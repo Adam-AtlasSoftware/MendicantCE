@@ -4,7 +4,8 @@ tools/hud_assets.py), the menus' titles (port/assets/titles, made by
 tools/title_assets.py), their controller button icons (port/assets/buttons,
 made by tools/button_assets.py), the fonts the text is drawn with
 (port/assets/fonts), the menus' files (port/assets/menus, made by
-tools/ce_menus.py), the windows' icon and the loading picture in the game
+tools/ce_menus.py), the tag packs' manifests (port/assets/tag_packs, TOML),
+the windows' icon and the loading picture in the game
 as C data:
 
     python tools/embed_assets.py OUTPUT.c ASSETS
@@ -22,7 +23,8 @@ writes OUTPUT.c with each PNG and the bitmap it stands for (its tag, index
 and checksum of its pixels, from port/assets/hud/layout.json,
 port/assets/titles/titles.json and port/assets/buttons/buttons.json), the
 fonts and their tags from port/assets/fonts/fonts.json, the menu files
-listed in port/assets/menus/menus.json, the icon and the picture, as
+listed in port/assets/menus/menus.json, every .toml file of
+port/assets/tag_packs (port_tag_packs.h), the icon and the picture, as
 port/linux/src/hud_hires.h, text_hires.h, menu_files.h and sdl_platform.c
 declare them. The builds generate it (hud_assets_build, called by
 tools/android_build.py, which the other guest builds share), so the assets
@@ -56,6 +58,8 @@ FONT_ASSETS = Path("port/assets/fonts")
 FONT_LIST = FONT_ASSETS / "fonts.json"
 MENU_ASSETS = Path("port/assets/menus")
 MENU_LIST = MENU_ASSETS / "menus.json"
+# the tag packs' manifests, each maps/<name>.pack (port/linux/src/port_tag_packs.c)
+TAG_PACK_ASSETS = Path("port/assets/tag_packs")
 # the desktop windows' icon (tools/app_icon.py; port/linux/src/sdl_platform.c)
 WINDOW_ICON = Path("port/assets/icon/openh1-icon-256.png")
 LOADING_PICTURE = Path("port/assets/loading/loading.rgba.zlib")
@@ -181,12 +185,20 @@ def picture_lines() -> List[str]:
     return lines
 
 
+def tag_pack_files() -> List[str]:
+    """The tag packs' manifests, by name."""
+    if not (ROOT / TAG_PACK_ASSETS).is_dir():
+        return []
+    return sorted(path.name for path in (ROOT / TAG_PACK_ASSETS).glob("*.toml"))
+
+
 def hud_asset_inputs() -> List[Path]:
     """The files the generated source is made from."""
     inputs = [listing for listing in (LAYOUT, CE_LAYOUT, CE_STOCK, CUSTOM_EDITION_HUD, TITLE_LIST, BUTTON_LIST, FONT_LIST, MENU_LIST)
               if (ROOT / listing).is_file()]
     return [*inputs, *(folder / f"{asset['name']}.png" for folder, asset, _ in textures()),
             *(FONT_ASSETS / name for name in font_files()), *(MENU_ASSETS / name for name in menu_files()),
+            *(TAG_PACK_ASSETS / name for name in tag_pack_files()),
             *([WINDOW_ICON] if (ROOT / WINDOW_ICON).is_file() else []),
             *([LOADING_PICTURE] if (ROOT / LOADING_PICTURE).is_file() else []),
             *([MENU_CURSOR] if (ROOT / MENU_CURSOR).is_file() else []),
@@ -205,6 +217,8 @@ def hud_configure_inputs() -> List[Path]:
     # (a pose dropped in changes the folder: configure.py runs again)
     if (ROOT / PICTURE_ASSETS).is_dir():
         inputs.append(PICTURE_ASSETS)
+    if (ROOT / TAG_PACK_ASSETS).is_dir():
+        inputs.append(TAG_PACK_ASSETS)
     return inputs
 
 
@@ -405,6 +419,26 @@ def main() -> None:
         lines.append("\t{ 0 },")
     lines.append("};")
     lines.append(f"const unsigned int menu_files_embedded_count = {len(menus)};")
+    lines.append("")
+    # the tag packs' manifests (port_tag_packs.h), their text as it is
+    lines.append('#include "port_tag_packs.h"')
+    lines.append("")
+    manifests = tag_pack_files()
+    for index, name in enumerate(manifests):
+        lines.append(f"static const unsigned int tag_pack{index}[] = {{")
+        lines.extend(words((ROOT / TAG_PACK_ASSETS / name).read_bytes()))
+        lines.append("};")
+        lines.append("")
+    lines.append("const struct tag_pack_manifest_embedded tag_pack_manifests_embedded[] =")
+    lines.append("{")
+    for index, name in enumerate(manifests):
+        size = (ROOT / TAG_PACK_ASSETS / name).stat().st_size
+        lines.append(f'\t{{ "{name}", tag_pack{index}, {size} }},')
+    if not manifests:
+        lines.append("\t{ 0 },")
+    lines.append("};")
+    lines.append(f"const unsigned int tag_pack_manifests_embedded_count = {len(manifests)};")
+    lines.append("")
     # the windows' icon, a PNG (of size 0 where the checkout has none)
     data = (ROOT / WINDOW_ICON).read_bytes() if (ROOT / WINDOW_ICON).is_file() else b""
     lines.append("")
