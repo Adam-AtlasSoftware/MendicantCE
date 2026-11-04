@@ -15,8 +15,7 @@ CONTROLS = [
     # on whatever the setting says
     ('world_ao.mode = setting && !strcmp(setting, "world") ?', 'world_ao.mode = setting ?', "off"),
     # the frame's work done when it is off
-    ("void world_ao_frame_begin(void)\n{\n\tif (!world_ao_mode())\n\t\treturn;",
-     "void world_ao_frame_begin(void)\n{", "off"),
+    ("\tif (!world_ao_mode())\n\t\treturn;\n\tworld_scene_frame_begin();", "\tworld_scene_frame_begin();", "off"),
     # an object's slot taken from its shape's place, not its owner's slot
     ("owner = (int)world_ao.proxies[index].v[1][3];", "owner = (int)index;", "window"),
     # the reference found without the field faded in
@@ -25,7 +24,8 @@ CONTROLS = [
     ("halo_world_ao_object(drawing ? WORLD_AO_OWNER_UNLIT : WORLD_AO_OWNER_NONE, 1.0f);",
      "halo_world_ao_object(WORLD_AO_OWNER_NONE, 1.0f);", "window"),
     # the made-up field uploaded each window
-    ("\tif (!world_ao_test.uploaded)\n", "\tif (1)\n", "test"),
+    ("\tif (!world_ao_test.uploaded)\n\t\tworld_ao_test_field(camera_position);",
+     "\tworld_ao_test_field(camera_position);", "test"),
 ]
 
 
