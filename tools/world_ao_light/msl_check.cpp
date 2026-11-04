@@ -27,6 +27,8 @@ extern struct world_sdf_volume scene_volume;
 extern struct world_proxy scene_proxies[];
 extern long scene_proxy_count;
 extern float scene_parameters[2][4];
+extern float scene_grid[2][4];
+extern unsigned int scene_cells[WORLD_AO_GRID_CELLS / 2][4];
 }
 
 #include <cstdio>
@@ -67,6 +69,10 @@ int main(int argc, char **argv)
 		for (int part = 0; part < 3; part++)
 			block.proxies[shape * 3 + part] = vector_of(scene_proxies[shape].v[part]);
 	}
+	for (index = 0; index < 2; index++)
+		block.grid[index] = vector_of(scene_grid[index]);
+	for (index = 0; index < WORLD_AO_GRID_CELLS / 2; index++)
+		block.cells[index] = uint4{ scene_cells[index][0], scene_cells[index][1], scene_cells[index][2], scene_cells[index][3] };
 	field.voxels = scene_volume.voxels;
 	field.width = (int)scene_volume.header.width;
 	field.height = (int)scene_volume.header.height;

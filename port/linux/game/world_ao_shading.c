@@ -17,6 +17,7 @@ Workstream D.
 #include "world_sdf.h"
 
 #include <math.h>
+#include <string.h>
 
 static float saturate(float x)
 {
@@ -81,37 +82,185 @@ static float world_ao_proxy_bound(struct world_proxy const *proxy)
 	}
 }
 
+/* one proxy's factor of A_prox at a point (1 - occlusion x fade); FALSE
+none (its owner's, past its reach, wholly below the tangent plane, or a box
+whose bound is under 1/510: the product as it was). The brute-force loop
+and the grid's call it alike, in the same order */
+static int world_ao_proxy_factor(struct world_proxy const *proxy, float const point[3], float const normal[3],
+	float owner, float *factor)
+{
+	float centre[3], offset[3], reach, away, fade;
+	int axis;
+
+	if (proxy->v[1][3] == owner)
+		return 0;
+	/* (from its centre: a capsule's segment's middle, a sphere's or a
+	box's a) */
+	for (axis = 0; axis < 3; axis++)
+	{
+		centre[axis] = (int)proxy->v[0][3] == _world_proxy_capsule ?
+			0.5f * (proxy->v[0][axis] + proxy->v[1][axis]) : proxy->v[0][axis];
+		offset[axis] = point[axis] - centre[axis];
+	}
+	reach = world_proxy_reach(proxy);
+	away = sqrtf(offset[0] * offset[0] + offset[1] * offset[1] + offset[2] * offset[2]);
+	if (away >= reach)
+		return 0;
+	/* (wholly below the point's tangent plane: none) */
+	if (normal[0] * -offset[0] + normal[1] * -offset[1] + normal[2] * -offset[2] < -world_ao_proxy_bound(proxy))
+		return 0;
+	/* (a sphere and a capsule fade out over the last of their reach; a box
+	by its bound (world_proxy_box_fade), which is under 1/510 well inside
+	its reach on a floor beside it or past its thin sides) */
+	if ((int)proxy->v[0][3] == _world_proxy_box)
+	{
+		fade = world_proxy_box_fade(proxy, point, normal);
+		if (fade <= 0.0f)
+			return 0;
+	}
+	else
+	{
+		fade = saturate((reach - away) / (reach * WORLD_AO_REACH_FADE));
+	}
+	*factor = 1.0f - world_proxy_occlusion(proxy, point, normal) * fade;
+	return 1;
+}
+
 float world_ao_proxies_occlusion(struct world_proxy const *proxies, long count, float const point[3],
 	float const normal[3], float owner)
 {
-	float product = 1.0f;
+	float product = 1.0f, factor;
 	long index;
 
 	for (index = 0; index < count; index++)
 	{
-		struct world_proxy const *proxy = &proxies[index];
-		float centre[3], offset[3], reach, away, fade;
-		int axis;
+		if (world_ao_proxy_factor(&proxies[index], point, normal, owner, &factor))
+			product *= factor;
+	}
+	return product;
+}
 
-		if (proxy->v[1][3] == owner)
-			continue;
-		/* (from its centre: a capsule's segment's middle, a sphere's or a
-		box's a) */
-		for (axis = 0; axis < 3; axis++)
+/* ---------- the window's proxy grid */
+
+static const int world_ao_grid_sizes[3] = { WORLD_AO_GRID_X, WORLD_AO_GRID_Y, WORLD_AO_GRID_Z };
+
+/* a cell's index along an axis for an offset from the camera, as the
+shaders find it: floor(sign(offset) log2(1 + |offset| grid[1].w) grid[1][axis]
++ size / 2), clamped */
+static int world_ao_grid_axis(float const grid[2][4], int axis, float offset)
+{
+	int size = world_ao_grid_sizes[axis];
+	float cell = log2f(1.0f + fabsf(offset) * grid[1][3]) * grid[1][axis];
+	int index = (int)floorf((offset > 0.0f ? cell : offset < 0.0f ? -cell : 0.0f) + (float)(size / 2));
+
+	return index < 0 ? 0 : index >= size ? size - 1 : index;
+}
+
+int world_ao_grid_cell(float const grid[2][4], float const point[3])
+{
+	int index[3], axis;
+
+	for (axis = 0; axis < 3; axis++)
+		index[axis] = world_ao_grid_axis(grid, axis, point[axis] - grid[0][axis]);
+	return (index[2] * WORLD_AO_GRID_Y + index[1]) * WORLD_AO_GRID_X + index[0];
+}
+
+/* the half extents along the world's axes of the box about a proxy's
+centre (world_proxy_reach's) outside which it is never computed: its
+reach's; a box's own bounds grown by its reach less its half diagonal
+(where its bound falls under 1/510), where that is less */
+static void world_ao_grid_extent(struct world_proxy const *proxy, float reach, float half[3])
+{
+	float ex, ey, ez, grow, z_axis[3];
+	int k;
+
+	for (k = 0; k < 3; k++)
+		half[k] = reach;
+	if ((int)proxy->v[0][3] != _world_proxy_box)
+		return;
+	ex = sqrtf(proxy->v[1][0] * proxy->v[1][0] + proxy->v[1][1] * proxy->v[1][1] + proxy->v[1][2] * proxy->v[1][2]);
+	ey = sqrtf(proxy->v[2][0] * proxy->v[2][0] + proxy->v[2][1] * proxy->v[2][1] + proxy->v[2][2] * proxy->v[2][2]);
+	ez = proxy->v[2][3];
+	if (ex <= 0.0f || ey <= 0.0f || ez <= 0.0f)
+		return;
+	grow = reach - sqrtf(ex * ex + ey * ey + ez * ez);
+	z_axis[0] = (proxy->v[1][1] * proxy->v[2][2] - proxy->v[1][2] * proxy->v[2][1]) / (ex * ey);
+	z_axis[1] = (proxy->v[1][2] * proxy->v[2][0] - proxy->v[1][0] * proxy->v[2][2]) / (ex * ey);
+	z_axis[2] = (proxy->v[1][0] * proxy->v[2][1] - proxy->v[1][1] * proxy->v[2][0]) / (ex * ey);
+	for (k = 0; k < 3; k++)
+	{
+		float extent = fabsf(proxy->v[1][k]) + fabsf(proxy->v[2][k]) + ez * fabsf(z_axis[k]) + grow;
+
+		half[k] = extent < reach ? extent : reach;
+	}
+}
+
+void world_ao_grid(struct world_proxy const *proxies, long count, float const camera[3], float grid[2][4],
+	unsigned int cells[WORLD_AO_GRID_CELLS / 2][4])
+{
+	long index;
+	int axis;
+
+	for (axis = 0; axis < 3; axis++)
+	{
+		grid[0][axis] = camera[axis];
+		grid[1][axis] = (float)(world_ao_grid_sizes[axis] / 2) / log2f(1.0f + WORLD_AO_GRID_REACH / WORLD_AO_GRID_CELL);
+	}
+	grid[0][3] = 0.0f;
+	grid[1][3] = 1.0f / WORLD_AO_GRID_CELL;
+	memset(cells, 0, sizeof(unsigned int) * 4 * (WORLD_AO_GRID_CELLS / 2));
+	if (count > 64)
+		count = 64;
+	for (index = 0; index < count; index++)
+	{
+		struct world_proxy const *proxy = &proxies[index];
+		float centre[3], half[3], reach = world_proxy_reach(proxy);
+		int first[3], last[3], x, y, z, k;
+
+		world_ao_grid_extent(proxy, reach, half);
+		for (k = 0; k < 3; k++)
 		{
-			centre[axis] = (int)proxy->v[0][3] == _world_proxy_capsule ?
-				0.5f * (proxy->v[0][axis] + proxy->v[1][axis]) : proxy->v[0][axis];
-			offset[axis] = point[axis] - centre[axis];
+			/* (a little past it, so that a pixel at its edge that the GPU's
+			log2 rounds into the next cell finds it there too) */
+			float pad;
+
+			centre[k] = (int)proxy->v[0][3] == _world_proxy_capsule ?
+				0.5f * (proxy->v[0][k] + proxy->v[1][k]) : proxy->v[0][k];
+			pad = 1.0e-3f * (half[k] + fabsf(centre[k] - camera[k])) + 1.0e-3f;
+			first[k] = world_ao_grid_axis((float const (*)[4])grid, k, centre[k] - half[k] - pad - camera[k]);
+			last[k] = world_ao_grid_axis((float const (*)[4])grid, k, centre[k] + half[k] + pad - camera[k]);
 		}
-		reach = world_proxy_reach(proxy);
-		away = sqrtf(offset[0] * offset[0] + offset[1] * offset[1] + offset[2] * offset[2]);
-		if (away >= reach)
-			continue;
-		/* (wholly below the point's tangent plane: none) */
-		if (normal[0] * -offset[0] + normal[1] * -offset[1] + normal[2] * -offset[2] < -world_ao_proxy_bound(proxy))
-			continue;
-		fade = saturate((reach - away) / (reach * WORLD_AO_REACH_FADE));
-		product *= 1.0f - world_proxy_occlusion(proxy, point, normal) * fade;
+		for (z = first[2]; z <= last[2]; z++)
+		{
+			for (y = first[1]; y <= last[1]; y++)
+			{
+				for (x = first[0]; x <= last[0]; x++)
+				{
+					int cell = (z * WORLD_AO_GRID_Y + y) * WORLD_AO_GRID_X + x;
+
+					cells[cell >> 1][((cell & 1) << 1) + (int)(index >> 5)] |= 1u << (index & 31);
+				}
+			}
+		}
+	}
+}
+
+float world_ao_proxies_occlusion_grid(struct world_proxy const *proxies, float const grid[2][4],
+	unsigned int const cells[WORLD_AO_GRID_CELLS / 2][4], float const point[3], float const normal[3], float owner)
+{
+	int cell = world_ao_grid_cell(grid, point), word, bit;
+	float product = 1.0f, factor;
+
+	/* (lowest first, as the shaders' findLSB / ctz) */
+	for (word = 0; word < 2; word++)
+	{
+		unsigned int bits = cells[cell >> 1][((cell & 1) << 1) + word];
+
+		for (bit = 0; bit < 32; bit++)
+		{
+			if ((bits >> bit) & 1u && world_ao_proxy_factor(&proxies[word * 32 + bit], point, normal, owner, &factor))
+				product *= factor;
+		}
 	}
 	return product;
 }

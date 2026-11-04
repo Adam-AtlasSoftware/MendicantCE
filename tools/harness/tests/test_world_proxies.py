@@ -10,7 +10,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, mutated, read, run  # noqa: E402
 
-CASES = ["sphere", "capsule", "box", "reach", "culling", "skeleton", "owner", "none"]
+CASES = ["sphere", "capsule", "box", "reach", "bound", "far", "culling", "skeleton", "owner", "none"]
 HEADER = "port/linux/include/world_proxies.h"
 SOURCE = "port/linux/include/world_proxies_source.h"
 GAME = "port/linux/game/world_proxies.c"
@@ -21,11 +21,23 @@ CONTROLS = [
     ("line = 2.0f * radius * h / WORLD_PROXIES_PI * (f1 - f0);",
      "line = radius * h / WORLD_PROXIES_PI * (f1 - f0);", "capsule"),
     # the box's form factor twice over, then its back faces counted
-    ("occlusion += fabsf(face_occlusion) / (2.0f * WORLD_PROXIES_PI);",
-     "occlusion += fabsf(face_occlusion) / WORLD_PROXIES_PI;", "box"),
+    ("return clampf(fabsf(occlusion) / (2.0f * WORLD_PROXIES_PI), 0.0f, 1.0f);",
+     "return clampf(fabsf(occlusion) / WORLD_PROXIES_PI, 0.0f, 1.0f);", "box"),
+    # the far patches' area halved
+    ("occlusion += 4.0f * extents[u] * extents[v] * out * facing", "occlusion += 2.0f * extents[u] * extents[v] * out * facing",
+     "far"),
+    # the faces not taken the same way round (a shared edge's terms then do not cancel)
+    ("occlusion += (float)side * face;", "occlusion += face;", "box"),
     ("if ((float)side * local[axis] <= extents[axis])", "if ((float)side * local[axis] <= -extents[axis])", "box"),
     # a box's reach too short
-    ("return 17.0f * sqrtf(diagonal_squared);", "return 4.0f * sqrtf(diagonal_squared);", "reach"),
+    ("return sqrtf(x * x + y * y + z * z) + sqrtf(WORLD_PROXIES_LEAST * 4.0f / WORLD_PROXIES_PI * areas);",
+     "return sqrtf(x * x + y * y + z * z) + sqrtf(WORLD_PROXIES_LEAST / WORLD_PROXIES_PI * areas);", "reach"),
+    # a box's bound without its faces' areas' 4 (under its occlusion), or its height's cosine taken as all
+    # of it the wrong way (H / D squared)
+    ("bound = WORLD_PROXIES_LEAST * 4.0f / WORLD_PROXIES_PI * faces",
+     "bound = WORLD_PROXIES_LEAST * 1.0f / WORLD_PROXIES_PI * faces", "bound"),
+    ("faces * (height < distance ? height : distance) /", "faces * (height < distance ? height * height / distance : distance) /",
+     "bound"),
     # culled by its centre, not its reach; the farthest kept first
     ("if (dot3(planes[plane], centre) - planes[plane][3] > reach)",
      "if (dot3(planes[plane], centre) - planes[plane][3] > 0.0f * reach)", "culling"),

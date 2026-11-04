@@ -22,6 +22,13 @@ game, a fake world in tools/harness/tests/world_proxies.c).
 /* ---------- constants */
 
 #define WORLD_PROXIES_PI 3.14159265358979f
+/* a box is computed whole where a bound on its occlusion is 2 / this (one
+step of 8 bits) or more, not at all under 1 / this (half a step), faded
+between (world_proxy_box_fade) */
+#define WORLD_PROXIES_LEAST 510.0f
+/* a box is found as its faces' patches past this many half diagonals from
+its centre (box_occlusion) */
+#define WORLD_PROXIES_FAR 6.0f
 /* a shape smaller than this across occludes nothing worth a slot */
 #define WORLD_PROXIES_SMALLEST 0.05f
 /* a capsule's radius against its collision vertices' mean distance from
@@ -266,10 +273,33 @@ static float capsule_occlusion(float const a[3], float const b[3], float radius,
 	return clampf(occlusion, 0.0f, 1.0f);
 }
 
+/* an edge's term of a polygon's form factor at p (normal n): the angle the
+edge (a to b, from p) subtends times n . its plane's unit normal. Both are
+the same for any lengths of a and b: atan2(|a x b|, a . b) and
+n . (a x b) / |a x b|, so neither is normalized (none where the angle's sine
+is under 1e-7) */
+static float box_edge(float const normal[3], float const a[3], float const b[3])
+{
+	float edge_normal[3], sine_squared, sine;
+
+	cross3(a, b, edge_normal);
+	sine_squared = dot3(edge_normal, edge_normal);
+	if (!(sine_squared > 1.0e-14f * dot3(a, a) * dot3(b, b)))
+		return 0.0f;
+	sine = sqrtf(sine_squared);
+	return atan2f(sine, dot3(a, b)) * dot3(normal, edge_normal) / sine;
+}
+
 /* a box (centre, half axes x and y, half extent along z = x cross y): the
 faces turned towards p (at most 3), each clipped by p's tangent plane, and
-the polygon's form factor (Lambert): (1 / 2 pi) the sum over its edges of
-the angle each edge subtends times n . (the edge's plane's normal) */
+their form factor (Lambert): (1 / 2 pi) the sum over the edges of the angle
+each subtends times n . (the edge's plane's normal). The faces are taken
+the same way round as seen from outside the box (their corners' order times
+the side), so an edge two of them share is taken once each way and its two
+terms cancel: such an edge is left out, and only the outline's edges (at
+most 6, and the tangent plane's chords) are found. A face's clipped edges
+are its edges' parts above the plane (Sutherland and Hodgman's taken edge
+by edge) and the chord from where it leaves the plane to where it enters */
 static float box_occlusion(float const centre[3], float const half_x[3], float const half_y[3], float extent_z,
 	float const point[3], float const normal[3])
 {
@@ -296,16 +326,45 @@ static float box_occlusion(float const centre[3], float const half_x[3], float c
 	}
 	if (fabsf(local[0]) <= extents[0] && fabsf(local[1]) <= extents[1] && fabsf(local[2]) <= extents[2])
 		return 1.0f;
+	/* far from it (WORLD_PROXIES_FAR half diagonals or more): each front face
+	as a patch at its centre, area 4 e_u e_v, its cosine (o / r) and p's
+	(n . r / r, 0 below the plane) over pi r^2, r from p to the face's centre:
+	within 0.15/255 of the exact form there (0.6/255 at 4 half diagonals,
+	1.5/255 at 3), at a tenth of its cost */
+	if (dot3(offset, offset) >= WORLD_PROXIES_FAR * WORLD_PROXIES_FAR * (extents[0] * extents[0] +
+		extents[1] * extents[1] + extents[2] * extents[2]))
+	{
+		for (axis = 0; axis < 3; axis++)
+		{
+			int side, u = (axis + 1) % 3, v = (axis + 2) % 3;
+
+			for (side = -1; side <= 1; side += 2)
+			{
+				float out = (float)side * local[axis] - extents[axis], r[3], r_squared, facing;
+
+				if (out <= 0.0f)
+					continue;
+				r[axis] = (float)side * extents[axis] - local[axis];
+				r[u] = -local[u];
+				r[v] = -local[v];
+				r_squared = dot3(r, r);
+				facing = dot3(local_normal, r);
+				if (facing > 0.0f)
+					occlusion += 4.0f * extents[u] * extents[v] * out * facing / (WORLD_PROXIES_PI * r_squared * r_squared);
+			}
+		}
+		return clampf(occlusion, 0.0f, 1.0f);
+	}
 	for (axis = 0; axis < 3; axis++)
 	{
 		int side;
 
 		for (side = -1; side <= 1; side += 2)
 		{
-			/* the face's corners from p, then those of it above the tangent
-			plane (a quad clipped by a plane: at most 5 corners) */
-			float corners[4][3], clipped[8][3], face_occlusion;
-			int u = (axis + 1) % 3, v = (axis + 2) % 3, count = 0, corner;
+			/* the face's corners from p (about +axis: (-u -v), (+u -v), (+u +v),
+			(-u +v)) and their heights above the tangent plane */
+			float corners[4][3], heights[4], exit_point[3], entry_point[3], face = 0.0f;
+			int u = (axis + 1) % 3, v = (axis + 2) % 3, corner, crossed = 0;
 
 			if ((float)side * local[axis] <= extents[axis])
 				continue;
@@ -317,55 +376,95 @@ static float box_occlusion(float const centre[3], float const half_x[3], float c
 				corners[corner][axis] = (float)side * extents[axis] - local[axis];
 				corners[corner][u] = su * extents[u] - local[u];
 				corners[corner][v] = sv * extents[v] - local[v];
+				heights[corner] = dot3(local_normal, corners[corner]);
 			}
 			for (corner = 0; corner < 4; corner++)
 			{
-				float const *this_corner = corners[corner];
-				float const *next_corner = corners[(corner + 1) % 4];
-				float this_height = dot3(local_normal, this_corner);
-				float next_height = dot3(local_normal, next_corner);
+				int next = (corner + 1) % 4;
+				/* (the face across this edge: edges 0 and 2 lie on v's faces, 1
+				and 3 on u's, at -, +, +, -) */
+				int across = corner == 0 || corner == 2 ? v : u;
+				float across_side = corner == 0 || corner == 3 ? -1.0f : 1.0f;
+				int above = heights[corner] >= 0.0f, next_above = heights[next] >= 0.0f;
+				float crossing[3], t = heights[corner] / (heights[corner] - heights[next]);
 
-				if (this_height >= 0.0f)
-				{
-					memcpy(clipped[count], this_corner, sizeof(clipped[count]));
-					count++;
-				}
-				if ((this_height >= 0.0f) != (next_height >= 0.0f))
-				{
-					float t = this_height / (this_height - next_height);
-
-					for (k = 0; k < 3; k++)
-						clipped[count][k] = this_corner[k] + t * (next_corner[k] - this_corner[k]);
-					count++;
-				}
-			}
-			if (count < 3)
-				continue;
-			face_occlusion = 0.0f;
-			for (corner = 0; corner < count; corner++)
-			{
-				float this_direction[3], next_direction[3], edge_normal[3];
-				float this_length = length3(clipped[corner]);
-				float next_length = length3(clipped[(corner + 1) % count]);
-				float sine, cosine;
-
-				if (this_length <= 0.0f || next_length <= 0.0f)
-					continue;
 				for (k = 0; k < 3; k++)
+					crossing[k] = corners[corner][k] + t * (corners[next][k] - corners[corner][k]);
+				if (above && !next_above)
 				{
-					this_direction[k] = clipped[corner][k] / this_length;
-					next_direction[k] = clipped[(corner + 1) % count][k] / next_length;
+					memcpy(exit_point, crossing, sizeof(exit_point));
+					crossed = 1;
 				}
-				cross3(this_direction, next_direction, edge_normal);
-				sine = length3(edge_normal);
-				cosine = dot3(this_direction, next_direction);
-				if (sine > 1.0e-7f)
-					face_occlusion += atan2f(sine, cosine) * dot3(local_normal, edge_normal) / sine;
+				if (!above && next_above)
+					memcpy(entry_point, crossing, sizeof(entry_point));
+				if ((above || next_above) && across_side * local[across] <= extents[across])
+					face += box_edge(local_normal, above ? corners[corner] : crossing, next_above ? corners[next] : crossing);
 			}
-			occlusion += fabsf(face_occlusion) / (2.0f * WORLD_PROXIES_PI);
+			if (crossed)
+				face += box_edge(local_normal, exit_point, entry_point);
+			occlusion += (float)side * face;
 		}
 	}
-	return clampf(occlusion, 0.0f, 1.0f);
+	return clampf(fabsf(occlusion) / (2.0f * WORLD_PROXIES_PI), 0.0f, 1.0f);
+}
+
+/* a box's fade (world_proxy_box_fade): a bound on box_occlusion that is
+never under it, U, made a fade that is 0 where U is under 1/510 and 1 where
+it is 1/255 or more, saturate(510 U - 1): what it leaves out of the
+occlusion is under 1/255 (and the old reach's fade, 17 half diagonals,
+left out about as much face on). In box space, with o the point's
+distance outside each pair of faces (o_i = max(|p_i| - e_i, 0)) and D = |o|
+its distance from the box:
+- the box's solid angle is its front faces' (at most 3), and a face's is
+  the integral over it of o_i / r^3 with r >= D: at most its area 4 e_j e_k
+  times o_i / D^3;
+- the cosine at p of any direction to the box is at most H / D, H the
+  box's height above p's tangent plane (its support along n less n . p);
+so U = (1 / pi) (4 (e_y e_z o_x + e_x e_z o_y + e_x e_y o_z) / D^3) min(1, H / D).
+It falls as 1 / D^3 on a floor beside a box (H / D small), and past a thin
+box's edges it is its edge's area's, where 17 half diagonals reached far:
+the box is computed only where it can show. 0 wholly below the tangent
+plane; 1 inside */
+float world_proxy_box_fade(struct world_proxy const *proxy, float const point[3], float const normal[3])
+{
+	float extents[3], axes[3][3], offset[3], outside[3], distance_squared, height = 0.0f, faces, bound;
+	int axis, k;
+
+	extents[0] = length3(proxy->v[1]);
+	extents[1] = length3(proxy->v[2]);
+	extents[2] = proxy->v[2][3];
+	if (extents[0] <= 0.0f || extents[1] <= 0.0f || extents[2] <= 0.0f)
+		return 0.0f;
+	for (k = 0; k < 3; k++)
+	{
+		axes[0][k] = proxy->v[1][k] / extents[0];
+		axes[1][k] = proxy->v[2][k] / extents[1];
+	}
+	cross3(axes[0], axes[1], axes[2]);
+	sub3(point, proxy->v[0], offset);
+	distance_squared = 0.0f;
+	for (axis = 0; axis < 3; axis++)
+	{
+		float local = dot3(offset, axes[axis]), local_normal = dot3(normal, axes[axis]);
+
+		outside[axis] = fabsf(local) - extents[axis];
+		outside[axis] = outside[axis] > 0.0f ? outside[axis] : 0.0f;
+		distance_squared += outside[axis] * outside[axis];
+		height += extents[axis] * fabsf(local_normal) - local_normal * local;
+	}
+	if (distance_squared <= 0.0f)
+		return 1.0f;
+	if (height <= 0.0f)
+		return 0.0f;
+	faces = extents[1] * extents[2] * outside[0] + extents[0] * extents[2] * outside[1] +
+		extents[0] * extents[1] * outside[2];
+	{
+		float distance = sqrtf(distance_squared);
+
+		bound = WORLD_PROXIES_LEAST * 4.0f / WORLD_PROXIES_PI * faces * (height < distance ? height : distance) /
+			(distance_squared * distance_squared);
+	}
+	return clampf(bound - 1.0f, 0.0f, 1.0f);
 }
 
 float world_proxy_occlusion(struct world_proxy const *proxy, float const point[3], float const normal[3])
@@ -412,11 +511,17 @@ float world_proxy_reach(struct world_proxy const *proxy)
 	}
 	case _world_proxy_box:
 	{
-		/* as its bounding sphere, from its surface: 16 + 1 half diagonals */
-		float diagonal_squared = dot3(proxy->v[1], proxy->v[1]) + proxy->v[2][0] * proxy->v[2][0] +
-			proxy->v[2][1] * proxy->v[2][1] + proxy->v[2][2] * proxy->v[2][2] + proxy->v[2][3] * proxy->v[2][3];
+		/* world_proxy_box_fade's U is at most 4 |A| / (pi D^2), A its faces'
+		areas over 4 (e_y e_z, e_x e_z, e_x e_y): under 1/510 (its fade 0)
+		past D^2 = 510 * 4 |A| / pi from the box, so past that and a half
+		diagonal from its centre. (A sphere about the box, for the window's
+		frustum and order: the grid takes the box's own bounds grown by D,
+		and each pixel the bound itself, which is far less on a floor beside
+		it or past a flat or long box's edges) */
+		float x = length3(proxy->v[1]), y = length3(proxy->v[2]), z = proxy->v[2][3];
+		float areas = sqrtf((y * z) * (y * z) + (x * z) * (x * z) + (x * y) * (x * y));
 
-		return 17.0f * sqrtf(diagonal_squared);
+		return sqrtf(x * x + y * y + z * z) + sqrtf(WORLD_PROXIES_LEAST * 4.0f / WORLD_PROXIES_PI * areas);
 	}
 	default:
 		/* (r / l)^2 < 1/255 past 16 radii */

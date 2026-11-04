@@ -24,7 +24,9 @@ def main():
     proxies = scene["proxies"]
     block = {0: [[origin[0], origin[1], origin[2], 1.0 / voxel], [float(width), float(height), float(depth), range_]],
              1: [parameters[0:4], parameters[4:8]],
-             2: [proxies[index:index + 4] for index in range(0, len(proxies), 4)]}
+             2: [proxies[index:index + 4] for index in range(0, len(proxies), 4)],
+             3: [scene["grid"][0:4], scene["grid"][4:8]],
+             4: [scene["cells"][index:index + 4] for index in range(0, len(scene["cells"]), 4)]}
 
     def sample(name, uvw):
         if name != "world_sdf":

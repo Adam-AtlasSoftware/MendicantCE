@@ -314,8 +314,13 @@ _Static_assert(XGPU_WORLD_AO_SHAPES == XGPU_WORLD_AO_PROXIES_MAXIMUM &&
 	XGPU_WORLD_AO_BOX == XGPU_WORLD_AO_PROXY_BOX, "the world's proxies as the emitters take them (xgpu.h)");
 _Static_assert(offsetof(struct xgpu_world_ao_block, field) == XGPU_WORLD_AO_BLOCK_FIELD &&
 	offsetof(struct xgpu_world_ao_block, parameters) == XGPU_WORLD_AO_BLOCK_PARAMETERS &&
-	offsetof(struct xgpu_world_ao_block, proxies) == XGPU_WORLD_AO_BLOCK_PROXIES,
+	offsetof(struct xgpu_world_ao_block, proxies) == XGPU_WORLD_AO_BLOCK_PROXIES &&
+	offsetof(struct xgpu_world_ao_block, grid) == XGPU_WORLD_AO_BLOCK_GRID &&
+	offsetof(struct xgpu_world_ao_block, cells) == XGPU_WORLD_AO_BLOCK_CELLS,
 	"the world's block as the emitters declare it (xgpu.h)");
+_Static_assert(XGPU_WORLD_AO_GRID_X == WORLD_AO_GRID_X && XGPU_WORLD_AO_GRID_Y == WORLD_AO_GRID_Y &&
+	XGPU_WORLD_AO_GRID_Z == WORLD_AO_GRID_Z && XGPU_WORLD_AO_GRID_CELLS == XGPU_WORLD_AO_GRID_CELLS_MAXIMUM,
+	"the world's proxy grid as the game makes it and the emitters read it (world_ao.h, xgpu.h)");
 
 static struct
 {
@@ -357,10 +362,16 @@ static BOOL world_ao_failed(struct nv2a_pixel_shader_key *key)
 }
 
 void halo_world_ao_window(float const field[2][4], float const parameters[2][4], float const (*proxies)[3][4],
-	int count)
+	int count, float const grid[2][4], unsigned int const (*cells)[4])
 {
-	struct xgpu_world_ao_block block;
+	/* (19 KB with the grid: on the heap, made once, not on the stack or in
+	the image) */
+	static struct xgpu_world_ao_block *made;
 
+	if (count >= 0 && !made)
+		made = malloc(sizeof(*made));
+	if (count >= 0 && !made)
+		count = -1;
 	world_ao.active = count >= 0;
 	world_ao.owner = WORLD_AO_OWNER_NONE;
 	world_ao.reference = 1.0f;
@@ -372,13 +383,15 @@ void halo_world_ao_window(float const field[2][4], float const parameters[2][4],
 	world_ao.view = config_boolean("debug.world_ao_view");
 	if (count > XGPU_WORLD_AO_PROXIES_MAXIMUM)
 		count = XGPU_WORLD_AO_PROXIES_MAXIMUM;
-	memset(&block, 0, sizeof(block));
-	memcpy(block.field, field, sizeof(block.field));
-	memcpy(block.parameters, parameters, sizeof(block.parameters));
+	memset(made, 0, sizeof(*made));
+	memcpy(made->field, field, sizeof(made->field));
+	memcpy(made->parameters, parameters, sizeof(made->parameters));
 	if (count)
-		memcpy(block.proxies, proxies, (size_t)count * sizeof(block.proxies[0]));
-	block.parameters[0][3] = (float)count;
-	xgpu_backend_world_ao_window(&block);
+		memcpy(made->proxies, proxies, (size_t)count * sizeof(made->proxies[0]));
+	made->parameters[0][3] = (float)count;
+	memcpy(made->grid, grid, sizeof(made->grid));
+	memcpy(made->cells, cells, sizeof(made->cells));
+	xgpu_backend_world_ao_window(made);
 }
 
 void halo_world_ao_object(int owner, float reference)
