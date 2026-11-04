@@ -22,6 +22,10 @@ game, a fake world in tools/harness/tests/world_proxies.c).
 /* ---------- constants */
 
 #define WORLD_PROXIES_PI 3.14159265358979f
+/* a box is computed whole where a bound on its occlusion is 2 / this (one
+step of 8 bits) or more, not at all under 1 / this (half a step), faded
+between (world_proxy_box_fade) */
+#define WORLD_PROXIES_LEAST 510.0f
 /* a shape smaller than this across occludes nothing worth a slot */
 #define WORLD_PROXIES_SMALLEST 0.05f
 /* a capsule's radius against its collision vertices' mean distance from
@@ -368,6 +372,65 @@ static float box_occlusion(float const centre[3], float const half_x[3], float c
 	return clampf(occlusion, 0.0f, 1.0f);
 }
 
+/* a box's fade (world_proxy_box_fade): a bound on box_occlusion that is
+never under it, U, made a fade that is 0 where U is under 1/510 and 1 where
+it is 1/255 or more, saturate(510 U - 1): what it leaves out of the
+occlusion is under 1/255 (and the old reach's fade, 17 half diagonals,
+left out about as much face on). In box space, with o the point's
+distance outside each pair of faces (o_i = max(|p_i| - e_i, 0)) and D = |o|
+its distance from the box:
+- the box's solid angle is its front faces' (at most 3), and a face's is
+  the integral over it of o_i / r^3 with r >= D: at most its area 4 e_j e_k
+  times o_i / D^3;
+- the cosine at p of any direction to the box is at most H / D, H the
+  box's height above p's tangent plane (its support along n less n . p);
+so U = (1 / pi) (4 (e_y e_z o_x + e_x e_z o_y + e_x e_y o_z) / D^3) min(1, H / D).
+It falls as 1 / D^3 on a floor beside a box (H / D small), and past a thin
+box's edges it is its edge's area's, where 17 half diagonals reached far:
+the box is computed only where it can show. 0 wholly below the tangent
+plane; 1 inside */
+float world_proxy_box_fade(struct world_proxy const *proxy, float const point[3], float const normal[3])
+{
+	float extents[3], axes[3][3], offset[3], outside[3], distance_squared, height = 0.0f, faces, bound;
+	int axis, k;
+
+	extents[0] = length3(proxy->v[1]);
+	extents[1] = length3(proxy->v[2]);
+	extents[2] = proxy->v[2][3];
+	if (extents[0] <= 0.0f || extents[1] <= 0.0f || extents[2] <= 0.0f)
+		return 0.0f;
+	for (k = 0; k < 3; k++)
+	{
+		axes[0][k] = proxy->v[1][k] / extents[0];
+		axes[1][k] = proxy->v[2][k] / extents[1];
+	}
+	cross3(axes[0], axes[1], axes[2]);
+	sub3(point, proxy->v[0], offset);
+	distance_squared = 0.0f;
+	for (axis = 0; axis < 3; axis++)
+	{
+		float local = dot3(offset, axes[axis]), local_normal = dot3(normal, axes[axis]);
+
+		outside[axis] = fabsf(local) - extents[axis];
+		outside[axis] = outside[axis] > 0.0f ? outside[axis] : 0.0f;
+		distance_squared += outside[axis] * outside[axis];
+		height += extents[axis] * fabsf(local_normal) - local_normal * local;
+	}
+	if (distance_squared <= 0.0f)
+		return 1.0f;
+	if (height <= 0.0f)
+		return 0.0f;
+	faces = extents[1] * extents[2] * outside[0] + extents[0] * extents[2] * outside[1] +
+		extents[0] * extents[1] * outside[2];
+	{
+		float distance = sqrtf(distance_squared);
+
+		bound = WORLD_PROXIES_LEAST * 4.0f / WORLD_PROXIES_PI * faces * (height < distance ? height : distance) /
+			(distance_squared * distance_squared);
+	}
+	return clampf(bound - 1.0f, 0.0f, 1.0f);
+}
+
 float world_proxy_occlusion(struct world_proxy const *proxy, float const point[3], float const normal[3])
 {
 	switch ((int)proxy->v[0][3])
@@ -412,11 +475,17 @@ float world_proxy_reach(struct world_proxy const *proxy)
 	}
 	case _world_proxy_box:
 	{
-		/* as its bounding sphere, from its surface: 16 + 1 half diagonals */
-		float diagonal_squared = dot3(proxy->v[1], proxy->v[1]) + proxy->v[2][0] * proxy->v[2][0] +
-			proxy->v[2][1] * proxy->v[2][1] + proxy->v[2][2] * proxy->v[2][2] + proxy->v[2][3] * proxy->v[2][3];
+		/* world_proxy_box_fade's U is at most 4 |A| / (pi D^2), A its faces'
+		areas over 4 (e_y e_z, e_x e_z, e_x e_y): under 1/510 (its fade 0)
+		past D^2 = 510 * 4 |A| / pi from the box, so past that and a half
+		diagonal from its centre. (A sphere about the box, for the window's
+		frustum and order: the grid takes the box's own bounds grown by D,
+		and each pixel the bound itself, which is far less on a floor beside
+		it or past a flat or long box's edges) */
+		float x = length3(proxy->v[1]), y = length3(proxy->v[2]), z = proxy->v[2][3];
+		float areas = sqrtf((y * z) * (y * z) + (x * z) * (x * z) + (x * y) * (x * y));
 
-		return 17.0f * sqrtf(diagonal_squared);
+		return sqrtf(x * x + y * y + z * z) + sqrtf(WORLD_PROXIES_LEAST * 4.0f / WORLD_PROXIES_PI * areas);
 	}
 	default:
 		/* (r / l)^2 < 1/255 past 16 radii */

@@ -10,7 +10,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, mutated, read, run  # noqa: E402
 
-CASES = ["sphere", "capsule", "box", "reach", "culling", "skeleton", "owner", "none"]
+CASES = ["sphere", "capsule", "box", "reach", "bound", "culling", "skeleton", "owner", "none"]
 HEADER = "port/linux/include/world_proxies.h"
 SOURCE = "port/linux/include/world_proxies_source.h"
 GAME = "port/linux/game/world_proxies.c"
@@ -25,7 +25,14 @@ CONTROLS = [
      "occlusion += fabsf(face_occlusion) / WORLD_PROXIES_PI;", "box"),
     ("if ((float)side * local[axis] <= extents[axis])", "if ((float)side * local[axis] <= -extents[axis])", "box"),
     # a box's reach too short
-    ("return 17.0f * sqrtf(diagonal_squared);", "return 4.0f * sqrtf(diagonal_squared);", "reach"),
+    ("return sqrtf(x * x + y * y + z * z) + sqrtf(WORLD_PROXIES_LEAST * 4.0f / WORLD_PROXIES_PI * areas);",
+     "return sqrtf(x * x + y * y + z * z) + sqrtf(WORLD_PROXIES_LEAST / WORLD_PROXIES_PI * areas);", "reach"),
+    # a box's bound without its faces' areas' 4 (under its occlusion), or its height's cosine taken as all
+    # of it the wrong way (H / D squared)
+    ("bound = WORLD_PROXIES_LEAST * 4.0f / WORLD_PROXIES_PI * faces",
+     "bound = WORLD_PROXIES_LEAST * 1.0f / WORLD_PROXIES_PI * faces", "bound"),
+    ("faces * (height < distance ? height : distance) /", "faces * (height < distance ? height * height / distance : distance) /",
+     "bound"),
     # culled by its centre, not its reach; the farthest kept first
     ("if (dot3(planes[plane], centre) - planes[plane][3] > reach)",
      "if (dot3(planes[plane], centre) - planes[plane][3] > 0.0f * reach)", "culling"),

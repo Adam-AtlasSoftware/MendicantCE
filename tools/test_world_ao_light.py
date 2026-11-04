@@ -221,7 +221,18 @@ def test_the_constants_alike():
     # (world_ao.h's for the CPU, xgpu.h's for the emitters)
     game = (INCLUDE / "world_ao.h").read_text()
     emitters = (SOURCE / "xgpu.h").read_text()
-    for name in ("K", "STEP", "TAPS", "REFERENCE_LEAST", "REACH_FADE", "FLOOR"):
+    for name in ("K", "STEP", "TAPS", "REFERENCE_LEAST", "REACH_FADE", "FLOOR", "GRID_X", "GRID_Y", "GRID_Z"):
         ours = re.search(rf"#define WORLD_AO_{name} (\S+)", game).group(1)
         theirs = re.search(rf"#define XGPU_WORLD_AO_{name} (\S+)", emitters).group(1)
         assert ours == theirs, name
+    # (world_proxies.c's box's bound, the emitters' copy)
+    ours = re.search(r"#define WORLD_PROXIES_LEAST (\S+)", (GAME / "world_proxies.c").read_text()).group(1)
+    assert ours == re.search(r"#define XGPU_WORLD_AO_LEAST (\S+)", emitters).group(1)
+
+
+def test_the_grid_finds_what_every_proxy_finds(reference):
+    """the proxies' grid (world_ao_grid) leaves out only proxies that could not shade the pixel: at random windows of
+    64 shapes and points about them, the grid's product is every proxy's, bit for bit"""
+    result = subprocess.run([str(reference["build"] / "scene"), "cull", "8", "20000"], capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    print(result.stdout)

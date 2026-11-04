@@ -1721,8 +1721,42 @@ static const char world_proxies_shapes[] =
 	"\t\treturn 0.5 * l + 16.0 * sqrt(radius * radius + 2.0 * radius * l / 3.14159265358979);\n"
 	"\t}\n"
 	"\tif (v0.w == " WORLD_AO_TEXT(XGPU_WORLD_AO_BOX) ".0)\n"
-	"\t\treturn 17.0 * sqrt(dot(v1.xyz, v1.xyz) + dot(v2, v2));\n"
+	"\t{\n"
+	"\t\tfloat x = length(v1.xyz), y = length(v2.xyz), z = v2.w;\n"
+	"\t\tfloat areas = sqrt((y * z) * (y * z) + (x * z) * (x * z) + (x * y) * (x * y));\n"
+	"\t\treturn sqrt(x * x + y * y + z * z) + sqrt(" WORLD_AO_TEXT(XGPU_WORLD_AO_LEAST) " * 4.0 / 3.14159265358979 * areas);\n"
+	"\t}\n"
 	"\treturn 16.0 * v2.x;\n"
+	"}\n"
+	/* world_proxy_box_fade: the box's bound on its occlusion made a fade */
+	"static inline float world_proxy_box_fade(float3 p, float3 n, float3 centre, float3 half_x, float3 half_y, float extent_z)\n"
+	"{\n"
+	"\tfloat3 extents = float3(length(half_x), length(half_y), extent_z);\n"
+	"\tif (extents.x <= 0.0 || extents.y <= 0.0 || extents.z <= 0.0)\n"
+	"\t\treturn 0.0;\n"
+	"\tfloat3 axes[3];\n"
+	"\taxes[0] = half_x / extents.x;\n"
+	"\taxes[1] = half_y / extents.y;\n"
+	"\taxes[2] = cross(axes[0], axes[1]);\n"
+	"\tfloat3 offset = p - centre, outside;\n"
+	"\tfloat distance_squared = 0.0, height = 0.0;\n"
+	"\tfor (int axis = 0; axis < 3; axis++)\n"
+	"\t{\n"
+	"\t\tfloat local = dot(offset, axes[axis]), local_normal = dot(n, axes[axis]);\n"
+	"\t\toutside[axis] = abs(local) - extents[axis];\n"
+	"\t\toutside[axis] = outside[axis] > 0.0 ? outside[axis] : 0.0;\n"
+	"\t\tdistance_squared += outside[axis] * outside[axis];\n"
+	"\t\theight += extents[axis] * abs(local_normal) - local_normal * local;\n"
+	"\t}\n"
+	"\tif (distance_squared <= 0.0)\n"
+	"\t\treturn 1.0;\n"
+	"\tif (height <= 0.0)\n"
+	"\t\treturn 0.0;\n"
+	"\tfloat faces = extents.y * extents.z * outside.x + extents.x * extents.z * outside.y + extents.x * extents.y * outside.z;\n"
+	"\tfloat distance = sqrt(distance_squared);\n"
+	"\tfloat bound = " WORLD_AO_TEXT(XGPU_WORLD_AO_LEAST) " * 4.0 / 3.14159265358979 * faces * (height < distance ? height : distance) /\n"
+	"\t\t(distance_squared * distance_squared);\n"
+	"\treturn clamp(bound - 1.0, 0.0, 1.0);\n"
 	"}\n";
 
 static void world_ao_functions(struct xgpu_text *text, int light)
@@ -1733,7 +1767,9 @@ static void world_ao_functions(struct xgpu_text *text, int light)
 		"\tfloat4 field[2];\n"
 		"\tfloat4 parameters[2];\n"
 		"\tfloat4 proxies[%d];\n"
-		"};\n", 3 * XGPU_WORLD_AO_SHAPES);
+		"\tfloat4 grid[2];\n"
+		"\tuint4 cells[%d];\n"
+		"};\n", 3 * XGPU_WORLD_AO_SHAPES, XGPU_WORLD_AO_GRID_CELLS / 2);
 	/* (the field's: never the lightmap pass's) */
 	if (light != XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP)
 		xgpu_text_append(text,
@@ -1759,36 +1795,58 @@ static void world_ao_functions(struct xgpu_text *text, int light)
 		"}\n", XGPU_WORLD_AO_STEP, XGPU_WORLD_AO_TAPS, XGPU_WORLD_AO_K);
 	xgpu_text_append(text, "%s", world_proxies_shapes);
 	xgpu_text_append(text,
-		/* A_prox(p, n): the shapes of the draw's object's others within
-		their reach, each faded out over the last of it */
+		/* A_prox(p, n): the shapes of the pixel's cell of the grid (those
+		whose reach touches it: world_ao_grid), lowest first, of the draw's
+		object's others within their reach, each faded out over the last of
+		it (a box by its bound) */
 		"static inline float world_proxies_occlusion(constant xgpu_world_ao &w, float3 p, float3 n, float owner)\n"
 		"{\n"
 		"\tfloat product = 1.0;\n"
-		"\tint count = int(w.parameters[0].w);\n"
-		"\tfor (int shape = 0; shape < count; shape++)\n"
+		"\tfloat3 offset = p - w.grid[0].xyz;\n"
+		"\tfloat3 at = sign(offset) * log2(1.0 + abs(offset) * w.grid[1].w) * w.grid[1].xyz + float3(%d.0, %d.0, %d.0);\n"
+		"\tint cell = (clamp(int(floor(at.z)), 0, %d) * %d + clamp(int(floor(at.y)), 0, %d)) * %d +\n"
+		"\t\tclamp(int(floor(at.x)), 0, %d);\n"
+		"\tuint4 pair = w.cells[cell >> 1];\n"
+		"\tuint words[2] = { (cell & 1) != 0 ? pair.z : pair.x, (cell & 1) != 0 ? pair.w : pair.y };\n"
+		"\tfor (int word = 0; word < 2; word++)\n"
 		"\t{\n"
-		"\t\tfloat4 v0 = w.proxies[shape * 3], v1 = w.proxies[shape * 3 + 1], v2 = w.proxies[shape * 3 + 2];\n"
-		"\t\tif (v1.w == owner)\n"
-		"\t\t\tcontinue;\n"
-		"\t\tfloat3 centre = v0.w == %d.0 ? (v0.xyz + v1.xyz) * 0.5 : v0.xyz;\n"
-		"\t\tfloat reach = world_proxy_reach(v0, v1, v2);\n"
-		"\t\tfloat away = length(p - centre);\n"
-		"\t\tif (away >= reach)\n"
-		"\t\t\tcontinue;\n"
-		"\t\tif (dot(n, centre - p) < -world_proxy_bound(v0, v1, v2))\n"
-		"\t\t\tcontinue;\n"
-		"\t\tfloat occlusion = 0.0;\n"
-		"\t\tif (v0.w == %d.0)\n"
-		"\t\t\tocclusion = world_proxy_sphere(p, n, v0.xyz, v2.x);\n"
-		"\t\tif (v0.w == %d.0)\n"
-		"\t\t\tocclusion = world_proxy_capsule(p, n, v0.xyz, v1.xyz, v2.x);\n"
-		"\t\tif (v0.w == %d.0)\n"
-		"\t\t\tocclusion = world_proxy_box(p, n, v0.xyz, v1.xyz, v2.xyz, v2.w);\n"
-		"\t\tproduct *= 1.0 - occlusion * saturate((reach - away) / (reach * %.6f));\n"
+		"\t\tfor (uint bits = words[word]; bits != 0u; bits &= bits - 1u)\n"
+		"\t\t{\n"
+		"\t\t\tint shape = word * 32 + int(ctz(bits));\n"
+		"\t\t\tfloat4 v0 = w.proxies[shape * 3], v1 = w.proxies[shape * 3 + 1], v2 = w.proxies[shape * 3 + 2];\n"
+		"\t\t\tif (v1.w == owner)\n"
+		"\t\t\t\tcontinue;\n"
+		"\t\t\tfloat3 centre = v0.w == %d.0 ? (v0.xyz + v1.xyz) * 0.5 : v0.xyz;\n"
+		"\t\t\tfloat reach = world_proxy_reach(v0, v1, v2);\n"
+		"\t\t\tfloat away = length(p - centre);\n"
+		"\t\t\tif (away >= reach)\n"
+		"\t\t\t\tcontinue;\n"
+		"\t\t\tif (dot(n, centre - p) < -world_proxy_bound(v0, v1, v2))\n"
+		"\t\t\t\tcontinue;\n"
+		"\t\t\tfloat fade = saturate((reach - away) / (reach * %.6f));\n"
+		"\t\t\tif (v0.w == %d.0)\n"
+		"\t\t\t{\n"
+		"\t\t\t\tfade = world_proxy_box_fade(p, n, v0.xyz, v1.xyz, v2.xyz, v2.w);\n"
+		"\t\t\t\tif (fade <= 0.0)\n"
+		"\t\t\t\t\tcontinue;\n"
+		"\t\t\t}\n"
+		"\t\t\tfloat occlusion = 0.0;\n"
+		"\t\t\tif (v0.w == %d.0)\n"
+		"\t\t\t\tocclusion = world_proxy_sphere(p, n, v0.xyz, v2.x);\n"
+		"\t\t\tif (v0.w == %d.0)\n"
+		"\t\t\t\tocclusion = world_proxy_capsule(p, n, v0.xyz, v1.xyz, v2.x);\n"
+		"\t\t\tif (v0.w == %d.0)\n"
+		"\t\t\t\tocclusion = world_proxy_box(p, n, v0.xyz, v1.xyz, v2.xyz, v2.w);\n"
+		"\t\t\tproduct *= 1.0 - occlusion * fade;\n"
+		"\t\t}\n"
 		"\t}\n"
 		"\treturn product;\n"
 		"}\n",
-		XGPU_WORLD_AO_CAPSULE, XGPU_WORLD_AO_SPHERE, XGPU_WORLD_AO_CAPSULE, XGPU_WORLD_AO_BOX, XGPU_WORLD_AO_REACH_FADE);
+		XGPU_WORLD_AO_GRID_X / 2, XGPU_WORLD_AO_GRID_Y / 2, XGPU_WORLD_AO_GRID_Z / 2,
+		XGPU_WORLD_AO_GRID_Z - 1, XGPU_WORLD_AO_GRID_Y, XGPU_WORLD_AO_GRID_Y - 1, XGPU_WORLD_AO_GRID_X,
+		XGPU_WORLD_AO_GRID_X - 1,
+		XGPU_WORLD_AO_CAPSULE, XGPU_WORLD_AO_REACH_FADE, XGPU_WORLD_AO_BOX, XGPU_WORLD_AO_SPHERE,
+		XGPU_WORLD_AO_CAPSULE, XGPU_WORLD_AO_BOX);
 }
 
 /* the occlusion at the pixel, for the light it multiplies

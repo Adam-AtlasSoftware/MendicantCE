@@ -236,7 +236,10 @@ XGPU_MSL_TEXTURE_WORLD_SDF), and the draw's object its uniforms' world_ao
   A_obj   = mix(A_sdf, clamp(A_sdf / max(reference, REFERENCE_LEAST), 0, 1), reference_weight)
   A_prox  = prod over the proxies of other owners within reach (1 - occlusion_i fade_i),
             fade_i = clamp((reach_i - |p - c_i|) / (REACH_FADE reach_i), 0, 1), c_i its
-            centre (a sphere's and a box's a, a capsule's segment's middle)
+            centre (a sphere's and a box's a, a capsule's segment's middle); a box's
+            fade_i its bound's (world_proxy_box_fade), and none where that is 0;
+            the proxies those of the pixel's cell of the block's grid alone
+            (XGPU_WORLD_AO_GRID_*), lowest first: the same product
   models:   A = mix(1, max(mix(1, A_obj, field_fade) A_prox, FLOOR), strength_objects)
   lightmap: A = mix(1, max(A_prox, FLOOR), strength_level)          (never the field)
 
@@ -264,7 +267,17 @@ they agree): its members' offsets, the most proxies, their kinds */
 #define XGPU_WORLD_AO_BLOCK_FIELD 0
 #define XGPU_WORLD_AO_BLOCK_PARAMETERS 32
 #define XGPU_WORLD_AO_BLOCK_PROXIES 64
+#define XGPU_WORLD_AO_BLOCK_GRID 3136
+#define XGPU_WORLD_AO_BLOCK_CELLS 3168
 #define XGPU_WORLD_AO_SHAPES 64
+/* the proxies' grid (world_ao.h's WORLD_AO_GRID_*: world_ao_grid) and the
+least box occlusion computed, one over (world_proxies.c's
+WORLD_PROXIES_LEAST: world_proxy_box_fade) */
+#define XGPU_WORLD_AO_GRID_X 16
+#define XGPU_WORLD_AO_GRID_Y 16
+#define XGPU_WORLD_AO_GRID_Z 8
+#define XGPU_WORLD_AO_GRID_CELLS (XGPU_WORLD_AO_GRID_X * XGPU_WORLD_AO_GRID_Y * XGPU_WORLD_AO_GRID_Z)
+#define XGPU_WORLD_AO_LEAST 510.0f
 #define XGPU_WORLD_AO_SPHERE 1
 #define XGPU_WORLD_AO_CAPSULE 2
 #define XGPU_WORLD_AO_BOX 3
