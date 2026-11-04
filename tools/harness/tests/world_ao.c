@@ -19,7 +19,8 @@ static unsigned long changes = 1;
 static int scene_frames, sdf_frames, windows_handed, fields_handed;
 static struct
 {
-	float field[2][4], parameters[2][4], proxies[8][3][4];
+	float field[2][4], parameters[2][4], proxies[8][3][4], grid[2][4];
+	unsigned int cells;
 	int count;
 } handed;
 static int object_owner = -100;
@@ -107,8 +108,19 @@ float world_ao_reference(struct world_sdf_volume const *reference_volume, float 
 	return reference_volume ? lighting_point[2] / 10.0f : 0.3f;
 }
 
+/* (world_ao_shading.c's grid, tested apart: here, about which camera, of
+how many proxies) */
+void world_ao_grid(struct world_proxy const *proxies, long count, float const camera[3], float grid[2][4],
+	unsigned int cells[WORLD_AO_GRID_CELLS / 2][4])
+{
+	(void)proxies;
+	memset(grid, 0, sizeof(float) * 8);
+	memcpy(grid[0], camera, sizeof(float) * 3);
+	cells[0][0] = (unsigned int)count;
+}
+
 void halo_world_ao_window(float const field[2][4], float const parameters[2][4], float const (*proxies)[3][4],
-	int count)
+	int count, float const grid[2][4], unsigned int const (*cells)[4])
 {
 	windows_handed++;
 	handed.count = count;
@@ -117,6 +129,8 @@ void halo_world_ao_window(float const field[2][4], float const parameters[2][4],
 	memcpy(handed.field, field, sizeof(handed.field));
 	memcpy(handed.parameters, parameters, sizeof(handed.parameters));
 	memcpy(handed.proxies, proxies, (size_t)(count < 8 ? count : 8) * sizeof(handed.proxies[0]));
+	memcpy(handed.grid, grid, sizeof(handed.grid));
+	handed.cells = cells ? cells[0][0] : 0xffffffffu;
 }
 
 void halo_world_ao_object(int owner, float reference)
@@ -199,6 +213,8 @@ static void window_case(void)
 		handed.parameters[0][2] == 0.5f && handed.parameters[0][3] == 3.0f &&
 		handed.parameters[1][0] == WORLD_AO_REFERENCE_WEIGHT, "the parameters");
 	CHECK(handed.proxies[2][1][3] == 1.0f, "the proxies' slots handed on as they were");
+	CHECK(handed.grid[0][0] == 1.0f && handed.grid[0][2] == 3.0f && handed.cells == 3,
+		"the proxies' grid about the camera");
 	/* each object's slot (its first shape's) and reference */
 	world_ao_object_begin(200);
 	CHECK(object_owner == 1 && object_reference == 0.7f, "%d %g", object_owner, object_reference);

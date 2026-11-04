@@ -57,7 +57,11 @@ static inline float3 cross(float3 a, float3 b)
 	return float3(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x);
 }
 static inline float saturate(float x) { return x < 0.0f ? 0.0f : x > 1.0f ? 1.0f : x; }
-static inline float clamp(float x, float low, float high) { return x < low ? low : x > high ? high : x; }
+/* (any floats: Metal's literals are floats, C++'s doubles) */
+template <typename X, typename L, typename H> static inline float clamp(X x, L low, H high)
+{
+	return (float)x < (float)low ? (float)low : (float)x > (float)high ? (float)high : (float)x;
+}
 static inline float mix(float a, float b, float t) { return a + (b - a) * t; }
 static inline float rsqrt(float x) { return 1.0f / std::sqrt(x); }
 using std::abs;
@@ -68,6 +72,24 @@ using std::max;
 using std::min;
 using std::sqrt;
 static inline float max(float a, double b) { return a > (float)b ? a : (float)b; }
+
+/* (the proxies' grid: its cells' masks, the cell's index) */
+typedef unsigned int uint;
+struct uint4
+{
+	uint x, y, z, w;
+};
+static inline float3 operator+(double s, float3 a) { return float3((float)s + a.x, (float)s + a.y, (float)s + a.z); }
+static inline float3 abs(float3 a) { return float3(std::fabs(a.x), std::fabs(a.y), std::fabs(a.z)); }
+static inline float3 log2(float3 a) { return float3(std::log2(a.x), std::log2(a.y), std::log2(a.z)); }
+static inline float3 sign(float3 a)
+{
+	return float3(a.x > 0.0f ? 1.0f : a.x < 0.0f ? -1.0f : 0.0f, a.y > 0.0f ? 1.0f : a.y < 0.0f ? -1.0f : 0.0f,
+		a.z > 0.0f ? 1.0f : a.z < 0.0f ? -1.0f : 0.0f);
+}
+static inline int clamp(int x, int low, int high) { return x < low ? low : x > high ? high : x; }
+using std::floor;
+static inline uint ctz(uint x) { return (uint)__builtin_ctz(x); }
 
 namespace filter { enum value { linear }; }
 namespace address { enum value { clamp_to_edge }; }

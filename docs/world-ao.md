@@ -274,30 +274,65 @@ follow it line for line. p is the point, n its unit normal, all in world units.
 
 - **Box** (centre c, half axis vectors X and Y, half extent ez along Z = normalize(X) × normalize(Y)), exact: in box
   space (p and n projected on the unit axes), 1 inside; else each face with p outside its plane (at most 3), its 4
-  corners taken relative to p and clipped by the plane n·v ≥ 0 (Sutherland–Hodgman: at most 5 corners), and the
-  polygon's form factor (Lambert):
+  corners taken relative to p and clipped by the plane n·v ≥ 0 (Sutherland–Hodgman taken edge by edge: each edge's
+  part above the plane, and the chord from where the face leaves it to where it enters), and the faces' form factor
+  (Lambert):
 
   ```
-  face = Σ_edges atan2(|v̂i × v̂j|, v̂i·v̂j) · n·(v̂i × v̂j) / |v̂i × v̂j|      (v̂ the corners normalized, j = i + 1)
-  occ  = clamp(Σ_faces |face| / 2π, 0, 1)
+  edge = atan2(|vi × vj|, vi·vj) · n·(vi × vj) / |vi × vj|      (j = i + 1; the same for any lengths of vi, vj)
+  occ  = clamp(|Σ_faces side · Σ_edges edge| / 2π, 0, 1)
   ```
 
+  Each face is taken the same way round as seen from outside the box (its corners' order times its side), so an
+  edge two front faces share is taken once each way and its terms cancel: it is left out (`box_occlusion`), and only
+  the outline's edges (at most 6) and the chords are found, about half the edges of the faces taken one by one.
   Within 0.02 of the integral everywhere (the residue is the integral's own sampling).
 
+  **Far** (6 half diagonals or more from its centre, `WORLD_PROXIES_FAR`): each front face as a patch at its centre,
+  `occ = Σ_faces 4 e_u e_v · o_a · max(n·r, 0) / (π |r|⁴)` (r from p to the face's centre, o_a p's distance outside
+  the face's plane): no edges, no atan2, about a tenth of the cost. Measured against the exact faces at 200,000
+  random boxes, points and normals: within 0.15/255 at 6 half diagonals (0.5/255 at 4, 1.5/255 at 3); the harness's
+  `far` case holds the step where the form changes under 0.2/255.
+
 - **Reach** (`world_proxy_reach`), measured from the sphere's and box's centre and the capsule's midpoint: past it
-  the occlusion is under 1/255 in every direction.
+  the occlusion is under 1/255 in every direction (a box's under 1/510).
   - sphere: 16r;
   - capsule: L/2 + 16·sqrt(r² + 2rL/π), a sphere of its silhouette's area side on;
-  - box: 17 × its half diagonal sqrt(|X|² + |Y|² + ez²).
+  - box: its half diagonal sqrt(|X|² + |Y|² + ez²) + sqrt(510 · 4|A| / π), A = (e_y e_z, e_x e_z, e_x e_y) (below).
 
-  The shader skips a shape after that one distance test. The term also fades to 0 over the last quarter of the
-  reach, `fade = clamp((reach − |p − centre|) / (0.25·reach), 0, 1)`, on the level and on objects alike, so culling
-  never shows an edge.
+  The shader skips a shape after that one distance test. A sphere's and a capsule's term also fades to 0 over the
+  last quarter of the reach, `fade = clamp((reach − |p − centre|) / (0.25·reach), 0, 1)`, on the level and on objects
+  alike, so culling never shows an edge.
+
+- **A box's bound** (`world_proxy_box_fade`). In box space, with o the point's distance outside each pair of faces
+  (o_i = max(|p_i| − e_i, 0)), D = |o| and H the box's height above the point's tangent plane (its support along n
+  less n·p), the box's occlusion is never more than
+
+  ```
+  U = (4 / π) (e_y e_z o_x + e_x e_z o_y + e_x e_y o_z) · min(D, H) / D⁴
+  ```
+
+  (its solid angle is its front faces', each at most its area 4 e_j e_k times o_i / D³, since every point of it is D
+  or more away; and the cosine at p of any direction to the box is at most H / D). A box's fade is
+  `clamp(510 U − 1, 0, 1)`: computed whole where U ≥ 1/255, not at all (skipped) where U ≤ 1/510. U falls as 1/D³ on a
+  floor beside a box (H/D is small there) and past a flat or long box's edges, where 17 half diagonals reached far: on
+  the ground about a Warthog the box is computed within about 6 wu, not 30. `tools/harness/tests/world_proxies.c`
+  (`bound`) checks U is never under the occlusion at 20,000 random points.
+
+- **The window's grid** (`world_ao_grid`, `world_ao_shading.c`). As the enhanced dynamic lights' grid: 16 × 16 × 8
+  cells about the camera, boxes in the world (VR's eyes share it), their size log2(1 + |offset| / 1 wu) times each
+  axis's scale, the outermost reaching 128 wu and holding whatever reaches past it. Each cell has a 64-bit mask of the
+  proxies that can touch it: a sphere's and a capsule's reach, a box's own bounds grown by where its U falls under
+  1/510 (if less). Built on the CPU for each window (64 shapes: microseconds), uploaded with the block (16 KB). A pixel
+  finds its cell and runs only the proxies of its mask, lowest first. That leaves out only proxies whose factor is
+  exactly 1 there, in the same order, so the product is the brute-force loop's bit for bit
+  (`world_ao_proxies_occlusion_grid` against `world_ao_proxies_occlusion`: 0 of 160,000 points differ, in random
+  windows of 64 shapes, in `tools/test_world_ao_light.py`).
 
 **Combining:**
 
 ```
-A_prox = Π_shapes (1 − occ_i · fade_i)                 (shapes of other owners; ≤64, reach-culled)
+A_prox = Π_shapes (1 − occ_i · fade_i)                 (shapes of other owners in the pixel's cell; ≤64)
 A      = max(mix(1, A_obj, fade) · A_prox, 0.2)   (models: fade the field's)
 A      = max(A_prox, 0.2)                          (lightmap pass)
 A      = mix(1, A, strength_{objects|level})
@@ -319,7 +354,7 @@ the strong preset.
 | | Vulkan (SPIR-V) | Metal (MSL) |
 | --- | --- | --- |
 | Field: 3D, R8 snorm, linear, clamp | set `XGPU_SPIRV_SET_OCCLUSION` (3), binding `XGPU_SPIRV_BINDING_WORLD_SDF` (1), combined image sampler | `[[texture(XGPU_MSL_TEXTURE_WORLD_SDF)]]` (5), `constexpr sampler` |
-| Block `struct xgpu_world_ao_block` (std140, 3,136 B) | set 3, binding `XGPU_SPIRV_BINDING_WORLD_AO` (2), uniform buffer | `[[buffer(XGPU_MSL_BUFFER_WORLD_AO)]]` (23) |
+| Block `struct xgpu_world_ao_block` (std140, 19,552 B) | set 3, binding `XGPU_SPIRV_BINDING_WORLD_AO` (2), uniform buffer | `[[buffer(XGPU_MSL_BUFFER_WORLD_AO)]]` (23) |
 | Per draw: owner slot, reference | the draw uniforms (`xgpu_spirv_uniforms`, 2 floats) | `xgpu_msl_uniforms`, the same |
 
 Set 3 is #574's occlusion set, so a draw still binds at most 4 sets, the Vulkan minimum. With no field yet, the
@@ -327,7 +362,8 @@ backend binds a 1×1×1 texel of +127 (far outside).
 
 The block: `field[0]` origin.xyz and 1/voxel; `field[1]` width, height, depth, range; `parameters[0]` strength on
 objects, strength on the level, fade, proxy count; `parameters[1]` reference weight and 3 spare; then 64 × 3 vec4
-proxies.
+proxies; then the grid: `grid[0]` the camera, `grid[1]` each axis's scale and 1 / cell; then 1,024 uvec4 cells, two
+cells' 64-bit masks each (cell i's word w at `cells[i / 2][2 (i % 2) + w]`).
 
 **Command stream (version 16):**
 - `XGPU_STREAM_WORLD_AO_WINDOW` carries the block (`active` 0: withdrawn);
@@ -366,8 +402,25 @@ Blood Gulch firefight (16 bipeds, 4 vehicles):
 
 There's no pre-pass, so the CPU doesn't walk the scene twice either. CPU per frame: scene ≤ 0.2 ms, proxies ≤
 0.1 ms, upload ≤ 512 KB a frame and only while a field arrives. Memory: field ≤ 8 MB of GPU memory and one block
-(3 KB) per window. If the level's per-pixel proxy loop exceeds the budget on the Deck, the fix is a proxy grid like
-the dynamic lights' (`XGPU_DYNAMIC_LIGHTS_GRID_*`, a 64-bit mask per cell), not fewer proxies.
+(19 KB with the proxies' grid) per window.
+
+### The proxies' cost (workstream E)
+
+World minus off, GPU ms a frame (`debug.gpu_stats`, the mean of the last five 600-frame windows), offscreen Vulkan,
+fixed step, release builds with B's field; "before" is `world-ao` as D left it, "after" this grid, the box's bound,
+its outline and its far patches:
+
+| Case | Radeon 8060S 1440p | Radeon 4K | RTX 4090 1440p | RTX 4090 4K |
+| --- | --- | --- | --- | --- |
+| Made up: a Warthog's box and wheels, a crate (Blood Gulch's start) | 0.49 → **0.22** | 1.07 → 0.73 | 0.32 → **0.17** | 0.69 → 0.35 |
+| Blood Gulch's start, its own objects | 1.53 → **0.41** | | 1.19 → **0.25** | |
+| b30's start, 64 scenery shapes | 6.46 → **3.05** | 12.81 → 6.48 | 2.51 → **1.81** | 4.91 → 2.04 |
+
+The proxies themselves now cost about nothing in the real scenes: with the window's proxies taken away (a
+measurement-only switch) b30 costs the same (4.75 against 4.76 ms) and Blood Gulch too (1.53 against 1.49 ms), and
+with the made-up field (no bake, no upload) and no shapes b30 is at off (1.79 ms). What is left there is the field's
+(B's sampling, being rebuilt by F). The made-up case meets the Radeon's budget; the 4090's frame is 0.39 ms, far from
+its boost clock, so its deltas run high (D's note).
 
 ## Determinism
 

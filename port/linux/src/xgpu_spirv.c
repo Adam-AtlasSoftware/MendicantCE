@@ -2592,16 +2592,26 @@ variables. */
 
 static void world_ao_declare(struct module *m)
 {
-	unsigned int members[3], block;
+	unsigned int members[5], block, operands[3];
 
 	members[0] = block_array(m, 2);
 	members[1] = block_array(m, 2);
 	members[2] = block_array(m, 3 * XGPU_WORLD_AO_SHAPES);
-	block = type_struct(m, 3, members);
+	members[3] = block_array(m, 2);
+	/* (the grid's cells: uvec4s, two cells each) */
+	members[4] = id_new(m);
+	operands[0] = members[4];
+	operands[1] = m->t_uv4;
+	operands[2] = constant_uint(m, XGPU_WORLD_AO_GRID_CELLS / 2);
+	instruction(m, SECTION_GLOBALS, OP_TYPE_ARRAY, 3, operands);
+	decorate1(m, members[4], DECORATION_ARRAY_STRIDE, 16);
+	block = type_struct(m, 5, members);
 	decorate(m, block, DECORATION_BLOCK, 0, NULL);
 	member_decorate(m, block, 0, DECORATION_OFFSET, XGPU_WORLD_AO_BLOCK_FIELD);
 	member_decorate(m, block, 1, DECORATION_OFFSET, XGPU_WORLD_AO_BLOCK_PARAMETERS);
 	member_decorate(m, block, 2, DECORATION_OFFSET, XGPU_WORLD_AO_BLOCK_PROXIES);
+	member_decorate(m, block, 3, DECORATION_OFFSET, XGPU_WORLD_AO_BLOCK_GRID);
+	member_decorate(m, block, 4, DECORATION_OFFSET, XGPU_WORLD_AO_BLOCK_CELLS);
 	name(m, block, "world_ao_block");
 	m->world_ao = variable(m, block, STORAGE_UNIFORM, "world_ao");
 	decorate1(m, m->world_ao, DECORATION_DESCRIPTOR_SET, XGPU_SPIRV_SET_OCCLUSION);
@@ -2615,17 +2625,17 @@ static void world_ao_declare(struct module *m)
 	decorate1(m, m->world_sdf_table, DECORATION_BINDING, XGPU_SPIRV_BINDING_WORLD_SDF_TABLE);
 }
 
-/* a vec4 of the block (0 field, 1 parameters, 2 proxies): a constant
-index or an int value */
+/* a vec4 of the block (0 field, 1 parameters, 2 proxies, 3 grid; 4 the
+cells, a uvec4): a constant index or an int value */
 static unsigned int world_ao_vector(struct module *m, int member, unsigned int index_id)
 {
-	unsigned int operands[3], pointer;
+	unsigned int operands[3], pointer, type = member == 4 ? m->t_uv4 : m->t_v4;
 
 	operands[0] = m->world_ao;
 	operands[1] = constant_int(m, member);
 	operands[2] = index_id;
-	pointer = op(m, OP_ACCESS_CHAIN, type_pointer(m, STORAGE_UNIFORM, m->t_v4), 3, operands);
-	return load(m, m->t_v4, pointer);
+	pointer = op(m, OP_ACCESS_CHAIN, type_pointer(m, STORAGE_UNIFORM, type), 3, operands);
+	return load(m, type, pointer);
 }
 
 static unsigned int fselect(struct module *m, unsigned int condition, unsigned int a, unsigned int b);
@@ -2811,37 +2821,51 @@ static unsigned int world_proxy_capsule(struct module *m, unsigned int p, unsign
 		world_proxy_sphere(m, p, n, a, radius), occlusion);
 }
 
-/* a polygon's edge's part of its form factor (box_occlusion's), the
-corners a and b from p, the normal in box space: 0 where either is at p
-or they are in line */
+/* a polygon's edge's part of its form factor (box_occlusion's box_edge), the
+corners a and b from p, the normal in box space: atan2(|a x b|, a . b) n .
+(a x b) / |a x b|, the same for any lengths of a and b (none normalized); 0
+where the angle's sine is under 1e-7 (either at p, or in line) */
 static unsigned int world_proxy_edge(struct module *m, unsigned int normal, unsigned int a, unsigned int b)
 {
-	unsigned int zero = constant_float(m, 0.0f), a_length = flength(m, a), b_length = flength(m, b);
-	unsigned int edge_normal = fcross(m, fscale(m, 3, a, fdiv(m, 1, constant_float(m, 1.0f), a_length)),
-		fscale(m, 3, b, fdiv(m, 1, constant_float(m, 1.0f), b_length)));
-	unsigned int sine = flength(m, edge_normal), cosine;
-	unsigned int valid = op2(m, OP_LOGICAL_AND, m->t_bool, op2(m, OP_LOGICAL_AND, m->t_bool,
-		compare(m, OP_F_ORD_GREATER_THAN, a_length, zero), compare(m, OP_F_ORD_GREATER_THAN, b_length, zero)),
-		compare(m, OP_F_ORD_GREATER_THAN, sine, constant_float(m, 1.0e-7f)));
+	unsigned int zero = constant_float(m, 0.0f), edge_normal = fcross(m, a, b);
+	unsigned int sine_squared = fdot(m, edge_normal, edge_normal), sine = fsqrt(m, sine_squared);
+	unsigned int valid = compare(m, OP_F_ORD_GREATER_THAN, sine_squared, fmul(m, 1, fmul(m, 1,
+		constant_float(m, 1.0e-14f), fdot(m, a, a)), fdot(m, b, b)));
 
-	cosine = fdot(m, fscale(m, 3, a, fdiv(m, 1, constant_float(m, 1.0f), a_length)),
-		fscale(m, 3, b, fdiv(m, 1, constant_float(m, 1.0f), b_length)));
-	return fselect(m, valid, fdiv(m, 1, fmul(m, 1, ext2(m, GLSL_ATAN2, m->t_float, sine, cosine),
+	return fselect(m, valid, fdiv(m, 1, fmul(m, 1, ext2(m, GLSL_ATAN2, m->t_float, sine, fdot(m, a, b)),
 		fdot(m, normal, edge_normal)), sine), zero);
+}
+
+/* face += edge(a, b) where condition holds: a selection, so that an edge
+left out costs nothing */
+static void world_proxy_box_add_edge(struct module *m, unsigned int face_variable, unsigned int condition,
+	unsigned int normal, unsigned int a, unsigned int b)
+{
+	unsigned int body = id_new(m), merge = id_new(m);
+
+	selection_merge(m, merge);
+	branch_conditional(m, condition, body, merge);
+	label_at(m, body);
+	store(m, face_variable, fadd(m, 1, load(m, m->t_float, face_variable), world_proxy_edge(m, normal, a, b)));
+	branch(m, merge);
+	label_at(m, merge);
 }
 
 /* box_occlusion: centre, half axes x and y (v1.xyz, v2.xyz), half extent
 along z = x cross y (v2.w): 1 inside; else the faces p is outside of, each
-clipped by p's tangent plane, and their form factors. The clipping is
-Sutherland and Hodgman's taken edge by edge: an edge with both corners
-above the plane is itself, one leaving it ends where it crosses, one
-entering begins there, and the crossing out joins the crossing in: the
-same edges as the clipped polygon's, so the same sum */
+clipped by p's tangent plane, and their form factors, the faces taken the
+same way round as seen from outside (their corners' order times the side)
+so that an edge two of them share cancels and is left out: the outline's
+edges alone. The clipping is Sutherland and Hodgman's taken edge by edge:
+an edge with both corners above the plane is itself, one leaving it ends
+where it crosses, one entering begins there, and the crossing out joins the
+crossing in: the same edges as the clipped polygon's, so the same sum */
 static unsigned int world_proxy_box(struct module *m, struct pixel_state *state, unsigned int p, unsigned int n,
 	unsigned int v0, unsigned int v1, unsigned int v2)
 {
 	unsigned int zero = constant_float(m, 0.0f), extents[3], axes[3], offset, at[3], local_normal[3], normal;
-	unsigned int occlusion_variable = local(m, &state->locals, m->t_float), inside, empty;
+	unsigned int occlusion_variable = local(m, &state->locals, m->t_float);
+	unsigned int face_variable = local(m, &state->locals, m->t_float), inside, empty, far, far_occlusion;
 	int axis, side, corner;
 
 	extents[0] = flength(m, xyz(m, v1));
@@ -2866,14 +2890,42 @@ static unsigned int world_proxy_box(struct module *m, struct pixel_state *state,
 			ext1(m, GLSL_F_ABS, m->t_float, at[axis]), extents[axis]));
 		empty = op2(m, OP_LOGICAL_OR, m->t_bool, empty, compare(m, OP_F_ORD_LESS_THAN_EQUAL, extents[axis], zero));
 	}
+	/* far from it (XGPU_WORLD_AO_FAR half diagonals or more): each front face
+	as a patch at its centre, 4 e_u e_v out (n . r) / (pi r^4), r from p to
+	the face's centre (n . r > 0), found without branches; the exact faces
+	below only when near */
+	far = compare(m, OP_F_ORD_GREATER_THAN_EQUAL, fdot(m, offset, offset), fmul(m, 1,
+		constant_float(m, XGPU_WORLD_AO_FAR * XGPU_WORLD_AO_FAR), fadd(m, 1, fadd(m, 1, fmul(m, 1, extents[0], extents[0]),
+		fmul(m, 1, extents[1], extents[1])), fmul(m, 1, extents[2], extents[2]))));
+	far_occlusion = zero;
 	for (axis = 0; axis < 3; axis++)
 	{
 		for (side = -1; side <= 1; side += 2)
 		{
 			int u = (axis + 1) % 3, v = (axis + 2) % 3;
-			unsigned int corners[4], heights[4], face = zero, exit_point = 0, entry_point = 0, crossed = 0;
-			unsigned int facing = compare(m, OP_F_ORD_GREATER_THAN, fmul(m, 1, constant_float(m, (float)side),
-				at[axis]), extents[axis]);
+			unsigned int out = fsub(m, 1, fmul(m, 1, constant_float(m, (float)side), at[axis]), extents[axis]);
+			unsigned int components[3], r, r_squared, facing_patch, term;
+
+			components[axis] = fsub(m, 1, fmul(m, 1, constant_float(m, (float)side), extents[axis]), at[axis]);
+			components[u] = fneg(m, 1, at[u]);
+			components[v] = fneg(m, 1, at[v]);
+			r = construct(m, 3, components);
+			r_squared = fdot(m, r, r);
+			facing_patch = fdot(m, normal, r);
+			term = fdiv(m, 1, fmul(m, 1, fmul(m, 1, fmul(m, 1, fmul(m, 1, constant_float(m, 4.0f), extents[u]), extents[v]),
+				out), facing_patch), fmul(m, 1, fmul(m, 1, constant_float(m, XGPU_WORLD_AO_PI), r_squared), r_squared));
+			far_occlusion = fselect(m, op2(m, OP_LOGICAL_AND, m->t_bool, compare(m, OP_F_ORD_GREATER_THAN, out, zero),
+				compare(m, OP_F_ORD_GREATER_THAN, facing_patch, zero)), fadd(m, 1, far_occlusion, term), far_occlusion);
+		}
+	}
+	for (axis = 0; axis < 3; axis++)
+	{
+		for (side = -1; side <= 1; side += 2)
+		{
+			int u = (axis + 1) % 3, v = (axis + 2) % 3;
+			unsigned int corners[4], heights[4], exit_point = 0, entry_point = 0, crossed = 0;
+			unsigned int facing = op2(m, OP_LOGICAL_AND, m->t_bool, op1(m, OP_LOGICAL_NOT, m->t_bool, far),
+				compare(m, OP_F_ORD_GREATER_THAN, fmul(m, 1, constant_float(m, (float)side), at[axis]), extents[axis]));
 			unsigned int body = id_new(m), merge = id_new(m);
 
 			/* if (side * at[axis] > extents[axis]) { ... } (a face p is
@@ -2882,6 +2934,7 @@ static unsigned int world_proxy_box(struct module *m, struct pixel_state *state,
 			branch_conditional(m, facing, body, merge);
 			label_at(m, body);
 
+			store(m, face_variable, zero);
 			for (corner = 0; corner < 4; corner++)
 			{
 				float su = (corner == 1 || corner == 2) ? 1.0f : -1.0f, sv = corner >= 2 ? 1.0f : -1.0f;
@@ -2896,6 +2949,10 @@ static unsigned int world_proxy_box(struct module *m, struct pixel_state *state,
 			for (corner = 0; corner < 4; corner++)
 			{
 				int next = (corner + 1) % 4;
+				/* (the face across this edge: edges 0 and 2 lie on v's faces, 1
+				and 3 on u's, at -, +, +, -) */
+				int across = corner == 0 || corner == 2 ? v : u;
+				float across_side = corner == 0 || corner == 3 ? -1.0f : 1.0f;
 				unsigned int above = compare(m, OP_F_ORD_GREATER_THAN_EQUAL, heights[corner], zero);
 				unsigned int next_above = compare(m, OP_F_ORD_GREATER_THAN_EQUAL, heights[next], zero);
 				unsigned int t = fdiv(m, 1, heights[corner], fsub(m, 1, heights[corner], heights[next]));
@@ -2905,31 +2962,79 @@ static unsigned int world_proxy_box(struct module *m, struct pixel_state *state,
 					next_above));
 				unsigned int enters = op2(m, OP_LOGICAL_AND, m->t_bool, op1(m, OP_LOGICAL_NOT, m->t_bool, above),
 					next_above);
-				unsigned int edge = world_proxy_edge(m, normal, select_n(m, 3, above, corners[corner], crossing),
-					select_n(m, 3, next_above, corners[next], crossing));
+				unsigned int outline = compare(m, OP_F_ORD_LESS_THAN_EQUAL, fmul(m, 1, constant_float(m, across_side),
+					at[across]), extents[across]);
 
-				face = fadd(m, 1, face, fselect(m, op2(m, OP_LOGICAL_OR, m->t_bool, above, next_above), edge, zero));
+				world_proxy_box_add_edge(m, face_variable, op2(m, OP_LOGICAL_AND, m->t_bool,
+					op2(m, OP_LOGICAL_OR, m->t_bool, above, next_above), outline), normal,
+					select_n(m, 3, above, corners[corner], crossing), select_n(m, 3, next_above, corners[next], crossing));
 				exit_point = exit_point ? select_n(m, 3, leaves, crossing, exit_point) : select_n(m, 3, leaves, crossing,
 					constant_splat(m, 3, 0.0f));
 				entry_point = entry_point ? select_n(m, 3, enters, crossing, entry_point) : select_n(m, 3, enters,
 					crossing, constant_splat(m, 3, 0.0f));
 				crossed = crossed ? op2(m, OP_LOGICAL_OR, m->t_bool, crossed, leaves) : leaves;
 			}
-			face = fadd(m, 1, face, fselect(m, crossed, world_proxy_edge(m, normal, exit_point, entry_point), zero));
-			store(m, occlusion_variable, fadd(m, 1, load(m, m->t_float, occlusion_variable), fdiv(m, 1,
-				ext1(m, GLSL_F_ABS, m->t_float, face), constant_float(m, 2.0f * XGPU_WORLD_AO_PI))));
+			world_proxy_box_add_edge(m, face_variable, crossed, normal, exit_point, entry_point);
+			store(m, occlusion_variable, fadd(m, 1, load(m, m->t_float, occlusion_variable),
+				fmul(m, 1, constant_float(m, (float)side), load(m, m->t_float, face_variable))));
 			branch(m, merge);
 			label_at(m, merge);
 		}
 	}
-	return fselect(m, empty, zero, fselect(m, inside, constant_float(m, 1.0f), fclamp_scalar(m,
-		load(m, m->t_float, occlusion_variable), 0.0f, 1.0f)));
+	return fselect(m, empty, zero, fselect(m, inside, constant_float(m, 1.0f), fselect(m, far,
+		fclamp_scalar(m, far_occlusion, 0.0f, 1.0f), fclamp_scalar(m,
+		fdiv(m, 1, ext1(m, GLSL_F_ABS, m->t_float, load(m, m->t_float, occlusion_variable)),
+		constant_float(m, 2.0f * XGPU_WORLD_AO_PI)), 0.0f, 1.0f))));
+}
+
+/* world_proxy_box_fade: the box's bound on its occlusion,
+(510 * 4 / pi) (e_y e_z o_x + e_x e_z o_y + e_x e_y o_z) min(H, D) / D^4 (o
+the point's distance outside each pair of faces, D = |o|, H the box's
+height above the tangent plane), made a fade: clamp(bound - 1, 0, 1); 0
+with no extent or wholly below the plane, 1 inside */
+static unsigned int world_proxy_box_fade(struct module *m, unsigned int p, unsigned int n, unsigned int v0,
+	unsigned int v1, unsigned int v2)
+{
+	unsigned int zero = constant_float(m, 0.0f), one = constant_float(m, 1.0f), extents[3], axes[3], offset;
+	unsigned int outside[3], distance_squared = zero, height = zero, empty, faces, distance, bound, fade;
+	int axis;
+
+	extents[0] = flength(m, xyz(m, v1));
+	extents[1] = flength(m, xyz(m, v2));
+	extents[2] = extract(m, v2, 3);
+	axes[0] = fscale(m, 3, xyz(m, v1), fdiv(m, 1, one, extents[0]));
+	axes[1] = fscale(m, 3, xyz(m, v2), fdiv(m, 1, one, extents[1]));
+	axes[2] = fcross(m, axes[0], axes[1]);
+	offset = fsub(m, 3, p, xyz(m, v0));
+	empty = constant_bool(m, FALSE);
+	for (axis = 0; axis < 3; axis++)
+	{
+		unsigned int at = fdot(m, offset, axes[axis]), local_normal = fdot(m, n, axes[axis]);
+
+		outside[axis] = fsub(m, 1, ext1(m, GLSL_F_ABS, m->t_float, at), extents[axis]);
+		outside[axis] = fselect(m, compare(m, OP_F_ORD_GREATER_THAN, outside[axis], zero), outside[axis], zero);
+		distance_squared = fadd(m, 1, distance_squared, fmul(m, 1, outside[axis], outside[axis]));
+		height = fadd(m, 1, height, fsub(m, 1, fmul(m, 1, extents[axis], ext1(m, GLSL_F_ABS, m->t_float, local_normal)),
+			fmul(m, 1, local_normal, at)));
+		empty = op2(m, OP_LOGICAL_OR, m->t_bool, empty, compare(m, OP_F_ORD_LESS_THAN_EQUAL, extents[axis], zero));
+	}
+	faces = fadd(m, 1, fadd(m, 1, fmul(m, 1, fmul(m, 1, extents[1], extents[2]), outside[0]),
+		fmul(m, 1, fmul(m, 1, extents[0], extents[2]), outside[1])), fmul(m, 1, fmul(m, 1, extents[0], extents[1]), outside[2]));
+	distance = fsqrt(m, distance_squared);
+	bound = fdiv(m, 1, fmul(m, 1, fmul(m, 1, constant_float(m, XGPU_WORLD_AO_LEAST * 4.0f / XGPU_WORLD_AO_PI), faces),
+		fselect(m, compare(m, OP_F_ORD_LESS_THAN, height, distance), height, distance)),
+		fmul(m, 1, distance_squared, distance_squared));
+	fade = fclamp_scalar(m, fsub(m, 1, bound, one), 0.0f, 1.0f);
+	fade = fselect(m, compare(m, OP_F_ORD_LESS_THAN_EQUAL, height, zero), zero, fade);
+	fade = fselect(m, compare(m, OP_F_ORD_LESS_THAN_EQUAL, distance_squared, zero), one, fade);
+	return fselect(m, empty, zero, fade);
 }
 
 /* a shape's reach from its centre (world_proxy_reach's): past it, its
 occlusion is under 1/255. A sphere's 16 radii; a capsule's, half its
-length and 16 radii of the sphere of its silhouette's area; a box's, 17
-half diagonals */
+length and 16 radii of the sphere of its silhouette's area; a box's, its
+half diagonal and sqrt(510 * 4 |A| / pi), A = (e_y e_z, e_x e_z, e_x e_y),
+where its bound falls under 1/510 */
 static unsigned int world_proxy_reach(struct module *m, unsigned int kind, unsigned int v0, unsigned int v1,
 	unsigned int v2)
 {
@@ -2938,8 +3043,11 @@ static unsigned int world_proxy_reach(struct module *m, unsigned int kind, unsig
 	unsigned int capsule = fadd(m, 1, fmul(m, 1, constant_float(m, 0.5f), length), fmul(m, 1, sixteen, fsqrt(m,
 		fadd(m, 1, fmul(m, 1, radius, radius), fdiv(m, 1, fmul(m, 1, fmul(m, 1, constant_float(m, 2.0f), radius),
 		length), constant_float(m, XGPU_WORLD_AO_PI))))));
-	unsigned int box = fmul(m, 1, constant_float(m, 17.0f), fsqrt(m, fadd(m, 1, fdot(m, xyz(m, v1), xyz(m, v1)),
-		op2(m, OP_DOT, m->t_float, v2, v2))));
+	unsigned int x = flength(m, xyz(m, v1)), y = flength(m, xyz(m, v2)), z = extract(m, v2, 3);
+	unsigned int yz = fmul(m, 1, y, z), xz = fmul(m, 1, x, z), xy = fmul(m, 1, x, y);
+	unsigned int areas = fsqrt(m, fadd(m, 1, fadd(m, 1, fmul(m, 1, yz, yz), fmul(m, 1, xz, xz)), fmul(m, 1, xy, xy)));
+	unsigned int box = fadd(m, 1, fsqrt(m, fadd(m, 1, fadd(m, 1, fmul(m, 1, x, x), fmul(m, 1, y, y)), fmul(m, 1, z, z))),
+		fsqrt(m, fmul(m, 1, constant_float(m, XGPU_WORLD_AO_LEAST * 4.0f / XGPU_WORLD_AO_PI), areas)));
 
 	return fselect(m, compare(m, OP_F_ORD_EQUAL, kind, constant_float(m, (float)XGPU_WORLD_AO_CAPSULE)), capsule,
 		fselect(m, compare(m, OP_F_ORD_EQUAL, kind, constant_float(m, (float)XGPU_WORLD_AO_BOX)), box,
@@ -2972,22 +3080,61 @@ static void world_proxy_kind_begin(struct module *m, unsigned int kind, int valu
 	label_at(m, body);
 }
 
-/* A_prox(p, n): the product of the shapes of the draw's object's others
-(not those of its owner slot) within their reach, each faded out over the
-last of it (world_ao.c's world_ao_proxies_occlusion) */
+/* A_prox(p, n): the product of the shapes of the pixel's cell of the grid
+(those whose reach touches it: world_ao_grid), lowest first, of the draw's
+object's others (not those of its owner slot) within their reach, each
+faded out over the last of it, a box by its bound (world_ao.c's
+world_ao_proxies_occlusion_grid: what world_ao_proxies_occlusion finds) */
 static unsigned int world_proxies_occlusion(struct module *m, struct pixel_state *state, unsigned int p,
 	unsigned int n, unsigned int owner)
 {
-	unsigned int parameters0 = world_ao_vector(m, 1, constant_int(m, 0));
-	unsigned int count = op1(m, OP_CONVERT_F_TO_S, m->t_int, extract(m, parameters0, 3));
+	unsigned int grid0 = world_ao_vector(m, 3, constant_int(m, 0)), grid1 = world_ao_vector(m, 3, constant_int(m, 1));
 	unsigned int product_variable = local(m, &state->locals, m->t_float);
-	unsigned int shape_variable = local(m, &state->locals, m->t_int);
+	unsigned int word_variable = local(m, &state->locals, m->t_int);
+	unsigned int bits_variable = local(m, &state->locals, m->t_uint);
 	unsigned int occlusion_variable = local(m, &state->locals, m->t_float);
+	unsigned int fade_variable = local(m, &state->locals, m->t_float);
+	unsigned int outer_header = id_new(m), outer_condition = id_new(m), outer_body = id_new(m);
+	unsigned int outer_continue = id_new(m), outer_merge = id_new(m);
 	unsigned int header = id_new(m), condition = id_new(m), body = id_new(m), next = id_new(m), merge = id_new(m);
-	unsigned int operands[3], shape, first, v0, v1, v2, kind, centre, reach, distance, fade, skip, test, kind_merge;
+	unsigned int operands[3], offset, at, index, cell, pair, low, word, bits, shape, first, v0, v1, v2, kind;
+	unsigned int centre, reach, distance, skip, test, kind_merge;
+
+	/* cell = clamp(ivec3(floor(sign(offset) * log2(1.0 + abs(offset) * grid[1].w) * grid[1].xyz + size / 2)), 0,
+	size - 1), offset = p - grid[0].xyz; its mask, words 2 (cell & 1) and the next of cells[cell >> 1] */
+	offset = fsub(m, 3, p, xyz(m, grid0));
+	at = fadd(m, 3, fmul(m, 3, fmul(m, 3, ext1(m, GLSL_F_SIGN, m->t_v3, offset),
+		ext1(m, GLSL_LOG2, m->t_v3, fadd(m, 3, constant_splat(m, 3, 1.0f),
+		fscale(m, 3, ext1(m, GLSL_F_ABS, m->t_v3, offset), extract(m, grid1, 3))))), xyz(m, grid1)),
+		constant_vector(m, 3, (const float[]){ (float)(XGPU_WORLD_AO_GRID_X / 2), (float)(XGPU_WORLD_AO_GRID_Y / 2),
+		(float)(XGPU_WORLD_AO_GRID_Z / 2) }));
+	index = ext3(m, GLSL_S_CLAMP, m->t_iv3, op1(m, OP_CONVERT_F_TO_S, m->t_iv3, ext1(m, GLSL_FLOOR, m->t_v3, at)),
+		op(m, OP_COMPOSITE_CONSTRUCT, m->t_iv3, 3, (unsigned int[]){ constant_int(m, 0), constant_int(m, 0), constant_int(m, 0) }),
+		op(m, OP_COMPOSITE_CONSTRUCT, m->t_iv3, 3, (unsigned int[]){ constant_int(m, XGPU_WORLD_AO_GRID_X - 1),
+		constant_int(m, XGPU_WORLD_AO_GRID_Y - 1), constant_int(m, XGPU_WORLD_AO_GRID_Z - 1) }));
+	/* cell = (index.z * size.y + index.y) * size.x + index.x */
+	cell = op2(m, OP_I_ADD, m->t_int, op2(m, OP_I_MUL, m->t_int, op2(m, OP_I_ADD, m->t_int, op2(m, OP_I_MUL, m->t_int,
+		op2(m, OP_COMPOSITE_EXTRACT, m->t_int, index, 2), constant_int(m, XGPU_WORLD_AO_GRID_Y)),
+		op2(m, OP_COMPOSITE_EXTRACT, m->t_int, index, 1)), constant_int(m, XGPU_WORLD_AO_GRID_X)),
+		op2(m, OP_COMPOSITE_EXTRACT, m->t_int, index, 0));
+	pair = world_ao_vector(m, 4, op2(m, OP_SHIFT_RIGHT_ARITHMETIC, m->t_int, cell, constant_int(m, 1)));
+	low = op2(m, OP_I_MUL, m->t_int, op2(m, OP_BITWISE_AND, m->t_int, cell, constant_int(m, 1)), constant_int(m, 2));
 
 	store(m, product_variable, constant_float(m, 1.0f));
-	store(m, shape_variable, constant_int(m, 0));
+	store(m, word_variable, constant_int(m, 0));
+	branch(m, outer_header);
+	label_at(m, outer_header);
+	operands[0] = outer_merge;
+	operands[1] = outer_continue;
+	operands[2] = 0;
+	op_void(m, OP_LOOP_MERGE, 3, operands);
+	branch(m, outer_condition);
+	label_at(m, outer_condition);
+	word = load(m, m->t_int, word_variable);
+	branch_conditional(m, op2(m, OP_S_LESS_THAN, m->t_bool, word, constant_int(m, 2)), outer_body, outer_merge);
+	label_at(m, outer_body);
+	store(m, bits_variable, op2(m, OP_VECTOR_EXTRACT_DYNAMIC, m->t_uint, pair, op2(m, OP_I_ADD, m->t_int, low, word)));
+
 	branch(m, header);
 	label_at(m, header);
 	operands[0] = merge;
@@ -2996,9 +3143,13 @@ static unsigned int world_proxies_occlusion(struct module *m, struct pixel_state
 	op_void(m, OP_LOOP_MERGE, 3, operands);
 	branch(m, condition);
 	label_at(m, condition);
-	shape = load(m, m->t_int, shape_variable);
-	branch_conditional(m, op2(m, OP_S_LESS_THAN, m->t_bool, shape, count), body, merge);
+	bits = load(m, m->t_uint, bits_variable);
+	branch_conditional(m, op2(m, OP_I_NOT_EQUAL, m->t_bool, bits, constant_uint(m, 0)), body, merge);
 	label_at(m, body);
+	/* shape = word * 32 + findLSB(bits); bits &= bits - 1u */
+	shape = op2(m, OP_I_ADD, m->t_int, op2(m, OP_I_MUL, m->t_int, word, constant_int(m, 32)),
+		ext1(m, GLSL_FIND_I_LSB, m->t_int, bits));
+	store(m, bits_variable, op2(m, OP_BITWISE_AND, m->t_uint, bits, op2(m, OP_I_SUB, m->t_uint, bits, constant_uint(m, 1))));
 	first = op2(m, OP_I_MUL, m->t_int, shape, constant_int(m, 3));
 	v0 = world_ao_vector(m, 2, first);
 	v1 = world_ao_vector(m, 2, op2(m, OP_I_ADD, m->t_int, first, constant_int(m, 1)));
@@ -3029,6 +3180,19 @@ static unsigned int world_proxies_occlusion(struct module *m, struct pixel_state
 	selection_merge(m, skip);
 	branch_conditional(m, test, next, skip);
 	label_at(m, skip);
+	/* fade = the last of its reach's; a box's, its bound's: if (fade <=
+	0.0) continue; */
+	store(m, fade_variable, saturate(m, 1, fdiv(m, 1, fsub(m, 1, reach, distance), fmul(m, 1, reach,
+		constant_float(m, XGPU_WORLD_AO_REACH_FADE)))));
+	world_proxy_kind_begin(m, kind, XGPU_WORLD_AO_BOX, &kind_merge);
+	store(m, fade_variable, world_proxy_box_fade(m, p, n, v0, v1, v2));
+	branch(m, kind_merge);
+	label_at(m, kind_merge);
+	test = compare(m, OP_F_ORD_LESS_THAN_EQUAL, load(m, m->t_float, fade_variable), constant_float(m, 0.0f));
+	skip = id_new(m);
+	selection_merge(m, skip);
+	branch_conditional(m, test, next, skip);
+	label_at(m, skip);
 	store(m, occlusion_variable, constant_float(m, 0.0f));
 	world_proxy_kind_begin(m, kind, XGPU_WORLD_AO_SPHERE, &kind_merge);
 	store(m, occlusion_variable, world_proxy_sphere(m, p, n, xyz(m, v0), extract(m, v2, 0)));
@@ -3042,15 +3206,17 @@ static unsigned int world_proxies_occlusion(struct module *m, struct pixel_state
 	store(m, occlusion_variable, world_proxy_box(m, state, p, n, v0, v1, v2));
 	branch(m, kind_merge);
 	label_at(m, kind_merge);
-	fade = saturate(m, 1, fdiv(m, 1, fsub(m, 1, reach, distance), fmul(m, 1, reach,
-		constant_float(m, XGPU_WORLD_AO_REACH_FADE))));
 	store(m, product_variable, fmul(m, 1, load(m, m->t_float, product_variable), fsub(m, 1, constant_float(m, 1.0f),
-		fmul(m, 1, load(m, m->t_float, occlusion_variable), fade))));
+		fmul(m, 1, load(m, m->t_float, occlusion_variable), load(m, m->t_float, fade_variable)))));
 	branch(m, next);
 	label_at(m, next);
-	store(m, shape_variable, op2(m, OP_I_ADD, m->t_int, load(m, m->t_int, shape_variable), constant_int(m, 1)));
 	branch(m, header);
 	label_at(m, merge);
+	branch(m, outer_continue);
+	label_at(m, outer_continue);
+	store(m, word_variable, op2(m, OP_I_ADD, m->t_int, load(m, m->t_int, word_variable), constant_int(m, 1)));
+	branch(m, outer_header);
+	label_at(m, outer_merge);
 	return load(m, m->t_float, product_variable);
 }
 

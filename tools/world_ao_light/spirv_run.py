@@ -5,7 +5,7 @@ the structured control flow is followed by its branches (the merges are only dec
 import math
 import struct
 
-GLSL = {4: "FAbs", 8: "Floor", 17: "Acos", 18: "Atan", 25: "Atan2", 26: "Pow", 27: "Exp", 31: "Sqrt",
+GLSL = {4: "FAbs", 6: "FSign", 8: "Floor", 30: "Log2", 73: "FindILsb", 17: "Acos", 18: "Atan", 25: "Atan2", 26: "Pow", 27: "Exp", 31: "Sqrt",
         32: "InverseSqrt", 37: "FMin", 40: "FMax", 43: "FClamp", 45: "SClamp", 46: "FMix", 49: "SmoothStep",
         66: "Length", 68: "Cross", 69: "Normalize"}
 
@@ -198,6 +198,12 @@ def run(module, inputs, sample):
             a = [values[part] for part in rest[2:]]
             if name == "FAbs":
                 r = _map(abs, a[0])
+            elif name == "FSign":
+                r = _map(lambda x: 1.0 if x > 0.0 else -1.0 if x < 0.0 else 0.0, a[0])
+            elif name == "Log2":
+                r = _map(lambda x: math.log2(x) if x > 0.0 else (-math.inf if x == 0.0 else math.nan), a[0])
+            elif name == "FindILsb":
+                r = _map(lambda x: ((x & -x).bit_length() - 1) if x else -1, a[0])
             elif name == "Floor":
                 r = _map(lambda x: float(math.floor(x)), a[0])
             elif name == "Acos":
@@ -310,6 +316,8 @@ def run(module, inputs, sample):
             values[result] = _map(cast, v[0])
         elif opcode == 199:
             values[result] = _map(lambda x, y: x & y, v[0], v[1])
+        elif opcode == 195:  # OpShiftRightArithmetic
+            values[result] = _map(lambda x, y: x >> y, v[0], v[1])
         elif opcode in (87, 88):  # OpImageSample*Lod
             values[result] = sample(values[rest[0]][1], v[1])
         else:

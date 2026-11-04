@@ -783,7 +783,9 @@ void xgpu_backend_world_ao_window(const struct xgpu_world_ao_block *block)
 	if (block)
 	{
 		record_body->block = *block;
-		stream_finite(&record_body->block.field[0][0], sizeof(record_body->block) / 4, "world occlusion", 0);
+		/* (its floats: the cells are masks) */
+		stream_finite(&record_body->block.field[0][0], offsetof(struct xgpu_world_ao_block, cells) / 4,
+			"world occlusion", 0);
 	}
 	else
 	{

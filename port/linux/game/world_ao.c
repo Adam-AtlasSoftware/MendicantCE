@@ -43,6 +43,9 @@ static struct
 	long count;
 	struct world_sdf_volume const *volume;
 	float fade;
+	/* the proxies' grid (world_ao_grid; its cells allocated once) */
+	float grid[2][4];
+	unsigned int (*cells)[4];
 } world_ao;
 
 int world_ao_mode(void)
@@ -312,8 +315,16 @@ void world_ao_window_begin(short local_player_index, short rasterizer_target, fl
 	parameters[0][2] = world_ao.fade;
 	parameters[0][3] = (float)world_ao.count;
 	parameters[1][0] = WORLD_AO_REFERENCE_WEIGHT;
+	/* (the proxies' grid about the camera: each pixel computes those that
+	can reach its cell alone. Its 16 KB of cells on the heap, made once) */
+	if (!world_ao.cells)
+		world_ao.cells = malloc(sizeof(unsigned int) * 4 * (WORLD_AO_GRID_CELLS / 2));
+	if (!world_ao.cells)
+		return;
+	world_ao_grid(world_ao.proxies, world_ao.count, camera_position, world_ao.grid, world_ao.cells);
 	halo_world_ao_window((float const (*)[4])field, (float const (*)[4])parameters,
-		(float const (*)[3][4])world_ao.proxies, (int)world_ao.count);
+		(float const (*)[3][4])world_ao.proxies, (int)world_ao.count, (float const (*)[4])world_ao.grid,
+		(unsigned int const (*)[4])world_ao.cells);
 	world_ao.window = 1;
 }
 
@@ -322,7 +333,7 @@ void world_ao_window_end(void)
 	if (!world_ao.window)
 		return;
 	world_ao.window = 0;
-	halo_world_ao_window(NULL, NULL, NULL, -1);
+	halo_world_ao_window(NULL, NULL, NULL, -1, NULL, NULL);
 }
 
 void world_ao_object_begin(long object_index)

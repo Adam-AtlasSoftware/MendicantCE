@@ -53,6 +53,20 @@ level ("world" is the strong preset); the reference's weight */
 #define WORLD_AO_STRENGTH_LEVEL 0.8f
 #define WORLD_AO_REFERENCE_WEIGHT 1.0f
 
+/* the window's proxy grid (world_ao_grid; xgpu.h's XGPU_WORLD_AO_GRID_*):
+cells about the camera, boxes in the world (eye-independent), each with a
+64-bit mask of the proxies whose reach can touch it, so a pixel computes
+only those. As the enhanced dynamic lights' grid, a cell's index along an
+axis is log2(1 + |offset| / WORLD_AO_GRID_CELL) times that axis's scale,
+from the middle: small cells near the camera, the outermost reaching
+WORLD_AO_GRID_REACH world units and holding whatever reaches past it */
+#define WORLD_AO_GRID_X 16
+#define WORLD_AO_GRID_Y 16
+#define WORLD_AO_GRID_Z 8
+#define WORLD_AO_GRID_CELL 1.0f
+#define WORLD_AO_GRID_REACH 128.0f
+#define WORLD_AO_GRID_CELLS (WORLD_AO_GRID_X * WORLD_AO_GRID_Y * WORLD_AO_GRID_Z)
+
 struct world_proxy;
 struct world_sdf_volume;
 
@@ -100,6 +114,22 @@ float world_ao_reference(struct world_sdf_volume const *volume, float const ligh
 owners than owner leave */
 float world_ao_proxies_occlusion(struct world_proxy const *proxies, long count, float const point[3],
 	float const normal[3], float owner);
+/* the window's proxy grid about the camera: grid[0] the camera (w 0);
+grid[1] each axis's scale, one over WORLD_AO_GRID_CELL; cells[i / 2][2 (i % 2) + w]
+word w of cell i's mask ((z * WORLD_AO_GRID_Y + y) * WORLD_AO_GRID_X + x),
+bit b of word w proxy 32 w + b. A proxy is in every cell its reach (a box's:
+the box grown by the distance its occlusion's bound falls under 1/510, if
+less) touches. Pure; the block's (xgpu_stream.h's struct
+xgpu_world_ao_block: grid, cells) */
+void world_ao_grid(struct world_proxy const *proxies, long count, float const camera[3], float grid[2][4],
+	unsigned int cells[WORLD_AO_GRID_CELLS / 2][4]);
+/* the cell a point is in (as the shaders find it) */
+int world_ao_grid_cell(float const grid[2][4], float const point[3]);
+/* A_prox as the shaders find it: the proxies of the point's cell alone,
+in the same order (what world_ao_proxies_occlusion finds, exactly: the
+others' reach does not touch the cell) */
+float world_ao_proxies_occlusion_grid(struct world_proxy const *proxies, float const grid[2][4],
+	unsigned int const cells[WORLD_AO_GRID_CELLS / 2][4], float const point[3], float const normal[3], float owner);
 /* the occlusion a draw's pixel multiplies its ambient light by: a model's
 (lightmap FALSE: the field relative to its reference, faded in, times the
 proxies) or the lightmap pass's (the proxies alone), the parameters as the
@@ -111,11 +141,12 @@ float world_ao_occlusion(float const parameters[2][4], struct world_sdf_volume c
 /* ---------- the front end's (port/linux/src/d3d8_device.c) */
 
 /* the window's world occlusion: the field's place and the parameters
-(xgpu_stream.h's struct xgpu_world_ao_block: field, parameters) and the
-proxies (three vec4s each: world_proxies.h's struct world_proxy). count < 0:
-none (the window draws as without it, from here on) */
+(xgpu_stream.h's struct xgpu_world_ao_block: field, parameters), the
+proxies (three vec4s each: world_proxies.h's struct world_proxy) and their
+grid (world_ao_grid). count < 0: none (the window draws as without it,
+from here on) */
 void halo_world_ao_window(float const field[2][4], float const parameters[2][4], float const (*proxies)[3][4],
-	int count);
+	int count, float const grid[2][4], unsigned int const (*cells)[4]);
 /* the object drawn next: its slot among the window's proxies' owners
 (WORLD_AO_OWNER_NONE: none, the structure; WORLD_AO_OWNER_UNLIT: drawn
 without the occlusion) and its reference, the field's occlusion at its

@@ -394,12 +394,18 @@ range (world units); [2] the strength on objects, the strength on the level,
 the field's fade (0 none yet: the proxies alone), the proxies' count; [3]
 the reference's weight (how much of the occlusion at the object's lighting
 point its ambient sample already holds) and three spare; then the
-proxies, three vec4s each (world_proxies.h's struct world_proxy) */
+proxies, three vec4s each (world_proxies.h's struct world_proxy); then
+their grid about the camera (world_ao.h's world_ao_grid): [0] the camera,
+[1] each axis's scale and one over the cell, and the cells' 64-bit masks of
+the proxies that can reach them, two cells a uvec4 */
+#define XGPU_WORLD_AO_GRID_CELLS_MAXIMUM (16 * 16 * 8)
 struct xgpu_world_ao_block
 {
 	float field[2][4];
 	float parameters[2][4];
 	float proxies[XGPU_WORLD_AO_PROXIES_MAXIMUM][3][4];
+	float grid[2][4];
+	uint32_t cells[XGPU_WORLD_AO_GRID_CELLS_MAXIMUM / 2][4];
 };
 
 /* WORLD_AO_WINDOW: display.ambient_occlusion "world"'s block for the
@@ -1131,7 +1137,8 @@ XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_hdr, 24);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_tone_map, 24);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_panini, 56);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_ambient_occlusion, 52);
-XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_world_ao_window, 16 + 32 + 32 + XGPU_WORLD_AO_PROXIES_MAXIMUM * 48);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_world_ao_window, 16 + 32 + 32 + XGPU_WORLD_AO_PROXIES_MAXIMUM * 48 + 32 +
+	XGPU_WORLD_AO_GRID_CELLS_MAXIMUM * 8);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_world_ao_field, 40);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_set_targets, 16);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_clear, 36);
