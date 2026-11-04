@@ -49,9 +49,10 @@ static int usnprintf(wchar_t *text, size_t size, wchar_t const *format, ...)
 static short browser_found_favorites, browser_offline_count;
 static short browser_sort_column, browser_tab;
 static boolean browser_sort_descending;
-static struct browser_filters browser_filters = { TRUE, TRUE, TRUE, 0, BROWSER_ALL_ENGINES, "" };
+static struct browser_filters browser_filters = { TRUE, TRUE, TRUE, 0, BROWSER_ALL_ENGINES };
 static boolean browser_filtering;
-static short browser_filtered_count;
+static short browser_filtered_count, browser_searched_count;
+static char browser_searches[NUMBER_OF_BROWSER_SEARCHES][BROWSER_SEARCH_LENGTH + 1];
 
 /* the fake settings (port_config.c's): the filters' own, by name */
 static struct
@@ -64,7 +65,7 @@ static struct
 	{ "network.browser_show_password", "true" }, { "network.browser_ping", "0" },
 	{ "network.browser_show_ctf", "true" }, { "network.browser_show_slayer", "true" },
 	{ "network.browser_show_oddball", "true" }, { "network.browser_show_king", "true" },
-	{ "network.browser_show_race", "true" }, { "network.browser_search", "" },
+	{ "network.browser_show_race", "true" },
 };
 
 static char const *config_string(char const *name)
@@ -145,6 +146,13 @@ static void listed(short tab, char *names, size_t size, short *offline)
 	entries[2] = entry("coop", FALSE, TRUE, 1);
 	entries[3] = entry("delta", TRUE, FALSE, 12);
 	entries[4] = entry("echo", TRUE, TRUE, 2);
+	/* (alpha's and coop's maps Blood Gulch, as shown too) */
+	for (index = 0; index < 5; index++)
+	{
+		snprintf(entries[index].map, sizeof(entries[index].map), "%s", index == 0 || index == 2 ? "bloodgulch" :
+			"beavercreek");
+		wcscpy(entries[index].map_shown, index == 0 || index == 2 ? L"Blood Gulch" : L"Battle Creek");
+	}
 	browser_tab = tab;
 	browser_sort_column = _browser_sort_players;
 	browser_sort_descending = TRUE;
@@ -200,45 +208,53 @@ int main(int argc, char **argv)
 		wchar_t text[256];
 
 		/* the local network's: what to do */
-		browser_empty_text(_multiplayer_mode_lan, _browser_tab_all, TRUE, TRUE, FALSE, 0, 0, text,
+		browser_empty_text(_multiplayer_mode_lan, _browser_tab_all, TRUE, TRUE, FALSE, 0, 0, 0, text,
 			NUMBEROF(text));
 		CHECK(contains(text, L"No games on your network yet.") && contains(text, L"Host one from Create Game."),
 			"the local network's empty list says %ls", text);
-		browser_empty_text(_multiplayer_mode_lan, _browser_tab_openh1, TRUE, TRUE, FALSE, 0, 0, text,
+		browser_empty_text(_multiplayer_mode_lan, _browser_tab_openh1, TRUE, TRUE, FALSE, 0, 0, 0, text,
 			NUMBEROF(text));
 		CHECK(contains(text, L"No OpenH1 games on your network."), "OPENH1's says %ls", text);
-		browser_empty_text(_multiplayer_mode_lan, _browser_tab_favorites, TRUE, TRUE, FALSE, 0, 0, text,
+		browser_empty_text(_multiplayer_mode_lan, _browser_tab_favorites, TRUE, TRUE, FALSE, 0, 0, 0, text,
 			NUMBEROF(text));
 		CHECK(contains(text, L"favorites") && contains(text, L"FAVORITE on a game"), "FAVORITES' says %ls", text);
 		/* the server browser's: still looking, off, none of a kind, newer */
-		browser_empty_text(_multiplayer_mode_server_browser, _browser_tab_all, TRUE, TRUE, TRUE, 0, 0, text,
+		browser_empty_text(_multiplayer_mode_server_browser, _browser_tab_all, TRUE, TRUE, TRUE, 0, 0, 0, text,
 			NUMBEROF(text));
 		CHECK(contains(text, L"Looking for public games"), "looking says %ls", text);
-		browser_empty_text(_multiplayer_mode_server_browser, _browser_tab_all, FALSE, TRUE, FALSE, 0, 0, text,
+		browser_empty_text(_multiplayer_mode_server_browser, _browser_tab_all, FALSE, TRUE, FALSE, 0, 0, 0, text,
 			NUMBEROF(text));
 		CHECK(contains(text, L"Internet play is off"), "offline says %ls", text);
-		browser_empty_text(_multiplayer_mode_server_browser, _browser_tab_coop, TRUE, TRUE, FALSE, 0, 0, text,
+		browser_empty_text(_multiplayer_mode_server_browser, _browser_tab_coop, TRUE, TRUE, FALSE, 0, 0, 0, text,
 			NUMBEROF(text));
 		CHECK(contains(text, L"No co-op games"), "CO-OP's says %ls", text);
-		browser_empty_text(_multiplayer_mode_server_browser, _browser_tab_dedicated, TRUE, TRUE, FALSE, 0, 0, text,
+		browser_empty_text(_multiplayer_mode_server_browser, _browser_tab_dedicated, TRUE, TRUE, FALSE, 0, 0, 0, text,
 			NUMBEROF(text));
 		CHECK(contains(text, L"No dedicated server games"), "DEDICATED's says %ls", text);
-		browser_empty_text(_multiplayer_mode_server_browser, _browser_tab_all, TRUE, TRUE, FALSE, 3, 0, text,
+		browser_empty_text(_multiplayer_mode_server_browser, _browser_tab_all, TRUE, TRUE, FALSE, 3, 0, 0, text,
 			NUMBEROF(text));
 		CHECK(contains(text, L"3 games are on a newer version"), "newer says %ls", text);
 		/* (the filters' hidden games: how many, and where to change them;
 		on a tab too, and before the newer games) */
-		browser_empty_text(_multiplayer_mode_server_browser, _browser_tab_openh1, TRUE, TRUE, FALSE, 3, 2, text,
+		browser_empty_text(_multiplayer_mode_server_browser, _browser_tab_openh1, TRUE, TRUE, FALSE, 3, 2, 0, text,
 			NUMBEROF(text));
 		CHECK(contains(text, L"2 games are hidden by your filters") && contains(text, L"FILTERS"),
 			"filtered says %ls", text);
-		browser_empty_text(_multiplayer_mode_lan, _browser_tab_all, TRUE, TRUE, FALSE, 0, 1, text, NUMBEROF(text));
+		browser_empty_text(_multiplayer_mode_lan, _browser_tab_all, TRUE, TRUE, FALSE, 0, 1, 0, text, NUMBEROF(text));
 		CHECK(contains(text, L"1 game is hidden by your filters"), "one filtered says %ls", text);
-		browser_empty_text(_multiplayer_mode_server_browser, _browser_tab_all, TRUE, TRUE, FALSE, 0, 0, text,
+		/* (the searches' hidden games, the Filters' too: no server matches) */
+		browser_empty_text(_multiplayer_mode_server_browser, _browser_tab_all, TRUE, TRUE, FALSE, 0, 3, 2, text,
+			NUMBEROF(text));
+		CHECK(contains(text, L"No servers match your search"), "searched says %ls", text);
+		browser_empty_text(_multiplayer_mode_lan, _browser_tab_all, TRUE, TRUE, FALSE, 0, 3, 0, text,
+			NUMBEROF(text));
+		CHECK(!contains(text, L"match") && contains(text, L"hidden by your filters"),
+			"filtered alone says %ls", text);
+		browser_empty_text(_multiplayer_mode_server_browser, _browser_tab_all, TRUE, TRUE, FALSE, 0, 0, 0, text,
 			NUMBEROF(text));
 		CHECK(contains(text, L"No public games found"), "none says %ls", text);
 		/* Join by Link's: how to paste a link (its footer's prompt) */
-		browser_empty_text(_multiplayer_mode_direct_link, _browser_tab_all, TRUE, TRUE, FALSE, 0, 0, text,
+		browser_empty_text(_multiplayer_mode_direct_link, _browser_tab_all, TRUE, TRUE, FALSE, 0, 0, 0, text,
 			NUMBEROF(text));
 		CHECK(contains(text, L"PASTE LINK"), "Join by Link's says %ls", text);
 		return 0;
@@ -259,7 +275,7 @@ int main(int argc, char **argv)
 		/* the settings' defaults list every game */
 		browser_filters_read(&filters);
 		CHECK(filters.show_full && filters.show_empty && filters.show_password && filters.maximum_ping == 0 &&
-			filters.engines == BROWSER_ALL_ENGINES && !filters.search[0], "the defaults filter games");
+			filters.engines == BROWSER_ALL_ENGINES, "the defaults filter games");
 		CHECK(browser_filters_show(&filters, &game), "the defaults hide a game");
 		/* full and empty games */
 		game.players = 16;
@@ -308,35 +324,21 @@ int main(int argc, char **argv)
 		game.engine_type = 5;
 		CHECK(!browser_filters_show(&filters, &game), "no game type lists Race");
 		filters.engines = BROWSER_ALL_ENGINES;
-		/* the words: the name's or the map's (shown or its own), in any case */
-		snprintf(filters.search, sizeof(filters.search), "snip");
-		CHECK(browser_filters_show(&filters, &game), "\"snip\" hides Foozy BG Snipers");
-		snprintf(filters.search, sizeof(filters.search), "BLOOD GULCH");
-		CHECK(browser_filters_show(&filters, &game), "\"BLOOD GULCH\" hides a game on Blood Gulch");
-		snprintf(filters.search, sizeof(filters.search), "bloodg");
-		CHECK(browser_filters_show(&filters, &game), "\"bloodg\" hides a game on bloodgulch");
-		snprintf(filters.search, sizeof(filters.search), "hang em");
-		CHECK(!browser_filters_show(&filters, &game), "\"hang em\" lists a game on Blood Gulch");
-		snprintf(filters.search, sizeof(filters.search), "Snipers!");
-		CHECK(!browser_filters_show(&filters, &game), "\"Snipers!\" lists Foozy BG Snipers");
 		/* the settings read: the game types in the engines' order, the
-		ping, the words without the spaces around them */
+		ping */
 		config_set("network.browser_show_full", "false");
 		config_set("network.browser_show_password", "false");
 		config_set("network.browser_ping", "250");
 		config_set("network.browser_show_slayer", "false");
 		config_set("network.browser_show_race", "false");
-		config_set("network.browser_search", "  gulch ");
 		browser_filters_read(&filters);
 		CHECK(!filters.show_full && filters.show_empty && !filters.show_password, "the settings' YES and NO");
 		CHECK(filters.maximum_ping == 250, "network.browser_ping 250 read as %d", filters.maximum_ping);
 		CHECK(filters.engines == (1 << 1 | 1 << 3 | 1 << 4), "the game types read as %#x", filters.engines);
-		CHECK(!strcmp(filters.search, "gulch"), "the words read as \"%s\"", filters.search);
 		/* the list: the filters hide games from every tab, counted; the
 		favorites too. Off (Join by Link's), they hide none */
 		browser_filters = filters;
 		browser_filters.engines = BROWSER_ALL_ENGINES;
-		browser_filters.search[0] = 0;
 		browser_filters.show_empty = FALSE;
 		browser_filters.maximum_ping = 0;
 		browser_filtering = TRUE;
@@ -349,14 +351,91 @@ int main(int argc, char **argv)
 		CHECK(browser_filtered_count == 1, "OPENH1 filtered counts %d hidden", browser_filtered_count);
 		listed(_browser_tab_legacy, names, sizeof(names), &offline);
 		CHECK(browser_filtered_count == 0, "LEGACY counts %d hidden of another tab's", browser_filtered_count);
-		snprintf(browser_filters.search, sizeof(browser_filters.search), "ECHO");
-		listed(_browser_tab_all, names, sizeof(names), &offline);
-		CHECK(!strcmp(names, "echo* "), "\"ECHO\" lists %s", names);
-		CHECK(browser_filtered_count == 4, "\"ECHO\" counts %d hidden", browser_filtered_count);
 		browser_filtering = FALSE;
 		listed(_browser_tab_all, names, sizeof(names), &offline);
 		CHECK(!strcmp(names, "echo* bravo* alpha delta coop "), "unfiltered lists %s", names);
 		CHECK(browser_filtered_count == 0, "unfiltered counts %d hidden", browser_filtered_count);
+		return 0;
+	}
+	CASE("search")
+	{
+		char searches[NUMBER_OF_BROWSER_SEARCHES][BROWSER_SEARCH_LENGTH + 1];
+		char names[128];
+		short offline;
+
+#define SEARCH(server, map) (snprintf(searches[_browser_search_server], sizeof(searches[0]), "%s", server), \
+	snprintf(searches[_browser_search_map], sizeof(searches[0]), "%s", map))
+#define SHOWS() browser_search_shows(searches, "Foozy BG-Snipers", "bloodgulch", L"Blood Gulch")
+		/* nothing searched lists every game */
+		SEARCH("", "");
+		CHECK(SHOWS(), "no search hides a game");
+		/* the server's words: part of its name, in any case, without spaces
+		or punctuation */
+		SEARCH("snip", "");
+		CHECK(SHOWS(), "\"snip\" hides Foozy BG-Snipers");
+		SEARCH("FOOZY", "");
+		CHECK(SHOWS(), "\"FOOZY\" hides Foozy BG-Snipers");
+		SEARCH("bg snipers", "");
+		CHECK(SHOWS(), "\"bg snipers\" hides Foozy BG-Snipers");
+		SEARCH("foozybg", "");
+		CHECK(SHOWS(), "\"foozybg\" hides Foozy BG-Snipers");
+		SEARCH("Snipers!", "");
+		CHECK(SHOWS(), "\"Snipers!\" hides Foozy BG-Snipers");
+		SEARCH("!?", "");
+		CHECK(SHOWS(), "punctuation alone hides a game");
+		SEARCH("sniperz", "");
+		CHECK(!SHOWS(), "\"sniperz\" lists Foozy BG-Snipers");
+		/* (the server's words not the map's) */
+		SEARCH("gulch", "");
+		CHECK(!SHOWS(), "the server's \"gulch\" lists a game by its map");
+		/* the map's words: its own name or its name as shown */
+		SEARCH("", "blood gulch");
+		CHECK(SHOWS(), "\"blood gulch\" hides bloodgulch");
+		SEARCH("", "BLOODG");
+		CHECK(SHOWS(), "\"BLOODG\" hides bloodgulch");
+		CHECK(!browser_search_shows(searches, "x", "bg_map", L"Hang 'Em High"), "\"BLOODG\" lists Hang 'Em High");
+		SEARCH("", "danger");
+		CHECK(browser_search_shows(searches, "x", "map_a", L"Danger Canyon"), "a map's name as shown not searched");
+		CHECK(browser_search_shows(searches, "x", "dangercanyon", L""), "a map's own name not searched");
+		SEARCH("", "snip");
+		CHECK(!SHOWS(), "the map's \"snip\" lists a game by its name");
+		/* both: each its own, together */
+		SEARCH("snip", "gulch");
+		CHECK(SHOWS(), "\"snip\" and \"gulch\" hide Foozy BG-Snipers on Blood Gulch");
+		SEARCH("snip", "hang");
+		CHECK(!SHOWS(), "\"snip\" and \"hang\" list a game on Blood Gulch");
+		SEARCH("halo", "gulch");
+		CHECK(!SHOWS(), "\"halo\" and \"gulch\" list Foozy BG-Snipers");
+		/* the list: the searches and the Filters together, those hidden
+		counted (the searches' apart); the searches stay as the Filters are
+		read again (Filters opened, changed and closed) */
+		memset(browser_searches, 0, sizeof(browser_searches));
+		browser_filters_read(&browser_filters);
+		browser_filtering = TRUE;
+		snprintf(browser_searches[_browser_search_server], sizeof(browser_searches[0]), "A");
+		listed(_browser_tab_all, names, sizeof(names), &offline);
+		CHECK(!strcmp(names, "bravo* alpha delta "), "\"A\" lists %s", names);
+		CHECK(browser_filtered_count == 2 && browser_searched_count == 2, "\"A\" counts %d hidden, %d searched",
+			browser_filtered_count, browser_searched_count);
+		/* (delta full, which SHOW FULL GAMES: NO hides: counted the Filters') */
+		config_set("network.browser_show_full", "false");
+		browser_filters_read(&browser_filters);
+		listed(_browser_tab_all, names, sizeof(names), &offline);
+		CHECK(!strcmp(names, "bravo* alpha "), "\"A\" and the Filters list %s", names);
+		CHECK(browser_filtered_count == 3 && browser_searched_count == 2,
+			"\"A\" and the Filters count %d hidden, %d searched", browser_filtered_count, browser_searched_count);
+		CHECK(!strcmp(browser_searches[_browser_search_server], "A"), "the Filters read forgot the search");
+		snprintf(browser_searches[_browser_search_map], sizeof(browser_searches[0]), "gulch");
+		listed(_browser_tab_all, names, sizeof(names), &offline);
+		CHECK(!strcmp(names, "alpha "), "\"A\" on gulch lists %s", names);
+		snprintf(browser_searches[_browser_search_server], sizeof(browser_searches[0]), "zulu");
+		listed(_browser_tab_all, names, sizeof(names), &offline);
+		CHECK(!names[0] && browser_searched_count == 4, "\"zulu\" lists %s, %d searched", names,
+			browser_searched_count);
+		config_set("network.browser_show_full", "true");
+		browser_filtering = FALSE;
+		listed(_browser_tab_all, names, sizeof(names), &offline);
+		CHECK(!strcmp(names, "echo* bravo* alpha delta coop "), "unfiltered lists %s", names);
 		return 0;
 	}
 	CASE("ping")

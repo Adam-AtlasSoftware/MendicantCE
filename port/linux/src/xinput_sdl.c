@@ -890,6 +890,9 @@ static void keyboard_gamepad(const struct platform_input_state *input, XINPUT_GA
 	pad->bAnalogButtons[XINPUT_GAMEPAD_RIGHT_TRIGGER] |= analog(k[SDL_SCANCODE_R]);
 	/* (L as the left trigger: the server browsers' Filters, drawn as L) */
 	pad->bAnalogButtons[XINPUT_GAMEPAD_LEFT_TRIGGER] |= analog(k[SDL_SCANCODE_L]);
+	/* (/ as R3 in a server browser: its SEARCH, drawn as /) */
+	if (browser && k[SDL_SCANCODE_SLASH])
+		pad->wButtons |= XINPUT_GAMEPAD_RIGHT_THUMB;
 }
 
 /* the keys held when the game and the menus switch, or typing or the

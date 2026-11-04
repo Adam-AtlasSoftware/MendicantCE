@@ -100,6 +100,11 @@ void hud_draw_weapon_overlays(
 	long reference_time,
 	short draw_flags,
 	boolean in_multiplayer);
+/* port: what hud_draw_bitmap's is_crosshair_bitmap may be besides FALSE
+and TRUE (the weapon's reticle, its size display.fov's: view_fov.c): a
+piece of a scope's own picture, drawn only zoomed over it, which keeps to
+the view as the scope's picture does (render_fov_reticle_scale) */
+#define HUD_CROSSHAIR_SCOPE_PIECE 2
 void hud_draw_bitmap(
 	struct bitmap_data const *bitmap,
 	struct hud_absolute_placement_definition const *absolute_placement,

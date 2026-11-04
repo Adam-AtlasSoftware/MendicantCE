@@ -70,10 +70,10 @@ NEGATIVE_CONTROLS = {
                                   "\t\tfloat second = sinf(1.57079633f * (angle - surround_ring_angle[segment]) /\n"
                                   "\t\t\t(surround_ring_angle[segment + 1] - surround_ring_angle[segment]));"),
                                  "surround"),
-    # audio.spatial: headphones forced panned; a device not known taken as headphones; the VR mode by audio.spatial
-    "spatial-headphones-panned": (('if (!strcmp(setting, "headphones"))\n\t\treturn TRUE;',
-                                   'if (!strcmp(setting, "headphones"))\n\t\treturn FALSE;'), "spatial-choice"),
-    "spatial-unknown-headphones": (("return headphones > 0;", "return headphones != 0;"), "spatial-choice"),
+    # audio.spatial: "auto" panned on stereo; "speakers" through the HRTF; the VR mode by audio.spatial
+    "spatial-auto-panned": (('return strcmp(setting, "speakers") != 0;',
+                             'return !strcmp(setting, "headphones");'), "spatial-choice"),
+    "spatial-speakers-hrtf": (('return strcmp(setting, "speakers") != 0;', 'return TRUE;'), "spatial-choice"),
     "spatial-vr-ignored": (("if (vr_running)\n\t\treturn vr_hrtf;", "if (vr_running && 0)\n\t\treturn vr_hrtf;"),
                            "spatial-choice"),
     # the HRTF: no time between the ears, no head shadow, the notch fixed (no elevation), nothing behind

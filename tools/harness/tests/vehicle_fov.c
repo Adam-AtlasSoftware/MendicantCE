@@ -78,6 +78,10 @@ static struct unit_datum *unit_try_and_get(long unit_index) { return unit_index 
 static struct unit_definition *unit_definition_get(long index) { (void)index; return &fake_definition; }
 static long unit_inventory_get_weapon(long unit_index, short index) { (void)unit_index; return index == NONE ? NONE : 3; }
 static real panini_strength(void) { return fake_panini; }
+/* (the projection's magnification: none here, test_panini.py has it) */
+static real panini_center_scale(void) { return 1.f; }
+static real fake_widening;
+static real panini_center_scale_widened(real widening) { fake_widening = widening; return 1.f; }
 static real weapon_get_field_of_view(long weapon_index, real unzoomed, short zoom_level)
 {
 	(void)weapon_index; (void)unzoomed; (void)zoom_level;
@@ -329,14 +333,50 @@ int main(int argc, char **argv)
 		drawn = frame(12, _director_perspective_first_person, DEGREES(35.f), &scale);
 		CHECK(drawn == native_of(DEGREES(35.f)) && scale == 1.f, "scoped: %f (scale %f)", drawn, scale);
 	}
+	CASE("zoomed_reticle_size")
+	{
+		/* (#594) the weapon's reticle keeps its unzoomed size through a
+		zoom's transition and at its full zoom, on foot and seated, where the
+		view's own scale goes back to the stock 1 (a scope's pieces take it) */
+		real foot_scale, seat_scale, angle, on_foot_drawn;
+
+		on_foot_drawn = on_foot(110.0, &foot_scale);
+		render_fov_reticle_size(0);
+		CHECK(fake_widening == 1.f, "unzoomed: widened by %f", fake_widening);
+		CHECK(foot_scale < 0.9f && SAME(render_fov_reticle_size(0), foot_scale),
+			"unzoomed: scale %f size %f", foot_scale, render_fov_reticle_size(0));
+		for (angle = DEGREES(66.f); angle > DEGREES(35.f); angle -= DEGREES(4.f))
+		{
+			frame(NONE, _director_perspective_first_person, angle, &scale);
+			CHECK(SAME(render_fov_reticle_size(0), foot_scale) && scale > foot_scale,
+				"zooming at %f: size %f, view's %f", angle, render_fov_reticle_size(0), scale);
+		}
+		frame(NONE, _director_perspective_first_person, DEGREES(35.f), &scale);
+		CHECK(scale == 1.f && SAME(render_fov_reticle_size(0), foot_scale),
+			"full zoom: size %f, view's %f", render_fov_reticle_size(0), scale);
+		/* (display.panini's magnification asked of the unzoomed view: the
+		zoomed one widened by the unzoomed tangent over its own) */
+		CHECK(fabsf(fake_widening - tanf(on_foot_drawn * 0.5f) / tanf(native_of(DEGREES(35.f)) * 0.5f)) < 1e-4f,
+			"full zoom: widened by %f", fake_widening);
+		settings(110.0, "130");
+		seated(_director_perspective_first_person, &seat_scale);
+		frame(12, _director_perspective_first_person, DEGREES(35.f), &scale);
+		CHECK(scale == 1.f && seat_scale < foot_scale && SAME(render_fov_reticle_size(0), seat_scale),
+			"seated full zoom: size %f, seat's %f", render_fov_reticle_size(0), seat_scale);
+		/* the stock view's reticle is the stock size, zoomed or not */
+		on_foot(0.0, &foot_scale);
+		frame(NONE, _director_perspective_first_person, DEGREES(35.f), &scale);
+		CHECK(foot_scale == 1.f && render_fov_reticle_size(0) == 1.f, "stock: size %f",
+			render_fov_reticle_size(0));
+	}
 	CASE("dead")
 	{
 		settings(110.0, "match");
 		frame(NONE, _director_perspective_first_person, DEGREES(70.f), &scale);
 		fake_unit.object.damage_flags = FLAG(_object_dead_bit);
 		drawn = render_fov_vertical(0, native);
-		CHECK(drawn == native && render_fov_reticle_scale(0) == 1.f, "dead: %f (scale %f)", drawn,
-			render_fov_reticle_scale(0));
+		CHECK(drawn == native && render_fov_reticle_scale(0) == 1.f && render_fov_reticle_size(0) == 1.f,
+			"dead: %f (scale %f, size %f)", drawn, render_fov_reticle_scale(0), render_fov_reticle_size(0));
 	}
 	CASE("neutral")
 	{

@@ -83,6 +83,7 @@ skipped or made without its sampler.
 
 #include "halo_dynamic_lights.h"
 #include "render_enumerate.h"
+#include "render_prepared.h"
 #ifdef HALO_VR
 #include "../src/vr.h"
 boolean vr_render_eye_pass(void);
@@ -232,6 +233,8 @@ static struct
 	/* the interface drawn in a pass (not where the VR mode's eyes are
 	drawn), or to draw in the frame's HUD pass (render_enumerate_hud) */
 	boolean interface_drawn, interface_pending;
+	/* a map of the menus' pictures' to be recorded (NONE: not asked yet) */
+	short picture_recording;
 	struct render_fog own_fog;
 	unsigned long started;
 	/* (the CPU time the game's thread has spent: halo_thread_cpu_seconds) */
@@ -619,15 +622,27 @@ boolean render_enumerate_pending(boolean scope)
 
 	if (setting < 0)
 		setting = config_boolean("display.prepare_shaders") || *config_string("debug.render_manifest");
-	/* (nor a map of the menus' pictures: its one frame makes only the
-	pipelines it draws with, menu_pictures_render.c) */
-	if (!setting || structure_bsp_index == NONE || structure_bsp_index >= LONG_BITS || menu_pictures_preparing())
+	if (!setting || structure_bsp_index == NONE || structure_bsp_index >= LONG_BITS)
 		return FALSE;
 	if (enumerate.new_map)
 	{
 		enumerate.structure_bsps_enumerated[0] = NULL;
 		enumerate.structure_bsps_enumerated[1] = NULL;
 		enumerate.new_map = FALSE;
+		enumerate.picture_recording = NONE;
+	}
+	/* (nor a map of the menus' pictures, whose one frame makes only the
+	pipelines it draws with, menu_pictures_render.c, but to record its
+	preparation where it has none, so that a player's first load of it is
+	played back: render_prepared.c) */
+	if (menu_pictures_preparing())
+	{
+		if (scope || !menu_pictures_stock_maps())
+			return FALSE;
+		if (enumerate.picture_recording == NONE)
+			enumerate.picture_recording = !render_prepared_recorded(structure_visibility_port_has_mirrors());
+		if (!enumerate.picture_recording)
+			return FALSE;
 	}
 	if (!enumerate.structure_bsps_enumerated[view])
 	{
@@ -670,6 +685,21 @@ boolean render_enumerate_begin(boolean mirrors, boolean scope)
 	enumerate.structure_bsp_index = structure_bsp_index;
 	SET_FLAG(*enumerate.structure_bsps_enumerated[view], structure_bsp_index, TRUE);
 	enumerate.mirrors = mirrors && structure_visibility_port_has_mirrors();
+	/* (a map's first: from its record, where it has one: render_prepared.c;
+	its structure's materials then counted as the walk counts them) */
+	if (enumerate.everything && !scope && !menu_pictures_preparing() && render_prepared_replay(enumerate.mirrors))
+	{
+		struct structure_bsp *structure_bsp = global_structure_bsp_get();
+		struct enumerated_materials *enumerated = enumerate.materials_enumerated[view];
+
+		if (structure_bsp)
+			structure_materials(structure_bsp, enumerated, TRUE);
+		while (stand_ins_next(structure_bsp, enumerated))
+			;
+		platform_log("render: the map's and its structure %d's shaders and pipelines made from its record, %d "
+			"rounds of the other structures' materials counted", structure_bsp_index, stand_ins.round);
+		return FALSE;
+	}
 	enumerate.own_fog = render.fog;
 	halo_load_trace("enumerate.begin", NULL);
 	enumerate.started = system_milliseconds();
@@ -682,6 +712,8 @@ boolean render_enumerate_begin(boolean mirrors, boolean scope)
 	render_enumerating = TRUE;
 	halo_gpu_prepare(enumerate.everything);
 	texture_cache_preparation_begin();
+	if (enumerate.everything && !scope)
+		render_prepared_record_begin(enumerate.mirrors);
 	return TRUE;
 }
 
@@ -695,6 +727,8 @@ boolean render_enumerate_next(void)
 	if (enumerate.pass < passes())
 	{
 		fog_set(pass_fog());
+		if (menu_pictures_preparing())
+			menu_pictures_recording((float)enumerate.pass / (float)passes());
 		return TRUE;
 	}
 	if (!stand_ins.round)
@@ -725,6 +759,9 @@ boolean render_enumerate_next(void)
 	cpu = cpu < 0.0 || enumerate.started_cpu < 0.0 ? -1.0 : cpu - enumerate.started_cpu;
 	/* (the loading screen's end: the shaders and pipelines made) */
 	waited = halo_gpu_prepared();
+	render_prepared_record_end();
+	if (menu_pictures_preparing())
+		menu_pictures_recording(1.0f);
 	halo_load_trace("enumerate.prepared.end", NULL);
 	/* These draws have reached the host. Advance the texture cache as a
 	completed frame does, so the next view and HUD can load their real
@@ -851,7 +888,9 @@ void render_enumerate_lights(boolean specular)
 {
 	short index;
 
-	if (!render_enumerating || !pass_world())
+	/* (the structure's light passes are drawn by their own shaders, not lit
+	by the renderer's lights: the same in either lighting) */
+	if (!render_enumerating || !pass_world() || pass_dynamic_lights())
 		return;
 	if (specular)
 		rasterizer_environment_specular_lights_begin();
@@ -1023,40 +1062,112 @@ static void models_draw(void)
 
 /* every object's model with its own effects: its modifier shader (a
 shield's), its camouflage (a unit's), its transparency drawn as it
-occludes itself, its forced shader permutation */
+occludes itself, its forced shader permutation. Many objects share a
+model and an effect (a level's many bipeds of one model, their shields'
+one modifier shader): each model is drawn with each of its effects once a
+pass, as a second draw of the same model with the same effect draws the
+same (a pass's draws are its fog's, part's and lighting's alone). */
+
+enum
+{
+	_object_effect_modifier,
+	_object_effect_camouflage,
+	_object_effect_self_occludes,
+	_object_effect_permutation,
+	/* (first person's: a model drawn as the first-person weapon's) */
+	_object_effect_first_person,
+};
+
+/* the models and effects a pass has drawn, at most (past them, each is
+drawn as if new) */
+#define MAXIMUM_OBJECT_EFFECTS 2048
+
+static struct
+{
+	short count;
+	struct
+	{
+		long model_index;
+		long value;
+		short kind;
+	} drawn[MAXIMUM_OBJECT_EFFECTS];
+} object_effects;
+
+/* the effects that take no light, the camouflage and the self-occluding
+transparency (rasterizer_xbox_models.c sets a model's lights only for a draw
+with neither; a modifier shader is lit), drawn in the passes without the
+renderer's lights alone: those light nothing they draw */
+static boolean unlit_effects_drawn(void)
+{
+	return !pass_dynamic_lights();
+}
+
+/* whether the model has been drawn with the effect (kind, and its shader
+or permutation: value) this pass; else it is now */
+static boolean object_effect_drawn(long model_index, short kind, long value)
+{
+	short index;
+
+	for (index = 0; index < object_effects.count; index++)
+	{
+		if (object_effects.drawn[index].model_index == model_index && object_effects.drawn[index].kind == kind &&
+			object_effects.drawn[index].value == value)
+		{
+			return TRUE;
+		}
+	}
+	if (object_effects.count < MAXIMUM_OBJECT_EFFECTS)
+	{
+		object_effects.drawn[object_effects.count].model_index = model_index;
+		object_effects.drawn[object_effects.count].kind = kind;
+		object_effects.drawn[object_effects.count].value = value;
+		object_effects.count++;
+	}
+	return FALSE;
+}
+
 static void object_effects_draw(void)
 {
 	struct tag_iterator iterator;
 	long tag_index;
 
+	object_effects.count = 0;
 	tag_iterator_new(&iterator, OBJECT_DEFINITION_TAG);
 	while ((tag_index = tag_iterator_next(&iterator)) != NONE)
 	{
 		struct object_definition *definition = object_definition_get(tag_index);
 		long model_index = definition->object.model.index;
+		long modifier_index = definition->object.modifier_shader.index;
+		short forced = definition->object.forced_shader_permutation_index;
 		struct render_model_effect effect;
+		boolean modifier, camouflage, self_occludes, permutation;
 		short state;
 
 		if (model_index == NONE)
 			continue;
+		modifier = modifier_index != NONE &&
+			shader_type_is_valid_for_modifier(shader_definition_get(modifier_index)->base.type) &&
+			!object_effect_drawn(model_index, _object_effect_modifier, modifier_index);
+		camouflage = TEST_FLAG(_object_mask_unit, FLAG(definition->object.type)) &&
+			!object_effect_drawn(model_index, _object_effect_camouflage, 0);
+		self_occludes = TEST_FLAG(definition->object.flags, _object_transparency_self_occludes_bit) &&
+			!object_effect_drawn(model_index, _object_effect_self_occludes, 0);
+		permutation = forced > 0 && !object_effect_drawn(model_index, _object_effect_permutation, forced);
 		for (state = 0; state < (short)NUMBEROF(model_states); state++)
 		{
+			boolean unlit_effects = unlit_effects_drawn();
+
 			memset(&effect, 0, sizeof(effect));
 			effect.type = _render_model_effect_type_none;
 			effect.source_object_index = STAND_IN_OBJECT_INDEX;
 			effect.source_object_centroid = render.camera.position;
-			if (definition->object.modifier_shader.index != NONE)
+			if (modifier)
 			{
-				struct shader *modifier = shader_definition_get(definition->object.modifier_shader.index);
-
-				if (shader_type_is_valid_for_modifier(modifier->base.type))
-				{
-					effect.modifier_shader = modifier;
-					model_draw(model_index, state, &effect, 0, 0);
-					effect.modifier_shader = NULL;
-				}
+				effect.modifier_shader = shader_definition_get(modifier_index);
+				model_draw(model_index, state, &effect, 0, 0);
+				effect.modifier_shader = NULL;
 			}
-			if (TEST_FLAG(_object_mask_unit, FLAG(definition->object.type)))
+			if (camouflage && unlit_effects)
 			{
 				effect.type = _render_model_effect_type_active_camouflage;
 				effect.intensity = 0.5f;
@@ -1067,14 +1178,14 @@ static void object_effects_draw(void)
 				effect.type = _render_model_effect_type_none;
 				effect.intensity = effect.parameter = 0.0f;
 			}
-			if (TEST_FLAG(definition->object.flags, _object_transparency_self_occludes_bit))
+			if (self_occludes && unlit_effects)
 			{
 				effect.type = _render_model_effect_type_modifier;
 				model_draw(model_index, state, &effect, 0, 0);
 				effect.type = _render_model_effect_type_none;
 			}
-			if (definition->object.forced_shader_permutation_index > 0)
-				model_draw(model_index, state, NULL, definition->object.forced_shader_permutation_index, 0);
+			if (permutation)
+				model_draw(model_index, state, NULL, forced, 0);
 		}
 	}
 }
@@ -1088,34 +1199,48 @@ static void first_person_model_draw(long model_index)
 	struct render_model_effect effect;
 	struct tag_iterator iterator;
 	long tag_index;
-	short state;
+	long modifiers[MAXIMUM_OBJECT_EFFECTS];
+	short modifier_count = 0, index, state;
 
-	if (model_index == NONE)
+	/* (a model drawn before: many weapons share one) */
+	if (model_index == NONE || object_effect_drawn(model_index, _object_effect_first_person, 0))
 		return;
+	/* (each modifier shader once: the units share their shields') */
+	tag_iterator_new(&iterator, UNIT_DEFINITION_TAG);
+	while ((tag_index = tag_iterator_next(&iterator)) != NONE && modifier_count < MAXIMUM_OBJECT_EFFECTS)
+	{
+		long modifier_index = object_definition_get(tag_index)->object.modifier_shader.index;
+
+		if (modifier_index == NONE ||
+			!shader_type_is_valid_for_modifier(shader_definition_get(modifier_index)->base.type))
+		{
+			continue;
+		}
+		for (index = 0; index < modifier_count && modifiers[index] != modifier_index; index++)
+			;
+		if (index == modifier_count)
+			modifiers[modifier_count++] = modifier_index;
+	}
 	for (state = 0; state < (short)NUMBEROF(model_states); state++)
 	{
 		model_draw(model_index, state, NULL, 0, flags);
 		memset(&effect, 0, sizeof(effect));
-		effect.type = _render_model_effect_type_active_camouflage;
-		effect.source_object_index = STAND_IN_OBJECT_INDEX;
-		effect.source_object_centroid = render.camera.position;
-		effect.intensity = 0.5f;
-		model_draw(model_index, state, &effect, 0, flags);
-		effect.parameter = 1.0f;
-		model_draw(model_index, state, &effect, 0, flags);
+		if (unlit_effects_drawn())
+		{
+			effect.type = _render_model_effect_type_active_camouflage;
+			effect.source_object_index = STAND_IN_OBJECT_INDEX;
+			effect.source_object_centroid = render.camera.position;
+			effect.intensity = 0.5f;
+			model_draw(model_index, state, &effect, 0, flags);
+			effect.parameter = 1.0f;
+			model_draw(model_index, state, &effect, 0, flags);
+		}
 		memset(&effect, 0, sizeof(effect));
 		effect.source_object_index = STAND_IN_OBJECT_INDEX;
-		tag_iterator_new(&iterator, UNIT_DEFINITION_TAG);
-		while ((tag_index = tag_iterator_next(&iterator)) != NONE)
+		for (index = 0; index < modifier_count; index++)
 		{
-			struct object_definition *definition = object_definition_get(tag_index);
-
-			if (definition->object.modifier_shader.index != NONE)
-			{
-				effect.modifier_shader = shader_definition_get(definition->object.modifier_shader.index);
-				if (shader_type_is_valid_for_modifier(effect.modifier_shader->base.type))
-					model_draw(model_index, state, &effect, 0, flags);
-			}
+			effect.modifier_shader = shader_definition_get(modifiers[index]);
+			model_draw(model_index, state, &effect, 0, flags);
 		}
 	}
 }
@@ -1127,6 +1252,7 @@ static void first_person_models_draw(void)
 	long tag_index;
 	short index;
 
+	object_effects.count = 0;
 	for (index = 0; globals && index < (short)globals->first_person_interface.count; index++)
 	{
 		struct game_globals_first_person_interface *interface = TAG_BLOCK_GET_ELEMENT(
@@ -1216,7 +1342,9 @@ void render_enumerate_shadows(void)
 	real_matrix4x3 shadow_matrix;
 	real_vector3d right;
 
-	if (!render_enumerating || !pass_world())
+	/* (a shadow is drawn by its own shaders, not lit by the renderer's
+	lights: the same in either lighting) */
+	if (!render_enumerating || !pass_world() || pass_dynamic_lights())
 		return;
 	memset(planes, 0, sizeof(planes));
 	memset(&bounds, 0, sizeof(bounds));

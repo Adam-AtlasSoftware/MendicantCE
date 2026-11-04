@@ -13,7 +13,7 @@ from harness import CHECK_FAILED, build, enum_with, function, mutated, read, run
 
 CASES = ["turret_default", "turret_match", "turret_number", "third_person_seat", "turret_exit",
          "leaving_third_person", "match_exit", "entering", "turned_back", "respawn", "scoped_in_seat", "dead",
-         "neutral", "scripted", "wider_with_panini", "past_the_widest"]
+         "neutral", "scripted", "wider_with_panini", "past_the_widest", "zoomed_reticle_size"]
 CONTROLS = [
     # display.vehicle_fov unread: the seat at display.fov's (#449's)
     ("\t\trequested_tangent = vehicle_tangent;", "\t\trequested_tangent = foot_tangent;", "turret_default"),
@@ -39,6 +39,18 @@ CONTROLS = [
     ("strength > 0.0f || degrees <= FIELD_OF_VIEW_MOST", "degrees <= FIELD_OF_VIEW_MOST", "wider_with_panini"),
     # no widest: any angle below 180
     ("degrees <= PANINI_FIELD_OF_VIEW_MOST))", "degrees < 180.0))", "past_the_widest"),
+    # (#594) the reticle sized by the zoomed view: it grows as the scope zooms in
+    ("\t\treticle_sizes[local_player_index] = reticle_size;", "\t\treticle_sizes[local_player_index] = scale;",
+     "zoomed_reticle_size"),
+    # display.panini's magnification asked of the zoomed view, not the unzoomed one
+    ("\t\t\t\treticle_widenings[local_player_index] = widening;", "\t\t\t\treticle_widenings[local_player_index] = 1.0f;",
+     "zoomed_reticle_size"),
+    # its size the requested view's alone, not the stock view's against it
+    ("*reticle_size = PIN(unzoomed_tangent / requested_tangent, 0.001f, 1000.0f);",
+     "*reticle_size = PIN(1.0f / requested_tangent, 0.001f, 1000.0f);", "zoomed_reticle_size"),
+    # left as the last frame's where the view is the game's own (death)
+    ("\t*reticle_size = 1.0f;\n\t*unzoomed_drawn_tangent",
+     "\t*reticle_size = reticle_sizes[local_player_index];\n\t*unzoomed_drawn_tangent", "dead"),
     # the director's neutral view widened
     ("perspective != _director_perspective_first_person &&", "perspective == _director_perspective_scripted &&",
      "neutral"),
@@ -83,13 +95,21 @@ def test_the_reticle_takes_it():
     # the HUD scales a centred reticle by it, and the passenger view's offset (a place in the drawn view) is given at
     # the HUD's own size, so that scaling it lands it there, at any vehicle field of view
     hud = read("source/interface/hud_draw.c")
-    # (display.panini's magnification of the middle too: test_panini.py)
-    assert "reticle_scale = is_crosshair_bitmap && absolute_placement->corner == _hud_anchor_center ?\n" \
-        "\t\trender_fov_reticle_scale(render.local_player_index) * panini_center_scale() : 1.0f;" in hud
+    # (display.panini's magnification of the middle too: test_panini.py; the weapon's reticle at its size, which a
+    # zoom keeps, a scope's own pieces with the view: #594)
+    assert "\t\treticle_scale = is_crosshair_bitmap == HUD_CROSSHAIR_SCOPE_PIECE ?\n" \
+        "\t\t\trender_fov_reticle_scale(render.local_player_index) * panini_center_scale() :\n" \
+        "\t\t\trender_fov_reticle_size(render.local_player_index);" in hud
     assert "\t\tcolor,\n\t\treticle_scale);" in hud
+    # the passenger's and the lowered reticle's offsets are given at the scale the reticle is drawn at
+    assert "!passenger_camera_reticle_offset(&point, reticle_scale))\n" \
+        "\t\tlowered_reticle_offset_point(&point, reticle_scale);" in hud
     passenger = read("port/linux/game/passenger_camera.c")
-    assert "reticle_scale = render_fov_reticle_scale(local_player_index) * panini_center_scale();" in passenger
-    assert passenger.count("/\n\t\treticle_scale;") == 2
+    assert "point->x = (short)(point->x + reticle_offset.x / reticle_scale);" in passenger
+    assert "point->y = (short)(point->y + reticle_offset.y / reticle_scale);" in passenger
+    # a scope's pieces are the items drawn only zoomed (the VR smart-link's zoomed layout's)
+    weapon = read("source/interface/hud_weapon.c")
+    assert "HUD_CROSSHAIR_SCOPE_PIECE : TRUE);" in weapon
 
 
 def test_the_setting():

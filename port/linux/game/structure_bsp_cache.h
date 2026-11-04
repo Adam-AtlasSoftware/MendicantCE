@@ -22,6 +22,8 @@ boolean structure_bsp_cache_restore(struct scenario_structure_bsp_reference cons
 	unsigned long region_size);
 /* the bsp where it loads, just read and checked, kept (if there is room) */
 void structure_bsp_cache_keep(struct scenario_structure_bsp_reference const *reference);
+/* how many bytes from where the bsp loads its copy is (0: none kept) */
+long structure_bsp_cache_copy_offset(struct scenario_structure_bsp_reference const *reference);
 /* whether another bsp may be kept */
 boolean structure_bsp_cache_room(void);
 /* each kept bsp's lightmaps' materials, read from its copy (where they are

@@ -15,7 +15,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, ROOT, build, enum_with, function, mutated, read, run, structure  # noqa: E402
 
-CASES = ["tabs", "empty", "ellipsis", "ping", "filters"]
+CASES = ["tabs", "empty", "ellipsis", "ping", "filters", "search"]
 
 NEGATIVE_CONTROLS = {
     "favorites-on-every-tab": (("\tcase _browser_tab_favorites:\n\t\treturn favorite;\n", ""), "tabs"),
@@ -39,13 +39,31 @@ NEGATIVE_CONTROLS = {
     "ping-unknown-hidden": (("entry->ping >= filters->maximum_ping)",
                              "(entry->ping < 0 || entry->ping >= filters->maximum_ping))"), "filters"),
     "coop-hidden-by-types": (("entry->engine_type >= 1 && entry->engine_type <= 5 &&", ""), "filters"),
-    "search-name-only": (("browser_text_has(text, filters->search) || browser_text_has(entry->map_shown, "
-                          "filters->search)", "browser_text_has(text, filters->search)"), "filters"),
-    "search-case-kept": (("int y = words[index] >= 'a' && words[index] <= 'z' ? words[index] - 32 : words[index];",
-                          "int y = words[index];"), "filters"),
-    "search-spaces-kept": (("; *search == ' '; search++)", "; 0; search++)"), "filters"),
+    # (the column searches: browser_search_shows)
+    "search-case-kept": (("*text >= 'a' && *text <= 'z' ? (wchar_t)(*text - 32) : *text;", "*text;"), "search"),
+    "search-spaces-kept": (("if ((character >= 'A' && character <= 'Z') || (character >= '0' && character <= '9') "
+                            "|| character > 0x7F)", "if (TRUE)"), "search"),
+    "search-whole-words": (("for (start = 0; start + words_length <= length; start++)",
+                            "for (start = 0; start == 0 && words_length == length; start++)"), "search"),
+    "search-map-shown-only": (("return browser_ascii_has(map, map_words) || browser_text_has(map_shown, map_words);",
+                               "return browser_text_has(map_shown, map_words);"), "search"),
+    "search-map-file-only": (("return browser_ascii_has(map, map_words) || browser_text_has(map_shown, map_words);",
+                              "return browser_ascii_has(map, map_words);"), "search"),
+    "search-either-column": (("if (!browser_ascii_has(name, searches[_browser_search_server]))\n\t\treturn FALSE;\n\t"
+                              "return browser_ascii_has(map, map_words)",
+                              "if (browser_ascii_has(name, searches[_browser_search_server]) && "
+                              "searches[_browser_search_server][0])\n\t\treturn TRUE;\n\treturn browser_ascii_has(map, "
+                              "map_words)"), "search"),
+    "search-server-searches-map": (("if (!browser_ascii_has(name, searches[_browser_search_server]))",
+                                    "if (!browser_ascii_has(name, searches[_browser_search_server]) && "
+                                    "!browser_ascii_has(map, searches[_browser_search_server]))"), "search"),
+    "search-ignores-filters": (("\t\t\telse if (browser_filtering && !browser_search_shows(",
+                                "\t\t\tif (browser_filtering && !browser_search_shows("), "search"),
+    "search-not-counted": (("\t\t\t\tbrowser_searched_count++;\n\t\t\t}", "\t\t\t}"), "search"),
+    "searched-says-filters": (("\telse if (searched > 0)", "\telse if (FALSE)"), "empty"),
     "types-read-shifted": (("(short)(1 << index);", "(short)(1 << (index - 1));"), "filters"),
-    "hidden-not-counted": (("\t\t\t\tbrowser_filtered_count++;", "\t\t\t\t;"), "filters"),
+    "hidden-not-counted": (("&entries[index]))\n\t\t\t\tbrowser_filtered_count++;", "&entries[index]))\n\t\t\t\t;"),
+                           "filters"),
     "filtered-says-nothing": (("\telse if (filtered > 0)", "\telse if (FALSE)"), "empty"),
     "ping-unknown-as-measuring": (("\telse if (ping_state == _browser_ping_measuring)",
                                    "\telse if (ping_state != _browser_ping_measured)"), "ping"),
@@ -63,7 +81,7 @@ def generated(fault=None):
     config = "\n\n".join([
         enum_with(menus, "_multiplayer_mode_server_browser"), enum_with(menus, "_browser_sort_players"),
         enum_with(menus, "_browser_tab_all"), enum_with(menus, "_browser_ping_measured"),
-        enum_with(menus, "PING_GOOD = 80"),
+        enum_with(menus, "PING_GOOD = 80"), enum_with(menus, "_browser_search_server"),
         "#define BROWSER_SEARCH_LENGTH %s" % re.search(r"#define BROWSER_SEARCH_LENGTH (\d+)", menus).group(1),
         "#define BROWSER_ALL_ENGINES %s" % re.search(r"#define BROWSER_ALL_ENGINES (\w+)", menus).group(1),
         "\n".join(re.findall(r"^#define BROWSER_PING_\w+ L[^\n]+", menus, re.M)),
@@ -73,7 +91,8 @@ def generated(fault=None):
         structure(menus, "browser_sort_entry"), structure(menus, "browser_filters")]) + "\n"
     code = "\n\n".join(function(menus, name) for name in (
         "settings_wide_copy", "browser_text_compare", "browser_wide_compare", "browser_sort_before",
-        "browser_tab_shows", "browser_tab_lists_offline", "browser_text_has", "browser_filters_show",
+        "browser_tab_shows", "browser_tab_lists_offline", "browser_search_key", "browser_text_has",
+        "browser_ascii_has", "browser_search_shows", "browser_filters_show",
         "browser_filters_read", "browser_favorites_order", "browser_empty_text",
         "menu_text_cut", "menu_text_fit", "browser_ping_cell", "browser_ping_bars"))
     if fault:
@@ -189,7 +208,7 @@ def test_browser_layout():
         icon = re.match(r"%([a-z-]+) ", words).group(1).replace("-", "_")
         assert f"case _icon_{icon}:" in keys, f"{name}'s {icon} has no key"
     assert [words.split(" ", 1)[1] for _, words, *_ in port_settings.BROWSER_PROMPTS] == \
-        ["FAVORITE", "REFRESH", "PASTE LINK", "SORT", "FILTERS", "BACK"]
+        ["FAVORITE", "REFRESH", "PASTE LINK", "SEARCH", "SORT", "FILTERS", "BACK"]
     # (FILTERS, and the left trigger, open the Filters page, Settings' Online's too)
     filters = f"{port_settings.PE}/network_setup/browser_filters/browser_filters_screen"
     assert f'<on event="left_trigger" run="port browser filters" open="{filters}"/>' in screen

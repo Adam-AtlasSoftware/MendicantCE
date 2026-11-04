@@ -160,7 +160,7 @@ To install the data from a computer:
 | Item | Location in `/sdcard/Android/data/com.openh1.openh1/files` |
 | --- | --- |
 | Saved games (`z:\` and `u:\`) | `save` |
-| Mods (`docs/mods.md`) | `mods`: `adb push <mod folder> /sdcard/Android/data/com.openh1.openh1/files/mods/`; Settings > Profiles > Mods orders them and turns them off |
+| Mods (`docs/mods.md`) | `mods`: `adb push <mod folder> /sdcard/Android/data/com.openh1.openh1/files/mods/`; Settings > Mods > Manage Mods orders them and turns them off |
 | Log | `debug.txt` |
 | Settings | `config.toml` |
 

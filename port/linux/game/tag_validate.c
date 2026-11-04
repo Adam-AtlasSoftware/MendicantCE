@@ -805,6 +805,130 @@ static void validate_value(
 	return;
 }
 
+/* What a definition's elements have for each pass, found once for each
+definition: a pass with nothing to do in an element is not walked. A
+campaign bsp has hundreds of thousands of elements whose fields are all
+values (the collision bsp's nodes, planes, edges, vertices): of the
+element's three walks (extents, values, checks), two did nothing, and the
+checks walk visited the elements of blocks with no check anywhere in them.
+What is skipped would have done nothing, so every map is checked, corrected
+and refused as before; a skip also keeps the depth's refusal
+(validate_element), so it is taken only where the walk would not have gone
+too deep. */
+enum
+{
+	/* a block, data or file data in the element (its structures too):
+	the extents pass's */
+	_summary_extents_bit = 0,
+	/* a value or a block in it: the values pass's (whose blocks' elements
+	it walks) */
+	_summary_values_bit,
+	/* a check in it or in its blocks' elements, however deep */
+	_summary_checks_bit,
+
+	DEFINITION_SUMMARY_SLOTS = 2048
+};
+
+struct definition_summary
+{
+	struct tag_schema_definition const *definition;
+	short flags;
+	/* how many elements deep its blocks go, the element's own counted: 1
+	with no blocks */
+	short depth;
+};
+
+static struct definition_summary definition_summaries[DEFINITION_SUMMARY_SLOTS];
+
+static struct definition_summary const *definition_summary_get(
+	struct tag_schema_definition const *definition);
+
+/* a definition's fields and its structures' fields, into summary */
+static void definition_summary_add(
+	struct definition_summary *summary,
+	struct tag_schema_definition const *definition)
+{
+	struct tag_schema_field const *field;
+
+	for (field = definition->fields; field->type != _tag_schema_terminator; field++)
+	{
+		switch (field->type)
+		{
+		case _tag_schema_struct:
+			definition_summary_add(summary, field->definition);
+			break;
+		case _tag_schema_block:
+		{
+			struct definition_summary const *element = definition_summary_get(field->definition);
+
+			summary->flags |= FLAG(_summary_extents_bit) | FLAG(_summary_values_bit);
+			if (!element)
+			{
+				summary->flags |= FLAG(_summary_checks_bit);
+				summary->depth = MAXIMUM_VALIDATION_DEPTH + 1;
+				break;
+			}
+			summary->flags |= element->flags & FLAG(_summary_checks_bit);
+			if (element->depth + 1 > summary->depth)
+				summary->depth = element->depth + 1;
+			break;
+		}
+		case _tag_schema_data:
+		case _tag_schema_file_data:
+			summary->flags |= FLAG(_summary_extents_bit);
+			break;
+		case _tag_schema_check:
+			summary->flags |= FLAG(_summary_checks_bit);
+			break;
+		default:
+			summary->flags |= FLAG(_summary_values_bit);
+			break;
+		}
+	}
+
+	return;
+}
+
+/* a definition's summary, made the first time; NULL when the table is
+full (every pass is walked then) */
+static struct definition_summary const *definition_summary_get(
+	struct tag_schema_definition const *definition)
+{
+	unsigned long slot = ((unsigned long)definition >> 3) * 2654435761UL;
+	unsigned long probes;
+	struct definition_summary made;
+
+	for (probes = 0; probes < DEFINITION_SUMMARY_SLOTS; probes++)
+	{
+		struct definition_summary *summary = &definition_summaries[(slot + probes) % DEFINITION_SUMMARY_SLOTS];
+
+		if (summary->definition == definition)
+			return summary;
+		if (!summary->definition)
+			break;
+	}
+	if (probes >= DEFINITION_SUMMARY_SLOTS)
+		return NULL;
+	/* (made before it is stored: the schemas have no cycles, schemas_fit,
+	and its blocks' summaries take slots of their own) */
+	made.definition = definition;
+	made.flags = 0;
+	made.depth = 1;
+	definition_summary_add(&made, definition);
+	for (probes = 0; probes < DEFINITION_SUMMARY_SLOTS; probes++)
+	{
+		struct definition_summary *summary = &definition_summaries[(slot + probes) % DEFINITION_SUMMARY_SLOTS];
+
+		if (!summary->definition)
+		{
+			*summary = made;
+			return summary;
+		}
+	}
+
+	return NULL;
+}
+
 /* one pass over an element's fields (those of the structures in it too) */
 static void validate_fields(
 	struct tag_validation *validation,
@@ -839,9 +963,19 @@ static void validate_fields(
 				else
 				{
 					struct tag_block *block = (struct tag_block *)address;
+					struct definition_summary const *summary = definition_summary_get(field->definition);
 					long element_index;
 
-					/* (the elements, through every pass) */
+					/* (the elements, through every pass: not those with
+					nothing to do in it, definition_summary_get) */
+					if (summary && validation->depth + summary->depth <= MAXIMUM_VALIDATION_DEPTH &&
+						(validation->pass == _pass_checks ?
+							!TEST_FLAG(summary->flags, _summary_checks_bit) :
+							!TEST_FLAG(summary->flags, _summary_extents_bit) &&
+								!TEST_FLAG(summary->flags, _summary_values_bit)))
+					{
+						break;
+					}
 					for (element_index = 0;
 						element_index < block->count && !validation->refused;
 						element_index++)
@@ -915,9 +1049,12 @@ static void validate_element(
 	}
 	else
 	{
+		struct definition_summary const *summary = definition_summary_get(definition);
+
 		validation->pass = _pass_extents;
-		validate_fields(validation, base, definition);
-		if (!validation->refused)
+		if (!summary || TEST_FLAG(summary->flags, _summary_extents_bit))
+			validate_fields(validation, base, definition);
+		if (!validation->refused && (!summary || TEST_FLAG(summary->flags, _summary_values_bit)))
 		{
 			validation->pass = _pass_values;
 			validate_fields(validation, base, definition);

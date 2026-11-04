@@ -94,7 +94,7 @@ later plays.
   asks to load after, and those that ask to load before it) are taken to
   just before it. Mods that ask in a ring (a after b, b after a) load
   alphabetically, and the game's log says so.
-- **Mods** in Settings' Profiles tab (in the PC version's menus, `display.menus =
+- **Manage Mods** in Settings' Mods tab (in the PC version's menus, `display.menus =
   "pc"`, the default) is laid out as the game lobby is: the mods on the
   left as a resource pack list has them, the one at the top playing over
   all those below it (the load order upside down: the mod loaded last is at

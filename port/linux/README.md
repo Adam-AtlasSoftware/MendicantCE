@@ -323,7 +323,7 @@ Frame"):
 | Xbox drive | Folder |
 | --- | --- |
 | `d:\` | The data root: the folder that contains `maps/`. |
-| `z:\` | `z/` in the save root. This folder contains the cache (approximately 800 MB of map data) and the saved games. |
+| `z:\` | `z/` in the save root. This folder contains the cache of decompressed maps (every stock map: 3.0 GB; `game.map_cache_megabytes`) and the saved games. |
 | `u:\` | `u/` in the save root. This folder contains the user data. |
 
 The save root is `paths.saves` in `config.toml`. If that setting is empty,
@@ -341,7 +341,7 @@ These files are in the data root:
 | `init.txt` | Console commands that the game does at start-up. For example, `map_name levels\a10\a10` starts the first campaign level. |
 | `tags/` | Sound tag files that replace the sounds of the maps (`audio.loose_sounds`). |
 | `menu_pictures/` | The menus' pictures of the missions and the multiplayer maps, drawn again from these maps (`display.menu_pictures`): a PNG and a note of each. Deleting it draws them again. |
-| `mods/` | Mods: folders of Halo PC tag files whose sounds, bitmaps, text and models play over the maps' on this machine, in the order of Settings > Profiles > Mods (`load_order.toml`). Refer to [docs/mods.md](../../docs/mods.md). |
+| `mods/` | Mods: folders of Halo PC tag files whose sounds, bitmaps, text and models play over the maps' on this machine, in the order of Settings > Mods > Manage Mods (`load_order.toml`). Refer to [docs/mods.md](../../docs/mods.md). |
 
 The settings are in `config.toml` in the game's folder (the release's
 folder, or the folder of `build/linux_x86_64/halo`), or in
@@ -776,7 +776,9 @@ one the pose was made for (its cache file checksum,
 `port/assets/pictures/maps.json`: a modded map), where its render failed
 twice (a render is noted as failed before it begins, so that a game gone
 in the middle of one tries it once more, then keeps the original), and
-until it is ready. Not in runs nobody watches (tests: `debug.menu_pictures`
+until it is ready. Not in runs nobody watches (tests: `debug.hidden_window`,
+`exit_after`, `fixed_step`, `test_input`, `network_test`, `menu_open`,
+`telnet_console`, `screenshot_every` or `load_trace`; `debug.menu_pictures`
 draws them there too), in VR, or with `display.menu_pictures = false`.
 
 ## Bots
@@ -1037,6 +1039,8 @@ the setting for one start of the game. It has priority over the file.
 | `display.viewmodel_offset_x` | `0.0` | `HALO_VIEWMODEL_OFFSET_X` | The first-person weapon and hands moved right (negative: left) along the view, in centimeters, from -20 to 20, for every weapon; with `display.viewmodel_fov`, as far on the screen as at the stock angle (the move is multiplied by the ratio of the angles' tangents). `0`: where the game draws them. Only this machine's drawing changes; not in the VR mode. First Person's WEAPON HORIZONTAL is a slider (-20 to 20, any value between typed). Refer to "Field of view". |
 | `display.viewmodel_offset_y` | `0.0` | `HALO_VIEWMODEL_OFFSET_Y` | The same, up (negative: down), as far on the screen at any `display.viewmodel_fov`: First Person's WEAPON VERTICAL. |
 | `display.viewmodel_offset_z` | `0.0` | `HALO_VIEWMODEL_OFFSET_Z` | The same, forward, away from the view (negative: closer; at -20 the right hand reaches the near plane), the same centimeters at any `display.viewmodel_fov`: First Person's WEAPON DEPTH. |
+| `display.viewmodel_pitch`, `display.viewmodel_yaw`, `display.viewmodel_roll` | `0.0` | `HALO_VIEWMODEL_PITCH`, `_YAW`, `_ROLL` | The first-person weapon and hands turned, in degrees from -15 to 15, about the middle of their nodes: the muzzle up, the muzzle right, the top to the right (negative: the other way). Drawn only, with the move above; the aim and the reticle stay. First Person > WEAPON POSITION's PITCH, YAW and ROLL. |
+| `display.viewmodel_weapon."<tag path>"` | none | none | A weapon's own offsets, added to the ones above (the sums held at their ranges): a table of `x`, `y`, `z` (centimeters), `pitch`, `yaw` and `roll` (degrees) for the weapon of that tag path, any case, `/` for `\`, so a modded map's weapons have theirs too: `[display.viewmodel_weapon."weapons\\pistol\\pistol"]`. Set in a game from the pause menu's Settings, First Person > WEAPON POSITION's THIS WEAPON rows, for the weapon held (RESET THIS WEAPON takes its table out); every local player's weapon takes its own. |
 | `display.lowered_reticle` | `false` | `HALO_LOWERED_RETICLE` | `true`: the reticle is drawn below the middle of the view, as Halo 2's and Halo 3's are, and the view looks that much above the aim, so shots go where the reticle points. On foot and in a seat, first or third person; a scope's zoom brings it back to the middle. Only this machine's view changes; not in the VR mode. First Person's LOWERED RETICLE. Refer to "Field of view". |
 | `display.lowered_reticle_amount` | `10.0` | `HALO_LOWERED_RETICLE_AMOUNT` | With `display.lowered_reticle`, how far below the middle the reticle is, in percent of the view's height, from 0 to 30 (about 9 is Halo 2's, 11 Halo 3's). First Person's RETICLE LOWERED BY is a slider (1 to 25, any of 0 to 30 typed). |
 | `display.viewmodel_visible` | `true` | `HALO_VIEWMODEL_VISIBLE` | `true`: the first-person weapon, hands and what is attached to them are drawn. `false`: they are not; firing, animation, sound and lights go on, and other players' models are drawn. |
@@ -1091,7 +1095,7 @@ the setting for one start of the game. It has priority over the file.
 | `audio.channels` | `"auto"` | `HALO_AUDIO_CHANNELS` | `"stereo"`, or `"5.1"` for surround sound as with Dolby Digital on the Xbox: the world's sounds panned around the five speakers (VBAP), the game's 2D sounds on the speakers it sends them to, nothing on the LFE (the game sends it none). `"auto"`: 5.1 if the sound device has 6 or more channels (the host's SDL says how many the device plays: a 5.1 or 7.1 receiver or headset), else stereo. Read when the game starts. Not on Android. 5.1 is always panned, never the HRTF (`vr.hrtf` too). |
 | `audio.reverb` | `true` | `HALO_REVERB` | `true`: the sounds of the world reverberate as the place the player is in does: the sound environments of the maps (a corridor, a cave, a large hall, outdoors) set the reverberation, as the I3DL2 reverb of the Xbox did. A sound behind a wall or a door is muffled in it too. `false`: no reverberation (sounds behind a wall are still muffled). |
 | `audio.doppler` | `true` | `HALO_DOPPLER` | `true`: a sound of the world moving towards the player rises in pitch and one moving away falls (a Banshee or a Ghost passing by, a plasma bolt), from the velocities the game gives each sound, as the Xbox's DirectSound shifted them (the speed of sound 343 m/s, the shift held to an octave either way). `false`: each keeps its pitch. |
-| `audio.spatial` | `"auto"` | `HALO_AUDIO_SPATIAL` | How the world's sounds are placed around you (Settings > Audio > 3D AUDIO; "3D audio"): `"headphones"` through a model of a head (HRTF), each from its direction, ahead, behind, above or below, as the Xbox's 3D audio was; `"speakers"` panned left and right; `"auto"` the first on headphones and the second otherwise, as the system's output changes. The menus, music and HUD are not placed. 5.1 is always panned; the VR mode keeps `vr.hrtf`. |
+| `audio.spatial` | `"auto"` | `HALO_AUDIO_SPATIAL` | How the world's sounds are placed around you (Settings > Audio > 3D AUDIO; "3D audio"): `"auto"` and `"headphones"` through a model of a head (HRTF), each from its direction, ahead, behind, above or below, as the Xbox's 3D audio was on stereo, speakers or headphones; `"speakers"` panned left and right. The menus, music and HUD are not placed. 5.1 is always panned; the VR mode keeps `vr.hrtf`. |
 | `audio.resampler` | `"sinc"` | `HALO_AUDIO_RESAMPLER` | How the sounds are converted to the output's rate (48 kHz): `"sinc"` with a band-limited low pass, which keeps out the images above the sound's own rate; `"linear"` between neighbouring samples, which lets some of them through and sounds brighter for it. Audio Setup's SOUND PROCESSING screen sets it, with `audio.reverb`. |
 | `audio.voice_chat` | `"push_to_talk"` | `HALO_VOICE_CHAT` | How you talk in voice chat: `"push_to_talk"` (while `controls.push_to_talk` is held; the microphone opens when you first press it), `"open_mic"` (when the microphone hears speech), or `"off"`. You hear the other players in every case. Refer to "Voice chat". |
 | `audio.voice_volume` | `1.0` | `HALO_VOICE_VOLUME` | The volume of the voices of the other players, `0` to `2`. |
@@ -1119,6 +1123,7 @@ the setting for one start of the game. It has priority over the file.
 | `game.language` | `""` | `HALO_LANGUAGE` | The language of the menus: `ja`, `de`, `fr`, `es` or `it`. Empty: English. |
 | `game.enhanced_animations` | `true` (Enhanced), `false` (Classic) | `HALO_ENHANCED_ANIMATIONS` | `true`: the player bipeds' grenade throws keep their legs moving, blended by speed and direction (crouched throws stay crouched, throws in the air use the jump's legs), Warthog and Scorpion riders stay seated to throw and let go of the grips to throw and reload, and a player turns with the aim while throwing, as while meleeing, and in the air, as while running (the original froze the body in a jump and kept the aim within its aiming screen about it, so a shot after turning in the air went between the jump's facing and the crosshair). `false`: the original animations, which freeze the legs during a throw and stand a rider up and the body in the air. The campaign's AI reacts to the player's body, so only `false` plays the campaign exactly as the Xbox did. `display.graphics` chooses it where it is commented out (refer to "Classic and Enhanced"). The turning with the aim (throwing, in the air) moves where shots go, so in an OpenH1 network game every machine turns players as the host's setting says; in a Legacy game, and for an OpenCE machine's players, they always turn, as OpenCE turns them. Settings > Video > Advanced Graphics > Animations. |
 | `game.campaign_difficulty` | `1` | `HALO_CAMPAIGN_DIFFICULTY` | The difficulty the campaign's Choose Difficulty opens on, the one chosen there last: `0` Easy, `1` Normal, `2` Heroic, `3` Legendary. The menus write it. |
+| `game.map_cache_megabytes` | `0` | `HALO_MAP_CACHE_MEGABYTES` | The most the cache of decompressed maps (`z:\cacheNNN.map`, up to 32) may take of the disk, in MB. `0`: what the disk has room for, short of the larger of 2 GB and a twentieth of the disk, which the cache always leaves free; at least 730 MB (the Xbox's six cache files'). Every stock map takes 3.0 GB (the campaign's 2.4 GB, the multiplayer maps' 0.57 GB, the main menu's 34 MB): the menus' pictures' pass at the first start decompresses them all, and the cache keeps them, so that no later load waits for a map to be decompressed (`port/linux/game/map_cache_prefill.c` copies, in the background, what the pass did not). Short of room, the map played least recently is given up first, and before any played map those never played, the least useful first (the campaign's levels in order, then the multiplayer maps most played); never the map open. |
 | `game.auto_pickup` | `false` | `HALO_AUTO_PICKUP` | Multiplayer's second weapon. `false` (the Xbox's way): a player with an empty weapon slot holds the action button over a weapon to pick it up, as the prompt says. `true` (Custom Edition's way): walking over it picks it up and readies it. The campaign always picks it up on walking over, as on the Xbox, and a player with no weapon at all picks up the first one they walk over either way. Games of this computer alone (split screen, bots) take this computer's; an OpenH1 network game takes its host's, as read in the lobby, which the game record carries to its OpenH1 clients so that their prompts show the host's way (`network_standard_walk_over_pickup`, OpenH1 protocol version 18). A Legacy game, and an OpenCE player in an OpenH1 game, always walk over, as OpenCE plays. WEAPON PICKUP in Settings > Online: HOLD (XBOX) or WALK OVER (CE). |
 | `game.sim_rate` | `60` | `HALO_SIM_RATE` | How many steps a second the game takes for what a player feels in their hands: their own movement and aim, projectiles, thrown items, and the VR mode's throws and grabs. `30` (as the game was made), `60` or `120`: 1, 2 or 4 steps inside each of the game's 30 ticks a second. Everything else keeps the 30 ticks: the AI, scripts, cinematics, animations, timers, vehicles, saved games and the network. Any other value is `30` (refer to "Simulation rate" in "How the port operates"). It applies to games of this computer alone: the campaign, split screen and games with bots (a split screen game runs as a network game of one computer that takes no other). Network games with other computers use the rate the game agreed on, hosting or joining: `30` in a Legacy game (OpenCE's netcode steps at 30), and the host's `network.sim_rate` in an OpenH1 game. The playback of a saved film is always `30`. TICK RATE in Video Setup > Graphics > Advanced: ORIGINAL (30), 60 or 120. A change applies from the next tick. Where the game sets the setting aside (a network game with other computers, a film's playback), the row is locked: dimmed, at the game's rate (ORIGINAL (30) in a Legacy game), passed over, and OK leaves the setting as it was. |
 | `game.unlock_all_levels` | `false` | `HALO_UNLOCK_ALL_LEVELS` | `true`: a profile created afterward starts with all the campaign levels finished on all the difficulties. `false`: a new profile starts at The Pillar of Autumn, and each level opens when you finish the level before it, as on the Xbox. Existing profiles keep their progress. To start a profile over, type `profile_reset_campaign` in the console. |
@@ -1148,7 +1153,6 @@ the setting for one start of the game. It has priority over the file.
 | `network.browser_show_password` | `true` | `HALO_NET_BROWSER_SHOW_PASSWORD` | `false`: the server browser hides games that need a password. Their Filters page. |
 | `network.browser_ping` | `0` | `HALO_NET_BROWSER_PING` | The server browsers list only games whose ping is under this many milliseconds (300, 250, 150, 100 or 50); `0` lists every game. A game whose ping is not known (a local network game's, a dedicated server's, one still being timed) is listed. Their Filters page. |
 | `network.browser_show_ctf`, `network.browser_show_slayer`, `network.browser_show_oddball`, `network.browser_show_king`, `network.browser_show_race` | `true` | `HALO_NET_BROWSER_SHOW_CTF`, `HALO_NET_BROWSER_SHOW_SLAYER`, `HALO_NET_BROWSER_SHOW_ODDBALL`, `HALO_NET_BROWSER_SHOW_KING`, `HALO_NET_BROWSER_SHOW_RACE` | `false`: the server browsers hide the games of that game type (OpenCE's kinds of it too: SWAT is Slayer). Co-op games have none (the CO-OP tab). Their Filters page. |
-| `network.browser_search` | `""` | `HALO_NET_BROWSER_SEARCH` | The server browsers list only games whose server name or map (as shown, or its own name) has these words, in any case. Empty lists every game. Their Filters page's SEARCH. |
 | `friends.share_status` | `true` | `HALO_FRIENDS_SHARE_STATUS` | Show your friends that you are online, and where, and let them join you (Multiplayer > FRIENDS). Only your friends can read it. `false` appears offline: nothing is published, and you still see your friends. Refer to "Friends". |
 | `network.host_public` | `true` | `HALO_NET_HOST_PUBLIC` | `true`: a new game of Create Game > Internet starts as PUBLIC. `false`: it starts as PRIVATE. LISTING in Server Setup changes it for each game. Refer to "Server browser". |
 | `network.game_mode` | `"openh1"` | `HALO_NET_GAME_MODE` | When you host: `"openh1"`, an OpenH1 game ("OpenH1 60 Tick" and the like) at the tick rate `network.sim_rate` sets, which OpenCE players can join too, at 30 (`network.allow_opence`); `"legacy"`, OpenCE's netcode at 30 ticks a second for everyone. `"standard"` is the same as `"openh1"`. Server Setup's GAME row (OPENH1 30 TICK, OPENH1 60 TICK, OPENH1 120 TICK or LEGACY) writes it and `network.sim_rate`. Read when hosting starts, and again when the game is started from Server Setup if no one has joined yet. Refer to "OpenH1 and Legacy games" in NETCODE.md. |
@@ -1294,7 +1298,7 @@ the setting for one start of the game. It has priority over the file.
 | `debug.gpu_stats`, `debug.gpu_trace_frame`, `debug.gpu_trace_constants`, `debug.gpu_dump_shaders`, `debug.texture_dump_directory`, `debug.gpu_validation` | off | `HALO_GPU_STATS`, `HALO_GPU_TRACE`, `HALO_GPU_TRACE_CONSTANTS`, `HALO_GPU_DUMP_SHADERS`, `HALO_TEXTURE_DUMP`, `HALO_GPU_VALIDATION` | Tools to find problems in the graphics: counts for each frame (with Vulkan, also its submissions, passes, clears and pipelines every 600 frames, as `HALO_VULKAN_STATS`), every draw of one frame, the shaders' code (Vulkan's SPIR-V, as `.spv` files, as `HALO_VULKAN_SHADERS`), the textures as they are read (TGA files, `tex<number>_fmt<format>_<width>x<height>.tga`), and the graphics API's errors in the log (Vulkan's validation layers, which must be installed, as `HALO_VULKAN_VALIDATION`). |
 | `debug.gl_debug` | `false` | `HALO_GL_DEBUG` | Deprecated: `debug.gpu_validation`'s old name, which still turns it on (with Vulkan, the validation layers). |
 | `debug.skip_cinematics` | `false` | `HALO_SKIP_CINEMATICS` | Skip each cinematic of a local game: as the skip button does where the level lets it be skipped, else run at sixteen times its speed (`main_skip`), so that a test reaches play in seconds (b30's opening, which cannot be skipped, in about 100 frames rather than 2,400). |
-| `debug.menu_pictures` | `false` | `HALO_DEBUG_MENU_PICTURES` | Prepare the menus' pictures (`display.menu_pictures`) even in a run that nobody watches (`debug.hidden_window`, `debug.exit_after`...), for tests ("Menu pictures"). |
+| `debug.menu_pictures` | `false` | `HALO_DEBUG_MENU_PICTURES` | Prepare the menus' pictures (`display.menu_pictures`) even in a run that nobody watches (`debug.hidden_window`, `exit_after`, `fixed_step`, `test_input`, `network_test`, `menu_open`, `telnet_console`, `screenshot_every`, `load_trace`), for tests ("Menu pictures"). |
 | `debug.menu_open` | `""` | `HALO_MENU_OPEN` | Start on this screen of the menus (`main_menu/settings_select/...`, as `port/assets/menus` names it), a player profile being edited, to look at it. |
 | `debug.matchmaking`, `debug.matchmaking_host` | `""` | `HALO_MATCHMAKING`, `HALO_MATCHMAKING_HOST` | Search a matchmaking playlist (its name, `"Team Slayer"`, or its number, 1 up) once the main menu is up, and how well this machine tells its party it can host (`"strict"` or `"open"`; empty: as its network is), for a test; with either, a player without a profile plays. |
 | `debug.party` | `""` | `HALO_PARTY` | Join this party link at the start, or lead its party (`lead:` before the link): several copies of the game in one party, for a test. |
@@ -1868,22 +1872,30 @@ half a second.
 
 ## 3D audio
 
-On headphones the world's sounds reach each ear as they would reach your
-head, as the Xbox's DirectSound put its 3D sounds through its HRTF: a sound
-to your left is a little later and duller at your right ear, one behind is
+In stereo the world's sounds reach each ear as they would reach your head,
+as the Xbox's DirectSound put its 3D sounds through its HRTF: a sound to
+your left is a little later and duller at your right ear, one behind is
 duller, and one above or below has a tone of its own (the notch of the
-pinna's), so ahead, behind, above and below can be told apart. On speakers
-they are panned left and right, as before. The menus, the music, the HUD
-and the other 2D sounds are as they were. The model is the VR mode's ("Sound
-from your head": Brown and Duda's, a few filters a sound); a sound's
-distance, occlusion, reverb and Doppler shift are the pan's.
+pinna's), so ahead, behind, above and below can be told apart. The Xbox did
+this on any stereo output, the television's speakers too (the game asks for
+DirectSound's full HRTF whatever the dashboard's speaker setting, and the
+capture shows no crosstalk cancellation after it: the effects image's
+crosstalk effect would lift the sides' difference below 600 Hz by up to 12
+dB, and the capture's is 7 to 11 dB under the sum, as the HRTF's alone), so `"auto"`, the default, does it
+on headphones and speakers alike. A capture of an Xbox set to stereo has the
+HRTF's spread: above 4 kHz the difference of its sides is as loud as their
+sum and they hardly correlate (coherence 0.15 at 4 to 8 kHz), where the pan
+has them 15 dB apart (coherence 0.94). The menus, the music, the HUD and the
+other 2D sounds are as they were. The model is the VR mode's ("Sound from
+your head": Brown and Duda's, a few filters a sound); a sound's distance,
+occlusion, reverb and Doppler shift are the pan's.
 
-`audio.spatial` (Settings > Audio > 3D AUDIO) chooses. `"auto"`, the
-default, asks the system what it plays on, at the start and each second
-after (`port/android/host/host_audio_route.c`, in the host, which the game
-asks through `host_audio_headphones`); plugging headphones in or taking them
-out mid-game crossfades each sound between the two over 100 ms, with no
-click:
+`audio.spatial` (Settings > Audio > 3D AUDIO) chooses: `"auto"` and
+`"headphones"` the HRTF, `"speakers"` panned left and right; changing it
+mid-game crossfades each sound between the two over 100 ms, with no click.
+5.1 is panned around its speakers, and the VR mode keeps `vr.hrtf`. The log
+says what the host reports the sound plays on as it changes ("audio: the
+sound plays on headphones; the world's sounds through the HRTF"):
 
 - macOS: the default output device: its name (External Headphones, AirPods,
   a headset), the built-in output's data source, Bluetooth (headphones
@@ -1897,11 +1909,6 @@ click:
 - Android: the devices the game's sound is routed to (Android 13 and
   later), or those connected: wired, Bluetooth and USB headsets and
   headphones, hearing aids.
-
-A device it cannot tell is speakers. `"headphones"` and `"speakers"` choose
-for good. 5.1 is panned around its speakers, and the VR mode keeps
-`vr.hrtf`. The log says what the sound plays on as it changes ("audio: the
-sound plays on headphones; the world's sounds through the HRTF").
 
 The HRTF costs about 15 ns a 3D sound a frame on an Apple M2 core: the
 mixer's bench (`tools/harness/tests/test_mixer.py bench 24 16 indoor hrtf`,
@@ -2051,13 +2058,26 @@ only with PANINI PROJECTION on (150 while it is off; below).
   it, while the camera flies back to the head), and turns back from where
   it is if the player gets in or out again on the way. Death, cinematics
   and scripted cameras keep their own view.
+- The near clip plane comes nearer at a wide view (`game/near_clip.c`). The
+  game clips the world at a plane 0.0625 world units ahead of the eye,
+  which at the sides of a wide view is nearly beside it: from about 145
+  degrees, a wall the player stands against (0.2 units away, the player's
+  collision radius) was cut along a line near the screen's side. The plane
+  is brought in until its corners, the view's as drawn (split screen's too),
+  are 0.2 units from the eye, so nothing that far or farther is clipped at
+  any angle. The stock view, and any up to about 138 degrees at 16:9, keep
+  the game's plane and are drawn exactly as before; the weapon keeps its
+  own.
 - A scope's zoom levels keep their stock view: the extra width fades out as
   the zoom comes in. A view narrower than the stock one narrows the zoom
   too.
 - The reticles scale with the view, so that they stay on the aim: each
   frame's reticle is scaled from that frame's view, so it grows or shrinks
-  with the view as you get in and out and never shows another size. The
-  scopes' pictures keep their place.
+  with the view as you get in and out and never shows another size. A
+  scope's zoom keeps the weapon's reticle at its unzoomed size, as the
+  stock game draws its reticle one size at every zoom (display.fov sizes
+  it, the zoom does not); the scopes' own pictures, and the pieces of the
+  reticle drawn only zoomed (the sniper rifle's lines), keep to the view.
 - By default the weapon keeps its stock view when the world is wider:
   arms and a gun right against the camera stretch at a wide angle.
 
@@ -2719,8 +2739,6 @@ time the game starts; Cancel leaves them as they were.
 - PING: ANY, or only games under 300, 250, 150, 100 or 50 ms. A game whose
   ping is not known (a local network game's, a dedicated server's, one
   still being timed) stays listed.
-- SEARCH: words that a game's server name or map must have, in any case
-  ("gulch" finds Blood Gulch). Select the row, type, and press Enter.
 - GAME TYPES: CAPTURE THE FLAG, SLAYER, ODDBALL, KING OF THE HILL and RACE,
   each SHOW or HIDE, so that any mix of them is listed. OpenCE's kinds go
   with their game type (SWAT, Infection and Gun Game with Slayer). Co-op
@@ -2729,6 +2747,21 @@ time the game starts; Cancel leaves them as they were.
 The filters apply on every tab, the favorites too. The counts above the
 list say how many games they hide (`3 HIDDEN`), and a list that they leave
 empty says so.
+
+Searches, in the same two lists: the SERVER and MAP column titles each have
+a magnifying glass. Click it (or choose it with the D-pad and press A) and
+type: the list shows only the games whose server name, or map, has what
+you typed, as you type it. Case, spaces and punctuation don't count ("blood
+gulch" finds bloodgulch), and a map is found by its name as shown or its
+file's name. Both searches can be on at once, with the filters too. Enter
+keeps the words; the field's X clears them; Esc (B, Back) while you type
+clears that search and shows the magnifying glass again. SEARCH in the
+footer (R3 on a controller, / on the keyboard) types into the server's
+search, and again into the map's; on a Steam Deck the screen keyboard comes
+up. A list the searches leave empty says "No servers match your search."
+with CLEAR SEARCH under it. The searches stay while you are in the browser,
+Filters opened and closed too, and go when you leave it; they are not kept
+in `config.toml`.
 
 The browser lists two kinds of games: the dedicated servers that the
 master servers list (`masters.txt`, `network.masters_file`; the official
@@ -3329,7 +3362,7 @@ them: sounds, bitmaps, string lists and models that play over the maps' tags
 of the same names, on this machine only (a high-res audio or texture pack, a
 translation, higher-detail models that keep the map's nodes, markers and
 regions). Every mod in the folder is on, in alphabetical order moved as the
-mods ask (`load_after`, `load_before`); Settings > Profiles > Mods lists them as a
+mods ask (`load_after`, `load_before`); Settings > Mods > Manage Mods lists them as a
 resource pack list does, the mod at the top playing over those below it,
 turns them off and moves them, and keeps that in `mods/load_order.toml`.
 Mods that say they cannot be played together (`incompatible`) are asked
@@ -6242,7 +6275,7 @@ does; making the eye images from the four layers cost 0.2 ms more there.
 | High-res text | The menus' and HUD's text is drawn with Overpass (`port/assets/fonts`, SIL Open Font License) in place of the maps' bitmap fonts, which are Interstate. `src/text_hires.c` rasterizes each glyph with stb_truetype (`port/third_party/stb`) at the resolution the game draws at, into an atlas that a placeholder bitmap of the game stands for. The console's text (and the debug text, in the same font tag) is drawn with Hack Bold (MIT and Bitstream Vera licenses), a monospaced font, in place of the maps' small bitmap font. The game lays the text out from its font tags as before: each font is as tall as its tag's capitals, and narrowed where the tag's letters are narrower than the Xbox maps' (the fonts of a Custom Edition `loc.map`), so that its letters do not run into each other. The menus' titles (the screens' headers and the main menu's items) are pictures of text in the maps, so they are drawn as the high-res HUD is: `tools/title_assets.py` sets each one again in OpenCE, Roger White's public-domain Newtown respaced to match the maps' commercial title typeface (`tools/title_font.py`), at 4x the bitmap's size over its own plate or glow, each letter placed where the map's letter is, in `port/assets/titles`. The postgame carnage report's title is set over a hand-made SVG redraw of its panel (`port/assets/titles/svg`) instead. The A, B, X and Y button icons beside the menus' key labels and in their text ("Press A to Join") are drawn from hand-made SVG redraws at 8x the size of the maps' bitmaps (`port/assets/buttons`, made by `tools/button_assets.py`), in the same sizes and places. `display.high_res_text = false` turns it off. |
 | Dynamic lights | `display.dynamic_lights = "enhanced"` (`src/d3d8_device.c`, `game/dynamic_lights.c`; Vulkan's `src/xgpu_spirv.c`, `vulkan/xgpu_vulkan_stream.c`): the frame's lights are a uniform block, and a 32 x 32 x 16 grid about the camera, its cells growing with the distance (out to 128 world units each way), a 128-bit mask of the lights that reach each cell (an integer 3D texture). The structure's lightmap pass and the models' per-pixel lighting (`display.per_pixel_lighting`'s, which this turns on) add the lights of their cell for each pixel, in place of the game's pass over the structure for each light and its two lights for each model. The vertex shaders hand on the world position: a model program's skinned position before it is projected, a structure's vertex as it is. The glows are a camera-facing quad each, projected as the game's programs are, faded against the scene's depth, sampled with the target drawn into without it. With Vulkan the block and the cells are its draw set's, written in the stream's order, and the glows' shaders are the SPIR-V emitter's. Metal draws them alike (`src/xgpu_msl.c`, `port/macos/xgpu_metal_stream.m`): the block and the cells (in buffers: the cells' masks in the texture's order) are copied into the frame's upload ring as the stream sends them and bound for the draws after them, and the glows' functions are the MSL emitter's, the SPIR-V emitter's operation for operation. A view that finds more lights than the 128 lit (512 on the desktop builds and the Mac, 256 on the Steam Frame: `include/halo_port_capacity.h`) lights the 128 that show most, each scored by its brightness times its radius over its distance as it was drawn last frame, those wholly behind the camera last (`game/dynamic_lights.c`, `dynamic_lights_rank`), classic lights too. |
 | Anti-aliasing | Off unless `display.anti_aliasing` is set (`src/d3d8_device.c`). FXAA (written in the port) and SMAA (`port/third_party/smaa`, MIT licensed, at its HIGH preset, compiled as GLSL) are passes over the 3D view of each window, after the lens flares and before the HUD and the menus (`render/render.c`). The Vulkan backend runs them, their GLSL (`tools/vulkan_post_shaders.py`) compiled to SPIR-V when the port is changed (`vulkan/xgpu_vulkan_post.c`), its pipelines made when the setting is chosen and as a map is prepared. The Metal backend runs them too, the same SPIR-V written as MSL by SPIRV-Cross (`port/macos/xgpu_metal_post.c`, `tools/metal_post_shaders.py`). Supersampling draws the render targets the size of the screen at two times the resolution in each direction, and the display blit scales them down. Multisampling draws the back buffer and its depth buffer into multisampled renderbuffers, and with them any target that is drawn together with one of them (a mirror's view, in the secondary target with the back buffer's depth buffer), so that the attachments of a framebuffer are all multisampled or none is. A target's pixels are resolved into its texture before something reads the texture (as a texture, or at the display blit). Visibility tests count samples, divided by the samples of a pixel. An alpha-tested surface (foliage, grates) covers the samples of a pixel in proportion to its alpha past the reference (the sample mask). |
-| Sound | Xbox DirectSound on SDL3 audio (`src/dsound_sdl.c`): PCM and Xbox ADPCM, mixed at 48 kHz in stereo or 5.1, with volume, pitch, mix bins, distance, pan, occlusion and obstruction, and the Doppler shift of moving sounds (`audio.doppler`); on headphones, the world's sounds through an HRTF (`audio.spatial`, "3D audio"). There are no cones (no sound of the maps has one). On 5.1 the game gets the AC-3 speaker setting of the Xbox and sends its 2D sounds to the center and back speakers, 3D sounds pan across the five speakers, and the reverb plays from the front and back pairs. The game sends nothing to the LFE channel. |
+| Sound | Xbox DirectSound on SDL3 audio (`src/dsound_sdl.c`): PCM and Xbox ADPCM, mixed at 48 kHz in stereo or 5.1, with volume, pitch, mix bins, distance, pan, occlusion and obstruction, and the Doppler shift of moving sounds (`audio.doppler`); in stereo, the world's sounds through an HRTF, as the Xbox's (`audio.spatial`, "3D audio"). There are no cones (no sound of the maps has one). On 5.1 the game gets the AC-3 speaker setting of the Xbox and sends its 2D sounds to the center and back speakers, 3D sounds pan across the five speakers, and the reverb plays from the front and back pairs. The game sends nothing to the LFE channel. |
 | Input | XInput on SDL3 (`src/xinput_sdl.c`): keyboard, mouse, gamepads with rumble, and the debug keyboard for the console. |
 | Files | The Win32 file functions and the MSVC file functions on POSIX, with the translation of Xbox paths. |
 | Threads | Threads, events, mutexes, critical sections, interlocked operations and alertable waits. |
@@ -6693,7 +6726,7 @@ Other changes:
 | `networking/`, `game/`, `interface/`, `bungie_net/network/` and the pools of objects, effects and sounds | The system link limits and the memory for them. |
 | `game/`, `objects/`, `units/`, `networking/` | The distributed netcode. Refer to `NETCODE.md`. |
 | `cache/cache_files.c` | When a map's tags load and unload, the port finds the bitmaps that the high-res HUD replaces (`game/hud_hires_tags.c`), adds the tags of the menus to the menus' map (`game/menu_tags.c`), and plays the mods' tags (`game/mods.c`). |
-| `cache/cache_files_windows.c` | Each cache slot (`z:\cacheNNN.map`) remembers the size and modification time of the map file it was copied from, in `z:\cacheNNN.source` (`src/xbox_files.c`). A slot whose map file has been replaced since, by a modded map that keeps the header's checksum, another region's or a corrected one, is copied again, at the start or the next time the map is loaded. The Xbox's disc never changed, so the name and checksum in the header were enough. |
+| `cache/cache_files_windows.c` | The cache of decompressed maps has up to 32 slots (`HALO_PORT_CACHED_MAP_FILES`; the Xbox's six of fixed sizes and kinds), any map in any slot, each the size of its map, within a budget of the disk (`game.map_cache_megabytes`, `src/map_cache.c`): a map is given up for room the least useful first (`cached_map_files_least_useful`), never the open map or the slot a copy is going to, and a slot is a map only once its copy is complete (its header is written last). A copy's decompression buffers are its own, not the texture cache's. The maps likely to be played next are copied ahead, in the background, when the game is not loading (`game/map_cache_prefill.c`). Each cache slot (`z:\cacheNNN.map`) remembers the size and modification time of the map file it was copied from, and when its map was last played, in `z:\cacheNNN.source` (`src/xbox_files.c`). A slot whose map file has been replaced since, by a modded map that keeps the header's checksum, another region's or a corrected one, is copied again, at the start or the next time the map is loaded. The Xbox's disc never changed, so the name and checksum in the header were enough. |
 | `cache/xbox_sound_cache.c`, `cache/xbox_texture_cache.c` | The samples of a mod's sound are copied from memory, and the pixels of a mod's bitmap read from its file and laid out for the hardware, at once (`game/mod_sounds.c`, `game/mod_bitmaps.c`); a mod's linear bitmap need not have rows of whole steps of the pitch. |
 | `hs/hs.c` | The console's `mods_reload`, `mods_enable` and `mods_list`, which a client may run too. |
 | `interface/ui_widget.c`, `interface/ui_widget_event_handler_functions.c`, `interface/ui_widget_game_data_input_functions.c` | The main menu is the PC version's from `port/assets/menus` (`display.menus`); the menus' widgets can call the port's functions (`game/menu_functions.c`) and send the PC version's custom activation event; the widgets' memory is 256 KB, not 16 KB; a spinner of the port's menus with more than two values stops at its ends instead of going round (`ui_widget_port_spinner_stops`: a count's most never steps on to none); the main menu and Multiplayer clear co-op's controllers, so that a gamepad going back to controller 1 is not a controller unplugged; the lobby's split screen players leave alone, and one who quits in game is not joined to the next game (`interface/player_ui.c`).; Create Game's OFFLINE hosts a game that takes no other machine, as the Xbox's split screen does (`ui_widget_port_host_local`); the port's own screens are laid out for the view's width up to 16:9 (their widgets' `wide`: `game/menu_tags.c`'s `ui_widget_port_wide_layout`), a picture widened by stretching its middle (`draw_bitmap_widened_in_rect`); after a game of this machine alone the host's map select and the lobby open in place of the Xbox's split screen Select Map and Select Teams (`game/menu_tags.c`'s `pc_menus_screen`). |
@@ -6725,6 +6758,7 @@ Other changes:
 | `main/main.c`, `interface/hud_draw.c`, `interface/first_person_weapons.c` | With `display.lowered_reticle`, the view is turned above the observer's aim as the window's camera is set, the weapon's reticle is drawn where the aim lands on the screen, and the first-person weapon is posed at the view turned back to the aim (`game/lowered_reticle.c`). |
 | `interface/first_person_weapons.c` | With the player's own view drawn from the newest step (`display.direct_camera`), the gun's animations are sampled at the frame's time: the state and moving animations between their frame and the next, a state's blend in by its fraction, the sway's springs where their velocity has them (`game/render_interpolation.c`, `render_interpolation_first_person_phase`). |
 | `render/render_objects.c`, `objects/objects.c` | In first person, your own body is drawn from the waist down with the pose `first_person_legs.c` makes (`display.first_person_legs`); the waist it found and the mesh `object_mesh.c` read are forgotten on a new map. |
+| `objects/object_lights.c` | The local player's own flashlight in the first person on foot, where the first-person weapon does not carry it (none in hand, or zoomed), shines along the view drawn, from where the body has it (`game/render_interpolation.c`, `render_interpolation_view_flashlight`): on the head's marker it trailed the view drawn from the newest step and turned with the head's look, so its pool slid and jumped as the player turned. |
 | `objects/object_lights.c` | Glows the port lights itself (`shield_glow.c`): dynamic lights attached to an object's node, colored and sized each frame by their maker, drawn with a light definition the map has. |
 | `render/render_objects.c`, `interface/first_person_weapons.c`, `rasterizer/xbox/rasterizer_xbox_plasma_energy.c`, `items/projectiles.c` | An overshield as `overshield_effect.c` draws it (`display.overshield_effect`): in its own color, its intensity full, its energy slower, faded above the height it has risen to; a hit on it plays the projectile's effect for an Elite's energy shield in place of its own (only the effect: the projectile's response is its own). |
 | `objects/object_lights.c`, `rasterizer/xbox/rasterizer_xbox_environment.c` | A light attached to an object is drawn where the object is drawn between ticks (its marker as drawn), not where the tick placed it: it no longer steps behind a bolt at 30 Hz (the light's own position, which the units' illumination reads, is kept). With `display.dynamic_lights = "enhanced"`, the frame's lights go to the renderer (`game/dynamic_lights.c`), a projectile's light that is only its lens flare's lights too, a muzzle flash's is moved to the first-person weapon, the structure's own pass for each light is left to the lightmap pass (but spotlights' and gelled lights'), which tells the renderer when it is drawn. |

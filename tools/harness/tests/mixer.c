@@ -1379,26 +1379,23 @@ int main(int argc, char **argv)
 		output_channels = 2;
 		return 0;
 	}
-	/* audio.spatial: "auto" through the HRTF on headphones only (speakers
-	and not known: the pan), "headphones" and "speakers" whatever the host
-	says, another word as "auto"; the VR mode by vr.hrtf alone */
+	/* audio.spatial: "auto" through the HRTF on any stereo output, as the
+	Xbox, "speakers" panned, another word as "auto"; the VR mode by vr.hrtf
+	alone */
 	CASE("spatial-choice")
 	{
-		static const struct { const char *setting; int headphones; BOOL vr, vr_hrtf, expected; } cases[] = {
-			{ "auto", 1, FALSE, FALSE, TRUE }, { "auto", 0, FALSE, FALSE, FALSE },
-			{ "auto", -1, FALSE, FALSE, FALSE }, { "headphones", 0, FALSE, FALSE, TRUE },
-			{ "headphones", -1, FALSE, FALSE, TRUE }, { "headphones", 1, FALSE, FALSE, TRUE },
-			{ "speakers", 1, FALSE, FALSE, FALSE }, { "speakers", -1, FALSE, FALSE, FALSE },
-			{ "", 1, FALSE, FALSE, TRUE }, { "", -1, FALSE, FALSE, FALSE },
-			{ "auto", 1, TRUE, FALSE, FALSE }, { "speakers", 0, TRUE, TRUE, TRUE },
-			{ "headphones", 1, TRUE, FALSE, FALSE },
+		static const struct { const char *setting; BOOL vr, vr_hrtf, expected; } cases[] = {
+			{ "auto", FALSE, FALSE, TRUE }, { "headphones", FALSE, FALSE, TRUE },
+			{ "speakers", FALSE, FALSE, FALSE }, { "", FALSE, FALSE, TRUE },
+			{ "auto", TRUE, FALSE, FALSE }, { "speakers", TRUE, TRUE, TRUE },
+			{ "headphones", TRUE, FALSE, FALSE },
 		};
 
 		for (index = 0; index < sizeof(cases) / sizeof(cases[0]); index++)
 		{
-			CHECK(spatial_hrtf(cases[index].setting, cases[index].headphones, cases[index].vr, cases[index].vr_hrtf) ==
-				cases[index].expected, "audio.spatial \"%s\", the host saying %d%s: %s, not %s", cases[index].setting,
-				cases[index].headphones, cases[index].vr ? (cases[index].vr_hrtf ? ", VR with vr.hrtf" : ", VR") : "",
+			CHECK(spatial_hrtf(cases[index].setting, cases[index].vr, cases[index].vr_hrtf) ==
+				cases[index].expected, "audio.spatial \"%s\"%s: %s, not %s", cases[index].setting,
+				cases[index].vr ? (cases[index].vr_hrtf ? ", VR with vr.hrtf" : ", VR") : "",
 				cases[index].expected ? "panned" : "through the HRTF", cases[index].expected ? "through the HRTF" : "panned");
 		}
 		return 0;

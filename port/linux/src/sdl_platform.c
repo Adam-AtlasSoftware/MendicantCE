@@ -22,10 +22,12 @@ and the debug keyboard that the game's console reads.
 #include "text_hires.h"
 #include "p2p.h"
 #include "port_mods.h"
+#include "halo_menus.h"
 #include "server_mode.h"
 #include "server_master.h"
 #include "player_link.h"
 #include "xiso.h"
+#include "map_unpack.h"
 #include "map_import.h"
 #ifdef HALO_VR
 #include "vr.h"
@@ -38,6 +40,7 @@ and the debug keyboard that the game's console reads.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 #include <zlib.h>
 #if !defined(HALO_WINDOWS) && !defined(HALO_ANDROID)
@@ -472,6 +475,10 @@ BOOL platform_sdl_initialize(void)
 	/* (the mods, and whether to play those that say they cannot be played
 	together, before the window opens: port_mods.c) */
 	port_mods_startup();
+	/* (the PC menus' files read meanwhile, on a thread of their own, for
+	the first map's load: menu_files.c) */
+	if (!halo_server_mode() && !strcasecmp(config_string("display.menus"), "pc"))
+		halo_menus_read_ahead();
 	return TRUE;
 }
 
@@ -530,6 +537,10 @@ static void *data_extraction_thread(void *context)
 	{
 		succeeded = xiso_extract_maps(extraction->image, extraction->destination, data_extraction_progress,
 			extraction, extraction->error, sizeof(extraction->error)) != 0;
+		/* (and the stock maps unpacked into the cache's slots, on the
+		same bar: map_unpack.c) */
+		if (succeeded)
+			map_unpack_after_extraction(extraction->destination, data_extraction_progress, extraction);
 	}
 	pthread_mutex_lock(&extraction->lock);
 	extraction->written = written;

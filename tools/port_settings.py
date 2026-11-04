@@ -20,7 +20,7 @@ from typing import NamedTuple
 from xml.sax.saxutils import quoteattr
 
 PE = "main_menu/settings_select/player_setup/player_profile_edit"
-# the mods' screen, and its rows (_mods), which Settings' PROFILES tab opens
+# the mods' screen, and its rows (_mods), which Settings' MODS tab opens
 MODS = "main_menu/mods"
 MOD_ROWS = 11
 # the main menu's items (ce/main_menu.xml): CAMPAIGN, MULTIPLAYER, SETTINGS
@@ -246,7 +246,7 @@ FRAMES_ADDED = {
 # ---------- Settings: its tabs and their pages (port/linux/game/menu_functions.c's
 # "port settings ..." functions)
 #
-# Settings opens straight to its tabs, VIDEO to PROFILES across the top (LB and
+# Settings opens straight to its tabs, VIDEO to MODS across the top (LB and
 # RB, Q and E, or a click switch them), each a page of rows under section
 # headers, and on the right a panel saying what the row chosen does: its name,
 # its value in large type and plain words. A row ending in "›" opens a page of
@@ -318,6 +318,17 @@ SETTINGS_TABS_TOP = 76
 # WIDE_MARGIN from the screen's edges)
 SETTINGS_TAB_WIDTH, SETTINGS_TAB_HEIGHT, SETTINGS_TAB_STEP, SETTINGS_TABS_X = 90, 22, 88, 56
 SETTINGS_TAB_LAID = 86
+# Settings' own tabs (seven: SETTINGS_TAB_PAGES) are each as wide as its name
+# and the same room either side of it, filling the row from SETTINGS_TABS_X to
+# RB's prompt (settings_tab_places); a name's width reckoned as small_ui's
+# capitals' (the high-res text's Overpass 750 at their height: INTERFACE,
+# the widest name, 79 units of the room its tab has)
+SETTINGS_TABS_RIGHT = SETTINGS_TABS_X + 5 * SETTINGS_TAB_STEP + SETTINGS_TAB_LAID
+SETTINGS_TAB_GAP = SETTINGS_TAB_STEP - SETTINGS_TAB_LAID
+SMALL_UI_CAPITALS = {"A": 10.33, "B": 9.94, "C": 9.10, "D": 10.21, "E": 8.98, "F": 8.24, "G": 9.72, "H": 10.35,
+                     "I": 4.25, "J": 7.99, "K": 10.23, "L": 8.11, "M": 11.58, "N": 10.29, "O": 10.30, "P": 9.14,
+                     "Q": 10.31, "R": 9.91, "S": 8.80, "T": 8.65, "U": 10.22, "V": 9.81, "W": 12.13, "X": 9.86,
+                     "Y": 9.86, "Z": 9.11}
 # (the tab keys' prompts: LB's at the margin, RB's after the last tab)
 SETTINGS_TAB_PROMPT_WIDTH = 30
 SETTINGS_PANEL_X, SETTINGS_PANEL_WIDTH, SETTINGS_PANEL_BOTTOM = 388, 224, 400
@@ -443,6 +454,9 @@ WEAPON_FIELDS_OF_VIEW = Slider(80, 150, 5, 20, 150, stops=FIELDS_OF_VIEW.stops[:
 # place; the track goes the whole range (the depth's closer end is about
 # where the right hand reaches the eye), any of -20 to 20 typed
 VIEWMODEL_OFFSETS = Slider(-20, 20, 0.5, -20, 20)
+# display.viewmodel_pitch's, _yaw's and _roll's: degrees, 0 the game's own
+# (view_fov.c's VIEWMODEL_ROTATION_MAXIMUM_DEGREES), any of -15 to 15 typed
+VIEWMODEL_ROTATIONS = Slider(-15, 15, 0.5, -15, 15)
 # display.lowered_reticle_amount's: percent of the view's height below its
 # middle; any of 0 to 30 typed
 LOWERED_RETICLE_AMOUNTS = Slider(1, 25, 1, 0, 30, whole=True)
@@ -491,6 +505,9 @@ SCREEN_LAYOUT = ("video_settings/screen_layout", "screen_layout_screen")
 # (First Person's shields: the arms' flare, its color, the overshield and its color; their
 # own page, so that First Person's view rows fit)
 SHIELDS = ("video_settings/first_person/shields", "shields_screen")
+# (First Person's weapon position: every weapon's offsets and turns, and in a
+# game the held weapon's own: menu_functions.c's viewmodel_weapon_rows_show)
+WEAPON_POSITION = ("video_settings/first_person/weapon_position", "weapon_position_screen")
 CONTROLLER = ("gamepad_setup", "gamepad_setup_screen")
 # (the controller's own button layout, each player's: controller_remap_menu.inl)
 BUTTON_REMAPPING = ("gamepad_setup/button_remapping", "button_remapping_screen")
@@ -526,8 +543,9 @@ REMAP_HANDLERS = ['<on event="x" run="port controller clear"/>',
 # menu_functions.c's discord_account_show fills in each frame: a link's (what
 # the page it opens is at), an action's (what it does, its state); and
 # hdr_display_show's, the display's peak
-SETTINGS_STATUS_ROWS = {"discord_account", "link_status", "link_unlink", "browser_search",
+SETTINGS_STATUS_ROWS = {"discord_account", "link_status", "link_unlink",
                         *(f"link_master_{n}" for n in range(1, 5)), "hdr_display",
+                        "viewmodel_weapon_reset",
                         "remap_player", "remap_group", *(f"pad_{n}" for n in range(1, REMAP_ROWS + 1))}
 # the rows whose labels menu_functions.c writes (a master server's host): the
 # label's text its own, not its list's; their values the narrower column at
@@ -634,9 +652,9 @@ PAGES = {
             ("OUTPUT DEVICE", "audio.output_device", [("SYSTEM DEFAULT", "default")],
              "Where the game's sound and the other players' voices play.", "desktop"),
             ("3D AUDIO", "audio.spatial", [("AUTO", "auto"), ("HEADPHONES", "headphones"), ("SPEAKERS", "speakers")],
-             "Where the sounds around you come from. Headphones places each ahead, behind, above or below you, as "
-             "the Xbox's 3D audio did; Speakers pans them left and right. Auto chooses by what you are listening "
-             "on, and changes when you plug headphones in or take them out.", None),
+             "Where the sounds around you come from. Auto and Headphones place each ahead, behind, above or below "
+             "you, as the Xbox's 3D audio did on speakers and headphones alike; Speakers pans them left and right.",
+             None),
             ("REVERB", "audio.reverb", ON_OFF,
              "Echoes sounds as the place you are in would, and muffles those behind walls, as the Xbox did. It "
              "costs a little of the processor.", None),
@@ -814,13 +832,12 @@ PAGES = {
     },
     "profile_settings": {
         "screen": "profile_settings_screen", "tab": "PROFILES",
-        "about": "Your player profiles, your name and color, and the mods.",
+        "about": "Your player profiles, your name and color.",
         "rows": [
             # (with no profile, NAME, COLOR and MANAGE PROFILES are hidden and
             # CREATE PROFILE shown; in a game, those whose screens are
             # ui.map's: the name's keyboard, the colours' pictures, and those
-            # that are the main menu's: the profiles, the mods:
-            # settings_rows_show)
+            # that are the main menu's: the profiles: settings_rows_show)
             (SECTION, "PLAYER"),
             ("NAME ›", None, f"{PE}/name_edit/profile_name_screen",
              "The name the other players see, kept in your player profile.", None, "name",
@@ -833,15 +850,25 @@ PAGES = {
             ("MANAGE PROFILES ›", None, PROFILE_MANAGER,
              "Switch to another player profile, make a new one or delete one. Your changes so far are kept.", None,
              "profiles", "port settings profiles"),
-            # (port/linux/game/mods.c: this machine's, every profile's)
-            (SECTION, "MODS"),
-            ("MODS ›", None, f"{MODS}/mods_screen",
-             "Texture, sound, text and model packs from the mods folder: turn each on or off, and choose which "
-             "plays over which. They are this computer's, for every profile.", None, "mods"),
             (SECTION, "ABOUT"),
             ("OPENH1", None, None,
              "Halo: Combat Evolved, the Xbox game, on this computer, played from your own copy of its maps. OpenH1 "
              "is a free fan project.", None, "about"),
+        ],
+    },
+    # (port/linux/game/mods.c: this machine's, every profile's; MANAGE MODS
+    # is the main menu's, hidden in a game: settings_rows_show)
+    "mods_settings": {
+        "screen": "mods_settings_screen", "tab": "MODS",
+        "about": "Texture, sound, text and model packs from the mods folder.",
+        "rows": [
+            (SECTION, "MODS"),
+            ("MANAGE MODS ›", None, f"{MODS}/mods_screen",
+             "Texture, sound, text and model packs from the mods folder: turn each on or off, and choose which "
+             "plays over which. They are this computer's, for every profile.", None, "mods"),
+            ("MODS FOLDER", None, None,
+             "Each mod is a folder in the mods folder, beside the maps folder, with its mod.toml and its tags. "
+             "Mods are turned on and off from the main menu's Settings, not in a game.", None, "mods_folder"),
         ],
     },
     # ---- the pages the rows open
@@ -950,15 +977,9 @@ PAGES = {
             ("WEAPON FIELD OF VIEW", "display.viewmodel_fov", WEAPON_FIELDS_OF_VIEW,
              "How wide your weapon and hands are drawn, in degrees across a 16:9 screen: wider draws them "
              "smaller. Default keeps the weapon's own view.|Click the number (or press A) to type any from 20 to 150.", None),
-            ("WEAPON HORIZONTAL", "display.viewmodel_offset_x", VIEWMODEL_OFFSETS,
-             "Moves your weapon and hands right, or left below 0, in centimeters, for every weapon, as far on "
-             "the screen at any weapon field of view. 0 keeps them where the game puts them.|Click the number (or press A) to type any from -20 to 20.", None),
-            ("WEAPON VERTICAL", "display.viewmodel_offset_y", VIEWMODEL_OFFSETS,
-             "Moves your weapon and hands up, or down below 0, in centimeters. Lower it to see more of the "
-             "screen.|Click the number (or press A) to type any from -20 to 20.", None),
-            ("WEAPON DEPTH", "display.viewmodel_offset_z", VIEWMODEL_OFFSETS,
-             "Pushes your weapon and hands away from you, or closer below 0, in centimeters. Too close and they "
-             "cut off.|Click the number (or press A) to type any from -20 to 20.", None),
+            ("WEAPON POSITION ›", None, _page_screen(*WEAPON_POSITION),
+             "Moves and turns your weapon and hands on the screen, for every weapon and, in a game, for the one "
+             "you hold.", None),
             ("VEHICLE FIELD OF VIEW", "display.vehicle_fov", VEHICLE_FIELDS_OF_VIEW,
              "How wide you see in a vehicle, in degrees across a 16:9 screen. Default keeps the game's view; Match "
              "uses your Field of View. Above 150 needs Panini Projection.|Click the number (or press A) to type "
@@ -995,6 +1016,58 @@ PAGES = {
              "from your seat. Behind, the weapon cannot zoom.", None),
             ("SHIELDS ›", None, _page_screen(*SHIELDS),
              "Your shield's flare on your first-person arms, its color, and an overshield's glow.", None),
+        ],
+    },
+    WEAPON_POSITION[0]: {
+        "screen": WEAPON_POSITION[1], "title": "WEAPON POSITION",
+        "rows": [
+            (SECTION, "ALL WEAPONS"),
+            ("HORIZONTAL", "display.viewmodel_offset_x", VIEWMODEL_OFFSETS,
+             "Moves your weapon and hands right, or left below 0, in centimeters, for every weapon, as far on "
+             "the screen at any weapon field of view. 0 keeps them where the game puts them. In a game, Settings from the pause menu also sets the weapon you hold on its own.|Click "
+             "the number (or press A) to type any from -20 to 20.", None),
+            ("VERTICAL", "display.viewmodel_offset_y", VIEWMODEL_OFFSETS,
+             "Moves your weapon and hands up, or down below 0, in centimeters. Lower it to see more of the "
+             "screen. In a game, Settings from the pause menu also sets the weapon you hold on its own.|Click the number (or press A) to type any from -20 to 20.", None),
+            ("DEPTH", "display.viewmodel_offset_z", VIEWMODEL_OFFSETS,
+             "Pushes your weapon and hands away from you, or closer below 0, in centimeters. Too close and they "
+             "cut off. In a game, Settings from the pause menu also sets the weapon you hold on its own.|Click the number (or press A) to type any from -20 to 20.", None),
+            ("PITCH", "display.viewmodel_pitch", VIEWMODEL_ROTATIONS,
+             "Tilts your weapon's muzzle up, or down below 0, in degrees, turning it in place. Your shots still "
+             "go where the reticle points. In a game, Settings from the pause menu also sets the weapon you hold on its own.|Click the number (or press A) to type any from -15 to "
+             "15.", None),
+            ("YAW", "display.viewmodel_yaw", VIEWMODEL_ROTATIONS,
+             "Turns your weapon's muzzle right, or left below 0, in degrees. Your shots still go where the "
+             "reticle points. In a game, Settings from the pause menu also sets the weapon you hold on its own.|Click the number (or press A) to type any from -15 to 15.", None),
+            ("ROLL", "display.viewmodel_roll", VIEWMODEL_ROTATIONS,
+             "Tilts the top of your weapon right, or left below 0, in degrees. Your shots still go where the "
+             "reticle points. In a game, Settings from the pause menu also sets the weapon you hold on its own.|Click the number (or press A) to type any from -15 to 15.", None),
+            # (the held weapon's own, added to those above, kept in
+            # config.toml by its tag's path; in a game only:
+            # menu_functions.c's viewmodel_weapon_rows_show)
+            (SECTION, "THIS WEAPON"),
+            ("HORIZONTAL", "weapon.x", VIEWMODEL_OFFSETS,
+             "Moves the weapon you hold right, or left below 0, in centimeters, added to All Weapons'. Each "
+             "weapon keeps its own, a modded map's too.|Click the number (or press A) to type any from -20 to 20.",
+             None, "viewmodel_weapon_x"),
+            ("VERTICAL", "weapon.y", VIEWMODEL_OFFSETS,
+             "Moves the weapon you hold up, or down below 0, in centimeters, added to All Weapons'.|Click the "
+             "number (or press A) to type any from -20 to 20.", None, "viewmodel_weapon_y"),
+            ("DEPTH", "weapon.z", VIEWMODEL_OFFSETS,
+             "Pushes the weapon you hold away, or closer below 0, in centimeters, added to All Weapons'.|Click "
+             "the number (or press A) to type any from -20 to 20.", None, "viewmodel_weapon_z"),
+            ("PITCH", "weapon.pitch", VIEWMODEL_ROTATIONS,
+             "Tilts the muzzle of the weapon you hold up, or down below 0, in degrees, added to All Weapons'."
+             "|Click the number (or press A) to type any from -15 to 15.", None, "viewmodel_weapon_pitch"),
+            ("YAW", "weapon.yaw", VIEWMODEL_ROTATIONS,
+             "Turns the muzzle of the weapon you hold right, or left below 0, in degrees, added to All "
+             "Weapons'.|Click the number (or press A) to type any from -15 to 15.", None, "viewmodel_weapon_yaw"),
+            ("ROLL", "weapon.roll", VIEWMODEL_ROTATIONS,
+             "Tilts the top of the weapon you hold right, or left below 0, in degrees, added to All Weapons'."
+             "|Click the number (or press A) to type any from -15 to 15.", None, "viewmodel_weapon_roll"),
+            ("RESET THIS WEAPON", None, None,
+             "Puts the weapon you hold back to All Weapons' place: its own offsets go back to 0 when you press "
+             "OK.", None, "viewmodel_weapon_reset", "port settings weapon reset"),
         ],
     },
     SHIELDS[0]: {
@@ -1152,11 +1225,6 @@ PAGES = {
             ("PING", "network.browser_ping", BROWSER_PINGS,
              "Lists only the games whose ping is under this.|A game whose ping is not known is listed: a local "
              "network game's, a dedicated server's, one still being timed.", None),
-            # (the search's words typed into its value: menu_functions.c's
-            # browser_search_edit)
-            ("SEARCH", None, None,
-             "Lists only the games whose server name or map has these words. Select it and type; Enter keeps "
-             "them. Empty them to list every game.", None, "browser_search", "port browser search"),
             (SECTION, "GAME TYPES"),
             ("CAPTURE THE FLAG", "network.browser_show_ctf", SHOW_HIDE,
              "Lists Capture the Flag games, OpenCE's kinds of it too.", None),
@@ -1198,6 +1266,26 @@ PAGES = {
     },
 }
 SETTINGS_TAB_PAGES = [folder for folder, page in PAGES.items() if "tab" in page]
+
+
+def tab_name_width(name: str) -> float:
+    """a tab's name's width in small_ui (SMALL_UI_CAPITALS)"""
+    return sum(SMALL_UI_CAPITALS[letter] for letter in name)
+
+
+def settings_tab_places() -> list:
+    """each of Settings' tabs' left and width at 4:3: as wide as its name and
+    the same room either side of it, SETTINGS_TAB_GAP apart, filling the row
+    from SETTINGS_TABS_X to SETTINGS_TABS_RIGHT"""
+    names = [PAGES[folder]["tab"] for folder in SETTINGS_TAB_PAGES]
+    room = (SETTINGS_TABS_RIGHT - SETTINGS_TABS_X - SETTINGS_TAB_GAP * (len(names) - 1) -
+            sum(map(tab_name_width, names))) / (2 * len(names))
+    places, x = [], float(SETTINGS_TABS_X)
+    for name in names:
+        right = x + tab_name_width(name) + 2 * room
+        places.append((round(x), round(right) - round(x)))
+        x = right + SETTINGS_TAB_GAP
+    return places
 # the panel's words for the buttons, on a tab and on a page the rows open
 SETTINGS_BUTTON_HELP = {
     "tab": ["Puts this tab's settings back to their defaults. Nothing changes until OK.",
@@ -1682,7 +1770,7 @@ def _settings_page(folder: str, page: dict) -> list:
                       *([f'<child widget="{SETTINGS}/tab_prompt_previous" x="{WIDE_MARGIN}" '
                          f'y="{SETTINGS_TABS_TOP}"/>',
                          f'<child widget="{SETTINGS}/tab_prompt_next" '
-                         f'x="{SETTINGS_TABS_X + 5 * SETTINGS_TAB_STEP + SETTINGS_TAB_LAID + 4}" '
+                         f'x="{SETTINGS_TABS_RIGHT + 4}" '
                          f'y="{SETTINGS_TABS_TOP}"/>'] if tab else []),
                       f'<child widget="{base}/options_menu"/>'])
     if not tab:
@@ -1706,11 +1794,11 @@ def _settings_page(folder: str, page: dict) -> list:
     if tab:
         # (each tab: its name, the current one framed; A or a click opens it)
         items = []
-        for index, other in enumerate(SETTINGS_TAB_PAGES):
+        for index, (other, (tab_x, tab_width)) in enumerate(zip(SETTINGS_TAB_PAGES, settings_tab_places())):
             current = other == folder
             name = f"{base}/tab_{PAGES[other]['screen'][:-len('_screen')]}"
-            items.append(f'<child widget="{name}" x="{SETTINGS_TABS_X + index * SETTINGS_TAB_STEP}"/>')
-            lines += _settings_text(name, [("width", SETTINGS_TAB_LAID), ("height", SETTINGS_TAB_HEIGHT),
+            items.append(f'<child widget="{name}" x="{tab_x}"/>')
+            lines += _settings_text(name, [("width", tab_width), ("height", SETTINGS_TAB_HEIGHT),
                                            ("flags", "keep_ends"),
                                            ("wide", wide(wide_spread(index, len(SETTINGS_TAB_PAGES)))),
                                            ("bitmap", f"{SETTINGS}/{'tab_current' if current else 'tab'}"),
@@ -2228,6 +2316,7 @@ PING_BARS = f"{MT}/ping_bars"
 # and bitmap, whose frames are none, a favorite (gold), a favorite offline
 # (grey) and the outline a click on the row focused stars (Lucide's star,
 # port/assets/icons/lucide)
+LUCIDE = Path(__file__).resolve().parent.parent / "port/assets/icons/lucide"
 FAVORITE_STAR_WIDGET = f"{MT}/join_game/server_item_favorite"
 FAVORITE_STAR = f"{MT}/join_game/favorite_star"
 FAVORITE_STAR_STYLES = [None, ("#E8C547", "#E8C547"), ("#7F8A99", "#7F8A99"), ("none", "#2896FF")]
@@ -3874,8 +3963,21 @@ BROWSER_WIDE_PANEL = (-WIDE_HALF + BROWSER_WIDE_LIST, WIDE_EXTRA - BROWSER_WIDE_
 # left out for a number too wide for both: menu_functions.c's browser_row_show)
 BROWSER_PING_BARS = 24
 # (a title wider or narrower than its column: Players' ends where its
-# column ends, with its numbers)
-BROWSER_HEADER_WIDTHS = {"type": 40, "players": 70}
+# column ends, with its numbers; Server's and Map's as wide as their words
+# and sort arrow, their search's magnifying glass after them)
+BROWSER_HEADER_WIDTHS = {"type": 40, "players": 70, "server_name": 76, "map": 50}
+# the columns searched (menu_functions.c's browser_searches): each title's
+# magnifying glass (op_search_<column>, after it), the field typed into in
+# its place (op_search_field_<column>, its column's width but the X's) and
+# its X (op_search_clear_<column>, at the column's right), each 16 units
+# square but the field
+BROWSER_SEARCHED = ("server_name", "map")
+BROWSER_SEARCH_ICON = f"{MT}/join_game/search_icon"
+BROWSER_SEARCH_CLEAR = f"{MT}/join_game/search_clear"
+BROWSER_SEARCH_X_GAP = 2
+# (the list's CLEAR SEARCH, under the words for no games, while the searches
+# hide every game: menu_functions.c's browser_clear_show)
+BROWSER_CLEAR = (164, 24)
 # the column titles: (widget, words, column)
 BROWSER_HEADERS = [("op_sort_header_server_name", "SERVER", "server_name"), ("op_sort_header_map", "MAP", "map"),
                    ("op_sort_header_type", "MODE", "type"), ("op_sort_header_players", "PLAYERS", "players"),
@@ -3884,19 +3986,26 @@ BROWSER_TICK_BADGE = 30
 # the panel's pills: a game's kind and tick rate, and OpenCE's
 BROWSER_PILL, BROWSER_WIDE_PILL = 64, 132
 BROWSER_JOIN = (148, 24)
+# (the list's CLEAR SEARCH: under the words for no games)
+BROWSER_CLEAR_TOP = 288
 # the footer's prompts: (widget, words, x, width, its function); the
 # browser shows those of its list (menu_functions.c's browser_prompts_show)
 BROWSER_PROMPTS = [
-    ("prompt_favorite", "%y-button FAVORITE", 28, 124, '<on event="a" run="port browser favorite"/>'),
-    ("prompt_refresh", "%right-trigger REFRESH", 156, 124, '<on event="a" run="port browser refresh"/>'),
-    ("prompt_paste", "%right-trigger PASTE LINK", 156, 144, '<on event="a" run="port browser refresh"/>'),
+    ("prompt_favorite", "%y-button FAVORITE", 24, 108, '<on event="a" run="port browser favorite"/>'),
+    ("prompt_refresh", "%right-trigger REFRESH", 134, 102, '<on event="a" run="port browser refresh"/>'),
+    ("prompt_paste", "%right-trigger PASTE LINK", 134, 124, '<on event="a" run="port browser refresh"/>'),
+    # (the searches, but Join by Link's: the server's, then the map's, then
+    # the server's again: menu_functions.c's browser_search_next)
+    ("prompt_search", "%right-thumb SEARCH", 238, 97, '<on event="a" run="port browser search next"/>'),
     # (the next column's title sorts: menu_functions.c's browser_sort_choose)
-    ("prompt_sort", "%x-button SORT", 304, 100, '<on event="a" run="port browser sort"/>'),
+    ("prompt_sort", "%x-button SORT", 337, 90, '<on event="a" run="port browser sort"/>'),
     # (the Filters page, but Join by Link's: menu_functions.c's browser_filters_open)
-    ("prompt_filters", "%left-trigger FILTERS", 408, 100,
+    ("prompt_filters", "%left-trigger FILTERS", 429, 97,
      f'<on event="a" run="port browser filters" open="{_page_screen(*BROWSER_FILTERS)}"/>'),
-    ("prompt_back", "%b-button BACK", 516, 96, '<on event="a" run="mouse emit back event"/>'),
+    ("prompt_back", "%b-button BACK", 528, 88, '<on event="a" run="mouse emit back event"/>'),
 ]
+# (six prompts across 4:3: their words closer to their highlights' left)
+BROWSER_PROMPT_TEXT_X = 5
 # Multiplayer's: its list's items (and its two pages': CREATE GAME's and
 # CO-OP CAMPAIGN's), the panel beside them, the line over EDIT GAMETYPES
 HUB = f"{MT}/hub"
@@ -4012,7 +4121,7 @@ def parts_pictures() -> list:
              [(framed(BROWSER_LIST_WIDTH, BROWSER_ROW_HEIGHT, "#0d3a7a", 0.9, "#8cc8ff"), BROWSER_LIST_WIDTH,
                BROWSER_ROW_HEIGHT)])]
     prompt_widths = sorted({width for *_, width, _ in BROWSER_PROMPTS + HUB_PROMPTS + PARTY_PROMPTS +
-                            LOBBY_PROMPTS + FRIENDS_PROMPTS})
+                            LOBBY_PROMPTS + FRIENDS_PROMPTS} | {BROWSER_CLEAR[0]})
     join_w, join_h = BROWSER_JOIN
     return [
         # (Settings' tab, then its current one: menu_functions.c's
@@ -4038,6 +4147,14 @@ def parts_pictures() -> list:
                                        (framed(join_w, join_h, "#2a6fe0", 1.0, "#b8dbff"), join_w, join_h)]),
         *lobby_pictures(framed, highlight),
         *touch_pictures(),
+        # (the searches' fields, magnifying glass and X: Lucide's,
+        # port/assets/icons/lucide)
+        *((part_outline(width, 16), [(framed(width, 16, "#000e23", 0.9, "#2f7fff", 4), width, 16),
+                                     (framed(width, 16, "#0d3a7a", 0.9, "#b8dbff", 4), width, 16)])
+          for width in sorted({place[2] for column in BROWSER_SEARCHED for place in _search_places(column)
+                               if place[0] == "op_search_field"})),
+        (BROWSER_SEARCH_ICON, browser_search_frames(LUCIDE, "search")),
+        (BROWSER_SEARCH_CLEAR, browser_search_frames(LUCIDE, "x")),
     ]
 
 
@@ -4104,7 +4221,7 @@ def _tab_strip(base: str, strip: str, tabs: list, handlers: list) -> list:
     return lines
 
 
-def _prompts(base: str, bar: str, prompts: list, defined: tuple = ()) -> list:
+def _prompts(base: str, bar: str, prompts: list, defined: tuple = (), text_x: int = 8) -> list:
     """a footer of key prompts, a bar of buttons: each its button's picture
     in its words (the device's, menu_functions.c's), highlighted while it
     has the focus, and its function run by A or a click (those another
@@ -4116,7 +4233,7 @@ def _prompts(base: str, bar: str, prompts: list, defined: tuple = ()) -> list:
         lines += _widget(f"{base}/{name}", [("type", "text"), ("width", width), ("height", PART_PROMPT_HEIGHT),
                                            ("wide", prompt_wide(x, width)),
                                            ("bitmap", part_highlight(width, PART_PROMPT_HEIGHT)), ("text", words),
-                                           ("font", "ui\\small_ui"), ("color", PART_TEXT), ("text_x", 8),
+                                           ("font", "ui\\small_ui"), ("color", PART_TEXT), ("text_x", text_x),
                                            ("text_y", caps_text_y(PART_PROMPT_HEIGHT))],
                          [handler, handler.replace('event="a"', 'event="start"'),
                           '<on event="left_mouse" run="mouse emit accept event"/>'])
@@ -4168,6 +4285,7 @@ def _browser() -> list:
                      '<on event="x" run="port browser sort"/>', '<on event="y" run="port browser favorite"/>',
                      '<on event="right_trigger" run="port browser refresh"/>',
                      f'<on event="left_trigger" run="port browser filters" open="{_page_screen(*BROWSER_FILTERS)}"/>',
+                     '<on event="right_thumb" run="port browser search next"/>',
                      f'<child widget="{base}/header_join_game"/>',
                      f'<child widget="{base}/browser_counts"/>',
                      f'<child widget="{SETTINGS}/tab_prompt_previous" x="{WIDE_MARGIN}" y="{SETTINGS_TABS_TOP}" '
@@ -4210,29 +4328,57 @@ def _browser() -> list:
                       f'<child widget="{base}/join_game_header" y="{BROWSER_HEADERS_TOP}"/>',
                       *rows,
                       f'<child widget="{base}/browser_join_bar" y="{panel_top + panel_height - BROWSER_JOIN[1] - 10}"/>',
+                      f'<child widget="{base}/browser_clear_bar" y="{BROWSER_CLEAR_TOP}"/>',
                       f'<child widget="{base}/join_game_button_bar" y="414"/>'])
     lines += _tab_strip(base, "browser_tabs", BROWSER_TABS, ['<on event="a" run="port browser tab"/>',
                                                              '<on event="start" run="port browser tab"/>'])
     # (the column titles: A or a click sorts by one, again the other way;
     # its arrow says which way: menu_functions.c's browser_sort_headers_show)
+    # (and after Server's and Map's, their searches: the magnifying glass,
+    # or the field typed into and its X, which A, Start or a click begin,
+    # menu_functions.c's browser_search_edit and browser_search_clear)
+    headers = []
+    for name, _, column in BROWSER_HEADERS:
+        headers.append(f'<child widget="{base}/{name}" x="{BROWSER_LIST_X + _header_x(column)}"/>')
+        if column in BROWSER_SEARCHED:
+            headers += [f'<child widget="{base}/{part}_{column}" x="{BROWSER_LIST_X + x}"/>'
+                        for part, x, _ in _search_places(column)]
     lines += _widget(f"{base}/join_game_header", [("type", "column_list"), ("width", 640), ("height", 16),
                                                   ("flags", "pass_unhandled_to_focused_child left_right_tabs_items")],
-                     [f'<child widget="{base}/{name}" x="{BROWSER_LIST_X + _header_x(column)}"/>'
-                      for name, _, column in BROWSER_HEADERS])
+                     headers)
     for name, words, column in BROWSER_HEADERS:
         width = BROWSER_HEADER_WIDTHS.get(column, BROWSER_COLUMNS[column][1])
         right = column in ("players", "ping")
         # (over its column, on a wide screen too: the list's move and the
-        # column's, its growth)
+        # column's, its growth; a searched column's as wide as its words, its
+        # magnifying glass after it)
         moved, grown = BROWSER_WIDE_COLUMNS[column]
         lines += _widget(f"{base}/{name}", [("type", "text"), ("width", width), ("height", 16), ("text", words),
                                            ("font", "ui\\small_ui"), ("color", PART_DIM),
                                            ("align", "right" if right else None),
-                                           ("wide", wide(-WIDE_HALF + moved, grown))],
+                                           ("wide", wide(-WIDE_HALF + moved,
+                                                         0 if column in BROWSER_SEARCHED else grown))],
                          ['<on event="a" run="gamespy select header"/>',
                           '<on event="start" run="gamespy select header"/>',
                           '<on event="left_mouse" run="mouse emit accept event"/>',
                           f'<child widget="{base}/header_sort_arrows"/>'])
+    search = ['<on event="a" run="port browser search"/>', '<on event="start" run="port browser search"/>',
+              '<on event="left_mouse" run="mouse emit accept event"/>']
+    clear = [line.replace('"port browser search"', '"port browser search clear"') for line in search]
+    for column in BROWSER_SEARCHED:
+        moved, grown = BROWSER_WIDE_COLUMNS[column]
+        (_, _, field_width), = [place for place in _search_places(column) if place[0] == "op_search_field"]
+        lines += _widget(f"{base}/op_search_{column}", [("width", 16), ("height", 16),
+                                                        ("bitmap", BROWSER_SEARCH_ICON),
+                                                        ("wide", wide(-WIDE_HALF + moved))], search)
+        lines += _widget(f"{base}/op_search_field_{column}",
+                         [("type", "text"), ("width", field_width), ("height", 16),
+                          ("bitmap", part_outline(field_width, 16)), ("font", "ui\\small_ui"),
+                          ("color", "#FFFFFFFF"), ("text_x", 4), ("text_y", caps_text_y(16)),
+                          ("text_flags", "no_focus_test"), ("wide", wide(-WIDE_HALF + moved, grown))], search)
+        lines += _widget(f"{base}/op_search_clear_{column}", [("width", 16), ("height", 16),
+                                                              ("bitmap", BROWSER_SEARCH_CLEAR),
+                                                              ("wide", wide(-WIDE_HALF + moved + grown))], clear)
     lines += _widget(f"{base}/header_sort_arrows", [("width", 16), ("height", 16)],
                      [f'<child widget="{base}/header_sort_up_arrow"/>',
                       f'<child widget="{base}/header_sort_down_arrow"/>'])
@@ -4327,8 +4473,42 @@ def _browser() -> list:
                                              ("color", "#FFFFFFFF"), ("text_x", 12), ("text_y", caps_text_y(join_h))],
                      ['<on event="a" run="gamespy select button"/>', '<on event="start" run="gamespy select button"/>',
                       '<on event="left_mouse" run="mouse emit accept event"/>'])
-    lines += _prompts(base, "join_game_button_bar", BROWSER_PROMPTS)
+    # (CLEAR SEARCH, under the words for no games while the searches hide
+    # every game: menu_functions.c's browser_clear_show)
+    clear_w, clear_h = BROWSER_CLEAR
+    lines += _widget(f"{base}/browser_clear_bar", [("type", "column_list"), ("width", 640), ("height", clear_h),
+                                                   ("flags", "pass_unhandled_to_focused_child")],
+                     [f'<child widget="{base}/button_clear_search" '
+                      f'x="{BROWSER_LIST_X + (BROWSER_LIST_WIDTH - clear_w) // 2}"/>'])
+    lines += _widget(f"{base}/button_clear_search", [("type", "text"), ("width", clear_w), ("height", clear_h),
+                                                     ("bitmap", part_highlight(clear_w, clear_h)),
+                                                     ("wide", wide(-WIDE_HALF + BROWSER_WIDE_LIST // 2)),
+                                                     ("text", "%a-button CLEAR SEARCH"), ("font", "ui\\small_ui"),
+                                                     ("color", PART_TEXT), ("text_x", 8),
+                                                     ("text_y", caps_text_y(clear_h))],
+                     ['<on event="a" run="port browser search clear"/>',
+                      '<on event="start" run="port browser search clear"/>',
+                      '<on event="left_mouse" run="mouse emit accept event"/>'])
+    lines += _prompts(base, "join_game_button_bar", BROWSER_PROMPTS, text_x=BROWSER_PROMPT_TEXT_X)
     return lines
+
+
+def _search_places(column: str) -> list:
+    """a searched column's parts in a row's places: (name, x, width) of its
+    magnifying glass (after its title), its field (from the column's left
+    to its X) and its X (at the column's right)"""
+    x, width = BROWSER_COLUMNS[column]
+    clear_x = x + width - 16
+    return [("op_search", _header_x(column) + BROWSER_HEADER_WIDTHS[column], 16),
+            ("op_search_field", x, clear_x - BROWSER_SEARCH_X_GAP - x), ("op_search_clear", clear_x, 16)]
+
+
+def browser_search_frames(icons: Path, name: str) -> list:
+    """a search's icon (Lucide's search or x), 16 pixels square: blue, and
+    white while it has the focus"""
+    svg = (icons / f"{name}.svg").read_text()
+    return [(svg.replace('stroke="currentColor"', f'stroke="{color}"').replace('width="24"', 'width="16"')
+             .replace('height="24"', 'height="16"'), 16, 16) for color in ("#2896FF", "#FFFFFF")]
 
 
 def _hub_panel(folder: str, place: tuple, wide_panel: tuple) -> list:

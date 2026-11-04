@@ -2666,6 +2666,11 @@ static struct observer_result direct_cameras[MAXIMUM_LOCAL_PLAYERS];
 /* each local player's view drawn last from the newest step
 (render_interpolation_view_newest) */
 static boolean newest_views[MAXIMUM_LOCAL_PLAYERS];
+/* each local player's view between the ticks (which goes with the body
+drawn) and the view drawn, this frame (render_interpolation_view_flashlight) */
+static struct observer_result blended_views[MAXIMUM_LOCAL_PLAYERS];
+static struct observer_result drawn_views[MAXIMUM_LOCAL_PLAYERS];
+static boolean drawn_views_valid[MAXIMUM_LOCAL_PLAYERS];
 
 /* the views display.direct_camera takes (render_interpolation_direct) */
 enum
@@ -3829,6 +3834,7 @@ struct observer_result const *render_interpolation_camera(
 	if (local_player_index < 0 || local_player_index >= MAXIMUM_LOCAL_PLAYERS)
 		return observer;
 	blended = render_interpolation_blended_camera(local_player_index, observer);
+	drawn_views_valid[local_player_index] = FALSE;
 	/* (in a seat of the player's vehicle drawn from its newest step) */
 	direct = render_interpolation_seat_camera(local_player_index, observer, blended);
 	if (direct)
@@ -3844,7 +3850,68 @@ struct observer_result const *render_interpolation_camera(
 #endif
 	if (newest_views[local_player_index])
 		render_interpolation_newest_camera(local_player_index, observer, &direct_cameras[local_player_index]);
+	if (blended && direct)
+	{
+		blended_views[local_player_index] = *blended;
+		drawn_views[local_player_index] = *direct;
+		drawn_views_valid[local_player_index] = TRUE;
+	}
 	return direct;
+}
+
+/* The local player's own flashlight in the first person on foot, when the
+first-person weapon does not carry it (none in hand, or zoomed: it is on the
+weapon's marker otherwise, which is posed from the view): the game lights it
+from the body's marker, on the head that the first person does not draw.
+That marker turns with the head, whose look trails the aim through a turn
+and catches up with it, and is drawn between the ticks, a tick behind the
+view drawn from the newest step (display.direct_camera); so the pool of
+light slid about the screen and jumped back as the player turned (#589).
+Here it shines along the view drawn, its aim (up as the view's), from where
+the body has it: as far along, across and up from the view drawn as it is
+from the view between the ticks, which goes with the body. FALSE (and
+nothing moved) for any other unit, view or window, and in the VR mode,
+whose view is the head's */
+boolean render_interpolation_view_flashlight(
+	long unit_index,
+	real_point3d *position,
+	real_vector3d *forward,
+	real_vector3d *up)
+{
+	short local_player_index = render.local_player_index;
+	struct observer_result const *from, *to;
+	real_vector3d from_left, to_left, offset;
+	real along, across, height;
+
+	if (local_player_index < 0 || local_player_index >= MAXIMUM_LOCAL_PLAYERS ||
+		!drawn_views_valid[local_player_index] || unit_index == NONE ||
+		player_control_get_unit_index(local_player_index) != unit_index ||
+		director_get_perspective(local_player_index) != _director_perspective_first_person ||
+		director_inhibited_facing(local_player_index) || cinematic_in_progress() ||
+		object_get(unit_index)->object.parent_object_index != NONE)
+	{
+		return FALSE;
+	}
+#ifdef HALO_VR
+	if (halo_vr_running())
+		return FALSE;
+#endif
+	from = &blended_views[local_player_index];
+	to = &drawn_views[local_player_index];
+	cross_product3d(&from->up, &from->forward, &from_left);
+	cross_product3d(&to->up, &to->forward, &to_left);
+	offset.i = position->x - from->position.x;
+	offset.j = position->y - from->position.y;
+	offset.k = position->z - from->position.z;
+	along = dot_product3d(&offset, &from->forward);
+	across = dot_product3d(&offset, &from_left);
+	height = dot_product3d(&offset, &from->up);
+	position->x = to->position.x + to->forward.i * along + to_left.i * across + to->up.i * height;
+	position->y = to->position.y + to->forward.j * along + to_left.j * across + to->up.j * height;
+	position->z = to->position.z + to->forward.k * along + to_left.k * across + to->up.k * height;
+	*forward = to->forward;
+	*up = to->up;
+	return TRUE;
 }
 
 boolean render_interpolation_view_newest(

@@ -1593,7 +1593,7 @@ void scenario_structure_bsps_read_ahead(
 		{
 			structure_culling_structure_bsp_read(
 				((struct cache_file_structure_bsp_header *)reference->base_address)->base_address,
-				index);
+				index, structure_bsp_cache_copy_offset(reference));
 		}
 	}
 	halo_load_trace("bsp.read_ahead.end", NULL); /* port: loading measurement */

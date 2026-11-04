@@ -1724,12 +1724,19 @@ static void hud_draw_bitmap_with_meter(
 		point.y += vr_render_crosshair_offset[1];
 	}
 #endif
-	reticle_scale = is_crosshair_bitmap && absolute_placement->corner == _hud_anchor_center ?
-		render_fov_reticle_scale(render.local_player_index) * panini_center_scale() : 1.0f;
+	/* (the weapon's reticle one size through a zoom, display.fov's; a
+	scope's own pieces with the view, as its picture is) */
+	reticle_scale = 1.0f;
+	if (is_crosshair_bitmap && absolute_placement->corner == _hud_anchor_center)
+	{
+		reticle_scale = is_crosshair_bitmap == HUD_CROSSHAIR_SCOPE_PIECE ?
+			render_fov_reticle_scale(render.local_player_index) * panini_center_scale() :
+			render_fov_reticle_size(render.local_player_index);
+	}
 	/* port: the crosshairs_draw scope moves only the weapon's reticle: to
 	the passenger's shot, or to where the aim lands below the middle
 	(display.lowered_reticle) */
-	if (is_crosshair_bitmap && !passenger_camera_reticle_offset(&point))
+	if (is_crosshair_bitmap && !passenger_camera_reticle_offset(&point, reticle_scale))
 		lowered_reticle_offset_point(&point, reticle_scale);
 	hud_calculate_bitmap_bounds(
 		bitmap,

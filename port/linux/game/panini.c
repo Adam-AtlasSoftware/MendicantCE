@@ -164,6 +164,22 @@ real panini_center_scale(void)
 	return window.active ? window.panini.scale : 1.0f;
 }
 
+real panini_center_scale_widened(real widening)
+{
+	struct panini_projection widened;
+	real d, s;
+
+	if (!window.active)
+		return 1.0f;
+	if (widening == 1.0f || !(widening > 0.0f) || !panini_settings(&d, &s) ||
+		!panini_projection_fit(&widened, d, s, MAX(-window.left, window.right) * widening,
+			MAX(-window.bottom, window.top) * widening))
+	{
+		return window.panini.scale;
+	}
+	return widened.scale;
+}
+
 real panini_strength(void)
 {
 	real d, s;
