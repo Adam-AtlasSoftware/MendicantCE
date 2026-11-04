@@ -686,6 +686,7 @@ static void rejection_case(void)
 	sdf_put32(changed + 16, 5000);
 	sdf_put32(changed + size - 4, sdf_crc(0, changed, size - 4));
 	rejected(changed, size, 0xC0FFEE12UL, 2, "too wide");
+	CHECK(logged >= 9, "%d deletions logged", logged);
 	/* (and the good one still taken) */
 	CHECK(sdf_file_write(cache_path(), bytes, size) && sdf_cache_load(cache_path(), 0xC0FFEE12UL, 2, &back), "good");
 	remove(cache_path());
