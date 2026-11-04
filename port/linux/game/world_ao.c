@@ -23,6 +23,7 @@ the Classic preset's "off") draws exactly as before.
 
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 const char *config_string(const char *name);
@@ -117,14 +118,18 @@ static struct
 	struct world_proxy proxies[WORLD_AO_TEST_SHAPES];
 	long count;
 	struct world_sdf_volume volume;
-	signed char voxels[WORLD_AO_TEST_WIDTH * WORLD_AO_TEST_HEIGHT * WORLD_AO_TEST_DEPTH];
+	/* (allocated when first asked for: the guest's image holds no more) */
+	signed char *voxels;
 } world_ao_test;
 
 static void world_ao_test_parse(const char *setting)
 {
 	const char *at;
 
+	signed char *voxels = world_ao_test.voxels;
+
 	memset(&world_ao_test, 0, sizeof(world_ao_test));
+	world_ao_test.voxels = voxels;
 	snprintf(world_ao_test.text, sizeof(world_ao_test.text), "%s", setting);
 	world_ao_test.parsed = 1;
 	for (at = setting; at && *at; at = strchr(at, ';') ? strchr(at, ';') + 1 : NULL)
@@ -180,6 +185,10 @@ static void world_ao_test_field(float const camera_position[3])
 	float length = sqrtf(plane[0] * plane[0] + plane[1] * plane[1] + plane[2] * plane[2]);
 	unsigned long x, y, z;
 
+	if (!world_ao_test.voxels)
+		world_ao_test.voxels = malloc(WORLD_AO_TEST_WIDTH * WORLD_AO_TEST_HEIGHT * WORLD_AO_TEST_DEPTH);
+	if (!world_ao_test.voxels)
+		return;
 	header->width = WORLD_AO_TEST_WIDTH;
 	header->height = WORLD_AO_TEST_HEIGHT;
 	header->depth = WORLD_AO_TEST_DEPTH;
@@ -223,6 +232,8 @@ static int world_ao_test_window(float const camera_position[3])
 		world_ao_test_parse(setting);
 	if (!world_ao_test.uploaded)
 		world_ao_test_field(camera_position);
+	if (!world_ao_test.uploaded)
+		return 0;
 	memcpy(world_ao.proxies, world_ao_test.proxies, sizeof(world_ao_test.proxies));
 	memset(world_ao.owners, 0xff, sizeof(world_ao.owners));
 	world_ao.count = world_ao_test.count;
