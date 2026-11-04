@@ -57,6 +57,9 @@ camera between the head and the seat's following camera */
 #define VEHICLE_FOV_TRANSITION_MILLISECONDS 500
 
 static real reticle_scales[MAXIMUM_LOCAL_PLAYERS];
+static real reticle_sizes[MAXIMUM_LOCAL_PLAYERS];
+/* how much wider the unzoomed view is than the one drawn (1 unzoomed) */
+static real reticle_widenings[MAXIMUM_LOCAL_PLAYERS];
 static real authored_vertical[MAXIMUM_LOCAL_PLAYERS];
 
 /* each local player's way between display.fov and display.vehicle_fov: the
@@ -201,14 +204,19 @@ cinematic, a scripted camera or a view the director holds, and at a scope's
 full zoom; between, the zoom's own transition. A vehicle's seat, first or
 third person, and its entering and exiting take the vehicle's, so the view
 and its reticle keep one size in the seat ("default": the stock view, its
-reticle at the stock size) */
-static real render_fov_adjust(short local_player_index, real native_vertical_field_of_view, real vehicle_weight)
+reticle at the stock size). The reticle's size, the unzoomed view's scale
+of it, is set too, and that view's tangent: 1 and 0 where the view is the
+game's own */
+static real render_fov_adjust(short local_player_index, real native_vertical_field_of_view, real vehicle_weight,
+	real *reticle_size, real *unzoomed_drawn_tangent)
 {
 	long unit_index, weapon_index;
 	struct unit_datum *unit;
 	real foot_tangent, vehicle_tangent, requested_tangent;
 	real unzoomed_angle, unzoomed_tangent, native_tangent, adjusted_tangent;
 
+	*reticle_size = 1.0f;
+	*unzoomed_drawn_tangent = 0.0f;
 	fov_requested_tangents(&foot_tangent, &vehicle_tangent);
 	if (!foot_tangent && !vehicle_tangent)
 		return native_vertical_field_of_view;
@@ -234,6 +242,13 @@ static real render_fov_adjust(short local_player_index, real native_vertical_fie
 		requested_tangent = vehicle_tangent;
 	else
 		requested_tangent = foot_tangent + (vehicle_tangent - foot_tangent) * vehicle_weight;
+	/* (the unzoomed view's scale of the reticle: a zoom leaves it as it is,
+	as the stock game draws its reticle one size at every zoom) */
+	if (requested_tangent > 0.0f)
+	{
+		*reticle_size = PIN(unzoomed_tangent / requested_tangent, 0.001f, 1000.0f);
+		*unzoomed_drawn_tangent = requested_tangent;
+	}
 	if (requested_tangent == unzoomed_tangent)
 		return native_vertical_field_of_view;
 
@@ -280,7 +295,9 @@ real render_fov_vertical(short local_player_index, real native_vertical_field_of
 	reticle is never a frame apart from the view it is drawn over) */
 	long unit_index;
 	real weight = vehicle_fov_weight(local_player_index, render_fov_unit(local_player_index, &unit_index));
-	real adjusted = render_fov_adjust(local_player_index, native_vertical_field_of_view, weight);
+	real reticle_size, unzoomed_drawn_tangent;
+	real adjusted = render_fov_adjust(local_player_index, native_vertical_field_of_view, weight, &reticle_size,
+		&unzoomed_drawn_tangent);
 
 	if (local_player_index >= 0 && local_player_index < MAXIMUM_LOCAL_PLAYERS)
 	{
@@ -297,6 +314,15 @@ real render_fov_vertical(short local_player_index, real native_vertical_field_of
 		/* (the view's projection, the zoom's transition too, for the HUD:
 		the weapon's own projection, viewmodel_projection_begin, is not it) */
 		reticle_scales[local_player_index] = scale;
+		reticle_sizes[local_player_index] = reticle_size;
+		reticle_widenings[local_player_index] = 1.0f;
+		if (unzoomed_drawn_tangent > 0.0f && adjusted > 0.0f && adjusted < _pi)
+		{
+			real widening = unzoomed_drawn_tangent / tanf(adjusted * 0.5f);
+
+			if (widening > 1.0f && widening < 1000.0f)
+				reticle_widenings[local_player_index] = widening;
+		}
 		/* (a widened view's own angle, which the weapon keeps by default) */
 		authored_vertical[local_player_index] =
 			adjusted != native_vertical_field_of_view ? native_vertical_field_of_view : 0.0f;
@@ -321,6 +347,20 @@ real render_fov_reticle_scale(short local_player_index)
 	return reticle_scales[local_player_index];
 }
 
+real render_fov_reticle_size(short local_player_index)
+{
+	/* (display.panini's magnification of the middle too, the unzoomed
+	view's: a zoom narrows the view the projection fits) */
+	if (local_player_index < 0 || local_player_index >= MAXIMUM_LOCAL_PLAYERS ||
+		!(reticle_sizes[local_player_index] > 0.0f))
+	{
+		return panini_center_scale();
+	}
+	return reticle_sizes[local_player_index] *
+		panini_center_scale_widened(reticle_widenings[local_player_index] > 0.0f ?
+			reticle_widenings[local_player_index] : 1.0f);
+}
+
 /* ---------- the mouse's turn zoomed (input.zoom_sensitivity) */
 
 /* a vertical angle as the horizontal one across 4:3, as CS2 gives its
@@ -337,6 +377,7 @@ real mouse_zoom_look_scale(short local_player_index, long unit_index, short zoom
 	struct unit_datum *unit;
 	long weapon_index;
 	real magnification, unzoomed_angle, zoomed_angle, unzoomed_drawn, zoomed_drawn, weight;
+	real reticle_size, unzoomed_drawn_tangent; /* (not wanted here) */
 
 	if (unit_index == NONE || zoom_level == NONE)
 		return 1.0f;
@@ -360,9 +401,11 @@ real mouse_zoom_look_scale(short local_player_index, long unit_index, short zoom
 	weight = local_player_index >= 0 && local_player_index < MAXIMUM_LOCAL_PLAYERS &&
 		vehicle_blends[local_player_index].valid ? vehicle_blends[local_player_index].weight : 0.0f;
 	unzoomed_drawn = render_fov_adjust(local_player_index,
-		2.0f * atanf(0.75f * render_camera_get_adjusted_field_of_view_tangent(unzoomed_angle)), weight);
+		2.0f * atanf(0.75f * render_camera_get_adjusted_field_of_view_tangent(unzoomed_angle)), weight,
+		&reticle_size, &unzoomed_drawn_tangent);
 	zoomed_drawn = render_fov_adjust(local_player_index,
-		2.0f * atanf(0.75f * render_camera_get_adjusted_field_of_view_tangent(zoomed_angle)), weight);
+		2.0f * atanf(0.75f * render_camera_get_adjusted_field_of_view_tangent(zoomed_angle)), weight,
+		&reticle_size, &unzoomed_drawn_tangent);
 	return mouse_zoom_scale(_mouse_zoom_cs2, magnification, fov_horizontal_4_3(zoomed_drawn),
 		fov_horizontal_4_3(unzoomed_drawn));
 }

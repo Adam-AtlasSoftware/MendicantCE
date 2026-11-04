@@ -2055,8 +2055,11 @@ only with PANINI PROJECTION on (150 while it is off; below).
   too.
 - The reticles scale with the view, so that they stay on the aim: each
   frame's reticle is scaled from that frame's view, so it grows or shrinks
-  with the view as you get in and out and never shows another size. The
-  scopes' pictures keep their place.
+  with the view as you get in and out and never shows another size. A
+  scope's zoom keeps the weapon's reticle at its unzoomed size, as the
+  stock game draws its reticle one size at every zoom (display.fov sizes
+  it, the zoom does not); the scopes' own pictures, and the pieces of the
+  reticle drawn only zoomed (the sniper rifle's lines), keep to the view.
 - By default the weapon keeps its stock view when the world is wider:
   arms and a gun right against the camera stretch at a wide angle.
 

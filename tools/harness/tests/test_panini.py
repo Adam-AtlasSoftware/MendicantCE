@@ -34,11 +34,13 @@ CONTROLS = [
     # the Panini projection's S with d's sign turned: no shape kept
     (PROJECTION, "float S = (projection->d + 1.0f) / (projection->d + c);\n\n\t*screen_x",
      "float S = (projection->d + 1.0f) / (projection->d + c * c);\n\n\t*screen_x", "shape"),
+    # (#594) the widened window's magnification its own, the zoomed view's
+    (GAME, "if (widening == 1.0f || !(widening > 0.0f)", "if (TRUE || !(widening > 0.0f)", "center"),
     # the HUD's place from the top for the bottom
     (GAME, "(window.top - y) / (window.top - window.bottom)", "(y - window.bottom) / (window.top - window.bottom)",
      "hud_matches_pass"),
     # the scale from the nearer side of an off-centre view
-    (GAME, "MAX(-window.left, window.right)", "-window.left", "hud_matches_pass"),
+    (GAME, "MAX(-window.left, window.right),\n", "-window.left,\n", "hud_matches_pass"),
     # the HUD's marks placed by the rectilinear view while the pass curves it
     (GAME, "\tif (!panini_window_projects(camera, frustum))\n\t\treturn FALSE;\n\t*visible",
      "\tif (TRUE)\n\t\treturn FALSE;\n\t*visible", "hud_matches_pass"),
@@ -103,10 +105,12 @@ def test_the_hud_and_the_weapon_take_it():
     # middle's magnification, the weapon's projection widened by it, the pass after the anti-aliasing
     assert "if (panini_view_to_screen(camera, frustum, view_point, screen_point, &result))" in \
         read("source/render/render_cameras.c")
-    assert "render_fov_reticle_scale(render.local_player_index) * panini_center_scale() : 1.0f;" in \
+    assert "\t\t\trender_fov_reticle_scale(render.local_player_index) * panini_center_scale() :" in \
         read("source/interface/hud_draw.c")
-    assert "render_fov_reticle_scale(local_player_index) * panini_center_scale();" in \
-        read("port/linux/game/passenger_camera.c")
+    # (the weapon's reticle at the unzoomed view's magnification, kept through a zoom: #594)
+    assert "panini_center_scale_widened(reticle_widenings[local_player_index] > 0.0f ?" in \
+        read("port/linux/game/view_fov.c")
+    assert "passenger_camera_reticle_offset(&point, reticle_scale)" in read("source/interface/hud_draw.c")
     assert "angle = 2.0f * atanf(tanf(angle * 0.5f) * panini_scale);" in read("port/linux/game/view_fov.c")
     render = read("source/render/render.c")
     assert render.index("halo_screen_anti_alias(") < render.index("panini_window_draw();") < \
