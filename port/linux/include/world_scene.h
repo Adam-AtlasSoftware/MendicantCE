@@ -71,7 +71,9 @@ struct world_scene_instance
 	the meshes' key */
 	long definition;
 	/* the object's root node as drawn this frame and the frame before (a
-	row-major 3x4: right, forward, up, position; for motion vectors) */
+	row-major 3x4 whose columns are the node's forward, left and up,
+	scaled, then its position: transform * (x y z 1) is a point of the
+	node's own space in the world; for motion vectors) */
 	float transform[3][4];
 	float previous_transform[3][4];
 	/* its bounding sphere as drawn: centre and radius */
