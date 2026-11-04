@@ -46,7 +46,7 @@ enum
 	OP_DECORATE = 71, OP_MEMBER_DECORATE = 72,
 	OP_VECTOR_EXTRACT_DYNAMIC = 77, OP_VECTOR_SHUFFLE = 79, OP_COMPOSITE_CONSTRUCT = 80, OP_COMPOSITE_EXTRACT = 81,
 	OP_COMPOSITE_INSERT = 82,
-	OP_IMAGE_SAMPLE_IMPLICIT_LOD = 87, OP_IMAGE_FETCH = 95, OP_IMAGE_READ = 98, OP_IMAGE = 100, OP_IMAGE_QUERY_SIZE_LOD = 103,
+	OP_IMAGE_SAMPLE_IMPLICIT_LOD = 87, OP_IMAGE_SAMPLE_EXPLICIT_LOD = 88, OP_IMAGE_FETCH = 95, OP_IMAGE_READ = 98, OP_IMAGE = 100, OP_IMAGE_QUERY_SIZE_LOD = 103,
 	OP_CONVERT_F_TO_S = 110, OP_CONVERT_S_TO_F = 111, OP_BITCAST = 124,
 	OP_F_NEGATE = 127, OP_I_ADD = 128, OP_F_ADD = 129, OP_I_SUB = 130, OP_F_SUB = 131, OP_I_MUL = 132, OP_F_MUL = 133,
 	OP_F_DIV = 136, OP_VECTOR_TIMES_SCALAR = 142, OP_DOT = 148,
@@ -144,6 +144,9 @@ struct module
 	unsigned int t_v2, t_v3, t_v4, t_iv2, t_iv3, t_iv4, t_uv4, t_bv2, t_bv3, t_bv4;
 	/* the uniform blocks' variables (0 until declared) */
 	unsigned int constants, uniforms, dynamic_lights, dynamic_light_cells, samples, view_index;
+	/* (display.ambient_occlusion "world": the window's block and the
+	structure's distance field) */
+	unsigned int world_ao, world_sdf;
 };
 
 static void words_push(struct module *m, struct words *words, unsigned int word)
@@ -825,11 +828,14 @@ enum
 	U_EYE_CORRECTION, U_SCREEN_CORRECTION, U_FOVEA_VIEW, U_FOVEA_SAMPLE, U_VISIBILITY_COUNTER, U_DEPTH_BIAS,
 	U_EFFECT_UNPROJECT, U_EFFECT_EYE,
 	U_COUNT,
+	/* (display.ambient_occlusion "world": past the others, declared by the
+	pixel shaders that read it alone: declare_uniforms_world) */
+	U_WORLD_AO = U_COUNT,
 };
 
-static void declare_uniforms(struct module *m)
+static void declare_uniforms_members(struct module *m, int count)
 {
-	static const unsigned long offsets[U_COUNT] =
+	static const unsigned long offsets[U_COUNT + 1] =
 	{
 		offsetof(struct xgpu_spirv_uniforms, viewport_scale), offsetof(struct xgpu_spirv_uniforms, viewport_offset),
 		offsetof(struct xgpu_spirv_uniforms, point_size), offsetof(struct xgpu_spirv_uniforms, screen_offset),
@@ -845,11 +851,12 @@ static void declare_uniforms(struct module *m)
 		offsetof(struct xgpu_spirv_uniforms, fovea_view), offsetof(struct xgpu_spirv_uniforms, fovea_sample),
 		offsetof(struct xgpu_spirv_uniforms, visibility_counter), offsetof(struct xgpu_spirv_uniforms, depth_bias),
 		offsetof(struct xgpu_spirv_uniforms, effect_unproject), offsetof(struct xgpu_spirv_uniforms, effect_eye),
+		offsetof(struct xgpu_spirv_uniforms, world_ao),
 	};
-	unsigned int members[U_COUNT], block;
+	unsigned int members[U_COUNT + 1], block;
 	int member;
 
-	for (member = 0; member < U_COUNT; member++)
+	for (member = 0; member < count; member++)
 	{
 		switch (member)
 		{
@@ -868,14 +875,25 @@ static void declare_uniforms(struct module *m)
 		default: members[member] = m->t_v4; break;
 		}
 	}
-	block = type_struct(m, U_COUNT, members);
+	block = type_struct(m, count, members);
 	decorate(m, block, DECORATION_BLOCK, 0, NULL);
-	for (member = 0; member < U_COUNT; member++)
+	for (member = 0; member < count; member++)
 		member_decorate(m, block, member, DECORATION_OFFSET, (unsigned int)offsets[member]);
 	name(m, block, "xgpu_uniforms");
 	m->uniforms = variable(m, block, STORAGE_UNIFORM, "u");
 	decorate1(m, m->uniforms, DECORATION_DESCRIPTOR_SET, XGPU_SPIRV_SET_DRAW);
 	decorate1(m, m->uniforms, DECORATION_BINDING, XGPU_SPIRV_BINDING_UNIFORMS);
+}
+
+static void declare_uniforms(struct module *m)
+{
+	declare_uniforms_members(m, U_COUNT);
+}
+
+/* (and the draw's object's, U_WORLD_AO: display.ambient_occlusion "world") */
+static void declare_uniforms_world(struct module *m)
+{
+	declare_uniforms_members(m, U_COUNT + 1);
 }
 
 /* a member of the uniforms (an element of an array member): a float or a
@@ -2561,6 +2579,253 @@ static unsigned int ambient_occlusion_read(struct module *m, struct pixel_state 
 	return extract(m, op(m, OP_IMAGE_FETCH, m->t_v4, 4, operands), 0);
 }
 
+/* ---------- display.ambient_occlusion "world"
+
+The occlusion found in the world at the pixel (xgpu.h's
+XGPU_AMBIENT_OCCLUSION_WORLD; xgpu_msl.c's world_ao_*, operation for
+operation; port/linux/game/world_ao.c's world_ao_occlusion, its CPU
+reference): the window's block (XGPU_SPIRV_BINDING_WORLD_AO) and the
+structure's distance field (XGPU_SPIRV_BINDING_WORLD_SDF), both in
+XGPU_SPIRV_SET_OCCLUSION, declared before the function, read in it. The
+proxies' loop is a structured loop, its values in the function's
+variables. */
+
+static void world_ao_declare(struct module *m)
+{
+	unsigned int members[3], block;
+
+	members[0] = block_array(m, 2);
+	members[1] = block_array(m, 2);
+	members[2] = block_array(m, 3 * XGPU_WORLD_AO_SHAPES);
+	block = type_struct(m, 3, members);
+	decorate(m, block, DECORATION_BLOCK, 0, NULL);
+	member_decorate(m, block, 0, DECORATION_OFFSET, XGPU_WORLD_AO_BLOCK_FIELD);
+	member_decorate(m, block, 1, DECORATION_OFFSET, XGPU_WORLD_AO_BLOCK_PARAMETERS);
+	member_decorate(m, block, 2, DECORATION_OFFSET, XGPU_WORLD_AO_BLOCK_PROXIES);
+	name(m, block, "world_ao_block");
+	m->world_ao = variable(m, block, STORAGE_UNIFORM, "world_ao");
+	decorate1(m, m->world_ao, DECORATION_DESCRIPTOR_SET, XGPU_SPIRV_SET_OCCLUSION);
+	decorate1(m, m->world_ao, DECORATION_BINDING, XGPU_SPIRV_BINDING_WORLD_AO);
+	m->world_sdf = variable(m, type_sampled_image(m, DIM_3D, FALSE, FALSE, TRUE), STORAGE_UNIFORM_CONSTANT, "world_sdf");
+	decorate1(m, m->world_sdf, DECORATION_DESCRIPTOR_SET, XGPU_SPIRV_SET_OCCLUSION);
+	decorate1(m, m->world_sdf, DECORATION_BINDING, XGPU_SPIRV_BINDING_WORLD_SDF);
+}
+
+/* a vec4 of the block (0 field, 1 parameters, 2 proxies): a constant
+index or an int value */
+static unsigned int world_ao_vector(struct module *m, int member, unsigned int index_id)
+{
+	unsigned int operands[3], pointer;
+
+	operands[0] = m->world_ao;
+	operands[1] = constant_int(m, member);
+	operands[2] = index_id;
+	pointer = op(m, OP_ACCESS_CHAIN, type_pointer(m, STORAGE_UNIFORM, m->t_v4), 3, operands);
+	return load(m, m->t_v4, pointer);
+}
+
+/* the field's distance at a point (world_sdf_sample): its trilinear texel
+times the range, the texels' centres at the voxels', clamped to the edge */
+static unsigned int world_sdf_distance(struct module *m, unsigned int field0, unsigned int field1, unsigned int point)
+{
+	unsigned int coordinate = fscale(m, 3, fsub(m, 3, point, xyz(m, field0)), extract(m, field0, 3));
+	unsigned int uvw = fdiv(m, 3, fadd(m, 3, coordinate, constant_splat(m, 3, 0.5f)), xyz(m, field1));
+	unsigned int sampled = load(m, type_sampled_image(m, DIM_3D, FALSE, FALSE, TRUE), m->world_sdf), operands[4];
+
+	operands[0] = sampled;
+	operands[1] = uvw;
+	operands[2] = IMAGE_OPERANDS_LOD;
+	operands[3] = constant_float(m, 0.0f);
+	return fmul(m, 1, extract(m, op(m, OP_IMAGE_SAMPLE_EXPLICIT_LOD, m->t_v4, 4, operands), 0), extract(m, field1, 3));
+}
+
+/* A_sdf(p, n): the cone of taps along the normal (world_ao.c's
+world_ao_field_occlusion) */
+static unsigned int world_sdf_occlusion(struct module *m, unsigned int p, unsigned int n)
+{
+	unsigned int field0 = world_ao_vector(m, 0, constant_int(m, 0)), field1 = world_ao_vector(m, 0, constant_int(m, 1));
+	unsigned int step = fmax_scalar(m, 1, fdiv(m, 1, constant_float(m, 1.0f), extract(m, field0, 3)), XGPU_WORLD_AO_STEP);
+	unsigned int occlusion = constant_float(m, 0.0f);
+	int tap;
+
+	for (tap = 0; tap < XGPU_WORLD_AO_TAPS; tap++)
+	{
+		unsigned int h = fmul(m, 1, step, constant_float(m, (float)(1 << tap)));
+		unsigned int d = world_sdf_distance(m, field0, field1, fadd(m, 3, p, fscale(m, 3, n, h)));
+
+		occlusion = fadd(m, 1, occlusion, fmul(m, 1, constant_float(m, 1.0f / (float)(2 << tap)),
+			saturate(m, 1, fdiv(m, 1, fsub(m, 1, h, d), h))));
+	}
+	return fsub(m, 1, constant_float(m, 1.0f), saturate(m, 1, fmul(m, 1, constant_float(m, XGPU_WORLD_AO_K), occlusion)));
+}
+
+/* a sphere's occlusion (world_proxy_occlusion's): v0 its centre, v2.x its
+radius; 1 inside */
+static unsigned int world_proxy_sphere(struct module *m, unsigned int p, unsigned int n, unsigned int v0,
+	unsigned int v2)
+{
+	unsigned int d = fsub(m, 3, xyz(m, v0), p), radius = extract(m, v2, 0);
+	unsigned int length_squared = fdot(m, d, d), radius_squared = fmul(m, 1, radius, radius);
+	unsigned int cosine = fmul(m, 1, fdot(m, n, d), ext1(m, GLSL_INVERSE_SQRT, m->t_float,
+		fmax_scalar(m, 1, length_squared, 1.0e-12f)));
+	unsigned int outside = op3(m, OP_SELECT, m->t_float, compare(m, OP_F_ORD_GREATER_THAN, cosine, constant_float(m, 0.0f)),
+		fdiv(m, 1, fmul(m, 1, cosine, radius_squared), length_squared), constant_float(m, 0.0f));
+
+	return op3(m, OP_SELECT, m->t_float, compare(m, OP_F_ORD_LESS_THAN_EQUAL, length_squared, radius_squared),
+		constant_float(m, 1.0f), outside);
+}
+
+/* C (workstream C, docs/world-ao.md "Proxies' occlusion"): a capsule's
+occlusion (v0: a; v1: b; v2.x: radius), world_proxy_occlusion's capsule
+line for line once it is final. None until then */
+static unsigned int world_proxy_capsule(struct module *m, unsigned int p, unsigned int n, unsigned int v0,
+	unsigned int v1, unsigned int v2)
+{
+	(void)p;
+	(void)n;
+	(void)v0;
+	(void)v1;
+	(void)v2;
+	return constant_float(m, 0.0f);
+}
+
+/* C: a box's occlusion (v0: its centre; v1: half axis x; v2: half axis y,
+and its half extent along z in w), world_proxy_occlusion's box line for
+line once it is final. None until then */
+static unsigned int world_proxy_box(struct module *m, unsigned int p, unsigned int n, unsigned int v0,
+	unsigned int v1, unsigned int v2)
+{
+	(void)p;
+	(void)n;
+	(void)v0;
+	(void)v1;
+	(void)v2;
+	return constant_float(m, 0.0f);
+}
+
+/* a shape's reach from its centre (world_proxy_reach's): past it, its
+occlusion is under 1/255. 16 radii (the sphere's; C: the capsule's and the
+box's once they are final) */
+static unsigned int world_proxy_reach(struct module *m, unsigned int v2)
+{
+	return fmul(m, 1, constant_float(m, 16.0f), extract(m, v2, 0));
+}
+
+/* if (kind == value) { ... }: the selection begun, its body's block next;
+its merge in *merge (branched to and labelled by the caller) */
+static void world_proxy_kind_begin(struct module *m, unsigned int kind, int value, unsigned int *merge)
+{
+	unsigned int body = id_new(m), condition = compare(m, OP_F_ORD_EQUAL, kind, constant_float(m, (float)value));
+
+	*merge = id_new(m);
+	selection_merge(m, *merge);
+	branch_conditional(m, condition, body, *merge);
+	label_at(m, body);
+}
+
+/* A_prox(p, n): the product of the shapes of the draw's object's others
+(not those of its owner slot) within their reach, each faded out over the
+last of it (world_ao.c's world_ao_proxies_occlusion) */
+static unsigned int world_proxies_occlusion(struct module *m, struct pixel_state *state, unsigned int p,
+	unsigned int n, unsigned int owner)
+{
+	unsigned int parameters0 = world_ao_vector(m, 1, constant_int(m, 0));
+	unsigned int count = op1(m, OP_CONVERT_F_TO_S, m->t_int, extract(m, parameters0, 3));
+	unsigned int product_variable = local(m, &state->locals, m->t_float);
+	unsigned int shape_variable = local(m, &state->locals, m->t_int);
+	unsigned int occlusion_variable = local(m, &state->locals, m->t_float);
+	unsigned int header = id_new(m), condition = id_new(m), body = id_new(m), next = id_new(m), merge = id_new(m);
+	unsigned int operands[3], shape, first, v0, v1, v2, kind, centre, reach, distance, fade, skip, test, kind_merge;
+
+	store(m, product_variable, constant_float(m, 1.0f));
+	store(m, shape_variable, constant_int(m, 0));
+	branch(m, header);
+	label_at(m, header);
+	operands[0] = merge;
+	operands[1] = next;
+	operands[2] = 0;
+	op_void(m, OP_LOOP_MERGE, 3, operands);
+	branch(m, condition);
+	label_at(m, condition);
+	shape = load(m, m->t_int, shape_variable);
+	branch_conditional(m, op2(m, OP_S_LESS_THAN, m->t_bool, shape, count), body, merge);
+	label_at(m, body);
+	first = op2(m, OP_I_MUL, m->t_int, shape, constant_int(m, 3));
+	v0 = world_ao_vector(m, 2, first);
+	v1 = world_ao_vector(m, 2, op2(m, OP_I_ADD, m->t_int, first, constant_int(m, 1)));
+	v2 = world_ao_vector(m, 2, op2(m, OP_I_ADD, m->t_int, first, constant_int(m, 2)));
+	kind = extract(m, v0, 3);
+	/* if (v1.w == owner) continue; */
+	test = compare(m, OP_F_ORD_EQUAL, extract(m, v1, 3), owner);
+	skip = id_new(m);
+	selection_merge(m, skip);
+	branch_conditional(m, test, next, skip);
+	label_at(m, skip);
+	/* if (distance >= reach) continue; (from its centre: a capsule's
+	segment's middle, a sphere's or a box's a) */
+	centre = select_n(m, 3, compare(m, OP_F_ORD_EQUAL, kind, constant_float(m, (float)XGPU_WORLD_AO_CAPSULE)),
+		fscale(m, 3, fadd(m, 3, xyz(m, v0), xyz(m, v1)), constant_float(m, 0.5f)), xyz(m, v0));
+	reach = world_proxy_reach(m, v2);
+	distance = ext1(m, GLSL_LENGTH, m->t_float, fsub(m, 3, p, centre));
+	test = compare(m, OP_F_ORD_GREATER_THAN_EQUAL, distance, reach);
+	skip = id_new(m);
+	selection_merge(m, skip);
+	branch_conditional(m, test, next, skip);
+	label_at(m, skip);
+	store(m, occlusion_variable, constant_float(m, 0.0f));
+	world_proxy_kind_begin(m, kind, XGPU_WORLD_AO_SPHERE, &kind_merge);
+	store(m, occlusion_variable, world_proxy_sphere(m, p, n, v0, v2));
+	branch(m, kind_merge);
+	label_at(m, kind_merge);
+	world_proxy_kind_begin(m, kind, XGPU_WORLD_AO_CAPSULE, &kind_merge);
+	store(m, occlusion_variable, world_proxy_capsule(m, p, n, v0, v1, v2));
+	branch(m, kind_merge);
+	label_at(m, kind_merge);
+	world_proxy_kind_begin(m, kind, XGPU_WORLD_AO_BOX, &kind_merge);
+	store(m, occlusion_variable, world_proxy_box(m, p, n, v0, v1, v2));
+	branch(m, kind_merge);
+	label_at(m, kind_merge);
+	fade = saturate(m, 1, fdiv(m, 1, fsub(m, 1, reach, distance), fmul(m, 1, reach,
+		constant_float(m, XGPU_WORLD_AO_REACH_FADE))));
+	store(m, product_variable, fmul(m, 1, load(m, m->t_float, product_variable), fsub(m, 1, constant_float(m, 1.0f),
+		fmul(m, 1, load(m, m->t_float, occlusion_variable), fade))));
+	branch(m, next);
+	label_at(m, next);
+	store(m, shape_variable, op2(m, OP_I_ADD, m->t_int, load(m, m->t_int, shape_variable), constant_int(m, 1)));
+	branch(m, header);
+	label_at(m, merge);
+	return load(m, m->t_float, product_variable);
+}
+
+/* the occlusion at the pixel, from its world position and normal, for the
+light it multiplies (XGPU_AMBIENT_OCCLUSION_LIGHT_*): a model's, the
+field's relative to its reference faded in, times the others' proxies; the
+lightmap pass's, the proxies alone; then the floor and the strength
+(xgpu.h) */
+static unsigned int world_ao_read(struct module *m, struct pixel_state *state, int light)
+{
+	unsigned int p = pixel_input(m, state, state->in_world_position, m->t_v3);
+	unsigned int normal = xyz(m, pixel_input(m, state, state->in_world_normal, m->t_v4));
+	unsigned int n = fscale(m, 3, normal, ext1(m, GLSL_INVERSE_SQRT, m->t_float,
+		fmax_scalar(m, 1, fdot(m, normal, normal), 1.0e-24f)));
+	unsigned int object = uniform(m, U_WORLD_AO, -1);
+	unsigned int parameters0 = world_ao_vector(m, 1, constant_int(m, 0));
+	unsigned int parameters1 = world_ao_vector(m, 1, constant_int(m, 1));
+	unsigned int proxies = world_proxies_occlusion(m, state, p, n, extract(m, object, 0));
+	unsigned int field, relative, occlusion;
+
+	if (light == XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP)
+		return ext3(m, GLSL_F_MIX, m->t_float, constant_float(m, 1.0f), fmax_scalar(m, 1, proxies, XGPU_WORLD_AO_FLOOR),
+			extract(m, parameters0, 1));
+	field = world_sdf_occlusion(m, p, n);
+	relative = saturate(m, 1, fdiv(m, 1, field, fmax_scalar(m, 1, extract(m, object, 1), XGPU_WORLD_AO_REFERENCE_LEAST)));
+	field = ext3(m, GLSL_F_MIX, m->t_float, field, relative, extract(m, parameters1, 0));
+	occlusion = fmul(m, 1, ext3(m, GLSL_F_MIX, m->t_float, constant_float(m, 1.0f), field, extract(m, parameters0, 2)),
+		proxies);
+	return ext3(m, GLSL_F_MIX, m->t_float, constant_float(m, 1.0f), fmax_scalar(m, 1, occlusion, XGPU_WORLD_AO_FLOOR),
+		extract(m, parameters0, 0));
+}
+
 /* ---------- per-pixel model lighting */
 
 static unsigned int model_lighting(struct module *m, struct pixel_state *state, BOOL point_lights, BOOL dynamic_lights,
@@ -3282,8 +3547,12 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	struct module m;
 	struct pixel_state state;
 	BOOL environment = program->dynamic_lights == XGPU_DYNAMIC_LIGHTS_ENVIRONMENT;
+	/* (display.ambient_occlusion: the light the occlusion multiplies, and
+	whether it is found in the world, at the pixel's position: xgpu.h) */
+	int occlusion_light = XGPU_AMBIENT_OCCLUSION_LIGHT_OF(program->ambient_occlusion);
+	BOOL world = (program->ambient_occlusion & XGPU_AMBIENT_OCCLUSION_WORLD) && occlusion_light;
 	BOOL world_position = (program->per_pixel_lighting && (program->per_pixel_lighting == 2 ||
-		program->dynamic_lights == XGPU_DYNAMIC_LIGHTS_MODEL)) || environment;
+		program->dynamic_lights == XGPU_DYNAMIC_LIGHTS_MODEL)) || environment || world;
 	BOOL count_samples = program->count_samples && options->count_samples;
 	unsigned int comparison = program->alpha_test ? comparison_opcode(program->alpha_test) : 0;
 	BOOL sample_mask = comparison && program->alpha_test_samples && program->alpha_test != D3DCMP_EQUAL &&
@@ -3304,7 +3573,10 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	state.program = program;
 	state.options = options;
 	module_begin(&m, EXECUTION_MODEL_FRAGMENT);
-	declare_uniforms(&m);
+	if (world)
+		declare_uniforms_world(&m);
+	else
+		declare_uniforms(&m);
 	declare_views(&m, program->multiview, options->foveated, TRUE);
 	if (program->dynamic_lights)
 		declare_dynamic_lights(&m);
@@ -3329,7 +3601,9 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 		frag_depth_out = variable(&m, m.t_float, STORAGE_OUTPUT, "gl_FragDepth");
 		decorate1(&m, frag_depth_out, DECORATION_BUILT_IN, BUILT_IN_FRAG_DEPTH);
 	}
-	if (program->ambient_occlusion)
+	if (world)
+		world_ao_declare(&m);
+	else if (program->ambient_occlusion)
 		ambient_occlusion_declare(&m, &state);
 	if (count_samples)
 	{
@@ -3352,14 +3626,14 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	for (stage = 0; stage < 4; stage++)
 		state.in_t[stage] = interface_variable(&m, m.t_v4, STORAGE_INPUT, XGPU_SPIRV_LOCATION_T0 + stage, coordinate_names[stage]);
 	state.in_fog = interface_variable(&m, m.t_float, STORAGE_INPUT, XGPU_SPIRV_LOCATION_FOG, "xFog");
-	if (program->ambient_occlusion == XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX)
+	if (occlusion_light == XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX)
 	{
 		state.in_light_ambient = interface_variable(&m, m.t_v3, STORAGE_INPUT, XGPU_SPIRV_LOCATION_LIGHT_AMBIENT,
 			"xLightAmbient");
 		state.in_light_point = interface_variable(&m, m.t_v3, STORAGE_INPUT, XGPU_SPIRV_LOCATION_LIGHT_POINT,
 			"xLightPoint");
 	}
-	if (program->per_pixel_lighting || environment)
+	if (program->per_pixel_lighting || environment || world)
 		state.in_world_normal = interface_variable(&m, m.t_v4, STORAGE_INPUT, XGPU_SPIRV_LOCATION_WORLD_NORMAL, "xWorldNormal");
 	if (world_position)
 		state.in_world_position = interface_variable(&m, m.t_v3, STORAGE_INPUT, XGPU_SPIRV_LOCATION_WORLD_POSITION, "xWorldPosition");
@@ -3392,7 +3666,9 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	}
 	/* display.ambient_occlusion: the occlusion at the pixel, which
 	multiplies the ambient light alone (xgpu.h) */
-	if (program->ambient_occlusion)
+	if (world)
+		state.occlusion = world_ao_read(&m, &state, occlusion_light);
+	else if (program->ambient_occlusion)
 		state.occlusion = ambient_occlusion_read(&m, &state);
 	if (program->per_pixel_lighting && program->dynamic_lights == XGPU_DYNAMIC_LIGHTS_MODEL)
 	{
@@ -3400,7 +3676,7 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 		unsigned int n = fscale(&m, 3, normal, ext1(&m, GLSL_INVERSE_SQRT, m.t_float,
 			fmax_scalar(&m, 1, fdot(&m, normal, normal), (float)1.0e-24)));
 		unsigned int lit = model_lighting(&m, &state, program->per_pixel_lighting == 2, TRUE,
-			program->ambient_occlusion == XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL ? state.occlusion : 0);
+			occlusion_light == XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL ? state.occlusion : 0);
 		unsigned int sum = dynamic_light_sum(&m, &state, pixel_input(&m, &state, state.in_world_position, m.t_v3), n, n, FALSE);
 		static const unsigned int rgb[4] = { 4, 5, 6, 3 };
 
@@ -3411,9 +3687,9 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 		static const unsigned int rgb[4] = { 4, 5, 6, 3 };
 
 		state.v0 = shuffle(&m, 4, state.v0, model_lighting(&m, &state, program->per_pixel_lighting == 2, FALSE,
-			program->ambient_occlusion == XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL ? state.occlusion : 0), rgb);
+			occlusion_light == XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL ? state.occlusion : 0), rgb);
 	}
-	else if (program->ambient_occlusion == XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX)
+	else if (occlusion_light == XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX)
 	{
 		/* (lit for each vertex: its ambient light by the occlusion, its
 		point lights' added, clamped as its program clamps the sum) */
@@ -3473,7 +3749,7 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	}
 	/* (display.ambient_occlusion: a lightmap pass's light, by the
 	occlusion, before the enhanced dynamic lights add theirs) */
-	if (program->ambient_occlusion == XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP)
+	if (occlusion_light == XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP)
 	{
 		static const unsigned int rgb[4] = { 4, 5, 6, 3 };
 
@@ -3553,6 +3829,9 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 		result = select_n(&m, 4, compare(&m, OP_F_ORD_GREATER_THAN, extract(&m, d0, 3), constant_float(&m, 0.0f)),
 			vec4_of(&m, xyz(&m, d0), constant_float(&m, 1.0f)), constant_v4(&m, 1.0f, 0.0f, 1.0f, 1.0f));
 	}
+	/* (debug.world_ao_view: the occlusion found in the world, in grey) */
+	if (world && (program->ambient_occlusion & XGPU_AMBIENT_OCCLUSION_WORLD_VIEW))
+		result = vec4_of(&m, splat(&m, 3, state.occlusion), constant_float(&m, 1.0f));
 	if (count_samples)
 	{
 		/* samples that pass the depth and stencil tests, as the NV2A's

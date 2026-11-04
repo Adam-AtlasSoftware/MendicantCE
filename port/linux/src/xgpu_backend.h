@@ -311,6 +311,9 @@ struct xgpu_draw_uniforms
 	float texture_scale[4][4];
 	float screen_offset;
 	float texture_lod_bias[4];
+	/* display.ambient_occlusion "world": the draw's object's owner slot
+	(-1 none) and reference (xgpu.h; d3d8_device.c's halo_world_ao_object) */
+	float world_ao[2];
 };
 
 /* ---------- the pipeline key's values */
