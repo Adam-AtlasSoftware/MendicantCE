@@ -326,6 +326,9 @@ static uint32_t uniforms_make(void *context, const struct xgpu_metal_stream_unif
 		memcpy(to->bump_luminance, from->bump_luminance, sizeof(to->bump_luminance));
 		memcpy(to->texture_scale, from->texture_scale, sizeof(to->texture_scale));
 		memcpy(to->texture_lod_bias, from->texture_lod_bias, sizeof(to->texture_lod_bias));
+		/* (display.ambient_occlusion "world": the draw's object) */
+		to->world_ao[0] = from->world_ao[0];
+		to->world_ao[1] = from->world_ao[1];
 	}
 	if (inputs->blend_color)
 		memcpy(to->blend_constant, inputs->blend_color, sizeof(to->blend_constant));

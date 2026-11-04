@@ -84,6 +84,11 @@ struct xgpu_msl_uniforms
 	float texture_border[4][4];
 	float texture_border_linear[4];
 	float model_lights[XGPU_MODEL_LIGHT_COUNT][4];
+	/* display.ambient_occlusion "world" (xgpu.h): the draw's object, its
+	owner slot among the window's proxies (-1 none) and its reference, then
+	two spare; declared in the pixel shaders that read it alone, the last
+	member, so that the others' text is as it was */
+	float world_ao[4];
 };
 
 /* what the Metal Shading Language is written for (xgpu_msl.c):

@@ -1412,6 +1412,9 @@ static int uniforms_update(int effect)
 		memcpy(to->bump_matrix, from->bump_matrix, sizeof(to->bump_matrix));
 		memcpy(to->bump_luminance, from->bump_luminance, sizeof(to->bump_luminance));
 		memcpy(to->texture_scale, from->texture_scale, sizeof(to->texture_scale));
+		/* (display.ambient_occlusion "world": the draw's object) */
+		to->world_ao[0] = from->world_ao[0];
+		to->world_ao[1] = from->world_ao[1];
 		memcpy(to->blend_constant, stream.dynamic.blend_color, sizeof(to->blend_constant));
 		for (stage = 0; stage < 4; stage++)
 		{

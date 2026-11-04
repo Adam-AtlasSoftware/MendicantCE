@@ -738,12 +738,13 @@ struct xgpu_stream_draw_uniforms
 	float texture_scale[4][4];
 	float screen_offset;
 	float texture_lod_bias[4];
+	float world_ao[2];
 };
 
 /* xgpu_backend_draw_state: what changed since the last follows, the
 dynamic state (XGPU_STREAM_DRAW_DYNAMIC), then the uniforms' pieces that
 changed (XGPU_STREAM_DRAW_UNIFORMS: the uniforms as 16-byte pieces, the
-last of 12, those whose bits are set in pieces, low word first, in order);
+last of 4, those whose bits are set in pieces, low word first, in order);
 a call that changes neither sends nothing */
 enum
 {
@@ -1135,7 +1136,7 @@ XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_pipeline_key, 308);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_pixel_program, 436);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_pipeline_define, 752);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_dynamic_state, 68);
-XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_draw_uniforms, 572);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_draw_uniforms, 580);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_vertex_element, 6);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_layout_define, 20);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_vertex_stream, 20);

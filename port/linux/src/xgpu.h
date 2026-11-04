@@ -217,6 +217,58 @@ enum
 	XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP,
 };
 
+/* ---------- display.ambient_occlusion "world" in the light
+
+The same three lights (XGPU_AMBIENT_OCCLUSION_LIGHT_*, the key's low bits:
+XGPU_AMBIENT_OCCLUSION_LIGHT_OF) multiplied by the occlusion found in the
+world at the pixel instead of GTAO's texel, where the key has
+XGPU_AMBIENT_OCCLUSION_WORLD (docs/world-ao.md, "Shading";
+port/linux/game/world_ao.c). The pixel's world position p and normal n
+(the lighting's: a model's, or the lightmap pass's own, XGPU_LIGHTING_
+ENVIRONMENT) read the window's block (xgpu_stream.h's struct
+xgpu_world_ao_block: XGPU_SPIRV_BINDING_WORLD_AO, XGPU_MSL_BUFFER_WORLD_AO)
+and the structure's distance field (XGPU_SPIRV_BINDING_WORLD_SDF,
+XGPU_MSL_TEXTURE_WORLD_SDF), and the draw's object its uniforms' world_ao
+(its owner slot among the proxies', -1 none; its reference):
+
+  A_sdf   = 1 - clamp(K sum_i 2^-i clamp((h_i - d(p + n h_i)) / h_i, 0, 1), 0, 1),
+            h_i = max(STEP, voxel) 2^(i-1), i = 1 to TAPS
+  A_obj   = mix(A_sdf, clamp(A_sdf / max(reference, REFERENCE_LEAST), 0, 1), reference_weight)
+  A_prox  = prod over the proxies of other owners within reach (1 - occlusion_i fade_i),
+            fade_i = clamp((reach_i - |p - c_i|) / (REACH_FADE reach_i), 0, 1), c_i its
+            centre (a sphere's and a box's a, a capsule's segment's middle)
+  models:   A = mix(1, max(mix(1, A_obj, field_fade) A_prox, FLOOR), strength_objects)
+  lightmap: A = mix(1, max(A_prox, FLOOR), strength_level)          (never the field)
+
+d is the field's trilinear sample times its range, read as
+world_sdf_sample reads it (world_sdf_bake.c); occlusion_i is
+world_proxy_occlusion's (world_proxies.c), reach_i world_proxy_reach's;
+world_ao.c's world_ao_occlusion is the whole of it on the CPU, line for
+line. With XGPU_AMBIENT_OCCLUSION_WORLD_VIEW too (debug.world_ao_view) the
+draw shows A in grey. */
+#define XGPU_AMBIENT_OCCLUSION_WORLD 0x10
+#define XGPU_AMBIENT_OCCLUSION_WORLD_VIEW 0x20
+#define XGPU_AMBIENT_OCCLUSION_LIGHT_OF(value) ((value) & 0x0f)
+#define XGPU_WORLD_AO_K 1.6f
+#define XGPU_WORLD_AO_STEP 0.15f
+#define XGPU_WORLD_AO_TAPS 5
+#define XGPU_WORLD_AO_REFERENCE_LEAST 0.25f
+#define XGPU_WORLD_AO_REACH_FADE 0.25f
+#define XGPU_WORLD_AO_FLOOR 0.2f
+/* (world_proxies.c's WORLD_PROXIES_PI) */
+#define XGPU_WORLD_AO_PI 3.14159265358979f
+/* the block as the emitters declare it (xgpu_stream.h's struct
+xgpu_world_ao_block, its XGPU_WORLD_AO_PROXIES_MAXIMUM and _PROXY_*: the
+emitters' copies of these headers have not that one; d3d8_device.c checks
+they agree): its members' offsets, the most proxies, their kinds */
+#define XGPU_WORLD_AO_BLOCK_FIELD 0
+#define XGPU_WORLD_AO_BLOCK_PARAMETERS 32
+#define XGPU_WORLD_AO_BLOCK_PROXIES 64
+#define XGPU_WORLD_AO_SHAPES 64
+#define XGPU_WORLD_AO_SPHERE 1
+#define XGPU_WORLD_AO_CAPSULE 2
+#define XGPU_WORLD_AO_BOX 3
+
 /* ---------- enhanced dynamic lights
 
 display.dynamic_lights "enhanced" (d3d8_device.c, halo_dynamic_lights_set):

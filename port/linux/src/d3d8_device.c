@@ -296,21 +296,80 @@ docs/world-ao.md)
 
 The window's block (the field's place, its proxies) handed to the backend
 for the opaque surfaces that draw until world_ao_window_end takes it away;
-the field's slices uploaded as its bake gives them. Workstream D gives the
-pixel keys the world's light (xgpu.h's XGPU_AMBIENT_OCCLUSION_LIGHT_*) and
-the draws their object (halo_world_ao_object); with the setting off nothing
-here is called. */
+the field's slices uploaded as its bake gives them. While a window's block
+is given, the opaque surfaces' pixel keys have the world's light
+(world_ao_key: xgpu.h's XGPU_AMBIENT_OCCLUSION_LIGHT_* with
+XGPU_AMBIENT_OCCLUSION_WORLD): a model's lit for each pixel or each vertex
+(where its lighting has its world position), and the structure's lightmap
+pass (lit as XGPU_LIGHTING_ENVIRONMENT for its position and normal, the
+enhanced dynamic lights or not); never a self-illuminated pass, a blended
+one, or the first-person weapon (WORLD_AO_OWNER_UNLIT). Each draw's
+uniforms carry its object (halo_world_ao_object: its owner slot and
+reference). With the setting off nothing here is called, no key has the
+world's bit and the uniforms' world_ao stay as they are: the shaders and
+the frames are as without it. */
+
+_Static_assert(XGPU_WORLD_AO_SHAPES == XGPU_WORLD_AO_PROXIES_MAXIMUM &&
+	XGPU_WORLD_AO_SPHERE == XGPU_WORLD_AO_PROXY_SPHERE && XGPU_WORLD_AO_CAPSULE == XGPU_WORLD_AO_PROXY_CAPSULE &&
+	XGPU_WORLD_AO_BOX == XGPU_WORLD_AO_PROXY_BOX, "the world's proxies as the emitters take them (xgpu.h)");
+_Static_assert(offsetof(struct xgpu_world_ao_block, field) == XGPU_WORLD_AO_BLOCK_FIELD &&
+	offsetof(struct xgpu_world_ao_block, parameters) == XGPU_WORLD_AO_BLOCK_PARAMETERS &&
+	offsetof(struct xgpu_world_ao_block, proxies) == XGPU_WORLD_AO_BLOCK_PROXIES,
+	"the world's block as the emitters declare it (xgpu.h)");
+
+static struct
+{
+	/* a window's block is given (its opaque surfaces draw with it); the
+	draw's object (its owner slot, WORLD_AO_OWNER_*, and its reference);
+	debug.world_ao_view, as read when the block was given; its shaders
+	could not be made (world_ao_failed) */
+	BOOL active, view;
+	int owner;
+	float reference;
+	BOOL failed;
+} world_ao = { FALSE, FALSE, WORLD_AO_OWNER_NONE, 1.0f, FALSE };
+
+/* a draw's pixel key's occlusion, for the light it multiplies, found in the
+world (0: none) */
+static unsigned char world_ao_key(int light)
+{
+	if (!world_ao.active || world_ao.failed || world_ao.owner == WORLD_AO_OWNER_UNLIT ||
+		(hdr.kind & HALO_HDR_KIND_SELF_ILLUMINATION))
+	{
+		return 0;
+	}
+	return (unsigned char)(light | XGPU_AMBIENT_OCCLUSION_WORLD | (world_ao.view ? XGPU_AMBIENT_OCCLUSION_WORLD_VIEW : 0));
+}
+
+/* a key with the world's light whose pipeline could not be made: the
+world's taken from it (and from every key after: said once), TRUE; FALSE
+a key without it */
+static BOOL world_ao_failed(struct nv2a_pixel_shader_key *key)
+{
+	if (!(key->ambient_occlusion & XGPU_AMBIENT_OCCLUSION_WORLD))
+		return FALSE;
+	key->ambient_occlusion = 0;
+	if (!world_ao.failed)
+		platform_log("GPU: display.ambient_occlusion \"world\"'s shaders cannot be made here (refer to the shader log "
+			"above): drawn without it");
+	world_ao.failed = TRUE;
+	return TRUE;
+}
 
 void halo_world_ao_window(float const field[2][4], float const parameters[2][4], float const (*proxies)[3][4],
 	int count)
 {
 	struct xgpu_world_ao_block block;
 
+	world_ao.active = count >= 0;
+	world_ao.owner = WORLD_AO_OWNER_NONE;
+	world_ao.reference = 1.0f;
 	if (count < 0)
 	{
 		xgpu_backend_world_ao_window(NULL);
 		return;
 	}
+	world_ao.view = config_boolean("debug.world_ao_view");
 	if (count > XGPU_WORLD_AO_PROXIES_MAXIMUM)
 		count = XGPU_WORLD_AO_PROXIES_MAXIMUM;
 	memset(&block, 0, sizeof(block));
@@ -324,9 +383,8 @@ void halo_world_ao_window(float const field[2][4], float const parameters[2][4],
 
 void halo_world_ao_object(int owner, float reference)
 {
-	/* D: the draws' owner and reference, in their uniforms */
-	(void)owner;
-	(void)reference;
+	world_ao.owner = owner;
+	world_ao.reference = reference;
 }
 
 void halo_world_ao_field(unsigned long width, unsigned long height, unsigned long depth, unsigned long z_first,
@@ -3217,7 +3275,7 @@ static void pipeline_state_describe(BOOL has_depth, struct xgpu_pipeline_key *ke
 }
 /* the uniforms of the latest draws, converted from these inputs; the serial
 counts the conversions */
-#define DRAW_UNIFORM_INPUT_COUNT (4 + 4 + 16 + 1 + 16 + 2 + 4 + 1 + 1 + 7 * D3DTSS_MAXSTAGES)
+#define DRAW_UNIFORM_INPUT_COUNT (4 + 4 + 16 + 1 + 16 + 2 + 4 + 1 + 1 + 7 * D3DTSS_MAXSTAGES + 2)
 
 static DWORD draw_uniform_inputs[DRAW_UNIFORM_INPUT_COUNT];
 static struct xgpu_draw_uniforms draw_uniforms;
@@ -3245,6 +3303,7 @@ static void draw_uniforms_update(const float texture_scale[4][4])
 {
 	DWORD inputs[DRAW_UNIFORM_INPUT_COUNT];
 	unsigned long count = 0;
+	float world_object[2];
 	int stage;
 
 	memcpy(&inputs[count], device.viewport_scale, sizeof(device.viewport_scale));
@@ -3267,6 +3326,12 @@ static void draw_uniforms_update(const float texture_scale[4][4])
 	inputs[count++] = D3D__RenderState[D3DRS_FOGDENSITY];
 	inputs[count++] = D3D__RenderState[D3DRS_ALPHAREF];
 	inputs[count++] = (DWORD)UI_OFFSET;
+	/* (display.ambient_occlusion "world": the draw's object, its owner
+	slot and reference; -1 and 1 without the window's block) */
+	world_object[0] = world_ao.active ? (float)world_ao.owner : (float)WORLD_AO_OWNER_NONE;
+	world_object[1] = world_ao.active ? world_ao.reference : 1.0f;
+	memcpy(&inputs[count], world_object, sizeof(world_object));
+	count += 2;
 	for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
 	{
 		DWORD *state = D3D__TextureState[stage];
@@ -3317,6 +3382,8 @@ static void draw_uniforms_update(const float texture_scale[4][4])
 			converted->texture_lod_bias[stage] = dword_to_float(state[D3DTSS_MIPMAPLODBIAS]);
 		}
 		converted->screen_offset = (float)UI_OFFSET;
+		converted->world_ao[0] = world_object[0];
+		converted->world_ao[1] = world_object[1];
 	}
 }
 
@@ -3863,12 +3930,20 @@ static BOOL prepare_draw(BOOL immediate, unsigned long primitive)
 		/* (the enhanced dynamic lights in the two point lights' place) */
 		if (dynamic_lights_active() && program->lighting.world_found)
 			key.dynamic_lights = XGPU_DYNAMIC_LIGHTS_MODEL;
-		/* (display.ambient_occlusion: its ambient light by the occlusion) */
+		/* (display.ambient_occlusion: its ambient light by the occlusion;
+		"world"'s where the lighting has the world position) */
 		if (ambient_occlusion.ready)
 			key.ambient_occlusion = XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL;
+		else if (program->lighting.lights == 2 || program->lighting.world_found)
+			key.ambient_occlusion = world_ao_key(XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL);
 		pipeline_key.pixel = key;
 		pipeline_key.lighting = program->lighting.lights == 2 ? XGPU_LIGHTING_MODEL_POINT : XGPU_LIGHTING_MODEL;
 		chosen = xgpu_backend_pipeline(&pipeline_key);
+		if (!chosen && world_ao_failed(&key))
+		{
+			pipeline_key.pixel = key;
+			chosen = xgpu_backend_pipeline(&pipeline_key);
+		}
 		if (!chosen)
 		{
 			/* drawn as the vertex shader lights it instead (not at all,
@@ -3881,16 +3956,21 @@ static BOOL prepare_draw(BOOL immediate, unsigned long primitive)
 			key.ambient_occlusion = 0;
 		}
 	}
-	else if (program->lighting.lights && !program->lighting_failed && !program->split_failed && ambient_occlusion.ready)
+	else if (program->lighting.lights && !program->lighting_failed && !program->split_failed && (ambient_occlusion.ready ||
+		((program->lighting.lights == 2 || program->lighting.world_found) &&
+		world_ao_key(XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX))))
 	{
 		/* display.ambient_occlusion over a model lit for each vertex: its
 		ambient light handed on apart, by the occlusion at each pixel (the
-		program's own sum clamps each vertex's light: xgpu.h) */
-		key.ambient_occlusion = XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX;
+		program's own sum clamps each vertex's light: xgpu.h); "world"'s
+		where the lighting has the world position */
+		key.ambient_occlusion = ambient_occlusion.ready ? XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX :
+			world_ao_key(XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX);
 		pipeline_key.pixel = key;
 		pipeline_key.lighting = XGPU_LIGHTING_MODEL_SPLIT;
 		chosen = xgpu_backend_pipeline(&pipeline_key);
-		if (!chosen)
+		/* (the world's failing: drawn as without it, below) */
+		if (!chosen && !world_ao_failed(&key))
 		{
 			platform_log("GPU: vertex shader %lu cannot hand on its ambient light apart (refer to the shader log "
 				"above): drawn without the ambient occlusion", program->id);
@@ -3911,9 +3991,16 @@ static BOOL prepare_draw(BOOL immediate, unsigned long primitive)
 		occlusion, theirs added after) */
 		if (ambient_occlusion.ready && !pipeline_key.blend)
 			key.ambient_occlusion = XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP;
+		else if (!pipeline_key.blend)
+			key.ambient_occlusion = world_ao_key(XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP);
 		pipeline_key.pixel = key;
 		pipeline_key.lighting = XGPU_LIGHTING_ENVIRONMENT;
 		chosen = xgpu_backend_pipeline(&pipeline_key);
+		if (!chosen && world_ao_failed(&key))
+		{
+			pipeline_key.pixel = key;
+			chosen = xgpu_backend_pipeline(&pipeline_key);
+		}
 		if (!chosen)
 		{
 			platform_log("GPU: vertex shader %lu cannot be lit by the dynamic lights (refer to the shader log "
@@ -3922,6 +4009,20 @@ static BOOL prepare_draw(BOOL immediate, unsigned long primitive)
 			key.dynamic_lights = 0;
 			key.hdr &= (unsigned short)~XGPU_HDR_LIGHTS;
 		}
+	}
+	else if (dynamic_lights.environment && !immediate && !program->lighting_failed && !pipeline_key.blend &&
+		(device.vertex_shader->packed_mask & 0xe) == 0xe && world_ao_key(XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP))
+	{
+		/* display.ambient_occlusion "world" over a structure's lightmap pass
+		without the enhanced dynamic lights: lit as its program lights it,
+		its vertex shader handing on the world position and normal alone
+		(XGPU_LIGHTING_ENVIRONMENT) for its light by the proxies' occlusion */
+		key.ambient_occlusion = world_ao_key(XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP);
+		pipeline_key.pixel = key;
+		pipeline_key.lighting = XGPU_LIGHTING_ENVIRONMENT;
+		chosen = xgpu_backend_pipeline(&pipeline_key);
+		if (!chosen)
+			world_ao_failed(&key);
 	}
 	ready = chosen;
 	if (!chosen)
