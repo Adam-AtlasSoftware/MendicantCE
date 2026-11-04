@@ -2349,6 +2349,13 @@ static const struct config_setting config_settings[] =
 	{ "debug.dynamic_lights_log", _config_boolean, "false", "HALO_DYNAMIC_LIGHTS_LOG", _environment_value, _platform_all,
 		"Log where the first projectile's light is drawn each frame (the\n"
 		"enhanced dynamic lights)." },
+	{ "debug.world_scene_log", _config_boolean, "false", "HALO_WORLD_SCENE_LOG", _environment_value, _platform_all,
+		"With display.ambient_occlusion \"world\", log the world scene's counts\n"
+		"(the level's triangles, the objects drawn, the lights) now and then." },
+	{ "debug.world_scene_dump", _config_boolean, "false", "HALO_WORLD_SCENE_DUMP", _environment_value, _platform_all,
+		"With display.ambient_occlusion \"world\", write each level BSP's\n"
+		"collision triangles to the data folder as it loads, to look at in a\n"
+		"mesh viewer: world_scene_<map>_bsp<n>.obj." },
 	{ "debug.gpu_debug_expression", _config_string, "\"\"", "HALO_GPU_DEBUG_EXPR", _environment_value, _platform_all,
 		"Metal only, not Vulkan's SPIR-V: an expression (MSL) every pixel shader\n"
 		"shows instead of its result." },
