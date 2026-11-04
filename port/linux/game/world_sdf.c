@@ -745,7 +745,8 @@ static int sdf_bake(struct sdf_job *job)
 	platform_log("world sdf: %s bsp %d: %lux%lux%lu voxel %.3f in %lu ms on %lu threads, %lu cached%s", job->key.map,
 		(int)job->key.bsp, job->volume.header.width, job->volume.header.height, job->volume.header.depth,
 		(double)job->volume.header.voxel, job->volume.header.bake_milliseconds, job->volume.header.bake_threads,
-		written ? size : 0UL, written ? "" : " (not written)");
+		written ? size : 0UL, written ? "" : file ? " (not written: the file could not be)" :
+		" (not written: the deflate failed)");
 	return 1;
 }
 
