@@ -436,7 +436,7 @@ int main(int argc, char **argv)
 		SCENE_WIDTH, SCENE_HEIGHT, SCENE_DEPTH, scene_volume.header.origin[0], scene_volume.header.origin[1],
 		scene_volume.header.origin[2], scene_volume.header.voxel, scene_volume.header.range);
 	/* (the field as the GPU has it: its table's bytes, and its atlas's layers) */
-	printf("\"layers\": %lu, \"cells\": [", world_sdf_atlas_layers(&scene_volume.header));
+	printf("\"layers\": %lu, \"table\": [", world_sdf_atlas_layers(&scene_volume.header));
 	for (voxel = 0; voxel < SCENE_WIDTH * SCENE_HEIGHT * SCENE_DEPTH * WORLD_SDF_CELL_BYTES; voxel++)
 		printf("%s%d", voxel ? "," : "", scene_volume.cells[voxel / 4][voxel % 4]);
 	printf("],\n\"atlas\": [");

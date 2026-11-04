@@ -2655,7 +2655,7 @@ static unsigned int world_sdf_distance(struct module *m, struct pixel_state *sta
 		constant_float(m, 1.0f / (float)XGPU_WORLD_SDF_BRICK))), fsub(m, 3, xyz(m, field1), constant_splat(m, 3, 1.0f)));
 	unsigned int sampled = load(m, type_sampled_image(m, DIM_3D, FALSE, FALSE, TRUE), m->world_sdf_table), operands[4];
 	unsigned int entry, kind, result = local(m, &state->locals, m->t_float), body = id_new(m), merge = id_new(m);
-	unsigned int at, uvw, atlas, size[3];
+	unsigned int at, uvw, atlas, size[3], brick;
 
 	operands[0] = op(m, OP_IMAGE, type_sampled_image(m, DIM_3D, FALSE, FALSE, FALSE), 1, &sampled);
 	operands[1] = op1(m, OP_CONVERT_F_TO_S, m->t_iv3, cell);
@@ -2668,9 +2668,9 @@ static unsigned int world_sdf_distance(struct module *m, struct pixel_state *sta
 	kind = extract(m, entry, 3);
 	store(m, result, fselect(m, compare(m, OP_F_ORD_EQUAL, kind, constant_float(m, (float)XGPU_WORLD_SDF_CELL_INSIDE)),
 		fneg(m, 1, range), range));
+	brick = compare(m, OP_F_ORD_EQUAL, kind, constant_float(m, (float)XGPU_WORLD_SDF_CELL_BRICK));
 	selection_merge(m, merge);
-	branch_conditional(m, compare(m, OP_F_ORD_EQUAL, kind, constant_float(m, (float)XGPU_WORLD_SDF_CELL_BRICK)), body,
-		merge);
+	branch_conditional(m, brick, body, merge);
 	label_at(m, body);
 	/* (the brick's texel in the atlas: its first at its place times the span) */
 	at = fadd(m, 3, fadd(m, 3, fscale(m, 3, xyz(m, entry), constant_float(m, (float)XGPU_WORLD_SDF_BRICK_SPAN)),

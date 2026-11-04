@@ -18,7 +18,7 @@ def main():
     modules = [spirv_run.Module(_words(Path(path))) for path in sys.argv[2:4]]
     tolerance = float(sys.argv[4])
     width, height, depth = scene["size"]
-    cells, atlas, layers = scene["cells"], scene["atlas"], scene["layers"]
+    table, atlas, layers = scene["table"], scene["atlas"], scene["layers"]
     origin, voxel, range_ = scene["origin"], scene["voxel"], scene["range"]
     side = 16 * 9  # (the atlas's: XGPU_WORLD_SDF_ATLAS bricks of XGPU_WORLD_SDF_BRICK_SPAN voxels)
     parameters = scene["parameters"]
@@ -33,7 +33,7 @@ def main():
         if name == "world_sdf_table":
             # (read by texel: the table's four bytes as RGBA8)
             at = ((uvw[2] * height + uvw[1]) * width + uvw[0]) * 4
-            return [spirv_run.f32(cells[at + part] / 255.0) for part in range(4)]
+            return [spirv_run.f32(table[at + part] / 255.0) for part in range(4)]
         if name != "world_sdf":
             return [1.0, 1.0, 1.0, 1.0]  # (the surface's own texture: white)
         size = (side, side, layers * 9)

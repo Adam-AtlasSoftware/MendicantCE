@@ -22,7 +22,7 @@ FILE_FUNCTIONS = ["sdf_put32", "sdf_get32", "sdf_put_float", "sdf_get_float", "s
                   "sdf_file_read", "sdf_cache_load", "sdf_bsp_inside"]
 CONTROLS = [
     # a cell marked only where a triangle is within range of its middle (not of each of its voxels)
-    (BAKE, "float reach = header->range + 0.5f * step * 1.7320508f;", "float reach = header->range;", "plane"),
+    (BAKE, "float reach = header->range + 0.5f * step * 1.7320508f;", "float reach = header->range;", "soup"),
     # the table's kinds read the wrong way round
     (BAKE, "return entry[3] == WORLD_SDF_CELL_INSIDE ? -header->range : header->range;",
      "return entry[3] == WORLD_SDF_CELL_INSIDE ? header->range : -header->range;", "sample"),
