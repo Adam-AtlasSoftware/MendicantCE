@@ -888,7 +888,9 @@ void render_enumerate_lights(boolean specular)
 {
 	short index;
 
-	if (!render_enumerating || !pass_world())
+	/* (the structure's light passes are drawn by their own shaders, not lit
+	by the renderer's lights: the same in either lighting) */
+	if (!render_enumerating || !pass_world() || pass_dynamic_lights())
 		return;
 	if (specular)
 		rasterizer_environment_specular_lights_begin();
@@ -1091,6 +1093,15 @@ static struct
 	} drawn[MAXIMUM_OBJECT_EFFECTS];
 } object_effects;
 
+/* the effects that take no light, the camouflage and the self-occluding
+transparency (rasterizer_xbox_models.c sets a model's lights only for a draw
+with neither; a modifier shader is lit), drawn in the passes without the
+renderer's lights alone: those light nothing they draw */
+static boolean unlit_effects_drawn(void)
+{
+	return !pass_dynamic_lights();
+}
+
 /* whether the model has been drawn with the effect (kind, and its shader
 or permutation: value) this pass; else it is now */
 static boolean object_effect_drawn(long model_index, short kind, long value)
@@ -1144,6 +1155,8 @@ static void object_effects_draw(void)
 		permutation = forced > 0 && !object_effect_drawn(model_index, _object_effect_permutation, forced);
 		for (state = 0; state < (short)NUMBEROF(model_states); state++)
 		{
+			boolean unlit_effects = unlit_effects_drawn();
+
 			memset(&effect, 0, sizeof(effect));
 			effect.type = _render_model_effect_type_none;
 			effect.source_object_index = STAND_IN_OBJECT_INDEX;
@@ -1154,7 +1167,7 @@ static void object_effects_draw(void)
 				model_draw(model_index, state, &effect, 0, 0);
 				effect.modifier_shader = NULL;
 			}
-			if (camouflage)
+			if (camouflage && unlit_effects)
 			{
 				effect.type = _render_model_effect_type_active_camouflage;
 				effect.intensity = 0.5f;
@@ -1165,7 +1178,7 @@ static void object_effects_draw(void)
 				effect.type = _render_model_effect_type_none;
 				effect.intensity = effect.parameter = 0.0f;
 			}
-			if (self_occludes)
+			if (self_occludes && unlit_effects)
 			{
 				effect.type = _render_model_effect_type_modifier;
 				model_draw(model_index, state, &effect, 0, 0);
@@ -1212,13 +1225,16 @@ static void first_person_model_draw(long model_index)
 	{
 		model_draw(model_index, state, NULL, 0, flags);
 		memset(&effect, 0, sizeof(effect));
-		effect.type = _render_model_effect_type_active_camouflage;
-		effect.source_object_index = STAND_IN_OBJECT_INDEX;
-		effect.source_object_centroid = render.camera.position;
-		effect.intensity = 0.5f;
-		model_draw(model_index, state, &effect, 0, flags);
-		effect.parameter = 1.0f;
-		model_draw(model_index, state, &effect, 0, flags);
+		if (unlit_effects_drawn())
+		{
+			effect.type = _render_model_effect_type_active_camouflage;
+			effect.source_object_index = STAND_IN_OBJECT_INDEX;
+			effect.source_object_centroid = render.camera.position;
+			effect.intensity = 0.5f;
+			model_draw(model_index, state, &effect, 0, flags);
+			effect.parameter = 1.0f;
+			model_draw(model_index, state, &effect, 0, flags);
+		}
 		memset(&effect, 0, sizeof(effect));
 		effect.source_object_index = STAND_IN_OBJECT_INDEX;
 		for (index = 0; index < modifier_count; index++)
@@ -1326,7 +1342,9 @@ void render_enumerate_shadows(void)
 	real_matrix4x3 shadow_matrix;
 	real_vector3d right;
 
-	if (!render_enumerating || !pass_world())
+	/* (a shadow is drawn by its own shaders, not lit by the renderer's
+	lights: the same in either lighting) */
+	if (!render_enumerating || !pass_world() || pass_dynamic_lights())
 		return;
 	memset(planes, 0, sizeof(planes));
 	memset(&bounds, 0, sizeof(bounds));

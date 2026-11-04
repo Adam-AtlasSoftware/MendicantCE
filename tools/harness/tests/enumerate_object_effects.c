@@ -106,6 +106,11 @@ static void model_draw(long model_index, short state, struct render_model_effect
 	drawn[drawn_count++] = draw_make(model_index, state, effect, permutation, flags);
 }
 
+/* (whether the pass has the renderer's lights: the unlit effects are drawn
+in the passes without them alone) */
+static boolean dynamic_lights;
+static boolean pass_dynamic_lights(void) { return dynamic_lights; }
+
 #include "under_test.inc"
 
 static void expect(long model_index, short state, struct render_model_effect const *effect, short permutation,
@@ -305,6 +310,22 @@ int main(int argc, char **argv)
 		drawn_count = 0;
 		first_person_models_draw();
 		check_drawn("first person's second pass");
+	}
+	else if (!strcmp(name, "lit"))
+	{
+		int index;
+		int unlit_count;
+
+		/* (a pass with the renderer's lights: no camouflage or self-occluding
+		draw, which take none of them, and so fewer draws than without) */
+		object_effects_draw();
+		unlit_count = drawn_count;
+		world();
+		dynamic_lights = TRUE;
+		object_effects_draw();
+		for (index = 0; index < drawn_count; index++)
+			CHECK(drawn[index].type != _render_model_effect_type_active_camouflage, "no camouflage in a lit pass");
+		CHECK(drawn_count < unlit_count, "fewer draws in a lit pass (%d of %d)", drawn_count, unlit_count);
 	}
 	else if (!strcmp(name, "full"))
 	{
