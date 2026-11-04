@@ -163,8 +163,9 @@ struct sdf_job
 	/* the bake's field, and the next slab a worker takes */
 	struct world_sdf_volume volume;
 	long next_slice;
-	/* what came of it */
+	/* what came of it; the game's thread's time copying the geometry */
 	int result;
+	double copy_milliseconds;
 };
 
 /* ---------- globals */
@@ -748,8 +749,9 @@ static int sdf_bake(struct sdf_job *job)
 	file = sdf_file_pack(&job->volume, &size);
 	written = file && sdf_file_write(path, file, size);
 	free(file);
-	platform_log("world sdf: %s bsp %d: %lux%lux%lu voxel %.3f in %lu ms on %lu threads, %lu cached%s", job->key.map,
-		(int)job->key.bsp, job->volume.header.width, job->volume.header.height, job->volume.header.depth,
+	platform_log("world sdf: %s bsp %d: %ld triangles copied in %.1f ms; %lux%lux%lu voxel %.3f in %lu ms on %lu "
+		"threads, %lu cached%s", job->key.map, (int)job->key.bsp, job->triangle_count, job->copy_milliseconds,
+		job->volume.header.width, job->volume.header.height, job->volume.header.depth,
 		(double)job->volume.header.voxel, job->volume.header.bake_milliseconds, job->volume.header.bake_threads,
 		written ? size : 0UL, written ? "" : file ? " (not written: the file could not be)" :
 		" (not written: the deflate failed)");
@@ -859,6 +861,7 @@ static int sdf_bake_begin(struct sdf_key const *key)
 	struct world_scene_triangles triangles;
 	struct collision_bsp const *collision = global_collision_bsp_get();
 	struct sdf_job *job;
+	unsigned long long began = SDL_GetTicksNS();
 
 	if (sdf_bake_queued(key))
 		return 1;
@@ -919,6 +922,7 @@ static int sdf_bake_begin(struct sdf_key const *key)
 	{
 		job->bsp.node_count = job->bsp.plane_count = 0;
 	}
+	job->copy_milliseconds = (double)(SDL_GetTicksNS() - began) / 1e6;
 	sdf_queue(job);
 	return 1;
 }
