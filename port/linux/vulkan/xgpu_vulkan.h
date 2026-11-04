@@ -182,6 +182,10 @@ struct xgpu_vulkan_capabilities
 	is ordered after the ones before it by a barrier (two of its own
 	triangles over the same pixel, unordered) */
 	int color_read, raster_order;
+	/* pixel shaders have the subgroups' bitwise operations (Vulkan 1.1's
+	subgroup arithmetic in the fragment stage): xgpu_spirv_options
+	subgroups */
+	int subgroups;
 };
 void xgpu_vulkan_capabilities(struct xgpu_vulkan_capabilities *capabilities);
 
@@ -520,6 +524,10 @@ struct xgpu_vulkan_draw
 	attachment bound as its input, the draw ordered after the pass's
 	draws before it */
 	uint8_t reads_color;
+	/* HALO_VULKAN_DRAW_TIMES (measuring): the game's draw's kind, its
+	pixel key's ambient_occlusion, its pipeline key's lighting and its
+	per_pixel_lighting, and XGPU_VULKAN_DRAW_GAME; zeros the backend's own */
+	uint8_t kind[4];
 	const struct xgpu_vulkan_dynamic_state *dynamic;
 	uint32_t bindings;
 	struct xgpu_vulkan_range vertices[XGPU_VULKAN_BINDINGS];
@@ -530,6 +538,7 @@ struct xgpu_vulkan_draw
 	int32_t vertex_offset;
 };
 
+#define XGPU_VULKAN_DRAW_GAME 0x80
 void xgpu_vulkan_draw(const struct xgpu_vulkan_draw *draw);
 
 /* display.ambient_occlusion: the occlusion of the 3D view (an image of the

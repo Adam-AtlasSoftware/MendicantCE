@@ -1728,6 +1728,167 @@ int xgpu_vulkan_gpu_time_read(double *milliseconds)
 	return 1;
 }
 
+/* ---------- HALO_VULKAN_DRAW_TIMES (measuring)
+
+Every Nth frame (the setting's number), a timestamp at the bottom of the
+pipe after each draw: sorted by time, each gap is the draw's that ended it
+(its kind, xgpu_vulkan_draw's kind), and from the last draw to the frame's
+end the frame's other work's. Summed by the draws' display.ambient_occlusion
+kind and logged every 20 timed frames; with HALO_VULKAN_DRAW_TIMES_FILE,
+each timed frame's draws written there one a line, to compare two runs'
+draws one for one. A timestamp after every draw serializes them, so the
+times are each draw's own, not its share of a frame's overlapped work. */
+
+#define DRAW_TIMES_MAXIMUM 16384
+
+static struct
+{
+	int every, pending;
+	VkQueryPool pool;
+	FILE *file;
+	uint32_t used;
+	uint64_t serial, frame;
+	struct
+	{
+		uint8_t kind[4];
+		uint32_t count;
+	} draws[DRAW_TIMES_MAXIMUM];
+	double kind_milliseconds[256], kind_draws[256], other_milliseconds, frames;
+} draw_times;
+
+static void draw_times_create(void)
+{
+	const char *every = getenv("HALO_VULKAN_DRAW_TIMES"), *file = getenv("HALO_VULKAN_DRAW_TIMES_FILE");
+	VkQueryPoolCreateInfo create;
+
+	draw_times.every = every ? atoi(every) : 0;
+	if (draw_times.every <= 0 || !vk.capabilities.gpu_timestamps)
+	{
+		draw_times.every = 0;
+		return;
+	}
+	memset(&create, 0, sizeof(create));
+	create.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+	create.queryType = VK_QUERY_TYPE_TIMESTAMP;
+	create.queryCount = DRAW_TIMES_MAXIMUM;
+	if (!check(vkCreateQueryPool(vk.device, &create, NULL, &draw_times.pool), "vkCreateQueryPool (draw times)"))
+	{
+		draw_times.every = 0;
+		return;
+	}
+	if (file && *file)
+		draw_times.file = fopen(file, "w");
+}
+
+/* after a draw recorded into commands: its timestamp (the frame's first
+draw: a timestamp before it, too) */
+static void draw_times_draw(VkCommandBuffer commands, const struct xgpu_vulkan_draw *draw, int after)
+{
+	if (!draw_times.every || draw_times.pending)
+		return;
+	if (!after)
+	{
+		if (draw_times.used || vk.frame % (uint64_t)draw_times.every)
+			return;
+		vkResetQueryPool(vk.device, draw_times.pool, 0, DRAW_TIMES_MAXIMUM);
+		vkCmdWriteTimestamp(commands, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, draw_times.pool, 0);
+		memset(&draw_times.draws[0], 0, sizeof(draw_times.draws[0]));
+		draw_times.used = 1;
+		draw_times.frame = vk.frame;
+		return;
+	}
+	if (!draw_times.used || draw_times.frame != vk.frame || draw_times.used >= DRAW_TIMES_MAXIMUM - 1)
+		return;
+	vkCmdWriteTimestamp(commands, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, draw_times.pool, draw_times.used);
+	memcpy(draw_times.draws[draw_times.used].kind, draw->kind, 4);
+	draw_times.draws[draw_times.used].count = draw->count;
+	draw_times.used++;
+}
+
+/* the timed frame's end, in its last submission's commands */
+static void draw_times_frame_end(void)
+{
+	if (!draw_times.used || draw_times.pending || draw_times.frame != vk.frame)
+		return;
+	vkCmdWriteTimestamp(main_commands(), VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, draw_times.pool, draw_times.used);
+	memset(&draw_times.draws[draw_times.used], 0, sizeof(draw_times.draws[0]));
+	draw_times.used++;
+	draw_times.pending = 1;
+}
+
+static int draw_times_order(const void *a, const void *b)
+{
+	const uint64_t *x = a, *y = b;
+
+	return x[0] < y[0] ? -1 : x[0] > y[0];
+}
+
+/* the timed frame's times, once its submission is done */
+static void draw_times_collect(void)
+{
+	static uint64_t times[DRAW_TIMES_MAXIMUM][2], sorted[DRAW_TIMES_MAXIMUM][2];
+	uint32_t index, last;
+	VkResult result;
+
+	if (!draw_times.pending || !draw_times.serial || draw_times.serial > completed_serial())
+		return;
+	result = vkGetQueryPoolResults(vk.device, draw_times.pool, 0, draw_times.used, sizeof(times[0]) * draw_times.used,
+		times, sizeof(times[0]), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT);
+	if (result == VK_NOT_READY)
+		return;
+	last = draw_times.used - 1;
+	for (index = 0; index < draw_times.used; index++)
+	{
+		sorted[index][0] = times[index][0];
+		sorted[index][1] = index;
+	}
+	qsort(sorted, draw_times.used, sizeof(sorted[0]), draw_times_order);
+	if (draw_times.file)
+		fprintf(draw_times.file, "frame %llu draws %u\n", (unsigned long long)draw_times.frame, draw_times.used - 2);
+	for (index = 1; result == VK_SUCCESS && index < draw_times.used; index++)
+	{
+		uint32_t which = (uint32_t)sorted[index][1];
+		double milliseconds = (double)(sorted[index][0] - sorted[index - 1][0]) *
+			(double)vk.properties.limits.timestampPeriod * 1e-6;
+
+		if (which == last)
+		{
+			draw_times.other_milliseconds += milliseconds;
+			continue;
+		}
+		draw_times.kind_milliseconds[draw_times.draws[which].kind[0]] += milliseconds;
+		draw_times.kind_draws[draw_times.draws[which].kind[0]]++;
+		if (draw_times.file)
+			fprintf(draw_times.file, "%u %.4f %02x %02x %02x %02x %u\n", which, milliseconds * 1000.0,
+				draw_times.draws[which].kind[0], draw_times.draws[which].kind[1], draw_times.draws[which].kind[2],
+				draw_times.draws[which].kind[3], draw_times.draws[which].count);
+	}
+	draw_times.frames++;
+	draw_times.used = 0;
+	draw_times.pending = 0;
+	draw_times.serial = 0;
+	if (draw_times.frames >= 20)
+	{
+		char line[2048];
+		int length = 0;
+
+		for (index = 0; index < 256; index++)
+		{
+			if (draw_times.kind_draws[index] && length < (int)sizeof(line) - 64)
+				length += snprintf(line + length, sizeof(line) - (size_t)length, " ao%02x %.3f ms (%.0f)", index,
+					draw_times.kind_milliseconds[index] / draw_times.frames,
+					draw_times.kind_draws[index] / draw_times.frames);
+		}
+		host_logf(HOST_LOG_INFO, "vulkan: draw times a frame:%s; other %.3f ms", line,
+			draw_times.other_milliseconds / draw_times.frames);
+		if (draw_times.file)
+			fflush(draw_times.file);
+		memset(draw_times.kind_milliseconds, 0, sizeof(draw_times.kind_milliseconds));
+		memset(draw_times.kind_draws, 0, sizeof(draw_times.kind_draws));
+		draw_times.other_milliseconds = draw_times.frames = 0.0;
+	}
+}
+
 /* ---------- the upload ring */
 
 /* the start of size bytes at the ring's head, aligned, wrapped to the
@@ -4762,12 +4923,15 @@ void xgpu_vulkan_draw(const struct xgpu_vulkan_draw *draw)
 			vk.bound.indices = draw->indices.buffer;
 			vk.bound.index_offset = draw->indices.offset;
 		}
+		draw_times_draw(commands, draw, 0);
 		vkCmdDrawIndexed(commands, draw->count, 1, draw->first_index, draw->vertex_offset, 0);
 	}
 	else
 	{
+		draw_times_draw(commands, draw, 0);
 		vkCmdDraw(commands, draw->count, 1, 0, 0);
 	}
+	draw_times_draw(commands, draw, 1);
 	vk.statistics.draws++;
 }
 
@@ -6071,6 +6235,7 @@ void xgpu_vulkan_frame_end(struct xgpu_vulkan_image *image, int present_window)
 	vk.gpu_time_armed = 0;
 	if (vk.frame_timing)
 		xgpu_vulkan_gpu_time_end();
+	draw_times_frame_end();
 	if (vk.queries && vk.queries->counter_count)
 		barrier(main_commands(), VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT,
 			VK_PIPELINE_STAGE_HOST_BIT, VK_ACCESS_HOST_READ_BIT);
@@ -6100,6 +6265,8 @@ void xgpu_vulkan_frame_end(struct xgpu_vulkan_image *image, int present_window)
 		serial = submit(VK_NULL_HANDLE, VK_NULL_HANDLE);
 	}
 	vk.frame_ending = 0;
+	if (draw_times.pending && !draw_times.serial)
+		draw_times.serial = serial;
 	if (vk.queries)
 	{
 		vk.queries->serial = serial;
@@ -6111,6 +6278,7 @@ void xgpu_vulkan_frame_end(struct xgpu_vulkan_image *image, int present_window)
 	vk.frame++;
 	vk.statistics.frames++;
 	completed_serial();
+	draw_times_collect();
 	garbage_collect();
 	vk.gpu_time_armed = gpu_time_armed;
 	if (vk.frame_timing)
@@ -6701,6 +6869,9 @@ static int device_make(const struct xgpu_vulkan_options *options)
 		properties11.pNext = &properties12;
 		vkGetPhysicalDeviceProperties2(vk.physical, &properties);
 		vk.capabilities.multiview_views = available11.multiview ? properties11.maxMultiviewViewCount : 0;
+		vk.capabilities.subgroups = (properties11.subgroupSupportedStages & VK_SHADER_STAGE_FRAGMENT_BIT) &&
+			(properties11.subgroupSupportedOperations & VK_SUBGROUP_FEATURE_ARITHMETIC_BIT) &&
+			!getenv("HALO_VULKAN_NO_SUBGROUPS");
 		vk.nvidia = properties12.driverID == VK_DRIVER_ID_NVIDIA_PROPRIETARY;
 	}
 	host_logf(HOST_LOG_INFO, "vulkan: %s (Vulkan %u.%u.%u, driver %08x)%s%s%s%s%s%s", vk.properties.deviceName,
@@ -7187,6 +7358,7 @@ int xgpu_vulkan_initialize(const struct xgpu_vulkan_options *options)
 	}
 #ifndef HALO_VR
 	vk.frame_timing = options->statistics;
+	draw_times_create();
 #endif
 	vk.serial = 1;
 	memset(&pool, 0, sizeof(pool));

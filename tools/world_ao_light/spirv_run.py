@@ -318,6 +318,10 @@ def run(module, inputs, sample):
             values[result] = _map(lambda x, y: x & y, v[0], v[1])
         elif opcode == 195:  # OpShiftRightArithmetic
             values[result] = _map(lambda x, y: x >> y, v[0], v[1])
+        elif opcode == 196:  # OpShiftLeftLogical
+            values[result] = _map(lambda x, y: (x << y) & 0xffffffff, v[0], v[1])
+        elif opcode == 359:  # OpGroupNonUniformBitwiseOr: a subgroup of one invocation, its own
+            values[result] = values[rest[2]]
         elif opcode in (87, 88):  # OpImageSample*Lod
             values[result] = sample(values[rest[0]][1], v[1])
         elif opcode == 100:  # OpImage: the sampled image's image

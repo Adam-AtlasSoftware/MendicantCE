@@ -172,6 +172,12 @@ struct xgpu_spirv_options
 	int effect, effect_fade;
 	int input_samples;
 	BOOL reversed_depth;
+	/* the device's subgroups have their bitwise operations in pixel shaders
+	(Vulkan 1.1's subgroup arithmetic in the fragment stage):
+	display.ambient_occlusion "world"'s proxies walked a subgroup at a time
+	(world_proxies_occlusion), each shape's place and kind then the same for
+	all of its pixels */
+	BOOL subgroups;
 };
 
 /* ---------- the VR mode's effects

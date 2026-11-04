@@ -13,6 +13,10 @@ model lit for each vertex with its ambient light apart:
   check msl [<source>]                the Metal emitter's, each after a line
                                       "==== <case> <occlusion: 0 or 1>"
   check spirv <directory> [<source>]  the SPIR-V emitter's, <case>-<occlusion>.spv
+  check spirv_subgroups <directory> [<source>]
+                                      the same, with the subgroups' bitwise
+                                      operations (xgpu_spirv_options
+                                      subgroups)
 
 <source>: the occlusion's, "screen" (GTAO's texel, the default), "world"
 (display.ambient_occlusion "world": XGPU_AMBIENT_OCCLUSION_WORLD), or "view"
@@ -141,7 +145,7 @@ static int spirv_write(const char *directory, const char *name, int occlusion, c
 	return 0;
 }
 
-static int spirv(const char *directory)
+static int spirv(const char *directory, int subgroups)
 {
 	struct xgpu_pixel_program program;
 	struct xgpu_vertex_program vertex;
@@ -152,6 +156,7 @@ static int spirv(const char *directory)
 	int occlusion;
 
 	memset(&options, 0, sizeof(options));
+	options.subgroups = subgroups;
 	for (index = 0; index < sizeof(cases) / sizeof(cases[0]); index++)
 	{
 		for (occlusion = 0; occlusion < 2; occlusion++)
@@ -188,8 +193,9 @@ int main(int argc, char **argv)
 {
 	if ((argc == 2 || (argc == 3 && source_set(argv[2]))) && !strcmp(argv[1], "msl"))
 		return msl();
-	if ((argc == 3 || (argc == 4 && source_set(argv[3]))) && !strcmp(argv[1], "spirv"))
-		return spirv(argv[2]);
-	fprintf(stderr, "check msl [screen|world|view] | check spirv <directory> [screen|world|view]\n");
+	if ((argc == 3 || (argc == 4 && source_set(argv[3]))) &&
+		(!strcmp(argv[1], "spirv") || !strcmp(argv[1], "spirv_subgroups")))
+		return spirv(argv[2], !strcmp(argv[1], "spirv_subgroups"));
+	fprintf(stderr, "check msl [screen|world|view] | check spirv|spirv_subgroups <directory> [screen|world|view]\n");
 	return 2;
 }

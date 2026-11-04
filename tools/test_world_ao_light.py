@@ -143,11 +143,12 @@ def test_the_view_shows_it(shaders):
 
 
 def test_spirv_modules_valid(check, tmp_path):
-    for source in ("screen", "world", "view"):
-        (tmp_path / source).mkdir()
-        subprocess.run([str(check), "spirv", str(tmp_path / source), source], check=True)
-    modules = sorted(tmp_path.glob("*/*.spv"))
-    assert len(modules) == 33
+    for mode in ("spirv", "spirv_subgroups"):
+        for source in ("screen", "world", "view"):
+            (tmp_path / mode / source).mkdir(parents=True)
+            subprocess.run([str(check), mode, str(tmp_path / mode / source), source], check=True)
+    modules = sorted(tmp_path.glob("*/*/*.spv"))
+    assert len(modules) == 66
     if not VALIDATOR:
         pytest.skip("no spirv-val")
     for module in modules:
@@ -183,14 +184,16 @@ def spirv_check(reference, directory):
                           capture_output=True, text=True)
 
 
-def test_spirv_finds_what_the_reference_finds(reference, check, tmp_path):
-    subprocess.run([str(check), "spirv", str(tmp_path), "view"], check=True)
+@pytest.mark.parametrize("mode", ["spirv", "spirv_subgroups"])
+def test_spirv_finds_what_the_reference_finds(reference, check, tmp_path, mode):
+    """(with the subgroups' bitwise operations too: a subgroup of one pixel walks its own cell's shapes)"""
+    subprocess.run([str(check), mode, str(tmp_path), "view"], check=True)
     result = spirv_check(reference, tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
 
 
 # negative controls: each emitter with a fault in a shape the scene has, which the checks must see
-SPIRV_FAULT = ("constant_float(m, 2.0f * XGPU_WORLD_AO_PI)), 0.0f, 1.0f))));", "constant_float(m, XGPU_WORLD_AO_PI)), 0.0f, 1.0f))));")
+SPIRV_FAULT = ("constant_float(m, 2.0f * XGPU_WORLD_AO_PI)), 0.0f, 1.0f));", "constant_float(m, XGPU_WORLD_AO_PI)), 0.0f, 1.0f));")
 MSL_FAULT = ('"\\t\\tline = 2.0 * radius * h / 3.14159265358979 * (f1 - f0);\\n"',
              '"\\t\\tline = radius * h / 3.14159265358979 * (f1 - f0);\\n"')
 
