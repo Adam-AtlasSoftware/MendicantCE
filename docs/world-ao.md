@@ -13,8 +13,8 @@ and the result doesn't shimmer at the screen's edges. The same code serves the d
 eyes (it doesn't depend on the eye) and Metal with multisampling.
 
 This branch (`world-ao`) is the skeleton: the interfaces, stubs, hooks and tests. Four workstreams fill it in
-parallel ([Workstreams](#workstreams)). With the setting at anything but `"world"` nothing new runs. For now
-`"world"` draws exactly as `"off"`.
+parallel ([Workstreams](#workstreams)). With the setting at anything but `"world"` nothing new runs. `"world"`
+shades with what of the field and the proxies is ready (D's shading).
 
 ## Principles
 
@@ -283,17 +283,25 @@ follow it line for line. p is the point, n its unit normal, all in world units.
   - capsule: L/2 + 16·sqrt(r² + 2rL/π), a sphere of its silhouette's area side on;
   - box: 17 × its half diagonal sqrt(|X|² + |Y|² + ez²).
 
-  The shader skips a shape after that one distance test. On the level the term also fades to 0 over the last quarter
-  of the reach, so culling never shows an edge.
+  The shader skips a shape after that one distance test. The term also fades to 0 over the last quarter of the
+  reach, `fade = clamp((reach − |p − centre|) / (0.25·reach), 0, 1)`, on the level and on objects alike, so culling
+  never shows an edge.
 
 **Combining:**
 
 ```
-A_prox = Π_shapes (1 − occ_i)                          (shapes of other owners; ≤64, reach-culled)
-A      = A_obj · A_prox                (models)        A = A_prox  (lightmap pass)
-A      = mix(1, max(A, 0.2), strength_{objects|level} · fade)   (fade: the field's for A_obj's part; 1 for proxies)
+A_prox = Π_shapes (1 − occ_i · fade_i)                 (shapes of other owners; ≤64, reach-culled)
+A      = max(mix(1, A_obj, fade) · A_prox, 0.2)   (models: fade the field's)
+A      = max(A_prox, 0.2)                          (lightmap pass)
+A      = mix(1, A, strength_{objects|level})
 ambient' = ambient · A,  then the point lights / dynamic lights are added as #574 does
 ```
+
+The CPU reference of all of it is `world_ao_occlusion` (`port/linux/game/world_ao_shading.c`), and both emitters'
+shaders are checked against it at a made-up scene's points (`tools/test_world_ao_light.py`: the Metal functions'
+text run as C++, the SPIR-V modules run by a small interpreter; within 1e-6 of it). The draw's owner slot is its
+object's first shape's `[1].w` (`world_proxies_window`'s owners are the objects' datum handles); a draw with no
+shapes of its own has −1, and the first-person weapon gets no world variant at all.
 
 The strengths are in the block (`parameters[0]`): **subtle** objects 0.6 / level 0.5, **strong** 1.0 / 0.8. Those
 two levels may come back as `"world_subtle"` and `"world_strong"` if D's captures call for it; v1 ships `"world"` as
@@ -328,10 +336,10 @@ ignored.
   at least as good, then retired or kept as a fallback) | `"world"`.
 - `"world"` doesn't run GTAO's pre-pass (d3d8_device.c reads it as GTAO off). It works in VR's eye passes and with
   Metal's multisampling, where GTAO can't.
-- The menu (`tools/port_settings.py`, AMBIENT OCCLUSION) gains WORLD once D's shading lands; until then the value
-  exists only in config.toml.
+- The menu (`tools/port_settings.py`, AMBIENT OCCLUSION) has WORLD.
 - Classic's preset writes `"off"`, which bypasses everything.
-- `debug.world_ao_view` (D): the term in grey, as `debug.ambient_occlusion_view` does. `debug.world_proxies_view`
+- `debug.world_ao_view` (D): the surfaces it shades drawn as the term alone, in grey. `debug.world_ao_test` (D): a
+  made-up field (a plane about the camera) and shapes in place of B's and C's, to check the shading alone. `debug.world_proxies_view`
   (C): the shapes as wireframes.
 - A dedicated server or `debug.null_renderer` never builds the scene, bakes or uploads (`world_ao_mode` returns 0
   without a renderer).
