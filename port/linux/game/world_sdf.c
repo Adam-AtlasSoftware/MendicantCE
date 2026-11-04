@@ -74,6 +74,8 @@ enum
 {
 	/* the most bytes of the field uploaded a frame */
 	WORLD_SDF_UPLOAD_BYTES = 512 * 1024,
+	/* the main menu's frames after the start-up pass before its bakes begin */
+	WORLD_SDF_MENU_SETTLE_FRAMES = 300,
 	/* the frames after a load before a missing field's geometry is copied */
 	WORLD_SDF_COPY_DELAY_FRAMES = 2,
 	/* the z slices a worker takes at a time */
@@ -1089,6 +1091,13 @@ void world_sdf_frame(void)
 	/* (no bake while the start-up pass runs, up to the main menu shown:
 	they begin once it is) */
 	hold = menu_pictures_preparing();
+	/* (and a few seconds more, the main menu's first frames its own) */
+	{
+		static long settle;
+
+		settle = hold ? WORLD_SDF_MENU_SETTLE_FRAMES : settle > 0 ? settle - 1 : 0;
+		hold = hold || settle > 0;
+	}
 	if (hold != world_sdf.hold)
 	{
 		pthread_mutex_lock(&world_sdf_lock);
