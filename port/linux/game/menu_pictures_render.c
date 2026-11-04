@@ -194,6 +194,9 @@ static struct
 	unsigned long long began, picture_began, phase_began;
 	double phases[NUMBER_OF_PHASES];
 	double totals[NUMBER_OF_PHASES];
+	/* how far the map's preparation being recorded has come (0 to 1;
+	render_enumerate.c), shown as the step it is of its picture */
+	real recorded;
 } prepare;
 
 /* ---------- public code */
@@ -699,11 +702,25 @@ static void prepare_screen(
 		1.0f, /* _prepare_menu */
 	};
 	char caption[96];
+	real part;
 
 	if (prepare.state == _prepare_menu || prepare.count <= 0)
 		return;
+	/* (a map's preparation recorded in the frame: the way to the next part) */
+	part = parts[prepare.state] + (parts[prepare.state + 1] - parts[prepare.state]) * prepare.recorded;
 	snprintf(caption, sizeof(caption), "Preparing menu pictures \xB7 %ld of %ld", prepare.done, prepare.count);
-	halo_loading_screen_progress((prepare.done + parts[prepare.state]) / (real)prepare.count, caption);
+	halo_loading_screen_progress((prepare.done + part) / (real)prepare.count, caption);
+}
+
+void menu_pictures_recording(
+	real fraction)
+{
+	if (prepare.state == _prepare_off || prepare.state == _prepare_menu)
+		return;
+	prepare.recorded = fraction;
+	prepare_screen();
+	if (fraction >= 1.0f)
+		prepare.recorded = 0.0f;
 }
 
 int menu_pictures_begin(

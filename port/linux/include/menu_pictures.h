@@ -191,6 +191,8 @@ int menu_pictures_frame_drawn(void);
 played on them (mods.c), so a picture never shows a mod, and turning mods
 on or off leaves the cached pictures right */
 int menu_pictures_stock_maps(void);
+/* how far a map's preparation recorded in the pass has come (render_enumerate.c) */
+void menu_pictures_recording(float fraction);
 /* a frame to keep, as it is presented (d3d8_device.c's present: kept, and
 not shown); TRUE if it was one */
 int menu_pictures_frame_kept(void);
