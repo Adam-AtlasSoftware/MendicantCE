@@ -1330,6 +1330,16 @@ void lights_preprocess_scene(
 							definition->flags,
 							_light_definition_is_first_person_flashlight_bit))
 						{
+							/* port: a local player's own flashlight shines along
+							the view drawn (port/linux/game/render_interpolation.c)
+							where the first-person weapon does not carry it below
+							(none in hand, or zoomed): the body's marker trails the
+							view and turns with the head's look, which jumps */
+							render_interpolation_view_flashlight(
+								light->object_index,
+								&light_parameters.position,
+								&light_parameters.forward,
+								&light_parameters.up);
 							first_person_weapon_center_flashlight(
 								light->object_index,
 								&light_parameters.position,
