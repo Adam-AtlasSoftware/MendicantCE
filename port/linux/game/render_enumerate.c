@@ -1023,40 +1023,101 @@ static void models_draw(void)
 
 /* every object's model with its own effects: its modifier shader (a
 shield's), its camouflage (a unit's), its transparency drawn as it
-occludes itself, its forced shader permutation */
+occludes itself, its forced shader permutation. Many objects share a
+model and an effect (a level's many bipeds of one model, their shields'
+one modifier shader): each model is drawn with each of its effects once a
+pass, as a second draw of the same model with the same effect draws the
+same (a pass's draws are its fog's, part's and lighting's alone). */
+
+enum
+{
+	_object_effect_modifier,
+	_object_effect_camouflage,
+	_object_effect_self_occludes,
+	_object_effect_permutation,
+	/* (first person's: a model drawn as the first-person weapon's) */
+	_object_effect_first_person,
+};
+
+/* the models and effects a pass has drawn, at most (past them, each is
+drawn as if new) */
+#define MAXIMUM_OBJECT_EFFECTS 2048
+
+static struct
+{
+	short count;
+	struct
+	{
+		long model_index;
+		long value;
+		short kind;
+	} drawn[MAXIMUM_OBJECT_EFFECTS];
+} object_effects;
+
+/* whether the model has been drawn with the effect (kind, and its shader
+or permutation: value) this pass; else it is now */
+static boolean object_effect_drawn(long model_index, short kind, long value)
+{
+	short index;
+
+	for (index = 0; index < object_effects.count; index++)
+	{
+		if (object_effects.drawn[index].model_index == model_index && object_effects.drawn[index].kind == kind &&
+			object_effects.drawn[index].value == value)
+		{
+			return TRUE;
+		}
+	}
+	if (object_effects.count < MAXIMUM_OBJECT_EFFECTS)
+	{
+		object_effects.drawn[object_effects.count].model_index = model_index;
+		object_effects.drawn[object_effects.count].kind = kind;
+		object_effects.drawn[object_effects.count].value = value;
+		object_effects.count++;
+	}
+	return FALSE;
+}
+
 static void object_effects_draw(void)
 {
 	struct tag_iterator iterator;
 	long tag_index;
 
+	object_effects.count = 0;
 	tag_iterator_new(&iterator, OBJECT_DEFINITION_TAG);
 	while ((tag_index = tag_iterator_next(&iterator)) != NONE)
 	{
 		struct object_definition *definition = object_definition_get(tag_index);
 		long model_index = definition->object.model.index;
+		long modifier_index = definition->object.modifier_shader.index;
+		short forced = definition->object.forced_shader_permutation_index;
 		struct render_model_effect effect;
+		boolean modifier, camouflage, self_occludes, permutation;
 		short state;
 
 		if (model_index == NONE)
 			continue;
+		modifier = modifier_index != NONE &&
+			shader_type_is_valid_for_modifier(shader_definition_get(modifier_index)->base.type) &&
+			!object_effect_drawn(model_index, _object_effect_modifier, modifier_index);
+		camouflage = TEST_FLAG(_object_mask_unit, FLAG(definition->object.type)) &&
+			!object_effect_drawn(model_index, _object_effect_camouflage, 0);
+		self_occludes = TEST_FLAG(definition->object.flags, _object_transparency_self_occludes_bit) &&
+			!object_effect_drawn(model_index, _object_effect_self_occludes, 0);
+		permutation = forced > 0 && !object_effect_drawn(model_index, _object_effect_permutation, forced);
 		for (state = 0; state < (short)NUMBEROF(model_states); state++)
 		{
 			memset(&effect, 0, sizeof(effect));
 			effect.type = _render_model_effect_type_none;
 			effect.source_object_index = STAND_IN_OBJECT_INDEX;
 			effect.source_object_centroid = render.camera.position;
-			if (definition->object.modifier_shader.index != NONE)
+			if (modifier)
 			{
-				struct shader *modifier = shader_definition_get(definition->object.modifier_shader.index);
-
-				if (shader_type_is_valid_for_modifier(modifier->base.type))
-				{
-					effect.modifier_shader = modifier;
-					model_draw(model_index, state, &effect, 0, 0);
-					effect.modifier_shader = NULL;
-				}
+				effect.modifier_shader = shader_definition_get(modifier_index);
+				model_draw(model_index, state, &effect, 0, 0);
+				effect.modifier_shader = NULL;
 			}
-			if (TEST_FLAG(_object_mask_unit, FLAG(definition->object.type)))
+			if (camouflage)
 			{
 				effect.type = _render_model_effect_type_active_camouflage;
 				effect.intensity = 0.5f;
@@ -1067,14 +1128,14 @@ static void object_effects_draw(void)
 				effect.type = _render_model_effect_type_none;
 				effect.intensity = effect.parameter = 0.0f;
 			}
-			if (TEST_FLAG(definition->object.flags, _object_transparency_self_occludes_bit))
+			if (self_occludes)
 			{
 				effect.type = _render_model_effect_type_modifier;
 				model_draw(model_index, state, &effect, 0, 0);
 				effect.type = _render_model_effect_type_none;
 			}
-			if (definition->object.forced_shader_permutation_index > 0)
-				model_draw(model_index, state, NULL, definition->object.forced_shader_permutation_index, 0);
+			if (permutation)
+				model_draw(model_index, state, NULL, forced, 0);
 		}
 	}
 }
@@ -1088,10 +1149,28 @@ static void first_person_model_draw(long model_index)
 	struct render_model_effect effect;
 	struct tag_iterator iterator;
 	long tag_index;
-	short state;
+	long modifiers[MAXIMUM_OBJECT_EFFECTS];
+	short modifier_count = 0, index, state;
 
-	if (model_index == NONE)
+	/* (a model drawn before: many weapons share one) */
+	if (model_index == NONE || object_effect_drawn(model_index, _object_effect_first_person, 0))
 		return;
+	/* (each modifier shader once: the units share their shields') */
+	tag_iterator_new(&iterator, UNIT_DEFINITION_TAG);
+	while ((tag_index = tag_iterator_next(&iterator)) != NONE && modifier_count < MAXIMUM_OBJECT_EFFECTS)
+	{
+		long modifier_index = object_definition_get(tag_index)->object.modifier_shader.index;
+
+		if (modifier_index == NONE ||
+			!shader_type_is_valid_for_modifier(shader_definition_get(modifier_index)->base.type))
+		{
+			continue;
+		}
+		for (index = 0; index < modifier_count && modifiers[index] != modifier_index; index++)
+			;
+		if (index == modifier_count)
+			modifiers[modifier_count++] = modifier_index;
+	}
 	for (state = 0; state < (short)NUMBEROF(model_states); state++)
 	{
 		model_draw(model_index, state, NULL, 0, flags);
@@ -1105,17 +1184,10 @@ static void first_person_model_draw(long model_index)
 		model_draw(model_index, state, &effect, 0, flags);
 		memset(&effect, 0, sizeof(effect));
 		effect.source_object_index = STAND_IN_OBJECT_INDEX;
-		tag_iterator_new(&iterator, UNIT_DEFINITION_TAG);
-		while ((tag_index = tag_iterator_next(&iterator)) != NONE)
+		for (index = 0; index < modifier_count; index++)
 		{
-			struct object_definition *definition = object_definition_get(tag_index);
-
-			if (definition->object.modifier_shader.index != NONE)
-			{
-				effect.modifier_shader = shader_definition_get(definition->object.modifier_shader.index);
-				if (shader_type_is_valid_for_modifier(effect.modifier_shader->base.type))
-					model_draw(model_index, state, &effect, 0, flags);
-			}
+			effect.modifier_shader = shader_definition_get(modifiers[index]);
+			model_draw(model_index, state, &effect, 0, flags);
 		}
 	}
 }
@@ -1127,6 +1199,7 @@ static void first_person_models_draw(void)
 	long tag_index;
 	short index;
 
+	object_effects.count = 0;
 	for (index = 0; globals && index < (short)globals->first_person_interface.count; index++)
 	{
 		struct game_globals_first_person_interface *interface = TAG_BLOCK_GET_ELEMENT(
