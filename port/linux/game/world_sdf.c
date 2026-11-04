@@ -83,7 +83,7 @@ enum
 	/* the most bakes waiting (the oldest waiting dropped past it) */
 	WORLD_SDF_MAXIMUM_BAKES = 16,
 	/* the most fields the start-up pass has tried */
-	WORLD_SDF_MAXIMUM_TRIED = 256,
+	WORLD_SDF_MAXIMUM_TRIED = 64,
 	/* the cache file's header, and its CRC after the deflated voxels */
 	WORLD_SDF_FILE_HEADER = 64,
 	WORLD_SDF_FILE_CRC = 4,
