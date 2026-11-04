@@ -5,7 +5,7 @@ port/linux/game/render_prepared.c, port/linux/src/prepared_shipped.h), made agai
     python3 tools/prepared_records.py --maps ~/halo-x86-maps/maps [--halo build/linux_x86_64/halo] [--work <folder>]
 
 Run on a Linux machine with the stock Xbox maps, on a build of the commit to be released. It starts the game once,
-fresh, offscreen, with every setting at its default (a config.toml of its own): its first start's pass loads the
+fresh, offscreen (not at a fixed step, which the pass waits on for ever), with every setting at its default (a config.toml of its own): its first start's pass loads the
 23 stock maps, then the main menu loads ui.map, and each map's preparation is recorded (z:\\prepared). The records
 are compressed (zlib) into port/assets/prepared, every other file there removed, and manifest.json lists each one's
 map, checksum, key, size and file with the records' form (render_prepared.c's PREPARED_VERSION and the journal's,
@@ -50,7 +50,7 @@ def run_game(halo: Path, maps: Path, work: Path, seconds: int) -> Path:
                        HALO_VULKAN_PIPELINE_CACHE=str(run / "save" / "vulkan.bin"),
                        HALO_NET_ONLINE="false", HALO_NET_PORT="5191", HALO_NET_BROADCAST="127.255.255.255",
                        HALO_UPDATE_ANSWER="no", HALO_NO_CLIPBOARD="1", HALO_DEBUG_MENU_PICTURES="1",
-                       HALO_FIXED_STEP="1", HALO_PREPARED_RECORDS="1", HALO_MAP_CACHE_MEGABYTES="3500",
+                       HALO_PREPARED_RECORDS="1", HALO_MAP_CACHE_MEGABYTES="3500",
                        SDL_VIDEO_DRIVER="offscreen", SDL_AUDIO_DRIVER="dummy")
     log = run / "stdout.txt"
     with open(log, "w") as output:
