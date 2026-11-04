@@ -572,6 +572,37 @@ static void bound_case(void)
 	}
 }
 
+/* past 6 half diagonals a box is its faces' patches: where the form
+changes (just inside: the exact faces; just outside: the patches) the two
+are within 0.2/255, facing anywhere */
+static void far_case(void)
+{
+	int index;
+	float worst = 0.0f;
+
+	for (index = 0; index < 20000; index++)
+	{
+		struct world_proxy proxy = random_box();
+		float direction[3], normal[3], near_point[3], far_point[3], difference;
+		float half = sqrtf(proxy.v[1][0] * proxy.v[1][0] + proxy.v[1][1] * proxy.v[1][1] + proxy.v[1][2] * proxy.v[1][2] +
+			proxy.v[2][0] * proxy.v[2][0] + proxy.v[2][1] * proxy.v[2][1] + proxy.v[2][2] * proxy.v[2][2] +
+			proxy.v[2][3] * proxy.v[2][3]);
+		int k;
+
+		random_direction(direction);
+		random_direction(normal);
+		for (k = 0; k < 3; k++)
+		{
+			near_point[k] = proxy.v[0][k] + direction[k] * half * 5.999f;
+			far_point[k] = proxy.v[0][k] + direction[k] * half * 6.001f;
+		}
+		difference = fabsf(world_proxy_occlusion(&proxy, near_point, normal) -
+			world_proxy_occlusion(&proxy, far_point, normal));
+		worst = difference > worst ? difference : worst;
+	}
+	CHECK(worst * 255.0f < 0.2f, "the box's patches past 6 half diagonals %g / 255 from its faces", worst * 255.0f);
+}
+
 /* ---------- windows */
 
 /* definition 0: one sphere of radius 0.5 on node 0 (a sphere class) */
@@ -861,6 +892,8 @@ int main(int argc, char **argv)
 		reach_case();
 	else if (!strcmp(name, "bound"))
 		bound_case();
+	else if (!strcmp(name, "far"))
+		far_case();
 	else if (!strcmp(name, "culling"))
 		culling_case();
 	else if (!strcmp(name, "skeleton"))

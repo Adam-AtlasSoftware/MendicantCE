@@ -2824,7 +2824,7 @@ static unsigned int world_proxy_box(struct module *m, struct pixel_state *state,
 {
 	unsigned int zero = constant_float(m, 0.0f), extents[3], axes[3], offset, at[3], local_normal[3], normal;
 	unsigned int occlusion_variable = local(m, &state->locals, m->t_float);
-	unsigned int face_variable = local(m, &state->locals, m->t_float), inside, empty;
+	unsigned int face_variable = local(m, &state->locals, m->t_float), inside, empty, far, far_occlusion;
 	int axis, side, corner;
 
 	extents[0] = flength(m, xyz(m, v1));
@@ -2849,14 +2849,42 @@ static unsigned int world_proxy_box(struct module *m, struct pixel_state *state,
 			ext1(m, GLSL_F_ABS, m->t_float, at[axis]), extents[axis]));
 		empty = op2(m, OP_LOGICAL_OR, m->t_bool, empty, compare(m, OP_F_ORD_LESS_THAN_EQUAL, extents[axis], zero));
 	}
+	/* far from it (XGPU_WORLD_AO_FAR half diagonals or more): each front face
+	as a patch at its centre, 4 e_u e_v out (n . r) / (pi r^4), r from p to
+	the face's centre (n . r > 0), found without branches; the exact faces
+	below only when near */
+	far = compare(m, OP_F_ORD_GREATER_THAN_EQUAL, fdot(m, offset, offset), fmul(m, 1,
+		constant_float(m, XGPU_WORLD_AO_FAR * XGPU_WORLD_AO_FAR), fadd(m, 1, fadd(m, 1, fmul(m, 1, extents[0], extents[0]),
+		fmul(m, 1, extents[1], extents[1])), fmul(m, 1, extents[2], extents[2]))));
+	far_occlusion = zero;
+	for (axis = 0; axis < 3; axis++)
+	{
+		for (side = -1; side <= 1; side += 2)
+		{
+			int u = (axis + 1) % 3, v = (axis + 2) % 3;
+			unsigned int out = fsub(m, 1, fmul(m, 1, constant_float(m, (float)side), at[axis]), extents[axis]);
+			unsigned int components[3], r, r_squared, facing_patch, term;
+
+			components[axis] = fsub(m, 1, fmul(m, 1, constant_float(m, (float)side), extents[axis]), at[axis]);
+			components[u] = fneg(m, 1, at[u]);
+			components[v] = fneg(m, 1, at[v]);
+			r = construct(m, 3, components);
+			r_squared = fdot(m, r, r);
+			facing_patch = fdot(m, normal, r);
+			term = fdiv(m, 1, fmul(m, 1, fmul(m, 1, fmul(m, 1, fmul(m, 1, constant_float(m, 4.0f), extents[u]), extents[v]),
+				out), facing_patch), fmul(m, 1, fmul(m, 1, constant_float(m, XGPU_WORLD_AO_PI), r_squared), r_squared));
+			far_occlusion = fselect(m, op2(m, OP_LOGICAL_AND, m->t_bool, compare(m, OP_F_ORD_GREATER_THAN, out, zero),
+				compare(m, OP_F_ORD_GREATER_THAN, facing_patch, zero)), fadd(m, 1, far_occlusion, term), far_occlusion);
+		}
+	}
 	for (axis = 0; axis < 3; axis++)
 	{
 		for (side = -1; side <= 1; side += 2)
 		{
 			int u = (axis + 1) % 3, v = (axis + 2) % 3;
 			unsigned int corners[4], heights[4], exit_point = 0, entry_point = 0, crossed = 0;
-			unsigned int facing = compare(m, OP_F_ORD_GREATER_THAN, fmul(m, 1, constant_float(m, (float)side),
-				at[axis]), extents[axis]);
+			unsigned int facing = op2(m, OP_LOGICAL_AND, m->t_bool, op1(m, OP_LOGICAL_NOT, m->t_bool, far),
+				compare(m, OP_F_ORD_GREATER_THAN, fmul(m, 1, constant_float(m, (float)side), at[axis]), extents[axis]));
 			unsigned int body = id_new(m), merge = id_new(m);
 
 			/* if (side * at[axis] > extents[axis]) { ... } (a face p is
@@ -2912,9 +2940,10 @@ static unsigned int world_proxy_box(struct module *m, struct pixel_state *state,
 			label_at(m, merge);
 		}
 	}
-	return fselect(m, empty, zero, fselect(m, inside, constant_float(m, 1.0f), fclamp_scalar(m,
+	return fselect(m, empty, zero, fselect(m, inside, constant_float(m, 1.0f), fselect(m, far,
+		fclamp_scalar(m, far_occlusion, 0.0f, 1.0f), fclamp_scalar(m,
 		fdiv(m, 1, ext1(m, GLSL_F_ABS, m->t_float, load(m, m->t_float, occlusion_variable)),
-		constant_float(m, 2.0f * XGPU_WORLD_AO_PI)), 0.0f, 1.0f)));
+		constant_float(m, 2.0f * XGPU_WORLD_AO_PI)), 0.0f, 1.0f))));
 }
 
 /* world_proxy_box_fade: the box's bound on its occlusion,

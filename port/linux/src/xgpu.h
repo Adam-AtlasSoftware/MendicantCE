@@ -278,6 +278,9 @@ WORLD_PROXIES_LEAST: world_proxy_box_fade) */
 #define XGPU_WORLD_AO_GRID_Z 8
 #define XGPU_WORLD_AO_GRID_CELLS (XGPU_WORLD_AO_GRID_X * XGPU_WORLD_AO_GRID_Y * XGPU_WORLD_AO_GRID_Z)
 #define XGPU_WORLD_AO_LEAST 510.0f
+/* (world_proxies.c's WORLD_PROXIES_FAR: a box as its faces' patches past
+it, in half diagonals) */
+#define XGPU_WORLD_AO_FAR 6.0f
 #define XGPU_WORLD_AO_SPHERE 1
 #define XGPU_WORLD_AO_CAPSULE 2
 #define XGPU_WORLD_AO_BOX 3

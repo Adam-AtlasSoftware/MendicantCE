@@ -26,6 +26,9 @@ game, a fake world in tools/harness/tests/world_proxies.c).
 step of 8 bits) or more, not at all under 1 / this (half a step), faded
 between (world_proxy_box_fade) */
 #define WORLD_PROXIES_LEAST 510.0f
+/* a box is found as its faces' patches past this many half diagonals from
+its centre (box_occlusion) */
+#define WORLD_PROXIES_FAR 6.0f
 /* a shape smaller than this across occludes nothing worth a slot */
 #define WORLD_PROXIES_SMALLEST 0.05f
 /* a capsule's radius against its collision vertices' mean distance from
@@ -323,6 +326,35 @@ static float box_occlusion(float const centre[3], float const half_x[3], float c
 	}
 	if (fabsf(local[0]) <= extents[0] && fabsf(local[1]) <= extents[1] && fabsf(local[2]) <= extents[2])
 		return 1.0f;
+	/* far from it (WORLD_PROXIES_FAR half diagonals or more): each front face
+	as a patch at its centre, area 4 e_u e_v, its cosine (o / r) and p's
+	(n . r / r, 0 below the plane) over pi r^2, r from p to the face's centre:
+	within 0.15/255 of the exact form there (0.6/255 at 4 half diagonals,
+	1.5/255 at 3), at a tenth of its cost */
+	if (dot3(offset, offset) >= WORLD_PROXIES_FAR * WORLD_PROXIES_FAR * (extents[0] * extents[0] +
+		extents[1] * extents[1] + extents[2] * extents[2]))
+	{
+		for (axis = 0; axis < 3; axis++)
+		{
+			int side, u = (axis + 1) % 3, v = (axis + 2) % 3;
+
+			for (side = -1; side <= 1; side += 2)
+			{
+				float out = (float)side * local[axis] - extents[axis], r[3], r_squared, facing;
+
+				if (out <= 0.0f)
+					continue;
+				r[axis] = (float)side * extents[axis] - local[axis];
+				r[u] = -local[u];
+				r[v] = -local[v];
+				r_squared = dot3(r, r);
+				facing = dot3(local_normal, r);
+				if (facing > 0.0f)
+					occlusion += 4.0f * extents[u] * extents[v] * out * facing / (WORLD_PROXIES_PI * r_squared * r_squared);
+			}
+		}
+		return clampf(occlusion, 0.0f, 1.0f);
+	}
 	for (axis = 0; axis < 3; axis++)
 	{
 		int side;

@@ -182,8 +182,11 @@ void scene_point(float point[3], float normal[3], float *owner, float *reference
 	float length;
 	int axis;
 
-	point[0] = -3.0f + 6.0f * scene_random();
-	point[1] = -3.0f + 6.0f * scene_random();
+	/* (one in four farther out, where a box is found as its faces' patches) */
+	float spread = scene_random() < 0.25f ? 12.0f : 3.0f;
+
+	point[0] = -spread + 2.0f * spread * scene_random();
+	point[1] = -spread + 2.0f * spread * scene_random();
 	point[2] = 0.02f + 2.5f * scene_random();
 	do
 	{
