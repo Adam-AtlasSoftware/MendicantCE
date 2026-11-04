@@ -288,6 +288,12 @@ follow it line for line. p is the point, n its unit normal, all in world units.
   the outline's edges (at most 6) and the chords are found, about half the edges of the faces taken one by one.
   Within 0.02 of the integral everywhere (the residue is the integral's own sampling).
 
+  **Far** (6 half diagonals or more from its centre, `WORLD_PROXIES_FAR`): each front face as a patch at its centre,
+  `occ = Σ_faces 4 e_u e_v · o_a · max(n·r, 0) / (π |r|⁴)` (r from p to the face's centre, o_a p's distance outside
+  the face's plane): no edges, no atan2, about a tenth of the cost. Measured against the exact faces at 200,000
+  random boxes, points and normals: within 0.15/255 at 6 half diagonals (0.5/255 at 4, 1.5/255 at 3); the harness's
+  `far` case holds the step where the form changes under 0.2/255.
+
 - **Reach** (`world_proxy_reach`), measured from the sphere's and box's centre and the capsule's midpoint: past it
   the occlusion is under 1/255 in every direction (a box's under 1/510).
   - sphere: 16r;
@@ -396,8 +402,25 @@ Blood Gulch firefight (16 bipeds, 4 vehicles):
 
 There's no pre-pass, so the CPU doesn't walk the scene twice either. CPU per frame: scene ≤ 0.2 ms, proxies ≤
 0.1 ms, upload ≤ 512 KB a frame and only while a field arrives. Memory: field ≤ 8 MB of GPU memory and one block
-(3 KB) per window. If the level's per-pixel proxy loop exceeds the budget on the Deck, the fix is a proxy grid like
-the dynamic lights' (`XGPU_DYNAMIC_LIGHTS_GRID_*`, a 64-bit mask per cell), not fewer proxies.
+(19 KB with the proxies' grid) per window.
+
+### The proxies' cost (workstream E)
+
+World minus off, GPU ms a frame (`debug.gpu_stats`, the mean of the last five 600-frame windows), offscreen Vulkan,
+fixed step, release builds with B's field; "before" is `world-ao` as D left it, "after" this grid, the box's bound,
+its outline and its far patches:
+
+| Case | Radeon 8060S 1440p | Radeon 4K | RTX 4090 1440p | RTX 4090 4K |
+| --- | --- | --- | --- | --- |
+| Made up: a Warthog's box and wheels, a crate (Blood Gulch's start) | 0.49 → **0.22** | 1.07 → 0.73 | 0.32 → **0.17** | 0.69 → 0.35 |
+| Blood Gulch's start, its own objects | 1.53 → **0.41** | | 1.19 → **0.25** | |
+| b30's start, 64 scenery shapes | 6.46 → **3.05** | 12.81 → 6.48 | 2.51 → **1.81** | 4.91 → 2.04 |
+
+The proxies themselves now cost about nothing in the real scenes: with the window's proxies taken away (a
+measurement-only switch) b30 costs the same (4.75 against 4.76 ms) and Blood Gulch too (1.53 against 1.49 ms), and
+with the made-up field (no bake, no upload) and no shapes b30 is at off (1.79 ms). What is left there is the field's
+(B's sampling, being rebuilt by F). The made-up case meets the Radeon's budget; the 4090's frame is 0.39 ms, far from
+its boost clock, so its deltas run high (D's note).
 
 ## Determinism
 
