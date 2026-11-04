@@ -68,7 +68,9 @@ def test_menu_sliders_match_their_rows():
     def stops_of(choices):
         return tuple((shown, value if value.isalpha() else float(value)) for shown, value in choices)
 
-    rows = {(f"op_{row[1].split('.', 1)[1]}", row[1], row[2]._replace(stops=stops_of(row[2].stops)))
+    # (a row's name: its own key, else its setting's)
+    rows = {(f"op_{row[5] if len(row) > 5 else row[1].split('.', 1)[1]}", row[1],
+             row[2]._replace(stops=stops_of(row[2].stops)))
             for page in port_settings.PAGES.values() for row in page["rows"]
             if row[0] != port_settings.SECTION and isinstance(row[2], port_settings.Slider)}
     assert rows
