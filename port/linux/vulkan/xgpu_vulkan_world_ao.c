@@ -19,8 +19,10 @@ submission whose draws read it (written again into a later submission's,
 should its window span two); with none, a block of zeros.
 */
 
-#include "xgpu_stream.h"
+#include "xgpu.h"
+#include "xgpu_shader.h"
 #include "xgpu_spirv.h"
+#include "xgpu_stream.h"
 #include "xgpu_vulkan.h"
 
 #include <stdlib.h>
