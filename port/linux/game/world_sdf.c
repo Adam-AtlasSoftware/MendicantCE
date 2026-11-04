@@ -81,7 +81,7 @@ enum
 	/* the most bake threads */
 	WORLD_SDF_MAXIMUM_THREADS = 32,
 	/* the most bakes waiting (the oldest waiting dropped past it) */
-	WORLD_SDF_MAXIMUM_BAKES = 16,
+	WORLD_SDF_MAXIMUM_BAKES = 64,
 	/* the most fields the start-up pass has tried */
 	WORLD_SDF_MAXIMUM_TRIED = 64,
 	/* the cache file's header, and its CRC after the deflated voxels */
@@ -181,6 +181,9 @@ static struct
 	int looker_running, baker_running;
 	struct sdf_job *looks, *bakes;
 	int baking;
+	/* the start-up pass runs (menu_pictures_exclusive): bakes wait, so that
+	the pass and its main menu come exactly when they would without them */
+	int hold;
 	struct sdf_key baking_key;
 	struct sdf_job *results;
 
@@ -765,7 +768,7 @@ static void *sdf_baker(void *context)
 
 		pthread_mutex_lock(&world_sdf_lock);
 		world_sdf.baking = 0;
-		while (!world_sdf.bakes)
+		while (!world_sdf.bakes || world_sdf.hold)
 			pthread_cond_wait(&world_sdf_bake_wake, &world_sdf_lock);
 		job = world_sdf.bakes;
 		world_sdf.bakes = job->next;
@@ -1022,12 +1025,62 @@ void world_sdf_bsp_switched(short bsp_index)
 	sdf_current_set(&key);
 }
 
+/* the frames' pacing while a bake runs and while none does, logged with
+HALO_WORLD_SDF_FRAMES (for measuring: the bake's threads are the game's
+lowest, and no frame should wait for them) */
+static void sdf_frames_measured(void)
+{
+	static int wanted = -1;
+	static unsigned long long last;
+	static double worst[2], total[2];
+	static long count[2];
+	unsigned long long now = SDL_GetTicksNS();
+	int baking;
+
+	if (wanted < 0)
+		wanted = getenv("HALO_WORLD_SDF_FRAMES") != NULL;
+	if (!wanted)
+		return;
+	pthread_mutex_lock(&world_sdf_lock);
+	baking = world_sdf.baking || world_sdf.bakes;
+	pthread_mutex_unlock(&world_sdf_lock);
+	if (last)
+	{
+		double milliseconds = (double)(now - last) / 1e6;
+
+		if (milliseconds > worst[baking])
+			worst[baking] = milliseconds;
+		total[baking] += milliseconds;
+		count[baking]++;
+	}
+	last = now;
+	if (count[0] + count[1] >= 600)
+	{
+		platform_log("world sdf: frames while baking %ld (mean %.2f ms, worst %.2f ms), while not %ld (mean %.2f ms, "
+			"worst %.2f ms)", count[1], count[1] ? total[1] / count[1] : 0.0, worst[1], count[0],
+			count[0] ? total[0] / count[0] : 0.0, worst[0]);
+		worst[0] = worst[1] = total[0] = total[1] = 0.0;
+		count[0] = count[1] = 0;
+	}
+}
+
 void world_sdf_frame(void)
 {
 	struct sdf_key key;
+	int hold;
 
 	if (sdf_off())
 		return;
+	/* (no bake while the start-up pass has the game: they begin as it ends) */
+	hold = menu_pictures_exclusive();
+	if (hold != world_sdf.hold)
+	{
+		pthread_mutex_lock(&world_sdf_lock);
+		world_sdf.hold = hold;
+		pthread_cond_signal(&world_sdf_bake_wake);
+		pthread_mutex_unlock(&world_sdf_lock);
+	}
+	sdf_frames_measured();
 	/* ("world" chosen with a map loaded) */
 	if (!world_sdf.map_known && game_in_progress() && sdf_key_loaded(&key))
 		sdf_current_set(&key);
