@@ -95,9 +95,9 @@ def test_map_unpack(case):
     (("if (result == Z_STREAM_END && done != body)\n			goto finished;", "if (result == Z_STREAM_END)\n"
       "			break;"), "short_stream"),
     # a map given a slot past the budget
-    (("taken + copy_size > budget)", "0)"), "assign"),
+    (("taken + copy_size > budget)", "taken + copy_size > ~0ULL)"), "assign"),
     # ... or past the most its type may be
-    (("file_lengths[index] >= most ||", ""), "assign"),
+    (("file_lengths[index] >= most ||", "file_lengths[index] >= most + 0x40000000 ||"), "assign"),
     # the folder's slots given no mark
     (("&job->progress) &&\n			map_unpack_source_write(job->source_path, job->map_path, name, checksum, file_length);",
       "&job->progress);"), "folder"),
