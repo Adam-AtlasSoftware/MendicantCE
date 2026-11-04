@@ -14,7 +14,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, function, inline, mutated, read, run, structure  # noqa: E402
 
 CASES = ["stock", "right", "up_and_forward", "turned_view", "on_the_screen", "weapon_fov_across", "weapon_fov_depth",
-         "weapon_fov_unusable", "held_at_the_range", "changed", "slider_steps"]
+         "weapon_fov_unusable", "held_at_the_range", "changed", "turn_pitch", "turn_yaw", "turn_roll", "turn_and_move",
+         "weapon_own", "weapon_own_changed", "slider_steps"]
 CONTROLS = [
     # the world's axes, not the view's
     ("\tcross_product3d(&camera->forward, &camera->up, &right);",
@@ -23,19 +24,22 @@ CONTROLS = [
     ("\tcross_product3d(&camera->forward, &camera->up, &right);",
      "\tcross_product3d(&camera->up, &camera->forward, &right);", "right"),
     # up and forward swapped
-    ("camera->up.k * offset.j + camera->forward.k * offset.k", "camera->up.k * offset.k + camera->forward.k * offset.j",
+    ("camera->up.k * offset.up + camera->forward.k * offset.forward",
+     "camera->up.k * offset.forward + camera->forward.k * offset.up",
      "up_and_forward"),
     # the root node alone: the hands and the gun part
-    ("for (node_index = 0; node_index < node_count; node_index++)", "for (node_index = 0; node_index < 1; node_index++)",
+    ("for (node_index = 0; node_index < node_count; node_index++)\n\t{\n\t\tnode_matrices[node_index].position.x += move.i;",
+     "for (node_index = 0; node_index < 1; node_index++)\n\t{\n\t\tnode_matrices[node_index].position.x += move.i;",
      "right"),
     # inches, not centimeters
     ("#define CENTIMETERS_PER_WORLD_UNIT 304.8", "#define CENTIMETERS_PER_WORLD_UNIT 120.0", "right"),
     # not held at the range
-    ("\tif (centimeters > VIEWMODEL_OFFSET_MAXIMUM_CENTIMETERS)\n", "\tif (FALSE)\n", "held_at_the_range"),
+    ("\tif (value > maximum)\n", "\tif (FALSE)\n", "held_at_the_range"),
     # read once, not on a change
-    ("if (!initialized || read_at != changes)\n\t{\n\t\tglobal.i", "if (!initialized || !read_at)\n\t{\n\t\tglobal.i", "changed"),
+    ("if (!initialized || read_at != changes)\n\t{\n\t\tglobal.right",
+     "if (!initialized || !read_at)\n\t{\n\t\tglobal.right", "changed"),
     # the weapon field of view's scale left out: the move set, as far in the world, shorter on the screen
-    ("\t\toffset.i *= scale;\n\t\toffset.j *= scale;\n", "", "weapon_fov_across"),
+    ("\t\toffset.right *= scale;\n\t\toffset.up *= scale;\n", "", "weapon_fov_across"),
     # the scale the other way about (the stock angle's over the drawn one's)
     ("return tanf(drawn * 0.5f) / tanf(stock * 0.5f);", "return tanf(stock * 0.5f) / tanf(drawn * 0.5f);",
      "weapon_fov_across"),
@@ -44,15 +48,41 @@ CONTROLS = [
     # the whole angle's tangents, not the half's
     ("return tanf(drawn * 0.5f) / tanf(stock * 0.5f);", "return tanf(drawn) / tanf(stock);", "weapon_fov_across"),
     # the depth scaled too (as #509 first proposed): the weapon pushed through the eye at a wide angle
-    ("\t\toffset.j *= scale;\n", "\t\toffset.j *= scale;\n\t\toffset.k *= scale;\n", "weapon_fov_depth"),
+    ("\t\toffset.up *= scale;\n", "\t\toffset.up *= scale;\n\t\toffset.forward *= scale;\n", "weapon_fov_depth"),
     # only the horizontal scaled
-    ("\t\toffset.j *= scale;\n", "", "weapon_fov_across"),
+    ("\t\toffset.up *= scale;\n", "", "weapon_fov_across"),
     # another view's angles: the local player's not passed on
     ("if (viewmodel_angles(local_player_index, &drawn, &stock))", "if (viewmodel_angles(1, &drawn, &stock))",
      "weapon_fov_across"),
     # angles that are none taken
     ("\tif (!(drawn > 0.0f && drawn < _pi && stock > 0.0f && stock < _pi))\n\t\treturn 1.0f;\n", "",
      "weapon_fov_unusable"),
+    # the turns held at the moves' 20, not 15 degrees
+    ("viewmodel_offset_held(config_real(name), VIEWMODEL_ROTATION_MAXIMUM_DEGREES)",
+     "viewmodel_offset_held(config_real(name), VIEWMODEL_OFFSET_MAXIMUM_CENTIMETERS)", "held_at_the_range"),
+    # turned about the eye, not the weapon's middle: it swings across the view
+    ("\t\tpivot.x /= node_count;\n\t\tpivot.y /= node_count;\n\t\tpivot.z /= node_count;\n",
+     "\t\tpivot = camera->position;\n", "turn_pitch"),
+    # the places turned but not the nodes' axes: the gun's parts each pointing as before
+    ("\t\t\tviewmodel_rotation_vector(&offset, &right, camera, &node->forward);\n", "", "turn_pitch"),
+    # pitch the other way (and so not a turn)
+    ("\ta = *y * cosine + *z * sine;", "\ta = *y * cosine - *z * sine;", "turn_pitch"),
+    # yaw and roll the other way
+    ("\tsine = sinf(offset->yaw);", "\tsine = -sinf(offset->yaw);", "turn_yaw"),
+    ("\tsine = sinf(offset->roll);", "\tsine = -sinf(offset->roll);", "turn_roll"),
+    # the weapon's own left out
+    ("total[0] = offset->right * CENTIMETERS_PER_WORLD_UNIT + own[0];",
+     "total[0] = offset->right * CENTIMETERS_PER_WORLD_UNIT;", "weapon_own"),
+    ("total[4] = offset->yaw * (180.0 / _pi) + own[4];", "total[4] = offset->yaw * (180.0 / _pi);", "weapon_own"),
+    # the sum not held at the range
+    ("\t\ttotal[value] = viewmodel_offset_held(total[value],", "\t\ttotal[value] = 0 * viewmodel_offset_held(total[value],", "weapon_own"),
+    # a change written not seen; another weapon given the last one's
+    ("if (definition_index != cached_definition || cached_at != changes)", "if (definition_index != cached_definition)",
+     "weapon_own_changed"),
+    ("if (definition_index != cached_definition || cached_at != changes)", "if (cached_at != changes)",
+     "weapon_own_changed"),
+    # looked up every frame
+    ("if (definition_index != cached_definition || cached_at != changes)", "if (TRUE)", "weapon_own_changed"),
     # a track's step rounded toward 0 below it, as before
     ("steps < 0.0 ? steps - 0.5 : steps + 0.5", "steps + 0.5", "slider_steps"),
 ]
@@ -70,7 +100,8 @@ def generated(fault=None, slider_fault=None):
             slider = mutated(slider, *fault)
     math = read("source/math/real_math.h")
     pi = re.search(r"#define _pi .*", math).group(0)
-    types = pi + "\n" + structure(math, "real_matrix4x3") + "\n" + inline(math, "cross_product3d") + "\n"
+    types = pi + "\n" + structure(math, "real_matrix4x3") + "\n" + inline(math, "cross_product3d") + "\n" + \
+        inline(math, "dot_product3d") + "\n" + structure(read("port/linux/game/view_fov.h"), "viewmodel_offset") + "\n"
     return (("types.inc", types), ("under_test.inc", section + "\n" + slider + "\n"))
 
 
