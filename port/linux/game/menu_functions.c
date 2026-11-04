@@ -2024,6 +2024,7 @@ the player who opened Settings holds: shown in a game, with one held, its
 name in RESET's value (its tag's last name: "ASSAULT RIFLE"); none on the
 main menu, where the panel says how to set them */
 boolean viewmodel_held_weapon(short local_player_index, char *path, unsigned int size);
+static void discord_text_set(struct widget_instance *text_box, char const *text);
 
 static void viewmodel_weapon_rows_show(struct widget_instance *list)
 {
