@@ -85,10 +85,16 @@ void world_ao_map_unloaded(void)
 
 void world_ao_frame_begin(void)
 {
+	const char *test;
+
 	if (!world_ao_mode())
 		return;
 	world_scene_frame_begin();
-	world_sdf_frame();
+	/* (not with debug.world_ao_test's made-up field, which the level's
+	would overwrite in the backend's one texture) */
+	test = config_string("debug.world_ao_test");
+	if (!test || !*test)
+		world_sdf_frame();
 }
 
 /* ---------- debug.world_ao_test
