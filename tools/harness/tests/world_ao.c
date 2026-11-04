@@ -8,6 +8,10 @@ test_world_sdf.py and test_world_proxies.py; the shading's arithmetic,
 tools/test_world_ao_light.py. */
 
 #include "harness.h"
+#include "world_ao.h"
+#include "world_proxies.h"
+#include "world_scene.h"
+#include "world_sdf.h"
 
 static const char *setting = "off";
 static const char *test_setting = "";

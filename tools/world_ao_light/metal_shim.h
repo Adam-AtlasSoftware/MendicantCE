@@ -29,11 +29,16 @@ struct float3
 	float3 &operator/=(float s) { x /= s; y /= s; z /= s; return *this; }
 };
 
+/* (its parts kept apart, each set by the constructor: the functions only
+read a float4's, and never assign one part) */
 struct float4
 {
-	union
-	{
-		struct { float x, y, z, w; };
+	float x, y, z, w;
+	float r;
+	float3 xyz;
+	float4() : x(0.0f), y(0.0f), z(0.0f), w(0.0f), r(0.0f), xyz(0.0f) {}
+	float4(float a, float b, float c, float d) : x(a), y(b), z(c), w(d), r(a), xyz(a, b, c) {}
+};
 		struct { float3 xyz; float w_; };
 		struct { float r, g, b, a; };
 	};
