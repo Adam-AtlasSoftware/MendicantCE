@@ -1398,9 +1398,13 @@ written after a copy that failed as after one that worked, and before the
 slot was on the disk: their slots are copied again, once.
 
 The slots are one copy of the game's: another running at once (a second
-start, one left running) would give up, empty and copy over the slots the
-first plays from, under it. The first holds z:\cache.lock; another takes
-the first z:\cache-N\ whose lock no copy holds, for slots of its own. */
+start, one left running, a server beside a client) would give up, empty and
+copy over the slots the first plays from, under it. The first holds
+z:\cache.lock and keeps the cache; another takes the first z:\cache-N\
+whose lock no copy holds, for a few slots of its own: the Xbox's six cache
+files' room, copied only as it loads a map, never ahead
+(cache_files_windows.c, port/linux/game/map_cache_prefill.c). The next copy
+started beside another takes the same folder again, as it left it. */
 
 /* (cache_files_windows.c's NUMBER_OF_CACHED_MAP_FILES) */
 #define MAXIMUM_CACHE_SLOT_SOURCES HALO_PORT_CACHED_MAP_FILES
@@ -1419,6 +1423,14 @@ struct cache_slot_source
 };
 
 static struct cache_slot_source cache_slot_sources[MAXIMUM_CACHE_SLOT_SOURCES];
+
+static int cache_slot_folder_number;
+
+int cache_slot_folder_keeps_cache(void)
+{
+	cache_slot_folder();
+	return cache_slot_folder_number <= 1;
+}
 
 const char *cache_slot_folder(void)
 {
@@ -1447,6 +1459,7 @@ const char *cache_slot_folder(void)
 		the system call itself, which every host has, not the C library's) */
 		if (descriptor >= 0 && (syscall(SYS_flock, descriptor, LOCK_EX | LOCK_NB) == 0 || errno == ENOSYS))
 		{
+			cache_slot_folder_number = number;
 			if (number > 1)
 				platform_log("map cache: another copy of the game holds the cache; this one's is in %s", folder);
 			return folder;

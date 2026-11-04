@@ -801,10 +801,12 @@ void cache_files_initialize(
 	cache_files_open_cache_files();
 	/* port: the cache files' budget, of the disk's space (at least what the
 	Xbox's six held), port/linux/src/map_cache.c */
-	cached_map_files_budget = map_cache_budget(
-		cached_map_files_bytes(NONE),
-		(unsigned long long)SOLO_CACHE_FILE_MAXIMUM_SIZE * 2 + MAIN_MENU_CACHE_FILE_MAXIMUM_SIZE +
-			(unsigned long long)MULTIPLAYER_CACHE_FILE_MAXIMUM_SIZE * 3);
+	cached_map_files_budget = (unsigned long long)SOLO_CACHE_FILE_MAXIMUM_SIZE * 2 + MAIN_MENU_CACHE_FILE_MAXIMUM_SIZE +
+		(unsigned long long)MULTIPLAYER_CACHE_FILE_MAXIMUM_SIZE * 3;
+	/* (a copy of the game running beside the one that keeps the cache:
+	those six's room alone, cache_slot_folder) */
+	if (cache_slot_folder_keeps_cache())
+		cached_map_files_budget = map_cache_budget(cached_map_files_bytes(NONE), cached_map_files_budget);
 	cache_copy_initialize();
 
 	return;

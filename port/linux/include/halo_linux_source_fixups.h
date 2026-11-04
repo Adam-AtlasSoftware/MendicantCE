@@ -317,6 +317,9 @@ int cache_slot_source_matches(short slot, const char *map_path, const char *name
 /* ... the folder of this copy of the game's slots, z:\ or, while another
 copy holds that, a z:\cache-N\ of its own (with its backslash) */
 const char *cache_slot_folder(void);
+/* ... whether it is z:\, the cache kept (else a few slots of its own, and
+no copies ahead) */
+int cache_slot_folder_keeps_cache(void);
 /* what was written to a file is on the disk (xbox_files.c) */
 int __stdcall FlushFileBuffers(void *file);
 /* ... and when a slot's map was last played (seconds; 0: never, copied
