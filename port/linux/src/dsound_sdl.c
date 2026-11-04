@@ -106,22 +106,32 @@ is a glide, not a step of pitch */
 #define DOPPLER_SMOOTHING_SECONDS 0.08f
 
 /* the HRTF (hrtf): the frames a voice keeps for its ears' delays, the head's
-radius (metres) and the speed of sound (metres a second), the head shadow's
-alpha over all directions (hrtf_initialize), the distance within which a
-sound's direction fades out (world units), the pinna's notch (its frequency
-from below the ears to above them, its depth and its Q) and the shadow of
-the pinna behind (its frequency and its depth) */
+radius (metres: Woodworth's delay) and the speed of sound (metres a
+second), the head shadow's corner (Hz), its least alpha and the angle from
+the ear where it is least (degrees), its alpha over all directions
+(diffuse), the level between the ears at every frequency (dB each ear, at
+the ear's axis), the distance within which a sound's direction fades out
+(world units), the pinna's notch (its frequency from the elevation low to
+the elevation high, its depth and its Q) and the shadow of the pinna behind
+(its frequency and its depth). Fitted to the Xbox's own HRTF (see the HRTF's
+comment below) */
 #define HRTF_FRAMES 64
-#define HRTF_HEAD_RADIUS 0.0875f
+#define HRTF_HEAD_RADIUS 0.0885f
 #define HRTF_SPEED_OF_SOUND 343.0f
-#define HRTF_DIFFUSE_ALPHA 1.03f
+#define HRTF_SHADOW_CORNER 1815.0f
+#define HRTF_SHADOW_ALPHA_MIN 0.103f
+#define HRTF_SHADOW_THETA_MIN 162.4f
+#define HRTF_DIFFUSE_ALPHA 1.097f
+#define HRTF_LEVEL_DECIBELS 2.07f
 #define HRTF_NEAR 0.25f
-#define HRTF_NOTCH_LOW 6000.0f
-#define HRTF_NOTCH_HIGH 11000.0f
-#define HRTF_NOTCH_DECIBELS -10.0f
-#define HRTF_NOTCH_Q 2.0f
-#define HRTF_REAR_FREQUENCY 2500.0f
-#define HRTF_REAR_DEPTH 0.55f
+#define HRTF_NOTCH_LOW 7040.0f
+#define HRTF_NOTCH_HIGH 14290.0f
+#define HRTF_NOTCH_ELEVATION_LOW -16.0f
+#define HRTF_NOTCH_ELEVATION_HIGH 17.4f
+#define HRTF_NOTCH_DECIBELS -11.4f
+#define HRTF_NOTCH_Q 1.85f
+#define HRTF_REAR_FREQUENCY 2110.0f
+#define HRTF_REAR_DEPTH 0.99f
 /* the crossfade between the pan and the HRTF when the choice changes
 (audio.spatial): 100 ms */
 #define HRTF_FADE_FRAMES 4800
@@ -334,8 +344,11 @@ static float sound_gain = 1.0f;
 /* audio.doppler */
 static BOOL doppler_enabled = TRUE;
 /* whether mono 3D voices go through the HRTF: on stereo, audio.spatial;
-in the VR mode, vr.hrtf (spatial_hrtf, DirectSoundDoWork) */
+in the VR mode, vr.hrtf (spatial_hrtf, DirectSoundDoWork); and whether as
+the Xbox did on stereo, a sound behind heard as from ahead and its front and
+back mix bins summed ("auto"), or all round ("headphones", and the VR mode) */
 static BOOL hrtf_enabled = FALSE;
+static BOOL hrtf_xbox_stereo = FALSE;
 /* 2 or 6 (audio.channels), chosen when the device first opens; the game
 sets its mix bins by it, so it holds while the game runs */
 static unsigned long output_channels = 2;
@@ -592,23 +605,51 @@ listener's: the camera's, or in VR the head as it is tracked,
 sound_manager.c refresh_listener), rather than panned between them: a
 sound behind or above is told from one ahead or below. The Xbox's
 DirectSound put its 3D voices through its own HRTF (DirectSoundUseFullHRTF)
-and left the 2D ones (the menus, the music, the HUD) dry; so here. Not a
-measured HRTF (which would need a dataset of a head's, and a convolution
-for each voice and ear) but a model of a head's
-(Brown and Duda, "A structural model for binaural sound synthesis", 1998),
-a few filters a voice, its parameters from the direction:
+and left the 2D ones (the menus, the music, the HUD) dry; so here. Not the
+Xbox's measured filters but a model of a head's (Brown and Duda, "A
+structural model for binaural sound synthesis", 1998), a few filters a
+voice, its parameters from the direction, fitted to the Xbox's HRTF:
 	- each ear its own delay, from the time the sound takes around a sphere
-	  of a head's size (Woodworth's), to the far ear up to 0.66 ms later;
-	- each ear the head's shadow, a one-pole one-zero shelf above about 1
-	  kHz, from 6 dB louder facing the sound to 20 dB quieter in the shadow
+	  of a head's size (Woodworth's), in whole frames, as the Xbox's: to the
+	  far ear up to 32 frames (0.67 ms) later;
+	- each ear the head's shadow, a one-pole one-zero shelf above about 2
+	  kHz, from 5 dB louder facing the sound to 21 dB quieter in the shadow
 	  (Brown and Duda's), the louder and quieter about what a sound from
 	  everywhere has (the diffuse field: HRTF_DIFFUSE_ALPHA), so that over
 	  all directions the sound is no brighter nor duller than panned;
+	- the ears' level apart at every frequency, the nearer ear up to 2 dB up
+	  and the farther 2 dB down, as the Xbox's (Brown and Duda's shelf has
+	  none below it; the Xbox's 4 dB to the side is its largest cue below 1
+	  kHz but the time);
 	- the pinna's notch, its frequency rising with the sound from below the
-	  ears (6 kHz) to above them (11 kHz), as a pinna's first notch does
+	  ears (7 kHz) to above them (14 kHz), as a pinna's first notch does
 	  (it is what tells up from down);
 	- a sound behind loses some of its high frequencies (the pinna's shadow,
-	  up to 7 dB above 2.5 kHz).
+	  above 2 kHz, down to 20 dB at 16 kHz behind).
+The direction is DirectSound's own: its azimuth and elevation from the
+ratio of the sides of each octant, 45 degrees times the lesser over the
+greater (not the arc tangent; 30 degrees is heard at 26), as the Xbox's
+calculator (CDirectSound3DCalculator) worked them out for its table.
+
+The figures come from the Xbox's own code and filters (tools/harness/tests
+hrtf.c holds them, and test_hrtf.py says how to measure them again from
+one's own default.xbe): the XDK DirectSound linked into the game looks up a
+pair of 31-tap filters and a whole-frame delay for each direction, on a grid
+of 6 degrees of elevation and 3 to 12 of azimuth, and hands them to the
+MCPX's voice processor. Their delays, the ears' levels apart in each
+octave, the notch and the loss behind, over every 15 degrees round and every
+10 from 40 below to 60 above, are what the model's parameters are fitted to
+by least squares.
+
+The Xbox on stereo ("auto", hrtf_xbox_stereo) did two things more, which
+are DirectSound's arithmetic, kept here: a sound behind is heard through the
+filters of the direction mirrored ahead (azimuth 180 - azimuth), for the
+Xbox's table is for front speakers, and its back mix bins take a share of
+it, 0.5 + (1 - |elevation| / 90)(|azimuth| / 90 - 1) of the power (all of
+it from 135 degrees round, none within 45 of ahead), which stereo plays
+with the front's: the ears hear both. "headphones" (and the VR mode) is
+the model all round instead, behind duller than ahead.
+
 A sound close to the head (within HRTF_NEAR) fades to the middle, as the pan
 centres one within its minimum distance. The parameters are ramped across
 each mix, as the gains are: a turn of the head moves the sound smoothly
@@ -631,13 +672,36 @@ static struct
 
 static void hrtf_initialize(void)
 {
-	/* Brown and Duda's pole, 2c/a, lowered by the diffuse field's alpha:
-	the shadow over the diffuse field's (H(alpha) / H(alpha_diffuse)) */
-	float pole = 2.0f * HRTF_SPEED_OF_SOUND / (HRTF_HEAD_RADIUS * HRTF_DIFFUSE_ALPHA);
+	float pole = 2.0f * 3.14159265f * HRTF_SHADOW_CORNER;
 
 	hrtf.shadow_k = 1.0f / tanf(pole / (2.0f * OUTPUT_RATE));
 	hrtf.shadow_a1 = (1.0f - hrtf.shadow_k) / (1.0f + hrtf.shadow_k);
 	hrtf.rear_lowpass = expf(-2.0f * 3.14159265f * HRTF_REAR_FREQUENCY / OUTPUT_RATE);
+}
+
+/* DirectSound's azimuth (degrees, -180 to 180, the right positive) and
+elevation (-90 to 90) of a direction right, up and ahead: in each octant
+45 degrees times the lesser side over the greater, and 90 less the
+greater's turn past 45 */
+static void hrtf_angles(float right, float up, float ahead, float *azimuth, float *elevation)
+{
+	float horizontal = sqrtf(right * right + ahead * ahead), height = fabsf(up);
+	float front = fabsf(ahead), side = fabsf(right);
+
+	if (height < horizontal)
+		*elevation = height / horizontal * 45.0f;
+	else
+		*elevation = height > 0.0f ? 90.0f - horizontal / height * 45.0f : 0.0f;
+	if (up < 0.0f)
+		*elevation = -*elevation;
+	if (front > side)
+		*azimuth = side / front * 45.0f;
+	else
+		*azimuth = side > 0.0f ? 90.0f - front / side * 45.0f : 0.0f;
+	if (ahead < 0.0f)
+		*azimuth = 180.0f - *azimuth;
+	if (right < 0.0f)
+		*azimuth = -*azimuth;
 }
 
 /* the HRTF's parameters for a sound right, up and ahead of the head, as
@@ -645,38 +709,56 @@ far away (world units) */
 static void hrtf_place(float right, float up, float ahead, float distance, struct hrtf_parameters *parameters)
 {
 	float strength = distance < HRTF_NEAR ? distance / HRTF_NEAR : 1.0f;
-	float lateral = 0.0f, rise = 0.0f, front = 1.0f, delay[2], elevation, frequency, a, w, alpha, a0;
+	float lateral = 0.0f, rise = 0.0f, front = 1.0f, level = 1.0f, delay[2], elevation, frequency, a, w, alpha, a0;
 	int ear;
 
 	if (distance > 1.0e-4f)
 	{
-		lateral = right / distance;
-		rise = up / distance;
-		front = ahead / distance;
+		float azimuth;
+
+		hrtf_angles(right, up, ahead, &azimuth, &elevation);
+		if (hrtf_xbox_stereo)
+		{
+			float back = 0.5f + (1.0f - fabsf(elevation) / 90.0f) * (fabsf(azimuth) / 90.0f - 1.0f);
+
+			back = back < 0.0f ? 0.0f : (back > 1.0f ? 1.0f : back);
+			level = sqrtf(1.0f - back) + sqrtf(back);
+			if (fabsf(azimuth) > 90.0f)
+				azimuth = azimuth > 0.0f ? 180.0f - azimuth : -180.0f - azimuth;
+		}
+		azimuth *= 3.14159265f / 180.0f;
+		elevation *= 3.14159265f / 180.0f;
+		lateral = sinf(azimuth) * cosf(elevation);
+		rise = sinf(elevation);
+		front = cosf(azimuth) * cosf(elevation);
 	}
+	level = 1.0f + strength * (level - 1.0f);
 	for (ear = 0; ear < 2; ear++)
 	{
 		/* the angle from the ear's axis: Brown and Duda's alpha, 2 facing
-		the sound, 0.1 at 150 degrees from it */
+		the sound, HRTF_SHADOW_ALPHA_MIN at HRTF_SHADOW_THETA_MIN from it */
 		float cosine = ear ? lateral : -lateral;
 		float theta = acosf(cosine < -1.0f ? -1.0f : (cosine > 1.0f ? 1.0f : cosine));
 		float shadow = 1.0f + strength *
-			((1.05f + 0.95f * cosf(theta * (180.0f / 150.0f))) / HRTF_DIFFUSE_ALPHA - 1.0f);
+			(((1.0f + 0.5f * HRTF_SHADOW_ALPHA_MIN) + (1.0f - 0.5f * HRTF_SHADOW_ALPHA_MIN) *
+			cosf(theta * (180.0f / HRTF_SHADOW_THETA_MIN))) / HRTF_DIFFUSE_ALPHA - 1.0f);
+		float gain = level * powf(10.0f, strength * HRTF_LEVEL_DECIBELS * cosf(theta) / 20.0f);
 
-		parameters->shadow_b0[ear] = (1.0f + shadow * hrtf.shadow_k) / (1.0f + hrtf.shadow_k);
-		parameters->shadow_b1[ear] = (1.0f - shadow * hrtf.shadow_k) / (1.0f + hrtf.shadow_k);
+		parameters->shadow_b0[ear] = gain * (1.0f + shadow * hrtf.shadow_k) / (1.0f + hrtf.shadow_k);
+		parameters->shadow_b1[ear] = gain * (1.0f - shadow * hrtf.shadow_k) / (1.0f + hrtf.shadow_k);
 		/* Woodworth's: the way around the head to the ear */
 		delay[ear] = theta < 0.5f * 3.14159265f ? 1.0f - cosf(theta) : theta - 0.5f * 3.14159265f + 1.0f;
 	}
-	/* (the nearer ear at no delay) */
+	/* (the nearer ear at no delay; whole frames, as the Xbox's) */
 	for (ear = 0; ear < 2; ear++)
 	{
-		parameters->delay[ear] = strength * (delay[ear] - (delay[0] < delay[1] ? delay[0] : delay[1])) *
-			(HRTF_HEAD_RADIUS / HRTF_SPEED_OF_SOUND) * OUTPUT_RATE;
+		parameters->delay[ear] = floorf(strength * (delay[ear] - (delay[0] < delay[1] ? delay[0] : delay[1])) *
+			(HRTF_HEAD_RADIUS / HRTF_SPEED_OF_SOUND) * OUTPUT_RATE + 0.5f);
 	}
-	/* the notch, from 30 degrees below to 60 above (RBJ's peaking filter) */
+	/* the notch, from HRTF_NOTCH_ELEVATION_LOW to _HIGH (RBJ's peaking
+	filter) */
 	elevation = asinf(rise < -1.0f ? -1.0f : (rise > 1.0f ? 1.0f : rise)) * (180.0f / 3.14159265f);
-	elevation = (elevation + 30.0f) / 90.0f;
+	elevation = (elevation - HRTF_NOTCH_ELEVATION_LOW) / (HRTF_NOTCH_ELEVATION_HIGH - HRTF_NOTCH_ELEVATION_LOW);
 	frequency = HRTF_NOTCH_LOW + (HRTF_NOTCH_HIGH - HRTF_NOTCH_LOW) *
 		(elevation < 0.0f ? 0.0f : (elevation > 1.0f ? 1.0f : elevation));
 	a = powf(10.0f, strength * HRTF_NOTCH_DECIBELS / 40.0f);
@@ -3947,6 +4029,7 @@ VOID WINAPI DirectSoundDoWork(void)
 	/* (5.1 is panned around its speakers whatever audio.spatial says: the
 	HRTF is for a pair of ears) */
 	hrtf_enabled = output_channels != 6 && spatial_hrtf(spatial_setting, vr_running, vr_hrtf);
+	hrtf_xbox_stereo = hrtf_enabled && !vr_running && strcmp(spatial_setting, "headphones") != 0;
 	if (headphones != logged_headphones || hrtf_enabled != logged_hrtf)
 	{
 		logged_headphones = headphones;

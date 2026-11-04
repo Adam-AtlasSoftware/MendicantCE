@@ -1095,7 +1095,7 @@ the setting for one start of the game. It has priority over the file.
 | `audio.channels` | `"auto"` | `HALO_AUDIO_CHANNELS` | `"stereo"`, or `"5.1"` for surround sound as with Dolby Digital on the Xbox: the world's sounds panned around the five speakers (VBAP), the game's 2D sounds on the speakers it sends them to, nothing on the LFE (the game sends it none). `"auto"`: 5.1 if the sound device has 6 or more channels (the host's SDL says how many the device plays: a 5.1 or 7.1 receiver or headset), else stereo. Read when the game starts. Not on Android. 5.1 is always panned, never the HRTF (`vr.hrtf` too). |
 | `audio.reverb` | `true` | `HALO_REVERB` | `true`: the sounds of the world reverberate as the place the player is in does: the sound environments of the maps (a corridor, a cave, a large hall, outdoors) set the reverberation, as the I3DL2 reverb of the Xbox did. A sound behind a wall or a door is muffled in it too. `false`: no reverberation (sounds behind a wall are still muffled). |
 | `audio.doppler` | `true` | `HALO_DOPPLER` | `true`: a sound of the world moving towards the player rises in pitch and one moving away falls (a Banshee or a Ghost passing by, a plasma bolt), from the velocities the game gives each sound, as the Xbox's DirectSound shifted them (the speed of sound 343 m/s, the shift held to an octave either way). `false`: each keeps its pitch. |
-| `audio.spatial` | `"auto"` | `HALO_AUDIO_SPATIAL` | How the world's sounds are placed around you (Settings > Audio > 3D AUDIO; "3D audio"): `"auto"` and `"headphones"` through a model of a head (HRTF), each from its direction, ahead, behind, above or below, as the Xbox's 3D audio was on stereo, speakers or headphones; `"speakers"` panned left and right. The menus, music and HUD are not placed. 5.1 is always panned; the VR mode keeps `vr.hrtf`. |
+| `audio.spatial` | `"auto"` | `HALO_AUDIO_SPATIAL` | How the world's sounds are placed around you (Settings > Audio > 3D AUDIO; "3D audio"): `"auto"` through a model of a head (HRTF), as the Xbox's 3D audio was on stereo, speakers or headphones: left, right, above and below, with a sound behind you heard as if it were ahead; `"headphones"` the same, but a sound behind you is heard behind (duller); `"speakers"` panned left and right. The menus, music and HUD are not placed. 5.1 is always panned; the VR mode keeps `vr.hrtf`. |
 | `audio.resampler` | `"sinc"` | `HALO_AUDIO_RESAMPLER` | How the sounds are converted to the output's rate (48 kHz): `"sinc"` with a band-limited low pass, which keeps out the images above the sound's own rate; `"linear"` between neighbouring samples, which lets some of them through and sounds brighter for it. Audio Setup's SOUND PROCESSING screen sets it, with `audio.reverb`. |
 | `audio.voice_chat` | `"push_to_talk"` | `HALO_VOICE_CHAT` | How you talk in voice chat: `"push_to_talk"` (while `controls.push_to_talk` is held; the microphone opens when you first press it), `"open_mic"` (when the microphone hears speech), or `"off"`. You hear the other players in every case. Refer to "Voice chat". |
 | `audio.voice_volume` | `1.0` | `HALO_VOICE_VOLUME` | The volume of the voices of the other players, `0` to `2`. |
@@ -1885,11 +1885,17 @@ HRTF's spread: above 4 kHz the difference of its sides is as loud as their
 sum and they hardly correlate (coherence 0.15 at 4 to 8 kHz), where the pan
 has them 15 dB apart (coherence 0.94). The menus, the music, the HUD and the
 other 2D sounds are as they were. The model is the VR mode's ("Sound from
-your head": Brown and Duda's, a few filters a sound); a sound's distance,
-occlusion, reverb and Doppler shift are the pan's.
+your head": Brown and Duda's, a few filters a sound), its parameters fitted
+to the Xbox's own HRTF (the filters and delays the XDK DirectSound in the
+game's default.xbe looks up for each direction; `tools/harness/tests/hrtf.c`
+holds the figures); a sound's distance, occlusion, reverb and Doppler shift
+are the pan's.
 
-`audio.spatial` (Settings > Audio > 3D AUDIO) chooses: `"auto"` and
-`"headphones"` the HRTF, `"speakers"` panned left and right; changing it
+`audio.spatial` (Settings > Audio > 3D AUDIO) chooses: `"auto"` the HRTF as
+the Xbox's on stereo (a sound behind heard through the filters of the
+direction mirrored ahead, as DirectSound did for its table of front
+filters), `"headphones"` the HRTF all round (a sound behind duller than
+ahead), `"speakers"` panned left and right; changing it
 mid-game crossfades each sound between the two over 100 ms, with no click.
 5.1 is panned around its speakers, and the VR mode keeps `vr.hrtf`. The log
 says what the host reports the sound plays on as it changes ("audio: the
