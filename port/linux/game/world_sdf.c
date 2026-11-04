@@ -1046,7 +1046,8 @@ static void sdf_frames_measured(void)
 	if (!wanted)
 		return;
 	pthread_mutex_lock(&world_sdf_lock);
-	baking = world_sdf.baking || world_sdf.bakes;
+	/* (a bake running: not one waiting for the start-up pass to end) */
+	baking = world_sdf.baking;
 	pthread_mutex_unlock(&world_sdf_lock);
 	if (last)
 	{
