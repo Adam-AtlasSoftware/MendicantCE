@@ -28,6 +28,9 @@ the Classic preset's "off") draws exactly as before.
 
 const char *config_string(const char *name);
 unsigned long config_changes(void);
+/* (render_enumerate.c's: the window drawn is a map's first frame's, unseen,
+which prepares its pipelines) */
+extern unsigned char render_enumerating;
 
 static struct
 {
@@ -290,7 +293,12 @@ void world_ao_window_begin(short local_player_index, short rasterizer_target, fl
 
 	(void)local_player_index;
 	(void)rasterizer_target;
-	if (!mode)
+	/* (none while a map's pipelines are prepared: its draws then are the
+	ones without the world, exactly as with it off, so that the world never
+	lengthens a load. The world's pipelines are made after it, their
+	stand-ins, these, drawing until they are: d3d8_device.c's
+	world_ao_stand_in) */
+	if (!mode || render_enumerating)
 		return;
 	world_ao.count = 0;
 	world_ao.volume = NULL;

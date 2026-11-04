@@ -24,6 +24,7 @@ static struct
 	int count;
 } handed;
 static int object_owner = -100;
+unsigned char render_enumerating;
 static float object_reference = -100.0f;
 
 const char *config_string(const char *name)
@@ -205,6 +206,11 @@ static void window_case(void)
 	volume.header.range = 6.0f;
 	volume.header.origin[0] = -1.0f;
 	field_ready = 1;
+	/* (none while a map's pipelines are prepared) */
+	render_enumerating = 1;
+	world_ao_window_begin(0, 0, camera);
+	CHECK(windows_handed == 0, "while enumerating: %d", windows_handed);
+	render_enumerating = 0;
 	world_ao_window_begin(0, 0, camera);
 	CHECK(windows_handed == 1 && handed.count == 3, "%d %d", windows_handed, handed.count);
 	CHECK(handed.field[0][0] == -1.0f && handed.field[0][3] == 2.0f && handed.field[1][0] == 8.0f &&
