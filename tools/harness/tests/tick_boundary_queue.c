@@ -1,0 +1,138 @@
+#include "harness.h"
+#include <math.h>
+
+/* game_time_update's frames with game.sim_rate's sub-steps (120: four a
+tick), the frame's work waiting for a tick's boundary as main_loop's does
+(game_time_tick_open_wait), and the players' updates of the ticks: each
+built as its tick is counted begun (update_client_local_ticks, a host's
+network_game_server_update_ticks), each taken by its tick's first sub-step
+(update_client_dequeue). An update built for a tick the frame then did not
+begin stayed queued, and every tick after took one built a tick earlier, its
+input with it, until the map was loaded again (OpenH1 #590). */
+#define MIN(a,b) ((a)<(b)?(a):(b))
+#define MAX(a,b) ((a)>(b)?(a):(b))
+#define PIN(x,lo,hi) ((x)<(lo)?(lo):((x)>(hi)?(hi):(x)))
+#define csmemset memset
+#define profile_scope(section, code) code
+enum { TICKS_PER_SECOND = 30, SIM_RATE_CLASSIC = 30, SUBSTEPS = 4 };
+enum { _game_connection_local, _game_connection_network_client, _game_connection_network_server,
+	_game_connection_film_playback };
+/* (game_time.c's structures and constants, taken from it) */
+#include "tick_boundary_defines.h"
+
+static struct game_time_globals_struct globals, *game_time_globals = &globals;
+static int connection = _game_connection_local;
+static short next_substep;
+/* the updates built and taken, the frame each was built in, the frame now */
+static long built, taken, frame;
+static long built_in[100000];
+static long substeps_run;
+static boolean work_pending;
+
+static void sim_rate_frame_begin(void) {}
+static long sim_rate_next(void) { return SIM_RATE_CLASSIC * SUBSTEPS; }
+static short sim_substep_next(void) { return next_substep; }
+static short sim_substep_count(void) { return SUBSTEPS; }
+static int game_connection(void) { return connection; }
+static real network_clock_frame_seconds(real seconds) { (void)seconds; return 0.0f; }
+static boolean halo_fixed_step(void) { return FALSE; }
+static boolean game_time_menu_scene(void) { return FALSE; }
+static boolean game_time_held(void) { return FALSE; }
+static void *global_network_game_server_get(void) { return NULL; }
+static void render_interpolation_frame_begin(void) {}
+static void render_interpolation_frame_end(void) {}
+static void game_frame(real seconds) { (void)seconds; }
+static real game_time_get_speed(void) { return 1.0f; }
+static void build(short ticks)
+{
+	while (ticks-- > 0)
+		built_in[built++] = frame;
+}
+static void update_client_local_ticks(short ticks) { CHECK(connection == _game_connection_local, "local"); build(ticks); }
+static void network_game_server_update_ticks(void *server, short ticks)
+{ (void)server; CHECK(connection == _game_connection_network_server, "host"); build(ticks); }
+/* (the updates' numbers are the ticks': the next to take is the next tick's) */
+static long update_client_get_maximum_possible_server_time(void) { return built; }
+
+static boolean game_time_run_substep(void)
+{
+	substeps_run++;
+	if (next_substep == 0)
+	{
+		CHECK(!game_time_substeps.boundary_wanted, "a tick begun while the frame's work waits for its boundary "
+			"(frame %ld)", frame);
+		CHECK(taken < built, "a tick begun with no update built for it (frame %ld)", frame);
+		CHECK(built_in[taken] == frame, "tick %ld took the update built %ld frames before (frame %ld): its input "
+			"stale", globals.server_time, frame - built_in[taken], frame);
+		taken++;
+	}
+	next_substep = (short)((next_substep + 1) % SUBSTEPS);
+	if (next_substep)
+		return FALSE;
+	globals.server_time++;
+	globals.local_time++;
+	return TRUE;
+}
+
+#include "under_test.inc"
+
+/* main_loop's frame: its work waits while a tick is open, else runs */
+static void main_frame(real seconds)
+{
+	if (work_pending && game_time_tick_open_wait())
+	{
+	}
+	else
+		work_pending = FALSE;
+	game_time_update(seconds);
+	frame++;
+	CHECK(built == taken, "%ld updates left queued after frame %ld: each tick after takes one built that much "
+		"earlier", built - taken, frame);
+}
+
+int main(int argc, char **argv)
+{
+	char const *case_name = argc == 2 ? argv[1] : "";
+	long index;
+	double seconds = 0.0;
+
+	globals.initialized = globals.active = TRUE;
+	globals.speed = 1.0f;
+	if (!strcmp(case_name, "host"))
+		connection = _game_connection_network_server;
+	if (!strcmp(case_name, "local") || !strcmp(case_name, "host"))
+	{
+		/* (45 frames a second at 120: 2.67 sub-steps a frame, so that frames
+		end at every phase of a tick; work every 7th) */
+		for (index = 0; index < 4000; index++)
+		{
+			if (index % 7 == 3)
+				work_pending = TRUE;
+			main_frame(1.0f / 45.0f);
+			seconds += 1.0 / 45.0;
+		}
+		/* (and no time lost to the waits: the steps' time kept for the next
+		frame) */
+		CHECK(fabs(substeps_run - seconds * 120.0) <= SUBSTEPS + 1, "%ld sub-steps run in %.2f s", substeps_run,
+			seconds);
+		printf("%s: %ld frames, %ld ticks, no update left queued\n", case_name, frame, taken);
+	}
+	else CASE("stall")
+	{
+		/* (a frame of two seconds, a shader compiled, with work waiting: the
+		time past the frame's most ticks is dropped, and none is owed after) */
+		for (index = 0; index < 600; index++)
+		{
+			long before = substeps_run;
+
+			if (index == 300)
+				work_pending = TRUE;
+			main_frame(index == 301 ? 2.0f : 1.0f / 60.0f);
+			if (index > 302)
+				CHECK(substeps_run - before <= 3, "frame %ld ran %ld sub-steps: time owed from the stall", index,
+					substeps_run - before);
+		}
+		printf("stall: %ld frames, %ld ticks, no update left queued\n", frame, taken);
+	}
+	return 0;
+}
