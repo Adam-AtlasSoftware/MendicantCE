@@ -88,6 +88,7 @@ This header is included by both halves.
 #define GUEST_SYS_clock_gettime 113
 #define GUEST_SYS_clock_getres 114
 #define GUEST_SYS_clock_nanosleep 115
+#define GUEST_SYS_sched_getaffinity 123
 #define GUEST_SYS_sched_yield 124
 #define GUEST_SYS_kill 129
 #define GUEST_SYS_tkill 130

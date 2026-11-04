@@ -47,6 +47,8 @@ into place, and a file that fails any check is deleted (and baked again).
 #include "scenario/scenario.h"
 #include "scenario/scenario_definitions.h"
 
+#include "memory/zlib/zlib.h"
+
 #include "menu_pictures.h"
 #include "world_ao.h"
 #include "world_scene.h"
@@ -123,10 +125,9 @@ long __guest_syscall(long long number, long long a, long long b, long long c, lo
 int mkdir(const char *path, unsigned int mode);
 void halo_world_ao_field(unsigned long width, unsigned long height, unsigned long depth, unsigned long z_first,
 	unsigned long z_count, signed char const *voxels);
-/* the game's zlib (source/memory/zlib) */
-int compress2(unsigned char *destination, unsigned long *destination_size, const unsigned char *source,
-	unsigned long source_size, int level);
-int uncompress(unsigned char *destination, unsigned long *destination_size, const unsigned char *source,
+/* the port's zlib (port/third_party/zlib/zlib_prefixed.h: its inflate,
+for data from anywhere, whose allocator is the C library's) */
+int z_uncompress(unsigned char *destination, unsigned long *destination_size, const unsigned char *source,
 	unsigned long source_size);
 
 /* ---------- structures */
@@ -202,6 +203,42 @@ static struct
 } world_sdf;
 
 /* ---------- the cache file (tools/harness/tests/world_sdf.c takes these) */
+
+/* the game's zlib's deflate (its compress2 allocates with the game's own
+allocator, which only the game's thread may call: the bake's thread
+deflates with the C library's) */
+static voidpf sdf_zalloc(voidpf opaque, uInt items, uInt size)
+{
+	(void)opaque;
+	return calloc(items, size);
+}
+
+static void sdf_zfree(voidpf opaque, voidpf address)
+{
+	(void)opaque;
+	free(address);
+}
+
+static int sdf_deflate(unsigned char *destination, unsigned long *destination_size, const unsigned char *source,
+	unsigned long source_size)
+{
+	z_stream stream;
+	int result;
+
+	memset(&stream, 0, sizeof(stream));
+	stream.zalloc = sdf_zalloc;
+	stream.zfree = sdf_zfree;
+	if (deflateInit(&stream, WORLD_SDF_DEFLATE_LEVEL) != Z_OK)
+		return -1;
+	stream.next_in = (Bytef *)source;
+	stream.avail_in = (uInt)source_size;
+	stream.next_out = destination;
+	stream.avail_out = (uInt)*destination_size;
+	result = deflate(&stream, Z_FINISH);
+	*destination_size = stream.total_out;
+	deflateEnd(&stream);
+	return result == Z_STREAM_END ? 0 : -1;
+}
 
 static void sdf_put32(unsigned char *bytes, unsigned long value)
 {
@@ -322,8 +359,7 @@ static unsigned char *sdf_file_pack(struct world_sdf_volume *volume, unsigned lo
 
 	if (!bytes)
 		return NULL;
-	if (compress2(bytes + WORLD_SDF_FILE_HEADER, &deflated, (unsigned char const *)volume->voxels, count,
-		WORLD_SDF_DEFLATE_LEVEL) != 0)
+	if (sdf_deflate(bytes + WORLD_SDF_FILE_HEADER, &deflated, (unsigned char const *)volume->voxels, count) != 0)
 	{
 		free(bytes);
 		return NULL;
@@ -357,7 +393,7 @@ static int sdf_file_unpack(unsigned char const *bytes, unsigned long size, unsig
 	if (!volume->voxels)
 		return 0;
 	inflated = count;
-	if (uncompress((unsigned char *)volume->voxels, &inflated, bytes + WORLD_SDF_FILE_HEADER,
+	if (z_uncompress((unsigned char *)volume->voxels, &inflated, bytes + WORLD_SDF_FILE_HEADER,
 		volume->header.deflated_size) != 0 || inflated != count)
 	{
 		free(volume->voxels);

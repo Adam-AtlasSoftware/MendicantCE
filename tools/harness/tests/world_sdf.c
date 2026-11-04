@@ -13,8 +13,8 @@ against every triangle's distance (the narrow band misses none). */
 
 #include "under_test.inc"
 
-/* (world_sdf.c's file functions: the platform's log and the game's zlib,
-here a stored copy, which is all the format needs of it) */
+/* (world_sdf.c's file functions: the platform's log, and the deflate and
+inflate, here a stored copy, which is all the format needs of them) */
 static int logged;
 static void platform_log(char const *format, ...)
 {
@@ -22,10 +22,9 @@ static void platform_log(char const *format, ...)
 	logged++;
 }
 
-static int compress2(unsigned char *destination, unsigned long *destination_size, const unsigned char *source,
-	unsigned long source_size, int level)
+static int sdf_deflate(unsigned char *destination, unsigned long *destination_size, const unsigned char *source,
+	unsigned long source_size)
 {
-	(void)level;
 	if (*destination_size < source_size + 4)
 		return -5;
 	destination[0] = 0x5A;
@@ -37,7 +36,7 @@ static int compress2(unsigned char *destination, unsigned long *destination_size
 	return 0;
 }
 
-static int uncompress(unsigned char *destination, unsigned long *destination_size, const unsigned char *source,
+static int z_uncompress(unsigned char *destination, unsigned long *destination_size, const unsigned char *source,
 	unsigned long source_size)
 {
 	unsigned long size;

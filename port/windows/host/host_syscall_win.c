@@ -1760,6 +1760,24 @@ static long long dispatch(long long number, long long a, long long b, long long 
 		SwitchToThread();
 		return 0;
 	/* the calling thread's priority (who 0, as Linux sets a thread's) */
+	/* the processors the guest may run on (sysconf's count): the first
+	GetActiveProcessorCount bits of the mask, its size in bytes returned as
+	Linux does */
+	case GUEST_SYS_sched_getaffinity:
+	{
+		uint32_t processors = (uint32_t)GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
+		uint32_t size = (uint32_t)b, index;
+		unsigned char *mask = GUEST(unsigned char *, c);
+
+		if (processors < 1)
+			processors = 1;
+		if (size < 8 || processors > size * 8)
+			return -GUEST_EINVAL;
+		memset(mask, 0, size);
+		for (index = 0; index < processors; index++)
+			mask[index / 8] |= (unsigned char)(1u << (index % 8));
+		return size;
+	}
 	case GUEST_SYS_setpriority:
 		if (a == 0 && b == 0 && (int)c > 0)
 			SetThreadPriority(GetCurrentThread(), (int)c >= 10 ? THREAD_PRIORITY_LOWEST : THREAD_PRIORITY_BELOW_NORMAL);
