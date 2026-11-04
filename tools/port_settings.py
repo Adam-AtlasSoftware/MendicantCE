@@ -20,7 +20,7 @@ from typing import NamedTuple
 from xml.sax.saxutils import quoteattr
 
 PE = "main_menu/settings_select/player_setup/player_profile_edit"
-# the mods' screen, and its rows (_mods), which Settings' PROFILES tab opens
+# the mods' screen, and its rows (_mods), which Settings' MODS tab opens
 MODS = "main_menu/mods"
 MOD_ROWS = 11
 # the main menu's items (ce/main_menu.xml): CAMPAIGN, MULTIPLAYER, SETTINGS
@@ -246,7 +246,7 @@ FRAMES_ADDED = {
 # ---------- Settings: its tabs and their pages (port/linux/game/menu_functions.c's
 # "port settings ..." functions)
 #
-# Settings opens straight to its tabs, VIDEO to PROFILES across the top (LB and
+# Settings opens straight to its tabs, VIDEO to MODS across the top (LB and
 # RB, Q and E, or a click switch them), each a page of rows under section
 # headers, and on the right a panel saying what the row chosen does: its name,
 # its value in large type and plain words. A row ending in "›" opens a page of
@@ -318,6 +318,17 @@ SETTINGS_TABS_TOP = 76
 # WIDE_MARGIN from the screen's edges)
 SETTINGS_TAB_WIDTH, SETTINGS_TAB_HEIGHT, SETTINGS_TAB_STEP, SETTINGS_TABS_X = 90, 22, 88, 56
 SETTINGS_TAB_LAID = 86
+# Settings' own tabs (seven: SETTINGS_TAB_PAGES) are each as wide as its name
+# and the same room either side of it, filling the row from SETTINGS_TABS_X to
+# RB's prompt (settings_tab_places); a name's width reckoned as small_ui's
+# capitals' (the high-res text's Overpass 750 at their height: INTERFACE,
+# the widest name, 79 units of the room its tab has)
+SETTINGS_TABS_RIGHT = SETTINGS_TABS_X + 5 * SETTINGS_TAB_STEP + SETTINGS_TAB_LAID
+SETTINGS_TAB_GAP = SETTINGS_TAB_STEP - SETTINGS_TAB_LAID
+SMALL_UI_CAPITALS = {"A": 10.33, "B": 9.94, "C": 9.10, "D": 10.21, "E": 8.98, "F": 8.24, "G": 9.72, "H": 10.35,
+                     "I": 4.25, "J": 7.99, "K": 10.23, "L": 8.11, "M": 11.58, "N": 10.29, "O": 10.30, "P": 9.14,
+                     "Q": 10.31, "R": 9.91, "S": 8.80, "T": 8.65, "U": 10.22, "V": 9.81, "W": 12.13, "X": 9.86,
+                     "Y": 9.86, "Z": 9.11}
 # (the tab keys' prompts: LB's at the margin, RB's after the last tab)
 SETTINGS_TAB_PROMPT_WIDTH = 30
 SETTINGS_PANEL_X, SETTINGS_PANEL_WIDTH, SETTINGS_PANEL_BOTTOM = 388, 224, 400
@@ -814,13 +825,12 @@ PAGES = {
     },
     "profile_settings": {
         "screen": "profile_settings_screen", "tab": "PROFILES",
-        "about": "Your player profiles, your name and color, and the mods.",
+        "about": "Your player profiles, your name and color.",
         "rows": [
             # (with no profile, NAME, COLOR and MANAGE PROFILES are hidden and
             # CREATE PROFILE shown; in a game, those whose screens are
             # ui.map's: the name's keyboard, the colours' pictures, and those
-            # that are the main menu's: the profiles, the mods:
-            # settings_rows_show)
+            # that are the main menu's: the profiles: settings_rows_show)
             (SECTION, "PLAYER"),
             ("NAME ›", None, f"{PE}/name_edit/profile_name_screen",
              "The name the other players see, kept in your player profile.", None, "name",
@@ -833,15 +843,25 @@ PAGES = {
             ("MANAGE PROFILES ›", None, PROFILE_MANAGER,
              "Switch to another player profile, make a new one or delete one. Your changes so far are kept.", None,
              "profiles", "port settings profiles"),
-            # (port/linux/game/mods.c: this machine's, every profile's)
-            (SECTION, "MODS"),
-            ("MODS ›", None, f"{MODS}/mods_screen",
-             "Texture, sound, text and model packs from the mods folder: turn each on or off, and choose which "
-             "plays over which. They are this computer's, for every profile.", None, "mods"),
             (SECTION, "ABOUT"),
             ("OPENH1", None, None,
              "Halo: Combat Evolved, the Xbox game, on this computer, played from your own copy of its maps. OpenH1 "
              "is a free fan project.", None, "about"),
+        ],
+    },
+    # (port/linux/game/mods.c: this machine's, every profile's; MANAGE MODS
+    # is the main menu's, hidden in a game: settings_rows_show)
+    "mods_settings": {
+        "screen": "mods_settings_screen", "tab": "MODS",
+        "about": "Texture, sound, text and model packs from the mods folder.",
+        "rows": [
+            (SECTION, "MODS"),
+            ("MANAGE MODS ›", None, f"{MODS}/mods_screen",
+             "Texture, sound, text and model packs from the mods folder: turn each on or off, and choose which "
+             "plays over which. They are this computer's, for every profile.", None, "mods"),
+            ("MODS FOLDER", None, None,
+             "Each mod is a folder in the mods folder, beside the maps folder, with its mod.toml and its tags. "
+             "Mods are turned on and off from the main menu's Settings, not in a game.", None, "mods_folder"),
         ],
     },
     # ---- the pages the rows open
@@ -1198,6 +1218,26 @@ PAGES = {
     },
 }
 SETTINGS_TAB_PAGES = [folder for folder, page in PAGES.items() if "tab" in page]
+
+
+def tab_name_width(name: str) -> float:
+    """a tab's name's width in small_ui (SMALL_UI_CAPITALS)"""
+    return sum(SMALL_UI_CAPITALS[letter] for letter in name)
+
+
+def settings_tab_places() -> list:
+    """each of Settings' tabs' left and width at 4:3: as wide as its name and
+    the same room either side of it, SETTINGS_TAB_GAP apart, filling the row
+    from SETTINGS_TABS_X to SETTINGS_TABS_RIGHT"""
+    names = [PAGES[folder]["tab"] for folder in SETTINGS_TAB_PAGES]
+    room = (SETTINGS_TABS_RIGHT - SETTINGS_TABS_X - SETTINGS_TAB_GAP * (len(names) - 1) -
+            sum(map(tab_name_width, names))) / (2 * len(names))
+    places, x = [], float(SETTINGS_TABS_X)
+    for name in names:
+        right = x + tab_name_width(name) + 2 * room
+        places.append((round(x), round(right) - round(x)))
+        x = right + SETTINGS_TAB_GAP
+    return places
 # the panel's words for the buttons, on a tab and on a page the rows open
 SETTINGS_BUTTON_HELP = {
     "tab": ["Puts this tab's settings back to their defaults. Nothing changes until OK.",
@@ -1682,7 +1722,7 @@ def _settings_page(folder: str, page: dict) -> list:
                       *([f'<child widget="{SETTINGS}/tab_prompt_previous" x="{WIDE_MARGIN}" '
                          f'y="{SETTINGS_TABS_TOP}"/>',
                          f'<child widget="{SETTINGS}/tab_prompt_next" '
-                         f'x="{SETTINGS_TABS_X + 5 * SETTINGS_TAB_STEP + SETTINGS_TAB_LAID + 4}" '
+                         f'x="{SETTINGS_TABS_RIGHT + 4}" '
                          f'y="{SETTINGS_TABS_TOP}"/>'] if tab else []),
                       f'<child widget="{base}/options_menu"/>'])
     if not tab:
@@ -1706,11 +1746,11 @@ def _settings_page(folder: str, page: dict) -> list:
     if tab:
         # (each tab: its name, the current one framed; A or a click opens it)
         items = []
-        for index, other in enumerate(SETTINGS_TAB_PAGES):
+        for index, (other, (tab_x, tab_width)) in enumerate(zip(SETTINGS_TAB_PAGES, settings_tab_places())):
             current = other == folder
             name = f"{base}/tab_{PAGES[other]['screen'][:-len('_screen')]}"
-            items.append(f'<child widget="{name}" x="{SETTINGS_TABS_X + index * SETTINGS_TAB_STEP}"/>')
-            lines += _settings_text(name, [("width", SETTINGS_TAB_LAID), ("height", SETTINGS_TAB_HEIGHT),
+            items.append(f'<child widget="{name}" x="{tab_x}"/>')
+            lines += _settings_text(name, [("width", tab_width), ("height", SETTINGS_TAB_HEIGHT),
                                            ("flags", "keep_ends"),
                                            ("wide", wide(wide_spread(index, len(SETTINGS_TAB_PAGES)))),
                                            ("bitmap", f"{SETTINGS}/{'tab_current' if current else 'tab'}"),
