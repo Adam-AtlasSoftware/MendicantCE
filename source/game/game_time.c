@@ -633,6 +633,21 @@ void game_time_update(
 			(game_time_tick_open_wait) */
 			if (!sim_substep_next())
 				game_time_substeps.boundary_wanted = FALSE;
+			/* port: else it waits for the boundary: the steps run only to the
+			open tick's end, and the time of the rest is the next frame's. So
+			no tick is begun here, nor its update built (update_client_local_ticks,
+			network_game_server_update_ticks, below): a tick's update built and
+			its tick not begun stayed queued, and every tick after took the
+			update one older, its input with it, until the map was loaded again:
+			a frame's wait at each checkpoint, structure switch and death added
+			a tick to the delay of every press (OpenH1 #590) */
+			else if (steps_elapsed > substep_count - sim_substep_next())
+			{
+				long open_steps = substep_count - sim_substep_next();
+
+				game_time_globals->leftover_dt += (real)(steps_elapsed - open_steps)/steps_per_second;
+				steps_elapsed = open_steps;
+			}
 
 			if (steps_elapsed > 0)
 			{
@@ -696,14 +711,6 @@ void game_time_update(
 					{
 						if (server_updates <= 0)
 							break;
-						/* port: the frame's work waits for this boundary
-						(game_time_tick_open_wait): the time of the steps left
-						is the next frame's */
-						if (game_time_substeps.boundary_wanted)
-						{
-							game_time_globals->leftover_dt += (real)(steps_elapsed - step_index)/steps_per_second;
-							break;
-						}
 						server_updates--;
 					}
 					if (game_time_run_substep())
