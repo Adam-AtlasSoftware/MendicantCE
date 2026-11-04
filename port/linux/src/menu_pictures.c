@@ -28,8 +28,8 @@ failure before it starts, and as rendered when it ends); and until it is
 ready. A pose or map changed, a larger
 screen (at the next start), its picture's file gone or cut short, or this
 file's version renders it again.
-Nothing is rendered in runs nobody watches (tests: debug.hidden_window,
-debug.exit_after...), in VR, or with display.menu_pictures off.
+Nothing is rendered in runs nobody watches (tests: picture_quiet_run), in
+VR, or with display.menu_pictures off.
 */
 
 #include "menu_pictures.h"
@@ -863,7 +863,8 @@ static int picture_enabled(void)
 		!config_boolean("debug.null_renderer") && !halo_server_mode();
 }
 
-/* runs nobody watches (tests), and those whose first screen is not the
+/* runs nobody watches (tests: timed, scripted, driven through the script
+console, recorded or measured), and those whose first screen is not the
 main menu's: nothing rendered */
 static int picture_quiet_run(void)
 {
@@ -871,7 +872,9 @@ static int picture_quiet_run(void)
 		return 0;
 	return config_boolean("debug.hidden_window") || config_real("debug.exit_after") > 0.0 ||
 		config_string("debug.network_test")[0] || config_string("debug.test_input")[0] ||
-		config_boolean("debug.fixed_step") || config_string("debug.menu_open")[0]
+		config_boolean("debug.fixed_step") || config_string("debug.menu_open")[0] ||
+		config_boolean("debug.telnet_console") || config_integer("debug.screenshot_every") > 0 ||
+		config_boolean("debug.load_trace")
 #ifdef HALO_VR
 		|| halo_vr_running()
 #endif

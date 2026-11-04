@@ -2282,7 +2282,9 @@ static const struct config_setting config_settings[] =
 	{ "debug.menu_pictures", _config_boolean, "false", "HALO_DEBUG_MENU_PICTURES", _environment_set_is_true,
 		_platform_desktop,
 		"Prepare the menus' pictures (display.menu_pictures) even in a run that\n"
-		"nobody watches (debug.hidden_window, debug.exit_after...), for tests." },
+		"nobody watches (debug.hidden_window, exit_after, fixed_step, test_input,\n"
+		"network_test, menu_open, telnet_console, screenshot_every, load_trace),\n"
+		"for tests." },
 	{ "debug.menu_open", _config_string, "\"\"", "HALO_MENU_OPEN", _environment_value, _platform_all,
 		"Start on this screen of the menus (port/assets/menus) instead of the main\n"
 		"menu, a player profile being edited; empty for the main menu." },
