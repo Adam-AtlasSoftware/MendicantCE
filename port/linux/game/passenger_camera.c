@@ -9,8 +9,6 @@ and the deterministic camera used for shooting keeps its original view.
 
 #include "cseries.h"
 #include "passenger_camera.h"
-#include "view_fov.h"
-#include "panini.h"
 #include "camera/director.h"
 #include "cutscene/cinematics.h"
 #include "game/game_engine.h"
@@ -153,7 +151,6 @@ boolean passenger_camera_reticle_begin(short local_player_index, long weapon_ind
 	real_vector3d direction, ray;
 	real_point2d screen;
 	struct collision_result collision;
-	real reticle_scale;
 
 	reticle_active = FALSE;
 	if (!passenger_camera_enabled(local_player_index) ||
@@ -171,26 +168,25 @@ boolean passenger_camera_reticle_begin(short local_player_index, long weapon_ind
 		point_from_line3d(&origin, &direction, 128.0f, &target);
 	if (!render_camera_world_to_screen(&render.camera, &render.frustum, &target, &screen))
 		return FALSE;
-	/* (where the shot lands in the drawn view: hud_draw.c scales the reticle
-	about the view's centre by this frame's view (display.vehicle_fov's, or
-	on the way to or from display.fov's), offset and all, so the offset is
-	given at the HUD's own size to land there; 1 at the stock view. The
-	screen's place is display.panini's, and the HUD's size its too) */
-	reticle_scale = render_fov_reticle_scale(local_player_index) * panini_center_scale();
-	reticle_offset.x = (screen.x - (render.camera.window_bounds.x0 + render.camera.window_bounds.x1) * 0.5f) /
-		reticle_scale;
-	reticle_offset.y = (screen.y - (render.camera.window_bounds.y0 + render.camera.window_bounds.y1) * 0.5f) /
-		reticle_scale;
+	/* (where the shot lands in the drawn view, from the middle; the
+	screen's place is display.panini's) */
+	reticle_offset.x = screen.x - (render.camera.window_bounds.x0 + render.camera.window_bounds.x1) * 0.5f;
+	reticle_offset.y = screen.y - (render.camera.window_bounds.y0 + render.camera.window_bounds.y1) * 0.5f;
 	reticle_active = TRUE;
 	return TRUE;
 }
 
-boolean passenger_camera_reticle_offset(point2d *point)
+boolean passenger_camera_reticle_offset(point2d *point, real reticle_scale)
 {
+	/* (hud_draw.c scales the reticle about the view's centre by
+	reticle_scale, offset and all, so the offset is given at the HUD's own
+	size to land there) */
+	if (!(reticle_scale > 0.0f))
+		reticle_scale = 1.0f;
 	if (reticle_active)
 	{
-		point->x = (short)(point->x + reticle_offset.x);
-		point->y = (short)(point->y + reticle_offset.y);
+		point->x = (short)(point->x + reticle_offset.x / reticle_scale);
+		point->y = (short)(point->y + reticle_offset.y / reticle_scale);
 	}
 	return reticle_active;
 }

@@ -12,8 +12,14 @@ after the observer and before the projection and the visibility frustum
 are built), from the game's own */
 real render_fov_vertical(short local_player_index, real native_vertical_field_of_view);
 /* how much the reticle shrinks or grows to stay on its aim at that view (the
-last local view's own projection against the game's): 1 for the stock view */
+last local view's own projection against the game's): 1 for the stock view.
+A scope's own pieces, drawn zoomed over its picture, keep to it */
 real render_fov_reticle_scale(short local_player_index);
+/* the weapon's reticle's size: its scale at the unzoomed view (display.panini's
+magnification of the middle with it), kept through the zoom (the stock game
+draws its reticle one size at every zoom: display.fov sizes it, the zoom
+does not) */
+real render_fov_reticle_size(short local_player_index);
 /* the view's own vertical angle when display.fov widened it, else 0 */
 real render_fov_authored_vertical(short local_player_index);
 /* the local player's unit when its view is the player's own aim, which the

@@ -1366,10 +1366,15 @@ static void crosshairs_draw(
 												in_multiplayer,
 												bitmap_group->type == _bitmap_group_type_interface_bitmaps,
 												/* port: a reticle, scaled with display.fov
-												(view_fov.c); a scope's picture keeps its
-												place */
-												state_index != _crosshair_state_zoom &&
-												!custom_edition_hud_warning(state_index));
+												(view_fov.c), but a piece of a scope's own
+												picture (drawn zoomed only) keeps to the view
+												as the picture does; the zoom's own picture
+												keeps its place */
+												state_index == _crosshair_state_zoom ||
+													custom_edition_hud_warning(state_index) ? FALSE :
+												TEST_FLAG(item->flags, _hud_crosshair_not_on_default_zoom_bit) ||
+													TEST_FLAG(item->flags, _hud_crosshair_show_sniper_data_bit) ?
+													HUD_CROSSHAIR_SCOPE_PIECE : TRUE);
 										}
 									}
 								}
