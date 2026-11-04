@@ -2,8 +2,10 @@
 port/linux/game/render_prepared.c): the entries read back are the entries
 recorded, a repeat once, in their order, with the textures and pages between
 them; malformed words are refused; a record whose draws the played back ones
-do not all have, or that is another form's, map's, build's or settings', is
-refused. */
+do not all have under its own derivation, or that is another form's or
+map's, is refused, and its key holds no setting; one record, made under any
+settings, played back under any others, makes every draw those settings
+would have walked. */
 #include "harness.h"
 
 #include <stdint.h>
@@ -13,6 +15,9 @@ typedef int BOOL;
 #define D3DTSS_MAXSTAGES 4
 #define D3DRS_MAX 144
 #define D3DTSS_MAX 32
+#define TRUE 1
+#define FALSE 0
+typedef int boolean;
 
 /* FNV-1a, 64 bits (xgpu_manifest.c's) */
 static uint64_t xgpu_manifest_hash(const void *data, size_t size, uint64_t hash)
@@ -219,6 +224,192 @@ static void case_missing(void)
 	CHECK(render_prepared_draws_missing(recorded, 4, NULL, 0) == 4, "no draws");
 }
 
+/* ---------- one record under every settings
+
+A toy front end: a walk's draw is a game state (journal_state: its pipeline
+in render_state[0], its HDR tag in hdr_kind, the occlusion's pre-pass and
+readiness and the enhanced lights' count as journal_capture notes them,
+whatever the settings: the walk draws the union as it records). Its
+pipeline under settings is derived as the front end derives it: the tag
+only with the HDR on, the lights only enhanced, the occlusion's flags as
+they are set (the front end reads the flags, not the setting). Recorded
+under some settings (a draw journaled where it is new in its derived
+pipeline or in journal_settings_blind_of's words: preparation_seen), played
+back under others (the occlusion's flags as journal_occlusion gives them),
+the record's pipelines must be the walk's under those. */
+
+enum { SETTING_HDR = 1, SETTING_OCCLUSION = 2, SETTING_LIGHTS = 4, SETTINGS = 8 };
+#define WALK 400
+#define DERIVED_MAXIMUM (WALK * 2)
+
+struct derived { uint32_t pipeline, tag, prepass, ready, lit; };
+
+static struct journal_state walk[WALK];
+
+static struct derived derive(const struct journal_state *state, int settings, BOOL prepass, BOOL ready)
+{
+	struct derived derived;
+
+	memset(&derived, 0, sizeof(derived));
+	derived.pipeline = state->render_state[0];
+	derived.tag = (settings & SETTING_HDR) ? state->hdr_kind : 0;
+	derived.prepass = prepass != 0;
+	derived.ready = ready != 0;
+	derived.lit = (settings & SETTING_LIGHTS) && state->lights_count > 0;
+	return derived;
+}
+
+static int derived_add(struct derived *set, int count, struct derived derived)
+{
+	int index;
+
+	for (index = 0; index < count; index++)
+	{
+		if (!memcmp(&set[index], &derived, sizeof(derived)))
+			return count;
+	}
+	set[count] = derived;
+	return count + 1;
+}
+
+static int derived_has(const struct derived *set, int count, struct derived derived)
+{
+	int index;
+
+	for (index = 0; index < count; index++)
+	{
+		if (!memcmp(&set[index], &derived, sizeof(derived)))
+			return 1;
+	}
+	return 0;
+}
+
+static void walk_make(void)
+{
+	int index;
+
+	srand(11);
+	memset(walk, 0, sizeof(walk));
+	for (index = 0; index < WALK; index++)
+	{
+		struct journal_state *state = &walk[index];
+		/* (a third of the walk the occlusion's pre-pass, a third the
+		surfaces it lit, a third after it) */
+		int part = index % 3;
+
+		state->render_state[0] = (uint32_t)(rand() % 24);
+		state->hdr_kind = (uint32_t)(rand() % 3);
+		state->occlusion_prepass = part == 0;
+		state->occlusion_ready = part == 1;
+		state->lights_count = (uint32_t)(rand() % 2);
+	}
+}
+
+/* the walk's pipelines under settings (the occlusion's flags set where it
+is on) */
+static int walked(int settings, struct derived *set)
+{
+	int index, count = 0;
+	int quality = (settings & SETTING_OCCLUSION) != 0;
+
+	for (index = 0; index < WALK; index++)
+		count = derived_add(set, count, derive(&walk[index], settings, walk[index].occlusion_prepass && quality,
+			walk[index].occlusion_ready && quality));
+	return count;
+}
+
+static struct journal_state recorded_entries[WALK];
+
+/* the walk recorded under settings: the entries journaled */
+static int recorded(int settings)
+{
+	struct { struct derived derived; unsigned long blind[3]; } seen[WALK], key;
+	int index, other, seen_count = 0, count = 0;
+	int quality = (settings & SETTING_OCCLUSION) != 0;
+
+	for (index = 0; index < WALK; index++)
+	{
+		const struct journal_state *state = &walk[index];
+
+		memset(&key, 0, sizeof(key));
+		key.derived = derive(state, settings, state->occlusion_prepass && quality, state->occlusion_ready && quality);
+		journal_settings_blind_of(key.blind, (int)state->hdr_category, (int)state->hdr_kind, (BOOL)state->hdr_view,
+			(BOOL)state->occlusion_prepass, (BOOL)state->occlusion_ready, (int)state->lights_count,
+			(BOOL)state->lights_environment);
+		for (other = 0; other < seen_count && memcmp(&seen[other], &key, sizeof(key)); other++)
+			;
+		if (other < seen_count)
+			continue;
+		seen[seen_count++] = key;
+		recorded_entries[count++] = *state;
+	}
+	return count;
+}
+
+static void case_settings(void)
+{
+	static struct derived wanted[DERIVED_MAXIMUM], made[DERIVED_MAXIMUM];
+	int recorded_under, played_under, index, wanted_count, made_count, entries;
+
+	walk_make();
+	for (recorded_under = 0; recorded_under < SETTINGS; recorded_under++)
+	{
+		entries = recorded(recorded_under);
+		for (played_under = 0; played_under < SETTINGS; played_under++)
+		{
+			int quality = (played_under & SETTING_OCCLUSION) != 0;
+
+			wanted_count = walked(played_under, wanted);
+			made_count = 0;
+			for (index = 0; index < entries; index++)
+			{
+				const struct journal_state *state = &recorded_entries[index];
+
+				made_count = derived_add(made, made_count, derive(state, played_under,
+					journal_occlusion(state->occlusion_prepass, quality),
+					journal_occlusion(state->occlusion_ready, quality)));
+			}
+			for (index = 0; index < wanted_count; index++)
+				CHECK(derived_has(made, made_count, wanted[index]), "recorded under settings %d, played under %d: "
+					"a pipeline the walk makes not made (%d of %d made)", recorded_under, played_under, made_count,
+					wanted_count);
+			for (index = 0; index < made_count; index++)
+				CHECK(derived_has(wanted, wanted_count, made[index]), "recorded under settings %d, played under %d: "
+					"a pipeline the walk does not make made", recorded_under, played_under);
+		}
+	}
+}
+
+/* the key: no setting in it, every part of it telling records apart, and
+a record played back judged under its own derivation alone */
+static void case_key(void)
+{
+	unsigned long long key = render_prepared_key("levels\\a10\\a10", 0x40000 | 400, TRUE, 0);
+	struct prepared_header header;
+
+	CHECK(key == render_prepared_key("levels\\a10\\a10", 0x40000 | 400, TRUE, 0), "the same map's the same");
+	CHECK(key != render_prepared_key("levels\\b30\\b30", 0x40000 | 400, TRUE, 0), "another scenario's");
+	CHECK(key != render_prepared_key("levels\\a10\\a10", 0x50000 | 400, TRUE, 0), "another journal form's");
+	CHECK(key != render_prepared_key("levels\\a10\\a10", 0x40000 | 400, FALSE, 0), "without mirrors");
+	CHECK(key != render_prepared_key("levels\\a10\\a10", 0x40000 | 400, TRUE, 1), "another structure's");
+	memset(&header, 0, sizeof(header));
+	header.magic = PREPARED_MAGIC;
+	header.version = PREPARED_VERSION;
+	header.header_size = sizeof(header);
+	header.checksum = 0x12345678;
+	header.key = key;
+	header.word_count = 100;
+	header.derivation = 0x99;
+	CHECK(prepared_header_fits(&header, 0x12345678, key), "a record under any derivation fits");
+	CHECK(!prepared_header_fits(&header, 0x12345678, render_prepared_key("levels\\a10\\a10", 0x50000 | 400, TRUE,
+		0)), "a stale form's key is refused");
+	CHECK(render_prepared_played(1, 0, 0, TRUE), "its own derivation's, every draw made");
+	CHECK(!render_prepared_played(1, 0, 3, TRUE), "its own derivation's, draws not made");
+	CHECK(render_prepared_played(1, 0, 3, FALSE), "another derivation's, its draws derived as others");
+	CHECK(!render_prepared_played(1, 2, 0, FALSE), "objects not found, under another derivation");
+	CHECK(!render_prepared_played(0, 0, 0, FALSE), "malformed, under another derivation");
+}
+
 static void case_stale(void)
 {
 	struct prepared_header header, changed;
@@ -260,6 +451,10 @@ int main(int argc, char **argv)
 		case_missing();
 	else if (!strcmp(which, "stale"))
 		case_stale();
+	else if (!strcmp(which, "settings"))
+		case_settings();
+	else if (!strcmp(which, "key"))
+		case_key();
 	else
 		CHECK(0, "no case %s", which);
 	return 0;

@@ -529,7 +529,7 @@ static short pass_fog(void)
 }
 
 /* the renderer's dynamic lights the stand-in lights (display.dynamic_lights
-"enhanced") */
+"enhanced", or the preparation recorded: halo_dynamic_lights_walked) */
 static boolean pass_dynamic_lights(void)
 {
 	return enumerate.pass >= NUMBER_OF_FOGS * NUMBER_OF_PARTS * NUMBER_OF_STENCIL_CONTEXTS;
@@ -537,7 +537,7 @@ static boolean pass_dynamic_lights(void)
 
 static short passes(void)
 {
-	return (short)((halo_dynamic_lights_enhanced() ? MAXIMUM_LIGHTINGS : 1) * NUMBER_OF_FOGS * NUMBER_OF_PARTS *
+	return (short)((halo_dynamic_lights_walked() ? MAXIMUM_LIGHTINGS : 1) * NUMBER_OF_FOGS * NUMBER_OF_PARTS *
 		NUMBER_OF_STENCIL_CONTEXTS);
 }
 
@@ -866,7 +866,7 @@ static void lights_submit(void)
 			enumerate.light_indices[enumerate.light_count++] = light_index;
 	}
 	/* (the renderer's: these and the window's, or none) */
-	if (halo_dynamic_lights_enhanced())
+	if (halo_dynamic_lights_walked())
 	{
 		long count = rasterizer_lights.light_count;
 
