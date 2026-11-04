@@ -222,6 +222,8 @@ enum
 	/* ASTC 4x4 (LDR): DXT textures transcoded on a device without BC
 	(port/linux/astc/xgpu_astc.h) */
 	XGPU_VULKAN_FORMAT_ASTC,
+	/* a signed byte (display.ambient_occlusion "world"'s distance field) */
+	XGPU_VULKAN_FORMAT_R8_SNORM,
 	XGPU_VULKAN_FORMAT_COUNT
 };
 
@@ -535,6 +537,28 @@ XGPU_SPIRV_BINDING_AMBIENT_OCCLUSION); NULL: a white texel, none */
 #define XGPU_VULKAN_SET_OCCLUSION 3
 #define XGPU_VULKAN_BINDING_OCCLUSION 0
 void xgpu_vulkan_set_ambient_occlusion(struct xgpu_vulkan_image *image);
+/* display.ambient_occlusion "world" (xgpu_vulkan_world_ao.c, xgpu_stream.h's
+struct xgpu_world_ao_block): in the same set, the structure's distance
+field (a 3D image, linear, clamped to its edge; a 1x1x1 far-outside
+stand-in where none is whole) and the window's block (a uniform buffer) */
+#define XGPU_VULKAN_BINDING_WORLD_SDF 1
+#define XGPU_VULKAN_BINDING_WORLD_AO 2
+struct xgpu_world_ao_block;
+/* the stand-in and the sampler made (the core's start): 0 if they cannot be */
+int xgpu_vulkan_world_ao_create(void);
+/* slices z_first to z_first + z_count - 1 of a width x height x depth
+field of signed bytes, in the stream's order (width 0: let go of), and the
+window's block from now on (NULL: none, zeros) */
+void xgpu_vulkan_world_ao_field(uint32_t width, uint32_t height, uint32_t depth, uint32_t z_first, uint32_t z_count,
+	const void *voxels);
+void xgpu_vulkan_world_ao_window(const struct xgpu_world_ao_block *block);
+/* (the core's occlusion set) the field's image or the stand-in, its
+sampler, the block's range in the ring for the submission of that serial
+(0: none), and a number that changes whenever any of them does */
+struct xgpu_vulkan_image *xgpu_vulkan_world_ao_field_image(void);
+VkSampler xgpu_vulkan_world_ao_sampler(void);
+int xgpu_vulkan_world_ao_block(uint64_t serial, VkDescriptorBufferInfo *info);
+uint64_t xgpu_vulkan_world_ao_number(void);
 
 /* the enhanced dynamic lights' block (struct xgpu_dynamic_lights_block,
 size bytes) and their grid's cells (32 x 32 x 16, four uints each: xgpu.h),

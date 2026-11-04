@@ -929,6 +929,30 @@ static long long dispatch(long long number, long long a, long long b, long long 
 	case __NR_sched_yield:
 		sched_yield();
 		return 0;
+	/* the calling thread's priority (who 0, as Linux sets a thread's):
+	niced, the background's quality of service */
+	/* the processors the guest may run on (sysconf's count): the first
+	hw.activecpu bits of the mask, its size in bytes returned as Linux does */
+	case __NR_sched_getaffinity:
+	{
+		int processors = 1;
+		size_t length = sizeof(processors);
+		uint32_t size = (uint32_t)b, index;
+		unsigned char *mask = GUEST(unsigned char *, c);
+
+		if (sysctlbyname("hw.activecpu", &processors, &length, NULL, 0) != 0 || processors < 1)
+			processors = 1;
+		if (size < 8 || (uint32_t)processors > size * 8)
+			return -22;
+		memset(mask, 0, size);
+		for (index = 0; index < (uint32_t)processors; index++)
+			mask[index / 8] |= (unsigned char)(1u << (index % 8));
+		return size;
+	}
+	case __NR_setpriority:
+		if (a == PRIO_PROCESS && b == 0 && (int)c > 0)
+			pthread_set_qos_class_self_np((int)c >= 10 ? QOS_CLASS_BACKGROUND : QOS_CLASS_UTILITY, 0);
+		return 0;
 	case __NR_getrandom:
 		arc4random_buf(GUEST(void *, a), (size_t)(uint32_t)b);
 		return (uint32_t)b;
