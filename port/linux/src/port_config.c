@@ -1179,9 +1179,9 @@ static const struct config_setting config_settings[] =
 		"each frame. The levels' own corners keep their baked light, and\n"
 		"self-illuminated surfaces, lights and your weapon keep theirs: \"off\",\n"
 		"\"subtle\" or \"strong\". Not with multisampling on Metal (macOS, iOS).\n"
-		"\"world\" (in progress, docs/world-ao.md): found in the world instead,\n"
-		"from the level's distance field and the objects' shapes; for now it\n"
-		"draws as \"off\"."
+		"\"world\" (docs/world-ao.md): found in the world instead, from the\n"
+		"level's distance field and the objects' shapes, with no pass over the\n"
+		"screen: in VR's eyes and with Metal's multisampling too."
 		GRAPHICS_CHOOSES },
 	{ "display.shield_color", _config_string, "\"default\"", "HALO_SHIELD_COLOR", _environment_value, _platform_all,
 		"Your energy shield's color, as this machine draws it: \"default\" (the\n"
@@ -2254,6 +2254,14 @@ static const struct config_setting config_settings[] =
 		_platform_all,
 		"With display.ambient_occlusion \"world\", the objects' occluding shapes\n"
 		"(spheres, capsules, boxes) drawn as wireframes over them." },
+	{ "debug.world_ao_view", _config_boolean, "false", "HALO_WORLD_AO_VIEW", _environment_value, _platform_all,
+		"With display.ambient_occlusion \"world\", the surfaces it shades drawn as\n"
+		"its occlusion alone, in grey." },
+	{ "debug.world_ao_test", _config_string, "\"\"", "HALO_WORLD_AO_TEST", _environment_value, _platform_all,
+		"With display.ambient_occlusion \"world\", a made-up field and shapes in\n"
+		"place of the level's and the objects' (docs/world-ao.md, \"D. Shading\"):\n"
+		"\"plane nx ny nz d; sphere x y z r; capsule ax ay az bx by bz r; box x y z\n"
+		"ex ey ez\" (\"\": none)." },
 	{ "debug.ambient_occlusion_view", _config_boolean, "false", "HALO_AMBIENT_OCCLUSION_VIEW", _environment_value,
 		_platform_all,
 		"With display.ambient_occlusion, the 3D view drawn as the occlusion\n"

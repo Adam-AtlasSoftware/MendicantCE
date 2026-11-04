@@ -6,7 +6,11 @@ renderer's side of each frame and window. The scene found again
 (world_scene.c, workstream A), the field's upload continued (world_sdf.c,
 B), the window's proxies chosen (world_proxies.c, C) and handed with the
 field's place to the front end (halo_world_ao_*, d3d8_device.c), which the
-shaders read in the ambient slot (D).
+shaders read in the ambient slot (D: the arithmetic is world_ao_shading.c,
+the shaders' world_ao_* in xgpu_spirv.c and xgpu_msl.c). Each object drawn
+is named to the front end with its owner slot among the window's proxies'
+owners (its own do not shade it) and its reference (the field's occlusion
+where its ambient light was sampled, which that light already holds).
 
 Nothing here runs unless the setting is "world": every other value (and
 the Classic preset's "off") draws exactly as before.
@@ -17,6 +21,8 @@ the Classic preset's "off") draws exactly as before.
 #include "world_scene.h"
 #include "world_sdf.h"
 
+#include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 const char *config_string(const char *name);
@@ -28,8 +34,14 @@ static struct
 	unsigned long read_at;
 	int mode;
 	/* a window's occlusion handed to the front end (world_ao_window_end
-	takes it away) */
+	takes it away): its proxies and their objects (datum handles), the
+	field's volume (for the objects' references; NULL none) and its fade */
 	int window;
+	struct world_proxy proxies[WORLD_PROXY_MAXIMUM_PER_WINDOW];
+	long owners[WORLD_PROXY_MAXIMUM_PER_WINDOW];
+	long count;
+	struct world_sdf_volume const *volume;
+	float fade;
 } world_ao;
 
 int world_ao_mode(void)
@@ -78,16 +90,204 @@ void world_ao_frame_begin(void)
 	world_sdf_frame();
 }
 
+/* ---------- debug.world_ao_test
+
+A made-up window, for the shading's checks without the scene, the field's
+bake or the proxies (docs/world-ao.md, "D. Shading"): "plane nx ny nz d" (a
+field of the plane n.x = d, solid behind it, about the camera where it was
+first asked for), then "; sphere x y z r", "; capsule ax ay az bx by bz r"
+or "; box x y z ex ey ez" (along the world's axes), at most
+WORLD_AO_TEST_SHAPES, each its own owner's (none of the objects': they
+shade every one). */
+
+enum
+{
+	WORLD_AO_TEST_SHAPES = 8,
+	WORLD_AO_TEST_WIDTH = 96,
+	WORLD_AO_TEST_HEIGHT = 96,
+	WORLD_AO_TEST_DEPTH = 48,
+	WORLD_AO_TEST_OWNER = 200,
+};
+
+static struct
+{
+	char text[256];
+	int parsed, uploaded;
+	float plane[4];
+	struct world_proxy proxies[WORLD_AO_TEST_SHAPES];
+	long count;
+	struct world_sdf_volume volume;
+	signed char voxels[WORLD_AO_TEST_WIDTH * WORLD_AO_TEST_HEIGHT * WORLD_AO_TEST_DEPTH];
+} world_ao_test;
+
+static void world_ao_test_parse(const char *setting)
+{
+	const char *at;
+
+	memset(&world_ao_test, 0, sizeof(world_ao_test));
+	snprintf(world_ao_test.text, sizeof(world_ao_test.text), "%s", setting);
+	world_ao_test.parsed = 1;
+	for (at = setting; at && *at; at = strchr(at, ';') ? strchr(at, ';') + 1 : NULL)
+	{
+		struct world_proxy *proxy = &world_ao_test.proxies[world_ao_test.count];
+		float v[7];
+
+		while (*at == ' ')
+			at++;
+		if (sscanf(at, "plane %f %f %f %f", &v[0], &v[1], &v[2], &v[3]) == 4)
+		{
+			memcpy(world_ao_test.plane, v, sizeof(world_ao_test.plane));
+			continue;
+		}
+		if (world_ao_test.count == WORLD_AO_TEST_SHAPES)
+			break;
+		memset(proxy, 0, sizeof(*proxy));
+		if (sscanf(at, "sphere %f %f %f %f", &v[0], &v[1], &v[2], &v[3]) == 4)
+		{
+			memcpy(proxy->v[0], v, 3 * sizeof(float));
+			proxy->v[0][3] = _world_proxy_sphere;
+			proxy->v[2][0] = v[3];
+		}
+		else if (sscanf(at, "capsule %f %f %f %f %f %f %f", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6]) == 7)
+		{
+			memcpy(proxy->v[0], v, 3 * sizeof(float));
+			memcpy(proxy->v[1], v + 3, 3 * sizeof(float));
+			proxy->v[0][3] = _world_proxy_capsule;
+			proxy->v[2][0] = v[6];
+		}
+		else if (sscanf(at, "box %f %f %f %f %f %f", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5]) == 6)
+		{
+			memcpy(proxy->v[0], v, 3 * sizeof(float));
+			proxy->v[0][3] = _world_proxy_box;
+			proxy->v[1][0] = v[3];
+			proxy->v[2][1] = v[4];
+			proxy->v[2][3] = v[5];
+		}
+		else
+		{
+			continue;
+		}
+		proxy->v[1][3] = (float)(WORLD_AO_TEST_OWNER + world_ao_test.count);
+		world_ao_test.count++;
+	}
+}
+
+/* the plane's field about the camera, as a bake encodes one */
+static void world_ao_test_field(float const camera_position[3])
+{
+	struct world_sdf_header *header = &world_ao_test.volume.header;
+	float const *plane = world_ao_test.plane;
+	float length = sqrtf(plane[0] * plane[0] + plane[1] * plane[1] + plane[2] * plane[2]);
+	unsigned long x, y, z;
+
+	header->width = WORLD_AO_TEST_WIDTH;
+	header->height = WORLD_AO_TEST_HEIGHT;
+	header->depth = WORLD_AO_TEST_DEPTH;
+	header->voxel = (float)WORLD_SDF_FINEST_VOXEL_MILLI / 1000.0f;
+	header->range = WORLD_SDF_RANGE_VOXELS * header->voxel;
+	header->origin[0] = camera_position[0] - 0.5f * WORLD_AO_TEST_WIDTH * header->voxel;
+	header->origin[1] = camera_position[1] - 0.5f * WORLD_AO_TEST_HEIGHT * header->voxel;
+	header->origin[2] = camera_position[2] - 0.5f * WORLD_AO_TEST_DEPTH * header->voxel;
+	world_ao_test.volume.voxels = world_ao_test.voxels;
+	for (z = 0; z < WORLD_AO_TEST_DEPTH; z++)
+	{
+		for (y = 0; y < WORLD_AO_TEST_HEIGHT; y++)
+		{
+			for (x = 0; x < WORLD_AO_TEST_WIDTH; x++)
+			{
+				float point[3], distance;
+
+				point[0] = header->origin[0] + (float)x * header->voxel;
+				point[1] = header->origin[1] + (float)y * header->voxel;
+				point[2] = header->origin[2] + (float)z * header->voxel;
+				distance = length > 0.0f ? (plane[0] * point[0] + plane[1] * point[1] + plane[2] * point[2] -
+					plane[3]) / length : header->range;
+				world_ao_test.voxels[(z * WORLD_AO_TEST_HEIGHT + y) * WORLD_AO_TEST_WIDTH + x] =
+					world_sdf_encode(distance, header->range);
+			}
+		}
+	}
+	halo_world_ao_field(WORLD_AO_TEST_WIDTH, WORLD_AO_TEST_HEIGHT, WORLD_AO_TEST_DEPTH, 0, WORLD_AO_TEST_DEPTH,
+		world_ao_test.voxels);
+	world_ao_test.uploaded = 1;
+}
+
+/* the made-up window's (FALSE: none asked for) */
+static int world_ao_test_window(float const camera_position[3])
+{
+	const char *setting = config_string("debug.world_ao_test");
+
+	if (!setting || !*setting)
+		return 0;
+	if (!world_ao_test.parsed || strcmp(setting, world_ao_test.text))
+		world_ao_test_parse(setting);
+	if (!world_ao_test.uploaded)
+		world_ao_test_field(camera_position);
+	memcpy(world_ao.proxies, world_ao_test.proxies, sizeof(world_ao_test.proxies));
+	memset(world_ao.owners, 0xff, sizeof(world_ao.owners));
+	world_ao.count = world_ao_test.count;
+	world_ao.volume = &world_ao_test.volume;
+	world_ao.fade = 1.0f;
+	return 1;
+}
+
+/* ---------- a window */
+
+/* the block's field: the volume's place (without one, a stand-in's) */
+static void world_ao_field_place(struct world_sdf_header const *header, float field[2][4])
+{
+	static const float none[2][4] = { { 0.0f, 0.0f, 0.0f, 1.0f }, { 1.0f, 1.0f, 1.0f, 1.0f } };
+
+	if (!header)
+	{
+		memcpy(field, none, sizeof(none));
+		return;
+	}
+	field[0][0] = header->origin[0];
+	field[0][1] = header->origin[1];
+	field[0][2] = header->origin[2];
+	field[0][3] = 1.0f / header->voxel;
+	field[1][0] = (float)header->width;
+	field[1][1] = (float)header->height;
+	field[1][2] = (float)header->depth;
+	field[1][3] = header->range;
+}
+
 void world_ao_window_begin(short local_player_index, short rasterizer_target, float const camera_position[3])
 {
+	float field[2][4], parameters[2][4];
+	int mode = world_ao_mode();
+
 	(void)local_player_index;
 	(void)rasterizer_target;
-	(void)camera_position;
-	if (!world_ao_mode())
+	if (!mode)
 		return;
-	/* D (with C's world_proxies_window and B's world_sdf_current): the
-	window's block made and handed on (halo_world_ao_window); the skeleton
-	hands nothing on, so that "world" draws as "off" until the streams land */
+	world_ao.count = 0;
+	world_ao.volume = NULL;
+	world_ao.fade = 0.0f;
+	if (!world_ao_test_window(camera_position))
+	{
+		if (mode & WORLD_AO_PROXIES)
+			world_ao.count = world_proxies_window(camera_position, world_ao.proxies, world_ao.owners,
+				WORLD_PROXY_MAXIMUM_PER_WINDOW);
+		/* (world_sdf_current's header is its volume's first member: the
+		volume itself, for the objects' references) */
+		if (mode & WORLD_AO_FIELD)
+			world_ao.volume = (struct world_sdf_volume const *)world_sdf_current();
+		world_ao.fade = world_ao.volume ? world_sdf_fade() : 0.0f;
+	}
+	if (world_ao.count < 0)
+		world_ao.count = 0;
+	world_ao_field_place(world_ao.volume ? &world_ao.volume->header : NULL, field);
+	memset(parameters, 0, sizeof(parameters));
+	parameters[0][0] = WORLD_AO_STRENGTH_OBJECTS;
+	parameters[0][1] = WORLD_AO_STRENGTH_LEVEL;
+	parameters[0][2] = world_ao.fade;
+	parameters[0][3] = (float)world_ao.count;
+	parameters[1][0] = WORLD_AO_REFERENCE_WEIGHT;
+	halo_world_ao_window((float const (*)[4])field, (float const (*)[4])parameters,
+		(float const (*)[3][4])world_ao.proxies, (int)world_ao.count);
+	world_ao.window = 1;
 }
 
 void world_ao_window_end(void)
@@ -100,8 +300,35 @@ void world_ao_window_end(void)
 
 void world_ao_object_begin(long object_index)
 {
-	(void)object_index;
+	struct world_scene_instance const *instance;
+	int owner = WORLD_AO_OWNER_NONE;
+	float reference = 1.0f;
+	long index;
+
 	if (!world_ao.window)
 		return;
-	/* D: the object's owner slot and reference (halo_world_ao_object) */
+	if (object_index != -1)
+	{
+		/* its slot (its proxies' [1].w, world_proxies_window's: owners[i]
+		is the datum handle of proxies[i]'s object) */
+		for (index = 0; index < world_ao.count; index++)
+		{
+			if (world_ao.owners[index] == object_index)
+			{
+				owner = (int)world_ao.proxies[index].v[1][3];
+				break;
+			}
+		}
+		instance = world_ao.volume && world_ao.fade > 0.0f ? world_scene_instance_find(object_index) : NULL;
+		if (instance)
+			reference = world_ao_reference(world_ao.volume, instance->lighting_point);
+	}
+	halo_world_ao_object(owner, reference);
+}
+
+void world_ao_first_person(int drawing)
+{
+	if (!world_ao.window)
+		return;
+	halo_world_ao_object(drawing ? WORLD_AO_OWNER_UNLIT : WORLD_AO_OWNER_NONE, 1.0f);
 }

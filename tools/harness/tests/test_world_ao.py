@@ -9,7 +9,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, mutated, read, run  # noqa: E402
 
-CASES = ["off", "world"]
+CASES = ["off", "world", "window", "test"]
 GAME = "port/linux/game/world_ao.c"
 CONTROLS = [
     # on whatever the setting says
@@ -17,6 +17,15 @@ CONTROLS = [
     # the frame's work done when it is off
     ("void world_ao_frame_begin(void)\n{\n\tif (!world_ao_mode())\n\t\treturn;",
      "void world_ao_frame_begin(void)\n{", "off"),
+    # an object's slot taken from its shape's place, not its owner's slot
+    ("owner = (int)world_ao.proxies[index].v[1][3];", "owner = (int)index;", "window"),
+    # the reference found without the field faded in
+    ("instance = world_ao.volume && world_ao.fade > 0.0f ?", "instance = 1 ?", "window"),
+    # the first-person weapon lit by it
+    ("halo_world_ao_object(drawing ? WORLD_AO_OWNER_UNLIT : WORLD_AO_OWNER_NONE, 1.0f);",
+     "halo_world_ao_object(WORLD_AO_OWNER_NONE, 1.0f);", "window"),
+    # the made-up field uploaded each window
+    ("\tif (!world_ao_test.uploaded)\n", "\tif (1)\n", "test"),
 ]
 
 
@@ -48,6 +57,12 @@ def test_the_hooks():
     assert render.index("halo_screen_ambient_occlusion_end();") < render.index("world_ao_window_end();") < \
         render.index("rasterizer_lens_flares_submit_occlusion_tests();")
     assert "world_ao_frame_begin();" in render
+    # each object named before its model draws, the first-person weapon unlit, the structure after
+    objects = read("source/render/render_objects.c")
+    assert objects.index("world_ao_object_begin(object_index);") < objects.index("\t\t\t\t\trender_model(\n")
+    assert "world_ao_first_person(TRUE);\n\t\t\tfirst_person_weapon_draw();\n\t\t\tworld_ao_first_person(FALSE);" in \
+        objects
+    assert objects.index("while (first_person_pass);") < objects.index("world_ao_object_begin(NONE);")
     scenario = read("source/scenario/scenario.c")
     for hook in ("world_ao_map_loaded();", "world_ao_map_unloaded();",
                  "world_ao_bsp_switched(global_structure_bsp_index);"):

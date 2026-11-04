@@ -113,6 +113,7 @@ symbols in this file:
 #include "rasterizer/rasterizer_console_vars.h"
 #include "rasterizer/rasterizer_model_types.h"
 #include "panini.h" /* port: port/linux/game/panini.c */
+#include "world_ao.h" /* port: port/linux/game/world_ao.c */
 
 /* ---------- constants */
 
@@ -403,7 +404,11 @@ void render_objects(
 	{
 		if (first_person_pass != rasterizer_debug_options.draw_first_person_weapon_first)
 		{
+			/* port: display.ambient_occlusion "world" leaves the first-person
+			weapon as it is (port/linux/game/world_ao.c) */
+			world_ao_first_person(TRUE);
 			first_person_weapon_draw();
+			world_ao_first_person(FALSE);
 		}
 		else
 		{
@@ -413,6 +418,9 @@ void render_objects(
 		first_person_pass = !first_person_pass;
 	}
 	while (first_person_pass);
+	/* port: display.ambient_occlusion "world": no object drawn now (the
+	structure next: port/linux/game/world_ao.c) */
+	world_ao_object_begin(NONE);
 	/* port: the projectiles deleted in the last tick, drawn through it
 	(port/linux/game/render_interpolation.c) */
 	render_interpolation_ghosts_draw();
@@ -747,6 +755,10 @@ static void render_object_list(
 						}
 					}
 
+					/* port: display.ambient_occlusion "world": the object drawn
+					(its own proxies do not shade it; its reference:
+					port/linux/game/world_ao.c) */
+					world_ao_object_begin(object_index);
 #ifdef HALO_VR
 					/* port: a weapon the VR mode's right hand reaches for, lit
 					up as the holsters' weapons are (port/linux/game/

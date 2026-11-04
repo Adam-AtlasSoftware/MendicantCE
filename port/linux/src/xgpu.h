@@ -255,6 +255,8 @@ draw shows A in grey. */
 #define XGPU_WORLD_AO_REFERENCE_LEAST 0.25f
 #define XGPU_WORLD_AO_REACH_FADE 0.25f
 #define XGPU_WORLD_AO_FLOOR 0.2f
+/* (world_proxies.c's WORLD_PROXIES_PI) */
+#define XGPU_WORLD_AO_PI 3.14159265358979f
 /* the block as the emitters declare it (xgpu_stream.h's struct
 xgpu_world_ao_block, its XGPU_WORLD_AO_PROXIES_MAXIMUM and _PROXY_*: the
 emitters' copies of these headers have not that one; d3d8_device.c checks

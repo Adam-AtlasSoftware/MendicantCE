@@ -63,7 +63,7 @@ enum
 /* GLSL.std.450's instructions */
 enum
 {
-	GLSL_F_ABS = 4, GLSL_F_SIGN = 6, GLSL_FLOOR = 8, GLSL_FRACT = 10, GLSL_POW = 26, GLSL_EXP = 27, GLSL_EXP2 = 29,
+	GLSL_F_ABS = 4, GLSL_F_SIGN = 6, GLSL_ACOS = 17, GLSL_ATAN = 18, GLSL_ATAN2 = 25, GLSL_FLOOR = 8, GLSL_FRACT = 10, GLSL_POW = 26, GLSL_EXP = 27, GLSL_EXP2 = 29,
 	GLSL_LOG2 = 30, GLSL_SQRT = 31, GLSL_INVERSE_SQRT = 32, GLSL_F_MIN = 37, GLSL_F_MAX = 40, GLSL_F_CLAMP = 43,
 	GLSL_S_CLAMP = 45, GLSL_F_MIX = 46, GLSL_SMOOTH_STEP = 49, GLSL_LENGTH = 66, GLSL_CROSS = 68, GLSL_NORMALIZE = 69, GLSL_FIND_I_LSB = 73,
 };
@@ -2659,56 +2659,240 @@ static unsigned int world_sdf_occlusion(struct module *m, unsigned int p, unsign
 	return fsub(m, 1, constant_float(m, 1.0f), saturate(m, 1, fmul(m, 1, constant_float(m, XGPU_WORLD_AO_K), occlusion)));
 }
 
-/* a sphere's occlusion (world_proxy_occlusion's): v0 its centre, v2.x its
-radius; 1 inside */
-static unsigned int world_proxy_sphere(struct module *m, unsigned int p, unsigned int n, unsigned int v0,
-	unsigned int v2)
-{
-	unsigned int d = fsub(m, 3, xyz(m, v0), p), radius = extract(m, v2, 0);
-	unsigned int length_squared = fdot(m, d, d), radius_squared = fmul(m, 1, radius, radius);
-	unsigned int cosine = fmul(m, 1, fdot(m, n, d), ext1(m, GLSL_INVERSE_SQRT, m->t_float,
-		fmax_scalar(m, 1, length_squared, 1.0e-12f)));
-	unsigned int outside = op3(m, OP_SELECT, m->t_float, compare(m, OP_F_ORD_GREATER_THAN, cosine, constant_float(m, 0.0f)),
-		fdiv(m, 1, fmul(m, 1, cosine, radius_squared), length_squared), constant_float(m, 0.0f));
+/* the shapes' occlusion, world_proxies.c's world_proxy_occlusion
+(sphere_occlusion, capsule_occlusion, box_occlusion) operation for
+operation, its branches as selections of values both of whose sides are
+found (the side not taken may be NaN or infinite: never used; the square
+roots of the side taken have their arguments as C's) */
 
-	return op3(m, OP_SELECT, m->t_float, compare(m, OP_F_ORD_LESS_THAN_EQUAL, length_squared, radius_squared),
-		constant_float(m, 1.0f), outside);
+static unsigned int fselect(struct module *m, unsigned int condition, unsigned int a, unsigned int b)
+{
+	return op3(m, OP_SELECT, m->t_float, condition, a, b);
 }
 
-/* C (workstream C, docs/world-ao.md "Proxies' occlusion"): a capsule's
-occlusion (v0: a; v1: b; v2.x: radius), world_proxy_occlusion's capsule
-line for line once it is final. None until then */
+static unsigned int fsqrt(struct module *m, unsigned int x)
+{
+	return ext1(m, GLSL_SQRT, m->t_float, x);
+}
+
+static unsigned int flength(struct module *m, unsigned int v)
+{
+	return ext1(m, GLSL_LENGTH, m->t_float, v);
+}
+
+static unsigned int fcross(struct module *m, unsigned int a, unsigned int b)
+{
+	return ext2(m, GLSL_CROSS, m->t_v3, a, b);
+}
+
+static unsigned int fclamp_scalar(struct module *m, unsigned int x, float low, float high)
+{
+	return fclamp(m, 1, x, low, high);
+}
+
+/* sphere_occlusion: centre c, radius r; 1 inside; with the horizon's
+clipping where the sphere crosses p's tangent plane */
+static unsigned int world_proxy_sphere(struct module *m, unsigned int p, unsigned int n, unsigned int c,
+	unsigned int radius)
+{
+	unsigned int d = fsub(m, 3, c, p), length_squared = fdot(m, d, d), radius_squared = fmul(m, 1, radius, radius);
+	unsigned int one = constant_float(m, 1.0f), length = fsqrt(m, length_squared);
+	unsigned int nl = fdiv(m, 1, fdot(m, n, d), length), h2 = fdiv(m, 1, length_squared, radius_squared);
+	unsigned int k2 = fsub(m, 1, one, fmul(m, 1, fmul(m, 1, h2, nl), nl)), h2_less = fsub(m, 1, h2, one);
+	unsigned int cosine, clipped, plain;
+
+	cosine = fclamp_scalar(m, fmul(m, 1, fneg(m, 1, nl), fsqrt(m, fdiv(m, 1, h2_less,
+		fmax_scalar(m, 1, fsub(m, 1, one, fmul(m, 1, nl, nl)), 1.0e-30f)))), -1.0f, 1.0f);
+	clipped = fadd(m, 1, fdiv(m, 1, fsub(m, 1, fmul(m, 1, nl, ext1(m, GLSL_ACOS, m->t_float, cosine)),
+		fsqrt(m, fmax_scalar(m, 1, fmul(m, 1, k2, h2_less), 0.0f))), h2),
+		ext1(m, GLSL_ATAN, m->t_float, fsqrt(m, fmax_scalar(m, 1, fdiv(m, 1, k2, h2_less), 0.0f))));
+	clipped = fclamp_scalar(m, fdiv(m, 1, clipped, constant_float(m, XGPU_WORLD_AO_PI)), 0.0f, 1.0f);
+	plain = fselect(m, compare(m, OP_F_ORD_GREATER_THAN, nl, constant_float(m, 0.0f)), fdiv(m, 1, nl, h2),
+		constant_float(m, 0.0f));
+	return fselect(m, compare(m, OP_F_ORD_LESS_THAN_EQUAL, length_squared, radius_squared), one,
+		fselect(m, compare(m, OP_F_ORD_GREATER_THAN, k2, constant_float(m, 0.001f)), clipped, plain));
+}
+
+/* capsule_occlusion: segment a to b, radius r: its tube as a line 2r wide
+above p's tangent plane, its caps' spheres weighted, never less than the
+sphere at the segment's closest point */
 static unsigned int world_proxy_capsule(struct module *m, unsigned int p, unsigned int n, unsigned int v0,
 	unsigned int v1, unsigned int v2)
 {
-	(void)p;
-	(void)n;
-	(void)v0;
-	(void)v1;
-	(void)v2;
-	return constant_float(m, 0.0f);
+	unsigned int a = xyz(m, v0), b = xyz(m, v1), radius = extract(m, v2, 0), zero = constant_float(m, 0.0f);
+	unsigned int half = constant_float(m, 0.5f), two = constant_float(m, 2.0f);
+	unsigned int axis = fsub(m, 3, b, a), length = flength(m, axis), u = fscale(m, 3, axis, fdiv(m, 1,
+		constant_float(m, 1.0f), length));
+	unsigned int q = fsub(m, 3, a, p), s0 = fneg(m, 1, fdot(m, q, u)), w = fadd(m, 3, q, fscale(m, 3, u, s0));
+	unsigned int h = flength(m, w), nw = fdot(m, n, w), nu = fdot(m, n, u), t0 = fneg(m, 1, s0);
+	unsigned int t1 = fsub(m, 1, length, s0), horizon = fdiv(m, 1, fneg(m, 1, nw), nu);
+	unsigned int parallel = compare(m, OP_F_ORD_LESS_THAN, ext1(m, GLSL_F_ABS, m->t_float, nu),
+		constant_float(m, 1.0e-6f));
+	unsigned int rising = compare(m, OP_F_ORD_GREATER_THAN, nu, zero);
+	unsigned int from, to, h2, f[2], line, to_a, to_b, to_a_length, to_b_length, weight_a, weight_b;
+	unsigned int occlusion, closest;
+	int end;
+
+	/* (above the tangent plane only) */
+	from = fselect(m, parallel, t0, fselect(m, rising, ext2(m, GLSL_F_MAX, m->t_float, t0, horizon), t0));
+	to = fselect(m, parallel, fselect(m, compare(m, OP_F_ORD_LESS_THAN_EQUAL, nw, zero), t0, t1),
+		fselect(m, rising, t1, ext2(m, GLSL_F_MIN, m->t_float, t1, horizon)));
+	h2 = fmul(m, 1, h, h);
+	for (end = 0; end < 2; end++)
+	{
+		unsigned int t = end ? to : from, sum = fadd(m, 1, h2, fmul(m, 1, t, t));
+
+		f[end] = fsub(m, 1, fmul(m, 1, nw, fadd(m, 1, fdiv(m, 1, t, fmul(m, 1, fmul(m, 1, two, h2), sum)),
+			fdiv(m, 1, ext1(m, GLSL_ATAN, m->t_float, fdiv(m, 1, t, h)), fmul(m, 1, fmul(m, 1, two, h2), h)))),
+			fdiv(m, 1, nu, fmul(m, 1, two, sum)));
+	}
+	line = fselect(m, op2(m, OP_LOGICAL_AND, m->t_bool, compare(m, OP_F_ORD_GREATER_THAN, to, from),
+		compare(m, OP_F_ORD_GREATER_THAN, h, constant_float(m, 1.0e-4f))),
+		fmul(m, 1, fdiv(m, 1, fmul(m, 1, fmul(m, 1, two, radius), h), constant_float(m, XGPU_WORLD_AO_PI)),
+		fsub(m, 1, f[1], f[0])), zero);
+	/* the caps */
+	to_a = fsub(m, 3, p, a);
+	to_b = fsub(m, 3, p, b);
+	to_a_length = flength(m, to_a);
+	to_b_length = flength(m, to_b);
+	weight_a = fselect(m, compare(m, OP_F_ORD_GREATER_THAN, to_a_length, zero), fmul(m, 1, half, fsub(m, 1,
+		constant_float(m, 1.0f), fdiv(m, 1, fdot(m, u, to_a), to_a_length))), half);
+	weight_b = fselect(m, compare(m, OP_F_ORD_GREATER_THAN, to_b_length, zero), fmul(m, 1, half, fadd(m, 1,
+		constant_float(m, 1.0f), fdiv(m, 1, fdot(m, u, to_b), to_b_length))), half);
+	occlusion = fadd(m, 1, fadd(m, 1, line, fmul(m, 1, weight_a, world_proxy_sphere(m, p, n, a, radius))),
+		fmul(m, 1, weight_b, world_proxy_sphere(m, p, n, b, radius)));
+	/* the sphere at the closest point */
+	closest = world_proxy_sphere(m, p, n, fadd(m, 3, a, fscale(m, 3, u, ext3(m, GLSL_F_CLAMP, m->t_float, s0, zero,
+		length))), radius);
+	occlusion = fclamp_scalar(m, fselect(m, compare(m, OP_F_ORD_GREATER_THAN, occlusion, closest), occlusion, closest),
+		0.0f, 1.0f);
+	return fselect(m, compare(m, OP_F_ORD_LESS_THAN, length, constant_float(m, 1.0e-4f)),
+		world_proxy_sphere(m, p, n, a, radius), occlusion);
 }
 
-/* C: a box's occlusion (v0: its centre; v1: half axis x; v2: half axis y,
-and its half extent along z in w), world_proxy_occlusion's box line for
-line once it is final. None until then */
+/* a polygon's edge's part of its form factor (box_occlusion's), the
+corners a and b from p, the normal in box space: 0 where either is at p
+or they are in line */
+static unsigned int world_proxy_edge(struct module *m, unsigned int normal, unsigned int a, unsigned int b)
+{
+	unsigned int zero = constant_float(m, 0.0f), a_length = flength(m, a), b_length = flength(m, b);
+	unsigned int edge_normal = fcross(m, fscale(m, 3, a, fdiv(m, 1, constant_float(m, 1.0f), a_length)),
+		fscale(m, 3, b, fdiv(m, 1, constant_float(m, 1.0f), b_length)));
+	unsigned int sine = flength(m, edge_normal), cosine;
+	unsigned int valid = op2(m, OP_LOGICAL_AND, m->t_bool, op2(m, OP_LOGICAL_AND, m->t_bool,
+		compare(m, OP_F_ORD_GREATER_THAN, a_length, zero), compare(m, OP_F_ORD_GREATER_THAN, b_length, zero)),
+		compare(m, OP_F_ORD_GREATER_THAN, sine, constant_float(m, 1.0e-7f)));
+
+	cosine = fdot(m, fscale(m, 3, a, fdiv(m, 1, constant_float(m, 1.0f), a_length)),
+		fscale(m, 3, b, fdiv(m, 1, constant_float(m, 1.0f), b_length)));
+	return fselect(m, valid, fdiv(m, 1, fmul(m, 1, ext2(m, GLSL_ATAN2, m->t_float, sine, cosine),
+		fdot(m, normal, edge_normal)), sine), zero);
+}
+
+/* box_occlusion: centre, half axes x and y (v1.xyz, v2.xyz), half extent
+along z = x cross y (v2.w): 1 inside; else the faces p is outside of, each
+clipped by p's tangent plane, and their form factors. The clipping is
+Sutherland and Hodgman's taken edge by edge: an edge with both corners
+above the plane is itself, one leaving it ends where it crosses, one
+entering begins there, and the crossing out joins the crossing in: the
+same edges as the clipped polygon's, so the same sum */
 static unsigned int world_proxy_box(struct module *m, unsigned int p, unsigned int n, unsigned int v0,
 	unsigned int v1, unsigned int v2)
 {
-	(void)p;
-	(void)n;
-	(void)v0;
-	(void)v1;
-	(void)v2;
-	return constant_float(m, 0.0f);
+	unsigned int zero = constant_float(m, 0.0f), extents[3], axes[3], offset, local[3], local_normal[3], normal;
+	unsigned int occlusion = zero, inside, empty;
+	int axis, side, corner;
+
+	extents[0] = flength(m, xyz(m, v1));
+	extents[1] = flength(m, xyz(m, v2));
+	extents[2] = extract(m, v2, 3);
+	axes[0] = fscale(m, 3, xyz(m, v1), fdiv(m, 1, constant_float(m, 1.0f), extents[0]));
+	axes[1] = fscale(m, 3, xyz(m, v2), fdiv(m, 1, constant_float(m, 1.0f), extents[1]));
+	axes[2] = fcross(m, axes[0], axes[1]);
+	offset = fsub(m, 3, p, xyz(m, v0));
+	for (axis = 0; axis < 3; axis++)
+	{
+		local[axis] = fdot(m, offset, axes[axis]);
+		local_normal[axis] = fdot(m, n, axes[axis]);
+	}
+	normal = construct(m, 3, local_normal);
+	inside = constant_bool(m, TRUE);
+	empty = constant_bool(m, FALSE);
+	for (axis = 0; axis < 3; axis++)
+	{
+		inside = op2(m, OP_LOGICAL_AND, m->t_bool, inside, compare(m, OP_F_ORD_LESS_THAN_EQUAL,
+			ext1(m, GLSL_F_ABS, m->t_float, local[axis]), extents[axis]));
+		empty = op2(m, OP_LOGICAL_OR, m->t_bool, empty, compare(m, OP_F_ORD_LESS_THAN_EQUAL, extents[axis], zero));
+	}
+	for (axis = 0; axis < 3; axis++)
+	{
+		for (side = -1; side <= 1; side += 2)
+		{
+			int u = (axis + 1) % 3, v = (axis + 2) % 3;
+			unsigned int corners[4], heights[4], face = zero, exit_point = 0, entry_point = 0, crossed = 0;
+			unsigned int facing = compare(m, OP_F_ORD_GREATER_THAN, fmul(m, 1, constant_float(m, (float)side),
+				local[axis]), extents[axis]);
+
+			for (corner = 0; corner < 4; corner++)
+			{
+				float su = (corner == 1 || corner == 2) ? 1.0f : -1.0f, sv = corner >= 2 ? 1.0f : -1.0f;
+				unsigned int components[3];
+
+				components[axis] = fsub(m, 1, fmul(m, 1, constant_float(m, (float)side), extents[axis]), local[axis]);
+				components[u] = fsub(m, 1, fmul(m, 1, constant_float(m, su), extents[u]), local[u]);
+				components[v] = fsub(m, 1, fmul(m, 1, constant_float(m, sv), extents[v]), local[v]);
+				corners[corner] = construct(m, 3, components);
+				heights[corner] = fdot(m, normal, corners[corner]);
+			}
+			for (corner = 0; corner < 4; corner++)
+			{
+				int next = (corner + 1) % 4;
+				unsigned int above = compare(m, OP_F_ORD_GREATER_THAN_EQUAL, heights[corner], zero);
+				unsigned int next_above = compare(m, OP_F_ORD_GREATER_THAN_EQUAL, heights[next], zero);
+				unsigned int t = fdiv(m, 1, heights[corner], fsub(m, 1, heights[corner], heights[next]));
+				unsigned int crossing = fadd(m, 3, corners[corner], fscale(m, 3, fsub(m, 3, corners[next], corners[corner]),
+					t));
+				unsigned int leaves = op2(m, OP_LOGICAL_AND, m->t_bool, above, op1(m, OP_LOGICAL_NOT, m->t_bool,
+					next_above));
+				unsigned int enters = op2(m, OP_LOGICAL_AND, m->t_bool, op1(m, OP_LOGICAL_NOT, m->t_bool, above),
+					next_above);
+				unsigned int edge = world_proxy_edge(m, normal, select_n(m, 3, above, corners[corner], crossing),
+					select_n(m, 3, next_above, corners[next], crossing));
+
+				face = fadd(m, 1, face, fselect(m, op2(m, OP_LOGICAL_OR, m->t_bool, above, next_above), edge, zero));
+				exit_point = exit_point ? select_n(m, 3, leaves, crossing, exit_point) : select_n(m, 3, leaves, crossing,
+					constant_splat(m, 3, 0.0f));
+				entry_point = entry_point ? select_n(m, 3, enters, crossing, entry_point) : select_n(m, 3, enters,
+					crossing, constant_splat(m, 3, 0.0f));
+				crossed = crossed ? op2(m, OP_LOGICAL_OR, m->t_bool, crossed, leaves) : leaves;
+			}
+			face = fadd(m, 1, face, fselect(m, crossed, world_proxy_edge(m, normal, exit_point, entry_point), zero));
+			occlusion = fadd(m, 1, occlusion, fselect(m, facing, fdiv(m, 1, ext1(m, GLSL_F_ABS, m->t_float, face),
+				constant_float(m, 2.0f * XGPU_WORLD_AO_PI)), zero));
+		}
+	}
+	return fselect(m, empty, zero, fselect(m, inside, constant_float(m, 1.0f), fclamp_scalar(m, occlusion, 0.0f,
+		1.0f)));
 }
 
 /* a shape's reach from its centre (world_proxy_reach's): past it, its
-occlusion is under 1/255. 16 radii (the sphere's; C: the capsule's and the
-box's once they are final) */
-static unsigned int world_proxy_reach(struct module *m, unsigned int v2)
+occlusion is under 1/255. A sphere's 16 radii; a capsule's, half its
+length and 16 radii of the sphere of its silhouette's area; a box's, 17
+half diagonals */
+static unsigned int world_proxy_reach(struct module *m, unsigned int kind, unsigned int v0, unsigned int v1,
+	unsigned int v2)
 {
-	return fmul(m, 1, constant_float(m, 16.0f), extract(m, v2, 0));
+	unsigned int radius = extract(m, v2, 0), sixteen = constant_float(m, 16.0f);
+	unsigned int length = flength(m, fsub(m, 3, xyz(m, v1), xyz(m, v0)));
+	unsigned int capsule = fadd(m, 1, fmul(m, 1, constant_float(m, 0.5f), length), fmul(m, 1, sixteen, fsqrt(m,
+		fadd(m, 1, fmul(m, 1, radius, radius), fdiv(m, 1, fmul(m, 1, fmul(m, 1, constant_float(m, 2.0f), radius),
+		length), constant_float(m, XGPU_WORLD_AO_PI))))));
+	unsigned int box = fmul(m, 1, constant_float(m, 17.0f), fsqrt(m, fadd(m, 1, fdot(m, xyz(m, v1), xyz(m, v1)),
+		op2(m, OP_DOT, m->t_float, v2, v2))));
+
+	return fselect(m, compare(m, OP_F_ORD_EQUAL, kind, constant_float(m, (float)XGPU_WORLD_AO_CAPSULE)), capsule,
+		fselect(m, compare(m, OP_F_ORD_EQUAL, kind, constant_float(m, (float)XGPU_WORLD_AO_BOX)), box,
+		fmul(m, 1, sixteen, radius)));
 }
 
 /* if (kind == value) { ... }: the selection begun, its body's block next;
@@ -2765,7 +2949,7 @@ static unsigned int world_proxies_occlusion(struct module *m, struct pixel_state
 	segment's middle, a sphere's or a box's a) */
 	centre = select_n(m, 3, compare(m, OP_F_ORD_EQUAL, kind, constant_float(m, (float)XGPU_WORLD_AO_CAPSULE)),
 		fscale(m, 3, fadd(m, 3, xyz(m, v0), xyz(m, v1)), constant_float(m, 0.5f)), xyz(m, v0));
-	reach = world_proxy_reach(m, v2);
+	reach = world_proxy_reach(m, kind, v0, v1, v2);
 	distance = ext1(m, GLSL_LENGTH, m->t_float, fsub(m, 3, p, centre));
 	test = compare(m, OP_F_ORD_GREATER_THAN_EQUAL, distance, reach);
 	skip = id_new(m);
@@ -2774,7 +2958,7 @@ static unsigned int world_proxies_occlusion(struct module *m, struct pixel_state
 	label_at(m, skip);
 	store(m, occlusion_variable, constant_float(m, 0.0f));
 	world_proxy_kind_begin(m, kind, XGPU_WORLD_AO_SPHERE, &kind_merge);
-	store(m, occlusion_variable, world_proxy_sphere(m, p, n, v0, v2));
+	store(m, occlusion_variable, world_proxy_sphere(m, p, n, xyz(m, v0), extract(m, v2, 0)));
 	branch(m, kind_merge);
 	label_at(m, kind_merge);
 	world_proxy_kind_begin(m, kind, XGPU_WORLD_AO_CAPSULE, &kind_merge);
