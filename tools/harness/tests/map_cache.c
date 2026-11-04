@@ -32,6 +32,8 @@ static struct
 	short open_map_file_index;
 } cache_file_globals;
 static unsigned long long cached_map_files_budget;
+/* (the slots a worker is unpacking into: none here) */
+static boolean cached_map_file_unpacking[NUMBER_OF_CACHED_MAP_FILES];
 
 /* the made-up cache files: their sizes, when their maps were played, and
 the next size set (SetFilePointer, then SetEndOfFile) */

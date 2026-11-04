@@ -357,6 +357,22 @@ of the disk, from the bytes they take now and the least they need; and a
 copy's decompression buffers of its own (NULL: none) */
 unsigned long long map_cache_budget(unsigned long long cache_bytes, unsigned long long least);
 void *map_cache_copy_buffer(long size);
+/* stock maps unpacked into cache slots off the game's thread, on a few
+workers (port/linux/src/map_unpack.c): one map file into one slot file,
+whole as the precache writes it, its source marked last (1 whole, 0 not);
+a slot's unpack queued (the paths Xbox paths), a finished one taken (each
+once), one waited for, and the workers' number */
+int map_unpack_slot(const char *map_path, const char *slot_path, long copy_size, char *name, unsigned long *checksum,
+	unsigned long *file_length, volatile int *stop, volatile float *progress);
+int map_unpack_queue(short slot, const char *map_xbox_path, const char *slot_xbox_path, long copy_size, int precache);
+/* ... the game's own copy (precache): its status (0 going, 1 whole, -1
+failed) and progress, asked to stop, and waited for and taken (1 whole) */
+int map_unpack_status(short slot, float *progress);
+void map_unpack_stop(short slot);
+int map_unpack_take(short slot);
+int map_unpack_take_finished(short *slot, int *succeeded);
+void map_unpack_wait(short slot);
+int map_unpack_worker_count(void);
 /* the maps copied into the cache ahead (port/linux/game/map_cache_prefill.c):
 once a frame (main_loop) */
 void map_cache_prefill_update(void);

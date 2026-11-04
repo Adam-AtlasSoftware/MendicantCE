@@ -192,6 +192,20 @@ void cache_files_cache_usage(
 	unsigned long long *bytes,
 	unsigned long long *budget,
 	long *maps);
+/* port: a stock map unpacked into a slot by a worker ahead
+(port/linux/src/map_unpack.c): begun (FALSE if not), the slots the workers
+are done with taken back, whether a map is being unpacked, how many are,
+and one waited for */
+boolean cache_files_unpack_begin(
+	char const *map_name);
+void cache_files_unpack_update(
+	void);
+boolean cache_files_map_unpacking(
+	char const *map_name);
+long cache_files_unpacking_count(
+	void);
+void cache_files_unpack_wait(
+	char const *map_name);
 
 void cache_file_promote_read(
 	short request_index);

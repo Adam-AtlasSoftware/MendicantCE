@@ -130,8 +130,9 @@ failed: whether its copy was begun */
 static boolean prefill_try(
 	long index)
 {
+	/* (nor one a worker is unpacking: cache_files_unpack_begin) */
 	if (index == NONE || index >= NUMBER_OF_PREFILL_MAPS || map_cache_prefill.failed[index] ||
-		cache_files_map_prefill_size(prefill_maps[index]) <= 0)
+		cache_files_map_unpacking(prefill_maps[index]) || cache_files_map_prefill_size(prefill_maps[index]) <= 0)
 	{
 		return FALSE;
 	}
@@ -178,6 +179,8 @@ void map_cache_prefill_update(
 {
 	char const *loaded = cache_file_loaded_map_name();
 
+	/* (the slots the unpacking workers are done with taken back: port/linux/src/map_unpack.c) */
+	cache_files_unpack_update();
 	/* (none in a copy of the game running beside the one that keeps the
 	cache: cache_slot_folder) */
 	if (!cache_slot_folder_keeps_cache())
