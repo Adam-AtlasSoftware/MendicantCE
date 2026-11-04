@@ -131,6 +131,7 @@ their handlers open opens.
 #include "basic_training.h"
 #include "bungie_net/network/transport.h"
 
+#include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 #include <xtl.h>
@@ -148,6 +149,10 @@ long config_integer(char const *name);
 int config_default(char const *name, char *text, unsigned int size);
 int config_graphics_value(char const *graphics, char const *name, char *text, unsigned int size);
 char const *config_graphics_setting(int entry);
+/* each weapon's own first-person offsets (port_config.h) */
+#define CONFIG_WEAPON_VALUES 6
+int config_viewmodel_weapon(char const *path, double values[CONFIG_WEAPON_VALUES]);
+int config_viewmodel_weapon_write(char const *path, double const values[CONFIG_WEAPON_VALUES]);
 long pc_menu_widget_string_list(long definition_index);
 boolean ui_widget_port_switch(struct widget_instance *widget, char const *name, boolean *widget_deleted);
 char const *config_string(char const *name);
@@ -388,12 +393,71 @@ static boolean profile_setting_boolean(short field)
 	return field != 0 && field != 4 && field != 5;
 }
 
+/* ---------- First Person's THIS WEAPON rows (Weapon Position's): the
+offsets of the weapon the player who opened Settings holds, by its tag's
+path (config.toml's [display.viewmodel_weapon."<path>"], view_fov.c), as
+settings named "weapon.x", "weapon.y", "weapon.z", "weapon.pitch",
+"weapon.yaw" and "weapon.roll"; shown in a game, with a weapon held
+(viewmodel_weapon_rows_show) */
+
+#define SETTINGS_WEAPON_PREFIX "weapon."
+
+static char const *const settings_weapon_keys[CONFIG_WEAPON_VALUES] = { "x", "y", "z", "pitch", "yaw", "roll" };
+static char const *const settings_weapon_rows[CONFIG_WEAPON_VALUES] =
+{
+	"op_viewmodel_weapon_x", "op_viewmodel_weapon_y", "op_viewmodel_weapon_z", "op_viewmodel_weapon_pitch",
+	"op_viewmodel_weapon_yaw", "op_viewmodel_weapon_roll"
+};
+/* the weapon the rows are for (the page's last frame's); "" for none */
+static char settings_weapon[256];
+
+static short settings_weapon_value(char const *name)
+{
+	short value;
+
+	if (strncmp(name, SETTINGS_WEAPON_PREFIX, sizeof(SETTINGS_WEAPON_PREFIX) - 1))
+		return NONE;
+	for (value = 0; value < CONFIG_WEAPON_VALUES; value++)
+	{
+		if (!strcmp(name + sizeof(SETTINGS_WEAPON_PREFIX) - 1, settings_weapon_keys[value]))
+			return value;
+	}
+	return NONE;
+}
+
+static boolean settings_weapon_text(short value, char *text, unsigned int size, boolean default_value)
+{
+	double values[CONFIG_WEAPON_VALUES];
+
+	if (!settings_weapon[0])
+		return FALSE;
+	if (default_value)
+		values[value] = 0.0;
+	else
+		config_viewmodel_weapon(settings_weapon, values);
+	snprintf(text, size, "%g", values[value]);
+	return TRUE;
+}
+
+static boolean settings_weapon_write(short value, char const *text)
+{
+	double values[CONFIG_WEAPON_VALUES];
+
+	if (!settings_weapon[0])
+		return FALSE;
+	config_viewmodel_weapon(settings_weapon, values);
+	values[value] = atof(text);
+	return config_viewmodel_weapon_write(settings_weapon, values) != 0;
+}
+
 /* a setting's value as text, or (default_value) its default: config.toml's,
 or the profile's */
 static boolean setting_text(char const *name, char *text, unsigned int size, boolean default_value)
 {
 	short index;
 
+	if (settings_weapon_value(name) != NONE)
+		return settings_weapon_text(settings_weapon_value(name), text, size, default_value);
 	if (strncmp(name, "profile.", 8))
 	{
 		if (!(default_value ? config_default(name, text, size) : config_text(name, text, size)))
@@ -450,6 +514,8 @@ static boolean setting_write(char const *name, char const *value)
 {
 	short index;
 
+	if (settings_weapon_value(name) != NONE)
+		return settings_weapon_write(settings_weapon_value(name), value);
 	if (strncmp(name, "profile.", 8))
 		return config_write(name, value);
 	for (index = 0; index < NUMBEROF(profile_settings); index++)
@@ -1953,6 +2019,50 @@ playback), the row is locked. It shows the rate the game takes (ORIGINAL
 list and the pointer pass over it, and OK leaves the setting as it was
 (setting_changed_save passes over a disabled spinner). Unlocked, it shows
 the setting's value again */
+/* Weapon Position's THIS WEAPON rows and RESET THIS WEAPON, for the weapon
+the player who opened Settings holds: shown in a game, with one held, its
+name in RESET's value (its tag's last name: "ASSAULT RIFLE"); none on the
+main menu, where the panel says how to set them */
+boolean viewmodel_held_weapon(short local_player_index, char *path, unsigned int size);
+
+static void viewmodel_weapon_rows_show(struct widget_instance *list)
+{
+	struct widget_instance *reset = named(list, "op_viewmodel_weapon_reset", 0);
+	struct widget_instance *value;
+	short local_player_index, row;
+	char path[sizeof(settings_weapon)];
+	boolean held;
+
+	if (!reset)
+		return;
+	local_player_index = player_ui_get_single_player_local_player_from_controller(controller_of(screen_of(list)));
+	if (local_player_index == NONE)
+		local_player_index = 0;
+	held = !main_menu_is_active() && viewmodel_held_weapon(local_player_index, path, sizeof(path));
+	snprintf(settings_weapon, sizeof(settings_weapon), "%s", held ? path : "");
+	for (row = 0; row < CONFIG_WEAPON_VALUES; row++)
+	{
+		struct widget_instance *widget = named(list, settings_weapon_rows[row], 0);
+
+		if (widget)
+			widget->visible = held;
+	}
+	reset->visible = held;
+	value = named(list, "viewmodel_weapon_reset_value", 0);
+	if (value && held)
+	{
+		char const *name = strrchr(settings_weapon, '\\');
+		char shown[ROW_TEXT_LENGTH];
+		short length;
+
+		name = name ? name + 1 : settings_weapon;
+		for (length = 0; name[length] && length < (short)sizeof(shown) - 1; length++)
+			shown[length] = name[length] == '_' ? ' ' : (char)toupper((unsigned char)name[length]);
+		shown[length] = 0;
+		discord_text_set(value, shown);
+	}
+}
+
 static void sim_rate_row_show(struct widget_instance *list)
 {
 	struct widget_instance *row = named(list, "op_sim_rate", 0);
@@ -2181,6 +2291,8 @@ static boolean settings_profile_new(struct widget_instance *widget, struct event
 	return FALSE;
 }
 
+static void settings_weapon_reset(struct widget_instance *screen);
+
 /* "port settings <name>": FALSE if it is not one of these */
 static boolean settings_function(char const *name, struct widget_instance *widget, struct event_record *event,
 	boolean *widget_deleted, boolean *result)
@@ -2245,6 +2357,11 @@ static boolean settings_function(char const *name, struct widget_instance *widge
 	else if (!strcmp(name, "new profile"))
 	{
 		*result = settings_profile_new(widget, event, widget_deleted);
+	}
+	else if (!strcmp(name, "weapon reset"))
+	{
+		settings_weapon_reset(screen);
+		ui_play_audio_feedback_sound(SOUND_CURSOR);
 	}
 	else if (!strcmp(name, "profiles"))
 	{
@@ -3152,6 +3269,7 @@ static void settings_page_update(struct widget_instance *list)
 	controls_page_update(list);
 	graphics_preset_show(list);
 	sim_rate_row_show(list);
+	viewmodel_weapon_rows_show(list);
 	settings_each(screen, setting_stash);
 	settings_sliders_show(list);
 	browser_search_show(list);
@@ -4964,6 +5082,17 @@ static struct
 	{ "op_viewmodel_offset_x", "display.viewmodel_offset_x", -20.0, 20.0, 0.5, -20.0, 20.0, FALSE, NULL, 0 },
 	{ "op_viewmodel_offset_y", "display.viewmodel_offset_y", -20.0, 20.0, 0.5, -20.0, 20.0, FALSE, NULL, 0 },
 	{ "op_viewmodel_offset_z", "display.viewmodel_offset_z", -20.0, 20.0, 0.5, -20.0, 20.0, FALSE, NULL, 0 },
+	/* (tools/port_settings.py's VIEWMODEL_ROTATIONS) */
+	{ "op_viewmodel_pitch", "display.viewmodel_pitch", -15.0, 15.0, 0.5, -15.0, 15.0, FALSE, NULL, 0 },
+	{ "op_viewmodel_yaw", "display.viewmodel_yaw", -15.0, 15.0, 0.5, -15.0, 15.0, FALSE, NULL, 0 },
+	{ "op_viewmodel_roll", "display.viewmodel_roll", -15.0, 15.0, 0.5, -15.0, 15.0, FALSE, NULL, 0 },
+	/* (the weapon held's own: settings_weapon_text) */
+	{ "op_viewmodel_weapon_x", "weapon.x", -20.0, 20.0, 0.5, -20.0, 20.0, FALSE, NULL, 0 },
+	{ "op_viewmodel_weapon_y", "weapon.y", -20.0, 20.0, 0.5, -20.0, 20.0, FALSE, NULL, 0 },
+	{ "op_viewmodel_weapon_z", "weapon.z", -20.0, 20.0, 0.5, -20.0, 20.0, FALSE, NULL, 0 },
+	{ "op_viewmodel_weapon_pitch", "weapon.pitch", -15.0, 15.0, 0.5, -15.0, 15.0, FALSE, NULL, 0 },
+	{ "op_viewmodel_weapon_yaw", "weapon.yaw", -15.0, 15.0, 0.5, -15.0, 15.0, FALSE, NULL, 0 },
+	{ "op_viewmodel_weapon_roll", "weapon.roll", -15.0, 15.0, 0.5, -15.0, 15.0, FALSE, NULL, 0 },
 	{ "op_lowered_reticle_amount", "display.lowered_reticle_amount", 1.0, 25.0, 1.0, 0.0, 30.0, TRUE, NULL, 0 },
 	{ "op_vehicle_fov", "display.vehicle_fov", 80.0, 160.0, 5.0, 20.0, 160.0, FALSE,
 		SLIDER_STOPS(settings_vehicle_fov_stops) },
@@ -5405,6 +5534,22 @@ static void settings_sliders_default(struct widget_instance *screen)
 		{
 			settings_slider_set(slider, value);
 		}
+	}
+}
+
+/* "port settings weapon reset" (RESET THIS WEAPON): the weapon held's
+own offsets at 0, kept as changes (OK writes them: its table taken out of
+config.toml; Cancel forgets them) */
+static void settings_weapon_reset(struct widget_instance *screen)
+{
+	short slider;
+
+	if (text_field_editing(NULL))
+		text_field_end(FALSE);
+	for (slider = 0; slider < (short)NUMBEROF(settings_sliders); slider++)
+	{
+		if (settings_weapon_value(settings_sliders[slider].setting) != NONE && named(screen, settings_sliders[slider].row, 0))
+			settings_slider_set(slider, 0.0);
 	}
 }
 

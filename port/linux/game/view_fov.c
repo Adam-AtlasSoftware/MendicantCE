@@ -614,7 +614,7 @@ static real viewmodel_rotation_axis(char const *name)
 
 static boolean viewmodel_offset_any(struct viewmodel_offset const *offset)
 {
-	return offset->move.i != 0.0f || offset->move.j != 0.0f || offset->move.k != 0.0f ||
+	return offset->right != 0.0f || offset->up != 0.0f || offset->forward != 0.0f ||
 		offset->pitch != 0.0f || offset->yaw != 0.0f || offset->roll != 0.0f;
 }
 
@@ -630,9 +630,9 @@ static void viewmodel_offset_global(struct viewmodel_offset *offset)
 
 	if (!initialized || read_at != changes)
 	{
-		global.move.i = viewmodel_offset_axis("display.viewmodel_offset_x");
-		global.move.j = viewmodel_offset_axis("display.viewmodel_offset_y");
-		global.move.k = viewmodel_offset_axis("display.viewmodel_offset_z");
+		global.right = viewmodel_offset_axis("display.viewmodel_offset_x");
+		global.up = viewmodel_offset_axis("display.viewmodel_offset_y");
+		global.forward = viewmodel_offset_axis("display.viewmodel_offset_z");
 		global.pitch = viewmodel_rotation_axis("display.viewmodel_pitch");
 		global.yaw = viewmodel_rotation_axis("display.viewmodel_yaw");
 		global.roll = viewmodel_rotation_axis("display.viewmodel_roll");
@@ -664,9 +664,9 @@ boolean viewmodel_offset(long weapon_index, struct viewmodel_offset *offset)
 		cached_at = changes;
 	}
 	/* (the weapon's own added to the global, the sum held at the range) */
-	total[0] = offset->move.i * CENTIMETERS_PER_WORLD_UNIT + own[0];
-	total[1] = offset->move.j * CENTIMETERS_PER_WORLD_UNIT + own[1];
-	total[2] = offset->move.k * CENTIMETERS_PER_WORLD_UNIT + own[2];
+	total[0] = offset->right * CENTIMETERS_PER_WORLD_UNIT + own[0];
+	total[1] = offset->up * CENTIMETERS_PER_WORLD_UNIT + own[1];
+	total[2] = offset->forward * CENTIMETERS_PER_WORLD_UNIT + own[2];
 	total[3] = offset->pitch * (180.0 / _pi) + own[3];
 	total[4] = offset->yaw * (180.0 / _pi) + own[4];
 	total[5] = offset->roll * (180.0 / _pi) + own[5];
@@ -675,9 +675,9 @@ boolean viewmodel_offset(long weapon_index, struct viewmodel_offset *offset)
 		total[value] = viewmodel_offset_held(total[value],
 			value < 3 ? VIEWMODEL_OFFSET_MAXIMUM_CENTIMETERS : VIEWMODEL_ROTATION_MAXIMUM_DEGREES);
 	}
-	offset->move.i = (real)(total[0] / CENTIMETERS_PER_WORLD_UNIT);
-	offset->move.j = (real)(total[1] / CENTIMETERS_PER_WORLD_UNIT);
-	offset->move.k = (real)(total[2] / CENTIMETERS_PER_WORLD_UNIT);
+	offset->right = (real)(total[0] / CENTIMETERS_PER_WORLD_UNIT);
+	offset->up = (real)(total[1] / CENTIMETERS_PER_WORLD_UNIT);
+	offset->forward = (real)(total[2] / CENTIMETERS_PER_WORLD_UNIT);
 	offset->pitch = (real)(total[3] * (_pi / 180.0));
 	offset->yaw = (real)(total[4] * (_pi / 180.0));
 	offset->roll = (real)(total[5] * (_pi / 180.0));
@@ -796,12 +796,12 @@ void viewmodel_offset_apply(short local_player_index, long weapon_index, struct 
 	{
 		real scale = viewmodel_offset_screen_scale(drawn, stock);
 
-		offset.move.i *= scale;
-		offset.move.j *= scale;
+		offset.right *= scale;
+		offset.up *= scale;
 	}
-	move.i = right.i * offset.move.i + camera->up.i * offset.move.j + camera->forward.i * offset.move.k;
-	move.j = right.j * offset.move.i + camera->up.j * offset.move.j + camera->forward.j * offset.move.k;
-	move.k = right.k * offset.move.i + camera->up.k * offset.move.j + camera->forward.k * offset.move.k;
+	move.i = right.i * offset.right + camera->up.i * offset.up + camera->forward.i * offset.forward;
+	move.j = right.j * offset.right + camera->up.j * offset.up + camera->forward.j * offset.forward;
+	move.k = right.k * offset.right + camera->up.k * offset.up + camera->forward.k * offset.forward;
 	for (node_index = 0; node_index < node_count; node_index++)
 	{
 		node_matrices[node_index].position.x += move.i;

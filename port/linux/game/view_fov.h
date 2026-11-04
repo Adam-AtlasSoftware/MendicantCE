@@ -48,7 +48,7 @@ _z), and turned, in radians, muzzle up (display.viewmodel_pitch), right
 by its tag's path) added. FALSE when it has none */
 struct viewmodel_offset
 {
-	union real_vector3d move;
+	real right, up, forward;
 	real pitch, yaw, roll;
 };
 boolean viewmodel_offset(long weapon_index, struct viewmodel_offset *offset);
