@@ -488,7 +488,7 @@ FIRST_PERSON = ("video_settings/first_person", "first_person_screen")
 BRIGHTNESS_PAGE = ("video_settings/brightness", "brightness_screen")
 # (Android's: the picture on a tall screen, and portrait's frame)
 SCREEN_LAYOUT = ("video_settings/screen_layout", "screen_layout_screen")
-# (First Person's shields: the arms' flare, its color, the overshield; their
+# (First Person's shields: the arms' flare, its color, the overshield and its color; their
 # own page, so that First Person's view rows fit)
 SHIELDS = ("video_settings/first_person/shields", "shields_screen")
 CONTROLLER = ("gamepad_setup", "gamepad_setup_screen")
@@ -1011,6 +1011,9 @@ PAGES = {
             ("OVERSHIELD", "display.overshield_effect", ON_OFF,
              "An overshield stays lit for as long as it lasts, in its own color, on your body and, with Arm "
              "Shields, your arms. Off draws it as the original did. Online: the host's choice.", None),
+            ("OVERSHIELD COLOR", "display.overshield_layer_color", [("LAYERS", "true"), ("RED", "false")],
+             "The overshield's color as its layers drain, as your shield meter shows them: green while the green "
+             "layer lasts, then red. Red keeps it red throughout.", None),
         ],
     },
     CONTROLLER[0]: {
