@@ -1001,13 +1001,13 @@ void particle_new(
 	return;
 }
 
-/* first_dt: the time of a particle's first update, a frame made it, at least
-the Xbox's frame (game.c). The Xbox drew a frame a tick, so a particle came to
-the screen a frame old: one whose sequence runs out within a frame (a single
-sprite at 30 a second, the plasma grenade's and the Shade's bolts of
-lightning) had died by then and was never seen. The frames drawn between the
-ticks are shorter; without this such a particle lived on for a frame or two of
-them. */
+/* port: first_dt, the time of a particle's first update, at least the Xbox's
+frame (game.c). The Xbox drew a frame a tick at most, so a particle came to the
+screen a frame old: one whose sequence runs out within that frame (a single
+sprite at 30 a second: the bolts of lightning of the plasma grenade, the Shade's
+and the needler's impacts) had died by then and was never seen. The frames
+drawn between the ticks are shorter, and without this such a particle was
+drawn for a frame or two of them. */
 void particles_update(
 	real dt,
 	real first_dt)

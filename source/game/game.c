@@ -1039,8 +1039,8 @@ void game_frame(
 	real dt)
 {
 	real frame_dt;
-	/* the game time of the Xbox's shortest frame: it drew at most 30 frames a
-	second, two vertical blanks each (main.c), at the game's speed */
+	/* port: the game time of the Xbox's shortest frame, for the particles: it
+	drew at most 30 frames a second, two vertical blanks each (main.c) */
 	real xbox_frame_dt = game_time_get_speed() / (real)TICKS_PER_SECOND;
 
 	if (game_globals->players_are_double_speed)
