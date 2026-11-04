@@ -118,6 +118,10 @@ notes): those to render this run, in the order they are rendered, into
 poses; how many. None if nothing is to be rendered, or in runs nobody
 watches, or with display.menu_pictures off */
 long menu_pictures_wanted(long *poses, long maximum);
+/* after it, a pose of each stock map the player has (a map made for it, not
+modded), whose preparation the pass records where it has none: none in runs
+nobody watches, as with the pictures */
+long menu_pictures_maps(long *poses, long maximum);
 /* a picture's high-res image, once it is ready, else 0 (the original is
 drawn) */
 unsigned int menu_pictures_texture(long pose, unsigned long *levels);
@@ -191,6 +195,8 @@ int menu_pictures_frame_drawn(void);
 played on them (mods.c), so a picture never shows a mod, and turning mods
 on or off leaves the cached pictures right */
 int menu_pictures_stock_maps(void);
+/* how far a map's preparation recorded in the pass has come (render_enumerate.c) */
+void menu_pictures_recording(float fraction);
 /* a frame to keep, as it is presented (d3d8_device.c's present: kept, and
 not shown); TRUE if it was one */
 int menu_pictures_frame_kept(void);

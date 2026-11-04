@@ -12,15 +12,16 @@ same draws, as it was by the walk: Vulkan and Metal make the same pipelines
 and bind the same textures.
 
 A record is kept in z:\prepared (beside the decompressed maps' cache
-files), a file for each map (its cache file's checksum and scenario), build
-and the settings that change what the walk draws (the lights, the ambient
+files), a file for each map (its cache file's checksum and scenario), the
+records' form (PREPARED_VERSION, not the build: an update keeps them) and
+the settings that change what the walk draws (the lights, the ambient
 occlusion, the anti-aliasing, the HDR, Panini and so on, and whether the
 frame draws mirrors). The screen's size is not among them: the journal holds
 the game's state, which the front end turns into pipelines and targets as
 the screen is now. Played back, the map's enumeration (the set of distinct
 draws as the front end describes them: xgpu_manifest_enumeration) must be
-the record's; a record that is missing, cut short, malformed, for another
-build or settings, whose objects cannot all be found again, or whose draws
+the record's; a record that is missing, cut short, malformed, of another
+form or settings, whose objects cannot all be found again, or whose draws
 are not the record's, is deleted and the walk made instead, which records
 again. A map is recorded at its first load, the stock maps at the game's
 first start (menu_pictures_render.c: the menus' pictures' pass loads them
@@ -52,7 +53,12 @@ void platform_log(char const *format, ...);
 int halo_dynamic_lights_enhanced(void);
 
 #define PREPARED_MAGIC 0x50314f48u /* "HO1P" */
-/* the journal's form and this file's: a change makes every record again */
+/* what a record holds: a change to what the walk draws (render_enumerate.c,
+and the game's code it draws through) or to this file's form must make it 2,
+3 and so on, which makes every record again. Records are not kept for a
+build, so that an update keeps them; the journal's own form is in the key
+too (halo_gpu_journal_form), and a record whose replay does not make its
+draws is made again all the same. */
 #define PREPARED_VERSION 1
 /* the most words a record may hold */
 #define PREPARED_MAXIMUM_WORDS (64UL * 1024 * 1024)
@@ -109,29 +115,6 @@ static uint64_t prepared_hash_string(char const *text, uint64_t hash)
 	return xgpu_manifest_hash(text, strlen(text) + 1, hash);
 }
 
-/* which build this is: when this file was compiled, and the distances
-between functions of many of the game's files (any change of the code
-moves them) */
-static uint64_t prepared_build_hash(uint64_t hash)
-{
-	char const *const functions[] =
-	{
-		(char const *)render_enumerate_begin, (char const *)tag_get_name, (char const *)render_prepared_replay,
-		(char const *)texture_cache_port_load, (char const *)texture_cache_idle, (char const *)cache_files_get_checksum,
-		(char const *)halo_dynamic_lights_enhanced, (char const *)xgpu_manifest_hash, (char const *)config_string,
-	};
-	short index;
-
-	hash = prepared_hash_string(__DATE__ " " __TIME__, hash);
-	for (index = 1; index < (short)NUMBEROF(functions); index++)
-	{
-		long distance = (long)(functions[index] - functions[0]);
-
-		hash = xgpu_manifest_hash(&distance, sizeof(distance), hash);
-	}
-	return hash;
-}
-
 /* the record's key and file, for the map loaded now */
 static boolean prepared_choose(boolean mirrors)
 {
@@ -144,7 +127,8 @@ static boolean prepared_choose(boolean mirrors)
 		return FALSE;
 	hash = xgpu_manifest_hash(&version, sizeof(version), hash);
 	hash = prepared_hash_string(scenario, hash);
-	hash = prepared_build_hash(hash);
+	version = halo_gpu_journal_form();
+	hash = xgpu_manifest_hash(&version, sizeof(version), hash);
 	for (index = 0; index < (short)NUMBEROF(prepared_settings); index++)
 	{
 		char const *value = config_string(prepared_settings[index]);
@@ -212,7 +196,7 @@ unsigned long render_prepared_draws_missing(unsigned long long const *recorded, 
 	return missing;
 }
 
-/* a record's header is of this form, map, build and settings (key) */
+/* a record's header is of this form, map and settings (key) */
 static boolean prepared_header_fits(struct prepared_header const *header, unsigned long checksum, uint64_t key)
 {
 	return header->magic == PREPARED_MAGIC && header->version == PREPARED_VERSION &&
@@ -242,7 +226,7 @@ static uint64_t *prepared_read(struct prepared_header *header)
 	fclose(file);
 	if (!good)
 	{
-		platform_log("render: the map's preparation's record is not this map's, build's or settings', or is cut "
+		platform_log("render: the map's preparation's record is not this map's, form's or settings', or is cut "
 			"short: made again");
 		free(words);
 		DeleteFileA(prepared.path);
@@ -277,6 +261,50 @@ static void prepared_log_new(uint64_t const *recorded, unsigned long recorded_co
 			draw->key.pixel.alpha_test_samples, draw->stages[0].source, draw->stages[0].sampler_type,
 			draw->stages[1].source, draw->stages[1].sampler_type, draw->stages[2].source, draw->stages[2].sampler_type,
 			draw->stages[3].source, draw->stages[3].sampler_type);
+	}
+}
+
+/* the stock maps' records made in this form (the pass's note, z:\prepared\stock) */
+static void prepared_stock_form(char *text, unsigned long size)
+{
+	snprintf(text, size, "%d %u\n", PREPARED_VERSION, halo_gpu_journal_form());
+}
+
+boolean render_prepared_stock_recorded(void)
+{
+	char form[32], read[32];
+	FILE *file;
+	boolean same = FALSE;
+
+	if (!prepared_enabled())
+		return TRUE;
+	prepared_stock_form(form, sizeof(form));
+	file = fopen("z:\\prepared\\stock", "rb");
+	if (file)
+	{
+		size_t length = fread(read, 1, sizeof(read) - 1, file);
+
+		read[length] = 0;
+		same = !strcmp(read, form);
+		fclose(file);
+	}
+	return same;
+}
+
+void render_prepared_stock_done(void)
+{
+	char form[32];
+	FILE *file;
+
+	if (!prepared_enabled())
+		return;
+	prepared_stock_form(form, sizeof(form));
+	CreateDirectoryA("z:\\prepared", NULL);
+	file = fopen("z:\\prepared\\stock", "wb");
+	if (file)
+	{
+		fwrite(form, 1, strlen(form), file);
+		fclose(file);
 	}
 }
 

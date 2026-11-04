@@ -29,9 +29,6 @@ SECTIONS
 	.text : { *(.text .text.*) }
 	.rodata : { *(.rodata .rodata.*) }
 	. = ALIGN(0x10000);
-	/* (the game's variables from here: port/linux/src/d3d8_device.c's
-	journal finds objects by them) */
-	__guest_data_start = .;
 	.data : { *(.data .data.*) }
 	.guest_init : {
 		__guest_init_start = .;

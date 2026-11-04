@@ -1012,6 +1012,30 @@ long menu_pictures_wanted(
 	return menu_picture_order(menu_picture_poses, picture_count(), decisions, poses, maximum);
 }
 
+long menu_pictures_maps(
+	long *poses,
+	long maximum)
+{
+	long pose, count = 0, other, index;
+
+	if (!menu_pictures.started || !picture_enabled() || picture_quiet_run())
+		return 0;
+	for (pose = 0; pose < picture_count() && count < maximum; pose++)
+	{
+		struct menu_picture_pose const *picture = &menu_picture_poses[pose];
+		int made_for = 0;
+
+		for (index = 0; index < picture->checksum_count && index < MAXIMUM_MENU_PICTURE_CHECKSUMS; index++)
+			made_for |= menu_pictures.pictures[pose].map_checksum && picture->checksums[index] ==
+				menu_pictures.pictures[pose].map_checksum;
+		for (other = 0; other < count && strcmp(menu_picture_poses[poses[other]].map, picture->map); other++)
+			;
+		if (made_for && other == count)
+			poses[count++] = pose;
+	}
+	return count;
+}
+
 long menu_pictures_scale(void)
 {
 	return menu_pictures.wanted_scale ? menu_pictures.wanted_scale : MENU_PICTURE_SMALLEST_SCALE;
