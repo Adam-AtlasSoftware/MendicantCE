@@ -22,6 +22,7 @@ and the debug keyboard that the game's console reads.
 #include "text_hires.h"
 #include "p2p.h"
 #include "port_mods.h"
+#include "halo_menus.h"
 #include "server_mode.h"
 #include "server_master.h"
 #include "player_link.h"
@@ -38,6 +39,7 @@ and the debug keyboard that the game's console reads.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 #include <zlib.h>
 #if !defined(HALO_WINDOWS) && !defined(HALO_ANDROID)
@@ -472,6 +474,10 @@ BOOL platform_sdl_initialize(void)
 	/* (the mods, and whether to play those that say they cannot be played
 	together, before the window opens: port_mods.c) */
 	port_mods_startup();
+	/* (the PC menus' files read meanwhile, on a thread of their own, for
+	the first map's load: menu_files.c) */
+	if (!halo_server_mode() && !strcasecmp(config_string("display.menus"), "pc"))
+		halo_menus_read_ahead();
 	return TRUE;
 }
 
