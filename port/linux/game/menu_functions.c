@@ -822,22 +822,25 @@ static short widget_screen_x(struct widget_instance *widget)
 }
 
 /* the text box's own text (as the server list sets its items'), in a
-buffer of length characters (made the first time: a text box is always
-given the same length) */
+buffer of at least length characters: grown to it each time (the pool
+keeps a block already that large), since one box is given different
+lengths (Choose Mission's panel: a fitted line, 64, on HALO, 256 on
+CUSTOM, #553) and the game sizes a string list's text to the string; the
+copy pads to length, so a buffer made smaller earlier was overrun, and
+the pool's check failed as the screen was freed */
 static void text_set_length(struct widget_instance *text_box, wchar_t const *text, short length)
 {
+	wchar_t *buffer;
+
 	if (!text_box)
 		return;
-	if (!text_box->parameters.text_box.text)
-	{
-		text_box->parameters.text_box.text = ui_widget_realloc(NULL, length * sizeof(wchar_t),
-			__FILE__, __LINE__);
-	}
-	if (text_box->parameters.text_box.text)
-	{
-		ustrncpy(text_box->parameters.text_box.text, text, length - 1);
-		text_box->parameters.text_box.text[length - 1] = 0;
-	}
+	/* (kept if it cannot grow: the pool keeps the old block) */
+	buffer = ui_widget_realloc(text_box->parameters.text_box.text, length * sizeof(wchar_t), __FILE__, __LINE__);
+	if (!buffer)
+		return;
+	text_box->parameters.text_box.text = buffer;
+	ustrncpy(buffer, text, length - 1);
+	buffer[length - 1] = 0;
 }
 
 static void text_set(struct widget_instance *text_box, wchar_t const *text)
