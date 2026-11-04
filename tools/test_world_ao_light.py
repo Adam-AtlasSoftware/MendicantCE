@@ -190,8 +190,7 @@ def test_spirv_finds_what_the_reference_finds(reference, check, tmp_path):
 
 
 # negative controls: each emitter with a fault in a shape the scene has, which the checks must see
-SPIRV_FAULT = ("constant_float(m, 2.0f * XGPU_WORLD_AO_PI)), zero));",
-               "constant_float(m, XGPU_WORLD_AO_PI)), zero));")
+SPIRV_FAULT = ("constant_float(m, 2.0f * XGPU_WORLD_AO_PI))));", "constant_float(m, XGPU_WORLD_AO_PI))));")
 MSL_FAULT = ('"\\t\\tline = 2.0 * radius * h / 3.14159265358979 * (f1 - f0);\\n"',
              '"\\t\\tline = radius * h / 3.14159265358979 * (f1 - f0);\\n"')
 

@@ -60,6 +60,27 @@ float world_ao_reference(struct world_sdf_volume const *volume, float const ligh
 	return world_ao_field_occlusion(volume, above, up);
 }
 
+/* the radius of a sphere about a shape's centre that holds it */
+static float world_ao_proxy_bound(struct world_proxy const *proxy)
+{
+	float axis[3];
+	int k;
+
+	for (k = 0; k < 3; k++)
+		axis[k] = proxy->v[1][k] - proxy->v[0][k];
+	switch ((int)proxy->v[0][3])
+	{
+	case _world_proxy_capsule:
+		return 0.5f * sqrtf(axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]) + proxy->v[2][0];
+	case _world_proxy_box:
+		return sqrtf(proxy->v[1][0] * proxy->v[1][0] + proxy->v[1][1] * proxy->v[1][1] + proxy->v[1][2] * proxy->v[1][2] +
+			proxy->v[2][0] * proxy->v[2][0] + proxy->v[2][1] * proxy->v[2][1] + proxy->v[2][2] * proxy->v[2][2] +
+			proxy->v[2][3] * proxy->v[2][3]);
+	default:
+		return proxy->v[2][0];
+	}
+}
+
 float world_ao_proxies_occlusion(struct world_proxy const *proxies, long count, float const point[3],
 	float const normal[3], float owner)
 {
@@ -85,6 +106,9 @@ float world_ao_proxies_occlusion(struct world_proxy const *proxies, long count, 
 		reach = world_proxy_reach(proxy);
 		away = sqrtf(offset[0] * offset[0] + offset[1] * offset[1] + offset[2] * offset[2]);
 		if (away >= reach)
+			continue;
+		/* (wholly below the point's tangent plane: none) */
+		if (normal[0] * -offset[0] + normal[1] * -offset[1] + normal[2] * -offset[2] < -world_ao_proxy_bound(proxy))
 			continue;
 		fade = saturate((reach - away) / (reach * WORLD_AO_REACH_FADE));
 		product *= 1.0f - world_proxy_occlusion(proxy, point, normal) * fade;
