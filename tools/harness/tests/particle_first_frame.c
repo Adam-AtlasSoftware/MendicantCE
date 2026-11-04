@@ -34,16 +34,16 @@ struct particle_definition
 };
 
 static struct data_array *particle_data;
-static struct particle_definition definition;
+static struct particle_definition the_definition;
 static struct bitmap_group_sequence sequences[4];
-static struct bitmap_group bitmap = { { 4, sequences } };
+static struct bitmap_group the_bitmap = { { 4, sequences } };
 static struct { long frame_index; } render;
 static int physics_updates;
 static long particles_drawn;
 
 #define particle_get(index) ((struct particle_datum *)datum_get(particle_data, (index)))
-#define particle_definition_get(index) (&definition)
-#define bitmap_group_get(index) (&bitmap)
+#define particle_definition_get(index) (&the_definition)
+#define bitmap_group_get(index) (&the_bitmap)
 #define profile_enter(section) ((void)0)
 #define profile_exit(section) ((void)0)
 #define render_interpolation_particles_due() ((void)0)
@@ -116,9 +116,9 @@ int main(int argc, char **argv)
 	int sequence;
 
 	particle_data = game_state_data_new("particle", 8, sizeof(struct particle_datum));
-	definition.bitmap.index = 0;
-	definition.effect.index = NONE;
-	definition.initial_sequence_count = 1;
+	the_definition.bitmap.index = 0;
+	the_definition.effect.index = NONE;
+	the_definition.initial_sequence_count = 1;
 	for (sequence = 0; sequence < 4; sequence++)
 		sequences[sequence].sprites.count = 1;
 
