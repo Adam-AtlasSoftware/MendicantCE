@@ -901,6 +901,12 @@ PAGES = {
              "How often the world updates each second, in games on this device: the campaign, split screen and "
              "bots. 60 and 120 respond faster and take more of the processor. Online games play at their host's "
              "tick rate: an OpenH1 game's (OpenH1 60 Tick), a Legacy game's 30.", None),
+            # (game.enhanced_animations: the preset's, Classic's off, as the
+            # Xbox played; a network game's turning is its host's:
+            # network_standard_turns_with_aim)
+            ("ANIMATIONS", "game.enhanced_animations", [("CLASSIC", "false"), ("ENHANCED", "true")],
+             "Enhanced: you turn with your aim in a jump and a grenade throw, and your legs keep moving as you "
+             "throw. Classic moves as the Xbox did, so the AI plays as it did. Online: the host's choice.", None),
         ],
     },
     BRIGHTNESS_PAGE[0]: {

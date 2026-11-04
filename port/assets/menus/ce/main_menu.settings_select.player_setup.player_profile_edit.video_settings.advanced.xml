@@ -27,6 +27,7 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/op_shield_glow_intensity" x="28" y="336"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/section_14" x="28" y="363"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/op_sim_rate" x="28" y="383"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/op_enhanced_animations" x="28" y="404"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/button_bar" y="414"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/button_bar" type="column_list" width="640" height="28" flags="pass_unhandled_to_focused_child left_right_tabs_items">
@@ -181,6 +182,15 @@
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/sim_rate_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="ORIGINAL (30)|60|120" setting="game.sim_rate" values="30|60|120" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
 		<on event="created" run="port setting load"/>
 	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/op_enhanced_animations" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/enhanced_animations_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/enhanced_animations_spinner" x="188"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/enhanced_animations_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/labels" string_index="16" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/enhanced_animations_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="CLASSIC|ENHANCED" setting="game.enhanced_animations" values="false|true" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+		<on event="created" run="port setting load"/>
+	</widget>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/labels">
 		<string text="IMAGE"/>
 		<string text="RENDER RESOLUTION"/>
@@ -198,6 +208,7 @@
 		<string text="GLOW INTENSITY"/>
 		<string text="GAME"/>
 		<string text="TICK RATE"/>
+		<string text="ANIMATIONS"/>
 	</strings>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/help_strings">
 		<string text=""/>
@@ -217,5 +228,6 @@
 		<string text="Light Show: the shields' glow reaches three times as far, and is brighter. Online: the host's choice."/>
 		<string text=""/>
 		<string text="How often the world updates each second, in games on this device: the campaign, split screen and bots. 60 and 120 respond faster and take more of the processor. Online games play at their host's tick rate: an OpenH1 game's (OpenH1 60 Tick), a Legacy game's 30."/>
+		<string text="Enhanced: you turn with your aim in a jump and a grenade throw, and your legs keep moving as you throw. Classic moves as the Xbox did, so the AI plays as it did. Online: the host's choice."/>
 	</strings>
 </menus>

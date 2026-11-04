@@ -1056,8 +1056,8 @@ static const struct config_setting config_settings[] =
 		"to throw and reload, and a player turns with the aim while throwing\n"
 		"and in the air (so shots after a turn in a jump go to the crosshair);\n"
 		"false: the original animations, which freeze the legs and stand a\n"
-		"rider up (the turning, which moves where shots go, stays on in a\n"
-		"network game for every player)." },
+		"rider up, and the body, so the campaign's AI plays as on the Xbox. In\n"
+		"an OpenH1 network game the host's choice (a Legacy game's players turn)." GRAPHICS_CHOOSES },
 	{ "game.campaign_difficulty", _config_integer, "1", "HALO_CAMPAIGN_DIFFICULTY", _environment_value, _platform_all,
 		"The difficulty Choose Difficulty opens on: the one chosen last (0 Easy,\n"
 		"1 Normal, 2 Heroic, 3 Legendary). The campaign's menus write it." },
@@ -3304,12 +3304,17 @@ the Xbox drew) or "enhanced" (its default, GRAPHICS_*: this build's) where
 the player has not set it; one set (config_set) wins over it. Settings
 writing one at the value the preset gives it, or the preset at the value of
 one set, leaves it to the preset again (config_write), so that choosing
-Classic or Enhanced there chooses them all. Only the drawing changes. */
+Classic or Enhanced there chooses them all. The drawing changes, and how
+the player bipeds move (game.enhanced_animations: Classic plays as the Xbox
+did, its AI too), which battery saver leaves as it is (simulation). */
 static const struct
 {
 	const char *name;
 	/* as the table above writes it */
 	const char *classic;
+	/* (battery saver's: only the drawing's, so that it never changes how a
+	game plays in the middle of it) */
+	int simulation;
 } config_graphics[] =
 {
 	{ "display.anti_aliasing", "\"off\"" },
@@ -3320,6 +3325,7 @@ static const struct
 	{ "display.model_detail", "\"auto\"" },
 	{ "display.dynamic_lights", "\"classic\"" },
 	{ "display.ambient_occlusion", "\"off\"" },
+	{ "game.enhanced_animations", "false", 1 },
 };
 
 #define NUMBER_OF_CONFIG_GRAPHICS (sizeof(config_graphics) / sizeof(config_graphics[0]))
@@ -4177,8 +4183,8 @@ static const struct config_value *config_read(const char *name, enum config_type
 		return value;
 	setting = config_setting_index(name);
 	entry = config_graphics_entry(setting);
-	return entry >= 0 && config_settings[setting].type == type && !config_set[setting] ?
-		&config_battery_values[entry] : value;
+	return entry >= 0 && !config_graphics[entry].simulation && config_settings[setting].type == type &&
+		!config_set[setting] ? &config_battery_values[entry] : value;
 }
 
 /* ---------- writing a setting */
