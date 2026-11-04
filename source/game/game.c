@@ -1039,9 +1039,15 @@ void game_frame(
 	real dt)
 {
 	real frame_dt;
+	/* the game time of the Xbox's shortest frame: it drew at most 30 frames a
+	second, two vertical blanks each (main.c), at the game's speed */
+	real xbox_frame_dt = game_time_get_speed() / (real)TICKS_PER_SECOND;
 
 	if (game_globals->players_are_double_speed)
+	{
 		frame_dt = dt * 0.5f;
+		xbox_frame_dt *= 0.5f;
+	}
 	else
 		frame_dt = dt;
 
@@ -1051,7 +1057,7 @@ void game_frame(
 		game_globals->active);
 
 	collision_log_begin_period(1);
-	particles_update(frame_dt);
+	particles_update(frame_dt, xbox_frame_dt);
 	contrails_update(frame_dt);
 	particle_systems_update(frame_dt);
 	widgets_update(frame_dt);
