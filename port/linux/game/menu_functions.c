@@ -2066,6 +2066,7 @@ static struct
 	{ "network_setup", "network_settings_screen" },
 	{ "interface_settings", "interface_settings_screen" },
 	{ "profile_settings", "profile_settings_screen" },
+	{ "mods_settings", "mods_settings_screen" },
 };
 
 /* the rows hidden in a game (not on the main menu): those that would drop
