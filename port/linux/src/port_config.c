@@ -1147,6 +1147,12 @@ static const struct config_setting config_settings[] =
 		"stock game draws it (no flare of its own). In a network game, the\n"
 		"host's network.shield_effects decides, unless it is \"players\" (each\n"
 		"player's own) or the game is co-op." },
+	{ "display.overshield_layer_color", _config_boolean, "true", "HALO_OVERSHIELD_LAYER_COLOR", _environment_value,
+		_platform_all,
+		"The overshield's flare (display.overshield_effect) in the color of\n"
+		"its layer the HUD's shield meter shows on top: green while the green\n"
+		"layer lasts, then red, the powerup's, once only the red is left.\n"
+		"false: red throughout. Only this machine's drawing changes." },
 	{ "display.shield_glow", _config_boolean, "false", "HALO_SHIELD_GLOW", _environment_value, _platform_all,
 		"Energy shields light what is around them as they flare, as plasma\n"
 		"does, in the shield's own color. In a network game, the host's\n"
