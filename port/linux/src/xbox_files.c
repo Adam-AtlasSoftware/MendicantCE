@@ -43,6 +43,7 @@ matched case-insensitively, like the Xbox's FATX volumes.
 #include <stdlib.h>
 #include <string.h>
 #include <sys/file.h>
+#include <sys/syscall.h>
 #include <unistd.h>
 #include <time.h>
 
@@ -1442,8 +1443,9 @@ const char *cache_slot_folder(void)
 		snprintf(lock_path, sizeof(lock_path), "%scache.lock", folder);
 		platform_translate_path(lock_path, path, sizeof(path));
 		descriptor = path[0] ? open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0644) : -1;
-		/* (held until the game ends; a system without locks, any folder) */
-		if (descriptor >= 0 && (flock(descriptor, LOCK_EX | LOCK_NB) == 0 || errno == ENOSYS))
+		/* (held until the game ends; a system without locks, any folder:
+		the system call itself, which every host has, not the C library's) */
+		if (descriptor >= 0 && (syscall(SYS_flock, descriptor, LOCK_EX | LOCK_NB) == 0 || errno == ENOSYS))
 		{
 			if (number > 1)
 				platform_log("map cache: another copy of the game holds the cache; this one's is in %s", folder);

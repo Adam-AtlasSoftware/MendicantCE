@@ -91,11 +91,10 @@ static boolean playable(void)
 
 int main(int argc, char **argv)
 {
-	const char *the_case = argc > 1 ? argv[1] : "";
+	const char *case_name = argc > 1 ? argv[1] : "";
 	char template[] = "/tmp/map-cache-whole-XXXXXX";
 
 	snprintf(folder, sizeof(folder), "%s", mkdtemp(template));
-#define CASE(name) if (!strcmp(the_case, name))
 	CASE("whole_copy")
 	{
 		copied("a10", 0x1234, TRUE);

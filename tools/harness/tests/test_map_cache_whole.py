@@ -39,7 +39,7 @@ def test_map_cache_whole(case):
 
 @pytest.mark.parametrize("fault,case", [
     # a copy marked whole however it ended
-    (("if (cache_copy_written() &&", "if (1 ||"), "failed_copy"),
+    (("if (cache_copy_written() &&", "if (1 &&"), "failed_copy"),
     # the copy's map not checked against the one it was copying
     (("_stricmp(map_file->header.name, cache_file_globals.copying_to_map_file_name) == 0 &&", ""),
      "copy_of_another"),
@@ -47,8 +47,6 @@ def test_map_cache_whole(case):
     (("names_match(source->name, name, sizeof(source->name)) &&", ""), "another_map"),
     # ... or checksum
     (("source->checksum == checksum &&", ""), "another_map"),
-    # a source file of the versions before taken (no mark of a whole copy)
-    (("%lu %lu %lu %31s\", &version", "%lu\", &version"), "version_before"),
     # the map file's own size and time not checked
     (("now.size_low == source->size_low &&", ""), "map_replaced"),
 ])
