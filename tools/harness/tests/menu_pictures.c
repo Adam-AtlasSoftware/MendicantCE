@@ -508,6 +508,30 @@ int main(int argc, char **argv)
 #undef PIXEL
 	}
 
+	/* a cached picture noted as rendered is drawn only if its file is a
+	whole PNG of its scale's size: one cut short, of another size, or not a
+	PNG is rendered again */
+	CASE("whole")
+	{
+		static unsigned char const ihdr[24] = { 0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n', 0, 0, 0, 13, 'I', 'H', 'D',
+			'R', 0, 0, 3, 0, 0, 0, 1, 128 };
+		static unsigned char const iend[12] = { 0, 0, 0, 0, 'I', 'E', 'N', 'D', 0xAE, 0x42, 0x60, 0x82 };
+		unsigned char head[24], tail[12];
+
+		CHECK(menu_picture_png_whole(ihdr, 24, iend, 12, 768, 384), "a whole 768x384 PNG is not whole");
+		CHECK(!menu_picture_png_whole(ihdr, 24, iend, 12, 512, 256), "a 768x384 PNG is taken for a 512x256 one");
+		CHECK(!menu_picture_png_whole(ihdr, 24, iend, 12, 768, 256), "a 768x384 PNG is taken for a 768x256 one");
+		/* (cut short: its last bytes the picture's data, not its end) */
+		memcpy(tail, iend, 12);
+		tail[11] = 0;
+		CHECK(!menu_picture_png_whole(ihdr, 24, tail, 12, 768, 384), "a PNG cut short is whole");
+		CHECK(!menu_picture_png_whole(ihdr, 24, iend, 4, 768, 384), "a file of 28 bytes is whole");
+		memcpy(head, ihdr, 24);
+		head[1] = 'J';
+		CHECK(!menu_picture_png_whole(head, 24, iend, 12, 768, 384), "a file that is not a PNG is whole");
+		CHECK(!menu_picture_png_whole(ihdr, 16, iend, 12, 768, 384), "a file of no size is whole");
+	}
+
 	/* laid out in the frame's top left, its last column and row repeated */
 	CASE("frame")
 	{

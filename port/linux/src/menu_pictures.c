@@ -26,7 +26,10 @@ not one of the pose's: a modded map), or its render failed twice (a
 failure, or the game gone in the middle of one: each render is noted as a
 failure before it starts, and as rendered when it ends); and until it is
 ready. A pose or map changed, a larger
-screen (at the next start), or this file's version renders it again.
+screen (at the next start), its picture's file gone or cut short, or this
+file's version renders it again. A frame kept that is no scene (one
+colour, or noise: menu_picture_not_a_scene) is a failed render, never a
+picture.
 Nothing is rendered in runs nobody watches (tests: debug.hidden_window,
 debug.exit_after...), in VR, or with display.menu_pictures off.
 */
@@ -303,6 +306,32 @@ char const *menu_picture_not_a_scene(
 	if (unlike * 100 > pairs * MENU_PICTURE_MOST_UNLIKE)
 		return "is noise, not a scene";
 	return NULL;
+}
+
+/* whether a cached picture's file, by its first and last bytes, is a whole
+PNG of this size: its signature and header, and its end chunk last (a file
+cut short, of another size, or not a PNG is not; its note's picture is
+rendered again) */
+int menu_picture_png_whole(
+	unsigned char const *head,
+	unsigned long head_size,
+	unsigned char const *tail,
+	unsigned long tail_size,
+	unsigned long width,
+	unsigned long height)
+{
+	static unsigned char const signature[16] = { 0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n', 0, 0, 0, 13, 'I', 'H',
+		'D', 'R' };
+	static unsigned char const end[12] = { 0, 0, 0, 0, 'I', 'E', 'N', 'D', 0xAE, 0x42, 0x60, 0x82 };
+
+	if (head_size < 24 || tail_size < 12 || memcmp(head, signature, sizeof(signature)) != 0 ||
+		memcmp(tail + tail_size - 12, end, sizeof(end)) != 0)
+	{
+		return 0;
+	}
+	return ((unsigned long)head[16] << 24 | (unsigned long)head[17] << 16 | (unsigned long)head[18] << 8 | head[19]) ==
+		width && ((unsigned long)head[20] << 24 | (unsigned long)head[21] << 16 | (unsigned long)head[22] << 8 |
+		head[23]) == height;
 }
 
 static char const *const menu_picture_result_names[] = { "none", "rendered", "failed", "modded" };
@@ -921,6 +950,27 @@ static void picture_load(long pose)
 	pthread_attr_destroy(&attributes);
 }
 
+/* whether a pose's cached picture is a whole PNG of a scale's size
+(menu_picture_png_whole) */
+static int picture_file_whole(long pose, long scale)
+{
+	char path[1100];
+	unsigned char head[24], tail[12];
+	FILE *file;
+	int whole;
+
+	picture_path(path, sizeof(path), pose, "png");
+	file = fopen(path, "rb");
+	if (!file)
+		return 0;
+	whole = fread(head, 1, sizeof(head), file) == sizeof(head) && fseek(file, -(long)sizeof(tail), SEEK_END) == 0 &&
+		fread(tail, 1, sizeof(tail), file) == sizeof(tail) &&
+		menu_picture_png_whole(head, sizeof(head), tail, sizeof(tail),
+			(unsigned long)(MENU_PICTURE_FRAME_WIDTH * scale), (unsigned long)(MENU_PICTURE_FRAME_HEIGHT * scale));
+	fclose(file);
+	return whole;
+}
+
 /* a pose's picture found: the map's checksum, the note, and so whether it
 is drawn, and rendered */
 static void picture_check(long pose)
@@ -934,6 +984,18 @@ static void picture_check(long pose)
 	pthread_mutex_unlock(&menu_pictures.lock);
 	state->decision = menu_picture_decide(&menu_picture_poses[pose], state->map_checksum,
 		state->noted ? &state->note : NULL, menu_pictures.wanted_scale);
+	/* (noted as rendered, but its picture gone or damaged: not rendered,
+	as far as its note goes; tried again, up to a point) */
+	if ((state->decision & (1UL << _menu_picture_use_bit)) && !picture_file_whole(pose, state->note.scale))
+	{
+		platform_log("menu pictures: %s's picture is missing or damaged: it is rendered again",
+			menu_picture_poses[pose].name);
+		pthread_mutex_lock(&menu_pictures.lock);
+		state->note.result = _menu_picture_none;
+		pthread_mutex_unlock(&menu_pictures.lock);
+		state->decision = menu_picture_decide(&menu_picture_poses[pose], state->map_checksum, &state->note,
+			menu_pictures.wanted_scale);
+	}
 	if (state->decision & (1UL << _menu_picture_use_bit))
 		picture_load(pose);
 }
