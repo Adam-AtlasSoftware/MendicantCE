@@ -248,6 +248,20 @@ void dynamic_lights_drawn(long light, real_point3d const *position, real radius,
 	lights_drawn[index].intensity = MAX(color->red, MAX(color->green, color->blue));
 }
 
+/* port/linux/game/world_scene.c (display.ambient_occlusion "world"'s light
+list): the light last drawn at an absolute index (dynamic_lights_drawn),
+its handle, where and how far it reached; FALSE if none has been. It only
+reads */
+boolean dynamic_lights_drawn_get(long index, long *light, real_point3d *position, real *radius)
+{
+	if (index < 0 || index >= MAXIMUM_LIGHTS_PER_MAP || !lights_drawn[index].light)
+		return FALSE;
+	*light = lights_drawn[index].light;
+	*position = lights_drawn[index].position;
+	*radius = lights_drawn[index].radius;
+	return TRUE;
+}
+
 /* object_lights.c lights_preprocess_scene: the scene's lights (light
 handles, as structure_visibility_find_objects found them), most visible
 first when there are more than the rasterizer has room for (none moved
