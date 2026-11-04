@@ -467,8 +467,52 @@ its outline and its far patches:
 The proxies themselves now cost about nothing in the real scenes: with the window's proxies taken away (a
 measurement-only switch) b30 costs the same (4.75 against 4.76 ms) and Blood Gulch too (1.53 against 1.49 ms), and
 with the made-up field (no bake, no upload) and no shapes b30 is at off (1.79 ms). What is left there is the field's
-(B's sampling, being rebuilt by F). The made-up case meets the Radeon's budget; the 4090's frame is 0.39 ms, far from
+(B's sampling, being rebuilt by F). (G found otherwise with the GPU held at one clock: the proxies are nearly all of
+it; [Where the time goes](#where-the-time-goes-workstream-g).) The made-up case meets the Radeon's budget; the 4090's frame is 0.39 ms, far from
 its boost clock, so its deltas run high (D's note).
+
+### Where the time goes (workstream G)
+
+E (proxies away: no change) and F (the field's taps away: no change) seemed to disagree. Neither measurement held
+the GPU still:
+
+- **The clock.** A fixed-step run is paced (8.3 ms a frame) and the GPU is busy 1 to 2 ms of it, so the Radeon picks
+  its clock from run to run. Draws "world" never touches ran up to twice as fast in one run as in another. Measure
+  with `HALO_MAX_FPS=-1`: the frames back to back, the GPU at its top clock, the same frames' time steady to 0.01 ms
+  between runs.
+- **The size.** Offscreen, the default (borderless) draws at SDL's offscreen desktop, 1024x768, whatever
+  `HALO_WINDOW_SIZE` says. Add `HALO_DISPLAY_MODE=windowed`.
+- **The frames.** Compare the same 600-frame windows by their number (frames 4,800 to 7,800 below): the scene
+  moves, so "the last windows" of two runs are not the same frames.
+
+Held still (`HALO_VULKAN_DRAW_TIMES`: a timestamp after each draw; two fixed-step runs matched draw for draw), on
+b30's start at 1024x768: no pre-pass, no extra draw, no stall; the world's shaders with nothing to shade cost
++0.05 ms, the field +0.02, the proxies the rest (+0.81): the loop and its shapes' loads 0.08, each shape's reach,
+bound and box frame 0.26 (every kind's reach computed for every shape), the exact boxes 0.41, spheres and capsules
+0.06.
+
+**The proxies' walk.** With the subgroups' bitwise operations in pixel shaders (Vulkan 1.1, the device's
+`subgroupSupportedOperations`), a subgroup walks the shapes of all of its pixels' cells together, lowest first, and
+each pixel takes only its own cell's: the same product of the same shapes in the same order, but each shape's index,
+place and kind are the subgroup's, so its loads are scalar and only the kinds present run. Each kind finds its reach,
+bound and fade in its own branch; a box finds its frame once for its bound and its faces, branches between its far
+patches and its exact faces, and takes one face of each pair (the side the pixel is on). Without subgroups (or
+`HALO_VULKAN_NO_SUBGROUPS`) each pixel walks its own cell, as before. The Metal emitter is unchanged.
+
+World minus off, GPU ms a frame, offscreen Vulkan, fixed step, unpaced, windowed, release; before is `world-ao`
+with F, after this:
+
+| Scene | Radeon 8060S 1440p | Radeon 4K | RTX 4090 1440p | RTX 4090 4K |
+| --- | --- | --- | --- | --- |
+| b30's start | 3.44 → **2.22** | 7.07 → 4.63 | 0.77 → **0.58** | 2.19 → 1.70 |
+| Blood Gulch's start | 0.47 → **0.24** | 1.00 → 0.50 | 0.13 → **0.11** | 0.30 → 0.24 |
+
+Blood Gulch is within the Radeon's budget. **b30's start is not**: its 64 shapes (23 scenery boxes of 19 to 98 wu
+reach, 13 spheres, 28 capsules) are each found exactly over much of the screen. Without the two largest boxes it
+is +1.89; without every shape reaching 30 wu or more, still +0.93. No reordering of the same arithmetic reaches 0.35
+there. What would: the static scenery's occlusion of the level found once (a lightmap-space bake per BSP, E's note),
+leaving the pixels the dynamic objects' shapes alone; or the boxes' far patches from nearer than 6 half diagonals.
+Both change the result slightly, so both are a decision, not done here.
 
 ## Determinism
 

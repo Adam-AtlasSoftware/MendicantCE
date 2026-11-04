@@ -1191,6 +1191,7 @@ static int pipeline_shaders(struct stream_pipeline *entry, const struct xgpu_str
 	options.debug_texture0 = getenv("HALO_GPU_DEBUG_T0") != NULL;
 	options.debug_flat = getenv("HALO_GPU_DEBUG_FLAT") != NULL;
 	options.reversed_depth = XGPU_VULKAN_REVERSED_DEPTH;
+	options.subgroups = stream.capabilities.subgroups;
 	program = malloc(sizeof(*program));
 	if (!program)
 		return 0;
@@ -1966,6 +1967,12 @@ static int draw_pipeline(const struct draw_input *input, int apart)
 	draw.reads_color = pipeline.color_read;
 	{
 		const struct xgpu_stream_pipeline_key *key = &stream.definition->key;
+
+		draw.kind[0] = stream.definition->pixel_program.ambient_occlusion;
+		draw.kind[1] = key->lighting;
+		draw.kind[2] = stream.definition->pixel_program.per_pixel_lighting;
+		draw.kind[3] = (uint8_t)(XGPU_VULKAN_DRAW_GAME | (key->depth_write ? 1 : 0) | (key->blend ? 2 : 0) |
+			(stream.definition->pixel_program.dynamic_lights ? 4 : 0));
 
 		draw.writes_depth = (key->depth_test && key->depth_write && !entry->effect_tests_depth) ||
 			(key->stencil_test && key->stencil_write_mask &&
