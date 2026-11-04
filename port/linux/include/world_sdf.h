@@ -148,6 +148,9 @@ its fields baked now if they are missing, where no one is waiting to play */
 void world_sdf_startup_map_loaded(void);
 /* any stock map's field missing (the pass runs for them too) */
 int world_sdf_startup_wanted(void);
+/* the frame drawn now prepares a map's pipelines (world_ao.c: its time is
+the load's, not the frames' that HALO_WORLD_SDF_FRAMES measures) */
+void world_sdf_frame_prepared(void);
 /* a field handed to the backend whole, its table and its atlas, at once
 (debug.world_ao_test's made-up one) */
 void world_sdf_upload(struct world_sdf_volume const *volume);

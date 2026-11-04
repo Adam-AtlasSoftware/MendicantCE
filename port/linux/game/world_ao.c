@@ -298,8 +298,13 @@ void world_ao_window_begin(short local_player_index, short rasterizer_target, fl
 	lengthens a load. The world's pipelines are made after it, their
 	stand-ins, these, drawing until they are: d3d8_device.c's
 	world_ao_stand_in) */
-	if (!mode || render_enumerating)
+	if (!mode)
 		return;
+	if (render_enumerating)
+	{
+		world_sdf_frame_prepared();
+		return;
+	}
 	world_ao.count = 0;
 	world_ao.volume = NULL;
 	world_ao.fade = 0.0f;

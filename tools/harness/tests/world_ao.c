@@ -48,6 +48,7 @@ void world_sdf_map_loaded(void) {}
 void world_sdf_map_unloaded(void) {}
 void world_sdf_bsp_switched(short bsp_index) { (void)bsp_index; }
 void world_sdf_frame(void) { sdf_frames++; }
+void world_sdf_frame_prepared(void) {}
 void world_proxies_map_unloaded(void) {}
 
 /* the field: a volume whose header world_sdf_current hands on, half faded in */

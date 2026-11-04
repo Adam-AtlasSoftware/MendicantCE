@@ -1458,7 +1458,17 @@ void world_sdf_bsp_switched(short bsp_index)
 
 /* the frames' pacing while a bake runs and while none does, logged with
 HALO_WORLD_SDF_FRAMES (for measuring: the bake's threads are the game's
-lowest, and no frame should wait for them) */
+lowest, and no frame should wait for them; nor any of the frames after a
+load for the world's pipelines, made apart from them). A frame that
+prepared a map's pipelines (world_sdf_frame_prepared) is the load's, not
+counted */
+static int sdf_frame_prepared;
+
+void world_sdf_frame_prepared(void)
+{
+	sdf_frame_prepared = 1;
+}
+
 static void sdf_frames_measured(void)
 {
 	static int wanted = -1;
@@ -1476,6 +1486,11 @@ static void sdf_frames_measured(void)
 	/* (a bake running: not one waiting for the start-up pass to end) */
 	baking = world_sdf.baking;
 	pthread_mutex_unlock(&world_sdf_lock);
+	if (sdf_frame_prepared)
+	{
+		sdf_frame_prepared = 0;
+		last = 0;
+	}
 	if (last)
 	{
 		double milliseconds = (double)(now - last) / 1e6;
