@@ -41,6 +41,7 @@ Conventions carried over from the Xbox:
 #include "halo_linux_source_fixups.h"
 #include "panini_projection.h"
 #include "world_ao.h"
+#include "world_sdf.h"
 #include "main/console.h"
 
 #include <SDL3/SDL.h>
@@ -309,6 +310,10 @@ reference). With the setting off nothing here is called, no key has the
 world's bit and the uniforms' world_ao stay as they are: the shaders and
 the frames are as without it. */
 
+_Static_assert(XGPU_WORLD_SDF_BRICK == WORLD_SDF_BRICK && XGPU_WORLD_SDF_BRICK_SPAN == WORLD_SDF_BRICK_SPAN &&
+	XGPU_WORLD_SDF_ATLAS == WORLD_SDF_ATLAS && XGPU_WORLD_SDF_RANGE_VOXELS == WORLD_SDF_RANGE_VOXELS &&
+	XGPU_WORLD_SDF_CELL_OUTSIDE == WORLD_SDF_CELL_OUTSIDE && XGPU_WORLD_SDF_CELL_INSIDE == WORLD_SDF_CELL_INSIDE &&
+	XGPU_WORLD_SDF_CELL_BRICK == WORLD_SDF_CELL_BRICK, "the world's field as the emitters read it (xgpu.h)");
 _Static_assert(XGPU_WORLD_AO_SHAPES == XGPU_WORLD_AO_PROXIES_MAXIMUM &&
 	XGPU_WORLD_AO_SPHERE == XGPU_WORLD_AO_PROXY_SPHERE && XGPU_WORLD_AO_CAPSULE == XGPU_WORLD_AO_PROXY_CAPSULE &&
 	XGPU_WORLD_AO_BOX == XGPU_WORLD_AO_PROXY_BOX, "the world's proxies as the emitters take them (xgpu.h)");
@@ -387,10 +392,10 @@ void halo_world_ao_object(int owner, float reference)
 	world_ao.reference = reference;
 }
 
-void halo_world_ao_field(unsigned long width, unsigned long height, unsigned long depth, unsigned long z_first,
-	unsigned long z_count, signed char const *voxels)
+void halo_world_ao_field(int part, unsigned long width, unsigned long height, unsigned long depth,
+	unsigned long z_first, unsigned long z_count, void const *data)
 {
-	xgpu_backend_world_ao_field(width, height, depth, z_first, z_count, voxels);
+	xgpu_backend_world_ao_field(part, width, height, depth, z_first, z_count, data);
 }
 
 /* a draw that writes the depth, made to write the occlusion's marks of its

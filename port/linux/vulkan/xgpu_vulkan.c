@@ -4308,22 +4308,24 @@ binds it: the last one, where it is of the same image and submission,
 else one written now */
 static VkDescriptorSet occlusion_set(void)
 {
-	VkDescriptorImageInfo image, field_image;
+	VkDescriptorImageInfo image, field_image, table_image;
 	VkDescriptorBufferInfo block;
-	VkWriteDescriptorSet writes[3];
+	VkWriteDescriptorSet writes[4];
 	struct xgpu_vulkan_image *occlusion = vk.occlusion_image && vk.occlusion_image->sampled ? vk.occlusion_image :
 		vk.occlusion_white;
 	struct xgpu_vulkan_image *field = xgpu_vulkan_world_ao_field_image();
+	struct xgpu_vulkan_image *table = xgpu_vulkan_world_ao_table_image();
 	uint64_t serial = vk.serial;
 	int index;
 
-	if (!occlusion || !field || !field->sampled || !vk.occlusion_layout)
+	if (!occlusion || !field || !field->sampled || !table || !table->sampled || !vk.occlusion_layout)
 		return VK_NULL_HANDLE;
 	/* (display.ambient_occlusion "world"'s block in this submission's ring) */
 	if (!xgpu_vulkan_world_ao_block(serial, &block))
 		return VK_NULL_HANDLE;
 	occlusion->used = vk.serial;
 	field->used = vk.serial;
+	table->used = vk.serial;
 	if (vk.occlusion_set && vk.occlusion_set_image == occlusion && vk.occlusion_set_number == occlusion->number &&
 		vk.occlusion_serial == vk.serial && vk.occlusion_world_number == xgpu_vulkan_world_ao_number())
 		return vk.occlusion_set;
@@ -4342,8 +4344,10 @@ static VkDescriptorSet occlusion_set(void)
 	field_image.sampler = xgpu_vulkan_world_ao_sampler();
 	field_image.imageView = field->sampled;
 	field_image.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+	table_image = field_image;
+	table_image.imageView = table->sampled;
 	memset(writes, 0, sizeof(writes));
-	for (index = 0; index < 3; index++)
+	for (index = 0; index < 4; index++)
 	{
 		writes[index].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 		writes[index].dstSet = vk.occlusion_set;
@@ -4357,7 +4361,9 @@ static VkDescriptorSet occlusion_set(void)
 	writes[2].dstBinding = XGPU_VULKAN_BINDING_WORLD_AO;
 	writes[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 	writes[2].pBufferInfo = &block;
-	vkUpdateDescriptorSets(vk.device, 3, writes, 0, NULL);
+	writes[3].dstBinding = XGPU_VULKAN_BINDING_WORLD_SDF_TABLE;
+	writes[3].pImageInfo = &table_image;
+	vkUpdateDescriptorSets(vk.device, 4, writes, 0, NULL);
 	return vk.occlusion_set;
 }
 
@@ -4539,6 +4545,7 @@ void xgpu_vulkan_draw(const struct xgpu_vulkan_draw *draw)
 		{
 			image_use(vk.occlusion_image && vk.occlusion_image->sampled ? vk.occlusion_image : vk.occlusion_white);
 			image_use(xgpu_vulkan_world_ao_field_image());
+			image_use(xgpu_vulkan_world_ao_table_image());
 		}
 	}
 	commands = vk.pass_commands;
@@ -6736,7 +6743,11 @@ static int layouts_make(void)
 	textures[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 	textures[2].descriptorCount = 1;
 	textures[2].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-	info.bindingCount = 3;
+	textures[3].binding = XGPU_VULKAN_BINDING_WORLD_SDF_TABLE;
+	textures[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	textures[3].descriptorCount = 1;
+	textures[3].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+	info.bindingCount = 4;
 	info.pBindings = textures;
 	if (!check(vkCreateDescriptorSetLayout(vk.device, &info, NULL, &vk.occlusion_layout), "vkCreateDescriptorSetLayout"))
 		return 0;

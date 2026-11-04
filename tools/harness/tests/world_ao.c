@@ -125,15 +125,19 @@ void halo_world_ao_object(int owner, float reference)
 	object_reference = reference;
 }
 
-void halo_world_ao_field(unsigned long width, unsigned long height, unsigned long depth, unsigned long z_first,
-	unsigned long z_count, signed char const *voxels)
+/* (the made-up field made sparse and handed on: world_sdf_bake.c's and
+world_sdf.c's, tested apart) */
+int world_sdf_pack(struct world_sdf_volume *packed, signed char const *voxels)
 {
-	(void)width;
-	(void)height;
-	(void)depth;
-	(void)z_first;
-	(void)z_count;
 	(void)voxels;
+	packed->cells = NULL;
+	packed->bricks = NULL;
+	return 1;
+}
+
+void world_sdf_upload(struct world_sdf_volume const *uploaded)
+{
+	(void)uploaded;
 	fields_handed++;
 }
 
@@ -190,7 +194,7 @@ static void window_case(void)
 	world_ao_window_begin(0, 0, camera);
 	CHECK(windows_handed == 1 && handed.count == 3, "%d %d", windows_handed, handed.count);
 	CHECK(handed.field[0][0] == -1.0f && handed.field[0][3] == 2.0f && handed.field[1][0] == 8.0f &&
-		handed.field[1][2] == 2.0f && handed.field[1][3] == 6.0f, "the field's place");
+		handed.field[1][2] == 2.0f && handed.field[1][3] == 1.0f, "the field's place (its atlas's layer)");
 	CHECK(handed.parameters[0][0] == WORLD_AO_STRENGTH_OBJECTS && handed.parameters[0][1] == WORLD_AO_STRENGTH_LEVEL &&
 		handed.parameters[0][2] == 0.5f && handed.parameters[0][3] == 3.0f &&
 		handed.parameters[1][0] == WORLD_AO_REFERENCE_WEIGHT, "the parameters");

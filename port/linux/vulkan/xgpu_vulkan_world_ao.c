@@ -2,21 +2,24 @@
 XGPU_VULKAN_WORLD_AO.C
 
 display.ambient_occlusion "world"'s resources in the Vulkan backend
-(docs/world-ao.md, "GPU binding layout"): the structure's distance field, a
-3D image of signed bytes (VK_FORMAT_R8_SNORM) read through a linear sampler
-clamped to its edge, and the window's block (struct xgpu_world_ao_block), a
-uniform buffer. Both are in display.ambient_occlusion's set
-(XGPU_VULKAN_SET_OCCLUSION), at XGPU_VULKAN_BINDING_WORLD_SDF and
-XGPU_VULKAN_BINDING_WORLD_AO, which the core writes beside the screen's
-occlusion (xgpu_vulkan.c's occlusion_set) from what this file hands it.
+(docs/world-ao.md, "GPU binding layout"): the structure's distance field,
+sparse (world_sdf.h): its atlas of bricks, a 3D image of signed bytes
+(VK_FORMAT_R8_SNORM) read through a linear sampler clamped to its edge, and
+its table of cells, a 3D RGBA8 image read by texel; and the window's block
+(struct xgpu_world_ao_block), a uniform buffer. All are in
+display.ambient_occlusion's set (XGPU_VULKAN_SET_OCCLUSION), at
+XGPU_VULKAN_BINDING_WORLD_SDF, _WORLD_SDF_TABLE and _WORLD_AO, which the
+core writes beside the screen's occlusion (xgpu_vulkan.c's occlusion_set)
+from what this file hands it.
 
 The field arrives a few slices at a time (the command stream's
-WORLD_AO_FIELD records): its image is made as its first slices come, and
-is drawn with once its last have (until then, and with none, the draws read
-a 1x1x1 stand-in of +127: far outside, no occlusion). The block arrives
-with each window (WORLD_AO_WINDOW) and is put in the upload ring of the
-submission whose draws read it (written again into a later submission's,
-should its window span two); with none, a block of zeros.
+WORLD_AO_FIELD records), its table first, then its atlas: each image is
+made as its first slices come, and the field is drawn with once both have
+had their last (until then, and with none, the draws read 1x1x1 stand-ins:
+a table cell far outside, no occlusion). The block arrives with each window
+(WORLD_AO_WINDOW) and is put in the upload ring of the submission whose
+draws read it (written again into a later submission's, should its window
+span two); with none, a block of zeros.
 */
 
 #include "xgpu_stream.h"
@@ -25,14 +28,21 @@ should its window span two); with none, a block of zeros.
 #include <stdlib.h>
 #include <string.h>
 
-static struct
+/* a part of the field: its image (NULL none), its size, and whether its
+last slices have come */
+struct world_ao_part
 {
-	/* the field's image (NULL none), its size, and whether its last
-	slices have come; the stand-in */
-	struct xgpu_vulkan_image *field;
+	struct xgpu_vulkan_image *image;
 	uint32_t width, height, depth;
 	int whole;
-	struct xgpu_vulkan_image *stand_in;
+};
+
+static struct
+{
+	/* the table and the atlas (XGPU_STREAM_WORLD_AO_TABLE, _ATLAS), and
+	their stand-ins */
+	struct world_ao_part parts[2];
+	struct xgpu_vulkan_image *stand_ins[2];
 	VkSampler sampler;
 	/* the window's block (zeros: none), and where it is in the ring for
 	the submission it was written for */
@@ -43,23 +53,35 @@ static struct
 	uint64_t number;
 } world_ao;
 
+static struct xgpu_vulkan_image *world_ao_image(uint32_t part, uint32_t width, uint32_t height, uint32_t depth)
+{
+	struct xgpu_vulkan_image_description description;
+
+	memset(&description, 0, sizeof(description));
+	description.type = XGPU_VULKAN_IMAGE_3D;
+	description.format = part == XGPU_STREAM_WORLD_AO_TABLE ? XGPU_VULKAN_FORMAT_RGBA8 : XGPU_VULKAN_FORMAT_R8_SNORM;
+	description.usage = XGPU_VULKAN_USAGE_SAMPLED;
+	description.width = width;
+	description.height = height;
+	description.depth_or_layers = depth;
+	description.levels = 1;
+	return xgpu_vulkan_image_create(&description);
+}
+
 int xgpu_vulkan_world_ao_create(void)
 {
+	/* (a cell far outside; a voxel +127, far outside) */
+	static const unsigned char outside_cell[4] = { 0, 0, 0, 0 };
 	static const signed char far_outside = 127;
-	struct xgpu_vulkan_image_description description;
 	struct xgpu_vulkan_sampler_description sampler;
 
 	memset(&world_ao, 0, sizeof(world_ao));
-	memset(&description, 0, sizeof(description));
-	description.type = XGPU_VULKAN_IMAGE_3D;
-	description.format = XGPU_VULKAN_FORMAT_R8_SNORM;
-	description.usage = XGPU_VULKAN_USAGE_SAMPLED;
-	description.width = description.height = description.depth_or_layers = 1;
-	description.levels = 1;
-	world_ao.stand_in = xgpu_vulkan_image_create(&description);
-	if (!world_ao.stand_in)
+	world_ao.stand_ins[XGPU_STREAM_WORLD_AO_TABLE] = world_ao_image(XGPU_STREAM_WORLD_AO_TABLE, 1, 1, 1);
+	world_ao.stand_ins[XGPU_STREAM_WORLD_AO_ATLAS] = world_ao_image(XGPU_STREAM_WORLD_AO_ATLAS, 1, 1, 1);
+	if (!world_ao.stand_ins[0] || !world_ao.stand_ins[1])
 		return 0;
-	xgpu_vulkan_image_upload(world_ao.stand_in, 0, 0, 0, 0, 0, 1, 1, 1, &far_outside, 1, 1);
+	xgpu_vulkan_image_upload(world_ao.stand_ins[XGPU_STREAM_WORLD_AO_TABLE], 0, 0, 0, 0, 0, 1, 1, 1, outside_cell, 4, 4);
+	xgpu_vulkan_image_upload(world_ao.stand_ins[XGPU_STREAM_WORLD_AO_ATLAS], 0, 0, 0, 0, 0, 1, 1, 1, &far_outside, 1, 1);
 	memset(&sampler, 0, sizeof(sampler));
 	sampler.minify = sampler.magnify = XGPU_VULKAN_FILTER_LINEAR;
 	sampler.mip = XGPU_VULKAN_MIP_NONE;
@@ -70,49 +92,48 @@ int xgpu_vulkan_world_ao_create(void)
 	return world_ao.sampler != VK_NULL_HANDLE;
 }
 
-void xgpu_vulkan_world_ao_field(uint32_t width, uint32_t height, uint32_t depth, uint32_t z_first, uint32_t z_count,
-	const void *voxels)
+static void world_ao_part_release(struct world_ao_part *part)
 {
-	/* (none: let go of) */
-	if (!width || !height || !depth || !voxels)
+	if (part->image)
+		xgpu_vulkan_image_destroy(part->image);
+	memset(part, 0, sizeof(*part));
+}
+
+void xgpu_vulkan_world_ao_field(uint32_t part_index, uint32_t width, uint32_t height, uint32_t depth, uint32_t z_first,
+	uint32_t z_count, const void *data)
+{
+	struct world_ao_part *part;
+	uint32_t texel = XGPU_STREAM_WORLD_AO_TEXEL(part_index);
+
+	/* (none: both let go of) */
+	if (!width || !height || !depth || !data || part_index > XGPU_STREAM_WORLD_AO_ATLAS)
 	{
-		if (world_ao.field)
-			xgpu_vulkan_image_destroy(world_ao.field);
-		world_ao.field = NULL;
-		world_ao.whole = 0;
+		world_ao_part_release(&world_ao.parts[0]);
+		world_ao_part_release(&world_ao.parts[1]);
 		world_ao.number++;
 		return;
 	}
-	/* (a new field: its image made as its first slices come) */
-	if (!world_ao.field || world_ao.width != width || world_ao.height != height || world_ao.depth != depth ||
-		z_first == 0)
+	part = &world_ao.parts[part_index];
+	/* (a new field's table comes first: the atlas before it is another's) */
+	if (part_index == XGPU_STREAM_WORLD_AO_TABLE && z_first == 0)
+		world_ao_part_release(&world_ao.parts[XGPU_STREAM_WORLD_AO_ATLAS]);
+	/* (a new field's part: its image made as its first slices come) */
+	if (!part->image || part->width != width || part->height != height || part->depth != depth || z_first == 0)
 	{
-		struct xgpu_vulkan_image_description description;
-
-		if (world_ao.field)
-			xgpu_vulkan_image_destroy(world_ao.field);
-		memset(&description, 0, sizeof(description));
-		description.type = XGPU_VULKAN_IMAGE_3D;
-		description.format = XGPU_VULKAN_FORMAT_R8_SNORM;
-		description.usage = XGPU_VULKAN_USAGE_SAMPLED;
-		description.width = width;
-		description.height = height;
-		description.depth_or_layers = depth;
-		description.levels = 1;
-		world_ao.field = xgpu_vulkan_image_create(&description);
-		world_ao.width = width;
-		world_ao.height = height;
-		world_ao.depth = depth;
-		world_ao.whole = 0;
+		world_ao_part_release(part);
+		part->image = world_ao_image(part_index, width, height, depth);
+		part->width = width;
+		part->height = height;
+		part->depth = depth;
 		world_ao.number++;
-		if (!world_ao.field)
+		if (!part->image)
 			return;
 	}
-	xgpu_vulkan_image_upload(world_ao.field, 0, 0, 0, 0, z_first, width, height, z_count, voxels, width,
-		width * height);
-	if (z_first + z_count >= depth && !world_ao.whole)
+	xgpu_vulkan_image_upload(part->image, 0, 0, 0, 0, z_first, width, height, z_count, data, width * texel,
+		width * height * texel);
+	if (z_first + z_count >= depth && !part->whole)
 	{
-		world_ao.whole = 1;
+		part->whole = 1;
 		world_ao.number++;
 	}
 }
@@ -128,9 +149,21 @@ void xgpu_vulkan_world_ao_window(const struct xgpu_world_ao_block *block)
 	world_ao.number++;
 }
 
+/* the field's part, where both are whole; else its stand-in */
+static struct xgpu_vulkan_image *world_ao_part_image(uint32_t part)
+{
+	return world_ao.parts[0].image && world_ao.parts[0].whole && world_ao.parts[1].image && world_ao.parts[1].whole ?
+		world_ao.parts[part].image : world_ao.stand_ins[part];
+}
+
 struct xgpu_vulkan_image *xgpu_vulkan_world_ao_field_image(void)
 {
-	return world_ao.field && world_ao.whole ? world_ao.field : world_ao.stand_in;
+	return world_ao_part_image(XGPU_STREAM_WORLD_AO_ATLAS);
+}
+
+struct xgpu_vulkan_image *xgpu_vulkan_world_ao_table_image(void)
+{
+	return world_ao_part_image(XGPU_STREAM_WORLD_AO_TABLE);
 }
 
 VkSampler xgpu_vulkan_world_ao_sampler(void)

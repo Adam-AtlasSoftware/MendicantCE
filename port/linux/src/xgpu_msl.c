@@ -1737,26 +1737,39 @@ static void world_ao_functions(struct xgpu_text *text, int light)
 	/* (the field's: never the lightmap pass's) */
 	if (light != XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP)
 		xgpu_text_append(text,
-		/* the field's distance at a point (world_sdf_sample) */
-		"static inline float world_sdf_distance(constant xgpu_world_ao &w, texture3d<float> world_sdf, float3 point)\n"
+		/* the field's distance at a point (world_sdf_sample): its cell in the
+		table, all outside or all inside the range, or a brick of the atlas
+		whose texel is filtered (xgpu.h) */
+		"static inline float world_sdf_distance(constant xgpu_world_ao &w, texture3d<float> world_sdf,\n"
+		"\ttexture3d<float> world_sdf_table, float3 point)\n"
 		"{\n"
 		"\tconstexpr sampler field_sampler(filter::linear, address::clamp_to_edge, coord::normalized);\n"
-		"\tfloat3 uvw = ((point - w.field[0].xyz) * w.field[0].w + 0.5) / w.field[1].xyz;\n"
-		"\treturn world_sdf.sample(field_sampler, uvw, level(0.0)).r * w.field[1].w;\n"
+		"\tfloat range = %d.0 / w.field[0].w;\n"
+		"\tfloat3 c = clamp((point - w.field[0].xyz) * w.field[0].w, float3(0.0), w.field[1].xyz * %d.0);\n"
+		"\tfloat3 cell = min(floor(c * %.6f), w.field[1].xyz - 1.0);\n"
+		"\tfloat4 entry = floor(world_sdf_table.read(uint3(cell)) * 255.0 + 0.5);\n"
+		"\tif (entry.w != %d.0)\n"
+		"\t\treturn entry.w == %d.0 ? -range : range;\n"
+		"\tfloat3 at = entry.xyz * %d.0 + (c - cell * %d.0) + 0.5;\n"
+		"\treturn world_sdf.sample(field_sampler, at / float3(%d.0, %d.0, w.field[1].w * %d.0), level(0.0)).r * range;\n"
 		"}\n"
 		/* A_sdf(p, n): the cone of taps along the normal */
-		"static inline float world_sdf_occlusion(constant xgpu_world_ao &w, texture3d<float> world_sdf, float3 p, float3 n)\n"
+		"static inline float world_sdf_occlusion(constant xgpu_world_ao &w, texture3d<float> world_sdf,\n"
+		"\ttexture3d<float> world_sdf_table, float3 p, float3 n)\n"
 		"{\n"
 		"\tfloat first = max(1.0 / w.field[0].w, %.6f);\n"
 		"\tfloat occlusion = 0.0;\n"
 		"\tfor (int tap = 0; tap < %d; tap++)\n"
 		"\t{\n"
 		"\t\tfloat h = first * float(1 << tap);\n"
-		"\t\tfloat d = world_sdf_distance(w, world_sdf, p + n * h);\n"
+		"\t\tfloat d = world_sdf_distance(w, world_sdf, world_sdf_table, p + n * h);\n"
 		"\t\tocclusion += (1.0 / float(2 << tap)) * saturate((h - d) / h);\n"
 		"\t}\n"
 		"\treturn 1.0 - saturate(%.6f * occlusion);\n"
-		"}\n", XGPU_WORLD_AO_STEP, XGPU_WORLD_AO_TAPS, XGPU_WORLD_AO_K);
+		"}\n", XGPU_WORLD_SDF_RANGE_VOXELS, XGPU_WORLD_SDF_BRICK, 1.0 / XGPU_WORLD_SDF_BRICK, XGPU_WORLD_SDF_CELL_BRICK,
+		XGPU_WORLD_SDF_CELL_INSIDE, XGPU_WORLD_SDF_BRICK_SPAN, XGPU_WORLD_SDF_BRICK,
+		XGPU_WORLD_SDF_ATLAS * XGPU_WORLD_SDF_BRICK_SPAN, XGPU_WORLD_SDF_ATLAS * XGPU_WORLD_SDF_BRICK_SPAN,
+		XGPU_WORLD_SDF_BRICK_SPAN, XGPU_WORLD_AO_STEP, XGPU_WORLD_AO_TAPS, XGPU_WORLD_AO_K);
 	xgpu_text_append(text, "%s", world_proxies_shapes);
 	xgpu_text_append(text,
 		/* A_prox(p, n): the shapes of the draw's object's others within
@@ -1807,7 +1820,7 @@ static void world_ao_read(struct xgpu_text *text, int light)
 			XGPU_WORLD_AO_FLOOR);
 	else
 		xgpu_text_append(text,
-			"\t\tfloat field = world_sdf_occlusion(world_ao, world_sdf, in.xWorldPosition, world_n);\n"
+			"\t\tfloat field = world_sdf_occlusion(world_ao, world_sdf, world_sdf_table, in.xWorldPosition, world_n);\n"
 			"\t\tfield = mix(field, saturate(field / max(u.world_ao.y, %.6f)), world_ao.parameters[1].x);\n"
 			"\t\tocclusion = mix(1.0, max(mix(1.0, field, world_ao.parameters[0].z) * proxies, %.6f), world_ao.parameters[0].x);\n",
 			XGPU_WORLD_AO_REFERENCE_LEAST, XGPU_WORLD_AO_FLOOR);
@@ -1902,7 +1915,8 @@ char *xgpu_msl_pixel_shader(const struct xgpu_pixel_program *program, const stru
 	{
 		xgpu_text_append(&text, ",\n\tconstant xgpu_world_ao &world_ao [[buffer(%d)]]", XGPU_MSL_BUFFER_WORLD_AO);
 		if (occlusion_light != XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP)
-			xgpu_text_append(&text, ", texture3d<float> world_sdf [[texture(%d)]]", XGPU_MSL_TEXTURE_WORLD_SDF);
+			xgpu_text_append(&text, ", texture3d<float> world_sdf [[texture(%d)]], texture3d<float> world_sdf_table "
+				"[[texture(%d)]]", XGPU_MSL_TEXTURE_WORLD_SDF, XGPU_MSL_TEXTURE_WORLD_SDF_TABLE);
 	}
 	else if (program->ambient_occlusion)
 		xgpu_text_append(&text, ",\n\ttexture2d<float> ambient_occlusion [[texture(%d)]]", XGPU_MSL_TEXTURE_AMBIENT_OCCLUSION);

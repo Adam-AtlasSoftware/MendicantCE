@@ -240,8 +240,17 @@ XGPU_MSL_TEXTURE_WORLD_SDF), and the draw's object its uniforms' world_ao
   models:   A = mix(1, max(mix(1, A_obj, field_fade) A_prox, FLOOR), strength_objects)
   lightmap: A = mix(1, max(A_prox, FLOOR), strength_level)          (never the field)
 
-d is the field's trilinear sample times its range, read as
-world_sdf_sample reads it (world_sdf_bake.c); occlusion_i is
+d is the field's distance, read as world_sdf_sample reads it
+(world_sdf_bake.c): the field is sparse (world_sdf.h), a table of cells
+(XGPU_SPIRV_BINDING_WORLD_SDF_TABLE, XGPU_MSL_TEXTURE_WORLD_SDF_TABLE: RGBA8,
+an atlas brick's x, y, z and the cell's kind, XGPU_WORLD_SDF_CELL_*) of
+XGPU_WORLD_SDF_BRICK voxels' steps a side, and an atlas of bricks of
+XGPU_WORLD_SDF_BRICK_SPAN voxels a side, XGPU_WORLD_SDF_ATLAS by
+XGPU_WORLD_SDF_ATLAS a layer (the block's field[1].w layers); at p, in
+voxels c = clamp((p - field[0].xyz) field[0].w, 0, 8 field[1].xyz), its cell
+min(floor(c / 8), field[1].xyz - 1): a cell outside is +range, inside
+-range, a brick its texel at its place times 9 plus c - 8 cell plus a half,
+filtered, times range = RANGE_VOXELS / field[0].w. occlusion_i is
 world_proxy_occlusion's (world_proxies.c), reach_i world_proxy_reach's;
 world_ao.c's world_ao_occlusion is the whole of it on the CPU, line for
 line. With XGPU_AMBIENT_OCCLUSION_WORLD_VIEW too (debug.world_ao_view) the
@@ -255,6 +264,14 @@ draw shows A in grey. */
 #define XGPU_WORLD_AO_REFERENCE_LEAST 0.25f
 #define XGPU_WORLD_AO_REACH_FADE 0.25f
 #define XGPU_WORLD_AO_FLOOR 0.2f
+/* the field's (world_sdf.h's WORLD_SDF_*: d3d8_device.c checks they agree) */
+#define XGPU_WORLD_SDF_BRICK 8
+#define XGPU_WORLD_SDF_BRICK_SPAN 9
+#define XGPU_WORLD_SDF_ATLAS 16
+#define XGPU_WORLD_SDF_RANGE_VOXELS 12
+#define XGPU_WORLD_SDF_CELL_OUTSIDE 0
+#define XGPU_WORLD_SDF_CELL_INSIDE 1
+#define XGPU_WORLD_SDF_CELL_BRICK 2
 /* (world_proxies.c's WORLD_PROXIES_PI) */
 #define XGPU_WORLD_AO_PI 3.14159265358979f
 /* the block as the emitters declare it (xgpu_stream.h's struct

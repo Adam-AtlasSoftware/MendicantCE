@@ -135,8 +135,8 @@ the block the opaque surfaces' ambient light reads from here on (the
 field's place, the window's proxies; NULL none), and slices of the field
 uploaded (width 0: released) */
 void xgpu_backend_world_ao_window(const struct xgpu_world_ao_block *block);
-void xgpu_backend_world_ao_field(unsigned long width, unsigned long height, unsigned long depth,
-	unsigned long z_first, unsigned long z_count, const void *voxels);
+void xgpu_backend_world_ao_field(int part, unsigned long width, unsigned long height, unsigned long depth,
+	unsigned long z_first, unsigned long z_count, const void *data);
 BOOL xgpu_backend_display_hdr(float *headroom);
 BOOL xgpu_backend_display_white(float *nits);
 

@@ -110,9 +110,12 @@ shade every one). */
 enum
 {
 	WORLD_AO_TEST_SHAPES = 8,
-	WORLD_AO_TEST_WIDTH = 96,
-	WORLD_AO_TEST_HEIGHT = 96,
-	WORLD_AO_TEST_DEPTH = 48,
+	/* (its cells; a whole grid of voxels the cells' steps and one more) */
+	WORLD_AO_TEST_WIDTH = 12,
+	WORLD_AO_TEST_HEIGHT = 12,
+	WORLD_AO_TEST_DEPTH = 6,
+	WORLD_AO_TEST_VOXELS = (WORLD_SDF_BRICK * WORLD_AO_TEST_WIDTH + 1) * (WORLD_SDF_BRICK * WORLD_AO_TEST_HEIGHT + 1) *
+		(WORLD_SDF_BRICK * WORLD_AO_TEST_DEPTH + 1),
 	WORLD_AO_TEST_OWNER = 200,
 };
 
@@ -134,6 +137,8 @@ static void world_ao_test_parse(const char *setting)
 
 	signed char *voxels = world_ao_test.voxels;
 
+	free(world_ao_test.volume.cells);
+	free(world_ao_test.volume.bricks);
 	memset(&world_ao_test, 0, sizeof(world_ao_test));
 	world_ao_test.voxels = voxels;
 	snprintf(world_ao_test.text, sizeof(world_ao_test.text), "%s", setting);
@@ -189,26 +194,26 @@ static void world_ao_test_field(float const camera_position[3])
 	struct world_sdf_header *header = &world_ao_test.volume.header;
 	float const *plane = world_ao_test.plane;
 	float length = sqrtf(plane[0] * plane[0] + plane[1] * plane[1] + plane[2] * plane[2]);
-	unsigned long x, y, z;
+	unsigned long x, y, z, row = WORLD_SDF_BRICK * WORLD_AO_TEST_WIDTH + 1, rows = WORLD_SDF_BRICK * WORLD_AO_TEST_HEIGHT + 1;
 
 	if (!world_ao_test.voxels)
-		world_ao_test.voxels = malloc(WORLD_AO_TEST_WIDTH * WORLD_AO_TEST_HEIGHT * WORLD_AO_TEST_DEPTH);
+		world_ao_test.voxels = malloc(WORLD_AO_TEST_VOXELS);
 	if (!world_ao_test.voxels)
 		return;
+	memset(header, 0, sizeof(*header));
 	header->width = WORLD_AO_TEST_WIDTH;
 	header->height = WORLD_AO_TEST_HEIGHT;
 	header->depth = WORLD_AO_TEST_DEPTH;
 	header->voxel = (float)WORLD_SDF_FINEST_VOXEL_MILLI / 1000.0f;
 	header->range = WORLD_SDF_RANGE_VOXELS * header->voxel;
-	header->origin[0] = camera_position[0] - 0.5f * WORLD_AO_TEST_WIDTH * header->voxel;
-	header->origin[1] = camera_position[1] - 0.5f * WORLD_AO_TEST_HEIGHT * header->voxel;
-	header->origin[2] = camera_position[2] - 0.5f * WORLD_AO_TEST_DEPTH * header->voxel;
-	world_ao_test.volume.voxels = world_ao_test.voxels;
-	for (z = 0; z < WORLD_AO_TEST_DEPTH; z++)
+	header->origin[0] = camera_position[0] - 0.5f * (float)(WORLD_SDF_BRICK * WORLD_AO_TEST_WIDTH) * header->voxel;
+	header->origin[1] = camera_position[1] - 0.5f * (float)(WORLD_SDF_BRICK * WORLD_AO_TEST_HEIGHT) * header->voxel;
+	header->origin[2] = camera_position[2] - 0.5f * (float)(WORLD_SDF_BRICK * WORLD_AO_TEST_DEPTH) * header->voxel;
+	for (z = 0; z < WORLD_SDF_BRICK * WORLD_AO_TEST_DEPTH + 1; z++)
 	{
-		for (y = 0; y < WORLD_AO_TEST_HEIGHT; y++)
+		for (y = 0; y < rows; y++)
 		{
-			for (x = 0; x < WORLD_AO_TEST_WIDTH; x++)
+			for (x = 0; x < row; x++)
 			{
 				float point[3], distance;
 
@@ -217,13 +222,15 @@ static void world_ao_test_field(float const camera_position[3])
 				point[2] = header->origin[2] + (float)z * header->voxel;
 				distance = length > 0.0f ? (plane[0] * point[0] + plane[1] * point[1] + plane[2] * point[2] -
 					plane[3]) / length : header->range;
-				world_ao_test.voxels[(z * WORLD_AO_TEST_HEIGHT + y) * WORLD_AO_TEST_WIDTH + x] =
-					world_sdf_encode(distance, header->range);
+				world_ao_test.voxels[(z * rows + y) * row + x] = world_sdf_encode(distance, header->range);
 			}
 		}
 	}
-	halo_world_ao_field(WORLD_AO_TEST_WIDTH, WORLD_AO_TEST_HEIGHT, WORLD_AO_TEST_DEPTH, 0, WORLD_AO_TEST_DEPTH,
-		world_ao_test.voxels);
+	free(world_ao_test.volume.cells);
+	free(world_ao_test.volume.bricks);
+	if (!world_sdf_pack(&world_ao_test.volume, world_ao_test.voxels))
+		return;
+	world_sdf_upload(&world_ao_test.volume);
 	world_ao_test.uploaded = 1;
 }
 
@@ -267,7 +274,10 @@ static void world_ao_field_place(struct world_sdf_header const *header, float fi
 	field[1][0] = (float)header->width;
 	field[1][1] = (float)header->height;
 	field[1][2] = (float)header->depth;
-	field[1][3] = header->range;
+	/* (the atlas's layers, at least one: as world_sdf.c uploads it) */
+	field[1][3] = (float)((header->brick_count + WORLD_SDF_ATLAS_LAYER - 1) / WORLD_SDF_ATLAS_LAYER);
+	if (field[1][3] < 1.0f)
+		field[1][3] = 1.0f;
 }
 
 void world_ao_window_begin(short local_player_index, short rasterizer_target, float const camera_position[3])
