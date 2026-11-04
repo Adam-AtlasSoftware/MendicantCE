@@ -164,6 +164,12 @@ static void loading_set(const struct host_render_backend *backend, int active)
 		loading.cost_index = 0;
 		loading.frame.started_ns = monotonic_nanoseconds();
 		loading.next = 0;
+		/* The guest waits for this record (xgpu_backend_loading), so the
+		first picture is deferred as every later one is: drawn once the
+		guest no longer waits, or LOADING_DEFERRED_MOST_NS from now. Drawn
+		here, the picture's first build (24 ms of the render thread's) was
+		the load's own wait. Until then the display keeps the last frame. */
+		loading.drawn = loading.frame.started_ns;
 	}
 #ifdef HALO_VR
 	host_vr_loading_set(active);
