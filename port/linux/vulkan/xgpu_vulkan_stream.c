@@ -73,6 +73,8 @@ its swapchain.
 /* (the occlusion's set, as the shaders read it) */
 _Static_assert(XGPU_SPIRV_SET_OCCLUSION == XGPU_VULKAN_SET_OCCLUSION &&
 	XGPU_SPIRV_BINDING_AMBIENT_OCCLUSION == XGPU_VULKAN_BINDING_OCCLUSION, "display.ambient_occlusion's set");
+_Static_assert(XGPU_SPIRV_BINDING_WORLD_SDF == XGPU_VULKAN_BINDING_WORLD_SDF &&
+	XGPU_SPIRV_BINDING_WORLD_AO == XGPU_VULKAN_BINDING_WORLD_AO, "display.ambient_occlusion \"world\"'s bindings");
 
 /* the mirror's segments: 4 MB of the contiguous window each */
 #define MIRROR_SEGMENT_SIZE 0x400000u
