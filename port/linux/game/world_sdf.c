@@ -121,7 +121,8 @@ int halo_server_mode(void);
 unsigned long long SDL_GetTicksNS(void);
 /* the guest runtime's system calls (port/android/guest/runtime) */
 long __guest_syscall(long long number, long long a, long long b, long long c, long long d, long long e, long long f);
-/* (sys/stat.h's, which the game's strict ANSI hides) */
+/* (sys/stat.h's, which the game's strict ANSI hides; not translated, so
+given the folder's whole path) */
 int mkdir(const char *path, unsigned int mode);
 void halo_world_ao_field(unsigned long width, unsigned long height, unsigned long depth, unsigned long z_first,
 	unsigned long z_count, signed char const *voxels);
@@ -554,8 +555,10 @@ static char const *sdf_folder(void)
 	return folder;
 }
 
-/* <data>/world_sdf/<map>_<bsp>.wsdf (the map's name kept to letters,
-digits, - and _: a Custom Edition map's path's last part) */
+/* <data>/world_sdf/<map>_<bsp>.wsdf, named as the game names its files,
+from the data root (the game's fopen, remove and rename find them there:
+port/linux/include/stdio.h); the map's name kept to letters, digits, - and
+_ (a Custom Edition map's path's last part) */
 static void sdf_path(struct sdf_key const *key, char *path, size_t size)
 {
 	char name[64];
@@ -575,7 +578,7 @@ static void sdf_path(struct sdf_key const *key, char *path, size_t size)
 			(letter >= '0' && letter <= '9') || letter == '-' ? letter : '_';
 	}
 	name[index] = 0;
-	snprintf(path, size, "%s/%s_%d.wsdf", sdf_folder(), name, (int)key->bsp);
+	snprintf(path, size, "world_sdf/%s_%d.wsdf", name, (int)key->bsp);
 }
 
 static int sdf_key_same(struct sdf_key const *a, struct sdf_key const *b)
