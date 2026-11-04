@@ -42,6 +42,8 @@ it could not keep (none for a journal to keep), or NULL; freed with
 halo_gpu_journal_free */
 unsigned int *halo_gpu_journal_take(unsigned int *count, unsigned int *unknown);
 void halo_gpu_journal_free(unsigned int *words);
+/* the journal's form (what a record of it is kept for) */
+unsigned int halo_gpu_journal_form(void);
 /* played back, in a preparation begun: 1, or 0 if the words are malformed;
 the objects not found */
 int halo_gpu_journal_replay(unsigned int const *words, unsigned int count,

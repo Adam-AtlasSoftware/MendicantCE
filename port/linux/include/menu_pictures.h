@@ -118,6 +118,10 @@ notes): those to render this run, in the order they are rendered, into
 poses; how many. None if nothing is to be rendered, or in runs nobody
 watches, or with display.menu_pictures off */
 long menu_pictures_wanted(long *poses, long maximum);
+/* after it, a pose of each stock map the player has (a map made for it, not
+modded), whose preparation the pass records where it has none: none in runs
+nobody watches, as with the pictures */
+long menu_pictures_maps(long *poses, long maximum);
 /* a picture's high-res image, once it is ready, else 0 (the original is
 drawn) */
 unsigned int menu_pictures_texture(long pose, unsigned long *levels);

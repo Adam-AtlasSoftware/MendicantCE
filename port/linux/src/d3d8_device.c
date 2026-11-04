@@ -5716,18 +5716,18 @@ enum
 	_journal_object_device,
 	/* (value: its address, in the contiguous memory) */
 	_journal_object_memory,
-	/* (value: the address of the game's variable that holds it: an object
-	the game made, in memory of its own) */
-	_journal_object_held,
+	/* (value: the device's target, as _device's, whose memory it is: a
+	texture or surface the game made over it, in memory of its own; its
+	words, format and size) */
+	_journal_object_view,
 };
-
-/* the guest image's data, where the game's variables are (the linker's:
-port/android/guest/guest.ld) */
-extern char __guest_data_start[], __guest_image_end[];
 
 struct journal_object
 {
 	uint32_t kind, value, check;
+	/* a texture's or surface's format and size words (a stand-in's, where
+	it is not found: journal_stand_in) */
+	uint32_t format, size;
 };
 
 struct journal_state
@@ -5764,10 +5764,6 @@ static struct
 	unsigned long unknown;
 	const struct halo_gpu_journal_bitmaps *bitmaps;
 	unsigned char pages[MIRROR_PAGE_COUNT / 8];
-	/* the objects the game's variables hold, looked for: each one's address
-	and its variable's */
-	unsigned long holders[64][2];
-	int holder_count;
 } journal;
 
 /* the textures, surfaces and palettes made, in order, and the vertex shaders
@@ -5860,46 +5856,139 @@ struct journal_saved
 
 static struct journal_saved saved;
 
-static BOOL journal_front_end(const char *word)
+/* a texture's or surface's format and size words */
+static void journal_object_shape(const void *object, struct journal_object *to)
 {
-	return (word >= (const char *)&journal && word < (const char *)(&journal + 1)) ||
-		(word >= (const char *)&device && word < (const char *)(&device + 1)) ||
-		(word >= (const char *)&preparation && word < (const char *)(&preparation + 1)) ||
-		(word >= (const char *)&saved && word < (const char *)(&saved + 1));
+	const DWORD *fields = object;
+	uint32_t type = fields[0] & D3DCOMMON_TYPE_MASK;
+
+	if (type == D3DCOMMON_TYPE_TEXTURE || type == D3DCOMMON_TYPE_SURFACE)
+	{
+		to->format = fields[3];
+		to->size = fields[4];
+	}
 }
 
-/* the first of the game's variables that holds the object (its address),
-or 0; the objects looked for remembered */
-static unsigned long journal_holder(const void *object)
+/* a texture or surface of an object's type, format and size, where the
+object itself is not found (one the game made as the walk drew, which a
+played back preparation, drawing no walk, has not made yet): what a draw's
+pipeline knows of it. Made once, and kept for the next. */
+#define JOURNAL_STAND_INS 32
+static struct
 {
-	const DWORD *word;
+	uint32_t check, format, size;
+	void *object;
+	/* the texture it is (a surface: its level 0's), made for the first of
+	its format and size: a texture and a surface alike are one memory, as a
+	target drawn into and then sampled is */
+	D3DTexture *texture;
+	unsigned long width, height;
+	D3DFORMAT d3d_format;
+	BOOL cube_map;
+} journal_stand_ins[JOURNAL_STAND_INS];
+
+static void *journal_stand_in(const struct journal_object *object)
+{
+	struct xgpu_texture_description description;
+	uint32_t type = object->check & D3DCOMMON_TYPE_MASK;
+	D3DFORMAT format = (D3DFORMAT)((object->format & D3DFORMAT_FORMAT_MASK) >> D3DFORMAT_FORMAT_SHIFT);
+	D3DTexture *texture = NULL;
+	void *made = NULL;
+	int index, other;
+
+	if ((type != D3DCOMMON_TYPE_TEXTURE && type != D3DCOMMON_TYPE_SURFACE) || !object->format)
+		return NULL;
+	for (index = 0; index < JOURNAL_STAND_INS && journal_stand_ins[index].object; index++)
+	{
+		if (journal_stand_ins[index].check == object->check && journal_stand_ins[index].format == object->format &&
+			journal_stand_ins[index].size == object->size)
+			return journal_stand_ins[index].object;
+	}
+	if (index == JOURNAL_STAND_INS)
+		return NULL;
+	xgpu_texture_describe(object->format, object->size, &description);
+	if (!description.width || !description.height || description.depth > 1 ||
+		(description.cube_map && type == D3DCOMMON_TYPE_SURFACE))
+	{
+		platform_log("GPU: journal: no stand-in for format %08lx size %08lx (%lux%lux%lu)",
+			(unsigned long)object->format, (unsigned long)object->size, description.width, description.height,
+			description.depth);
+		return NULL;
+	}
+	for (other = 0; other < index && !texture; other++)
+	{
+		if (journal_stand_ins[other].width == description.width && journal_stand_ins[other].height ==
+			description.height && journal_stand_ins[other].d3d_format == format &&
+			journal_stand_ins[other].cube_map == description.cube_map)
+			texture = journal_stand_ins[other].texture;
+	}
+	if (!texture && description.cube_map &&
+		D3DDevice_CreateCubeTexture(description.width, description.levels, 0, format, D3DPOOL_DEFAULT,
+			(D3DCubeTexture **)&texture) != S_OK)
+		return NULL;
+	if (!texture && D3DDevice_CreateTexture(description.width, description.height, description.levels, 0, format,
+		D3DPOOL_DEFAULT, &texture) != S_OK)
+		return NULL;
+	if (type == D3DCOMMON_TYPE_SURFACE)
+	{
+		if (D3DTexture_GetSurfaceLevel(texture, 0, (D3DSurface **)&made) != S_OK)
+			return NULL;
+		((DWORD *)made)[3] = object->format;
+		((DWORD *)made)[4] = object->size;
+	}
+	else
+	{
+		made = texture;
+		((DWORD *)made)[3] = object->format;
+		((DWORD *)made)[4] = object->size;
+	}
+	journal_stand_ins[index].check = object->check;
+	journal_stand_ins[index].format = object->format;
+	journal_stand_ins[index].size = object->size;
+	journal_stand_ins[index].object = made;
+	journal_stand_ins[index].texture = texture;
+	journal_stand_ins[index].width = description.width;
+	journal_stand_ins[index].height = description.height;
+	journal_stand_ins[index].d3d_format = format;
+	journal_stand_ins[index].cube_map = description.cube_map;
+	return made;
+}
+
+/* a texture or surface over one of the device's targets, as the game made
+one (its words), its memory the target's now */
+static struct
+{
+	struct journal_object object;
+	D3DSurface header;
+} journal_views[JOURNAL_STAND_INS];
+
+static void *journal_view(const struct journal_object *object)
+{
+	const D3DSurface *target = object->value == 0 ? &device.back_buffer : object->value == 1 ? &device.depth_buffer :
+		object->value == 2 ? &ambient_occlusion.depth : NULL;
 	int index;
 
-	for (index = 0; index < journal.holder_count; index++)
+	if (!target || !target->Data)
+		return NULL;
+	for (index = 0; index < JOURNAL_STAND_INS && journal_views[index].object.kind; index++)
 	{
-		if (journal.holders[index][0] == (unsigned long)object)
-			return journal.holders[index][1];
-	}
-	for (word = (const DWORD *)(((unsigned long)__guest_data_start + 3) & ~3UL); (const char *)(word + 1) <= __guest_image_end; word++)
-	{
-		/* (not the front end's own, which hold what is bound now) */
-		if (*word == (DWORD)(unsigned long)object && !journal_front_end((const char *)word))
+		if (!memcmp(&journal_views[index].object, object, sizeof(*object)))
 			break;
 	}
-	if ((const char *)(word + 1) > __guest_image_end)
-		word = NULL;
-	if (journal.holder_count < (int)(sizeof(journal.holders) / sizeof(journal.holders[0])))
-	{
-		journal.holders[journal.holder_count][0] = (unsigned long)object;
-		journal.holders[journal.holder_count][1] = (unsigned long)word;
-		journal.holder_count++;
-	}
-	return (unsigned long)word;
+	if (index == JOURNAL_STAND_INS)
+		return NULL;
+	journal_views[index].object = *object;
+	memset(&journal_views[index].header, 0, sizeof(journal_views[index].header));
+	journal_views[index].header.Common = (object->check & D3DCOMMON_TYPE_MASK) | 1;
+	journal_views[index].header.Data = target->Data;
+	journal_views[index].header.Format = object->format;
+	journal_views[index].header.Size = object->size;
+	return &journal_views[index].header;
 }
 
 static void journal_identify(const void *object, struct journal_object *to)
 {
-	unsigned long tag_index, bitmap_index, index, slot;
+	unsigned long tag_index, bitmap_index, index;
 
 	memset(to, 0, sizeof(*to));
 	if (!object)
@@ -5924,6 +6013,7 @@ static void journal_identify(const void *object, struct journal_object *to)
 			to->kind = _journal_object_created;
 			to->value = (uint32_t)index;
 			to->check = journal_object_check(object);
+			journal_object_shape(object, to);
 			return;
 		}
 	}
@@ -5932,14 +6022,23 @@ static void journal_identify(const void *object, struct journal_object *to)
 		to->kind = _journal_object_memory;
 		to->value = (uint32_t)(unsigned long)object;
 		to->check = journal_object_check(object);
+		journal_object_shape(object, to);
 		return;
 	}
-	if ((slot = journal_holder(object)) != 0)
 	{
-		to->kind = _journal_object_held;
-		to->value = (uint32_t)slot;
-		to->check = journal_object_check(object);
-		return;
+		const DWORD *fields = object;
+		uint32_t type = fields[0] & D3DCOMMON_TYPE_MASK;
+
+		if ((type == D3DCOMMON_TYPE_TEXTURE || type == D3DCOMMON_TYPE_SURFACE) && fields[1] &&
+			(fields[1] == device.back_buffer.Data || fields[1] == device.depth_buffer.Data ||
+			fields[1] == ambient_occlusion.depth.Data))
+		{
+			to->kind = _journal_object_view;
+			to->value = fields[1] == device.back_buffer.Data ? 0 : fields[1] == device.depth_buffer.Data ? 1 : 2;
+			to->check = journal_object_check(object);
+			journal_object_shape(object, to);
+			return;
+		}
 	}
 	if (journal.unknown < 8)
 		platform_log("GPU: journal: unknown object %p (common %08lx format %08lx; device %p)", object,
@@ -5966,32 +6065,24 @@ static void *journal_resolve(const struct journal_object *object)
 	case _journal_object_created:
 		/* (its number's, or failing that the first of its type and format:
 		what a draw's pipeline knows of it) */
+		/* (its number's, or failing that one like it) */
 		if (object->value < resource_count && resources[object->value] &&
 			journal_object_check(resources[object->value]) == object->check)
 		{
 			found = resources[object->value];
 			break;
 		}
-		for (index = 0; index < resource_count && !found; index++)
-		{
-			if (resources[index] && journal_object_check(resources[index]) == object->check)
-				found = resources[index];
-		}
+		found = journal_stand_in(object);
 		break;
-	case _journal_object_held:
-		if (object->value >= (unsigned long)__guest_data_start && object->value + sizeof(DWORD) <= (unsigned long)__guest_image_end &&
-			!(object->value & 3))
-		{
-			void *held = (void *)(unsigned long)*(const DWORD *)(unsigned long)object->value;
-
-			if (held && journal_object_check(held) == object->check)
-				found = held;
-		}
+	case _journal_object_view:
+		found = journal_view(object);
 		break;
 	case _journal_object_memory:
 		if (platform_is_contiguous((const void *)(unsigned long)object->value) &&
 			journal_object_check((const void *)(unsigned long)object->value) == object->check)
 			found = (void *)(unsigned long)object->value;
+		if (!found)
+			found = journal_stand_in(object);
 		break;
 	}
 	if (!found)
@@ -6203,6 +6294,15 @@ unsigned int *halo_gpu_journal_take(unsigned int *count, unsigned int *unknown)
 	journal.words = NULL;
 	journal.count = journal.capacity = 0;
 	return (unsigned int *)words;
+}
+
+/* the journal's form: a change to what an entry holds or how it is written
+makes it 2, 3 and so on; its state's size is in it as well */
+#define JOURNAL_FORM 3
+
+unsigned int halo_gpu_journal_form(void)
+{
+	return JOURNAL_FORM << 16 | (unsigned int)JOURNAL_STATE_WORDS;
 }
 
 void halo_gpu_journal_free(unsigned int *words)
