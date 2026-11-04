@@ -12,8 +12,9 @@ SOURCE = 'port/linux/game/render_enumerate.c'
 def generated(fault=None):
     source = read(SOURCE)
     table = re.search(r"^static struct\n\{\n\tshort count;.*?^\} object_effects;", source, re.M | re.S).group(0)
-    code = '\n'.join(function(source, name) for name in ('object_effect_drawn', 'object_effects_draw',
-                                                         'first_person_model_draw', 'first_person_models_draw'))
+    code = '\n'.join(function(source, name) for name in ('unlit_effects_drawn', 'object_effect_drawn',
+                                                         'object_effects_draw', 'first_person_model_draw',
+                                                         'first_person_models_draw'))
     if fault == 'value':
         code = mutated(code, 'object_effects.drawn[index].value == value', 'TRUE')
     if fault == 'reset':
@@ -21,6 +22,8 @@ def generated(fault=None):
                        '\ttag_iterator_new(&iterator, OBJECT_DEFINITION_TAG);')
     if fault == 'model':
         code = mutated(code, 'object_effect_drawn(model_index, _object_effect_first_person, 0)', 'FALSE')
+    if fault == 'lit':
+        code = mutated(code, 'return !pass_dynamic_lights();', 'return TRUE;')
     if fault == 'full':
         code = mutated(code, '\t\tobject_effects.count++;\n\t}\n\treturn FALSE;',
                        '\t\tobject_effects.count++;\n\t}\n\treturn object_effects.count >= MAXIMUM_OBJECT_EFFECTS;')
@@ -30,14 +33,14 @@ def generated(fault=None):
     return (('enums.inc', enums), ('under_test.inc', code))
 
 
-@pytest.mark.parametrize('case', ['objects', 'passes', 'first-person', 'full'])
+@pytest.mark.parametrize('case', ['objects', 'passes', 'first-person', 'full', 'lit'])
 def test_object_effects(case):
     status, output = run(build('enumerate_object_effects', generated()), case)
     assert status == 0, output
 
 
 @pytest.mark.parametrize('fault,case', [('value', 'objects'), ('reset', 'passes'), ('model', 'first-person'),
-                                        ('full', 'full')])
+                                        ('full', 'full'), ('lit', 'lit')])
 def test_negative(fault, case):
     status, output = run(build('enumerate_object_effects', generated(fault)), case)
     assert status == CHECK_FAILED, output
