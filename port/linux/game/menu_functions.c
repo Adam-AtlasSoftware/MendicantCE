@@ -6807,6 +6807,8 @@ static boolean browser_initialize(struct widget_instance *screen, struct event_r
 	/* (the tabs and their prompts, but for Join by Link's list, whose games
 	are its invites) */
 	visible_set(named(screen, "browser_tabs", 0), !link);
+	/* (CLEAR SEARCH as the searches empty the list: browser_clear_show) */
+	visible_set(named(screen, "browser_clear_bar", 0), FALSE);
 	visible_set(named(screen, "tab_prompt_previous", 0), !link);
 	visible_set(named(screen, "tab_prompt_next", 0), !link);
 	{
@@ -8338,7 +8340,8 @@ static void browser_searches_show(struct widget_instance *list)
 }
 
 /* the list's CLEAR SEARCH: shown while the searches hide every game it
-would list (the focus on it, as there is no row) */
+would list (the focus on it as it comes, as there is no row, but for the
+titles' while a search is typed into) */
 static void browser_clear_show(struct widget_instance *list, short rows)
 {
 	struct widget_instance *bar = named(list, "browser_clear_bar", 0);
@@ -8346,15 +8349,15 @@ static void browser_clear_show(struct widget_instance *list, short rows)
 
 	if (!bar)
 		return;
+	if (shown && !bar->visible && list->focused_child && strcmp(list->focused_child->name, "join_game_header"))
+		list_focus_child(list, bar);
 	bar->visible = shown;
 	bar->disabled = !shown;
-	if (shown && list->focused_child != bar && list->focused_child &&
-		strcmp(list->focused_child->name, "join_game_header"))
-	{
-		list_focus_child(list, bar);
-	}
-	else if (!shown && list->focused_child == bar)
+	if (!shown && list->focused_child == bar)
 		browser_focus(list, NONE);
+	/* (its highlight lit only while the list's focus is on it) */
+	if (bar->child)
+		bar->child->animation.current_frame_index = (short)(list->focused_child == bar);
 }
 
 /* the favorites offline the searches hide, left out (and counted) */
