@@ -438,11 +438,19 @@ static void cached_map_files_make_room(
 /* ---------- globals */
 
 static struct cache_file_runtime_globals cache_file_globals;
+/* port: (cache_files_open_cache_files, cache_files_unpack_update) */
+static boolean cached_map_file_adopt(
+	short map_file_index);
 /* port: the most the cache files hold together (map_cache_budget), and
 whether the copy in progress took the texture cache's memory for its
 buffers (a copy has buffers of its own: map_cache_copy_buffer) */
 static unsigned long long cached_map_files_budget;
 static boolean cache_copy_buffer_stolen = TRUE;
+/* port: the slots a worker is unpacking a map into (port/linux/src/map_unpack.c),
+the game's thread's: no map until the worker is done and the slot passes
+the check a slot gets as the game starts (cached_map_file_adopt) */
+static boolean cached_map_file_unpacking[NUMBER_OF_CACHED_MAP_FILES];
+static char cached_map_file_unpacking_name[NUMBER_OF_CACHED_MAP_FILES][32];
 
 /* ---------- public code */
 
@@ -677,6 +685,9 @@ boolean cache_files_precache_map_begin(
 
 		return FALSE;
 	}
+	/* port: a map a worker is unpacking is waited for, never copied a
+	second time into another slot (port/linux/src/map_unpack.c) */
+	cache_files_unpack_wait(map_name);
 	if (!cache_files_precache_map_loaded(map_name))
 	{
 		struct cache_file_header header;
@@ -1148,10 +1159,7 @@ static void cache_files_verify_language(
 static void cache_files_open_cache_files(
 	void)
 {
-	struct cache_file_header dvd_header;
 	char path[256];
-	char map_path[256]; /* port: the slot's source (cache_slot_source_matches) */
-	boolean valid;
 	short map_file_index;
 
 	cached_map_files_delete(NUMBER_OF_CACHED_MAP_FILES);
@@ -1163,10 +1171,8 @@ static void cache_files_open_cache_files(
 		HANDLE file;
 
 		/* port: a cache file is its map's size (cache_files_precache_map_begin),
-		not its slot's; one not a whole map of the maps folder is emptied,
-		which gives its space back (the six of fixed sizes of the builds
-		before keep their maps) */
-		valid = FALSE;
+		not its slot's; one not a whole map of the maps folder is emptied
+		(cached_map_file_adopt) */
 		cached_map_file_get_path(map_file_index, path);
 		file = CreateFileA(
 			path,
@@ -1191,42 +1197,65 @@ static void cache_files_open_cache_files(
 		{
 			continue;
 		}
-		if (cached_map_file_get_size(map_file_index) >= (long)sizeof(struct cache_file_header))
-		{
-			char *cache_map_name = cached_map_file_get(map_file_index)->header.name;
-
-			cached_map_file_read_header(map_file_index);
-			/* port: and the map file the slot was copied from is still the
-			one in the maps folder, not another of the same name and header
-			(a modded map, which keeps the checksum): the Xbox's disc never
-			changed */
-			cache_slot_source_load(map_file_index);
-			cache_file_get_map_path(cache_map_name, map_path);
-			valid = map_file->file != INVALID_HANDLE_VALUE &&
-				cache_map_name[0] &&
-				cached_map_file_get_size(map_file_index) >= map_file->header.file_length &&
-				cache_file_read_header_from_dvd(cache_map_name, &dvd_header) &&
-				map_file->header.checksum == dvd_header.checksum &&
-				cache_slot_source_matches(map_file_index, map_path, cache_map_name,
-					(unsigned long)map_file->header.checksum, (unsigned long)map_file->header.file_length);
-		}
-		if (valid)
-		{
-			continue;
-		}
-
-		cache_slot_source_forget(map_file_index); /* port: (above) */
-		memset(
-			&map_file->header,
-			0,
-			sizeof(struct cache_file_header));
-		if (map_file->file != INVALID_HANDLE_VALUE)
-		{
-			cached_map_file_resize(map_file_index, 0);
-		}
+		cached_map_file_adopt(map_file_index);
 	}
 
 	return;
+}
+
+/* port: a slot file taken as its map only if it is a whole map of the maps
+folder: its header read, the map's in the maps folder (its checksum), and
+the map file the slot was copied from still the one in the maps folder,
+not another of the same name and header (a modded map, which keeps the
+checksum: the Xbox's disc never changed), with its source's mark of a
+whole copy (cache_slot_source_matches). Else it is emptied, which gives
+its space back (the six of fixed sizes of the builds before keep their
+maps). As the game starts, and as a slot a worker unpacked is taken back
+(cache_files_unpack_update) */
+static boolean cached_map_file_adopt(
+	short map_file_index)
+{
+	struct cached_map_file *map_file = cached_map_file_get(map_file_index);
+	struct cache_file_header dvd_header;
+	char map_path[256];
+	boolean valid = FALSE;
+
+	memset(&map_file->header, 0, sizeof(struct cache_file_header));
+	if (map_file->file == INVALID_HANDLE_VALUE)
+	{
+		return FALSE;
+	}
+	if (cached_map_file_get_size(map_file_index) >= (long)sizeof(struct cache_file_header))
+	{
+		char *cache_map_name = map_file->header.name;
+
+		cached_map_file_read_header(map_file_index);
+		cache_slot_source_load(map_file_index);
+		cache_file_get_map_path(cache_map_name, map_path);
+		valid = map_file->file != INVALID_HANDLE_VALUE &&
+			cache_map_name[0] &&
+			cached_map_file_get_size(map_file_index) >= map_file->header.file_length &&
+			cache_file_read_header_from_dvd(cache_map_name, &dvd_header) &&
+			map_file->header.checksum == dvd_header.checksum &&
+			cache_slot_source_matches(map_file_index, map_path, cache_map_name,
+				(unsigned long)map_file->header.checksum, (unsigned long)map_file->header.file_length);
+	}
+	if (valid)
+	{
+		return TRUE;
+	}
+
+	cache_slot_source_forget(map_file_index);
+	memset(
+		&map_file->header,
+		0,
+		sizeof(struct cache_file_header));
+	if (map_file->file != INVALID_HANDLE_VALUE)
+	{
+		cached_map_file_resize(map_file_index, 0);
+	}
+
+	return FALSE;
 }
 
 static void CALLBACK cache_file_read_io_completion_routine(
@@ -1428,6 +1457,7 @@ static short cached_map_files_find_free_map(
 
 		if (cache_file_globals.open_map_file_index != map_file_index &&
 			!(cache_file_globals.copy_in_progress && cache_file_globals.copying_to_map_file_index == map_file_index) &&
+			!cached_map_file_unpacking[map_file_index] &&
 			map_file->file != INVALID_HANDLE_VALUE &&
 			!map_file->header.name[0])
 		{
@@ -1911,6 +1941,7 @@ static short cached_map_files_least_useful(
 		if (map_file_index == except_map_file_index ||
 			map_file_index == cache_file_globals.open_map_file_index ||
 			(cache_file_globals.copy_in_progress && map_file_index == cache_file_globals.copying_to_map_file_index) ||
+			cached_map_file_unpacking[map_file_index] ||
 			map_file->file == INVALID_HANDLE_VALUE ||
 			!map_file->header.name[0])
 		{
@@ -2006,6 +2037,151 @@ void cache_files_cache_usage(
 	{
 		*maps += cached_map_file_get(map_file_index)->header.name[0] != 0;
 	}
+
+	return;
+}
+
+/* port: the slot a worker is unpacking a map (a10) into, NONE if none */
+static short cached_map_files_find_unpacking(
+	char const *map_name)
+{
+	short map_file_index;
+
+	for (map_file_index = 0;
+		map_file_index < NUMBER_OF_CACHED_MAP_FILES;
+		map_file_index++)
+	{
+		if (cached_map_file_unpacking[map_file_index] &&
+			_stricmp(cached_map_file_unpacking_name[map_file_index], tag_name_strip_path(map_name)) == 0)
+		{
+			return map_file_index;
+		}
+	}
+
+	return NONE;
+}
+
+/* port: a stock map (a10) unpacked into a slot by a worker
+(port/linux/src/map_unpack.c), if the precache would copy it and the budget
+has room for it without giving up another map (cache_files_map_prefill_size's
+rules): its slot chosen here and held, emptied and made the map's size,
+its source forgotten, until the worker is done (cache_files_unpack_update).
+FALSE if it was not begun */
+boolean cache_files_unpack_begin(
+	char const *map_name)
+{
+	char const *cache_map_name = tag_name_strip_path(map_name);
+	struct cache_file_header header;
+	char map_path[256], slot_path[256];
+	short map_file_index;
+	long copy_size;
+
+	if (!cache_slot_folder_keeps_cache() ||
+		cached_map_files_find_unpacking(map_name) != NONE ||
+		cache_files_precache_is_copying_map(map_name) ||
+		(copy_size = cache_files_map_prefill_size(map_name)) <= 0 ||
+		!cache_file_read_header_from_dvd(cache_map_name, &header))
+	{
+		return FALSE;
+	}
+	map_file_index = cached_map_files_find_free_map(header.file_length, header.scenario_type);
+	if (map_file_index == NONE || cached_map_file_get(map_file_index)->header.name[0])
+	{
+		return FALSE;
+	}
+	cache_slot_source_forget(map_file_index);
+	if (!cached_map_file_resize(map_file_index, 0) || !cached_map_file_resize(map_file_index, copy_size))
+	{
+		cached_map_file_resize(map_file_index, 0);
+		return FALSE;
+	}
+	cache_file_get_map_path(cache_map_name, map_path);
+	cached_map_file_get_path(map_file_index, slot_path);
+	if (!map_path[0] || !map_unpack_queue(map_file_index, map_path, slot_path, copy_size))
+	{
+		cached_map_file_resize(map_file_index, 0);
+		return FALSE;
+	}
+	cached_map_file_unpacking[map_file_index] = TRUE;
+	strncpy(cached_map_file_unpacking_name[map_file_index], cache_map_name,
+		sizeof(cached_map_file_unpacking_name[map_file_index]) - 1);
+	cached_map_file_unpacking_name[map_file_index][sizeof(cached_map_file_unpacking_name[map_file_index]) - 1] = 0;
+
+	return TRUE;
+}
+
+/* port: the slots the workers are done with taken back, each only once it
+passes the check of the game's start (cached_map_file_adopt) */
+void cache_files_unpack_update(
+	void)
+{
+	short map_file_index;
+	int succeeded;
+
+	while (map_unpack_take_finished(&map_file_index, &succeeded))
+	{
+		if (map_file_index < 0 || map_file_index >= NUMBER_OF_CACHED_MAP_FILES ||
+			!cached_map_file_unpacking[map_file_index])
+		{
+			continue;
+		}
+		cached_map_file_unpacking[map_file_index] = FALSE;
+		if (succeeded && cached_map_file_adopt(map_file_index))
+		{
+			cached_map_file_set_modification_date(map_file_index);
+		}
+		else
+		{
+			error(_error_silent, "the unpack of map '%s' did not end whole: copied again",
+				cached_map_file_unpacking_name[map_file_index]);
+			cache_slot_source_forget(map_file_index);
+			memset(&cached_map_file_get(map_file_index)->header, 0, sizeof(struct cache_file_header));
+			cached_map_file_resize(map_file_index, 0);
+		}
+		cached_map_file_unpacking_name[map_file_index][0] = 0;
+	}
+
+	return;
+}
+
+/* port: whether a worker is unpacking a map (a10) */
+boolean cache_files_map_unpacking(
+	char const *map_name)
+{
+	cache_files_unpack_update();
+
+	return cached_map_files_find_unpacking(map_name) != NONE;
+}
+
+/* port: how many maps the workers are unpacking */
+long cache_files_unpacking_count(
+	void)
+{
+	long count = 0;
+	short map_file_index;
+
+	for (map_file_index = 0;
+		map_file_index < NUMBER_OF_CACHED_MAP_FILES;
+		map_file_index++)
+	{
+		count += cached_map_file_unpacking[map_file_index] != 0;
+	}
+
+	return count;
+}
+
+/* port: a map (a10) a worker is unpacking waited for, and taken back */
+void cache_files_unpack_wait(
+	char const *map_name)
+{
+	short map_file_index = cached_map_files_find_unpacking(map_name);
+
+	if (map_file_index == NONE)
+	{
+		return;
+	}
+	map_unpack_wait(map_file_index);
+	cache_files_unpack_update();
 
 	return;
 }

@@ -209,6 +209,9 @@ static struct
 	boolean made_pictures, overdue;
 	/* (of the count, the pictures: the maps recorded alone after them) */
 	long pictures;
+	/* the poses whose maps were given to the unpacking workers, or refused
+	(prepare_unpack_ahead) */
+	boolean unpack_tried[MAXIMUM_MENU_PICTURES];
 } prepare;
 
 /* ---------- public code */
@@ -422,6 +425,9 @@ static int prepare_precache(
 {
 	real progress;
 
+	/* (one a worker is unpacking waited for: prepare_unpack_ahead) */
+	if (cache_files_map_unpacking(scenario))
+		return 0;
 	if (cache_files_precache_map_loaded(scenario))
 		return 1;
 	if (cache_files_precache_in_progress())
@@ -441,6 +447,30 @@ static int prepare_precache(
 	if (!cache_files_precache_map_begin(scenario, FALSE))
 		return -1;
 	return 0;
+}
+
+/* the maps of the poses to come unpacked ahead, in the pass's order, on
+the workers (port/linux/src/map_unpack.c: about half the cores, at most 4),
+as many at once as there are workers, so that the next map is whole as the
+pass reaches it; each tried once (a map the budget has no room for, or the
+precache is copying, is the precache's at its turn) */
+static void prepare_unpack_ahead(
+	void)
+{
+	long next, in_flight;
+
+	cache_files_unpack_update();
+	in_flight = cache_files_unpacking_count();
+	for (next = prepare.index; next < prepare.count && in_flight < map_unpack_worker_count(); next++)
+	{
+		char const *scenario = menu_picture_poses[prepare.poses[next]].scenario;
+
+		if (prepare.unpack_tried[next])
+			continue;
+		prepare.unpack_tried[next] = TRUE;
+		if (cache_files_unpack_begin(scenario))
+			in_flight++;
+	}
 }
 
 static void prepare_picture_failed(
@@ -467,6 +497,7 @@ static void prepare_begin(
 	if (prepare.count < 0)
 		prepare.count = 0;
 	csmemset(prepare.record_only, 0, sizeof(prepare.record_only));
+	csmemset(prepare.unpack_tried, 0, sizeof(prepare.unpack_tried));
 	prepare.made_pictures = prepare.count > 0;
 	prepare.pictures = prepare.count;
 	/* (and the maps whose preparation is not recorded in this form, each
@@ -526,6 +557,8 @@ static void prepare_update(
 		prepare.index : 0]];
 	char line[MAXIMUM_RENDER_LINE];
 
+	if (prepare.state != _prepare_menu)
+		prepare_unpack_ahead();
 	/* (the picture's or the pass's time spent: the pass ended, the main menu
 	shown, the pictures not made keeping their originals; the one being made
 	counted as failed) */
