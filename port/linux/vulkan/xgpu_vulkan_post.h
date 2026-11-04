@@ -30,16 +30,20 @@ bound before are not bound after. 0 if its pipelines cannot be made */
 int xgpu_vulkan_post_anti_alias(int smaa, struct xgpu_vulkan_image *target, uint32_t layer, const int32_t corners[4]);
 
 /* display.panini (port/linux/game/panini.c): its pipeline for a target of
-a format (BGRA8, or display.hdr's RGBA16F), made now or queued where
-preparing, 0 if it cannot be (logged once); and the corners of a layer of
-such a target (not multisampled) drawn again through the Panini projection
-(port/linux/include/panini_projection.h): projection its d, s,
-magnification at the middle, 0, and the rectilinear view's tangents at the
-corners' left, right, top and bottom. In the stream's order; the targets
-bound before are not bound after. 0 if it was not drawn */
-int xgpu_vulkan_post_panini_prepare(uint8_t format, int preparing);
-int xgpu_vulkan_post_panini(struct xgpu_vulkan_image *target, uint32_t layer, const int32_t corners[4],
-	const float projection[8]);
+a format (BGRA8, or display.hdr's RGBA16F) and a number of samples, made
+now or queued where preparing, 0 if it cannot be (logged once); and the
+corners of a layer of such a target drawn again through the Panini
+projection (port/linux/include/panini_projection.h): read from source (not
+multisampled: the target's pixels, resolved), drawn into into (the same
+image, or the target's multisampled attachment, every sample of a pixel
+given the pixel's value, so that what is drawn over it after is
+multisampled and resolved with it); projection its d, s, magnification at
+the middle, 0, and the rectilinear view's tangents at the corners' left,
+right, top and bottom. In the stream's order; the targets bound before are
+not bound after. 0 if it was not drawn */
+int xgpu_vulkan_post_panini_prepare(uint8_t format, uint32_t samples, int preparing);
+int xgpu_vulkan_post_panini(struct xgpu_vulkan_image *source, struct xgpu_vulkan_image *into, uint32_t layer,
+	const int32_t corners[4], const float projection[8]);
 
 /* display.hdr (docs/hdr.md). The tone map's pipeline for an RGBA16F target
 of a number of samples drawn with a depth attachment (XGPU_VULKAN_FORMAT_

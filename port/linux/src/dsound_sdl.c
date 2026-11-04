@@ -1667,76 +1667,100 @@ downloads), fed by every 3D voice's I3DL2 mix bin. The game sets the listener
 properties from the sound environment the camera is in (sound_dsound_xbox.c
 dsound_set_listener_properties), and each 3D voice's room send from its
 reverb attenuation and occlusion (dsound_channel_set_I3DL2_properties). This
-is a reverb of the I3DL2 model on those properties, not the DSP's program
-(whose own conversion of the properties is the XDK's, which the game does not
-hold), as the model's authors define it (Dahl and Jot, "A Reverberator Based
-on Absorbent All-Pass Filters", DAFx 2000):
-	- each 3D voice sends to a mono bus at the listener's and its own room
-	  levels, occlusion included, their high frequency levels a low pass at the
-	  HF reference, attenuated with distance by the room rolloff factors
-	  (voice_gains);
-	- the early reflections are REVERB_TAPS taps of the bus, the first the
-	  reflections delay after the sound, the others spread over the reverb
-	  delay after it, the last where the late reverberation starts, at the
-	  reflections level;
-	- the late reverberation starts the reverb delay after the first
-	  reflection: all-pass diffusers as strong as the diffusion, then a
-	  feedback delay network of REVERB_LINES lines, as long as the density
-	  makes them, each losing what decays it by 60 dB in the decay time, and
-	  its high frequencies in the decay time times the HF ratio at the HF
-	  reference (a low pass; for a ratio over 1, the cave's, a high shelf),
-	  at the reverb level. Each line is heard a few milliseconds after what
-	  goes into it, so that it starts where it should, not a line's length
-	  later, and its read is moved earlier by as much of the diffusers'
-	  delay as their diffusion leaves a delay.
-Both levels are energies, relative to the room level, over the output
-channels together, as a 3D voice's direct path is 1 over them (the pan's
-power): each channel has half. A change of environment crossfades each
-delay's read from its old length to its new one, and each gain, over
-REVERB_FADE_FRAMES: what is reverberating carries on, without the click of a
-jump or the pitch shift of a sliding delay; the game moves the environment a
-step each tick on the way to another (scenario.c), and each step waits for
-the fade to the last to end (mix). audio.reverb = false fades the reverb out
-over as long and stops it. Once nothing has been sent for REVERB_QUIET_FRAMES
-and the reverberation is 120 dB down, the reverb stops until something is
-sent again (outdoors, in the menus). */
+is that DSP program's reverb, as decoded from the image and from the XDK
+DirectSound's conversion of the listener properties into its parameters (in
+every retail default.xbe), redone in floating point:
+	- the send (here the mono bus, the room level and the Room HF low pass
+	  already on it) is halved (and turned over at a Room HF of 0, as the
+	  DSP's filter word did), and the reverb runs at half the output rate,
+	  24 kHz: it takes every other frame and plays each of its frames twice,
+	  as the DSP did (no filter either way: the reverberation stops at 12
+	  kHz, with the images of the repeat above);
+	- every delay is a whole number of the DSP's 4-sample words, and the
+	  input's delay line is REVERB_INPUT_SIZE long, a longer delay wrapping
+	  round it as the DSP's did;
+	- the reflections: on each of four channels (front left and right, back
+	  left and right), the input the reflections delay after the sound, and
+	  again a channel's share of the reverb delay after that, through a
+	  feedback comb of a few milliseconds (gains -0.4, 0.4, -0.4, -0.4), at
+	  the reflections level times a channel's weight (0.57, 0.52, 0.54,
+	  0.6);
+	- the late reverberation: a feedback delay network of four lines of
+	  fixed lengths (58 to 103 ms) mixed by a Householder reflection, each
+	  line decaying by 60 dB in the decay time (Jot: a gain of
+	  10^(-3 length / (rate decay)), whole millibels), its high frequencies
+	  in the decay time times the HF ratio at the HF reference (a one-pole
+	  low pass; a ratio over 1 is held to 1, as the DSP's conversion does).
+	  Into it go taps of the input the reflections and reverb delays after
+	  the sound (and 2.4, 5.6 and 9.7 ms later), and the taps of a chain of
+	  four delays (up to a second long, as the decay time and the density
+	  make it, each decayed as the lines are), at 0.2 times the diffusion;
+	  the chain's taps also go, at 1 minus the diffusion, round two loops as
+	  long as the chain. Each channel hears a line, at the reverb level, and
+	  a loop at half of it;
+	- the four channels play from the front and back pairs on 5.1, and as
+	  each side's pair summed on stereo (the energy of the four together is
+	  that of the two, as a voice's direct path is 1 over the speakers on
+	  either).
+A change of environment crossfades each delay's read from its old length to
+its new one, and each gain and filter, over REVERB_FADE_FRAMES: what is
+reverberating carries on, without the click of a jump or the pitch shift of
+a sliding delay (the DSP faded each tap out and in again, one by one); the
+game moves the environment a step each tick on the way to another
+(scenario.c), and each step waits for the fade to the last to end (mix).
+audio.reverb = false fades the reverb out over as long and stops it. Once
+nothing has been sent for REVERB_QUIET_FRAMES and the reverberation is 120 dB
+down, the reverb stops until something is sent again (outdoors, in the
+menus). */
 
-#define REVERB_DELAY_SIZE 32768 /* the reflections and reverb delays, 0.3 + 0.1 s at most, and the taps */
-#define REVERB_TAPS 6
-#define REVERB_DIFFUSERS 4
-#define REVERB_DIFFUSER_SIZE 1024
-#define REVERB_LINES 8
-#define REVERB_LINE_SIZE 4096
+#define REVERB_RATE (OUTPUT_RATE / 2)
+#define REVERB_INPUT_SIZE 6000 /* the input's and the chain's delays, a quarter of a second */
+#define REVERB_LOOP_SIZE 24000 /* the loops' */
+#define REVERB_CHANNELS 4
+#define REVERB_LINES 4
+#define REVERB_CHAIN 4
+#define REVERB_COMB_SIZE 720
 #define REVERB_FADE_FRAMES 4096 /* 85 ms */
-/* the input delays, then the diffusers, played out */
-#define REVERB_QUIET_FRAMES (REVERB_DELAY_SIZE + REVERB_DIFFUSERS * REVERB_DIFFUSER_SIZE)
+/* the input's delay, the chain and a loop, played out */
+#define REVERB_QUIET_FRAMES (2 * (REVERB_INPUT_SIZE * REVERB_CHAIN + REVERB_LOOP_SIZE))
 #define REVERB_QUIET_PEAK 1.0e-6f
 
-/* the taps after the reflections delay, as parts of the reverb delay; in
-milliseconds, the diffusers, the lines at full density, and where each line is
-heard, after what goes into it */
-static const float reverb_tap_times[REVERB_TAPS] = { 0.0f, 0.208f, 0.356f, 0.530f, 0.752f, 1.0f };
-static const float reverb_tap_signs[REVERB_TAPS] = { 1.0f, 1.0f, -1.0f, 1.0f, 1.0f, -1.0f };
-static const float reverb_diffuser_times[REVERB_DIFFUSERS] = { 4.7f, 3.6f, 12.7f, 9.3f };
-static const float reverb_line_times[REVERB_LINES] = { 29.7f, 37.1f, 41.1f, 43.7f, 53.3f, 59.9f, 67.1f, 73.1f };
-static const float reverb_line_output_times[REVERB_LINES] = { 0.0f, 3.1f, 7.3f, 11.9f, 15.7f, 20.3f, 24.1f, 29.3f };
-/* which lines go in negated, and the two outputs' signs of the lines */
-static const float reverb_input_signs[REVERB_LINES] = { 1, -1, -1, 1, 1, -1, -1, 1 };
-static const float reverb_left_signs[REVERB_LINES] = { 1, -1, 1, -1, 1, -1, 1, -1 };
-static const float reverb_right_signs[REVERB_LINES] = { 1, 1, -1, -1, 1, 1, -1, -1 };
+/* each channel's reflections: its weight, its tap's part of the reverb
+delay, and its comb's delay (a part of the reverb delay and seconds), gain
+and line's length (its longest delay) */
+static const float reverb_reflection_weights[REVERB_CHANNELS] = { 0.57f, 0.52f, 0.54f, 0.6f };
+static const float reverb_reflection_taps[REVERB_CHANNELS] = { 0.1052f, 0.0673f, 0.1737f, 0.2404f };
+static const float reverb_comb_parts[REVERB_CHANNELS] = { 0.2469f, 0.2209f, 0.2311f, 0.2608f };
+static const float reverb_comb_seconds[REVERB_CHANNELS] = { 0.003651f, 0.003515f, 0.003673f, 0.003946f };
+static const float reverb_comb_gains[REVERB_CHANNELS] = { -0.4f, 0.4f, -0.4f, -0.4f };
+static const long reverb_comb_sizes[REVERB_CHANNELS] = { 680, 612, 640, 720 };
+/* the lines' lengths (58, 70.3, 85.2 and 103.3 ms) */
+static const long reverb_line_lengths[REVERB_LINES] = { 1392, 1684, 2044, 2476 };
+/* the taps of the input into the lines, after the reverb delay; which pair
+of them goes into each line, with what signs (times the diffusion) */
+static const long reverb_onset_taps[REVERB_LINES] = { 0, 58, 134, 232 };
+static const float reverb_onset_signs[2 * REVERB_LINES] = { 1, -1, -1, 1, 1, 1, -1, -1 };
+/* the chain's two taps on each of its delays, in parts of its length (the
+second goes on into the next delay) */
+static const float reverb_chain_taps[REVERB_CHAIN][2] =
+{
+	{ 0.040023f, 0.021224f }, { 0.288186f, 0.37542f }, { 0.603764f, 0.623583f }, { 0.851905f, 0.759229f }
+};
 
-/* what an environment sets: delays in samples, and gains */
+/* what an environment sets: delays in the reverb's samples (multiples of
+4), gains, and the one-pole filters' coefficients (y = a y' + b x) */
+struct reverb_filter
+{
+	float a, b;
+};
+
 struct reverb_parameters
 {
-	unsigned long taps[REVERB_TAPS];
-	unsigned long late_delay;
-	unsigned long lengths[REVERB_LINES];
-	/* each line's gain a pass, and its filter's coefficients (y = b0 x + b1
-	x' - a1 y') */
-	float feedback[REVERB_LINES];
-	float damping_b0[REVERB_LINES], damping_b1[REVERB_LINES], damping_a1[REVERB_LINES];
-	float reflections_gain, late_gain;
-	float diffusion;
+	long reflections_delay, reflection_taps[REVERB_CHANNELS], comb_delays[REVERB_CHANNELS];
+	long late_delay, chain[REVERB_CHAIN][2], loop_length;
+	float reflections_gains[REVERB_CHANNELS], late_gain;
+	float input_gain, onset_gains[2 * REVERB_LINES], loop_input, network_input;
+	struct reverb_filter lines[REVERB_LINES], chain_filter, loop_filter;
 };
 
 static struct
@@ -1757,20 +1781,20 @@ static struct
 	BOOL silent;
 	unsigned long quiet;
 
-	/* the bus, delayed for the taps and the late reverberation */
-	float delay[REVERB_DELAY_SIZE];
-	unsigned long delay_position;
+	/* whether the next output frame is the second of a reverb frame, and
+	that frame's channels */
+	BOOL odd;
+	float held[REVERB_CHANNELS];
 
-	float diffusers[REVERB_DIFFUSERS][REVERB_DIFFUSER_SIZE];
-	unsigned long diffuser_lengths[REVERB_DIFFUSERS];
-	unsigned long diffuser_position;
-
-	float lines[REVERB_LINES][REVERB_LINE_SIZE];
-	unsigned long line_position;
-	unsigned long line_output_delays[REVERB_LINES];
-	/* each line's filter's last output and input */
-	float lowpass[REVERB_LINES];
-	float lowpass_input[REVERB_LINES];
+	/* the delays, each written at position (of its size) */
+	float input[REVERB_INPUT_SIZE];
+	float chain[REVERB_CHAIN - 1][REVERB_INPUT_SIZE];
+	float combs[REVERB_CHANNELS][REVERB_COMB_SIZE];
+	float lines[REVERB_LINES][2476];
+	float loops[2][REVERB_LOOP_SIZE];
+	unsigned long position;
+	/* the filters' last outputs */
+	float line_state[REVERB_LINES], chain_state[REVERB_CHAIN - 1], loop_state[2];
 } reverb;
 
 static float clamp_real(float value, float minimum, float maximum)
@@ -1778,100 +1802,137 @@ static float clamp_real(float value, float minimum, float maximum)
 	return value < minimum ? minimum : value > maximum ? maximum : value;
 }
 
-/* whole samples */
-static unsigned long reverb_samples(float seconds)
+/* the DSP's: a float to a whole number, towards 0; a delay up to a whole
+word, and down */
+static long reverb_whole(double value)
 {
-	return (unsigned long)floorf(seconds * OUTPUT_RATE + 0.5f);
+	return (long)value;
 }
 
-/* the sample buffer got delay samples before position, crossfaded from the
-from delay to the to delay by fade (0 to 1) */
-static float reverb_read(const float *buffer, unsigned long mask, unsigned long position,
-	unsigned long from_delay, unsigned long to_delay, float fade)
+static long reverb_word_up(long samples)
 {
-	float from_sample = buffer[(position - from_delay) & mask];
-
-	if (from_delay == to_delay)
-		return from_sample;
-	return from_sample + (buffer[(position - to_delay) & mask] - from_sample) * fade;
+	return (samples + 1) & ~3L;
 }
 
-static float reverb_blend(float from, float to, float fade)
+static long reverb_word_down(long samples)
 {
-	return from + (to - from) * fade;
+	return samples & ~3L;
 }
 
-/* a line's filter, whose gain is 1 at low frequencies and gain at the
-frequency of hertz: for a gain under 1 a low pass (lowpass_coefficient), as
-the model's lines have; for one over 1 (a decay HF ratio over 1), which no low
-pass gives, a high shelf of gain^2, its middle (gain) at hertz, held so that
-with the line's feedback no frequency comes back louder than it went in */
-static void reverb_damping_set(struct reverb_parameters *parameters, int line, float gain, float hertz)
+/* 10^(millibels / 2000), as the conversion works it out (in single
+precision) */
+static float reverb_gain(long millibels)
 {
-	float shelf, u;
+	return (float)pow(10.0, (double)((float)millibels * 0.0005f));
+}
 
-	if (gain <= 1.0f)
+/* the one-pole filter whose gain is 10^(level / 2000) at low frequencies
+and 10^((level + high) / 2000) at hertz, at the reverb's rate; levels at or
+under -10000 silence it */
+static struct reverb_filter reverb_filter_set(long level, long high, float hertz)
+{
+	struct reverb_filter filter = { 0.0f, 0.0f };
+	double cosine, power, root;
+
+	if (level <= DSBVOLUME_MIN)
+		return filter;
+	if (!high)
 	{
-		float a = lowpass_coefficient(gain, frequency_cosine(hertz));
-
-		parameters->damping_b0[line] = 1.0f - a;
-		parameters->damping_b1[line] = 0.0f;
-		parameters->damping_a1[line] = -a;
-		return;
+		filter.b = level ? reverb_gain(level) : 1.0f;
+		return filter;
 	}
-	shelf = gain * gain;
-	if (shelf * parameters->feedback[line] > 0.999f)
-		shelf = 0.999f / parameters->feedback[line];
-	/* H(s) = (shelf s / w + 1) / (s / w + 1), by the bilinear transform:
-	its gain is sqrt(shelf) at w / sqrt(shelf), put at hertz */
-	u = 1.0f / (tanf(3.14159265f * clamp_real(hertz, 20.0f, 0.45f * OUTPUT_RATE) / OUTPUT_RATE) * sqrtf(shelf));
-	parameters->damping_b0[line] = (shelf * u + 1.0f) / (u + 1.0f);
-	parameters->damping_b1[line] = (1.0f - shelf * u) / (u + 1.0f);
-	parameters->damping_a1[line] = (1.0f - u) / (u + 1.0f);
+	cosine = cos(2.0 * 3.14159274 * hertz / REVERB_RATE);
+	power = reverb_gain(2 * high);
+	root = sqrt(2.0 * power * (1.0 - cosine) - power * power * (1.0 - cosine * cosine));
+	filter.a = (float)((1.0 - power * cosine - root) / (1.0 - power));
+	filter.b = (1.0f - filter.a) * reverb_gain(level);
+	/* under the DSP's least step, the filter passes nothing (whatever its a,
+	which can come out at 1) */
+	if (filter.b < 1.0f / 8388608.0f)
+		filter.a = filter.b = 0.0f;
+	return filter;
 }
 
+/* the filter of a delay of samples in the environment of properties: what
+decays it 60 dB in the decay time, and its high frequencies in the decay
+time times the HF ratio (held to 1) */
+static struct reverb_filter reverb_decay_filter(long samples, const DSI3DL2LISTENER *properties)
+{
+	double loss = (double)samples * 4.16666662e-05f / properties->flDecayTime * -6000.0;
+	long level = reverb_whole(loss);
+
+	if (properties->flDecayHFRatio < 1.0f)
+		loss /= properties->flDecayHFRatio;
+	return reverb_filter_set(level, reverb_whole(loss) - level, properties->flHFReference);
+}
+
+/* the DSP's parameters of an environment, as DirectSound worked them out */
 static void reverb_parameters_set(struct reverb_parameters *parameters, const DSI3DL2LISTENER *properties)
 {
-	float decay = clamp_real(properties->flDecayTime, 0.1f, 20.0f);
-	float high_decay = decay * clamp_real(properties->flDecayHFRatio, 0.1f, 2.0f);
-	float scale = 0.25f + 0.75f * clamp_real(properties->flDensity / 100.0f, 0.0f, 1.0f);
-	float reflections_span = clamp_real(properties->flReverbDelay, 0.001f, 0.1f);
-	float mean_length = 0.0f, mean_feedback, diffuser_delay = 0.0f, late_delay;
-	unsigned long reflections_delay;
+	float diffusion = properties->flDiffusion * 0.01f;
+	/* how long the chain is: a second, shorter in a room of short decay
+	(and more so as the density is less) */
+	float length = (float)((2.0 - (double)0.01f * properties->flDensity) * 5.0 * (properties->flDecayTime - 1.0));
+	double scale;
+	long reverb_delay, previous = 0, chain_length;
 	int index;
 
-	for (index = 0; index < REVERB_LINES; index++)
-	{
-		float length = floorf(reverb_line_times[index] * 0.001f * OUTPUT_RATE * scale + 0.5f);
-		float high_feedback;
+	length = length < 1.0f ? 1.0f : length > 60.0f ? 60.0f : length;
+	scale = length < 2.5f ? ((double)length - (double)0.8f) * (double)0.588235259f : 1.0;
 
-		parameters->lengths[index] = (unsigned long)length;
-		parameters->feedback[index] = powf(10.0f, -3.0f * length / (decay * OUTPUT_RATE));
-		high_feedback = powf(10.0f, -3.0f * length / (high_decay * OUTPUT_RATE));
-		reverb_damping_set(parameters, index, high_feedback / parameters->feedback[index], properties->flHFReference);
-		mean_length += length / REVERB_LINES;
+	parameters->reflections_delay = reverb_word_down(reverb_whole(properties->flReflectionsDelay * 24000.0));
+	reverb_delay = reverb_word_down(reverb_whole(properties->flReverbDelay * 24000.0));
+	parameters->late_delay = reverb_delay + parameters->reflections_delay;
+	for (index = 0; index < REVERB_CHANNELS; index++)
+	{
+		long comb = reverb_word_up(reverb_whole(((double)properties->flReverbDelay * reverb_comb_parts[index] +
+			reverb_comb_seconds[index]) * 24000.0));
+
+		parameters->reflection_taps[index] = parameters->reflections_delay +
+			reverb_word_up(reverb_whole((double)reverb_delay * reverb_reflection_taps[index]));
+		parameters->comb_delays[index] = comb > reverb_comb_sizes[index] ? reverb_comb_sizes[index] : comb;
+		parameters->reflections_gains[index] = properties->lReflections <= DSBVOLUME_MIN ? 0.0f :
+			reverb_gain(properties->lReflections) * reverb_reflection_weights[index];
 	}
-	mean_feedback = powf(10.0f, -3.0f * mean_length / (decay * OUTPUT_RATE));
-	parameters->diffusion = 0.7f * clamp_real(properties->flDiffusion / 100.0f, 0.0f, 1.0f);
-	reflections_delay = reverb_samples(clamp_real(properties->flReflectionsDelay, 0.0f, 0.3f));
-	/* the reflections span the reverb delay, the last where the late
-	reverberation starts */
-	for (index = 0; index < REVERB_TAPS; index++)
-		parameters->taps[index] = reflections_delay + reverb_samples(reverb_tap_times[index] * reflections_span);
-	/* the diffusers delay what they do not diffuse: all of it at no
-	diffusion (a diffuser of no gain is a delay), little at full; so much is
-	taken from the late reverberation's read, as far as it goes */
-	for (index = 0; index < REVERB_DIFFUSERS; index++)
-		diffuser_delay += reverb_diffuser_times[index] * 0.001f;
-	late_delay = clamp_real(properties->flReflectionsDelay, 0.0f, 0.3f) +
-		clamp_real(properties->flReverbDelay, 0.0f, 0.1f) - diffuser_delay * (1.0f - parameters->diffusion / 0.7f);
-	parameters->late_delay = reverb_samples(late_delay > 0.0f ? late_delay : 0.0f);
-	/* the energies over the output channels together, half to each: the
-	taps', half of them to each side; the network's, whose sound circulates
-	until it decays */
-	parameters->reflections_gain = gain_from_millibels(properties->lReflections) / sqrtf((float)REVERB_TAPS);
-	parameters->late_gain = gain_from_millibels(properties->lReverb) *
-		sqrtf((1.0f - mean_feedback * mean_feedback) / OUTPUT_CHANNELS);
+
+	/* the chain: its taps at their parts of its length, each delay's
+	measured from the last's second tap and squeezed into the delay */
+	chain_length = reverb_word_down(reverb_whole(scale * 24000.0));
+	for (index = 0; index < REVERB_CHAIN; index++)
+	{
+		long first = reverb_word_down(reverb_whole(scale * reverb_chain_taps[index][0] * 24000.0));
+		long second = reverb_word_down(reverb_whole(scale * reverb_chain_taps[index][1] * 24000.0));
+		long span = (first > second ? first : second) - previous;
+
+		if (span > REVERB_INPUT_SIZE - 1)
+		{
+			double squeeze = (double)(REVERB_INPUT_SIZE - 1) / span;
+
+			parameters->chain[index][0] = reverb_word_up(reverb_whole((first - previous) * squeeze));
+			parameters->chain[index][1] = reverb_word_up(reverb_whole((second - previous) * squeeze));
+		}
+		else
+		{
+			parameters->chain[index][0] = first - previous;
+			parameters->chain[index][1] = second - previous;
+		}
+		previous = second;
+	}
+	parameters->loop_length = chain_length > REVERB_LOOP_SIZE ? REVERB_LOOP_SIZE : chain_length;
+	parameters->chain_filter = reverb_decay_filter(chain_length >> 2, properties);
+	parameters->loop_filter = reverb_decay_filter(chain_length, properties);
+	for (index = 0; index < REVERB_LINES; index++)
+		parameters->lines[index] = reverb_decay_filter(reverb_line_lengths[index], properties);
+
+	for (index = 0; index < 2 * REVERB_LINES; index++)
+		parameters->onset_gains[index] = clamp_real(reverb_onset_signs[index] * diffusion, -1.0f, 1.0f);
+	parameters->loop_input = 1.0f - diffusion;
+	parameters->network_input = 0.2f * diffusion;
+	parameters->late_gain = properties->lReverb <= DSBVOLUME_MIN ? 0.0f : reverb_gain(properties->lReverb);
+	/* the send halved; the DSP's Room HF filter, which the send's low pass
+	is, passes it whole at a Room HF of 0 with a gain of 1, which its 24-bit
+	word holds as -1: the reverberation upside down (the cave's) */
+	parameters->input_gain = properties->lRoomHF ? 0.5f : -0.5f;
 }
 
 /* a new environment, faded to unless the reverb is silent. The game sets the
@@ -1891,11 +1952,16 @@ static void reverb_update(const DSI3DL2LISTENER *properties, unsigned long seria
 
 static void reverb_clear(void)
 {
-	memset(reverb.delay, 0, sizeof(reverb.delay));
-	memset(reverb.diffusers, 0, sizeof(reverb.diffusers));
+	memset(reverb.input, 0, sizeof(reverb.input));
+	memset(reverb.chain, 0, sizeof(reverb.chain));
+	memset(reverb.combs, 0, sizeof(reverb.combs));
 	memset(reverb.lines, 0, sizeof(reverb.lines));
-	memset(reverb.lowpass, 0, sizeof(reverb.lowpass));
-	memset(reverb.lowpass_input, 0, sizeof(reverb.lowpass_input));
+	memset(reverb.loops, 0, sizeof(reverb.loops));
+	memset(reverb.line_state, 0, sizeof(reverb.line_state));
+	memset(reverb.chain_state, 0, sizeof(reverb.chain_state));
+	memset(reverb.loop_state, 0, sizeof(reverb.loop_state));
+	memset(reverb.held, 0, sizeof(reverb.held));
+	reverb.odd = FALSE;
 	reverb.from = reverb.to;
 	reverb.fade = 0;
 	reverb.silent = TRUE;
@@ -1904,113 +1970,160 @@ static void reverb_clear(void)
 
 static void reverb_initialize(void)
 {
-	int index;
-
-	for (index = 0; index < REVERB_DIFFUSERS; index++)
-		reverb.diffuser_lengths[index] = reverb_samples(reverb_diffuser_times[index] * 0.001f);
-	for (index = 0; index < REVERB_LINES; index++)
-		reverb.line_output_delays[index] = reverb_samples(reverb_line_output_times[index] * 0.001f);
 	reverb.silent = TRUE;
 	reverb.level = reverb_enabled ? 1.0f : 0.0f;
 	reverb_update(&environment, environment_serial);
+}
+
+static float reverb_blend(float from, float to, float fade)
+{
+	return from + (to - from) * fade;
+}
+
+/* the sample of a delay line size long that went in delay samples ago: as
+the DSP's, a delay of a block (16 samples) or more, and one longer than the
+line wrapping round it */
+static float reverb_tap(const float *line, long size, long delay)
+{
+	long position = (long)(reverb.position % (unsigned long)size);
+
+	delay = delay < 16 ? 16 : (delay - 16) % size + 16;
+	return line[(position - delay + size) % size];
+}
+
+/* the tap crossfaded from the from delay to the to delay by fade (0 to 1) */
+static float reverb_read(const float *line, long size, long from, long to, float fade)
+{
+	float sample = reverb_tap(line, size, from);
+
+	return from == to ? sample : sample + (reverb_tap(line, size, to) - sample) * fade;
+}
+
+static void reverb_write(float *line, long size, float value)
+{
+	line[reverb.position % (unsigned long)size] = flush_denormal(value);
+}
+
+static float reverb_filter(struct reverb_filter from, struct reverb_filter to, float fade, float *state, float x)
+{
+	*state = flush_denormal(reverb_blend(from.a, to.a, fade) * *state + reverb_blend(from.b, to.b, fade) * x);
+	return *state;
+}
+
+/* a frame of the reverb (at REVERB_RATE) of input, its four channels into
+channels */
+static void reverb_frame(float input, float fade, float *channels)
+{
+	const struct reverb_parameters *from = &reverb.from, *to = &reverb.to;
+	float onset[2 * REVERB_LINES], taps[REVERB_LINES], chain[REVERB_CHAIN][2], sums[2], loops[2];
+	float reflections, network_input, loop_input, mean = 0.0f, late_gain;
+	int index;
+
+	/* the reflections: each channel's comb */
+	reflections = reverb_read(reverb.input, REVERB_INPUT_SIZE, from->reflections_delay, to->reflections_delay, fade);
+	for (index = 0; index < REVERB_CHANNELS; index++)
+	{
+		float value = reflections + reverb_read(reverb.input, REVERB_INPUT_SIZE,
+			from->reflection_taps[index], to->reflection_taps[index], fade) +
+			reverb_comb_gains[index] * reverb_read(reverb.combs[index], reverb_comb_sizes[index],
+			from->comb_delays[index], to->comb_delays[index], fade);
+
+		reverb_write(reverb.combs[index], reverb_comb_sizes[index], value);
+		channels[index] = value * reverb_blend(from->reflections_gains[index], to->reflections_gains[index], fade);
+	}
+
+	/* the lines' ends, with the input's onset taps in pairs */
+	for (index = 0; index < 2 * REVERB_LINES; index++)
+	{
+		long tap = reverb_onset_taps[index % REVERB_LINES];
+
+		onset[index] = reverb_read(reverb.input, REVERB_INPUT_SIZE, from->late_delay + tap, to->late_delay + tap, fade);
+	}
+	for (index = 0; index < REVERB_LINES; index++)
+	{
+		taps[index] = reverb_tap(reverb.lines[index], reverb_line_lengths[index], reverb_line_lengths[index]) +
+			reverb_blend(from->onset_gains[2 * index], to->onset_gains[2 * index], fade) * onset[2 * index] +
+			reverb_blend(from->onset_gains[2 * index + 1], to->onset_gains[2 * index + 1], fade) * onset[2 * index + 1];
+		mean += 0.5f * taps[index];
+	}
+
+	/* the chain's taps, summed in two, round the loops and into the lines */
+	for (index = 0; index < REVERB_CHAIN; index++)
+	{
+		const float *line = index ? reverb.chain[index - 1] : reverb.input;
+
+		chain[index][0] = reverb_read(line, REVERB_INPUT_SIZE, from->chain[index][0], to->chain[index][0], fade);
+		chain[index][1] = reverb_read(line, REVERB_INPUT_SIZE, from->chain[index][1], to->chain[index][1], fade);
+	}
+	sums[0] = chain[0][1] + chain[1][0] + chain[2][0] + chain[3][1];
+	sums[1] = chain[0][0] + chain[1][1] + chain[2][1] + chain[3][0];
+	network_input = reverb_blend(from->network_input, to->network_input, fade) * (sums[0] + sums[1]);
+	loop_input = reverb_blend(from->loop_input, to->loop_input, fade);
+	for (index = 0; index < 2; index++)
+	{
+		loops[index] = loop_input * sums[index] +
+			reverb_read(reverb.loops[index], REVERB_LOOP_SIZE, from->loop_length, to->loop_length, fade);
+		reverb_write(reverb.loops[index], REVERB_LOOP_SIZE,
+			reverb_filter(from->loop_filter, to->loop_filter, fade, &reverb.loop_state[index], loops[index]));
+	}
+	for (index = 0; index < REVERB_CHAIN - 1; index++)
+	{
+		reverb_write(reverb.chain[index], REVERB_INPUT_SIZE,
+			reverb_filter(from->chain_filter, to->chain_filter, fade, &reverb.chain_state[index], chain[index][1]));
+	}
+
+	/* the network: a Householder reflection of the lines' ends, decayed */
+	for (index = 0; index < REVERB_LINES; index++)
+	{
+		reverb_write(reverb.lines[index], reverb_line_lengths[index],
+			reverb_filter(from->lines[index], to->lines[index], fade, &reverb.line_state[index],
+			taps[index] - mean + network_input));
+	}
+	reverb_write(reverb.input, REVERB_INPUT_SIZE, input);
+	reverb.position++;
+
+	late_gain = reverb_blend(from->late_gain, to->late_gain, fade);
+	for (index = 0; index < REVERB_CHANNELS; index++)
+		channels[index] += late_gain * (taps[index] + 0.5f * loops[index / 2]);
 }
 
 /* adds the reverberation of send to output, its level moving to
 target_level */
 static void reverb_process(const float *send, float *output, unsigned long frames, float target_level)
 {
-	const struct reverb_parameters *from = &reverb.from, *to = &reverb.to;
-	float input_scale = 1.0f / sqrtf((float)REVERB_LINES), peak = 0.0f;
+	float peak = 0.0f;
 	unsigned long frame;
-	int index;
 
 	reverb.silent = FALSE;
 	for (frame = 0; frame < frames; frame++)
 	{
-		/* how far the fade from the old environment to the new is */
-		float fade = 1.0f - (float)reverb.fade / REVERB_FADE_FRAMES;
-		float early[OUTPUT_CHANNELS] = { 0.0f, 0.0f };
-		float outputs[REVERB_LINES], late_left = 0.0f, late_right = 0.0f, feedback_sum = 0.0f, value;
-		float diffusion = reverb_blend(from->diffusion, to->diffusion, fade);
+		const float *held = reverb.held;
+		float level = reverb.level;
 
-		reverb.delay[reverb.delay_position & (REVERB_DELAY_SIZE - 1)] = send[frame];
-		for (index = 0; index < REVERB_TAPS; index++)
+		if (!reverb.odd)
 		{
-			early[index % OUTPUT_CHANNELS] += reverb_tap_signs[index] * reverb_read(reverb.delay, REVERB_DELAY_SIZE - 1,
-				reverb.delay_position, from->taps[index], to->taps[index], fade);
-		}
+			float fade = 1.0f - (float)reverb.fade / REVERB_FADE_FRAMES;
 
-		/* diffusers: w = x + g w', y = w' - g w */
-		value = reverb_read(reverb.delay, REVERB_DELAY_SIZE - 1, reverb.delay_position,
-			from->late_delay, to->late_delay, fade);
-		reverb.delay_position++;
-		for (index = 0; index < REVERB_DIFFUSERS; index++)
+			reverb_frame(reverb_blend(reverb.from.input_gain, reverb.to.input_gain, fade) * send[frame], fade, reverb.held);
+		}
+		reverb.odd = !reverb.odd;
+		if (output_channels == 6)
 		{
-			float *buffer = reverb.diffusers[index];
-			float delayed = buffer[(reverb.diffuser_position - reverb.diffuser_lengths[index]) & (REVERB_DIFFUSER_SIZE - 1)];
-			float written = flush_denormal(value + diffusion * delayed);
-
-			buffer[reverb.diffuser_position & (REVERB_DIFFUSER_SIZE - 1)] = written;
-			value = delayed - diffusion * written;
+			output[frame * 6] += held[0] * level;
+			output[frame * 6 + 1] += held[1] * level;
+			output[frame * 6 + 4] += held[2] * level;
+			output[frame * 6 + 5] += held[3] * level;
 		}
-		reverb.diffuser_position++;
-
-		/* the network: each line's output is damped and decayed, and mixed
-		back into every line by a Householder reflection, with the diffused
-		bus. Each line is heard a little after what goes into it, each a
-		different time (reverb_line_output_times): heard at its end, the late
-		reverberation came a line's length (30 ms or more) after the reverb
-		delay, and heard as it goes in, the input's signs and the outputs' (a
-		Hadamard matrix's rows) cancel it */
-		for (index = 0; index < REVERB_LINES; index++)
+		else
 		{
-			float line_output = reverb_read(reverb.lines[index], REVERB_LINE_SIZE - 1, reverb.line_position,
-				from->lengths[index], to->lengths[index], fade);
-			float filtered = reverb_blend(from->damping_b0[index], to->damping_b0[index], fade) * line_output +
-				reverb_blend(from->damping_b1[index], to->damping_b1[index], fade) * reverb.lowpass_input[index] -
-				reverb_blend(from->damping_a1[index], to->damping_a1[index], fade) * reverb.lowpass[index];
-
-			reverb.lowpass_input[index] = line_output;
-			reverb.lowpass[index] = flush_denormal(filtered);
-			outputs[index] = reverb.lowpass[index] * reverb_blend(from->feedback[index], to->feedback[index], fade);
-			feedback_sum += outputs[index];
+			output[frame * 2] += (held[0] + held[2]) * level;
+			output[frame * 2 + 1] += (held[1] + held[3]) * level;
 		}
-		feedback_sum *= 2.0f / REVERB_LINES;
-		for (index = 0; index < REVERB_LINES; index++)
-		{
-			float heard;
-
-			reverb.lines[index][reverb.line_position & (REVERB_LINE_SIZE - 1)] = flush_denormal(outputs[index] -
-				feedback_sum + value * reverb_input_signs[index] * input_scale);
-			heard = reverb.lines[index][(reverb.line_position - reverb.line_output_delays[index]) & (REVERB_LINE_SIZE - 1)];
-			late_left += reverb_left_signs[index] * heard;
-			late_right += reverb_right_signs[index] * heard;
-		}
-		reverb.line_position++;
-
-		{
-			float reflections_gain = reverb_blend(from->reflections_gain, to->reflections_gain, fade);
-			float late_gain = reverb_blend(from->late_gain, to->late_gain, fade);
-			float left = early[0] * reflections_gain + late_left * late_gain;
-			float right = early[1] * reflections_gain + late_right * late_gain;
-
-			if (output_channels == 6)
-			{
-				/* from the front and back pairs, at the same power */
-				output[frame * 6] += left * reverb.level * 0.70710678f;
-				output[frame * 6 + 1] += right * reverb.level * 0.70710678f;
-				output[frame * 6 + 4] += left * reverb.level * 0.70710678f;
-				output[frame * 6 + 5] += right * reverb.level * 0.70710678f;
-			}
-			else
-			{
-				output[frame * 2] += left * reverb.level;
-				output[frame * 2 + 1] += right * reverb.level;
-			}
-			peak = fabsf(left) > peak ? fabsf(left) : peak;
-			peak = fabsf(right) > peak ? fabsf(right) : peak;
-			peak = fabsf(send[frame]) > peak ? fabsf(send[frame]) : peak;
-		}
+		peak = fabsf(held[0]) > peak ? fabsf(held[0]) : peak;
+		peak = fabsf(held[1]) > peak ? fabsf(held[1]) : peak;
+		peak = fabsf(held[2]) > peak ? fabsf(held[2]) : peak;
+		peak = fabsf(held[3]) > peak ? fabsf(held[3]) : peak;
+		peak = fabsf(send[frame]) > peak ? fabsf(send[frame]) : peak;
 		if (reverb.fade && !--reverb.fade)
 			reverb.from = reverb.to;
 		reverb.level = clamp_real(target_level, reverb.level - 1.0f / REVERB_FADE_FRAMES,

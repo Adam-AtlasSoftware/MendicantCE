@@ -4866,9 +4866,11 @@ void halo_screen_panini(short x0, short y0, short x1, short y1, const float proj
 	target = render_target_get(&device.back_buffer);
 	if (!target)
 		return;
-	/* (no longer multisampled: the pass reads the view's pixels resolved,
-	as anti-aliasing's do; the HUD's draws multisample it again) */
-	render_target_multisample(&target->target, 0);
+	/* (still multisampled, if it is: the backend reads the view's pixels
+	resolved and draws the pass into its samples, which the HUD is drawn
+	into after. Its samples change only between frames: made again here,
+	its attachment would come back for the HUD without the view, and the
+	frame's resolve would put that over the pass) */
 	view_corners(target, x0, y0, x1, y1, corners);
 	xgpu_backend_panini(target->target.number, corners, projection);
 }

@@ -144,7 +144,7 @@ static int textures_fit(int smaa, uint8_t format, uint32_t width, uint32_t heigh
 
 /* a pass's pipeline: into the target its colour alone; into an
 intermediate, all of it; the target's format (display.hdr's half floats) */
-static void pipeline_describe(int function, uint8_t format, struct xgpu_metal_pipeline *pipeline)
+static void pipeline_describe(int function, uint8_t format, uint32_t samples, struct xgpu_metal_pipeline *pipeline)
 {
 	memset(pipeline, 0, sizeof(*pipeline));
 	pipeline->vertex_shader = post.functions[XGPU_METAL_POST_VERTEX];
@@ -156,7 +156,9 @@ static void pipeline_describe(int function, uint8_t format, struct xgpu_metal_pi
 	with its pixels) */
 	pipeline->color_format = function == XGPU_METAL_POST_FXAA || function == XGPU_METAL_POST_SMAA_BLEND ||
 		function == XGPU_METAL_POST_PANINI ? format : XGPU_METAL_FORMAT_BGRA8;
-	pipeline->samples = 1;
+	/* (display.panini's into a multisampled target's samples, every sample
+	of a pixel given its value) */
+	pipeline->samples = (uint8_t)(samples > 1 ? samples : 1);
 }
 
 static int prepare_failed(int smaa, const char *what)
@@ -196,7 +198,7 @@ int xgpu_metal_post_prepare(int smaa)
 			return prepare_failed(smaa, "functions");
 		/* (made on the backend's queues: a draw waits for its own, a map's
 		preparation for all of them) */
-		pipeline_describe(function, XGPU_METAL_FORMAT_BGRA8, &pipeline);
+		pipeline_describe(function, XGPU_METAL_FORMAT_BGRA8, 1, &pipeline);
 		xgpu_metal_prepare(&pipeline);
 	}
 	if (smaa && !post.area)
@@ -212,10 +214,12 @@ int xgpu_metal_post_prepare(int smaa)
 
 /* ---------- the passes */
 
-/* a function's triangle drawn into a texture over the rectangle, sampling
-textures (0: none) */
-static void pass_draw_with(int function, uint32_t into, uint8_t format, const int32_t rectangle[4], uint32_t texture0,
-	uint32_t texture1, uint32_t texture2, const float bounds[4], const float window[4], const float panini[8])
+/* a function's triangle drawn into a texture over the rectangle (into its
+samples, where it has samples: a multisampled target's), sampling textures
+(0: none) */
+static void pass_draw_with(int function, uint32_t into, uint8_t format, uint32_t samples, const int32_t rectangle[4],
+	uint32_t texture0, uint32_t texture1, uint32_t texture2, const float bounds[4], const float window[4],
+	const float panini[8])
 {
 	struct xgpu_metal_pipeline pipeline;
 	struct xgpu_metal_dynamic_state dynamic;
@@ -224,8 +228,8 @@ static void pass_draw_with(int function, uint32_t into, uint8_t format, const in
 	const uint32_t textures[4] = { texture0, texture1, texture2, 0 };
 	uint32_t stage;
 
-	xgpu_metal_set_targets(into, 0, 0, 0, 0);
-	pipeline_describe(function, format, &pipeline);
+	xgpu_metal_set_targets(into, 0, 0, 0, samples > 1);
+	pipeline_describe(function, format, samples, &pipeline);
 	xgpu_metal_set_pipeline(&pipeline);
 	memset(&dynamic, 0, sizeof(dynamic));
 	dynamic.viewport[0] = dynamic.scissor[0] = rectangle[0];
@@ -263,7 +267,7 @@ static void pass_draw_with(int function, uint32_t into, uint8_t format, const in
 static void pass_draw(int function, uint32_t into, uint8_t format, const int32_t rectangle[4], uint32_t texture0,
 	uint32_t texture1, uint32_t texture2, const float bounds[4])
 {
-	pass_draw_with(function, into, format, rectangle, texture0, texture1, texture2, bounds, NULL, NULL);
+	pass_draw_with(function, into, format, 1, rectangle, texture0, texture1, texture2, bounds, NULL, NULL);
 }
 
 /* an intermediate emptied, all of it, as its pass begins, so that no edge
@@ -331,9 +335,13 @@ int xgpu_metal_post_anti_alias(int smaa, uint32_t target, uint8_t format, uint32
 The window's 3D view drawn again through the Panini projection, as the
 Vulkan backend draws it (xgpu_vulkan_post.c): the target's pixels copied,
 then each pixel of the rectangle drawn from the copy where the rectilinear
-view saw what the projection puts there, all four channels. */
+view saw what the projection puts there, all four channels. A multisampled
+target stays multisampled: its pixels resolved for the copy, and the pass
+drawn into its samples, which the HUD is drawn into after and the frame's
+end resolves (drawn into the resolved pixels alone, the pass would be lost
+to that resolve). */
 
-int xgpu_metal_post_panini_prepare(void)
+int xgpu_metal_post_panini_prepare(uint32_t samples)
 {
 	struct xgpu_metal_pipeline pipeline;
 
@@ -347,21 +355,21 @@ int xgpu_metal_post_panini_prepare(void)
 	}
 	/* (made on the backend's queues: a draw waits for its own, a map's
 	preparation for all of them) */
-	pipeline_describe(XGPU_METAL_POST_PANINI, XGPU_METAL_FORMAT_BGRA8, &pipeline);
+	pipeline_describe(XGPU_METAL_POST_PANINI, XGPU_METAL_FORMAT_BGRA8, samples, &pipeline);
 	xgpu_metal_prepare(&pipeline);
-	pipeline_describe(XGPU_METAL_POST_PANINI, XGPU_METAL_FORMAT_RGBA16F, &pipeline);
+	pipeline_describe(XGPU_METAL_POST_PANINI, XGPU_METAL_FORMAT_RGBA16F, samples, &pipeline);
 	xgpu_metal_prepare(&pipeline);
 	return 1;
 }
 
-int xgpu_metal_post_panini(uint32_t target, uint8_t format, uint32_t width, uint32_t height, const int32_t corners[4],
-	const float projection[8])
+int xgpu_metal_post_panini(uint32_t target, uint8_t format, uint32_t width, uint32_t height, uint32_t samples,
+	const int32_t corners[4], const float projection[8])
 {
 	int32_t rectangle[4];
 	float bounds[4], window[4];
 	int index;
 
-	if (!target || !width || !height || !xgpu_metal_post_panini_prepare())
+	if (!target || !width || !height || !xgpu_metal_post_panini_prepare(samples))
 		return 0;
 	/* (inside the target) */
 	for (index = 0; index < 4; index++)
@@ -375,6 +383,10 @@ int xgpu_metal_post_panini(uint32_t target, uint8_t format, uint32_t width, uint
 	/* (the copy, FXAA's) */
 	if (!textures_fit(0, format, width, height))
 		return 0;
+	/* (a multisampled target's samples resolved into its texture, which is
+	copied) */
+	if (samples > 1)
+		xgpu_metal_texture_resolve(target);
 	xgpu_metal_texture_copy(target, post.color);
 	/* (split screen: no texel of the next window is read) */
 	bounds[0] = ((float)rectangle[0] + 0.5f) / (float)post.width;
@@ -386,7 +398,8 @@ int xgpu_metal_post_panini(uint32_t target, uint8_t format, uint32_t width, uint
 	window[1] = (float)corners[1];
 	window[2] = (float)(corners[2] - corners[0]);
 	window[3] = (float)(corners[3] - corners[1]);
-	pass_draw_with(XGPU_METAL_POST_PANINI, target, format, rectangle, post.color, 0, 0, bounds, window, projection);
+	pass_draw_with(XGPU_METAL_POST_PANINI, target, format, samples, rectangle, post.color, 0, 0, bounds, window,
+		projection);
 	return 1;
 }
 

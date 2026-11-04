@@ -319,6 +319,8 @@ static void pass_draw_with(int program, struct xgpu_vulkan_image *into, uint32_t
 	const float bounds[4], const float window[4], const float panini[8])
 {
 	uint8_t format = xgpu_vulkan_image_description(into)->format;
+	uint32_t into_samples = xgpu_vulkan_image_description(into)->samples;
+	struct xgpu_vulkan_pipeline_description pipeline;
 	struct xgpu_vulkan_image *images[3];
 	struct xgpu_vulkan_post_uniforms *uniforms;
 	struct xgpu_vulkan_dynamic_state dynamic;
@@ -326,7 +328,11 @@ static void pass_draw_with(int program, struct xgpu_vulkan_image *into, uint32_t
 	int stage;
 
 	memset(&draw, 0, sizeof(draw));
-	draw.pipeline = xgpu_vulkan_pipeline(pipeline_of(program, format));
+	/* (of the samples of the image drawn into: a multisampled attachment's
+	every sample given its pixel's value) */
+	pipeline = *pipeline_of(program, format);
+	pipeline.samples = (uint8_t)(into_samples > 1 ? into_samples : 1);
+	draw.pipeline = xgpu_vulkan_pipeline(&pipeline);
 	if (!draw.pipeline)
 		return;
 	images[0] = image0;
@@ -452,11 +458,14 @@ FXAA's: the target's pixels copied, then each pixel of the rectangle drawn
 from the copy where the rectilinear view saw what the projection puts there
 (tools/vulkan_post_shaders.py's PANINI_SOURCE). All four channels: the
 game's own values in destination alpha belong to the pixels they are moved
-with. */
+with. With multisampling the copy is of the resolved pixels and the pass
+draws into the multisampled attachment, which the HUD is drawn into after
+and which is resolved over the target's pixels at the frame's end: drawn
+into the resolved pixels alone, the pass would be lost to that resolve. */
 
-int xgpu_vulkan_post_panini_prepare(uint8_t format, int preparing)
+int xgpu_vulkan_post_panini_prepare(uint8_t format, uint32_t samples, int preparing)
 {
-	struct xgpu_vulkan_pipeline_description *description;
+	struct xgpu_vulkan_pipeline_description *description, multisampled;
 
 	if (format != XGPU_VULKAN_FORMAT_RGBA16F)
 		format = XGPU_VULKAN_FORMAT_BGRA8;
@@ -477,7 +486,11 @@ int xgpu_vulkan_post_panini_prepare(uint8_t format, int preparing)
 		description->color_mask = 15;
 		description->color_format = format;
 		description->samples = 1;
-		if (preparing ? xgpu_vulkan_pipeline_prepare(description) : xgpu_vulkan_pipeline(description) != VK_NULL_HANDLE)
+		/* (the pipeline of the target's samples: pass_draw_with's) */
+		multisampled = *description;
+		multisampled.samples = (uint8_t)(samples > 1 ? samples : 1);
+		if (preparing ? xgpu_vulkan_pipeline_prepare(&multisampled) :
+			xgpu_vulkan_pipeline(&multisampled) != VK_NULL_HANDLE)
 			return 1;
 	}
 	host_logf(HOST_LOG_WARN, "vulkan: the Panini projection's pass cannot be made, so the 3D view is drawn flat");
@@ -485,22 +498,24 @@ int xgpu_vulkan_post_panini_prepare(uint8_t format, int preparing)
 	return 0;
 }
 
-int xgpu_vulkan_post_panini(struct xgpu_vulkan_image *target, uint32_t layer, const int32_t corners[4],
-	const float projection[8])
+int xgpu_vulkan_post_panini(struct xgpu_vulkan_image *source, struct xgpu_vulkan_image *into, uint32_t layer,
+	const int32_t corners[4], const float projection[8])
 {
-	const struct xgpu_vulkan_image_description *description;
+	const struct xgpu_vulkan_image_description *description, *into_description;
 	int32_t rectangle[4];
 	float bounds[4], window[4];
 	int index;
 
-	if (!target)
+	if (!source || !into)
 		return 0;
-	description = xgpu_vulkan_image_description(target);
+	description = xgpu_vulkan_image_description(source);
+	into_description = xgpu_vulkan_image_description(into);
 	if ((description->format != XGPU_VULKAN_FORMAT_BGRA8 && description->format != XGPU_VULKAN_FORMAT_RGBA16F) ||
-		description->samples > 1)
+		description->samples > 1 || into_description->format != description->format ||
+		into_description->width != description->width || into_description->height != description->height)
 		return 0;
 	/* (made already, as the map was prepared, or now) */
-	if (!xgpu_vulkan_post_panini_prepare(description->format, 0))
+	if (!xgpu_vulkan_post_panini_prepare(description->format, into_description->samples, 0))
 		return 0;
 	/* (inside the target) */
 	for (index = 0; index < 4; index++)
@@ -514,7 +529,7 @@ int xgpu_vulkan_post_panini(struct xgpu_vulkan_image *target, uint32_t layer, co
 	/* (the copy, FXAA's) */
 	if (!images_fit(0, description->format, description->width, description->height))
 		return 0;
-	xgpu_vulkan_image_copy_rectangle(target, layer, post.color, rectangle);
+	xgpu_vulkan_image_copy_rectangle(source, layer, post.color, rectangle);
 	/* (split screen: no texel of the next window is read) */
 	bounds[0] = ((float)rectangle[0] + 0.5f) / (float)post.width;
 	bounds[1] = ((float)rectangle[1] + 0.5f) / (float)post.height;
@@ -525,7 +540,7 @@ int xgpu_vulkan_post_panini(struct xgpu_vulkan_image *target, uint32_t layer, co
 	window[1] = (float)corners[1];
 	window[2] = (float)(corners[2] - corners[0]);
 	window[3] = (float)(corners[3] - corners[1]);
-	pass_draw_with(XGPU_VULKAN_POST_PANINI, target, layer, rectangle, post.color, NULL, NULL, bounds, window,
+	pass_draw_with(XGPU_VULKAN_POST_PANINI, into, layer, rectangle, post.color, NULL, NULL, bounds, window,
 		projection);
 	return 1;
 }

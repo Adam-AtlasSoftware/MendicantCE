@@ -2117,6 +2117,13 @@ than that needs.
   settings the flat view covers the whole screen through it, so nothing
   wider is drawn. The pass samples each pixel over the pixels it covers, so
   the sides, drawn smaller, do not shimmer.
+- With multisampling (`msaa2x` to `msaa8x`) the pass reads the view's
+  pixels resolved and draws into the screen's samples, every sample of a
+  pixel given its value, and the HUD is multisampled over it as ever
+  (`xgpu_vulkan_post_panini`, `xgpu_metal_post_panini`). The screen stays
+  multisampled through the frame: the backends change a target's samples
+  only between frames, making its samples again, empty
+  (`tools/test_screen_passes_samples.py`).
 - So that the middle keeps its sharpness, the screen is supersampled (as
   `ssaa2x` is) by the middle's magnification at the widest of
   `display.fov`'s and `display.vehicle_fov`'s views, at most twice each way:

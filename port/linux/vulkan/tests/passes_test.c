@@ -746,6 +746,7 @@ static VkImageCopy post_copied;
 static VkImageView post_attachments[4];
 static VkRenderingAttachmentInfo post_began[4];
 static uint32_t post_begins, post_draws, post_updates, post_masks[4], post_pipelines;
+static VkSampleCountFlagBits post_pipeline_samples[4];
 static VkDescriptorImageInfo post_sampled[4][4];
 static VkViewport post_viewports[4];
 static VkRect2D post_scissors[4];
@@ -826,7 +827,7 @@ static VkResult VKAPI_CALL post_pipeline(VkDevice device, VkPipelineCache cache,
 	assert(!info->pColorBlendState->pAttachments[0].blendEnable);
 	assert(rendering->colorAttachmentCount == 1 && rendering->pColorAttachmentFormats[0] == VK_FORMAT_B8G8R8A8_UNORM);
 	assert(rendering->depthAttachmentFormat == VK_FORMAT_UNDEFINED && !rendering->viewMask);
-	assert(info->pMultisampleState->rasterizationSamples == VK_SAMPLE_COUNT_1_BIT);
+	post_pipeline_samples[post_pipelines] = info->pMultisampleState->rasterizationSamples;
 	post_masks[post_pipelines] = info->pColorBlendState->pAttachments[0].colorWriteMask;
 	*pipeline = (VkPipeline)(uintptr_t)(200 + post_pipelines++);
 	return VK_SUCCESS;
@@ -965,6 +966,8 @@ static void post_test(void)
 	assert(xgpu_vulkan_post_anti_alias(1, &target, 0, corners));
 	assert(!strcmp(post_events, "CXBcDEXBcDEXBlD"));
 	assert(post_pipelines == 3 && post_masks[0] == 15 && post_masks[1] == 15 && post_masks[2] == 7);
+	for (index = 0; index < 3; index++)
+		assert(post_pipeline_samples[index] == VK_SAMPLE_COUNT_1_BIT);
 	assert(post_copied.srcSubresource.baseArrayLayer == 0 && post_copied.dstSubresource.baseArrayLayer == 0);
 	assert(post_copied.srcOffset.x == 8 && post_copied.srcOffset.y == 4 && post_copied.dstOffset.x == 8);
 	assert(post_copied.dstOffset.y == 4 && post_copied.extent.width == 32 && post_copied.extent.height == 40);
@@ -1041,6 +1044,60 @@ static void post_test(void)
 		free(images[index]->attachments);
 		images[index]->attachments = NULL;
 	}
+	memset(&post, 0, sizeof(post));
+	recording.descriptor_pools = NULL;
+	recording.descriptor_pool_count = 0;
+	reset();
+}
+
+/* display.panini over a multisampled target: its resolved pixels copied,
+and the pass drawn into its samples, by a pipeline of as many samples (drawn
+into the resolved pixels alone, it would be lost to the frame's resolve of
+the samples, which the HUD is drawn into after); over a target of one
+sample, into the target; never from samples */
+static void panini_post_test(void)
+{
+	static struct xgpu_vulkan_image target, color, samples;
+	static const int32_t corners[4] = { 0, 0, 64, 48 };
+	static const float projection[8] = { 0.5f, 0.0f, 1.0f, 0.0f, -1.0f, 1.0f, 0.75f, -0.75f };
+	uint32_t index;
+
+	post_reset();
+	post_image(&target, 1, XGPU_VULKAN_FORMAT_BGRA8, 64, 48);
+	post_image(&color, 2, XGPU_VULKAN_FORMAT_BGRA8, 64, 48);
+	post_image(&samples, 3, XGPU_VULKAN_FORMAT_BGRA8, 64, 48);
+	samples.description.samples = 4;
+	memset(&post, 0, sizeof(post));
+	post.vertex = (VkShaderModule)(uintptr_t)1;
+	for (index = 0; index < XGPU_VULKAN_POST_PROGRAM_COUNT; index++)
+		post.pixel[index] = (VkShaderModule)(uintptr_t)(2 + index);
+	post.sampler = (VkSampler)(uintptr_t)5;
+	post.color = &color;
+	post.width = 64;
+	post.height = 48;
+	post.format = XGPU_VULKAN_FORMAT_BGRA8;
+	post_pipelines = 0;
+
+	assert(xgpu_vulkan_post_panini(&target, &samples, 0, corners, projection));
+	assert(!strcmp(post_events, "CXBlD"));
+	assert(post_copied.extent.width == 64 && post_copied.extent.height == 48);
+	assert(post_pipelines == 1 && post_pipeline_samples[0] == VK_SAMPLE_COUNT_4_BIT && post_masks[0] == 15);
+	assert(post_attachments[0] == samples.attachments[0] && vk.color == &samples);
+	assert(post_sampled[0][0].imageView == color.sampled);
+
+	post_reset();
+	assert(xgpu_vulkan_post_panini(&target, &target, 0, corners, projection));
+	assert(!strcmp(post_events, "CXBlD"));
+	assert(post_pipelines == 2 && post_pipeline_samples[1] == VK_SAMPLE_COUNT_1_BIT);
+	assert(post_attachments[0] == target.attachments[0]);
+
+	post_reset();
+	assert(!xgpu_vulkan_post_panini(&samples, &samples, 0, corners, projection) && !post_events[0]);
+
+	free(target.attachments);
+	free(color.attachments);
+	free(samples.attachments);
+	target.attachments = color.attachments = samples.attachments = NULL;
 	memset(&post, 0, sizeof(post));
 	recording.descriptor_pools = NULL;
 	recording.descriptor_pool_count = 0;
@@ -3577,6 +3634,7 @@ int main(void)
 	submissions_test();
 	texture_sets_test();
 	post_test();
+	panini_post_test();
 	masked_clear_test();
 	window_test();
 	rotate_test();
