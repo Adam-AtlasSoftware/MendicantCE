@@ -18,7 +18,7 @@ FUNCTIONS = ("menu_picture_scale_for_height", "menu_picture_decide", "menu_pictu
              "menu_picture_note_end", "menu_picture_note_give_up", "menu_picture_overdue", "menu_picture_note_parse",
              "menu_picture_note_format", "picture_sorted_at", "picture_quantile", "menu_picture_colour_curve",
              "menu_picture_cut", "menu_picture_frame", "menu_pictures_may_begin", "menu_picture_not_a_scene",
-             "menu_picture_png_whole")
+             "picture_be32", "menu_picture_png_whole")
 
 # a fault in menu_pictures.c, the function it is in, and the case that must catch it
 NEGATIVE_CONTROLS = {
@@ -70,7 +70,7 @@ NEGATIVE_CONTROLS = {
                        "scene"),
     "cut-short-drawn": (("memcmp(tail + tail_size - 12, end, sizeof(end))", "memcmp(tail + tail_size - 12, end, 0)"),
                         "menu_picture_png_whole", "whole"),
-    "any-size-drawn": (("== width && (", "!= 0 || ("), "menu_picture_png_whole", "whole"),
+    "any-size-drawn": (("== width && picture_be32(head + 20) == height", "== width || 1"), "menu_picture_png_whole", "whole"),
     "edges-not-repeated": (("(x < width ? x : width - 1)", "(x < width ? x : 0)"), "menu_picture_frame", "frame"),
 }
 

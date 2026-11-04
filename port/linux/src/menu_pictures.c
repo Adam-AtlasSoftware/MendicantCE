@@ -308,6 +308,11 @@ char const *menu_picture_not_a_scene(
 	return NULL;
 }
 
+static unsigned long picture_be32(unsigned char const *bytes)
+{
+	return (unsigned long)bytes[0] << 24 | (unsigned long)bytes[1] << 16 | (unsigned long)bytes[2] << 8 | bytes[3];
+}
+
 /* whether a cached picture's file, by its first and last bytes, is a whole
 PNG of this size: its signature and header, and its end chunk last (a file
 cut short, of another size, or not a PNG is not; its note's picture is
@@ -329,9 +334,7 @@ int menu_picture_png_whole(
 	{
 		return 0;
 	}
-	return ((unsigned long)head[16] << 24 | (unsigned long)head[17] << 16 | (unsigned long)head[18] << 8 | head[19]) ==
-		width && ((unsigned long)head[20] << 24 | (unsigned long)head[21] << 16 | (unsigned long)head[22] << 8 |
-		head[23]) == height;
+	return picture_be32(head + 16) == width && picture_be32(head + 20) == height;
 }
 
 static char const *const menu_picture_result_names[] = { "none", "rendered", "failed", "modded" };
