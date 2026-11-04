@@ -514,6 +514,31 @@ void texture_cache_preparation_begin(void)
 		texture_cache_preparation_checkpoint);
 }
 
+void texture_cache_bitmap_new(
+	long bitmap_tag_index,
+	struct bitmap_data *bitmap)
+{
+	struct bitmap_group *bitmap_group;
+
+	match_assert(
+		"c:\\halo\\SOURCE\\cache\\xbox_texture_cache.c",
+		157,
+		!TEST_FLAG(bitmap->flags, _bitmap_cached_bit));
+	SET_FLAG(bitmap->flags, _bitmap_cached_bit, TRUE);
+	bitmap->cache_block_index = NONE;
+	bitmap->base_address = NULL;
+	bitmap->hardware_format = NULL;
+	bitmap_group = bitmap_group_get(bitmap_tag_index);
+	bitmap->pixels_offset += bitmap_group->pixel_data.file_offset;
+	bitmap->pixels_size = bitmap_get_pixel_data_size(bitmap);
+	bitmap->tag_index = bitmap_tag_index;
+	bitmap->base_address = NULL;
+	bitmap->hardware_format = NULL;
+	bitmap->cache_block_index = NONE;
+
+	return;
+}
+
 /* (cache_files.c's) */
 boolean tag_index_is_group(long tag_index, long group_tag);
 
@@ -597,31 +622,6 @@ void *texture_cache_port_load(
 		TAG_BLOCK_GET_ELEMENT(&bitmap_group->bitmaps, (long)bitmap_index, struct bitmap_data),
 		TRUE,
 		TRUE);
-}
-
-void texture_cache_bitmap_new(
-	long bitmap_tag_index,
-	struct bitmap_data *bitmap)
-{
-	struct bitmap_group *bitmap_group;
-
-	match_assert(
-		"c:\\halo\\SOURCE\\cache\\xbox_texture_cache.c",
-		157,
-		!TEST_FLAG(bitmap->flags, _bitmap_cached_bit));
-	SET_FLAG(bitmap->flags, _bitmap_cached_bit, TRUE);
-	bitmap->cache_block_index = NONE;
-	bitmap->base_address = NULL;
-	bitmap->hardware_format = NULL;
-	bitmap_group = bitmap_group_get(bitmap_tag_index);
-	bitmap->pixels_offset += bitmap_group->pixel_data.file_offset;
-	bitmap->pixels_size = bitmap_get_pixel_data_size(bitmap);
-	bitmap->tag_index = bitmap_tag_index;
-	bitmap->base_address = NULL;
-	bitmap->hardware_format = NULL;
-	bitmap->cache_block_index = NONE;
-
-	return;
 }
 
 void texture_cache_bitmap_delete(

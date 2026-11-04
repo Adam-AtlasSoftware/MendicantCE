@@ -6335,11 +6335,91 @@ static void journal_play(unsigned long op, const struct journal_state *state)
 	}
 }
 
+/* the journal's words read, a call for each entry (its type and its state,
+made from the entry's before in state), texture and run of pages; 0 if
+they are malformed (the calls up to there made) */
+struct journal_reader
+{
+	void (*entry)(unsigned long op, const struct journal_state *state);
+	void (*texture)(uint32_t tag_index, uint32_t bitmap_index);
+	void (*pages)(unsigned long first, unsigned long end);
+};
+
+static int journal_read(const uint32_t *words, unsigned long count, struct journal_state *state,
+	unsigned long page_count, const struct journal_reader *reader)
+{
+	uint32_t *fields = (uint32_t *)state;
+	unsigned long position = 0, index;
+
+	while (position < count)
+	{
+		uint32_t header = words[position++];
+		uint32_t type = header & 0xff, size = header >> 8;
+
+		if (type == JOURNAL_TEXTURE)
+		{
+			if (count - position < 2)
+				return 0;
+			reader->texture(words[position], words[position + 1]);
+			position += 2;
+		}
+		else if (type == JOURNAL_PAGES)
+		{
+			if ((count - position) / 2 < size)
+				return 0;
+			for (index = 0; index < size; index++, position += 2)
+			{
+				if (words[position] >= words[position + 1] || words[position + 1] > page_count)
+					return 0;
+				reader->pages(words[position], words[position + 1]);
+			}
+		}
+		else if (type >= JOURNAL_DRAW && type < JOURNAL_STATES)
+		{
+			if ((count - position) / 2 < size)
+				return 0;
+			for (index = 0; index < size; index++, position += 2)
+			{
+				if (words[position] >= JOURNAL_STATE_WORDS)
+					return 0;
+				fields[words[position]] = words[position + 1];
+			}
+			reader->entry(type, state);
+		}
+		else
+		{
+			return 0;
+		}
+	}
+	return 1;
+}
+
+static void journal_replay_texture(uint32_t tag_index, uint32_t bitmap_index)
+{
+	if (journal.bitmaps && !journal.bitmaps->load(tag_index, bitmap_index))
+		journal.unknown++;
+}
+
+/* a run a segment at a time, as mirror_range uploads them */
+static void journal_replay_pages(unsigned long first, unsigned long end)
+{
+	while (first < end)
+	{
+		unsigned long segment_end = (first * MIRROR_PAGE_SIZE / MIRROR_SEGMENT_SIZE + 1) *
+			(MIRROR_SEGMENT_SIZE / MIRROR_PAGE_SIZE);
+		unsigned long last = end < segment_end ? end : segment_end;
+
+		(void)mirror_refresh(first, last);
+		first = last;
+	}
+}
+
 int halo_gpu_journal_replay(const unsigned int *words, unsigned int count, const struct halo_gpu_journal_bitmaps *bitmaps,
 	unsigned int *unknown)
 {
-	unsigned long position = 0, index;
-	int well_formed = 1;
+	static const struct journal_reader reader = { journal_play, journal_replay_texture, journal_replay_pages };
+	unsigned long index;
+	int well_formed;
 
 	*unknown = 0;
 	if (!device.gl_ready || device.immediate_active)
@@ -6377,76 +6457,7 @@ int halo_gpu_journal_replay(const unsigned int *words, unsigned int count, const
 	journal.bitmaps = bitmaps;
 	journal.unknown = 0;
 	memset(&journal.last, 0, sizeof(journal.last));
-	while (position < count && well_formed)
-	{
-		uint32_t header = words[position++];
-		uint32_t type = header & 0xff, size = header >> 8;
-
-		if (type == JOURNAL_TEXTURE)
-		{
-			if (count - position < 2)
-			{
-				well_formed = 0;
-				break;
-			}
-			if (bitmaps && !bitmaps->load(words[position], words[position + 1]))
-				journal.unknown++;
-			position += 2;
-		}
-		else if (type == JOURNAL_PAGES)
-		{
-			if ((count - position) / 2 < size)
-			{
-				well_formed = 0;
-				break;
-			}
-			for (index = 0; index < size; index++, position += 2)
-			{
-				unsigned long first = words[position], end = words[position + 1];
-
-				if (first >= end || end > MIRROR_PAGE_COUNT)
-				{
-					well_formed = 0;
-					break;
-				}
-				/* (a run a segment at a time, as mirror_range uploads them) */
-				while (first < end)
-				{
-					unsigned long segment_end = (first * MIRROR_PAGE_SIZE / MIRROR_SEGMENT_SIZE + 1) *
-						(MIRROR_SEGMENT_SIZE / MIRROR_PAGE_SIZE);
-					unsigned long last = end < segment_end ? end : segment_end;
-
-					(void)mirror_refresh(first, last);
-					first = last;
-				}
-			}
-		}
-		else if (type >= JOURNAL_DRAW && type < JOURNAL_STATES)
-		{
-			uint32_t *state = (uint32_t *)&journal.last;
-
-			if ((count - position) / 2 < size)
-			{
-				well_formed = 0;
-				break;
-			}
-			for (index = 0; index < size; index++, position += 2)
-			{
-				if (words[position] >= JOURNAL_STATE_WORDS)
-				{
-					well_formed = 0;
-					break;
-				}
-				state[words[position]] = words[position + 1];
-			}
-			if (well_formed)
-				journal_play(type, &journal.last);
-		}
-		else
-		{
-			well_formed = 0;
-		}
-	}
+	well_formed = journal_read((const uint32_t *)words, count, &journal.last, MIRROR_PAGE_COUNT, &reader);
 
 	memcpy(D3D__RenderState, saved.render_states, sizeof(saved.render_states));
 	memcpy(D3D__TextureState, saved.texture_states, sizeof(saved.texture_states));

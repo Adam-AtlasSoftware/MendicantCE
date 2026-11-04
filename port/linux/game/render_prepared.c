@@ -209,6 +209,15 @@ unsigned long render_prepared_draws_missing(unsigned long long const *recorded, 
 	return missing;
 }
 
+/* a record's header is of this form, map, build and settings (key) */
+static boolean prepared_header_fits(struct prepared_header const *header, unsigned long checksum, uint64_t key)
+{
+	return header->magic == PREPARED_MAGIC && header->version == PREPARED_VERSION &&
+		header->header_size == sizeof(*header) && header->checksum == (uint32_t)checksum && header->key == key &&
+		header->word_count && header->word_count <= PREPARED_MAXIMUM_WORDS &&
+		header->draw_count <= PREPARED_MAXIMUM_WORDS / 2;
+}
+
 /* the record (its draws, then its words), read and checked; NULL if there is
 none to play */
 static uint64_t *prepared_read(struct prepared_header *header)
@@ -220,10 +229,7 @@ static uint64_t *prepared_read(struct prepared_header *header)
 
 	if (!file)
 		return NULL;
-	if (fread(header, sizeof(*header), 1, file) == 1 && header->magic == PREPARED_MAGIC &&
-		header->version == PREPARED_VERSION && header->header_size == sizeof(*header) &&
-		header->checksum == (uint32_t)prepared.checksum && header->key == prepared.key && header->word_count &&
-		header->word_count <= PREPARED_MAXIMUM_WORDS && header->draw_count <= PREPARED_MAXIMUM_WORDS / 2)
+	if (fread(header, sizeof(*header), 1, file) == 1 && prepared_header_fits(header, prepared.checksum, prepared.key))
 	{
 		size = header->word_count * sizeof(unsigned int) + header->draw_count * sizeof(uint64_t);
 		words = malloc(size + sizeof(uint64_t));
