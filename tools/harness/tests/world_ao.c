@@ -100,10 +100,11 @@ struct world_scene_instance const *world_scene_instance_find(long id)
 	return &instance;
 }
 
-/* (world_ao_shading.c's, tested apart: here, which point and volume) */
+/* (world_ao_shading.c's, tested apart: here, which point; asked without a
+field, a value that shows it was) */
 float world_ao_reference(struct world_sdf_volume const *reference_volume, float const lighting_point[3])
 {
-	return reference_volume ? lighting_point[2] / 10.0f : 1.0f;
+	return reference_volume ? lighting_point[2] / 10.0f : 0.3f;
 }
 
 void halo_world_ao_window(float const field[2][4], float const parameters[2][4], float const (*proxies)[3][4],
