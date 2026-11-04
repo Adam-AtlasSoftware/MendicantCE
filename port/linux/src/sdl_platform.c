@@ -27,6 +27,7 @@ and the debug keyboard that the game's console reads.
 #include "server_master.h"
 #include "player_link.h"
 #include "xiso.h"
+#include "map_unpack.h"
 #include "map_import.h"
 #ifdef HALO_VR
 #include "vr.h"
@@ -536,6 +537,10 @@ static void *data_extraction_thread(void *context)
 	{
 		succeeded = xiso_extract_maps(extraction->image, extraction->destination, data_extraction_progress,
 			extraction, extraction->error, sizeof(extraction->error)) != 0;
+		/* (and the stock maps unpacked into the cache's slots, on the
+		same bar: map_unpack.c) */
+		if (succeeded)
+			map_unpack_after_extraction(extraction->destination, data_extraction_progress, extraction);
 	}
 	pthread_mutex_lock(&extraction->lock);
 	extraction->written = written;

@@ -13,7 +13,8 @@ from harness import CHECK_FAILED, ROOT, build, mutated, read, run  # noqa: E402
 
 SOURCE = "port/linux/src/map_unpack.c"
 ZLIB = ["adler32.c", "crc32.c", "inffast.c", "inflate.c", "inftrees.c", "zutil.c"]
-CASES = ["precache_slot", "marker_last", "torn_stream", "short_stream", "two_threads", "workers"]
+CASES = ["precache_slot", "marker_last", "torn_stream", "short_stream", "two_threads", "workers", "assign",
+         "folder"]
 
 
 def synthetic_map():
@@ -62,12 +63,12 @@ ZLIB_SOURCES = zlib_sources()
 
 def generated(fault=None):
     code = read(SOURCE).replace('#include "platform.h"\n', "").replace(
-        '#include "../../third_party/zlib/zlib_prefixed.h"\n', "")
+        '#include "../../third_party/zlib/zlib_prefixed.h"\n', "").replace('#include "posix.h"\n', "")
     code = mutated(mutated(code, "MAP_UNPACK_READ_SIZE = 0x40000,", "MAP_UNPACK_READ_SIZE = 0x4000,"),
                    "MAP_UNPACK_WRITE_SIZE = 0x400000,", "MAP_UNPACK_WRITE_SIZE = 0x10000,")
     if fault:
         code = mutated(code, *fault)
-    return (("zlib_all.inc", ZLIB_SOURCES), ("map.inc", MAP), ("under_test.inc", code))
+    return (("map_unpack.h", read("port/linux/src/map_unpack.h")), ("zlib_all.inc", ZLIB_SOURCES), ("map.inc", MAP), ("under_test.inc", code))
 
 
 @pytest.mark.parametrize("case", CASES)
@@ -93,6 +94,15 @@ def test_map_unpack(case):
     # a stream that ends before the map's length taken for the map
     (("if (result == Z_STREAM_END && done != body)\n			goto finished;", "if (result == Z_STREAM_END)\n"
       "			break;"), "short_stream"),
+    # a map given a slot past the budget
+    (("taken + copy_size > budget)", "taken + copy_size > ~0ULL)"), "assign"),
+    # ... or past the most its type may be
+    (("file_lengths[index] >= most ||", "file_lengths[index] >= most + 0x40000000 ||"), "assign"),
+    # the folder's slots given no mark
+    (("&job->progress) &&\n			map_unpack_source_write(job->source_path, job->map_path, name, checksum, file_length);",
+      "&job->progress);"), "folder"),
+    # no language written for the game's start
+    (("	if (whole)\n	{\n		char path[1024];", "	if (0)\n	{\n		char path[1024];"), "folder"),
 ])
 def test_negative_control(fault, case):
     status, output = run(build("map_unpack", generated(fault)), case)

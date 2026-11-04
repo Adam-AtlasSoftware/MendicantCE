@@ -16,9 +16,32 @@ their own. */
 #include "zlib_all.inc"
 
 #define HALO_PORT_CACHED_MAP_FILES 32
+#define HALO_LINUX_PLATFORM_LAYER 1
 #include "map.inc"
 
+typedef unsigned int posix_ulong;
+struct posix_file_information { posix_ulong size_low, size_high, modification_seconds, modification_nanoseconds; };
+static int posix_stat(const char *path, struct posix_file_information *information)
+{
+	struct stat status;
+
+	if (stat(path, &status) != 0)
+		return -1;
+	information->size_low = (posix_ulong)status.st_size;
+	information->size_high = 0;
+	information->modification_seconds = (posix_ulong)status.st_mtim.tv_sec;
+	information->modification_nanoseconds = (posix_ulong)status.st_mtim.tv_nsec;
+	return 0;
+}
+
 static char folder[256];
+static void platform_log(const char *format, ...) { (void)format; }
+static unsigned long XGetLanguage(void) { return 1; }
+static int posix_make_directory(const char *path) { return mkdir(path, 0755); }
+unsigned long long map_cache_budget(unsigned long long cache_bytes, unsigned long long least)
+{
+	return cache_bytes + least;
+}
 static pthread_mutex_t marks_lock = PTHREAD_MUTEX_INITIALIZER;
 static int marks, marks_whole;
 static char marked_name[32];
@@ -218,6 +241,48 @@ int main(int argc, char **argv)
 		}
 		CHECK(done == 2 && whole == 2, "%d finished, %d whole", done, whole);
 		CHECK(marks == 2 && marks_whole == 2, "%d marks, %d of whole slots", marks, marks_whole);
+	}
+	else CASE("assign")
+	{
+		/* too big a multiplayer map, a campaign level, the main menu, a
+		multiplayer map, then one past the budget; and 40 small maps for 32
+		slots */
+		long lengths[5] = { 0x03000000, 0x10000000, 0x01000000, 0x00800000, 0x00800000 };
+		short types[5] = { 1, 0, 2, 1, 1 }, slots[40];
+		long many[40];
+		short many_types[40];
+		int index;
+
+		CHECK(map_unpack_assign(lengths, types, 5, 0x11800000ULL, slots) == 3, "not 3 assigned");
+		CHECK(slots[0] == -1 && slots[1] == 0 && slots[2] == 1 && slots[3] == 2 && slots[4] == -1,
+			"slots %d %d %d %d %d", slots[0], slots[1], slots[2], slots[3], slots[4]);
+		for (index = 0; index < 40; index++)
+		{
+			many[index] = 0x10000;
+			many_types[index] = 1;
+		}
+		CHECK(map_unpack_assign(many, many_types, 40, ~0ULL, slots) == 32 && slots[31] == 31 && slots[32] == -1,
+			"more than 32 slots");
+	}
+	else CASE("folder")
+	{
+		char path[512], line[256];
+		unsigned char language[4] = { 0 };
+		FILE *file;
+
+		snprintf(path, sizeof(path), "%s/maps", folder);
+		mkdir(path, 0755);
+		write_map("maps/a10.map", map_file, sizeof(map_file));
+		CHECK(map_unpack_folder(host("maps"), host("z"), 1, ~0ULL, NULL, NULL) == 1, "the folder not unpacked");
+		CHECK(slot_is_precache_s(host("z/cache000.map")), "the folder's slot is not the precache's");
+		file = fopen(host("z/cache000.source"), "r");
+		CHECK(file && fgets(line, sizeof(line), file), "no mark");
+		fclose(file);
+		CHECK(!strncmp(line, "openh1-cache-source 3 ", 22) && strstr(line, " 0 1592594996 526336 a10\n"),
+			"the mark is not version 3's: %s", line);
+		file = fopen(host("z/last_language.dat"), "rb");
+		CHECK(file && fread(language, 1, 4, file) == 4 && language[0] == 1 && !language[1], "no language");
+		fclose(file);
 	}
 	else
 	{
