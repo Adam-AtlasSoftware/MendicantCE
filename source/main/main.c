@@ -701,11 +701,16 @@ void network_test_update(boolean main_menu_loaded, real seconds);
 /* port: port/linux/game/basic_training.c */
 void basic_training_update(boolean main_menu_loaded, real seconds);
 /* port: the menus' pictures drawn again from the player's maps, rendered
-by the game itself as the main menu first shows, under the loading screen:
-which frames it draws (port/linux/game/menu_pictures_render.c) */
+by the game itself as a phase of its start (main_startup_update), under the
+loading screen: which frames it draws (port/linux/game/menu_pictures_render.c) */
+int menu_pictures_begin(void);
+int menu_pictures_exclusive(void);
 void menu_pictures_frame(int main_menu_loaded);
 int menu_pictures_preparing(void);
 int menu_pictures_frame_drawn(void);
+/* (port/linux/src/menu_pictures.c: _menu_pictures_startup_*) */
+long menu_pictures_startup_next(long phase, int main_menu_loaded, int movie_open, int pass_exclusive);
+int menu_pictures_startup_holds_main_menu(long phase, int pass_exclusive);
 /* port: port/linux/game/network_distributed.c */
 void network_distributed_frame_received(void);
 int network_distributed_server_receive(long milliseconds);
@@ -2528,6 +2533,53 @@ void main_menu_pictures_map(
 	return;
 }
 
+/* port: the game's start, in order (menu_pictures_startup_next): the intro
+movie (display.movies), if any, played to its end or skipped; then the
+menus' pictures, if any are to be made (menu_pictures_render.c), the pass
+having the game to itself (the map loader, the copy of a map's file into the
+cache and the texture cache's spare memory, which the movie had held: no
+movie starts meanwhile, bink_playback.c); then the main menu's menus and
+music, which wait till then (main_startup_holds_main_menu). Each phase
+begins only once the one before it has ended: nothing of one runs during
+another. (A run that starts in a map goes through them as it first reaches
+the main menu.) */
+enum
+{
+	_startup_intro = 0,
+	_startup_pictures,
+	_startup_done
+};
+static long main_startup_phase = _startup_intro;
+
+/* (ui_widget.c's main_screen_shell_load) */
+boolean main_startup_holds_main_menu(
+	void)
+{
+	return menu_pictures_startup_holds_main_menu(main_startup_phase, menu_pictures_exclusive()) != 0;
+}
+
+static void main_startup_update(
+	void)
+{
+	long next;
+
+	if (main_startup_phase == _startup_done)
+		return;
+	next = menu_pictures_startup_next(main_startup_phase, main_globals.main_menu_scenario_loaded,
+		bink_playback_in_progress(), menu_pictures_exclusive());
+	if (next == main_startup_phase)
+		return;
+	main_startup_phase = next;
+	/* (the pictures' pass begun; with none to make, straight on) */
+	if (main_startup_phase == _startup_pictures && menu_pictures_begin())
+		return;
+	main_startup_phase = _startup_done;
+	/* (the main menu's menus and music, held till now; the pass's end asked
+	for the main menu itself, which loads them) */
+	if (!menu_pictures_preparing())
+		main_screen_shell_load();
+}
+
 /* port: ...and then the main menu, at the player's difficulty */
 void main_menu_pictures_end(
 	void)
@@ -3773,7 +3825,9 @@ void main_loop(
 			/* port: Basic Training's game started, its skip buttons
 			(port/linux/game/basic_training.c) */
 			basic_training_update(main_globals.main_menu_scenario_loaded, main_globals.seconds_elapsed);
-			/* port: the menus' pictures (port/linux/game/menu_pictures_render.c) */
+			/* port: the game's start's phases, and the menus' pictures in
+			theirs (port/linux/game/menu_pictures_render.c) */
+			main_startup_update();
 			menu_pictures_frame(main_globals.main_menu_scenario_loaded);
 			/* (and what its ticks' scripts asked meanwhile) */
 			if (menu_pictures_preparing())

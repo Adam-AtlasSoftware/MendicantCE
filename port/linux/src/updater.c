@@ -125,6 +125,30 @@ build */
 #define UPDATE_NAME "OpenH1-Linux"
 #endif
 
+/* (given for this file by the build: tools/android_build.py's
+generate_guest_image, windows_build.py; the commit, CI's) */
+#ifndef HALO_BUILD_NUMBER
+#define HALO_BUILD_NUMBER 0
+#endif
+#ifndef HALO_BUILD_FLAVOR
+#define HALO_BUILD_FLAVOR "release"
+#endif
+#ifndef HALO_BUILD_COMMIT
+#define HALO_BUILD_COMMIT ""
+#endif
+
+/* which build this is, first in the log as the game starts (updater_start):
+its release (build-1314), and the commit it was made from */
+static void updater_log_build(void)
+{
+	if (HALO_BUILD_NUMBER > 0)
+		platform_log("build: build-%d (%s%s%s)", HALO_BUILD_NUMBER, HALO_BUILD_FLAVOR,
+			HALO_BUILD_COMMIT[0] ? ", commit " : "", HALO_BUILD_COMMIT);
+	else
+		platform_log("build: a local build, not a release (%s%s%s)", HALO_BUILD_FLAVOR,
+			HALO_BUILD_COMMIT[0] ? ", commit " : "", HALO_BUILD_COMMIT);
+}
+
 #ifdef UPDATE_PLATFORM
 
 #include "p2p_internal.h"
@@ -135,15 +159,6 @@ build */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-/* (given for this file by the build: tools/android_build.py's
-generate_guest_image, windows_build.py) */
-#ifndef HALO_BUILD_NUMBER
-#define HALO_BUILD_NUMBER 0
-#endif
-#ifndef HALO_BUILD_FLAVOR
-#define HALO_BUILD_FLAVOR "release"
-#endif
 
 #define UPDATE_REPOSITORY "OpenH1/OpenH1"
 #ifdef HALO_WINDOWS
@@ -1315,6 +1330,7 @@ void updater_start(void)
 	char *slash;
 	int updated;
 
+	updater_log_build();
 	if (!update_executable_path(updater_executable, sizeof(updater_executable)))
 		return;
 #ifdef HALO_WINDOWS
@@ -1810,6 +1826,7 @@ int updater_server_install_poll(char *error, int size)
 
 void updater_start(void)
 {
+	updater_log_build();
 }
 
 /* (the Frame's alone: menu_functions.c's "port update now") */

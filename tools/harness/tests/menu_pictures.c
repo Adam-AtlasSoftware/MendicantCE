@@ -11,7 +11,7 @@ no pass), a render noted before it begins (retried after a failure or a
 crash, then given up), a pass resumed at the next start, its notes written
 and read back, the colour curve,
 the picture cut from the middle of a frame and laid out as the original
-frame is. test_menu_pictures.py takes the header (menu_pictures_h.inc), the
+frame is, and the game's start's phases (the intro, the pass, the main menu). test_menu_pictures.py takes the header (menu_pictures_h.inc), the
 constants (config.inc) and the code (under_test.inc).
 */
 
@@ -408,104 +408,41 @@ int main(int argc, char **argv)
 		CHECK(menu_picture_decide(&pose, 0x11111111UL, &note, 3) == RENDER, "a changed map is not tried");
 	}
 
-	/* the pass begins once, in the main menu, and never while a movie
-	plays: the intro holds the texture cache's spare memory the maps' files
-	are copied through, draws over the frames kept, and loads the main menu
-	as it ends (issue 550) */
-	CASE("begin")
+	/* the game's start, in order: the intro movie played to its end or
+	skipped, then the pictures' pass, then the main menu's menus and music;
+	none begins before the one before it has ended, and the pass has the game
+	to itself from its start to its end's main menu (issue 550: the pass ran
+	under the intro, which held the texture cache's spare memory the maps'
+	files are copied through and drew over the frames kept) */
+	CASE("startup")
 	{
-		CHECK(menu_pictures_may_begin(TRUE, FALSE, FALSE), "the main menu with no movie does not begin the pass");
-		CHECK(!menu_pictures_may_begin(TRUE, TRUE, FALSE), "the pass begins while the intro movie plays");
-		CHECK(!menu_pictures_may_begin(FALSE, FALSE, FALSE), "the pass begins before the main menu is loaded");
-		CHECK(!menu_pictures_may_begin(TRUE, FALSE, TRUE), "the pass begins twice");
-		CHECK(!menu_pictures_may_begin(FALSE, TRUE, FALSE), "the pass begins in a movie before the main menu");
-	}
+		enum { INTRO = _menu_pictures_startup_intro, PICTURES = _menu_pictures_startup_pictures,
+			DONE = _menu_pictures_startup_done };
 
-	/* a frame kept that is no scene is never kept as a picture: one colour
-	nearly throughout (the intro's backdrop with its logo, a cleared screen)
-	or noise (memory drawn as a picture); a scene is, dark or bright (issue
-	550's frames: 96 to 99 percent alike, or 10 to 53 unlike) */
-	CASE("scene")
-	{
-		enum { WIDE = 420, HIGH = 342 };
-		static unsigned char picture[WIDE * HIGH * 4];
-		unsigned long seed = 12345;
-		long x, y;
-
-#define PIXEL(px, py) (picture + ((py) * WIDE + (px)) * 4)
-		/* (a scene: smooth light, a texture's fine grain, an object's edges) */
-		for (y = 0; y < HIGH; y++)
-		{
-			for (x = 0; x < WIDE; x++)
-			{
-				unsigned char *pixel = PIXEL(x, y);
-				int object = x > 150 && x < 260 && y > 120 && y < 220;
-
-				seed = seed * 1103515245UL + 12345UL;
-				pixel[0] = (unsigned char)(x * 200 / WIDE + (seed >> 16) % 4 + (object ? 50 : 0));
-				pixel[1] = (unsigned char)(y * 200 / HIGH + (object ? 0 : 30));
-				pixel[2] = (unsigned char)((x + y) / 8 + (object ? 40 : 0));
-				pixel[3] = 255;
-			}
-		}
-		CHECK(!menu_picture_not_a_scene(picture, WIDE, HIGH), "a scene is not one: %s",
-			menu_picture_not_a_scene(picture, WIDE, HIGH));
-		/* (a dark scene: half of it one black, the rest dim and grainy) */
-		for (y = 0; y < HIGH; y++)
-		{
-			for (x = 0; x < WIDE; x++)
-			{
-				unsigned char *pixel = PIXEL(x, y);
-
-				seed = seed * 1103515245UL + 12345UL;
-				pixel[0] = pixel[1] = pixel[2] = (unsigned char)(y < HIGH / 2 ? 0 : 10 + (seed >> 16) % 6);
-			}
-		}
-		CHECK(!menu_picture_not_a_scene(picture, WIDE, HIGH), "a dark scene is not one: %s",
-			menu_picture_not_a_scene(picture, WIDE, HIGH));
-		/* (the intro's backdrop: one colour, a logo on it) */
-		for (y = 0; y < HIGH; y++)
-		{
-			for (x = 0; x < WIDE; x++)
-			{
-				unsigned char *pixel = PIXEL(x, y);
-				int logo = x > 40 && x < 230 && y > 60 && y < 95 && (x / 6) % 2;
-
-				pixel[0] = logo ? 0 : 252;
-				pixel[1] = logo ? 0 : 252;
-				pixel[2] = logo ? 0 : 252;
-			}
-		}
-		CHECK(menu_picture_not_a_scene(picture, WIDE, HIGH) != NULL, "the intro's backdrop is kept as a scene");
-		/* (noise: memory drawn as a picture) */
-		for (y = 0; y < HIGH; y++)
-		{
-			for (x = 0; x < WIDE; x++)
-			{
-				unsigned char *pixel = PIXEL(x, y);
-
-				seed = seed * 1103515245UL + 12345UL;
-				pixel[0] = (unsigned char)(seed >> 16);
-				pixel[1] = (unsigned char)(seed >> 8);
-				pixel[2] = (unsigned char)(seed >> 24);
-			}
-		}
-		CHECK(menu_picture_not_a_scene(picture, WIDE, HIGH) != NULL, "noise is kept as a scene");
-		/* (bands of noise between bands of black, the least unlike of issue
-		550's: a sixth of the picture noise) */
-		for (y = 0; y < HIGH; y++)
-		{
-			for (x = 0; x < WIDE; x++)
-			{
-				unsigned char *pixel = PIXEL(x, y);
-
-				if ((x / 30) % 6 != 0)
-					pixel[0] = pixel[1] = pixel[2] = 8;
-			}
-		}
-		CHECK(menu_picture_not_a_scene(picture, WIDE, HIGH) != NULL, "bands of noise are kept as a scene");
-		CHECK(menu_picture_not_a_scene(picture, 0, 0) != NULL, "nothing is kept as a scene");
-#undef PIXEL
+		/* (the intro: until the main menu's map is loaded and no movie is
+		open; the pass's state is not its business) */
+		CHECK(menu_pictures_startup_next(INTRO, FALSE, FALSE, FALSE) == INTRO, "the start goes on before the main menu");
+		CHECK(menu_pictures_startup_next(INTRO, TRUE, TRUE, FALSE) == INTRO, "the pass begins while the intro plays");
+		CHECK(menu_pictures_startup_next(INTRO, FALSE, TRUE, FALSE) == INTRO, "the start goes on in a movie");
+		CHECK(menu_pictures_startup_next(INTRO, TRUE, FALSE, FALSE) == PICTURES,
+			"the pass does not begin once the intro has ended");
+		/* (the pass: while it has the game, whatever else is so) */
+		CHECK(menu_pictures_startup_next(PICTURES, TRUE, FALSE, TRUE) == PICTURES, "the main menu comes during the pass");
+		CHECK(menu_pictures_startup_next(PICTURES, FALSE, FALSE, TRUE) == PICTURES,
+			"the main menu comes as the pass loads a map");
+		CHECK(menu_pictures_startup_next(PICTURES, TRUE, FALSE, FALSE) == DONE, "the start never ends after the pass");
+		CHECK(menu_pictures_startup_next(DONE, TRUE, TRUE, TRUE) == DONE, "the start begins again");
+		/* (the main menu's menus and music wait through the intro and the
+		pass, not for the pass's own main menu at its end) */
+		CHECK(menu_pictures_startup_holds_main_menu(INTRO, FALSE), "the main menu shows before the intro has ended");
+		CHECK(menu_pictures_startup_holds_main_menu(PICTURES, TRUE), "the main menu shows during the pass");
+		CHECK(!menu_pictures_startup_holds_main_menu(PICTURES, FALSE), "the pass's end's main menu is held");
+		CHECK(!menu_pictures_startup_holds_main_menu(DONE, FALSE), "the main menu is held after the start");
+		CHECK(!menu_pictures_startup_holds_main_menu(DONE, TRUE), "the main menu is held after the start");
+		/* (the pass has the game from its start to its end's main menu) */
+		CHECK(menu_pictures_phase_exclusive(TRUE, FALSE), "the running pass shares the game");
+		CHECK(!menu_pictures_phase_exclusive(TRUE, TRUE), "the ended pass keeps the game: no intro after it");
+		CHECK(!menu_pictures_phase_exclusive(FALSE, FALSE), "no pass has the game");
 	}
 
 	/* a cached picture noted as rendered is drawn only if its file is a
