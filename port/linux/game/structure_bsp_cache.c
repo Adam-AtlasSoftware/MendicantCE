@@ -23,6 +23,7 @@ as before.
 #include "scenario/scenario_definitions.h"
 #include "structures/structure_bsp_definitions.h"
 #include "structure_bsp_cache.h"
+#include "structure_culling.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -160,6 +161,14 @@ void structure_bsp_cache_keep(
 	structure_bsp_cache.bytes += (unsigned long)reference->file_size;
 }
 
+long structure_bsp_cache_copy_offset(
+	struct scenario_structure_bsp_reference const *reference)
+{
+	struct structure_bsp_cache_entry const *entry = structure_bsp_cache_find(reference);
+
+	return entry ? (long)((byte *)entry->bytes - (byte *)entry->base_address) : 0;
+}
+
 /* the copy's bytes standing for count elements of size bytes at address,
 where the bsp loads; NULL for any not in the copy */
 static void const *structure_bsp_cache_at(
@@ -217,6 +226,8 @@ void structure_bsp_cache_dispose(
 {
 	short index;
 
+	/* (the buckets being built from the copies: structure_culling.c) */
+	structure_culling_wait();
 	if (structure_bsp_cache.count)
 	{
 		platform_log("structure bsps: %d kept, %lu bytes, let go of", structure_bsp_cache.count,
