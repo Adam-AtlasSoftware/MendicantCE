@@ -1,7 +1,7 @@
 """The menus' pictures drawn again from the player's maps (port/linux/src/menu_pictures.c): the scale a screen asks for,
 the cache's decision (drawn, rendered again, or the original kept for a missing or modded map and failed renders), the
 preparing pass's order and the pictures it counts (none with a missing or modded map; none at all, no pass), retries
-(a render noted before it begins) and a pass resumed after a failure or a crash, its notes, the colour curve, and the picture cut from a frame and laid out as the original frame is."""
+(a render noted before it begins) and a pass resumed after a failure or a crash, its notes, the colour curve, the picture cut from a frame and laid out as the original frame is, the pass begun only once\nthe intro movie has ended, and a frame kept only if it looks like a scene (issue 550)."""
 
 import sys
 from pathlib import Path
@@ -11,13 +11,14 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, function, mutated, read, run  # noqa: E402
 
-CASES = ["scale", "fallback", "cached", "failures", "order", "makeable", "retry", "resume", "notes", "colour", "cut", "frame", "budget", "give_up"]
+CASES = ["scale", "fallback", "cached", "failures", "order", "makeable", "retry", "resume", "notes", "colour", "cut", "frame", "budget", "give_up", "begin", "scene", "whole"]
 
 SOURCE = "port/linux/src/menu_pictures.c"
 FUNCTIONS = ("menu_picture_scale_for_height", "menu_picture_decide", "menu_picture_order", "menu_picture_note_begin",
              "menu_picture_note_end", "menu_picture_note_give_up", "menu_picture_overdue", "menu_picture_note_parse",
              "menu_picture_note_format", "picture_sorted_at", "picture_quantile", "menu_picture_colour_curve",
-             "menu_picture_cut", "menu_picture_frame")
+             "menu_picture_cut", "menu_picture_frame", "menu_pictures_may_begin", "menu_picture_not_a_scene",
+             "picture_be32", "menu_picture_png_whole")
 
 # a fault in menu_pictures.c, the function it is in, and the case that must catch it
 NEGATIVE_CONTROLS = {
@@ -59,6 +60,17 @@ NEGATIVE_CONTROLS = {
     "give-up-retried": (("note->failures = MENU_PICTURE_FAILURES;", ";"), "menu_picture_note_give_up", "give_up"),
     "give-up-hides-picture": (("if (note->result != _menu_picture_rendered)\n\t\tnote->result = _menu_picture_failed;",
                                "note->result = _menu_picture_failed;"), "menu_picture_note_give_up", "give_up"),
+    "pass-during-movie": (("&& !movie_playing ", ""), "menu_pictures_may_begin", "begin"),
+    "pass-before-main-menu": (("return main_menu_loaded && ", "return "), "menu_pictures_may_begin", "begin"),
+    "one-colour-kept": (("pairs * MENU_PICTURE_MOST_ALIKE", "pairs * 100"), "menu_picture_not_a_scene",
+                        "scene"),
+    "noise-kept": (("pairs * MENU_PICTURE_MOST_UNLIKE", "pairs * 100"), "menu_picture_not_a_scene",
+                   "scene"),
+    "scenes-refused": (("alike += difference == 0;", "alike += difference < 8;"), "menu_picture_not_a_scene",
+                       "scene"),
+    "cut-short-drawn": (("memcmp(tail + tail_size - 12, end, sizeof(end))", "memcmp(tail + tail_size - 12, end, 0)"),
+                        "menu_picture_png_whole", "whole"),
+    "any-size-drawn": (("== width && picture_be32(head + 20) == height", "== width || 1"), "menu_picture_png_whole", "whole"),
     "edges-not-repeated": (("(x < width ? x : width - 1)", "(x < width ? x : 0)"), "menu_picture_frame", "frame"),
 }
 
@@ -68,7 +80,8 @@ def generated(fault=None, faulty_function=None):
     source = read(SOURCE)
     config = "#include <math.h>\n"
     for name in ("MENU_PICTURES_VERSION", "MENU_PICTURE_FAILURES", "MENU_PICTURE_LARGEST_UNITS",
-                 "MENU_PICTURE_TIME_BUDGET", "MENU_PICTURES_TIME_BUDGET"):
+                 "MENU_PICTURE_TIME_BUDGET", "MENU_PICTURES_TIME_BUDGET", "MENU_PICTURE_MOST_ALIKE", "MENU_PICTURE_UNLIKE",
+                 "MENU_PICTURE_MOST_UNLIKE"):
         line = next(line for line in source.splitlines() if line.startswith(f"#define {name} "))
         config += line + "\n"
     start = source.index("static char const *const menu_picture_result_names[]")
