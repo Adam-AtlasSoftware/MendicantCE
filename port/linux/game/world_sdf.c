@@ -114,6 +114,7 @@ enum
 /* the platform layer's */
 const char *platform_data_root(void);
 void platform_log(char const *format, ...);
+void halo_load_trace(char const *phase, char const *detail);
 int config_boolean(const char *name);
 double config_real(const char *name);
 const char *config_string(const char *name);
@@ -1005,7 +1006,10 @@ void world_sdf_map_loaded(void)
 
 	if (sdf_off() || !sdf_key_loaded(&key))
 		return;
+	/* (measured: debug.load_trace's world_sdf.map_loaded) */
+	halo_load_trace("world_sdf.map_loaded.begin", key.map);
 	sdf_current_set(&key);
+	halo_load_trace("world_sdf.map_loaded.end", key.map);
 }
 
 void world_sdf_map_unloaded(void)
