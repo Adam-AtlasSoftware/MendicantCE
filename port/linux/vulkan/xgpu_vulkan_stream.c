@@ -284,7 +284,7 @@ static struct
 	(halo_shaders) */
 	VkShaderModule halo_vertex[3], halo_pixel[3];
 	int halo_failed[3];
-	int trace_preparing, trace_pipeline_descriptions;
+	int trace_preparing, trace_pipeline_descriptions, trace_frames;
 	struct xgpu_vulkan_statistics trace_statistics;
 	struct xgpu_vulkan_texture_statistics trace_textures;
 	double trace_seconds[4];
@@ -2588,6 +2588,10 @@ static void stream_frame_end(void *context)
 	}
 #endif
 	xgpu_vulkan_frame_end(back_buffer ? back_buffer->image : NULL, present_window);
+	/* (debug.load_trace: each frame's end on the render thread, whose
+	spacing tools/load_benchmark.py reads as the frames' times after a load) */
+	if (stream.trace_frames)
+		host_load_trace("vulkan.frame.end", "");
 	stream.back_buffer = 0;
 	xgpu_vulkan_textures_frame_end();
 	if (stream.statistics)
@@ -2743,6 +2747,7 @@ const struct host_render_backend *xgpu_vulkan_stream_backend(void)
 	if (!backend.open)
 	{
 		xgpu_vulkan_capabilities(&stream.capabilities);
+		stream.trace_frames = host_load_trace_enabled();
 		backend.open = stream_open;
 		backend.fence = stream_fence;
 		backend.wait = stream_wait;
