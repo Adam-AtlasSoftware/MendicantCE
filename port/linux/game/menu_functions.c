@@ -4859,8 +4859,8 @@ static void text_field_open(struct widget_instance *row, char const *text, short
 	text_field.maximum = (short)MIN(maximum, TEXT_FIELD_LENGTH - 1);
 	text_field.done = done;
 	text_field.masked = masked;
-	text_field.chosen = FALSE;
 	text_field.enter_ends = FALSE;
+	text_field.chosen = FALSE;
 	text_field_shown_time = system_milliseconds();
 	while (input_get_key(&key))
 		;
@@ -7381,28 +7381,6 @@ static boolean browser_searching(void)
 			return TRUE;
 	}
 	return FALSE;
-}
-
-/* whether text has the words, in any case (ASCII's) */
-static boolean browser_text_has(wchar_t const *text, char const *words)
-{
-	short start, index;
-
-	for (start = 0; text[start]; start++)
-	{
-		for (index = 0; words[index] && text[start + index]; index++)
-		{
-			int x = text[start + index] >= 'a' && text[start + index] <= 'z' ? text[start + index] - 32 :
-				text[start + index];
-			int y = words[index] >= 'a' && words[index] <= 'z' ? words[index] - 32 : words[index];
-
-			if (x != y)
-				break;
-		}
-		if (!words[index])
-			return TRUE;
-	}
-	return !words[0];
 }
 
 /* whether the filters list the game */

@@ -1153,7 +1153,6 @@ the setting for one start of the game. It has priority over the file.
 | `network.browser_show_password` | `true` | `HALO_NET_BROWSER_SHOW_PASSWORD` | `false`: the server browser hides games that need a password. Their Filters page. |
 | `network.browser_ping` | `0` | `HALO_NET_BROWSER_PING` | The server browsers list only games whose ping is under this many milliseconds (300, 250, 150, 100 or 50); `0` lists every game. A game whose ping is not known (a local network game's, a dedicated server's, one still being timed) is listed. Their Filters page. |
 | `network.browser_show_ctf`, `network.browser_show_slayer`, `network.browser_show_oddball`, `network.browser_show_king`, `network.browser_show_race` | `true` | `HALO_NET_BROWSER_SHOW_CTF`, `HALO_NET_BROWSER_SHOW_SLAYER`, `HALO_NET_BROWSER_SHOW_ODDBALL`, `HALO_NET_BROWSER_SHOW_KING`, `HALO_NET_BROWSER_SHOW_RACE` | `false`: the server browsers hide the games of that game type (OpenCE's kinds of it too: SWAT is Slayer). Co-op games have none (the CO-OP tab). Their Filters page. |
-| `network.browser_search` | `""` | `HALO_NET_BROWSER_SEARCH` | The server browsers list only games whose server name or map (as shown, or its own name) has these words, in any case. Empty lists every game. Their Filters page's SEARCH. |
 | `friends.share_status` | `true` | `HALO_FRIENDS_SHARE_STATUS` | Show your friends that you are online, and where, and let them join you (Multiplayer > FRIENDS). Only your friends can read it. `false` appears offline: nothing is published, and you still see your friends. Refer to "Friends". |
 | `network.host_public` | `true` | `HALO_NET_HOST_PUBLIC` | `true`: a new game of Create Game > Internet starts as PUBLIC. `false`: it starts as PRIVATE. LISTING in Server Setup changes it for each game. Refer to "Server browser". |
 | `network.game_mode` | `"openh1"` | `HALO_NET_GAME_MODE` | When you host: `"openh1"`, an OpenH1 game ("OpenH1 60 Tick" and the like) at the tick rate `network.sim_rate` sets, which OpenCE players can join too, at 30 (`network.allow_opence`); `"legacy"`, OpenCE's netcode at 30 ticks a second for everyone. `"standard"` is the same as `"openh1"`. Server Setup's GAME row (OPENH1 30 TICK, OPENH1 60 TICK, OPENH1 120 TICK or LEGACY) writes it and `network.sim_rate`. Read when hosting starts, and again when the game is started from Server Setup if no one has joined yet. Refer to "OpenH1 and Legacy games" in NETCODE.md. |
@@ -2734,8 +2733,6 @@ time the game starts; Cancel leaves them as they were.
 - PING: ANY, or only games under 300, 250, 150, 100 or 50 ms. A game whose
   ping is not known (a local network game's, a dedicated server's, one
   still being timed) stays listed.
-- SEARCH: words that a game's server name or map must have, in any case
-  ("gulch" finds Blood Gulch). Select the row, type, and press Enter.
 - GAME TYPES: CAPTURE THE FLAG, SLAYER, ODDBALL, KING OF THE HILL and RACE,
   each SHOW or HIDE, so that any mix of them is listed. OpenCE's kinds go
   with their game type (SWAT, Infection and Gun Game with Slayer). Co-op
@@ -2744,6 +2741,21 @@ time the game starts; Cancel leaves them as they were.
 The filters apply on every tab, the favorites too. The counts above the
 list say how many games they hide (`3 HIDDEN`), and a list that they leave
 empty says so.
+
+Searches, in the same two lists: the SERVER and MAP column titles each have
+a magnifying glass. Click it (or choose it with the D-pad and press A) and
+type: the list shows only the games whose server name, or map, has what
+you typed, as you type it. Case, spaces and punctuation don't count ("blood
+gulch" finds bloodgulch), and a map is found by its name as shown or its
+file's name. Both searches can be on at once, with the filters too. Enter
+keeps the words; the field's X clears them; Esc (B, Back) while you type
+clears that search and shows the magnifying glass again. SEARCH in the
+footer (R3 on a controller, / on the keyboard) types into the server's
+search, and again into the map's; on a Steam Deck the screen keyboard comes
+up. A list the searches leave empty says "No servers match your search."
+with CLEAR SEARCH under it. The searches stay while you are in the browser,
+Filters opened and closed too, and go when you leave it; they are not kept
+in `config.toml`.
 
 The browser lists two kinds of games: the dedicated servers that the
 master servers list (`masters.txt`, `network.masters_file`; the official

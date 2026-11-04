@@ -583,29 +583,29 @@
 		<frame png="ce/port/main_menu/parts/item_280x26__0.png" width="280" height="26"/>
 		<frame png="ce/port/main_menu/parts/item_280x26__1.png" width="280" height="26"/>
 	</bitmap>
-	<bitmap name="main_menu/parts/item_82x24">
-		<frame png="ce/port/main_menu/parts/item_82x24__0.png" width="82" height="24"/>
-		<frame png="ce/port/main_menu/parts/item_82x24__1.png" width="82" height="24"/>
+	<bitmap name="main_menu/parts/item_88x24">
+		<frame png="ce/port/main_menu/parts/item_88x24__0.png" width="88" height="24"/>
+		<frame png="ce/port/main_menu/parts/item_88x24__1.png" width="88" height="24"/>
 	</bitmap>
-	<bitmap name="main_menu/parts/item_84x24">
-		<frame png="ce/port/main_menu/parts/item_84x24__0.png" width="84" height="24"/>
-		<frame png="ce/port/main_menu/parts/item_84x24__1.png" width="84" height="24"/>
-	</bitmap>
-	<bitmap name="main_menu/parts/item_94x24">
-		<frame png="ce/port/main_menu/parts/item_94x24__0.png" width="94" height="24"/>
-		<frame png="ce/port/main_menu/parts/item_94x24__1.png" width="94" height="24"/>
+	<bitmap name="main_menu/parts/item_90x24">
+		<frame png="ce/port/main_menu/parts/item_90x24__0.png" width="90" height="24"/>
+		<frame png="ce/port/main_menu/parts/item_90x24__1.png" width="90" height="24"/>
 	</bitmap>
 	<bitmap name="main_menu/parts/item_96x24">
 		<frame png="ce/port/main_menu/parts/item_96x24__0.png" width="96" height="24"/>
 		<frame png="ce/port/main_menu/parts/item_96x24__1.png" width="96" height="24"/>
 	</bitmap>
-	<bitmap name="main_menu/parts/item_104x24">
-		<frame png="ce/port/main_menu/parts/item_104x24__0.png" width="104" height="24"/>
-		<frame png="ce/port/main_menu/parts/item_104x24__1.png" width="104" height="24"/>
+	<bitmap name="main_menu/parts/item_97x24">
+		<frame png="ce/port/main_menu/parts/item_97x24__0.png" width="97" height="24"/>
+		<frame png="ce/port/main_menu/parts/item_97x24__1.png" width="97" height="24"/>
 	</bitmap>
-	<bitmap name="main_menu/parts/item_106x24">
-		<frame png="ce/port/main_menu/parts/item_106x24__0.png" width="106" height="24"/>
-		<frame png="ce/port/main_menu/parts/item_106x24__1.png" width="106" height="24"/>
+	<bitmap name="main_menu/parts/item_102x24">
+		<frame png="ce/port/main_menu/parts/item_102x24__0.png" width="102" height="24"/>
+		<frame png="ce/port/main_menu/parts/item_102x24__1.png" width="102" height="24"/>
+	</bitmap>
+	<bitmap name="main_menu/parts/item_108x24">
+		<frame png="ce/port/main_menu/parts/item_108x24__0.png" width="108" height="24"/>
+		<frame png="ce/port/main_menu/parts/item_108x24__1.png" width="108" height="24"/>
 	</bitmap>
 	<bitmap name="main_menu/parts/item_100x24">
 		<frame png="ce/port/main_menu/parts/item_100x24__0.png" width="100" height="24"/>

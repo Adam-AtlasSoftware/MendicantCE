@@ -3991,19 +3991,21 @@ BROWSER_CLEAR_TOP = 288
 # the footer's prompts: (widget, words, x, width, its function); the
 # browser shows those of its list (menu_functions.c's browser_prompts_show)
 BROWSER_PROMPTS = [
-    ("prompt_favorite", "%y-button FAVORITE", 26, 106, '<on event="a" run="port browser favorite"/>'),
-    ("prompt_refresh", "%right-trigger REFRESH", 136, 104, '<on event="a" run="port browser refresh"/>'),
-    ("prompt_paste", "%right-trigger PASTE LINK", 136, 124, '<on event="a" run="port browser refresh"/>'),
+    ("prompt_favorite", "%y-button FAVORITE", 24, 108, '<on event="a" run="port browser favorite"/>'),
+    ("prompt_refresh", "%right-trigger REFRESH", 134, 102, '<on event="a" run="port browser refresh"/>'),
+    ("prompt_paste", "%right-trigger PASTE LINK", 134, 124, '<on event="a" run="port browser refresh"/>'),
     # (the searches, but Join by Link's: the server's, then the map's, then
     # the server's again: menu_functions.c's browser_search_next)
-    ("prompt_search", "%right-thumb SEARCH", 244, 96, '<on event="a" run="port browser search next"/>'),
+    ("prompt_search", "%right-thumb SEARCH", 238, 97, '<on event="a" run="port browser search next"/>'),
     # (the next column's title sorts: menu_functions.c's browser_sort_choose)
-    ("prompt_sort", "%x-button SORT", 344, 82, '<on event="a" run="port browser sort"/>'),
+    ("prompt_sort", "%x-button SORT", 337, 90, '<on event="a" run="port browser sort"/>'),
     # (the Filters page, but Join by Link's: menu_functions.c's browser_filters_open)
-    ("prompt_filters", "%left-trigger FILTERS", 430, 94,
+    ("prompt_filters", "%left-trigger FILTERS", 429, 97,
      f'<on event="a" run="port browser filters" open="{_page_screen(*BROWSER_FILTERS)}"/>'),
-    ("prompt_back", "%b-button BACK", 528, 84, '<on event="a" run="mouse emit back event"/>'),
+    ("prompt_back", "%b-button BACK", 528, 88, '<on event="a" run="mouse emit back event"/>'),
 ]
+# (six prompts across 4:3: their words closer to their highlights' left)
+BROWSER_PROMPT_TEXT_X = 5
 # Multiplayer's: its list's items (and its two pages': CREATE GAME's and
 # CO-OP CAMPAIGN's), the panel beside them, the line over EDIT GAMETYPES
 HUB = f"{MT}/hub"
@@ -4219,7 +4221,7 @@ def _tab_strip(base: str, strip: str, tabs: list, handlers: list) -> list:
     return lines
 
 
-def _prompts(base: str, bar: str, prompts: list, defined: tuple = ()) -> list:
+def _prompts(base: str, bar: str, prompts: list, defined: tuple = (), text_x: int = 8) -> list:
     """a footer of key prompts, a bar of buttons: each its button's picture
     in its words (the device's, menu_functions.c's), highlighted while it
     has the focus, and its function run by A or a click (those another
@@ -4231,7 +4233,7 @@ def _prompts(base: str, bar: str, prompts: list, defined: tuple = ()) -> list:
         lines += _widget(f"{base}/{name}", [("type", "text"), ("width", width), ("height", PART_PROMPT_HEIGHT),
                                            ("wide", prompt_wide(x, width)),
                                            ("bitmap", part_highlight(width, PART_PROMPT_HEIGHT)), ("text", words),
-                                           ("font", "ui\\small_ui"), ("color", PART_TEXT), ("text_x", 8),
+                                           ("font", "ui\\small_ui"), ("color", PART_TEXT), ("text_x", text_x),
                                            ("text_y", caps_text_y(PART_PROMPT_HEIGHT))],
                          [handler, handler.replace('event="a"', 'event="start"'),
                           '<on event="left_mouse" run="mouse emit accept event"/>'])
@@ -4487,7 +4489,7 @@ def _browser() -> list:
                      ['<on event="a" run="port browser search clear"/>',
                       '<on event="start" run="port browser search clear"/>',
                       '<on event="left_mouse" run="mouse emit accept event"/>'])
-    lines += _prompts(base, "join_game_button_bar", BROWSER_PROMPTS)
+    lines += _prompts(base, "join_game_button_bar", BROWSER_PROMPTS, text_x=BROWSER_PROMPT_TEXT_X)
     return lines
 
 
