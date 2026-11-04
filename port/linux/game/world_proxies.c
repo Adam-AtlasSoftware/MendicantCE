@@ -924,7 +924,8 @@ struct world_proxy_set const *world_proxies_definition(long definition)
 	struct world_proxy_set *set;
 	long slot, probe;
 
-	if (definition < 0)
+	/* (a tag index is a datum handle: its salt sets the sign bit) */
+	if (definition == -1)
 		return NULL;
 	/* (open addressing on the tag index) */
 	slot = -1;

@@ -30,10 +30,12 @@ static struct
 
 int world_proxies_source_definition(long definition, struct world_proxies_source *source)
 {
+	long index = definition & 0xFFFF; /* (a tag index's absolute index; its salt above) */
+
 	fake.definitions_read++;
-	if (definition < 0 || definition >= 4 || !fake.source_known[definition])
+	if (definition == -1 || index >= 4 || !fake.source_known[index])
 		return 0;
-	*source = fake.sources[definition];
+	*source = fake.sources[index];
 	return 1;
 }
 
@@ -791,6 +793,10 @@ static void none_case(void)
 	CHECK(world_proxies_window(origin, NULL, NULL, 0) == 0, "an empty window");
 	/* an unknown definition and a projectile's: no shapes */
 	CHECK(world_proxies_definition(3) == NULL, "unknown");
+	CHECK(world_proxies_definition(-1) == NULL, "none");
+	/* a tag index is a datum handle, its salt in the sign bit */
+	one_sphere_definition();
+	CHECK(world_proxies_definition((long)0xE3D70000UL) != NULL, "a salted tag index");
 	memset(&fake.sources[2], 0, sizeof(fake.sources[2]));
 	fake.sources[2].shape_class = _world_proxies_source_none;
 	fake.sources[2].node_count = 1;
