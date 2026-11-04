@@ -1,5 +1,6 @@
 """A stock map unpacked into a cache slot off the game's thread (port/linux/src/map_unpack.c): the precache's slot,
 byte for byte, marked last, none for a cut map, two at once."""
+import re
 import struct
 import sys
 import zlib
@@ -25,7 +26,7 @@ def synthetic_map():
     struct.pack_into("<4sII", header, 0, b"daeh", 5, length)
     header[0x20:0x24] = b"a10\0"
     header[0x40:0x4E] = b"01.01.14.2342\0"
-    struct.pack_into("<HI", header, 0x60, 0, 0x5EED1234)
+    struct.pack_into("<I", header, 0x64, 0x5EED1234)
     header[0x7FC:0x800] = b"toof"
     data = bytes(header) + zlib.compress(body, 6)
 
@@ -39,6 +40,26 @@ def synthetic_map():
 MAP = synthetic_map()
 
 
+def zlib_sources():
+    """The port's zlib's inflate, its files as one (its unguarded headers once)."""
+    zlib_dir = ROOT / "port/third_party/zlib"
+    seen = set()
+
+    def header(match):
+        name = match.group(1)
+        if name in ("inflate.h", "inftrees.h", "inffast.h") and name in seen:
+            return ""
+        seen.add(name)
+        return f'#include "{zlib_dir / name}"'
+    text = "".join(re.sub(r'^#\s*include "([\w.]+)"', header, (zlib_dir / name).read_text(), flags=re.M) + "\n"
+                   for name in ZLIB)
+    return "#pragma clang diagnostic push\n#pragma clang diagnostic ignored \"-Weverything\"\n" + text + \
+        "#pragma clang diagnostic pop\n"
+
+
+ZLIB_SOURCES = zlib_sources()
+
+
 def generated(fault=None):
     code = read(SOURCE).replace('#include "platform.h"\n', "").replace(
         '#include "../../third_party/zlib/zlib_prefixed.h"\n', "")
@@ -46,10 +67,7 @@ def generated(fault=None):
                    "MAP_UNPACK_WRITE_SIZE = 0x400000,", "MAP_UNPACK_WRITE_SIZE = 0x10000,")
     if fault:
         code = mutated(code, *fault)
-    zlib_dir = ROOT / "port/third_party/zlib"
-    zlib_all = "#pragma clang diagnostic push\n#pragma clang diagnostic ignored \"-Weverything\"\n" + \
-        "".join(f'#include "{zlib_dir / name}"\n' for name in ZLIB) + "#pragma clang diagnostic pop\n"
-    return (("zlib_all.inc", zlib_all), ("map.inc", MAP), ("under_test.inc", code))
+    return (("zlib_all.inc", ZLIB_SOURCES), ("map.inc", MAP), ("under_test.inc", code))
 
 
 @pytest.mark.parametrize("case", CASES)

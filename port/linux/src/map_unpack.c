@@ -34,6 +34,12 @@ through the same check the slots get as the game starts
 #include <string.h>
 #include <unistd.h>
 
+/* (xbox_files.c's cache slots' sources) */
+void cache_slot_source_record(short slot, const char *map_path, const char *name, unsigned long checksum,
+	unsigned long file_length);
+int cache_slot_source_matches(short slot, const char *map_path, const char *name, unsigned long checksum,
+	unsigned long file_length);
+
 /* ---------- constants */
 
 enum

@@ -62,7 +62,7 @@ static int slot_is_precache_s(const char *path)
 }
 
 /* (xbox_files.c's) the mark: the slot must be whole when it is made */
-static void cache_slot_source_record(short slot, const char *map_path, const char *name, unsigned long checksum,
+void cache_slot_source_record(short slot, const char *map_path, const char *name, unsigned long checksum,
 	unsigned long file_length)
 {
 	char xbox_path[64], path[512];
@@ -79,7 +79,7 @@ static void cache_slot_source_record(short slot, const char *map_path, const cha
 	pthread_mutex_unlock(&marks_lock);
 }
 
-static int cache_slot_source_matches(short slot, const char *map_path, const char *name, unsigned long checksum,
+int cache_slot_source_matches(short slot, const char *map_path, const char *name, unsigned long checksum,
 	unsigned long file_length)
 {
 	(void)slot;
