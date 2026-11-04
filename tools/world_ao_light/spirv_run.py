@@ -320,6 +320,10 @@ def run(module, inputs, sample):
             values[result] = _map(lambda x, y: x >> y, v[0], v[1])
         elif opcode in (87, 88):  # OpImageSample*Lod
             values[result] = sample(values[rest[0]][1], v[1])
+        elif opcode == 100:  # OpImage: the sampled image's image
+            values[result] = values[rest[0]]
+        elif opcode == 95:  # OpImageFetch: a texel by its integer place
+            values[result] = sample(values[rest[0]][1], v[1])
         else:
             raise NotImplementedError(f"opcode {opcode}")
 

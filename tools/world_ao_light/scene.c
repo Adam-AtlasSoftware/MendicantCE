@@ -65,14 +65,19 @@ void world_proxies_source_line(float const a[3], float const b[3], unsigned long
 
 enum
 {
-	SCENE_WIDTH = 40,
-	SCENE_HEIGHT = 40,
-	SCENE_DEPTH = 24,
+	/* (the field's cells; its whole grid of voxels, the cells' steps and one
+	more, made sparse: world_sdf_pack) */
+	SCENE_WIDTH = 5,
+	SCENE_HEIGHT = 5,
+	SCENE_DEPTH = 3,
+	SCENE_ROW = WORLD_SDF_BRICK * SCENE_WIDTH + 1,
+	SCENE_ROWS = WORLD_SDF_BRICK * SCENE_HEIGHT + 1,
+	SCENE_SLICES = WORLD_SDF_BRICK * SCENE_DEPTH + 1,
 	SCENE_PROXIES = 5,
 };
 
 struct world_sdf_volume scene_volume;
-static signed char scene_voxels[SCENE_WIDTH * SCENE_HEIGHT * SCENE_DEPTH];
+static signed char scene_voxels[SCENE_ROW * SCENE_ROWS * SCENE_SLICES];
 struct world_proxy scene_proxies[SCENE_PROXIES];
 long scene_proxy_count = SCENE_PROXIES;
 float scene_parameters[2][4];
@@ -104,23 +109,24 @@ void scene_make(void)
 	header->origin[0] = -5.0f;
 	header->origin[1] = -5.0f;
 	header->origin[2] = -1.0f;
-	scene_volume.voxels = scene_voxels;
 	/* a floor at z 0 and a wall at x 3: solid below and past them */
-	for (z = 0; z < SCENE_DEPTH; z++)
+	for (z = 0; z < SCENE_SLICES; z++)
 	{
-		for (y = 0; y < SCENE_HEIGHT; y++)
+		for (y = 0; y < SCENE_ROWS; y++)
 		{
-			for (x = 0; x < SCENE_WIDTH; x++)
+			for (x = 0; x < SCENE_ROW; x++)
 			{
 				float px = header->origin[0] + (float)x * header->voxel;
 				float pz = header->origin[2] + (float)z * header->voxel;
 				float floor_distance = pz, wall_distance = 3.0f - px;
 
-				scene_voxels[(z * SCENE_HEIGHT + y) * SCENE_WIDTH + x] = world_sdf_encode(
+				scene_voxels[(z * SCENE_ROWS + y) * SCENE_ROW + x] = world_sdf_encode(
 					floor_distance < wall_distance ? floor_distance : wall_distance, header->range);
 			}
 		}
 	}
+	if (!world_sdf_pack(&scene_volume, scene_voxels))
+		abort();
 	memset(scene_proxies, 0, sizeof(scene_proxies));
 	/* a sphere, owner 0 */
 	scene_proxies[0].v[0][0] = 1.0f;
@@ -429,9 +435,22 @@ int main(int argc, char **argv)
 	printf("{\"size\": [%d, %d, %d], \"origin\": [%.9g, %.9g, %.9g], \"voxel\": %.9g, \"range\": %.9g,\n",
 		SCENE_WIDTH, SCENE_HEIGHT, SCENE_DEPTH, scene_volume.header.origin[0], scene_volume.header.origin[1],
 		scene_volume.header.origin[2], scene_volume.header.voxel, scene_volume.header.range);
-	printf("\"voxels\": [");
-	for (voxel = 0; voxel < sizeof(scene_voxels); voxel++)
-		printf("%s%d", voxel ? "," : "", scene_voxels[voxel]);
+	/* (the field as the GPU has it: its table's bytes, and its atlas's layers) */
+	printf("\"layers\": %lu, \"cells\": [", world_sdf_atlas_layers(&scene_volume.header));
+	for (voxel = 0; voxel < SCENE_WIDTH * SCENE_HEIGHT * SCENE_DEPTH * WORLD_SDF_CELL_BYTES; voxel++)
+		printf("%s%d", voxel ? "," : "", scene_volume.cells[voxel / 4][voxel % 4]);
+	printf("],\n\"atlas\": [");
+	{
+		static signed char layer[WORLD_SDF_ATLAS_LAYER_BYTES];
+		unsigned long at;
+
+		for (voxel = 0; voxel < world_sdf_atlas_layers(&scene_volume.header); voxel++)
+		{
+			world_sdf_atlas_layer(&scene_volume, voxel, layer);
+			for (at = 0; at < WORLD_SDF_ATLAS_LAYER_BYTES; at++)
+				printf("%s%d", voxel || at ? "," : "", layer[at]);
+		}
+	}
 	printf("],\n\"parameters\": [");
 	for (i = 0; i < 2; i++)
 		for (j = 0; j < 4; j++)

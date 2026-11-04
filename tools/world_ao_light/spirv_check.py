@@ -18,20 +18,25 @@ def main():
     modules = [spirv_run.Module(_words(Path(path))) for path in sys.argv[2:4]]
     tolerance = float(sys.argv[4])
     width, height, depth = scene["size"]
-    voxels = scene["voxels"]
+    cells, atlas, layers = scene["cells"], scene["atlas"], scene["layers"]
     origin, voxel, range_ = scene["origin"], scene["voxel"], scene["range"]
+    side = 16 * 9  # (the atlas's: XGPU_WORLD_SDF_ATLAS bricks of XGPU_WORLD_SDF_BRICK_SPAN voxels)
     parameters = scene["parameters"]
     proxies = scene["proxies"]
-    block = {0: [[origin[0], origin[1], origin[2], 1.0 / voxel], [float(width), float(height), float(depth), range_]],
+    block = {0: [[origin[0], origin[1], origin[2], 1.0 / voxel], [float(width), float(height), float(depth), float(layers)]],
              1: [parameters[0:4], parameters[4:8]],
              2: [proxies[index:index + 4] for index in range(0, len(proxies), 4)],
              3: [scene["grid"][0:4], scene["grid"][4:8]],
              4: [scene["cells"][index:index + 4] for index in range(0, len(scene["cells"]), 4)]}
 
     def sample(name, uvw):
+        if name == "world_sdf_table":
+            # (read by texel: the table's four bytes as RGBA8)
+            at = ((uvw[2] * height + uvw[1]) * width + uvw[0]) * 4
+            return [spirv_run.f32(cells[at + part] / 255.0) for part in range(4)]
         if name != "world_sdf":
             return [1.0, 1.0, 1.0, 1.0]  # (the surface's own texture: white)
-        size = (width, height, depth)
+        size = (side, side, layers * 9)
         base, fraction = [], []
         for axis in range(3):
             coordinate = uvw[axis] * size[axis] - 0.5
@@ -45,7 +50,7 @@ def main():
                 bit = (corner >> axis) & 1
                 at.append(min(max(base[axis] + bit, 0), size[axis] - 1))
                 weight *= fraction[axis] if bit else 1.0 - fraction[axis]
-            result += weight * max(voxels[(at[2] * height + at[1]) * width + at[0]] / 127.0, -1.0)
+            result += weight * max(atlas[(at[2] * side + at[1]) * side + at[0]] / 127.0, -1.0)
         return [spirv_run.f32(result), 0.0, 0.0, 1.0]
 
     worst = 0.0

@@ -7,7 +7,7 @@ in C++, so that tools/world_ao_light/msl_check.cpp runs those functions'
 very text on the CPU: float3 and float4 (their components, .xyz, a
 component by index), their arithmetic, the few library functions, the
 constant address space, and a 3D texture sampled linear and clamped to its
-edge as a GPU samples it.
+edge as a GPU samples it, and one read by texel.
 */
 
 #ifndef METAL_SHIM_H
@@ -29,6 +29,12 @@ struct float3
 	float3 &operator/=(float s) { x /= s; y /= s; z /= s; return *this; }
 };
 
+struct uint3
+{
+	unsigned int x, y, z;
+	explicit uint3(float3 v) : x((unsigned int)v.x), y((unsigned int)v.y), z((unsigned int)v.z) {}
+};
+
 /* (its parts kept apart, each set by the constructor: the functions only
 read a float4's, and never assign one part) */
 struct float4
@@ -48,6 +54,20 @@ static inline float3 operator*(float3 a, float3 b) { return float3(a.x * b.x, a.
 static inline float3 operator/(float3 a, float s) { return float3(a.x / s, a.y / s, a.z / s); }
 static inline float3 operator/(float3 a, float3 b) { return float3(a.x / b.x, a.y / b.y, a.z / b.z); }
 static inline float3 operator+(float3 a, float s) { return float3(a.x + s, a.y + s, a.z + s); }
+static inline float3 operator-(float3 a, float s) { return float3(a.x - s, a.y - s, a.z - s); }
+static inline float4 operator*(float4 a, float s) { return float4(a.x * s, a.y * s, a.z * s, a.w * s); }
+static inline float4 operator+(float4 a, float s) { return float4(a.x + s, a.y + s, a.z + s, a.w + s); }
+static inline float4 floor(float4 a)
+{
+	return float4(std::floor(a.x), std::floor(a.y), std::floor(a.z), std::floor(a.w));
+}
+static inline float3 floor(float3 a) { return float3(std::floor(a.x), std::floor(a.y), std::floor(a.z)); }
+static inline float3 min(float3 a, float3 b) { return float3(std::min(a.x, b.x), std::min(a.y, b.y), std::min(a.z, b.z)); }
+static inline float3 clamp(float3 v, float3 low, float3 high)
+{
+	return float3(std::min(std::max(v.x, low.x), high.x), std::min(std::max(v.y, low.y), high.y),
+		std::min(std::max(v.z, low.z), high.z));
+}
 static inline float3 operator-(float3 a) { return float3(-a.x, -a.y, -a.z); }
 static inline float dot(float3 a, float3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
 static inline float dot(float4 a, float4 b) { return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w; }
@@ -106,11 +126,19 @@ struct level
 	level(float l) : lod(l) {}
 };
 
-/* the field: signed bytes, x fastest (world_sdf.h), read as R8 snorm */
+/* the field's atlas: signed bytes, x fastest (world_sdf.h), sampled as R8
+snorm; its table: four bytes a texel, read as RGBA8 */
 template <typename T> struct texture3d
 {
 	const signed char *voxels;
+	const unsigned char *texels;
 	int width, height, depth;
+	float4 read(uint3 at) const
+	{
+		const unsigned char *texel = texels + ((at.z * height + at.y) * width + at.x) * 4;
+
+		return float4(texel[0] / 255.0f, texel[1] / 255.0f, texel[2] / 255.0f, texel[3] / 255.0f);
+	}
 	float4 sample(sampler, float3 uvw, level) const
 	{
 		int size[3] = { width, height, depth }, base[3];

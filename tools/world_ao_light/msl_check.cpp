@@ -47,7 +47,8 @@ int main(int argc, char **argv)
 	float tolerance = argc > 2 ? (float)atof(argv[2]) : 0.0f;
 	float worst_shape = 0.0f, worst_reach = 0.0f, worst_product = 0.0f, worst_field = 0.0f;
 	static xgpu_world_ao block;
-	texture3d<float> field;
+	texture3d<float> field, table;
+	static signed char atlas[16 * WORLD_SDF_ATLAS_LAYER_BYTES];
 
 	if (count <= 0)
 	{
@@ -63,7 +64,7 @@ int main(int argc, char **argv)
 	block.field[0] = float4(scene_volume.header.origin[0], scene_volume.header.origin[1],
 		scene_volume.header.origin[2], 1.0f / scene_volume.header.voxel);
 	block.field[1] = float4((float)scene_volume.header.width, (float)scene_volume.header.height,
-		(float)scene_volume.header.depth, scene_volume.header.range);
+		(float)scene_volume.header.depth, (float)world_sdf_atlas_layers(&scene_volume.header));
 	for (shape = 0; shape < scene_proxy_count; shape++)
 	{
 		for (int part = 0; part < 3; part++)
@@ -73,10 +74,16 @@ int main(int argc, char **argv)
 		block.grid[index] = vector_of(scene_grid[index]);
 	for (index = 0; index < WORLD_AO_GRID_CELLS / 2; index++)
 		block.cells[index] = uint4{ scene_cells[index][0], scene_cells[index][1], scene_cells[index][2], scene_cells[index][3] };
-	field.voxels = scene_volume.voxels;
-	field.width = (int)scene_volume.header.width;
-	field.height = (int)scene_volume.header.height;
-	field.depth = (int)scene_volume.header.depth;
+	/* (the field as the GPU has it: its atlas's layers, and its table) */
+	for (index = 0; index < (long)world_sdf_atlas_layers(&scene_volume.header) && index < 16; index++)
+		world_sdf_atlas_layer(&scene_volume, (unsigned long)index, atlas + index * WORLD_SDF_ATLAS_LAYER_BYTES);
+	field.voxels = atlas;
+	field.width = field.height = WORLD_SDF_ATLAS * WORLD_SDF_BRICK_SPAN;
+	field.depth = (int)world_sdf_atlas_layers(&scene_volume.header) * WORLD_SDF_BRICK_SPAN;
+	table.texels = &scene_volume.cells[0][0];
+	table.width = (int)scene_volume.header.width;
+	table.height = (int)scene_volume.header.height;
+	table.depth = (int)scene_volume.header.depth;
 	for (shape = 0; shape < scene_proxy_count; shape++)
 	{
 		float4 v0 = block.proxies[shape * 3], v1 = block.proxies[shape * 3 + 1], v2 = block.proxies[shape * 3 + 2];
@@ -112,7 +119,7 @@ int main(int argc, char **argv)
 		difference = std::fabs(world_proxies_occlusion(block, p, n, owner) -
 			world_ao_proxies_occlusion(scene_proxies, scene_proxy_count, point, normal, owner));
 		worst_product = difference > worst_product ? difference : worst_product;
-		difference = std::fabs(world_sdf_occlusion(block, field, p, n) -
+		difference = std::fabs(world_sdf_occlusion(block, field, table, p, n) -
 			world_ao_field_occlusion(&scene_volume, point, normal));
 		worst_field = difference > worst_field ? difference : worst_field;
 	}
