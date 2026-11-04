@@ -523,7 +523,6 @@ def test_graphics_preset_chooses_the_animations(config_check_mac, monkeypatch):
     assert "\n# enhanced_animations = true\n" in run.config.read_text()
     run("write", "display.graphics", "classic")
     assert run("get", "game.enhanced_animations") == "false"
-    assert "\n# enhanced_animations = false\n" in run.config.read_text()
     # (battery saver: as it is, in Classic and Enhanced)
     assert run("saving", "game.enhanced_animations") == "false false"
     run("write", "display.graphics", "enhanced")

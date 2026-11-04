@@ -848,7 +848,8 @@ PAGES = {
     ADVANCED[0]: {
         "screen": ADVANCED[1], "title": "ADVANCED GRAPHICS",
         "rows": [
-            (SECTION, "IMAGE"),
+            # (the image's rows under the page's title, with no section of
+            # their own: GAME's ANIMATIONS took its line)
             ("RENDER RESOLUTION", "display.resolution_scaling", [("FULL", "native"), ("XBOX 640X480", "original")],
              "Full draws the game at your screen's resolution. Xbox draws it at the Xbox's 640x480 and scales it "
              "up: softer, and very light on the graphics card.", "computer"),
