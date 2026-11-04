@@ -148,21 +148,35 @@ never shipped, and never trusted without checks.
 
 Each object definition gets up to 16 shapes, made the first time it's drawn and kept until the map unloads:
 
-- **Bipeds:** capsules along the skeleton's limb bones (upper and lower arm, thigh, calf: a node and its child), a
-  capsule for the torso (spine to neck) and a sphere for the head. Radii come from the collision model's pill/sphere
-  sizes for those nodes where there are some, else from the model's bounding radius scaled per bone. Each shape
-  rides on its node.
-- **Vehicles:** boxes fitted to the collision model's pieces (each region's BSP bounds in its node's space, merged to
-  at most 4 boxes) plus spheres for the wheels' nodes.
-- **Scenery, machines, items, weapons on the ground:** one box, from the collision model's bounds; if there's no
-  collision model, a sphere of the bounding radius at its bounding centre.
-- **None:** projectiles, effects-only objects, the first-person weapon and anything under 0.05 wu.
+- **Bipeds:** a shape for each node with collision geometry (the collision model's node of the same index, its
+  first permutation's BSP vertices): a capsule along the bone to its child node (or, with no child, along the
+  vertices' longest spread), its radius 0.9 × the vertices' mean distance from that axis, its ends the vertices'
+  extent along it less the radius; a sphere where they're shorter than they're wide (the head). The 10 largest are
+  kept: upper and lower arms, thighs, calves, the torso and the head on a Spartan. With no collision geometry at
+  all, a capsule from each node to its child, radius 0.12 × the bounding radius. Each shape rides on its node.
+- **Vehicles:** a box for each node's collision geometry (its bounds in the node's space), the smallest merged into
+  its nearest ancestor's box (or the largest) until at most 4 are left, plus a sphere for each node named as a wheel
+  ("tire", "wheel"): its own geometry's bounds, else its height above the body's lowest point (0.15 to 1 wu).
+- **Scenery, machines, controls, light fixtures, items (weapons and equipment on the ground, garbage):** one box,
+  every node's collision geometry in node 0's space; with no collision geometry, a sphere of the bounding radius at
+  its bounding centre.
+- **Anything else** with a model: its bounding sphere.
+- **None:** projectiles, sound scenery, a weapon or equipment held (its holder covers it, and it would shade the
+  hands holding it), invisible objects, and any shape under 0.05 wu across.
 
 **Each frame and window** (`world_proxies_window`): the shapes are placed by their node matrices as drawn, i.e. the
 `render_interpolation.c` pose that `render_objects` draws with, so proxies never lag their objects. They're culled
-by their reach sphere against the camera's frustum, ordered by distance to the camera, and the first 64 are kept.
-Each proxy records its owner, so an object's own proxies don't shade it (models have no baked self-occlusion to
-double, but the crude shapes would look wrong on their own surface).
+by their reach sphere against the camera's frustum (its four sides), ordered by the distance from the camera to the
+reach's centre, and the first 64 are kept. Each proxy records its owner, so an object's own proxies don't shade it
+(models have no baked self-occlusion to double, but the crude shapes would look wrong on their own surface). The
+**owner slot** (`[1].w`) is the order of the owner's first shape in the window: 0 for the nearest shape's object, then
+1, 2... `world_proxies_window`'s `owners[i]` is the object's id (datum handle) for each shape, so `world_ao.c` gives
+a draw its object's slot by finding the object there (-1 when it has no shape in the window, which matches none).
+
+The game is read through `world_proxies_source.h` alone (`world_proxies_game.c`): the definitions' tags, the
+frame's objects (A's `world_scene_instances`), their
+node matrices as drawn and the window's frustum. `debug.world_proxies_view` draws the window's shapes as wireframes
+(spheres yellow, capsules green, boxes cyan).
 
 **GPU layout:** three vec4s per proxy (`struct world_proxy`, `xgpu_stream.h`):
 - `[0]`: a.xyz, kind (1 sphere, 2 capsule, 3 box);
@@ -212,21 +226,65 @@ and a Warthog's belly over the ground are darker, which is what the eye misses t
 
 ### Proxies' occlusion
 
-Each is the cosine-weighted share of the hemisphere the shape covers, computed analytically:
+Each is the cosine-weighted share of the hemisphere the shape covers, computed analytically. The reference is
+`world_proxy_occlusion` in `world_proxies.c` (`sphere_occlusion`, `capsule_occlusion`, `box_occlusion`); D's shaders
+follow it line for line. p is the point, n its unit normal, all in world units.
 
-- **Sphere** (centre c, radius r): with `d = c − p`, `l = |d|`, `occ = max(0, n·d / l) · (r / l)²`, or 1 inside. The
-  horizon-clipped form (Quilez, *sphere ambient occlusion*) is the refinement C checks against numeric integration.
-- **Capsule** (segment a–b, radius r): the sphere at the closest point of the segment to p,
-  `t = clamp((p − a)·(b − a) / |b − a|², 0, 1)`, `c = a + t(b − a)`, its occlusion scaled by the segment's length
-  across the view: `(1 + |b − a| · |sin θ| / (2 l))` with θ between the segment and d, clamped to 1. C keeps it
-  within 0.05 of the integral.
-- **Box** (centre, three half axes): in box space, the faces facing p (at most 3), each clipped by p's tangent plane.
-  The occlusion is the polygon's form factor (Lambert):
-  `occ = (1 / 2π) Σ_edges acos(v_i · v_{i+1}) · n · normalize(v_i × v_{i+1})`, with v the clipped corners
-  normalized from p.
-- **Reach:** a shape's occlusion falls under 1/255 past about 16 radii (`world_proxy_reach`), so the shader skips it
-  after one distance test. On the level the term also fades to 0 over the last quarter of the reach, so culling
-  never shows an edge.
+- **Sphere** S(c, r) (centre c, radius r), exact, with the horizon's clipping (Lagarde and de Rousiers' form, as
+  Quilez gives it):
+
+  ```
+  d = c − p;  if |d|² ≤ r²: 1
+  l = |d|,  nl = n·d / l,  h2 = l² / r²,  k2 = 1 − h2·nl²
+  k2 > 0.001 (it crosses the tangent plane):
+      x   = clamp(−nl·sqrt((h2 − 1) / (1 − nl²)), −1, 1)
+      occ = ((nl·acos(x) − sqrt(k2·(h2 − 1))) / h2 + atan(sqrt(k2 / (h2 − 1)))) / π,  clamped 0..1
+  else: occ = max(nl, 0) / h2
+  ```
+
+  Within 0.01 of the numerical integral everywhere.
+
+- **Capsule** (segment a–b, radius r): the tube as a line 2r wide, the part of it above the tangent plane integrated
+  in closed form, plus the two caps' spheres weighted by how much of each shows past the tube, and never less than
+  the sphere at the segment's closest point:
+
+  ```
+  L = |b − a|;  L < 1e-4: S(a, r)
+  u = (b − a) / L,  q = a − p,  s0 = −q·u,  w = q + s0·u,  h = |w|
+  nw = n·w,  nu = n·u,  t0 = −s0,  t1 = L − s0
+  |nu| < 1e-6: (nw ≤ 0: t1 = t0)        else: th = −nw / nu;  nu > 0: t0 = max(t0, th)  else: t1 = min(t1, th)
+  F(t) = nw·(t / (2h²(h² + t²)) + atan(t / h) / (2h³)) − nu / (2(h² + t²))
+  line = (t1 > t0 and h > 1e-4) ? 2r·h / π · (F(t1) − F(t0)) : 0
+  wa = ½(1 − u·normalize(p − a)),  wb = ½(1 + u·normalize(p − b))
+  occ = line + wa·S(a, r) + wb·S(b, r)
+  occ = clamp(max(occ, S(a + clamp(s0, 0, L)·u, r)), 0, 1)
+  ```
+
+  The line term is (2r h / π) ∫ n·d / |d|⁴ along the segment's part above the horizon; for a long tube facing p it's
+  exactly r / h. Within 0.05 of the integral at a radius or more from the surface (0.04 measured); nearer, within
+  0.15 (a line 2r wide is a tube only from afar), mean error about 0.015. (The draft's "sphere at the closest point
+  times (1 + L·|sin θ| / 2l)" was off by up to 0.6.)
+
+- **Box** (centre c, half axis vectors X and Y, half extent ez along Z = normalize(X) × normalize(Y)), exact: in box
+  space (p and n projected on the unit axes), 1 inside; else each face with p outside its plane (at most 3), its 4
+  corners taken relative to p and clipped by the plane n·v ≥ 0 (Sutherland–Hodgman: at most 5 corners), and the
+  polygon's form factor (Lambert):
+
+  ```
+  face = Σ_edges atan2(|v̂i × v̂j|, v̂i·v̂j) · n·(v̂i × v̂j) / |v̂i × v̂j|      (v̂ the corners normalized, j = i + 1)
+  occ  = clamp(Σ_faces |face| / 2π, 0, 1)
+  ```
+
+  Within 0.02 of the integral everywhere (the residue is the integral's own sampling).
+
+- **Reach** (`world_proxy_reach`), measured from the sphere's and box's centre and the capsule's midpoint: past it
+  the occlusion is under 1/255 in every direction.
+  - sphere: 16r;
+  - capsule: L/2 + 16·sqrt(r² + 2rL/π), a sphere of its silhouette's area side on;
+  - box: 17 × its half diagonal sqrt(|X|² + |Y|² + ez²).
+
+  The shader skips a shape after that one distance test. On the level the term also fades to 0 over the last quarter
+  of the reach, so culling never shows an edge.
 
 **Combining:**
 
