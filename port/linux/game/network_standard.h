@@ -53,6 +53,13 @@ in the lobby, which the record carries to its OpenH1 clients
 (_network_game_hold_to_pick_up_bit); a Legacy game, and an OpenCE machine's
 player, OpenCE's way, walking over */
 boolean network_standard_walk_over_pickup(long player_index);
+/* whether a player (a datum index) turns with the aim in a jump and a
+grenade throw (units.c's unit_turns_with_aim) in a network game: the
+host's game.enhanced_animations, as read in the lobby, which the game
+record carries to its OpenH1 machines (_network_game_classic_turning_bit);
+a Legacy game's players, and an OpenCE machine's, always turn, as OpenCE's
+machines turn them */
+boolean network_standard_turns_with_aim(long player_index);
 
 /* joining: whether the game joined is Standard (its advertisement's), set
 as the join begins, and its join token made a Standard game's */

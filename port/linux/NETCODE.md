@@ -372,7 +372,14 @@ or walking over it, Custom Edition's) in the game record, in bit 3 of
 lobby with the rate, so that an OpenH1 client's prompts and pickups are the
 host's (`network_standard_walk_over_pickup`); an OpenCE machine's copy of
 the record leaves it clear, and its players, and a Legacy game's, walk over
-weapons as OpenCE's do.
+weapons as OpenCE's do; version 19 carries, in bit 4 of `cooperative_flags`
+(`_network_game_classic_turning_bit`), whether the host's players keep the
+original's facing in a jump and a grenade throw (`game.enhanced_animations`
+off, as Classic has it), read in the lobby as the pickup's way is, so that
+every OpenH1 machine turns a player's body as the host does
+(`network_standard_turns_with_aim`): the turn moves where shots go and
+what the campaign's AI sees. A Legacy game's players, and an OpenCE
+machine's in a mixed game, always turn, as OpenCE's machines turn them.
 With no new version, each client then tells the
 host its build (distributed message 92, `_distributed_message_client_build`,
 reliably once a game after its ready, over its connection alone): its

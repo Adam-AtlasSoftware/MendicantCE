@@ -48,6 +48,9 @@ static short game_connection(void) { return connection; }
 static boolean game_engine_running(void) { return engine_running; }
 static int config_boolean(char const *name)
 {
+	/* (game.enhanced_animations: the turn's, network_standard_turns_with_aim, read as the pickup's way is) */
+	if (!strcmp(name, "game.enhanced_animations"))
+		return TRUE;
 	CHECK(!strcmp(name, "game.auto_pickup"), "an unexpected setting %s", name);
 	return auto_pickup_setting;
 }
@@ -58,6 +61,7 @@ static struct
 	boolean hosting;
 	long hosting_rate;
 	boolean hosting_hold_to_pick_up;
+	boolean hosting_classic_turning;
 	boolean joined;
 } network_standard_globals;
 static struct network_game record;

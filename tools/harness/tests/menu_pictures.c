@@ -408,6 +408,130 @@ int main(int argc, char **argv)
 		CHECK(menu_picture_decide(&pose, 0x11111111UL, &note, 3) == RENDER, "a changed map is not tried");
 	}
 
+	/* the pass begins once, in the main menu, and never while a movie
+	plays: the intro holds the texture cache's spare memory the maps' files
+	are copied through, draws over the frames kept, and loads the main menu
+	as it ends (issue 550) */
+	CASE("begin")
+	{
+		CHECK(menu_pictures_may_begin(TRUE, FALSE, FALSE), "the main menu with no movie does not begin the pass");
+		CHECK(!menu_pictures_may_begin(TRUE, TRUE, FALSE), "the pass begins while the intro movie plays");
+		CHECK(!menu_pictures_may_begin(FALSE, FALSE, FALSE), "the pass begins before the main menu is loaded");
+		CHECK(!menu_pictures_may_begin(TRUE, FALSE, TRUE), "the pass begins twice");
+		CHECK(!menu_pictures_may_begin(FALSE, TRUE, FALSE), "the pass begins in a movie before the main menu");
+	}
+
+	/* a frame kept that is no scene is never kept as a picture: one colour
+	nearly throughout (the intro's backdrop with its logo, a cleared screen)
+	or noise (memory drawn as a picture); a scene is, dark or bright (issue
+	550's frames: 96 to 99 percent alike, or 10 to 53 unlike) */
+	CASE("scene")
+	{
+		enum { WIDE = 420, HIGH = 342 };
+		static unsigned char picture[WIDE * HIGH * 4];
+		unsigned long seed = 12345;
+		long x, y;
+
+#define PIXEL(px, py) (picture + ((py) * WIDE + (px)) * 4)
+		/* (a scene: smooth light, a texture's fine grain, an object's edges) */
+		for (y = 0; y < HIGH; y++)
+		{
+			for (x = 0; x < WIDE; x++)
+			{
+				unsigned char *pixel = PIXEL(x, y);
+				int object = x > 150 && x < 260 && y > 120 && y < 220;
+
+				seed = seed * 1103515245UL + 12345UL;
+				pixel[0] = (unsigned char)(x * 200 / WIDE + (seed >> 16) % 4 + (object ? 50 : 0));
+				pixel[1] = (unsigned char)(y * 200 / HIGH + (object ? 0 : 30));
+				pixel[2] = (unsigned char)((x + y) / 8 + (object ? 40 : 0));
+				pixel[3] = 255;
+			}
+		}
+		CHECK(!menu_picture_not_a_scene(picture, WIDE, HIGH), "a scene is not one: %s",
+			menu_picture_not_a_scene(picture, WIDE, HIGH));
+		/* (a dark scene: half of it one black, the rest dim and grainy) */
+		for (y = 0; y < HIGH; y++)
+		{
+			for (x = 0; x < WIDE; x++)
+			{
+				unsigned char *pixel = PIXEL(x, y);
+
+				seed = seed * 1103515245UL + 12345UL;
+				pixel[0] = pixel[1] = pixel[2] = (unsigned char)(y < HIGH / 2 ? 0 : 10 + (seed >> 16) % 6);
+			}
+		}
+		CHECK(!menu_picture_not_a_scene(picture, WIDE, HIGH), "a dark scene is not one: %s",
+			menu_picture_not_a_scene(picture, WIDE, HIGH));
+		/* (the intro's backdrop: one colour, a logo on it) */
+		for (y = 0; y < HIGH; y++)
+		{
+			for (x = 0; x < WIDE; x++)
+			{
+				unsigned char *pixel = PIXEL(x, y);
+				int logo = x > 40 && x < 230 && y > 60 && y < 95 && (x / 6) % 2;
+
+				pixel[0] = logo ? 0 : 252;
+				pixel[1] = logo ? 0 : 252;
+				pixel[2] = logo ? 0 : 252;
+			}
+		}
+		CHECK(menu_picture_not_a_scene(picture, WIDE, HIGH) != NULL, "the intro's backdrop is kept as a scene");
+		/* (noise: memory drawn as a picture) */
+		for (y = 0; y < HIGH; y++)
+		{
+			for (x = 0; x < WIDE; x++)
+			{
+				unsigned char *pixel = PIXEL(x, y);
+
+				seed = seed * 1103515245UL + 12345UL;
+				pixel[0] = (unsigned char)(seed >> 16);
+				pixel[1] = (unsigned char)(seed >> 8);
+				pixel[2] = (unsigned char)(seed >> 24);
+			}
+		}
+		CHECK(menu_picture_not_a_scene(picture, WIDE, HIGH) != NULL, "noise is kept as a scene");
+		/* (bands of noise between bands of black, the least unlike of issue
+		550's: a sixth of the picture noise) */
+		for (y = 0; y < HIGH; y++)
+		{
+			for (x = 0; x < WIDE; x++)
+			{
+				unsigned char *pixel = PIXEL(x, y);
+
+				if ((x / 30) % 6 != 0)
+					pixel[0] = pixel[1] = pixel[2] = 8;
+			}
+		}
+		CHECK(menu_picture_not_a_scene(picture, WIDE, HIGH) != NULL, "bands of noise are kept as a scene");
+		CHECK(menu_picture_not_a_scene(picture, 0, 0) != NULL, "nothing is kept as a scene");
+#undef PIXEL
+	}
+
+	/* a cached picture noted as rendered is drawn only if its file is a
+	whole PNG of its scale's size: one cut short, of another size, or not a
+	PNG is rendered again */
+	CASE("whole")
+	{
+		static unsigned char const ihdr[24] = { 0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n', 0, 0, 0, 13, 'I', 'H', 'D',
+			'R', 0, 0, 3, 0, 0, 0, 1, 128 };
+		static unsigned char const iend[12] = { 0, 0, 0, 0, 'I', 'E', 'N', 'D', 0xAE, 0x42, 0x60, 0x82 };
+		unsigned char head[24], tail[12];
+
+		CHECK(menu_picture_png_whole(ihdr, 24, iend, 12, 768, 384), "a whole 768x384 PNG is not whole");
+		CHECK(!menu_picture_png_whole(ihdr, 24, iend, 12, 512, 256), "a 768x384 PNG is taken for a 512x256 one");
+		CHECK(!menu_picture_png_whole(ihdr, 24, iend, 12, 768, 256), "a 768x384 PNG is taken for a 768x256 one");
+		/* (cut short: its last bytes the picture's data, not its end) */
+		memcpy(tail, iend, 12);
+		tail[11] = 0;
+		CHECK(!menu_picture_png_whole(ihdr, 24, tail, 12, 768, 384), "a PNG cut short is whole");
+		CHECK(!menu_picture_png_whole(ihdr, 24, iend, 4, 768, 384), "a file of 28 bytes is whole");
+		memcpy(head, ihdr, 24);
+		head[1] = 'J';
+		CHECK(!menu_picture_png_whole(head, 24, iend, 12, 768, 384), "a file that is not a PNG is whole");
+		CHECK(!menu_picture_png_whole(ihdr, 16, iend, 12, 768, 384), "a file of no size is whole");
+	}
+
 	/* laid out in the frame's top left, its last column and row repeated */
 	CASE("frame")
 	{

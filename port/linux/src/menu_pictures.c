@@ -26,7 +26,10 @@ not one of the pose's: a modded map), or its render failed twice (a
 failure, or the game gone in the middle of one: each render is noted as a
 failure before it starts, and as rendered when it ends); and until it is
 ready. A pose or map changed, a larger
-screen (at the next start), or this file's version renders it again.
+screen (at the next start), its picture's file gone or cut short, or this
+file's version renders it again. A frame kept that is no scene (one
+colour, or noise: menu_picture_not_a_scene) is a failed render, never a
+picture.
 Nothing is rendered in runs nobody watches (tests: debug.hidden_window,
 debug.exit_after...), in VR, or with display.menu_pictures off.
 */
@@ -66,6 +69,14 @@ the main menu shows, the pictures not made keeping their originals (a slow
 disc's ten seconds a map is a third of a picture's) */
 #define MENU_PICTURE_TIME_BUDGET 30000000000ULL
 #define MENU_PICTURES_TIME_BUDGET 120000000000ULL
+/* (percent of a picture's neighbouring pixels) a frame kept is not a
+scene's with more alike than this, or more unlike (each channel, on
+average, more than MENU_PICTURE_UNLIKE apart). The 23 poses' scenes have
+3 to 47 alike and 0.3 to 3.4 unlike; the intro movie's frames kept in their
+place (issue 550) 96 to 99 alike, or 10 to 53 unlike */
+#define MENU_PICTURE_MOST_ALIKE 85
+#define MENU_PICTURE_UNLIKE 32
+#define MENU_PICTURE_MOST_UNLIKE 7
 
 /* ---------- prototypes */
 
@@ -238,6 +249,92 @@ int menu_picture_overdue(
 	if (now < pass_began || now < picture_began)
 		return 0;
 	return now - picture_began > MENU_PICTURE_TIME_BUDGET || now - pass_began > MENU_PICTURES_TIME_BUDGET;
+}
+
+/* whether the pass may begin this frame: once, in the main menu, and never
+while a movie plays (the intro, over the main menu as it first shows). The
+movie holds the texture cache's spare memory, which each map's file copied
+into the cache takes too; it draws its frames over the game's, so the frame
+kept would be the movie's; and its end loads the main menu, over the pass's
+map */
+int menu_pictures_may_begin(
+	int main_menu_loaded,
+	int movie_playing,
+	int looked)
+{
+	return main_menu_loaded && !movie_playing && !looked;
+}
+
+/* NULL if a picture (width x height RGBA, cut from the frame kept) looks
+like a scene, else what it looks like instead: one colour nearly
+throughout (a cleared screen, a movie's backdrop: its neighbouring pixels
+all but alike), or noise (memory that is not a picture, drawn as one: its
+neighbouring pixels unlike, nearly everywhere, as no scene's are) */
+char const *menu_picture_not_a_scene(
+	unsigned char const *rgba,
+	unsigned long width,
+	unsigned long height)
+{
+	unsigned long x, y, pairs = 0, alike = 0, unlike = 0;
+
+	for (y = 0; y < height; y++)
+	{
+		for (x = 0; x < width; x++)
+		{
+			unsigned char const *pixel = rgba + (y * width + x) * 4;
+			int side;
+
+			for (side = 0; side < 2; side++)
+			{
+				unsigned char const *next;
+				int difference;
+
+				if (side == 0 ? x + 1 >= width : y + 1 >= height)
+					continue;
+				next = side == 0 ? pixel + 4 : pixel + width * 4;
+				difference = abs(pixel[0] - next[0]) + abs(pixel[1] - next[1]) + abs(pixel[2] - next[2]);
+				pairs++;
+				alike += difference == 0;
+				unlike += difference > MENU_PICTURE_UNLIKE * 3;
+			}
+		}
+	}
+	if (!pairs)
+		return "is empty";
+	if (alike * 100 > pairs * MENU_PICTURE_MOST_ALIKE)
+		return "is one colour, not a scene";
+	if (unlike * 100 > pairs * MENU_PICTURE_MOST_UNLIKE)
+		return "is noise, not a scene";
+	return NULL;
+}
+
+static unsigned long picture_be32(unsigned char const *bytes)
+{
+	return (unsigned long)bytes[0] << 24 | (unsigned long)bytes[1] << 16 | (unsigned long)bytes[2] << 8 | bytes[3];
+}
+
+/* whether a cached picture's file, by its first and last bytes, is a whole
+PNG of this size: its signature and header, and its end chunk last (a file
+cut short, of another size, or not a PNG is not; its note's picture is
+rendered again) */
+int menu_picture_png_whole(
+	unsigned char const *head,
+	unsigned long head_size,
+	unsigned char const *tail,
+	unsigned long tail_size,
+	unsigned long width,
+	unsigned long height)
+{
+	static unsigned char const signature[16] = { 0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n', 0, 0, 0, 13, 'I', 'H',
+		'D', 'R' };
+	static unsigned char const end[12] = { 0, 0, 0, 0, 'I', 'E', 'N', 'D', 0xAE, 0x42, 0x60, 0x82 };
+
+	if (head_size < 24 || tail_size < 12 || memcmp(head, signature, sizeof(signature)) != 0 ||
+		memcmp(tail + tail_size - 12, end, sizeof(end)) != 0)
+	{
+		return 0;
+	}
+	return picture_be32(head + 16) == width && picture_be32(head + 20) == height;
 }
 
 static char const *const menu_picture_result_names[] = { "none", "rendered", "failed", "modded" };
@@ -856,6 +953,27 @@ static void picture_load(long pose)
 	pthread_attr_destroy(&attributes);
 }
 
+/* whether a pose's cached picture is a whole PNG of a scale's size
+(menu_picture_png_whole) */
+static int picture_file_whole(long pose, long scale)
+{
+	char path[1100];
+	unsigned char head[24], tail[12];
+	FILE *file;
+	int whole;
+
+	picture_path(path, sizeof(path), pose, "png");
+	file = fopen(path, "rb");
+	if (!file)
+		return 0;
+	whole = fread(head, 1, sizeof(head), file) == sizeof(head) && fseek(file, -(long)sizeof(tail), SEEK_END) == 0 &&
+		fread(tail, 1, sizeof(tail), file) == sizeof(tail) &&
+		menu_picture_png_whole(head, sizeof(head), tail, sizeof(tail),
+			(unsigned long)(MENU_PICTURE_FRAME_WIDTH * scale), (unsigned long)(MENU_PICTURE_FRAME_HEIGHT * scale));
+	fclose(file);
+	return whole;
+}
+
 /* a pose's picture found: the map's checksum, the note, and so whether it
 is drawn, and rendered */
 static void picture_check(long pose)
@@ -869,6 +987,18 @@ static void picture_check(long pose)
 	pthread_mutex_unlock(&menu_pictures.lock);
 	state->decision = menu_picture_decide(&menu_picture_poses[pose], state->map_checksum,
 		state->noted ? &state->note : NULL, menu_pictures.wanted_scale);
+	/* (noted as rendered, but its picture gone or damaged: not rendered,
+	as far as its note goes; tried again, up to a point) */
+	if ((state->decision & (1UL << _menu_picture_use_bit)) && !picture_file_whole(pose, state->note.scale))
+	{
+		platform_log("menu pictures: %s's picture is missing or damaged: it is rendered again",
+			menu_picture_poses[pose].name);
+		pthread_mutex_lock(&menu_pictures.lock);
+		state->note.result = _menu_picture_none;
+		pthread_mutex_unlock(&menu_pictures.lock);
+		state->decision = menu_picture_decide(&menu_picture_poses[pose], state->map_checksum, &state->note,
+			menu_pictures.wanted_scale);
+	}
 	if (state->decision & (1UL << _menu_picture_use_bit))
 		picture_load(pose);
 }
@@ -1022,9 +1152,11 @@ int menu_pictures_render_kept(
 	unsigned char *frame = malloc(frame_width * frame_height * 4);
 	struct menu_picture_note note;
 	char path[1100];
+	char const *fault = NULL;
 	int written = 0;
 
-	if (bgra && cut && frame && menu_picture_cut(bgra, width, height, picture->aspect, cut, picture_width, picture_height))
+	if (bgra && cut && frame && menu_picture_cut(bgra, width, height, picture->aspect, cut, picture_width, picture_height) &&
+		!(fault = menu_picture_not_a_scene(cut, picture_width, picture_height)))
 	{
 		if (picture->colour_curve && state->original)
 			menu_picture_colour_curve(cut, picture_width * picture_height, state->original,
@@ -1041,7 +1173,8 @@ int menu_pictures_render_kept(
 	if (!written)
 	{
 		free(frame);
-		menu_pictures_render_failed(pose, "was not written");
+		/* (a frame that is no scene never kept: the original drawn) */
+		menu_pictures_render_failed(pose, fault ? fault : "was not written");
 		return 0;
 	}
 	note = state->noted_before ? state->note_before : (struct menu_picture_note){ 0 };
