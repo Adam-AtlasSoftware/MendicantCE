@@ -1171,6 +1171,8 @@ float world_sdf_fade(void)
 struct world_sdf_header const *world_sdf_current(void)
 {
 	/* (the volume's first member: (struct world_sdf_volume const *) this
-	is the field, its voxels too, for world_sdf_sample) */
+	is the field, its voxels too, for world_sdf_sample. The game's thread's
+	alone, and good until the next world_sdf_frame, BSP switch or unload:
+	the threads never touch a field once it is handed over) */
 	return world_sdf.field.voxels ? &world_sdf.field.header : NULL;
 }
