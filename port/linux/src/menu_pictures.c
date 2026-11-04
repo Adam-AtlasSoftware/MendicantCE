@@ -53,8 +53,11 @@ int mkdir(const char *path, unsigned int mode);
 
 /* the cache's notes say which version of the rendering made them: a change
 of the rendering renders every picture again (3: drawn without mods, as
-the maps shipped: those drawn with mods before are drawn again) */
-#define MENU_PICTURES_VERSION 3
+the maps shipped: those drawn with mods before are drawn again; 4: made as
+a phase of the game's start, with the game to itself: the failures and the
+movie's frames of the passes run under the intro movie, issue 550, are made
+again) */
+#define MENU_PICTURES_VERSION 4
 /* renders of a pose (for a map) that did not finish before the original is
 kept */
 #define MENU_PICTURE_FAILURES 2
