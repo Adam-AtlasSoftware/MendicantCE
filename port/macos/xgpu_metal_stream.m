@@ -1265,26 +1265,28 @@ static void stream_anti_alias(void *context, const struct xgpu_stream_anti_alias
 }
 
 /* display.panini over a window's 3D view, after its anti-aliasing and
-before the HUD: the target's texture (the front end no longer multisamples
-it, as for the anti-aliasing) */
+before the HUD: the target's texture. A multisampled target stays
+multisampled, the HUD's draws going on into its samples: the pass reads its
+pixels resolved and draws into its samples (the front end changes a
+target's samples only between frames: made again mid-frame, it would lose
+the view) */
 static void stream_panini(void *context, const struct xgpu_stream_panini *record)
 {
 	struct stream_target *target = target_get(record->target);
 
 	(void)context;
 	if (!target || (target->description.format != XGPU_METAL_FORMAT_BGRA8 &&
-		target->description.format != XGPU_METAL_FORMAT_RGBA16F) || target->description.samples > 1 ||
-		target->description.depth_or_layers > 1)
+		target->description.format != XGPU_METAL_FORMAT_RGBA16F) || target->description.depth_or_layers > 1)
 		return;
 	if (stream.preparing)
 	{
 		/* (made as the map loads, as the game's pipelines are) */
-		(void)xgpu_metal_post_panini_prepare();
+		(void)xgpu_metal_post_panini_prepare(target->description.samples);
 		return;
 	}
 	target->written++;
 	xgpu_metal_post_panini(target->texture, target->description.format, target->description.width,
-		target->description.height, record->corners, record->projection);
+		target->description.height, target->description.samples, record->corners, record->projection);
 	stream_state_restore();
 }
 
