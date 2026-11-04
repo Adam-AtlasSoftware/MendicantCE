@@ -61,6 +61,10 @@ def main():
     else:
         results.append(step("30 Hz gate: bit-identical to master", identity + ["--baseline", str(BASELINE),
                                                                               "--missing-ok"]))
+    # (b30's AI against the original code's seeds: on a runner with the retail maps, HALO_RETAIL_MAPS; skipped
+    # without them, as on GitHub's)
+    results.append(step("campaign 30 Hz gate: b30's AI as the original's",
+                        [python, str(HERE / "campaign_identity.py")]))
     print(f"\nscorecard CI: {'passed' if all(results) else 'FAILED'}")
     return 0 if all(results) else 1
 
