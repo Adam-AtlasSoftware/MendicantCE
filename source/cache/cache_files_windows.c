@@ -620,7 +620,9 @@ boolean cache_files_precache_map_loaded(
 		!(cache_file_globals.copy_in_progress && map_file_index == cache_file_globals.copying_to_map_file_index))
 	{
 		cache_file_get_map_path(tag_name_strip_path(map_name), path);
-		if (!cache_slot_source_matches(map_file_index, path))
+		if (!cache_slot_source_matches(map_file_index, path, cached_map_file_get(map_file_index)->header.name,
+				(unsigned long)cached_map_file_get(map_file_index)->header.checksum,
+				(unsigned long)cached_map_file_get(map_file_index)->header.file_length))
 		{
 			error(_error_silent, "map '%s' has changed since it was cached: copied again", map_name);
 			cache_slot_source_forget(map_file_index);
@@ -808,6 +810,36 @@ void cache_files_initialize(
 	return;
 }
 
+/* port: a copy's slot marked a whole map (cache_slot_source_record): only
+a copy that wrote every byte and put the slot on the disk, its header the
+map's it was copying (cache_copy_written); any other (failed, ended, its
+header or pages not written) emptied, so that it is copied again, never
+played (port/linux/src/xbox_files.c's cache slots' sources) */
+static void cache_files_precache_map_mark(
+	short map_file_index)
+{
+	struct cached_map_file *map_file = cached_map_file_get(map_file_index);
+
+	if (cache_copy_written() &&
+		map_file->header.name[0] &&
+		_stricmp(map_file->header.name, cache_file_globals.copying_to_map_file_name) == 0 &&
+		cached_map_file_get_size(map_file_index) >= map_file->header.file_length)
+	{
+		char path[256];
+
+		cache_file_get_map_path(cache_file_globals.copying_to_map_file_name, path);
+		cache_slot_source_record(map_file_index, path, map_file->header.name,
+			(unsigned long)map_file->header.checksum, (unsigned long)map_file->header.file_length);
+		return;
+	}
+	if (map_file->header.name[0])
+		error(_error_silent, "the copy of map '%s' did not end whole: copied again", map_file->header.name);
+	cache_slot_source_forget(map_file_index);
+	memset(&map_file->header, 0, sizeof(struct cache_file_header));
+	memset(&map_file->last_modification_date, 0, sizeof(FILETIME));
+	cached_map_file_resize(map_file_index, 0);
+}
+
 void cache_files_precache_map_end(
 	void)
 {
@@ -821,14 +853,7 @@ void cache_files_precache_map_end(
 	cache_copy_buffer_stolen = TRUE;
 	cached_map_file_set_modification_date(cache_file_globals.copying_to_map_file_index);
 	cached_map_file_read_header(cache_file_globals.copying_to_map_file_index);
-	/* port: the map file the copy came from (cache_slot_source_matches) */
-	if (cached_map_file_get(cache_file_globals.copying_to_map_file_index)->header.name[0])
-	{
-		char path[256];
-
-		cache_file_get_map_path(cache_file_globals.copying_to_map_file_name, path);
-		cache_slot_source_record(cache_file_globals.copying_to_map_file_index, path);
-	}
+	cache_files_precache_map_mark(cache_file_globals.copying_to_map_file_index);
 	cache_file_globals.copy_in_progress = FALSE;
 	cache_file_globals.copying_to_map_file_index = NONE;
 
@@ -1180,7 +1205,8 @@ static void cache_files_open_cache_files(
 				cached_map_file_get_size(map_file_index) >= map_file->header.file_length &&
 				cache_file_read_header_from_dvd(cache_map_name, &dvd_header) &&
 				map_file->header.checksum == dvd_header.checksum &&
-				cache_slot_source_matches(map_file_index, map_path);
+				cache_slot_source_matches(map_file_index, map_path, cache_map_name,
+					(unsigned long)map_file->header.checksum, (unsigned long)map_file->header.file_length);
 		}
 		if (valid)
 		{
@@ -1603,7 +1629,8 @@ static void cached_map_file_get_path(
 	short map_file_index,
 	char *path)
 {
-	sprintf(path, "z:\\cache%03d.map", map_file_index);
+	/* port: this copy of the game's folder (cache_slot_folder) */
+	sprintf(path, "%scache%03d.map", cache_slot_folder(), map_file_index);
 
 	return;
 }
