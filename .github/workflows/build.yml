@@ -413,7 +413,7 @@ jobs:
         run: |
           python3 -c "import sys; sys.path.insert(0, '.'); from pathlib import Path; from tools.linux_guest_build import fetch_openxr_headers; fetch_openxr_headers(Path('build/linux_x86_64/third_party/openxr'))"
           python3 -m pytest -q -n auto --dist loadfile tools/test_vulkan_passes.py tools/test_host_vr_vulkan.py tools/test_vr_vehicles.py \
-            tools/test_vr_effects.py tools/test_host_texture_idle.py tools/test_hdr.py tools/test_hdr_backends.py
+            tools/test_vr_effects.py tools/test_host_texture_idle.py tools/test_hdr.py tools/test_hdr_backends.py tools/test_screen_passes_samples.py
 
       - name: Compile cache
         run: ccache --show-stats

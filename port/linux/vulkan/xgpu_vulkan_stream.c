@@ -2378,25 +2378,32 @@ static void stream_anti_alias(void *context, const struct xgpu_stream_anti_alias
 }
 
 /* display.panini over a window's 3D view, after its anti-aliasing and
-before the HUD: the target's texture, its first layer (the front end no
-longer multisamples it, as for the anti-aliasing) */
+before the HUD: the target's texture, its first layer. A multisampled
+target stays multisampled, the HUD's draws going on into its samples: its
+pixels resolved for the pass to read, and the pass drawn into its samples,
+which the frame's end resolves (the front end changes a target's samples
+only between frames: an attachment made again mid-frame would lose the
+view) */
 static void stream_panini(void *context, const struct xgpu_stream_panini *record)
 {
 	struct stream_target *target = target_get(record->target);
+	struct xgpu_vulkan_image *into;
 
 	(void)context;
 	if (!target || target->depth || target->layers > 1)
 		return;
+	into = target->multisampled ? target->multisampled : target->image;
 	if (stream.preparing)
 	{
 		/* (made as the map loads, as the game's pipelines are) */
-		(void)xgpu_vulkan_post_panini_prepare(target->format, 1);
+		(void)xgpu_vulkan_post_panini_prepare(target->format, xgpu_vulkan_image_description(into)->samples, 1);
 		return;
 	}
-	if (target->multisampled)
-		return;
+	target_resolve(target);
 	target->written++;
-	xgpu_vulkan_post_panini(target->image, 0, record->corners, record->projection);
+	if (xgpu_vulkan_post_panini(target->image, into, 0, record->corners, record->projection) &&
+		into == target->multisampled)
+		target->unresolved = 1;
 	/* (the stream's targets again, for what follows) */
 	targets_bind();
 }
