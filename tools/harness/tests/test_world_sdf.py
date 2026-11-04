@@ -18,9 +18,9 @@ CONTROLS = [
     # the encoding truncated the wrong way round
     ("return (signed char)(value < 0.0f ? value - 0.5f : value + 0.5f);", "return (signed char)(value * 0.5f);",
      "encoding"),
-    # the sample's weights for the far corner and the near swapped
-    ("((corner & 1) ? fraction[0] : 1.0f - fraction[0])", "((corner & 1) ? 1.0f - fraction[0] : fraction[0])",
-     "sample"),
+    # the sample's weights for the far corner and the near swapped (along z, the test plane's)
+    ("(((corner >> 2) & 1) ? fraction[2] : 1.0f - fraction[2])",
+     "(((corner >> 2) & 1) ? 1.0f - fraction[2] : fraction[2])", "sample"),
 ]
 
 
