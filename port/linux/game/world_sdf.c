@@ -56,7 +56,6 @@ into place, and a file that fails any check is deleted (and baked again).
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/resource.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -111,6 +110,8 @@ double config_real(const char *name);
 const char *config_string(const char *name);
 int halo_server_mode(void);
 unsigned long long SDL_GetTicksNS(void);
+/* the guest runtime's system calls (port/android/guest/runtime) */
+long __guest_syscall(long long number, long long a, long long b, long long c, long long d, long long e, long long f);
 /* (sys/stat.h's, which the game's strict ANSI hides) */
 int mkdir(const char *path, unsigned int mode);
 void halo_world_ao_field(unsigned long width, unsigned long height, unsigned long depth, unsigned long z_first,
@@ -561,10 +562,14 @@ static unsigned long long sdf_now(void)
 	return SDL_GetTicksNS();
 }
 
-/* the calling thread at the lowest priority (the game's threads first) */
+/* the calling thread at the lowest priority (the game's threads first):
+setpriority(PRIO_PROCESS, 0, 19), which the guest's C library has not, as
+the runtime's dispatcher takes it (port/android/include/halo_guest_syscall.h's
+GUEST_SYS_setpriority, asm-generic's number; each host lowers the calling
+thread: host_syscall.c) */
 static void sdf_thread_background(void)
 {
-	setpriority(PRIO_PROCESS, 0, 19);
+	__guest_syscall(140, 0, 0, 19, 0, 0, 0);
 }
 
 static long sdf_threads(void)
