@@ -64,6 +64,11 @@ binding 0 of its own set, read with texelFetch at the pixel (white where
 the backend found none: a stand-in), for the draws whose pixel key has it */
 #define XGPU_SPIRV_SET_OCCLUSION 3
 #define XGPU_SPIRV_BINDING_AMBIENT_OCCLUSION 0
+/* display.ambient_occlusion "world" (xgpu_world_ao.h): in the same set, the
+structure's distance field (a combined image sampler, 3D, linear, clamped
+to its edge) and the window's block (a uniform buffer) */
+#define XGPU_SPIRV_BINDING_WORLD_SDF 1
+#define XGPU_SPIRV_BINDING_WORLD_AO 2
 
 /* the locations of what the vertex shader hands the pixel shader */
 enum

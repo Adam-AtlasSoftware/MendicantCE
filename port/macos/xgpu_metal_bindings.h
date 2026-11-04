@@ -42,5 +42,11 @@ read (XGPU_MSL_TEXTURE_AMBIENT_OCCLUSION) */
 #define XGPU_METAL_SAMPLER_STAGE(stage) (stage)
 #define XGPU_METAL_TEXTURE_AMBIENT_OCCLUSION 4
 #define XGPU_METAL_TEXTURE_STAGE_COUNT 5
+/* display.ambient_occlusion "world" (port/linux/src/xgpu_world_ao.h): the
+field past the stages (XGPU_MSL_TEXTURE_WORLD_SDF; workstream D raises
+XGPU_METAL_TEXTURE_STAGE_COUNT when it binds it) and the window's block
+(XGPU_MSL_BUFFER_WORLD_AO) */
+#define XGPU_METAL_TEXTURE_WORLD_SDF 5
+#define XGPU_METAL_BUFFER_WORLD_AO 23
 
 #endif

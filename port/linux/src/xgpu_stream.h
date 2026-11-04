@@ -37,8 +37,10 @@ port/linux/README.md.
 
 #include <stdint.h>
 
+#include "xgpu_world_ao.h"
+
 #define XGPU_STREAM_MAGIC 0x53504758u /* "XGPS" */
-#define XGPU_STREAM_VERSION 15
+#define XGPU_STREAM_VERSION 16
 #define XGPU_STREAM_LOADING_ART_BYTES (640u * 480u * 4u)
 
 /* ---------- the ring
@@ -258,6 +260,10 @@ enum
 	XGPU_STREAM_GAMMA,
 	/* display.panini (xgpu_backend_panini) */
 	XGPU_STREAM_PANINI,
+	/* display.ambient_occlusion "world" (xgpu_backend_world_ao_window,
+	_field; docs/world-ao.md) */
+	XGPU_STREAM_WORLD_AO_WINDOW,
+	XGPU_STREAM_WORLD_AO_FIELD,
 	XGPU_STREAM_RECORD_TYPES,
 };
 
@@ -356,6 +362,29 @@ struct xgpu_stream_ambient_occlusion
 	uint32_t quality;
 	int32_t corners[4];
 	float camera[6];
+};
+
+/* WORLD_AO_WINDOW: display.ambient_occlusion "world"'s block for the
+window's opaque surfaces from here on (xgpu_backend_world_ao_window):
+active 0 none (the block's contents unused) */
+struct xgpu_stream_world_ao_window
+{
+	uint32_t header;
+	uint32_t active;
+	uint32_t pad[2];
+	struct xgpu_world_ao_block block;
+};
+
+/* WORLD_AO_FIELD: slices z_first to z_first + z_count - 1 of the field (a
+width * height * depth volume of signed bytes, x fastest:
+xgpu_backend_world_ao_field), its bytes at data (size: width * height *
+z_count); width 0 releases the field */
+struct xgpu_stream_world_ao_field
+{
+	uint32_t header;
+	uint32_t width, height, depth;
+	uint32_t z_first, z_count;
+	uint32_t data, size;
 };
 
 /* its quality; the stencil's bits of the pixels the occlusion leaves (the
@@ -1055,6 +1084,8 @@ XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_hdr, 24);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_tone_map, 24);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_panini, 56);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_ambient_occlusion, 52);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_world_ao_window, 16 + 32 + 32 + XGPU_WORLD_AO_PROXIES_MAXIMUM * 48);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_world_ao_field, 32);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_set_targets, 16);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_clear, 36);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_read_target, 28);

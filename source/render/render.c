@@ -92,6 +92,7 @@ symbols in this file:
 #include "models/models.h"
 #include "structure_culling.h" /* port: port/linux/game/structure_culling.c */
 #include "panini.h" /* port: port/linux/game/panini.c */
+#include "world_ao.h" /* port: port/linux/game/world_ao.c */
 
 #ifdef HALO_VR
 #include "../../port/linux/src/vr.h"
@@ -482,6 +483,12 @@ static void render_window(
 				parameters.frustum.z_far,
 				projection);
 		}
+		/* port: display.ambient_occlusion "world": the window's proxies and
+		the field's place handed to the shaders' ambient slot before the
+		opaque surfaces shade (port/linux/game/world_ao.c; the objects' draws
+		say which they are: world_ao_object_begin), taken away after the
+		lightmap pass, which the later passes never read */
+		world_ao_window_begin(local_player_index, rasterizer_target, &render.camera.position.x);
 		render_objects();
 		/* port: and through every model's parts */
 		render_enumerate_models();
@@ -495,6 +502,7 @@ static void render_window(
 		{
 			halo_screen_ambient_occlusion_end();
 		}
+		world_ao_window_end();
 #ifdef HALO_VR
 		/* the scope's view: no lens flares (their visibility tests are the
 		eyes', counted per frame), nor the objects' shadows, which a few
@@ -1015,6 +1023,10 @@ void render_frame(
 	parameters.game_time_sec = render_interpolation_game_time_sec(game_time_get());
 	rasterizer_frame_begin(&parameters);
 	rasterizer_windows_begin();
+	/* port: display.ambient_occlusion "world": the scene's objects as drawn
+	this frame, the field's upload continued (port/linux/game/world_ao.c;
+	nothing unless it is on) */
+	world_ao_frame_begin();
 
 	for (window_index = 0; window_index < window_count; window_index++)
 	{

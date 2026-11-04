@@ -40,6 +40,7 @@ Conventions carried over from the Xbox:
 #include "bink_import.h"
 #include "halo_linux_source_fixups.h"
 #include "panini_projection.h"
+#include "world_ao.h"
 #include "main/console.h"
 
 #include <SDL3/SDL.h>
@@ -281,12 +282,57 @@ static void ambient_occlusion_read(void)
 		return;
 	ambient_occlusion.read_at = config_changes();
 	setting = config_string("display.ambient_occlusion");
+	/* ("world" is not the screen's: port/linux/game/world_ao.c, below) */
 	quality = !strcmp(setting, "strong") ? XGPU_AMBIENT_OCCLUSION_STRONG :
 		!strcmp(setting, "subtle") ? XGPU_AMBIENT_OCCLUSION_SUBTLE : 0;
 	if (quality != ambient_occlusion.quality)
 		platform_log("ambient occlusion: %s", quality ? setting : "off");
 	ambient_occlusion.quality = quality;
 	ambient_occlusion.view = config_boolean("debug.ambient_occlusion_view");
+}
+
+/* ---------- display.ambient_occlusion "world" (port/linux/game/world_ao.c,
+docs/world-ao.md)
+
+The window's block (the field's place, its proxies) handed to the backend
+for the opaque surfaces that draw until world_ao_window_end takes it away;
+the field's slices uploaded as its bake gives them. Workstream D gives the
+pixel keys the world's light (xgpu.h's XGPU_AMBIENT_OCCLUSION_LIGHT_*) and
+the draws their object (halo_world_ao_object); with the setting off nothing
+here is called. */
+
+void halo_world_ao_window(float const field[2][4], float const parameters[2][4], float const (*proxies)[3][4],
+	int count)
+{
+	struct xgpu_world_ao_block block;
+
+	if (count < 0)
+	{
+		xgpu_backend_world_ao_window(NULL);
+		return;
+	}
+	if (count > XGPU_WORLD_AO_PROXIES_MAXIMUM)
+		count = XGPU_WORLD_AO_PROXIES_MAXIMUM;
+	memset(&block, 0, sizeof(block));
+	memcpy(block.field, field, sizeof(block.field));
+	memcpy(block.parameters, parameters, sizeof(block.parameters));
+	if (count)
+		memcpy(block.proxies, proxies, (size_t)count * sizeof(block.proxies[0]));
+	block.parameters[0][3] = (float)count;
+	xgpu_backend_world_ao_window(&block);
+}
+
+void halo_world_ao_object(int owner, float reference)
+{
+	/* D: the draws' owner and reference, in their uniforms */
+	(void)owner;
+	(void)reference;
+}
+
+void halo_world_ao_field(unsigned long width, unsigned long height, unsigned long depth, unsigned long z_first,
+	unsigned long z_count, signed char const *voxels)
+{
+	xgpu_backend_world_ao_field(width, height, depth, z_first, z_count, voxels);
 }
 
 /* a draw that writes the depth, made to write the occlusion's marks of its

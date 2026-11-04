@@ -49,6 +49,11 @@ draw reads the frame's, wherever its ring put them) */
 by the draws whose pixel key has it (xgpu.h's XGPU_AMBIENT_OCCLUSION_LIGHT_*;
 white where the backend found none) */
 #define XGPU_MSL_TEXTURE_AMBIENT_OCCLUSION 4
+/* display.ambient_occlusion "world" (xgpu_world_ao.h): the structure's
+distance field (texture3d<float>, read through a constexpr linear sampler
+clamped to its edge) and the window's block */
+#define XGPU_MSL_TEXTURE_WORLD_SDF 5
+#define XGPU_MSL_BUFFER_WORLD_AO 23
 
 /* the draw's values both stages read, laid out alike in C and in Metal
 (float4s, and floats in fours): d3d8_gl.c's draw uniforms, the per-pixel

@@ -2792,6 +2792,10 @@ const struct host_render_backend *xgpu_vulkan_stream_backend(void)
 		backend.picture_top = stream_picture_top;
 		backend.gamma = stream_gamma;
 		backend.panini = stream_panini;
+		/* world-ao (#578, docs/world-ao.md): backend.world_ao_field (workstream
+		B: the field's 3D texture, XGPU_SPIRV_BINDING_WORLD_SDF) and
+		backend.world_ao_window (C: the block, XGPU_SPIRV_BINDING_WORLD_AO),
+		both in XGPU_SPIRV_SET_OCCLUSION; none yet: not drawn */
 #ifdef HALO_VR
 		host_vulkan_vr_backend(&backend);
 #endif

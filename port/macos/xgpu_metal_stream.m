@@ -1568,6 +1568,10 @@ const struct host_render_backend *xgpu_metal_stream_backend(void)
 		backend.ambient_occlusion = stream_ambient_occlusion;
 		backend.gamma = stream_gamma;
 		backend.panini = stream_panini;
+		/* world-ao (#578, docs/world-ao.md): backend.world_ao_field (workstream
+		B: the field's 3D texture, XGPU_METAL_TEXTURE_WORLD_SDF) and
+		backend.world_ao_window (C: the block, XGPU_METAL_BUFFER_WORLD_AO);
+		none yet: not drawn */
 	}
 	return &backend;
 }

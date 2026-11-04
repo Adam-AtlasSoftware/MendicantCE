@@ -94,6 +94,11 @@ struct host_render_backend
 	/* display.panini: a 3D view drawn again through the Panini projection
 	(none: not drawn) */
 	void (*panini)(void *context, const struct xgpu_stream_panini *record);
+	/* display.ambient_occlusion "world" (docs/world-ao.md): the block the
+	opaque surfaces' ambient light reads from here on, and slices of the
+	field (its bytes: host_pointer(record->data)); none: not drawn */
+	void (*world_ao_window)(void *context, const struct xgpu_stream_world_ao_window *record);
+	void (*world_ao_field)(void *context, const struct xgpu_stream_world_ao_field *record);
 
 	void (*target_create)(void *context, const struct xgpu_stream_target_create *record);
 	void (*target_delete)(void *context, uint32_t target);

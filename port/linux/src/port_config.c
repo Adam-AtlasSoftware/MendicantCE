@@ -1178,7 +1178,10 @@ static const struct config_setting config_settings[] =
 		"bench, a Warthog on the sand), worked out from the 3D view's depth\n"
 		"each frame. The levels' own corners keep their baked light, and\n"
 		"self-illuminated surfaces, lights and your weapon keep theirs: \"off\",\n"
-		"\"subtle\" or \"strong\". Not with multisampling on Metal (macOS, iOS)."
+		"\"subtle\" or \"strong\". Not with multisampling on Metal (macOS, iOS).\n"
+		"\"world\" (in progress, docs/world-ao.md): found in the world instead,\n"
+		"from the level's distance field and the objects' shapes; for now it\n"
+		"draws as \"off\"."
 		GRAPHICS_CHOOSES },
 	{ "display.shield_color", _config_string, "\"default\"", "HALO_SHIELD_COLOR", _environment_value, _platform_all,
 		"Your energy shield's color, as this machine draws it: \"default\" (the\n"

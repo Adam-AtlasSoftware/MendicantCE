@@ -199,6 +199,7 @@ symbols in this file:
 #include "structure_culling.h" /* port: port/linux/game/structure_culling.c */
 #include "structure_bsp_cache.h" /* port: port/linux/game/structure_bsp_cache.c */
 #include "load_zone.h" /* port: port/linux/game/load_zone.c */
+#include "world_ao.h" /* port: port/linux/game/world_ao.c */
 
 /* ---------- constants */
 
@@ -373,6 +374,9 @@ void scenario_unload(
 
 	/* port: release pointers into the bsp before its tags go away */
 	structure_culling_dispose();
+	/* port: and display.ambient_occlusion "world"'s scene, proxies and
+	field (port/linux/game/world_ao.c) */
+	world_ao_map_unloaded();
 	/* port: and the copies of its bsps (port/linux/game/structure_bsp_cache.c) */
 	structure_bsp_cache_dispose();
 	scenario_tags_unload();
@@ -1190,6 +1194,10 @@ boolean scenario_switch_structure_bsp(
 		one's before the frame draws (port/linux/game/load_zone.c) */
 		if (loaded)
 			load_zone_structure_bsp_switched();
+		/* port: display.ambient_occlusion "world"'s field of the bsp
+		(port/linux/game/world_ao.c: nothing unless it is on) */
+		if (loaded)
+			world_ao_bsp_switched(global_structure_bsp_index);
 	}
 
 	return result;
@@ -1280,6 +1288,11 @@ missing_tag_loop:
 			goto missing_tag_loop;
 	}
 
+	/* port: display.ambient_occlusion "world": the map's scene found, its
+	fields looked for in the cache, never baked here (a missing one bakes in
+	the background: port/linux/game/world_ao.c) */
+	if (result)
+		world_ao_map_loaded();
 	halo_load_trace("scenario.end", name); /* port: loading measurement */
 	return result;
 }
