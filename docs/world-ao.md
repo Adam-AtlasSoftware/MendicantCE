@@ -112,7 +112,13 @@ asked: at quit, and at a map unload if the map can't be re-read.
   every stock map, so baking each map's fields while it's loaded (`world_sdf_startup_map_loaded`, called from
   `menu_pictures_render.c`'s `_prepare_loading` state) costs no extra loads. Baking overlaps the pictures' settle and
   render time; the pass's per-picture time limit counts it. If the pictures are already cached but a field is
-  missing (a new bake version), `world_sdf_startup_wanted` makes the pass run for the fields alone.
+  missing (a new bake version), `world_sdf_startup_wanted` makes the pass run for the fields alone. Only the loaded
+  BSP's tags are in memory, so the pass bakes the BSP each map starts in and each picture's, and switches to no
+  other (repeated switches once leaked the device's groups, #506). A campaign map's other BSPs are baked in the
+  background the first time the game switches to them (proxies alone until then), never in the switch.
+- **Threads:** the bake runs on every processor (`HALO_WORLD_SDF_THREADS` overrides, for measuring), each thread
+  lowered with `setpriority(PRIO_PROCESS, 0, 19)`, which each host applies to the calling thread (Linux and
+  Android as it is, macOS as the background quality of service, Windows as the lowest thread priority).
 - **Any other time:** after a map loads with no field (a custom map, a new bake version), `world_sdf_map_loaded`
   only looks in the cache. On a miss it copies the geometry (a few ms) and starts the bake on a low-priority
   background thread, after the load is done. **Never during a load:** `scenario_load` does nothing more than a cache
