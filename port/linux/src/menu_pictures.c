@@ -66,6 +66,14 @@ the main menu shows, the pictures not made keeping their originals (a slow
 disc's ten seconds a map is a third of a picture's) */
 #define MENU_PICTURE_TIME_BUDGET 30000000000ULL
 #define MENU_PICTURES_TIME_BUDGET 120000000000ULL
+/* (percent of a picture's neighbouring pixels) a frame kept is not a
+scene's with more alike than this, or more unlike (each channel, on
+average, more than MENU_PICTURE_UNLIKE apart). The 23 poses' scenes have
+3 to 47 alike and 0.3 to 3.4 unlike; the intro movie's frames kept in their
+place (issue 550) 96 to 99 alike, or 10 to 53 unlike */
+#define MENU_PICTURE_MOST_ALIKE 85
+#define MENU_PICTURE_UNLIKE 32
+#define MENU_PICTURE_MOST_UNLIKE 7
 
 /* ---------- prototypes */
 
@@ -238,6 +246,63 @@ int menu_picture_overdue(
 	if (now < pass_began || now < picture_began)
 		return 0;
 	return now - picture_began > MENU_PICTURE_TIME_BUDGET || now - pass_began > MENU_PICTURES_TIME_BUDGET;
+}
+
+/* whether the pass may begin this frame: once, in the main menu, and never
+while a movie plays (the intro, over the main menu as it first shows). The
+movie holds the texture cache's spare memory, which each map's file copied
+into the cache takes too; it draws its frames over the game's, so the frame
+kept would be the movie's; and its end loads the main menu, over the pass's
+map */
+int menu_pictures_may_begin(
+	int main_menu_loaded,
+	int movie_playing,
+	int looked)
+{
+	return main_menu_loaded && !movie_playing && !looked;
+}
+
+/* NULL if a picture (width x height RGBA, cut from the frame kept) looks
+like a scene, else what it looks like instead: one colour nearly
+throughout (a cleared screen, a movie's backdrop: its neighbouring pixels
+all but alike), or noise (memory that is not a picture, drawn as one: its
+neighbouring pixels unlike, nearly everywhere, as no scene's are) */
+char const *menu_picture_not_a_scene(
+	unsigned char const *rgba,
+	unsigned long width,
+	unsigned long height)
+{
+	unsigned long x, y, pairs = 0, alike = 0, unlike = 0;
+
+	for (y = 0; y < height; y++)
+	{
+		for (x = 0; x < width; x++)
+		{
+			unsigned char const *pixel = rgba + (y * width + x) * 4;
+			int side;
+
+			for (side = 0; side < 2; side++)
+			{
+				unsigned char const *next;
+				int difference;
+
+				if (side == 0 ? x + 1 >= width : y + 1 >= height)
+					continue;
+				next = side == 0 ? pixel + 4 : pixel + width * 4;
+				difference = abs(pixel[0] - next[0]) + abs(pixel[1] - next[1]) + abs(pixel[2] - next[2]);
+				pairs++;
+				alike += difference == 0;
+				unlike += difference > MENU_PICTURE_UNLIKE * 3;
+			}
+		}
+	}
+	if (!pairs)
+		return "is empty";
+	if (alike * 100 > pairs * MENU_PICTURE_MOST_ALIKE)
+		return "is one colour, not a scene";
+	if (unlike * 100 > pairs * MENU_PICTURE_MOST_UNLIKE)
+		return "is noise, not a scene";
+	return NULL;
 }
 
 static char const *const menu_picture_result_names[] = { "none", "rendered", "failed", "modded" };
@@ -1022,9 +1087,11 @@ int menu_pictures_render_kept(
 	unsigned char *frame = malloc(frame_width * frame_height * 4);
 	struct menu_picture_note note;
 	char path[1100];
+	char const *fault = NULL;
 	int written = 0;
 
-	if (bgra && cut && frame && menu_picture_cut(bgra, width, height, picture->aspect, cut, picture_width, picture_height))
+	if (bgra && cut && frame && menu_picture_cut(bgra, width, height, picture->aspect, cut, picture_width, picture_height) &&
+		!(fault = menu_picture_not_a_scene(cut, picture_width, picture_height)))
 	{
 		if (picture->colour_curve && state->original)
 			menu_picture_colour_curve(cut, picture_width * picture_height, state->original,
@@ -1041,7 +1108,8 @@ int menu_pictures_render_kept(
 	if (!written)
 	{
 		free(frame);
-		menu_pictures_render_failed(pose, "was not written");
+		/* (a frame that is no scene never kept: the original drawn) */
+		menu_pictures_render_failed(pose, fault ? fault : "was not written");
 		return 0;
 	}
 	note = state->noted_before ? state->note_before : (struct menu_picture_note){ 0 };

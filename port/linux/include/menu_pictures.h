@@ -138,6 +138,8 @@ void menu_picture_note_begin(struct menu_picture_note *note, struct menu_picture
 void menu_picture_note_end(struct menu_picture_note *note, enum menu_picture_result result, long scale);
 void menu_picture_note_give_up(struct menu_picture_note *note);
 int menu_picture_overdue(unsigned long long now, unsigned long long pass_began, unsigned long long picture_began);
+int menu_pictures_may_begin(int main_menu_loaded, int movie_playing, int looked);
+char const *menu_picture_not_a_scene(unsigned char const *rgba, unsigned long width, unsigned long height);
 int menu_picture_note_parse(char const *text, struct menu_picture_note *note);
 int menu_picture_note_format(struct menu_picture_note const *note, char *text, long size);
 void menu_picture_colour_curve(unsigned char *pixels, unsigned long count, unsigned char const *reference,
