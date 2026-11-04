@@ -24,8 +24,8 @@ NEGATIVE_CONTROLS = {
     "opence-player-held": (("if (!network_standard_globals.hosting || network_standard_player_is_opence(player_index))",
                             "if (!network_standard_globals.hosting)"), "host"),
     # (the host's way changed during a game)
-    "read-in-game": (("\tif (in_lobby)\n\t\tnetwork_standard_globals.hosting_hold_to_pick_up",
-                      "\tif (TRUE)\n\t\tnetwork_standard_globals.hosting_hold_to_pick_up"), "host"),
+    "read-in-game": (("\tif (in_lobby)\n\t{\n\t\tnetwork_standard_globals.hosting_hold_to_pick_up",
+                      "\tif (TRUE)\n\t{\n\t\tnetwork_standard_globals.hosting_hold_to_pick_up"), "host"),
     # (an OpenCE machine sent the bit)
     "opence-sent-the-bit": (("\tSET_FLAG(legacy_game.cooperative_flags, _network_game_hold_to_pick_up_bit, FALSE);\n",
                              ""), "opence-record"),
