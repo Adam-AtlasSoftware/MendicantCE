@@ -83,6 +83,7 @@ skipped or made without its sampler.
 
 #include "halo_dynamic_lights.h"
 #include "render_enumerate.h"
+#include "render_prepared.h"
 #ifdef HALO_VR
 #include "../src/vr.h"
 boolean vr_render_eye_pass(void);
@@ -670,6 +671,21 @@ boolean render_enumerate_begin(boolean mirrors, boolean scope)
 	enumerate.structure_bsp_index = structure_bsp_index;
 	SET_FLAG(*enumerate.structure_bsps_enumerated[view], structure_bsp_index, TRUE);
 	enumerate.mirrors = mirrors && structure_visibility_port_has_mirrors();
+	/* (a map's first: from its record, where it has one: render_prepared.c;
+	its structure's materials then counted as the walk counts them) */
+	if (enumerate.everything && !scope && render_prepared_replay(enumerate.mirrors))
+	{
+		struct structure_bsp *structure_bsp = global_structure_bsp_get();
+		struct enumerated_materials *enumerated = enumerate.materials_enumerated[view];
+
+		if (structure_bsp)
+			structure_materials(structure_bsp, enumerated, TRUE);
+		while (stand_ins_next(structure_bsp, enumerated))
+			;
+		platform_log("render: the map's and its structure %d's shaders and pipelines made from its record, %d "
+			"rounds of the other structures' materials counted", structure_bsp_index, stand_ins.round);
+		return FALSE;
+	}
 	enumerate.own_fog = render.fog;
 	halo_load_trace("enumerate.begin", NULL);
 	enumerate.started = system_milliseconds();
@@ -682,6 +698,8 @@ boolean render_enumerate_begin(boolean mirrors, boolean scope)
 	render_enumerating = TRUE;
 	halo_gpu_prepare(enumerate.everything);
 	texture_cache_preparation_begin();
+	if (enumerate.everything && !scope)
+		render_prepared_record_begin(enumerate.mirrors);
 	return TRUE;
 }
 
@@ -725,6 +743,7 @@ boolean render_enumerate_next(void)
 	cpu = cpu < 0.0 || enumerate.started_cpu < 0.0 ? -1.0 : cpu - enumerate.started_cpu;
 	/* (the loading screen's end: the shaders and pipelines made) */
 	waited = halo_gpu_prepared();
+	render_prepared_record_end();
 	halo_load_trace("enumerate.prepared.end", NULL);
 	/* These draws have reached the host. Advance the texture cache as a
 	completed frame does, so the next view and HUD can load their real

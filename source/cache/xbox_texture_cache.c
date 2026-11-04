@@ -121,6 +121,7 @@ symbols in this file:
 #include "tag_files/tag_groups.h"
 #include "text/draw_string.h"
 #include <xtl.h>
+#include <stddef.h>
 #include "custom_edition_cache.h" /* port: port/linux/game/custom_edition_cache.c */
 #include "render_enumerate.h" /* port: port/linux/game/render_enumerate.c */
 
@@ -536,6 +537,91 @@ void texture_cache_bitmap_new(
 	bitmap->cache_block_index = NONE;
 
 	return;
+}
+
+/* (cache_files.c's) */
+boolean tag_index_is_group(long tag_index, long group_tag);
+
+/* port: a map's preparation's journal (port/linux/src/d3d8_device.c,
+port/linux/game/render_prepared.c) keeps a cached bitmap by its tag and its
+index in the tag, not where the cache put it */
+static boolean texture_cache_bitmap_index(
+	struct bitmap_data const *bitmap,
+	unsigned long *bitmap_index)
+{
+	struct bitmap_group *bitmap_group;
+	struct bitmap_data const *first;
+
+	if (bitmap->tag_index == NONE || !tag_index_is_group(bitmap->tag_index, BITMAP_GROUP_TAG))
+	{
+		return FALSE;
+	}
+	bitmap_group = bitmap_group_get(bitmap->tag_index);
+	if (bitmap_group->bitmaps.count <= 0)
+	{
+		return FALSE;
+	}
+	first = TAG_BLOCK_GET_ELEMENT(&bitmap_group->bitmaps, 0, struct bitmap_data);
+	if (bitmap < first || bitmap >= first + bitmap_group->bitmaps.count)
+	{
+		return FALSE;
+	}
+	*bitmap_index = (unsigned long)(bitmap - first);
+
+	return TRUE;
+}
+
+int texture_cache_port_identify(
+	void const *texture,
+	unsigned long *tag_index,
+	unsigned long *bitmap_index)
+{
+	struct data_array *array = xbox_texture_cache_globals.textures;
+	struct xbox_texture_cache_texture const *cached;
+	unsigned long offset;
+
+	/* (the datum whose texture it is: its array's, and in use) */
+	if (!array || !array->data || array->size <= 0 ||
+		(char const *)texture < (char const *)array->data + offsetof(struct xbox_texture_cache_texture, hardware_format))
+	{
+		return FALSE;
+	}
+	offset = (unsigned long)((char const *)texture - (char const *)array->data -
+		offsetof(struct xbox_texture_cache_texture, hardware_format));
+	if (offset % (unsigned long)array->size || offset / (unsigned long)array->size >= (unsigned long)array->maximum_count)
+	{
+		return FALSE;
+	}
+	cached = (struct xbox_texture_cache_texture const *)((char const *)array->data + offset);
+	if (!cached->identifier || !cached->bitmap)
+	{
+		return FALSE;
+	}
+	*tag_index = (unsigned long)cached->bitmap->tag_index;
+
+	return texture_cache_bitmap_index(cached->bitmap, bitmap_index);
+}
+
+void *texture_cache_port_load(
+	unsigned long tag_index,
+	unsigned long bitmap_index)
+{
+	struct bitmap_group *bitmap_group;
+
+	if (!tag_index_is_group((long)tag_index, BITMAP_GROUP_TAG))
+	{
+		return NULL;
+	}
+	bitmap_group = bitmap_group_get((long)tag_index);
+	if ((long)bitmap_index >= bitmap_group->bitmaps.count)
+	{
+		return NULL;
+	}
+
+	return _texture_cache_bitmap_get_hardware_format(
+		TAG_BLOCK_GET_ELEMENT(&bitmap_group->bitmaps, (long)bitmap_index, struct bitmap_data),
+		TRUE,
+		TRUE);
 }
 
 void texture_cache_bitmap_delete(
@@ -997,6 +1083,15 @@ static boolean texture_cache_start_loading_bitmap(
 		bitmap->cache_block_index = cache_block_index;
 		bitmap->base_address = base_address;
 		texture->bitmap = bitmap;
+		/* port: noted in a map's preparation's journal */
+		{
+			unsigned long bitmap_index;
+
+			if (texture_cache_bitmap_index(bitmap, &bitmap_index))
+			{
+				halo_gpu_journal_texture((unsigned int)bitmap->tag_index, (unsigned int)bitmap_index);
+			}
+		}
 		texture_cache_initialize_hardware_format(bitmap, &texture->hardware_format);
 		/* port: or, the bitmap of a mod played over the map's, from its
 		file, at once (port/linux/game/mod_bitmaps.c) */
