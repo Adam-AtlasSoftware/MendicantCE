@@ -28,11 +28,11 @@ CONTROLS = [
     ("return 17.0f * sqrtf(diagonal_squared);", "return 4.0f * sqrtf(diagonal_squared);", "reach"),
     # culled by its centre, not its reach; the farthest kept first
     ("if (dot3(planes[plane], centre) - planes[plane][3] > reach)",
-     "if (dot3(planes[plane], centre) - planes[plane][3] > 0.0f)", "culling"),
+     "if (dot3(planes[plane], centre) - planes[plane][3] > 0.0f * reach)", "culling"),
     ("distance = length3(offset);", "distance = -length3(offset);", "culling"),
     # a slot per shape rather than per owner
     ("proxies[i].v[1][3] = j < i ? proxies[j].v[1][3] : (float)slots++;",
-     "proxies[i].v[1][3] = (float)i;", "owner"),
+     "proxies[i].v[1][3] = (float)slots++;", "owner"),
     # a capsule's end carried as a direction, not a point
     ("frame_point(frame, shape->b, proxy->v[1]);", "frame_vector(frame, shape->b, proxy->v[1]);", "skeleton"),
 ]
