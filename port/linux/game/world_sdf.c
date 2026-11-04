@@ -58,7 +58,6 @@ into place, and a file that fails any check is deleted (and baked again).
 #include <string.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
-#include <time.h>
 #include <unistd.h>
 
 /* ---------- constants */
@@ -112,6 +111,8 @@ double config_real(const char *name);
 const char *config_string(const char *name);
 int halo_server_mode(void);
 unsigned long long SDL_GetTicksNS(void);
+/* (sys/stat.h's, which the game's strict ANSI hides) */
+int mkdir(const char *path, unsigned int mode);
 void halo_world_ao_field(unsigned long width, unsigned long height, unsigned long depth, unsigned long z_first,
 	unsigned long z_count, signed char const *voxels);
 /* the game's zlib (source/memory/zlib) */
@@ -557,10 +558,7 @@ static int sdf_key_loaded(struct sdf_key *key)
 
 static unsigned long long sdf_now(void)
 {
-	struct timespec now;
-
-	clock_gettime(CLOCK_MONOTONIC, &now);
-	return (unsigned long long)now.tv_sec * 1000000000ULL + (unsigned long long)now.tv_nsec;
+	return SDL_GetTicksNS();
 }
 
 /* the calling thread at the lowest priority (the game's threads first) */
