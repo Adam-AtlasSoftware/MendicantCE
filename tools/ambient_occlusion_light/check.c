@@ -1,0 +1,175 @@
+/*
+CHECK.C
+
+display.ambient_occlusion's light (port/linux/src/xgpu.h's
+XGPU_AMBIENT_OCCLUSION_LIGHT_*; tools/test_ambient_occlusion_light.py): the
+shaders of a surface lit by the occlusion, as the emitters write them, for
+the test to read. Each case's pixel shader (a model lit for each pixel, by
+its point lights or the enhanced dynamic lights; a model lit for each
+vertex; a structure's lightmap pass, alone or with the enhanced dynamic
+lights), with the occlusion and without it, and the vertex shader of a
+model lit for each vertex with its ambient light apart:
+
+  check msl                 the Metal emitter's, each after a line
+                            "==== <case> <occlusion: 0 or 1>"
+  check spirv <directory>   the SPIR-V emitter's, <case>-<occlusion>.spv
+
+Built by the test with the shader decoders and both emitters, as
+tools/msl_corpus is.
+*/
+
+#include "xgpu.h"
+#include "xgpu_backend.h"
+#include "xgpu_shader.h"
+#include "xgpu_msl.h"
+#include "xgpu_spirv.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+void platform_log(const char *format, ...) { (void)format; }
+
+/* the pixel shader's cases: name, per_pixel_lighting, dynamic_lights, the
+light the occlusion multiplies */
+static const struct
+{
+	const char *name;
+	unsigned char per_pixel_lighting, dynamic_lights, light;
+} cases[] =
+{
+	{ "model", 2, 0, XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL },
+	{ "model_dynamic", 1, XGPU_DYNAMIC_LIGHTS_MODEL, XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL },
+	{ "vertex", 0, 0, XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX },
+	{ "lightmap", 0, 0, XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP },
+	{ "lightmap_dynamic", 0, XGPU_DYNAMIC_LIGHTS_ENVIRONMENT, XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP },
+};
+
+/* a texture times the diffuse colour (the models' and the lightmap pass's
+shape: its light, v0, by its texture) */
+static void program_make(struct xgpu_pixel_program *program, int index, int occlusion)
+{
+	memset(program, 0, sizeof(*program));
+	program->stages[0].declared_mode = program->stages[0].mode = XGPU_TEXTURE_PROJECT2D;
+	program->stages[0].sampler = _xgpu_sampler_2d;
+	program->final.present = 1;
+	program->final.inputs[0].reg = XGPU_REGISTER_V0;
+	program->final.inputs[1].reg = XGPU_REGISTER_T0;
+	program->final.inputs[6].reg = XGPU_REGISTER_T0;
+	program->final.inputs[6].alpha = 1;
+	program->per_pixel_lighting = cases[index].per_pixel_lighting;
+	program->dynamic_lights = cases[index].dynamic_lights;
+	program->ambient_occlusion = occlusion ? cases[index].light : 0;
+}
+
+/* a model lighting program's stand-in: the normal in r0 and the position
+in r1 before its one instruction (oPos = v0) */
+static void vertex_make(struct xgpu_vertex_program *program, struct nv2a_vertex_lighting *lighting)
+{
+	memset(program, 0, sizeof(*program));
+	program->instruction_count = 1;
+	program->instructions[0].mac = XGPU_MAC_MOV;
+	program->instructions[0].a.file = XGPU_VERTEX_INPUT;
+	program->instructions[0].a.index = 0;
+	program->instructions[0].a.swizzle[0] = 0;
+	program->instructions[0].a.swizzle[1] = 1;
+	program->instructions[0].a.swizzle[2] = 2;
+	program->instructions[0].a.swizzle[3] = 3;
+	program->instructions[0].writes_output = 1;
+	program->instructions[0].output_is_register = 1;
+	program->instructions[0].output = XGPU_OUTPUT_POSITION;
+	program->instructions[0].output_mask = 15;
+	program->instructions[0].last = 1;
+	memset(lighting, 0, sizeof(*lighting));
+	lighting->lights = 2;
+	lighting->normal_instruction = 0;
+	lighting->normal_register = 0;
+	lighting->position_instruction = 0;
+	lighting->position_register = 1;
+	lighting->split = TRUE;
+}
+
+static int msl(void)
+{
+	struct xgpu_pixel_program program;
+	struct xgpu_vertex_program vertex;
+	struct nv2a_vertex_lighting lighting;
+	struct xgpu_msl_options options;
+	unsigned int index;
+	int occlusion;
+	char *source;
+
+	memset(&options, 0, sizeof(options));
+	for (index = 0; index < sizeof(cases) / sizeof(cases[0]); index++)
+	{
+		for (occlusion = 0; occlusion < 2; occlusion++)
+		{
+			program_make(&program, (int)index, occlusion);
+			source = xgpu_msl_pixel_shader(&program, &options);
+			if (!source)
+				return 1;
+			printf("==== %s %d\n%s\n", cases[index].name, occlusion, source);
+			free(source);
+		}
+	}
+	vertex_make(&vertex, &lighting);
+	source = xgpu_msl_vertex_shader(&vertex, 0, 0, &lighting, &options);
+	if (!source)
+		return 1;
+	printf("==== vertex_split 1\n%s\n", source);
+	free(source);
+	return 0;
+}
+
+static int spirv_write(const char *directory, const char *name, int occlusion, const struct xgpu_spirv_module *module)
+{
+	char path[1024];
+	FILE *file;
+
+	snprintf(path, sizeof(path), "%s/%s-%d.spv", directory, name, occlusion);
+	if (!(file = fopen(path, "wb")))
+		return 1;
+	fwrite(module->words, 4, module->count, file);
+	fclose(file);
+	return 0;
+}
+
+static int spirv(const char *directory)
+{
+	struct xgpu_pixel_program program;
+	struct xgpu_vertex_program vertex;
+	struct nv2a_vertex_lighting lighting;
+	struct xgpu_spirv_options options;
+	struct xgpu_spirv_module module;
+	unsigned int index;
+	int occlusion;
+
+	memset(&options, 0, sizeof(options));
+	for (index = 0; index < sizeof(cases) / sizeof(cases[0]); index++)
+	{
+		for (occlusion = 0; occlusion < 2; occlusion++)
+		{
+			program_make(&program, (int)index, occlusion);
+			if (!xgpu_spirv_pixel_shader(&program, &options, &module) ||
+				spirv_write(directory, cases[index].name, occlusion, &module))
+				return 1;
+			free(module.words);
+		}
+	}
+	vertex_make(&vertex, &lighting);
+	if (!xgpu_spirv_vertex_shader(&vertex, 0, 0, &lighting, &options, &module) ||
+		spirv_write(directory, "vertex_split", 1, &module))
+		return 1;
+	free(module.words);
+	return 0;
+}
+
+int main(int argc, char **argv)
+{
+	if (argc == 2 && !strcmp(argv[1], "msl"))
+		return msl();
+	if (argc == 3 && !strcmp(argv[1], "spirv"))
+		return spirv(argv[2]);
+	fprintf(stderr, "check msl | check spirv <directory>\n");
+	return 2;
+}

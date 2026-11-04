@@ -419,19 +419,29 @@ preparation, or made at its first use. Metal draws the same GLSL.
 ## Ambient occlusion
 
 `display.ambient_occlusion` (`"off"`, `"subtle"`, `"strong"`: Enhanced's)
-shades each window's 3D view once its opaque surfaces have drawn their
-light, only where the game's lighting does not hold the occlusion: the game
-calls `halo_screen_ambient_occlusion` after the structure's lightmap pass
-(`source/render/render.c`), before the diffuse textures, the decals, the
-dynamic lights, the specular light, the transparent surfaces and the
-effects. As they draw, objects (models) mark their pixels in the stencil's
-bit 6 and self-illuminated surfaces in bit 7 (`ambient_occlusion_mark`),
-and every other draw that writes the depth clears both where it does, so
-that the marks are always the shown surface's: the objects draw before the
-level, and a wall over an object behind it must not keep the object's mark
+darkens the ambient light of each window's opaque surfaces, only where the
+game's lighting does not hold the occlusion, and not what a light adds (the
+flashlight, the dynamic lights): it multiplies that light alone, in the
+shaders that light the surfaces, so it is found before they shade. The game
+draws the opaque surfaces' depth first, alone (`source/render/render.c`:
+the objects and the structure's lightmap pass, their transparent parts and
+what they queue for later left out, `render_ambient_occlusion_prepass`),
+into a depth target of its own, no colour written
+(`halo_screen_ambient_occlusion_begin`, `src/d3d8_device.c`); then calls
+`halo_screen_ambient_occlusion`, whose record
+(`XGPU_STREAM_AMBIENT_OCCLUSION`) finds the occlusion from the depth target
+bound; and the surfaces then draw, the models' ambient and distant lights
+and the lightmap pass's light by it (`src/xgpu.h`'s
+`XGPU_AMBIENT_OCCLUSION_LIGHT_*`; the occlusion's set,
+`XGPU_SPIRV_SET_OCCLUSION`), until `halo_screen_ambient_occlusion_end`
+after the lightmap pass. As they draw, the pre-pass's objects (models) mark
+their pixels in the stencil's bit 6 and self-illuminated surfaces in bit 7
+(`ambient_occlusion_mark`), and every other draw that writes the depth
+clears both where it does, so that the marks are always the shown
+surface's: the objects draw before the level, and a wall over an object
+behind it must not keep the object's mark
 (`tools/test_ambient_occlusion_marks.py`). The first-person weapon's is the
-game's bit 0. The record
-(`XGPU_STREAM_AMBIENT_OCCLUSION`) carries the camera, and the passes
+game's bit 0. The record carries the camera, and the passes
 (`xgpu_vulkan_post.c`, their GLSL in `tools/vulkan_post_shaders.py`) are:
 
 - the depth target (its first sample's, resolved where it has more) made
@@ -448,9 +458,12 @@ game's bit 0. The record
   so that no corner is darkened twice;
 - a blur along x and then y, nine taps weighted by their distances'
   nearness, none across an object's edge;
-- a draw over the target multiplying its colour (not its alpha), filtered
-  up by the nearest four weighted by their distances, none over the pixels
-  the mask leaves.
+- the occlusion at each of the target's pixels, an image of its own (white
+  first), filtered up by the nearest four weighted by their distances, none
+  over the pixels the mask leaves: what the surfaces' shaders read at their
+  pixel (`xgpu_vulkan_set_ambient_occlusion`; a white texel where none was
+  found). The occlusion multiplies the light before the lights add theirs
+  (`tools/test_ambient_occlusion_light.py`).
 
 The target's pass ends for them and begins again, loading what it drew.
 `debug.ambient_occlusion_view` draws the occlusion alone in the view's place
