@@ -145,7 +145,7 @@ int main(int argc, char **argv)
 			"[display.viewmodel_weapon.\"weapons\\\\needler\\\\needler\"]\nz = 1.0\n\n[audio]\nvolume = 0.5\n");
 		load();
 		CHECK(config_viewmodel_weapon_write("weapons/PISTOL/pistol", set), "not written");
-		CHECK(count(file_text, "pistol") == 2 && !strstr(file_text, "x = 9.0"), "the old table kept:\n%s", file_text);
+		CHECK(count(file_text, "pistol]") == 0 && count(file_text, "viewmodel_weapon") == 2 && !strstr(file_text, "x = 9.0"), "the old table kept:\n%s", file_text);
 		CHECK(strstr(file_text, "fov = 90.0\n\n[display.viewmodel_weapon.\"weapons/PISTOL/pistol\"]\nx = 0.0\ny = 3.0\n")
 			!= NULL, "not in its place:\n%s", file_text);
 		CHECK(strstr(file_text, "roll = -6.5\n\n[display.viewmodel_weapon.\"weapons\\\\needler\\\\needler\"]\nz = 1.0\n\n"
