@@ -183,8 +183,9 @@ static struct
 	int looker_running, baker_running;
 	struct sdf_job *looks, *bakes;
 	int baking;
-	/* the start-up pass runs (menu_pictures_exclusive): bakes wait, so that
-	the pass and its main menu come exactly when they would without them */
+	/* the start-up pass runs (menu_pictures_preparing, to the main menu
+	shown): bakes wait, so that the pass and its main menu come exactly when
+	they would without them */
 	int hold;
 	struct sdf_key baking_key;
 	struct sdf_job *results;
@@ -1080,8 +1081,9 @@ void world_sdf_frame(void)
 
 	if (sdf_off())
 		return;
-	/* (no bake while the start-up pass has the game: they begin as it ends) */
-	hold = menu_pictures_exclusive();
+	/* (no bake while the start-up pass runs, up to the main menu shown:
+	they begin once it is) */
+	hold = menu_pictures_preparing();
 	if (hold != world_sdf.hold)
 	{
 		pthread_mutex_lock(&world_sdf_lock);
