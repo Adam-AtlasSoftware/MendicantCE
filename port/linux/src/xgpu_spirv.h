@@ -128,6 +128,11 @@ struct xgpu_spirv_uniforms
 	xgpu_vulkan_effects.h) */
 	float effect_unproject[4][4][4];
 	float effect_eye[4][4];
+	/* display.ambient_occlusion "world" (xgpu.h): the draw's object, its
+	owner slot among the window's proxies (-1 none) and its reference, then
+	two spare; declared in the pixel shaders that read it alone, the last
+	member, so that the others' words are as they were */
+	float world_ao[4];
 };
 
 /* what the SPIR-V is written for (xgpu_spirv.c):

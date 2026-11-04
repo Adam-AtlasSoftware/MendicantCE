@@ -10,9 +10,13 @@ vertex; a structure's lightmap pass, alone or with the enhanced dynamic
 lights), with the occlusion and without it, and the vertex shader of a
 model lit for each vertex with its ambient light apart:
 
-  check msl                 the Metal emitter's, each after a line
-                            "==== <case> <occlusion: 0 or 1>"
-  check spirv <directory>   the SPIR-V emitter's, <case>-<occlusion>.spv
+  check msl [<source>]                the Metal emitter's, each after a line
+                                      "==== <case> <occlusion: 0 or 1>"
+  check spirv <directory> [<source>]  the SPIR-V emitter's, <case>-<occlusion>.spv
+
+<source>: the occlusion's, "screen" (GTAO's texel, the default), "world"
+(display.ambient_occlusion "world": XGPU_AMBIENT_OCCLUSION_WORLD), or "view"
+(the world's, shown: debug.world_ao_view).
 
 Built by the test with the shader decoders and both emitters, as
 tools/msl_corpus is.
@@ -29,6 +33,9 @@ tools/msl_corpus is.
 #include <string.h>
 
 void platform_log(const char *format, ...) { (void)format; }
+
+/* the occlusion's source: the key's bits beside its light (xgpu.h) */
+static unsigned char source;
 
 /* the pixel shader's cases: name, per_pixel_lighting, dynamic_lights, the
 light the occlusion multiplies */
@@ -59,7 +66,7 @@ static void program_make(struct xgpu_pixel_program *program, int index, int occl
 	program->final.inputs[6].alpha = 1;
 	program->per_pixel_lighting = cases[index].per_pixel_lighting;
 	program->dynamic_lights = cases[index].dynamic_lights;
-	program->ambient_occlusion = occlusion ? cases[index].light : 0;
+	program->ambient_occlusion = occlusion ? (unsigned char)(cases[index].light | source) : 0;
 }
 
 /* a model lighting program's stand-in: the normal in r0 and the position
@@ -164,12 +171,25 @@ static int spirv(const char *directory)
 	return 0;
 }
 
+static int source_set(const char *name)
+{
+	if (!strcmp(name, "screen"))
+		source = 0;
+	else if (!strcmp(name, "world"))
+		source = XGPU_AMBIENT_OCCLUSION_WORLD;
+	else if (!strcmp(name, "view"))
+		source = XGPU_AMBIENT_OCCLUSION_WORLD | XGPU_AMBIENT_OCCLUSION_WORLD_VIEW;
+	else
+		return 0;
+	return 1;
+}
+
 int main(int argc, char **argv)
 {
-	if (argc == 2 && !strcmp(argv[1], "msl"))
+	if ((argc == 2 || (argc == 3 && source_set(argv[2]))) && !strcmp(argv[1], "msl"))
 		return msl();
-	if (argc == 3 && !strcmp(argv[1], "spirv"))
+	if ((argc == 3 || (argc == 4 && source_set(argv[3]))) && !strcmp(argv[1], "spirv"))
 		return spirv(argv[2]);
-	fprintf(stderr, "check msl | check spirv <directory>\n");
+	fprintf(stderr, "check msl [screen|world|view] | check spirv <directory> [screen|world|view]\n");
 	return 2;
 }
