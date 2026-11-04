@@ -583,9 +583,29 @@
 		<frame png="ce/port/main_menu/parts/item_280x26__0.png" width="280" height="26"/>
 		<frame png="ce/port/main_menu/parts/item_280x26__1.png" width="280" height="26"/>
 	</bitmap>
+	<bitmap name="main_menu/parts/item_82x24">
+		<frame png="ce/port/main_menu/parts/item_82x24__0.png" width="82" height="24"/>
+		<frame png="ce/port/main_menu/parts/item_82x24__1.png" width="82" height="24"/>
+	</bitmap>
+	<bitmap name="main_menu/parts/item_84x24">
+		<frame png="ce/port/main_menu/parts/item_84x24__0.png" width="84" height="24"/>
+		<frame png="ce/port/main_menu/parts/item_84x24__1.png" width="84" height="24"/>
+	</bitmap>
+	<bitmap name="main_menu/parts/item_94x24">
+		<frame png="ce/port/main_menu/parts/item_94x24__0.png" width="94" height="24"/>
+		<frame png="ce/port/main_menu/parts/item_94x24__1.png" width="94" height="24"/>
+	</bitmap>
 	<bitmap name="main_menu/parts/item_96x24">
 		<frame png="ce/port/main_menu/parts/item_96x24__0.png" width="96" height="24"/>
 		<frame png="ce/port/main_menu/parts/item_96x24__1.png" width="96" height="24"/>
+	</bitmap>
+	<bitmap name="main_menu/parts/item_104x24">
+		<frame png="ce/port/main_menu/parts/item_104x24__0.png" width="104" height="24"/>
+		<frame png="ce/port/main_menu/parts/item_104x24__1.png" width="104" height="24"/>
+	</bitmap>
+	<bitmap name="main_menu/parts/item_106x24">
+		<frame png="ce/port/main_menu/parts/item_106x24__0.png" width="106" height="24"/>
+		<frame png="ce/port/main_menu/parts/item_106x24__1.png" width="106" height="24"/>
 	</bitmap>
 	<bitmap name="main_menu/parts/item_100x24">
 		<frame png="ce/port/main_menu/parts/item_100x24__0.png" width="100" height="24"/>
@@ -767,6 +787,22 @@
 	</bitmap>
 	<bitmap name="main_menu/parts/panel_212x334">
 		<frame png="ce/port/main_menu/parts/panel_212x334__0.png" width="212" height="334"/>
+	</bitmap>
+	<bitmap name="main_menu/parts/outline_60x16">
+		<frame png="ce/port/main_menu/parts/outline_60x16__0.png" width="60" height="16"/>
+		<frame png="ce/port/main_menu/parts/outline_60x16__1.png" width="60" height="16"/>
+	</bitmap>
+	<bitmap name="main_menu/parts/outline_92x16">
+		<frame png="ce/port/main_menu/parts/outline_92x16__0.png" width="92" height="16"/>
+		<frame png="ce/port/main_menu/parts/outline_92x16__1.png" width="92" height="16"/>
+	</bitmap>
+	<bitmap name="main_menu/multiplayer_type_select/join_game/search_icon">
+		<frame png="ce/port/main_menu/multiplayer_type_select/join_game/search_icon__0.png" width="16" height="16"/>
+		<frame png="ce/port/main_menu/multiplayer_type_select/join_game/search_icon__1.png" width="16" height="16"/>
+	</bitmap>
+	<bitmap name="main_menu/multiplayer_type_select/join_game/search_clear">
+		<frame png="ce/port/main_menu/multiplayer_type_select/join_game/search_clear__0.png" width="16" height="16"/>
+		<frame png="ce/port/main_menu/multiplayer_type_select/join_game/search_clear__1.png" width="16" height="16"/>
 	</bitmap>
 	<bitmap name="main_menu/campaign/continue_280x46">
 		<frame png="ce/port/main_menu/campaign/continue_280x46__0.png" width="280" height="46"/>

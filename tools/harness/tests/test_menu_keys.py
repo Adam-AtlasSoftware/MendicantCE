@@ -26,6 +26,10 @@ NEGATIVE_CONTROLS = {
                     "browser"),
     # the browsers' Filters (the left trigger) drawn as L, which presses nothing
     "l-not-left-trigger": ("keyboard", ("analog(k[SDL_SCANCODE_L])", "analog(0)"), "keys"),
+    # the browsers' SEARCH (R3) drawn as /, which presses nothing; / as R3 in every menu
+    "slash-not-r3": ("keyboard", ("if (browser && k[SDL_SCANCODE_SLASH])", "if (FALSE)"), "keys"),
+    "slash-everywhere": ("keyboard", ("if (browser && k[SDL_SCANCODE_SLASH])", "if (k[SDL_SCANCODE_SLASH])"),
+                         "browser"),
     "escape-not-b": ("keyboard", ("k[SDL_SCANCODE_ESCAPE] || k[SDL_SCANCODE_BACKSPACE]", "k[SDL_SCANCODE_BACKSPACE]"),
                      "keys"),
     # the code before #541: the Back button only as X1 held, which the menus' pointer never lets through
