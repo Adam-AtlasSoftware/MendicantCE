@@ -313,11 +313,12 @@ enum
 	_sdf_cells_fill,
 };
 
-/* the cells within range and half a cell's diagonal of a triangle (from
-their middles): marked, counted for it (firsts[cell + 1]++, a marked one),
-or given it (indices[firsts[cell]++]); how many */
+/* the cells of slices z_first to z_end - 1 within range and half a cell's
+diagonal of a triangle (from their middles): marked, counted for it
+(firsts[cell + 1]++, a marked one), or given it (indices[firsts[cell]++]);
+how many */
 static long sdf_cells_near(struct world_sdf_header const *header, struct sdf_triangle const *triangle,
-	long triangle_index, int what, unsigned char *marks, long *firsts, long *indices)
+	long triangle_index, int what, unsigned char *marks, long *firsts, long *indices, long z_first, long z_end)
 {
 	float step = WORLD_SDF_BRICK * header->voxel;
 	float reach = header->range + 0.5f * step * 1.7320508f;
@@ -337,6 +338,10 @@ static long sdf_cells_near(struct world_sdf_header const *header, struct sdf_tri
 			return 0;
 		}
 	}
+	if (first[2] < z_first)
+		first[2] = z_first;
+	if (last[2] > z_end - 1)
+		last[2] = z_end - 1;
 	for (z = first[2]; z <= last[2]; z++)
 	{
 		float point_z = middle[2] + (float)z * step;
@@ -378,81 +383,131 @@ static long sdf_cells_near(struct world_sdf_header const *header, struct sdf_tri
 	return found;
 }
 
-long world_sdf_mark(struct world_sdf_header const *header, float const *positions, long triangle_count,
-	unsigned char *marks)
+/* whether a triangle may reach slices z_first to z_end - 1 (its corners' z
+against theirs grown by reach), before it is made */
+static int sdf_triangle_in_slices(struct world_sdf_header const *header, float const *corners, long z_first,
+	long z_end)
 {
-	unsigned long cells = header->width * header->height * header->depth, cell;
+	float step = WORLD_SDF_BRICK * header->voxel, reach = header->range + step;
+	float low = fminf(corners[2], fminf(corners[5], corners[8])), high = fmaxf(corners[2], fmaxf(corners[5], corners[8]));
+
+	return high + reach >= header->origin[2] + (float)z_first * step &&
+		low - reach <= header->origin[2] + (float)z_end * step;
+}
+
+long world_sdf_mark_slices(struct world_sdf_header const *header, float const *positions, long triangle_count,
+	unsigned char *marks, long z_first, long z_end)
+{
+	unsigned long slice = header->width * header->height, cell;
 	long triangle, count = 0;
 
-	memset(marks, 0, cells);
+	memset(marks + (unsigned long)z_first * slice, 0, (unsigned long)(z_end - z_first) * slice);
 	for (triangle = 0; triangle < triangle_count; triangle++)
 	{
 		struct sdf_triangle made;
 
+		if (!sdf_triangle_in_slices(header, positions + triangle * 9, z_first, z_end))
+			continue;
 		sdf_triangle_make(positions + triangle * 9, &made);
-		sdf_cells_near(header, &made, triangle, _sdf_cells_mark, marks, NULL, NULL);
+		sdf_cells_near(header, &made, triangle, _sdf_cells_mark, marks, NULL, NULL, z_first, z_end);
 	}
-	for (cell = 0; cell < cells; cell++)
+	for (cell = (unsigned long)z_first * slice; cell < (unsigned long)z_end * slice; cell++)
 		count += marks[cell];
 	return count;
+}
+
+long world_sdf_mark(struct world_sdf_header const *header, float const *positions, long triangle_count,
+	unsigned char *marks)
+{
+	return world_sdf_mark_slices(header, positions, triangle_count, marks, 0, (long)header->depth);
+}
+
+void world_sdf_bin_slices(struct world_sdf_header const *header, float const *positions, long triangle_count,
+	unsigned char const *marks, long *firsts, long *indices, long z_first, long z_end)
+{
+	long triangle;
+
+	for (triangle = 0; triangle < triangle_count; triangle++)
+	{
+		struct sdf_triangle made;
+
+		if (!sdf_triangle_in_slices(header, positions + triangle * 9, z_first, z_end))
+			continue;
+		sdf_triangle_make(positions + triangle * 9, &made);
+		sdf_cells_near(header, &made, triangle, indices ? _sdf_cells_fill : _sdf_cells_count, (unsigned char *)marks,
+			firsts, indices, z_first, z_end);
+	}
 }
 
 long *world_sdf_bin(struct world_sdf_header const *header, float const *positions, long triangle_count,
 	unsigned char const *marks, long **firsts_out)
 {
-	unsigned long cells = header->width * header->height * header->depth, cell;
-	long *firsts = calloc(cells + 1, sizeof(*firsts)), *indices, triangle;
+	unsigned long cells = header->width * header->height * header->depth;
+	long *firsts = calloc(cells + 1, sizeof(*firsts)), *indices;
 
 	*firsts_out = NULL;
 	if (!firsts)
 		return NULL;
-	for (triangle = 0; triangle < triangle_count; triangle++)
-	{
-		struct sdf_triangle made;
-
-		sdf_triangle_make(positions + triangle * 9, &made);
-		sdf_cells_near(header, &made, triangle, _sdf_cells_count, (unsigned char *)marks, firsts, NULL);
-	}
-	for (cell = 0; cell < cells; cell++)
-		firsts[cell + 1] += firsts[cell];
-	indices = malloc(((size_t)firsts[cells] + 1) * sizeof(*indices));
+	world_sdf_bin_slices(header, positions, triangle_count, marks, firsts, NULL, 0, (long)header->depth);
+	indices = world_sdf_bin_place(header, firsts);
 	if (!indices)
 	{
 		free(firsts);
 		return NULL;
 	}
-	/* (each cell's start, moved up as its triangles are put; then put back) */
-	for (triangle = 0; triangle < triangle_count; triangle++)
-	{
-		struct sdf_triangle made;
-
-		sdf_triangle_make(positions + triangle * 9, &made);
-		sdf_cells_near(header, &made, triangle, _sdf_cells_fill, (unsigned char *)marks, firsts, indices);
-	}
-	for (cell = cells; cell > 0; cell--)
-		firsts[cell] = firsts[cell - 1];
-	firsts[0] = 0;
+	world_sdf_bin_slices(header, positions, triangle_count, marks, firsts, indices, 0, (long)header->depth);
+	world_sdf_bin_placed(header, firsts);
 	*firsts_out = firsts;
 	return indices;
 }
 
+long *world_sdf_bin_place(struct world_sdf_header const *header, long *firsts)
+{
+	unsigned long cells = header->width * header->height * header->depth, cell;
+
+	for (cell = 0; cell < cells; cell++)
+		firsts[cell + 1] += firsts[cell];
+	return malloc(((size_t)firsts[cells] + 1) * sizeof(long));
+}
+
+void world_sdf_bin_placed(struct world_sdf_header const *header, long *firsts)
+{
+	unsigned long cell;
+
+	/* (each cell's start, moved up as its triangles were put: put back) */
+	for (cell = header->width * header->height * header->depth; cell > 0; cell--)
+		firsts[cell] = firsts[cell - 1];
+	firsts[0] = 0;
+}
+
+static long sdf_mark_all(void *context, struct world_sdf_header const *header, float const *positions,
+	long triangle_count, unsigned char *marks)
+{
+	(void)context;
+	return world_sdf_mark(header, positions, triangle_count, marks);
+}
+
 unsigned char *world_sdf_plan(float const bounds[6], float const *positions, long triangle_count,
-	struct world_sdf_header *header)
+	struct world_sdf_header *header, world_sdf_marker mark, void *context)
 {
 	float voxel = (float)WORLD_SDF_FINEST_VOXEL_MILLI / 1000.0f;
 	unsigned char *marks = NULL;
 
-	for (;; voxel *= 1.125f)
+	if (!mark)
+		mark = sdf_mark_all;
+	for (;;)
 	{
-		unsigned long cells;
+		unsigned long cells, bytes;
 		unsigned char *grown;
 		long marked;
+		int steps;
 
 		world_sdf_layout(bounds, voxel, header);
 		cells = header->width * header->height * header->depth;
 		if (header->width > WORLD_SDF_MAXIMUM_DIMENSION || header->height > WORLD_SDF_MAXIMUM_DIMENSION ||
 			header->depth > WORLD_SDF_MAXIMUM_DIMENSION || world_sdf_bytes(header, 0) > WORLD_SDF_MAXIMUM_BYTES)
 		{
+			voxel *= 1.125f;
 			continue;
 		}
 		grown = realloc(marks, cells);
@@ -462,9 +517,21 @@ unsigned char *world_sdf_plan(float const bounds[6], float const *positions, lon
 			return NULL;
 		}
 		marks = grown;
-		marked = world_sdf_mark(header, positions, triangle_count, marks);
-		if (world_sdf_bytes(header, (unsigned long)marked) <= WORLD_SDF_MAXIMUM_BYTES)
+		marked = mark(context, header, positions, triangle_count, marks);
+		bytes = world_sdf_bytes(header, (unsigned long)marked);
+		if (bytes <= WORLD_SDF_MAXIMUM_BYTES)
 			return marks;
+		/* (the bricks' memory falls at least as the voxel's square grows: a
+		step short of as many steps as that says, so that none finer that
+		fits is passed over) */
+		{
+			double predicted = (double)bytes;
+
+			for (steps = 0; predicted > (double)WORLD_SDF_MAXIMUM_BYTES && steps < 8; steps++)
+				predicted /= 1.125 * 1.125;
+		}
+		for (steps = steps > 1 ? steps - 1 : 1; steps > 0; steps--)
+			voxel *= 1.125f;
 	}
 }
 

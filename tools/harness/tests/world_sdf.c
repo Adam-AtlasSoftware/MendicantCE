@@ -136,7 +136,7 @@ static void bake_within(struct world_sdf_volume *volume, float const bounds[6],
 	signed char *bricks;
 
 	memset(header, 0, sizeof(*header));
-	marks = world_sdf_plan(bounds, positions, triangle_count, header);
+	marks = world_sdf_plan(bounds, positions, triangle_count, header, NULL, NULL);
 	CHECK(marks, "planned");
 	indices = world_sdf_bin(header, positions, triangle_count, marks, &firsts);
 	CHECK(indices && firsts, "binned");
@@ -380,16 +380,16 @@ static void layout_case(void)
 	CHECK(header.origin[0] <= -0.5f + 1.0e-5f &&
 		header.origin[0] + (float)(WORLD_SDF_BRICK * header.width) * header.voxel >= 10.5f - 1.0e-5f, "x");
 	triangle_count = 0;
-	marks = world_sdf_plan(room, positions, 0, &header);
+	marks = world_sdf_plan(room, positions, 0, &header, NULL, NULL);
 	CHECK(marks && header.voxel == 0.25f, "room %g", header.voxel);
 	free(marks);
-	marks = world_sdf_plan(huge, positions, 0, &header);
+	marks = world_sdf_plan(huge, positions, 0, &header, NULL, NULL);
 	CHECK(marks && world_sdf_bytes(&header, 0) <= WORLD_SDF_MAXIMUM_BYTES, "budget");
 	CHECK(header.width <= WORLD_SDF_MAXIMUM_DIMENSION && header.height <= WORLD_SDF_MAXIMUM_DIMENSION, "dimension");
 	CHECK(header.voxel > 0.25f && header.range == WORLD_SDF_RANGE_VOXELS * header.voxel, "%g", header.voxel);
 	free(marks);
 	triangle_add(a, b, c);
-	marks = world_sdf_plan(room, positions, triangle_count, &header);
+	marks = world_sdf_plan(room, positions, triangle_count, &header, NULL, NULL);
 	{
 		unsigned long cells = header.width * header.height * header.depth, cell, count = 0;
 

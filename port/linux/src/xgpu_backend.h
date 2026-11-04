@@ -465,6 +465,12 @@ BOOL xgpu_backend_pipeline(const struct xgpu_pipeline_key *key);
 alone (with the times the numbers have begun again), so that the front
 end's map preparation tells draws apart by it, not by the key's bytes */
 unsigned long xgpu_backend_pipeline_number(void);
+/* display.ambient_occlusion "world": the pipeline bound, one with the
+world's light, has a stand-in (a number of xgpu_backend_pipeline_number's;
+0 none), the pipeline the draw would have without the world, which the
+backend may draw with until the world's is made (it never makes the
+world's while a map is prepared) */
+void xgpu_backend_pipeline_stand_in(unsigned long number);
 /* the pipeline's state, the dynamic state and the uniforms (converted
 anew when uniforms_serial changes) set for the draws that follow */
 void xgpu_backend_draw_state(const struct xgpu_dynamic_state *dynamic, const struct xgpu_draw_uniforms *uniforms,

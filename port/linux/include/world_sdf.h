@@ -170,18 +170,34 @@ void world_sdf_layout(float const bounds[6], float voxel, struct world_sdf_heade
 marks[cell] 1, the others 0; their count */
 long world_sdf_mark(struct world_sdf_header const *header, float const *positions, long triangle_count,
 	unsigned char *marks);
+/* the same for slices z_first to z_end - 1 alone (marks of the others
+untouched: threads each mark some), their count */
+long world_sdf_mark_slices(struct world_sdf_header const *header, float const *positions, long triangle_count,
+	unsigned char *marks, long z_first, long z_end);
 /* the triangles that may be within range of each marked cell (the same
 test): indices into positions' triangles, cell by cell, those of cell c
 from firsts[c] to firsts[c + 1] - 1 (both malloc'd, firsts width * height *
 depth + 1 long); NULL if no memory */
 long *world_sdf_bin(struct world_sdf_header const *header, float const *positions, long triangle_count,
 	unsigned char const *marks, long **firsts);
+/* its parts, for threads each taking some slices: the cells' triangles of
+slices z_first to z_end - 1 counted (indices NULL: firsts[cell + 1]++, firsts
+zeroed before) or put (indices[firsts[cell]++]); between the two passes the
+counts made places (world_sdf_bin_place: the indices malloc'd), after the
+second the places put back (world_sdf_bin_placed) */
+void world_sdf_bin_slices(struct world_sdf_header const *header, float const *positions, long triangle_count,
+	unsigned char const *marks, long *firsts, long *indices, long z_first, long z_end);
+long *world_sdf_bin_place(struct world_sdf_header const *header, long *firsts);
+void world_sdf_bin_placed(struct world_sdf_header const *header, long *firsts);
 /* the finest layout (from WORLD_SDF_FINEST_VOXEL_MILLI, the voxel x1.125
 a step) of these triangles within bounds whose table and marked cells'
 bricks fit WORLD_SDF_MAXIMUM_BYTES; its marks (malloc'd), NULL if no
-memory */
+memory. Each layout tried is marked by mark (NULL: world_sdf_mark; threads
+may share it), which returns the count */
+typedef long (*world_sdf_marker)(void *context, struct world_sdf_header const *header, float const *positions,
+	long triangle_count, unsigned char *marks);
 unsigned char *world_sdf_plan(float const bounds[6], float const *positions, long triangle_count,
-	struct world_sdf_header *header);
+	struct world_sdf_header *header, world_sdf_marker mark, void *context);
 /* the GPU memory a layout's table and this many bricks take */
 unsigned long world_sdf_bytes(struct world_sdf_header const *header, unsigned long bricks);
 /* a distance (world units) encoded, and decoded */

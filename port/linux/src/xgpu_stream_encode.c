@@ -1264,6 +1264,18 @@ BOOL xgpu_backend_pipeline(const struct xgpu_pipeline_key *key)
 	return __atomic_load_n(&stream.pipelines[id], __ATOMIC_RELAXED) != XGPU_STREAM_PIPELINE_FAILED;
 }
 
+void xgpu_backend_pipeline_stand_in(unsigned long number)
+{
+	struct xgpu_stream_pipeline_stand_in *record_body;
+
+	if (!stream.open || !stream.pipeline)
+		return;
+	record_body = record(XGPU_STREAM_PIPELINE_STAND_IN, sizeof(*record_body));
+	record_body->id = stream.pipeline;
+	/* (the same round of numbers alone: XGPU_STREAM_PIPELINES' 14 bits) */
+	record_body->stand_in = number >> 16 == stream.pipeline_keys.rounds ? (uint32_t)(number & 0xffff) : 0;
+}
+
 unsigned long xgpu_backend_pipeline_number(void)
 {
 	/* (XGPU_STREAM_PIPELINES: 14 bits) */

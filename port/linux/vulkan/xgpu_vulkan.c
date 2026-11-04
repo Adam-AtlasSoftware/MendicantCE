@@ -378,6 +378,9 @@ struct pipeline_entry
 	struct xgpu_vulkan_pipeline_description description;
 	VkPipeline pipeline;
 	int pending;
+	/* (made apart from the draws, xgpu_vulkan_pipeline_ready's: not yet
+	handed to the compilers, their queue full) */
+	int waiting;
 };
 
 struct shader_entry
@@ -3489,17 +3492,10 @@ void xgpu_vulkan_preparation_service(void (*service)(void))
 	pipeline_compiler.service = service;
 }
 
-static void pipeline_request(struct pipeline_entry *entry)
+/* the compilers started (where they are not yet) */
+static void pipeline_compilers_start(void)
 {
-	VkResult result;
-	VkPipeline pipeline;
-	double elapsed;
-	uint32_t index;
-
-	vk.pipeline_count++;
-	host_load_trace("vulkan.pipeline.request", "count=%llu hash=%08x",
-		(unsigned long long)vk.pipeline_count, entry->hash);
-	if (pipeline_compiler.service && !pipeline_compiler.started)
+	if (!pipeline_compiler.started)
 	{
 		long processors = sysconf(_SC_NPROCESSORS_ONLN);
 		int workers = processors > 4 ? (int)processors - 4 : 1;
@@ -3513,6 +3509,20 @@ static void pipeline_request(struct pipeline_entry *entry)
 			pipeline_compiler.started++;
 		host_logf(HOST_LOG_INFO, "vulkan: %d pipeline compilers", pipeline_compiler.started);
 	}
+}
+
+static void pipeline_request(struct pipeline_entry *entry)
+{
+	VkResult result;
+	VkPipeline pipeline;
+	double elapsed;
+	uint32_t index;
+
+	vk.pipeline_count++;
+	host_load_trace("vulkan.pipeline.request", "count=%llu hash=%08x",
+		(unsigned long long)vk.pipeline_count, entry->hash);
+	if (pipeline_compiler.service)
+		pipeline_compilers_start();
 	if (!pipeline_compiler.service || !pipeline_compiler.started)
 	{
 		pipeline = pipeline_build(&entry->description, &result, &elapsed);
@@ -3734,7 +3744,41 @@ static VkPipeline pipeline_build(const struct xgpu_vulkan_pipeline_description *
 	return pipeline;
 }
 
+/* a pipeline handed to the compilers without waiting, where there is room
+(else it waits for the next look); FALSE if there are none */
+static int pipeline_request_apart(struct pipeline_entry *entry)
+{
+	uint32_t index;
+
+	pipeline_compilers_start();
+	if (!pipeline_compiler.started)
+		return 0;
+	pthread_mutex_lock(&pipeline_compiler.mutex);
+	pipeline_publish_completed();
+	entry->waiting = pipeline_compiler.submitted - pipeline_compiler.published >= PIPELINE_JOBS;
+	if (!entry->waiting)
+	{
+		index = (uint32_t)(pipeline_compiler.submitted % PIPELINE_JOBS);
+		pipeline_compiler.jobs[index].description = entry->description;
+		pipeline_compiler.jobs[index].entry = entry;
+		entry->pending = 1;
+		pipeline_compiler.submitted++;
+		pthread_cond_broadcast(&pipeline_compiler.changed);
+	}
+	pthread_mutex_unlock(&pipeline_compiler.mutex);
+	return 1;
+}
+
+static struct pipeline_entry *pipeline_find_apart(const struct xgpu_vulkan_pipeline_description *description,
+	int apart);
+
 static struct pipeline_entry *pipeline_find(const struct xgpu_vulkan_pipeline_description *description)
+{
+	return pipeline_find_apart(description, 0);
+}
+
+static struct pipeline_entry *pipeline_find_apart(const struct xgpu_vulkan_pipeline_description *description,
+	int apart)
 {
 	static struct pipeline_entry *last;
 	uint32_t hash;
@@ -3760,7 +3804,8 @@ static struct pipeline_entry *pipeline_find(const struct xgpu_vulkan_pipeline_de
 	entry->next = *bucket;
 	*bucket = entry;
 	last = entry;
-	pipeline_request(entry);
+	if (!apart || !pipeline_request_apart(entry))
+		pipeline_request(entry);
 	return entry;
 }
 
@@ -3780,6 +3825,23 @@ VkPipeline xgpu_vulkan_pipeline(const struct xgpu_vulkan_pipeline_description *d
 	if (entry->pending)
 		pipeline_wait(entry, 0);
 	return entry->pipeline;
+}
+
+VkPipeline xgpu_vulkan_pipeline_ready(const struct xgpu_vulkan_pipeline_description *description)
+{
+	struct pipeline_entry *entry = pipeline_find_apart(description, 1);
+
+	if (!entry)
+		return VK_NULL_HANDLE;
+	if (entry->waiting && !pipeline_request_apart(entry))
+		pipeline_request(entry);
+	if (entry->pending)
+	{
+		pthread_mutex_lock(&pipeline_compiler.mutex);
+		pipeline_publish_completed();
+		pthread_mutex_unlock(&pipeline_compiler.mutex);
+	}
+	return entry->pending || entry->waiting ? VK_NULL_HANDLE : entry->pipeline;
 }
 
 uint64_t xgpu_vulkan_pipeline_count(void)

@@ -392,6 +392,10 @@ struct xgpu_vulkan_pipeline_description
 /* the pipeline of a description, made the first time; VK_NULL_HANDLE if it
 cannot be */
 VkPipeline xgpu_vulkan_pipeline(const struct xgpu_vulkan_pipeline_description *description);
+/* the pipeline where it is made; else none (VK_NULL_HANDLE), and it is made
+apart from the draws, on the compilers, never waited for (display.ambient_
+occlusion "world"'s, while their stand-ins draw) */
+VkPipeline xgpu_vulkan_pipeline_ready(const struct xgpu_vulkan_pipeline_description *description);
 /* Queue preparation without requiring the handle yet. Nonzero means the
 request was accepted or already ready; PREPARED drains every accepted job. */
 int xgpu_vulkan_pipeline_prepare(const struct xgpu_vulkan_pipeline_description *description);

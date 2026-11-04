@@ -122,6 +122,11 @@ struct host_render_backend
 	/* the pipeline the draws use from now on; nonzero if it is made (its
 	state goes back to the guest: XGPU_STREAM_PIPELINE_*) */
 	int (*pipeline)(void *context, uint32_t id, const struct xgpu_stream_pipeline_define *definition);
+	/* pipeline id's stand-in (0 none; its definition): drawn with until
+	id's is made, and always while a map is prepared (none: id's made as
+	any other's) */
+	void (*pipeline_stand_in)(void *context, uint32_t id, uint32_t stand_in,
+		const struct xgpu_stream_pipeline_define *definition);
 	/* the latest of each, whichever changed */
 	void (*draw_state)(void *context, const struct xgpu_stream_dynamic_state *dynamic,
 		const struct xgpu_stream_draw_uniforms *uniforms, uint32_t uniforms_serial);

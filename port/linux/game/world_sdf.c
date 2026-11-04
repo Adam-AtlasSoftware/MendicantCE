@@ -97,6 +97,16 @@ enum
 /* the fade in, in nanoseconds */
 #define WORLD_SDF_FADE_NANOSECONDS 1000000000ULL
 
+/* a bake's passes on its threads: a layout's cells marked, the marked
+cells' triangles counted, then put, slice by slice; the bricks baked */
+enum
+{
+	_sdf_pass_mark,
+	_sdf_pass_count,
+	_sdf_pass_fill,
+	_sdf_pass_bake,
+};
+
 /* what a job is, and what came of it */
 enum
 {
@@ -174,6 +184,12 @@ struct sdf_job
 	signed char *baked;
 	unsigned char *kinds;
 	unsigned long next_item;
+	/* the pass the workers do (_sdf_pass_*): its layout and marks, the
+	cells it has marked, and the next slice a worker takes */
+	int pass;
+	struct world_sdf_header const *pass_header;
+	unsigned char *pass_marks;
+	long pass_marked, next_slice;
 	/* what came of it; the game's thread's time copying the geometry */
 	int result;
 	double copy_milliseconds;
@@ -787,16 +803,14 @@ static void *sdf_looker(void *context)
 	return NULL;
 }
 
-/* a bake's worker: the marked cells' bricks baked, then every other cell's
-kind found, a few cells at a time, until there are none */
-static void *sdf_bake_worker(void *context)
+/* the marked cells' bricks baked, then every other cell's kind found, a
+few cells at a time, until there are none */
+static void sdf_bake_cells(struct sdf_job *job)
 {
-	struct sdf_job *job = context;
 	struct world_sdf_header const *header = &job->volume.header;
 	unsigned long cells = header->width * header->height * header->depth;
 	unsigned long items = job->marked_count + cells;
 
-	sdf_thread_background();
 	for (;;)
 	{
 		unsigned long first, item;
@@ -824,7 +838,84 @@ static void *sdf_bake_worker(void *context)
 			}
 		}
 	}
+}
+
+/* a slice at a time: its cells marked, or their triangles counted or put
+(each slice's cells, and their counts, are its own) */
+static void sdf_slices(struct sdf_job *job)
+{
+	long depth = (long)job->pass_header->depth;
+
+	for (;;)
+	{
+		long z, marked;
+
+		pthread_mutex_lock(&world_sdf_lock);
+		z = job->next_slice++;
+		pthread_mutex_unlock(&world_sdf_lock);
+		if (z >= depth)
+			break;
+		if (job->pass == _sdf_pass_mark)
+		{
+			marked = world_sdf_mark_slices(job->pass_header, job->positions, job->triangle_count, job->pass_marks, z,
+				z + 1);
+			pthread_mutex_lock(&world_sdf_lock);
+			job->pass_marked += marked;
+			pthread_mutex_unlock(&world_sdf_lock);
+		}
+		else
+		{
+			world_sdf_bin_slices(job->pass_header, job->positions, job->triangle_count, job->pass_marks, job->firsts,
+				job->pass == _sdf_pass_fill ? job->triangles : NULL, z, z + 1);
+		}
+	}
+}
+
+static void *sdf_bake_worker(void *context)
+{
+	struct sdf_job *job = context;
+
+	sdf_thread_background();
+	if (job->pass == _sdf_pass_bake)
+		sdf_bake_cells(job);
+	else
+		sdf_slices(job);
 	return NULL;
+}
+
+/* a pass run on every processor; the threads it ran on */
+static long sdf_pass(struct sdf_job *job, int pass)
+{
+	pthread_t threads[WORLD_SDF_MAXIMUM_THREADS];
+	long thread_count = sdf_threads(), started = 0, index;
+
+	job->pass = pass;
+	job->next_slice = 0;
+	job->next_item = 0;
+	for (index = 1; index < thread_count; index++)
+	{
+		if (pthread_create(&threads[started], NULL, sdf_bake_worker, job) == 0)
+			started++;
+	}
+	sdf_bake_worker(job);
+	for (index = 0; index < started; index++)
+		pthread_join(threads[index], NULL);
+	return started + 1;
+}
+
+/* (world_sdf_plan's marker: a layout tried, marked on every processor) */
+static long sdf_mark(void *context, struct world_sdf_header const *header, float const *positions,
+	long triangle_count, unsigned char *marks)
+{
+	struct sdf_job *job = context;
+
+	(void)positions;
+	(void)triangle_count;
+	job->pass_header = header;
+	job->pass_marks = marks;
+	job->pass_marked = 0;
+	sdf_pass(job, _sdf_pass_mark);
+	return job->pass_marked;
 }
 
 /* the baked cells' bricks kept, in the cells' order, each given its place in
@@ -864,9 +955,8 @@ static int sdf_bake_gather(struct sdf_job *job)
 could not be */
 static int sdf_bake(struct sdf_job *job)
 {
-	pthread_t threads[WORLD_SDF_MAXIMUM_THREADS];
 	struct world_sdf_header *header = &job->volume.header;
-	long thread_count = sdf_threads(), started = 0, index;
+	long threads;
 	unsigned long long began = sdf_now();
 	unsigned long cells, cell, size = 0;
 	unsigned char *file;
@@ -876,7 +966,7 @@ static int sdf_bake(struct sdf_job *job)
 	memset(header, 0, sizeof(*header));
 	/* (the finest voxel its memory allows; the cells a surface may reach,
 	and the triangles that may reach each) */
-	job->marks = world_sdf_plan(job->bounds, job->positions, job->triangle_count, header);
+	job->marks = world_sdf_plan(job->bounds, job->positions, job->triangle_count, header, sdf_mark, job);
 	if (!job->marks)
 		return 0;
 	header->magic = WORLD_SDF_MAGIC;
@@ -884,7 +974,17 @@ static int sdf_bake(struct sdf_job *job)
 	header->map_checksum = job->key.checksum;
 	header->bsp_index = (unsigned long)job->key.bsp;
 	cells = header->width * header->height * header->depth;
-	job->triangles = world_sdf_bin(header, job->positions, job->triangle_count, job->marks, &job->firsts);
+	job->pass_header = header;
+	job->pass_marks = job->marks;
+	job->firsts = calloc(cells + 1, sizeof(*job->firsts));
+	if (!job->firsts)
+		return 0;
+	sdf_pass(job, _sdf_pass_count);
+	job->triangles = world_sdf_bin_place(header, job->firsts);
+	if (!job->triangles)
+		return 0;
+	sdf_pass(job, _sdf_pass_fill);
+	world_sdf_bin_placed(header, job->firsts);
 	job->marked_count = 0;
 	for (cell = 0; cell < cells; cell++)
 		job->marked_count += job->marks[cell];
@@ -898,20 +998,12 @@ static int sdf_bake(struct sdf_job *job)
 		if (job->marks[cell])
 			job->marked[job->marked_count++] = cell;
 	}
-	job->next_item = 0;
-	for (index = 1; index < thread_count; index++)
-	{
-		if (pthread_create(&threads[started], NULL, sdf_bake_worker, job) == 0)
-			started++;
-	}
-	sdf_bake_worker(job);
-	for (index = 0; index < started; index++)
-		pthread_join(threads[index], NULL);
+	threads = sdf_pass(job, _sdf_pass_bake);
 	if (!sdf_bake_gather(job))
 		return 0;
 	sdf_job_scratch_free(job);
 	header->bake_milliseconds = (unsigned long)((sdf_now() - began) / 1000000ULL);
-	header->bake_threads = (unsigned long)(started + 1);
+	header->bake_threads = (unsigned long)threads;
 	sdf_path(&job->key, path, sizeof(path));
 	mkdir(sdf_folder(), 0755);
 	file = sdf_file_pack(&job->volume, &size);

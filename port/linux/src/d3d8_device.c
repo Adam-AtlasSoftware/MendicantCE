@@ -3840,17 +3840,174 @@ static void combiner_state_describe(DWORD *state, DWORD texture_modes)
 	described = TRUE;
 }
 
+/* the draw's pipeline chosen for its program and its lighting (key and
+pipeline_key filled in: the light its pixel shader adds, its vertex
+lighting) and bound; FALSE if none can be drawn with */
+static BOOL pipeline_choose(struct vertex_shader_object *program, struct nv2a_pixel_shader_key *key,
+	struct xgpu_pipeline_key *pipeline_key, BOOL immediate)
+{
+	BOOL chosen = FALSE, ready;
+
+	if (program->lighting.lights && !program->lighting_failed && !ambient_occlusion.prepass && per_pixel_lighting())
+	{
+		key->per_pixel_lighting = (unsigned char)program->lighting.lights;
+		/* (the enhanced dynamic lights in the two point lights' place) */
+		if (dynamic_lights_active() && program->lighting.world_found)
+			key->dynamic_lights = XGPU_DYNAMIC_LIGHTS_MODEL;
+		/* (display.ambient_occlusion: its ambient light by the occlusion;
+		"world"'s where the lighting has the world position) */
+		if (ambient_occlusion.ready)
+			key->ambient_occlusion = XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL;
+		else if (program->lighting.lights == 2 || program->lighting.world_found)
+			key->ambient_occlusion = world_ao_key(XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL);
+		pipeline_key->pixel = *key;
+		pipeline_key->lighting = program->lighting.lights == 2 ? XGPU_LIGHTING_MODEL_POINT : XGPU_LIGHTING_MODEL;
+		chosen = xgpu_backend_pipeline(pipeline_key);
+		if (!chosen && world_ao_failed(key))
+		{
+			pipeline_key->pixel = *key;
+			chosen = xgpu_backend_pipeline(pipeline_key);
+		}
+		if (!chosen)
+		{
+			/* drawn as the vertex shader lights it instead (not at all,
+			were it to fail too) */
+			platform_log("GPU: vertex shader %lu cannot be lit for each pixel here (refer to the shader log above): "
+				"lit for each vertex", program->id);
+			program->lighting_failed = TRUE;
+			key->per_pixel_lighting = 0;
+			key->dynamic_lights = 0;
+			key->ambient_occlusion = 0;
+		}
+	}
+	else if (program->lighting.lights && !program->lighting_failed && !program->split_failed && (ambient_occlusion.ready ||
+		((program->lighting.lights == 2 || program->lighting.world_found) &&
+		world_ao_key(XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX))))
+	{
+		/* display.ambient_occlusion over a model lit for each vertex: its
+		ambient light handed on apart, by the occlusion at each pixel (the
+		program's own sum clamps each vertex's light: xgpu.h); "world"'s
+		where the lighting has the world position */
+		key->ambient_occlusion = ambient_occlusion.ready ? XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX :
+			world_ao_key(XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX);
+		pipeline_key->pixel = *key;
+		pipeline_key->lighting = XGPU_LIGHTING_MODEL_SPLIT;
+		chosen = xgpu_backend_pipeline(pipeline_key);
+		/* (the world's failing: drawn as without it, below) */
+		if (!chosen && !world_ao_failed(key))
+		{
+			platform_log("GPU: vertex shader %lu cannot hand on its ambient light apart (refer to the shader log "
+				"above): drawn without the ambient occlusion", program->id);
+			program->split_failed = TRUE;
+			key->ambient_occlusion = 0;
+		}
+	}
+	else if (dynamic_lights.environment && dynamic_lights_active() && !immediate && !program->lighting_failed &&
+		!ambient_occlusion.prepass && (device.vertex_shader->packed_mask & 0xe) == 0xe)
+	{
+		/* a structure's lightmap pass: its normal, binormal and tangent are
+		packed (rasterizer_xbox_vertex_shaders_initialize.c's declaration) */
+		key->dynamic_lights = XGPU_DYNAMIC_LIGHTS_ENVIRONMENT;
+		/* (display.hdr: their light past white) */
+		if (hdr.target)
+			key->hdr |= XGPU_HDR_LIGHTS;
+		/* (display.ambient_occlusion: the lightmap's light by the
+		occlusion, theirs added after) */
+		if (ambient_occlusion.ready && !pipeline_key->blend)
+			key->ambient_occlusion = XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP;
+		else if (!pipeline_key->blend)
+			key->ambient_occlusion = world_ao_key(XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP);
+		pipeline_key->pixel = *key;
+		pipeline_key->lighting = XGPU_LIGHTING_ENVIRONMENT;
+		chosen = xgpu_backend_pipeline(pipeline_key);
+		if (!chosen && world_ao_failed(key))
+		{
+			pipeline_key->pixel = *key;
+			chosen = xgpu_backend_pipeline(pipeline_key);
+		}
+		if (!chosen)
+		{
+			platform_log("GPU: vertex shader %lu cannot be lit by the dynamic lights (refer to the shader log "
+				"above): lit by the game's own passes", program->id);
+			program->lighting_failed = TRUE;
+			key->dynamic_lights = 0;
+			key->hdr &= (unsigned short)~XGPU_HDR_LIGHTS;
+		}
+	}
+	else if (dynamic_lights.environment && !immediate && !program->lighting_failed && !pipeline_key->blend &&
+		(device.vertex_shader->packed_mask & 0xe) == 0xe && world_ao_key(XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP))
+	{
+		/* display.ambient_occlusion "world" over a structure's lightmap pass
+		without the enhanced dynamic lights: lit as its program lights it,
+		its vertex shader handing on the world position and normal alone
+		(XGPU_LIGHTING_ENVIRONMENT) for its light by the proxies' occlusion */
+		key->ambient_occlusion = world_ao_key(XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP);
+		pipeline_key->pixel = *key;
+		pipeline_key->lighting = XGPU_LIGHTING_ENVIRONMENT;
+		chosen = xgpu_backend_pipeline(pipeline_key);
+		if (!chosen)
+			world_ao_failed(key);
+	}
+	ready = chosen;
+	if (!chosen)
+	{
+		/* (display.ambient_occlusion: a lightmap pass's light, drawn
+		opaque, by the occlusion; nothing else of a draw unlit by the
+		shaders above) */
+		key->ambient_occlusion = ambient_occlusion.ready && dynamic_lights.environment && !immediate &&
+			!pipeline_key->blend ? XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP : 0;
+		pipeline_key->pixel = *key;
+		pipeline_key->lighting = XGPU_LIGHTING_NONE;
+		ready = xgpu_backend_pipeline(pipeline_key);
+	}
+	return ready;
+}
+
+/* display.ambient_occlusion "world": each pipeline with the world's light
+(by its number: xgpu_backend_pipeline_number) told its stand-in, the
+pipeline the draw would have without the world, which the backend draws
+with until the world's is made (and while a map is prepared: the world's
+pipelines are never made in a load). Found the first time the number is
+drawn with: its keys chosen again with the world off, then the world's
+bound again. */
+#define WORLD_AO_STAND_INS 0x4000
+static struct
+{
+	unsigned long number[WORLD_AO_STAND_INS];
+} world_ao_stand_ins;
+
+static void world_ao_stand_in(struct vertex_shader_object *program, struct nv2a_pixel_shader_key const *key_before,
+	struct xgpu_pipeline_key const *pipeline_key_before, struct xgpu_pipeline_key const *pipeline_key, BOOL immediate)
+{
+	unsigned long number = xgpu_backend_pipeline_number(), slot = number % WORLD_AO_STAND_INS;
+	struct nv2a_pixel_shader_key plain_key = *key_before;
+	struct xgpu_pipeline_key plain_pipeline_key = *pipeline_key_before;
+	unsigned long plain = 0;
+
+	if (world_ao_stand_ins.number[slot] == number + 1)
+		return;
+	world_ao_stand_ins.number[slot] = number + 1;
+	world_ao.active = FALSE;
+	if (pipeline_choose(program, &plain_key, &plain_pipeline_key, immediate))
+		plain = xgpu_backend_pipeline_number();
+	world_ao.active = TRUE;
+	/* (the world's bound again, and told its stand-in) */
+	if (!xgpu_backend_pipeline(pipeline_key) || xgpu_backend_pipeline_number() != number)
+		return;
+	xgpu_backend_pipeline_stand_in(plain && plain != number ? plain : 0);
+}
+
 /* the draw's description to the backend: its textures, its targets, its
 pipeline (shaders and fixed-function state), its dynamic state and its
 uniforms; FALSE if it is not drawn */
 static BOOL prepare_draw(BOOL immediate, unsigned long primitive)
 {
 	struct vertex_shader_object *program = current_program();
-	struct nv2a_pixel_shader_key key;
-	struct xgpu_pipeline_key pipeline_key;
+	struct nv2a_pixel_shader_key key, key_before;
+	struct xgpu_pipeline_key pipeline_key, pipeline_key_before;
 	struct xgpu_dynamic_state dynamic;
 	float texture_scale[4][4];
-	BOOL has_depth = FALSE, chosen = FALSE, ready;
+	BOOL has_depth = FALSE, ready;
 	int stage;
 	double traced;
 
@@ -3942,118 +4099,11 @@ static BOOL prepare_draw(BOOL immediate, unsigned long primitive)
 	pipeline_key.pixel = key;
 	pipeline_key.depth_format = has_depth ? XGPU_FORMAT_D24S8 : XGPU_FORMAT_NONE;
 	pipeline_key.samples = (unsigned char)target_samples;
-	if (program->lighting.lights && !program->lighting_failed && !ambient_occlusion.prepass && per_pixel_lighting())
-	{
-		key.per_pixel_lighting = (unsigned char)program->lighting.lights;
-		/* (the enhanced dynamic lights in the two point lights' place) */
-		if (dynamic_lights_active() && program->lighting.world_found)
-			key.dynamic_lights = XGPU_DYNAMIC_LIGHTS_MODEL;
-		/* (display.ambient_occlusion: its ambient light by the occlusion;
-		"world"'s where the lighting has the world position) */
-		if (ambient_occlusion.ready)
-			key.ambient_occlusion = XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL;
-		else if (program->lighting.lights == 2 || program->lighting.world_found)
-			key.ambient_occlusion = world_ao_key(XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL);
-		pipeline_key.pixel = key;
-		pipeline_key.lighting = program->lighting.lights == 2 ? XGPU_LIGHTING_MODEL_POINT : XGPU_LIGHTING_MODEL;
-		chosen = xgpu_backend_pipeline(&pipeline_key);
-		if (!chosen && world_ao_failed(&key))
-		{
-			pipeline_key.pixel = key;
-			chosen = xgpu_backend_pipeline(&pipeline_key);
-		}
-		if (!chosen)
-		{
-			/* drawn as the vertex shader lights it instead (not at all,
-			were it to fail too) */
-			platform_log("GPU: vertex shader %lu cannot be lit for each pixel here (refer to the shader log above): "
-				"lit for each vertex", program->id);
-			program->lighting_failed = TRUE;
-			key.per_pixel_lighting = 0;
-			key.dynamic_lights = 0;
-			key.ambient_occlusion = 0;
-		}
-	}
-	else if (program->lighting.lights && !program->lighting_failed && !program->split_failed && (ambient_occlusion.ready ||
-		((program->lighting.lights == 2 || program->lighting.world_found) &&
-		world_ao_key(XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX))))
-	{
-		/* display.ambient_occlusion over a model lit for each vertex: its
-		ambient light handed on apart, by the occlusion at each pixel (the
-		program's own sum clamps each vertex's light: xgpu.h); "world"'s
-		where the lighting has the world position */
-		key.ambient_occlusion = ambient_occlusion.ready ? XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX :
-			world_ao_key(XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX);
-		pipeline_key.pixel = key;
-		pipeline_key.lighting = XGPU_LIGHTING_MODEL_SPLIT;
-		chosen = xgpu_backend_pipeline(&pipeline_key);
-		/* (the world's failing: drawn as without it, below) */
-		if (!chosen && !world_ao_failed(&key))
-		{
-			platform_log("GPU: vertex shader %lu cannot hand on its ambient light apart (refer to the shader log "
-				"above): drawn without the ambient occlusion", program->id);
-			program->split_failed = TRUE;
-			key.ambient_occlusion = 0;
-		}
-	}
-	else if (dynamic_lights.environment && dynamic_lights_active() && !immediate && !program->lighting_failed &&
-		!ambient_occlusion.prepass && (device.vertex_shader->packed_mask & 0xe) == 0xe)
-	{
-		/* a structure's lightmap pass: its normal, binormal and tangent are
-		packed (rasterizer_xbox_vertex_shaders_initialize.c's declaration) */
-		key.dynamic_lights = XGPU_DYNAMIC_LIGHTS_ENVIRONMENT;
-		/* (display.hdr: their light past white) */
-		if (hdr.target)
-			key.hdr |= XGPU_HDR_LIGHTS;
-		/* (display.ambient_occlusion: the lightmap's light by the
-		occlusion, theirs added after) */
-		if (ambient_occlusion.ready && !pipeline_key.blend)
-			key.ambient_occlusion = XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP;
-		else if (!pipeline_key.blend)
-			key.ambient_occlusion = world_ao_key(XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP);
-		pipeline_key.pixel = key;
-		pipeline_key.lighting = XGPU_LIGHTING_ENVIRONMENT;
-		chosen = xgpu_backend_pipeline(&pipeline_key);
-		if (!chosen && world_ao_failed(&key))
-		{
-			pipeline_key.pixel = key;
-			chosen = xgpu_backend_pipeline(&pipeline_key);
-		}
-		if (!chosen)
-		{
-			platform_log("GPU: vertex shader %lu cannot be lit by the dynamic lights (refer to the shader log "
-				"above): lit by the game's own passes", program->id);
-			program->lighting_failed = TRUE;
-			key.dynamic_lights = 0;
-			key.hdr &= (unsigned short)~XGPU_HDR_LIGHTS;
-		}
-	}
-	else if (dynamic_lights.environment && !immediate && !program->lighting_failed && !pipeline_key.blend &&
-		(device.vertex_shader->packed_mask & 0xe) == 0xe && world_ao_key(XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP))
-	{
-		/* display.ambient_occlusion "world" over a structure's lightmap pass
-		without the enhanced dynamic lights: lit as its program lights it,
-		its vertex shader handing on the world position and normal alone
-		(XGPU_LIGHTING_ENVIRONMENT) for its light by the proxies' occlusion */
-		key.ambient_occlusion = world_ao_key(XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP);
-		pipeline_key.pixel = key;
-		pipeline_key.lighting = XGPU_LIGHTING_ENVIRONMENT;
-		chosen = xgpu_backend_pipeline(&pipeline_key);
-		if (!chosen)
-			world_ao_failed(&key);
-	}
-	ready = chosen;
-	if (!chosen)
-	{
-		/* (display.ambient_occlusion: a lightmap pass's light, drawn
-		opaque, by the occlusion; nothing else of a draw unlit by the
-		shaders above) */
-		key.ambient_occlusion = ambient_occlusion.ready && dynamic_lights.environment && !immediate &&
-			!pipeline_key.blend ? XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP : 0;
-		pipeline_key.pixel = key;
-		pipeline_key.lighting = XGPU_LIGHTING_NONE;
-		ready = xgpu_backend_pipeline(&pipeline_key);
-	}
+	key_before = key;
+	pipeline_key_before = pipeline_key;
+	ready = pipeline_choose(program, &key, &pipeline_key, immediate);
+	if (ready && (key.ambient_occlusion & XGPU_AMBIENT_OCCLUSION_WORLD))
+		world_ao_stand_in(program, &key_before, &pipeline_key_before, &pipeline_key, immediate);
 #ifdef HALO_VR
 	if (vr_gl.multiview && vr_gl.statistics && !program->program->projects)
 	{
