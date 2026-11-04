@@ -2250,6 +2250,10 @@ static const struct config_setting config_settings[] =
 		"if it is carried a tenth of a unit away), turned so many degrees left\n"
 		"of the view's heading (0: ahead); empty none." },
 #endif
+	{ "debug.world_proxies_view", _config_boolean, "false", "HALO_WORLD_PROXIES_VIEW", _environment_value,
+		_platform_all,
+		"With display.ambient_occlusion \"world\", the objects' occluding shapes\n"
+		"(spheres, capsules, boxes) drawn as wireframes over them." },
 	{ "debug.ambient_occlusion_view", _config_boolean, "false", "HALO_AMBIENT_OCCLUSION_VIEW", _environment_value,
 		_platform_all,
 		"With display.ambient_occlusion, the 3D view drawn as the occlusion\n"

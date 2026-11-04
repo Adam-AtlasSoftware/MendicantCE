@@ -91,7 +91,8 @@ tools/harness/tests/world_proxies.c) */
 blocks, 0 to 1 */
 float world_proxy_occlusion(struct world_proxy const *proxy, float const point[3], float const normal[3]);
 /* how far from a shape its occlusion is worth computing (the shaders'
-cull; past it, under 1/255) */
+cull; past it, under 1/255), from a sphere's or box's centre (a) or a
+capsule's midpoint ((a + b) / 2) */
 float world_proxy_reach(struct world_proxy const *proxy);
 
 #endif
