@@ -1,6 +1,6 @@
 """Each weapon's own first-person offsets in config.toml (port/linux/src/port_config.c's config_weapons_read,
 config_viewmodel_weapon, config_viewmodel_weapon_write): [display.viewmodel_weapon."<tag path>"] tables, read by
-the real TOML parser and looked up by the path in any case, / for \; written in place of the weapon's table in any
+the real TOML parser and looked up by the path in any case, a slash for a backslash; written in place of the weapon's table in any
 spelling (or at the end), taken out at all 0, never written to leave the file unreadable; a long table name still a
 section's line (config_line_section, config_join_sections)."""
 

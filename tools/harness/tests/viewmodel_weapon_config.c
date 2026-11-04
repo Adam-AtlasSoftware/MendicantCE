@@ -17,6 +17,8 @@ the sources; the file is the test's.
 #include <ctype.h>
 #include <pthread.h>
 
+/* (tomlc17 asserts with C11's static_assert) */
+#define static_assert _Static_assert
 #include "tomlc17.inc"
 
 #define CONFIG_WEAPON_VALUES 6
@@ -193,7 +195,7 @@ int main(int argc, char **argv)
 		char section[64];
 		const char *line = "[display.viewmodel_weapon.\"weapons\\\\a very long folder name\\\\an even longer weapon name here\"]";
 
-		CHECK(config_line_section(line, line + strlen(line), section, sizeof(section)) && !strcmp(section, "") == 0 &&
+		CHECK(config_line_section(line, line + strlen(line), section, sizeof(section)) &&
 			strncmp(section, "display.viewmodel_weapon", 24) == 0, "not a section");
 		{
 			static const char twice[] =
