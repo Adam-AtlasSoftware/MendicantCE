@@ -77,12 +77,13 @@ CONTROLS = [
     # the sum not held at the range
     ("\t\ttotal[value] = viewmodel_offset_held(total[value],", "\t\ttotal[value] = 0 * viewmodel_offset_held(total[value],", "weapon_own"),
     # a change written not seen; another weapon given the last one's
-    ("if (definition_index != cached_definition || cached_at != changes)", "if (definition_index != cached_definition)",
+    ("if (definition_index != cached_definition || cached_at != changes)", "if (definition_index != cached_definition || (cached_at != changes && 0))",
      "weapon_own_changed"),
-    ("if (definition_index != cached_definition || cached_at != changes)", "if (cached_at != changes)",
+    ("if (definition_index != cached_definition || cached_at != changes)", "if ((definition_index != cached_definition && 0) || cached_at != changes)",
      "weapon_own_changed"),
     # looked up every frame
-    ("if (definition_index != cached_definition || cached_at != changes)", "if (TRUE)", "weapon_own_changed"),
+    ("if (definition_index != cached_definition || cached_at != changes)", "if (TRUE || definition_index != cached_definition || cached_at != changes)",
+     "weapon_own_changed"),
     # a track's step rounded toward 0 below it, as before
     ("steps < 0.0 ? steps - 0.5 : steps + 0.5", "steps + 0.5", "slider_steps"),
 ]
