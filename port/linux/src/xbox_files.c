@@ -1426,12 +1426,6 @@ static struct cache_slot_source cache_slot_sources[MAXIMUM_CACHE_SLOT_SOURCES];
 
 static int cache_slot_folder_number;
 
-int cache_slot_folder_keeps_cache(void)
-{
-	cache_slot_folder();
-	return cache_slot_folder_number <= 1;
-}
-
 const char *cache_slot_folder(void)
 {
 	static char folder[32];
@@ -1470,6 +1464,12 @@ const char *cache_slot_folder(void)
 	snprintf(folder, sizeof(folder), "z:\\");
 	platform_log("map cache: every cache folder is another copy of the game's; sharing z:\\");
 	return folder;
+}
+
+int cache_slot_folder_keeps_cache(void)
+{
+	cache_slot_folder();
+	return cache_slot_folder_number <= 1;
 }
 
 static void cache_slot_source_path(short slot, char *path, unsigned long size)
