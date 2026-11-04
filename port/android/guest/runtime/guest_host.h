@@ -109,7 +109,7 @@ int host_sdl_audio_stream_timing(unsigned int stream, char *driver, int driver_s
 
 /* ---------- the sound's output (host_audio_route.c)
 
-What the system's sound plays on, for audio.spatial (dsound_sdl.c): 1
+What the system's sound plays on, for the sound's log (dsound_sdl.c): 1
 headphones, 0 speakers, -1 not known; kept current by a thread of the
 host's, so asking costs nothing */
 int host_audio_headphones(void);
