@@ -146,7 +146,7 @@ struct module
 	unsigned int constants, uniforms, dynamic_lights, dynamic_light_cells, samples, view_index;
 	/* (display.ambient_occlusion "world": the window's block and the
 	structure's distance field) */
-	unsigned int world_ao, world_sdf;
+	unsigned int world_ao, world_sdf, world_sdf_table;
 };
 
 static void words_push(struct module *m, struct words *words, unsigned int word)
@@ -2619,6 +2619,10 @@ static void world_ao_declare(struct module *m)
 	m->world_sdf = variable(m, type_sampled_image(m, DIM_3D, FALSE, FALSE, TRUE), STORAGE_UNIFORM_CONSTANT, "world_sdf");
 	decorate1(m, m->world_sdf, DECORATION_DESCRIPTOR_SET, XGPU_SPIRV_SET_OCCLUSION);
 	decorate1(m, m->world_sdf, DECORATION_BINDING, XGPU_SPIRV_BINDING_WORLD_SDF);
+	m->world_sdf_table = variable(m, type_sampled_image(m, DIM_3D, FALSE, FALSE, TRUE), STORAGE_UNIFORM_CONSTANT,
+		"world_sdf_table");
+	decorate1(m, m->world_sdf_table, DECORATION_DESCRIPTOR_SET, XGPU_SPIRV_SET_OCCLUSION);
+	decorate1(m, m->world_sdf_table, DECORATION_BINDING, XGPU_SPIRV_BINDING_WORLD_SDF_TABLE);
 }
 
 /* a vec4 of the block (0 field, 1 parameters, 2 proxies, 3 grid; 4 the
@@ -2634,24 +2638,61 @@ static unsigned int world_ao_vector(struct module *m, int member, unsigned int i
 	return load(m, type, pointer);
 }
 
-/* the field's distance at a point (world_sdf_sample): its trilinear texel
-times the range, the texels' centres at the voxels', clamped to the edge */
-static unsigned int world_sdf_distance(struct module *m, unsigned int field0, unsigned int field1, unsigned int point)
-{
-	unsigned int coordinate = fscale(m, 3, fsub(m, 3, point, xyz(m, field0)), extract(m, field0, 3));
-	unsigned int uvw = fdiv(m, 3, fadd(m, 3, coordinate, constant_splat(m, 3, 0.5f)), xyz(m, field1));
-	unsigned int sampled = load(m, type_sampled_image(m, DIM_3D, FALSE, FALSE, TRUE), m->world_sdf), operands[4];
+static unsigned int fselect(struct module *m, unsigned int condition, unsigned int a, unsigned int b);
 
-	operands[0] = sampled;
+/* the field's distance at a point (world_sdf_sample): the voxels' place
+(from the first voxel's centre, clamped to the field's edge), its cell in
+the table; a cell all outside or all inside its range, else its brick's
+trilinear texel in the atlas, times the range */
+static unsigned int world_sdf_distance(struct module *m, struct pixel_state *state, unsigned int field0,
+	unsigned int field1, unsigned int point)
+{
+	unsigned int range = fdiv(m, 1, constant_float(m, (float)XGPU_WORLD_SDF_RANGE_VOXELS), extract(m, field0, 3));
+	unsigned int coordinate = ext3(m, GLSL_F_CLAMP, m->t_v3, fscale(m, 3, fsub(m, 3, point, xyz(m, field0)),
+		extract(m, field0, 3)), constant_splat(m, 3, 0.0f), fscale(m, 3, xyz(m, field1),
+		constant_float(m, (float)XGPU_WORLD_SDF_BRICK)));
+	unsigned int cell = ext2(m, GLSL_F_MIN, m->t_v3, ext1(m, GLSL_FLOOR, m->t_v3, fscale(m, 3, coordinate,
+		constant_float(m, 1.0f / (float)XGPU_WORLD_SDF_BRICK))), fsub(m, 3, xyz(m, field1), constant_splat(m, 3, 1.0f)));
+	unsigned int sampled = load(m, type_sampled_image(m, DIM_3D, FALSE, FALSE, TRUE), m->world_sdf_table), operands[4];
+	unsigned int entry, kind, result = local(m, &state->locals, m->t_float), body = id_new(m), merge = id_new(m);
+	unsigned int at, uvw, atlas, size[3], brick;
+
+	operands[0] = op(m, OP_IMAGE, type_sampled_image(m, DIM_3D, FALSE, FALSE, FALSE), 1, &sampled);
+	operands[1] = op1(m, OP_CONVERT_F_TO_S, m->t_iv3, cell);
+	operands[2] = IMAGE_OPERANDS_LOD;
+	operands[3] = constant_int(m, 0);
+	entry = op(m, OP_IMAGE_FETCH, m->t_v4, 4, operands);
+	/* (its bytes: x, y, z of the atlas's brick and the kind) */
+	entry = ext1(m, GLSL_FLOOR, m->t_v4, fadd(m, 4, fscale(m, 4, entry, constant_float(m, 255.0f)),
+		constant_splat(m, 4, 0.5f)));
+	kind = extract(m, entry, 3);
+	store(m, result, fselect(m, compare(m, OP_F_ORD_EQUAL, kind, constant_float(m, (float)XGPU_WORLD_SDF_CELL_INSIDE)),
+		fneg(m, 1, range), range));
+	brick = compare(m, OP_F_ORD_EQUAL, kind, constant_float(m, (float)XGPU_WORLD_SDF_CELL_BRICK));
+	selection_merge(m, merge);
+	branch_conditional(m, brick, body, merge);
+	label_at(m, body);
+	/* (the brick's texel in the atlas: its first at its place times the span) */
+	at = fadd(m, 3, fadd(m, 3, fscale(m, 3, xyz(m, entry), constant_float(m, (float)XGPU_WORLD_SDF_BRICK_SPAN)),
+		fsub(m, 3, coordinate, fscale(m, 3, cell, constant_float(m, (float)XGPU_WORLD_SDF_BRICK)))),
+		constant_splat(m, 3, 0.5f));
+	size[0] = size[1] = constant_float(m, (float)(XGPU_WORLD_SDF_ATLAS * XGPU_WORLD_SDF_BRICK_SPAN));
+	size[2] = fmul(m, 1, extract(m, field1, 3), constant_float(m, (float)XGPU_WORLD_SDF_BRICK_SPAN));
+	uvw = fdiv(m, 3, at, op(m, OP_COMPOSITE_CONSTRUCT, m->t_v3, 3, size));
+	atlas = load(m, type_sampled_image(m, DIM_3D, FALSE, FALSE, TRUE), m->world_sdf);
+	operands[0] = atlas;
 	operands[1] = uvw;
 	operands[2] = IMAGE_OPERANDS_LOD;
 	operands[3] = constant_float(m, 0.0f);
-	return fmul(m, 1, extract(m, op(m, OP_IMAGE_SAMPLE_EXPLICIT_LOD, m->t_v4, 4, operands), 0), extract(m, field1, 3));
+	store(m, result, fmul(m, 1, extract(m, op(m, OP_IMAGE_SAMPLE_EXPLICIT_LOD, m->t_v4, 4, operands), 0), range));
+	branch(m, merge);
+	label_at(m, merge);
+	return load(m, m->t_float, result);
 }
 
 /* A_sdf(p, n): the cone of taps along the normal (world_ao.c's
 world_ao_field_occlusion) */
-static unsigned int world_sdf_occlusion(struct module *m, unsigned int p, unsigned int n)
+static unsigned int world_sdf_occlusion(struct module *m, struct pixel_state *state, unsigned int p, unsigned int n)
 {
 	unsigned int field0 = world_ao_vector(m, 0, constant_int(m, 0)), field1 = world_ao_vector(m, 0, constant_int(m, 1));
 	unsigned int step = fmax_scalar(m, 1, fdiv(m, 1, constant_float(m, 1.0f), extract(m, field0, 3)), XGPU_WORLD_AO_STEP);
@@ -2661,7 +2702,7 @@ static unsigned int world_sdf_occlusion(struct module *m, unsigned int p, unsign
 	for (tap = 0; tap < XGPU_WORLD_AO_TAPS; tap++)
 	{
 		unsigned int h = fmul(m, 1, step, constant_float(m, (float)(1 << tap)));
-		unsigned int d = world_sdf_distance(m, field0, field1, fadd(m, 3, p, fscale(m, 3, n, h)));
+		unsigned int d = world_sdf_distance(m, state, field0, field1, fadd(m, 3, p, fscale(m, 3, n, h)));
 
 		occlusion = fadd(m, 1, occlusion, fmul(m, 1, constant_float(m, 1.0f / (float)(2 << tap)),
 			saturate(m, 1, fdiv(m, 1, fsub(m, 1, h, d), h))));
@@ -3199,7 +3240,7 @@ static unsigned int world_ao_read(struct module *m, struct pixel_state *state, i
 	if (light == XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP)
 		return ext3(m, GLSL_F_MIX, m->t_float, constant_float(m, 1.0f), fmax_scalar(m, 1, proxies, XGPU_WORLD_AO_FLOOR),
 			extract(m, parameters0, 1));
-	field = world_sdf_occlusion(m, p, n);
+	field = world_sdf_occlusion(m, state, p, n);
 	relative = saturate(m, 1, fdiv(m, 1, field, fmax_scalar(m, 1, extract(m, object, 1), XGPU_WORLD_AO_REFERENCE_LEAST)));
 	field = ext3(m, GLSL_F_MIX, m->t_float, field, relative, extract(m, parameters1, 0));
 	occlusion = fmul(m, 1, ext3(m, GLSL_F_MIX, m->t_float, constant_float(m, 1.0f), field, extract(m, parameters0, 2)),

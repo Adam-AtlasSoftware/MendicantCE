@@ -28,7 +28,7 @@ from render_enumerate_sweep import STOCK_MAPS
 MARKER = re.compile(r"\b(LOAD|LOAD_IO) ")
 FIELDS = re.compile(r"(\w+)=(.*?)(?= \w+=|$)")
 PRESENT_PHASES = ("gl.swap.return", "loading.swap.return", "vulkan.present.return", "metal.presented", "loading.presented", "xr.submit.end")
-SAFE_SETTINGS = {"HALO_VR", "HALO_PREPARE_SHADERS", "HALO_RANDOM_SEED", "HALO_NO_AUDIO",
+SAFE_SETTINGS = {"HALO_VR", "HALO_PREPARE_SHADERS", "HALO_AMBIENT_OCCLUSION", "HALO_RANDOM_SEED", "HALO_NO_AUDIO",
                  "HALO_SKIP_CINEMATICS", "HALO_GPU_STATS", "HALO_VULKAN_STATS", "HALO_VULKAN_VALIDATION",
                  "HALO_NO_VSYNC", "HALO_RESOLUTION", "HALO_RESOLUTION_SCALING", "HALO_VR_TIMING",
                  "HALO_VR_GPU_TIME", "HALO_VR_FOVEATION", "HALO_VR_RESOLUTION"}

@@ -1,8 +1,9 @@
 """display.ambient_occlusion "world"'s distance field (port/linux/include/world_sdf.h,
-port/linux/game/world_sdf_bake.c, port/linux/game/world_sdf.c, docs/world-ao.md): the layout within its budget, the
-encoding's round trip, the trilinear sample as the GPU reads it, the bake against exact distances (a plane, a box room,
-a sphere, a box signed by a BSP's point test, a soup of triangles against every triangle), and the cache file's round
-trip and rejections."""
+port/linux/game/world_sdf_bake.c, port/linux/game/world_sdf.c, docs/world-ao.md): the layout and plan within its
+budget, the encoding's round trip, the sparse field's sample as the GPU reads it (the whole grid's it stands for,
+exactly), its atlas, the bake against exact distances (a plane, a box room, a sphere, a box signed by a BSP's point
+test, a soup of triangles against every triangle; the bricks' shared faces alike), and the cache file's round trip
+and rejections."""
 import sys
 from pathlib import Path
 
@@ -11,16 +12,26 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, enum_with, function, mutated, read, run, structure  # noqa: E402
 
-CASES = ["layout", "encoding", "sample", "bake", "plane", "room", "sphere", "bsp", "soup", "round_trip", "rejection"]
+CASES = ["layout", "encoding", "sample", "atlas", "bake", "plane", "room", "sphere", "bsp", "soup", "round_trip", "rejection"]
 HEADER = "port/linux/include/world_sdf.h"
 BAKE = "port/linux/game/world_sdf_bake.c"
 SCHEDULE = "port/linux/game/world_sdf.c"
 FILE_FUNCTIONS = ["sdf_put32", "sdf_get32", "sdf_put_float", "sdf_get_float", "sdf_crc", "sdf_header_write",
-                  "sdf_header_read", "sdf_header_good", "sdf_file_pack", "sdf_file_unpack", "sdf_file_write",
+                  "sdf_header_read", "sdf_header_good", "sdf_cells_size", "sdf_bricks_size", "sdf_cells_good",
+                  "sdf_volume_free", "sdf_file_pack", "sdf_file_unpack", "sdf_file_write",
                   "sdf_file_read", "sdf_cache_load", "sdf_bsp_inside"]
 CONTROLS = [
-    # the voxel never grown: a huge map past the budget
-    (BAKE, "voxel *= 1.125f;", "voxel *= 1.0f; break;", "layout"),
+    # a cell marked only where a triangle is within range of its middle (not of each of its voxels)
+    (BAKE, "float reach = header->range + 0.5f * step * 1.7320508f;", "float reach = header->range;", "soup"),
+    # the table's kinds read the wrong way round
+    (BAKE, "return entry[3] == WORLD_SDF_CELL_INSIDE ? -header->range : header->range;",
+     "return entry[3] == WORLD_SDF_CELL_INSIDE ? header->range : -header->range;", "sample"),
+    # a brick's local voxel taken from the wrong cell (its place as the next cell's)
+    (BAKE, "local[axis] = coordinate - (float)(cell[axis] * WORLD_SDF_BRICK);",
+     "local[axis] = coordinate - (float)(cell[axis] * WORLD_SDF_BRICK_SPAN);", "sample"),
+    # the atlas's rows of bricks laid one voxel row apart
+    (BAKE, "index / WORLD_SDF_ATLAS * WORLD_SDF_BRICK_SPAN * row;", "index / WORLD_SDF_ATLAS * WORLD_SDF_BRICK_SPAN;",
+     "atlas"),
     # the encoding truncated the wrong way round
     (BAKE, "return (signed char)(value < 0.0f ? value - 0.5f : value + 0.5f);",
      "return (signed char)(value * 0.5f);", "encoding"),
@@ -32,7 +43,7 @@ CONTROLS = [
     # no sign: the solid outside the room as air
     (BAKE, "if (inside && inside(context, point))", "if (inside && 0)", "room"),
     # the rows cut to the plane's reach the wrong way (the walls' voxels near them missed)
-    (BAKE, "else if (fabsf(plane_row) >= range)", "else if (fabsf(plane_row) < range)", "room"),
+    (BAKE, "else if (fabsf(plane_row) >= reach)", "else if (fabsf(plane_row) < reach)", "room"),
     # an edge's region taken as the face's (corners rounded wrongly)
     (BAKE, "if (vc <= 0.0f && d1 >= 0.0f && d3 <= 0.0f)", "if (0)", "soup"),
     # the point test's children swapped
@@ -43,6 +54,9 @@ CONTROLS = [
     # a bad file kept
     (SCHEDULE, "\t\tremove(path);\n\t\tplatform_log(\"world sdf: %s is damaged", "\t\tplatform_log(\"world sdf: %s is damaged",
      "rejection"),
+    # a cell's kind or its brick's place not checked
+    (SCHEDULE, "if (entry[3] > WORLD_SDF_CELL_BRICK || (entry[3] == WORLD_SDF_CELL_BRICK &&",
+     "if (0 && (entry[3] == WORLD_SDF_CELL_BRICK &&", "rejection"),
     # the header's fields out of order
     (SCHEDULE, "sdf_put32(bytes + 16, header->width);\n\tsdf_put32(bytes + 20, header->height);",
      "sdf_put32(bytes + 20, header->width);\n\tsdf_put32(bytes + 16, header->height);", "round_trip"),
@@ -77,7 +91,7 @@ def test_the_bake_is_never_in_a_load():
     # thread: no file read, no geometry copied, no bake
     scenario = read("source/scenario/scenario.c")
     assert "world_ao_map_loaded();" in scenario
-    assert "world_sdf_bake_slab" not in scenario
+    assert "world_sdf_bake_cell" not in scenario and "world_sdf_plan" not in scenario
     loaded = function(read(SCHEDULE), "world_sdf_map_loaded") + function(read(SCHEDULE), "sdf_current_set")
     for call in ("sdf_cache_load", "sdf_cache_present", "sdf_bake_begin", "world_scene_static_triangles", "fopen"):
         assert call not in loaded, call

@@ -152,10 +152,17 @@ void halo_world_ao_window(float const field[2][4], float const parameters[2][4],
 without the occlusion) and its reference, the field's occlusion at its
 lighting point, which its ambient sample already holds (1: none) */
 void halo_world_ao_object(int owner, float reference);
-/* the field's voxels uploaded, slices z_first to z_first + z_count - 1 of
-a width * height * depth volume (signed bytes: world_sdf.h); width 0
-releases it */
-void halo_world_ao_field(unsigned long width, unsigned long height, unsigned long depth, unsigned long z_first,
-	unsigned long z_count, signed char const *voxels);
+/* a part of the field uploaded (WORLD_AO_FIELD_*: world_sdf.h's table of
+cells, 4 bytes each, or its atlas of bricks' voxels, signed bytes), slices
+z_first to z_first + z_count - 1 of a width * height * depth volume; width
+0 releases the field, both parts. The field is drawn with once both have
+had their last slices */
+enum
+{
+	WORLD_AO_FIELD_TABLE = 0,
+	WORLD_AO_FIELD_ATLAS = 1,
+};
+void halo_world_ao_field(int part, unsigned long width, unsigned long height, unsigned long depth,
+	unsigned long z_first, unsigned long z_count, void const *data);
 
 #endif

@@ -23,6 +23,8 @@ CONTROLS = [
     # the first-person weapon lit by it
     ("halo_world_ao_object(drawing ? WORLD_AO_OWNER_UNLIT : WORLD_AO_OWNER_NONE, 1.0f);",
      "halo_world_ao_object(WORLD_AO_OWNER_NONE, 1.0f);", "window"),
+    # a window given while a map's pipelines are prepared (the world's then made in the load)
+    ("\tif (render_enumerating)\n\t{\n\t\tworld_sdf_frame_prepared();\n\t\treturn;\n\t}", "", "window"),
     # the made-up field uploaded each window
     ("\tif (!world_ao_test.uploaded)\n\t\tworld_ao_test_field(camera_position);",
      "\tworld_ao_test_field(camera_position);", "test"),

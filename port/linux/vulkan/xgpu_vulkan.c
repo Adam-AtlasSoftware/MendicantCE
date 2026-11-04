@@ -378,6 +378,9 @@ struct pipeline_entry
 	struct xgpu_vulkan_pipeline_description description;
 	VkPipeline pipeline;
 	int pending;
+	/* (made apart from the draws, xgpu_vulkan_pipeline_ready's: not yet
+	handed to the compilers, their queue full) */
+	int waiting;
 };
 
 struct shader_entry
@@ -3489,17 +3492,10 @@ void xgpu_vulkan_preparation_service(void (*service)(void))
 	pipeline_compiler.service = service;
 }
 
-static void pipeline_request(struct pipeline_entry *entry)
+/* the compilers started (where they are not yet) */
+static void pipeline_compilers_start(void)
 {
-	VkResult result;
-	VkPipeline pipeline;
-	double elapsed;
-	uint32_t index;
-
-	vk.pipeline_count++;
-	host_load_trace("vulkan.pipeline.request", "count=%llu hash=%08x",
-		(unsigned long long)vk.pipeline_count, entry->hash);
-	if (pipeline_compiler.service && !pipeline_compiler.started)
+	if (!pipeline_compiler.started)
 	{
 		long processors = sysconf(_SC_NPROCESSORS_ONLN);
 		int workers = processors > 4 ? (int)processors - 4 : 1;
@@ -3513,6 +3509,20 @@ static void pipeline_request(struct pipeline_entry *entry)
 			pipeline_compiler.started++;
 		host_logf(HOST_LOG_INFO, "vulkan: %d pipeline compilers", pipeline_compiler.started);
 	}
+}
+
+static void pipeline_request(struct pipeline_entry *entry)
+{
+	VkResult result;
+	VkPipeline pipeline;
+	double elapsed;
+	uint32_t index;
+
+	vk.pipeline_count++;
+	host_load_trace("vulkan.pipeline.request", "count=%llu hash=%08x",
+		(unsigned long long)vk.pipeline_count, entry->hash);
+	if (pipeline_compiler.service)
+		pipeline_compilers_start();
 	if (!pipeline_compiler.service || !pipeline_compiler.started)
 	{
 		pipeline = pipeline_build(&entry->description, &result, &elapsed);
@@ -3528,6 +3538,31 @@ static void pipeline_request(struct pipeline_entry *entry)
 	pipeline_compiler.submitted++;
 	pthread_cond_broadcast(&pipeline_compiler.changed);
 	pthread_mutex_unlock(&pipeline_compiler.mutex);
+}
+
+/* a pipeline handed to the compilers without waiting, where there is room
+(else it waits for the next look); FALSE if there are none */
+static int pipeline_request_apart(struct pipeline_entry *entry)
+{
+	uint32_t index;
+
+	pipeline_compilers_start();
+	if (!pipeline_compiler.started)
+		return 0;
+	pthread_mutex_lock(&pipeline_compiler.mutex);
+	pipeline_publish_completed();
+	entry->waiting = pipeline_compiler.submitted - pipeline_compiler.published >= PIPELINE_JOBS;
+	if (!entry->waiting)
+	{
+		index = (uint32_t)(pipeline_compiler.submitted % PIPELINE_JOBS);
+		pipeline_compiler.jobs[index].description = entry->description;
+		pipeline_compiler.jobs[index].entry = entry;
+		entry->pending = 1;
+		pipeline_compiler.submitted++;
+		pthread_cond_broadcast(&pipeline_compiler.changed);
+	}
+	pthread_mutex_unlock(&pipeline_compiler.mutex);
+	return 1;
 }
 
 static void pipeline_compiler_stop(void)
@@ -3734,7 +3769,8 @@ static VkPipeline pipeline_build(const struct xgpu_vulkan_pipeline_description *
 	return pipeline;
 }
 
-static struct pipeline_entry *pipeline_find(const struct xgpu_vulkan_pipeline_description *description)
+static struct pipeline_entry *pipeline_find_apart(const struct xgpu_vulkan_pipeline_description *description,
+	int apart)
 {
 	static struct pipeline_entry *last;
 	uint32_t hash;
@@ -3760,8 +3796,14 @@ static struct pipeline_entry *pipeline_find(const struct xgpu_vulkan_pipeline_de
 	entry->next = *bucket;
 	*bucket = entry;
 	last = entry;
-	pipeline_request(entry);
+	if (!apart || !pipeline_request_apart(entry))
+		pipeline_request(entry);
 	return entry;
+}
+
+static struct pipeline_entry *pipeline_find(const struct xgpu_vulkan_pipeline_description *description)
+{
+	return pipeline_find_apart(description, 0);
 }
 
 int xgpu_vulkan_pipeline_prepare(const struct xgpu_vulkan_pipeline_description *description)
@@ -3780,6 +3822,23 @@ VkPipeline xgpu_vulkan_pipeline(const struct xgpu_vulkan_pipeline_description *d
 	if (entry->pending)
 		pipeline_wait(entry, 0);
 	return entry->pipeline;
+}
+
+VkPipeline xgpu_vulkan_pipeline_ready(const struct xgpu_vulkan_pipeline_description *description)
+{
+	struct pipeline_entry *entry = pipeline_find_apart(description, 1);
+
+	if (!entry)
+		return VK_NULL_HANDLE;
+	if (entry->waiting && !pipeline_request_apart(entry))
+		pipeline_request(entry);
+	if (entry->pending)
+	{
+		pthread_mutex_lock(&pipeline_compiler.mutex);
+		pipeline_publish_completed();
+		pthread_mutex_unlock(&pipeline_compiler.mutex);
+	}
+	return entry->pending || entry->waiting ? VK_NULL_HANDLE : entry->pipeline;
 }
 
 uint64_t xgpu_vulkan_pipeline_count(void)
@@ -4308,22 +4367,24 @@ binds it: the last one, where it is of the same image and submission,
 else one written now */
 static VkDescriptorSet occlusion_set(void)
 {
-	VkDescriptorImageInfo image, field_image;
+	VkDescriptorImageInfo image, field_image, table_image;
 	VkDescriptorBufferInfo block;
-	VkWriteDescriptorSet writes[3];
+	VkWriteDescriptorSet writes[4];
 	struct xgpu_vulkan_image *occlusion = vk.occlusion_image && vk.occlusion_image->sampled ? vk.occlusion_image :
 		vk.occlusion_white;
 	struct xgpu_vulkan_image *field = xgpu_vulkan_world_ao_field_image();
+	struct xgpu_vulkan_image *table = xgpu_vulkan_world_ao_table_image();
 	uint64_t serial = vk.serial;
 	int index;
 
-	if (!occlusion || !field || !field->sampled || !vk.occlusion_layout)
+	if (!occlusion || !field || !field->sampled || !table || !table->sampled || !vk.occlusion_layout)
 		return VK_NULL_HANDLE;
 	/* (display.ambient_occlusion "world"'s block in this submission's ring) */
 	if (!xgpu_vulkan_world_ao_block(serial, &block))
 		return VK_NULL_HANDLE;
 	occlusion->used = vk.serial;
 	field->used = vk.serial;
+	table->used = vk.serial;
 	if (vk.occlusion_set && vk.occlusion_set_image == occlusion && vk.occlusion_set_number == occlusion->number &&
 		vk.occlusion_serial == vk.serial && vk.occlusion_world_number == xgpu_vulkan_world_ao_number())
 		return vk.occlusion_set;
@@ -4342,8 +4403,10 @@ static VkDescriptorSet occlusion_set(void)
 	field_image.sampler = xgpu_vulkan_world_ao_sampler();
 	field_image.imageView = field->sampled;
 	field_image.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+	table_image = field_image;
+	table_image.imageView = table->sampled;
 	memset(writes, 0, sizeof(writes));
-	for (index = 0; index < 3; index++)
+	for (index = 0; index < 4; index++)
 	{
 		writes[index].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 		writes[index].dstSet = vk.occlusion_set;
@@ -4357,7 +4420,9 @@ static VkDescriptorSet occlusion_set(void)
 	writes[2].dstBinding = XGPU_VULKAN_BINDING_WORLD_AO;
 	writes[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 	writes[2].pBufferInfo = &block;
-	vkUpdateDescriptorSets(vk.device, 3, writes, 0, NULL);
+	writes[3].dstBinding = XGPU_VULKAN_BINDING_WORLD_SDF_TABLE;
+	writes[3].pImageInfo = &table_image;
+	vkUpdateDescriptorSets(vk.device, 4, writes, 0, NULL);
 	return vk.occlusion_set;
 }
 
@@ -4539,6 +4604,7 @@ void xgpu_vulkan_draw(const struct xgpu_vulkan_draw *draw)
 		{
 			image_use(vk.occlusion_image && vk.occlusion_image->sampled ? vk.occlusion_image : vk.occlusion_white);
 			image_use(xgpu_vulkan_world_ao_field_image());
+			image_use(xgpu_vulkan_world_ao_table_image());
 		}
 	}
 	commands = vk.pass_commands;
@@ -6736,7 +6802,11 @@ static int layouts_make(void)
 	textures[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 	textures[2].descriptorCount = 1;
 	textures[2].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-	info.bindingCount = 3;
+	textures[3].binding = XGPU_VULKAN_BINDING_WORLD_SDF_TABLE;
+	textures[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	textures[3].descriptorCount = 1;
+	textures[3].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+	info.bindingCount = 4;
 	info.pBindings = textures;
 	if (!check(vkCreateDescriptorSetLayout(vk.device, &info, NULL, &vk.occlusion_layout), "vkCreateDescriptorSetLayout"))
 		return 0;

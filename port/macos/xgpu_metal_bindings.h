@@ -48,6 +48,8 @@ field past the stages (XGPU_MSL_TEXTURE_WORLD_SDF) and the window's block
 stage: a 3D texture at stage 5 would also be bound at the combiner's place
 for it, XGPU_METAL_COMBINER_TEXTURE_3D + 5, which is a cube stage's */
 #define XGPU_METAL_TEXTURE_WORLD_SDF 5
+/* (and its table of cells, past it: 6 is no stage's, nor a combiner's place) */
+#define XGPU_METAL_TEXTURE_WORLD_SDF_TABLE 6
 #define XGPU_METAL_BUFFER_WORLD_AO 23
 
 #endif

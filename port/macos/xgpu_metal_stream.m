@@ -1369,8 +1369,8 @@ block (xgpu_metal_world_ao.c) */
 static void stream_world_ao_field(void *context, const struct xgpu_stream_world_ao_field *record)
 {
 	(void)context;
-	xgpu_metal_world_ao_field(record->width, record->height, record->depth, record->z_first, record->z_count,
-		record->width && record->size ? host_pointer(record->data) : NULL);
+	xgpu_metal_world_ao_field(record->part, record->width, record->height, record->depth, record->z_first,
+		record->z_count, record->width && record->size ? host_pointer(record->data) : NULL);
 }
 
 static void stream_world_ao_window(void *context, const struct xgpu_stream_world_ao_window *record)

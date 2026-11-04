@@ -793,25 +793,26 @@ void xgpu_backend_world_ao_window(const struct xgpu_world_ao_block *block)
 	}
 }
 
-void xgpu_backend_world_ao_field(unsigned long width, unsigned long height, unsigned long depth,
-	unsigned long z_first, unsigned long z_count, const void *voxels)
+void xgpu_backend_world_ao_field(int part, unsigned long width, unsigned long height, unsigned long depth,
+	unsigned long z_first, unsigned long z_count, const void *data)
 {
 	struct xgpu_stream_world_ao_field *record_body;
-	uint32_t size = (uint32_t)(width * height * z_count);
+	uint32_t size = (uint32_t)(width * height * z_count * XGPU_STREAM_WORLD_AO_TEXEL(part));
 	unsigned char *place;
 
 	if (!stream.open)
 		return;
-	if (!width || !voxels)
+	if (!width || !data)
 		size = 0;
 	record_body = record_data(XGPU_STREAM_WORLD_AO_FIELD, sizeof(*record_body), size ? carried_one(size) : 0, &place);
+	record_body->part = (uint32_t)part;
 	record_body->width = (uint32_t)width;
 	record_body->height = (uint32_t)height;
 	record_body->depth = (uint32_t)depth;
 	record_body->z_first = (uint32_t)z_first;
 	record_body->z_count = (uint32_t)z_count;
 	record_body->size = size;
-	record_body->data = size ? carry_one(&place, voxels, size) : 0;
+	record_body->data = size ? carry_one(&place, data, size) : 0;
 }
 
 /* (the host writes the ring's display_hdr and display_headroom as it looks
@@ -1261,6 +1262,18 @@ BOOL xgpu_backend_pipeline(const struct xgpu_pipeline_key *key)
 		stream.pipeline = id;
 	}
 	return __atomic_load_n(&stream.pipelines[id], __ATOMIC_RELAXED) != XGPU_STREAM_PIPELINE_FAILED;
+}
+
+void xgpu_backend_pipeline_stand_in(unsigned long number)
+{
+	struct xgpu_stream_pipeline_stand_in *record_body;
+
+	if (!stream.open || !stream.pipeline)
+		return;
+	record_body = record(XGPU_STREAM_PIPELINE_STAND_IN, sizeof(*record_body));
+	record_body->id = stream.pipeline;
+	/* (the same round of numbers alone: XGPU_STREAM_PIPELINES' 14 bits) */
+	record_body->stand_in = number >> 16 == stream.pipeline_keys.rounds ? (uint32_t)(number & 0xffff) : 0;
 }
 
 unsigned long xgpu_backend_pipeline_number(void)

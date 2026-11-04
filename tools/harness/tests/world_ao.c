@@ -24,6 +24,7 @@ static struct
 	int count;
 } handed;
 static int object_owner = -100;
+unsigned char render_enumerating;
 static float object_reference = -100.0f;
 
 const char *config_string(const char *name)
@@ -47,6 +48,7 @@ void world_sdf_map_loaded(void) {}
 void world_sdf_map_unloaded(void) {}
 void world_sdf_bsp_switched(short bsp_index) { (void)bsp_index; }
 void world_sdf_frame(void) { sdf_frames++; }
+void world_sdf_frame_prepared(void) {}
 void world_proxies_map_unloaded(void) {}
 
 /* the field: a volume whose header world_sdf_current hands on, half faded in */
@@ -139,15 +141,19 @@ void halo_world_ao_object(int owner, float reference)
 	object_reference = reference;
 }
 
-void halo_world_ao_field(unsigned long width, unsigned long height, unsigned long depth, unsigned long z_first,
-	unsigned long z_count, signed char const *voxels)
+/* (the made-up field made sparse and handed on: world_sdf_bake.c's and
+world_sdf.c's, tested apart) */
+int world_sdf_pack(struct world_sdf_volume *packed, signed char const *voxels)
 {
-	(void)width;
-	(void)height;
-	(void)depth;
-	(void)z_first;
-	(void)z_count;
 	(void)voxels;
+	packed->cells = NULL;
+	packed->bricks = NULL;
+	return 1;
+}
+
+void world_sdf_upload(struct world_sdf_volume const *uploaded)
+{
+	(void)uploaded;
 	fields_handed++;
 }
 
@@ -201,10 +207,15 @@ static void window_case(void)
 	volume.header.range = 6.0f;
 	volume.header.origin[0] = -1.0f;
 	field_ready = 1;
+	/* (none while a map's pipelines are prepared) */
+	render_enumerating = 1;
+	world_ao_window_begin(0, 0, camera);
+	CHECK(windows_handed == 0, "while enumerating: %d", windows_handed);
+	render_enumerating = 0;
 	world_ao_window_begin(0, 0, camera);
 	CHECK(windows_handed == 1 && handed.count == 3, "%d %d", windows_handed, handed.count);
 	CHECK(handed.field[0][0] == -1.0f && handed.field[0][3] == 2.0f && handed.field[1][0] == 8.0f &&
-		handed.field[1][2] == 2.0f && handed.field[1][3] == 6.0f, "the field's place");
+		handed.field[1][2] == 2.0f && handed.field[1][3] == 1.0f, "the field's place (its atlas's layer)");
 	CHECK(handed.parameters[0][0] == WORLD_AO_STRENGTH_OBJECTS && handed.parameters[0][1] == WORLD_AO_STRENGTH_LEVEL &&
 		handed.parameters[0][2] == 0.5f && handed.parameters[0][3] == 3.0f &&
 		handed.parameters[1][0] == WORLD_AO_REFERENCE_WEIGHT, "the parameters");

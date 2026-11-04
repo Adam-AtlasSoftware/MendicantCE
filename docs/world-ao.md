@@ -27,7 +27,8 @@ shades with what of the field and the proxies is ready (D's shading).
 - **Only the ambient light.** The flashlight, the dynamic lights (classic and enhanced), specular, self-illumination,
   decals, transparents and the first-person weapon stay as they are, exactly as with #574's GTAO.
 - **Never block or lengthen a load.** The owner's long-term goal is no load screens at all. A map with no field yet
-  loads exactly as fast as it does today ([The bake's schedule](#the-bakes-schedule)).
+  loads exactly as fast as it does today ([The bake's schedule](#the-bakes-schedule)), and a map's pipelines are
+  prepared as with the setting off: the world's are made after the load ([Pipelines](#pipelines-never-in-a-load)).
 - **Off is pixel-identical.** Off emits no stream records and no new shader code: the emitters write byte-identical
   shaders. The Classic preset sets `display.ambient_occlusion = "off"`, so Classic always bypasses all of this.
 
@@ -73,38 +74,60 @@ The scene is built only while `"world"` is on, refreshed once a frame inside `re
 
 ### Geometry, bounds and resolution
 
-There's one field per structure BSP, over its collision geometry's bounds padded by `WORLD_SDF_PADDING_VOXELS` (2).
-The voxel is **0.25 world units** (about 0.76 m; a Spartan is about 0.7 wu tall). On a large map the voxel grows in
-steps of ×1.125 until the field has at most **8 Mi voxels** (`WORLD_SDF_MAXIMUM_VOXELS`, 8 MB as R8) and at most
-1024 along any axis (`world_sdf_layout`). Small and indoor maps get 0.25 wu. A big outdoor map like Blood Gulch
-(about 300×300×60 wu) gets about 0.9 wu. That's still right for floors and walls, because trilinear interpolation
-reproduces a plane's distance exactly; only corners soften. A sparse fine level (0.125 wu bricks near surfaces) is
-a later option if captures show the outdoor maps need it. The format version covers that change.
+There's one field per structure BSP. Its bounds are the collision geometry's, cut to **where objects can be**: the
+box of the scenario's placements inside the BSP (players' starting points, netgame flags and equipment, bipeds,
+vehicles, weapons, equipment, machines, controls, the AI's firing positions and starting locations; not scenery,
+which can be a far backdrop) grown by `WORLD_SDF_PLACEMENTS_REACH` (32 wu) each way, then padded by
+`WORLD_SDF_PADDING_VOXELS` (2). That drops the sky's box and sea floors out to the horizon: b30's collision BSP is
+2000×2000×381 wu (95 triangles of sky and sea floor make 9.6 million of its 9.7 million square wu), its island and
+everything placed on it about 300 wu across.
+
+The field is **sparse**: a grid of cells of `WORLD_SDF_BRICK` (8) voxels' steps a side. A cell that a triangle may
+reach within range of one of its voxels is a **brick** of 9×9×9 voxels (its far faces are its neighbours' near
+faces, so a trilinear filter inside one brick is the whole grid's, exactly); every other cell is a single kind, all
+outside (+range) or all inside (-range). Memory follows the surfaces' area, not the bounds' volume. The voxel is
+**0.25 world units** (about 0.76 m; a Spartan is about 0.7 wu tall), grown in steps of ×1.125 only until the
+table of cells and the bricks fit `WORLD_SDF_MAXIMUM_BYTES` (8 MB) of GPU memory (`world_sdf_plan`). At 0.25 wu a
+brick holds 2 wu of surface each side: about 730 bytes per square wu of surface with the 3 wu range, so 0.25 wu
+everywhere fits small and indoor BSPs and not the big outdoor ones (Blood Gulch's ~150,000 square wu would need
+~110 MB). Those get the finest voxel their surface allows, which with the cut bounds is 2 to 6 times finer than a
+whole grid's of the same memory (b30 0.91 wu, was 6.0; Blood Gulch 0.45, was 0.72). Flat ground is exact at any
+voxel (trilinear holds a plane's distance); only corners soften.
 
 ### Encoding
 
-The texture is **R8 signed normalized** (`VK_FORMAT_R8_SNORM`, `MTLPixelFormatR8Snorm`; linear filtering of it is
-required on both APIs). It's sampled linear and clamped to the edge. `texel × range` is the signed distance at the
-voxel's centre: positive is outside (air), negative is inside solid. range = `WORLD_SDF_RANGE_VOXELS` (12) × voxel,
-which is 3 wu at the finest voxel and covers the longest occlusion step (2.4 wu, below). Precision is range/127,
-about 0.024 wu.
+Two textures, both clamped to the edge:
+- the **atlas** of bricks, **R8 signed normalized** (`VK_FORMAT_R8_SNORM`, `MTLPixelFormatR8Snorm`; linear
+  filtering of it is required on both APIs), 16×16 bricks a layer (144×144×9 voxels), as many layers as needed;
+- the **table** of cells, **RGBA8**, read by texel: an atlas brick's x, y, z and the cell's kind
+  (`WORLD_SDF_CELL_OUTSIDE`, `_INSIDE`, `_BRICK`).
+
+A voxel × range is the signed distance at its centre: positive is outside (air), negative is inside solid.
+range = `WORLD_SDF_RANGE_VOXELS` (12) × voxel, which is 3 wu at the finest voxel and covers the longest occlusion
+step (2.4 wu, below). Precision is range/127, about 0.024 wu. A sample (`world_sdf_sample`, the shaders' too) reads
+the point's cell in the table: ±range for a cell of one kind, else the brick's texel in the atlas, filtered. Cells of
+one kind are most of the volume, so most taps cost one read of a small texture.
 
 ### The bake
 
-`world_sdf_bake_slab` is pure, and runs on N worker threads, each baking a slab of z slices:
+Pure (`world_sdf_bake.c`), on N worker threads, each pass split by z slices or by cells:
 
-1. **Narrow band, exact.** For each triangle, visit the voxels in its bounds grown by `range`, and keep the least
-   exact point-triangle distance and the triangle that gives it. A triangle's work is about
-   area / voxel² × 2·range / voxel.
-2. **Far field.** Voxels farther than `range` from every triangle stay at ±range: the encoding clamps there anyway,
-   so no propagation pass is needed.
-3. **Sign:** whether the voxel's centre is inside solid, by the collision BSP's own point test (`bsp3d` leaf
-   classification, the physics' answer). It's evaluated on the copy through the `inside` callback, which works on a
-   copy of the bsp3d nodes and leaves. It's not done by normal orientation: Halo's BSPs aren't perfectly closed.
-4. **Encode** (`world_sdf_encode`).
+1. **Plan** (`world_sdf_plan`): the finest voxel whose table and **marked** cells fit the budget. A cell is marked
+   where a triangle is within range plus half the cell's diagonal of its middle (`world_sdf_mark`). When a voxel
+   doesn't fit, the next tried is a step short of what the bricks' memory (falling at least as the voxel's square)
+   says.
+2. **Bin** (`world_sdf_bin`): each marked cell's triangles, by the same test.
+3. **Bricks, narrow band, exact** (`world_sdf_bake_cell`): for each of a marked cell's triangles, visit its voxels
+   within `range` of the triangle's plane and bounding sphere, and keep the least exact point-triangle distance.
+   Voxels farther than `range` from every triangle stay at ±range: the encoding clamps there anyway.
+4. **Sign:** whether the voxel's centre is inside solid, by the collision BSP's own point test (`bsp3d` leaf
+   classification, the physics' answer), on a copy of the bsp3d nodes and planes. It's not done by normal
+   orientation: Halo's BSPs aren't perfectly closed. A marked cell whose voxels all come out ±127 is a cell of that
+   kind; an unmarked cell's kind is its middle's side (`world_sdf_cell_kind`).
+5. **Encode** (`world_sdf_encode`), and the bricks gathered in the cells' order.
 
-Slabs are independent, so threads need no locks. The bake runs at the lowest thread priority and stops as soon as
-asked: at quit, and at a map unload if the map can't be re-read.
+The bake runs at the lowest thread priority and stops as soon as asked: at quit, and at a map unload if the map
+can't be re-read.
 
 ### The bake's schedule
 
@@ -128,8 +151,9 @@ asked: at quit, and at a map unload if the map can't be re-read.
   finishes, the field uploads a few slices a frame (at most 512 KB a frame) and then **fades in over 1 s**
   (`world_sdf_fade`), with no hitch and no pop. We chose proxies-only over falling back to GTAO: GTAO's pre-pass
   would cost more than the whole new feature on the Deck, and switching would pop.
-- **Measured and stated:** each bake logs `world sdf: <map> bsp <n>: <w>x<h>x<d> voxel <v> in <ms> ms on <t>
-  threads, <bytes> cached`, and the header records the time and threads. Workstream B's PR states the bake time and
+- **Measured and stated:** each bake logs `world sdf: <map> bsp <n>: ... within <bounds>, <w>x<h>x<d> cells, <n>
+  bricks, voxel <v> in <ms> ms on <t> threads, <bytes> in memory, <bytes> cached`, and the header records the time
+  and threads. Workstream B's PR states the bake time and
   cache size for every stock map on the 5900X, the Steam Deck and one phone. Targets: under 2 s per BSP on 8
   desktop threads, under 10 s in the background on a phone, and a cache under 3 MB per BSP after deflate.
 
@@ -142,13 +166,14 @@ never shipped, and never trusted without checks.
 - **Key:** the map's cache file header checksum (`menu_picture_map_checksum`'s source) plus `WORLD_SDF_VERSION`. A
   different map under the same name, or a new version, is baked again. A good file is reused forever.
 - **Format** (little-endian, written field by field, not as a struct):
-  - a 64-byte `struct world_sdf_header`: magic `WSDF`, version, map checksum, bsp index, width/height/depth, origin,
-    voxel, range, deflated size, bake ms, bake threads;
-  - then the voxels (x fastest, then y, then z), deflated as one zlib stream (the game's own zlib,
-    `source/memory/zlib`);
+  - a 64-byte `struct world_sdf_header`: magic `WSDF`, version (2: sparse), map checksum, bsp index, the cells along
+    x/y/z, origin, voxel, range, deflated size, bake ms, bake threads, brick count;
+  - then the cells (4 bytes each, x fastest, then y, then z) and the bricks (729 bytes each), deflated as one zlib
+    stream (the game's own zlib, `source/memory/zlib`);
   - then a CRC-32 of the header and the deflated bytes (the menu pictures' CRC).
 - **Writing:** to `<name>.tmp`, then renamed into place, so a crash leaves no half file.
-- **Reading:** a file with the wrong magic, version, checksum, size or CRC is deleted and baked again.
+- **Reading:** a file with the wrong magic, version, checksum, size or CRC, a cell of no kind, or a brick's place
+  past the bricks is deleted and baked again.
 - **Bumping `WORLD_SDF_VERSION`:** whenever the bake's arithmetic, the source geometry or the layout changes.
 
 ## Proxies (`world_proxies.h`)
@@ -353,22 +378,44 @@ the strong preset.
 
 | | Vulkan (SPIR-V) | Metal (MSL) |
 | --- | --- | --- |
-| Field: 3D, R8 snorm, linear, clamp | set `XGPU_SPIRV_SET_OCCLUSION` (3), binding `XGPU_SPIRV_BINDING_WORLD_SDF` (1), combined image sampler | `[[texture(XGPU_MSL_TEXTURE_WORLD_SDF)]]` (5), `constexpr sampler` |
+| Field's atlas: 3D, R8 snorm, linear, clamp | set `XGPU_SPIRV_SET_OCCLUSION` (3), binding `XGPU_SPIRV_BINDING_WORLD_SDF` (1), combined image sampler | `[[texture(XGPU_MSL_TEXTURE_WORLD_SDF)]]` (5), `constexpr sampler` |
+| Field's table: 3D, RGBA8, read by texel | set 3, binding `XGPU_SPIRV_BINDING_WORLD_SDF_TABLE` (3), combined image sampler, `OpImageFetch` | `[[texture(XGPU_MSL_TEXTURE_WORLD_SDF_TABLE)]]` (6), `read` |
 | Block `struct xgpu_world_ao_block` (std140, 19,552 B) | set 3, binding `XGPU_SPIRV_BINDING_WORLD_AO` (2), uniform buffer | `[[buffer(XGPU_MSL_BUFFER_WORLD_AO)]]` (23) |
 | Per draw: owner slot, reference | the draw uniforms (`xgpu_spirv_uniforms`, 2 floats) | `xgpu_msl_uniforms`, the same |
 
 Set 3 is #574's occlusion set, so a draw still binds at most 4 sets, the Vulkan minimum. With no field yet, the
-backend binds a 1×1×1 texel of +127 (far outside).
+backend binds 1×1×1 stand-ins: a table cell far outside and an atlas texel of +127.
 
-The block: `field[0]` origin.xyz and 1/voxel; `field[1]` width, height, depth, range; `parameters[0]` strength on
+The block: `field[0]` origin.xyz (the first voxel's centre) and 1/voxel; `field[1]` the cells along x, y, z and the
+atlas's layers (range is `WORLD_SDF_RANGE_VOXELS` / `field[0].w`); `parameters[0]` strength on
 objects, strength on the level, fade, proxy count; `parameters[1]` reference weight and 3 spare; then 64 × 3 vec4
 proxies; then the grid: `grid[0]` the camera, `grid[1]` each axis's scale and 1 / cell; then 1,024 uvec4 cells, two
 cells' 64-bit masks each (cell i's word w at `cells[i / 2][2 (i % 2) + w]`).
 
 **Command stream (version 16):**
 - `XGPU_STREAM_WORLD_AO_WINDOW` carries the block (`active` 0: withdrawn);
-- `XGPU_STREAM_WORLD_AO_FIELD` carries a slab of slices (`width` 0: release). The decoder checks the slab's bounds
-  and size before any backend reads it.
+- `XGPU_STREAM_WORLD_AO_FIELD` carries a slab of slices of a part, the table (4 bytes a texel) or the atlas (1)
+  (`width` 0: release both). The table comes first; the field is drawn with once both have their last slices. The
+  decoder checks the slab's part, bounds and size before any backend reads it.
+- `XGPU_STREAM_PIPELINE_STAND_IN` names the pipeline bound's stand-in ([Pipelines](#pipelines-never-in-a-load)).
+
+### Pipelines: never in a load
+
+A map's pipelines are made as it starts (`render_enumerate.c`), and the load waits for them. With `"world"`, the
+draws then would be the world's, whose shaders are bigger, and the load longer (10 to 15 ms on the 5900X). So:
+- **No world window while a map's pipelines are prepared** (`world_ao_window_begin` while `render_enumerating`):
+  the load's draws are exactly the ones without the world, and the load makes exactly the pipelines it makes with
+  the setting off.
+- **A stand-in for each world pipeline** (`d3d8_device.c`'s `world_ao_stand_in`): the first time a pipeline with
+  the world's light is drawn with, the front end chooses the draw's keys again with the world off and tells the
+  backend that pipeline's number (`xgpu_backend_pipeline_stand_in`).
+- **The world's made apart** (Vulkan, `xgpu_vulkan_stream.c`): a world pipeline's shaders aren't made when it is
+  bound. Its draws use the stand-in (made in the load) until the world's shaders and pipeline are made: the shaders
+  two a frame after the frame's draws (`world_make_some`, never while a map is prepared), the pipeline on the
+  pipeline compilers, never waited for (`xgpu_vulkan_pipeline_ready`). No draw waits, no frame hitches; the world's
+  light comes in over the first frames of play, as the field fades in. The Metal backend doesn't do this yet (it has
+  no stand-in callback, so its world pipelines are made at their first draw, as before): its shaders are compiled
+  from source synchronously, so it needs Metal's asynchronous library compile first.
 
 The backends' `world_ao_window` and `world_ao_field` callbacks are still unset, so the records are decoded and
 ignored.
@@ -401,7 +448,8 @@ Blood Gulch firefight (16 bipeds, 4 vehicles):
 | VR (both eyes, multiview, 90 Hz) | per headset | ≤ 0.4 for both eyes | not drawn in the eyes |
 
 There's no pre-pass, so the CPU doesn't walk the scene twice either. CPU per frame: scene ≤ 0.2 ms, proxies ≤
-0.1 ms, upload ≤ 512 KB a frame and only while a field arrives. Memory: field ≤ 8 MB of GPU memory and one block
+0.1 ms, upload ≤ 512 KB a frame and only while a field arrives. Memory: field ≤ 8 MB of GPU memory (its table and
+atlas: `WORLD_SDF_MAXIMUM_BYTES`) and one block
 (19 KB with the proxies' grid) per window.
 
 ### The proxies' cost (workstream E)
@@ -508,7 +556,8 @@ the instances.
 Implement the structure's distance field: `port/linux/game/world_sdf.c` (schedule, cache, upload) and
 `port/linux/game/world_sdf_bake.c` (pure arithmetic), behind the fixed `port/linux/include/world_sdf.h`. Follow
 docs/world-ao.md's "The distance field" exactly:
-- voxel 0.25 wu, grown to stay within 8 Mi voxels;
+- voxel 0.25 wu, grown to stay within 8 MB (sparse since workstream F: [Geometry, bounds and
+  resolution](#geometry-bounds-and-resolution));
 - R8 snorm with range 12 voxels;
 - exact narrow-band point-triangle distances, signed by the collision BSP's `bsp3d` point test run on a copy;
 - slabs of z slices baked on low-priority worker threads.

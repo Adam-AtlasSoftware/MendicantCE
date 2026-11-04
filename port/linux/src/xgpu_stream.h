@@ -262,6 +262,8 @@ enum
 	_field; docs/world-ao.md) */
 	XGPU_STREAM_WORLD_AO_WINDOW,
 	XGPU_STREAM_WORLD_AO_FIELD,
+	/* the pipeline bound's stand-in (xgpu_backend_pipeline_stand_in) */
+	XGPU_STREAM_PIPELINE_STAND_IN,
 	XGPU_STREAM_RECORD_TYPES,
 };
 
@@ -419,16 +421,34 @@ struct xgpu_stream_world_ao_window
 	struct xgpu_world_ao_block block;
 };
 
-/* WORLD_AO_FIELD: slices z_first to z_first + z_count - 1 of the field (a
-width * height * depth volume of signed bytes, x fastest:
-xgpu_backend_world_ao_field), its bytes at data (size: width * height *
-z_count); width 0 releases the field */
+/* PIPELINE_STAND_IN: pipeline id (one with the world's light) has a stand-in
+(an id, 0 none), the pipeline the draw would have without the world: the
+backend may draw with it until id's is made, and never makes id's while a
+map is prepared (xgpu_backend_pipeline_stand_in) */
+struct xgpu_stream_pipeline_stand_in
+{
+	uint32_t header;
+	uint32_t id, stand_in;
+};
+
+/* WORLD_AO_FIELD: slices z_first to z_first + z_count - 1 of a part of
+the field (a width * height * depth volume, x fastest:
+xgpu_backend_world_ao_field): its table of cells (part 0, four bytes a
+texel: an atlas brick's x, y, z and the cell's kind, read as RGBA8) or its
+atlas of bricks (part 1, signed bytes: R8 snorm), its bytes at data (size:
+width * height * z_count * the texel's); width 0 releases the field, both
+parts */
+#define XGPU_STREAM_WORLD_AO_TABLE 0
+#define XGPU_STREAM_WORLD_AO_ATLAS 1
+#define XGPU_STREAM_WORLD_AO_TEXEL(part) ((part) == XGPU_STREAM_WORLD_AO_TABLE ? 4u : 1u)
 struct xgpu_stream_world_ao_field
 {
 	uint32_t header;
+	uint32_t part;
 	uint32_t width, height, depth;
 	uint32_t z_first, z_count;
 	uint32_t data, size;
+	uint32_t pad;
 };
 
 /* its quality; the stencil's bits of the pixels the occlusion leaves (the
@@ -1131,7 +1151,8 @@ XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_panini, 56);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_ambient_occlusion, 52);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_world_ao_window, 16 + 32 + 32 + XGPU_WORLD_AO_PROXIES_MAXIMUM * 48 + 32 +
 	XGPU_WORLD_AO_GRID_CELLS_MAXIMUM * 8);
-XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_world_ao_field, 32);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_world_ao_field, 40);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_pipeline_stand_in, 12);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_set_targets, 16);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_clear, 36);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_read_target, 28);
