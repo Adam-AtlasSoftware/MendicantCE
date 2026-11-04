@@ -1069,6 +1069,12 @@ static const struct config_setting config_settings[] =
 		"split screen and games with bots. Network games play at the rate they\n"
 		"agreed on (a Legacy game's 30, an OpenH1 game's network.sim_rate), and\n"
 		"saved films at 30, whatever this is." },
+	{ "game.map_cache_megabytes", _config_integer, "0", "HALO_MAP_CACHE_MEGABYTES", _environment_value, _platform_all,
+		"The most the decompressed maps the game keeps (the save folder's z/)\n"
+		"may take of the disk, in MB; 0: what the disk has room for, short of\n"
+		"the larger of 2 GB and a twentieth of the disk, which it always keeps\n"
+		"free. Every stock map takes 3.0 GB, unpacked once and then loaded\n"
+		"without waiting; at least 730 MB, the Xbox's six cache files'." },
 	{ "game.auto_pickup", _config_boolean, "false", "HALO_AUTO_PICKUP", _environment_value, _platform_all,
 		"Multiplayer: a player with an empty weapon slot picks up a weapon by\n"
 		"walking over it, as Custom Edition does. false (the Xbox's way): they\n"
