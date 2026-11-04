@@ -513,6 +513,31 @@ def test_battery_saver_reads_the_classic_values(config_check_mac):
     assert run("saving", "display.fov") == "0 0"
 
 
+def test_graphics_preset_chooses_the_animations(config_check_mac, monkeypatch):
+    """game.enhanced_animations follows display.graphics (Classic plays as the
+    Xbox did: its AI reacts to the player's body, refs #544) where it is left
+    to it; set (in the file, by its variable) it wins; battery saver, which
+    only changes the drawing, never turns it off"""
+    run = config_check_mac
+    assert run("get", "game.enhanced_animations") == "true"
+    assert "\n# enhanced_animations = true\n" in run.config.read_text()
+    run("write", "display.graphics", "classic")
+    assert run("get", "game.enhanced_animations") == "false"
+    # (battery saver: as it is, in Classic and Enhanced)
+    assert run("saving", "game.enhanced_animations") == "false false"
+    run("write", "display.graphics", "enhanced")
+    assert run("saving", "game.enhanced_animations") == "true true"
+    # (set: it wins over the preset; at the preset's value, the preset's again)
+    run("write", "game.enhanced_animations", "false")
+    assert "\nenhanced_animations = false\n" in run.config.read_text()
+    run("write", "display.graphics", "classic")
+    run("write", "display.graphics", "enhanced")
+    assert run("get", "game.enhanced_animations") == "true"
+    run("write", "display.graphics", "classic")
+    monkeypatch.setenv("HALO_ENHANCED_ANIMATIONS", "true")
+    assert run("get", "game.enhanced_animations") == "true"
+
+
 def test_vsync_default_by_build(tmp_path, monkeypatch, config_check_mac):
     """display.vsync: off on the Linux builds, Windows and the Mac; on under
     gamescope (the Steam Deck's Game Mode) where the player has not set it,

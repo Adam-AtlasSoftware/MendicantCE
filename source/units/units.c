@@ -3356,6 +3356,8 @@ void unit_impulse(
 /* the platform layer's (port/linux/src/port_config.c) */
 int config_boolean(const char *name);
 unsigned long config_changes(void);
+/* port/linux/game/network_standard.c's */
+boolean network_standard_turns_with_aim(long player_index);
 
 /* port: the animation enhancements (game.enhanced_animations, on unless
 config.toml turns them off) are for the player bipeds (cyborg and
@@ -3408,19 +3410,21 @@ boolean unit_animation_enhanced(
 
 /* port: whether a player biped turns with the aim where the original left
 its body facing (throwing a grenade, in the air: bipeds.c's
-biped_update_turning). It moves where a shot goes, not only how the body
-looks, so in a network game every machine turns them, whatever its own
-game.enhanced_animations says: a player who turned it off would otherwise
-aim differently from the others, and a client and its host would turn that
-player's body differently. In a game of one machine the setting decides,
-as for the other enhancements. */
+biped_update_turning). It moves where a shot goes and what the AI sees, not
+only how the body looks, so in a network game every machine turns them as
+the host says (network_standard_turns_with_aim: the host's
+game.enhanced_animations, a Legacy game's always), whatever its own
+setting: a client and its host would otherwise turn that player's body
+differently. In a game of one machine the setting decides, as for the other
+enhancements. */
 boolean unit_turns_with_aim(
 	long unit_index)
 {
 	if (game_connection() == _game_connection_network_client ||
 		game_connection() == _game_connection_network_server)
 	{
-		return unit_animation_enhanced_unit(unit_index);
+		return unit_animation_enhanced_unit(unit_index) &&
+			network_standard_turns_with_aim(unit_get(unit_index)->unit.player_index);
 	}
 	return unit_animation_enhanced(unit_index);
 }

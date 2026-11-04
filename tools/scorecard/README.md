@@ -11,6 +11,7 @@ exactly as master does (the gate).
 | `scenarios.py` | The scenarios (data), their tags and the stubs that need retail maps |
 | `metrics.py` | The trace read, what each kind of scenario measures, and the tolerances |
 | `identity.py` | The 30 Hz gate: bit-identical to master (the determinism log, `tools/determinism_compare.py`) |
+| `campaign_identity.py`, `campaign_b30.txt` | The campaign's 30 Hz gate: b30's AI in Classic, its global seed each tick as the original code's (retail maps: `HALO_RETAIL_MAPS`) |
 | `ci.py`, `enforced.txt` | CI's step (the linux-x86_64 job), and the tags it enforces at 60 and 120 |
 
 It needs a build with a guest: `ninja linux_x86_64`, `ninja linux_arm64` or `ninja macos` (the one for this
@@ -80,6 +81,18 @@ builds and compared: each tick's game state allocation by allocation, the random
 Script threads are left out (they keep a guest image address, which moves with any code). `--record <folder>` keeps
 a build's logs and `--baseline <folder>` compares with them: CI records master's on each master build and compares
 every branch with the latest. `--trace` checks that tracing changes nothing; `--mutation jump` must fail.
+
+### The campaign gate
+
+    HALO_RETAIL_MAPS=<maps folder> python tools/scorecard/campaign_identity.py
+
+StageKit has no AI that reacts to a player, so the gate above cannot see a change to what the campaign's AI does.
+This one plays b30's beach battle from the level's start at 30 Hz in fast mode (seed 12345, the player standing
+still, Classic), and compares its global random seed, which the AI's choices take, with the original code's
+(`campaign_b30.txt`, recorded from 40aba0cf9, the build before the sub-steps) for 2,400 ticks: about 10 seconds.
+#312's turn in the air (`game.enhanced_animations`, which Classic turns off) parts at tick 1553; `--mutation` plays
+with it on, and must fail. CI's step (`ci.py`) runs it where `HALO_RETAIL_MAPS` names the maps, the scorecard
+computer, and notes it skipped on GitHub's runners, which have none.
 
 ## Anti-gaming
 

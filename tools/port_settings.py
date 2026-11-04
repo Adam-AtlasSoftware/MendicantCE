@@ -848,7 +848,8 @@ PAGES = {
     ADVANCED[0]: {
         "screen": ADVANCED[1], "title": "ADVANCED GRAPHICS",
         "rows": [
-            (SECTION, "IMAGE"),
+            # (the image's rows under the page's title, with no section of
+            # their own: GAME's ANIMATIONS took its line)
             ("RENDER RESOLUTION", "display.resolution_scaling", [("FULL", "native"), ("XBOX 640X480", "original")],
              "Full draws the game at your screen's resolution. Xbox draws it at the Xbox's 640x480 and scales it "
              "up: softer, and very light on the graphics card.", "computer"),
@@ -901,6 +902,12 @@ PAGES = {
              "How often the world updates each second, in games on this device: the campaign, split screen and "
              "bots. 60 and 120 respond faster and take more of the processor. Online games play at their host's "
              "tick rate: an OpenH1 game's (OpenH1 60 Tick), a Legacy game's 30.", None),
+            # (game.enhanced_animations: the preset's, Classic's off, as the
+            # Xbox played; a network game's turning is its host's:
+            # network_standard_turns_with_aim)
+            ("ANIMATIONS", "game.enhanced_animations", [("CLASSIC", "false"), ("ENHANCED", "true")],
+             "Enhanced: you turn with your aim in a jump and a grenade throw, and your legs keep moving as you "
+             "throw. Classic moves as the Xbox did, so the AI plays as it did. Online: the host's choice.", None),
         ],
     },
     BRIGHTNESS_PAGE[0]: {

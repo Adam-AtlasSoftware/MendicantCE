@@ -59,6 +59,11 @@ enum
 	(game.auto_pickup false: network_standard_walk_over_pickup). Only a
 	Standard host sets it, and its OpenH1 machines alone read it */
 	_network_game_hold_to_pick_up_bit = 3,
+	/* not co-op's: an OpenH1 game's players keep the original's facing in a
+	jump and a grenade throw (the host's game.enhanced_animations false:
+	network_standard_turns_with_aim). Only a Standard host sets it, and its
+	OpenH1 machines alone read it */
+	_network_game_classic_turning_bit = 4,
 };
 
 struct network_game
