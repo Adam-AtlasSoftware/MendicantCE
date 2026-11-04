@@ -454,6 +454,9 @@ WEAPON_FIELDS_OF_VIEW = Slider(80, 150, 5, 20, 150, stops=FIELDS_OF_VIEW.stops[:
 # place; the track goes the whole range (the depth's closer end is about
 # where the right hand reaches the eye), any of -20 to 20 typed
 VIEWMODEL_OFFSETS = Slider(-20, 20, 0.5, -20, 20)
+# display.viewmodel_pitch's, _yaw's and _roll's: degrees, 0 the game's own
+# (view_fov.c's VIEWMODEL_ROTATION_MAXIMUM_DEGREES), any of -15 to 15 typed
+VIEWMODEL_ROTATIONS = Slider(-15, 15, 0.5, -15, 15)
 # display.lowered_reticle_amount's: percent of the view's height below its
 # middle; any of 0 to 30 typed
 LOWERED_RETICLE_AMOUNTS = Slider(1, 25, 1, 0, 30, whole=True)
@@ -502,6 +505,9 @@ SCREEN_LAYOUT = ("video_settings/screen_layout", "screen_layout_screen")
 # (First Person's shields: the arms' flare, its color, the overshield and its color; their
 # own page, so that First Person's view rows fit)
 SHIELDS = ("video_settings/first_person/shields", "shields_screen")
+# (First Person's weapon position: every weapon's offsets and turns, and in a
+# game the held weapon's own: menu_functions.c's viewmodel_weapon_rows_show)
+WEAPON_POSITION = ("video_settings/first_person/weapon_position", "weapon_position_screen")
 CONTROLLER = ("gamepad_setup", "gamepad_setup_screen")
 # (the controller's own button layout, each player's: controller_remap_menu.inl)
 BUTTON_REMAPPING = ("gamepad_setup/button_remapping", "button_remapping_screen")
@@ -539,6 +545,7 @@ REMAP_HANDLERS = ['<on event="x" run="port controller clear"/>',
 # hdr_display_show's, the display's peak
 SETTINGS_STATUS_ROWS = {"discord_account", "link_status", "link_unlink", "browser_search",
                         *(f"link_master_{n}" for n in range(1, 5)), "hdr_display",
+                        "viewmodel_weapon_reset",
                         "remap_player", "remap_group", *(f"pad_{n}" for n in range(1, REMAP_ROWS + 1))}
 # the rows whose labels menu_functions.c writes (a master server's host): the
 # label's text its own, not its list's; their values the narrower column at
@@ -970,15 +977,9 @@ PAGES = {
             ("WEAPON FIELD OF VIEW", "display.viewmodel_fov", WEAPON_FIELDS_OF_VIEW,
              "How wide your weapon and hands are drawn, in degrees across a 16:9 screen: wider draws them "
              "smaller. Default keeps the weapon's own view.|Click the number (or press A) to type any from 20 to 150.", None),
-            ("WEAPON HORIZONTAL", "display.viewmodel_offset_x", VIEWMODEL_OFFSETS,
-             "Moves your weapon and hands right, or left below 0, in centimeters, for every weapon, as far on "
-             "the screen at any weapon field of view. 0 keeps them where the game puts them.|Click the number (or press A) to type any from -20 to 20.", None),
-            ("WEAPON VERTICAL", "display.viewmodel_offset_y", VIEWMODEL_OFFSETS,
-             "Moves your weapon and hands up, or down below 0, in centimeters. Lower it to see more of the "
-             "screen.|Click the number (or press A) to type any from -20 to 20.", None),
-            ("WEAPON DEPTH", "display.viewmodel_offset_z", VIEWMODEL_OFFSETS,
-             "Pushes your weapon and hands away from you, or closer below 0, in centimeters. Too close and they "
-             "cut off.|Click the number (or press A) to type any from -20 to 20.", None),
+            ("WEAPON POSITION ›", None, _page_screen(*WEAPON_POSITION),
+             "Moves and turns your weapon and hands on the screen, for every weapon and, in a game, for the one "
+             "you hold.", None),
             ("VEHICLE FIELD OF VIEW", "display.vehicle_fov", VEHICLE_FIELDS_OF_VIEW,
              "How wide you see in a vehicle, in degrees across a 16:9 screen. Default keeps the game's view; Match "
              "uses your Field of View. Above 150 needs Panini Projection.|Click the number (or press A) to type "
@@ -1015,6 +1016,58 @@ PAGES = {
              "from your seat. Behind, the weapon cannot zoom.", None),
             ("SHIELDS ›", None, _page_screen(*SHIELDS),
              "Your shield's flare on your first-person arms, its color, and an overshield's glow.", None),
+        ],
+    },
+    WEAPON_POSITION[0]: {
+        "screen": WEAPON_POSITION[1], "title": "WEAPON POSITION",
+        "rows": [
+            (SECTION, "ALL WEAPONS"),
+            ("HORIZONTAL", "display.viewmodel_offset_x", VIEWMODEL_OFFSETS,
+             "Moves your weapon and hands right, or left below 0, in centimeters, for every weapon, as far on "
+             "the screen at any weapon field of view. 0 keeps them where the game puts them. In a game, Settings from the pause menu also sets the weapon you hold on its own.|Click "
+             "the number (or press A) to type any from -20 to 20.", None),
+            ("VERTICAL", "display.viewmodel_offset_y", VIEWMODEL_OFFSETS,
+             "Moves your weapon and hands up, or down below 0, in centimeters. Lower it to see more of the "
+             "screen. In a game, Settings from the pause menu also sets the weapon you hold on its own.|Click the number (or press A) to type any from -20 to 20.", None),
+            ("DEPTH", "display.viewmodel_offset_z", VIEWMODEL_OFFSETS,
+             "Pushes your weapon and hands away from you, or closer below 0, in centimeters. Too close and they "
+             "cut off. In a game, Settings from the pause menu also sets the weapon you hold on its own.|Click the number (or press A) to type any from -20 to 20.", None),
+            ("PITCH", "display.viewmodel_pitch", VIEWMODEL_ROTATIONS,
+             "Tilts your weapon's muzzle up, or down below 0, in degrees, turning it in place. Your shots still "
+             "go where the reticle points. In a game, Settings from the pause menu also sets the weapon you hold on its own.|Click the number (or press A) to type any from -15 to "
+             "15.", None),
+            ("YAW", "display.viewmodel_yaw", VIEWMODEL_ROTATIONS,
+             "Turns your weapon's muzzle right, or left below 0, in degrees. Your shots still go where the "
+             "reticle points. In a game, Settings from the pause menu also sets the weapon you hold on its own.|Click the number (or press A) to type any from -15 to 15.", None),
+            ("ROLL", "display.viewmodel_roll", VIEWMODEL_ROTATIONS,
+             "Tilts the top of your weapon right, or left below 0, in degrees. Your shots still go where the "
+             "reticle points. In a game, Settings from the pause menu also sets the weapon you hold on its own.|Click the number (or press A) to type any from -15 to 15.", None),
+            # (the held weapon's own, added to those above, kept in
+            # config.toml by its tag's path; in a game only:
+            # menu_functions.c's viewmodel_weapon_rows_show)
+            (SECTION, "THIS WEAPON"),
+            ("HORIZONTAL", "weapon.x", VIEWMODEL_OFFSETS,
+             "Moves the weapon you hold right, or left below 0, in centimeters, added to All Weapons'. Each "
+             "weapon keeps its own, a modded map's too.|Click the number (or press A) to type any from -20 to 20.",
+             None, "viewmodel_weapon_x"),
+            ("VERTICAL", "weapon.y", VIEWMODEL_OFFSETS,
+             "Moves the weapon you hold up, or down below 0, in centimeters, added to All Weapons'.|Click the "
+             "number (or press A) to type any from -20 to 20.", None, "viewmodel_weapon_y"),
+            ("DEPTH", "weapon.z", VIEWMODEL_OFFSETS,
+             "Pushes the weapon you hold away, or closer below 0, in centimeters, added to All Weapons'.|Click "
+             "the number (or press A) to type any from -20 to 20.", None, "viewmodel_weapon_z"),
+            ("PITCH", "weapon.pitch", VIEWMODEL_ROTATIONS,
+             "Tilts the muzzle of the weapon you hold up, or down below 0, in degrees, added to All Weapons'."
+             "|Click the number (or press A) to type any from -15 to 15.", None, "viewmodel_weapon_pitch"),
+            ("YAW", "weapon.yaw", VIEWMODEL_ROTATIONS,
+             "Turns the muzzle of the weapon you hold right, or left below 0, in degrees, added to All "
+             "Weapons'.|Click the number (or press A) to type any from -15 to 15.", None, "viewmodel_weapon_yaw"),
+            ("ROLL", "weapon.roll", VIEWMODEL_ROTATIONS,
+             "Tilts the top of the weapon you hold right, or left below 0, in degrees, added to All Weapons'."
+             "|Click the number (or press A) to type any from -15 to 15.", None, "viewmodel_weapon_roll"),
+            ("RESET THIS WEAPON", None, None,
+             "Puts the weapon you hold back to All Weapons' place: its own offsets go back to 0 when you press "
+             "OK.", None, "viewmodel_weapon_reset", "port settings weapon reset"),
         ],
     },
     SHIELDS[0]: {
