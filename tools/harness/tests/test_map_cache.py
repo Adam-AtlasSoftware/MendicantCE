@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, constant, function, mutated, read, run  # noqa: E402
 
 CACHE = "source/cache/cache_files_windows.c"
-BUDGET = "port/linux/src/map_cache.c"
+BUDGET = "port/linux/src/map_unpack.c"
 FUNCTIONS = ["cached_map_type_maximum_size", "cached_map_files_bytes", "cached_map_file_resize", "cached_map_usefulness",
              "cached_map_files_least_useful", "cached_map_files_make_room", "cached_map_files_find_free_map",
              "cache_files_map_prefill_size"]
@@ -31,7 +31,7 @@ def generated(fault=None, budget_fault=None):
     if fault:
         code = mutated(code, *fault)
     budget_source = read(BUDGET)
-    budget = "\n".join(re.findall(r"^#define MAP_CACHE_\w+ .*$", budget_source, re.M)) + "\n" + \
+    budget = "\n".join(re.findall(r"^#define MAP_CACHE_(?:MEGABYTE|FREE_\w+) .*$", budget_source, re.M)) + "\n" + \
         function(budget_source, "map_cache_choose_budget")
     if budget_fault:
         budget = mutated(budget, *budget_fault)

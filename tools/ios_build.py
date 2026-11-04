@@ -50,7 +50,7 @@ IOS_BUNDLE_ID = MACOS_BUNDLE_ID
 IOS_FRAMEWORKS = " ".join(f"-framework {name}" for name in (
     "Metal", "QuartzCore", "Foundation", "UIKit", "ImageIO", "CoreGraphics", "AVFoundation", "AudioToolbox",
     "CoreAudio", "CoreHaptics", "CoreMotion", "GameController", "CoreBluetooth", "UniformTypeIdentifiers",
-    "CoreFoundation", "Security", "CoreMedia", "CoreVideo", "IOSurface", "CoreText")) + " -lcompression"
+    "CoreFoundation", "Security", "CoreMedia", "CoreVideo", "IOSurface", "CoreText")) + " -lcompression -lz"
 
 
 def ios_configure_inputs() -> List[Path]:
@@ -111,8 +111,9 @@ def ios_platform(name: str, sdk: str, guest=None) -> ApplePlatform:
         sdl_library="libSDL3.a", sdl_link="-lSDL3", guest_image_source=PORT_DIR / "guest_image.S",
         shader_platform="ios_simulator" if simulator else "ios", guest=guest,
         guest_imports=[PORT_DIR / "host_imports.list"],
-        # (the first start's disc image extraction: port/ios/data_import.m)
-        shared_extra=["xiso.h", "xiso.c", "posix.h"])
+        # (the first start's disc image extraction and the maps' unpack into the
+        # cache: port/ios/data_import.m)
+        shared_extra=["xiso.h", "xiso.c", "posix.h", "map_unpack.h", "map_unpack.c"])
 
 
 def generate_ios_app(n: Writer, sln: Any, built: dict, name: str, build: Path, signed: bool) -> None:

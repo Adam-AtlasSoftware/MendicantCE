@@ -33,11 +33,14 @@ then finds its data as it is told.
 #include "host.h"
 #undef host_page_size
 #include "xiso.h"
+#include "map_unpack.h"
 
 #include <stdarg.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/statvfs.h>
 
 /* xiso.c's log lines, the host's */
 void platform_log(const char *format, ...)
@@ -255,6 +258,12 @@ static BOOL maps_usable(NSString *folder, NSString **problem)
 		int succeeded = xiso_extract_maps(image.path.fileSystemRepresentation, documents.fileSystemRepresentation,
 			extraction_progress, (__bridge void *)self, error, sizeof(error));
 
+		/* (and the stock maps unpacked into the cache's slots, in the save
+		root's z folder, on the same bar: port/linux/src/map_unpack.c; a
+		failure leaves only slots the game copies again) */
+		if (succeeded)
+			unpack_maps(documents.fileSystemRepresentation, (__bridge void *)self);
+
 		NSString *reason = succeeded ? nil : [NSString stringWithUTF8String:error];
 
 		if (accessing)
@@ -264,6 +273,33 @@ static BOOL maps_usable(NSString *folder, NSString **problem)
 			[self finish:reason];
 		});
 	});
+}
+
+static void extraction_progress(void *context, const char *file, unsigned long long done, unsigned long long total);
+
+/* the maps of <data root>/maps unpacked into <save root>/z, within the
+cache's budget of the disk (game.map_cache_megabytes is the game's: the
+disk's room here), for the game's language, English: another's slots are
+not adopted, and are copied again */
+static void unpack_maps(const char *data_root, void *context)
+{
+	const char *save_root = getenv("HALO_SAVE_ROOT");
+	char maps_folder[1024], z_folder[1024];
+	struct statvfs disk;
+	unsigned long long room = 0, total = 0;
+
+	if (!save_root || !save_root[0])
+		return;
+	snprintf(maps_folder, sizeof(maps_folder), "%s/maps", data_root);
+	mkdir(save_root, 0755);
+	snprintf(z_folder, sizeof(z_folder), "%s/z", save_root);
+	if (statvfs(save_root, &disk) == 0)
+	{
+		room = (unsigned long long)disk.f_bavail * disk.f_frsize;
+		total = (unsigned long long)disk.f_blocks * disk.f_frsize;
+	}
+	map_unpack_folder(maps_folder, z_folder, 1, map_cache_choose_budget(0, 0, room, total, map_unpack_least_budget()),
+		extraction_progress, context);
 }
 
 static void extraction_progress(void *context, const char *file, unsigned long long done, unsigned long long total)

@@ -22,16 +22,37 @@ each into its own slot. The game's thread chooses the slot and holds it
 while a worker fills it (cache_files_unpack_begin), and takes it back
 through the same check the slots get as the game starts
 (cache_files_unpack_update).
+
+Before the game starts, once the maps are copied out of a disc image
+(xiso_extract_maps' callers: first_start.c, sdl_platform.c, the iOS app's
+port/ios/data_import.m), map_unpack_folder fills the slots the same way,
+on the same number of workers, with slots chosen by the cache's rules
+without the game's tables (map_unpack_assign: 32 slots, the most a map of
+each type may be, the budget of map_cache_choose_budget), and writes
+z:\last_language.dat, so that the game's start adopts them
+(cache_files_open_cache_files). One cut short is copied again then. The
+iOS app's host builds this part alone (no HALO_LINUX_PLATFORM_LAYER), on
+the system's zlib.
 */
 
+#ifdef HALO_LINUX_PLATFORM_LAYER
 #include "platform.h"
 #include "../../third_party/zlib/zlib_prefixed.h"
+#else
+#include <zlib.h>
+#define HALO_PORT_CACHED_MAP_FILES 32
+#endif
+#include "posix.h"
+#include "map_unpack.h"
 
 #include <fcntl.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
+#include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 /* (xbox_files.c's cache slots' sources) */
@@ -54,7 +75,21 @@ enum
 	/* (cache_files_windows.c's NUMBER_OF_CACHED_MAP_FILES) */
 	MAP_UNPACK_SLOTS = HALO_PORT_CACHED_MAP_FILES,
 	MAP_UNPACK_MOST_WORKERS = 4,
+	MAP_UNPACK_TYPE_OFFSET = 0x60,
+	MAP_UNPACK_VERSION = 5,
+	/* (cache_files_windows.c's: the most a map of each type may be) */
+	MAP_UNPACK_SOLO_MAXIMUM_SIZE = 0x11600000,
+	MAP_UNPACK_MULTIPLAYER_MAXIMUM_SIZE = 0x02F00000,
+	MAP_UNPACK_MAIN_MENU_MAXIMUM_SIZE = 0x02300000,
+	MAP_UNPACK_SOURCE_VERSION = 3,
 };
+
+#define MAP_CACHE_MEGABYTE (1024ULL * 1024ULL)
+/* the disk's room the cache never takes: the larger of these */
+#define MAP_CACHE_FREE_MARGIN (2048ULL * MAP_CACHE_MEGABYTE)
+#define MAP_CACHE_FREE_MARGIN_SHARE 20
+/* (cache_files_initialize's least: the Xbox's six cache files) */
+#define MAP_CACHE_LEAST (0x11600000ULL * 2 + 0x02300000ULL + 0x02F00000ULL * 3)
 
 enum map_unpack_state
 {
@@ -83,6 +118,8 @@ struct map_unpack_job
 
 /* ---------- globals */
 
+#ifdef HALO_LINUX_PLATFORM_LAYER
+
 static struct
 {
 	pthread_mutex_t lock;
@@ -90,6 +127,7 @@ static struct
 	int workers;
 	struct map_unpack_job jobs[MAP_UNPACK_SLOTS];
 } map_unpack = { PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, PTHREAD_COND_INITIALIZER };
+#endif
 
 /* ---------- private code */
 
@@ -208,6 +246,7 @@ finished:
 	return whole;
 }
 
+#ifdef HALO_LINUX_PLATFORM_LAYER
 /* the job's slot unpacked, and only if it is whole, its source written:
 the mark, last */
 static int map_unpack_job_run(short slot, struct map_unpack_job *job)
@@ -258,6 +297,8 @@ static void *map_unpack_worker(void *context)
 	return NULL;
 }
 
+#endif
+
 int map_unpack_worker_count(void)
 {
 	long cores = sysconf(_SC_NPROCESSORS_ONLN);
@@ -270,6 +311,7 @@ int map_unpack_worker_count(void)
 	return (int)count;
 }
 
+#ifdef HALO_LINUX_PLATFORM_LAYER
 /* (the lock held) the pool started, once */
 static int map_unpack_start(void)
 {
@@ -385,3 +427,279 @@ int map_unpack_take(short slot)
 	pthread_mutex_unlock(&map_unpack.lock);
 	return succeeded;
 }
+#endif
+
+/* ---------- before the game starts */
+
+/* the budget: megabytes game.map_cache_megabytes' (0: the disk's), cache
+the bytes the cache takes now, free and total the disk's (0 unknown),
+least the least it may be */
+unsigned long long map_cache_choose_budget(long megabytes, unsigned long long cache, unsigned long long free,
+	unsigned long long total, unsigned long long least)
+{
+	unsigned long long margin = total / MAP_CACHE_FREE_MARGIN_SHARE;
+	unsigned long long budget;
+
+	if (margin < MAP_CACHE_FREE_MARGIN)
+		margin = MAP_CACHE_FREE_MARGIN;
+	if (megabytes > 0)
+		budget = (unsigned long long)megabytes * MAP_CACHE_MEGABYTE;
+	else
+		budget = cache + free > margin ? cache + free - margin : 0;
+	return budget > least ? budget : least;
+}
+
+unsigned long long map_unpack_least_budget(void)
+{
+	return MAP_CACHE_LEAST;
+}
+
+/* the slots of maps (their lengths and types, in the order they are
+wanted), as the cache would give them with every slot empty: the next slot
+to each map a slot can hold (shorter than the most its type may be) while
+the budget has room for it (its length rounded up to 64 KB), else none
+(-1); how many have one */
+int map_unpack_assign(const long *file_lengths, const short *types, int count, unsigned long long budget,
+	short *slots)
+{
+	unsigned long long taken = 0;
+	short next = 0;
+	int index, assigned = 0;
+
+	for (index = 0; index < count; index++)
+	{
+		long most = types[index] == 0 ? MAP_UNPACK_SOLO_MAXIMUM_SIZE :
+			types[index] == 1 ? MAP_UNPACK_MULTIPLAYER_MAXIMUM_SIZE :
+			types[index] == 2 ? MAP_UNPACK_MAIN_MENU_MAXIMUM_SIZE : 0;
+		unsigned long long copy_size = ((unsigned long long)file_lengths[index] + 0xFFFF) & ~0xFFFFULL;
+
+		slots[index] = -1;
+		if (next >= MAP_UNPACK_SLOTS || file_lengths[index] <= MAP_UNPACK_HEADER_SIZE || file_lengths[index] >= most ||
+			taken + copy_size > budget)
+		{
+			continue;
+		}
+		slots[index] = next++;
+		taken += copy_size;
+		assigned++;
+	}
+	return assigned;
+}
+
+/* the stock maps, the cache's most useful first (cache_files_windows.c's
+cached_map_usefulness) */
+static const char *const map_unpack_stock_maps[] =
+{
+	"ui", "a10", "a30", "a50", "b30", "b40", "c10", "c20", "c40", "d20", "d40",
+	"bloodgulch", "hangemhigh", "chillout", "prisoner", "damnation", "sidewinder", "ratrace",
+	"beavercreek", "longest", "wizard", "carousel", "boardingaction", "putput",
+};
+
+#define MAP_UNPACK_STOCK_MAPS ((int)(sizeof(map_unpack_stock_maps) / sizeof(map_unpack_stock_maps[0])))
+
+struct map_unpack_folder_job
+{
+	char map_path[1024], slot_path[1024], source_path[1024];
+	long copy_size, file_length;
+	volatile int done, whole;
+	volatile float progress;
+};
+
+static struct
+{
+	pthread_mutex_t lock;
+	struct map_unpack_folder_job *jobs;
+	int count, next;
+} map_unpack_folder_pool = { PTHREAD_MUTEX_INITIALIZER };
+
+/* a map file's header: its length and type, if it is an Xbox map whose
+header names it */
+static int map_unpack_read_header(const char *path, const char *name, long *file_length, short *type)
+{
+	unsigned char header[MAP_UNPACK_HEADER_SIZE];
+	int descriptor = open(path, O_RDONLY | O_CLOEXEC);
+	int read_whole = descriptor >= 0 && pread(descriptor, header, sizeof(header), 0) == (ssize_t)sizeof(header);
+
+	if (descriptor >= 0)
+		close(descriptor);
+	if (!read_whole || map_unpack_word(header) != 0x68656164UL || map_unpack_word(header + 0x7FC) != 0x666F6F74UL ||
+		map_unpack_word(header + 4) != MAP_UNPACK_VERSION || !memchr(header + MAP_UNPACK_NAME_OFFSET, 0,
+			MAP_UNPACK_NAME_SIZE) || strcasecmp((const char *)header + MAP_UNPACK_NAME_OFFSET, name) != 0)
+	{
+		return 0;
+	}
+	*file_length = (long)map_unpack_word(header + MAP_UNPACK_FILE_LENGTH_OFFSET);
+	*type = (short)(header[MAP_UNPACK_TYPE_OFFSET] | header[MAP_UNPACK_TYPE_OFFSET + 1] << 8);
+	return 1;
+}
+
+/* a whole slot's source (xbox_files.c's cache_slot_source_write, version
+3: never played), on the disk */
+static int map_unpack_source_write(const char *source_path, const char *map_path, const char *name,
+	unsigned long checksum, unsigned long file_length)
+{
+	struct posix_file_information information;
+	FILE *file;
+	int written;
+
+	if (posix_stat(map_path, &information) != 0)
+		return 0;
+	file = fopen(source_path, "wb");
+	if (!file)
+		return 0;
+	written = fprintf(file, "openh1-cache-source %d %lu %lu %lu %lu %lu %lu %lu %s\n", MAP_UNPACK_SOURCE_VERSION,
+		(unsigned long)information.size_low, (unsigned long)information.size_high,
+		(unsigned long)information.modification_seconds, (unsigned long)information.modification_nanoseconds, 0UL,
+		checksum, file_length, name) >= 0;
+	if (fflush(file) != 0 || fsync(fileno(file)) != 0)
+		written = 0;
+	if (fclose(file) != 0)
+		written = 0;
+	if (!written)
+		remove(source_path);
+	return written;
+}
+
+static void *map_unpack_folder_worker(void *context)
+{
+	(void)context;
+	for (;;)
+	{
+		struct map_unpack_folder_job *job;
+		char name[MAP_UNPACK_NAME_SIZE];
+		unsigned long checksum = 0, file_length = 0;
+
+		pthread_mutex_lock(&map_unpack_folder_pool.lock);
+		job = map_unpack_folder_pool.next < map_unpack_folder_pool.count ?
+			&map_unpack_folder_pool.jobs[map_unpack_folder_pool.next++] : NULL;
+		pthread_mutex_unlock(&map_unpack_folder_pool.lock);
+		if (!job)
+			return NULL;
+		job->whole = map_unpack_slot(job->map_path, job->slot_path, job->copy_size, name, &checksum, &file_length,
+				NULL, &job->progress) &&
+			map_unpack_source_write(job->source_path, job->map_path, name, checksum, file_length);
+		job->progress = 1.0f;
+		job->done = 1;
+	}
+}
+
+int map_unpack_folder(const char *maps_folder, const char *z_folder, long language, unsigned long long budget,
+	void (*progress)(void *context, const char *file, unsigned long long done, unsigned long long total),
+	void *context)
+{
+	struct map_unpack_folder_job jobs[MAP_UNPACK_STOCK_MAPS];
+	long file_lengths[MAP_UNPACK_STOCK_MAPS];
+	short types[MAP_UNPACK_STOCK_MAPS], slots[MAP_UNPACK_STOCK_MAPS];
+	char map_paths[MAP_UNPACK_STOCK_MAPS][1024];
+	pthread_t threads[MAP_UNPACK_MOST_WORKERS];
+	int index, count = 0, threads_started = 0, whole = 0, finished = 0;
+	unsigned long long total = 0;
+
+	for (index = 0; index < MAP_UNPACK_STOCK_MAPS; index++)
+	{
+		snprintf(map_paths[index], sizeof(map_paths[index]), "%s/%s.map", maps_folder, map_unpack_stock_maps[index]);
+		if (!map_unpack_read_header(map_paths[index], map_unpack_stock_maps[index], &file_lengths[index],
+				&types[index]))
+		{
+			file_lengths[index] = 0;
+			types[index] = -1;
+		}
+	}
+	map_unpack_assign(file_lengths, types, MAP_UNPACK_STOCK_MAPS, budget, slots);
+	mkdir(z_folder, 0755);
+	for (index = 0; index < MAP_UNPACK_STOCK_MAPS; index++)
+	{
+		struct map_unpack_folder_job *job = &jobs[count];
+
+		if (slots[index] < 0)
+			continue;
+		memset(job, 0, sizeof(*job));
+		snprintf(job->map_path, sizeof(job->map_path), "%s", map_paths[index]);
+		snprintf(job->slot_path, sizeof(job->slot_path), "%s/cache%03d.map", z_folder, slots[index]);
+		snprintf(job->source_path, sizeof(job->source_path), "%s/cache%03d.source", z_folder, slots[index]);
+		job->file_length = file_lengths[index];
+		job->copy_size = (file_lengths[index] + 0xFFFF) & ~0xFFFFL;
+		/* (a slot's old mark gone first: it is no map until its new one) */
+		remove(job->source_path);
+		total += (unsigned long long)job->file_length;
+		count++;
+	}
+	if (!count)
+		return 0;
+	map_unpack_folder_pool.jobs = jobs;
+	map_unpack_folder_pool.count = count;
+	map_unpack_folder_pool.next = 0;
+	for (index = 0; index < map_unpack_worker_count() && index < count; index++)
+	{
+		if (pthread_create(&threads[threads_started], NULL, map_unpack_folder_worker, NULL) == 0)
+			threads_started++;
+	}
+	if (!threads_started)
+		map_unpack_folder_worker(NULL);
+	while (finished < count)
+	{
+		unsigned long long done = 0;
+
+		finished = 0;
+		for (index = 0; index < count; index++)
+		{
+			done += (unsigned long long)((double)jobs[index].progress * (double)jobs[index].file_length);
+			finished += jobs[index].done;
+		}
+		if (progress)
+			progress(context, "Unpacking the maps", done, total);
+		if (finished < count)
+		{
+			struct timespec wait = { 0, 100 * 1000 * 1000 };
+
+			nanosleep(&wait, NULL);
+		}
+	}
+	for (index = 0; index < threads_started; index++)
+		pthread_join(threads[index], NULL);
+	for (index = 0; index < count; index++)
+		whole += jobs[index].whole;
+	/* (the language the slots are of: the game's start empties every slot
+	of another's, cache_files_verify_language) */
+	if (whole)
+	{
+		char path[1024];
+		int descriptor;
+		unsigned char bytes[4] = { (unsigned char)language, (unsigned char)(language >> 8),
+			(unsigned char)(language >> 16), (unsigned char)(language >> 24) };
+
+		snprintf(path, sizeof(path), "%s/last_language.dat", z_folder);
+		descriptor = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+		if (descriptor < 0 || !map_unpack_write_all(descriptor, bytes, sizeof(bytes), 0) || fsync(descriptor) != 0)
+			whole = 0;
+		if (descriptor >= 0)
+			close(descriptor);
+	}
+	return whole;
+}
+
+#ifdef HALO_LINUX_PLATFORM_LAYER
+/* (map_cache.c's) */
+unsigned long long map_cache_budget(unsigned long long cache_bytes, unsigned long long least);
+
+int map_unpack_after_extraction(const char *destination,
+	void (*progress)(void *context, const char *file, unsigned long long done, unsigned long long total),
+	void *context)
+{
+	char maps_folder[1024], z_folder[1024];
+	size_t length;
+	int whole;
+
+	snprintf(maps_folder, sizeof(maps_folder), "%s/maps", destination);
+	platform_translate_path("z:\\", z_folder, sizeof(z_folder));
+	length = strlen(z_folder);
+	while (length > 1 && z_folder[length - 1] == '/')
+		z_folder[--length] = 0;
+	if (!z_folder[0])
+		return 0;
+	whole = map_unpack_folder(maps_folder, z_folder, (long)XGetLanguage(), map_cache_budget(0,
+		map_unpack_least_budget()), progress, context);
+	platform_log("map cache: %d stock maps unpacked into %s before the game starts", whole, z_folder);
+	return whole;
+}
+#endif

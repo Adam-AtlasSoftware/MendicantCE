@@ -41,6 +41,7 @@ maps, and the installer has the same ones.
 
 #include "port_config.h"
 #include "xiso.h"
+#include "map_unpack.h"
 #include "ce_installer.h"
 #include "game_data_scan.h"
 #include "map_import.h"
@@ -726,6 +727,10 @@ static void *copy_thread(void *context)
 	{
 		succeeded = xiso_extract_maps(copy->source.path, copy->destination, copy_progress, copy, error,
 			sizeof(error)) != 0;
+		/* (and the stock maps unpacked into the cache's slots, on the
+		same bar: a failure leaves only slots copied again later) */
+		if (succeeded)
+			map_unpack_after_extraction(copy->destination, copy_progress, copy);
 	}
 	else
 	{

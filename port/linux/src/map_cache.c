@@ -32,27 +32,10 @@ open map and a copy need.
 #include <sys/mman.h>
 
 #define MAP_CACHE_MEGABYTE (1024ULL * 1024ULL)
-/* the disk's room the cache never takes: the larger of these */
-#define MAP_CACHE_FREE_MARGIN (2048ULL * MAP_CACHE_MEGABYTE)
-#define MAP_CACHE_FREE_MARGIN_SHARE 20
 
-/* the budget: megabytes game.map_cache_megabytes' (0: the disk's), cache
-the bytes the cache takes now, free and total the disk's (0 unknown),
-least the least it may be */
+/* (map_unpack.c's, which the first start's unpack before the game shares) */
 unsigned long long map_cache_choose_budget(long megabytes, unsigned long long cache, unsigned long long free,
-	unsigned long long total, unsigned long long least)
-{
-	unsigned long long margin = total / MAP_CACHE_FREE_MARGIN_SHARE;
-	unsigned long long budget;
-
-	if (margin < MAP_CACHE_FREE_MARGIN)
-		margin = MAP_CACHE_FREE_MARGIN;
-	if (megabytes > 0)
-		budget = (unsigned long long)megabytes * MAP_CACHE_MEGABYTE;
-	else
-		budget = cache + free > margin ? cache + free - margin : 0;
-	return budget > least ? budget : least;
-}
+	unsigned long long total, unsigned long long least);
 
 unsigned long long map_cache_budget(unsigned long long cache_bytes, unsigned long long least)
 {
