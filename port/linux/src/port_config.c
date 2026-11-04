@@ -1308,9 +1308,6 @@ static const struct config_setting config_settings[] =
 	{ "network.browser_show_race", _config_boolean, "true", "HALO_NET_BROWSER_SHOW_RACE", _environment_value,
 		_platform_all,
 		"The server browsers list Race games (their Filters page)." },
-	{ "network.browser_search", _config_string, "\"\"", "HALO_NET_BROWSER_SEARCH", _environment_value, _platform_all,
-		"The server browsers list only games whose server name or map has\n"
-		"these words, in any case; empty lists every game (their Filters page)." },
 	{ "friends.share_status", _config_boolean, "true", "HALO_FRIENDS_SHARE_STATUS", _environment_value, _platform_all,
 		"Show your friends that you are online, and where (the menus, a party,\n"
 		"a game), and let them join you (Multiplayer > FRIENDS). Only your\n"

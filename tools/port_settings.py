@@ -543,7 +543,7 @@ REMAP_HANDLERS = ['<on event="x" run="port controller clear"/>',
 # menu_functions.c's discord_account_show fills in each frame: a link's (what
 # the page it opens is at), an action's (what it does, its state); and
 # hdr_display_show's, the display's peak
-SETTINGS_STATUS_ROWS = {"discord_account", "link_status", "link_unlink", "browser_search",
+SETTINGS_STATUS_ROWS = {"discord_account", "link_status", "link_unlink",
                         *(f"link_master_{n}" for n in range(1, 5)), "hdr_display",
                         "viewmodel_weapon_reset",
                         "remap_player", "remap_group", *(f"pad_{n}" for n in range(1, REMAP_ROWS + 1))}
@@ -1225,11 +1225,6 @@ PAGES = {
             ("PING", "network.browser_ping", BROWSER_PINGS,
              "Lists only the games whose ping is under this.|A game whose ping is not known is listed: a local "
              "network game's, a dedicated server's, one still being timed.", None),
-            # (the search's words typed into its value: menu_functions.c's
-            # browser_search_edit)
-            ("SEARCH", None, None,
-             "Lists only the games whose server name or map has these words. Select it and type; Enter keeps "
-             "them. Empty them to list every game.", None, "browser_search", "port browser search"),
             (SECTION, "GAME TYPES"),
             ("CAPTURE THE FLAG", "network.browser_show_ctf", SHOW_HIDE,
              "Lists Capture the Flag games, OpenCE's kinds of it too.", None),
@@ -2321,6 +2316,7 @@ PING_BARS = f"{MT}/ping_bars"
 # and bitmap, whose frames are none, a favorite (gold), a favorite offline
 # (grey) and the outline a click on the row focused stars (Lucide's star,
 # port/assets/icons/lucide)
+LUCIDE = Path(__file__).resolve().parent.parent / "port/assets/icons/lucide"
 FAVORITE_STAR_WIDGET = f"{MT}/join_game/server_item_favorite"
 FAVORITE_STAR = f"{MT}/join_game/favorite_star"
 FAVORITE_STAR_STYLES = [None, ("#E8C547", "#E8C547"), ("#7F8A99", "#7F8A99"), ("none", "#2896FF")]
@@ -3967,8 +3963,21 @@ BROWSER_WIDE_PANEL = (-WIDE_HALF + BROWSER_WIDE_LIST, WIDE_EXTRA - BROWSER_WIDE_
 # left out for a number too wide for both: menu_functions.c's browser_row_show)
 BROWSER_PING_BARS = 24
 # (a title wider or narrower than its column: Players' ends where its
-# column ends, with its numbers)
-BROWSER_HEADER_WIDTHS = {"type": 40, "players": 70}
+# column ends, with its numbers; Server's and Map's as wide as their words
+# and sort arrow, their search's magnifying glass after them)
+BROWSER_HEADER_WIDTHS = {"type": 40, "players": 70, "server_name": 76, "map": 50}
+# the columns searched (menu_functions.c's browser_searches): each title's
+# magnifying glass (op_search_<column>, after it), the field typed into in
+# its place (op_search_field_<column>, its column's width but the X's) and
+# its X (op_search_clear_<column>, at the column's right), each 16 units
+# square but the field
+BROWSER_SEARCHED = ("server_name", "map")
+BROWSER_SEARCH_ICON = f"{MT}/join_game/search_icon"
+BROWSER_SEARCH_CLEAR = f"{MT}/join_game/search_clear"
+BROWSER_SEARCH_X_GAP = 2
+# (the list's CLEAR SEARCH, under the words for no games, while the searches
+# hide every game: menu_functions.c's browser_clear_show)
+BROWSER_CLEAR = (164, 24)
 # the column titles: (widget, words, column)
 BROWSER_HEADERS = [("op_sort_header_server_name", "SERVER", "server_name"), ("op_sort_header_map", "MAP", "map"),
                    ("op_sort_header_type", "MODE", "type"), ("op_sort_header_players", "PLAYERS", "players"),
@@ -3977,19 +3986,26 @@ BROWSER_TICK_BADGE = 30
 # the panel's pills: a game's kind and tick rate, and OpenCE's
 BROWSER_PILL, BROWSER_WIDE_PILL = 64, 132
 BROWSER_JOIN = (148, 24)
+# (the list's CLEAR SEARCH: under the words for no games)
+BROWSER_CLEAR_TOP = 288
 # the footer's prompts: (widget, words, x, width, its function); the
 # browser shows those of its list (menu_functions.c's browser_prompts_show)
 BROWSER_PROMPTS = [
-    ("prompt_favorite", "%y-button FAVORITE", 28, 124, '<on event="a" run="port browser favorite"/>'),
-    ("prompt_refresh", "%right-trigger REFRESH", 156, 124, '<on event="a" run="port browser refresh"/>'),
-    ("prompt_paste", "%right-trigger PASTE LINK", 156, 144, '<on event="a" run="port browser refresh"/>'),
+    ("prompt_favorite", "%y-button FAVORITE", 24, 108, '<on event="a" run="port browser favorite"/>'),
+    ("prompt_refresh", "%right-trigger REFRESH", 134, 102, '<on event="a" run="port browser refresh"/>'),
+    ("prompt_paste", "%right-trigger PASTE LINK", 134, 124, '<on event="a" run="port browser refresh"/>'),
+    # (the searches, but Join by Link's: the server's, then the map's, then
+    # the server's again: menu_functions.c's browser_search_next)
+    ("prompt_search", "%right-thumb SEARCH", 238, 97, '<on event="a" run="port browser search next"/>'),
     # (the next column's title sorts: menu_functions.c's browser_sort_choose)
-    ("prompt_sort", "%x-button SORT", 304, 100, '<on event="a" run="port browser sort"/>'),
+    ("prompt_sort", "%x-button SORT", 337, 90, '<on event="a" run="port browser sort"/>'),
     # (the Filters page, but Join by Link's: menu_functions.c's browser_filters_open)
-    ("prompt_filters", "%left-trigger FILTERS", 408, 100,
+    ("prompt_filters", "%left-trigger FILTERS", 429, 97,
      f'<on event="a" run="port browser filters" open="{_page_screen(*BROWSER_FILTERS)}"/>'),
-    ("prompt_back", "%b-button BACK", 516, 96, '<on event="a" run="mouse emit back event"/>'),
+    ("prompt_back", "%b-button BACK", 528, 88, '<on event="a" run="mouse emit back event"/>'),
 ]
+# (six prompts across 4:3: their words closer to their highlights' left)
+BROWSER_PROMPT_TEXT_X = 5
 # Multiplayer's: its list's items (and its two pages': CREATE GAME's and
 # CO-OP CAMPAIGN's), the panel beside them, the line over EDIT GAMETYPES
 HUB = f"{MT}/hub"
@@ -4105,7 +4121,7 @@ def parts_pictures() -> list:
              [(framed(BROWSER_LIST_WIDTH, BROWSER_ROW_HEIGHT, "#0d3a7a", 0.9, "#8cc8ff"), BROWSER_LIST_WIDTH,
                BROWSER_ROW_HEIGHT)])]
     prompt_widths = sorted({width for *_, width, _ in BROWSER_PROMPTS + HUB_PROMPTS + PARTY_PROMPTS +
-                            LOBBY_PROMPTS + FRIENDS_PROMPTS})
+                            LOBBY_PROMPTS + FRIENDS_PROMPTS} | {BROWSER_CLEAR[0]})
     join_w, join_h = BROWSER_JOIN
     return [
         # (Settings' tab, then its current one: menu_functions.c's
@@ -4131,6 +4147,14 @@ def parts_pictures() -> list:
                                        (framed(join_w, join_h, "#2a6fe0", 1.0, "#b8dbff"), join_w, join_h)]),
         *lobby_pictures(framed, highlight),
         *touch_pictures(),
+        # (the searches' fields, magnifying glass and X: Lucide's,
+        # port/assets/icons/lucide)
+        *((part_outline(width, 16), [(framed(width, 16, "#000e23", 0.9, "#2f7fff", 4), width, 16),
+                                     (framed(width, 16, "#0d3a7a", 0.9, "#b8dbff", 4), width, 16)])
+          for width in sorted({place[2] for column in BROWSER_SEARCHED for place in _search_places(column)
+                               if place[0] == "op_search_field"})),
+        (BROWSER_SEARCH_ICON, browser_search_frames(LUCIDE, "search")),
+        (BROWSER_SEARCH_CLEAR, browser_search_frames(LUCIDE, "x")),
     ]
 
 
@@ -4197,7 +4221,7 @@ def _tab_strip(base: str, strip: str, tabs: list, handlers: list) -> list:
     return lines
 
 
-def _prompts(base: str, bar: str, prompts: list, defined: tuple = ()) -> list:
+def _prompts(base: str, bar: str, prompts: list, defined: tuple = (), text_x: int = 8) -> list:
     """a footer of key prompts, a bar of buttons: each its button's picture
     in its words (the device's, menu_functions.c's), highlighted while it
     has the focus, and its function run by A or a click (those another
@@ -4209,7 +4233,7 @@ def _prompts(base: str, bar: str, prompts: list, defined: tuple = ()) -> list:
         lines += _widget(f"{base}/{name}", [("type", "text"), ("width", width), ("height", PART_PROMPT_HEIGHT),
                                            ("wide", prompt_wide(x, width)),
                                            ("bitmap", part_highlight(width, PART_PROMPT_HEIGHT)), ("text", words),
-                                           ("font", "ui\\small_ui"), ("color", PART_TEXT), ("text_x", 8),
+                                           ("font", "ui\\small_ui"), ("color", PART_TEXT), ("text_x", text_x),
                                            ("text_y", caps_text_y(PART_PROMPT_HEIGHT))],
                          [handler, handler.replace('event="a"', 'event="start"'),
                           '<on event="left_mouse" run="mouse emit accept event"/>'])
@@ -4261,6 +4285,7 @@ def _browser() -> list:
                      '<on event="x" run="port browser sort"/>', '<on event="y" run="port browser favorite"/>',
                      '<on event="right_trigger" run="port browser refresh"/>',
                      f'<on event="left_trigger" run="port browser filters" open="{_page_screen(*BROWSER_FILTERS)}"/>',
+                     '<on event="right_thumb" run="port browser search next"/>',
                      f'<child widget="{base}/header_join_game"/>',
                      f'<child widget="{base}/browser_counts"/>',
                      f'<child widget="{SETTINGS}/tab_prompt_previous" x="{WIDE_MARGIN}" y="{SETTINGS_TABS_TOP}" '
@@ -4303,29 +4328,57 @@ def _browser() -> list:
                       f'<child widget="{base}/join_game_header" y="{BROWSER_HEADERS_TOP}"/>',
                       *rows,
                       f'<child widget="{base}/browser_join_bar" y="{panel_top + panel_height - BROWSER_JOIN[1] - 10}"/>',
+                      f'<child widget="{base}/browser_clear_bar" y="{BROWSER_CLEAR_TOP}"/>',
                       f'<child widget="{base}/join_game_button_bar" y="414"/>'])
     lines += _tab_strip(base, "browser_tabs", BROWSER_TABS, ['<on event="a" run="port browser tab"/>',
                                                              '<on event="start" run="port browser tab"/>'])
     # (the column titles: A or a click sorts by one, again the other way;
     # its arrow says which way: menu_functions.c's browser_sort_headers_show)
+    # (and after Server's and Map's, their searches: the magnifying glass,
+    # or the field typed into and its X, which A, Start or a click begin,
+    # menu_functions.c's browser_search_edit and browser_search_clear)
+    headers = []
+    for name, _, column in BROWSER_HEADERS:
+        headers.append(f'<child widget="{base}/{name}" x="{BROWSER_LIST_X + _header_x(column)}"/>')
+        if column in BROWSER_SEARCHED:
+            headers += [f'<child widget="{base}/{part}_{column}" x="{BROWSER_LIST_X + x}"/>'
+                        for part, x, _ in _search_places(column)]
     lines += _widget(f"{base}/join_game_header", [("type", "column_list"), ("width", 640), ("height", 16),
                                                   ("flags", "pass_unhandled_to_focused_child left_right_tabs_items")],
-                     [f'<child widget="{base}/{name}" x="{BROWSER_LIST_X + _header_x(column)}"/>'
-                      for name, _, column in BROWSER_HEADERS])
+                     headers)
     for name, words, column in BROWSER_HEADERS:
         width = BROWSER_HEADER_WIDTHS.get(column, BROWSER_COLUMNS[column][1])
         right = column in ("players", "ping")
         # (over its column, on a wide screen too: the list's move and the
-        # column's, its growth)
+        # column's, its growth; a searched column's as wide as its words, its
+        # magnifying glass after it)
         moved, grown = BROWSER_WIDE_COLUMNS[column]
         lines += _widget(f"{base}/{name}", [("type", "text"), ("width", width), ("height", 16), ("text", words),
                                            ("font", "ui\\small_ui"), ("color", PART_DIM),
                                            ("align", "right" if right else None),
-                                           ("wide", wide(-WIDE_HALF + moved, grown))],
+                                           ("wide", wide(-WIDE_HALF + moved,
+                                                         0 if column in BROWSER_SEARCHED else grown))],
                          ['<on event="a" run="gamespy select header"/>',
                           '<on event="start" run="gamespy select header"/>',
                           '<on event="left_mouse" run="mouse emit accept event"/>',
                           f'<child widget="{base}/header_sort_arrows"/>'])
+    search = ['<on event="a" run="port browser search"/>', '<on event="start" run="port browser search"/>',
+              '<on event="left_mouse" run="mouse emit accept event"/>']
+    clear = [line.replace('"port browser search"', '"port browser search clear"') for line in search]
+    for column in BROWSER_SEARCHED:
+        moved, grown = BROWSER_WIDE_COLUMNS[column]
+        (_, _, field_width), = [place for place in _search_places(column) if place[0] == "op_search_field"]
+        lines += _widget(f"{base}/op_search_{column}", [("width", 16), ("height", 16),
+                                                        ("bitmap", BROWSER_SEARCH_ICON),
+                                                        ("wide", wide(-WIDE_HALF + moved))], search)
+        lines += _widget(f"{base}/op_search_field_{column}",
+                         [("type", "text"), ("width", field_width), ("height", 16),
+                          ("bitmap", part_outline(field_width, 16)), ("font", "ui\\small_ui"),
+                          ("color", "#FFFFFFFF"), ("text_x", 4), ("text_y", caps_text_y(16)),
+                          ("text_flags", "no_focus_test"), ("wide", wide(-WIDE_HALF + moved, grown))], search)
+        lines += _widget(f"{base}/op_search_clear_{column}", [("width", 16), ("height", 16),
+                                                              ("bitmap", BROWSER_SEARCH_CLEAR),
+                                                              ("wide", wide(-WIDE_HALF + moved + grown))], clear)
     lines += _widget(f"{base}/header_sort_arrows", [("width", 16), ("height", 16)],
                      [f'<child widget="{base}/header_sort_up_arrow"/>',
                       f'<child widget="{base}/header_sort_down_arrow"/>'])
@@ -4420,8 +4473,42 @@ def _browser() -> list:
                                              ("color", "#FFFFFFFF"), ("text_x", 12), ("text_y", caps_text_y(join_h))],
                      ['<on event="a" run="gamespy select button"/>', '<on event="start" run="gamespy select button"/>',
                       '<on event="left_mouse" run="mouse emit accept event"/>'])
-    lines += _prompts(base, "join_game_button_bar", BROWSER_PROMPTS)
+    # (CLEAR SEARCH, under the words for no games while the searches hide
+    # every game: menu_functions.c's browser_clear_show)
+    clear_w, clear_h = BROWSER_CLEAR
+    lines += _widget(f"{base}/browser_clear_bar", [("type", "column_list"), ("width", 640), ("height", clear_h),
+                                                   ("flags", "pass_unhandled_to_focused_child")],
+                     [f'<child widget="{base}/button_clear_search" '
+                      f'x="{BROWSER_LIST_X + (BROWSER_LIST_WIDTH - clear_w) // 2}"/>'])
+    lines += _widget(f"{base}/button_clear_search", [("type", "text"), ("width", clear_w), ("height", clear_h),
+                                                     ("bitmap", part_highlight(clear_w, clear_h)),
+                                                     ("wide", wide(-WIDE_HALF + BROWSER_WIDE_LIST // 2)),
+                                                     ("text", "%a-button CLEAR SEARCH"), ("font", "ui\\small_ui"),
+                                                     ("color", PART_TEXT), ("text_x", 8),
+                                                     ("text_y", caps_text_y(clear_h))],
+                     ['<on event="a" run="port browser search clear"/>',
+                      '<on event="start" run="port browser search clear"/>',
+                      '<on event="left_mouse" run="mouse emit accept event"/>'])
+    lines += _prompts(base, "join_game_button_bar", BROWSER_PROMPTS, text_x=BROWSER_PROMPT_TEXT_X)
     return lines
+
+
+def _search_places(column: str) -> list:
+    """a searched column's parts in a row's places: (name, x, width) of its
+    magnifying glass (after its title), its field (from the column's left
+    to its X) and its X (at the column's right)"""
+    x, width = BROWSER_COLUMNS[column]
+    clear_x = x + width - 16
+    return [("op_search", _header_x(column) + BROWSER_HEADER_WIDTHS[column], 16),
+            ("op_search_field", x, clear_x - BROWSER_SEARCH_X_GAP - x), ("op_search_clear", clear_x, 16)]
+
+
+def browser_search_frames(icons: Path, name: str) -> list:
+    """a search's icon (Lucide's search or x), 16 pixels square: blue, and
+    white while it has the focus"""
+    svg = (icons / f"{name}.svg").read_text()
+    return [(svg.replace('stroke="currentColor"', f'stroke="{color}"').replace('width="24"', 'width="16"')
+             .replace('height="24"', 'height="16"'), 16, 16) for color in ("#2896FF", "#FFFFFF")]
 
 
 def _hub_panel(folder: str, place: tuple, wide_panel: tuple) -> list:
