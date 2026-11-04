@@ -1374,6 +1374,10 @@ static void event_handler_dispatch(
 static boolean ui_widget_load_children_recursive(
 	struct widget_instance *widget,
 	struct ui_widget_definition *definition);
+/* port: whether the main menu's menus and music wait for the game's start's
+phases before them (main.c) */
+boolean main_startup_holds_main_menu(
+	void);
 /* port: whether the tag is one of the menus' (port/linux/game/menu_tags.c) */
 boolean pc_menu_tag(
 	long tag_index);
@@ -5393,6 +5397,11 @@ void main_screen_shell_load(
 		perform_filesystem_initialization();
 		input_abstraction_reset_controller_detection_timer();
 	}
+	/* port: the menus and music wait for the game's start's phases before
+	them: the intro movie, then the menus' pictures (main.c's
+	main_startup_update, which loads them once those have ended) */
+	if (load_main_menu && main_startup_holds_main_menu())
+		load_main_menu = FALSE;
 	if (load_main_menu)
 	{
 		attract_mode_reset_timer();

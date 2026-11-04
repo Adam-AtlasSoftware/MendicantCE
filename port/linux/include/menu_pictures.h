@@ -6,7 +6,8 @@ ui\shell\bitmaps\sp_levels and mp_map_grafix, 140x114 in 256x128 frames)
 drawn again, sharp, from the player's own maps: a camera's place for each
 (port/assets/pictures, embedded by tools/embed_assets.py: never a picture),
 rendered once by the game itself, in its own window, under the loading
-screen as the main menu first shows ("Preparing menu pictures":
+screen, as a phase of its start between the intro movie and the main menu
+("Preparing menu pictures":
 port/linux/game/menu_pictures_render.c),
 kept in the data folder, and drawn in place of the original frame
 (port/linux/src/menu_pictures.c). Any picture that cannot be (its map
@@ -33,6 +34,14 @@ enum
 	MAXIMUM_MENU_PICTURE_CHECKSUMS = 4,
 	/* the most poses */
 	MAXIMUM_MENU_PICTURES = 64,
+};
+
+/* the phases of the game's start (menu_pictures_startup_next) */
+enum
+{
+	_menu_pictures_startup_intro,
+	_menu_pictures_startup_pictures,
+	_menu_pictures_startup_done,
 };
 
 /* what to do with a picture (menu_picture_decide) */
@@ -138,8 +147,9 @@ void menu_picture_note_begin(struct menu_picture_note *note, struct menu_picture
 void menu_picture_note_end(struct menu_picture_note *note, enum menu_picture_result result, long scale);
 void menu_picture_note_give_up(struct menu_picture_note *note);
 int menu_picture_overdue(unsigned long long now, unsigned long long pass_began, unsigned long long picture_began);
-int menu_pictures_may_begin(int main_menu_loaded, int movie_playing, int looked);
-char const *menu_picture_not_a_scene(unsigned char const *rgba, unsigned long width, unsigned long height);
+long menu_pictures_startup_next(long phase, int main_menu_loaded, int movie_open, int pass_exclusive);
+int menu_pictures_startup_holds_main_menu(long phase, int pass_exclusive);
+int menu_pictures_phase_exclusive(int running, int ended);
 int menu_picture_png_whole(unsigned char const *head, unsigned long head_size, unsigned char const *tail,
 	unsigned long tail_size, unsigned long width, unsigned long height);
 int menu_picture_note_parse(char const *text, struct menu_picture_note *note);
@@ -162,14 +172,19 @@ unsigned long menu_picture_map_checksum(char const *map);
 /* the pass stopped where it is, as the game stops (the error a damaged
 disc gives): the picture being made given up, the loading screen given back */
 void menu_pictures_abandon(char const *why);
-/* each frame of the game's main loop, before it is drawn: in the main menu
-first shown, the pictures to render looked for, and if there are any, each
-rendered in turn (its map loaded, the scene set, a frame drawn and kept),
-the preparing screen shown meanwhile, then the main menu again */
+/* the pass begun, as the game's start reaches its phase (main.c's
+main_startup_update): TRUE if there are pictures to make, the first begun */
+int menu_pictures_begin(void);
+/* from then until it asks for the main menu at its end: the pass has the
+game to itself (menu_pictures_phase_exclusive) */
+int menu_pictures_exclusive(void);
+/* each frame of the game's main loop, before it is drawn, while the pass
+runs: each picture rendered in turn (its map loaded, the scene set, a frame
+drawn and kept), the preparing screen shown meanwhile, then the main menu */
 void menu_pictures_frame(int main_menu_loaded);
-/* while the pictures are rendered (from the main menu first shown to the
-main menu again, under the loading screen): the main loop draws only the
-frames kept (menu_pictures_frame_drawn) */
+/* while the pictures are rendered (from the pass begun to the main menu
+shown, under the loading screen): the main loop draws only the frames kept
+(menu_pictures_frame_drawn) */
 int menu_pictures_preparing(void);
 int menu_pictures_frame_drawn(void);
 /* the maps loaded now are the pass's, drawn as they shipped: no mod is

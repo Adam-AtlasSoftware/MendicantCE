@@ -162,8 +162,13 @@ def updater_defines(release: bool) -> str:
     if not number.isdigit():
         number = "0"
     flavor = "release" if release else "debug"
+    # (the commit, in the game's log as it starts: CI's, which names a
+    # release's; none for a local build)
+    commit = os.environ.get("GITHUB_SHA", "")[:12]
+    if not re.fullmatch(r"[0-9a-f]*", commit):
+        commit = ""
     return (f'-DHALO_BUILD_NUMBER={number} -DHALO_BUILD_FLAVOR=\\"{flavor}\\" '
-            f'-DHALO_BUILD_REPOSITORY=\\"{build_repository()}\\"')
+            f'-DHALO_BUILD_REPOSITORY=\\"{build_repository()}\\" -DHALO_BUILD_COMMIT=\\"{commit}\\"')
 
 
 def configuration_defines(sln: Any) -> List[str]:

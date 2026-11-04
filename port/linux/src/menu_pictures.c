@@ -6,8 +6,8 @@ sp_levels and mp_map_grafix: 140x114 in the top left of 256x128 frames)
 drawn again, sharp, from the player's own maps (menu_pictures.h).
 
 Each picture's pose (port/assets/pictures: a camera's place, numbers only)
-is rendered once by the game itself, in its own window, as its main menu
-first shows: "Preparing menu pictures" (port/linux/game/menu_pictures_render.c),
+is rendered once by the game itself, in its own window, as a phase of its
+start between the intro movie and the main menu: "Preparing menu pictures" (port/linux/game/menu_pictures_render.c),
 a map at a time, loaded the normal way, the scene set, one frame drawn and
 kept. This file is its platform half: which pictures are rendered and in
 what order (menu_pictures_wanted), each frame kept cut to the picture's
@@ -27,9 +27,7 @@ failure, or the game gone in the middle of one: each render is noted as a
 failure before it starts, and as rendered when it ends); and until it is
 ready. A pose or map changed, a larger
 screen (at the next start), its picture's file gone or cut short, or this
-file's version renders it again. A frame kept that is no scene (one
-colour, or noise: menu_picture_not_a_scene) is a failed render, never a
-picture.
+file's version renders it again.
 Nothing is rendered in runs nobody watches (tests: debug.hidden_window,
 debug.exit_after...), in VR, or with display.menu_pictures off.
 */
@@ -69,14 +67,6 @@ the main menu shows, the pictures not made keeping their originals (a slow
 disc's ten seconds a map is a third of a picture's) */
 #define MENU_PICTURE_TIME_BUDGET 30000000000ULL
 #define MENU_PICTURES_TIME_BUDGET 120000000000ULL
-/* (percent of a picture's neighbouring pixels) a frame kept is not a
-scene's with more alike than this, or more unlike (each channel, on
-average, more than MENU_PICTURE_UNLIKE apart). The 23 poses' scenes have
-3 to 47 alike and 0.3 to 3.4 unlike; the intro movie's frames kept in their
-place (issue 550) 96 to 99 alike, or 10 to 53 unlike */
-#define MENU_PICTURE_MOST_ALIKE 85
-#define MENU_PICTURE_UNLIKE 32
-#define MENU_PICTURE_MOST_UNLIKE 7
 
 /* ---------- prototypes */
 
@@ -251,61 +241,50 @@ int menu_picture_overdue(
 	return now - picture_began > MENU_PICTURE_TIME_BUDGET || now - pass_began > MENU_PICTURES_TIME_BUDGET;
 }
 
-/* whether the pass may begin this frame: once, in the main menu, and never
-while a movie plays (the intro, over the main menu as it first shows). The
-movie holds the texture cache's spare memory, which each map's file copied
-into the cache takes too; it draws its frames over the game's, so the frame
-kept would be the movie's; and its end loads the main menu, over the pass's
-map */
-int menu_pictures_may_begin(
+/* the game's start, in order (main.c's main_startup_update): the intro
+movie (display.movies), if any, played to its end or skipped; then the menus'
+pictures, if any are to be made; then the main menu's menus and music. The
+phase after this one, given the main menu's map loaded, a movie open, and
+whether the pictures' pass has the game (menu_pictures_phase_exclusive); for
+_menu_pictures_startup_pictures from the intro the pass is begun, and with
+none to make the start goes on to the main menu */
+long menu_pictures_startup_next(
+	long phase,
 	int main_menu_loaded,
-	int movie_playing,
-	int looked)
+	int movie_open,
+	int pass_exclusive)
 {
-	return main_menu_loaded && !movie_playing && !looked;
+	switch (phase)
+	{
+	case _menu_pictures_startup_intro:
+		return main_menu_loaded && !movie_open ? _menu_pictures_startup_pictures : phase;
+	case _menu_pictures_startup_pictures:
+		return pass_exclusive ? phase : _menu_pictures_startup_done;
+	default:
+		return _menu_pictures_startup_done;
+	}
 }
 
-/* NULL if a picture (width x height RGBA, cut from the frame kept) looks
-like a scene, else what it looks like instead: one colour nearly
-throughout (a cleared screen, a movie's backdrop: its neighbouring pixels
-all but alike), or noise (memory that is not a picture, drawn as one: its
-neighbouring pixels unlike, nearly everywhere, as no scene's are) */
-char const *menu_picture_not_a_scene(
-	unsigned char const *rgba,
-	unsigned long width,
-	unsigned long height)
+/* whether the main menu's menus and music wait (ui_widget.c's
+main_screen_shell_load): through the intro, and while the pass has the game;
+not once the pass has asked for the main menu at its end */
+int menu_pictures_startup_holds_main_menu(
+	long phase,
+	int pass_exclusive)
 {
-	unsigned long x, y, pairs = 0, alike = 0, unlike = 0;
+	return phase == _menu_pictures_startup_intro || (phase == _menu_pictures_startup_pictures && pass_exclusive);
+}
 
-	for (y = 0; y < height; y++)
-	{
-		for (x = 0; x < width; x++)
-		{
-			unsigned char const *pixel = rgba + (y * width + x) * 4;
-			int side;
-
-			for (side = 0; side < 2; side++)
-			{
-				unsigned char const *next;
-				int difference;
-
-				if (side == 0 ? x + 1 >= width : y + 1 >= height)
-					continue;
-				next = side == 0 ? pixel + 4 : pixel + width * 4;
-				difference = abs(pixel[0] - next[0]) + abs(pixel[1] - next[1]) + abs(pixel[2] - next[2]);
-				pairs++;
-				alike += difference == 0;
-				unlike += difference > MENU_PICTURE_UNLIKE * 3;
-			}
-		}
-	}
-	if (!pairs)
-		return "is empty";
-	if (alike * 100 > pairs * MENU_PICTURE_MOST_ALIKE)
-		return "is one colour, not a scene";
-	if (unlike * 100 > pairs * MENU_PICTURE_MOST_UNLIKE)
-		return "is noise, not a scene";
-	return NULL;
+/* whether the pass has the game to itself (running, and not yet ended: the
+main menu asked for): the map loader, the copy of a map's file into the
+cache and the texture cache's spare memory it takes are the pass's alone, no
+movie starts (bink_playback.c: a movie takes that memory too, and draws
+over the pass's frames), and the main menu's menus are not loaded */
+int menu_pictures_phase_exclusive(
+	int running,
+	int ended)
+{
+	return running && !ended;
 }
 
 static unsigned long picture_be32(unsigned char const *bytes)
@@ -1152,11 +1131,9 @@ int menu_pictures_render_kept(
 	unsigned char *frame = malloc(frame_width * frame_height * 4);
 	struct menu_picture_note note;
 	char path[1100];
-	char const *fault = NULL;
 	int written = 0;
 
-	if (bgra && cut && frame && menu_picture_cut(bgra, width, height, picture->aspect, cut, picture_width, picture_height) &&
-		!(fault = menu_picture_not_a_scene(cut, picture_width, picture_height)))
+	if (bgra && cut && frame && menu_picture_cut(bgra, width, height, picture->aspect, cut, picture_width, picture_height))
 	{
 		if (picture->colour_curve && state->original)
 			menu_picture_colour_curve(cut, picture_width * picture_height, state->original,
@@ -1173,8 +1150,7 @@ int menu_pictures_render_kept(
 	if (!written)
 	{
 		free(frame);
-		/* (a frame that is no scene never kept: the original drawn) */
-		menu_pictures_render_failed(pose, fault ? fault : "was not written");
+		menu_pictures_render_failed(pose, "was not written");
 		return 0;
 	}
 	note = state->noted_before ? state->note_before : (struct menu_picture_note){ 0 };

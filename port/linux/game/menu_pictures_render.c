@@ -10,8 +10,9 @@ menus draw it: ui.map's bitmap itself (the multiplayer map's picture), or a
 menu file's scaled copy of one of its frames (the campaign's cards:
 menu_tags.c's placements).
 
-"Preparing menu pictures": the first time the main menu shows, once the
-intro movie (display.movies) has ended or been skipped, if any
+"Preparing menu pictures": a phase of the game's start of its own (main.c's
+main_startup_update), after the intro movie (display.movies), if any, has
+ended or been skipped, and before the main menu's menus and music: if any
 picture is to be rendered (menu_pictures_wanted: none rendered yet, a pose
 or map changed, a larger screen), the game renders them itself, in its own
 window and process, one map at a time, then shows the main menu. Each map
@@ -38,7 +39,11 @@ frame drawn, each texture it draws with waited for (xbox_texture_cache.c),
 with only the pipelines it draws with made (render_enumerate.c's map's
 enumeration left out), at the window's size, and kept as it is presented
 instead of shown (d3d8_device.c; menu_pictures_render_kept cuts and scales
-it, and keeps nothing that is no scene: menu_picture_not_a_scene). Whatever the player's view settings, the frame is drawn with the
+it). The phase has the game to itself (menu_pictures_exclusive): the map
+loader, the copy of a map's file into the cache and the texture cache's
+spare memory it takes are the pass's alone, no movie starts (bink_playback.c),
+and the main menu's menus are not loaded yet, so a frame kept is the scene
+the pass drew and nothing else. Whatever the player's view settings, the frame is drawn with the
 pose's own field of view, no Panini projection, the reticle in the middle
 and every line drawn (port_config.c's config_picture_view). Sound is off
 meanwhile.
@@ -67,7 +72,6 @@ shown, not the loading screen.
 #include "cseries.h"
 #include "bitmaps/bitmap_group.h"
 #include "bitmaps/bitmaps.h"
-#include "bink/bink_playback.h"
 #include "cache/cache_files.h"
 #include "cache/texture_cache.h"
 #include "cutscene/cinematics.h"
@@ -431,8 +435,8 @@ static void prepare_picture_failed(
 	prepare_next();
 }
 
-/* the pictures to render looked for, as the main menu first shows; and if
-there are any, the first begun */
+/* the pictures to render looked for, as the phase begins; and if there
+are any, the first begun */
 static void prepare_begin(
 	void)
 {
@@ -702,28 +706,29 @@ static void prepare_screen(
 	halo_loading_screen_progress((prepare.done + parts[prepare.state]) / (real)prepare.count, caption);
 }
 
+int menu_pictures_begin(
+	void)
+{
+	if (prepare.state != _prepare_off)
+		return FALSE;
+	prepare_begin();
+	return prepare.state != _prepare_off;
+}
+
+int menu_pictures_exclusive(
+	void)
+{
+	return menu_pictures_phase_exclusive(prepare.state != _prepare_off, prepare.state == _prepare_menu);
+}
+
 void menu_pictures_frame(
 	int main_menu_loaded)
 {
-	static int looked;
-
 	if (prepare.state == _prepare_off)
-	{
-		/* (as the main menu first shows, once the intro movie has ended:
-		menu_pictures_may_begin) */
-		if (!menu_pictures_may_begin(main_menu_loaded, bink_playback_in_progress(), looked))
-			return;
-		looked = TRUE;
-		prepare_begin();
-		if (prepare.state == _prepare_off)
-			return;
-	}
-	else
-	{
-		prepare.picture_frames++;
-		prepare_input();
-		prepare_update(main_menu_loaded);
-	}
+		return;
+	prepare.picture_frames++;
+	prepare_input();
+	prepare_update(main_menu_loaded);
 	if (prepare.state == _prepare_off)
 		return;
 	/* this frame: the game's kept, or none (the loading screen's own on
@@ -765,11 +770,7 @@ int menu_pictures_frame_kept(
 		return FALSE;
 	prepare_phase(_phase_frame);
 	prepare.capture_wanted = FALSE;
-	/* (a movie's frame, drawn over the game's, never kept) */
-	if (bink_playback_in_progress())
-		menu_pictures_render_failed(prepare.poses[prepare.index], "was a movie's frame");
-	else
-		prepare.captured = menu_pictures_render_kept(prepare.poses[prepare.index]);
+	prepare.captured = menu_pictures_render_kept(prepare.poses[prepare.index]);
 	if (!prepare.captured)
 		prepare.frames = 1000;
 	prepare_phase(_phase_keep);
