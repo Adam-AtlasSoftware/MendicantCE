@@ -30,7 +30,7 @@ NEGATIVE_CONTROLS = {
     "only-quoted-spelling": (("result = toml_parse(header.buffer, (int)header.length);",
                               "result = toml_parse(strchr(header.buffer, '\\'') ? \"x\" : header.buffer, "
                               "(int)header.length);"), "config_weapon_line_path", "write_replace"),
-    "zero-kept": (("\tif (!any)\n\t{\n\t\tif (index >= 0)", "\tif (0)\n\t{\n\t\tif (index >= 0)"),
+    "zero-kept": (("\tif (!any)\n\t{\n\t\tif (index >= 0)", "\tif (!any \"zero-kept": (("\tif (!any)\n\t{\n\t\tif (index >= 0)", "\tif (0)\n\t{\n\t\tif (index >= 0)"),\"zero-kept": (("\tif (!any)\n\t{\n\t\tif (index >= 0)", "\tif (0)\n\t{\n\t\tif (index >= 0)"), 0)\n\t{\n\t\tif (index >= 0)"),
                   "config_weapon_store", "write_zero"),
     "unchecked-write": (("\t\tif (check.ok)\n", "\t\tif (1)\n"), "config_viewmodel_weapon_write", "refused"),
     "long-name-no-section": (("\tif (length >= size)\n\t\tlength = size - 1;", "\tif (length >= size)\n\t\treturn 0;"),
