@@ -178,6 +178,10 @@ void map_cache_prefill_update(
 {
 	char const *loaded = cache_file_loaded_map_name();
 
+	/* (none in a copy of the game running beside the one that keeps the
+	cache: cache_slot_folder) */
+	if (!cache_slot_folder_keeps_cache())
+		return;
 	/* the copy made ahead, finished or failed, ended (or ended by the game,
 	or taken over for its load) */
 	if (map_cache_prefill.copying != NONE)

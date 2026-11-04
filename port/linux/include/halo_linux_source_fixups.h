@@ -303,13 +303,25 @@ int halo_server_debug_echo(void);
 /* ... the level its rotation plays next, NULL if none (game_engine.c) */
 char const *server_director_first_level(void);
 /* the cache slots' sources (port/linux/src/xbox_files.c): the size and
-modification time of the map file a slot was copied from, kept beside it,
-so that a slot whose map file has been replaced is not used
+modification time of the map file a slot was copied from, and the name,
+checksum and length of the map its whole copy holds, kept beside it once
+the copy is on the disk, so that a slot whose map file has been replaced,
+or that is not a whole copy of the map its header names, is not used
 (cache_files_windows.c) */
 void cache_slot_source_load(short slot);
-void cache_slot_source_record(short slot, const char *map_path);
+void cache_slot_source_record(short slot, const char *map_path, const char *name, unsigned long checksum,
+	unsigned long file_length);
 void cache_slot_source_forget(short slot);
-int cache_slot_source_matches(short slot, const char *map_path);
+int cache_slot_source_matches(short slot, const char *map_path, const char *name, unsigned long checksum,
+	unsigned long file_length);
+/* ... the folder of this copy of the game's slots, z:\ or, while another
+copy holds that, a z:\cache-N\ of its own (with its backslash) */
+const char *cache_slot_folder(void);
+/* ... whether it is z:\, the cache kept (else a few slots of its own, and
+no copies ahead) */
+int cache_slot_folder_keeps_cache(void);
+/* what was written to a file is on the disk (xbox_files.c) */
+int __stdcall FlushFileBuffers(void *file);
 /* ... and when a slot's map was last played (seconds; 0: never, copied
 by the menus' pictures' pass or ahead), kept with it: the cache's least
 useful map is given up first for room (cache_files_windows.c) */
