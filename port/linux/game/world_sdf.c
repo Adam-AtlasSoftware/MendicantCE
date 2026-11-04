@@ -800,8 +800,13 @@ static void sdf_queue(struct sdf_job *job)
 	struct sdf_job **last;
 	long waiting = 0;
 	int *running;
+	/* (a bake queued while the start-up pass runs waits for its end: the
+	frames' check, world_sdf_frame, lets it go) */
+	int hold = menu_pictures_preparing();
 
 	pthread_mutex_lock(&world_sdf_lock);
+	if (bake && hold)
+		world_sdf.hold = 1;
 	running = bake ? &world_sdf.baker_running : &world_sdf.looker_running;
 	if (!*running)
 	{
