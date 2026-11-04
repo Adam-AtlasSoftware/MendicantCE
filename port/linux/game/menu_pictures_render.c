@@ -90,6 +90,7 @@ shown, not the loading screen.
 #include "text/draw_string.h"
 
 #include "menu_pictures.h"
+#include "world_sdf.h"
 #include "../src/loading_screen.h"
 
 /* sdl_platform.c's: a map load's loading screen given back */
@@ -168,6 +169,9 @@ void main_menu_pictures_end(void);
 /* port_config.c's: the view as a pose was found with, whatever the
 player's settings */
 void config_picture_view(int on);
+/* world_sdf.c's: whether a stock map is missing its distance field
+(display.ambient_occlusion "world": the pass loads it for that alone) */
+int world_sdf_startup_map_wanted(char const *map);
 
 /* ---------- globals */
 
@@ -178,6 +182,9 @@ static struct
 	done (rendered or failed) */
 	long poses[MAXIMUM_MENU_PICTURES];
 	long count;
+	/* a pose whose map is loaded for its distance field alone, not its
+	picture (world_sdf.h) */
+	int fields_only[MAXIMUM_MENU_PICTURES];
 	long index;
 	long done, made;
 	long frames, picture_frames;
@@ -386,7 +393,8 @@ static void prepare_next(
 	prepare.ticks = 0;
 	prepare.quiet_ticks = 0;
 	prepare.frames = prepare.picture_frames = 0;
-	menu_pictures_render_begin(pose);
+	if (!prepare.fields_only[prepare.index])
+		menu_pictures_render_begin(pose);
 	/* (its map's file copied into the cache first, a frame at a time:
 	_prepare_load) */
 	prepare.state = _prepare_load;
@@ -428,7 +436,11 @@ static void prepare_picture_failed(
 {
 	long pose = prepare.poses[prepare.index];
 
-	menu_pictures_render_failed(pose, why);
+	if (prepare.fields_only[prepare.index])
+		platform_log("menu pictures: %s %s: its distance field is baked when it is played", menu_picture_poses[pose].map,
+			why);
+	else
+		menu_pictures_render_failed(pose, why);
 	prepare_picture_log(pose, "failed");
 	prepare.index++;
 	prepare.done++;
@@ -443,6 +455,31 @@ static void prepare_begin(
 	long index;
 
 	prepare.count = menu_pictures_wanted(prepare.poses, MAXIMUM_MENU_PICTURES);
+	if (prepare.count < 0)
+		prepare.count = 0;
+	csmemset(prepare.fields_only, 0, sizeof(prepare.fields_only));
+	/* (display.ambient_occlusion "world": each stock map missing its
+	distance field loaded too, once, where no picture of it is made) */
+	if (world_sdf_startup_wanted())
+	{
+		long pose;
+
+		for (pose = 0; pose < (long)menu_picture_pose_count && prepare.count < MAXIMUM_MENU_PICTURES; pose++)
+		{
+			char const *map = menu_picture_poses[pose].map;
+			long other;
+
+			for (other = 0; other < prepare.count && strcasecmp(menu_picture_poses[prepare.poses[other]].map, map);
+				other++)
+			{
+			}
+			if (other == prepare.count && world_sdf_startup_map_wanted(map))
+			{
+				prepare.fields_only[prepare.count] = TRUE;
+				prepare.poses[prepare.count++] = pose;
+			}
+		}
+	}
 	if (prepare.count <= 0)
 		return;
 	platform_log("menu pictures: preparing %ld at %ld times their size", prepare.count, menu_pictures_scale());
@@ -451,7 +488,7 @@ static void prepare_begin(
 	csmemset(prepare.totals, 0, sizeof(prepare.totals));
 	for (index = 0; index < prepare.count; index++)
 	{
-		if (menu_picture_poses[prepare.poses[index]].colour_curve)
+		if (!prepare.fields_only[index] && menu_picture_poses[prepare.poses[index]].colour_curve)
 			prepare_keep_original(prepare.poses[index]);
 	}
 	config_picture_view(TRUE);
@@ -490,7 +527,8 @@ static void prepare_update(
 		platform_log("menu pictures: out of time: the pass ends, the %ld not made keep their originals",
 			prepare.count - prepare.made);
 		prepare.capture_wanted = FALSE;
-		menu_pictures_render_failed(prepare.poses[prepare.index], "took too long");
+		if (!prepare.fields_only[prepare.index])
+			menu_pictures_render_failed(prepare.poses[prepare.index], "took too long");
 		prepare_picture_log(prepare.poses[prepare.index], "failed");
 		prepare.index = prepare.count;
 		prepare_next();
@@ -532,6 +570,18 @@ static void prepare_update(
 				}
 			}
 			game_time_set_speed(0.0f);
+			/* (display.ambient_occlusion "world": the BSP the map starts in
+			baked in the background, where nobody waits to play) */
+			world_sdf_startup_map_loaded();
+			if (prepare.fields_only[prepare.index])
+			{
+				platform_log("menu pictures: %s loaded for its distance field", picture->map);
+				prepare.index++;
+				prepare.done++;
+				prepare.made++;
+				prepare_next();
+				break;
+			}
 			prepare.state = _prepare_opening;
 		}
 		else if (++prepare.frames > PREPARE_LOAD_FRAMES)
@@ -602,7 +652,9 @@ static void prepare_update(
 		break;
 	}
 	case _prepare_structure:
-		/* (the structure switched at this frame's start) */
+		/* (the structure switched at this frame's start: its field baked
+		too, if it is another BSP) */
+		world_sdf_startup_map_loaded();
 		prepare_command("debug_camera_set \"0 0 0 0 0 0 50\"");
 		prepare.line = 0;
 		prepare.state = _prepare_objects;

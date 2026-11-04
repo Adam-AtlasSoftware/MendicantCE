@@ -929,6 +929,12 @@ static long long dispatch(long long number, long long a, long long b, long long 
 	case __NR_sched_yield:
 		sched_yield();
 		return 0;
+	/* the calling thread's priority (who 0, as Linux sets a thread's):
+	niced, the background's quality of service */
+	case __NR_setpriority:
+		if (a == PRIO_PROCESS && b == 0 && (int)c > 0)
+			pthread_set_qos_class_self_np((int)c >= 10 ? QOS_CLASS_BACKGROUND : QOS_CLASS_UTILITY, 0);
+		return 0;
 	case __NR_getrandom:
 		arc4random_buf(GUEST(void *, a), (size_t)(uint32_t)b);
 		return (uint32_t)b;

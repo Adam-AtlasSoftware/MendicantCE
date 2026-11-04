@@ -17,9 +17,15 @@ The schedule (docs/world-ao.md, "The bake's schedule"):
   slices on every processor at the lowest priority, writes it to the cache
   and hands it back;
 - the first launch's "Preparing menu pictures" pass (menu_pictures_render.c)
-  bakes every stock map's BSPs as it loads them, where nobody waits to play
+  bakes the BSPs of every stock map it loads (the one each map starts in,
+  and each picture's), where nobody waits to play
   (world_sdf_startup_map_loaded), and runs for them alone when only fields
-  are missing (world_sdf_startup_wanted);
+  are missing (world_sdf_startup_wanted). Only the loaded BSP's tags are
+  in memory, and the pass switches to no other BSP for them (repeated
+  switches once leaked the device's groups, #506): a campaign map's other
+  BSPs are baked in the background the first time the game switches to
+  them (world_sdf_bsp_switched: a look in the cache, the copy a few frames
+  later, never in the switch), the proxies alone shading them till then;
 - a field found or baked is uploaded at most WORLD_SDF_UPLOAD_BYTES a frame,
   then fades in over a second (world_sdf_fade); until then the proxies
   alone shade.
@@ -1048,31 +1054,6 @@ void world_sdf_startup_map_loaded(void)
 		return;
 	if (!sdf_bake_begin(&key))
 		platform_log("world sdf: %s bsp %d has no geometry to bake", key.map, (int)key.bsp);
-}
-
-/* the loaded map's next BSP whose field the pass has not tried and is not
-cached (the pass switches to it, and calls world_sdf_startup_map_loaded),
-or -1 (menu_pictures_render.c's) */
-short world_sdf_startup_missing_bsp(void)
-{
-	struct scenario *scenario = global_scenario_get();
-	struct sdf_key key;
-	short bsp;
-
-	if (sdf_off() || !scenario || !sdf_key_loaded(&key))
-		return -1;
-	for (bsp = 0; bsp < scenario->structure_bsp_references.count && bsp < 64; bsp++)
-	{
-		char path[1100];
-
-		key.bsp = bsp;
-		if (sdf_tried(&key))
-			continue;
-		sdf_path(&key, path, sizeof(path));
-		if (!sdf_cache_present(path, key.checksum, (unsigned long)bsp))
-			return bsp;
-	}
-	return -1;
 }
 
 /* whether a stock map (a10) is missing its first BSP's field: the pass

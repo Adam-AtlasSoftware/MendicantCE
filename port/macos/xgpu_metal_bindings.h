@@ -43,9 +43,10 @@ read (XGPU_MSL_TEXTURE_AMBIENT_OCCLUSION) */
 #define XGPU_METAL_TEXTURE_AMBIENT_OCCLUSION 4
 #define XGPU_METAL_TEXTURE_STAGE_COUNT 5
 /* display.ambient_occlusion "world" (port/linux/src/xgpu_stream.h): the
-field past the stages (XGPU_MSL_TEXTURE_WORLD_SDF; workstream D raises
-XGPU_METAL_TEXTURE_STAGE_COUNT when it binds it) and the window's block
-(XGPU_MSL_BUFFER_WORLD_AO) */
+field past the stages (XGPU_MSL_TEXTURE_WORLD_SDF) and the window's block
+(XGPU_MSL_BUFFER_WORLD_AO), bound by xgpu_metal_set_world_ao, not as a
+stage: a 3D texture at stage 5 would also be bound at the combiner's place
+for it, XGPU_METAL_COMBINER_TEXTURE_3D + 5, which is a cube stage's */
 #define XGPU_METAL_TEXTURE_WORLD_SDF 5
 #define XGPU_METAL_BUFFER_WORLD_AO 23
 

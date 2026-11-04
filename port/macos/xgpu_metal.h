@@ -132,6 +132,8 @@ enum
 	/* ASTC 4x4 (LDR): DXT textures transcoded on a GPU without BC
 	(port/linux/astc/xgpu_astc.h) */
 	XGPU_METAL_FORMAT_ASTC,
+	/* a signed byte (display.ambient_occlusion "world"'s distance field) */
+	XGPU_METAL_FORMAT_R8_SNORM,
 	XGPU_METAL_FORMAT_COUNT
 };
 
@@ -488,6 +490,21 @@ pixel shaders that light with them read (XGPU_METAL_BUFFER_DYNAMIC_LIGHTS,
 _DYNAMIC_LIGHT_CELLS): until set again (XGPU_METAL_SOURCE_NONE: none bound;
 a ring's source is the frame's alone) */
 void xgpu_metal_set_dynamic_lights(struct xgpu_metal_source block, struct xgpu_metal_source cells);
+/* display.ambient_occlusion "world"'s field (a 3D texture: 0 none) and the
+window's block (struct xgpu_world_ao_block), which the shaders that read
+them take at XGPU_METAL_TEXTURE_WORLD_SDF (with a constexpr sampler of
+their own) and XGPU_METAL_BUFFER_WORLD_AO, both stages: until set again (a
+ring's source is the frame's alone) */
+void xgpu_metal_set_world_ao(uint32_t field, struct xgpu_metal_source block);
+/* their resources (xgpu_metal_world_ao.c): slices z_first to z_first +
+z_count - 1 of a width x height x depth field of signed bytes, in the
+frame's order (width 0: let go of; until its last slices, a 1x1x1
+far-outside stand-in is bound), and the window's block from now on (NULL:
+none, zeros) */
+struct xgpu_world_ao_block;
+void xgpu_metal_world_ao_field(uint32_t width, uint32_t height, uint32_t depth, uint32_t z_first, uint32_t z_count,
+	const void *voxels);
+void xgpu_metal_world_ao_window(const struct xgpu_world_ao_block *block);
 /* the values of the 16 inputs no stream feeds */
 void xgpu_metal_set_constant_attributes(const float (*values)[4]);
 /* indices: 16-bit, or XGPU_METAL_SOURCE_NONE */

@@ -1759,6 +1759,11 @@ static long long dispatch(long long number, long long a, long long b, long long 
 	case GUEST_SYS_sched_yield:
 		SwitchToThread();
 		return 0;
+	/* the calling thread's priority (who 0, as Linux sets a thread's) */
+	case GUEST_SYS_setpriority:
+		if (a == 0 && b == 0 && (int)c > 0)
+			SetThreadPriority(GetCurrentThread(), (int)c >= 10 ? THREAD_PRIORITY_LOWEST : THREAD_PRIORITY_BELOW_NORMAL);
+		return 0;
 
 	case GUEST_SYS_mmap:
 		return host_guest_mmap((uint64_t)a, (uint64_t)b, (int)c, (int)d, (int)e, f);

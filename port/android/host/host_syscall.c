@@ -669,6 +669,8 @@ static long passthrough_number(long long number)
 	case GUEST_SYS_getgid: return SYS_getgid;
 	case GUEST_SYS_getegid: return SYS_getegid;
 	case GUEST_SYS_sched_yield: return SYS_sched_yield;
+	/* (the calling thread's priority: who 0, as Linux sets it) */
+	case GUEST_SYS_setpriority: return SYS_setpriority;
 	case GUEST_SYS_getrandom: return SYS_getrandom;
 	case GUEST_SYS_kill: return SYS_kill;
 	case GUEST_SYS_tkill: return SYS_tkill;
