@@ -23,6 +23,29 @@ void halo_load_trace(char const *phase, char const *detail);
 draw and after the render owner has consumed their bytes. */
 void halo_gpu_preparation_checkpoint_set(unsigned long bytes, void (*checkpoint)(void *const *textures));
 void halo_gpu_preparation_loaded(unsigned long bytes);
+/* a map's preparation's journal (port/linux/src/d3d8_device.c), recorded and
+played back (port/linux/game/render_prepared.c): the texture cache's
+bitmaps, as the journal keeps them */
+struct halo_gpu_journal_bitmaps
+{
+	/* a texture the cache holds: nonzero, and its bitmap's tag and index */
+	int (*identify)(void const *texture, unsigned long *tag_index, unsigned long *bitmap_index);
+	/* the bitmap's texture, loaded (waited for); NULL if there is none */
+	void *(*load)(unsigned long tag_index, unsigned long bitmap_index);
+};
+/* recorded from now on (the preparation begun) */
+void halo_gpu_journal_record(struct halo_gpu_journal_bitmaps const *bitmaps);
+/* (the texture cache's: a bitmap it began loading) */
+void halo_gpu_journal_texture(unsigned int tag_index, unsigned int bitmap_index);
+/* no longer recorded: the words (malloc's), their count and the objects
+it could not keep (none for a journal to keep), or NULL; freed with
+halo_gpu_journal_free */
+unsigned int *halo_gpu_journal_take(unsigned int *count, unsigned int *unknown);
+void halo_gpu_journal_free(unsigned int *words);
+/* played back, in a preparation begun: 1, or 0 if the words are malformed;
+the objects not found */
+int halo_gpu_journal_replay(unsigned int const *words, unsigned int count,
+	struct halo_gpu_journal_bitmaps const *bitmaps, unsigned int *unknown);
 
 /* frames between the 30 Hz ticks (port/linux/game/render_interpolation.c);
 the platform layer reads the display.interpolation setting */

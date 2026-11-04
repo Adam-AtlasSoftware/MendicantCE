@@ -246,7 +246,7 @@ buffer's size (ambient_occlusion.depth, bind_targets), no colour written
 depth (halo_screen_ambient_occlusion), and the surfaces then draw with it in
 their shaders (xgpu.h's XGPU_AMBIENT_OCCLUSION_LIGHT_*: the models' ambient
 and distant lights, the lightmap pass's light) until the lightmap pass is
-done (halo_screen_ambient_occlusion_end). The pre-pass's draws mark their
+done (halo_screen_ambient_occlusion__guest_image_end). The pre-pass's draws mark their
 pixels in its stencil as they draw (pipeline_state_describe): an object's
 (a model's: one ambient sample lights it, so everything about it occludes
 it, where the level's lightmap holds the level's own occlusion and only
@@ -804,6 +804,33 @@ struct d3d8_device
 };
 
 static struct d3d8_device device;
+
+/* a map's preparation's journal (below): recording, and what it notes */
+enum
+{
+	JOURNAL_DRAW = 1,
+	JOURNAL_DRAW_INDEXED,
+	JOURNAL_DRAW_IMMEDIATE,
+	JOURNAL_CLEAR,
+	JOURNAL_ANTI_ALIAS,
+	JOURNAL_PANINI,
+	JOURNAL_OCCLUSION_BEGIN,
+	JOURNAL_OCCLUSION,
+	JOURNAL_OCCLUSION_END,
+	JOURNAL_TONE_MAP,
+	JOURNAL_HALOS,
+	JOURNAL_STATES,
+	/* (not of the device's state: a texture the cache loaded, the
+	mirror's pages) */
+	JOURNAL_TEXTURE = 0x40,
+	JOURNAL_PAGES,
+};
+static BOOL journal_recording;
+static void journal_draw(unsigned long op, unsigned long primitive, unsigned long start, unsigned long count,
+	unsigned long base_vertex, unsigned long minimum);
+static void journal_operation(unsigned long op, const void *arguments, unsigned long bytes);
+static void journal_page(unsigned long page);
+static void journal_vertex_shader(struct vertex_shader_object *object);
 
 /* A preparation draw is needed once for each pipeline, vertex layout and
 texture revision. Geometry mirrors are still refreshed for every range:
@@ -2594,6 +2621,7 @@ HRESULT WINAPI D3DDevice_CreateVertexShader(CONST DWORD *declaration, CONST DWOR
 			object->instruction_count);
 	}
 	parse_declaration(object, declaration);
+	journal_vertex_shader(object);
 	/* odd values are FVF codes; programmable shader handles are even */
 	*handle = (DWORD)object;
 	return S_OK;
@@ -3494,6 +3522,8 @@ void halo_dynamic_lights_halos_draw(void)
 	struct xgpu_dynamic_lights_halos *halos = &dynamic_lights.halos;
 	int axis;
 
+	if (journal_recording)
+		journal_operation(JOURNAL_HALOS, NULL, 0);
 	if (!dynamic_lights_active() || !halos->count || !device.gl_ready)
 		return;
 #ifdef HALO_VR
@@ -4252,6 +4282,8 @@ static BOOL mirror_refresh(unsigned long first, unsigned long last)
 			mirror.generation[page] = memory_watch_generation(PLATFORM_CONTIGUOUS_BASE + page * MIRROR_PAGE_SIZE,
 				MIRROR_PAGE_SIZE);
 			mirror.state[page] = _mirror_page_present;
+			if (journal_recording)
+				journal_page(page);
 		}
 		xgpu_backend_mirror_write(segment, address - PLATFORM_CONTIGUOUS_BASE - segment * MIRROR_SEGMENT_SIZE, size,
 			(const void *)address, unused);
@@ -4554,6 +4586,8 @@ void WINAPI D3DDevice_DrawVertices(D3DPRIMITIVETYPE primitive_type, UINT start_v
 		preparation_draw_complete();
 		return;
 	}
+	if (journal_recording)
+		journal_draw(JOURNAL_DRAW, primitive_type, start_vertex, vertex_count, 0, 0);
 	xgpu_manifest_record_draw(0, 0);
 	if (primitive_type == D3DPT_QUADLIST)
 	{
@@ -4594,6 +4628,8 @@ void WINAPI D3DDevice_DrawIndexedVertices(D3DPRIMITIVETYPE primitive_type, UINT 
 		preparation_draw_complete();
 		return;
 	}
+	if (journal_recording)
+		journal_draw(JOURNAL_DRAW_INDEXED, primitive_type, 0, vertex_count, device.base_vertex_index, minimum);
 	xgpu_manifest_record_draw(0, 0);
 	if (mirrored)
 	{
@@ -4669,6 +4705,8 @@ void WINAPI D3DDevice_End(void)
 		preparation_draw_complete();
 		return;
 	}
+	if (journal_recording)
+		journal_draw(JOURNAL_DRAW_IMMEDIATE, type, 0, count, 0, 0);
 	xgpu_manifest_record_draw(1, device.immediate_written);
 	if (type == D3DPT_QUADLIST)
 		indices = quad_indices(NULL, count, &index_count);
@@ -4747,6 +4785,13 @@ void WINAPI D3DDevice_Clear(DWORD count, CONST D3DRECT *rectangles, DWORD flags,
 	BOOL has_depth = FALSE;
 	DWORD index;
 
+	if (journal_recording)
+	{
+		unsigned int arguments[4] = { flags, color, 0, stencil };
+
+		memcpy(&arguments[2], &z, sizeof(z));
+		journal_operation(JOURNAL_CLEAR, arguments, sizeof(arguments));
+	}
 	if (!device.gl_ready || !bind_targets(&has_depth))
 		return;
 	if (trace_frame())
@@ -4827,6 +4872,12 @@ void halo_screen_anti_alias(short x0, short y0, short x1, short y1)
 	long corners[4];
 	int mode = anti_aliasing();
 
+	if (journal_recording)
+	{
+		short arguments[4] = { x0, y0, x1, y1 };
+
+		journal_operation(JOURNAL_ANTI_ALIAS, arguments, sizeof(arguments));
+	}
 	if (!device.gl_ready || (mode != _anti_aliasing_fxaa && mode != _anti_aliasing_smaa))
 		return;
 	/* (the primary target's view: the back buffer's) */
@@ -4861,6 +4912,15 @@ void halo_screen_panini(short x0, short y0, short x1, short y1, const float proj
 	struct render_target_entry *target;
 	long corners[4];
 
+	if (journal_recording)
+	{
+		unsigned int arguments[10];
+		short bounds[4] = { x0, y0, x1, y1 };
+
+		memcpy(arguments, bounds, sizeof(bounds));
+		memcpy(arguments + 2, projection, 8 * sizeof(float));
+		journal_operation(JOURNAL_PANINI, arguments, sizeof(arguments));
+	}
 	if (!device.gl_ready)
 		return;
 	target = render_target_get(&device.back_buffer);
@@ -4881,6 +4941,8 @@ Its depth target cleared, as the window's beginning clears the depth
 buffer: the opaque surfaces' alone (not the sky's, which nothing occludes) */
 BOOL halo_screen_ambient_occlusion_begin(void)
 {
+	if (journal_recording)
+		journal_operation(JOURNAL_OCCLUSION_BEGIN, NULL, 0);
 	ambient_occlusion.prepass = ambient_occlusion.ready = FALSE;
 	if (!device.gl_ready || !ambient_occlusion.quality || device.depth_stencil != &device.depth_buffer ||
 		device.render_target != &device.back_buffer)
@@ -4911,6 +4973,17 @@ void halo_screen_ambient_occlusion(short x0, short y0, short x1, short y1, float
 	float camera[6];
 	BOOL has_depth = FALSE;
 
+	if (journal_recording)
+	{
+		unsigned int arguments[8];
+		short bounds[4] = { x0, y0, x1, y1 };
+
+		memcpy(arguments, bounds, sizeof(bounds));
+		memcpy(arguments + 2, &z_near, sizeof(float));
+		memcpy(arguments + 3, &z_far, sizeof(float));
+		memcpy(arguments + 4, projection, 4 * sizeof(float));
+		journal_operation(JOURNAL_OCCLUSION, arguments, sizeof(arguments));
+	}
 	if (!ambient_occlusion.prepass)
 		return;
 	target = render_target_get(&device.back_buffer);
@@ -4932,6 +5005,8 @@ void halo_screen_ambient_occlusion(short x0, short y0, short x1, short y1, float
 /* ... the window's opaque surfaces drawn: nothing after is shaded with it */
 void halo_screen_ambient_occlusion_end(void)
 {
+	if (journal_recording)
+		journal_operation(JOURNAL_OCCLUSION_END, NULL, 0);
 	ambient_occlusion.prepass = ambient_occlusion.ready = FALSE;
 }
 
@@ -4943,6 +5018,12 @@ void halo_screen_tone_map(short x0, short y0, short x1, short y1)
 	struct render_target_entry *target;
 	long corners[4];
 
+	if (journal_recording)
+	{
+		short arguments[4] = { x0, y0, x1, y1 };
+
+		journal_operation(JOURNAL_TONE_MAP, arguments, sizeof(arguments));
+	}
 	/* (debug.ambient_occlusion_view: the view is the occlusion alone) */
 	if (device.gl_ready && ambient_occlusion.laid && ambient_occlusion.view &&
 		(target = render_target_get(&device.back_buffer)))
@@ -5592,4 +5673,815 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 HRESULT WINAPI D3DDevice_PersistDisplay(void)
 {
 	return S_OK;
+}
+
+/* ---------- a map's preparation's journal (port/linux/game/render_prepared.c)
+
+What a map's preparation (render_enumerate.c: its first frame drawn through
+every shader) gives the backend, kept so that a later load of the map gives
+it the same without the walk: each draw that was not a repeat
+(preparation_seen), as the state it was drawn in (the render and texture
+states, the textures, targets, viewport, vertex shader and streams, and the
+front end's own that prepare_draw reads); each operation of a window that a
+backend prepares something for (a clear, the anti-aliasing, Panini, the
+ambient occlusion, the tone map, the glows); each texture the cache loaded
+for them, in order; and the mirror's pages uploaded. Played back, each draw
+is made again in its state from a vertex or a few (a backend prepares its
+pipeline and binds its textures; it draws nothing), each operation again,
+each texture loaded and each page uploaded, so that a backend, Vulkan's or
+Metal's, is given what the walk gave it; the front end derives the draws'
+pipelines again, from the settings as they are now. Objects are kept as what
+they are, not where: a cached bitmap by its tag and index (the texture
+cache's), a texture, surface or palette the device made by the number of
+its making (checked by its type and format), the device's own targets by
+name, a vertex shader by its id.
+
+The words: an entry's first, its type in the low 8 bits and in the high 24
+the count of its state's words that differ from the entry's before, a pair
+(the word's index, its value) each after it; a texture's, JOURNAL_TEXTURE,
+then its tag's index and the bitmap's; the pages', JOURNAL_PAGES and the
+count of runs, then each run's first page and the page past it. */
+
+typedef char journal_words_are_dwords[sizeof(DWORD) == sizeof(uint32_t) ? 1 : -1];
+
+enum
+{
+	_journal_object_none,
+	/* (value: the tag index; check: the bitmap's index) */
+	_journal_object_bitmap,
+	/* (value: its number, d3d8_resource_created) */
+	_journal_object_created,
+	/* (value: 0 the back buffer, 1 its depth buffer, 2 the ambient
+	occlusion's depth) */
+	_journal_object_device,
+	/* (value: its address, in the contiguous memory) */
+	_journal_object_memory,
+	/* (value: the address of the game's variable that holds it: an object
+	the game made, in memory of its own) */
+	_journal_object_held,
+};
+
+/* the guest image's data, where the game's variables are (the linker's:
+port/android/guest/guest.ld) */
+extern char __guest_data_start[], __guest_image_end[];
+
+struct journal_object
+{
+	uint32_t kind, value, check;
+};
+
+struct journal_state
+{
+	uint32_t primitive, start, count, base_vertex, minimum, immediate_written;
+	uint32_t arguments[12];
+	struct journal_object textures[D3DTSS_MAXSTAGES], palettes[D3DTSS_MAXSTAGES], render_target, depth_stencil;
+	uint32_t viewport[6];
+	uint32_t vertex_shader, program, program_address, shader_constant_mode;
+	uint32_t streams[16][2];
+	uint32_t hdr_category, hdr_kind, hdr_view, occlusion_prepass, occlusion_ready;
+	uint32_t lights_environment, lights_count, halos_count, sky, visibility;
+	uint32_t render_state[D3DRS_MAX];
+	uint32_t texture_state[D3DTSS_MAXSTAGES][D3DTSS_MAX];
+};
+
+#define JOURNAL_STATE_WORDS (sizeof(struct journal_state) / sizeof(uint32_t))
+typedef char journal_state_is_words[sizeof(struct journal_state) % sizeof(uint32_t) == 0 ? 1 : -1];
+/* the entries told apart (a hash each), at most: past them, an entry is
+kept even when it repeats one */
+#define JOURNAL_SEEN_SLOTS 16384
+
+static struct
+{
+	uint32_t *words;
+	unsigned long count, capacity;
+	BOOL failed;
+	/* the state of the entry before (recorded, or played) */
+	struct journal_state last;
+	uint64_t seen[JOURNAL_SEEN_SLOTS];
+	unsigned long seen_count;
+	/* objects that are none of the kinds above (recorded), or not found
+	(played) */
+	unsigned long unknown;
+	const struct halo_gpu_journal_bitmaps *bitmaps;
+	unsigned char pages[MIRROR_PAGE_COUNT / 8];
+	/* the objects the game's variables hold, looked for: each one's address
+	and its variable's */
+	unsigned long holders[64][2];
+	int holder_count;
+} journal;
+
+/* the textures, surfaces and palettes made, in order, and the vertex shaders
+by id */
+static void **resources;
+static unsigned long resource_count, resource_capacity;
+static struct vertex_shader_object **vertex_shaders;
+static unsigned long vertex_shader_capacity;
+
+void d3d8_resource_created(void *resource)
+{
+	if (resource_count == resource_capacity)
+	{
+		unsigned long capacity = resource_capacity ? resource_capacity * 2 : 256;
+		void **larger = realloc(resources, capacity * sizeof(*larger));
+
+		/* (out of memory: its number is unknown, and a journal that draws with
+		it is not kept) */
+		if (!larger)
+			return;
+		resources = larger;
+		resource_capacity = capacity;
+	}
+	resources[resource_count++] = resource;
+}
+
+void d3d8_resource_freed(void *resource)
+{
+	unsigned long index;
+
+	for (index = 0; index < resource_count; index++)
+	{
+		if (resources[index] == resource)
+			resources[index] = NULL;
+	}
+}
+
+static void journal_vertex_shader(struct vertex_shader_object *object)
+{
+	if (object->id >= vertex_shader_capacity)
+	{
+		unsigned long capacity = object->id + 256;
+		struct vertex_shader_object **larger = realloc(vertex_shaders, capacity * sizeof(*larger));
+
+		if (!larger)
+			return;
+		memset(larger + vertex_shader_capacity, 0, (capacity - vertex_shader_capacity) * sizeof(*larger));
+		vertex_shaders = larger;
+		vertex_shader_capacity = capacity;
+	}
+	vertex_shaders[object->id] = object;
+}
+
+static struct vertex_shader_object *journal_vertex_shader_get(uint32_t id)
+{
+	return id && id < vertex_shader_capacity ? vertex_shaders[id] : NULL;
+}
+
+/* what an object is checked by: its type, and a texture's or surface's
+format (not its size, which follows the screen's) */
+static uint32_t journal_object_check(const void *object)
+{
+	const DWORD *fields = object;
+	uint32_t type = fields[0] & D3DCOMMON_TYPE_MASK;
+
+	if (type == D3DCOMMON_TYPE_TEXTURE || type == D3DCOMMON_TYPE_SURFACE)
+		type |= fields[3] & (D3DFORMAT_FORMAT_MASK | D3DFORMAT_DIMENSION_MASK | D3DFORMAT_CUBEMAP);
+	return type;
+}
+
+/* the state a replay changes, given back after it */
+struct journal_saved
+{
+	DWORD render_states[D3DRS_MAX], texture_states[D3DTSS_MAXSTAGES][D3DTSS_MAX];
+	D3DBaseTexture *textures[D3DTSS_MAXSTAGES];
+	D3DPalette *palettes[D3DTSS_MAXSTAGES];
+	D3DSurface *render_target, *depth_stencil;
+	D3DVIEWPORT8 viewport;
+	struct vertex_shader_object *vertex_shader, *program_slots[VERTEX_PROGRAM_SLOTS];
+	unsigned long program_address;
+	D3DSHADERCONSTANTMODE shader_constant_mode;
+	DWORD stream_data[16];
+	UINT stream_stride[16], base_vertex_index;
+	float attributes[XGPU_VERTEX_ATTRIBUTE_COUNT][4];
+	int hdr_category, hdr_kind;
+	BOOL hdr_view, occlusion_prepass, occlusion_ready, lights_environment, visibility;
+	int lights_count, halos_count;
+	unsigned long sky;
+};
+
+static struct journal_saved saved;
+
+static BOOL journal_front_end(const char *word)
+{
+	return (word >= (const char *)&journal && word < (const char *)(&journal + 1)) ||
+		(word >= (const char *)&device && word < (const char *)(&device + 1)) ||
+		(word >= (const char *)&preparation && word < (const char *)(&preparation + 1)) ||
+		(word >= (const char *)&saved && word < (const char *)(&saved + 1));
+}
+
+/* the first of the game's variables that holds the object (its address),
+or 0; the objects looked for remembered */
+static unsigned long journal_holder(const void *object)
+{
+	const DWORD *word;
+	int index;
+
+	for (index = 0; index < journal.holder_count; index++)
+	{
+		if (journal.holders[index][0] == (unsigned long)object)
+			return journal.holders[index][1];
+	}
+	for (word = (const DWORD *)(((unsigned long)__guest_data_start + 3) & ~3UL); (const char *)(word + 1) <= __guest_image_end; word++)
+	{
+		/* (not the front end's own, which hold what is bound now) */
+		if (*word == (DWORD)(unsigned long)object && !journal_front_end((const char *)word))
+			break;
+	}
+	if ((const char *)(word + 1) > __guest_image_end)
+		word = NULL;
+	if (journal.holder_count < (int)(sizeof(journal.holders) / sizeof(journal.holders[0])))
+	{
+		journal.holders[journal.holder_count][0] = (unsigned long)object;
+		journal.holders[journal.holder_count][1] = (unsigned long)word;
+		journal.holder_count++;
+	}
+	return (unsigned long)word;
+}
+
+static void journal_identify(const void *object, struct journal_object *to)
+{
+	unsigned long tag_index, bitmap_index, index, slot;
+
+	memset(to, 0, sizeof(*to));
+	if (!object)
+		return;
+	if (object == &device.back_buffer || object == &device.depth_buffer || object == &ambient_occlusion.depth)
+	{
+		to->kind = _journal_object_device;
+		to->value = object == &device.back_buffer ? 0 : object == &device.depth_buffer ? 1 : 2;
+		return;
+	}
+	if (journal.bitmaps && journal.bitmaps->identify(object, &tag_index, &bitmap_index))
+	{
+		to->kind = _journal_object_bitmap;
+		to->value = (uint32_t)tag_index;
+		to->check = (uint32_t)bitmap_index;
+		return;
+	}
+	for (index = 0; index < resource_count; index++)
+	{
+		if (resources[index] == object)
+		{
+			to->kind = _journal_object_created;
+			to->value = (uint32_t)index;
+			to->check = journal_object_check(object);
+			return;
+		}
+	}
+	if (platform_is_contiguous(object))
+	{
+		to->kind = _journal_object_memory;
+		to->value = (uint32_t)(unsigned long)object;
+		to->check = journal_object_check(object);
+		return;
+	}
+	if ((slot = journal_holder(object)) != 0)
+	{
+		to->kind = _journal_object_held;
+		to->value = (uint32_t)slot;
+		to->check = journal_object_check(object);
+		return;
+	}
+	if (journal.unknown < 8)
+		platform_log("GPU: journal: unknown object %p (common %08lx format %08lx; device %p)", object,
+			(unsigned long)((const DWORD *)object)[0], (unsigned long)((const DWORD *)object)[3], (void *)&device);
+	journal.unknown++;
+}
+
+static void *journal_resolve(const struct journal_object *object)
+{
+	unsigned long index;
+	void *found = NULL;
+
+	switch (object->kind)
+	{
+	case _journal_object_none:
+		return NULL;
+	case _journal_object_device:
+		found = object->value == 0 ? (void *)&device.back_buffer : object->value == 1 ? (void *)&device.depth_buffer :
+			object->value == 2 ? (void *)&ambient_occlusion.depth : NULL;
+		break;
+	case _journal_object_bitmap:
+		found = journal.bitmaps ? journal.bitmaps->load(object->value, object->check) : NULL;
+		break;
+	case _journal_object_created:
+		/* (its number's, or failing that the first of its type and format:
+		what a draw's pipeline knows of it) */
+		if (object->value < resource_count && resources[object->value] &&
+			journal_object_check(resources[object->value]) == object->check)
+		{
+			found = resources[object->value];
+			break;
+		}
+		for (index = 0; index < resource_count && !found; index++)
+		{
+			if (resources[index] && journal_object_check(resources[index]) == object->check)
+				found = resources[index];
+		}
+		break;
+	case _journal_object_held:
+		if (object->value >= (unsigned long)__guest_data_start && object->value + sizeof(DWORD) <= (unsigned long)__guest_image_end &&
+			!(object->value & 3))
+		{
+			void *held = (void *)(unsigned long)*(const DWORD *)(unsigned long)object->value;
+
+			if (held && journal_object_check(held) == object->check)
+				found = held;
+		}
+		break;
+	case _journal_object_memory:
+		if (platform_is_contiguous((const void *)(unsigned long)object->value) &&
+			journal_object_check((const void *)(unsigned long)object->value) == object->check)
+			found = (void *)(unsigned long)object->value;
+		break;
+	}
+	if (!found)
+	{
+		if (journal.unknown < 12)
+			platform_log("GPU: journal: object not found: kind %lu value %08lx check %08lx",
+				(unsigned long)object->kind, (unsigned long)object->value, (unsigned long)object->check);
+		journal.unknown++;
+	}
+	return found;
+}
+
+/* a stage that samples its texture (bind_textures) */
+static BOOL journal_stage_samples(int stage)
+{
+	unsigned long mode = stage_texture_mode(stage);
+	D3DBaseTexture *texture = device.textures[stage];
+
+	return texture && texture->Data && mode != 0 && mode != 0x04 && mode != 0x05 && mode != 0x0a && mode != 0x11;
+}
+
+static void journal_capture(struct journal_state *state)
+{
+	struct vertex_shader_object *program = current_program();
+	int stage, index;
+
+	memset(state, 0, sizeof(*state));
+	for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
+	{
+		if (!journal_stage_samples(stage))
+			continue;
+		journal_identify(device.textures[stage], &state->textures[stage]);
+		journal_identify(device.palettes[stage], &state->palettes[stage]);
+	}
+	journal_identify(device.render_target, &state->render_target);
+	journal_identify(device.depth_stencil, &state->depth_stencil);
+	memcpy(state->viewport, &device.viewport, sizeof(device.viewport) < sizeof(state->viewport) ?
+		sizeof(device.viewport) : sizeof(state->viewport));
+	state->vertex_shader = device.vertex_shader ? (uint32_t)device.vertex_shader->id : 0;
+	state->program = program ? (uint32_t)program->id : 0;
+	state->program_address = (uint32_t)device.program_address;
+	state->shader_constant_mode = (uint32_t)device.shader_constant_mode;
+	for (index = 0; index < 16; index++)
+	{
+		state->streams[index][0] = (uint32_t)device.streams[index].data;
+		state->streams[index][1] = (uint32_t)device.streams[index].stride;
+	}
+	state->hdr_category = (uint32_t)hdr.category;
+	state->hdr_kind = (uint32_t)hdr.kind;
+	state->hdr_view = (uint32_t)hdr.view;
+	state->occlusion_prepass = (uint32_t)ambient_occlusion.prepass;
+	state->occlusion_ready = (uint32_t)ambient_occlusion.ready;
+	state->lights_environment = (uint32_t)dynamic_lights.environment;
+	state->lights_count = (uint32_t)dynamic_lights.count;
+	state->halos_count = (uint32_t)dynamic_lights.halos.count;
+	state->sky = (uint32_t)preparation.sky;
+	state->visibility = (uint32_t)device.visibility_test_active;
+	memcpy(state->render_state, D3D__RenderState, sizeof(state->render_state));
+	memcpy(state->texture_state, D3D__TextureState, sizeof(state->texture_state));
+}
+
+static BOOL journal_reserve(unsigned long words)
+{
+	if (journal.failed)
+		return FALSE;
+	if (journal.count + words > journal.capacity)
+	{
+		unsigned long capacity = journal.capacity ? journal.capacity * 2 : 65536;
+		uint32_t *larger;
+
+		while (capacity < journal.count + words)
+			capacity *= 2;
+		larger = realloc(journal.words, capacity * sizeof(*larger));
+		if (!larger)
+		{
+			journal.failed = TRUE;
+			return FALSE;
+		}
+		journal.words = larger;
+		journal.capacity = capacity;
+	}
+	return TRUE;
+}
+
+/* an entry, unless one the same was kept before */
+static void journal_append(unsigned long op, const struct journal_state *state)
+{
+	const uint32_t *words = (const uint32_t *)state, *last = (const uint32_t *)&journal.last;
+	uint64_t hash = xgpu_manifest_hash(&op, sizeof(op), XGPU_MANIFEST_HASH_START);
+	unsigned long index, changed = 0, slot;
+
+	hash = xgpu_manifest_hash(state, sizeof(*state), hash);
+	hash |= 1;
+	if (journal.seen_count < JOURNAL_SEEN_SLOTS * 3 / 4)
+	{
+		for (slot = (unsigned long)(hash >> 20) % JOURNAL_SEEN_SLOTS; journal.seen[slot];
+			slot = (slot + 1) % JOURNAL_SEEN_SLOTS)
+		{
+			if (journal.seen[slot] == hash)
+				return;
+		}
+		journal.seen[slot] = hash;
+		journal.seen_count++;
+	}
+	for (index = 0; index < JOURNAL_STATE_WORDS; index++)
+		changed += words[index] != last[index];
+	if (!journal_reserve(1 + changed * 2))
+		return;
+	journal.words[journal.count++] = (uint32_t)op | (uint32_t)changed << 8;
+	for (index = 0; index < JOURNAL_STATE_WORDS; index++)
+	{
+		if (words[index] == last[index])
+			continue;
+		journal.words[journal.count++] = (uint32_t)index;
+		journal.words[journal.count++] = words[index];
+	}
+	journal.last = *state;
+}
+
+static void journal_draw(unsigned long op, unsigned long primitive, unsigned long start, unsigned long count,
+	unsigned long base_vertex, unsigned long minimum)
+{
+	static struct journal_state state;
+
+	journal_capture(&state);
+	state.primitive = (uint32_t)primitive;
+	state.start = (uint32_t)start;
+	state.count = (uint32_t)count;
+	state.base_vertex = (uint32_t)base_vertex;
+	state.minimum = (uint32_t)minimum;
+	state.immediate_written = op == JOURNAL_DRAW_IMMEDIATE ? (uint32_t)device.immediate_written : 0;
+	journal_append(op, &state);
+}
+
+static void journal_operation(unsigned long op, const void *arguments, unsigned long bytes)
+{
+	static struct journal_state state;
+
+	journal_capture(&state);
+	if (arguments)
+		memcpy(state.arguments, arguments, bytes < sizeof(state.arguments) ? bytes : sizeof(state.arguments));
+	journal_append(op, &state);
+}
+
+static void journal_page(unsigned long page)
+{
+	if (page < MIRROR_PAGE_COUNT)
+		journal.pages[page >> 3] |= (unsigned char)(1u << (page & 7));
+}
+
+void halo_gpu_journal_record(const struct halo_gpu_journal_bitmaps *bitmaps)
+{
+	free(journal.words);
+	memset(&journal, 0, sizeof(journal));
+	journal.bitmaps = bitmaps;
+	journal_recording = TRUE;
+}
+
+void halo_gpu_journal_texture(unsigned int tag_index, unsigned int bitmap_index)
+{
+	if (!journal_recording || !journal_reserve(3))
+		return;
+	journal.words[journal.count++] = JOURNAL_TEXTURE;
+	journal.words[journal.count++] = tag_index;
+	journal.words[journal.count++] = bitmap_index;
+}
+
+unsigned int *halo_gpu_journal_take(unsigned int *count, unsigned int *unknown)
+{
+	unsigned long page, runs = 0, header;
+	uint32_t *words;
+
+	*count = 0;
+	*unknown = 0;
+	if (!journal_recording)
+		return NULL;
+	journal_recording = FALSE;
+	/* (the pages' runs, last) */
+	if (journal_reserve(1))
+	{
+		header = journal.count++;
+		for (page = 0; page < MIRROR_PAGE_COUNT; page++)
+		{
+			unsigned long end;
+
+			if (!(journal.pages[page >> 3] & (1u << (page & 7))))
+				continue;
+			for (end = page; end < MIRROR_PAGE_COUNT && (journal.pages[end >> 3] & (1u << (end & 7))); end++)
+				;
+			if (!journal_reserve(2))
+				break;
+			journal.words[journal.count++] = (uint32_t)page;
+			journal.words[journal.count++] = (uint32_t)end;
+			runs++;
+			page = end;
+		}
+		if (!journal.failed)
+			journal.words[header] = JOURNAL_PAGES | (uint32_t)runs << 8;
+	}
+	*unknown = (unsigned int)journal.unknown;
+	if (journal.failed)
+	{
+		free(journal.words);
+		journal.words = NULL;
+		return NULL;
+	}
+	words = journal.words;
+	*count = (unsigned int)journal.count;
+	journal.words = NULL;
+	journal.count = journal.capacity = 0;
+	return (unsigned int *)words;
+}
+
+void halo_gpu_journal_free(unsigned int *words)
+{
+	free(words);
+}
+
+/* the vertices a replayed draw is made from: the fewest its primitive has */
+static unsigned long journal_vertices(unsigned long primitive, unsigned long count)
+{
+	unsigned long least = primitive == D3DPT_POINTLIST ? 1 : primitive == D3DPT_LINELIST ||
+		primitive == D3DPT_LINESTRIP || primitive == D3DPT_LINELOOP ? 2 :
+		primitive == D3DPT_QUADLIST || primitive == D3DPT_QUADSTRIP ? 4 : 3;
+
+	return count < least ? count : least;
+}
+
+static void journal_restore(const struct journal_state *state)
+{
+	struct vertex_shader_object *program = journal_vertex_shader_get(state->program);
+	int stage, index;
+
+	memcpy(D3D__RenderState, state->render_state, sizeof(state->render_state));
+	memcpy(D3D__TextureState, state->texture_state, sizeof(state->texture_state));
+	for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
+	{
+		device.textures[stage] = journal_resolve(&state->textures[stage]);
+		device.palettes[stage] = journal_resolve(&state->palettes[stage]);
+	}
+	device.render_target = journal_resolve(&state->render_target);
+	device.depth_stencil = journal_resolve(&state->depth_stencil);
+	memcpy(&device.viewport, state->viewport, sizeof(device.viewport) < sizeof(state->viewport) ?
+		sizeof(device.viewport) : sizeof(state->viewport));
+	viewport_update_constants();
+	device.vertex_shader = journal_vertex_shader_get(state->vertex_shader);
+	if ((state->vertex_shader && !device.vertex_shader) || (state->program && !program))
+		journal.unknown++;
+	device.program_address = state->program_address < VERTEX_PROGRAM_SLOTS ? state->program_address : 0;
+	device.program_slots[device.program_address] = program;
+	device.shader_constant_mode = (D3DSHADERCONSTANTMODE)state->shader_constant_mode;
+	for (index = 0; index < 16; index++)
+	{
+		device.streams[index].data = state->streams[index][0];
+		device.streams[index].stride = state->streams[index][1];
+	}
+	hdr.category = (int)state->hdr_category;
+	hdr.kind = (int)state->hdr_kind;
+	hdr.view = state->hdr_view != 0;
+	ambient_occlusion.prepass = state->occlusion_prepass != 0;
+	ambient_occlusion.ready = state->occlusion_ready != 0;
+	dynamic_lights.environment = state->lights_environment != 0;
+	dynamic_lights.count = (int)state->lights_count;
+	dynamic_lights.halos.count = (int)state->halos_count;
+	preparation.sky = state->sky;
+	device.visibility_test_active = state->visibility != 0;
+}
+
+static void journal_play(unsigned long op, const struct journal_state *state)
+{
+	static WORD indices[4];
+	const short *bounds = (const short *)state->arguments;
+	float z;
+
+	journal_restore(state);
+	switch (op)
+	{
+	case JOURNAL_DRAW:
+		D3DDevice_DrawVertices((D3DPRIMITIVETYPE)state->primitive, state->start,
+			journal_vertices(state->primitive, state->count));
+		break;
+	case JOURNAL_DRAW_INDEXED:
+		device.base_vertex_index = state->base_vertex + state->minimum;
+		D3DDevice_DrawIndexedVertices((D3DPRIMITIVETYPE)state->primitive,
+			journal_vertices(state->primitive, state->count), indices);
+		break;
+	case JOURNAL_DRAW_IMMEDIATE:
+	{
+		unsigned long count = journal_vertices(state->primitive, state->count);
+		unsigned long floats = XGPU_VERTEX_ATTRIBUTE_COUNT * 4;
+
+		if (count > device.immediate_capacity)
+		{
+			float *vertices = realloc(device.immediate_vertices, 256 * floats * sizeof(float));
+
+			if (!vertices)
+				break;
+			device.immediate_vertices = vertices;
+			device.immediate_capacity = 256;
+		}
+		memset(device.immediate_vertices, 0, count * floats * sizeof(float));
+		device.immediate_active = TRUE;
+		device.immediate_type = (D3DPRIMITIVETYPE)state->primitive;
+		device.immediate_count = count;
+		device.immediate_written = state->immediate_written;
+		D3DDevice_End();
+		break;
+	}
+	case JOURNAL_CLEAR:
+		memcpy(&z, &state->arguments[2], sizeof(z));
+		D3DDevice_Clear(0, NULL, state->arguments[0], state->arguments[1], z, state->arguments[3]);
+		break;
+	case JOURNAL_ANTI_ALIAS:
+		halo_screen_anti_alias(bounds[0], bounds[1], bounds[2], bounds[3]);
+		break;
+	case JOURNAL_PANINI:
+		halo_screen_panini(bounds[0], bounds[1], bounds[2], bounds[3], (const float *)&state->arguments[2]);
+		break;
+	case JOURNAL_OCCLUSION_BEGIN:
+		(void)halo_screen_ambient_occlusion_begin();
+		break;
+	case JOURNAL_OCCLUSION:
+	{
+		float z_near, z_far;
+
+		memcpy(&z_near, &state->arguments[2], sizeof(z_near));
+		memcpy(&z_far, &state->arguments[3], sizeof(z_far));
+		halo_screen_ambient_occlusion(bounds[0], bounds[1], bounds[2], bounds[3], z_near, z_far,
+			(const float *)&state->arguments[4]);
+		break;
+	}
+	case JOURNAL_OCCLUSION_END:
+		halo_screen_ambient_occlusion_end();
+		break;
+	case JOURNAL_TONE_MAP:
+		halo_screen_tone_map(bounds[0], bounds[1], bounds[2], bounds[3]);
+		break;
+	case JOURNAL_HALOS:
+		halo_dynamic_lights_halos_draw();
+		break;
+	}
+}
+
+int halo_gpu_journal_replay(const unsigned int *words, unsigned int count, const struct halo_gpu_journal_bitmaps *bitmaps,
+	unsigned int *unknown)
+{
+	unsigned long position = 0, index;
+	int well_formed = 1;
+
+	*unknown = 0;
+	if (!device.gl_ready || device.immediate_active)
+		return 0;
+	memcpy(saved.render_states, D3D__RenderState, sizeof(saved.render_states));
+	memcpy(saved.texture_states, D3D__TextureState, sizeof(saved.texture_states));
+	memcpy(saved.textures, device.textures, sizeof(saved.textures));
+	memcpy(saved.palettes, device.palettes, sizeof(saved.palettes));
+	saved.render_target = device.render_target;
+	saved.depth_stencil = device.depth_stencil;
+	saved.viewport = device.viewport;
+	saved.vertex_shader = device.vertex_shader;
+	memcpy(saved.program_slots, device.program_slots, sizeof(saved.program_slots));
+	saved.program_address = device.program_address;
+	saved.shader_constant_mode = device.shader_constant_mode;
+	for (index = 0; index < 16; index++)
+	{
+		saved.stream_data[index] = device.streams[index].data;
+		saved.stream_stride[index] = device.streams[index].stride;
+	}
+	saved.base_vertex_index = device.base_vertex_index;
+	memcpy(saved.attributes, device.attributes, sizeof(saved.attributes));
+	saved.hdr_category = hdr.category;
+	saved.hdr_kind = hdr.kind;
+	saved.hdr_view = hdr.view;
+	saved.occlusion_prepass = ambient_occlusion.prepass;
+	saved.occlusion_ready = ambient_occlusion.ready;
+	saved.lights_environment = dynamic_lights.environment;
+	saved.lights_count = dynamic_lights.count;
+	saved.halos_count = dynamic_lights.halos.count;
+	saved.sky = preparation.sky;
+	saved.visibility = device.visibility_test_active;
+
+	journal_recording = FALSE;
+	journal.bitmaps = bitmaps;
+	journal.unknown = 0;
+	memset(&journal.last, 0, sizeof(journal.last));
+	while (position < count && well_formed)
+	{
+		uint32_t header = words[position++];
+		uint32_t type = header & 0xff, size = header >> 8;
+
+		if (type == JOURNAL_TEXTURE)
+		{
+			if (count - position < 2)
+			{
+				well_formed = 0;
+				break;
+			}
+			if (bitmaps && !bitmaps->load(words[position], words[position + 1]))
+				journal.unknown++;
+			position += 2;
+		}
+		else if (type == JOURNAL_PAGES)
+		{
+			if ((count - position) / 2 < size)
+			{
+				well_formed = 0;
+				break;
+			}
+			for (index = 0; index < size; index++, position += 2)
+			{
+				unsigned long first = words[position], end = words[position + 1];
+
+				if (first >= end || end > MIRROR_PAGE_COUNT)
+				{
+					well_formed = 0;
+					break;
+				}
+				/* (a run a segment at a time, as mirror_range uploads them) */
+				while (first < end)
+				{
+					unsigned long segment_end = (first * MIRROR_PAGE_SIZE / MIRROR_SEGMENT_SIZE + 1) *
+						(MIRROR_SEGMENT_SIZE / MIRROR_PAGE_SIZE);
+					unsigned long last = end < segment_end ? end : segment_end;
+
+					(void)mirror_refresh(first, last);
+					first = last;
+				}
+			}
+		}
+		else if (type >= JOURNAL_DRAW && type < JOURNAL_STATES)
+		{
+			uint32_t *state = (uint32_t *)&journal.last;
+
+			if ((count - position) / 2 < size)
+			{
+				well_formed = 0;
+				break;
+			}
+			for (index = 0; index < size; index++, position += 2)
+			{
+				if (words[position] >= JOURNAL_STATE_WORDS)
+				{
+					well_formed = 0;
+					break;
+				}
+				state[words[position]] = words[position + 1];
+			}
+			if (well_formed)
+				journal_play(type, &journal.last);
+		}
+		else
+		{
+			well_formed = 0;
+		}
+	}
+
+	memcpy(D3D__RenderState, saved.render_states, sizeof(saved.render_states));
+	memcpy(D3D__TextureState, saved.texture_states, sizeof(saved.texture_states));
+	memcpy(device.textures, saved.textures, sizeof(saved.textures));
+	memcpy(device.palettes, saved.palettes, sizeof(saved.palettes));
+	device.render_target = saved.render_target;
+	device.depth_stencil = saved.depth_stencil;
+	device.viewport = saved.viewport;
+	viewport_update_constants();
+	device.vertex_shader = saved.vertex_shader;
+	memcpy(device.program_slots, saved.program_slots, sizeof(saved.program_slots));
+	device.program_address = saved.program_address;
+	device.shader_constant_mode = saved.shader_constant_mode;
+	for (index = 0; index < 16; index++)
+	{
+		device.streams[index].data = saved.stream_data[index];
+		device.streams[index].stride = saved.stream_stride[index];
+	}
+	device.base_vertex_index = saved.base_vertex_index;
+	memcpy(device.attributes, saved.attributes, sizeof(saved.attributes));
+	device.immediate_active = FALSE;
+	device.immediate_count = 0;
+	device.immediate_written = 0;
+	hdr.category = saved.hdr_category;
+	hdr.kind = saved.hdr_kind;
+	hdr.view = saved.hdr_view;
+	ambient_occlusion.prepass = saved.occlusion_prepass;
+	ambient_occlusion.ready = saved.occlusion_ready;
+	dynamic_lights.environment = saved.lights_environment;
+	dynamic_lights.count = saved.lights_count;
+	dynamic_lights.halos.count = saved.halos_count;
+	preparation.sky = saved.sky;
+	device.visibility_test_active = saved.visibility;
+	journal.bitmaps = NULL;
+	xgpu_backend_invalidate();
+	*unknown = (unsigned int)journal.unknown;
+	return well_formed;
 }
