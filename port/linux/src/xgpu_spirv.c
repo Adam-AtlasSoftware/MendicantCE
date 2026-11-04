@@ -2799,18 +2799,36 @@ static unsigned int world_proxy_edge(struct module *m, unsigned int normal, unsi
 		fdot(m, normal, edge_normal)), sine), zero);
 }
 
+/* face += edge(a, b) where condition holds: a selection, so that an edge
+left out costs nothing */
+static void world_proxy_box_add_edge(struct module *m, unsigned int face_variable, unsigned int condition,
+	unsigned int normal, unsigned int a, unsigned int b)
+{
+	unsigned int body = id_new(m), merge = id_new(m);
+
+	selection_merge(m, merge);
+	branch_conditional(m, condition, body, merge);
+	label_at(m, body);
+	store(m, face_variable, fadd(m, 1, load(m, m->t_float, face_variable), world_proxy_edge(m, normal, a, b)));
+	branch(m, merge);
+	label_at(m, merge);
+}
+
 /* box_occlusion: centre, half axes x and y (v1.xyz, v2.xyz), half extent
 along z = x cross y (v2.w): 1 inside; else the faces p is outside of, each
-clipped by p's tangent plane, and their form factors. The clipping is
-Sutherland and Hodgman's taken edge by edge: an edge with both corners
-above the plane is itself, one leaving it ends where it crosses, one
-entering begins there, and the crossing out joins the crossing in: the
-same edges as the clipped polygon's, so the same sum */
+clipped by p's tangent plane, and their form factors, the faces taken the
+same way round as seen from outside (their corners' order times the side)
+so that an edge two of them share cancels and is left out: the outline's
+edges alone. The clipping is Sutherland and Hodgman's taken edge by edge:
+an edge with both corners above the plane is itself, one leaving it ends
+where it crosses, one entering begins there, and the crossing out joins the
+crossing in: the same edges as the clipped polygon's, so the same sum */
 static unsigned int world_proxy_box(struct module *m, struct pixel_state *state, unsigned int p, unsigned int n,
 	unsigned int v0, unsigned int v1, unsigned int v2)
 {
 	unsigned int zero = constant_float(m, 0.0f), extents[3], axes[3], offset, at[3], local_normal[3], normal;
-	unsigned int occlusion_variable = local(m, &state->locals, m->t_float), inside, empty;
+	unsigned int occlusion_variable = local(m, &state->locals, m->t_float);
+	unsigned int face_variable = local(m, &state->locals, m->t_float), inside, empty;
 	int axis, side, corner;
 
 	extents[0] = flength(m, xyz(m, v1));
@@ -2840,7 +2858,7 @@ static unsigned int world_proxy_box(struct module *m, struct pixel_state *state,
 		for (side = -1; side <= 1; side += 2)
 		{
 			int u = (axis + 1) % 3, v = (axis + 2) % 3;
-			unsigned int corners[4], heights[4], face = zero, exit_point = 0, entry_point = 0, crossed = 0;
+			unsigned int corners[4], heights[4], exit_point = 0, entry_point = 0, crossed = 0;
 			unsigned int facing = compare(m, OP_F_ORD_GREATER_THAN, fmul(m, 1, constant_float(m, (float)side),
 				at[axis]), extents[axis]);
 			unsigned int body = id_new(m), merge = id_new(m);
@@ -2851,6 +2869,7 @@ static unsigned int world_proxy_box(struct module *m, struct pixel_state *state,
 			branch_conditional(m, facing, body, merge);
 			label_at(m, body);
 
+			store(m, face_variable, zero);
 			for (corner = 0; corner < 4; corner++)
 			{
 				float su = (corner == 1 || corner == 2) ? 1.0f : -1.0f, sv = corner >= 2 ? 1.0f : -1.0f;
@@ -2865,6 +2884,10 @@ static unsigned int world_proxy_box(struct module *m, struct pixel_state *state,
 			for (corner = 0; corner < 4; corner++)
 			{
 				int next = (corner + 1) % 4;
+				/* (the face across this edge: edges 0 and 2 lie on v's faces, 1
+				and 3 on u's, at -, +, +, -) */
+				int across = corner == 0 || corner == 2 ? v : u;
+				float across_side = corner == 0 || corner == 3 ? -1.0f : 1.0f;
 				unsigned int above = compare(m, OP_F_ORD_GREATER_THAN_EQUAL, heights[corner], zero);
 				unsigned int next_above = compare(m, OP_F_ORD_GREATER_THAN_EQUAL, heights[next], zero);
 				unsigned int t = fdiv(m, 1, heights[corner], fsub(m, 1, heights[corner], heights[next]));
@@ -2874,25 +2897,28 @@ static unsigned int world_proxy_box(struct module *m, struct pixel_state *state,
 					next_above));
 				unsigned int enters = op2(m, OP_LOGICAL_AND, m->t_bool, op1(m, OP_LOGICAL_NOT, m->t_bool, above),
 					next_above);
-				unsigned int edge = world_proxy_edge(m, normal, select_n(m, 3, above, corners[corner], crossing),
-					select_n(m, 3, next_above, corners[next], crossing));
+				unsigned int outline = compare(m, OP_F_ORD_LESS_THAN_EQUAL, fmul(m, 1, constant_float(m, across_side),
+					at[across]), extents[across]);
 
-				face = fadd(m, 1, face, fselect(m, op2(m, OP_LOGICAL_OR, m->t_bool, above, next_above), edge, zero));
+				world_proxy_box_add_edge(m, face_variable, op2(m, OP_LOGICAL_AND, m->t_bool,
+					op2(m, OP_LOGICAL_OR, m->t_bool, above, next_above), outline), normal,
+					select_n(m, 3, above, corners[corner], crossing), select_n(m, 3, next_above, corners[next], crossing));
 				exit_point = exit_point ? select_n(m, 3, leaves, crossing, exit_point) : select_n(m, 3, leaves, crossing,
 					constant_splat(m, 3, 0.0f));
 				entry_point = entry_point ? select_n(m, 3, enters, crossing, entry_point) : select_n(m, 3, enters,
 					crossing, constant_splat(m, 3, 0.0f));
 				crossed = crossed ? op2(m, OP_LOGICAL_OR, m->t_bool, crossed, leaves) : leaves;
 			}
-			face = fadd(m, 1, face, fselect(m, crossed, world_proxy_edge(m, normal, exit_point, entry_point), zero));
-			store(m, occlusion_variable, fadd(m, 1, load(m, m->t_float, occlusion_variable), fdiv(m, 1,
-				ext1(m, GLSL_F_ABS, m->t_float, face), constant_float(m, 2.0f * XGPU_WORLD_AO_PI))));
+			world_proxy_box_add_edge(m, face_variable, crossed, normal, exit_point, entry_point);
+			store(m, occlusion_variable, fadd(m, 1, load(m, m->t_float, occlusion_variable),
+				fmul(m, 1, constant_float(m, (float)side), load(m, m->t_float, face_variable))));
 			branch(m, merge);
 			label_at(m, merge);
 		}
 	}
 	return fselect(m, empty, zero, fselect(m, inside, constant_float(m, 1.0f), fclamp_scalar(m,
-		load(m, m->t_float, occlusion_variable), 0.0f, 1.0f)));
+		fdiv(m, 1, ext1(m, GLSL_F_ABS, m->t_float, load(m, m->t_float, occlusion_variable)),
+		constant_float(m, 2.0f * XGPU_WORLD_AO_PI)), 0.0f, 1.0f)));
 }
 
 /* world_proxy_box_fade: the box's bound on its occlusion,

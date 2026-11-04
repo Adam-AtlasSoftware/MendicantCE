@@ -21,8 +21,10 @@ CONTROLS = [
     ("line = 2.0f * radius * h / WORLD_PROXIES_PI * (f1 - f0);",
      "line = radius * h / WORLD_PROXIES_PI * (f1 - f0);", "capsule"),
     # the box's form factor twice over, then its back faces counted
-    ("occlusion += fabsf(face_occlusion) / (2.0f * WORLD_PROXIES_PI);",
-     "occlusion += fabsf(face_occlusion) / WORLD_PROXIES_PI;", "box"),
+    ("return clampf(fabsf(occlusion) / (2.0f * WORLD_PROXIES_PI), 0.0f, 1.0f);",
+     "return clampf(fabsf(occlusion) / WORLD_PROXIES_PI, 0.0f, 1.0f);", "box"),
+    # the faces not taken the same way round (a shared edge's terms then do not cancel)
+    ("occlusion += (float)side * face;", "occlusion += face;", "box"),
     ("if ((float)side * local[axis] <= extents[axis])", "if ((float)side * local[axis] <= -extents[axis])", "box"),
     # a box's reach too short
     ("return sqrtf(x * x + y * y + z * z) + sqrtf(WORLD_PROXIES_LEAST * 4.0f / WORLD_PROXIES_PI * areas);",

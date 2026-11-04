@@ -270,10 +270,36 @@ static float capsule_occlusion(float const a[3], float const b[3], float radius,
 	return clampf(occlusion, 0.0f, 1.0f);
 }
 
+/* an edge's term of a polygon's form factor at p (normal n): the angle the
+edge (a to b, from p) subtends times n . its plane's unit normal */
+static float box_edge(float const normal[3], float const a[3], float const b[3])
+{
+	float a_direction[3], b_direction[3], edge_normal[3], sine;
+	float a_length = length3(a), b_length = length3(b);
+	int k;
+
+	if (a_length <= 0.0f || b_length <= 0.0f)
+		return 0.0f;
+	for (k = 0; k < 3; k++)
+	{
+		a_direction[k] = a[k] / a_length;
+		b_direction[k] = b[k] / b_length;
+	}
+	cross3(a_direction, b_direction, edge_normal);
+	sine = length3(edge_normal);
+	return sine > 1.0e-7f ? atan2f(sine, dot3(a_direction, b_direction)) * dot3(normal, edge_normal) / sine : 0.0f;
+}
+
 /* a box (centre, half axes x and y, half extent along z = x cross y): the
 faces turned towards p (at most 3), each clipped by p's tangent plane, and
-the polygon's form factor (Lambert): (1 / 2 pi) the sum over its edges of
-the angle each edge subtends times n . (the edge's plane's normal) */
+their form factor (Lambert): (1 / 2 pi) the sum over the edges of the angle
+each subtends times n . (the edge's plane's normal). The faces are taken
+the same way round as seen from outside the box (their corners' order times
+the side), so an edge two of them share is taken once each way and its two
+terms cancel: such an edge is left out, and only the outline's edges (at
+most 6, and the tangent plane's chords) are found. A face's clipped edges
+are its edges' parts above the plane (Sutherland and Hodgman's taken edge
+by edge) and the chord from where it leaves the plane to where it enters */
 static float box_occlusion(float const centre[3], float const half_x[3], float const half_y[3], float extent_z,
 	float const point[3], float const normal[3])
 {
@@ -306,10 +332,10 @@ static float box_occlusion(float const centre[3], float const half_x[3], float c
 
 		for (side = -1; side <= 1; side += 2)
 		{
-			/* the face's corners from p, then those of it above the tangent
-			plane (a quad clipped by a plane: at most 5 corners) */
-			float corners[4][3], clipped[8][3], face_occlusion;
-			int u = (axis + 1) % 3, v = (axis + 2) % 3, count = 0, corner;
+			/* the face's corners from p (about +axis: (-u -v), (+u -v), (+u +v),
+			(-u +v)) and their heights above the tangent plane */
+			float corners[4][3], heights[4], exit_point[3], entry_point[3], face = 0.0f;
+			int u = (axis + 1) % 3, v = (axis + 2) % 3, corner, crossed = 0;
 
 			if ((float)side * local[axis] <= extents[axis])
 				continue;
@@ -321,55 +347,36 @@ static float box_occlusion(float const centre[3], float const half_x[3], float c
 				corners[corner][axis] = (float)side * extents[axis] - local[axis];
 				corners[corner][u] = su * extents[u] - local[u];
 				corners[corner][v] = sv * extents[v] - local[v];
+				heights[corner] = dot3(local_normal, corners[corner]);
 			}
 			for (corner = 0; corner < 4; corner++)
 			{
-				float const *this_corner = corners[corner];
-				float const *next_corner = corners[(corner + 1) % 4];
-				float this_height = dot3(local_normal, this_corner);
-				float next_height = dot3(local_normal, next_corner);
+				int next = (corner + 1) % 4;
+				/* (the face across this edge: edges 0 and 2 lie on v's faces, 1
+				and 3 on u's, at -, +, +, -) */
+				int across = corner == 0 || corner == 2 ? v : u;
+				float across_side = corner == 0 || corner == 3 ? -1.0f : 1.0f;
+				int above = heights[corner] >= 0.0f, next_above = heights[next] >= 0.0f;
+				float crossing[3], t = heights[corner] / (heights[corner] - heights[next]);
 
-				if (this_height >= 0.0f)
-				{
-					memcpy(clipped[count], this_corner, sizeof(clipped[count]));
-					count++;
-				}
-				if ((this_height >= 0.0f) != (next_height >= 0.0f))
-				{
-					float t = this_height / (this_height - next_height);
-
-					for (k = 0; k < 3; k++)
-						clipped[count][k] = this_corner[k] + t * (next_corner[k] - this_corner[k]);
-					count++;
-				}
-			}
-			if (count < 3)
-				continue;
-			face_occlusion = 0.0f;
-			for (corner = 0; corner < count; corner++)
-			{
-				float this_direction[3], next_direction[3], edge_normal[3];
-				float this_length = length3(clipped[corner]);
-				float next_length = length3(clipped[(corner + 1) % count]);
-				float sine, cosine;
-
-				if (this_length <= 0.0f || next_length <= 0.0f)
-					continue;
 				for (k = 0; k < 3; k++)
+					crossing[k] = corners[corner][k] + t * (corners[next][k] - corners[corner][k]);
+				if (above && !next_above)
 				{
-					this_direction[k] = clipped[corner][k] / this_length;
-					next_direction[k] = clipped[(corner + 1) % count][k] / next_length;
+					memcpy(exit_point, crossing, sizeof(exit_point));
+					crossed = 1;
 				}
-				cross3(this_direction, next_direction, edge_normal);
-				sine = length3(edge_normal);
-				cosine = dot3(this_direction, next_direction);
-				if (sine > 1.0e-7f)
-					face_occlusion += atan2f(sine, cosine) * dot3(local_normal, edge_normal) / sine;
+				if (!above && next_above)
+					memcpy(entry_point, crossing, sizeof(entry_point));
+				if ((above || next_above) && across_side * local[across] <= extents[across])
+					face += box_edge(local_normal, above ? corners[corner] : crossing, next_above ? corners[next] : crossing);
 			}
-			occlusion += fabsf(face_occlusion) / (2.0f * WORLD_PROXIES_PI);
+			if (crossed)
+				face += box_edge(local_normal, exit_point, entry_point);
+			occlusion += (float)side * face;
 		}
 	}
-	return clampf(occlusion, 0.0f, 1.0f);
+	return clampf(fabsf(occlusion) / (2.0f * WORLD_PROXIES_PI), 0.0f, 1.0f);
 }
 
 /* a box's fade (world_proxy_box_fade): a bound on box_occlusion that is
