@@ -8,9 +8,7 @@ view's lines. port/linux/game/world_proxies_game.c reads them from the tags
 and objects; tools/harness/tests/world_proxies.c gives a fake world instead.
 Workstream C's own (docs/world-ao.md).
 
-The objects come from world_scene.h's instances (workstream A) once it has
-them, else from the game's object list directly: the adapter is the one
-place that changes when A lands.
+The objects come from world_scene.h's instances (workstream A).
 */
 
 #ifndef WORLD_PROXIES_SOURCE_H

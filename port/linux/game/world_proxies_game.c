@@ -6,10 +6,9 @@ What the object proxies (world_proxies.c) read of the game
 from its tags, the window's objects and their nodes as drawn, the window's
 frustum, and debug.world_proxies_view's lines. Read only; render-only.
 
-The objects are world_scene.h's instances (workstream A) once it has any,
-else the game's object list read directly, the same way: either is the
-frame's objects as drawn, since this runs inside the frame's
-render_interpolation pose (render_window).
+The objects are world_scene.h's instances (workstream A), their nodes the
+object's node matrices, read inside the frame's render_interpolation pose
+(render_window): as drawn.
 */
 
 #include "cseries.h"
@@ -169,38 +168,17 @@ int world_proxies_source_definition(long definition, struct world_proxies_source
 
 long world_proxies_source_instances(struct world_proxies_source_instance *instances, long maximum)
 {
-	long count = 0;
+	/* workstream A's scene: the frame's objects as drawn */
+	struct world_scene_instance const *scene = world_scene_instances();
+	long index, count = 0;
 
-	if (world_scene_instance_count() > 0)
+	for (index = 0; scene && index < world_scene_instance_count() && count < maximum; index++)
 	{
-		/* workstream A's scene */
-		struct world_scene_instance const *scene = world_scene_instances();
-		long index;
-
-		for (index = 0; index < world_scene_instance_count() && count < maximum; index++)
-		{
-			if (scene[index].kind != _world_scene_instance_object || !object_occludes(scene[index].id))
-				continue;
-			instances[count].id = scene[index].id;
-			instances[count].definition = scene[index].definition;
-			count++;
-		}
-	}
-	else
-	{
-		/* (until A lands: the game's objects themselves) */
-		struct object_iterator iterator;
-		struct object_datum *object;
-
-		object_iterator_new(&iterator, _object_mask_all, 0);
-		while ((object = (struct object_datum *)object_iterator_next(&iterator)) != NULL && count < maximum)
-		{
-			if (!object_occludes(iterator.index))
-				continue;
-			instances[count].id = iterator.index;
-			instances[count].definition = object->definition_index;
-			count++;
-		}
+		if (scene[index].kind != _world_scene_instance_object || !object_occludes(scene[index].id))
+			continue;
+		instances[count].id = scene[index].id;
+		instances[count].definition = scene[index].definition;
+		count++;
 	}
 	return count;
 }
