@@ -267,14 +267,18 @@ follow it line for line. p is the point, n its unit normal, all in world units.
 
 - **Box** (centre c, half axis vectors X and Y, half extent ez along Z = normalize(X) × normalize(Y)), exact: in box
   space (p and n projected on the unit axes), 1 inside; else each face with p outside its plane (at most 3), its 4
-  corners taken relative to p and clipped by the plane n·v ≥ 0 (Sutherland–Hodgman: at most 5 corners), and the
-  polygon's form factor (Lambert):
+  corners taken relative to p and clipped by the plane n·v ≥ 0 (Sutherland–Hodgman taken edge by edge: each edge's
+  part above the plane, and the chord from where the face leaves it to where it enters), and the faces' form factor
+  (Lambert):
 
   ```
-  face = Σ_edges atan2(|v̂i × v̂j|, v̂i·v̂j) · n·(v̂i × v̂j) / |v̂i × v̂j|      (v̂ the corners normalized, j = i + 1)
-  occ  = clamp(Σ_faces |face| / 2π, 0, 1)
+  edge = atan2(|vi × vj|, vi·vj) · n·(vi × vj) / |vi × vj|      (j = i + 1; the same for any lengths of vi, vj)
+  occ  = clamp(|Σ_faces side · Σ_edges edge| / 2π, 0, 1)
   ```
 
+  Each face is taken the same way round as seen from outside the box (its corners' order times its side), so an
+  edge two front faces share is taken once each way and its terms cancel: it is left out (`box_occlusion`), and only
+  the outline's edges (at most 6) and the chords are found, about half the edges of the faces taken one by one.
   Within 0.02 of the integral everywhere (the residue is the integral's own sampling).
 
 - **Reach** (`world_proxy_reach`), measured from the sphere's and box's centre and the capsule's midpoint: past it
