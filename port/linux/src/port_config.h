@@ -78,6 +78,17 @@ struct config_setting_info
 };
 int config_setting_info(int index, struct config_setting_info *info);
 
+/* each weapon's own first-person offsets, by its tag's path ("weapons\\pistol\\pistol",
+any case, / for \\): config.toml's [display.viewmodel_weapon."<path>"] tables,
+x, y and z in centimeters and pitch, yaw and roll in degrees, added to the
+global ones (view_fov.c). config_viewmodel_weapon gives them (0 and 0 if the
+weapon has none); config_viewmodel_weapon_write sets them, for now and in
+config.toml (all 0: the weapon's table taken out), 1 on success.
+config_changes moves with a write */
+#define CONFIG_WEAPON_VALUES 6
+int config_viewmodel_weapon(const char *path, double values[CONFIG_WEAPON_VALUES]);
+int config_viewmodel_weapon_write(const char *path, const double values[CONFIG_WEAPON_VALUES]);
+
 /* the settings whose names begin with prefix ("server.") read from
 config.toml again, but for those their environment variables set; 1 on
 success (a file that cannot be read leaves them as they were) */

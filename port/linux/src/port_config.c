@@ -273,6 +273,19 @@ static const struct config_setting config_settings[] =
 		"The first-person weapon and hands moved forward, away from the view\n"
 		"(negative: closer), in centimeters (-20 to 20); 0 keeps them where\n"
 		"the game draws them." },
+	{ "display.viewmodel_pitch", _config_real, "0.0", "HALO_VIEWMODEL_PITCH", _environment_value, _platform_all,
+		"The first-person weapon and hands turned, muzzle up (negative: down),\n"
+		"in degrees (-15 to 15), about their middle, for every weapon; 0 keeps\n"
+		"them as the game draws them. The aim does not move. Not in VR.\n"
+		"Each weapon's own offsets, added to these: [display.viewmodel_weapon.\n"
+		"\"<tag path>\"] tables of x, y, z, pitch, yaw and roll (Settings, in a\n"
+		"game: First Person's WEAPON POSITION, THIS WEAPON)." },
+	{ "display.viewmodel_yaw", _config_real, "0.0", "HALO_VIEWMODEL_YAW", _environment_value, _platform_all,
+		"The first-person weapon and hands turned, muzzle right (negative:\n"
+		"left), in degrees (-15 to 15); 0 keeps them as the game draws them." },
+	{ "display.viewmodel_roll", _config_real, "0.0", "HALO_VIEWMODEL_ROLL", _environment_value, _platform_all,
+		"The first-person weapon and hands tilted, top to the right (negative:\n"
+		"left), in degrees (-15 to 15); 0 keeps them as the game draws them." },
 	{ "display.lowered_reticle", _config_boolean, "false", "HALO_LOWERED_RETICLE", _environment_value, _platform_all,
 		"Draw the reticle below the middle of the view, as Halo 2 and 3 do\n"
 		"(display.lowered_reticle_amount: how far). The view looks a little\n"
@@ -3096,27 +3109,34 @@ section's later parts moved to the end of its first, the rest kept as it
 is. Returns the new text, or NULL if no section is there twice */
 static char *config_join_sections(const char *text)
 {
-	enum { PARTS_MAXIMUM = 64 };
+	enum { PARTS_MAXIMUM = 256, NAME_MAXIMUM = 600 };
 	struct
 	{
-		char name[64];
+		/* (the name, as long as a weapon's table's: config_weapons_read) */
+		char name[NAME_MAXIMUM];
 		const char *start, *end;
-	} parts[PARTS_MAXIMUM];
+	} *parts;
 	struct config_text joined = { NULL, 0, 0 };
 	const char *line;
 	const char *first_part = NULL;
 	int count = 0, repeated = 0, index, other;
 
+	parts = malloc(sizeof(*parts) * PARTS_MAXIMUM);
+	if (!parts)
+		return NULL;
 	/* the parts, each from its section's line to the next one's */
 	for (line = text; *line; )
 	{
 		size_t length = strcspn(line, "\n");
-		char name[64];
+		char name[NAME_MAXIMUM];
 
 		if (config_line_section(line, line + length, name, sizeof(name)))
 		{
 			if (count == PARTS_MAXIMUM)
+			{
+				free(parts);
 				return NULL;
+			}
 			if (count)
 				parts[count - 1].end = line;
 			else
@@ -3132,7 +3152,10 @@ static char *config_join_sections(const char *text)
 			line++;
 	}
 	if (!repeated)
+	{
+		free(parts);
 		return NULL;
+	}
 	parts[count - 1].end = line;
 
 	config_append_range(&joined, text, first_part);
@@ -3158,6 +3181,7 @@ static char *config_join_sections(const char *text)
 			config_append_range(&joined, body + 1, parts[other].end);
 		}
 	}
+	free(parts);
 	return joined.buffer;
 }
 
@@ -3489,6 +3513,9 @@ static void config_report_unknown_key(int line, const char *name)
 	}
 }
 
+/* each weapon's own offsets' table (config_weapons_read) */
+#define CONFIG_WEAPON_TABLE "display.viewmodel_weapon"
+
 /* keys in the file that are no setting, likely misspelt */
 static void config_report_unknown_keys(toml_datum_t table)
 {
@@ -3509,6 +3536,10 @@ static void config_report_unknown_keys(toml_datum_t table)
 			char name[128];
 
 			snprintf(name, sizeof(name), "%s.%s", table.u.tab.key[section_index], section.u.tab.key[key_index]);
+			/* (each weapon's offsets: config_weapons_read says what is wrong
+			in them) */
+			if (!strcmp(name, CONFIG_WEAPON_TABLE))
+				continue;
 			if (config_setting_index(name) < 0)
 				config_report_unknown_key(section.u.tab.value[key_index].lineno, name);
 		}
@@ -3921,6 +3952,8 @@ static void config_apply_server_mode(void)
 }
 #endif
 
+static void config_weapons_read(toml_datum_t table);
+
 static void config_load(void)
 {
 	char path[1024];
@@ -4024,6 +4057,7 @@ static void config_load(void)
 			for (index = 0; index < NUMBER_OF_CONFIG_SETTINGS; index++)
 				config_set[index] = (unsigned char)config_set_from_file(&config_values[index], &config_settings[index],
 					result.toptab);
+			config_weapons_read(result.toptab);
 #ifndef HALO_ANDROID
 			if (config_values[config_setting_index("server.enabled")].boolean && !config_probe_mode)
 				config_server_mode = 1;
@@ -4227,20 +4261,26 @@ static int config_line_key(const char *line, const char *end, const char *key, i
 	return line < end && *line == '=';
 }
 
-/* the section the line opens, if it is "[section]" (after spaces) */
+/* the section the line opens, if it is "[section]" (after spaces). A name
+longer than size is cut short, still a section's line: a weapon's table
+(display.viewmodel_weapon."<tag path>") ends the section before it */
 static int config_line_section(const char *line, const char *end, char *section, size_t size)
 {
 	const char *close;
+	size_t length;
 
 	while (line < end && (*line == ' ' || *line == '\t'))
 		line++;
-	if (line >= end || *line != '[')
+	if (line >= end || *line != '[' || !size)
 		return 0;
 	close = memchr(line, ']', (size_t)(end - line));
-	if (!close || (size_t)(close - line - 1) >= size)
+	if (!close)
 		return 0;
-	memcpy(section, line + 1, (size_t)(close - line - 1));
-	section[close - line - 1] = 0;
+	length = (size_t)(close - line - 1);
+	if (length >= size)
+		length = size - 1;
+	memcpy(section, line + 1, length);
+	section[length] = 0;
 	return 1;
 }
 
@@ -4608,6 +4648,9 @@ int config_reload(const char *prefix)
 		/* (the old string kept, as config_set_from_text keeps it) */
 		config_values[index] = value;
 	}
+	/* (each weapon's offsets: display.viewmodel_weapon) */
+	if (!strncmp(CONFIG_WEAPON_TABLE, prefix, length))
+		config_weapons_read(result.toptab);
 #ifndef HALO_ANDROID
 	/* (what the run forces, forced again: a server started by --server
 	stays one whatever the file's server.enabled says, and its router asked
@@ -4623,6 +4666,353 @@ int config_reload(const char *prefix)
 	free(text);
 	config_check_words();
 	return 1;
+}
+
+/* ---------- each weapon's own view model offsets (display.viewmodel_weapon)
+
+A table of its own for each weapon, by its tag's path, as the map names it,
+so that a modded map's weapons have theirs too:
+
+	[display.viewmodel_weapon."weapons\\pistol\\pistol"]
+	x = 2.0
+	y = -1.5
+	z = 0.0
+	pitch = 0.0
+	yaw = 4.0
+	roll = 0.0
+
+Each value is added to the global one (display.viewmodel_offset_x, _y,
+_z, display.viewmodel_pitch, _yaw, _roll: view_fov.c). Kept apart from the
+table of settings: config_viewmodel_weapon reads them, and
+config_viewmodel_weapon_write writes one weapon's table (none when every
+value is 0), the rest of the file kept as it is. */
+
+/* the longest tag path (tag_files.h's) */
+#define CONFIG_WEAPON_PATH_MAXIMUM 255
+
+static const char *const config_weapon_keys[CONFIG_WEAPON_VALUES] = { "x", "y", "z", "pitch", "yaw", "roll" };
+
+struct config_weapon
+{
+	char *path;
+	double values[CONFIG_WEAPON_VALUES];
+};
+
+static struct config_weapon *config_weapons;
+static int config_weapon_count;
+
+/* whether two tag paths are the same tag's: tags' paths are the same in
+any case, and a / is taken for the \ the maps write */
+static int config_weapon_paths_same(const char *a, const char *b)
+{
+	for (;; a++, b++)
+	{
+		int ca = *a == '/' ? '\\' : tolower((unsigned char)*a);
+		int cb = *b == '/' ? '\\' : tolower((unsigned char)*b);
+
+		if (ca != cb)
+			return 0;
+		if (!ca)
+			return 1;
+	}
+}
+
+static int config_weapon_find(const char *path)
+{
+	int index;
+
+	for (index = 0; index < config_weapon_count; index++)
+	{
+		if (config_weapon_paths_same(config_weapons[index].path, path))
+			return index;
+	}
+	return -1;
+}
+
+static void config_weapons_clear(void)
+{
+	int index;
+
+	for (index = 0; index < config_weapon_count; index++)
+		free(config_weapons[index].path);
+	free(config_weapons);
+	config_weapons = NULL;
+	config_weapon_count = 0;
+}
+
+/* one weapon's values set (all 0: none kept); 0 if out of memory */
+static int config_weapon_store(const char *path, const double values[CONFIG_WEAPON_VALUES])
+{
+	int index = config_weapon_find(path);
+	int value, any = 0;
+
+	for (value = 0; value < CONFIG_WEAPON_VALUES; value++)
+		any |= values[value] != 0.0;
+	if (!any)
+	{
+		if (index >= 0)
+		{
+			free(config_weapons[index].path);
+			config_weapons[index] = config_weapons[--config_weapon_count];
+		}
+		return 1;
+	}
+	if (index < 0)
+	{
+		struct config_weapon *grown = realloc(config_weapons, sizeof(*grown) * (size_t)(config_weapon_count + 1));
+		char *copy = strdup(path);
+
+		if (!grown || !copy)
+		{
+			free(copy);
+			if (grown)
+				config_weapons = grown;
+			return 0;
+		}
+		config_weapons = grown;
+		index = config_weapon_count++;
+		config_weapons[index].path = copy;
+	}
+	memcpy(config_weapons[index].values, values, sizeof(config_weapons[index].values));
+	return 1;
+}
+
+/* the weapons' tables in the file (table, parsed): each number kept, any
+other value or key said in the log */
+static void config_weapons_read(toml_datum_t table)
+{
+	toml_datum_t weapons = toml_seek(table, CONFIG_WEAPON_TABLE);
+	int weapon;
+
+	config_weapons_clear();
+	if (weapons.type == TOML_UNKNOWN)
+		return;
+	if (weapons.type != TOML_TABLE)
+	{
+		platform_log("config.toml line %d: %s should be a table of weapons", weapons.lineno, CONFIG_WEAPON_TABLE);
+		return;
+	}
+	for (weapon = 0; weapon < weapons.u.tab.size; weapon++)
+	{
+		const char *path = weapons.u.tab.key[weapon];
+		toml_datum_t entry = weapons.u.tab.value[weapon];
+		double values[CONFIG_WEAPON_VALUES] = { 0 };
+		int key;
+
+		if (entry.type != TOML_TABLE || !path[0] || strlen(path) > CONFIG_WEAPON_PATH_MAXIMUM)
+		{
+			platform_log("config.toml line %d: %s.\"%s\" should be a table (x, y, z, pitch, yaw, roll)",
+				entry.lineno, CONFIG_WEAPON_TABLE, path);
+			continue;
+		}
+		for (key = 0; key < entry.u.tab.size; key++)
+		{
+			toml_datum_t datum = entry.u.tab.value[key];
+			int value;
+
+			for (value = 0; value < CONFIG_WEAPON_VALUES && strcmp(entry.u.tab.key[key], config_weapon_keys[value]);
+				value++)
+				;
+			if (value == CONFIG_WEAPON_VALUES)
+				platform_log("config.toml line %d: %s is no weapon offset (x, y, z, pitch, yaw, roll)", datum.lineno,
+					entry.u.tab.key[key]);
+			else if (datum.type == TOML_FP64)
+				values[value] = datum.u.fp64;
+			else if (datum.type == TOML_INT64)
+				values[value] = (double)datum.u.int64;
+			else
+				platform_log("config.toml line %d: %s should be a number; using 0", datum.lineno, entry.u.tab.key[key]);
+		}
+		/* (a path twice, as / and \: the later one's) */
+		config_weapon_store(path, values);
+	}
+}
+
+int config_viewmodel_weapon(const char *path, double values[CONFIG_WEAPON_VALUES])
+{
+	int index;
+
+	config_ensure_loaded();
+	pthread_mutex_lock(&config_lock);
+	index = path ? config_weapon_find(path) : -1;
+	if (index >= 0)
+		memcpy(values, config_weapons[index].values, sizeof(config_weapons[index].values));
+	else
+		memset(values, 0, sizeof(double) * CONFIG_WEAPON_VALUES);
+	pthread_mutex_unlock(&config_lock);
+	return index >= 0;
+}
+
+/* the weapon's path the line's table is for, if it is
+[display.viewmodel_weapon."<path>"] in any of TOML's spellings, read as
+TOML reads it; 0 if it is another line */
+static int config_weapon_line_path(const char *line, const char *end, char *path, size_t size)
+{
+	static const char prefix[] = CONFIG_WEAPON_TABLE;
+	struct config_text header = { NULL, 0, 0 };
+	char *copy;
+	toml_result_t result;
+	toml_datum_t weapons;
+	int found = 0;
+
+	while (line < end && (*line == ' ' || *line == '\t'))
+		line++;
+	/* (only a table's line that likely names one: parsed alone) */
+	if (end - line < 3 || line[0] != '[' || line[1] == '[' || !memchr(line, 'v', (size_t)(end - line)))
+		return 0;
+	copy = config_copy(line, (size_t)(end - line));
+	if (!copy)
+		return 0;
+	config_append(&header, copy);
+	config_append(&header, "\n");
+	free(copy);
+	if (!header.buffer)
+		return 0;
+	result = toml_parse(header.buffer, (int)header.length);
+	weapons = result.ok ? toml_seek(result.toptab, prefix) : (toml_datum_t){ 0 };
+	if (weapons.type == TOML_TABLE && weapons.u.tab.size == 1 && result.toptab.u.tab.size == 1 &&
+		toml_seek(result.toptab, "display").u.tab.size == 1 && strlen(weapons.u.tab.key[0]) < size)
+	{
+		strcpy(path, weapons.u.tab.key[0]);
+		found = 1;
+	}
+	toml_free(result);
+	free(header.buffer);
+	return found;
+}
+
+/* text with the weapon's table in place of its own (or at the end), or
+without it (values NULL); the rest as it is. NULL if out of memory */
+static char *config_weapon_set_table(const char *text, const char *path, const double *values)
+{
+	struct config_text out = { NULL, 0, 0 };
+	const char *line;
+	char block[CONFIG_WEAPON_PATH_MAXIMUM * 2 + 600];
+	int written = 0, in_table = 0;
+
+	if (values)
+	{
+		char *end = block + sprintf(block, "[%s.\"", CONFIG_WEAPON_TABLE);
+		const char *character;
+		int value;
+
+		/* (a TOML basic string, its backslashes and quotes escaped) */
+		for (character = path; *character; character++)
+		{
+			if (*character == '"' || *character == '\\')
+				*end++ = '\\';
+			*end++ = *character;
+		}
+		end += sprintf(end, "\"]\n");
+		for (value = 0; value < CONFIG_WEAPON_VALUES; value++)
+		{
+			char number[64];
+
+			config_real_text(values[value], number, sizeof(number));
+			end += sprintf(end, "%s = %s\n", config_weapon_keys[value], number);
+		}
+	}
+	config_append(&out, "");
+	for (line = text; *line;)
+	{
+		const char *end = line + strcspn(line, "\n");
+		const char *next = *end ? end + 1 : end;
+		const char *start = line;
+		char found[CONFIG_WEAPON_PATH_MAXIMUM + 1];
+
+		while (start < end && (*start == ' ' || *start == '\t'))
+			start++;
+		if (start < end && *start == '[')
+		{
+			in_table = config_weapon_line_path(line, end, found, sizeof(found)) &&
+				config_weapon_paths_same(found, path);
+			/* (its table's lines, the first time, the new table's) */
+			if (in_table)
+			{
+				if (values && !written)
+					config_append(&out, block);
+				written = 1;
+				line = next;
+				continue;
+			}
+		}
+		if (!in_table)
+		{
+			char *copy = config_copy(line, (size_t)(next - line));
+
+			if (copy)
+				config_append(&out, copy);
+			free(copy);
+		}
+		/* (a blank line after the table kept, before the next) */
+		else if (start == end || (start < end && *start == '\r'))
+		{
+			config_append(&out, "\n");
+		}
+		line = next;
+	}
+	if (values && !written)
+	{
+		if (out.length && out.buffer[out.length - 1] != '\n')
+			config_append(&out, "\n");
+		config_append(&out, "\n");
+		config_append(&out, block);
+	}
+	return out.buffer;
+}
+
+int config_viewmodel_weapon_write(const char *path, const double values[CONFIG_WEAPON_VALUES])
+{
+	char file[1024];
+	size_t size = 0, length = path ? strlen(path) : 0;
+	char *text, *updated;
+	int succeeded = 0, value, any = 0;
+	toml_result_t check;
+
+	if (!length || length > CONFIG_WEAPON_PATH_MAXIMUM)
+		return 0;
+	for (value = 0; value < (int)length; value++)
+	{
+		if ((unsigned char)path[value] < 0x20 || path[value] == 0x7F)
+			return 0;
+	}
+	for (value = 0; value < CONFIG_WEAPON_VALUES; value++)
+	{
+		if (!(values[value] == values[value]))
+			return 0;
+		any |= values[value] != 0.0;
+	}
+	config_ensure_loaded();
+	pthread_mutex_lock(&config_lock);
+	if (!config_weapon_store(path, values))
+	{
+		pthread_mutex_unlock(&config_lock);
+		return 0;
+	}
+	config_change_count++;
+	if (config_answer_only)
+	{
+		pthread_mutex_unlock(&config_lock);
+		return 1;
+	}
+	config_path(file, sizeof(file));
+	text = config_read_file(file, &size);
+	updated = config_weapon_set_table(text ? text : "", path, any ? values : NULL);
+	/* (a file the new table would leave unreadable, as one with the
+	weapon's in an inline table, is left as it is) */
+	if (updated)
+	{
+		check = toml_parse(updated, (int)strlen(updated));
+		if (check.ok)
+			succeeded = config_write_file(file, updated);
+		else
+			platform_log("settings: %s's offsets not written: config.toml would not read (%s)", path, check.errmsg);
+		toml_free(check);
+	}
+	pthread_mutex_unlock(&config_lock);
+	free(updated);
+	free(text);
+	return succeeded;
 }
 
 int config_default(const char *name, char *text, size_t size)
