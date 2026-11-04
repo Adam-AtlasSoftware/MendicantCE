@@ -2780,22 +2780,18 @@ static unsigned int world_proxy_capsule(struct module *m, unsigned int p, unsign
 		world_proxy_sphere(m, p, n, a, radius), occlusion);
 }
 
-/* a polygon's edge's part of its form factor (box_occlusion's), the
-corners a and b from p, the normal in box space: 0 where either is at p
-or they are in line */
+/* a polygon's edge's part of its form factor (box_occlusion's box_edge), the
+corners a and b from p, the normal in box space: atan2(|a x b|, a . b) n .
+(a x b) / |a x b|, the same for any lengths of a and b (none normalized); 0
+where the angle's sine is under 1e-7 (either at p, or in line) */
 static unsigned int world_proxy_edge(struct module *m, unsigned int normal, unsigned int a, unsigned int b)
 {
-	unsigned int zero = constant_float(m, 0.0f), a_length = flength(m, a), b_length = flength(m, b);
-	unsigned int edge_normal = fcross(m, fscale(m, 3, a, fdiv(m, 1, constant_float(m, 1.0f), a_length)),
-		fscale(m, 3, b, fdiv(m, 1, constant_float(m, 1.0f), b_length)));
-	unsigned int sine = flength(m, edge_normal), cosine;
-	unsigned int valid = op2(m, OP_LOGICAL_AND, m->t_bool, op2(m, OP_LOGICAL_AND, m->t_bool,
-		compare(m, OP_F_ORD_GREATER_THAN, a_length, zero), compare(m, OP_F_ORD_GREATER_THAN, b_length, zero)),
-		compare(m, OP_F_ORD_GREATER_THAN, sine, constant_float(m, 1.0e-7f)));
+	unsigned int zero = constant_float(m, 0.0f), edge_normal = fcross(m, a, b);
+	unsigned int sine_squared = fdot(m, edge_normal, edge_normal), sine = fsqrt(m, sine_squared);
+	unsigned int valid = compare(m, OP_F_ORD_GREATER_THAN, sine_squared, fmul(m, 1, fmul(m, 1,
+		constant_float(m, 1.0e-14f), fdot(m, a, a)), fdot(m, b, b)));
 
-	cosine = fdot(m, fscale(m, 3, a, fdiv(m, 1, constant_float(m, 1.0f), a_length)),
-		fscale(m, 3, b, fdiv(m, 1, constant_float(m, 1.0f), b_length)));
-	return fselect(m, valid, fdiv(m, 1, fmul(m, 1, ext2(m, GLSL_ATAN2, m->t_float, sine, cosine),
+	return fselect(m, valid, fdiv(m, 1, fmul(m, 1, ext2(m, GLSL_ATAN2, m->t_float, sine, fdot(m, a, b)),
 		fdot(m, normal, edge_normal)), sine), zero);
 }
 

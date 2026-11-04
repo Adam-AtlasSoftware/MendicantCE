@@ -271,23 +271,20 @@ static float capsule_occlusion(float const a[3], float const b[3], float radius,
 }
 
 /* an edge's term of a polygon's form factor at p (normal n): the angle the
-edge (a to b, from p) subtends times n . its plane's unit normal */
+edge (a to b, from p) subtends times n . its plane's unit normal. Both are
+the same for any lengths of a and b: atan2(|a x b|, a . b) and
+n . (a x b) / |a x b|, so neither is normalized (none where the angle's sine
+is under 1e-7) */
 static float box_edge(float const normal[3], float const a[3], float const b[3])
 {
-	float a_direction[3], b_direction[3], edge_normal[3], sine;
-	float a_length = length3(a), b_length = length3(b);
-	int k;
+	float edge_normal[3], sine_squared, sine;
 
-	if (a_length <= 0.0f || b_length <= 0.0f)
+	cross3(a, b, edge_normal);
+	sine_squared = dot3(edge_normal, edge_normal);
+	if (!(sine_squared > 1.0e-14f * dot3(a, a) * dot3(b, b)))
 		return 0.0f;
-	for (k = 0; k < 3; k++)
-	{
-		a_direction[k] = a[k] / a_length;
-		b_direction[k] = b[k] / b_length;
-	}
-	cross3(a_direction, b_direction, edge_normal);
-	sine = length3(edge_normal);
-	return sine > 1.0e-7f ? atan2f(sine, dot3(a_direction, b_direction)) * dot3(normal, edge_normal) / sine : 0.0f;
+	sine = sqrtf(sine_squared);
+	return atan2f(sine, dot3(a, b)) * dot3(normal, edge_normal) / sine;
 }
 
 /* a box (centre, half axes x and y, half extent along z = x cross y): the
