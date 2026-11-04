@@ -394,6 +394,17 @@ A profiling build plays with normal builds.
 The tests are listed in [AGENTS.md](AGENTS.md) ("Testing"). Most run
 without the game data, in GitHub Actions too.
 
+A game started with a new data folder at the main menu first prepares the
+menu pictures ("Preparing menu pictures", about 12 seconds for the 23 retail
+pictures on a desktop computer; at most 2 minutes). Runs started by tests skip
+this: a run with `debug.exit_after`, `fixed_step`, `test_input`,
+`network_test`, `menu_open`, `hidden_window`, `telnet_console`,
+`screenshot_every` or `load_trace` set goes directly to its map or the main
+menu. Other runs that start in a map (`init.txt`) prepare the pictures only
+when they first go to the main menu.
+`HALO_DEBUG_MENU_PICTURES=1` prepares the pictures in a test run as well.
+Refer to "Menu pictures" in [port/linux/README.md](port/linux/README.md).
+
 One check needs the retail maps, so it runs on your own computer (or on a
 self-hosted runner), not in GitHub Actions: `tools/net_compare.py` plays
 two builds together in a network game on one computer and checks that they

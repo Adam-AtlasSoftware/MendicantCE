@@ -776,7 +776,9 @@ one the pose was made for (its cache file checksum,
 `port/assets/pictures/maps.json`: a modded map), where its render failed
 twice (a render is noted as failed before it begins, so that a game gone
 in the middle of one tries it once more, then keeps the original), and
-until it is ready. Not in runs nobody watches (tests: `debug.menu_pictures`
+until it is ready. Not in runs nobody watches (tests: `debug.hidden_window`,
+`exit_after`, `fixed_step`, `test_input`, `network_test`, `menu_open`,
+`telnet_console`, `screenshot_every` or `load_trace`; `debug.menu_pictures`
 draws them there too), in VR, or with `display.menu_pictures = false`.
 
 ## Bots
@@ -1291,7 +1293,7 @@ the setting for one start of the game. It has priority over the file.
 | `debug.gpu_stats`, `debug.gpu_trace_frame`, `debug.gpu_trace_constants`, `debug.gpu_dump_shaders`, `debug.texture_dump_directory`, `debug.gpu_validation` | off | `HALO_GPU_STATS`, `HALO_GPU_TRACE`, `HALO_GPU_TRACE_CONSTANTS`, `HALO_GPU_DUMP_SHADERS`, `HALO_TEXTURE_DUMP`, `HALO_GPU_VALIDATION` | Tools to find problems in the graphics: counts for each frame (with Vulkan, also its submissions, passes, clears and pipelines every 600 frames, as `HALO_VULKAN_STATS`), every draw of one frame, the shaders' code (Vulkan's SPIR-V, as `.spv` files, as `HALO_VULKAN_SHADERS`), the textures as they are read (TGA files, `tex<number>_fmt<format>_<width>x<height>.tga`), and the graphics API's errors in the log (Vulkan's validation layers, which must be installed, as `HALO_VULKAN_VALIDATION`). |
 | `debug.gl_debug` | `false` | `HALO_GL_DEBUG` | Deprecated: `debug.gpu_validation`'s old name, which still turns it on (with Vulkan, the validation layers). |
 | `debug.skip_cinematics` | `false` | `HALO_SKIP_CINEMATICS` | Skip each cinematic of a local game: as the skip button does where the level lets it be skipped, else run at sixteen times its speed (`main_skip`), so that a test reaches play in seconds (b30's opening, which cannot be skipped, in about 100 frames rather than 2,400). |
-| `debug.menu_pictures` | `false` | `HALO_DEBUG_MENU_PICTURES` | Prepare the menus' pictures (`display.menu_pictures`) even in a run that nobody watches (`debug.hidden_window`, `debug.exit_after`...), for tests ("Menu pictures"). |
+| `debug.menu_pictures` | `false` | `HALO_DEBUG_MENU_PICTURES` | Prepare the menus' pictures (`display.menu_pictures`) even in a run that nobody watches (`debug.hidden_window`, `exit_after`, `fixed_step`, `test_input`, `network_test`, `menu_open`, `telnet_console`, `screenshot_every`, `load_trace`), for tests ("Menu pictures"). |
 | `debug.menu_open` | `""` | `HALO_MENU_OPEN` | Start on this screen of the menus (`main_menu/settings_select/...`, as `port/assets/menus` names it), a player profile being edited, to look at it. |
 | `debug.matchmaking`, `debug.matchmaking_host` | `""` | `HALO_MATCHMAKING`, `HALO_MATCHMAKING_HOST` | Search a matchmaking playlist (its name, `"Team Slayer"`, or its number, 1 up) once the main menu is up, and how well this machine tells its party it can host (`"strict"` or `"open"`; empty: as its network is), for a test; with either, a player without a profile plays. |
 | `debug.party` | `""` | `HALO_PARTY` | Join this party link at the start, or lead its party (`lead:` before the link): several copies of the game in one party, for a test. |
