@@ -39,12 +39,6 @@ struct float4
 	float4() : x(0.0f), y(0.0f), z(0.0f), w(0.0f), r(0.0f), xyz(0.0f) {}
 	float4(float a, float b, float c, float d) : x(a), y(b), z(c), w(d), r(a), xyz(a, b, c) {}
 };
-		struct { float3 xyz; float w_; };
-		struct { float r, g, b, a; };
-	};
-	float4() { x = y = z = w = 0.0f; }
-	float4(float a_, float b_, float c_, float d_) { x = a_; y = b_; z = c_; w = d_; }
-};
 
 static inline float3 operator+(float3 a, float3 b) { return float3(a.x + b.x, a.y + b.y, a.z + b.z); }
 static inline float3 operator-(float3 a, float3 b) { return float3(a.x - b.x, a.y - b.y, a.z - b.z); }
