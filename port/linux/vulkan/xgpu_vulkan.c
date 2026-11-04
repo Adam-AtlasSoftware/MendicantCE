@@ -3540,6 +3540,31 @@ static void pipeline_request(struct pipeline_entry *entry)
 	pthread_mutex_unlock(&pipeline_compiler.mutex);
 }
 
+/* a pipeline handed to the compilers without waiting, where there is room
+(else it waits for the next look); FALSE if there are none */
+static int pipeline_request_apart(struct pipeline_entry *entry)
+{
+	uint32_t index;
+
+	pipeline_compilers_start();
+	if (!pipeline_compiler.started)
+		return 0;
+	pthread_mutex_lock(&pipeline_compiler.mutex);
+	pipeline_publish_completed();
+	entry->waiting = pipeline_compiler.submitted - pipeline_compiler.published >= PIPELINE_JOBS;
+	if (!entry->waiting)
+	{
+		index = (uint32_t)(pipeline_compiler.submitted % PIPELINE_JOBS);
+		pipeline_compiler.jobs[index].description = entry->description;
+		pipeline_compiler.jobs[index].entry = entry;
+		entry->pending = 1;
+		pipeline_compiler.submitted++;
+		pthread_cond_broadcast(&pipeline_compiler.changed);
+	}
+	pthread_mutex_unlock(&pipeline_compiler.mutex);
+	return 1;
+}
+
 static void pipeline_compiler_stop(void)
 {
 	if (!pipeline_compiler.started)
@@ -3744,39 +3769,6 @@ static VkPipeline pipeline_build(const struct xgpu_vulkan_pipeline_description *
 	return pipeline;
 }
 
-/* a pipeline handed to the compilers without waiting, where there is room
-(else it waits for the next look); FALSE if there are none */
-static int pipeline_request_apart(struct pipeline_entry *entry)
-{
-	uint32_t index;
-
-	pipeline_compilers_start();
-	if (!pipeline_compiler.started)
-		return 0;
-	pthread_mutex_lock(&pipeline_compiler.mutex);
-	pipeline_publish_completed();
-	entry->waiting = pipeline_compiler.submitted - pipeline_compiler.published >= PIPELINE_JOBS;
-	if (!entry->waiting)
-	{
-		index = (uint32_t)(pipeline_compiler.submitted % PIPELINE_JOBS);
-		pipeline_compiler.jobs[index].description = entry->description;
-		pipeline_compiler.jobs[index].entry = entry;
-		entry->pending = 1;
-		pipeline_compiler.submitted++;
-		pthread_cond_broadcast(&pipeline_compiler.changed);
-	}
-	pthread_mutex_unlock(&pipeline_compiler.mutex);
-	return 1;
-}
-
-static struct pipeline_entry *pipeline_find_apart(const struct xgpu_vulkan_pipeline_description *description,
-	int apart);
-
-static struct pipeline_entry *pipeline_find(const struct xgpu_vulkan_pipeline_description *description)
-{
-	return pipeline_find_apart(description, 0);
-}
-
 static struct pipeline_entry *pipeline_find_apart(const struct xgpu_vulkan_pipeline_description *description,
 	int apart)
 {
@@ -3807,6 +3799,11 @@ static struct pipeline_entry *pipeline_find_apart(const struct xgpu_vulkan_pipel
 	if (!apart || !pipeline_request_apart(entry))
 		pipeline_request(entry);
 	return entry;
+}
+
+static struct pipeline_entry *pipeline_find(const struct xgpu_vulkan_pipeline_description *description)
+{
+	return pipeline_find_apart(description, 0);
 }
 
 int xgpu_vulkan_pipeline_prepare(const struct xgpu_vulkan_pipeline_description *description)
