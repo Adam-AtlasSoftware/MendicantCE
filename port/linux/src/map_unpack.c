@@ -51,7 +51,6 @@ the system's zlib.
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
-#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -606,7 +605,7 @@ int map_unpack_folder(const char *maps_folder, const char *z_folder, long langua
 		}
 	}
 	map_unpack_assign(file_lengths, types, MAP_UNPACK_STOCK_MAPS, budget, slots);
-	mkdir(z_folder, 0755);
+	posix_make_directory(z_folder);
 	for (index = 0; index < MAP_UNPACK_STOCK_MAPS; index++)
 	{
 		struct map_unpack_folder_job *job = &jobs[count];

@@ -37,6 +37,7 @@ static int posix_stat(const char *path, struct posix_file_information *informati
 static char folder[256];
 static void platform_log(const char *format, ...) { (void)format; }
 static unsigned long XGetLanguage(void) { return 1; }
+static int posix_make_directory(const char *path) { return mkdir(path, 0755); }
 unsigned long long map_cache_budget(unsigned long long cache_bytes, unsigned long long least)
 {
 	return cache_bytes + least;
@@ -243,16 +244,17 @@ int main(int argc, char **argv)
 	}
 	else CASE("assign")
 	{
-		/* a campaign level, too big a multiplayer map, the main menu, then
-		maps past the budget; and 40 small maps for 32 slots */
-		long lengths[5] = { 0x10000000, 0x03000000, 0x01000000, 0x00800000, 0x00800000 };
-		short types[5] = { 0, 1, 2, 1, 1 }, slots[40];
+		/* too big a multiplayer map, a campaign level, the main menu, a
+		multiplayer map, then one past the budget; and 40 small maps for 32
+		slots */
+		long lengths[5] = { 0x03000000, 0x10000000, 0x01000000, 0x00800000, 0x00800000 };
+		short types[5] = { 1, 0, 2, 1, 1 }, slots[40];
 		long many[40];
 		short many_types[40];
 		int index;
 
 		CHECK(map_unpack_assign(lengths, types, 5, 0x11800000ULL, slots) == 3, "not 3 assigned");
-		CHECK(slots[0] == 0 && slots[1] == -1 && slots[2] == 1 && slots[3] == 2 && slots[4] == -1,
+		CHECK(slots[0] == -1 && slots[1] == 0 && slots[2] == 1 && slots[3] == 2 && slots[4] == -1,
 			"slots %d %d %d %d %d", slots[0], slots[1], slots[2], slots[3], slots[4]);
 		for (index = 0; index < 40; index++)
 		{
