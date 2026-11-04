@@ -50,7 +50,8 @@ static void frame_from_matrix(real_matrix4x3 const *matrix, struct world_proxies
 	frame->position[2] = matrix->position.z;
 }
 
-/* a node named as a wheel ("front left tire", "wheel") */
+/* a node named as a wheel ("front left tire", "wheel"; not a steering
+wheel) */
 static short node_is_wheel(char const *name)
 {
 	char lower[TAG_STRING_LENGTH + 1];
@@ -59,7 +60,7 @@ static short node_is_wheel(char const *name)
 	for (i = 0; i < TAG_STRING_LENGTH && name[i]; i++)
 		lower[i] = name[i] >= 'A' && name[i] <= 'Z' ? (char)(name[i] - 'A' + 'a') : name[i];
 	lower[i] = 0;
-	return strstr(lower, "tire") || strstr(lower, "wheel");
+	return (strstr(lower, "tire") || strstr(lower, "wheel")) && !strstr(lower, "steer");
 }
 
 static short shape_class_of(short object_type)
