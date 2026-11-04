@@ -45,6 +45,10 @@ draw reads the frame's, wherever its ring put them) */
 #define XGPU_MSL_BUFFER_DYNAMIC_LIGHTS 18
 #define XGPU_MSL_BUFFER_SAMPLES 19
 #define XGPU_MSL_BUFFER_DYNAMIC_LIGHT_CELLS 22
+/* display.ambient_occlusion: the occlusion of the 3D view, read at the pixel
+by the draws whose pixel key has it (xgpu.h's XGPU_AMBIENT_OCCLUSION_LIGHT_*;
+white where the backend found none) */
+#define XGPU_MSL_TEXTURE_AMBIENT_OCCLUSION 4
 
 /* the draw's values both stages read, laid out alike in C and in Metal
 (float4s, and floats in fours): d3d8_gl.c's draw uniforms, the per-pixel
