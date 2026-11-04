@@ -713,7 +713,10 @@ void _rasterizer_model_begin(
 				_rasterizer_geometry_atmospheric_fog_but_no_planar_fog_bit) ||
 			camera_plane_distance < 0.0f);
 
-		if (!local_sky_flag &&
+		/* port: (not in display.ambient_occlusion's depth pre-pass: the fog
+		screen draws its models again at the window's end, queued by its
+		own draw: render_ambient_occlusion_prepass) */
+		if (!local_sky_flag && !render_ambient_occlusion_prepass &&
 			rasterizer_environment_fog_screen_model_begin(parameters))
 		{
 			local_environment_fog_screen_flag = TRUE;
@@ -2489,8 +2492,11 @@ struct transparent_geometry_group *_rasterizer_model_transparent_geometry_submit
 	boolean alpha_blended_decal;
 	boolean submit_decals;
 
+	/* port: (nothing queued by display.ambient_occlusion's depth pre-pass:
+	the window's own draw queues it, render_ambient_occlusion_prepass) */
 	if (rasterizer_debug_options.draw_models &&
-		rasterizer_debug_options.draw_model_transparent_geometry)
+		rasterizer_debug_options.draw_model_transparent_geometry &&
+		!render_ambient_occlusion_prepass)
 	{
 		alpha_blended_decal =
 			shader &&

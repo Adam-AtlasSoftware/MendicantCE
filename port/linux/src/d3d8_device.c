@@ -234,12 +234,20 @@ void halo_hdr_draw_kind(int kind)
 
 /* ---------- display.ambient_occlusion (xgpu_backend_ambient_occlusion)
 
-Each window's 3D view is occluded once its opaque surfaces have drawn their
-light (halo_screen_ambient_occlusion, after the structure's lightmap pass):
-the backend finds the occlusion from the depth and multiplies the light by
-it, before the diffuse textures, the decals, the dynamic lights, the
-specular light, the transparent surfaces and the effects. Draws mark their
-pixels in the stencil as they draw (pipeline_state_describe): an object's
+The occlusion is the share of the ambient light that reaches a pixel, so it
+must multiply that light alone, not what the lights add (the flashlight on
+a character, a plasma bolt's glow on a wall), and so it must be known before
+the opaque surfaces shade, which light them in one pass. Each window's 3D
+view draws its opaque surfaces' depth first, alone (source/render/render.c,
+halo_screen_ambient_occlusion_begin): the objects and the structure's
+lightmap pass, as they draw after, into a depth target of the depth
+buffer's size (ambient_occlusion.depth, bind_targets), no colour written
+(ambient_occlusion_prepass); the backend finds the occlusion from that
+depth (halo_screen_ambient_occlusion), and the surfaces then draw with it in
+their shaders (xgpu.h's XGPU_AMBIENT_OCCLUSION_LIGHT_*: the models' ambient
+and distant lights, the lightmap pass's light) until the lightmap pass is
+done (halo_screen_ambient_occlusion_end). The pre-pass's draws mark their
+pixels in its stencil as they draw (pipeline_state_describe): an object's
 (a model's: one ambient sample lights it, so everything about it occludes
 it, where the level's lightmap holds the level's own occlusion and only
 objects add to it), and a surface's that lights itself (a structure's
@@ -252,12 +260,17 @@ where it does (ambient_occlusion_mark). Read between frames
 static struct
 {
 	/* XGPU_AMBIENT_OCCLUSION_SUBTLE or _STRONG, 0 off; the view shown alone
-	(debug.ambient_occlusion_view); config_changes() when read; laid over
-	a view since its last show */
+	(debug.ambient_occlusion_view); config_changes() when read; found for a
+	view since its last show */
 	int quality;
 	BOOL view, laid;
 	long read_at;
-} ambient_occlusion = { 0, FALSE, FALSE, -1 };
+	/* the window's pre-pass is drawing (its depth into depth, a surface of
+	its own the depth buffer's size), and the occlusion found from it is
+	ready for the surfaces' shaders */
+	BOOL prepass, ready;
+	D3DSurface depth;
+} ambient_occlusion = { 0, FALSE, FALSE, -1, FALSE, FALSE };
 
 static void ambient_occlusion_read(void)
 {
@@ -658,6 +671,9 @@ struct vertex_shader_object
 	/* a shader lit for each pixel failed to compile or link: lit as the
 	vertex shader lights it from then on */
 	BOOL lighting_failed;
+	/* lit for each vertex with its ambient light apart (display.ambient_
+	occlusion, XGPU_LIGHTING_MODEL_SPLIT) failed: lit without the occlusion */
+	BOOL split_failed;
 };
 
 /* ---------- render targets */
@@ -1483,7 +1499,10 @@ static BOOL bind_targets(BOOL *has_depth)
 	vr_frame_resume();
 #endif
 	color = render_target_get(device.render_target);
-	depth = render_target_get(device.depth_stencil);
+	/* (display.ambient_occlusion's pre-pass: the depth buffer's depth into
+	a target of its own, ambient_occlusion_prepass) */
+	depth = render_target_get(ambient_occlusion.prepass && device.depth_stencil == &device.depth_buffer ?
+		&ambient_occlusion.depth : device.depth_stencil);
 	if (depth && !depth->target.depth)
 		depth = NULL;
 	if (!color && !depth)
@@ -3107,7 +3126,7 @@ static void pipeline_state_describe(BOOL has_depth, struct xgpu_pipeline_key *ke
 	/* display.ambient_occlusion: an object (a model: rasterizer.h's
 	_rasterizer_profile_models) and a surface that lights itself mark their
 	pixels (ambient_occlusion_mark) */
-	if (ambient_occlusion.quality && key->depth_write)
+	if (ambient_occlusion.prepass && key->depth_write)
 		ambient_occlusion_mark(key, &dynamic->stencil_reference, (unsigned char)(
 			((hdr.kind & HALO_HDR_KIND_SELF_ILLUMINATION) ? XGPU_AMBIENT_OCCLUSION_SELF_ILLUMINATED : 0) |
 			(hdr.category == 2 ? XGPU_AMBIENT_OCCLUSION_OBJECT : 0)));
@@ -3785,15 +3804,22 @@ static BOOL prepare_draw(BOOL immediate, unsigned long primitive)
 		XGPU_FORMAT_BGRA8;
 	/* (display.hdr: the draw's tag, from its blend) */
 	key.hdr = hdr_tag(&pipeline_key);
+	/* display.ambient_occlusion's pre-pass: the depth (and the marks)
+	alone, its draws unlit (ambient_occlusion_prepass) */
+	if (ambient_occlusion.prepass)
+		pipeline_key.color_mask = 0;
 	pipeline_key.pixel = key;
 	pipeline_key.depth_format = has_depth ? XGPU_FORMAT_D24S8 : XGPU_FORMAT_NONE;
 	pipeline_key.samples = (unsigned char)target_samples;
-	if (program->lighting.lights && !program->lighting_failed && per_pixel_lighting())
+	if (program->lighting.lights && !program->lighting_failed && !ambient_occlusion.prepass && per_pixel_lighting())
 	{
 		key.per_pixel_lighting = (unsigned char)program->lighting.lights;
 		/* (the enhanced dynamic lights in the two point lights' place) */
 		if (dynamic_lights_active() && program->lighting.world_found)
 			key.dynamic_lights = XGPU_DYNAMIC_LIGHTS_MODEL;
+		/* (display.ambient_occlusion: its ambient light by the occlusion) */
+		if (ambient_occlusion.ready)
+			key.ambient_occlusion = XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL;
 		pipeline_key.pixel = key;
 		pipeline_key.lighting = program->lighting.lights == 2 ? XGPU_LIGHTING_MODEL_POINT : XGPU_LIGHTING_MODEL;
 		chosen = xgpu_backend_pipeline(&pipeline_key);
@@ -3806,10 +3832,28 @@ static BOOL prepare_draw(BOOL immediate, unsigned long primitive)
 			program->lighting_failed = TRUE;
 			key.per_pixel_lighting = 0;
 			key.dynamic_lights = 0;
+			key.ambient_occlusion = 0;
+		}
+	}
+	else if (program->lighting.lights && !program->lighting_failed && !program->split_failed && ambient_occlusion.ready)
+	{
+		/* display.ambient_occlusion over a model lit for each vertex: its
+		ambient light handed on apart, by the occlusion at each pixel (the
+		program's own sum clamps each vertex's light: xgpu.h) */
+		key.ambient_occlusion = XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX;
+		pipeline_key.pixel = key;
+		pipeline_key.lighting = XGPU_LIGHTING_MODEL_SPLIT;
+		chosen = xgpu_backend_pipeline(&pipeline_key);
+		if (!chosen)
+		{
+			platform_log("GPU: vertex shader %lu cannot hand on its ambient light apart (refer to the shader log "
+				"above): drawn without the ambient occlusion", program->id);
+			program->split_failed = TRUE;
+			key.ambient_occlusion = 0;
 		}
 	}
 	else if (dynamic_lights.environment && dynamic_lights_active() && !immediate && !program->lighting_failed &&
-		(device.vertex_shader->packed_mask & 0xe) == 0xe)
+		!ambient_occlusion.prepass && (device.vertex_shader->packed_mask & 0xe) == 0xe)
 	{
 		/* a structure's lightmap pass: its normal, binormal and tangent are
 		packed (rasterizer_xbox_vertex_shaders_initialize.c's declaration) */
@@ -3817,6 +3861,10 @@ static BOOL prepare_draw(BOOL immediate, unsigned long primitive)
 		/* (display.hdr: their light past white) */
 		if (hdr.target)
 			key.hdr |= XGPU_HDR_LIGHTS;
+		/* (display.ambient_occlusion: the lightmap's light by the
+		occlusion, theirs added after) */
+		if (ambient_occlusion.ready && !pipeline_key.blend)
+			key.ambient_occlusion = XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP;
 		pipeline_key.pixel = key;
 		pipeline_key.lighting = XGPU_LIGHTING_ENVIRONMENT;
 		chosen = xgpu_backend_pipeline(&pipeline_key);
@@ -3832,6 +3880,11 @@ static BOOL prepare_draw(BOOL immediate, unsigned long primitive)
 	ready = chosen;
 	if (!chosen)
 	{
+		/* (display.ambient_occlusion: a lightmap pass's light, drawn
+		opaque, by the occlusion; nothing else of a draw unlit by the
+		shaders above) */
+		key.ambient_occlusion = ambient_occlusion.ready && dynamic_lights.environment && !immediate &&
+			!pipeline_key.blend ? XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP : 0;
 		pipeline_key.pixel = key;
 		pipeline_key.lighting = XGPU_LIGHTING_NONE;
 		ready = xgpu_backend_pipeline(&pipeline_key);
@@ -4703,6 +4756,10 @@ void WINAPI D3DDevice_Clear(DWORD count, CONST D3DRECT *rectangles, DWORD flags,
 			device.depth_stencil ? (unsigned long)device.depth_stencil->Data : 0);
 	stats.clears++;
 	color_to_vec4(color, rgba);
+	/* (display.ambient_occlusion's pre-pass draws depth alone: its draws
+	clear the colour again as they draw it) */
+	if (ambient_occlusion.prepass)
+		flags &= ~(DWORD)D3DCLEAR_TARGET;
 	if (flags & D3DCLEAR_TARGET)
 	{
 		/* the Xbox clears the channels named (D3DCLEAR_TARGET_R, _G, _B, _A):
@@ -4818,29 +4875,64 @@ void halo_screen_panini(short x0, short y0, short x1, short y1, const float proj
 	xgpu_backend_panini(target->target.number, corners, projection);
 }
 
-/* display.ambient_occlusion over a window's 3D view once its opaque
-surfaces have drawn their light (source/render/render.c), from the camera
-it was drawn with: its near and far planes and its projection's x and y
-scales and offsets (render_frustum's projection_matrix [0][0], [1][1],
-[2][0], [2][1]) */
+/* display.ambient_occlusion's pre-pass of a window's 3D view, before its
+opaque surfaces shade (source/render/render.c): FALSE where there is none.
+Its depth target cleared, as the window's beginning clears the depth
+buffer: the opaque surfaces' alone (not the sky's, which nothing occludes) */
+BOOL halo_screen_ambient_occlusion_begin(void)
+{
+	ambient_occlusion.prepass = ambient_occlusion.ready = FALSE;
+	if (!device.gl_ready || !ambient_occlusion.quality || device.depth_stencil != &device.depth_buffer ||
+		device.render_target != &device.back_buffer)
+		return FALSE;
+	if (!ambient_occlusion.depth.Data)
+		d3d8_surface_initialize(&ambient_occlusion.depth, D3DFMT_LIN_D24S8, 1, 1);
+	if (!ambient_occlusion.depth.Data)
+		return FALSE;
+	/* (the depth buffer's size and format, in memory of its own: a target
+	of its own, render_target_get) */
+	ambient_occlusion.depth.Format = device.depth_buffer.Format;
+	ambient_occlusion.depth.Size = device.depth_buffer.Size;
+	ambient_occlusion.prepass = TRUE;
+	D3DDevice_Clear(0, NULL, D3DCLEAR_ZBUFFER | D3DCLEAR_STENCIL, 0, 1.0f, 0);
+	return TRUE;
+}
+
+/* ... and the occlusion found from its depth, once its opaque surfaces
+have drawn it, from the camera it was drawn with: its near and far planes
+and its projection's x and y scales and offsets (render_frustum's
+projection_matrix [0][0], [1][1], [2][0], [2][1]); the surfaces then shade
+with it, until halo_screen_ambient_occlusion_end */
 void halo_screen_ambient_occlusion(short x0, short y0, short x1, short y1, float z_near, float z_far,
 	const float projection[4])
 {
 	struct render_target_entry *target;
 	long corners[4];
 	float camera[6];
+	BOOL has_depth = FALSE;
 
-	if (!device.gl_ready || !ambient_occlusion.quality)
+	if (!ambient_occlusion.prepass)
 		return;
 	target = render_target_get(&device.back_buffer);
-	if (!target || !device.depth_stencil)
-		return;
-	view_corners(target, x0, y0, x1, y1, corners);
-	camera[0] = z_near;
-	camera[1] = z_far;
-	memcpy(camera + 2, projection, sizeof(float) * 4);
-	xgpu_backend_ambient_occlusion(target->target.number, corners, ambient_occlusion.quality, camera);
-	ambient_occlusion.laid = TRUE;
+	/* (the pre-pass's targets bound: the occlusion is found from the depth
+	target drawn with the view) */
+	if (target && bind_targets(&has_depth) && has_depth)
+	{
+		view_corners(target, x0, y0, x1, y1, corners);
+		camera[0] = z_near;
+		camera[1] = z_far;
+		memcpy(camera + 2, projection, sizeof(float) * 4);
+		xgpu_backend_ambient_occlusion(target->target.number, corners, ambient_occlusion.quality, camera);
+		ambient_occlusion.laid = TRUE;
+		ambient_occlusion.ready = TRUE;
+	}
+	ambient_occlusion.prepass = FALSE;
+}
+
+/* ... the window's opaque surfaces drawn: nothing after is shaded with it */
+void halo_screen_ambient_occlusion_end(void)
+{
+	ambient_occlusion.prepass = ambient_occlusion.ready = FALSE;
 }
 
 /* display.hdr's tone map of a window's 3D view (source/render/render.c),

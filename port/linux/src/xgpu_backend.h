@@ -356,6 +356,9 @@ lights too), a structure's lightmap pass's for the enhanced dynamic lights */
 enum
 {
 	XGPU_LIGHTING_NONE, XGPU_LIGHTING_MODEL, XGPU_LIGHTING_MODEL_POINT, XGPU_LIGHTING_ENVIRONMENT,
+	/* (a model lighting program lit for each vertex, its ambient light
+	handed on apart: xgpu.h's XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX) */
+	XGPU_LIGHTING_MODEL_SPLIT,
 };
 
 /* ---------- the pipeline key

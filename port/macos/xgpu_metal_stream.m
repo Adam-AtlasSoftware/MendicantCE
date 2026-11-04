@@ -860,6 +860,19 @@ static BOOL draw_prepare(const struct xgpu_metal_vertex_attribute *attributes, c
 	}
 	uniforms_update();
 	textures_bind();
+	/* (display.ambient_occlusion: the occlusion the draw lights by, a texel
+	at each of the target's pixels) */
+	if (stream.definition->pixel_program.ambient_occlusion)
+	{
+		struct xgpu_metal_sampler sampler;
+
+		memset(&sampler, 0, sizeof(sampler));
+		sampler.min_filter = sampler.mag_filter = XGPU_METAL_FILTER_POINT;
+		sampler.mip_filter = XGPU_METAL_MIP_NONE;
+		sampler.address_u = sampler.address_v = sampler.address_w = XGPU_METAL_ADDRESS_CLAMP;
+		sampler.max_anisotropy = 1;
+		xgpu_metal_set_texture(XGPU_METAL_TEXTURE_AMBIENT_OCCLUSION, xgpu_metal_post_ambient_occlusion_texture(), &sampler);
+	}
 	if (target_get(stream.color))
 		target_get(stream.color)->written++;
 	memcpy(pipeline.attributes, attributes, sizeof(pipeline.attributes));
@@ -1350,16 +1363,20 @@ static void stream_tone_map(void *context, const struct xgpu_stream_tone_map *re
 	stream_state_restore();
 }
 
-/* display.ambient_occlusion over a window's 3D view once its opaque
-surfaces have drawn their light (xgpu_metal_post.c), with the depth target
-drawn with it, or the occlusion last laid in the view's place
-(debug.ambient_occlusion_view); none over a multisampled target */
+/* display.ambient_occlusion of a window's 3D view (xgpu_metal_post.c), from
+the depth target drawn with it, its opaque surfaces' depth alone
+(d3d8_device.c's pre-pass), which the surfaces' draws then light by; or the
+occlusion last found in the view's place (debug.ambient_occlusion_view);
+none over a multisampled target */
 static void stream_ambient_occlusion(void *context, const struct xgpu_stream_ambient_occlusion *record)
 {
 	struct stream_target *target = target_get(record->target);
 	struct stream_target *depth = stream.color == record->target ? target_get(stream.depth) : NULL;
 
 	(void)context;
+	/* (none, white, unless it is found) */
+	if (record->quality != XGPU_AMBIENT_OCCLUSION_SHOW && !stream.preparing)
+		xgpu_metal_post_ambient_occlusion_none();
 	if (!target || target->description.depth_or_layers > 1 || target->description.samples > 1 || !depth ||
 		depth->description.samples > 1 || record->quality < XGPU_AMBIENT_OCCLUSION_SUBTLE ||
 		record->quality > XGPU_AMBIENT_OCCLUSION_SHOW)
@@ -1369,10 +1386,12 @@ static void stream_ambient_occlusion(void *context, const struct xgpu_stream_amb
 		(void)xgpu_metal_post_ambient_occlusion_prepare(target->description.format, depth->description.format);
 		return;
 	}
-	target->written++;
 	if (record->quality == XGPU_AMBIENT_OCCLUSION_SHOW)
+	{
+		target->written++;
 		xgpu_metal_post_ambient_occlusion_show(target->texture, target->description.format, target->description.width,
 			target->description.height, record->corners);
+	}
 	else
 		xgpu_metal_post_ambient_occlusion(target->texture, target->description.format, target->description.width,
 			target->description.height, depth->texture, depth->description.format, record->corners, (int)record->quality,

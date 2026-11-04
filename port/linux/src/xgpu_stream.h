@@ -565,7 +565,7 @@ struct xgpu_stream_pixel_key
 	uint32_t alpha_test_function;
 	uint8_t fog_enable, fog_table_mode, count_samples, coverage_alpha;
 	uint8_t point_threshold, per_pixel_lighting, alpha_test_samples, multiview;
-	uint8_t source_blend, dynamic_lights, vr_effect, pad;
+	uint8_t source_blend, dynamic_lights, vr_effect, ambient_occlusion;
 	/* display.hdr's tag (xgpu_hdr.h) */
 	uint16_t hdr;
 };
@@ -605,7 +605,7 @@ struct xgpu_stream_pixel_program
 	uint8_t alpha_test_samples;
 	uint8_t count_samples, coverage_alpha, point_threshold, per_pixel_lighting, dynamic_lights, multiview;
 	uint8_t source_blend;
-	uint8_t pad;
+	uint8_t ambient_occlusion;
 	/* display.hdr's tag (xgpu_hdr.h) */
 	uint16_t hdr;
 };

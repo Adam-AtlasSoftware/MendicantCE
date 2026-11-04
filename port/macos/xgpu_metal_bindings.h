@@ -35,9 +35,12 @@ input as [[attribute(n)]] whether a stream feeds it or not */
 /* (the VR mode's uniforms, should the macOS app ever draw both eyes) */
 #define XGPU_METAL_BUFFER_VIEW_UNIFORMS 21
 
-/* texture stage n samples texture n with sampler n */
+/* texture stage n samples texture n with sampler n; past the game's four,
+display.ambient_occlusion's occlusion, which the draws that light by it
+read (XGPU_MSL_TEXTURE_AMBIENT_OCCLUSION) */
 #define XGPU_METAL_TEXTURE_STAGE(stage) (stage)
 #define XGPU_METAL_SAMPLER_STAGE(stage) (stage)
-#define XGPU_METAL_TEXTURE_STAGE_COUNT 4
+#define XGPU_METAL_TEXTURE_AMBIENT_OCCLUSION 4
+#define XGPU_METAL_TEXTURE_STAGE_COUNT 5
 
 #endif

@@ -49,6 +49,10 @@ struct nv2a_vertex_lighting
 	the point lights, the same as theirs; world_found FALSE if none */
 	BOOL world_found;
 	unsigned long world_instruction, world_register;
+	/* (the backends': lit for each vertex, the ambient and distant lights'
+	sum and the point lights' handed on apart, for the pixel shader's
+	ambient occlusion: XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX) */
+	BOOL split;
 };
 
 /* the lights value of a structure's (the environment's) lightmap pass lit
@@ -158,6 +162,10 @@ struct nv2a_pixel_shader_key
 	model's lighting lit for each pixel in place of its two point lights; 0
 	none */
 	unsigned char dynamic_lights;
+	/* display.ambient_occlusion's occlusion multiplies the draw's ambient
+	light alone, not the light its lights add (XGPU_AMBIENT_OCCLUSION_LIGHT_*,
+	below); 0 none */
+	unsigned char ambient_occlusion;
 	/* the VR mode's effects (d3d8_device.c halo_vr_effect_depth, the
 	backend's xgpu_spirv.h XGPU_SPIRV_EFFECT_*): an effect drawn into both
 	eyes soft against the scene's depth (1), and thick (2); 0 none */
@@ -176,6 +184,38 @@ lights, the lights the model is not lit by: its object's own that say so,
 as four light indices, -1 none: halo_dynamic_lights.h) */
 #define XGPU_MODEL_LIGHT_COUNT 13
 #define XGPU_MODEL_LIGHT_OWN_LIGHTS 12
+
+/* ---------- display.ambient_occlusion in the light
+
+The occlusion (found from the 3D view's depth before its opaque surfaces
+shade: d3d8_device.c's halo_screen_ambient_occlusion_begin) is the share of
+the ambient light that reaches a pixel, so it multiplies that light alone,
+in the shaders that light the surfaces, never what a light adds (the
+flashlight, a plasma bolt's glow, the enhanced dynamic lights): the pixel
+key's ambient_occlusion, the occlusion read at the pixel from the
+backend's image of it (XGPU_SPIRV_BINDING_AMBIENT_OCCLUSION,
+XGPU_MSL_TEXTURE_AMBIENT_OCCLUSION; white where none is found):
+
+- XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL: a model lit for each pixel
+  (per_pixel_lighting): its ambient and distant lights (the level's light
+  about it, sampled from the lightmap) by the occlusion, its two point
+  lights or the enhanced dynamic lights added after;
+- XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX: a model lit for each vertex, as the
+  Xbox lit it: the vertex shader lights it as its program does, but hands
+  on the ambient and distant lights' sum and the point lights' apart
+  (XGPU_LIGHTING_MODEL_SPLIT), and the pixel shader adds them, the first by
+  the occlusion; the program's own sum clamps each vertex's light, which
+  no pixel could take apart again;
+- XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP: a structure's lightmap pass, its
+  light (the lightmap, before the textures multiply it) by the occlusion,
+  the enhanced dynamic lights added after. */
+enum
+{
+	XGPU_AMBIENT_OCCLUSION_LIGHT_NONE,
+	XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL,
+	XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX,
+	XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP,
+};
 
 /* ---------- enhanced dynamic lights
 

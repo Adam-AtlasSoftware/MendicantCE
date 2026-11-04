@@ -240,7 +240,8 @@ structures (their fields are named alike) */
 	X(stencil_function) X(stencil_fail) X(stencil_depth_fail) X(stencil_pass) X(cull) X(front_counter_clockwise) \
 	X(cull_front) X(fill) X(depth_bias) X(color_format) X(depth_format) X(samples)
 #define PIXEL_BYTES(X) X(fog_enable) X(fog_table_mode) X(count_samples) X(coverage_alpha) X(point_threshold) \
-	X(per_pixel_lighting) X(alpha_test_samples) X(multiview) X(source_blend) X(dynamic_lights)
+	X(per_pixel_lighting) X(alpha_test_samples) X(multiview) X(source_blend) X(dynamic_lights) \
+	X(ambient_occlusion)
 #define PRINT_FIELD(name) text_printf(t, " %lu", (unsigned long)k->name);
 #define PRINT_PIXEL_FIELD(name) text_printf(t, " %lu", (unsigned long)k->pixel.name);
 
