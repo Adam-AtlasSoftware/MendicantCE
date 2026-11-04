@@ -30,6 +30,7 @@ struct observer_result;
 struct render_camera;
 struct real_matrix4x3;
 union real_point3d;
+union real_vector3d;
 union real_rgb_color;
 int halo_interpolation_enabled(void);
 float game_time_get_tick_fraction(void);
@@ -59,6 +60,11 @@ struct observer_result const *render_interpolation_camera(short local_player_ind
 /* the local player's own view (and first-person weapon) was drawn last from
 the newest step, not a tick behind (display.direct_camera) */
 unsigned char render_interpolation_view_newest(short local_player_index);
+/* the local player's own flashlight in the first person on foot, when no
+first-person weapon carries it: along the view drawn, from where the body
+has it (render_interpolation.c) */
+unsigned char render_interpolation_view_flashlight(long unit_index, union real_point3d *position,
+	union real_vector3d *forward, union real_vector3d *up);
 /* the first-person weapons' animations advanced (first_person_weapons.c,
 in the tick), and how far the frame is past that, in ticks: -1 for a view
 drawn between the ticks (render_interpolation.c) */
