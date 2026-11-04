@@ -13,6 +13,8 @@ A map's preparation recorded and played back (render_prepared.c).
 prepared (mirrors: whether it draws a mirror's window): TRUE, or FALSE
 where there is none to play (its walk to be made, and recorded) */
 boolean render_prepared_replay(boolean mirrors);
+/* the map loaded has a record (or has none to make: records off) */
+boolean render_prepared_recorded(boolean mirrors);
 /* the walk recorded, from its preparation's beginning to its end */
 void render_prepared_record_begin(boolean mirrors);
 void render_prepared_record_end(void);

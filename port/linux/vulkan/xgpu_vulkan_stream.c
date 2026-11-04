@@ -287,6 +287,10 @@ static struct
 	int trace_preparing, trace_pipeline_descriptions, trace_frames;
 	struct xgpu_vulkan_statistics trace_statistics;
 	struct xgpu_vulkan_texture_statistics trace_textures;
+	/* (debug.load_trace: the textures made in the frames after a map's
+	preparation, until these are drawn: textures it left to play) */
+	struct xgpu_vulkan_texture_statistics after_textures;
+	uint32_t after_frames;
 	double trace_seconds[4];
 	uint64_t trace_counts[4];
 	uint32_t pipeline_misses;
@@ -2592,6 +2596,15 @@ static void stream_frame_end(void *context)
 	spacing tools/load_benchmark.py reads as the frames' times after a load) */
 	if (stream.trace_frames)
 		host_load_trace("vulkan.frame.end", "");
+	if (stream.after_frames && !--stream.after_frames)
+	{
+		struct xgpu_vulkan_texture_statistics textures;
+
+		xgpu_vulkan_textures_statistics_peek(&textures);
+		host_load_trace("prepare.vulkan.after", "frames=600 made=%u remade=%u bytes=%llu misses=%u",
+			textures.made - stream.after_textures.made, textures.remade - stream.after_textures.remade,
+			(unsigned long long)(textures.bytes - stream.after_textures.bytes), stream.pipeline_misses);
+	}
 	stream.back_buffer = 0;
 	xgpu_vulkan_textures_frame_end();
 	if (stream.statistics)
@@ -2719,6 +2732,8 @@ static uint32_t stream_prepared(void *context)
 			host_load_trace("prepare.vulkan.stage", "stage=%s count=%llu seconds=%.6f", names[stage],
 				(unsigned long long)stream.trace_counts[stage], stream.trace_seconds[stage]);
 		stream.trace_preparing = 0;
+		stream.after_textures = textures;
+		stream.after_frames = 600;
 	}
 	/* Clearing the preparation service drains queued native descriptions.
 	The reply follows compilation of every requested layout and target. */

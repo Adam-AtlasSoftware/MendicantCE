@@ -155,9 +155,12 @@ static boolean prepared_choose(boolean mirrors)
 	{
 		long enhanced = halo_dynamic_lights_enhanced() ? 1 : 0;
 		long mirrored = mirrors ? 1 : 0;
+		/* (the structure the map starts in: a saved game's may be another) */
+		long structure_bsp_index = global_structure_bsp_index_get();
 
 		hash = xgpu_manifest_hash(&enhanced, sizeof(enhanced), hash);
 		hash = xgpu_manifest_hash(&mirrored, sizeof(mirrored), hash);
+		hash = xgpu_manifest_hash(&structure_bsp_index, sizeof(structure_bsp_index), hash);
 	}
 	prepared.checksum = cache_files_get_checksum();
 	prepared.key = hash;
@@ -248,6 +251,53 @@ static uint64_t *prepared_read(struct prepared_header *header)
 	return words;
 }
 
+/* the draws made that the record has not (what tells them apart, a few) */
+static void prepared_log_new(uint64_t const *recorded, unsigned long recorded_count)
+{
+	struct xgpu_manifest const *enumeration = xgpu_manifest_enumeration();
+	unsigned long index, logged = 0;
+
+	for (index = 0; index < enumeration->draw_count && logged < 8; index++)
+	{
+		struct xgpu_manifest_draw const *draw = &enumeration->draws[index];
+		uint64_t hash = xgpu_manifest_hash(draw, sizeof(*draw), XGPU_MANIFEST_HASH_START);
+
+		if (!render_prepared_draws_missing(&hash, 1, recorded, recorded_count))
+			continue;
+		logged++;
+		platform_log("render: a draw the record has not: vertex %08lx%08lx immediate %u lighting %u samples %u "
+			"colour %u depth %u blend %u/%u/%u cm %x pixel hash %08lx coverage %u threshold %u per-pixel %u lights %u "
+			"occlusion %u hdr %x alpha samples %u stages %u.%u %u.%u %u.%u %u.%u", (unsigned long)draw->key.vertex_program[1],
+			(unsigned long)draw->key.vertex_program[0], draw->key.immediate, draw->key.lighting, draw->key.samples,
+			draw->key.color_format, draw->key.depth_format, draw->key.blend, draw->key.blend_source,
+			draw->key.blend_destination, draw->key.color_mask,
+			(unsigned long)xgpu_manifest_hash(&draw->key.pixel, sizeof(draw->key.pixel), XGPU_MANIFEST_HASH_START),
+			draw->key.pixel.coverage_alpha, draw->key.pixel.point_threshold, draw->key.pixel.per_pixel_lighting,
+			draw->key.pixel.dynamic_lights, draw->key.pixel.ambient_occlusion, draw->key.pixel.hdr,
+			draw->key.pixel.alpha_test_samples, draw->stages[0].source, draw->stages[0].sampler_type,
+			draw->stages[1].source, draw->stages[1].sampler_type, draw->stages[2].source, draw->stages[2].sampler_type,
+			draw->stages[3].source, draw->stages[3].sampler_type);
+	}
+}
+
+boolean render_prepared_recorded(boolean mirrors)
+{
+	struct prepared_header header;
+	FILE *file;
+	boolean fits = FALSE;
+
+	if (!prepared_choose(mirrors))
+		return TRUE;
+	file = fopen(prepared.path, "rb");
+	if (file)
+	{
+		fits = fread(&header, sizeof(header), 1, file) == 1 &&
+			prepared_header_fits(&header, prepared.checksum, prepared.key);
+		fclose(file);
+	}
+	return fits;
+}
+
 boolean render_prepared_replay(boolean mirrors)
 {
 	struct prepared_header header;
@@ -274,6 +324,8 @@ boolean render_prepared_replay(boolean mirrors)
 	/* (every draw the walk made made again: more, a draw the walk did not
 	need, makes no difference to play) */
 	missing = made ? render_prepared_draws_missing(record, header.draw_count, made, count) : header.draw_count;
+	if (missing && made)
+		prepared_log_new(record, header.draw_count);
 	free(made);
 	free(record);
 	if (!formed || unknown || missing)
