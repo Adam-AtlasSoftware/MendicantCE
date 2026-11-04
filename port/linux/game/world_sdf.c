@@ -59,6 +59,13 @@ into place, and a file that fails any check is deleted (and baked again).
 #include <sys/stat.h>
 #include <unistd.h>
 
+/* (the C library's allocator, which every thread may call, not the game's
+debug one, cseries.h's: the bake's threads allocate, and its fields are
+not the game's memory) */
+#undef malloc
+#undef free
+#undef realloc
+
 /* ---------- constants */
 
 enum
@@ -821,10 +828,18 @@ static int sdf_bake_begin(struct sdf_key const *key)
 	}
 	job->kind = _sdf_job_bake;
 	job->key = *key;
-	job->positions = triangles.positions;
+	/* (copied again: world_scene.c's copy is the game's allocator's, let
+	go of here, on the game's thread) */
+	job->positions = malloc((size_t)triangles.count * 9 * sizeof(float));
+	if (!job->positions)
+	{
+		world_scene_triangles_free(&triangles);
+		sdf_job_free(job);
+		return 0;
+	}
+	memcpy(job->positions, triangles.positions, (size_t)triangles.count * 9 * sizeof(float));
 	job->triangle_count = triangles.count;
 	memcpy(job->bounds, triangles.bounds, sizeof(job->bounds));
-	triangles.positions = NULL;
 	world_scene_triangles_free(&triangles);
 	job->bsp.node_count = collision->bsp3d.nodes.count;
 	job->bsp.plane_count = collision->bsp3d.planes.count;
