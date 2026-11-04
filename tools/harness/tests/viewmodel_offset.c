@@ -430,8 +430,9 @@ int main(int argc, char **argv)
 		viewmodel_offset(5, &offset);
 		CHECK(NEAR(offset.right, UNITS(20.0)) && NEAR(offset.up, -UNITS(20.0)) && NEAR(offset.forward, UNITS(20.0)),
 			"%f %f %f", offset.right, offset.up, offset.forward);
+		/* (and the turns at 15 degrees, for a weapon with none of its own) */
 		turns(40.0, -16.0, 0.0);
-		viewmodel_offset(5, &offset);
+		viewmodel_offset(7, &offset);
 		CHECK(NEAR(offset.pitch, 15.f * PI_ / 180.f) && NEAR(offset.yaw, -15.f * PI_ / 180.f), "%f %f",
 			offset.pitch, offset.yaw);
 	}
