@@ -164,7 +164,7 @@ by their reach sphere against the camera's frustum, ordered by distance to the c
 Each proxy records its owner, so an object's own proxies don't shade it (models have no baked self-occlusion to
 double, but the crude shapes would look wrong on their own surface).
 
-**GPU layout:** three vec4s per proxy (`struct world_proxy`, `xgpu_world_ao.h`):
+**GPU layout:** three vec4s per proxy (`struct world_proxy`, `xgpu_stream.h`):
 - `[0]`: a.xyz, kind (1 sphere, 2 capsule, 3 box);
 - `[1]`: b.xyz (a box's half axis x), owner slot;
 - `[2]`: radius (a box's half axis y in xyz and half extent z in w).
@@ -328,10 +328,10 @@ draft PR `world-ao` → master stays a draft until every stream lands and the ch
 
 **The shared files.** Each stream edits only its own files and the marked points named in its brief:
 - `render.c`, `scenario.c` and `d3d8_device.c`;
-- `xgpu_stream.h`, `xgpu_world_ao.h`, `host_render_stream.c` and `host_render_stream.h`;
+- `xgpu_stream.h`, `xgpu_stream.h`, `host_render_stream.c` and `host_render_stream.h`;
 - the backends' stream tables.
 
-The interfaces in `port/linux/include/world_*.h` and `port/linux/src/xgpu_world_ao.h` are fixed. A stream that needs
+The interfaces in `port/linux/include/world_*.h` and `port/linux/src/xgpu_stream.h` are fixed. A stream that needs
 one changed says so in its PR and in the other owners' threads first.
 
 | Stream | Owns | Implements | Consumes |

@@ -49,7 +49,7 @@ draw reads the frame's, wherever its ring put them) */
 by the draws whose pixel key has it (xgpu.h's XGPU_AMBIENT_OCCLUSION_LIGHT_*;
 white where the backend found none) */
 #define XGPU_MSL_TEXTURE_AMBIENT_OCCLUSION 4
-/* display.ambient_occlusion "world" (xgpu_world_ao.h): the structure's
+/* display.ambient_occlusion "world" (xgpu_stream.h): the structure's
 distance field (texture3d<float>, read through a constexpr linear sampler
 clamped to its edge) and the window's block */
 #define XGPU_MSL_TEXTURE_WORLD_SDF 5

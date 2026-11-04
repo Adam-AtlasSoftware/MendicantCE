@@ -59,7 +59,7 @@ void world_ao_object_begin(long object_index);
 /* ---------- the front end's (port/linux/src/d3d8_device.c) */
 
 /* the window's world occlusion: the field's place and the parameters
-(xgpu_world_ao.h's struct xgpu_world_ao_block: field, parameters) and the
+(xgpu_stream.h's struct xgpu_world_ao_block: field, parameters) and the
 proxies (three vec4s each: world_proxies.h's struct world_proxy). count < 0:
 none (the window draws as without it, from here on) */
 void halo_world_ao_window(float const field[2][4], float const parameters[2][4], float const (*proxies)[3][4],

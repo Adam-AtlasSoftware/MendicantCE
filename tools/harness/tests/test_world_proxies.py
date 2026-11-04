@@ -42,7 +42,7 @@ def test_negative_control(before, after, case):
 
 
 def test_the_gpu_takes_as_many_as_a_window_gives():
-    gpu = read("port/linux/src/xgpu_world_ao.h")
+    gpu = read("port/linux/src/xgpu_stream.h")
     assert "#define XGPU_WORLD_AO_PROXIES_MAXIMUM 64" in gpu
     assert "WORLD_PROXY_MAXIMUM_PER_WINDOW = 64," in read(HEADER)
     assert "#define XGPU_WORLD_AO_PROXY_SPHERE 1" in gpu and "_world_proxy_sphere," in read(HEADER)

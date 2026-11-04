@@ -30,7 +30,9 @@ renderer" in port/linux/README.md.
 #define __HALO_LINUX_XGPU_BACKEND_H
 
 #include "xgpu.h"
-#include "xgpu_world_ao.h"
+
+/* (xgpu_stream.h) */
+struct xgpu_world_ao_block;
 
 struct xgpu_vertex_program;
 
@@ -128,7 +130,7 @@ y scales and offsets). XGPU_AMBIENT_OCCLUSION_SHOW draws the occlusion last
 laid over the target in its place (debug.ambient_occlusion_view: the term
 in grey, white where it was not laid), once the view is drawn */
 void xgpu_backend_ambient_occlusion(xgpu_target target, const long corners[4], int quality, const float camera[6]);
-/* display.ambient_occlusion "world" (xgpu_world_ao.h, docs/world-ao.md):
+/* display.ambient_occlusion "world" (xgpu_stream.h, docs/world-ao.md):
 the block the opaque surfaces' ambient light reads from here on (the
 field's place, the window's proxies; NULL none), and slices of the field
 uploaded (width 0: released) */

@@ -10,7 +10,7 @@ geometry's pieces), placed each frame on the object's nodes as drawn
 occlusion is analytic: soft, exact, no noise, nothing on screen needed.
 
 Workstream C owns this interface (port/linux/game/world_proxies.c); D's
-shaders read the same shapes on the GPU (xgpu_world_ao.h), and
+shaders read the same shapes on the GPU (xgpu_stream.h), and
 world_proxy_occlusion is their CPU reference.
 */
 
@@ -60,7 +60,7 @@ struct world_proxy_set
 };
 
 /* a shape in the world, as the renderer takes it (the GPU's layout:
-xgpu_world_ao.h's three vec4s): [0] a.xyz, kind; [1] b.xyz (a box's x
+xgpu_stream.h's three vec4s): [0] a.xyz, kind; [1] b.xyz (a box's x
 half axis), owner (the window's object slot: an object's own shapes do not
 shade it); [2] radius (a box's y half axis xyz and z half extent in w) */
 struct world_proxy
