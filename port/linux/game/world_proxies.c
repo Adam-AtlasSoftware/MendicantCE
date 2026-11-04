@@ -16,6 +16,7 @@ game, a fake world in tools/harness/tests/world_proxies.c).
 #include "world_proxies_source.h"
 
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* ---------- constants */
@@ -66,7 +67,9 @@ struct world_proxies_candidate
 
 static struct
 {
-	struct world_proxies_cache_entry entries[WORLD_PROXIES_CACHE_SIZE];
+	/* (allocated on first use, freed at a map's unload: kept out of the
+	image, whose guest address window is tight) */
+	struct world_proxies_cache_entry *entries;
 	long entry_count;
 	/* a definition made when the cache is full */
 	struct world_proxy_set spare;
@@ -929,7 +932,9 @@ struct world_proxy_set const *world_proxies_definition(long definition)
 		return NULL;
 	/* (open addressing on the tag index) */
 	slot = -1;
-	for (probe = 0; probe < WORLD_PROXIES_CACHE_SIZE; probe++)
+	if (!world_proxies.entries)
+		world_proxies.entries = calloc(WORLD_PROXIES_CACHE_SIZE, sizeof(*world_proxies.entries));
+	for (probe = 0; world_proxies.entries && probe < WORLD_PROXIES_CACHE_SIZE; probe++)
 	{
 		struct world_proxies_cache_entry *entry =
 			&world_proxies.entries[((unsigned long)definition * 2654435761UL + (unsigned long)probe) %
@@ -959,7 +964,8 @@ struct world_proxy_set const *world_proxies_definition(long definition)
 
 void world_proxies_map_unloaded(void)
 {
-	memset(world_proxies.entries, 0, sizeof(world_proxies.entries));
+	free(world_proxies.entries);
+	world_proxies.entries = NULL;
 	world_proxies.entry_count = 0;
 }
 
