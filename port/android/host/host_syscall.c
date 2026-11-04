@@ -628,6 +628,8 @@ static unsigned int pointer_arguments(long long number)
 	case GUEST_SYS_readlinkat:
 	case GUEST_SYS_rt_sigprocmask:
 		return 1 << 1 | 1 << 2;
+	case GUEST_SYS_sched_getaffinity:
+		return 1 << 2;
 	case GUEST_SYS_prlimit64:
 		return 1 << 2 | 1 << 3;
 	default:
@@ -669,6 +671,11 @@ static long passthrough_number(long long number)
 	case GUEST_SYS_getgid: return SYS_getgid;
 	case GUEST_SYS_getegid: return SYS_getegid;
 	case GUEST_SYS_sched_yield: return SYS_sched_yield;
+	/* (the calling thread's priority: who 0, as Linux sets it) */
+	case GUEST_SYS_setpriority: return SYS_setpriority;
+	/* (the processors the guest may run on: a mask of bits, the same bytes
+	whatever the size of a long; sysconf's processor count) */
+	case GUEST_SYS_sched_getaffinity: return SYS_sched_getaffinity;
 	case GUEST_SYS_getrandom: return SYS_getrandom;
 	case GUEST_SYS_kill: return SYS_kill;
 	case GUEST_SYS_tkill: return SYS_tkill;

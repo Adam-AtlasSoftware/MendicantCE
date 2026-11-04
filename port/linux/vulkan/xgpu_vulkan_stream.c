@@ -73,6 +73,8 @@ its swapchain.
 /* (the occlusion's set, as the shaders read it) */
 _Static_assert(XGPU_SPIRV_SET_OCCLUSION == XGPU_VULKAN_SET_OCCLUSION &&
 	XGPU_SPIRV_BINDING_AMBIENT_OCCLUSION == XGPU_VULKAN_BINDING_OCCLUSION, "display.ambient_occlusion's set");
+_Static_assert(XGPU_SPIRV_BINDING_WORLD_SDF == XGPU_VULKAN_BINDING_WORLD_SDF &&
+	XGPU_SPIRV_BINDING_WORLD_AO == XGPU_VULKAN_BINDING_WORLD_AO, "display.ambient_occlusion \"world\"'s bindings");
 
 /* the mirror's segments: 4 MB of the contiguous window each */
 #define MIRROR_SEGMENT_SIZE 0x400000u
@@ -2420,6 +2422,25 @@ static void stream_panini(void *context, const struct xgpu_stream_panini *record
 	targets_bind();
 }
 
+/* ---------- display.ambient_occlusion "world" (docs/world-ao.md)
+
+The structure's distance field's slices (the decoder has checked their
+bounds and size) and each window's block, kept by xgpu_vulkan_world_ao.c
+for the occlusion set the draws that light by it bind. */
+
+static void stream_world_ao_field(void *context, const struct xgpu_stream_world_ao_field *record)
+{
+	(void)context;
+	xgpu_vulkan_world_ao_field(record->width, record->height, record->depth, record->z_first, record->z_count,
+		record->width && record->size ? host_pointer(record->data) : NULL);
+}
+
+static void stream_world_ao_window(void *context, const struct xgpu_stream_world_ao_window *record)
+{
+	(void)context;
+	xgpu_vulkan_world_ao_window(record->active ? &record->block : NULL);
+}
+
 /* ---------- display.hdr (port/linux/src/xgpu_hdr.h)
 
 The front end's state, for the tone map and the core's encoding and
@@ -2795,10 +2816,11 @@ const struct host_render_backend *xgpu_vulkan_stream_backend(void)
 		backend.picture_top = stream_picture_top;
 		backend.gamma = stream_gamma;
 		backend.panini = stream_panini;
-		/* world-ao (#578, docs/world-ao.md): backend.world_ao_field (workstream
-		B: the field's 3D texture, XGPU_SPIRV_BINDING_WORLD_SDF) and
-		backend.world_ao_window (C: the block, XGPU_SPIRV_BINDING_WORLD_AO),
-		both in XGPU_SPIRV_SET_OCCLUSION; none yet: not drawn */
+		/* display.ambient_occlusion "world" (#578, docs/world-ao.md): the
+		field's 3D image (XGPU_SPIRV_BINDING_WORLD_SDF) and the window's block
+		(XGPU_SPIRV_BINDING_WORLD_AO), both in XGPU_SPIRV_SET_OCCLUSION */
+		backend.world_ao_field = stream_world_ao_field;
+		backend.world_ao_window = stream_world_ao_window;
 #ifdef HALO_VR
 		host_vulkan_vr_backend(&backend);
 #endif

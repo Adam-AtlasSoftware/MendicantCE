@@ -196,7 +196,8 @@ enum
 	_dirty_streams = 1 << 10,
 	_dirty_constant_attributes = 1 << 11,
 	_dirty_dynamic_lights = 1 << 12,
-	_dirty_all = (1 << 13) - 1,
+	_dirty_world_ao = 1 << 13,
+	_dirty_all = (1 << 14) - 1,
 };
 
 static struct
@@ -314,6 +315,9 @@ static struct
 	float constant_attributes[16][4];
 	/* the enhanced dynamic lights' block and cells */
 	struct xgpu_metal_source dynamic_lights[2];
+	/* display.ambient_occlusion "world"'s field and block */
+	uint32_t world_ao_field;
+	struct xgpu_metal_source world_ao_block;
 
 	/* an image for the presentation that a picture is copied into (a
 	target of levels or layers) */
@@ -3369,6 +3373,15 @@ void xgpu_metal_set_dynamic_lights(struct xgpu_metal_source block, struct xgpu_m
 	metal.dirty |= _dirty_dynamic_lights;
 }
 
+void xgpu_metal_set_world_ao(uint32_t field, struct xgpu_metal_source block)
+{
+	if (metal.world_ao_field != field)
+		texture_contents(texture_get(field));
+	metal.world_ao_field = field;
+	metal.world_ao_block = block;
+	metal.dirty |= _dirty_world_ao;
+}
+
 void xgpu_metal_set_constant_attributes(const float (*values)[4])
 {
 	if (!memcmp(metal.constant_attributes, values, sizeof(metal.constant_attributes)))
@@ -3537,6 +3550,36 @@ static BOOL draw_state_apply(id<MTLRenderCommandEncoder> render)
 
 			if (buffer)
 				[render setFragmentBuffer:buffer offset:offset atIndex:places[index]];
+		}
+	}
+	if (dirty & _dirty_world_ao)
+	{
+		struct texture_entry *entry = texture_get(metal.world_ao_field);
+		NSUInteger offset = 0;
+		id<MTLBuffer> buffer = metal.world_ao_block.kind == XGPU_METAL_SOURCE_NONE ? nil :
+			source_buffer(metal.world_ao_block, &offset);
+
+		if (entry)
+		{
+			[render setVertexTexture:entry->texture atIndex:XGPU_METAL_TEXTURE_WORLD_SDF];
+			[render setFragmentTexture:entry->texture atIndex:XGPU_METAL_TEXTURE_WORLD_SDF];
+		}
+		if (buffer)
+		{
+			[render setVertexBuffer:buffer offset:offset atIndex:XGPU_METAL_BUFFER_WORLD_AO];
+			[render setFragmentBuffer:buffer offset:offset atIndex:XGPU_METAL_BUFFER_WORLD_AO];
+		}
+	}
+	/* (the field too: in use until the draw's command buffer is done) */
+	{
+		struct texture_entry *entry = texture_get(metal.world_ao_field);
+
+		if (entry)
+		{
+			entry->used = serial;
+			if (!metal.aside)
+				entry->main_sampled = serial;
+			texture_first_use(entry, NO);
 		}
 	}
 	metal.dirty = 0;
