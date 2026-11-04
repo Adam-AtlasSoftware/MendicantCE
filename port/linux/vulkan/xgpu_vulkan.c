@@ -508,8 +508,8 @@ static struct
 		VkPrimitiveTopology topology;
 		VkDescriptorSet sets[2];
 		uint32_t offsets[2];
-		/* (display.hdr's input set) */
-		VkDescriptorSet input;
+		/* (display.hdr's input set; display.ambient_occlusion's set) */
+		VkDescriptorSet input, occlusion;
 		VkBuffer vertices[XGPU_VULKAN_BINDINGS];
 		VkDeviceSize vertex_offsets[XGPU_VULKAN_BINDINGS];
 		VkBuffer indices;
@@ -600,6 +600,17 @@ static struct
 	VkDescriptorSet input_set;
 	VkImageView input_view;
 	uint64_t input_serial;
+	/* display.ambient_occlusion: its set's layout (the pipeline layout's
+	fourth set, XGPU_VULKAN_SET_OCCLUSION; the third an empty one where
+	draws cannot read their colour attachment), the occlusion the draws
+	that light by it read (xgpu_vulkan_set_ambient_occlusion; the white
+	stand-in where none is), and its set, written for the submission of
+	that number */
+	VkDescriptorSetLayout occlusion_layout, empty_layout;
+	struct xgpu_vulkan_image *occlusion_image, *occlusion_white;
+	VkDescriptorSet occlusion_set;
+	struct xgpu_vulkan_image *occlusion_set_image;
+	uint64_t occlusion_set_number, occlusion_serial;
 	/* the window's display (any thread, atomic: HDR on, its SDR white's
 	and its headroom's bits, and whether they changed since the render
 	thread looked); the front end's state; the HDR outputs the surface
@@ -4278,6 +4289,48 @@ static VkDescriptorSet input_set(void)
 	return vk.input_set;
 }
 
+void xgpu_vulkan_set_ambient_occlusion(struct xgpu_vulkan_image *image)
+{
+	vk.occlusion_image = image;
+}
+
+/* display.ambient_occlusion's set, as a draw that lights by the occlusion
+binds it: the last one, where it is of the same image and submission,
+else one written now */
+static VkDescriptorSet occlusion_set(void)
+{
+	VkDescriptorImageInfo image;
+	VkWriteDescriptorSet write;
+	struct xgpu_vulkan_image *occlusion = vk.occlusion_image && vk.occlusion_image->sampled ? vk.occlusion_image :
+		vk.occlusion_white;
+
+	if (!occlusion || !vk.occlusion_layout)
+		return VK_NULL_HANDLE;
+	occlusion->used = vk.serial;
+	if (vk.occlusion_set && vk.occlusion_set_image == occlusion && vk.occlusion_set_number == occlusion->number &&
+		vk.occlusion_serial == vk.serial)
+		return vk.occlusion_set;
+	vk.occlusion_set = set_allocate(vk.occlusion_layout);
+	if (!vk.occlusion_set)
+		return VK_NULL_HANDLE;
+	vk.occlusion_set_image = occlusion;
+	vk.occlusion_set_number = occlusion->number;
+	vk.occlusion_serial = vk.serial;
+	memset(&image, 0, sizeof(image));
+	image.sampler = vk.stand_in_sampler;
+	image.imageView = occlusion->sampled;
+	image.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+	memset(&write, 0, sizeof(write));
+	write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	write.dstSet = vk.occlusion_set;
+	write.dstBinding = XGPU_VULKAN_BINDING_OCCLUSION;
+	write.descriptorCount = 1;
+	write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	write.pImageInfo = &image;
+	vkUpdateDescriptorSets(vk.device, 1, &write, 0, NULL);
+	return vk.occlusion_set;
+}
+
 /* a set written before from the slot's pools with these textures, or NULL */
 static struct texture_set_entry *texture_set_find(const struct slot *slot, const struct texture_set_key *key,
 	uint32_t bucket)
@@ -4451,6 +4504,9 @@ void xgpu_vulkan_draw(const struct xgpu_vulkan_draw *draw)
 		names: no upload of them put aside before this pass) */
 		if (draw->dynamic_lights)
 			image_use(vk.lights_cells);
+		/* (and display.ambient_occlusion's) */
+		if (draw->ambient_occlusion)
+			image_use(vk.occlusion_image && vk.occlusion_image->sampled ? vk.occlusion_image : vk.occlusion_white);
 	}
 	commands = vk.pass_commands;
 	if (vk.bound_pipeline != draw->pipeline)
@@ -4557,6 +4613,20 @@ void xgpu_vulkan_draw(const struct xgpu_vulkan_draw *draw)
 		{
 			vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout, 2, 1, &input, 0, NULL);
 			vk.bound.input = input;
+		}
+	}
+	/* (display.ambient_occlusion: the occlusion the draw lights by) */
+	if (draw->ambient_occlusion)
+	{
+		VkDescriptorSet occlusion = occlusion_set();
+
+		if (!occlusion)
+			return;
+		if (vk.bound.occlusion != occlusion)
+		{
+			vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout,
+				XGPU_VULKAN_SET_OCCLUSION, 1, &occlusion, 0, NULL);
+			vk.bound.occlusion = occlusion;
 		}
 	}
 	/* (the lights written after this are written after it: in order) */
@@ -6549,7 +6619,7 @@ static int layouts_make(void)
 	VkDescriptorSetLayoutBinding draw[5], textures[4];
 	VkDescriptorSetLayoutCreateInfo info;
 	VkPipelineLayoutCreateInfo layout;
-	VkDescriptorSetLayout sets[3];
+	VkDescriptorSetLayout sets[4];
 	int index;
 
 	memset(draw, 0, sizeof(draw));
@@ -6610,8 +6680,26 @@ static int layouts_make(void)
 		if (!check(vkCreateDescriptorSetLayout(vk.device, &info, NULL, &vk.input_layout), "vkCreateDescriptorSetLayout"))
 			return 0;
 		sets[2] = vk.input_layout;
-		layout.setLayoutCount = 3;
 	}
+	else
+	{
+		info.bindingCount = 0;
+		info.pBindings = NULL;
+		if (!check(vkCreateDescriptorSetLayout(vk.device, &info, NULL, &vk.empty_layout), "vkCreateDescriptorSetLayout"))
+			return 0;
+		sets[2] = vk.empty_layout;
+	}
+	/* (display.ambient_occlusion's: XGPU_VULKAN_SET_OCCLUSION) */
+	textures[0].binding = XGPU_VULKAN_BINDING_OCCLUSION;
+	textures[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	textures[0].descriptorCount = 1;
+	textures[0].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+	info.bindingCount = 1;
+	info.pBindings = textures;
+	if (!check(vkCreateDescriptorSetLayout(vk.device, &info, NULL, &vk.occlusion_layout), "vkCreateDescriptorSetLayout"))
+		return 0;
+	sets[XGPU_VULKAN_SET_OCCLUSION] = vk.occlusion_layout;
+	layout.setLayoutCount = 4;
 	return check(vkCreatePipelineLayout(vk.device, &layout, NULL, &vk.pipeline_layout), "vkCreatePipelineLayout");
 }
 
@@ -6748,6 +6836,23 @@ static int stand_ins_make(void)
 			return 0;
 		for (layer = 0; layer < (kind == XGPU_VULKAN_IMAGE_CUBE ? 6 : 1); layer++)
 			xgpu_vulkan_image_upload(vk.stand_ins[kind], 0, (uint32_t)layer, 0, 0, 0, 1, 1, 1, texel, 4, 4);
+	}
+	/* (display.ambient_occlusion's white: no occlusion) */
+	{
+		static const unsigned char white[4] = { 255, 255, 255, 255 };
+		struct xgpu_vulkan_image_description description;
+
+		memset(&description, 0, sizeof(description));
+		description.type = XGPU_VULKAN_IMAGE_2D;
+		description.format = XGPU_VULKAN_FORMAT_BGRA8;
+		description.usage = XGPU_VULKAN_USAGE_SAMPLED;
+		description.width = description.height = 1;
+		description.depth_or_layers = 1;
+		description.levels = 1;
+		vk.occlusion_white = xgpu_vulkan_image_create(&description);
+		if (!vk.occlusion_white)
+			return 0;
+		xgpu_vulkan_image_upload(vk.occlusion_white, 0, 0, 0, 0, 0, 1, 1, 1, white, 4, 4);
 	}
 	(void)sampler;
 	return 1;

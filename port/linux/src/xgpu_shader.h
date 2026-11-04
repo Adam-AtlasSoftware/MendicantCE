@@ -326,9 +326,9 @@ struct xgpu_pixel_program
 	their thresholds read at level 0 (texture 0), per-pixel model lighting
 	(its lights), the enhanced dynamic lights (XGPU_DYNAMIC_LIGHTS_*), the
 	views drawn (XGPU_MULTIVIEW_*), the source blend factor applied here
-	(1 to 4) */
+	(1 to 4), the ambient occlusion's light (XGPU_AMBIENT_OCCLUSION_LIGHT_*) */
 	unsigned char count_samples, coverage_alpha, point_threshold, per_pixel_lighting, dynamic_lights, multiview;
-	unsigned char source_blend;
+	unsigned char source_blend, ambient_occlusion;
 	/* display.hdr's tag (nv2a_pixel_shader_key.hdr: xgpu_hdr.h) */
 	unsigned short hdr;
 };

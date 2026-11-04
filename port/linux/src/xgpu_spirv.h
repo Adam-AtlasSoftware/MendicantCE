@@ -35,7 +35,8 @@ The conventions (SPIR-V 1.3, Vulkan 1.1):
   (xgpu_spirv_options border);
 - the stages hand on, at locations XGPU_SPIRV_LOCATION_*: the colors, the
   texture coordinates, fog, and with lighting the world normal, position,
-  binormal and tangent;
+  binormal and tangent (or, lit for each vertex with the ambient occlusion,
+  the ambient and the point lights' light);
 - the VR mode uses Vulkan multiview, with ViewIndex relative to the
   attachment view's first layer. A draw of one eye uses that eye's layer
   (its two layers when foveated) as the attachment view. The eyes and all
@@ -57,6 +58,12 @@ The conventions (SPIR-V 1.3, Vulkan 1.1):
 XGPU_HDR_SHADER_BLENDS, xgpu_hdr.h), the colour attachment read as input
 attachment 0 at binding 0 (VK_KHR_dynamic_rendering_local_read) */
 #define XGPU_SPIRV_SET_INPUT 2
+/* display.ambient_occlusion: the occlusion of the 3D view at each pixel
+(xgpu.h's XGPU_AMBIENT_OCCLUSION_LIGHT_*), a combined image sampler at
+binding 0 of its own set, read with texelFetch at the pixel (white where
+the backend found none: a stand-in), for the draws whose pixel key has it */
+#define XGPU_SPIRV_SET_OCCLUSION 3
+#define XGPU_SPIRV_BINDING_AMBIENT_OCCLUSION 0
 
 /* the locations of what the vertex shader hands the pixel shader */
 enum
@@ -66,6 +73,9 @@ enum
 	XGPU_SPIRV_LOCATION_FOG,
 	XGPU_SPIRV_LOCATION_WORLD_NORMAL, XGPU_SPIRV_LOCATION_WORLD_POSITION,
 	XGPU_SPIRV_LOCATION_WORLD_BINORMAL, XGPU_SPIRV_LOCATION_WORLD_TANGENT,
+	/* (a model lit for each vertex, its ambient light apart: xgpu.h's
+	XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX) */
+	XGPU_SPIRV_LOCATION_LIGHT_AMBIENT, XGPU_SPIRV_LOCATION_LIGHT_POINT,
 };
 
 /* the draw's values both stages read, laid out alike in C and in the

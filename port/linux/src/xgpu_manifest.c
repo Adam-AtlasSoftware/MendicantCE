@@ -78,6 +78,7 @@ static const struct field pixel_fields[] = {
 	PIXEL_FIELD("sb", source_blend, 1, 1, 0),
 	PIXEL_FIELD("dl", dynamic_lights, 1, 1, 0),
 	PIXEL_FIELD("ve", vr_effect, 1, 1, 0),
+	PIXEL_FIELD("ao", ambient_occlusion, 1, 1, 0),
 };
 
 #define FIELD_COUNT(fields) (sizeof(fields) / sizeof((fields)[0]))

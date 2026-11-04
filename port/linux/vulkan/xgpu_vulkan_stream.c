@@ -70,6 +70,10 @@ its swapchain.
 #include <stdlib.h>
 #include <string.h>
 
+/* (the occlusion's set, as the shaders read it) */
+_Static_assert(XGPU_SPIRV_SET_OCCLUSION == XGPU_VULKAN_SET_OCCLUSION &&
+	XGPU_SPIRV_BINDING_AMBIENT_OCCLUSION == XGPU_VULKAN_BINDING_OCCLUSION, "display.ambient_occlusion's set");
+
 /* the mirror's segments: 4 MB of the contiguous window each */
 #define MIRROR_SEGMENT_SIZE 0x400000u
 #define MIRROR_SEGMENT_MAXIMUM 64
@@ -117,7 +121,7 @@ enum
 
 enum
 {
-	_lighting_none, _lighting_model, _lighting_model_point, _lighting_environment,
+	_lighting_none, _lighting_model, _lighting_model_point, _lighting_environment, _lighting_model_split,
 };
 
 /* ---------- state */
@@ -1049,6 +1053,7 @@ static void pixel_program_convert(const struct xgpu_stream_pixel_program *wire, 
 	program->dynamic_lights = wire->dynamic_lights;
 	program->multiview = wire->multiview;
 	program->source_blend = wire->source_blend;
+	program->ambient_occlusion = wire->ambient_occlusion;
 	program->hdr = wire->hdr;
 }
 
@@ -1147,6 +1152,9 @@ static int pipeline_shaders(struct stream_pipeline *entry, const struct xgpu_str
 	/* (a model lighting program's normal and position, or a structure's
 	lightmap pass's own) */
 	vertex_lighting_convert(lighting_record ? lighting_record->record : NULL, &model);
+	/* (display.ambient_occlusion: lit for each vertex, the ambient light
+	handed on apart) */
+	model.split = key->lighting == _lighting_model_split;
 	lighting = key->lighting == _lighting_none ? NULL : key->lighting == _lighting_environment ? &environment : &model;
 	memset(&options, 0, sizeof(options));
 	memcpy(options.border, variant->border, sizeof(options.border));
@@ -1895,6 +1903,7 @@ static void draw_input(const struct draw_input *input)
 	draw.uniforms = stream.uniforms_range;
 	draw.dynamic = &stream.dynamic;
 	draw.dynamic_lights = stream.definition->pixel_program.dynamic_lights != 0;
+	draw.ambient_occlusion = stream.definition->pixel_program.ambient_occlusion != 0;
 	draw.reads_color = pipeline.color_read;
 	{
 		const struct xgpu_stream_pipeline_key *key = &stream.definition->key;
@@ -2474,11 +2483,12 @@ static void stream_tone_map(void *context, const struct xgpu_stream_tone_map *re
 	targets_bind();
 }
 
-/* display.ambient_occlusion over a window's 3D view, once its opaque
-surfaces have drawn their light (xgpu_vulkan_post.c), with the depth target
-drawn with it: its stencil marks the pixels left, and its depth (its first
-sample's, resolved where it has more) gives the occlusion. Or the occlusion
-last laid drawn in the view's place (debug.ambient_occlusion_view) */
+/* display.ambient_occlusion of a window's 3D view (xgpu_vulkan_post.c),
+from the depth target drawn with it, its opaque surfaces' depth alone
+(d3d8_device.c's pre-pass): its stencil marks the pixels left, and its depth
+(its first sample's, resolved where it has more) gives the occlusion, which
+the surfaces' draws then light by. Or the occlusion last found drawn in the
+view's place (debug.ambient_occlusion_view) */
 static void stream_ambient_occlusion(void *context, const struct xgpu_stream_ambient_occlusion *record)
 {
 	struct stream_target *target = target_get(record->target);
@@ -2486,6 +2496,9 @@ static void stream_ambient_occlusion(void *context, const struct xgpu_stream_amb
 	struct xgpu_vulkan_image *color_image, *depth_image;
 
 	(void)context;
+	/* (none, white, unless it is found) */
+	if (record->quality != XGPU_AMBIENT_OCCLUSION_SHOW && !stream.preparing)
+		xgpu_vulkan_set_ambient_occlusion(NULL);
 	if (!target || target->depth || target->layers > 1 || !depth || !depth->depth ||
 		record->quality < XGPU_AMBIENT_OCCLUSION_SUBTLE || record->quality > XGPU_AMBIENT_OCCLUSION_SHOW)
 		return;
@@ -2501,11 +2514,13 @@ static void stream_ambient_occlusion(void *context, const struct xgpu_stream_amb
 			xgpu_vulkan_image_description(color_image)->samples, 1);
 		return;
 	}
-	target->written++;
-	if (color_image == target->multisampled)
-		target->unresolved = 1;
 	if (record->quality == XGPU_AMBIENT_OCCLUSION_SHOW)
+	{
+		target->written++;
+		if (color_image == target->multisampled)
+			target->unresolved = 1;
 		xgpu_vulkan_post_ambient_occlusion_show(color_image, record->corners);
+	}
 	else
 	{
 		/* (the first sample's depth, to find the occlusion from) */

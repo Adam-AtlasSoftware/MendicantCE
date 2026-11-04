@@ -1417,6 +1417,50 @@ static BOOL lighting_position(const struct nv2a_vertex_lighting *lighting)
 	return lighting && (lighting->lights == 2 || lighting->world_found || lighting->lights == XGPU_ENVIRONMENT_LIGHTING);
 }
 
+/* a model lighting register of the vertex constants, in the per-pixel
+lighting's order (xgpu.h: [0] c[-82], [1] to [11] c[-79] to c[-69]) */
+static unsigned int model_light_constant(struct module *m, int index)
+{
+	return vertex_constant(m, constant_int(m, XGPU_VERTEX_CONSTANT_BIAS + (index ? index - 80 : -82)));
+}
+
+/* display.ambient_occlusion, a model lit for each vertex
+(XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX): the light its program gives the
+vertex (the pixel shader's model_lighting, at the vertex), its ambient and
+distant lights' sum and its two point lights' apart, unclamped: the pixel
+shader adds them, the first by the occlusion, and clamps the sum as the
+program clamps it */
+static void vertex_light_split(struct module *m, const struct nv2a_vertex_lighting *lighting,
+	unsigned int world_normal, unsigned int world_position, unsigned int *ambient, unsigned int *point)
+{
+	unsigned int n = xyz(m, world_normal), facing;
+	int index;
+
+	facing = fdot(m, n, fneg(m, 3, xyz(m, model_light_constant(m, 7))));
+	*ambient = fadd(m, 3, fadd(m, 3, xyz(m, model_light_constant(m, 11)),
+		fscale(m, 3, xyz(m, model_light_constant(m, 8)), fmax_scalar(m, 1, ext2(m, GLSL_F_MAX, m->t_float, facing,
+		fmul(m, 1, fneg(m, 1, facing), extract(m, model_light_constant(m, 0), 2))), 0.0f))),
+		fscale(m, 3, xyz(m, model_light_constant(m, 10)), fmax_scalar(m, 1,
+		fdot(m, n, fneg(m, 3, xyz(m, model_light_constant(m, 9)))), 0.0f)));
+	*point = constant_splat(m, 3, 0.0f);
+	for (index = 0; lighting->lights == 2 && index < 2; index++)
+	{
+		int first = 1 + index * 3;
+		unsigned int first_light = model_light_constant(m, first), cone = model_light_constant(m, first + 1);
+		unsigned int color = model_light_constant(m, first + 2);
+		unsigned int to_light = fsub(m, 3, xyz(m, first_light), world_position);
+		unsigned int distance_squared = fdot(m, to_light, to_light);
+		unsigned int l = fscale(m, 3, to_light, ext1(m, GLSL_INVERSE_SQRT, m->t_float,
+			fmax_scalar(m, 1, distance_squared, (float)1.0e-12)));
+		unsigned int term;
+
+		term = fmul(m, 1, fmul(m, 1, fmax_scalar(m, 1, fsub(m, 1, constant_float(m, 1.0f),
+			fmul(m, 1, distance_squared, extract(m, first_light, 3))), 0.0f), saturate(m, 1, fdot(m, l, n))),
+			saturate(m, 1, fadd(m, 1, fmul(m, 1, fdot(m, l, fneg(m, 3, xyz(m, cone))), extract(m, cone, 3)), extract(m, color, 3))));
+		*point = fadd(m, 3, *point, fscale(m, 3, xyz(m, color), term));
+	}
+}
+
 /* the inputs a program reads (bit n v<n>) */
 static unsigned long vertex_inputs(const struct xgpu_vertex_program *program, const struct nv2a_vertex_lighting *lighting)
 {
@@ -1479,6 +1523,7 @@ BOOL xgpu_spirv_vertex_shader(const struct xgpu_vertex_program *program, unsigne
 	unsigned int main_id, input_variables[XGPU_VERTEX_ATTRIBUTE_COUNT];
 	unsigned int position_out, point_size_out, color_outs[6], fog_out;
 	unsigned int world_normal_out = 0, world_position_out = 0, world_binormal_out = 0, world_tangent_out = 0;
+	unsigned int light_ambient_out = 0, light_point_out = 0;
 	unsigned int world_normal = 0, world_position = 0;
 	unsigned int clip_position = 0, view = 0, screen_points = 0, centre_clip = 0, eye = 0;
 	BOOL environment = lighting && lighting->lights == XGPU_ENVIRONMENT_LIGHTING;
@@ -1528,6 +1573,11 @@ BOOL xgpu_spirv_vertex_shader(const struct xgpu_vertex_program *program, unsigne
 	{
 		world_binormal_out = interface_variable(&m, m.t_v3, STORAGE_OUTPUT, XGPU_SPIRV_LOCATION_WORLD_BINORMAL, "xWorldBinormal");
 		world_tangent_out = interface_variable(&m, m.t_v3, STORAGE_OUTPUT, XGPU_SPIRV_LOCATION_WORLD_TANGENT, "xWorldTangent");
+	}
+	if (lighting && lighting->split && !environment)
+	{
+		light_ambient_out = interface_variable(&m, m.t_v3, STORAGE_OUTPUT, XGPU_SPIRV_LOCATION_LIGHT_AMBIENT, "xLightAmbient");
+		light_point_out = interface_variable(&m, m.t_v3, STORAGE_OUTPUT, XGPU_SPIRV_LOCATION_LIGHT_POINT, "xLightPoint");
 	}
 
 	main_id = function_begin(&m);
@@ -1798,6 +1848,14 @@ BOOL xgpu_spirv_vertex_shader(const struct xgpu_vertex_program *program, unsigne
 	store(&m, fog_out, extract(&m, finite4(&m, state.outputs[OUT_FOG]), 0));
 	if (world_normal_out)
 		store(&m, world_normal_out, world_normal);
+	if (light_ambient_out)
+	{
+		unsigned int ambient, point;
+
+		vertex_light_split(&m, lighting, world_normal, world_position, &ambient, &point);
+		store(&m, light_ambient_out, ambient);
+		store(&m, light_point_out, point);
+	}
 	if (world_position_out)
 		store(&m, world_position_out, world_position);
 	if (environment)
@@ -1825,6 +1883,9 @@ struct pixel_state
 	const struct xgpu_spirv_options *options;
 	struct words locals;
 	unsigned int in_d0, in_d1, in_t[4], in_fog, in_world_normal, in_world_position, in_world_binormal, in_world_tangent;
+	/* (display.ambient_occlusion: its image, the light apart of a model lit
+	for each vertex, and the occlusion at the pixel once read) */
+	unsigned int ambient_occlusion, in_light_ambient, in_light_point, occlusion;
 	unsigned int textures[4];
 	unsigned int v0, v1, t[4], dots[4], r0, r1, fog;
 	unsigned int zero4;
@@ -2462,9 +2523,48 @@ static void combiner_stage(struct module *m, struct pixel_state *state, int stag
 	}
 }
 
+/* ---------- display.ambient_occlusion
+
+The occlusion at the pixel (xgpu.h's XGPU_AMBIENT_OCCLUSION_LIGHT_*): the
+backend's image of it (XGPU_SPIRV_SET_OCCLUSION) read at the pixel, the
+coordinate kept inside it (a stand-in of a texel where it has none). Its
+image and gl_FragCoord are declared before the function, the read in it. */
+
+static void ambient_occlusion_declare(struct module *m, struct pixel_state *state)
+{
+	state->ambient_occlusion = variable(m, type_sampled_image(m, DIM_2D, FALSE, FALSE, TRUE), STORAGE_UNIFORM_CONSTANT,
+		"ambient_occlusion");
+	decorate1(m, state->ambient_occlusion, DECORATION_DESCRIPTOR_SET, XGPU_SPIRV_SET_OCCLUSION);
+	decorate1(m, state->ambient_occlusion, DECORATION_BINDING, XGPU_SPIRV_BINDING_AMBIENT_OCCLUSION);
+	if (!state->frag_coord)
+	{
+		state->frag_coord = variable(m, m->t_v4, STORAGE_INPUT, "gl_FragCoord");
+		decorate1(m, state->frag_coord, DECORATION_BUILT_IN, BUILT_IN_FRAG_COORD);
+	}
+}
+
+static unsigned int ambient_occlusion_read(struct module *m, struct pixel_state *state)
+{
+	unsigned int sampled = load(m, type_sampled_image(m, DIM_2D, FALSE, FALSE, TRUE), state->ambient_occlusion);
+	unsigned int image = op(m, OP_IMAGE, type_sampled_image(m, DIM_2D, FALSE, FALSE, FALSE), 1, &sampled);
+	unsigned int size = image_size(m, image, m->t_iv2), pixel, last, zeros[2], operands[4];
+
+	pixel = op1(m, OP_CONVERT_F_TO_S, m->t_iv2, ext1(m, GLSL_FLOOR, m->t_v2, xy(m, load(m, m->t_v4, state->frag_coord))));
+	zeros[0] = zeros[1] = constant_int(m, 0);
+	last = op2(m, OP_I_SUB, m->t_iv2, size, op(m, OP_COMPOSITE_CONSTRUCT, m->t_iv2, 2,
+		(unsigned int[]){ constant_int(m, 1), constant_int(m, 1) }));
+	pixel = ext3(m, GLSL_S_CLAMP, m->t_iv2, pixel, op(m, OP_COMPOSITE_CONSTRUCT, m->t_iv2, 2, zeros), last);
+	operands[0] = image;
+	operands[1] = pixel;
+	operands[2] = IMAGE_OPERANDS_LOD;
+	operands[3] = constant_int(m, 0);
+	return extract(m, op(m, OP_IMAGE_FETCH, m->t_v4, 4, operands), 0);
+}
+
 /* ---------- per-pixel model lighting */
 
-static unsigned int model_lighting(struct module *m, struct pixel_state *state, BOOL point_lights, BOOL dynamic_lights)
+static unsigned int model_lighting(struct module *m, struct pixel_state *state, BOOL point_lights, BOOL dynamic_lights,
+	unsigned int occlusion)
 {
 	unsigned int world_normal = pixel_input(m, state, state->in_world_normal, m->t_v4);
 	unsigned int normal = xyz(m, world_normal), n, facing, light;
@@ -2480,6 +2580,10 @@ static unsigned int model_lighting(struct module *m, struct pixel_state *state, 
 		fmul(m, 1, fneg(m, 1, facing), extract(m, uniform(m, U_MODEL_LIGHTS, 0), 2))), 0.0f))),
 		fscale(m, 3, xyz(m, uniform(m, U_MODEL_LIGHTS, 10)), fmax_scalar(m, 1,
 		fdot(m, n, fneg(m, 3, xyz(m, uniform(m, U_MODEL_LIGHTS, 9)))), 0.0f)));
+	/* (display.ambient_occlusion: the ambient and distant lights, the
+	level's light about the model, by the occlusion; not the point lights) */
+	if (occlusion)
+		light = fscale(m, 3, light, occlusion);
 	for (index = 0; point_lights && !dynamic_lights && index < 2; index++)
 	{
 		int first = 1 + index * 3;
@@ -3225,6 +3329,8 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 		frag_depth_out = variable(&m, m.t_float, STORAGE_OUTPUT, "gl_FragDepth");
 		decorate1(&m, frag_depth_out, DECORATION_BUILT_IN, BUILT_IN_FRAG_DEPTH);
 	}
+	if (program->ambient_occlusion)
+		ambient_occlusion_declare(&m, &state);
 	if (count_samples)
 	{
 		unsigned int array = type1(&m, OP_TYPE_RUNTIME_ARRAY, m.t_uint), block;
@@ -3246,6 +3352,13 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	for (stage = 0; stage < 4; stage++)
 		state.in_t[stage] = interface_variable(&m, m.t_v4, STORAGE_INPUT, XGPU_SPIRV_LOCATION_T0 + stage, coordinate_names[stage]);
 	state.in_fog = interface_variable(&m, m.t_float, STORAGE_INPUT, XGPU_SPIRV_LOCATION_FOG, "xFog");
+	if (program->ambient_occlusion == XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX)
+	{
+		state.in_light_ambient = interface_variable(&m, m.t_v3, STORAGE_INPUT, XGPU_SPIRV_LOCATION_LIGHT_AMBIENT,
+			"xLightAmbient");
+		state.in_light_point = interface_variable(&m, m.t_v3, STORAGE_INPUT, XGPU_SPIRV_LOCATION_LIGHT_POINT,
+			"xLightPoint");
+	}
 	if (program->per_pixel_lighting || environment)
 		state.in_world_normal = interface_variable(&m, m.t_v4, STORAGE_INPUT, XGPU_SPIRV_LOCATION_WORLD_NORMAL, "xWorldNormal");
 	if (world_position)
@@ -3277,12 +3390,17 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 		state.t[stage] = state.zero4;
 		state.dots[stage] = constant_float(&m, 0.0f);
 	}
+	/* display.ambient_occlusion: the occlusion at the pixel, which
+	multiplies the ambient light alone (xgpu.h) */
+	if (program->ambient_occlusion)
+		state.occlusion = ambient_occlusion_read(&m, &state);
 	if (program->per_pixel_lighting && program->dynamic_lights == XGPU_DYNAMIC_LIGHTS_MODEL)
 	{
 		unsigned int world_normal = pixel_input(&m, &state, state.in_world_normal, m.t_v4), normal = xyz(&m, world_normal);
 		unsigned int n = fscale(&m, 3, normal, ext1(&m, GLSL_INVERSE_SQRT, m.t_float,
 			fmax_scalar(&m, 1, fdot(&m, normal, normal), (float)1.0e-24)));
-		unsigned int lit = model_lighting(&m, &state, program->per_pixel_lighting == 2, TRUE);
+		unsigned int lit = model_lighting(&m, &state, program->per_pixel_lighting == 2, TRUE,
+			program->ambient_occlusion == XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL ? state.occlusion : 0);
 		unsigned int sum = dynamic_light_sum(&m, &state, pixel_input(&m, &state, state.in_world_position, m.t_v3), n, n, FALSE);
 		static const unsigned int rgb[4] = { 4, 5, 6, 3 };
 
@@ -3292,7 +3410,19 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	{
 		static const unsigned int rgb[4] = { 4, 5, 6, 3 };
 
-		state.v0 = shuffle(&m, 4, state.v0, model_lighting(&m, &state, program->per_pixel_lighting == 2, FALSE), rgb);
+		state.v0 = shuffle(&m, 4, state.v0, model_lighting(&m, &state, program->per_pixel_lighting == 2, FALSE,
+			program->ambient_occlusion == XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL ? state.occlusion : 0), rgb);
+	}
+	else if (program->ambient_occlusion == XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX)
+	{
+		/* (lit for each vertex: its ambient light by the occlusion, its
+		point lights' added, clamped as its program clamps the sum) */
+		static const unsigned int rgb[4] = { 4, 5, 6, 3 };
+		unsigned int lit = saturate(&m, 3, fadd(&m, 3,
+			fscale(&m, 3, pixel_input(&m, &state, state.in_light_ambient, m.t_v3), state.occlusion),
+			pixel_input(&m, &state, state.in_light_point, m.t_v3)));
+
+		state.v0 = shuffle(&m, 4, state.v0, lit, rgb);
 	}
 
 	if (effect)
@@ -3340,6 +3470,14 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 		more = op3(&m, OP_SELECT, m.t_float, compare(&m, OP_F_ORD_GREATER_THAN, added_most, constant_float(&m, 0.0f)),
 			more, constant_float(&m, 0.0f));
 		self_illumination = fscale(&m, 3, added, more);
+	}
+	/* (display.ambient_occlusion: a lightmap pass's light, by the
+	occlusion, before the enhanced dynamic lights add theirs) */
+	if (program->ambient_occlusion == XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP)
+	{
+		static const unsigned int rgb[4] = { 4, 5, 6, 3 };
+
+		result = shuffle(&m, 4, result, fscale(&m, 3, xyz(&m, result), state.occlusion), rgb);
 	}
 
 	if (environment)

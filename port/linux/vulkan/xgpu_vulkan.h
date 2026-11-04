@@ -507,6 +507,9 @@ struct xgpu_vulkan_draw
 {
 	VkPipeline pipeline;
 	uint8_t topology, dynamic_lights, reads_depth, writes_depth;
+	/* its pixel shader reads display.ambient_occlusion's occlusion
+	(xgpu_vulkan_set_ambient_occlusion) */
+	uint8_t ambient_occlusion;
 	/* its pipeline reads the colour attachment (color_read): the
 	attachment bound as its input, the draw ordered after the pass's
 	draws before it */
@@ -522,6 +525,16 @@ struct xgpu_vulkan_draw
 };
 
 void xgpu_vulkan_draw(const struct xgpu_vulkan_draw *draw);
+
+/* display.ambient_occlusion: the occlusion of the 3D view (an image of the
+target's size, its red the share of the ambient light each pixel has) that
+the draws lighting by it read (xgpu_vulkan_draw's ambient_occlusion), at
+binding XGPU_VULKAN_BINDING_OCCLUSION of the pipeline layout's set
+XGPU_VULKAN_SET_OCCLUSION (xgpu_spirv.h's XGPU_SPIRV_SET_OCCLUSION and
+XGPU_SPIRV_BINDING_AMBIENT_OCCLUSION); NULL: a white texel, none */
+#define XGPU_VULKAN_SET_OCCLUSION 3
+#define XGPU_VULKAN_BINDING_OCCLUSION 0
+void xgpu_vulkan_set_ambient_occlusion(struct xgpu_vulkan_image *image);
 
 /* the enhanced dynamic lights' block (struct xgpu_dynamic_lights_block,
 size bytes) and their grid's cells (32 x 32 x 16, four uints each: xgpu.h),
