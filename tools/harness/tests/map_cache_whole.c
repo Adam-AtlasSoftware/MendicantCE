@@ -49,7 +49,25 @@ static int posix_stat(const char *path, struct posix_file_information *informati
 	return 0;
 }
 static const char *cache_slot_folder(void) { return "z:\\"; }
-static boolean cache_copy_written(void) { return copy_written; }
+static struct cached_map_file *cached_map_file_get(short index);
+void cache_slot_source_record(short slot, const char *map_path, const char *name, unsigned long checksum,
+	unsigned long file_length);
+int cache_slot_source_matches(short slot, const char *map_path, const char *name, unsigned long checksum,
+	unsigned long file_length);
+/* the worker's copy (map_unpack.c): ended whole, it marks the header's map */
+static int map_unpack_take(short index)
+{
+	if (copy_written)
+		cache_slot_source_record(index, "z:\\a10.map", slot.header.name, slot.header.checksum,
+			(unsigned long)slot.header.file_length);
+	return copy_written;
+}
+/* the start's check: the slot's source marks its header's map */
+static boolean cached_map_file_adopt(short index)
+{
+	return cache_slot_source_matches(index, "z:\\a10.map", slot.header.name, slot.header.checksum,
+		(unsigned long)slot.header.file_length);
+}
 static struct cached_map_file *cached_map_file_get(short index) { (void)index; return &slot; }
 static long cached_map_file_get_size(short index) { (void)index; return slot_size; }
 static boolean cached_map_file_resize(short index, long size) { (void)index; slot_size = size; return TRUE; }

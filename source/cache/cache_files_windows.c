@@ -583,7 +583,9 @@ void cache_files_dispose(
 void cache_files_precache_set_priority(
 	boolean blocking)
 {
-	cache_copy_set_priority(blocking);
+	/* port: (the copy is a worker's, port/linux/src/map_unpack.c, which
+	runs a load's copy before any other) */
+	(void)blocking;
 
 	return;
 }
@@ -695,12 +697,11 @@ boolean cache_files_precache_map_begin(
 
 		if (cache_file_read_header_from_dvd(cache_map_name, &header))
 		{
-			long buffer_size = cache_copy_buffer_size(copy_map);
 			short map_file_index = cached_map_files_find_free_map(
 				header.file_length,
 				header.scenario_type);
-			void *buffer;
 			struct cached_map_file *map_file;
+			char slot_path[256];
 			/* port: the cache file's size, its map's (sectors' reads past
 			its end within it) */
 			long copy_size = (header.file_length + 0xFFFF) & ~0xFFFF;
@@ -736,14 +737,9 @@ boolean cache_files_precache_map_begin(
 
 				return FALSE;
 			}
-			/* port: the copy's buffers its own, so the texture cache keeps
-			its memory while it runs (a copy made ahead, in a game:
-			port/linux/game/map_cache_prefill.c); the texture cache's if there
-			are none */
-			buffer = map_cache_copy_buffer(buffer_size);
-			cache_copy_buffer_stolen = buffer == NULL;
-			if (!buffer)
-				buffer = texture_cache_steal_memory(buffer_size);
+			/* port: the copy is the unpacking workers' (port/linux/src/map_unpack.c),
+			with buffers of their own: the texture cache keeps its memory */
+			cache_copy_buffer_stolen = FALSE;
 			map_file = cached_map_file_get(map_file_index);
 
 			memset(
@@ -768,12 +764,23 @@ boolean cache_files_precache_map_begin(
 			{
 				error(_error_silent, "couldn't size cache file %d for map '%s'", map_file_index, cache_map_name);
 			}
-			cache_copy_begin(
-				buffer,
-				buffer_size,
-				cached_map_file_get_handle(map_file_index),
-				cached_map_file_get_size(map_file_index),
-				path);
+			/* port: the map unpacked into the slot by a worker, whole as the
+			Xbox's decompressor (cache_files_decompress_windows.c) wrote it, and
+			its source marked last; ended in cache_files_precache_map_end */
+			cached_map_file_get_path(map_file_index, slot_path);
+			if (!path[0] || !map_unpack_queue(map_file_index, path, slot_path, copy_size, TRUE))
+			{
+				error(_error_silent, "couldn't begin the copy of map '%s'", cache_map_name);
+				cache_file_globals.copy_in_progress = FALSE;
+				cache_file_globals.copying_to_map_file_index = NONE;
+				cached_map_file_resize(map_file_index, 0);
+				if (copy_map)
+				{
+					display_error_damaged_media();
+				}
+
+				return FALSE;
+			}
 		}
 		else
 		{
@@ -818,14 +825,16 @@ void cache_files_initialize(
 	those six's room alone, cache_slot_folder) */
 	if (cache_slot_folder_keeps_cache())
 		cached_map_files_budget = map_cache_budget(cached_map_files_bytes(NONE), cached_map_files_budget);
-	cache_copy_initialize();
+	/* port: (the copies are port/linux/src/map_unpack.c's: the Xbox's
+	decompressor's thread is not started) */
 
 	return;
 }
 
-/* port: a copy's slot marked a whole map (cache_slot_source_record): only
-a copy that wrote every byte and put the slot on the disk, its header the
-map's it was copying (cache_copy_written); any other (failed, ended, its
+/* port: a copy's slot taken as a whole map: only a copy the worker ended
+whole, the slot on the disk and its source marked last
+(port/linux/src/map_unpack.c), that passes the check of the game's start
+(cached_map_file_adopt), its header the map's it was copying; any other (failed, ended, its
 header or pages not written) emptied, so that it is copied again, never
 played (port/linux/src/xbox_files.c's cache slots' sources) */
 static void cache_files_precache_map_mark(
@@ -833,16 +842,12 @@ static void cache_files_precache_map_mark(
 {
 	struct cached_map_file *map_file = cached_map_file_get(map_file_index);
 
-	if (cache_copy_written() &&
+	if (map_unpack_take(map_file_index) &&
+		cached_map_file_adopt(map_file_index) &&
 		map_file->header.name[0] &&
 		_stricmp(map_file->header.name, cache_file_globals.copying_to_map_file_name) == 0 &&
 		cached_map_file_get_size(map_file_index) >= map_file->header.file_length)
 	{
-		char path[256];
-
-		cache_file_get_map_path(cache_file_globals.copying_to_map_file_name, path);
-		cache_slot_source_record(map_file_index, path, map_file->header.name,
-			(unsigned long)map_file->header.checksum, (unsigned long)map_file->header.file_length);
 		return;
 	}
 	if (map_file->header.name[0])
@@ -860,12 +865,11 @@ void cache_files_precache_map_end(
 		"c:\\halo\\SOURCE\\cache\\cache_files_windows.c",
 		1031,
 		cache_file_globals.copy_in_progress);
-	cache_copy_end();
+	/* port: (the worker's copy waited for: cache_files_precache_map_mark) */
 	if (cache_copy_buffer_stolen) /* port: (cache_files_precache_map_begin) */
 		texture_cache_return_memory();
 	cache_copy_buffer_stolen = TRUE;
 	cached_map_file_set_modification_date(cache_file_globals.copying_to_map_file_index);
-	cached_map_file_read_header(cache_file_globals.copying_to_map_file_index);
 	cache_files_precache_map_mark(cache_file_globals.copying_to_map_file_index);
 	cache_file_globals.copy_in_progress = FALSE;
 	cache_file_globals.copying_to_map_file_index = NONE;
@@ -880,7 +884,7 @@ void cache_files_precache_map_queue_end(
 		"c:\\halo\\SOURCE\\cache\\cache_files_windows.c",
 		1022,
 		cache_file_globals.copy_in_progress);
-	cache_copy_queue_end();
+	map_unpack_stop(cache_file_globals.copying_to_map_file_index); /* port: (map_unpack.c) */
 
 	return;
 }
@@ -1063,28 +1067,19 @@ short cache_files_precache_map_status(
 		"c:\\halo\\SOURCE\\cache\\cache_files_windows.c",
 		984,
 		cache_file_globals.copy_in_progress);
-	switch (cache_copy_get_status(progress))
+	/* port: the worker's copy (port/linux/src/map_unpack.c) */
+	switch (map_unpack_status(cache_file_globals.copying_to_map_file_index, progress))
 	{
-		case _cache_copy_bad_file_failure:
-		case _cache_copy_read_failure:
-			status = _cached_map_file_failed;
-			break;
-
-		case _cache_copy_write_failure:
-			cached_map_file_invalidate(cache_file_globals.copying_to_map_file_index);
-			status = _cached_map_file_failed;
-			break;
-
-		case _cache_copy_in_progress:
+		case 0:
 			status = _cached_map_file_in_progress;
 			break;
 
-		case _cache_copy_finished:
+		case 1:
 			status = _cached_map_file_success;
 			break;
 
 		default:
-			match_vassert("c:\\halo\\SOURCE\\cache\\cache_files_windows.c", 1013, FALSE, NULL);
+			status = _cached_map_file_failed;
 			break;
 	}
 
@@ -2097,7 +2092,7 @@ boolean cache_files_unpack_begin(
 	}
 	cache_file_get_map_path(cache_map_name, map_path);
 	cached_map_file_get_path(map_file_index, slot_path);
-	if (!map_path[0] || !map_unpack_queue(map_file_index, map_path, slot_path, copy_size))
+	if (!map_path[0] || !map_unpack_queue(map_file_index, map_path, slot_path, copy_size, FALSE))
 	{
 		cached_map_file_resize(map_file_index, 0);
 		return FALSE;

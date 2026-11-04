@@ -84,12 +84,12 @@ def test_map_unpack(case):
     # the header never written
     (("!map_unpack_write_all(slot, header, sizeof(header), 0) ||", ""), "precache_slot"),
     # the mark made before the slot is whole
-    (("	if (!map_unpack_slot(job->map_path, job->slot_path, job->copy_size, name, &checksum, &file_length))\n"
-      "		return 0;\n	cache_slot_source_record(slot, job->map_xbox_path, name, checksum, file_length);\n",
+    (("	if (!map_unpack_slot(job->map_path, job->slot_path, job->copy_size, name, &checksum, &file_length, &job->stop,\n"
+      "			&job->progress))\n		return 0;\n	cache_slot_source_record(slot, job->map_xbox_path, name, checksum, file_length);\n",
       "	memcpy(name, \"a10\", 4);\n	checksum = MAP_CHECKSUM;\n	file_length = MAP_LENGTH;\n"
       "	cache_slot_source_record(slot, job->map_xbox_path, name, checksum, file_length);\n"
-      "	if (!map_unpack_slot(job->map_path, job->slot_path, job->copy_size, name, &checksum, &file_length))\n"
-      "		return 0;\n"), "marker_last"),
+      "	if (!map_unpack_slot(job->map_path, job->slot_path, job->copy_size, name, &checksum, &file_length, &job->stop,\n"
+      "			&job->progress))\n		return 0;\n"), "marker_last"),
     # a stream that ends before the map's length taken for the map
     (("if (result == Z_STREAM_END && done != body)\n			goto finished;", "if (result == Z_STREAM_END)\n"
       "			break;"), "short_stream"),

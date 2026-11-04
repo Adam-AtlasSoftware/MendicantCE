@@ -120,7 +120,7 @@ static void *unpack_thread(void *context)
 {
 	struct unpack_thread *unpack = context;
 
-	unpack->whole = map_unpack_slot(unpack->map, unpack->slot, MAP_COPY_SIZE, NULL, NULL, NULL);
+	unpack->whole = map_unpack_slot(unpack->map, unpack->slot, MAP_COPY_SIZE, NULL, NULL, NULL, NULL, NULL);
 	return NULL;
 }
 
@@ -136,7 +136,7 @@ int main(int argc, char **argv)
 		char name[32];
 		unsigned long checksum = 0, length = 0;
 
-		CHECK(map_unpack_slot(host("a10.map"), host("cache000.map"), MAP_COPY_SIZE, name, &checksum, &length),
+		CHECK(map_unpack_slot(host("a10.map"), host("cache000.map"), MAP_COPY_SIZE, name, &checksum, &length, NULL, NULL),
 			"a whole map not unpacked");
 		CHECK(slot_is_precache_s(host("cache000.map")), "the slot is not the precache's");
 		CHECK(!strcmp(name, "a10") && checksum == MAP_CHECKSUM && length == MAP_LENGTH,
@@ -180,7 +180,7 @@ int main(int argc, char **argv)
 		memcpy(longer, map_file, sizeof(map_file));
 		memcpy(longer + 8, &length, 4);
 		write_map("short.map", longer, sizeof(map_file));
-		CHECK(!map_unpack_slot(host("short.map"), host("cache002.map"), MAP_COPY_SIZE, NULL, NULL, NULL),
+		CHECK(!map_unpack_slot(host("short.map"), host("cache002.map"), MAP_COPY_SIZE, NULL, NULL, NULL, NULL, NULL),
 			"a map whose stream ends early unpacked");
 		free(longer);
 	}
@@ -206,9 +206,9 @@ int main(int argc, char **argv)
 
 		CHECK(map_unpack_worker_count() >= 1 && map_unpack_worker_count() <= 4, "%d workers",
 			map_unpack_worker_count());
-		CHECK(map_unpack_queue(6, "z:\\a10.map", "z:\\cache006.map", MAP_COPY_SIZE) &&
-			map_unpack_queue(7, "z:\\a10.map", "z:\\cache007.map", MAP_COPY_SIZE), "not queued");
-		CHECK(!map_unpack_queue(6, "z:\\a10.map", "z:\\cache006.map", MAP_COPY_SIZE), "a busy slot queued again");
+		CHECK(map_unpack_queue(6, "z:\\a10.map", "z:\\cache006.map", MAP_COPY_SIZE, 0) &&
+			map_unpack_queue(7, "z:\\a10.map", "z:\\cache007.map", MAP_COPY_SIZE, 0), "not queued");
+		CHECK(!map_unpack_queue(6, "z:\\a10.map", "z:\\cache006.map", MAP_COPY_SIZE, 0), "a busy slot queued again");
 		map_unpack_wait(6);
 		map_unpack_wait(7);
 		while (map_unpack_take_finished(&slot, &succeeded))

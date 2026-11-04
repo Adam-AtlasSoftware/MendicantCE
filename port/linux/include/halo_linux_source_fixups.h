@@ -363,8 +363,13 @@ whole as the precache writes it, its source marked last (1 whole, 0 not);
 a slot's unpack queued (the paths Xbox paths), a finished one taken (each
 once), one waited for, and the workers' number */
 int map_unpack_slot(const char *map_path, const char *slot_path, long copy_size, char *name, unsigned long *checksum,
-	unsigned long *file_length);
-int map_unpack_queue(short slot, const char *map_xbox_path, const char *slot_xbox_path, long copy_size);
+	unsigned long *file_length, volatile int *stop, volatile float *progress);
+int map_unpack_queue(short slot, const char *map_xbox_path, const char *slot_xbox_path, long copy_size, int precache);
+/* ... the game's own copy (precache): its status (0 going, 1 whole, -1
+failed) and progress, asked to stop, and waited for and taken (1 whole) */
+int map_unpack_status(short slot, float *progress);
+void map_unpack_stop(short slot);
+int map_unpack_take(short slot);
 int map_unpack_take_finished(short *slot, int *succeeded);
 void map_unpack_wait(short slot);
 int map_unpack_worker_count(void);

@@ -70,6 +70,11 @@ struct map_unpack_job
 {
 	enum map_unpack_state state;
 	int succeeded;
+	/* the game's own copy (the precache's: taken only by map_unpack_take),
+	the copy asked to stop, how far it has come (0 to 1) */
+	int precache;
+	volatile int stop;
+	volatile float progress;
 	long copy_size;
 	char map_path[1024], slot_path[1024];
 	/* (the map's path as the slot's source names it: cache_slot_source_record) */
@@ -114,7 +119,7 @@ static int map_unpack_write_all(int descriptor, const void *buffer, size_t size,
 /* ---------- public code */
 
 int map_unpack_slot(const char *map_path, const char *slot_path, long copy_size, char *name, unsigned long *checksum,
-	unsigned long *file_length)
+	unsigned long *file_length, volatile int *stop, volatile float *progress)
 {
 	unsigned char header[MAP_UNPACK_HEADER_SIZE];
 	unsigned char *in = NULL, *out = NULL;
@@ -147,6 +152,11 @@ int map_unpack_slot(const char *map_path, const char *slot_path, long copy_size,
 	while (done < body)
 	{
 		int result;
+
+		if (stop && *stop)
+			goto finished;
+		if (progress)
+			*progress = (float)done / (float)body;
 
 		if (!stream.avail_in)
 		{
@@ -205,7 +215,8 @@ static int map_unpack_job_run(short slot, struct map_unpack_job *job)
 	char name[MAP_UNPACK_NAME_SIZE];
 	unsigned long checksum = 0, file_length = 0;
 
-	if (!map_unpack_slot(job->map_path, job->slot_path, job->copy_size, name, &checksum, &file_length))
+	if (!map_unpack_slot(job->map_path, job->slot_path, job->copy_size, name, &checksum, &file_length, &job->stop,
+			&job->progress))
 		return 0;
 	cache_slot_source_record(slot, job->map_xbox_path, name, checksum, file_length);
 	return cache_slot_source_matches(slot, job->map_xbox_path, name, checksum, file_length);
@@ -219,8 +230,15 @@ static void *map_unpack_worker(void *context)
 	{
 		short slot;
 
-		for (slot = 0; slot < MAP_UNPACK_SLOTS && map_unpack.jobs[slot].state != _map_unpack_queued; slot++)
+		/* (the game's own copy first: a load waits for it) */
+		for (slot = 0; slot < MAP_UNPACK_SLOTS &&
+			!(map_unpack.jobs[slot].state == _map_unpack_queued && map_unpack.jobs[slot].precache); slot++)
 			;
+		if (slot >= MAP_UNPACK_SLOTS)
+		{
+			for (slot = 0; slot < MAP_UNPACK_SLOTS && map_unpack.jobs[slot].state != _map_unpack_queued; slot++)
+				;
+		}
 		if (slot >= MAP_UNPACK_SLOTS)
 		{
 			pthread_cond_wait(&map_unpack.wake, &map_unpack.lock);
@@ -269,7 +287,7 @@ static int map_unpack_start(void)
 	return map_unpack.workers > 0;
 }
 
-int map_unpack_queue(short slot, const char *map_xbox_path, const char *slot_xbox_path, long copy_size)
+int map_unpack_queue(short slot, const char *map_xbox_path, const char *slot_xbox_path, long copy_size, int precache)
 {
 	struct map_unpack_job *job;
 	int queued = 0;
@@ -285,6 +303,9 @@ int map_unpack_queue(short slot, const char *map_xbox_path, const char *slot_xbo
 		snprintf(job->map_xbox_path, sizeof(job->map_xbox_path), "%s", map_xbox_path);
 		job->copy_size = copy_size;
 		job->succeeded = 0;
+		job->precache = precache;
+		job->stop = 0;
+		job->progress = 0.0f;
 		if (job->map_path[0] && job->slot_path[0])
 		{
 			job->state = _map_unpack_queued;
@@ -304,7 +325,7 @@ int map_unpack_take_finished(short *slot, int *succeeded)
 	pthread_mutex_lock(&map_unpack.lock);
 	for (index = 0; index < MAP_UNPACK_SLOTS; index++)
 	{
-		if (map_unpack.jobs[index].state == _map_unpack_done)
+		if (map_unpack.jobs[index].state == _map_unpack_done && !map_unpack.jobs[index].precache)
 		{
 			*slot = index;
 			*succeeded = map_unpack.jobs[index].succeeded;
@@ -325,4 +346,42 @@ void map_unpack_wait(short slot)
 	while (map_unpack.jobs[slot].state == _map_unpack_queued || map_unpack.jobs[slot].state == _map_unpack_running)
 		pthread_cond_wait(&map_unpack.finished, &map_unpack.lock);
 	pthread_mutex_unlock(&map_unpack.lock);
+}
+
+int map_unpack_status(short slot, float *progress)
+{
+	int status;
+
+	if (slot < 0 || slot >= MAP_UNPACK_SLOTS)
+		return -1;
+	pthread_mutex_lock(&map_unpack.lock);
+	if (progress)
+		*progress = map_unpack.jobs[slot].progress;
+	status = map_unpack.jobs[slot].state == _map_unpack_done ? (map_unpack.jobs[slot].succeeded ? 1 : -1) :
+		map_unpack.jobs[slot].state == _map_unpack_free ? -1 : 0;
+	pthread_mutex_unlock(&map_unpack.lock);
+	return status;
+}
+
+void map_unpack_stop(short slot)
+{
+	if (slot >= 0 && slot < MAP_UNPACK_SLOTS)
+		map_unpack.jobs[slot].stop = 1;
+}
+
+int map_unpack_take(short slot)
+{
+	int succeeded = 0;
+
+	if (slot < 0 || slot >= MAP_UNPACK_SLOTS)
+		return 0;
+	map_unpack_wait(slot);
+	pthread_mutex_lock(&map_unpack.lock);
+	if (map_unpack.jobs[slot].state == _map_unpack_done)
+	{
+		succeeded = map_unpack.jobs[slot].succeeded;
+		map_unpack.jobs[slot].state = _map_unpack_free;
+	}
+	pthread_mutex_unlock(&map_unpack.lock);
+	return succeeded;
 }
