@@ -174,7 +174,7 @@ reach's centre, and the first 64 are kept. Each proxy records its owner, so an o
 a draw its object's slot by finding the object there (-1 when it has no shape in the window, which matches none).
 
 The game is read through `world_proxies_source.h` alone (`world_proxies_game.c`): the definitions' tags, the
-frame's objects (A's `world_scene_instances` once A has any, until then the game's object list directly), their
+frame's objects (A's `world_scene_instances`), their
 node matrices as drawn and the window's frustum. `debug.world_proxies_view` draws the window's shapes as wireframes
 (spheres yellow, capsules green, boxes cyan).
 
