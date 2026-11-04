@@ -15,6 +15,12 @@ where there is none to play (its walk to be made, and recorded) */
 boolean render_prepared_replay(boolean mirrors);
 /* the map loaded has a record (or has none to make: records off) */
 boolean render_prepared_recorded(boolean mirrors);
+/* a shipped record (prepared_shipped.h) of a map (its cache file's
+checksum) and key that plays: not passed over, whole and of this form */
+boolean render_prepared_shipped(unsigned long checksum, unsigned long long key);
+/* a map not loaded yet (its checksum and scenario, levels\a10\a10) has a
+shipped record of the settings now: its first load needs no walk */
+boolean render_prepared_shipped_map(unsigned long checksum, char const *scenario);
 /* the stock maps' preparations recorded by the first start's pass in this
 form (menu_pictures_render.c), and noted so at its end */
 boolean render_prepared_stock_recorded(void);
