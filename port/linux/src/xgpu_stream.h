@@ -374,8 +374,7 @@ As the GPU sees it, alike in the guest's front end and the hosts' backends.
 - The block: the field's place and the window's proxies (world_proxies.h's
   struct world_proxy), a uniform buffer (std140: vec4s only).
 
-Bindings (the shaders: workstream D; the backends' descriptors, both:
-B):
+Bindings (the shaders: workstream D; the backends' descriptors: B):
 - SPIR-V: XGPU_SPIRV_SET_OCCLUSION (#574's set, so that a draw still binds
   at most four sets), bindings XGPU_SPIRV_BINDING_WORLD_SDF and
   XGPU_SPIRV_BINDING_WORLD_AO (xgpu_spirv.h);
