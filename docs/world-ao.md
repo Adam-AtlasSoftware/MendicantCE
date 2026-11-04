@@ -109,9 +109,10 @@ asked: at quit, and at a map unload if the map can't be re-read.
 ### The bake's schedule
 
 - **First launch:** in #575's fixed start (intro → "Preparing menu pictures" → main menu). That pass already loads
-  every stock map, so baking each map's fields while it's loaded (`world_sdf_startup_map_loaded`, called from
-  `menu_pictures_render.c`'s `_prepare_loading` state) costs no extra loads. Baking overlaps the pictures' settle and
-  render time; the pass's per-picture time limit counts it. If the pictures are already cached but a field is
+  every stock map, so copying each map's geometry while it's loaded (`world_sdf_startup_map_loaded`, called from
+  `menu_pictures_render.c`'s `_prepare_loading` state) costs no extra loads. The bakes themselves wait until the pass
+  ends (`menu_pictures_exclusive`), so the pass and the main menu come exactly when they would without them; they
+  then run from the copies at the lowest priority behind the main menu. If the pictures are already cached but a field is
   missing (a new bake version), `world_sdf_startup_wanted` makes the pass run for the fields alone. Only the loaded
   BSP's tags are in memory, so the pass bakes the BSP each map starts in and each picture's, and switches to no
   other (repeated switches once leaked the device's groups, #506). A campaign map's other BSPs are baked in the
