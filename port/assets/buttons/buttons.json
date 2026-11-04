@@ -521,6 +521,22 @@
     36,
     40
    ]
+  },
+  {
+   "name": "menu_bkds__1",
+   "tag": "ui\\shell\\bitmaps\\menu_bkds",
+   "bitmap": 1,
+   "width": 256,
+   "height": 32,
+   "format": "dxt3",
+   "scale": 8,
+   "crc": 93885396,
+   "svg": "menu_bkds__1.svg",
+   "place": [
+    1,
+    0,
+    0
+   ]
   }
  ]
 }

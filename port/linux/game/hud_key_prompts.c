@@ -74,7 +74,7 @@ void hud_key_prompt_action_name(short action, char *name, long size);
 boolean hud_key_prompt_draw(short local_player_index, short game_control, short gamepad_button,
 	rectangle2d *bounds, rectangle2d *cursor, pixel32 color);
 boolean hud_key_prompt_draw_key(char const *name, rectangle2d *bounds, rectangle2d *cursor, pixel32 color);
-short hud_key_prompt_cap_widening(short name_width);
+short hud_key_prompt_cap_advance(short name_left, short name_right);
 void hud_key_prompt_button_word(wchar_t *text, long length, wchar_t const *word, wchar_t const *icon);
 
 /* ---------- private code */
@@ -177,15 +177,43 @@ resolution */
 centres, rasterizer_xbox_dynavobgeom.c) */
 #define KEY_CAP_PIXEL_ORIGIN 0.5f
 
-/* the key cap's margin about its name, the text's leading inset, and half
-its height, in the HUD's units (as hud_hires_button_draw's) */
-static void key_cap_metrics(short *margin, short *inset, short *half)
+/* a key cap's measures, in the HUD's units (as hud_hires_button_draw's):
+how far past the cursor its box starts (inset), the room between its name's
+letters and either side of it (margin), the room between it and the
+letters of the text after it (gap), and half its height */
+static void key_cap_metrics(short *inset, short *margin, short *gap, short *half)
 {
 	real scale = local_player_count() > 1 ? 0.75f : 1.0f;
 
-	*margin = (short)(3.0f * scale);
 	*inset = (short)(4.0f * scale);
+	*margin = (short)(3.0f * scale);
+	*gap = (short)(3.0f * scale);
 	*half = (short)(10.0f * scale);
+}
+
+/* a key cap laid out for a name whose letters (their glyphs' boxes, as
+draw_unicode_string_compute_bounds has them) span left to right when it is
+drawn from 0, all from the cursor at 0: its box's sides, where its name is
+drawn from (its letters in the middle of the box, as much room either side
+of them), and where the text after it is drawn from (its letters, which
+start as far past their pen as the name's, the gap past the box). A box is
+at least as wide as it is tall, so a narrow name (a digit, a letter) is not
+in a box taller than wide */
+static void key_cap_layout(short left, short right, short *box_x0, short *box_x1, short *pen, short *after)
+{
+	short inset, margin, gap, half, letters, width;
+
+	key_cap_metrics(&inset, &margin, &gap, &half);
+	letters = (short)MAX(right - left, 0);
+	width = (short)MAX(letters + 2 * margin, 2 * half - 1);
+	/* (whole units either side: a box an odd unit wider would leave the
+	name half a unit off its middle) */
+	if ((width - letters) % 2)
+		width++;
+	*box_x0 = inset;
+	*box_x1 = (short)(inset + width);
+	*pen = (short)(inset + (width - letters) / 2 - left);
+	*after = (short)(*box_x1 + gap - left);
 }
 
 /* a part of a key cap: a quadrilateral, its corners in the display's
@@ -330,60 +358,66 @@ static void key_cap_shape(rectangle2d const *box, pixel32 fill, pixel32 color)
 	}
 }
 
-/* how much wider than its name and the edges about it a key's cap is
-drawn: a narrow name's (a digit, a letter) is as wide as the cap is tall,
-the name in its middle. name_width is the name's width in the font it is
-drawn in (the HUD's units) */
-short hud_key_prompt_cap_widening(short name_width)
+/* how far past the cursor the text after a key's cap starts (the cap's
+advance), for a name whose letters span left to right drawn from 0 in the
+font it is drawn in (the HUD's units: draw_unicode_string_compute_bounds's
+text bounds), as key_cap_draw lays it out */
+short hud_key_prompt_cap_advance(short name_left, short name_right)
 {
-	short margin, inset, half;
+	short box_x0, box_x1, pen, after;
 
-	key_cap_metrics(&margin, &inset, &half);
-	return (short)MAX(0, (2 * half - 1) - (name_width + 2 * margin + 1 - inset));
+	key_cap_layout(name_left, name_right, &box_x0, &box_x1, &pen, &after);
+	return after;
 }
 
 /* the key's name at the cursor in a key cap, as the HUD draws a button
 there, the cursor moved past it */
 static boolean key_cap_draw(wchar_t const *text, rectangle2d *bounds, rectangle2d *cursor, pixel32 color)
 {
-	rectangle2d text_bounds, box, name_start;
-	short margin, inset, half, line_top, middle, widening;
-	short start;
+	rectangle2d text_bounds, box, line_start;
+	short inset, margin, gap, half, middle;
+	short start, left = 0, right = 0, box_x0, box_x1, pen, after;
 	pixel32 fill;
 
-	key_cap_metrics(&margin, &inset, &half);
+	key_cap_metrics(&inset, &margin, &gap, &half);
 	start = cursor->x0;
-	line_top = cursor->y0;
-	cursor->x0 += margin;
-	name_start = *cursor;
+	line_start = *cursor;
+	/* (the name measured from the cursor: its letters' span) */
+	draw_string_set_indents(start - bounds->x0, 0);
+	draw_unicode_string_compute_bounds(bounds, text, &text_bounds, cursor);
+	if (cursor->y0 != line_start.y0)
+	{
+		/* (a name that does not fit on the line: its text alone, where it
+		wrapped) */
+		text_bounds.x0 = bounds->x0;
+		rasterizer_draw_unicode_string(&text_bounds, NULL, NULL, 0, text);
+		bounds->y0 = cursor->y0;
+		return TRUE;
+	}
+	if (text_bounds.x0 <= text_bounds.x1)
+	{
+		left = (short)(text_bounds.x0 - start);
+		right = (short)(text_bounds.x1 - start);
+	}
+	key_cap_layout(left, right, &box_x0, &box_x1, &pen, &after);
+	/* (the name drawn from its place in the middle of the cap) */
+	*cursor = line_start;
+	cursor->x0 = (short)(start + pen);
 	draw_string_set_indents(cursor->x0 - bounds->x0, 0);
 	draw_unicode_string_compute_bounds(bounds, text, &text_bounds, cursor);
-	/* (a narrow name measured again, moved to the middle of its cap) */
-	widening = cursor->y0 == line_top ? hud_key_prompt_cap_widening((short)(cursor->x0 - 3 - name_start.x0)) : 0;
-	if (widening > 0)
-	{
-		*cursor = name_start;
-		cursor->x0 = (short)(cursor->x0 + widening / 2);
-		draw_string_set_indents(cursor->x0 - bounds->x0, 0);
-		draw_unicode_string_compute_bounds(bounds, text, &text_bounds, cursor);
-	}
-	cursor->x0 -= 3;
-	box.x0 = (short)(start + inset);
-	box.x1 = (short)(cursor->x0 + 4 + margin + widening - widening / 2);
-	if (cursor->y0 == line_top)
-	{
-		/* a key cap: the prompt's colour faintly filled, edged in it */
-		middle = draw_unicode_string_capital_middle(cursor, L"");
-		box.y0 = (short)(middle - half + 1);
-		box.y1 = (short)(middle + half);
-		fill = ((pixel32)((color >> 24) * 3 / 10) << 24) | (color & 0x00FFFFFFUL);
-		key_cap_shape(&box, fill, color);
-	}
+	/* a key cap: the prompt's colour faintly filled, edged in it */
+	box.x0 = (short)(start + box_x0);
+	box.x1 = (short)(start + box_x1);
+	middle = draw_unicode_string_capital_middle(cursor, L"");
+	box.y0 = (short)(middle - half + 1);
+	box.y1 = (short)(middle + half);
+	fill = ((pixel32)((color >> 24) * 3 / 10) << 24) | (color & 0x00FFFFFFUL);
+	key_cap_shape(&box, fill, color);
 	text_bounds.x0 = bounds->x0;
 	rasterizer_draw_unicode_string(&text_bounds, NULL, NULL, 0, text);
 	bounds->y0 = cursor->y0;
-	/* (the text that follows starts past the cap) */
-	cursor->x0 = (short)(box.x1 - inset + 1);
+	/* (the text that follows starts past the cap and its gap) */
+	cursor->x0 = (short)(start + after);
 	return TRUE;
 }
 
