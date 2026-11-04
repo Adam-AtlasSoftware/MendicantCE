@@ -92,6 +92,7 @@ symbols in this file:
 #include "models/models.h"
 #include "structure_culling.h" /* port: port/linux/game/structure_culling.c */
 #include "panini.h" /* port: port/linux/game/panini.c */
+#include "near_clip.h" /* port: port/linux/game/near_clip.c */
 
 #ifdef HALO_VR
 #include "../../port/linux/src/vr.h"
@@ -750,6 +751,18 @@ static void render_player_frame(
 			sizeof(rectangle2d)));
 
 	render_camera_build_frustum_bounds(camera, &frustum_bounds);
+	/* port: a wide field of view's near plane brought nearer, so that its
+	corners do not cut a wall beside the player (port/linux/game/near_
+	clip.c), from the whole view's bounds (not a screenshot's tile); the
+	VR mode's eyes keep their own */
+#ifdef HALO_VR
+	if (!render_vr_eye_pass && !render_vr_scope_pass)
+#endif
+	{
+		camera->z_near = render_near_clip_distance(camera, &frustum_bounds);
+		window->rasterizer_camera.z_near =
+			render_near_clip_distance(&window->rasterizer_camera, &frustum_bounds);
+	}
 
 	if (screenshot_combined_index != NULL)
 	{

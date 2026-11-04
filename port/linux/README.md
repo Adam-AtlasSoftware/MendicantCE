@@ -2050,6 +2050,16 @@ only with PANINI PROJECTION on (150 while it is off; below).
   it, while the camera flies back to the head), and turns back from where
   it is if the player gets in or out again on the way. Death, cinematics
   and scripted cameras keep their own view.
+- The near clip plane comes nearer at a wide view (`game/near_clip.c`). The
+  game clips the world at a plane 0.0625 world units ahead of the eye,
+  which at the sides of a wide view is nearly beside it: from about 145
+  degrees, a wall the player stands against (0.2 units away, the player's
+  collision radius) was cut along a line near the screen's side. The plane
+  is brought in until its corners, the view's as drawn (split screen's too),
+  are 0.2 units from the eye, so nothing that far or farther is clipped at
+  any angle. The stock view, and any up to about 138 degrees at 16:9, keep
+  the game's plane and are drawn exactly as before; the weapon keeps its
+  own.
 - A scope's zoom levels keep their stock view: the extra width fades out as
   the zoom comes in. A view narrower than the stock one narrows the zoom
   too.
