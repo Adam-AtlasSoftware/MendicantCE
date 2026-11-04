@@ -1,9 +1,9 @@
 /*
 HOST_AUDIO_ROUTE.C
 
-What the system's sound plays on, for audio.spatial "auto"
-(port/linux/src/dsound_sdl.c: the world's sounds through the HRTF on
-headphones, panned on speakers). The guest asks each frame
+What the system's sound plays on, for the sound's log
+(port/linux/src/dsound_sdl.c: audio.spatial "auto" is the HRTF on any
+stereo output, as the Xbox's, so it no longer depends on it). The guest asks each frame
 (host_audio_headphones), which reads what a thread of the host's own last
 found: it looks once a second, so that asking costs the game nothing and a
 slow answer from the system (a sound server, COM) never holds it. Each
@@ -150,7 +150,7 @@ static int route_detect(void)
 	if (named >= 0)
 		return named;
 	/* (AirPods and the other Bluetooth headphones; a Bluetooth speaker is
-	one by name, else audio.spatial "speakers") */
+	one by name) */
 	if (transport == kAudioDeviceTransportTypeBluetooth || transport == kAudioDeviceTransportTypeBluetoothLE)
 		return 1;
 	return 0;

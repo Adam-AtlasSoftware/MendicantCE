@@ -504,12 +504,11 @@ static const struct config_setting config_settings[] =
 		"from the player, as the Xbox's DirectSound did (a Banshee passing by);\n"
 		"false keeps their pitch." },
 	{ "audio.spatial", _config_string, "\"auto\"", "HALO_AUDIO_SPATIAL", _environment_value, _platform_all,
-		"How the world's sounds are placed around you: \"headphones\" through a\n"
-		"model of a head (HRTF), each from its direction, ahead, behind, above or\n"
-		"below, as the Xbox's 3D audio was; \"speakers\" panned left and right;\n"
-		"\"auto\" the first on headphones (wired, Bluetooth, AirPods, a USB\n"
-		"headset, the Steam Deck's jack) and the second otherwise, changing as\n"
-		"the system's output does. The menus, music and HUD are not placed.\n"
+		"How the world's sounds are placed around you: \"auto\" and\n"
+		"\"headphones\" through a model of a head (HRTF), each from its\n"
+		"direction, ahead, behind, above or below, as the Xbox's 3D audio was on\n"
+		"any stereo output, speakers or headphones; \"speakers\" panned left and\n"
+		"right. The menus, music and HUD are not placed.\n"
 		"The VR mode keeps vr.hrtf; 5.1 is always panned." },
 	{ "audio.resampler", _config_string, "\"sinc\"", "HALO_AUDIO_RESAMPLER", _environment_value, _platform_all,
 		"How sounds are converted to the output's rate: \"sinc\" with a\n"

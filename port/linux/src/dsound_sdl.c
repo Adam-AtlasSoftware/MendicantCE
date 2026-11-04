@@ -22,11 +22,11 @@ resampling) and applies:
 	  game gives the voice and the listener (doppler).
 3D voices also send to an I3DL2 reverb of the environment the listener is in
 (reverb). Cones are not modelled (no sound of the maps has one). A look-ahead
-limiter keeps the sum under full scale (limit). On headphones (audio.spatial:
-"auto" asks the host what the sound plays on, spatial_hrtf), and in the VR
-mode with vr.hrtf, a mono 3D voice goes to each ear through a model of a head
-instead of the pan (hrtf), as the Xbox's DirectSound put its 3D voices through
-its HRTF; 2D voices (the menus, the music, the HUD) are as they were.
+limiter keeps the sum under full scale (limit). On stereo (audio.spatial:
+"auto", as the Xbox on stereo; spatial_hrtf), and in the VR mode with
+vr.hrtf, a mono 3D voice goes to each ear through a model of a head instead
+of the pan (hrtf), as the Xbox's DirectSound put its 3D voices through its
+HRTF; 2D voices (the menus, the music, the HUD) are as they were.
 
 The output is stereo or 5.1 (audio.channels; "auto": 5.1 on a device of
 six channels or more, as the host's SDL reports it, output_channels_choose).
@@ -122,8 +122,8 @@ the pinna behind (its frequency and its depth) */
 #define HRTF_NOTCH_Q 2.0f
 #define HRTF_REAR_FREQUENCY 2500.0f
 #define HRTF_REAR_DEPTH 0.55f
-/* the crossfade between the pan and the HRTF when the choice changes (the
-headphones plugged in or out, audio.spatial): 100 ms */
+/* the crossfade between the pan and the HRTF when the choice changes
+(audio.spatial): 100 ms */
 #define HRTF_FADE_FRAMES 4800
 #if defined(__GNUC__) || defined(__clang__)
 #define RESAMPLER_ALIGNED __attribute__((aligned(16)))
@@ -333,7 +333,7 @@ static volatile BOOL sound_on = TRUE;
 static float sound_gain = 1.0f;
 /* audio.doppler */
 static BOOL doppler_enabled = TRUE;
-/* whether mono 3D voices go through the HRTF: on headphones, audio.spatial;
+/* whether mono 3D voices go through the HRTF: on stereo, audio.spatial;
 in the VR mode, vr.hrtf (spatial_hrtf, DirectSoundDoWork) */
 static BOOL hrtf_enabled = FALSE;
 /* 2 or 6 (audio.channels), chosen when the device first opens; the game
@@ -586,7 +586,7 @@ static float doppler_smoothed(struct sdl_stream *stream, unsigned long frames)
 
 /* ---------- the HRTF
 
-On headphones (audio.spatial, spatial_hrtf), and in the VR mode (vr.hrtf), a
+On stereo (audio.spatial, spatial_hrtf), and in the VR mode (vr.hrtf), a
 mono 3D voice reaches each ear as it would a head's, from its direction (the
 listener's: the camera's, or in VR the head as it is tracked,
 sound_manager.c refresh_listener), rather than panned between them: a
@@ -614,10 +614,10 @@ centres one within its minimum distance. The parameters are ramped across
 each mix, as the gains are: a turn of the head moves the sound smoothly
 from ear to ear, with no step. Distance, the direct path's obstruction and
 occlusion (its low pass), the room send and the Doppler shift are the
-pan's, before the head's filters. When the choice changes (headphones
-plugged in or out mid-game), each voice crossfades between the pan and the
-HRTF over HRTF_FADE_FRAMES, both running meanwhile: no click. Speakers,
-and 5.1, keep the pan (a head's filters are for a pair of ears). */
+pan's, before the head's filters. When the choice changes (audio.spatial
+set mid-game), each voice crossfades between the pan and the HRTF over
+HRTF_FADE_FRAMES, both running meanwhile: no click. "speakers", and 5.1,
+keep the pan. */
 
 static struct
 {
@@ -790,21 +790,25 @@ static void hrtf_process(struct sdl_stream *stream, const float *direct, float *
 	memcpy(stream->hrtf_shadow, shadow, sizeof(shadow));
 }
 
-/* audio.spatial ("auto", "headphones" or "speakers"; another is "auto")
-and what the host says the sound plays on (headphones: 1 headphones, 0
-speakers, -1 unknown, host_audio_headphones): whether 3D voices go through
-the HRTF. Unknown is speakers: the pan is right for both, the HRTF only
-for headphones. In the VR mode, vr.hrtf alone, as before (the headset's
-speakers are at the ears) */
-static BOOL spatial_hrtf(const char *setting, int headphones, BOOL vr_running, BOOL vr_hrtf)
+/* audio.spatial ("auto", "headphones" or "speakers"; another is "auto"):
+whether 3D voices go through the HRTF. "auto" is the Xbox's own way, the
+HRTF on any stereo output: the game asks DirectSound for its full HRTF
+(DirectSoundUseFullHRTF, sound_dsound_xbox.c) whatever the dashboard's
+speaker setting, and an Xbox set to stereo played its 3D voices through it
+to the television's speakers too, with no crosstalk cancellation after it
+(the effects image's crosstalk effect, a canceller of 11-frame delay and a
+one-pole low pass, would lift the sides' difference below 600 Hz by up to 12
+dB; an Xbox capture's is 7 to 11 dB under the sum, as the HRTF's alone, so
+it passes stereo through). A capture of an Xbox on stereo has the HRTF's
+decorrelated high frequencies (side over middle -1 dB at 4 to 8 kHz, the
+ears' coherence 0.15), where the pan has almost none (-15 dB, 0.94).
+"speakers" pans instead. In the VR mode, vr.hrtf alone, as before (the
+headset's speakers are at the ears) */
+static BOOL spatial_hrtf(const char *setting, BOOL vr_running, BOOL vr_hrtf)
 {
 	if (vr_running)
 		return vr_hrtf;
-	if (!strcmp(setting, "headphones"))
-		return TRUE;
-	if (!strcmp(setting, "speakers"))
-		return FALSE;
-	return headphones > 0;
+	return strcmp(setting, "speakers") != 0;
 }
 
 /* the gains of a 3D voice to the left and right (the pan's), and the room
@@ -3936,13 +3940,13 @@ VOID WINAPI DirectSoundDoWork(void)
 	vr_running = halo_vr_running() != 0;
 	vr_hrtf = hrtf_setting;
 #endif
-	/* the HRTF on headphones, the pan on speakers (audio.spatial), each
-	frame: the host keeps what the sound plays on, and the mixer crossfades
-	each voice from one to the other as it changes */
+	/* the HRTF, or the pan (audio.spatial), each frame: the mixer
+	crossfades each voice from one to the other as it changes; what the
+	host says the sound plays on is logged */
 	headphones = host_audio_headphones();
 	/* (5.1 is panned around its speakers whatever audio.spatial says: the
 	HRTF is for a pair of ears) */
-	hrtf_enabled = output_channels != 6 && spatial_hrtf(spatial_setting, headphones, vr_running, vr_hrtf);
+	hrtf_enabled = output_channels != 6 && spatial_hrtf(spatial_setting, vr_running, vr_hrtf);
 	if (headphones != logged_headphones || hrtf_enabled != logged_hrtf)
 	{
 		logged_headphones = headphones;
