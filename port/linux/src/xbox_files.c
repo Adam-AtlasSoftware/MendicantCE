@@ -1363,15 +1363,20 @@ from the maps folder, and the game finds a slot by the name in its header.
 The Xbox's disc never changed under it; a maps folder can (a modded map,
 another region's, a corrected file), so the slot's copy remembers the size
 and modification time of the file it came from, in z:\cacheNNN.source, and
-a slot whose map file is not that one any more is not used. */
+a slot whose map file is not that one any more is not used. It remembers
+too when its map was last played (0: never; copied by the menus' pictures'
+pass, or ahead), so that the cache gives up the least useful map first for
+room (cache_files_windows.c's cached_map_files_least_useful), from one run
+to the next. A file of the first version (no time) is a map never played. */
 
 /* (cache_files_windows.c's NUMBER_OF_CACHED_MAP_FILES) */
-#define MAXIMUM_CACHE_SLOT_SOURCES 6
+#define MAXIMUM_CACHE_SLOT_SOURCES HALO_PORT_CACHED_MAP_FILES
 
 struct cache_slot_source
 {
 	BOOL known;
 	posix_ulong size_low, size_high, seconds, nanoseconds;
+	unsigned long played;
 };
 
 static struct cache_slot_source cache_slot_sources[MAXIMUM_CACHE_SLOT_SOURCES];
@@ -1404,7 +1409,8 @@ static BOOL cache_slot_source_stat(const char *map_path, struct cache_slot_sourc
 void cache_slot_source_load(short slot)
 {
 	struct cache_slot_source *source;
-	unsigned long size_low, size_high, seconds, nanoseconds;
+	unsigned long size_low, size_high, seconds, nanoseconds, played = 0;
+	int version = 0;
 	char path[1024];
 	FILE *file;
 
@@ -1416,15 +1422,40 @@ void cache_slot_source_load(short slot)
 	file = fopen(path, "rb");
 	if (!file)
 		return;
-	if (fscanf(file, "openh1-cache-source 1 %lu %lu %lu %lu", &size_low, &size_high, &seconds, &nanoseconds) == 4)
+	if (fscanf(file, "openh1-cache-source %d %lu %lu %lu %lu", &version, &size_low, &size_high, &seconds,
+			&nanoseconds) == 5 &&
+		(version == 1 || (version == 2 && fscanf(file, " %lu", &played) == 1)))
 	{
 		source->known = TRUE;
 		source->size_low = size_low;
 		source->size_high = size_high;
 		source->seconds = seconds;
 		source->nanoseconds = nanoseconds;
+		source->played = played;
 	}
 	fclose(file);
+}
+
+/* (the slot's source known) its file written: FALSE if it was not */
+static BOOL cache_slot_source_write(short slot)
+{
+	const struct cache_slot_source *source = &cache_slot_sources[slot];
+	char path[1024];
+	BOOL written;
+	FILE *file;
+
+	cache_slot_source_path(slot, path, sizeof(path));
+	file = fopen(path, "wb");
+	if (!file)
+		return FALSE;
+	written = fprintf(file, "openh1-cache-source 2 %lu %lu %lu %lu %lu\n", (unsigned long)source->size_low,
+		(unsigned long)source->size_high, (unsigned long)source->seconds, (unsigned long)source->nanoseconds,
+		source->played) >= 0;
+	if (fclose(file) != 0)
+		written = FALSE;
+	if (!written)
+		remove(path);
+	return written;
 }
 
 void cache_slot_source_forget(short slot)
@@ -1441,8 +1472,6 @@ void cache_slot_source_forget(short slot)
 void cache_slot_source_record(short slot, const char *map_path)
 {
 	struct cache_slot_source *source;
-	char path[1024];
-	FILE *file;
 
 	if (slot < 0 || slot >= MAXIMUM_CACHE_SLOT_SOURCES)
 		return;
@@ -1450,20 +1479,22 @@ void cache_slot_source_record(short slot, const char *map_path)
 	source = &cache_slot_sources[slot];
 	if (!cache_slot_source_stat(map_path, source))
 		return;
-	cache_slot_source_path(slot, path, sizeof(path));
-	file = fopen(path, "wb");
-	if (!file)
-	{
+	if (!cache_slot_source_write(slot))
 		source->known = FALSE;
+}
+
+void cache_slot_source_played(short slot)
+{
+	if (slot < 0 || slot >= MAXIMUM_CACHE_SLOT_SOURCES || !cache_slot_sources[slot].known)
 		return;
-	}
-	if (fprintf(file, "openh1-cache-source 1 %lu %lu %lu %lu\n", (unsigned long)source->size_low,
-		(unsigned long)source->size_high, (unsigned long)source->seconds, (unsigned long)source->nanoseconds) < 0)
-		source->known = FALSE;
-	if (fclose(file) != 0)
-		source->known = FALSE;
-	if (!source->known)
-		remove(path);
+	cache_slot_sources[slot].played = (unsigned long)time(NULL);
+	if (!cache_slot_source_write(slot))
+		cache_slot_sources[slot].known = FALSE;
+}
+
+unsigned long cache_slot_source_played_time(short slot)
+{
+	return slot >= 0 && slot < MAXIMUM_CACHE_SLOT_SOURCES ? cache_slot_sources[slot].played : 0;
 }
 
 int cache_slot_source_matches(short slot, const char *map_path)

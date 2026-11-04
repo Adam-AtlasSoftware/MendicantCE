@@ -310,6 +310,21 @@ void cache_slot_source_load(short slot);
 void cache_slot_source_record(short slot, const char *map_path);
 void cache_slot_source_forget(short slot);
 int cache_slot_source_matches(short slot, const char *map_path);
+/* ... and when a slot's map was last played (seconds; 0: never, copied
+by the menus' pictures' pass or ahead), kept with it: the cache's least
+useful map is given up first for room (cache_files_windows.c) */
+void cache_slot_source_played(short slot);
+unsigned long cache_slot_source_played_time(short slot);
+/* the cache files' budget (port/linux/src/map_cache.c): what they may take
+of the disk, from the bytes they take now and the least they need; and a
+copy's decompression buffers of its own (NULL: none) */
+unsigned long long map_cache_budget(unsigned long long cache_bytes, unsigned long long least);
+void *map_cache_copy_buffer(long size);
+/* the maps copied into the cache ahead (port/linux/game/map_cache_prefill.c):
+once a frame (main_loop) */
+void map_cache_prefill_update(void);
+/* (port/linux/game/menu_pictures_render.c) the menus' pictures' pass runs */
+int menu_pictures_preparing(void);
 /* the deflection of a stick (0 the left, 1 the right) read as none, of
 32767: input.left_stick_dead_zone and input.right_stick_dead_zone, else the
 game's own (port/linux/src/xinput_sdl.c) */

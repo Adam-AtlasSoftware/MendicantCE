@@ -183,6 +183,15 @@ boolean cache_files_precache_map_begin(
 /* port: a map's checksum as the precache would copy it; 0 if it would not */
 unsigned long cache_files_map_copyable_checksum(
 	char const *map_name);
+/* port: the bytes a copy of a map into the cache would take without giving
+up another's, 0 if one is held or there is no room (port/linux/game/
+map_cache_prefill.c); the bytes the cache takes, its budget, its maps */
+long cache_files_map_prefill_size(
+	char const *map_name);
+void cache_files_cache_usage(
+	unsigned long long *bytes,
+	unsigned long long *budget,
+	long *maps);
 
 void cache_file_promote_read(
 	short request_index);
