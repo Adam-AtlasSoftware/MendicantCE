@@ -129,7 +129,8 @@ static long world_scene_fan(
 					positions[count * 9 + vertex * 3 + 1] = point->y;
 					positions[count * 9 + vertex * 3 + 2] = point->z;
 				}
-				materials[count] = surface->material_index;
+				if (materials)
+					materials[count] = surface->material_index;
 			}
 			count++;
 		}
@@ -203,6 +204,17 @@ int world_scene_static_triangles(short bsp_index, struct world_scene_triangles *
 	triangles->count = count;
 	world_scene_bounds(count, triangles->positions, triangles->bounds);
 	return TRUE;
+}
+
+long world_scene_collision_fan(void const *collision_bsp, float *positions)
+{
+	struct collision_bsp const *bsp = collision_bsp;
+
+	if (!bsp || !bsp->surfaces.address || !bsp->edges.address || !bsp->vertices.address)
+		return 0;
+	return world_scene_fan((struct collision_surface const *)bsp->surfaces.address, bsp->surfaces.count,
+		(struct collision_edge const *)bsp->edges.address, bsp->edges.count,
+		(struct collision_vertex const *)bsp->vertices.address, bsp->vertices.count, positions, NULL);
 }
 
 void world_scene_triangles_free(struct world_scene_triangles *triangles)

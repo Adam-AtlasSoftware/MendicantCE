@@ -50,6 +50,9 @@ for it, XGPU_METAL_COMBINER_TEXTURE_3D + 5, which is a cube stage's */
 #define XGPU_METAL_TEXTURE_WORLD_SDF 5
 /* (and its table of cells, past it: 6 is no stage's, nor a combiner's place) */
 #define XGPU_METAL_TEXTURE_WORLD_SDF_TABLE 6
+/* (and the static scenery's pages of the level's occlusion: 7 is no
+stage's, nor a combiner's place, whose 3D ones begin at 8) */
+#define XGPU_METAL_TEXTURE_WORLD_AO_SCENERY 7
 #define XGPU_METAL_BUFFER_WORLD_AO 23
 
 #endif

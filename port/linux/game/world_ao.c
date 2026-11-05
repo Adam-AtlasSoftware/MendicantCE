@@ -43,7 +43,9 @@ static struct
 	int window;
 	struct world_proxy proxies[WORLD_PROXY_MAXIMUM_PER_WINDOW];
 	long owners[WORLD_PROXY_MAXIMUM_PER_WINDOW];
-	long count;
+	/* (the dynamic objects' first, dynamic_count of them; the static
+	scenery's the field and its pages hold after) */
+	long count, dynamic_count;
 	struct world_sdf_volume const *volume;
 	float fade;
 	/* the proxies' grid (world_ao_grid; its cells allocated once) */
@@ -305,14 +307,14 @@ void world_ao_window_begin(short local_player_index, short rasterizer_target, fl
 		world_sdf_frame_prepared();
 		return;
 	}
-	world_ao.count = 0;
+	world_ao.count = world_ao.dynamic_count = 0;
 	world_ao.volume = NULL;
 	world_ao.fade = 0.0f;
 	if (!world_ao_test_window(camera_position))
 	{
 		if (mode & WORLD_AO_PROXIES)
 			world_ao.count = world_proxies_window(camera_position, world_ao.proxies, world_ao.owners,
-				WORLD_PROXY_MAXIMUM_PER_WINDOW);
+				WORLD_PROXY_MAXIMUM_PER_WINDOW, &world_ao.dynamic_count);
 		/* (world_sdf_current's header is its volume's first member: the
 		volume itself, for the objects' references) */
 		if (mode & WORLD_AO_FIELD)
@@ -321,6 +323,9 @@ void world_ao_window_begin(short local_player_index, short rasterizer_target, fl
 	}
 	if (world_ao.count < 0)
 		world_ao.count = 0;
+	/* (debug.world_ao_test's shapes: every one an object's) */
+	if (world_ao.dynamic_count <= 0 || world_ao.dynamic_count > world_ao.count)
+		world_ao.dynamic_count = world_ao.count;
 	world_ao_field_place(world_ao.volume ? &world_ao.volume->header : NULL, field);
 	memset(parameters, 0, sizeof(parameters));
 	parameters[0][0] = WORLD_AO_STRENGTH_OBJECTS;
@@ -328,6 +333,7 @@ void world_ao_window_begin(short local_player_index, short rasterizer_target, fl
 	parameters[0][2] = world_ao.fade;
 	parameters[0][3] = (float)world_ao.count;
 	parameters[1][0] = WORLD_AO_REFERENCE_WEIGHT;
+	parameters[1][1] = (float)world_ao.dynamic_count;
 	/* (the proxies' grid about the camera: each pixel computes those that
 	can reach its cell alone. Its 16 KB of cells on the heap, made once) */
 	if (!world_ao.cells)
@@ -352,7 +358,7 @@ void world_ao_window_end(void)
 void world_ao_object_begin(long object_index)
 {
 	struct world_scene_instance const *instance;
-	int owner = WORLD_AO_OWNER_NONE;
+	int owner = WORLD_AO_OWNER_NONE, baked;
 	float reference = 1.0f;
 	long index;
 
@@ -370,11 +376,23 @@ void world_ao_object_begin(long object_index)
 				break;
 			}
 		}
-		instance = world_ao.volume && world_ao.fade > 0.0f ? world_scene_instance_find(object_index) : NULL;
+		/* (a static scenery placement the field holds: its own geometry in the
+		field over where its light was sampled, which its light never held) */
+		baked = index < world_ao.count && index >= world_ao.dynamic_count;
+		instance = world_ao.volume && world_ao.fade > 0.0f && !baked ? world_scene_instance_find(object_index) : NULL;
 		if (instance)
 			reference = world_ao_reference(world_ao.volume, instance->lighting_point);
 	}
 	halo_world_ao_object(owner, reference);
+}
+
+void world_ao_lightmap_begin(void const *lightmap_bitmap)
+{
+	/* (the structure's: none of the objects' shapes its own; its page's
+	layer where the lightmap draws take their reference, or none) */
+	if (!world_ao.window)
+		return;
+	halo_world_ao_object(WORLD_AO_OWNER_NONE, (float)world_sdf_scenery_layer(lightmap_bitmap));
 }
 
 void world_ao_first_person(int drawing)

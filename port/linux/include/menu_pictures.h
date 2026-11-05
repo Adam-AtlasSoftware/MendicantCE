@@ -195,6 +195,8 @@ void menu_pictures_frame(int main_menu_loaded);
 shown, under the loading screen): the main loop draws only the frames kept
 (menu_pictures_frame_drawn) */
 int menu_pictures_preparing(void);
+/* the start-up pass's seconds this run, to its main menu shown (0: none) */
+double menu_pictures_pass_seconds(void);
 int menu_pictures_frame_drawn(void);
 /* the maps loaded now are the pass's, drawn as they shipped: no mod is
 played on them (mods.c), so a picture never shows a mod, and turning mods

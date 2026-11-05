@@ -288,6 +288,9 @@ int menu_pictures_textures_wait(void)
 
 /* ---------- the pictures rendered */
 
+/* the last pass's seconds, to the main menu shown (0: none this run) */
+static double prepare_seconds;
+
 static unsigned long long prepare_now(
 	void)
 {
@@ -822,7 +825,8 @@ static void prepare_update(
 			config_picture_view(FALSE);
 			prepare.state = _prepare_off;
 			prepare.drawn = 0;
-			platform_log("menu pictures: the main menu after %.2f s", (double)(prepare_now() - prepare.began) / 1e9);
+			prepare_seconds = (double)(prepare_now() - prepare.began) / 1e9;
+			platform_log("menu pictures: the main menu after %.2f s", prepare_seconds);
 		}
 		break;
 	default:
@@ -879,6 +883,12 @@ void menu_pictures_recording(
 	prepare_screen();
 	if (fraction >= 1.0f)
 		prepare.recorded = 0.0f;
+}
+
+double menu_pictures_pass_seconds(
+	void)
+{
+	return prepare_seconds;
 }
 
 int menu_pictures_begin(

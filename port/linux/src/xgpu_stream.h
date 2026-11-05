@@ -435,11 +435,14 @@ struct xgpu_stream_pipeline_stand_in
 the field (a width * height * depth volume, x fastest:
 xgpu_backend_world_ao_field): its table of cells (part 0, four bytes a
 texel: an atlas brick's x, y, z and the cell's kind, read as RGBA8) or its
-atlas of bricks (part 1, signed bytes: R8 snorm), its bytes at data (size:
-width * height * z_count * the texel's); width 0 releases the field, both
-parts */
+atlas of bricks (part 1, signed bytes: R8 snorm), or the static
+scenery's pages of the level's occlusion (part 2, bytes, R8 unorm: a 2D
+array, depth its layers, sent before the table), its bytes at data (size:
+width * height * z_count * the texel's); width 0 releases the field, every
+part */
 #define XGPU_STREAM_WORLD_AO_TABLE 0
 #define XGPU_STREAM_WORLD_AO_ATLAS 1
+#define XGPU_STREAM_WORLD_AO_SCENERY 2
 #define XGPU_STREAM_WORLD_AO_TEXEL(part) ((part) == XGPU_STREAM_WORLD_AO_TABLE ? 4u : 1u)
 struct xgpu_stream_world_ao_field
 {

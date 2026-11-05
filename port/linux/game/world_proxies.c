@@ -68,6 +68,8 @@ struct world_proxies_candidate
 	struct world_proxy proxy;
 	long owner;
 	float distance;
+	/* (a static scenery placement the field and its pages hold) */
+	int baked;
 };
 
 /* ---------- globals */
@@ -1230,8 +1232,32 @@ static void view_proxy(struct world_proxy const *proxy)
 	}
 }
 
+/* whether a shape goes before a candidate kept: the dynamic objects'
+first, then the nearer */
+static int candidate_before(int baked, float distance, struct world_proxies_candidate const *candidate)
+{
+	return baked != candidate->baked ? !baked : distance < candidate->distance;
+}
+
+long world_proxies_place(long definition, struct world_proxies_frame const *frames, short node_count,
+	struct world_proxy *proxies, long maximum)
+{
+	struct world_proxy_set const *set = world_proxies_definition(definition);
+	long count = 0;
+	short shape_index;
+
+	for (shape_index = 0; set && node_count > 0 && shape_index < set->count && count < maximum; shape_index++)
+	{
+		struct world_proxy_shape const *shape = &set->shapes[shape_index];
+
+		shape_place(shape, &frames[shape->node_index >= 0 && shape->node_index < node_count ? shape->node_index : 0],
+			&proxies[count++]);
+	}
+	return count;
+}
+
 long world_proxies_window(float const camera_position[3], struct world_proxy *proxies, long *owners,
-	long maximum)
+	long maximum, long *dynamic_count)
 {
 	float planes[4][4];
 	int frustum;
@@ -1239,6 +1265,7 @@ long world_proxies_window(float const camera_position[3], struct world_proxy *pr
 
 	if (maximum > WORLD_PROXY_MAXIMUM_PER_WINDOW)
 		maximum = WORLD_PROXY_MAXIMUM_PER_WINDOW;
+	*dynamic_count = 0;
 	if (maximum <= 0 || !proxies || !owners)
 		return 0;
 	frustum = world_proxies_source_frustum(planes);
@@ -1273,25 +1300,31 @@ long world_proxies_window(float const camera_position[3], struct world_proxy *pr
 			}
 			if (!seen)
 				continue;
-			/* the nearest kept, nearest first */
+			/* the nearest kept, nearest first: the dynamic objects' first, the
+			static scenery's the field holds after them (world_sdf_scenery_baked:
+			the lightmap pass reads its pages, the objects the field, and only
+			a page without a layer walks them) */
 			sub3(centre, camera_position, offset);
 			distance = length3(offset);
-			if (count == maximum && distance >= world_proxies.candidates[count - 1].distance)
+			if (count == maximum && !candidate_before(instance->baked, distance, &world_proxies.candidates[count - 1]))
 				continue;
 			i = count < maximum ? count++ : count - 1;
-			for (; i > 0 && world_proxies.candidates[i - 1].distance > distance; i--)
+			for (; i > 0 && candidate_before(instance->baked, distance, &world_proxies.candidates[i - 1]); i--)
 				world_proxies.candidates[i] = world_proxies.candidates[i - 1];
 			world_proxies.candidates[i].proxy = proxy;
 			world_proxies.candidates[i].owner = instance->id;
 			world_proxies.candidates[i].distance = distance;
+			world_proxies.candidates[i].baked = instance->baked;
 		}
 	}
 	/* each owner's slot: the order its first shape has in the window (so
 	the shader leaves an object's own shapes out: world_ao.c gives a draw
 	its object's slot, or -1) */
 	slots = 0;
+	*dynamic_count = 0;
 	for (i = 0; i < count; i++)
 	{
+		*dynamic_count += !world_proxies.candidates[i].baked;
 		proxies[i] = world_proxies.candidates[i].proxy;
 		owners[i] = world_proxies.candidates[i].owner;
 		for (j = 0; j < i && owners[j] != owners[i]; j++)

@@ -29,8 +29,9 @@ pure arithmetic in port/linux/game/world_sdf_bake.c).
 
 /* the cache's version: bumped whenever the bake or the format changes, so
 that every field is baked again (2: sparse bricks, within the placements'
-reach) */
-#define WORLD_SDF_VERSION 2
+reach; 3: the static scenery in the field, and its occlusion of the level
+in lightmap pages) */
+#define WORLD_SDF_VERSION 3
 /* the file's magic, "WSDF" */
 #define WORLD_SDF_MAGIC 0x46445357UL
 
@@ -66,6 +67,19 @@ enum
 	vehicles', units', items', devices' and the AI's) grown by this many
 	world units each way: where objects can be */
 	WORLD_SDF_PLACEMENTS_REACH = 32,
+	/* the static scenery's occlusion of the level (struct
+	world_sdf_scenery): the most bytes its pages take, the most and the
+	least texels along a page's side, the most lightmap pages a BSP has,
+	and the most placements baked */
+	WORLD_SDF_SCENERY_MAXIMUM_BYTES = 4 * 1024 * 1024,
+	WORLD_SDF_SCENERY_MOST_SIDE = 512,
+	WORLD_SDF_SCENERY_LEAST_SIDE = 16,
+	WORLD_SDF_SCENERY_MAXIMUM_PAGES = 1024,
+	WORLD_SDF_SCENERY_MAXIMUM_PLACEMENTS = 4096,
+	/* a page's layer where it has none: the lightmap pass walks the
+	static scenery's shapes itself there (no page: a lightmap missing, a
+	page whose texels two surfaces share) */
+	WORLD_SDF_SCENERY_NO_LAYER = -1,
 };
 
 /* a cell's kind (struct world_sdf_volume's cells[i][3]): far outside every
@@ -94,8 +108,9 @@ side. Its voxels' centres are at origin + voxel * (x y z), x from 0 to
 WORLD_SDF_BRICK * width (and y, z so); each holds the distance at its
 centre over range (127 = +range: outside; -127 = -range: inside solid).
 
-The cache file's header (little-endian, 64 bytes), followed by the cells
-(4 bytes each, x fastest, then y, then z) and then the bricks, deflated
+The cache file's header (little-endian, 72 bytes), followed by the cells
+(4 bytes each, x fastest, then y, then z), the bricks and the static
+scenery's part (struct world_sdf_scenery, scenery_bytes of it), deflated
 (zlib) as one stream; a CRC-32 of the header and the deflated bytes ends
 the file. Named <data>/world_sdf/<map name>_<bsp index>.wsdf */
 struct world_sdf_header
@@ -117,6 +132,36 @@ struct world_sdf_header
 	unsigned long bake_threads;
 	/* the bricks */
 	unsigned long brick_count;
+	/* the static scenery's part's bytes, and the milliseconds its pages
+	took of the bake */
+	unsigned long scenery_bytes;
+	unsigned long scenery_milliseconds;
+};
+
+/* a static scenery placement baked (its shapes in the level's pages, its
+collision geometry in the field): its definition (a tag index) and where it
+stands, which the window finds its object by (world_sdf_scenery_baked) */
+struct world_sdf_placement
+{
+	long definition;
+	float position[3];
+};
+
+/* the static scenery's occlusion of the level, in the BSP's lightmaps'
+space (docs/world-ao.md, "Static scenery"): for each of its lightmap pages,
+the layer of an array of width x height pages of bytes (255 none: the
+product of the static shapes' 1 - occlusion x fade at each texel's place
+and normal) that the lightmap pass reads at the lightmap's own coordinates,
+or WORLD_SDF_SCENERY_NO_LAYER; and the placements baked. Its part of the
+file: page_count, layer_count, width, height, placement_count (4 bytes
+each), each page's layer (2 bytes, signed), each placement (its definition,
+its position: 4 bytes each), then the layers' texels */
+struct world_sdf_scenery
+{
+	unsigned long page_count, layer_count, width, height, placement_count;
+	short *layers;
+	struct world_sdf_placement *placements;
+	unsigned char *texels;
 };
 
 /* a field in memory: its cells (width * height * depth, x fastest: a
@@ -129,6 +174,7 @@ struct world_sdf_volume
 	struct world_sdf_header header;
 	unsigned char (*cells)[WORLD_SDF_CELL_BYTES];
 	signed char *bricks;
+	struct world_sdf_scenery scenery;
 };
 
 /* ---------- prototypes (port/linux/game/world_sdf.c) */
@@ -161,6 +207,15 @@ int world_sdf_state(void);
 float world_sdf_fade(void);
 /* its header (NULL: none) */
 struct world_sdf_header const *world_sdf_current(void);
+/* whether an object of this definition standing here is a static scenery
+placement that the drawn field and its pages hold (the window's proxies
+put it apart: the lightmap pass reads its pages, the objects the field) */
+int world_sdf_scenery_baked(long definition, float const position[3]);
+/* the layer in the drawn field's pages of a page of the loaded BSP's
+lightmaps (its bitmap data, as the lightmap pass binds it), or
+WORLD_SDF_SCENERY_NO_LAYER (none drawn, not one of its pages, or none baked
+for it) */
+int world_sdf_scenery_layer(void const *lightmap_bitmap);
 
 /* ---------- the bake's pure arithmetic (port/linux/game/world_sdf_bake.c;
 tools/harness/tests/world_sdf.c) */
