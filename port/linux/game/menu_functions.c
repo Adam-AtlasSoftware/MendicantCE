@@ -2900,6 +2900,27 @@ static void hdr_display_show(struct widget_instance *list)
 	discord_text_set(value, text);
 }
 
+/* the GYRO row's panel while Steam Input has the controller (STEAM INPUT HAS
+IT: only its virtual controllers, which pass no gyroscope): how to turn it
+off for the game, on a Steam Deck (xinput_sdl.c's halo_steam_deck) or another
+computer's Steam (the others': FALSE) */
+int halo_steam_deck(void);
+
+static boolean gyro_found_panel(struct widget_instance *row, wchar_t const **help)
+{
+	static wchar_t words[SETTINGS_PANEL_TEXT_LENGTH];
+
+	if (!row->name || strcmp(row->name, "op_gyro_found") || halo_gyro_found() != 1)
+		return FALSE;
+	discord_widen(halo_steam_deck() ?
+		"Steam Input has the controls: it passes no gyro to OpenH1.|To aim with the Steam Deck's gyro: Steam > "
+		"OpenH1 > controller icon > Disable Steam Input, then start OpenH1 again." :
+		"Steam Input has the controller: it passes no gyro to OpenH1.|To aim with its gyro: in Steam, OpenH1's "
+		"Properties > Controller > Disable Steam Input, then start OpenH1 again.", words, SETTINGS_PANEL_TEXT_LENGTH);
+	*help = words;
+	return TRUE;
+}
+
 /* the DISPLAY PEAK row's panel: its value and words, the display's peak and
 SDR white now (the others': FALSE) */
 static boolean hdr_display_panel(struct widget_instance *row, wchar_t *value, wchar_t const **help)
@@ -3177,6 +3198,8 @@ static void settings_panel_show(struct widget_instance *list, short tab)
 		discord_account_panel(row, name, value, &help);
 		/* (the display's peak: its words of the display now) */
 		hdr_display_panel(row, value, &help);
+		/* (Gyro's STEAM INPUT HAS IT: how to turn it off) */
+		gyro_found_panel(row, &help);
 		/* (Profile's ABOUT: this build) */
 		about_panel(row, value, &help);
 		/* (Button Remapping's: a button being taken, a replacement asked) */

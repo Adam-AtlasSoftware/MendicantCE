@@ -6,9 +6,11 @@ Empty settings keep the profile preset and stock shortcuts.
 
 Choose Movement, Combat, General, Chat and Voice or Debug Camera on the SHOW row. Select an action, release
 the opening press, then press the desired button on that player's controller.
-All four D-pad directions and Back/Select are available. Start/Options and Escape
-cancel capture. Button names follow the detected controller family (Xbox,
-PlayStation, Switch). Stick axes, sensitivity and menu navigation keep their settings.
+All four D-pad directions and Back/Select are available, and the back paddles of a
+controller that has them (an Elite's P1 to P4, a DualSense Edge's, the Steam Deck's
+L4, L5, R4, R5 with Steam Input off): left and right step only through the paddles
+the controller has. Start/Options and Escape cancel capture. Button names follow the
+detected controller family (Xbox, PlayStation, Switch, Steam Deck). Stick axes, sensitivity and menu navigation keep their settings.
 
 Left/right also cycles assignments, including **UNBOUND**. The menu's X action
 (Square on PlayStation, Y on Switch) clears the selected action; keyboard Delete
@@ -135,7 +137,11 @@ camera raise, camera lower, cycle camera
 ```
 
 Entries are physical tokens: `south,east,west,north,rb,lb,lt,rt,ls,rs,dpad_up,
-dpad_down,dpad_left,dpad_right,back`, or `unbound`. South means A on Xbox, Cross on
+dpad_down,dpad_left,dpad_right,back,left_paddle,right_paddle,left_paddle2,right_paddle2`,
+or `unbound`. The paddles are SDL's left and right paddle 1 and 2 (an Elite's P3, P1,
+P4, P2; the Steam Deck's L4, R4, L5, R5): they are not the Xbox pad's, so only a custom
+layout's actions take them, and a prompt names an action on one in words ("L4") where
+the HUD has no icon for it (`controller_remap_prompt_text`). South means A on Xbox, Cross on
 PlayStation and B on Switch. Tokens must be unique within gameplay/communication
 and separately within Debug; `unbound` may repeat. Unbound saves remain distinct
 from an empty setting (profile defaults).

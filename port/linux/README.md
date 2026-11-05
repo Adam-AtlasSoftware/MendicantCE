@@ -202,7 +202,11 @@ Do the set-up in Desktop Mode:
    it: Execute). It opens a Konsole window, which shows what it does.
 3. When it asks where your game's maps are, select the disc image (`.iso`
    or `.xiso`) or the maps folder copied from the disc.
-4. Start OpenH1 from the library in Game Mode.
+4. When it asks whether to turn Steam Input off for OpenH1, select Yes:
+   Steam closes for a moment and opens again, and the game then reads the
+   Deck's controls itself, with gyro aiming and the back buttons (refer to
+   "Controls", below).
+5. Start OpenH1 from the library in Game Mode.
 
 Step 3 can be skipped: put the disc image in Downloads or on the SD card
 (in Game Mode too, with Steam's file transfer from another computer), and
@@ -250,6 +254,27 @@ Frame"):
   reads: Steam rewrites that file while it runs). Without
   `steamos-add-to-steam`, it says how to add it: in Steam, Games > Add a
   Non-Steam Game to My Library, OpenH1, Add Selected Programs.
+- Turns Steam Input off for the shortcut it has just added, if you say Yes
+  (`kdialog`; in a terminal, `[Y/n]`), so that the game reads the Deck's
+  controls itself. Steam keeps a game's Steam Input in
+  `~/.local/share/Steam/userdata/<user>/config/localconfig.vdf`, a text
+  file that it reads as it starts and writes over as it exits, as
+  `"UseSteamControllerConfig"` under `"UserLocalConfigStore"` > `"apps"` >
+  the shortcut's app ID (its `appid` in `shortcuts.vdf`, unsigned): `"0"`
+  off, `"1"` Steam's default, `"2"` on, as Steam's own Disable Steam Input
+  writes it. So `install.sh` asks Steam to close (`steam -shutdown`), waits
+  for it to (90 seconds at most), copies the file to
+  `localconfig.vdf.before-openh1`, adds `"UseSteamControllerConfig" "0"` for
+  the shortcut, and starts Steam again. Only what it adds changes: the rest
+  of the file stays byte for byte, the result is read back and compared
+  with the original, key by key, before it takes the file's place, and it
+  is written as Steam writes it (tabs, its quotes), so that Steam's own
+  writing of it is the same. It never does this for a shortcut Steam had
+  before (installing again, or an update), the VR build's, or an app ID
+  that already has a Steam Input setting (yours). Where it cannot (you say
+  No, Steam does not close, no `python3`, a `localconfig.vdf` it cannot
+  read), it changes nothing and says how to do it in Steam: in Game Mode,
+  Steam > OpenH1 > the controller icon > Disable Steam Input.
 - Gives the shortcut its library artwork, so that Game Mode shows the
   game's tile, banner and logo rather than a grey tile: the release's
   `share/openh1/steam/*.png` (`port/assets/steam`, drawn by
@@ -283,14 +308,30 @@ Frame"):
 - Screen: the game fills the screen without borders (`display.mode` empty,
   thus borderless). The 3D view and the HUD have the shape of the screen
   (16:10) and are drawn at its resolution; the menus are at the center.
-- Controls: Steam Input gives the game a virtual controller, which the game
-  operates as the controller of the Xbox. With the template that Steam selects
-  ("Gamepad With Joystick Trackpad"), the buttons, sticks and triggers have
-  the functions of the same controls on an Xbox controller, the right
-  trackpad operates as the right stick, and the back buttons (L4, L5, R4,
-  R5) do nothing until you assign them in the controller settings of the
-  game in Steam. With a template that makes a trackpad a mouse, the mouse
-  aims in the game and moves the pointer in the menus.
+- Controls, with Steam Input off for OpenH1 (as `install.sh` sets it, or
+  Steam > OpenH1 > the controller icon > Disable Steam Input, then start it
+  again): the game reads the Deck's controls itself, through SDL's Steam
+  Deck driver. The buttons, sticks and triggers are the Xbox controller's
+  (A, B, X, Y; L1 and R1 the bumpers, L2 and R2 the triggers, L3 and R3 the
+  stick clicks; View is Back, Menu is Start). The back buttons (L4, L5, R4,
+  R5) press what Settings > Controls > Controller > Button Remapping puts
+  on them (none until then), or hold the gyro (Gyro Button's Left Paddle
+  and Right Paddle are L4 and R4). The gyroscope aims (Gyro & Flick Stick:
+  Gyro Aiming), and Thumb on Stick aims with it only while your thumb rests
+  on the right stick, whose top senses touch. The left trackpad's click is
+  Gyro Button's Touchpad; the trackpads do nothing else. The Steam and
+  Quick Access (...) buttons stay Steam's. The prompts and Button Remapping
+  name the Deck's buttons (L1, R1, View, L4).
+- Controls, with Steam Input on (Steam's default, and the game's before
+  `install.sh` turned it off): Steam gives the game a virtual controller,
+  which the game operates as the controller of the Xbox, with no gyroscope
+  (Gyro & Flick Stick shows STEAM INPUT HAS IT, and how to turn it off).
+  With the template that Steam selects ("Gamepad With Joystick Trackpad"),
+  the buttons, sticks and triggers have the functions of the same controls
+  on an Xbox controller, the right trackpad operates as the right stick,
+  and the back buttons do nothing until you assign them in the controller
+  settings of the game in Steam. With a template that makes a trackpad a
+  mouse, the mouse aims in the game and moves the pointer in the menus.
 - Text: names of profiles and gametypes use the keyboard of the game, which
   the controller operates. The text fields of the menus (the name and the
   password in Server Setup, and the password of a game in the server
@@ -1115,8 +1156,8 @@ the setting for one start of the game. It has priority over the file.
 | `input.left_stick_dead_zone` | `-1` | `HALO_LEFT_STICK_DEAD_ZONE` | How far the controller's left stick moves before it moves the player, in percent of its travel (`0` to `50`). Lower for finer control, higher for a worn stick that drifts. `-1`: the game's own (9000 of 32767, about 27%). On Android, the touch controls' stick too. Settings > Controls > Controller > Stick Dead Zones sets it. |
 | `input.right_stick_dead_zone` | `-1` | `HALO_RIGHT_STICK_DEAD_ZONE` | The same for the right stick, which turns the view. |
 | `input.invert_look_horizontal` | `false` | `HALO_INVERT_LOOK_HORIZONTAL` | `true`: a controller's look turns the other way side to side (pushing the look stick right turns the view left), whichever stick looks (the profile's STICK LAYOUT) and for every controller on this device (Settings > Controls > Controller: INVERT TURNING). The profile's INVERT LOOK is up and down. The keyboard and mouse and the touch controls are not changed. |
-| `input.gyro_aim` | `"off"` | `HALO_GYRO_AIM` | Aiming by turning a controller that has a gyroscope (SDL's gamepad sensors: a DualSense, a DualShock 4, a Switch Pro Controller or Joy-Cons, a Steam Deck's own controls; Settings > Controls > Controller > Gyro & Flick Stick): `"off"`; `"on"`, always; `"hold"`, while `input.gyro_button` is held; `"pause"`, always but while it is held (to bring the controller back to the middle, a ratchet). The gyroscope turns the view as the mouse does, a direct turn added to the stick's after the aim assist's magnetism has acted on that, so the magnetism never slows or drags it (the bullets' autoaim stays, as for the mouse); zoomed in, it turns as the mouse does (`input.zoom_sensitivity`), and with `display.direct_camera` the drawn view takes what has come since the frame's input, as it does the mouse's. The sensors are on only while it is not `"off"` (or a calibration runs). It calibrates itself whenever the controller is held still for a second (its reading at rest, the bias, taken off), and Calibrate measures it put down. Under Steam Input the game is given Steam's virtual controller, which has no gyroscope: the log says so; turn Steam Input off for the game to aim with it here. Written from Jibb Smart's published descriptions of the methods (GyroWiki: player space, soft tiered smoothing, the flick stick); `port/linux/src/gyro_aim.c`. |
-| `input.gyro_button` | `"touchpad"` | `HALO_GYRO_BUTTON` | The button of `input.gyro_aim`'s `"hold"` and `"pause"`: `"touchpad"` (its click), `"left_paddle"`, `"right_paddle"` (the back buttons: an Elite's, a DualSense Edge's, the Steam Deck's L4 and R4), `"misc"` (Capture, Share or the microphone button), `"left_bumper"`, `"right_bumper"`, `"left_trigger"`, `"right_trigger"` (pulled half way), `"left_stick"`, `"right_stick"` (their clicks). It still does its own action too (Button Remapping can move that). |
+| `input.gyro_aim` | `"off"` | `HALO_GYRO_AIM` | Aiming by turning a controller that has a gyroscope (SDL's gamepad sensors: a DualSense, a DualShock 4, a Switch Pro Controller or Joy-Cons, a Steam Deck's own controls; Settings > Controls > Controller > Gyro & Flick Stick): `"off"`; `"on"`, always; `"hold"`, while `input.gyro_button` is held; `"pause"`, always but while it is held (to bring the controller back to the middle, a ratchet); `"touch"` (Thumb on Stick), while the thumb rests on the right stick, on a controller whose sticks sense touch (a Steam Deck's own controls and the Steam Controller: SDL's drivers give the touch as the gamepad's misc4 button; on another controller it turns nothing, and the log says so). The gyroscope turns the view as the mouse does, a direct turn added to the stick's after the aim assist's magnetism has acted on that, so the magnetism never slows or drags it (the bullets' autoaim stays, as for the mouse); zoomed in, it turns as the mouse does (`input.zoom_sensitivity`), and with `display.direct_camera` the drawn view takes what has come since the frame's input, as it does the mouse's. The sensors are on only while it is not `"off"` (or a calibration runs). It calibrates itself whenever the controller is held still for a second (its reading at rest, the bias, taken off), and Calibrate measures it put down. Under Steam Input the game is given Steam's virtual controller, which has no gyroscope: the log says so, and Gyro & Flick Stick's GYRO row shows STEAM INPUT HAS IT with how to turn it off (on a Steam Deck: Steam > OpenH1 > the controller icon > Disable Steam Input; `install.sh` turns it off for a new install, "Steam Deck"). Written from Jibb Smart's published descriptions of the methods (GyroWiki: player space, soft tiered smoothing, the flick stick); `port/linux/src/gyro_aim.c`. |
+| `input.gyro_button` | `"touchpad"` | `HALO_GYRO_BUTTON` | The button of `input.gyro_aim`'s `"hold"` and `"pause"`: `"touchpad"` (its click), `"left_paddle"`, `"right_paddle"` (the back buttons: an Elite's, a DualSense Edge's, the Steam Deck's L4 and R4), `"misc"` (Capture, Share or the microphone button; on a Steam Deck none, its Quick Access button being Steam's), `"left_bumper"`, `"right_bumper"`, `"left_trigger"`, `"right_trigger"` (pulled half way), `"left_stick"`, `"right_stick"` (their clicks). It still does its own action too (Button Remapping can move that). |
 | `input.gyro_sensitivity` | `2.0` | `HALO_GYRO_SENSITIVITY` | The view's degrees side to side for each degree the controller turns: `1` as far, `2` twice as far. |
 | `input.gyro_vertical_sensitivity` | `1.0` | `HALO_GYRO_VERTICAL_SENSITIVITY` | The gyroscope's up and down, times `input.gyro_sensitivity`. |
 | `input.gyro_space` | `"player"` | `HALO_GYRO_SPACE` | Which turn of the controller turns the view side to side: `"player"`, a turn about the up direction (the accelerometer's gravity, followed by the gyroscope), however the controller is held, flat, upright or between; `"local"`, a turn about the controller's own vertical axis, as if held flat. Up and down is the controller's pitch either way. |

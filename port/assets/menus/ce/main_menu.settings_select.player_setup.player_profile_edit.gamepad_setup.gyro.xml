@@ -63,7 +63,7 @@
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/gyro/gyro_aim_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/gyro/labels" string_index="2" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/gyro/gyro_aim_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="OFF|ALWAYS ON|HOLD TO AIM|HOLD TO PAUSE" setting="input.gyro_aim" values="off|on|hold|pause" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/gyro/gyro_aim_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="OFF|ALWAYS ON|HOLD TO AIM|HOLD TO PAUSE|THUMB ON STICK" setting="input.gyro_aim" values="off|on|hold|pause|touch" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
 		<on event="created" run="port setting load"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/gyro/op_gyro_button" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 120">
@@ -163,7 +163,7 @@
 		<string text=""/>
 		<string text=""/>
 		<string text="Whether a controller with a gyroscope is connected: a DualSense, a DualShock 4, a Switch Pro Controller or Joy-Cons, a Steam Deck.|With Steam Input, turn it off for OpenH1."/>
-		<string text="Aim by turning the controller, as you would a mouse; the stick still works too. Hold to Aim: only while the gyro button is held. Hold to Pause: except while it is held, to re-center.|No aim assist on the gyro's aim."/>
+		<string text="Aim by turning the controller, as you would a mouse; the stick still works too. Hold to Aim: only while the gyro button is held. Hold to Pause: except while it is held, to re-center. Thumb on Stick: while your thumb touches the right stick (a Steam Deck, a Steam Controller).|No aim assist on the gyro's aim."/>
 		<string text="The button that Hold to Aim and Hold to Pause hold. It still does its own action too: Button Remapping can move that."/>
 		<string text="How far the view turns for each degree you turn the controller: 1 as far, 2 twice as far. Press A, or click the number, to type a value.|Zoomed in: as Zoom Aim Speed sets."/>
 		<string text="How far the view turns up and down, of how far it turns side to side. 1X turns it as far."/>

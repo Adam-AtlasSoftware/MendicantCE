@@ -196,6 +196,45 @@ int main(void) {
 ''')
 
 
+
+def test_back_paddles_press_a_custom_layouts_actions(tmp_path):
+    """the back paddles (a Steam Deck's L4, R4, L5, R5: controller_remap_paddles) press a custom layout's actions,
+    each port's its own; the stock layout's never; capture takes one; their names round-trip"""
+    run_c(tmp_path, COMMON + POLICY + INPUT + source('port/linux/src/controller_remap_input.c') + r"""
+int main(void) {
+ XINPUT_GAMEPAD pad={0};unsigned char b[CONTROLLER_REMAP_ACTIONS],c[CONTROLLER_REMAP_ACTIONS];char text[512];int button=-1;
+ /* the stock layout: a paddle presses nothing */
+ controller_remap_paddles(0,15);controller_remap_input(0,&pad,1);
+ assert(!pad.wButtons && !pad.bAnalogButtons[0] && !pad.bAnalogButtons[2]);
+ controller_remap_profile(0,b);controller_remap_assign(b,PAD_JUMP,CONTROLLER_REMAP_PADDLE+1);
+ controller_remap_assign(b,PAD_SCOREBOARD,CONTROLLER_REMAP_PADDLE+2);
+ controller_remap_format(b,text,sizeof(text));config_write("input.controller_p1",text);
+ assert(strstr(text,"v3:right_paddle,") && strstr(text,",left_paddle2,"));
+ assert(controller_remap_parse(text,c) && !memcmp(b,c,sizeof(b)));
+ assert(!strcmp(controller_remap_button_name(CONTROLLER_REMAP_PADDLE,CONTROLLER_STEAM_DECK),"L4"));
+ assert(!strcmp(controller_remap_button_name(CONTROLLER_REMAP_PADDLE+3,CONTROLLER_STEAM_DECK),"R5"));
+ assert(!strcmp(controller_remap_button_name(CONTROLLER_REMAP_PADDLE+1,CONTROLLER_XBOX),"P1"));
+ assert(!strcmp(controller_remap_button_name(13,CONTROLLER_STEAM_DECK),"VIEW"));
+ assert(controller_remap_cycle(13,1)==CONTROLLER_REMAP_PADDLE && controller_remap_cycle(CONTROLLER_REMAP_PADDLE+3,1)==255);
+ /* (the layout's change waits for the paddles held across it to be let go) */
+ controller_remap_paddles(0,0);memset(&pad,0,sizeof(pad));controller_remap_input(0,&pad,1);
+ controller_remap_paddles(0,2);memset(&pad,0,sizeof(pad));controller_remap_input(0,&pad,1);
+ assert(pad.bAnalogButtons[0]==255 && !(pad.wButtons&XINPUT_GAMEPAD_BACK));
+ controller_remap_paddles(0,4);memset(&pad,0,sizeof(pad));controller_remap_input(0,&pad,1);
+ assert(!pad.bAnalogButtons[0] && (pad.wButtons&XINPUT_GAMEPAD_BACK));
+ /* (the pad's own A no longer jumps: it is the paddle's now) */
+ controller_remap_paddles(0,0);memset(&pad,0,sizeof(pad));pad.bAnalogButtons[0]=255;controller_remap_input(0,&pad,1);
+ assert(!pad.bAnalogButtons[0]);
+ /* another port's paddles are its own */
+ controller_remap_paddles(1,2);memset(&pad,0,sizeof(pad));controller_remap_input(0,&pad,1);assert(!pad.bAnalogButtons[0]);
+ /* capture: R5 taken */
+ menu[0]=1;controller_remap_capture_begin(0);memset(&pad,0,sizeof(pad));controller_remap_input(0,&pad,1);
+ controller_remap_paddles(0,8);controller_remap_input(0,&pad,1);
+ assert(controller_remap_capture_poll(&button)==1 && button==CONTROLLER_REMAP_PADDLE+3);
+ return 0;
+}
+""")
+
 def test_disabled_matches_original_sdl_merge(tmp_path):
     original = (ROOT / 'port/linux/src/xinput_sdl.c').read_text()
     run_c(tmp_path, COMMON + POLICY + INPUT + r'''
@@ -344,6 +383,8 @@ static int ui_widgets_active_for_local_player(short port){return menus;}
 short network_chat_controller(void){return (short)chat;}
 static long local_player_get_player_index(short viewport){return viewport==1?7:NONE;}
 #define player_get(index) (&fake_player)
+static int family,device_port=-1;
+void controller_device_get(short port,struct controller_device *d){memset(d,0,sizeof(*d));d->family=family;device_port=port;}
 ''' + source('port/linux/game/controller_remap_game.c') + r'''
 int main(void) {
  unsigned char b[CONTROLLER_REMAP_ACTIONS];struct game_input_preferences original;char text[512];int i;
@@ -354,6 +395,16 @@ int main(void) {
  controller_remap_prompt(1,&profile);assert(profile.game_control_to_xbox_buttons[0]==1);
  controller_remap_assign(b,0,255);controller_remap_format(b,text,sizeof(text));config_write("input.controller_p3",text);
  controller_remap_prompt(1,&profile);assert(profile.game_control_to_xbox_buttons[0]==255);
+ assert(controller_remap_prompt_text(1,255)[0]=='U' && !controller_remap_prompt_text(1,0) && !controller_remap_prompt_text(1,16));
+ /* a back paddle: past the icons, named as the player's controller names it (the Steam Deck's R5; an Elite's P2) */
+ controller_remap_assign(b,0,CONTROLLER_REMAP_PADDLE+3);controller_remap_format(b,text,sizeof(text));
+ assert(strstr(text,"v3:right_paddle2,"));config_write("input.controller_p3",text);
+ controller_remap_prompt(1,&profile);assert(profile.game_control_to_xbox_buttons[0]==CONTROLLER_REMAP_PROMPT_PADDLE+3);
+ family=CONTROLLER_STEAM_DECK;{wchar_t const *w=controller_remap_prompt_text(1,profile.game_control_to_xbox_buttons[0]);
+ assert(w[0]=='R' && w[1]=='5' && !w[2] && device_port==2);}
+ family=CONTROLLER_XBOX;{wchar_t const *w=controller_remap_prompt_text(1,CONTROLLER_REMAP_PROMPT_PADDLE+3);
+ assert(w[0]=='P' && w[1]=='2' && !w[2]);}
+ family=0;
  profile=original;controller_remap_prompt(0,&profile);assert(!memcmp(&profile,&original,sizeof(profile)));
  assert(controller_remap_playing(2) && !controller_remap_playing(0));menus=1;assert(!controller_remap_playing(2));menus=0;
  chat=2;assert(!controller_remap_playing(2));

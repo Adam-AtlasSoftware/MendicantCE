@@ -263,6 +263,37 @@ static float flick_ease(float share)
 	return 1.0f - (1.0f - share) * (1.0f - share);
 }
 
+/* ---------- when the gyroscope's turn counts */
+
+int gyro_aim_active(int mode, int held, int touched)
+{
+	switch (mode)
+	{
+	case GYRO_AIM_ON:
+		return 1;
+	case GYRO_AIM_HOLD:
+		return held != 0;
+	case GYRO_AIM_PAUSE:
+		return !held;
+	case GYRO_AIM_TOUCH:
+		return touched > 0;
+	default:
+		return 0;
+	}
+}
+
+#define VALVE 0x28de
+
+int gyro_stick_touch_known(unsigned short vendor, unsigned short product)
+{
+	return vendor == VALVE && (product == 0x1205 || (product >= 0x1302 && product <= 0x1305));
+}
+
+int gyro_steam_deck(unsigned short vendor, unsigned short product)
+{
+	return vendor == VALVE && product == 0x1205;
+}
+
 void flick_stick_reset(struct flick_stick *flick)
 {
 	memset(flick, 0, sizeof(*flick));
