@@ -150,14 +150,18 @@ def generate_ios_app(n: Writer, sln: Any, built: dict, name: str, build: Path, s
     n.rule(
         name=f"{name}_app",
         command=(f"$python tools/ios_app.py bundle --app {app} --executable {built['executable']} "
-                 f"--resource {built['brokers']} --resource {built['library']} --bundle-id {bundle_id} "
+                 f"--resource {built['brokers']} --resource {built['records']} --resource {built['assets']} "
+                 f"--resource {built['library']} "
+                 f"--bundle-id {bundle_id} "
                  f"{' '.join(f'--license {source}={name}' for source, name in licenses)} "
                  f"{' '.join(f'--touch {source}' for source in touch)} "
                  f"--build {build_number if build_number.isdigit() else 0} --minimum {IOS_MINIMUM} {signing} "
                  f"{'--simulator ' if not signed else ''}> {build}/app.log"),
         description=f"{name.upper()} APP {app}",
     )
-    n.build(outputs=app_executable, rule=f"{name}_app", inputs=[built["executable"], built["brokers"], built["library"]],
+    n.build(outputs=app_executable, rule=f"{name}_app",
+            inputs=[built["executable"], built["brokers"], built["records"], built["assets"],
+                    built["library"]],
             implicit=implicit)
     n.build(outputs=name, rule="phony", inputs=[app_executable])
     # (the app on the connected device, or the booted simulator:

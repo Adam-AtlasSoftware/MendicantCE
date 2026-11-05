@@ -69,7 +69,7 @@ def test_entitlements_ask_for_no_jit():
 
 @built
 def test_app_contents():
-    for path in ("halo", "Info.plist", "brokers.txt", "shaders.metallib", "Assets.car", "Licenses/LICENSE.txt",
+    for path in ("halo", "Info.plist", "brokers.txt", "prepared.records", "openh1.assets", "shaders.metallib", "Assets.car", "Licenses/LICENSE.txt",
                  "touch/touch_button_classic_a.png", "touch/touch_caption.ttf"):
         assert (APP / path).is_file(), path
 

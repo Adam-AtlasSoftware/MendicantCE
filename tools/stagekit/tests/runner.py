@@ -252,7 +252,10 @@ def launch(machine, input, address, broadcast, test, init="", game=None, **envir
     (machine / "runtime").mkdir(mode=0o700, exist_ok=True)
     # (the game, and the libraries it finds beside it, in machine's own folder: a desktop build keeps its
     # config.toml beside the executable, so each machine has its own settings)
-    for source in [game, *game.parent.glob("lib*.so*"), *game.parent.glob("lib*.dylib")]:
+    # (and the files the game reads beside it: its assets' file, embedded_assets.h, and the shipped records)
+    for source in [game, *game.parent.glob("lib*.so*"), *game.parent.glob("lib*.dylib"),
+                   *(game.parent / name for name in ("openh1.assets", "prepared.records")
+                     if (game.parent / name).is_file())]:
         place(source, machine / ("halo" if source == game else source.name))
     # (none of the caller's own settings; system link on the loopback only, no internet play; a failed assertion
     # ends the run, with its place, which play_slice then shows, rather than a release build carrying on past it or
