@@ -1062,6 +1062,9 @@ static const struct config_setting config_settings[] =
 	{ "display.chat_style", _config_string, "\"colors\"", "HALO_CHAT_STYLE", _environment_value, _platform_all,
 		"The text chat's colors: \"colors\" (names in their team's color, the\n"
 		"text a pale blue) or \"white\" (all white, as Custom Edition)." },
+	{ "display.menu_fade", _config_boolean, "false", "HALO_MENU_FADE", _environment_value, _platform_all,
+		"Choosing a level in the menus fades them to black over a second before\n"
+		"the level loads, as on the Xbox; false: the level loads at once." GRAPHICS_CHOOSES },
 	{ "game.enhanced_animations", _config_boolean, "true", "HALO_ENHANCED_ANIMATIONS", _environment_value, _platform_all,
 		"The player bipeds' grenade throws keep their legs moving (crouched,\n"
 		"in the air and in a vehicle's seat too), riders' hands leave the grips\n"
@@ -3360,6 +3363,7 @@ static const struct
 	{ "display.dynamic_lights", "\"classic\"" },
 	{ "display.ambient_occlusion", "\"off\"" },
 	{ "game.enhanced_animations", "false", 1 },
+	{ "display.menu_fade", "true", 1 },
 };
 
 #define NUMBER_OF_CONFIG_GRAPHICS (sizeof(config_graphics) / sizeof(config_graphics[0]))
