@@ -269,7 +269,7 @@ a layer and without, a window's mean */
 static struct
 {
 	int wanted;
-	long windows, shapes, dynamic, paged, unpaged;
+	long windows, shapes, dynamic, paged, unpaged, kinds[NUMBER_OF_WORLD_PROXY_KINDS];
 } world_ao_counts = { -1 };
 
 static void world_ao_counts_window(void)
@@ -281,10 +281,24 @@ static void world_ao_counts_window(void)
 	world_ao_counts.windows++;
 	world_ao_counts.shapes += world_ao.count;
 	world_ao_counts.dynamic += world_ao.dynamic_count;
+	{
+		long index;
+
+		/* (the dynamic objects' kinds) */
+		for (index = 0; index < world_ao.dynamic_count; index++)
+		{
+			int kind = (int)world_ao.proxies[index].v[0][3];
+
+			if (kind > 0 && kind < NUMBER_OF_WORLD_PROXY_KINDS)
+				world_ao_counts.kinds[kind]++;
+		}
+	}
 	if (world_ao_counts.windows >= 600)
 	{
-		printf("world ao: a window's %.1f shapes, %.1f of them dynamic; %.1f lightmap pages with a layer, %.1f "
-			"without\n", (double)world_ao_counts.shapes / 600.0, (double)world_ao_counts.dynamic / 600.0,
+		printf("world ao: a window's %.1f shapes, %.1f of them dynamic (%.1f spheres, %.1f capsules, %.1f boxes); %.1f "
+			"lightmap pages with a layer, %.1f without\n", (double)world_ao_counts.shapes / 600.0,
+			(double)world_ao_counts.dynamic / 600.0, (double)world_ao_counts.kinds[_world_proxy_sphere] / 600.0,
+			(double)world_ao_counts.kinds[_world_proxy_capsule] / 600.0, (double)world_ao_counts.kinds[_world_proxy_box] / 600.0,
 			(double)world_ao_counts.paged / 600.0, (double)world_ao_counts.unpaged / 600.0);
 		fflush(stdout);
 		memset(&world_ao_counts.windows, 0, sizeof(world_ao_counts) - sizeof(world_ao_counts.wanted));
