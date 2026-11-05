@@ -53,7 +53,7 @@ CONTROLS = [
     # a vehicle's field counted as one slot (its three then cut apart by a window's end)
     ("slot_count = WORLD_PROXY_FIELD_SLOTS;", "slot_count = 1;", "field"),
     # its boxes kept beside its field
-    ("if (fielded && shape->kind == _world_proxy_box)\n\t\t\t\t\tcontinue;", "", "field"),
+    ("if (boxless && shape->kind == _world_proxy_box)\n\t\t\t\t\tcontinue;", "", "field"),
     # the rows to its voxels without the frame's scale squared
     ("over = 1.0f / (scale * scale * field->voxel);", "over = 1.0f / (scale * field->voxel);", "field"),
     # its reach the field's alone (its box's bound not taken)

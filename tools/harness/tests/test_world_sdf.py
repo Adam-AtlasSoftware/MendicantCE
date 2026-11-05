@@ -89,8 +89,8 @@ CONTROLS = [
     (BAKE, "weights[j * WORLD_SDF_OBJECT_NORMALS + k] = cosine > 0.0f ?\n\t\t\t\tcosine",
      "weights[j * WORLD_SDF_OBJECT_NORMALS + k] = cosine < 0.0f ?\n\t\t\t\t-cosine", "object_bake"),
     # a triangle's cone meeting too few buckets (rays it blocks missed)
-    (BAKE, "cosine * buckets.cosines[bucket] - sine * buckets.sines[bucket]",
-     "cosine * buckets.cosines[bucket] + sine * buckets.sines[bucket]", "object_bake"),
+    (BAKE, "cosine * buckets->cosines[bucket] - sine * buckets->sines[bucket]",
+     "cosine * buckets->cosines[bucket] + sine * buckets->sines[bucket]", "object_bake"),
     # past the grid, its edge's occlusion kept whole (no falling off: the reach not met)
     (BAKE, "\tscale *= scale;\n\tfor (corner = 0; corner < 8; corner++)", "\tscale = 1.0f;\n\tfor (corner = 0; corner < 8; corner++)",
      "object_bake"),
