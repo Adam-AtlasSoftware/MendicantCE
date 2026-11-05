@@ -178,3 +178,15 @@ def test_tab_check_sees_a_tab_too_narrow():
     assert any(name in problem for problem in _tab_problems(even, names) for name in ("INTERFACE", "CONTROLS"))
     places = port_settings.settings_tab_places()
     assert _tab_problems([places[0], (places[0][0] + 10, places[1][1])] + places[2:], names)
+
+
+def test_map_storage_row():
+    """MAP STORAGE (issue 603) sets game.map_cache_megabytes: Instant Load
+    Times its default (0, every stock map kept), Disk Space Saver the Xbox's
+    730 MB"""
+    rows = [entry for page in PAGES.values() for entry in page["rows"]
+            if entry[0] != SECTION and entry[1] == "game.map_cache_megabytes"]
+    assert [row[0] for row in rows] == ["MAP STORAGE"]
+    assert rows[0][2] == [("INSTANT LOADING", "0"), ("DISK SPACE SAVER", "730")]
+    config = (Path(__file__).resolve().parent.parent / "port/linux/src/port_config.c").read_text()
+    assert re.search(r'\{ "game\.map_cache_megabytes", _config_integer, "0",', config)
