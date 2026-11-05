@@ -1679,6 +1679,8 @@ static void hud_draw_bitmap_with_meter(
 	/* port: a reticle at the centre keeps to its aim (view_fov.c), the view
 	drawn through display.panini's projection too (panini.c) */
 	real reticle_scale;
+	/* port: (passenger_camera_reticle_offset) */
+	real_vector2d reticle_rest;
 
 	csmemset(stack_buffer, 0x62, sizeof(stack_buffer));
 
@@ -1736,7 +1738,9 @@ static void hud_draw_bitmap_with_meter(
 	/* port: the crosshairs_draw scope moves only the weapon's reticle: to
 	the passenger's shot, or to where the aim lands below the middle
 	(display.lowered_reticle) */
-	if (is_crosshair_bitmap && !passenger_camera_reticle_offset(&point, reticle_scale))
+	reticle_rest.i = 0.0f;
+	reticle_rest.j = 0.0f;
+	if (is_crosshair_bitmap && !passenger_camera_reticle_offset(&point, reticle_scale, &reticle_rest))
 		lowered_reticle_offset_point(&point, reticle_scale);
 	hud_calculate_bitmap_bounds(
 		bitmap,
@@ -1744,6 +1748,9 @@ static void hud_draw_bitmap_with_meter(
 		clip,
 		&bounds,
 		is_interface_bitmap);
+	/* port: (the passenger's reticle where the shot is, not the unit short
+	of it: rasterizer_screen_offset_set) */
+	rasterizer_screen_offset_set(reticle_rest.i, reticle_rest.j);
 	hud_draw_bitmap_internal(
 		meter_parameters,
 		bitmap,
@@ -1754,6 +1761,7 @@ static void hud_draw_bitmap_with_meter(
 		theta,
 		color,
 		reticle_scale);
+	rasterizer_screen_offset_set(0.0f, 0.0f);
 
 	match_assert_stack_frame("c:\\halo\\SOURCE\\interface\\hud_draw.c", 814);
 
@@ -1919,6 +1927,30 @@ void hud_draw_bitmap_direct(
 		1.0f);
 
 	match_assert_stack_frame("c:\\halo\\SOURCE\\interface\\hud_draw.c", 856);
+
+	return;
+}
+
+/* port: (hud_draw.h) */
+void hud_draw_mark_begin(
+	real x,
+	real y,
+	point2d *whole)
+{
+	real whole_x = (real)floor(x);
+	real whole_y = (real)floor(y);
+
+	whole->x = (short)whole_x;
+	whole->y = (short)whole_y;
+	rasterizer_screen_offset_set(x - whole_x, y - whole_y);
+
+	return;
+}
+
+void hud_draw_mark_end(
+	void)
+{
+	rasterizer_screen_offset_set(0.0f, 0.0f);
 
 	return;
 }

@@ -434,6 +434,8 @@ static short cached_map_files_least_useful(
 static void cached_map_files_make_room(
 	short map_file_index,
 	long size);
+static unsigned long long cached_map_files_fit_budget(
+	void);
 
 /* ---------- globals */
 
@@ -445,6 +447,9 @@ static boolean cached_map_file_adopt(
 whether the copy in progress took the texture cache's memory for its
 buffers (a copy has buffers of its own: map_cache_copy_buffer) */
 static unsigned long long cached_map_files_budget;
+/* port: (the least the budget is: what the Xbox's six cache files held) */
+#define CACHED_MAP_FILES_LEAST_BUDGET ((unsigned long long)SOLO_CACHE_FILE_MAXIMUM_SIZE * 2 + \
+	MAIN_MENU_CACHE_FILE_MAXIMUM_SIZE + (unsigned long long)MULTIPLAYER_CACHE_FILE_MAXIMUM_SIZE * 3)
 static boolean cache_copy_buffer_stolen = TRUE;
 /* port: the slots a worker is unpacking a map into (port/linux/src/map_unpack.c),
 the game's thread's: no map until the worker is done and the slot passes
@@ -819,12 +824,16 @@ void cache_files_initialize(
 	cache_files_open_cache_files();
 	/* port: the cache files' budget, of the disk's space (at least what the
 	Xbox's six held), port/linux/src/map_cache.c */
-	cached_map_files_budget = (unsigned long long)SOLO_CACHE_FILE_MAXIMUM_SIZE * 2 + MAIN_MENU_CACHE_FILE_MAXIMUM_SIZE +
-		(unsigned long long)MULTIPLAYER_CACHE_FILE_MAXIMUM_SIZE * 3;
+	cached_map_files_budget = CACHED_MAP_FILES_LEAST_BUDGET;
 	/* (a copy of the game running beside the one that keeps the cache:
 	those six's room alone, cache_slot_folder) */
 	if (cache_slot_folder_keeps_cache())
+	{
 		cached_map_files_budget = map_cache_budget(cached_map_files_bytes(NONE), cached_map_files_budget);
+		/* (a cache past it, kept at a larger budget before: given up to fit
+		now, as the setting's change does while the game runs) */
+		cached_map_files_fit_budget();
+	}
 	/* port: (the copies are port/linux/src/map_unpack.c's: the Xbox's
 	decompressor's thread is not started) */
 
@@ -1981,6 +1990,48 @@ static void cached_map_files_make_room(
 	}
 
 	return;
+}
+
+/* port: the maps given up, the least useful first, until the cache files
+fit their budget (a smaller one: Settings' DISK SPACE SAVER, game.map_cache_megabytes);
+never the open map's, nor the one a copy is going to: the bytes given up */
+static unsigned long long cached_map_files_fit_budget(
+	void)
+{
+	unsigned long long before = cached_map_files_bytes(NONE);
+
+	cached_map_files_make_room(NONE, 0);
+
+	return before - cached_map_files_bytes(NONE);
+}
+
+/* port: the budget read again (game.map_cache_megabytes changed:
+port/linux/game/map_cache_prefill.c), and the cache made to fit it now: the
+workers' unpacks ended first (their slots, unfinished, emptied), as a copy
+begun for the larger budget may not fit the smaller; the bytes given up */
+unsigned long long cache_files_budget_update(
+	void)
+{
+	short map_file_index;
+
+	if (!cache_slot_folder_keeps_cache())
+	{
+		return 0;
+	}
+	for (map_file_index = 0;
+		map_file_index < NUMBER_OF_CACHED_MAP_FILES;
+		map_file_index++)
+	{
+		if (cached_map_file_unpacking[map_file_index])
+		{
+			map_unpack_stop(map_file_index);
+			map_unpack_wait(map_file_index);
+		}
+	}
+	cache_files_unpack_update();
+	cached_map_files_budget = map_cache_budget(cached_map_files_bytes(NONE), CACHED_MAP_FILES_LEAST_BUDGET);
+
+	return cached_map_files_fit_budget();
 }
 
 /* port: the bytes a copy of a map (a10) into the cache would take, without

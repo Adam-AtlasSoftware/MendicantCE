@@ -572,6 +572,13 @@ MOVIES_HELP = ("Plays the Xbox's intro movie as the game starts, and its attract
                "button skips the intro.|They are the bink folder of your Xbox disc image, copied with the maps. "
                "Without them, put the disc's bink folder beside your maps folder.")
 
+# game.map_cache_megabytes's: every stock map kept unpacked (the disk's
+# room), or the Xbox's six cache files' room (730 MB, the least it takes)
+MAP_STORAGE = [("INSTANT LOADING", "0"), ("DISK SPACE SAVER", "730")]
+MAP_STORAGE_HELP = ("Instant Loading keeps every map unpacked, about 3.0 GB, so loads never wait. Disk Space Saver "
+                    "keeps at most 730 MB, saving 2.3 GB or more, little on most drives. A map it has not kept loads "
+                    "a second or more slower.|Switching back unpacks them in the background.")
+
 CREATE_PROFILE = ("CREATE PROFILE ›", None, None,
                   "Your name, color and controller layout are kept in a player profile. Make one to set them; the "
                   "rest of Settings works without one.", None, "create_profile", "port settings new profile")
@@ -841,7 +848,7 @@ PAGES = {
     },
     "profile_settings": {
         "screen": "profile_settings_screen", "tab": "PROFILES",
-        "about": "Your player profiles, your name and color.",
+        "about": "Your player profiles, your name and color, and the disk space the maps take.",
         "rows": [
             # (with no profile, NAME, COLOR and MANAGE PROFILES are hidden and
             # CREATE PROFILE shown; in a game, those whose screens are
@@ -859,6 +866,11 @@ PAGES = {
             ("MANAGE PROFILES ›", None, PROFILE_MANAGER,
              "Switch to another player profile, make a new one or delete one. Your changes so far are kept.", None,
              "profiles", "port settings profiles"),
+            # (game.map_cache_megabytes: 0 keeps every stock map unpacked, 730
+            # the Xbox's room, the least it takes; another number shows the
+            # nearer: port/linux/src/map_cache.c, port/linux/game/map_cache_prefill.c)
+            (SECTION, "STORAGE"),
+            ("MAP STORAGE", "game.map_cache_megabytes", MAP_STORAGE, MAP_STORAGE_HELP, None),
             (SECTION, "ABOUT"),
             ("OPENH1", None, None,
              "Halo: Combat Evolved, the Xbox game, on this computer, played from your own copy of its maps. OpenH1 "
@@ -921,7 +933,7 @@ PAGES = {
              "Enhanced: plasma bolts, muzzle flashes and blasts light their surroundings smoothly, with a glow. "
              "Classic lights them as the Xbox did.", "desktop android"),
             ("AMBIENT OCCLUSION", "display.ambient_occlusion",
-             [("OFF", "off"), ("SUBTLE", "subtle"), ("STRONG", "strong")],
+             [("OFF", "off"), ("SUBTLE", "subtle"), ("STRONG", "strong"), ("WORLD", "world")],
              "Grounds characters, vehicles and scenery with soft shade where they meet the world and in their "
              "creases. The levels keep their own lighting.", "desktop android"),
             ("SHIELD GLOW", "display.shield_glow", ON_OFF,
@@ -4342,7 +4354,7 @@ def _browser() -> list:
                      f'<on event="left_trigger" run="port browser filters" open="{_page_screen(*BROWSER_FILTERS)}"/>',
                      '<on event="right_thumb" run="port browser search next"/>',
                      f'<child widget="{base}/header_join_game"/>',
-                     f'<child widget="{base}/browser_counts"/>',
+                     f'<child widget="{base}/browser_counts" platform="pointer"/>',
                      f'<child widget="{SETTINGS}/tab_prompt_previous" x="{WIDE_MARGIN}" y="{SETTINGS_TABS_TOP}" '
                      'platform="pointer"/>',
                      f'<child widget="{SETTINGS}/tab_prompt_next" '
@@ -4558,12 +4570,12 @@ def _search_places(column: str) -> list:
             ("op_search_field", x, clear_x - BROWSER_SEARCH_X_GAP - x), ("op_search_clear", clear_x, 16)]
 
 
-def browser_search_frames(icons: Path, name: str) -> list:
-    """a search's icon (Lucide's search or x), 16 pixels square: blue, and
-    white while it has the focus"""
+def browser_search_frames(icons: Path, name: str, size: int = 16, colors: tuple = ("#2896FF", "#FFFFFF")) -> list:
+    """a search's icon (Lucide's search or x), size pixels square: blue, and
+    white while it has the focus (or a frame each of colors)"""
     svg = (icons / f"{name}.svg").read_text()
-    return [(svg.replace('stroke="currentColor"', f'stroke="{color}"').replace('width="24"', 'width="16"')
-             .replace('height="24"', 'height="16"'), 16, 16) for color in ("#2896FF", "#FFFFFF")]
+    return [(svg.replace('stroke="currentColor"', f'stroke="{color}"').replace('width="24"', f'width="{size}"')
+             .replace('height="24"', f'height="{size}"'), size, size) for color in colors]
 
 
 def _hub_panel(folder: str, place: tuple, wide_panel: tuple) -> list:
@@ -5319,6 +5331,27 @@ TOUCH_BROWSER_PROMPTS = [
     ("prompt_sort", None, 312, 136, '<on event="a" run="port browser sort"/>'),
     ("prompt_back", "BACK", 502, 110, '<on event="a" run="mouse emit back event"/>'),
 ]
+# the browser's search, which has no column titles to be in: one field at
+# the top, beside the title (SERVER BROWSER's ends at 369) and over the tabs,
+# above a phone's keyboard, for a word of the server's name or of its map
+# (menu_functions.c's "any" search), as a phone's search finds them; its X
+# beside it. (x, y, width) of the field and its X together, at 4:3; a wide
+# screen's wider to its left by TOUCH_SEARCH_GROWN (to the title's end), its
+# right edge at the screen's. The counts (the computer's beside the title,
+# where the search is) are over the title's left
+TOUCH_SEARCHED = "any"
+TOUCH_SEARCH = (380, 18, 232)
+TOUCH_SEARCH_GROWN = 2 * WIDE_HALF - 4
+TOUCH_SEARCH_WORDS = "SEARCH"
+TOUCH_COUNTS = (66, 4, 300)
+TOUCH_SEARCH_ICON = f"{MT}/join_game/touch/search_icon"
+TOUCH_SEARCH_CLEAR = f"{MT}/join_game/touch/search_clear"
+# (the icons' size, and their place in the field and in the X)
+TOUCH_ICON = 20
+# (the list's CLEAR SEARCH under the words for no games, while the search
+# hides every game: menu_functions.c's browser_clear_show; its width)
+TOUCH_CLEAR_WIDTH = 200
+TOUCH_CLEAR_TOP = 316
 # Multiplayer's tiles: two columns TOUCH_HUB_WIDTH wide in all (HUB_WIDE_ITEMS
 # wider, between them, on a wide screen) under PLAY ONLINE's and HOST's
 # titles, each its name over what is live for it (its note), their words
@@ -5417,13 +5450,29 @@ def touch_button(width: int, height: int) -> str:
     return f"{PARTS}/touch_button_{width}x{height}"
 
 
+def touch_field(width: int, height: int) -> str:
+    """a field typed into (the browser's search): outlined, and brighter
+    while it has the focus or is typed into (menu_functions.c chooses)"""
+    return f"{PARTS}/touch_field_{width}x{height}"
+
+
+def touch_search_places() -> list:
+    """the browser's search's parts: (name, x, width) of the bar saying what
+    it finds (op_search_any), the field typed into in its place and its X"""
+    x, _, width = TOUCH_SEARCH
+    field_width = width - TOUCH_TAP - TOUCH_GAP
+    return [(f"op_search_{TOUCH_SEARCHED}", x, field_width), (f"op_search_field_{TOUCH_SEARCHED}", x, field_width),
+            (f"op_search_clear_{TOUCH_SEARCHED}", x + field_width + TOUCH_GAP, TOUCH_TAP)]
+
+
 def touch_sizes() -> dict:
     """each touch part's sizes, as the layouts use them"""
     panel_inner = TOUCH_PANEL_WIDTH - 24
     buttons = {(width, TOUCH_TAP) for prompts in (TOUCH_BROWSER_PROMPTS, TOUCH_HUB_PROMPTS, TOUCH_LOBBY_PROMPTS,
                                                   TOUCH_PARTY_PROMPTS, TOUCH_FRIENDS_PROMPTS)
                for *_, width, _ in prompts}
-    buttons |= {(panel_inner, TOUCH_TAP), (TOUCH_HOST_BACK[1], TOUCH_TAP)}
+    buttons |= {(panel_inner, TOUCH_TAP), (TOUCH_HOST_BACK[1], TOUCH_TAP), (TOUCH_TAP, TOUCH_TAP),
+                (TOUCH_CLEAR_WIDTH, TOUCH_TAP)}
     return {
         "chip": sorted({(TOUCH_CHIP_WIDTHS[count], TOUCH_TAP) for count in TOUCH_CHIP_WIDTHS} |
                        {(width, TOUCH_TAP) for width in TOUCH_HOST_CHIP_WIDTHS}),
@@ -5433,6 +5482,7 @@ def touch_sizes() -> dict:
         "panel": sorted({TOUCH_BROWSER_PANEL[2:], TOUCH_HOST_PANEL[2:], TOUCH_LOBBY_PANEL[2:],
                          TOUCH_HUB_PANEL[2:]}),
         "section": [TOUCH_HUB_WIDTH],
+        "field": [(touch_search_places()[1][2], TOUCH_TAP)],
     }
 
 
@@ -5465,6 +5515,15 @@ def touch_pictures() -> list:
         pictures.append((touch_button(width, height), [
             framed(width, height, "#0a2a5a", 0.8, "#2f7fff"),
             framed(width, height, "#1e5fd1", 1.0, "#b8dbff")]))
+    # (three frames, which the engine leaves to the game, whose functions
+    # light it while the list's focus is on it or it is typed into: a column
+    # list's item of two frames is lit while it is the list's own focus)
+    for width, height in sizes["field"]:
+        lit = framed(width, height, "#0d3a7a", 0.95, "#b8dbff")
+        pictures.append((touch_field(width, height), [framed(width, height, "#000e23", 0.9, "#2f7fff"), lit, lit]))
+    # (the search's magnifying glass and X: Lucide's, port/assets/icons/lucide)
+    pictures.append((TOUCH_SEARCH_ICON, browser_search_frames(LUCIDE, "search", TOUCH_ICON, ("#2896FF",))))
+    pictures.append((TOUCH_SEARCH_CLEAR, browser_search_frames(LUCIDE, "x", TOUCH_ICON, ("#FFFFFF",))))
     # (Multiplayer's sections' titles, as wide as its tiles)
     for width in sizes["section"]:
         pictures.append((part_section(width), [(_svg(width, PART_SECTION_HEIGHT, [
@@ -5538,20 +5597,32 @@ def _touch_browser() -> tuple:
     names, its own in join_game/touch): its tabs a row of chips, TOUCH_BROWSER_ROWS
     rows each a game's name and players over its map, mode and ping (the
     columns' titles left out: SORT says the sort), the panel beside them
-    with JOIN GAME, and the footer's buttons. Returns the screen's children
-    and the widgets"""
+    with JOIN GAME, and the footer's buttons; the search, a field at the
+    top's right for the server's name or its map (touch_search_places),
+    the counts over the title, and CLEAR SEARCH under the words for no games
+    while it hides every game. Returns the screen's children and the
+    widgets"""
     base = f"{MT}/join_game"
     touch = f"{base}/touch"
     left, top, width, height = TOUCH_BROWSER_PANEL
     inner_left, inner_width = left + 12, width - 24
     panel_moved, panel_grown = BROWSER_WIDE_PANEL
     list_wide = wide(-WIDE_HALF, BROWSER_WIDE_LIST)
+    _, search_y, _ = TOUCH_SEARCH
+    # (the search's move and growth on a wide screen: its right edge at the
+    # screen's, TOUCH_SEARCH_GROWN wider)
+    search_wide = wide(WIDE_HALF - TOUCH_SEARCH_GROWN, TOUCH_SEARCH_GROWN)
     children = [f'<child widget="{touch}/browser_empty" platform="touch"/>',
+                f'<child widget="{touch}/browser_counts" platform="touch"/>',
                 f'<child widget="{touch}/join_game_items_list" platform="touch"/>']
     lines = _part_text(f"{touch}/browser_empty", [("left", BROWSER_LIST_X + 24), ("top", 230),
                                                  ("width", TOUCH_LIST_WIDTH - 48), ("height", 80),
                                                  ("font", "ui\\large_ui"), ("color", SETTINGS_BLUE),
                                                  ("align", "center"), ("wide", list_wide)])
+    counts_x, counts_y, counts_width = TOUCH_COUNTS
+    lines += _part_text(f"{touch}/browser_counts", [("left", counts_x), ("top", counts_y), ("width", counts_width),
+                                                   ("height", 16), ("font", "ui\\small_ui"), ("color", PART_DIM),
+                                                   ("wide", WIDE_LEFT)])
     rows = [f'<child widget="{touch}/server_item_{row}" x="{BROWSER_LIST_X}" '
             f'y="{TOUCH_ROWS_TOP + TOUCH_STEP * (row - 1)}"/>' for row in range(1, TOUCH_BROWSER_ROWS + 1)]
     join_y = top + height - TOUCH_TAP - 10
@@ -5560,9 +5631,52 @@ def _touch_browser() -> tuple:
                                                                 "up_down_tabs_children"),
                                                       ("description", f"{touch}/browser_panel")],
                      ['<data input="gamespy screen update"/>',
+                      f'<child widget="{touch}/join_game_header" y="{search_y}"/>',
                       f'<child widget="{touch}/browser_tabs" y="{TOUCH_CHIPS_TOP}"/>', *rows,
                       f'<child widget="{touch}/browser_join_bar" y="{join_y}"/>',
+                      f'<child widget="{touch}/browser_clear_bar" y="{TOUCH_CLEAR_TOP}"/>',
                       f'<child widget="{touch}/join_game_button_bar" y="{TOUCH_FOOTER_TOP}"/>'])
+    # (the search: a tap on its bar, or R3, types into it (the system's
+    # keyboard up), the list filtered as each letter is typed; its X clears
+    # it: menu_functions.c's browser_search_edit and browser_search_clear)
+    search = ['<on event="a" run="port browser search"/>', '<on event="start" run="port browser search"/>',
+              '<on event="left_mouse" run="mouse emit accept event"/>']
+    clear = [line.replace('"port browser search"', '"port browser search clear"') for line in search]
+    places = touch_search_places()
+    lines += _widget(f"{touch}/join_game_header", [("type", "column_list"), ("width", 640), ("height", TOUCH_TAP),
+                                                  ("flags", "pass_unhandled_to_focused_child left_right_tabs_items")],
+                     [f'<child widget="{touch}/{name}" x="{x}"/>' for name, x, _ in places])
+    icon_y = (TOUCH_TAP - TOUCH_ICON) // 2
+    (bar, _, field_width), (field, _, _), (cross, _, _) = places
+    lines += _widget(f"{touch}/{bar}", [("type", "text"), ("width", field_width), ("height", TOUCH_TAP),
+                                       ("wide", search_wide), ("bitmap", touch_field(field_width, TOUCH_TAP)),
+                                       ("text", TOUCH_SEARCH_WORDS), ("font", "ui\\small_ui"), ("color", PART_DIM),
+                                       ("text_x", 2 * icon_y + TOUCH_ICON), ("text_y", 19)],
+                     [*search, f'<child widget="{touch}/search_glass" x="{icon_y}" y="{icon_y}"/>'])
+    lines += _widget(f"{touch}/{field}", [("type", "text"), ("width", field_width), ("height", TOUCH_TAP),
+                                         ("wide", search_wide), ("bitmap", touch_field(field_width, TOUCH_TAP)),
+                                         ("font", "ui\\large_ui"), ("color", "#FFFFFFFF"),
+                                         ("text_x", 2 * icon_y + TOUCH_ICON), ("text_y", 16),
+                                         ("text_flags", "no_focus_test")],
+                     [*search, f'<child widget="{touch}/search_glass" x="{icon_y}" y="{icon_y}"/>'])
+    lines += _widget(f"{touch}/{cross}", [("width", TOUCH_TAP), ("height", TOUCH_TAP), ("wide", wide(WIDE_HALF)),
+                                         ("bitmap", touch_button(TOUCH_TAP, TOUCH_TAP))],
+                     [*clear, f'<child widget="{touch}/search_cross" x="{icon_y}" y="{icon_y}"/>'])
+    lines += _widget(f"{touch}/search_glass", [("width", TOUCH_ICON), ("height", TOUCH_ICON),
+                                               ("bitmap", TOUCH_SEARCH_ICON)], [])
+    lines += _widget(f"{touch}/search_cross", [("width", TOUCH_ICON), ("height", TOUCH_ICON),
+                                               ("bitmap", TOUCH_SEARCH_CLEAR)], [])
+    lines += _widget(f"{touch}/browser_clear_bar", [("type", "column_list"), ("width", 640), ("height", TOUCH_TAP),
+                                                    ("flags", "pass_unhandled_to_focused_child")],
+                     [f'<child widget="{touch}/button_clear_search" '
+                      f'x="{BROWSER_LIST_X + (TOUCH_LIST_WIDTH - TOUCH_CLEAR_WIDTH) // 2}"/>'])
+    lines += _widget(f"{touch}/button_clear_search", [("type", "text"), ("width", TOUCH_CLEAR_WIDTH),
+                                                      ("height", TOUCH_TAP),
+                                                      ("wide", wide(-WIDE_HALF + BROWSER_WIDE_LIST // 2)),
+                                                      ("bitmap", touch_button(TOUCH_CLEAR_WIDTH, TOUCH_TAP)),
+                                                      ("text", "CLEAR SEARCH"), ("font", "ui\\small_ui"),
+                                                      ("color", "#FFFFFFFF"), ("align", "center"), ("text_y", 19)],
+                     clear)
     lines += _touch_chips(touch, "browser_tabs", BROWSER_TABS, ['<on event="a" run="port browser tab"/>',
                                                                 '<on event="start" run="port browser tab"/>'], 584)
     row_w = TOUCH_LIST_WIDTH

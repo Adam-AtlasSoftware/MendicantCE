@@ -28,7 +28,7 @@ failure before it starts, and as rendered when it ends); and until it is
 ready. A pose or map changed, a larger
 screen (at the next start), its picture's file gone or cut short, or this
 file's version renders it again.
-Nothing is rendered in runs nobody watches (tests: picture_quiet_run), in
+Nothing is rendered in runs nobody watches (tests: menu_pictures_quiet_run), in
 VR, or with display.menu_pictures off.
 */
 
@@ -866,7 +866,7 @@ static int picture_enabled(void)
 /* runs nobody watches (tests: timed, scripted, driven through the script
 console, recorded or measured), and those whose first screen is not the
 main menu's: nothing rendered */
-static int picture_quiet_run(void)
+int menu_pictures_quiet_run(void)
 {
 	if (config_boolean("debug.menu_pictures"))
 		return 0;
@@ -1007,7 +1007,7 @@ long menu_pictures_wanted(
 		picture_check(pose);
 		decisions[pose] = menu_pictures.pictures[pose].decision;
 	}
-	if (picture_quiet_run())
+	if (menu_pictures_quiet_run())
 		return 0;
 	return menu_picture_order(menu_picture_poses, picture_count(), decisions, poses, maximum);
 }
@@ -1018,7 +1018,7 @@ long menu_pictures_maps(
 {
 	long pose, count = 0, other, index;
 
-	if (!menu_pictures.started || !picture_enabled() || picture_quiet_run())
+	if (!menu_pictures.started || !picture_enabled() || menu_pictures_quiet_run())
 		return 0;
 	for (pose = 0; pose < picture_count() && count < maximum; pose++)
 	{

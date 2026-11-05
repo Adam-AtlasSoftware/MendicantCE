@@ -67,6 +67,7 @@ static struct stream_target *target_get(uint32_t number)
 { assert(number <= 1); return number ? &target : NULL; }
 static void target_resolve(struct stream_target *value) { (void)value; }
 static void xgpu_vulkan_textures_frame_end(void) { texture_frames++; }
+static void world_make_some(void) {}
 ''' + stream + r'''
 int main(void)
 {

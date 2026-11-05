@@ -561,7 +561,7 @@ static void occlusion_pipeline(int kind, int function, uint8_t format, uint8_t d
 int xgpu_metal_post_ambient_occlusion_prepare(uint8_t format, uint8_t depth_format)
 {
 	struct xgpu_metal_pipeline pipeline;
-	int function, kind;
+	int function, kind, made = 1;
 
 	if (occlusion.failed)
 		return 0;
@@ -574,17 +574,27 @@ int xgpu_metal_post_ambient_occlusion_prepare(uint8_t format, uint8_t depth_form
 			return 0;
 		}
 	}
+	/* (each asked for until it is made: the passes are drawn once all
+	are, never some of them skipped, xgpu_metal.m's pipeline_state_get) */
 	for (function = XGPU_METAL_POST_OCCLUSION_DEPTH; function < XGPU_METAL_POST_OCCLUSION_APPLY; function++)
 	{
 		occlusion_pipeline(OCCLUSION_INTERMEDIATE, function, 0, 0, &pipeline);
-		xgpu_metal_prepare(&pipeline);
+		if (!xgpu_metal_pipeline_made(&pipeline))
+		{
+			xgpu_metal_prepare(&pipeline);
+			made = 0;
+		}
 	}
 	for (kind = OCCLUSION_LAY; kind <= OCCLUSION_MASK_KEPT; kind++)
 	{
 		occlusion_pipeline(kind, 0, format, depth_format, &pipeline);
-		xgpu_metal_prepare(&pipeline);
+		if (!xgpu_metal_pipeline_made(&pipeline))
+		{
+			xgpu_metal_prepare(&pipeline);
+			made = 0;
+		}
 	}
-	return 1;
+	return made;
 }
 
 /* the occlusion's textures for a target of a size, at a scale: 1 if they

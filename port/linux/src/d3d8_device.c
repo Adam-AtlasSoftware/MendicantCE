@@ -40,6 +40,8 @@ Conventions carried over from the Xbox:
 #include "bink_import.h"
 #include "halo_linux_source_fixups.h"
 #include "panini_projection.h"
+#include "world_ao.h"
+#include "world_sdf.h"
 #include "main/console.h"
 
 #include <SDL3/SDL.h>
@@ -298,12 +300,147 @@ static void ambient_occlusion_read(void)
 		return;
 	ambient_occlusion.read_at = config_changes();
 	setting = config_string("display.ambient_occlusion");
+	/* ("world" is not the screen's: port/linux/game/world_ao.c, below) */
 	quality = !strcmp(setting, "strong") ? XGPU_AMBIENT_OCCLUSION_STRONG :
 		!strcmp(setting, "subtle") ? XGPU_AMBIENT_OCCLUSION_SUBTLE : 0;
 	if (quality != ambient_occlusion.quality)
 		platform_log("ambient occlusion: %s", quality ? setting : "off");
 	ambient_occlusion.quality = quality;
 	ambient_occlusion.view = config_boolean("debug.ambient_occlusion_view");
+}
+
+/* ---------- display.ambient_occlusion "world" (port/linux/game/world_ao.c,
+docs/world-ao.md)
+
+The window's block (the field's place, its proxies) handed to the backend
+for the opaque surfaces that draw until world_ao_window_end takes it away;
+the field's slices uploaded as its bake gives them. While a window's block
+is given, the opaque surfaces' pixel keys have the world's light
+(world_ao_key: xgpu.h's XGPU_AMBIENT_OCCLUSION_LIGHT_* with
+XGPU_AMBIENT_OCCLUSION_WORLD): a model's lit for each pixel or each vertex
+(where its lighting has its world position), and the structure's lightmap
+pass (lit as XGPU_LIGHTING_ENVIRONMENT for its position and normal, the
+enhanced dynamic lights or not); never a self-illuminated pass, a blended
+one, or the first-person weapon (WORLD_AO_OWNER_UNLIT). Each draw's
+uniforms carry its object (halo_world_ao_object: its owner slot and
+reference). With the setting off nothing here is called, no key has the
+world's bit and the uniforms' world_ao stay as they are: the shaders and
+the frames are as without it. */
+
+_Static_assert(XGPU_WORLD_SDF_BRICK == WORLD_SDF_BRICK && XGPU_WORLD_SDF_BRICK_SPAN == WORLD_SDF_BRICK_SPAN &&
+	XGPU_WORLD_SDF_ATLAS == WORLD_SDF_ATLAS && XGPU_WORLD_SDF_RANGE_VOXELS == WORLD_SDF_RANGE_VOXELS &&
+	XGPU_WORLD_SDF_CELL_OUTSIDE == WORLD_SDF_CELL_OUTSIDE && XGPU_WORLD_SDF_CELL_INSIDE == WORLD_SDF_CELL_INSIDE &&
+	XGPU_WORLD_SDF_CELL_BRICK == WORLD_SDF_CELL_BRICK, "the world's field as the emitters read it (xgpu.h)");
+_Static_assert(XGPU_WORLD_AO_SHAPES == XGPU_WORLD_AO_PROXIES_MAXIMUM &&
+	XGPU_WORLD_AO_SPHERE == XGPU_WORLD_AO_PROXY_SPHERE && XGPU_WORLD_AO_CAPSULE == XGPU_WORLD_AO_PROXY_CAPSULE &&
+	XGPU_WORLD_AO_BOX == XGPU_WORLD_AO_PROXY_BOX && XGPU_WORLD_AO_FIELD == XGPU_WORLD_AO_PROXY_FIELD,
+	"the world's proxies as the emitters take them (xgpu.h)");
+_Static_assert(offsetof(struct xgpu_world_ao_block, field) == XGPU_WORLD_AO_BLOCK_FIELD &&
+	offsetof(struct xgpu_world_ao_block, parameters) == XGPU_WORLD_AO_BLOCK_PARAMETERS &&
+	offsetof(struct xgpu_world_ao_block, proxies) == XGPU_WORLD_AO_BLOCK_PROXIES &&
+	offsetof(struct xgpu_world_ao_block, grid) == XGPU_WORLD_AO_BLOCK_GRID &&
+	offsetof(struct xgpu_world_ao_block, cells) == XGPU_WORLD_AO_BLOCK_CELLS,
+	"the world's block as the emitters declare it (xgpu.h)");
+_Static_assert(XGPU_WORLD_AO_GRID_X == WORLD_AO_GRID_X && XGPU_WORLD_AO_GRID_Y == WORLD_AO_GRID_Y &&
+	XGPU_WORLD_AO_GRID_Z == WORLD_AO_GRID_Z && XGPU_WORLD_AO_GRID_CELLS == XGPU_WORLD_AO_GRID_CELLS_MAXIMUM,
+	"the world's proxy grid as the game makes it and the emitters read it (world_ao.h, xgpu.h)");
+_Static_assert(WORLD_AO_FIELD_TABLE == XGPU_STREAM_WORLD_AO_TABLE && WORLD_AO_FIELD_ATLAS == XGPU_STREAM_WORLD_AO_ATLAS &&
+	WORLD_AO_FIELD_SCENERY == XGPU_STREAM_WORLD_AO_SCENERY && WORLD_AO_FIELD_OBJECTS == XGPU_STREAM_WORLD_AO_OBJECTS,
+	"the world's field's parts as the stream carries them");
+
+static struct
+{
+	/* a window's block is given (its opaque surfaces draw with it); the
+	draw's object (its owner slot, WORLD_AO_OWNER_*, and its reference);
+	debug.world_ao_view, as read when the block was given; its shaders
+	could not be made (world_ao_fail) */
+	BOOL active, view;
+	int owner;
+	float reference;
+	BOOL failed;
+	/* the window's span as the game draws it (WORLD_AO_SPAN_*:
+	halo_world_ao_span), whatever the setting and while a map's pipelines
+	are prepared; a record's draw's as it notes it, played back
+	(journal_restore) */
+	int span;
+} world_ao = { FALSE, FALSE, WORLD_AO_OWNER_NONE, 1.0f, FALSE, WORLD_AO_SPAN_NONE };
+
+/* the draw takes the world's light where its window is given: one of the
+window's opaque surfaces, not the first-person weapon, not lighting itself
+(the window's span alone, so that the renderer's manifest notes it with
+the setting off and in a map's preparation: manifest_note_basis) */
+static BOOL world_ao_applies(void)
+{
+	return world_ao.span == WORLD_AO_SPAN_OPEN && !(hdr.kind & HALO_HDR_KIND_SELF_ILLUMINATION);
+}
+
+/* a draw's pixel key's occlusion, for the light it multiplies, found in the
+world (0: none) */
+static unsigned char world_ao_key(int light)
+{
+	if (!world_ao.active || world_ao.failed || !world_ao_applies())
+		return 0;
+	return (unsigned char)(light | XGPU_AMBIENT_OCCLUSION_WORLD | (world_ao.view ? XGPU_AMBIENT_OCCLUSION_WORLD_VIEW : 0));
+}
+
+/* a pipeline with the world's light could not be made: none has it from
+here on (said once) */
+static void world_ao_fail(void)
+{
+	if (!world_ao.failed)
+		platform_log("GPU: display.ambient_occlusion \"world\"'s shaders cannot be made here (refer to the shader log "
+			"above): drawn without it");
+	world_ao.failed = TRUE;
+}
+
+void halo_world_ao_span(int span)
+{
+	world_ao.span = span;
+}
+
+void halo_world_ao_window(float const field[2][4], float const parameters[2][4], float const (*proxies)[3][4],
+	int count, float const grid[2][4], unsigned int const (*cells)[4])
+{
+	/* (19 KB with the grid: on the heap, made once, not on the stack or in
+	the image) */
+	static struct xgpu_world_ao_block *made;
+
+	if (count >= 0 && !made)
+		made = malloc(sizeof(*made));
+	if (count >= 0 && !made)
+		count = -1;
+	world_ao.active = count >= 0;
+	world_ao.owner = WORLD_AO_OWNER_NONE;
+	world_ao.reference = 1.0f;
+	if (count < 0)
+	{
+		xgpu_backend_world_ao_window(NULL);
+		return;
+	}
+	world_ao.view = config_boolean("debug.world_ao_view");
+	if (count > XGPU_WORLD_AO_PROXIES_MAXIMUM)
+		count = XGPU_WORLD_AO_PROXIES_MAXIMUM;
+	memset(made, 0, sizeof(*made));
+	memcpy(made->field, field, sizeof(made->field));
+	memcpy(made->parameters, parameters, sizeof(made->parameters));
+	if (count)
+		memcpy(made->proxies, proxies, (size_t)count * sizeof(made->proxies[0]));
+	made->parameters[0][3] = (float)count;
+	memcpy(made->grid, grid, sizeof(made->grid));
+	memcpy(made->cells, cells, sizeof(made->cells));
+	xgpu_backend_world_ao_window(made);
+}
+
+void halo_world_ao_object(int owner, float reference)
+{
+	world_ao.owner = owner;
+	world_ao.reference = reference;
+}
+
+void halo_world_ao_field(int part, unsigned long width, unsigned long height, unsigned long depth,
+	unsigned long z_first, unsigned long z_count, void const *data)
+{
+	xgpu_backend_world_ao_field(part, width, height, depth, z_first, z_count, data);
 }
 
 /* a draw that writes the depth, made to write the occlusion's marks of its
@@ -851,6 +988,7 @@ static void journal_draw(unsigned long op, unsigned long primitive, unsigned lon
 	unsigned long base_vertex, unsigned long minimum);
 static void journal_operation(unsigned long op, const void *arguments, unsigned long bytes);
 static void journal_page(unsigned long page);
+static void mirror_page_size_set(unsigned long size);
 static void journal_vertex_shader(struct vertex_shader_object *object);
 static void journal_settings_blind(unsigned long words[3]);
 static void journal_vertex_shader_identify(struct vertex_shader_object *object);
@@ -1655,6 +1793,7 @@ static void device_backend_ready(void)
 		device.attributes[index][3] = 1.0f;
 	xgpu_backend_initialize();
 	memory_watch_initialize();
+	mirror_page_size_set(memory_watch_page_size());
 	debug_settings.skip_vertex_shaders = config_string("debug.gpu_skip_vertex_shaders");
 	debug_settings.statistics = config_boolean("debug.gpu_stats");
 #ifdef HALO_VR
@@ -2134,6 +2273,14 @@ int halo_hdr_display_text(int words, char *text, unsigned int size)
 	return hdr_display_text(words ? XGPU_HDR_DISPLAY_WORDS : XGPU_HDR_DISPLAY_VALUE, text, size);
 }
 
+/* config_changes() as halo_screen_commit last took the settings up */
+static unsigned long screen_settings_taken = (unsigned long)-1;
+
+unsigned long halo_gpu_settings_taken(void)
+{
+	return screen_settings_taken;
+}
+
 /* takes up the display's shape and resolution, or the window's, if they
 have changed; between frames, since the game's layout and the targets must
 agree for a whole frame. Returns the width the game draws. */
@@ -2155,6 +2302,9 @@ long halo_screen_commit(void)
 	hdr_read();
 	/* (display.ambient_occlusion) */
 	ambient_occlusion_read();
+	/* (the settings taken up: a map's preparation made again under them,
+	render_enumerate.c) */
+	screen_settings_taken = config_changes();
 	/* (display.picture_position) */
 	picture_position_send();
 	/* (display.gamma) */
@@ -2274,6 +2424,18 @@ void WINAPI D3DDevice_SetRenderTarget(D3DSurface *render_target, D3DSurface *dep
 void WINAPI D3DDevice_SetViewport(CONST D3DVIEWPORT8 *viewport)
 {
 	device.viewport = *viewport;
+	viewport_update_constants();
+}
+
+void d3d8_viewport_depth_range(float minimum, float maximum, float previous[2])
+{
+	if (previous)
+	{
+		previous[0] = device.viewport.MinZ;
+		previous[1] = device.viewport.MaxZ;
+	}
+	device.viewport.MinZ = minimum;
+	device.viewport.MaxZ = maximum;
 	viewport_update_constants();
 }
 
@@ -3237,7 +3399,7 @@ static void pipeline_state_describe(BOOL has_depth, struct xgpu_pipeline_key *ke
 }
 /* the uniforms of the latest draws, converted from these inputs; the serial
 counts the conversions */
-#define DRAW_UNIFORM_INPUT_COUNT (4 + 4 + 16 + 1 + 16 + 2 + 4 + 1 + 1 + 7 * D3DTSS_MAXSTAGES)
+#define DRAW_UNIFORM_INPUT_COUNT (4 + 4 + 16 + 1 + 16 + 2 + 4 + 1 + 1 + 7 * D3DTSS_MAXSTAGES + 2)
 
 static DWORD draw_uniform_inputs[DRAW_UNIFORM_INPUT_COUNT];
 static struct xgpu_draw_uniforms draw_uniforms;
@@ -3265,6 +3427,7 @@ static void draw_uniforms_update(const float texture_scale[4][4])
 {
 	DWORD inputs[DRAW_UNIFORM_INPUT_COUNT];
 	unsigned long count = 0;
+	float world_object[2];
 	int stage;
 
 	memcpy(&inputs[count], device.viewport_scale, sizeof(device.viewport_scale));
@@ -3287,6 +3450,12 @@ static void draw_uniforms_update(const float texture_scale[4][4])
 	inputs[count++] = D3D__RenderState[D3DRS_FOGDENSITY];
 	inputs[count++] = D3D__RenderState[D3DRS_ALPHAREF];
 	inputs[count++] = (DWORD)UI_OFFSET;
+	/* (display.ambient_occlusion "world": the draw's object, its owner
+	slot and reference; -1 and 1 without the window's block) */
+	world_object[0] = world_ao.active ? (float)world_ao.owner : (float)WORLD_AO_OWNER_NONE;
+	world_object[1] = world_ao.active ? world_ao.reference : 1.0f;
+	memcpy(&inputs[count], world_object, sizeof(world_object));
+	count += 2;
 	for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
 	{
 		DWORD *state = D3D__TextureState[stage];
@@ -3337,6 +3506,8 @@ static void draw_uniforms_update(const float texture_scale[4][4])
 			converted->texture_lod_bias[stage] = dword_to_float(state[D3DTSS_MIPMAPLODBIAS]);
 		}
 		converted->screen_offset = (float)UI_OFFSET;
+		converted->world_ao[0] = world_object[0];
+		converted->world_ao[1] = world_object[1];
 	}
 }
 
@@ -3831,7 +4002,97 @@ static void manifest_note_basis(const struct vertex_shader_object *program, cons
 	context.hdr_category = (uint8_t)hdr.category;
 	context.hdr_view = hdr.view ? 1 : 0;
 	context.hdr_kind = (uint16_t)hdr.kind;
+	/* (display.ambient_occlusion "world"'s, as with it on: its window's
+	span as the game draws it, whatever the setting, as the journal notes
+	it) */
+	context.world = world_ao_applies() ? 1 : 0;
 	xgpu_manifest_note_basis(key, &context);
+}
+
+/* the draw's pipeline as the facts derive it (xgpu_draw_derive), bound;
+FALSE if none can be drawn with. Where the lit one cannot be made: without
+the world's light, where it had it (world_ao_fail: from here on), else
+lit by none of the shaders' lighting, its program's lighting or its split
+noted as failed */
+static BOOL pipeline_bind(struct vertex_shader_object *program, struct xgpu_draw_facts *facts,
+	struct xgpu_pipeline_key *pipeline_key)
+{
+	struct xgpu_draw_derived derived;
+	BOOL chosen = FALSE, lit;
+
+	lit = xgpu_draw_derive(facts, FALSE, &derived);
+	if (lit)
+	{
+		pipeline_derived(&derived, pipeline_key);
+		chosen = xgpu_backend_pipeline(pipeline_key);
+	}
+	if (lit && !chosen && (derived.ambient_occlusion & XGPU_AMBIENT_OCCLUSION_WORLD))
+	{
+		world_ao_fail();
+		facts->world = 0;
+		lit = xgpu_draw_derive(facts, FALSE, &derived);
+		if (lit)
+		{
+			pipeline_derived(&derived, pipeline_key);
+			chosen = xgpu_backend_pipeline(pipeline_key);
+		}
+	}
+	/* (not made: drawn unlit by these shaders instead, below; not at all,
+	were it to fail too) */
+	if (lit && !chosen && derived.lighting == XGPU_LIGHTING_MODEL_SPLIT)
+	{
+		platform_log("GPU: vertex shader %lu cannot hand on its ambient light apart (refer to the shader log "
+			"above): drawn without the ambient occlusion", program->id);
+		program->split_failed = TRUE;
+	}
+	else if (lit && !chosen)
+	{
+		platform_log(derived.lighting == XGPU_LIGHTING_ENVIRONMENT ? "GPU: vertex shader %lu cannot be lit by the "
+			"dynamic lights (refer to the shader log above): lit by the game's own passes" : "GPU: vertex shader %lu "
+			"cannot be lit for each pixel here (refer to the shader log above): lit for each vertex", program->id);
+		program->lighting_failed = TRUE;
+	}
+	if (!chosen)
+	{
+		xgpu_draw_derive(facts, TRUE, &derived);
+		pipeline_derived(&derived, pipeline_key);
+		chosen = xgpu_backend_pipeline(pipeline_key);
+	}
+	return chosen;
+}
+
+/* display.ambient_occlusion "world": each pipeline with the world's light
+(by its number: xgpu_backend_pipeline_number) told its stand-in, the
+pipeline the draw would have without the world, which the backend draws
+with until the world's is made (and while a map is prepared: the world's
+pipelines are never made in a load). Found the first time the number is
+drawn with: the draw derived again from its facts without the world's
+light (basis: its pipeline before the derivation), then the world's bound
+again. */
+#define WORLD_AO_STAND_INS 0x4000
+static struct
+{
+	unsigned long number[WORLD_AO_STAND_INS];
+} world_ao_stand_ins;
+
+static void world_ao_stand_in(struct vertex_shader_object *program, const struct xgpu_draw_facts *facts,
+	const struct xgpu_pipeline_key *basis, const struct xgpu_pipeline_key *pipeline_key)
+{
+	unsigned long number = xgpu_backend_pipeline_number(), slot = number % WORLD_AO_STAND_INS;
+	struct xgpu_draw_facts plain_facts = *facts;
+	struct xgpu_pipeline_key plain_key = *basis;
+	unsigned long plain = 0;
+
+	if (world_ao_stand_ins.number[slot] == number + 1)
+		return;
+	world_ao_stand_ins.number[slot] = number + 1;
+	plain_facts.world = 0;
+	if (pipeline_bind(program, &plain_facts, &plain_key))
+		plain = xgpu_backend_pipeline_number();
+	/* (the world's bound again, and told its stand-in) */
+	if (!xgpu_backend_pipeline(pipeline_key) || xgpu_backend_pipeline_number() != number)
+		return;
+	xgpu_backend_pipeline_stand_in(plain && plain != number ? plain : 0);
 }
 
 /* the draw's description to the backend: its textures, its targets, its
@@ -3841,12 +4102,11 @@ static BOOL prepare_draw(BOOL immediate, unsigned long primitive)
 {
 	struct vertex_shader_object *program = current_program();
 	struct nv2a_pixel_shader_key key;
-	struct xgpu_pipeline_key pipeline_key;
+	struct xgpu_pipeline_key pipeline_key, basis;
 	struct xgpu_dynamic_state dynamic;
 	struct xgpu_draw_facts facts;
-	struct xgpu_draw_derived derived;
 	float texture_scale[4][4];
-	BOOL has_depth = FALSE, chosen = FALSE, ready;
+	BOOL has_depth = FALSE, ready;
 	int stage;
 	double traced;
 
@@ -3969,33 +4229,13 @@ static BOOL prepare_draw(BOOL immediate, unsigned long primitive)
 	facts.lights_active = dynamic_lights_active();
 	facts.environment = dynamic_lights.environment;
 	facts.sample_mask = xgpu_backend_capabilities.sample_mask;
-	if (xgpu_draw_derive(&facts, FALSE, &derived))
-	{
-		pipeline_derived(&derived, &pipeline_key);
-		chosen = xgpu_backend_pipeline(&pipeline_key);
-		/* (not made: drawn unlit by these shaders instead, below; not at all,
-		were it to fail too) */
-		if (!chosen && derived.lighting == XGPU_LIGHTING_MODEL_SPLIT)
-		{
-			platform_log("GPU: vertex shader %lu cannot hand on its ambient light apart (refer to the shader log "
-				"above): drawn without the ambient occlusion", program->id);
-			program->split_failed = TRUE;
-		}
-		else if (!chosen)
-		{
-			platform_log(derived.lighting == XGPU_LIGHTING_ENVIRONMENT ? "GPU: vertex shader %lu cannot be lit by the "
-				"dynamic lights (refer to the shader log above): lit by the game's own passes" : "GPU: vertex shader %lu "
-				"cannot be lit for each pixel here (refer to the shader log above): lit for each vertex", program->id);
-			program->lighting_failed = TRUE;
-		}
-	}
-	ready = chosen;
-	if (!chosen)
-	{
-		xgpu_draw_derive(&facts, TRUE, &derived);
-		pipeline_derived(&derived, &pipeline_key);
-		ready = xgpu_backend_pipeline(&pipeline_key);
-	}
+	/* (display.ambient_occlusion "world": its light, where its window is
+	given and the draw takes it: world_ao_key) */
+	facts.world = world_ao_key(XGPU_AMBIENT_OCCLUSION_LIGHT_NONE);
+	basis = pipeline_key;
+	ready = pipeline_bind(program, &facts, &pipeline_key);
+	if (ready && (pipeline_key.pixel.ambient_occlusion & XGPU_AMBIENT_OCCLUSION_WORLD))
+		world_ao_stand_in(program, &facts, &basis, &pipeline_key);
 #ifdef HALO_VR
 	if (vr_gl.multiview && vr_gl.statistics && !program->program->projects)
 	{
@@ -4246,14 +4486,17 @@ while, and draws that use it stream their data as before. */
 
 #define MIRROR_SEGMENT_SIZE XGPU_MIRROR_SEGMENT_SIZE
 #define MIRROR_SEGMENT_COUNT (PLATFORM_CONTIGUOUS_SIZE / MIRROR_SEGMENT_SIZE)
-/* (the protection's page: 16 KB on Apple's hardware, the Mac's and the
-iPhone's; a 4 KB page there shared its protection with three others, whose
-game-written vertices then faulted every frame) */
-#if defined(HALO_MACOS)
-#define MIRROR_PAGE_SIZE 0x4000UL
-#else
-#define MIRROR_PAGE_SIZE 0x1000UL
-#endif
+/* The mirror's page is the write tracking's (memory_watch_page_size): the
+host's page, 4 KB, or 16 KB on Apple's hardware (the Mac's and the
+iPhone's) and on the Android and ARM Linux kernels that use them, 64 KB on
+some ARM Linux ones. A smaller page would share its protection with others,
+whose game-written vertices then faulted every frame: each upload protected
+the whole host page again. The arrays have room for the smallest page, the
+window's 4 KB (MIRROR_PAGE_UNIT). */
+#define MIRROR_PAGE_UNIT 0x1000UL
+#define MIRROR_PAGE_SLOTS (PLATFORM_CONTIGUOUS_SIZE / MIRROR_PAGE_UNIT)
+static unsigned long mirror_page_size = MIRROR_PAGE_UNIT;
+#define MIRROR_PAGE_SIZE mirror_page_size
 #define MIRROR_PAGE_COUNT (PLATFORM_CONTIGUOUS_SIZE / MIRROR_PAGE_SIZE)
 /* rewrites no more than this many frames apart ... */
 #define MIRROR_REWRITE_FRAMES 2
@@ -4273,14 +4516,28 @@ enum
 
 static struct
 {
-	unsigned char state[MIRROR_PAGE_COUNT];
-	unsigned char rewrites[MIRROR_PAGE_COUNT];
+	unsigned char state[MIRROR_PAGE_SLOTS];
+	unsigned char rewrites[MIRROR_PAGE_SLOTS];
 	/* the page's memory_watch generation when it was uploaded */
-	unsigned long generation[MIRROR_PAGE_COUNT];
-	unsigned long rewritten_frame[MIRROR_PAGE_COUNT];
+	unsigned long generation[MIRROR_PAGE_SLOTS];
+	unsigned long rewritten_frame[MIRROR_PAGE_SLOTS];
 	/* the times the page has turned volatile (its period's doublings) */
-	unsigned char volatile_times[MIRROR_PAGE_COUNT];
+	unsigned char volatile_times[MIRROR_PAGE_SLOTS];
 } mirror;
+
+/* the mirror's page, the write tracking's (as the device's backend is made
+ready, before the mirror holds a page), once: a power of two from the unit
+to a segment, else the unit */
+static void mirror_page_size_set(unsigned long size)
+{
+	static BOOL set;
+
+	if (set)
+		return;
+	set = TRUE;
+	if (size >= MIRROR_PAGE_UNIT && size <= MIRROR_SEGMENT_SIZE && !(size & (size - 1)))
+		mirror_page_size = size;
+}
 
 /* uploads the pages of [first, last) that are absent or stale; FALSE if one
 of them turns out to be volatile */
@@ -5798,7 +6055,7 @@ the count of its state's words that differ from the entry's before, a pair
 then its tag's index and the bitmap's; the pages', JOURNAL_PAGES and the
 count of runs, then each run's first unit and the unit past it. A unit is
 JOURNAL_PAGE_UNIT's bytes of the contiguous window, whatever the platform's
-mirror page (MIRROR_PAGE_SIZE: 16 KB on Apple's hardware, 4 KB elsewhere),
+mirror page (MIRROR_PAGE_SIZE: the host's, 4 KB or larger),
 so that a record made on one plays back on every other: played back, a run
 uploads the pages that hold it, whole (journal_read). */
 
@@ -5806,7 +6063,8 @@ typedef char journal_words_are_dwords[sizeof(DWORD) == sizeof(uint32_t) ? 1 : -1
 /* (the window's 4 KB pages, the contiguous allocator's on every platform:
 xbox_memory.c) */
 #define JOURNAL_PAGE_UNIT 0x1000
-typedef char journal_unit_divides_pages[MIRROR_PAGE_SIZE % JOURNAL_PAGE_UNIT == 0 ? 1 : -1];
+/* (the mirror's page is a power of two times its unit: mirror_page_size_set) */
+typedef char journal_unit_divides_pages[MIRROR_PAGE_UNIT % JOURNAL_PAGE_UNIT == 0 ? 1 : -1];
 
 enum
 {
@@ -5843,7 +6101,7 @@ struct journal_state
 	uint32_t vertex_shader, program, program_address, shader_constant_mode;
 	uint32_t streams[16][2];
 	uint32_t hdr_category, hdr_kind, hdr_view, occlusion_prepass, occlusion_ready;
-	uint32_t lights_environment, lights_count, halos_count, sky, visibility;
+	uint32_t lights_environment, lights_count, halos_count, sky, visibility, world_span;
 	uint32_t render_state[D3DRS_MAX];
 	uint32_t texture_state[D3DTSS_MAXSTAGES][D3DTSS_MAX];
 };
@@ -5867,7 +6125,7 @@ static struct
 	(played) */
 	unsigned long unknown;
 	const struct halo_gpu_journal_bitmaps *bitmaps;
-	unsigned char pages[MIRROR_PAGE_COUNT / 8];
+	unsigned char pages[MIRROR_PAGE_SLOTS / 8];
 } journal;
 
 /* the textures, surfaces and palettes made, in order, and the vertex shaders
@@ -5989,7 +6247,7 @@ struct journal_saved
 	int hdr_category, hdr_kind;
 	BOOL hdr_view, occlusion_prepass, occlusion_ready, occlusion_noted_prepass, occlusion_noted_ready;
 	BOOL lights_environment, visibility;
-	int lights_count, halos_count;
+	int lights_count, halos_count, world_span;
 	unsigned long sky;
 };
 
@@ -6280,6 +6538,9 @@ static void journal_capture(struct journal_state *state)
 	state->halos_count = (uint32_t)dynamic_lights.halos.count;
 	state->sky = (uint32_t)preparation.sky;
 	state->visibility = (uint32_t)device.visibility_test_active;
+	/* (display.ambient_occlusion "world"'s window, whatever the setting: a
+	draw's context in a recording of the manifest, prepare_draw) */
+	state->world_span = (uint32_t)world_ao.span;
 	memcpy(state->render_state, D3D__RenderState, sizeof(state->render_state));
 	memcpy(state->texture_state, D3D__TextureState, sizeof(state->texture_state));
 }
@@ -6470,8 +6731,9 @@ unsigned int *halo_gpu_journal_take(unsigned int *count, unsigned int *unknown)
 
 /* the journal's form: a change to what an entry holds or how it is written
 makes it 2, 3 and so on; its state's size is in it as well (5: the pages'
-runs in JOURNAL_PAGE_UNIT's units, not the platform's pages) */
-#define JOURNAL_FORM 5
+runs in JOURNAL_PAGE_UNIT's units, not the platform's pages; 6: the world's
+window's span, world_span) */
+#define JOURNAL_FORM 6
 
 unsigned int halo_gpu_journal_form(void)
 {
@@ -6553,6 +6815,7 @@ static void journal_restore(const struct journal_state *state)
 	dynamic_lights.halos.count = (int)state->halos_count;
 	preparation.sky = state->sky;
 	device.visibility_test_active = state->visibility != 0;
+	world_ao.span = (int)state->world_span;
 }
 
 static void journal_play(unsigned long op, const struct journal_state *state)
@@ -6769,6 +7032,7 @@ int halo_gpu_journal_replay(const unsigned int *words, unsigned int count, const
 	saved.halos_count = dynamic_lights.halos.count;
 	saved.sky = preparation.sky;
 	saved.visibility = device.visibility_test_active;
+	saved.world_span = world_ao.span;
 
 	journal_recording = FALSE;
 	journal.bitmaps = bitmaps;
@@ -6811,6 +7075,7 @@ int halo_gpu_journal_replay(const unsigned int *words, unsigned int count, const
 	dynamic_lights.halos.count = saved.halos_count;
 	preparation.sky = saved.sky;
 	device.visibility_test_active = saved.visibility;
+	world_ao.span = saved.world_span;
 	journal.bitmaps = NULL;
 	xgpu_backend_invalidate();
 	*unknown = (unsigned int)journal.unknown;

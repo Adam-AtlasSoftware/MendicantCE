@@ -150,6 +150,19 @@ void hud_draw_numbers(
 	long flash_reference_time,
 	real override_scale);
 
+/* port: a mark over the world (a waypoint and its distance, a teammate's
+triangle, a player's name) at the point of the screen where its world point
+projects through the view drawn (in the screen's units, not whole): whole is
+the whole units the game places it at, and what is drawn until
+hud_draw_mark_end is moved on by the rest, so that it keeps to its point as
+the world under it moves, not a unit (several pixels) short of it in steps */
+void hud_draw_mark_begin(
+	real x,
+	real y,
+	point2d *whole);
+void hud_draw_mark_end(
+	void);
+
 /* port: the left of the last picture drawn, in the window's units
 (hud_unit.c: the motion sensor's, which the text chat goes above:
 port/linux/game/network_chat.c) */

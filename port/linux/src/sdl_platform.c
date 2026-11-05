@@ -306,13 +306,13 @@ static BOOL scoreboard_pointer_active;
 static struct platform_keystroke keystroke_queue[KEYSTROKE_QUEUE_SIZE];
 static unsigned long keystroke_head, keystroke_count;
 
+static void screen_keyboard_update(void);
 #ifndef HALO_ANDROID
 /* dsound_sdl.c's: the output device followed */
 void dsound_sdl_output_device_check(void);
 /* updater.c's: the desktop self-updater */
 void updater_start(void);
 void updater_poll(SDL_Window *window);
-static void screen_keyboard_update(void);
 /* the windows' icon, a PNG (tools/embed_assets.py, from port/assets/icon) */
 extern const unsigned int platform_window_icon[];
 extern const unsigned long platform_window_icon_size;
@@ -2837,11 +2837,11 @@ void platform_pump_events(void)
 	updater_poll(platform_window);
 	/* (Settings > Audio's output device, as it changes: dsound_sdl.c) */
 	dsound_sdl_output_device_check();
-	screen_keyboard_update();
 #else
 	/* (display.orientation, as it changes) */
 	orientation_apply();
 #endif
+	screen_keyboard_update();
 #ifndef HALO_ANDROID
 	test_menu_mouse();
 #endif
@@ -3254,6 +3254,133 @@ int platform_binding_capture_poll(int *input)
 	return result;
 }
 
+/* ---------- the system's on-screen keyboard
+
+A menu's text field is typed into (platform_text_field, xinput_sdl.c).
+Where a system's on-screen keyboard is there to bring up, SDL's text input
+runs while the field is typed into: the keyboard comes up with the field and
+goes with it, and what it types arrives as keys (SDL makes a key of each
+letter, digit and sign of ASCII the keyboard types, and its delete and
+Enter keys theirs), which the field reads. Those keyboards are Steam's (in
+Big Picture and in the Steam Deck's Game Mode, which ask for it with
+SDL_ENABLE_STEAM_SCREEN_KEYBOARD) and the touchscreens' builds' own,
+Android's (its activity's, by host_android_text_input) and iOS's.
+Elsewhere text input stays off, as before, so that no input method takes
+the keys the field reads: a Wayland touch screen's keyboard (text-input-v3)
+would type text events, which the field does not read. */
+static int screen_keyboard_wanted;
+/* (each field begun, which brings the keyboard up again: Steam does not say
+when its keyboard goes, by its own Enter or closed by hand, so SDL holds it
+to be up still; after a field ended and another begun in the same frame, as
+the password screen's is after a wrong password, it would not come back.
+A touchscreen's keyboard closed by its own key, while the field is still
+typed into, comes back at the next field begun, or the same tapped again,
+and not before) */
+static int screen_keyboard_requests;
+
+void platform_screen_keyboard(BOOL show, BOOL password)
+{
+	__atomic_store_n(&screen_keyboard_wanted, !show ? 0 : password ? 2 : 1, __ATOMIC_SEQ_CST);
+	if (show)
+		__atomic_add_fetch(&screen_keyboard_requests, 1, __ATOMIC_SEQ_CST);
+}
+
+#ifdef HALO_ANDROID
+/* port/android/guest/runtime/guest_host.h */
+void host_android_text_input(int show, int password);
+int host_android_text_input_active(void);
+#endif
+
+/* whether the system's keyboard is up (SDL's text input running) */
+static BOOL screen_keyboard_active(void)
+{
+#ifdef HALO_ANDROID
+	return host_android_text_input_active() != 0;
+#else
+	return SDL_TextInputActive(platform_window);
+#endif
+}
+
+static void screen_keyboard_stop(void)
+{
+#ifdef HALO_ANDROID
+	host_android_text_input(FALSE, FALSE);
+#else
+	SDL_StopTextInput(platform_window);
+#endif
+}
+
+/* the system's keyboard brought up for one line (a password's, wanted 2,
+for the keyboards that hide what is typed into one): its Enter ends the
+field, and the keyboard goes with it */
+static void screen_keyboard_start(int wanted)
+{
+	platform_log("text field: showing the on-screen keyboard");
+#ifdef HALO_ANDROID
+	host_android_text_input(TRUE, wanted == 2);
+#else
+	{
+		SDL_PropertiesID properties = SDL_CreateProperties();
+
+		SDL_SetBooleanProperty(properties, SDL_PROP_TEXTINPUT_MULTILINE_BOOLEAN, false);
+		SDL_SetNumberProperty(properties, SDL_PROP_TEXTINPUT_TYPE_NUMBER,
+			wanted == 2 ? SDL_TEXTINPUT_TYPE_TEXT_PASSWORD_HIDDEN : SDL_TEXTINPUT_TYPE_TEXT);
+		SDL_StartTextInputWithProperties(platform_window, properties);
+		SDL_DestroyProperties(properties);
+	}
+#endif
+}
+
+/* (on the window's thread, as SDL asks: platform_pump_events) */
+static void screen_keyboard_update(void)
+{
+	/* (a keyboard shown again is closed first, as SDL opens none that it
+	holds to be up, and opened a moment later: Steam takes each as a URL,
+	steam://close/keyboard then steam://open/keyboard, which must not
+	arrive the other way round) */
+	enum { REOPEN_DELAY_MS = 500 };
+	static int requests_handled;
+	static Uint64 open_time;
+	int requests = __atomic_load_n(&screen_keyboard_requests, __ATOMIC_SEQ_CST);
+	int wanted = __atomic_load_n(&screen_keyboard_wanted, __ATOMIC_SEQ_CST);
+
+	if (!wanted)
+	{
+		open_time = 0;
+		if (screen_keyboard_active())
+			screen_keyboard_stop();
+		return;
+	}
+	if (requests != requests_handled)
+	{
+		requests_handled = requests;
+#if defined(HALO_ANDROID) || defined(HALO_IOS)
+		/* (the touchscreens' own keyboard, which SDL knows to be up or
+		closed: brought up if it is not, at once) */
+		if (!screen_keyboard_active())
+			screen_keyboard_start(wanted);
+		return;
+#else
+		if (!SDL_HasScreenKeyboardSupport() ||
+			!SDL_GetHintBoolean(SDL_HINT_ENABLE_STEAM_SCREEN_KEYBOARD, false))
+		{
+			return;
+		}
+		open_time = SDL_GetTicks();
+		if (screen_keyboard_active())
+		{
+			screen_keyboard_stop();
+			open_time += REOPEN_DELAY_MS;
+		}
+#endif
+	}
+	if (open_time && SDL_GetTicks() >= open_time)
+	{
+		open_time = 0;
+		screen_keyboard_start(wanted);
+	}
+}
+
 #ifndef HALO_ANDROID
 /* ---------- the menus' pointer */
 
@@ -3338,83 +3465,6 @@ BOOL platform_ui_pointer_read(struct platform_ui_pointer *pointer)
 void platform_video_window_size(int *width, int *height)
 {
 	SDL_GetWindowSize(platform_window, width, height);
-}
-
-/* ---------- the system's on-screen keyboard */
-
-/* A menu's text field is typed into (platform_text_field, xinput_sdl.c).
-Where Steam's on-screen keyboard is there to bring up (in Big Picture and in
-the Steam Deck's Game Mode, which ask for it with
-SDL_ENABLE_STEAM_SCREEN_KEYBOARD), SDL's text input runs while the field is
-typed into: the keyboard comes up with the field and goes with it, and what
-it types arrives as keys. Elsewhere text input stays off, as before, so that
-no input method takes the keys the field reads: a Wayland touch screen's
-keyboard (text-input-v3) would type text events, which the field does not
-read. */
-static SDL_AtomicInt screen_keyboard_wanted;
-/* (each field begun, which brings the keyboard up again: Steam does not say
-when its keyboard goes, by its own Enter or closed by hand, so SDL holds it
-to be up still; after a field ended and another begun in the same frame, as
-the password screen's is after a wrong password, it would not come back) */
-static SDL_AtomicInt screen_keyboard_requests;
-
-void platform_screen_keyboard(BOOL show, BOOL password)
-{
-	SDL_SetAtomicInt(&screen_keyboard_wanted, !show ? 0 : password ? 2 : 1);
-	if (show)
-		SDL_AddAtomicInt(&screen_keyboard_requests, 1);
-}
-
-/* (on the window's thread, as SDL asks: platform_pump_events) */
-static void screen_keyboard_update(void)
-{
-	/* (a keyboard shown again is closed first, as SDL opens none that it
-	holds to be up, and opened a moment later: Steam takes each as a URL,
-	steam://close/keyboard then steam://open/keyboard, which must not
-	arrive the other way round) */
-	enum { REOPEN_DELAY_MS = 500 };
-	static int requests_handled;
-	static Uint64 open_time;
-	int requests = SDL_GetAtomicInt(&screen_keyboard_requests);
-	int wanted = SDL_GetAtomicInt(&screen_keyboard_wanted);
-
-	if (!wanted)
-	{
-		open_time = 0;
-		if (SDL_TextInputActive(platform_window))
-			SDL_StopTextInput(platform_window);
-		return;
-	}
-	if (requests != requests_handled)
-	{
-		requests_handled = requests;
-		if (!SDL_HasScreenKeyboardSupport() ||
-			!SDL_GetHintBoolean(SDL_HINT_ENABLE_STEAM_SCREEN_KEYBOARD, false))
-		{
-			return;
-		}
-		open_time = SDL_GetTicks();
-		if (SDL_TextInputActive(platform_window))
-		{
-			SDL_StopTextInput(platform_window);
-			open_time += REOPEN_DELAY_MS;
-		}
-	}
-	if (open_time && SDL_GetTicks() >= open_time)
-	{
-		/* one line: the keyboard's Enter ends the field (and Steam's
-		keyboard goes with it); a password's, for the keyboards that hide
-		what is typed into one */
-		SDL_PropertiesID properties = SDL_CreateProperties();
-
-		open_time = 0;
-		platform_log("text field: showing the on-screen keyboard");
-		SDL_SetBooleanProperty(properties, SDL_PROP_TEXTINPUT_MULTILINE_BOOLEAN, false);
-		SDL_SetNumberProperty(properties, SDL_PROP_TEXTINPUT_TYPE_NUMBER,
-			wanted == 2 ? SDL_TEXTINPUT_TYPE_TEXT_PASSWORD_HIDDEN : SDL_TEXTINPUT_TYPE_TEXT);
-		SDL_StartTextInputWithProperties(platform_window, properties);
-		SDL_DestroyProperties(properties);
-	}
 }
 
 #else
@@ -3552,4 +3602,29 @@ void halo_load_trace(char const *phase, char const *detail)
 #endif
 	load_trace_log("LOAD phase=%s wall=%.6f thread=%.6f process=%.6f owner=guest:%llu detail=%s",
 		phase, wall, thread, process, (unsigned long long)SDL_GetCurrentThreadID(), detail ? detail : "");
+}
+
+/* each pass of the game's main loop ended: with the load trace, a frame that
+took longer than LONG_FRAME_SECONDS is recorded ("frame.long", its
+milliseconds; "frame.longest" for each longer than any before), so that a
+hitch in the menus or the game is found and measured on every platform */
+#define LONG_FRAME_SECONDS 0.025
+void halo_load_trace_frame(void)
+{
+	static double previous, longest;
+	struct timespec now;
+	double wall;
+	char detail[32];
+
+	if (!config_boolean("debug.load_trace") || clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+		return;
+	wall = (double)now.tv_sec + (double)now.tv_nsec * 1e-9;
+	if (previous > 0.0 && wall - previous > LONG_FRAME_SECONDS)
+	{
+		snprintf(detail, sizeof(detail), "%.1f", (wall - previous) * 1000.0);
+		halo_load_trace(wall - previous > longest ? "frame.longest" : "frame.long", detail);
+		if (wall - previous > longest)
+			longest = wall - previous;
+	}
+	previous = wall;
 }

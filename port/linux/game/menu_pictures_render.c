@@ -92,6 +92,7 @@ shown, not the loading screen.
 #include "menu_pictures.h"
 #include "render_enumerate.h"
 #include "render_prepared.h"
+#include "world_sdf.h"
 #include "../src/loading_screen.h"
 
 /* sdl_platform.c's: a map load's loading screen given back */
@@ -173,6 +174,9 @@ void main_menu_pictures_end(void);
 /* port_config.c's: the view as a pose was found with, whatever the
 player's settings */
 void config_picture_view(int on);
+/* world_sdf.c's: whether a stock map is missing its distance field
+(display.ambient_occlusion "world": the pass loads it for that alone) */
+int world_sdf_startup_map_wanted(char const *map);
 
 /* ---------- globals */
 
@@ -185,6 +189,9 @@ static struct
 	long poses[MAXIMUM_MENU_PICTURES];
 	boolean record_only[MAXIMUM_MENU_PICTURES];
 	long count;
+	/* a pose whose map is loaded for its distance field alone, not its
+	picture (world_sdf.h) */
+	int fields_only[MAXIMUM_MENU_PICTURES];
 	long index;
 	long done, made;
 	long frames, picture_frames;
@@ -280,6 +287,9 @@ int menu_pictures_textures_wait(void)
 }
 
 /* ---------- the pictures rendered */
+
+/* the last pass's seconds, to the main menu shown (0: none this run) */
+static double prepare_seconds;
 
 static unsigned long long prepare_now(
 	void)
@@ -387,7 +397,7 @@ static void prepare_next(
 		platform_log("menu pictures: %ld of %ld made%s in %.2f s (load %.2f, opening %.2f, scene %.2f, objects %.2f, "
 			"frame %.2f, kept %.2f, after %.2f)", prepare.made, prepare.pictures, prepare.made < prepare.pictures ?
 			", the rest failed (their originals kept)" : prepare.pictures < prepare.count ?
-			", and the maps' preparations recorded" : "",
+			", and the other maps prepared" : "",
 			(double)(prepare_now() - prepare.began) / 1e9, prepare.totals[_phase_load], prepare.totals[_phase_opening],
 			prepare.totals[_phase_scene], prepare.totals[_phase_objects], prepare.totals[_phase_frame],
 			prepare.totals[_phase_keep], prepare.totals[_phase_after]);
@@ -408,7 +418,7 @@ static void prepare_next(
 	prepare.ticks = 0;
 	prepare.quiet_ticks = 0;
 	prepare.frames = prepare.picture_frames = 0;
-	if (!prepare.record_only[prepare.index])
+	if (!prepare.record_only[prepare.index] && !prepare.fields_only[prepare.index])
 		menu_pictures_render_begin(pose);
 	/* (its map's file copied into the cache first, a frame at a time:
 	_prepare_load) */
@@ -479,7 +489,10 @@ static void prepare_picture_failed(
 {
 	long pose = prepare.poses[prepare.index];
 
-	if (!prepare.record_only[prepare.index])
+	if (prepare.fields_only[prepare.index])
+		platform_log("menu pictures: %s %s: its distance field is baked when it is played", menu_picture_poses[pose].map,
+			why);
+	else if (!prepare.record_only[prepare.index])
 		menu_pictures_render_failed(pose, why);
 	prepare_picture_log(pose, "failed");
 	prepare.index++;
@@ -498,6 +511,7 @@ static void prepare_begin(
 	if (prepare.count < 0)
 		prepare.count = 0;
 	csmemset(prepare.record_only, 0, sizeof(prepare.record_only));
+	csmemset(prepare.fields_only, 0, sizeof(prepare.fields_only));
 	csmemset(prepare.unpack_tried, 0, sizeof(prepare.unpack_tried));
 	prepare.made_pictures = prepare.count > 0;
 	prepare.pictures = prepare.count;
@@ -524,6 +538,28 @@ static void prepare_begin(
 			prepare.poses[prepare.count++] = wanted[index];
 		}
 	}
+	/* (display.ambient_occlusion "world": each stock map missing its
+	distance field loaded too, once, where neither its picture nor its
+	preparation is made; those that are bake theirs as they load) */
+	if (world_sdf_startup_wanted())
+	{
+		long pose;
+
+		for (pose = 0; pose < (long)menu_picture_pose_count && prepare.count < MAXIMUM_MENU_PICTURES; pose++)
+		{
+			char const *map = menu_picture_poses[pose].map;
+			long other;
+
+			for (other = 0; other < prepare.count && strcasecmp(menu_picture_poses[prepare.poses[other]].map, map);
+				other++)
+				;
+			if (other == prepare.count && world_sdf_startup_map_wanted(map))
+			{
+				prepare.fields_only[prepare.count] = TRUE;
+				prepare.poses[prepare.count++] = pose;
+			}
+		}
+	}
 	if (prepare.count <= 0)
 		return;
 	platform_log("menu pictures: preparing %ld at %ld times their size", prepare.count, menu_pictures_scale());
@@ -533,7 +569,8 @@ static void prepare_begin(
 	csmemset(prepare.totals, 0, sizeof(prepare.totals));
 	for (index = 0; index < prepare.count; index++)
 	{
-		if (!prepare.record_only[index] && menu_picture_poses[prepare.poses[index]].colour_curve)
+		if (!prepare.record_only[index] && !prepare.fields_only[index] &&
+			menu_picture_poses[prepare.poses[index]].colour_curve)
 			prepare_keep_original(prepare.poses[index]);
 	}
 	config_picture_view(TRUE);
@@ -575,7 +612,7 @@ static void prepare_update(
 			prepare.count - prepare.made);
 		prepare.capture_wanted = FALSE;
 		prepare.overdue = TRUE;
-		if (!prepare.record_only[prepare.index])
+		if (!prepare.record_only[prepare.index] && !prepare.fields_only[prepare.index])
 			menu_pictures_render_failed(prepare.poses[prepare.index], "took too long");
 		prepare_picture_log(prepare.poses[prepare.index], "failed");
 		prepare.index = prepare.count;
@@ -618,6 +655,18 @@ static void prepare_update(
 				}
 			}
 			game_time_set_speed(0.0f);
+			/* (display.ambient_occlusion "world": the BSP the map starts in
+			baked in the background, where nobody waits to play) */
+			world_sdf_startup_map_loaded();
+			if (prepare.fields_only[prepare.index])
+			{
+				/* (no picture, so not one made) */
+				platform_log("menu pictures: %s loaded for its distance field", picture->map);
+				prepare.index++;
+				prepare.done++;
+				prepare_next();
+				break;
+			}
 			prepare.frames = 0;
 			/* (its preparation recorded first, in its first frame as a mission
 			starts: as the player's first frame of it draws, before any tick) */
@@ -691,7 +740,9 @@ static void prepare_update(
 		break;
 	}
 	case _prepare_structure:
-		/* (the structure switched at this frame's start) */
+		/* (the structure switched at this frame's start: its field baked
+		too, if it is another BSP) */
+		world_sdf_startup_map_loaded();
 		prepare_command("debug_camera_set \"0 0 0 0 0 0 50\"");
 		prepare.line = 0;
 		prepare.state = _prepare_objects;
@@ -780,7 +831,8 @@ static void prepare_update(
 			config_picture_view(FALSE);
 			prepare.state = _prepare_off;
 			prepare.drawn = 0;
-			platform_log("menu pictures: the main menu after %.2f s", (double)(prepare_now() - prepare.began) / 1e9);
+			prepare_seconds = (double)(prepare_now() - prepare.began) / 1e9;
+			platform_log("menu pictures: the main menu after %.2f s", prepare_seconds);
 		}
 		break;
 	default:
@@ -837,6 +889,12 @@ void menu_pictures_recording(
 	prepare_screen();
 	if (fraction >= 1.0f)
 		prepare.recorded = 0.0f;
+}
+
+double menu_pictures_pass_seconds(
+	void)
+{
+	return prepare_seconds;
 }
 
 int menu_pictures_begin(

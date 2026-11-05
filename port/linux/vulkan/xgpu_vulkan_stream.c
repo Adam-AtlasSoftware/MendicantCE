@@ -73,6 +73,12 @@ its swapchain.
 /* (the occlusion's set, as the shaders read it) */
 _Static_assert(XGPU_SPIRV_SET_OCCLUSION == XGPU_VULKAN_SET_OCCLUSION &&
 	XGPU_SPIRV_BINDING_AMBIENT_OCCLUSION == XGPU_VULKAN_BINDING_OCCLUSION, "display.ambient_occlusion's set");
+_Static_assert(XGPU_SPIRV_BINDING_WORLD_SDF == XGPU_VULKAN_BINDING_WORLD_SDF &&
+	XGPU_SPIRV_BINDING_WORLD_AO == XGPU_VULKAN_BINDING_WORLD_AO &&
+	XGPU_SPIRV_BINDING_WORLD_SDF_TABLE == XGPU_VULKAN_BINDING_WORLD_SDF_TABLE &&
+	XGPU_SPIRV_BINDING_WORLD_AO_SCENERY == XGPU_VULKAN_BINDING_WORLD_AO_SCENERY &&
+	XGPU_SPIRV_BINDING_WORLD_AO_OBJECTS == XGPU_VULKAN_BINDING_WORLD_AO_OBJECTS,
+	"display.ambient_occlusion \"world\"'s bindings");
 
 /* the mirror's segments: 4 MB of the contiguous window each */
 #define MIRROR_SEGMENT_SIZE 0x400000u
@@ -152,6 +158,11 @@ struct variant
 	uint8_t border[4];
 	uint8_t foveated, pad;
 };
+
+/* the most world pipelines waiting for their shaders, and the most made a
+frame (after the load: never in it) */
+#define WORLD_WAITING_MOST 1024
+#define WORLD_MADE_A_FRAME 2
 
 struct stream_pipeline
 {
@@ -294,6 +305,18 @@ static struct
 	double trace_seconds[4];
 	uint64_t trace_counts[4];
 	uint32_t pipeline_misses;
+	/* display.ambient_occlusion "world": each pipeline's definition as last
+	bound, and its stand-in (0 none: PIPELINE_STAND_IN), which draws until
+	its own is made, and always while a map is prepared; the pipelines whose
+	shaders wait to be made after the load (and in which variant) */
+	const struct xgpu_stream_pipeline_define *definitions[XGPU_STREAM_PIPELINES];
+	uint16_t stand_ins[XGPU_STREAM_PIPELINES];
+	struct
+	{
+		uint16_t id;
+		struct variant variant;
+	} world_waiting[WORLD_WAITING_MOST];
+	uint32_t world_waiting_count;
 	/* the debugging settings (xgpu_vulkan_stream_debug): the statistics
 	logged, the folder the shader modules are written into (NULL: none) */
 	int statistics;
@@ -998,7 +1021,10 @@ static void stream_pipeline_define(void *context, const struct xgpu_stream_pipel
 	(void)context;
 	/* (a number defined again is another pipeline) */
 	if (record->id && record->id < XGPU_STREAM_PIPELINES)
+	{
 		stream.pipelines[record->id].state = XGPU_STREAM_PIPELINE_UNKNOWN;
+		stream.stand_ins[record->id] = 0;
+	}
 	if (record->id == stream.pipeline_id)
 		stream.pipeline_id = 0;
 }
@@ -1171,6 +1197,7 @@ static int pipeline_shaders(struct stream_pipeline *entry, const struct xgpu_str
 	options.debug_texture0 = getenv("HALO_GPU_DEBUG_T0") != NULL;
 	options.debug_flat = getenv("HALO_GPU_DEBUG_FLAT") != NULL;
 	options.reversed_depth = XGPU_VULKAN_REVERSED_DEPTH;
+	options.subgroups = stream.capabilities.subgroups;
 	program = malloc(sizeof(*program));
 	if (!program)
 		return 0;
@@ -1217,6 +1244,13 @@ static int pipeline_shaders(struct stream_pipeline *entry, const struct xgpu_str
 	return 0;
 }
 
+/* a definition whose pixel shader has display.ambient_occlusion "world"'s
+light */
+static int world_definition(const struct xgpu_stream_pipeline_define *definition)
+{
+	return (definition->pixel_program.ambient_occlusion & XGPU_AMBIENT_OCCLUSION_WORLD) != 0;
+}
+
 /* the variant the draws have now */
 static void variant_current(const struct xgpu_stream_pipeline_key *key, struct variant *variant)
 {
@@ -1239,17 +1273,22 @@ static int stream_pipeline(void *context, uint32_t id, const struct xgpu_stream_
 	if (!id || id >= XGPU_STREAM_PIPELINES)
 		return 0;
 	entry = &stream.pipelines[id];
+	stream.definitions[id] = definition;
 	/* (made at first in the variant the draws have now, to tell the guest
-	whether it can be) */
-	if (entry->state == XGPU_STREAM_PIPELINE_UNKNOWN)
+	whether it can be; display.ambient_occlusion "world"'s not: made at
+	their first draw, or after the load where they have a stand-in) */
+	if (entry->state == XGPU_STREAM_PIPELINE_UNKNOWN && !world_definition(definition))
 	{
 		struct variant variant;
 
 		variant_current(key, &variant);
 		pipeline_shaders(entry, definition, &variant);
 	}
-	if (entry->state != XGPU_STREAM_PIPELINE_MADE)
+	if (entry->state != XGPU_STREAM_PIPELINE_MADE &&
+		!(entry->state == XGPU_STREAM_PIPELINE_UNKNOWN && world_definition(definition)))
+	{
 		return 0;
+	}
 	stream.pipeline_id = id;
 	stream.definition = definition;
 	memset(pipeline, 0, sizeof(*pipeline));
@@ -1289,6 +1328,15 @@ static int stream_pipeline(void *context, uint32_t id, const struct xgpu_stream_
 	pipeline->depth_format = key->depth_format == 2 ? XGPU_VULKAN_FORMAT_D24S8 : XGPU_VULKAN_FORMAT_NONE;
 	pipeline->samples = key->samples > 1 ? key->samples : 1;
 	return 1;
+}
+
+static void stream_pipeline_stand_in(void *context, uint32_t id, uint32_t stand_in,
+	const struct xgpu_stream_pipeline_define *definition)
+{
+	(void)context;
+	stream.stand_ins[id] = (uint16_t)stand_in;
+	if (stand_in)
+		stream.definitions[stand_in] = definition;
 }
 
 static void stream_draw_state(void *context, const struct xgpu_stream_dynamic_state *dynamic,
@@ -1414,6 +1462,9 @@ static int uniforms_update(int effect)
 		memcpy(to->bump_matrix, from->bump_matrix, sizeof(to->bump_matrix));
 		memcpy(to->bump_luminance, from->bump_luminance, sizeof(to->bump_luminance));
 		memcpy(to->texture_scale, from->texture_scale, sizeof(to->texture_scale));
+		/* (display.ambient_occlusion "world": the draw's object) */
+		to->world_ao[0] = from->world_ao[0];
+		to->world_ao[1] = from->world_ao[1];
 		memcpy(to->blend_constant, stream.dynamic.blend_color, sizeof(to->blend_constant));
 		for (stage = 0; stage < 4; stage++)
 		{
@@ -1665,20 +1716,29 @@ static int indices_upload(const struct draw_input *input, struct xgpu_vulkan_dra
 	return 1;
 }
 
-/* A map's enumeration should exercise every native pipeline before play.
-Keep first-use misses visible, including the key and layout that need it. */
+/* A map's enumeration should exercise every native pipeline before play
+(and again as a setting changes them: render_enumerate.c). Keep first-use
+misses visible, including the key and layout that need it. A pipeline
+missed is made on the compilers and its draws skipped until it is (a frame
+or two), as Metal's are, never compiled on the render thread: a pipeline is
+a compile of tens of milliseconds, and a burst of them waited for stopped
+the frame for 230 ms. */
 static void pipeline_missed(const struct xgpu_vulkan_pipeline_description *pipeline, uint64_t vertex_program)
 {
 	const struct xgpu_stream_pipeline_key *key = &stream.definition->key;
 
 	stream.pipeline_misses++;
 	host_logf(HOST_LOG_WARN, "vulkan: pipeline missed map preparation: vertex %08x%08x, "
-		"views %u/%u, layout %08x/%08x, key %08x (textures %u, coverage %u, threshold %u), total %u",
+		"views %u/%u, layout %08x/%08x, key %08x (textures %u, coverage %u, threshold %u; lighting %u, "
+		"occlusion %u, hdr %x, per-pixel %u, lights %u, samples %u/%u, colour %u, depth %u), total %u",
 		(unsigned)(vertex_program >> 32), (unsigned)vertex_program, (unsigned)key->views,
 		(unsigned)pipeline->view_mask, bytes_hash(pipeline->attributes, sizeof(pipeline->attributes)),
 		bytes_hash(pipeline->strides, sizeof(pipeline->strides)), bytes_hash(key, sizeof(*key)),
 		(unsigned)key->pixel.texture_modes, (unsigned)key->pixel.coverage_alpha,
-		(unsigned)key->pixel.point_threshold, stream.pipeline_misses);
+		(unsigned)key->pixel.point_threshold, (unsigned)key->lighting, (unsigned)key->pixel.ambient_occlusion,
+		(unsigned)key->pixel.hdr, (unsigned)key->pixel.per_pixel_lighting, (unsigned)key->pixel.dynamic_lights,
+		(unsigned)key->samples, (unsigned)key->pixel.alpha_test_samples, (unsigned)key->color_format,
+		(unsigned)key->depth_format, stream.pipeline_misses);
 }
 
 /* A native key can depend on backend state absent from the manifest.
@@ -1758,8 +1818,11 @@ static int effect_textures(struct xgpu_vulkan_texture textures[4])
 
 /* a draw of the current pipeline, made and drawn: its shaders for the
 draw's variant, its pipeline for the vertex layout, its textures and
-uniforms, its vertices and indices; nothing if it cannot be drawn */
-static void draw_input(const struct draw_input *input)
+uniforms, its vertices and indices; nothing if it cannot be drawn. Apart
+(a world pipeline that has a stand-in): its shaders not made here, its
+pipeline made apart from the draws (xgpu_vulkan_pipeline_ready), and FALSE
+before anything is done where either is not made yet; else TRUE */
+static int draw_pipeline(const struct draw_input *input, int apart)
 {
 	struct xgpu_vulkan_pipeline_description pipeline = stream.pipeline;
 	struct xgpu_vulkan_draw draw;
@@ -1770,12 +1833,14 @@ static void draw_input(const struct draw_input *input)
 	double traced;
 
 	if (!stream.pipeline_id || !stream.definition || !input->count)
-		return;
+		return 1;
 	entry = &stream.pipelines[stream.pipeline_id];
 	variant_current(&stream.definition->key, &variant);
 	variant.integer_attributes = stream.definition->key.immediate ? 0 : input->integers;
+	if (apart && (entry->state != XGPU_STREAM_PIPELINE_MADE || memcmp(&entry->variant, &variant, sizeof(variant))))
+		return 0;
 	if (!pipeline_shaders(entry, stream.definition, &variant))
-		return;
+		return 1;
 	pipeline.vertex_shader = entry->vertex_shader;
 	pipeline.pixel_shader = entry->pixel_shader;
 	pipeline.primitive_class = primitive_class(input->primitive);
@@ -1808,7 +1873,7 @@ static void draw_input(const struct draw_input *input)
 	for (index = 0; index < 16; index++)
 	{
 		if ((draw.bindings & (1u << index)) && !(input->present & (1u << index)))
-			return;
+			return 1;
 	}
 	pipeline.view_mask = stream.views > 1 ? (uint8_t)((1u << stream.views) - 1) : 0;
 	if (target_image(stream.color))
@@ -1824,13 +1889,22 @@ static void draw_input(const struct draw_input *input)
 		uint64_t vertex_program = stream.definition->key.vertex_program[0] |
 			((uint64_t)stream.definition->key.vertex_program[1] << 32);
 
-		if (stream.preparing)
+		if (apart)
+		{
+			draw.pipeline = xgpu_vulkan_pipeline_ready(&pipeline);
+			if (!draw.pipeline)
+				return 0;
+		}
+		else if (stream.preparing)
 			(void)xgpu_vulkan_pipeline_prepare(&pipeline);
+		else if (stream.prepared)
+			draw.pipeline = xgpu_vulkan_pipeline_ready(&pipeline);
 		else
 			draw.pipeline = xgpu_vulkan_pipeline(&pipeline);
 		if (xgpu_vulkan_pipeline_count() != before)
 			pipeline_description_trace(&pipeline, vertex_program, &variant);
-		if (!stream.preparing && stream.prepared && xgpu_vulkan_pipeline_count() != before)
+		/* (a world pipeline made apart has its stand-in: not a miss) */
+		if (!apart && !stream.preparing && stream.prepared && xgpu_vulkan_pipeline_count() != before)
 			pipeline_missed(&pipeline, vertex_program);
 	}
 	if (stream.preparing)
@@ -1845,10 +1919,10 @@ static void draw_input(const struct draw_input *input)
 		if (entry->effect)
 			(void)xgpu_vulkan_textures_thickness(&stream.stages[0].stage);
 		preparation_end(0, traced);
-		return;
+		return 1;
 	}
 	if (!draw.pipeline)
-		return;
+		return 1;
 	draw.topology = primitive_topology(input->primitive);
 	draw.count = input->count;
 	draw.vertex_offset = input->vertex_offset;
@@ -1877,7 +1951,7 @@ static void draw_input(const struct draw_input *input)
 			if ((draw.bindings & (1u << index)) && !source_range(&input->sources[index], &draw.vertices[index]))
 			{
 				preparation_end(2, traced);
-				return;
+				return 1;
 			}
 		}
 		if (draw.bindings & (1u << XGPU_VULKAN_BINDING_CONSTANT))
@@ -1887,21 +1961,21 @@ static void draw_input(const struct draw_input *input)
 			if (!to)
 			{
 				preparation_end(2, traced);
-				return;
+				return 1;
 			}
 			memcpy(to, input->values, 16 * 16);
 		}
 		if (!indices_upload(input, &draw))
 		{
 			preparation_end(2, traced);
-			return;
+			return 1;
 		}
 		preparation_end(2, traced);
 		if (serial == xgpu_vulkan_serial())
 			break;
 	}
 	if (attempt == 3)
-		return;
+		return 1;
 	memcpy(draw.textures, stream.textures, sizeof(draw.textures));
 	draw.constants = stream.constants_range;
 	draw.uniforms = stream.uniforms_range;
@@ -1911,6 +1985,12 @@ static void draw_input(const struct draw_input *input)
 	draw.reads_color = pipeline.color_read;
 	{
 		const struct xgpu_stream_pipeline_key *key = &stream.definition->key;
+
+		draw.kind[0] = stream.definition->pixel_program.ambient_occlusion;
+		draw.kind[1] = key->lighting;
+		draw.kind[2] = stream.definition->pixel_program.per_pixel_lighting;
+		draw.kind[3] = (uint8_t)(XGPU_VULKAN_DRAW_GAME | (key->depth_write ? 1 : 0) | (key->blend ? 2 : 0) |
+			(stream.definition->pixel_program.dynamic_lights ? 4 : 0));
 
 		draw.writes_depth = (key->depth_test && key->depth_write && !entry->effect_tests_depth) ||
 			(key->stencil_test && key->stencil_write_mask &&
@@ -1928,6 +2008,85 @@ static void draw_input(const struct draw_input *input)
 	traced = preparation_start();
 	xgpu_vulkan_draw(&draw);
 	preparation_end(3, traced);
+	return 1;
+}
+
+/* display.ambient_occlusion "world": a world pipeline's shaders to be made
+after the load, in this variant (once) */
+static void world_wait(uint32_t id, const struct variant *variant)
+{
+	uint32_t index;
+
+	for (index = 0; index < stream.world_waiting_count; index++)
+	{
+		if (stream.world_waiting[index].id == id && !memcmp(&stream.world_waiting[index].variant, variant,
+			sizeof(*variant)))
+		{
+			return;
+		}
+	}
+	if (stream.world_waiting_count == WORLD_WAITING_MOST)
+		return;
+	stream.world_waiting[stream.world_waiting_count].id = (uint16_t)id;
+	stream.world_waiting[stream.world_waiting_count].variant = *variant;
+	stream.world_waiting_count++;
+}
+
+/* (each frame, never while a map is prepared) a few of the world
+pipelines' shaders made; their pipelines are made apart from the draws as
+they are next drawn (draw_pipeline) */
+static void world_make_some(void)
+{
+	uint32_t made = 0;
+
+	while (stream.world_waiting_count && made < WORLD_MADE_A_FRAME && !stream.preparing)
+	{
+		uint32_t id = stream.world_waiting[0].id;
+		struct variant variant = stream.world_waiting[0].variant;
+		struct stream_pipeline *entry = &stream.pipelines[id];
+
+		memmove(&stream.world_waiting[0], &stream.world_waiting[1],
+			(stream.world_waiting_count - 1) * sizeof(stream.world_waiting[0]));
+		stream.world_waiting_count--;
+		if (!stream.stand_ins[id] || !stream.definitions[id] || entry->state == XGPU_STREAM_PIPELINE_FAILED ||
+			(entry->state == XGPU_STREAM_PIPELINE_MADE && !memcmp(&entry->variant, &variant, sizeof(variant))))
+		{
+			continue;
+		}
+		pipeline_shaders(entry, stream.definitions[id], &variant);
+		made++;
+	}
+}
+
+/* a draw: with a world pipeline that has a stand-in, the world's where it
+is made, else the stand-in's (and the world's made after the load); every
+other with its own */
+static void draw_input(const struct draw_input *input)
+{
+	uint32_t id = stream.pipeline_id, stand_in = id ? stream.stand_ins[id] : 0;
+	const struct xgpu_stream_pipeline_define *definition = stream.definition;
+	struct xgpu_vulkan_pipeline_description pipeline;
+
+	if (!stand_in || !definition || !world_definition(definition) || !stream.definitions[stand_in])
+	{
+		draw_pipeline(input, 0);
+		return;
+	}
+	if (!stream.preparing && draw_pipeline(input, 1))
+		return;
+	{
+		struct variant variant;
+
+		variant_current(&definition->key, &variant);
+		variant.integer_attributes = definition->key.immediate ? 0 : input->integers;
+		world_wait(id, &variant);
+	}
+	pipeline = stream.pipeline;
+	if (stream_pipeline(NULL, stand_in, stream.definitions[stand_in]))
+		draw_pipeline(input, 0);
+	stream.pipeline_id = id;
+	stream.definition = definition;
+	stream.pipeline = pipeline;
 }
 
 /* the draws of set_vertices's input */
@@ -2421,6 +2580,25 @@ static void stream_panini(void *context, const struct xgpu_stream_panini *record
 	targets_bind();
 }
 
+/* ---------- display.ambient_occlusion "world" (docs/world-ao.md)
+
+The structure's distance field's slices (the decoder has checked their
+bounds and size) and each window's block, kept by xgpu_vulkan_world_ao.c
+for the occlusion set the draws that light by it bind. */
+
+static void stream_world_ao_field(void *context, const struct xgpu_stream_world_ao_field *record)
+{
+	(void)context;
+	xgpu_vulkan_world_ao_field(record->part, record->width, record->height, record->depth, record->z_first,
+		record->z_count, record->width && record->size ? host_pointer(record->data) : NULL);
+}
+
+static void stream_world_ao_window(void *context, const struct xgpu_stream_world_ao_window *record)
+{
+	(void)context;
+	xgpu_vulkan_world_ao_window(record->active ? &record->block : NULL);
+}
+
 /* ---------- display.hdr (port/linux/src/xgpu_hdr.h)
 
 The front end's state, for the tone map and the core's encoding and
@@ -2581,6 +2759,7 @@ static void stream_frame_end(void *context)
 	int present_window = !host_render_stream_loading_holds();
 
 	(void)context;
+	world_make_some();
 	target_resolve(back_buffer);
 #ifdef HALO_VR
 	/* (the headset shows the frames: the window, hidden, is not presented
@@ -2781,6 +2960,7 @@ const struct host_render_backend *xgpu_vulkan_stream_backend(void)
 		backend.vertex_lighting = stream_vertex_lighting;
 		backend.pipeline_define = stream_pipeline_define;
 		backend.pipeline = stream_pipeline;
+		backend.pipeline_stand_in = stream_pipeline_stand_in;
 		backend.draw_state = stream_draw_state;
 		backend.mirror_write = stream_mirror_write;
 		backend.set_vertices = stream_set_vertices;
@@ -2812,6 +2992,11 @@ const struct host_render_backend *xgpu_vulkan_stream_backend(void)
 		backend.picture_top = stream_picture_top;
 		backend.gamma = stream_gamma;
 		backend.panini = stream_panini;
+		/* display.ambient_occlusion "world" (#578, docs/world-ao.md): the
+		field's 3D image (XGPU_SPIRV_BINDING_WORLD_SDF) and the window's block
+		(XGPU_SPIRV_BINDING_WORLD_AO), both in XGPU_SPIRV_SET_OCCLUSION */
+		backend.world_ao_field = stream_world_ao_field;
+		backend.world_ao_window = stream_world_ao_window;
 #ifdef HALO_VR
 		host_vulkan_vr_backend(&backend);
 #endif

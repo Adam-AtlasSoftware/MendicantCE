@@ -42,6 +42,13 @@ its draws, is passed over for the rest of the game (it cannot be deleted)
 and the walk made, which records into z:\prepared as ever. The first start's
 pass does not load a map only to record it (record_only) where a record of
 it is shipped.
+
+A map prepared again in play (a setting that changes its draws changed:
+render_enumerate.c) plays the record it was prepared from (played), whatever
+structure it is in now: a record holds every structure's materials, its
+objects and effects, so that the one it started in serves them all. A
+record that does not play then is left as it is (it played as the map
+loaded) and the walk made.
 */
 
 #include "cseries.h"
@@ -79,7 +86,7 @@ and the game's code it draws through) or to this file's form must make it 2,
 build, so that an update keeps them; the journal's own form is in the key
 too (halo_gpu_journal_form), and a record whose replay does not make its
 draws is made again all the same. */
-#define PREPARED_VERSION 2
+#define PREPARED_VERSION 3
 /* the most words a record may hold */
 #define PREPARED_MAXIMUM_WORDS (64UL * 1024 * 1024)
 
@@ -152,6 +159,18 @@ static struct
 	/* the shipped records passed over (their checksum and key's hash) */
 	uint64_t rejected[64];
 	unsigned long rejected_count;
+	/* the record the map loaded now was prepared from (played back, or
+	recorded): its map, whether it draws mirrors, its key; the record
+	chosen is it, for a preparation in play (not the one the map's
+	structure now would key); the walk recorded draws mirrors */
+	struct
+	{
+		boolean known, mirrors;
+		unsigned long checksum;
+		char scenario[64];
+		uint64_t key;
+	} played;
+	boolean again, recording_mirrors;
 } prepared;
 
 static int prepared_panini(float projection[8])
@@ -217,6 +236,13 @@ unsigned long long render_prepared_key(char const *scenario, unsigned long journ
 }
 
 /* the settings, backend and GPU a record's draws are derived under now */
+static uint64_t prepared_derivation(void);
+
+unsigned long long render_prepared_derivation(void)
+{
+	return prepared_derivation();
+}
+
 static uint64_t prepared_derivation(void)
 {
 	uint64_t hash = halo_gpu_journal_derivation(XGPU_MANIFEST_HASH_START);
@@ -235,6 +261,19 @@ static uint64_t prepared_derivation(void)
 	return hash;
 }
 
+/* the record the map loaded now is prepared from (prepared_choose's) */
+static void prepared_played(boolean mirrors)
+{
+	char const *scenario = global_scenario_index != NONE ? tag_get_name(global_scenario_index) : "";
+
+	prepared.played.known = TRUE;
+	prepared.played.mirrors = mirrors;
+	prepared.played.checksum = prepared.checksum;
+	strncpy(prepared.played.scenario, scenario, sizeof(prepared.played.scenario) - 1);
+	prepared.played.scenario[sizeof(prepared.played.scenario) - 1] = 0;
+	prepared.played.key = prepared.key;
+}
+
 /* the record's key and file, for the map loaded now */
 static boolean prepared_choose(boolean mirrors)
 {
@@ -246,6 +285,12 @@ static boolean prepared_choose(boolean mirrors)
 	/* (the structure the map starts in: a saved game's may be another) */
 	hash = prepared_key(prepared_key_settings(scenario), mirrors, global_structure_bsp_index_get());
 	prepared.checksum = cache_files_get_checksum();
+	/* (prepared again in play: from its record, whatever structure it is in) */
+	prepared.again = prepared.played.known && prepared.played.checksum == prepared.checksum &&
+		prepared.played.mirrors == mirrors && !strcmp(prepared.played.scenario, scenario) &&
+		prepared.played.key != hash;
+	if (prepared.again)
+		hash = prepared.played.key;
 	prepared.key = hash;
 	prepared.derivation = prepared_derivation();
 	CreateDirectoryA("z:\\prepared", NULL);
@@ -559,16 +604,23 @@ boolean render_prepared_replay(boolean mirrors)
 	if (!render_prepared_played(formed, unknown, missing, header.derivation == prepared.derivation))
 	{
 		platform_log("render: the map's preparation's record played back does not make its draws (%s, %u objects "
-			"not found, %lu of its %lu draws not made, %lu made): it is made again", formed ? "well formed" :
-			"malformed", unknown, missing, (unsigned long)header.draw_count, count);
-		if (prepared.shipped)
+			"not found, %lu of its %lu draws not made, %lu made): it is made again%s", formed ? "well formed" :
+			"malformed", unknown, missing, (unsigned long)header.draw_count, count, prepared.again ?
+			" (in play, from another structure than its own: the record kept)" : "");
+		/* (in play, from another structure: the record played as the map
+		loaded, and is kept) */
+		if (prepared.again)
+			prepared.played.known = FALSE;
+		else if (prepared.shipped)
 			prepared_shipped_reject(prepared.checksum, prepared.key);
 		else
 			DeleteFileA(prepared.path);
 		return FALSE;
 	}
-	platform_log("render: the map's shaders and pipelines made from its %s record (%lu draws, %lu recorded, %lu words, "
-		"%s, in %lu ms, %.0f ms waited for the GPU's)", prepared.shipped ? "shipped" : "own", count,
+	prepared_played(mirrors);
+	platform_log("render: the map's shaders and pipelines made from its %s record%s (%lu draws, %lu recorded, %lu words, "
+		"%s, in %lu ms, %.0f ms waited for the GPU's)", prepared.shipped ? "shipped" : "own",
+		prepared.again ? ", again in play" : "", count,
 		(unsigned long)header.draw_count, (unsigned long)header.word_count, header.derivation == prepared.derivation ?
 		"its own settings" : "other settings", system_milliseconds() - started, waited * 1000.0);
 	return TRUE;
@@ -577,6 +629,7 @@ boolean render_prepared_replay(boolean mirrors)
 void render_prepared_record_begin(boolean mirrors)
 {
 	prepared.recording = prepared_choose(mirrors);
+	prepared.recording_mirrors = mirrors;
 	if (prepared.recording)
 		halo_gpu_journal_record(&prepared_bitmaps);
 }
@@ -629,6 +682,8 @@ void render_prepared_record_end(void)
 		if (!written)
 			DeleteFileA(temporary);
 	}
+	if (written)
+		prepared_played(prepared.recording_mirrors);
 	/* (its file, scenario and form, as tools/prepared_records.py reads them) */
 	platform_log("render: the map's preparation %s (%lu draws, %u words; %s, %s, form %d %u)", written ? "recorded" :
 		"could not be recorded", draw_count, count, prepared.path, global_scenario_index != NONE ?

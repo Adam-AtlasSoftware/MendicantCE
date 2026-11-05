@@ -196,7 +196,8 @@ enum
 	_dirty_streams = 1 << 10,
 	_dirty_constant_attributes = 1 << 11,
 	_dirty_dynamic_lights = 1 << 12,
-	_dirty_all = (1 << 13) - 1,
+	_dirty_world_ao = 1 << 13,
+	_dirty_all = (1 << 14) - 1,
 };
 
 static struct
@@ -239,6 +240,9 @@ static struct
 	dispatch_queue_t making_queue;
 	dispatch_group_t preparing;
 	BOOL preparing_draws;
+	/* a map's preparation made (before it, a draw waits for its pipeline:
+	pipeline_state_get) */
+	BOOL prepared_once;
 	/* the library the combiner's function is in (the app's, or its source
 	compiled where the app has none: the tests) */
 	id<MTLLibrary> combiner_library;
@@ -314,6 +318,9 @@ static struct
 	float constant_attributes[16][4];
 	/* the enhanced dynamic lights' block and cells */
 	struct xgpu_metal_source dynamic_lights[2];
+	/* display.ambient_occlusion "world"'s field and block */
+	uint32_t world_ao_field, world_ao_table, world_ao_scenery, world_ao_objects;
+	struct xgpu_metal_source world_ao_block;
 
 	/* an image for the presentation that a picture is copied into (a
 	target of levels or layers) */
@@ -2630,7 +2637,7 @@ uint64_t xgpu_metal_frame_end(uint32_t present)
 
 	if (!metal.in_frame)
 		xgpu_metal_frame_begin();
-	/* (the pipelines made while drawing written once no more have come for
+	/* (the pipelines made for the draws written once no more have come for
 	a while, in the background) */
 	if (metal.archive_changed && seconds_now() - metal.archive_changed_at > ARCHIVE_SETTLED_SECONDS)
 		archive_save(0.0);
@@ -3308,10 +3315,18 @@ static void pipeline_make_later(const struct xgpu_metal_pipeline_state_key *key,
 }
 
 /* a draw's pipeline state: made (by the loading screen's preparation, or
-an earlier draw); else made on the making queue and waited for (logged and
-counted: one the loading screen did not prepare), as the picture must be
-whole: a draw is never skipped. During a preparation (draws unseen), only
-asked for. Never compiled on this thread. */
+an earlier draw); else asked for on the making queue, and nil: the draw is
+skipped until it is made (logged and counted: one the map's preparation did
+not make). A pipeline is a compile of tens of milliseconds, of a frame or
+more: waited for, a burst of them stopped the frame for 67 to 117 ms on an
+M2; skipped, the draws that need it are missing from a frame or two, as
+Vulkan's are (xgpu_vulkan_stream.c). The preparation makes every pipeline
+the map's draws need (render_enumerate.c), and again as a setting changes
+them, so that a draw skipped is the preparation's miss, in the log. With
+options.synchronous (the tests'), or before any map's preparation, made and
+waited for. During a
+preparation (draws unseen), only asked for. Never compiled on this
+thread. */
 static id<MTLRenderPipelineState> pipeline_state_get(const struct xgpu_metal_pipeline *pipeline)
 {
 	struct xgpu_metal_pipeline_state_key key;
@@ -3331,13 +3346,24 @@ static id<MTLRenderPipelineState> pipeline_state_get(const struct xgpu_metal_pip
 		pipeline_make_later(&key, metal.preparing);
 		return nil;
 	}
-	if (!state)
+	if (!state && !metal.options.synchronous && metal.prepared_once)
 	{
-		if (!metal.options.synchronous)
+		BOOL making;
+
+		os_unfair_lock_lock(&metal.lock);
+		making = metal.pipelines_making[data] != nil;
+		os_unfair_lock_unlock(&metal.lock);
+		if (!making)
 		{
 			statistics_add(&metal.statistics.draws_waiting, 1);
-			host_logf(HOST_LOG_WARN, "metal: a pipeline made while drawing (not prepared as the map loaded)");
+			host_logf(HOST_LOG_WARN, "metal: a pipeline missed (not prepared as the map loaded): made on the "
+				"compilers, its draws skipped until it is");
 		}
+		pipeline_make_later(&key, nil);
+		return nil;
+	}
+	if (!state)
+	{
 		made = dispatch_group_create();
 		pipeline_make_later(&key, made);
 		dispatch_group_wait(made, DISPATCH_TIME_FOREVER);
@@ -3358,6 +3384,38 @@ void xgpu_metal_prepare(const struct xgpu_metal_pipeline *pipeline)
 	pipeline_make_later(&key, metal.preparing);
 }
 
+int xgpu_metal_pipeline_known(const struct xgpu_metal_pipeline *pipeline)
+{
+	struct xgpu_metal_pipeline_state_key key;
+	NSData *data;
+	BOOL made;
+
+	xgpu_metal_pipeline_state_key_make(pipeline, &key);
+	if (metal.pipeline_state && !memcmp(&key, &metal.pipeline_state_key, sizeof(key)))
+		return 1;
+	data = [NSData dataWithBytes:&key length:sizeof(key)];
+	os_unfair_lock_lock(&metal.lock);
+	made = metal.pipelines[data] != nil || metal.pipelines_making[data] != nil;
+	os_unfair_lock_unlock(&metal.lock);
+	return made;
+}
+
+int xgpu_metal_pipeline_made(const struct xgpu_metal_pipeline *pipeline)
+{
+	struct xgpu_metal_pipeline_state_key key;
+	NSData *data;
+	BOOL made;
+
+	xgpu_metal_pipeline_state_key_make(pipeline, &key);
+	if (metal.pipeline_state && !memcmp(&key, &metal.pipeline_state_key, sizeof(key)))
+		return 1;
+	data = [NSData dataWithBytes:&key length:sizeof(key)];
+	os_unfair_lock_lock(&metal.lock);
+	made = metal.pipelines[data] != nil;
+	os_unfair_lock_unlock(&metal.lock);
+	return made;
+}
+
 void xgpu_metal_prepare_begin(void)
 {
 	metal.preparing_draws = YES;
@@ -3368,6 +3426,7 @@ double xgpu_metal_prepared(void)
 	double start = seconds_now();
 
 	metal.preparing_draws = NO;
+	metal.prepared_once = YES;
 	dispatch_group_wait(metal.preparing, DISPATCH_TIME_FOREVER);
 	/* (a safe point: the user's archive written with the map's pipelines,
 	in the background) */
@@ -3543,6 +3602,25 @@ void xgpu_metal_set_dynamic_lights(struct xgpu_metal_source block, struct xgpu_m
 	metal.dirty |= _dirty_dynamic_lights;
 }
 
+void xgpu_metal_set_world_ao(uint32_t field, uint32_t table, uint32_t scenery, uint32_t objects,
+	struct xgpu_metal_source block)
+{
+	if (metal.world_ao_objects != objects)
+		texture_contents(texture_get(objects));
+	metal.world_ao_objects = objects;
+	if (metal.world_ao_field != field)
+		texture_contents(texture_get(field));
+	if (metal.world_ao_table != table)
+		texture_contents(texture_get(table));
+	if (metal.world_ao_scenery != scenery)
+		texture_contents(texture_get(scenery));
+	metal.world_ao_field = field;
+	metal.world_ao_table = table;
+	metal.world_ao_scenery = scenery;
+	metal.world_ao_block = block;
+	metal.dirty |= _dirty_world_ao;
+}
+
 void xgpu_metal_set_constant_attributes(const float (*values)[4])
 {
 	if (!memcmp(metal.constant_attributes, values, sizeof(metal.constant_attributes)))
@@ -3711,6 +3789,55 @@ static BOOL draw_state_apply(id<MTLRenderCommandEncoder> render)
 
 			if (buffer)
 				[render setFragmentBuffer:buffer offset:offset atIndex:places[index]];
+		}
+	}
+	if (dirty & _dirty_world_ao)
+	{
+		struct texture_entry *entry = texture_get(metal.world_ao_field);
+		struct texture_entry *table = texture_get(metal.world_ao_table);
+		struct texture_entry *scenery = texture_get(metal.world_ao_scenery);
+		struct texture_entry *objects = texture_get(metal.world_ao_objects);
+		NSUInteger offset = 0;
+		id<MTLBuffer> buffer = metal.world_ao_block.kind == XGPU_METAL_SOURCE_NONE ? nil :
+			source_buffer(metal.world_ao_block, &offset);
+
+		if (entry)
+		{
+			[render setVertexTexture:entry->texture atIndex:XGPU_METAL_TEXTURE_WORLD_SDF];
+			[render setFragmentTexture:entry->texture atIndex:XGPU_METAL_TEXTURE_WORLD_SDF];
+		}
+		if (table)
+		{
+			[render setVertexTexture:table->texture atIndex:XGPU_METAL_TEXTURE_WORLD_SDF_TABLE];
+			[render setFragmentTexture:table->texture atIndex:XGPU_METAL_TEXTURE_WORLD_SDF_TABLE];
+		}
+		if (scenery)
+			[render setFragmentTexture:scenery->texture atIndex:XGPU_METAL_TEXTURE_WORLD_AO_SCENERY];
+		if (objects)
+			[render setFragmentTexture:objects->texture atIndex:XGPU_METAL_TEXTURE_WORLD_AO_OBJECTS];
+		if (buffer)
+		{
+			[render setVertexBuffer:buffer offset:offset atIndex:XGPU_METAL_BUFFER_WORLD_AO];
+			[render setFragmentBuffer:buffer offset:offset atIndex:XGPU_METAL_BUFFER_WORLD_AO];
+		}
+	}
+	/* (the field too: in use until the draw's command buffer is done) */
+	{
+		uint32_t const fields[4] = { metal.world_ao_field, metal.world_ao_table, metal.world_ao_scenery,
+			metal.world_ao_objects };
+		int part;
+
+		for (part = 0; part < 4; part++)
+		{
+			struct texture_entry *entry = texture_get(fields[part]);
+
+			if (entry)
+			{
+				entry->used = serial;
+				if (!metal.aside)
+					entry->main_sampled = serial;
+				texture_first_use(entry, NO);
+			}
 		}
 	}
 	metal.dirty = 0;

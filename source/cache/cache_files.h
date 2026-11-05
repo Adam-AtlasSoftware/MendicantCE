@@ -192,6 +192,11 @@ void cache_files_cache_usage(
 	unsigned long long *bytes,
 	unsigned long long *budget,
 	long *maps);
+/* port: the cache's budget read again (game.map_cache_megabytes changed), and
+maps given up now, the least useful first, until the cache fits it: the bytes
+given up */
+unsigned long long cache_files_budget_update(
+	void);
 /* port: a stock map unpacked into a slot by a worker ahead
 (port/linux/src/map_unpack.c): begun (FALSE if not), the slots the workers
 are done with taken back, whether a map is being unpacked, how many are,

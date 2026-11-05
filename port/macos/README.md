@@ -338,7 +338,10 @@ of each 4 KB page of the guest. A host page gets the union of the
 protections of its four guest pages, stays mapped while any of them is,
 and a guest page mapped into a host page in use is zeroed in place. The
 write tracking (`host_memory_watch.c`) protects host pages, so a write
-marks the whole 16 KB as written.
+marks the whole 16 KB as written; the vertex mirror's pages are the
+tracking's (`memory_watch_page_size`). Android's and Linux's memory without
+the base register (`host_memory.c`) keeps its pages so too, on kernels of
+16 KB pages.
 
 ### System calls
 
@@ -701,8 +704,12 @@ command stream's backend table. They run on one thread, the render thread.
   thread: each is made on a queue (user-initiated QoS) once its shaders
   are, during a map's loading screen for the draws it is shown first
   (`display.prepare_shaders`: the stream's PREPARE and PREPARED records).
-  A draw whose pipeline was not made so waits for it, logged and counted
-  ("made while drawing"): a draw is never skipped. The archive is written,
+  The map is prepared again in play when a setting changes its draws'
+  pipelines (`port/linux/game/render_enumerate.c`). A draw whose pipeline
+  was not made so is skipped until its pipeline is made on the queue (a
+  frame or two), logged with what tells the draw apart and counted
+  ("pipeline missed"), as Vulkan's is: waited for, a burst of them stopped
+  the frame for up to 117 ms on an M2. The archive is written,
   on a background queue, after a map's preparation and as the process
   ends (host_exit), never in play: a new archive each time, as Metal's
   archiver cannot write one that was read or written and has had pipelines

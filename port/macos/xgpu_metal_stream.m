@@ -131,6 +131,10 @@ static struct
 	uint32_t back_buffer;
 	uint32_t uniforms_serial;
 	BOOL uniforms_set, preparing;
+	/* a map's preparation made (a draw's pipeline not made after it is
+	missed: pipeline_missed), and the draws missed so */
+	BOOL prepared;
+	uint32_t pipeline_misses;
 	/* the dynamic state as last set (the passes of the stream's own set it
 	again after them) */
 	struct xgpu_metal_dynamic_state dynamic;
@@ -830,6 +834,35 @@ static void stream_set_vertices(void *context, const struct host_render_vertex_i
 	memcpy(stream.constant_attributes, input->attributes, sizeof(stream.constant_attributes));
 }
 
+static uint32_t bytes_hash(const void *data, size_t size)
+{
+	const unsigned char *bytes = data;
+	uint32_t hash = 2166136261u;
+	size_t index;
+
+	for (index = 0; index < size; index++)
+		hash = (hash ^ bytes[index]) * 16777619u;
+	return hash;
+}
+
+/* A map's preparation should make every pipeline its draws need before
+play: a draw whose pipeline is not made is logged with what tells it
+apart (as Vulkan's: xgpu_vulkan_stream.c), the settings' parts of it
+(xgpu_draw_derive) among them */
+static void pipeline_missed(const struct xgpu_stream_pipeline_key *key)
+{
+	stream.pipeline_misses++;
+	host_logf(HOST_LOG_WARN, "metal: pipeline missed map preparation: vertex %08x%08x, key %08x, pixel %08x "
+		"(lighting %u, occlusion %u, hdr %x, per-pixel %u, lights %u, samples %u/%u, colour %u, depth %u, "
+		"blend %u/%u/%u, mask %x, stencil %u, views %u), total %u", (unsigned)key->vertex_program[1],
+		(unsigned)key->vertex_program[0], bytes_hash(key, sizeof(*key)), bytes_hash(&key->pixel, sizeof(key->pixel)),
+		(unsigned)key->lighting, (unsigned)key->pixel.ambient_occlusion, (unsigned)key->pixel.hdr,
+		(unsigned)key->pixel.per_pixel_lighting, (unsigned)key->pixel.dynamic_lights, (unsigned)key->samples,
+		(unsigned)key->pixel.alpha_test_samples, (unsigned)key->color_format, (unsigned)key->depth_format,
+		(unsigned)key->blend, (unsigned)key->blend_source, (unsigned)key->blend_destination,
+		(unsigned)key->color_mask, (unsigned)key->stencil_test, (unsigned)key->views, stream.pipeline_misses);
+}
+
 /* the pipeline and layout for a draw: set_vertices's, or immediate mode's
 (integers: the inputs read as integers); NO if it cannot be drawn */
 static BOOL draw_prepare(const struct xgpu_metal_vertex_attribute *attributes, const uint16_t *strides,
@@ -860,6 +893,8 @@ static BOOL draw_prepare(const struct xgpu_metal_vertex_attribute *attributes, c
 		xgpu_metal_prepare(&pipeline);
 		return NO;
 	}
+	if (stream.prepared && !xgpu_metal_pipeline_known(&pipeline))
+		pipeline_missed(&stream.definition->key);
 	uniforms_update();
 	textures_bind();
 	/* (display.ambient_occlusion: the occlusion the draw lights by, a texel
@@ -1383,6 +1418,22 @@ static void stream_tone_map(void *context, const struct xgpu_stream_tone_map *re
 	stream_state_restore();
 }
 
+/* display.ambient_occlusion "world": the structure's distance field's
+slices (the decoder has checked their bounds and size) and each window's
+block (xgpu_metal_world_ao.c) */
+static void stream_world_ao_field(void *context, const struct xgpu_stream_world_ao_field *record)
+{
+	(void)context;
+	xgpu_metal_world_ao_field(record->part, record->width, record->height, record->depth, record->z_first,
+		record->z_count, record->width && record->size ? host_pointer(record->data) : NULL);
+}
+
+static void stream_world_ao_window(void *context, const struct xgpu_stream_world_ao_window *record)
+{
+	(void)context;
+	xgpu_metal_world_ao_window(record->active ? &record->block : NULL);
+}
+
 /* display.ambient_occlusion of a window's 3D view (xgpu_metal_post.c), from
 the depth target drawn with it, its opaque surfaces' depth alone
 (d3d8_device.c's pre-pass), which the surfaces' draws then light by; or the
@@ -1491,6 +1542,7 @@ static uint32_t stream_prepared(void *context)
 {
 	(void)context;
 	stream.preparing = NO;
+	stream.prepared = YES;
 	return (uint32_t)(xgpu_metal_prepared() * 1000.0 + 0.5);
 }
 
@@ -1621,6 +1673,11 @@ const struct host_render_backend *xgpu_metal_stream_backend(void)
 		backend.gamma = stream_gamma;
 		backend.category = stream_category;
 		backend.panini = stream_panini;
+		/* display.ambient_occlusion "world" (#578, docs/world-ao.md): the
+		field's 3D texture (XGPU_METAL_TEXTURE_WORLD_SDF) and the window's
+		block (XGPU_METAL_BUFFER_WORLD_AO): xgpu_metal_world_ao.c */
+		backend.world_ao_field = stream_world_ao_field;
+		backend.world_ao_window = stream_world_ao_window;
 	}
 	return &backend;
 }

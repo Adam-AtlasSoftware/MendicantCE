@@ -64,6 +64,19 @@ binding 0 of its own set, read with texelFetch at the pixel (white where
 the backend found none: a stand-in), for the draws whose pixel key has it */
 #define XGPU_SPIRV_SET_OCCLUSION 3
 #define XGPU_SPIRV_BINDING_AMBIENT_OCCLUSION 0
+/* display.ambient_occlusion "world" (xgpu_stream.h): in the same set, the
+structure's distance field, its atlas of bricks (a combined image sampler,
+3D, linear, clamped to its edge) and its table of cells (3D, RGBA8, read
+with texelFetch), and the window's block (a uniform buffer) */
+#define XGPU_SPIRV_BINDING_WORLD_SDF 1
+#define XGPU_SPIRV_BINDING_WORLD_AO 2
+#define XGPU_SPIRV_BINDING_WORLD_SDF_TABLE 3
+/* (the static scenery's pages of the level's occlusion: a 2D array of
+bytes, sampled at the lightmap pass's lightmap coordinates) */
+#define XGPU_SPIRV_BINDING_WORLD_AO_SCENERY 4
+/* (the vehicles' occlusion fields' atlas: a 3D image of four halves, t
+and v.xyz, sampled at a field's voxels' place) */
+#define XGPU_SPIRV_BINDING_WORLD_AO_OBJECTS 5
 
 /* the locations of what the vertex shader hands the pixel shader */
 enum
@@ -123,6 +136,11 @@ struct xgpu_spirv_uniforms
 	xgpu_vulkan_effects.h) */
 	float effect_unproject[4][4][4];
 	float effect_eye[4][4];
+	/* display.ambient_occlusion "world" (xgpu.h): the draw's object, its
+	owner slot among the window's proxies (-1 none) and its reference, then
+	two spare; declared in the pixel shaders that read it alone, the last
+	member, so that the others' words are as they were */
+	float world_ao[4];
 };
 
 /* what the SPIR-V is written for (xgpu_spirv.c):
@@ -160,6 +178,12 @@ struct xgpu_spirv_options
 	int effect, effect_fade;
 	int input_samples;
 	BOOL reversed_depth;
+	/* the device's subgroups have their bitwise operations in pixel shaders
+	(Vulkan 1.1's subgroup arithmetic in the fragment stage):
+	display.ambient_occlusion "world"'s proxies walked a subgroup at a time
+	(world_proxies_occlusion), each shape's place and kind then the same for
+	all of its pixels */
+	BOOL subgroups;
 };
 
 /* ---------- the VR mode's effects

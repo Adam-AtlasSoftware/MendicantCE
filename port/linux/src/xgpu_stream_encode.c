@@ -784,6 +784,52 @@ void xgpu_backend_ambient_occlusion(xgpu_target target, const long corners[4], i
 		record_body->camera[index] = camera ? camera[index] : 0.0f;
 }
 
+static void stream_finite(float *values, unsigned long count, const char *what, unsigned long first);
+
+void xgpu_backend_world_ao_window(const struct xgpu_world_ao_block *block)
+{
+	struct xgpu_stream_world_ao_window *record_body;
+
+	if (!stream.open)
+		return;
+	record_body = record(XGPU_STREAM_WORLD_AO_WINDOW, sizeof(*record_body));
+	record_body->active = block ? 1 : 0;
+	record_body->pad[0] = record_body->pad[1] = 0;
+	if (block)
+	{
+		record_body->block = *block;
+		/* (its floats: the cells are masks) */
+		stream_finite(&record_body->block.field[0][0], offsetof(struct xgpu_world_ao_block, cells) / 4,
+			"world occlusion", 0);
+	}
+	else
+	{
+		memset(&record_body->block, 0, sizeof(record_body->block));
+	}
+}
+
+void xgpu_backend_world_ao_field(int part, unsigned long width, unsigned long height, unsigned long depth,
+	unsigned long z_first, unsigned long z_count, const void *data)
+{
+	struct xgpu_stream_world_ao_field *record_body;
+	uint32_t size = (uint32_t)(width * height * z_count * XGPU_STREAM_WORLD_AO_TEXEL(part));
+	unsigned char *place;
+
+	if (!stream.open)
+		return;
+	if (!width || !data)
+		size = 0;
+	record_body = record_data(XGPU_STREAM_WORLD_AO_FIELD, sizeof(*record_body), size ? carried_one(size) : 0, &place);
+	record_body->part = (uint32_t)part;
+	record_body->width = (uint32_t)width;
+	record_body->height = (uint32_t)height;
+	record_body->depth = (uint32_t)depth;
+	record_body->z_first = (uint32_t)z_first;
+	record_body->z_count = (uint32_t)z_count;
+	record_body->size = size;
+	record_body->data = size ? carry_one(&place, data, size) : 0;
+}
+
 /* (the host writes the ring's display_hdr and display_headroom as it looks
 at its display) */
 BOOL xgpu_backend_display_hdr(float *headroom)
@@ -1231,6 +1277,18 @@ BOOL xgpu_backend_pipeline(const struct xgpu_pipeline_key *key)
 		stream.pipeline = id;
 	}
 	return __atomic_load_n(&stream.pipelines[id], __ATOMIC_RELAXED) != XGPU_STREAM_PIPELINE_FAILED;
+}
+
+void xgpu_backend_pipeline_stand_in(unsigned long number)
+{
+	struct xgpu_stream_pipeline_stand_in *record_body;
+
+	if (!stream.open || !stream.pipeline)
+		return;
+	record_body = record(XGPU_STREAM_PIPELINE_STAND_IN, sizeof(*record_body));
+	record_body->id = stream.pipeline;
+	/* (the same round of numbers alone: XGPU_STREAM_PIPELINES' 14 bits) */
+	record_body->stand_in = number >> 16 == stream.pipeline_keys.rounds ? (uint32_t)(number & 0xffff) : 0;
 }
 
 unsigned long xgpu_backend_pipeline_number(void)

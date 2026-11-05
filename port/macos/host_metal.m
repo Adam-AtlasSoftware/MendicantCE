@@ -246,6 +246,16 @@ static struct
 	/* (iOS) the app is in the background: no GPU work, which iOS refuses
 	there (host_metal_background) */
 	_Atomic int background;
+	/* (macOS) the window is hidden (window_visibility_read): the link's
+	refreshes, seldom or none, show nothing, and hidden_refresh takes the
+	frames on the grid of its last deadline (the link's thread's), from that
+	thread's run loop; the refreshes so taken, and the times the
+	window was hidden, since the last log */
+	_Atomic int hidden;
+	double last_deadline;
+	CFRunLoopRef link_run_loop;
+	uint32_t hidden_taken;
+	_Atomic uint32_t hidden_times;
 
 	/* pacing, since the last log */
 	double stats_interval, stats_since, started;
@@ -980,7 +990,7 @@ static void pacing_log(double now)
 			"metal: a frame: GPU busy %.2f ms (%.0f%% of the time); its command buffers' GPU time %.2f ms (%u), render thread CPU %.2f ms, %.1f draws, %.1f passes (%.1f put aside, %.1f targets renamed for it), "
 			"%.1f ordered uploads, %.1f copies of a target drawn into, %.1f pictures restored; the last played in %.2f ms, its stream %u KB "
 			"(the most %u KB); the game waited %u times (%.1f ms); textures made %u, made again %u, images %u, "
-			"%.1f MB read; shaders compiled %u (%.1f ms), %u from the library, %u the combiner's specialised; pipelines made %u (%u from the archive, %.1f ms); %u pipelines made while drawing (not prepared); thermal state %s",
+			"%.1f MB read; shaders compiled %u (%.1f ms), %u from the library, %u the combiner's specialised; pipelines made %u (%u from the archive, %.1f ms); %u pipelines missed (not prepared: made on the compilers, their draws skipped meanwhile); thermal state %s",
 			statistics.gpu_busy_seconds * 1000.0 / statistics.frames, statistics.gpu_busy_seconds * 100.0 / seconds,
 			statistics.gpu_seconds * 1000.0 / statistics.frames, statistics.command_buffers,
 			statistics.render_cpu_seconds * 1000.0 / statistics.frames, (double)statistics.draws / statistics.frames,
@@ -994,6 +1004,14 @@ static void pacing_log(double now)
 			statistics.shaders_from_library, statistics.shaders_specialised,
 			statistics.pipelines_made, statistics.pipelines_from_archive,
 			statistics.pipeline_seconds * 1000.0, statistics.draws_waiting, thermal_state());
+	{
+		uint32_t hidden_times = atomic_exchange(&presentation.hidden_times, 0);
+
+		if (hidden_times || presentation.hidden_taken)
+			host_logf(HOST_LOG_INFO, "metal: %.1f s: the window hidden %u times, %u frames taken while hidden", seconds,
+				hidden_times, presentation.hidden_taken);
+		presentation.hidden_taken = 0;
+	}
 	waits_before = waits;
 	wait_nanoseconds_before = wait_nanoseconds;
 	presentation.stats_since = now;
@@ -1061,6 +1079,253 @@ static void take_wait(double when)
 	if (late > atomic_load(&presentation.take_late_most_us))
 		atomic_store(&presentation.take_late_most_us, late);
 }
+
+/* (the link's thread) a refresh's times: its target's interval from the
+last (its period, link_period), and its deadline (the hidden window's grid,
+hidden_refresh) */
+static void link_grid(CAMetalDisplayLinkUpdate *update)
+{
+	if (presentation.last_target > 0.0 && update.targetPresentationTimestamp > presentation.last_target &&
+		update.targetPresentationTimestamp - presentation.last_target < 0.1)
+		presentation.target_intervals[presentation.target_interval_next++ % 32] =
+			update.targetPresentationTimestamp - presentation.last_target;
+	presentation.last_target = update.targetPresentationTimestamp;
+	presentation.last_deadline = update.targetTimestamp;
+}
+
+/* (the link's thread) the refreshes' period: the least of the link's last
+targets' intervals (a ProMotion display's rate is the link's), else the
+display's */
+static double link_period(void)
+{
+	double period = 0.0;
+	uint32_t interval;
+
+	for (interval = 0; interval < 32; interval++)
+	{
+		double each = presentation.target_intervals[interval];
+
+		if (each > 0.0 && (period == 0.0 || each < period))
+			period = each;
+	}
+	return period > 0.0 ? period : 1.0 / (presentation.refresh_rate > 0.0f ? presentation.refresh_rate : 60.0f);
+}
+
+/* (the link's thread) a refresh's take, for its deadline (the link's
+targetTimestamp, or the hidden window's stand-in's): until TAKE_MARGIN_MS
+before it, the time the game's next frames are paced by. Paced, the
+refresh's latch and the refreshes' period on the game's clock (else 0) */
+static void take_time(double deadline, double now, uint64_t *latch_ns, uint64_t *period_ns)
+{
+	struct timespec monotonic;
+	double offset, period = link_period();
+	/* (vsync off) the newest frame is taken TAKE_MARGIN_MS before the
+	link's deadline for this refresh, not as the link calls, a refresh
+	before it: the frame on screen is that much newer */
+	double take = deadline - presentation.take_margin;
+
+	*latch_ns = *period_ns = 0;
+	clock_gettime(CLOCK_MONOTONIC, &monotonic);
+	offset = (double)monotonic.tv_sec + monotonic.tv_nsec / 1e9 - seconds_now();
+	if (!presentation.unpaced)
+	{
+		/* (the refresh's latch is the link's deadline, its frame's work to
+		be done by it: its GPU's too, which the presentation waits for. The
+		frame is taken a little before, take_frame) */
+		if (presentation.frames_seen && take > now && take - now < 0.1)
+			take_wait(take);
+		*latch_ns = (uint64_t)((deadline + offset) * 1e9);
+		*period_ns = (uint64_t)(period * 1e9);
+	}
+	else
+	{
+		/* (the game's frames start at fixed phases of these times:
+		host_metal_frame_phase) */
+		uint64_t budget = take_budget((uint64_t)(period * 1e9));
+
+		/* (the budget follows the frames' costs by UNPACED_PHASE_SLEW_NS a
+		refresh at most: a jump in the frames' start would be a jump in the
+		game's time on screen) */
+		if (!presentation.take_budget_ns)
+			presentation.take_budget_ns = budget;
+		else if (budget > presentation.take_budget_ns + UNPACED_PHASE_SLEW_NS)
+			presentation.take_budget_ns += UNPACED_PHASE_SLEW_NS;
+		else if (budget + UNPACED_PHASE_SLEW_NS < presentation.take_budget_ns)
+			presentation.take_budget_ns -= UNPACED_PHASE_SLEW_NS;
+		else
+			presentation.take_budget_ns = budget;
+		atomic_store(&presentation.take_period_ns, (uint64_t)(period * 1e9));
+		atomic_store(&presentation.take_budget_published_ns, presentation.take_budget_ns);
+		atomic_store(&presentation.take_phase_ns, (uint64_t)((take + offset) * 1e9) - presentation.take_budget_ns);
+		if (presentation.frames_seen && take > now && take - now < 0.1)
+			take_wait(take);
+	}
+}
+
+/* a refresh's take (take_frame): the image to show (index -1, nil: none
+new), its frame's, and the loading screen's frame */
+struct taken
+{
+	int index;
+	id<MTLTexture> image;
+	struct xgpu_metal_compile_totals compiled;
+	uint64_t input, producer_frame;
+	struct loading_presentation_frame loading;
+	BOOL idle;
+};
+
+/* (the link's thread, at a refresh's take) the frame it shows: the oldest
+queued (vsync off: the newest, those before it dropped), none while the
+loading screen is shown; and the stream told (paced: the frame taken at its
+latch, which says whether it came in time for the refresh it was started
+for, or the latch alone, nothing new queued). hidden: a hidden window's
+refresh, whose frame is shown nowhere: its image is free again at once (its
+producer's later work on it is on that same queue), and the frame neither
+counts as in time nor as missed */
+static void take_frame(struct taken *taken, uint64_t latch_ns, uint64_t period_ns, BOOL hidden)
+{
+	int discarded = 0;
+
+	*taken = (struct taken){ .index = -1 };
+	pthread_mutex_lock(&presentation.lock);
+	taken->loading = presentation.loading;
+	if (taken->loading.ready && presentation.queued)
+	{
+		taken->loading.active = 0;
+		presentation.loading.active = 0;
+	}
+	if (taken->loading.active && !hidden)
+	{
+		struct timespec monotonic;
+
+		clock_gettime(CLOCK_MONOTONIC, &monotonic);
+		taken->loading.elapsed_ns = (uint64_t)monotonic.tv_sec * 1000000000ull + monotonic.tv_nsec -
+			taken->loading.started_ns;
+		taken->loading.serial = ++presentation.loading.serial;
+		loading_presentation_build(&taken->loading);
+	}
+	/* Progress pictures are not sampled by the owned loading scene. Their
+	producer work was committed before queueing; later reuse stays on that
+	same producer queue, so it needs no loading-GPU completion dependency. */
+	if (taken->loading.active)
+	{
+		while (presentation.queued)
+		{
+			presentation.image_states[presentation.queue[--presentation.queued]] = _image_free;
+			discarded++;
+		}
+		pthread_cond_broadcast(&presentation.freed);
+	}
+	/* (vsync off: the newest frame, those queued before it dropped) */
+	while (presentation.unpaced && presentation.queued > 1)
+	{
+		presentation.image_states[presentation.queue[0]] = _image_free;
+		memmove(presentation.queue, presentation.queue + 1, sizeof(int) * (size_t)(presentation.queued - 1));
+		presentation.queued--;
+		presentation.dropped++;
+		discarded++;
+		pthread_cond_broadcast(&presentation.freed);
+	}
+	if (presentation.queued)
+	{
+		taken->index = presentation.queue[0];
+		memmove(presentation.queue, presentation.queue + 1, sizeof(int) * (size_t)(presentation.queued - 1));
+		presentation.queued--;
+		presentation.image_states[taken->index] = hidden ? _image_free : _image_showing;
+		taken->image = presentation.images[taken->index];
+		taken->compiled = presentation.compiled[taken->index];
+		taken->input = presentation.frame_input[taken->index];
+		taken->producer_frame = presentation.frame_ready[taken->index];
+		if (hidden)
+			pthread_cond_broadcast(&presentation.freed);
+	}
+	taken->idle = !presentation.frames_seen;
+	pthread_mutex_unlock(&presentation.lock);
+	while (discarded-- > 0)
+		host_render_stream_frame_taken();
+	if (taken->image && latch_ns && !hidden)
+	{
+		uint64_t finished = atomic_load(&presentation.frame_finished_number[taken->producer_frame % 8]) ==
+			taken->producer_frame ? atomic_load(&presentation.frame_finished_ns[taken->producer_frame % 8]) : 0;
+
+		host_render_stream_frame_displayed(taken->input, finished, latch_ns, 0, period_ns);
+		return;
+	}
+	if (taken->image)
+		host_render_stream_frame_taken();
+	if (latch_ns)
+		host_render_stream_display_latched(latch_ns, period_ns);
+}
+
+#if !TARGET_OS_IPHONE
+/* ---------- the window hidden
+
+A window on another desktop (a three-finger swipe away, or another app's
+fullscreen Space), covered by others or minimized is hidden: its link calls
+seldom (about once a second on an M2) or not at all, and what it presents
+never reaches the screen. The game would wait for each take a refresh never
+gave (frame_pacing.h's FRAME_PACING_WAIT_MAXIMUM_NS, then this file's
+PRESENT_WAIT_MAXIMUM_NS), and macOS lets the timed waits of a hidden
+window's process end late: measured on an M2, each of the game's frames took
+100 to 190 ms while hidden (its ticks run five at a time), the pacing learned
+those frames as missed refreshes (its margin from 1.75 to 5 ms, its budget
+from 18 to 30 ms: frames started earlier, a refresh more of latency, after
+coming back), and the first frames back were those the timed-out waits had
+left queued (#646). So while the window is hidden (its occlusion state,
+window_visibility_read) the link's thread takes the frames in the link's
+place (hidden_refresh), at its deadlines on the grid of its last
+(frame_pacing_next_latch), waiting for each as the link's takes do (take_wait,
+on time whatever macOS does to other timers): the game keeps the display's
+pace and phase and its own clock, draws no more than it would on screen,
+counts no refresh missed, and the link's first refresh back finds the frame
+started for it. The link's own calls meanwhile only keep its grid
+(link_grid). */
+
+/* (the link's thread, from its run loop as the window is hidden) the hidden
+window's refreshes, until it is shown again */
+static void hidden_refresh(void)
+{
+	while (atomic_load(&presentation.hidden))
+	{
+		double now = seconds_now(), period = link_period(), deadline, take;
+		uint64_t latch_ns, period_ns;
+		struct taken taken;
+
+		if (presentation.last_deadline <= 0.0)
+			presentation.last_deadline = now;
+		deadline = (double)frame_pacing_next_latch((uint64_t)(presentation.last_deadline * 1e9),
+			(uint64_t)(period * 1e9), (uint64_t)(now * 1e9), (uint64_t)(presentation.take_margin * 1e9)) / 1e9;
+		take = deadline - presentation.take_margin;
+		if (take > now)
+			take_wait(take);
+		take_time(deadline, seconds_now(), &latch_ns, &period_ns);
+		take_frame(&taken, latch_ns, period_ns, YES);
+		if (taken.image)
+			presentation.hidden_taken++;
+		presentation.last_deadline = deadline;
+	}
+}
+
+/* (the main thread, as the window's occlusion changes) whether it is
+hidden: the link's thread takes its frames while it is */
+static void window_visibility_read(void)
+{
+	NSWindow *native = (__bridge NSWindow *)SDL_GetPointerProperty(SDL_GetWindowProperties(presentation.window),
+		SDL_PROP_WINDOW_COCOA_WINDOW_POINTER, NULL);
+	int hidden = native && !(native.occlusionState & NSWindowOcclusionStateVisible);
+
+	if (atomic_exchange(&presentation.hidden, hidden) == hidden)
+		return;
+	host_logf(HOST_LOG_INFO, "metal: the window is %s", hidden ? "hidden: its frames are taken on the display's "
+		"refreshes, not shown" : "shown again");
+	if (hidden && presentation.link_run_loop)
+	{
+		atomic_fetch_add(&presentation.hidden_times, 1);
+		CFRunLoopPerformBlock(presentation.link_run_loop, kCFRunLoopDefaultMode, ^{ hidden_refresh(); });
+		CFRunLoopWakeUp(presentation.link_run_loop);
+	}
+}
+#endif
 
 @interface HaloDisplayLinkTarget : NSObject <CAMetalDisplayLinkDelegate>
 @end
@@ -1145,6 +1410,14 @@ static BOOL rate_adapt(BOOL shown, double now)
 
 	if (atomic_load(&presentation.background))
 		return;
+	/* (the window hidden: the drawable would not reach the screen, and the
+	frames are taken by hidden_refresh; the link's times keep its grid) */
+	if (atomic_load(&presentation.hidden))
+	{
+		link_grid(update);
+		presentation.last_tick = 0.0;
+		return;
+	}
 	[self refresh:update];
 	presentation.last_callback_seconds = seconds_now() - start;
 	if (presentation.last_callback_seconds > presentation.callback_most_seconds)
@@ -1177,8 +1450,9 @@ static BOOL rate_adapt(BOOL shown, double now)
 		id<MTLTexture> image = nil;
 		id<MTLTexture> loading_image = nil, sampled_image;
 		double now = seconds_now(), target = update.targetPresentationTimestamp, committed;
-		int index = -1, discarded = 0;
+		int index = -1;
 		BOOL idle;
+		struct taken taken;
 		struct xgpu_metal_compile_totals compiled = { 0 };
 		uint64_t input = 0, producer_frame = 0;
 		/* (paced) the take's time and the refreshes' period, on the game's
@@ -1215,73 +1489,14 @@ static BOOL rate_adapt(BOOL shown, double now)
 			presentation.last_gap = NO;
 		}
 		presentation.last_tick = now;
-		if (presentation.last_target > 0.0 && update.targetPresentationTimestamp > presentation.last_target &&
-			update.targetPresentationTimestamp - presentation.last_target < 0.1)
-			presentation.target_intervals[presentation.target_interval_next++ % 32] =
-				update.targetPresentationTimestamp - presentation.last_target;
-		presentation.last_target = update.targetPresentationTimestamp;
+		link_grid(update);
 		if (presentation.stats_interval > 0.0 && now - presentation.stats_since >= presentation.stats_interval)
 			pacing_log(now);
 		/* the frame is latched now (the link calls about two refreshes before
 		the frame is on screen; one taken later, nearer the link's deadline,
 		misses its refresh): the game starts each frame to be ready by the
 		next latch (frame_pacing.h) */
-		{
-			struct timespec monotonic;
-			double offset, period = 0.0;
-			uint32_t interval;
-			/* (vsync off) the newest frame is taken TAKE_MARGIN_MS
-			before the link's deadline for this refresh, not as the link
-			calls, a refresh before it: the frame on screen is that much
-			newer */
-			double take = update.targetTimestamp - presentation.take_margin;
-
-			for (interval = 0; interval < 32; interval++)
-			{
-				double each = presentation.target_intervals[interval];
-
-				if (each > 0.0 && (period == 0.0 || each < period))
-					period = each;
-			}
-			if (period == 0.0)
-				period = 1.0 / presentation.refresh_rate;
-			clock_gettime(CLOCK_MONOTONIC, &monotonic);
-			offset = (double)monotonic.tv_sec + monotonic.tv_nsec / 1e9 - seconds_now();
-			if (!presentation.unpaced)
-			{
-				/* (the refresh's latch is the link's deadline, its frame's
-				work to be done by it: its GPU's too, which the presentation
-				waits for. The frame is taken a little before, below) */
-				if (presentation.frames_seen && take > now && take - now < 0.1)
-					take_wait(take);
-				latch_ns = (uint64_t)((update.targetTimestamp + offset) * 1e9);
-				period_ns = (uint64_t)(period * 1e9);
-			}
-			else
-			{
-				/* (the game's frames start at fixed phases of these times:
-				host_metal_frame_phase) */
-				uint64_t budget = take_budget((uint64_t)(period * 1e9));
-
-				/* (the budget follows the frames' costs by
-				UNPACED_PHASE_SLEW_NS a refresh at most: a jump in the
-				frames' start would be a jump in the game's time on
-				screen) */
-				if (!presentation.take_budget_ns)
-					presentation.take_budget_ns = budget;
-				else if (budget > presentation.take_budget_ns + UNPACED_PHASE_SLEW_NS)
-					presentation.take_budget_ns += UNPACED_PHASE_SLEW_NS;
-				else if (budget + UNPACED_PHASE_SLEW_NS < presentation.take_budget_ns)
-					presentation.take_budget_ns -= UNPACED_PHASE_SLEW_NS;
-				else
-					presentation.take_budget_ns = budget;
-				atomic_store(&presentation.take_period_ns, (uint64_t)(period * 1e9));
-				atomic_store(&presentation.take_budget_published_ns, presentation.take_budget_ns);
-				atomic_store(&presentation.take_phase_ns, (uint64_t)((take + offset) * 1e9) - presentation.take_budget_ns);
-				if (presentation.frames_seen && take > now && take - now < 0.1)
-					take_wait(take);
-			}
-		}
+		take_time(update.targetTimestamp, now, &latch_ns, &period_ns);
 		/* (a new size is the next drawable's) */
 		if (width && height && (width != presentation.drawable_width || height != presentation.drawable_height))
 		{
@@ -1289,74 +1504,14 @@ static BOOL rate_adapt(BOOL shown, double now)
 			presentation.drawable_width = width;
 			presentation.drawable_height = height;
 		}
-		pthread_mutex_lock(&presentation.lock);
-		loading_frame = presentation.loading;
-		if (loading_frame.ready && presentation.queued)
-		{
-			loading_frame.active = 0;
-			presentation.loading.active = 0;
-		}
-		if (loading_frame.active)
-		{
-			struct timespec monotonic;
-
-			clock_gettime(CLOCK_MONOTONIC, &monotonic);
-			loading_frame.elapsed_ns = (uint64_t)monotonic.tv_sec * 1000000000ull + monotonic.tv_nsec -
-				loading_frame.started_ns;
-			loading_frame.serial = ++presentation.loading.serial;
-			loading_presentation_build(&loading_frame);
-		}
-		/* Progress pictures are not sampled by the owned loading scene. Their
-		producer work was committed before queueing; later reuse stays on that
-		same producer queue, so it needs no loading-GPU completion dependency. */
-		if (loading_frame.active)
-		{
-			while (presentation.queued)
-			{
-				presentation.image_states[presentation.queue[--presentation.queued]] = _image_free;
-				discarded++;
-			}
-			pthread_cond_broadcast(&presentation.freed);
-		}
-		/* (vsync off: the newest frame, those queued before it dropped) */
-		while (presentation.unpaced && presentation.queued > 1)
-		{
-			presentation.image_states[presentation.queue[0]] = _image_free;
-			memmove(presentation.queue, presentation.queue + 1, sizeof(int) * (size_t)(presentation.queued - 1));
-			presentation.queued--;
-			presentation.dropped++;
-			discarded++;
-			pthread_cond_broadcast(&presentation.freed);
-		}
-		if (presentation.queued)
-		{
-			index = presentation.queue[0];
-			memmove(presentation.queue, presentation.queue + 1, sizeof(int) * (size_t)(presentation.queued - 1));
-			presentation.queued--;
-			presentation.image_states[index] = _image_showing;
-			image = presentation.images[index];
-			compiled = presentation.compiled[index];
-			input = presentation.frame_input[index];
-			producer_frame = presentation.frame_ready[index];
-		}
-		idle = !presentation.frames_seen;
-		pthread_mutex_unlock(&presentation.lock);
-		while (discarded-- > 0)
-			host_render_stream_frame_taken();
-		/* (paced: the frame taken at the take, which tells the stream whether
-		it came in time for the refresh it was started for; or the take
-		alone, nothing new queued) */
-		if (image && latch_ns)
-		{
-			uint64_t finished = atomic_load(&presentation.frame_finished_number[producer_frame % 8]) == producer_frame ?
-				atomic_load(&presentation.frame_finished_ns[producer_frame % 8]) : 0;
-
-			host_render_stream_frame_displayed(input, finished, latch_ns, 0, period_ns);
-		}
-		else if (image)
-			host_render_stream_frame_taken();
-		else if (latch_ns)
-			host_render_stream_display_latched(latch_ns, period_ns);
+		take_frame(&taken, latch_ns, period_ns, NO);
+		index = taken.index;
+		image = taken.image;
+		compiled = taken.compiled;
+		input = taken.input;
+		producer_frame = taken.producer_frame;
+		loading_frame = taken.loading;
+		idle = taken.idle;
 		if (!idle && !loading_frame.active && rate_adapt(image != nil, now))
 		{
 			link.preferredFrameRateRange = link_rate_range(presentation.battery_saver_set);
@@ -1615,6 +1770,13 @@ static void *presentation_thread(void *context)
 		link.preferredFrameLatency = 1.0f;
 		presentation.link = link;
 		[link addToRunLoop:[NSRunLoop currentRunLoop] forMode:NSDefaultRunLoopMode];
+#if !TARGET_OS_IPHONE
+		/* (the hidden window's refreshes: hidden_refresh, from here; the
+		window hidden before the thread was up) */
+		presentation.link_run_loop = (CFRunLoopRef)CFRetain(CFRunLoopGetCurrent());
+		if (atomic_load(&presentation.hidden))
+			CFRunLoopPerformBlock(presentation.link_run_loop, kCFRunLoopDefaultMode, ^{ hidden_refresh(); });
+#endif
 	}
 	for (;;)
 	{
@@ -1957,6 +2119,16 @@ int host_metal_window_open(uint32_t window)
 			display_hdr_read();
 			display_rate_read();
 		}];
+	{
+		NSWindow *native = (__bridge NSWindow *)SDL_GetPointerProperty(SDL_GetWindowProperties(object),
+			SDL_PROP_WINDOW_COCOA_WINDOW_POINTER, NULL);
+
+		[[NSNotificationCenter defaultCenter] addObserverForName:NSWindowDidChangeOcclusionStateNotification
+			object:native queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note) {
+				(void)note;
+				window_visibility_read();
+			}];
+	}
 #endif
 	sampler = [MTLSamplerDescriptor new];
 	sampler.minFilter = MTLSamplerMinMagFilterLinear;

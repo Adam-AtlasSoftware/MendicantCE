@@ -122,6 +122,11 @@ long menu_pictures_wanted(long *poses, long maximum);
 modded), whose preparation the pass records where it has none: none in runs
 nobody watches, as with the pictures */
 long menu_pictures_maps(long *poses, long maximum);
+/* runs nobody watches (tests: timed, scripted, driven through the script
+console, recorded or measured), and those whose first screen is not the
+main menu's: no pass, for the pictures, the maps' preparations or their
+distance fields (world_sdf.c) */
+int menu_pictures_quiet_run(void);
 /* a picture's high-res image, once it is ready, else 0 (the original is
 drawn) */
 unsigned int menu_pictures_texture(long pose, unsigned long *levels);
@@ -190,6 +195,8 @@ void menu_pictures_frame(int main_menu_loaded);
 shown, under the loading screen): the main loop draws only the frames kept
 (menu_pictures_frame_drawn) */
 int menu_pictures_preparing(void);
+/* the start-up pass's seconds this run, to its main menu shown (0: none) */
+double menu_pictures_pass_seconds(void);
 int menu_pictures_frame_drawn(void);
 /* the maps loaded now are the pass's, drawn as they shipped: no mod is
 played on them (mods.c), so a picture never shows a mod, and turning mods

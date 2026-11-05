@@ -182,8 +182,11 @@ int main(int argc, char **argv)
 
 	CASE("budget")
 	{
-		/* the disk's room less the larger of 2 GB and a twentieth of the disk */
-		CHECK(map_cache_choose_budget(0, 0, 100 * GIGABYTE, 1000 * GIGABYTE, LEAST) == 50 * GIGABYTE, "large disk");
+		/* the disk's room less a twentieth of the disk, at least 2 GB and at
+		most 5 GB */
+		CHECK(map_cache_choose_budget(0, 0, 100 * GIGABYTE, 1000 * GIGABYTE, LEAST) == 95 * GIGABYTE, "large disk");
+		CHECK(map_cache_choose_budget(0, 0, 20 * GIGABYTE, 64 * GIGABYTE, LEAST) == 20 * GIGABYTE - 64 * GIGABYTE / 20,
+			"a twentieth, between 2 and 5 GB");
 		CHECK(map_cache_choose_budget(0, 3 * GIGABYTE, 10 * GIGABYTE, 40 * GIGABYTE, LEAST) == 11 * GIGABYTE,
 			"the cache's own bytes count as room");
 		CHECK(map_cache_choose_budget(0, 0, 5 * GIGABYTE, 20 * GIGABYTE, LEAST) == 3 * GIGABYTE, "small disk");
@@ -294,6 +297,84 @@ int main(int argc, char **argv)
 		CHECK(cache_files_map_prefill_size("levels\\b40\\b40") == 0, "b40 ahead would give up a map");
 		CHECK(cache_files_map_prefill_size("levels\\test\\bloodgulch\\bloodgulch") == 0,
 			"bloodgulch ahead would pass the budget");
+	}
+	else CASE("storage_values")
+	{
+		/* Settings' MAP STORAGE (tools/port_settings.py's MAP_STORAGE):
+		Instant Loading the disk's room, which holds every stock map;
+		Disk Space Saver the Xbox's six cache files' room, however much the
+		disk has */
+		CHECK(map_cache_choose_budget(INSTANT_MEGABYTES, 3 * GIGABYTE, 100 * GIGABYTE, 1000 * GIGABYTE, LEAST) ==
+			98 * GIGABYTE, "instant: the disk's room");
+		/* (a 471 GB disk with 20.1 GB free and the 2.8 GB cache: the 5 GB
+		margin leaves every stock map room, where a twentieth, 23.5 GB, left
+		only the Xbox's) */
+		CHECK(map_cache_choose_budget(INSTANT_MEGABYTES, 2841ULL * MEGABYTE, 20602ULL * MEGABYTE, 471482ULL * MEGABYTE,
+			LEAST) == (2841ULL + 20602 - 5120) * MEGABYTE, "instant on a large disk with 20 GB free");
+		CHECK(map_cache_choose_budget(INSTANT_MEGABYTES, 0, 10 * GIGABYTE, 64 * GIGABYTE, LEAST) >= 3100ULL * MEGABYTE,
+			"instant: every stock map on a disk with 10 GB free");
+		CHECK(map_cache_choose_budget(SAVER_MEGABYTES, 3 * GIGABYTE, 100 * GIGABYTE, 1000 * GIGABYTE, LEAST) == LEAST,
+			"saver: the Xbox's room");
+		CHECK(map_cache_choose_budget(SAVER_MEGABYTES, 0, 0, 0, LEAST) == LEAST, "saver, the disk unknown");
+		CHECK(LEAST < 740ULL * MEGABYTE, "the Xbox's room is about 730 MB");
+	}
+	else CASE("shrink_on_switch")
+	{
+		/* every stock map kept (Instant Loading), four campaign levels
+		played, d40 longest ago and open; then Disk Space Saver: maps given
+		up now to fit, those never played first, then those played longest
+		ago, never the open map; the bytes given up reported */
+		unsigned long long before, given_up;
+
+		reset(3200ULL * MEGABYTE);
+		for (index = 0; index < NUMBEROF(folder) - 1; index++)
+			copy(folder[index].name);
+		played_times[held("d40")] = 1;
+		played_times[held("a10")] = 5;
+		played_times[held("b40")] = 6;
+		played_times[held("c40")] = 7;
+		cache_file_globals.open_map_file_index = held("d40");
+		before = cached_map_files_bytes(NONE);
+		cached_map_files_budget = LEAST;
+		given_up = cached_map_files_fit_budget();
+		check_within_budget();
+		CHECK(given_up == before - cached_map_files_bytes(NONE), "%llu bytes reported, %llu given up", given_up,
+			before - cached_map_files_bytes(NONE));
+		CHECK(given_up > 2 * GIGABYTE, "only %llu bytes given up", given_up);
+		CHECK(held("d40") != NONE, "the open map given up");
+		CHECK(held("c40") != NONE, "the map played last given up");
+		CHECK(held("a10") == NONE && held("ui") == NONE, "a map never played, or played longer ago, kept");
+		/* (already within it: nothing more) */
+		CHECK(cached_map_files_fit_budget() == 0, "maps given up within the budget");
+	}
+	else CASE("rebuild_on_switch_back")
+	{
+		/* after Disk Space Saver, Instant Loading: each map given up has
+		room to be copied again ahead (cache_files_map_prefill_size), and all
+		of them fit with the maps kept */
+		reset(3200ULL * MEGABYTE);
+		for (index = 0; index < NUMBEROF(folder) - 1; index++)
+			copy(folder[index].name);
+		played_times[held("b30")] = 9;
+		cached_map_files_budget = LEAST;
+		cached_map_files_fit_budget();
+		CHECK(held("d40") == NONE && cache_files_map_prefill_size("levels\\d40\\d40") == 0,
+			"d40 ahead past Disk Space Saver's room");
+		cached_map_files_budget = 3200ULL * MEGABYTE;
+		for (index = 0; index < NUMBEROF(folder) - 1; index++)
+		{
+			char path[64];
+
+			snprintf(path, sizeof(path), "levels\\%s\\%s", folder[index].name, folder[index].name);
+			if (held(folder[index].name) == NONE)
+			{
+				CHECK(cache_files_map_prefill_size(path) > 0, "no room to copy %s again", folder[index].name);
+				copy(folder[index].name);
+			}
+		}
+		for (index = 0; index < NUMBEROF(folder) - 1; index++)
+			CHECK(held(folder[index].name) != NONE, "%s not copied again", folder[index].name);
+		check_within_budget();
 	}
 	else CASE("type_limits")
 	{

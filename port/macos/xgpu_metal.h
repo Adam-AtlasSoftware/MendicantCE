@@ -132,6 +132,8 @@ enum
 	/* ASTC 4x4 (LDR): DXT textures transcoded on a GPU without BC
 	(port/linux/astc/xgpu_astc.h) */
 	XGPU_METAL_FORMAT_ASTC,
+	/* a signed byte (display.ambient_occlusion "world"'s distance field) */
+	XGPU_METAL_FORMAT_R8_SNORM,
 	/* the backend's own targets: a byte (red), two (red, green) */
 	XGPU_METAL_FORMAT_R8,
 	XGPU_METAL_FORMAT_RG8,
@@ -403,6 +405,11 @@ void xgpu_metal_prepare(const struct xgpu_metal_pipeline *pipeline);
 (not drawn: a map's first frame's, unseen) */
 void xgpu_metal_prepare_begin(void);
 double xgpu_metal_prepared(void);
+/* whether a pipeline is made or being made (a draw's: as the map's
+preparation made it, or an earlier draw asked for it) */
+int xgpu_metal_pipeline_known(const struct xgpu_metal_pipeline *pipeline);
+/* whether a pipeline is made (a draw of it is drawn, not skipped) */
+int xgpu_metal_pipeline_made(const struct xgpu_metal_pipeline *pipeline);
 
 /* textures: a handle, or 0 (logged) */
 uint32_t xgpu_metal_texture_create(const struct xgpu_metal_texture_description *description);
@@ -491,6 +498,25 @@ pixel shaders that light with them read (XGPU_METAL_BUFFER_DYNAMIC_LIGHTS,
 _DYNAMIC_LIGHT_CELLS): until set again (XGPU_METAL_SOURCE_NONE: none bound;
 a ring's source is the frame's alone) */
 void xgpu_metal_set_dynamic_lights(struct xgpu_metal_source block, struct xgpu_metal_source cells);
+/* display.ambient_occlusion "world"'s field, its atlas and its table (3D
+textures: 0 none), the static scenery's pages (a 2D array, at
+XGPU_METAL_TEXTURE_WORLD_AO_SCENERY, the fragments'), the vehicles' occlusion fields' atlas (a 3D texture,
+at XGPU_METAL_TEXTURE_WORLD_AO_OBJECTS, the fragments'), and the window's block (struct xgpu_world_ao_block),
+which the shaders that read them take at XGPU_METAL_TEXTURE_WORLD_SDF (with
+a constexpr sampler of their own), _WORLD_SDF_TABLE and
+XGPU_METAL_BUFFER_WORLD_AO, both stages: until set again (a ring's source
+is the frame's alone) */
+void xgpu_metal_set_world_ao(uint32_t field, uint32_t table, uint32_t scenery, uint32_t objects,
+	struct xgpu_metal_source block);
+/* their resources (xgpu_metal_world_ao.c): slices z_first to z_first +
+z_count - 1 of a width x height x depth part of the field
+(XGPU_STREAM_WORLD_AO_TABLE or _ATLAS), in the frame's order (width 0: both
+let go of; until both have their last slices, 1x1x1 far-outside stand-ins
+are bound), and the window's block from now on (NULL: none, zeros) */
+struct xgpu_world_ao_block;
+void xgpu_metal_world_ao_field(uint32_t part, uint32_t width, uint32_t height, uint32_t depth, uint32_t z_first,
+	uint32_t z_count, const void *data);
+void xgpu_metal_world_ao_window(const struct xgpu_world_ao_block *block);
 /* the values of the 16 inputs no stream feeds */
 void xgpu_metal_set_constant_attributes(const float (*values)[4]);
 /* indices: 16-bit, or XGPU_METAL_SOURCE_NONE */

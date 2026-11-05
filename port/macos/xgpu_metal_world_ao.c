@@ -1,0 +1,200 @@
+/*
+XGPU_METAL_WORLD_AO.C
+
+display.ambient_occlusion "world"'s resources in the Metal backend
+(docs/world-ao.md, "GPU binding layout"), as the Vulkan backend has them
+(port/linux/vulkan/xgpu_vulkan_world_ao.c): the structure's distance field,
+sparse (world_sdf.h): its atlas of bricks, a 3D texture of signed bytes
+(MTLPixelFormatR8Snorm) that the shaders read through a constexpr linear
+sampler clamped to its edge, at XGPU_METAL_TEXTURE_WORLD_SDF, and its
+table of cells, a 3D RGBA8 texture they read by texel, at
+XGPU_METAL_TEXTURE_WORLD_SDF_TABLE; and the window's block (struct
+xgpu_world_ao_block) at XGPU_METAL_BUFFER_WORLD_AO (xgpu_metal_set_world_ao).
+
+The field arrives a few slices at a time (the command stream's
+WORLD_AO_FIELD records), its table first, then its atlas: each texture is
+made as its first slices come, and both are bound once both have had their
+last; until then, and with none, 1x1x1 stand-ins (a table cell far outside:
+no occlusion). The block arrives with each window (WORLD_AO_WINDOW) and is
+copied into the frame's upload ring; with none, a block of zeros of the
+backend's own.
+*/
+
+#include "xgpu_metal.h"
+#include "xgpu_metal_bindings.h"
+#include "xgpu_stream.h"
+
+#include <string.h>
+
+/* a part of the field: its texture (0 none), its size, and whether its last
+slices have come */
+struct world_ao_part
+{
+	uint32_t texture;
+	uint32_t width, height, depth;
+	int whole;
+};
+
+static struct
+{
+	/* the table, the atlas and the static scenery's pages
+	(XGPU_STREAM_WORLD_AO_TABLE, _ATLAS, _SCENERY: a 2D array of bytes),
+	their stand-ins, and the block of zeros */
+	struct world_ao_part parts[4];
+	uint32_t stand_ins[4];
+	uint32_t zeros;
+	struct xgpu_metal_source block;
+	int made;
+} world_ao;
+
+static uint32_t world_ao_texture(uint32_t part, uint32_t width, uint32_t height, uint32_t depth)
+{
+	struct xgpu_metal_texture_description description;
+
+	memset(&description, 0, sizeof(description));
+	description.type = part == XGPU_STREAM_WORLD_AO_SCENERY ? XGPU_METAL_TEXTURE_2D_ARRAY : XGPU_METAL_TEXTURE_3D;
+	/* (the pages' bytes: R8 unorm, the coverage's format; the vehicles'
+	fields' four halves: RGBA16F) */
+	description.format = part == XGPU_STREAM_WORLD_AO_TABLE ? XGPU_METAL_FORMAT_RGBA8 :
+		part == XGPU_STREAM_WORLD_AO_SCENERY ? XGPU_METAL_FORMAT_COVERAGE :
+		part == XGPU_STREAM_WORLD_AO_OBJECTS ? XGPU_METAL_FORMAT_RGBA16F : XGPU_METAL_FORMAT_R8_SNORM;
+	description.usage = XGPU_METAL_USAGE_SAMPLED;
+	description.width = (uint16_t)width;
+	description.height = (uint16_t)height;
+	description.depth_or_layers = (uint16_t)depth;
+	description.levels = 1;
+	return xgpu_metal_texture_create(&description);
+}
+
+/* the stand-ins and the zeros, made the first time */
+static void world_ao_make(void)
+{
+	static const unsigned char outside_cell[4] = { 0, 0, 0, 0 };
+	static const signed char far_outside = 127;
+	static const unsigned char none = 255;
+	static const unsigned short no_occlusion[4] = { 0, 0, 0, 0 };
+
+	if (world_ao.made)
+		return;
+	world_ao.made = 1;
+	world_ao.stand_ins[XGPU_STREAM_WORLD_AO_OBJECTS] = world_ao_texture(XGPU_STREAM_WORLD_AO_OBJECTS, 1, 1, 1);
+	if (world_ao.stand_ins[XGPU_STREAM_WORLD_AO_OBJECTS])
+		xgpu_metal_texture_upload(world_ao.stand_ins[XGPU_STREAM_WORLD_AO_OBJECTS], 0, 0, 0, 0, 0, 1, 1, 1, no_occlusion,
+			8, 8);
+	world_ao.stand_ins[XGPU_STREAM_WORLD_AO_SCENERY] = world_ao_texture(XGPU_STREAM_WORLD_AO_SCENERY, 1, 1, 1);
+	if (world_ao.stand_ins[XGPU_STREAM_WORLD_AO_SCENERY])
+		xgpu_metal_texture_upload(world_ao.stand_ins[XGPU_STREAM_WORLD_AO_SCENERY], 0, 0, 0, 0, 0, 1, 1, 1, &none, 1, 1);
+	world_ao.stand_ins[XGPU_STREAM_WORLD_AO_TABLE] = world_ao_texture(XGPU_STREAM_WORLD_AO_TABLE, 1, 1, 1);
+	if (world_ao.stand_ins[XGPU_STREAM_WORLD_AO_TABLE])
+		xgpu_metal_texture_upload(world_ao.stand_ins[XGPU_STREAM_WORLD_AO_TABLE], 0, 0, 0, 0, 0, 1, 1, 1, outside_cell,
+			4, 4);
+	world_ao.stand_ins[XGPU_STREAM_WORLD_AO_ATLAS] = world_ao_texture(XGPU_STREAM_WORLD_AO_ATLAS, 1, 1, 1);
+	if (world_ao.stand_ins[XGPU_STREAM_WORLD_AO_ATLAS])
+		xgpu_metal_texture_upload(world_ao.stand_ins[XGPU_STREAM_WORLD_AO_ATLAS], 0, 0, 0, 0, 0, 1, 1, 1, &far_outside,
+			1, 1);
+	world_ao.zeros = xgpu_metal_buffer_create(sizeof(struct xgpu_world_ao_block));
+	if (world_ao.zeros)
+	{
+		static const struct xgpu_world_ao_block none;
+
+		xgpu_metal_buffer_write(world_ao.zeros, 0, &none, sizeof(none), 1);
+	}
+	world_ao.block.kind = XGPU_METAL_SOURCE_BUFFER;
+	world_ao.block.handle = world_ao.zeros;
+	world_ao.block.offset = 0;
+	world_ao.block.size = world_ao.zeros ? sizeof(struct xgpu_world_ao_block) : 0;
+	if (!world_ao.zeros)
+		world_ao.block.kind = XGPU_METAL_SOURCE_NONE;
+}
+
+static void world_ao_bind(void)
+{
+	int whole = world_ao.parts[0].texture && world_ao.parts[0].whole && world_ao.parts[1].texture &&
+		world_ao.parts[1].whole;
+	struct world_ao_part const *scenery = &world_ao.parts[XGPU_STREAM_WORLD_AO_SCENERY];
+	struct world_ao_part const *objects = &world_ao.parts[XGPU_STREAM_WORLD_AO_OBJECTS];
+
+	xgpu_metal_set_world_ao(whole ? world_ao.parts[XGPU_STREAM_WORLD_AO_ATLAS].texture :
+		world_ao.stand_ins[XGPU_STREAM_WORLD_AO_ATLAS], whole ? world_ao.parts[XGPU_STREAM_WORLD_AO_TABLE].texture :
+		world_ao.stand_ins[XGPU_STREAM_WORLD_AO_TABLE], scenery->texture && scenery->whole ? scenery->texture :
+		world_ao.stand_ins[XGPU_STREAM_WORLD_AO_SCENERY], objects->texture && objects->whole ? objects->texture :
+		world_ao.stand_ins[XGPU_STREAM_WORLD_AO_OBJECTS], world_ao.block);
+}
+
+static void world_ao_part_release(struct world_ao_part *part)
+{
+	if (part->texture)
+		xgpu_metal_texture_destroy(part->texture);
+	memset(part, 0, sizeof(*part));
+}
+
+void xgpu_metal_world_ao_field(uint32_t part_index, uint32_t width, uint32_t height, uint32_t depth, uint32_t z_first,
+	uint32_t z_count, const void *data)
+{
+	struct world_ao_part *part;
+	uint32_t texel = XGPU_STREAM_WORLD_AO_TEXEL(part_index);
+
+	world_ao_make();
+	/* (none: every part let go of) */
+	if (!width || !height || !depth || !data || part_index > XGPU_STREAM_WORLD_AO_OBJECTS)
+	{
+		world_ao_part_release(&world_ao.parts[0]);
+		world_ao_part_release(&world_ao.parts[1]);
+		world_ao_part_release(&world_ao.parts[2]);
+		world_ao_part_release(&world_ao.parts[3]);
+		world_ao_bind();
+		return;
+	}
+	part = &world_ao.parts[part_index];
+	/* (a new field's table comes first: the atlas before it is another's) */
+	if (part_index == XGPU_STREAM_WORLD_AO_TABLE && z_first == 0)
+		world_ao_part_release(&world_ao.parts[XGPU_STREAM_WORLD_AO_ATLAS]);
+	/* (a new field's part: its texture made as its first slices come) */
+	if (!part->texture || part->width != width || part->height != height || part->depth != depth || z_first == 0)
+	{
+		world_ao_part_release(part);
+		part->texture = world_ao_texture(part_index, width, height, depth);
+		part->width = width;
+		part->height = height;
+		part->depth = depth;
+		world_ao_bind();
+		if (!part->texture)
+			return;
+	}
+	/* (the pages a layer at a time) */
+	if (part_index == XGPU_STREAM_WORLD_AO_SCENERY)
+	{
+		uint32_t layer;
+
+		for (layer = 0; layer < z_count; layer++)
+			xgpu_metal_texture_upload(part->texture, 0, z_first + layer, 0, 0, 0, width, height, 1,
+				(const unsigned char *)data + (size_t)layer * width * height, width, width * height);
+	}
+	else
+	{
+		xgpu_metal_texture_upload(part->texture, 0, 0, 0, 0, z_first, width, height, z_count, data, width * texel,
+			width * height * texel);
+	}
+	if (z_first + z_count >= depth && !part->whole)
+	{
+		part->whole = 1;
+		world_ao_bind();
+	}
+}
+
+void xgpu_metal_world_ao_window(const struct xgpu_world_ao_block *block)
+{
+	world_ao_make();
+	if (block)
+	{
+		world_ao.block = xgpu_metal_stream(block, sizeof(*block));
+	}
+	else
+	{
+		world_ao.block.kind = world_ao.zeros ? XGPU_METAL_SOURCE_BUFFER : XGPU_METAL_SOURCE_NONE;
+		world_ao.block.handle = world_ao.zeros;
+		world_ao.block.offset = 0;
+		world_ao.block.size = world_ao.zeros ? sizeof(*block) : 0;
+	}
+	world_ao_bind();
+}

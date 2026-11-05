@@ -42,5 +42,20 @@ read (XGPU_MSL_TEXTURE_AMBIENT_OCCLUSION) */
 #define XGPU_METAL_SAMPLER_STAGE(stage) (stage)
 #define XGPU_METAL_TEXTURE_AMBIENT_OCCLUSION 4
 #define XGPU_METAL_TEXTURE_STAGE_COUNT 5
+/* display.ambient_occlusion "world" (port/linux/src/xgpu_stream.h): the
+field past the stages (XGPU_MSL_TEXTURE_WORLD_SDF) and the window's block
+(XGPU_MSL_BUFFER_WORLD_AO), bound by xgpu_metal_set_world_ao, not as a
+stage: a 3D texture at stage 5 would also be bound at the combiner's place
+for it, XGPU_METAL_COMBINER_TEXTURE_3D + 5, which is a cube stage's */
+#define XGPU_METAL_TEXTURE_WORLD_SDF 5
+/* (and its table of cells, past it: 6 is no stage's, nor a combiner's place) */
+#define XGPU_METAL_TEXTURE_WORLD_SDF_TABLE 6
+/* (and the static scenery's pages of the level's occlusion: 7 is no
+stage's, nor a combiner's place, whose 3D ones begin at 8) */
+#define XGPU_METAL_TEXTURE_WORLD_AO_SCENERY 7
+/* (and the vehicles' occlusion fields' atlas, a 3D texture of four
+halves: past the combiner's places, 8 to 19) */
+#define XGPU_METAL_TEXTURE_WORLD_AO_OBJECTS 20
+#define XGPU_METAL_BUFFER_WORLD_AO 23
 
 #endif

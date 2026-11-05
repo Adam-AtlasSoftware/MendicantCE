@@ -39,5 +39,9 @@ unsigned long long render_prepared_key(char const *scenario, unsigned long journ
 (unknown 0), and, under the settings, backend and GPU it was made with, its
 draws all made (missing 0) */
 boolean render_prepared_played(int formed, unsigned long unknown, unsigned long missing, boolean same_derivation);
+/* what the settings, backend and GPU now make of a map's draws (a hash of
+the settings that change them, render_prepared.c's prepared_settings): a
+map prepared under another is prepared again (render_enumerate.c) */
+unsigned long long render_prepared_derivation(void);
 
 #endif

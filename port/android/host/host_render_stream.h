@@ -97,6 +97,11 @@ struct host_render_backend
 	/* display.panini: a 3D view drawn again through the Panini projection
 	(none: not drawn) */
 	void (*panini)(void *context, const struct xgpu_stream_panini *record);
+	/* display.ambient_occlusion "world" (docs/world-ao.md): the block the
+	opaque surfaces' ambient light reads from here on, and slices of the
+	field (its bytes: host_pointer(record->data)); none: not drawn */
+	void (*world_ao_window)(void *context, const struct xgpu_stream_world_ao_window *record);
+	void (*world_ao_field)(void *context, const struct xgpu_stream_world_ao_field *record);
 
 	void (*target_create)(void *context, const struct xgpu_stream_target_create *record);
 	void (*target_delete)(void *context, uint32_t target);
@@ -120,6 +125,11 @@ struct host_render_backend
 	/* the pipeline the draws use from now on; nonzero if it is made (its
 	state goes back to the guest: XGPU_STREAM_PIPELINE_*) */
 	int (*pipeline)(void *context, uint32_t id, const struct xgpu_stream_pipeline_define *definition);
+	/* pipeline id's stand-in (0 none; its definition): drawn with until
+	id's is made, and always while a map is prepared (none: id's made as
+	any other's) */
+	void (*pipeline_stand_in)(void *context, uint32_t id, uint32_t stand_in,
+		const struct xgpu_stream_pipeline_define *definition);
 	/* the latest of each, whichever changed */
 	void (*draw_state)(void *context, const struct xgpu_stream_dynamic_state *dynamic,
 		const struct xgpu_stream_draw_uniforms *uniforms, uint32_t uniforms_serial);

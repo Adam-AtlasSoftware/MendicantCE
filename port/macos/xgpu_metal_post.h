@@ -53,7 +53,8 @@ int xgpu_metal_post_prepare_hdr(uint8_t depth_format, uint32_t samples);
 /* display.ambient_occlusion (the Vulkan backend's passes, xgpu_vulkan_post.c):
 its functions and pipelines for a target of a format drawn with a depth
 target of a format, made on the backend's queues (0 if the functions cannot
-be: logged once, and it stays so); the occlusion over the corners of a
+be: logged once, and it stays so; or while a pipeline is still being made,
+which none is found for: white); the occlusion over the corners of a
 target's 3D view (one sample, its first layer), found from the depth
 target's depth and stencil (xgpu_stream.h's XGPU_AMBIENT_OCCLUSION_*: its
 opaque surfaces' depth, drawn before they shade), quality

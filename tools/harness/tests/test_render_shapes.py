@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, enum_with, function, mutated, read, run, structure  # noqa: E402
 
 CASES = ["frames_dont_step", "cloth_between_ticks", "open_tick_waits", "turns_with_pole", "gap", "camera_on_foot",
-         "camera_seated"]
+         "camera_seated", "camera_view_newest"]
 
 # a fault in the code, and the case that must catch it
 NEGATIVE_CONTROLS = {
@@ -45,8 +45,10 @@ NEGATIVE_CONTROLS = {
     "camera-mixed": (("\tinterpolation_rendering = FALSE;\n\tunit_get_camera_position(unit_index, position);",
                       "\tunit_get_camera_position(unit_index, position);"), "camera_seated"),
     # ... on foot, left where the tick put it
-    "camera-unmoved": (("\tinterpolation_rendering = rendering;\n\trender_interpolation_object_point(unit_index, position);",
-                        "\tinterpolation_rendering = rendering;"), "camera_on_foot"),
+    "camera-unmoved": (("\t}\n\trender_interpolation_object_point(unit_index, position);", "\t}\n"), "camera_on_foot"),
+    # ... on foot, its view drawn from the newest step: with the body a tick behind, not where the view is
+    "camera-behind-the-view": (("\tif (render_interpolation_view_carried(unit_index, &carried))", "\tif (0)"),
+                               "camera_view_newest"),
 }
 
 
@@ -69,7 +71,8 @@ def generated(fault=None):
 
     text = ""
     for name in ("lerp", "point_lerp", "vector_length", "vector_in_frame", "vector_from_frame", "point_in_frame",
-                 "point_from_frame", "render_interpolation_object_origin", "render_interpolation_unit_camera_position",
+                 "point_from_frame", "render_interpolation_object_origin", "render_interpolation_view_carried",
+                 "render_interpolation_unit_camera_position",
                  "render_interpolation_shape_find", "shape_frame", "render_interpolation_shape_tick",
                  "render_interpolation_shape_forget", "shape_snapshot", "render_interpolation_shape"):
         text += function(code, name) + "\n"
