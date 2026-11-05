@@ -19,7 +19,7 @@ played, the least useful first (cache_files_windows.c).
 
 The budget is game.map_cache_megabytes where set, else the disk's room:
 what the cache takes now and the disk's free space, less a margin the
-cache never takes (the larger of 2 GB and a twentieth of the disk), so that
+cache never takes (a twentieth of the disk, at least 2 GB and at most 5 GB), so that
 the cache never fills the disk. Either way it is at least what the Xbox's
 six cache files took (about 730 MB), as the builds before kept: what the
 open map and a copy need.

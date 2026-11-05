@@ -182,8 +182,11 @@ int main(int argc, char **argv)
 
 	CASE("budget")
 	{
-		/* the disk's room less the larger of 2 GB and a twentieth of the disk */
-		CHECK(map_cache_choose_budget(0, 0, 100 * GIGABYTE, 1000 * GIGABYTE, LEAST) == 50 * GIGABYTE, "large disk");
+		/* the disk's room less a twentieth of the disk, at least 2 GB and at
+		most 5 GB */
+		CHECK(map_cache_choose_budget(0, 0, 100 * GIGABYTE, 1000 * GIGABYTE, LEAST) == 95 * GIGABYTE, "large disk");
+		CHECK(map_cache_choose_budget(0, 0, 20 * GIGABYTE, 64 * GIGABYTE, LEAST) == 20 * GIGABYTE - 64 * GIGABYTE / 20,
+			"a twentieth, between 2 and 5 GB");
 		CHECK(map_cache_choose_budget(0, 3 * GIGABYTE, 10 * GIGABYTE, 40 * GIGABYTE, LEAST) == 11 * GIGABYTE,
 			"the cache's own bytes count as room");
 		CHECK(map_cache_choose_budget(0, 0, 5 * GIGABYTE, 20 * GIGABYTE, LEAST) == 3 * GIGABYTE, "small disk");
@@ -302,7 +305,12 @@ int main(int argc, char **argv)
 		Disk Space Saver the Xbox's six cache files' room, however much the
 		disk has */
 		CHECK(map_cache_choose_budget(INSTANT_MEGABYTES, 3 * GIGABYTE, 100 * GIGABYTE, 1000 * GIGABYTE, LEAST) ==
-			53 * GIGABYTE, "instant: the disk's room");
+			98 * GIGABYTE, "instant: the disk's room");
+		/* (a 471 GB disk with 20.1 GB free and the 2.8 GB cache: the 5 GB
+		margin leaves every stock map room, where a twentieth, 23.5 GB, left
+		only the Xbox's) */
+		CHECK(map_cache_choose_budget(INSTANT_MEGABYTES, 2841ULL * MEGABYTE, 20602ULL * MEGABYTE, 471482ULL * MEGABYTE,
+			LEAST) == (2841ULL + 20602 - 5120) * MEGABYTE, "instant on a large disk with 20 GB free");
 		CHECK(map_cache_choose_budget(INSTANT_MEGABYTES, 0, 10 * GIGABYTE, 64 * GIGABYTE, LEAST) >= 3100ULL * MEGABYTE,
 			"instant: every stock map on a disk with 10 GB free");
 		CHECK(map_cache_choose_budget(SAVER_MEGABYTES, 3 * GIGABYTE, 100 * GIGABYTE, 1000 * GIGABYTE, LEAST) == LEAST,

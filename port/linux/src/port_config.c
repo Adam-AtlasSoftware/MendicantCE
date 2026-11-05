@@ -1126,8 +1126,8 @@ static const struct config_setting config_settings[] =
 		"The most the decompressed maps the game keeps (the save folder's z/)\n"
 		"may take of the disk, in MB. 0 (Settings' Instant Loading): every\n"
 		"stock map, 3.0 GB, unpacked once, in the background, and then loaded\n"
-		"without waiting, short of the larger of 2 GB and a twentieth of the\n"
-		"disk, which it always keeps free. 730 (Disk Space Saver): the Xbox's\n"
+		"without waiting, short of a twentieth of the disk (at least 2 GB, at\n"
+		"most 5 GB), which it always keeps free. 730 (Disk Space Saver): the Xbox's\n"
 		"six cache files' room, the least it takes; a map is unpacked as it is\n"
 		"played, and none ahead. A change gives maps up at once." },
 	{ "game.auto_pickup", _config_boolean, "false", "HALO_AUTO_PICKUP", _environment_value, _platform_all,

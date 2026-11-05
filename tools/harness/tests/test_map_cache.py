@@ -94,6 +94,13 @@ def test_storage_negative_control():
     assert status == CHECK_FAILED, output
 
 
+def test_budget_most_negative_control():
+    """the free-space margin a twentieth of a large disk, past 5 GB, fails the budget"""
+    status, output = run(build("map_cache", generated(budget_fault=("if (margin > MAP_CACHE_FREE_MARGIN_MOST)",
+                                                                     "if (0)"))), "budget")
+    assert status == CHECK_FAILED, output
+
+
 def test_budget_negative_control():
     """the free-space margin, the smaller of the two, fails the budget"""
     status, output = run(build("map_cache", generated(budget_fault=("margin < MAP_CACHE_FREE_MARGIN",
