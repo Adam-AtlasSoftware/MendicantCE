@@ -370,7 +370,7 @@ def test_pipeline_worker_presents_during_compile_and_joins(tmp_path):
     code = text[text.index("/* Preparation queues owned native descriptions."):
                 text.index("\n}\n", text.index("static void pipeline_compiler_stop(")) + 3]
     entries = text[text.index("struct pipeline_entry\n"):text.index("struct shader_entry\n")]
-    accessors = text[text.index("static struct pipeline_entry *pipeline_find("):
+    accessors = text[text.index("static struct pipeline_entry *pipeline_find_apart("):
                      text.index("uint64_t xgpu_vulkan_pipeline_count(")]
     source = r'''
 #include <assert.h>

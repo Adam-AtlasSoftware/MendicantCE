@@ -99,6 +99,7 @@ counts them; each host answers with all of its own, halo_guest_affinity) */
 #define GUEST_SYS_rt_sigaction 134
 #define GUEST_SYS_rt_sigprocmask 135
 #define GUEST_SYS_rt_sigtimedwait 137
+#define GUEST_SYS_setpriority 140
 #define GUEST_SYS_times 153
 #define GUEST_SYS_uname 160
 #define GUEST_SYS_getrlimit 163

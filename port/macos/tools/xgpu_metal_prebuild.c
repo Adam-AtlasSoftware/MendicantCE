@@ -258,8 +258,10 @@ static int draw_pipeline(const struct xgpu_manifest *manifest, const struct xgpu
 	if (!program)
 		fail("out of memory");
 	record = vertex_program_record(microcode, program);
-	lit = (draw->key.lighting == XGPU_LIGHTING_MODEL || draw->key.lighting == XGPU_LIGHTING_MODEL_POINT) &&
-		vertex_lighting_record(program, &lighting);
+	/* (its lighting's record for every lit form, as the backend has it
+	from the guest for the program whatever the draw: the split's vertex
+	function reads its normal, position and lights too) */
+	lit = draw->key.lighting != XGPU_LIGHTING_NONE && vertex_lighting_record(program, &lighting);
 	free(program);
 	/* the layout's attributes (immediate mode's: the registers written),
 	and the draw's variant */
