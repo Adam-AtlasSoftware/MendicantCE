@@ -441,17 +441,20 @@ class Art:
         lines.append("\t</bitmap>")
         return "\n".join(lines)
 
-    def port_picture(self, name: str, frames: list) -> str:
+    def port_picture(self, name: str, frames: list, keep: bool = False) -> str:
         """a <bitmap> of this port's own drawing: each frame an SVG (text,
-        width, height) written to port_svg/ and drawn"""
+        width, height) written to port_svg/ and drawn (keep: not drawn again
+        where its SVG and picture are there already, unchanged)"""
         lines = [f"\t<bitmap{attributes([('name', name)])}>"]
         for index, (text, width, height) in enumerate(frames):
             svg = MENUS / "port_svg" / f"{name}__{index}.svg"
+            png = f"ce/port/{name}__{index}.png"
+            unchanged = keep and svg.is_file() and svg.read_text() == text and (MENUS / png).is_file()
             svg.parent.mkdir(parents=True, exist_ok=True)
             svg.write_text(text)
-            png = f"ce/port/{name}__{index}.png"
             (MENUS / png).parent.mkdir(parents=True, exist_ok=True)
-            Image.fromarray(render_svg(svg, SCALE), "RGBA").save(MENUS / png, optimize=True)
+            if not unchanged:
+                Image.fromarray(render_svg(svg, SCALE), "RGBA").save(MENUS / png, optimize=True)
             self.pngs.append(png)
             lines.append(f"\t\t<frame{attributes([('png', png), ('width', width), ('height', height)])}/>")
         lines.append("\t</bitmap>")
@@ -683,15 +686,109 @@ def pause_art(art):
     return lines
 
 
+# the port's own pictures that tools/port_settings.py draws (each list of
+# (bitmap name, frames) in the order main writes them into bitmaps.xml):
+# Settings', then the shared parts and the campaign's
+PORT_PICTURE_GROUPS = [
+    lambda: port_settings.settings_pictures(),
+    lambda: port_settings.parts_pictures() + port_settings.campaign_pictures(),
+]
+
+
+def bitmap_blocks(text: str) -> list:
+    """bitmaps.xml's <bitmap> elements, in order: (name, its lines)"""
+    blocks, lines = [], text.splitlines()
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if line.startswith("\t<bitmap "):
+            name = line.split('name="', 1)[1].split('"', 1)[0]
+            end = index
+            while lines[end] != "\t</bitmap>":
+                end += 1
+            blocks.append((name, lines[index:end + 1]))
+            index = end + 1
+        else:
+            index += 1
+    return blocks
+
+
+def port_pictures_only() -> None:
+    """the port's own screens (tools/port_settings.py) and pictures written
+    again without the PC version's tags: the pictures port_settings.py
+    draws (PORT_PICTURE_GROUPS) put in bitmaps.xml in place of what it had
+    of them, each group where its first was (as main writes them), the rest
+    of it as it was; a frame drawn again only where its SVG changed; files of
+    pictures it no longer has removed, and menus.json listing what it has"""
+    for name, lines in [*port_settings.settings_files().items(), *port_settings.multiplayer_files().items(),
+                        *port_settings.campaign_files().items()]:
+        (CE / name).write_text("\n".join(lines))
+    art = Art.__new__(Art)
+    art.pngs = []
+    blocks = bitmap_blocks((CE / "bitmaps.xml").read_text())
+    groups = [group() for group in PORT_PICTURE_GROUPS]
+    ours = {name for group in groups for name, _ in group}
+    # (and those it drew before that no screen names now: a picture of
+    # the same folders as ours, drawn as ours are, that no menu file or
+    # source names)
+    import re
+    folders = {name.rsplit("/", 1)[0] for name in ours}
+    named = "\n".join(path.read_text() for path in CE.glob("*.xml") if path.name != "bitmaps.xml")
+    named += "\n".join(path.read_text() for path in (ROOT / "port/linux/game").glob("*.[ch]*"))
+    for name, lines in blocks:
+        frames = [line for line in lines if 'png="' in line]
+        if (name not in ours and name.rsplit("/", 1)[0] in folders and frames and
+                all(re.search(r'png="ce/port/[^"]*__\d+\.png"', line) for line in frames) and
+                f'"{name}"' not in named and name.rsplit("/", 1)[1] not in named):
+            ours.add(name)
+    old_pngs = {line.split('png="', 1)[1].split('"', 1)[0] for name, lines in blocks if name in ours
+                for line in lines if 'png="' in line}
+    written, placed = [], [False] * len(groups)
+    old_names = [name for name, _ in blocks]
+    for name, lines in blocks:
+        if name in ours:
+            group = next((index for index, members in enumerate(groups) if name in dict(members)), None)
+            if group is not None and not placed[group]:
+                placed[group] = True
+                written += [art.port_picture(member, frames, keep=True) for member, frames in groups[group]]
+            continue
+        written.append("\n".join(lines))
+    for group, done in enumerate(placed):
+        if not done:
+            written += [art.port_picture(member, frames, keep=True) for member, frames in groups[group]]
+    text = (CE / "bitmaps.xml").read_text()
+    head = text[:text.index("\t<bitmap ")]
+    (CE / "bitmaps.xml").write_text(head + "\n".join(written) + "\n</menus>\n")
+    for png in sorted(old_pngs - set(art.pngs)):
+        (MENUS / png).unlink(missing_ok=True)
+        (MENUS / "port_svg" / (png[len("ce/port/"):-len(".png")] + ".svg")).unlink(missing_ok=True)
+    listed = json.loads((MENUS / "menus.json").read_text())
+    pngs = sorted((set(name for name in listed["files"] if name.endswith(".png")) - old_pngs) | set(art.pngs))
+    xmls = [name for name in listed["files"] if not name.endswith(".png")]
+    listed["files"] = xmls + pngs
+    (MENUS / "menus.json").write_text(json.dumps(listed, indent=1) + "\n")
+    added = sorted(set(name for name, _ in bitmap_blocks((CE / "bitmaps.xml").read_text())) - set(old_names))
+    print(f"{len(ours)} of the port's pictures; added {added or 'none'}; "
+          f"{len(old_pngs - set(art.pngs))} frames' files removed")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--tags", type=Path, required=True)
-    parser.add_argument("--definitions", type=Path, required=True)
-    parser.add_argument("--redraws", type=Path, required=True)
-    parser.add_argument("--placeholder", type=Path, required=True, help="the picture for frames with no redraw")
+    parser.add_argument("--port-pictures", action="store_true",
+                        help="only the port's own screens and the pictures tools/port_settings.py draws, without "
+                        "the PC version's tags (the rest of bitmaps.xml kept as it is)")
+    parser.add_argument("--tags", type=Path)
+    parser.add_argument("--definitions", type=Path)
+    parser.add_argument("--redraws", type=Path)
+    parser.add_argument("--placeholder", type=Path, help="the picture for frames with no redraw")
     parser.add_argument("--pictures", type=Path,
                         help="the PC version's pictures, as PNGs by tag path: only where each is, to place its placeholder")
     arguments = parser.parse_args()
+    if arguments.port_pictures:
+        port_pictures_only()
+        return
+    if not (arguments.tags and arguments.definitions and arguments.redraws and arguments.placeholder):
+        parser.error("--tags, --definitions, --redraws and --placeholder are needed (or --port-pictures)")
     tags = Tags(arguments.tags, arguments.definitions)
     # (the names of the Xbox's own as the game has them, which the tags' own
     # names give a little differently: "create&edit", "NULL")
