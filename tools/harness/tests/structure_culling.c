@@ -117,6 +117,9 @@ static void fixture_free(void *data) { CHECK(data!=NULL,"engine debug_free rejec
 #define malloc fixture_malloc
 #define realloc fixture_realloc
 #define free fixture_free
+/* (the map's preparation's walk: not walking) */
+static boolean render_enumerating;
+
 #include "under_test.inc"
 #undef malloc
 #undef realloc
