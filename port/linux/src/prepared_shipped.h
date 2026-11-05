@@ -26,10 +26,12 @@ struct prepared_shipped
 extern const struct prepared_shipped prepared_shipped[];
 extern const unsigned int prepared_shipped_count;
 
-/* the shipped record of a map (its checksum) and key, inflated: malloc's,
-of size bytes; NULL where none is shipped, or it does not inflate whole */
-void *prepared_shipped_read(unsigned int checksum, unsigned int key_high, unsigned int key_low, unsigned int *size);
-/* a record of that map and key is shipped */
-int prepared_shipped_exists(unsigned int checksum, unsigned int key_high, unsigned int key_low);
+/* the size of the shipped record of a map (its checksum) and key, inflated;
+0 where none is shipped */
+unsigned int prepared_shipped_size(unsigned int checksum, unsigned int key_high, unsigned int key_low);
+/* ...inflated into a buffer of that size (the caller's, whose memory is the
+game's): whether it inflates whole */
+int prepared_shipped_inflate(unsigned int checksum, unsigned int key_high, unsigned int key_low, void *into,
+	unsigned int size);
 
 #endif

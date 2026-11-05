@@ -269,15 +269,19 @@ and checked; NULL if none is shipped, or it is passed over (never deleted:
 the game's own) */
 static uint64_t *prepared_shipped_take(unsigned long checksum, uint64_t key, struct prepared_header *header)
 {
-	unsigned int size = 0;
+	unsigned int size;
 	unsigned char *data;
 	unsigned long payload;
 
-	if (prepared_shipped_rejected(checksum, key) ||
-		!prepared_shipped_exists((unsigned int)checksum, (unsigned int)(key >> 32), (unsigned int)key))
+	if (prepared_shipped_rejected(checksum, key))
 		return NULL;
-	data = prepared_shipped_read((unsigned int)checksum, (unsigned int)(key >> 32), (unsigned int)key, &size);
-	if (data && size >= sizeof(*header))
+	size = prepared_shipped_size((unsigned int)checksum, (unsigned int)(key >> 32), (unsigned int)key);
+	if (!size)
+		return NULL;
+	/* (the game's memory, which the caller frees) */
+	data = malloc(size);
+	if (data && size >= sizeof(*header) &&
+		prepared_shipped_inflate((unsigned int)checksum, (unsigned int)(key >> 32), (unsigned int)key, data, size))
 	{
 		memcpy(header, data, sizeof(*header));
 		payload = size - sizeof(*header);
@@ -290,7 +294,8 @@ static uint64_t *prepared_shipped_take(unsigned long checksum, uint64_t key, str
 			return (uint64_t *)data;
 		}
 	}
-	free(data);
+	if (data)
+		free(data);
 	platform_log("render: the map's preparation's shipped record is not this map's, form's or settings', or does "
 		"not inflate whole: passed over");
 	prepared_shipped_reject(checksum, key);
@@ -325,7 +330,9 @@ static uint64_t *prepared_read(struct prepared_header *header)
 	{
 		platform_log("render: the map's preparation's record is not this map's, form's or settings', or is cut "
 			"short: made again");
-		free(words);
+		/* (the game's free halts on NULL) */
+		if (words)
+			free(words);
 		DeleteFileA(prepared.path);
 		words = prepared_shipped_take(prepared.checksum, prepared.key, header);
 		prepared.shipped = words != NULL;
@@ -435,8 +442,10 @@ boolean render_prepared_shipped(unsigned long checksum, unsigned long long key)
 	if (!prepared_enabled())
 		return FALSE;
 	record = prepared_shipped_take(checksum, key, &header);
+	if (!record)
+		return FALSE;
 	free(record);
-	return record != NULL;
+	return TRUE;
 }
 
 boolean render_prepared_shipped_map(unsigned long checksum, char const *scenario)
@@ -488,7 +497,8 @@ boolean render_prepared_replay(boolean mirrors)
 	missing = made ? render_prepared_draws_missing(record, header.draw_count, made, count) : header.draw_count;
 	if (missing && made)
 		prepared_log_new(record, header.draw_count);
-	free(made);
+	if (made)
+		free(made);
 	free(record);
 	if (!formed || unknown || missing)
 	{
