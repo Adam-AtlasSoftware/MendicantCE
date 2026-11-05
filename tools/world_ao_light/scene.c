@@ -426,6 +426,97 @@ static int scene_cull(long windows, long points)
 	return unequal ? 1 : 0;
 }
 
+/* ---------- pages: the static scenery's pages (world_ao_scenery_page) of a
+floor 4 wu square, its lightmap's coordinates the square's, under a sphere:
+each texel whose centre the floor covers is the shapes' product at its
+place, as a byte; the texels about it take their neighbours'; and a page
+whose second triangle's coordinates lie over the first's, at another
+place, is found shared */
+
+static void page_triangle(float *out, float const a[3], float const b[3], float const c[3], float const uv[6])
+{
+	static const float up[3] = { 0.0f, 0.0f, 1.0f };
+	int k;
+
+	for (k = 0; k < 3; k++)
+	{
+		out[k] = a[k];
+		out[3 + k] = b[k];
+		out[6 + k] = c[k];
+		out[9 + k] = out[12 + k] = out[15 + k] = up[k];
+	}
+	memcpy(out + 18, uv, 6 * sizeof(float));
+}
+
+static int scene_pages_check(void)
+{
+	enum { SIDE = 32 };
+	static const float a[3] = { -2.0f, -2.0f, 0.0f }, b[3] = { 2.0f, -2.0f, 0.0f }, c[3] = { 2.0f, 2.0f, 0.0f },
+		d[3] = { -2.0f, 2.0f, 0.0f };
+	/* (the square's middle half of the page: a margin of texels about it) */
+	static const float first[6] = { 0.25f, 0.25f, 0.75f, 0.25f, 0.75f, 0.75f },
+		second[6] = { 0.25f, 0.25f, 0.75f, 0.75f, 0.25f, 0.75f };
+	static const float up[3] = { 0.0f, 0.0f, 1.0f };
+	float triangles[3 * WORLD_AO_SCENERY_TRIANGLE];
+	unsigned char texels[SIDE * SIDE];
+	struct world_proxy sphere;
+	long covered, shared, x, y, wrong = 0;
+
+	memset(&sphere, 0, sizeof(sphere));
+	sphere.v[0][2] = 0.8f;
+	sphere.v[0][3] = _world_proxy_sphere;
+	sphere.v[1][2] = 0.8f;
+	sphere.v[1][3] = 7.0f;
+	sphere.v[2][0] = 0.5f;
+	page_triangle(triangles, a, b, c, first);
+	page_triangle(triangles + WORLD_AO_SCENERY_TRIANGLE, a, c, d, second);
+	covered = world_ao_scenery_page(&sphere, 1, triangles, 2, SIDE, SIDE, texels, &shared);
+	/* (the texels whose centres are in the square: 16 a side) */
+	if (covered != 16 * 16 || shared)
+	{
+		printf("covered %ld shared %ld\n", covered, shared);
+		return 1;
+	}
+	for (y = 0; y < SIDE; y++)
+	{
+		for (x = 0; x < SIDE; x++)
+		{
+			float u = ((float)x + 0.5f) / SIDE, v = ((float)y + 0.5f) / SIDE, place[3];
+			int inside = u > 0.25f && u < 0.75f && v > 0.25f && v < 0.75f;
+			int near = !inside && u > 0.25f - 2.0f / SIDE && u < 0.75f + 2.0f / SIDE && v > 0.25f - 2.0f / SIDE &&
+				v < 0.75f + 2.0f / SIDE;
+			int expected;
+
+			place[0] = -2.0f + (u - 0.25f) * 8.0f;
+			place[1] = -2.0f + (v - 0.25f) * 8.0f;
+			place[2] = 0.0f;
+			expected = (int)(world_ao_proxies_occlusion(&sphere, 1, place, up, -3.0f) * 255.0f + 0.5f);
+			/* (inside: its own; two texels about it: its neighbours', within a
+			few steps of its edge's; past them, none: 255) */
+			if (inside ? texels[y * SIDE + x] != expected : near ? abs(texels[y * SIDE + x] - expected) > 24 :
+				texels[y * SIDE + x] != 255)
+			{
+				if (wrong++ < 4)
+					printf("texel %ld %ld: %d, expected %d\n", x, y, texels[y * SIDE + x], expected);
+			}
+		}
+	}
+	/* (a third triangle over the first's coordinates, a metre up: shared) */
+	{
+		static const float raised[3][3] = { { -2.0f, -2.0f, 1.0f }, { 2.0f, -2.0f, 1.0f }, { 2.0f, 2.0f, 1.0f } };
+
+		page_triangle(triangles + 2 * WORLD_AO_SCENERY_TRIANGLE, raised[0], raised[1], raised[2], first);
+		covered = world_ao_scenery_page(&sphere, 1, triangles, 3, SIDE, SIDE, texels, &shared);
+		if (covered != 16 * 16 || shared < 100)
+		{
+			printf("over: covered %ld shared %ld\n", covered, shared);
+			return 1;
+		}
+	}
+	printf("pages: %ld wrong\n", wrong);
+	return wrong ? 1 : 0;
+}
+
 int main(int argc, char **argv)
 {
 	long count = argc > 2 && !strcmp(argv[1], "reference") ? atol(argv[2]) : 0, index;
@@ -434,6 +525,8 @@ int main(int argc, char **argv)
 
 	if (argc > 3 && !strcmp(argv[1], "cull"))
 		return scene_cull(atol(argv[2]), atol(argv[3]));
+	if (argc > 1 && !strcmp(argv[1], "pages"))
+		return scene_pages_check();
 	if (count <= 0)
 	{
 		fprintf(stderr, "scene reference <count> | scene cull <windows> <points>\n");

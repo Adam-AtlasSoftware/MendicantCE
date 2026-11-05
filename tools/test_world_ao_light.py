@@ -242,6 +242,30 @@ def test_the_constants_alike():
     assert ours == re.search(r"#define XGPU_WORLD_AO_LEAST (\S+)", emitters).group(1)
 
 
+def test_the_static_scenery_pages(reference):
+    """the static scenery's pages (world_ao_scenery_page): each texel a floor covers is the shapes' product at its place,
+    the texels about it its neighbours', and a page two places share is found"""
+    result = subprocess.run([str(reference["build"] / "scene"), "pages"], capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_the_static_scenery_pages_control(reference, tmp_path):
+    """(a texel's place taken from the triangle's first corner alone: the check sees it)"""
+    text = (GAME / "world_ao_shading.c").read_text()
+    fault = "place[axis] = b[0] * t[axis] + b[1] * t[3 + axis] + b[2] * t[6 + axis];"
+    assert text.count(fault) == 1
+    (tmp_path / "world_ao_shading.c").write_text(text.replace(fault, "place[axis] = t[axis];"))
+    objects = []
+    for path in (GAME / "world_proxies.c", GAME / "world_sdf_bake.c", tmp_path / "world_ao_shading.c"):
+        objects.append(tmp_path / path.name.replace(".c", ".o"))
+        subprocess.run([CC, "-std=gnu99", "-O1", "-Wall", "-iquote", str(INCLUDE), "-c", str(path), "-o",
+                        str(objects[-1])], check=True)
+    scene = tmp_path / "scene"
+    subprocess.run([CC, "-std=gnu99", "-O1", "-Wall", "-iquote", str(INCLUDE), str(TOOL / "scene.c")] +
+                   [str(path) for path in objects] + ["-o", str(scene), "-lm"], check=True)
+    assert subprocess.run([str(scene), "pages"], capture_output=True, text=True).returncode == 1
+
+
 def test_the_grid_finds_what_every_proxy_finds(reference):
     """the proxies' grid (world_ao_grid) leaves out only proxies that could not shade the pixel: at random windows of
     64 shapes and points about them, the grid's product is every proxy's, bit for bit"""

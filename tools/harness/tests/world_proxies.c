@@ -625,6 +625,7 @@ static void add_instance(long id, long definition, float x, float y, float z)
 
 	fake.instances[index].id = id;
 	fake.instances[index].definition = definition;
+	fake.instances[index].baked = 0;
 	identity(&fake.frames[index][0], x, y, z);
 	fake.frame_counts[index] = 1;
 }
@@ -857,6 +858,34 @@ static void owner_case(void)
 	CHECK(proxies[count - 1].v[1][3] == 2.0f && owners[count - 1] == 22, "the last owner's slot 2");
 }
 
+/* the static scenery the field and its pages hold: its shapes after every
+dynamic object's, nearer or not, and the dynamic objects' counted */
+static void baked_case(void)
+{
+	float const camera[3] = { -5.0f, 0.0f, 1.0f };
+	struct world_proxy proxies[WORLD_PROXY_MAXIMUM_PER_WINDOW];
+	long owners[WORLD_PROXY_MAXIMUM_PER_WINDOW], count;
+
+	one_sphere_definition();
+	fake.frustum = 0;
+	/* (a baked sphere nearest, a dynamic one, a baked one, a dynamic one
+	farthest) */
+	add_instance(30, 0, -4.0f, 0.0f, 1.0f);
+	fake.instances[0].baked = 1;
+	add_instance(31, 0, -2.0f, 0.0f, 1.0f);
+	add_instance(32, 0, 0.0f, 0.0f, 1.0f);
+	fake.instances[2].baked = 1;
+	add_instance(33, 0, 3.0f, 0.0f, 1.0f);
+	count = world_proxies_window(camera, proxies, owners, WORLD_PROXY_MAXIMUM_PER_WINDOW, &dynamic_count);
+	CHECK(count == 4 && dynamic_count == 2, "%ld shapes, %ld dynamic", count, dynamic_count);
+	CHECK(owners[0] == 31 && owners[1] == 33 && owners[2] == 30 && owners[3] == 32, "the order %ld %ld %ld %ld",
+		owners[0], owners[1], owners[2], owners[3]);
+	/* (a window too small for all: the dynamic objects' kept first) */
+	count = world_proxies_window(camera, proxies, owners, 3, &dynamic_count);
+	CHECK(count == 3 && dynamic_count == 2 && owners[2] == 30, "three: %ld, %ld dynamic, the last %ld", count,
+		dynamic_count, owners[2]);
+}
+
 static void none_case(void)
 {
 	float const origin[3] = { 0.0f, 0.0f, 0.0f };
@@ -902,6 +931,8 @@ int main(int argc, char **argv)
 		skeleton_case();
 	else if (!strcmp(name, "owner"))
 		owner_case();
+	else if (!strcmp(name, "baked"))
+		baked_case();
 	else if (!strcmp(name, "none"))
 		none_case();
 	else
