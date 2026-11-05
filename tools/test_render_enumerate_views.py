@@ -30,7 +30,7 @@ typedef int boolean;
 #define SET_FLAG(value, bit, on) ((on) ? ((value) |= 1UL << (bit)) : ((value) &= ~(1UL << (bit))))
 struct enumerated_materials { short count; unsigned long keys[1]; };
 static struct { boolean new_map; unsigned long *structure_bsps_enumerated[2];
-    struct enumerated_materials *materials_enumerated[2]; short picture_recording; } enumerate;
+    struct enumerated_materials *materials_enumerated[2]; } enumerate;
 static short structure;
 static unsigned long checksum=1;
 static long global_scenario_index=1;
@@ -52,8 +52,6 @@ static void platform_log(const char *format, ...) { (void)format; }
 /* (no menu pictures' pass: render_prepared.c records none) */
 static int menu_pictures_preparing(void) { return 0; }
 static int menu_pictures_stock_maps(void) { return 0; }
-static boolean render_prepared_recorded(boolean mirrors) { (void)mirrors; return TRUE; }
-static boolean structure_visibility_port_has_mirrors(void) { return FALSE; }
 """
     start = code.index("static struct\n", code.index("/* the maps enumerated (a map"))
     end = code.index("static short enumerated_map_count = 0;", start)
