@@ -1651,16 +1651,12 @@ static int sdf_bsp_copy(struct collision_bsp const *collision, struct sdf_bsp *c
 
 /* ---------- the static scenery (docs/world-ao.md, "Static scenery") */
 
-/* a scenario's scenery placement (tag_schema_scenario.c's 0x48 bytes: a
-struct scenario_object_datum, then its permutation) */
-#define SDF_SCENERY_PLACEMENT_BYTES 0x48
-
 /* a placement's definition if it is static (FALSE if not): no script can
 name it, it is made at the map's start on every difficulty, in this BSP
 (as the game places a placement in a BSP: object_types.c), and nothing
-moves or destroys it (no animations, no body to damage). Everything else
-the proxies shade, as before */
-static long sdf_scenery_static(struct scenario const *scenario, struct scenario_object_datum const *placement)
+moves or destroys it (no animations, which are how a device moves, no body
+to damage). Everything else the proxies shade, as before */
+static long sdf_scenery_static(struct tag_block const *palette, struct scenario_object_datum const *placement)
 {
 	struct scenario_object_palette_entry const *entry;
 	struct object_definition const *definition;
@@ -1669,13 +1665,11 @@ static long sdf_scenery_static(struct scenario const *scenario, struct scenario_
 	long index;
 
 	if (placement->name_index != NONE || (placement->placement_flags & ((1 << NUMBER_OF_SCENARIO_OBJECT_LOCATION_PLACEMENT_FLAGS) - 1)) ||
-		placement->palette_entry_index < 0 || placement->palette_entry_index >= scenario->scenery_palette.count ||
-		!scenario->scenery_palette.address)
+		placement->palette_entry_index < 0 || placement->palette_entry_index >= palette->count || !palette->address)
 	{
 		return NONE;
 	}
-	entry = TAG_BLOCK_GET_ELEMENT(&scenario->scenery_palette, placement->palette_entry_index,
-		struct scenario_object_palette_entry);
+	entry = TAG_BLOCK_GET_ELEMENT(palette, placement->palette_entry_index, struct scenario_object_palette_entry);
 	index = entry->reference.index;
 	if (index == NONE || !(definition = object_definition_get(index)) || definition->object.model.index == NONE)
 		return NONE;
@@ -1750,15 +1744,36 @@ static int sdf_scenery_copy(struct sdf_job *job)
 	struct scenario *scenario = global_scenario_get();
 	long index, positions_room = job->triangle_count, solids_room = 0, shapes_room = 0;
 	long placements_room = 0;
+	/* (the scenery, and the devices that cannot move: their blocks, their
+	palettes and their placements' bytes, tag_schema_scenario.c's) */
+	struct
+	{
+		struct tag_block const *placements, *palette;
+		long size;
+	} kinds[4];
+	int kind;
 
-	if (!scenario || !scenario->scenery.address)
+	if (!scenario)
 		return 1;
-	for (index = 0; index < scenario->scenery.count && job->placement_count < WORLD_SDF_SCENERY_MAXIMUM_PLACEMENTS;
-		index++)
+	kinds[0].placements = &scenario->scenery;
+	kinds[0].palette = &scenario->scenery_palette;
+	kinds[0].size = 0x48;
+	kinds[1].placements = &scenario->machines;
+	kinds[1].palette = &scenario->machine_palette;
+	kinds[1].size = 0x40;
+	kinds[2].placements = &scenario->controls;
+	kinds[2].palette = &scenario->control_palette;
+	kinds[2].size = 0x40;
+	kinds[3].placements = &scenario->light_fixtures;
+	kinds[3].palette = &scenario->light_fixtures_palette;
+	kinds[3].size = 0x58;
+	for (kind = 0; kind < 4; kind++)
+	for (index = 0; kinds[kind].placements->address && index < kinds[kind].placements->count &&
+		job->placement_count < WORLD_SDF_SCENERY_MAXIMUM_PLACEMENTS; index++)
 	{
 		struct scenario_object_datum const *placement = (struct scenario_object_datum const *)
-			((byte const *)scenario->scenery.address + index * SDF_SCENERY_PLACEMENT_BYTES);
-		long definition_index = sdf_scenery_static(scenario, placement), node_index;
+			((byte const *)kinds[kind].placements->address + index * kinds[kind].size);
+		long definition_index = sdf_scenery_static(kinds[kind].palette, placement), node_index;
 		struct object_definition const *definition;
 		struct model const *model;
 		struct collision_model const *collision;

@@ -104,14 +104,18 @@ static boolean object_occludes(long object_index)
 }
 
 /* a static scenery placement that the drawn field and its pages hold:
-scenery on no other object, standing where one baked stands */
+scenery or a device on no other object, standing where one baked stands */
 static int object_baked(long object_index, long definition)
 {
 	struct object_datum *object = (struct object_datum *)object_try_and_get(object_index);
 	float position[3];
 
-	if (!object || object->object.type != _object_type_scenery || object->object.parent_object_index != NONE)
+	if (!object || object->object.parent_object_index != NONE || (object->object.type != _object_type_scenery &&
+		object->object.type != _object_type_machine && object->object.type != _object_type_control &&
+		object->object.type != _object_type_light_fixture))
+	{
 		return FALSE;
+	}
 	position[0] = object->object.position.x;
 	position[1] = object->object.position.y;
 	position[2] = object->object.position.z;
