@@ -166,14 +166,15 @@ never shipped, and never trusted without checks.
 - **Key:** the map's cache file header checksum (`menu_picture_map_checksum`'s source) plus `WORLD_SDF_VERSION`. A
   different map under the same name, or a new version, is baked again. A good file is reused forever.
 - **Format** (little-endian, written field by field, not as a struct):
-  - a 64-byte `struct world_sdf_header`: magic `WSDF`, version (2: sparse), map checksum, bsp index, the cells along
-    x/y/z, origin, voxel, range, deflated size, bake ms, bake threads, brick count;
-  - then the cells (4 bytes each, x fastest, then y, then z) and the bricks (729 bytes each), deflated as one zlib
-    stream (the game's own zlib, `source/memory/zlib`);
+  - a 72-byte `struct world_sdf_header`: magic `WSDF`, version (3: the static scenery), map checksum, bsp index, the
+    cells along x/y/z, origin, voxel, range, deflated size, bake ms, bake threads, brick count, the static scenery's
+    part's bytes and its pages' bake ms;
+  - then the cells (4 bytes each, x fastest, then y, then z), the bricks (729 bytes each) and the static scenery's
+    part ([Static scenery](#static-scenery)), deflated as one zlib stream (the game's own zlib, `source/memory/zlib`);
   - then a CRC-32 of the header and the deflated bytes (the menu pictures' CRC).
 - **Writing:** to `<name>.tmp`, then renamed into place, so a crash leaves no half file.
-- **Reading:** a file with the wrong magic, version, checksum, size or CRC, a cell of no kind, or a brick's place
-  past the bricks is deleted and baked again.
+- **Reading:** a file with the wrong magic, version, checksum, size or CRC, a cell of no kind, a brick's place
+  past the bricks, or a scenery part whose counts, sizes or pages' layers don't hold is deleted and baked again.
 - **Bumping `WORLD_SDF_VERSION`:** whenever the bake's arithmetic, the source geometry or the layout changes.
 
 ## Proxies (`world_proxies.h`)

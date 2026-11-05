@@ -345,6 +345,7 @@ void world_ao_window_begin(short local_player_index, short rasterizer_target, fl
 		(float const (*)[3][4])world_ao.proxies, (int)world_ao.count, (float const (*)[4])world_ao.grid,
 		(unsigned int const (*)[4])world_ao.cells);
 	world_ao.window = 1;
+	world_ao_counts_window();
 }
 
 void world_ao_window_end(void)
@@ -386,13 +387,48 @@ void world_ao_object_begin(long object_index)
 	halo_world_ao_object(owner, reference);
 }
 
+/* HALO_WORLD_AO_COUNTS (measuring): every 600 windows, the windows'
+shapes and the dynamic objects' of them, and the lightmap pages drawn with
+a layer and without, a window's mean */
+static struct
+{
+	int wanted;
+	long windows, shapes, dynamic, paged, unpaged;
+} world_ao_counts = { -1 };
+
+static void world_ao_counts_window(void)
+{
+	if (world_ao_counts.wanted < 0)
+		world_ao_counts.wanted = getenv("HALO_WORLD_AO_COUNTS") != NULL;
+	if (!world_ao_counts.wanted)
+		return;
+	world_ao_counts.windows++;
+	world_ao_counts.shapes += world_ao.count;
+	world_ao_counts.dynamic += world_ao.dynamic_count;
+	if (world_ao_counts.windows >= 600)
+	{
+		printf("world ao: a window's %.1f shapes, %.1f of them dynamic; %.1f lightmap pages with a layer, %.1f "
+			"without\n", (double)world_ao_counts.shapes / 600.0, (double)world_ao_counts.dynamic / 600.0,
+			(double)world_ao_counts.paged / 600.0, (double)world_ao_counts.unpaged / 600.0);
+		fflush(stdout);
+		memset(&world_ao_counts.windows, 0, sizeof(world_ao_counts) - sizeof(world_ao_counts.wanted));
+	}
+}
+
 void world_ao_lightmap_begin(void const *lightmap_bitmap)
 {
+	int layer;
+
 	/* (the structure's: none of the objects' shapes its own; its page's
 	layer where the lightmap draws take their reference, or none) */
 	if (!world_ao.window)
 		return;
-	halo_world_ao_object(WORLD_AO_OWNER_NONE, (float)world_sdf_scenery_layer(lightmap_bitmap));
+	layer = world_sdf_scenery_layer(lightmap_bitmap);
+	if (layer >= 0)
+		world_ao_counts.paged++;
+	else
+		world_ao_counts.unpaged++;
+	halo_world_ao_object(WORLD_AO_OWNER_NONE, (float)layer);
 }
 
 void world_ao_first_person(int drawing)
