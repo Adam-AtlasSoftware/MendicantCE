@@ -828,7 +828,12 @@ void cache_files_initialize(
 	/* (a copy of the game running beside the one that keeps the cache:
 	those six's room alone, cache_slot_folder) */
 	if (cache_slot_folder_keeps_cache())
+	{
 		cached_map_files_budget = map_cache_budget(cached_map_files_bytes(NONE), cached_map_files_budget);
+		/* (a cache past it, kept at a larger budget before: given up to fit
+		now, as the setting's change does while the game runs) */
+		cached_map_files_fit_budget();
+	}
 	/* port: (the copies are port/linux/src/map_unpack.c's: the Xbox's
 	decompressor's thread is not started) */
 
