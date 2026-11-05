@@ -114,6 +114,8 @@ static struct
 	tracking's serial then; a target's copy bound (checked at each draw) */
 	struct xgpu_stream_texture_stage stages[4];
 	BOOL textures_dirty, feedback_bound;
+	/* display.ambient_occlusion's texture is bound for the draws */
+	BOOL occlusion_bound;
 	uint32_t textures_serial;
 	/* the copy of a target drawn into that a draw samples: of which
 	texture, as of which of its draws */
@@ -872,6 +874,15 @@ static BOOL draw_prepare(const struct xgpu_metal_vertex_attribute *attributes, c
 		sampler.address_u = sampler.address_v = sampler.address_w = XGPU_METAL_ADDRESS_CLAMP;
 		sampler.max_anisotropy = 1;
 		xgpu_metal_set_texture(XGPU_METAL_TEXTURE_AMBIENT_OCCLUSION, xgpu_metal_post_ambient_occlusion_texture(), &sampler);
+		stream.occlusion_bound = YES;
+	}
+	else if (stream.occlusion_bound)
+	{
+		/* (and none for a draw that does not: a draw put aside reads
+		nothing the frame wrote, xgpu_metal.m, and an object's shadow drawn
+		after the surfaces would otherwise be thought to read it) */
+		xgpu_metal_set_texture(XGPU_METAL_TEXTURE_AMBIENT_OCCLUSION, 0, NULL);
+		stream.occlusion_bound = NO;
 	}
 	if (target_get(stream.color))
 		target_get(stream.color)->written++;

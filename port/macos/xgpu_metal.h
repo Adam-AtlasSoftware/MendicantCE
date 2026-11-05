@@ -132,6 +132,9 @@ enum
 	/* ASTC 4x4 (LDR): DXT textures transcoded on a GPU without BC
 	(port/linux/astc/xgpu_astc.h) */
 	XGPU_METAL_FORMAT_ASTC,
+	/* the backend's own targets: a byte (red), two (red, green) */
+	XGPU_METAL_FORMAT_R8,
+	XGPU_METAL_FORMAT_RG8,
 	XGPU_METAL_FORMAT_COUNT
 };
 

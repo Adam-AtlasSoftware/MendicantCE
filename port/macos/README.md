@@ -895,6 +895,25 @@ command stream's backend table. They run on one thread, the render thread.
   `tools/metal_post_shaders.py`); the functions are in the app's library,
   their pipelines made as the setting is chosen and as a map is
   prepared.
+- **Ambient occlusion** (`display.ambient_occlusion`): the Vulkan
+  backend's GTAO (`tools/vulkan_post_shaders.py`) in passes Apple's GPUs
+  draw cheaply (`xgpu_metal_post.c`): the stencil's marks drawn into a mask
+  of two bytes a pixel; the distances and the mask taken into one texture at
+  the occlusion's resolution (half the target's each way: a Retina
+  display's points), the only pixels the occlusion reads them at, so that
+  its scattered reads stay in a texture a quarter of the target's size; the
+  occlusion, its blur along x and y, and the occlusion filtered up into a
+  byte a pixel, the pixel's distance read from the depth target. The
+  occlusion, the blur and the filtering are compiled in Metal's relaxed
+  maths (`#pragma METAL fp math_mode(relaxed)`, by
+  `tools/metal_post_shaders.py`): in safe maths, their arcsines,
+  exponentials and divides cost three times their reads. The occlusion's
+  texture is unbound for the draws that do not read it, so that the
+  objects' shadows drawn after the surfaces are still put aside. On an M2
+  at 3420x2146, unpaced (`HALO_METAL_PASS_TIMES`), a frame's GPU time with
+  "strong" over none: a10's hangar 3.3 ms (was 10 to 12), a30's landing
+  1.1 ms (was 5.1).
+
 ### Tests
 
 `ninja macos_metal_test`, then `python3 -m pytest -q tools/test_macos_metal.py`,
