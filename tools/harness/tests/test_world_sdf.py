@@ -37,10 +37,10 @@ CONTROLS = [
     # the menus paced as play (the start's bakes slowed behind the main menu)
     (BAKE, "\tif (!playing)\n\t{", "\tif (0)\n\t{", "pace"),
     # frames a tenth late never a rest
-    (BAKE, "total > pace->normal * WORLD_SDF_PACE_LATE * (float)count", "total > pace->normal * 2.0f * (float)count",
-     "pace"),
+    (BAKE, "return normal * WORLD_SDF_PACE_LATE + WORLD_SDF_PACE_SLACK_MS;", "return normal * 2.0f;", "pace"),
     # a hitch never a rest
-    (BAKE, "if (milliseconds > pace->normal * WORLD_SDF_PACE_HITCH ||", "if (0 ||", "pace"),
+    (BAKE, "if (milliseconds > pace->normal * WORLD_SDF_PACE_HITCH + WORLD_SDF_PACE_HITCH_SLACK_MS ||", "if (0 ||",
+     "pace"),
     # a rest no longer while frames keep running late
     (BAKE, "pace->next_rest = pace->next_rest * 2 < WORLD_SDF_PACE_MOST_REST ? pace->next_rest * 2 : "
      "WORLD_SDF_PACE_MOST_REST;", "", "pace"),
