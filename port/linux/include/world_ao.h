@@ -126,6 +126,17 @@ float world_ao_reference(struct world_sdf_volume const *volume, float const ligh
 owners than owner leave */
 float world_ao_proxies_occlusion(struct world_proxy const *proxies, long count, float const point[3],
 	float const normal[3], float owner);
+/* the atlas of the vehicles' occlusion fields the reference reads
+(world_sdf.h's struct world_sdf_objects, as the GPU has it: width x height
+x depth texels of four half floats; NULL none), and a vehicle's field's
+occlusion at a point (its three shapes from proxy: xgpu_stream.h's
+XGPU_WORLD_AO_PROXY_FIELD), as the shaders find it */
+void world_ao_objects_atlas(unsigned short const *texels, unsigned long width, unsigned long height,
+	unsigned long depth);
+float world_ao_field_proxy_occlusion(struct world_proxy const *proxy, float const point[3], float const normal[3]);
+/* its share kept at a point by its geometry's box's bound (world_proxies.h's
+world_proxy_box_fade, the box in its voxels): 0 where that is under 1/510 */
+float world_ao_field_proxy_fade(struct world_proxy const *proxy, float const point[3], float const normal[3]);
 /* a lightmap page of the static scenery's occlusion of the level
 (world_sdf.h's struct world_sdf_scenery): the triangles that draw with it
 (WORLD_AO_SCENERY_TRIANGLE floats each: three corners' positions, then their
@@ -200,6 +211,9 @@ enum
 	/* (the static scenery's pages: width x height bytes, depth layers;
 	sent before the table) */
 	WORLD_AO_FIELD_SCENERY = 2,
+	/* (the vehicles' occlusion fields' atlas: width x height texels of 4
+	half floats, depth slices; sent before the table) */
+	WORLD_AO_FIELD_OBJECTS = 3,
 };
 void halo_world_ao_field(int part, unsigned long width, unsigned long height, unsigned long depth,
 	unsigned long z_first, unsigned long z_count, void const *data);

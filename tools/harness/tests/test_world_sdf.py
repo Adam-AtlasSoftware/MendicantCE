@@ -3,7 +3,9 @@ port/linux/game/world_sdf_bake.c, port/linux/game/world_sdf.c, docs/world-ao.md)
 budget, the encoding's round trip, the sparse field's sample as the GPU reads it (the whole grid's it stands for,
 exactly), its atlas, the bake against exact distances (a plane, a box room, a sphere, a box signed by a BSP's point
 test, a soup of triangles against every triangle; the bricks' shared faces alike), and the cache file's round trip
-and rejections."""
+and rejections. The vehicles' occlusion fields: their layout, a box's bake against the hemisphere's integral (its
+inside never filtered out past its faces, its reach), their bytes the same in any slices' order, half floats, the
+atlas's places, and their part of the file."""
 import sys
 from pathlib import Path
 
@@ -12,13 +14,16 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, enum_with, function, mutated, read, run, structure  # noqa: E402
 
-CASES = ["layout", "encoding", "sample", "atlas", "bake", "plane", "room", "sphere", "bsp", "soup", "round_trip", "rejection"]
+CASES = ["layout", "encoding", "sample", "atlas", "bake", "plane", "room", "sphere", "bsp", "soup", "round_trip", "rejection",
+         "object_layout", "object_bake", "object_determinism", "object_half", "object_atlas"]
 HEADER = "port/linux/include/world_sdf.h"
 BAKE = "port/linux/game/world_sdf_bake.c"
 SCHEDULE = "port/linux/game/world_sdf.c"
 FILE_FUNCTIONS = ["sdf_put32", "sdf_get32", "sdf_put_float", "sdf_get_float", "sdf_crc", "sdf_header_write",
                   "sdf_header_read", "sdf_scenery_most_bytes", "sdf_scenery_size", "sdf_scenery_free",
-                  "sdf_scenery_write", "sdf_scenery_read", "sdf_header_good", "sdf_cells_size", "sdf_bricks_size", "sdf_cells_good",
+                  "sdf_scenery_write", "sdf_scenery_read", "sdf_objects_most_bytes", "sdf_object_voxels",
+                  "sdf_objects_size", "sdf_objects_free", "sdf_objects_write", "sdf_finite", "sdf_objects_read",
+                  "sdf_header_good", "sdf_cells_size", "sdf_bricks_size", "sdf_cells_good",
                   "sdf_volume_free", "sdf_file_pack", "sdf_file_unpack", "sdf_file_write",
                   "sdf_file_read", "sdf_cache_load", "sdf_bsp_inside"]
 CONTROLS = [
@@ -58,6 +63,30 @@ CONTROLS = [
     # a cell's kind or its brick's place not checked
     (SCHEDULE, "if (entry[3] > WORLD_SDF_CELL_BRICK || (entry[3] == WORLD_SDF_CELL_BRICK &&",
      "if (0 && (entry[3] == WORLD_SDF_CELL_BRICK &&", "rejection"),
+    # an object's voxels in solid kept as solid (not filled from outside): its darkness filtered past its faces
+    (BAKE, "if (marks[other] == 0 || (marks[other] >= 2 && marks[other] < step))", "if (0)", "object_bake"),
+    # the cosines' weights to the rays the wrong way round (the far side's occlusion)
+    (BAKE, "weights[j * WORLD_SDF_OBJECT_NORMALS + k] = cosine > 0.0f ? cosine",
+     "weights[j * WORLD_SDF_OBJECT_NORMALS + k] = cosine < 0.0f ? -cosine", "object_bake"),
+    # a triangle's cone meeting too few buckets (rays it blocks missed)
+    (BAKE, "cosine * buckets.cosines[bucket] - sine * buckets.sines[bucket]",
+     "cosine * buckets.cosines[bucket] + sine * buckets.sines[bucket]", "object_bake"),
+    # past the grid, its edge's occlusion kept whole (no falling off: the reach not met)
+    (BAKE, "\tscale *= scale;\n\tfor (corner = 0; corner < 8; corner++)", "\tscale = 1.0f;\n\tfor (corner = 0; corner < 8; corner++)",
+     "object_bake"),
+    # the reach from the farthest edge voxel alone (not its occlusion)
+    (BAKE, "object->reach = sqrtf(most) > farthest ? sqrtf(most) : farthest;", "object->reach = farthest;", "object_bake"),
+    # the fit unweighted (the normals that see most of it as the others: its contact darkening short)
+    (BAKE, "weight = WORLD_SDF_OBJECT_FIT_WEIGHT + occlusions[k];", "weight = 1.0;", "object_bake"),
+    # the half's rounding truncated
+    (BAKE, "if (rest > 0x1000u || (rest == 0x1000u && (half & 1u)))", "if (0)", "object_half"),
+    # a column's next object put where the last began
+    (BAKE, "\t\tz += object->depth;\n", "\n", "object_atlas"),
+    # an object's texels not checked for no number
+    (SCHEDULE, "if ((object->texels[texel] & 0x7C00u) == 0x7C00u)", "if (0)", "rejection"),
+    # an object's bounds read one word on
+    (SCHEDULE, "object->bounds[texel] = sdf_get_float(bytes + at + 36 + texel * 4);",
+     "object->bounds[texel] = sdf_get_float(bytes + at + 40 + texel * 4);", "round_trip"),
     # the header's fields out of order
     (SCHEDULE, "sdf_put32(bytes + 16, header->width);\n\tsdf_put32(bytes + 20, header->height);",
      "sdf_put32(bytes + 20, header->width);\n\tsdf_put32(bytes + 16, header->height);", "round_trip"),

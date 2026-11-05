@@ -39,6 +39,26 @@ def main():
             # 1, 1, 1, the byte)
             layer = min(max(int(round(uvw[2])), 0), len(scene["pages"]) - 1)
             return [1.0, 1.0, 1.0, spirv_run.f32(scene["pages"][layer])]
+        if name == "world_ao_objects":
+            # (the vehicles' occlusion fields' atlas: four halves a texel, filtered, clamped to its edge)
+            size = scene["objects"]
+            base, fraction = [], []
+            for axis in range(3):
+                coordinate = uvw[axis] * size[axis] - 0.5
+                floor_value = math.floor(coordinate)
+                base.append(int(floor_value))
+                fraction.append(coordinate - floor_value)
+            result = [0.0, 0.0, 0.0, 0.0]
+            for corner in range(8):
+                at, weight = [], 1.0
+                for axis in range(3):
+                    bit = (corner >> axis) & 1
+                    at.append(min(max(base[axis] + bit, 0), size[axis] - 1))
+                    weight *= fraction[axis] if bit else 1.0 - fraction[axis]
+                texel = ((at[2] * size[1] + at[1]) * size[0] + at[0]) * 4
+                for part in range(4):
+                    result[part] += weight * scene["objects_texels"][texel + part]
+            return [spirv_run.f32(value) for value in result]
         if name != "world_sdf":
             return [1.0, 1.0, 1.0, 1.0]  # (the surface's own texture: white)
         size = (side, side, layers * 9)
@@ -68,7 +88,7 @@ def main():
             worst = difference
             if difference > tolerance:
                 print(f"at {case}: {colour[0]}")
-    print(f"{len(scene['cases'])} points, largest difference {worst:.3g}")
+    print(f"{len(scene['cases'])} points, largest difference {worst:.3g}; {scene['field_shaded']} the field shades")
     return 1 if worst > tolerance else 0
 
 

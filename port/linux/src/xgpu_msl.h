@@ -57,6 +57,9 @@ constexpr linear sampler clamped to its edge) and its table of cells
 #define XGPU_MSL_TEXTURE_WORLD_SDF_TABLE 6
 /* (the static scenery's pages of the level's occlusion, a 2D array) */
 #define XGPU_MSL_TEXTURE_WORLD_AO_SCENERY 7
+/* (the vehicles' occlusion fields' atlas: a 3D texture of four halves;
+past the combiner's places, 8 to 19) */
+#define XGPU_MSL_TEXTURE_WORLD_AO_OBJECTS 20
 #define XGPU_MSL_BUFFER_WORLD_AO 23
 
 /* the draw's values both stages read, laid out alike in C and in Metal

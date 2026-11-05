@@ -1835,12 +1835,56 @@ static void world_ao_functions(struct xgpu_text *text, int light)
 		XGPU_WORLD_SDF_BRICK_SPAN, XGPU_WORLD_AO_STEP, XGPU_WORLD_AO_TAPS, XGPU_WORLD_AO_K);
 	xgpu_text_append(text, "%s", world_proxies_shapes);
 	xgpu_text_append(text,
+		/* a vehicle's occlusion field (its shape and the next two:
+		xgpu_stream.h's XGPU_WORLD_AO_PROXY_FIELD), its occlusion faded out
+		over the last of its reach (world_ao_shading.c's
+		world_ao_field_proxy_occlusion) */
+		"static inline float world_proxy_field(constant xgpu_world_ao &w, texture3d<float> objects, int shape, float3 p,\n"
+		"\tfloat3 n, float4 v0, float4 v1, float4 v2)\n"
+		"{\n"
+		"\tconstexpr sampler objects_sampler(filter::linear, address::clamp_to_edge, coord::normalized);\n"
+		"\tfloat4 b0 = w.proxies[shape * 3 + 3], b1 = w.proxies[shape * 3 + 4], b2 = w.proxies[shape * 3 + 5];\n"
+		"\tfloat4 c0 = w.proxies[shape * 3 + 6], c1 = w.proxies[shape * 3 + 7];\n"
+		"\tfloat reach = v2.w, away = length(p - v0.xyz);\n"
+		"\tif (away >= reach)\n"
+		"\t\treturn 0.0;\n"
+		"\tfloat4 c2 = w.proxies[shape * 3 + 8];\n"
+		"\tfloat3 g = float3(dot(v1.xyz, p), dot(b0.xyz, p), dot(b1.xyz, p)) + v2.xyz;\n"
+		"\tfloat3 local = float3(dot(v1.xyz, n), dot(b0.xyz, n), dot(b1.xyz, n));\n"
+		"\tlocal *= rsqrt(max(dot(local, local), 1.0e-24));\n"
+		/* (its geometry's box's bound, in its voxels: its occlusion is under it) */
+		"\tfloat3 extents = c2.xyz, offset = g - b2.xyz * 0.5;\n"
+		"\tfloat3 beyond = max(abs(offset) - extents, float3(0.0));\n"
+		"\tfloat distance_squared = dot(beyond, beyond);\n"
+		"\tfloat height = dot(extents, abs(local)) - dot(local, offset);\n"
+		"\tfloat box_fade = 1.0;\n"
+		"\tif (distance_squared > 0.0)\n"
+		"\t{\n"
+		"\t\tif (height <= 0.0)\n"
+		"\t\t\treturn 0.0;\n"
+		"\t\tfloat distance = sqrt(distance_squared);\n"
+		"\t\tfloat faces = dot(beyond, float3(extents.y * extents.z, extents.x * extents.z, extents.x * extents.y));\n"
+		"\t\tbox_fade = clamp(%.6f * faces * (height < distance ? height : distance) / (distance_squared * distance_squared)\n"
+		"\t\t\t- 1.0, 0.0, 1.0);\n"
+		"\t}\n"
+		"\tfloat fade = saturate((reach - away) / (reach * %.6f)) * box_fade;\n"
+		"\tif (fade <= 0.0)\n"
+		"\t\treturn 0.0;\n"
+		"\tfloat3 q = clamp(g, float3(0.0), b2.xyz);\n"
+		"\tfloat outside = length(g - q), from = length(q - b2.xyz * 0.5);\n"
+		"\tfloat scale = (from + 1.0e-3) / (from + outside + 1.0e-3);\n"
+		"\tscale *= scale;\n"
+		"\tfloat4 tv = objects.sample(objects_sampler, (q + c0.xyz) * c1.xyz, level(0.0));\n"
+		"\treturn saturate(scale * (tv.x + dot(local, tv.yzw))) * fade;\n"
+		"}\n", XGPU_WORLD_AO_LEAST * 4.0f / XGPU_WORLD_AO_PI, XGPU_WORLD_AO_REACH_FADE);
+	xgpu_text_append(text,
 		/* A_prox(p, n): the shapes of the pixel's cell of the grid (those
 		whose reach touches it: world_ao_grid) below the draw's limit (the
 		dynamic objects' first: world_ao_read), lowest first, of the draw's
 		object's others within their reach, each faded out over the last of
 		it (a box by its bound) */
-		"static inline float world_proxies_occlusion(constant xgpu_world_ao &w, float3 p, float3 n, float owner, int limit)\n"
+		"static inline float world_proxies_occlusion(constant xgpu_world_ao &w, texture3d<float> objects, float3 p, float3 n,\n"
+		"\tfloat owner, int limit)\n"
 		"{\n"
 		"\tfloat product = 1.0;\n"
 		"\tfloat3 offset = p - w.grid[0].xyz;\n"
@@ -1859,6 +1903,11 @@ static void world_ao_functions(struct xgpu_text *text, int light)
 		"\t\t\tfloat4 v0 = w.proxies[shape * 3], v1 = w.proxies[shape * 3 + 1], v2 = w.proxies[shape * 3 + 2];\n"
 		"\t\t\tif (v1.w == owner)\n"
 		"\t\t\t\tcontinue;\n"
+		"\t\t\tif (v0.w == %d.0)\n"
+		"\t\t\t{\n"
+		"\t\t\t\tproduct *= 1.0 - world_proxy_field(w, objects, shape, p, n, v0, v1, v2);\n"
+		"\t\t\t\tcontinue;\n"
+		"\t\t\t}\n"
 		"\t\t\tfloat3 centre = v0.w == %d.0 ? (v0.xyz + v1.xyz) * 0.5 : v0.xyz;\n"
 		"\t\t\tfloat reach = world_proxy_reach(v0, v1, v2);\n"
 		"\t\t\tfloat away = length(p - centre);\n"
@@ -1887,7 +1936,7 @@ static void world_ao_functions(struct xgpu_text *text, int light)
 		"}\n",
 		XGPU_WORLD_AO_GRID_X / 2, XGPU_WORLD_AO_GRID_Y / 2, XGPU_WORLD_AO_GRID_Z / 2,
 		XGPU_WORLD_AO_GRID_Z - 1, XGPU_WORLD_AO_GRID_Y, XGPU_WORLD_AO_GRID_Y - 1, XGPU_WORLD_AO_GRID_X,
-		XGPU_WORLD_AO_GRID_X - 1,
+		XGPU_WORLD_AO_GRID_X - 1, XGPU_WORLD_AO_FIELD,
 		XGPU_WORLD_AO_CAPSULE, XGPU_WORLD_AO_REACH_FADE, XGPU_WORLD_AO_BOX, XGPU_WORLD_AO_SPHERE,
 		XGPU_WORLD_AO_CAPSULE, XGPU_WORLD_AO_BOX);
 }
@@ -1931,7 +1980,8 @@ static void world_ao_read(struct xgpu_text *text, const struct xgpu_pixel_progra
 	else if (light == XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP)
 		xgpu_text_append(text, "\t\tlimit = %d;\n", XGPU_WORLD_AO_SHAPES);
 	xgpu_text_append(text,
-		"\t\tfloat proxies = world_proxies_occlusion(world_ao, in.xWorldPosition, world_n, u.world_ao.x, limit);\n");
+		"\t\tfloat proxies = world_proxies_occlusion(world_ao, world_ao_objects, in.xWorldPosition, world_n, u.world_ao.x,\n"
+		"\t\t\tlimit);\n");
 	if (world_ao_paged(program, light))
 		xgpu_text_append(text, "\t\tproxies *= scenery;\n");
 	if (light == XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP)
@@ -2037,7 +2087,8 @@ char *xgpu_msl_pixel_shader(const struct xgpu_pixel_program *program, const stru
 		xgpu_text_append(&text, ",\n\tdevice atomic_uint *visible_samples [[buffer(%d)]]", XGPU_MSL_BUFFER_SAMPLES);
 	if (world)
 	{
-		xgpu_text_append(&text, ",\n\tconstant xgpu_world_ao &world_ao [[buffer(%d)]]", XGPU_MSL_BUFFER_WORLD_AO);
+		xgpu_text_append(&text, ",\n\tconstant xgpu_world_ao &world_ao [[buffer(%d)]], texture3d<float> world_ao_objects "
+			"[[texture(%d)]]", XGPU_MSL_BUFFER_WORLD_AO, XGPU_MSL_TEXTURE_WORLD_AO_OBJECTS);
 		if (occlusion_light != XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP)
 			xgpu_text_append(&text, ", texture3d<float> world_sdf [[texture(%d)]], texture3d<float> world_sdf_table "
 				"[[texture(%d)]]", XGPU_MSL_TEXTURE_WORLD_SDF, XGPU_MSL_TEXTURE_WORLD_SDF_TABLE);

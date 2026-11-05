@@ -7,7 +7,8 @@ never the field); without it (or with GTAO's source) they have none of its code.
 CPU's reference finds (port/linux/game/world_ao_shading.c, on world_proxies.c's arithmetic): the Metal emitter's
 functions' very text run as C++ (tools/world_ao_light/msl_check.cpp) and the SPIR-V emitter's whole shaders run on
 the CPU (tools/world_ao_light/spirv_run.py), at a made-up scene's points (tools/world_ao_light/scene.c: a floor and
-a wall, spheres, a capsule and two boxes). The modules pass spirv-val where it is installed."""
+a wall, spheres, a capsule, two boxes and a vehicle's occlusion field, a box's baked, on a turned and scaled frame,
+read from an atlas). The modules pass spirv-val where it is installed."""
 import re
 import shutil
 import subprocess
@@ -127,7 +128,8 @@ def test_the_world_in_the_ambient_light_alone(shaders):
     # the occlusion found in the world before the light it multiplies, from the block and the draw's object
     for name in CASES:
         text = body(world[name, 1])
-        assert "world_proxies_occlusion(world_ao, in.xWorldPosition, world_n, u.world_ao.x, limit)" in text
+        assert "world_proxies_occlusion(world_ao, world_ao_objects, in.xWorldPosition, world_n, u.world_ao.x,\n" in text
+        assert "texture3d<float> world_ao_objects [[texture(20)]]" in text
         assert text.index("float occlusion;") < text.index("texture stage 0")
         assert "[[buffer(23)]]" in text and "ambient_occlusion [[texture" not in text
         # the lightmap pass: the proxies alone, never the field
@@ -215,6 +217,12 @@ def faulted(name, fault):
     return {name: text.replace(fault[0], fault[1])}
 
 
+def test_the_field_is_found(reference):
+    """(the scene's vehicle's field shades enough of its points for the checks to hold there)"""
+    import json
+    assert json.loads(reference["json"].read_text())["field_shaded"] >= POINTS // 10
+
+
 def test_spirv_control(reference, tmp_path):
     if not CC:
         pytest.skip("no C compiler")
@@ -222,6 +230,27 @@ def test_spirv_control(reference, tmp_path):
     (tmp_path / "out").mkdir()
     subprocess.run([str(faulty), "spirv", str(tmp_path / "out"), "view"], check=True)
     assert spirv_check(reference, tmp_path / "out").returncode == 1
+
+
+# (and a vehicle's field read from the atlas without its place in it)
+SPIRV_FIELD_FAULT = ("uvw = fmul(m, 3, fadd(m, 3, q, xyz(m, c0)), xyz(m, c1));", "uvw = fmul(m, 3, q, xyz(m, c1));")
+MSL_FIELD_FAULT = ("(q + c0.xyz) * c1.xyz, level(0.0));", "q * c1.xyz, level(0.0));")
+
+
+def test_spirv_field_control(reference, tmp_path):
+    if not CC:
+        pytest.skip("no C compiler")
+    faulty = check_build(tmp_path / "build", faulted("xgpu_spirv.c", SPIRV_FIELD_FAULT))
+    (tmp_path / "out").mkdir()
+    subprocess.run([str(faulty), "spirv", str(tmp_path / "out"), "view"], check=True)
+    assert spirv_check(reference, tmp_path / "out").returncode == 1
+
+
+def test_msl_field_control(reference, tmp_path):
+    if not CC:
+        pytest.skip("no C compiler")
+    faulty = check_build(tmp_path / "build", faulted("xgpu_msl.c", MSL_FIELD_FAULT))
+    assert msl_check(reference, msl_of(faulty, "world")["model", 1], tmp_path).returncode == 1
 
 
 def test_msl_control(reference, tmp_path):

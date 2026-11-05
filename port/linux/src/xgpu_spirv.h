@@ -74,6 +74,9 @@ with texelFetch), and the window's block (a uniform buffer) */
 /* (the static scenery's pages of the level's occlusion: a 2D array of
 bytes, sampled at the lightmap pass's lightmap coordinates) */
 #define XGPU_SPIRV_BINDING_WORLD_AO_SCENERY 4
+/* (the vehicles' occlusion fields' atlas: a 3D image of four halves, t
+and v.xyz, sampled at a field's voxels' place) */
+#define XGPU_SPIRV_BINDING_WORLD_AO_OBJECTS 5
 
 /* the locations of what the vertex shader hands the pixel shader */
 enum

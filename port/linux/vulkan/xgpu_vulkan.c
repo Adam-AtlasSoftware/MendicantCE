@@ -2599,7 +2599,8 @@ void xgpu_vulkan_image_upload(struct xgpu_vulkan_image *image, uint32_t level, u
 	int blocks = format_blocks(description->format);
 	uint32_t texel = description->format == XGPU_VULKAN_FORMAT_COVERAGE ||
 		description->format == XGPU_VULKAN_FORMAT_R8_SNORM ? 1 :
-		description->format == XGPU_VULKAN_FORMAT_RGBA32_UINT ? 16 : 4;
+		description->format == XGPU_VULKAN_FORMAT_RGBA32_UINT ? 16 :
+		description->format == XGPU_VULKAN_FORMAT_RGBA16F ? 8 : 4;
 	uint32_t rows = blocks ? (height + 3) / 4 : height;
 	uint32_t row_bytes = blocks ? (description->format == XGPU_VULKAN_FORMAT_DXT1 ? 8 : 16) * ((width + 3) / 4) :
 		width * texel;
@@ -4428,8 +4429,11 @@ static VkDescriptorPool descriptor_pool_get(void)
 		if (!grown)
 			return VK_NULL_HANDLE;
 		slot->descriptor_pools = grown;
+		/* (the most a set has: the occlusion's, its screen's texel, the
+		field's atlas and table, the static scenery's pages and the vehicles'
+		fields' atlas) */
 		sizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-		sizes[0].descriptorCount = SETS_A_POOL * 4;
+		sizes[0].descriptorCount = SETS_A_POOL * 5;
 		/* (display.hdr's input sets, where draws can read their colour
 		attachment) */
 		sizes[2].type = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT;
@@ -4528,19 +4532,20 @@ binds it: the last one, where it is of the same image and submission,
 else one written now */
 static VkDescriptorSet occlusion_set(void)
 {
-	VkDescriptorImageInfo image, field_image, table_image, scenery_image;
+	VkDescriptorImageInfo image, field_image, table_image, scenery_image, objects_image;
 	VkDescriptorBufferInfo block;
-	VkWriteDescriptorSet writes[5];
+	VkWriteDescriptorSet writes[6];
 	struct xgpu_vulkan_image *occlusion = vk.occlusion_image && vk.occlusion_image->sampled ? vk.occlusion_image :
 		vk.occlusion_white;
 	struct xgpu_vulkan_image *field = xgpu_vulkan_world_ao_field_image();
 	struct xgpu_vulkan_image *table = xgpu_vulkan_world_ao_table_image();
 	struct xgpu_vulkan_image *scenery = xgpu_vulkan_world_ao_scenery_image();
+	struct xgpu_vulkan_image *objects = xgpu_vulkan_world_ao_objects_image();
 	uint64_t serial = vk.serial;
 	int index;
 
 	if (!occlusion || !field || !field->sampled || !table || !table->sampled || !scenery || !scenery->sampled ||
-		!vk.occlusion_layout)
+		!objects || !objects->sampled || !vk.occlusion_layout)
 		return VK_NULL_HANDLE;
 	/* (display.ambient_occlusion "world"'s block in this submission's ring) */
 	if (!xgpu_vulkan_world_ao_block(serial, &block))
@@ -4549,6 +4554,7 @@ static VkDescriptorSet occlusion_set(void)
 	field->used = vk.serial;
 	table->used = vk.serial;
 	scenery->used = vk.serial;
+	objects->used = vk.serial;
 	if (vk.occlusion_set && vk.occlusion_set_image == occlusion && vk.occlusion_set_number == occlusion->number &&
 		vk.occlusion_serial == vk.serial && vk.occlusion_world_number == xgpu_vulkan_world_ao_number())
 		return vk.occlusion_set;
@@ -4571,8 +4577,10 @@ static VkDescriptorSet occlusion_set(void)
 	table_image.imageView = table->sampled;
 	scenery_image = field_image;
 	scenery_image.imageView = scenery->sampled;
+	objects_image = field_image;
+	objects_image.imageView = objects->sampled;
 	memset(writes, 0, sizeof(writes));
-	for (index = 0; index < 5; index++)
+	for (index = 0; index < 6; index++)
 	{
 		writes[index].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 		writes[index].dstSet = vk.occlusion_set;
@@ -4590,7 +4598,9 @@ static VkDescriptorSet occlusion_set(void)
 	writes[3].pImageInfo = &table_image;
 	writes[4].dstBinding = XGPU_VULKAN_BINDING_WORLD_AO_SCENERY;
 	writes[4].pImageInfo = &scenery_image;
-	vkUpdateDescriptorSets(vk.device, 5, writes, 0, NULL);
+	writes[5].dstBinding = XGPU_VULKAN_BINDING_WORLD_AO_OBJECTS;
+	writes[5].pImageInfo = &objects_image;
+	vkUpdateDescriptorSets(vk.device, 6, writes, 0, NULL);
 	return vk.occlusion_set;
 }
 
@@ -4774,6 +4784,7 @@ void xgpu_vulkan_draw(const struct xgpu_vulkan_draw *draw)
 			image_use(xgpu_vulkan_world_ao_field_image());
 			image_use(xgpu_vulkan_world_ao_table_image());
 			image_use(xgpu_vulkan_world_ao_scenery_image());
+			image_use(xgpu_vulkan_world_ao_objects_image());
 		}
 	}
 	commands = vk.pass_commands;
@@ -6894,7 +6905,7 @@ static int device_make(const struct xgpu_vulkan_options *options)
 
 static int layouts_make(void)
 {
-	VkDescriptorSetLayoutBinding draw[5], textures[5];
+	VkDescriptorSetLayoutBinding draw[5], textures[6];
 	VkDescriptorSetLayoutCreateInfo info;
 	VkPipelineLayoutCreateInfo layout;
 	VkDescriptorSetLayout sets[4];
@@ -6989,7 +7000,11 @@ static int layouts_make(void)
 	textures[4].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 	textures[4].descriptorCount = 1;
 	textures[4].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-	info.bindingCount = 5;
+	textures[5].binding = XGPU_VULKAN_BINDING_WORLD_AO_OBJECTS;
+	textures[5].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	textures[5].descriptorCount = 1;
+	textures[5].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+	info.bindingCount = 6;
 	info.pBindings = textures;
 	if (!check(vkCreateDescriptorSetLayout(vk.device, &info, NULL, &vk.occlusion_layout), "vkCreateDescriptorSetLayout"))
 		return 0;

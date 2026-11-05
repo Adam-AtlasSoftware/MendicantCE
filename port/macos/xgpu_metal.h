@@ -492,12 +492,14 @@ a ring's source is the frame's alone) */
 void xgpu_metal_set_dynamic_lights(struct xgpu_metal_source block, struct xgpu_metal_source cells);
 /* display.ambient_occlusion "world"'s field, its atlas and its table (3D
 textures: 0 none), the static scenery's pages (a 2D array, at
-XGPU_METAL_TEXTURE_WORLD_AO_SCENERY, the fragments'), and the window's block (struct xgpu_world_ao_block),
+XGPU_METAL_TEXTURE_WORLD_AO_SCENERY, the fragments'), the vehicles' occlusion fields' atlas (a 3D texture,
+at XGPU_METAL_TEXTURE_WORLD_AO_OBJECTS, the fragments'), and the window's block (struct xgpu_world_ao_block),
 which the shaders that read them take at XGPU_METAL_TEXTURE_WORLD_SDF (with
 a constexpr sampler of their own), _WORLD_SDF_TABLE and
 XGPU_METAL_BUFFER_WORLD_AO, both stages: until set again (a ring's source
 is the frame's alone) */
-void xgpu_metal_set_world_ao(uint32_t field, uint32_t table, uint32_t scenery, struct xgpu_metal_source block);
+void xgpu_metal_set_world_ao(uint32_t field, uint32_t table, uint32_t scenery, uint32_t objects,
+	struct xgpu_metal_source block);
 /* their resources (xgpu_metal_world_ao.c): slices z_first to z_first +
 z_count - 1 of a width x height x depth part of the field
 (XGPU_STREAM_WORLD_AO_TABLE or _ATLAS), in the frame's order (width 0: both

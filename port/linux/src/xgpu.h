@@ -301,6 +301,9 @@ it, in half diagonals) */
 #define XGPU_WORLD_AO_SPHERE 1
 #define XGPU_WORLD_AO_CAPSULE 2
 #define XGPU_WORLD_AO_BOX 3
+/* (a vehicle's occlusion field: its shape and the next two, read from the
+objects' atlas) */
+#define XGPU_WORLD_AO_FIELD 4
 
 /* ---------- enhanced dynamic lights
 

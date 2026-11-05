@@ -389,6 +389,15 @@ Bindings (the shaders: workstream D; the backends' descriptors: B):
 #define XGPU_WORLD_AO_PROXY_SPHERE 1
 #define XGPU_WORLD_AO_PROXY_CAPSULE 2
 #define XGPU_WORLD_AO_PROXY_BOX 3
+/* (a vehicle's occlusion field, over this proxy and the next two: [0]
+the reach's centre, kind; [1] row 0 of the world to its voxels' place,
+owner; [2] the three rows' translations, its reach (world units); then [0]
+row 1, 0; [1] row 2, owner; [2] its last voxel's place (its sides less
+one), 0; then [0] its place in the objects' atlas plus a half texel, 0;
+[1] one over the atlas's size, owner; [2] its geometry's box's half
+extents (voxels, about the grid's middle), 0: the box's bound
+(world_proxy_box_fade's U) bounds the field's occlusion) */
+#define XGPU_WORLD_AO_PROXY_FIELD 4
 
 /* the uniform block: [0] the field's origin (its first voxel's centre) and
 one over the voxel's size; [1] its width, height, depth (in voxels) and
@@ -437,13 +446,17 @@ xgpu_backend_world_ao_field): its table of cells (part 0, four bytes a
 texel: an atlas brick's x, y, z and the cell's kind, read as RGBA8) or its
 atlas of bricks (part 1, signed bytes: R8 snorm), or the static
 scenery's pages of the level's occlusion (part 2, bytes, R8 unorm: a 2D
-array, depth its layers, sent before the table), its bytes at data (size:
+array, depth its layers, sent before the table), or the vehicles'
+occlusion fields' atlas (part 3, four half floats a texel: RGBA16F, a 3D
+volume, sent before the table), its bytes at data (size:
 width * height * z_count * the texel's); width 0 releases the field, every
 part */
 #define XGPU_STREAM_WORLD_AO_TABLE 0
 #define XGPU_STREAM_WORLD_AO_ATLAS 1
 #define XGPU_STREAM_WORLD_AO_SCENERY 2
-#define XGPU_STREAM_WORLD_AO_TEXEL(part) ((part) == XGPU_STREAM_WORLD_AO_TABLE ? 4u : 1u)
+#define XGPU_STREAM_WORLD_AO_OBJECTS 3
+#define XGPU_STREAM_WORLD_AO_TEXEL(part) ((part) == XGPU_STREAM_WORLD_AO_TABLE ? 4u : \
+	(part) == XGPU_STREAM_WORLD_AO_OBJECTS ? 8u : 1u)
 struct xgpu_stream_world_ao_field
 {
 	uint32_t header;

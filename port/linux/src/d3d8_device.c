@@ -316,7 +316,8 @@ _Static_assert(XGPU_WORLD_SDF_BRICK == WORLD_SDF_BRICK && XGPU_WORLD_SDF_BRICK_S
 	XGPU_WORLD_SDF_CELL_BRICK == WORLD_SDF_CELL_BRICK, "the world's field as the emitters read it (xgpu.h)");
 _Static_assert(XGPU_WORLD_AO_SHAPES == XGPU_WORLD_AO_PROXIES_MAXIMUM &&
 	XGPU_WORLD_AO_SPHERE == XGPU_WORLD_AO_PROXY_SPHERE && XGPU_WORLD_AO_CAPSULE == XGPU_WORLD_AO_PROXY_CAPSULE &&
-	XGPU_WORLD_AO_BOX == XGPU_WORLD_AO_PROXY_BOX, "the world's proxies as the emitters take them (xgpu.h)");
+	XGPU_WORLD_AO_BOX == XGPU_WORLD_AO_PROXY_BOX && XGPU_WORLD_AO_FIELD == XGPU_WORLD_AO_PROXY_FIELD,
+	"the world's proxies as the emitters take them (xgpu.h)");
 _Static_assert(offsetof(struct xgpu_world_ao_block, field) == XGPU_WORLD_AO_BLOCK_FIELD &&
 	offsetof(struct xgpu_world_ao_block, parameters) == XGPU_WORLD_AO_BLOCK_PARAMETERS &&
 	offsetof(struct xgpu_world_ao_block, proxies) == XGPU_WORLD_AO_BLOCK_PROXIES &&
@@ -327,7 +328,8 @@ _Static_assert(XGPU_WORLD_AO_GRID_X == WORLD_AO_GRID_X && XGPU_WORLD_AO_GRID_Y =
 	XGPU_WORLD_AO_GRID_Z == WORLD_AO_GRID_Z && XGPU_WORLD_AO_GRID_CELLS == XGPU_WORLD_AO_GRID_CELLS_MAXIMUM,
 	"the world's proxy grid as the game makes it and the emitters read it (world_ao.h, xgpu.h)");
 _Static_assert(WORLD_AO_FIELD_TABLE == XGPU_STREAM_WORLD_AO_TABLE && WORLD_AO_FIELD_ATLAS == XGPU_STREAM_WORLD_AO_ATLAS &&
-	WORLD_AO_FIELD_SCENERY == XGPU_STREAM_WORLD_AO_SCENERY, "the world's field's parts as the stream carries them");
+	WORLD_AO_FIELD_SCENERY == XGPU_STREAM_WORLD_AO_SCENERY && WORLD_AO_FIELD_OBJECTS == XGPU_STREAM_WORLD_AO_OBJECTS,
+	"the world's field's parts as the stream carries them");
 
 static struct
 {

@@ -67,6 +67,23 @@ struct world_proxies_source
 	struct world_proxies_source_node nodes[WORLD_PROXIES_SOURCE_MAXIMUM_NODES];
 };
 
+/* a vehicle's occlusion field drawn now (world_sdf.h's struct
+world_sdf_object, docs/world-ao.md "Dynamic objects"), as the window places
+it on node 0: its first voxel's centre and the voxel, in node 0's space; its
+voxels along x, y, z; its reach from the grid's middle, in voxels; its
+place in the GPU's atlas of them and the atlas's size, in texels; its
+geometry's bounds in node 0's space (x0 y0 z0 x1 y1 z1) */
+struct world_proxies_source_field
+{
+	float origin[3];
+	float voxel;
+	float reach;
+	float bounds[6];
+	unsigned long size[3];
+	unsigned long place[3];
+	unsigned long atlas[3];
+};
+
 /* an object of the window, as drawn */
 struct world_proxies_source_instance
 {
@@ -86,6 +103,9 @@ int world_proxies_source_definition(long definition, struct world_proxies_source
 /* the frame's objects that may occlude (drawn, not a held weapon), at most
 maximum; returns how many */
 long world_proxies_source_instances(struct world_proxies_source_instance *instances, long maximum);
+/* a definition's occlusion field, if one is drawn (FALSE: none; its
+shapes' boxes shade, as before) */
+int world_proxies_source_field(long definition, struct world_proxies_source_field *field);
 /* an object's nodes as drawn this frame (world space), at most maximum;
 returns how many (0: not drawn) */
 short world_proxies_source_nodes(long id, struct world_proxies_frame *frames, short maximum);

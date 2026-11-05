@@ -149,7 +149,7 @@ bitwise or (GroupNonUniformArithmetic) */
 	unsigned int constants, uniforms, dynamic_lights, dynamic_light_cells, samples, view_index;
 	/* (display.ambient_occlusion "world": the window's block and the
 	structure's distance field) */
-	unsigned int world_ao, world_sdf, world_sdf_table, world_ao_scenery;
+	unsigned int world_ao, world_sdf, world_sdf_table, world_ao_scenery, world_ao_objects;
 };
 
 static void words_push(struct module *m, struct words *words, unsigned int word)
@@ -2637,6 +2637,10 @@ static void world_ao_declare(struct module *m)
 		"world_ao_scenery");
 	decorate1(m, m->world_ao_scenery, DECORATION_DESCRIPTOR_SET, XGPU_SPIRV_SET_OCCLUSION);
 	decorate1(m, m->world_ao_scenery, DECORATION_BINDING, XGPU_SPIRV_BINDING_WORLD_AO_SCENERY);
+	m->world_ao_objects = variable(m, type_sampled_image(m, DIM_3D, FALSE, FALSE, TRUE), STORAGE_UNIFORM_CONSTANT,
+		"world_ao_objects");
+	decorate1(m, m->world_ao_objects, DECORATION_DESCRIPTOR_SET, XGPU_SPIRV_SET_OCCLUSION);
+	decorate1(m, m->world_ao_objects, DECORATION_BINDING, XGPU_SPIRV_BINDING_WORLD_AO_OBJECTS);
 }
 
 /* a vec4 of the block (0 field, 1 parameters, 2 proxies, 3 grid; 4 the
@@ -3167,6 +3171,85 @@ static void world_proxy_shade(struct module *m, struct pixel_state *state, int k
 	selection_end(m, reach_merge);
 }
 
+/* a vehicle's occlusion field (XGPU_WORLD_AO_FIELD, its shape at first and
+the next two: xgpu_stream.h's XGPU_WORLD_AO_PROXY_FIELD) multiplied into the
+product where it can shade p (world_ao_shading.c's
+world_ao_field_proxy_occlusion): within its reach of its grid's middle,
+faded out over the last of it. p's place among its voxels g, clamped to the
+grid (q); past the grid, its edge's value by (L / (L + e))^2, L q's distance
+from the grid's middle, e p's past the edge (voxels); the atlas's texel
+there, t and v, trilinear; sat(t + n . v) of n in the vehicle's space */
+static void world_proxy_field_shade(struct module *m, struct pixel_state *state, unsigned int p, unsigned int n,
+	unsigned int first, unsigned int v0, unsigned int v1, unsigned int v2, unsigned int product_variable)
+{
+	unsigned int b0 = world_ao_vector(m, 2, op2(m, OP_I_ADD, m->t_int, first, constant_int(m, 3)));
+	unsigned int b1 = world_ao_vector(m, 2, op2(m, OP_I_ADD, m->t_int, first, constant_int(m, 4)));
+	unsigned int b2 = world_ao_vector(m, 2, op2(m, OP_I_ADD, m->t_int, first, constant_int(m, 5)));
+	unsigned int c0 = world_ao_vector(m, 2, op2(m, OP_I_ADD, m->t_int, first, constant_int(m, 6)));
+	unsigned int c1 = world_ao_vector(m, 2, op2(m, OP_I_ADD, m->t_int, first, constant_int(m, 7)));
+	unsigned int c2 = world_ao_vector(m, 2, op2(m, OP_I_ADD, m->t_int, first, constant_int(m, 8)));
+	unsigned int reach = extract(m, v2, 3), distance, reached, merge, kept_merge, fade, g, last, q, outside, from, scale;
+	unsigned int local, uvw, sampled, occlusion, operands[4], small = constant_float(m, 1.0e-3f), zero, one;
+	unsigned int extents, offset, beyond, distance_squared, height, faces, box_distance, bound, box_fade;
+
+	zero = constant_float(m, 0.0f);
+	one = constant_float(m, 1.0f);
+	distance = flength(m, fsub(m, 3, p, xyz(m, v0)));
+	/* if (!(distance >= reach)) */
+	reached = op1(m, OP_LOGICAL_NOT, m->t_bool, compare(m, OP_F_ORD_GREATER_THAN_EQUAL, distance, reach));
+	selection_begin(m, reached, &merge);
+	g = fadd(m, 3, op(m, OP_COMPOSITE_CONSTRUCT, m->t_v3, 3, (unsigned int[]){ fdot(m, xyz(m, v1), p),
+		fdot(m, xyz(m, b0), p), fdot(m, xyz(m, b1), p) }), xyz(m, v2));
+	local = op(m, OP_COMPOSITE_CONSTRUCT, m->t_v3, 3, (unsigned int[]){ fdot(m, xyz(m, v1), n), fdot(m, xyz(m, b0), n),
+		fdot(m, xyz(m, b1), n) });
+	local = fscale(m, 3, local, ext1(m, GLSL_INVERSE_SQRT, m->t_float, fmax_scalar(m, 1, fdot(m, local, local), 1.0e-24f)));
+	/* the geometry's box's bound (world_proxy_box_fade's, in its voxels):
+	its occlusion is under it */
+	extents = xyz(m, c2);
+	offset = fsub(m, 3, g, fscale(m, 3, xyz(m, b2), constant_float(m, 0.5f)));
+	beyond = ext2(m, GLSL_F_MAX, m->t_v3, fsub(m, 3, ext1(m, GLSL_F_ABS, m->t_v3, offset), extents),
+		constant_splat(m, 3, 0.0f));
+	distance_squared = fdot(m, beyond, beyond);
+	height = fsub(m, 1, fdot(m, extents, ext1(m, GLSL_F_ABS, m->t_v3, local)), fdot(m, local, offset));
+	faces = fdot(m, beyond, op(m, OP_COMPOSITE_CONSTRUCT, m->t_v3, 3, (unsigned int[]){
+		fmul(m, 1, extract(m, extents, 1), extract(m, extents, 2)), fmul(m, 1, extract(m, extents, 0), extract(m, extents, 2)),
+		fmul(m, 1, extract(m, extents, 0), extract(m, extents, 1)) }));
+	box_distance = fsqrt(m, distance_squared);
+	bound = fdiv(m, 1, fmul(m, 1, fmul(m, 1, constant_float(m, XGPU_WORLD_AO_LEAST * 4.0f / XGPU_WORLD_AO_PI), faces),
+		fselect(m, compare(m, OP_F_ORD_LESS_THAN, height, box_distance), height, box_distance)),
+		fmul(m, 1, distance_squared, distance_squared));
+	box_fade = fclamp_scalar(m, fsub(m, 1, bound, one), 0.0f, 1.0f);
+	box_fade = fselect(m, compare(m, OP_F_ORD_LESS_THAN_EQUAL, height, zero), zero, box_fade);
+	box_fade = fselect(m, compare(m, OP_F_ORD_LESS_THAN_EQUAL, distance_squared, zero), one, box_fade);
+	fade = fmul(m, 1, saturate(m, 1, fdiv(m, 1, fsub(m, 1, reach, distance), fmul(m, 1, reach,
+		constant_float(m, XGPU_WORLD_AO_REACH_FADE)))), box_fade);
+	/* if (!(fade <= 0.0)) */
+	selection_begin(m, op1(m, OP_LOGICAL_NOT, m->t_bool, compare(m, OP_F_ORD_LESS_THAN_EQUAL, fade, zero)), &kept_merge);
+	last = xyz(m, b2);
+	q = ext3(m, GLSL_F_CLAMP, m->t_v3, g, constant_splat(m, 3, 0.0f), last);
+	outside = flength(m, fsub(m, 3, g, q));
+	from = flength(m, fsub(m, 3, q, fscale(m, 3, last, constant_float(m, 0.5f))));
+	scale = fdiv(m, 1, fadd(m, 1, from, small), fadd(m, 1, fadd(m, 1, from, outside), small));
+	scale = fmul(m, 1, scale, scale);
+	uvw = fmul(m, 3, fadd(m, 3, q, xyz(m, c0)), xyz(m, c1));
+	operands[0] = load(m, type_sampled_image(m, DIM_3D, FALSE, FALSE, TRUE), m->world_ao_objects);
+	operands[1] = uvw;
+	operands[2] = IMAGE_OPERANDS_LOD;
+	operands[3] = constant_float(m, 0.0f);
+	sampled = op(m, OP_IMAGE_SAMPLE_EXPLICIT_LOD, m->t_v4, 4, operands);
+	{
+		static const unsigned int vector[3] = { 1, 2, 3 };
+
+		occlusion = saturate(m, 1, fmul(m, 1, scale, fadd(m, 1, extract(m, sampled, 0),
+			fdot(m, local, shuffle(m, 3, sampled, sampled, vector)))));
+	}
+	store(m, product_variable, fmul(m, 1, load(m, m->t_float, product_variable), fsub(m, 1, one,
+		fmul(m, 1, occlusion, fade))));
+	selection_end(m, kept_merge);
+	selection_end(m, merge);
+	(void)state;
+}
+
 /* A_prox(p, n): the product of the shapes of the pixel's cell of the grid
 (those whose reach touches it: world_ao_grid), lowest first, of the draw's
 object's others (not those of its owner slot) within their reach, each
@@ -3295,6 +3378,9 @@ static unsigned int world_proxies_occlusion(struct module *m, struct pixel_state
 		world_proxy_shade(m, state, each[kinds], p, n, v0, v1, v2, product_variable);
 		selection_end(m, kind_merge);
 	}
+	selection_begin(m, compare(m, OP_F_ORD_EQUAL, kind, constant_float(m, (float)XGPU_WORLD_AO_FIELD)), &kind_merge);
+	world_proxy_field_shade(m, state, p, n, first, v0, v1, v2, product_variable);
+	selection_end(m, kind_merge);
 	selection_end(m, owner_merge);
 	if (subgroups)
 		selection_end(m, mine_merge);
