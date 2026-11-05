@@ -108,6 +108,7 @@ METAL_C_SOURCES = {"xgpu_metal_post.c", "xgpu_metal_post_shaders.c"}
 # decoders, the stream's descriptions and the manifest's reader, beside the
 # same stand-in
 TOOL_SHARED_SOURCES = ["nv2a_vsh.c", "nv2a_psh.c", "xgpu_stream.h", "xgpu_stream_describe.h", "xgpu_stream_describe.c",
+                       "xgpu_hdr.h", "xgpu_hdr.c",
                        "xgpu_manifest.h", "xgpu_manifest.c"]
 # the renderer's manifest the app's shaders are made from
 # (port/assets/render/README.md)

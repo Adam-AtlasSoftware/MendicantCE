@@ -247,7 +247,7 @@ depth (halo_screen_ambient_occlusion), and the surfaces then draw with it in
 their shaders (xgpu.h's XGPU_AMBIENT_OCCLUSION_LIGHT_*: the models' ambient
 and distant lights, the lightmap pass's light) until the lightmap pass is
 done (halo_screen_ambient_occlusion__guest_image_end). The pre-pass's draws mark their
-pixels in its stencil as they draw (pipeline_state_describe): an object's
+pixels in its stencil as they draw (prepare_draw): an object's
 (a model's: one ambient sample lights it, so everything about it occludes
 it, where the level's lightmap holds the level's own occlusion and only
 objects add to it), and a surface's that lights itself (a structure's
@@ -1486,6 +1486,10 @@ when it is made, or made again for other samples. */
 color target (bind_targets) */
 static int target_samples = 1;
 static BOOL target_has_color;
+/* ...and, whatever the settings, whether they are multisampled with
+multisampling, and the colour target is a screen buffer's (in half floats
+with display.hdr): a draw's context (xgpu_manifest_context) */
+static BOOL target_multisampled, target_screen_colour;
 
 /* the multisampled pixels of a target drawn into since into its texture */
 static void render_target_resolve(struct xgpu_render_target *target)
@@ -1593,17 +1597,19 @@ static BOOL bind_targets(BOOL *has_depth)
 #endif
 	/* with multisampling, multisampled where either is a screen buffer or
 	is multisampled already */
+	target_multisampled = (color && (color->screen_buffer || color->target.samples)) ||
+		(depth && (depth->screen_buffer || depth->target.samples));
 	samples = anti_aliasing() == _anti_aliasing_msaa ? anti_aliasing_samples : 0;
-	if (samples && !((color && (color->screen_buffer || color->target.samples)) ||
-		(depth && (depth->screen_buffer || depth->target.samples))))
-	{
+	if (samples && !target_multisampled)
 		samples = 0;
-	}
 #ifdef HALO_VR
 	/* (not in the VR mode's passes: the eyes' targets have a layer for each
 	eye, and the HUD and its groups are layers of their own) */
 	if (vr_gl.pass != HALO_VR_PASS_NONE)
+	{
 		samples = 0;
+		target_multisampled = FALSE;
+	}
 #endif
 	if (color)
 		render_target_multisample(&color->target, samples);
@@ -1615,6 +1621,7 @@ static BOOL bind_targets(BOOL *has_depth)
 	*has_depth = depth != NULL;
 	target_has_color = color != NULL;
 	hdr.target = color && color->target.format == XGPU_FORMAT_RGBA16F;
+	target_screen_colour = color && render_target_screen_colour(color);
 	return TRUE;
 }
 
@@ -3179,14 +3186,6 @@ static void pipeline_state_describe(BOOL has_depth, struct xgpu_pipeline_key *ke
 		key->stencil_write_mask = rs[D3DRS_STENCILWRITEMASK];
 		dynamic->stencil_reference = rs[D3DRS_STENCILREF];
 	}
-	/* display.ambient_occlusion: an object (a model: rasterizer.h's
-	_rasterizer_profile_models) and a surface that lights itself mark their
-	pixels (ambient_occlusion_mark) */
-	if (ambient_occlusion.prepass && key->depth_write)
-		ambient_occlusion_mark(key, &dynamic->stencil_reference, (unsigned char)(
-			((hdr.kind & HALO_HDR_KIND_SELF_ILLUMINATION) ? XGPU_AMBIENT_OCCLUSION_SELF_ILLUMINATED : 0) |
-			(hdr.category == 2 ? XGPU_AMBIENT_OCCLUSION_OBJECT : 0)));
-
 	key->blend = rs[D3DRS_ALPHABLENDENABLE] != 0;
 	if (key->blend)
 	{
@@ -3784,6 +3783,46 @@ static void combiner_state_describe(DWORD *state, DWORD texture_modes)
 	described = TRUE;
 }
 
+/* what the settings make of a draw's pipeline (xgpu_draw_derive), in it */
+static void pipeline_derived(const struct xgpu_draw_derived *derived, struct xgpu_pipeline_key *key)
+{
+	key->color_format = derived->color_format;
+	key->samples = derived->samples;
+	key->lighting = derived->lighting;
+	if (derived->no_color)
+		key->color_mask = 0;
+	key->pixel.alpha_test_samples = derived->alpha_test_samples;
+	key->pixel.hdr = derived->hdr;
+	key->pixel.per_pixel_lighting = derived->per_pixel_lighting;
+	key->pixel.dynamic_lights = derived->dynamic_lights;
+	key->pixel.ambient_occlusion = derived->ambient_occlusion;
+}
+
+/* a draw as no setting changes it (key: before xgpu_draw_derive) to the
+manifest's recording, with what the settings derive it from, whatever they
+are now (xgpu_manifest_context) */
+static void manifest_note_basis(const struct vertex_shader_object *program, const struct xgpu_pipeline_key *key)
+{
+	struct xgpu_manifest_context context;
+
+	memset(&context, 0, sizeof(context));
+	context.lights = (uint8_t)program->lighting.lights;
+	context.world_found = program->lighting.world_found ? 1 : 0;
+	context.multisampled = target_multisampled ? 1 : 0;
+	context.screen_colour = target_screen_colour ? 1 : 0;
+	/* (as with the occlusion on: as the journal notes them) */
+	context.occlusion_prepass = ambient_occlusion.journal_prepass || ambient_occlusion.prepass;
+	context.occlusion_ready = ambient_occlusion.journal_ready || ambient_occlusion.ready;
+	/* (the lights given to the front end whatever the setting where the
+	map's preparation is recorded: halo_dynamic_lights_walked) */
+	context.lights_present = dynamic_lights.count > 0;
+	context.environment = dynamic_lights.environment ? 1 : 0;
+	context.hdr_category = (uint8_t)hdr.category;
+	context.hdr_view = hdr.view ? 1 : 0;
+	context.hdr_kind = (uint16_t)hdr.kind;
+	xgpu_manifest_note_basis(key, &context);
+}
+
 /* the draw's description to the backend: its textures, its targets, its
 pipeline (shaders and fixed-function state), its dynamic state and its
 uniforms; FALSE if it is not drawn */
@@ -3793,6 +3832,8 @@ static BOOL prepare_draw(BOOL immediate, unsigned long primitive)
 	struct nv2a_pixel_shader_key key;
 	struct xgpu_pipeline_key pipeline_key;
 	struct xgpu_dynamic_state dynamic;
+	struct xgpu_draw_facts facts;
+	struct xgpu_draw_derived derived;
 	float texture_scale[4][4];
 	BOOL has_depth = FALSE, chosen = FALSE, ready;
 	int stage;
@@ -3850,12 +3891,6 @@ static BOOL prepare_draw(BOOL immediate, unsigned long primitive)
 		D3D__RenderState[D3DRS_DESTBLEND] == D3DBLEND_SRCALPHA;
 	key.point_threshold = key.point_threshold && key.coverage_alpha;
 	key.alpha_test_function = D3D__RenderState[D3DRS_ALPHATESTENABLE] ? D3D__RenderState[D3DRS_ALPHAFUNC] : 0;
-	/* (a sample mask, where the backend has one) */
-	if (xgpu_backend_capabilities.sample_mask && target_samples > 1 && key.alpha_test_function &&
-		!D3D__RenderState[D3DRS_ALPHABLENDENABLE])
-	{
-		key.alpha_test_samples = (unsigned char)target_samples;
-	}
 	key.fog_enable = D3D__RenderState[D3DRS_FOGENABLE] != 0;
 	key.source_blend = source_blend_in_shader();
 	key.fog_table_mode = (unsigned char)D3D__RenderState[D3DRS_FOGTABLEMODE];
@@ -3875,93 +3910,79 @@ static BOOL prepare_draw(BOOL immediate, unsigned long primitive)
 	pipeline_key.packed_attributes = immediate ? 0 : device.vertex_shader->packed_mask;
 	pipeline_key.immediate = immediate != 0;
 	pipeline_key.views = key.multiview;
-	pipeline_key.color_format = !target_has_color ? XGPU_FORMAT_NONE : hdr.target ? XGPU_FORMAT_RGBA16F :
-		XGPU_FORMAT_BGRA8;
-	/* (display.hdr: the draw's tag, from its blend) */
-	key.hdr = hdr_tag(&pipeline_key);
-	/* display.ambient_occlusion's pre-pass: the depth (and the marks)
-	alone, its draws unlit (ambient_occlusion_prepass) */
-	if (ambient_occlusion.prepass)
-		pipeline_key.color_mask = 0;
-	pipeline_key.pixel = key;
+	pipeline_key.color_format = target_has_color ? XGPU_FORMAT_BGRA8 : XGPU_FORMAT_NONE;
 	pipeline_key.depth_format = has_depth ? XGPU_FORMAT_D24S8 : XGPU_FORMAT_NONE;
-	pipeline_key.samples = (unsigned char)target_samples;
-	if (program->lighting.lights && !program->lighting_failed && !ambient_occlusion.prepass && per_pixel_lighting())
+	pipeline_key.samples = 1;
+	/* the draw as no setting changes it, recorded with what the settings
+	make of it from (debug.render_manifest) */
+	if (xgpu_manifest_recording())
+		manifest_note_basis(program, &pipeline_key);
+	/* display.ambient_occlusion's pre-pass: an object (a model:
+	rasterizer.h's _rasterizer_profile_models) and a surface that lights
+	itself mark their pixels (ambient_occlusion_mark) */
+	if (ambient_occlusion.prepass && pipeline_key.depth_write)
+		ambient_occlusion_mark(&pipeline_key, &dynamic.stencil_reference, (unsigned char)(
+			((hdr.kind & HALO_HDR_KIND_SELF_ILLUMINATION) ? XGPU_AMBIENT_OCCLUSION_SELF_ILLUMINATED : 0) |
+			(hdr.category == 2 ? XGPU_AMBIENT_OCCLUSION_OBJECT : 0)));
+	/* ...and what the settings make of it as they are now: its targets'
+	samples and format, its alpha test (a sample mask, where the backend
+	has one), its tag (display.hdr: from its blend), the pre-pass's depth
+	alone (display.ambient_occlusion: ambient_occlusion_prepass, its draws
+	unlit), and its lighting (xgpu_draw_derive): a model lighting program's
+	lit for each pixel (display.per_pixel_lighting), the enhanced dynamic
+	lights in its two point lights' place; over a model lit for each vertex,
+	the ambient occlusion its ambient light handed on apart, by the
+	occlusion at each pixel (the program's own sum clamps each vertex's
+	light: xgpu.h); a structure's lightmap pass lit by the dynamic lights
+	(its normal, binormal and tangent packed:
+	rasterizer_xbox_vertex_shaders_initialize.c's declaration), their light
+	past white with display.hdr, the lightmap's light by the occlusion and
+	theirs added after; else, a lightmap pass's light, drawn opaque, by the
+	occlusion */
+	memset(&facts, 0, sizeof(facts));
+	facts.blend = pipeline_key.blend;
+	facts.color = target_has_color;
+	facts.immediate = immediate != 0;
+	facts.packed_attributes = (uint32_t)pipeline_key.packed_attributes;
+	facts.alpha_test = (uint32_t)key.alpha_test_function;
+	facts.lights = program->lighting.lights;
+	facts.world_found = program->lighting.world_found;
+	facts.lighting_failed = program->lighting_failed;
+	facts.split_failed = program->split_failed;
+	facts.samples = target_samples;
+	facts.hdr_target = hdr.target;
+	facts.hdr = hdr_tag(&pipeline_key);
+	facts.occlusion_prepass = ambient_occlusion.prepass;
+	facts.occlusion_ready = ambient_occlusion.ready;
+	facts.per_pixel = per_pixel_lighting();
+	facts.lights_active = dynamic_lights_active();
+	facts.environment = dynamic_lights.environment;
+	facts.sample_mask = xgpu_backend_capabilities.sample_mask;
+	if (xgpu_draw_derive(&facts, FALSE, &derived))
 	{
-		key.per_pixel_lighting = (unsigned char)program->lighting.lights;
-		/* (the enhanced dynamic lights in the two point lights' place) */
-		if (dynamic_lights_active() && program->lighting.world_found)
-			key.dynamic_lights = XGPU_DYNAMIC_LIGHTS_MODEL;
-		/* (display.ambient_occlusion: its ambient light by the occlusion) */
-		if (ambient_occlusion.ready)
-			key.ambient_occlusion = XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL;
-		pipeline_key.pixel = key;
-		pipeline_key.lighting = program->lighting.lights == 2 ? XGPU_LIGHTING_MODEL_POINT : XGPU_LIGHTING_MODEL;
+		pipeline_derived(&derived, &pipeline_key);
 		chosen = xgpu_backend_pipeline(&pipeline_key);
-		if (!chosen)
-		{
-			/* drawn as the vertex shader lights it instead (not at all,
-			were it to fail too) */
-			platform_log("GPU: vertex shader %lu cannot be lit for each pixel here (refer to the shader log above): "
-				"lit for each vertex", program->id);
-			program->lighting_failed = TRUE;
-			key.per_pixel_lighting = 0;
-			key.dynamic_lights = 0;
-			key.ambient_occlusion = 0;
-		}
-	}
-	else if (program->lighting.lights && !program->lighting_failed && !program->split_failed && ambient_occlusion.ready)
-	{
-		/* display.ambient_occlusion over a model lit for each vertex: its
-		ambient light handed on apart, by the occlusion at each pixel (the
-		program's own sum clamps each vertex's light: xgpu.h) */
-		key.ambient_occlusion = XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX;
-		pipeline_key.pixel = key;
-		pipeline_key.lighting = XGPU_LIGHTING_MODEL_SPLIT;
-		chosen = xgpu_backend_pipeline(&pipeline_key);
-		if (!chosen)
+		/* (not made: drawn unlit by these shaders instead, below; not at all,
+		were it to fail too) */
+		if (!chosen && derived.lighting == XGPU_LIGHTING_MODEL_SPLIT)
 		{
 			platform_log("GPU: vertex shader %lu cannot hand on its ambient light apart (refer to the shader log "
 				"above): drawn without the ambient occlusion", program->id);
 			program->split_failed = TRUE;
-			key.ambient_occlusion = 0;
 		}
-	}
-	else if (dynamic_lights.environment && dynamic_lights_active() && !immediate && !program->lighting_failed &&
-		!ambient_occlusion.prepass && (device.vertex_shader->packed_mask & 0xe) == 0xe)
-	{
-		/* a structure's lightmap pass: its normal, binormal and tangent are
-		packed (rasterizer_xbox_vertex_shaders_initialize.c's declaration) */
-		key.dynamic_lights = XGPU_DYNAMIC_LIGHTS_ENVIRONMENT;
-		/* (display.hdr: their light past white) */
-		if (hdr.target)
-			key.hdr |= XGPU_HDR_LIGHTS;
-		/* (display.ambient_occlusion: the lightmap's light by the
-		occlusion, theirs added after) */
-		if (ambient_occlusion.ready && !pipeline_key.blend)
-			key.ambient_occlusion = XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP;
-		pipeline_key.pixel = key;
-		pipeline_key.lighting = XGPU_LIGHTING_ENVIRONMENT;
-		chosen = xgpu_backend_pipeline(&pipeline_key);
-		if (!chosen)
+		else if (!chosen)
 		{
-			platform_log("GPU: vertex shader %lu cannot be lit by the dynamic lights (refer to the shader log "
-				"above): lit by the game's own passes", program->id);
+			platform_log(derived.lighting == XGPU_LIGHTING_ENVIRONMENT ? "GPU: vertex shader %lu cannot be lit by the "
+				"dynamic lights (refer to the shader log above): lit by the game's own passes" : "GPU: vertex shader %lu "
+				"cannot be lit for each pixel here (refer to the shader log above): lit for each vertex", program->id);
 			program->lighting_failed = TRUE;
-			key.dynamic_lights = 0;
-			key.hdr &= (unsigned short)~XGPU_HDR_LIGHTS;
 		}
 	}
 	ready = chosen;
 	if (!chosen)
 	{
-		/* (display.ambient_occlusion: a lightmap pass's light, drawn
-		opaque, by the occlusion; nothing else of a draw unlit by the
-		shaders above) */
-		key.ambient_occlusion = ambient_occlusion.ready && dynamic_lights.environment && !immediate &&
-			!pipeline_key.blend ? XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP : 0;
-		pipeline_key.pixel = key;
-		pipeline_key.lighting = XGPU_LIGHTING_NONE;
+		xgpu_draw_derive(&facts, TRUE, &derived);
+		pipeline_derived(&derived, &pipeline_key);
 		ready = xgpu_backend_pipeline(&pipeline_key);
 	}
 #ifdef HALO_VR
@@ -5947,7 +5968,8 @@ struct journal_saved
 	UINT stream_stride[16], base_vertex_index;
 	float attributes[XGPU_VERTEX_ATTRIBUTE_COUNT][4];
 	int hdr_category, hdr_kind;
-	BOOL hdr_view, occlusion_prepass, occlusion_ready, lights_environment, visibility;
+	BOOL hdr_view, occlusion_prepass, occlusion_ready, occlusion_noted_prepass, occlusion_noted_ready;
+	BOOL lights_environment, visibility;
 	int lights_count, halos_count;
 	unsigned long sky;
 };
@@ -6495,6 +6517,10 @@ static void journal_restore(const struct journal_state *state)
 	hdr.view = state->hdr_view != 0;
 	ambient_occlusion.prepass = journal_occlusion(state->occlusion_prepass, ambient_occlusion.quality);
 	ambient_occlusion.ready = journal_occlusion(state->occlusion_ready, ambient_occlusion.quality);
+	/* (as noted: with the occlusion on, whatever it is now, the draws'
+	contexts in a recording of the manifest, prepare_draw) */
+	ambient_occlusion.journal_prepass = state->occlusion_prepass != 0;
+	ambient_occlusion.journal_ready = state->occlusion_ready != 0;
 	dynamic_lights.environment = state->lights_environment != 0;
 	dynamic_lights.count = (int)state->lights_count;
 	dynamic_lights.halos.count = (int)state->halos_count;
@@ -6697,6 +6723,8 @@ int halo_gpu_journal_replay(const unsigned int *words, unsigned int count, const
 	saved.hdr_view = hdr.view;
 	saved.occlusion_prepass = ambient_occlusion.prepass;
 	saved.occlusion_ready = ambient_occlusion.ready;
+	saved.occlusion_noted_prepass = ambient_occlusion.journal_prepass;
+	saved.occlusion_noted_ready = ambient_occlusion.journal_ready;
 	saved.lights_environment = dynamic_lights.environment;
 	saved.lights_count = dynamic_lights.count;
 	saved.halos_count = dynamic_lights.halos.count;
@@ -6736,6 +6764,8 @@ int halo_gpu_journal_replay(const unsigned int *words, unsigned int count, const
 	hdr.view = saved.hdr_view;
 	ambient_occlusion.prepass = saved.occlusion_prepass;
 	ambient_occlusion.ready = saved.occlusion_ready;
+	ambient_occlusion.journal_prepass = saved.occlusion_noted_prepass;
+	ambient_occlusion.journal_ready = saved.occlusion_noted_ready;
 	dynamic_lights.environment = saved.lights_environment;
 	dynamic_lights.count = saved.lights_count;
 	dynamic_lights.halos.count = saved.halos_count;

@@ -6,6 +6,9 @@ the front end's recorder.
 */
 
 #include "xgpu_manifest.h"
+#include "xgpu.h"
+#include "xgpu_backend.h"
+#include "xgpu_hdr.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -13,8 +16,6 @@ the front end's recorder.
 #include <string.h>
 
 #ifndef XGPU_MANIFEST_READER_ONLY
-#include "xgpu.h"
-#include "xgpu_backend.h"
 #include "xgpu_stream_describe.h"
 #include "port_config.h"
 #endif
@@ -31,7 +32,7 @@ uint64_t xgpu_manifest_hash(const void *data, size_t size, uint64_t hash)
 	return hash;
 }
 
-/* a field of a key: its name, place, the size of each value (1 or 4
+/* a field of a key: its name, place, the size of each value (1, 2 or 4
 bytes), how many, and whether it is written in hex */
 struct field
 {
@@ -81,6 +82,22 @@ static const struct field pixel_fields[] = {
 	PIXEL_FIELD("ao", ambient_occlusion, 1, 1, 0),
 };
 
+#define CONTEXT_FIELD(name, member, size, count) \
+	{ name, offsetof(struct xgpu_manifest_context, member), size, count, 0 }
+
+/* a d record's context (xgpu_manifest_context): cl the vertex program's
+lighting (lights, world's transform found), ct the targets (multisampled,
+screen colour), co the occlusion (pre-pass, ready), cd the dynamic lights
+(present, the lightmap pass), ch the HDR tag's (category, 3D view, kind) */
+static const struct field context_fields[] = {
+	CONTEXT_FIELD("cl", lights, 1, 2),
+	CONTEXT_FIELD("ct", multisampled, 1, 2),
+	CONTEXT_FIELD("co", occlusion_prepass, 1, 2),
+	CONTEXT_FIELD("cd", lights_present, 1, 2),
+	CONTEXT_FIELD("ch", hdr_category, 1, 2),
+	CONTEXT_FIELD("ck", hdr_kind, 2, 1),
+};
+
 #define FIELD_COUNT(fields) (sizeof(fields) / sizeof((fields)[0]))
 
 #ifndef XGPU_MANIFEST_READER_ONLY
@@ -88,9 +105,15 @@ static uint32_t field_value(const unsigned char *base, const struct field *field
 {
 	const unsigned char *at = base + field->offset + (size_t)index * field->size;
 	uint32_t value;
+	uint16_t half;
 
 	if (field->size == 1)
 		return *at;
+	if (field->size == 2)
+	{
+		memcpy(&half, at, sizeof(half));
+		return half;
+	}
 	memcpy(&value, at, sizeof(value));
 	return value;
 }
@@ -99,9 +122,12 @@ static uint32_t field_value(const unsigned char *base, const struct field *field
 static void field_set(unsigned char *base, const struct field *field, int index, uint32_t value)
 {
 	unsigned char *at = base + field->offset + (size_t)index * field->size;
+	uint16_t half = (uint16_t)value;
 
 	if (field->size == 1)
 		*at = (unsigned char)value;
+	else if (field->size == 2)
+		memcpy(at, &half, sizeof(half));
 	else
 		memcpy(at, &value, sizeof(value));
 }
@@ -200,7 +226,8 @@ static void pixel_write(struct text *text, const struct xgpu_stream_pixel_key *p
 	text_add(text, "\n");
 }
 
-static void draw_write(struct text *text, const struct xgpu_manifest_draw *draw)
+static void draw_write(struct text *text, const struct xgpu_manifest_draw *draw,
+	const struct xgpu_manifest_context *context)
 {
 	uint32_t index;
 	int stream, first = 1;
@@ -242,6 +269,8 @@ static void draw_write(struct text *text, const struct xgpu_manifest_draw *draw)
 		text_add(text, "%s%u.%u.%u.%u.%u.0x%lx", stream ? "/" : "", stage->source, stage->sampler_type,
 			stage->address[0], stage->address[1], stage->address[2], (unsigned long)stage->border_color);
 	}
+	if (context)
+		fields_write(text, context, context_fields, FIELD_COUNT(context_fields));
 	text_add(text, "\n");
 }
 
@@ -272,7 +301,7 @@ struct reader
 {
 	struct xgpu_manifest *manifest;
 	struct pixel_entry *pixels;
-	uint32_t pixel_count, pixel_capacity, draw_capacity, program_capacity, shader_capacity;
+	uint32_t pixel_count, pixel_capacity, draw_capacity, context_capacity, program_capacity, shader_capacity;
 	/* the draws' pixel keys' hashes, matched at the end */
 	uint64_t *draw_pixels;
 	char *error;
@@ -351,7 +380,7 @@ static const char *fields_read(const char *text, void *structure, const struct f
 			return NULL;
 		if (!(text = number_read(text, &number)))
 			return NULL;
-		if (fields[index].size == 1 && number > 0xff)
+		if ((fields[index].size == 1 && number > 0xff) || (fields[index].size == 2 && number > 0xffff))
 			return NULL;
 		field_set(structure, &fields[index], value, number);
 	}
@@ -445,6 +474,8 @@ static int draw_read(struct reader *reader, const char *text, int shader)
 {
 	struct xgpu_manifest *manifest = reader->manifest;
 	struct xgpu_manifest_draw *draw;
+	struct xgpu_manifest_context *context = NULL;
+	const char *after;
 	uint64_t value, unused;
 	uint32_t number;
 
@@ -460,11 +491,15 @@ static int draw_read(struct reader *reader, const char *text, int shader)
 	else
 	{
 		if (!grow((void **)&manifest->draws, &reader->draw_capacity, manifest->draw_count, sizeof(*manifest->draws)) ||
+			!grow((void **)&manifest->contexts, &reader->context_capacity, manifest->draw_count,
+			sizeof(*manifest->contexts)) ||
 			!(reader->draw_pixels = realloc(reader->draw_pixels, (size_t)reader->draw_capacity * sizeof(uint64_t))))
 		{
 			return fail(reader, "out of memory");
 		}
 		draw = &manifest->draws[manifest->draw_count];
+		context = &manifest->contexts[manifest->draw_count];
+		memset(context, 0, sizeof(*context));
 	}
 	memset(draw, 0, sizeof(*draw));
 	if (strncmp(text, "vp=", 3) || !(text = hex_read(text + 3, 16, &value)))
@@ -555,6 +590,10 @@ static int draw_read(struct reader *reader, const char *text, int shader)
 				if (stage < 3 && *text++ != '/')
 					return fail(reader, "a draw's texture stages");
 			}
+		}
+		else if (context && (after = fields_read(text, context, context_fields, FIELD_COUNT(context_fields))) != NULL)
+		{
+			text = after;
 		}
 		else if (!(text = fields_read(text, &draw->key, key_fields, FIELD_COUNT(key_fields))))
 		{
@@ -681,6 +720,7 @@ void xgpu_manifest_free(struct xgpu_manifest *manifest)
 {
 	free(manifest->vertex_programs);
 	free(manifest->draws);
+	free(manifest->contexts);
 	free(manifest->vertex_shaders);
 	memset(manifest, 0, sizeof(*manifest));
 }
@@ -696,6 +736,149 @@ const struct xgpu_manifest_vertex_program *xgpu_manifest_vertex_program(const st
 			return &manifest->vertex_programs[index];
 	}
 	return NULL;
+}
+
+/* ---------- a draw's pipeline under the settings */
+
+int xgpu_draw_derive(const struct xgpu_draw_facts *facts, int unlit, struct xgpu_draw_derived *derived)
+{
+	memset(derived, 0, sizeof(*derived));
+	derived->samples = (uint8_t)(facts->samples > 1 ? facts->samples : 1);
+	derived->color_format = (uint8_t)(!facts->color ? XGPU_FORMAT_NONE : facts->hdr_target ? XGPU_FORMAT_RGBA16F :
+		XGPU_FORMAT_BGRA8);
+	/* (an alpha test by sample, where the backend has a sample mask, of an
+	opaque draw into multisampled targets) */
+	if (facts->sample_mask && facts->samples > 1 && facts->alpha_test && !facts->blend)
+		derived->alpha_test_samples = (uint8_t)facts->samples;
+	derived->hdr = facts->hdr_target ? facts->hdr : 0;
+	/* display.ambient_occlusion's pre-pass: the depth (and the marks) alone,
+	its draws unlit */
+	derived->no_color = facts->occlusion_prepass ? 1 : 0;
+	derived->lighting = XGPU_LIGHTING_NONE;
+	if (!unlit && facts->lights && !facts->lighting_failed && !facts->occlusion_prepass && facts->per_pixel)
+	{
+		/* a model lighting program's draw lit for each pixel: the enhanced
+		dynamic lights in its two point lights' place, its ambient light by
+		the occlusion */
+		derived->per_pixel_lighting = (uint8_t)facts->lights;
+		if (facts->lights_active && facts->world_found)
+			derived->dynamic_lights = XGPU_DYNAMIC_LIGHTS_MODEL;
+		if (facts->occlusion_ready)
+			derived->ambient_occlusion = XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL;
+		derived->lighting = facts->lights == 2 ? XGPU_LIGHTING_MODEL_POINT : XGPU_LIGHTING_MODEL;
+		return 1;
+	}
+	if (!unlit && facts->lights && !facts->lighting_failed && !facts->split_failed && facts->occlusion_ready)
+	{
+		/* the occlusion over a model lit for each vertex: its ambient light
+		handed on apart, by the occlusion at each pixel (the program's own
+		sum clamps each vertex's light: xgpu.h) */
+		derived->ambient_occlusion = XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX;
+		derived->lighting = XGPU_LIGHTING_MODEL_SPLIT;
+		return 1;
+	}
+	if (!unlit && facts->environment && facts->lights_active && !facts->immediate && !facts->lighting_failed &&
+		!facts->occlusion_prepass && (facts->packed_attributes & 0xe) == 0xe)
+	{
+		/* a structure's lightmap pass lit by the dynamic lights (its normal,
+		binormal and tangent packed: rasterizer_xbox_vertex_shaders_initialize.c's
+		declaration), their light past white with display.hdr, the
+		lightmap's light by the occlusion, theirs added after */
+		derived->dynamic_lights = XGPU_DYNAMIC_LIGHTS_ENVIRONMENT;
+		if (facts->hdr_target)
+			derived->hdr |= XGPU_HDR_LIGHTS;
+		if (facts->occlusion_ready && !facts->blend)
+			derived->ambient_occlusion = XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP;
+		derived->lighting = XGPU_LIGHTING_ENVIRONMENT;
+		return 1;
+	}
+	/* (unlit by these shaders: a lightmap pass's light, drawn opaque, by the
+	occlusion; nothing else) */
+	if (facts->occlusion_ready && facts->environment && !facts->immediate && !facts->blend)
+		derived->ambient_occlusion = XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP;
+	return 0;
+}
+
+/* multisampling's samples a pixel (d3d8_device.c's anti_aliasing_values':
+tools/test_render_manifest.py checks that it has no others), 1 first */
+static const int settings_samples[] = { 1, 2, 4, 8 };
+
+#define SETTINGS_SAMPLES ((int)(sizeof(settings_samples) / sizeof(settings_samples[0])))
+
+int xgpu_manifest_settings(int index, struct xgpu_manifest_settings *settings)
+{
+	if (index < 0 || index >= SETTINGS_SAMPLES * 16)
+		return 0;
+	memset(settings, 0, sizeof(*settings));
+	settings->samples = settings_samples[index % SETTINGS_SAMPLES];
+	index /= SETTINGS_SAMPLES;
+	settings->hdr = index & 1;
+	settings->per_pixel_lighting = (index >> 1) & 1;
+	settings->enhanced_lights = (index >> 2) & 1;
+	settings->ambient_occlusion = (index >> 3) & 1;
+	return 1;
+}
+
+int xgpu_manifest_derive(const struct xgpu_manifest_draw *draw, const struct xgpu_manifest_context *context,
+	const struct xgpu_manifest_settings *settings, int unlit, struct xgpu_manifest_draw *derived)
+{
+	const struct xgpu_stream_pipeline_key *key = &draw->key;
+	struct xgpu_draw_facts facts;
+	struct xgpu_draw_derived parts;
+	int lit;
+
+	memset(&facts, 0, sizeof(facts));
+	facts.blend = key->blend;
+	facts.color = key->color_format != XGPU_FORMAT_NONE;
+	facts.immediate = key->immediate;
+	facts.packed_attributes = key->packed_attributes;
+	facts.alpha_test = key->pixel.alpha_test_function;
+	facts.lights = context->lights;
+	facts.world_found = context->world_found;
+	/* (d3d8_device.c's bind_targets: multisampled where a screen buffer
+	is; a screen buffer's colour in half floats with display.hdr) */
+	facts.samples = context->multisampled ? settings->samples : 1;
+	facts.hdr_target = settings->hdr && context->screen_colour && facts.color;
+	if (facts.hdr_target)
+	{
+		/* (d3d8_device.c's hdr_tag) */
+		struct xgpu_hdr_draw tagged;
+
+		memset(&tagged, 0, sizeof(tagged));
+		tagged.blend = key->blend;
+		tagged.blend_source = key->blend_source;
+		tagged.blend_destination = key->blend_destination;
+		tagged.blend_operation = key->blend_operation;
+		tagged.color_mask = key->color_mask;
+		tagged.category = (signed char)context->hdr_category;
+		tagged.interface = !context->hdr_view;
+		tagged.kind = context->hdr_kind;
+		facts.hdr = xgpu_hdr_classify(&tagged);
+	}
+	/* (as the journal's draws played with the occlusion on or off:
+	d3d8_device.c's journal_occlusion) */
+	facts.occlusion_prepass = settings->ambient_occlusion && context->occlusion_prepass;
+	facts.occlusion_ready = settings->ambient_occlusion && context->occlusion_ready;
+	/* (d3d8_device.c's per_pixel_lighting, dynamic_lights_active: the
+	enhanced lights light each pixel whatever display.per_pixel_lighting
+	says) */
+	facts.per_pixel = settings->per_pixel_lighting || settings->enhanced_lights;
+	facts.lights_active = settings->enhanced_lights && context->lights_present;
+	facts.environment = context->environment;
+	facts.sample_mask = 1;
+	lit = xgpu_draw_derive(&facts, unlit, &parts);
+	*derived = *draw;
+	derived->key.color_format = parts.color_format;
+	derived->key.samples = parts.samples;
+	derived->key.lighting = parts.lighting;
+	if (parts.no_color)
+		derived->key.color_mask = 0;
+	derived->key.pixel.alpha_test_samples = parts.alpha_test_samples;
+	derived->key.pixel.hdr = parts.hdr;
+	derived->key.pixel.per_pixel_lighting = parts.per_pixel_lighting;
+	derived->key.pixel.dynamic_lights = parts.dynamic_lights;
+	derived->key.pixel.ambient_occlusion = parts.ambient_occlusion;
+	return lit;
 }
 
 /* ---------- the recorder */
@@ -768,9 +951,11 @@ static struct
 	struct xgpu_manifest_vertex_program *programs;
 	uint32_t program_count, program_capacity;
 	struct hash_set written_programs, written_pixels, draws;
-	/* the next draw's */
-	struct xgpu_stream_pipeline_key key;
-	int have_key;
+	/* the next draw's: as drawn, and as no setting changes it with its
+	context (written) */
+	struct xgpu_stream_pipeline_key key, basis;
+	struct xgpu_manifest_context context;
+	int have_key, have_basis;
 	struct xgpu_manifest_stage stages[4];
 	uint32_t element_count;
 	struct xgpu_manifest_element elements[XGPU_MANIFEST_ATTRIBUTES];
@@ -881,6 +1066,15 @@ void xgpu_manifest_note_pipeline(const struct xgpu_pipeline_key *key)
 		return;
 	xgpu_stream_pipeline_key_describe(key, &recorder.key);
 	recorder.have_key = 1;
+}
+
+void xgpu_manifest_note_basis(const struct xgpu_pipeline_key *key, const struct xgpu_manifest_context *context)
+{
+	if (recorder.state <= 0)
+		return;
+	xgpu_stream_pipeline_key_describe(key, &recorder.basis);
+	recorder.context = *context;
+	recorder.have_basis = 1;
 }
 
 void xgpu_manifest_note_vertices(const struct xgpu_vertex_input *input)
@@ -1002,7 +1196,7 @@ const struct xgpu_manifest *xgpu_manifest_enumeration(void)
 void xgpu_manifest_record_draw(int immediate, unsigned long written)
 {
 	struct xgpu_manifest_draw draw;
-	uint64_t hash, program;
+	uint64_t hash, recorded, program;
 	uint32_t index;
 	int missed;
 
@@ -1030,7 +1224,19 @@ void xgpu_manifest_record_draw(int immediate, unsigned long written)
 	again after the stack that made it) */
 	missed = !recorder.enumerating && recorder.enumerated_once && !hash_set_has(&recorder.enumerated, hash) &&
 		hash_set_add(&recorder.missed, hash);
-	if (!hash_set_add(&recorder.draws, hash) && !missed)
+	/* (written as no setting changes it, with its context: each written
+	once) */
+	if (recorder.have_basis)
+	{
+		draw.key = recorder.basis;
+		recorded = xgpu_manifest_hash(&recorder.context, sizeof(recorder.context),
+			xgpu_manifest_hash(&draw, sizeof(draw), XGPU_MANIFEST_HASH_START));
+	}
+	else
+	{
+		recorded = hash;
+	}
+	if (!hash_set_add(&recorder.draws, recorded) && !missed)
 		return;
 	if (missed)
 		missed_write();
@@ -1046,7 +1252,7 @@ void xgpu_manifest_record_draw(int immediate, unsigned long written)
 	}
 	if (hash_set_add(&recorder.written_pixels, pixel_hash(&draw.key.pixel)))
 		pixel_write(&recorder.text, &draw.key.pixel);
-	draw_write(&recorder.text, &draw);
+	draw_write(&recorder.text, &draw, recorder.have_basis ? &recorder.context : NULL);
 	record_write();
 	recorder.recorded++;
 }
