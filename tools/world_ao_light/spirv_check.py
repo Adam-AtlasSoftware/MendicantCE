@@ -35,9 +35,10 @@ def main():
             at = ((uvw[2] * height + uvw[1]) * width + uvw[0]) * 4
             return [spirv_run.f32(table[at + part] / 255.0) for part in range(4)]
         if name == "world_ao_scenery":
-            # (the static scenery's pages: each layer one value, scene.c's)
+            # (the static scenery's pages: each layer one value, scene.c's, in the coverage's format, read as
+            # 1, 1, 1, the byte)
             layer = min(max(int(round(uvw[2])), 0), len(scene["pages"]) - 1)
-            return [spirv_run.f32(scene["pages"][layer]), 0.0, 0.0, 1.0]
+            return [1.0, 1.0, 1.0, spirv_run.f32(scene["pages"][layer])]
         if name != "world_sdf":
             return [1.0, 1.0, 1.0, 1.0]  # (the surface's own texture: white)
         size = (side, side, layers * 9)

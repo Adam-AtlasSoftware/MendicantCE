@@ -141,6 +141,8 @@ def test_the_world_in_the_ambient_light_alone(shaders):
         if lightmap:
             assert "if (u.world_ao.y < 0.0)\n\t\t\tlimit = 64;" in text
             assert "u.texture_scale[2].xy" in text and "proxies *= scenery;" in text
+            # (the pages are the coverage's format, read as 1, 1, 1, the byte)
+            assert "level(0.0)).a;" in text
         else:
             assert "limit = 64" not in text
 

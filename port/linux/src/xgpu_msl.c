@@ -1896,7 +1896,8 @@ static void world_ao_functions(struct xgpu_text *text, int light)
 (XGPU_AMBIENT_OCCLUSION_LIGHT_*): a model's, the field's relative to its
 reference faded in, times the others' proxies; the lightmap pass's, the
 proxies alone; then the floor and the strength (xgpu.h) */
-/* whether a lightmap pass's draw reads the static scenery's pages: its
+/* whether a lightmap pass's draw reads the static scenery's pages (their
+bytes the coverage's format, read as 1, 1, 1, the byte: their alpha): its
 stage 2 is its lightmap, a 2D texture at projected coordinates (else it
 walks every shape: world_ao_read) */
 static BOOL world_ao_paged(const struct xgpu_pixel_program *program, int light)
@@ -1925,7 +1926,7 @@ static void world_ao_read(struct xgpu_text *text, const struct xgpu_pixel_progra
 			"\t\t{\n"
 			"\t\t\tconstexpr sampler page_sampler(filter::linear, address::clamp_to_edge, coord::normalized);\n"
 			"\t\t\tfloat2 page = fast::divide(in.xT2.xy, float2(in.xT2.w != 0.0 ? in.xT2.w : 1.0)) * u.texture_scale[2].xy;\n"
-			"\t\t\tscenery = world_ao_scenery.sample(page_sampler, page, uint(u.world_ao.y), level(0.0)).r;\n"
+			"\t\t\tscenery = world_ao_scenery.sample(page_sampler, page, uint(u.world_ao.y), level(0.0)).a;\n"
 			"\t\t}\n", XGPU_WORLD_AO_SHAPES);
 	else if (light == XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP)
 		xgpu_text_append(text, "\t\tlimit = %d;\n", XGPU_WORLD_AO_SHAPES);

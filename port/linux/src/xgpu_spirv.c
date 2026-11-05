@@ -3351,8 +3351,10 @@ static unsigned int world_ao_read(struct module *m, struct pixel_state *state, i
 				extract(m, uv, 1), fmax_scalar(m, 1, layer, 0.0f) });
 			operands[2] = IMAGE_OPERANDS_LOD;
 			operands[3] = constant_float(m, 0.0f);
+			/* (the pages' bytes are the coverage's format, read as 1, 1, 1, the
+			byte: their alpha) */
 			scenery = fselect(m, unpaged, constant_float(m, 1.0f),
-				extract(m, op(m, OP_IMAGE_SAMPLE_EXPLICIT_LOD, m->t_v4, 4, operands), 0));
+				extract(m, op(m, OP_IMAGE_SAMPLE_EXPLICIT_LOD, m->t_v4, 4, operands), 3));
 			limit = op3(m, OP_SELECT, m->t_int, unpaged, constant_int(m, XGPU_WORLD_AO_SHAPES), dynamic);
 		}
 		else
