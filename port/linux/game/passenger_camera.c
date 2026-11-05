@@ -176,8 +176,10 @@ boolean passenger_camera_reticle_begin(short local_player_index, long weapon_ind
 	return TRUE;
 }
 
-boolean passenger_camera_reticle_offset(point2d *point, real reticle_scale)
+boolean passenger_camera_reticle_offset(point2d *point, real reticle_scale, real_vector2d *rest)
 {
+	rest->i = 0.0f;
+	rest->j = 0.0f;
 	/* (hud_draw.c scales the reticle about the view's centre by
 	reticle_scale, offset and all, so the offset is given at the HUD's own
 	size to land there) */
@@ -185,8 +187,13 @@ boolean passenger_camera_reticle_offset(point2d *point, real reticle_scale)
 		reticle_scale = 1.0f;
 	if (reticle_active)
 	{
-		point->x = (short)(point->x + reticle_offset.x / reticle_scale);
-		point->y = (short)(point->y + reticle_offset.y / reticle_scale);
+		real x = point->x + reticle_offset.x / reticle_scale;
+		real y = point->y + reticle_offset.y / reticle_scale;
+
+		point->x = (short)floorf(x);
+		point->y = (short)floorf(y);
+		rest->i = (x - point->x) * reticle_scale;
+		rest->j = (y - point->y) * reticle_scale;
 	}
 	return reticle_active;
 }

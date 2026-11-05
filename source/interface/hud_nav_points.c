@@ -696,6 +696,7 @@ void custom_render_nav_point(
 	real_point2d screen_position;
 	real a, b, ab, bx, ay;
 	real theta;
+	point2d corner;
 
 	memset(stack_buffer, 0x62, sizeof(stack_buffer));
 	arrow = TAG_BLOCK_GET_ELEMENT(&hud_globals->waypoint.arrows, nav_index, struct hud_waypoint_arrow);
@@ -762,15 +763,19 @@ void custom_render_nav_point(
 	screen_position.y += (render.camera.viewport_bounds.y1 - render.camera.viewport_bounds.y0) / 2;
 	match_assert("c:\\halo\\SOURCE\\interface\\hud_nav_points.c", 615, waypoint_type!=NONE);
 
+	/* port: where its point is, not the whole unit short of it, that it
+	keeps to the world under it (hud_draw_mark_begin) */
+	hud_draw_mark_begin(screen_position.x, screen_position.y, &corner);
 #ifdef HALO_VR
 	/* port: in VR, a waypoint on the screen is drawn in each eye over what it
 	marks, one off it at the HUD's edge as ever (vr_render_world_waypoint) */
 	if (!vr_render_world_waypoint(
 		position_pointer,
 		waypoint_type!=_waypoint_off_screen,
-		(real)(short)(long)screen_position.x,
-		(real)(short)(long)screen_position.y))
+		screen_position.x,
+		screen_position.y))
 	{
+		hud_draw_mark_end();
 		match_assert_stack_frame("c:\\halo\\SOURCE\\interface\\hud_nav_points.c", 675);
 		return;
 	}
@@ -784,12 +789,9 @@ void custom_render_nav_point(
 		hud_retrieve_bitmap_and_bounding_rect(bitmap_index, arrow->sequence_indices[waypoint_type], 0, &bitmap, &clip);
 		if (bitmap && _texture_cache_bitmap_get_hardware_format((struct bitmap_data *)bitmap, FALSE, TRUE))
 		{
-			point2d corner;
 			byte alpha;
 			real_rgb_color rgb_temp;
 
-			corner.x = (short)screen_position.x;
-			corner.y = (short)screen_position.y;
 			alpha = PIN(255 * fast_ftol_C(arrow->opacity), 0, 255);
 			pixel32_to_real_rgb_color(arrow->color, &rgb_temp);
 			rgb_temp.red *= PIN(1.f - arrow->fade, 0.f, 1.f);
@@ -801,9 +803,14 @@ void custom_render_nav_point(
 			{
 				struct hud_absolute_placement_definition placement;
 				struct number_hud_element_definition numbers;
-				real fractional_value;
+				long tenths;
 
-				distance *= 3.048f;
+				/* port: in meters to the nearest tenth, the whole meters and
+				the tenth both of it: the whole meters were rounded to the
+				nearest and the tenth cut short, so that 108.6 m showed as
+				109.6 and the number jumped a meter and a tenth at each
+				half meter */
+				tenths = (long)floor(distance * 3.048f * 10.0f + 0.5f);
 				memset(&placement, 0, sizeof(struct hud_absolute_placement_definition));
 				memset(&numbers, 0, sizeof(struct number_hud_element_definition));
 				placement.corner = _hud_anchor_top_left;
@@ -818,13 +825,13 @@ void custom_render_nav_point(
 				numbers.placement.offset.x -= render.camera.window_bounds.x0 - render.camera.viewport_bounds.x0;
 				numbers.placement.offset.y -= render.camera.window_bounds.y0 - render.camera.viewport_bounds.y0;
 
-				fractional_value = power(10.f, 4.f);
 				hud_draw_numbers(local_player_index, &placement, &numbers,
-					fast_ftol_C(distance), fast_ftol(fmod(fabs((real)(fractional_value * distance)), fractional_value)),
+					(short)MIN(tenths / 10, SHORT_MAX), (short)(tenths % 10 * 1000),
 					0, 0, 0.f);
 			}
 		}
 	}
+	hud_draw_mark_end();
 
 	{
 		short corrupt_index = check_stack_buffer(stack_buffer);

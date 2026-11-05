@@ -86,6 +86,7 @@ symbols in this file:
 #include "game/players.h"
 #include "interface/hud.h"
 #include "interface/hud_definitions.h"
+#include "interface/hud_draw.h"
 #include "interface/hud_messaging.h"
 #include "interface/hud_unit.h"
 #include "interface/hud_weapon.h"
@@ -989,10 +990,12 @@ static void hud_draw_friendly_indicator(
 			0);
 		if (_texture_cache_bitmap_get_hardware_format(bitmap, FALSE, TRUE))
 		{
-			position.x =
-				(short)fast_ftol(screen_position.x) - render.camera.viewport_bounds.x0;
-			position.y =
-				(short)fast_ftol(screen_position.y) - render.camera.viewport_bounds.y0;
+			/* port: where the point is, not the nearest whole unit, that
+			it keeps to the teammate (hud_draw_mark_begin) */
+			hud_draw_mark_begin(
+				screen_position.x - render.camera.viewport_bounds.x0,
+				screen_position.y - render.camera.viewport_bounds.y0,
+				&position);
 			/* port: over the game's own far distance, not display.draw_
 			distance's (far_clip.c): the fade's distance stays the same */
 			depth_factor = 1.0f -
@@ -1005,8 +1008,13 @@ static void hud_draw_friendly_indicator(
 			clip.y1 = 1.0f;
 #ifdef HALO_VR
 			/* port: in VR, drawn in each eye over the teammate */
-			if (!vr_render_world_mark(&head_position, (real)position.x, (real)position.y))
+			if (!vr_render_world_mark(&head_position,
+				screen_position.x - render.camera.viewport_bounds.x0,
+				screen_position.y - render.camera.viewport_bounds.y0))
+			{
+				hud_draw_mark_end();
 				return;
+			}
 #endif
 			interface_draw_bitmap(
 				bitmap,
@@ -1015,6 +1023,7 @@ static void hud_draw_friendly_indicator(
 				1.0f,
 				0.0f,
 				1.0f);
+			hud_draw_mark_end();
 		}
 	}
 
@@ -1228,12 +1237,27 @@ static void hud_draw_player_name(
 	matrix4x3_transform_point(&render.frustum.world_to_view, &head_position, &view_position);
 	if (!render_camera_view_to_screen(&render.camera, &render.frustum, &view_position, &screen_position))
 		return;
-	x = (short)fast_ftol(screen_position.x) - render.camera.viewport_bounds.x0;
-	y = (short)fast_ftol(screen_position.y) - render.camera.viewport_bounds.y0;
+	/* (where the point is, not the nearest whole unit, that the name keeps
+	to the player: hud_draw_mark_begin) */
+	{
+		point2d whole;
+
+		hud_draw_mark_begin(
+			screen_position.x - render.camera.viewport_bounds.x0,
+			screen_position.y - render.camera.viewport_bounds.y0,
+			&whole);
+		x = whole.x;
+		y = whole.y;
+	}
 #ifdef HALO_VR
 	/* port: in VR, drawn in each eye over the player's head */
-	if (!vr_render_world_mark(&head_position, (real)x, (real)y))
+	if (!vr_render_world_mark(&head_position,
+		screen_position.x - render.camera.viewport_bounds.x0,
+		screen_position.y - render.camera.viewport_bounds.y0))
+	{
+		hud_draw_mark_end();
 		return;
+	}
 #endif
 	if (indicator)
 	{
@@ -1290,6 +1314,7 @@ static void hud_draw_player_name(
 		icon.y1 = (short)(icon.y0 + size);
 		network_voice_draw_icon(&icon, FALSE, color.alpha);
 	}
+	hud_draw_mark_end();
 
 	return;
 }

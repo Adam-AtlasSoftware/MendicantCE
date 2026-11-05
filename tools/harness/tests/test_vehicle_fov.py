@@ -102,11 +102,14 @@ def test_the_reticle_takes_it():
         "\t\t\trender_fov_reticle_size(render.local_player_index);" in hud
     assert "\t\tcolor,\n\t\treticle_scale);" in hud
     # the passenger's and the lowered reticle's offsets are given at the scale the reticle is drawn at
-    assert "!passenger_camera_reticle_offset(&point, reticle_scale))\n" \
+    assert "!passenger_camera_reticle_offset(&point, reticle_scale, &reticle_rest))\n" \
         "\t\tlowered_reticle_offset_point(&point, reticle_scale);" in hud
     passenger = read("port/linux/game/passenger_camera.c")
-    assert "point->x = (short)(point->x + reticle_offset.x / reticle_scale);" in passenger
-    assert "point->y = (short)(point->y + reticle_offset.y / reticle_scale);" in passenger
+    assert "real x = point->x + reticle_offset.x / reticle_scale;" in passenger
+    assert "real y = point->y + reticle_offset.y / reticle_scale;" in passenger
+    # (and what is past the whole units, at the scale it is drawn at: hud_draw.c draws the reticle moved by it)
+    assert "rest->i = (x - point->x) * reticle_scale;" in passenger
+    assert "rasterizer_screen_offset_set(reticle_rest.i, reticle_rest.j);" in hud
     # a scope's pieces are the items drawn only zoomed (the VR smart-link's zoomed layout's)
     weapon = read("source/interface/hud_weapon.c")
     assert "HUD_CROSSHAIR_SCOPE_PIECE : TRUE);" in weapon
