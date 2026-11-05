@@ -31,43 +31,58 @@ static unsigned int assets_word(const unsigned char *bytes)
 		(unsigned int)bytes[3] << 24;
 }
 
+/* why the file is not used, for embedded_assets_check: "" when it is */
+static char assets_problem[1400];
+
+/* a candidate file: kept if it is this build's, else its problem noted */
+static int assets_try(const char *path)
+{
+	size_t size = 0;
+	char *file = config_file_read(path, &size);
+
+	if (!file)
+	{
+		if (!assets_problem[0])
+			snprintf(assets_problem, sizeof(assets_problem), "%s is missing", path);
+		return 0;
+	}
+	if (size != embedded_assets_size || size < EMBEDDED_ASSETS_HEADER_SIZE ||
+		assets_word((const unsigned char *)file) != EMBEDDED_ASSETS_MAGIC ||
+		assets_word((const unsigned char *)file + 4) != EMBEDDED_ASSETS_FORM ||
+		crc32(0L, (const Bytef *)file, (uInt)size) != embedded_assets_crc)
+	{
+		/* (another build's, or damaged: that is the problem to tell of) */
+		snprintf(assets_problem, sizeof(assets_problem), "%s is not this build's (%lu bytes, not %u, or damaged)",
+			path, (unsigned long)size, embedded_assets_size);
+		free(file);
+		return 0;
+	}
+	assets = (const unsigned char *)file;
+	assets_size = size;
+	assets_problem[0] = 0;
+	return 1;
+}
+
 /* beside config.toml, else the Linux release's (share/openh1,
 install_layout.c), as brokers.txt is found (p2p_signal.c) */
 static void assets_read(void)
 {
 	char path[1024];
-	size_t size = 0, length;
-	char *file;
+	size_t length;
 
 	if (embedded_assets_size <= EMBEDDED_ASSETS_HEADER_SIZE)
 		return;
 	config_folder(path, sizeof(path));
 	length = strlen(path);
 	snprintf(path + length, sizeof(path) - length, "%s", EMBEDDED_ASSETS_FILE);
-	file = config_file_read(path, &size);
+	if (assets_try(path))
+		return;
 #if !defined(HALO_WINDOWS) && !defined(HALO_ANDROID) && !defined(HALO_MACOS)
-	if (!file)
-	{
-		install_shared_file(EMBEDDED_ASSETS_FILE, path, sizeof(path));
-		file = config_file_read(path, &size);
-	}
+	install_shared_file(EMBEDDED_ASSETS_FILE, path, sizeof(path));
+	if (assets_try(path))
+		return;
 #endif
-	if (!file)
-	{
-		platform_log("assets: %s cannot be read: no high-res HUD, text or menus", path);
-		return;
-	}
-	if (size != embedded_assets_size || assets_word((const unsigned char *)file) != EMBEDDED_ASSETS_MAGIC ||
-		assets_word((const unsigned char *)file + 4) != EMBEDDED_ASSETS_FORM ||
-		crc32(0L, (const Bytef *)file, (uInt)size) != embedded_assets_crc)
-	{
-		platform_log("assets: %s is not this build's (%lu bytes, not %u): no high-res HUD, text or menus", path,
-			(unsigned long)size, embedded_assets_size);
-		free(file);
-		return;
-	}
-	assets = (const unsigned char *)file;
-	assets_size = size;
+	platform_log("assets: %s: no high-res HUD, text or menus", assets_problem);
 }
 
 #ifndef HALO_ANDROID
@@ -75,7 +90,7 @@ static pthread_mutex_t assets_lock = PTHREAD_MUTEX_INITIALIZER;
 #endif
 static int assets_tried;
 
-const void *embedded_assets_data(unsigned int offset, unsigned int size)
+static void assets_ready(void)
 {
 	/* (the high-res HUD's decoders ask from their threads too: the guest's C
 	library has no pthread_once) */
@@ -90,7 +105,18 @@ const void *embedded_assets_data(unsigned int offset, unsigned int size)
 #ifndef HALO_ANDROID
 	pthread_mutex_unlock(&assets_lock);
 #endif
+}
+
+const void *embedded_assets_data(unsigned int offset, unsigned int size)
+{
+	assets_ready();
 	if (!assets || offset < EMBEDDED_ASSETS_HEADER_SIZE || offset > assets_size || size > assets_size - offset)
 		return NULL;
 	return assets + offset;
+}
+
+const char *embedded_assets_check(void)
+{
+	assets_ready();
+	return assets_problem[0] ? assets_problem : NULL;
 }
