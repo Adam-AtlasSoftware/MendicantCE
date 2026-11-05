@@ -144,8 +144,10 @@ void host_memory_report_low_mappings(FILE *file);
 faults (host_watch_hash.h), for when the app cannot receive its own
 SIGSEGV (ARM translation). Call before the guest starts. */
 void host_memory_watch_use_hashes(void);
-/* the host's page size (4 KB on Linux and Android without the base
-register, which needs it: the Xbox window's pages; 16 KB on macOS) */
+/* the host's page size, the kernel's (4 KB; 16 KB on macOS and iOS, and on
+the Android and ARM Linux kernels that use them; 64 KB on some ARM Linux
+ones): the guest's 4 KB pages are kept on them (host_memory.c,
+host_memory_base.c) */
 size_t host_page_size(void);
 /* page-granular allocations in the guest's memory; NULL on failure */
 void *host_low_map(size_t size, int protection);
@@ -274,6 +276,9 @@ cache too (port/macos/xgpu_metal_textures.c: any thread) */
 void host_memory_watch_protect(uint32_t address, uint32_t size);
 uint32_t host_memory_watch_generation(uint32_t address, uint32_t size);
 uint32_t host_memory_watch_serial(void);
+/* memory_watch_page_size (also the guest's): the bytes a generation and a
+protection covers, the host's page (or the hashing's, host_watch_hash.h) */
+uint32_t host_memory_watch_page_size(void);
 /* (host_memory.c or host_memory_base.c) the protection the guest asked for
 of the Xbox window's host page at that address, which the write tracking
 puts back */

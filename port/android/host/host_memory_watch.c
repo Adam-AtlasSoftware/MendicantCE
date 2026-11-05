@@ -12,8 +12,12 @@ caught, and the tracking compares page contents instead
 (host_watch_hash.c).
 
 The guest names its ranges with guest addresses (host.h); the pages
-protected are the host's (4 KB on Linux and Android, 16 KB on macOS), so on
-a host with larger pages a write marks a little more than it touched.
+protected are the host's (the kernel's: 4 KB, or 16 KB on macOS, iOS and
+the Android and ARM Linux kernels that use them, 64 KB on some ARM Linux
+ones), so on a host with larger pages a write marks a little more than it
+touched. The guest asks the size (memory_watch_page_size): its vertex
+mirror (d3d8_device.c) watches pages of it, so that a page it uploads is one
+the tracking protects alone.
 
 The renderer's texture cache can be on the host's render thread
 (port/macos/xgpu_metal_textures.c), which protects pages and reads their
@@ -67,6 +71,13 @@ static struct watch_hash *hashes(void)
 static uint64_t watch_page_size(void)
 {
 	return watch_hashing ? WATCH_HASH_PAGE_SIZE : host_page_size();
+}
+
+/* memory_watch_page_size: the bytes each generation and protection covers
+(a host page, or the hashing's page) */
+uint32_t host_memory_watch_page_size(void)
+{
+	return (uint32_t)watch_page_size();
 }
 
 static uint64_t watch_page_count(void)

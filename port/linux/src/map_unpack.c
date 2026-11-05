@@ -84,8 +84,16 @@ enum
 };
 
 #define MAP_CACHE_MEGABYTE (1024ULL * 1024ULL)
-/* the disk's room the cache never takes: the larger of these */
+/* the disk's room the cache never takes: a twentieth of the disk, but at
+least 2 GB (a small disk's: a phone's, a 64 GB Steam Deck's) and at most
+5 GB. The cache is the game's own to give back (a load gives a map up for
+room), the system is not: what it needs free is a fixed amount, for its swap,
+its temporary files and an update's download, not a share of the disk, and 5 GB
+holds those with the game's own writes (its saves, its shader caches, a few
+hundred MB). A twentieth alone kept 23.5 GB of a 471 GB disk free, more than
+many have left, and so most of every stock map out of the cache. */
 #define MAP_CACHE_FREE_MARGIN (2048ULL * MAP_CACHE_MEGABYTE)
+#define MAP_CACHE_FREE_MARGIN_MOST (5120ULL * MAP_CACHE_MEGABYTE)
 #define MAP_CACHE_FREE_MARGIN_SHARE 20
 /* (cache_files_initialize's least: the Xbox's six cache files) */
 #define MAP_CACHE_LEAST (0x11600000ULL * 2 + 0x02300000ULL + 0x02F00000ULL * 3)
@@ -459,6 +467,8 @@ unsigned long long map_cache_choose_budget(long megabytes, unsigned long long ca
 
 	if (margin < MAP_CACHE_FREE_MARGIN)
 		margin = MAP_CACHE_FREE_MARGIN;
+	if (margin > MAP_CACHE_FREE_MARGIN_MOST)
+		margin = MAP_CACHE_FREE_MARGIN_MOST;
 	if (megabytes > 0)
 		budget = (unsigned long long)megabytes * MAP_CACHE_MEGABYTE;
 	else
