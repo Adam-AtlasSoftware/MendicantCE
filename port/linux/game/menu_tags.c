@@ -526,6 +526,9 @@ static char const *const port_function_names[] =
 	"port campaign init", "port campaign continue", "port campaign missions", "port campaign missions init",
 	"port campaign previous", "port campaign next", "port campaign tab", "port campaign tab previous",
 	"port campaign tab next", "port campaign choose", "port campaign difficulty init", "port campaign play",
+	/* (a mission in progress started again: campaign_menu.inc's campaign_restart_*) */
+	"port campaign restart ask", "port campaign missions restart", "port campaign restart",
+	"port campaign restart cancel",
 };
 
 /* the PC version's game data functions that the Xbox's have not, from
@@ -574,6 +577,7 @@ static char const *const port_game_data_input_names[] =
 	"port training update",
 	/* (the campaign's screens: campaign_menu.inc) */
 	"port campaign update", "port campaign missions update", "port campaign difficulty update",
+	"port campaign restart update",
 };
 
 static struct

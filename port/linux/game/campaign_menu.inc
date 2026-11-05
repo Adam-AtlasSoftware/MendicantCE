@@ -12,7 +12,9 @@ campaign_levels_read), a level started as the PC version's lists start it
   ("port campaign continue" goes on with it), CHOOSE MISSION, CO-OP (the
   Multiplayer's CO-OP CAMPAIGN page) and BACK, and the panel of the mission
   CONTINUE plays, else the one Choose Mission opens on, with what the item
-  chosen does.
+  chosen does. RESTART MISSION, under CONTINUE and shown with it, asks first
+  ("port campaign restart ask"), then plays CONTINUE's mission from its
+  start.
 - Choose Mission ("port campaign missions init", "missions update"): HALO's
   ten levels or the custom_maps folder's campaign maps (CUSTOM: LB and RB,
   "tab previous" and "tab next", or a click on a tab, "tab"), three cards at
@@ -32,7 +34,11 @@ campaign_levels_read), a level started as the PC version's lists start it
   RESUME on the saved game's. Under them, the chosen one's panel: its name,
   its objective, and over its badges where the player is with it. Every mission can be played. A card's A, a second tap on a
   touchscreen or SELECT ("choose") opens the difficulties, or goes on with
-  the saved game (RESUME).
+  the saved game (RESUME). On the saved game's card, Y (F on the keyboard)
+  or RESTART ("missions restart") asks first, then plays it from its start.
+- The question before a restart ("restart update"): "Restart <mission>?
+  Your progress in it will be lost.", CANCEL (with the focus, and B) and
+  RESTART ("restart": campaign_restart).
 - Choose Difficulty ("difficulty init", "difficulty update"): four cards,
   the one chosen last focused (game.campaign_difficulty), each its badge,
   its name, the game's words about it and BEATEN where the mission has
@@ -107,6 +113,17 @@ static struct
 	real slide_from;
 	unsigned long slide_start;
 } campaign_cards = { FALSE, 0, 0, 0, NONE, NONE, 1, FALSE, 0, NONE, 0.0f, 0 };
+
+/* the mission the question asks about (the saved game's), else NONE */
+static short campaign_restart_level = NONE;
+
+/* whether RESTART is offered: with a saved game (saved_level, else NONE),
+on the Campaign menu (chosen NONE), or on Choose Mission on its mission's
+card (HALO's: CUSTOM's maps have no saved game) */
+static boolean campaign_restart_offered(short saved_level, boolean custom, short chosen)
+{
+	return saved_level != NONE && (chosen == NONE || (!custom && chosen == saved_level));
+}
 
 /* ---------- the row's layout (tools/harness/tests/campaign_cards.c) */
 
@@ -442,23 +459,27 @@ static void campaign_screen_update(struct widget_instance *list)
 {
 	struct widget_instance *panel = list->parameters.list.extended_description;
 	struct widget_instance *item = named(list, "item_continue", 0);
+	struct widget_instance *restart = named(list, "item_restart", 0);
 	boolean saved = campaign.saved_level != NONE;
 	wchar_t text[MISSION_TEXT_LENGTH], difficulty_name[ROW_TEXT_LENGTH];
 	short index, hint = 0;
 	struct widget_instance *child;
 
 	visible_set(item, saved);
-	if (item && !saved && list->focused_child == item)
+	/* (RESTART MISSION with CONTINUE: campaign_restart_offered) */
+	visible_set(restart, campaign_restart_offered(campaign.saved_level, FALSE, NONE));
+	if (!saved && list->focused_child && (list->focused_child == item || list->focused_child == restart))
 	{
 		struct widget_instance *missions = named(list, "item_missions", 0);
 
 		if (missions)
 			list->focused_child = missions;
 	}
-	/* (the items under CONTINUE, up in its place without it) */
+	/* (the items under CONTINUE, up in its place without it; RESTART
+	MISSION's, without it, theirs) */
 	for (child = list->child, index = 0; child; child = child->next)
 	{
-		if (!strncmp(child->name, "item_", 5) && child != item)
+		if (!strncmp(child->name, "item_", 5) && child != item && child->visible)
 		{
 			child->vertical_offset = (short)(CAMPAIGN_ITEMS_TOP + (saved ? CAMPAIGN_CONTINUE_HEIGHT + 4 : 0) +
 				index * (CAMPAIGN_ITEM_HEIGHT + 2));
@@ -467,7 +488,7 @@ static void campaign_screen_update(struct widget_instance *list)
 		if (child == list->focused_child)
 		{
 			hint = !strcmp(child->name, "item_continue") ? 0 : !strcmp(child->name, "item_missions") ? 1 :
-				!strcmp(child->name, "item_coop") ? 2 : 3;
+				!strcmp(child->name, "item_coop") ? 2 : !strcmp(child->name, "item_restart") ? 4 : 3;
 		}
 	}
 	if (saved)
@@ -486,11 +507,11 @@ static void campaign_screen_update(struct widget_instance *list)
 		if (named(item, "continue_corners", 0))
 			named(item, "continue_corners", 0)->animation.current_frame_index = list->focused_child == item ? 1 : 0;
 	}
-	/* (CONTINUE's mission; CHOOSE MISSION's the one chosen there last, else
-	the first not yet beaten; CO-OP's its own words) */
+	/* (CONTINUE's and RESTART MISSION's mission; CHOOSE MISSION's the one
+	chosen there last, else the first not yet beaten; CO-OP's its own words) */
 	campaign_panel_coop(panel, hint == 2);
 	if (hint != 2)
-		campaign_panel_show(panel, hint == 0 && saved ? campaign.saved_level : campaign_menu_mission());
+		campaign_panel_show(panel, (hint == 0 || hint == 4) && saved ? campaign.saved_level : campaign_menu_mission());
 	string_get("pc\\main_menu\\campaign\\hints", hint, text);
 	menu_text_box_wrap(named(panel, "panel_hint", 0), text, 2);
 	profile_name_show(screen_of(list));
@@ -802,6 +823,9 @@ static void campaign_missions_update(struct widget_instance *list)
 	}
 	visible_set(named(screen, "mission_empty", 0), count <= 0);
 	menu_tabs_show(named(screen, "source_tabs", 0), campaign_cards.custom ? 1 : 0);
+	/* (RESTART on the saved game's card) */
+	visible_set(named(screen, "prompt_restart", 0), count > 0 &&
+		campaign_restart_offered(campaign.saved_level, campaign_cards.custom, campaign_cards.chosen));
 	campaign_text_set_ascii(named(screen, "prompt_select", 0),
 		!campaign_cards.custom && count > 0 && campaign_cards.chosen == campaign.saved_level ?
 		"%a-button RESUME" : "%a-button SELECT");
@@ -1008,6 +1032,70 @@ static boolean campaign_difficulty_play(struct widget_instance *widget, short co
 	return difficulty_start(difficulty, controller);
 }
 
+/* ---------- a mission in progress started again */
+
+/* "port campaign restart ask" (the Campaign menu's RESTART MISSION, chosen
+NONE), "missions restart" (Choose Mission's Y and RESTART, its chosen
+card): the question opens for the saved game's mission (TRUE); else it
+does not (FALSE) */
+static boolean campaign_restart_ask(short chosen)
+{
+	if (!campaign_restart_offered(campaign.saved_level, campaign_cards.custom, chosen))
+	{
+		campaign_restart_level = NONE;
+		return FALSE;
+	}
+	campaign_restart_level = campaign.saved_level;
+	ui_play_audio_feedback_sound(SOUND_FORWARD);
+	return TRUE;
+}
+
+/* "port campaign restart" (the question's RESTART): the mission asked
+about from its start, at the saved game's difficulty, as the next level
+after one won starts: main.c's main_new_map loads no saved game
+(main_disallow_persistent_storage). The saved game's file is kept until a
+checkpoint of the new start takes its place (game_state.c's
+game_state_save_to_persistent_storage writes none before the first).
+Nothing starts (FALSE) if the saved game is no longer the one asked about */
+static boolean campaign_restart(short controller)
+{
+	struct player_profile profile;
+	char const *map_name;
+	short level, difficulty;
+
+	if (campaign_restart_level == NONE || !campaign_profile(controller, &profile) ||
+		!ui_widget_port_saved_game(&map_name, &level, &difficulty) || level != campaign_restart_level)
+	{
+		campaign_restart_level = NONE;
+		return campaign_fail();
+	}
+	campaign_start(map_name, difficulty, controller);
+	main_disallow_persistent_storage();
+	return TRUE;
+}
+
+/* "port campaign restart cancel" (CANCEL, B): back, nothing changed */
+static boolean campaign_restart_cancel(void)
+{
+	campaign_restart_level = NONE;
+	return TRUE;
+}
+
+/* "port campaign restart update": the question, of the mission asked about
+(kept while the mission loads: the question is shown until it has) */
+static void campaign_restart_update(struct widget_instance *screen)
+{
+	wchar_t text[MISSION_TEXT_LENGTH], title[MISSION_TEXT_LENGTH];
+
+	if (campaign_restart_level == NONE)
+		return;
+	campaign_level_title(campaign_restart_level, TRUE, title, MISSION_TEXT_LENGTH);
+	campaign_widen("Restart ", text, MISSION_TEXT_LENGTH);
+	ustrncat(text, title, MISSION_TEXT_LENGTH - 1 - (long)ustrlen(text));
+	ustrncat(text, L"?\r\nYour progress in it will be lost.", MISSION_TEXT_LENGTH - 1 - (long)ustrlen(text));
+	text_set_length(screen, text, MISSION_TEXT_LENGTH);
+}
+
 /* ---------- the functions */
 
 static boolean campaign_menu_event(struct widget_instance *widget, char const *name, short controller)
@@ -1032,6 +1120,14 @@ static boolean campaign_menu_event(struct widget_instance *widget, char const *n
 		return campaign_difficulty_initialize(widget, controller);
 	if (!strcmp(name, "play"))
 		return campaign_difficulty_play(widget, controller);
+	if (!strcmp(name, "restart ask"))
+		return campaign_restart_ask(NONE);
+	if (!strcmp(name, "missions restart"))
+		return campaign_restart_ask(campaign_cards.chosen);
+	if (!strcmp(name, "restart"))
+		return campaign_restart(controller);
+	if (!strcmp(name, "restart cancel"))
+		return campaign_restart_cancel();
 	return FALSE;
 }
 
@@ -1043,4 +1139,6 @@ static void campaign_menu_update(struct widget_instance *widget, char const *nam
 		campaign_missions_update(widget);
 	else if (!strcmp(name, "difficulty update"))
 		campaign_difficulty_update(widget);
+	else if (!strcmp(name, "restart update"))
+		campaign_restart_update(widget);
 }
