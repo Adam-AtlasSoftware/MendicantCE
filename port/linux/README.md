@@ -3539,6 +3539,15 @@ Game) find the checkpoint checked (its 20 MB summed against its checksum) on
 a thread, as the main menu shows and again whenever the file changes
 (`src/saved_game_check.c`), not as their screens open.
 
+The checkpoint a revert goes back to (`savegame.bin` in `z:\`) holds the
+part of the game state in use, its allocations (18 MB of the 20 MB it has
+room for). The game's thread copies it, and a thread of its own writes the
+copy (`src/saved_game_writer.c`): beside the file, on the disk, then renamed
+over it, so that the file is always a whole image, even if the game stops in
+the middle of a write. A revert, and the next checkpoint, wait for the
+write. It had been the game's thread's, in the middle of a frame: 20 MB,
+which an M2 Mac takes 30 to 45 ms to write.
+
 ## 64-bit ARM
 
 `ninja linux_arm64` builds the game for 64-bit ARM Linux. It was tested on
