@@ -68,16 +68,19 @@ static short draw_unicode_string_capital_middle(rectangle2d const *bounds, wchar
 	return (short)(bounds->y0 + 10);
 }
 
-/* what was drawn: the name's pen, and the cap's box */
-static short drawn_pen;
+/* what was drawn: the name's pen (and an "='s"), and the cap's box */
+static short drawn_pen, equals_pen = SHORT_MIN;
 static rectangle2d drawn_box;
 static int caps_drawn;
 
 static void rasterizer_draw_unicode_string(rectangle2d const *bounds, void const *clip, void const *style, long flags,
 	wchar_t const *text)
 {
-	(void)clip; (void)style; (void)flags; (void)text;
-	drawn_pen = (short)(bounds->x0 + indent);
+	(void)clip; (void)style; (void)flags;
+	if (text[0] == L'=' && !text[1])
+		equals_pen = (short)(bounds->x0 + indent);
+	else
+		drawn_pen = (short)(bounds->x0 + indent);
 }
 
 static void key_cap_shape(rectangle2d const *box, pixel32 fill, pixel32 color)
@@ -88,6 +91,39 @@ static void key_cap_shape(rectangle2d const *box, pixel32 fill, pixel32 color)
 }
 
 #include "under_test.inc"
+
+/* a glyph's box drawn from a pen in the fake font */
+static short glyph_left(short pen) { return (short)(pen + lead); }
+static short glyph_right(short pen, wchar_t letter) { return (short)(pen + advance_of(letter) - trail); }
+
+/* a legend's words after a cap drawn at x ("=CANCEL"): the "=" and the
+word drawn as draw_string_and_hack_in_icons draws them (the "=", then the
+rest from the cursor) */
+struct equals_drawn
+{
+	long taken;
+	short box_x1, equals_left, equals_right, word_left, word_right;
+};
+
+static struct equals_drawn draw_equals(wchar_t const *name, short x, wchar_t const *words)
+{
+	rectangle2d bounds = { 0, 0, 480, 640 }, cursor = { 0, 0, 20, 0 }, text_bounds;
+	struct equals_drawn result;
+
+	cursor.x0 = x;
+	equals_pen = SHORT_MIN;
+	CHECK(key_cap_draw(name, &bounds, &cursor, 0xFF2896FFUL), "drawn");
+	result.box_x1 = drawn_box.x1;
+	result.taken = hud_key_prompt_draw_equals(&bounds, &cursor, words);
+	result.equals_left = glyph_left(equals_pen);
+	result.equals_right = glyph_right(equals_pen, L'=');
+	indent = (short)(cursor.x0 - bounds.x0);
+	draw_unicode_string_compute_bounds(&bounds, words + result.taken, &text_bounds, &(rectangle2d){ 0, 0, 20, 0 });
+	indent = 0;
+	result.word_left = text_bounds.x0;
+	result.word_right = text_bounds.x1;
+	return result;
+}
 
 /* the name drawn at the cursor at x: its glyphs' span as drawn, the cap's
 box, and where the text after it starts (the cursor) */
@@ -189,6 +225,73 @@ int main(int argc, char **argv)
 						"%ls: laid out %d, drawn %d", names[name],
 						hud_key_prompt_cap_advance(text_bounds.x0, text_bounds.x1), d.after - 30);
 				}
+	}
+	CASE("equals")
+	{
+		/* a legend's "=" (issue 596's "[Esc] =CANCEL"): as much room
+		between the cap and it as between it and its word, for any name and
+		font */
+		for (players = 1; players <= 2; players++)
+			for (font = 0; font < sizeof(leads) / sizeof(leads[0]); font++)
+				for (name = 0; name < sizeof(names) / sizeof(names[0]); name++)
+				{
+					struct equals_drawn e;
+					short before, after;
+
+					lead = leads[font][0];
+					trail = leads[font][1];
+					e = draw_equals(names[name], 40, name % 2 ? L" =CANCEL" : L"=CANCEL");
+					/* (by the advances, which the high-res text centres its
+					glyphs on: the "='s" pen to the word's) */
+					before = (short)(equals_pen - e.box_x1);
+					after = (short)(e.word_left - lead - (equals_pen + advance_of(L'=')));
+					CHECK(e.taken == (name % 2 ? 2 : 1) && equals_pen != SHORT_MIN, "%ls: the = not drawn on its own",
+						names[name]);
+					CHECK(before == after, "%ls (lead %d, trail %d, %d players): the = %d past the cap, %d before its word",
+						names[name], lead, trail, players, before, after);
+					CHECK(before >= 1, "%ls: the = %d past the cap", names[name], before);
+				}
+	}
+	CASE("equals-advance")
+	{
+		/* the legends lay a cap, its "=" and word out as they are drawn */
+		for (players = 1; players <= 2; players++)
+			for (font = 0; font < sizeof(leads) / sizeof(leads[0]); font++)
+				for (name = 0; name < sizeof(names) / sizeof(names[0]); name++)
+				{
+					static wchar_t const *const words[] = { L"=CANCEL", L" =SELECT", L"BACK" };
+					unsigned long word;
+
+					lead = leads[font][0];
+					trail = leads[font][1];
+					for (word = 0; word < sizeof(words) / sizeof(words[0]); word++)
+					{
+						rectangle2d bounds = { 0, 0, 480, 640 }, text_bounds, cursor = { 0, 0, 20, 0 };
+						struct equals_drawn e;
+						short laid;
+
+						indent = 0;
+						draw_unicode_string_compute_bounds(&bounds, names[name], &text_bounds, &cursor);
+						laid = hud_key_prompt_legend_advance(text_bounds.x0, text_bounds.x1, words[word]);
+						e = draw_equals(names[name], 30, words[word]);
+						CHECK(laid == e.word_right - 30, "%ls %ls: laid out to %d, drawn to %d", names[name],
+							words[word], laid, e.word_right - 30);
+					}
+				}
+	}
+	CASE("equals-none")
+	{
+		/* no "=" or no cap before it on its line: nothing taken */
+		rectangle2d bounds = { 0, 0, 480, 640 }, cursor = { 0, 600, 20, 0 };
+
+		players = 1;
+		lead = 3;
+		trail = 0;
+		CHECK(draw_equals(L"Esc", 40, L"CANCEL").taken == 0, "words with no = taken");
+		line_end = 610;
+		CHECK(key_cap_draw(L"Enter", &bounds, &cursor, 0xFF2896FFUL), "drawn");
+		CHECK(hud_key_prompt_draw_equals(&bounds, &cursor, L"=SELECT") == 0, "an = after a wrapped name taken");
+		line_end = SHORT_MAX;
 	}
 	CASE("wrapped")
 	{
