@@ -474,7 +474,7 @@ static char const *const port_function_names[] =
 	/* (a new profile's screens: Settings' is then being edited, which the
 	Xbox's leaves to its own screens) */
 	"new campaign decision",
-	/* (the Mods screen, Settings' PROFILES tab's MODS: menu_functions.c) */
+	/* (the Mods screen, Settings' MODS tab's MANAGE MODS: menu_functions.c) */
 	"port mods init", "port mods close", "port mods toggle", "port mods move up", "port mods move down",
 	"port mods save",
 	/* (the update question, the Steam Frame's and gamescope's: menu_functions.c) */
@@ -484,7 +484,7 @@ static char const *const port_function_names[] =
 	/* (Settings' tabs and pages: menu_functions.c's settings_*) */
 	"port settings begin", "port settings tab", "port settings tab next", "port settings tab previous",
 	"port settings ok", "port settings cancel", "port settings keep", "port settings page cancel",
-	"port settings new profile", "port settings profiles",
+	"port settings new profile", "port settings profiles", "port settings weapon reset",
 	/* (Online's Discord account: menu_functions.c's discord_link and
 	discord_unlink) */
 	"port discord link", "port discord unlink",
@@ -499,9 +499,10 @@ static char const *const port_function_names[] =
 	/* (the browsers' tabs and refresh: menu_functions.c's browser_tab_choose,
 	browser_refresh) */
 	"port browser tab", "port browser tab next", "port browser tab previous", "port browser refresh",
-	/* (the browsers' Filters page and its SEARCH: menu_functions.c's
-	browser_filters_open, browser_search_edit) */
-	"port browser filters", "port browser search",
+	/* (the browsers' Filters page, and the searches of their SERVER and MAP
+	columns: menu_functions.c's browser_filters_open, browser_search_edit,
+	browser_search_next, browser_search_clear_chosen) */
+	"port browser filters", "port browser search", "port browser search next", "port browser search clear",
 	/* (Multiplayer's PARTY and its screen: party_menu.inc) */
 	"port party open", "port party button", "port party x", "port party y",
 	/* (Multiplayer's MATCHMAKING and its screen: matchmaking_menu.inc) */

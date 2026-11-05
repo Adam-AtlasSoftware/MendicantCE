@@ -90,6 +90,8 @@ shown, not the loading screen.
 #include "text/draw_string.h"
 
 #include "menu_pictures.h"
+#include "render_enumerate.h"
+#include "render_prepared.h"
 #include "world_sdf.h"
 #include "../src/loading_screen.h"
 
@@ -137,6 +139,9 @@ enum prepare_state
 	/* the camera taken; the frame drawn and kept */
 	_prepare_pose,
 	_prepare_capture,
+	/* (a map whose picture is current: its preparation alone recorded, in
+	the frames after its load: render_prepared.c) */
+	_prepare_record,
 	/* the main menu asked for, and shown */
 	_prepare_menu,
 };
@@ -179,8 +184,10 @@ static struct
 {
 	enum prepare_state state;
 	/* the poses to render, in order, the one rendered, and how many are
-	done (rendered or failed) */
+	done (rendered or failed); those whose map's preparation alone is
+	recorded (their pictures current), after them */
 	long poses[MAXIMUM_MENU_PICTURES];
+	boolean record_only[MAXIMUM_MENU_PICTURES];
 	long count;
 	/* a pose whose map is loaded for its distance field alone, not its
 	picture (world_sdf.h) */
@@ -201,6 +208,17 @@ static struct
 	unsigned long long began, picture_began, phase_began;
 	double phases[NUMBER_OF_PHASES];
 	double totals[NUMBER_OF_PHASES];
+	/* how far the map's preparation being recorded has come (0 to 1;
+	render_enumerate.c), shown as the step it is of its picture */
+	real recorded;
+	/* any picture is made (else the pass prepares the maps alone); the pass
+	ran out of time */
+	boolean made_pictures, overdue;
+	/* (of the count, the pictures: the maps recorded alone after them) */
+	long pictures;
+	/* the poses whose maps were given to the unpacking workers, or refused
+	(prepare_unpack_ahead) */
+	boolean unpack_tried[MAXIMUM_MENU_PICTURES];
 } prepare;
 
 /* ---------- public code */
@@ -370,9 +388,13 @@ static void prepare_next(
 	prepare.captured = FALSE;
 	if (prepare.index >= prepare.count)
 	{
+		/* (every stock map's preparation recorded, or tried) */
+		if (!prepare.overdue)
+			render_prepared_stock_done();
 		platform_log("menu pictures: %ld of %ld made%s in %.2f s (load %.2f, opening %.2f, scene %.2f, objects %.2f, "
-			"frame %.2f, kept %.2f, after %.2f)", prepare.made, prepare.count, prepare.made < prepare.count ?
-			", the rest failed (their originals kept)" : "",
+			"frame %.2f, kept %.2f, after %.2f)", prepare.made, prepare.pictures, prepare.made < prepare.pictures ?
+			", the rest failed (their originals kept)" : prepare.pictures < prepare.count ?
+			", and the other maps prepared" : "",
 			(double)(prepare_now() - prepare.began) / 1e9, prepare.totals[_phase_load], prepare.totals[_phase_opening],
 			prepare.totals[_phase_scene], prepare.totals[_phase_objects], prepare.totals[_phase_frame],
 			prepare.totals[_phase_keep], prepare.totals[_phase_after]);
@@ -393,7 +415,7 @@ static void prepare_next(
 	prepare.ticks = 0;
 	prepare.quiet_ticks = 0;
 	prepare.frames = prepare.picture_frames = 0;
-	if (!prepare.fields_only[prepare.index])
+	if (!prepare.record_only[prepare.index] && !prepare.fields_only[prepare.index])
 		menu_pictures_render_begin(pose);
 	/* (its map's file copied into the cache first, a frame at a time:
 	_prepare_load) */
@@ -410,6 +432,9 @@ static int prepare_precache(
 {
 	real progress;
 
+	/* (one a worker is unpacking waited for: prepare_unpack_ahead) */
+	if (cache_files_map_unpacking(scenario))
+		return 0;
 	if (cache_files_precache_map_loaded(scenario))
 		return 1;
 	if (cache_files_precache_in_progress())
@@ -431,6 +456,30 @@ static int prepare_precache(
 	return 0;
 }
 
+/* the maps of the poses to come unpacked ahead, in the pass's order, on
+the workers (port/linux/src/map_unpack.c: about half the cores, at most 4),
+as many at once as there are workers, so that the next map is whole as the
+pass reaches it; each tried once (a map the budget has no room for, or the
+precache is copying, is the precache's at its turn) */
+static void prepare_unpack_ahead(
+	void)
+{
+	long next, in_flight;
+
+	cache_files_unpack_update();
+	in_flight = cache_files_unpacking_count();
+	for (next = prepare.index; next < prepare.count && in_flight < map_unpack_worker_count(); next++)
+	{
+		char const *scenario = menu_picture_poses[prepare.poses[next]].scenario;
+
+		if (prepare.unpack_tried[next])
+			continue;
+		prepare.unpack_tried[next] = TRUE;
+		if (cache_files_unpack_begin(scenario))
+			in_flight++;
+	}
+}
+
 static void prepare_picture_failed(
 	char const *why)
 {
@@ -439,7 +488,7 @@ static void prepare_picture_failed(
 	if (prepare.fields_only[prepare.index])
 		platform_log("menu pictures: %s %s: its distance field is baked when it is played", menu_picture_poses[pose].map,
 			why);
-	else
+	else if (!prepare.record_only[prepare.index])
 		menu_pictures_render_failed(pose, why);
 	prepare_picture_log(pose, "failed");
 	prepare.index++;
@@ -457,9 +506,37 @@ static void prepare_begin(
 	prepare.count = menu_pictures_wanted(prepare.poses, MAXIMUM_MENU_PICTURES);
 	if (prepare.count < 0)
 		prepare.count = 0;
+	csmemset(prepare.record_only, 0, sizeof(prepare.record_only));
 	csmemset(prepare.fields_only, 0, sizeof(prepare.fields_only));
+	csmemset(prepare.unpack_tried, 0, sizeof(prepare.unpack_tried));
+	prepare.made_pictures = prepare.count > 0;
+	prepare.pictures = prepare.count;
+	/* (and the maps whose preparation is not recorded in this form, each
+	once, their pictures current: render_prepared.c) */
+	if (!render_prepared_stock_recorded())
+	{
+		long wanted[MAXIMUM_MENU_PICTURES];
+		long count = menu_pictures_maps(wanted, MAXIMUM_MENU_PICTURES), index, other;
+
+		for (index = 0; index < count && prepare.count < MAXIMUM_MENU_PICTURES; index++)
+		{
+			for (other = 0; other < prepare.count &&
+				strcasecmp(menu_picture_poses[prepare.poses[other]].map, menu_picture_poses[wanted[index]].map); other++)
+				;
+			if (other < prepare.count)
+				continue;
+			/* (nor one whose record is shipped with the game: its first load
+			plays it, render_prepared.c) */
+			if (render_prepared_shipped_map(menu_picture_map_checksum(menu_picture_poses[wanted[index]].map),
+				menu_picture_poses[wanted[index]].scenario))
+				continue;
+			prepare.record_only[prepare.count] = TRUE;
+			prepare.poses[prepare.count++] = wanted[index];
+		}
+	}
 	/* (display.ambient_occlusion "world": each stock map missing its
-	distance field loaded too, once, where no picture of it is made) */
+	distance field loaded too, once, where neither its picture nor its
+	preparation is made; those that are bake theirs as they load) */
 	if (world_sdf_startup_wanted())
 	{
 		long pose;
@@ -471,8 +548,7 @@ static void prepare_begin(
 
 			for (other = 0; other < prepare.count && strcasecmp(menu_picture_poses[prepare.poses[other]].map, map);
 				other++)
-			{
-			}
+				;
 			if (other == prepare.count && world_sdf_startup_map_wanted(map))
 			{
 				prepare.fields_only[prepare.count] = TRUE;
@@ -485,10 +561,12 @@ static void prepare_begin(
 	platform_log("menu pictures: preparing %ld at %ld times their size", prepare.count, menu_pictures_scale());
 	prepare.began = prepare_now();
 	prepare.index = prepare.done = prepare.made = 0;
+	prepare.overdue = FALSE;
 	csmemset(prepare.totals, 0, sizeof(prepare.totals));
 	for (index = 0; index < prepare.count; index++)
 	{
-		if (!prepare.fields_only[index] && menu_picture_poses[prepare.poses[index]].colour_curve)
+		if (!prepare.record_only[index] && !prepare.fields_only[index] &&
+			menu_picture_poses[prepare.poses[index]].colour_curve)
 			prepare_keep_original(prepare.poses[index]);
 	}
 	config_picture_view(TRUE);
@@ -518,6 +596,8 @@ static void prepare_update(
 		prepare.index : 0]];
 	char line[MAXIMUM_RENDER_LINE];
 
+	if (prepare.state != _prepare_menu)
+		prepare_unpack_ahead();
 	/* (the picture's or the pass's time spent: the pass ended, the main menu
 	shown, the pictures not made keeping their originals; the one being made
 	counted as failed) */
@@ -527,7 +607,8 @@ static void prepare_update(
 		platform_log("menu pictures: out of time: the pass ends, the %ld not made keep their originals",
 			prepare.count - prepare.made);
 		prepare.capture_wanted = FALSE;
-		if (!prepare.fields_only[prepare.index])
+		prepare.overdue = TRUE;
+		if (!prepare.record_only[prepare.index] && !prepare.fields_only[prepare.index])
 			menu_pictures_render_failed(prepare.poses[prepare.index], "took too long");
 		prepare_picture_log(prepare.poses[prepare.index], "failed");
 		prepare.index = prepare.count;
@@ -575,14 +656,17 @@ static void prepare_update(
 			world_sdf_startup_map_loaded();
 			if (prepare.fields_only[prepare.index])
 			{
+				/* (no picture, so not one made) */
 				platform_log("menu pictures: %s loaded for its distance field", picture->map);
 				prepare.index++;
 				prepare.done++;
-				prepare.made++;
 				prepare_next();
 				break;
 			}
-			prepare.state = _prepare_opening;
+			prepare.frames = 0;
+			/* (its preparation recorded first, in its first frame as a mission
+			starts: as the player's first frame of it draws, before any tick) */
+			prepare.state = _prepare_record;
 		}
 		else if (++prepare.frames > PREPARE_LOAD_FRAMES)
 		{
@@ -718,6 +802,24 @@ static void prepare_update(
 			prepare_next();
 		}
 		break;
+	case _prepare_record:
+		/* (its first frame drawn, walked and recorded: render_enumerate.c) */
+		if (render_enumerate_pending(FALSE) && ++prepare.frames <= PREPARE_LOAD_FRAMES)
+		{
+			prepare.line_drawn = TRUE;
+			break;
+		}
+		if (!prepare.record_only[prepare.index])
+		{
+			prepare.state = _prepare_opening;
+			break;
+		}
+		prepare_phase(_phase_frame);
+		prepare_picture_log(prepare.poses[prepare.index], "recorded");
+		prepare.index++;
+		prepare.done++;
+		prepare_next();
+		break;
 	case _prepare_menu:
 		if (main_menu_loaded && prepare_now() - prepare.faded >= PREPARE_SCREEN_FADE)
 		{
@@ -748,14 +850,40 @@ static void prepare_screen(
 		0.85f, /* _prepare_objects */
 		0.9f, /* _prepare_pose */
 		0.95f, /* _prepare_capture */
+		0.3f, /* _prepare_record */
 		1.0f, /* _prepare_menu */
 	};
+	/* (a map recorded alone: its load, then its walk from here to its end) */
+	static real const recording_parts[] = { 0.0f, 0.3f };
 	char caption[96];
+	real part;
 
 	if (prepare.state == _prepare_menu || prepare.count <= 0)
 		return;
-	snprintf(caption, sizeof(caption), "Preparing menu pictures \xB7 %ld of %ld", prepare.done, prepare.count);
-	halo_loading_screen_progress((prepare.done + parts[prepare.state]) / (real)prepare.count, caption);
+	/* (a map's preparation recorded in the frame: the way to the next part,
+	or to the map's end) */
+	if (prepare.state == _prepare_record && prepare.record_only[prepare.index])
+		part = recording_parts[1] + (1.0f - recording_parts[1]) * prepare.recorded;
+	else if (prepare.state == _prepare_record)
+		part = parts[_prepare_opening] * prepare.recorded;
+	else if (prepare.index < prepare.count && prepare.record_only[prepare.index])
+		part = recording_parts[0];
+	else
+		part = parts[prepare.state] + (parts[prepare.state + 1] - parts[prepare.state]) * prepare.recorded;
+	snprintf(caption, sizeof(caption), "%s \xB7 %ld of %ld", prepare.made_pictures ? "Preparing menu pictures" :
+		"Preparing maps", prepare.done, prepare.count);
+	halo_loading_screen_progress((prepare.done + part) / (real)prepare.count, caption);
+}
+
+void menu_pictures_recording(
+	real fraction)
+{
+	if (prepare.state == _prepare_off || prepare.state == _prepare_menu)
+		return;
+	prepare.recorded = fraction;
+	prepare_screen();
+	if (fraction >= 1.0f)
+		prepare.recorded = 0.0f;
 }
 
 int menu_pictures_begin(

@@ -68,7 +68,8 @@ struct hud_hires_embedded
 	int ce_only;
 	/* Stock CE first mip after hardware conversion; resource maps may be modified. */
 	unsigned int ce_width, ce_height, ce_size, ce_crc;
-	const unsigned int *png;
+	/* (its PNG's bytes: an offset in the assets' file, embedded_assets.h) */
+	unsigned int png_offset;
 	unsigned int png_size;
 };
 

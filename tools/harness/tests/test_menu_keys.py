@@ -26,6 +26,10 @@ NEGATIVE_CONTROLS = {
                     "browser"),
     # the browsers' Filters (the left trigger) drawn as L, which presses nothing
     "l-not-left-trigger": ("keyboard", ("analog(k[SDL_SCANCODE_L])", "analog(0)"), "keys"),
+    # the browsers' SEARCH (R3) drawn as /, which presses nothing; / as R3 in every menu
+    "slash-not-r3": ("keyboard", ("if (browser && k[SDL_SCANCODE_SLASH])", "if (FALSE)"), "keys"),
+    "slash-everywhere": ("keyboard", ("if (browser && k[SDL_SCANCODE_SLASH])", "if (k[SDL_SCANCODE_SLASH])"),
+                         "browser"),
     "escape-not-b": ("keyboard", ("k[SDL_SCANCODE_ESCAPE] || k[SDL_SCANCODE_BACKSPACE]", "k[SDL_SCANCODE_BACKSPACE]"),
                      "keys"),
     # the code before #541: the Back button only as X1 held, which the menus' pointer never lets through
@@ -71,7 +75,7 @@ def generated(fault=None):
             keyboard = mutated(keyboard, *change)
     names = set(re.findall(r"SDL_SCANCODE_\w+", keyboard + function(inputs, "typing_gamepad")))
     names |= {"SDL_SCANCODE_RETURN", "SDL_SCANCODE_ESCAPE", "SDL_SCANCODE_E", "SDL_SCANCODE_F", "SDL_SCANCODE_Q",
-              "SDL_SCANCODE_L", "SDL_SCANCODE_F1"}
+              "SDL_SCANCODE_L", "SDL_SCANCODE_F1", "SDL_SCANCODE_SLASH"}
     config = "\n".join(re.findall(r"^#define XINPUT_GAMEPAD_\w+ [^\n]+", read("port/include/xdk/xdk_xbox.h"), re.M))
     config += "\nenum {" + ", ".join(sorted(names)) + ", TEST_SCANCODE_COUNT};\n"
     config += enum_with(widgets, "_icon_a_button") + "\n"

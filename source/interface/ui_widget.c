@@ -1418,8 +1418,9 @@ boolean hud_key_prompt_draw_key(
 	rectangle2d *bounds,
 	rectangle2d *cursor,
 	pixel32 color);
-short hud_key_prompt_cap_widening(
-	short name_width);
+short hud_key_prompt_cap_advance(
+	short name_left,
+	short name_right);
 int halo_keyboard_prompts(
 	void);
 /* port: a button's word in a message as its icon's name
@@ -1441,7 +1442,7 @@ static boolean ui_widget_port_key_legend_text(
 	long length);
 static short ui_widget_port_key_legend_shift(
 	struct widget_instance *label);
-static short ui_widget_port_key_label_widening(
+static short ui_widget_port_key_label_cap_extra(
 	struct widget_instance *label);
 static boolean ui_widget_port_key_icon_hidden(
 	struct widget_instance *widget);
@@ -4375,8 +4376,9 @@ browser as Tab (its sort: halo_keyboard_browser_keys_active), Y as F (their
 favorite), LB and RB (the white and black buttons, Settings' and the
 browsers' tabs) as Q and E, the right trigger (Multiplayer's and the
 browsers' refresh) as R, the left trigger (the browsers' Filters) as L, back
-as F1; NULL for the others (the D-pad, which the arrow keys press, Start and
-the sticks), drawn as the controller's */
+as F1, in a server browser R3 (its SEARCH) as /; NULL for the others (the
+D-pad, which the arrow keys press, Start and the sticks), drawn as the
+controller's */
 static char const *ui_widget_port_menu_key(
 	short icon_type)
 {
@@ -4400,6 +4402,8 @@ static char const *ui_widget_port_menu_key(
 		return "Q";
 	case _icon_back_button:
 		return "F1";
+	case _icon_right_thumb:
+		return halo_keyboard_browser_keys_active() ? "/" : NULL;
 	default:
 		return NULL;
 	}
@@ -5937,18 +5941,18 @@ static void widget_instance_render_text_box(
 			ui_widget_port_key_label_text(widget, TRUE, named, NUMBEROF(named)))
 		{
 			rectangle2d text_bounds, cursor_bounds;
-			short end, widening;
+			short end, extra;
 
-			widening = ui_widget_port_key_label_widening(widget);
+			extra = ui_widget_port_key_label_cap_extra(widget);
 			draw_string_set_draw_mode(font_index, NONE, justification, 0, &color);
 			draw_string_set_indents(0, 0);
 			draw_unicode_string_compute_bounds(&bounds, *text, &text_bounds, &cursor_bounds);
 			end = text_bounds.x1;
 			draw_unicode_string_compute_bounds(&bounds, named, &text_bounds, &cursor_bounds);
-			/* (and the cap's edges about the name, a narrow name's cap
-			widened) */
-			if (end != SHORT_MIN && text_bounds.x1 + widening > end - 6)
-				bounds.x0 = (short)(bounds.x0 - (text_bounds.x1 + widening + 6 - end));
+			/* (and the cap about the name wider than the name, and room
+			before the panel's edge) */
+			if (end != SHORT_MIN && text_bounds.x1 + extra + 2 > end)
+				bounds.x0 = (short)(bounds.x0 - (text_bounds.x1 + extra + 2 - end));
 		}
 		draw_string_and_hack_in_icons(&bounds, &clip, NULL, 0, keyed, FALSE);
 	}
@@ -6791,17 +6795,22 @@ static boolean ui_widget_port_key_legend_text(
 	return TRUE;
 }
 
-/* the width of words in a text box's font, as one line from 0; 0 for none */
-static short ui_widget_port_text_width(
+/* where words in a text box's font span, their letters' glyphs, as one line
+from 0 (left and right); FALSE (both 0) for none */
+static boolean ui_widget_port_text_span(
 	struct widget_instance *label,
-	wchar_t const *text)
+	wchar_t const *text,
+	short *left,
+	short *right)
 {
 	struct ui_widget_definition *definition = ui_widget_definition_get(label->definition_tag_index);
 	real_argb_color color = definition->text_color;
 	rectangle2d bounds, text_bounds, cursor_bounds;
 
+	*left = 0;
+	*right = 0;
 	if (!text || !*text || definition->text_font.index == NONE)
-		return 0;
+		return FALSE;
 	bounds.x0 = 0;
 	bounds.y0 = 0;
 	bounds.x1 = SHORT_MAX;
@@ -6809,25 +6818,43 @@ static short ui_widget_port_text_width(
 	draw_string_set_draw_mode(definition->text_font.index, NONE, _text_justification_left, 0, &color);
 	draw_string_set_indents(0, 0);
 	draw_unicode_string_compute_bounds(&bounds, text, &text_bounds, &cursor_bounds);
+	if (text_bounds.x1 == SHORT_MIN)
+		return FALSE;
+	*left = text_bounds.x0;
+	*right = text_bounds.x1;
 
-	return text_bounds.x1 == SHORT_MIN ? 0 : text_bounds.x1;
+	return TRUE;
 }
 
-/* how much wider a narrow key's cap is drawn than its name and edges
-(hud_key_prompts.c's key_cap_draw), for the key pictured in a label's gap
-(ui_widget_port_key_label_text). Leaves the draw mode the measuring's: the
-caller sets its own again */
-static short ui_widget_port_key_label_widening(
+/* the width of words in a text box's font, as one line from 0; 0 for none */
+static short ui_widget_port_text_width(
+	struct widget_instance *label,
+	wchar_t const *text)
+{
+	short left, right;
+
+	ui_widget_port_text_span(label, text, &left, &right);
+
+	return right;
+}
+
+/* how much further than its name the key pictured in a label's gap
+(ui_widget_port_key_label_text) takes the text, drawn in its cap
+(hud_key_prompts.c's key_cap_draw). Leaves the draw mode the measuring's:
+the caller sets its own again */
+static short ui_widget_port_key_label_cap_extra(
 	struct widget_instance *label)
 {
 	struct widget_instance *icon = label->parent ? ui_widget_port_label_key_icon(label->parent, label, 0) : NULL;
 	wchar_t name[16];
+	short left, right;
 
 	if (!icon || !ui_widget_port_key_icon_key(icon))
 		return 0;
 	ascii_to_wide(ui_widget_port_key_icon_key(icon), name, sizeof(name));
+	ui_widget_port_text_span(label, name, &left, &right);
 
-	return hud_key_prompt_cap_widening(ui_widget_port_text_width(label, name));
+	return (short)(hud_key_prompt_cap_advance(left, right) - right);
 }
 
 /* how far right of its words' box a legend's key is drawn: the legends of
@@ -6839,6 +6866,7 @@ static short ui_widget_port_key_legend_shift(
 {
 	struct widget_instance *icon;
 	wchar_t name[256];
+	wchar_t key[16];
 	short old_left = SHORT_MAX, old_right = SHORT_MIN;
 	short x = 0, start, label_x = 0;
 	short previous_end = SHORT_MIN;
@@ -6846,7 +6874,7 @@ static short ui_widget_port_key_legend_shift(
 	for (icon = label->parent ? label->parent->child : NULL; icon; icon = icon->next)
 	{
 		struct widget_instance *words;
-		short icon_left, words_left, words_width, name_width;
+		short icon_left, words_left, words_width, name_left, name_right;
 
 		if (!ui_widget_port_key_icon_key(icon))
 			continue;
@@ -6861,11 +6889,11 @@ static short ui_widget_port_key_legend_shift(
 			x = (short)(x + MAX(icon_left - previous_end, 4));
 		if (words == label)
 			label_x = x;
-		/* (the key's name and the words, and the cap's edges about the
-		name, a narrow name's cap widened: hud_key_prompts.c's
-		key_cap_draw) */
-		name_width = ui_widget_port_text_width(words, name);
-		x = (short)(x + name_width + 4 + hud_key_prompt_cap_widening(name_width));
+		/* (the key's cap, as hud_key_prompts.c's key_cap_draw lays it out
+		about its name, then the words) */
+		ascii_to_wide(ui_widget_port_key_icon_key(icon), key, sizeof(key));
+		ui_widget_port_text_span(words, key, &name_left, &name_right);
+		x = (short)(x + hud_key_prompt_cap_advance(name_left, name_right) + words_width);
 		previous_end = (short)(words_left + words_width);
 		old_left = MIN(old_left, icon_left);
 		old_right = MAX(old_right, previous_end);

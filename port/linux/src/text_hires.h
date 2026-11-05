@@ -18,7 +18,8 @@ struct text_hires_embedded
 {
 	const char *tag;
 	const char *file;
-	const unsigned int *data;
+	/* (its bytes: an offset in the assets' file, embedded_assets.h) */
+	unsigned int data_offset;
 	unsigned int size;
 };
 

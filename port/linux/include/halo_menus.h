@@ -149,6 +149,9 @@ struct halo_menus
 /* the menus, read from the files (once; the same each call after); NULL if
 there are none, or a file has an error (logged) */
 struct halo_menus const *halo_menus_load(void);
+/* the files read on a thread of their own, from now, for halo_menus_load
+(which waits for it) */
+void halo_menus_read_ahead(void);
 /* text as UTF-16, its terminator included, "\n" written as the game's line
 breaks ("\r\n"): the number of characters written (at most capacity) */
 long halo_menus_utf16(char const *utf8, unsigned short *out, long capacity);

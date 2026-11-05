@@ -14,7 +14,7 @@ void passenger_camera_clamp_facing(short local_player_index, real_euler_angles2d
 The offset says whether it moved the point to the shot (which, projected
 through the drawn view, needs no lowered reticle's offset besides). */
 boolean passenger_camera_reticle_begin(short local_player_index, long weapon_index);
-boolean passenger_camera_reticle_offset(point2d *point);
+boolean passenger_camera_reticle_offset(point2d *point, real reticle_scale);
 void passenger_camera_reticle_end(void);
 
 #endif

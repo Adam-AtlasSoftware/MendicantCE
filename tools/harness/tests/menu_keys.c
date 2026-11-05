@@ -74,6 +74,7 @@ static int scancode(char const *name)
 		{ "Tab", SDL_SCANCODE_TAB },
 		{ "R", SDL_SCANCODE_R },
 		{ "L", SDL_SCANCODE_L },
+		{ "/", SDL_SCANCODE_SLASH },
 	};
 	size_t index;
 
@@ -100,6 +101,7 @@ static boolean pressed(XINPUT_GAMEPAD const *pad, short icon)
 	case _icon_left_trigger: return pad->bAnalogButtons[XINPUT_GAMEPAD_LEFT_TRIGGER] != 0;
 	case _icon_back_button: return (pad->wButtons & XINPUT_GAMEPAD_BACK) != 0;
 	case _icon_start_button: return (pad->wButtons & XINPUT_GAMEPAD_START) != 0;
+	case _icon_right_thumb: return (pad->wButtons & XINPUT_GAMEPAD_RIGHT_THUMB) != 0;
 	default: return FALSE;
 	}
 }
@@ -167,6 +169,17 @@ int main(int argc, char **argv)
 				pressed(&pad, _icon_black_button), pressed(&pad, _icon_x_button));
 			CHECK(!strcmp(ui_widget_port_menu_key(_icon_x_button), shown ? "Tab" : "E"),
 				"X drawn as %s", ui_widget_port_menu_key(_icon_x_button));
+			/* (/ is R3 in a browser alone, its SEARCH: elsewhere it is no
+			button, and R3 is drawn as the controller's) */
+			memset(&input, 0, sizeof(input));
+			memset(&pad, 0, sizeof(pad));
+			input.menus = TRUE;
+			input.keys[SDL_SCANCODE_SLASH] = 1;
+			keyboard_gamepad(&input, &pad);
+			CHECK(pressed(&pad, _icon_right_thumb) == shown, "/ in %s presses R3 %d",
+				shown ? "a browser" : "the other menus", pressed(&pad, _icon_right_thumb));
+			CHECK(!ui_widget_port_menu_key(_icon_right_thumb) == !shown, "R3 drawn as %s",
+				ui_widget_port_menu_key(_icon_right_thumb) ? ui_widget_port_menu_key(_icon_right_thumb) : "R3");
 		}
 		return 0;
 	}

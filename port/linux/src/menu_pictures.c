@@ -28,8 +28,8 @@ failure before it starts, and as rendered when it ends); and until it is
 ready. A pose or map changed, a larger
 screen (at the next start), its picture's file gone or cut short, or this
 file's version renders it again.
-Nothing is rendered in runs nobody watches (tests: debug.hidden_window,
-debug.exit_after...), in VR, or with display.menu_pictures off.
+Nothing is rendered in runs nobody watches (tests: menu_pictures_quiet_run), in
+VR, or with display.menu_pictures off.
 */
 
 #include "menu_pictures.h"
@@ -863,15 +863,18 @@ static int picture_enabled(void)
 		!config_boolean("debug.null_renderer") && !halo_server_mode();
 }
 
-/* runs nobody watches (tests), and those whose first screen is not the
+/* runs nobody watches (tests: timed, scripted, driven through the script
+console, recorded or measured), and those whose first screen is not the
 main menu's: nothing rendered */
-static int picture_quiet_run(void)
+int menu_pictures_quiet_run(void)
 {
 	if (config_boolean("debug.menu_pictures"))
 		return 0;
 	return config_boolean("debug.hidden_window") || config_real("debug.exit_after") > 0.0 ||
 		config_string("debug.network_test")[0] || config_string("debug.test_input")[0] ||
-		config_boolean("debug.fixed_step") || config_string("debug.menu_open")[0]
+		config_boolean("debug.fixed_step") || config_string("debug.menu_open")[0] ||
+		config_boolean("debug.telnet_console") || config_integer("debug.screenshot_every") > 0 ||
+		config_boolean("debug.load_trace")
 #ifdef HALO_VR
 		|| halo_vr_running()
 #endif
@@ -1004,9 +1007,33 @@ long menu_pictures_wanted(
 		picture_check(pose);
 		decisions[pose] = menu_pictures.pictures[pose].decision;
 	}
-	if (picture_quiet_run())
+	if (menu_pictures_quiet_run())
 		return 0;
 	return menu_picture_order(menu_picture_poses, picture_count(), decisions, poses, maximum);
+}
+
+long menu_pictures_maps(
+	long *poses,
+	long maximum)
+{
+	long pose, count = 0, other, index;
+
+	if (!menu_pictures.started || !picture_enabled() || menu_pictures_quiet_run())
+		return 0;
+	for (pose = 0; pose < picture_count() && count < maximum; pose++)
+	{
+		struct menu_picture_pose const *picture = &menu_picture_poses[pose];
+		int made_for = 0;
+
+		for (index = 0; index < picture->checksum_count && index < MAXIMUM_MENU_PICTURE_CHECKSUMS; index++)
+			made_for |= menu_pictures.pictures[pose].map_checksum && picture->checksums[index] ==
+				menu_pictures.pictures[pose].map_checksum;
+		for (other = 0; other < count && strcmp(menu_picture_poses[poses[other]].map, picture->map); other++)
+			;
+		if (made_for && other == count)
+			poses[count++] = pose;
+	}
+	return count;
 }
 
 long menu_pictures_scale(void)

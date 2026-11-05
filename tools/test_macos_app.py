@@ -77,7 +77,7 @@ def test_entitlements_are_the_narrowest():
 def test_app_contents():
     contents = APP / "Contents"
     for path in ("MacOS/halo", "Frameworks/libSDL3.0.dylib", "Resources/openh1-icon.icns",
-                 "Resources/brokers.txt", "Info.plist"):
+                 "Resources/brokers.txt", "Resources/prepared.records", "Resources/openh1.assets", "Info.plist"):
         assert (contents / path).is_file(), path
     with open(contents / "Info.plist", "rb") as file:
         plist = plistlib.load(file)

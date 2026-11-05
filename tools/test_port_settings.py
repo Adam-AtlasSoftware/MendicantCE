@@ -101,8 +101,8 @@ def _main_menu_items():
 
 def test_main_menu_items():
     """the main menu is CAMPAIGN, MULTIPLAYER, SETTINGS and QUIT (the
-    profiles and the mods are Settings' PROFILES tab's), a row apart with no
-    gap"""
+    profiles and the mods are Settings' PROFILES and MODS tabs'), a row apart
+    with no gap"""
     items = _main_menu_items()
     assert [name for name, _, _ in items] == ["load_camp", "multiplayer", "settings", "quit_game"]
     assert {after[2] - before[2] for before, after in zip(items, items[1:])} == {36}
@@ -110,12 +110,71 @@ def test_main_menu_items():
     assert items[3][1:] == port_settings.QUIT_ITEM_PLACE
 
 
-def test_profiles_tab_opens_profiles_and_mods():
+def test_profiles_tab_opens_profiles():
     """the PROFILES tab opens the profile manager (the main menu's Profile's
-    was) and the Mods screen, beside its own rows"""
+    was), beside its own rows"""
     page = PAGES["profile_settings"]
     assert page["tab"] == "PROFILES"
     links = {_key(entry): entry[2] for entry in page["rows"] if entry[0] != SECTION and not entry[1]}
     assert links["profiles"] == port_settings.PROFILE_MANAGER
-    assert links["mods"] == f"{port_settings.MODS}/mods_screen"
     assert {"name", "color", "create_profile", "about"} <= set(links)
+    assert "mods" not in links
+
+
+def test_mods_tab():
+    """MODS is a tab of its own (issue 598), the last, after PROFILES: it opens
+    the Mods screen, and says where mods go, in a game too (MANAGE MODS is the
+    main menu's)"""
+    assert port_settings.SETTINGS_TAB_PAGES[-2:] == ["profile_settings", "mods_settings"]
+    page = PAGES["mods_settings"]
+    assert page["tab"] == "MODS"
+    links = {_key(entry): entry[2] for entry in page["rows"] if entry[0] != SECTION and not entry[1]}
+    assert links["mods"] == f"{port_settings.MODS}/mods_screen"
+    assert "mods_folder" in links
+    functions = (Path(__file__).resolve().parent.parent / "port/linux/game/menu_functions.c").read_text()
+    hidden = functions[functions.index("settings_in_game_hidden[] ="):][:400]
+    assert '"op_mods"' in hidden and '"op_mods_folder"' not in hidden
+
+
+def _engine_tabs():
+    """menu_functions.c's settings_tabs: each tab's folder and screen, in order"""
+    functions = (Path(__file__).resolve().parent.parent / "port/linux/game/menu_functions.c").read_text()
+    table = functions[functions.index("} const settings_tabs[] ="):]
+    return re.findall(r'\{ "(\w+)", "(\w+)" \}', table[:table.index("};")])
+
+
+def test_engine_tabs_are_the_generators():
+    """the tabs Q and E, LB and RB step through (and a click opens) are the
+    generator's, in its order"""
+    assert _engine_tabs() == [(folder, PAGES[folder]["screen"]) for folder in port_settings.SETTINGS_TAB_PAGES]
+
+
+def _tab_problems(places, names):
+    """the tabs that are not in the row (from the first's place to RB's
+    prompt), not apart, or too narrow for their names and room either side"""
+    problems = []
+    for index, ((x, width), name) in enumerate(zip(places, names)):
+        if width < port_settings.tab_name_width(name) + 2 * 6:
+            problems.append(f"{name}: {width} wide, its name {port_settings.tab_name_width(name):.1f}")
+        if index and x < places[index - 1][0] + places[index - 1][1] + port_settings.SETTINGS_TAB_GAP:
+            problems.append(f"{name} at {x} reaches the tab before it")
+    if places[0][0] < port_settings.SETTINGS_TABS_X or sum(places[-1]) > port_settings.SETTINGS_TABS_RIGHT:
+        problems.append(f"the tabs {places[0][0]} to {sum(places[-1])} are out of their row")
+    return problems
+
+
+def test_settings_tabs_fit_their_names():
+    """at 4:3, where the row is narrowest, every tab holds its name with room
+    either side, apart from the next, between LB's and RB's prompts"""
+    names = [PAGES[folder]["tab"] for folder in port_settings.SETTINGS_TAB_PAGES]
+    assert _tab_problems(port_settings.settings_tab_places(), names) == []
+
+
+def test_tab_check_sees_a_tab_too_narrow():
+    """the check sees seven tabs of the old six's width, and tabs laid over each other"""
+    names = [PAGES[folder]["tab"] for folder in port_settings.SETTINGS_TAB_PAGES]
+    step = (port_settings.SETTINGS_TABS_RIGHT - port_settings.SETTINGS_TABS_X) // len(names)
+    even = [(port_settings.SETTINGS_TABS_X + index * step, step - 2) for index in range(len(names))]
+    assert any(name in problem for problem in _tab_problems(even, names) for name in ("INTERFACE", "CONTROLS"))
+    places = port_settings.settings_tab_places()
+    assert _tab_problems([places[0], (places[0][0] + 10, places[1][1])] + places[2:], names)

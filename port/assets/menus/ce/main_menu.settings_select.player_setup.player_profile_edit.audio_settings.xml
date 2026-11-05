@@ -35,43 +35,49 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/button_ok" x="358" y="1"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/button_cancel" x="488" y="1"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/tab_video_settings" type="text" controller="1" width="86" height="22" flags="keep_ends" wide="-106 0" bitmap="main_menu/settings/tab" string_list="main_menu/settings/tab_names" color="#FF2896FF" align="center" text_y="2" font="ui\small_ui">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/tab_video_settings" type="text" controller="1" width="59" height="22" flags="keep_ends" wide="-106 0" bitmap="main_menu/settings/tab" string_list="main_menu/settings/tab_names" color="#FF2896FF" align="center" text_y="2" font="ui\small_ui">
 		<on event="a" run="port settings tab"/>
 		<on event="start" run="port settings tab"/>
 		<on event="left_mouse" run="mouse emit accept event"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/tab_audio_settings" type="text" controller="1" width="86" height="22" flags="keep_ends" wide="-64 0" bitmap="main_menu/settings/tab_current" string_list="main_menu/settings/tab_names" string_index="1" color="#FFFFFFFF" align="center" text_y="2" font="ui\small_ui">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/tab_audio_settings" type="text" controller="1" width="61" height="22" flags="keep_ends" wide="-71 0" bitmap="main_menu/settings/tab_current" string_list="main_menu/settings/tab_names" string_index="1" color="#FFFFFFFF" align="center" text_y="2" font="ui\small_ui">
 		<on event="a" run="port settings tab"/>
 		<on event="start" run="port settings tab"/>
 		<on event="left_mouse" run="mouse emit accept event"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/tab_mouse_settings" type="text" controller="1" width="86" height="22" flags="keep_ends" wide="-21 0" bitmap="main_menu/settings/tab" string_list="main_menu/settings/tab_names" string_index="2" color="#FF2896FF" align="center" text_y="2" font="ui\small_ui">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/tab_mouse_settings" type="text" controller="1" width="92" height="22" flags="keep_ends" wide="-35 0" bitmap="main_menu/settings/tab" string_list="main_menu/settings/tab_names" string_index="2" color="#FF2896FF" align="center" text_y="2" font="ui\small_ui">
 		<on event="a" run="port settings tab"/>
 		<on event="start" run="port settings tab"/>
 		<on event="left_mouse" run="mouse emit accept event"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/tab_network_settings" type="text" controller="1" width="86" height="22" flags="keep_ends" wide="21 0" bitmap="main_menu/settings/tab" string_list="main_menu/settings/tab_names" string_index="3" color="#FF2896FF" align="center" text_y="2" font="ui\small_ui">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/tab_network_settings" type="text" controller="1" width="67" height="22" flags="keep_ends" bitmap="main_menu/settings/tab" string_list="main_menu/settings/tab_names" string_index="3" color="#FF2896FF" align="center" text_y="2" font="ui\small_ui">
 		<on event="a" run="port settings tab"/>
 		<on event="start" run="port settings tab"/>
 		<on event="left_mouse" run="mouse emit accept event"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/tab_interface_settings" type="text" controller="1" width="86" height="22" flags="keep_ends" wide="64 0" bitmap="main_menu/settings/tab" string_list="main_menu/settings/tab_names" string_index="4" color="#FF2896FF" align="center" text_y="2" font="ui\small_ui">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/tab_interface_settings" type="text" controller="1" width="95" height="22" flags="keep_ends" wide="35 0" bitmap="main_menu/settings/tab" string_list="main_menu/settings/tab_names" string_index="4" color="#FF2896FF" align="center" text_y="2" font="ui\small_ui">
 		<on event="a" run="port settings tab"/>
 		<on event="start" run="port settings tab"/>
 		<on event="left_mouse" run="mouse emit accept event"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/tab_profile_settings" type="text" controller="1" width="86" height="22" flags="keep_ends" wide="106 0" bitmap="main_menu/settings/tab" string_list="main_menu/settings/tab_names" string_index="5" color="#FF2896FF" align="center" text_y="2" font="ui\small_ui">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/tab_profile_settings" type="text" controller="1" width="83" height="22" flags="keep_ends" wide="71 0" bitmap="main_menu/settings/tab" string_list="main_menu/settings/tab_names" string_index="5" color="#FF2896FF" align="center" text_y="2" font="ui\small_ui">
+		<on event="a" run="port settings tab"/>
+		<on event="start" run="port settings tab"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/tab_mods_settings" type="text" controller="1" width="57" height="22" flags="keep_ends" wide="106 0" bitmap="main_menu/settings/tab" string_list="main_menu/settings/tab_names" string_index="6" color="#FF2896FF" align="center" text_y="2" font="ui\small_ui">
 		<on event="a" run="port settings tab"/>
 		<on event="start" run="port settings tab"/>
 		<on event="left_mouse" run="mouse emit accept event"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/tabs" type="column_list" width="640" height="22" flags="pass_unhandled_to_focused_child left_right_tabs_items">
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/tab_video_settings" x="56"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/tab_audio_settings" x="144"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/tab_mouse_settings" x="232"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/tab_network_settings" x="320"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/tab_interface_settings" x="408"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/tab_profile_settings" x="496"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/tab_audio_settings" x="117"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/tab_mouse_settings" x="180"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/tab_network_settings" x="274"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/tab_interface_settings" x="343"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/tab_profile_settings" x="440"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/tab_mods_settings" x="525"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/button_defaults" type="text" width="128" height="24" bitmap="bitmaps/text_button_background" string_list="strings/common_button_captions" string_index="3" font="ui\small_ui" color="#FFFFFFFF" align="center" text_y="2" wide="-106 0">
 		<on event="a" run="port settings defaults"/>
@@ -222,7 +228,7 @@
 		<string text="The sound and its devices, 3D audio, the volumes and voice chat."/>
 		<string text=""/>
 		<string text="Where the game's sound and the other players' voices play."/>
-		<string text="Where the sounds around you come from. Headphones places each ahead, behind, above or below you, as the Xbox's 3D audio did; Speakers pans them left and right. Auto chooses by what you are listening on, and changes when you plug headphones in or take them out."/>
+		<string text="Where the sounds around you come from. Auto and Headphones place each ahead, behind, above or below you, as the Xbox's 3D audio did on speakers and headphones alike; Speakers pans them left and right."/>
 		<string text="Echoes sounds as the place you are in would, and muffles those behind walls, as the Xbox did. It costs a little of the processor."/>
 		<string text="How sounds are converted to your speakers' rate. Clean is clear; Classic is brighter but harsher, and costs a little less."/>
 		<string text="Turns all sound off or on, at once."/>

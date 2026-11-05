@@ -27,6 +27,10 @@ void panini_window_end(void);
 the projection), by which the reticle (hud_draw.c) and the first-person
 weapon's projection (view_fov.c) are scaled to keep their size there */
 real panini_center_scale(void);
+/* that magnification were the window's view widened by this factor (its
+tangents' across and up: the view unzoomed of a zoomed one, the reticle's
+size kept through the zoom, view_fov.c); panini_center_scale's at 1 */
+real panini_center_scale_widened(real widening);
 
 /* the projection's strength (display.panini's), 0 while it is off (and in
 the VR build): it allows the wider fields of view (view_fov.c's, as

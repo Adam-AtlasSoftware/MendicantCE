@@ -3791,6 +3791,12 @@ void main_loop(
 			{
 				main_queue_map_private();
 			}
+			/* port: else the maps copied into the cache ahead
+			(port/linux/game/map_cache_prefill.c) */
+			else
+			{
+				map_cache_prefill_update();
+			}
 		}
 		else if (main_globals.reset_map)
 		{

@@ -387,6 +387,25 @@ static void center(void)
 		screen.y);
 	panini_window_end();
 	CHECK(panini_center_scale() == 1.0f, "after the window");
+	CHECK(panini_center_scale_widened(2.0f) == 1.0f, "widened, after the window");
+	/* (#594) a zoomed view's window widened back to the unzoomed view has the
+	unzoomed view's magnification, which the reticle keeps through the zoom;
+	at 1 the window's own */
+	{
+		float zx, zy;
+
+		view_tangents(120.0, 16.0 / 9.0, &tx, &ty);
+		zx = tx * 0.25f;
+		zy = ty * 0.25f;
+		window_set(zx, zy, 0.0f, 0.0f, 0, 0, 852, 480);
+		panini_window_begin(0, 0, &camera, &frustum);
+		CHECK(panini_center_scale() < 1.1f, "zoomed: %g", panini_center_scale());
+		CHECK(panini_center_scale_widened(1.0f) == panini_center_scale(), "widened by 1: %g",
+			panini_center_scale_widened(1.0f));
+		CHECK(near(panini_center_scale_widened(4.0f), 1.5f, 1.0e-3f), "widened to 120 degrees: %g",
+			panini_center_scale_widened(4.0f));
+		panini_window_end();
+	}
 }
 
 /* off (the default), no strength, a mirror, a target not the screen, another

@@ -1588,17 +1588,6 @@ static int sdf_tried(struct sdf_key const *key)
 	return 0;
 }
 
-/* runs nobody watches (tests), and those whose first screen is not the
-main menu's: no pass (menu_pictures.c's picture_quiet_run) */
-static int sdf_quiet_run(void)
-{
-	if (config_boolean("debug.menu_pictures"))
-		return 0;
-	return config_boolean("debug.hidden_window") || config_real("debug.exit_after") > 0.0 ||
-		config_string("debug.network_test")[0] || config_string("debug.test_input")[0] ||
-		config_boolean("debug.fixed_step") || config_string("debug.menu_open")[0];
-}
-
 void world_sdf_startup_map_loaded(void)
 {
 	struct sdf_key key;
@@ -1640,7 +1629,7 @@ int world_sdf_startup_wanted(void)
 	if (world_sdf.startup_looked)
 		return world_sdf.startup_wanted;
 	world_sdf.startup_looked = 1;
-	if (sdf_off() || sdf_quiet_run())
+	if (sdf_off() || menu_pictures_quiet_run())
 		return 0;
 	for (pose = 0; pose < menu_picture_pose_count && !world_sdf.startup_wanted; pose++)
 	{

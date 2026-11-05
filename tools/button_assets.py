@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Makes high-res textures of the menus' controller button icons
-(port/assets/buttons/*.png) from hand-drawn SVG redraws of them
-(port/assets/buttons/svg):
+"""Makes high-res textures of the menus' controller button icons, and of the
+in-game menus' highlight (port/assets/buttons/*.png), from hand-drawn SVG
+redraws of them (port/assets/buttons/svg):
 
     python tools/button_assets.py layout --map assets/maps/ui.map
-    python tools/button_assets.py build
+    python tools/button_assets.py build [--only menu_bkds__1 ...]
     python tools/button_assets.py check --map assets/maps/ui.map --out /tmp/button_check
 
 The icons beside the menus' key labels (A SELECT, B BACK, X DELETE, Y CREATE
@@ -45,6 +45,14 @@ layout: reads each icon's bitmap from the map (its size, format and the CRC
 build: renders the redraws as buttons.json places them into
     port/assets/buttons/*.png (committed; the builds embed them:
     tools/embed_assets.py).
+The pause menus of every map (the campaign's and multiplayer's) mark the row
+chosen with the second frame of ui\\shell\\bitmaps\\menu_bkds, a rounded
+box of 256x32 texels drawn at one texel to a unit of the 480 lines: at 4K
+each texel covered four and a half pixels, its corners in steps. Its
+redraw (MENU_BITMAPS) is drawn in the same texels, at 8x, so it stands for
+that frame wherever a map has it, as the icons do; its first frame is
+empty, and stays the map's.
+
 check: compares each PNG, reduced to its bitmap's size, with the map's
     bitmap and writes side-by-side images into --out.
 
@@ -87,6 +95,12 @@ BUTTONS = {
 # sequence of its sprite (on the sheet's first bitmap)
 MESSAGE_ICONS = "ui\\hud\\bitmaps\\hud_msg_icons_sm"
 MESSAGE_BUTTONS = {0: "a_butn.svg", 1: "b_butn.svg", 2: "x_butn.svg", 3: "y_butn.svg"}
+
+# the in-game menus' pictures that are not buttons, each drawn in its map
+# bitmap's texels (place [1, 0, 0]): the pause menus' highlight, the second
+# frame of menu_bkds (every game map has the same, this CRC; ui.map has none)
+MENU_BITMAPS = [dict(name="menu_bkds__1", tag=BITMAPS + "menu_bkds", bitmap=1, width=256, height=32,
+                     format="dxt3", scale=SCALE, crc=93885396, svg="menu_bkds__1.svg", place=[1, 0, 0])]
 
 # Standalone Xbox faces for gameplay prompts, using the existing redraws.
 HUD_BUTTONS = [dict(name=f"{button}_butn__0", tag=BITMAPS + f"{button}_butn",
@@ -380,16 +394,18 @@ def layout(arguments) -> None:
     classic_buttons = [dict(entry) for entry in CLASSIC_BUTTONS]
     for entry, sprite in zip(classic_buttons, sprites):
         entry["letter"] = [round(n / sprite["place"][0], 4) for n in sprite["letter"]]
-    LIST.write_text(json.dumps({"assets": entries + HUD_BUTTONS + classic_buttons + GEM_BUTTONS + CONTROL_BUTTONS}, indent=1) + "\n")
+    LIST.write_text(json.dumps({"assets": entries + HUD_BUTTONS + classic_buttons + GEM_BUTTONS + CONTROL_BUTTONS + MENU_BITMAPS}, indent=1) + "\n")
 
 
 def build(arguments) -> None:
     description = json.loads(LIST.read_text())
     names = {f"{entry['name']}.png" for entry in description["assets"]}
     for stale in ASSETS.glob("*.png"):
-        if stale.name not in names:
+        if stale.name not in names and not arguments.only:
             stale.unlink()
     for entry in description["assets"]:
+        if arguments.only and entry["name"] not in arguments.only:
+            continue
         if "control_cell" in entry:
             image = gameplay_control(entry)
         elif "source_png" in entry:
@@ -452,7 +468,8 @@ def main() -> None:
     commands = parser.add_subparsers(dest="command", required=True)
     command = commands.add_parser("layout")
     command.add_argument("--map", required=True)
-    commands.add_parser("build")
+    command = commands.add_parser("build")
+    command.add_argument("--only", nargs="+", help="these textures alone (their names), the rest left as they are")
     command = commands.add_parser("check")
     command.add_argument("--map", required=True)
     command.add_argument("--out", required=True)

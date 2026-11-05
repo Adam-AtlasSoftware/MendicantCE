@@ -32,7 +32,7 @@ def test_loading_embedding(tmp_path, monkeypatch, present):
         asset.write_bytes(payload)
     assert (embed_assets.LOADING_PICTURE in embed_assets.hud_asset_inputs()) == present
     output = tmp_path / "embedded.c"
-    monkeypatch.setattr(sys, "argv", ["embed_assets.py", str(output)])
+    monkeypatch.setattr(sys, "argv", ["embed_assets.py", str(output), str(tmp_path / "openh1.assets")])
     embed_assets.main()
     code = output.read_text()
     assert f"platform_loading_picture_size = {len(payload) if present else 0};" in code
@@ -47,7 +47,7 @@ def test_loading_embedding(tmp_path, monkeypatch, present):
         pytest.skip("needs a C preprocessor")
     # Use the generated declarations after preprocessing; a source-text
     # search alone misses guard mistakes.
-    for name in ("hud_hires.h", "text_hires.h", "menu_files.h", "menu_pictures.h"):
+    for name in ("hud_hires.h", "text_hires.h", "menu_files.h", "menu_pictures.h", "embedded_assets.h"):
         (tmp_path / name).write_text("")
     result = subprocess.run([compiler, "-E", "-P", "-I", str(tmp_path), str(output)],
                             check=True, capture_output=True, text=True).stdout

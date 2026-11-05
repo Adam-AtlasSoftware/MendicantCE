@@ -70,17 +70,19 @@ NEGATIVE_CONTROLS = {
                                   "\t\tfloat second = sinf(1.57079633f * (angle - surround_ring_angle[segment]) /\n"
                                   "\t\t\t(surround_ring_angle[segment + 1] - surround_ring_angle[segment]));"),
                                  "surround"),
-    # audio.spatial: headphones forced panned; a device not known taken as headphones; the VR mode by audio.spatial
-    "spatial-headphones-panned": (('if (!strcmp(setting, "headphones"))\n\t\treturn TRUE;',
-                                   'if (!strcmp(setting, "headphones"))\n\t\treturn FALSE;'), "spatial-choice"),
-    "spatial-unknown-headphones": (("return headphones > 0;", "return headphones != 0;"), "spatial-choice"),
+    # audio.spatial: "auto" panned on stereo; "speakers" through the HRTF; the VR mode by audio.spatial
+    "spatial-auto-panned": (('return strcmp(setting, "speakers") != 0;',
+                             'return !strcmp(setting, "headphones");'), "spatial-choice"),
+    "spatial-speakers-hrtf": (('return strcmp(setting, "speakers") != 0;', 'return TRUE;'), "spatial-choice"),
     "spatial-vr-ignored": (("if (vr_running)\n\t\treturn vr_hrtf;", "if (vr_running && 0)\n\t\treturn vr_hrtf;"),
                            "spatial-choice"),
     # the HRTF: no time between the ears, no head shadow, the notch fixed (no elevation), nothing behind
-    "hrtf-no-delay": (("parameters->delay[ear] = strength *", "parameters->delay[ear] = 0.0f * strength *"), "hrtf-cues"),
+    "hrtf-no-delay": (("parameters->delay[ear] = floorf(strength *", "parameters->delay[ear] = 0.0f * floorf(strength *"),
+                      "hrtf-cues"),
     "hrtf-no-shadow": (("float shadow = 1.0f + strength *", "float shadow = 1.0f + 0.0f * strength *"), "hrtf-cues"),
-    "hrtf-no-elevation": (("elevation = (elevation + 30.0f) / 90.0f;", "elevation = 30.0f / 90.0f;"), "hrtf-cues"),
-    "hrtf-no-rear": (("#define HRTF_REAR_DEPTH 0.55f", "#define HRTF_REAR_DEPTH 0.0f"), "hrtf-cues"),
+    "hrtf-no-elevation": (("elevation = (elevation - HRTF_NOTCH_ELEVATION_LOW) /",
+                           "elevation = (0.0f - HRTF_NOTCH_ELEVATION_LOW) /"), "hrtf-cues"),
+    "hrtf-no-rear": (("#define HRTF_REAR_DEPTH 0.99f", "#define HRTF_REAR_DEPTH 0.0f"), "hrtf-cues"),
     # through the HRTF: the distance left out
     "hrtf-no-distance": (("hrtf_out->gain = 0.70710678f * attenuation *", "hrtf_out->gain = 0.70710678f *"),
                          "hrtf-paths"),

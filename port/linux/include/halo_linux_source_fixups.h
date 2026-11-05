@@ -23,6 +23,31 @@ void halo_load_trace(char const *phase, char const *detail);
 draw and after the render owner has consumed their bytes. */
 void halo_gpu_preparation_checkpoint_set(unsigned long bytes, void (*checkpoint)(void *const *textures));
 void halo_gpu_preparation_loaded(unsigned long bytes);
+/* a map's preparation's journal (port/linux/src/d3d8_device.c), recorded and
+played back (port/linux/game/render_prepared.c): the texture cache's
+bitmaps, as the journal keeps them */
+struct halo_gpu_journal_bitmaps
+{
+	/* a texture the cache holds: nonzero, and its bitmap's tag and index */
+	int (*identify)(void const *texture, unsigned long *tag_index, unsigned long *bitmap_index);
+	/* the bitmap's texture, loaded (waited for); NULL if there is none */
+	void *(*load)(unsigned long tag_index, unsigned long bitmap_index);
+};
+/* recorded from now on (the preparation begun) */
+void halo_gpu_journal_record(struct halo_gpu_journal_bitmaps const *bitmaps);
+/* (the texture cache's: a bitmap it began loading) */
+void halo_gpu_journal_texture(unsigned int tag_index, unsigned int bitmap_index);
+/* no longer recorded: the words (malloc's), their count and the objects
+it could not keep (none for a journal to keep), or NULL; freed with
+halo_gpu_journal_free */
+unsigned int *halo_gpu_journal_take(unsigned int *count, unsigned int *unknown);
+void halo_gpu_journal_free(unsigned int *words);
+/* the journal's form (what a record of it is kept for) */
+unsigned int halo_gpu_journal_form(void);
+/* played back, in a preparation begun: 1, or 0 if the words are malformed;
+the objects not found */
+int halo_gpu_journal_replay(unsigned int const *words, unsigned int count,
+	struct halo_gpu_journal_bitmaps const *bitmaps, unsigned int *unknown);
 
 /* frames between the 30 Hz ticks (port/linux/game/render_interpolation.c);
 the platform layer reads the display.interpolation setting */
@@ -30,6 +55,7 @@ struct observer_result;
 struct render_camera;
 struct real_matrix4x3;
 union real_point3d;
+union real_vector3d;
 union real_rgb_color;
 int halo_interpolation_enabled(void);
 float game_time_get_tick_fraction(void);
@@ -59,6 +85,11 @@ struct observer_result const *render_interpolation_camera(short local_player_ind
 /* the local player's own view (and first-person weapon) was drawn last from
 the newest step, not a tick behind (display.direct_camera) */
 unsigned char render_interpolation_view_newest(short local_player_index);
+/* the local player's own flashlight in the first person on foot, when no
+first-person weapon carries it: along the view drawn, from where the body
+has it (render_interpolation.c) */
+unsigned char render_interpolation_view_flashlight(long unit_index, union real_point3d *position,
+	union real_vector3d *forward, union real_vector3d *up);
 /* the first-person weapons' animations advanced (first_person_weapons.c,
 in the tick), and how far the frame is past that, in ticks: -1 for a view
 drawn between the ticks (render_interpolation.c) */
@@ -297,13 +328,56 @@ int halo_server_debug_echo(void);
 /* ... the level its rotation plays next, NULL if none (game_engine.c) */
 char const *server_director_first_level(void);
 /* the cache slots' sources (port/linux/src/xbox_files.c): the size and
-modification time of the map file a slot was copied from, kept beside it,
-so that a slot whose map file has been replaced is not used
+modification time of the map file a slot was copied from, and the name,
+checksum and length of the map its whole copy holds, kept beside it once
+the copy is on the disk, so that a slot whose map file has been replaced,
+or that is not a whole copy of the map its header names, is not used
 (cache_files_windows.c) */
 void cache_slot_source_load(short slot);
-void cache_slot_source_record(short slot, const char *map_path);
+void cache_slot_source_record(short slot, const char *map_path, const char *name, unsigned long checksum,
+	unsigned long file_length);
 void cache_slot_source_forget(short slot);
-int cache_slot_source_matches(short slot, const char *map_path);
+int cache_slot_source_matches(short slot, const char *map_path, const char *name, unsigned long checksum,
+	unsigned long file_length);
+/* ... the folder of this copy of the game's slots, z:\ or, while another
+copy holds that, a z:\cache-N\ of its own (with its backslash) */
+const char *cache_slot_folder(void);
+/* ... whether it is z:\, the cache kept (else a few slots of its own, and
+no copies ahead) */
+int cache_slot_folder_keeps_cache(void);
+/* what was written to a file is on the disk (xbox_files.c) */
+int __stdcall FlushFileBuffers(void *file);
+/* ... and when a slot's map was last played (seconds; 0: never, copied
+by the menus' pictures' pass or ahead), kept with it: the cache's least
+useful map is given up first for room (cache_files_windows.c) */
+void cache_slot_source_played(short slot);
+unsigned long cache_slot_source_played_time(short slot);
+/* the cache files' budget (port/linux/src/map_cache.c): what they may take
+of the disk, from the bytes they take now and the least they need; and a
+copy's decompression buffers of its own (NULL: none) */
+unsigned long long map_cache_budget(unsigned long long cache_bytes, unsigned long long least);
+void *map_cache_copy_buffer(long size);
+/* stock maps unpacked into cache slots off the game's thread, on a few
+workers (port/linux/src/map_unpack.c): one map file into one slot file,
+whole as the precache writes it, its source marked last (1 whole, 0 not);
+a slot's unpack queued (the paths Xbox paths), a finished one taken (each
+once), one waited for, and the workers' number */
+int map_unpack_slot(const char *map_path, const char *slot_path, long copy_size, char *name, unsigned long *checksum,
+	unsigned long *file_length, volatile int *stop, volatile float *progress);
+int map_unpack_queue(short slot, const char *map_xbox_path, const char *slot_xbox_path, long copy_size, int precache);
+/* ... the game's own copy (precache): its status (0 going, 1 whole, -1
+failed) and progress, asked to stop, and waited for and taken (1 whole) */
+int map_unpack_status(short slot, float *progress);
+void map_unpack_stop(short slot);
+int map_unpack_take(short slot);
+int map_unpack_take_finished(short *slot, int *succeeded);
+void map_unpack_wait(short slot);
+int map_unpack_worker_count(void);
+/* the maps copied into the cache ahead (port/linux/game/map_cache_prefill.c):
+once a frame (main_loop) */
+void map_cache_prefill_update(void);
+/* (port/linux/game/menu_pictures_render.c) the menus' pictures' pass runs */
+int menu_pictures_preparing(void);
 /* the deflection of a stick (0 the left, 1 the right) read as none, of
 32767: input.left_stick_dead_zone and input.right_stick_dead_zone, else the
 game's own (port/linux/src/xinput_sdl.c) */

@@ -21,6 +21,7 @@ high-res HUD's are (hud_hires.c).
 #include "halo_menus.h"
 #include "hud_hires.h"
 #include "menu_files.h"
+#include "embedded_assets.h"
 #include "platform.h"
 #include "port_config.h"
 /* (the renderer's backend is on the host: the pictures are images) */
@@ -33,6 +34,7 @@ high-res HUD's are (hud_hires.c).
 
 #include <SDL3/SDL.h>
 #include <errno.h>
+#include <pthread.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -167,7 +169,12 @@ static void files_gather(void)
 		}
 		else
 		{
-			file_add(embedded->path, (const unsigned char *)embedded->data, embedded->size, 0);
+			/* (the game's own, in the assets' file: embedded_assets.h) */
+			const unsigned char *own = (const unsigned char *)embedded_assets_data(embedded->data_offset,
+				embedded->size);
+
+			if (own)
+				file_add(embedded->path, own, embedded->size, 0);
 		}
 	}
 #ifndef HALO_ANDROID
@@ -980,17 +987,22 @@ static int read_file(struct reader *reader, const struct menu_file *file)
 
 /* ---------- public code */
 
-struct halo_menus const *halo_menus_load(void)
+/* The files are read once, on a thread of their own from the start
+(halo_menus_read_ahead), so that the first map's load (the main menu's)
+does not wait the 24 ms Expat takes over them: halo_menus_load waits for
+that thread, and nothing else reads the files before it. */
+static struct halo_menus menus;
+static int menus_succeeded;
+static int menus_read;
+static pthread_t menus_reader;
+static int menus_reading;
+
+static void menus_files_read(void)
 {
-	static int read;
-	static struct halo_menus menus;
-	static int succeeded;
 	struct reader reader;
 	long index;
 
-	if (read)
-		return succeeded ? &menus : NULL;
-	read = 1;
+	menus_read = 1;
 	files_gather();
 	memset(&reader, 0, sizeof(reader));
 	for (index = 0; index < file_count && !reader.failed; index++)
@@ -1009,13 +1021,37 @@ struct halo_menus const *halo_menus_load(void)
 	{
 		if (reader.failed)
 			platform_log("menus: the files have a problem; using the game's own menus");
-		return NULL;
+		return;
 	}
 	if (!reader.menus.root)
 		reader.menus.root = "main_menu";
 	menus = reader.menus;
-	succeeded = 1;
-	return &menus;
+	menus_succeeded = 1;
+}
+
+static void *menus_files_reader(void *unused)
+{
+	(void)unused;
+	menus_files_read();
+	return NULL;
+}
+
+void halo_menus_read_ahead(void)
+{
+	if (!menus_read && !menus_reading && !pthread_create(&menus_reader, NULL, menus_files_reader, NULL))
+		menus_reading = 1;
+}
+
+struct halo_menus const *halo_menus_load(void)
+{
+	if (menus_reading)
+	{
+		pthread_join(menus_reader, NULL);
+		menus_reading = 0;
+	}
+	if (!menus_read)
+		menus_files_read();
+	return menus_succeeded ? &menus : NULL;
 }
 
 long halo_menus_utf16(char const *utf8, unsigned short *out, long capacity)

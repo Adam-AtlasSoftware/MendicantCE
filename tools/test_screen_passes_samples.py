@@ -48,6 +48,11 @@ typedef int BOOL;
 #define TRUE 1
 #define FALSE 0
 typedef unsigned long xgpu_target;
+/* (a map's preparation's journal: not recorded here) */
+enum { JOURNAL_ANTI_ALIAS = 5, JOURNAL_PANINI, JOURNAL_OCCLUSION_BEGIN, JOURNAL_OCCLUSION };
+static BOOL journal_recording;
+static void journal_operation(unsigned long op, const void *arguments, unsigned long bytes)
+{ (void)op; (void)arguments; (void)bytes; }
 struct xgpu_render_target { xgpu_target number; int samples; float scale[2]; };
 struct render_target_entry { struct xgpu_render_target target; };
 static struct { BOOL gl_ready; int back_buffer; void *depth_stencil; } device;

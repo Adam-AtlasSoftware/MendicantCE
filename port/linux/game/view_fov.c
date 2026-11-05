@@ -4,7 +4,9 @@ VIEW_FOV.C
 The view's field of view (display.fov on foot, display.vehicle_fov in a
 vehicle's seat), the first-person weapon's (display.viewmodel_fov) and
 whether the weapon is drawn (display.viewmodel_visible) and where
-(display.viewmodel_offset_x, _y and _z), the local render view only: the
+(display.viewmodel_offset_x, _y and _z, display.viewmodel_pitch, _yaw and
+_roll, and each weapon's own: display.viewmodel_weapon), the local render
+view only: the
 observer, its transitions and what the network sends keep the game's own
 camera. Each angle is horizontal at 16:9 (the vertical
 angle is kept, so other shapes of window widen or narrow as the stock view
@@ -21,6 +23,7 @@ that draw the first-person weapon (rasterizer and render sources).
 #include "game/players.h"
 #include "items/weapons.h"
 #include "objects/objects.h"
+#include "tag_files/tag_files.h"
 #include "rasterizer/rasterizer.h"
 #include "rasterizer/xbox/rasterizer_xbox_internal.h"
 #include "render/render.h"
@@ -47,6 +50,9 @@ int config_boolean(const char *name);
 unsigned long config_changes(void);
 char const *config_string(char const *name);
 unsigned long system_milliseconds(void);
+/* each weapon's own offsets (port/linux/src/port_config.h) */
+#define CONFIG_WEAPON_VALUES 6
+int config_viewmodel_weapon(const char *path, double values[CONFIG_WEAPON_VALUES]);
 
 /* ---------- the world's field of view */
 
@@ -57,6 +63,9 @@ camera between the head and the seat's following camera */
 #define VEHICLE_FOV_TRANSITION_MILLISECONDS 500
 
 static real reticle_scales[MAXIMUM_LOCAL_PLAYERS];
+static real reticle_sizes[MAXIMUM_LOCAL_PLAYERS];
+/* how much wider the unzoomed view is than the one drawn (1 unzoomed) */
+static real reticle_widenings[MAXIMUM_LOCAL_PLAYERS];
 static real authored_vertical[MAXIMUM_LOCAL_PLAYERS];
 
 /* each local player's way between display.fov and display.vehicle_fov: the
@@ -201,14 +210,19 @@ cinematic, a scripted camera or a view the director holds, and at a scope's
 full zoom; between, the zoom's own transition. A vehicle's seat, first or
 third person, and its entering and exiting take the vehicle's, so the view
 and its reticle keep one size in the seat ("default": the stock view, its
-reticle at the stock size) */
-static real render_fov_adjust(short local_player_index, real native_vertical_field_of_view, real vehicle_weight)
+reticle at the stock size). The reticle's size, the unzoomed view's scale
+of it, is set too, and that view's tangent: 1 and 0 where the view is the
+game's own */
+static real render_fov_adjust(short local_player_index, real native_vertical_field_of_view, real vehicle_weight,
+	real *reticle_size, real *unzoomed_drawn_tangent)
 {
 	long unit_index, weapon_index;
 	struct unit_datum *unit;
 	real foot_tangent, vehicle_tangent, requested_tangent;
 	real unzoomed_angle, unzoomed_tangent, native_tangent, adjusted_tangent;
 
+	*reticle_size = 1.0f;
+	*unzoomed_drawn_tangent = 0.0f;
 	fov_requested_tangents(&foot_tangent, &vehicle_tangent);
 	if (!foot_tangent && !vehicle_tangent)
 		return native_vertical_field_of_view;
@@ -234,6 +248,13 @@ static real render_fov_adjust(short local_player_index, real native_vertical_fie
 		requested_tangent = vehicle_tangent;
 	else
 		requested_tangent = foot_tangent + (vehicle_tangent - foot_tangent) * vehicle_weight;
+	/* (the unzoomed view's scale of the reticle: a zoom leaves it as it is,
+	as the stock game draws its reticle one size at every zoom) */
+	if (requested_tangent > 0.0f)
+	{
+		*reticle_size = PIN(unzoomed_tangent / requested_tangent, 0.001f, 1000.0f);
+		*unzoomed_drawn_tangent = requested_tangent;
+	}
 	if (requested_tangent == unzoomed_tangent)
 		return native_vertical_field_of_view;
 
@@ -280,7 +301,9 @@ real render_fov_vertical(short local_player_index, real native_vertical_field_of
 	reticle is never a frame apart from the view it is drawn over) */
 	long unit_index;
 	real weight = vehicle_fov_weight(local_player_index, render_fov_unit(local_player_index, &unit_index));
-	real adjusted = render_fov_adjust(local_player_index, native_vertical_field_of_view, weight);
+	real reticle_size, unzoomed_drawn_tangent;
+	real adjusted = render_fov_adjust(local_player_index, native_vertical_field_of_view, weight, &reticle_size,
+		&unzoomed_drawn_tangent);
 
 	if (local_player_index >= 0 && local_player_index < MAXIMUM_LOCAL_PLAYERS)
 	{
@@ -297,6 +320,15 @@ real render_fov_vertical(short local_player_index, real native_vertical_field_of
 		/* (the view's projection, the zoom's transition too, for the HUD:
 		the weapon's own projection, viewmodel_projection_begin, is not it) */
 		reticle_scales[local_player_index] = scale;
+		reticle_sizes[local_player_index] = reticle_size;
+		reticle_widenings[local_player_index] = 1.0f;
+		if (unzoomed_drawn_tangent > 0.0f && adjusted > 0.0f && adjusted < _pi)
+		{
+			real widening = unzoomed_drawn_tangent / tanf(adjusted * 0.5f);
+
+			if (widening > 1.0f && widening < 1000.0f)
+				reticle_widenings[local_player_index] = widening;
+		}
 		/* (a widened view's own angle, which the weapon keeps by default) */
 		authored_vertical[local_player_index] =
 			adjusted != native_vertical_field_of_view ? native_vertical_field_of_view : 0.0f;
@@ -321,6 +353,20 @@ real render_fov_reticle_scale(short local_player_index)
 	return reticle_scales[local_player_index];
 }
 
+real render_fov_reticle_size(short local_player_index)
+{
+	/* (display.panini's magnification of the middle too, the unzoomed
+	view's: a zoom narrows the view the projection fits) */
+	if (local_player_index < 0 || local_player_index >= MAXIMUM_LOCAL_PLAYERS ||
+		!(reticle_sizes[local_player_index] > 0.0f))
+	{
+		return panini_center_scale();
+	}
+	return reticle_sizes[local_player_index] *
+		panini_center_scale_widened(reticle_widenings[local_player_index] > 0.0f ?
+			reticle_widenings[local_player_index] : 1.0f);
+}
+
 /* ---------- the mouse's turn zoomed (input.zoom_sensitivity) */
 
 /* a vertical angle as the horizontal one across 4:3, as CS2 gives its
@@ -337,6 +383,7 @@ real mouse_zoom_look_scale(short local_player_index, long unit_index, short zoom
 	struct unit_datum *unit;
 	long weapon_index;
 	real magnification, unzoomed_angle, zoomed_angle, unzoomed_drawn, zoomed_drawn, weight;
+	real reticle_size, unzoomed_drawn_tangent; /* (not wanted here) */
 
 	if (unit_index == NONE || zoom_level == NONE)
 		return 1.0f;
@@ -360,9 +407,11 @@ real mouse_zoom_look_scale(short local_player_index, long unit_index, short zoom
 	weight = local_player_index >= 0 && local_player_index < MAXIMUM_LOCAL_PLAYERS &&
 		vehicle_blends[local_player_index].valid ? vehicle_blends[local_player_index].weight : 0.0f;
 	unzoomed_drawn = render_fov_adjust(local_player_index,
-		2.0f * atanf(0.75f * render_camera_get_adjusted_field_of_view_tangent(unzoomed_angle)), weight);
+		2.0f * atanf(0.75f * render_camera_get_adjusted_field_of_view_tangent(unzoomed_angle)), weight,
+		&reticle_size, &unzoomed_drawn_tangent);
 	zoomed_drawn = render_fov_adjust(local_player_index,
-		2.0f * atanf(0.75f * render_camera_get_adjusted_field_of_view_tangent(zoomed_angle)), weight);
+		2.0f * atanf(0.75f * render_camera_get_adjusted_field_of_view_tangent(zoomed_angle)), weight,
+		&reticle_size, &unzoomed_drawn_tangent);
 	return mouse_zoom_scale(_mouse_zoom_cs2, magnification, fov_horizontal_4_3(zoomed_drawn),
 		fov_horizontal_4_3(unzoomed_drawn));
 }
@@ -490,54 +539,149 @@ void viewmodel_projection_end(void)
 	rasterizer_set_frustum_z(0.0f, 0.0f);
 }
 
+/* ---------- the weapon a first-person offset is for */
+
+/* the weapon's tag (its definition), or NONE */
+static long viewmodel_weapon_definition(long weapon_index)
+{
+	struct object_datum *weapon = weapon_index != NONE ? object_try_and_get(weapon_index) : NULL;
+
+	return weapon ? weapon->definition_index : NONE;
+}
+
+/* the tag's path ("weapons\\pistol\\pistol"), by which its own offsets are
+kept (config_viewmodel_weapon) */
+static char const *viewmodel_weapon_path(long definition_index)
+{
+	return definition_index != NONE ? tag_get_name(definition_index) : NULL;
+}
+
+boolean viewmodel_held_weapon(short local_player_index, char *path, unsigned int size)
+{
+	long unit_index;
+	struct unit_datum *unit;
+	short current;
+	char const *name;
+
+	if (local_player_index < 0 || local_player_index >= MAXIMUM_LOCAL_PLAYERS || !size)
+		return FALSE;
+	unit_index = player_control_get_unit_index(local_player_index);
+	unit = unit_index != NONE ? unit_try_and_get(unit_index) : NULL;
+	if (!unit || TEST_FLAG(unit->object.damage_flags, _object_dead_bit))
+		return FALSE;
+	current = unit->unit.current_weapon_index;
+	if (current < 0 || current >= MAXIMUM_WEAPONS_PER_UNIT)
+		return FALSE;
+	name = viewmodel_weapon_path(viewmodel_weapon_definition(unit->unit.weapon_object_indices[current]));
+	if (!name || !name[0] || strlen(name) >= size)
+		return FALSE;
+	strcpy(path, name);
+	return TRUE;
+}
+
 /* ---------- where the first-person weapon is drawn */
 
 /* a world unit is ten feet */
 #define CENTIMETERS_PER_WORLD_UNIT 304.8
 /* the farthest display.viewmodel_offset_* move the weapon along each axis,
-in centimeters (the menu's sliders go half as far) */
+in centimeters, and display.viewmodel_pitch, _yaw and _roll turn it, in
+degrees: a weapon's own added to the global, the sum held there too */
 #define VIEWMODEL_OFFSET_MAXIMUM_CENTIMETERS 20.0
+#define VIEWMODEL_ROTATION_MAXIMUM_DEGREES 15.0
+
+/* a value held at its range (not a number: none) */
+static double viewmodel_offset_held(double value, double maximum)
+{
+	if (value > maximum)
+		return maximum;
+	if (value < -maximum)
+		return -maximum;
+	if (!(value >= -maximum))
+		return 0.0;
+	return value;
+}
 
 static real viewmodel_offset_axis(char const *name)
 {
-	double centimeters = config_real(name);
-
-	/* (beyond the range, its end; not a number, none) */
-	if (centimeters > VIEWMODEL_OFFSET_MAXIMUM_CENTIMETERS)
-		centimeters = VIEWMODEL_OFFSET_MAXIMUM_CENTIMETERS;
-	else if (centimeters < -VIEWMODEL_OFFSET_MAXIMUM_CENTIMETERS)
-		centimeters = -VIEWMODEL_OFFSET_MAXIMUM_CENTIMETERS;
-	else if (!(centimeters >= -VIEWMODEL_OFFSET_MAXIMUM_CENTIMETERS))
-		centimeters = 0.0;
-	return (real)(centimeters / CENTIMETERS_PER_WORLD_UNIT);
+	return (real)(viewmodel_offset_held(config_real(name), VIEWMODEL_OFFSET_MAXIMUM_CENTIMETERS) /
+		CENTIMETERS_PER_WORLD_UNIT);
 }
 
-/* every weapon's offset (display.viewmodel_offset_x, _y and _z): along the
-view's right, up and forward, in world units */
-static boolean viewmodel_offset_global(real_vector3d *offset)
+static real viewmodel_rotation_axis(char const *name)
+{
+	return (real)(viewmodel_offset_held(config_real(name), VIEWMODEL_ROTATION_MAXIMUM_DEGREES) * (_pi / 180.0));
+}
+
+static boolean viewmodel_offset_any(struct viewmodel_offset const *offset)
+{
+	return offset->right != 0.0f || offset->up != 0.0f || offset->forward != 0.0f ||
+		offset->pitch != 0.0f || offset->yaw != 0.0f || offset->roll != 0.0f;
+}
+
+/* every weapon's offset (display.viewmodel_offset_x, _y and _z, along the
+view's right, up and forward, in world units; display.viewmodel_pitch, _yaw
+and _roll, in radians) */
+static void viewmodel_offset_global(struct viewmodel_offset *offset)
 {
 	static boolean initialized;
 	static unsigned long read_at;
-	static real_vector3d global;
+	static struct viewmodel_offset global;
 	unsigned long changes = config_changes();
 
 	if (!initialized || read_at != changes)
 	{
-		global.i = viewmodel_offset_axis("display.viewmodel_offset_x");
-		global.j = viewmodel_offset_axis("display.viewmodel_offset_y");
-		global.k = viewmodel_offset_axis("display.viewmodel_offset_z");
+		global.right = viewmodel_offset_axis("display.viewmodel_offset_x");
+		global.up = viewmodel_offset_axis("display.viewmodel_offset_y");
+		global.forward = viewmodel_offset_axis("display.viewmodel_offset_z");
+		global.pitch = viewmodel_rotation_axis("display.viewmodel_pitch");
+		global.yaw = viewmodel_rotation_axis("display.viewmodel_yaw");
+		global.roll = viewmodel_rotation_axis("display.viewmodel_roll");
 		initialized = TRUE;
 		read_at = changes;
 	}
 	*offset = global;
-	return global.i != 0.0f || global.j != 0.0f || global.k != 0.0f;
 }
 
-boolean viewmodel_offset(long weapon_index, real_vector3d *offset)
+boolean viewmodel_offset(long weapon_index, struct viewmodel_offset *offset)
 {
-	/* (one offset for every weapon: a weapon's own would be found here) */
-	(void)weapon_index;
-	return viewmodel_offset_global(offset);
+	/* (the last weapon's, until the weapon or a setting changes: a lookup
+	by its tag's path) */
+	static long cached_definition = NONE;
+	static unsigned long cached_at;
+	static double own[CONFIG_WEAPON_VALUES];
+	long definition_index = viewmodel_weapon_definition(weapon_index);
+	unsigned long changes = config_changes();
+	double total[CONFIG_WEAPON_VALUES];
+	short value;
+
+	viewmodel_offset_global(offset);
+	if (definition_index == NONE)
+		return viewmodel_offset_any(offset);
+	if (definition_index != cached_definition || cached_at != changes)
+	{
+		config_viewmodel_weapon(viewmodel_weapon_path(definition_index), own);
+		cached_definition = definition_index;
+		cached_at = changes;
+	}
+	/* (the weapon's own added to the global, the sum held at the range) */
+	total[0] = offset->right * CENTIMETERS_PER_WORLD_UNIT + own[0];
+	total[1] = offset->up * CENTIMETERS_PER_WORLD_UNIT + own[1];
+	total[2] = offset->forward * CENTIMETERS_PER_WORLD_UNIT + own[2];
+	total[3] = offset->pitch * (180.0 / _pi) + own[3];
+	total[4] = offset->yaw * (180.0 / _pi) + own[4];
+	total[5] = offset->roll * (180.0 / _pi) + own[5];
+	for (value = 0; value < CONFIG_WEAPON_VALUES; value++)
+	{
+		total[value] = viewmodel_offset_held(total[value],
+			value < 3 ? VIEWMODEL_OFFSET_MAXIMUM_CENTIMETERS : VIEWMODEL_ROTATION_MAXIMUM_DEGREES);
+	}
+	offset->right = (real)(total[0] / CENTIMETERS_PER_WORLD_UNIT);
+	offset->up = (real)(total[1] / CENTIMETERS_PER_WORLD_UNIT);
+	offset->forward = (real)(total[2] / CENTIMETERS_PER_WORLD_UNIT);
+	offset->pitch = (real)(total[3] * (_pi / 180.0));
+	offset->yaw = (real)(total[4] * (_pi / 180.0));
+	offset->roll = (real)(total[5] * (_pi / 180.0));
+	return viewmodel_offset_any(offset);
 }
 
 /* what the weapon's moves right and up are multiplied by at the angle it is
@@ -547,7 +691,8 @@ middle by that ratio; a move across the view is shrunk with it, so it is
 made that much longer, and goes as far across the screen as at the stock
 angle. A move away needs nothing: it shrinks the weapon by the same part
 at any angle (a point's place on the screen is across over away, times
-the angle's own factor, and the move away changes the away alone) */
+the angle's own factor, and the move away changes the away alone). A turn
+needs nothing either: it is an angle, the same at any field of view */
 static real viewmodel_offset_screen_scale(real drawn, real stock)
 {
 	if (!(drawn > 0.0f && drawn < _pi && stock > 0.0f && stock < _pi))
@@ -555,29 +700,108 @@ static real viewmodel_offset_screen_scale(real drawn, real stock)
 	return tanf(drawn * 0.5f) / tanf(stock * 0.5f);
 }
 
+/* a vector given along the view's right, up and forward (x, y, z) turned
+by the offset's pitch (muzzle up: forward toward up, about the right), then
+yaw (muzzle right: forward toward the right, about the up) after its roll
+(top to the right: up toward the right, about the forward) */
+static void viewmodel_rotation_turn(struct viewmodel_offset const *offset, real *x, real *y, real *z)
+{
+	real cosine, sine, a, b;
+
+	/* roll */
+	cosine = cosf(offset->roll);
+	sine = sinf(offset->roll);
+	a = *x * cosine + *y * sine;
+	b = -*x * sine + *y * cosine;
+	*x = a;
+	*y = b;
+	/* pitch */
+	cosine = cosf(offset->pitch);
+	sine = sinf(offset->pitch);
+	a = *y * cosine + *z * sine;
+	b = -*y * sine + *z * cosine;
+	*y = a;
+	*z = b;
+	/* yaw */
+	cosine = cosf(offset->yaw);
+	sine = sinf(offset->yaw);
+	a = *x * cosine + *z * sine;
+	b = -*x * sine + *z * cosine;
+	*x = a;
+	*z = b;
+}
+
+/* a world vector turned in the view's frame (right, up and forward) */
+static void viewmodel_rotation_vector(struct viewmodel_offset const *offset, real_vector3d const *right,
+	struct render_camera const *camera, real_vector3d *vector)
+{
+	real x = dot_product3d(vector, right);
+	real y = dot_product3d(vector, &camera->up);
+	real z = dot_product3d(vector, &camera->forward);
+
+	viewmodel_rotation_turn(offset, &x, &y, &z);
+	vector->i = right->i * x + camera->up.i * y + camera->forward.i * z;
+	vector->j = right->j * x + camera->up.j * y + camera->forward.j * z;
+	vector->k = right->k * x + camera->up.k * y + camera->forward.k * z;
+}
+
 void viewmodel_offset_apply(short local_player_index, long weapon_index, struct real_matrix4x3 *node_matrices,
 	short node_count, struct render_camera const *camera)
 {
-	real_vector3d offset, right, move;
+	struct viewmodel_offset offset;
+	real_vector3d right, move;
 	real drawn, stock;
 	short node_index;
 
 	if (!node_matrices || node_count <= 0 || !viewmodel_offset(weapon_index, &offset))
 		return;
+	/* (the view's right: forward across up, as the world has z up and y
+	left) */
+	cross_product3d(&camera->forward, &camera->up, &right);
+	/* turned first, the weapon and hands as one, about the middle of their
+	nodes as posed (a gun's turns about itself, wherever its animation holds
+	it), each node's place and axes */
+	if (offset.pitch != 0.0f || offset.yaw != 0.0f || offset.roll != 0.0f)
+	{
+		real_point3d pivot = { 0.0f, 0.0f, 0.0f };
+
+		for (node_index = 0; node_index < node_count; node_index++)
+		{
+			pivot.x += node_matrices[node_index].position.x;
+			pivot.y += node_matrices[node_index].position.y;
+			pivot.z += node_matrices[node_index].position.z;
+		}
+		pivot.x /= node_count;
+		pivot.y /= node_count;
+		pivot.z /= node_count;
+		for (node_index = 0; node_index < node_count; node_index++)
+		{
+			struct real_matrix4x3 *node = &node_matrices[node_index];
+			real_vector3d away;
+
+			away.i = node->position.x - pivot.x;
+			away.j = node->position.y - pivot.y;
+			away.k = node->position.z - pivot.z;
+			viewmodel_rotation_vector(&offset, &right, camera, &away);
+			node->position.x = pivot.x + away.i;
+			node->position.y = pivot.y + away.j;
+			node->position.z = pivot.z + away.k;
+			viewmodel_rotation_vector(&offset, &right, camera, &node->forward);
+			viewmodel_rotation_vector(&offset, &right, camera, &node->left);
+			viewmodel_rotation_vector(&offset, &right, camera, &node->up);
+		}
+	}
 	/* (display.viewmodel_fov: on the screen as at the weapon's stock angle) */
 	if (viewmodel_angles(local_player_index, &drawn, &stock))
 	{
 		real scale = viewmodel_offset_screen_scale(drawn, stock);
 
-		offset.i *= scale;
-		offset.j *= scale;
+		offset.right *= scale;
+		offset.up *= scale;
 	}
-	/* (the view's right: forward across up, as the world has z up and y
-	left) */
-	cross_product3d(&camera->forward, &camera->up, &right);
-	move.i = right.i * offset.i + camera->up.i * offset.j + camera->forward.i * offset.k;
-	move.j = right.j * offset.i + camera->up.j * offset.j + camera->forward.j * offset.k;
-	move.k = right.k * offset.i + camera->up.k * offset.j + camera->forward.k * offset.k;
+	move.i = right.i * offset.right + camera->up.i * offset.up + camera->forward.i * offset.forward;
+	move.j = right.j * offset.right + camera->up.j * offset.up + camera->forward.j * offset.forward;
+	move.k = right.k * offset.right + camera->up.k * offset.up + camera->forward.k * offset.forward;
 	for (node_index = 0; node_index < node_count; node_index++)
 	{
 		node_matrices[node_index].position.x += move.i;
