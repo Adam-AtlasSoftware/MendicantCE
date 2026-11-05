@@ -372,6 +372,35 @@ int host_sdl_rumble_gamepad(uint32_t gamepad, uint32_t low, uint32_t high, uint3
 	return object ? SDL_RumbleGamepad(object, (Uint16)low, (Uint16)high, milliseconds) : 0;
 }
 
+/* (gyro aiming: port/linux/src/xinput_sdl.c) */
+int host_sdl_gamepad_has_sensor(uint32_t gamepad, int type)
+{
+	SDL_Gamepad *object = host_sdl_handle_get(gamepad, _handle_gamepad);
+
+	return object ? SDL_GamepadHasSensor(object, (SDL_SensorType)type) : 0;
+}
+
+int host_sdl_set_gamepad_sensor_enabled(uint32_t gamepad, int type, int enabled)
+{
+	SDL_Gamepad *object = host_sdl_handle_get(gamepad, _handle_gamepad);
+	int done;
+
+	if (!object)
+		return 0;
+	done = SDL_SetGamepadSensorEnabled(object, (SDL_SensorType)type, enabled != 0);
+	if (enabled)
+		host_logf(HOST_LOG_INFO, "gamepad %s: sensor %d on%s (%.0f samples a second)", SDL_GetGamepadName(object),
+			type, done ? "" : " failed", SDL_GetGamepadSensorDataRate(object, (SDL_SensorType)type));
+	return done;
+}
+
+int host_sdl_gamepad_steam(uint32_t gamepad)
+{
+	SDL_Gamepad *object = host_sdl_handle_get(gamepad, _handle_gamepad);
+
+	return object && SDL_GetGamepadSteamHandle(object) != 0;
+}
+
 /* ---------- audio */
 
 /* SDL calls audio_callback on its own audio thread, which cannot run guest

@@ -2064,6 +2064,55 @@ static void viewmodel_weapon_rows_show(struct widget_instance *list)
 	}
 }
 
+/* Gyro & Flick Stick's rows (port/linux/src/xinput_sdl.c): GYRO says whether
+a controller with a gyroscope is connected (or only Steam Input's virtual
+ones, which pass none), and the gyroscope's rows are shown only then; Gyro
+Button's only while Gyro Aiming holds it (Hold to Aim, Hold to Pause);
+CALIBRATE's value says it measures, then that it is done */
+int halo_gyro_found(void);
+int halo_gyro_calibrating(void);
+void halo_gyro_calibrate(void);
+static boolean gyro_calibrated;
+
+static void gyro_rows_show(struct widget_instance *list)
+{
+	static char const *const rows[] =
+	{
+		"op_gyro_aim", "op_gyro_button", "op_gyro_sensitivity", "op_gyro_vertical_sensitivity", "op_gyro_space",
+		"op_gyro_smoothing", "op_gyro_calibrate",
+	};
+	struct widget_instance *found = named(list, "op_gyro_found", 0);
+	struct widget_instance *mode = named(list, "gyro_aim_spinner", 0);
+	struct widget_instance *button = named(list, "op_gyro_button", 0);
+	struct widget_instance *value;
+	struct pc_menu_setting *setting = mode ? pc_menu_setting_get(mode->definition_tag_index) : NULL;
+	short index;
+	int gyro;
+
+	if (!found)
+		return;
+	gyro = halo_gyro_found();
+	if ((value = named(list, "gyro_found_value", 0)) != NULL)
+		discord_text_set(value, gyro == 2 ? "CONNECTED" : gyro == 1 ? "STEAM INPUT HAS IT" : "NONE CONNECTED");
+	for (index = 0; index < (short)NUMBEROF(rows); index++)
+	{
+		struct widget_instance *row = named(list, rows[index], 0);
+
+		if (row)
+			row->visible = gyro == 2;
+	}
+	if (button && gyro == 2)
+	{
+		index = mode ? mode->parameters.list.selected_index : NONE;
+		button->visible = setting && index >= 0 && index < setting->value_count &&
+			(!strcmp(setting->values[index], "hold") || !strcmp(setting->values[index], "pause"));
+	}
+	if (halo_gyro_calibrating())
+		gyro_calibrated = TRUE;
+	if ((value = named(list, "gyro_calibrate_value", 0)) != NULL)
+		discord_text_set(value, halo_gyro_calibrating() ? "HOLD STILL" : gyro_calibrated ? "DONE" : "");
+}
+
 static void sim_rate_row_show(struct widget_instance *list)
 {
 	struct widget_instance *row = named(list, "op_sim_rate", 0);
@@ -2362,6 +2411,13 @@ static boolean settings_function(char const *name, struct widget_instance *widge
 	else if (!strcmp(name, "weapon reset"))
 	{
 		settings_weapon_reset(screen);
+		ui_play_audio_feedback_sound(SOUND_CURSOR);
+	}
+	else if (!strcmp(name, "gyro calibrate"))
+	{
+		/* (Gyro & Flick Stick's CALIBRATE: at once, not kept for OK) */
+		halo_gyro_calibrate();
+		gyro_calibrated = FALSE;
 		ui_play_audio_feedback_sound(SOUND_CURSOR);
 	}
 	else if (!strcmp(name, "profiles"))
@@ -3265,6 +3321,7 @@ static void settings_page_update(struct widget_instance *list)
 	graphics_preset_show(list);
 	sim_rate_row_show(list);
 	viewmodel_weapon_rows_show(list);
+	gyro_rows_show(list);
 	settings_each(screen, setting_stash);
 	settings_sliders_show(list);
 	settings_rows_pack(list, tab != NONE);
@@ -5075,6 +5132,8 @@ static struct
 } const settings_sliders[] =
 {
 	{ "op_mouse_sensitivity", "input.mouse_sensitivity", 0.1, 10.0, 0.05, 0.01, 100.0, FALSE, NULL, 0 },
+	/* (tools/port_settings.py's GYRO_SENSITIVITY) */
+	{ "op_gyro_sensitivity", "input.gyro_sensitivity", 0.25, 8.0, 0.05, 0.05, 20.0, FALSE, NULL, 0 },
 	{ "op_max_fps", "display.max_fps", 30.0, 540.0, 1.0, 10.0, 1000.0, TRUE, SLIDER_STOPS(settings_frame_rate_stops) },
 	/* (above 150 with display.panini on: panini_projection.h's
 	PANINI_FIELD_OF_VIEW_MOST) */
