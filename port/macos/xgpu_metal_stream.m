@@ -144,6 +144,8 @@ static struct
 	uint32_t halo_vertex, halo_pixel;
 	BOOL halo_failed;
 	uint32_t lights_none[2];
+	/* their world (none: lights_world_none's header of no nodes) */
+	uint32_t lights_world, lights_world_none;
 } stream;
 
 void xgpu_metal_stream_set_shaders(const struct xgpu_metal_stream_shaders *shaders)
@@ -1105,6 +1107,17 @@ static void lights_none_bind(void)
 			(struct xgpu_metal_source){ XGPU_METAL_SOURCE_NONE, 0, 0, 0 };
 	}
 	xgpu_metal_set_dynamic_lights(sources[0], sources[1]);
+	if (!stream.lights_world_none)
+	{
+		static const uint32_t none[4];
+
+		stream.lights_world_none = xgpu_metal_buffer_create(sizeof(none));
+		if (stream.lights_world_none)
+			xgpu_metal_buffer_write(stream.lights_world_none, 0, none, sizeof(none), 1);
+	}
+	if (!stream.lights_world && stream.lights_world_none)
+		xgpu_metal_set_dynamic_light_world((struct xgpu_metal_source){ XGPU_METAL_SOURCE_BUFFER, 0, 16,
+			stream.lights_world_none });
 }
 
 static int stream_dynamic_lights_prepare(void *context)
@@ -1128,6 +1141,24 @@ static void stream_dynamic_lights_upload(void *context, const struct xgpu_stream
 		lights_none_bind();
 	else
 		xgpu_metal_set_dynamic_lights(block, copied);
+}
+
+/* the world (xgpu.h), into a buffer of its own made the first time with room
+for the most, written in the frame's order */
+static void stream_dynamic_lights_world(void *context, const struct xgpu_stream_dynamic_lights_world *record)
+{
+	const void *texels = host_pointer(record->texels);
+
+	(void)context;
+	if (!texels || !record->count || record->count > XGPU_METAL_STREAM_DYNAMIC_LIGHT_WORLD_TEXELS)
+		return;
+	if (!stream.lights_world)
+		stream.lights_world = xgpu_metal_buffer_create(XGPU_METAL_STREAM_DYNAMIC_LIGHT_WORLD_TEXELS * 16);
+	if (!stream.lights_world)
+		return;
+	xgpu_metal_buffer_write(stream.lights_world, 0, texels, record->count * 16, 1);
+	xgpu_metal_set_dynamic_light_world((struct xgpu_metal_source){ XGPU_METAL_SOURCE_BUFFER, 0,
+		XGPU_METAL_STREAM_DYNAMIC_LIGHT_WORLD_TEXELS * 16, stream.lights_world });
 }
 
 /* the glows' functions, made the first time; 0 if they cannot be */
@@ -1665,6 +1696,7 @@ const struct host_render_backend *xgpu_metal_stream_backend(void)
 		backend.dynamic_lights_prepare = stream_dynamic_lights_prepare;
 		backend.dynamic_lights_upload = stream_dynamic_lights_upload;
 		backend.dynamic_lights_halos = stream_dynamic_lights_halos;
+		backend.dynamic_lights_world = stream_dynamic_lights_world;
 		backend.anti_aliasing_prepare = stream_anti_aliasing_prepare;
 		backend.anti_alias = stream_anti_alias;
 		backend.hdr = stream_hdr;

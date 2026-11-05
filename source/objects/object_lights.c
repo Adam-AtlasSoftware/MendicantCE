@@ -193,6 +193,7 @@ void dynamic_lights_submit(void);
 void dynamic_lights_rank(long *lights, short count,
 	void (*describe)(long light, real_point3d *position, real *radius, real *intensity));
 void dynamic_lights_drawn(long light, real_point3d const *position, real radius, real_rgb_color const *color);
+void dynamic_lights_clusters(long rasterizer_light_index, short count, short const *clusters);
 
 /* port: port/linux/src (halo.log) */
 void platform_log(const char *format, ...);
@@ -1409,6 +1410,29 @@ void lights_preprocess_scene(
 								flags |= HALO_DYNAMIC_LIGHT_HALO;
 						}
 						dynamic_lights_note(light->rasterizer_light_index, flags, cone_scale, cone_offset, &light->position);
+						/* (and the clusters it reaches: those its sphere as drawn
+						floods into through the portals from where it is drawn, as
+						the game gathers its surfaces, or its own clusters where it
+						is drawn in no cluster; every one where the game lights
+						every surface in view with it, a first-person weapon's
+						supersized light) */
+						{
+							short clusters[MAXIMUM_CLUSTERS_PER_LIGHT];
+							short cluster_count = NONE;
+							struct location location;
+
+							if (!(TEST_FLAG(light->flags, _point_light_attached_to_first_person_weapon_bit) &&
+								TEST_FLAG(definition->flags, _light_definition_supersize_in_first_person_bit)))
+							{
+								scenario_location_from_point(&location, &light_parameters.position);
+								cluster_count = location.cluster_index != NONE
+									? structure_clusters_in_sphere(location.cluster_index, &light_parameters.position,
+										light_parameters.radius, MAXIMUM_CLUSTERS_PER_LIGHT, clusters)
+									: light_build_cluster_array(scene_light_handle, MAXIMUM_CLUSTERS_PER_LIGHT, clusters);
+								cluster_count = MIN(cluster_count, MAXIMUM_CLUSTERS_PER_LIGHT);
+							}
+							dynamic_lights_clusters(light->rasterizer_light_index, cluster_count, clusters);
+						}
 					}
 				}
 			}

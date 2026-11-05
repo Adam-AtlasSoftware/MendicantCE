@@ -498,6 +498,9 @@ pixel shaders that light with them read (XGPU_METAL_BUFFER_DYNAMIC_LIGHTS,
 _DYNAMIC_LIGHT_CELLS): until set again (XGPU_METAL_SOURCE_NONE: none bound;
 a ring's source is the frame's alone) */
 void xgpu_metal_set_dynamic_lights(struct xgpu_metal_source block, struct xgpu_metal_source cells);
+/* their world (xgpu.h), which the same shaders read
+(XGPU_METAL_BUFFER_DYNAMIC_LIGHT_WORLD): until set again */
+void xgpu_metal_set_dynamic_light_world(struct xgpu_metal_source world);
 /* display.ambient_occlusion "world"'s field, its atlas and its table (3D
 textures: 0 none), the static scenery's pages (a 2D array, at
 XGPU_METAL_TEXTURE_WORLD_AO_SCENERY, the fragments'), the vehicles' occlusion fields' atlas (a 3D texture,

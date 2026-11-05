@@ -1318,15 +1318,47 @@ static void dynamic_lights_functions(struct xgpu_text *text, struct xgpu_text *f
 		"\tfloat4 color[%d];\n"
 		"\tfloat4 cone[%d];\n"
 		"};\n", XGPU_DYNAMIC_LIGHTS_MAXIMUM, XGPU_DYNAMIC_LIGHTS_MAXIMUM, XGPU_DYNAMIC_LIGHTS_MAXIMUM);
+	/* (the lights that reach a point's cluster: its cluster's mask, found down
+	the world's BSP; every light where the world has none, or puts the point
+	in no cluster: xgpu.h) */
 	xgpu_text_append(functions,
-		"static inline float3 dynamic_light_sum(constant xgpu_dynamic_lights &lights, const device uint4 *cells, float3 p,\n"
-		"\tfloat3 n, float3 surface_normal, bool environment, float4 own)\n"
+		"static inline uint4 dynamic_light_cluster_mask(const device uint4 *cells, const device uint4 *world, float3 q)\n"
+		"{\n"
+		"\tuint4 header = world[0];\n"
+		"\tuint node = 0u;\n"
+		"\tfor (int depth = 0; depth < %d; depth++)\n"
+		"\t{\n"
+		"\t\tif (node >= header.x)\n"
+		"\t\t\tbreak;\n"
+		"\t\tuint4 entry = world[1u + node];\n"
+		"\t\tif (entry.x >= header.z - header.y)\n"
+		"\t\t\tbreak;\n"
+		"\t\tfloat4 plane = as_type<float4>(world[header.y + entry.x]);\n"
+		"\t\tuint child = dot(plane.xyz, q) - plane.w >= 0.0 ? entry.z : entry.y;\n"
+		"\t\tif ((child & 0x80000000u) != 0u)\n"
+		"\t\t{\n"
+		"\t\t\tuint leaf = child & 0x7fffffffu;\n"
+		"\t\t\tif (child == 0xffffffffu || leaf >= header.w)\n"
+		"\t\t\t\tbreak;\n"
+		"\t\t\tuint cluster = world[header.z + leaf / 4u][leaf %% 4u];\n"
+		"\t\t\treturn cluster < %du ? cells[%du + cluster] : uint4(0xffffffffu);\n"
+		"\t\t}\n"
+		"\t\tnode = child;\n"
+		"\t}\n"
+		"\treturn uint4(0xffffffffu);\n"
+		"}\n", XGPU_DYNAMIC_LIGHTS_WORLD_DEPTH, XGPU_DYNAMIC_LIGHTS_CLUSTERS,
+		XGPU_DYNAMIC_LIGHTS_GRID_X * XGPU_DYNAMIC_LIGHTS_GRID_Y * XGPU_DYNAMIC_LIGHTS_GRID_Z);
+	xgpu_text_append(functions,
+		"static inline float3 dynamic_light_sum(constant xgpu_dynamic_lights &lights, const device uint4 *cells,\n"
+		"\tconst device uint4 *world, float3 p, float3 n, float3 surface_normal, bool environment, float4 own)\n"
 		"{\n"
 		"\tfloat3 offset = p - lights.grid[0].xyz;\n"
 		"\tfloat3 cell = sign(offset) * log2(1.0 + abs(offset) * lights.grid[1].w) * lights.grid[1].xyz +\n"
 		"\t\tfloat3(%d.0, %d.0, %d.0);\n"
 		"\tint3 at = clamp(int3(floor(cell)), int3(0), int3(%d, %d, %d));\n"
 		"\tuint4 mask = cells[(at.z * %d + at.y) * %d + at.x];\n"
+		"\tif (any(mask != 0u) && world[0].x != 0u)\n"
+		"\t\tmask &= dynamic_light_cluster_mask(cells, world, p + surface_normal * %.4f);\n"
 		"\tfloat3 sum = float3(0.0);\n"
 		"\tfor (int word = 0; word < 4; word++)\n"
 		"\t{\n"
@@ -1379,7 +1411,7 @@ static void dynamic_lights_functions(struct xgpu_text *text, struct xgpu_text *f
 		"}\n",
 		XGPU_DYNAMIC_LIGHTS_GRID_X / 2, XGPU_DYNAMIC_LIGHTS_GRID_Y / 2, XGPU_DYNAMIC_LIGHTS_GRID_Z / 2,
 		XGPU_DYNAMIC_LIGHTS_GRID_X - 1, XGPU_DYNAMIC_LIGHTS_GRID_Y - 1, XGPU_DYNAMIC_LIGHTS_GRID_Z - 1,
-		XGPU_DYNAMIC_LIGHTS_GRID_Y, XGPU_DYNAMIC_LIGHTS_GRID_X,
+		XGPU_DYNAMIC_LIGHTS_GRID_Y, XGPU_DYNAMIC_LIGHTS_GRID_X, (double)XGPU_DYNAMIC_LIGHTS_CLUSTER_OFFSET,
 		1.0 / (XGPU_DYNAMIC_LIGHTS_CORE * XGPU_DYNAMIC_LIGHTS_CORE));
 }
 
@@ -2081,8 +2113,9 @@ char *xgpu_msl_pixel_shader(const struct xgpu_pixel_program *program, const stru
 	}
 	if (program->dynamic_lights)
 		xgpu_text_append(&text, ",\n\tconstant xgpu_dynamic_lights &dynamic_lights [[buffer(%d)]], "
-			"const device uint4 *dynamic_light_cells [[buffer(%d)]]", XGPU_MSL_BUFFER_DYNAMIC_LIGHTS,
-			XGPU_MSL_BUFFER_DYNAMIC_LIGHT_CELLS);
+			"const device uint4 *dynamic_light_cells [[buffer(%d)]], "
+			"const device uint4 *dynamic_light_world [[buffer(%d)]]", XGPU_MSL_BUFFER_DYNAMIC_LIGHTS,
+			XGPU_MSL_BUFFER_DYNAMIC_LIGHT_CELLS, XGPU_MSL_BUFFER_DYNAMIC_LIGHT_WORLD);
 	if (count_samples)
 		xgpu_text_append(&text, ",\n\tdevice atomic_uint *visible_samples [[buffer(%d)]]", XGPU_MSL_BUFFER_SAMPLES);
 	if (world)
@@ -2134,7 +2167,7 @@ char *xgpu_msl_pixel_shader(const struct xgpu_pixel_program *program, const stru
 			"\t{\n"
 			"\t\tfloat3 n = in.xWorldNormal.xyz * rsqrt(max(dot(in.xWorldNormal.xyz, in.xWorldNormal.xyz), 1.0e-24));\n"
 			"\t\tv0.rgb = dynamic_light_add(dynamic_lights, model_lighting(u, in.xWorldNormal%s),\n"
-			"\t\t\tdynamic_light_sum(dynamic_lights, dynamic_light_cells, in.xWorldPosition, n, n, false,\n"
+			"\t\t\tdynamic_light_sum(dynamic_lights, dynamic_light_cells, dynamic_light_world, in.xWorldPosition, n, n, false,\n"
 			"\t\t\t\tu.model_lights[%d]));\n"
 			"\t}\n", occlusion_light == XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL ? ", occlusion" : "",
 			XGPU_MODEL_LIGHT_OWN_LIGHTS);
@@ -2235,7 +2268,7 @@ char *xgpu_msl_pixel_shader(const struct xgpu_pixel_program *program, const stru
 			"\t\tfloat3 bump = %s;\n"
 			"\t\tfloat3 n = normalize(in.xWorldTangent * bump.x + in.xWorldBinormal * bump.y + surface_normal * max(bump.z, 0.05));\n"
 			"\t\tresult.rgb = dynamic_light_add%s(dynamic_lights, result.rgb,\n"
-			"\t\t\tdynamic_light_sum(dynamic_lights, dynamic_light_cells, in.xWorldPosition, n, surface_normal, true,\n"
+			"\t\t\tdynamic_light_sum(dynamic_lights, dynamic_light_cells, dynamic_light_world, in.xWorldPosition, n, surface_normal, true,\n"
 			"\t\t\t\tfloat4(-1.0)) *\n"
 			"\t\t\tpow(u.ps_final_c0.rgb, float3(2.2)));\n"
 			"\t}\n",

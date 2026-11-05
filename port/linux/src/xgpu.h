@@ -329,6 +329,38 @@ camera, where lights are seen large. */
 #define XGPU_DYNAMIC_LIGHTS_CORE 0.6
 #define XGPU_DYNAMIC_LIGHTS_UNIT 12
 #define XGPU_DYNAMIC_LIGHTS_BINDING 1
+
+/* Which lights reach which of the structure's clusters: a light reaches the
+clusters its sphere floods into through the structure's portals from where
+it is (structure_clusters_in_sphere, as the game gathers a light's surfaces
+for its own pass), and no other, so that a light on the far side of a wall
+does not light this side of it. Past the cells, at z = GRID_Z, the cells'
+texture has a slice of each cluster's 128-bit mask of the lights that reach
+it (XGPU_DYNAMIC_LIGHTS_CLUSTERS of them: the game's most), uploaded with
+the cells. Past it are the world's slices (XGPU_DYNAMIC_LIGHTS_WORLD_SLICES),
+uploaded when the structure changes: the structure's 3D BSP, which says in
+which leaf, and so cluster, a point is (bsp3d_test_point), as four words a
+texel, texel t at x = t % 32, y = t / 32 % 32, z = GRID_Z + 1 + t / 1024:
+texel 0 the header (the node count, the planes' first texel, the leaves'
+first texel, the leaf count), from texel 1 a node each (its plane, its
+children behind and in front: a child with the top bit set is a leaf, all
+bits set none), then the planes (their floats' bits: the normal, and its
+distance along it), then the leaves' clusters, four a texel (all bits set:
+none). A pixel finds its cluster from its point a little off its surface,
+along its normal, and its cell's lights are those its cluster's mask has; a
+world with no nodes (none uploaded, or too large) leaves the cells' lights as
+they are, as does a point the BSP puts in no cluster. */
+#define XGPU_DYNAMIC_LIGHTS_CLUSTERS 512
+#define XGPU_DYNAMIC_LIGHTS_WORLD_SLICES 240
+#define XGPU_DYNAMIC_LIGHTS_WORLD_TEXELS (XGPU_DYNAMIC_LIGHTS_WORLD_SLICES * 1024)
+/* the bytes uploaded each frame: the cells and the clusters' masks */
+#define XGPU_DYNAMIC_LIGHTS_CELLS_BYTES \
+	(XGPU_DYNAMIC_LIGHTS_GRID_X * XGPU_DYNAMIC_LIGHTS_GRID_Y * (XGPU_DYNAMIC_LIGHTS_GRID_Z + 1) * 16)
+/* how far off its surface a pixel's point is put, world units */
+#define XGPU_DYNAMIC_LIGHTS_CLUSTER_OFFSET 0.02f
+/* the most nodes a pixel walks down the BSP (bsp3d.c's
+MAXIMUM_BSP3D_TRAVERSAL_DEPTH) */
+#define XGPU_DYNAMIC_LIGHTS_WORLD_DEPTH 128
 enum
 {
 	XGPU_DYNAMIC_LIGHTS_ENVIRONMENT = 1,

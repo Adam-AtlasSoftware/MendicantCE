@@ -316,8 +316,8 @@ static struct
 	uint32_t draw_uniforms_size;
 	struct xgpu_metal_source streams[XGPU_METAL_STREAM_COUNT];
 	float constant_attributes[16][4];
-	/* the enhanced dynamic lights' block and cells */
-	struct xgpu_metal_source dynamic_lights[2];
+	/* the enhanced dynamic lights' block, cells and world */
+	struct xgpu_metal_source dynamic_lights[3];
 	/* display.ambient_occlusion "world"'s field and block */
 	uint32_t world_ao_field, world_ao_table, world_ao_scenery, world_ao_objects;
 	struct xgpu_metal_source world_ao_block;
@@ -3602,6 +3602,12 @@ void xgpu_metal_set_dynamic_lights(struct xgpu_metal_source block, struct xgpu_m
 	metal.dirty |= _dirty_dynamic_lights;
 }
 
+void xgpu_metal_set_dynamic_light_world(struct xgpu_metal_source world)
+{
+	metal.dynamic_lights[2] = world;
+	metal.dirty |= _dirty_dynamic_lights;
+}
+
 void xgpu_metal_set_world_ao(uint32_t field, uint32_t table, uint32_t scenery, uint32_t objects,
 	struct xgpu_metal_source block)
 {
@@ -3779,9 +3785,10 @@ static BOOL draw_state_apply(id<MTLRenderCommandEncoder> render)
 	}
 	if (dirty & _dirty_dynamic_lights)
 	{
-		static const NSUInteger places[2] = { XGPU_METAL_BUFFER_DYNAMIC_LIGHTS, XGPU_METAL_BUFFER_DYNAMIC_LIGHT_CELLS };
+		static const NSUInteger places[3] = { XGPU_METAL_BUFFER_DYNAMIC_LIGHTS, XGPU_METAL_BUFFER_DYNAMIC_LIGHT_CELLS,
+			XGPU_METAL_BUFFER_DYNAMIC_LIGHT_WORLD };
 
-		for (index = 0; index < 2; index++)
+		for (index = 0; index < 3; index++)
 		{
 			NSUInteger offset = 0;
 			id<MTLBuffer> buffer = metal.dynamic_lights[index].kind == XGPU_METAL_SOURCE_NONE ? nil :
