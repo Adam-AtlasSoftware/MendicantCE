@@ -77,10 +77,12 @@ NEGATIVE_CONTROLS = {
     "spatial-vr-ignored": (("if (vr_running)\n\t\treturn vr_hrtf;", "if (vr_running && 0)\n\t\treturn vr_hrtf;"),
                            "spatial-choice"),
     # the HRTF: no time between the ears, no head shadow, the notch fixed (no elevation), nothing behind
-    "hrtf-no-delay": (("parameters->delay[ear] = strength *", "parameters->delay[ear] = 0.0f * strength *"), "hrtf-cues"),
+    "hrtf-no-delay": (("parameters->delay[ear] = floorf(strength *", "parameters->delay[ear] = 0.0f * floorf(strength *"),
+                      "hrtf-cues"),
     "hrtf-no-shadow": (("float shadow = 1.0f + strength *", "float shadow = 1.0f + 0.0f * strength *"), "hrtf-cues"),
-    "hrtf-no-elevation": (("elevation = (elevation + 30.0f) / 90.0f;", "elevation = 30.0f / 90.0f;"), "hrtf-cues"),
-    "hrtf-no-rear": (("#define HRTF_REAR_DEPTH 0.55f", "#define HRTF_REAR_DEPTH 0.0f"), "hrtf-cues"),
+    "hrtf-no-elevation": (("elevation = (elevation - HRTF_NOTCH_ELEVATION_LOW) /",
+                           "elevation = (0.0f - HRTF_NOTCH_ELEVATION_LOW) /"), "hrtf-cues"),
+    "hrtf-no-rear": (("#define HRTF_REAR_DEPTH 0.99f", "#define HRTF_REAR_DEPTH 0.0f"), "hrtf-cues"),
     # through the HRTF: the distance left out
     "hrtf-no-distance": (("hrtf_out->gain = 0.70710678f * attenuation *", "hrtf_out->gain = 0.70710678f *"),
                          "hrtf-paths"),

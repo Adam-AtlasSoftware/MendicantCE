@@ -596,8 +596,9 @@ int main(int argc, char **argv)
 	{
 		/* the reference: a 3D voice's direct path, centred, has an energy of
 		1 over the two channels (the equal power pan); the reverb's four
-		channels play from the two sides' pairs, so that their energy over
-		the stereo output is theirs over the four */
+		channels play on stereo as the Xbox's stereo downmix played the
+		speakers' mix bins (its encode processor's: left = front left + 0.707
+		center + 0.707 back left), each side its front and its back at -3 dB */
 		struct sdl_stream stream;
 		float left, right, room, direct_lowpass, room_lowpass, output[2 * 2048], *four;
 		static float send[2048];
@@ -623,8 +624,14 @@ int main(int argc, char **argv)
 		properties.lReflections = DSBVOLUME_MIN;
 		four = response(&properties, 2048);
 		for (frame = 0; frame < 2048; frame++)
-			for (channel = 0; channel < 4; channel++)
-				quad += (double)four[frame * 4 + channel] * four[frame * 4 + channel];
+		{
+			for (channel = 0; channel < 2; channel++)
+			{
+				double side = four[frame * 4 + channel] + 0.70710678 * four[frame * 4 + 2 + channel];
+
+				quad += side * side;
+			}
+		}
 		free(four);
 		reverb_clear();
 		reverb_update(&properties, ++serial);
@@ -633,7 +640,7 @@ int main(int argc, char **argv)
 		reverb_process(send, output, 2048, 1.0f);
 		for (frame = 0; frame < 2 * 2048; frame++)
 			stereo += (double)output[frame] * output[frame];
-		CHECK(fabs(10.0 * log10(stereo / quad)) < 0.1, "the stereo reverb %.2f dB over the four channels",
+		CHECK(fabs(10.0 * log10(stereo / quad)) < 0.1, "the stereo reverb %.2f dB over the four channels' downmix",
 			10.0 * log10(stereo / quad));
 		return 0;
 	}
