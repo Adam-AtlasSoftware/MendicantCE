@@ -36,7 +36,7 @@ STOCK_MAP_COUNT = 24
 # render_prepared.c's line, as a record is written
 RECORDED = re.compile(r"render: the map's preparation recorded \((\d+) draws, (\d+) words; "
                       r"z:\\prepared\\([0-9a-f]{8})-([0-9a-f]{16})\.prepared, ([^,]*), form (\d+) (\d+)\)")
-HEADER_SIZE = 40  # struct prepared_header
+HEADER_SIZE = 48  # struct prepared_header
 MAGIC = 0x50314F48
 # the shipped file (prepared_shipped.h)
 PACK_NAME = "prepared.records"
