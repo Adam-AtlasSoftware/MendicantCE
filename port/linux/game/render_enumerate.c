@@ -32,6 +32,18 @@ whether the window being drawn is one of these. The texture cache waits for
 each texture while enumerating (xbox_texture_cache.c), so that no draw is
 skipped or made without its sampler.
 
+What a structure the map switches to later draws besides its materials is
+drawn in the map's first frame too, whatever structure it starts in: the
+mirrors' window (render_window's through a mirror: the world again, its
+models, effects and lens flares, unlit by the ambient occlusion, which the
+3D view's window alone has) where any structure of the map has a mirror
+(structure_bsp_cache_has_mirrors: the kept copies of its bsps), and the
+other structures' materials (the stand-ins) drawn through it too; and the
+fog screen of each of the map's fogs (the planar fog's layers a camera
+inside a fog plane's depth sees), each in a world pass of its own with the
+camera inside it (fog_screens_collect). A later structure then draws
+nothing new as the game switches to it.
+
 A setting that changes what the draws' pipelines are (render_prepared.c's
 prepared_settings: the ambient occlusion, the lights, HDR, multisampling)
 changed in play makes the maps' enumerations others': each map is prepared
@@ -91,6 +103,7 @@ each structure's first sight, every model and effect).
 #include "effects/particles.h"
 #include "effects/weather_particle_systems.h"
 #include "render/render_sprite.h"
+#include "scenario/fog_definitions.h"
 
 #include "halo_dynamic_lights.h"
 #include "render_enumerate.h"
@@ -253,6 +266,9 @@ static struct
 	/* the frame's lens flares before the enumeration's (none of these
 	left for the frame's own window) */
 	long lens_flare_count;
+	/* the fog (a 'fog ' tag) whose screen this round's world pass draws
+	(fog_screens_collect), or NONE */
+	long fog_screen;
 	/* the pass's lights (rasterizer_light_submit's) */
 	short light_count;
 	long light_indices[MAXIMUM_LIGHTS_PER_WINDOW];
@@ -396,13 +412,12 @@ static void materials_add(struct enumerated_materials *materials, unsigned long 
 		materials->keys[materials->count++] = key;
 }
 
-/* each of the structure's materials' keys, as its world draws them and (a
-structure with a mirror) as its mirror's window does: whether one is new
-(not in materials), or with add, they are added */
+/* each of the structure's materials' keys, as its world draws them and
+(mirrors) as a mirror's window does: whether one is new (not in materials),
+or with add, they are added */
 static boolean structure_materials(struct structure_bsp *structure_bsp, struct enumerated_materials *materials,
-	boolean add)
+	boolean add, boolean mirrors)
 {
-	boolean mirrors = structure_visibility_port_has_mirrors();
 	short lightmap_index, material_index;
 
 	for (lightmap_index = 0; lightmap_index < structure_bsp->lightmaps.count; lightmap_index++)
@@ -491,7 +506,7 @@ static void stand_ins_collect(struct structure_bsp *structure_bsp, struct enumer
 	if (!enumerated)
 		return;
 	known = *enumerated;
-	structure_materials(structure_bsp, &known, TRUE);
+	structure_materials(structure_bsp, &known, TRUE, FALSE);
 	structure_bsp_cache_materials(stand_ins_visit, &known);
 }
 
@@ -510,7 +525,12 @@ static void stand_ins_restore(struct enumerated_materials *enumerated)
 		stand_ins.unlit->bitmap_index = stand_ins.unlit_bitmap_index;
 	stand_ins.unlit = NULL;
 	for (index = 0; index < stand_ins.keys.count; index++)
+	{
 		materials_add(enumerated, stand_ins.keys.keys[index]);
+		/* (drawn through the mirrors' window too) */
+		if (enumerate.mirrors)
+			materials_add(enumerated, stand_ins.keys.keys[index] | MATERIAL_KEY_MIRROR);
+	}
 	stand_ins.count = 0;
 	stand_ins.keys.count = 0;
 }
@@ -614,6 +634,100 @@ static short pass_part(void)
 
 /* ---------- the fogs */
 
+/* a fog's screen as the fog tag holds it (structures.c's struct fog_screen,
+at FOG_SCREEN_OFFSET in the tag: tag_schema_render.c checks the offsets) */
+#define FOG_SCREEN_OFFSET 0x84
+#define MAXIMUM_FOG_SCREEN_LAYERS 4
+struct enumerated_fog_screen
+{
+	word flags;
+	short layer_count;
+	real near_distance, far_distance, near_density, far_density;
+	real start_distance_from_fog_plane;
+	byte reserved18[4];
+	pixel32 color;
+	real rotation_multiplier, strafing_multiplier, zoom_multiplier;
+	byte reserved2C[8];
+	real map_scale;
+	struct tag_reference map;
+};
+typedef char enumerated_fog_screen_map_offset[offsetof(struct enumerated_fog_screen, map) == 0xBC - FOG_SCREEN_OFFSET ?
+	1 : -1];
+
+#define MAXIMUM_FOG_SCREENS 32
+
+/* the map's fogs whose screens the first frame draws, one of each that
+draws alike (its flags, layers and map), and the next to draw */
+static struct
+{
+	long tags[MAXIMUM_FOG_SCREENS];
+	short count, next;
+} fog_screens;
+
+static struct enumerated_fog_screen const *fog_screen_get(long fog_index)
+{
+	return (struct enumerated_fog_screen const *)((byte const *)fog_definition_get(fog_index) + FOG_SCREEN_OFFSET);
+}
+
+/* each of the map's fogs with a screen a camera inside it draws
+(rasterizer_xbox_environment_fog.c's rasterizer_environment_fog_screen_is_active
+and _begin: its layers, its map, its densities apart): whatever structure's
+fog plane or sky uses it */
+static void fog_screens_collect(void)
+{
+	struct tag_iterator iterator;
+	long fog_index;
+
+	fog_screens.count = fog_screens.next = 0;
+	tag_iterator_new(&iterator, FOG_TAG);
+	while ((fog_index = tag_iterator_next(&iterator)) != NONE && fog_screens.count < MAXIMUM_FOG_SCREENS)
+	{
+		struct enumerated_fog_screen const *screen = fog_screen_get(fog_index);
+		short index;
+
+		if (screen->layer_count <= 0 || screen->layer_count > MAXIMUM_FOG_SCREEN_LAYERS || screen->map.index == NONE ||
+			screen->far_distance == 0.0f || screen->far_density == 0.0f || screen->near_density == screen->far_density)
+		{
+			continue;
+		}
+		for (index = 0; index < fog_screens.count; index++)
+		{
+			struct enumerated_fog_screen const *other = fog_screen_get(fog_screens.tags[index]);
+
+			if (other->flags == screen->flags && other->layer_count == screen->layer_count &&
+				other->map.index == screen->map.index)
+			{
+				break;
+			}
+		}
+		if (index == fog_screens.count)
+			fog_screens.tags[fog_screens.count++] = fog_index;
+	}
+}
+
+/* the round's fog screen's fog: planar, its plane above the camera, which
+is half way into the screen's density (between where it starts and the
+plane's depth) */
+static void fog_screen_set(struct render_fog *to, long fog_index)
+{
+	struct enumerated_fog_screen const *screen = fog_screen_get(fog_index);
+	real depth = 10.0f, start = screen->start_distance_from_fog_plane, inside;
+
+	if (start == -depth)
+		start = 0.0001f - depth;
+	inside = (start - depth) * 0.5f;
+	to->planar_mode = _planar_fog_normal;
+	to->plane.n.i = to->plane.n.j = 0.0f;
+	to->plane.n.k = 1.0f;
+	to->plane.d = render.camera.position.z - inside;
+	to->planar_maximum_density = 0.5f;
+	to->planar_maximum_distance = 50.0f;
+	to->planar_maximum_depth = depth;
+	to->runtime_flags = 0;
+	to->fog_definition_flags = *(word const *)fog_definition_get(fog_index);
+	to->screen = (struct fog_screen const *)screen;
+}
+
 static void fog_set(short fog)
 {
 	struct render_fog *to = &render.fog;
@@ -621,6 +735,8 @@ static void fog_set(short fog)
 	real_vector3d up = { 0.0f, 0.0f, 1.0f };
 
 	*to = enumerate.own_fog;
+	if (fog == _fog_own && enumerate.fog_screen != NONE)
+		fog_screen_set(to, enumerate.fog_screen);
 	if (fog == _fog_own)
 		return;
 	to->screen = NULL;
@@ -710,7 +826,8 @@ boolean render_enumerate_pending(boolean scope)
 	has its pipelines: nothing is drawn as the game switches to it (a load
 	zone), and its textures load as its surfaces are seen, as the Xbox's. */
 	if (*enumerate.structure_bsps_enumerated[view] && global_structure_bsp_get() &&
-		!structure_materials(global_structure_bsp_get(), enumerate.materials_enumerated[view], FALSE))
+		!structure_materials(global_structure_bsp_get(), enumerate.materials_enumerated[view], FALSE,
+			structure_visibility_port_has_mirrors()))
 	{
 		SET_FLAG(*enumerate.structure_bsps_enumerated[view], structure_bsp_index, TRUE);
 		platform_log("render: structure %d%s: its materials' pipelines made before", structure_bsp_index,
@@ -741,7 +858,14 @@ boolean render_enumerate_begin(boolean mirrors, boolean scope)
 		enumerated_derivation_note();
 	enumerate.structure_bsp_index = structure_bsp_index;
 	SET_FLAG(*enumerate.structure_bsps_enumerated[view], structure_bsp_index, TRUE);
-	enumerate.mirrors = mirrors && structure_visibility_port_has_mirrors();
+	/* (a map's first frame: through a mirror's window wherever the map has
+	one, whatever structure it starts in) */
+	enumerate.mirrors = mirrors && (structure_visibility_port_has_mirrors() ||
+		(enumerate.everything && structure_bsp_cache_has_mirrors()));
+	enumerate.fog_screen = NONE;
+	fog_screens.count = fog_screens.next = 0;
+	if (enumerate.everything)
+		fog_screens_collect();
 	/* (a map's first: from its record, where it has one: render_prepared.c;
 	its structure's materials then counted as the walk counts them) */
 	if (enumerate.everything && !scope && render_prepared_replay(enumerate.mirrors))
@@ -750,7 +874,7 @@ boolean render_enumerate_begin(boolean mirrors, boolean scope)
 		struct enumerated_materials *enumerated = enumerate.materials_enumerated[view];
 
 		if (structure_bsp)
-			structure_materials(structure_bsp, enumerated, TRUE);
+			structure_materials(structure_bsp, enumerated, TRUE, enumerate.mirrors);
 		while (stand_ins_next(structure_bsp, enumerated))
 			;
 		platform_log("render: the map's and its structure %d's shaders and pipelines made from its record, %d "
@@ -778,16 +902,29 @@ boolean render_enumerate_next(void)
 {
 	double waited, cpu;
 
-	do
-		enumerate.pass++;
-	while (enumerate.pass < passes() && !pass_drawn());
-	if (enumerate.pass < passes())
+	if (enumerate.fog_screen == NONE)
 	{
+		do
+			enumerate.pass++;
+		while (enumerate.pass < passes() && !pass_drawn());
+		if (enumerate.pass < passes())
+		{
+			fog_set(pass_fog());
+			if (menu_pictures_preparing())
+				menu_pictures_recording((float)enumerate.pass / (float)passes());
+			return TRUE;
+		}
+	}
+	/* the map's fog screens, each in the first world pass again (its models
+	too: a screen draws the opaque models over again) */
+	if (enumerate.everything && fog_screens.next < fog_screens.count)
+	{
+		enumerate.fog_screen = fog_screens.tags[fog_screens.next++];
+		enumerate.pass = 0;
 		fog_set(pass_fog());
-		if (menu_pictures_preparing())
-			menu_pictures_recording((float)enumerate.pass / (float)passes());
 		return TRUE;
 	}
+	enumerate.fog_screen = NONE;
 	if (!stand_ins.round)
 	{
 		if (!enumerate.scope)
@@ -795,13 +932,14 @@ boolean render_enumerate_next(void)
 		/* (its materials' pipelines made: a later structure with these alone
 		draws nothing) */
 		if (global_structure_bsp_get())
-			structure_materials(global_structure_bsp_get(), enumerate.materials_enumerated[enumerate.scope ? 1 : 0], TRUE);
+			structure_materials(global_structure_bsp_get(), enumerate.materials_enumerated[enumerate.scope ? 1 : 0], TRUE,
+				enumerate.mirrors);
 	}
 	/* the map's other structures' materials, in the world's passes alone */
 	if (stand_ins_next(global_structure_bsp_get(), enumerate.materials_enumerated[enumerate.scope ? 1 : 0]))
 	{
+		/* (and through the mirrors' window, where the map has one) */
 		enumerate.everything = FALSE;
-		enumerate.mirrors = FALSE;
 		enumerate.pass = 0;
 		while (!pass_drawn())
 			enumerate.pass++;
