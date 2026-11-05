@@ -6597,9 +6597,13 @@ never turns (a turn is the stick's rate over each frame's time, so it is
 the same each tick only at one frame rate), a10 at 60 and at 90 frames a
 second is the same game. Left out of the hash, as they mean nothing
 between their uses: the objects' magic numbers (the collision tests'
-marks, which the frames' tests leave too) and their cached render states'
+marks, which the frames' tests leave too), their cached render states'
 indices (the renderer's), and the free space after the objects' last
-block. `--game` compares each log from its last game's start, where the
+block. Left out too: the indices of an object's attachments that are the
+frames' datums (a light, a looping sound, a contrail, a particle system;
+an effect's is compared). The tick makes them with the object, but in
+slots that the frames free, so a projectile's tracer was contrail 0 in one
+run and 1 in another after lobbies of different lengths. `--game` compares each log from its last game's start, where the
 tick count began again at 1: a network test's game after its lobby (above).
 
 ### Simulation rate
