@@ -981,6 +981,41 @@ static const struct config_setting config_settings[] =
 		"A controller's look turns the other way: pushing the stick that looks to\n"
 		"the right turns the view left. The profile's INVERT LOOK is the up and\n"
 		"down; this is the side to side, for every controller." },
+	{ "input.gyro_aim", _config_string, "\"off\"", "HALO_GYRO_AIM", _environment_value, _platform_all,
+		"Aiming by turning a controller that has a gyroscope (a DualSense, a\n"
+		"DualShock 4, a Switch Pro Controller or Joy-Cons, a Steam Deck with\n"
+		"Steam Input off for the game): \"off\"; \"on\", always; \"hold\", while\n"
+		"input.gyro_button is held; \"pause\", always but while it is held (to\n"
+		"bring the controller back to the middle). It turns the view as the\n"
+		"mouse does, with no aim assist; the stick keeps its own." },
+	{ "input.gyro_button", _config_string, "\"touchpad\"", "HALO_GYRO_BUTTON", _environment_value, _platform_all,
+		"The button of input.gyro_aim's \"hold\" and \"pause\": \"touchpad\" (its\n"
+		"click), \"left_paddle\", \"right_paddle\" (the back buttons),\n"
+		"\"misc\" (Capture, Share or the microphone button), \"left_bumper\",\n"
+		"\"right_bumper\", \"left_trigger\", \"right_trigger\", \"left_stick\",\n"
+		"\"right_stick\" (their clicks). It still does its own action too." },
+	{ "input.gyro_sensitivity", _config_real, "2.0", "HALO_GYRO_SENSITIVITY", _environment_value, _platform_all,
+		"How far the view turns side to side for each degree the controller\n"
+		"turns: 1 as far, 2 twice as far. Zoomed in, it turns as the mouse does\n"
+		"(input.zoom_sensitivity)." },
+	{ "input.gyro_vertical_sensitivity", _config_real, "1.0", "HALO_GYRO_VERTICAL_SENSITIVITY", _environment_value,
+		_platform_all,
+		"How far the view turns up and down for the gyroscope, times\n"
+		"input.gyro_sensitivity: 1 the same as side to side." },
+	{ "input.gyro_space", _config_string, "\"player\"", "HALO_GYRO_SPACE", _environment_value, _platform_all,
+		"Which turn of the controller turns the view side to side: \"player\",\n"
+		"a turn about the up direction, however the controller is held (flat,\n"
+		"upright or between); \"local\", a turn about the controller's own\n"
+		"vertical axis, as if it were held flat." },
+	{ "input.gyro_smoothing", _config_boolean, "true", "HALO_GYRO_SMOOTHING", _environment_value, _platform_all,
+		"Steadies the gyroscope's smallest motions (the hand's tremor), never a\n"
+		"real turn's; nothing is lost, only spread over a few hundredths of a\n"
+		"second." },
+	{ "input.flick_stick", _config_boolean, "false", "HALO_FLICK_STICK", _environment_value, _platform_all,
+		"The right stick as a flick stick, with the default stick layout: pushed\n"
+		"to its rim, you turn at once to face where it points (pushed right, a\n"
+		"quarter turn right; down, about face); turned round the rim, you turn\n"
+		"with it. It does not look up or down: the gyroscope does." },
 
 	/* the keyboard and mouse's own controls (port/linux/src/xinput_sdl.c) */
 	{ "controls.move_forward", _config_string, "\"W\"", "HALO_KEY_MOVE_FORWARD", _environment_value, _platform_all,
@@ -3709,6 +3744,10 @@ static const struct
 	{ "input.touch_controls", { "auto", "on", "off", NULL }, NULL },
 	{ "input.touch_crouch", { "toggle", "hold", NULL }, NULL },
 	{ "input.crouch", { "hold", "toggle", NULL }, NULL },
+	{ "input.gyro_aim", { "off", "on", "hold", "pause", NULL }, NULL },
+	{ "input.gyro_button", { "touchpad", "left_paddle", "right_paddle", "misc", "left_bumper", "right_bumper",
+		"left_trigger", "right_trigger", "left_stick", "right_stick", NULL }, NULL },
+	{ "input.gyro_space", { "player", "local", NULL }, NULL },
 	{ "input.button_prompts", { "auto", "controller", "keyboard", NULL }, NULL },
 	{ "input.zoom_sensitivity", { "cs2", "halo", NULL }, "cs2" },
 	{ "game.console_log", { "important", "all", "none", NULL }, NULL },

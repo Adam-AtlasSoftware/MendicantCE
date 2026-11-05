@@ -257,6 +257,8 @@ static unsigned long movie_skip_presses, movie_skip_presses_seen;
 /* port/linux/src/xinput_sdl.c: the scripted player's mouse, as its events
 would bring it (debug.test_input "latency:") */
 void halo_test_input_pump(struct platform_input_state *state, unsigned char *buttons_pressed);
+/* xinput_sdl.c: a gamepad's gyroscope or accelerometer sample */
+void halo_gyro_sensor_event(SDL_JoystickID which, int sensor, const float *data, Uint64 sensor_ns, Uint64 event_ns);
 /* rebinding (platform_binding_capture_begin), under input_lock: waiting for
 an input, and the one taken; then the keyboard and mouse settle (their keys
 and buttons held then are let go) before they drive anything again */
@@ -3162,6 +3164,10 @@ void platform_pump_events(void)
 			}
 			break;
 #endif
+		case SDL_EVENT_GAMEPAD_SENSOR_UPDATE:
+			halo_gyro_sensor_event(event.gsensor.which, event.gsensor.sensor, event.gsensor.data,
+				event.gsensor.sensor_timestamp, event.gsensor.timestamp);
+			break;
 		case SDL_EVENT_GAMEPAD_REMOVED:
 			/* (SDL keeps a gamepad open until it is closed, even once the
 			controller has gone) */
