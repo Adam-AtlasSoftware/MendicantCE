@@ -839,6 +839,11 @@ long long host_syscall(long long number, long long a, long long b, long long c,
 	case GUEST_SYS_exit_group:
 		host_exit((int)a);
 
+	case GUEST_SYS_sched_getaffinity:
+		/* (the host's processors, all of them: musl's processor count) */
+		return halo_guest_affinity(GUEST(unsigned char *, c), (unsigned long)(uint32_t)b,
+			sysconf(_SC_NPROCESSORS_ONLN));
+
 	case GUEST_SYS_sysinfo:
 	{
 		struct sysinfo value;
