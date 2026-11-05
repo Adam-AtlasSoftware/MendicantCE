@@ -612,10 +612,9 @@ GPU's time a frame says little about the work. To measure the work:
   kind's median, mean and most milliseconds a frame, its passes a frame and
   the other kinds drawn in them. The kinds are the game's renderer's
   categories (`rasterizer.h`'s, sent with the command stream's `CATEGORY`
-  records: the sky, `ao pre-pass` (`display.ambient_occlusion`'s), the world,
-  its transparents, water, effects, the HUD, `other` outside them) and the
-  backend's own passes (`ao depth`, `ao`, `ao blur`, `ao upsample`,
-  `tone map`, `anti-aliasing`, `panini`), with the passes put aside
+  records: the sky, the world, its transparents, water, effects, the HUD,
+  `other` outside them) and the backend's own passes (`tone map`,
+  `anti-aliasing`, `panini`), with the passes put aside
   (`aside`: the shadows' and mip chains' small targets), the blits
   (`copies`) and the picture's copy for the presentation (`present`). A
   render pass's time is its fragment stage's (the GPU runs the vertex
@@ -623,8 +622,7 @@ GPU's time a frame says little about the work. To measure the work:
   that started before it, to its end: the kinds' times add up to the time
   the GPU was busy with the frame (`busy`), whatever else the GPU did
   between (another app's work). A pass's kind is the one its first draw had:
-  the 3D view's after the occlusion is one pass, its transparents, water
-  and HUD in it; `HALO_METAL_PASS_TIMES_SPLIT=1` ends the timed frames'
+  the 3D view is one pass, its transparents, water and HUD in it; `HALO_METAL_PASS_TIMES_SPLIT=1` ends the timed frames'
   passes where the kind changes, at the cost of their stores and loads.
 - `HALO_METAL_CAPTURE=<frame>:<file>.gputrace` (with `MTL_CAPTURE_ENABLED=1`)
   writes that frame and the next, the first's presentation included, as a
@@ -902,24 +900,6 @@ command stream's backend table. They run on one thread, the render thread.
   `tools/metal_post_shaders.py`); the functions are in the app's library,
   their pipelines made as the setting is chosen and as a map is
   prepared.
-- **Ambient occlusion** (`display.ambient_occlusion`): the Vulkan
-  backend's GTAO (`tools/vulkan_post_shaders.py`) in passes Apple's GPUs
-  draw cheaply (`xgpu_metal_post.c`): the stencil's marks drawn into a mask
-  of two bytes a pixel; the distances and the mask taken into one texture at
-  the occlusion's resolution (half the target's each way: a Retina
-  display's points), the only pixels the occlusion reads them at, so that
-  its scattered reads stay in a texture a quarter of the target's size; the
-  occlusion, its blur along x and y, and the occlusion filtered up into a
-  byte a pixel, the pixel's distance read from the depth target. The
-  occlusion, the blur and the filtering are compiled in Metal's relaxed
-  maths (`#pragma METAL fp math_mode(relaxed)`, by
-  `tools/metal_post_shaders.py`): in safe maths, their arcsines,
-  exponentials and divides cost three times their reads. The occlusion's
-  texture is unbound for the draws that do not read it, so that the
-  objects' shadows drawn after the surfaces are still put aside. On an M2
-  at 3420x2146, unpaced (`HALO_METAL_PASS_TIMES`), a frame's GPU time with
-  "strong" over none: a10's hangar 3.3 ms (was 10 to 12), a30's landing
-  1.1 ms (was 5.1).
 
 ### Tests
 

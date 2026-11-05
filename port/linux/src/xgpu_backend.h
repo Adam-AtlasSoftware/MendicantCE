@@ -119,21 +119,10 @@ void xgpu_backend_picture_top(int top);
 on; 1 none, which costs nothing. An HDR swapchain's frame never is. */
 void xgpu_backend_gamma(float gamma);
 /* the game's renderer's category of the draws from now on (rasterizer.h's
-_rasterizer_profile_*, -1 none), and whether they are display.ambient_occlusion's
-pre-pass: what the backends' GPU timing sums by (HALO_METAL_PASS_TIMES) */
-void xgpu_backend_category(int category, BOOL prepass);
+_rasterizer_profile_*, -1 none): what the backends' GPU timing sums by
+(HALO_METAL_PASS_TIMES) */
+void xgpu_backend_category(int category);
 void xgpu_backend_tone_map(xgpu_target target, const long corners[4]);
-/* display.ambient_occlusion: the occlusion of a window's 3D view (its
-corners in the target's pixels), from the depth target drawn with it, laid
-over the light of its opaque surfaces where the lighting does not hold it
-(an object's pixel by all about it, the level's by objects alone: the
-stencil's XGPU_AMBIENT_OCCLUSION_OBJECT bit), none over the pixels its
-XGPU_AMBIENT_OCCLUSION_KEEP bits mark: quality XGPU_AMBIENT_OCCLUSION_SUBTLE
-or _STRONG (xgpu_stream.h), and the camera (near, far, the projection's x and
-y scales and offsets). XGPU_AMBIENT_OCCLUSION_SHOW draws the occlusion last
-laid over the target in its place (debug.ambient_occlusion_view: the term
-in grey, white where it was not laid), once the view is drawn */
-void xgpu_backend_ambient_occlusion(xgpu_target target, const long corners[4], int quality, const float camera[6]);
 /* display.ambient_occlusion "world" (xgpu_stream.h, docs/world-ao.md):
 the block the opaque surfaces' ambient light reads from here on (the
 field's place, the window's proxies; NULL none), and slices of the field

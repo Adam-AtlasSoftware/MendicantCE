@@ -3,8 +3,9 @@ what a light adds (port/linux/src/xgpu.h's XGPU_AMBIENT_OCCLUSION_LIGHT_*,
 issue 560: the flashlight on a character and a plasma bolt's glow on a wall
 were darkened by it).
 
-The shaders of a surface lit by the occlusion, as the emitters write them
-(tools/ambient_occlusion_light/check.c), are read: a model lit for each pixel
+The shaders of a surface lit by the occlusion (display.ambient_occlusion
+"world"'s), as the emitters write them (tools/ambient_occlusion_light/check.c),
+are read: a model lit for each pixel
 has its ambient and distant lights by the occlusion before its point lights
 or the enhanced dynamic lights add theirs; a model lit for each vertex adds
 its point lights' light, handed on apart, to its ambient light by the

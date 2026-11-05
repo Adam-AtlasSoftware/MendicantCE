@@ -2051,10 +2051,12 @@ char *xgpu_msl_pixel_shader(const struct xgpu_pixel_program *program, const stru
 	self-illuminated surface's) */
 	BOOL unclamped = XGPU_HDR_IS_UNCLAMPED(program->hdr);
 	BOOL self_illuminated = XGPU_HDR_IS_SELF_ILLUMINATED(program->hdr) && !program->source_blend;
-	/* (display.ambient_occlusion: the light the occlusion multiplies, and
-	whether it is found in the world, at the pixel's position: xgpu.h) */
-	int occlusion_light = XGPU_AMBIENT_OCCLUSION_LIGHT_OF(program->ambient_occlusion);
-	BOOL world = (program->ambient_occlusion & XGPU_AMBIENT_OCCLUSION_WORLD) && occlusion_light;
+	/* (display.ambient_occlusion "world": the light the occlusion found in
+	the world multiplies, at the pixel's position: xgpu.h; none without
+	XGPU_AMBIENT_OCCLUSION_WORLD) */
+	int occlusion_light = (program->ambient_occlusion & XGPU_AMBIENT_OCCLUSION_WORLD) ?
+		XGPU_AMBIENT_OCCLUSION_LIGHT_OF(program->ambient_occlusion) : XGPU_AMBIENT_OCCLUSION_LIGHT_NONE;
+	BOOL world = occlusion_light != XGPU_AMBIENT_OCCLUSION_LIGHT_NONE;
 	int stage;
 
 	pixel_usage(program, &usage);
@@ -2075,7 +2077,7 @@ char *xgpu_msl_pixel_shader(const struct xgpu_pixel_program *program, const stru
 		"\tfloat4 xT2 [[user(xT2)]];\n"
 		"\tfloat4 xT3 [[user(xT3)]];\n"
 		"\tfloat xFog [[user(xFog)]];\n");
-	if (replaces_depth || (program->ambient_occlusion && !world))
+	if (replaces_depth)
 		xgpu_text_append(&text, "\tfloat4 frag_position [[position]];\n");
 	if (occlusion_light == XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX)
 		xgpu_text_append(&text, "\tfloat3 xLightAmbient [[user(xLightAmbient)]];\n\tfloat3 xLightPoint [[user(xLightPoint)]];\n");
@@ -2129,8 +2131,6 @@ char *xgpu_msl_pixel_shader(const struct xgpu_pixel_program *program, const stru
 			xgpu_text_append(&text, ", texture2d_array<float> world_ao_scenery [[texture(%d)]]",
 				XGPU_MSL_TEXTURE_WORLD_AO_SCENERY);
 	}
-	else if (program->ambient_occlusion)
-		xgpu_text_append(&text, ",\n\ttexture2d<float> ambient_occlusion [[texture(%d)]]", XGPU_MSL_TEXTURE_AMBIENT_OCCLUSION);
 	/* (display.hdr: a draw blended here reads the pixel it draws over:
 	Apple's GPUs' programmable blending) */
 	if (XGPU_HDR_SHADER_BLENDS(program->hdr))
@@ -2153,13 +2153,10 @@ char *xgpu_msl_pixel_shader(const struct xgpu_pixel_program *program, const stru
 	}
 	if (replaces_depth)
 		xgpu_text_append(&text, "\tfloat replaced_depth = 1.0;\n");
-	/* display.ambient_occlusion: the occlusion at the pixel, which
+	/* display.ambient_occlusion "world": the occlusion at the pixel, which
 	multiplies the ambient light alone (xgpu.h) */
 	if (world)
 		world_ao_read(&text, program, occlusion_light);
-	else if (program->ambient_occlusion)
-		xgpu_text_append(&text, "\tfloat occlusion = ambient_occlusion.read(min(uint2(in.frag_position.xy),\n"
-			"\t\tuint2(ambient_occlusion.get_width() - 1, ambient_occlusion.get_height() - 1))).r;\n");
 	if (register_read(&usage, XGPU_REGISTER_V0) && program->per_pixel_lighting &&
 		program->dynamic_lights == XGPU_DYNAMIC_LIGHTS_MODEL)
 	{

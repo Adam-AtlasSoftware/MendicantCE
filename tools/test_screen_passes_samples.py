@@ -25,7 +25,6 @@ FUNCTIONS = (
     "void halo_screen_anti_alias(",
     "static void view_corners(",
     "void halo_screen_panini(",
-    "void halo_screen_ambient_occlusion(",
 )
 
 
@@ -49,15 +48,14 @@ typedef int BOOL;
 #define FALSE 0
 typedef unsigned long xgpu_target;
 /* (a map's preparation's journal: not recorded here) */
-enum { JOURNAL_ANTI_ALIAS = 5, JOURNAL_PANINI, JOURNAL_OCCLUSION_BEGIN, JOURNAL_OCCLUSION };
+enum { JOURNAL_ANTI_ALIAS = 5, JOURNAL_PANINI };
 static BOOL journal_recording;
 static void journal_operation(unsigned long op, const void *arguments, unsigned long bytes)
 { (void)op; (void)arguments; (void)bytes; }
 struct xgpu_render_target { xgpu_target number; int samples; float scale[2]; };
 struct render_target_entry { struct xgpu_render_target target; };
 static struct { BOOL gl_ready; int back_buffer; void *depth_stencil; } device;
-static struct { int quality; BOOL laid, prepass, ready, journal_prepass, journal_ready; } ambient_occlusion;
-/* (the targets bound: the back buffer and the occlusion's depth pre-pass target, as they are) */
+/* (the targets bound: the back buffer, as it is) */
 static BOOL bind_targets(BOOL *has_depth) { *has_depth = TRUE; return TRUE; }
 enum { _anti_aliasing_off, _anti_aliasing_fxaa, _anti_aliasing_smaa, _anti_aliasing_ssaa, _anti_aliasing_msaa };
 static int mode = _anti_aliasing_msaa;
@@ -75,19 +73,15 @@ static void xgpu_backend_anti_alias(xgpu_target target, BOOL smaa, const long co
 { (void)target; (void)smaa; (void)corners; passes++; }
 static void xgpu_backend_panini(xgpu_target target, const long corners[4], const float projection[8])
 { (void)target; (void)projection; assert(corners[2] == 640 && corners[3] == 480); passes++; }
-static void xgpu_backend_ambient_occlusion(xgpu_target target, const long corners[4], int quality, const float *camera)
-{ (void)target; (void)corners; (void)quality; (void)camera; passes++; }
 %FUNCTIONS%
 int main(void)
 {
 	static const float projection[8] = { 0.5f, 0.0f, 1.0f, 0.0f, -1.0f, 1.0f, 0.75f, -0.75f };
-	static const float camera[4] = { 1.0f, 1.0f, 0.0f, 0.0f };
 	static const int counts[] = { 2, 4, 8 };
 	int index;
 
 	device.gl_ready = TRUE;
 	device.depth_stencil = &device;
-	ambient_occlusion.quality = 1;
 	back_buffer.target.number = 1;
 	back_buffer.target.scale[0] = back_buffer.target.scale[1] = 1.0f;
 	for (index = 0; index < 3; index++)
@@ -95,12 +89,10 @@ int main(void)
 		/* (the back buffer as the 3D view left it, multisampled) */
 		back_buffer.target.samples = counts[index];
 		passes = 0;
-		/* (its depth pre-pass drawn: halo_screen_ambient_occlusion_begin) */
-		ambient_occlusion.prepass = TRUE;
-		halo_screen_ambient_occlusion(0, 0, 640, 480, 0.0625f, 1024.0f, camera);
 		halo_screen_anti_alias(0, 0, 640, 480);
 		halo_screen_panini(0, 0, 640, 480, projection);
-		assert(passes == 2);
+		/* (multisampling has no anti-aliasing pass: Panini's alone) */
+		assert(passes == 1);
 		assert(back_buffer.target.samples == counts[index]);
 	}
 	(void)resolves;

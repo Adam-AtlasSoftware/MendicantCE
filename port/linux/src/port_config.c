@@ -97,7 +97,7 @@ struct config_setting
 chooses (config_graphics), which are their defaults, the same on every
 build: SMAA (on iOS MSAA 2x), 16x anisotropic filtering, 512 shadow maps,
 the models' detail by the display's lines and lit for each pixel, the
-enhanced dynamic lights, strong ambient occlusion */
+enhanced dynamic lights; ambient occlusion off (below) */
 #ifdef HALO_IOS
 /* (an iPhone's tile-based GPU resolves MSAA in its tile memory, the 3D view
 drawn in one pass, port/macos/xgpu_metal.m: about the cost of SMAA's
@@ -113,10 +113,9 @@ frame where 4x took up to 10) */
 #define GRAPHICS_PER_PIXEL_LIGHTING "true"
 #define GRAPHICS_MODEL_DETAIL "\"native\""
 #define GRAPHICS_DYNAMIC_LIGHTS "\"enhanced\""
-/* (off in Enhanced too, for now: it is opt-in, Video Setup > Advanced
-Graphics > Ambient Occlusion, while its look is refined; and the phones'
-tile-based GPUs would store the 3D view's colour and depth and load them
-again for its passes in the middle of each frame) */
+/* (off in Enhanced too, for now: "world" is opt-in, Video Setup > Advanced
+Graphics > Ambient Occlusion, while its cost on the slower GPUs is measured
+and brought down, #671) */
 #define GRAPHICS_AMBIENT_OCCLUSION "\"off\""
 /* display.astc_textures: "auto" everywhere (iPhones, through Metal; Android
 phones without BC, through Vulkan: seen right on a Pixel 11 Pro's PowerVR) */
@@ -1236,13 +1235,11 @@ static const struct config_setting config_settings[] =
 		"Ambient occlusion, which the Xbox did not have: the ambient light of\n"
 		"characters, vehicles and scenery dimmed where they meet the world and\n"
 		"in their creases, and the level's dimmed under them (a marine on a\n"
-		"bench, a Warthog on the sand), worked out from the 3D view's depth\n"
-		"each frame. The levels' own corners keep their baked light, and\n"
-		"self-illuminated surfaces, lights and your weapon keep theirs: \"off\",\n"
-		"\"subtle\" or \"strong\". Not with multisampling on Metal (macOS, iOS).\n"
-		"\"world\" (docs/world-ao.md): found in the world instead, from the\n"
-		"level's distance field and the objects' shapes, with no pass over the\n"
-		"screen: in VR's eyes and with Metal's multisampling too."
+		"bench, a Warthog on the sand), found in the world from the level's\n"
+		"distance field and the objects' shapes (docs/world-ao.md). The levels'\n"
+		"own corners keep their baked light, and self-illuminated surfaces,\n"
+		"lights and your weapon keep theirs: \"off\" or \"world\". The older\n"
+		"\"subtle\" and \"strong\" are read as \"world\"."
 		GRAPHICS_CHOOSES },
 	{ "display.shield_color", _config_string, "\"default\"", "HALO_SHIELD_COLOR", _environment_value, _platform_all,
 		"Your energy shield's color, as this machine draws it: \"default\" (the\n"
@@ -2324,10 +2321,6 @@ static const struct config_setting config_settings[] =
 		"place of the level's and the objects' (docs/world-ao.md, \"D. Shading\"):\n"
 		"\"plane nx ny nz d; sphere x y z r; capsule ax ay az bx by bz r; box x y z\n"
 		"ex ey ez\" (\"\": none)." },
-	{ "debug.ambient_occlusion_view", _config_boolean, "false", "HALO_AMBIENT_OCCLUSION_VIEW", _environment_value,
-		_platform_all,
-		"With display.ambient_occlusion, the 3D view drawn as the occlusion\n"
-		"alone, in grey (white where it is not laid)." },
 	{ "debug.null_renderer", _config_boolean, "false", "HALO_NULL_RENDERER", _environment_set_is_true, _platform_all,
 		"Run without a window, drawing nothing: a frame a step of the game's\n"
 		"clock (game.sim_rate), not as many as it can." },
@@ -2678,6 +2671,23 @@ static const struct
 	{ "vr.hands", "\"floating\"" },
 #endif
 	{ NULL, NULL },
+};
+
+/* the words a setting took in an older version that this one has no more:
+read as the word in their place (config_renamed_word: the file's and the
+environment's), and written so in the file as it is read
+(config_migrate_words) */
+static const struct
+{
+	const char *name;
+	const char *old_word, *word;
+} config_renamed_words[] =
+{
+	/* (the ambient occlusion found on the screen, gone: the world's in its
+	place) */
+	{ "display.ambient_occlusion", "subtle", "world" },
+	{ "display.ambient_occlusion", "strong", "world" },
+	{ NULL, NULL, NULL },
 };
 
 struct config_text
@@ -3071,6 +3081,59 @@ static char *config_migrate_mouse(const char *text, toml_datum_t table)
 		if (vertical_set)
 			platform_log("settings: input.mouse_vertical_sensitivity %g is now %s, times input.mouse_sensitivity",
 				old_vertical, value);
+	}
+	return result;
+}
+
+static int config_word_is(const char *text, size_t length, const char *word);
+
+/* the word in place of the setting's value, where it is an older version's
+(config_renamed_words: in any case), or NULL */
+static const char *config_renamed_word(const char *name, const char *value)
+{
+	size_t index;
+
+	for (index = 0; value && config_renamed_words[index].name; index++)
+	{
+		if (!strcmp(config_renamed_words[index].name, name) &&
+			config_word_is(value, strlen(value), config_renamed_words[index].old_word))
+		{
+			return config_renamed_words[index].word;
+		}
+	}
+	return NULL;
+}
+
+/* a file with a setting at an older version's word (config_renamed_words):
+the word in its place, with this version's comment. Returns the new text,
+or NULL if it has none */
+static char *config_migrate_words(const char *text, toml_datum_t table)
+{
+	char *result = NULL;
+	size_t index;
+
+	for (index = 0; config_renamed_words[index].name; index++)
+	{
+		const char *name = config_renamed_words[index].name;
+		long setting = config_setting_index(name);
+		toml_datum_t datum = toml_seek(table, name);
+		const char *word;
+		char value[80];
+		char *updated;
+
+		if (setting < 0 || datum.type != TOML_STRING ||
+			!config_word_is(datum.u.s, strlen(datum.u.s), config_renamed_words[index].old_word))
+		{
+			continue;
+		}
+		word = config_renamed_words[index].word;
+		snprintf(value, sizeof(value), "\"%s\"", word);
+		updated = config_replace_setting(result ? result : text, &config_settings[setting], value);
+		if (!updated)
+			continue;
+		free(result);
+		result = updated;
+		platform_log("settings: %s = \"%s\" is an older version's: now \"%s\"", name, datum.u.s, word);
 	}
 	return result;
 }
@@ -3758,6 +3821,7 @@ static const struct
 	{ "display.mode", { "", "fullscreen", "borderless", "windowed", NULL }, "display.fullscreen's" },
 	{ "display.resolution_scaling", { "native", "original", NULL }, NULL },
 	{ "display.anti_aliasing", { "off", "fxaa", "smaa", "ssaa2x", "msaa2x", "msaa4x", "msaa8x", NULL }, NULL },
+	{ "display.ambient_occlusion", { "off", "world", NULL }, "off" },
 	{ "display.astc_textures", { "auto", "always", "off", NULL }, NULL },
 	{ "display.picture_position", { "center", "top", "bottom", NULL }, NULL },
 	{ "display.orientation", { "landscape", "portrait", "auto", NULL }, NULL },
@@ -3829,6 +3893,17 @@ static void config_check_words(void)
 		if (index < 0 || !(config_settings[index].platforms & CONFIG_PLATFORM))
 			continue;
 		value = &config_values[index];
+		/* (an older version's word, as this version names it: from the
+		environment, or a file that could not be written) */
+		{
+			const char *renamed = config_renamed_word(config_words[word_index].name, value->string);
+
+			if (renamed)
+			{
+				free(value->string);
+				value->string = strdup(renamed);
+			}
+		}
 		for (word = 0; words[word] && !config_word_is(value->string, strlen(value->string), words[word]); word++)
 		{
 		}
@@ -4112,6 +4187,20 @@ static void config_load(void)
 				toml_free(result);
 				free(text);
 				text = mouse;
+				result = toml_parse(text, (int)strlen(text));
+				migrated = text;
+			}
+		}
+		/* (an older version's words, as this version names them) */
+		if (result.ok && !skipped)
+		{
+			char *words = config_migrate_words(text, result.toptab);
+
+			if (words)
+			{
+				toml_free(result);
+				free(text);
+				text = words;
 				result = toml_parse(text, (int)strlen(text));
 				migrated = text;
 			}

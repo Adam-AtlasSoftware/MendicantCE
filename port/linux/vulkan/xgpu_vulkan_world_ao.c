@@ -11,8 +11,7 @@ pages of the level's occlusion, a 2D array of bytes (R8 unorm) read through
 the same sampler. All are in display.ambient_occlusion's set
 (XGPU_VULKAN_SET_OCCLUSION), at XGPU_VULKAN_BINDING_WORLD_SDF,
 _WORLD_SDF_TABLE, _WORLD_AO and _WORLD_AO_SCENERY, which the core writes
-beside the screen's occlusion (xgpu_vulkan.c's occlusion_set) from what this
-file hands it.
+(xgpu_vulkan.c's occlusion_set) from what this file hands it.
 
 The field arrives a few slices at a time (the command stream's
 WORLD_AO_FIELD records), its table first, then its atlas: each image is

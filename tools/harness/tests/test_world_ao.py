@@ -60,7 +60,7 @@ def test_the_hooks():
     render = read("source/render/render.c")
     # the window's block handed on before the opaque surfaces, taken away after the lightmap pass
     assert render.index("world_ao_window_begin(") < render.index("\t\trender_objects();\n\t\t/* port: and through")
-    assert render.index("halo_screen_ambient_occlusion_end();") < render.index("world_ao_window_end();") < \
+    assert render.index("structure_render_lightmaps();") < render.index("world_ao_window_end();") < \
         render.index("rasterizer_lens_flares_submit_occlusion_tests();")
     assert "world_ao_frame_begin();" in render
     # each object named before its model draws, the first-person weapon unlit, the structure after

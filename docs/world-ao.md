@@ -572,11 +572,12 @@ ignored.
 
 ## Settings
 
-- `display.ambient_occlusion`: `"off"` (default) | `"subtle"` | `"strong"` (GTAO, #574, kept until the world mode is
-  at least as good, then retired or kept as a fallback) | `"world"`.
-- `"world"` doesn't run GTAO's pre-pass (d3d8_device.c reads it as GTAO off). It works in VR's eye passes and with
-  Metal's multisampling, where GTAO can't.
-- The menu (`tools/port_settings.py`, AMBIENT OCCLUSION) has WORLD.
+- `display.ambient_occlusion`: `"off"` (default) | `"world"`. GTAO's `"subtle"` and `"strong"` (#574) are retired,
+  with their pre-pass and passes: their stripes on flat surfaces and at door and screen edges were not worth keeping.
+  A config.toml or `HALO_AMBIENT_OCCLUSION` with either is read as `"world"`, and the file is written with it
+  (port_config.c's `config_renamed_words`).
+- `"world"` works in VR's eye passes and with Metal's multisampling.
+- The menu (`tools/port_settings.py`, AMBIENT OCCLUSION) has OFF and WORLD.
 - Classic's preset writes `"off"`, which bypasses everything.
 - `debug.world_ao_view` (D): the surfaces it shades drawn as the term alone, in grey. `debug.world_ao_test` (D): a
   made-up field (a plane about the camera) and shapes in place of B's and C's, to check the shading alone. `debug.world_proxies_view`

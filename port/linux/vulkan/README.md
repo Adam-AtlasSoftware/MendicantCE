@@ -414,66 +414,30 @@ rectangle copied, then each pixel drawn from where the flat view saw what
 the projection puts there (`PANINI_SOURCE`, the inverse of
 `port/linux/include/panini_projection.h`), sampled over the pixels it covers
 (a bilinear tap for each two of them each way, up to 4, from the
-coordinate's derivatives), all
-four channels (the game's values in alpha move with their pixels). The
-ambient occlusion and the lens flares are drawn before it, in the flat
+coordinate's derivatives), all four channels (the game's values in alpha
+move with their pixels). The lens flares are drawn before it, in the flat
 view, and carried with it. Its pipeline is requested with the map's
 preparation, or made at its first use. Metal draws the same GLSL.
 
 ## Ambient occlusion
 
-`display.ambient_occlusion` (`"off"`, `"subtle"`, `"strong"`: Enhanced's)
-darkens the ambient light of each window's opaque surfaces, only where the
-game's lighting does not hold the occlusion, and not what a light adds (the
-flashlight, the dynamic lights): it multiplies that light alone, in the
-shaders that light the surfaces, so it is found before they shade. The game
-draws the opaque surfaces' depth first, alone (`source/render/render.c`:
-the objects and the structure's lightmap pass, their transparent parts and
-what they queue for later left out, `render_ambient_occlusion_prepass`),
-into a depth target of its own, no colour written
-(`halo_screen_ambient_occlusion_begin`, `src/d3d8_device.c`); then calls
-`halo_screen_ambient_occlusion`, whose record
-(`XGPU_STREAM_AMBIENT_OCCLUSION`) finds the occlusion from the depth target
-bound; and the surfaces then draw, the models' ambient and distant lights
-and the lightmap pass's light by it (`src/xgpu.h`'s
-`XGPU_AMBIENT_OCCLUSION_LIGHT_*`; the occlusion's set,
-`XGPU_SPIRV_SET_OCCLUSION`), until `halo_screen_ambient_occlusion_end`
-after the lightmap pass. As they draw, the pre-pass's objects (models) mark
-their pixels in the stencil's bit 6 and self-illuminated surfaces in bit 7
-(`ambient_occlusion_mark`), and every other draw that writes the depth
-clears both where it does, so that the marks are always the shown
-surface's: the objects draw before the level, and a wall over an object
-behind it must not keep the object's mark
-(`tools/test_ambient_occlusion_marks.py`). The first-person weapon's is the
-game's bit 0. The record carries the camera, and the passes
-(`xgpu_vulkan_post.c`, their GLSL in `tools/vulkan_post_shaders.py`) are:
-
-- the depth target (its first sample's, resolved where it has more) made
-  the distances along the view, each a half float and what it leaves;
-- the mask: the stencil's bits made a texture by draws tested against them
-  (red an object's pixel, green one left as it is);
-- GTAO (XeGTAO's horizon integral) at half the resolution: in two
-  directions a pixel, turned by a 4x4 Bayer matrix, the highest horizon
-  each side within 0.5 world units (each sample's rise above the pixel's
-  tangent plane, its normal from the depth), as a share of what the same
-  directions see unoccluded, so that a flat surface is exactly 1. An
-  object's pixel (one ambient sample lights it) counts every sample; the
-  level's (its radiosity lightmap holds its own occlusion) only objects',
-  so that no corner is darkened twice;
-- a blur along x and then y, nine taps weighted by their distances'
-  nearness, none across an object's edge;
-- the occlusion at each of the target's pixels, an image of its own (white
-  first), filtered up by the nearest four weighted by their distances, none
-  over the pixels the mask leaves: what the surfaces' shaders read at their
-  pixel (`xgpu_vulkan_set_ambient_occlusion`; a white texel where none was
-  found). The occlusion multiplies the light before the lights add theirs
-  (`tools/test_ambient_occlusion_light.py`).
-
-The target's pass ends for them and begins again, loading what it drew.
-`debug.ambient_occlusion_view` draws the occlusion alone in the view's place
-before the HUD. Metal draws the same passes (`port/macos/xgpu_metal_post.c`,
-their MSL written from this GLSL by `tools/metal_post_shaders.py`), but not
-over a multisampled target.
+`display.ambient_occlusion` (`"off"` or `"world"`: `docs/world-ao.md`)
+darkens the ambient light of each window's opaque surfaces where the world
+about them hides the sky, and not what a light adds (the flashlight, the
+dynamic lights): it multiplies that light alone, in the shaders that light
+the surfaces (`src/xgpu.h`'s `XGPU_AMBIENT_OCCLUSION_LIGHT_*` with
+`XGPU_AMBIENT_OCCLUSION_WORLD`). Each pixel finds its occlusion from its own
+world position and normal, in the structure's distance field and the
+window's proxies (spheres, capsules, boxes and the vehicles' fields), so
+there is no pass over the screen, and it holds in the VR mode's eyes and
+with multisampling. The field, its table of cells, the static scenery's
+pages and the vehicles' fields' atlas are images of the backend's
+(`xgpu_vulkan_world_ao.c`), and the window's block a uniform range of the
+ring: all in the draws' fourth descriptor set (`XGPU_SPIRV_SET_OCCLUSION`,
+bindings 1 to 5), which the draws that light by it bind. The occlusion
+multiplies the light before the lights add theirs
+(`tools/test_world_ao_light.py`). `debug.world_ao_view` draws the surfaces
+it shades as their occlusion alone, in grey.
 
 ## HDR
 

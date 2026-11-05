@@ -3,7 +3,8 @@ docs/world-ao.md "Shading"): the emitters' shaders of a surface the world's occl
 tools/ambient_occlusion_light/check.c writes them, with the source "world") multiply its ambient light alone,
 before any light adds its own, in each of the three draws (a model lit for each pixel, by its point lights or the
 enhanced dynamic lights; a model lit for each vertex; the structure's lightmap pass, which reads the proxies and
-never the field); without it (or with GTAO's source) they have none of its code. And what they find is what the
+never the field); without it (or with a light's bits alone, without XGPU_AMBIENT_OCCLUSION_WORLD) they have none
+of its code. And what they find is what the
 CPU's reference finds (port/linux/game/world_ao_shading.c, on world_proxies.c's arithmetic): the Metal emitter's
 functions' very text run as C++ (tools/world_ao_light/msl_check.cpp) and the SPIR-V emitter's whole shaders run on
 the CPU (tools/world_ao_light/spirv_run.py), at a made-up scene's points (tools/world_ao_light/scene.c: a floor and
@@ -67,7 +68,7 @@ def check(tmp_path_factory):
 
 @pytest.fixture(scope="module")
 def shaders(check):
-    return {source: msl_of(check, source) for source in ("screen", "world", "view")}
+    return {source: msl_of(check, source) for source in ("bare", "world", "view")}
 
 
 @pytest.fixture(scope="module")
@@ -99,11 +100,11 @@ def body(source):
 
 
 def test_none_without_it(shaders):
-    # (GTAO's source and no occlusion: none of the world's code, binding or uniform)
-    for source in ("screen",):
-        for (name, occlusion), text in shaders[source].items():
-            for word in ("world_ao", "world_sdf", "world_proxy"):
-                assert word not in text, (source, name, occlusion)
+    # (a light's bits without the world's, and no occlusion: none of the world's code, binding or uniform, and no
+    # occlusion at all: nothing else finds it)
+    for (name, occlusion), text in shaders["bare"].items():
+        for word in ("world_ao", "world_sdf", "world_proxy", "occlusion"):
+            assert word not in text, (name, occlusion)
     for (name, occlusion), text in shaders["world"].items():
         if not occlusion:
             assert "world" not in text.replace("xWorld", ""), name
@@ -157,7 +158,7 @@ def test_the_view_shows_it(shaders):
 
 def test_spirv_modules_valid(check, tmp_path):
     for mode in ("spirv", "spirv_subgroups"):
-        for source in ("screen", "world", "view"):
+        for source in ("bare", "world", "view"):
             (tmp_path / mode / source).mkdir(parents=True)
             subprocess.run([str(check), mode, str(tmp_path / mode / source), source], check=True)
     modules = sorted(tmp_path.glob("*/*/*.spv"))

@@ -72,8 +72,7 @@ its swapchain.
 
 /* (the occlusion's set, as the shaders read it) */
 _Static_assert(XGPU_SPIRV_SET_OCCLUSION == XGPU_VULKAN_SET_OCCLUSION &&
-	XGPU_SPIRV_BINDING_AMBIENT_OCCLUSION == XGPU_VULKAN_BINDING_OCCLUSION, "display.ambient_occlusion's set");
-_Static_assert(XGPU_SPIRV_BINDING_WORLD_SDF == XGPU_VULKAN_BINDING_WORLD_SDF &&
+	XGPU_SPIRV_BINDING_WORLD_SDF == XGPU_VULKAN_BINDING_WORLD_SDF &&
 	XGPU_SPIRV_BINDING_WORLD_AO == XGPU_VULKAN_BINDING_WORLD_AO &&
 	XGPU_SPIRV_BINDING_WORLD_SDF_TABLE == XGPU_VULKAN_BINDING_WORLD_SDF_TABLE &&
 	XGPU_SPIRV_BINDING_WORLD_AO_SCENERY == XGPU_VULKAN_BINDING_WORLD_AO_SCENERY &&
@@ -1187,8 +1186,8 @@ static int pipeline_shaders(struct stream_pipeline *entry, const struct xgpu_str
 	/* (a model lighting program's normal and position, or a structure's
 	lightmap pass's own) */
 	vertex_lighting_convert(lighting_record ? lighting_record->record : NULL, &model);
-	/* (display.ambient_occlusion: lit for each vertex, the ambient light
-	handed on apart) */
+	/* (display.ambient_occlusion "world": lit for each vertex, the ambient
+	light handed on apart) */
 	model.split = key->lighting == _lighting_model_split;
 	lighting = key->lighting == _lighting_none ? NULL : key->lighting == _lighting_environment ? &environment : &model;
 	memset(&options, 0, sizeof(options));
@@ -2691,56 +2690,6 @@ static void stream_tone_map(void *context, const struct xgpu_stream_tone_map *re
 	targets_bind();
 }
 
-/* display.ambient_occlusion of a window's 3D view (xgpu_vulkan_post.c),
-from the depth target drawn with it, its opaque surfaces' depth alone
-(d3d8_device.c's pre-pass): its stencil marks the pixels left, and its depth
-(its first sample's, resolved where it has more) gives the occlusion, which
-the surfaces' draws then light by. Or the occlusion last found drawn in the
-view's place (debug.ambient_occlusion_view) */
-static void stream_ambient_occlusion(void *context, const struct xgpu_stream_ambient_occlusion *record)
-{
-	struct stream_target *target = target_get(record->target);
-	struct stream_target *depth = stream.color == record->target ? target_get(stream.depth) : NULL;
-	struct xgpu_vulkan_image *color_image, *depth_image;
-
-	(void)context;
-	/* (none, white, unless it is found) */
-	if (record->quality != XGPU_AMBIENT_OCCLUSION_SHOW && !stream.preparing)
-		xgpu_vulkan_set_ambient_occlusion(NULL);
-	if (!target || target->depth || target->layers > 1 || !depth || !depth->depth ||
-		record->quality < XGPU_AMBIENT_OCCLUSION_SUBTLE || record->quality > XGPU_AMBIENT_OCCLUSION_SHOW)
-		return;
-	/* (the attachments the view is drawn into: multisampled where they
-	are, and both of a number of samples) */
-	color_image = stream.samples && target->multisampled ? target->multisampled : target->image;
-	depth_image = stream.samples && depth->multisampled ? depth->multisampled : depth->image;
-	if (xgpu_vulkan_image_description(depth_image)->samples != xgpu_vulkan_image_description(color_image)->samples)
-		return;
-	if (stream.preparing)
-	{
-		(void)xgpu_vulkan_post_ambient_occlusion_prepare(xgpu_vulkan_image_description(color_image)->format,
-			xgpu_vulkan_image_description(color_image)->samples, 1);
-		return;
-	}
-	if (record->quality == XGPU_AMBIENT_OCCLUSION_SHOW)
-	{
-		target->written++;
-		if (color_image == target->multisampled)
-			target->unresolved = 1;
-		xgpu_vulkan_post_ambient_occlusion_show(color_image, record->corners);
-	}
-	else
-	{
-		/* (the first sample's depth, to find the occlusion from) */
-		if (depth_image == depth->multisampled)
-			xgpu_vulkan_image_resolve(depth->multisampled, depth->image);
-		xgpu_vulkan_post_ambient_occlusion(color_image, depth_image, depth->image, record->corners, (int)record->quality,
-			record->camera);
-	}
-	/* (the stream's targets again: the same, so that the pass goes on) */
-	targets_bind();
-}
-
 /* ---------- visibility tests, frames */
 
 static void stream_visibility_begin(void *context)
@@ -3008,7 +2957,6 @@ const struct host_render_backend *xgpu_vulkan_stream_backend(void)
 		backend.anti_alias = stream_anti_alias;
 		backend.hdr = stream_hdr;
 		backend.tone_map = stream_tone_map;
-		backend.ambient_occlusion = stream_ambient_occlusion;
 		backend.picture_top = stream_picture_top;
 		backend.gamma = stream_gamma;
 		backend.panini = stream_panini;

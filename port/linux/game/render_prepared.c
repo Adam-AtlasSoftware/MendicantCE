@@ -86,7 +86,7 @@ and the game's code it draws through) or to this file's form must make it 2,
 build, so that an update keeps them; the journal's own form is in the key
 too (halo_gpu_journal_form), and a record whose replay does not make its
 draws is made again all the same. */
-#define PREPARED_VERSION 4
+#define PREPARED_VERSION 5
 /* the most words a record may hold */
 #define PREPARED_MAXIMUM_WORDS (64UL * 1024 * 1024)
 
@@ -108,10 +108,9 @@ struct prepared_header
 Each is either applied by the front end as a record plays (its pipelines,
 targets and textures made as the setting is now), or the walk draws, as it
 records, what every value of it would:
-- ambient_occlusion: the walk draws its pre-pass and the surfaces lit by it
-  whatever the setting, the journal noting them as with it on
-  (d3d8_device.c, halo_screen_ambient_occlusion_begin); played back with it
-  off, they are the surfaces' own draws (journal_occlusion);
+- ambient_occlusion: the journal notes each draw's window's span
+  whatever the setting (d3d8_device.c, world_span); the draws' pipelines
+  lit by the world's occlusion as the setting is now (world_ao_key);
 - anisotropic_filtering: the samplers', made as the record plays;
 - anti_aliasing: its pass journaled whatever the setting, the targets'
   samples and the pass made as the record plays;

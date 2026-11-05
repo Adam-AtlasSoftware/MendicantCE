@@ -51,10 +51,6 @@ draw reads the frame's, wherever its ring put them) */
 the buffer's t), a buffer of its own: the cells' clusters' masks are the
 cells' (their texture's slice past them, in its order) */
 #define XGPU_MSL_BUFFER_DYNAMIC_LIGHT_WORLD 24
-/* display.ambient_occlusion: the occlusion of the 3D view, read at the pixel
-by the draws whose pixel key has it (xgpu.h's XGPU_AMBIENT_OCCLUSION_LIGHT_*;
-white where the backend found none) */
-#define XGPU_MSL_TEXTURE_AMBIENT_OCCLUSION 4
 /* display.ambient_occlusion "world" (xgpu_stream.h): the structure's
 distance field, its atlas of bricks (texture3d<float>, read through a
 constexpr linear sampler clamped to its edge) and its table of cells

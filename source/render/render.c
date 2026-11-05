@@ -157,8 +157,6 @@ static boolean render_preparing_frame; /* port: enumerate a view without drawing
 
 extern short global_screenshot_count;
 
-/* port: display.ambient_occlusion's depth pre-pass is being drawn (render_window) */
-boolean render_ambient_occlusion_prepass = FALSE;
 boolean render_contrails_enabled = TRUE;
 boolean render_particles_enabled = TRUE;
 boolean render_particle_systems_enabled = TRUE;
@@ -400,7 +398,6 @@ static void render_window(
 {
 	struct rasterizer_window_begin_parameters parameters;
 	short rendered_cluster_index;
-	boolean ambient_occlusion; /* port: (below) */
 
 	profile_render_window_start(TRUE);
 	render.scene_index++;
@@ -449,41 +446,6 @@ static void render_window(
 #endif
 		first_person_weapon_render_update();
 		lights_preprocess_scene();
-		/* port: display.ambient_occlusion, which multiplies the opaque
-		surfaces' ambient light alone, as they shade: their depth drawn
-		first, alone, and the occlusion found from it (not in the VR mode's
-		eye or scope passes, whose targets have a layer for each eye). The
-		same draws as below (the objects' transparent parts, widgets and
-		fog left for below: render_ambient_occlusion_prepass), into a depth
-		target of their own (port/linux/src/d3d8_device.c) */
-		ambient_occlusion = rasterizer_target == _render_target_primary &&
-#ifdef HALO_VR
-			!render_vr_eye_pass && !render_vr_scope_pass &&
-#endif
-			halo_screen_ambient_occlusion_begin();
-		if (ambient_occlusion)
-		{
-			float projection[4];
-
-			render_ambient_occlusion_prepass = TRUE;
-			render_objects();
-			render_enumerate_models();
-			structure_render_preprocess();
-			structure_render_lightmaps();
-			render_ambient_occlusion_prepass = FALSE;
-			projection[0] = parameters.frustum.projection_matrix[0][0];
-			projection[1] = parameters.frustum.projection_matrix[1][1];
-			projection[2] = parameters.frustum.projection_matrix[2][0];
-			projection[3] = parameters.frustum.projection_matrix[2][1];
-			halo_screen_ambient_occlusion(
-				rasterizer_camera->viewport_bounds.x0,
-				rasterizer_camera->viewport_bounds.y0,
-				rasterizer_camera->viewport_bounds.x1,
-				rasterizer_camera->viewport_bounds.y1,
-				parameters.frustum.z_near,
-				parameters.frustum.z_far,
-				projection);
-		}
 		/* port: display.ambient_occlusion "world": the window's proxies and
 		the field's place handed to the shaders' ambient slot before the
 		opaque surfaces shade (port/linux/game/world_ao.c; the objects' draws
@@ -493,16 +455,8 @@ static void render_window(
 		render_objects();
 		/* port: and through every model's parts */
 		render_enumerate_models();
-		if (!ambient_occlusion)
-		{
-			structure_render_preprocess();
-		}
+		structure_render_preprocess();
 		structure_render_lightmaps();
-		/* port: (display.ambient_occlusion: in the light drawn so far alone) */
-		if (ambient_occlusion)
-		{
-			halo_screen_ambient_occlusion_end();
-		}
 		world_ao_window_end();
 #ifdef HALO_VR
 		/* the scope's view: no lens flares (their visibility tests are the

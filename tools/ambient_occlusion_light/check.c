@@ -18,9 +18,10 @@ model lit for each vertex with its ambient light apart:
                                       operations (xgpu_spirv_options
                                       subgroups)
 
-<source>: the occlusion's, "screen" (GTAO's texel, the default), "world"
-(display.ambient_occlusion "world": XGPU_AMBIENT_OCCLUSION_WORLD), or "view"
-(the world's, shown: debug.world_ao_view).
+<source>: the occlusion's, "world" (display.ambient_occlusion "world":
+XGPU_AMBIENT_OCCLUSION_WORLD, the default), "view" (the world's, shown:
+debug.world_ao_view), or "bare" (the light's bits alone, without
+XGPU_AMBIENT_OCCLUSION_WORLD: no occlusion at all).
 
 Built by the test with the shader decoders and both emitters, as
 tools/msl_corpus is.
@@ -39,7 +40,7 @@ tools/msl_corpus is.
 void platform_log(const char *format, ...) { (void)format; }
 
 /* the occlusion's source: the key's bits beside its light (xgpu.h) */
-static unsigned char source;
+static unsigned char source = XGPU_AMBIENT_OCCLUSION_WORLD;
 
 /* the pixel shader's cases: name, per_pixel_lighting, dynamic_lights, the
 light the occlusion multiplies */
@@ -185,7 +186,7 @@ static int spirv(const char *directory, int subgroups)
 
 static int source_set(const char *name)
 {
-	if (!strcmp(name, "screen"))
+	if (!strcmp(name, "bare"))
 		source = 0;
 	else if (!strcmp(name, "world"))
 		source = XGPU_AMBIENT_OCCLUSION_WORLD;
@@ -203,6 +204,6 @@ int main(int argc, char **argv)
 	if ((argc == 3 || (argc == 4 && source_set(argv[3]))) &&
 		(!strcmp(argv[1], "spirv") || !strcmp(argv[1], "spirv_subgroups")))
 		return spirv(argv[2], !strcmp(argv[1], "spirv_subgroups"));
-	fprintf(stderr, "check msl [screen|world|view] | check spirv|spirv_subgroups <directory> [screen|world|view]\n");
+	fprintf(stderr, "check msl [world|view|bare] | check spirv|spirv_subgroups <directory> [world|view|bare]\n");
 	return 2;
 }

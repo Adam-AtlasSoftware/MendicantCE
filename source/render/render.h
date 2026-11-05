@@ -171,11 +171,6 @@ void render_object_shadows(
 
 extern struct render_globals render;
 extern boolean render_particle_systems_enabled;
-/* port: display.ambient_occlusion's depth pre-pass of the window's opaque
-surfaces is being drawn: their draws alone, not what they queue for later
-(the transparent parts, the widgets, the fog screen's models), nor a second
-search for the objects (render.c) */
-extern boolean render_ambient_occlusion_prepass;
 
 /* ---------- public code */
 

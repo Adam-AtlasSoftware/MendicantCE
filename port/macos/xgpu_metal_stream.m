@@ -114,8 +114,6 @@ static struct
 	tracking's serial then; a target's copy bound (checked at each draw) */
 	struct xgpu_stream_texture_stage stages[4];
 	BOOL textures_dirty, feedback_bound;
-	/* display.ambient_occlusion's texture is bound for the draws */
-	BOOL occlusion_bound;
 	uint32_t textures_serial;
 	/* the copy of a target drawn into that a draw samples: of which
 	texture, as of which of its draws */
@@ -899,28 +897,6 @@ static BOOL draw_prepare(const struct xgpu_metal_vertex_attribute *attributes, c
 		pipeline_missed(&stream.definition->key);
 	uniforms_update();
 	textures_bind();
-	/* (display.ambient_occlusion: the occlusion the draw lights by, a texel
-	at each of the target's pixels) */
-	if (stream.definition->pixel_program.ambient_occlusion)
-	{
-		struct xgpu_metal_sampler sampler;
-
-		memset(&sampler, 0, sizeof(sampler));
-		sampler.min_filter = sampler.mag_filter = XGPU_METAL_FILTER_POINT;
-		sampler.mip_filter = XGPU_METAL_MIP_NONE;
-		sampler.address_u = sampler.address_v = sampler.address_w = XGPU_METAL_ADDRESS_CLAMP;
-		sampler.max_anisotropy = 1;
-		xgpu_metal_set_texture(XGPU_METAL_TEXTURE_AMBIENT_OCCLUSION, xgpu_metal_post_ambient_occlusion_texture(), &sampler);
-		stream.occlusion_bound = YES;
-	}
-	else if (stream.occlusion_bound)
-	{
-		/* (and none for a draw that does not: a draw put aside reads
-		nothing the frame wrote, xgpu_metal.m, and an object's shadow drawn
-		after the surfaces would otherwise be thought to read it) */
-		xgpu_metal_set_texture(XGPU_METAL_TEXTURE_AMBIENT_OCCLUSION, 0, NULL);
-		stream.occlusion_bound = NO;
-	}
 	if (target_get(stream.color))
 		target_get(stream.color)->written++;
 	memcpy(pipeline.attributes, attributes, sizeof(pipeline.attributes));
@@ -1465,45 +1441,6 @@ static void stream_world_ao_window(void *context, const struct xgpu_stream_world
 	xgpu_metal_world_ao_window(record->active ? &record->block : NULL);
 }
 
-/* display.ambient_occlusion of a window's 3D view (xgpu_metal_post.c), from
-the depth target drawn with it, its opaque surfaces' depth alone
-(d3d8_device.c's pre-pass), which the surfaces' draws then light by; or the
-occlusion last found in the view's place (debug.ambient_occlusion_view);
-none over a multisampled target */
-static void stream_ambient_occlusion(void *context, const struct xgpu_stream_ambient_occlusion *record)
-{
-	struct stream_target *target = target_get(record->target);
-	struct stream_target *depth = stream.color == record->target ? target_get(stream.depth) : NULL;
-	uint32_t kind;
-
-	(void)context;
-	/* (none, white, unless it is found) */
-	if (record->quality != XGPU_AMBIENT_OCCLUSION_SHOW && !stream.preparing)
-		xgpu_metal_post_ambient_occlusion_none();
-	if (!target || target->description.depth_or_layers > 1 || target->description.samples > 1 || !depth ||
-		depth->description.samples > 1 || record->quality < XGPU_AMBIENT_OCCLUSION_SUBTLE ||
-		record->quality > XGPU_AMBIENT_OCCLUSION_SHOW)
-		return;
-	if (stream.preparing)
-	{
-		(void)xgpu_metal_post_ambient_occlusion_prepare(target->description.format, depth->description.format);
-		return;
-	}
-	kind = xgpu_metal_pass_kind(XGPU_METAL_PASS_OCCLUSION_UPSAMPLE);
-	if (record->quality == XGPU_AMBIENT_OCCLUSION_SHOW)
-	{
-		target->written++;
-		xgpu_metal_post_ambient_occlusion_show(target->texture, target->description.format, target->description.width,
-			target->description.height, record->corners);
-	}
-	else
-		xgpu_metal_post_ambient_occlusion(target->texture, target->description.format, target->description.width,
-			target->description.height, depth->texture, depth->description.format, record->corners, (int)record->quality,
-			record->camera);
-	xgpu_metal_pass_kind(kind);
-	stream_state_restore();
-}
-
 /* the game's renderer's category of the draws from now on
 (XGPU_STREAM_CATEGORY's value: rasterizer.h's _rasterizer_profile_*), as the
 kind of pass HALO_METAL_PASS_TIMES sums them under */
@@ -1526,11 +1463,8 @@ static void stream_category(void *context, uint32_t category)
 		XGPU_METAL_PASS_EFFECTS, XGPU_METAL_PASS_EFFECTS, XGPU_METAL_PASS_EFFECTS, XGPU_METAL_PASS_EFFECTS,
 		XGPU_METAL_PASS_HUD, XGPU_METAL_PASS_HUD,
 	};
-	uint32_t number = category & ~XGPU_STREAM_CATEGORY_PREPASS;
-
 	(void)context;
-	xgpu_metal_pass_kind((category & XGPU_STREAM_CATEGORY_PREPASS) ? XGPU_METAL_PASS_PREPASS :
-		number < sizeof(kinds) ? kinds[number] : XGPU_METAL_PASS_OTHER);
+	xgpu_metal_pass_kind(category < sizeof(kinds) ? kinds[category] : XGPU_METAL_PASS_OTHER);
 }
 
 /* ---------- visibility tests, frames */
@@ -1701,7 +1635,6 @@ const struct host_render_backend *xgpu_metal_stream_backend(void)
 		backend.anti_alias = stream_anti_alias;
 		backend.hdr = stream_hdr;
 		backend.tone_map = stream_tone_map;
-		backend.ambient_occlusion = stream_ambient_occlusion;
 		backend.gamma = stream_gamma;
 		backend.category = stream_category;
 		backend.panini = stream_panini;
