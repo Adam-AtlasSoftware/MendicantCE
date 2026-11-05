@@ -111,7 +111,7 @@ def test_the_hud_and_the_weapon_take_it():
     # (the weapon's reticle at the unzoomed view's magnification, kept through a zoom: #594)
     assert "panini_center_scale_widened(reticle_widenings[local_player_index] > 0.0f ?" in \
         read("port/linux/game/view_fov.c")
-    assert "passenger_camera_reticle_offset(&point, reticle_scale)" in read("source/interface/hud_draw.c")
+    assert "passenger_camera_reticle_offset(&point, reticle_scale, &reticle_rest)" in read("source/interface/hud_draw.c")
     assert "angle = 2.0f * atanf(tanf(angle * 0.5f) * panini_scale);" in read("port/linux/game/view_fov.c")
     render = read("source/render/render.c")
     assert render.index("halo_screen_anti_alias(") < render.index("panini_window_draw();") < \

@@ -813,14 +813,17 @@ void rasterizer_text_get_scale(
 	return;
 }
 
-/* port: a character's quad, scaled (rasterizer_text_set_scale) */
+/* port: a character's quad, scaled (rasterizer_text_set_scale), and moved
+past the whole units it is laid out at (rasterizer_screen_offset_set) */
 static void rasterizer_text_draw_scaled_character(
 	struct dynamic_screen_vertex const *vertices)
 {
 	struct dynamic_screen_vertex scaled[NUMBER_OF_VERTICES_PER_QUADRILATERAL];
+	real_vector2d offset;
 	short vertex_index;
 
-	if (text_scale == 1.0f)
+	rasterizer_screen_offset_get(&offset);
+	if (text_scale == 1.0f && offset.i == 0.0f && offset.j == 0.0f)
 	{
 		rasterizer_text_draw_character(vertices);
 		return;
@@ -828,9 +831,9 @@ static void rasterizer_text_draw_scaled_character(
 	for (vertex_index = 0; vertex_index < NUMBER_OF_VERTICES_PER_QUADRILATERAL; vertex_index++)
 	{
 		scaled[vertex_index] = vertices[vertex_index];
-		scaled[vertex_index].position.x =
+		scaled[vertex_index].position.x = offset.i +
 			text_scale_origin_x + (vertices[vertex_index].position.x - text_scale_origin_x) * text_scale;
-		scaled[vertex_index].position.y =
+		scaled[vertex_index].position.y = offset.j +
 			text_scale_origin_y + (vertices[vertex_index].position.y - text_scale_origin_y) * text_scale;
 	}
 	rasterizer_text_draw_character(scaled);
