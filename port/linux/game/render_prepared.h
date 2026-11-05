@@ -13,7 +13,8 @@ A map's preparation recorded and played back (render_prepared.c).
 prepared (mirrors: whether it draws a mirror's window): TRUE, or FALSE
 where there is none to play (its walk to be made, and recorded) */
 boolean render_prepared_replay(boolean mirrors);
-/* the map loaded has a record (or has none to make: records off) */
+/* the map loaded has a record, its own or a shipped one of any structure
+(or has none to make: records off) */
 boolean render_prepared_recorded(boolean mirrors);
 /* a shipped record (prepared_shipped.h) of a map (its cache file's
 checksum) and key that plays: not passed over, whole and of this form */

@@ -429,8 +429,11 @@ boolean render_prepared_recorded(boolean mirrors)
 			prepared_header_fits(&header, prepared.checksum, prepared.key);
 		fclose(file);
 	}
+	/* (or a shipped one of the map as a load starts it, whatever structure
+	the pass has come to: menu_pictures_render.c) */
 	if (!fits)
-		fits = render_prepared_shipped(prepared.checksum, prepared.key);
+		fits = render_prepared_shipped_map(prepared.checksum, global_scenario_index != NONE ?
+			tag_get_name(global_scenario_index) : "");
 	if (!fits)
 		platform_log("render: the map's preparation has no record (%s, structure %d%s): it is recorded",
 			prepared.path, global_structure_bsp_index_get(), mirrors ? ", mirrors" : "");
