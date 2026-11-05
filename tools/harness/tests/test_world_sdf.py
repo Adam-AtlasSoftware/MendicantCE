@@ -86,8 +86,8 @@ CONTROLS = [
     # an object's voxels in solid kept as solid (not filled from outside): its darkness filtered past its faces
     (BAKE, "if (marks[other] == 0 || (marks[other] >= 2 && marks[other] < step))", "if (0)", "object_bake"),
     # the cosines' weights to the rays the wrong way round (the far side's occlusion)
-    (BAKE, "weights[j * WORLD_SDF_OBJECT_NORMALS + k] = cosine > 0.0f ? cosine",
-     "weights[j * WORLD_SDF_OBJECT_NORMALS + k] = cosine < 0.0f ? -cosine", "object_bake"),
+    (BAKE, "weights[j * WORLD_SDF_OBJECT_NORMALS + k] = cosine > 0.0f ?\n\t\t\t\tcosine",
+     "weights[j * WORLD_SDF_OBJECT_NORMALS + k] = cosine < 0.0f ?\n\t\t\t\t-cosine", "object_bake"),
     # a triangle's cone meeting too few buckets (rays it blocks missed)
     (BAKE, "cosine * buckets.cosines[bucket] - sine * buckets.sines[bucket]",
      "cosine * buckets.cosines[bucket] + sine * buckets.sines[bucket]", "object_bake"),
