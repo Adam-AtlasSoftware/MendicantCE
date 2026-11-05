@@ -170,8 +170,8 @@ jobs:
         run: |
           packages="$(cat .github/ci-image/packages.txt)"
           if ! dpkg -s $packages > /dev/null 2>&1; then
-            apt-get update
-            apt-get install -y --no-install-recommends $packages
+            apt-get -o Acquire::Retries=5 update
+            apt-get -o Acquire::Retries=5 install -y --no-install-recommends $packages
           fi
 
       # (the compile cache of master's latest build, restored on every branch
@@ -308,8 +308,8 @@ jobs:
         run: |
           packages="$(cat .github/ci-image/packages.txt .github/ci-image/packages-x86_64.txt)"
           if ! dpkg -s $packages > /dev/null 2>&1; then
-            apt-get update
-            apt-get install -y --no-install-recommends $packages
+            apt-get -o Acquire::Retries=5 update
+            apt-get -o Acquire::Retries=5 install -y --no-install-recommends $packages
           fi
 
       # (master's, as the 64-bit ARM job's)
@@ -464,8 +464,8 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/tools"
           # (each download checked against the hash it had when it was pinned)
-          curl -fsSL -o ninja.zip https://github.com/ninja-build/ninja/releases/download/v1.12.1/ninja-linux.zip
-          curl -fsSL -o ccache.tar.xz https://github.com/ccache/ccache/releases/download/v4.10.2/ccache-4.10.2-linux-x86_64.tar.xz
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -o ninja.zip https://github.com/ninja-build/ninja/releases/download/v1.12.1/ninja-linux.zip
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -o ccache.tar.xz https://github.com/ccache/ccache/releases/download/v4.10.2/ccache-4.10.2-linux-x86_64.tar.xz
           sha256sum -c - <<'EOF'
           6f98805688d19672bd699fbbfa2c2cf0fc054ac3df1f0e6a47664d963d530255  ninja.zip
           80cab87bd510eca796467aee8e663c398239e0df1c4800a0b5dff11dca0b4f18  ccache.tar.xz
@@ -616,8 +616,8 @@ jobs:
       - name: Install the toolchain
         shell: pwsh
         run: |
-          Invoke-WebRequest -OutFile ninja.zip https://github.com/ninja-build/ninja/releases/download/v1.12.1/ninja-win.zip
-          Invoke-WebRequest -OutFile ccache.zip https://github.com/ccache/ccache/releases/download/v4.10.2/ccache-4.10.2-windows-x86_64.zip
+          Invoke-WebRequest -MaximumRetryCount 5 -RetryIntervalSec 5 -OutFile ninja.zip https://github.com/ninja-build/ninja/releases/download/v1.12.1/ninja-win.zip
+          Invoke-WebRequest -MaximumRetryCount 5 -RetryIntervalSec 5 -OutFile ccache.zip https://github.com/ccache/ccache/releases/download/v4.10.2/ccache-4.10.2-windows-x86_64.zip
           # (each download checked against the hash it had when it was pinned)
           if ((Get-FileHash ninja.zip -Algorithm SHA256).Hash -ne "F550FEC705B6D6FF58F2DB3C374C2277A37691678D6ABA463ADCBB129108467A") { throw "ninja.zip: unexpected SHA-256" }
           if ((Get-FileHash ccache.zip -Algorithm SHA256).Hash -ne "6252F081876A9A9F700FAE13A5AEC5D0D486B28261D7F1F72AC11C7AD9DF4DA9") { throw "ccache.zip: unexpected SHA-256" }
@@ -744,7 +744,7 @@ jobs:
     steps:
       - name: Install the toolchain
         run: |
-          brew install ninja ccache
+          for i in 1 2 3; do brew install ninja ccache && break; sleep 10; done; command -v ninja && command -v ccache
           # (the disk image's window: tools/macos_app.py dmg)
           python3 -m pip install --break-system-packages dmgbuild==1.6.7
           # (Xcode 26 downloads the Metal compiler apart)
@@ -937,7 +937,7 @@ jobs:
     steps:
       - name: Install the toolchain
         run: |
-          brew install ninja ccache
+          for i in 1 2 3; do brew install ninja ccache && break; sleep 10; done; command -v ninja && command -v ccache
           xcrun -sdk iphoneos metal --version || xcodebuild -downloadComponent MetalToolchain
 
       - uses: actions/checkout@v4
@@ -1201,7 +1201,7 @@ jobs:
           fi
           if [ -n "$ORG" ]; then export SENTRY_ORG="$ORG"; fi
           if [ -n "$URL" ]; then export SENTRY_URL="$URL"; fi
-          curl -fsSL -o sentry-cli "https://github.com/getsentry/sentry-cli/releases/download/$SENTRY_CLI_VERSION/sentry-cli-Linux-x86_64"
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -o sentry-cli "https://github.com/getsentry/sentry-cli/releases/download/$SENTRY_CLI_VERSION/sentry-cli-Linux-x86_64"
           chmod +x sentry-cli
           ./sentry-cli debug-files upload --wait \
             artifacts/halo-windows-release artifacts/halo-windows-release-symbols \
