@@ -55,19 +55,6 @@ NEGATIVE_CONTROLS = {
 MENU_NAMES = ("campaign_restart_offered", "campaign_restart_ask", "campaign_restart", "campaign_restart_cancel")
 
 
-def xbox_function(source, name):
-    """a function of the Xbox's code, its type on the line before its name"""
-    match = re.search(r"^\w[\w *]*\n" + re.escape(name) + r"\(\s*[^;{]*\)\s*\{", source, re.M)
-    if not match:
-        raise LookupError(f"function not found in the sources: {name}")
-    end = source.index("{", match.start()) + 1
-    depth = 1
-    while depth:
-        depth += (source[end] == "{") - (source[end] == "}")
-        end += 1
-    return source[match.start():end]
-
-
 def generated(control=None):
     sources = {path: read(path) for path in (CAMPAIGN_MENU, FUNCTIONS, GAME_STATE)}
     if control:
@@ -80,7 +67,7 @@ def generated(control=None):
     code = [level.group(0)]
     code += [function(sources[FUNCTIONS], name) for name in ("campaign_start", "campaign_fail", "campaign_continue")]
     code += [function(menu, name) for name in MENU_NAMES]
-    code.append(xbox_function(sources[GAME_STATE], "game_state_save_to_persistent_storage"))
+    code.append(function(sources[GAME_STATE], "game_state_save_to_persistent_storage"))
     return (("under_test.inc", "\n\n".join(code) + "\n"),)
 
 

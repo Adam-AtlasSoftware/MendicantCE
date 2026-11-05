@@ -3550,6 +3550,12 @@ The menus that show whether there is one (Campaign, Choose Mission, Load
 Game) find the checkpoint checked (its 20 MB summed against its checksum) on
 a thread, as the main menu shows and again whenever the file changes
 (`src/saved_game_check.c`), not as their screens open.
+The Campaign menu's RESTART MISSION, and Choose Mission's RESTART on that
+mission's card, ask first, then play the mission from its start at the saved
+game's difficulty without loading it. Quitting writes the profile's saved
+game from the last checkpoint; before a map's first checkpoint nothing is
+written, so a restart left early keeps the saved game it would have
+replaced.
 
 The checkpoint a revert goes back to (`savegame.bin` in `z:\`) holds the
 part of the game state in use, its allocations (18 MB of the 20 MB it has
