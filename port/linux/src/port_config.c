@@ -316,9 +316,9 @@ static const struct config_setting config_settings[] =
 		"menu_pictures; false keeps the originals." },
 	{ "display.high_res_text", _config_boolean, "true", "HALO_HIGH_RES_TEXT", _environment_value, _platform_all,
 		"Draw the menus', HUD's and console's text with the fonts in\n"
-		"port/assets/fonts (Overpass, Hack) at the resolution the game draws at,\n"
-		"and the menus' titles from port/assets/titles; false draws the maps'\n"
-		"bitmap fonts and titles." },
+		"port/assets/fonts (Cyborg Interface Gothic, Hack) at the resolution\n"
+		"the game draws at, and the menus' titles from port/assets/titles;\n"
+		"false draws the maps' bitmap fonts and titles." },
 	{ "display.shadow_resolution", _config_integer, GRAPHICS_SHADOW_RESOLUTION, "HALO_SHADOW_RESOLUTION",
 		_environment_value, _platform_all,
 		"The size the objects' shadows are drawn at, in pixels each way: 128 as\n"

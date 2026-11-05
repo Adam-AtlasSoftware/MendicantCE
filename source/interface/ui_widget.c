@@ -5772,6 +5772,67 @@ static boolean ui_widget_port_text_wrap(
 	return fits;
 }
 
+/* port: port/linux/game/menu_shapes.c */
+void menu_shape_caret(real x, real y0, real y1, real width, pixel32 color);
+
+/* port: the caret of a menu's field typed into (menu_functions.c's
+text_field_show, each frame it is lit): the text box it is drawn in, and
+when it was last shown (a box not shown a moment since has none: its screen
+was left). It is a bar after the text, about its capitals, which a field
+has in its middle (tools/port_settings.py's caps_text_y), not a character:
+an underscore was drawn under the baseline, low in the field (issue 682). */
+#define UI_WIDGET_PORT_CARET_MILLISECONDS 250
+/* (its width, and how far it reaches past the capitals above and below, in
+units) */
+#define UI_WIDGET_PORT_CARET_WIDTH 1.25f
+#define UI_WIDGET_PORT_CARET_OVER 1.5f
+static struct widget_instance *ui_widget_port_caret_box = NULL;
+static unsigned long ui_widget_port_caret_time;
+
+/* port: a text box's caret lit this frame (shown), or not (where it was
+lit in it) */
+void ui_widget_port_caret_show(
+	struct widget_instance *box,
+	boolean shown)
+{
+	if (shown && box)
+	{
+		ui_widget_port_caret_box = box;
+		ui_widget_port_caret_time = system_milliseconds();
+	}
+	else if (box == ui_widget_port_caret_box)
+	{
+		ui_widget_port_caret_box = NULL;
+	}
+}
+
+static boolean ui_widget_port_caret_shown(
+	struct widget_instance *widget)
+{
+	return widget && widget == ui_widget_port_caret_box &&
+		system_milliseconds() - ui_widget_port_caret_time < UI_WIDGET_PORT_CARET_MILLISECONDS;
+}
+
+/* port: the caret after a text drawn in the bounds (in the draw mode's
+font, draw_string_set_draw_mode): at the pen past its last letter, over
+the font's capitals' height and a little more, on their middle */
+static void ui_widget_port_caret_draw(
+	rectangle2d const *bounds,
+	wchar_t const *text,
+	real_argb_color const *color)
+{
+	rectangle2d text_bounds, cursor_bounds;
+	real middle, half;
+
+	draw_string_set_indents(0, 0);
+	draw_unicode_string_compute_bounds(bounds, text, &text_bounds, &cursor_bounds);
+	/* (the capitals' rows' middle: their middle row's lower half) */
+	middle = (real)draw_unicode_string_capital_middle(bounds, text) + 0.5f;
+	half = draw_string_capital_height() * 0.5f + UI_WIDGET_PORT_CARET_OVER;
+	menu_shape_caret((real)cursor_bounds.x0, middle - half, middle + half, UI_WIDGET_PORT_CARET_WIDTH,
+		real_argb_color_to_pixel32(color));
+}
+
 static void widget_instance_render_text_box(
 	struct widget_instance *widget,
 	struct ui_widget_definition *definition,
@@ -5793,6 +5854,8 @@ static void widget_instance_render_text_box(
 	wchar_t named[256];
 	/* port: (an error dialog's button named in words) */
 	wchar_t prompted[256];
+	/* port: a field typed into: its caret after its text (none yet too) */
+	boolean caret = ui_widget_port_caret_shown(widget);
 
 	if (definition->text_label_string_list.index != NONE)
 	{
@@ -5842,10 +5905,11 @@ static void widget_instance_render_text_box(
 		}
 	}
 	text = &widget->parameters.text_box.text;
-	if (!*text || !**text)
+	/* port: (an empty field typed into: its caret alone) */
+	if ((!*text || !**text) && !caret)
 		return;
 	for (search_index = 0;
-		search_index < definition->search_and_replace_functions.count;
+		*text && **text && search_index < definition->search_and_replace_functions.count;
 		search_index++)
 	{
 		struct ui_widget_search_and_replace_reference *reference =
@@ -5926,6 +5990,12 @@ static void widget_instance_render_text_box(
 				SECONDS_PER_MILLISECOND * 3.0f) + 1.5f) * 0.4f) * color.alpha;
 	}
 	draw_string_set_draw_mode(font_index, NONE, justification, 0, &color);
+	/* port: an empty field typed into: its caret alone */
+	if (!*text || !**text)
+	{
+		ui_widget_port_caret_draw(&bounds, L"", &color);
+		return;
+	}
 	/* port: the port's own error text, wrapped to its dialog: the box its
 	background draws (narrower than the text box; its picture is padded to a
 	power of two, so a margin of the text's offset on each side and as much
@@ -6006,6 +6076,9 @@ static void widget_instance_render_text_box(
 		draw_string_and_hack_in_icons(&bounds, &clip, NULL, 0, *text, FALSE);
 	else
 		rasterizer_draw_unicode_string(&bounds, &clip, NULL, 0, *text);
+	/* port: a field typed into: its caret after its text */
+	if (caret)
+		ui_widget_port_caret_draw(&bounds, *text, &color);
 
 	return;
 }
@@ -6847,7 +6920,9 @@ static boolean ui_widget_port_text_span(
 	bounds.y1 = SHORT_MAX;
 	draw_string_set_draw_mode(definition->text_font.index, NONE, _text_justification_left, 0, &color);
 	draw_string_set_indents(0, 0);
-	draw_unicode_string_compute_bounds(&bounds, text, &text_bounds, &cursor_bounds);
+	/* (where its letters are drawn, as hud_key_prompts.c lays a cap out about
+	them) */
+	draw_unicode_string_compute_drawn_bounds(&bounds, text, &text_bounds, &cursor_bounds);
 	if (text_bounds.x1 == SHORT_MIN)
 		return FALSE;
 	*left = text_bounds.x0;

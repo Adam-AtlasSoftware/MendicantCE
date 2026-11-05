@@ -5,6 +5,7 @@ smaller than its capitals once lost every letter but the dots), and drawn
 where they belong at the screen's rows."""
 from pathlib import Path
 import os
+import re
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,6 +20,9 @@ def function(text, start):
 
 def test_caption_letters_are_set_and_drawn(tmp_path):
     source = (ROOT / "port/linux/src/text_hires.c").read_text()
+    # (the embedded fonts' list as text_hires.h has it)
+    embedded = re.search(r"^struct text_hires_embedded\n\{.*?^\};", (ROOT / "port/linux/src/text_hires.h").read_text(),
+                         re.M | re.S).group(0)
     program = r'''
 #include <assert.h>
 #include <math.h>
@@ -29,7 +33,7 @@ def test_caption_letters_are_set_and_drawn(tmp_path):
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "../../third_party/stb/stb_truetype.h"
 #include "loading_art.h"
-struct text_hires_embedded { const char *tag; const char *file; unsigned int data_offset; unsigned int size; };
+''' + embedded + r'''
 static struct text_hires_embedded text_hires_embedded[1];
 static const unsigned int text_hires_embedded_count = 1;
 /* (the assets' file, embedded_assets.h: the font alone, at offset 16) */

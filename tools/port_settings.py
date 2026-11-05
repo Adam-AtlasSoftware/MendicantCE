@@ -321,8 +321,9 @@ SETTINGS_TAB_LAID = 86
 # Settings' own tabs (seven: SETTINGS_TAB_PAGES) are each as wide as its name
 # and the same room either side of it, filling the row from SETTINGS_TABS_X to
 # RB's prompt (settings_tab_places); a name's width reckoned as small_ui's
-# capitals' (the high-res text's Overpass 750 at their height: INTERFACE,
-# the widest name, 79 units of the room its tab has)
+# capitals' (Overpass 750's advances at their height, which the high-res
+# text drew them with until Cyborg Interface Gothic, its glyphs centred on
+# the tag's: INTERFACE, the widest name, 79 units of the room its tab has)
 SETTINGS_TABS_RIGHT = SETTINGS_TABS_X + 5 * SETTINGS_TAB_STEP + SETTINGS_TAB_LAID
 SETTINGS_TAB_GAP = SETTINGS_TAB_STEP - SETTINGS_TAB_LAID
 SMALL_UI_CAPITALS = {"A": 10.33, "B": 9.94, "C": 9.10, "D": 10.21, "E": 8.98, "F": 8.24, "G": 9.72, "H": 10.35,
@@ -6193,8 +6194,10 @@ CAMPAIGN_ACCENT = "#FF4FB3FF"
 CAMPAIGN_TEXT = "#FFD6E9FF"
 CAMPAIGN_DIM = "#FF8FB3D3"
 CAMPAIGN_NEW = "#FFF2B34A"
-# the missions' names: the menus' heading font (menu_tags.c's pc\\heading, OpenCE)
-CAMPAIGN_TITLE_FONT = "heading"
+# the missions' names: the interface's font, as the cards beside the chosen
+# one have them (large_ui's: issue 681; not the titles' face, OpenCE, which
+# the menus' heading font, pc\\heading, draws)
+CAMPAIGN_TITLE_FONT = "ui\\large_ui"
 # CONTINUE's picture of the saved game's mission, at its left
 CONTINUE_ART_WIDTH = 50
 # the levels' pictures (ui.map's sp_levels: the ten levels', then a level
@@ -6248,12 +6251,33 @@ MISSION_BADGE = {MISSION_BIG: (36, 38), MISSION_SMALL: (28, 31)}
 MISSION_CARDS_TOP = 84
 MISSION_CARD_GAP = 10
 MISSION_ARROW = (24, 64)
-# (the arrows' places, and their move to a wide screen's edges)
-MISSION_ARROW_X, MISSION_ARROW_WIDE = WIDE_MARGIN, 48
+# the arrows: as far from the row's cards beside the chosen one at any width
+# (the row wider apart on a wide screen: campaign_menu.inc's
+# mission_cards_place, the gap an eighth of the extra width more)
+MISSION_ARROW_GAP = 32
+# NOT YET BEATEN, in the badges' place: as wide as the card's picture
+MISSION_UNBEATEN_INSET = MISSION_ART_INSET
+# the chosen mission's objective under its name: lines of small_ui
+# (campaign_menu.inc's MISSION_OBJECTIVE_LINES), SMALL_UI_LINE units apart
+MISSION_OBJECTIVE_LINES = 2
+SMALL_UI_LINE, SMALL_UI_DESCENT = 20, 3
+
+
+def mission_arrow_place(side: str) -> tuple:
+    """an arrow's place at 4:3 and its move on a wide screen (x, dx):
+    MISSION_ARROW_GAP from the row of three cards, as mission_cards_place
+    lays it out"""
+    row = MISSION_BIG[0] + 2 * MISSION_SMALL[0] + 2 * MISSION_CARD_GAP
+    left = 320 - row // 2
+    if side == "left":
+        return left - MISSION_ARROW_GAP - MISSION_ARROW[0], -(WIDE_EXTRA // 8)
+    return left + row + MISSION_ARROW_GAP, WIDE_EXTRA // 8
 MISSION_DOTS, MISSION_DOT, MISSION_DOT_STEP, MISSION_DOTS_TOP = 16, (16, 8), 20, 328
 # the details' panel under the cards, across a wide screen
 MISSION_PANEL = (28, 340, 584, 68)
 MISSION_PANEL_BADGE, MISSION_PANEL_BADGE_STEP = 30, 66
+# (the room the objective keeps before the panel's first badge)
+MISSION_PANEL_TEXT_ROOM = 10
 # the difficulty cards: four across, each its big badge in a box at its top
 DIFFICULTY_CARD = (138, 300)
 DIFFICULTY_CARDS = (28, 96, 148)
@@ -6560,10 +6584,11 @@ def _mission_card(size: tuple, slot: int) -> list:
                          ("card_badge", f"{CAMPAIGN}/badges_{badge}")):
         lines += _widget(f"{CAMPAIGN}/{name}_{kind}", [("controller", 1), ("top", text_top + 62),
                                                         ("width", badge), ("height", badge), ("bitmap", bitmap)], [])
-    # (a mission not beaten on any difficulty says so, in the badges' place:
-    # the longest of campaign_menu.inc's wordings that fits the card)
-    lines += _campaign_text(f"{CAMPAIGN}/card_unbeaten_{kind}", 10, text_top + 62 + (badge - 16) // 2, width - 20, 18,
-                            "ui\\small_ui", CAMPAIGN_NEW)
+    # (a mission not beaten on any difficulty says so, in the badges' place,
+    # across the card's picture's width, in the middle as the badges are)
+    lines += _campaign_text(f"{CAMPAIGN}/card_unbeaten_{kind}", MISSION_UNBEATEN_INSET,
+                            text_top + 62 + (badge - 16) // 2, width - 2 * MISSION_UNBEATEN_INSET, 18,
+                            "ui\\small_ui", CAMPAIGN_NEW, align="center")
     lines += _level_pictures(f"{CAMPAIGN}/art_{art_w}x{art_h}", art_w, art_h)
     lines += _badge_frames(f"{CAMPAIGN}/badges_{badge}", CAMPAIGN_BADGES_SMALL, badge)
     return lines
@@ -6631,12 +6656,12 @@ def _missions() -> list:
                       *(f'<on event="{event}" run="port campaign previous"/>' for event in ("left", "stick_left")),
                       *(f'<on event="{event}" run="port campaign next"/>' for event in ("right", "stick_right")),
                       *cards,
-                      f'<child widget="{base}/arrow_previous" x="{MISSION_ARROW_X}" y="{arrow_y}"/>',
-                      f'<child widget="{base}/arrow_next" x="{640 - MISSION_ARROW_X - arrow_w}" y="{arrow_y}"/>'])
-    for name, side, move in (("arrow_previous", "left", -MISSION_ARROW_WIDE), ("arrow_next", "right",
-                                                                               MISSION_ARROW_WIDE)):
+                      f'<child widget="{base}/arrow_previous" x="{mission_arrow_place("left")[0]}" y="{arrow_y}"/>',
+                      f'<child widget="{base}/arrow_next" x="{mission_arrow_place("right")[0]}" y="{arrow_y}"/>'])
+    for name, side in (("arrow_previous", "left"), ("arrow_next", "right")):
         lines += _widget(f"{base}/{name}", [("width", arrow_w), ("height", arrow_h),
-                                            ("bitmap", f"{base}/arrow_{side}"), ("wide", wide(move))],
+                                            ("bitmap", f"{base}/arrow_{side}"),
+                                            ("wide", wide(mission_arrow_place(side)[1]))],
                          [f'<on event="{event}" run="port campaign {name[6:]}"/>' for event in ("a", "start")] +
                          ['<on event="left_mouse" run="mouse emit accept event"/>'])
     for slot in range(3):
@@ -6655,19 +6680,25 @@ def _missions() -> list:
     step = MISSION_PANEL_BADGE_STEP
     badges_x = left + width - 24 - 4 * step
     panel = [f'<child widget="{base}/{name}"/>' for name in
-             ("detail_title", "detail_objective", "detail_status", "detail_status_new", "detail_beaten")]
+             ("detail_title", "detail_objective", "detail_status", "detail_status_new")]
     panel += [f'<child widget="{base}/detail_{part}" x="{step * index}"/>' for index in range(4)
               for part in ("badge_shape", "badge", "badge_name")]
     lines += _campaign_text(f"{base}/detail_title", left + 14, top + 4, 276, 22, CAMPAIGN_TITLE_FONT, "#FFFFFFFF",
                             wide_layout=wide(0, WIDE_EXTRA))
-    lines += _campaign_text(f"{base}/detail_objective", left + 14, top + 24, 276, 26, "ui\\small_ui", SETTINGS_BLUE,
-                            wide_layout=wide(0, WIDE_EXTRA))
-    lines += _campaign_text(f"{base}/detail_status", left + 14, top + 47, 276, 18, "ui\\small_ui", CAMPAIGN_ACCENT,
-                            wide_layout=wide(0, WIDE_EXTRA))
-    lines += _campaign_text(f"{base}/detail_status_new", left + 14, top + 47, 276, 18, "ui\\small_ui",
-                            CAMPAIGN_NEW, wide_layout=wide(0, WIDE_EXTRA))
-    lines += _campaign_text(f"{base}/detail_beaten", badges_x, top + 2, 4 * step, 16, "ui\\small_ui", CAMPAIGN_DIM,
-                            words="BEATEN ON", align="center", wide_layout=wide(WIDE_EXTRA))
+    # (the objective under the name on as many lines as it takes, to
+    # MISSION_OBJECTIVE_LINES; where the player is with the mission over
+    # the badges, which it is about: "Beaten on Heroic.", "Not yet beaten.",
+    # a saved game's difficulty)
+    # (as wide as there is room before the badges, MISSION_PANEL_TEXT_ROOM
+    # short of the first: Keyes's on two lines at 4:3)
+    objective_height = (MISSION_OBJECTIVE_LINES - 1) * SMALL_UI_LINE + SMALL_UI_ASCENT + SMALL_UI_DESCENT
+    objective_width = badges_x + (step - badge) // 2 - MISSION_PANEL_TEXT_ROOM - (left + 14)
+    lines += _campaign_text(f"{base}/detail_objective", left + 14, top + 24, objective_width, objective_height,
+                            "ui\\small_ui", SETTINGS_BLUE, wide_layout=wide(0, WIDE_EXTRA))
+    lines += _campaign_text(f"{base}/detail_status", badges_x, top + 2, 4 * step, 16, "ui\\small_ui",
+                            CAMPAIGN_ACCENT, align="center", wide_layout=wide(WIDE_EXTRA))
+    lines += _campaign_text(f"{base}/detail_status_new", badges_x, top + 2, 4 * step, 16, "ui\\small_ui",
+                            CAMPAIGN_NEW, align="center", wide_layout=wide(WIDE_EXTRA))
     badge_x = badges_x + (step - badge) // 2
     for name, bitmap in (("detail_badge_shape", f"{base}/badge_shape_{badge}"),
                          ("detail_badge", f"{base}/badges_{badge}")):

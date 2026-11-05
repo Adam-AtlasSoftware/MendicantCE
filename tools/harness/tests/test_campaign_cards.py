@@ -86,6 +86,7 @@ def test_generator_sizes_are_the_engines():
     assert _define(source, "MISSION_CARDS_TOP") == port_settings.MISSION_CARDS_TOP
     assert _define(source, "MISSION_DOTS") == port_settings.MISSION_DOTS
     assert _define(source, "MISSION_DOT_STEP") == port_settings.MISSION_DOT_STEP
+    assert _define(source, "MISSION_OBJECTIVE_LINES") == port_settings.MISSION_OBJECTIVE_LINES
     assert _define(source, "CAMPAIGN_ITEMS_TOP") == port_settings.CAMPAIGN_ITEMS_TOP
     assert _define(source, "CAMPAIGN_CONTINUE_HEIGHT") == port_settings.CAMPAIGN_CONTINUE[1]
     assert _define(source, "CAMPAIGN_ITEM_HEIGHT") == port_settings.HUB_ITEM[1]
@@ -168,7 +169,7 @@ def test_mission_screen_layout(aspect):
     panel = one(boxes, "mission_panel")
     assert panel.inside(area)
     assert cards_bottom <= port_settings.MISSION_DOTS_TOP <= panel.y0 - port_settings.MISSION_DOT[1]
-    for name in ("detail_title", "detail_objective", "detail_status", "detail_status_new", "detail_beaten"):
+    for name in ("detail_title", "detail_objective", "detail_status", "detail_status_new"):
         assert one(boxes, name).inside(panel), name
     badges = named(boxes, "detail_badge")
     assert len(badges) == 4
@@ -218,3 +219,14 @@ def test_mission_cards_fit(aspect):
         assert len(badges) == 4
         _apart(badges, "the card's badges")
         assert one(boxes, f"card_title_{kind}").y1 <= min(box.y0 for box in badges)
+
+
+def test_one_wording_and_lines():
+    """Every card says NOT YET BEATEN (issue 681: the cards beside the chosen one said NOT BEATEN, a shorter wording
+    that fit their box), and the panel wraps the objective to the lines its box holds."""
+    source = read("port/linux/game/campaign_menu.inc")
+    card = function(source, "mission_card_show")
+    assert 'L"NOT YET BEATEN"' in card and '"NOT BEATEN"' not in source and '"UNBEATEN"' not in source
+    panel = function(source, "mission_panel_show")
+    assert panel.count('menu_text_box_wrap(named(panel, "detail_objective", 0)') == 2
+    assert panel.count("MISSION_OBJECTIVE_LINES);") == 2

@@ -3,7 +3,9 @@ each list of rows (Server Setup's, VR's, the setup options') no row over the nex
 (port_settings.option_row_height); every one-line text on or in a framed part (a button, a row, a prompt, the
 lobby's players' rows and controls) and every spinner's value in such a row with its capitals on its middle
 (port_settings.caps_text_y); every footer prompt's key cap and words inside its picture (port_settings.
-prompt_fit_width). The files as shipped, and the generator's output with a fault, which each check must find."""
+prompt_fit_width); Choose Mission's arrows as far from its cards at any width, NOT YET BEATEN in its box, the
+missions' objectives on the lines shown (issue 681). The files as shipped, and the generator's output with a fault,
+which each check must find."""
 
 import sys
 import xml.etree.ElementTree as ElementTree
@@ -16,7 +18,7 @@ from harness import menu_fit, menu_layout  # noqa: E402
 
 port_settings = menu_layout.port_settings
 CHECKS = {"rows": menu_fit.rows_overlapping, "centred": menu_fit.texts_off_middle,
-          "prompts": menu_fit.prompt_overflows}
+          "prompts": menu_fit.prompt_overflows, "missions": menu_fit.mission_overflows}
 
 
 def generated():
@@ -70,6 +72,12 @@ NEGATIVE_CONTROLS = {
     "prompts-not-fitted": ("prompt_fit_width", lambda words, width, text_x, browser=False: width, "prompts"),
     # a key's cap measured without its gap
     "cap-without-gap": ("KEY_CAP_GAP", 0, "prompts"),
+    # Choose Mission's arrows at the screen's margin, moved to a wide screen's edges, as before (issue 681)
+    "arrows-at-margin": ("mission_arrow_place", lambda side: (24, -48) if side == "left" else (592, 48), "missions"),
+    # NOT YET BEATEN in the name's column, as before: too narrow on a card beside the chosen one
+    "unbeaten-in-text-column": ("MISSION_UNBEATEN_INSET", 10, "missions"),
+    # the objective on one line, as before: Keyes's and The Library's cut short
+    "objective-one-line": ("MISSION_OBJECTIVE_LINES", 1, "missions"),
 }
 
 

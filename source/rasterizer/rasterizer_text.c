@@ -1076,6 +1076,49 @@ static void rasterizer_draw_hires_glyph(
 	return;
 }
 
+/* port: a place in units to the nearest whole unit (a half up) */
+static short drawn_span_unit(
+	real units)
+{
+	short whole = (short)units;
+
+	if ((real)whole > units)
+		whole--;
+	return (short)(units - whole >= 0.5f ? whole + 1 : whole);
+}
+
+/* port: where the high-res text draws a font tag's character whose bitmap
+is drawn from x0 (from its column x), in the draw mode's font, as
+rasterizer_draw_hires_glyph places it: its ink's left and right, whole
+units; FALSE (left and right as they were) where it is drawn from the tag's
+bitmap (the high-res text off, its font or the glyph not made yet) */
+boolean rasterizer_text_port_drawn_span(
+	struct font_character const *font_character,
+	short x0,
+	short x,
+	short *left,
+	short *right)
+{
+	struct text_hires_glyph glyph;
+	long hires_font;
+	real ink_left;
+
+	if (!hires_text_atlas || !font_character)
+		return FALSE;
+	hires_font = hires_text_font_get(draw_string_get_font(), MAX(text_scale, 1.0f));
+	if (hires_font == NONE || !text_hires_covers(hires_font, font_character->character) ||
+		!text_hires_glyph(hires_font, font_character->character, &glyph))
+	{
+		return FALSE;
+	}
+	ink_left = (real)(x0 - x + font_character->bitmap_origin_x) +
+		(font_character->character_width - glyph.advance) * 0.5f + glyph.left;
+	*left = drawn_span_unit(ink_left);
+	*right = drawn_span_unit(ink_left + (glyph.right - glyph.left));
+
+	return TRUE;
+}
+
 static void rasterizer_draw_hires_character(
 	struct parse_string_state *state,
 	struct font_header *font,

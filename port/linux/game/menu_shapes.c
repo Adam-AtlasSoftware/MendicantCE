@@ -4,7 +4,8 @@ MENU_SHAPES.C
 Shapes the port draws at the display's resolution rather than from a
 picture: a box with rounded corners, filled and edged (the prompts' key
 caps, port/linux/game/hud_key_prompts.c; the name keyboard's panels and
-keys, source/interface/virtual_keyboard.c), and a band shaded from one
+keys, source/interface/virtual_keyboard.c), a text field's caret (a bar
+about the capitals, source/interface/ui_widget.c), and a band shaded from one
 colour at its top to another at its bottom (the name keyboard's backdrop,
 as the menus' bitmaps\gradient has it). Each is drawn as quadrilaterals of
 the maps' white texture (the game globals' default textures), their
@@ -34,6 +35,7 @@ void menu_shape_rounded_box_pixels(real x0, real y0, real x1, real y1, real radi
 void menu_shape_rounded_box(real x0, real y0, real x1, real y1, real radius, real edge, pixel32 fill,
 	pixel32 color);
 void menu_shape_band(real x0, real y0, real x1, real y1, pixel32 top, pixel32 bottom);
+void menu_shape_caret(real x, real y0, real y1, real width, pixel32 color);
 real menu_shape_pixels(void);
 
 /* ---------- constants */
@@ -260,4 +262,32 @@ void menu_shape_band(
 		return;
 	menu_shape_rectangle(white, pixels, menu_shape_pixel_edge(x0, pixels), menu_shape_pixel_edge(y0, pixels),
 		menu_shape_pixel_edge(x1, pixels), menu_shape_pixel_edge(y1, pixels), top, bottom);
+}
+
+/* a text field's caret: a bar from x, width units wide (a pixel at least),
+from y0 to y1, in the text's units (drawn as the text is, scaled by
+rasterizer_text_set_scale about its origin), its sides on the display's
+pixels' edges, over the text's drop shadow (a unit down and right, black) */
+void menu_shape_caret(
+	real x,
+	real y0,
+	real y1,
+	real width,
+	pixel32 color)
+{
+	struct bitmap_data *white = menu_shape_white();
+	real pixels = menu_shape_pixels();
+	real scale, origin_x, origin_y, left, right, top, bottom, shadow;
+	pixel32 dark = color & 0xFF000000UL;
+
+	if (!white || y1 <= y0)
+		return;
+	rasterizer_text_get_scale(&scale, &origin_x, &origin_y);
+	left = menu_shape_pixel_edge(origin_x + (x - origin_x) * scale, pixels);
+	right = MAX(menu_shape_pixel_edge(origin_x + (x + width - origin_x) * scale, pixels), left + 1.0f);
+	top = menu_shape_pixel_edge(origin_y + (y0 - origin_y) * scale, pixels);
+	bottom = menu_shape_pixel_edge(origin_y + (y1 - origin_y) * scale, pixels);
+	shadow = MAX(floorf(scale * pixels + 0.5f), 1.0f);
+	menu_shape_rectangle(white, pixels, left + shadow, top + shadow, right + shadow, bottom + shadow, dark, dark);
+	menu_shape_rectangle(white, pixels, left, top, right, bottom, color, color);
 }

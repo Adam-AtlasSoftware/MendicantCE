@@ -98,11 +98,11 @@ def inner(width):
     return Box("inner", area.x0 + margin, 0, area.x1 - margin, 480, ())
 
 
-def layout(root, width, platforms=DESKTOP):
+def layout(root, width, platforms=DESKTOP, every=None):
     """the widgets under a screen (root) as drawn on a screen this wide: a Box each, in drawing order (a list's
-    description after its children)"""
+    description after its children); of the menu files', or of every (widgets_of's)"""
     extra = port_settings.wide_extra_of(width)
-    every = widgets()
+    every = every or widgets()
     boxes = []
 
     def walk(name, x, y, path):

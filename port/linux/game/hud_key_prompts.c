@@ -268,7 +268,8 @@ static void key_cap_equals_layout(short equals_advance, short *equals_pen, short
 }
 
 /* where text's letters span drawn from 0 in the draw mode's font, as one
-line, and its advance (where the next text would be drawn from); FALSE for
+line (their ink where it is drawn: draw_unicode_string_compute_drawn_bounds),
+and its advance (where the next text would be drawn from); FALSE for
 none (no letter with ink) */
 static boolean key_text_measure(wchar_t const *text, short *left, short *right, short *advance)
 {
@@ -283,7 +284,7 @@ static boolean key_text_measure(wchar_t const *text, short *left, short *right, 
 	bounds.y1 = SHORT_MAX;
 	cursor = bounds;
 	draw_string_set_indents(0, 0);
-	draw_unicode_string_compute_bounds(&bounds, text, &text_bounds, &cursor);
+	draw_unicode_string_compute_drawn_bounds(&bounds, text, &text_bounds, &cursor);
 	if (text_bounds.x0 > text_bounds.x1 || text_bounds.x1 == SHORT_MIN)
 		return FALSE;
 	*left = text_bounds.x0;
@@ -358,9 +359,11 @@ static boolean key_cap_draw(wchar_t const *text, rectangle2d *bounds, rectangle2
 	key_cap_metrics(&inset, &margin, &gap, &half);
 	start = cursor->x0;
 	line_start = *cursor;
-	/* (the name measured from the cursor: its letters' span) */
+	/* (the name measured from the cursor: its letters' span where they are
+	drawn, the high-res text's glyphs where it draws them, so that the cap
+	is about the letters seen, not the font tag's bitmaps) */
 	draw_string_set_indents(start - bounds->x0, 0);
-	draw_unicode_string_compute_bounds(bounds, text, &text_bounds, cursor);
+	draw_unicode_string_compute_drawn_bounds(bounds, text, &text_bounds, cursor);
 	if (cursor->y0 != line_start.y0)
 	{
 		/* (a name that does not fit on the line: its text alone, where it

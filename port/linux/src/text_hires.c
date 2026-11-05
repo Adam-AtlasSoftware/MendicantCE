@@ -4,7 +4,9 @@ TEXT_HIRES.C
 The game's text drawn with fonts at the display's resolution (text_hires.h).
 
 Each font tag the fonts draw (port/assets/fonts/fonts.json) gets its font
-sized so that its capitals are as tall as the tag's: the game's layout,
+sized so that its capitals are as tall as the tag's, and its fallback, the
+font that draws a character the first has not (Overpass, for the few that
+Cyborg Interface Gothic lacks), sized and fitted the same way: the game's layout,
 from the tag's character widths, is kept, and the fonts were chosen to fit
 the Xbox maps' widths. A tag whose letters are narrower (the fonts of a
 Custom Edition loc.map) gets its font narrowed until its letters are, on
@@ -58,17 +60,26 @@ each at its oversamples) */
 #define ATLAS_PADDING 2
 #define GLYPH_CACHE_SIZE 4096
 
+/* a font file as it draws a tag (none where scale is 0) */
+struct font_face
+{
+	stbtt_fontinfo info;
+	/* font units to units of the 480 lines */
+	float scale;
+	/* the glyphs' widths, against their heights, to fit the tag's letters */
+	float narrowing;
+};
+
+/* the font, and the fallback that draws the characters it has not */
+#define FONT_FACES 2
+
 static struct
 {
 	char tag[64];
 	/* the tag's measures it was made for */
 	float cap_height;
 	long letters_width;
-	stbtt_fontinfo info;
-	/* font units to units of the 480 lines */
-	float scale;
-	/* the glyphs' widths, against their heights, to fit the tag's letters */
-	float narrowing;
+	struct font_face faces[FONT_FACES];
 	/* how many times the display's pixels its glyphs are rasterized with */
 	float oversample;
 } fonts[MAXIMUM_FONTS];
@@ -101,6 +112,8 @@ GLYPH_CACHE_SIZE (no more can be asked than the cache has room for) */
 struct glyph_job
 {
 	long font;
+	/* (the font's face that has it: font_glyph_face) */
+	int face;
 	unsigned long code;
 	/* the atlas it is for (its generation) and the pixels it is drawn at */
 	unsigned long generation;
@@ -235,6 +248,7 @@ static void *rasterizer_thread(void *unused)
 	for (;;)
 	{
 		struct glyph_job job;
+		struct font_face *face;
 		int index, x0 = 0, y0 = 0, x1 = 0, y1 = 0, advance = 0, bearing = 0;
 		unsigned char *pixels = NULL;
 
@@ -247,11 +261,12 @@ static void *rasterizer_thread(void *unused)
 		if (job.generation != rasterizer.pack_generation)
 			continue;
 		pthread_mutex_unlock(&rasterizer.lock);
-		index = stbtt_FindGlyphIndex(&fonts[job.font].info, (int)job.code);
+		face = &fonts[job.font].faces[job.face];
+		index = stbtt_FindGlyphIndex(&face->info, (int)job.code);
 		if (index)
 		{
-			stbtt_GetGlyphBitmapBox(&fonts[job.font].info, index, job.pixels_x, job.pixels, &x0, &y0, &x1, &y1);
-			stbtt_GetGlyphHMetrics(&fonts[job.font].info, index, &advance, &bearing);
+			stbtt_GetGlyphBitmapBox(&face->info, index, job.pixels_x, job.pixels, &x0, &y0, &x1, &y1);
+			stbtt_GetGlyphHMetrics(&face->info, index, &advance, &bearing);
 		}
 		job.width = (short)(x1 - x0);
 		job.height = (short)(y1 - y0);
@@ -262,7 +277,7 @@ static void *rasterizer_thread(void *unused)
 		}
 		else if ((pixels = malloc((size_t)job.width * job.height)) != NULL)
 		{
-			stbtt_MakeGlyphBitmap(&fonts[job.font].info, pixels, job.width, job.height, job.width,
+			stbtt_MakeGlyphBitmap(&face->info, pixels, job.width, job.height, job.width,
 				job.pixels_x, job.pixels, index);
 		}
 		else
@@ -271,7 +286,7 @@ static void *rasterizer_thread(void *unused)
 		}
 		job.left = (short)x0;
 		job.top = (short)y0;
-		job.advance = advance * fonts[job.font].scale * fonts[job.font].narrowing;
+		job.advance = advance * face->scale * face->narrowing;
 		job.x = job.y = 0;
 		pthread_mutex_lock(&rasterizer.lock);
 		if (job.generation == rasterizer.pack_generation)
@@ -344,6 +359,20 @@ static void glyphs_take(void)
 		atlas_reset(atlas_scale);
 }
 
+/* the face of a font that draws a character: the font's own, else its
+fallback's; -1 if neither has it */
+static int font_glyph_face(long font, unsigned long code)
+{
+	int face;
+
+	for (face = 0; face < FONT_FACES; face++)
+	{
+		if (fonts[font].faces[face].scale > 0.0f && stbtt_FindGlyphIndex(&fonts[font].faces[face].info, (int)code))
+			return face;
+	}
+	return -1;
+}
+
 /* the atlas, for the display's scale now (emptied if it was another's);
 0 if there is none */
 static long glyph_want(long font, unsigned long code);
@@ -365,7 +394,7 @@ static int atlas_ready(void)
 		tags' bitmaps until they are) */
 		for (font = 0; atlas && font < font_count; font++)
 		{
-			for (code = '!'; fonts[font].scale > 0.0f && code <= '~'; code++)
+			for (code = '!'; fonts[font].faces[0].scale > 0.0f && code <= '~'; code++)
 				glyph_want(font, code);
 		}
 	}
@@ -379,6 +408,7 @@ static long glyph_want(long font, unsigned long code)
 {
 	long slot = glyph_slot(font, code);
 	struct glyph_job *job;
+	int face;
 
 	if (slot < 0)
 	{
@@ -391,7 +421,8 @@ static long glyph_want(long font, unsigned long code)
 		return slot;
 	glyphs[slot].font = font;
 	glyphs[slot].code = code;
-	if (!stbtt_FindGlyphIndex(&fonts[font].info, (int)code))
+	face = font_glyph_face(font, code);
+	if (face < 0)
 	{
 		glyphs[slot].state = _glyph_missing;
 		return slot;
@@ -419,10 +450,11 @@ static long glyph_want(long font, unsigned long code)
 	}
 	memset(job, 0, sizeof(*job));
 	job->font = font;
+	job->face = face;
 	job->code = code;
 	job->generation = atlas_generation;
-	job->pixels = fonts[font].scale * atlas_scale * fonts[font].oversample;
-	job->pixels_x = job->pixels * fonts[font].narrowing;
+	job->pixels = fonts[font].faces[face].scale * atlas_scale * fonts[font].oversample;
+	job->pixels_x = job->pixels * fonts[font].faces[face].narrowing;
 	rasterizer.wanted_count++;
 	pthread_cond_signal(&rasterizer.work);
 	pthread_mutex_unlock(&rasterizer.lock);
@@ -442,12 +474,45 @@ static void font_ahead(long font)
 		glyph_want(font, code);
 }
 
+/* a font file made a face that draws a tag: sized so that its capitals are
+cap_height units tall, narrowed where its letters are wider than the tag's
+(letter_widths); FALSE (and no face) if it cannot be read */
+static int face_make(struct font_face *face, const unsigned char *data, float cap_height, short const *letter_widths)
+{
+	float tag_width = 0.0f;
+	float font_width = 0.0f;
+	int x0, y0, x1, y1;
+	int letter;
+
+	face->scale = 0.0f;
+	face->narrowing = 1.0f;
+	if (!data || !stbtt_InitFont(&face->info, data, stbtt_GetFontOffsetForIndex(data, 0)) ||
+		!stbtt_GetCodepointBox(&face->info, 'H', &x0, &y0, &x1, &y1) || y1 <= y0)
+	{
+		return 0;
+	}
+	face->scale = cap_height / (float)(y1 - y0);
+	for (letter = 0; letter < TEXT_HIRES_FIT_LETTERS; letter++)
+	{
+		int glyph = stbtt_FindGlyphIndex(&face->info, letter < 26 ? 'A' + letter : 'a' + letter - 26);
+		int advance = 0, bearing = 0;
+
+		if (letter_widths[letter] <= 0 || !glyph)
+			continue;
+		stbtt_GetGlyphHMetrics(&face->info, glyph, &advance, &bearing);
+		tag_width += letter_widths[letter];
+		font_width += advance * face->scale;
+	}
+	if (tag_width > 0.0f && font_width > tag_width)
+		face->narrowing = tag_width / font_width;
+	return 1;
+}
+
 long text_hires_font(char const *tag_name, float cap_height, short const *letter_widths, float oversample)
 {
 	unsigned int index;
 	long font;
 	long letters_width = 0;
-	int x0, y0, x1, y1;
 	int letter;
 
 	if (!text_hires_enabled() || !tag_name || cap_height <= 0.0f || !letter_widths)
@@ -462,7 +527,7 @@ long text_hires_font(char const *tag_name, float cap_height, short const *letter
 		if (!names_differ(fonts[font].tag, tag_name) && fonts[font].cap_height == cap_height &&
 			fonts[font].letters_width == letters_width && fonts[font].oversample == oversample)
 		{
-			return fonts[font].scale > 0.0f ? font : -1;
+			return fonts[font].faces[0].scale > 0.0f ? font : -1;
 		}
 	}
 	if (font_count >= MAXIMUM_FONTS)
@@ -471,47 +536,37 @@ long text_hires_font(char const *tag_name, float cap_height, short const *letter
 	snprintf(fonts[font].tag, sizeof(fonts[font].tag), "%s", tag_name);
 	fonts[font].cap_height = cap_height;
 	fonts[font].letters_width = letters_width;
-	fonts[font].scale = 0.0f;
-	fonts[font].narrowing = 1.0f;
+	memset(fonts[font].faces, 0, sizeof(fonts[font].faces));
 	fonts[font].oversample = oversample;
 	for (index = 0; index < text_hires_embedded_count; index++)
 	{
 		const struct text_hires_embedded *embedded = &text_hires_embedded[index];
-		const unsigned char *data;
 
 		if (!embedded->tag || names_differ(embedded->tag, tag_name))
 			continue;
-		data = (const unsigned char *)embedded_assets_data(embedded->data_offset, embedded->size);
-		if (!data || !stbtt_InitFont(&fonts[font].info, data, stbtt_GetFontOffsetForIndex(data, 0)) ||
-			!stbtt_GetCodepointBox(&fonts[font].info, 'H', &x0, &y0, &x1, &y1) || y1 <= y0)
+		if (!face_make(&fonts[font].faces[0],
+			(const unsigned char *)embedded_assets_data(embedded->data_offset, embedded->size), cap_height,
+			letter_widths))
 		{
 			platform_log("high-res text: could not read %s for %s", embedded->file, tag_name);
 			break;
 		}
-		fonts[font].scale = cap_height / (float)(y1 - y0);
+		/* (its fallback: a font that cannot be read draws nothing, the
+		string with a character the font lacks drawn from the tag's bitmaps,
+		as without one) */
+		if (embedded->fallback_file && !face_make(&fonts[font].faces[1],
+			(const unsigned char *)embedded_assets_data(embedded->fallback_data_offset, embedded->fallback_size),
+			cap_height, letter_widths))
 		{
-			float tag_width = 0.0f;
-			float font_width = 0.0f;
-
-			for (letter = 0; letter < TEXT_HIRES_FIT_LETTERS; letter++)
-			{
-				int glyph = stbtt_FindGlyphIndex(&fonts[font].info, letter < 26 ? 'A' + letter : 'a' + letter - 26);
-				int advance = 0, bearing = 0;
-
-				if (letter_widths[letter] <= 0 || !glyph)
-					continue;
-				stbtt_GetGlyphHMetrics(&fonts[font].info, glyph, &advance, &bearing);
-				tag_width += letter_widths[letter];
-				font_width += advance * fonts[font].scale;
-			}
-			if (tag_width > 0.0f && font_width > tag_width)
-				fonts[font].narrowing = tag_width / font_width;
+			platform_log("high-res text: could not read %s for %s", embedded->fallback_file, tag_name);
 		}
-		platform_log("high-res text: %s (capitals %.0f units) drawn with %s, %.0f%% wide",
-			tag_name, cap_height, embedded->file, fonts[font].narrowing * 100.0f);
+		platform_log("high-res text: %s (capitals %.0f units) drawn with %s, %.0f%% wide%s%s",
+			tag_name, cap_height, embedded->file, fonts[font].faces[0].narrowing * 100.0f,
+			fonts[font].faces[1].scale > 0.0f ? ", what it lacks with " : "",
+			fonts[font].faces[1].scale > 0.0f ? embedded->fallback_file : "");
 		break;
 	}
-	if (fonts[font].scale <= 0.0f)
+	if (fonts[font].faces[0].scale <= 0.0f)
 		return -1;
 	font_ahead(font);
 	return font;
@@ -521,7 +576,7 @@ int text_hires_covers(long font, unsigned long code)
 {
 	long slot;
 
-	if (font < 0 || font >= font_count || fonts[font].scale <= 0.0f)
+	if (font < 0 || font >= font_count || fonts[font].faces[0].scale <= 0.0f)
 		return 0;
 	/* (control characters are never drawn) */
 	if (code < 32 || code == ' ')
@@ -539,7 +594,7 @@ int text_hires_glyph(long font, unsigned long code, struct text_hires_glyph *gly
 	float pixel_scale;
 	long slot;
 
-	if (font < 0 || font >= font_count || fonts[font].scale <= 0.0f || !placeholder_data || !atlas)
+	if (font < 0 || font >= font_count || fonts[font].faces[0].scale <= 0.0f || !placeholder_data || !atlas)
 		return 0;
 	slot = glyph_slot(font, code);
 	if (slot < 0 || glyphs[slot].state != _glyph_ready || !glyphs[slot].width || !glyphs[slot].height)

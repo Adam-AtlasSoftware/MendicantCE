@@ -2,7 +2,8 @@
 typing_gamepad): a slider's field starts empty where its value is a word (DEFAULT, AUTO, NONE, OFF, MATCH), so the
 number is typed at once, and with its number chosen otherwise, which the first key typed replaces and the first
 backspace clears; a name's field keeps its text; Enter ends a field as its row's A, posted to the menus, never as the
-controller's Start, which in a game closes the menus and drops what was typed (#507, #508)."""
+controller's Start, which in a game closes the menus and drops what was typed (#507, #508); the caret is the text
+box's to draw, on the capitals' middle, not an underscore in the text (#682)."""
 
 import re
 import sys
@@ -13,7 +14,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, function, mutated, read, run  # noqa: E402
 
-CASES = ["word-empty", "replace", "backspace-clears", "names-append", "enter-is-a", "enter-not-start"]
+CASES = ["word-empty", "replace", "backspace-clears", "names-append", "enter-is-a", "enter-not-start", "caret"]
 
 # a fault in the code, and the case that must catch it
 NEGATIVE_CONTROLS = {
@@ -32,6 +33,10 @@ NEGATIVE_CONTROLS = {
                                  "\ttext_field.chosen = text[0] != 0;\n\ttext_field_shown_time"), "names-append"),
     # Enter not read by the field (it was the controller's Start)
     "enter-ignored": ("menus", ("\t\t\tif (key.key_code == _key_return)", "\t\t\tif (FALSE)"), "enter-is-a"),
+    # the caret an underscore after the text again, drawn under its baseline (issue 682)
+    "caret-underscore": ("menus", ("\tshown[index] = 0;\n\ttext_set(value, shown);",
+                                   "\tif (editing && (system_milliseconds() / 500) % 2)\n\t\tshown[index++] = L'_';\n"
+                                   "\tshown[index] = 0;\n\ttext_set(value, shown);"), "caret"),
     # Enter Start in a menu's field again
     "enter-start": ("keyboard", ("else if (text_typing_enter_armed && !text_typing_field)",
                                  "else if (text_typing_enter_armed)"), "enter-not-start"),
@@ -80,3 +85,20 @@ def test_case(case):
 def test_negative_control(control):
     status, output = run(build("typed_values", generated(control)), NEGATIVE_CONTROLS[control][2])
     assert status == CHECK_FAILED, f"{control} was not caught: {output}"
+
+
+def test_caret_on_the_capitals_middle():
+    """Every text field's caret (text_field_show's, the sliders' held on: Server Setup's, the browser's searches, the
+    touchscreen's search, a password's, a friend code's, Host Controls') is drawn by the text box, empty or not: a bar
+    about the font's capitals, on their middle, which the fields' text_y puts on the field's middle (test_menu_fit's
+    "centred"); no field draws an underscore."""
+    menus = read("port/linux/game/menu_functions.c")
+    assert "L'_'" not in menus
+    assert "ui_widget_port_caret_show(value_text, TRUE);" in menus
+    widgets = read("source/interface/ui_widget.c")
+    draw = function(widgets, "ui_widget_port_caret_draw")
+    assert "draw_unicode_string_capital_middle(bounds, text)" in draw and "draw_string_capital_height()" in draw
+    assert re.search(r"middle - half, middle \+ half", draw)
+    render = function(widgets, "widget_instance_render_text_box")
+    assert render.count("ui_widget_port_caret_draw(") == 2
+    assert "if ((!*text || !**text) && !caret)" in render

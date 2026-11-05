@@ -60,6 +60,7 @@ LICENSES = {
     "LICENSE.txt": "LICENSE",
     "mbedtls-LICENSE.txt": "port/third_party/mbedtls/LICENSE",
     "miniupnpc-LICENSE.txt": "port/third_party/miniupnpc/LICENSE",
+    "CyborgInterfaceGothic-OFL.txt": "port/assets/fonts/CyborgInterfaceGothic-OFL.txt",
     "Overpass-OFL.txt": "port/assets/fonts/Overpass-OFL.txt",
     "Hack-LICENSE.txt": "port/assets/fonts/Hack-LICENSE.txt",
     "OpenCE-OFL.txt": "port/assets/fonts/OpenCE-OFL.txt",

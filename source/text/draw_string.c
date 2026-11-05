@@ -257,7 +257,16 @@ static struct
 {
 	rectangle2d bounds;
 	struct font_header *last_font_header;
+	/* port: the letters' bounds where they are drawn: the high-res text's
+	glyphs where it draws them (draw_unicode_string_compute_drawn_bounds) */
+	boolean drawn;
 } text_bounds_globals = { 0 };
+
+/* port: rasterizer_text.c: where the high-res text draws a font tag's
+character whose bitmap is drawn from x0 (from its column x), its ink's left
+and right; FALSE where it does not draw it (it is drawn from the bitmap) */
+boolean rasterizer_text_port_drawn_span(struct font_character const *character, short x0, short x, short *left,
+	short *right);
 
 static struct font_drawing_globals font_drawing_globals = { 0 };
 
@@ -322,6 +331,11 @@ static void text_bounds_draw_character(
 	short x1 = (short)(x0 + dx);
 	short y1 = (short)(y0 + dy);
 
+	/* port: where the high-res text draws its glyph, centred on the
+	character's advance, not the tag's bitmap's columns (whose blank ones
+	are not the drawn letter's) */
+	if (text_bounds_globals.drawn)
+		rasterizer_text_port_drawn_span(character, x0, x, &x0, &x1);
 	if (x0 < text_bounds_globals.bounds.x0)
 		text_bounds_globals.bounds.x0 = x0;
 	if (y0 < text_bounds_globals.bounds.y0)
@@ -1475,6 +1489,58 @@ void draw_unicode_string_compute_bounds(
 	text_bounds->y1 = cursor_bounds->y1;
 
 	return;
+}
+
+/* port: as draw_unicode_string_compute_bounds, the letters' bounds those of
+their ink as it is drawn: the high-res text's glyphs where it draws them
+(rasterizer_text.c), else the font tag's bitmaps. What is laid out about
+drawn letters (a key's cap about its name, hud_key_prompts.c) is laid out
+with these. */
+void draw_unicode_string_compute_drawn_bounds(
+	rectangle2d const *bounds,
+	wchar_t const *string,
+	rectangle2d *text_bounds,
+	rectangle2d *cursor_bounds)
+{
+	text_bounds_globals.drawn = TRUE;
+	draw_unicode_string_compute_bounds(bounds, string, text_bounds, cursor_bounds);
+	text_bounds_globals.drawn = FALSE;
+
+	return;
+}
+
+/* port: how many rows the draw mode's font's capitals are tall (its H's
+rows with ink; its ascent where it has no H) */
+short draw_string_capital_height(
+	void)
+{
+	struct font_header *font = styled_font_get(
+		font_drawing_globals.current_font_index,
+		font_drawing_globals.current_style);
+	struct font_character *capital = font ? font_get_character_by_ascii_code(font, 'H') : NULL;
+	short top = NONE;
+	short bottom = NONE;
+	short row;
+
+	if (!font)
+		return 0;
+	for (row = 0; capital && row < capital->bitmap_height; row++)
+	{
+		byte const *pixels = (byte const *)font->pixels.address + capital->pixels_offset + row * capital->bitmap_width;
+		short column;
+
+		for (column = 0; column < capital->bitmap_width; column++)
+		{
+			if (pixels[column])
+			{
+				if (top == NONE)
+					top = row;
+				bottom = row;
+				break;
+			}
+		}
+	}
+	return top == NONE ? font->ascending_height : (short)(bottom - top + 1);
 }
 
 /* port: the middle of a string's capitals as it is drawn in the bounds

@@ -72,8 +72,10 @@ def notices(platform: str) -> List[Tuple[Path, str]]:
         # internet play's UPnP (port/third_party/miniupnpc), in every build,
         # whose BSD license asks binaries to carry its notice
         (ROOT / "port/third_party/miniupnpc/LICENSE", "miniupnpc-LICENSE.txt"),
-        # the text's fonts (port/assets/fonts), embedded in every build, whose
-        # SIL Open Font License asks each copy to carry it
+        # the text's font, Cyborg Interface Gothic, by fizzy, and the font of
+        # what it lacks, Overpass (port/assets/fonts), embedded in every
+        # build, whose SIL Open Font License asks each copy to carry it
+        (ROOT / "port/assets/fonts/CyborgInterfaceGothic-OFL.txt", "CyborgInterfaceGothic-OFL.txt"),
         (ROOT / "port/assets/fonts/Overpass-OFL.txt", "Overpass-OFL.txt"),
         # the console's font (port/assets/fonts), embedded in every build,
         # whose MIT and Bitstream Vera licenses ask copies to carry them
