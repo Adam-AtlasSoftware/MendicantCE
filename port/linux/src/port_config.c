@@ -2413,6 +2413,9 @@ static const struct config_setting config_settings[] =
 	{ "debug.dynamic_lights_log", _config_boolean, "false", "HALO_DYNAMIC_LIGHTS_LOG", _environment_value, _platform_all,
 		"Log where the first projectile's light is drawn each frame (the\n"
 		"enhanced dynamic lights)." },
+	{ "debug.doors_pass_light", _config_boolean, "false", "HALO_DOORS_PASS_LIGHT", _environment_value, _platform_all,
+		"Leave the closed doors' portals open to the dynamic lights, as the game\n"
+		"did: a light behind a closed door lights the near side (for comparing)." },
 	{ "debug.world_scene_log", _config_boolean, "false", "HALO_WORLD_SCENE_LOG", _environment_value, _platform_all,
 		"With display.ambient_occlusion \"world\", log the world scene's counts\n"
 		"(the level's triangles, the objects drawn, the lights) now and then." },
