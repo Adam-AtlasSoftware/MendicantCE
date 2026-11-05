@@ -338,7 +338,10 @@ of each 4 KB page of the guest. A host page gets the union of the
 protections of its four guest pages, stays mapped while any of them is,
 and a guest page mapped into a host page in use is zeroed in place. The
 write tracking (`host_memory_watch.c`) protects host pages, so a write
-marks the whole 16 KB as written.
+marks the whole 16 KB as written; the vertex mirror's pages are the
+tracking's (`memory_watch_page_size`). Android's and Linux's memory without
+the base register (`host_memory.c`) keeps its pages so too, on kernels of
+16 KB pages.
 
 ### System calls
 

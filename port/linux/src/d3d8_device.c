@@ -840,6 +840,7 @@ static void journal_draw(unsigned long op, unsigned long primitive, unsigned lon
 	unsigned long base_vertex, unsigned long minimum);
 static void journal_operation(unsigned long op, const void *arguments, unsigned long bytes);
 static void journal_page(unsigned long page);
+static void mirror_page_size_set(unsigned long size);
 static void journal_vertex_shader(struct vertex_shader_object *object);
 static void journal_settings_blind(unsigned long words[3]);
 static void journal_vertex_shader_identify(struct vertex_shader_object *object);
@@ -1644,6 +1645,7 @@ static void device_backend_ready(void)
 		device.attributes[index][3] = 1.0f;
 	xgpu_backend_initialize();
 	memory_watch_initialize();
+	mirror_page_size_set(memory_watch_page_size());
 	debug_settings.skip_vertex_shaders = config_string("debug.gpu_skip_vertex_shaders");
 	debug_settings.statistics = config_boolean("debug.gpu_stats");
 #ifdef HALO_VR
@@ -4235,14 +4237,17 @@ while, and draws that use it stream their data as before. */
 
 #define MIRROR_SEGMENT_SIZE XGPU_MIRROR_SEGMENT_SIZE
 #define MIRROR_SEGMENT_COUNT (PLATFORM_CONTIGUOUS_SIZE / MIRROR_SEGMENT_SIZE)
-/* (the protection's page: 16 KB on Apple's hardware, the Mac's and the
-iPhone's; a 4 KB page there shared its protection with three others, whose
-game-written vertices then faulted every frame) */
-#if defined(HALO_MACOS)
-#define MIRROR_PAGE_SIZE 0x4000UL
-#else
-#define MIRROR_PAGE_SIZE 0x1000UL
-#endif
+/* The mirror's page is the write tracking's (memory_watch_page_size): the
+host's page, 4 KB, or 16 KB on Apple's hardware (the Mac's and the
+iPhone's) and on the Android and ARM Linux kernels that use them, 64 KB on
+some ARM Linux ones. A smaller page would share its protection with others,
+whose game-written vertices then faulted every frame: each upload protected
+the whole host page again. The arrays have room for the smallest page, the
+window's 4 KB (MIRROR_PAGE_UNIT). */
+#define MIRROR_PAGE_UNIT 0x1000UL
+#define MIRROR_PAGE_SLOTS (PLATFORM_CONTIGUOUS_SIZE / MIRROR_PAGE_UNIT)
+static unsigned long mirror_page_size = MIRROR_PAGE_UNIT;
+#define MIRROR_PAGE_SIZE mirror_page_size
 #define MIRROR_PAGE_COUNT (PLATFORM_CONTIGUOUS_SIZE / MIRROR_PAGE_SIZE)
 /* rewrites no more than this many frames apart ... */
 #define MIRROR_REWRITE_FRAMES 2
@@ -4262,14 +4267,28 @@ enum
 
 static struct
 {
-	unsigned char state[MIRROR_PAGE_COUNT];
-	unsigned char rewrites[MIRROR_PAGE_COUNT];
+	unsigned char state[MIRROR_PAGE_SLOTS];
+	unsigned char rewrites[MIRROR_PAGE_SLOTS];
 	/* the page's memory_watch generation when it was uploaded */
-	unsigned long generation[MIRROR_PAGE_COUNT];
-	unsigned long rewritten_frame[MIRROR_PAGE_COUNT];
+	unsigned long generation[MIRROR_PAGE_SLOTS];
+	unsigned long rewritten_frame[MIRROR_PAGE_SLOTS];
 	/* the times the page has turned volatile (its period's doublings) */
-	unsigned char volatile_times[MIRROR_PAGE_COUNT];
+	unsigned char volatile_times[MIRROR_PAGE_SLOTS];
 } mirror;
+
+/* the mirror's page, the write tracking's (as the device's backend is made
+ready, before the mirror holds a page), once: a power of two from the unit
+to a segment, else the unit */
+static void mirror_page_size_set(unsigned long size)
+{
+	static BOOL set;
+
+	if (set)
+		return;
+	set = TRUE;
+	if (size >= MIRROR_PAGE_UNIT && size <= MIRROR_SEGMENT_SIZE && !(size & (size - 1)))
+		mirror_page_size = size;
+}
 
 /* uploads the pages of [first, last) that are absent or stale; FALSE if one
 of them turns out to be volatile */
@@ -5787,7 +5806,7 @@ the count of its state's words that differ from the entry's before, a pair
 then its tag's index and the bitmap's; the pages', JOURNAL_PAGES and the
 count of runs, then each run's first unit and the unit past it. A unit is
 JOURNAL_PAGE_UNIT's bytes of the contiguous window, whatever the platform's
-mirror page (MIRROR_PAGE_SIZE: 16 KB on Apple's hardware, 4 KB elsewhere),
+mirror page (MIRROR_PAGE_SIZE: the host's, 4 KB or larger),
 so that a record made on one plays back on every other: played back, a run
 uploads the pages that hold it, whole (journal_read). */
 
@@ -5795,7 +5814,8 @@ typedef char journal_words_are_dwords[sizeof(DWORD) == sizeof(uint32_t) ? 1 : -1
 /* (the window's 4 KB pages, the contiguous allocator's on every platform:
 xbox_memory.c) */
 #define JOURNAL_PAGE_UNIT 0x1000
-typedef char journal_unit_divides_pages[MIRROR_PAGE_SIZE % JOURNAL_PAGE_UNIT == 0 ? 1 : -1];
+/* (the mirror's page is a power of two times its unit: mirror_page_size_set) */
+typedef char journal_unit_divides_pages[MIRROR_PAGE_UNIT % JOURNAL_PAGE_UNIT == 0 ? 1 : -1];
 
 enum
 {
@@ -5856,7 +5876,7 @@ static struct
 	(played) */
 	unsigned long unknown;
 	const struct halo_gpu_journal_bitmaps *bitmaps;
-	unsigned char pages[MIRROR_PAGE_COUNT / 8];
+	unsigned char pages[MIRROR_PAGE_SLOTS / 8];
 } journal;
 
 /* the textures, surfaces and palettes made, in order, and the vertex shaders
