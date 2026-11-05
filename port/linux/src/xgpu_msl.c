@@ -1398,7 +1398,7 @@ static const char pixel_functions[] =
 	"\treturn float3(signed_byte(x.r), signed_byte(x.g), signed_byte(x.b));\n"
 	"}\n";
 
-/* a border color Metal's samplers cannot hold (xgpu_msl.h): the texel,
+/* a stage's border color (xgpu_msl.h): the texel,
 sampled clamped to the edge, mixed with the color by how much of the
 lookup's footprint is inside the texture along each axis the border is on:
 with the nearest texel, all or none; filtered linearly, the half texel
