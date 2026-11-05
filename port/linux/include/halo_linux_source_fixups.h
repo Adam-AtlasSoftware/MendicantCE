@@ -32,6 +32,10 @@ struct halo_gpu_journal_bitmaps
 	int (*identify)(void const *texture, unsigned long *tag_index, unsigned long *bitmap_index);
 	/* the bitmap's texture, loaded (waited for); NULL if there is none */
 	void *(*load)(unsigned long tag_index, unsigned long bitmap_index);
+	/* display.panini's pass played back: nonzero where it is on now, the
+	projection (as halo_screen_panini's) given where the record's is none
+	(made with it off) */
+	int (*panini)(float projection[8]);
 };
 /* recorded from now on (the preparation begun) */
 void halo_gpu_journal_record(struct halo_gpu_journal_bitmaps const *bitmaps);
@@ -269,6 +273,8 @@ void halo_screen_anti_alias(short x0, short y0, short x1, short y1);
 before the HUD (port/linux/game/panini.c): the window's bounds on the
 screen, and the projection: d, s, the middle's magnification, 0, and the
 rectilinear view's tangents at its left, right, top and bottom */
+/* (projection NULL: the setting off, the pass journaled alone for a map's
+preparation's record) */
 void halo_screen_panini(short x0, short y0, short x1, short y1, const float projection[8]);
 /* the enhanced dynamic lights (display.dynamic_lights) */
 #include "halo_dynamic_lights.h"

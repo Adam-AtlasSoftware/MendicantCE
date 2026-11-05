@@ -45,10 +45,11 @@ CONTROLS = [
     (GAME, "\tif (!panini_window_projects(camera, frustum))\n\t\treturn FALSE;\n\t*visible",
      "\tif (TRUE)\n\t\treturn FALSE;\n\t*visible", "hud_matches_pass"),
     # the magnification kept after the window
-    (GAME, "void panini_window_end(void)\n{\n\twindow.active = FALSE;", "void panini_window_end(void)\n{\n",
+    (GAME, "void panini_window_end(void)\n{\n\twindow.active = window.journaled = FALSE;", "void panini_window_end(void)\n{\n",
      "center"),
     # on whatever the setting says
-    (GAME, "if (!panini_settings(&d, &s) || ", "if ((panini_settings(&d, &s), FALSE) || ", "off"),
+    (GAME, "\tif (!panini_settings(&d, &s))\n\t{\n\t\twindow.viewport = camera->viewport_bounds;",
+     "\tif ((panini_settings(&d, &s), FALSE))\n\t{\n\t\twindow.viewport = camera->viewport_bounds;", "off"),
     # the arrows' direction kept rectilinear
     (GAME, "\t*x = across;\n\t*y = -up;", "\t(void)across;\n\t(void)up;", "direction"),
 ]

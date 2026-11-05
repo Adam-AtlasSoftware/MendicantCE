@@ -270,6 +270,12 @@ static struct
 	ready for the surfaces' shaders */
 	BOOL prepass, ready;
 	D3DSurface depth;
+	/* the same as the journal notes them (journal_capture): as they would
+	be with the occlusion on, whatever the setting, so that a map's
+	preparation's record holds the pre-pass and the surfaces lit by it, for
+	a load with the setting on (journal_restore leaves them out with it
+	off) */
+	BOOL journal_prepass, journal_ready;
 } ambient_occlusion = { 0, FALSE, FALSE, -1, FALSE, FALSE };
 
 static void ambient_occlusion_read(void)
@@ -674,6 +680,10 @@ struct vertex_shader_object
 	/* lit for each vertex with its ambient light apart (display.ambient_
 	occlusion, XGPU_LIGHTING_MODEL_SPLIT) failed: lit without the occlusion */
 	BOOL split_failed;
+	/* what a map's preparation's journal knows it by: its program's and its
+	declaration's hash (journal_vertex_shader), the same in every build and
+	on every platform, as its id (the order of its making) is not */
+	uint32_t journal_identity;
 };
 
 /* ---------- render targets */
@@ -831,6 +841,8 @@ static void journal_draw(unsigned long op, unsigned long primitive, unsigned lon
 static void journal_operation(unsigned long op, const void *arguments, unsigned long bytes);
 static void journal_page(unsigned long page);
 static void journal_vertex_shader(struct vertex_shader_object *object);
+static void journal_settings_blind(unsigned long words[3]);
+static void journal_vertex_shader_identify(struct vertex_shader_object *object);
 
 /* A preparation draw is needed once for each pipeline, vertex layout and
 texture revision. Geometry mirrors are still refreshed for every range:
@@ -848,6 +860,11 @@ struct preparation_key
 	unsigned long color_data, color_format, color_size, depth_data, depth_format, depth_size;
 	unsigned long texture_data[4], texture_format[4], texture_size[4];
 	unsigned long texture_generation[4], palette_generation[4];
+	/* (recording a map's preparation's journal: the front end's state a
+	draw's pipeline is derived from under some settings, though not under
+	these, so that a draw the settings now make a repeat of another is
+	journaled all the same: journal_settings_blind) */
+	unsigned long journaled[3];
 };
 static struct
 {
@@ -994,6 +1011,7 @@ static BOOL preparation_seen(unsigned long pipeline, const struct xgpu_dynamic_s
 		key->depth_size = device.depth_stencil->Size;
 	}
 	key->written = immediate ? device.immediate_written : 0;
+	journal_settings_blind(key->journaled);
 	key->present = 0;
 	memset(key->elements, 0, sizeof(key->elements));
 	memset(key->strides, 0, sizeof(key->strides));
@@ -1606,6 +1624,8 @@ static BOOL bind_targets(BOOL *has_depth)
 static void vr_initialize(void);
 #endif
 
+static void hdr_read(void);
+
 /* the window's context exists: the backend made ready, and what the
 device's settings ask of it */
 static void device_backend_ready(void)
@@ -1628,6 +1648,12 @@ static void device_backend_ready(void)
 		anti_aliasing_read();
 	else
 		anti_aliasing_prepare();
+	/* (and display.hdr and display.ambient_occlusion, which halo_screen_commit
+	reads between frames, now: a frame drawn before the next, a map loaded
+	as the game starts, prepares its pipelines as they are, its targets none
+	yet) */
+	hdr_read();
+	ambient_occlusion_read();
 }
 
 /* what display.anti_aliasing's value needs of the backend, once it is
@@ -2654,6 +2680,8 @@ void halo_vertex_shader_lighting(unsigned long handle)
 		return;
 	}
 	xgpu_backend_vertex_lighting(object->program->hash, &object->lighting);
+	/* (a shader the game lights so is another than its program's twin) */
+	journal_vertex_shader_identify(object);
 }
 
 void WINAPI D3DDevice_DeleteVertexShader(DWORD handle)
@@ -3380,6 +3408,20 @@ int halo_dynamic_lights_enhanced(void)
 		xgpu_backend_capabilities.dynamic_lights;
 }
 
+/* whether a map's preparation draws its passes lit by the enhanced lights
+(port/linux/game/render_enumerate.c) and the lights are given to the front
+end (halo_dynamic_lights_set): with them enhanced, or classic and the
+preparation recorded (render_prepared.c), so that its record holds those
+passes' draws for a load with them enhanced. Their draws' pipelines are
+derived as the setting says (dynamic_lights_active: classic, the game's
+lighting). */
+int halo_dynamic_lights_walked(void)
+{
+	dynamic_lights_read_settings();
+	return (dynamic_lights.enhanced || journal_recording) && !dynamic_lights.failed && device.gl_ready &&
+		xgpu_backend_capabilities.dynamic_lights;
+}
+
 /* a grid cell's index along an axis for an offset from the middle (xgpu.h) */
 static int dynamic_lights_cell(float offset, float scale, int count)
 {
@@ -3401,7 +3443,7 @@ void halo_dynamic_lights_set(const struct halo_dynamic_light *lights, int count,
 
 	dynamic_lights.count = 0;
 	halos->count = 0;
-	if (!halo_dynamic_lights_enhanced())
+	if (!halo_dynamic_lights_walked())
 		return;
 	if (count > XGPU_DYNAMIC_LIGHTS_MAXIMUM)
 		count = XGPU_DYNAMIC_LIGHTS_MAXIMUM;
@@ -3510,6 +3552,9 @@ typedef char dynamic_lights_own_lights_register[XGPU_MODEL_LIGHT_REGISTER(XGPU_M
 /* the frame's draws are lit by the enhanced dynamic lights */
 static BOOL dynamic_lights_active(void)
 {
+	/* (the setting as it is now: a map's preparation played back from its
+	record before anything else read it) */
+	dynamic_lights_read_settings();
 	return dynamic_lights.count > 0 && dynamic_lights.enhanced;
 }
 
@@ -4917,11 +4962,15 @@ void halo_screen_panini(short x0, short y0, short x1, short y1, const float proj
 		unsigned int arguments[10];
 		short bounds[4] = { x0, y0, x1, y1 };
 
+		memset(arguments, 0, sizeof(arguments));
 		memcpy(arguments, bounds, sizeof(bounds));
-		memcpy(arguments + 2, projection, 8 * sizeof(float));
+		if (projection)
+			memcpy(arguments + 2, projection, 8 * sizeof(float));
 		journal_operation(JOURNAL_PANINI, arguments, sizeof(arguments));
 	}
-	if (!device.gl_ready)
+	/* (no projection: the setting off, the pass only journaled, for a load
+	with it on: port/linux/game/panini.c) */
+	if (!device.gl_ready || !projection)
 		return;
 	target = render_target_get(&device.back_buffer);
 	if (!target)
@@ -4944,9 +4993,21 @@ BOOL halo_screen_ambient_occlusion_begin(void)
 	if (journal_recording)
 		journal_operation(JOURNAL_OCCLUSION_BEGIN, NULL, 0);
 	ambient_occlusion.prepass = ambient_occlusion.ready = FALSE;
-	if (!device.gl_ready || !ambient_occlusion.quality || device.depth_stencil != &device.depth_buffer ||
+	ambient_occlusion.journal_prepass = ambient_occlusion.journal_ready = FALSE;
+	if (!device.gl_ready || device.depth_stencil != &device.depth_buffer ||
 		device.render_target != &device.back_buffer)
 		return FALSE;
+	/* (off, and a map's preparation recorded: its pre-pass drawn all the
+	same, as the journal notes it, into the targets as they are: the
+	record is for a load with the occlusion on too) */
+	if (!ambient_occlusion.quality)
+	{
+		if (!journal_recording)
+			return FALSE;
+		ambient_occlusion.journal_prepass = TRUE;
+		D3DDevice_Clear(0, NULL, D3DCLEAR_ZBUFFER | D3DCLEAR_STENCIL, 0, 1.0f, 0);
+		return TRUE;
+	}
 	if (!ambient_occlusion.depth.Data)
 		d3d8_surface_initialize(&ambient_occlusion.depth, D3DFMT_LIN_D24S8, 1, 1);
 	if (!ambient_occlusion.depth.Data)
@@ -4955,7 +5016,7 @@ BOOL halo_screen_ambient_occlusion_begin(void)
 	of its own, render_target_get) */
 	ambient_occlusion.depth.Format = device.depth_buffer.Format;
 	ambient_occlusion.depth.Size = device.depth_buffer.Size;
-	ambient_occlusion.prepass = TRUE;
+	ambient_occlusion.prepass = ambient_occlusion.journal_prepass = TRUE;
 	D3DDevice_Clear(0, NULL, D3DCLEAR_ZBUFFER | D3DCLEAR_STENCIL, 0, 1.0f, 0);
 	return TRUE;
 }
@@ -4984,6 +5045,8 @@ void halo_screen_ambient_occlusion(short x0, short y0, short x1, short y1, float
 		memcpy(arguments + 4, projection, 4 * sizeof(float));
 		journal_operation(JOURNAL_OCCLUSION, arguments, sizeof(arguments));
 	}
+	ambient_occlusion.journal_ready = ambient_occlusion.journal_prepass;
+	ambient_occlusion.journal_prepass = FALSE;
 	if (!ambient_occlusion.prepass)
 		return;
 	target = render_target_get(&device.back_buffer);
@@ -5008,6 +5071,7 @@ void halo_screen_ambient_occlusion_end(void)
 	if (journal_recording)
 		journal_operation(JOURNAL_OCCLUSION_END, NULL, 0);
 	ambient_occlusion.prepass = ambient_occlusion.ready = FALSE;
+	ambient_occlusion.journal_prepass = ambient_occlusion.journal_ready = FALSE;
 }
 
 /* display.hdr's tone map of a window's 3D view (source/render/render.c),
@@ -5801,8 +5865,29 @@ void d3d8_resource_freed(void *resource)
 	}
 }
 
+/* a vertex shader's identity: its program's hash, its instructions' count,
+its declaration's elements, packed ones and count, and the lighting the
+game gives it (halo_vertex_shader_lighting); never 0. Two shaders of one
+identity draw alike. */
+static void journal_vertex_shader_identify(struct vertex_shader_object *object)
+{
+	uint64_t hash = XGPU_MANIFEST_HASH_START;
+	uint32_t words[4];
+
+	words[0] = (uint32_t)object->instruction_count;
+	words[1] = (uint32_t)object->element_count;
+	words[2] = (uint32_t)object->packed_mask;
+	words[3] = (uint32_t)object->lighting.lights;
+	if (object->program)
+		hash = xgpu_manifest_hash(&object->program->hash, sizeof(object->program->hash), hash);
+	hash = xgpu_manifest_hash(words, sizeof(words), hash);
+	hash = xgpu_manifest_hash(object->elements, sizeof(object->elements), hash);
+	object->journal_identity = (uint32_t)(hash ^ hash >> 32) | 1;
+}
+
 static void journal_vertex_shader(struct vertex_shader_object *object)
 {
+	journal_vertex_shader_identify(object);
 	if (object->id >= vertex_shader_capacity)
 	{
 		unsigned long capacity = object->id + 256;
@@ -5817,9 +5902,22 @@ static void journal_vertex_shader(struct vertex_shader_object *object)
 	vertex_shaders[object->id] = object;
 }
 
-static struct vertex_shader_object *journal_vertex_shader_get(uint32_t id)
+/* the vertex shader of an identity (journal_vertex_shader), or NULL */
+static struct vertex_shader_object *journal_vertex_shader_get(uint32_t identity)
 {
-	return id && id < vertex_shader_capacity ? vertex_shaders[id] : NULL;
+	static struct vertex_shader_object *last;
+	unsigned long index;
+
+	if (!identity)
+		return NULL;
+	if (last && last->journal_identity == identity)
+		return last;
+	for (index = 0; index < vertex_shader_capacity; index++)
+	{
+		if (vertex_shaders[index] && vertex_shaders[index]->journal_identity == identity)
+			return last = vertex_shaders[index];
+	}
+	return NULL;
 }
 
 /* what an object is checked by: its type, and a texture's or surface's
@@ -6121,8 +6219,8 @@ static void journal_capture(struct journal_state *state)
 	journal_identify(device.depth_stencil, &state->depth_stencil);
 	memcpy(state->viewport, &device.viewport, sizeof(device.viewport) < sizeof(state->viewport) ?
 		sizeof(device.viewport) : sizeof(state->viewport));
-	state->vertex_shader = device.vertex_shader ? (uint32_t)device.vertex_shader->id : 0;
-	state->program = program ? (uint32_t)program->id : 0;
+	state->vertex_shader = device.vertex_shader ? device.vertex_shader->journal_identity : 0;
+	state->program = program ? program->journal_identity : 0;
 	state->program_address = (uint32_t)device.program_address;
 	state->shader_constant_mode = (uint32_t)device.shader_constant_mode;
 	for (index = 0; index < 16; index++)
@@ -6133,8 +6231,9 @@ static void journal_capture(struct journal_state *state)
 	state->hdr_category = (uint32_t)hdr.category;
 	state->hdr_kind = (uint32_t)hdr.kind;
 	state->hdr_view = (uint32_t)hdr.view;
-	state->occlusion_prepass = (uint32_t)ambient_occlusion.prepass;
-	state->occlusion_ready = (uint32_t)ambient_occlusion.ready;
+	/* (as they would be with the occlusion on: journal_occlusion) */
+	state->occlusion_prepass = (uint32_t)ambient_occlusion.journal_prepass;
+	state->occlusion_ready = (uint32_t)ambient_occlusion.journal_ready;
 	state->lights_environment = (uint32_t)dynamic_lights.environment;
 	state->lights_count = (uint32_t)dynamic_lights.count;
 	state->halos_count = (uint32_t)dynamic_lights.halos.count;
@@ -6227,6 +6326,31 @@ static void journal_operation(unsigned long op, const void *arguments, unsigned 
 	journal_append(op, &state);
 }
 
+/* the front end's state that a draw's pipeline is derived from under some
+settings and not under others (the HDR's tags, with display.hdr; the
+occlusion's pre-pass and readiness, as journal_capture notes them, with
+display.ambient_occlusion; the enhanced lights', with display.dynamic_lights
+"enhanced"), as three words: recording a map's preparation, a draw is
+journaled where it is new in these or in its pipeline (preparation_seen),
+so that its record holds every draw a load under other settings tells
+apart; 0 otherwise */
+static void journal_settings_blind_of(unsigned long words[3], int hdr_category, int hdr_kind, BOOL hdr_view,
+	BOOL prepass, BOOL ready, int lights, BOOL environment)
+{
+	words[0] = (unsigned long)hdr_category;
+	words[1] = (unsigned long)hdr_kind;
+	words[2] = (unsigned long)(hdr_view != 0) | (unsigned long)(prepass != 0) << 1 | (unsigned long)(ready != 0) << 2 |
+		(unsigned long)(lights > 0) << 3 | (unsigned long)(environment != 0) << 4;
+}
+
+static void journal_settings_blind(unsigned long words[3])
+{
+	words[0] = words[1] = words[2] = 0;
+	if (journal_recording)
+		journal_settings_blind_of(words, hdr.category, hdr.kind, hdr.view, ambient_occlusion.journal_prepass,
+			ambient_occlusion.journal_ready, dynamic_lights.count, dynamic_lights.environment);
+}
+
 static void journal_page(unsigned long page)
 {
 	if (page < MIRROR_PAGE_COUNT)
@@ -6298,11 +6422,18 @@ unsigned int *halo_gpu_journal_take(unsigned int *count, unsigned int *unknown)
 
 /* the journal's form: a change to what an entry holds or how it is written
 makes it 2, 3 and so on; its state's size is in it as well */
-#define JOURNAL_FORM 3
+#define JOURNAL_FORM 4
 
 unsigned int halo_gpu_journal_form(void)
 {
 	return JOURNAL_FORM << 16 | (unsigned int)JOURNAL_STATE_WORDS;
+}
+
+/* the backend's and the GPU's part of what a record's draws are derived
+under (render_prepared.c: its enumeration checked under its own alone) */
+unsigned long long halo_gpu_journal_derivation(unsigned long long hash)
+{
+	return xgpu_manifest_hash(&xgpu_backend_capabilities, sizeof(xgpu_backend_capabilities), hash);
 }
 
 void halo_gpu_journal_free(unsigned int *words)
@@ -6318,6 +6449,17 @@ static unsigned long journal_vertices(unsigned long primitive, unsigned long cou
 		primitive == D3DPT_QUADLIST || primitive == D3DPT_QUADSTRIP ? 4 : 3;
 
 	return count < least ? count : least;
+}
+
+/* the occlusion's pre-pass or its readiness, as a recorded draw notes it
+(as it would be with the occlusion on, whatever the setting was:
+halo_screen_ambient_occlusion_begin), played back as the setting is now:
+with the occlusion off, a draw of its pre-pass is the opaque surfaces' draw
+it repeats (the record's alone, of the structure's preprocess), and a
+surface it lit is lit without it */
+static BOOL journal_occlusion(uint32_t noted, int quality)
+{
+	return noted != 0 && quality != 0;
 }
 
 static void journal_restore(const struct journal_state *state)
@@ -6351,8 +6493,8 @@ static void journal_restore(const struct journal_state *state)
 	hdr.category = (int)state->hdr_category;
 	hdr.kind = (int)state->hdr_kind;
 	hdr.view = state->hdr_view != 0;
-	ambient_occlusion.prepass = state->occlusion_prepass != 0;
-	ambient_occlusion.ready = state->occlusion_ready != 0;
+	ambient_occlusion.prepass = journal_occlusion(state->occlusion_prepass, ambient_occlusion.quality);
+	ambient_occlusion.ready = journal_occlusion(state->occlusion_ready, ambient_occlusion.quality);
 	dynamic_lights.environment = state->lights_environment != 0;
 	dynamic_lights.count = (int)state->lights_count;
 	dynamic_lights.halos.count = (int)state->halos_count;
@@ -6408,8 +6550,16 @@ static void journal_play(unsigned long op, const struct journal_state *state)
 		halo_screen_anti_alias(bounds[0], bounds[1], bounds[2], bounds[3]);
 		break;
 	case JOURNAL_PANINI:
-		halo_screen_panini(bounds[0], bounds[1], bounds[2], bounds[3], (const float *)&state->arguments[2]);
+	{
+		/* (where the setting is on now: the projection it gives, if it was
+		off as the record was made) */
+		float projection[8];
+
+		memcpy(projection, &state->arguments[2], sizeof(projection));
+		if (journal.bitmaps && journal.bitmaps->panini && journal.bitmaps->panini(projection))
+			halo_screen_panini(bounds[0], bounds[1], bounds[2], bounds[3], projection);
 		break;
+	}
 	case JOURNAL_OCCLUSION_BEGIN:
 		(void)halo_screen_ambient_occlusion_begin();
 		break;

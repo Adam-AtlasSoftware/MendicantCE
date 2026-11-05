@@ -35,6 +35,7 @@ any other target than the screen.
 #include "render/render_cameras.h"
 
 #include "panini_projection.h"
+#include "render_enumerate.h"
 
 #include <math.h>
 
@@ -81,6 +82,9 @@ tangents at the viewport's left, right, top and bottom, and the projection */
 static struct
 {
 	boolean active;
+	/* (off, the window a map's preparation draws: its pass journaled
+	alone, for its record: panini_window_draw) */
+	boolean journaled;
 	rectangle2d viewport;
 	real projection[4];
 	real left, right, top, bottom;
@@ -92,10 +96,16 @@ void panini_window_begin(short local_player_index, short rasterizer_target, stru
 {
 	real d, s, x_scale, y_scale, x_offset, y_offset;
 
-	window.active = FALSE;
-	if (!panini_settings(&d, &s) || local_player_index < 0 ||
-		rasterizer_target != _rasterizer_target_render_primary || camera->mirrored || !frustum->projection_valid)
+	window.active = window.journaled = FALSE;
+	if (local_player_index < 0 || rasterizer_target != _rasterizer_target_render_primary || camera->mirrored ||
+		!frustum->projection_valid)
 	{
+		return;
+	}
+	if (!panini_settings(&d, &s))
+	{
+		window.viewport = camera->viewport_bounds;
+		window.journaled = render_enumerating;
 		return;
 	}
 	x_scale = frustum->projection_matrix[0][0];
@@ -142,7 +152,11 @@ void panini_window_draw(void)
 	float parameters[8];
 
 	if (!window.active)
+	{
+		if (window.journaled)
+			halo_screen_panini(window.viewport.x0, window.viewport.y0, window.viewport.x1, window.viewport.y1, NULL);
 		return;
+	}
 	parameters[0] = window.panini.d;
 	parameters[1] = window.panini.s;
 	parameters[2] = window.panini.scale;
@@ -156,7 +170,30 @@ void panini_window_draw(void)
 
 void panini_window_end(void)
 {
-	window.active = FALSE;
+	window.active = window.journaled = FALSE;
+}
+
+boolean panini_replay_projection(float projection[8])
+{
+	real d, s;
+	struct panini_projection fitted;
+
+	if (!panini_settings(&d, &s))
+		return FALSE;
+	/* (a record made with it off: a projection of a 90-degree view, the
+	pass's own being the same whatever its terms) */
+	if (projection[0] <= 0.0f && panini_projection_fit(&fitted, d, s, 1.0f, 1.0f))
+	{
+		projection[0] = fitted.d;
+		projection[1] = fitted.s;
+		projection[2] = fitted.scale;
+		projection[3] = 0.0f;
+		projection[4] = -1.0f;
+		projection[5] = 1.0f;
+		projection[6] = 1.0f;
+		projection[7] = -1.0f;
+	}
+	return TRUE;
 }
 
 real panini_center_scale(void)
