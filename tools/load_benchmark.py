@@ -469,6 +469,10 @@ def run_game(args, scenario, work, saves, shaders, destination, cache_proof=None
         sdl = args.halo.parent / "libSDL3.so.0"
         if sdl.exists():
             shutil.copy2(sdl, run / sdl.name)
+        # (and the files the game reads beside it: its assets' file, embedded_assets.h, and the shipped records)
+        for name in ("openh1.assets", "prepared.records"):
+            if (args.halo.parent / name).exists():
+                shutil.copy2(args.halo.parent / name, run / name)
         (run / "maps").symlink_to(args.data / "maps")
         if scenario != "ui":
             (run / "init.txt").write_text(f"map_name {scenario}\n")

@@ -29,13 +29,16 @@ def test_caption_letters_are_set_and_drawn(tmp_path):
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "../../third_party/stb/stb_truetype.h"
 #include "loading_art.h"
-struct text_hires_embedded { const char *tag; const char *file; const unsigned int *data; unsigned int size; };
+struct text_hires_embedded { const char *tag; const char *file; unsigned int data_offset; unsigned int size; };
 static struct text_hires_embedded text_hires_embedded[1];
 static const unsigned int text_hires_embedded_count = 1;
+/* (the assets' file, embedded_assets.h: the font alone, at offset 16) */
+static unsigned int font[1 << 20];
+static const void *embedded_assets_data(unsigned int offset, unsigned int size)
+{ (void)size; return offset == 16 ? font : NULL; }
 ''' + function(source, "static int names_differ(") + function(source, "unsigned char *text_hires_line(") + r'''
 int main(int argc, char **argv) {
     FILE *file = fopen(argv[1], "rb");
-    static unsigned int font[1 << 20];
     static struct loading_art art;
     static uint8_t frame[1916 * 1080 * 4];
     int width, height, x, y, inked_columns = 0, top = 1 << 30, bottom = -1;
@@ -43,7 +46,8 @@ int main(int argc, char **argv) {
     unsigned char *line;
     unsigned int drawn = 0, i;
     assert(file && fread(font, 1, sizeof(font), file) > 1000); fclose(file);
-    text_hires_embedded[0].tag = "pc\\heading"; text_hires_embedded[0].data = font;
+    text_hires_embedded[0].tag = "pc\\heading"; text_hires_embedded[0].data_offset = 16;
+    text_hires_embedded[0].size = sizeof(font);
     assert(!text_hires_line("no such font", "x", 40.0f, &width, &height));
     line = text_hires_line("pc\\heading", "Preparing menu pictures \xc2\xb7 4 of 11", 40.0f, &width, &height);
     assert(line && width > 600 && height >= 40);

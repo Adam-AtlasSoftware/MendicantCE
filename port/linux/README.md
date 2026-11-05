@@ -1887,8 +1887,12 @@ HRTF's spread: above 4 kHz the difference of its sides is as loud as their
 sum and they hardly correlate (coherence 0.15 at 4 to 8 kHz), where the pan
 has them 15 dB apart (coherence 0.94). The menus, the music, the HUD and the
 other 2D sounds are as they were. The model is the VR mode's ("Sound from
-your head": Brown and Duda's, a few filters a sound); a sound's distance,
-occlusion, reverb and Doppler shift are the pan's.
+your head": Brown and Duda's, a few filters a sound), its parameters fitted
+to the Xbox's own HRTF (the filters and delays the XDK DirectSound in the
+game's default.xbe looks up for each direction; `tools/harness/tests/hrtf.c`
+holds the figures); a sound's distance, occlusion, reverb and Doppler shift
+are the pan's. On stereo the reverb's back channels play at -3 dB with the
+front ones, as the Xbox's stereo downmix played its back speakers' sound.
 
 `audio.spatial` (Settings > Audio > 3D AUDIO) chooses: `"auto"` and
 `"headphones"` the HRTF, `"speakers"` panned left and right; changing it
