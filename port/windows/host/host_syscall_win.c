@@ -1765,6 +1765,10 @@ static long long dispatch(long long number, long long a, long long b, long long 
 			(long)GetActiveProcessorCount(ALL_PROCESSOR_GROUPS));
 	/* the calling thread's priority (who 0, as Linux sets a thread's) */
 	case GUEST_SYS_setpriority:
+		/* (the lowest, 19: background mode, the thread's processor, disk and
+		memory priority all lowered; world_sdf.c's bake) */
+		if (a == 0 && b == 0 && (int)c >= 19 && SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN))
+			return 0;
 		if (a == 0 && b == 0 && (int)c > 0)
 			SetThreadPriority(GetCurrentThread(), (int)c >= 10 ? THREAD_PRIORITY_LOWEST : THREAD_PRIORITY_BELOW_NORMAL);
 		return 0;

@@ -1242,7 +1242,9 @@ static void object_bake(struct world_sdf_object *object, int backwards)
 	unsigned long slice, z;
 	float *values;
 	unsigned char *solid;
+	struct world_sdf_object_tables *tables = world_sdf_object_tables_make();
 
+	CHECK(tables, "tables");
 	triangle_count = 0;
 	box_add(object_low, object_high);
 	memcpy(bounds, object_low, sizeof(object_low));
@@ -1253,12 +1255,19 @@ static void object_bake(struct world_sdf_object *object, int backwards)
 	solid = malloc(slice * object->depth);
 	for (z = 0; z < object->depth; z++)
 	{
-		unsigned long at = backwards ? object->depth - 1 - z : z;
+		unsigned long at = backwards ? object->depth - 1 - z : z, row;
 
-		world_sdf_object_slice(object, positions, triangle_count, inside_object, NULL, at, values + at * slice * 4,
-			solid + at * slice);
+		/* (a row at a time, from the last when backwards, as the threads may) */
+		for (row = 0; row < object->height; row++)
+		{
+			unsigned long y = backwards ? object->height - 1 - row : row;
+
+			world_sdf_object_slice(tables, object, positions, triangle_count, inside_object, NULL, at, y, y + 1,
+				values + at * slice * 4, solid + at * slice);
+		}
 	}
 	CHECK(world_sdf_object_finish(object, values, solid), "finished");
+	world_sdf_object_tables_free(tables);
 	free(values);
 	free(solid);
 }
@@ -1498,6 +1507,110 @@ static void object_atlas_case(void)
 	CHECK(world_sdf_objects_place(&objects) == 6, "the small ones");
 }
 
+/* the bake's threads: the processors less the game's own (its thread, the
+renderer's, the sound's with the system's), at least one, at most the most */
+static void threads_case(void)
+{
+	CHECK(world_sdf_bake_threads(8, 0) == 5, "an M2 or a Steam Deck: %ld", world_sdf_bake_threads(8, 0));
+	CHECK(world_sdf_bake_threads(32, 0) == 29, "a 5900X: %ld", world_sdf_bake_threads(32, 0));
+	CHECK(world_sdf_bake_threads(64, 0) == WORLD_SDF_MAXIMUM_THREADS, "the most");
+	CHECK(world_sdf_bake_threads(4, 0) == 1 && world_sdf_bake_threads(3, 0) == 1 && world_sdf_bake_threads(1, 0) == 1,
+		"a few processors: one");
+	CHECK(world_sdf_bake_threads(0, 0) == 1 && world_sdf_bake_threads(-1, 0) == 1, "none known: one");
+	CHECK(world_sdf_bake_threads(8, 2) == 2 && world_sdf_bake_threads(8, 8) == 8, "forced");
+	CHECK(world_sdf_bake_threads(8, 100) == WORLD_SDF_MAXIMUM_THREADS, "forced, at most the most");
+}
+
+/* frames of so many ms to the pace, played; how many of them it rested */
+static long pace_frames(struct world_sdf_pace *pace, long count, float milliseconds, int *last)
+{
+	long rested = 0, index;
+
+	for (index = 0; index < count; index++)
+	{
+		*last = world_sdf_pace_frame(pace, milliseconds, 1);
+		rested += !*last;
+	}
+	return rested;
+}
+
+/* the bake's pace: free behind the menus; in play it learns the frames'
+normal time, runs while they keep to it, rests when they run late, each
+rest longer while resting helps and the least again when it did not (a
+heavier scene), shorter after calm, and learns the normal again as it
+rests; a slow frame now and then is not late */
+static void pace_case(void)
+{
+	struct world_sdf_pace pace;
+	long index, rested, before;
+	int running;
+
+	world_sdf_pace_begin(&pace);
+	/* the menus: always free, however slow */
+	for (index = 0; index < 100; index++)
+		CHECK(world_sdf_pace_frame(&pace, index % 2 ? 16.0f : 200.0f, 0), "the menus: free");
+	/* play: a rest to learn the normal first, then free */
+	rested = pace_frames(&pace, WORLD_SDF_PACE_LEARN, 16.0f, &running);
+	CHECK(rested == WORLD_SDF_PACE_LEARN - 1 && running, "learned in %ld", rested);
+	CHECK(fabsf(pace.normal - 16.0f) < 1.0e-4f, "normal %g", pace.normal);
+	/* within a tenth and a millisecond of it: free */
+	rested = pace_frames(&pace, 200, 18.0f, &running);
+	CHECK(rested == 0 && running, "a little slower: %ld rested", rested);
+	/* a slow frame now and then, however slow: free */
+	rested = 0;
+	for (index = 0; index < 400; index++)
+		rested += !world_sdf_pace_frame(&pace, index % 4 ? 16.0f : 300.0f, 1);
+	CHECK(rested == 0, "now and then: %ld", rested);
+	/* more, held: a rest, the least, within the window's frames */
+	for (index = 0; index < WORLD_SDF_PACE_WINDOW && world_sdf_pace_frame(&pace, 20.0f, 1); index++)
+		;
+	CHECK(index < WORLD_SDF_PACE_WINDOW && pace.rest == WORLD_SDF_PACE_LEAST_REST, "late: rested after %ld, %ld",
+		index, pace.rest);
+	/* (the rest's frames, faster without the bake: the new normal) */
+	rested = pace_frames(&pace, WORLD_SDF_PACE_LEAST_REST, 15.0f, &running);
+	CHECK(rested == WORLD_SDF_PACE_LEAST_REST - 1 && running, "the least rest: %ld", rested);
+	CHECK(fabsf(pace.normal - 15.0f) < 1.0e-4f, "learned again: %g", pace.normal);
+	/* late again (resting helped): twice as long, and longer up to the most */
+	for (index = 0; index < 12; index++)
+	{
+		long late;
+
+		for (late = 0; late < WORLD_SDF_PACE_WINDOW && world_sdf_pace_frame(&pace, 20.0f, 1); late++)
+			;
+		CHECK(late < WORLD_SDF_PACE_WINDOW, "late %ld", index);
+		before = pace.rest;
+		CHECK(index || before == 2 * WORLD_SDF_PACE_LEAST_REST, "twice: %ld", before);
+		pace_frames(&pace, before, 15.0f, &running);
+		CHECK(running, "rested");
+	}
+	CHECK(before == WORLD_SDF_PACE_MOST_REST, "the most rest: %ld", before);
+	/* calm: shorter again */
+	pace_frames(&pace, WORLD_SDF_PACE_CALM, 15.0f, &running);
+	CHECK(pace.next_rest == WORLD_SDF_PACE_MOST_REST / 2, "calm: %ld", pace.next_rest);
+	/* late, but as slow while it rests (a heavier scene, not the bake): the
+	least rest next */
+	for (index = 0; index < WORLD_SDF_PACE_WINDOW && world_sdf_pace_frame(&pace, 20.0f, 1); index++)
+		;
+	CHECK(index < WORLD_SDF_PACE_WINDOW && pace.rest == WORLD_SDF_PACE_MOST_REST / 2, "a heavier scene: %ld", pace.rest);
+	pace_frames(&pace, pace.rest, 20.0f, &running);
+	CHECK(running && pace.next_rest == WORLD_SDF_PACE_LEAST_REST && fabsf(pace.normal - 20.0f) < 1.0e-4f,
+		"not the bake's: the next rest %ld, normal %g", pace.next_rest, pace.normal);
+	/* at hundreds of frames a second, a few tenths of a ms more is not late */
+	world_sdf_pace_frame(&pace, 1.0f, 0);
+	pace_frames(&pace, WORLD_SDF_PACE_LEARN, 1.6f, &running);
+	rested = pace_frames(&pace, 400, 2.2f, &running);
+	CHECK(running && rested == 0, "fast: %ld", rested);
+	/* back to the menus, then a map again: free, then learning again */
+	CHECK(world_sdf_pace_frame(&pace, 100.0f, 0), "the menus again");
+	CHECK(!world_sdf_pace_frame(&pace, 30.0f, 1) && pace.normal == 0.0f, "learning again");
+	/* (a pace never begun: the same) */
+	memset(&pace, 0, sizeof(pace));
+	rested = pace_frames(&pace, WORLD_SDF_PACE_LEARN, 16.0f, &running);
+	CHECK(rested == WORLD_SDF_PACE_LEARN - 1 && running, "zeroed: %ld", rested);
+	pace_frames(&pace, WORLD_SDF_PACE_WINDOW, 25.0f, &running);
+	CHECK(!running && pace.rest == WORLD_SDF_PACE_LEAST_REST, "zeroed: rest %ld", pace.rest);
+}
+
 int main(int argc, char **argv)
 {
 	const char *name = argc > 1 ? argv[1] : "";
@@ -1536,6 +1649,10 @@ int main(int argc, char **argv)
 		object_half_case();
 	else if (!strcmp(name, "object_atlas"))
 		object_atlas_case();
+	else if (!strcmp(name, "threads"))
+		threads_case();
+	else if (!strcmp(name, "pace"))
+		pace_case();
 	else
 		return 2;
 	return 0;

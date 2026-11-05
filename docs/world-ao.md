@@ -127,7 +127,8 @@ Pure (`world_sdf_bake.c`), on N worker threads, each pass split by z slices or b
    kind; an unmarked cell's kind is its middle's side (`world_sdf_cell_kind`).
 5. **Encode** (`world_sdf_encode`), and the bricks gathered in the cells' order.
 
-The bake runs at the lowest thread priority and stops as soon as asked: at quit, and at a map unload if the map
+The bake runs on fewer threads than processors, at the lowest priority, at a pace the frames set in play
+([The bake's schedule](#the-bakes-schedule)), and stops as soon as asked: at quit, and at a map unload if the map
 can't be re-read.
 
 ### The bake's schedule
@@ -140,16 +141,36 @@ can't be re-read.
   missing (a new bake version), `world_sdf_startup_wanted` makes the pass run for the fields alone. Only the loaded
   BSP's tags are in memory, so the pass bakes the BSP each map starts in and each picture's, and switches to no
   other (repeated switches once leaked the device's groups, #506). A campaign map's other BSPs are baked in the
-  background the first time the game switches to them (proxies alone until then), never in the switch.
-- **Threads:** the bake runs on every processor (`HALO_WORLD_SDF_THREADS` overrides, for measuring), each thread
-  lowered with `setpriority(PRIO_PROCESS, 0, 19)`, which each host applies to the calling thread (Linux and
-  Android as it is, macOS as the background quality of service, Windows as the lowest thread priority).
+  background the first time the game switches to them (proxies alone until then), never in the switch. A map that
+  is played while its field still waits behind the main menu's others has its bake put first.
+- **Threads:** the processors less 3 (`world_sdf_bake_threads`; at least 1, at most 32; `HALO_WORLD_SDF_THREADS`
+  overrides, for measuring). The 3 are the game's thread, the renderer's (the command stream's) and the sound's with
+  the system's own (its compositor and drivers): 5 on an M2 or a Steam Deck, 29 on a 5900X. Each thread is lowered
+  with `setpriority(PRIO_PROCESS, 0, 19)`, which each host applies to the calling thread: Linux and Android as
+  nice 19 and `SCHED_IDLE` (only a processor nothing else wants), macOS and iOS as `QOS_CLASS_BACKGROUND` (the
+  efficiency cores), Windows as `THREAD_MODE_BACKGROUND_BEGIN` (the processor's, the disk's and memory's lowest).
+  The threads take their work with atomic counters, never the lock the game's thread takes, and the game's thread
+  only tries that lock (`sdf_results`): no frame waits for a bake's thread. A slice of a vehicle's field
+  allocates nothing (its directions' tables are made once a bake): guest memory mapped and unmapped meanwhile
+  makes the renderer drop the buffers and textures over those pages.
+- **Its pace in play** (`world_sdf_pace_frame`): while a map is played (not the menus, a loading screen or the
+  start's pass, where it runs freely), the bake first rests 30 frames to learn the frames' normal time. It then
+  runs until the last 8 frames' mean is more than a tenth and 1 ms over that, or one frame twice it and 8 ms more
+  (a hitch). It then rests (its threads nap between their items: a vehicle's row, a page, 16 cells) and learns the
+  normal again: 1 s, doubled up to 32 s while resting helps, the least again when the frames were as slow while it
+  rested (a heavier scene, not the bake), and halved after 600 calm frames. A game that draws no frames for
+  0.25 s (minimized, a load, "world" off) lets it run. On a machine with processors to spare it never rests.
 - **Any other time:** after a map loads with no field (a custom map, a new bake version), `world_sdf_map_loaded`
   only looks in the cache. On a miss it copies the geometry (a few ms) and starts the bake on a low-priority
   background thread, after the load is done. **Never during a load:** `scenario_load` does nothing more than a cache
   lookup (test: `test_the_bake_is_never_in_a_load`).
-- **While a field isn't ready,** `"world"` quietly runs with **proxies only** (the block's fade is 0). When the bake
-  finishes, the field uploads a few slices a frame (at most 512 KB a frame) and then **fades in over 1 s**
+- **While a field isn't ready,** `"world"` quietly runs with **proxies only** (the block's fade is 0), and only
+  those that stay when the field is drawn: the static scenery placements the field will hold
+  (`world_sdf_scenery_awaited`) and the boxes of the vehicles it will hold occlusion fields of
+  (`world_sdf_object_awaited`; their wheels' spheres stay) are left out until it is drawn, then fade in with it. So
+  a frame waiting for a field never costs more than one with it. Shading them meanwhile as proxies made b30's
+  frames on an M2 six times as long (85 ms against 14; the vehicles' boxes most of it), whether a bake ran or not:
+  that, not the bake's threads, was #651's stutter. When the bake finishes, the field uploads a few slices a frame (at most 512 KB a frame) and then **fades in over 1 s**
   (`world_sdf_fade`), with no hitch and no pop. We chose proxies-only over falling back to GTAO: GTAO's pre-pass
   would cost more than the whole new feature on the Deck, and switching would pop.
 - **Measured and stated:** each bake logs `world sdf: <map> bsp <n>: ... within <bounds>, <w>x<h>x<d> cells, <n>
@@ -157,7 +178,9 @@ can't be re-read.
   (<ms> ms); in <ms> ms on <t> threads, <bytes> in memory, <bytes> cached`, and the header records the times and
   threads. Once the start-up pass's last bake is done it logs `world sdf: the first start's <n> of <n> fields baked
   in <s> s behind the main menu: the pass and its fields <s> s` (the pass's own total from
-  `menu_pictures_pass_seconds`). Workstream B's PR states the bake time and
+  `menu_pictures_pass_seconds`). `HALO_WORLD_SDF_FRAMES=1` logs every 600 frames their mean and worst while a
+  bake runs (and in how many it rested) and while none does; `HALO_WORLD_SDF_NO_BAKE=1` bakes nothing, as if a field
+  were on its way for good (the frames waiting for one, without a bake's threads). Workstream B's PR states the bake time and
   cache size for every stock map on the 5900X, the Steam Deck and one phone. Targets: under 2 s per BSP on 8
   desktop threads, under 10 s in the background on a phone, and a cache under 3 MB per BSP after deflate.
 

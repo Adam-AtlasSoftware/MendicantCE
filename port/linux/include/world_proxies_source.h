@@ -92,6 +92,10 @@ struct world_proxies_source_instance
 	/* a static scenery placement that the drawn field and its pages hold
 	(world_sdf_scenery_baked): its shapes after the dynamic objects' */
 	int baked;
+	/* a vehicle whose occlusion field is on its way with the BSP's field
+	(world_sdf_object_awaited): its boxes left out until the field is
+	drawn, its wheels' spheres kept */
+	int field_awaited;
 };
 
 /* ---------- prototypes (port/linux/game/world_proxies_game.c) */

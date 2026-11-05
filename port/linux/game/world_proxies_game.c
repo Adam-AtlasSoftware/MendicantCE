@@ -104,9 +104,10 @@ static boolean object_occludes(long object_index)
 	return object->object.type != _object_type_projectile && object->object.type != _object_type_sound_scenery;
 }
 
-/* a static scenery placement that the drawn field and its pages hold:
-scenery or a device on no other object, standing where one baked stands */
-static int object_baked(long object_index, long definition)
+/* a static scenery placement that the drawn field and its pages hold
+(or, awaited, that the field on its way will hold): scenery or a device on
+no other object, standing where one baked stands */
+static int object_static(long object_index, long definition, int awaited)
 {
 	struct object_datum *object = (struct object_datum *)object_try_and_get(object_index);
 	float position[3];
@@ -120,7 +121,12 @@ static int object_baked(long object_index, long definition)
 	position[0] = object->object.position.x;
 	position[1] = object->object.position.y;
 	position[2] = object->object.position.z;
-	return world_sdf_scenery_baked(definition, position);
+	return awaited ? world_sdf_scenery_awaited(definition, position) : world_sdf_scenery_baked(definition, position);
+}
+
+static int object_baked(long object_index, long definition)
+{
+	return object_static(object_index, definition, FALSE);
 }
 
 /* ---------- public code */
@@ -225,11 +231,17 @@ long world_proxies_source_instances(struct world_proxies_source_instance *instan
 
 	for (index = 0; scene && index < world_scene_instance_count() && count < maximum; index++)
 	{
-		if (scene[index].kind != _world_scene_instance_object || !object_occludes(scene[index].id))
+		/* (nor the static scenery whose field is on its way: it comes with
+		the field, faded in) */
+		if (scene[index].kind != _world_scene_instance_object || !object_occludes(scene[index].id) ||
+			object_static(scene[index].id, scene[index].definition, TRUE))
+		{
 			continue;
+		}
 		instances[count].id = scene[index].id;
 		instances[count].definition = scene[index].definition;
 		instances[count].baked = object_baked(scene[index].id, scene[index].definition);
+		instances[count].field_awaited = world_sdf_object_awaited(scene[index].definition);
 		count++;
 	}
 	return count;
