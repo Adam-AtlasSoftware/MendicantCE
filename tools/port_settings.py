@@ -577,7 +577,7 @@ MOVIES_HELP = ("Plays the Xbox's intro movie as the game starts, and its attract
 MAP_STORAGE = [("INSTANT LOADING", "0"), ("DISK SPACE SAVER", "730")]
 MAP_STORAGE_HELP = ("Instant Loading keeps every map unpacked, about 3.0 GB, so loads never wait. Disk Space Saver "
                     "keeps at most 730 MB, saving 2.3 GB or more, little on most drives. A map it has not kept loads "
-                    "a second or more slower.|Switching back unpacks every map again, in the background.")
+                    "a second or more slower.|Switching back unpacks every map again in the background.")
 
 CREATE_PROFILE = ("CREATE PROFILE ›", None, None,
                   "Your name, color and controller layout are kept in a player profile. Make one to set them; the "
