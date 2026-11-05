@@ -56,7 +56,7 @@ static void journal_operation(unsigned long op, const void *arguments, unsigned 
 struct xgpu_render_target { xgpu_target number; int samples; float scale[2]; };
 struct render_target_entry { struct xgpu_render_target target; };
 static struct { BOOL gl_ready; int back_buffer; void *depth_stencil; } device;
-static struct { int quality; BOOL laid, prepass, ready; } ambient_occlusion;
+static struct { int quality; BOOL laid, prepass, ready, journal_prepass, journal_ready; } ambient_occlusion;
 /* (the targets bound: the back buffer and the occlusion's depth pre-pass target, as they are) */
 static BOOL bind_targets(BOOL *has_depth) { *has_depth = TRUE; return TRUE; }
 enum { _anti_aliasing_off, _anti_aliasing_fxaa, _anti_aliasing_smaa, _anti_aliasing_ssaa, _anti_aliasing_msaa };
