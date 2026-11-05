@@ -77,6 +77,7 @@ symbols in this file:
 #include "text/font_group.h"
 #include "text/unicode.h"
 #include "tag_files/tag_files.h"
+#include "cache/cache_files.h" /* port: tag_iterator (hires_text_fonts_ahead) */
 
 /* port: the high-res text (port/linux/src/text_hires.c): the text drawn with
 fonts at the display's resolution, laid out as before. Characters are drawn
@@ -210,6 +211,8 @@ static void rasterizer_draw_character_with_dropshadow(
 static long hires_text_font_get(
 	long font_index,
 	real oversample);
+static void hires_text_fonts_ahead(
+	void);
 static void rasterizer_text_draw_scaled_character(
 	struct dynamic_screen_vertex const *vertices);
 static void rasterizer_draw_hires_character(
@@ -250,6 +253,9 @@ static struct
 	long hires_font;
 } hires_text_fonts[MAXIMUM_HIRES_TEXT_FONTS];
 static short hires_text_next_font = 0;
+/* port: the map's fonts made, and their glyphs rasterized, ahead of their
+first strings (hires_text_fonts_ahead) */
+static boolean hires_text_fonts_made = FALSE;
 /* port: the text's scale about a point (rasterizer_text_set_scale) */
 static real text_scale = 1.0f;
 static real text_scale_origin_x = 0.0f;
@@ -361,6 +367,7 @@ rasterizer_text_cache_flush(
 	/* port: the next map's font tags may be at the same addresses */
 	memset(hires_text_fonts, 0, sizeof(hires_text_fonts));
 	hires_text_next_font = 0;
+	hires_text_fonts_made = FALSE;
 
 	return;
 }
@@ -474,6 +481,7 @@ rasterizer_draw_string(
 			}
 
 			/* port: from the font's atlas, when it has every character */
+			hires_text_fonts_ahead();
 			hires_text_font = hires_text_atlas ? hires_text_font_get(draw_string_get_font(), MAX(text_scale, 1.0f)) : NONE;
 			if (hires_text_font != NONE)
 			{
@@ -615,6 +623,7 @@ rasterizer_draw_unicode_string(
 			}
 
 			/* port: from the font's atlas, when it has every character */
+			hires_text_fonts_ahead();
 			hires_text_font = hires_text_atlas ? hires_text_font_get(draw_string_get_font(), MAX(text_scale, 1.0f)) : NONE;
 			if (hires_text_font != NONE)
 			{
@@ -837,6 +846,25 @@ static void rasterizer_text_draw_scaled_character(
 			text_scale_origin_y + (vertices[vertex_index].position.y - text_scale_origin_y) * text_scale;
 	}
 	rasterizer_text_draw_character(scaled);
+
+	return;
+}
+
+/* port: the high-res text's fonts of every font tag of the map, made as its
+first string is drawn: their glyphs are rasterized then, on a thread
+(text_hires.c), before the menus and the HUD draw with them */
+static void hires_text_fonts_ahead(
+	void)
+{
+	struct tag_iterator iterator;
+	long font_index;
+
+	if (hires_text_fonts_made || !hires_text_atlas || !text_hires_enabled())
+		return;
+	hires_text_fonts_made = TRUE;
+	tag_iterator_new(&iterator, FONT_GROUP_TAG);
+	while ((font_index = tag_iterator_next(&iterator)) != NONE)
+		hires_text_font_get(font_index, 1.0f);
 
 	return;
 }

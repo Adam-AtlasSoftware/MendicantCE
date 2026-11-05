@@ -9,11 +9,27 @@ from the tag's character widths, is kept, and the fonts were chosen to fit
 the Xbox maps' widths. A tag whose letters are narrower (the fonts of a
 Custom Edition loc.map) gets its font narrowed until its letters are, on
 the whole, as wide as the tag's, so that they do not run into each other;
-the Xbox maps' fonts are narrowed by a few hundredths. A glyph is rasterized when first drawn, at the display's
-pixels per unit of the 480 lines, into an 8-bit atlas; the image the
-game's placeholder bitmap stands for (xbox_textures.c) is the atlas, its new
-rows uploaded when the placeholder is bound. A change of the display's
-scale (a window made fullscreen) or a full atlas starts it over.
+the Xbox maps' fonts are narrowed by a few hundredths.
+
+The glyphs are rasterized on a thread of their own, never on the game's,
+at the display's pixels per unit of the 480 lines, into an 8-bit atlas: a
+font's letters, digits and punctuation (ASCII's) as the font is made, which
+the maps' fonts are as each map loads (rasterizer_text.c's
+rasterizer_text_fonts_ahead), before the menus or the HUD draw them, and any
+other character as it is first drawn. Until a string's every glyph is in
+the atlas it is drawn as the game draws it, from its font tag's bitmaps,
+and from the atlas once they are (a frame or two later: rasterizing a
+glyph takes some tens of microseconds, the ASCII of the maps' five fonts
+some milliseconds, of the thread's time). The image the game's placeholder
+bitmap stands for (xbox_textures.c) is the atlas, uploaded again when
+glyphs have been added to it and the placeholder is bound. A change of the
+display's scale (a window made fullscreen) starts it over, every font's
+ASCII rasterized again at once, on the thread; a full atlas too, its glyphs
+rasterized again as they are drawn.
+
+The atlas is not kept on disk: the thread rasterizes the maps' fonts'
+ASCII (some 470 glyphs) in tens of milliseconds of its own time, as the
+loading screen shows, and reading it back would save nothing a player sees.
 */
 
 #include "text_hires.h"
@@ -24,6 +40,7 @@ scale (a window made fullscreen) or a full atlas starts it over.
 #include "xgpu_images.h"
 
 #include <math.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <ctype.h>
@@ -57,19 +74,67 @@ static struct
 } fonts[MAXIMUM_FONTS];
 static long font_count;
 
+/* a glyph's place in the cache (the game thread's) */
+enum
+{
+	_glyph_free,
+	/* asked of the thread */
+	_glyph_wanted,
+	/* in the atlas (or one with no ink: none) */
+	_glyph_ready,
+	/* the font has none */
+	_glyph_missing,
+};
+
 static struct
 {
-	long font;          /* -1: free */
+	short state;
+	long font;
 	unsigned long code;
 	short x, y, width, height;
 	short left, top;    /* the glyph's corner, in pixels from the pen on the baseline */
 	float advance;      /* in units of the 480 lines */
 } glyphs[GLYPH_CACHE_SIZE];
 
+/* the glyphs asked of the thread, and those it has rasterized: rings of
+GLYPH_CACHE_SIZE (no more can be asked than the cache has room for) */
+struct glyph_job
+{
+	long font;
+	unsigned long code;
+	/* the atlas it is for (its generation) and the pixels it is drawn at */
+	unsigned long generation;
+	float pixels, pixels_x;
+	/* (done) where it is, its corner and advance; full: the atlas is */
+	short x, y, width, height, left, top;
+	float advance;
+	int full;
+};
+
+static struct
+{
+	pthread_mutex_t lock;
+	pthread_cond_t work;
+	int running;
+	struct glyph_job wanted[GLYPH_CACHE_SIZE];
+	unsigned long wanted_first, wanted_count;
+	struct glyph_job done[GLYPH_CACHE_SIZE];
+	unsigned long done_first, done_count;
+	/* (the atlas's, the lock's) where the next glyph goes */
+	int pack_x, pack_y, pack_row_height;
+	unsigned long pack_generation;
+} rasterizer = { PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER };
+
+/* (the game thread's) glyphs rasterized, waiting to be taken: read without
+the lock, to take none when there are none */
+static volatile unsigned long rasterizer_done;
+
 static unsigned char *atlas;
 static float atlas_scale;   /* the pixels per unit its glyphs have */
-static int pack_x, pack_y, pack_row_height;
-static int dirty_top = ATLAS_SIZE, dirty_bottom;
+/* changed each time it is emptied: the glyphs rasterized for one before are
+let go */
+static unsigned long atlas_generation;
+static int atlas_changed;
 static unsigned long placeholder_data, placeholder_width, placeholder_height;
 static unsigned int atlas_texture;
 
@@ -105,7 +170,9 @@ void text_hires_set_reset_hook(void (*hook)(void))
 	reset_hook = hook;
 }
 
-/* the atlas emptied: every glyph to be rasterized again */
+/* the atlas emptied, for a display of this scale: every glyph to be
+rasterized again (those asked of the thread for the atlas before are let
+go) */
 static void atlas_reset(float scale)
 {
 	long index;
@@ -113,16 +180,266 @@ static void atlas_reset(float scale)
 	/* (text batched from the glyphs there drawn first) */
 	if (reset_hook && atlas)
 		reset_hook();
+	pthread_mutex_lock(&rasterizer.lock);
 	if (!atlas)
 		atlas = malloc(ATLAS_SIZE * ATLAS_SIZE);
 	if (atlas)
 		memset(atlas, 0, ATLAS_SIZE * ATLAS_SIZE);
+	atlas_generation++;
+	rasterizer.pack_x = rasterizer.pack_y = rasterizer.pack_row_height = 0;
+	rasterizer.pack_generation = atlas_generation;
+	/* (those waiting are dropped by their generation, as they are taken) */
+	pthread_mutex_unlock(&rasterizer.lock);
 	for (index = 0; index < GLYPH_CACHE_SIZE; index++)
-		glyphs[index].font = -1;
+		glyphs[index].state = _glyph_free;
 	atlas_scale = scale;
-	pack_x = pack_y = pack_row_height = 0;
-	dirty_top = 0;
-	dirty_bottom = ATLAS_SIZE;
+	atlas_changed = 1;
+}
+
+/* (the thread's, the lock held) a glyph rasterized: placed in the atlas, its
+pixels copied there; 0 if the atlas is full */
+static int glyph_place(struct glyph_job *job, const unsigned char *pixels)
+{
+	int width = job->width, height = job->height;
+
+	if (width <= 0 || height <= 0)
+		return 1;
+	if (rasterizer.pack_x + width + 2 * ATLAS_PADDING > ATLAS_SIZE)
+	{
+		rasterizer.pack_x = 0;
+		rasterizer.pack_y += rasterizer.pack_row_height;
+		rasterizer.pack_row_height = 0;
+	}
+	if (rasterizer.pack_y + height + 2 * ATLAS_PADDING > ATLAS_SIZE)
+		return 0;
+	job->x = (short)(rasterizer.pack_x + ATLAS_PADDING);
+	job->y = (short)(rasterizer.pack_y + ATLAS_PADDING);
+	{
+		int row;
+
+		for (row = 0; row < height; row++)
+			memcpy(atlas + (size_t)(job->y + row) * ATLAS_SIZE + job->x, pixels + (size_t)row * width, (size_t)width);
+	}
+	rasterizer.pack_x += width + 2 * ATLAS_PADDING;
+	if (height + 2 * ATLAS_PADDING > rasterizer.pack_row_height)
+		rasterizer.pack_row_height = height + 2 * ATLAS_PADDING;
+	return 1;
+}
+
+/* the thread: each glyph asked for rasterized (outside the lock: the
+fonts it reads do not change once made), then placed in the atlas */
+static void *rasterizer_thread(void *unused)
+{
+	(void)unused;
+	pthread_mutex_lock(&rasterizer.lock);
+	for (;;)
+	{
+		struct glyph_job job;
+		int index, x0 = 0, y0 = 0, x1 = 0, y1 = 0, advance = 0, bearing = 0;
+		unsigned char *pixels = NULL;
+
+		while (!rasterizer.wanted_count)
+			pthread_cond_wait(&rasterizer.work, &rasterizer.lock);
+		job = rasterizer.wanted[rasterizer.wanted_first];
+		rasterizer.wanted_first = (rasterizer.wanted_first + 1) % GLYPH_CACHE_SIZE;
+		rasterizer.wanted_count--;
+		/* (for an atlas emptied since: let go) */
+		if (job.generation != rasterizer.pack_generation)
+			continue;
+		pthread_mutex_unlock(&rasterizer.lock);
+		index = stbtt_FindGlyphIndex(&fonts[job.font].info, (int)job.code);
+		if (index)
+		{
+			stbtt_GetGlyphBitmapBox(&fonts[job.font].info, index, job.pixels_x, job.pixels, &x0, &y0, &x1, &y1);
+			stbtt_GetGlyphHMetrics(&fonts[job.font].info, index, &advance, &bearing);
+		}
+		job.width = (short)(x1 - x0);
+		job.height = (short)(y1 - y0);
+		if (job.width <= 0 || job.height <= 0 ||
+			job.width + 2 * ATLAS_PADDING > ATLAS_SIZE || job.height + 2 * ATLAS_PADDING > ATLAS_SIZE)
+		{
+			job.width = job.height = 0;
+		}
+		else if ((pixels = malloc((size_t)job.width * job.height)) != NULL)
+		{
+			stbtt_MakeGlyphBitmap(&fonts[job.font].info, pixels, job.width, job.height, job.width,
+				job.pixels_x, job.pixels, index);
+		}
+		else
+		{
+			job.width = job.height = 0;
+		}
+		job.left = (short)x0;
+		job.top = (short)y0;
+		job.advance = advance * fonts[job.font].scale * fonts[job.font].narrowing;
+		job.x = job.y = 0;
+		pthread_mutex_lock(&rasterizer.lock);
+		if (job.generation == rasterizer.pack_generation)
+		{
+			job.full = !glyph_place(&job, pixels);
+			rasterizer.done[(rasterizer.done_first + rasterizer.done_count) % GLYPH_CACHE_SIZE] = job;
+			rasterizer.done_count++;
+			rasterizer_done = rasterizer.done_count;
+		}
+		free(pixels);
+	}
+	return NULL;
+}
+
+/* the glyph's slot in the cache: its own, else the free one it would take,
+else -1 (the cache is full) */
+static long glyph_slot(long font, unsigned long code)
+{
+	unsigned long slot = ((unsigned long)font * 2654435761UL ^ code * 40503UL) & (GLYPH_CACHE_SIZE - 1);
+	long probe;
+
+	for (probe = 0; probe < GLYPH_CACHE_SIZE; probe++, slot = (slot + 1) & (GLYPH_CACHE_SIZE - 1))
+	{
+		if (glyphs[slot].state == _glyph_free || (glyphs[slot].font == font && glyphs[slot].code == code))
+			return (long)slot;
+	}
+	return -1;
+}
+
+/* the glyphs the thread has rasterized taken into the cache (the atlas
+started over if it is full) */
+static void glyphs_take(void)
+{
+	int full = 0;
+
+	if (!rasterizer_done)
+		return;
+	pthread_mutex_lock(&rasterizer.lock);
+	while (rasterizer.done_count)
+	{
+		struct glyph_job *job = &rasterizer.done[rasterizer.done_first];
+		long slot;
+
+		rasterizer.done_first = (rasterizer.done_first + 1) % GLYPH_CACHE_SIZE;
+		rasterizer.done_count--;
+		if (job->generation != atlas_generation)
+			continue;
+		if (job->full)
+		{
+			full = 1;
+			continue;
+		}
+		slot = glyph_slot(job->font, job->code);
+		if (slot < 0 || glyphs[slot].state != _glyph_wanted)
+			continue;
+		glyphs[slot].x = job->x;
+		glyphs[slot].y = job->y;
+		glyphs[slot].width = job->width;
+		glyphs[slot].height = job->height;
+		glyphs[slot].left = job->left;
+		glyphs[slot].top = job->top;
+		glyphs[slot].advance = job->advance;
+		glyphs[slot].state = _glyph_ready;
+		atlas_changed = 1;
+	}
+	rasterizer_done = 0;
+	pthread_mutex_unlock(&rasterizer.lock);
+	/* (its glyphs asked for again as they are drawn) */
+	if (full)
+		atlas_reset(atlas_scale);
+}
+
+/* the atlas, for the display's scale now (emptied if it was another's);
+0 if there is none */
+static long glyph_want(long font, unsigned long code);
+
+static int atlas_ready(void)
+{
+	float scale = halo_screen_pixel_scale();
+
+	if (scale <= 0.0f)
+		return 0;
+	if (!atlas || scale != atlas_scale)
+	{
+		long font;
+		unsigned long code;
+
+		atlas_reset(scale);
+		/* (every font's letters, digits and punctuation rasterized again
+		at once, for this scale, on the thread: the text is drawn from its
+		tags' bitmaps until they are) */
+		for (font = 0; atlas && font < font_count; font++)
+		{
+			for (code = '!'; fonts[font].scale > 0.0f && code <= '~'; code++)
+				glyph_want(font, code);
+		}
+	}
+	if (atlas)
+		glyphs_take();
+	return atlas != NULL;
+}
+
+/* the glyph asked of the thread (once): its slot, else -1 */
+static long glyph_want(long font, unsigned long code)
+{
+	long slot = glyph_slot(font, code);
+	struct glyph_job *job;
+
+	if (slot < 0)
+	{
+		atlas_reset(atlas_scale);
+		slot = glyph_slot(font, code);
+		if (slot < 0)
+			return -1;
+	}
+	if (glyphs[slot].state != _glyph_free)
+		return slot;
+	glyphs[slot].font = font;
+	glyphs[slot].code = code;
+	if (!stbtt_FindGlyphIndex(&fonts[font].info, (int)code))
+	{
+		glyphs[slot].state = _glyph_missing;
+		return slot;
+	}
+	pthread_mutex_lock(&rasterizer.lock);
+	if (!rasterizer.running)
+	{
+		pthread_t thread;
+
+		if (pthread_create(&thread, NULL, rasterizer_thread, NULL) != 0)
+		{
+			pthread_mutex_unlock(&rasterizer.lock);
+			return -1;
+		}
+		pthread_detach(thread);
+		rasterizer.running = 1;
+	}
+	/* (every glyph asked for has a slot of its own: no more than the
+	ring holds) */
+	job = &rasterizer.wanted[(rasterizer.wanted_first + rasterizer.wanted_count) % GLYPH_CACHE_SIZE];
+	if (rasterizer.wanted_count == GLYPH_CACHE_SIZE)
+	{
+		pthread_mutex_unlock(&rasterizer.lock);
+		return -1;
+	}
+	memset(job, 0, sizeof(*job));
+	job->font = font;
+	job->code = code;
+	job->generation = atlas_generation;
+	job->pixels = fonts[font].scale * atlas_scale * fonts[font].oversample;
+	job->pixels_x = job->pixels * fonts[font].narrowing;
+	rasterizer.wanted_count++;
+	pthread_cond_signal(&rasterizer.work);
+	pthread_mutex_unlock(&rasterizer.lock);
+	glyphs[slot].state = _glyph_wanted;
+	return slot;
+}
+
+/* a font's letters, digits and punctuation asked of the thread as it is
+made, before they are drawn */
+static void font_ahead(long font)
+{
+	unsigned long code;
+
+	if (!atlas_ready())
+		return;
+	for (code = '!'; code <= '~'; code++)
+		glyph_want(font, code);
 }
 
 long text_hires_font(char const *tag_name, float cap_height, short const *letter_widths, float oversample)
@@ -194,99 +511,40 @@ long text_hires_font(char const *tag_name, float cap_height, short const *letter
 			tag_name, cap_height, embedded->file, fonts[font].narrowing * 100.0f);
 		break;
 	}
-	return fonts[font].scale > 0.0f ? font : -1;
+	if (fonts[font].scale <= 0.0f)
+		return -1;
+	font_ahead(font);
+	return font;
 }
 
 int text_hires_covers(long font, unsigned long code)
 {
+	long slot;
+
 	if (font < 0 || font >= font_count || fonts[font].scale <= 0.0f)
 		return 0;
 	/* (control characters are never drawn) */
-	return code < 32 || code == ' ' || stbtt_FindGlyphIndex(&fonts[font].info, (int)code) != 0;
+	if (code < 32 || code == ' ')
+		return 1;
+	if (!placeholder_data || !atlas_ready())
+		return 0;
+	/* (one not yet rasterized: asked for, the string drawn from the tag's
+	bitmaps meanwhile) */
+	slot = glyph_want(font, code);
+	return slot >= 0 && glyphs[slot].state == _glyph_ready;
 }
 
 int text_hires_glyph(long font, unsigned long code, struct text_hires_glyph *glyph)
 {
-	float scale = halo_screen_pixel_scale();
 	float pixel_scale;
-	unsigned long slot;
-	long probe;
+	long slot;
 
-	if (font < 0 || font >= font_count || fonts[font].scale <= 0.0f || !placeholder_data || scale <= 0.0f)
+	if (font < 0 || font >= font_count || fonts[font].scale <= 0.0f || !placeholder_data || !atlas)
 		return 0;
-	if (!atlas || scale != atlas_scale)
-		atlas_reset(scale);
-	if (!atlas)
+	slot = glyph_slot(font, code);
+	if (slot < 0 || glyphs[slot].state != _glyph_ready || !glyphs[slot].width || !glyphs[slot].height)
 		return 0;
-	slot = ((unsigned long)font * 2654435761UL ^ code * 40503UL) & (GLYPH_CACHE_SIZE - 1);
-	for (probe = 0; probe < GLYPH_CACHE_SIZE; probe++, slot = (slot + 1) & (GLYPH_CACHE_SIZE - 1))
-	{
-		if (glyphs[slot].font == -1 || (glyphs[slot].font == font && glyphs[slot].code == code))
-			break;
-	}
-	if (probe == GLYPH_CACHE_SIZE)
-	{
-		atlas_reset(scale);
-		return text_hires_glyph(font, code, glyph);
-	}
-	if (glyphs[slot].font == -1)
-	{
-		/* rasterized now */
-		float pixels = fonts[font].scale * scale * fonts[font].oversample;
-		float pixels_x = pixels * fonts[font].narrowing;
-		int index = stbtt_FindGlyphIndex(&fonts[font].info, (int)code);
-		int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
-		int width, height, advance = 0, bearing = 0;
-
-		if (index)
-		{
-			stbtt_GetGlyphBitmapBox(&fonts[font].info, index, pixels_x, pixels, &x0, &y0, &x1, &y1);
-			stbtt_GetGlyphHMetrics(&fonts[font].info, index, &advance, &bearing);
-		}
-		width = x1 - x0;
-		height = y1 - y0;
-		if (width > 0 && height > 0)
-		{
-			if (width + 2 * ATLAS_PADDING > ATLAS_SIZE || height + 2 * ATLAS_PADDING > ATLAS_SIZE)
-				return 0;
-			if (pack_x + width + 2 * ATLAS_PADDING > ATLAS_SIZE)
-			{
-				pack_x = 0;
-				pack_y += pack_row_height;
-				pack_row_height = 0;
-			}
-			if (pack_y + height + 2 * ATLAS_PADDING > ATLAS_SIZE)
-			{
-				atlas_reset(scale);
-				return text_hires_glyph(font, code, glyph);
-			}
-			stbtt_MakeGlyphBitmap(&fonts[font].info,
-				atlas + (pack_y + ATLAS_PADDING) * ATLAS_SIZE + pack_x + ATLAS_PADDING,
-				width, height, ATLAS_SIZE, pixels_x, pixels, index);
-			if (pack_y < dirty_top)
-				dirty_top = pack_y;
-			if (pack_y + height + 2 * ATLAS_PADDING > dirty_bottom)
-				dirty_bottom = pack_y + height + 2 * ATLAS_PADDING;
-		}
-		glyphs[slot].font = font;
-		glyphs[slot].code = code;
-		glyphs[slot].x = (short)(pack_x + ATLAS_PADDING);
-		glyphs[slot].y = (short)(pack_y + ATLAS_PADDING);
-		glyphs[slot].width = (short)(width > 0 && height > 0 ? width : 0);
-		glyphs[slot].height = (short)(width > 0 && height > 0 ? height : 0);
-		glyphs[slot].left = (short)x0;
-		glyphs[slot].top = (short)y0;
-		glyphs[slot].advance = advance * fonts[font].scale * fonts[font].narrowing;
-		if (width > 0 && height > 0)
-		{
-			pack_x += width + 2 * ATLAS_PADDING;
-			if (height + 2 * ATLAS_PADDING > pack_row_height)
-				pack_row_height = height + 2 * ATLAS_PADDING;
-		}
-	}
-	if (!glyphs[slot].width || !glyphs[slot].height)
-		return 0;
-	pixel_scale = scale * fonts[font].oversample;
+	pixel_scale = atlas_scale * fonts[font].oversample;
 	glyph->left = glyphs[slot].left / pixel_scale;
 	glyph->top = glyphs[slot].top / pixel_scale;
 	glyph->right = (glyphs[slot].left + glyphs[slot].width) / pixel_scale;
@@ -313,11 +571,10 @@ unsigned int text_hires_atlas_texture(unsigned long data)
 	/* (the host reads the atlas where it is, again once it has changed) */
 	if (!atlas_texture)
 		atlas_texture = xgpu_image_create(atlas, ATLAS_SIZE, ATLAS_SIZE, 1, XGPU_IMAGE_COVERAGE, FALSE);
-	if (dirty_top < dirty_bottom)
+	if (atlas_changed)
 	{
 		xgpu_image_changed(atlas_texture);
-		dirty_top = ATLAS_SIZE;
-		dirty_bottom = 0;
+		atlas_changed = 0;
 	}
 	return atlas_texture;
 }

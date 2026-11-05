@@ -524,20 +524,35 @@ static void upscale_outline(unsigned char *pixels, const unsigned char *bgra,
 	}
 }
 
-unsigned int hud_hires_upscale_texture(const unsigned char *bgra, unsigned long width,
-	unsigned long height, long kind, unsigned long *levels)
+unsigned char *hud_hires_upscale_kind_pixels(const unsigned char *bgra, unsigned long width,
+	unsigned long height, long kind)
 {
 	unsigned char *pixels = kind == 4 ? upscale_pixels(bgra, width, height, 512) :
 		hud_hires_upscale_pixels(bgra, width, height);
+
+	if (pixels)
+		upscale_outline(pixels, bgra, width, height, kind);
+	return pixels;
+}
+
+unsigned int hud_hires_upscaled_texture(unsigned char *pixels, unsigned long width, unsigned long height,
+	unsigned long *levels)
+{
 	unsigned long largest;
 
 	if (!pixels)
 		return 0;
-	upscale_outline(pixels, bgra, width, height, kind);
 	*levels = 1;
 	for (largest = (width > height ? width : height) * 4; largest > 1; largest >>= 1)
 		(*levels)++;
 	return xgpu_image_create(pixels, width * 4, height * 4, *levels, XGPU_IMAGE_RGBA, TRUE);
+}
+
+unsigned int hud_hires_upscale_texture(const unsigned char *bgra, unsigned long width,
+	unsigned long height, long kind, unsigned long *levels)
+{
+	return hud_hires_upscaled_texture(hud_hires_upscale_kind_pixels(bgra, width, height, kind), width, height,
+		levels);
 }
 
 static unsigned long big_endian_long(const unsigned char *bytes)
@@ -683,6 +698,12 @@ static unsigned int png_pixels_texture(unsigned char *pixels, unsigned long widt
 unsigned char *hud_hires_png_pixels(const void *png, unsigned long size, unsigned long *width, unsigned long *height)
 {
 	return png_decode(png, size, width, height);
+}
+
+unsigned int hud_hires_pixels_texture(unsigned char *pixels, unsigned long width, unsigned long height,
+	unsigned long *levels)
+{
+	return png_pixels_texture(pixels, width, height, levels);
 }
 
 unsigned int hud_hires_png_texture(const void *png, unsigned long size, unsigned long *levels)
