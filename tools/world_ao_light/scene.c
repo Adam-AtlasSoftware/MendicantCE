@@ -213,6 +213,9 @@ void scene_point(float point[3], float normal[3], float *owner, float *reference
 		normal[axis] /= length;
 	*owner = (float)((int)(scene_random() * 5.0f) - 1);
 	*reference = 0.1f + 0.9f * scene_random();
+	/* (one in eight a static scenery placement's own draw: none of the field) */
+	if (scene_random() < 0.125f)
+		*reference = WORLD_AO_REFERENCE_NO_FIELD;
 }
 
 #ifndef SCENE_LIBRARY

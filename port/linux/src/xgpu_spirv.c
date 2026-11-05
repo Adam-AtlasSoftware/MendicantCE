@@ -3369,8 +3369,11 @@ static unsigned int world_ao_read(struct module *m, struct pixel_state *state, i
 	field = world_sdf_occlusion(m, state, p, n);
 	relative = saturate(m, 1, fdiv(m, 1, field, fmax_scalar(m, 1, extract(m, object, 1), XGPU_WORLD_AO_REFERENCE_LEAST)));
 	field = ext3(m, GLSL_F_MIX, m->t_float, field, relative, extract(m, parameters1, 0));
-	occlusion = fmul(m, 1, ext3(m, GLSL_F_MIX, m->t_float, constant_float(m, 1.0f), field, extract(m, parameters0, 2)),
-		proxies);
+	/* (a negative reference, a static scenery placement's own draw: none of
+	the field, which holds its own geometry) */
+	occlusion = fmul(m, 1, ext3(m, GLSL_F_MIX, m->t_float, constant_float(m, 1.0f), field,
+		fselect(m, compare(m, OP_F_ORD_LESS_THAN, extract(m, object, 1), constant_float(m, 0.0f)), constant_float(m, 0.0f),
+		extract(m, parameters0, 2))), proxies);
 	return ext3(m, GLSL_F_MIX, m->t_float, constant_float(m, 1.0f), fmax_scalar(m, 1, occlusion, XGPU_WORLD_AO_FLOOR),
 		extract(m, parameters0, 0));
 }

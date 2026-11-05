@@ -124,6 +124,13 @@ static int object_baked(long object_index, long definition)
 
 /* ---------- public code */
 
+int world_proxies_source_baked(long id)
+{
+	struct object_datum *object = (struct object_datum *)object_try_and_get(id);
+
+	return object && object_baked(id, object->definition_index);
+}
+
 int world_proxies_source_definition(long definition, struct world_proxies_source *source)
 {
 	struct object_definition const *object_definition;

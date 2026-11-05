@@ -18,6 +18,7 @@ the Classic preset's "off") draws exactly as before.
 
 #include "world_ao.h"
 #include "world_proxies.h"
+#include "world_proxies_source.h"
 #include "world_scene.h"
 #include "world_sdf.h"
 
@@ -419,12 +420,14 @@ void world_ao_object_begin(long object_index)
 				break;
 			}
 		}
-		/* (a static scenery placement the field holds: its own geometry in the
-		field over where its light was sampled, which its light never held) */
-		baked = index < world_ao.count && index >= world_ao.dynamic_count;
+		/* (a static scenery placement the field holds: its own geometry is in
+		the field, so it takes none of it, which a negative reference says) */
+		baked = world_ao.volume && world_ao.fade > 0.0f && world_proxies_source_baked(object_index);
 		instance = world_ao.volume && world_ao.fade > 0.0f && !baked ? world_scene_instance_find(object_index) : NULL;
 		if (instance)
 			reference = world_ao_reference(world_ao.volume, instance->lighting_point);
+		if (baked)
+			reference = WORLD_AO_REFERENCE_NO_FIELD;
 	}
 	halo_world_ao_object(owner, reference);
 }

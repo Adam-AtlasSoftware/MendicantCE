@@ -294,7 +294,9 @@ float world_ao_occlusion(float const parameters[2][4], struct world_sdf_volume c
 	field = world_ao_field_occlusion(volume, point, normal);
 	field = mix(field, saturate(field / (reference > WORLD_AO_REFERENCE_LEAST ? reference : WORLD_AO_REFERENCE_LEAST)),
 		parameters[1][0]);
-	field = mix(1.0f, field, parameters[0][2]) * proxied;
+	/* (a static scenery placement's own draw: none of the field, which holds
+	its own geometry) */
+	field = mix(1.0f, field, reference < 0.0f ? 0.0f : parameters[0][2]) * proxied;
 	return mix(1.0f, field > WORLD_AO_FLOOR ? field : WORLD_AO_FLOOR, parameters[0][0]);
 }
 

@@ -52,6 +52,9 @@ level ("world" is the strong preset); the reference's weight */
 #define WORLD_AO_STRENGTH_OBJECTS 1.0f
 #define WORLD_AO_STRENGTH_LEVEL 0.8f
 #define WORLD_AO_REFERENCE_WEIGHT 1.0f
+/* a model draw's reference that takes none of the field (a static scenery
+placement's own: the field holds its geometry) */
+#define WORLD_AO_REFERENCE_NO_FIELD -1.0f
 
 /* the window's proxy grid (world_ao_grid; xgpu.h's XGPU_WORLD_AO_GRID_*):
 cells about the camera, boxes in the world (eye-independent), each with a
@@ -151,8 +154,8 @@ others' reach does not touch the cell) */
 float world_ao_proxies_occlusion_grid(struct world_proxy const *proxies, float const grid[2][4],
 	unsigned int const cells[WORLD_AO_GRID_CELLS / 2][4], float const point[3], float const normal[3], float owner);
 /* the occlusion a draw's pixel multiplies its ambient light by: a model's
-(lightmap FALSE: the field relative to its reference, faded in, times the
-dynamic proxies) or the lightmap pass's (the proxies alone, or, where its
+(lightmap FALSE: the field relative to its reference, faded in (none where
+the reference is negative), times the dynamic proxies) or the lightmap pass's (the proxies alone, or, where its
 page has a layer (reference, as the lightmap pass's draws give it, 0 or
 more), the dynamic proxies times scenery, the page's texel there), the
 parameters as the block's (xgpu_stream.h's struct xgpu_world_ao_block:

@@ -65,6 +65,13 @@ float world_sdf_fade(void)
 	return 0.5f;
 }
 
+/* (no static scenery) */
+int world_proxies_source_baked(long id)
+{
+	(void)id;
+	return 0;
+}
+
 /* (no static scenery's pages) */
 int world_sdf_scenery_layer(void const *lightmap_bitmap)
 {

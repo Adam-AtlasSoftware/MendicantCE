@@ -1940,7 +1940,8 @@ static void world_ao_read(struct xgpu_text *text, const struct xgpu_pixel_progra
 		xgpu_text_append(text,
 			"\t\tfloat field = world_sdf_occlusion(world_ao, world_sdf, world_sdf_table, in.xWorldPosition, world_n);\n"
 			"\t\tfield = mix(field, saturate(field / max(u.world_ao.y, %.6f)), world_ao.parameters[1].x);\n"
-			"\t\tocclusion = mix(1.0, max(mix(1.0, field, world_ao.parameters[0].z) * proxies, %.6f), world_ao.parameters[0].x);\n",
+			"\t\tocclusion = mix(1.0, max(mix(1.0, field, u.world_ao.y < 0.0 ? 0.0 : world_ao.parameters[0].z) * proxies, %.6f),\n"
+			"\t\t\tworld_ao.parameters[0].x);\n",
 			XGPU_WORLD_AO_REFERENCE_LEAST, XGPU_WORLD_AO_FLOOR);
 	xgpu_text_append(text, "\t}\n");
 }

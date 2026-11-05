@@ -92,6 +92,10 @@ short world_proxies_source_nodes(long id, struct world_proxies_frame *frames, sh
 /* the window's frustum: its 4 side planes, x y z d each (a point p is
 outside a plane where x*p.x + y*p.y + z*p.z - d > 0); FALSE: none known */
 int world_proxies_source_frustum(float planes[4][4]);
+/* whether an object is a static scenery placement that the drawn field
+and its pages hold (world_sdf_scenery_baked): its draws take none of the
+field, which holds its own geometry */
+int world_proxies_source_baked(long id);
 /* debug.world_proxies_view, and its lines (world space, a colour 0xRRGGBB) */
 int world_proxies_source_view(void);
 void world_proxies_source_line(float const a[3], float const b[3], unsigned long color);
