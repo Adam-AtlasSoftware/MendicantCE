@@ -18,7 +18,6 @@ the Classic preset's "off") draws exactly as before.
 
 #include "world_ao.h"
 #include "world_proxies.h"
-#include "world_proxies_source.h"
 #include "world_scene.h"
 #include "world_sdf.h"
 

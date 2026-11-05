@@ -23,6 +23,7 @@ object's node matrices, read inside the frame's render_interpolation pose
 #include "render/render_debug.h"
 #include "tag_files/tag_groups.h"
 
+#include "world_proxies.h"
 #include "world_proxies_source.h"
 #include "world_scene.h"
 #include "world_sdf.h"
