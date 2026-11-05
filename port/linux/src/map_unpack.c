@@ -292,7 +292,17 @@ static void *map_unpack_worker(void *context)
 		map_unpack.jobs[slot].state = _map_unpack_running;
 		pthread_mutex_unlock(&map_unpack.lock);
 		{
-			int succeeded = map_unpack_job_run(slot, &map_unpack.jobs[slot]);
+			struct timespec began, ended;
+			int succeeded;
+
+			clock_gettime(CLOCK_MONOTONIC, &began);
+			succeeded = map_unpack_job_run(slot, &map_unpack.jobs[slot]);
+			clock_gettime(CLOCK_MONOTONIC, &ended);
+#ifdef HALO_LINUX_PLATFORM_LAYER
+			platform_log("map cache: %s unpacked%s into slot %d in %.0f ms (%ld MB)", map_unpack.jobs[slot].map_xbox_path,
+				succeeded ? "" : " (not whole)", slot, (ended.tv_sec - began.tv_sec) * 1e3 +
+				(ended.tv_nsec - began.tv_nsec) / 1e6, map_unpack.jobs[slot].copy_size >> 20);
+#endif
 
 			pthread_mutex_lock(&map_unpack.lock);
 			map_unpack.jobs[slot].succeeded = succeeded;

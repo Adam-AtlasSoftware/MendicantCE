@@ -468,7 +468,9 @@ static void prepare_unpack_ahead(
 		if (prepare.unpack_tried[next])
 			continue;
 		prepare.unpack_tried[next] = TRUE;
-		cache_files_unpack_begin(scenario);
+		if (!cache_files_unpack_begin(scenario))
+			platform_log("menu pictures: %s is not unpacked ahead (whole, or the cache has no room for it)",
+				scenario);
 	}
 }
 
