@@ -3602,8 +3602,12 @@ port operates" in [port/android/README.md](../android/README.md#how-the-port-ope
   `configure.py --guest-base`, it is at a base that the host chooses: each
   guest address is an offset from a base register, which every memory
   access of the guest adds (`tools/guest_base_register.py`;
-  `android/host/host_memory_base.c`). Then the guest's 4 KB pages also
-  operate on a kernel with 16 KB pages.
+  `android/host/host_memory_base.c`).
+- The guest's 4 KB pages operate on kernels with larger pages (16 KB or
+  64 KB, as some ARM kernels have), in either case: the host keeps each
+  guest page's protection, and the write tracking and the vertex mirror
+  work in the kernel's pages (refer to "Pages of 16 KB" in
+  [port/android/README.md](../android/README.md#pages-of-16-kb)).
 
 ### The renderer's command stream
 

@@ -711,6 +711,41 @@ assembly of the port is necessary:
 - The symbol aliases in `guest/libc/src_include/features.h`. The Darwin
   target does not accept alias attributes.
 
+## Pages of 16 KB
+
+Android 15 and later run on kernels with 16 KB pages too (some devices,
+and the developer option "Boot with 16 KB page size"), and Google Play
+requires apps to support them. The app does:
+
+- Its native libraries (`libmain.so`, `libSDL3.so`) are linked with
+  `-z max-page-size=16384`: every loadable segment is 16 KB aligned. The
+  build checks this (`tools/android_elf_alignment.py`), and the APK stores
+  them uncompressed on 16 KB boundaries (the Android Gradle Plugin's
+  default; `zipalign -c -P 16 -v 4` checks the APK).
+- The guest maps and protects its memory in 4 KB pages (its musl, and the
+  Xbox memory of `port/linux/src/xbox_memory.c`). The host asks the
+  kernel's page size (`sysconf`) and keeps each 4 KB guest page's
+  protection itself (`host/host_memory.c`, or `host/host_memory_base.c`
+  with the base register): a host page gets the union of its guest pages'
+  protections, it is mapped while any of them is, and a guest page mapped
+  into a host page in use is zeroed in place. The pools hand out whole host
+  pages. A file is mapped only in whole host pages, and the image's pages
+  are changed only in whole host pages.
+- The write tracking protects host pages (`host/host_memory_watch.c`): a
+  write marks the whole 16 KB as written. The guest asks that size
+  (`memory_watch_page_size`), and the vertex mirror
+  (`port/linux/src/d3d8_device.c`) uses it as its page, so that a page the
+  game rewrites every frame does not share its protection with a mirrored
+  page beside it. The preparations' records keep their pages in 4 KB units,
+  played back as the pages that hold them, so the stock records serve both.
+- The stack guards are whole host pages.
+
+`tools/test_host_pages.py` runs the guest's memory and the write tracking
+on simulated kernels of 16 KB and 64 KB pages (each call that such a kernel
+refuses is counted), and `tools/harness/tests/test_mirror_pages.py` the
+vertex mirror. The Linux arm64 build shares this: its kernels may have 16 KB
+or 64 KB pages.
+
 ## Find problems
 
 - Enter `adb logcat -s halo` to see the log of the port and the errors of
@@ -738,10 +773,6 @@ assembly of the port is necessary:
   controls appear when no controller is connected; their size follows the
   height of the screen (larger on a tablet than on a phone), never smaller
   than a finger.
-- Kernels with 16 KB pages (a developer option of Android 15) do not
-  operate. The Xbox memory uses 4 KB pages. A build with
-  `configure.py --guest-base` keeps the guest's 4 KB pages on larger ones
-  (`host/host_memory_base.c`), but it was not tested on Android.
 - The x86 Android emulator runs the app through its ARM translation. The
   translation cannot deliver the page faults that the renderer uses to
   notice changed textures and vertices. On the emulator the app compares

@@ -906,7 +906,15 @@ def generate_android_build(n: Writer, sln: Any) -> None:
     staged_embedded = assets_dir / "openh1.assets"
     n.build(outputs=staged_embedded, rule="android_copy", inputs=guest["assets"])
     staged_assets = [staged_image, staged_brokers, staged_records, staged_embedded, *staged_licenses]
-    n.build(outputs="android", rule="phony", inputs=[libmain, staged_sdl, *staged_assets])
+    # the native libraries load on kernels of 16 KB pages (Android 15 and
+    # later; Google Play requires it): every loadable segment 16 KB aligned
+    # (-z max-page-size=16384, above), checked
+    elf_alignment = BUILD / "elf_alignment.stamp"
+    n.rule(name="android_elf_alignment", command="$python tools/android_elf_alignment.py $out $in",
+           description="ANDROID CHECK 16 KB pages")
+    n.build(outputs=elf_alignment, rule="android_elf_alignment", inputs=[libmain, staged_sdl],
+            implicit=[Path("tools/android_elf_alignment.py")])
+    n.build(outputs="android", rule="phony", inputs=[libmain, staged_sdl, elf_alignment, *staged_assets])
 
     apk = PORT_DIR / "app" / "build" / "outputs" / "apk" / "debug" / "app-debug.apk"
     sdl_android_mouse_listener = SDL_DIR / SDL_ANDROID_MOUSE_LISTENER
@@ -920,7 +928,7 @@ def generate_android_build(n: Writer, sln: Any) -> None:
     )
     # (and the app's own files: a change to its Java, manifest or resources
     # alone would otherwise leave the old APK in place)
-    n.build(outputs=apk, rule="android_gradle", inputs=[libmain, staged_sdl, *staged_assets],
+    n.build(outputs=apk, rule="android_gradle", inputs=[libmain, staged_sdl, elf_alignment, *staged_assets],
             implicit=[sdl_android_mouse_listener, *app_sources(), *GRADLE_FILES])
     n.build(outputs="android_apk", rule="phony", inputs=apk)
     n.newline()
