@@ -1421,6 +1421,14 @@ boolean hud_key_prompt_draw_key(
 short hud_key_prompt_cap_advance(
 	short name_left,
 	short name_right);
+short hud_key_prompt_legend_advance(
+	short name_left,
+	short name_right,
+	wchar_t const *words);
+long hud_key_prompt_draw_equals(
+	rectangle2d *bounds,
+	rectangle2d *cursor,
+	wchar_t const *text);
 int halo_keyboard_prompts(
 	void);
 /* port: a button's word in a message as its icon's name
@@ -4459,6 +4467,8 @@ void draw_string_and_hack_in_icons(
 	wchar_t *current = string_data;
 	rectangle2d cursor_bounds = *bounds;
 	unsigned long length;
+	/* port: a key cap was drawn last (hud_key_prompt_draw_equals) */
+	boolean key_drawn = FALSE;
 
 	/* port: no more than the buffer holds (the text is the map's: a string
 	list's or a hud message's; retail strings are up to 398 characters of
@@ -4488,6 +4498,11 @@ void draw_string_and_hack_in_icons(
 			break;
 		*icon_spec = 0;
 		icon_spec++;
+		/* port: a key cap's "=" (the legends' "=CANCEL") as far from the
+		cap as from its word (hud_key_prompts.c) */
+		if (key_drawn)
+			current += hud_key_prompt_draw_equals(bounds, &cursor_bounds, current);
+		key_drawn = FALSE;
 		render_state_text(bounds, &cursor_bounds, current);
 		current = icon_spec;
 		icon_type = get_icon_type(icon_spec);
@@ -4527,6 +4542,7 @@ void draw_string_and_hack_in_icons(
 				if (menu_key &&
 					hud_key_prompt_draw_key(menu_key, bounds, &cursor_bounds, real_argb_color_to_pixel32(&key_color)))
 				{
+					key_drawn = TRUE;
 					continue;
 				}
 				if (!menus &&
@@ -4538,6 +4554,7 @@ void draw_string_and_hack_in_icons(
 						&cursor_bounds,
 						real_argb_color_to_pixel32(&key_color)))
 				{
+					key_drawn = TRUE;
 					continue;
 				}
 			}
@@ -4552,6 +4569,7 @@ void draw_string_and_hack_in_icons(
 					&cursor_bounds,
 					real_argb_color_to_pixel32(&key_color)))
 			{
+				key_drawn = TRUE;
 				continue;
 			}
 			if (icon_type >= _icon_action && icon_type <= _icon_zoom &&
@@ -4563,6 +4581,7 @@ void draw_string_and_hack_in_icons(
 					&cursor_bounds,
 					real_argb_color_to_pixel32(&key_color)))
 			{
+				key_drawn = TRUE;
 				continue;
 			}
 			remapped_icon_type = remap_sticks_for_local_player(
@@ -4671,6 +4690,8 @@ void draw_string_and_hack_in_icons(
 			}
 		}
 	}
+	if (current && key_drawn)
+		current += hud_key_prompt_draw_equals(bounds, &cursor_bounds, current);
 	if (current)
 		render_state_text(bounds, &cursor_bounds, current);
 	draw_string_set_indents(0, 0);
@@ -6869,20 +6890,28 @@ static short ui_widget_port_key_label_cap_extra(
 /* how far right of its words' box a legend's key is drawn: the legends of
 the label's parent drawn in turn as each key's cap and its words, the gaps
 between them as they were, the row centred on the pictures' and words'.
-Leaves the draw mode the measuring's: the caller sets its own again */
+A row wider than the Xbox's was and a margin either side (the caps and the
+room either side of an "=" are wider than the Xbox's pictures: the pause
+menu's "[Esc] = CANCEL [Enter] = SELECT") has its gaps narrowed to fit, to
+no narrower than UI_WIDGET_PORT_LEGEND_LEAST_GAP. Leaves the draw mode the
+measuring's: the caller sets its own again */
+#define UI_WIDGET_PORT_LEGENDS 8
+#define UI_WIDGET_PORT_LEGEND_MARGIN 0
+#define UI_WIDGET_PORT_LEGEND_LEAST_GAP 4
 static short ui_widget_port_key_legend_shift(
 	struct widget_instance *label)
 {
 	struct widget_instance *icon;
-	wchar_t name[256];
 	wchar_t key[16];
+	short gaps[UI_WIDGET_PORT_LEGENDS], widths[UI_WIDGET_PORT_LEGENDS];
 	short old_left = SHORT_MAX, old_right = SHORT_MIN;
-	short x = 0, start, label_x = 0;
 	short previous_end = SHORT_MIN;
+	short count = 0, label_index = NONE, index, x, label_x = 0, start, room, gap_total = 0;
 
-	for (icon = label->parent ? label->parent->child : NULL; icon; icon = icon->next)
+	for (icon = label->parent ? label->parent->child : NULL; icon && count < UI_WIDGET_PORT_LEGENDS; icon = icon->next)
 	{
 		struct widget_instance *words;
+		wchar_t name[256];
 		short icon_left, words_left, words_width, name_left, name_right;
 
 		if (!ui_widget_port_key_icon_key(icon))
@@ -6894,21 +6923,51 @@ static short ui_widget_port_key_legend_shift(
 		words_left = ui_widget_port_left_in_parent(words);
 		words_width = ui_widget_port_text_width(words, words->parameters.text_box.text);
 		/* (the gap from the words before, as it was) */
-		if (previous_end != SHORT_MIN)
-			x = (short)(x + MAX(icon_left - previous_end, 4));
+		gaps[count] = (short)(previous_end != SHORT_MIN ? MAX(icon_left - previous_end, 4) : 0);
+		gap_total = (short)(gap_total + gaps[count]);
 		if (words == label)
-			label_x = x;
+			label_index = count;
 		/* (the key's cap, as hud_key_prompts.c's key_cap_draw lays it out
-		about its name, then the words) */
+		about its name, then the words, an "=" before them spaced as
+		hud_key_prompt_draw_equals draws it) */
 		ascii_to_wide(ui_widget_port_key_icon_key(icon), key, sizeof(key));
 		ui_widget_port_text_span(words, key, &name_left, &name_right);
-		x = (short)(x + hud_key_prompt_cap_advance(name_left, name_right) + words_width);
+		widths[count] = hud_key_prompt_legend_advance(name_left, name_right, words->parameters.text_box.text);
 		previous_end = (short)(words_left + words_width);
 		old_left = MIN(old_left, icon_left);
 		old_right = MAX(old_right, previous_end);
+		count++;
 	}
-	if (old_left == SHORT_MAX)
+	if (!count || label_index == NONE)
 		return 0;
+	x = gap_total;
+	for (index = 0; index < count; index++)
+		x = (short)(x + widths[index]);
+	/* (the gaps narrowed, as evenly as they can be, where the row is wider
+	than the Xbox's pictures and words were, and a margin either side: the
+	panel they are in has room for no more) */
+	room = (short)(old_right - old_left + 2 * UI_WIDGET_PORT_LEGEND_MARGIN);
+	if (x > room && count > 1)
+	{
+		short least = (short)((count - 1) * UI_WIDGET_PORT_LEGEND_LEAST_GAP);
+		short narrowed = (short)MAX(gap_total - (x - room), MIN(least, gap_total));
+		short left = narrowed;
+
+		for (index = 1; index < count; index++)
+		{
+			gaps[index] = (short)(left / (count - index));
+			left = (short)(left - gaps[index]);
+		}
+		x = (short)(x - gap_total + narrowed);
+	}
+	for (index = 0, start = 0; index <= label_index; index++)
+	{
+		start = (short)(start + gaps[index]);
+		if (index < label_index)
+			start = (short)(start + widths[index]);
+	}
+	label_x = start;
+	/* (centred on the Xbox's pictures and words) */
 	start = (short)(old_left - (x - (old_right - old_left)) / 2);
 
 	return (short)(start + label_x - ui_widget_port_left_in_parent(label));

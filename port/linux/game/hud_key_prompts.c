@@ -45,9 +45,10 @@ machines of a network game agree on.
 
 #include <math.h>
 
-/* port/linux/src/d3d8_device.c: the display's pixels for each of the 480
-lines */
-float halo_screen_pixel_scale(void);
+/* port/linux/game/menu_shapes.c */
+real menu_shape_pixels(void);
+void menu_shape_rounded_box_pixels(real x0, real y0, real x1, real y1, real radius, real edge, pixel32 fill,
+	pixel32 color);
 
 #ifdef HALO_VR
 /* port/linux/src/vr.c (vr.h) */
@@ -75,6 +76,8 @@ boolean hud_key_prompt_draw(short local_player_index, short game_control, short 
 	rectangle2d *bounds, rectangle2d *cursor, pixel32 color);
 boolean hud_key_prompt_draw_key(char const *name, rectangle2d *bounds, rectangle2d *cursor, pixel32 color);
 short hud_key_prompt_cap_advance(short name_left, short name_right);
+short hud_key_prompt_legend_advance(short name_left, short name_right, wchar_t const *words);
+long hud_key_prompt_draw_equals(rectangle2d *bounds, rectangle2d *cursor, wchar_t const *text);
 void hud_key_prompt_button_word(wchar_t *text, long length, wchar_t const *word, wchar_t const *icon);
 
 /* ---------- private code */
@@ -216,103 +219,17 @@ static void key_cap_layout(short left, short right, short *box_x0, short *box_x1
 	*after = (short)(*box_x1 + gap - left);
 }
 
-/* a part of a key cap: a quadrilateral, its corners in the display's
-pixels and their colours, the colours blended between them */
-static void key_cap_quad(struct bitmap_data *white, real pixels, real const x[4], real const y[4],
-	pixel32 const color[4])
-{
-	struct rasterizer_dynamic_screen_geometry_parameters parameters;
-	struct dynamic_screen_vertex vertices[4];
-	short index;
-
-	for (index = 0; index < 4; index++)
-	{
-		vertices[index].position.x = x[index] / pixels + KEY_CAP_PIXEL_ORIGIN;
-		vertices[index].position.y = y[index] / pixels + KEY_CAP_PIXEL_ORIGIN;
-		vertices[index].texture_coordinates.x = 0.0f;
-		vertices[index].texture_coordinates.y = 0.0f;
-		vertices[index].color = color[index];
-	}
-	csmemset(&parameters, 0, sizeof(parameters));
-	parameters.map[0] = white;
-	parameters.map_texture_scale[0].i = parameters.map_texture_scale[0].j = 1.0f;
-	parameters.map_scale[0].i = parameters.map_scale[0].j = 1.0f;
-	rasterizer_globals.current_lock_operation = _rasterizer_lock_cinematics;
-	rasterizer_psuedo_dynamic_screen_quad_draw(&parameters, vertices);
-	rasterizer_globals.current_lock_operation = _rasterizer_lock_none;
-}
-
-static void key_cap_rectangle(struct bitmap_data *white, real pixels, real x0, real y0, real x1, real y1,
-	pixel32 color)
-{
-	real x[4], y[4];
-	pixel32 colors[4];
-
-	if (x1 <= x0 || y1 <= y0)
-		return;
-	x[0] = x0; y[0] = y0;
-	x[1] = x1; y[1] = y0;
-	x[2] = x1; y[2] = y1;
-	x[3] = x0; y[3] = y1;
-	colors[0] = colors[1] = colors[2] = colors[3] = color;
-	key_cap_quad(white, pixels, x, y, colors);
-}
-
-/* a corner's band between two radii about its centre (from the centre for
-inner 0), towards side_x and side_y, its colour at each radius */
-static void key_cap_corner(struct bitmap_data *white, real pixels, real center_x, real center_y,
-	real side_x, real side_y, real inner, real outer, pixel32 inner_color, pixel32 outer_color, short segments)
-{
-	/* (each quadrilateral's corners turning the same way as the
-	rectangles', which the renderer may cull otherwise) */
-	short turn = side_x * side_y < 0.0f ? 1 : 0;
-	short segment;
-
-	for (segment = 0; segment < segments; segment++)
-	{
-		real angle0 = (real)(segment + turn) * (0.5f * (real)M_PI) / segments;
-		real angle1 = (real)(segment + 1 - turn) * (0.5f * (real)M_PI) / segments;
-		real x[4], y[4];
-		pixel32 colors[4];
-
-		x[0] = center_x + side_x * outer * cosf(angle0);
-		y[0] = center_y + side_y * outer * sinf(angle0);
-		x[1] = center_x + side_x * outer * cosf(angle1);
-		y[1] = center_y + side_y * outer * sinf(angle1);
-		x[2] = center_x + side_x * inner * cosf(angle1);
-		y[2] = center_y + side_y * inner * sinf(angle1);
-		x[3] = center_x + side_x * inner * cosf(angle0);
-		y[3] = center_y + side_y * inner * sinf(angle0);
-		colors[0] = colors[1] = outer_color;
-		colors[2] = colors[3] = inner_color;
-		key_cap_quad(white, pixels, x, y, colors);
-	}
-}
-
 /* a key cap about box (in the HUD's units, laid out as the text is, and
 drawn as it is: rasterizer_text_set_scale, the scoreboard's prompts):
 filled, edged, its corners rounded, their curves' edges blended over a
 pixel */
 static void key_cap_shape(rectangle2d const *box, pixel32 fill, pixel32 color)
 {
-	static real const sides[4][2] = { { -1.0f, -1.0f }, { 1.0f, -1.0f }, { 1.0f, 1.0f }, { -1.0f, 1.0f } };
-	struct game_globals *game_globals = scenario_get_game_globals();
-	struct game_globals_rasterizer_data *rasterizer_data;
-	struct bitmap_data *white;
 	real text_scale, origin_x, origin_y, pixels, size;
-	real x0, y0, x1, y1, edge, radius;
-	pixel32 clear = color & 0x00FFFFFFUL;
-	short segments, corner;
+	real x0, y0, x1, y1;
 
-	if (!game_globals || !game_globals->rasterizer_data.count)
-		return;
-	rasterizer_data = TAG_BLOCK_GET_ELEMENT(&game_globals->rasterizer_data, 0, struct game_globals_rasterizer_data);
-	white = TAG_BLOCK_GET_ELEMENT(&bitmap_group_get(rasterizer_data->default_textures[0].index)->bitmaps, 1,
-		struct bitmap_data);
 	rasterizer_text_get_scale(&text_scale, &origin_x, &origin_y);
-	pixels = halo_screen_pixel_scale();
-	if (pixels <= 0.0f)
-		pixels = 1.0f;
+	pixels = menu_shape_pixels();
 	/* (the box in whole pixels; the edge and the radius in pixels of the
 	cap as large as it is drawn) */
 	x0 = floorf((origin_x + (box->x0 - origin_x) * text_scale - KEY_CAP_PIXEL_ORIGIN) * pixels + 0.5f);
@@ -320,42 +237,77 @@ static void key_cap_shape(rectangle2d const *box, pixel32 fill, pixel32 color)
 	y0 = floorf((origin_y + (box->y0 - origin_y) * text_scale - KEY_CAP_PIXEL_ORIGIN) * pixels + 0.5f);
 	y1 = floorf((origin_y + (box->y1 - origin_y) * text_scale - KEY_CAP_PIXEL_ORIGIN) * pixels + 0.5f);
 	size = (local_player_count() > 1 ? 0.75f : 1.0f) * text_scale * pixels;
-	edge = MAX(floorf(KEY_CAP_EDGE * size + 0.5f), 1.0f);
-	radius = floorf(KEY_CAP_RADIUS * size + 0.5f);
-	radius = MIN(radius, floorf(MIN(x1 - x0, y1 - y0) / 2.0f));
-	radius = MAX(radius, edge);
-	if (x1 - x0 < 2.0f * radius || y1 - y0 < 2.0f * radius)
-		return;
-	/* (enough segments that a curve looks round at any size) */
-	segments = (short)MAX(2, MIN(8, (long)(radius / 2.0f)));
+	menu_shape_rounded_box_pixels(x0, y0, x1, y1, floorf(KEY_CAP_RADIUS * size + 0.5f),
+		MAX(floorf(KEY_CAP_EDGE * size + 0.5f), 1.0f), fill, color);
+}
 
-	/* the fill: the middle, above and below it, and the corners */
-	key_cap_rectangle(white, pixels, x0, y0 + radius, x1, y1 - radius, fill);
-	key_cap_rectangle(white, pixels, x0 + radius, y0, x1 - radius, y0 + radius, fill);
-	key_cap_rectangle(white, pixels, x0 + radius, y1 - radius, x1 - radius, y1, fill);
-	/* the edge over it: the four sides, between the corners */
-	key_cap_rectangle(white, pixels, x0 + radius, y0, x1 - radius, y0 + edge, color);
-	key_cap_rectangle(white, pixels, x0 + radius, y1 - edge, x1 - radius, y1, color);
-	key_cap_rectangle(white, pixels, x0, y0 + radius, x0 + edge, y1 - radius, color);
-	key_cap_rectangle(white, pixels, x1 - edge, y0 + radius, x1, y1 - radius, color);
-	for (corner = 0; corner < 4; corner++)
-	{
-		real center_x = sides[corner][0] < 0.0f ? x0 + radius : x1 - radius;
-		real center_y = sides[corner][1] < 0.0f ? y0 + radius : y1 - radius;
+/* the last key cap drawn (key_cap_draw): the top of its line, and where
+the letters after it start (its edge and the gap); SHORT_MIN for none */
+static short key_cap_after_line = SHORT_MIN;
+static short key_cap_letters_x;
 
-		key_cap_corner(white, pixels, center_x, center_y, sides[corner][0], sides[corner][1],
-			0.0f, radius, fill, fill, segments);
-		key_cap_corner(white, pixels, center_x, center_y, sides[corner][0], sides[corner][1],
-			radius - edge, radius, color, color, segments);
-		/* (the curves' edges blended: outside the edge, and inside it) */
-		key_cap_corner(white, pixels, center_x, center_y, sides[corner][0], sides[corner][1],
-			radius, radius + 1.0f, color, clear, segments);
-		if (radius - edge >= 1.0f)
-		{
-			key_cap_corner(white, pixels, center_x, center_y, sides[corner][0], sides[corner][1],
-				radius - edge - 1.0f, radius - edge, clear, color, segments);
-		}
-	}
+/* the "=" between a key's cap and its word (the Xbox's legends'
+"=CANCEL", issue 596), from where the letters after the cap start (its
+edge and the gap, 0 here): where the "=" is drawn from and where the word
+is, for an "=" that advances equals_advance. The "=" takes its whole
+advance and KEY_CAP_EQUALS_ROOM either side of it, from the cap's edge to
+the word's pen: the same room either side by the advances, which the
+high-res text centres its glyphs on (rasterizer_text.c's
+rasterizer_draw_hires_glyph), not by the font tag's glyphs' boxes, whose
+blank columns are not the drawn letters'. (The "='s" own side bearings
+are room enough beside the room: a legend's row is no wider than the
+panel the Xbox drew it in has room for) */
+#define KEY_CAP_EQUALS_ROOM 1
+static void key_cap_equals_layout(short equals_advance, short *equals_pen, short *word_pen)
+{
+	short inset, margin, gap, half;
+
+	key_cap_metrics(&inset, &margin, &gap, &half);
+	*equals_pen = (short)(KEY_CAP_EQUALS_ROOM - gap);
+	*word_pen = (short)(*equals_pen + equals_advance + KEY_CAP_EQUALS_ROOM);
+}
+
+/* where text's letters span drawn from 0 in the draw mode's font, as one
+line, and its advance (where the next text would be drawn from); FALSE for
+none (no letter with ink) */
+static boolean key_text_measure(wchar_t const *text, short *left, short *right, short *advance)
+{
+	rectangle2d bounds, text_bounds, cursor;
+
+	*left = *right = *advance = 0;
+	if (!text || !*text)
+		return FALSE;
+	bounds.x0 = 0;
+	bounds.y0 = 0;
+	bounds.x1 = SHORT_MAX;
+	bounds.y1 = SHORT_MAX;
+	cursor = bounds;
+	draw_string_set_indents(0, 0);
+	draw_unicode_string_compute_bounds(&bounds, text, &text_bounds, &cursor);
+	if (text_bounds.x0 > text_bounds.x1 || text_bounds.x1 == SHORT_MIN)
+		return FALSE;
+	*left = text_bounds.x0;
+	*right = text_bounds.x1;
+	*advance = cursor.x0;
+	return TRUE;
+}
+
+static boolean key_text_span(wchar_t const *text, short *left, short *right)
+{
+	short advance;
+
+	return key_text_measure(text, left, right, &advance);
+}
+
+/* the length of the "=" a legend's words start with (the maps' "=CANCEL",
+and " =CANCEL" with the spaces before it), 0 for none */
+static long key_equals_length(wchar_t const *words)
+{
+	long length = 0;
+
+	while (words && words[length] == L' ')
+		length++;
+	return words && words[length] == L'=' ? length + 1 : 0;
 }
 
 /* how far past the cursor the text after a key's cap starts (the cap's
@@ -368,6 +320,30 @@ short hud_key_prompt_cap_advance(short name_left, short name_right)
 
 	key_cap_layout(name_left, name_right, &box_x0, &box_x1, &pen, &after);
 	return after;
+}
+
+/* how far past the cursor a legend's words end after a key's cap (the
+cap's advance and the words: "=CANCEL" with its "=" between the cap and
+CANCEL, as hud_key_prompt_draw_equals draws it), for a name whose letters
+span name_left to name_right drawn from 0, measured in the draw mode's
+font, which the words are drawn in */
+short hud_key_prompt_legend_advance(short name_left, short name_right, wchar_t const *words)
+{
+	short inset, margin, gap, half, box_x0, box_x1, pen, after;
+	short equals_left, equals_right, equals_advance, word_left, word_right, equals_pen, word_pen;
+	long equals;
+
+	key_cap_metrics(&inset, &margin, &gap, &half);
+	key_cap_layout(name_left, name_right, &box_x0, &box_x1, &pen, &after);
+	equals = key_equals_length(words);
+	if (equals && key_text_measure(L"=", &equals_left, &equals_right, &equals_advance) &&
+		key_text_span(words + equals, &word_left, &word_right))
+	{
+		key_cap_equals_layout(equals_advance, &equals_pen, &word_pen);
+		return (short)(box_x1 + gap + word_pen + word_right);
+	}
+	key_text_span(words, &word_left, &word_right);
+	return (short)(after + word_right);
 }
 
 /* the key's name at the cursor in a key cap, as the HUD draws a button
@@ -392,6 +368,7 @@ static boolean key_cap_draw(wchar_t const *text, rectangle2d *bounds, rectangle2
 		text_bounds.x0 = bounds->x0;
 		rasterizer_draw_unicode_string(&text_bounds, NULL, NULL, 0, text);
 		bounds->y0 = cursor->y0;
+		key_cap_after_line = SHORT_MIN;
 		return TRUE;
 	}
 	if (text_bounds.x0 <= text_bounds.x1)
@@ -418,7 +395,43 @@ static boolean key_cap_draw(wchar_t const *text, rectangle2d *bounds, rectangle2
 	bounds->y0 = cursor->y0;
 	/* (the text that follows starts past the cap and its gap) */
 	cursor->x0 = (short)(start + after);
+	key_cap_after_line = cursor->y0;
+	key_cap_letters_x = (short)(start + box_x1 + gap);
 	return TRUE;
+}
+
+/* the "=" of a legend's words after the key cap just drawn at the cursor
+("=CANCEL"), drawn as far from the cap as from the rest of the words, the
+cursor moved to where they are drawn from (key_cap_equals_layout);
+returns the characters taken (the "=" and the spaces before it), or 0
+(nothing drawn) where the text starts with no "=", or no cap was just
+drawn on the cursor's line */
+long hud_key_prompt_draw_equals(
+	rectangle2d *bounds,
+	rectangle2d *cursor,
+	wchar_t const *text)
+{
+	short equals_left, equals_right, equals_advance, word_left, word_right, equals_pen, word_pen;
+	rectangle2d text_bounds, drawn;
+	long equals = key_equals_length(text);
+
+	if (!equals || cursor->y0 != key_cap_after_line)
+		return 0;
+	if (!key_text_measure(L"=", &equals_left, &equals_right, &equals_advance) ||
+		!key_text_span(text + equals, &word_left, &word_right))
+	{
+		return 0;
+	}
+	key_cap_equals_layout(equals_advance, &equals_pen, &word_pen);
+	drawn = *cursor;
+	drawn.x0 = (short)(key_cap_letters_x + equals_pen);
+	draw_string_set_indents((short)(drawn.x0 - bounds->x0), 0);
+	draw_unicode_string_compute_bounds(bounds, L"=", &text_bounds, &drawn);
+	text_bounds.x0 = bounds->x0;
+	rasterizer_draw_unicode_string(&text_bounds, NULL, NULL, 0, L"=");
+	cursor->x0 = (short)(key_cap_letters_x + word_pen);
+	key_cap_after_line = SHORT_MIN;
+	return equals;
 }
 
 /* an action's key as the prompts name it: its first binding, else

@@ -610,17 +610,33 @@
 		<frame png="ce/port/main_menu/parts/item_108x24__0.png" width="108" height="24"/>
 		<frame png="ce/port/main_menu/parts/item_108x24__1.png" width="108" height="24"/>
 	</bitmap>
-	<bitmap name="main_menu/parts/item_100x24">
-		<frame png="ce/port/main_menu/parts/item_100x24__0.png" width="100" height="24"/>
-		<frame png="ce/port/main_menu/parts/item_100x24__1.png" width="100" height="24"/>
-	</bitmap>
 	<bitmap name="main_menu/parts/item_124x24">
 		<frame png="ce/port/main_menu/parts/item_124x24__0.png" width="124" height="24"/>
 		<frame png="ce/port/main_menu/parts/item_124x24__1.png" width="124" height="24"/>
 	</bitmap>
+	<bitmap name="main_menu/parts/item_128x24">
+		<frame png="ce/port/main_menu/parts/item_128x24__0.png" width="128" height="24"/>
+		<frame png="ce/port/main_menu/parts/item_128x24__1.png" width="128" height="24"/>
+	</bitmap>
+	<bitmap name="main_menu/parts/item_132x24">
+		<frame png="ce/port/main_menu/parts/item_132x24__0.png" width="132" height="24"/>
+		<frame png="ce/port/main_menu/parts/item_132x24__1.png" width="132" height="24"/>
+	</bitmap>
 	<bitmap name="main_menu/parts/item_144x24">
 		<frame png="ce/port/main_menu/parts/item_144x24__0.png" width="144" height="24"/>
 		<frame png="ce/port/main_menu/parts/item_144x24__1.png" width="144" height="24"/>
+	</bitmap>
+	<bitmap name="main_menu/parts/item_147x24">
+		<frame png="ce/port/main_menu/parts/item_147x24__0.png" width="147" height="24"/>
+		<frame png="ce/port/main_menu/parts/item_147x24__1.png" width="147" height="24"/>
+	</bitmap>
+	<bitmap name="main_menu/parts/item_150x24">
+		<frame png="ce/port/main_menu/parts/item_150x24__0.png" width="150" height="24"/>
+		<frame png="ce/port/main_menu/parts/item_150x24__1.png" width="150" height="24"/>
+	</bitmap>
+	<bitmap name="main_menu/parts/item_154x24">
+		<frame png="ce/port/main_menu/parts/item_154x24__0.png" width="154" height="24"/>
+		<frame png="ce/port/main_menu/parts/item_154x24__1.png" width="154" height="24"/>
 	</bitmap>
 	<bitmap name="main_menu/parts/item_164x24">
 		<frame png="ce/port/main_menu/parts/item_164x24__0.png" width="164" height="24"/>
@@ -825,6 +841,22 @@
 	<bitmap name="main_menu/multiplayer_type_select/join_game/search_clear">
 		<frame png="ce/port/main_menu/multiplayer_type_select/join_game/search_clear__0.png" width="16" height="16"/>
 		<frame png="ce/port/main_menu/multiplayer_type_select/join_game/search_clear__1.png" width="16" height="16"/>
+	</bitmap>
+	<bitmap name="main_menu/parts/option_row_512x16">
+		<frame png="ce/port/main_menu/parts/option_row_512x16__0.png" width="512" height="16"/>
+		<frame png="ce/port/main_menu/parts/option_row_512x16__1.png" width="512" height="16"/>
+	</bitmap>
+	<bitmap name="main_menu/parts/option_row_512x18">
+		<frame png="ce/port/main_menu/parts/option_row_512x18__0.png" width="512" height="18"/>
+		<frame png="ce/port/main_menu/parts/option_row_512x18__1.png" width="512" height="18"/>
+	</bitmap>
+	<bitmap name="main_menu/parts/option_row_512x22">
+		<frame png="ce/port/main_menu/parts/option_row_512x22__0.png" width="512" height="22"/>
+		<frame png="ce/port/main_menu/parts/option_row_512x22__1.png" width="512" height="22"/>
+	</bitmap>
+	<bitmap name="main_menu/parts/option_row_512x26">
+		<frame png="ce/port/main_menu/parts/option_row_512x26__0.png" width="512" height="26"/>
+		<frame png="ce/port/main_menu/parts/option_row_512x26__1.png" width="512" height="26"/>
 	</bitmap>
 	<bitmap name="main_menu/campaign/continue_280x46">
 		<frame png="ce/port/main_menu/campaign/continue_280x46__0.png" width="280" height="46"/>

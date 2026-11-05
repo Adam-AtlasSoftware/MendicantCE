@@ -487,7 +487,11 @@ off shows the system's pointer):
   left or right half changes the value. On a button in the key of a screen
   (for example "B = Back"), a click pushes that button.
 - On the on-screen keyboard (a profile's name), a left click presses the
-  key below the pointer, or pushes the "B =BACK" or "A =ENTER" legend.
+  key below the pointer, or pushes the BACK or ENTER prompt at the bottom
+  right. With the PC version's menus the keyboard's screen is drawn in
+  their look, across a wide screen, and its prompts name the keys while you
+  play with the keyboard and mouse (Esc BACK, Enter DONE: Enter ends the
+  name) and the buttons while you play with a controller (B BACK, A ENTER).
 - A right click goes back. The mouse's side Back button (the one a web
   browser goes back with: mouse button 4) goes back as escape does, on
   every screen, also while you type a name and in the pause menu. If you
