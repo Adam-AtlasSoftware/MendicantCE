@@ -3960,6 +3960,10 @@ static struct pipeline_entry *pipeline_find_apart(const struct xgpu_vulkan_pipel
 	last = entry;
 	if (!apart || !pipeline_request_apart(entry))
 		pipeline_request(entry);
+	else
+		/* (counted as pipeline_request counts it: a miss in play, the
+		stream's pipeline_missed) */
+		vk.pipeline_count++;
 	return entry;
 }
 
@@ -7223,7 +7227,11 @@ void xgpu_vulkan_pipeline_cache_save(void)
 	FILE *file;
 	int saved = 0;
 
-	if (!vk.pipeline_cache || !vk.cache_path[0] || vk.pipelines_saved == vk.pipelines_made)
+	if (!vk.pipeline_cache || !vk.cache_path[0])
+		return;
+	/* (with the compilers' pipelines in it: those a draw in play asked for) */
+	pipeline_wait(NULL, 0);
+	if (vk.pipelines_saved == vk.pipelines_made)
 		return;
 	if (vkGetPipelineCacheData(vk.device, vk.pipeline_cache, &size, NULL) != VK_SUCCESS || !size)
 		return;

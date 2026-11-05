@@ -1926,6 +1926,10 @@ static const struct config_setting config_settings[] =
 		"Every this many seconds of a campaign level the game switches to its next\n"
 		"structure bsp, as a load zone does, puts the player in it and logs the\n"
 		"frames' times about the switch (game/bsp_switch_test.c); 0 never." },
+	{ "debug.setting_test", _config_string, "\"\"", "HALO_SETTING_TEST", _environment_value, _platform_all,
+		"\"<setting>=<value>@<seconds>\": that many seconds into a level (of its\n"
+		"game time), the setting is written as Settings' OK writes it, so that\n"
+		"a change in play can be timed (game/bsp_switch_test.c); \"\" never." },
 	{ "debug.network_test_pickup", _config_real, "0.0", "HALO_NETWORK_TEST_PICKUP", _environment_value, _platform_all,
 		"This many seconds into an automated test game the host stands its last\n"
 		"player on a weapon, which a joining player then picks up; 0 never." },
