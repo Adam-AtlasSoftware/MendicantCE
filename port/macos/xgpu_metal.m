@@ -371,6 +371,9 @@ static struct
 	} recent[GUEST_RECENT];
 	uint32_t recent_next;
 
+	/* what the passes from now on draw (xgpu_metal_pass_kind) */
+	uint32_t pass_kind;
+
 	struct xgpu_metal_statistics statistics;
 	struct xgpu_metal_compile_totals compile_totals;
 	pthread_mutex_t statistics_lock;
@@ -503,11 +506,35 @@ static uint64_t recording_serial(void)
 
 HALO_METAL_PASSES=<seconds>: a frame that often is timed pass by pass, with
 the GPU's timestamps at each encoder's stages, and logged with each pass's
-targets, load and store actions and draws. HALO_METAL_CAPTURE=<frame>:<path>
-(with MTL_CAPTURE_ENABLED=1) writes that frame and the next, the
-presentation of the first included, as a GPU trace document. */
+targets, load and store actions and draws. HALO_METAL_PASS_TIMES=<n>: every
+nth frame timed so, each pass's time summed by what it draws (its kind:
+xgpu_metal_pass_kind, the kind its first draw had), and the sums logged as a
+table every PROFILE_TABLE_FRAMES timed frames. The stages of passes overlap
+on the GPU (it runs the vertex stages of later passes ahead), so a render
+pass's time is its fragment stage's, from its start, or the end of those
+that started before it, to its end: the passes' times add up to the time
+the GPU was busy with the frame. A pass draws what follows its first
+draw too (the 3D view's after the occlusion is one pass, its transparents,
+water and HUD in it): HALO_METAL_PASS_TIMES_SPLIT=1 ends the timed frames'
+passes where the kind changes, at the cost of their stores and loads.
+HALO_METAL_CAPTURE=<frame>:<path> (with MTL_CAPTURE_ENABLED=1) writes that
+frame and the next, the presentation of the first included, as a GPU trace
+document. */
 
 #define PROFILE_PASSES 1024
+#define PROFILE_TABLE_FRAMES 20
+/* the kinds of passes the backend's kinds are not: aside passes, blits, the
+frame's picture's copy for the presentation */
+#define PROFILE_KIND_ASIDE XGPU_METAL_PASS_KINDS
+#define PROFILE_KIND_COPY (XGPU_METAL_PASS_KINDS + 1)
+#define PROFILE_KIND_PRESENT (XGPU_METAL_PASS_KINDS + 2)
+#define PROFILE_KINDS (XGPU_METAL_PASS_KINDS + 3)
+
+static const char *const profile_kind_names[PROFILE_KINDS] =
+{
+	"other", "sky", "ao pre-pass", "world", "transparents", "water", "effects", "hud", "ao depth", "ao", "ao blur",
+	"ao upsample", "tone map", "anti-aliasing", "panini", "aside", "copies", "present",
+};
 
 struct profile_pass
 {
@@ -517,6 +544,10 @@ struct profile_pass
 	/* colour, depth, stencil (Metal's actions; -1: none) */
 	int8_t loads[3], stores[3];
 	uint32_t draws, clears;
+	/* its kind (PROFILE_KIND_*, or the backend's); the kinds its draws
+	had, a bit each */
+	uint8_t kind;
+	uint32_t kinds;
 	/* (HALO_METAL_PASSES_SPLIT: the draw's pipeline and textures) */
 	char detail[256];
 };
@@ -540,6 +571,17 @@ static struct
 	/* each draw of a timed frame a pass of its own */
 	BOOL split;
 
+	/* HALO_METAL_PASS_TIMES: every how many frames one is timed; its
+	passes ended where the kind changes; the timed frames' times by kind
+	(ms), their passes and the kinds drawn in them, their busy time, until
+	the table is logged */
+	uint32_t every;
+	BOOL kind_split;
+	uint32_t table_frames;
+	float table_times[PROFILE_TABLE_FRAMES][PROFILE_KINDS];
+	uint32_t table_passes[PROFILE_KINDS], table_kinds[PROFILE_KINDS];
+	float table_busy[PROFILE_TABLE_FRAMES];
+
 	uint64_t capture_frame;
 	NSString *capture_path;
 	BOOL capturing;
@@ -548,10 +590,13 @@ static struct
 static void profile_initialize(void)
 {
 	const char *passes = getenv("HALO_METAL_PASSES"), *capture = getenv("HALO_METAL_CAPTURE");
+	const char *times = getenv("HALO_METAL_PASS_TIMES");
 
 	profile.interval = passes ? atof(passes) : 0.0;
 	profile.split = getenv("HALO_METAL_PASSES_SPLIT") && atoi(getenv("HALO_METAL_PASSES_SPLIT"));
-	if (profile.interval > 0.0)
+	profile.every = times && atoi(times) > 0 ? (uint32_t)atoi(times) : 0;
+	profile.kind_split = getenv("HALO_METAL_PASS_TIMES_SPLIT") && atoi(getenv("HALO_METAL_PASS_TIMES_SPLIT"));
+	if (profile.interval > 0.0 || profile.every)
 	{
 		MTLCounterSampleBufferDescriptor *descriptor = [MTLCounterSampleBufferDescriptor new];
 		NSError *error = nil;
@@ -570,6 +615,7 @@ static void profile_initialize(void)
 			host_logf(HOST_LOG_ERROR, "metal: no timestamps at the GPU's stages: %s",
 				error ? error.localizedDescription.UTF8String : "not supported");
 			profile.interval = 0.0;
+			profile.every = 0;
 		}
 	}
 	if (capture && strchr(capture, ':'))
@@ -596,7 +642,8 @@ static void profile_frame_begin(uint64_t frame)
 			(unsigned long long)frame + 1, profile.capture_path.UTF8String, profile.capturing ? "" : ": ",
 			profile.capturing ? "" : error.localizedDescription.UTF8String);
 	}
-	if (profile.interval <= 0.0 || atomic_load(&profile.state) != 0 || now - profile.last < profile.interval)
+	if (atomic_load(&profile.state) != 0 || !((profile.interval > 0.0 && now - profile.last >= profile.interval) ||
+		(profile.every && frame % profile.every == 0)))
 		return;
 	profile.count = 0;
 	profile.current = -1;
@@ -621,6 +668,7 @@ static int32_t profile_pass_add(const char *what)
 	memset(pass->loads, -1, sizeof(pass->loads));
 	memset(pass->stores, -1, sizeof(pass->stores));
 	pass->what = what;
+	pass->kind = (uint8_t)metal.pass_kind;
 	return (int32_t)profile.count++;
 }
 
@@ -636,6 +684,7 @@ static id<MTLBlitCommandEncoder> blit_encoder(const char *what)
 	index = profile_pass_add(what);
 	if (index < 0)
 		return [command_buffer() blitCommandEncoder];
+	profile.passes[index].kind = strcmp(what, "present") ? PROFILE_KIND_COPY : PROFILE_KIND_PRESENT;
 	descriptor = [MTLBlitPassDescriptor blitPassDescriptor];
 	descriptor.sampleBufferAttachments[0].sampleBuffer = profile.samples;
 	descriptor.sampleBufferAttachments[0].startOfEncoderSampleIndex = (NSUInteger)index * 4;
@@ -653,9 +702,114 @@ static char action_letter(int action, BOOL store)
 	return action == MTLLoadActionLoad ? 'L' : action == MTLLoadActionClear ? 'C' : action == MTLLoadActionDontCare ? 'D' : '?';
 }
 
+static int profile_float_compare(const void *a, const void *b)
+{
+	float x = *(const float *)a, y = *(const float *)b;
+
+	return x < y ? -1 : x > y;
+}
+
+/* (HALO_METAL_PASS_TIMES) the timed frame's passes' times summed by kind,
+from their spans (ms; 0, 0: not timed); the table logged once it has
+PROFILE_TABLE_FRAMES frames: each kind's median, mean and most a frame,
+its passes a frame and the other kinds drawn in its passes */
+static void profile_table_add(const double *starts, const double *ends)
+{
+	static uint32_t order[PROFILE_PASSES];
+	float *times, sorted[PROFILE_TABLE_FRAMES];
+	double busy_end = 0.0, busy = 0.0;
+	uint32_t index, count = 0, kind, frame;
+
+	if (profile.table_frames >= PROFILE_TABLE_FRAMES)
+		return;
+	times = profile.table_times[profile.table_frames];
+	memset(times, 0, sizeof(profile.table_times[0]));
+	/* (in the order they started: each its time from its start, or the end
+	of those before it, to its end) */
+	for (index = 0; index < profile.count; index++)
+	{
+		uint32_t place = count++;
+
+		if (ends[index] <= 0.0)
+		{
+			count--;
+			continue;
+		}
+		while (place > 0 && starts[order[place - 1]] > starts[index])
+		{
+			order[place] = order[place - 1];
+			place--;
+		}
+		order[place] = index;
+	}
+	for (index = 0; index < count; index++)
+	{
+		const struct profile_pass *pass = &profile.passes[order[index]];
+		double from = starts[order[index]] > busy_end ? starts[order[index]] : busy_end;
+
+		if (ends[order[index]] > from)
+		{
+			times[pass->kind] += (float)(ends[order[index]] - from);
+			busy += ends[order[index]] - from;
+			busy_end = ends[order[index]];
+		}
+		profile.table_passes[pass->kind]++;
+		profile.table_kinds[pass->kind] |= pass->kinds;
+	}
+	profile.table_busy[profile.table_frames++] = (float)busy;
+	if (profile.table_frames < PROFILE_TABLE_FRAMES)
+		return;
+	host_logf(HOST_LOG_INFO, "metal: pass times over %u frames, one in %u (ms a frame: median, mean, most; passes a "
+		"frame; what else they drew)", PROFILE_TABLE_FRAMES, profile.every);
+	for (kind = 0; kind < PROFILE_KINDS; kind++)
+	{
+		double sum = 0.0;
+		char others[160];
+		uint32_t other;
+
+		if (!profile.table_passes[kind])
+			continue;
+		for (frame = 0; frame < PROFILE_TABLE_FRAMES; frame++)
+		{
+			sorted[frame] = profile.table_times[frame][kind];
+			sum += sorted[frame];
+		}
+		qsort(sorted, PROFILE_TABLE_FRAMES, sizeof(sorted[0]), profile_float_compare);
+		others[0] = 0;
+		for (other = 0; other < XGPU_METAL_PASS_KINDS; other++)
+		{
+			if (other != kind && (profile.table_kinds[kind] & (1u << other)) &&
+				strlen(others) + strlen(profile_kind_names[other]) + 2 < sizeof(others))
+			{
+				strcat(others, others[0] ? ", " : "with ");
+				strcat(others, profile_kind_names[other]);
+			}
+		}
+		host_logf(HOST_LOG_INFO, "metal:   %-14s %7.3f %7.3f %7.3f %6.1f  %s", profile_kind_names[kind],
+			sorted[PROFILE_TABLE_FRAMES / 2], sum / PROFILE_TABLE_FRAMES, sorted[PROFILE_TABLE_FRAMES - 1],
+			(double)profile.table_passes[kind] / PROFILE_TABLE_FRAMES, others);
+	}
+	{
+		double sum = 0.0;
+
+		for (frame = 0; frame < PROFILE_TABLE_FRAMES; frame++)
+		{
+			sorted[frame] = profile.table_busy[frame];
+			sum += sorted[frame];
+		}
+		qsort(sorted, PROFILE_TABLE_FRAMES, sizeof(sorted[0]), profile_float_compare);
+		host_logf(HOST_LOG_INFO, "metal:   %-14s %7.3f %7.3f %7.3f", "busy", sorted[PROFILE_TABLE_FRAMES / 2],
+			sum / PROFILE_TABLE_FRAMES, sorted[PROFILE_TABLE_FRAMES - 1]);
+	}
+	profile.table_frames = 0;
+	memset(profile.table_passes, 0, sizeof(profile.table_passes));
+	memset(profile.table_kinds, 0, sizeof(profile.table_kinds));
+}
+
 /* the timed frame's passes, logged (its last command buffer is done) */
 static void profile_log(void)
 {
+	static double starts[PROFILE_PASSES], ends[PROFILE_PASSES];
 	NSData *data = [profile.samples resolveCounterRange:NSMakeRange(0, profile.count * 4)];
 	const MTLCounterResultTimestamp *samples = data.bytes;
 	MTLTimestamp cpu, gpu;
@@ -704,23 +858,40 @@ static void profile_log(void)
 			first = start;
 		if (end > last)
 			last = end;
-		host_logf(HOST_LOG_INFO,
-			"metal: pass %2u %-7s %4ux%-4u t%u/%u fmt %2u/%2u x%u load %c%c%c store %c%c%c draws %3u clears %2u: "
-			"at %7.3f ms, %6.3f long (vertex %6.3f, fragment %6.3f), %6.3f after the last",
-			index, pass->what, pass->width, pass->height, pass->color, pass->depth, pass->color_format, pass->depth_format, pass->samples,
-			action_letter(pass->loads[0], NO), action_letter(pass->loads[1], NO), action_letter(pass->loads[2], NO),
-			action_letter(pass->stores[0], YES), action_letter(pass->stores[1], YES), action_letter(pass->stores[2], YES),
-			pass->draws, pass->clears, start, end - start, vertex, fragment, previous_end > 0.0 ? start - previous_end : 0.0);
-		if (pass->detail[0])
-			host_logf(HOST_LOG_INFO, "metal:    %s", pass->detail);
+		/* (a render pass's time is its fragment stage's: the GPU runs the
+		vertex stages of the passes after it ahead of it) */
+		starts[index] = start;
+		ends[index] = end > start ? end : 0.0;
+		if (fragment > 0.0)
+		{
+			starts[index] = (double)(values[2] - profile.gpu_start) * scale / 1e6;
+			ends[index] = starts[index] + fragment;
+		}
+		if (profile.interval > 0.0)
+		{
+			host_logf(HOST_LOG_INFO,
+				"metal: pass %2u %-7s %4ux%-4u t%u/%u fmt %2u/%2u x%u load %c%c%c store %c%c%c draws %3u clears %2u: "
+				"at %7.3f ms, %6.3f long (vertex %6.3f, fragment %6.3f from %7.3f), %6.3f after the last; %s",
+				index, pass->what, pass->width, pass->height, pass->color, pass->depth, pass->color_format,
+				pass->depth_format, pass->samples,
+				action_letter(pass->loads[0], NO), action_letter(pass->loads[1], NO), action_letter(pass->loads[2], NO),
+				action_letter(pass->stores[0], YES), action_letter(pass->stores[1], YES),
+				action_letter(pass->stores[2], YES), pass->draws, pass->clears, start, end - start, vertex, fragment,
+				starts[index], previous_end > 0.0 ? start - previous_end : 0.0, profile_kind_names[pass->kind]);
+			if (pass->detail[0])
+				host_logf(HOST_LOG_INFO, "metal:    %s", pass->detail);
+		}
 		if (end > 0.0)
 			previous_end = end;
 	}
-	host_logf(HOST_LOG_INFO,
-		"metal: frame %llu timed: %u passes from %.3f to %.3f ms (%.3f ms); stages' sums: vertex %.3f, fragment %.3f; "
-		"its %u command buffers %.3f ms",
-		(unsigned long long)profile.frame, profile.count, first, last, last - first, vertex_sum, fragment_sum,
-		profile.buffers, profile.buffer_seconds * 1000.0);
+	if (profile.interval > 0.0)
+		host_logf(HOST_LOG_INFO,
+			"metal: frame %llu timed: %u passes from %.3f to %.3f ms (%.3f ms); stages' sums: vertex %.3f, fragment %.3f; "
+			"its %u command buffers %.3f ms",
+			(unsigned long long)profile.frame, profile.count, first, last, last - first, vertex_sum, fragment_sum,
+			profile.buffers, profile.buffer_seconds * 1000.0);
+	if (profile.every && data)
+		profile_table_add(starts, ends);
 	profile.last = seconds_now();
 	atomic_store(&profile.state, 0);
 }
@@ -2828,6 +2999,9 @@ static id<MTLRenderCommandEncoder> encoder(void)
 	if (profile.current >= 0)
 	{
 		struct profile_pass *timed = &profile.passes[profile.current];
+
+		if (metal.aside)
+			timed->kind = PROFILE_KIND_ASIDE;
 		MTLRenderPassSampleBufferAttachmentDescriptor *samples = pass.sampleBufferAttachments[0];
 
 		samples.sampleBuffer = profile.samples;
@@ -3222,6 +3396,22 @@ int xgpu_metal_pipeline_known(const struct xgpu_metal_pipeline *pipeline)
 	data = [NSData dataWithBytes:&key length:sizeof(key)];
 	os_unfair_lock_lock(&metal.lock);
 	made = metal.pipelines[data] != nil || metal.pipelines_making[data] != nil;
+	os_unfair_lock_unlock(&metal.lock);
+	return made;
+}
+
+int xgpu_metal_pipeline_made(const struct xgpu_metal_pipeline *pipeline)
+{
+	struct xgpu_metal_pipeline_state_key key;
+	NSData *data;
+	BOOL made;
+
+	xgpu_metal_pipeline_state_key_make(pipeline, &key);
+	if (metal.pipeline_state && !memcmp(&key, &metal.pipeline_state_key, sizeof(key)))
+		return 1;
+	data = [NSData dataWithBytes:&key length:sizeof(key)];
+	os_unfair_lock_lock(&metal.lock);
+	made = metal.pipelines[data] != nil;
 	os_unfair_lock_unlock(&metal.lock);
 	return made;
 }
@@ -3732,6 +3922,7 @@ void xgpu_metal_draw(uint32_t primitive, uint32_t count, uint32_t first_vertex, 
 	if (profile.current >= 0)
 	{
 		profile.passes[profile.current].draws++;
+		profile.passes[profile.current].kinds |= 1u << metal.pass_kind;
 		if (profile.split)
 		{
 			profile_draw_describe(&profile.passes[profile.current], primitive, count);
@@ -3739,6 +3930,24 @@ void xgpu_metal_draw(uint32_t primitive, uint32_t count, uint32_t first_vertex, 
 			metal.dirty = _dirty_all;
 		}
 	}
+}
+
+uint32_t xgpu_metal_pass_kind(uint32_t kind)
+{
+	uint32_t was = metal.pass_kind;
+
+	if (kind >= XGPU_METAL_PASS_KINDS || kind == was)
+		return was;
+	metal.pass_kind = kind;
+	/* (HALO_METAL_PASS_TIMES_SPLIT: a timed frame's pass ends here, the
+	next draw beginning another of this kind) */
+	if (profile.kind_split && profile.current >= 0 && metal.encoder && !metal.aside &&
+		profile.passes[profile.current].draws)
+	{
+		encoder_end();
+		metal.dirty = _dirty_all;
+	}
+	return was;
 }
 
 /* ---------- visibility tests */

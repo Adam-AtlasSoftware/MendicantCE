@@ -91,6 +91,9 @@ struct host_render_backend
 	void (*picture_top)(void *context, uint32_t top);
 	/* display.gamma: the setting (a float's bits), from the next present on */
 	void (*gamma)(void *context, uint32_t gamma);
+	/* the game's renderer's category of the draws from now on
+	(XGPU_STREAM_CATEGORY's value), for the GPU's timing */
+	void (*category)(void *context, uint32_t category);
 	/* display.panini: a 3D view drawn again through the Panini projection
 	(none: not drawn) */
 	void (*panini)(void *context, const struct xgpu_stream_panini *record);

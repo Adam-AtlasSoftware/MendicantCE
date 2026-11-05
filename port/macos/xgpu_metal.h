@@ -134,6 +134,9 @@ enum
 	XGPU_METAL_FORMAT_ASTC,
 	/* a signed byte (display.ambient_occlusion "world"'s distance field) */
 	XGPU_METAL_FORMAT_R8_SNORM,
+	/* the backend's own targets: a byte (red), two (red, green) */
+	XGPU_METAL_FORMAT_R8,
+	XGPU_METAL_FORMAT_RG8,
 	XGPU_METAL_FORMAT_COUNT
 };
 
@@ -405,6 +408,8 @@ double xgpu_metal_prepared(void);
 /* whether a pipeline is made or being made (a draw's: as the map's
 preparation made it, or an earlier draw asked for it) */
 int xgpu_metal_pipeline_known(const struct xgpu_metal_pipeline *pipeline);
+/* whether a pipeline is made (a draw of it is drawn, not skipped) */
+int xgpu_metal_pipeline_made(const struct xgpu_metal_pipeline *pipeline);
 
 /* textures: a handle, or 0 (logged) */
 uint32_t xgpu_metal_texture_create(const struct xgpu_metal_texture_description *description);
@@ -548,6 +553,31 @@ floats, as the game has it, not reversed) after the work done so far; waits for 
 tests). Returns 1 on success. */
 int xgpu_metal_read_pixels(uint32_t texture, uint32_t level, uint32_t layer, uint32_t x, uint32_t y,
 	uint32_t width, uint32_t height, void *pixels, uint32_t bytes_per_row);
+
+/* what the passes from now on draw, which HALO_METAL_PASS_TIMES sums the
+GPU's time by (xgpu_metal.m, "the passes' GPU times"): the game's
+renderer's categories (xgpu_metal_stream.m), the backend's own passes */
+enum
+{
+	XGPU_METAL_PASS_OTHER,
+	XGPU_METAL_PASS_SKY,
+	XGPU_METAL_PASS_PREPASS,
+	XGPU_METAL_PASS_WORLD,
+	XGPU_METAL_PASS_TRANSPARENTS,
+	XGPU_METAL_PASS_WATER,
+	XGPU_METAL_PASS_EFFECTS,
+	XGPU_METAL_PASS_HUD,
+	XGPU_METAL_PASS_OCCLUSION_DEPTH,
+	XGPU_METAL_PASS_OCCLUSION,
+	XGPU_METAL_PASS_OCCLUSION_BLUR,
+	XGPU_METAL_PASS_OCCLUSION_UPSAMPLE,
+	XGPU_METAL_PASS_TONE_MAP,
+	XGPU_METAL_PASS_ANTI_ALIASING,
+	XGPU_METAL_PASS_PANINI,
+	XGPU_METAL_PASS_KINDS
+};
+/* sets what the passes from now on draw; returns what it was */
+uint32_t xgpu_metal_pass_kind(uint32_t kind);
 
 /* statistics since the last call */
 struct xgpu_metal_statistics

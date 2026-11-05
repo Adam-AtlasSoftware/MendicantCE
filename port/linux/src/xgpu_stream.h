@@ -264,6 +264,9 @@ enum
 	XGPU_STREAM_WORLD_AO_FIELD,
 	/* the pipeline bound's stand-in (xgpu_backend_pipeline_stand_in) */
 	XGPU_STREAM_PIPELINE_STAND_IN,
+	/* the game's renderer's category of the draws from now on, for the
+	backends' timing alone (xgpu_backend_category; value: XGPU_STREAM_CATEGORY_*) */
+	XGPU_STREAM_CATEGORY,
 	XGPU_STREAM_RECORD_TYPES,
 };
 
@@ -292,6 +295,12 @@ struct xgpu_stream_value
 	uint32_t header;
 	uint32_t value;
 };
+
+/* CATEGORY's value: the category (rasterizer.h's _rasterizer_profile_*,
+XGPU_STREAM_CATEGORY_NONE outside them), with XGPU_STREAM_CATEGORY_PREPASS
+in display.ambient_occlusion's pre-pass */
+#define XGPU_STREAM_CATEGORY_NONE 255u
+#define XGPU_STREAM_CATEGORY_PREPASS 256u
 
 /* ---------- the backend's life */
 
