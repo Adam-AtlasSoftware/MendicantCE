@@ -1149,6 +1149,8 @@ int menu_pictures_render_kept(
 	long pose)
 {
 	unsigned long width = 0, height = 0;
+	/* (each step's time, for the log) */
+	Uint64 began = SDL_GetTicksNS(), read_at, cut_at = 0, framed_at = 0, written_at = 0;
 	unsigned char *bgra = d3d8_back_buffer_read(&width, &height);
 	struct menu_picture_state *state = &menu_pictures.pictures[pose];
 	struct menu_picture_pose const *picture = &menu_picture_poses[pose];
@@ -1163,17 +1165,23 @@ int menu_pictures_render_kept(
 	char path[1100];
 	int written = 0;
 
+	read_at = SDL_GetTicksNS();
 	if (bgra && cut && frame && menu_picture_cut(bgra, width, height, picture->aspect, cut, picture_width, picture_height))
 	{
+		cut_at = SDL_GetTicksNS();
 		if (picture->colour_curve && state->original)
 			menu_picture_colour_curve(cut, picture_width * picture_height, state->original,
 				MENU_PICTURE_WIDTH * MENU_PICTURE_HEIGHT);
 		menu_picture_frame(cut, picture_width, picture_height, frame, frame_width, frame_height);
+		framed_at = SDL_GetTicksNS();
 		picture_path(path, sizeof(path), pose, "png");
 		written = picture_png_write(path, frame, frame_width, frame_height);
-		platform_log("menu pictures: %s, %lux%lu from a %lux%lu frame%s: %s", picture->name, picture_width,
-			picture_height, width, height, picture->colour_curve ? (state->original ? ", colours matched" :
-			", colours not matched (no original)") : "", written ? path : "not written");
+		written_at = SDL_GetTicksNS();
+		platform_log("menu pictures: %s, %lux%lu from a %lux%lu frame%s: %s (read %.1f ms, cut %.1f, colours and "
+			"frame %.1f, written %.1f)", picture->name, picture_width, picture_height, width, height,
+			picture->colour_curve ? (state->original ? ", colours matched" : ", colours not matched (no original)") :
+			"", written ? path : "not written", (read_at - began) / 1e6, (cut_at - read_at) / 1e6,
+			(framed_at - cut_at) / 1e6, (written_at - framed_at) / 1e6);
 	}
 	free(cut);
 	free(bgra);
