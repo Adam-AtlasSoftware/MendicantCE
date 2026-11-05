@@ -22,6 +22,10 @@ void panini_window_begin(short local_player_index, short rasterizer_target, stru
 	struct render_frustum const *frustum);
 void panini_window_draw(void);
 void panini_window_end(void);
+/* display.panini's pass played back from a map's preparation's record
+(render_prepared.c): TRUE where it is on now, the projection given where
+the record's is none (made with it off) */
+boolean panini_replay_projection(float projection[8]);
 
 /* how much larger the window's view is drawn at its middle (1: not through
 the projection), by which the reticle (hud_draw.c) and the first-person

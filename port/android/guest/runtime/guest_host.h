@@ -91,6 +91,11 @@ int host_sdl_gamepad_button(unsigned int gamepad, int button);
 int host_sdl_gamepad_type(unsigned int gamepad);
 int host_sdl_rumble_gamepad(unsigned int gamepad, unsigned int low, unsigned int high, unsigned int milliseconds);
 void host_sdl_close_gamepad(unsigned int gamepad);
+/* the gamepad's sensor (SDL_SensorType) there, and turned on or off; and
+whether the gamepad is Steam Input's virtual one (gyro aiming) */
+int host_sdl_gamepad_has_sensor(unsigned int gamepad, int type);
+int host_sdl_set_gamepad_sensor_enabled(unsigned int gamepad, int type, int enabled);
+int host_sdl_gamepad_steam(unsigned int gamepad);
 /* callback: void (*)(void *userdata, unsigned int stream, int additional, int total),
 called on the audio thread */
 unsigned int host_sdl_open_audio_stream(unsigned int device, const void *spec, unsigned int callback, unsigned int userdata);

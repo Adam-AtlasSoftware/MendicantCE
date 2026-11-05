@@ -73,6 +73,11 @@ void input_abstraction_port_button_controls(
 	short *controls);
 boolean input_abstraction_port_look_inverted(
 	short controller_index);
+/* port: the controller's right stick is the flick stick (input.flick_stick:
+port/linux/src/xinput_sdl.c), which turns the player itself: with the
+default stick layout, whose right stick looks */
+boolean input_abstraction_port_flick_stick(
+	short controller_index);
 /* port: a sub-step's reading of a controller (port/linux/game/sim_rate.h):
 FALSE when it is the frame's */
 boolean input_abstraction_port_substep_state(

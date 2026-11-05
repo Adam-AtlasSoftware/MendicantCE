@@ -279,6 +279,8 @@ static struct {
 } device;
 static int consumed, checkpointed;
 static void xgpu_backend_consume(void) { consumed++; }
+/* (the settings a draw is journaled under alike: none here) */
+static void journal_settings_blind(unsigned long words[3]) { words[0] = words[1] = words[2] = 0; }
 static void checkpoint(void *const *textures)
 {
     assert(consumed == checkpointed + 1);

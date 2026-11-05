@@ -47,6 +47,9 @@ void halo_screen_panini(short x0, short y0, short x1, short y1, const float proj
 	memcpy(pass_projection, projection, sizeof(pass_projection));
 }
 
+/* (the map's preparation's walk: not walking) */
+static boolean render_enumerating;
+
 #include "projection.inc"
 #include "under_test.inc"
 

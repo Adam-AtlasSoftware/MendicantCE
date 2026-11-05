@@ -70,6 +70,6 @@ def test_records_are_whole():
         data = zlib.decompress(pack[offset:offset + compressed])
         magic, version, header_size, header_checksum, header_key = struct.unpack_from('<4IQ', data)
         assert len(data) == size, record['map']
-        assert (magic, header_size) == (0x50314F48, 40), record['map']
+        assert (magic, header_size) == (0x50314F48, 48), record['map']
         assert version == MANIFEST['prepared_version'], f"{record['map']}: {RERUN}"
         assert (header_checksum, header_key) == (checksum, key), record['map']

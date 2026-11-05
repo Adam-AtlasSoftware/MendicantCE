@@ -250,6 +250,24 @@ void SDL_CloseGamepad(SDL_Gamepad *gamepad)
 	host_sdl_close_gamepad((unsigned int)gamepad);
 }
 
+/* (gyro aiming: xinput_sdl.c) */
+bool SDL_GamepadHasSensor(SDL_Gamepad *gamepad, SDL_SensorType type)
+{
+	return host_sdl_gamepad_has_sensor((unsigned int)gamepad, (int)type) != 0;
+}
+
+bool SDL_SetGamepadSensorEnabled(SDL_Gamepad *gamepad, SDL_SensorType type, bool enabled)
+{
+	return host_sdl_set_gamepad_sensor_enabled((unsigned int)gamepad, (int)type, enabled ? 1 : 0) != 0;
+}
+
+/* (whether it is Steam Input's virtual controller: the handle itself is not
+wanted) */
+Uint64 SDL_GetGamepadSteamHandle(SDL_Gamepad *gamepad)
+{
+	return host_sdl_gamepad_steam((unsigned int)gamepad) ? 1 : 0;
+}
+
 /* ---------- audio */
 
 SDL_AudioStream *SDL_OpenAudioDeviceStream(SDL_AudioDeviceID device, const SDL_AudioSpec *spec,

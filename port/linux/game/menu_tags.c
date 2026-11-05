@@ -484,7 +484,7 @@ static char const *const port_function_names[] =
 	/* (Settings' tabs and pages: menu_functions.c's settings_*) */
 	"port settings begin", "port settings tab", "port settings tab next", "port settings tab previous",
 	"port settings ok", "port settings cancel", "port settings keep", "port settings page cancel",
-	"port settings new profile", "port settings profiles", "port settings weapon reset",
+	"port settings new profile", "port settings profiles", "port settings weapon reset", "port settings gyro calibrate",
 	/* (Online's Discord account: menu_functions.c's discord_link and
 	discord_unlink) */
 	"port discord link", "port discord unlink",

@@ -512,6 +512,15 @@ CONTROLLER = ("gamepad_setup", "gamepad_setup_screen")
 # (the controller's own button layout, each player's: controller_remap_menu.inl)
 BUTTON_REMAPPING = ("gamepad_setup/button_remapping", "button_remapping_screen")
 DEAD_ZONES = ("gamepad_setup/dead_zones", "dead_zones_screen")
+# (aiming with a controller's gyroscope, and the flick stick: port/linux/src/xinput_sdl.c;
+# menu_functions.c's gyro_rows_show)
+GYRO = ("gamepad_setup/gyro", "gyro_screen")
+# input.gyro_sensitivity's: the view's degrees for each degree the controller turns
+GYRO_SENSITIVITY = Slider(0.25, 8.0, 0.05, 0.05, 20.0)
+GYRO_BUTTONS = [("TOUCHPAD", "touchpad"), ("LEFT PADDLE", "left_paddle"), ("RIGHT PADDLE", "right_paddle"),
+                ("CAPTURE / SHARE", "misc"), ("LEFT BUMPER", "left_bumper"), ("RIGHT BUMPER", "right_bumper"),
+                ("LEFT TRIGGER", "left_trigger"), ("RIGHT TRIGGER", "right_trigger"), ("LEFT STICK", "left_stick"),
+                ("RIGHT STICK", "right_stick")]
 KEY_BINDINGS = ("controls_setup", "controls_settings_screen")
 # Key Bindings: the keyboard and mouse's actions, in groups (the order of
 # port/linux/game/menu_functions.c's table of them), and its rows for a
@@ -545,7 +554,7 @@ REMAP_HANDLERS = ['<on event="x" run="port controller clear"/>',
 # hdr_display_show's, the display's peak
 SETTINGS_STATUS_ROWS = {"discord_account", "link_status", "link_unlink",
                         *(f"link_master_{n}" for n in range(1, 5)), "hdr_display",
-                        "viewmodel_weapon_reset",
+                        "viewmodel_weapon_reset", "gyro_found", "gyro_calibrate",
                         "remap_player", "remap_group", *(f"pad_{n}" for n in range(1, REMAP_ROWS + 1))}
 # the rows whose labels menu_functions.c writes (a master server's host): the
 # label's text its own, not its list's; their values the narrower column at
@@ -1098,6 +1107,8 @@ PAGES = {
             ("INVERT LOOK", "profile.invert_look", YES_NO, "Pushing the right stick up looks down.", None),
             ("INVERT TURNING", "input.invert_look_horizontal", YES_NO,
              "Pushing the right stick right turns the view left. For every controller on this device.", None),
+            ("GYRO & FLICK STICK ›", None, _page_screen(*GYRO),
+             "Aim by turning a controller that has a gyroscope, and the right stick as a flick stick.", None),
             ("INVERT FLIGHT", "profile.flight_inversion", YES_NO,
              "Flying vehicles pitch as aircraft do: pushing up flies down.", None),
             ("AUTO-CENTER LOOK", "profile.autocenter", YES_NO, "Levels the view while you walk.", None),
@@ -1154,6 +1165,50 @@ PAGES = {
              "Which of the actions to show: movement, weapons, actions or communication.", None, "group"),
             (SECTION, "ACTIONS"),
             *[("", None, None, "", None, f"command_{n}") for n in range(1, CONTROL_ROWS + 1)],
+        ],
+    },
+    GYRO[0]: {
+        "screen": GYRO[1], "title": "GYRO & FLICK STICK",
+        "rows": [
+            # (with no controller that has a gyroscope connected, only the
+            # first row and the flick stick's: menu_functions.c's
+            # gyro_rows_show, which writes the first's value and
+            # Calibrate's; Gyro Button's only while Gyro Aiming holds)
+            (SECTION, "GYRO AIMING"),
+            ("GYRO", None, None,
+             "Whether a controller with a gyroscope is connected: a DualSense, a DualShock 4, a Switch Pro "
+             "Controller or Joy-Cons, a Steam Deck.|With Steam Input, turn it off for OpenH1.", None, "gyro_found"),
+            ("GYRO AIMING", "input.gyro_aim",
+             [("OFF", "off"), ("ALWAYS ON", "on"), ("HOLD TO AIM", "hold"), ("HOLD TO PAUSE", "pause"),
+              ("THUMB ON STICK", "touch")],
+             "Aim by turning the controller, as you would a mouse; the stick still works too. Hold to Aim: only "
+             "while the gyro button is held. Hold to Pause: except while it is held, to re-center. Thumb on "
+             "Stick: while your thumb touches the right stick (a Steam Deck, a Steam Controller).|No aim assist "
+             "on the gyro's aim.", None),
+            ("GYRO BUTTON", "input.gyro_button", GYRO_BUTTONS,
+             "The button that Hold to Aim and Hold to Pause hold. It still does its own action too: Button "
+             "Remapping can move that.", None),
+            ("SENSITIVITY", "input.gyro_sensitivity", GYRO_SENSITIVITY,
+             "How far the view turns for each degree you turn the controller: 1 as far, 2 twice as far. Press A, "
+             "or click the number, to type a value.|Zoomed in: as Zoom Aim Speed sets.", None),
+            ("VERTICAL SENSITIVITY", "input.gyro_vertical_sensitivity", VERTICAL_SENSITIVITIES,
+             "How far the view turns up and down, of how far it turns side to side. 1X turns it as far.", None),
+            ("TURN AXIS", "input.gyro_space", [("PLAYER SPACE", "player"), ("LOCAL SPACE", "local")],
+             "Player Space turns you as you turn the controller about the up direction, however you hold it: "
+             "flat, upright or between. Local Space turns you about the controller's own axis, as if held flat.",
+             None),
+            ("SMOOTHING", "input.gyro_smoothing", ON_OFF,
+             "Steadies the smallest motions, your hand's tremor, but never a real turn. Off: every motion as it "
+             "comes.", None),
+            ("CALIBRATE", None, None,
+             "Put the controller down on something still, then select this: it measures the gyroscope at rest "
+             "for a second and a half.|It also does so whenever it is held still.", None,
+             "gyro_calibrate", "port settings gyro calibrate"),
+            (SECTION, "RIGHT STICK"),
+            ("FLICK STICK", "input.flick_stick", ON_OFF,
+             "Point the right stick and you turn at once to face that way: right, a quarter turn; down, about "
+             "face. Turn it round its rim and you turn with it. Aim up and down with the gyro.|With the default "
+             "stick layout.", None),
         ],
     },
     DEAD_ZONES[0]: {

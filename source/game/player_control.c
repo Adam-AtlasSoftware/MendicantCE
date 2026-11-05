@@ -1424,6 +1424,41 @@ boolean player_control_touch_look_late(
 	return TRUE;
 }
 
+/* port: the gyroscope's turn come since this frame's input took it, for the
+drawn view's own late reading (port/linux/game/render_interpolation.c,
+display.direct_camera): radians of yaw and pitch, zoomed as the input turns
+the player by it, which only the view drawn takes now. FALSE, and nothing
+read, while the camera takes no input or none has come */
+boolean player_control_gyro_look_late(
+	short local_player_index,
+	real *yaw,
+	real *pitch)
+{
+	extern int halo_linux_gyro_look_late(short gamepad_index, real *yaw, real *pitch);
+	long player_index = local_player_get_player_index(local_player_index);
+	struct player_control *control;
+	struct player_datum *player;
+	short gamepad_index;
+
+	*yaw = 0.f;
+	*pitch = 0.f;
+	if (player_index == NONE || !player_control_camera_control_is_active())
+		return FALSE;
+	control = player_control_get(local_player_index);
+	player = player_get(player_index);
+	gamepad_index = player->local_player_index;
+	if (gamepad_index == NONE || !halo_linux_gyro_look_late(gamepad_index, yaw, pitch))
+		return FALSE;
+	if (player->unit_index != NONE && control->zoom_level != NONE)
+	{
+		real zoom_scale = mouse_zoom_look_scale(local_player_index, player->unit_index, control->zoom_level);
+
+		*yaw *= zoom_scale;
+		*pitch *= zoom_scale;
+	}
+	return TRUE;
+}
+
 static void get_local_player_input_blob(
 	short local_player_index,
 	real time_delta_sec,
@@ -1602,6 +1637,40 @@ static void get_local_player_input_blob(
 							}
 							input->facing_delta.yaw += mouse_yaw;
 							input->facing_delta.pitch += mouse_pitch;
+						}
+					}
+					{
+						/* port: the gyroscope's and the flick stick's turns
+						(port/linux/src/xinput_sdl.c), direct as the mouse's
+						and after the magnetism, which leaves them be: the
+						aim assist's is the stick's alone. The gyroscope's
+						zoomed as the mouse's is; the flick stick's not, which
+						turns the player to where it points */
+						extern int halo_linux_gyro_look(short gamepad_index, real *yaw, real *pitch);
+						extern int halo_linux_flick_look(short gamepad_index, real *yaw);
+						real gyro_yaw;
+						real gyro_pitch;
+						real flick_yaw;
+
+						if (halo_linux_gyro_look(gamepad_index, &gyro_yaw, &gyro_pitch))
+						{
+							if (player->unit_index != NONE && control->zoom_level != NONE)
+							{
+								real zoom_scale = mouse_zoom_look_scale(
+									local_player_index,
+									player->unit_index,
+									control->zoom_level);
+
+								gyro_yaw *= zoom_scale;
+								gyro_pitch *= zoom_scale;
+							}
+							input->facing_delta.yaw += gyro_yaw;
+							input->facing_delta.pitch += gyro_pitch;
+						}
+						if (halo_linux_flick_look(gamepad_index, &flick_yaw) &&
+							input_abstraction_port_flick_stick(gamepad_index))
+						{
+							input->facing_delta.yaw += flick_yaw;
 						}
 					}
 				}

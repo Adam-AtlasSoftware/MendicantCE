@@ -42,6 +42,9 @@ The per-pixel model lighting has it as its model_lights[12] (xgpu.h) */
 position and its right and up), the structure's lightmap pass drawn, and
 the glows drawn into the 3D view */
 int halo_dynamic_lights_enhanced(void);
+/* whether a map's preparation draws its passes lit by them: enhanced, or
+its record made (port/linux/src/d3d8_device.c) */
+int halo_dynamic_lights_walked(void);
 void halo_dynamic_lights_set(const struct halo_dynamic_light *lights, int count, const float camera[3],
 	const float right[3], const float up[3]);
 void halo_dynamic_lights_environment(int drawing);

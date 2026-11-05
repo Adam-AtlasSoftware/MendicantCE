@@ -697,7 +697,13 @@ command stream's backend table. They run on one thread, the render thread.
   clears' and the presentation's functions, the NV2A combiner as one
   function whose configuration is function constants
   (`xgpu_metal_combiner.c`), and the pixel programs of the renderer's
-  manifest (`port/assets/render`) that the combiner cannot draw. A shader is
+  manifest (`port/assets/render`) that the combiner cannot draw, each of its
+  draws derived under every setting that changes a draw (multisampling's
+  samples, HDR, each pixel's lighting, the enhanced dynamic lights, the
+  ambient occlusion: `xgpu_manifest_derive`, the front end's own derivation).
+  The manifest is recorded in the run that makes the shipped records
+  (`tools/prepared_records.py`), and `tools/test_render_manifest.py` fails
+  where a record's draw is not one of its own. A shader is
   looked up there by its name (its MSL source's hash). A pixel program is
   the combiner's function specialised for its configuration
   (`newFunctionWithName:constantValues:`, on the queue: about 0.2 ms, 10 ms

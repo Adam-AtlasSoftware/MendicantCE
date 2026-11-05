@@ -564,6 +564,18 @@ boolean input_abstraction_port_look_inverted(
 		(preferences->invert_look_aircraft_control && local_player_is_piloting_aircraft(controller_index));
 }
 
+/* port: the controller's right stick is the flick stick (input.flick_stick),
+whose turn player_control.c gives the player: only with the default stick
+layout, in which the right stick looks (another's moves or strafes with it) */
+boolean input_abstraction_port_flick_stick(
+	short controller_index)
+{
+	if (controller_index < 0 || controller_index >= MAXIMUM_GAMEPADS || !halo_linux_flick_stick())
+		return FALSE;
+	return input_abstraction_globals.player_control_preferences[controller_index].joystick_controls ==
+		_joystick_controls_default;
+}
+
 /* ---------- public code */
 
 void input_abstraction_initialize(
@@ -942,6 +954,13 @@ static void input_abstraction_state_from_gamepad(
 	whichever stick or D-pad turns */
 	if (halo_look_horizontal_inverted())
 		state->yaw = -state->yaw;
+	/* port: the right stick as the flick stick looks by itself: its turn is
+	the flick stick's (player_control.c), its look as the stick's none */
+	if (input_abstraction_port_flick_stick((short)controller_index))
+	{
+		state->yaw = 0.f;
+		state->pitch = 0.f;
+	}
 	/* port: digital movement bindings are independent of stick presets. */
 	controller_remap_movement((short)controller_index, &state->forward_movement, &state->strafe);
 
