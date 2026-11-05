@@ -371,6 +371,9 @@ def _generate(n: Writer, sln: Any, target: LinuxGuest, config_path: Path, third_
     # ... and the stock maps' preparations' records (port/linux/src/prepared_shipped.h)
     records = build / "prepared.records"
     n.build(outputs=records, rule=f"{prefix}_copy", inputs=Path("port/assets/prepared/prepared.records"))
+    # ... and the textures', fonts' and menus' bytes (port/linux/src/embedded_assets.h)
+    assets = build / "openh1.assets"
+    n.build(outputs=assets, rule=f"{prefix}_copy", inputs=guest["assets"])
     n.build(outputs=target.name, rule="phony", inputs=[output, staged_sdl, sdl_license, brokers, masters, relays,
-                                                         records])
+                                                         records, assets])
     n.newline()

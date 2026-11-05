@@ -29,6 +29,7 @@ Windows executable (port/windows/host; port/windows/README.md):
   (a delay-loaded DLL);
 - build/windows/brokers.txt, internet play's brokers.
 - build/windows/prepared.records, the stock maps' preparations' records.
+- build/windows/openh1.assets, the textures', fonts' and menus' bytes.
 """
 
 import hashlib
@@ -371,5 +372,8 @@ def _generate_host(n: Writer, sln: Any, guest: Dict[str, Path]) -> None:
     # ... and the stock maps' preparations' records (port/linux/src/prepared_shipped.h)
     records = BUILD / "prepared.records"
     n.build(outputs=records, rule="windows_copy", inputs=Path("port/assets/prepared/prepared.records"))
-    n.build(outputs="windows", rule="phony", inputs=[output, sdl_dll, brokers, masters, relays, records])
+    # ... and the textures', fonts' and menus' bytes (port/linux/src/embedded_assets.h)
+    assets = BUILD / "openh1.assets"
+    n.build(outputs=assets, rule="windows_copy", inputs=guest["assets"])
+    n.build(outputs="windows", rule="phony", inputs=[output, sdl_dll, brokers, masters, relays, records, assets])
     n.newline()

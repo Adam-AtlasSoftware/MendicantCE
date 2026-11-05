@@ -21,6 +21,7 @@ high-res HUD's are (hud_hires.c).
 #include "halo_menus.h"
 #include "hud_hires.h"
 #include "menu_files.h"
+#include "embedded_assets.h"
 #include "platform.h"
 #include "port_config.h"
 /* (the renderer's backend is on the host: the pictures are images) */
@@ -168,7 +169,12 @@ static void files_gather(void)
 		}
 		else
 		{
-			file_add(embedded->path, (const unsigned char *)embedded->data, embedded->size, 0);
+			/* (the game's own, in the assets' file: embedded_assets.h) */
+			const unsigned char *own = (const unsigned char *)embedded_assets_data(embedded->data_offset,
+				embedded->size);
+
+			if (own)
+				file_add(embedded->path, own, embedded->size, 0);
 		}
 	}
 #ifndef HALO_ANDROID

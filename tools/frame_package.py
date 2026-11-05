@@ -173,6 +173,7 @@ def main() -> int:
         **{f"steam-{art.name}": art for art in sorted((ROOT / "port/assets/steam/openh1-vr").glob("*.png"))},
         "brokers.txt": ROOT / "port/assets/network/brokers.txt",
         "prepared.records": ROOT / "port/assets/prepared/prepared.records",
+        "openh1.assets": args.build / "openh1.assets",
         "README.md": FRAME_DIR / "README.md",
         **{name: ROOT / source for name, source in LICENSES.items()},
     }

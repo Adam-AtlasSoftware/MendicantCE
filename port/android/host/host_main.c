@@ -272,6 +272,17 @@ static void *game_main(void *unused)
 			host_logf(HOST_LOG_ERROR, "cannot write %s: %s", path, SDL_GetError());
 		SDL_free(records);
 	}
+	/* ...and the textures', fonts' and menus' bytes (port/linux/src/
+	embedded_assets.h), the same way */
+	{
+		size_t assets_size = 0;
+		void *assets = SDL_LoadFile("openh1.assets", &assets_size);
+
+		snprintf(path, sizeof(path), "%s/openh1.assets", data_root);
+		if (!assets || !SDL_SaveFile(path, assets, assets_size))
+			host_logf(HOST_LOG_ERROR, "cannot write %s: %s", path, SDL_GetError());
+		SDL_free(assets);
+	}
 	snprintf(path, sizeof(path), "%s/config.toml", data_root);
 
 	image = SDL_LoadFile("halo_guest.elf", &image_size);

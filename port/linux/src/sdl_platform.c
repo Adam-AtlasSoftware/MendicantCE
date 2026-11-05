@@ -12,6 +12,7 @@ and the debug keyboard that the game's console reads.
 #include "platform.h"
 #include "sdl_platform.h"
 #include "port_config.h"
+#include "embedded_assets.h"
 #include "battery_saver.h"
 #include "frame_pacing.h"
 #include "xgpu_backend.h"
@@ -379,6 +380,28 @@ static void data_check_maps(void)
 }
 #endif
 
+/* the game's own assets' file, embedded_assets.h: missing, or another
+build's, the game quits with a message naming it, as it does on missing
+maps (data_check_maps), rather than showing menus without their files */
+static void assets_check(void)
+{
+	char message[2048];
+	const char *problem = embedded_assets_check();
+	BOOL quiet = config_boolean("debug.hidden_window") || config_real("debug.exit_after") > 0.0 ||
+		config_string("debug.network_test")[0];
+
+	if (!problem)
+		return;
+	snprintf(message, sizeof(message),
+		"The game's own files are incomplete: %s.\n\nIt holds the menus, the high-res HUD and the text. "
+		"Reinstall or update OpenH1 so that the " EMBEDDED_ASSETS_FILE " that came with this version is "
+		"beside it.", problem);
+	platform_log("assets: %s: quitting", problem);
+	if (!quiet)
+		SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Halo", message, NULL);
+	exit(EXIT_FAILURE);
+}
+
 BOOL platform_sdl_initialize(void)
 {
 	SDL_InitFlags flags = SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD | SDL_INIT_EVENTS;
@@ -451,6 +474,11 @@ BOOL platform_sdl_initialize(void)
 		return FALSE;
 	}
 	platform_sdl_started = TRUE;
+	/* the game's own files' bytes (the menus', the high-res HUD's and text's:
+	embedded_assets.h), beside it as a build or a package puts them; a
+	dedicated server draws nothing, and starts without them */
+	if (!halo_server_mode())
+		assets_check();
 #ifndef HALO_ANDROID
 	/* found (or offered to the player, platform_offer_game_data) before the
 	game's window opens, and checked to be the Xbox maps (a dedicated

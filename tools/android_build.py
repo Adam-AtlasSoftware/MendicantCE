@@ -39,7 +39,7 @@ from .build_common import (LINUX_PROFILE, MBEDTLS_DIR, MINIUPNPC_DEFINES, MINIUP
                            xdk_headers)
 from . import check_host_imports
 from .ffmpeg_fetch import fetch_ffmpeg, ffmpeg_sources, ffmpeg_tree
-from .embed_assets import hud_assets_build, hud_configure_inputs, server_ui_build
+from .embed_assets import assets_file, hud_assets_build, hud_configure_inputs, server_ui_build
 from .linux_package import ROOT as REPO_ROOT, notices as release_notices
 from .ninja_syntax import Writer
 from .vulkan_build import VULKAN_DIR, fetch_vulkan_headers, host_vulkan_renderer
@@ -699,7 +699,9 @@ def generate_guest_image(n: Writer, sln: Any, config: Dict[str, Any], *, arch: G
     n.build(outputs=checked, rule=f"{prefix}_guest_check", inputs=image,
             implicit=[Path("tools/guest_image_check.py"), GUEST_ARCH_SCRIPT])
 
-    return {"image": image, "checked": checked, "host_table_c": host_table_c}
+    # (and the assets' file the game reads beside it: embedded_assets.h)
+    return {"image": image, "checked": checked, "host_table_c": host_table_c,
+            "assets": assets_file(gen_dir / "hud_hires_assets.c")}
 
 
 def generate_android_build(n: Writer, sln: Any) -> None:
@@ -899,7 +901,11 @@ def generate_android_build(n: Writer, sln: Any) -> None:
     # (port/linux/src/prepared_shipped.h)
     staged_records = assets_dir / "prepared.records"
     n.build(outputs=staged_records, rule="android_copy", inputs=Path("port/assets/prepared/prepared.records"))
-    staged_assets = [staged_image, staged_brokers, staged_records, *staged_licenses]
+    # the textures', fonts' and menus' bytes (port/linux/src/embedded_assets.h),
+    # which the app writes there too
+    staged_embedded = assets_dir / "openh1.assets"
+    n.build(outputs=staged_embedded, rule="android_copy", inputs=guest["assets"])
+    staged_assets = [staged_image, staged_brokers, staged_records, staged_embedded, *staged_licenses]
     n.build(outputs="android", rule="phony", inputs=[libmain, staged_sdl, *staged_assets])
 
     apk = PORT_DIR / "app" / "build" / "outputs" / "apk" / "debug" / "app-debug.apk"
