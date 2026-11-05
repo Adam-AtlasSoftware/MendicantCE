@@ -842,6 +842,7 @@ static void journal_operation(unsigned long op, const void *arguments, unsigned 
 static void journal_page(unsigned long page);
 static void journal_vertex_shader(struct vertex_shader_object *object);
 static void journal_settings_blind(unsigned long words[3]);
+static void journal_vertex_shader_identify(struct vertex_shader_object *object);
 
 /* A preparation draw is needed once for each pipeline, vertex layout and
 texture revision. Geometry mirrors are still refreshed for every range:
@@ -1623,6 +1624,8 @@ static BOOL bind_targets(BOOL *has_depth)
 static void vr_initialize(void);
 #endif
 
+static void hdr_read(void);
+
 /* the window's context exists: the backend made ready, and what the
 device's settings ask of it */
 static void device_backend_ready(void)
@@ -1645,6 +1648,12 @@ static void device_backend_ready(void)
 		anti_aliasing_read();
 	else
 		anti_aliasing_prepare();
+	/* (and display.hdr and display.ambient_occlusion, which halo_screen_commit
+	reads between frames, now: a frame drawn before the next, a map loaded
+	as the game starts, prepares its pipelines as they are, its targets none
+	yet) */
+	hdr_read();
+	ambient_occlusion_read();
 }
 
 /* what display.anti_aliasing's value needs of the backend, once it is
@@ -2671,6 +2680,8 @@ void halo_vertex_shader_lighting(unsigned long handle)
 		return;
 	}
 	xgpu_backend_vertex_lighting(object->program->hash, &object->lighting);
+	/* (a shader the game lights so is another than its program's twin) */
+	journal_vertex_shader_identify(object);
 }
 
 void WINAPI D3DDevice_DeleteVertexShader(DWORD handle)
@@ -3541,6 +3552,9 @@ typedef char dynamic_lights_own_lights_register[XGPU_MODEL_LIGHT_REGISTER(XGPU_M
 /* the frame's draws are lit by the enhanced dynamic lights */
 static BOOL dynamic_lights_active(void)
 {
+	/* (the setting as it is now: a map's preparation played back from its
+	record before anything else read it) */
+	dynamic_lights_read_settings();
 	return dynamic_lights.count > 0 && dynamic_lights.enhanced;
 }
 
@@ -5851,21 +5865,29 @@ void d3d8_resource_freed(void *resource)
 	}
 }
 
-static void journal_vertex_shader(struct vertex_shader_object *object)
+/* a vertex shader's identity: its program's hash, its instructions' count,
+its declaration's elements, packed ones and count, and the lighting the
+game gives it (halo_vertex_shader_lighting); never 0. Two shaders of one
+identity draw alike. */
+static void journal_vertex_shader_identify(struct vertex_shader_object *object)
 {
 	uint64_t hash = XGPU_MANIFEST_HASH_START;
-	uint32_t words[3];
+	uint32_t words[4];
 
-	/* (its identity: its program's hash, its instructions' count, and its
-	declaration's elements, packed ones and count; never 0) */
 	words[0] = (uint32_t)object->instruction_count;
 	words[1] = (uint32_t)object->element_count;
 	words[2] = (uint32_t)object->packed_mask;
+	words[3] = (uint32_t)object->lighting.lights;
 	if (object->program)
 		hash = xgpu_manifest_hash(&object->program->hash, sizeof(object->program->hash), hash);
 	hash = xgpu_manifest_hash(words, sizeof(words), hash);
 	hash = xgpu_manifest_hash(object->elements, sizeof(object->elements), hash);
 	object->journal_identity = (uint32_t)(hash ^ hash >> 32) | 1;
+}
+
+static void journal_vertex_shader(struct vertex_shader_object *object)
+{
+	journal_vertex_shader_identify(object);
 	if (object->id >= vertex_shader_capacity)
 	{
 		unsigned long capacity = object->id + 256;

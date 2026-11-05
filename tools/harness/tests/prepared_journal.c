@@ -15,9 +15,6 @@ typedef int BOOL;
 #define D3DTSS_MAXSTAGES 4
 #define D3DRS_MAX 144
 #define D3DTSS_MAX 32
-#define TRUE 1
-#define FALSE 0
-typedef int boolean;
 
 /* FNV-1a, 64 bits (xgpu_manifest.c's) */
 static uint64_t xgpu_manifest_hash(const void *data, size_t size, uint64_t hash)

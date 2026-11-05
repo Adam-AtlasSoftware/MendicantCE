@@ -54,7 +54,7 @@ all). HALO_PREPARED_RECORDS=0 turns the records off (the walk every time).
 #include <xtl.h>
 
 /* the platform layer's (port/linux/src/port_config.c, xbox_files.c) */
-const char *config_string(char const *name);
+int config_text(char const *name, char *text, size_t size);
 void platform_log(char const *format, ...);
 /* (port/linux/src/d3d8_device.c's) */
 unsigned long long halo_gpu_journal_derivation(unsigned long long hash);
@@ -110,8 +110,8 @@ records, what every value of it would:
   (debug_model_lod: model_detail_rules' stock);
 - overshield_effect, shield_glow, viewmodel_shield: a unit's constants and
   lights as it plays; the walk draws every modifier shader on every model;
-- panini: its pass journaled whatever the setting (panini.c), played back
-  where it is on now (panini_replay_projection);
+- panini, panini_vertical: its pass journaled whatever the setting
+  (panini.c), played back where it is on now (panini_replay_projection);
 - per_pixel_lighting: the model lighting's pipelines, made as the record
   plays;
 - shadow_resolution: the shadow maps' size, which the journal does not hold;
@@ -126,7 +126,7 @@ static char const *const prepared_settings[] =
 	"display.ambient_occlusion", "display.anisotropic_filtering", "display.anti_aliasing", "display.astc_textures",
 	"display.dynamic_lights", "display.graphics", "display.hdr", "display.hdr_mode", "display.high_res_hud",
 	"display.high_res_text", "display.model_detail", "display.overshield_effect", "display.panini",
-	"display.per_pixel_lighting", "display.shadow_resolution", "display.shield_glow", "display.structure_culling",
+	"display.panini_vertical", "display.per_pixel_lighting", "display.shadow_resolution", "display.shield_glow", "display.structure_culling",
 	"display.first_person_legs", "display.viewmodel_shield", "display.viewmodel_visible",
 };
 
@@ -192,10 +192,13 @@ static uint64_t prepared_derivation(void)
 
 	for (index = 0; index < (short)NUMBEROF(prepared_settings); index++)
 	{
-		char const *value = config_string(prepared_settings[index]);
+		/* (as text, whatever its type: a boolean's, a number's) */
+		char value[256];
 
+		if (!config_text(prepared_settings[index], value, sizeof(value)))
+			value[0] = 0;
 		hash = prepared_hash_string(prepared_settings[index], hash);
-		hash = prepared_hash_string(value ? value : "", hash);
+		hash = prepared_hash_string(value, hash);
 	}
 	return hash;
 }
