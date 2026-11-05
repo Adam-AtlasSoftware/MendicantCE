@@ -104,7 +104,7 @@ enum
 	WORLD_SDF_RESERVED_PROCESSORS = 3,
 	WORLD_SDF_MAXIMUM_THREADS = 32,
 	/* the bake's pace in play (struct world_sdf_pace): the frames it rests
-	to learn their normal time, the frames whose mean is compared with it,
+	to learn their normal time, the frames whose median is compared with it,
 	the least and the most frames a rest lasts (doubled each time frames
 	run late again, halved after so many calm ones) */
 	WORLD_SDF_PACE_LEARN = 30,
@@ -114,14 +114,11 @@ enum
 	WORLD_SDF_PACE_CALM = 600,
 };
 
-/* frames late while the bake runs in play: their mean over the window's
-more than the normal's this many times and so many ms, or one frame more
-than the normal's this many times and so many ms (a hitch; the ms, so that
-a machine at hundreds of frames a second does not rest for a millisecond) */
+/* frames late while the bake runs in play: the last window's median more
+than the normal's this many times and so many ms (the ms, so that a
+machine at hundreds of frames a second does not rest for a millisecond) */
 #define WORLD_SDF_PACE_LATE 1.10f
 #define WORLD_SDF_PACE_SLACK_MS 1.0f
-#define WORLD_SDF_PACE_HITCH 2.0f
-#define WORLD_SDF_PACE_HITCH_SLACK_MS 8.0f
 
 /* an object field's least voxel, its margin about the object (a share of
 its longest side, between the least and the most, world units), and the
@@ -274,19 +271,22 @@ threads share its processors (a phone's few cores, the Steam Deck's
 hyperthreads) never plays slower for it. Behind the menus it runs freely */
 struct world_sdf_pace
 {
-	/* the frames' normal time (ms; 0: not known), the mean of a rest's */
+	/* the frames' normal time (ms; 0: not known): a rest's last frames'
+	median */
 	float normal;
-	/* the rest: frames left of it, its frames' total and count so far, the
-	late frames' mean it began for (0: one to learn), and the next rest's
-	frames (doubled while resting helps; the least again when frames were
-	as slow while it rested, late for something else) */
-	long rest, rested;
-	float rested_total, late;
+	/* the last frames' times (a ring, the newest at count - 1 mod window),
+	and how many since the last rest ended */
+	float frames[WORLD_SDF_PACE_WINDOW];
+	long count;
+	/* the rest: frames left of it, the late median it began for (0: one to
+	learn), and the next rest's frames (doubled while resting helps; the
+	least again when frames were as slow while it rested, late for
+	something else) */
+	long rest;
+	float late;
 	long next_rest;
-	/* the last frames baked (a ring, the newest at count - 1 mod window),
-	and the frames baked since the last late one */
-	float baked[WORLD_SDF_PACE_WINDOW];
-	long baked_count, calm;
+	/* the frames baked since the last rest */
+	long calm;
 };
 
 /* ---------- prototypes (port/linux/game/world_sdf.c) */
@@ -359,8 +359,9 @@ void world_sdf_pace_begin(struct world_sdf_pace *pace);
 /* a frame's time (ms), and whether a map is played (not a menu, a loading
 screen or the start's pass): TRUE if the bake may run until the next frame.
 In play it first rests WORLD_SDF_PACE_LEARN frames to learn the normal;
-then runs until frames run late, rests (learning the normal again), and
-runs again */
+then runs until the frames run late (their median: a bake's threads slow
+every frame, and one slow frame now and then is something else's), rests
+(learning the normal again), and runs again */
 int world_sdf_pace_frame(struct world_sdf_pace *pace, float milliseconds, int playing);
 
 /* the field's cells and origin for these bounds (x0 y0 z0 x1 y1 z1), padded,

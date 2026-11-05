@@ -53,18 +53,33 @@ void world_sdf_pace_begin(struct world_sdf_pace *pace)
 	pace->next_rest = WORLD_SDF_PACE_LEAST_REST;
 }
 
-/* a rest begun, of so many frames, for frames of this mean (0: to learn) */
+/* a rest begun, of so many frames, for frames this late (0: to learn) */
 static void sdf_pace_rest(struct world_sdf_pace *pace, long frames, float late)
 {
 	pace->rest = frames;
-	pace->rested = 0;
-	pace->rested_total = 0.0f;
 	pace->late = late;
-	pace->baked_count = 0;
 	pace->calm = 0;
 }
 
-/* the most frames' mean that keeps to a normal */
+/* the last frames' median (a frame now and then slower, for whatever
+reason, moves it not at all: a bake's threads slow every frame) */
+static float sdf_pace_median(struct world_sdf_pace const *pace)
+{
+	float sorted[WORLD_SDF_PACE_WINDOW];
+	long count = pace->count < WORLD_SDF_PACE_WINDOW ? pace->count : WORLD_SDF_PACE_WINDOW, i, j;
+
+	for (i = 0; i < count; i++)
+	{
+		float value = pace->frames[i];
+
+		for (j = i; j > 0 && sorted[j - 1] > value; j--)
+			sorted[j] = sorted[j - 1];
+		sorted[j] = value;
+	}
+	return count ? sorted[count / 2] : 0.0f;
+}
+
+/* the most frames' median that keeps to a normal */
 static float sdf_pace_kept(float normal)
 {
 	return normal * WORLD_SDF_PACE_LATE + WORLD_SDF_PACE_SLACK_MS;
@@ -72,8 +87,7 @@ static float sdf_pace_kept(float normal)
 
 int world_sdf_pace_frame(struct world_sdf_pace *pace, float milliseconds, int playing)
 {
-	float total = 0.0f, mean;
-	long index, count;
+	float median;
 
 	if (!playing)
 	{
@@ -84,29 +98,25 @@ int world_sdf_pace_frame(struct world_sdf_pace *pace, float milliseconds, int pl
 		pace->next_rest = WORLD_SDF_PACE_LEAST_REST;
 	if (pace->rest <= 0 && pace->normal <= 0.0f)
 		sdf_pace_rest(pace, WORLD_SDF_PACE_LEARN, 0.0f);
+	pace->frames[pace->count++ % WORLD_SDF_PACE_WINDOW] = milliseconds;
+	median = sdf_pace_median(pace);
 	if (pace->rest > 0)
 	{
-		pace->rested_total += milliseconds;
-		pace->rested++;
 		if (--pace->rest > 0)
 			return 0;
-		pace->normal = pace->rested_total / (float)pace->rested;
+		/* (the rest's last frames, the bake's threads at rest: the normal) */
+		pace->normal = median;
+		pace->count = 0;
 		/* (as slow while it rested: the frames ran late for something
 		else, a heavier scene, not for the bake; no longer rests for it) */
 		if (pace->late > 0.0f && pace->late <= sdf_pace_kept(pace->normal))
 			pace->next_rest = WORLD_SDF_PACE_LEAST_REST;
 		return 1;
 	}
-	pace->baked[pace->baked_count++ % WORLD_SDF_PACE_WINDOW] = milliseconds;
-	count = pace->baked_count < WORLD_SDF_PACE_WINDOW ? pace->baked_count : WORLD_SDF_PACE_WINDOW;
-	for (index = 0; index < count; index++)
-		total += pace->baked[index];
-	mean = total / (float)count;
-	if (milliseconds > pace->normal * WORLD_SDF_PACE_HITCH + WORLD_SDF_PACE_HITCH_SLACK_MS ||
-		(count == WORLD_SDF_PACE_WINDOW && mean > sdf_pace_kept(pace->normal)))
+	if (pace->count >= WORLD_SDF_PACE_WINDOW && median > sdf_pace_kept(pace->normal))
 	{
 		/* (late: a rest, each longer than the last while resting helps) */
-		sdf_pace_rest(pace, pace->next_rest, mean);
+		sdf_pace_rest(pace, pace->next_rest, median);
 		pace->next_rest = pace->next_rest * 2 < WORLD_SDF_PACE_MOST_REST ? pace->next_rest * 2 : WORLD_SDF_PACE_MOST_REST;
 		return 0;
 	}

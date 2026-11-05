@@ -14,8 +14,9 @@ The schedule (docs/world-ao.md, "The bake's schedule"):
   geometry (world_scene_static_triangles) and of its collision BSP's planes
   (the sign's point test), taken on the game's thread a few frames after
   the load and handed to the baker thread, which bakes it in slabs of z
-  slices on every processor at the lowest priority, writes it to the cache
-  and hands it back;
+  slices on the processors the game's own threads leave
+  (world_sdf_bake_threads) at the lowest priority, at the frames' pace in
+  play (world_sdf_pace_frame), writes it to the cache and hands it back;
 - the first launch's "Preparing menu pictures" pass (menu_pictures_render.c)
   bakes the BSPs of every stock map it loads (the one each map starts in,
   and each picture's), where nobody waits to play
@@ -28,7 +29,9 @@ The schedule (docs/world-ao.md, "The bake's schedule"):
   later, never in the switch), the proxies alone shading them till then;
 - a field found or baked is uploaded at most WORLD_SDF_UPLOAD_BYTES a frame,
   then fades in over a second (world_sdf_fade); until then the proxies
-  alone shade.
+  alone shade, without those of what the field will hold (the static
+  scenery's, the vehicles' boxes: world_sdf_scenery_awaited,
+  world_sdf_object_awaited), which cost the most.
 
 A bake outlives the map it was taken from (it works on copies): its field is
 written to the cache all the same, and found there the next time.
@@ -1511,7 +1514,7 @@ static void *sdf_bake_worker(void *context)
 	return NULL;
 }
 
-/* a pass run on every processor; the threads it ran on */
+/* a pass run on the bake's threads; how many it ran on */
 static long sdf_pass(struct sdf_job *job, int pass)
 {
 	pthread_t threads[WORLD_SDF_MAXIMUM_THREADS];
@@ -1531,7 +1534,7 @@ static long sdf_pass(struct sdf_job *job, int pass)
 	return started + 1;
 }
 
-/* (world_sdf_plan's marker: a layout tried, marked on every processor) */
+/* (world_sdf_plan's marker: a layout tried, marked on the bake's threads) */
 static long sdf_mark(void *context, struct world_sdf_header const *header, float const *positions,
 	long triangle_count, unsigned char *marks)
 {
@@ -1662,7 +1665,7 @@ static int sdf_bake_scenery(struct sdf_job *job)
 }
 
 /* the vehicles' occlusion fields (docs/world-ao.md, "Dynamic objects"):
-each laid out about its geometry, its slices baked on every processor, its
+each laid out about its geometry, its rows baked on the bake's threads, its
 voxels in solid filled and its reach found; FALSE if no memory. Their
 milliseconds in the header */
 static int sdf_bake_objects(struct sdf_job *job)
@@ -1720,7 +1723,7 @@ static int sdf_bake_objects(struct sdf_job *job)
 	return 1;
 }
 
-/* a field baked on every processor, written to the cache; FALSE if it
+/* a field baked on the bake's threads, written to the cache; FALSE if it
 could not be */
 static int sdf_bake(struct sdf_job *job)
 {

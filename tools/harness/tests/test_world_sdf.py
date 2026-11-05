@@ -36,22 +36,20 @@ CONTROLS = [
     (BAKE, "\tif (threads > WORLD_SDF_MAXIMUM_THREADS)\n\t\tthreads = WORLD_SDF_MAXIMUM_THREADS;", "", "threads"),
     # the menus paced as play (the start's bakes slowed behind the main menu)
     (BAKE, "\tif (!playing)\n\t{", "\tif (0)\n\t{", "pace"),
-    # frames a tenth late never a rest
+    # frames late never a rest
     (BAKE, "return normal * WORLD_SDF_PACE_LATE + WORLD_SDF_PACE_SLACK_MS;", "return normal * 2.0f;", "pace"),
-    # a hitch never a rest
-    (BAKE, "if (milliseconds > pace->normal * WORLD_SDF_PACE_HITCH + WORLD_SDF_PACE_HITCH_SLACK_MS ||", "if (0 ||",
+    # a fast machine's few tenths of a millisecond late
+    (BAKE, "return normal * WORLD_SDF_PACE_LATE + WORLD_SDF_PACE_SLACK_MS;", "return normal * WORLD_SDF_PACE_LATE;",
      "pace"),
+    # the frames' mean, not their median: a slow frame now and then a rest
+    (BAKE, "return count ? sorted[count / 2] : 0.0f;", "return count ? sorted[count - 1] : 0.0f;", "pace"),
     # a rest no longer while frames keep running late
     (BAKE, "pace->next_rest = pace->next_rest * 2 < WORLD_SDF_PACE_MOST_REST ? pace->next_rest * 2 : "
      "WORLD_SDF_PACE_MOST_REST;", "", "pace"),
     # a heavier scene taken for the bake's lateness (its rests ever longer: the field never comes)
     (BAKE, "\t\t\tpace->next_rest = WORLD_SDF_PACE_LEAST_REST;\n\t\treturn 1;", "\t\t\t;\n\t\treturn 1;", "pace"),
-    # a fast machine's few milliseconds a hitch
-    (BAKE, "pace->normal * WORLD_SDF_PACE_HITCH + WORLD_SDF_PACE_HITCH_SLACK_MS", "pace->normal * WORLD_SDF_PACE_HITCH",
-     "pace"),
     # the normal not learned again as it rests (the first one kept for good)
-    (BAKE, "\tpace->normal = pace->rested_total / (float)pace->rested;", "\tif (pace->normal <= 0.0f)\n\t\t"
-     "pace->normal = pace->rested_total / (float)pace->rested;", "pace"),
+    (BAKE, "\t\tpace->normal = median;", "\t\tif (pace->normal <= 0.0f)\n\t\t\tpace->normal = median;", "pace"),
     # a cell marked only where a triangle is within range of its middle (not of each of its voxels)
     (BAKE, "float reach = header->range + 0.5f * step * 1.7320508f;", "float reach = header->range;", "soup"),
     # the table's kinds read the wrong way round
