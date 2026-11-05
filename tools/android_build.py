@@ -895,7 +895,11 @@ def generate_android_build(n: Writer, sln: Any) -> None:
     staged_licenses = [assets_dir / "licenses" / name for _, name in licenses]
     for (source, _), staged in zip(licenses, staged_licenses):
         n.build(outputs=staged, rule="android_copy", inputs=source)
-    staged_assets = [staged_image, staged_brokers, *staged_licenses]
+    # ... and the stock maps' preparations' records, which it writes there too
+    # (port/linux/src/prepared_shipped.h)
+    staged_records = assets_dir / "prepared.records"
+    n.build(outputs=staged_records, rule="android_copy", inputs=Path("port/assets/prepared/prepared.records"))
+    staged_assets = [staged_image, staged_brokers, staged_records, *staged_licenses]
     n.build(outputs="android", rule="phony", inputs=[libmain, staged_sdl, *staged_assets])
 
     apk = PORT_DIR / "app" / "build" / "outputs" / "apk" / "debug" / "app-debug.apk"

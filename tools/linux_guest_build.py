@@ -368,5 +368,9 @@ def _generate(n: Writer, sln: Any, target: LinuxGuest, config_path: Path, third_
     # ... and the relays offered when a direct connection fails (network.relays_file)
     relays = build / "relays.txt"
     n.build(outputs=relays, rule=f"{prefix}_copy", inputs=Path("port/assets/network/relays.txt"))
-    n.build(outputs=target.name, rule="phony", inputs=[output, staged_sdl, sdl_license, brokers, masters, relays])
+    # ... and the stock maps' preparations' records (port/linux/src/prepared_shipped.h)
+    records = build / "prepared.records"
+    n.build(outputs=records, rule=f"{prefix}_copy", inputs=Path("port/assets/prepared/prepared.records"))
+    n.build(outputs=target.name, rule="phony", inputs=[output, staged_sdl, sdl_license, brokers, masters, relays,
+                                                         records])
     n.newline()

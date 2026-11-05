@@ -305,6 +305,19 @@ void host_app_start(void)
 			[files removeItemAtPath:copy error:NULL];
 			[files copyItemAtPath:brokers toPath:copy error:NULL];
 		}
+		/* ...and the stock maps' preparations' records (port/linux/src/
+		prepared_shipped.h), the same way */
+		{
+			NSString *records = [bundle pathForResource:@"prepared" ofType:@"records"];
+
+			if (records)
+			{
+				NSString *copy = [documents_folder stringByAppendingPathComponent:@"prepared.records"];
+
+				[files removeItemAtPath:copy error:NULL];
+				[files copyItemAtPath:records toPath:copy error:NULL];
+			}
+		}
 
 		saves = [documents_folder stringByAppendingPathComponent:@"saves"];
 		if (!getenv("HALO_SAVE_ROOT") && !config_path_setting("paths.saves"))

@@ -514,6 +514,11 @@ static void prepare_begin(
 				;
 			if (other < prepare.count)
 				continue;
+			/* (nor one whose record is shipped with the game: its first load
+			plays it, render_prepared.c) */
+			if (render_prepared_shipped_map(menu_picture_map_checksum(menu_picture_poses[wanted[index]].map),
+				menu_picture_poses[wanted[index]].scenario))
+				continue;
 			prepare.record_only[prepare.count] = TRUE;
 			prepare.poses[prepare.count++] = wanted[index];
 		}
