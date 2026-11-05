@@ -306,6 +306,37 @@ static void case_flick(void)
 		turned / DEGREES);
 }
 
+/* when the turn counts: each mode, its button and the right stick's touch; which controllers say when their right
+stick is touched (the Steam Deck's own controls and the Steam Controller, by SDL's drivers), which is the Deck */
+static void case_modes(void)
+{
+	int held, touched;
+
+	for (held = 0; held < 2; held++)
+	{
+		for (touched = -1; touched < 2; touched++)
+		{
+			CHECK(!gyro_aim_active(GYRO_AIM_OFF, held, touched), "off, it turned (held %d, touched %d)", held, touched);
+			CHECK(gyro_aim_active(GYRO_AIM_ON, held, touched), "always on, it did not turn");
+			CHECK(gyro_aim_active(GYRO_AIM_HOLD, held, touched) == held, "hold to aim: %d with the button %d",
+				gyro_aim_active(GYRO_AIM_HOLD, held, touched), held);
+			CHECK(gyro_aim_active(GYRO_AIM_PAUSE, held, touched) == !held, "hold to pause: %d with the button %d",
+				gyro_aim_active(GYRO_AIM_PAUSE, held, touched), held);
+			CHECK(gyro_aim_active(GYRO_AIM_TOUCH, held, touched) == (touched > 0),
+				"thumb on stick: %d, touched %d (the button %d)", gyro_aim_active(GYRO_AIM_TOUCH, held, touched),
+				touched, held);
+		}
+	}
+	CHECK(gyro_stick_touch_known(0x28de, 0x1205), "the Steam Deck's controls: no stick touch");
+	CHECK(gyro_stick_touch_known(0x28de, 0x1302) && gyro_stick_touch_known(0x28de, 0x1305),
+		"the Steam Controller: no stick touch");
+	CHECK(!gyro_stick_touch_known(0x28de, 0x11ff), "Steam Input's virtual controller: a stick touch");
+	CHECK(!gyro_stick_touch_known(0x28de, 0x1102) && !gyro_stick_touch_known(0x054c, 0x0ce6) &&
+		!gyro_stick_touch_known(0x045e, 0x0b12), "the 2015 Steam Controller, a DualSense, an Xbox pad: a stick touch");
+	CHECK(gyro_steam_deck(0x28de, 0x1205) && !gyro_steam_deck(0x28de, 0x1302) && !gyro_steam_deck(0x28de, 0x11ff),
+		"the Steam Deck's controls told from the others wrong");
+}
+
 int main(int argc, char **argv)
 {
 	const char *name = argc > 1 ? argv[1] : "";
@@ -322,6 +353,8 @@ int main(int argc, char **argv)
 		case_smoothing();
 	else if (!strcmp(name, "flick"))
 		case_flick();
+	else if (!strcmp(name, "modes"))
+		case_modes();
 	else
 	{
 		fprintf(stderr, "no case %s\n", name);

@@ -79,6 +79,40 @@ of samples, for its bias (the controller put down still) */
 #define GYRO_AIM_CALIBRATION_SECONDS 1.5f
 void gyro_aim_calibrate(struct gyro_aim *aim);
 
+/* ---------- when the gyroscope's turn counts (input.gyro_aim) */
+
+enum gyro_aim_mode
+{
+	GYRO_AIM_OFF,
+	/* always */
+	GYRO_AIM_ON,
+	/* while input.gyro_button is held */
+	GYRO_AIM_HOLD,
+	/* always but while it is held (to bring the controller back to the
+	middle, a ratchet) */
+	GYRO_AIM_PAUSE,
+	/* while the thumb is on the right stick (its capacitive touch) */
+	GYRO_AIM_TOUCH,
+};
+
+/* whether the turn counts in a mode, the gyro button held or not, the right
+stick touched or not (touched < 0: the controller cannot tell, and Thumb on
+Stick turns nothing) */
+int gyro_aim_active(int mode, int held, int touched);
+
+/* whether a controller (its USB vendor and product) reports the touch of its
+right stick: SDL 3.4's HIDAPI drivers of the Steam Deck's own controls
+(28de:1205) and of the Steam Controller (2026: 28de:1302 to 1305) give it
+as the gamepad's misc4 button (SDL_gamepad.c's mapping for them: misc4 is
+their button 18, RIGHT_JOYSTICK_TOUCH, SDL_hidapi_steamdeck.c and
+SDL_hidapi_steam_triton.c). Steam Input's virtual controller (28de:11ff)
+has none */
+int gyro_stick_touch_known(unsigned short vendor, unsigned short product);
+
+/* whether a controller is the Steam Deck's own controls (28de:1205), whose
+misc1 is the Quick Access button, Steam's own */
+int gyro_steam_deck(unsigned short vendor, unsigned short product);
+
 /* ---------- the flick stick */
 
 struct flick_stick

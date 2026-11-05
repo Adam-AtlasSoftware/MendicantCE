@@ -50,6 +50,12 @@ void controller_device_read(void *handle, struct controller_device *device)
         device->vendor = SDL_GetGamepadVendor(gamepad);
         device->product = SDL_GetGamepadProduct(gamepad);
         snprintf(device->name, sizeof(device->name), "%s", name ? name : "Unknown controller");
+        /* (Valve's 28de:1205, SDL's Steam Deck driver: its own labels) */
+        if (device->vendor == 0x28de && device->product == 0x1205) device->family = CONTROLLER_STEAM_DECK;
+        device->paddles = (SDL_GamepadHasButton(gamepad, SDL_GAMEPAD_BUTTON_LEFT_PADDLE1) ? 1u : 0u) |
+            (SDL_GamepadHasButton(gamepad, SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1) ? 2u : 0u) |
+            (SDL_GamepadHasButton(gamepad, SDL_GAMEPAD_BUTTON_LEFT_PADDLE2) ? 4u : 0u) |
+            (SDL_GamepadHasButton(gamepad, SDL_GAMEPAD_BUTTON_RIGHT_PADDLE2) ? 8u : 0u);
     }
 #else
     /* The guest's SDL bridge exposes the family but not a device name

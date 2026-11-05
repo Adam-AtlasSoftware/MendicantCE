@@ -1813,6 +1813,9 @@ second (tools/scorecard). An event is "<start>[-<end>] <action>":
     tilt=<x>,<y>,<z>     its accelerometer reading up along this direction
                          (its axes), start to end; level (0,1,0) else
     gyro_button          its gyroscope button (input.gyro_button) held
+    stick_touch          the thumb on its right stick (its touch, as a
+                         Steam Deck's), start to end (input.gyro_aim's
+                         "touch")
     gyro_calibrate       its calibration asked for at start, once
 
 A time on the 30 Hz grid (a multiple of 1/30) falls on a step at every
@@ -1831,7 +1834,7 @@ static struct test_script_event
 	int aim, aimed;
 	int hunt;
 	/* (gyro=, tilt=: the rates or the direction in x, y and z) */
-	int gyro, tilt, gyro_button, gyro_calibrate;
+	int gyro, tilt, gyro_button, stick_touch, gyro_calibrate;
 	float z;
 } test_script[TEST_SCRIPT_EVENTS];
 static int test_script_count;
@@ -1905,6 +1908,8 @@ static void test_script_parse(const char *script)
 			event->tilt = test_script_gyro = 1;
 		else if (!strcmp(action, "gyro_button"))
 			event->gyro_button = test_script_gyro = 1;
+		else if (!strcmp(action, "stick_touch"))
+			event->stick_touch = test_script_gyro = 1;
 		else if (!strcmp(action, "gyro_calibrate"))
 			event->gyro_calibrate = test_script_gyro = 1;
 		else
@@ -1945,7 +1950,7 @@ static void test_script_gamepad(XINPUT_GAMEPAD *pad)
 			continue;
 		}
 		/* (the gyroscope's are gyro_test_feed's) */
-		if (event->gyro || event->tilt || event->gyro_button || event->gyro_calibrate)
+		if (event->gyro || event->tilt || event->gyro_button || event->stick_touch || event->gyro_calibrate)
 			continue;
 		if (t < event->start || t >= event->end)
 			continue;
@@ -2450,6 +2455,27 @@ static void sdl_gamepad_state(SDL_Gamepad *gamepad, XINPUT_GAMEPAD *pad)
 	if (abs(value) > abs(pad->sThumbRY)) pad->sThumbRY = value;
 }
 
+/* the back paddles held (controller_remap_paddles' bits: the left, the
+right, the second left, the second right; a Steam Deck's L4, R4, L5, R5),
+which only a custom layout's actions take (Button Remapping) */
+static unsigned int sdl_gamepad_paddles(SDL_Gamepad *gamepad)
+{
+	static const SDL_GamepadButton paddles[4] =
+	{
+		SDL_GAMEPAD_BUTTON_LEFT_PADDLE1, SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1,
+		SDL_GAMEPAD_BUTTON_LEFT_PADDLE2, SDL_GAMEPAD_BUTTON_RIGHT_PADDLE2,
+	};
+	unsigned int held = 0;
+	int index;
+
+	for (index = 0; gamepad && index < 4; index++)
+	{
+		if (SDL_GetGamepadButton(gamepad, paddles[index]))
+			held |= 1u << index;
+	}
+	return held;
+}
+
 /* ---------- gyro aiming and the flick stick (gyro_aim.h)
 
 A controller with a gyroscope (SDL's gamepad sensors: a DualSense, a
@@ -2475,14 +2501,6 @@ stick looks.
 The scripted player's gyroscope (debug.test_input "script:", gyro=, tilt=,
 gyro_button, gyro_calibrate) is a controller of its own on port 0, whose
 samples go through the same code (gyro_device_sample). */
-
-enum
-{
-	_gyro_off,
-	_gyro_on,
-	_gyro_hold,
-	_gyro_pause,
-};
 
 /* (the triggers, which are axes: past half way is held) */
 #define GYRO_BUTTON_LEFT_TRIGGER (-2)
@@ -2525,8 +2543,8 @@ static void gyro_settings_read(void)
 		return;
 	read_at = config_changes();
 	mode = config_string("input.gyro_aim");
-	gyro_settings.mode = !strcmp(mode, "on") ? _gyro_on : !strcmp(mode, "hold") ? _gyro_hold :
-		!strcmp(mode, "pause") ? _gyro_pause : _gyro_off;
+	gyro_settings.mode = !strcmp(mode, "on") ? GYRO_AIM_ON : !strcmp(mode, "hold") ? GYRO_AIM_HOLD :
+		!strcmp(mode, "pause") ? GYRO_AIM_PAUSE : !strcmp(mode, "touch") ? GYRO_AIM_TOUCH : GYRO_AIM_OFF;
 	button = config_string("input.gyro_button");
 	gyro_settings.button = gyro_buttons[0].button;
 	for (index = 0; index < sizeof(gyro_buttons) / sizeof(gyro_buttons[0]); index++)
@@ -2553,9 +2571,12 @@ struct gyro_device
 {
 	SDL_JoystickID id;
 	/* what it has (looked at once), its sensors on; a Steam Input virtual
-	controller */
+	controller; the touch of its right stick (gyro_stick_touch_known); the
+	Steam Deck's own controls */
 	BOOL looked;
-	BOOL has_gyro, has_accelerometer, steam;
+	BOOL has_gyro, has_accelerometer, steam, stick_touch, deck;
+	/* (Thumb on Stick's want of a touch said in the log) */
+	BOOL touch_told;
 	BOOL enabled;
 	/* its gyroscope's turn counts (input.gyro_aim and its button) */
 	BOOL active;
@@ -2647,10 +2668,42 @@ void halo_gyro_sensor_event(SDL_JoystickID which, int sensor, const float *data,
 	pthread_mutex_unlock(&gyro_lock);
 }
 
-/* the gyroscope button held on a controller */
-static BOOL gyro_button_held(SDL_Gamepad *gamepad, int button)
+/* whether the game runs on a Steam Deck: Steam says so to the games it
+starts (SteamDeck=1), or the machine's name does (DMI's product name: Valve's
+Jupiter, the LCD model, or Galileo, the OLED) */
+int halo_steam_deck(void)
 {
-	if (!gamepad)
+	static int known = -1;
+
+	if (known < 0)
+	{
+#ifdef HALO_GUEST
+		known = 0;
+#else
+		const char *steam_deck = getenv("SteamDeck");
+		char name[64];
+		FILE *file;
+
+		known = steam_deck && !strcmp(steam_deck, "1");
+		if (!known && (file = fopen("/sys/devices/virtual/dmi/id/product_name", "r")) != NULL)
+		{
+			if (fgets(name, sizeof(name), file))
+			{
+				name[strcspn(name, "\r\n")] = 0;
+				known = !strcmp(name, "Jupiter") || !strcmp(name, "Galileo");
+			}
+			fclose(file);
+		}
+#endif
+	}
+	return known;
+}
+
+/* the gyroscope button held on a controller (a Steam Deck's misc1, its
+Quick Access button, is Steam's: never) */
+static BOOL gyro_button_held(struct gyro_device *device, SDL_Gamepad *gamepad, int button)
+{
+	if (!gamepad || (device->deck && button == SDL_GAMEPAD_BUTTON_MISC1))
 		return FALSE;
 	if (button == GYRO_BUTTON_LEFT_TRIGGER)
 		return SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > 16384;
@@ -2666,13 +2719,20 @@ static void gyro_device_look(struct gyro_device *device, SDL_Gamepad *gamepad, i
 	device->has_gyro = SDL_GamepadHasSensor(gamepad, SDL_SENSOR_GYRO);
 	device->has_accelerometer = SDL_GamepadHasSensor(gamepad, SDL_SENSOR_ACCEL);
 	device->steam = SDL_GetGamepadSteamHandle(gamepad) != 0;
+#ifndef HALO_GUEST
+	device->stick_touch = gyro_stick_touch_known(SDL_GetGamepadVendor(gamepad), SDL_GetGamepadProduct(gamepad));
+	device->deck = gyro_steam_deck(SDL_GetGamepadVendor(gamepad), SDL_GetGamepadProduct(gamepad));
+#endif
 	if (device->has_gyro)
-		platform_log("gyro: controller %u (port %d): a gyroscope%s", (unsigned)device->id, port + 1,
-			device->has_accelerometer ? " and an accelerometer" : ", no accelerometer (local space only)");
+		platform_log("gyro: controller %u (port %d): a gyroscope%s%s", (unsigned)device->id, port + 1,
+			device->has_accelerometer ? " and an accelerometer" : ", no accelerometer (local space only)",
+			device->stick_touch ? ", the right stick's touch" : "");
 	else if (device->steam)
 		platform_log("gyro: controller %u (port %d): Steam Input's virtual controller, which passes no gyroscope "
-			"to the game; to aim with the gyroscope here, turn Steam Input off for OpenH1 (the game's Properties, "
-			"Controller), or use Steam's own gyro mapping", (unsigned)device->id, port + 1);
+			"to the game; to aim with the gyroscope here, turn Steam Input off for OpenH1 (%s), or use Steam's "
+			"own gyro mapping", (unsigned)device->id, port + 1, halo_steam_deck() ?
+			"Steam > OpenH1 > the controller icon > Disable Steam Input" :
+			"in Steam, OpenH1's Properties > Controller > Disable Steam Input");
 	else
 		platform_log("gyro: controller %u (port %d): no gyroscope", (unsigned)device->id, port + 1);
 }
@@ -2740,15 +2800,17 @@ static void gyro_test_feed(void)
 	}
 }
 
-/* the script holds the gyroscope button */
-static BOOL gyro_test_button(void)
+/* the script holds the gyroscope button (touch: has the thumb on the right
+stick) */
+static BOOL gyro_test_button(BOOL touch)
 {
 	double t = sim_trace_scenario_seconds() + 1e-6;
 	int index;
 
 	for (index = 0; index < test_script_count; index++)
 	{
-		if (test_script[index].gyro_button && t >= test_script[index].start && t < test_script[index].end)
+		if ((touch ? test_script[index].stick_touch : test_script[index].gyro_button) &&
+			t >= test_script[index].start && t < test_script[index].end)
 			return TRUE;
 	}
 	return FALSE;
@@ -2761,6 +2823,8 @@ static void gyro_port_update(int port, SDL_Gamepad *gamepad, SDL_JoystickID id)
 {
 	struct gyro_device *device = NULL;
 	BOOL held = FALSE, want;
+	/* (the right stick touched; -1, the controller cannot tell) */
+	int touched = -1;
 
 	gyro_settings_read();
 	pthread_mutex_lock(&gyro_lock);
@@ -2769,19 +2833,30 @@ static void gyro_port_update(int port, SDL_Gamepad *gamepad, SDL_JoystickID id)
 		if (!gyro_test_device.looked)
 		{
 			gyro_test_device.looked = gyro_test_device.has_gyro = gyro_test_device.has_accelerometer = TRUE;
+			gyro_test_device.stick_touch = TRUE;
 			gyro_test_device.enabled = TRUE;
 			platform_log("gyro: test: the script's gyroscope on port 1");
 		}
 		device = &gyro_test_device;
-		held = gyro_test_button();
+		held = gyro_test_button(FALSE);
+		touched = gyro_test_button(TRUE);
 	}
 	else if (gamepad)
 	{
 		device = gyro_device_of(id, TRUE);
 		if (!device->looked)
 			gyro_device_look(device, gamepad, port);
-		held = gyro_button_held(gamepad, gyro_settings.button);
-		want = device->has_gyro && (gyro_settings.mode != _gyro_off || device->aim.calibrating);
+		held = gyro_button_held(device, gamepad, gyro_settings.button);
+		if (device->stick_touch)
+			touched = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_MISC4);
+		else if (gyro_settings.mode == GYRO_AIM_TOUCH && device->has_gyro && !device->touch_told)
+		{
+			device->touch_told = TRUE;
+			platform_log("gyro: controller %u (port %d): Thumb on Stick, but it does not say when its right stick "
+				"is touched (a Steam Deck's own controls and the Steam Controller do): its gyroscope turns nothing",
+				(unsigned)id, port + 1);
+		}
+		want = device->has_gyro && (gyro_settings.mode != GYRO_AIM_OFF || device->aim.calibrating);
 		if (want != device->enabled)
 		{
 			SDL_SetGamepadSensorEnabled(gamepad, SDL_SENSOR_GYRO, want);
@@ -2801,8 +2876,7 @@ static void gyro_port_update(int port, SDL_Gamepad *gamepad, SDL_JoystickID id)
 	}
 	if (device)
 	{
-		device->active = gyro_settings.mode == _gyro_on || (gyro_settings.mode == _gyro_hold && held) ||
-			(gyro_settings.mode == _gyro_pause && !held);
+		device->active = gyro_aim_active(gyro_settings.mode, held, touched);
 		if (device == &gyro_test_device)
 			gyro_test_feed();
 	}
@@ -3153,6 +3227,7 @@ DWORD WINAPI XInputGetState(HANDLE device, PXINPUT_STATE state)
 	chat_pad_record((short)port, &physical);
 	chat_physical_pad[port] = chat_pad[port];
 	controller_remap_reserve((short)port, remap_reserved(port));
+	controller_remap_paddles((short)port, sdl_gamepad_paddles(port_gamepad(gamepads, count, port)));
 	captured = controller_remap_input((short)port, &physical, port_gamepad(gamepads, count, port) != NULL);
 	if (port == 0)
 	{

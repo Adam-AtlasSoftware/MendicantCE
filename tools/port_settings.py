@@ -1179,9 +1179,11 @@ PAGES = {
              "Whether a controller with a gyroscope is connected: a DualSense, a DualShock 4, a Switch Pro "
              "Controller or Joy-Cons, a Steam Deck.|With Steam Input, turn it off for OpenH1.", None, "gyro_found"),
             ("GYRO AIMING", "input.gyro_aim",
-             [("OFF", "off"), ("ALWAYS ON", "on"), ("HOLD TO AIM", "hold"), ("HOLD TO PAUSE", "pause")],
+             [("OFF", "off"), ("ALWAYS ON", "on"), ("HOLD TO AIM", "hold"), ("HOLD TO PAUSE", "pause"),
+              ("THUMB ON STICK", "touch")],
              "Aim by turning the controller, as you would a mouse; the stick still works too. Hold to Aim: only "
-             "while the gyro button is held. Hold to Pause: except while it is held, to re-center.|No aim assist "
+             "while the gyro button is held. Hold to Pause: except while it is held, to re-center. Thumb on "
+             "Stick: while your thumb touches the right stick (a Steam Deck, a Steam Controller).|No aim assist "
              "on the gyro's aim.", None),
             ("GYRO BUTTON", "input.gyro_button", GYRO_BUTTONS,
              "The button that Hold to Aim and Hold to Pause hold. It still does its own action too: Button "

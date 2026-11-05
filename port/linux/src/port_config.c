@@ -959,9 +959,10 @@ static const struct config_setting config_settings[] =
 	{ "input.controller_p1", _config_string, "\"\"", "HALO_CONTROLLER_P1", _environment_value, _platform_all,
 		"P1 custom controller layout; empty uses the profile's preset. Edit in\n"
 		"Settings > Controls > Controller > Button Remapping. v3: 26 physical\n"
-		"button names, unbound among them; gameplay and the debug camera have\n"
-		"separate bindings. Old ten-action and v2 layouts are accepted. See\n"
-		"docs/controller_remapping.md for the full order." },
+		"button names (the back paddles too), unbound among them; gameplay and\n"
+		"the debug camera have separate bindings. Old ten-action and v2\n"
+		"layouts are accepted. See docs/controller_remapping.md for the full\n"
+		"order." },
 	{ "input.controller_p2", _config_string, "\"\"", "HALO_CONTROLLER_P2", _environment_value, _platform_all,
 		"P2 custom controller buttons, same format as controller_p1. Empty uses the profile." },
 	{ "input.controller_p3", _config_string, "\"\"", "HALO_CONTROLLER_P3", _environment_value, _platform_all,
@@ -986,8 +987,10 @@ static const struct config_setting config_settings[] =
 		"DualShock 4, a Switch Pro Controller or Joy-Cons, a Steam Deck with\n"
 		"Steam Input off for the game): \"off\"; \"on\", always; \"hold\", while\n"
 		"input.gyro_button is held; \"pause\", always but while it is held (to\n"
-		"bring the controller back to the middle). It turns the view as the\n"
-		"mouse does, with no aim assist; the stick keeps its own." },
+		"bring the controller back to the middle); \"touch\", while the thumb is\n"
+		"on the right stick (a Steam Deck's or a Steam Controller's, whose sticks\n"
+		"sense touch). It turns the view as the mouse does, with no aim assist;\n"
+		"the stick keeps its own." },
 	{ "input.gyro_button", _config_string, "\"touchpad\"", "HALO_GYRO_BUTTON", _environment_value, _platform_all,
 		"The button of input.gyro_aim's \"hold\" and \"pause\": \"touchpad\" (its\n"
 		"click), \"left_paddle\", \"right_paddle\" (the back buttons),\n"
@@ -3744,7 +3747,7 @@ static const struct
 	{ "input.touch_controls", { "auto", "on", "off", NULL }, NULL },
 	{ "input.touch_crouch", { "toggle", "hold", NULL }, NULL },
 	{ "input.crouch", { "hold", "toggle", NULL }, NULL },
-	{ "input.gyro_aim", { "off", "on", "hold", "pause", NULL }, NULL },
+	{ "input.gyro_aim", { "off", "on", "hold", "pause", "touch", NULL }, NULL },
 	{ "input.gyro_button", { "touchpad", "left_paddle", "right_paddle", "misc", "left_bumper", "right_bumper",
 		"left_trigger", "right_trigger", "left_stick", "right_stick", NULL }, NULL },
 	{ "input.gyro_space", { "player", "local", NULL }, NULL },

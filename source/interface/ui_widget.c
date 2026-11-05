@@ -4615,10 +4615,13 @@ void draw_string_and_hack_in_icons(
 				icon_index = remapped_icon_type;
 			}
 			/* port: an action the player's layout leaves without a button
-			(input.controller_p1 to p4) says so, as the HUD's prompts do */
-			if (icon_index == CONTROLLER_REMAP_UNBOUND)
+			(input.controller_p1 to p4) says so, as the HUD's prompts do,
+			and one on a back paddle names it (controller_remap_prompt_text) */
+			if (remapped_icon_type > _icon_right_stick && remapped_icon_type <= _icon_accept &&
+				controller_remap_prompt_text(local_player_index_for_draw_string_and_hack_in_icons, icon_index))
 			{
-				render_state_text(bounds, &cursor_bounds, L"UNBOUND");
+				render_state_text(bounds, &cursor_bounds,
+					controller_remap_prompt_text(local_player_index_for_draw_string_and_hack_in_icons, icon_index));
 				continue;
 			}
 

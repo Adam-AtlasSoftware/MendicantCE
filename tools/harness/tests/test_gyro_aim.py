@@ -34,6 +34,14 @@ AIM_CONTROLS = [
     ("\t\t\t\tturn -= rate * seconds;", "\t\t\t\tturn += rate * seconds;", "flick"),
     # no way back off the rim but its own threshold: a wavering stick flicks again
     ("#define FLICK_RIM_LEFT 0.7f", "#define FLICK_RIM_LEFT 0.9f", "flick"),
+    # thumb on stick: turning while the controller cannot tell, or with the gyro button instead of the touch
+    ("\t\treturn touched > 0;", "\t\treturn touched != 0;", "modes"),
+    ("\t\treturn touched > 0;", "\t\treturn held != 0;", "modes"),
+    # hold to pause turning while held
+    ("\t\treturn !held;", "\t\treturn 1;", "modes"),
+    # the Steam Controller's touch not known, or Steam Input's virtual controller's taken for one
+    ("(product >= 0x1302 && product <= 0x1305)", "(product == 0x1302)", "modes"),
+    ("return vendor == VALVE && (product", "return vendor == VALVE && (product == 0x11ff || product", "modes"),
 ]
 
 
@@ -45,7 +53,7 @@ def aim_generated(fault=None):
     return (("gyro_aim.h", read("port/linux/src/gyro_aim.h")), ("under_test.inc", code))
 
 
-@pytest.mark.parametrize("case", ["bias", "calibrate", "player_space", "tilt_followed", "smoothing", "flick"])
+@pytest.mark.parametrize("case", ["bias", "calibrate", "player_space", "tilt_followed", "smoothing", "flick", "modes"])
 def test_gyro_aim(case):
     status, output = run(build("gyro_aim", aim_generated()), case)
     assert status == 0, output

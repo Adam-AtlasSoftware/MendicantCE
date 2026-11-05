@@ -7,9 +7,11 @@
 #include <string.h>
 
 unsigned char const controller_remap_controls[CONTROLLER_REMAP_GAME_ACTIONS] = {0,1,2,3,4,5,6,7,10,11};
-static unsigned char const remap_buttons[CONTROLLER_REMAP_BUTTONS] = {0,1,2,3,4,5,6,7,14,15,8,9,10,11,13};
+static unsigned char const remap_buttons[CONTROLLER_REMAP_BUTTONS] = {0,1,2,3,4,5,6,7,14,15,8,9,10,11,13,
+    CONTROLLER_REMAP_PADDLE, CONTROLLER_REMAP_PADDLE + 1, CONTROLLER_REMAP_PADDLE + 2, CONTROLLER_REMAP_PADDLE + 3};
 static char const *const remap_names[] = {"south","east","west","north","rb","lb","lt","rt","ls","rs",
-    "dpad_up","dpad_down","dpad_left","dpad_right","back"};
+    "dpad_up","dpad_down","dpad_left","dpad_right","back",
+    "left_paddle","right_paddle","left_paddle2","right_paddle2"};
 
 void controller_remap_defaults(unsigned char *buttons)
 {
@@ -156,14 +158,20 @@ int controller_remap_cycle(int button, int direction)
 
 char const *controller_remap_button_name(int button, int family)
 {
-    static char const *const labels[4][CONTROLLER_REMAP_BUTTONS] = {
-        {"A","B","X","Y","RB / BLACK","LB / WHITE","LT","RT","LEFT STICK","RIGHT STICK","D-PAD UP","D-PAD DOWN","D-PAD LEFT","D-PAD RIGHT","BACK / SELECT"},
-        {"A","B","X","Y","RB / BLACK","LB / WHITE","LT","RT","LEFT STICK","RIGHT STICK","D-PAD UP","D-PAD DOWN","D-PAD LEFT","D-PAD RIGHT","BACK / SELECT"},
-        {"CROSS","CIRCLE","SQUARE","TRIANGLE","R1","L1","L2","R2","L3","R3","D-PAD UP","D-PAD DOWN","D-PAD LEFT","D-PAD RIGHT","TOUCHPAD / SELECT"},
-        {"B","A","Y","X","R","L","ZL","ZR","LEFT STICK","RIGHT STICK","D-PAD UP","D-PAD DOWN","D-PAD LEFT","D-PAD RIGHT","BACK / SELECT"}
+    static char const *const labels[5][CONTROLLER_REMAP_BUTTONS] = {
+        {"A","B","X","Y","RB / BLACK","LB / WHITE","LT","RT","LEFT STICK","RIGHT STICK","D-PAD UP","D-PAD DOWN","D-PAD LEFT","D-PAD RIGHT","BACK / SELECT",
+         "LEFT PADDLE","RIGHT PADDLE","LEFT PADDLE 2","RIGHT PADDLE 2"},
+        {"A","B","X","Y","RB / BLACK","LB / WHITE","LT","RT","LEFT STICK","RIGHT STICK","D-PAD UP","D-PAD DOWN","D-PAD LEFT","D-PAD RIGHT","BACK / SELECT",
+         "P3","P1","P4","P2"},
+        {"CROSS","CIRCLE","SQUARE","TRIANGLE","R1","L1","L2","R2","L3","R3","D-PAD UP","D-PAD DOWN","D-PAD LEFT","D-PAD RIGHT","TOUCHPAD / SELECT",
+         "LEFT BACK","RIGHT BACK","LEFT BACK 2","RIGHT BACK 2"},
+        {"B","A","Y","X","R","L","ZL","ZR","LEFT STICK","RIGHT STICK","D-PAD UP","D-PAD DOWN","D-PAD LEFT","D-PAD RIGHT","BACK / SELECT",
+         "LEFT PADDLE","RIGHT PADDLE","LEFT PADDLE 2","RIGHT PADDLE 2"},
+        {"A","B","X","Y","R1","L1","L2","R2","L3","R3","D-PAD UP","D-PAD DOWN","D-PAD LEFT","D-PAD RIGHT","VIEW",
+         "L4","R4","L5","R5"}
     };
     int i;
-    if (family < 0 || family > 3) family = 0;
+    if (family < 0 || family > 4) family = 0;
     for (i = 0; i < CONTROLLER_REMAP_BUTTONS; i++)
         if (remap_buttons[i] == button) return labels[family][i];
     return "UNBOUND";

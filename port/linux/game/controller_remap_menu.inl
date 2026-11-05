@@ -128,7 +128,16 @@ static boolean pad_editor_event(struct widget_instance *widget, char const *name
         controller_remap_capture_begin(port);
     }
     else
-        pad_editor_propose(port, action, controller_remap_cycle(pad_editor.buttons[port][action], direction));
+    {
+        /* (past the back paddles the player's controller has not) */
+        struct controller_device device;
+        int button = pad_editor.buttons[port][action];
+        controller_device_get(port, &device);
+        do button = controller_remap_cycle(button, direction);
+        while (button != CONTROLLER_REMAP_UNBOUND && button >= CONTROLLER_REMAP_PADDLE &&
+            !(device.paddles & (1u << (button - CONTROLLER_REMAP_PADDLE))));
+        pad_editor_propose(port, action, button);
+    }
     return TRUE;
 }
 
