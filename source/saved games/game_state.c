@@ -401,7 +401,13 @@ void game_state_revert(
 void game_state_save_to_persistent_storage(
 	void)
 {
-	if (player_spawn_count==1)
+	/* port: with no checkpoint yet in this map (a mission begun, or
+	restarted from the Campaign menu, and left before its first), the saved
+	game's file is kept: the new start's first checkpoint takes its place,
+	not a game state no checkpoint has (game_state_revert would start the
+	map over and leave the game state as it is, written with no map's
+	header) */
+	if (player_spawn_count==1 && (game_state_port_saved_game_valid() || recover_saved_games_hack))
 	{
 		game_state_note_event("save and quit");
 		game_state_revert();

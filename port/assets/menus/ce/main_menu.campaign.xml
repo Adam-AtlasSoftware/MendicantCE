@@ -13,9 +13,10 @@
 	<widget name="main_menu/campaign/campaign_list" type="column_list" width="640" height="480" flags="pass_unhandled_to_focused_child up_down_tabs_children" description="main_menu/campaign/campaign_panel">
 		<data input="port campaign update"/>
 		<child widget="main_menu/campaign/item_continue" x="28" y="92"/>
-		<child widget="main_menu/campaign/item_missions" x="28" y="142"/>
-		<child widget="main_menu/campaign/item_coop" x="28" y="170"/>
-		<child widget="main_menu/campaign/item_back" x="28" y="198"/>
+		<child widget="main_menu/campaign/item_restart" x="28" y="142"/>
+		<child widget="main_menu/campaign/item_missions" x="28" y="170"/>
+		<child widget="main_menu/campaign/item_coop" x="28" y="198"/>
+		<child widget="main_menu/campaign/item_back" x="28" y="226"/>
 		<child widget="main_menu/campaign/campaign_prompts" y="414"/>
 	</widget>
 	<widget name="main_menu/campaign/item_continue" type="text" width="280" height="46" wide="-106 80" bitmap="main_menu/campaign/continue_280x46" text="CONTINUE" font="ui\large_ui" color="#FFFFFFFF" text_x="64" text_y="2">
@@ -44,6 +45,11 @@
 		<frame map="ui\shell\bitmaps\sp_levels" index="10" width="91" height="46"/>
 	</bitmap>
 	<widget name="main_menu/campaign/continue_note" type="text" controller="1" left="64" top="24" width="208" height="18" font="ui\small_ui" color="#FFD6E9FF" wide="0 80" text_flags="no_focus_test">
+	</widget>
+	<widget name="main_menu/campaign/item_restart" type="text" width="280" height="26" wide="-106 80" bitmap="main_menu/parts/item_280x26" text="RESTART MISSION" font="ui\large_ui" color="#FF2896FF" text_x="10" text_y="2">
+		<on event="a" run="port campaign restart ask" open="main_menu/campaign/restart_screen"/>
+		<on event="start" run="port campaign restart ask" open="main_menu/campaign/restart_screen"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
 	</widget>
 	<widget name="main_menu/campaign/item_missions" type="text" width="280" height="26" wide="-106 80" bitmap="main_menu/parts/item_280x26" text="CHOOSE MISSION" font="ui\large_ui" color="#FF2896FF" text_x="10" text_y="2">
 		<on event="a" run="port campaign missions" open="main_menu/campaign/mission_screen"/>
@@ -112,12 +118,37 @@
 		<string text="Play any mission, on any difficulty."/>
 		<string text=""/>
 		<string text=""/>
+		<string text="Play the mission in progress again from its start, on the same difficulty."/>
 	</strings>
+	<widget name="main_menu/campaign/restart_screen" type="text" controller="1" left="180" top="160" width="280" height="160" flags="pass_unhandled_to_focused_child" bitmap="bitmaps/alert_bkd" font="ui\small_ui" color="#FF2896FF" align="center" text_x="-10" text_y="40">
+		<data input="port campaign restart update"/>
+		<on event="b" run="port campaign restart cancel" back="true"/>
+		<on event="back" run="port campaign restart cancel" back="true"/>
+		<child widget="main_menu/campaign/restart_button_bar" x="182" y="293"/>
+		<child widget="main_menu/campaign/header_restart" x="182" y="164"/>
+	</widget>
+	<widget name="main_menu/campaign/header_restart" type="text" controller="1" width="270" height="20" text="RESTART MISSION" font="ui\large_ui" color="#FF2896FF">
+	</widget>
+	<widget name="main_menu/campaign/restart_button_bar" type="column_list" width="256" height="20" flags="pass_unhandled_to_focused_child up_down_tabs_items left_right_tabs_items">
+		<child widget="main_menu/campaign/restart_button_cancel" x="128"/>
+		<child widget="main_menu/campaign/restart_button_confirm"/>
+	</widget>
+	<widget name="main_menu/campaign/restart_button_confirm" type="text" width="128" height="24" bitmap="bitmaps/text_button_background" text="RESTART" font="ui\small_ui" color="#FFFFFFFF" align="center" text_y="2">
+		<on event="a" run="port campaign restart"/>
+		<on event="start" run="port campaign restart"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
+	</widget>
+	<widget name="main_menu/campaign/restart_button_cancel" type="text" width="128" height="24" bitmap="bitmaps/text_button_background" text="CANCEL" font="ui\small_ui" color="#FFFFFFFF" align="center" text_y="2">
+		<on event="a" run="port campaign restart cancel" back="true"/>
+		<on event="start" run="port campaign restart cancel" back="true"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
+	</widget>
 	<widget name="main_menu/campaign/mission_screen" width="640" height="480" flags="pass_unhandled_to_focused_child" bitmap="bitmaps/gradient">
 		<on event="b" back="true"/>
 		<on event="back" back="true"/>
 		<on event="white" run="port campaign tab previous"/>
 		<on event="black" run="port campaign tab next"/>
+		<on event="y" run="port campaign missions restart" open="main_menu/campaign/restart_screen"/>
 		<child widget="main_menu/campaign/mission_cards"/>
 		<child widget="main_menu/campaign/header_missions"/>
 		<child widget="main_menu/campaign/source_prompt_previous"/>
@@ -490,10 +521,16 @@
 	<widget name="main_menu/campaign/mission_prompts" type="column_list" width="640" height="28" flags="pass_unhandled_to_focused_child left_right_tabs_items">
 		<child widget="main_menu/campaign/prompt_select" x="388" y="1"/>
 		<child widget="main_menu/campaign/prompt_back" x="516" y="1"/>
+		<child widget="main_menu/campaign/prompt_restart" x="260" y="1"/>
 	</widget>
 	<widget name="main_menu/campaign/prompt_select" type="text" width="124" height="24" wide="106 0" bitmap="main_menu/parts/item_124x24" font="ui\small_ui" color="#FFCFE3FF" text_x="8" text_y="3">
 		<on event="a" run="port campaign choose" open="main_menu/campaign/difficulty_screen"/>
 		<on event="start" run="port campaign choose" open="main_menu/campaign/difficulty_screen"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
+	</widget>
+	<widget name="main_menu/campaign/prompt_restart" type="text" width="124" height="24" wide="106 0" bitmap="main_menu/parts/item_124x24" text="%y-button RESTART" font="ui\small_ui" color="#FFCFE3FF" text_x="8" text_y="3">
+		<on event="a" run="port campaign missions restart" open="main_menu/campaign/restart_screen"/>
+		<on event="start" run="port campaign missions restart" open="main_menu/campaign/restart_screen"/>
 		<on event="left_mouse" run="mouse emit accept event"/>
 	</widget>
 	<widget name="main_menu/campaign/difficulty_screen" width="640" height="480" flags="pass_unhandled_to_focused_child" bitmap="bitmaps/gradient">

@@ -6270,7 +6270,11 @@ CAMPAIGN_PROMPT_BACK = ("prompt_back", "%b-button BACK", 516, 96, '<on event="a"
 CAMPAIGN_HINTS = ["Pick up where you left off: no mission or difficulty to choose.",
                   "Play any mission, on any difficulty.",
                   "",
-                  ""]
+                  "",
+                  "Play the mission in progress again from its start, on the same difficulty."]
+# Choose Mission's RESTART (on the saved game's mission), beside SELECT
+CAMPAIGN_PROMPT_RESTART = ("prompt_restart", "%y-button RESTART", 260, 124,
+                           '<on event="a" run="port campaign missions restart" open="main_menu/campaign/restart_screen"/>')
 
 
 def mission_card(size: tuple) -> str:
@@ -6414,7 +6418,9 @@ def _campaign_menu() -> list:
     y = CAMPAIGN_ITEMS_TOP
     children = [f'<child widget="{CAMPAIGN}/item_continue" x="{HUB_LIST_X}" y="{y}"/>']
     y += CAMPAIGN_CONTINUE[1] + 4
-    for name in ("item_missions", "item_coop", "item_back"):
+    # (RESTART MISSION shown with CONTINUE, the items under it moved down:
+    # campaign_menu.inc's campaign_screen_update)
+    for name in ("item_restart", "item_missions", "item_coop", "item_back"):
         children.append(f'<child widget="{CAMPAIGN}/{name}" x="{HUB_LIST_X}" y="{y}"/>')
         y += item_h + 2
     lines += _widget(f"{CAMPAIGN}/campaign_list", [("type", "column_list"), ("width", 640), ("height", 480),
@@ -6443,6 +6449,8 @@ def _campaign_menu() -> list:
     lines += _campaign_text(f"{CAMPAIGN}/continue_note", CONTINUE_ART_WIDTH + 14, 24, cw - CONTINUE_ART_WIDTH - 22, 18,
                             "ui\\small_ui", CAMPAIGN_TEXT, wide_layout=wide(0, HUB_WIDE_ITEMS))
     for name, words, handlers in (
+            ("item_restart", "RESTART MISSION", [f'<on event="{event}" run="port campaign restart ask" '
+                                                 f'open="{CAMPAIGN}/restart_screen"/>' for event in ("a", "start")]),
             ("item_missions", "CHOOSE MISSION", [f'<on event="{event}" run="port campaign missions" '
                                                  f'open="{CAMPAIGN}/mission_screen"/>' for event in ("a", "start")]),
             ("item_coop", "CO-OP", [f'<on event="{event}" open="{HUB}/coop_screen"/>' for event in ("a", "start")]),
@@ -6490,6 +6498,43 @@ def _campaign_menu() -> list:
     lines += _prompts(CAMPAIGN, "campaign_prompts", [CAMPAIGN_PROMPT_BACK])
     lines += _level_pictures(f"{CAMPAIGN}/art_{art_w}x{art_h}", art_w, art_h)
     lines += _strings(f"{CAMPAIGN}/hints", CAMPAIGN_HINTS)
+    lines += _restart_question()
+    return lines
+
+
+def _restart_question() -> list:
+    """the question before a mission in progress starts again (the Campaign
+    menu's RESTART MISSION, Choose Mission's RESTART on its card), laid out
+    as the PC version's Quit is (ce/main_menu.quit_select.xml), as internet
+    play's connecting box is: "Restart <mission>? Your progress in it will
+    be lost." (its text the game's: "port campaign restart update"), CANCEL
+    (with the focus, and B) back to the screen it was asked from, RESTART
+    the mission from its start at the saved game's difficulty"""
+    base = CAMPAIGN
+    lines = _widget(f"{base}/restart_screen",
+                    [("type", "text"), ("controller", 1), ("left", 180), ("top", 160), ("width", 280), ("height", 160),
+                     ("flags", "pass_unhandled_to_focused_child"), ("bitmap", "bitmaps/alert_bkd"),
+                     ("font", "ui\\small_ui"), ("color", "#FF2896FF"), ("align", "center"), ("text_x", -10),
+                     ("text_y", 40)],
+                    ['<data input="port campaign restart update"/>',
+                     '<on event="b" run="port campaign restart cancel" back="true"/>',
+                     '<on event="back" run="port campaign restart cancel" back="true"/>',
+                     f'<child widget="{base}/restart_button_bar" x="182" y="293"/>',
+                     f'<child widget="{base}/header_restart" x="182" y="164"/>'])
+    lines += _widget(f"{base}/header_restart",
+                     [("type", "text"), ("controller", 1), ("width", 270), ("height", 20), ("text", "RESTART MISSION"),
+                      ("font", "ui\\large_ui"), ("color", "#FF2896FF")], [])
+    # (CANCEL first, with the focus: nothing is lost by a press too many)
+    lines += _widget(f"{base}/restart_button_bar",
+                     [("type", "column_list"), ("width", 256), ("height", 20),
+                      ("flags", "pass_unhandled_to_focused_child up_down_tabs_items left_right_tabs_items")],
+                     [f'<child widget="{base}/restart_button_cancel" x="128"/>',
+                      f'<child widget="{base}/restart_button_confirm"/>'])
+    lines += _text_button(f"{base}/restart_button_confirm", "RESTART",
+                          [f'<on event="{event}" run="port campaign restart"/>' for event in ("a", "start")])
+    lines += _text_button(f"{base}/restart_button_cancel", "CANCEL",
+                          [f'<on event="{event}" run="port campaign restart cancel" back="true"/>'
+                           for event in ("a", "start")])
     return lines
 
 
@@ -6585,6 +6630,7 @@ def _missions() -> list:
                     ['<on event="b" back="true"/>', '<on event="back" back="true"/>',
                      '<on event="white" run="port campaign tab previous"/>',
                      '<on event="black" run="port campaign tab next"/>',
+                     f'<on event="y" run="port campaign missions restart" open="{base}/restart_screen"/>',
                      f'<child widget="{base}/mission_cards"/>',
                      f'<child widget="{base}/header_missions"/>',
                      f'<child widget="{base}/source_prompt_previous"/>',
@@ -6686,7 +6732,8 @@ def _missions() -> list:
                                                  ("height", PART_PROMPT_HEIGHT + 4),
                                                  ("flags", "pass_unhandled_to_focused_child left_right_tabs_items")],
                      [f'<child widget="{base}/prompt_select" x="388" y="1"/>',
-                      f'<child widget="{base}/prompt_back" x="516" y="1"/>'])
+                      f'<child widget="{base}/prompt_back" x="516" y="1"/>',
+                      f'<child widget="{base}/{CAMPAIGN_PROMPT_RESTART[0]}" x="{CAMPAIGN_PROMPT_RESTART[2]}" y="1"/>'])
     lines += _widget(f"{base}/prompt_select", [("type", "text"), ("width", 124), ("height", PART_PROMPT_HEIGHT),
                                                ("wide", prompt_wide(388, 124)),
                                                ("bitmap", part_highlight(124, PART_PROMPT_HEIGHT)),
@@ -6694,6 +6741,16 @@ def _missions() -> list:
                                                ("text_y", caps_text_y(PART_PROMPT_HEIGHT))],
                      [*(f'<on event="{event}" run="port campaign choose" open="{base}/difficulty_screen"/>'
                         for event in ("a", "start")),
+                      '<on event="left_mouse" run="mouse emit accept event"/>'])
+    # (RESTART, shown on the saved game's mission: a footer's prompt, as
+    # _prompts makes one)
+    name, words, x, width, handler = _prompt_fitted(CAMPAIGN_PROMPT_RESTART, 8, False)
+    lines += _widget(f"{base}/{name}", [("type", "text"), ("width", width), ("height", PART_PROMPT_HEIGHT),
+                                        ("wide", prompt_wide(x, width)),
+                                        ("bitmap", part_highlight(width, PART_PROMPT_HEIGHT)), ("text", words),
+                                        ("font", "ui\\small_ui"), ("color", PART_TEXT), ("text_x", 8),
+                                        ("text_y", caps_text_y(PART_PROMPT_HEIGHT))],
+                     [handler, handler.replace('event="a"', 'event="start"'),
                       '<on event="left_mouse" run="mouse emit accept event"/>'])
     return lines
 
