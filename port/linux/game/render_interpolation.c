@@ -144,6 +144,9 @@ struct player_control *player_control_get(short local_player_index);
 took them, as radians of the player's facing (the drawn view's own late
 reading) */
 boolean player_control_touch_look_late(short local_player_index, real *yaw, real *pitch);
+/* ... and a controller's gyroscope's (port/linux/src/xinput_sdl.c), zoomed
+as the input turns the player by it */
+boolean player_control_gyro_look_late(short local_player_index, real *yaw, real *pitch);
 /* view_fov.c: the mouse's turn zoomed (input.zoom_sensitivity) */
 real mouse_zoom_look_scale(short local_player_index, long unit_index, short zoom_level);
 /* port/linux/src/xinput_sdl.c: the mouse's motion come since the frame's
@@ -2731,9 +2734,10 @@ static short render_interpolation_direct(
 
 /* The aim's motion come since the frame's input took it, which the view
 drawn takes as late as it can: the mouse's (halo_linux_mouse_look_late, the
-first player's, as the input turns it: by the zoom's scale) and the touch
+first player's, as the input turns it: by the zoom's scale), the touch
 controls' swipe and gyroscope (player_control_touch_look_late, as the input
-turns them), read as the frame takes its view rather than at its start.
+turns them) and a controller's gyroscope (player_control_gyro_look_late),
+read as the frame takes its view rather than at its start.
 Only the view drawn takes it: the next frame's input turns the player by it
 (none in the VR mode, whose head aims). FALSE for none. Once a frame */
 static boolean render_interpolation_look_late(
@@ -2768,6 +2772,12 @@ static boolean render_interpolation_look_late(
 		turned = TRUE;
 	}
 	if (player_control_touch_look_late(local_player_index, &touch_yaw, &touch_pitch))
+	{
+		*yaw += touch_yaw;
+		*pitch += touch_pitch;
+		turned = TRUE;
+	}
+	if (player_control_gyro_look_late(local_player_index, &touch_yaw, &touch_pitch))
 	{
 		*yaw += touch_yaw;
 		*pitch += touch_pitch;

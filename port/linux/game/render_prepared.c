@@ -13,17 +13,23 @@ and bind the same textures.
 
 A record is kept in z:\prepared (beside the decompressed maps' cache
 files), a file for each map (its cache file's checksum and scenario), the
-records' form (PREPARED_VERSION, not the build: an update keeps them) and
-the settings that change what the walk draws (the lights, the ambient
-occlusion, the anti-aliasing, the HDR, Panini and so on, and whether the
-frame draws mirrors). The screen's size is not among them: the journal holds
-the game's state, which the front end turns into pipelines and targets as
-the screen is now. Played back, the map's enumeration (the set of distinct
-draws as the front end describes them: xgpu_manifest_enumeration) must be
-the record's; a record that is missing, cut short, malformed, of another
-form or settings, whose objects cannot all be found again, or whose draws
-are not the record's, is deleted and the walk made instead, which records
-again. A map is recorded at its first load, the stock maps at the game's
+records' form (PREPARED_VERSION, not the build: an update keeps them),
+whether the frame draws mirrors and the structure it starts in. No setting
+is in its key, nor the backend, the platform or the screen's size: one
+record is for every player's. The journal holds the game's state, which the
+front end turns into pipelines and targets as the settings and the screen
+are now (prepared_settings says of each setting why), and the walk draws,
+as it records, what every setting's would (the enhanced lights' passes,
+the ambient occlusion's pre-pass and Panini's pass, whatever the settings:
+the front end plays back what the settings now want of them). Played back
+under the settings, backend and GPU it was made with (its derivation), the
+map's enumeration (the set of distinct draws as the front end describes
+them: xgpu_manifest_enumeration) must be the record's; under others, which
+make other pipelines of the same draws, its objects must all be found. A
+record that is missing, cut short, malformed, of another form, whose
+objects cannot all be found again, or whose draws are not the record's
+under its own derivation, is deleted and the walk made instead, which
+records again. A map is recorded at its first load, the stock maps at the game's
 first start (menu_pictures_render.c: the menus' pictures' pass loads them
 all). HALO_PREPARED_RECORDS=0 turns the records off (the walk every time).
 
@@ -59,9 +65,12 @@ it is shipped.
 #include <xtl.h>
 
 /* the platform layer's (port/linux/src/port_config.c, xbox_files.c) */
-const char *config_string(char const *name);
+int config_text(char const *name, char *text, size_t size);
 void platform_log(char const *format, ...);
-int halo_dynamic_lights_enhanced(void);
+/* (port/linux/src/d3d8_device.c's) */
+unsigned long long halo_gpu_journal_derivation(unsigned long long hash);
+/* (panini.c's) */
+boolean panini_replay_projection(float projection[8]);
 
 #define PREPARED_MAGIC 0x50314f48u /* "HO1P" */
 /* what a record holds: a change to what the walk draws (render_enumerate.c,
@@ -70,7 +79,7 @@ and the game's code it draws through) or to this file's form must make it 2,
 build, so that an update keeps them; the journal's own form is in the key
 too (halo_gpu_journal_form), and a record whose replay does not make its
 draws is made again all the same. */
-#define PREPARED_VERSION 1
+#define PREPARED_VERSION 2
 /* the most words a record may hold */
 #define PREPARED_MAXIMUM_WORDS (64UL * 1024 * 1024)
 
@@ -83,15 +92,52 @@ struct prepared_header
 	uint32_t word_count;
 	uint32_t draw_count;
 	uint64_t words_hash;
+	/* the settings, backend and GPU its draws were derived under
+	(prepared_derivation): the enumeration is checked under these alone */
+	uint64_t derivation;
 };
 
-/* the settings that change what a map's preparation draws or makes */
+/* The settings that change a map's draws, none of them in a record's key.
+Each is either applied by the front end as a record plays (its pipelines,
+targets and textures made as the setting is now), or the walk draws, as it
+records, what every value of it would:
+- ambient_occlusion: the walk draws its pre-pass and the surfaces lit by it
+  whatever the setting, the journal noting them as with it on
+  (d3d8_device.c, halo_screen_ambient_occlusion_begin); played back with it
+  off, they are the surfaces' own draws (journal_occlusion);
+- anisotropic_filtering: the samplers', made as the record plays;
+- anti_aliasing: its pass journaled whatever the setting, the targets'
+  samples and the pass made as the record plays;
+- astc_textures: the textures' upload, as the record loads them;
+- dynamic_lights: the walk draws the passes lit by the enhanced lights as it
+  records, whatever the setting (halo_dynamic_lights_walked); the draws'
+  pipelines lit as the setting is now;
+- graphics: a preset, nothing but the other settings' values;
+- hdr, hdr_mode: the targets' formats and the tone map, made as the record
+  plays; the draws' HDR tags are journaled whatever they are;
+- high_res_hud, high_res_text: the bitmaps' pixels, as the record loads them
+  (the game draws a bitmap as its tag says either way);
+- model_detail: the walk draws each level of each model as the Xbox chose it
+  (debug_model_lod: model_detail_rules' stock);
+- overshield_effect, shield_glow, viewmodel_shield: a unit's constants and
+  lights as it plays; the walk draws every modifier shader on every model;
+- panini, panini_vertical: its pass journaled whatever the setting
+  (panini.c), played back where it is on now (panini_replay_projection);
+- per_pixel_lighting: the model lighting's pipelines, made as the record
+  plays;
+- shadow_resolution: the shadow maps' size, which the journal does not hold;
+- structure_culling: none in the walk (structure_culling.c), the game's own
+  visibility's frame;
+- first_person_legs, viewmodel_visible: the walk draws every first-person and
+  every unit's model whatever the setting.
+They are the record's derivation (prepared_derivation), that its
+enumeration is checked under. */
 static char const *const prepared_settings[] =
 {
 	"display.ambient_occlusion", "display.anisotropic_filtering", "display.anti_aliasing", "display.astc_textures",
 	"display.dynamic_lights", "display.graphics", "display.hdr", "display.hdr_mode", "display.high_res_hud",
 	"display.high_res_text", "display.model_detail", "display.overshield_effect", "display.panini",
-	"display.per_pixel_lighting", "display.shadow_resolution", "display.shield_glow", "display.structure_culling",
+	"display.panini_vertical", "display.per_pixel_lighting", "display.shadow_resolution", "display.shield_glow", "display.structure_culling",
 	"display.first_person_legs", "display.viewmodel_shield", "display.viewmodel_visible",
 };
 
@@ -100,7 +146,7 @@ static struct
 	boolean recording;
 	char path[64];
 	unsigned long checksum;
-	uint64_t key;
+	uint64_t key, derivation;
 	/* the record played is a shipped one's */
 	boolean shipped;
 	/* the shipped records passed over (their checksum and key's hash) */
@@ -108,10 +154,16 @@ static struct
 	unsigned long rejected_count;
 } prepared;
 
+static int prepared_panini(float projection[8])
+{
+	return panini_replay_projection(projection);
+}
+
 static struct halo_gpu_journal_bitmaps const prepared_bitmaps =
 {
 	texture_cache_port_identify,
 	texture_cache_port_load,
+	prepared_panini,
 };
 
 static boolean prepared_enabled(void)
@@ -131,40 +183,55 @@ static uint64_t prepared_hash_string(char const *text, uint64_t hash)
 	return xgpu_manifest_hash(text, strlen(text) + 1, hash);
 }
 
-/* a record's key: its form, the map's scenario and the settings, up to the
-map's own (prepared_key) */
+/* a record's key, up to the map's own (prepared_key): its form, the
+journal's and the map's scenario, as 32-bit words (the same on every
+platform); no setting (prepared_settings) */
+static uint64_t prepared_key_of(char const *scenario, unsigned long journal_form)
+{
+	uint32_t words[2];
+
+	words[0] = PREPARED_VERSION;
+	words[1] = (uint32_t)journal_form;
+	return prepared_hash_string(scenario, xgpu_manifest_hash(words, sizeof(words), XGPU_MANIFEST_HASH_START));
+}
+
 static uint64_t prepared_key_settings(char const *scenario)
 {
-	uint64_t hash = XGPU_MANIFEST_HASH_START;
-	short index;
-	unsigned long version = PREPARED_VERSION;
-
-	hash = xgpu_manifest_hash(&version, sizeof(version), hash);
-	hash = prepared_hash_string(scenario, hash);
-	version = halo_gpu_journal_form();
-	hash = xgpu_manifest_hash(&version, sizeof(version), hash);
-	for (index = 0; index < (short)NUMBEROF(prepared_settings); index++)
-	{
-		char const *value = config_string(prepared_settings[index]);
-
-		hash = prepared_hash_string(prepared_settings[index], hash);
-		hash = prepared_hash_string(value ? value : "", hash);
-	}
-	{
-		long enhanced = halo_dynamic_lights_enhanced() ? 1 : 0;
-
-		hash = xgpu_manifest_hash(&enhanced, sizeof(enhanced), hash);
-	}
-	return hash;
+	return prepared_key_of(scenario, halo_gpu_journal_form());
 }
 
 /* ...and the map's: whether it draws mirrors, the structure it starts in */
 static uint64_t prepared_key(uint64_t hash, boolean mirrors, long structure_bsp_index)
 {
-	long mirrored = mirrors ? 1 : 0;
+	uint32_t words[2];
 
-	hash = xgpu_manifest_hash(&mirrored, sizeof(mirrored), hash);
-	hash = xgpu_manifest_hash(&structure_bsp_index, sizeof(structure_bsp_index), hash);
+	words[0] = mirrors ? 1 : 0;
+	words[1] = (uint32_t)structure_bsp_index;
+	return xgpu_manifest_hash(words, sizeof(words), hash);
+}
+
+unsigned long long render_prepared_key(char const *scenario, unsigned long journal_form, boolean mirrors,
+	long structure_bsp_index)
+{
+	return prepared_key(prepared_key_of(scenario, journal_form), mirrors, structure_bsp_index);
+}
+
+/* the settings, backend and GPU a record's draws are derived under now */
+static uint64_t prepared_derivation(void)
+{
+	uint64_t hash = halo_gpu_journal_derivation(XGPU_MANIFEST_HASH_START);
+	short index;
+
+	for (index = 0; index < (short)NUMBEROF(prepared_settings); index++)
+	{
+		/* (as text, whatever its type: a boolean's, a number's) */
+		char value[256];
+
+		if (!config_text(prepared_settings[index], value, sizeof(value)))
+			value[0] = 0;
+		hash = prepared_hash_string(prepared_settings[index], hash);
+		hash = prepared_hash_string(value, hash);
+	}
 	return hash;
 }
 
@@ -180,6 +247,7 @@ static boolean prepared_choose(boolean mirrors)
 	hash = prepared_key(prepared_key_settings(scenario), mirrors, global_structure_bsp_index_get());
 	prepared.checksum = cache_files_get_checksum();
 	prepared.key = hash;
+	prepared.derivation = prepared_derivation();
 	CreateDirectoryA("z:\\prepared", NULL);
 	snprintf(prepared.path, sizeof(prepared.path), "z:\\prepared\\%08lx-%08lx%08lx.prepared", prepared.checksum,
 		(unsigned long)(hash >> 32), (unsigned long)hash);
@@ -228,7 +296,14 @@ unsigned long render_prepared_draws_missing(unsigned long long const *recorded, 
 	return missing;
 }
 
-/* a record's header is of this form, map and settings (key) */
+/* a record played back is good: well formed, its objects all found, and,
+played under the derivation it was made with, its draws all made */
+boolean render_prepared_played(int formed, unsigned long unknown, unsigned long missing, boolean same_derivation)
+{
+	return formed && !unknown && (!missing || !same_derivation);
+}
+
+/* a record's header is of this form and map (key) */
 static boolean prepared_header_fits(struct prepared_header const *header, unsigned long checksum, uint64_t key)
 {
 	return header->magic == PREPARED_MAGIC && header->version == PREPARED_VERSION &&
@@ -414,32 +489,6 @@ void render_prepared_stock_done(void)
 	}
 }
 
-boolean render_prepared_recorded(boolean mirrors)
-{
-	struct prepared_header header;
-	FILE *file;
-	boolean fits = FALSE;
-
-	if (!prepared_choose(mirrors))
-		return TRUE;
-	file = fopen(prepared.path, "rb");
-	if (file)
-	{
-		fits = fread(&header, sizeof(header), 1, file) == 1 &&
-			prepared_header_fits(&header, prepared.checksum, prepared.key);
-		fclose(file);
-	}
-	/* (or a shipped one of the map as a load starts it, whatever structure
-	the pass has come to: menu_pictures_render.c) */
-	if (!fits)
-		fits = render_prepared_shipped_map(prepared.checksum, global_scenario_index != NONE ?
-			tag_get_name(global_scenario_index) : "");
-	if (!fits)
-		platform_log("render: the map's preparation has no record (%s, structure %d%s): it is recorded",
-			prepared.path, global_structure_bsp_index_get(), mirrors ? ", mirrors" : "");
-	return fits;
-}
-
 boolean render_prepared_shipped(unsigned long checksum, unsigned long long key)
 {
 	struct prepared_header header;
@@ -498,15 +547,16 @@ boolean render_prepared_replay(boolean mirrors)
 	waited = halo_gpu_prepared();
 	texture_cache_idle();
 	halo_load_trace("enumerate.replay.end", NULL);
-	/* (every draw the walk made made again: more, a draw the walk did not
-	need, makes no difference to play) */
+	/* (every draw the walk made made again, under the derivation it was
+	made with: more, a draw the walk did not need, makes no difference to
+	play; under another, the draws' pipelines are others) */
 	missing = made ? render_prepared_draws_missing(record, header.draw_count, made, count) : header.draw_count;
-	if (missing && made)
+	if (missing && made && header.derivation == prepared.derivation)
 		prepared_log_new(record, header.draw_count);
 	if (made)
 		free(made);
 	free(record);
-	if (!formed || unknown || missing)
+	if (!render_prepared_played(formed, unknown, missing, header.derivation == prepared.derivation))
 	{
 		platform_log("render: the map's preparation's record played back does not make its draws (%s, %u objects "
 			"not found, %lu of its %lu draws not made, %lu made): it is made again", formed ? "well formed" :
@@ -518,9 +568,9 @@ boolean render_prepared_replay(boolean mirrors)
 		return FALSE;
 	}
 	platform_log("render: the map's shaders and pipelines made from its %s record (%lu draws, %lu recorded, %lu words, "
-		"in %lu ms, %.0f ms waited for the GPU's)", prepared.shipped ? "shipped" : "own", count,
-		(unsigned long)header.draw_count,
-		(unsigned long)header.word_count, system_milliseconds() - started, waited * 1000.0);
+		"%s, in %lu ms, %.0f ms waited for the GPU's)", prepared.shipped ? "shipped" : "own", count,
+		(unsigned long)header.draw_count, (unsigned long)header.word_count, header.derivation == prepared.derivation ?
+		"its own settings" : "other settings", system_milliseconds() - started, waited * 1000.0);
 	return TRUE;
 }
 
@@ -561,6 +611,7 @@ void render_prepared_record_end(void)
 	header.header_size = sizeof(header);
 	header.checksum = (uint32_t)prepared.checksum;
 	header.key = prepared.key;
+	header.derivation = prepared.derivation;
 	header.draw_count = (uint32_t)draw_count;
 	header.word_count = count;
 	header.words_hash = xgpu_manifest_hash(words, count * sizeof(*words),

@@ -30,6 +30,8 @@ static struct
 /* The physical buttons each port's overlays read as they are, whatever the
  * layout: controller_remap_reserve. */
 static unsigned int remap_reserved[4];
+/* Each port's back paddles held (controller_remap_paddles). */
+static unsigned int remap_paddles[4];
 
 void controller_remap_input_reset(void)
 {
@@ -42,6 +44,11 @@ static void physical_values(XINPUT_GAMEPAD const *pad, unsigned char *values)
     int i;
     memcpy(values, pad->bAnalogButtons, 8);
     for (i = 0; i < 8; i++) values[8+i] = pad->wButtons & digital_masks[i] ? 255 : 0;
+}
+
+void controller_remap_paddles(short port, unsigned int paddles)
+{
+    if (port >= 0 && port < 4) remap_paddles[port] = paddles & 15u;
 }
 
 static int capture_device_present(void)
@@ -104,7 +111,7 @@ void controller_remap_reserve(short port, unsigned int buttons)
 
 int controller_remap_input(short port, XINPUT_GAMEPAD *pad, int connected)
 {
-    unsigned char values[16], layout[CONTROLLER_REMAP_ACTIONS], targets[CONTROLLER_REMAP_ACTIONS];
+    unsigned char values[CONTROLLER_REMAP_PHYSICAL], layout[CONTROLLER_REMAP_ACTIONS], targets[CONTROLLER_REMAP_ACTIONS];
     unsigned int held = 0;
     struct controller_device device;
     struct platform_input_state input;
@@ -123,7 +130,8 @@ int controller_remap_input(short port, XINPUT_GAMEPAD *pad, int connected)
         return 1;
     }
     physical_values(pad, values);
-    for (i = 0; i < 16; i++) if (values[i] > 30) held |= 1u << i;
+    for (i = 0; i < 4; i++) values[CONTROLLER_REMAP_PADDLE+i] = remap_paddles[port] & (1u << i) ? 255 : 0;
+    for (i = 0; i < CONTROLLER_REMAP_PHYSICAL; i++) if (values[i] > 30) held |= 1u << i;
     platform_input_read(&input, FALSE);
     controller_device_get(port, &device);
     if (!input.focused) connected = 0;
@@ -138,7 +146,7 @@ int controller_remap_input(short port, XINPUT_GAMEPAD *pad, int connected)
             if (held & (1u << 12))
             { capture.result = 3; capture.phase = 3; }
             else
-                for (i = 0; i < 16; i++)
+                for (i = 0; i < CONTROLLER_REMAP_PHYSICAL; i++)
                     if (i != 12 && (held & (1u << i)))
                     { capture.button = i; capture.result = 1; capture.phase = 3; break; }
         }

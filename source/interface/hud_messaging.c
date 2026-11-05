@@ -1816,9 +1816,14 @@ void hud_messaging_update(
 								rectangle2d text_bounds;
 
 								draw_string_set_indents(line_cursor.x0 - line_bounds.x0, 0);
+								/* port: an action the player's layout leaves
+								without a button, or puts on a back paddle
+								(controller_remap_prompt_text) */
+								wchar_t const *remapped = controller_remap_prompt_text(local_player_index, icon_index);
+
 								draw_unicode_string_compute_bounds(
 									&line_bounds,
-									(icon_index == CONTROLLER_REMAP_UNBOUND ? L"UNBOUND" : L"<no button icon>") /* port: explicit cleared controller action */,
+									remapped ? remapped : L"<no button icon>",
 									&text_bounds,
 									&line_cursor);
 								line_cursor.x0 -= 3;
@@ -1828,7 +1833,7 @@ void hud_messaging_update(
 									NULL,
 									NULL,
 									0,
-									(icon_index == CONTROLLER_REMAP_UNBOUND ? L"UNBOUND" : L"<no button icon>") /* port: explicit cleared controller action */);
+									remapped ? remapped : L"<no button icon>");
 								line_bounds.y0 = line_cursor.y0;
 							}
 						}

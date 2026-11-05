@@ -1579,6 +1579,9 @@ static void main_new_map(
 	return;
 }
 
+/* port: the platform layer's (port/linux/src/port_config.c) */
+int config_boolean(const char *name);
+
 static void main_change_map_name(
 	void)
 {
@@ -1587,7 +1590,11 @@ static void main_change_map_name(
 	{
 		if (!main_globals.map_change_load_timer)
 		{
-			if (ui_main_menu_music_active() == TRUE)
+			/* port: the menu's second of fading to black before the level
+			loads, as the Xbox's, only with display.menu_fade (Classic's):
+			else the level loads at once, a load being a fraction of a
+			second now */
+			if (ui_main_menu_music_active() == TRUE && config_boolean("display.menu_fade"))
 			{
 				main_globals.map_change_load_timer =
 					main_globals.frame_start_milliseconds + 1000;

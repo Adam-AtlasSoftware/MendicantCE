@@ -30,7 +30,8 @@ shades with what of the field and the proxies is ready (D's shading).
   loads exactly as fast as it does today ([The bake's schedule](#the-bakes-schedule)), and a map's pipelines are
   prepared as with the setting off: the world's are made after the load ([Pipelines](#pipelines-never-in-a-load)).
 - **Off is pixel-identical.** Off emits no stream records and no new shader code: the emitters write byte-identical
-  shaders. The Classic preset sets `display.ambient_occlusion = "off"`, so Classic always bypasses all of this.
+  shaders. The game tells the front end only where a window's opaque surfaces are drawn (`halo_world_ao_span`),
+  which the renderer's manifest notes ([Pipelines](#pipelines-never-in-a-load)). The Classic preset sets `display.ambient_occlusion = "off"`, so Classic always bypasses all of this.
 
 ## The frame
 
@@ -534,9 +535,14 @@ draws then would be the world's, whose shaders are bigger, and the load longer (
   bound. Its draws use the stand-in (made in the load) until the world's shaders and pipeline are made: the shaders
   two a frame after the frame's draws (`world_make_some`, never while a map is prepared), the pipeline on the
   pipeline compilers, never waited for (`xgpu_vulkan_pipeline_ready`). No draw waits, no frame hitches; the world's
-  light comes in over the first frames of play, as the field fades in. The Metal backend doesn't do this yet (it has
-  no stand-in callback, so its world pipelines are made at their first draw, as before): its shaders are compiled
-  from source synchronously, so it needs Metal's asynchronous library compile first.
+  light comes in over the first frames of play, as the field fades in. The Metal backend has no stand-in callback
+  yet: its world pipelines are made at their first draw, from the app's library.
+- **The settings' one derivation:** the world's light is a fact of the draw (`xgpu_draw_facts.world`, from
+  `world_ao_key`), and `xgpu_draw_derive` (`xgpu_manifest.c`) gives it the same places as above. The renderer's
+  manifest notes it as it would be with `"world"` on (context `cw`), from the window's span as the game draws it,
+  whatever the setting and while a map is prepared; the journal keeps the span (`world_span`, form 6). The Mac's
+  and iOS's library is built under `"world"` too (`XGPU_MANIFEST_OCCLUSION_WORLD`), so the world's shaders are in
+  it. `debug.world_ao_view`'s aren't (a debug view, compiled at its first draw).
 
 The backends' `world_ao_window` and `world_ao_field` callbacks are still unset, so the records are decoded and
 ignored.

@@ -233,8 +233,6 @@ static struct
 	/* the interface drawn in a pass (not where the VR mode's eyes are
 	drawn), or to draw in the frame's HUD pass (render_enumerate_hud) */
 	boolean interface_drawn, interface_pending;
-	/* a map of the menus' pictures' to be recorded (NONE: not asked yet) */
-	short picture_recording;
 	struct render_fog own_fog;
 	unsigned long started;
 	/* (the CPU time the game's thread has spent: halo_thread_cpu_seconds) */
@@ -529,7 +527,7 @@ static short pass_fog(void)
 }
 
 /* the renderer's dynamic lights the stand-in lights (display.dynamic_lights
-"enhanced") */
+"enhanced", or the preparation recorded: halo_dynamic_lights_walked) */
 static boolean pass_dynamic_lights(void)
 {
 	return enumerate.pass >= NUMBER_OF_FOGS * NUMBER_OF_PARTS * NUMBER_OF_STENCIL_CONTEXTS;
@@ -537,7 +535,7 @@ static boolean pass_dynamic_lights(void)
 
 static short passes(void)
 {
-	return (short)((halo_dynamic_lights_enhanced() ? MAXIMUM_LIGHTINGS : 1) * NUMBER_OF_FOGS * NUMBER_OF_PARTS *
+	return (short)((halo_dynamic_lights_walked() ? MAXIMUM_LIGHTINGS : 1) * NUMBER_OF_FOGS * NUMBER_OF_PARTS *
 		NUMBER_OF_STENCIL_CONTEXTS);
 }
 
@@ -629,21 +627,14 @@ boolean render_enumerate_pending(boolean scope)
 		enumerate.structure_bsps_enumerated[0] = NULL;
 		enumerate.structure_bsps_enumerated[1] = NULL;
 		enumerate.new_map = FALSE;
-		enumerate.picture_recording = NONE;
 	}
-	/* (nor a map of the menus' pictures, whose one frame makes only the
-	pipelines it draws with, menu_pictures_render.c, but to record its
-	preparation where it has none, so that a player's first load of it is
-	played back: render_prepared.c) */
-	if (menu_pictures_preparing())
-	{
-		if (scope || !menu_pictures_stock_maps())
-			return FALSE;
-		if (enumerate.picture_recording == NONE)
-			enumerate.picture_recording = !render_prepared_recorded(structure_visibility_port_has_mirrors());
-		if (!enumerate.picture_recording)
-			return FALSE;
-	}
+	/* (a map of the menus' pictures too, menu_pictures_render.c, in its first
+	frame: from its record, where it has one, so that its pose's frame finds
+	its pipelines made, on the compilers, not one at a time as it draws;
+	else walked, and recorded, so that a player's first load of it is played
+	back: render_prepared.c) */
+	if (menu_pictures_preparing() && (scope || !menu_pictures_stock_maps()))
+		return FALSE;
 	if (!enumerate.structure_bsps_enumerated[view])
 	{
 		enumerate.structure_bsps_enumerated[view] =
@@ -687,7 +678,7 @@ boolean render_enumerate_begin(boolean mirrors, boolean scope)
 	enumerate.mirrors = mirrors && structure_visibility_port_has_mirrors();
 	/* (a map's first: from its record, where it has one: render_prepared.c;
 	its structure's materials then counted as the walk counts them) */
-	if (enumerate.everything && !scope && !menu_pictures_preparing() && render_prepared_replay(enumerate.mirrors))
+	if (enumerate.everything && !scope && render_prepared_replay(enumerate.mirrors))
 	{
 		struct structure_bsp *structure_bsp = global_structure_bsp_get();
 		struct enumerated_materials *enumerated = enumerate.materials_enumerated[view];
@@ -866,7 +857,7 @@ static void lights_submit(void)
 			enumerate.light_indices[enumerate.light_count++] = light_index;
 	}
 	/* (the renderer's: these and the window's, or none) */
-	if (halo_dynamic_lights_enhanced())
+	if (halo_dynamic_lights_walked())
 	{
 		long count = rasterizer_lights.light_count;
 

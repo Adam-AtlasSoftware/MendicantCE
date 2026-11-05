@@ -7,6 +7,7 @@ Six-plane rejection and conservative facing summaries for structure buckets.
 /* ---------- headers */
 
 #include "structure_culling.h"
+#include "render_enumerate.h"
 #include "far_clip.h"
 #include "custom_edition_cache.h"
 #include "cseries/cseries_windows.h"
@@ -1096,7 +1097,10 @@ boolean structure_culling_traverse(struct structure_bsp *structure)
 	{
 		memset(structure_culling_recorded, 0, sizeof(structure_culling_recorded));
 	}
-	if (!structure_culling_tests || !structure_culling_data_matches(structure))
+	/* (nor in a map's preparation, render_enumerate.c: its frame is the
+	game's own visibility's whatever the setting, so that its record is for
+	every setting's) */
+	if (!structure_culling_tests || render_enumerating || !structure_culling_data_matches(structure))
 	{
 		return FALSE;
 	}

@@ -25,6 +25,10 @@ CONTROLS = [
      "halo_world_ao_object(WORLD_AO_OWNER_NONE, 1.0f);", "window"),
     # a window given while a map's pipelines are prepared (the world's then made in the load)
     ("\tif (render_enumerating)\n\t{\n\t\tworld_sdf_frame_prepared();\n\t\treturn;\n\t}", "", "window"),
+    # the window's span told only while the setting is on (the manifest's world draws then lost)
+    ("\t(void)rasterizer_target;\n\t/* (its span, whatever the setting: halo_world_ao_span) */\n"
+     "\thalo_world_ao_span(WORLD_AO_SPAN_OPEN);\n", "\t(void)rasterizer_target;\n", "off"),
+    ("\thalo_world_ao_span(drawing ? WORLD_AO_SPAN_FIRST_PERSON : WORLD_AO_SPAN_OPEN);\n", "", "off"),
     # the made-up field uploaded each window
     ("\tif (!world_ao_test.uploaded)\n\t\tworld_ao_test_field(camera_position);",
      "\tworld_ao_test_field(camera_position);", "test"),

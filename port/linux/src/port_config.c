@@ -959,9 +959,10 @@ static const struct config_setting config_settings[] =
 	{ "input.controller_p1", _config_string, "\"\"", "HALO_CONTROLLER_P1", _environment_value, _platform_all,
 		"P1 custom controller layout; empty uses the profile's preset. Edit in\n"
 		"Settings > Controls > Controller > Button Remapping. v3: 26 physical\n"
-		"button names, unbound among them; gameplay and the debug camera have\n"
-		"separate bindings. Old ten-action and v2 layouts are accepted. See\n"
-		"docs/controller_remapping.md for the full order." },
+		"button names (the back paddles too), unbound among them; gameplay and\n"
+		"the debug camera have separate bindings. Old ten-action and v2\n"
+		"layouts are accepted. See docs/controller_remapping.md for the full\n"
+		"order." },
 	{ "input.controller_p2", _config_string, "\"\"", "HALO_CONTROLLER_P2", _environment_value, _platform_all,
 		"P2 custom controller buttons, same format as controller_p1. Empty uses the profile." },
 	{ "input.controller_p3", _config_string, "\"\"", "HALO_CONTROLLER_P3", _environment_value, _platform_all,
@@ -981,6 +982,43 @@ static const struct config_setting config_settings[] =
 		"A controller's look turns the other way: pushing the stick that looks to\n"
 		"the right turns the view left. The profile's INVERT LOOK is the up and\n"
 		"down; this is the side to side, for every controller." },
+	{ "input.gyro_aim", _config_string, "\"off\"", "HALO_GYRO_AIM", _environment_value, _platform_all,
+		"Aiming by turning a controller that has a gyroscope (a DualSense, a\n"
+		"DualShock 4, a Switch Pro Controller or Joy-Cons, a Steam Deck with\n"
+		"Steam Input off for the game): \"off\"; \"on\", always; \"hold\", while\n"
+		"input.gyro_button is held; \"pause\", always but while it is held (to\n"
+		"bring the controller back to the middle); \"touch\", while the thumb is\n"
+		"on the right stick (a Steam Deck's or a Steam Controller's, whose sticks\n"
+		"sense touch). It turns the view as the mouse does, with no aim assist;\n"
+		"the stick keeps its own." },
+	{ "input.gyro_button", _config_string, "\"touchpad\"", "HALO_GYRO_BUTTON", _environment_value, _platform_all,
+		"The button of input.gyro_aim's \"hold\" and \"pause\": \"touchpad\" (its\n"
+		"click), \"left_paddle\", \"right_paddle\" (the back buttons),\n"
+		"\"misc\" (Capture, Share or the microphone button), \"left_bumper\",\n"
+		"\"right_bumper\", \"left_trigger\", \"right_trigger\", \"left_stick\",\n"
+		"\"right_stick\" (their clicks). It still does its own action too." },
+	{ "input.gyro_sensitivity", _config_real, "2.0", "HALO_GYRO_SENSITIVITY", _environment_value, _platform_all,
+		"How far the view turns side to side for each degree the controller\n"
+		"turns: 1 as far, 2 twice as far. Zoomed in, it turns as the mouse does\n"
+		"(input.zoom_sensitivity)." },
+	{ "input.gyro_vertical_sensitivity", _config_real, "1.0", "HALO_GYRO_VERTICAL_SENSITIVITY", _environment_value,
+		_platform_all,
+		"How far the view turns up and down for the gyroscope, times\n"
+		"input.gyro_sensitivity: 1 the same as side to side." },
+	{ "input.gyro_space", _config_string, "\"player\"", "HALO_GYRO_SPACE", _environment_value, _platform_all,
+		"Which turn of the controller turns the view side to side: \"player\",\n"
+		"a turn about the up direction, however the controller is held (flat,\n"
+		"upright or between); \"local\", a turn about the controller's own\n"
+		"vertical axis, as if it were held flat." },
+	{ "input.gyro_smoothing", _config_boolean, "true", "HALO_GYRO_SMOOTHING", _environment_value, _platform_all,
+		"Steadies the gyroscope's smallest motions (the hand's tremor), never a\n"
+		"real turn's; nothing is lost, only spread over a few hundredths of a\n"
+		"second." },
+	{ "input.flick_stick", _config_boolean, "false", "HALO_FLICK_STICK", _environment_value, _platform_all,
+		"The right stick as a flick stick, with the default stick layout: pushed\n"
+		"to its rim, you turn at once to face where it points (pushed right, a\n"
+		"quarter turn right; down, about face); turned round the rim, you turn\n"
+		"with it. It does not look up or down: the gyroscope does." },
 
 	/* the keyboard and mouse's own controls (port/linux/src/xinput_sdl.c) */
 	{ "controls.move_forward", _config_string, "\"W\"", "HALO_KEY_MOVE_FORWARD", _environment_value, _platform_all,
@@ -1062,6 +1100,9 @@ static const struct config_setting config_settings[] =
 	{ "display.chat_style", _config_string, "\"colors\"", "HALO_CHAT_STYLE", _environment_value, _platform_all,
 		"The text chat's colors: \"colors\" (names in their team's color, the\n"
 		"text a pale blue) or \"white\" (all white, as Custom Edition)." },
+	{ "display.menu_fade", _config_boolean, "false", "HALO_MENU_FADE", _environment_value, _platform_all,
+		"Choosing a level in the menus fades them to black over a second before\n"
+		"the level loads, as on the Xbox; false: the level loads at once." GRAPHICS_CHOOSES },
 	{ "game.enhanced_animations", _config_boolean, "true", "HALO_ENHANCED_ANIMATIONS", _environment_value, _platform_all,
 		"The player bipeds' grenade throws keep their legs moving (crouched,\n"
 		"in the air and in a vehicle's seat too), riders' hands leave the grips\n"
@@ -3382,6 +3423,7 @@ static const struct
 	{ "display.dynamic_lights", "\"classic\"" },
 	{ "display.ambient_occlusion", "\"off\"" },
 	{ "game.enhanced_animations", "false", 1 },
+	{ "display.menu_fade", "true", 1 },
 };
 
 #define NUMBER_OF_CONFIG_GRAPHICS (sizeof(config_graphics) / sizeof(config_graphics[0]))
@@ -3727,6 +3769,10 @@ static const struct
 	{ "input.touch_controls", { "auto", "on", "off", NULL }, NULL },
 	{ "input.touch_crouch", { "toggle", "hold", NULL }, NULL },
 	{ "input.crouch", { "hold", "toggle", NULL }, NULL },
+	{ "input.gyro_aim", { "off", "on", "hold", "pause", "touch", NULL }, NULL },
+	{ "input.gyro_button", { "touchpad", "left_paddle", "right_paddle", "misc", "left_bumper", "right_bumper",
+		"left_trigger", "right_trigger", "left_stick", "right_stick", NULL }, NULL },
+	{ "input.gyro_space", { "player", "local", NULL }, NULL },
 	{ "input.button_prompts", { "auto", "controller", "keyboard", NULL }, NULL },
 	{ "input.zoom_sensitivity", { "cs2", "halo", NULL }, "cs2" },
 	{ "game.console_log", { "important", "all", "none", NULL }, NULL },

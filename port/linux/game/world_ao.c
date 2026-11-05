@@ -338,6 +338,8 @@ void world_ao_window_begin(short local_player_index, short rasterizer_target, fl
 
 	(void)local_player_index;
 	(void)rasterizer_target;
+	/* (its span, whatever the setting: halo_world_ao_span) */
+	halo_world_ao_span(WORLD_AO_SPAN_OPEN);
 	/* (none while a map's pipelines are prepared: its draws then are the
 	ones without the world, exactly as with it off, so that the world never
 	lengthens a load. The world's pipelines are made after it, their
@@ -393,6 +395,7 @@ void world_ao_window_begin(short local_player_index, short rasterizer_target, fl
 
 void world_ao_window_end(void)
 {
+	halo_world_ao_span(WORLD_AO_SPAN_NONE);
 	if (!world_ao.window)
 		return;
 	world_ao.window = 0;
@@ -451,6 +454,7 @@ void world_ao_lightmap_begin(void const *lightmap_bitmap)
 
 void world_ao_first_person(int drawing)
 {
+	halo_world_ao_span(drawing ? WORLD_AO_SPAN_FIRST_PERSON : WORLD_AO_SPAN_OPEN);
 	if (!world_ao.window)
 		return;
 	halo_world_ao_object(drawing ? WORLD_AO_OWNER_UNLIT : WORLD_AO_OWNER_NONE, 1.0f);

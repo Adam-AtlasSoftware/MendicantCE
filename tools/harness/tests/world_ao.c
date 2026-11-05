@@ -26,6 +26,8 @@ static struct
 static int object_owner = -100;
 unsigned char render_enumerating;
 static float object_reference = -100.0f;
+/* (the window's span as the front end was last told it) */
+static int span = -100;
 
 const char *config_string(const char *name)
 {
@@ -151,6 +153,11 @@ void halo_world_ao_window(float const field[2][4], float const parameters[2][4],
 	handed.cells = cells ? cells[0][0] : 0xffffffffu;
 }
 
+void halo_world_ao_span(int value)
+{
+	span = value;
+}
+
 void halo_world_ao_object(int owner, float reference)
 {
 	object_owner = owner;
@@ -188,9 +195,15 @@ static void off_case(void)
 		CHECK(world_ao_mode() == 0, "%s", setting);
 		world_ao_frame_begin();
 		world_ao_window_begin(0, 0, camera);
+		/* (its span told whatever the setting: the manifest's) */
+		CHECK(span == WORLD_AO_SPAN_OPEN, "%s: the span opened: %d", setting, span);
 		world_ao_object_begin(200);
 		world_ao_first_person(1);
+		CHECK(span == WORLD_AO_SPAN_FIRST_PERSON, "%s: the first-person weapon's span: %d", setting, span);
+		world_ao_first_person(0);
+		CHECK(span == WORLD_AO_SPAN_OPEN, "%s: after it: %d", setting, span);
 		world_ao_window_end();
+		CHECK(span == WORLD_AO_SPAN_NONE, "%s: the span closed: %d", setting, span);
 	}
 	CHECK(scene_frames == 0 && sdf_frames == 0 && windows_handed == 0, "%d %d %d", scene_frames, sdf_frames,
 		windows_handed);
@@ -227,6 +240,7 @@ static void window_case(void)
 	render_enumerating = 1;
 	world_ao_window_begin(0, 0, camera);
 	CHECK(windows_handed == 0, "while enumerating: %d", windows_handed);
+	CHECK(span == WORLD_AO_SPAN_OPEN, "the span opened while enumerating: %d", span);
 	render_enumerating = 0;
 	world_ao_window_begin(0, 0, camera);
 	CHECK(windows_handed == 1 && handed.count == 3, "%d %d", windows_handed, handed.count);

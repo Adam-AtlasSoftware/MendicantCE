@@ -13,9 +13,6 @@ A map's preparation recorded and played back (render_prepared.c).
 prepared (mirrors: whether it draws a mirror's window): TRUE, or FALSE
 where there is none to play (its walk to be made, and recorded) */
 boolean render_prepared_replay(boolean mirrors);
-/* the map loaded has a record, its own or a shipped one of any structure
-(or has none to make: records off) */
-boolean render_prepared_recorded(boolean mirrors);
 /* a shipped record (prepared_shipped.h) of a map (its cache file's
 checksum) and key that plays: not passed over, whole and of this form */
 boolean render_prepared_shipped(unsigned long checksum, unsigned long long key);
@@ -33,5 +30,14 @@ void render_prepared_record_end(void);
 (in order) do not have */
 unsigned long render_prepared_draws_missing(unsigned long long const *recorded, unsigned long recorded_count,
 	unsigned long long const *made, unsigned long made_count);
+/* a record's key: its form, the journal's (halo_gpu_journal_form), the map's
+scenario, whether the frame draws mirrors and the structure it starts in
+(no setting, backend or platform: render_prepared.c) */
+unsigned long long render_prepared_key(char const *scenario, unsigned long journal_form, boolean mirrors,
+	long structure_bsp_index);
+/* a record played back is good: well formed (formed), its objects all found
+(unknown 0), and, under the settings, backend and GPU it was made with, its
+draws all made (missing 0) */
+boolean render_prepared_played(int formed, unsigned long unknown, unsigned long missing, boolean same_derivation);
 
 #endif

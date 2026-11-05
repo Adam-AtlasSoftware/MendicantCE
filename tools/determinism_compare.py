@@ -205,6 +205,12 @@ MEMORY_POOL_HEADER_SIZE = 0x38
 # (in an object datum: objects.h)
 OBJECT_MAGIC_NUMBER = 0x8
 OBJECT_CACHED_RENDER_STATE_INDEX = 0x120
+OBJECT_ATTACHMENT_TYPES = 0xf4
+OBJECT_ATTACHMENT_INDICES = 0xfc
+MAXIMUM_ATTACHMENTS_PER_OBJECT = 8
+# (the attachments' types whose datums are the frames': a light, a looping
+# sound, a contrail, a particle system; not an effect, the simulation's)
+FRAME_ATTACHMENT_TYPES = (0, 1, 3, 4)
 MEMORY_POOL_BLOCK_HEADER_SIZE = 0x18
 
 
@@ -240,13 +246,20 @@ def compare_dumps(allocations, path_a, path_b, ignored, limit=12):
         position += size
         if name == "objects" and x[:4] == b"loop":
             # (not the objects' magic numbers, the collision tests' marks,
+            # the indices of their attachments that are the frames' datums,
             # their cached render states' indices, the renderer's, nor the
             # free space after the last block, as the log's hash leaves
             # them out)
             x, y = bytearray(x), bytearray(y)
             for blocks, data in ((memory_pool_blocks(x), x), (memory_pool_blocks(y), y)):
                 for start, size, _ in blocks:
-                    for field in (OBJECT_MAGIC_NUMBER, OBJECT_CACHED_RENDER_STATE_INDEX):
+                    datum = start + MEMORY_POOL_BLOCK_HEADER_SIZE
+                    fields = [OBJECT_MAGIC_NUMBER, OBJECT_CACHED_RENDER_STATE_INDEX]
+                    if OBJECT_ATTACHMENT_INDICES + 4 * MAXIMUM_ATTACHMENTS_PER_OBJECT <= size - MEMORY_POOL_BLOCK_HEADER_SIZE:
+                        fields += [OBJECT_ATTACHMENT_INDICES + 4 * index
+                                   for index in range(MAXIMUM_ATTACHMENTS_PER_OBJECT)
+                                   if data[datum + OBJECT_ATTACHMENT_TYPES + index] in FRAME_ATTACHMENT_TYPES]
+                    for field in fields:
                         if field + 4 <= size - MEMORY_POOL_BLOCK_HEADER_SIZE:
                             offset = start + MEMORY_POOL_BLOCK_HEADER_SIZE + field
                             data[offset:offset + 4] = b"\0\0\0\0"
