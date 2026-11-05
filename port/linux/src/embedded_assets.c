@@ -33,6 +33,7 @@ static unsigned int assets_word(const unsigned char *bytes)
 
 /* why the file is not used, for embedded_assets_check: "" when it is */
 static char assets_problem[1400];
+static int assets_stale;
 
 /* a candidate file: kept if it is this build's, else its problem noted */
 static int assets_try(const char *path)
@@ -42,7 +43,9 @@ static int assets_try(const char *path)
 
 	if (!file)
 	{
-		if (!assets_problem[0])
+		/* (where the game's own goes, the last place looked: unless a file
+		of another build was found, which is the problem to tell of) */
+		if (!assets_stale)
 			snprintf(assets_problem, sizeof(assets_problem), "%s is missing", path);
 		return 0;
 	}
@@ -54,6 +57,7 @@ static int assets_try(const char *path)
 		/* (another build's, or damaged: that is the problem to tell of) */
 		snprintf(assets_problem, sizeof(assets_problem), "%s is not this build's (%lu bytes, not %u, or damaged)",
 			path, (unsigned long)size, embedded_assets_size);
+		assets_stale = 1;
 		free(file);
 		return 0;
 	}
