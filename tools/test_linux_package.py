@@ -52,6 +52,7 @@ def test_tree(build, tmp_path):
     assert (tree / "bin/openh1").read_bytes() == b"halo"
     assert "lib/openh1/libSDL3.so.0" in names
     assert "share/openh1/brokers.txt" in names
+    assert "share/openh1/prepared.records" in names
     assert "share/applications/openh1.desktop" in names
     assert "share/icons/hicolor/48x48/apps/openh1.png" in names
     assert "share/licenses/openh1/LICENSE" in names

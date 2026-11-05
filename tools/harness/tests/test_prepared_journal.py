@@ -23,6 +23,8 @@ def generated(fault=None):
                         *(re.search(r'^#define %s .*$' % name, prepared, re.M).group(0)
                           for name in ('PREPARED_MAGIC', 'PREPARED_VERSION', 'PREPARED_MAXIMUM_WORDS')),
                         function(prepared, 'prepared_hash_string'),
+                        function(prepared, 'prepared_key_of'),
+                        function(prepared, 'prepared_key'),
                         function(prepared, 'render_prepared_key'),
                         function(prepared, 'render_prepared_played'),
                         function(prepared, 'prepared_header_fits'),
@@ -48,7 +50,8 @@ def generated(fault=None):
         checks = mutated(checks, 'return formed && !unknown && (!missing || !same_derivation);',
                          'return formed && !unknown;')
     if fault == 'scenario':
-        checks = mutated(checks, '\treturn prepared_hash_string(scenario, hash);', '\treturn hash;')
+        checks = mutated(checks, 'return prepared_hash_string(scenario, xgpu_manifest_hash(words, sizeof(words), XGPU_MANIFEST_HASH_START));',
+                         'return xgpu_manifest_hash(words, sizeof(words), XGPU_MANIFEST_HASH_START);')
     return (('journal.inc', types), ('journal_code.inc', code), ('prepared.inc', checks))
 
 

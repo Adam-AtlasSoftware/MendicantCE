@@ -32,6 +32,16 @@ under its own derivation, is deleted and the walk made instead, which
 records again. A map is recorded at its first load, the stock maps at the game's
 first start (menu_pictures_render.c: the menus' pictures' pass loads them
 all). HALO_PREPARED_RECORDS=0 turns the records off (the walk every time).
+
+The stock maps' records are shipped with the game too (port/assets/prepared,
+made by tools/prepared_records.py: prepared_shipped.h), a file beside the
+game holding each compressed, read as it is, never written to z:\prepared. A map's record is looked for in
+z:\prepared first, then among the shipped ones; a shipped record that is not
+the map's, form's or settings', is malformed, or whose replay does not make
+its draws, is passed over for the rest of the game (it cannot be deleted)
+and the walk made, which records into z:\prepared as ever. The first start's
+pass does not load a map only to record it (record_only) where a record of
+it is shipped.
 */
 
 #include "cseries.h"
@@ -46,6 +56,7 @@ all). HALO_PREPARED_RECORDS=0 turns the records off (the walk every time).
 #include "../src/xgpu_manifest.h"
 #include "render_enumerate.h"
 #include "render_prepared.h"
+#include "../src/prepared_shipped.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -136,6 +147,11 @@ static struct
 	char path[64];
 	unsigned long checksum;
 	uint64_t key, derivation;
+	/* the record played is a shipped one's */
+	boolean shipped;
+	/* the shipped records passed over (their checksum and key's hash) */
+	uint64_t rejected[64];
+	unsigned long rejected_count;
 } prepared;
 
 static int prepared_panini(float projection[8])
@@ -167,21 +183,37 @@ static uint64_t prepared_hash_string(char const *text, uint64_t hash)
 	return xgpu_manifest_hash(text, strlen(text) + 1, hash);
 }
 
-/* a record's key: its form, the journal's, the map's scenario, whether the
-frame draws mirrors and the structure it starts in (a saved game's may be
-another); each as 32-bit words, the same on every platform */
-unsigned long long render_prepared_key(char const *scenario, unsigned long journal_form, boolean mirrors,
-	long structure_bsp_index)
+/* a record's key, up to the map's own (prepared_key): its form, the
+journal's and the map's scenario, as 32-bit words (the same on every
+platform); no setting (prepared_settings) */
+static uint64_t prepared_key_of(char const *scenario, unsigned long journal_form)
 {
-	uint32_t words[4];
-	uint64_t hash = XGPU_MANIFEST_HASH_START;
+	uint32_t words[2];
 
 	words[0] = PREPARED_VERSION;
 	words[1] = (uint32_t)journal_form;
-	words[2] = mirrors ? 1 : 0;
-	words[3] = (uint32_t)structure_bsp_index;
-	hash = xgpu_manifest_hash(words, sizeof(words), hash);
-	return prepared_hash_string(scenario, hash);
+	return prepared_hash_string(scenario, xgpu_manifest_hash(words, sizeof(words), XGPU_MANIFEST_HASH_START));
+}
+
+static uint64_t prepared_key_settings(char const *scenario)
+{
+	return prepared_key_of(scenario, halo_gpu_journal_form());
+}
+
+/* ...and the map's: whether it draws mirrors, the structure it starts in */
+static uint64_t prepared_key(uint64_t hash, boolean mirrors, long structure_bsp_index)
+{
+	uint32_t words[2];
+
+	words[0] = mirrors ? 1 : 0;
+	words[1] = (uint32_t)structure_bsp_index;
+	return xgpu_manifest_hash(words, sizeof(words), hash);
+}
+
+unsigned long long render_prepared_key(char const *scenario, unsigned long journal_form, boolean mirrors,
+	long structure_bsp_index)
+{
+	return prepared_key(prepared_key_of(scenario, journal_form), mirrors, structure_bsp_index);
 }
 
 /* the settings, backend and GPU a record's draws are derived under now */
@@ -211,7 +243,8 @@ static boolean prepared_choose(boolean mirrors)
 
 	if (!prepared_enabled())
 		return FALSE;
-	hash = render_prepared_key(scenario, halo_gpu_journal_form(), mirrors, global_structure_bsp_index_get());
+	/* (the structure the map starts in: a saved game's may be another) */
+	hash = prepared_key(prepared_key_settings(scenario), mirrors, global_structure_bsp_index_get());
 	prepared.checksum = cache_files_get_checksum();
 	prepared.key = hash;
 	prepared.derivation = prepared_derivation();
@@ -279,8 +312,73 @@ static boolean prepared_header_fits(struct prepared_header const *header, unsign
 		header->draw_count <= PREPARED_MAXIMUM_WORDS / 2;
 }
 
-/* the record (its draws, then its words), read and checked; NULL if there is
-none to play */
+/* a shipped record of a map and key passed over */
+static uint64_t prepared_rejected_hash(unsigned long checksum, uint64_t key)
+{
+	uint32_t value = (uint32_t)checksum;
+
+	return xgpu_manifest_hash(&value, sizeof(value), xgpu_manifest_hash(&key, sizeof(key), XGPU_MANIFEST_HASH_START));
+}
+
+static boolean prepared_shipped_rejected(unsigned long checksum, uint64_t key)
+{
+	uint64_t hash = prepared_rejected_hash(checksum, key);
+	unsigned long index;
+
+	for (index = 0; index < prepared.rejected_count; index++)
+	{
+		if (prepared.rejected[index] == hash)
+			return TRUE;
+	}
+	return FALSE;
+}
+
+static void prepared_shipped_reject(unsigned long checksum, uint64_t key)
+{
+	if (!prepared_shipped_rejected(checksum, key) && prepared.rejected_count < NUMBEROF(prepared.rejected))
+		prepared.rejected[prepared.rejected_count++] = prepared_rejected_hash(checksum, key);
+}
+
+/* the shipped record of a map and key (its draws, then its words), inflated
+and checked; NULL if none is shipped, or it is passed over (never deleted:
+the game's own) */
+static uint64_t *prepared_shipped_take(unsigned long checksum, uint64_t key, struct prepared_header *header)
+{
+	unsigned int size;
+	unsigned char *data;
+	unsigned long payload;
+
+	if (prepared_shipped_rejected(checksum, key))
+		return NULL;
+	size = prepared_shipped_size((unsigned int)checksum, (unsigned int)(key >> 32), (unsigned int)key);
+	if (!size)
+		return NULL;
+	/* (the game's memory, which the caller frees) */
+	data = malloc(size);
+	if (data && size >= sizeof(*header) &&
+		prepared_shipped_inflate((unsigned int)checksum, (unsigned int)(key >> 32), (unsigned int)key, data, size))
+	{
+		memcpy(header, data, sizeof(*header));
+		payload = size - sizeof(*header);
+		if (prepared_header_fits(header, checksum, key) &&
+			payload == header->word_count * sizeof(unsigned int) + header->draw_count * sizeof(uint64_t) &&
+			xgpu_manifest_hash(data + sizeof(*header), payload, XGPU_MANIFEST_HASH_START) == header->words_hash)
+		{
+			/* (the draws first, where the caller frees them) */
+			memmove(data, data + sizeof(*header), payload);
+			return (uint64_t *)data;
+		}
+	}
+	if (data)
+		free(data);
+	platform_log("render: the map's preparation's shipped record is not this map's, form's or settings', or does "
+		"not inflate whole: passed over");
+	prepared_shipped_reject(checksum, key);
+	return NULL;
+}
+
+/* the record (its draws, then its words), read and checked: the player's,
+else a shipped one; NULL if there is none to play */
 static uint64_t *prepared_read(struct prepared_header *header)
 {
 	FILE *file = fopen(prepared.path, "rb");
@@ -288,8 +386,13 @@ static uint64_t *prepared_read(struct prepared_header *header)
 	unsigned long size;
 	boolean good = FALSE;
 
+	prepared.shipped = FALSE;
 	if (!file)
-		return NULL;
+	{
+		words = prepared_shipped_take(prepared.checksum, prepared.key, header);
+		prepared.shipped = words != NULL;
+		return words;
+	}
 	if (fread(header, sizeof(*header), 1, file) == 1 && prepared_header_fits(header, prepared.checksum, prepared.key))
 	{
 		size = header->word_count * sizeof(unsigned int) + header->draw_count * sizeof(uint64_t);
@@ -302,9 +405,13 @@ static uint64_t *prepared_read(struct prepared_header *header)
 	{
 		platform_log("render: the map's preparation's record is not this map's, form's or settings', or is cut "
 			"short: made again");
-		free(words);
+		/* (the game's free halts on NULL) */
+		if (words)
+			free(words);
 		DeleteFileA(prepared.path);
-		return NULL;
+		words = prepared_shipped_take(prepared.checksum, prepared.key, header);
+		prepared.shipped = words != NULL;
+		return words;
 	}
 	return words;
 }
@@ -397,7 +504,50 @@ boolean render_prepared_recorded(boolean mirrors)
 			prepared_header_fits(&header, prepared.checksum, prepared.key);
 		fclose(file);
 	}
+	/* (or a shipped one of the map as a load starts it, whatever structure
+	the pass has come to: menu_pictures_render.c) */
+	if (!fits)
+		fits = render_prepared_shipped_map(prepared.checksum, global_scenario_index != NONE ?
+			tag_get_name(global_scenario_index) : "");
+	if (!fits)
+		platform_log("render: the map's preparation has no record (%s, structure %d%s): it is recorded",
+			prepared.path, global_structure_bsp_index_get(), mirrors ? ", mirrors" : "");
 	return fits;
+}
+
+boolean render_prepared_shipped(unsigned long checksum, unsigned long long key)
+{
+	struct prepared_header header;
+	uint64_t *record;
+
+	if (!prepared_enabled())
+		return FALSE;
+	record = prepared_shipped_take(checksum, key, &header);
+	if (!record)
+		return FALSE;
+	free(record);
+	return TRUE;
+}
+
+boolean render_prepared_shipped_map(unsigned long checksum, char const *scenario)
+{
+	uint64_t hash;
+	long structure_bsp_index;
+	int mirrors;
+
+	if (!prepared_enabled() || !checksum || !scenario)
+		return FALSE;
+	hash = prepared_key_settings(scenario);
+	/* (the map's own part of its key known once it is loaded: any of them) */
+	for (structure_bsp_index = 0; structure_bsp_index < LONG_BITS; structure_bsp_index++)
+	{
+		for (mirrors = 0; mirrors < 2; mirrors++)
+		{
+			if (render_prepared_shipped(checksum, prepared_key(hash, (boolean)mirrors, structure_bsp_index)))
+				return TRUE;
+		}
+	}
+	return FALSE;
 }
 
 boolean render_prepared_replay(boolean mirrors)
@@ -429,20 +579,24 @@ boolean render_prepared_replay(boolean mirrors)
 	missing = made ? render_prepared_draws_missing(record, header.draw_count, made, count) : header.draw_count;
 	if (missing && made && header.derivation == prepared.derivation)
 		prepared_log_new(record, header.draw_count);
-	free(made);
+	if (made)
+		free(made);
 	free(record);
 	if (!render_prepared_played(formed, unknown, missing, header.derivation == prepared.derivation))
 	{
 		platform_log("render: the map's preparation's record played back does not make its draws (%s, %u objects "
 			"not found, %lu of its %lu draws not made, %lu made): it is made again", formed ? "well formed" :
 			"malformed", unknown, missing, (unsigned long)header.draw_count, count);
-		DeleteFileA(prepared.path);
+		if (prepared.shipped)
+			prepared_shipped_reject(prepared.checksum, prepared.key);
+		else
+			DeleteFileA(prepared.path);
 		return FALSE;
 	}
-	platform_log("render: the map's shaders and pipelines made from its record (%lu draws, %lu recorded, %lu words, "
-		"%s, in %lu ms, %.0f ms waited for the GPU's)", count, (unsigned long)header.draw_count,
-		(unsigned long)header.word_count, header.derivation == prepared.derivation ? "its own settings" :
-		"other settings", system_milliseconds() - started, waited * 1000.0);
+	platform_log("render: the map's shaders and pipelines made from its %s record (%lu draws, %lu recorded, %lu words, "
+		"%s, in %lu ms, %.0f ms waited for the GPU's)", prepared.shipped ? "shipped" : "own", count,
+		(unsigned long)header.draw_count, (unsigned long)header.word_count, header.derivation == prepared.derivation ?
+		"its own settings" : "other settings", system_milliseconds() - started, waited * 1000.0);
 	return TRUE;
 }
 
@@ -501,8 +655,10 @@ void render_prepared_record_end(void)
 		if (!written)
 			DeleteFileA(temporary);
 	}
-	platform_log("render: the map's preparation %s (%lu draws, %u words)", written ? "recorded" :
-		"could not be recorded", draw_count, count);
+	/* (its file, scenario and form, as tools/prepared_records.py reads them) */
+	platform_log("render: the map's preparation %s (%lu draws, %u words; %s, %s, form %d %u)", written ? "recorded" :
+		"could not be recorded", draw_count, count, prepared.path, global_scenario_index != NONE ?
+		tag_get_name(global_scenario_index) : "", PREPARED_VERSION, halo_gpu_journal_form());
 	halo_gpu_journal_free(words);
 	free(draws);
 }

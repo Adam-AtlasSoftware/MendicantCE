@@ -1404,7 +1404,7 @@ int main(int argc, char **argv)
 	right ear 0.66 ms later (Woodworth's 31.5 frames) and its high
 	frequencies well down; ahead and behind, the ears alike, and behind
 	duller above a few kHz; above, the pinna's notch moved up from ahead's
-	7.7 kHz to 11 kHz, below down to 6 kHz. Panned: to the left, louder in
+	10.5 kHz to 14.3 kHz, below down to 7 kHz. Panned: to the left, louder in
 	the left ear but at the same time; above, below and behind exactly as
 	ahead (no cue of them) */
 	CASE("hrtf-cues")
@@ -1430,7 +1430,7 @@ int main(int argc, char **argv)
 		below_pan = placed_noise(FALSE, 0.0f, -3.0f, 0.0f, frames);
 
 		delay = ears_delay(left_hrtf, frames);
-		CHECK(delay >= 29 && delay <= 34, "to the left through the HRTF, the right ear %ld frames later, not 31.5", delay);
+		CHECK(delay >= 29 && delay <= 34, "to the left through the HRTF, the right ear %ld frames later, not 32", delay);
 		CHECK(ears_level(left_hrtf, frames) > 10.0, "to the left through the HRTF, the left ear's high frequencies "
 			"%+.1f dB over the right's", ears_level(left_hrtf, frames));
 		delay = ears_delay(left_pan, frames);
@@ -1449,11 +1449,12 @@ int main(int argc, char **argv)
 			CHECK(rear_db < -4.0 && fabs(low_db) < 1.0, "behind through the HRTF, 15 kHz %+.1f dB and 300 Hz %+.1f dB "
 				"of ahead's (ear %d)", rear_db, low_db, ear);
 			/* (each notch: its band against the other's) */
-			notch_ahead = ear_band(ahead_hrtf, frames, ear, 7667.0) - ear_band(ahead_hrtf, frames, ear, 11000.0);
-			notch_above = ear_band(above_hrtf, frames, ear, 7667.0) - ear_band(above_hrtf, frames, ear, 11000.0);
-			notch_below = ear_band(below_hrtf, frames, ear, 6000.0) - ear_band(below_hrtf, frames, ear, 7667.0);
-			CHECK(notch_above - notch_ahead > 8.0 && notch_below < -4.0, "the notch: ahead 7.7 kHz %+.1f dB of 11 kHz, "
-				"above %+.1f dB; below 6 kHz %+.1f dB of 7.7 kHz (ear %d)", notch_ahead, notch_above, notch_below, ear);
+			notch_ahead = ear_band(ahead_hrtf, frames, ear, 10500.0) - ear_band(ahead_hrtf, frames, ear, 14300.0);
+			notch_above = ear_band(above_hrtf, frames, ear, 10500.0) - ear_band(above_hrtf, frames, ear, 14300.0);
+			notch_below = ear_band(below_hrtf, frames, ear, 7040.0) - ear_band(below_hrtf, frames, ear, 10500.0);
+			CHECK(notch_above - notch_ahead > 8.0 && notch_below < -4.0, "the notch: ahead 10.5 kHz %+.1f dB of 14.3 "
+				"kHz, above %+.1f dB; below 7 kHz %+.1f dB of 10.5 kHz (ear %d)", notch_ahead, notch_above, notch_below,
+				ear);
 		}
 		for (index = 0; index < frames * 2; index++)
 		{
