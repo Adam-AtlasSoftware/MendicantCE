@@ -65,6 +65,20 @@ float world_sdf_fade(void)
 	return 0.5f;
 }
 
+/* (no static scenery) */
+int world_proxies_source_baked(long id)
+{
+	(void)id;
+	return 0;
+}
+
+/* (no static scenery's pages) */
+int world_sdf_scenery_layer(void const *lightmap_bitmap)
+{
+	(void)lightmap_bitmap;
+	return WORLD_SDF_SCENERY_NO_LAYER;
+}
+
 signed char world_sdf_encode(float distance, float range)
 {
 	(void)range;
@@ -72,12 +86,14 @@ signed char world_sdf_encode(float distance, float range)
 }
 
 /* three shapes: two of object 100 (slot 0), one of object 200 (slot 1) */
-long world_proxies_window(float const camera_position[3], struct world_proxy *proxies, long *owners, long maximum)
+long world_proxies_window(float const camera_position[3], struct world_proxy *proxies, long *owners, long maximum,
+	long *dynamic_count)
 {
 	static const long ids[3] = { 100, 100, 200 };
 	long index;
 
 	(void)camera_position;
+	*dynamic_count = maximum < 3 ? maximum : 3;
 	for (index = 0; index < 3 && index < maximum; index++)
 	{
 		memset(&proxies[index], 0, sizeof(proxies[index]));

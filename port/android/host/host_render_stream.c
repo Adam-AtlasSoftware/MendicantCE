@@ -517,7 +517,7 @@ static int decode_record(struct host_render_decoder *decoder, const unsigned cha
 	{
 		const struct xgpu_stream_world_ao_field *field = (const void *)start;
 
-		if (field->width && (field->part > XGPU_STREAM_WORLD_AO_ATLAS || field->z_count > field->depth ||
+		if (field->width && (field->part > XGPU_STREAM_WORLD_AO_SCENERY || field->z_count > field->depth ||
 			field->z_first > field->depth - field->z_count ||
 			(uint64_t)field->width * field->height * field->z_count * XGPU_STREAM_WORLD_AO_TEXEL(field->part) !=
 			field->size ||

@@ -559,6 +559,9 @@ block (a uniform buffer) */
 #define XGPU_VULKAN_BINDING_WORLD_SDF 1
 #define XGPU_VULKAN_BINDING_WORLD_AO 2
 #define XGPU_VULKAN_BINDING_WORLD_SDF_TABLE 3
+/* (and the static scenery's pages of the level's occlusion: a 2D array of
+bytes, linear, clamped, a 1x1 page of none where they have not all come) */
+#define XGPU_VULKAN_BINDING_WORLD_AO_SCENERY 4
 struct xgpu_world_ao_block;
 /* the stand-ins and the sampler made (the core's start): 0 if they cannot be */
 int xgpu_vulkan_world_ao_create(void);
@@ -574,6 +577,7 @@ the sampler, the block's range in the ring for the submission of that
 serial (0: none), and a number that changes whenever any of them does */
 struct xgpu_vulkan_image *xgpu_vulkan_world_ao_field_image(void);
 struct xgpu_vulkan_image *xgpu_vulkan_world_ao_table_image(void);
+struct xgpu_vulkan_image *xgpu_vulkan_world_ao_scenery_image(void);
 VkSampler xgpu_vulkan_world_ao_sampler(void);
 int xgpu_vulkan_world_ao_block(uint64_t serial, VkDescriptorBufferInfo *info);
 uint64_t xgpu_vulkan_world_ao_number(void);

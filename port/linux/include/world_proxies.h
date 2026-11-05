@@ -80,9 +80,21 @@ void world_proxies_map_unloaded(void);
 /* a window's shapes: those of the frame's instances (world_scene.h) that
 can shade what this camera sees (their spheres of influence in its
 frustum, nearest first), at most maximum; returns how many. owners[i] is
-the instance's id whose shape proxies[i] is */
+the instance's id whose shape proxies[i] is. The dynamic objects' come
+first, *dynamic_count of them; the static scenery's that the drawn field
+and its pages hold after (world_sdf.h's world_sdf_scenery_baked) */
 long world_proxies_window(float const camera_position[3], struct world_proxy *proxies, long *owners,
-	long maximum);
+	long maximum, long *dynamic_count);
+/* whether an object is a static scenery placement that the drawn field
+and its pages hold (world_sdf.h's world_sdf_scenery_baked): its draws take
+none of the field, which holds its own geometry
+(port/linux/game/world_proxies_game.c, which reads the object) */
+int world_proxies_source_baked(long id);
+struct world_proxies_frame;
+/* a definition's shapes placed on these nodes (world space; at most
+maximum): how many. The static scenery's, baked where it stands */
+long world_proxies_place(long definition, struct world_proxies_frame const *frames, short node_count,
+	struct world_proxy *proxies, long maximum);
 
 /* ---------- the arithmetic (shared with D's shaders: their reference;
 tools/harness/tests/world_proxies.c) */

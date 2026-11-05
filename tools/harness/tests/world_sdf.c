@@ -135,6 +135,7 @@ static void bake_within(struct world_sdf_volume *volume, float const bounds[6],
 	unsigned long cells, cell;
 	signed char *bricks;
 
+	memset(&volume->scenery, 0, sizeof(volume->scenery));
 	memset(header, 0, sizeof(*header));
 	marks = world_sdf_plan(bounds, positions, triangle_count, header, NULL, NULL);
 	CHECK(marks, "planned");
@@ -183,6 +184,10 @@ static void volume_free(struct world_sdf_volume *volume)
 	free(volume->bricks);
 	volume->cells = NULL;
 	volume->bricks = NULL;
+	free(volume->scenery.layers);
+	free(volume->scenery.placements);
+	free(volume->scenery.texels);
+	memset(&volume->scenery, 0, sizeof(volume->scenery));
 }
 
 /* the whole grid's voxels along an axis */
@@ -904,13 +909,39 @@ static void cache_volume(struct world_sdf_volume *volume)
 	volume->bricks = malloc(volume->header.brick_count * WORLD_SDF_BRICK_VOXELS);
 	for (index = 0; index < volume->header.brick_count * WORLD_SDF_BRICK_VOXELS; index++)
 		volume->bricks[index] = (signed char)((int)(index * 7 % 255) - 127);
+	/* (the static scenery's part: three lightmap pages, the first and the
+	last on the one layer, the second with none; two placements) */
+	memset(&volume->scenery, 0, sizeof(volume->scenery));
+	volume->scenery.page_count = 3;
+	volume->scenery.layer_count = 1;
+	volume->scenery.width = volume->scenery.height = WORLD_SDF_SCENERY_LEAST_SIDE;
+	volume->scenery.placement_count = 2;
+	volume->scenery.layers = malloc(3 * sizeof(*volume->scenery.layers));
+	volume->scenery.layers[0] = volume->scenery.layers[2] = 0;
+	volume->scenery.layers[1] = WORLD_SDF_SCENERY_NO_LAYER;
+	volume->scenery.placements = calloc(2, sizeof(*volume->scenery.placements));
+	volume->scenery.placements[0].definition = 0xE1F20003L;
+	volume->scenery.placements[0].position[0] = 1.5f;
+	volume->scenery.placements[1].definition = 7;
+	volume->scenery.placements[1].position[2] = -2.25f;
+	volume->scenery.texels = malloc(WORLD_SDF_SCENERY_LEAST_SIDE * WORLD_SDF_SCENERY_LEAST_SIDE);
+	for (index = 0; index < WORLD_SDF_SCENERY_LEAST_SIDE * WORLD_SDF_SCENERY_LEAST_SIDE; index++)
+		volume->scenery.texels[index] = (unsigned char)(index * 13);
 }
 
-/* the payload's size (the cells, then the bricks) */
+/* the scenery part's bytes (its counts, its pages' layers, its placements,
+its layers' texels) */
+static unsigned long cache_scenery(struct world_sdf_volume const *volume)
+{
+	return 20 + volume->scenery.page_count * 2 + volume->scenery.placement_count * 16 +
+		volume->scenery.layer_count * volume->scenery.width * volume->scenery.height;
+}
+
+/* the payload's size (the cells, then the bricks, then the scenery's part) */
 static unsigned long cache_payload(struct world_sdf_volume const *volume)
 {
 	return volume->header.width * volume->header.height * volume->header.depth * 4 +
-		volume->header.brick_count * WORLD_SDF_BRICK_VOXELS;
+		volume->header.brick_count * WORLD_SDF_BRICK_VOXELS + cache_scenery(volume);
 }
 
 static void round_trip_case(void)
@@ -923,19 +954,30 @@ static void round_trip_case(void)
 	payload = cache_payload(&volume);
 	cells = volume.header.width * volume.header.height * volume.header.depth;
 	bytes = sdf_file_pack(&volume, &size);
-	CHECK(bytes && size == 64 + payload + 4 + 4, "%lu", size);
+	CHECK(bytes && size == 72 + payload + 4 + 4, "%lu", size);
 	/* (the header field by field, little-endian, at fixed places) */
 	CHECK(bytes[0] == 'W' && bytes[1] == 'S' && bytes[2] == 'D' && bytes[3] == 'F', "magic");
-	CHECK(sdf_get32(bytes + 4) == 2, "version");
+	CHECK(sdf_get32(bytes + 4) == 3, "version");
 	CHECK(sdf_get32(bytes + 8) == 0xC0FFEE12UL && sdf_get32(bytes + 12) == 2, "checksum, bsp");
 	CHECK(sdf_get32(bytes + 16) == volume.header.width && sdf_get32(bytes + 20) == volume.header.height &&
 		sdf_get32(bytes + 24) == volume.header.depth, "size");
 	CHECK(sdf_get_float(bytes + 40) == volume.header.voxel && sdf_get32(bytes + 48) == payload + 4, "voxel, deflated");
 	CHECK(sdf_get32(bytes + 52) == 1234 && sdf_get32(bytes + 56) == 7, "bake time, threads");
 	CHECK(sdf_get32(bytes + 60) == volume.header.brick_count && volume.header.brick_count, "bricks");
-	/* (the cells first, then the bricks: the stored stand-in deflate's) */
-	CHECK(!memcmp(bytes + 68, volume.cells, cells * 4) && !memcmp(bytes + 68 + cells * 4, volume.bricks,
+	CHECK(sdf_get32(bytes + 64) == cache_scenery(&volume), "the scenery's part's bytes");
+	/* (the cells first, then the bricks, then the scenery's part: the
+	stored stand-in deflate's) */
+	CHECK(!memcmp(bytes + 76, volume.cells, cells * 4) && !memcmp(bytes + 76 + cells * 4, volume.bricks,
 		volume.header.brick_count * WORLD_SDF_BRICK_VOXELS), "payload");
+	{
+		unsigned char const *part = bytes + 76 + cells * 4 + volume.header.brick_count * WORLD_SDF_BRICK_VOXELS;
+
+		CHECK(sdf_get32(part) == 3 && sdf_get32(part + 4) == 1 && sdf_get32(part + 8) == 16 &&
+			sdf_get32(part + 12) == 16 && sdf_get32(part + 16) == 2, "the scenery's counts");
+		CHECK(part[20] == 0 && part[22] == 0xFF && part[23] == 0xFF && part[24] == 0, "the pages' layers");
+		CHECK(sdf_get32(part + 26) == 0xE1F20003UL && sdf_get_float(part + 30) == 1.5f &&
+			sdf_get_float(part + 54) == -2.25f, "the placements");
+	}
 	remove(cache_path());
 	CHECK(sdf_file_write(cache_path(), bytes, size), "written");
 	CHECK(sdf_cache_load(cache_path(), 0xC0FFEE12UL, 2, &back), "read back");
@@ -944,6 +986,11 @@ static void round_trip_case(void)
 		back.header.brick_count == volume.header.brick_count, "header");
 	CHECK(!memcmp(back.cells, volume.cells, cells * 4) && !memcmp(back.bricks, volume.bricks,
 		volume.header.brick_count * WORLD_SDF_BRICK_VOXELS), "cells, bricks");
+	CHECK(back.scenery.page_count == 3 && back.scenery.layer_count == 1 && back.scenery.width == 16 &&
+		back.scenery.layers[1] == WORLD_SDF_SCENERY_NO_LAYER && back.scenery.layers[2] == 0 &&
+		back.scenery.placement_count == 2 && back.scenery.placements[0].definition == (long)0xE1F20003L &&
+		back.scenery.placements[1].position[2] == -2.25f &&
+		!memcmp(back.scenery.texels, volume.scenery.texels, 16 * 16), "the scenery's part");
 	{
 		/* (no .tmp left beside it) */
 		char temporary[300];
@@ -983,12 +1030,12 @@ static void rejected_word(unsigned char const *bytes, unsigned char *changed, un
 }
 
 /* a copy with a byte of the payload changed (the stored stand-in
-deflate's, at 68), and its CRC made again */
+deflate's, at 76), and its CRC made again */
 static void rejected_byte(unsigned char const *bytes, unsigned char *changed, unsigned long size, unsigned long offset,
 	unsigned char value, char const *why)
 {
 	memcpy(changed, bytes, size);
-	changed[68 + offset] = value;
+	changed[76 + offset] = value;
 	sdf_put32(changed + size - 4, sdf_crc(0, changed, size - 4));
 	rejected(changed, size, 0xC0FFEE12UL, 2, why);
 }
@@ -1014,7 +1061,7 @@ static void rejection_case(void)
 	rejected(changed, size, 0xC0FFEE12UL, 2, "magic");
 	rejected_word(bytes, changed, size, 4, WORLD_SDF_VERSION + 1, "version");
 	memcpy(changed, bytes, size);
-	changed[64 + 100] ^= 1;
+	changed[72 + 100] ^= 1;
 	rejected(changed, size, 0xC0FFEE12UL, 2, "a voxel's bit");
 	rejected_word(bytes, changed, size, 16, volume.header.width + 1, "size against the cells");
 	rejected_word(bytes, changed, size, 60, volume.header.brick_count + 1, "bricks against the payload");
@@ -1025,7 +1072,17 @@ static void rejection_case(void)
 	rejected_byte(bytes, changed, size, 1 * 4 + 3, 7, "a cell's kind");
 	rejected_byte(bytes, changed, size, 3 * 4 + 2, 200, "a brick past the bricks");
 	rejected_byte(bytes, changed, size, 3 * 4 + 0, WORLD_SDF_ATLAS, "a brick past the atlas's row");
-	CHECK(logged >= 14, "%d deletions logged", logged);
+	{
+		/* (the scenery's part, after the cells and the bricks) */
+		unsigned long part = volume.header.width * volume.header.height * volume.header.depth * 4 +
+			volume.header.brick_count * WORLD_SDF_BRICK_VOXELS;
+
+		rejected_byte(bytes, changed, size, part + 20, 1, "a page's layer past the layers");
+		rejected_byte(bytes, changed, size, part + 22, 0xFE, "a page's layer under none");
+		rejected_byte(bytes, changed, size, part + 9, 4, "the pages wider than their bytes");
+		rejected_byte(bytes, changed, size, part + 4, 0, "fewer layers than their bytes");
+	}
+	CHECK(logged >= 18, "%d deletions logged", logged);
 	/* (and the good one still taken) */
 	CHECK(sdf_file_write(cache_path(), bytes, size) && sdf_cache_load(cache_path(), 0xC0FFEE12UL, 2, &back), "good");
 	remove(cache_path());

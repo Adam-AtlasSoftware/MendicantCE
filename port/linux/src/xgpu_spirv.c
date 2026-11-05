@@ -149,7 +149,7 @@ bitwise or (GroupNonUniformArithmetic) */
 	unsigned int constants, uniforms, dynamic_lights, dynamic_light_cells, samples, view_index;
 	/* (display.ambient_occlusion "world": the window's block and the
 	structure's distance field) */
-	unsigned int world_ao, world_sdf, world_sdf_table;
+	unsigned int world_ao, world_sdf, world_sdf_table, world_ao_scenery;
 };
 
 static void words_push(struct module *m, struct words *words, unsigned int word)
@@ -2633,6 +2633,10 @@ static void world_ao_declare(struct module *m)
 		"world_sdf_table");
 	decorate1(m, m->world_sdf_table, DECORATION_DESCRIPTOR_SET, XGPU_SPIRV_SET_OCCLUSION);
 	decorate1(m, m->world_sdf_table, DECORATION_BINDING, XGPU_SPIRV_BINDING_WORLD_SDF_TABLE);
+	m->world_ao_scenery = variable(m, type_sampled_image(m, DIM_2D, TRUE, FALSE, TRUE), STORAGE_UNIFORM_CONSTANT,
+		"world_ao_scenery");
+	decorate1(m, m->world_ao_scenery, DECORATION_DESCRIPTOR_SET, XGPU_SPIRV_SET_OCCLUSION);
+	decorate1(m, m->world_ao_scenery, DECORATION_BINDING, XGPU_SPIRV_BINDING_WORLD_AO_SCENERY);
 }
 
 /* a vec4 of the block (0 field, 1 parameters, 2 proxies, 3 grid; 4 the
@@ -2700,9 +2704,11 @@ static unsigned int world_sdf_distance(struct module *m, struct pixel_state *sta
 	return load(m, m->t_float, result);
 }
 
-/* A_sdf(p, n): the cone of taps along the normal (world_ao.c's
-world_ao_field_occlusion) */
-static unsigned int world_sdf_occlusion(struct module *m, struct pixel_state *state, unsigned int p, unsigned int n)
+/* A_sdf(p, n): the cone of taps along the normal, each tap's distance
+taken from own (0, or a static scenery placement's own draw's depth inside
+solid at the pixel: world_ao_shading.c's world_ao_field_occlusion_from) */
+static unsigned int world_sdf_occlusion(struct module *m, struct pixel_state *state, unsigned int p, unsigned int n,
+	unsigned int own)
 {
 	unsigned int field0 = world_ao_vector(m, 0, constant_int(m, 0)), field1 = world_ao_vector(m, 0, constant_int(m, 1));
 	unsigned int step = fmax_scalar(m, 1, fdiv(m, 1, constant_float(m, 1.0f), extract(m, field0, 3)), XGPU_WORLD_AO_STEP);
@@ -2712,7 +2718,7 @@ static unsigned int world_sdf_occlusion(struct module *m, struct pixel_state *st
 	for (tap = 0; tap < XGPU_WORLD_AO_TAPS; tap++)
 	{
 		unsigned int h = fmul(m, 1, step, constant_float(m, (float)(1 << tap)));
-		unsigned int d = world_sdf_distance(m, state, field0, field1, fadd(m, 3, p, fscale(m, 3, n, h)));
+		unsigned int d = fsub(m, 1, world_sdf_distance(m, state, field0, field1, fadd(m, 3, p, fscale(m, 3, n, h))), own);
 
 		occlusion = fadd(m, 1, occlusion, fmul(m, 1, constant_float(m, 1.0f / (float)(2 << tap)),
 			saturate(m, 1, fdiv(m, 1, fsub(m, 1, h, d), h))));
@@ -3177,7 +3183,7 @@ pixels of a subgroup are near one another and mostly share their cells, and
 where they differ the subgroup ran each of their shapes anyway, one lane's
 at a time. */
 static unsigned int world_proxies_occlusion(struct module *m, struct pixel_state *state, unsigned int p,
-	unsigned int n, unsigned int owner)
+	unsigned int n, unsigned int owner, unsigned int limit)
 {
 	unsigned int grid0 = world_ao_vector(m, 3, constant_int(m, 0)), grid1 = world_ao_vector(m, 3, constant_int(m, 1));
 	unsigned int product_variable = local(m, &state->locals, m->t_float);
@@ -3224,9 +3230,22 @@ static unsigned int world_proxies_occlusion(struct module *m, struct pixel_state
 	word = load(m, m->t_int, word_variable);
 	branch_conditional(m, op2(m, OP_S_LESS_THAN, m->t_bool, word, constant_int(m, 2)), outer_body, outer_merge);
 	label_at(m, outer_body);
-	/* this pixel's word of its cell's mask; walked, the subgroup's (all of
-	its pixels' words or'd) */
+	/* this pixel's word of its cell's mask, cut to the shapes below the
+	draw's limit (the dynamic objects' first: world_ao_read); walked, the
+	subgroup's (all of its pixels' words or'd). allowed = clamp(limit - 32
+	word, 0, 32), own &= allowed < 32 ? (1u << allowed) - 1u : ~0u */
 	own = op2(m, OP_VECTOR_EXTRACT_DYNAMIC, m->t_uint, pair, op2(m, OP_I_ADD, m->t_int, low, word));
+	{
+		unsigned int allowed = ext3(m, GLSL_S_CLAMP, m->t_int, op2(m, OP_I_SUB, m->t_int, limit,
+			op2(m, OP_I_MUL, m->t_int, word, constant_int(m, 32))), constant_int(m, 0), constant_int(m, 32));
+		/* (its shift never 32, which the select leaves out anyway) */
+		unsigned int shift = ext3(m, GLSL_S_CLAMP, m->t_int, allowed, constant_int(m, 0), constant_int(m, 31));
+		unsigned int keep = op3(m, OP_SELECT, m->t_uint, op2(m, OP_S_LESS_THAN, m->t_bool, allowed, constant_int(m, 32)),
+			op2(m, OP_I_SUB, m->t_uint, op2(m, OP_SHIFT_LEFT_LOGICAL, m->t_uint, constant_uint(m, 1), shift),
+			constant_uint(m, 1)), constant_uint(m, 0xFFFFFFFFu));
+
+		own = op2(m, OP_BITWISE_AND, m->t_uint, own, keep);
+	}
 	if (subgroups)
 	{
 		operands[0] = constant_uint(m, SCOPE_SUBGROUP);
@@ -3305,14 +3324,65 @@ static unsigned int world_ao_read(struct module *m, struct pixel_state *state, i
 	unsigned int object = uniform(m, U_WORLD_AO, -1);
 	unsigned int parameters0 = world_ao_vector(m, 1, constant_int(m, 0));
 	unsigned int parameters1 = world_ao_vector(m, 1, constant_int(m, 1));
-	unsigned int proxies = world_proxies_occlusion(m, state, p, n, extract(m, object, 0));
+	/* (the shapes walked: the dynamic objects', parameters[1].y of them;
+	every one in the lightmap pass where its page has no layer, or it reads
+	no lightmap: world_ao_shading.c's world_ao_proxies_walked) */
+	unsigned int dynamic = op1(m, OP_CONVERT_F_TO_S, m->t_int, extract(m, parameters1, 1));
+	unsigned int layer = extract(m, object, 1), limit = dynamic, scenery = 0, proxies;
 	unsigned int field, relative, occlusion;
+	int paged = light == XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP && state->in_t[2] &&
+		state->program->stages[2].mode == XGPU_TEXTURE_PROJECT2D && state->program->stages[2].sampler == _xgpu_sampler_2d;
 
 	if (light == XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP)
+	{
+		unsigned int unpaged = compare(m, OP_F_ORD_LESS_THAN, layer, constant_float(m, 0.0f));
+
+		if (paged)
+		{
+			/* the page's texel at the lightmap's own coordinates, as stage 2
+			samples them: xT2.xy / (xT2.w != 0 ? xT2.w : 1) by its scale */
+			unsigned int xt = pixel_input(m, state, state->in_t[2], m->t_v4), w = extract(m, xt, 3), uv, operands[4];
+
+			w = op3(m, OP_SELECT, m->t_float, compare(m, OP_F_UNORD_NOT_EQUAL, w, constant_float(m, 0.0f)), w,
+				constant_float(m, 1.0f));
+			uv = fmul(m, 2, fdiv(m, 2, xy(m, xt), splat(m, 2, w)), xy(m, uniform(m, U_TEXTURE_SCALE, 2)));
+			operands[0] = load(m, type_sampled_image(m, DIM_2D, TRUE, FALSE, TRUE), m->world_ao_scenery);
+			operands[1] = op(m, OP_COMPOSITE_CONSTRUCT, m->t_v3, 3, (unsigned int[]){ extract(m, uv, 0),
+				extract(m, uv, 1), fmax_scalar(m, 1, layer, 0.0f) });
+			operands[2] = IMAGE_OPERANDS_LOD;
+			operands[3] = constant_float(m, 0.0f);
+			/* (the pages' bytes are the coverage's format, read as 1, 1, 1, the
+			byte: their alpha) */
+			scenery = fselect(m, unpaged, constant_float(m, 1.0f),
+				extract(m, op(m, OP_IMAGE_SAMPLE_EXPLICIT_LOD, m->t_v4, 4, operands), 3));
+			limit = op3(m, OP_SELECT, m->t_int, unpaged, constant_int(m, XGPU_WORLD_AO_SHAPES), dynamic);
+		}
+		else
+		{
+			limit = constant_int(m, XGPU_WORLD_AO_SHAPES);
+		}
+	}
+	proxies = world_proxies_occlusion(m, state, p, n, extract(m, object, 0), limit);
+	if (light == XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP)
+	{
+		if (scenery)
+			proxies = fmul(m, 1, proxies, scenery);
 		return ext3(m, GLSL_F_MIX, m->t_float, constant_float(m, 1.0f), fmax_scalar(m, 1, proxies, XGPU_WORLD_AO_FLOOR),
 			extract(m, parameters0, 1));
-	field = world_sdf_occlusion(m, state, p, n);
-	relative = saturate(m, 1, fdiv(m, 1, field, fmax_scalar(m, 1, extract(m, object, 1), XGPU_WORLD_AO_REFERENCE_LEAST)));
+	}
+	/* (a negative reference, a static scenery placement's own draw: the
+	field holds its own geometry, so its taps are taken from the pixel's own
+	depth in it, relative to no reference) */
+	{
+		unsigned int baked = compare(m, OP_F_ORD_LESS_THAN, extract(m, object, 1), constant_float(m, 0.0f));
+		unsigned int field0 = world_ao_vector(m, 0, constant_int(m, 0)), field1 = world_ao_vector(m, 0, constant_int(m, 1));
+		unsigned int inside = ext2(m, GLSL_F_MIN, m->t_float, world_sdf_distance(m, state, field0, field1, p),
+			constant_float(m, 0.0f));
+		unsigned int reference = fselect(m, baked, constant_float(m, 1.0f), extract(m, object, 1));
+
+		field = world_sdf_occlusion(m, state, p, n, fselect(m, baked, inside, constant_float(m, 0.0f)));
+		relative = saturate(m, 1, fdiv(m, 1, field, fmax_scalar(m, 1, reference, XGPU_WORLD_AO_REFERENCE_LEAST)));
+	}
 	field = ext3(m, GLSL_F_MIX, m->t_float, field, relative, extract(m, parameters1, 0));
 	occlusion = fmul(m, 1, ext3(m, GLSL_F_MIX, m->t_float, constant_float(m, 1.0f), field, extract(m, parameters0, 2)),
 		proxies);

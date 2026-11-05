@@ -109,6 +109,10 @@ map has no such BSP. The caller frees it (world_scene_triangles_free). Safe
 only on the game's thread while the map is loaded */
 int world_scene_static_triangles(short bsp_index, struct world_scene_triangles *triangles);
 void world_scene_triangles_free(struct world_scene_triangles *triangles);
+/* any collision BSP's surfaces (a struct collision_bsp: an object's, the
+static scenery's) fanned into triangles in its own space, as the structure's
+are (9 floats each into positions; NULL for the count alone): how many */
+long world_scene_collision_fan(void const *collision_bsp, float *positions);
 
 /* each frame, once the objects stand where they are drawn (render_frame,
 inside render_interpolation_frame_begin/_end): the objects found again */

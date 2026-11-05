@@ -52,6 +52,10 @@ level ("world" is the strong preset); the reference's weight */
 #define WORLD_AO_STRENGTH_OBJECTS 1.0f
 #define WORLD_AO_STRENGTH_LEVEL 0.8f
 #define WORLD_AO_REFERENCE_WEIGHT 1.0f
+/* a model draw's reference for a static scenery placement's own draws:
+the field holds its own geometry, so its taps are taken from the pixel's
+own depth inside it (world_ao_occlusion), relative to no reference */
+#define WORLD_AO_REFERENCE_NO_FIELD -1.0f
 
 /* the window's proxy grid (world_ao_grid; xgpu.h's XGPU_WORLD_AO_GRID_*):
 cells about the camera, boxes in the world (eye-independent), each with a
@@ -99,6 +103,10 @@ it; -1 none, the structure); the first-person weapon drawn (TRUE) and done
 (FALSE: none drawn now), which the occlusion leaves as it is */
 void world_ao_object_begin(long object_index);
 void world_ao_first_person(int drawing);
+/* the structure's lightmap pass draws with this page of its lightmaps
+next (rasterizer_environment_lightmap_begin; NULL none): its static
+scenery's layer, or the static scenery's shapes walked where it has none */
+void world_ao_lightmap_begin(void const *lightmap_bitmap);
 
 /* ---------- the arithmetic (the shaders' reference: xgpu.h's
 XGPU_AMBIENT_OCCLUSION_WORLD, the emitters' world_ao_*; tools/harness/
@@ -107,6 +115,10 @@ tests/world_ao.c) */
 /* A_sdf: the share of the ambient light the field leaves a point with this
 normal (1 none: no volume) */
 float world_ao_field_occlusion(struct world_sdf_volume const *volume, float const point[3], float const normal[3]);
+/* the same with each tap's distance taken from own (the pixel's own depth
+inside solid, 0 or less: a static scenery placement's own draw) */
+float world_ao_field_occlusion_from(struct world_sdf_volume const *volume, float const point[3], float const normal[3],
+	float own);
 /* an object's reference: A_sdf where its ambient light was sampled, above
 its lighting point, facing up */
 float world_ao_reference(struct world_sdf_volume const *volume, float const lighting_point[3]);
@@ -114,6 +126,22 @@ float world_ao_reference(struct world_sdf_volume const *volume, float const ligh
 owners than owner leave */
 float world_ao_proxies_occlusion(struct world_proxy const *proxies, long count, float const point[3],
 	float const normal[3], float owner);
+/* a lightmap page of the static scenery's occlusion of the level
+(world_sdf.h's struct world_sdf_scenery): the triangles that draw with it
+(WORLD_AO_SCENERY_TRIANGLE floats each: three corners' positions, then their
+normals, then their lightmap coordinates, 0 to 1) rasterized at width x
+height texels' centres, each the product of the shapes' 1 - occlusion x
+fade (A_prox, owner none) at its place and normal, as a byte (255: 1); the
+texels no triangle covers take their covered neighbours' (two steps out),
+else 255. Returns how many texels were covered, and in *shared how many of
+them two triangles at different places cover (the page then means two
+things there). Pure; texels width * height bytes */
+enum
+{
+	WORLD_AO_SCENERY_TRIANGLE = 24,
+};
+long world_ao_scenery_page(struct world_proxy const *shapes, long shape_count, float const *triangles,
+	long triangle_count, unsigned long width, unsigned long height, unsigned char *texels, long *shared);
 /* the window's proxy grid about the camera: grid[0] the camera (w 0);
 grid[1] each axis's scale, one over WORLD_AO_GRID_CELL; cells[i / 2][2 (i % 2) + w]
 word w of cell i's mask ((z * WORLD_AO_GRID_Y + y) * WORLD_AO_GRID_X + x),
@@ -131,12 +159,20 @@ others' reach does not touch the cell) */
 float world_ao_proxies_occlusion_grid(struct world_proxy const *proxies, float const grid[2][4],
 	unsigned int const cells[WORLD_AO_GRID_CELLS / 2][4], float const point[3], float const normal[3], float owner);
 /* the occlusion a draw's pixel multiplies its ambient light by: a model's
-(lightmap FALSE: the field relative to its reference, faded in, times the
-proxies) or the lightmap pass's (the proxies alone), the parameters as the
-block's (xgpu_stream.h's struct xgpu_world_ao_block) */
+(lightmap FALSE: the field relative to its reference, faded in (where the
+reference is negative, from the pixel's own depth in it, relative to none),
+times the dynamic proxies) or the lightmap pass's (the proxies alone, or, where its
+page has a layer (reference, as the lightmap pass's draws give it, 0 or
+more), the dynamic proxies times scenery, the page's texel there), the
+parameters as the block's (xgpu_stream.h's struct xgpu_world_ao_block:
+parameters[1][1] is how many of the proxies are the dynamic objects', the
+static scenery's after them) */
 float world_ao_occlusion(float const parameters[2][4], struct world_sdf_volume const *volume,
 	struct world_proxy const *proxies, long count, float const point[3], float const normal[3], float owner,
-	float reference, int lightmap);
+	float reference, int lightmap, float scenery);
+/* of a window's proxies, how many a draw walks: the dynamic objects'
+alone, or every one (the lightmap pass where its page has no layer) */
+long world_ao_proxies_walked(float const parameters[2][4], long count, float reference, int lightmap);
 
 /* ---------- the front end's (port/linux/src/d3d8_device.c) */
 
@@ -161,6 +197,9 @@ enum
 {
 	WORLD_AO_FIELD_TABLE = 0,
 	WORLD_AO_FIELD_ATLAS = 1,
+	/* (the static scenery's pages: width x height bytes, depth layers;
+	sent before the table) */
+	WORLD_AO_FIELD_SCENERY = 2,
 };
 void halo_world_ao_field(int part, unsigned long width, unsigned long height, unsigned long depth,
 	unsigned long z_first, unsigned long z_count, void const *data);

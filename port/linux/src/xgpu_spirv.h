@@ -71,6 +71,9 @@ with texelFetch), and the window's block (a uniform buffer) */
 #define XGPU_SPIRV_BINDING_WORLD_SDF 1
 #define XGPU_SPIRV_BINDING_WORLD_AO 2
 #define XGPU_SPIRV_BINDING_WORLD_SDF_TABLE 3
+/* (the static scenery's pages of the level's occlusion: a 2D array of
+bytes, sampled at the lightmap pass's lightmap coordinates) */
+#define XGPU_SPIRV_BINDING_WORLD_AO_SCENERY 4
 
 /* the locations of what the vertex shader hands the pixel shader */
 enum

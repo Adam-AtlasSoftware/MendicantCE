@@ -13,6 +13,8 @@ skeleton and placed on its nodes as they move. */
 
 #define FAKE_INSTANCES 256
 
+/* (world_proxies_window's count of the dynamic objects' shapes) */
+static long dynamic_count;
 static struct
 {
 	struct world_proxies_source sources[4]; /* by definition */
@@ -623,6 +625,7 @@ static void add_instance(long id, long definition, float x, float y, float z)
 
 	fake.instances[index].id = id;
 	fake.instances[index].definition = definition;
+	fake.instances[index].baked = 0;
 	identity(&fake.frames[index][0], x, y, z);
 	fake.frame_counts[index] = 1;
 }
@@ -656,7 +659,7 @@ static void culling_case(void)
 	add_instance(101, 0, -20.0f, 0.0f, 0.0f);
 	add_instance(102, 0, -3.0f, 0.0f, 0.0f);
 	add_instance(103, 0, 10.0f, 30.0f, 0.0f);
-	count = world_proxies_window(camera, proxies, owners, WORLD_PROXY_MAXIMUM_PER_WINDOW);
+	count = world_proxies_window(camera, proxies, owners, WORLD_PROXY_MAXIMUM_PER_WINDOW, &dynamic_count);
 	CHECK(count == 2, "%ld", count);
 	/* nearest first */
 	CHECK(owners[0] == 102 && owners[1] == 100, "%ld %ld", owners[0], owners[1]);
@@ -666,21 +669,21 @@ static void culling_case(void)
 	fake.instance_count = 0;
 	for (index = 0; index < 200; index++)
 		add_instance(1000 + index, 0, 5.0f + (float)((index * 37) % 200), 0.0f, 0.0f);
-	count = world_proxies_window(camera, proxies, owners, WORLD_PROXY_MAXIMUM_PER_WINDOW);
+	count = world_proxies_window(camera, proxies, owners, WORLD_PROXY_MAXIMUM_PER_WINDOW, &dynamic_count);
 	CHECK(count == WORLD_PROXY_MAXIMUM_PER_WINDOW, "%ld", count);
 	for (index = 0; index < count; index++)
 		CHECK(proxies[index].v[0][0] == 5.0f + (float)index, "%ld: %g", index, proxies[index].v[0][0]);
 	/* a smaller maximum, and none */
-	CHECK(world_proxies_window(camera, proxies, owners, 3) == 3, "three");
-	CHECK(world_proxies_window(camera, NULL, NULL, 0) == 0, "none");
+	CHECK(world_proxies_window(camera, proxies, owners, 3, &dynamic_count) == 3, "three");
+	CHECK(world_proxies_window(camera, NULL, NULL, 0, &dynamic_count) == 0, "none");
 	/* a definition is made once */
 	{
 		long read = fake.definitions_read;
 
-		world_proxies_window(camera, proxies, owners, WORLD_PROXY_MAXIMUM_PER_WINDOW);
+		world_proxies_window(camera, proxies, owners, WORLD_PROXY_MAXIMUM_PER_WINDOW, &dynamic_count);
 		CHECK(fake.definitions_read == read, "made again");
 		world_proxies_map_unloaded();
-		world_proxies_window(camera, proxies, owners, WORLD_PROXY_MAXIMUM_PER_WINDOW);
+		world_proxies_window(camera, proxies, owners, WORLD_PROXY_MAXIMUM_PER_WINDOW, &dynamic_count);
 		CHECK(fake.definitions_read == read + 1, "kept past the map");
 	}
 }
@@ -779,7 +782,7 @@ static void skeleton_case(void)
 		fake.frames[0][node] = fake.sources[1].nodes[node].default_frame;
 		fake.frames[0][node].position[0] += 3.0f;
 	}
-	count = world_proxies_window(camera, proxies, owners, WORLD_PROXY_MAXIMUM_PER_WINDOW);
+	count = world_proxies_window(camera, proxies, owners, WORLD_PROXY_MAXIMUM_PER_WINDOW, &dynamic_count);
 	CHECK(count == 2, "%ld", count);
 	for (index = 0; index < count; index++)
 	{
@@ -792,7 +795,7 @@ static void skeleton_case(void)
 	fake.frames[0][2].axes[0][0] = 1.0f;
 	fake.frames[0][2].axes[1][1] = 1.0f;
 	fake.frames[0][2].axes[2][2] = 1.0f;
-	count = world_proxies_window(camera, proxies, owners, WORLD_PROXY_MAXIMUM_PER_WINDOW);
+	count = world_proxies_window(camera, proxies, owners, WORLD_PROXY_MAXIMUM_PER_WINDOW, &dynamic_count);
 	CHECK(count == 2, "%ld", count);
 	for (index = 0; index < count; index++)
 	{
@@ -813,7 +816,7 @@ static void skeleton_case(void)
 			for (k = 0; k < 3; k++)
 				fake.frames[0][node].axes[axis][k] *= 2.0f;
 	}
-	count = world_proxies_window(camera, proxies, owners, WORLD_PROXY_MAXIMUM_PER_WINDOW);
+	count = world_proxies_window(camera, proxies, owners, WORLD_PROXY_MAXIMUM_PER_WINDOW, &dynamic_count);
 	for (index = 0; index < count; index++)
 		CHECK(proxies[index].v[2][0] > 0.12f, "scaled radius %g", proxies[index].v[2][0]);
 }
@@ -835,7 +838,7 @@ static void owner_case(void)
 	for (node = 0; node < 3; node++)
 		fake.frames[1][node] = fake.sources[1].nodes[node].default_frame;
 	add_instance(22, 0, 2.0f, 0.0f, 1.0f);
-	count = world_proxies_window(camera, proxies, owners, WORLD_PROXY_MAXIMUM_PER_WINDOW);
+	count = world_proxies_window(camera, proxies, owners, WORLD_PROXY_MAXIMUM_PER_WINDOW, &dynamic_count);
 	CHECK(count == 4, "%ld", count);
 	/* each owner one slot, in order of its first shape; a slot's shapes all
 	its owner's */
@@ -855,6 +858,34 @@ static void owner_case(void)
 	CHECK(proxies[count - 1].v[1][3] == 2.0f && owners[count - 1] == 22, "the last owner's slot 2");
 }
 
+/* the static scenery the field and its pages hold: its shapes after every
+dynamic object's, nearer or not, and the dynamic objects' counted */
+static void baked_case(void)
+{
+	float const camera[3] = { -5.0f, 0.0f, 1.0f };
+	struct world_proxy proxies[WORLD_PROXY_MAXIMUM_PER_WINDOW];
+	long owners[WORLD_PROXY_MAXIMUM_PER_WINDOW], count;
+
+	one_sphere_definition();
+	fake.frustum = 0;
+	/* (a baked sphere nearest, a dynamic one, a baked one, a dynamic one
+	farthest) */
+	add_instance(30, 0, -4.0f, 0.0f, 1.0f);
+	fake.instances[0].baked = 1;
+	add_instance(31, 0, -2.0f, 0.0f, 1.0f);
+	add_instance(32, 0, 0.0f, 0.0f, 1.0f);
+	fake.instances[2].baked = 1;
+	add_instance(33, 0, 3.0f, 0.0f, 1.0f);
+	count = world_proxies_window(camera, proxies, owners, WORLD_PROXY_MAXIMUM_PER_WINDOW, &dynamic_count);
+	CHECK(count == 4 && dynamic_count == 2, "%ld shapes, %ld dynamic", count, dynamic_count);
+	CHECK(owners[0] == 31 && owners[1] == 33 && owners[2] == 30 && owners[3] == 32, "the order %ld %ld %ld %ld",
+		owners[0], owners[1], owners[2], owners[3]);
+	/* (a window too small for all: the dynamic objects' kept first) */
+	count = world_proxies_window(camera, proxies, owners, 3, &dynamic_count);
+	CHECK(count == 3 && dynamic_count == 2 && owners[2] == 30, "three: %ld, %ld dynamic, the last %ld", count,
+		dynamic_count, owners[2]);
+}
+
 static void none_case(void)
 {
 	float const origin[3] = { 0.0f, 0.0f, 0.0f };
@@ -863,7 +894,7 @@ static void none_case(void)
 
 	memset(&proxy, 0, sizeof(proxy));
 	CHECK(world_proxy_occlusion(&proxy, origin, up) == 0.0f, "none");
-	CHECK(world_proxies_window(origin, NULL, NULL, 0) == 0, "an empty window");
+	CHECK(world_proxies_window(origin, NULL, NULL, 0, &dynamic_count) == 0, "an empty window");
 	/* an unknown definition and a projectile's: no shapes */
 	CHECK(world_proxies_definition(3) == NULL, "unknown");
 	CHECK(world_proxies_definition(-1) == NULL, "none");
@@ -900,6 +931,8 @@ int main(int argc, char **argv)
 		skeleton_case();
 	else if (!strcmp(name, "owner"))
 		owner_case();
+	else if (!strcmp(name, "baked"))
+		baked_case();
 	else if (!strcmp(name, "none"))
 		none_case();
 	else

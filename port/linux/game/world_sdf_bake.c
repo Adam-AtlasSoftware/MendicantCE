@@ -663,6 +663,7 @@ int world_sdf_pack(struct world_sdf_volume *volume, signed char const *voxels)
 
 	volume->cells = calloc(cells, sizeof(*volume->cells));
 	volume->bricks = NULL;
+	memset(&volume->scenery, 0, sizeof(volume->scenery));
 	if (!volume->cells)
 		return 0;
 	/* (counted, then copied) */

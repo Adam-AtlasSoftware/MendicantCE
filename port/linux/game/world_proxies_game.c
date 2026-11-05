@@ -23,8 +23,10 @@ object's node matrices, read inside the frame's render_interpolation pose
 #include "render/render_debug.h"
 #include "tag_files/tag_groups.h"
 
+#include "world_proxies.h"
 #include "world_proxies_source.h"
 #include "world_scene.h"
+#include "world_sdf.h"
 
 #include <string.h>
 
@@ -102,7 +104,33 @@ static boolean object_occludes(long object_index)
 	return object->object.type != _object_type_projectile && object->object.type != _object_type_sound_scenery;
 }
 
+/* a static scenery placement that the drawn field and its pages hold:
+scenery or a device on no other object, standing where one baked stands */
+static int object_baked(long object_index, long definition)
+{
+	struct object_datum *object = (struct object_datum *)object_try_and_get(object_index);
+	float position[3];
+
+	if (!object || object->object.parent_object_index != NONE || (object->object.type != _object_type_scenery &&
+		object->object.type != _object_type_machine && object->object.type != _object_type_control &&
+		object->object.type != _object_type_light_fixture))
+	{
+		return FALSE;
+	}
+	position[0] = object->object.position.x;
+	position[1] = object->object.position.y;
+	position[2] = object->object.position.z;
+	return world_sdf_scenery_baked(definition, position);
+}
+
 /* ---------- public code */
+
+int world_proxies_source_baked(long id)
+{
+	struct object_datum *object = (struct object_datum *)object_try_and_get(id);
+
+	return object && object_baked(id, object->definition_index);
+}
 
 int world_proxies_source_definition(long definition, struct world_proxies_source *source)
 {
@@ -178,6 +206,7 @@ long world_proxies_source_instances(struct world_proxies_source_instance *instan
 			continue;
 		instances[count].id = scene[index].id;
 		instances[count].definition = scene[index].definition;
+		instances[count].baked = object_baked(scene[index].id, scene[index].definition);
 		count++;
 	}
 	return count;

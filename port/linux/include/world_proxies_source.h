@@ -72,6 +72,9 @@ struct world_proxies_source_instance
 {
 	long id; /* its datum handle (world_scene.h's id) */
 	long definition; /* its tag index */
+	/* a static scenery placement that the drawn field and its pages hold
+	(world_sdf_scenery_baked): its shapes after the dynamic objects' */
+	int baked;
 };
 
 /* ---------- prototypes (port/linux/game/world_proxies_game.c) */

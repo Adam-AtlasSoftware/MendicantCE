@@ -317,6 +317,7 @@ symbols in this file:
 #include "render/render_debug.h"
 #include "saved games/game_state.h"
 #include "tag_files/tag_groups.h"
+#include "world_ao.h" /* port: port/linux/game/world_ao.c */
 
 /* ---------- constants */
 
@@ -1156,6 +1157,9 @@ void rasterizer_environment_lightmap_begin(
 	struct bitmap_data const *lightmap_bitmap)
 {
 	_rasterizer_environment_lightmap_begin(lightmap_bitmap);
+	/* port: display.ambient_occlusion "world": the page drawn with next, for
+	its static scenery's occlusion (port/linux/game/world_ao.c) */
+	world_ao_lightmap_begin(lightmap_bitmap);
 	return;
 }
 

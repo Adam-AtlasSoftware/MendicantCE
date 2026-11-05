@@ -326,6 +326,8 @@ _Static_assert(offsetof(struct xgpu_world_ao_block, field) == XGPU_WORLD_AO_BLOC
 _Static_assert(XGPU_WORLD_AO_GRID_X == WORLD_AO_GRID_X && XGPU_WORLD_AO_GRID_Y == WORLD_AO_GRID_Y &&
 	XGPU_WORLD_AO_GRID_Z == WORLD_AO_GRID_Z && XGPU_WORLD_AO_GRID_CELLS == XGPU_WORLD_AO_GRID_CELLS_MAXIMUM,
 	"the world's proxy grid as the game makes it and the emitters read it (world_ao.h, xgpu.h)");
+_Static_assert(WORLD_AO_FIELD_TABLE == XGPU_STREAM_WORLD_AO_TABLE && WORLD_AO_FIELD_ATLAS == XGPU_STREAM_WORLD_AO_ATLAS &&
+	WORLD_AO_FIELD_SCENERY == XGPU_STREAM_WORLD_AO_SCENERY, "the world's field's parts as the stream carries them");
 
 static struct
 {

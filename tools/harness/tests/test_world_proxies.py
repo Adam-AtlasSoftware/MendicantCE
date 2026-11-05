@@ -10,11 +10,14 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, mutated, read, run  # noqa: E402
 
-CASES = ["sphere", "capsule", "box", "reach", "bound", "far", "culling", "skeleton", "owner", "none"]
+CASES = ["sphere", "capsule", "box", "reach", "bound", "far", "culling", "skeleton", "owner", "baked", "none"]
 HEADER = "port/linux/include/world_proxies.h"
 SOURCE = "port/linux/include/world_proxies_source.h"
 GAME = "port/linux/game/world_proxies.c"
 CONTROLS = [
+    # the static scenery's shapes taken among the dynamic objects' by their distance alone
+    ("return baked != candidate->baked ? !baked : distance < candidate->distance;",
+     "return distance < candidate->distance;", "baked"),
     # the sphere's horizon left out
     ("if (k2 > 0.001f)", "if (k2 > 1.0f)", "sphere"),
     # the capsule's tube half as wide

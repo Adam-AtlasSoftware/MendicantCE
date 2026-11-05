@@ -152,8 +152,11 @@ can't be re-read.
   (`world_sdf_fade`), with no hitch and no pop. We chose proxies-only over falling back to GTAO: GTAO's pre-pass
   would cost more than the whole new feature on the Deck, and switching would pop.
 - **Measured and stated:** each bake logs `world sdf: <map> bsp <n>: ... within <bounds>, <w>x<h>x<d> cells, <n>
-  bricks, voxel <v> in <ms> ms on <t> threads, <bytes> in memory, <bytes> cached`, and the header records the time
-  and threads. Workstream B's PR states the bake time and
+  bricks, voxel <v>; static scenery <n> placements, <n> shapes, <n> of <n> lightmap pages in <n> layers of <w>x<h>
+  (<ms> ms); in <ms> ms on <t> threads, <bytes> in memory, <bytes> cached`, and the header records the times and
+  threads. Once the start-up pass's last bake is done it logs `world sdf: the first start's <n> of <n> fields baked
+  in <s> s behind the main menu: the pass and its fields <s> s` (the pass's own total from
+  `menu_pictures_pass_seconds`). Workstream B's PR states the bake time and
   cache size for every stock map on the 5900X, the Steam Deck and one phone. Targets: under 2 s per BSP on 8
   desktop threads, under 10 s in the background on a phone, and a cache under 3 MB per BSP after deflate.
 
@@ -166,15 +169,76 @@ never shipped, and never trusted without checks.
 - **Key:** the map's cache file header checksum (`menu_picture_map_checksum`'s source) plus `WORLD_SDF_VERSION`. A
   different map under the same name, or a new version, is baked again. A good file is reused forever.
 - **Format** (little-endian, written field by field, not as a struct):
-  - a 64-byte `struct world_sdf_header`: magic `WSDF`, version (2: sparse), map checksum, bsp index, the cells along
-    x/y/z, origin, voxel, range, deflated size, bake ms, bake threads, brick count;
-  - then the cells (4 bytes each, x fastest, then y, then z) and the bricks (729 bytes each), deflated as one zlib
-    stream (the game's own zlib, `source/memory/zlib`);
+  - a 72-byte `struct world_sdf_header`: magic `WSDF`, version (3: the static scenery), map checksum, bsp index, the
+    cells along x/y/z, origin, voxel, range, deflated size, bake ms, bake threads, brick count, the static scenery's
+    part's bytes and its pages' bake ms;
+  - then the cells (4 bytes each, x fastest, then y, then z), the bricks (729 bytes each) and the static scenery's
+    part ([Static scenery](#static-scenery)), deflated as one zlib stream (the game's own zlib, `source/memory/zlib`);
   - then a CRC-32 of the header and the deflated bytes (the menu pictures' CRC).
 - **Writing:** to `<name>.tmp`, then renamed into place, so a crash leaves no half file.
-- **Reading:** a file with the wrong magic, version, checksum, size or CRC, a cell of no kind, or a brick's place
-  past the bricks is deleted and baked again.
+- **Reading:** a file with the wrong magic, version, checksum, size or CRC, a cell of no kind, a brick's place
+  past the bricks, or a scenery part whose counts, sizes or pages' layers don't hold is deleted and baked again.
 - **Bumping `WORLD_SDF_VERSION`:** whenever the bake's arithmetic, the source geometry or the layout changes.
+
+## Static scenery
+
+The scenery and devices that never move are baked with the field, once per BSP, and leave the per-pixel proxy
+loop to the dynamic objects (units, vehicles, items, moving devices).
+
+**What is static.** A placement of the scenery, machines, controls or light fixtures blocks that:
+- no script can name (`name_index` none);
+- is made at the map's start on every difficulty (no placement flags);
+- is in this BSP, by the game's own test (`object_types.c`: its position or its bounding centre in a leaf);
+- can't move or be destroyed: its definition has no animations (which is how a device moves) and no body
+  vitality.
+
+Anything else stays a dynamic proxy, as before. At run time an object is baked when it's scenery or a device
+on no parent, standing exactly where a baked placement of its definition stands (`world_sdf_scenery_baked`).
+
+**The level: lightmap-space pages.** The level never samples the field (it must not darken itself), and the
+field's cone reaches 2.4 wu, where scenery boxes reach 19 to 98. So the static shapes' occlusion of the level is
+baked in the BSP's own lightmap space:
+- One page of bytes per lightmap page that a static shape's reach touches. Each texel is the exact product the
+  proxy loop computes, Π (1 − occlusion × fade) over the static shapes (`world_ao_scenery_page`), at the texel
+  centre's place and interpolated normal on the surfaces drawn with that lightmap.
+- The pages' side is the largest of 512, 256... whose layers fit 4 MB. Texels the surfaces don't cover take
+  their covered neighbours' mean, two steps out, for the filter at chart edges.
+- A page none of whose texels is shaded shares one layer of none.
+- At draw time the lightmap pass reads its page at the lightmap's own coordinates, exactly as stage 2 samples
+  them (`xT2.xy / w` by the stage's scale). It multiplies the dynamic proxies' product by the page, then the
+  floor and the level's strength apply as before.
+- **Fallback (never black):** a lightmap with no bitmap, a material whose lightmap vertices aren't its vertices,
+  or a page where more than 1% of the covered texels are covered twice at different places (two surfaces sharing
+  them) has no layer. Its draws walk every shape of the window, the static scenery's too, as before the bake.
+  Per draw, the front end gives the layer in the draw's reference (`world_ao_lightmap_begin`, hooked in
+  `rasterizer_environment_lightmap_begin`), −1 for none.
+
+**The objects: the field.** Each static placement's collision geometry is folded into the field. Its triangles
+(each node's first BSP, at rest) join the structure's, and its solids join the sign's point test. Objects then see
+every static placement, not just the 64 nearest shapes. A static placement's own draws take the field from the
+pixel's own depth inside it (each tap's distance less `min(d(p), 0)`), relative to no reference. That keeps a
+rock's ground contact while its surface, which sits on its collision, isn't darkened by itself. Their reference
+is sent as −1 (`WORLD_AO_REFERENCE_NO_FIELD`).
+
+**The window.** The dynamic objects' shapes come first, nearest first; the static scenery's that the drawn field
+holds come after them (`world_proxies_window`'s dynamic count, `parameters[1].y`). A draw walks only the shapes
+below its limit: a model, and a lightmap draw with a layer, the dynamic ones; a lightmap draw without a layer,
+every one. The limit cuts each word of the cell's mask before the subgroup's OR.
+
+**Its part of the file** (after the bricks, in the same deflated stream; `struct world_sdf_scenery`):
+- page count, layer count, width, height and placement count, 4 bytes each;
+- each page's layer (2 bytes, signed);
+- each placement's definition and position (16 bytes);
+- the layers' texels.
+
+A part whose counts, sizes or layers don't hold is a damaged file (deleted, baked again). The GPU holds the
+pages as a 2D array in the coverage's format, read as (1, 1, 1, the byte): Vulkan set 3 binding 4
+(`XGPU_SPIRV_BINDING_WORLD_AO_SCENERY`), Metal texture 7. The command stream's `WORLD_AO_FIELD` carries them as
+part 2, before the table, a layer at a time. A 1x1 page of none stands in until they've all come, and the game
+names a layer to the draws only once the whole field is on the GPU.
+
+**Measuring:** `HALO_WORLD_AO_COUNTS=1` logs, every 600 windows, a window's shapes, how many are dynamic (by kind),
+and its lightmap pages drawn with a layer and without.
 
 ## Proxies (`world_proxies.h`)
 
@@ -380,15 +444,16 @@ the strong preset.
 | --- | --- | --- |
 | Field's atlas: 3D, R8 snorm, linear, clamp | set `XGPU_SPIRV_SET_OCCLUSION` (3), binding `XGPU_SPIRV_BINDING_WORLD_SDF` (1), combined image sampler | `[[texture(XGPU_MSL_TEXTURE_WORLD_SDF)]]` (5), `constexpr sampler` |
 | Field's table: 3D, RGBA8, read by texel | set 3, binding `XGPU_SPIRV_BINDING_WORLD_SDF_TABLE` (3), combined image sampler, `OpImageFetch` | `[[texture(XGPU_MSL_TEXTURE_WORLD_SDF_TABLE)]]` (6), `read` |
+| Static scenery's pages: 2D array, R8 (the coverage's format: read as 1, 1, 1, the byte), linear, clamp | set 3, binding `XGPU_SPIRV_BINDING_WORLD_AO_SCENERY` (4), combined image sampler | `[[texture(XGPU_MSL_TEXTURE_WORLD_AO_SCENERY)]]` (7), `constexpr sampler` |
 | Block `struct xgpu_world_ao_block` (std140, 19,552 B) | set 3, binding `XGPU_SPIRV_BINDING_WORLD_AO` (2), uniform buffer | `[[buffer(XGPU_MSL_BUFFER_WORLD_AO)]]` (23) |
-| Per draw: owner slot, reference | the draw uniforms (`xgpu_spirv_uniforms`, 2 floats) | `xgpu_msl_uniforms`, the same |
+| Per draw: owner slot, reference (a lightmap draw's: its page's layer, −1 none; a static placement's own: −1) | the draw uniforms (`xgpu_spirv_uniforms`, 2 floats) | `xgpu_msl_uniforms`, the same |
 
 Set 3 is #574's occlusion set, so a draw still binds at most 4 sets, the Vulkan minimum. With no field yet, the
 backend binds 1×1×1 stand-ins: a table cell far outside and an atlas texel of +127.
 
 The block: `field[0]` origin.xyz (the first voxel's centre) and 1/voxel; `field[1]` the cells along x, y, z and the
 atlas's layers (range is `WORLD_SDF_RANGE_VOXELS` / `field[0].w`); `parameters[0]` strength on
-objects, strength on the level, fade, proxy count; `parameters[1]` reference weight and 3 spare; then 64 × 3 vec4
+objects, strength on the level, fade, proxy count; `parameters[1]` reference weight, the dynamic objects' shapes' count (the static scenery's after them) and 2 spare; then 64 × 3 vec4
 proxies; then the grid: `grid[0]` the camera, `grid[1]` each axis's scale and 1 / cell; then 1,024 uvec4 cells, two
 cells' 64-bit masks each (cell i's word w at `cells[i / 2][2 (i % 2) + w]`).
 
@@ -513,6 +578,47 @@ is +1.89; without every shape reaching 30 wu or more, still +0.93. No reordering
 there. What would: the static scenery's occlusion of the level found once (a lightmap-space bake per BSP, E's note),
 leaving the pixels the dynamic objects' shapes alone; or the boxes' far patches from nearer than 6 half diagonals.
 Both change the result slightly, so both are a decision, not done here.
+
+### The static scenery baked
+
+The static scenery's occlusion of the level found once per BSP ([Static scenery](#static-scenery)). World minus
+off, GPU ms a frame, offscreen Vulkan, fixed step, unpaced, windowed, release, no input. Ten 600-frame windows,
+counted from each run's first window of the game's frames (frames run unpaced through the load too, so a window's
+number from the start isn't the same frames from run to run). Before is `world-ao` with master merged
+(`world-ao-sync`):
+
+| Scene | Radeon 8060S 1440p | RTX 4090 1440p |
+| --- | --- | --- |
+| b30's start | 1.67 → **1.31** | 0.50 → **0.39** |
+| Blood Gulch's start | 0.25 → **0.14** | 0.11 → **0.05** |
+
+**b30's start is still over the Radeon's budget, and the static scenery isn't what's left.** With the static
+scenery out of the loop, the window still fills to its 64 shapes, now all dynamic. About 52 of them are the
+marines' capsules, 2 to 6 are spheres, and 8 to 12 are boxes, nearly all a vehicle's (the Pelican over the beach)
+(`HALO_WORLD_AO_COUNTS`). Taking the window's shapes out by kind, a measurement-only switch, on the same windows:
+
+| Window | Radeon 1440p | World minus off |
+| --- | --- | --- |
+| every shape | 2.66 | +1.31 |
+| no boxes | 1.64 | +0.31 |
+| no capsules | 2.50 | |
+| no shapes | 1.47 | +0.14 |
+
+So about 1.0 ms of what's left is the vehicle's exact boxes, about 0.17 the marines' capsules, and 0.14 the field
+and the shaders. The vehicle moves, so its boxes can't be baked. What would bring it under 0.35 is G's other way:
+a box's far patches from nearer than 6 half diagonals (1.5/255 at 3), or a vehicle's boxes merged into fewer.
+Both change the result slightly, so both are a decision.
+
+**The bake** (the first start's pass with `"world"`, every stock map's start BSP, the Radeon box's 32 threads at the
+lowest priority, behind the main menu): 27 fields in 7.40 s all told, after a 12.19 s pass, so the first start and
+its fields take 19.59 s. The largest are a50 1.05 s (588 placements, its pages 0.60 s), d20 bsp 1 0.86 s, b30
+0.71 s and c10 0.50 s; the multiplayer maps take 36 to 156 ms. The cache is 33 MB for all 28 files (b30 1.58 MB,
+Blood Gulch 3.11 MB, the largest b40 2.83 MB). Seven pages on five BSPs (damnation, c10, c40 bsp 2, d20 bsp 1 and
+d40) have texels two surfaces share, and walk the static shapes themselves there.
+
+**The look.** Blood Gulch's frames differ from before by 0.10/255 on average (0.24% of pixels by more than 4/255).
+On b30 the rocks, the ground and the trees look the same in the normal view. In `debug.world_ao_view`, two trees
+whose leaves lie within their own collision come out a little greyer, since the field now holds them.
 
 ## Determinism
 

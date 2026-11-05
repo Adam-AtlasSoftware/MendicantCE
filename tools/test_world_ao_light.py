@@ -127,13 +127,24 @@ def test_the_world_in_the_ambient_light_alone(shaders):
     # the occlusion found in the world before the light it multiplies, from the block and the draw's object
     for name in CASES:
         text = body(world[name, 1])
-        assert "world_proxies_occlusion(world_ao, in.xWorldPosition, world_n, u.world_ao.x)" in text
+        assert "world_proxies_occlusion(world_ao, in.xWorldPosition, world_n, u.world_ao.x, limit)" in text
         assert text.index("float occlusion;") < text.index("texture stage 0")
         assert "[[buffer(23)]]" in text and "ambient_occlusion [[texture" not in text
         # the lightmap pass: the proxies alone, never the field
         lightmap = name.startswith("lightmap")
         assert ("world_sdf" in world[name, 1]) != lightmap, name
         assert ("[[texture(5)]]" in text) != lightmap, name
+        # the lightmap pass: the static scenery's pages at its lightmap's coordinates where its page has a layer,
+        # the dynamic objects' shapes alone there and every shape where it has none; a model, the dynamic objects'
+        assert ("texture2d_array<float> world_ao_scenery [[texture(7)]]" in text) == lightmap, name
+        assert "int limit = int(world_ao.parameters[1].y);" in text
+        if lightmap:
+            assert "if (u.world_ao.y < 0.0)\n\t\t\tlimit = 64;" in text
+            assert "u.texture_scale[2].xy" in text and "proxies *= scenery;" in text
+            # (the pages are the coverage's format, read as 1, 1, 1, the byte)
+            assert "level(0.0)).a;" in text
+        else:
+            assert "limit = 64" not in text
 
 
 def test_the_view_shows_it(shaders):
@@ -231,6 +242,30 @@ def test_the_constants_alike():
     # (world_proxies.c's box's bound, the emitters' copy)
     ours = re.search(r"#define WORLD_PROXIES_LEAST (\S+)", (GAME / "world_proxies.c").read_text()).group(1)
     assert ours == re.search(r"#define XGPU_WORLD_AO_LEAST (\S+)", emitters).group(1)
+
+
+def test_the_static_scenery_pages(reference):
+    """the static scenery's pages (world_ao_scenery_page): each texel a floor covers is the shapes' product at its place,
+    the texels about it its neighbours', and a page two places share is found"""
+    result = subprocess.run([str(reference["build"] / "scene"), "pages"], capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_the_static_scenery_pages_control(reference, tmp_path):
+    """(a texel's place taken from the triangle's first corner alone: the check sees it)"""
+    text = (GAME / "world_ao_shading.c").read_text()
+    fault = "place[axis] = b[0] * t[axis] + b[1] * t[3 + axis] + b[2] * t[6 + axis];"
+    assert text.count(fault) == 1
+    (tmp_path / "world_ao_shading.c").write_text(text.replace(fault, "place[axis] = t[axis];"))
+    objects = []
+    for path in (GAME / "world_proxies.c", GAME / "world_sdf_bake.c", tmp_path / "world_ao_shading.c"):
+        objects.append(tmp_path / path.name.replace(".c", ".o"))
+        subprocess.run([CC, "-std=gnu99", "-O1", "-Wall", "-iquote", str(INCLUDE), "-c", str(path), "-o",
+                        str(objects[-1])], check=True)
+    scene = tmp_path / "scene"
+    subprocess.run([CC, "-std=gnu99", "-O1", "-Wall", "-iquote", str(INCLUDE), str(TOOL / "scene.c")] +
+                   [str(path) for path in objects] + ["-o", str(scene), "-lm"], check=True)
+    assert subprocess.run([str(scene), "pages"], capture_output=True, text=True).returncode == 1
 
 
 def test_the_grid_finds_what_every_proxy_finds(reference):
