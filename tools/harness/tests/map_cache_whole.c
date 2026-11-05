@@ -10,6 +10,7 @@ copy's end and the cache file's header are made up. */
 #include "harness.h"
 #include <ctype.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 typedef int BOOL;
@@ -161,8 +162,19 @@ int main(int argc, char **argv)
 	}
 	else CASE("map_replaced")
 	{
+		char path[512];
+		struct stat before;
+		struct timeval times[2];
+
 		copied("a10", 0x1234, TRUE);
+		snprintf(path, sizeof(path), "%s/a10.map", folder);
+		stat(path, &before);
 		write_text("a10.map", "another map, longer");
+		/* (its time kept: the size alone tells it apart, whatever second the
+		two writes fell in) */
+		times[0].tv_sec = times[1].tv_sec = before.st_mtime;
+		times[0].tv_usec = times[1].tv_usec = 0;
+		utimes(path, times);
 		CHECK(!playable(), "a replaced map file's copy played");
 	}
 	else return 2;
