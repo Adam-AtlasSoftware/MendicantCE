@@ -1,0 +1,247 @@
+{
+ "comment": "The stock maps' preparations' records shipped with the game (render_prepared.c), made by tools/prepared_records.py with every setting at its default: run it again whenever tools/harness/tests/test_prepared_shipped.py says the records' form has changed.",
+ "prepared_version": 1,
+ "journal_form": 197000,
+ "records": [
+  {
+   "map": "a10",
+   "scenario": "levels\\a10\\a10",
+   "checksum": "e6ac8e18",
+   "key": "04d9760c8e33a20b",
+   "draws": 509,
+   "words": 130821,
+   "size": 527396,
+   "file": "a10.prepared.zlib"
+  },
+  {
+   "map": "a30",
+   "scenario": "levels\\a30\\a30",
+   "checksum": "5b4c2953",
+   "key": "9214b568cb7c5ec7",
+   "draws": 460,
+   "words": 142687,
+   "size": 574468,
+   "file": "a30.prepared.zlib"
+  },
+  {
+   "map": "a50",
+   "scenario": "levels\\a50\\a50",
+   "checksum": "2ae9c2ed",
+   "key": "6409157b0133b3e3",
+   "draws": 458,
+   "words": 134789,
+   "size": 542860,
+   "file": "a50.prepared.zlib"
+  },
+  {
+   "map": "b30",
+   "scenario": "levels\\b30\\b30",
+   "checksum": "cb35bb26",
+   "key": "92de49762ba91252",
+   "draws": 488,
+   "words": 217354,
+   "size": 873360,
+   "file": "b30.prepared.zlib"
+  },
+  {
+   "map": "b40",
+   "scenario": "levels\\b40\\b40",
+   "checksum": "580cd8d3",
+   "key": "b1ea7c5868ce0737",
+   "draws": 522,
+   "words": 149417,
+   "size": 601884,
+   "file": "b40.prepared.zlib"
+  },
+  {
+   "map": "beavercreek",
+   "scenario": "levels\\test\\beavercreek\\beavercreek",
+   "checksum": "a831a7bf",
+   "key": "66696a838abfd231",
+   "draws": 440,
+   "words": 130655,
+   "size": 526180,
+   "file": "beavercreek.prepared.zlib"
+  },
+  {
+   "map": "bloodgulch",
+   "scenario": "levels\\test\\bloodgulch\\bloodgulch",
+   "checksum": "035e2da3",
+   "key": "05f7ef08fd34c2c3",
+   "draws": 437,
+   "words": 141059,
+   "size": 567772,
+   "file": "bloodgulch.prepared.zlib"
+  },
+  {
+   "map": "boardingaction",
+   "scenario": "levels\\test\\boardingaction\\boardingaction",
+   "checksum": "a0d614f5",
+   "key": "012b7e411d7fb025",
+   "draws": 430,
+   "words": 111352,
+   "size": 448888,
+   "file": "boardingaction.prepared.zlib"
+  },
+  {
+   "map": "c10",
+   "scenario": "levels\\c10\\c10",
+   "checksum": "4a170f76",
+   "key": "5b83880332ccbdc7",
+   "draws": 464,
+   "words": 146961,
+   "size": 591596,
+   "file": "c10.prepared.zlib"
+  },
+  {
+   "map": "c20",
+   "scenario": "levels\\c20\\c20",
+   "checksum": "d22193c1",
+   "key": "6ced5241e7935303",
+   "draws": 382,
+   "words": 99015,
+   "size": 399156,
+   "file": "c20.prepared.zlib"
+  },
+  {
+   "map": "c40",
+   "scenario": "levels\\c40\\c40",
+   "checksum": "61a4799d",
+   "key": "19488483bf92c517",
+   "draws": 516,
+   "words": 154558,
+   "size": 622400,
+   "file": "c40.prepared.zlib"
+  },
+  {
+   "map": "carousel",
+   "scenario": "levels\\test\\carousel\\carousel",
+   "checksum": "b38b62c7",
+   "key": "2f72e61c40fc3bfd",
+   "draws": 457,
+   "words": 106483,
+   "size": 429628,
+   "file": "carousel.prepared.zlib"
+  },
+  {
+   "map": "chillout",
+   "scenario": "levels\\test\\chillout\\chillout",
+   "checksum": "086c74ad",
+   "key": "526115d936b38265",
+   "draws": 432,
+   "words": 103559,
+   "size": 417732,
+   "file": "chillout.prepared.zlib"
+  },
+  {
+   "map": "d20",
+   "scenario": "levels\\d20\\d20",
+   "checksum": "3c590eec",
+   "key": "8da030047655af87",
+   "draws": 470,
+   "words": 135499,
+   "size": 545796,
+   "file": "d20.prepared.zlib"
+  },
+  {
+   "map": "d40",
+   "scenario": "levels\\d40\\d40",
+   "checksum": "eb84833e",
+   "key": "14b592c4e6d4d3b7",
+   "draws": 519,
+   "words": 159745,
+   "size": 643172,
+   "file": "d40.prepared.zlib"
+  },
+  {
+   "map": "damnation",
+   "scenario": "levels\\test\\damnation\\damnation",
+   "checksum": "911cd6ee",
+   "key": "46ff0bd258028e95",
+   "draws": 477,
+   "words": 105326,
+   "size": 425160,
+   "file": "damnation.prepared.zlib"
+  },
+  {
+   "map": "hangemhigh",
+   "scenario": "levels\\test\\hangemhigh\\hangemhigh",
+   "checksum": "8313bd85",
+   "key": "8cfbc0822d429825",
+   "draws": 426,
+   "words": 100505,
+   "size": 405468,
+   "file": "hangemhigh.prepared.zlib"
+  },
+  {
+   "map": "longest",
+   "scenario": "levels\\test\\longest\\longest",
+   "checksum": "df1deaa6",
+   "key": "773c82f3bcfeb491",
+   "draws": 426,
+   "words": 99664,
+   "size": 402104,
+   "file": "longest.prepared.zlib"
+  },
+  {
+   "map": "prisoner",
+   "scenario": "levels\\test\\prisoner\\prisoner",
+   "checksum": "b68da242",
+   "key": "0e13db6fdc46e921",
+   "draws": 438,
+   "words": 108309,
+   "size": 436780,
+   "file": "prisoner.prepared.zlib"
+  },
+  {
+   "map": "putput",
+   "scenario": "levels\\test\\putput\\putput",
+   "checksum": "b3f87f50",
+   "key": "f5f66565ffabb24d",
+   "draws": 415,
+   "words": 83425,
+   "size": 337060,
+   "file": "putput.prepared.zlib"
+  },
+  {
+   "map": "ratrace",
+   "scenario": "levels\\test\\ratrace\\ratrace",
+   "checksum": "af5f3831",
+   "key": "57761703812b61f5",
+   "draws": 421,
+   "words": 84950,
+   "size": 343208,
+   "file": "ratrace.prepared.zlib"
+  },
+  {
+   "map": "sidewinder",
+   "scenario": "levels\\test\\sidewinder\\sidewinder",
+   "checksum": "4f8e749d",
+   "key": "fd2ee4bf1e8c73fd",
+   "draws": 435,
+   "words": 115338,
+   "size": 464872,
+   "file": "sidewinder.prepared.zlib"
+  },
+  {
+   "map": "ui",
+   "scenario": "levels\\ui\\ui",
+   "checksum": "cdc1a39a",
+   "key": "cefd74a08699bf87",
+   "draws": 178,
+   "words": 22008,
+   "size": 89496,
+   "file": "ui.prepared.zlib"
+  },
+  {
+   "map": "wizard",
+   "scenario": "levels\\test\\wizard\\wizard",
+   "checksum": "2d5a08fc",
+   "key": "fac1d2b91bf86c5b",
+   "draws": 428,
+   "words": 126060,
+   "size": 507704,
+   "file": "wizard.prepared.zlib"
+  }
+ ]
+}
