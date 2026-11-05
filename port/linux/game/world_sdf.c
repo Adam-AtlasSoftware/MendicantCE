@@ -433,13 +433,6 @@ static void sdf_header_read(unsigned char const *bytes, struct world_sdf_header 
 
 /* ---------- the static scenery's part (world_sdf.h's struct world_sdf_scenery) */
 
-enum
-{
-	/* its counts (page_count, layer_count, width, height, placement_count) */
-	WORLD_SDF_SCENERY_COUNTS = 5 * 4,
-	WORLD_SDF_SCENERY_PLACEMENT = 4 * 4,
-};
-
 /* the most bytes a part may have */
 static unsigned long sdf_scenery_most_bytes(void)
 {

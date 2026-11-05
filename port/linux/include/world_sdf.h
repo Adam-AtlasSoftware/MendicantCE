@@ -80,6 +80,10 @@ enum
 	static scenery's shapes itself there (no page: a lightmap missing, a
 	page whose texels two surfaces share) */
 	WORLD_SDF_SCENERY_NO_LAYER = -1,
+	/* its part of the file: its counts (page_count, layer_count, width,
+	height, placement_count) and a placement's bytes */
+	WORLD_SDF_SCENERY_COUNTS = 5 * 4,
+	WORLD_SDF_SCENERY_PLACEMENT = 4 * 4,
 };
 
 /* a cell's kind (struct world_sdf_volume's cells[i][3]): far outside every
