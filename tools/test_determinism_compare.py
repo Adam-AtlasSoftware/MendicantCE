@@ -138,3 +138,25 @@ def test_asserts_noted(tmp_path):
     assert status == 0, out
     assert "note: B's run failed 1 assertions and 3 warnings, the first by tick 2" in out
     assert "A's run" not in out
+
+
+def test_dump_leaves_out_the_frames_attachments(tmp_path):
+    # (an object's attachments: a contrail's index, the frames', and an effect's, the simulation's)
+    write_log(tmp_path / "a.txt", [(1, 10)])
+    a = bytearray(pool([0xE4090295], [5]))
+    datum = 0x38 + 0x18
+    a[datum + 0xF4:datum + 0xF6] = bytes([3, 2])
+    struct.pack_into("<LL", a, datum + 0xFC, 0xF1000000, 0xE6650004)
+    b = bytearray(a)
+    struct.pack_into("<L", b, datum + 0xFC, 0xF1000001)
+    lines = (tmp_path / "a.txt").read_text().replace("alloc 1 10 64 objects", f"alloc 1 10 {len(a)} objects")
+    (tmp_path / "a.txt").write_text(lines)
+    (tmp_path / "a.bin").write_bytes(bytes(16) + bytes(a))
+    (tmp_path / "b.bin").write_bytes(bytes(16) + bytes(b))
+    status, out = run(tmp_path / "a.txt", tmp_path / "a.txt", "--dump", tmp_path / "a.bin", tmp_path / "b.bin")
+    assert status == 0, out
+    struct.pack_into("<L", b, datum + 0x100, 0xE6650005)
+    (tmp_path / "b.bin").write_bytes(bytes(16) + bytes(b))
+    status, out = run(tmp_path / "a.txt", tmp_path / "a.txt", "--dump", tmp_path / "a.bin", tmp_path / "b.bin")
+    assert status == 1
+    assert "+100 in it" in out

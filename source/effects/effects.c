@@ -2265,8 +2265,13 @@ static void effect_update(
 						attachment_index < attachment_count;
 						attachment_index++)
 					{
-						if (object->object.attachment_indices[attachment_index] ==
-							effect_index)
+						/* port: only an effect's slot: another type's
+						index is of another array (a light's, a contrail's:
+						the frames'), and may be the same number */
+						if (object->object.attachment_types[attachment_index] ==
+								_object_attachment_type_effect &&
+							object->object.attachment_indices[attachment_index] ==
+								effect_index)
 						{
 							object->object.attachment_indices[attachment_index] =
 								NONE;
