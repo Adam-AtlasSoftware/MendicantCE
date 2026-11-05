@@ -6271,7 +6271,7 @@ CAMPAIGN_HINTS = ["Pick up where you left off: no mission or difficulty to choos
                   "Play any mission, on any difficulty.",
                   "",
                   "",
-                  "Play the mission in progress again from its start, on the same difficulty."]
+                  "Play the mission in progress again from its start."]
 # Choose Mission's RESTART (on the saved game's mission), beside SELECT
 CAMPAIGN_PROMPT_RESTART = ("prompt_restart", "%y-button RESTART", 260, 124,
                            '<on event="a" run="port campaign missions restart" open="main_menu/campaign/restart_screen"/>')

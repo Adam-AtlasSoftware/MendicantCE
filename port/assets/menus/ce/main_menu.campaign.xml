@@ -118,7 +118,7 @@
 		<string text="Play any mission, on any difficulty."/>
 		<string text=""/>
 		<string text=""/>
-		<string text="Play the mission in progress again from its start, on the same difficulty."/>
+		<string text="Play the mission in progress again from its start."/>
 	</strings>
 	<widget name="main_menu/campaign/restart_screen" type="text" controller="1" left="180" top="160" width="280" height="160" flags="pass_unhandled_to_focused_child" bitmap="bitmaps/alert_bkd" font="ui\small_ui" color="#FF2896FF" align="center" text_x="-10" text_y="40">
 		<data input="port campaign restart update"/>
