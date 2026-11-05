@@ -29,9 +29,9 @@ def generated(fault=None, budget_fault=None):
                           ("SOLO_CACHE_FILE_MAXIMUM_SIZE", "MAIN_MENU_CACHE_FILE_MAXIMUM_SIZE",
                            "MULTIPLAYER_CACHE_FILE_MAXIMUM_SIZE"))
     constants += f"\n#define NUMBER_OF_CACHED_MAP_FILES {constant(source, 'NUMBER_OF_CACHED_MAP_FILES')}\n"
-    # (Settings' MAP STORAGE's values: Instant Load Times, Disk Space Saver)
+    # (Settings' MAP STORAGE's values: Instant Loading, Disk Space Saver)
     storage = dict((shown, value) for shown, value in MAP_STORAGE)
-    constants += f"#define INSTANT_MEGABYTES {storage['INSTANT LOAD TIMES']}\n"
+    constants += f"#define INSTANT_MEGABYTES {storage['INSTANT LOADING']}\n"
     constants += f"#define SAVER_MEGABYTES {storage['DISK SPACE SAVER']}\n"
     code = "\n".join(function(source, name) for name in FUNCTIONS)
     if fault:

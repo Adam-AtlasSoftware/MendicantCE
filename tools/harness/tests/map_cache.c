@@ -298,7 +298,7 @@ int main(int argc, char **argv)
 	else CASE("storage_values")
 	{
 		/* Settings' MAP STORAGE (tools/port_settings.py's MAP_STORAGE):
-		Instant Load Times the disk's room, which holds every stock map;
+		Instant Loading the disk's room, which holds every stock map;
 		Disk Space Saver the Xbox's six cache files' room, however much the
 		disk has */
 		CHECK(map_cache_choose_budget(INSTANT_MEGABYTES, 3 * GIGABYTE, 100 * GIGABYTE, 1000 * GIGABYTE, LEAST) ==
@@ -312,7 +312,7 @@ int main(int argc, char **argv)
 	}
 	else CASE("shrink_on_switch")
 	{
-		/* every stock map kept (Instant Load Times), four campaign levels
+		/* every stock map kept (Instant Loading), four campaign levels
 		played, d40 longest ago and open; then Disk Space Saver: maps given
 		up now to fit, those never played first, then those played longest
 		ago, never the open map; the bytes given up reported */
@@ -341,7 +341,7 @@ int main(int argc, char **argv)
 	}
 	else CASE("rebuild_on_switch_back")
 	{
-		/* after Disk Space Saver, Instant Load Times: each map given up has
+		/* after Disk Space Saver, Instant Loading: each map given up has
 		room to be copied again ahead (cache_files_map_prefill_size), and all
 		of them fit with the maps kept */
 		reset(3200ULL * MEGABYTE);

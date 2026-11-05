@@ -27,12 +27,12 @@ header is written last). A map whose copy fails is not tried again in the
 run. Once nothing is left to copy, it looks again when another map loads.
 
 It copies only while game.map_cache_megabytes is 0 (Settings' MAP STORAGE:
-INSTANT LOAD TIMES, every stock map kept). With a budget set (DISK SPACE
+INSTANT LOADING, every stock map kept). With a budget set (DISK SPACE
 SAVER, the Xbox's 730 MB) the player has chosen the disk over the loads: a
 map is copied as it is played, as on the Xbox, and none ahead. As the
 setting changes, the cache's budget is read again: a smaller one ends the
 copy ahead and gives up maps now, the least useful first, never the open
-map (cache_files_budget_update); back at INSTANT LOAD TIMES, every stock map
+map (cache_files_budget_update); back at INSTANT LOADING, every stock map
 given up is copied again, as above.
 */
 

@@ -187,6 +187,6 @@ def test_map_storage_row():
     rows = [entry for page in PAGES.values() for entry in page["rows"]
             if entry[0] != SECTION and entry[1] == "game.map_cache_megabytes"]
     assert [row[0] for row in rows] == ["MAP STORAGE"]
-    assert rows[0][2] == [("INSTANT LOAD TIMES", "0"), ("DISK SPACE SAVER", "730")]
+    assert rows[0][2] == [("INSTANT LOADING", "0"), ("DISK SPACE SAVER", "730")]
     config = (Path(__file__).resolve().parent.parent / "port/linux/src/port_config.c").read_text()
     assert re.search(r'\{ "game\.map_cache_megabytes", _config_integer, "0",', config)

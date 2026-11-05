@@ -1124,7 +1124,7 @@ static const struct config_setting config_settings[] =
 		"saved films at 30, whatever this is." },
 	{ "game.map_cache_megabytes", _config_integer, "0", "HALO_MAP_CACHE_MEGABYTES", _environment_value, _platform_all,
 		"The most the decompressed maps the game keeps (the save folder's z/)\n"
-		"may take of the disk, in MB. 0 (Settings' Instant Load Times): every\n"
+		"may take of the disk, in MB. 0 (Settings' Instant Loading): every\n"
 		"stock map, 3.0 GB, unpacked once, in the background, and then loaded\n"
 		"without waiting, short of the larger of 2 GB and a twentieth of the\n"
 		"disk, which it always keeps free. 730 (Disk Space Saver): the Xbox's\n"

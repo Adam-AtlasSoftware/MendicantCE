@@ -1,6 +1,6 @@
 /* The stock maps copied into the cache ahead (port/linux/game/map_cache_prefill.c),
 as Settings' MAP STORAGE (game.map_cache_megabytes) changes: every stock map
-copied at 0 (INSTANT LOAD TIMES), none ahead with a budget set (DISK SPACE
+copied at 0 (INSTANT LOADING), none ahead with a budget set (DISK SPACE
 SAVER), the copy ahead ended and the budget read again (maps given up) as
 it changes, and every map copied again on the way back. The cache and the
 config are made up: a map is held or not, a copy ends whole at once. */

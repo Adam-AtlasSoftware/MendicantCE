@@ -138,7 +138,7 @@
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/map_cache_megabytes_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/labels" string_index="6" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/map_cache_megabytes_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="INSTANT LOAD TIMES|DISK SPACE SAVER" setting="game.map_cache_megabytes" values="0|730" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/map_cache_megabytes_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="INSTANT LOADING|DISK SPACE SAVER" setting="game.map_cache_megabytes" values="0|730" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
 		<on event="created" run="port setting load"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/section_7" width="344" height="18" bitmap="main_menu/settings/section" wide="-106 120">
@@ -170,7 +170,7 @@
 		<string text="Your name, color and controller layout are kept in a player profile. Make one to set them; the rest of Settings works without one."/>
 		<string text="Switch to another player profile, make a new one or delete one. Your changes so far are kept."/>
 		<string text=""/>
-		<string text="Instant Load Times keeps every map unpacked, about 3.0 GB, so no load waits to unpack one. Disk Space Saver keeps about 730 MB: 2.3 GB less, a small part of most drives. A map it has not kept takes a second or more longer to load.|Switching back to Instant unpacks every map again, in the background."/>
+		<string text="Instant Loading keeps every map unpacked, about 3.0 GB, so no load waits to unpack one. Disk Space Saver keeps about 730 MB: 2.3 GB less, a small part of most drives. A map it has not kept takes a second or more longer to load.|Switching back to Instant Loading unpacks every map again, in the background."/>
 		<string text=""/>
 		<string text="Halo: Combat Evolved, the Xbox game, on this computer, played from your own copy of its maps. OpenH1 is a free fan project."/>
 	</strings>

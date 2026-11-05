@@ -1,6 +1,6 @@
 """The stock maps copied into the cache ahead (port/linux/game/map_cache_prefill.c)
 as Settings' MAP STORAGE (game.map_cache_megabytes) changes: every map copied
-at Instant Load Times, none ahead at Disk Space Saver, the copy ahead ended
+at Instant Loading, none ahead at Disk Space Saver, the copy ahead ended
 and maps given up now on the switch to it, every map copied again on the way
 back."""
 import sys
@@ -39,7 +39,7 @@ def test_map_cache_prefill(case):
     # the copy ahead left going on the switch
     (("\t\t\tcache_files_precache_map_queue_end();\n\t\t\tcache_files_precache_map_end();\n", ""),
      "switch_to_saver"),
-    # back at Instant Load Times, nothing more copied (the prefill left idle)
+    # back at Instant Loading, nothing more copied (the prefill left idle)
     (("\tmap_cache_prefill.idle = FALSE;\n\tcsmemset", "\tcsmemset"), "switch_back_rebuilds"),
     # a map whose copy failed before never tried again
     (("\tcsmemset(map_cache_prefill.failed, 0, sizeof(map_cache_prefill.failed));\n", ""), "switch_back_rebuilds"),
