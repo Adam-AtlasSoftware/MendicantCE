@@ -829,7 +829,7 @@ static int picture_png_write(char const *path, unsigned char const *rgba, unsign
 			raw[row * (stride + 1)] = 0;
 			memcpy(raw + row * (stride + 1) + 1, rgba + row * stride, stride);
 		}
-		if (compress2(png + 8 + 25 + 8, &packed_size, raw, raw_size, 6) == 0)
+		if (compress2(png + 8 + 25 + 8, &packed_size, raw, raw_size, 1) == 0)
 		{
 			memcpy(png, "\x89PNG\r\n\x1a\n", 8);
 			header[0] = (unsigned char)(width >> 24);
