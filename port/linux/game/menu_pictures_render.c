@@ -449,27 +449,28 @@ static int prepare_precache(
 	return 0;
 }
 
-/* the maps of the poses to come unpacked ahead, in the pass's order, on
-the workers (port/linux/src/map_unpack.c: about half the cores, at most 4),
-as many at once as there are workers, so that the next map is whole as the
-pass reaches it; each tried once (a map the budget has no room for, or the
+/* the maps of the poses to come unpacked ahead on the workers
+(port/linux/src/map_unpack.c: about half the cores, at most 4), every one
+queued at once, which the workers take in the pass's order, so that each
+map is whole as the pass reaches it (the workers never wait for the pass to
+come near a map); each tried once (a map the budget has no room for, or the
 precache is copying, is the precache's at its turn) */
 static void prepare_unpack_ahead(
 	void)
 {
-	long next, in_flight;
+	long next;
 
 	cache_files_unpack_update();
-	in_flight = cache_files_unpacking_count();
-	for (next = prepare.index; next < prepare.count && in_flight < map_unpack_worker_count(); next++)
+	for (next = prepare.index; next < prepare.count; next++)
 	{
 		char const *scenario = menu_picture_poses[prepare.poses[next]].scenario;
 
 		if (prepare.unpack_tried[next])
 			continue;
 		prepare.unpack_tried[next] = TRUE;
-		if (cache_files_unpack_begin(scenario))
-			in_flight++;
+		if (!cache_files_unpack_begin(scenario))
+			platform_log("menu pictures: %s is not unpacked ahead (whole, or the cache has no room for it)",
+				scenario);
 	}
 }
 

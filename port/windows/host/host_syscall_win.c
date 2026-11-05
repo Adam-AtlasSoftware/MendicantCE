@@ -1759,6 +1759,10 @@ static long long dispatch(long long number, long long a, long long b, long long 
 	case GUEST_SYS_sched_yield:
 		SwitchToThread();
 		return 0;
+	case GUEST_SYS_sched_getaffinity:
+		/* (the host's processors, all of them: musl's processor count) */
+		return halo_guest_affinity(GUEST(unsigned char *, c), (unsigned long)(uint32_t)b,
+			(long)GetActiveProcessorCount(ALL_PROCESSOR_GROUPS));
 
 	case GUEST_SYS_mmap:
 		return host_guest_mmap((uint64_t)a, (uint64_t)b, (int)c, (int)d, (int)e, f);

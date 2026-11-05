@@ -107,6 +107,9 @@ struct map_unpack_job
 	/* the game's own copy (the precache's: taken only by map_unpack_take),
 	the copy asked to stop, how far it has come (0 to 1) */
 	int precache;
+	/* (its place in the queue: the workers take the jobs in the order they
+	were queued, the order the pass reaches the maps in) */
+	unsigned long order;
 	volatile int stop;
 	volatile float progress;
 	long copy_size;
@@ -124,6 +127,7 @@ static struct
 	pthread_mutex_t lock;
 	pthread_cond_t wake, finished;
 	int workers;
+	unsigned long queued;
 	struct map_unpack_job jobs[MAP_UNPACK_SLOTS];
 } map_unpack = { PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, PTHREAD_COND_INITIALIZER };
 #endif
@@ -266,16 +270,19 @@ static void *map_unpack_worker(void *context)
 	pthread_mutex_lock(&map_unpack.lock);
 	for (;;)
 	{
-		short slot;
+		short slot = MAP_UNPACK_SLOTS, other;
 
-		/* (the game's own copy first: a load waits for it) */
-		for (slot = 0; slot < MAP_UNPACK_SLOTS &&
-			!(map_unpack.jobs[slot].state == _map_unpack_queued && map_unpack.jobs[slot].precache); slot++)
-			;
-		if (slot >= MAP_UNPACK_SLOTS)
+		/* (the game's own copy first, as a load waits for it; else the job
+		queued first) */
+		for (other = 0; other < MAP_UNPACK_SLOTS; other++)
 		{
-			for (slot = 0; slot < MAP_UNPACK_SLOTS && map_unpack.jobs[slot].state != _map_unpack_queued; slot++)
-				;
+			struct map_unpack_job const *job = &map_unpack.jobs[other];
+
+			if (job->state != _map_unpack_queued)
+				continue;
+			if (slot == MAP_UNPACK_SLOTS || (job->precache && !map_unpack.jobs[slot].precache) ||
+				(job->precache == map_unpack.jobs[slot].precache && job->order < map_unpack.jobs[slot].order))
+				slot = other;
 		}
 		if (slot >= MAP_UNPACK_SLOTS)
 		{
@@ -285,7 +292,17 @@ static void *map_unpack_worker(void *context)
 		map_unpack.jobs[slot].state = _map_unpack_running;
 		pthread_mutex_unlock(&map_unpack.lock);
 		{
-			int succeeded = map_unpack_job_run(slot, &map_unpack.jobs[slot]);
+			struct timespec began, ended;
+			int succeeded;
+
+			clock_gettime(CLOCK_MONOTONIC, &began);
+			succeeded = map_unpack_job_run(slot, &map_unpack.jobs[slot]);
+			clock_gettime(CLOCK_MONOTONIC, &ended);
+#ifdef HALO_LINUX_PLATFORM_LAYER
+			platform_log("map cache: %s unpacked%s into slot %d in %.0f ms (%ld MB)", map_unpack.jobs[slot].map_xbox_path,
+				succeeded ? "" : " (not whole)", slot, (ended.tv_sec - began.tv_sec) * 1e3 +
+				(ended.tv_nsec - began.tv_nsec) / 1e6, map_unpack.jobs[slot].copy_size >> 20);
+#endif
 
 			pthread_mutex_lock(&map_unpack.lock);
 			map_unpack.jobs[slot].succeeded = succeeded;
@@ -345,6 +362,7 @@ int map_unpack_queue(short slot, const char *map_xbox_path, const char *slot_xbo
 		job->copy_size = copy_size;
 		job->succeeded = 0;
 		job->precache = precache;
+		job->order = map_unpack.queued++;
 		job->stop = 0;
 		job->progress = 0.0f;
 		if (job->map_path[0] && job->slot_path[0])
