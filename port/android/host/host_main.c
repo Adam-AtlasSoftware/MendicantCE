@@ -271,6 +271,7 @@ static void *game_main(void *unused)
 		if (!records || !SDL_SaveFile(path, records, records_size))
 			host_logf(HOST_LOG_ERROR, "cannot write %s: %s", path, SDL_GetError());
 		SDL_free(records);
+	}
 	/* ...and the textures', fonts' and menus' bytes (port/linux/src/
 	embedded_assets.h), the same way */
 	{

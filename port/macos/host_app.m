@@ -819,6 +819,8 @@ void host_app_start(void)
 
 				[files removeItemAtPath:copy error:NULL];
 				[files copyItemAtPath:records toPath:copy error:NULL];
+			}
+		}
 		/* ...and the textures', fonts' and menus' bytes (port/linux/src/
 		embedded_assets.h), the same way */
 		{
