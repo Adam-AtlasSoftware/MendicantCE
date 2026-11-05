@@ -127,13 +127,22 @@ def test_the_world_in_the_ambient_light_alone(shaders):
     # the occlusion found in the world before the light it multiplies, from the block and the draw's object
     for name in CASES:
         text = body(world[name, 1])
-        assert "world_proxies_occlusion(world_ao, in.xWorldPosition, world_n, u.world_ao.x)" in text
+        assert "world_proxies_occlusion(world_ao, in.xWorldPosition, world_n, u.world_ao.x, limit)" in text
         assert text.index("float occlusion;") < text.index("texture stage 0")
         assert "[[buffer(23)]]" in text and "ambient_occlusion [[texture" not in text
         # the lightmap pass: the proxies alone, never the field
         lightmap = name.startswith("lightmap")
         assert ("world_sdf" in world[name, 1]) != lightmap, name
         assert ("[[texture(5)]]" in text) != lightmap, name
+        # the lightmap pass: the static scenery's pages at its lightmap's coordinates where its page has a layer,
+        # the dynamic objects' shapes alone there and every shape where it has none; a model, the dynamic objects'
+        assert ("texture2d_array<float> world_ao_scenery [[texture(7)]]" in text) == lightmap, name
+        assert "int limit = int(world_ao.parameters[1].y);" in text
+        if lightmap:
+            assert "if (u.world_ao.y < 0.0)\n\t\t\tlimit = 64;" in text
+            assert "u.texture_scale[2].xy" in text and "proxies *= scenery;" in text
+        else:
+            assert "limit = 64" not in text
 
 
 def test_the_view_shows_it(shaders):

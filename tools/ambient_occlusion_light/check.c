@@ -68,6 +68,13 @@ static void program_make(struct xgpu_pixel_program *program, int index, int occl
 	program->final.inputs[1].reg = XGPU_REGISTER_T0;
 	program->final.inputs[6].reg = XGPU_REGISTER_T0;
 	program->final.inputs[6].alpha = 1;
+	/* (the lightmap pass's lightmap, in stage 2: the static scenery's pages
+	are read at its coordinates) */
+	if (cases[index].light == XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP)
+	{
+		program->stages[2].declared_mode = program->stages[2].mode = XGPU_TEXTURE_PROJECT2D;
+		program->stages[2].sampler = _xgpu_sampler_2d;
+	}
 	program->per_pixel_lighting = cases[index].per_pixel_lighting;
 	program->dynamic_lights = cases[index].dynamic_lights;
 	program->ambient_occlusion = occlusion ? (unsigned char)(cases[index].light | source) : 0;

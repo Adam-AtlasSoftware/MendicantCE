@@ -74,7 +74,12 @@ enum
 	SCENE_ROWS = WORLD_SDF_BRICK * SCENE_HEIGHT + 1,
 	SCENE_SLICES = WORLD_SDF_BRICK * SCENE_DEPTH + 1,
 	SCENE_PROXIES = 5,
+	SCENE_DYNAMIC = 3,
 };
+
+/* the static scenery's pages: each layer one value all through (so that a
+lightmap draw's page is the same at any of its coordinates) */
+float const scene_pages[2] = { 153.0f / 255.0f, 77.0f / 255.0f };
 
 struct world_sdf_volume scene_volume;
 static signed char scene_voxels[SCENE_ROW * SCENE_ROWS * SCENE_SLICES];
@@ -174,6 +179,9 @@ void scene_make(void)
 	scene_parameters[0][2] = 0.75f;
 	scene_parameters[0][3] = (float)SCENE_PROXIES;
 	scene_parameters[1][0] = 0.8f;
+	/* (the first three the dynamic objects', the capsule and the box the
+	static scenery's, which the field and the pages hold) */
+	scene_parameters[1][1] = (float)SCENE_DYNAMIC;
 	{
 		static const float camera[3] = { 0.4f, -0.3f, 1.5f };
 
@@ -468,7 +476,7 @@ int main(int argc, char **argv)
 	for (index = 0; index < WORLD_AO_GRID_CELLS / 2; index++)
 		for (j = 0; j < 4; j++)
 			printf("%s%u", index || j ? "," : "", scene_cells[index][j]);
-	printf("],\n\"cases\": [\n");
+	printf("],\n\"pages\": [%.9g, %.9g],\n\"cases\": [\n", scene_pages[0], scene_pages[1]);
 	for (index = 0; index < count; index++)
 	{
 		float point[3], normal[3], owner, reference;
@@ -477,11 +485,15 @@ int main(int argc, char **argv)
 		scene_point(point, normal, &owner, &reference);
 		for (lightmap = 0; lightmap < 2; lightmap++)
 		{
+			/* (a lightmap draw's reference is its page's layer: none, the
+			first or the second) */
+			float given = lightmap ? (float)(index % 3 - 1) : reference;
+
 			printf("%s{\"point\": [%.9g, %.9g, %.9g], \"normal\": [%.9g, %.9g, %.9g], \"owner\": %.9g, "
 				"\"reference\": %.9g, \"lightmap\": %d, \"occlusion\": %.9g}\n", index || lightmap ? "," : "",
-				point[0], point[1], point[2], normal[0], normal[1], normal[2], owner, reference, lightmap,
+				point[0], point[1], point[2], normal[0], normal[1], normal[2], owner, given, lightmap,
 				world_ao_occlusion((float const (*)[4])scene_parameters, &scene_volume, scene_proxies,
-				scene_proxy_count, point, normal, owner, reference, lightmap));
+				scene_proxy_count, point, normal, owner, given, lightmap, given >= 0.0f ? scene_pages[(int)given] : 1.0f));
 		}
 	}
 	printf("]}\n");

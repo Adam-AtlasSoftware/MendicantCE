@@ -34,6 +34,10 @@ def main():
             # (read by texel: the table's four bytes as RGBA8)
             at = ((uvw[2] * height + uvw[1]) * width + uvw[0]) * 4
             return [spirv_run.f32(table[at + part] / 255.0) for part in range(4)]
+        if name == "world_ao_scenery":
+            # (the static scenery's pages: each layer one value, scene.c's)
+            layer = min(max(int(round(uvw[2])), 0), len(scene["pages"]) - 1)
+            return [spirv_run.f32(scene["pages"][layer]), 0.0, 0.0, 1.0]
         if name != "world_sdf":
             return [1.0, 1.0, 1.0, 1.0]  # (the surface's own texture: white)
         size = (side, side, layers * 9)
