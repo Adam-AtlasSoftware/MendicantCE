@@ -6896,8 +6896,8 @@ menu's "[Esc] = CANCEL [Enter] = SELECT") has its gaps narrowed to fit, to
 no narrower than UI_WIDGET_PORT_LEGEND_LEAST_GAP. Leaves the draw mode the
 measuring's: the caller sets its own again */
 #define UI_WIDGET_PORT_LEGENDS 8
-#define UI_WIDGET_PORT_LEGEND_MARGIN 4
-#define UI_WIDGET_PORT_LEGEND_LEAST_GAP 8
+#define UI_WIDGET_PORT_LEGEND_MARGIN 0
+#define UI_WIDGET_PORT_LEGEND_LEAST_GAP 4
 static short ui_widget_port_key_legend_shift(
 	struct widget_instance *label)
 {
