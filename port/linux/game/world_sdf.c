@@ -2036,6 +2036,19 @@ static int sdf_bake_begin(struct sdf_key const *key, int startup)
 	return 1;
 }
 
+/* (the placements in order of x, then y, for world_sdf_scenery_baked's
+search: sdf_results sorts a field's as it takes it) */
+static int sdf_placement_order(void const *a, void const *b)
+{
+	struct world_sdf_placement const *p = a, *q = b;
+
+	if (p->position[0] != q->position[0])
+		return p->position[0] < q->position[0] ? -1 : 1;
+	if (p->position[1] != q->position[1])
+		return p->position[1] < q->position[1] ? -1 : 1;
+	return 0;
+}
+
 /* ---------- the field's upload */
 
 /* the atlas's layers uploaded (at least one: the backend's atlas is never
@@ -2449,19 +2462,6 @@ static int sdf_field_drawn(void)
 {
 	return world_sdf.field.cells && sdf_upload_done(&world_sdf.field, world_sdf.uploaded_pages,
 		world_sdf.uploaded_cells, world_sdf.uploaded_layers);
-}
-
-/* (the placements in order of x, then y, for world_sdf_scenery_baked's
-search: sdf_results sorts a field's as it takes it) */
-static int sdf_placement_order(void const *a, void const *b)
-{
-	struct world_sdf_placement const *p = a, *q = b;
-
-	if (p->position[0] != q->position[0])
-		return p->position[0] < q->position[0] ? -1 : 1;
-	if (p->position[1] != q->position[1])
-		return p->position[1] < q->position[1] ? -1 : 1;
-	return 0;
 }
 
 int world_sdf_scenery_baked(long definition, float const position[3])
