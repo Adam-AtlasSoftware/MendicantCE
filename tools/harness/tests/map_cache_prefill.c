@@ -33,13 +33,21 @@ static char failing[64];
 /* what the budget read again gives up: every map but the main menu's */
 static boolean budget_gives_up = TRUE;
 
+static char const *tag_name_strip_path(char const *name)
+{
+	const char *slash = strrchr(name, '\\');
+
+	return slash ? slash + 1 : name;
+}
+
+/* (by its name, a10, or its path, levels\a10\a10) */
 static int held_index(const char *name)
 {
 	int index;
 
 	for (index = 0; index < STOCK_MAPS; index++)
 	{
-		if (!strcmp(held[index], name))
+		if (!strcmp(held[index], tag_name_strip_path(name)))
 			return index;
 	}
 	return NONE;
@@ -68,12 +76,6 @@ static void hold(const char *name)
 	}
 }
 
-static char const *tag_name_strip_path(char const *name)
-{
-	const char *slash = strrchr(name, '\\');
-
-	return slash ? slash + 1 : name;
-}
 static int halo_load_trace_enabled(void) { return 0; }
 static void halo_load_trace(char const *phase, char const *detail) { (void)phase; (void)detail; }
 static void cache_files_cache_usage(unsigned long long *bytes, unsigned long long *budget, long *maps)
