@@ -74,7 +74,8 @@ static void draw_unicode_string_compute_drawn_bounds(rectangle2d const *bounds, 
 	rectangle2d *text_bounds, rectangle2d *cursor)
 {
 	draw_unicode_string_compute_bounds(bounds, text, text_bounds, cursor);
-	if (text_bounds->x0 <= text_bounds->x1)
+	/* (a glyph narrower than both: as its bitmap) */
+	if (text_bounds->x1 - text_bounds->x0 > ink_left + ink_right)
 	{
 		text_bounds->x0 = (short)(text_bounds->x0 + ink_left);
 		text_bounds->x1 = (short)(text_bounds->x1 - ink_right);
@@ -226,6 +227,8 @@ int main(int argc, char **argv)
 					ink_left = inks[ink][0];
 					ink_right = inks[ink][1];
 					d = draw(names[name], 100);
+					if (d.right - d.left <= ink_left + ink_right)
+						continue;
 					room_left = (short)(d.left + ink_left - d.box_x0);
 					room_right = (short)(d.box_x1 - (d.right - ink_right));
 					CHECK(room_left == room_right, "%ls (ink %d in at the left, %d at the right): %d left of its ink, "

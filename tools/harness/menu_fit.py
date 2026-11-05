@@ -179,7 +179,7 @@ def mission_overflows(widgets, names):
             problems.append(f"{aspect}: an arrow {gap} units from the cards, not {port_settings.MISSION_ARROW_GAP}")
     for kind in ("big", "small"):
         box = widgets[f"{base}/card_unbeaten_{kind}"].attributes
-        need = port_settings.small_ui_width("NOT YET BEATEN")
+        need = port_settings.small_ui_width("NOT YET BEATEN") + port_settings.SMALL_UI_LEAD
         if int(box["width"]) < need:
             problems.append(f"card_unbeaten_{kind}: {box['width']} wide, NOT YET BEATEN {need}")
     return problems

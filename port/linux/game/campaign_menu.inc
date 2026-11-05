@@ -637,8 +637,7 @@ static void mission_card_show(struct widget_instance *card, short mission, boole
 		snprintf(name, sizeof(name), "card_unbeaten_%s", kind);
 		visible_set(named(card, name, 0), beaten == 0);
 		/* (the same words on every card, the panel's chosen one's and those
-		beside it: their box as wide as the card's picture, which they fit
-		in small_ui) */
+		beside it: their box across the card, which they fit in small_ui) */
 		if (beaten == 0)
 			menu_text_box_fit(named(card, name, 0), L"NOT YET BEATEN", 0);
 	}

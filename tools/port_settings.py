@@ -6255,8 +6255,11 @@ MISSION_ARROW = (24, 64)
 # (the row wider apart on a wide screen: campaign_menu.inc's
 # mission_cards_place, the gap an eighth of the extra width more)
 MISSION_ARROW_GAP = 32
-# NOT YET BEATEN, in the badges' place: as wide as the card's picture
-MISSION_UNBEATEN_INSET = MISSION_ART_INSET
+# NOT YET BEATEN, in the badges' place: across the card, inside its edge
+# (the words are 119 units of small_ui's advances, and its letters' bitmaps
+# start SMALL_UI_LEAD past their pen: 122 wide as menu_text_box_fit measures)
+MISSION_UNBEATEN_INSET = 4
+SMALL_UI_LEAD = 3
 # the chosen mission's objective under its name: lines of small_ui
 # (campaign_menu.inc's MISSION_OBJECTIVE_LINES), SMALL_UI_LINE units apart
 MISSION_OBJECTIVE_LINES = 2
@@ -6585,7 +6588,7 @@ def _mission_card(size: tuple, slot: int) -> list:
         lines += _widget(f"{CAMPAIGN}/{name}_{kind}", [("controller", 1), ("top", text_top + 62),
                                                         ("width", badge), ("height", badge), ("bitmap", bitmap)], [])
     # (a mission not beaten on any difficulty says so, in the badges' place,
-    # across the card's picture's width, in the middle as the badges are)
+    # across the card, in the middle as the badges are)
     lines += _campaign_text(f"{CAMPAIGN}/card_unbeaten_{kind}", MISSION_UNBEATEN_INSET,
                             text_top + 62 + (badge - 16) // 2, width - 2 * MISSION_UNBEATEN_INSET, 18,
                             "ui\\small_ui", CAMPAIGN_NEW, align="center")
