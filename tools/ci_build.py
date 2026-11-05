@@ -296,6 +296,8 @@ def main() -> int:
     # ... and the relays a machine offers when a direct connection fails
     # (network.relays_file, server.relays_file: none in it)
     shutil.copy2(ROOT / "port/assets/network/relays.txt", dist / "relays.txt")
+    # ... and the stock maps' preparations' records (port/linux/src/prepared_shipped.h)
+    shutil.copy2(ROOT / "port/assets/prepared/prepared.records", dist / "prepared.records")
     return 0
 
 

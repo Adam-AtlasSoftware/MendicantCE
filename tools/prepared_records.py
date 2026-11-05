@@ -7,8 +7,9 @@ port/linux/game/render_prepared.c, port/linux/src/prepared_shipped.h), made agai
 Run on a Linux machine with the stock Xbox maps, on a build of the commit to be released. It starts the game once,
 fresh, offscreen at a fixed step, with every setting at its default (a config.toml of its own): its first start's pass loads the
 23 stock maps, then the main menu loads ui.map, and each map's preparation is recorded (z:\\prepared). The records
-are compressed (zlib) into port/assets/prepared, every other file there removed, and manifest.json lists each one's
-map, checksum, key, size and file with the records' form (render_prepared.c's PREPARED_VERSION and the journal's,
+are compressed (zlib, each) into one file, port/assets/prepared/prepared.records (its form:
+port/linux/src/prepared_shipped.h), which the builds put beside the game as they do brokers.txt, every other file
+there removed; and manifest.json lists each one's map, checksum, key, sizes and offset with the records' form (render_prepared.c's PREPARED_VERSION and the journal's,
 d3d8_device.c's halo_gpu_journal_form). The run's folder (about 3 GB of maps decompressed) is deleted as it ends.
 
 A change that makes the records another form (PREPARED_VERSION, JOURNAL_FORM or the journal's state) fails
@@ -21,6 +22,7 @@ import os
 import re
 import shutil
 import signal
+import struct
 import subprocess
 import sys
 import tempfile
@@ -36,6 +38,10 @@ RECORDED = re.compile(r"render: the map's preparation recorded \((\d+) draws, (\
                       r"z:\\prepared\\([0-9a-f]{8})-([0-9a-f]{16})\.prepared, ([^,]*), form (\d+) (\d+)\)")
 HEADER_SIZE = 40  # struct prepared_header
 MAGIC = 0x50314F48
+# the shipped file (prepared_shipped.h)
+PACK_NAME = "prepared.records"
+PACK_MAGIC = 0x5331484F  # "OH1S"
+PACK_FORM = 1
 
 
 def run_game(halo: Path, maps: Path, work: Path, seconds: int) -> Path:
@@ -103,21 +109,32 @@ def collect(run: Path, out: Path) -> dict:
         name = scenario.replace("\\", "/").rsplit("/", 1)[-1]
         records[name] = {"map": name, "scenario": scenario, "checksum": checksum, "key": key,
                          "draws": int(draws), "words": int(words), "size": len(data),
-                         "file": f"{name}.prepared.zlib", "data": zlib.compress(data, 9)}
+                         "data": zlib.compress(data, 9)}
     if len(records) != STOCK_MAP_COUNT:
         sys.exit(f"{len(records)} maps recorded, not {STOCK_MAP_COUNT}: {sorted(records)}")
     if out.is_dir():
         shutil.rmtree(out)
     out.mkdir(parents=True)
-    for record in records.values():
-        (out / record["file"]).write_bytes(record.pop("data"))
+    ordered = [records[name] for name in sorted(records)]
+    offset = 4 * (3 + 6 * len(ordered))
+    index, blobs = [struct.pack("<3I", PACK_MAGIC, PACK_FORM, len(ordered))], []
+    for record in ordered:
+        data = record.pop("data")
+        record["offset"], record["compressed_size"] = offset, len(data)
+        key = int(record["key"], 16)
+        index.append(struct.pack("<6I", int(record["checksum"], 16), key >> 32, key & 0xFFFFFFFF, offset, len(data),
+                                 record["size"]))
+        blobs.append(data)
+        offset += len(data)
+    (out / PACK_NAME).write_bytes(b"".join(index + blobs))
     manifest = {
         "comment": "The stock maps' preparations' records shipped with the game (render_prepared.c), made by "
                    "tools/prepared_records.py with every setting at its default: run it again whenever "
                    "tools/harness/tests/test_prepared_shipped.py says the records' form has changed.",
         "prepared_version": version,
         "journal_form": form,
-        "records": [records[name] for name in sorted(records)],
+        "file": PACK_NAME,
+        "records": ordered,
     }
     (out / "manifest.json").write_text(json.dumps(manifest, indent=1) + "\n")
     return manifest
@@ -140,7 +157,7 @@ def main() -> None:
     finally:
         shutil.rmtree(work, ignore_errors=True)
     size = sum(record["size"] for record in manifest["records"])
-    compressed = sum((arguments.out / record["file"]).stat().st_size for record in manifest["records"])
+    compressed = (arguments.out / PACK_NAME).stat().st_size
     print(f"{len(manifest['records'])} records (form {manifest['prepared_version']}, journal "
           f"{manifest['journal_form']:#x}): {size / 1e6:.1f} MB, {compressed / 1e6:.2f} MB compressed, in {arguments.out}")
 

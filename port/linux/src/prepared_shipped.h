@@ -1,30 +1,26 @@
 /*
 PREPARED_SHIPPED.H
 
-The stock maps' preparations' records shipped with the game
-(port/assets/prepared, made by tools/prepared_records.py on a Linux machine
-from the stock maps: render states, texture references by tag and bitmap
-index, mirror pages and shader ids, no map data). tools/embed_assets.py
-makes them C data, each as zlib compressed it, and the game reads them as
-they are, read-only, where the player's own z:\prepared has no record
-(port/linux/game/render_prepared.c).
+The stock maps' preparations' records shipped with the game: one file,
+prepared.records (port/assets/prepared, made by tools/prepared_records.py on
+a Linux machine from the stock maps: render states, texture references by
+tag and bitmap index, mirror pages and shader ids, no map data), which the
+builds put beside the game as they do brokers.txt (beside config.toml; the
+Linux release's share/openh1; the macOS and iOS apps and the APK copy theirs
+beside config.toml at each start). It is read once, when a record is first
+looked for, and kept; each record is zlib's, inflated as it is played
+(port/linux/game/render_prepared.c), never written out.
+
+The file: "OH1S", its form (1) and its records' count, each 32 bits; then a
+record's map's cache file checksum, its key (high, low), its offset in the
+file, its compressed size and its size inflated, 32 bits each, for each
+record; then the records.
 */
 
 #ifndef PREPARED_SHIPPED_H
 #define PREPARED_SHIPPED_H
 
-/* a record: its map's cache file checksum and its key (as its file's name
-has them), its words as zlib compressed them, and its size inflated */
-struct prepared_shipped
-{
-	unsigned int checksum;
-	unsigned int key_high, key_low;
-	const unsigned int *data;
-	unsigned int compressed_size, size;
-};
-
-extern const struct prepared_shipped prepared_shipped[];
-extern const unsigned int prepared_shipped_count;
+#define PREPARED_SHIPPED_FILE "prepared.records"
 
 /* the size of the shipped record of a map (its checksum) and key, inflated;
 0 where none is shipped */

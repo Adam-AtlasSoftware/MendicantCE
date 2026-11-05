@@ -28,8 +28,8 @@ first start (menu_pictures_render.c: the menus' pictures' pass loads them
 all). HALO_PREPARED_RECORDS=0 turns the records off (the walk every time).
 
 The stock maps' records are shipped with the game too (port/assets/prepared,
-made by tools/prepared_records.py: prepared_shipped.h), each compressed and
-read as it is, never written to z:\prepared. A map's record is looked for in
+made by tools/prepared_records.py: prepared_shipped.h), a file beside the
+game holding each compressed, read as it is, never written to z:\prepared. A map's record is looked for in
 z:\prepared first, then among the shipped ones; a shipped record that is not
 the map's, form's or settings', is malformed, or whose replay does not make
 its draws, is passed over for the rest of the game (it cannot be deleted)

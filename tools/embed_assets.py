@@ -3,9 +3,7 @@
 tools/hud_assets.py), the menus' titles (port/assets/titles, made by
 tools/title_assets.py), their controller button icons (port/assets/buttons,
 made by tools/button_assets.py), the fonts the text is drawn with
-(port/assets/fonts), the stock maps' preparations' records
-(port/assets/prepared, made by tools/prepared_records.py, kept compressed),
-the menus' files (port/assets/menus, made by
+(port/assets/fonts), the menus' files (port/assets/menus, made by
 tools/ce_menus.py), the windows' icon and the loading picture in the game
 as C data:
 
@@ -61,10 +59,6 @@ PICTURE_ASSETS = Path("port/assets/pictures")
 PICTURE_MAPS = PICTURE_ASSETS / "maps.json"
 # the bitmaps of ui.map whose frames a pose may draw
 PICTURE_BITMAPS = {"sp_levels": "ui\\shell\\bitmaps\\sp_levels", "mp_map_grafix": "ui\\shell\\bitmaps\\mp_map_grafix"}
-# the stock maps' preparations' records, each zlib compressed, and their list
-# (tools/prepared_records.py; port/linux/src/prepared_shipped.h)
-PREPARED_ASSETS = Path("port/assets/prepared")
-PREPARED_MANIFEST = PREPARED_ASSETS / "manifest.json"
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
@@ -177,37 +171,6 @@ def picture_lines() -> List[str]:
     return lines
 
 
-def prepared_records() -> List[dict]:
-    """The shipped records manifest.json lists."""
-    if not (ROOT / PREPARED_MANIFEST).is_file():
-        return []
-    return json.loads((ROOT / PREPARED_MANIFEST).read_text())["records"]
-
-
-def prepared_lines() -> List[str]:
-    """The shipped records' table (prepared_shipped.h), each as compressed."""
-    lines = ['#include "prepared_shipped.h"', ""]
-    table = []
-    for index, record in enumerate(prepared_records()):
-        data = (ROOT / PREPARED_ASSETS / record["file"]).read_bytes()
-        key = int(record["key"], 16)
-        lines.append(f"static const unsigned int prepared{index}[] = {{")
-        lines.extend(words(data))
-        lines.append("};")
-        lines.append("")
-        table.append(f'\t{{ 0x{int(record["checksum"], 16):08x}u, 0x{key >> 32:08x}u, 0x{key & 0xffffffff:08x}u, '
-                     f'prepared{index}, {len(data)}, {record["size"]} }},')
-    lines.append("const struct prepared_shipped prepared_shipped[] =")
-    lines.append("{")
-    lines.extend(table)
-    if not table:
-        lines.append("\t{ 0 },")
-    lines.append("};")
-    lines.append(f"const unsigned int prepared_shipped_count = {len(table)};")
-    lines.append("")
-    return lines
-
-
 def hud_asset_inputs() -> List[Path]:
     """The files the generated source is made from."""
     inputs = [listing for listing in (LAYOUT, CE_LAYOUT, CE_STOCK, CUSTOM_EDITION_HUD, TITLE_LIST, BUTTON_LIST, FONT_LIST, MENU_LIST)
@@ -217,9 +180,7 @@ def hud_asset_inputs() -> List[Path]:
             *([WINDOW_ICON] if (ROOT / WINDOW_ICON).is_file() else []),
             *([LOADING_PICTURE] if (ROOT / LOADING_PICTURE).is_file() else []),
             *([MENU_CURSOR] if (ROOT / MENU_CURSOR).is_file() else []),
-            *([PICTURE_MAPS] if (ROOT / PICTURE_MAPS).is_file() else []), *picture_poses(),
-            *([PREPARED_MANIFEST] if (ROOT / PREPARED_MANIFEST).is_file() else []),
-            *(PREPARED_ASSETS / record["file"] for record in prepared_records())]
+            *([PICTURE_MAPS] if (ROOT / PICTURE_MAPS).is_file() else []), *picture_poses()]
 
 
 def hud_configure_inputs() -> List[Path]:
@@ -234,9 +195,6 @@ def hud_configure_inputs() -> List[Path]:
     # (a pose dropped in changes the folder: configure.py runs again)
     if (ROOT / PICTURE_ASSETS).is_dir():
         inputs.append(PICTURE_ASSETS)
-    # (the shipped records' list names their files; without them, the
-    # assets' folder, where they are added)
-    inputs += [PREPARED_MANIFEST] if (ROOT / PREPARED_MANIFEST).is_file() else [PREPARED_ASSETS.parent]
     return inputs
 
 
@@ -431,7 +389,6 @@ def main() -> None:
     lines.append(f"const unsigned long platform_loading_picture_size = {len(data)};")
     lines.append("")
     lines.extend(picture_lines())
-    lines.extend(prepared_lines())
     write_output(Path(sys.argv[1]), lines)
 
 

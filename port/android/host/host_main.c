@@ -261,6 +261,17 @@ static void *game_main(void *unused)
 			host_logf(HOST_LOG_ERROR, "cannot write %s: %s", path, SDL_GetError());
 		SDL_free(brokers);
 	}
+	/* ...and the stock maps' preparations' records (port/linux/src/
+	prepared_shipped.h), the same way */
+	{
+		size_t records_size = 0;
+		void *records = SDL_LoadFile("prepared.records", &records_size);
+
+		snprintf(path, sizeof(path), "%s/prepared.records", data_root);
+		if (!records || !SDL_SaveFile(path, records, records_size))
+			host_logf(HOST_LOG_ERROR, "cannot write %s: %s", path, SDL_GetError());
+		SDL_free(records);
+	}
 	snprintf(path, sizeof(path), "%s/config.toml", data_root);
 
 	image = SDL_LoadFile("halo_guest.elf", &image_size);

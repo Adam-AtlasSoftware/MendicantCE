@@ -56,13 +56,20 @@ def test_negative():
 
 
 def test_records_are_whole():
-    names = {record['file'] for record in MANIFEST['records']}
-    assert len(MANIFEST['records']) == 24, f"not every stock map's record is shipped: {RERUN}"
-    assert names | {'manifest.json'} == {path.name for path in FOLDER.iterdir()}, f"files not in the manifest: {RERUN}"
-    for record in MANIFEST['records']:
-        data = zlib.decompress((FOLDER / record['file']).read_bytes())
-        magic, version, header_size, checksum, key = struct.unpack_from('<4IQ', data)
-        assert len(data) == record['size'], record['file']
-        assert (magic, header_size) == (0x50314F48, 40), record['file']
-        assert version == MANIFEST['prepared_version'], f"{record['file']}: {RERUN}"
-        assert (checksum, key) == (int(record['checksum'], 16), int(record['key'], 16)), record['file']
+    """the shipped file (prepared_shipped.h's form) holds the manifest's records, each whole and of its map and key"""
+    records = MANIFEST['records']
+    assert len(records) == 24, f"not every stock map's record is shipped: {RERUN}"
+    assert {path.name for path in FOLDER.iterdir()} == {'manifest.json', MANIFEST['file']}, f"files not in the manifest: {RERUN}"
+    pack = (FOLDER / MANIFEST['file']).read_bytes()
+    assert struct.unpack_from('<3I', pack) == (0x5331484F, 1, len(records)), RERUN
+    for at, record in enumerate(records):
+        checksum, high, low, offset, compressed, size = struct.unpack_from('<6I', pack, 12 + 24 * at)
+        key = int(record['key'], 16)
+        assert (checksum, high, low) == (int(record['checksum'], 16), key >> 32, key & 0xFFFFFFFF), record['map']
+        assert (offset, compressed, size) == (record['offset'], record['compressed_size'], record['size']), record['map']
+        data = zlib.decompress(pack[offset:offset + compressed])
+        magic, version, header_size, header_checksum, header_key = struct.unpack_from('<4IQ', data)
+        assert len(data) == size, record['map']
+        assert (magic, header_size) == (0x50314F48, 40), record['map']
+        assert version == MANIFEST['prepared_version'], f"{record['map']}: {RERUN}"
+        assert (header_checksum, header_key) == (checksum, key), record['map']
