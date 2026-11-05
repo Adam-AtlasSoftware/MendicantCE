@@ -234,9 +234,9 @@ def hud_configure_inputs() -> List[Path]:
     # (a pose dropped in changes the folder: configure.py runs again)
     if (ROOT / PICTURE_ASSETS).is_dir():
         inputs.append(PICTURE_ASSETS)
-    # (the shipped records' list names their files)
-    if (ROOT / PREPARED_MANIFEST).is_file():
-        inputs.append(PREPARED_MANIFEST)
+    # (the shipped records' list names their files; without them, the
+    # assets' folder, where they are added)
+    inputs += [PREPARED_MANIFEST] if (ROOT / PREPARED_MANIFEST).is_file() else [PREPARED_ASSETS.parent]
     return inputs
 
 
