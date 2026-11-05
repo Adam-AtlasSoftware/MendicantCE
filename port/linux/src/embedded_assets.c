@@ -71,22 +71,24 @@ static void assets_read(void)
 }
 
 #ifndef HALO_ANDROID
-static pthread_once_t assets_once = PTHREAD_ONCE_INIT;
+static pthread_mutex_t assets_lock = PTHREAD_MUTEX_INITIALIZER;
 #endif
+static int assets_tried;
 
 const void *embedded_assets_data(unsigned int offset, unsigned int size)
 {
+	/* (the high-res HUD's decoders ask from their threads too: the guest's C
+	library has no pthread_once) */
 #ifndef HALO_ANDROID
-	/* (the high-res HUD's decoders ask from their threads too) */
-	pthread_once(&assets_once, assets_read);
-#else
-	static int read;
-
-	if (!read)
+	pthread_mutex_lock(&assets_lock);
+#endif
+	if (!assets_tried)
 	{
-		read = 1;
+		assets_tried = 1;
 		assets_read();
 	}
+#ifndef HALO_ANDROID
+	pthread_mutex_unlock(&assets_lock);
 #endif
 	if (!assets || offset < EMBEDDED_ASSETS_HEADER_SIZE || offset > assets_size || size > assets_size - offset)
 		return NULL;
