@@ -344,11 +344,8 @@ static float sound_gain = 1.0f;
 /* audio.doppler */
 static BOOL doppler_enabled = TRUE;
 /* whether mono 3D voices go through the HRTF: on stereo, audio.spatial;
-in the VR mode, vr.hrtf (spatial_hrtf, DirectSoundDoWork); and whether as
-the Xbox did on stereo, a sound behind heard as from ahead and its front and
-back mix bins summed ("auto"), or all round ("headphones", and the VR mode) */
+in the VR mode, vr.hrtf (spatial_hrtf, DirectSoundDoWork) */
 static BOOL hrtf_enabled = FALSE;
-static BOOL hrtf_xbox_stereo = FALSE;
 /* 2 or 6 (audio.channels), chosen when the device first opens; the game
 sets its mix bins by it, so it holds while the game runs */
 static unsigned long output_channels = 2;
@@ -641,14 +638,13 @@ octave, the notch and the loss behind, over every 15 degrees round and every
 10 from 40 below to 60 above, are what the model's parameters are fitted to
 by least squares.
 
-The Xbox on stereo ("auto", hrtf_xbox_stereo) did two things more, which
-are DirectSound's arithmetic, kept here: a sound behind is heard through the
-filters of the direction mirrored ahead (azimuth 180 - azimuth), for the
-Xbox's table is for front speakers, and its back mix bins take a share of
-it, 0.5 + (1 - |elevation| / 90)(|azimuth| / 90 - 1) of the power (all of
-it from 135 degrees round, none within 45 of ahead), which stereo plays
-with the front's: the ears hear both. "headphones" (and the VR mode) is
-the model all round instead, behind duller than ahead.
+On stereo the Xbox played its table all round, behind duller than ahead,
+and every 3D voice from its front mix bins alone; so here, on "auto" and
+"headphones" alike. (On Dolby Surround and Dolby Digital, DirectSound
+instead heard a sound behind through the filters of the direction mirrored
+ahead, azimuth 180 - azimuth, and gave its back mix bins 0.5 + (1 -
+|elevation| / 90)(|azimuth| / 90 - 1) of the power, clamped, for the back
+speakers to place it: 5.1 here pans around the speakers instead.)
 
 A sound close to the head (within HRTF_NEAR) fades to the middle, as the pan
 centres one within its minimum distance. The parameters are ramped across
@@ -709,7 +705,7 @@ far away (world units) */
 static void hrtf_place(float right, float up, float ahead, float distance, struct hrtf_parameters *parameters)
 {
 	float strength = distance < HRTF_NEAR ? distance / HRTF_NEAR : 1.0f;
-	float lateral = 0.0f, rise = 0.0f, front = 1.0f, level = 1.0f, delay[2], elevation, frequency, a, w, alpha, a0;
+	float lateral = 0.0f, rise = 0.0f, front = 1.0f, delay[2], elevation, frequency, a, w, alpha, a0;
 	int ear;
 
 	if (distance > 1.0e-4f)
@@ -717,22 +713,12 @@ static void hrtf_place(float right, float up, float ahead, float distance, struc
 		float azimuth;
 
 		hrtf_angles(right, up, ahead, &azimuth, &elevation);
-		if (hrtf_xbox_stereo)
-		{
-			float back = 0.5f + (1.0f - fabsf(elevation) / 90.0f) * (fabsf(azimuth) / 90.0f - 1.0f);
-
-			back = back < 0.0f ? 0.0f : (back > 1.0f ? 1.0f : back);
-			level = sqrtf(1.0f - back) + sqrtf(back);
-			if (fabsf(azimuth) > 90.0f)
-				azimuth = azimuth > 0.0f ? 180.0f - azimuth : -180.0f - azimuth;
-		}
 		azimuth *= 3.14159265f / 180.0f;
 		elevation *= 3.14159265f / 180.0f;
 		lateral = sinf(azimuth) * cosf(elevation);
 		rise = sinf(elevation);
 		front = cosf(azimuth) * cosf(elevation);
 	}
-	level = 1.0f + strength * (level - 1.0f);
 	for (ear = 0; ear < 2; ear++)
 	{
 		/* the angle from the ear's axis: Brown and Duda's alpha, 2 facing
@@ -742,7 +728,7 @@ static void hrtf_place(float right, float up, float ahead, float distance, struc
 		float shadow = 1.0f + strength *
 			(((1.0f + 0.5f * HRTF_SHADOW_ALPHA_MIN) + (1.0f - 0.5f * HRTF_SHADOW_ALPHA_MIN) *
 			cosf(theta * (180.0f / HRTF_SHADOW_THETA_MIN))) / HRTF_DIFFUSE_ALPHA - 1.0f);
-		float gain = level * powf(10.0f, strength * HRTF_LEVEL_DECIBELS * cosf(theta) / 20.0f);
+		float gain = powf(10.0f, strength * HRTF_LEVEL_DECIBELS * cosf(theta) / 20.0f);
 
 		parameters->shadow_b0[ear] = gain * (1.0f + shadow * hrtf.shadow_k) / (1.0f + hrtf.shadow_k);
 		parameters->shadow_b1[ear] = gain * (1.0f - shadow * hrtf.shadow_k) / (1.0f + hrtf.shadow_k);
@@ -1784,10 +1770,10 @@ every retail default.xbe), redone in floating point:
 	  the chain's taps also go, at 1 minus the diffusion, round two loops as
 	  long as the chain. Each channel hears a line, at the reverb level, and
 	  a loop at half of it;
-	- the four channels play from the front and back pairs on 5.1, and as
-	  each side's pair summed on stereo (the energy of the four together is
-	  that of the two, as a voice's direct path is 1 over the speakers on
-	  either).
+	- the four channels play from the front and back pairs on 5.1, and on
+	  stereo each side's back channel at -3 dB with its front, as the
+	  Xbox's stereo downmix (its encode processor's: left = front left +
+	  0.707 center + 0.707 back left) played the back speakers' mix bins.
 A change of environment crossfades each delay's read from its old length to
 its new one, and each gain and filter, over REVERB_FADE_FRAMES: what is
 reverberating carries on, without the click of a jump or the pitch shift of
@@ -2202,8 +2188,8 @@ static void reverb_process(const float *send, float *output, unsigned long frame
 		}
 		else
 		{
-			output[frame * 2] += (held[0] + held[2]) * level;
-			output[frame * 2 + 1] += (held[1] + held[3]) * level;
+			output[frame * 2] += (held[0] + 0.70710678f * held[2]) * level;
+			output[frame * 2 + 1] += (held[1] + 0.70710678f * held[3]) * level;
 		}
 		peak = fabsf(held[0]) > peak ? fabsf(held[0]) : peak;
 		peak = fabsf(held[1]) > peak ? fabsf(held[1]) : peak;
@@ -4029,7 +4015,6 @@ VOID WINAPI DirectSoundDoWork(void)
 	/* (5.1 is panned around its speakers whatever audio.spatial says: the
 	HRTF is for a pair of ears) */
 	hrtf_enabled = output_channels != 6 && spatial_hrtf(spatial_setting, vr_running, vr_hrtf);
-	hrtf_xbox_stereo = hrtf_enabled && !vr_running && strcmp(spatial_setting, "headphones") != 0;
 	if (headphones != logged_headphones || hrtf_enabled != logged_hrtf)
 	{
 		logged_headphones = headphones;

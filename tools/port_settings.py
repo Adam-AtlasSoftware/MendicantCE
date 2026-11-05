@@ -652,8 +652,8 @@ PAGES = {
             ("OUTPUT DEVICE", "audio.output_device", [("SYSTEM DEFAULT", "default")],
              "Where the game's sound and the other players' voices play.", "desktop"),
             ("3D AUDIO", "audio.spatial", [("AUTO", "auto"), ("HEADPHONES", "headphones"), ("SPEAKERS", "speakers")],
-             "Where sounds come from. Auto is the Xbox's stereo: sounds behind you seem ahead. Headphones also "
-             "places them behind you. Speakers pans left and right.",
+             "Where the sounds around you come from. Auto and Headphones place each ahead, behind, above or below "
+             "you, as the Xbox's 3D audio did on speakers and headphones alike; Speakers pans them left and right.",
              None),
             ("REVERB", "audio.reverb", ON_OFF,
              "Echoes sounds as the place you are in would, and muffles those behind walls, as the Xbox did. It "

@@ -22,10 +22,8 @@ every 10 from 40 below to 60 above, from impulse responses of 512 frames at
 	  above, against the 2 to 16 kHz mean (each against the mean over all
 	  directions: a directional transfer function);
 	- "rear": what a sound behind loses above 2.5 kHz, against its low
-	  frequencies, beside the direction mirrored ahead;
-	- "stereo": on stereo ("auto", as the Xbox), a sound behind heard
-	  through the filters of the direction mirrored ahead, and its front and
-	  back mix bins' power split as DirectSound split it, played together.
+	  frequencies, beside the direction mirrored ahead (the Xbox on stereo
+	  played its table all round, its front mix bins alone).
 "metrics" prints our figures beside the Xbox's; "measure" prints the
 figures of responses given (raw floats: for each direction of the grid,
 elevation by elevation from below and round from ahead to the right, 512
@@ -103,7 +101,7 @@ static int direction_at(int azimuth, int elevation)
 /* our response from direction (both ears, FRAMES each), through the HRTF
 as the mixer has it (hrtf_place, hrtf_process), 3 units away; its
 parameters in placed */
-static void our_response(int direction, BOOL xbox_stereo, float *left, float *right, struct hrtf_parameters *placed)
+static void our_response(int direction, float *left, float *right, struct hrtf_parameters *placed)
 {
 	static float impulse[FRAMES], output[FRAMES * 2];
 	struct sdl_stream *stream = calloc(1, sizeof(*stream));
@@ -112,11 +110,9 @@ static void our_response(int direction, BOOL xbox_stereo, float *left, float *ri
 	unsigned long n;
 
 	hrtf_initialize();
-	hrtf_xbox_stereo = xbox_stereo;
 	memset(&parameters, 0, sizeof(parameters));
 	hrtf_place((float)(3.0 * sin(azimuth) * cos(elevation)), (float)(3.0 * sin(elevation)),
 		(float)(3.0 * cos(azimuth) * cos(elevation)), 3.0f, &parameters);
-	hrtf_xbox_stereo = FALSE;
 	parameters.gain = 1.0f;
 	if (placed)
 		*placed = parameters;
@@ -319,19 +315,19 @@ static struct figures measure(const float *responses)
 	return f;
 }
 
-static float *our_responses(BOOL xbox_stereo)
+static float *our_responses(void)
 {
 	float *responses = malloc(sizeof(float) * FRAMES * 2 * DIRECTIONS);
 	int d;
 
 	for (d = 0; d < DIRECTIONS; d++)
-		our_response(d, xbox_stereo, responses + d * FRAMES * 2, responses + d * FRAMES * 2 + FRAMES, NULL);
+		our_response(d, responses + d * FRAMES * 2, responses + d * FRAMES * 2 + FRAMES, NULL);
 	return responses;
 }
 
 /* the Xbox's figures, measured on its own filters and delays (the table
 DirectSoundUseFullHRTF has DirectSound look up), all round (its table's
-own: the Xbox on stereo mirrored the back half onto the front, "stereo") */
+own, which the Xbox on stereo played) */
 static const struct figures xbox_figures =
 {
 	{ { 0.275, 0.651, 0.724, 0.643, 0.255 }, { 0.241, 0.574, 0.673, 0.574, 0.229 }, { 0.260, 0.613, 0.684, 0.604, 0.263 } },
@@ -390,18 +386,15 @@ int main(int argc, char **argv)
 {
 	char const *case_name = argc > 1 ? argv[1] : "";
 	static struct figures ours;
-	static BOOL measured = FALSE;
 	int i, b;
 
-	if (strcmp(case_name, "measure") && strcmp(case_name, "stereo"))
+	if (strcmp(case_name, "measure"))
 	{
-		float *responses = our_responses(FALSE);
+		float *responses = our_responses();
 
 		ours = measure(responses);
 		free(responses);
-		measured = TRUE;
 	}
-	(void)measured;
 	CASE("metrics")
 	{
 		print_figures("ours", &ours);
@@ -456,7 +449,7 @@ int main(int argc, char **argv)
 			static float left[FRAMES], right[FRAMES];
 			struct hrtf_parameters placed;
 
-			our_response(d, FALSE, left, right, &placed);
+			our_response(d, left, right, &placed);
 			CHECK(placed.delay[0] == floorf(placed.delay[0]) && placed.delay[1] == floorf(placed.delay[1]),
 				"at %d degrees round, %d up, the ears' delays %g and %g frames, not whole", azimuth_of(d),
 				elevation_of(d), placed.delay[0], placed.delay[1]);
@@ -510,73 +503,6 @@ int main(int argc, char **argv)
 		{
 			CHECK(fabs(ours.rear[i] - xbox_figures.rear[i]) < 3.0, "%s, above 2.5 kHz %+.1f dB of the front's, the "
 				"Xbox's %+.1f", at[i], ours.rear[i], xbox_figures.rear[i]);
-		}
-		return 0;
-	}
-	/* on stereo, as the Xbox: a sound behind through the filters of the
-	direction mirrored ahead (ears and spectra alike but for its level),
-	and its level the front and back mix bins' together: back the share
-	DirectSound gave it of the power (its azimuth and elevation its own: 45
-	times a side over the other), here at 0, 45, 60, 90 and 135 degrees
-	round and 90 round 45 up */
-	CASE("stereo")
-	{
-		static const struct { int azimuth, elevation; double back; } splits[] = {
-			{ 0, 0, 0.0 }, { 45, 0, 0.0 }, { 60, 0, 0.2113 }, { 90, 0, 0.5 }, { 135, 0, 1.0 }, { 90, 40, 0.5 },
-			{ 120, 20, 0.7361 },
-		};
-		static float left[FRAMES], right[FRAMES], mirror_left[FRAMES], mirror_right[FRAMES], all_left[FRAMES],
-			all_right[FRAMES];
-		int d;
-
-		for (d = 0; d < DIRECTIONS; d++)
-		{
-			int azimuth = azimuth_of(d), mirror = direction_at(180 - azimuth, elevation_of(d));
-			double ratio = 0.0, worst = 0.0;
-			unsigned long n;
-
-			if (azimuth <= 90 || azimuth >= 270)
-				continue;
-			our_response(d, TRUE, left, right, NULL);
-			our_response(mirror, TRUE, mirror_left, mirror_right, NULL);
-			/* (the ratio of their energies, then every frame at it) */
-			{
-				double a = 0.0, m = 0.0;
-
-				for (n = 0; n < FRAMES; n++)
-				{
-					a += (double)left[n] * left[n] + (double)right[n] * right[n];
-					m += (double)mirror_left[n] * mirror_left[n] + (double)mirror_right[n] * mirror_right[n];
-				}
-				ratio = sqrt(a / m);
-				for (n = 0; n < FRAMES; n++)
-				{
-					double e = fabs(left[n] - ratio * mirror_left[n]) + fabs(right[n] - ratio * mirror_right[n]);
-
-					worst = e > worst ? e : worst;
-				}
-			}
-			CHECK(worst < 1.0e-4, "on stereo, %d degrees round, %d up, not heard as the front's %d: %g apart", azimuth,
-				elevation_of(d), 180 - azimuth, worst);
-		}
-		for (i = 0; i < (int)(sizeof(splits) / sizeof(splits[0])); i++)
-		{
-			double expected = 20.0 * log10(sqrt(1.0 - splits[i].back) + sqrt(splits[i].back)), got, a = 0.0, m = 0.0;
-			int at, mirrored;
-			unsigned long n;
-
-			at = direction_at(splits[i].azimuth, splits[i].elevation);
-			mirrored = splits[i].azimuth > 90 ? direction_at(180 - splits[i].azimuth, splits[i].elevation) : at;
-			our_response(at, TRUE, left, right, NULL);
-			our_response(mirrored, FALSE, all_left, all_right, NULL);
-			for (n = 0; n < FRAMES; n++)
-			{
-				a += (double)left[n] * left[n] + (double)right[n] * right[n];
-				m += (double)all_left[n] * all_left[n] + (double)all_right[n] * all_right[n];
-			}
-			got = 10.0 * log10(a / m);
-			CHECK(fabs(got - expected) < 0.05, "on stereo, %d degrees round, %d up: %+.2f dB of all round's, not "
-				"%+.2f (back %.3f of the power)", splits[i].azimuth, splits[i].elevation, got, expected, splits[i].back);
 		}
 		return 0;
 	}

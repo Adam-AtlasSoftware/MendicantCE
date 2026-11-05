@@ -228,7 +228,7 @@
 		<string text="The sound and its devices, 3D audio, the volumes and voice chat."/>
 		<string text=""/>
 		<string text="Where the game's sound and the other players' voices play."/>
-		<string text="Where sounds come from. Auto is the Xbox's stereo: sounds behind you seem ahead. Headphones also places them behind you. Speakers pans left and right."/>
+		<string text="Where the sounds around you come from. Auto and Headphones place each ahead, behind, above or below you, as the Xbox's 3D audio did on speakers and headphones alike; Speakers pans them left and right."/>
 		<string text="Echoes sounds as the place you are in would, and muffles those behind walls, as the Xbox did. It costs a little of the processor."/>
 		<string text="How sounds are converted to your speakers' rate. Clean is clear; Classic is brighter but harsher, and costs a little less."/>
 		<string text="Turns all sound off or on, at once."/>

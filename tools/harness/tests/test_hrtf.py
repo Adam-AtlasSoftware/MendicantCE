@@ -1,6 +1,5 @@
 """The HRTF of dsound_sdl.c against the Xbox's (hrtf.c): the time between the ears, their levels apart in each
-octave, the pinna's notch and what a sound behind loses, over a grid of directions, and on stereo the Xbox's own
-handling of a sound behind and of its front and back mix bins.
+octave, the pinna's notch and what a sound behind loses, over a grid of directions.
 
     python tools/harness/tests/test_hrtf.py metrics   our figures, beside the Xbox's
 (MIXER_SOURCE=path: of another dsound_sdl.c, to compare)
@@ -13,7 +12,8 @@ pair of 31-tap filters with a whole-frame delay between the ears, which it write
 (NV1BA0_PIO_SET_HRIR). Each tap is a byte: a sign, a 3-bit exponent and a 4-bit mantissa (the magnitude the
 mantissa below 16, else 16 plus it, doubled each exponent past the first). To measure them again from one's own
 default.xbe: find DirectSoundUseFullHRTF (it stores its lookup's address for the 3D calculator to call), run that
-lookup as it is (x86, stdcall: azimuth, elevation, the stereo fold, and two pointers it sets to the left and
+lookup as it is (x86, stdcall: azimuth, elevation, the fold behind (off: DirectSound sets it only for Dolby
+Surround and Dolby Digital), and two pointers it sets to the left and
 right ears' filters) for each direction of hrtf.c's grid with the fold off, make each ear's response at 48 kHz
 from its 31 taps decoded, after its delay (the filter's last byte: the left ear's when the sound is to the
 right), 512 frames each, and give them to "measure" (raw floats, in the grid's order) for its line of
@@ -29,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, run  # noqa: E402
 from harness.tests.test_mixer import generated  # noqa: E402
 
-CASES = ["delays", "levels", "notch", "rear", "stereo"]
+CASES = ["delays", "levels", "notch", "rear"]
 
 # a fault in the HRTF, and the case that must catch it
 NEGATIVE_CONTROLS = {
@@ -50,9 +50,6 @@ NEGATIVE_CONTROLS = {
                          "#define HRTF_NOTCH_ELEVATION_LOW -30.0f\n#define HRTF_NOTCH_ELEVATION_HIGH 60.0f"), "notch"),
     # behind as it was (up to 7 dB above 2.5 kHz)
     "rear-as-it-was": (("#define HRTF_REAR_DEPTH 0.99f", "#define HRTF_REAR_DEPTH 0.55f"), "rear"),
-    # on stereo, a sound behind kept behind (not mirrored ahead), or its mix bins' split left out
-    "stereo-no-mirror": (("if (fabsf(azimuth) > 90.0f)\n", "if (fabsf(azimuth) > 900.0f)\n"), "stereo"),
-    "stereo-no-split": (("level = sqrtf(1.0f - back) + sqrtf(back);", "level = 1.0f;"), "stereo"),
 }
 
 

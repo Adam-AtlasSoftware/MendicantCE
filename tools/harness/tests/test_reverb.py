@@ -48,8 +48,8 @@ NEGATIVE_CONTROLS = {
     # a delay longer than the input's line not wrapping round it (the mountains' reflections a quarter second later)
     "no-wrap": (("delay = delay < 16 ? 16 : (delay - 16) % size + 16;", "delay = delay < 16 ? 16 : delay;\n"
                  "\tif (delay > size) delay = size;"), "response"),
-    # the four channels on stereo each side's pair averaged, not summed: 3 dB dry
-    "stereo-averaged": (("(held[0] + held[2]) * level", "(held[0] + held[2]) * 0.70710678f * level"), "levels"),
+    # the four channels on stereo each side's pair summed whole, not the back at -3 dB as the Xbox's downmix
+    "stereo-back-whole": (("(held[0] + 0.70710678f * held[2]) * level", "(held[0] + held[2]) * level"), "levels"),
     # a step of the game's mid-fade restarting the fade from the environment before
     "fade-restarted": (("if (reverb.serial != environment_serial && !reverb.fade)",
                         "if (reverb.serial != environment_serial)"), "transition"),
