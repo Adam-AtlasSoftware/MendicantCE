@@ -15,6 +15,8 @@ HEADER = "port/linux/include/world_proxies.h"
 SOURCE = "port/linux/include/world_proxies_source.h"
 GAME = "port/linux/game/world_proxies.c"
 CONTROLS = [
+    # a vehicle whose field is on its way shaded by its boxes meanwhile (six times an Apple M2's frame, #651)
+    ("boxless = fielded && !instance->baked && instance->field_awaited;", "boxless = 0;", "field"),
     # the static scenery's shapes taken among the dynamic objects' by their distance alone
     ("return baked != candidate->baked ? !baked : distance < candidate->distance;",
      "return distance < candidate->distance;", "baked"),

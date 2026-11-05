@@ -34,6 +34,79 @@ BSPs are not perfectly closed.
 #include <stdlib.h>
 #include <string.h>
 
+/* ---------- the threads */
+
+long world_sdf_bake_threads(long processors, long forced)
+{
+	long threads = forced > 0 ? forced : processors - WORLD_SDF_RESERVED_PROCESSORS;
+
+	if (threads < 1)
+		threads = 1;
+	if (threads > WORLD_SDF_MAXIMUM_THREADS)
+		threads = WORLD_SDF_MAXIMUM_THREADS;
+	return threads;
+}
+
+void world_sdf_pace_begin(struct world_sdf_pace *pace)
+{
+	memset(pace, 0, sizeof(*pace));
+	pace->next_rest = WORLD_SDF_PACE_LEAST_REST;
+}
+
+/* a rest begun, of so many frames */
+static void sdf_pace_rest(struct world_sdf_pace *pace, long frames)
+{
+	pace->rest = frames;
+	pace->rested = 0;
+	pace->rested_total = 0.0f;
+	pace->baked_count = 0;
+	pace->calm = 0;
+}
+
+int world_sdf_pace_frame(struct world_sdf_pace *pace, float milliseconds, int playing)
+{
+	float total = 0.0f;
+	long index, count;
+
+	if (!playing)
+	{
+		world_sdf_pace_begin(pace);
+		return 1;
+	}
+	if (pace->next_rest < WORLD_SDF_PACE_LEAST_REST)
+		pace->next_rest = WORLD_SDF_PACE_LEAST_REST;
+	if (pace->rest <= 0 && pace->normal <= 0.0f)
+		sdf_pace_rest(pace, WORLD_SDF_PACE_LEARN);
+	if (pace->rest > 0)
+	{
+		pace->rested_total += milliseconds;
+		pace->rested++;
+		if (--pace->rest > 0)
+			return 0;
+		pace->normal = pace->rested_total / (float)pace->rested;
+		return 1;
+	}
+	pace->baked[pace->baked_count++ % WORLD_SDF_PACE_WINDOW] = milliseconds;
+	count = pace->baked_count < WORLD_SDF_PACE_WINDOW ? pace->baked_count : WORLD_SDF_PACE_WINDOW;
+	for (index = 0; index < count; index++)
+		total += pace->baked[index];
+	if (milliseconds > pace->normal * WORLD_SDF_PACE_HITCH ||
+		(count == WORLD_SDF_PACE_WINDOW && total > pace->normal * WORLD_SDF_PACE_LATE * (float)count))
+	{
+		/* (late: a rest, each longer than the last while they keep coming) */
+		sdf_pace_rest(pace, pace->next_rest);
+		pace->next_rest = pace->next_rest * 2 < WORLD_SDF_PACE_MOST_REST ? pace->next_rest * 2 : WORLD_SDF_PACE_MOST_REST;
+		return 0;
+	}
+	if (++pace->calm >= WORLD_SDF_PACE_CALM)
+	{
+		pace->calm = 0;
+		pace->next_rest = pace->next_rest / 2 > WORLD_SDF_PACE_LEAST_REST ? pace->next_rest / 2 :
+			WORLD_SDF_PACE_LEAST_REST;
+	}
+	return 1;
+}
+
 /* ---------- the layout and the encoding */
 
 void world_sdf_layout(float const bounds[6], float voxel, struct world_sdf_header *header)
@@ -1061,48 +1134,60 @@ static void sdf_object_buckets_make(float const (*rays)[3], struct sdf_object_bu
 	}
 }
 
-void world_sdf_object_slice(struct world_sdf_object const *object, float const *positions, long triangle_count,
-	int (*inside)(void *context, float const point[3]), void *context, unsigned long z, float *values,
-	unsigned char *solid)
+/* the directions looked along and the normals fitted, their buckets, and
+each normal's cosine to each ray by the ray's share of the sphere over pi
+(the cosine-weighted hemisphere's occlusion is their sum over the blocked
+rays): the same for every voxel and every object */
+struct world_sdf_object_tables
 {
-	float (*rays)[3] = malloc(sizeof(*rays) * WORLD_SDF_OBJECT_RAYS);
-	float (*normals)[3] = malloc(sizeof(*normals) * WORLD_SDF_OBJECT_NORMALS);
-	/* (each normal's cosine to each ray, by the ray's share of the sphere
-	over pi: the cosine-weighted hemisphere's occlusion is their sum over
-	the blocked rays) */
-	float *weights = malloc(sizeof(float) * WORLD_SDF_OBJECT_NORMALS * WORLD_SDF_OBJECT_RAYS);
-	unsigned char blocked[WORLD_SDF_OBJECT_RAYS];
-	float occlusions[WORLD_SDF_OBJECT_NORMALS];
+	float rays[WORLD_SDF_OBJECT_RAYS][3];
+	float normals[WORLD_SDF_OBJECT_NORMALS][3];
+	float weights[WORLD_SDF_OBJECT_RAYS * WORLD_SDF_OBJECT_NORMALS];
 	struct sdf_object_buckets buckets;
-	unsigned long x, y;
-	long k, j, triangle;
+};
 
-	if (!rays || !normals || !weights)
-	{
-		free(rays);
-		free(normals);
-		free(weights);
-		for (x = 0; x < object->width * object->height; x++)
-		{
-			values[x * 4] = 0.0f;
-			values[x * 4 + 1] = values[x * 4 + 2] = values[x * 4 + 3] = 0.0f;
-			solid[x] = 0;
-		}
-		return;
-	}
-	sdf_object_sphere(WORLD_SDF_OBJECT_RAYS, rays);
-	sdf_object_sphere(WORLD_SDF_OBJECT_NORMALS, normals);
-	sdf_object_buckets_make((float const (*)[3])rays, &buckets);
+struct world_sdf_object_tables *world_sdf_object_tables_make(void)
+{
+	struct world_sdf_object_tables *tables = malloc(sizeof(*tables));
+	long k, j;
+
+	if (!tables)
+		return NULL;
+	sdf_object_sphere(WORLD_SDF_OBJECT_RAYS, tables->rays);
+	sdf_object_sphere(WORLD_SDF_OBJECT_NORMALS, tables->normals);
+	sdf_object_buckets_make((float const (*)[3])tables->rays, &tables->buckets);
 	for (k = 0; k < WORLD_SDF_OBJECT_NORMALS; k++)
 	{
 		for (j = 0; j < WORLD_SDF_OBJECT_RAYS; j++)
 		{
-			float cosine = sdf_dot(normals[k], rays[j]);
+			float cosine = sdf_dot(tables->normals[k], tables->rays[j]);
 
-			weights[j * WORLD_SDF_OBJECT_NORMALS + k] = cosine > 0.0f ? cosine * 4.0f / (float)WORLD_SDF_OBJECT_RAYS : 0.0f;
+			tables->weights[j * WORLD_SDF_OBJECT_NORMALS + k] = cosine > 0.0f ?
+				cosine * 4.0f / (float)WORLD_SDF_OBJECT_RAYS : 0.0f;
 		}
 	}
-	for (y = 0; y < object->height; y++)
+	return tables;
+}
+
+void world_sdf_object_tables_free(struct world_sdf_object_tables *tables)
+{
+	free(tables);
+}
+
+void world_sdf_object_slice(struct world_sdf_object_tables const *tables, struct world_sdf_object const *object,
+	float const *positions, long triangle_count, int (*inside)(void *context, float const point[3]), void *context,
+	unsigned long z, unsigned long first_row, unsigned long end_row, float *values, unsigned char *solid)
+{
+	float const (*rays)[3] = tables->rays;
+	float const (*normals)[3] = tables->normals;
+	float const *weights = tables->weights;
+	struct sdf_object_buckets const *buckets = &tables->buckets;
+	unsigned char blocked[WORLD_SDF_OBJECT_RAYS];
+	float occlusions[WORLD_SDF_OBJECT_NORMALS];
+	unsigned long x, y;
+	long k, j, triangle;
+
+	for (y = first_row; y < end_row && y < object->height; y++)
 	{
 		for (x = 0; x < object->width; x++)
 		{
@@ -1164,16 +1249,16 @@ void world_sdf_object_slice(struct world_sdf_object const *object, float const *
 						/* (the two cones meet where the angle between their axes is
 						at most the sum of theirs: cos(between) >= cos(sum); a cone
 						of 90 degrees or more meets every bucket) */
-						if (cosine > 0.0f && length > 1.0e-6f && sdf_dot(axis_vector, buckets.axes[bucket]) / length <
-							cosine * buckets.cosines[bucket] - sine * buckets.sines[bucket])
+						if (cosine > 0.0f && length > 1.0e-6f && sdf_dot(axis_vector, buckets->axes[bucket]) / length <
+							cosine * buckets->cosines[bucket] - sine * buckets->sines[bucket])
 						{
 							continue;
 						}
 						/* (a direction within the triangle's corners as seen from the
 						point: a positive mix of them) */
-						for (ray = buckets.firsts[bucket]; ray < buckets.firsts[bucket + 1]; ray++)
+						for (ray = buckets->firsts[bucket]; ray < buckets->firsts[bucket + 1]; ray++)
 						{
-							j = buckets.rays[ray];
+							j = buckets->rays[ray];
 							if (!blocked[j] && side * sdf_dot(rays[j], ab) >= 0.0f &&
 								side * sdf_dot(rays[j], bc) >= 0.0f && side * sdf_dot(rays[j], ca) >= 0.0f)
 							{
@@ -1206,12 +1291,9 @@ void world_sdf_object_slice(struct world_sdf_object const *object, float const *
 				for (k = 0; k < WORLD_SDF_OBJECT_NORMALS; k++)
 					occlusions[k] = occlusions[k] > 1.0f ? 1.0f : occlusions[k];
 			}
-			sdf_object_fit((float const (*)[3])normals, occlusions, value);
+			sdf_object_fit(normals, occlusions, value);
 		}
 	}
-	free(rays);
-	free(normals);
-	free(weights);
 }
 
 unsigned short world_sdf_half(float value)

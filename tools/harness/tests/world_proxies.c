@@ -639,6 +639,7 @@ static void add_instance(long id, long definition, float x, float y, float z)
 	fake.instances[index].id = id;
 	fake.instances[index].definition = definition;
 	fake.instances[index].baked = 0;
+	fake.instances[index].field_awaited = 0;
 	identity(&fake.frames[index][0], x, y, z);
 	fake.frame_counts[index] = 1;
 }
@@ -985,6 +986,23 @@ static void field_case(void)
 	for (index = 0; index < count; index++)
 		kinds[(int)proxies[index].v[0][3]]++;
 	CHECK(count == 2 && kinds[_world_proxy_box] == 1 && kinds[_world_proxy_sphere] == 1, "without: %ld", count);
+	/* none drawn but one on its way (with the BSP's field): neither its box
+	nor a field until it comes, its wheel's sphere kept */
+	fake.instances[0].field_awaited = 1;
+	count = world_proxies_window(camera, proxies, owners, WORLD_PROXY_MAXIMUM_PER_WINDOW, &dynamic_count);
+	memset(kinds, 0, sizeof(kinds));
+	for (index = 0; index < count; index++)
+		kinds[(int)proxies[index].v[0][3]]++;
+	CHECK(count == 1 && kinds[_world_proxy_sphere] == 1, "awaited: %ld", count);
+	/* (a baked one keeps its box: it is not the vehicle's field) */
+	fake.instances[0].baked = 1;
+	count = world_proxies_window(camera, proxies, owners, WORLD_PROXY_MAXIMUM_PER_WINDOW, &dynamic_count);
+	memset(kinds, 0, sizeof(kinds));
+	for (index = 0; index < count; index++)
+		kinds[(int)proxies[index].v[0][3]]++;
+	CHECK(kinds[_world_proxy_box] == 1, "awaited and baked: %ld", count);
+	fake.instances[0].baked = 0;
+	fake.instances[0].field_awaited = 0;
 	/* drawn: its field in three slots together, in place of its box, and
 	its wheel's sphere */
 	field_known = 1;

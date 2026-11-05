@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, enum_with, function, mutated, read, run, structure  # noqa: E402
 
 CASES = ["layout", "encoding", "sample", "atlas", "bake", "plane", "room", "sphere", "bsp", "soup", "round_trip", "rejection",
-         "object_layout", "object_bake", "object_determinism", "object_half", "object_atlas"]
+         "object_layout", "object_bake", "object_determinism", "object_half", "object_atlas", "threads", "pace"]
 HEADER = "port/linux/include/world_sdf.h"
 BAKE = "port/linux/game/world_sdf_bake.c"
 SCHEDULE = "port/linux/game/world_sdf.c"
@@ -27,6 +27,26 @@ FILE_FUNCTIONS = ["sdf_put32", "sdf_get32", "sdf_put_float", "sdf_get_float", "s
                   "sdf_volume_free", "sdf_file_pack", "sdf_file_unpack", "sdf_file_write",
                   "sdf_file_read", "sdf_cache_load", "sdf_bsp_inside"]
 CONTROLS = [
+    # the bake on every processor: the game's own threads left none (#651)
+    (BAKE, "long threads = forced > 0 ? forced : processors - WORLD_SDF_RESERVED_PROCESSORS;",
+     "long threads = forced > 0 ? forced : processors;", "threads"),
+    # none on a machine of a few processors
+    (BAKE, "\tif (threads < 1)\n\t\tthreads = 1;", "", "threads"),
+    # forced past the most (the threads' table overrun)
+    (BAKE, "\tif (threads > WORLD_SDF_MAXIMUM_THREADS)\n\t\tthreads = WORLD_SDF_MAXIMUM_THREADS;", "", "threads"),
+    # the menus paced as play (the start's bakes slowed behind the main menu)
+    (BAKE, "\tif (!playing)\n\t{", "\tif (0)\n\t{", "pace"),
+    # frames a tenth late never a rest
+    (BAKE, "total > pace->normal * WORLD_SDF_PACE_LATE * (float)count", "total > pace->normal * 2.0f * (float)count",
+     "pace"),
+    # a hitch never a rest
+    (BAKE, "if (milliseconds > pace->normal * WORLD_SDF_PACE_HITCH ||", "if (0 ||", "pace"),
+    # a rest no longer while frames keep running late
+    (BAKE, "pace->next_rest = pace->next_rest * 2 < WORLD_SDF_PACE_MOST_REST ? pace->next_rest * 2 : "
+     "WORLD_SDF_PACE_MOST_REST;", "", "pace"),
+    # the normal not learned again as it rests (the first one kept for good)
+    (BAKE, "\tpace->normal = pace->rested_total / (float)pace->rested;", "\tif (pace->normal <= 0.0f)\n\t\t"
+     "pace->normal = pace->rested_total / (float)pace->rested;", "pace"),
     # a cell marked only where a triangle is within range of its middle (not of each of its voxels)
     (BAKE, "float reach = header->range + 0.5f * step * 1.7320508f;", "float reach = header->range;", "soup"),
     # the table's kinds read the wrong way round
