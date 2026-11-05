@@ -45,7 +45,8 @@ hash; its vertex layout: l=<reg>.<stream>.<format>.<bytes>.<offset>/...
 elements read), or i=<registers written> for immediate mode; and its
 texture stages: t=<source>.<sampler type>.<address u>.<v>.<w>.<border
 colour>/... (four; the border colour only where an axis is clamped to it,
-else 0).
+else 0). A recording's draw is as no setting changes it, with its context
+(xgpu_manifest_context): cl, ct, co, cd, ch and ck.
 
 s: a vertex shader as the game creates it: its program and its
 declaration's layout (fields as a draw's of the same names), whichever

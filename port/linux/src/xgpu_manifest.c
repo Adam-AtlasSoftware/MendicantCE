@@ -867,7 +867,8 @@ int xgpu_manifest_derive(const struct xgpu_manifest_draw *draw, const struct xgp
 	facts.environment = context->environment;
 	facts.sample_mask = 1;
 	lit = xgpu_draw_derive(&facts, unlit, &parts);
-	*derived = *draw;
+	/* (its bytes, padding too: a draw's hash is of them) */
+	memcpy(derived, draw, sizeof(*derived));
 	derived->key.color_format = parts.color_format;
 	derived->key.samples = parts.samples;
 	derived->key.lighting = parts.lighting;

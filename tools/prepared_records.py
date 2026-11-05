@@ -65,7 +65,8 @@ def run_game(halo: Path, maps: Path, work: Path, seconds: int) -> Path:
                        HALO_VULKAN_PIPELINE_CACHE=str(run / "save" / "vulkan.bin"),
                        HALO_NET_ONLINE="false", HALO_NET_PORT="5191", HALO_NET_BROADCAST="127.255.255.255",
                        HALO_UPDATE_ANSWER="no", HALO_NO_CLIPBOARD="1", HALO_DEBUG_MENU_PICTURES="1",
-                       HALO_FIXED_STEP="1", HALO_PREPARED_RECORDS="1", HALO_MAP_CACHE_MEGABYTES="3500",
+                       HALO_FIXED_STEP="1", HALO_PREPARED_RECORDS="1", HALO_SHIPPED_RECORDS="0",
+                       HALO_MAP_CACHE_MEGABYTES="3500",
                        HALO_RENDER_MANIFEST=str(run / "manifest.txt"),
                        SDL_VIDEO_DRIVER="offscreen", SDL_AUDIO_DRIVER="dummy")
     log = run / "stdout.txt"

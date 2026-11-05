@@ -105,8 +105,9 @@ SHARED_USERS = {"xgpu_metal_shaders.c", "xgpu_metal_textures.c", "xgpu_metal_com
 # tools/metal_post_shaders.py)
 METAL_C_SOURCES = {"xgpu_metal_post.c", "xgpu_metal_post_shaders.c"}
 # the shaders' tool's own (port/macos/tools/xgpu_metal_prebuild.c): the
-# decoders, the stream's descriptions and the manifest's reader, beside the
-# same stand-in
+# decoders, the stream's descriptions, the HDR tags' classification and the
+# manifest's reader with its derivation of a draw under the settings, beside
+# the same stand-in
 TOOL_SHARED_SOURCES = ["nv2a_vsh.c", "nv2a_psh.c", "xgpu_stream.h", "xgpu_stream_describe.h", "xgpu_stream_describe.c",
                        "xgpu_hdr.h", "xgpu_hdr.c",
                        "xgpu_manifest.h", "xgpu_manifest.c"]
