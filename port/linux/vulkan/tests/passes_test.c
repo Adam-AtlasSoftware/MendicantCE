@@ -542,13 +542,17 @@ static void VKAPI_CALL fake_copy_lights(VkCommandBuffer command, VkBuffer source
 	light_copies++;
 }
 
+/* (the cells and the clusters' masks, 17 slices from 0; or the world, its
+whole slices from 17) */
+static uint32_t light_image_z, light_image_depth;
+
 static void VKAPI_CALL fake_copy_cells(VkCommandBuffer command, VkBuffer source, VkImage destination,
 	VkImageLayout layout, uint32_t count, const VkBufferImageCopy *regions)
 {
 	(void)source; (void)destination;
 	assert(layout == VK_IMAGE_LAYOUT_GENERAL && count == 1);
 	assert(regions[0].imageExtent.width == 32 && regions[0].imageExtent.height == 32 &&
-		regions[0].imageExtent.depth == 16);
+		regions[0].imageOffset.z == (int32_t)light_image_z && regions[0].imageExtent.depth == light_image_depth);
 	assert(regions[0].imageSubresource.baseArrayLayer == 0 && regions[0].imageSubresource.layerCount == 1);
 	assert(command == light_commands);
 	light_image_copies++;
@@ -561,7 +565,8 @@ static void dynamic_lights_test(void)
 {
 	static struct xgpu_vulkan_buffer block;
 	static struct xgpu_vulkan_image cells;
-	static unsigned char ring[6192 + 32 * 32 * 16 * 16 + 64], data[6192], grid[32 * 32 * 16 * 16];
+	static unsigned char ring[6192 + 32 * 32 * 17 * 16 + 64], data[6192], grid[32 * 32 * 17 * 16];
+	static uint32_t world[1500][4];
 
 	reset();
 	vk.slot->main = (VkCommandBuffer)(uintptr_t)1;
@@ -573,11 +578,13 @@ static void dynamic_lights_test(void)
 	cells.description.type = XGPU_VULKAN_IMAGE_3D;
 	cells.description.format = XGPU_VULKAN_FORMAT_RGBA32_UINT;
 	cells.description.width = cells.description.height = 32;
-	cells.description.depth_or_layers = 16;
+	cells.description.depth_or_layers = 17 + 240;
 	cells.description.levels = 1;
 	cells.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
 	vk.lights_block = &block;
 	vk.lights_cells = &cells;
+	light_image_z = 0;
+	light_image_depth = 17;
 	data[0] = 7;
 	grid[sizeof(grid) - 1] = 9;
 	vkCmdCopyBuffer = fake_copy_lights;
@@ -592,6 +599,13 @@ static void dynamic_lights_test(void)
 	xgpu_vulkan_dynamic_lights_upload(data, sizeof(data), grid);
 	assert(light_copies == 2 && light_image_copies == 2 && light_commands == vk.slot->main);
 	assert(vk.statistics.uploads_ordered == 2);
+	/* the world: its 1500 texels in two whole slices past the clusters' */
+	world[1499][3] = 11;
+	light_image_z = 17;
+	light_image_depth = 2;
+	vk.ring_head = 0;
+	xgpu_vulkan_dynamic_lights_world(world, 1500);
+	assert(light_image_copies == 3 && ring[1499 * 16 + 12] == 11 && ring[1500 * 16] == 0);
 }
 
 static void VKAPI_CALL fake_copy_buffer(VkCommandBuffer command, VkBuffer source, VkBuffer destination,

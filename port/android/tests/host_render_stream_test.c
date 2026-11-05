@@ -1664,17 +1664,17 @@ static void test_round_trip(void)
 		if (frame == 7)
 		{
 			struct xgpu_dynamic_lights_block *block = calloc(1, sizeof(*block));
-			unsigned char *cells = guest_allocate(32 * 32 * 16 * 16);
+			unsigned char *cells = guest_allocate(32 * 32 * 17 * 16);
 			struct xgpu_dynamic_lights_halos *halos = calloc(1, sizeof(*halos));
 
 			random_bytes(block->grid, sizeof(block->grid));
 			random_bytes(block->position, 5 * 16);
-			random_bytes(cells, 32 * 32 * 16 * 16);
+			random_bytes(cells, 32 * 32 * 17 * 16);
 			CHECK(xgpu_backend_dynamic_lights_prepare());
 			xgpu_backend_dynamic_lights_upload(block, cells);
 			text_printf(&expected, "lights %08x %08x\n", checksum(block, sizeof(*block)),
-				checksum(cells, 32 * 32 * 16 * 16));
-			memset(cells, 0, 32 * 32 * 16 * 16);
+				checksum(cells, 32 * 32 * 17 * 16));
+			memset(cells, 0, 32 * 32 * 17 * 16);
 			halos->count = 3;
 			random_bytes(halos->halos, 6 * 16);
 			random_bytes(halos->camera_right, 43 * 4);

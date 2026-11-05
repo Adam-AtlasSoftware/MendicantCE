@@ -399,6 +399,14 @@ static void record_memory(const unsigned char *start, uint32_t type, uint32_t si
 		outside(upload->cells, upload->size);
 		break;
 	}
+	case XGPU_STREAM_DYNAMIC_LIGHTS_WORLD:
+	{
+		const struct xgpu_stream_dynamic_lights_world *world = (const void *)start;
+
+		if (world->count <= 0xfffffffu)
+			outside(world->texels, world->count * 16);
+		break;
+	}
 	case XGPU_STREAM_VR_INITIALIZE:
 		outside(((const struct xgpu_stream_reply_record *)start)->reply, sizeof(struct xgpu_stream_vr_info));
 		break;

@@ -100,6 +100,7 @@ _Static_assert(sizeof(struct xgpu_combiner_stage) == XGPU_STREAM_COMBINER_STAGE_
 _Static_assert(sizeof(struct xgpu_final_combiner) == XGPU_STREAM_FINAL_COMBINER_SIZE, "final combiner");
 _Static_assert(sizeof(struct xgpu_vertex_element) == sizeof(struct xgpu_stream_vertex_element), "vertex element");
 _Static_assert(sizeof(struct xgpu_draw_uniforms) == sizeof(struct xgpu_stream_draw_uniforms), "draw uniforms");
+_Static_assert(XGPU_DYNAMIC_LIGHTS_WORLD_TEXELS == XGPU_STREAM_DYNAMIC_LIGHTS_WORLD_TEXELS, "the dynamic lights' world");
 _Static_assert(sizeof(struct xgpu_dynamic_lights_block) == sizeof(struct xgpu_stream_dynamic_lights_block),
 	"dynamic lights block");
 _Static_assert(XGPU_DYNAMIC_LIGHTS_MAXIMUM == XGPU_STREAM_DYNAMIC_LIGHTS_MAXIMUM, "dynamic lights");
@@ -1831,8 +1832,7 @@ BOOL xgpu_backend_dynamic_lights_prepare(void)
 	return TRUE;
 }
 
-#define DYNAMIC_LIGHTS_CELLS_SIZE \
-	(XGPU_DYNAMIC_LIGHTS_GRID_X * XGPU_DYNAMIC_LIGHTS_GRID_Y * XGPU_DYNAMIC_LIGHTS_GRID_Z * 16)
+#define DYNAMIC_LIGHTS_CELLS_SIZE XGPU_DYNAMIC_LIGHTS_CELLS_BYTES
 
 void xgpu_backend_dynamic_lights_upload(const struct xgpu_dynamic_lights_block *block, const void *cells)
 {
@@ -1864,6 +1864,19 @@ void xgpu_backend_dynamic_lights_upload(const struct xgpu_dynamic_lights_block *
 	stream_finite(&record_body->block.color[0][0], count * 4, "dynamic light colour", 0);
 	stream_finite(&record_body->block.cone[0][0], count * 4, "dynamic light cone", 0);
 	record_body->cells = carry_one(&place, cells, DYNAMIC_LIGHTS_CELLS_SIZE);
+}
+
+void xgpu_backend_dynamic_lights_world(const void *texels, int count)
+{
+	struct xgpu_stream_dynamic_lights_world *record_body;
+	unsigned char *place;
+
+	if (!stream.open || count < 1 || count > XGPU_DYNAMIC_LIGHTS_WORLD_TEXELS)
+		return;
+	record_body = record_data(XGPU_STREAM_DYNAMIC_LIGHTS_WORLD, sizeof(*record_body),
+		carried_one((uint32_t)count * 16), &place);
+	record_body->count = (uint32_t)count;
+	record_body->texels = carry_one(&place, texels, (uint32_t)count * 16);
 }
 
 void xgpu_backend_dynamic_lights_halos(xgpu_target color, xgpu_target depth, int layers,

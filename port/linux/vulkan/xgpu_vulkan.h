@@ -587,10 +587,14 @@ int xgpu_vulkan_world_ao_block(uint64_t serial, VkDescriptorBufferInfo *info);
 uint64_t xgpu_vulkan_world_ao_number(void);
 
 /* the enhanced dynamic lights' block (struct xgpu_dynamic_lights_block,
-size bytes) and their grid's cells (32 x 32 x 16, four uints each: xgpu.h),
-which the draw set holds (xgpu_spirv.h), in the stream's order: draws
-recorded before it read the old ones, draws after it these */
+size bytes) and their grid's cells (32 x 32 x 16, four uints each: xgpu.h)
+with the clusters' masks past them (a slice more), which the draw set holds
+(xgpu_spirv.h), in the stream's order: draws recorded before it read the old
+ones, draws after it these */
 void xgpu_vulkan_dynamic_lights_upload(const void *block, uint32_t size, const void *cells);
+/* the world (xgpu.h): count texels, into the cells' texture past the
+clusters' masks, in the stream's order as the cells are */
+void xgpu_vulkan_dynamic_lights_world(const void *texels, uint32_t count);
 
 /* ---------- visibility tests */
 

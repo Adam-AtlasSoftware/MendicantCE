@@ -3544,7 +3544,13 @@ static struct
 	BOOL environment;
 	BOOL failed;
 	struct xgpu_dynamic_lights_block data;
-	unsigned int mask[XGPU_DYNAMIC_LIGHTS_GRID_Z][XGPU_DYNAMIC_LIGHTS_GRID_Y][XGPU_DYNAMIC_LIGHTS_GRID_X][4];
+	/* the cells' masks, and past them a slice of the clusters' (xgpu.h) */
+	unsigned int mask[XGPU_DYNAMIC_LIGHTS_GRID_Z + 1][XGPU_DYNAMIC_LIGHTS_GRID_Y][XGPU_DYNAMIC_LIGHTS_GRID_X][4];
+	/* the world (halo_dynamic_lights_world, malloc's), and whether the
+	backend has it */
+	unsigned int (*world)[4];
+	int world_count;
+	BOOL world_sent;
 	/* the glows: each one's middle and size, its color (the display's) */
 	struct xgpu_dynamic_lights_halos halos;
 } dynamic_lights;
@@ -3612,10 +3618,33 @@ static int dynamic_lights_cell(float offset, float scale, int count)
 	return index < 0 ? 0 : index >= count ? count - 1 : index;
 }
 
+typedef char dynamic_lights_cluster_slice[XGPU_DYNAMIC_LIGHTS_GRID_X * XGPU_DYNAMIC_LIGHTS_GRID_Y >=
+	XGPU_DYNAMIC_LIGHTS_CLUSTERS ? 1 : -1];
+typedef char dynamic_lights_cells_bytes[sizeof(dynamic_lights.mask) == XGPU_DYNAMIC_LIGHTS_CELLS_BYTES ? 1 : -1];
+typedef char dynamic_lights_game_sizes[HALO_DYNAMIC_LIGHTS_MAXIMUM == XGPU_DYNAMIC_LIGHTS_MAXIMUM &&
+	HALO_DYNAMIC_LIGHTS_CLUSTERS == XGPU_DYNAMIC_LIGHTS_CLUSTERS &&
+	HALO_DYNAMIC_LIGHTS_WORLD_TEXELS == XGPU_DYNAMIC_LIGHTS_WORLD_TEXELS ? 1 : -1];
+
+/* the structure's 3D BSP (the game's dynamic_lights.c; xgpu.h's world),
+which the backend is given with the frame's lights next */
+void halo_dynamic_lights_world(const unsigned int (*texels)[4], int count)
+{
+	if (count < 1 || count > XGPU_DYNAMIC_LIGHTS_WORLD_TEXELS)
+		return;
+	if (!dynamic_lights.world)
+		dynamic_lights.world = malloc(XGPU_DYNAMIC_LIGHTS_WORLD_TEXELS * sizeof(*dynamic_lights.world));
+	if (!dynamic_lights.world)
+		return;
+	memcpy(dynamic_lights.world, texels, (size_t)count * sizeof(*dynamic_lights.world));
+	dynamic_lights.world_count = count;
+	dynamic_lights.world_sent = FALSE;
+}
+
 /* the frame's lights (the game's dynamic_lights.c): where they are, as the
-objects are drawn; the camera's position and axes (the glows face it) */
+objects are drawn; the camera's position and axes (the glows face it); the
+clusters each light reaches (each cluster's mask of them) */
 void halo_dynamic_lights_set(const struct halo_dynamic_light *lights, int count, const float camera[3],
-	const float right[3], const float up[3])
+	const float right[3], const float up[3], const unsigned int (*cluster_masks)[4])
 {
 	static const int sizes[3] = { XGPU_DYNAMIC_LIGHTS_GRID_X, XGPU_DYNAMIC_LIGHTS_GRID_Y, XGPU_DYNAMIC_LIGHTS_GRID_Z };
 	struct xgpu_dynamic_lights_halos *halos = &dynamic_lights.halos;
@@ -3646,6 +3675,13 @@ void halo_dynamic_lights_set(const struct halo_dynamic_light *lights, int count,
 	dynamic_lights.data.grid[1][3] = 1.0f / XGPU_DYNAMIC_LIGHTS_CELL;
 	memcpy(dynamic_lights.data.grid[2], dynamic_lights.look[0], sizeof(dynamic_lights.look[0]));
 	memset(dynamic_lights.mask, 0, sizeof(dynamic_lights.mask));
+	if (cluster_masks)
+		memcpy(dynamic_lights.mask[XGPU_DYNAMIC_LIGHTS_GRID_Z], cluster_masks, XGPU_DYNAMIC_LIGHTS_CLUSTERS * 16);
+	if (dynamic_lights.world && !dynamic_lights.world_sent)
+	{
+		xgpu_backend_dynamic_lights_world((const void *)dynamic_lights.world, dynamic_lights.world_count);
+		dynamic_lights.world_sent = TRUE;
+	}
 	for (index = 0; index < count; index++)
 	{
 		const struct halo_dynamic_light *light = &lights[index];

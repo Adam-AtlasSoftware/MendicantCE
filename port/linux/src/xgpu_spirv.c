@@ -55,6 +55,7 @@ enum
 	OP_F_ORD_EQUAL = 180, OP_F_UNORD_NOT_EQUAL = 183, OP_F_ORD_LESS_THAN = 184, OP_F_ORD_GREATER_THAN = 186,
 	OP_F_ORD_LESS_THAN_EQUAL = 188, OP_F_ORD_GREATER_THAN_EQUAL = 190,
 	OP_SHIFT_RIGHT_ARITHMETIC = 195, OP_SHIFT_LEFT_LOGICAL = 196, OP_BITWISE_AND = 199,
+	OP_ANY = 154, OP_U_GREATER_THAN_EQUAL = 174, OP_U_LESS_THAN = 176, OP_SHIFT_RIGHT_LOGICAL = 194,
 	OP_GROUP_NON_UNIFORM_BITWISE_OR = 359,
 	OP_DPDX = 207, OP_DPDY = 208, OP_FWIDTH = 209, OP_ATOMIC_I_ADD = 234,
 	OP_LOOP_MERGE = 246, OP_SELECTION_MERGE = 247, OP_LABEL = 248, OP_BRANCH = 249, OP_BRANCH_CONDITIONAL = 250,
@@ -66,7 +67,7 @@ enum
 {
 	GLSL_F_ABS = 4, GLSL_F_SIGN = 6, GLSL_ACOS = 17, GLSL_ATAN = 18, GLSL_ATAN2 = 25, GLSL_FLOOR = 8, GLSL_FRACT = 10, GLSL_POW = 26, GLSL_EXP = 27, GLSL_EXP2 = 29,
 	GLSL_LOG2 = 30, GLSL_SQRT = 31, GLSL_INVERSE_SQRT = 32, GLSL_F_MIN = 37, GLSL_F_MAX = 40, GLSL_F_CLAMP = 43,
-	GLSL_S_CLAMP = 45, GLSL_F_MIX = 46, GLSL_SMOOTH_STEP = 49, GLSL_LENGTH = 66, GLSL_CROSS = 68, GLSL_NORMALIZE = 69, GLSL_FIND_I_LSB = 73,
+	GLSL_U_MIN = 38, GLSL_S_CLAMP = 45, GLSL_F_MIX = 46, GLSL_SMOOTH_STEP = 49, GLSL_LENGTH = 66, GLSL_CROSS = 68, GLSL_NORMALIZE = 69, GLSL_FIND_I_LSB = 73,
 };
 
 enum
@@ -3559,6 +3560,142 @@ static unsigned int dynamic_light(struct module *m, int member, unsigned int ind
 	return load(m, m->t_v4, pointer);
 }
 
+/* a texel of the cells' texture (xgpu.h): the cells, the clusters' masks at
+z = GRID_Z, the world past them */
+static unsigned int dynamic_light_texel(struct module *m, unsigned int coordinates)
+{
+	unsigned int sampled = load(m, type_sampled_image(m, DIM_3D, FALSE, TRUE, TRUE), m->dynamic_light_cells);
+	unsigned int image = op(m, OP_IMAGE, type_sampled_image(m, DIM_3D, FALSE, TRUE, FALSE), 1, &sampled);
+	unsigned int operands[4];
+
+	operands[0] = image;
+	operands[1] = coordinates;
+	operands[2] = IMAGE_OPERANDS_LOD;
+	operands[3] = constant_int(m, 0);
+	return op(m, OP_IMAGE_FETCH, m->t_uv4, 4, operands);
+}
+
+/* the world's texel t (a uint, at most its last: xgpu.h) */
+static unsigned int dynamic_light_world_texel(struct module *m, unsigned int t)
+{
+	unsigned int x, y, z;
+
+	t = ext2(m, GLSL_U_MIN, m->t_uint, t, constant_uint(m, XGPU_DYNAMIC_LIGHTS_WORLD_TEXELS - 1));
+	x = op2(m, OP_BITWISE_AND, m->t_uint, t, constant_uint(m, 31));
+	y = op2(m, OP_BITWISE_AND, m->t_uint, op2(m, OP_SHIFT_RIGHT_LOGICAL, m->t_uint, t, constant_uint(m, 5)),
+		constant_uint(m, 31));
+	z = op2(m, OP_I_ADD, m->t_uint, op2(m, OP_SHIFT_RIGHT_LOGICAL, m->t_uint, t, constant_uint(m, 10)),
+		constant_uint(m, XGPU_DYNAMIC_LIGHTS_GRID_Z + 1));
+	return dynamic_light_texel(m, op1(m, OP_BITCAST, m->t_iv3,
+		op(m, OP_COMPOSITE_CONSTRUCT, type_vector(m, m->t_uint, 3), 3, (unsigned int[]){ x, y, z })));
+}
+
+static unsigned int uextract(struct module *m, unsigned int vector, unsigned int component)
+{
+	return op2(m, OP_COMPOSITE_EXTRACT, m->t_uint, vector, component);
+}
+
+/* the cell's lights that reach the point q's cluster (xgpu.h): its
+cluster's mask, the world's BSP walked down from its root to q's leaf, in a
+loop of SPIR-V's structure; every light where the world has no nodes, or
+puts q in no cluster. Only where the cell has a light: mask is the cell's */
+static unsigned int dynamic_light_cluster_mask(struct module *m, struct pixel_state *state, unsigned int mask,
+	unsigned int q)
+{
+	unsigned int all = constant_uint(m, 0xffffffffu), top = constant_uint(m, 0x80000000u);
+	unsigned int header = dynamic_light_world_texel(m, constant_uint(m, 0));
+	unsigned int node_count = uextract(m, header, 0), plane_base = uextract(m, header, 1);
+	unsigned int leaf_base = uextract(m, header, 2), leaf_count = uextract(m, header, 3);
+	unsigned int mask_variable = local(m, &state->locals, m->t_uv4);
+	unsigned int node_variable = local(m, &state->locals, m->t_uint);
+	unsigned int leaf_variable = local(m, &state->locals, m->t_uint);
+	unsigned int depth_variable = local(m, &state->locals, m->t_int);
+	unsigned int walk, after, loop_header, loop_condition, loop_body, loop_continue, loop_merge;
+	unsigned int node, entry, plane, distance, child, is_leaf, bad, done, leaf, word, cluster, found, cluster_mask;
+	unsigned int any_light, condition;
+
+	store(m, mask_variable, mask);
+	any_light = op1(m, OP_ANY, m->t_bool, op2(m, OP_I_NOT_EQUAL, m->t_bv4, mask,
+		op(m, OP_COMPOSITE_CONSTRUCT, m->t_uv4, 4, (unsigned int[]){ constant_uint(m, 0), constant_uint(m, 0),
+		constant_uint(m, 0), constant_uint(m, 0) })));
+	condition = op2(m, OP_LOGICAL_AND, m->t_bool, any_light, op2(m, OP_I_NOT_EQUAL, m->t_bool, node_count,
+		constant_uint(m, 0)));
+	walk = id_new(m);
+	after = id_new(m);
+	selection_merge(m, after);
+	branch_conditional(m, condition, walk, after);
+	label_at(m, walk);
+	store(m, node_variable, constant_uint(m, 0));
+	store(m, leaf_variable, all);
+	store(m, depth_variable, constant_int(m, 0));
+
+	loop_header = id_new(m);
+	loop_condition = id_new(m);
+	loop_body = id_new(m);
+	loop_continue = id_new(m);
+	loop_merge = id_new(m);
+	branch(m, loop_header);
+	label_at(m, loop_header);
+	{
+		unsigned int operands[3] = { loop_merge, loop_continue, 0 };
+
+		op_void(m, OP_LOOP_MERGE, 3, operands);
+	}
+	branch(m, loop_condition);
+	label_at(m, loop_condition);
+	/* while (depth < DEPTH && node < node_count) */
+	node = load(m, m->t_uint, node_variable);
+	branch_conditional(m, op2(m, OP_LOGICAL_AND, m->t_bool,
+		op2(m, OP_S_LESS_THAN, m->t_bool, load(m, m->t_int, depth_variable), constant_int(m, XGPU_DYNAMIC_LIGHTS_WORLD_DEPTH)),
+		op2(m, OP_U_LESS_THAN, m->t_bool, node, node_count)), loop_body, loop_merge);
+	label_at(m, loop_body);
+	/* entry = world[1 + node]; plane = world[plane_base + entry.x];
+	child = dot(plane.xyz, q) - plane.w >= 0.0 ? entry.z : entry.y */
+	entry = dynamic_light_world_texel(m, op2(m, OP_I_ADD, m->t_uint, node, constant_uint(m, 1)));
+	bad = op2(m, OP_U_GREATER_THAN_EQUAL, m->t_bool, uextract(m, entry, 0),
+		op2(m, OP_I_SUB, m->t_uint, leaf_base, plane_base));
+	plane = op1(m, OP_BITCAST, m->t_v4, dynamic_light_world_texel(m, op2(m, OP_I_ADD, m->t_uint, plane_base,
+		uextract(m, entry, 0))));
+	distance = fsub(m, 1, fdot(m, xyz(m, plane), q), extract(m, plane, 3));
+	child = op(m, OP_SELECT, m->t_uint, 3, (unsigned int[]){ compare(m, OP_F_ORD_GREATER_THAN_EQUAL, distance,
+		constant_float(m, 0.0f)), uextract(m, entry, 2), uextract(m, entry, 1) });
+	is_leaf = op2(m, OP_I_NOT_EQUAL, m->t_bool, op2(m, OP_BITWISE_AND, m->t_uint, child, top), constant_uint(m, 0));
+	/* a leaf (or a bad node: none) ends the walk */
+	store(m, leaf_variable, op(m, OP_SELECT, m->t_uint, 3, (unsigned int[]){ bad, all,
+		op(m, OP_SELECT, m->t_uint, 3, (unsigned int[]){ is_leaf, child, all }) }));
+	done = op2(m, OP_LOGICAL_OR, m->t_bool, bad, is_leaf);
+	store(m, node_variable, op(m, OP_SELECT, m->t_uint, 3, (unsigned int[]){ done, all, child }));
+	branch(m, loop_continue);
+	label_at(m, loop_continue);
+	store(m, depth_variable, op2(m, OP_I_ADD, m->t_int, load(m, m->t_int, depth_variable), constant_int(m, 1)));
+	branch(m, loop_header);
+	label_at(m, loop_merge);
+
+	/* the leaf's cluster, and its mask */
+	leaf = load(m, m->t_uint, leaf_variable);
+	found = op2(m, OP_LOGICAL_AND, m->t_bool, op2(m, OP_I_NOT_EQUAL, m->t_bool, leaf, all),
+		op2(m, OP_U_LESS_THAN, m->t_bool, op2(m, OP_BITWISE_AND, m->t_uint, leaf, constant_uint(m, 0x7fffffffu)),
+		leaf_count));
+	leaf = op2(m, OP_BITWISE_AND, m->t_uint, leaf, constant_uint(m, 0x7fffffffu));
+	word = dynamic_light_world_texel(m, op2(m, OP_I_ADD, m->t_uint, leaf_base,
+		op2(m, OP_SHIFT_RIGHT_LOGICAL, m->t_uint, leaf, constant_uint(m, 2))));
+	cluster = op2(m, OP_VECTOR_EXTRACT_DYNAMIC, m->t_uint, word, op2(m, OP_BITWISE_AND, m->t_uint, leaf,
+		constant_uint(m, 3)));
+	found = op2(m, OP_LOGICAL_AND, m->t_bool, found, op2(m, OP_U_LESS_THAN, m->t_bool, cluster,
+		constant_uint(m, XGPU_DYNAMIC_LIGHTS_CLUSTERS)));
+	cluster = ext2(m, GLSL_U_MIN, m->t_uint, cluster, constant_uint(m, XGPU_DYNAMIC_LIGHTS_CLUSTERS - 1));
+	cluster_mask = dynamic_light_texel(m, op1(m, OP_BITCAST, m->t_iv3, op(m, OP_COMPOSITE_CONSTRUCT,
+		type_vector(m, m->t_uint, 3), 3, (unsigned int[]){ op2(m, OP_BITWISE_AND, m->t_uint, cluster, constant_uint(m, 31)),
+		op2(m, OP_SHIFT_RIGHT_LOGICAL, m->t_uint, cluster, constant_uint(m, 5)),
+		constant_uint(m, XGPU_DYNAMIC_LIGHTS_GRID_Z) })));
+	store(m, mask_variable, op(m, OP_SELECT, m->t_uv4, 3, (unsigned int[]){
+		op(m, OP_COMPOSITE_CONSTRUCT, m->t_bv4, 4, (unsigned int[]){ found, found, found, found }),
+		op2(m, OP_BITWISE_AND, m->t_uv4, mask, cluster_mask), mask }));
+	branch(m, after);
+	label_at(m, after);
+	return load(m, m->t_uv4, mask_variable);
+}
+
 /* dynamic_light_sum(p, n, surface_normal, environment): the lights of the
 pixel's cell, summed (a model's but those its object's own that do not light
 it, its model_lights[XGPU_MODEL_LIGHT_OWN_LIGHTS]); its loops are SPIR-V's structured loops, its values
@@ -3585,16 +3722,11 @@ static unsigned int dynamic_light_sum(struct module *m, struct pixel_state *stat
 		op(m, OP_COMPOSITE_CONSTRUCT, m->t_iv3, 3, (unsigned int[]){ constant_int(m, 0), constant_int(m, 0), constant_int(m, 0) }),
 		op(m, OP_COMPOSITE_CONSTRUCT, m->t_iv3, 3, (unsigned int[]){ constant_int(m, XGPU_DYNAMIC_LIGHTS_GRID_X - 1),
 		constant_int(m, XGPU_DYNAMIC_LIGHTS_GRID_Y - 1), constant_int(m, XGPU_DYNAMIC_LIGHTS_GRID_Z - 1) }));
-	{
-		unsigned int sampled = load(m, type_sampled_image(m, DIM_3D, FALSE, TRUE, TRUE), m->dynamic_light_cells);
-		unsigned int image = op(m, OP_IMAGE, type_sampled_image(m, DIM_3D, FALSE, TRUE, FALSE), 1, &sampled);
-
-		operands[0] = image;
-		operands[1] = cell_index;
-		operands[2] = IMAGE_OPERANDS_LOD;
-		operands[3] = constant_int(m, 0);
-		mask = op(m, OP_IMAGE_FETCH, m->t_uv4, 4, operands);
-	}
+	mask = dynamic_light_texel(m, cell_index);
+	/* (those of the cell's lights that reach the pixel's cluster, its point
+	a little off its surface: xgpu.h) */
+	mask = dynamic_light_cluster_mask(m, state, mask, fadd(m, 3, p, fscale(m, 3, surface_normal,
+		constant_float(m, XGPU_DYNAMIC_LIGHTS_CLUSTER_OFFSET))));
 	grid2 = dynamic_light(m, 0, constant_int(m, 2));
 	/* (a model's: the lights it is not lit by, xgpu.h) */
 	if (!environment)

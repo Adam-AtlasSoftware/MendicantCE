@@ -171,6 +171,8 @@ struct host_render_backend
 	int (*dynamic_lights_prepare)(void *context);
 	void (*dynamic_lights_upload)(void *context, const struct xgpu_stream_dynamic_lights_upload *record);
 	void (*dynamic_lights_halos)(void *context, const struct xgpu_stream_dynamic_lights_halos *record);
+	/* the world (xgpu.h), checked: its texels inside the stream */
+	void (*dynamic_lights_world)(void *context, const struct xgpu_stream_dynamic_lights_world *record);
 
 	int (*vr_supported)(void *context);
 	/* PREPARED: waits until the shaders and pipelines of the draws so far are
