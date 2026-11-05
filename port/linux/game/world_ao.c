@@ -263,6 +263,34 @@ static int world_ao_test_window(float const camera_position[3])
 	return 1;
 }
 
+/* HALO_WORLD_AO_COUNTS (measuring): every 600 windows, the windows'
+shapes and the dynamic objects' of them, and the lightmap pages drawn with
+a layer and without, a window's mean */
+static struct
+{
+	int wanted;
+	long windows, shapes, dynamic, paged, unpaged;
+} world_ao_counts = { -1 };
+
+static void world_ao_counts_window(void)
+{
+	if (world_ao_counts.wanted < 0)
+		world_ao_counts.wanted = getenv("HALO_WORLD_AO_COUNTS") != NULL;
+	if (!world_ao_counts.wanted)
+		return;
+	world_ao_counts.windows++;
+	world_ao_counts.shapes += world_ao.count;
+	world_ao_counts.dynamic += world_ao.dynamic_count;
+	if (world_ao_counts.windows >= 600)
+	{
+		printf("world ao: a window's %.1f shapes, %.1f of them dynamic; %.1f lightmap pages with a layer, %.1f "
+			"without\n", (double)world_ao_counts.shapes / 600.0, (double)world_ao_counts.dynamic / 600.0,
+			(double)world_ao_counts.paged / 600.0, (double)world_ao_counts.unpaged / 600.0);
+		fflush(stdout);
+		memset(&world_ao_counts.windows, 0, sizeof(world_ao_counts) - sizeof(world_ao_counts.wanted));
+	}
+}
+
 /* ---------- a window */
 
 /* the block's field: the volume's place (without one, a stand-in's) */
@@ -385,34 +413,6 @@ void world_ao_object_begin(long object_index)
 			reference = world_ao_reference(world_ao.volume, instance->lighting_point);
 	}
 	halo_world_ao_object(owner, reference);
-}
-
-/* HALO_WORLD_AO_COUNTS (measuring): every 600 windows, the windows'
-shapes and the dynamic objects' of them, and the lightmap pages drawn with
-a layer and without, a window's mean */
-static struct
-{
-	int wanted;
-	long windows, shapes, dynamic, paged, unpaged;
-} world_ao_counts = { -1 };
-
-static void world_ao_counts_window(void)
-{
-	if (world_ao_counts.wanted < 0)
-		world_ao_counts.wanted = getenv("HALO_WORLD_AO_COUNTS") != NULL;
-	if (!world_ao_counts.wanted)
-		return;
-	world_ao_counts.windows++;
-	world_ao_counts.shapes += world_ao.count;
-	world_ao_counts.dynamic += world_ao.dynamic_count;
-	if (world_ao_counts.windows >= 600)
-	{
-		printf("world ao: a window's %.1f shapes, %.1f of them dynamic; %.1f lightmap pages with a layer, %.1f "
-			"without\n", (double)world_ao_counts.shapes / 600.0, (double)world_ao_counts.dynamic / 600.0,
-			(double)world_ao_counts.paged / 600.0, (double)world_ao_counts.unpaged / 600.0);
-		fflush(stdout);
-		memset(&world_ao_counts.windows, 0, sizeof(world_ao_counts) - sizeof(world_ao_counts.wanted));
-	}
 }
 
 void world_ao_lightmap_begin(void const *lightmap_bitmap)
