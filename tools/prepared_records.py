@@ -12,6 +12,12 @@ port/linux/src/prepared_shipped.h), which the builds put beside the game as they
 there removed; and manifest.json lists each one's map, checksum, key, sizes and offset with the records' form (render_prepared.c's PREPARED_VERSION and the journal's,
 d3d8_device.c's halo_gpu_journal_form). The run's folder (about 3 GB of maps decompressed) is deleted as it ends.
 
+The same run records the renderer's manifest (debug.render_manifest: port/assets/render/manifest.txt, made of
+the run's recording alone), every draw of it, the main menu's after the pass too, as no setting changes it, with
+what the settings derive it from (xgpu_manifest.h): the Mac's and iOS's shader libraries are made from it under
+every setting (tools/macos_shaders.py), so that they have each shader the records' draws need, whatever the
+settings; tools/test_render_manifest.py checks that it holds every record's draw.
+
 A change that makes the records another form (PREPARED_VERSION, JOURNAL_FORM or the journal's state) fails
 tools/harness/tests/test_prepared_shipped.py until this is run again and its records committed. A record holds no
 map data: render states, textures by tag and bitmap index, mirror pages and shader ids.
@@ -42,6 +48,9 @@ MAGIC = 0x50314F48
 PACK_NAME = "prepared.records"
 PACK_MAGIC = 0x5331484F  # "OH1S"
 PACK_FORM = 1
+# the renderer's manifest, recorded in the same run (port/assets/render/README.md)
+RENDER_MANIFEST = ROOT / "port/assets/render/manifest.txt"
+MENU_SECONDS = 10
 
 
 def run_game(halo: Path, maps: Path, work: Path, seconds: int) -> Path:
@@ -56,7 +65,9 @@ def run_game(halo: Path, maps: Path, work: Path, seconds: int) -> Path:
                        HALO_VULKAN_PIPELINE_CACHE=str(run / "save" / "vulkan.bin"),
                        HALO_NET_ONLINE="false", HALO_NET_PORT="5191", HALO_NET_BROADCAST="127.255.255.255",
                        HALO_UPDATE_ANSWER="no", HALO_NO_CLIPBOARD="1", HALO_DEBUG_MENU_PICTURES="1",
-                       HALO_FIXED_STEP="1", HALO_PREPARED_RECORDS="1", HALO_MAP_CACHE_MEGABYTES="3500",
+                       HALO_FIXED_STEP="1", HALO_PREPARED_RECORDS="1", HALO_SHIPPED_RECORDS="0",
+                       HALO_MAP_CACHE_MEGABYTES="3500",
+                       HALO_RENDER_MANIFEST=str(run / "manifest.txt"),
                        SDL_VIDEO_DRIVER="offscreen", SDL_AUDIO_DRIVER="dummy")
     log = run / "stdout.txt"
     with open(log, "w") as output:
@@ -67,6 +78,8 @@ def run_game(halo: Path, maps: Path, work: Path, seconds: int) -> Path:
             while game.poll() is None and time.monotonic() - started < seconds:
                 time.sleep(1)
                 if len(RECORDED.findall(log.read_text(errors="replace"))) >= STOCK_MAP_COUNT:
+                    # (the main menu drawn a while, for the manifest)
+                    time.sleep(MENU_SECONDS)
                     break
                 debug = run / "debug.txt"
                 if debug.is_file() and "EXCEPTION" in debug.read_text(errors="replace"):
@@ -140,12 +153,22 @@ def collect(run: Path, out: Path) -> dict:
     return manifest
 
 
+def render_manifest(run: Path, out: Path) -> None:
+    """the run's recording of the renderer's manifest, merged alone into out"""
+    recording = run / "manifest.txt"
+    if not recording.is_file():
+        sys.exit(f"{recording}: the renderer's manifest was not recorded")
+    subprocess.run([sys.executable, str(ROOT / "tools/render_manifest.py"), "merge", "--replace", str(out),
+                    str(recording)], check=True)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--maps", required=True, type=Path, help="the stock Xbox maps' folder (a10.map, ui.map...)")
     parser.add_argument("--halo", type=Path, default=ROOT / "build/linux_x86_64/halo")
     parser.add_argument("--work", type=Path, help="where the game runs (deleted after; default: a temporary folder)")
     parser.add_argument("--out", type=Path, default=OUT)
+    parser.add_argument("--render-manifest", type=Path, default=RENDER_MANIFEST)
     parser.add_argument("--seconds", type=int, default=600)
     arguments = parser.parse_args()
     if not (arguments.maps / "ui.map").is_file():
@@ -154,6 +177,7 @@ def main() -> None:
     try:
         run = run_game(arguments.halo, arguments.maps, work, arguments.seconds)
         manifest = collect(run, arguments.out)
+        render_manifest(run, arguments.render_manifest)
     finally:
         shutil.rmtree(work, ignore_errors=True)
     size = sum(record["size"] for record in manifest["records"])

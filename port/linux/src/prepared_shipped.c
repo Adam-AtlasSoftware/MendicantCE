@@ -42,15 +42,23 @@ static unsigned int shipped_word(size_t offset)
 }
 
 /* the file read, once: beside config.toml, else the Linux release's
-(share/openh1, install_layout.c), as brokers.txt is found (p2p_signal.c) */
+(share/openh1, install_layout.c), as brokers.txt is found (p2p_signal.c);
+none with HALO_SHIPPED_RECORDS=0 (tools/prepared_records.py, which makes
+them again: each map walked and recorded) */
 static void shipped_read(void)
 {
+	const char *setting = getenv("HALO_SHIPPED_RECORDS");
 	char path[1024];
 	size_t length;
 
 	if (shipped.read)
 		return;
 	shipped.read = 1;
+	if (setting && !strcmp(setting, "0"))
+	{
+		platform_log("render: the shipped records left out (HALO_SHIPPED_RECORDS=0): each map's first load is walked");
+		return;
+	}
 	config_folder(path, sizeof(path));
 	length = strlen(path);
 	snprintf(path + length, sizeof(path) - length, "%s", PREPARED_SHIPPED_FILE);
