@@ -25,6 +25,15 @@ or takes it over if it is the map wanted (the copy goes on, at the
 loading's priority); a copy ended unfinished is not used (the cache file's
 header is written last). A map whose copy fails is not tried again in the
 run. Once nothing is left to copy, it looks again when another map loads.
+
+It copies only while game.map_cache_megabytes is 0 (Settings' MAP STORAGE:
+INSTANT LOAD TIMES, every stock map kept). With a budget set (DISK SPACE
+SAVER, the Xbox's 730 MB) the player has chosen the disk over the loads: a
+map is copied as it is played, as on the Xbox, and none ahead. As the
+setting changes, the cache's budget is read again: a smaller one ends the
+copy ahead and gives up maps now, the least useful first, never the open
+map (cache_files_budget_update); back at INSTANT LOAD TIMES, every stock map
+given up is copied again, as above.
 */
 
 #include "cseries.h"
@@ -34,6 +43,11 @@ run. Once nothing is left to copy, it looks again when another map loads.
 
 #include <stdio.h>
 #include <string.h>
+
+/* (port/linux/src/port_config.c's) */
+long config_integer(const char *name);
+unsigned long config_changes(void);
+void platform_log(char const *format, ...);
 
 /* ---------- constants */
 
@@ -75,6 +89,11 @@ static struct
 	long settled_frames;
 	/* nothing was left to copy: looked for again once another map loads */
 	boolean idle;
+	/* game.map_cache_megabytes as last read (0: every stock map kept,
+	copied ahead), at config_changes' count, once read */
+	boolean setting_read;
+	unsigned long setting_read_at;
+	long megabytes;
 } map_cache_prefill = { NONE };
 
 /* ---------- private code */
@@ -172,6 +191,45 @@ static boolean prefill_next(
 	return FALSE;
 }
 
+/* game.map_cache_megabytes followed (Settings' MAP STORAGE): as it changes,
+the copy ahead ended (its cache file, unfinished, is emptied), the cache's
+budget read again and maps given up now to fit it (cache_files_budget_update),
+and every map looked for again, those that failed too */
+static void prefill_follow_setting(
+	void)
+{
+	unsigned long changes = config_changes();
+	long megabytes;
+	unsigned long long given_up;
+
+	if (map_cache_prefill.setting_read && map_cache_prefill.setting_read_at == changes)
+		return;
+	megabytes = config_integer("game.map_cache_megabytes");
+	map_cache_prefill.setting_read_at = changes;
+	if (!map_cache_prefill.setting_read || megabytes == map_cache_prefill.megabytes)
+	{
+		map_cache_prefill.setting_read = TRUE;
+		map_cache_prefill.megabytes = megabytes;
+		return;
+	}
+	map_cache_prefill.megabytes = megabytes;
+	if (map_cache_prefill.copying != NONE)
+	{
+		if (cache_files_precache_in_progress() &&
+			cache_files_precache_is_copying_map(prefill_maps[map_cache_prefill.copying]))
+		{
+			cache_files_precache_map_queue_end();
+			cache_files_precache_map_end();
+		}
+		map_cache_prefill.copying = NONE;
+	}
+	given_up = cache_files_budget_update();
+	platform_log("map cache: game.map_cache_megabytes %ld: %llu MB given up", megabytes, given_up / (1024ULL * 1024ULL));
+	prefill_trace("map_cache.budget_changed", map_cache_prefill.loaded);
+	map_cache_prefill.idle = FALSE;
+	csmemset(map_cache_prefill.failed, 0, sizeof(map_cache_prefill.failed));
+}
+
 /* ---------- public code */
 
 void map_cache_prefill_update(
@@ -184,6 +242,10 @@ void map_cache_prefill_update(
 	/* (none in a copy of the game running beside the one that keeps the
 	cache: cache_slot_folder) */
 	if (!cache_slot_folder_keeps_cache())
+		return;
+	prefill_follow_setting();
+	/* (none ahead with a budget set: DISK SPACE SAVER) */
+	if (map_cache_prefill.megabytes > 0)
 		return;
 	/* the copy made ahead, finished or failed, ended (or ended by the game,
 	or taken over for its load) */

@@ -1124,10 +1124,12 @@ static const struct config_setting config_settings[] =
 		"saved films at 30, whatever this is." },
 	{ "game.map_cache_megabytes", _config_integer, "0", "HALO_MAP_CACHE_MEGABYTES", _environment_value, _platform_all,
 		"The most the decompressed maps the game keeps (the save folder's z/)\n"
-		"may take of the disk, in MB; 0: what the disk has room for, short of\n"
-		"the larger of 2 GB and a twentieth of the disk, which it always keeps\n"
-		"free. Every stock map takes 3.0 GB, unpacked once and then loaded\n"
-		"without waiting; at least 730 MB, the Xbox's six cache files'." },
+		"may take of the disk, in MB. 0 (Settings' Instant Load Times): every\n"
+		"stock map, 3.0 GB, unpacked once, in the background, and then loaded\n"
+		"without waiting, short of the larger of 2 GB and a twentieth of the\n"
+		"disk, which it always keeps free. 730 (Disk Space Saver): the Xbox's\n"
+		"six cache files' room, the least it takes; a map is unpacked as it is\n"
+		"played, and none ahead. A change gives maps up at once." },
 	{ "game.auto_pickup", _config_boolean, "false", "HALO_AUTO_PICKUP", _environment_value, _platform_all,
 		"Multiplayer: a player with an empty weapon slot picks up a weapon by\n"
 		"walking over it, as Custom Edition does. false (the Xbox's way): they\n"

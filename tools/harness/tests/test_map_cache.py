@@ -11,14 +11,16 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, constant, function, mutated, read, run  # noqa: E402
+from port_settings import MAP_STORAGE  # noqa: E402
 
 CACHE = "source/cache/cache_files_windows.c"
 BUDGET = "port/linux/src/map_unpack.c"
 FUNCTIONS = ["cached_map_type_maximum_size", "cached_map_files_bytes", "cached_map_file_resize", "cached_map_usefulness",
              "cached_map_files_least_useful", "cached_map_files_make_room", "cached_map_files_find_free_map",
-             "cache_files_map_prefill_size"]
+             "cache_files_map_prefill_size", "cached_map_files_fit_budget"]
 CASES = ["budget", "keeps_every_stock_map", "least_useful_first", "room_made", "open_map_kept", "copy_in_progress_kept",
-         "unfinished_copy", "ahead_never_gives_up", "type_limits"]
+         "unfinished_copy", "ahead_never_gives_up", "type_limits",
+         "storage_values", "shrink_on_switch", "rebuild_on_switch_back"]
 
 
 def generated(fault=None, budget_fault=None):
@@ -27,6 +29,10 @@ def generated(fault=None, budget_fault=None):
                           ("SOLO_CACHE_FILE_MAXIMUM_SIZE", "MAIN_MENU_CACHE_FILE_MAXIMUM_SIZE",
                            "MULTIPLAYER_CACHE_FILE_MAXIMUM_SIZE"))
     constants += f"\n#define NUMBER_OF_CACHED_MAP_FILES {constant(source, 'NUMBER_OF_CACHED_MAP_FILES')}\n"
+    # (Settings' MAP STORAGE's values: Instant Load Times, Disk Space Saver)
+    storage = dict((shown, value) for shown, value in MAP_STORAGE)
+    constants += f"#define INSTANT_MEGABYTES {storage['INSTANT LOAD TIMES']}\n"
+    constants += f"#define SAVER_MEGABYTES {storage['DISK SPACE SAVER']}\n"
     code = "\n".join(function(source, name) for name in FUNCTIONS)
     if fault:
         code = mutated(code, *fault)
@@ -65,6 +71,26 @@ def test_map_cache(case):
 ])
 def test_negative_control(fault, case):
     status, output = run(build("map_cache", generated(fault)), case)
+    assert status == CHECK_FAILED, output
+
+
+@pytest.mark.parametrize("fault,case", [
+    # the switch to Disk Space Saver gives nothing up
+    (("\tcached_map_files_make_room(NONE, 0);\n", ""), "shrink_on_switch"),
+    # the open map given up for the smaller budget
+    (("map_file_index == cache_file_globals.open_map_file_index ||", ""), "shrink_on_switch"),
+    # the most recently played given up first
+    (("played < best_played ||", "played > best_played ||"), "shrink_on_switch"),
+])
+def test_switch_negative_control(fault, case):
+    status, output = run(build("map_cache", generated(fault)), case)
+    assert status == CHECK_FAILED, output
+
+
+def test_storage_negative_control():
+    """Disk Space Saver's 730 MB taken as set, not the Xbox's room it is at least"""
+    status, output = run(build("map_cache", generated(budget_fault=("return budget > least ? budget : least;",
+                                                                     "return budget;"))), "storage_values")
     assert status == CHECK_FAILED, output
 
 

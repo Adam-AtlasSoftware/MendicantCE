@@ -19,7 +19,9 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/op_create_profile" x="28" y="166"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/op_profiles" x="28" y="187"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/section_5" x="28" y="214"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/op_about" x="28" y="234"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/op_map_cache_megabytes" x="28" y="234"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/section_7" x="28" y="261"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/op_about" x="28" y="281"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/button_bar" y="414"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/tabs" y="76"/>
 	</widget>
@@ -130,10 +132,24 @@
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/section_5_title" type="text" controller="1" width="344" height="18" wide="0 120" string_list="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/labels" string_index="5" color="#FF6F9CD0" text_x="2" text_y="1" font="ui\small_ui">
 	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/op_map_cache_megabytes" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/map_cache_megabytes_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/map_cache_megabytes_spinner" x="188"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/map_cache_megabytes_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/labels" string_index="6" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/map_cache_megabytes_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="INSTANT LOAD TIMES|DISK SPACE SAVER" setting="game.map_cache_megabytes" values="0|730" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+		<on event="created" run="port setting load"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/section_7" width="344" height="18" bitmap="main_menu/settings/section" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/section_7_title"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/section_7_title" type="text" controller="1" width="344" height="18" wide="0 120" string_list="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/labels" string_index="7" color="#FF6F9CD0" text_x="2" text_y="1" font="ui\small_ui">
+	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/op_about" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 120">
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/about_label"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/about_label" type="text" controller="1" width="332" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/labels" string_index="6" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/about_label" type="text" controller="1" width="332" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/labels" string_index="8" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
 	</widget>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/labels">
 		<string text="PLAYER"/>
@@ -141,16 +157,20 @@
 		<string text="COLOR ›"/>
 		<string text="CREATE PROFILE ›"/>
 		<string text="MANAGE PROFILES ›"/>
+		<string text="STORAGE"/>
+		<string text="MAP STORAGE"/>
 		<string text="ABOUT"/>
 		<string text="OPENH1"/>
 	</strings>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/help_strings">
-		<string text="Your player profiles, your name and color."/>
+		<string text="Your player profiles, your name and color, and the disk space the maps take."/>
 		<string text=""/>
 		<string text="The name the other players see, kept in your player profile."/>
 		<string text="Your armor's color in free-for-all multiplayer games, kept in your player profile."/>
 		<string text="Your name, color and controller layout are kept in a player profile. Make one to set them; the rest of Settings works without one."/>
 		<string text="Switch to another player profile, make a new one or delete one. Your changes so far are kept."/>
+		<string text=""/>
+		<string text="Instant Load Times keeps every map unpacked, about 3.0 GB, so no load waits to unpack one. Disk Space Saver keeps about 730 MB: 2.3 GB less, a small part of most drives. A map it has not kept takes a second or more longer to load.|Switching back to Instant unpacks every map again, in the background."/>
 		<string text=""/>
 		<string text="Halo: Combat Evolved, the Xbox game, on this computer, played from your own copy of its maps. OpenH1 is a free fan project."/>
 	</strings>
