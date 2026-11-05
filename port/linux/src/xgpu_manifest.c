@@ -88,7 +88,8 @@ static const struct field pixel_fields[] = {
 /* a d record's context (xgpu_manifest_context): cl the vertex program's
 lighting (lights, world's transform found), ct the targets (multisampled,
 screen colour), co the occlusion (pre-pass, ready), cd the dynamic lights
-(present, the lightmap pass), ch the HDR tag's (category, 3D view, kind) */
+(present, the lightmap pass), ch the HDR tag's (category, 3D view, kind),
+cw the world's occlusion's light (a recording without it: none) */
 static const struct field context_fields[] = {
 	CONTEXT_FIELD("cl", lights, 1, 2),
 	CONTEXT_FIELD("ct", multisampled, 1, 2),
@@ -96,6 +97,7 @@ static const struct field context_fields[] = {
 	CONTEXT_FIELD("cd", lights_present, 1, 2),
 	CONTEXT_FIELD("ch", hdr_category, 1, 2),
 	CONTEXT_FIELD("ck", hdr_kind, 2, 1),
+	CONTEXT_FIELD("cw", world, 1, 1),
 };
 
 #define FIELD_COUNT(fields) (sizeof(fields) / sizeof((fields)[0]))
@@ -826,7 +828,7 @@ static const int settings_samples[] = { 1, 2, 4, 8 };
 
 int xgpu_manifest_settings(int index, struct xgpu_manifest_settings *settings)
 {
-	if (index < 0 || index >= SETTINGS_SAMPLES * 16)
+	if (index < 0 || index >= SETTINGS_SAMPLES * 8 * XGPU_MANIFEST_OCCLUSIONS)
 		return 0;
 	memset(settings, 0, sizeof(*settings));
 	settings->samples = settings_samples[index % SETTINGS_SAMPLES];
@@ -834,7 +836,7 @@ int xgpu_manifest_settings(int index, struct xgpu_manifest_settings *settings)
 	settings->hdr = index & 1;
 	settings->per_pixel_lighting = (index >> 1) & 1;
 	settings->enhanced_lights = (index >> 2) & 1;
-	settings->ambient_occlusion = (index >> 3) & 1;
+	settings->ambient_occlusion = index >> 3;
 	return 1;
 }
 
@@ -875,9 +877,12 @@ int xgpu_manifest_derive(const struct xgpu_manifest_draw *draw, const struct xgp
 		facts.hdr = xgpu_hdr_classify(&tagged);
 	}
 	/* (as the journal's draws played with the occlusion on or off:
-	d3d8_device.c's journal_occlusion) */
-	facts.occlusion_prepass = settings->ambient_occlusion && context->occlusion_prepass;
-	facts.occlusion_ready = settings->ambient_occlusion && context->occlusion_ready;
+	d3d8_device.c's journal_occlusion; "world" has no pre-pass, and its
+	light where its window is given: d3d8_device.c's world_ao_key) */
+	facts.occlusion_prepass = settings->ambient_occlusion == XGPU_MANIFEST_OCCLUSION_SCREEN && context->occlusion_prepass;
+	facts.occlusion_ready = settings->ambient_occlusion == XGPU_MANIFEST_OCCLUSION_SCREEN && context->occlusion_ready;
+	facts.world = settings->ambient_occlusion == XGPU_MANIFEST_OCCLUSION_WORLD && context->world ?
+		XGPU_AMBIENT_OCCLUSION_WORLD : 0;
 	/* (d3d8_device.c's per_pixel_lighting, dynamic_lights_active: the
 	enhanced lights light each pixel whatever display.per_pixel_lighting
 	says) */

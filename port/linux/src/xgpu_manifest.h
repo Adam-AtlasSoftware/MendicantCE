@@ -46,7 +46,7 @@ elements read), or i=<registers written> for immediate mode; and its
 texture stages: t=<source>.<sampler type>.<address u>.<v>.<w>.<border
 colour>/... (four; the border colour only where an axis is clamped to it,
 else 0). A recording's draw is as no setting changes it, with its context
-(xgpu_manifest_context): cl, ct, co, cd, ch and ck.
+(xgpu_manifest_context): cl, ct, co, cd, ch, ck and cw.
 
 s: a vertex shader as the game creates it: its program and its
 declaration's layout (fields as a draw's of the same names), whichever
@@ -112,13 +112,17 @@ occlusion ready, as they would be with it on; the enhanced dynamic lights'
 present in the frame and the structure's lightmap pass drawing; the game's
 renderer's category (rasterizer.h's _rasterizer_profile_*, 255 outside one),
 the 3D view drawn and what the game's code says of the draw (xgpu_hdr.h's
-xgpu_hdr_draw, HALO_HDR_KIND_*). */
+xgpu_hdr_draw, HALO_HDR_KIND_*); display.ambient_occlusion "world"'s light
+for it, as it would be with "world" on (drawn among a window's opaque
+surfaces, not the first-person weapon, not lighting itself: d3d8_device.c's
+world_ao_applies). */
 struct xgpu_manifest_context
 {
 	uint8_t lights, world_found, multisampled, screen_colour;
 	uint8_t occlusion_prepass, occlusion_ready, lights_present, environment;
 	uint8_t hdr_category, hdr_view;
 	uint16_t hdr_kind;
+	uint8_t world, unused[3];
 };
 
 struct xgpu_manifest
@@ -207,11 +211,21 @@ int xgpu_draw_derive(const struct xgpu_draw_facts *facts, int unlit, struct xgpu
 /* the settings a manifest's draw is derived under: the targets' samples (1,
 or display.anti_aliasing's multisampling's), display.hdr on, each pixel lit
 (display.per_pixel_lighting), the enhanced dynamic lights, the ambient
-occlusion on; with the stream's backends' sample mask and dynamic lights
-(Metal's and Vulkan's) */
+occlusion (XGPU_MANIFEST_OCCLUSION_*); with the stream's backends' sample
+mask and dynamic lights (Metal's and Vulkan's) */
 struct xgpu_manifest_settings
 {
 	int samples, hdr, per_pixel_lighting, enhanced_lights, ambient_occlusion;
+};
+
+/* display.ambient_occlusion: off, found on the screen ("subtle", "strong"),
+found in the world ("world"; without debug.world_ao_view's light) */
+enum
+{
+	XGPU_MANIFEST_OCCLUSION_OFF,
+	XGPU_MANIFEST_OCCLUSION_SCREEN,
+	XGPU_MANIFEST_OCCLUSION_WORLD,
+	XGPU_MANIFEST_OCCLUSIONS
 };
 
 /* the index-th combination of every value of every setting that changes a

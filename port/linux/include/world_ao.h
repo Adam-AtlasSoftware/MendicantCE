@@ -37,6 +37,15 @@ enum
 	WORLD_AO_OWNER_UNLIT = -2,
 };
 
+/* the window's span as the game draws it (halo_world_ao_span): outside
+one, its opaque surfaces, the first-person weapon among them */
+enum
+{
+	WORLD_AO_SPAN_NONE,
+	WORLD_AO_SPAN_OPEN,
+	WORLD_AO_SPAN_FIRST_PERSON,
+};
+
 /* the shading's constants (docs/world-ao.md, "Shading"; the emitters' are
 xgpu.h's XGPU_WORLD_AO_*, which port/linux/src/d3d8_device.c checks are
 these): the cone's gain, its first step's least (world units) and taps; the
@@ -199,6 +208,12 @@ void halo_world_ao_window(float const field[2][4], float const parameters[2][4],
 without the occlusion) and its reference, the field's occlusion at its
 lighting point, which its ambient sample already holds (1: none) */
 void halo_world_ao_object(int owner, float reference);
+/* where the window's opaque surfaces are drawn (WORLD_AO_SPAN_*), whatever
+the setting and while a map's pipelines are prepared: the draws that take
+the world's light when it is on, which the renderer's manifest notes of
+each draw with it off too, so that the Mac's and iOS's shader libraries
+have the world's (xgpu_manifest.h's context) */
+void halo_world_ao_span(int span);
 /* a part of the field uploaded (WORLD_AO_FIELD_*: world_sdf.h's table of
 cells, 4 bytes each, or its atlas of bricks' voxels, signed bytes), slices
 z_first to z_first + z_count - 1 of a width * height * depth volume; width

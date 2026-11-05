@@ -387,3 +387,62 @@ def test_settings_have_every_multisampling():
     listed = manifest[manifest.index("static const int settings_samples[] = {"):]
     listed = {int(value) for value in re.findall(r"\d+", listed[:listed.index("}")])}
     assert samples and samples <= listed and 1 in listed, (samples, listed)
+
+
+WORLD_DERIVER = r"""
+#include "xgpu_manifest.h"
+#include "xgpu.h"
+#include <stdio.h>
+#include <string.h>
+
+/* the committed manifest's draws under display.ambient_occlusion "world"
+(the records' other settings): how many take the world's light, with
+their contexts and with every context's world cleared */
+int main(int argc, char **argv)
+{
+	struct xgpu_manifest manifest;
+	struct xgpu_manifest_settings settings;
+	char error[256];
+	uint32_t index, world = 0, cleared = 0;
+
+	(void)argc;
+	if (!xgpu_manifest_read(argv[1], &manifest, error, sizeof(error)))
+	{
+		printf("error: %s\n", error);
+		return 1;
+	}
+	memset(&settings, 0, sizeof(settings));
+	settings.samples = 1;
+	settings.per_pixel_lighting = 1;
+	settings.enhanced_lights = 1;
+	settings.ambient_occlusion = XGPU_MANIFEST_OCCLUSION_WORLD;
+	for (index = 0; index < manifest.draw_count; index++)
+	{
+		struct xgpu_manifest_draw draw;
+		struct xgpu_manifest_context context = manifest.contexts[index];
+
+		xgpu_manifest_derive(&manifest.draws[index], &context, &settings, 0, &draw);
+		world += (draw.key.pixel.ambient_occlusion & XGPU_AMBIENT_OCCLUSION_WORLD) != 0;
+		context.world = 0;
+		xgpu_manifest_derive(&manifest.draws[index], &context, &settings, 0, &draw);
+		cleared += (draw.key.pixel.ambient_occlusion & XGPU_AMBIENT_OCCLUSION_WORLD) != 0;
+	}
+	printf("%u %u\n", world, cleared);
+	xgpu_manifest_free(&manifest);
+	return 0;
+}
+"""
+
+
+def test_manifest_holds_the_worlds_draws(tmp_path):
+    """the committed manifest notes which draws take display.ambient_occlusion
+    "world"'s light (its window's opaque surfaces, noted whatever the setting
+    it was recorded with), so that the Mac's and iOS's libraries, made under
+    every setting, have the world's shaders; none without that context"""
+    (tmp_path / "world.c").write_text(WORLD_DERIVER)
+    binary = compile_reader(tmp_path, tmp_path / "world.c", tmp_path / "world")
+    result = subprocess.run([str(binary), str(COMMITTED)], capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout
+    world, cleared = map(int, result.stdout.split())
+    assert world > 0, f"no draw of the committed manifest takes the world's light. {REMAKE}."
+    assert cleared == 0

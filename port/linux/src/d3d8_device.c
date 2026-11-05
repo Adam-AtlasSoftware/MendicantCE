@@ -347,17 +347,28 @@ static struct
 	int owner;
 	float reference;
 	BOOL failed;
-} world_ao = { FALSE, FALSE, WORLD_AO_OWNER_NONE, 1.0f, FALSE };
+	/* the window's span as the game draws it (WORLD_AO_SPAN_*:
+	halo_world_ao_span), whatever the setting and while a map's pipelines
+	are prepared; a record's draw's as it notes it, played back
+	(journal_restore) */
+	int span;
+} world_ao = { FALSE, FALSE, WORLD_AO_OWNER_NONE, 1.0f, FALSE, WORLD_AO_SPAN_NONE };
+
+/* the draw takes the world's light where its window is given: one of the
+window's opaque surfaces, not the first-person weapon, not lighting itself
+(the window's span alone, so that the renderer's manifest notes it with
+the setting off and in a map's preparation: manifest_note_basis) */
+static BOOL world_ao_applies(void)
+{
+	return world_ao.span == WORLD_AO_SPAN_OPEN && !(hdr.kind & HALO_HDR_KIND_SELF_ILLUMINATION);
+}
 
 /* a draw's pixel key's occlusion, for the light it multiplies, found in the
 world (0: none) */
 static unsigned char world_ao_key(int light)
 {
-	if (!world_ao.active || world_ao.failed || world_ao.owner == WORLD_AO_OWNER_UNLIT ||
-		(hdr.kind & HALO_HDR_KIND_SELF_ILLUMINATION))
-	{
+	if (!world_ao.active || world_ao.failed || !world_ao_applies())
 		return 0;
-	}
 	return (unsigned char)(light | XGPU_AMBIENT_OCCLUSION_WORLD | (world_ao.view ? XGPU_AMBIENT_OCCLUSION_WORLD_VIEW : 0));
 }
 
@@ -369,6 +380,11 @@ static void world_ao_fail(void)
 		platform_log("GPU: display.ambient_occlusion \"world\"'s shaders cannot be made here (refer to the shader log "
 			"above): drawn without it");
 	world_ao.failed = TRUE;
+}
+
+void halo_world_ao_span(int span)
+{
+	world_ao.span = span;
 }
 
 void halo_world_ao_window(float const field[2][4], float const parameters[2][4], float const (*proxies)[3][4],
@@ -3950,6 +3966,10 @@ static void manifest_note_basis(const struct vertex_shader_object *program, cons
 	context.hdr_category = (uint8_t)hdr.category;
 	context.hdr_view = hdr.view ? 1 : 0;
 	context.hdr_kind = (uint16_t)hdr.kind;
+	/* (display.ambient_occlusion "world"'s, as with it on: its window's
+	span as the game draws it, whatever the setting, as the journal notes
+	it) */
+	context.world = world_ao_applies() ? 1 : 0;
 	xgpu_manifest_note_basis(key, &context);
 }
 
@@ -6027,7 +6047,7 @@ struct journal_state
 	uint32_t vertex_shader, program, program_address, shader_constant_mode;
 	uint32_t streams[16][2];
 	uint32_t hdr_category, hdr_kind, hdr_view, occlusion_prepass, occlusion_ready;
-	uint32_t lights_environment, lights_count, halos_count, sky, visibility;
+	uint32_t lights_environment, lights_count, halos_count, sky, visibility, world_span;
 	uint32_t render_state[D3DRS_MAX];
 	uint32_t texture_state[D3DTSS_MAXSTAGES][D3DTSS_MAX];
 };
@@ -6173,7 +6193,7 @@ struct journal_saved
 	int hdr_category, hdr_kind;
 	BOOL hdr_view, occlusion_prepass, occlusion_ready, occlusion_noted_prepass, occlusion_noted_ready;
 	BOOL lights_environment, visibility;
-	int lights_count, halos_count;
+	int lights_count, halos_count, world_span;
 	unsigned long sky;
 };
 
@@ -6464,6 +6484,9 @@ static void journal_capture(struct journal_state *state)
 	state->halos_count = (uint32_t)dynamic_lights.halos.count;
 	state->sky = (uint32_t)preparation.sky;
 	state->visibility = (uint32_t)device.visibility_test_active;
+	/* (display.ambient_occlusion "world"'s window, whatever the setting: a
+	draw's context in a recording of the manifest, prepare_draw) */
+	state->world_span = (uint32_t)world_ao.span;
 	memcpy(state->render_state, D3D__RenderState, sizeof(state->render_state));
 	memcpy(state->texture_state, D3D__TextureState, sizeof(state->texture_state));
 }
@@ -6654,8 +6677,9 @@ unsigned int *halo_gpu_journal_take(unsigned int *count, unsigned int *unknown)
 
 /* the journal's form: a change to what an entry holds or how it is written
 makes it 2, 3 and so on; its state's size is in it as well (5: the pages'
-runs in JOURNAL_PAGE_UNIT's units, not the platform's pages) */
-#define JOURNAL_FORM 5
+runs in JOURNAL_PAGE_UNIT's units, not the platform's pages; 6: the world's
+window's span, world_span) */
+#define JOURNAL_FORM 6
 
 unsigned int halo_gpu_journal_form(void)
 {
@@ -6737,6 +6761,7 @@ static void journal_restore(const struct journal_state *state)
 	dynamic_lights.halos.count = (int)state->halos_count;
 	preparation.sky = state->sky;
 	device.visibility_test_active = state->visibility != 0;
+	world_ao.span = (int)state->world_span;
 }
 
 static void journal_play(unsigned long op, const struct journal_state *state)
@@ -6953,6 +6978,7 @@ int halo_gpu_journal_replay(const unsigned int *words, unsigned int count, const
 	saved.halos_count = dynamic_lights.halos.count;
 	saved.sky = preparation.sky;
 	saved.visibility = device.visibility_test_active;
+	saved.world_span = world_ao.span;
 
 	journal_recording = FALSE;
 	journal.bitmaps = bitmaps;
@@ -6995,6 +7021,7 @@ int halo_gpu_journal_replay(const unsigned int *words, unsigned int count, const
 	dynamic_lights.halos.count = saved.halos_count;
 	preparation.sky = saved.sky;
 	device.visibility_test_active = saved.visibility;
+	world_ao.span = saved.world_span;
 	journal.bitmaps = NULL;
 	xgpu_backend_invalidate();
 	*unknown = (unsigned int)journal.unknown;
