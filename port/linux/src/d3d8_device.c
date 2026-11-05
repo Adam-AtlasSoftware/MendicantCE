@@ -5794,7 +5794,7 @@ uploads the pages that hold it, whole (journal_read). */
 typedef char journal_words_are_dwords[sizeof(DWORD) == sizeof(uint32_t) ? 1 : -1];
 /* (the window's 4 KB pages, the contiguous allocator's on every platform:
 xbox_memory.c) */
-#define JOURNAL_PAGE_UNIT 0x1000UL
+#define JOURNAL_PAGE_UNIT 0x1000
 typedef char journal_unit_divides_pages[MIRROR_PAGE_SIZE % JOURNAL_PAGE_UNIT == 0 ? 1 : -1];
 
 enum

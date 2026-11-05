@@ -17,7 +17,7 @@ def generated(fault=None):
                        structure(device, 'journal_state'), structure(device, 'journal_reader')))
     types += '\n#define JOURNAL_STATE_WORDS (sizeof(struct journal_state) / sizeof(uint32_t))\n'
     types += '#define JOURNAL_SEEN_SLOTS %d\n' % constant(device, 'JOURNAL_SEEN_SLOTS')
-    types += '#define JOURNAL_PAGE_UNIT %#xUL\n' % constant(device, 'JOURNAL_PAGE_UNIT')
+    types += '#define JOURNAL_PAGE_UNIT %#x\n' % constant(device, 'JOURNAL_PAGE_UNIT')
     code = '\n'.join(function(device, name) for name in ('journal_reserve', 'journal_append', 'journal_runs',
                                                           'journal_read',
                                                           'journal_settings_blind_of', 'journal_occlusion'))
