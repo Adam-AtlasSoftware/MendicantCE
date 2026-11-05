@@ -32,6 +32,12 @@ static float mix(float a, float b, float t)
 
 float world_ao_field_occlusion(struct world_sdf_volume const *volume, float const point[3], float const normal[3])
 {
+	return world_ao_field_occlusion_from(volume, point, normal, 0.0f);
+}
+
+float world_ao_field_occlusion_from(struct world_sdf_volume const *volume, float const point[3], float const normal[3],
+	float own)
+{
 	float first, occlusion = 0.0f;
 	int tap, axis;
 
@@ -44,7 +50,7 @@ float world_ao_field_occlusion(struct world_sdf_volume const *volume, float cons
 
 		for (axis = 0; axis < 3; axis++)
 			at[axis] = point[axis] + normal[axis] * h;
-		occlusion += 1.0f / (float)(2 << tap) * saturate((h - world_sdf_sample(volume, at)) / h);
+		occlusion += 1.0f / (float)(2 << tap) * saturate((h - (world_sdf_sample(volume, at) - own)) / h);
 	}
 	return 1.0f - saturate(WORLD_AO_K * occlusion);
 }
@@ -291,12 +297,24 @@ float world_ao_occlusion(float const parameters[2][4], struct world_sdf_volume c
 			proxied *= scenery;
 		return mix(1.0f, proxied > WORLD_AO_FLOOR ? proxied : WORLD_AO_FLOOR, parameters[0][1]);
 	}
-	field = world_ao_field_occlusion(volume, point, normal);
+	/* (a static scenery placement's own draw, its reference negative: the
+	field holds its own geometry, so taken from the pixel's own depth in it,
+	where its surface is inside its collision (a canopy within its hull), and
+	relative to none) */
+	if (reference < 0.0f)
+	{
+		float inside = volume ? world_sdf_sample(volume, point) : 0.0f;
+
+		field = world_ao_field_occlusion_from(volume, point, normal, inside < 0.0f ? inside : 0.0f);
+		reference = 1.0f;
+	}
+	else
+	{
+		field = world_ao_field_occlusion(volume, point, normal);
+	}
 	field = mix(field, saturate(field / (reference > WORLD_AO_REFERENCE_LEAST ? reference : WORLD_AO_REFERENCE_LEAST)),
 		parameters[1][0]);
-	/* (a static scenery placement's own draw: none of the field, which holds
-	its own geometry) */
-	field = mix(1.0f, field, reference < 0.0f ? 0.0f : parameters[0][2]) * proxied;
+	field = mix(1.0f, field, parameters[0][2]) * proxied;
 	return mix(1.0f, field > WORLD_AO_FLOOR ? field : WORLD_AO_FLOOR, parameters[0][0]);
 }
 

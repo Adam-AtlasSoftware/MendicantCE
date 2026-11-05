@@ -420,7 +420,8 @@ void world_ao_object_begin(long object_index)
 			}
 		}
 		/* (a static scenery placement the field holds: its own geometry is in
-		the field, so it takes none of it, which a negative reference says) */
+		the field, which a negative reference says: the shaders take its taps
+		from the pixel's own depth in it) */
 		baked = world_ao.volume && world_ao.fade > 0.0f && world_proxies_source_baked(object_index);
 		instance = world_ao.volume && world_ao.fade > 0.0f && !baked ? world_scene_instance_find(object_index) : NULL;
 		if (instance)

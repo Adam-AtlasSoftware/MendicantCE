@@ -1818,14 +1818,14 @@ static void world_ao_functions(struct xgpu_text *text, int light)
 		"}\n"
 		/* A_sdf(p, n): the cone of taps along the normal */
 		"static inline float world_sdf_occlusion(constant xgpu_world_ao &w, texture3d<float> world_sdf,\n"
-		"\ttexture3d<float> world_sdf_table, float3 p, float3 n)\n"
+		"\ttexture3d<float> world_sdf_table, float3 p, float3 n, float own)\n"
 		"{\n"
 		"\tfloat first = max(1.0 / w.field[0].w, %.6f);\n"
 		"\tfloat occlusion = 0.0;\n"
 		"\tfor (int tap = 0; tap < %d; tap++)\n"
 		"\t{\n"
 		"\t\tfloat h = first * float(1 << tap);\n"
-		"\t\tfloat d = world_sdf_distance(w, world_sdf, world_sdf_table, p + n * h);\n"
+		"\t\tfloat d = world_sdf_distance(w, world_sdf, world_sdf_table, p + n * h) - own;\n"
 		"\t\tocclusion += (1.0 / float(2 << tap)) * saturate((h - d) / h);\n"
 		"\t}\n"
 		"\treturn 1.0 - saturate(%.6f * occlusion);\n"
@@ -1938,10 +1938,14 @@ static void world_ao_read(struct xgpu_text *text, const struct xgpu_pixel_progra
 			XGPU_WORLD_AO_FLOOR);
 	else
 		xgpu_text_append(text,
-			"\t\tfloat field = world_sdf_occlusion(world_ao, world_sdf, world_sdf_table, in.xWorldPosition, world_n);\n"
-			"\t\tfield = mix(field, saturate(field / max(u.world_ao.y, %.6f)), world_ao.parameters[1].x);\n"
-			"\t\tocclusion = mix(1.0, max(mix(1.0, field, u.world_ao.y < 0.0 ? 0.0 : world_ao.parameters[0].z) * proxies, %.6f),\n"
-			"\t\t\tworld_ao.parameters[0].x);\n",
+			/* (a negative reference, a static scenery placement's own draw: its
+			taps from the pixel's own depth in the field, relative to none) */
+			"\t\tbool baked = u.world_ao.y < 0.0;\n"
+			"\t\tfloat inside = min(world_sdf_distance(world_ao, world_sdf, world_sdf_table, in.xWorldPosition), 0.0);\n"
+			"\t\tfloat field = world_sdf_occlusion(world_ao, world_sdf, world_sdf_table, in.xWorldPosition, world_n,\n"
+			"\t\t\tbaked ? inside : 0.0);\n"
+			"\t\tfield = mix(field, saturate(field / max(baked ? 1.0 : u.world_ao.y, %.6f)), world_ao.parameters[1].x);\n"
+			"\t\tocclusion = mix(1.0, max(mix(1.0, field, world_ao.parameters[0].z) * proxies, %.6f), world_ao.parameters[0].x);\n",
 			XGPU_WORLD_AO_REFERENCE_LEAST, XGPU_WORLD_AO_FLOOR);
 	xgpu_text_append(text, "\t}\n");
 }

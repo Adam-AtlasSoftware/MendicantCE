@@ -123,8 +123,11 @@ int main(int argc, char **argv)
 			world_ao_proxies_occlusion(scene_proxies, limit < scene_proxy_count ? limit : scene_proxy_count, point, normal,
 			owner));
 		worst_product = difference > worst_product ? difference : worst_product;
-		difference = std::fabs(world_sdf_occlusion(block, field, table, p, n) -
-			world_ao_field_occlusion(&scene_volume, point, normal));
+		/* (from the pixel's own depth too, as a static placement's own draws) */
+		float own = index % 3 ? 0.0f : -0.4f;
+
+		difference = std::fabs(world_sdf_occlusion(block, field, table, p, n, own) -
+			world_ao_field_occlusion_from(&scene_volume, point, normal, own));
 		worst_field = difference > worst_field ? difference : worst_field;
 	}
 	printf("shapes %.3g reach %.3g proxies %.3g field %.3g\n", worst_shape, worst_reach, worst_product, worst_field);

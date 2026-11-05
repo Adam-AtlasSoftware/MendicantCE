@@ -2704,9 +2704,11 @@ static unsigned int world_sdf_distance(struct module *m, struct pixel_state *sta
 	return load(m, m->t_float, result);
 }
 
-/* A_sdf(p, n): the cone of taps along the normal (world_ao.c's
-world_ao_field_occlusion) */
-static unsigned int world_sdf_occlusion(struct module *m, struct pixel_state *state, unsigned int p, unsigned int n)
+/* A_sdf(p, n): the cone of taps along the normal, each tap's distance
+taken from own (0, or a static scenery placement's own draw's depth inside
+solid at the pixel: world_ao_shading.c's world_ao_field_occlusion_from) */
+static unsigned int world_sdf_occlusion(struct module *m, struct pixel_state *state, unsigned int p, unsigned int n,
+	unsigned int own)
 {
 	unsigned int field0 = world_ao_vector(m, 0, constant_int(m, 0)), field1 = world_ao_vector(m, 0, constant_int(m, 1));
 	unsigned int step = fmax_scalar(m, 1, fdiv(m, 1, constant_float(m, 1.0f), extract(m, field0, 3)), XGPU_WORLD_AO_STEP);
@@ -2716,7 +2718,7 @@ static unsigned int world_sdf_occlusion(struct module *m, struct pixel_state *st
 	for (tap = 0; tap < XGPU_WORLD_AO_TAPS; tap++)
 	{
 		unsigned int h = fmul(m, 1, step, constant_float(m, (float)(1 << tap)));
-		unsigned int d = world_sdf_distance(m, state, field0, field1, fadd(m, 3, p, fscale(m, 3, n, h)));
+		unsigned int d = fsub(m, 1, world_sdf_distance(m, state, field0, field1, fadd(m, 3, p, fscale(m, 3, n, h))), own);
 
 		occlusion = fadd(m, 1, occlusion, fmul(m, 1, constant_float(m, 1.0f / (float)(2 << tap)),
 			saturate(m, 1, fdiv(m, 1, fsub(m, 1, h, d), h))));
@@ -3366,14 +3368,22 @@ static unsigned int world_ao_read(struct module *m, struct pixel_state *state, i
 		return ext3(m, GLSL_F_MIX, m->t_float, constant_float(m, 1.0f), fmax_scalar(m, 1, proxies, XGPU_WORLD_AO_FLOOR),
 			extract(m, parameters0, 1));
 	}
-	field = world_sdf_occlusion(m, state, p, n);
-	relative = saturate(m, 1, fdiv(m, 1, field, fmax_scalar(m, 1, extract(m, object, 1), XGPU_WORLD_AO_REFERENCE_LEAST)));
+	/* (a negative reference, a static scenery placement's own draw: the
+	field holds its own geometry, so its taps are taken from the pixel's own
+	depth in it, relative to no reference) */
+	{
+		unsigned int baked = compare(m, OP_F_ORD_LESS_THAN, extract(m, object, 1), constant_float(m, 0.0f));
+		unsigned int field0 = world_ao_vector(m, 0, constant_int(m, 0)), field1 = world_ao_vector(m, 0, constant_int(m, 1));
+		unsigned int inside = ext2(m, GLSL_F_MIN, m->t_float, world_sdf_distance(m, state, field0, field1, p),
+			constant_float(m, 0.0f));
+		unsigned int reference = fselect(m, baked, constant_float(m, 1.0f), extract(m, object, 1));
+
+		field = world_sdf_occlusion(m, state, p, n, fselect(m, baked, inside, constant_float(m, 0.0f)));
+		relative = saturate(m, 1, fdiv(m, 1, field, fmax_scalar(m, 1, reference, XGPU_WORLD_AO_REFERENCE_LEAST)));
+	}
 	field = ext3(m, GLSL_F_MIX, m->t_float, field, relative, extract(m, parameters1, 0));
-	/* (a negative reference, a static scenery placement's own draw: none of
-	the field, which holds its own geometry) */
-	occlusion = fmul(m, 1, ext3(m, GLSL_F_MIX, m->t_float, constant_float(m, 1.0f), field,
-		fselect(m, compare(m, OP_F_ORD_LESS_THAN, extract(m, object, 1), constant_float(m, 0.0f)), constant_float(m, 0.0f),
-		extract(m, parameters0, 2))), proxies);
+	occlusion = fmul(m, 1, ext3(m, GLSL_F_MIX, m->t_float, constant_float(m, 1.0f), field, extract(m, parameters0, 2)),
+		proxies);
 	return ext3(m, GLSL_F_MIX, m->t_float, constant_float(m, 1.0f), fmax_scalar(m, 1, occlusion, XGPU_WORLD_AO_FLOOR),
 		extract(m, parameters0, 0));
 }
