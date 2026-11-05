@@ -135,6 +135,7 @@ static void bake_within(struct world_sdf_volume *volume, float const bounds[6],
 	unsigned long cells, cell;
 	signed char *bricks;
 
+	memset(&volume->scenery, 0, sizeof(volume->scenery));
 	memset(header, 0, sizeof(*header));
 	marks = world_sdf_plan(bounds, positions, triangle_count, header, NULL, NULL);
 	CHECK(marks, "planned");

@@ -19,7 +19,7 @@ CONTROLS = [
     # an object's slot taken from its shape's place, not its owner's slot
     ("owner = (int)world_ao.proxies[index].v[1][3];", "owner = (int)index;", "window"),
     # the reference found without the field faded in
-    ("instance = world_ao.volume && world_ao.fade > 0.0f && !baked ?", "instance = 1 ?", "window"),
+    ("instance = world_ao.volume && world_ao.fade > 0.0f && !baked ?", "instance = !baked ?", "window"),
     # the first-person weapon lit by it
     ("halo_world_ao_object(drawing ? WORLD_AO_OWNER_UNLIT : WORLD_AO_OWNER_NONE, 1.0f);",
      "halo_world_ao_object(WORLD_AO_OWNER_NONE, 1.0f);", "window"),
