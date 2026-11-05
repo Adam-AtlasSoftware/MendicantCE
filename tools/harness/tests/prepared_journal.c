@@ -1,6 +1,8 @@
 /* A map's preparation's record (port/linux/src/d3d8_device.c's journal,
 port/linux/game/render_prepared.c): the entries read back are the entries
 recorded, a repeat once, in their order, with the textures and pages between
+them; pages recorded under one platform's page size (4 KB, 16 KB on Apple's
+hardware) are played back under the other's as exactly the pages that hold
 them; malformed words are refused; a record whose draws the played back ones
 do not all have under its own derivation, or that is another form's or
 map's, is refused, and its key holds no setting; one record, made under any
@@ -49,6 +51,8 @@ static struct
 #define POOL 40
 #define ENTRIES 3000
 #define PAGE_COUNT 4096
+/* (the window's: platform.h's PLATFORM_CONTIGUOUS_SIZE) */
+#define WINDOW_SIZE 0x20000000UL
 
 static struct journal_state pool[POOL];
 static struct { unsigned long op; int state; } expected[ENTRIES];
@@ -102,7 +106,7 @@ static int read_back(struct journal_state *state)
 {
 	memset(state, 0, sizeof(*state));
 	read_count = textures_read_count = pages_read_count = 0;
-	return journal_read(journal.words, journal.count, state, PAGE_COUNT, &reader);
+	return journal_read(journal.words, journal.count, state, PAGE_COUNT * JOURNAL_PAGE_UNIT, JOURNAL_PAGE_UNIT, &reader);
 }
 
 /* states that differ in a few of their words, as one draw's from the next */
@@ -205,6 +209,120 @@ static void case_malformed(void)
 	CHECK(!read_back(&state), "pages past the mirror are refused");
 	journal.words[count - 1] = 101;
 	CHECK(read_back(&state), "the journal as recorded is read");
+}
+
+/* ---------- the pages, from one platform's page size to another's
+
+Pages set in a bitmap of one page size (journal_runs, as
+halo_gpu_journal_take writes them) and read back under another's must be
+given as exactly the pages of that size that share a byte with them, each
+once, in order: among them two runs of 4 KB pages in one 16 KB page, runs
+that start and end within a 16 KB page, and the high runs of a campaign
+map's (a10's, near 0x0E700000 into the window, where 4 KB pages' numbers are
+past the 16 KB pages' count), and the window's last page. */
+
+#define SIZES 2
+static const unsigned long page_sizes[SIZES] = { 0x1000, 0x4000 };
+static unsigned char written[WINDOW_SIZE / 0x1000 / 8], wanted[WINDOW_SIZE / 0x1000 / 8],
+	given[WINDOW_SIZE / 0x1000 / 8];
+static unsigned long given_end, given_runs;
+static int given_twice, given_backwards;
+
+static void page_set(unsigned char *pages, unsigned long page)
+{
+	pages[page >> 3] |= (unsigned char)(1u << (page & 7));
+}
+
+static int page_is(const unsigned char *pages, unsigned long page)
+{
+	return (pages[page >> 3] >> (page & 7)) & 1;
+}
+
+static void on_pages_given(unsigned long first, unsigned long end)
+{
+	unsigned long page;
+
+	if (first < given_end)
+		given_backwards = 1;
+	for (page = first; page < end; page++)
+	{
+		if (page_is(given, page))
+			given_twice = 1;
+		page_set(given, page);
+	}
+	given_end = end;
+	given_runs++;
+}
+
+static const struct journal_reader page_reader = { on_entry, on_texture, on_pages_given };
+
+static void case_pages(void)
+{
+	/* (in bytes into the window: [start, end) each) */
+	static const unsigned long runs[][2] = {
+		{ 0x0, 0x1000 }, { 0x2000, 0x3000 }, { 0x5000, 0x9000 }, { 0x13000, 0x20000 }, { 0x40000, 0x48000 },
+		{ 0x691000, 0x6A1000 }, { 0x0E6C0000, 0x0E6C7000 }, { 0x0E6F1000, 0x0E6F3000 }, { 0x0E7AE000, 0x0E7AF000 },
+		{ 0x1FFFF000, 0x20000000 },
+	};
+	int write, read, run;
+
+	for (write = 0; write < SIZES; write++)
+	{
+		unsigned long write_size = page_sizes[write];
+
+		for (read = 0; read < SIZES; read++)
+		{
+			unsigned long read_size = page_sizes[read], page;
+			struct journal_state state;
+
+			memset(written, 0, sizeof(written));
+			memset(wanted, 0, sizeof(wanted));
+			memset(given, 0, sizeof(given));
+			given_end = given_runs = 0;
+			given_twice = given_backwards = 0;
+			for (run = 0; run < (int)(sizeof(runs) / sizeof(runs[0])); run++)
+			{
+				for (page = runs[run][0] / write_size; page < (runs[run][1] + write_size - 1) / write_size; page++)
+					page_set(written, page);
+			}
+			for (page = 0; page < WINDOW_SIZE / write_size; page++)
+			{
+				unsigned long other;
+
+				if (!page_is(written, page))
+					continue;
+				for (other = page * write_size / read_size; other < ((page + 1) * write_size + read_size - 1) / read_size;
+					other++)
+					page_set(wanted, other);
+			}
+			memset(&journal, 0, sizeof(journal));
+			journal_runs(written, WINDOW_SIZE / write_size, write_size);
+			CHECK(!journal.failed, "room");
+			memset(&state, 0, sizeof(state));
+			CHECK(journal_read(journal.words, journal.count, &state, WINDOW_SIZE, read_size, &page_reader),
+				"written in %lu-byte pages, read in %lu-byte pages: refused as malformed", write_size, read_size);
+			CHECK(!memcmp(given, wanted, WINDOW_SIZE / read_size / 8), "written in %lu-byte pages, read in "
+				"%lu-byte pages: not the pages that hold them", write_size, read_size);
+			CHECK(!given_twice && !given_backwards, "written in %lu-byte pages, read in %lu-byte pages: a page given "
+				"twice or out of order", write_size, read_size);
+			CHECK(given_runs > 0, "no pages given");
+			free(journal.words);
+		}
+	}
+	/* (a run past the window, in units) */
+	memset(&journal, 0, sizeof(journal));
+	CHECK(journal_reserve(3), "room");
+	journal.words[journal.count++] = JOURNAL_PAGES | 1u << 8;
+	journal.words[journal.count++] = WINDOW_SIZE / JOURNAL_PAGE_UNIT - 1;
+	journal.words[journal.count++] = WINDOW_SIZE / JOURNAL_PAGE_UNIT + 1;
+	{
+		struct journal_state state;
+
+		memset(&state, 0, sizeof(state));
+		CHECK(!journal_read(journal.words, journal.count, &state, WINDOW_SIZE, 0x4000, &page_reader),
+			"a run past the window is refused");
+	}
+	free(journal.words);
 }
 
 static void case_missing(void)
@@ -444,6 +562,8 @@ int main(int argc, char **argv)
 		case_roundtrip();
 	else if (!strcmp(which, "malformed"))
 		case_malformed();
+	else if (!strcmp(which, "pages"))
+		case_pages();
 	else if (!strcmp(which, "missing"))
 		case_missing();
 	else if (!strcmp(which, "stale"))

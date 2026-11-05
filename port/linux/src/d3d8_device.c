@@ -5785,9 +5785,17 @@ The words: an entry's first, its type in the low 8 bits and in the high 24
 the count of its state's words that differ from the entry's before, a pair
 (the word's index, its value) each after it; a texture's, JOURNAL_TEXTURE,
 then its tag's index and the bitmap's; the pages', JOURNAL_PAGES and the
-count of runs, then each run's first page and the page past it. */
+count of runs, then each run's first unit and the unit past it. A unit is
+JOURNAL_PAGE_UNIT's bytes of the contiguous window, whatever the platform's
+mirror page (MIRROR_PAGE_SIZE: 16 KB on Apple's hardware, 4 KB elsewhere),
+so that a record made on one plays back on every other: played back, a run
+uploads the pages that hold it, whole (journal_read). */
 
 typedef char journal_words_are_dwords[sizeof(DWORD) == sizeof(uint32_t) ? 1 : -1];
+/* (the window's 4 KB pages, the contiguous allocator's on every platform:
+xbox_memory.c) */
+#define JOURNAL_PAGE_UNIT 0x1000UL
+typedef char journal_unit_divides_pages[MIRROR_PAGE_SIZE % JOURNAL_PAGE_UNIT == 0 ? 1 : -1];
 
 enum
 {
@@ -6396,9 +6404,36 @@ void halo_gpu_journal_texture(unsigned int tag_index, unsigned int bitmap_index)
 	journal.words[journal.count++] = bitmap_index;
 }
 
-unsigned int *halo_gpu_journal_take(unsigned int *count, unsigned int *unknown)
+/* the runs of the pages set in pages (page_count of page_size bytes each),
+appended in JOURNAL_PAGE_UNIT's units: JOURNAL_PAGES and their count, then
+each's first unit and the unit past it */
+static void journal_runs(const unsigned char *pages, unsigned long page_count, unsigned long page_size)
 {
 	unsigned long page, runs = 0, header;
+
+	if (!journal_reserve(1))
+		return;
+	header = journal.count++;
+	for (page = 0; page < page_count; page++)
+	{
+		unsigned long end;
+
+		if (!(pages[page >> 3] & (1u << (page & 7))))
+			continue;
+		for (end = page; end < page_count && (pages[end >> 3] & (1u << (end & 7))); end++)
+			;
+		if (!journal_reserve(2))
+			return;
+		journal.words[journal.count++] = (uint32_t)(page * (page_size / JOURNAL_PAGE_UNIT));
+		journal.words[journal.count++] = (uint32_t)(end * (page_size / JOURNAL_PAGE_UNIT));
+		runs++;
+		page = end;
+	}
+	journal.words[header] = JOURNAL_PAGES | (uint32_t)runs << 8;
+}
+
+unsigned int *halo_gpu_journal_take(unsigned int *count, unsigned int *unknown)
+{
 	uint32_t *words;
 
 	*count = 0;
@@ -6407,27 +6442,7 @@ unsigned int *halo_gpu_journal_take(unsigned int *count, unsigned int *unknown)
 		return NULL;
 	journal_recording = FALSE;
 	/* (the pages' runs, last) */
-	if (journal_reserve(1))
-	{
-		header = journal.count++;
-		for (page = 0; page < MIRROR_PAGE_COUNT; page++)
-		{
-			unsigned long end;
-
-			if (!(journal.pages[page >> 3] & (1u << (page & 7))))
-				continue;
-			for (end = page; end < MIRROR_PAGE_COUNT && (journal.pages[end >> 3] & (1u << (end & 7))); end++)
-				;
-			if (!journal_reserve(2))
-				break;
-			journal.words[journal.count++] = (uint32_t)page;
-			journal.words[journal.count++] = (uint32_t)end;
-			runs++;
-			page = end;
-		}
-		if (!journal.failed)
-			journal.words[header] = JOURNAL_PAGES | (uint32_t)runs << 8;
-	}
+	journal_runs(journal.pages, MIRROR_PAGE_COUNT, MIRROR_PAGE_SIZE);
 	*unknown = (unsigned int)journal.unknown;
 	if (journal.failed)
 	{
@@ -6443,8 +6458,9 @@ unsigned int *halo_gpu_journal_take(unsigned int *count, unsigned int *unknown)
 }
 
 /* the journal's form: a change to what an entry holds or how it is written
-makes it 2, 3 and so on; its state's size is in it as well */
-#define JOURNAL_FORM 4
+makes it 2, 3 and so on; its state's size is in it as well (5: the pages'
+runs in JOURNAL_PAGE_UNIT's units, not the platform's pages) */
+#define JOURNAL_FORM 5
 
 unsigned int halo_gpu_journal_form(void)
 {
@@ -6613,7 +6629,10 @@ static void journal_play(unsigned long op, const struct journal_state *state)
 
 /* the journal's words read, a call for each entry (its type and its state,
 made from the entry's before in state), texture and run of pages; 0 if
-they are malformed (the calls up to there made) */
+they are malformed (the calls up to there made). A run's units, of a window
+of window_size bytes, are given as the pages of page_size bytes that hold
+them, whole, less those the run before gave (two runs may share a page
+larger than a unit) */
 struct journal_reader
 {
 	void (*entry)(unsigned long op, const struct journal_state *state);
@@ -6622,10 +6641,10 @@ struct journal_reader
 };
 
 static int journal_read(const uint32_t *words, unsigned long count, struct journal_state *state,
-	unsigned long page_count, const struct journal_reader *reader)
+	unsigned long window_size, unsigned long page_size, const struct journal_reader *reader)
 {
 	uint32_t *fields = (uint32_t *)state;
-	unsigned long position = 0, index;
+	unsigned long position = 0, index, given = 0;
 
 	while (position < count)
 	{
@@ -6645,9 +6664,18 @@ static int journal_read(const uint32_t *words, unsigned long count, struct journ
 				return 0;
 			for (index = 0; index < size; index++, position += 2)
 			{
-				if (words[position] >= words[position + 1] || words[position + 1] > page_count)
+				unsigned long first, end;
+
+				if (words[position] >= words[position + 1] || words[position + 1] > window_size / JOURNAL_PAGE_UNIT)
 					return 0;
-				reader->pages(words[position], words[position + 1]);
+				first = words[position] * JOURNAL_PAGE_UNIT / page_size;
+				end = (words[position + 1] * JOURNAL_PAGE_UNIT + page_size - 1) / page_size;
+				if (first < given)
+					first = given;
+				if (first < end)
+					reader->pages(first, end);
+				if (end > given)
+					given = end;
 			}
 		}
 		else if (type >= JOURNAL_DRAW && type < JOURNAL_STATES)
@@ -6735,7 +6763,8 @@ int halo_gpu_journal_replay(const unsigned int *words, unsigned int count, const
 	journal.bitmaps = bitmaps;
 	journal.unknown = 0;
 	memset(&journal.last, 0, sizeof(journal.last));
-	well_formed = journal_read((const uint32_t *)words, count, &journal.last, MIRROR_PAGE_COUNT, &reader);
+	well_formed = journal_read((const uint32_t *)words, count, &journal.last, PLATFORM_CONTIGUOUS_SIZE,
+		MIRROR_PAGE_SIZE, &reader);
 
 	memcpy(D3D__RenderState, saved.render_states, sizeof(saved.render_states));
 	memcpy(D3D__TextureState, saved.texture_states, sizeof(saved.texture_states));
