@@ -28,8 +28,9 @@ campaign_levels_read), a level started as the PC version's lists start it
   picture (ui.map's sp_levels; a Custom Edition map's own, else a title
   card), MISSION 0N, its name, a badge for each difficulty, veiled where it
   is not beaten on it (the profile's flags, as the Xbox's list marks them),
-  NOT YET BEATEN in their place where it is on none, and RESUME on the saved
-  game's. Every mission can be played. A card's A, a second tap on a
+  NOT YET BEATEN in their place where it is on none (on every card), and
+  RESUME on the saved game's. Under them, the chosen one's panel: its name,
+  its objective, and over its badges where the player is with it. Every mission can be played. A card's A, a second tap on a
   touchscreen or SELECT ("choose") opens the difficulties, or goes on with
   the saved game (RESUME).
 - Choose Difficulty ("difficulty init", "difficulty update"): four cards,
@@ -54,6 +55,10 @@ MISSION_CARDS_TOP, MISSION_DOTS, MISSION_DOT_STEP) */
 #define MISSION_CARDS_TOP 84
 #define MISSION_DOTS 16
 #define MISSION_DOT_STEP 20
+/* the chosen mission's objective, under its name in the panel: wrapped to
+this many lines (port_settings.py's MISSION_OBJECTIVE_LINES, which its box
+is as tall as) */
+#define MISSION_OBJECTIVE_LINES 2
 /* the card's frames (port_settings.py's mission_card: its third unused) */
 #define MISSION_CARD_RESTING 0
 #define MISSION_CARD_CHOSEN 1
@@ -631,12 +636,10 @@ static void mission_card_show(struct widget_instance *card, short mission, boole
 		campaign_badges_show(card, badge, shape, MISSION_BADGE_FAINT, beaten, beaten != 0);
 		snprintf(name, sizeof(name), "card_unbeaten_%s", kind);
 		visible_set(named(card, name, 0), beaten == 0);
+		/* (the same words on every card, the panel's chosen one's and those
+		beside it: their box across the card, which they fit in small_ui) */
 		if (beaten == 0)
-		{
-			static char const *const wordings[] = { "NOT YET BEATEN", "NOT BEATEN", "UNBEATEN" };
-
-			campaign_label_fit(named(card, name, 0), wordings, NUMBEROF(wordings));
-		}
+			menu_text_box_fit(named(card, name, 0), L"NOT YET BEATEN", 0);
 	}
 	card->animation.current_frame_index = chosen ? MISSION_CARD_CHOSEN : MISSION_CARD_RESTING;
 	/* (its picture's corners the card's fill, resting or chosen) */
@@ -645,8 +648,9 @@ static void mission_card_show(struct widget_instance *card, short mission, boole
 		named(card, name, 0)->animation.current_frame_index = chosen ? 1 : 0;
 }
 
-/* the panel under the cards: the chosen mission's name, objective, where
-the player is with it, and BEATEN ON's badges */
+/* the panel under the cards: the chosen mission's name and objective (on
+MISSION_OBJECTIVE_LINES lines), and where the player is with it over the
+badges of the difficulties it has been finished on */
 static void mission_panel_show(struct widget_instance *panel, short mission, short count)
 {
 	wchar_t text[MISSION_TEXT_LENGTH];
@@ -662,8 +666,8 @@ static void mission_panel_show(struct widget_instance *panel, short mission, sho
 
 		menu_text_box_fit(named(panel, "detail_title", 0), words ? words : L"", 0);
 		words = custom_edition_maps_description(display_index);
-		menu_text_box_wrap(named(panel, "detail_objective", 0), words ? words : L"", 1);
-		campaign_text_set_ascii(named(panel, "detail_status", 0), "A campaign map of your custom_maps folder.");
+		menu_text_box_wrap(named(panel, "detail_objective", 0), words ? words : L"", MISSION_OBJECTIVE_LINES);
+		menu_text_box_fit(named(panel, "detail_status", 0), L"From your custom_maps folder.", 0);
 		visible_set(named(panel, "detail_status", 0), TRUE);
 		visible_set(named(panel, "detail_status_new", 0), FALSE);
 		campaign_badges_show(panel, "detail_badge", "detail_badge_shape", MISSION_PANEL_BADGE_FAINT, 0, TRUE);
@@ -678,9 +682,10 @@ static void mission_panel_show(struct widget_instance *panel, short mission, sho
 		menu_text_box_fit(named(panel, "detail_title", 0), text, 0);
 		campaign_string("pc\\main_menu\\solo_level_select\\map_data", reached ? mission : LEVEL_UNAVAILABLE, text,
 			MISSION_TEXT_LENGTH);
-		menu_text_box_wrap(named(panel, "detail_objective", 0), text, 1);
+		menu_text_box_wrap(named(panel, "detail_objective", 0), text, MISSION_OBJECTIVE_LINES);
 		campaign_level_status(mission, text, MISSION_TEXT_LENGTH);
-		/* (NOT YET BEATEN in its own colour, which the eye finds at once) */
+		/* (over the badges, which it is about; NOT YET BEATEN in its own
+		colour, which the eye finds at once) */
 		menu_text_box_fit(named(panel, beaten || saved ? "detail_status" : "detail_status_new", 0), text, 0);
 		visible_set(named(panel, "detail_status", 0), beaten || saved);
 		visible_set(named(panel, "detail_status_new", 0), !beaten && !saved);

@@ -29,6 +29,11 @@
   reference photos by Aerocatia. The sniper rifle's zoom labels (2x, 10x)
   are set in Overpass (`port/assets/fonts`). The message icons' pictures
   are Aerocatia's and Jessie's (below).
+- **The high-res text's font**, Cyborg Interface Gothic (the menus' and
+  the HUD's text, `port/assets/fonts`): by fizzy, made to match Halo's
+  interface font, many of its glyphs derived from Overpass and the others
+  drawn by them; under the SIL Open Font License 1.1
+  (`CyborgInterfaceGothic-OFL.txt`). Taken from ChupathingyCE.
 - **The menus' mouse cursor** (the blue arrow the menus show for the
   mouse): by pugzysixtyfour (`port/assets/cursor`).
 

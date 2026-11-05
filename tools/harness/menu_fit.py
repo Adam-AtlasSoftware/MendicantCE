@@ -1,6 +1,7 @@
 """What the menu files' rows, buttons and prompts hold, where the engine draws it (test_menu_fit.py): the rows of a
-list apart, a one-line text's capitals on the middle of the framed picture it is in or on, and a prompt's words in
-its picture. Each check returns the problems it finds, so that a deliberate fault can be shown to be found."""
+list apart, a one-line text's capitals on the middle of the framed picture it is in or on, a prompt's words in its
+picture, and Choose Mission's words in their boxes and its arrows by its cards. Each check returns the problems it
+finds, so that a deliberate fault can be shown to be found."""
 
 import re
 from typing import NamedTuple
@@ -115,4 +116,70 @@ def prompt_overflows(widgets, names):
         room = int(attributes["width"]) - port_settings.PROMPT_RIGHT_ROOM
         if end > room:
             problems.append(f"{name}: its words end at {end}, its picture's room at {room}")
+    return problems
+
+
+def stock_objectives():
+    """the missions' objectives as the game shows them (campaign_menu.inc's campaign_string: the lines joined, a word
+    broken at a line's end whole again)"""
+    import xml.etree.ElementTree as ElementTree
+    root = ElementTree.parse(menu_layout.CE / "strings.xml").getroot()
+    strings = next(element for element in root.iter("strings")
+                   if element.get("name") == "main_menu/solo_level_select/map_data")
+    found = []
+    for string in strings.iter("string"):
+        # (the file's line breaks are "\\n", two characters)
+        text = re.sub(r"(?<! )-\\n", "", string.get("text"))
+        found.append(" ".join(text.replace("\\n", " ").split()))
+    return found[:10]
+
+
+def wrapped_lines(words, width):
+    """how many lines words take wrapped to a width in small_ui (settings_text_wrap: at spaces)"""
+    lines, line = 1, ""
+    for word in words.split(" "):
+        longer = f"{line} {word}" if line else word
+        if line and port_settings.small_ui_width(longer) > width:
+            lines, line = lines + 1, word
+        else:
+            line = longer
+    return lines
+
+
+def mission_overflows(widgets, names):
+    """Choose Mission (issue 681): its arrows as far from the row of cards at every width (MISSION_ARROW_GAP, a unit
+    either way: the row wider apart on a wide screen, campaign_menu.inc's mission_cards_place); NOT YET BEATEN within
+    its box on either card; each mission's objective on no more lines than its box holds and the game wraps it to
+    (MISSION_OBJECTIVE_LINES), at every width"""
+    base = port_settings.CAMPAIGN
+    if f"{base}/mission_screen" not in names:
+        return []
+    problems = []
+    big, small = port_settings.MISSION_BIG[0], port_settings.MISSION_SMALL[0]
+    gaps = set()
+    for aspect, width in port_settings.WIDE_SCREENS.items():
+        extra = port_settings.wide_extra_of(width)
+        boxes = menu_layout.layout(f"{base}/mission_screen", width, every=widgets)
+        row = big + 2 * small + 2 * (port_settings.MISSION_CARD_GAP + extra // 8)
+        left, right = 320 - row // 2, 320 - row // 2 + row
+        previous, following = menu_layout.one(boxes, "arrow_previous"), menu_layout.one(boxes, "arrow_next")
+        gaps |= {(aspect, left - previous.x1), (aspect, following.x0 - right)}
+        objective = menu_layout.one(boxes, "detail_objective")
+        lines = port_settings.MISSION_OBJECTIVE_LINES
+        holds = 1 + (objective.y1 - objective.y0 - port_settings.SMALL_UI_ASCENT - port_settings.SMALL_UI_DESCENT) // \
+            port_settings.SMALL_UI_LINE
+        if holds < lines:
+            problems.append(f"{aspect}: the objective's box holds {holds} lines, {lines} are drawn")
+        for words in stock_objectives():
+            needs = wrapped_lines(words, objective.x1 - objective.x0)
+            if needs > min(lines, holds):
+                problems.append(f"{aspect}: \"{words}\" takes {needs} lines, {min(lines, holds)} are shown")
+    for aspect, gap in sorted(gaps):
+        if abs(gap - port_settings.MISSION_ARROW_GAP) > 1:
+            problems.append(f"{aspect}: an arrow {gap} units from the cards, not {port_settings.MISSION_ARROW_GAP}")
+    for kind in ("big", "small"):
+        box = widgets[f"{base}/card_unbeaten_{kind}"].attributes
+        need = port_settings.small_ui_width("NOT YET BEATEN") + port_settings.SMALL_UI_LEAD
+        if int(box["width"]) < need:
+            problems.append(f"card_unbeaten_{kind}: {box['width']} wide, NOT YET BEATEN {need}")
     return problems

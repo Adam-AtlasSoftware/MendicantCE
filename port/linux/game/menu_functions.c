@@ -5000,6 +5000,10 @@ static void text_field_insert(char const *text)
 	text_field.text[length] = 0;
 }
 
+/* (ui_widget.c) a text box's caret, lit this frame or not: a bar after its
+text, on its capitals' middle */
+void ui_widget_port_caret_show(struct widget_instance *box, boolean shown);
+
 /* the keys typed since the last frame, and the field shown (a caret
 blinking while it is edited) */
 
@@ -5056,10 +5060,11 @@ static void text_field_show(struct widget_instance *value, char const *text, boo
 	}
 	for (index = 0; text[index] && index < TEXT_FIELD_LENGTH; index++)
 		shown[index] = editing && text_field.masked ? L'*' : (wchar_t)(unsigned char)text[index];
-	if (editing && (system_milliseconds() / 500) % 2)
-		shown[index++] = L'_';
 	shown[index] = 0;
 	text_set(value, shown);
+	/* (the caret: drawn by the text box, after the text, on its capitals'
+	middle; lit half the time) */
+	ui_widget_port_caret_show(value, editing && (system_milliseconds() / 500) % 2);
 	/* (what is being typed shown as it is: streamer mode hides nothing of it,
 	text_filter.c) */
 	if (editing && value)
@@ -5583,19 +5588,9 @@ static void settings_sliders_show(struct widget_instance *list)
 		so that it is plain that the number takes what is typed) */
 		if (value_text)
 		{
-			wchar_t *shown = value_text->parameters.text_box.text;
-
 			value_text->animation.current_frame_index = (short)(text_field_editing(row) != FALSE);
-			if (shown && text_field_editing(row))
-			{
-				short length = (short)ustrlen(shown);
-
-				if ((!length || shown[length - 1] != L'_') && length < ROW_TEXT_LENGTH - 1)
-				{
-					shown[length] = L'_';
-					shown[length + 1] = 0;
-				}
-			}
+			if (text_field_editing(row))
+				ui_widget_port_caret_show(value_text, TRUE);
 		}
 	}
 }

@@ -1340,3 +1340,25 @@ def test_android_release():
     builder = (ROOT / "tools/android_build.py").read_text()
     assert 'assets_dir / "licenses"' in builder and 'release_notices("android")' in builder
     assert '(SDL_DIR / "LICENSE.txt", "SDL3-LICENSE.txt")' in builder
+
+
+def test_embedded_fonts_carry_their_licenses():
+    """Every font the builds embed (port/assets/fonts/fonts.json: each tag's font and its fallback, tools/
+    embed_assets.py) has its licence in every platform's release (desktop and dedicated server alike) and the Steam
+    Frame's package: a font file Family-Style.ttf, a notice Family-*.txt."""
+    import embed_assets
+    import frame_package
+    families = {name.split("-", 1)[0] for name in embed_assets.font_files()}
+    assert {"CyborgInterfaceGothic", "Overpass"} <= families
+    for platform in ("linux_x86_64", "linux_arm64", "windows", "macos", "ios", "android"):
+        names = {name for _, name in linux_package.notices(platform)}
+        for family in families:
+            assert any(name.startswith(f"{family}-") for name in names), (platform, family)
+    for family in families:
+        assert any(name.startswith(f"{family}-") for name in frame_package.LICENSES), family
+    for source, name in linux_package.notices("linux_x86_64"):
+        assert source.is_file(), source
+    # (Cyborg Interface Gothic's notice: both its copyright lines, and the licence's whole text)
+    cyborg = (ROOT / "port/assets/fonts/CyborgInterfaceGothic-OFL.txt").read_text()
+    assert "Copyright 2021 The Overpass Project Authors" in cyborg and "Copyright (c) 2026, fizzy" in cyborg
+    assert "SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007" in cyborg and "DISCLAIMER" in cyborg

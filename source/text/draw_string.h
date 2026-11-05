@@ -95,6 +95,17 @@ void draw_unicode_string_compute_bounds(
 	wchar_t const *string,
 	rectangle2d *text_bounds,
 	rectangle2d *cursor_bounds);
+/* port: as draw_unicode_string_compute_bounds, the letters' bounds those of
+their ink where it is drawn (the high-res text's glyphs, where it draws
+them) */
+void draw_unicode_string_compute_drawn_bounds(
+	rectangle2d const *bounds,
+	wchar_t const *string,
+	rectangle2d *text_bounds,
+	rectangle2d *cursor_bounds);
+/* port: how many rows the draw mode's font's capitals are tall */
+short draw_string_capital_height(
+	void);
 /* port: the middle of the string's capitals as it is drawn in the bounds,
 in the draw mode's font (draw_string_set_draw_mode) */
 short draw_unicode_string_capital_middle(

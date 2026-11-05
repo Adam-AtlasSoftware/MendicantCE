@@ -8,7 +8,10 @@ text after it a gap past it, and the advance the menus' legends lay their
 rows out with (ui_widget.c) the one it is drawn with. The font is a fake
 one: each letter's glyph a box of its own width, starting LEAD past its pen
 (the Xbox maps' small_ui and large_ui start theirs 3 past it) and ending
-TRAIL short of the next letter's pen; the cap's drawing is noted, not drawn.
+TRAIL short of the next letter's pen, and its ink as the high-res text
+draws it INK_LEFT further in at the left and INK_RIGHT at the right (its
+glyphs centred on the tag's advances, not on its bitmaps' blank columns);
+the cap's drawing is noted, not drawn.
 test_key_caps.py takes the code (under_test.inc).
 */
 
@@ -60,6 +63,23 @@ static void draw_unicode_string_compute_bounds(rectangle2d const *bounds, wchar_
 		return;
 	}
 	cursor->x0 = pen;
+}
+
+/* the high-res text's ink, past the tag's bitmaps' left (ink_left) and
+short of their right (ink_right) */
+static short ink_left, ink_right;
+
+/* as draw_unicode_string_compute_bounds, the letters' ink where it is drawn */
+static void draw_unicode_string_compute_drawn_bounds(rectangle2d const *bounds, wchar_t const *text,
+	rectangle2d *text_bounds, rectangle2d *cursor)
+{
+	draw_unicode_string_compute_bounds(bounds, text, text_bounds, cursor);
+	/* (a glyph narrower than both: as its bitmap) */
+	if (text_bounds->x1 - text_bounds->x0 > ink_left + ink_right)
+	{
+		text_bounds->x0 = (short)(text_bounds->x0 + ink_left);
+		text_bounds->x1 = (short)(text_bounds->x1 - ink_right);
+	}
 }
 
 static short draw_unicode_string_capital_middle(rectangle2d const *bounds, wchar_t const *text)
@@ -185,6 +205,36 @@ int main(int argc, char **argv)
 					CHECK(d.box_x1 - d.box_x0 >= d.box_height, "%ls: %d wide, %d tall", names[name],
 						d.box_x1 - d.box_x0, d.box_height);
 				}
+	}
+	CASE("drawn")
+	{
+		/* the cap about the letters' ink as it is drawn (a glyph of the
+		high-res text further in than the tag's bitmap on one side, as
+		Overpass's E and Q in their caps: issue 681), as much room either
+		side of it */
+		static short const inks[][2] = { { 2, 0 }, { 0, 2 }, { 3, 1 }, { 1, 1 } };
+		unsigned long ink;
+
+		for (players = 1; players <= 2; players++)
+			for (ink = 0; ink < sizeof(inks) / sizeof(inks[0]); ink++)
+				for (name = 0; name < sizeof(names) / sizeof(names[0]); name++)
+				{
+					struct drawn d;
+					short room_left, room_right;
+
+					lead = 3;
+					trail = 0;
+					ink_left = inks[ink][0];
+					ink_right = inks[ink][1];
+					d = draw(names[name], 100);
+					if (d.right - d.left <= ink_left + ink_right)
+						continue;
+					room_left = (short)(d.left + ink_left - d.box_x0);
+					room_right = (short)(d.box_x1 - (d.right - ink_right));
+					CHECK(room_left == room_right, "%ls (ink %d in at the left, %d at the right): %d left of its ink, "
+						"%d right", names[name], ink_left, ink_right, room_left, room_right);
+				}
+		ink_left = ink_right = 0;
 	}
 	CASE("gap")
 	{

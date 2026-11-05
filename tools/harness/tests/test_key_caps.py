@@ -1,5 +1,6 @@
 """A key's cap in the prompts and the menus' footers (port/linux/game/hud_key_prompts.c, issue 596): its name's
-letters in the middle of the box with as much room either side, for any name and font; the text after it a gap past
+letters in the middle of the box with as much room either side, for any name and font, by their ink as it is drawn
+(the high-res text's glyphs, issue 681); the text after it a gap past
 the box; a legend's "=" ("[Esc] = CANCEL") as far from the cap as from its word; the advance the menus' legends lay
 their rows out with (source/interface/ui_widget.c) the drawing's; and the legends measuring with it, not a width of
 their own."""
@@ -13,7 +14,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, function, mutated, read, run  # noqa: E402
 
-CASES = ["centred", "gap", "advance", "wrapped", "equals", "equals-advance", "equals-none"]
+CASES = ["centred", "drawn", "gap", "advance", "wrapped", "equals", "equals-advance", "equals-none"]
 
 SOURCE = "port/linux/game/hud_key_prompts.c"
 FUNCTIONS = ("key_cap_metrics", "key_cap_layout", "key_cap_equals_layout", "key_text_measure", "key_text_span", "key_equals_length", "hud_key_prompt_cap_advance",
@@ -28,6 +29,9 @@ NEGATIVE_CONTROLS = {
     # a narrow name's box taller than wide
     "no-least-width": (("width = (short)MAX(letters + 2 * margin, 2 * half - 1);",
                         "width = (short)(letters + 2 * margin);"), "centred"),
+    # the cap laid out about the font tag's bitmaps, not the letters' ink as drawn (issue 681's Q and E)
+    "cap-about-bitmaps": (("draw_unicode_string_compute_drawn_bounds(bounds, text, &text_bounds, cursor);",
+                           "draw_unicode_string_compute_bounds(bounds, text, &text_bounds, cursor);"), "drawn"),
     # the text after the cap started inside its edge, as before issue 596
     "no-gap": (("*after = (short)(*box_x1 + gap - left);", "*after = (short)(*box_x1 - inset + 1);"), "gap"),
     # the legends' advance not the drawing's
@@ -91,3 +95,24 @@ def test_icons_space_the_equals():
     assert drawing.count("hud_key_prompt_draw_equals(bounds, &cursor_bounds, current)") == 2
     assert drawing.count("key_drawn = TRUE;") == 4
     assert re.search(r"if \(key_drawn\)\s*current \+= hud_key_prompt_draw_equals", drawing)
+
+
+def test_drawn_bounds_are_the_glyphs_places():
+    """The letters' drawn bounds a cap is laid out about (draw_unicode_string_compute_drawn_bounds) are where the
+    high-res text draws its glyphs: rasterizer_text_port_drawn_span places a glyph as rasterizer_draw_hires_glyph
+    does (its advance centred on the font tag character's), for the font it is drawn in; the cap and the legends'
+    rows measure with them."""
+    text = read("source/rasterizer/rasterizer_text.c")
+    span = function(text, "rasterizer_text_port_drawn_span")
+    glyph = function(text, "rasterizer_draw_hires_glyph")
+    for placed in ("x0 - x + font_character->bitmap_origin_x", "(font_character->character_width - glyph.advance) * 0.5f + glyph.left"):
+        assert placed in span and placed in glyph, placed
+    assert "hires_text_font_get(draw_string_get_font(), MAX(text_scale, 1.0f))" in span
+    assert "hires_text_font_get(draw_string_get_font(), MAX(text_scale, 1.0f))" in text.split("rasterizer_draw_string(", 2)[-1]
+    bounds = function(read("source/text/draw_string.c"), "text_bounds_draw_character")
+    assert "if (text_bounds_globals.drawn)\n\t\trasterizer_text_port_drawn_span(character, x0, x, &x0, &x1);" in bounds
+    caps = read(SOURCE)
+    assert "draw_unicode_string_compute_drawn_bounds(bounds, text, &text_bounds, cursor);" in function(caps, "key_cap_draw")
+    assert "draw_unicode_string_compute_drawn_bounds(" in function(caps, "key_text_measure")
+    assert "draw_unicode_string_compute_drawn_bounds(" in function(read("source/interface/ui_widget.c"),
+                                                                  "ui_widget_port_text_span")
