@@ -239,6 +239,9 @@ static struct
 	dispatch_queue_t making_queue;
 	dispatch_group_t preparing;
 	BOOL preparing_draws;
+	/* a map's preparation made (before it, a draw waits for its pipeline:
+	pipeline_state_get) */
+	BOOL prepared_once;
 	/* the library the combiner's function is in (the app's, or its source
 	compiled where the app has none: the tests) */
 	id<MTLLibrary> combiner_library;
@@ -2459,7 +2462,7 @@ uint64_t xgpu_metal_frame_end(uint32_t present)
 
 	if (!metal.in_frame)
 		xgpu_metal_frame_begin();
-	/* (the pipelines made while drawing written once no more have come for
+	/* (the pipelines made for the draws written once no more have come for
 	a while, in the background) */
 	if (metal.archive_changed && seconds_now() - metal.archive_changed_at > ARCHIVE_SETTLED_SECONDS)
 		archive_save(0.0);
@@ -3134,10 +3137,18 @@ static void pipeline_make_later(const struct xgpu_metal_pipeline_state_key *key,
 }
 
 /* a draw's pipeline state: made (by the loading screen's preparation, or
-an earlier draw); else made on the making queue and waited for (logged and
-counted: one the loading screen did not prepare), as the picture must be
-whole: a draw is never skipped. During a preparation (draws unseen), only
-asked for. Never compiled on this thread. */
+an earlier draw); else asked for on the making queue, and nil: the draw is
+skipped until it is made (logged and counted: one the map's preparation did
+not make). A pipeline is a compile of tens of milliseconds, of a frame or
+more: waited for, a burst of them stopped the frame for 67 to 117 ms on an
+M2; skipped, the draws that need it are missing from a frame or two, as
+Vulkan's are (xgpu_vulkan_stream.c). The preparation makes every pipeline
+the map's draws need (render_enumerate.c), and again as a setting changes
+them, so that a draw skipped is the preparation's miss, in the log. With
+options.synchronous (the tests'), or before any map's preparation, made and
+waited for. During a
+preparation (draws unseen), only asked for. Never compiled on this
+thread. */
 static id<MTLRenderPipelineState> pipeline_state_get(const struct xgpu_metal_pipeline *pipeline)
 {
 	struct xgpu_metal_pipeline_state_key key;
@@ -3157,13 +3168,24 @@ static id<MTLRenderPipelineState> pipeline_state_get(const struct xgpu_metal_pip
 		pipeline_make_later(&key, metal.preparing);
 		return nil;
 	}
-	if (!state)
+	if (!state && !metal.options.synchronous && metal.prepared_once)
 	{
-		if (!metal.options.synchronous)
+		BOOL making;
+
+		os_unfair_lock_lock(&metal.lock);
+		making = metal.pipelines_making[data] != nil;
+		os_unfair_lock_unlock(&metal.lock);
+		if (!making)
 		{
 			statistics_add(&metal.statistics.draws_waiting, 1);
-			host_logf(HOST_LOG_WARN, "metal: a pipeline made while drawing (not prepared as the map loaded)");
+			host_logf(HOST_LOG_WARN, "metal: a pipeline missed (not prepared as the map loaded): made on the "
+				"compilers, its draws skipped until it is");
 		}
+		pipeline_make_later(&key, nil);
+		return nil;
+	}
+	if (!state)
+	{
 		made = dispatch_group_create();
 		pipeline_make_later(&key, made);
 		dispatch_group_wait(made, DISPATCH_TIME_FOREVER);
@@ -3184,6 +3206,22 @@ void xgpu_metal_prepare(const struct xgpu_metal_pipeline *pipeline)
 	pipeline_make_later(&key, metal.preparing);
 }
 
+int xgpu_metal_pipeline_known(const struct xgpu_metal_pipeline *pipeline)
+{
+	struct xgpu_metal_pipeline_state_key key;
+	NSData *data;
+	BOOL made;
+
+	xgpu_metal_pipeline_state_key_make(pipeline, &key);
+	if (metal.pipeline_state && !memcmp(&key, &metal.pipeline_state_key, sizeof(key)))
+		return 1;
+	data = [NSData dataWithBytes:&key length:sizeof(key)];
+	os_unfair_lock_lock(&metal.lock);
+	made = metal.pipelines[data] != nil || metal.pipelines_making[data] != nil;
+	os_unfair_lock_unlock(&metal.lock);
+	return made;
+}
+
 void xgpu_metal_prepare_begin(void)
 {
 	metal.preparing_draws = YES;
@@ -3194,6 +3232,7 @@ double xgpu_metal_prepared(void)
 	double start = seconds_now();
 
 	metal.preparing_draws = NO;
+	metal.prepared_once = YES;
 	dispatch_group_wait(metal.preparing, DISPATCH_TIME_FOREVER);
 	/* (a safe point: the user's archive written with the map's pipelines,
 	in the background) */

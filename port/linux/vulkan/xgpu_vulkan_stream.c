@@ -1665,20 +1665,29 @@ static int indices_upload(const struct draw_input *input, struct xgpu_vulkan_dra
 	return 1;
 }
 
-/* A map's enumeration should exercise every native pipeline before play.
-Keep first-use misses visible, including the key and layout that need it. */
+/* A map's enumeration should exercise every native pipeline before play
+(and again as a setting changes them: render_enumerate.c). Keep first-use
+misses visible, including the key and layout that need it. A pipeline
+missed is made on the compilers and its draws skipped until it is (a frame
+or two), as Metal's are, never compiled on the render thread: a pipeline is
+a compile of tens of milliseconds, and a burst of them waited for stopped
+the frame for 230 ms. */
 static void pipeline_missed(const struct xgpu_vulkan_pipeline_description *pipeline, uint64_t vertex_program)
 {
 	const struct xgpu_stream_pipeline_key *key = &stream.definition->key;
 
 	stream.pipeline_misses++;
 	host_logf(HOST_LOG_WARN, "vulkan: pipeline missed map preparation: vertex %08x%08x, "
-		"views %u/%u, layout %08x/%08x, key %08x (textures %u, coverage %u, threshold %u), total %u",
+		"views %u/%u, layout %08x/%08x, key %08x (textures %u, coverage %u, threshold %u; lighting %u, "
+		"occlusion %u, hdr %x, per-pixel %u, lights %u, samples %u/%u, colour %u, depth %u), total %u",
 		(unsigned)(vertex_program >> 32), (unsigned)vertex_program, (unsigned)key->views,
 		(unsigned)pipeline->view_mask, bytes_hash(pipeline->attributes, sizeof(pipeline->attributes)),
 		bytes_hash(pipeline->strides, sizeof(pipeline->strides)), bytes_hash(key, sizeof(*key)),
 		(unsigned)key->pixel.texture_modes, (unsigned)key->pixel.coverage_alpha,
-		(unsigned)key->pixel.point_threshold, stream.pipeline_misses);
+		(unsigned)key->pixel.point_threshold, (unsigned)key->lighting, (unsigned)key->pixel.ambient_occlusion,
+		(unsigned)key->pixel.hdr, (unsigned)key->pixel.per_pixel_lighting, (unsigned)key->pixel.dynamic_lights,
+		(unsigned)key->samples, (unsigned)key->pixel.alpha_test_samples, (unsigned)key->color_format,
+		(unsigned)key->depth_format, stream.pipeline_misses);
 }
 
 /* A native key can depend on backend state absent from the manifest.
@@ -1826,6 +1835,8 @@ static void draw_input(const struct draw_input *input)
 
 		if (stream.preparing)
 			(void)xgpu_vulkan_pipeline_prepare(&pipeline);
+		else if (stream.prepared)
+			draw.pipeline = xgpu_vulkan_pipeline_ready(&pipeline);
 		else
 			draw.pipeline = xgpu_vulkan_pipeline(&pipeline);
 		if (xgpu_vulkan_pipeline_count() != before)

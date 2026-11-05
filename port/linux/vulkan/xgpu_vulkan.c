@@ -3388,6 +3388,9 @@ static struct
 		int done;
 	} jobs[PIPELINE_JOBS];
 	void (*service)(void);
+	/* a draw's pipeline in play asked for (xgpu_vulkan_pipeline_ready):
+	made on the compilers too, not on the render thread */
+	int background;
 } pipeline_compiler = { .mutex = PTHREAD_MUTEX_INITIALIZER, .changed = PTHREAD_COND_INITIALIZER };
 
 static void *pipeline_compile_worker(void *unused)
@@ -3494,7 +3497,7 @@ static void pipeline_request(struct pipeline_entry *entry)
 	vk.pipeline_count++;
 	host_load_trace("vulkan.pipeline.request", "count=%llu hash=%08x",
 		(unsigned long long)vk.pipeline_count, entry->hash);
-	if (pipeline_compiler.service && !pipeline_compiler.started)
+	if ((pipeline_compiler.service || pipeline_compiler.background) && !pipeline_compiler.started)
 	{
 		long processors = sysconf(_SC_NPROCESSORS_ONLN);
 		int workers = processors > 4 ? (int)processors - 4 : 1;
@@ -3508,7 +3511,7 @@ static void pipeline_request(struct pipeline_entry *entry)
 			pipeline_compiler.started++;
 		host_logf(HOST_LOG_INFO, "vulkan: %d pipeline compilers", pipeline_compiler.started);
 	}
-	if (!pipeline_compiler.service || !pipeline_compiler.started)
+	if ((!pipeline_compiler.service && !pipeline_compiler.background) || !pipeline_compiler.started)
 	{
 		pipeline = pipeline_build(&entry->description, &result, &elapsed);
 		pipeline_publish(entry, pipeline, result, elapsed);
@@ -3775,6 +3778,24 @@ VkPipeline xgpu_vulkan_pipeline(const struct xgpu_vulkan_pipeline_description *d
 	if (entry->pending)
 		pipeline_wait(entry, 0);
 	return entry->pipeline;
+}
+
+VkPipeline xgpu_vulkan_pipeline_ready(const struct xgpu_vulkan_pipeline_description *description)
+{
+	struct pipeline_entry *entry;
+
+	pipeline_compiler.background = 1;
+	entry = pipeline_find(description);
+	pipeline_compiler.background = 0;
+	if (!entry)
+		return VK_NULL_HANDLE;
+	if (entry->pending)
+	{
+		pthread_mutex_lock(&pipeline_compiler.mutex);
+		pipeline_publish_completed();
+		pthread_mutex_unlock(&pipeline_compiler.mutex);
+	}
+	return entry->pending ? VK_NULL_HANDLE : entry->pipeline;
 }
 
 uint64_t xgpu_vulkan_pipeline_count(void)
@@ -6910,7 +6931,11 @@ void xgpu_vulkan_pipeline_cache_save(void)
 	FILE *file;
 	int saved = 0;
 
-	if (!vk.pipeline_cache || !vk.cache_path[0] || vk.pipelines_saved == vk.pipelines_made)
+	if (!vk.pipeline_cache || !vk.cache_path[0])
+		return;
+	/* (with the compilers' pipelines in it: those a draw in play asked for) */
+	pipeline_wait(NULL, 0);
+	if (vk.pipelines_saved == vk.pipelines_made)
 		return;
 	if (vkGetPipelineCacheData(vk.device, vk.pipeline_cache, &size, NULL) != VK_SUCCESS || !size)
 		return;

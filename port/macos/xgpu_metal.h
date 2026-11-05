@@ -400,6 +400,9 @@ void xgpu_metal_prepare(const struct xgpu_metal_pipeline *pipeline);
 (not drawn: a map's first frame's, unseen) */
 void xgpu_metal_prepare_begin(void);
 double xgpu_metal_prepared(void);
+/* whether a pipeline is made or being made (a draw's: as the map's
+preparation made it, or an earlier draw asked for it) */
+int xgpu_metal_pipeline_known(const struct xgpu_metal_pipeline *pipeline);
 
 /* textures: a handle, or 0 (logged) */
 uint32_t xgpu_metal_texture_create(const struct xgpu_metal_texture_description *description);

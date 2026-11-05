@@ -31,6 +31,15 @@ detail objects', the weather's: each in its own file). render_window
 whether the window being drawn is one of these. The texture cache waits for
 each texture while enumerating (xbox_texture_cache.c), so that no draw is
 skipped or made without its sampler.
+
+A setting that changes what the draws' pipelines are (render_prepared.c's
+prepared_settings: the ambient occlusion, the lights, HDR, multisampling)
+changed in play makes the maps' enumerations others': each map is prepared
+again under it, the one loaded at the next frame (from the record it was
+prepared from, else walked), before a draw needs a pipeline of the new
+settings. Without it the new settings' pipelines were made one at a time
+as the draws first needed them, for the rest of the map (the surfaces at
+each structure's first sight, every model and effect).
 */
 
 #include "cseries.h"
@@ -103,6 +112,8 @@ void dynamic_lights_submit(void);
 /* the platform layer's (port/linux/src/port_config.c) */
 const char *config_string(char const *name);
 int config_boolean(char const *name);
+/* (d3d8_device.c's: config_changes() as the frame took the settings up) */
+unsigned long halo_gpu_settings_taken(void);
 void platform_log(char const *format, ...);
 /* cache_files.c's */
 boolean tag_index_is_group(long tag_index, long group_tag);
@@ -266,6 +277,56 @@ static struct
 	struct enumerated_materials *materials[2];
 } enumerated_maps[MAXIMUM_ENUMERATED_MAPS];
 static short enumerated_map_count = 0;
+
+/* what the settings made of the draws (render_prepared_derivation) as the
+maps were enumerated, and the settings' changes (config_changes) when it
+was last compared: as the front end took them up between frames
+(halo_screen_commit), so that the map is prepared again as the draws will
+be derived */
+static struct
+{
+	boolean known;
+	unsigned long long derivation;
+	unsigned long changes;
+} enumerated_derivation;
+
+/* the maps' enumerations forgotten where the settings now make other
+pipelines of their draws than they were made under: the map loaded is
+prepared again at its next frame, another as it is loaded again */
+static void enumerated_derivation_check(void)
+{
+	unsigned long long derivation;
+	short index;
+
+	if (!enumerated_derivation.known || enumerated_derivation.changes == halo_gpu_settings_taken())
+		return;
+	enumerated_derivation.changes = halo_gpu_settings_taken();
+	derivation = render_prepared_derivation();
+	if (derivation == enumerated_derivation.derivation)
+		return;
+	enumerated_derivation.derivation = derivation;
+	for (index = 0; index < enumerated_map_count; index++)
+	{
+		short view;
+
+		for (view = 0; view < 2; view++)
+		{
+			enumerated_maps[index].structure_bsps[view] = 0;
+			if (enumerated_maps[index].materials[view])
+				enumerated_maps[index].materials[view]->count = 0;
+		}
+	}
+	platform_log("render: the settings make other pipelines of the draws: the map's shaders and pipelines made "
+		"again");
+}
+
+/* the settings the maps' enumerations are made under (as one begins) */
+static void enumerated_derivation_note(void)
+{
+	enumerated_derivation.known = TRUE;
+	enumerated_derivation.changes = halo_gpu_settings_taken();
+	enumerated_derivation.derivation = render_prepared_derivation();
+}
 
 /* the map's structures enumerated: a map not seen in this run of the game
 has none */
@@ -628,6 +689,7 @@ boolean render_enumerate_pending(boolean scope)
 		enumerate.structure_bsps_enumerated[1] = NULL;
 		enumerate.new_map = FALSE;
 	}
+	enumerated_derivation_check();
 	/* (a map of the menus' pictures too, menu_pictures_render.c, in its first
 	frame: from its record, where it has one, so that its pose's frame finds
 	its pipelines made, on the compilers, not one at a time as it draws;
@@ -673,6 +735,8 @@ boolean render_enumerate_begin(boolean mirrors, boolean scope)
 		stand_ins.pending.count = stand_ins.round = 0;
 	enumerate.scope = scope;
 	enumerate.interface_drawn = FALSE;
+	if (enumerate.everything)
+		enumerated_derivation_note();
 	enumerate.structure_bsp_index = structure_bsp_index;
 	SET_FLAG(*enumerate.structure_bsps_enumerated[view], structure_bsp_index, TRUE);
 	enumerate.mirrors = mirrors && structure_visibility_port_has_mirrors();

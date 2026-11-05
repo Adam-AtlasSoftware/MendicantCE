@@ -980,7 +980,7 @@ static void pacing_log(double now)
 			"metal: a frame: GPU busy %.2f ms (%.0f%% of the time); its command buffers' GPU time %.2f ms (%u), render thread CPU %.2f ms, %.1f draws, %.1f passes (%.1f put aside, %.1f targets renamed for it), "
 			"%.1f ordered uploads, %.1f copies of a target drawn into, %.1f pictures restored; the last played in %.2f ms, its stream %u KB "
 			"(the most %u KB); the game waited %u times (%.1f ms); textures made %u, made again %u, images %u, "
-			"%.1f MB read; shaders compiled %u (%.1f ms), %u from the library, %u the combiner's specialised; pipelines made %u (%u from the archive, %.1f ms); %u pipelines made while drawing (not prepared); thermal state %s",
+			"%.1f MB read; shaders compiled %u (%.1f ms), %u from the library, %u the combiner's specialised; pipelines made %u (%u from the archive, %.1f ms); %u pipelines missed (not prepared: made on the compilers, their draws skipped meanwhile); thermal state %s",
 			statistics.gpu_busy_seconds * 1000.0 / statistics.frames, statistics.gpu_busy_seconds * 100.0 / seconds,
 			statistics.gpu_seconds * 1000.0 / statistics.frames, statistics.command_buffers,
 			statistics.render_cpu_seconds * 1000.0 / statistics.frames, (double)statistics.draws / statistics.frames,

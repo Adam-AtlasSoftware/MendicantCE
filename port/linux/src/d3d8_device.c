@@ -2123,6 +2123,14 @@ int halo_hdr_display_text(int words, char *text, unsigned int size)
 	return hdr_display_text(words ? XGPU_HDR_DISPLAY_WORDS : XGPU_HDR_DISPLAY_VALUE, text, size);
 }
 
+/* config_changes() as halo_screen_commit last took the settings up */
+static unsigned long screen_settings_taken = (unsigned long)-1;
+
+unsigned long halo_gpu_settings_taken(void)
+{
+	return screen_settings_taken;
+}
+
 /* takes up the display's shape and resolution, or the window's, if they
 have changed; between frames, since the game's layout and the targets must
 agree for a whole frame. Returns the width the game draws. */
@@ -2144,6 +2152,9 @@ long halo_screen_commit(void)
 	hdr_read();
 	/* (display.ambient_occlusion) */
 	ambient_occlusion_read();
+	/* (the settings taken up: a map's preparation made again under them,
+	render_enumerate.c) */
+	screen_settings_taken = config_changes();
 	/* (display.picture_position) */
 	picture_position_send();
 	/* (display.gamma) */
