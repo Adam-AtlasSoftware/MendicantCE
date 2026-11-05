@@ -295,10 +295,11 @@ static void world_ao_counts_window(void)
 	}
 	if (world_ao_counts.windows >= 600)
 	{
-		printf("world ao: a window's %.1f shapes, %.1f of them dynamic (%.1f spheres, %.1f capsules, %.1f boxes); %.1f "
-			"lightmap pages with a layer, %.1f without\n", (double)world_ao_counts.shapes / 600.0,
+		printf("world ao: a window's %.1f shapes, %.1f of them dynamic (%.1f spheres, %.1f capsules, %.1f boxes, %.1f "
+			"occlusion fields); %.1f lightmap pages with a layer, %.1f without\n", (double)world_ao_counts.shapes / 600.0,
 			(double)world_ao_counts.dynamic / 600.0, (double)world_ao_counts.kinds[_world_proxy_sphere] / 600.0,
 			(double)world_ao_counts.kinds[_world_proxy_capsule] / 600.0, (double)world_ao_counts.kinds[_world_proxy_box] / 600.0,
+			(double)world_ao_counts.kinds[_world_proxy_field] / 600.0,
 			(double)world_ao_counts.paged / 600.0, (double)world_ao_counts.unpaged / 600.0);
 		fflush(stdout);
 		memset(&world_ao_counts.windows, 0, sizeof(world_ao_counts) - sizeof(world_ao_counts.wanted));

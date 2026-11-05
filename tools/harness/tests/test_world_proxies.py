@@ -10,7 +10,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, mutated, read, run  # noqa: E402
 
-CASES = ["sphere", "capsule", "box", "reach", "bound", "far", "culling", "skeleton", "owner", "baked", "none"]
+CASES = ["sphere", "capsule", "box", "reach", "bound", "far", "culling", "skeleton", "owner", "baked", "field", "none"]
 HEADER = "port/linux/include/world_proxies.h"
 SOURCE = "port/linux/include/world_proxies_source.h"
 GAME = "port/linux/game/world_proxies.c"
@@ -48,6 +48,18 @@ CONTROLS = [
     # a slot per shape rather than per owner
     ("proxies[i].v[1][3] = j < i ? proxies[j].v[1][3] : (float)slots++;",
      "proxies[i].v[1][3] = (float)slots++;", "owner"),
+    # a vehicle's field counted as one slot (its three then cut apart by a window's end)
+    ("slot_count = WORLD_PROXY_FIELD_SLOTS;", "slot_count = 1;", "field"),
+    # its boxes kept beside its field
+    ("if (fielded && shape->kind == _world_proxy_box)\n\t\t\t\t\tcontinue;", "", "field"),
+    # the rows to its voxels without the frame's scale squared
+    ("over = 1.0f / (scale * scale * field->voxel);", "over = 1.0f / (scale * field->voxel);", "field"),
+    # its reach the field's alone (its box's bound not taken)
+    ("proxies[0].v[2][3] = box_reach < proxies[0].v[2][3] ? box_reach : proxies[0].v[2][3];",
+     "proxies[0].v[2][3] = box_reach < 0.0f ? box_reach : proxies[0].v[2][3];", "field"),
+    # the atlas's half texel left out
+    ("proxies[2].v[0][axis] = (float)field->place[axis] + 0.5f;", "proxies[2].v[0][axis] = (float)field->place[axis];",
+     "field"),
     # a capsule's end carried as a direction, not a point
     ("frame_point(frame, shape->b, proxy->v[1]);", "frame_vector(frame, shape->b, proxy->v[1]);", "skeleton"),
 ]
@@ -76,8 +88,8 @@ def test_the_gpu_takes_as_many_as_a_window_gives():
     gpu = read("port/linux/src/xgpu_stream.h")
     assert "#define XGPU_WORLD_AO_PROXIES_MAXIMUM 64" in gpu
     assert "WORLD_PROXY_MAXIMUM_PER_WINDOW = 64," in read(HEADER)
-    for name, kind in (("SPHERE", "sphere"), ("CAPSULE", "capsule"), ("BOX", "box")):
-        number = ["sphere", "capsule", "box"].index(kind) + 1
+    for name, kind in (("SPHERE", "sphere"), ("CAPSULE", "capsule"), ("BOX", "box"), ("FIELD", "field")):
+        number = ["sphere", "capsule", "box", "field"].index(kind) + 1
         assert f"#define XGPU_WORLD_AO_PROXY_{name} {number}" in gpu
         assert f"_world_proxy_{kind}," in read(HEADER)
 

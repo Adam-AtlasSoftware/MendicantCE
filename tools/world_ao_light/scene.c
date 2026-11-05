@@ -45,6 +45,13 @@ short world_proxies_source_nodes(long id, struct world_proxies_frame *frames, sh
 	return 0;
 }
 
+int world_proxies_source_field(long definition, struct world_proxies_source_field *field)
+{
+	(void)definition;
+	(void)field;
+	return 0;
+}
+
 int world_proxies_source_frustum(float planes[4][4])
 {
 	(void)planes;
@@ -73,8 +80,11 @@ enum
 	SCENE_ROW = WORLD_SDF_BRICK * SCENE_WIDTH + 1,
 	SCENE_ROWS = WORLD_SDF_BRICK * SCENE_HEIGHT + 1,
 	SCENE_SLICES = WORLD_SDF_BRICK * SCENE_DEPTH + 1,
-	SCENE_PROXIES = 5,
-	SCENE_DYNAMIC = 3,
+	SCENE_PROXIES = 8,
+	SCENE_DYNAMIC = 6,
+	/* (a vehicle's occlusion field's place in the objects' atlas: along z
+	past two slices of none) */
+	SCENE_FIELD_PLACE = 2,
 };
 
 /* the static scenery's pages: each layer one value all through (so that a
@@ -89,6 +99,12 @@ float scene_parameters[2][4];
 /* the proxies' grid about a camera among them (world_ao_grid) */
 float scene_grid[2][4];
 unsigned int scene_cells[WORLD_AO_GRID_CELLS / 2][4];
+/* a vehicle's occlusion field (a box's, baked), and the objects' atlas it
+is in: its halves (the reference's) and their values (the GPU's) */
+struct world_sdf_object scene_object;
+unsigned short *scene_atlas;
+float *scene_atlas_values;
+unsigned long scene_atlas_size[3];
 
 static unsigned long scene_seed = 12345;
 
@@ -97,6 +113,112 @@ float scene_random(void)
 {
 	scene_seed = scene_seed * 1103515245UL + 12345UL;
 	return (float)((scene_seed >> 8) & 0xffffff) / 16777216.0f;
+}
+
+/* the box the field is baked of, in its own space */
+static float const scene_object_low[3] = { -0.6f, -0.35f, 0.0f }, scene_object_high[3] = { 0.6f, 0.35f, 0.5f };
+
+static int scene_object_inside(void *context, float const point[3])
+{
+	int axis;
+
+	(void)context;
+	for (axis = 0; axis < 3; axis++)
+	{
+		if (point[axis] <= scene_object_low[axis] || point[axis] >= scene_object_high[axis])
+			return 0;
+	}
+	return 1;
+}
+
+/* the field baked (the box's twelve triangles), in an atlas past two
+slices of none, and placed on a frame turned 0.5 about z, scaled 1.2, at
+-0.5, -0.4, 0.1: three shapes from first, as world_proxies.c's field_place
+puts them */
+static void scene_field(struct world_proxy *first)
+{
+	static const int faces[6][4] = { { 0, 1, 3, 2 }, { 4, 6, 7, 5 }, { 0, 4, 5, 1 }, { 2, 3, 7, 6 }, { 0, 2, 6, 4 },
+		{ 1, 5, 7, 3 } };
+	float corners[8][3], triangles[12 * 9], bounds[6], *values, axes[3][3], position[3] = { -0.5f, -0.4f, 0.1f };
+	float scale = 1.2f, angle = 0.5f, over, middle[3], extents[3], areas, box_reach;
+	unsigned char *solid;
+	unsigned long z, slice, index;
+	int corner, face, axis, k;
+
+	for (corner = 0; corner < 8; corner++)
+		for (axis = 0; axis < 3; axis++)
+			corners[corner][axis] = (corner >> axis) & 1 ? scene_object_high[axis] : scene_object_low[axis];
+	for (face = 0; face < 6; face++)
+	{
+		static const int halves[2][3] = { { 0, 1, 2 }, { 0, 2, 3 } };
+		int half;
+
+		for (half = 0; half < 2; half++)
+			for (corner = 0; corner < 3; corner++)
+				memcpy(triangles + ((face * 2 + half) * 3 + corner) * 3, corners[faces[face][halves[half][corner]]],
+					sizeof(float) * 3);
+	}
+	memcpy(bounds, scene_object_low, sizeof(scene_object_low));
+	memcpy(bounds + 3, scene_object_high, sizeof(scene_object_high));
+	world_sdf_object_layout(bounds, &scene_object);
+	slice = scene_object.width * scene_object.height;
+	values = malloc(slice * scene_object.depth * 4 * sizeof(float));
+	solid = malloc(slice * scene_object.depth);
+	for (z = 0; z < scene_object.depth; z++)
+		world_sdf_object_slice(&scene_object, triangles, 12, scene_object_inside, NULL, z, values + z * slice * 4,
+			solid + z * slice);
+	if (!world_sdf_object_finish(&scene_object, values, solid))
+		abort();
+	free(values);
+	free(solid);
+	scene_atlas_size[0] = scene_object.width;
+	scene_atlas_size[1] = scene_object.height;
+	scene_atlas_size[2] = scene_object.depth + SCENE_FIELD_PLACE;
+	scene_atlas = calloc(slice * scene_atlas_size[2] * 4, sizeof(*scene_atlas));
+	scene_atlas_values = calloc(slice * scene_atlas_size[2] * 4, sizeof(*scene_atlas_values));
+	memcpy(scene_atlas + slice * SCENE_FIELD_PLACE * 4, scene_object.texels, slice * scene_object.depth * 4 * sizeof(short));
+	for (index = 0; index < slice * scene_atlas_size[2] * 4; index++)
+		scene_atlas_values[index] = world_sdf_half_value(scene_atlas[index]);
+	world_ao_objects_atlas(scene_atlas, scene_atlas_size[0], scene_atlas_size[1], scene_atlas_size[2]);
+	/* (its frame: turned, scaled) */
+	memset(axes, 0, sizeof(axes));
+	axes[0][0] = scale * cosf(angle);
+	axes[0][1] = scale * sinf(angle);
+	axes[1][0] = -scale * sinf(angle);
+	axes[1][1] = scale * cosf(angle);
+	axes[2][2] = scale;
+	memset(first, 0, sizeof(*first) * 3);
+	over = 1.0f / (scale * scale * scene_object.voxel);
+	for (axis = 0; axis < 3; axis++)
+	{
+		float *row = axis == 0 ? first[0].v[1] : axis == 1 ? first[1].v[0] : first[1].v[1];
+		unsigned long count = axis == 0 ? scene_object.width : axis == 1 ? scene_object.height : scene_object.depth;
+
+		for (k = 0; k < 3; k++)
+			row[k] = axes[axis][k] * over;
+		first[0].v[2][axis] = -(axes[axis][0] * position[0] + axes[axis][1] * position[1] + axes[axis][2] * position[2]) *
+			over - scene_object.origin[axis] / scene_object.voxel;
+		middle[axis] = scene_object.origin[axis] + 0.5f * scene_object.voxel * (float)(count - 1);
+		first[1].v[2][axis] = (float)(count - 1);
+		first[2].v[0][axis] = (float)(axis == 2 ? SCENE_FIELD_PLACE : 0) + 0.5f;
+		first[2].v[1][axis] = 1.0f / (float)scene_atlas_size[axis];
+		extents[axis] = 0.5f * (scene_object.bounds[3 + axis] - scene_object.bounds[axis]) / scene_object.voxel;
+		first[2].v[2][axis] = extents[axis];
+	}
+	for (axis = 0; axis < 3; axis++)
+		first[0].v[0][axis] = position[axis] + middle[0] * axes[0][axis] + middle[1] * axes[1][axis] + middle[2] * axes[2][axis];
+	first[0].v[0][3] = (float)_world_proxy_field;
+	for (axis = 0; axis < 3; axis++)
+		extents[axis] *= scene_object.voxel * scale;
+	areas = sqrtf((extents[1] * extents[2]) * (extents[1] * extents[2]) + (extents[0] * extents[2]) *
+		(extents[0] * extents[2]) + (extents[0] * extents[1]) * (extents[0] * extents[1]));
+	box_reach = sqrtf(extents[0] * extents[0] + extents[1] * extents[1] + extents[2] * extents[2]) +
+		sqrtf(510.0f * 4.0f / 3.14159265358979f * areas);
+	first[0].v[2][3] = scene_object.reach * scene_object.voxel * scale;
+	first[0].v[2][3] = box_reach < first[0].v[2][3] ? box_reach : first[0].v[2][3];
+	/* (its owner, 4, in each of its shapes) */
+	for (k = 0; k < 3; k++)
+		first[k].v[1][3] = 4.0f;
 }
 
 void scene_make(void)
@@ -160,27 +282,30 @@ void scene_make(void)
 	scene_proxies[2].v[2][0] = -axis_x[1] / length * 0.5f;
 	scene_proxies[2].v[2][1] = axis_x[0] / length * 0.5f;
 	scene_proxies[2].v[2][3] = 0.6f;
+	/* a vehicle's occlusion field, owner 4: three shapes */
+	scene_field(&scene_proxies[3]);
 	/* a second sphere of owner 0 */
-	scene_proxies[3] = scene_proxies[0];
-	scene_proxies[3].v[0][2] = 1.6f;
-	scene_proxies[3].v[2][0] = 0.3f;
+	scene_proxies[6] = scene_proxies[0];
+	scene_proxies[6].v[0][2] = 1.6f;
+	scene_proxies[6].v[2][0] = 0.3f;
 	/* a box along the axes, owner 3 */
-	scene_proxies[4].v[0][0] = 1.8f;
-	scene_proxies[4].v[0][1] = 1.5f;
-	scene_proxies[4].v[0][2] = 0.4f;
-	scene_proxies[4].v[0][3] = _world_proxy_box;
-	scene_proxies[4].v[1][0] = 0.6f;
-	scene_proxies[4].v[1][3] = 3.0f;
-	scene_proxies[4].v[2][1] = 0.4f;
-	scene_proxies[4].v[2][3] = 0.4f;
+	scene_proxies[7].v[0][0] = 1.8f;
+	scene_proxies[7].v[0][1] = 1.5f;
+	scene_proxies[7].v[0][2] = 0.4f;
+	scene_proxies[7].v[0][3] = _world_proxy_box;
+	scene_proxies[7].v[1][0] = 0.6f;
+	scene_proxies[7].v[1][3] = 3.0f;
+	scene_proxies[7].v[2][1] = 0.4f;
+	scene_proxies[7].v[2][3] = 0.4f;
 	memset(scene_parameters, 0, sizeof(scene_parameters));
 	scene_parameters[0][0] = 0.9f;
 	scene_parameters[0][1] = 0.7f;
 	scene_parameters[0][2] = 0.75f;
 	scene_parameters[0][3] = (float)SCENE_PROXIES;
 	scene_parameters[1][0] = 0.8f;
-	/* (the first three the dynamic objects', the capsule and the box the
-	static scenery's, which the field and the pages hold) */
+	/* (the first six the dynamic objects', the second sphere and the box
+	along the axes the static scenery's, which the field and the pages
+	hold) */
 	scene_parameters[1][1] = (float)SCENE_DYNAMIC;
 	{
 		static const float camera[3] = { 0.4f, -0.3f, 1.5f };
@@ -189,7 +314,7 @@ void scene_make(void)
 	}
 }
 
-/* a point about the shapes and the walls, a unit normal, an owner (-1 to 3)
+/* a point about the shapes and the walls, a unit normal, an owner (-1 to 4)
 and a reference */
 void scene_point(float point[3], float normal[3], float *owner, float *reference)
 {
@@ -211,7 +336,7 @@ void scene_point(float point[3], float normal[3], float *owner, float *reference
 	while (length < 0.1f || length > 1.0f);
 	for (axis = 0; axis < 3; axis++)
 		normal[axis] /= length;
-	*owner = (float)((int)(scene_random() * 5.0f) - 1);
+	*owner = (float)((int)(scene_random() * 6.0f) - 1);
 	*reference = 0.1f + 0.9f * scene_random();
 	/* (one in eight a static scenery placement's own draw: none of the field) */
 	if (scene_random() < 0.125f)
@@ -520,6 +645,23 @@ static int scene_pages_check(void)
 	return wrong ? 1 : 0;
 }
 
+/* how many of the first count points (as the cases') the field shades
+(its factor under 1 - 1/255): the check holds where it is found */
+static long scene_field_shaded(long count)
+{
+	long index, shaded = 0;
+
+	scene_seed = 12345;
+	for (index = 0; index < count; index++)
+	{
+		float point[3], normal[3], owner, reference;
+
+		scene_point(point, normal, &owner, &reference);
+		shaded += world_ao_proxies_occlusion(&scene_proxies[3], 3, point, normal, -1.0f) < 1.0f - 1.0f / 255.0f;
+	}
+	return shaded;
+}
+
 int main(int argc, char **argv)
 {
 	long count = argc > 2 && !strcmp(argv[1], "reference") ? atol(argv[2]) : 0, index;
@@ -572,7 +714,13 @@ int main(int argc, char **argv)
 	for (index = 0; index < WORLD_AO_GRID_CELLS / 2; index++)
 		for (j = 0; j < 4; j++)
 			printf("%s%u", index || j ? "," : "", scene_cells[index][j]);
-	printf("],\n\"pages\": [%.9g, %.9g],\n\"cases\": [\n", scene_pages[0], scene_pages[1]);
+	printf("],\n\"pages\": [%.9g, %.9g],\n", scene_pages[0], scene_pages[1]);
+	/* (the objects' atlas: its size, its texels' four values each) */
+	printf("\"objects\": [%lu, %lu, %lu], \"objects_texels\": [", scene_atlas_size[0], scene_atlas_size[1],
+		scene_atlas_size[2]);
+	for (voxel = 0; voxel < scene_atlas_size[0] * scene_atlas_size[1] * scene_atlas_size[2] * 4; voxel++)
+		printf("%s%.9g", voxel ? "," : "", scene_atlas_values[voxel]);
+	printf("],\n\"cases\": [\n");
 	for (index = 0; index < count; index++)
 	{
 		float point[3], normal[3], owner, reference;
@@ -592,7 +740,7 @@ int main(int argc, char **argv)
 				scene_proxy_count, point, normal, owner, given, lightmap, given >= 0.0f ? scene_pages[(int)given] : 1.0f));
 		}
 	}
-	printf("]}\n");
+	printf("], \"field_shaded\": %ld}\n", scene_field_shaded(count));
 	return 0;
 }
 #endif

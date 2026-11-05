@@ -29,6 +29,8 @@ extern long scene_proxy_count;
 extern float scene_parameters[2][4];
 extern float scene_grid[2][4];
 extern unsigned int scene_cells[WORLD_AO_GRID_CELLS / 2][4];
+extern float *scene_atlas_values;
+extern unsigned long scene_atlas_size[3];
 }
 
 #include <cstdio>
@@ -45,9 +47,10 @@ int main(int argc, char **argv)
 {
 	long count = argc > 2 ? atol(argv[1]) : 0, index, shape;
 	float tolerance = argc > 2 ? (float)atof(argv[2]) : 0.0f;
-	float worst_shape = 0.0f, worst_reach = 0.0f, worst_product = 0.0f, worst_field = 0.0f;
+	float worst_shape = 0.0f, worst_reach = 0.0f, worst_product = 0.0f, worst_field = 0.0f, worst_field_shape = 0.0f;
+	long shaded = 0;
 	static xgpu_world_ao block;
-	texture3d<float> field, table;
+	texture3d<float> field, table, objects;
 	static signed char atlas[16 * WORLD_SDF_ATLAS_LAYER_BYTES];
 
 	if (count <= 0)
@@ -84,9 +87,17 @@ int main(int argc, char **argv)
 	table.width = (int)scene_volume.header.width;
 	table.height = (int)scene_volume.header.height;
 	table.depth = (int)scene_volume.header.depth;
+	objects.values = scene_atlas_values;
+	objects.width = (int)scene_atlas_size[0];
+	objects.height = (int)scene_atlas_size[1];
+	objects.depth = (int)scene_atlas_size[2];
 	for (shape = 0; shape < scene_proxy_count; shape++)
 	{
 		float4 v0 = block.proxies[shape * 3], v1 = block.proxies[shape * 3 + 1], v2 = block.proxies[shape * 3 + 2];
+
+		/* (a vehicle's field, and its slots: its own, below) */
+		if (v0.w < 1.0f || v0.w > 3.0f)
+			continue;
 		float difference = std::fabs(world_proxy_reach(v0, v1, v2) - world_proxy_reach(&scene_proxies[shape]));
 
 		worst_reach = difference > worst_reach ? difference : worst_reach;
@@ -102,6 +113,27 @@ int main(int argc, char **argv)
 		for (shape = 0; shape < scene_proxy_count; shape++)
 		{
 			float4 v0 = block.proxies[shape * 3], v1 = block.proxies[shape * 3 + 1], v2 = block.proxies[shape * 3 + 2];
+
+			if (v0.w == 4.0f)
+			{
+				/* (a vehicle's field: its occlusion by its fades, against the
+				reference's) */
+				struct world_proxy const *proxy = &scene_proxies[shape];
+				float reach = proxy->v[2][3], away = 0.0f, fade, expected;
+
+				for (int axis = 0; axis < 3; axis++)
+					away += (point[axis] - proxy->v[0][axis]) * (point[axis] - proxy->v[0][axis]);
+				away = std::sqrt(away);
+				fade = away >= reach ? 0.0f : std::fmin(std::fmax((reach - away) / (reach * WORLD_AO_REACH_FADE), 0.0f), 1.0f) *
+					world_ao_field_proxy_fade(proxy, point, normal);
+				expected = fade > 0.0f ? world_ao_field_proxy_occlusion(proxy, point, normal) * fade : 0.0f;
+				difference = std::fabs(world_proxy_field(block, objects, (int)shape, p, n, v0, v1, v2) - expected);
+				worst_field_shape = difference > worst_field_shape ? difference : worst_field_shape;
+				shaded += expected > 1.0f / 255.0f;
+				continue;
+			}
+			if (v0.w < 1.0f || v0.w > 3.0f)
+				continue;
 			float found = v0.w == 1.0f ? world_proxy_sphere(p, n, v0.xyz, v2.x) :
 				v0.w == 2.0f ? world_proxy_capsule(p, n, v0.xyz, v1.xyz, v2.x) :
 				world_proxy_box(p, n, v0.xyz, v1.xyz, v2.xyz, v2.w);
@@ -119,7 +151,7 @@ int main(int argc, char **argv)
 		/* (every shape, or the dynamic objects' alone: the first three) */
 		int limit = index % 2 ? 64 : 3;
 
-		difference = std::fabs(world_proxies_occlusion(block, p, n, owner, limit) -
+		difference = std::fabs(world_proxies_occlusion(block, objects, p, n, owner, limit) -
 			world_ao_proxies_occlusion(scene_proxies, limit < scene_proxy_count ? limit : scene_proxy_count, point, normal,
 			owner));
 		worst_product = difference > worst_product ? difference : worst_product;
@@ -130,6 +162,8 @@ int main(int argc, char **argv)
 			world_ao_field_occlusion_from(&scene_volume, point, normal, own));
 		worst_field = difference > worst_field ? difference : worst_field;
 	}
-	printf("shapes %.3g reach %.3g proxies %.3g field %.3g\n", worst_shape, worst_reach, worst_product, worst_field);
-	return worst_shape > tolerance || worst_reach > tolerance || worst_product > tolerance || worst_field > tolerance;
+	printf("shapes %.3g reach %.3g proxies %.3g field %.3g; a vehicle's field %.3g at %ld points it shades\n", worst_shape,
+		worst_reach, worst_product, worst_field, worst_field_shape, shaded);
+	return worst_shape > tolerance || worst_reach > tolerance || worst_product > tolerance || worst_field > tolerance ||
+		worst_field_shape > tolerance || shaded < count / 20;
 }

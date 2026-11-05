@@ -6,7 +6,11 @@ and its cache file and the sign's copy of the collision BSP's point test
 distances: a plane, a box room, a sphere, a box signed by a BSP of its six
 planes, and a soup of triangles against every triangle's distance (the
 narrow band misses none); each with its bricks' shared faces alike and its
-cells without a brick truly out of range. */
+cells without a brick truly out of range. The vehicles' occlusion fields:
+their grid's layout within its budget, the bake of a box against the
+cosine-weighted hemisphere's integral (4,096 directions), the same however
+its slices are taken, half floats, their places in the atlas, and their
+part of the file. */
 
 #include "harness.h"
 
@@ -927,7 +931,51 @@ static void cache_volume(struct world_sdf_volume *volume)
 	volume->scenery.texels = malloc(WORLD_SDF_SCENERY_LEAST_SIDE * WORLD_SDF_SCENERY_LEAST_SIDE);
 	for (index = 0; index < WORLD_SDF_SCENERY_LEAST_SIDE * WORLD_SDF_SCENERY_LEAST_SIDE; index++)
 		volume->scenery.texels[index] = (unsigned char)(index * 13);
+	/* (the vehicles' part: two objects, 3x2x2 and 2x2x1 voxels) */
+	memset(&volume->objects, 0, sizeof(volume->objects));
+	volume->objects.count = 2;
+	volume->objects.objects = calloc(2, sizeof(*volume->objects.objects));
+	for (index = 0; index < 2; index++)
+	{
+		struct world_sdf_object *object = &volume->objects.objects[index];
+		unsigned long texel;
+
+		object->definition = index ? 0xE5FE0001L : 12;
+		object->width = index ? 2 : 3;
+		object->height = 2;
+		object->depth = index ? 1 : 2;
+		object->origin[0] = -1.5f;
+		object->origin[1] = 0.25f * (float)index;
+		object->origin[2] = 2.0f;
+		object->voxel = 0.125f;
+		object->reach = 40.5f;
+		object->bounds[0] = -1.0f;
+		object->bounds[1] = -0.5f;
+		object->bounds[2] = 2.25f;
+		object->bounds[3] = 1.0f;
+		object->bounds[4] = 0.5f;
+		object->bounds[5] = 3.0f;
+		object->texels = malloc(object->width * object->height * object->depth * 4 * sizeof(unsigned short));
+		for (texel = 0; texel < object->width * object->height * object->depth * 4; texel++)
+			object->texels[texel] = world_sdf_half((float)(texel % 7) * 0.125f - 0.25f);
+	}
 }
+
+/* the objects' part's bytes (the count, each object's 15 words, the texels) */
+static unsigned long cache_objects(struct world_sdf_volume const *volume)
+{
+	unsigned long bytes = 4, index;
+
+	for (index = 0; index < volume->objects.count; index++)
+	{
+		struct world_sdf_object const *object = &volume->objects.objects[index];
+
+		bytes += 60 + object->width * object->height * object->depth * 8;
+	}
+	return bytes;
+}
+
+static unsigned long cache_objects(struct world_sdf_volume const *volume);
 
 /* the scenery part's bytes (its counts, its pages' layers, its placements,
 its layers' texels) */
@@ -941,7 +989,7 @@ static unsigned long cache_scenery(struct world_sdf_volume const *volume)
 static unsigned long cache_payload(struct world_sdf_volume const *volume)
 {
 	return volume->header.width * volume->header.height * volume->header.depth * 4 +
-		volume->header.brick_count * WORLD_SDF_BRICK_VOXELS + cache_scenery(volume);
+		volume->header.brick_count * WORLD_SDF_BRICK_VOXELS + cache_scenery(volume) + cache_objects(volume);
 }
 
 static void round_trip_case(void)
@@ -954,10 +1002,10 @@ static void round_trip_case(void)
 	payload = cache_payload(&volume);
 	cells = volume.header.width * volume.header.height * volume.header.depth;
 	bytes = sdf_file_pack(&volume, &size);
-	CHECK(bytes && size == 72 + payload + 4 + 4, "%lu", size);
+	CHECK(bytes && size == 80 + payload + 4 + 4, "%lu", size);
 	/* (the header field by field, little-endian, at fixed places) */
 	CHECK(bytes[0] == 'W' && bytes[1] == 'S' && bytes[2] == 'D' && bytes[3] == 'F', "magic");
-	CHECK(sdf_get32(bytes + 4) == 3, "version");
+	CHECK(sdf_get32(bytes + 4) == 4, "version");
 	CHECK(sdf_get32(bytes + 8) == 0xC0FFEE12UL && sdf_get32(bytes + 12) == 2, "checksum, bsp");
 	CHECK(sdf_get32(bytes + 16) == volume.header.width && sdf_get32(bytes + 20) == volume.header.height &&
 		sdf_get32(bytes + 24) == volume.header.depth, "size");
@@ -965,12 +1013,13 @@ static void round_trip_case(void)
 	CHECK(sdf_get32(bytes + 52) == 1234 && sdf_get32(bytes + 56) == 7, "bake time, threads");
 	CHECK(sdf_get32(bytes + 60) == volume.header.brick_count && volume.header.brick_count, "bricks");
 	CHECK(sdf_get32(bytes + 64) == cache_scenery(&volume), "the scenery's part's bytes");
+	CHECK(sdf_get32(bytes + 72) == cache_objects(&volume) && cache_objects(&volume), "the objects' part's bytes");
 	/* (the cells first, then the bricks, then the scenery's part: the
 	stored stand-in deflate's) */
-	CHECK(!memcmp(bytes + 76, volume.cells, cells * 4) && !memcmp(bytes + 76 + cells * 4, volume.bricks,
+	CHECK(!memcmp(bytes + 84, volume.cells, cells * 4) && !memcmp(bytes + 84 + cells * 4, volume.bricks,
 		volume.header.brick_count * WORLD_SDF_BRICK_VOXELS), "payload");
 	{
-		unsigned char const *part = bytes + 76 + cells * 4 + volume.header.brick_count * WORLD_SDF_BRICK_VOXELS;
+		unsigned char const *part = bytes + 84 + cells * 4 + volume.header.brick_count * WORLD_SDF_BRICK_VOXELS;
 
 		CHECK(sdf_get32(part) == 3 && sdf_get32(part + 4) == 1 && sdf_get32(part + 8) == 16 &&
 			sdf_get32(part + 12) == 16 && sdf_get32(part + 16) == 2, "the scenery's counts");
@@ -991,6 +1040,24 @@ static void round_trip_case(void)
 		back.scenery.placement_count == 2 && back.scenery.placements[0].definition == (long)0xE1F20003L &&
 		back.scenery.placements[1].position[2] == -2.25f &&
 		!memcmp(back.scenery.texels, volume.scenery.texels, 16 * 16), "the scenery's part");
+	{
+		unsigned long index;
+
+		CHECK(back.objects.count == 2, "%lu objects", back.objects.count);
+		for (index = 0; index < 2; index++)
+		{
+			struct world_sdf_object const *a = &volume.objects.objects[index], *b = &back.objects.objects[index];
+
+			CHECK(a->definition == b->definition && a->width == b->width && a->height == b->height &&
+				a->depth == b->depth && !memcmp(a->origin, b->origin, sizeof(a->origin)) && a->voxel == b->voxel &&
+				a->reach == b->reach && !memcmp(a->bounds, b->bounds, sizeof(a->bounds)) &&
+				!memcmp(a->texels, b->texels, a->width * a->height * a->depth * 8), "object %lu", index);
+			/* (put in the atlas as it is read) */
+			CHECK(b->atlas[0] != ~0UL, "object %lu not in the atlas", index);
+		}
+		CHECK(back.objects.atlas_width == 3 && back.objects.atlas_height == 2 && back.objects.atlas_depth == 3,
+			"the atlas %lux%lux%lu", back.objects.atlas_width, back.objects.atlas_height, back.objects.atlas_depth);
+	}
 	{
 		/* (no .tmp left beside it) */
 		char temporary[300];
@@ -1030,12 +1097,12 @@ static void rejected_word(unsigned char const *bytes, unsigned char *changed, un
 }
 
 /* a copy with a byte of the payload changed (the stored stand-in
-deflate's, at 76), and its CRC made again */
+deflate's, at 84), and its CRC made again */
 static void rejected_byte(unsigned char const *bytes, unsigned char *changed, unsigned long size, unsigned long offset,
 	unsigned char value, char const *why)
 {
 	memcpy(changed, bytes, size);
-	changed[76 + offset] = value;
+	changed[84 + offset] = value;
 	sdf_put32(changed + size - 4, sdf_crc(0, changed, size - 4));
 	rejected(changed, size, 0xC0FFEE12UL, 2, why);
 }
@@ -1061,7 +1128,7 @@ static void rejection_case(void)
 	rejected(changed, size, 0xC0FFEE12UL, 2, "magic");
 	rejected_word(bytes, changed, size, 4, WORLD_SDF_VERSION + 1, "version");
 	memcpy(changed, bytes, size);
-	changed[72 + 100] ^= 1;
+	changed[80 + 100] ^= 1;
 	rejected(changed, size, 0xC0FFEE12UL, 2, "a voxel's bit");
 	rejected_word(bytes, changed, size, 16, volume.header.width + 1, "size against the cells");
 	rejected_word(bytes, changed, size, 60, volume.header.brick_count + 1, "bricks against the payload");
@@ -1081,8 +1148,20 @@ static void rejection_case(void)
 		rejected_byte(bytes, changed, size, part + 22, 0xFE, "a page's layer under none");
 		rejected_byte(bytes, changed, size, part + 9, 4, "the pages wider than their bytes");
 		rejected_byte(bytes, changed, size, part + 4, 0, "fewer layers than their bytes");
+		/* (the objects' part, after the scenery's: its count, then the first
+		object's definition, width (at 8), voxel (at 32), reach (36),
+		bounds (40 to 60), then the texels after both objects) */
+		part += cache_scenery(&volume);
+		rejected_byte(bytes, changed, size, part + 0, 3, "more objects than their bytes");
+		rejected_byte(bytes, changed, size, part + 0, 0, "no objects in a part of some bytes");
+		rejected_byte(bytes, changed, size, part + 8, 97, "an object wider than the most");
+		rejected_byte(bytes, changed, size, part + 8, 4, "an object wider than its texels");
+		rejected_byte(bytes, changed, size, part + 32 + 3, 0xFF, "a voxel of NaN");
+		rejected_byte(bytes, changed, size, part + 36 + 3, 0xBF, "a reach under none");
+		rejected_byte(bytes, changed, size, part + 52 + 3, 0xC2, "bounds the wrong way round");
+		rejected_byte(bytes, changed, size, part + 4 + 2 * 60 + 1, 0x7C, "a texel of no number");
 	}
-	CHECK(logged >= 18, "%d deletions logged", logged);
+	CHECK(logged >= 26, "%d deletions logged", logged);
 	/* (and the good one still taken) */
 	CHECK(sdf_file_write(cache_path(), bytes, size) && sdf_cache_load(cache_path(), 0xC0FFEE12UL, 2, &back), "good");
 	remove(cache_path());
@@ -1090,6 +1169,333 @@ static void rejection_case(void)
 	free(changed);
 	free(bytes);
 	volume_free(&volume);
+}
+
+/* ---------- the vehicles' occlusion fields */
+
+/* (its x faces half a voxel off the grid's voxels, an even count of them
+centred over it: a point just outside them is filtered with the voxel
+inside) */
+static float const object_low[3] = { -1.0001f, -0.5f, 0.4f }, object_high[3] = { 1.0001f, 0.5f, 1.2f };
+
+static int inside_object(void *context, float const point[3])
+{
+	(void)context;
+	return point[0] > object_low[0] && point[0] < object_high[0] && point[1] > object_low[1] && point[1] < object_high[1] &&
+		point[2] > object_low[2] && point[2] < object_high[2];
+}
+
+/* the box's share of a point's cosine-weighted hemisphere, numerically:
+4,096 directions of a Fibonacci sphere, each ray's hit of the box (slabs) */
+static float object_exact(float const point[3], float const normal[3])
+{
+	long index, count = 4096;
+	float sum = 0.0f;
+
+	if (inside_object(NULL, point))
+		return 1.0f;
+	for (index = 0; index < count; index++)
+	{
+		float z = 1.0f - (2.0f * (float)index + 1.0f) / (float)count, r = sqrtf(1.0f - z * z);
+		float angle = (float)index * 2.39996323f, d[3], cosine, near = 0.0f, far = 1.0e30f;
+		int axis, hit = 1;
+
+		d[0] = r * cosf(angle);
+		d[1] = r * sinf(angle);
+		d[2] = z;
+		cosine = d[0] * normal[0] + d[1] * normal[1] + d[2] * normal[2];
+		if (cosine <= 0.0f)
+			continue;
+		for (axis = 0; axis < 3 && hit; axis++)
+		{
+			if (fabsf(d[axis]) < 1.0e-9f)
+			{
+				hit = point[axis] > object_low[axis] && point[axis] < object_high[axis];
+				continue;
+			}
+			{
+				float a = (object_low[axis] - point[axis]) / d[axis], b = (object_high[axis] - point[axis]) / d[axis];
+
+				if (a > b)
+				{
+					float t = a;
+
+					a = b;
+					b = t;
+				}
+				near = a > near ? a : near;
+				far = b < far ? b : far;
+				hit = near <= far;
+			}
+		}
+		if (hit && far > 0.0f)
+			sum += cosine;
+	}
+	return sum * 4.0f / (float)count;
+}
+
+/* the box's field baked as world_sdf.c bakes it, its slices in order (or
+from the last) */
+static void object_bake(struct world_sdf_object *object, int backwards)
+{
+	float bounds[6];
+	unsigned long slice, z;
+	float *values;
+	unsigned char *solid;
+
+	triangle_count = 0;
+	box_add(object_low, object_high);
+	memcpy(bounds, object_low, sizeof(object_low));
+	memcpy(bounds + 3, object_high, sizeof(object_high));
+	world_sdf_object_layout(bounds, object);
+	slice = object->width * object->height;
+	values = malloc(slice * object->depth * 4 * sizeof(float));
+	solid = malloc(slice * object->depth);
+	for (z = 0; z < object->depth; z++)
+	{
+		unsigned long at = backwards ? object->depth - 1 - z : z;
+
+		world_sdf_object_slice(object, positions, triangle_count, inside_object, NULL, at, values + at * slice * 4,
+			solid + at * slice);
+	}
+	CHECK(world_sdf_object_finish(object, values, solid), "finished");
+	free(values);
+	free(solid);
+}
+
+static void object_layout_case(void)
+{
+	/* a small vehicle: the least voxel and the least margin; a large one:
+	the most margin and a voxel grown to fit the budget */
+	float const small[6] = { -1.0f, -0.5f, 0.0f, 1.0f, 0.5f, 1.0f };
+	float const large[6] = { -6.0f, -5.0f, 0.0f, 6.0f, 5.0f, 4.0f };
+	struct world_sdf_object object;
+	int axis;
+
+	world_sdf_object_layout(small, &object);
+	CHECK(object.voxel == WORLD_SDF_OBJECT_LEAST_VOXEL, "%g", object.voxel);
+	for (axis = 0; axis < 3; axis++)
+	{
+		unsigned long count = axis == 0 ? object.width : axis == 1 ? object.height : object.depth;
+
+		/* (the bounds and the margin each way, within a voxel) */
+		CHECK(object.origin[axis] <= small[axis] - WORLD_SDF_OBJECT_LEAST_MARGIN + 1.0e-4f &&
+			object.origin[axis] >= small[axis] - WORLD_SDF_OBJECT_LEAST_MARGIN - object.voxel, "small low %d", axis);
+		CHECK(object.origin[axis] + (float)(count - 1) * object.voxel >= small[3 + axis] + WORLD_SDF_OBJECT_LEAST_MARGIN -
+			1.0e-4f, "small high %d", axis);
+	}
+	CHECK(!memcmp(object.bounds, small, sizeof(small)), "its bounds");
+	world_sdf_object_layout(large, &object);
+	CHECK(object.voxel > WORLD_SDF_OBJECT_LEAST_VOXEL, "%g", object.voxel);
+	CHECK(object.width * object.height * object.depth <= WORLD_SDF_OBJECT_MOST_VOXELS &&
+		object.width <= WORLD_SDF_OBJECT_MOST_SIDE && object.height <= WORLD_SDF_OBJECT_MOST_SIDE &&
+		object.depth <= WORLD_SDF_OBJECT_MOST_SIDE, "%lux%lux%lu", object.width, object.height, object.depth);
+	/* (the voxel a step finer would not have fitted) */
+	{
+		float finer = object.voxel / WORLD_SDF_OBJECT_GROWTH;
+		unsigned long w = (unsigned long)ceilf((12.0f + 2.0f * WORLD_SDF_OBJECT_MOST_MARGIN) / finer) + 1;
+		unsigned long h = (unsigned long)ceilf((10.0f + 2.0f * WORLD_SDF_OBJECT_MOST_MARGIN) / finer) + 1;
+		unsigned long d = (unsigned long)ceilf((4.0f + 2.0f * WORLD_SDF_OBJECT_MOST_MARGIN) / finer) + 1;
+
+		CHECK(w * h * d > WORLD_SDF_OBJECT_MOST_VOXELS || w > WORLD_SDF_OBJECT_MOST_SIDE, "a finer voxel fits");
+	}
+	CHECK(object.origin[0] <= -6.0f - WORLD_SDF_OBJECT_MOST_MARGIN + 1.0e-4f, "large margin");
+}
+
+static void object_bake_case(void)
+{
+	/* the box's field against the integral: on the ground about it and
+	under it (facing up), near its faces at random normals, and just outside
+	its faces facing away (none: its inside's darkness filtered in would
+	show there); past its reach, under 1/510 */
+	struct world_sdf_object object;
+	double ground = 0.0, near = 0.0, most_ground = 0.0, most_near = 0.0;
+	unsigned long seed = 7;
+	int index, counted_ground = 0, counted_near = 0;
+
+	object_bake(&object, 0);
+	for (index = 0; index < 4000; index++)
+	{
+		float point[3], normal[3] = { 0.0f, 0.0f, 1.0f }, error;
+		int axis;
+
+		for (axis = 0; axis < 3; axis++)
+		{
+			seed = seed * 1103515245UL + 12345UL;
+			point[axis] = (float)((seed >> 8) & 0xFFFF) / 65535.0f;
+		}
+		if (index < 2000)
+		{
+			/* (the ground 0.4 under the box, about it) */
+			point[0] = -3.0f + 6.0f * point[0];
+			point[1] = -2.5f + 5.0f * point[1];
+			point[2] = 0.0f;
+			error = fabsf(world_sdf_object_occlusion(&object, point, normal) - object_exact(point, normal));
+			ground += error;
+			most_ground = error > most_ground ? error : most_ground;
+			counted_ground++;
+			continue;
+		}
+		point[0] = -2.0f + 4.0f * point[0];
+		point[1] = -1.5f + 3.0f * point[1];
+		point[2] = 0.0f + 2.0f * point[2];
+		/* (outside it, by 0.05 or more: a surface touching it is its own
+		object's contact, a voxel's width from its filled inside) */
+		if (inside_object(NULL, point) || box_distance(point, object_low, object_high) < 0.05f)
+			continue;
+		for (axis = 0; axis < 3; axis++)
+		{
+			seed = seed * 1103515245UL + 12345UL;
+			normal[axis] = (float)((seed >> 8) & 0xFFFF) / 32767.5f - 1.0f;
+		}
+		{
+			float length = sqrtf(normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]);
+
+			if (length < 0.1f)
+				continue;
+			for (axis = 0; axis < 3; axis++)
+				normal[axis] /= length;
+		}
+		error = fabsf(world_sdf_object_occlusion(&object, point, normal) - object_exact(point, normal));
+		near += error;
+		most_near = error > most_near ? error : most_near;
+		counted_near++;
+	}
+	ground /= counted_ground;
+	near /= counted_near;
+	printf("object field: ground mean %.2f max %.1f, near mean %.2f max %.1f (/255)\n", 255.0 * ground, 255.0 * most_ground,
+		255.0 * near, 255.0 * most_near);
+	/* (measured 2.2 and 18, 2.7 and 22: the fit's own, a clamped plane of
+	the normal) */
+	CHECK(ground * 255.0 < 3.0 && most_ground * 255.0 < 24.0, "ground: mean %.2f max %.1f", 255.0 * ground,
+		255.0 * most_ground);
+	CHECK(near * 255.0 < 3.5 && most_near * 255.0 < 32.0, "near: mean %.2f max %.1f", 255.0 * near, 255.0 * most_near);
+	{
+		/* (0.03 outside each face, facing away from it: none) */
+		static const float points[6][3] = { { 1.0301f, 0.0f, 0.8f }, { -1.0301f, 0.0f, 0.8f }, { 0.0f, 0.53f, 0.8f },
+			{ 0.0f, -0.53f, 0.8f }, { 0.0f, 0.0f, 1.23f }, { 0.0f, 0.0f, 0.37f } };
+		static const float normals[6][3] = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } };
+
+		for (index = 0; index < 6; index++)
+		{
+			float occlusion = world_sdf_object_occlusion(&object, points[index], normals[index]);
+
+			CHECK(occlusion < 0.06f, "face %d facing away: %g", index, occlusion);
+		}
+	}
+	{
+		/* (past its reach, from the grid's middle, every way: under 1/510) */
+		float middle[3];
+		int axis;
+
+		middle[0] = object.origin[0] + 0.5f * object.voxel * (float)(object.width - 1);
+		middle[1] = object.origin[1] + 0.5f * object.voxel * (float)(object.height - 1);
+		middle[2] = object.origin[2] + 0.5f * object.voxel * (float)(object.depth - 1);
+		CHECK(object.reach > 0.0f, "reach %g", object.reach);
+		for (index = 0; index < 200; index++)
+		{
+			float point[3], normal[3], length = 0.0f;
+
+			for (axis = 0; axis < 3; axis++)
+			{
+				seed = seed * 1103515245UL + 12345UL;
+				normal[axis] = (float)((seed >> 8) & 0xFFFF) / 32767.5f - 1.0f;
+				length += normal[axis] * normal[axis];
+			}
+			length = sqrtf(length);
+			for (axis = 0; axis < 3; axis++)
+			{
+				normal[axis] /= length;
+				point[axis] = middle[axis] + normal[axis] * object.reach * object.voxel * 1.01f;
+				/* (facing the box: the most it can be) */
+				normal[axis] = -normal[axis];
+			}
+			CHECK(world_sdf_object_occlusion(&object, point, normal) < 1.0f / 510.0f, "past the reach: %g",
+				world_sdf_object_occlusion(&object, point, normal));
+		}
+	}
+	free(object.texels);
+}
+
+static void object_determinism_case(void)
+{
+	/* (its slices are each their own: baked in any order, the same bytes) */
+	struct world_sdf_object a, b;
+
+	object_bake(&a, 0);
+	object_bake(&b, 1);
+	CHECK(a.width == b.width && a.reach == b.reach && !memcmp(a.texels, b.texels, a.width * a.height * a.depth * 8),
+		"the slices' order changed the field");
+	free(a.texels);
+	free(b.texels);
+}
+
+static void object_half_case(void)
+{
+	static const float exact[] = { 0.0f, 1.0f, -1.0f, 0.5f, 0.25f, 0.125f, 2.0f, -0.75f, 65504.0f, 6.103515625e-05f };
+	unsigned long index;
+
+	for (index = 0; index < sizeof(exact) / sizeof(exact[0]); index++)
+		CHECK(world_sdf_half_value(world_sdf_half(exact[index])) == exact[index], "%g", exact[index]);
+	CHECK(world_sdf_half(1.0f) == 0x3C00 && world_sdf_half(-2.0f) == 0xC000, "bits");
+	/* (to nearest, ties to even: 1 + 2^-11 is halfway, 1 + 3 2^-11 rounds up) */
+	CHECK(world_sdf_half(1.0f + 1.0f / 2048.0f) == 0x3C00 && world_sdf_half(1.0f + 3.0f / 2048.0f) == 0x3C02, "rounding");
+	CHECK(world_sdf_half(1.0e6f) == 0x7C00 && world_sdf_half(1.0e-9f) == 0, "past its range");
+	for (index = 0; index < 2000; index++)
+	{
+		float value = ((float)index - 1000.0f) / 517.0f, back = world_sdf_half_value(world_sdf_half(value));
+
+		CHECK(fabsf(back - value) <= fabsf(value) / 2048.0f + 1.0e-7f, "%g %g", value, back);
+	}
+}
+
+static void object_atlas_case(void)
+{
+	/* objects stacked in columns, apart, within the atlas's side and bytes;
+	one too large none, and those past the budget none */
+	struct world_sdf_objects objects;
+	struct world_sdf_object list[6];
+	unsigned long placed, i, j;
+
+	memset(list, 0, sizeof(list));
+	for (i = 0; i < 6; i++)
+	{
+		list[i].width = 90;
+		list[i].height = 60 + i;
+		list[i].depth = 40;
+	}
+	list[2].width = 300;
+	objects.count = 6;
+	objects.objects = list;
+	placed = world_sdf_objects_place(&objects);
+	CHECK(list[2].atlas[0] == ~0UL, "too large placed");
+	CHECK(placed >= 1 && objects.atlas_width <= WORLD_SDF_OBJECT_ATLAS_SIDE &&
+		objects.atlas_depth <= WORLD_SDF_OBJECT_ATLAS_SIDE &&
+		objects.atlas_width * objects.atlas_height * objects.atlas_depth * WORLD_SDF_OBJECT_TEXEL <=
+		WORLD_SDF_OBJECT_ATLAS_BYTES, "%lu placed in %lux%lux%lu", placed, objects.atlas_width, objects.atlas_height,
+		objects.atlas_depth);
+	for (i = 0; i < 6; i++)
+	{
+		if (list[i].atlas[0] == ~0UL)
+			continue;
+		CHECK(list[i].atlas[0] + list[i].width <= objects.atlas_width && list[i].height <= objects.atlas_height &&
+			list[i].atlas[2] + list[i].depth <= objects.atlas_depth, "object %lu past the atlas", i);
+		for (j = 0; j < i; j++)
+		{
+			if (list[j].atlas[0] == ~0UL)
+				continue;
+			CHECK(list[i].atlas[0] >= list[j].atlas[0] + list[j].width || list[j].atlas[0] >= list[i].atlas[0] + list[i].width ||
+				list[i].atlas[2] >= list[j].atlas[2] + list[j].depth || list[j].atlas[2] >= list[i].atlas[2] + list[i].depth,
+				"objects %lu and %lu overlap", i, j);
+		}
+	}
+	/* (small ones all fit) */
+	for (i = 0; i < 6; i++)
+	{
+		list[i].width = list[i].height = 8;
+		list[i].depth = 50;
+	}
+	CHECK(world_sdf_objects_place(&objects) == 6, "the small ones");
 }
 
 int main(int argc, char **argv)
@@ -1120,6 +1526,16 @@ int main(int argc, char **argv)
 		round_trip_case();
 	else if (!strcmp(name, "rejection"))
 		rejection_case();
+	else if (!strcmp(name, "object_layout"))
+		object_layout_case();
+	else if (!strcmp(name, "object_bake"))
+		object_bake_case();
+	else if (!strcmp(name, "object_determinism"))
+		object_determinism_case();
+	else if (!strcmp(name, "object_half"))
+		object_half_case();
+	else if (!strcmp(name, "object_atlas"))
+		object_atlas_case();
 	else
 		return 2;
 	return 0;

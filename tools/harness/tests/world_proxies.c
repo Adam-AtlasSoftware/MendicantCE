@@ -1,7 +1,8 @@
 /* display.ambient_occlusion "world"'s object proxies (port/linux/game/world_proxies.c,
 test_world_proxies.py): each shape's analytic occlusion (the shaders' reference) against a numerical integral of the
-cosine-weighted hemisphere, its reach, a window's culling, order and owner slots, and the shapes made from a fake
-skeleton and placed on its nodes as they move. */
+cosine-weighted hemisphere, its reach, a window's culling, order and owner slots, the shapes made from a fake
+skeleton and placed on its nodes as they move, and a vehicle's occlusion field in place of its boxes (its three
+slots together, its wheels' spheres kept, its place, its reach, its boxes where it has none). */
 
 #include "harness.h"
 
@@ -70,6 +71,18 @@ int world_proxies_source_frustum(float planes[4][4])
 {
 	memcpy(planes, fake.planes, sizeof(fake.planes));
 	return fake.frustum;
+}
+
+/* (a vehicle's occlusion field, of definition 3, where field_known) */
+static int field_known;
+static struct world_proxies_source_field fake_field;
+
+int world_proxies_source_field(long definition, struct world_proxies_source_field *field)
+{
+	if (!field_known || (definition & 0xFFFF) != 3)
+		return 0;
+	*field = fake_field;
+	return 1;
 }
 
 int world_proxies_source_view(void)
@@ -886,6 +899,203 @@ static void baked_case(void)
 		dynamic_count, owners[2]);
 }
 
+/* a vehicle: a body box (node 0, 2 x 1 x 0.8) and a wheel (node 1) */
+static float field_body[8][3], field_wheel[8][3];
+
+static void field_definition(void)
+{
+	struct world_proxies_source *source = &fake.sources[3];
+	int corner;
+
+	memset(source, 0, sizeof(*source));
+	source->shape_class = _world_proxies_source_vehicle;
+	source->node_count = 2;
+	source->bounding_radius = 1.5f;
+	source->nodes[0].parent = -1;
+	identity(&source->nodes[0].default_frame, 0.0f, 0.0f, 0.0f);
+	source->nodes[1].parent = 0;
+	source->nodes[1].wheel = 1;
+	identity(&source->nodes[1].default_frame, 0.8f, 0.6f, 0.2f);
+	for (corner = 0; corner < 8; corner++)
+	{
+		field_body[corner][0] = corner & 1 ? 1.0f : -1.0f;
+		field_body[corner][1] = corner & 2 ? 0.5f : -0.5f;
+		field_body[corner][2] = corner & 4 ? 0.8f : 0.0f;
+		field_wheel[corner][0] = corner & 1 ? 0.2f : -0.2f;
+		field_wheel[corner][1] = corner & 2 ? 0.2f : -0.2f;
+		field_wheel[corner][2] = corner & 4 ? 0.2f : -0.2f;
+	}
+	source->nodes[0].vertex_count = source->nodes[1].vertex_count = 8;
+	source->nodes[0].vertex_stride = source->nodes[1].vertex_stride = sizeof(float) * 3;
+	source->nodes[0].vertices = &field_body[0][0];
+	source->nodes[1].vertices = &field_wheel[0][0];
+	fake.source_known[3] = 1;
+	/* (its field: 0.25 voxels over the body and 1.5 about it, its place in
+	an atlas of 16 x 16 x 32) */
+	memset(&fake_field, 0, sizeof(fake_field));
+	fake_field.origin[0] = -2.5f;
+	fake_field.origin[1] = -2.0f;
+	fake_field.origin[2] = -1.475f;
+	fake_field.voxel = 0.25f;
+	fake_field.size[0] = 21;
+	fake_field.size[1] = 17;
+	fake_field.size[2] = 16;
+	fake_field.reach = 30.0f;
+	fake_field.bounds[0] = -1.0f;
+	fake_field.bounds[1] = -0.5f;
+	fake_field.bounds[2] = 0.0f;
+	fake_field.bounds[3] = 1.0f;
+	fake_field.bounds[4] = 0.5f;
+	fake_field.bounds[5] = 0.8f;
+	fake_field.place[2] = 5;
+	fake_field.atlas[0] = 32;
+	fake_field.atlas[1] = 32;
+	fake_field.atlas[2] = 64;
+}
+
+/* a field's place of a world point (its first slot's and the next's rows) */
+static void field_voxel(struct world_proxy const *proxy, float const point[3], float g[3])
+{
+	float const *rows[3] = { proxy[0].v[1], proxy[1].v[0], proxy[1].v[1] };
+	int axis;
+
+	for (axis = 0; axis < 3; axis++)
+		g[axis] = rows[axis][0] * point[0] + rows[axis][1] * point[1] + rows[axis][2] * point[2] + proxy[0].v[2][axis];
+}
+
+static void field_case(void)
+{
+	float const camera[3] = { -6.0f, 0.0f, 1.0f };
+	struct world_proxy proxies[WORLD_PROXY_MAXIMUM_PER_WINDOW];
+	long owners[WORLD_PROXY_MAXIMUM_PER_WINDOW], count, index;
+	int axis, kinds[NUMBER_OF_WORLD_PROXY_KINDS];
+
+	field_definition();
+	one_sphere_definition();
+	fake.frustum = 0;
+	add_instance(40, 3, 2.0f, 1.0f, 0.0f);
+	fake.frame_counts[0] = 2;
+	fake.frames[0][1] = fake.sources[3].nodes[1].default_frame;
+	fake.frames[0][1].position[0] += 2.0f;
+	fake.frames[0][1].position[1] += 1.0f;
+	/* none drawn: its box and its wheel's sphere */
+	field_known = 0;
+	count = world_proxies_window(camera, proxies, owners, WORLD_PROXY_MAXIMUM_PER_WINDOW, &dynamic_count);
+	memset(kinds, 0, sizeof(kinds));
+	for (index = 0; index < count; index++)
+		kinds[(int)proxies[index].v[0][3]]++;
+	CHECK(count == 2 && kinds[_world_proxy_box] == 1 && kinds[_world_proxy_sphere] == 1, "without: %ld", count);
+	/* drawn: its field in three slots together, in place of its box, and
+	its wheel's sphere */
+	field_known = 1;
+	count = world_proxies_window(camera, proxies, owners, WORLD_PROXY_MAXIMUM_PER_WINDOW, &dynamic_count);
+	memset(kinds, 0, sizeof(kinds));
+	for (index = 0; index < count; index++)
+		kinds[(int)proxies[index].v[0][3]]++;
+	CHECK(count == 4 && dynamic_count == 4 && kinds[_world_proxy_field] == 1 && kinds[_world_proxy_none] == 2 &&
+		kinds[_world_proxy_sphere] == 1 && kinds[_world_proxy_box] == 0, "with: %ld, %ld dynamic", count, dynamic_count);
+	for (index = 0; index < count; index++)
+	{
+		CHECK(owners[index] == 40 && proxies[index].v[1][3] == 0.0f, "slot %ld's owner", index);
+		if ((int)proxies[index].v[0][3] == _world_proxy_field)
+		{
+			CHECK(index + 2 < count && (int)proxies[index + 1].v[0][3] == _world_proxy_none &&
+				(int)proxies[index + 2].v[0][3] == _world_proxy_none, "its slots apart");
+			break;
+		}
+	}
+	{
+		struct world_proxy const *field = &proxies[index];
+		/* (its first voxel where the field's origin stands, on node 0 at 2, 1, 0) */
+		float origin[3] = { -0.5f, -1.0f, -1.475f }, g[3], middle[3];
+
+		field_voxel(field, origin, g);
+		CHECK(fabsf(g[0]) < 1.0e-4f && fabsf(g[1]) < 1.0e-4f && fabsf(g[2]) < 1.0e-4f, "its origin %g %g %g", g[0], g[1],
+			g[2]);
+		field_voxel(field, field[0].v[0], middle);
+		CHECK(fabsf(middle[0] - 10.0f) < 1.0e-3f && fabsf(middle[1] - 8.0f) < 1.0e-3f && fabsf(middle[2] - 7.5f) < 1.0e-3f,
+			"its middle %g %g %g", middle[0], middle[1], middle[2]);
+		CHECK(field[1].v[2][0] == 20.0f && field[1].v[2][1] == 16.0f && field[1].v[2][2] == 15.0f, "its last voxel");
+		CHECK(field[2].v[0][2] == 5.5f && field[2].v[1][0] == 1.0f / 32.0f && field[2].v[1][2] == 1.0f / 64.0f, "its atlas");
+		/* (its geometry's box in its voxels: half 4, 2, 1.6) */
+		CHECK(fabsf(field[2].v[2][0] - 4.0f) < 1.0e-4f && fabsf(field[2].v[2][1] - 2.0f) < 1.0e-4f &&
+			fabsf(field[2].v[2][2] - 1.6f) < 1.0e-4f && field[2].v[2][3] == 0.0f && field[1].v[2][3] == 0.0f, "its box");
+		/* (its reach: the field's, 7.5) */
+		CHECK(fabsf(field[0].v[2][3] - 7.5f) < 1.0e-4f, "reach %g", field[0].v[2][3]);
+		CHECK(world_proxy_reach(field) == field[0].v[2][3], "world_proxy_reach");
+	}
+	/* (a field reaching past its box's bound: the box's reach, from the
+	grid's middle) */
+	fake_field.reach = 1000.0f;
+	count = world_proxies_window(camera, proxies, owners, WORLD_PROXY_MAXIMUM_PER_WINDOW, &dynamic_count);
+	for (index = 0; index < count && (int)proxies[index].v[0][3] != _world_proxy_field; index++)
+		;
+	{
+		struct world_proxy box;
+		float reach;
+
+		memset(&box, 0, sizeof(box));
+		box.v[0][3] = (float)_world_proxy_box;
+		box.v[1][0] = 1.0f;
+		box.v[2][1] = 0.5f;
+		box.v[2][3] = 0.4f;
+		reach = world_proxy_reach(&box);
+		CHECK(index < count && fabsf(proxies[index].v[2][3] - reach) < 1.0e-3f, "capped reach %g, the box's %g",
+			index < count ? proxies[index].v[2][3] : -1.0f, reach);
+	}
+	fake_field.reach = 30.0f;
+	/* scaled twice: its voxels' place the same, its reach twice */
+	for (axis = 0; axis < 3; axis++)
+	{
+		int k;
+
+		for (k = 0; k < 3; k++)
+			fake.frames[0][0].axes[axis][k] *= 2.0f;
+	}
+	count = world_proxies_window(camera, proxies, owners, WORLD_PROXY_MAXIMUM_PER_WINDOW, &dynamic_count);
+	for (index = 0; index < count && (int)proxies[index].v[0][3] != _world_proxy_field; index++)
+		;
+	{
+		/* (its origin at 2 + 2 (-2.5), 1 + 2 (-2), 2 (-1.475)) */
+		float origin[3] = { -3.0f, -3.0f, -2.95f }, g[3];
+
+		CHECK(index < count, "scaled: no field");
+		field_voxel(&proxies[index], origin, g);
+		CHECK(fabsf(g[0]) < 1.0e-3f && fabsf(g[1]) < 1.0e-3f && fabsf(g[2]) < 1.0e-3f, "scaled origin %g %g %g", g[0], g[1],
+			g[2]);
+		CHECK(fabsf(proxies[index].v[2][3] - 15.0f) < 1.0e-3f, "scaled reach %g", proxies[index].v[2][3]);
+	}
+	for (axis = 0; axis < 3; axis++)
+	{
+		int k;
+
+		for (k = 0; k < 3; k++)
+			fake.frames[0][0].axes[axis][k] *= 0.5f;
+	}
+	/* a window too small for its field: none of it, never a part; with a
+	nearer sphere, the sphere and the wheel */
+	add_instance(41, 0, -5.0f, 0.0f, 1.0f);
+	count = world_proxies_window(camera, proxies, owners, 3, &dynamic_count);
+	memset(kinds, 0, sizeof(kinds));
+	for (index = 0; index < count; index++)
+		kinds[(int)proxies[index].v[0][3]]++;
+	CHECK(count <= 3 && kinds[_world_proxy_field] == 0 && kinds[_world_proxy_none] == 0, "three: %ld, %d fields, %d parts",
+		count, kinds[_world_proxy_field], kinds[_world_proxy_none]);
+	count = world_proxies_window(camera, proxies, owners, 4, &dynamic_count);
+	memset(kinds, 0, sizeof(kinds));
+	for (index = 0; index < count; index++)
+		kinds[(int)proxies[index].v[0][3]]++;
+	CHECK(count == 4 && kinds[_world_proxy_field] == 1 && kinds[_world_proxy_none] == 2 && owners[0] == 41,
+		"four: %ld, %d fields", count, kinds[_world_proxy_field]);
+	/* (a baked vehicle keeps its boxes: the field stands for a moving one) */
+	fake.instances[0].baked = 1;
+	count = world_proxies_window(camera, proxies, owners, WORLD_PROXY_MAXIMUM_PER_WINDOW, &dynamic_count);
+	memset(kinds, 0, sizeof(kinds));
+	for (index = 0; index < count; index++)
+		kinds[(int)proxies[index].v[0][3]]++;
+	CHECK(kinds[_world_proxy_field] == 0 && kinds[_world_proxy_box] == 1, "baked");
+}
+
 static void none_case(void)
 {
 	float const origin[3] = { 0.0f, 0.0f, 0.0f };
@@ -933,6 +1143,8 @@ int main(int argc, char **argv)
 		owner_case();
 	else if (!strcmp(name, "baked"))
 		baked_case();
+	else if (!strcmp(name, "field"))
+		field_case();
 	else if (!strcmp(name, "none"))
 		none_case();
 	else

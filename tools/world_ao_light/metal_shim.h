@@ -4,10 +4,11 @@ METAL_SHIM.H
 What of the Metal Shading Language the Metal emitter's display.ambient_
 occlusion "world" functions use (port/linux/src/xgpu_msl.c's world_ao_*),
 in C++, so that tools/world_ao_light/msl_check.cpp runs those functions'
-very text on the CPU: float3 and float4 (their components, .xyz, a
+very text on the CPU: float3 and float4 (their components, .xyz, .yzw, a
 component by index), their arithmetic, the few library functions, the
 constant address space, and a 3D texture sampled linear and clamped to its
-edge as a GPU samples it, and one read by texel.
+edge as a GPU samples it (of signed bytes, or of four floats a texel), and
+one read by texel.
 */
 
 #ifndef METAL_SHIM_H
@@ -27,6 +28,7 @@ struct float3
 	float &operator[](int i) { return i == 0 ? x : i == 1 ? y : z; }
 	float operator[](int i) const { return i == 0 ? x : i == 1 ? y : z; }
 	float3 &operator/=(float s) { x /= s; y /= s; z /= s; return *this; }
+	float3 &operator*=(float s) { x *= s; y *= s; z *= s; return *this; }
 };
 
 struct uint3
@@ -41,9 +43,9 @@ struct float4
 {
 	float x, y, z, w;
 	float r;
-	float3 xyz;
-	float4() : x(0.0f), y(0.0f), z(0.0f), w(0.0f), r(0.0f), xyz(0.0f) {}
-	float4(float a, float b, float c, float d) : x(a), y(b), z(c), w(d), r(a), xyz(a, b, c) {}
+	float3 xyz, yzw;
+	float4() : x(0.0f), y(0.0f), z(0.0f), w(0.0f), r(0.0f), xyz(0.0f), yzw(0.0f) {}
+	float4(float a, float b, float c, float d) : x(a), y(b), z(c), w(d), r(a), xyz(a, b, c), yzw(b, c, d) {}
 };
 
 static inline float3 operator+(float3 a, float3 b) { return float3(a.x + b.x, a.y + b.y, a.z + b.z); }
@@ -63,12 +65,14 @@ static inline float4 floor(float4 a)
 }
 static inline float3 floor(float3 a) { return float3(std::floor(a.x), std::floor(a.y), std::floor(a.z)); }
 static inline float3 min(float3 a, float3 b) { return float3(std::min(a.x, b.x), std::min(a.y, b.y), std::min(a.z, b.z)); }
+static inline float3 max(float3 a, float3 b) { return float3(std::max(a.x, b.x), std::max(a.y, b.y), std::max(a.z, b.z)); }
 static inline float3 clamp(float3 v, float3 low, float3 high)
 {
 	return float3(std::min(std::max(v.x, low.x), high.x), std::min(std::max(v.y, low.y), high.y),
 		std::min(std::max(v.z, low.z), high.z));
 }
 static inline float3 operator-(float3 a) { return float3(-a.x, -a.y, -a.z); }
+static inline float3 abs(float3 a) { return float3(std::fabs(a.x), std::fabs(a.y), std::fabs(a.z)); }
 static inline float dot(float3 a, float3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
 static inline float dot(float4 a, float4 b) { return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w; }
 static inline float length(float3 a) { return std::sqrt(dot(a, a)); }
@@ -100,7 +104,7 @@ struct uint4
 	uint x, y, z, w;
 };
 static inline float3 operator+(double s, float3 a) { return float3((float)s + a.x, (float)s + a.y, (float)s + a.z); }
-static inline float3 abs(float3 a) { return float3(std::fabs(a.x), std::fabs(a.y), std::fabs(a.z)); }
+
 static inline float3 log2(float3 a) { return float3(std::log2(a.x), std::log2(a.y), std::log2(a.z)); }
 static inline float3 sign(float3 a)
 {
@@ -132,6 +136,8 @@ template <typename T> struct texture3d
 {
 	const signed char *voxels;
 	const unsigned char *texels;
+	/* (or four floats a texel, filtered: the vehicles' fields' atlas) */
+	const float *values;
 	int width, height, depth;
 	float4 read(uint3 at) const
 	{
@@ -142,7 +148,7 @@ template <typename T> struct texture3d
 	float4 sample(sampler, float3 uvw, level) const
 	{
 		int size[3] = { width, height, depth }, base[3];
-		float fraction[3], result = 0.0f;
+		float fraction[3], result = 0.0f, results[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 
 		for (int axis = 0; axis < 3; axis++)
 		{
@@ -165,10 +171,18 @@ template <typename T> struct texture3d
 				at[axis] = at[axis] < 0 ? 0 : at[axis] >= size[axis] ? size[axis] - 1 : at[axis];
 				weight *= bit ? fraction[axis] : 1.0f - fraction[axis];
 			}
+			if (values)
+			{
+				for (int part = 0; part < 4; part++)
+					results[part] += weight * values[((at[2] * height + at[1]) * width + at[0]) * 4 + part];
+				continue;
+			}
 			float texel = (float)voxels[(at[2] * height + at[1]) * width + at[0]] / 127.0f;
 
 			result += weight * (texel < -1.0f ? -1.0f : texel);
 		}
+		if (values)
+			return float4(results[0], results[1], results[2], results[3]);
 		return float4(result, 0.0f, 0.0f, 1.0f);
 	}
 };

@@ -316,7 +316,7 @@ static struct
 	/* the enhanced dynamic lights' block and cells */
 	struct xgpu_metal_source dynamic_lights[2];
 	/* display.ambient_occlusion "world"'s field and block */
-	uint32_t world_ao_field, world_ao_table, world_ao_scenery;
+	uint32_t world_ao_field, world_ao_table, world_ao_scenery, world_ao_objects;
 	struct xgpu_metal_source world_ao_block;
 
 	/* an image for the presentation that a picture is copied into (a
@@ -3373,8 +3373,12 @@ void xgpu_metal_set_dynamic_lights(struct xgpu_metal_source block, struct xgpu_m
 	metal.dirty |= _dirty_dynamic_lights;
 }
 
-void xgpu_metal_set_world_ao(uint32_t field, uint32_t table, uint32_t scenery, struct xgpu_metal_source block)
+void xgpu_metal_set_world_ao(uint32_t field, uint32_t table, uint32_t scenery, uint32_t objects,
+	struct xgpu_metal_source block)
 {
+	if (metal.world_ao_objects != objects)
+		texture_contents(texture_get(objects));
+	metal.world_ao_objects = objects;
 	if (metal.world_ao_field != field)
 		texture_contents(texture_get(field));
 	if (metal.world_ao_table != table)
@@ -3563,6 +3567,7 @@ static BOOL draw_state_apply(id<MTLRenderCommandEncoder> render)
 		struct texture_entry *entry = texture_get(metal.world_ao_field);
 		struct texture_entry *table = texture_get(metal.world_ao_table);
 		struct texture_entry *scenery = texture_get(metal.world_ao_scenery);
+		struct texture_entry *objects = texture_get(metal.world_ao_objects);
 		NSUInteger offset = 0;
 		id<MTLBuffer> buffer = metal.world_ao_block.kind == XGPU_METAL_SOURCE_NONE ? nil :
 			source_buffer(metal.world_ao_block, &offset);
@@ -3579,6 +3584,8 @@ static BOOL draw_state_apply(id<MTLRenderCommandEncoder> render)
 		}
 		if (scenery)
 			[render setFragmentTexture:scenery->texture atIndex:XGPU_METAL_TEXTURE_WORLD_AO_SCENERY];
+		if (objects)
+			[render setFragmentTexture:objects->texture atIndex:XGPU_METAL_TEXTURE_WORLD_AO_OBJECTS];
 		if (buffer)
 		{
 			[render setVertexBuffer:buffer offset:offset atIndex:XGPU_METAL_BUFFER_WORLD_AO];
@@ -3587,10 +3594,11 @@ static BOOL draw_state_apply(id<MTLRenderCommandEncoder> render)
 	}
 	/* (the field too: in use until the draw's command buffer is done) */
 	{
-		uint32_t const fields[3] = { metal.world_ao_field, metal.world_ao_table, metal.world_ao_scenery };
+		uint32_t const fields[4] = { metal.world_ao_field, metal.world_ao_table, metal.world_ao_scenery,
+			metal.world_ao_objects };
 		int part;
 
-		for (part = 0; part < 3; part++)
+		for (part = 0; part < 4; part++)
 		{
 			struct texture_entry *entry = texture_get(fields[part]);
 

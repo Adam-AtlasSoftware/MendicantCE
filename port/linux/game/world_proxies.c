@@ -65,7 +65,9 @@ struct world_proxies_cache_entry
 
 struct world_proxies_candidate
 {
-	struct world_proxy proxy;
+	/* (a vehicle's occlusion field's three, else one) */
+	struct world_proxy proxies[WORLD_PROXY_FIELD_SLOTS];
+	short slots;
 	long owner;
 	float distance;
 	/* (a static scenery placement the field and its pages hold) */
@@ -86,6 +88,7 @@ static struct
 	struct world_proxies_source_instance instances[WORLD_PROXIES_MAXIMUM_INSTANCES];
 	struct world_proxies_frame frames[WORLD_PROXIES_SOURCE_MAXIMUM_NODES];
 	struct world_proxies_candidate candidates[WORLD_PROXY_MAXIMUM_PER_WINDOW];
+	long candidate_count, candidate_slots;
 } world_proxies;
 
 /* ---------- vectors */
@@ -511,6 +514,11 @@ float world_proxy_reach(struct world_proxy const *proxy)
 		length = length3(axis);
 		return 0.5f * length + 16.0f * sqrtf(radius * radius + 2.0f * radius * length / WORLD_PROXIES_PI);
 	}
+	case _world_proxy_field:
+		/* (its own: past it, under 1/510) */
+		return proxy->v[2][3];
+	case _world_proxy_none:
+		return 0.0f;
 	case _world_proxy_box:
 	{
 		/* world_proxy_box_fade's U is at most 4 |A| / (pi D^2), A its faces'
@@ -1153,6 +1161,9 @@ static void view_basis(float const axis[3], float x[3], float y[3])
 
 static void view_proxy(struct world_proxy const *proxy)
 {
+	/* (a vehicle's occlusion field, and its slots after the first: none drawn) */
+	if ((int)proxy->v[0][3] < _world_proxy_sphere || (int)proxy->v[0][3] > _world_proxy_box)
+		return;
 	float const x_axis[3] = { 1.0f, 0.0f, 0.0f }, y_axis[3] = { 0.0f, 1.0f, 0.0f }, z_axis[3] = { 0.0f, 0.0f, 1.0f };
 	int k;
 
@@ -1239,6 +1250,82 @@ static int candidate_before(int baked, float distance, struct world_proxies_cand
 	return baked != candidate->baked ? !baked : distance < candidate->distance;
 }
 
+/* a candidate kept, nearest first (the dynamic objects' first), the
+farthest dropped while the window's slots are short; FALSE if it is not */
+static int candidate_add(struct world_proxy const *proxies, short slots, long owner, float distance, int baked,
+	long maximum)
+{
+	long i;
+
+	while (world_proxies.candidate_slots + slots > maximum && world_proxies.candidate_count > 0 &&
+		candidate_before(baked, distance, &world_proxies.candidates[world_proxies.candidate_count - 1]))
+	{
+		world_proxies.candidate_slots -= world_proxies.candidates[--world_proxies.candidate_count].slots;
+	}
+	if (world_proxies.candidate_slots + slots > maximum || world_proxies.candidate_count >= WORLD_PROXY_MAXIMUM_PER_WINDOW)
+		return 0;
+	for (i = world_proxies.candidate_count; i > 0 && candidate_before(baked, distance, &world_proxies.candidates[i - 1]); i--)
+		world_proxies.candidates[i] = world_proxies.candidates[i - 1];
+	memcpy(world_proxies.candidates[i].proxies, proxies, sizeof(*proxies) * (size_t)slots);
+	world_proxies.candidates[i].slots = slots;
+	world_proxies.candidates[i].owner = owner;
+	world_proxies.candidates[i].distance = distance;
+	world_proxies.candidates[i].baked = baked;
+	world_proxies.candidate_count++;
+	world_proxies.candidate_slots += slots;
+	return 1;
+}
+
+/* a vehicle's occlusion field placed on its node 0 as drawn (frame), in
+the GPU's layout (xgpu_stream.h's XGPU_WORLD_AO_PROXY_FIELD): the world to
+its voxels' place, g = (frame^-1 (p) - origin) / voxel, each row an axis of
+the frame over its scale squared and the voxel (a frame of one scale) */
+static void field_place(struct world_proxies_source_field const *field, struct world_proxies_frame const *frame,
+	struct world_proxy proxies[WORLD_PROXY_FIELD_SLOTS])
+{
+	float scale = frame_scale(frame), middle[3], over;
+	int axis, k;
+
+	memset(proxies, 0, sizeof(*proxies) * WORLD_PROXY_FIELD_SLOTS);
+	scale = scale > 0.0f ? scale : 1.0f;
+	over = 1.0f / (scale * scale * field->voxel);
+	for (axis = 0; axis < 3; axis++)
+	{
+		float *row = axis == 0 ? proxies[0].v[1] : axis == 1 ? proxies[1].v[0] : proxies[1].v[1];
+
+		for (k = 0; k < 3; k++)
+			row[k] = frame->axes[axis][k] * over;
+		proxies[0].v[2][axis] = -dot3(frame->axes[axis], frame->position) * over - field->origin[axis] / field->voxel;
+		middle[axis] = field->origin[axis] + 0.5f * field->voxel * (float)(field->size[axis] - 1);
+		proxies[1].v[2][axis] = (float)(field->size[axis] - 1);
+		proxies[2].v[0][axis] = (float)field->place[axis] + 0.5f;
+		proxies[2].v[1][axis] = 1.0f / (float)(field->atlas[axis] ? field->atlas[axis] : 1);
+	}
+	frame_point(frame, middle, proxies[0].v[0]);
+	proxies[0].v[0][3] = (float)_world_proxy_field;
+	/* (its geometry's box among its voxels, whose bound is its own: its
+	half extents, about the grid's middle, which world_sdf_object_layout
+	centres over it) */
+	{
+		float extents[3], areas, box_reach;
+
+		for (axis = 0; axis < 3; axis++)
+		{
+			extents[axis] = 0.5f * (field->bounds[3 + axis] - field->bounds[axis]) / field->voxel;
+			proxies[2].v[2][axis] = extents[axis];
+		}
+		/* (its reach: the field's, or the box's (world_proxy_reach's), where
+		less) */
+		for (axis = 0; axis < 3; axis++)
+			extents[axis] *= field->voxel * scale;
+		areas = sqrtf((extents[1] * extents[2]) * (extents[1] * extents[2]) + (extents[0] * extents[2]) *
+			(extents[0] * extents[2]) + (extents[0] * extents[1]) * (extents[0] * extents[1]));
+		box_reach = sqrtf(dot3(extents, extents)) + sqrtf(WORLD_PROXIES_LEAST * 4.0f / WORLD_PROXIES_PI * areas);
+		proxies[0].v[2][3] = field->reach * field->voxel * scale;
+		proxies[0].v[2][3] = box_reach < proxies[0].v[2][3] ? box_reach : proxies[0].v[2][3];
+	}
+}
+
 long world_proxies_place(long definition, struct world_proxies_frame const *frames, short node_count,
 	struct world_proxy *proxies, long maximum)
 {
@@ -1261,7 +1348,7 @@ long world_proxies_window(float const camera_position[3], struct world_proxy *pr
 {
 	float planes[4][4];
 	int frustum;
-	long instance_count, instance_index, count = 0, slots, i, j;
+	long instance_count, instance_index, count = 0, slots, i, j, c;
 
 	if (maximum > WORLD_PROXY_MAXIMUM_PER_WINDOW)
 		maximum = WORLD_PROXY_MAXIMUM_PER_WINDOW;
@@ -1269,12 +1356,17 @@ long world_proxies_window(float const camera_position[3], struct world_proxy *pr
 	if (maximum <= 0 || !proxies || !owners)
 		return 0;
 	frustum = world_proxies_source_frustum(planes);
+	world_proxies.candidate_count = world_proxies.candidate_slots = 0;
 	instance_count = world_proxies_source_instances(world_proxies.instances, WORLD_PROXIES_MAXIMUM_INSTANCES);
 	for (instance_index = 0; instance_index < instance_count; instance_index++)
 	{
 		struct world_proxies_source_instance const *instance = &world_proxies.instances[instance_index];
 		struct world_proxy_set const *set = world_proxies_definition(instance->definition);
+		struct world_proxies_source_field field;
 		short node_count, shape_index;
+		/* (a vehicle with an occlusion field drawn: the field in place of its
+		boxes; its wheels keep their spheres, which turn and spring) */
+		int fielded = 0;
 
 		if (!set)
 			continue;
@@ -1282,17 +1374,32 @@ long world_proxies_window(float const camera_position[3], struct world_proxy *pr
 		if (node_count <= 0)
 			continue;
 		for (shape_index = 0; shape_index < set->count; shape_index++)
+			fielded = fielded || set->shapes[shape_index].kind == _world_proxy_box;
+		fielded = fielded && !instance->baked && world_proxies_source_field(instance->definition, &field);
+		for (shape_index = fielded ? -1 : 0; shape_index < set->count; shape_index++)
 		{
-			struct world_proxy_shape const *shape = &set->shapes[shape_index];
-			struct world_proxy proxy;
+			struct world_proxy placed[WORLD_PROXY_FIELD_SLOTS];
 			float centre[3], offset[3], reach, distance;
 			int plane, seen = 1;
+			short slot_count = 1;
 
-			shape_place(shape, &world_proxies.frames[shape->node_index >= 0 && shape->node_index < node_count ?
-				shape->node_index : 0], &proxy);
+			if (shape_index < 0)
+			{
+				field_place(&field, &world_proxies.frames[0], placed);
+				slot_count = WORLD_PROXY_FIELD_SLOTS;
+			}
+			else
+			{
+				struct world_proxy_shape const *shape = &set->shapes[shape_index];
+
+				if (fielded && shape->kind == _world_proxy_box)
+					continue;
+				shape_place(shape, &world_proxies.frames[shape->node_index >= 0 && shape->node_index < node_count ?
+					shape->node_index : 0], &placed[0]);
+			}
 			/* its reach's sphere against the frustum's sides */
-			world_proxy_reach_centre(&proxy, centre);
-			reach = world_proxy_reach(&proxy);
+			world_proxy_reach_centre(&placed[0], centre);
+			reach = world_proxy_reach(&placed[0]);
 			for (plane = 0; frustum && plane < 4 && seen; plane++)
 			{
 				if (dot3(planes[plane], centre) - planes[plane][3] > reach)
@@ -1306,27 +1413,26 @@ long world_proxies_window(float const camera_position[3], struct world_proxy *pr
 			a page without a layer walks them) */
 			sub3(centre, camera_position, offset);
 			distance = length3(offset);
-			if (count == maximum && !candidate_before(instance->baked, distance, &world_proxies.candidates[count - 1]))
-				continue;
-			i = count < maximum ? count++ : count - 1;
-			for (; i > 0 && candidate_before(instance->baked, distance, &world_proxies.candidates[i - 1]); i--)
-				world_proxies.candidates[i] = world_proxies.candidates[i - 1];
-			world_proxies.candidates[i].proxy = proxy;
-			world_proxies.candidates[i].owner = instance->id;
-			world_proxies.candidates[i].distance = distance;
-			world_proxies.candidates[i].baked = instance->baked;
+			candidate_add(placed, slot_count, instance->id, distance, instance->baked, maximum);
+		}
+	}
+	for (c = 0; c < world_proxies.candidate_count; c++)
+	{
+		struct world_proxies_candidate const *candidate = &world_proxies.candidates[c];
+
+		for (j = 0; j < candidate->slots; j++, count++)
+		{
+			proxies[count] = candidate->proxies[j];
+			owners[count] = candidate->owner;
+			*dynamic_count += !candidate->baked;
 		}
 	}
 	/* each owner's slot: the order its first shape has in the window (so
 	the shader leaves an object's own shapes out: world_ao.c gives a draw
 	its object's slot, or -1) */
 	slots = 0;
-	*dynamic_count = 0;
 	for (i = 0; i < count; i++)
 	{
-		*dynamic_count += !world_proxies.candidates[i].baked;
-		proxies[i] = world_proxies.candidates[i].proxy;
-		owners[i] = world_proxies.candidates[i].owner;
 		for (j = 0; j < i && owners[j] != owners[i]; j++)
 			;
 		proxies[i].v[1][3] = j < i ? proxies[j].v[1][3] : (float)slots++;

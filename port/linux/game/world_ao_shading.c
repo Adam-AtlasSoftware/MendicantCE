@@ -20,6 +20,10 @@ Workstream D.
 #include <stdlib.h>
 #include <string.h>
 
+/* (world_proxies.c's WORLD_PROXIES_LEAST and pi: the box's bound) */
+#define WORLD_AO_BOX_LEAST 510.0f
+#define WORLD_AO_PI 3.14159265358979f
+
 static float saturate(float x)
 {
 	return x < 0.0f ? 0.0f : x > 1.0f ? 1.0f : x;
@@ -89,6 +93,125 @@ static float world_ao_proxy_bound(struct world_proxy const *proxy)
 	}
 }
 
+/* ---------- a vehicle's occlusion field (world_proxies.h's _world_proxy_field) */
+
+/* the objects' atlas the reference reads (the GPU's: width x height x
+depth texels of four halves, t and v.xyz) */
+static struct
+{
+	unsigned short const *texels;
+	unsigned long size[3];
+} world_ao_objects;
+
+void world_ao_objects_atlas(unsigned short const *texels, unsigned long width, unsigned long height,
+	unsigned long depth)
+{
+	world_ao_objects.texels = texels;
+	world_ao_objects.size[0] = width;
+	world_ao_objects.size[1] = height;
+	world_ao_objects.size[2] = depth;
+}
+
+/* a texel of the atlas, clamped to its edge (a sampler's) */
+static float world_ao_objects_texel(long x, long y, long z, int channel)
+{
+	unsigned long const *size = world_ao_objects.size;
+
+	x = x < 0 ? 0 : x >= (long)size[0] ? (long)size[0] - 1 : x;
+	y = y < 0 ? 0 : y >= (long)size[1] ? (long)size[1] - 1 : y;
+	z = z < 0 ? 0 : z >= (long)size[2] ? (long)size[2] - 1 : z;
+	return world_sdf_half_value(world_ao_objects.texels[(((unsigned long)z * size[1] + (unsigned long)y) * size[0] +
+		(unsigned long)x) * 4 + (unsigned long)channel]);
+}
+
+float world_ao_field_proxy_fade(struct world_proxy const *proxy, float const point[3], float const normal[3])
+{
+	struct world_proxy const *b = proxy + 1, *c = proxy + 2;
+	float const *rows[3];
+	float extents[3], local[3], offset[3], outside[3], length, distance_squared = 0.0f, height = 0.0f, faces, distance;
+	int axis;
+
+	rows[0] = proxy->v[1];
+	rows[1] = b->v[0];
+	rows[2] = b->v[1];
+	for (axis = 0; axis < 3; axis++)
+		extents[axis] = c->v[2][axis];
+	for (axis = 0; axis < 3; axis++)
+		local[axis] = rows[axis][0] * normal[0] + rows[axis][1] * normal[1] + rows[axis][2] * normal[2];
+	length = sqrtf(local[0] * local[0] + local[1] * local[1] + local[2] * local[2]);
+	for (axis = 0; axis < 3; axis++)
+	{
+		local[axis] = length > 0.0f ? local[axis] / length : 0.0f;
+		offset[axis] = rows[axis][0] * point[0] + rows[axis][1] * point[1] + rows[axis][2] * point[2] +
+			proxy->v[2][axis] - 0.5f * b->v[2][axis];
+		outside[axis] = fabsf(offset[axis]) - extents[axis];
+		outside[axis] = outside[axis] > 0.0f ? outside[axis] : 0.0f;
+		distance_squared += outside[axis] * outside[axis];
+		height += extents[axis] * fabsf(local[axis]) - local[axis] * offset[axis];
+	}
+	/* (world_proxy_box_fade's, in the field's voxels: the box is its axes') */
+	if (distance_squared <= 0.0f)
+		return 1.0f;
+	if (height <= 0.0f)
+		return 0.0f;
+	faces = extents[1] * extents[2] * outside[0] + extents[0] * extents[2] * outside[1] +
+		extents[0] * extents[1] * outside[2];
+	distance = sqrtf(distance_squared);
+	return saturate(WORLD_AO_BOX_LEAST * 4.0f / WORLD_AO_PI * faces * (height < distance ? height : distance) /
+		(distance_squared * distance_squared) - 1.0f);
+}
+
+float world_ao_field_proxy_occlusion(struct world_proxy const *proxy, float const point[3], float const normal[3])
+{
+	struct world_proxy const *b = proxy + 1, *c = proxy + 2;
+	float g[3], q[3], local[3], length, outside = 0.0f, from = 0.0f, scale, at[3], value[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+	float const *rows[3];
+	long base[3];
+	int axis, corner, k;
+
+	if (!world_ao_objects.texels || !world_ao_objects.size[0])
+		return 0.0f;
+	rows[0] = proxy->v[1];
+	rows[1] = b->v[0];
+	rows[2] = b->v[1];
+	for (axis = 0; axis < 3; axis++)
+	{
+		float middle = 0.5f * b->v[2][axis];
+
+		g[axis] = rows[axis][0] * point[0] + rows[axis][1] * point[1] + rows[axis][2] * point[2] + proxy->v[2][axis];
+		q[axis] = g[axis] < 0.0f ? 0.0f : g[axis] > b->v[2][axis] ? b->v[2][axis] : g[axis];
+		outside += (g[axis] - q[axis]) * (g[axis] - q[axis]);
+		from += (q[axis] - middle) * (q[axis] - middle);
+		local[axis] = rows[axis][0] * normal[0] + rows[axis][1] * normal[1] + rows[axis][2] * normal[2];
+		/* (the texel's place: the atlas's coordinate times its size, less a
+		half, as the sampler takes it) */
+		at[axis] = (q[axis] + c->v[0][axis]) * c->v[1][axis] * (float)world_ao_objects.size[axis] - 0.5f;
+		base[axis] = (long)floorf(at[axis]);
+	}
+	outside = sqrtf(outside);
+	from = sqrtf(from);
+	scale = (from + 1.0e-3f) / (from + outside + 1.0e-3f);
+	scale *= scale;
+	length = sqrtf(local[0] * local[0] + local[1] * local[1] + local[2] * local[2]);
+	for (axis = 0; axis < 3; axis++)
+		local[axis] = length > 0.0f ? local[axis] / length : 0.0f;
+	for (corner = 0; corner < 8; corner++)
+	{
+		float weight = 1.0f;
+		long x = base[0] + (corner & 1), y = base[1] + ((corner >> 1) & 1), z = base[2] + ((corner >> 2) & 1);
+
+		for (axis = 0; axis < 3; axis++)
+		{
+			float f = at[axis] - (float)base[axis];
+
+			weight *= (corner >> axis) & 1 ? f : 1.0f - f;
+		}
+		for (k = 0; k < 4; k++)
+			value[k] += weight * world_ao_objects_texel(x, y, z, k);
+	}
+	return saturate(scale * (value[0] + local[0] * value[1] + local[1] * value[2] + local[2] * value[3]));
+}
+
 /* one proxy's factor of A_prox at a point (1 - occlusion x fade); FALSE
 none (its owner's, past its reach, wholly below the tangent plane, or a box
 whose bound is under 1/510: the product as it was). The brute-force loop
@@ -99,8 +222,26 @@ static int world_ao_proxy_factor(struct world_proxy const *proxy, float const po
 	float centre[3], offset[3], reach, away, fade;
 	int axis;
 
-	if (proxy->v[1][3] == owner)
+	if (proxy->v[1][3] == owner || (int)proxy->v[0][3] == _world_proxy_none)
 		return 0;
+	/* (a vehicle's occlusion field: within its reach, faded out over the
+	last of it) */
+	if ((int)proxy->v[0][3] == _world_proxy_field)
+	{
+		reach = proxy->v[2][3];
+		for (axis = 0; axis < 3; axis++)
+			offset[axis] = point[axis] - proxy->v[0][axis];
+		away = sqrtf(offset[0] * offset[0] + offset[1] * offset[1] + offset[2] * offset[2]);
+		if (away >= reach)
+			return 0;
+		/* (and by its geometry's box's bound, which its occlusion is under,
+		as a box's) */
+		fade = saturate((reach - away) / (reach * WORLD_AO_REACH_FADE)) * world_ao_field_proxy_fade(proxy, point, normal);
+		if (fade <= 0.0f)
+			return 0;
+		*factor = 1.0f - world_ao_field_proxy_occlusion(proxy, point, normal) * fade;
+		return 1;
+	}
 	/* (from its centre: a capsule's segment's middle, a sphere's or a
 	box's a) */
 	for (axis = 0; axis < 3; axis++)
@@ -183,6 +324,50 @@ static void world_ao_grid_extent(struct world_proxy const *proxy, float reach, f
 
 	for (k = 0; k < 3; k++)
 		half[k] = reach;
+	/* (a vehicle's field: its geometry's box (in its voxels: each row of
+	the world to them is an axis over its length squared there) grown as a
+	box's, from the grid's middle) */
+	if ((int)proxy->v[0][3] == _world_proxy_field)
+	{
+		struct world_proxy const *b = proxy + 1, *c = proxy + 2;
+		float const *rows[3];
+		float axes[3][3], centre[3], areas, sizes[3];
+		int i;
+
+		rows[0] = proxy->v[1];
+		rows[1] = b->v[0];
+		rows[2] = b->v[1];
+		ex = c->v[2][0];
+		ey = c->v[2][1];
+		ez = c->v[2][2];
+		for (k = 0; k < 3; k++)
+			centre[k] = 0.0f;
+		for (i = 0; i < 3; i++)
+		{
+			float squared = rows[i][0] * rows[i][0] + rows[i][1] * rows[i][1] + rows[i][2] * rows[i][2];
+			float extent = i == 0 ? ex : i == 1 ? ey : ez;
+
+			if (squared <= 0.0f)
+				return;
+			for (k = 0; k < 3; k++)
+			{
+				axes[i][k] = extent * rows[i][k] / squared;
+				centre[k] += (0.5f * b->v[2][i] - proxy->v[2][i]) * rows[i][k] / squared;
+			}
+			sizes[i] = extent / sqrtf(squared);
+		}
+		areas = sqrtf((sizes[1] * sizes[2]) * (sizes[1] * sizes[2]) + (sizes[0] * sizes[2]) * (sizes[0] * sizes[2]) +
+			(sizes[0] * sizes[1]) * (sizes[0] * sizes[1]));
+		grow = sqrtf(WORLD_AO_BOX_LEAST * 4.0f / WORLD_AO_PI * areas);
+		for (k = 0; k < 3; k++)
+		{
+			float extent = fabsf(centre[k] - proxy->v[0][k]) + fabsf(axes[0][k]) + fabsf(axes[1][k]) + fabsf(axes[2][k]) +
+				grow;
+
+			half[k] = extent < reach ? extent : reach;
+		}
+		return;
+	}
 	if ((int)proxy->v[0][3] != _world_proxy_box)
 		return;
 	ex = sqrtf(proxy->v[1][0] * proxy->v[1][0] + proxy->v[1][1] * proxy->v[1][1] + proxy->v[1][2] * proxy->v[1][2]);
@@ -224,6 +409,9 @@ void world_ao_grid(struct world_proxy const *proxies, long count, float const ca
 		float centre[3], half[3], reach = world_proxy_reach(proxy);
 		int first[3], last[3], x, y, z, k;
 
+		/* (a vehicle's field's slots after its first: in no cell) */
+		if ((int)proxy->v[0][3] == _world_proxy_none)
+			continue;
 		world_ao_grid_extent(proxy, reach, half);
 		for (k = 0; k < 3; k++)
 		{

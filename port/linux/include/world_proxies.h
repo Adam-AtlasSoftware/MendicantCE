@@ -25,6 +25,8 @@ enum
 	WORLD_PROXY_MAXIMUM_PER_DEFINITION = 16,
 	/* the most a window hands the renderer (XGPU_WORLD_AO_PROXIES_MAXIMUM) */
 	WORLD_PROXY_MAXIMUM_PER_WINDOW = 64,
+	/* the window's shapes a vehicle's occlusion field takes */
+	WORLD_PROXY_FIELD_SLOTS = 3,
 };
 
 enum world_proxy_kind
@@ -33,6 +35,10 @@ enum world_proxy_kind
 	_world_proxy_sphere,
 	_world_proxy_capsule,
 	_world_proxy_box,
+	/* a vehicle's occlusion field (world_sdf.h's struct world_sdf_object):
+	this and the next two of the window's shapes (WORLD_PROXY_FIELD_SLOTS),
+	which are of no kind */
+	_world_proxy_field,
 	NUMBER_OF_WORLD_PROXY_KINDS
 };
 

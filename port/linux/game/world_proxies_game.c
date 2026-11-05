@@ -132,6 +132,29 @@ int world_proxies_source_baked(long id)
 	return object && object_baked(id, object->definition_index);
 }
 
+int world_proxies_source_field(long definition, struct world_proxies_source_field *field)
+{
+	unsigned long atlas[3];
+	struct world_sdf_object const *object = world_sdf_object_field(definition, atlas);
+	int axis;
+
+	if (!object)
+		return FALSE;
+	for (axis = 0; axis < 3; axis++)
+	{
+		field->origin[axis] = object->origin[axis];
+		field->place[axis] = object->atlas[axis];
+		field->atlas[axis] = atlas[axis];
+	}
+	field->voxel = object->voxel;
+	field->reach = object->reach;
+	memcpy(field->bounds, object->bounds, sizeof(field->bounds));
+	field->size[0] = object->width;
+	field->size[1] = object->height;
+	field->size[2] = object->depth;
+	return TRUE;
+}
+
 int world_proxies_source_definition(long definition, struct world_proxies_source *source)
 {
 	struct object_definition const *object_definition;
