@@ -611,7 +611,12 @@ glows. */
 (answered now; it could wait: the lights would be classic from the next
 frame on) */
 BOOL xgpu_backend_dynamic_lights_prepare(void);
+/* the block, and the cells with the clusters' masks past them
+(XGPU_DYNAMIC_LIGHTS_CELLS_BYTES) */
 void xgpu_backend_dynamic_lights_upload(const struct xgpu_dynamic_lights_block *block, const void *cells);
+/* the world (xgpu.h): count texels of four words, when the structure
+changes; the backend keeps it until the next */
+void xgpu_backend_dynamic_lights_world(const void *texels, int count);
 
 /* the glows: each one's middle and size, its color, two vec4 each; the
 camera's right and up; the world's projection (c[-96] to c[-93]) and the

@@ -98,7 +98,27 @@ enum
 	WORLD_SDF_OBJECT_RAYS = 256,
 	WORLD_SDF_OBJECT_NORMALS = 96,
 	WORLD_SDF_OBJECT_ENTRY = 4 * 15,
+	/* the bake's threads: the processors less those the game's own threads
+	run on while it plays (world_sdf_bake_threads), at least one and at
+	most WORLD_SDF_MAXIMUM_THREADS */
+	WORLD_SDF_RESERVED_PROCESSORS = 3,
+	WORLD_SDF_MAXIMUM_THREADS = 32,
+	/* the bake's pace in play (struct world_sdf_pace): the frames it rests
+	to learn their normal time, the frames whose median is compared with it,
+	the least and the most frames a rest lasts (doubled each time frames
+	run late again, halved after so many calm ones) */
+	WORLD_SDF_PACE_LEARN = 30,
+	WORLD_SDF_PACE_WINDOW = 8,
+	WORLD_SDF_PACE_LEAST_REST = 60,
+	WORLD_SDF_PACE_MOST_REST = 1920,
+	WORLD_SDF_PACE_CALM = 600,
 };
+
+/* frames late while the bake runs in play: the last window's median more
+than the normal's this many times and so many ms (the ms, so that a
+machine at hundreds of frames a second does not rest for a millisecond) */
+#define WORLD_SDF_PACE_LATE 1.10f
+#define WORLD_SDF_PACE_SLACK_MS 1.0f
 
 /* an object field's least voxel, its margin about the object (a share of
 its longest side, between the least and the most, world units), and the
@@ -245,6 +265,30 @@ struct world_sdf_volume
 	struct world_sdf_objects objects;
 };
 
+/* the bake's pace while a map is played (world_sdf_pace_frame): its
+threads rest while the frames run late, so that a machine whose game
+threads share its processors (a phone's few cores, the Steam Deck's
+hyperthreads) never plays slower for it. Behind the menus it runs freely */
+struct world_sdf_pace
+{
+	/* the frames' normal time (ms; 0: not known): a rest's last frames'
+	median */
+	float normal;
+	/* the last frames' times (a ring, the newest at count - 1 mod window),
+	and how many since the last rest ended */
+	float frames[WORLD_SDF_PACE_WINDOW];
+	long count;
+	/* the rest: frames left of it, the late median it began for (0: one to
+	learn), and the next rest's frames (doubled while resting helps; the
+	least again when frames were as slow while it rested, late for
+	something else) */
+	long rest;
+	float late;
+	long next_rest;
+	/* the frames baked since the last rest */
+	long calm;
+};
+
 /* ---------- prototypes (port/linux/game/world_sdf.c) */
 
 /* the game's hooks: a map loaded (finds its fields in the cache; starts
@@ -279,6 +323,17 @@ struct world_sdf_header const *world_sdf_current(void);
 placement that the drawn field and its pages hold (the window's proxies
 put it apart: the lightmap pass reads its pages, the objects the field) */
 int world_sdf_scenery_baked(long definition, float const position[3]);
+/* whether it is one that the current BSP's field will hold while the
+field is on its way (being looked for, baked or uploaded): the window
+leaves it out until the field is drawn, which it then fades in with. As
+proxies meanwhile, every pixel of the level walked the static scenery's
+shapes (on an Apple M2 b30's frames took six times as long) */
+int world_sdf_scenery_awaited(long definition, float const position[3]);
+/* whether objects of this definition get an occlusion field with the
+current BSP's field while that is on its way: their boxes are left out
+until it is drawn (boxes cost the most of the proxies: on an Apple M2 the
+vehicles' were most of the rest of that sixfold frame) */
+int world_sdf_object_awaited(long definition);
 /* the drawn field's occlusion field of an object of this definition
 (NULL none: its proxies' boxes shade, as before), with the GPU's atlas's
 size */
@@ -291,6 +346,23 @@ int world_sdf_scenery_layer(void const *lightmap_bitmap);
 
 /* ---------- the bake's pure arithmetic (port/linux/game/world_sdf_bake.c;
 tools/harness/tests/world_sdf.c) */
+
+/* the bake's threads on a machine of this many processors: forced if more
+than 0 (HALO_WORLD_SDF_THREADS, for measuring), else all but
+WORLD_SDF_RESERVED_PROCESSORS, which are the game's thread, the renderer's
+(the command stream's: the GPU's encoding) and the sound's with the
+system's own (its compositor and drivers); at least 1, at most
+WORLD_SDF_MAXIMUM_THREADS */
+long world_sdf_bake_threads(long processors, long forced);
+/* a pace begun: free to run, the normal not known */
+void world_sdf_pace_begin(struct world_sdf_pace *pace);
+/* a frame's time (ms), and whether a map is played (not a menu, a loading
+screen or the start's pass): TRUE if the bake may run until the next frame.
+In play it first rests WORLD_SDF_PACE_LEARN frames to learn the normal;
+then runs until the frames run late (their median: a bake's threads slow
+every frame, and one slow frame now and then is something else's), rests
+(learning the normal again), and runs again */
+int world_sdf_pace_frame(struct world_sdf_pace *pace, float milliseconds, int playing);
 
 /* the field's cells and origin for these bounds (x0 y0 z0 x1 y1 z1), padded,
 at this voxel (world units) */
@@ -363,14 +435,24 @@ its space): grown by its margin, at the least voxel that fits
 WORLD_SDF_OBJECT_MOST_VOXELS and WORLD_SDF_OBJECT_MOST_SIDE (its texels
 not made) */
 void world_sdf_object_layout(float const bounds[6], struct world_sdf_object *object);
-/* slice z of an object's voxels: each voxel's t, v.xyz (4 floats, x
+/* the directions and weights every slice reads, made once a bake and
+shared by its threads (a slice allocates nothing: the guest's memory
+mapped and unmapped meanwhile makes the renderer drop and remake its
+buffers and textures over those pages, docs/world-ao.md); NULL if no
+memory */
+struct world_sdf_object_tables;
+struct world_sdf_object_tables *world_sdf_object_tables_make(void);
+void world_sdf_object_tables_free(struct world_sdf_object_tables *tables);
+/* slice z of an object's voxels, its rows first_row to end_row (values
+and solid its whole slice's: a row's are its own, so the rows may be
+baked apart, a few at a time): each voxel's t, v.xyz (4 floats, x
 fastest) fitted to the occlusion of these triangles (9 floats each) at
 WORLD_SDF_OBJECT_NORMALS normals, from WORLD_SDF_OBJECT_RAYS directions
 looked along; solid[x] 1 where inside(point) (its collision's point test:
 a voxel in solid, whose value is its neighbours' after) */
-void world_sdf_object_slice(struct world_sdf_object const *object, float const *positions, long triangle_count,
-	int (*inside)(void *context, float const point[3]), void *context, unsigned long z, float *values,
-	unsigned char *solid);
+void world_sdf_object_slice(struct world_sdf_object_tables const *tables, struct world_sdf_object const *object,
+	float const *positions, long triangle_count, int (*inside)(void *context, float const point[3]), void *context,
+	unsigned long z, unsigned long first_row, unsigned long end_row, float *values, unsigned char *solid);
 /* an object's texels made from its voxels' values (each in solid its
 neighbours' outside, step by step), and its reach; FALSE if no memory */
 int world_sdf_object_finish(struct world_sdf_object *object, float const *values, unsigned char const *solid);

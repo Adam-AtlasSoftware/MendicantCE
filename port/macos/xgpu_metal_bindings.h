@@ -27,6 +27,9 @@ shaders that read them (xgpu_metal_set_dynamic_lights;
 XGPU_MSL_BUFFER_DYNAMIC_LIGHTS, _DYNAMIC_LIGHT_CELLS) */
 #define XGPU_METAL_BUFFER_DYNAMIC_LIGHTS 18
 #define XGPU_METAL_BUFFER_DYNAMIC_LIGHT_CELLS 22
+/* ... and their world (xgpu_metal_set_dynamic_light_world;
+XGPU_MSL_BUFFER_DYNAMIC_LIGHT_WORLD) */
+#define XGPU_METAL_BUFFER_DYNAMIC_LIGHT_WORLD 24
 /* (19: the emitter's sample counter, which the macOS app does not use) */
 /* the values of the inputs no stream feeds, 16 float4 (setVertexBytes),
 read by the vertex descriptor at a constant step: the shaders read every

@@ -267,6 +267,8 @@ enum
 	/* the game's renderer's category of the draws from now on, for the
 	backends' timing alone (xgpu_backend_category; value: XGPU_STREAM_CATEGORY_*) */
 	XGPU_STREAM_CATEGORY,
+	/* the enhanced dynamic lights' world (xgpu_backend_dynamic_lights_world) */
+	XGPU_STREAM_DYNAMIC_LIGHTS_WORLD,
 	XGPU_STREAM_RECORD_TYPES,
 };
 
@@ -952,6 +954,20 @@ struct xgpu_stream_dynamic_lights_upload
 	struct xgpu_stream_dynamic_lights_block block;
 };
 
+/* the world's count texels (inline) at texels, count * 16 bytes; count
+at most xgpu.h's XGPU_DYNAMIC_LIGHTS_WORLD_TEXELS */
+#define XGPU_STREAM_DYNAMIC_LIGHTS_WORLD_TEXELS (240u * 1024u)
+/* the cells' texture's slices of 32 x 32 texels (xgpu.h): the cells and the
+clusters' masks, uploaded each frame, then the world's */
+#define XGPU_STREAM_DYNAMIC_LIGHTS_CELL_SLICES 17u
+#define XGPU_STREAM_DYNAMIC_LIGHTS_WORLD_SLICES 240u
+struct xgpu_stream_dynamic_lights_world
+{
+	uint32_t header;
+	uint32_t count;
+	uint32_t texels;
+};
+
 /* xgpu_backend.h's struct xgpu_dynamic_lights_halos but its halos, which
 follow (count * 2 vec4s) */
 struct xgpu_stream_dynamic_lights_halos
@@ -1197,6 +1213,7 @@ XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_vertices, 12);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_draw_immediate, 28);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_dynamic_lights_block, 6192);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_dynamic_lights_halos, 192);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_dynamic_lights_world, 12);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_vr_info, 108);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_vr_eyes, 36 + 4 * 52);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_vr_eye_transforms, 8 + 4 * 64);

@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, enum_with, function, mutated, read, run, structure  # noqa: E402
 
 CASES = ["layout", "encoding", "sample", "atlas", "bake", "plane", "room", "sphere", "bsp", "soup", "round_trip", "rejection",
-         "object_layout", "object_bake", "object_determinism", "object_half", "object_atlas"]
+         "object_layout", "object_bake", "object_determinism", "object_half", "object_atlas", "threads", "pace"]
 HEADER = "port/linux/include/world_sdf.h"
 BAKE = "port/linux/game/world_sdf_bake.c"
 SCHEDULE = "port/linux/game/world_sdf.c"
@@ -27,6 +27,29 @@ FILE_FUNCTIONS = ["sdf_put32", "sdf_get32", "sdf_put_float", "sdf_get_float", "s
                   "sdf_volume_free", "sdf_file_pack", "sdf_file_unpack", "sdf_file_write",
                   "sdf_file_read", "sdf_cache_load", "sdf_bsp_inside"]
 CONTROLS = [
+    # the bake on every processor: the game's own threads left none (#651)
+    (BAKE, "long threads = forced > 0 ? forced : processors - WORLD_SDF_RESERVED_PROCESSORS;",
+     "long threads = forced > 0 ? forced : processors;", "threads"),
+    # none on a machine of a few processors
+    (BAKE, "\tif (threads < 1)\n\t\tthreads = 1;", "", "threads"),
+    # forced past the most (the threads' table overrun)
+    (BAKE, "\tif (threads > WORLD_SDF_MAXIMUM_THREADS)\n\t\tthreads = WORLD_SDF_MAXIMUM_THREADS;", "", "threads"),
+    # the menus paced as play (the start's bakes slowed behind the main menu)
+    (BAKE, "\tif (!playing)\n\t{", "\tif (0)\n\t{", "pace"),
+    # frames late never a rest
+    (BAKE, "return normal * WORLD_SDF_PACE_LATE + WORLD_SDF_PACE_SLACK_MS;", "return normal * 2.0f;", "pace"),
+    # a fast machine's few tenths of a millisecond late
+    (BAKE, "return normal * WORLD_SDF_PACE_LATE + WORLD_SDF_PACE_SLACK_MS;", "return normal * WORLD_SDF_PACE_LATE;",
+     "pace"),
+    # the frames' mean, not their median: a slow frame now and then a rest
+    (BAKE, "return count ? sorted[count / 2] : 0.0f;", "return count ? sorted[count - 1] : 0.0f;", "pace"),
+    # a rest no longer while frames keep running late
+    (BAKE, "pace->next_rest = pace->next_rest * 2 < WORLD_SDF_PACE_MOST_REST ? pace->next_rest * 2 : "
+     "WORLD_SDF_PACE_MOST_REST;", "", "pace"),
+    # a heavier scene taken for the bake's lateness (its rests ever longer: the field never comes)
+    (BAKE, "\t\t\tpace->next_rest = WORLD_SDF_PACE_LEAST_REST;\n\t\treturn 1;", "\t\t\t;\n\t\treturn 1;", "pace"),
+    # the normal not learned again as it rests (the first one kept for good)
+    (BAKE, "\t\tpace->normal = median;", "\t\tif (pace->normal <= 0.0f)\n\t\t\tpace->normal = median;", "pace"),
     # a cell marked only where a triangle is within range of its middle (not of each of its voxels)
     (BAKE, "float reach = header->range + 0.5f * step * 1.7320508f;", "float reach = header->range;", "soup"),
     # the table's kinds read the wrong way round
@@ -66,11 +89,11 @@ CONTROLS = [
     # an object's voxels in solid kept as solid (not filled from outside): its darkness filtered past its faces
     (BAKE, "if (marks[other] == 0 || (marks[other] >= 2 && marks[other] < step))", "if (0)", "object_bake"),
     # the cosines' weights to the rays the wrong way round (the far side's occlusion)
-    (BAKE, "weights[j * WORLD_SDF_OBJECT_NORMALS + k] = cosine > 0.0f ? cosine",
-     "weights[j * WORLD_SDF_OBJECT_NORMALS + k] = cosine < 0.0f ? -cosine", "object_bake"),
+    (BAKE, "weights[j * WORLD_SDF_OBJECT_NORMALS + k] = cosine > 0.0f ?\n\t\t\t\tcosine",
+     "weights[j * WORLD_SDF_OBJECT_NORMALS + k] = cosine < 0.0f ?\n\t\t\t\t-cosine", "object_bake"),
     # a triangle's cone meeting too few buckets (rays it blocks missed)
-    (BAKE, "cosine * buckets.cosines[bucket] - sine * buckets.sines[bucket]",
-     "cosine * buckets.cosines[bucket] + sine * buckets.sines[bucket]", "object_bake"),
+    (BAKE, "cosine * buckets->cosines[bucket] - sine * buckets->sines[bucket]",
+     "cosine * buckets->cosines[bucket] + sine * buckets->sines[bucket]", "object_bake"),
     # past the grid, its edge's occlusion kept whole (no falling off: the reach not met)
     (BAKE, "\tscale *= scale;\n\tfor (corner = 0; corner < 8; corner++)", "\tscale = 1.0f;\n\tfor (corner = 0; corner < 8; corner++)",
      "object_bake"),

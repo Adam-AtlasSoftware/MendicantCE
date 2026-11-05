@@ -2214,8 +2214,12 @@ The front end works out the frame's lights and the grid's cells
 (d3d8_device.c); the block and the cells are the draw set's (xgpu_vulkan.c),
 written in the stream's order, and the glows are drawn here. */
 
-#define DYNAMIC_LIGHTS_CELLS_SIZE \
-	(XGPU_DYNAMIC_LIGHTS_GRID_X * XGPU_DYNAMIC_LIGHTS_GRID_Y * XGPU_DYNAMIC_LIGHTS_GRID_Z * 16)
+#define DYNAMIC_LIGHTS_CELLS_SIZE XGPU_DYNAMIC_LIGHTS_CELLS_BYTES
+
+_Static_assert(XGPU_DYNAMIC_LIGHTS_GRID_X == 32 && XGPU_DYNAMIC_LIGHTS_GRID_Y == 32 &&
+	XGPU_DYNAMIC_LIGHTS_GRID_Z + 1 == XGPU_STREAM_DYNAMIC_LIGHTS_CELL_SLICES &&
+	XGPU_DYNAMIC_LIGHTS_WORLD_SLICES == XGPU_STREAM_DYNAMIC_LIGHTS_WORLD_SLICES &&
+	XGPU_DYNAMIC_LIGHTS_WORLD_TEXELS == XGPU_STREAM_DYNAMIC_LIGHTS_WORLD_TEXELS, "the dynamic lights' texture");
 
 _Static_assert(sizeof(struct xgpu_stream_dynamic_lights_block) == sizeof(struct xgpu_dynamic_lights_block),
 	"the dynamic lights' block");
@@ -2244,6 +2248,16 @@ static void stream_dynamic_lights_upload(void *context, const struct xgpu_stream
 	if (!cells || record->size != DYNAMIC_LIGHTS_CELLS_SIZE)
 		return;
 	xgpu_vulkan_dynamic_lights_upload(&record->block, sizeof(record->block), cells);
+}
+
+static void stream_dynamic_lights_world(void *context, const struct xgpu_stream_dynamic_lights_world *record)
+{
+	const void *texels = host_pointer(record->texels);
+
+	(void)context;
+	if (!texels)
+		return;
+	xgpu_vulkan_dynamic_lights_world(texels, record->count);
 }
 
 /* a glow's shaders for its layers' slot (0: the screen's target, 1: the VR
@@ -2989,6 +3003,7 @@ const struct host_render_backend *xgpu_vulkan_stream_backend(void)
 		backend.dynamic_lights_prepare = stream_dynamic_lights_prepare;
 		backend.dynamic_lights_upload = stream_dynamic_lights_upload;
 		backend.dynamic_lights_halos = stream_dynamic_lights_halos;
+		backend.dynamic_lights_world = stream_dynamic_lights_world;
 		backend.anti_aliasing_prepare = stream_anti_aliasing_prepare;
 		backend.anti_alias = stream_anti_alias;
 		backend.hdr = stream_hdr;

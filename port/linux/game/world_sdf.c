@@ -14,8 +14,9 @@ The schedule (docs/world-ao.md, "The bake's schedule"):
   geometry (world_scene_static_triangles) and of its collision BSP's planes
   (the sign's point test), taken on the game's thread a few frames after
   the load and handed to the baker thread, which bakes it in slabs of z
-  slices on every processor at the lowest priority, writes it to the cache
-  and hands it back;
+  slices on the processors the game's own threads leave
+  (world_sdf_bake_threads) at the lowest priority, at the frames' pace in
+  play (world_sdf_pace_frame), writes it to the cache and hands it back;
 - the first launch's "Preparing menu pictures" pass (menu_pictures_render.c)
   bakes the BSPs of every stock map it loads (the one each map starts in,
   and each picture's), where nobody waits to play
@@ -28,7 +29,9 @@ The schedule (docs/world-ao.md, "The bake's schedule"):
   later, never in the switch), the proxies alone shading them till then;
 - a field found or baked is uploaded at most WORLD_SDF_UPLOAD_BYTES a frame,
   then fades in over a second (world_sdf_fade); until then the proxies
-  alone shade.
+  alone shade, without those of what the field will hold (the static
+  scenery's, the vehicles' boxes: world_sdf_scenery_awaited,
+  world_sdf_object_awaited), which cost the most.
 
 A bake outlives the map it was taken from (it works on copies): its field is
 written to the cache all the same, and found there the next time.
@@ -93,8 +96,6 @@ enum
 	WORLD_SDF_COPY_DELAY_FRAMES = 2,
 	/* the cells a worker takes at a time */
 	WORLD_SDF_WORKER_CELLS = 16,
-	/* the most bake threads */
-	WORLD_SDF_MAXIMUM_THREADS = 32,
 	/* the most bakes waiting (the oldest waiting dropped past it) */
 	WORLD_SDF_MAXIMUM_BAKES = 64,
 	/* the most fields the start-up pass has tried */
@@ -108,6 +109,10 @@ enum
 
 /* the fade in, in nanoseconds */
 #define WORLD_SDF_FADE_NANOSECONDS 1000000000ULL
+/* a resting thread's nap between looks at the pace, and the time without a
+frame after which it runs whatever the pace last said */
+#define WORLD_SDF_PACE_NAP_MS 4
+#define WORLD_SDF_PACE_SILENCE_NS 250000000ULL
 
 /* a bake's passes on its threads: a layout's cells marked, the marked
 cells' triangles counted, then put, slice by slice; the bricks baked */
@@ -147,6 +152,7 @@ double config_real(const char *name);
 const char *config_string(const char *name);
 int halo_server_mode(void);
 unsigned long long SDL_GetTicksNS(void);
+void SDL_Delay(unsigned int milliseconds);
 /* the guest runtime's system calls (port/android/guest/runtime) */
 long __guest_syscall(long long number, long long a, long long b, long long c, long long d, long long e, long long f);
 /* (sys/stat.h's, which the game's strict ANSI hides; not translated, so
@@ -247,6 +253,9 @@ struct sdf_job
 	/* the vehicles' copies (their occlusion fields') */
 	struct sdf_object_copy *object_copies;
 	long object_count;
+	/* (their slices' directions and weights, made once: a slice allocates
+	nothing) */
+	struct world_sdf_object_tables *object_tables;
 	/* the bake's field; its plan (the cells marked, and each marked cell's
 	triangles: world_sdf_bin), the marked cells in order and their bricks
 	as baked, each cell's kind, and the next of them (the marked cells,
@@ -263,7 +272,8 @@ struct sdf_job
 	int pass;
 	struct world_sdf_header const *pass_header;
 	unsigned char *pass_marks;
-	long pass_marked, next_slice;
+	long pass_marked;
+	unsigned long next_slice;
 	/* what came of it; the game's thread's time copying the geometry; one
 	the start-up pass asked for */
 	int result, startup;
@@ -310,6 +320,15 @@ static struct
 	int field_sent;
 	unsigned long long faded_from;
 	float fade;
+	/* the static scenery placements its field will hold, while it is on
+	its way (looked for, baking or uploading): in order of x, then y
+	(sdf_placement_order); made the first frame it is awaited */
+	struct world_sdf_placement *awaited;
+	unsigned long awaited_count;
+	int awaited_made;
+	/* and the vehicles' definitions that it will hold occlusion fields of */
+	long awaited_objects[WORLD_SDF_OBJECT_MAXIMUM];
+	long awaited_object_count;
 	/* the start-up pass: the fields it has tried, and whether any is
 	missing (once looked) */
 	struct sdf_key tried[WORLD_SDF_MAXIMUM_TRIED];
@@ -1171,6 +1190,42 @@ static unsigned long long sdf_now(void)
 	return SDL_GetTicksNS();
 }
 
+/* the bake's pace (world_sdf_frame's, world_sdf_pace_frame): whether its
+threads may run, and when the game last said so. A word the game's thread
+writes and the bake's threads read, no lock between them: no frame ever
+waits for a bake's thread */
+static int sdf_pace_running = 1;
+static unsigned long long sdf_pace_said;
+/* (the game's thread's) the pace, the last frame's time (0: the next not
+timed) and whether this one prepared a map */
+static struct world_sdf_pace sdf_pace;
+static unsigned long long sdf_frame_last;
+static int sdf_frame_prepared;
+
+/* (a bake's thread, between its items) while the game's frames want it to
+rest; not when the game has said nothing for a while (no frames drawn: a
+window minimized, "world" turned off, a load), when nothing is to be kept
+from waiting */
+static void sdf_pace_wait(void)
+{
+	while (!__atomic_load_n(&sdf_pace_running, __ATOMIC_RELAXED) &&
+		sdf_now() - __atomic_load_n(&sdf_pace_said, __ATOMIC_RELAXED) < WORLD_SDF_PACE_SILENCE_NS)
+		SDL_Delay(WORLD_SDF_PACE_NAP_MS);
+}
+
+/* the next of a pass's items for a thread to take (once the pace lets it),
+and the next so many */
+static unsigned long sdf_next_many(unsigned long *next, unsigned long count)
+{
+	sdf_pace_wait();
+	return __atomic_fetch_add(next, count, __ATOMIC_RELAXED);
+}
+
+static unsigned long sdf_next(unsigned long *next)
+{
+	return sdf_next_many(next, 1);
+}
+
 /* the calling thread at the lowest priority (the game's threads first):
 setpriority(PRIO_PROCESS, 0, 19), which the guest's C library has not, as
 the runtime's dispatcher takes it (port/android/include/halo_guest_syscall.h's
@@ -1184,13 +1239,8 @@ static void sdf_thread_background(void)
 static long sdf_threads(void)
 {
 	char const *forced = getenv("HALO_WORLD_SDF_THREADS");
-	long processors = forced && atol(forced) > 0 ? atol(forced) : sysconf(_SC_NPROCESSORS_ONLN);
 
-	if (processors < 1)
-		processors = 1;
-	if (processors > WORLD_SDF_MAXIMUM_THREADS)
-		processors = WORLD_SDF_MAXIMUM_THREADS;
-	return processors;
+	return world_sdf_bake_threads(sysconf(_SC_NPROCESSORS_ONLN), forced ? atol(forced) : 0);
 }
 
 /* a bake's working memory let go of */
@@ -1319,12 +1369,8 @@ static void sdf_bake_cells(struct sdf_job *job)
 
 	for (;;)
 	{
-		unsigned long first, item;
+		unsigned long first = sdf_next_many(&job->next_item, WORLD_SDF_WORKER_CELLS), item;
 
-		pthread_mutex_lock(&world_sdf_lock);
-		first = job->next_item;
-		job->next_item += WORLD_SDF_WORKER_CELLS;
-		pthread_mutex_unlock(&world_sdf_lock);
 		if (first >= items)
 			break;
 		for (item = first; item < first + WORLD_SDF_WORKER_CELLS && item < items; item++)
@@ -1354,20 +1400,15 @@ static void sdf_slices(struct sdf_job *job)
 
 	for (;;)
 	{
-		long z, marked;
+		long z = (long)sdf_next(&job->next_slice), marked;
 
-		pthread_mutex_lock(&world_sdf_lock);
-		z = job->next_slice++;
-		pthread_mutex_unlock(&world_sdf_lock);
 		if (z >= depth)
 			break;
 		if (job->pass == _sdf_pass_mark)
 		{
 			marked = world_sdf_mark_slices(job->pass_header, job->positions, job->triangle_count, job->pass_marks, z,
 				z + 1);
-			pthread_mutex_lock(&world_sdf_lock);
-			job->pass_marked += marked;
-			pthread_mutex_unlock(&world_sdf_lock);
+			__atomic_fetch_add(&job->pass_marked, marked, __ATOMIC_RELAXED);
 		}
 		else
 		{
@@ -1409,11 +1450,8 @@ static void sdf_bake_pages(struct sdf_job *job)
 	for (;;)
 	{
 		struct sdf_page *page;
-		unsigned long index;
+		unsigned long index = sdf_next(&job->next_item);
 
-		pthread_mutex_lock(&world_sdf_lock);
-		index = job->next_item++;
-		pthread_mutex_unlock(&world_sdf_lock);
 		if (index >= (unsigned long)(job->page_count > 0 ? job->page_count : 0))
 			break;
 		page = &job->pages[index];
@@ -1426,39 +1464,34 @@ static void sdf_bake_pages(struct sdf_job *job)
 	}
 }
 
-/* the vehicles' fields' slices baked, a slice at a time (each object's z
-slices in turn), until there are none */
+/* the vehicles' fields' rows baked, a row at a time (each object's z
+slices' rows in turn), until there are none */
 static void sdf_bake_objects_slices(struct sdf_job *job)
 {
 	for (;;)
 	{
-		unsigned long item, first = 0;
+		unsigned long item = sdf_next(&job->next_item), first = 0;
 		long index;
 
-		pthread_mutex_lock(&world_sdf_lock);
-		item = job->next_item++;
-		pthread_mutex_unlock(&world_sdf_lock);
 		for (index = 0; index < job->object_count; index++)
 		{
 			struct sdf_object_copy *copy = &job->object_copies[index];
 			unsigned long slice = copy->field.width * copy->field.height;
+			unsigned long rows = copy->field.depth * copy->field.height;
 
 			if (!copy->values)
 				continue;
-			if (item < first + copy->field.depth)
+			if (item < first + rows)
 			{
-				unsigned long z = item - first;
-
+				unsigned long z = (item - first) / copy->field.height, y = (item - first) % copy->field.height;
 				unsigned long long began = sdf_now();
 
-				world_sdf_object_slice(&copy->field, copy->positions, copy->triangle_count, sdf_object_inside, copy, z,
-					copy->values + z * slice * 4, copy->solid + z * slice);
-				pthread_mutex_lock(&world_sdf_lock);
-				copy->nanoseconds += sdf_now() - began;
-				pthread_mutex_unlock(&world_sdf_lock);
+				world_sdf_object_slice(job->object_tables, &copy->field, copy->positions, copy->triangle_count,
+					sdf_object_inside, copy, z, y, y + 1, copy->values + z * slice * 4, copy->solid + z * slice);
+				__atomic_fetch_add(&copy->nanoseconds, sdf_now() - began, __ATOMIC_RELAXED);
 				break;
 			}
-			first += copy->field.depth;
+			first += rows;
 		}
 		if (index >= job->object_count)
 			break;
@@ -1481,7 +1514,7 @@ static void *sdf_bake_worker(void *context)
 	return NULL;
 }
 
-/* a pass run on every processor; the threads it ran on */
+/* a pass run on the bake's threads; how many it ran on */
 static long sdf_pass(struct sdf_job *job, int pass)
 {
 	pthread_t threads[WORLD_SDF_MAXIMUM_THREADS];
@@ -1501,7 +1534,7 @@ static long sdf_pass(struct sdf_job *job, int pass)
 	return started + 1;
 }
 
-/* (world_sdf_plan's marker: a layout tried, marked on every processor) */
+/* (world_sdf_plan's marker: a layout tried, marked on the bake's threads) */
 static long sdf_mark(void *context, struct world_sdf_header const *header, float const *positions,
 	long triangle_count, unsigned char *marks)
 {
@@ -1632,7 +1665,7 @@ static int sdf_bake_scenery(struct sdf_job *job)
 }
 
 /* the vehicles' occlusion fields (docs/world-ao.md, "Dynamic objects"):
-each laid out about its geometry, its slices baked on every processor, its
+each laid out about its geometry, its rows baked on the bake's threads, its
 voxels in solid filled and its reach found; FALSE if no memory. Their
 milliseconds in the header */
 static int sdf_bake_objects(struct sdf_job *job)
@@ -1658,7 +1691,12 @@ static int sdf_bake_objects(struct sdf_job *job)
 	}
 	if (!any)
 		return 1;
+	job->object_tables = world_sdf_object_tables_make();
+	if (!job->object_tables)
+		return 0;
 	sdf_pass(job, _sdf_pass_objects);
+	world_sdf_object_tables_free(job->object_tables);
+	job->object_tables = NULL;
 	objects->objects = calloc((size_t)job->object_count, sizeof(*objects->objects));
 	if (!objects->objects)
 		return 0;
@@ -1685,7 +1723,7 @@ static int sdf_bake_objects(struct sdf_job *job)
 	return 1;
 }
 
-/* a field baked on every processor, written to the cache; FALSE if it
+/* a field baked on the bake's threads, written to the cache; FALSE if it
 could not be */
 static int sdf_bake(struct sdf_job *job)
 {
@@ -1852,16 +1890,28 @@ static void sdf_queue(struct sdf_job *job)
 	pthread_mutex_unlock(&world_sdf_lock);
 }
 
-/* whether a field is waiting to be baked, or baking */
+/* whether a field is waiting to be baked, or baking; one waiting put
+first (the map played: the start-up pass's other fields wait for it) */
 static int sdf_bake_queued(struct sdf_key const *key)
 {
-	struct sdf_job *job;
+	struct sdf_job **job;
 	int queued;
 
 	pthread_mutex_lock(&world_sdf_lock);
 	queued = world_sdf.baking && sdf_key_same(&world_sdf.baking_key, key);
-	for (job = world_sdf.bakes; job && !queued; job = job->next)
-		queued = sdf_key_same(&job->key, key);
+	for (job = &world_sdf.bakes; *job && !queued; job = &(*job)->next)
+	{
+		if (sdf_key_same(&(*job)->key, key))
+		{
+			struct sdf_job *found = *job;
+
+			*job = found->next;
+			found->next = world_sdf.bakes;
+			world_sdf.bakes = found;
+			queued = 1;
+			break;
+		}
+	}
 	pthread_mutex_unlock(&world_sdf_lock);
 	return queued;
 }
@@ -2093,22 +2143,21 @@ static int sdf_grow(void **array, long *room, long used, long count, size_t size
 /* the static scenery's copies: its placements, each node's collision
 triangles (put after the structure's in positions) and solid, and its
 shapes as placed; FALSE if no memory (none kept) */
-static int sdf_scenery_copy(struct sdf_job *job)
+/* the scenery's and the devices' placements' blocks, their palettes and
+their placements' bytes (tag_schema_scenario.c's) */
+struct sdf_scenery_kind
 {
-	struct scenario *scenario = global_scenario_get();
-	long index, positions_room = job->triangle_count, solids_room = 0, shapes_room = 0;
-	long placements_room = 0;
-	/* (the scenery, and the devices that cannot move: their blocks, their
-	palettes and their placements' bytes, tag_schema_scenario.c's) */
-	struct
-	{
-		struct tag_block const *placements, *palette;
-		long size;
-	} kinds[4];
-	int kind;
+	struct tag_block const *placements, *palette;
+	long size;
+};
 
-	if (!scenario)
-		return 1;
+enum
+{
+	SDF_SCENERY_KINDS = 4,
+};
+
+static void sdf_scenery_kinds(struct scenario *scenario, struct sdf_scenery_kind kinds[SDF_SCENERY_KINDS])
+{
 	kinds[0].placements = &scenario->scenery;
 	kinds[0].palette = &scenario->scenery_palette;
 	kinds[0].size = 0x48;
@@ -2121,13 +2170,41 @@ static int sdf_scenery_copy(struct sdf_job *job)
 	kinds[3].placements = &scenario->light_fixtures;
 	kinds[3].palette = &scenario->light_fixtures_palette;
 	kinds[3].size = 0x58;
-	for (kind = 0; kind < 4; kind++)
+}
+
+/* a kind's placement, and its definition if the bake holds it (static,
+with a model of nodes: sdf_scenery_copy's); NONE if not */
+static long sdf_scenery_placement(struct sdf_scenery_kind const *kind, long index,
+	struct scenario_object_datum const **placement)
+{
+	long definition_index;
+	struct model const *model;
+
+	*placement = (struct scenario_object_datum const *)((byte const *)kind->placements->address + index * kind->size);
+	definition_index = sdf_scenery_static(kind->palette, *placement);
+	if (definition_index == NONE)
+		return NONE;
+	model = model_definition_get(object_definition_get(definition_index)->object.model.index);
+	return model && model->nodes.address && model->nodes.count > 0 ? definition_index : NONE;
+}
+
+static int sdf_scenery_copy(struct sdf_job *job)
+{
+	struct scenario *scenario = global_scenario_get();
+	long index, positions_room = job->triangle_count, solids_room = 0, shapes_room = 0;
+	long placements_room = 0;
+	struct sdf_scenery_kind kinds[SDF_SCENERY_KINDS];
+	int kind;
+
+	if (!scenario)
+		return 1;
+	sdf_scenery_kinds(scenario, kinds);
+	for (kind = 0; kind < SDF_SCENERY_KINDS; kind++)
 	for (index = 0; kinds[kind].placements->address && index < kinds[kind].placements->count &&
 		job->placement_count < WORLD_SDF_SCENERY_MAXIMUM_PLACEMENTS; index++)
 	{
-		struct scenario_object_datum const *placement = (struct scenario_object_datum const *)
-			((byte const *)kinds[kind].placements->address + index * kinds[kind].size);
-		long definition_index = sdf_scenery_static(kinds[kind].palette, placement), node_index;
+		struct scenario_object_datum const *placement;
+		long definition_index = sdf_scenery_placement(&kinds[kind], index, &placement), node_index;
 		struct object_definition const *definition;
 		struct model const *model;
 		struct collision_model const *collision;
@@ -2139,8 +2216,6 @@ static int sdf_scenery_copy(struct sdf_job *job)
 			continue;
 		definition = object_definition_get(definition_index);
 		model = model_definition_get(definition->object.model.index);
-		if (!model || !model->nodes.address || model->nodes.count <= 0)
-			continue;
 		collision = definition->object.collision_model.index != NONE ?
 			collision_model_definition_get(definition->object.collision_model.index) : NULL;
 		/* (its nodes where they rest, as the object's are: its matrix by each
@@ -2245,6 +2320,23 @@ collision nodes' triangles (each node's first BSP) but its wheels' (which
 keep their spheres: they turn and spring) in node 0's space at rest, and
 their solids; FALSE if no memory (none kept). A vehicle whose collision has
 no triangles keeps its proxies' boxes */
+/* whether a vehicle palette's definition gets an occlusion field (a
+vehicle's model of nodes, with collision geometry) */
+static int sdf_object_fielded(long definition_index, struct world_proxies_source *source)
+{
+	struct object_definition const *definition;
+	struct model const *model;
+	struct collision_model const *collision;
+
+	return definition_index != NONE && (definition = object_definition_get(definition_index)) != NULL &&
+		definition->object.model.index != NONE && definition->object.collision_model.index != NONE &&
+		(model = model_definition_get(definition->object.model.index)) != NULL && model->nodes.address &&
+		model->nodes.count > 0 &&
+		(collision = collision_model_definition_get(definition->object.collision_model.index)) != NULL &&
+		collision->nodes.address && world_proxies_source_definition(definition_index, source) &&
+		source->shape_class == _world_proxies_source_vehicle;
+}
+
 static int sdf_objects_copy(struct sdf_job *job)
 {
 	struct scenario *scenario = global_scenario_get();
@@ -2276,16 +2368,11 @@ static int sdf_objects_copy(struct sdf_job *job)
 
 		for (other = 0; other < job->object_count; other++)
 			duplicate = duplicate || job->object_copies[other].definition == definition_index;
-		if (duplicate || definition_index == NONE || !(definition = object_definition_get(definition_index)) ||
-			definition->object.model.index == NONE || definition->object.collision_model.index == NONE ||
-			!(model = model_definition_get(definition->object.model.index)) || !model->nodes.address ||
-			model->nodes.count <= 0 ||
-			!(collision = collision_model_definition_get(definition->object.collision_model.index)) ||
-			!collision->nodes.address || !world_proxies_source_definition(definition_index, source) ||
-			source->shape_class != _world_proxies_source_vehicle)
-		{
+		if (duplicate || !sdf_object_fielded(definition_index, source))
 			continue;
-		}
+		definition = object_definition_get(definition_index);
+		model = model_definition_get(definition->object.model.index);
+		collision = collision_model_definition_get(definition->object.collision_model.index);
 		copy = &job->object_copies[job->object_count];
 		memset(copy, 0, sizeof(*copy));
 		copy->definition = definition_index;
@@ -2503,6 +2590,67 @@ static int sdf_pages_copy(struct sdf_job *job)
 	return 1;
 }
 
+/* the static scenery placements the current BSP's field will hold (as
+sdf_scenery_copy finds them), while it is on its way: the window leaves
+them out until it is drawn, then they fade in with it. Shading them as
+proxies meanwhile (b30: 592 shapes, the window's 64 nearest walked by every
+pixel of the level) cost an Apple M2's GPU six times the frame the field
+does */
+static int sdf_placement_order(void const *a, void const *b);
+
+static void sdf_awaited_make(void)
+{
+	struct scenario *scenario = global_scenario_get();
+	struct world_proxies_source *source;
+	struct sdf_scenery_kind kinds[SDF_SCENERY_KINDS];
+	long room = 0, index;
+	int kind;
+
+	world_sdf.awaited_made = 1;
+	if (!scenario)
+		return;
+	sdf_scenery_kinds(scenario, kinds);
+	for (kind = 0; kind < SDF_SCENERY_KINDS; kind++)
+	for (index = 0; kinds[kind].placements->address && index < kinds[kind].placements->count &&
+		world_sdf.awaited_count < WORLD_SDF_SCENERY_MAXIMUM_PLACEMENTS; index++)
+	{
+		struct scenario_object_datum const *placement;
+		long definition = sdf_scenery_placement(&kinds[kind], index, &placement);
+		struct world_sdf_placement *awaited;
+
+		if (definition == NONE)
+			continue;
+		if (!sdf_grow((void **)&world_sdf.awaited, &room, (long)world_sdf.awaited_count, 1, sizeof(*world_sdf.awaited)))
+		{
+			free(world_sdf.awaited);
+			world_sdf.awaited = NULL;
+			world_sdf.awaited_count = 0;
+			return;
+		}
+		awaited = &world_sdf.awaited[world_sdf.awaited_count++];
+		awaited->definition = definition;
+		awaited->position[0] = placement->position.x;
+		awaited->position[1] = placement->position.y;
+		awaited->position[2] = placement->position.z;
+	}
+	if (world_sdf.awaited_count)
+		qsort(world_sdf.awaited, world_sdf.awaited_count, sizeof(*world_sdf.awaited), sdf_placement_order);
+	/* (the vehicles, as sdf_objects_copy finds them) */
+	if (scenario->vehicle_palette.address && (source = malloc(sizeof(*source))) != NULL)
+	{
+		for (index = 0; index < scenario->vehicle_palette.count &&
+			world_sdf.awaited_object_count < WORLD_SDF_OBJECT_MAXIMUM; index++)
+		{
+			long definition = TAG_BLOCK_GET_ELEMENT(&scenario->vehicle_palette, index,
+				struct scenario_object_palette_entry)->reference.index;
+
+			if (!world_sdf_object_awaited(definition) && sdf_object_fielded(definition, source))
+				world_sdf.awaited_objects[world_sdf.awaited_object_count++] = definition;
+		}
+		free(source);
+	}
+}
+
 /* the loaded map's BSP's geometry and planes copied, and its bake queued;
 FALSE if they cannot be (no geometry: the proxies alone) */
 static int sdf_bake_begin(struct sdf_key const *key, int startup)
@@ -2513,6 +2661,10 @@ static int sdf_bake_begin(struct sdf_key const *key, int startup)
 	unsigned long long began = SDL_GetTicksNS();
 
 	if (sdf_bake_queued(key))
+		return 1;
+	/* (HALO_WORLD_SDF_NO_BAKE, for measuring: none baked, as if one were
+	on its way for good; the frames without a bake's threads) */
+	if (getenv("HALO_WORLD_SDF_NO_BAKE"))
 		return 1;
 	if (!collision || !world_scene_static_triangles(key->bsp, &triangles))
 		return 0;
@@ -2695,6 +2847,11 @@ static void sdf_field_release(void)
 	world_sdf.objects_slice = NULL;
 	world_sdf.fade = 0.0f;
 	world_sdf.faded_from = 0;
+	free(world_sdf.awaited);
+	world_sdf.awaited = NULL;
+	world_sdf.awaited_count = 0;
+	world_sdf.awaited_made = 0;
+	world_sdf.awaited_object_count = 0;
 }
 
 /* the map's BSP drawn from now on: looked for in the cache (by the looker:
@@ -2706,6 +2863,8 @@ static void sdf_current_set(struct sdf_key const *key)
 	sdf_field_release();
 	world_sdf.current = *key;
 	world_sdf.map_known = 1;
+	/* (the load's frame not timed) */
+	sdf_frame_last = 0;
 	world_sdf.copy_wanted = 0;
 	world_sdf.state = _world_sdf_baking;
 	job = calloc(1, sizeof(*job));
@@ -2719,12 +2878,15 @@ static void sdf_current_set(struct sdf_key const *key)
 	sdf_queue(job);
 }
 
-/* the threads' results taken: the current BSP's field kept */
+/* the threads' results taken: the current BSP's field kept (not this frame
+if a bake's thread holds the lock: the game's thread never waits for one,
+which may be held off its processor for a while at the lowest priority) */
 static void sdf_results(void)
 {
 	struct sdf_job *jobs, *job;
 
-	pthread_mutex_lock(&world_sdf_lock);
+	if (pthread_mutex_trylock(&world_sdf_lock) != 0)
+		return;
 	jobs = world_sdf.results;
 	world_sdf.results = NULL;
 	pthread_mutex_unlock(&world_sdf_lock);
@@ -2796,59 +2958,71 @@ void world_sdf_bsp_switched(short bsp_index)
 	sdf_current_set(&key);
 }
 
-/* the frames' pacing while a bake runs and while none does, logged with
-HALO_WORLD_SDF_FRAMES (for measuring: the bake's threads are the game's
-lowest, and no frame should wait for them; nor any of the frames after a
-load for the world's pipelines, made apart from them). A frame that
-prepared a map's pipelines (world_sdf_frame_prepared) is the load's, not
-counted */
-static int sdf_frame_prepared;
+/* the frames: their times pace the bake in play (world_sdf_pace_frame),
+and with HALO_WORLD_SDF_FRAMES they are logged while a bake runs and while
+none does (for measuring: no frame should be slower for a bake; nor any
+of the frames after a load for the world's pipelines, made apart from
+them). A frame that prepared a map's pipelines (world_sdf_frame_prepared),
+and the first after a map's load, are the load's: not timed */
+
+/* updater.c's, menu_functions.c's: a game played (its pause menu too), not
+the main menu */
+int pc_menu_game_playing(void);
 
 void world_sdf_frame_prepared(void)
 {
 	sdf_frame_prepared = 1;
 }
 
-static void sdf_frames_measured(void)
+static void sdf_frames_measured(double milliseconds, int resting)
 {
 	static int wanted = -1;
-	static unsigned long long last;
 	static double worst[2], total[2];
-	static long count[2];
-	unsigned long long now = SDL_GetTicksNS();
-	int baking;
+	static long count[2], rested;
+	/* (a bake running: not one waiting for the start-up pass to end) */
+	int baking = __atomic_load_n(&world_sdf.baking, __ATOMIC_RELAXED) != 0;
 
 	if (wanted < 0)
 		wanted = getenv("HALO_WORLD_SDF_FRAMES") != NULL;
 	if (!wanted)
 		return;
-	pthread_mutex_lock(&world_sdf_lock);
-	/* (a bake running: not one waiting for the start-up pass to end) */
-	baking = world_sdf.baking;
-	pthread_mutex_unlock(&world_sdf_lock);
+	if (milliseconds > worst[baking])
+		worst[baking] = milliseconds;
+	total[baking] += milliseconds;
+	count[baking]++;
+	rested += baking && resting;
+	if (count[0] + count[1] >= 600)
+	{
+		platform_log("world sdf: frames while baking %ld (mean %.2f ms, worst %.2f ms; the bake resting in %ld), while "
+			"not %ld (mean %.2f ms, worst %.2f ms)", count[1], count[1] ? total[1] / count[1] : 0.0, worst[1], rested,
+			count[0], count[0] ? total[0] / count[0] : 0.0, worst[0]);
+		worst[0] = worst[1] = total[0] = total[1] = 0.0;
+		count[0] = count[1] = rested = 0;
+	}
+}
+
+/* this frame's time, paced and measured; the pace told to the bake's
+threads */
+static void sdf_frame_timed(void)
+{
+	unsigned long long now = SDL_GetTicksNS();
+	int running = __atomic_load_n(&sdf_pace_running, __ATOMIC_RELAXED);
+
 	if (sdf_frame_prepared)
 	{
 		sdf_frame_prepared = 0;
-		last = 0;
+		sdf_frame_last = 0;
 	}
-	if (last)
+	if (sdf_frame_last)
 	{
-		double milliseconds = (double)(now - last) / 1e6;
+		double milliseconds = (double)(now - sdf_frame_last) / 1e6;
 
-		if (milliseconds > worst[baking])
-			worst[baking] = milliseconds;
-		total[baking] += milliseconds;
-		count[baking]++;
+		running = world_sdf_pace_frame(&sdf_pace, (float)milliseconds, pc_menu_game_playing());
+		sdf_frames_measured(milliseconds, !running);
 	}
-	last = now;
-	if (count[0] + count[1] >= 600)
-	{
-		platform_log("world sdf: frames while baking %ld (mean %.2f ms, worst %.2f ms), while not %ld (mean %.2f ms, "
-			"worst %.2f ms)", count[1], count[1] ? total[1] / count[1] : 0.0, worst[1], count[0],
-			count[0] ? total[0] / count[0] : 0.0, worst[0]);
-		worst[0] = worst[1] = total[0] = total[1] = 0.0;
-		count[0] = count[1] = 0;
-	}
+	sdf_frame_last = now;
+	__atomic_store_n(&sdf_pace_running, running, __ATOMIC_RELAXED);
+	__atomic_store_n(&sdf_pace_said, now, __ATOMIC_RELAXED);
 }
 
 /* the start-up pass's bakes all done (or dropped: a failed bake is never
@@ -2859,9 +3033,11 @@ static void sdf_startup_total(void)
 	unsigned long milliseconds, count;
 	int idle;
 
-	if (!world_sdf.startup_bakes || world_sdf.startup_logged || menu_pictures_preparing())
+	if (!world_sdf.startup_bakes || world_sdf.startup_logged || menu_pictures_preparing() ||
+		pthread_mutex_trylock(&world_sdf_lock) != 0)
+	{
 		return;
-	pthread_mutex_lock(&world_sdf_lock);
+	}
 	milliseconds = world_sdf.baked_milliseconds;
 	count = world_sdf.baked_count;
 	idle = !world_sdf.baking && !world_sdf.bakes && !world_sdf.hold;
@@ -2898,12 +3074,15 @@ void world_sdf_frame(void)
 		pthread_cond_signal(&world_sdf_bake_wake);
 		pthread_mutex_unlock(&world_sdf_lock);
 	}
-	sdf_frames_measured();
+	sdf_frame_timed();
 	sdf_startup_total();
 	/* ("world" chosen with a map loaded) */
 	if (!world_sdf.map_known && game_in_progress() && sdf_key_loaded(&key))
 		sdf_current_set(&key);
 	sdf_results();
+	/* (its static scenery left out of the window until it is drawn) */
+	if (world_sdf.map_known && world_sdf.state == _world_sdf_baking && !world_sdf.awaited_made)
+		sdf_awaited_make();
 	if (world_sdf.copy_wanted && --world_sdf.copy_frames <= 0)
 	{
 		world_sdf.copy_wanted = 0;
@@ -3052,27 +3231,26 @@ struct world_sdf_object const *world_sdf_object_field(long definition, unsigned 
 	return NULL;
 }
 
-int world_sdf_scenery_baked(long definition, float const position[3])
+/* whether these placements (in sdf_placement_order) hold one of this
+definition standing here */
+static int sdf_placement_found(struct world_sdf_placement const *placements, unsigned long count, long definition,
+	float const position[3])
 {
-	struct world_sdf_scenery const *scenery = &world_sdf.field.scenery;
-	unsigned long low = 0, high, index;
+	unsigned long low = 0, high = count, index;
 
-	if (!sdf_field_drawn())
-		return 0;
 	/* (the first at or past its x) */
-	high = scenery->placement_count;
 	while (low < high)
 	{
 		unsigned long middle = (low + high) / 2;
 
-		if (scenery->placements[middle].position[0] < position[0])
+		if (placements[middle].position[0] < position[0])
 			low = middle + 1;
 		else
 			high = middle;
 	}
-	for (index = low; index < scenery->placement_count && scenery->placements[index].position[0] == position[0]; index++)
+	for (index = low; index < count && placements[index].position[0] == position[0]; index++)
 	{
-		struct world_sdf_placement const *placement = &scenery->placements[index];
+		struct world_sdf_placement const *placement = &placements[index];
 
 		if (placement->definition == definition && placement->position[1] == position[1] &&
 			placement->position[2] == position[2])
@@ -3081,6 +3259,33 @@ int world_sdf_scenery_baked(long definition, float const position[3])
 		}
 	}
 	return 0;
+}
+
+int world_sdf_scenery_baked(long definition, float const position[3])
+{
+	return sdf_field_drawn() &&
+		sdf_placement_found(world_sdf.field.scenery.placements, world_sdf.field.scenery.placement_count, definition,
+			position);
+}
+
+int world_sdf_object_awaited(long definition)
+{
+	long index;
+
+	if (definition == NONE || world_sdf.state == _world_sdf_failed || sdf_field_drawn())
+		return 0;
+	for (index = 0; index < world_sdf.awaited_object_count; index++)
+	{
+		if (world_sdf.awaited_objects[index] == definition)
+			return 1;
+	}
+	return 0;
+}
+
+int world_sdf_scenery_awaited(long definition, float const position[3])
+{
+	return world_sdf.awaited_count && world_sdf.state != _world_sdf_failed && !sdf_field_drawn() &&
+		sdf_placement_found(world_sdf.awaited, world_sdf.awaited_count, definition, position);
 }
 
 int world_sdf_scenery_layer(void const *lightmap_bitmap)

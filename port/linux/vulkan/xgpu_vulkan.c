@@ -7063,11 +7063,19 @@ static int draw_set_make(void)
 	description.usage = XGPU_VULKAN_USAGE_SAMPLED;
 	description.width = 32;
 	description.height = 32;
-	description.depth_or_layers = 16;
+	/* (the cells, the clusters' masks and the world: xgpu.h) */
+	description.depth_or_layers = XGPU_STREAM_DYNAMIC_LIGHTS_CELL_SLICES + XGPU_STREAM_DYNAMIC_LIGHTS_WORLD_SLICES;
 	description.levels = 1;
 	vk.lights_cells = xgpu_vulkan_image_create(&description);
 	if (!vk.lights_block || !vk.samples || !vk.lights_cells)
 		return 0;
+	/* (no world yet: its header's node count 0) */
+	{
+		static const uint32_t none[4];
+
+		xgpu_vulkan_image_upload(vk.lights_cells, 0, 0, 0, 0, XGPU_STREAM_DYNAMIC_LIGHTS_CELL_SLICES, 1, 1, 1, none, 16,
+			16);
+	}
 	/* (named by the set below, made once: xgpu_vulkan_buffer_write) */
 	vk.lights_block->named_by_set = vk.samples->named_by_set = 1;
 	memset(buffers, 0, sizeof(buffers));
@@ -7113,7 +7121,24 @@ void xgpu_vulkan_dynamic_lights_upload(const void *block, uint32_t size, const v
 	read the lights: xgpu_vulkan_draw) */
 	xgpu_vulkan_buffer_write(vk.lights_block, 0, block, size < vk.lights_block->size ? size : vk.lights_block->size, 0);
 	xgpu_vulkan_image_upload(vk.lights_cells, 0, 0, 0, 0, 0, vk.lights_cells->description.width,
-		vk.lights_cells->description.height, vk.lights_cells->description.depth_or_layers, cells, 0, 0);
+		vk.lights_cells->description.height, XGPU_STREAM_DYNAMIC_LIGHTS_CELL_SLICES, cells, 0, 0);
+}
+
+void xgpu_vulkan_dynamic_lights_world(const void *texels, uint32_t count)
+{
+	uint32_t slices = (count + 1023) / 1024;
+	unsigned char *whole;
+
+	if (!vk.lights_cells || !count || count > XGPU_STREAM_DYNAMIC_LIGHTS_WORLD_TEXELS)
+		return;
+	/* (whole slices: the last's rest zeros) */
+	whole = calloc(slices, 1024 * 16);
+	if (!whole)
+		return;
+	memcpy(whole, texels, (size_t)count * 16);
+	xgpu_vulkan_image_upload(vk.lights_cells, 0, 0, 0, 0, XGPU_STREAM_DYNAMIC_LIGHTS_CELL_SLICES, 32, 32, slices, whole,
+		0, 0);
+	free(whole);
 }
 
 /* the stand-ins sampled by a stage with no image: 1 by 1, (0, 0, 0, 1), as
