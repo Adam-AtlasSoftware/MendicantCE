@@ -17,7 +17,8 @@ HEADER = "port/linux/include/world_sdf.h"
 BAKE = "port/linux/game/world_sdf_bake.c"
 SCHEDULE = "port/linux/game/world_sdf.c"
 FILE_FUNCTIONS = ["sdf_put32", "sdf_get32", "sdf_put_float", "sdf_get_float", "sdf_crc", "sdf_header_write",
-                  "sdf_header_read", "sdf_header_good", "sdf_cells_size", "sdf_bricks_size", "sdf_cells_good",
+                  "sdf_header_read", "sdf_scenery_most_bytes", "sdf_scenery_size", "sdf_scenery_free",
+                  "sdf_scenery_write", "sdf_scenery_read", "sdf_header_good", "sdf_cells_size", "sdf_bricks_size", "sdf_cells_good",
                   "sdf_volume_free", "sdf_file_pack", "sdf_file_unpack", "sdf_file_write",
                   "sdf_file_read", "sdf_cache_load", "sdf_bsp_inside"]
 CONTROLS = [
