@@ -2338,15 +2338,30 @@ void render_interpolation_object_origin(long object_index, real_point3d *origin)
 	render_interpolation_object_point(object_index, origin);
 }
 
+static boolean render_interpolation_view_carried(long unit_index, real_vector3d *carried);
+
 /* the unit's camera (unit_get_camera_position) where it is drawn: what a
-waypoint's distance, and the motion tracker's centre, are measured from */
+waypoint's distance, and the motion tracker's centre, are measured from.
+The window's own player's on foot, whose view is drawn from the newest step
+(display.direct_camera), is where that view is drawn: as the newest step
+left it, carried on as the view is (render_interpolation_view_carried), not
+a tick behind with the body, so that a waypoint's distance is the view's
+from what it marks in every frame */
 void render_interpolation_unit_camera_position(long unit_index, real_point3d *position)
 {
 	boolean rendering = interpolation_rendering;
+	real_vector3d carried;
 
 	interpolation_rendering = FALSE;
 	unit_get_camera_position(unit_index, position);
 	interpolation_rendering = rendering;
+	if (render_interpolation_view_carried(unit_index, &carried))
+	{
+		position->x += carried.i;
+		position->y += carried.j;
+		position->z += carried.k;
+		return;
+	}
 	render_interpolation_object_point(unit_index, position);
 }
 
@@ -2669,6 +2684,11 @@ static struct observer_result direct_cameras[MAXIMUM_LOCAL_PLAYERS];
 /* each local player's view drawn last from the newest step
 (render_interpolation_view_newest) */
 static boolean newest_views[MAXIMUM_LOCAL_PLAYERS];
+/* each local player's view drawn last from the newest step on foot, and how
+far it is carried on from where that step left it (the observer's place:
+render_interpolation_newest_camera), for render_interpolation_view_carried */
+static boolean newest_carried_valid[MAXIMUM_LOCAL_PLAYERS];
+static real_vector3d newest_carried[MAXIMUM_LOCAL_PLAYERS];
 /* each local player's view between the ticks (which goes with the body
 drawn) and the view drawn, this frame (render_interpolation_view_flashlight) */
 static struct observer_result blended_views[MAXIMUM_LOCAL_PLAYERS];
@@ -3845,6 +3865,7 @@ struct observer_result const *render_interpolation_camera(
 		return observer;
 	blended = render_interpolation_blended_camera(local_player_index, observer);
 	drawn_views_valid[local_player_index] = FALSE;
+	newest_carried_valid[local_player_index] = FALSE;
 	/* (in a seat of the player's vehicle drawn from its newest step) */
 	direct = render_interpolation_seat_camera(local_player_index, observer, blended);
 	if (direct)
@@ -3859,7 +3880,15 @@ struct observer_result const *render_interpolation_camera(
 		newest_views[local_player_index] = FALSE;
 #endif
 	if (newest_views[local_player_index])
+	{
+		struct observer_result const *drawn = &direct_cameras[local_player_index];
+
 		render_interpolation_newest_camera(local_player_index, observer, &direct_cameras[local_player_index]);
+		newest_carried[local_player_index].i = drawn->position.x - observer->position.x;
+		newest_carried[local_player_index].j = drawn->position.y - observer->position.y;
+		newest_carried[local_player_index].k = drawn->position.z - observer->position.z;
+		newest_carried_valid[local_player_index] = TRUE;
+	}
 	if (blended && direct)
 	{
 		blended_views[local_player_index] = *blended;
@@ -3921,6 +3950,29 @@ boolean render_interpolation_view_flashlight(
 	position->z = to->position.z + to->forward.k * along + to_left.k * across + to->up.k * height;
 	*forward = to->forward;
 	*up = to->up;
+	return TRUE;
+}
+
+/* The window's own player's unit on foot, its view drawn from the newest
+step (render_interpolation_newest_camera): how far the view drawn is carried
+on from where the newest step left it, which the unit's camera point (the
+game's, the newest step's) is carried on by as well to be where the view is.
+FALSE for any other unit, view or window: one drawn between the ticks, a
+seat's (the vehicle drawn from its newest step carries its riders and the
+view from the seat with it: render_interpolation_object_point), and the VR
+mode's */
+static boolean render_interpolation_view_carried(long unit_index, real_vector3d *carried)
+{
+	short local_player_index = render.local_player_index;
+
+	if (!interpolation_rendering || unit_index == NONE ||
+		local_player_index < 0 || local_player_index >= MAXIMUM_LOCAL_PLAYERS ||
+		!newest_carried_valid[local_player_index] ||
+		player_control_get_unit_index(local_player_index) != unit_index)
+	{
+		return FALSE;
+	}
+	*carried = newest_carried[local_player_index];
 	return TRUE;
 }
 

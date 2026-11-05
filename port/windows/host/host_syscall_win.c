@@ -1763,6 +1763,11 @@ static long long dispatch(long long number, long long a, long long b, long long 
 		/* (the host's processors, all of them: musl's processor count) */
 		return halo_guest_affinity(GUEST(unsigned char *, c), (unsigned long)(uint32_t)b,
 			(long)GetActiveProcessorCount(ALL_PROCESSOR_GROUPS));
+	/* the calling thread's priority (who 0, as Linux sets a thread's) */
+	case GUEST_SYS_setpriority:
+		if (a == 0 && b == 0 && (int)c > 0)
+			SetThreadPriority(GetCurrentThread(), (int)c >= 10 ? THREAD_PRIORITY_LOWEST : THREAD_PRIORITY_BELOW_NORMAL);
+		return 0;
 
 	case GUEST_SYS_mmap:
 		return host_guest_mmap((uint64_t)a, (uint64_t)b, (int)c, (int)d, (int)e, f);

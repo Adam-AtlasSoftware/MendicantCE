@@ -3553,3 +3553,28 @@ void halo_load_trace(char const *phase, char const *detail)
 	load_trace_log("LOAD phase=%s wall=%.6f thread=%.6f process=%.6f owner=guest:%llu detail=%s",
 		phase, wall, thread, process, (unsigned long long)SDL_GetCurrentThreadID(), detail ? detail : "");
 }
+
+/* each pass of the game's main loop ended: with the load trace, a frame that
+took longer than LONG_FRAME_SECONDS is recorded ("frame.long", its
+milliseconds; "frame.longest" for each longer than any before), so that a
+hitch in the menus or the game is found and measured on every platform */
+#define LONG_FRAME_SECONDS 0.025
+void halo_load_trace_frame(void)
+{
+	static double previous, longest;
+	struct timespec now;
+	double wall;
+	char detail[32];
+
+	if (!config_boolean("debug.load_trace") || clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+		return;
+	wall = (double)now.tv_sec + (double)now.tv_nsec * 1e-9;
+	if (previous > 0.0 && wall - previous > LONG_FRAME_SECONDS)
+	{
+		snprintf(detail, sizeof(detail), "%.1f", (wall - previous) * 1000.0);
+		halo_load_trace(wall - previous > longest ? "frame.longest" : "frame.long", detail);
+		if (wall - previous > longest)
+			longest = wall - previous;
+	}
+	previous = wall;
+}

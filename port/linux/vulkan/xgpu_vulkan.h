@@ -182,6 +182,10 @@ struct xgpu_vulkan_capabilities
 	is ordered after the ones before it by a barrier (two of its own
 	triangles over the same pixel, unordered) */
 	int color_read, raster_order;
+	/* pixel shaders have the subgroups' bitwise operations (Vulkan 1.1's
+	subgroup arithmetic in the fragment stage): xgpu_spirv_options
+	subgroups */
+	int subgroups;
 };
 void xgpu_vulkan_capabilities(struct xgpu_vulkan_capabilities *capabilities);
 
@@ -222,6 +226,8 @@ enum
 	/* ASTC 4x4 (LDR): DXT textures transcoded on a device without BC
 	(port/linux/astc/xgpu_astc.h) */
 	XGPU_VULKAN_FORMAT_ASTC,
+	/* a signed byte (display.ambient_occlusion "world"'s distance field) */
+	XGPU_VULKAN_FORMAT_R8_SNORM,
 	XGPU_VULKAN_FORMAT_COUNT
 };
 
@@ -390,9 +396,9 @@ struct xgpu_vulkan_pipeline_description
 /* the pipeline of a description, made the first time; VK_NULL_HANDLE if it
 cannot be */
 VkPipeline xgpu_vulkan_pipeline(const struct xgpu_vulkan_pipeline_description *description);
-/* a draw's pipeline in play, if it is made; else VK_NULL_HANDLE, and (the
-first time) it is asked for on the compilers, without waiting: the draw is
-skipped until it is made (xgpu_vulkan_stream.c) */
+/* the pipeline where it is made; else none (VK_NULL_HANDLE), and it is made
+apart from the draws, on the compilers, never waited for (display.ambient_
+occlusion "world"'s, while their stand-ins draw) */
 VkPipeline xgpu_vulkan_pipeline_ready(const struct xgpu_vulkan_pipeline_description *description);
 /* Queue preparation without requiring the handle yet. Nonzero means the
 request was accepted or already ready; PREPARED drains every accepted job. */
@@ -518,6 +524,10 @@ struct xgpu_vulkan_draw
 	attachment bound as its input, the draw ordered after the pass's
 	draws before it */
 	uint8_t reads_color;
+	/* HALO_VULKAN_DRAW_TIMES (measuring): the game's draw's kind, its
+	pixel key's ambient_occlusion, its pipeline key's lighting and its
+	per_pixel_lighting, and XGPU_VULKAN_DRAW_GAME; zeros the backend's own */
+	uint8_t kind[4];
 	const struct xgpu_vulkan_dynamic_state *dynamic;
 	uint32_t bindings;
 	struct xgpu_vulkan_range vertices[XGPU_VULKAN_BINDINGS];
@@ -528,6 +538,7 @@ struct xgpu_vulkan_draw
 	int32_t vertex_offset;
 };
 
+#define XGPU_VULKAN_DRAW_GAME 0x80
 void xgpu_vulkan_draw(const struct xgpu_vulkan_draw *draw);
 
 /* display.ambient_occlusion: the occlusion of the 3D view (an image of the
@@ -539,6 +550,41 @@ XGPU_SPIRV_BINDING_AMBIENT_OCCLUSION); NULL: a white texel, none */
 #define XGPU_VULKAN_SET_OCCLUSION 3
 #define XGPU_VULKAN_BINDING_OCCLUSION 0
 void xgpu_vulkan_set_ambient_occlusion(struct xgpu_vulkan_image *image);
+/* display.ambient_occlusion "world" (xgpu_vulkan_world_ao.c, xgpu_stream.h's
+struct xgpu_world_ao_block): in the same set, the structure's distance
+field, its atlas of bricks (a 3D image of signed bytes, linear, clamped to
+its edge) and its table of cells (a 3D RGBA8 image, read by texel), each a
+1x1x1 far-outside stand-in where the field is not whole, and the window's
+block (a uniform buffer) */
+#define XGPU_VULKAN_BINDING_WORLD_SDF 1
+#define XGPU_VULKAN_BINDING_WORLD_AO 2
+#define XGPU_VULKAN_BINDING_WORLD_SDF_TABLE 3
+/* (and the static scenery's pages of the level's occlusion: a 2D array of
+bytes, linear, clamped, a 1x1 page of none where they have not all come) */
+#define XGPU_VULKAN_BINDING_WORLD_AO_SCENERY 4
+/* (and the vehicles' occlusion fields' atlas: a 3D image of four halves,
+linear, clamped, a texel of none where it has not all come) */
+#define XGPU_VULKAN_BINDING_WORLD_AO_OBJECTS 5
+struct xgpu_world_ao_block;
+/* the stand-ins and the sampler made (the core's start): 0 if they cannot be */
+int xgpu_vulkan_world_ao_create(void);
+/* slices z_first to z_first + z_count - 1 of a width x height x depth part
+of the field (XGPU_STREAM_WORLD_AO_TABLE or _ATLAS), in the stream's order
+(width 0: both let go of), and the window's block from now on (NULL: none,
+zeros) */
+void xgpu_vulkan_world_ao_field(uint32_t part, uint32_t width, uint32_t height, uint32_t depth, uint32_t z_first,
+	uint32_t z_count, const void *data);
+void xgpu_vulkan_world_ao_window(const struct xgpu_world_ao_block *block);
+/* (the core's occlusion set) the field's atlas and table or the stand-ins,
+the sampler, the block's range in the ring for the submission of that
+serial (0: none), and a number that changes whenever any of them does */
+struct xgpu_vulkan_image *xgpu_vulkan_world_ao_field_image(void);
+struct xgpu_vulkan_image *xgpu_vulkan_world_ao_table_image(void);
+struct xgpu_vulkan_image *xgpu_vulkan_world_ao_scenery_image(void);
+struct xgpu_vulkan_image *xgpu_vulkan_world_ao_objects_image(void);
+VkSampler xgpu_vulkan_world_ao_sampler(void);
+int xgpu_vulkan_world_ao_block(uint64_t serial, VkDescriptorBufferInfo *info);
+uint64_t xgpu_vulkan_world_ao_number(void);
 
 /* the enhanced dynamic lights' block (struct xgpu_dynamic_lights_block,
 size bytes) and their grid's cells (32 x 32 x 16, four uints each: xgpu.h),

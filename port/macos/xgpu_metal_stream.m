@@ -1398,6 +1398,22 @@ static void stream_tone_map(void *context, const struct xgpu_stream_tone_map *re
 	stream_state_restore();
 }
 
+/* display.ambient_occlusion "world": the structure's distance field's
+slices (the decoder has checked their bounds and size) and each window's
+block (xgpu_metal_world_ao.c) */
+static void stream_world_ao_field(void *context, const struct xgpu_stream_world_ao_field *record)
+{
+	(void)context;
+	xgpu_metal_world_ao_field(record->part, record->width, record->height, record->depth, record->z_first,
+		record->z_count, record->width && record->size ? host_pointer(record->data) : NULL);
+}
+
+static void stream_world_ao_window(void *context, const struct xgpu_stream_world_ao_window *record)
+{
+	(void)context;
+	xgpu_metal_world_ao_window(record->active ? &record->block : NULL);
+}
+
 /* display.ambient_occlusion of a window's 3D view (xgpu_metal_post.c), from
 the depth target drawn with it, its opaque surfaces' depth alone
 (d3d8_device.c's pre-pass), which the surfaces' draws then light by; or the
@@ -1604,6 +1620,11 @@ const struct host_render_backend *xgpu_metal_stream_backend(void)
 		backend.ambient_occlusion = stream_ambient_occlusion;
 		backend.gamma = stream_gamma;
 		backend.panini = stream_panini;
+		/* display.ambient_occlusion "world" (#578, docs/world-ao.md): the
+		field's 3D texture (XGPU_METAL_TEXTURE_WORLD_SDF) and the window's
+		block (XGPU_METAL_BUFFER_WORLD_AO): xgpu_metal_world_ao.c */
+		backend.world_ao_field = stream_world_ao_field;
+		backend.world_ao_window = stream_world_ao_window;
 	}
 	return &backend;
 }

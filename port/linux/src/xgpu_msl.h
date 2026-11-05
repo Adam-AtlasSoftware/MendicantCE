@@ -49,6 +49,18 @@ draw reads the frame's, wherever its ring put them) */
 by the draws whose pixel key has it (xgpu.h's XGPU_AMBIENT_OCCLUSION_LIGHT_*;
 white where the backend found none) */
 #define XGPU_MSL_TEXTURE_AMBIENT_OCCLUSION 4
+/* display.ambient_occlusion "world" (xgpu_stream.h): the structure's
+distance field, its atlas of bricks (texture3d<float>, read through a
+constexpr linear sampler clamped to its edge) and its table of cells
+(texture3d<float>, RGBA8, read), and the window's block */
+#define XGPU_MSL_TEXTURE_WORLD_SDF 5
+#define XGPU_MSL_TEXTURE_WORLD_SDF_TABLE 6
+/* (the static scenery's pages of the level's occlusion, a 2D array) */
+#define XGPU_MSL_TEXTURE_WORLD_AO_SCENERY 7
+/* (the vehicles' occlusion fields' atlas: a 3D texture of four halves;
+past the combiner's places, 8 to 19) */
+#define XGPU_MSL_TEXTURE_WORLD_AO_OBJECTS 20
+#define XGPU_MSL_BUFFER_WORLD_AO 23
 
 /* the draw's values both stages read, laid out alike in C and in Metal
 (float4s, and floats in fours): d3d8_gl.c's draw uniforms, the per-pixel
@@ -79,6 +91,11 @@ struct xgpu_msl_uniforms
 	float texture_border[4][4];
 	float texture_border_linear[4];
 	float model_lights[XGPU_MODEL_LIGHT_COUNT][4];
+	/* display.ambient_occlusion "world" (xgpu.h): the draw's object, its
+	owner slot among the window's proxies (-1 none) and its reference, then
+	two spare; declared in the pixel shaders that read it alone, the last
+	member, so that the others' text is as it was */
+	float world_ao[4];
 };
 
 /* what the Metal Shading Language is written for (xgpu_msl.c):

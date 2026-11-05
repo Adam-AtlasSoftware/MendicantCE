@@ -1124,10 +1124,12 @@ static const struct config_setting config_settings[] =
 		"saved films at 30, whatever this is." },
 	{ "game.map_cache_megabytes", _config_integer, "0", "HALO_MAP_CACHE_MEGABYTES", _environment_value, _platform_all,
 		"The most the decompressed maps the game keeps (the save folder's z/)\n"
-		"may take of the disk, in MB; 0: what the disk has room for, short of\n"
-		"the larger of 2 GB and a twentieth of the disk, which it always keeps\n"
-		"free. Every stock map takes 3.0 GB, unpacked once and then loaded\n"
-		"without waiting; at least 730 MB, the Xbox's six cache files'." },
+		"may take of the disk, in MB. 0 (Settings' Instant Loading): every\n"
+		"stock map, 3.0 GB, unpacked once, in the background, and then loaded\n"
+		"without waiting, short of a twentieth of the disk (at least 2 GB, at\n"
+		"most 5 GB), which it always keeps free. 730 (Disk Space Saver): the Xbox's\n"
+		"six cache files' room, the least it takes; a map is unpacked as it is\n"
+		"played, and none ahead. A change gives maps up at once." },
 	{ "game.auto_pickup", _config_boolean, "false", "HALO_AUTO_PICKUP", _environment_value, _platform_all,
 		"Multiplayer: a player with an empty weapon slot picks up a weapon by\n"
 		"walking over it, as Custom Edition does. false (the Xbox's way): they\n"
@@ -1237,7 +1239,10 @@ static const struct config_setting config_settings[] =
 		"bench, a Warthog on the sand), worked out from the 3D view's depth\n"
 		"each frame. The levels' own corners keep their baked light, and\n"
 		"self-illuminated surfaces, lights and your weapon keep theirs: \"off\",\n"
-		"\"subtle\" or \"strong\". Not with multisampling on Metal (macOS, iOS)."
+		"\"subtle\" or \"strong\". Not with multisampling on Metal (macOS, iOS).\n"
+		"\"world\" (docs/world-ao.md): found in the world instead, from the\n"
+		"level's distance field and the objects' shapes, with no pass over the\n"
+		"screen: in VR's eyes and with Metal's multisampling too."
 		GRAPHICS_CHOOSES },
 	{ "display.shield_color", _config_string, "\"default\"", "HALO_SHIELD_COLOR", _environment_value, _platform_all,
 		"Your energy shield's color, as this machine draws it: \"default\" (the\n"
@@ -2307,6 +2312,18 @@ static const struct config_setting config_settings[] =
 		"if it is carried a tenth of a unit away), turned so many degrees left\n"
 		"of the view's heading (0: ahead); empty none." },
 #endif
+	{ "debug.world_proxies_view", _config_boolean, "false", "HALO_WORLD_PROXIES_VIEW", _environment_value,
+		_platform_all,
+		"With display.ambient_occlusion \"world\", the objects' occluding shapes\n"
+		"(spheres, capsules, boxes) drawn as wireframes over them." },
+	{ "debug.world_ao_view", _config_boolean, "false", "HALO_WORLD_AO_VIEW", _environment_value, _platform_all,
+		"With display.ambient_occlusion \"world\", the surfaces it shades drawn as\n"
+		"its occlusion alone, in grey." },
+	{ "debug.world_ao_test", _config_string, "\"\"", "HALO_WORLD_AO_TEST", _environment_value, _platform_all,
+		"With display.ambient_occlusion \"world\", a made-up field and shapes in\n"
+		"place of the level's and the objects' (docs/world-ao.md, \"D. Shading\"):\n"
+		"\"plane nx ny nz d; sphere x y z r; capsule ax ay az bx by bz r; box x y z\n"
+		"ex ey ez\" (\"\": none)." },
 	{ "debug.ambient_occlusion_view", _config_boolean, "false", "HALO_AMBIENT_OCCLUSION_VIEW", _environment_value,
 		_platform_all,
 		"With display.ambient_occlusion, the 3D view drawn as the occlusion\n"
@@ -2396,6 +2413,13 @@ static const struct config_setting config_settings[] =
 	{ "debug.dynamic_lights_log", _config_boolean, "false", "HALO_DYNAMIC_LIGHTS_LOG", _environment_value, _platform_all,
 		"Log where the first projectile's light is drawn each frame (the\n"
 		"enhanced dynamic lights)." },
+	{ "debug.world_scene_log", _config_boolean, "false", "HALO_WORLD_SCENE_LOG", _environment_value, _platform_all,
+		"With display.ambient_occlusion \"world\", log the world scene's counts\n"
+		"(the level's triangles, the objects drawn, the lights) now and then." },
+	{ "debug.world_scene_dump", _config_boolean, "false", "HALO_WORLD_SCENE_DUMP", _environment_value, _platform_all,
+		"With display.ambient_occlusion \"world\", write each level BSP's\n"
+		"collision triangles to the data folder as it loads, to look at in a\n"
+		"mesh viewer: world_scene_<map>_bsp<n>.obj." },
 	{ "debug.gpu_debug_expression", _config_string, "\"\"", "HALO_GPU_DEBUG_EXPR", _environment_value, _platform_all,
 		"Metal only, not Vulkan's SPIR-V: an expression (MSL) every pixel shader\n"
 		"shows instead of its result." },

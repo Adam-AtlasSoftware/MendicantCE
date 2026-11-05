@@ -572,6 +572,13 @@ MOVIES_HELP = ("Plays the Xbox's intro movie as the game starts, and its attract
                "button skips the intro.|They are the bink folder of your Xbox disc image, copied with the maps. "
                "Without them, put the disc's bink folder beside your maps folder.")
 
+# game.map_cache_megabytes's: every stock map kept unpacked (the disk's
+# room), or the Xbox's six cache files' room (730 MB, the least it takes)
+MAP_STORAGE = [("INSTANT LOADING", "0"), ("DISK SPACE SAVER", "730")]
+MAP_STORAGE_HELP = ("Instant Loading keeps every map unpacked, about 3.0 GB, so loads never wait. Disk Space Saver "
+                    "keeps at most 730 MB, saving 2.3 GB or more, little on most drives. A map it has not kept loads "
+                    "a second or more slower.|Switching back unpacks them in the background.")
+
 CREATE_PROFILE = ("CREATE PROFILE ›", None, None,
                   "Your name, color and controller layout are kept in a player profile. Make one to set them; the "
                   "rest of Settings works without one.", None, "create_profile", "port settings new profile")
@@ -841,7 +848,7 @@ PAGES = {
     },
     "profile_settings": {
         "screen": "profile_settings_screen", "tab": "PROFILES",
-        "about": "Your player profiles, your name and color.",
+        "about": "Your player profiles, your name and color, and the disk space the maps take.",
         "rows": [
             # (with no profile, NAME, COLOR and MANAGE PROFILES are hidden and
             # CREATE PROFILE shown; in a game, those whose screens are
@@ -859,6 +866,11 @@ PAGES = {
             ("MANAGE PROFILES ›", None, PROFILE_MANAGER,
              "Switch to another player profile, make a new one or delete one. Your changes so far are kept.", None,
              "profiles", "port settings profiles"),
+            # (game.map_cache_megabytes: 0 keeps every stock map unpacked, 730
+            # the Xbox's room, the least it takes; another number shows the
+            # nearer: port/linux/src/map_cache.c, port/linux/game/map_cache_prefill.c)
+            (SECTION, "STORAGE"),
+            ("MAP STORAGE", "game.map_cache_megabytes", MAP_STORAGE, MAP_STORAGE_HELP, None),
             (SECTION, "ABOUT"),
             ("OPENH1", None, None,
              "Halo: Combat Evolved, the Xbox game, on this computer, played from your own copy of its maps. OpenH1 "
@@ -921,7 +933,7 @@ PAGES = {
              "Enhanced: plasma bolts, muzzle flashes and blasts light their surroundings smoothly, with a glow. "
              "Classic lights them as the Xbox did.", "desktop android"),
             ("AMBIENT OCCLUSION", "display.ambient_occlusion",
-             [("OFF", "off"), ("SUBTLE", "subtle"), ("STRONG", "strong")],
+             [("OFF", "off"), ("SUBTLE", "subtle"), ("STRONG", "strong"), ("WORLD", "world")],
              "Grounds characters, vehicles and scenery with soft shade where they meet the world and in their "
              "creases. The levels keep their own lighting.", "desktop android"),
             ("SHIELD GLOW", "display.shield_glow", ON_OFF,

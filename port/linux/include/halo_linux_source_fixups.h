@@ -19,6 +19,8 @@ void halo_loading_ready(void);
 /* opt-in map loading timestamps (port/linux/src/sdl_platform.c) */
 int halo_load_trace_enabled(void);
 void halo_load_trace(char const *phase, char const *detail);
+/* each pass of the main loop ended: its long frames traced */
+void halo_load_trace_frame(void);
 /* Preparation batches release texture cache pages only after a complete
 draw and after the render owner has consumed their bytes. */
 void halo_gpu_preparation_checkpoint_set(unsigned long bytes, void (*checkpoint)(void *const *textures));
@@ -243,6 +245,11 @@ float halo_screen_scale(void);
 0: none), which D3DDevice_GetVisibilityTestResult gives as the time stamp
 of the test a slot's count is of (port/linux/src/d3d8_device.c) */
 unsigned long d3d8_visibility_test_number(void);
+/* the viewport's depth range (D3DVIEWPORT8's MinZ and MaxZ), the rest of
+it kept, and the range it had in previous (NULL: not wanted); a range of
+1 to 1 draws at the far plane, where only what nothing has drawn over is
+(port/linux/src/d3d8_device.c) */
+void d3d8_viewport_depth_range(float minimum, float maximum, float previous[2]);
 /* takes up a new width between frames (F11); returns the width */
 long halo_screen_commit(void);
 /* the shadow maps' pixels for each of their 128 texels each way, a power of

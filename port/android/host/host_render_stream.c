@@ -230,6 +230,9 @@ static const uint32_t record_minimum[XGPU_STREAM_RECORD_TYPES] =
 	[XGPU_STREAM_PICTURE_POSITION] = sizeof(struct xgpu_stream_value),
 	[XGPU_STREAM_GAMMA] = sizeof(struct xgpu_stream_value),
 	[XGPU_STREAM_PANINI] = sizeof(struct xgpu_stream_panini),
+	[XGPU_STREAM_WORLD_AO_WINDOW] = sizeof(struct xgpu_stream_world_ao_window),
+	[XGPU_STREAM_WORLD_AO_FIELD] = sizeof(struct xgpu_stream_world_ao_field),
+	[XGPU_STREAM_PIPELINE_STAND_IN] = sizeof(struct xgpu_stream_pipeline_stand_in),
 	/* (and its folder's path, at least its NUL) */
 	[XGPU_STREAM_SCREENSHOT] = sizeof(struct xgpu_stream_screenshot) + XGPU_STREAM_RECORD_ALIGNMENT,
 	[XGPU_STREAM_TARGET_CREATE] = sizeof(struct xgpu_stream_target_create),
@@ -507,6 +510,22 @@ static int decode_record(struct host_render_decoder *decoder, const unsigned cha
 	case XGPU_STREAM_PANINI:
 		CALL(panini, (const void *)start);
 		break;
+	case XGPU_STREAM_WORLD_AO_WINDOW:
+		CALL(world_ao_window, (const void *)start);
+		break;
+	case XGPU_STREAM_WORLD_AO_FIELD:
+	{
+		const struct xgpu_stream_world_ao_field *field = (const void *)start;
+
+		if (field->width && (field->part > XGPU_STREAM_WORLD_AO_OBJECTS || field->z_count > field->depth ||
+			field->z_first > field->depth - field->z_count ||
+			(uint64_t)field->width * field->height * field->z_count * XGPU_STREAM_WORLD_AO_TEXEL(field->part) !=
+			field->size ||
+			!data_inside(decoder, start, size, field->data, field->size)))
+			return XGPU_STREAM_ERROR_BOUNDS;
+		CALL(world_ao_field, field);
+		break;
+	}
 	case XGPU_STREAM_TARGET_CREATE:
 		CALL(target_create, (const void *)start);
 		break;
@@ -632,6 +651,17 @@ static int decode_record(struct host_render_decoder *decoder, const unsigned cha
 		if (__atomic_load_n(&decoder->pipeline_states[id], __ATOMIC_RELAXED) == XGPU_STREAM_PIPELINE_UNKNOWN)
 			__atomic_store_n(&decoder->pipeline_states[id], made ? XGPU_STREAM_PIPELINE_MADE : XGPU_STREAM_PIPELINE_FAILED,
 				__ATOMIC_RELAXED);
+		break;
+	}
+	case XGPU_STREAM_PIPELINE_STAND_IN:
+	{
+		const struct xgpu_stream_pipeline_stand_in *stand_in = (const void *)start;
+
+		if (!stand_in->id || stand_in->id >= XGPU_STREAM_PIPELINES || !decoder->pipelines[stand_in->id] ||
+			stand_in->stand_in >= XGPU_STREAM_PIPELINES || (stand_in->stand_in && !decoder->pipelines[stand_in->stand_in]))
+			return XGPU_STREAM_ERROR_ID;
+		CALL(pipeline_stand_in, stand_in->id, stand_in->stand_in,
+			stand_in->stand_in ? decoder->pipelines[stand_in->stand_in] : NULL);
 		break;
 	}
 	case XGPU_STREAM_DRAW_STATE:

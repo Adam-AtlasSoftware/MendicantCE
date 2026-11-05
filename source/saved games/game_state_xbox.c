@@ -100,6 +100,7 @@ symbols in this file:
 #include "interface/player_ui.h"
 #include "memory/crc.h"
 #include "saved games/game_state.h"
+#include "saved games/player_profile.h" /* port: game_state_persistent_storage_file_expected */
 #include "sound/sound_manager.h"
 #include <xtl.h>
 
@@ -445,6 +446,33 @@ static __inline boolean game_state_get_persistent_storage_path(
 	result = player_ui_get_path_to_local_player_profile_directory(0, path) != FALSE;
 
 	return result;
+}
+
+/* port: the persistent storage's file (its check on a thread, ahead of the
+menus that ask for it: port/linux/src/saved_game_check.c) */
+boolean game_state_persistent_storage_file(
+	char *path)
+{
+	if (!game_state_get_persistent_storage_path(path))
+		return FALSE;
+	strcat(path, game_state_get_persistent_storage_filename());
+	return TRUE;
+}
+
+/* port: ...and the one it will be: the main menu has no player yet until
+one presses a button, and then the profile used last is the player's */
+boolean game_state_persistent_storage_file_expected(
+	char *path)
+{
+	long profile_index;
+
+	if (game_state_persistent_storage_file(path))
+		return TRUE;
+	profile_index = player_ui_get_player1_last_used_profile_index();
+	if (profile_index == NONE || !player_profile_get_enclosing_directory_path(profile_index, path))
+		return FALSE;
+	strcat(path, game_state_get_persistent_storage_filename());
+	return TRUE;
 }
 
 static void delete_persistent_storage(

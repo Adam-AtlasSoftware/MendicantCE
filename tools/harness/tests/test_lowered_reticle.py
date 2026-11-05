@@ -112,7 +112,7 @@ def test_called_only_by_the_drawing():
         "source/interface/hud_draw.c", "source/main/main.c"]
     hud = function(read("source/interface/hud_draw.c"), "hud_draw_bitmap_with_meter")
     # the weapon's reticle only, and not on top of the passenger's shot, which is projected through the turned view
-    assert "if (is_crosshair_bitmap && !passenger_camera_reticle_offset(&point, reticle_scale))\n" \
+    assert "if (is_crosshair_bitmap && !passenger_camera_reticle_offset(&point, reticle_scale, &reticle_rest))\n" \
         "\t\tlowered_reticle_offset_point(&point, reticle_scale);" in hud
     assert hud.index("reticle_scale = is_crosshair_bitmap") < hud.index("lowered_reticle_offset_point(")
     assert "\t\treticle_scale);" in hud[hud.index("hud_draw_bitmap_internal("):]

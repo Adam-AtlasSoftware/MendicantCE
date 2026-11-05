@@ -198,6 +198,12 @@ unsigned long memory_watch_generation(unsigned long address, unsigned long size)
 /* changes whenever any page's generation does: while it stays the same, so
 do all generations */
 unsigned long memory_watch_serial(void);
+/* the bytes a generation and a protection covers: the host's page (the
+kernel's, 4 KB or larger: 16 KB on Apple's hardware and on the Android and
+ARM Linux kernels that use them), or 4 KB where the tracking compares page
+contents. A range the renderer watches on its own (the vertex mirror's
+pages) is one of these, so that its neighbours' writes are not its own. */
+unsigned long memory_watch_page_size(void);
 /* call before the host itself (read(), the kernel) writes into the range */
 void memory_watch_prepare_write(void *address, unsigned long size);
 /* the range was remapped or reprotected: treat it as written and unwatched */
