@@ -1461,6 +1461,80 @@ def _button(name: str, caption: int, handlers: list, wide_layout=None) -> list:
     return _widget(name, pairs, handlers + ['<on event="left_mouse" run="mouse emit accept event"/>'])
 
 
+# ---------- the rows of the port's screens of a list of rows (_screen, the
+# setup options' screens): each OPTION_ROW_WIDTH wide, as tall as its list's
+# pitch leaves room for between it and the next (option_row_height), its
+# picture that tall (part_option_row: a dark bar, framed while it has the
+# focus), its label's capitals and its value's on its middle; the values in
+# one column (OPTION_VALUE_X, OPTION_VALUE_WIDTH: the spinners' and the
+# typed values', their words on its middle)
+OPTION_ROW_WIDTH = 512
+OPTION_ROW_PITCH = 28
+OPTION_ROW_GAP = 2
+OPTION_VALUE_X, OPTION_VALUE_WIDTH = 286, 206
+# (a spinner's arrows that far outside its sides)
+OPTION_ARROW_GAP = 7
+
+
+def option_row_height(pitch: int) -> int:
+    """a row's height in a list of rows pitch apart: OPTION_ROW_GAP clear of
+    the next, and no taller than at the screens' usual pitch"""
+    return min(pitch, OPTION_ROW_PITCH) - OPTION_ROW_GAP
+
+
+def part_option_row(height: int) -> str:
+    """a row's picture, height tall (option_row_height)"""
+    return f"{PARTS}/option_row_{OPTION_ROW_WIDTH}x{height}"
+
+
+def option_row_heights() -> list:
+    """the rows' heights the screens have (their pictures': parts_pictures)"""
+    pitches = {OPTION_ROW_PITCH, SERVER_SETTINGS_SPACING, SETUP_OPTION_PITCH}
+    pitches |= {spec.get("spacing", OPTION_ROW_PITCH) for spec in [*SCREENS.values(), *VR_SCREENS.values()]}
+    return sorted({option_row_height(pitch) for pitch in pitches})
+
+
+def _option_row(name: str, pitch: int, handlers: list, platform=None) -> list:
+    return _widget(name, [("width", OPTION_ROW_WIDTH), ("height", option_row_height(pitch)),
+                          ("flags", "pass_unhandled_to_focused_child"), ("bitmap", part_option_row(option_row_height(pitch))),
+                          ("color", "#FF2896FF"), ("platform", platform)], handlers)
+
+
+def _option_label(name: str, pitch: int, width: int, pairs: list) -> list:
+    """a row's label (pairs: its words), large_ui's capitals on the row's
+    middle"""
+    height = option_row_height(pitch)
+    return _widget(name, [("type", "text"), ("controller", 1), ("width", width), ("height", height), *pairs,
+                          ("font", "ui\\large_ui"), ("color", "#FF2896FF"), ("text_x", 13),
+                          ("text_y", caps_text_y(height, large=True))], [])
+
+
+def _option_value(name: str, pitch: int, small: bool = False) -> list:
+    """a row's value the game writes (a typed name, a gametype), in the
+    value column, its capitals on the row's middle (small_ui's for a long
+    one: an invite link)"""
+    height = option_row_height(pitch)
+    return _widget(name, [("type", "text"), ("controller", 1), ("width", OPTION_VALUE_WIDTH), ("height", height),
+                          ("font", "ui\\small_ui" if small else "ui\\large_ui"), ("color", "#FF2896FF"),
+                          ("align", "center"), ("text_y", caps_text_y(height, large=not small)),
+                          ("text_flags", "no_focus_test")], [])
+
+
+def option_spinner_pairs(pitch: int) -> list:
+    """a row's spinner's pairs, placed at OPTION_VALUE_X in it: the value
+    column, its box from the row's top as far as its value's capitals' top
+    is (a spinner draws its value at its box's top), its arrows outside its
+    sides on the row's middle"""
+    height = option_row_height(pitch)
+    top = caps_text_y(height, large=True)
+    left, right = arrows_bounds(height, -OPTION_ARROW_GAP, OPTION_VALUE_WIDTH + OPTION_ARROW_GAP)
+    return [("top", top), ("width", OPTION_VALUE_WIDTH), ("height", height - 2 * top),
+            ("flags", "pass_unhandled_to_focused_child left_right_tabs_items"), ("font", "ui\\large_ui"),
+            ("color", "#FF2896FF"), ("align", "center"), ("text_y", 0),
+            ("header_bitmap", "bitmaps/arrow_sm_left"), ("footer_bitmap", "bitmaps/arrow_sm_right"),
+            ("header_bounds", left), ("footer_bounds", right)]
+
+
 def _screen(folder: str, spec: dict, rows: list, list_inputs: list, list_handlers: list, extra: list) -> list:
     """a screen: its header, the list of rows (with the help line as its
     description), and the buttons"""
@@ -1514,6 +1588,7 @@ def _placed(row: str, platform, members: list, places: dict) -> list:
 def _setting_screen(folder: str, spec: dict) -> list:
     base = f"{PE}/{folder}"
     rows, extra = [], []
+    pitch = spec.get("spacing", OPTION_ROW_PITCH)
     place = -1
     # (platform_places: each platform's rows in places of their own, with
     # no gap where the others' are; a row in one place for all its
@@ -1526,16 +1601,12 @@ def _setting_screen(folder: str, spec: dict) -> list:
             row = f"{base}/op_{key}"
             place += 1
             rows.append((row, platform, place))
-            extra += _widget(row, [("width", 512), ("height", 28), ("flags", "pass_unhandled_to_focused_child"),
-                                   ("bitmap", "bitmaps/option_bkds"), ("color", "#FF2896FF"), ("platform", platform)],
-                             [f'<on event="a" run="port settings save" open="{choices}"/>',
-                              f'<on event="start" run="port settings save" open="{choices}"/>',
-                              '<on event="left_mouse" run="mouse emit accept event"/>',
-                              f'<child{attributes([("widget", f"{base}/{key}_label")])}/>'])
-            extra += _widget(f"{base}/{key}_label",
-                             [("type", "text"), ("controller", 1), ("width", 480), ("height", 22),
-                              ("string_list", f"{base}/labels"), ("string_index", index), ("font", "ui\\large_ui"),
-                              ("color", "#FF2896FF"), ("text_x", 13), ("text_y", 4)], [])
+            extra += _option_row(row, pitch, [f'<on event="a" run="port settings save" open="{choices}"/>',
+                                              f'<on event="start" run="port settings save" open="{choices}"/>',
+                                              '<on event="left_mouse" run="mouse emit accept event"/>',
+                                              f'<child{attributes([("widget", f"{base}/{key}_label")])}/>'], platform)
+            extra += _option_label(f"{base}/{key}_label", pitch, 480,
+                                   [("string_list", f"{base}/labels"), ("string_index", index)])
             continue
         key = named[0] if named else setting.split(".", 1)[1]
         row = f"{base}/op_{key}"
@@ -1550,26 +1621,16 @@ def _setting_screen(folder: str, spec: dict) -> list:
             if setting not in spec.get("same_place", ()) and key not in spec.get("same_place", ()):
                 place += 1
             rows.append((row, platform, place))
-        # (a device's name wants the wider spinner Server Setup's co-op rows
-        # have: WIDE_SETTINGS)
-        wide = setting in WIDE_SETTINGS
-        extra += _widget(row, [("width", 512), ("height", 28), ("flags", "pass_unhandled_to_focused_child"),
-                               ("bitmap", "bitmaps/option_bkds"), ("color", "#FF2896FF"), ("platform", platform)],
-                         [f'<child{attributes([("widget", f"{base}/{key}_label")])}/>',
-                          f'<child{attributes([("widget", f"{base}/{key}_spinner"), ("x", 286 if wide else 320), ("y", 1)])}/>'])
-        extra += _widget(f"{base}/{key}_label",
-                         [("type", "text"), ("controller", 1), ("width", 300), ("height", 22),
-                          ("string_list", f"{base}/labels"), ("string_index", index), ("font", "ui\\large_ui"),
-                          ("color", "#FF2896FF"), ("text_x", 13), ("text_y", 4)], [])
+        # (each in the value column, wide enough for a device's name)
+        extra += _option_row(row, pitch, [f'<child{attributes([("widget", f"{base}/{key}_label")])}/>',
+                                          f'<child{attributes([("widget", f"{base}/{key}_spinner"), ("x", OPTION_VALUE_X)])}/>'],
+                             platform)
+        extra += _option_label(f"{base}/{key}_label", pitch, OPTION_VALUE_X - 6,
+                               [("string_list", f"{base}/labels"), ("string_index", index)])
         extra += _widget(f"{base}/{key}_spinner",
-                         [("type", "spinner"), ("left", None if wide else 3), ("top", 2), ("width", 206 if wide else 147),
-                          ("height", 20), ("flags", "pass_unhandled_to_focused_child left_right_tabs_items"),
+                         [("type", "spinner"), *option_spinner_pairs(pitch),
                           ("strings", "|".join(shown for shown, _ in choices)), ("setting", setting),
-                          ("values", "|".join(value for _, value in choices)), ("font", "ui\\large_ui"),
-                          ("color", "#FF2896FF"), ("align", "center"), ("text_y", 4 if wide else 1),
-                          ("header_bitmap", "bitmaps/arrow_sm_left"), ("footer_bitmap", "bitmaps/arrow_sm_right"),
-                          ("header_bounds", "7 -13 19 -7" if wide else "7 -6 19 0"),
-                          ("footer_bounds", "7 208 19 214" if wide else "7 150 19 156")],
+                          ("values", "|".join(value for _, value in choices))],
                          ['<on event="created" run="port setting load"/>'])
     # (each category's row: its label, the screen it opens, its help, and the
     # platforms it is for, as a row's: every one's when it names none)
@@ -1585,15 +1646,11 @@ def _setting_screen(folder: str, spec: dict) -> list:
             rows += _placed(row, platform, members, places)
         else:
             rows.append((row, platform, place + 1 + index))
-        extra += _widget(row, [("width", 512), ("height", 28), ("flags", "pass_unhandled_to_focused_child"),
-                               ("bitmap", "bitmaps/option_bkds"), ("color", "#FF2896FF"), ("platform", platform)],
-                         [f'<on event="a" open="{target}"/>', f'<on event="start" open="{target}"/>',
-                          '<on event="left_mouse" run="mouse emit accept event"/>',
-                          f'<child widget="{base}/{key}_label"/>'])
-        extra += _widget(f"{base}/{key}_label",
-                         [("type", "text"), ("controller", 1), ("width", 512), ("height", 22),
-                          ("string_list", f"{base}/labels"), ("string_index", len(spec["rows"]) + index),
-                          ("font", "ui\\large_ui"), ("color", "#FF2896FF"), ("text_x", 13), ("text_y", 4)], [])
+        extra += _option_row(row, pitch, [f'<on event="a" open="{target}"/>', f'<on event="start" open="{target}"/>',
+                                          '<on event="left_mouse" run="mouse emit accept event"/>',
+                                          f'<child widget="{base}/{key}_label"/>'], platform)
+        extra += _option_label(f"{base}/{key}_label", pitch, OPTION_ROW_WIDTH,
+                               [("string_list", f"{base}/labels"), ("string_index", len(spec["rows"]) + index)])
     extra += _button(f"{base}/button_defaults", 3, ['<on event="a" run="port settings defaults"/>',
                                                     '<on event="start" run="port settings defaults"/>'])
     extra += _button(f"{base}/button_ok", 1, ['<on event="a" run="port settings save" back="true"/>',
@@ -2716,20 +2773,18 @@ FIELD_BACK = ['<on event="b"/>', '<on event="back"/>']
 SCREEN_BACK = ['<on event="b" run="gamespy back handler"/>', '<on event="back" run="gamespy back handler"/>']
 
 
-def _value_row(base: str, key: str, label_index: int, run: str) -> list:
-    """a row of a label and a value the player sets (A edits it)"""
-    lines = _widget(f"{base}/op_{key}", [("width", 512), ("height", 28), ("flags", "pass_unhandled_to_focused_child"),
-                                         ("bitmap", "bitmaps/option_bkds"), ("color", "#FF2896FF")],
-                    [f'<on event="a" run="{run}"/>', f'<on event="start" run="{run}"/>', *FIELD_BACK,
-                     '<on event="left_mouse" run="mouse emit accept event"/>',
-                     f'<child widget="{base}/{key}_label"/>', f'<child widget="{base}/{key}_value" x="230" y="1"/>'])
-    lines += _widget(f"{base}/{key}_label", [("type", "text"), ("controller", 1), ("width", 230), ("height", 22),
-                                             ("string_list", f"{base}/labels"), ("string_index", label_index or None),
-                                             ("font", "ui\\large_ui"), ("color", "#FF2896FF"), ("text_x", 13),
-                                             ("text_y", 4)], [])
-    lines += _widget(f"{base}/{key}_value", [("type", "text"), ("controller", 1), ("width", 280), ("height", 22),
-                                             ("font", "ui\\small_ui"), ("color", "#FF2896FF"), ("align", "center"),
-                                             ("text_y", 5), ("text_flags", "no_focus_test")], [])
+def _value_row(base: str, key: str, label_index: int, run: str, pitch: int = OPTION_ROW_PITCH,
+               small: bool = False) -> list:
+    """a row of a label and a value the player sets (A edits it), the value
+    in the value column (small: in small_ui, a long one)"""
+    lines = _option_row(f"{base}/op_{key}", pitch,
+                        [f'<on event="a" run="{run}"/>', f'<on event="start" run="{run}"/>', *FIELD_BACK,
+                         '<on event="left_mouse" run="mouse emit accept event"/>',
+                         f'<child widget="{base}/{key}_label"/>',
+                         f'<child widget="{base}/{key}_value" x="{OPTION_VALUE_X}"/>'])
+    lines += _option_label(f"{base}/{key}_label", pitch, OPTION_VALUE_X - 6,
+                           [("string_list", f"{base}/labels"), ("string_index", label_index or None)])
+    lines += _option_value(f"{base}/{key}_value", pitch, small)
     return lines
 
 
@@ -2835,70 +2890,50 @@ def _server_settings() -> list:
     spec = {"screen": "server_settings_screen", "spacing": SERVER_SETTINGS_SPACING, "help_top": 364,
             "header": ("header_server_settings", f"{base}/header_server_settings")}
     rows, extra = [], []
-    extra += _value_row(base, "server_name", 0, "ss edit server name")
+    pitch = SERVER_SETTINGS_SPACING
+
+    def spinner_row(key, label_index, strings, handlers=()):
+        """a row of a label and a spinner of strings"""
+        row = _option_row(f"{base}/op_{key}", pitch, [f'<child widget="{base}/{key}_label"/>',
+                                                      f'<child widget="{base}/{key}_spinner" x="{OPTION_VALUE_X}"/>'])
+        row += _option_label(f"{base}/{key}_label", pitch, OPTION_VALUE_X - 6,
+                             [("string_list", f"{base}/labels"), ("string_index", label_index)])
+        row += _widget(f"{base}/{key}_spinner", [("type", "spinner"), *option_spinner_pairs(pitch),
+                                                 ("strings", "|".join(strings))], list(handlers))
+        return row
+
+    def opening_row(key, label_index, handlers, value=False):
+        """a row that opens a screen (and its value, the game's words)"""
+        children = [f'<child widget="{base}/{key}_label"/>']
+        if value:
+            children.append(f'<child widget="{base}/{key}_value" x="{OPTION_VALUE_X}"/>')
+        row = _option_row(f"{base}/op_{key}", pitch, handlers + ['<on event="left_mouse" run="mouse emit accept event"/>']
+                          + children)
+        row += _option_label(f"{base}/{key}_label", pitch, (OPTION_VALUE_X if value else OPTION_ROW_WIDTH) - 6,
+                             [("string_list", f"{base}/labels"), ("string_index", label_index)])
+        if value:
+            row += _option_value(f"{base}/{key}_value", pitch, small=True)
+        return row
+
+    extra += _value_row(base, "server_name", 0, "ss edit server name", pitch)
     rows.append((f"{base}/op_server_name", None))
-    extra += _widget(f"{base}/op_max_players", [("width", 512), ("height", 28),
-                                                ("flags", "pass_unhandled_to_focused_child"),
-                                                ("bitmap", "bitmaps/option_bkds"), ("color", "#FF2896FF")],
-                     [f'<child widget="{base}/max_players_label"/>',
-                      f'<child widget="{base}/max_players_spinner" x="320" y="1"/>'])
-    extra += _widget(f"{base}/max_players_label", [("type", "text"), ("controller", 1), ("width", 300),
-                                                   ("height", 22), ("string_list", f"{base}/labels"),
-                                                   ("string_index", 1), ("font", "ui\\large_ui"),
-                                                   ("color", "#FF2896FF"), ("text_x", 13), ("text_y", 4)], [])
-    extra += _widget(f"{base}/max_players_spinner",
-                     [("type", "spinner"), ("left", 3), ("top", 2), ("width", 147), ("height", 20),
-                      ("flags", "pass_unhandled_to_focused_child left_right_tabs_items"),
-                      ("strings", "|".join(str(count) for count in MAXIMUM_PLAYERS)), ("font", "ui\\large_ui"),
-                      ("color", "#FF2896FF"), ("align", "center"), ("text_y", 1),
-                      ("header_bitmap", "bitmaps/arrow_sm_left"), ("footer_bitmap", "bitmaps/arrow_sm_right"),
-                      ("header_bounds", "7 -6 19 0"), ("footer_bounds", "7 150 19 156")], [])
+    extra += spinner_row("max_players", 1, [str(count) for count in MAXIMUM_PLAYERS])
     rows.append((f"{base}/op_max_players", None))
     # GAME: OpenH1 at its tick rate, or Legacy (menu_functions.c's
     # server_settings_update), each choice its help
-    extra += _widget(f"{base}/op_game_mode", [("width", 512), ("height", 28),
-                                              ("flags", "pass_unhandled_to_focused_child"),
-                                              ("bitmap", "bitmaps/option_bkds"), ("color", "#FF2896FF")],
-                     [f'<child widget="{base}/game_mode_label"/>',
-                      f'<child widget="{base}/game_mode_spinner" x="296" y="1"/>'])
-    extra += _widget(f"{base}/game_mode_label", [("type", "text"), ("controller", 1), ("width", 280),
-                                                 ("height", 22), ("string_list", f"{base}/labels"),
-                                                 ("string_index", 12 + len(COOP_SETUP_SCREENS)),
-                                                 ("font", "ui\\large_ui"), ("color", "#FF2896FF"), ("text_x", 13),
-                                                 ("text_y", 4)], [])
-    extra += _widget(f"{base}/game_mode_spinner",
-                     [("type", "spinner"), ("left", 3), ("top", 2), ("width", 195), ("height", 20),
-                      ("flags", "pass_unhandled_to_focused_child left_right_tabs_items"),
-                      ("strings", "|".join(name for name, _ in GAME_MODES)), ("font", "ui\\large_ui"),
-                      ("color", "#FF2896FF"), ("align", "center"), ("text_y", 1),
-                      ("header_bitmap", "bitmaps/arrow_sm_left"), ("footer_bitmap", "bitmaps/arrow_sm_right"),
-                      ("header_bounds", "7 -6 19 0"), ("footer_bounds", "7 198 19 204")],
-                     ['<on event="left_mouse" run="mouse spinner 1wide click"/>'])
+    extra += spinner_row("game_mode", 12 + len(COOP_SETUP_SCREENS), [name for name, _ in GAME_MODES],
+                         ['<on event="left_mouse" run="mouse spinner 1wide click"/>'])
     rows.append((f"{base}/op_game_mode", None))
-    extra += _value_row(base, "invite", 2, "ss copy invite")
+    # (the invite link, long: small_ui)
+    extra += _value_row(base, "invite", 2, "ss copy invite", pitch, small=True)
     rows.append((f"{base}/op_invite", None))
     # (PUBLIC or PRIVATE: menu_functions.c's server_settings_update)
-    extra += _widget(f"{base}/op_listing", [("width", 512), ("height", 28),
-                                            ("flags", "pass_unhandled_to_focused_child"),
-                                            ("bitmap", "bitmaps/option_bkds"), ("color", "#FF2896FF")],
-                     [f'<child widget="{base}/listing_label"/>',
-                      f'<child widget="{base}/listing_spinner" x="320" y="1"/>'])
-    extra += _widget(f"{base}/listing_label", [("type", "text"), ("controller", 1), ("width", 300),
-                                               ("height", 22), ("string_list", f"{base}/labels"),
-                                               ("string_index", 9), ("font", "ui\\large_ui"),
-                                               ("color", "#FF2896FF"), ("text_x", 13), ("text_y", 4)], [])
-    extra += _widget(f"{base}/listing_spinner",
-                     [("type", "spinner"), ("left", 3), ("top", 2), ("width", 147), ("height", 20),
-                      ("flags", "pass_unhandled_to_focused_child left_right_tabs_items"),
-                      ("strings", "PUBLIC|PRIVATE"), ("font", "ui\\large_ui"),
-                      ("color", "#FF2896FF"), ("align", "center"), ("text_y", 1),
-                      ("header_bitmap", "bitmaps/arrow_sm_left"), ("footer_bitmap", "bitmaps/arrow_sm_right"),
-                      ("header_bounds", "7 -6 19 0"), ("footer_bounds", "7 150 19 156")],
-                     ['<on event="left_mouse" run="mouse spinner 1wide click"/>'])
+    extra += spinner_row("listing", 9, ["PUBLIC", "PRIVATE"],
+                         ['<on event="left_mouse" run="mouse spinner 1wide click"/>'])
     rows.append((f"{base}/op_listing", None))
     # PASSWORD (a public internet game's: menu_functions.c's server_settings_update),
     # which players from the server browser must type
-    extra += _value_row(base, "password", 10 + len(COOP_SETUP_SCREENS), "ss edit server password")
+    extra += _value_row(base, "password", 10 + len(COOP_SETUP_SCREENS), "ss edit server password", pitch)
     rows.append((f"{base}/op_password", None))
     # (a game of this machine alone's line, in the network's rows' places,
     # which it hides: menu_functions.c's server_settings_local)
@@ -2911,17 +2946,8 @@ def _server_settings() -> list:
     # for any game: SETUP_OPTIONS_PLACE below it
     key, _, _, _ = MAP_SHARE_SETUP
     target = f"{base}/{key}/{key}_screen"
-    extra += _widget(f"{base}/op_{key}", [("width", 512), ("height", 28),
-                                         ("flags", "pass_unhandled_to_focused_child"),
-                                         ("bitmap", "bitmaps/option_bkds"), ("color", "#FF2896FF")],
-                     [f'<on event="a" open="{target}"/>', f'<on event="start" open="{target}"/>',
-                      '<on event="left_mouse" run="mouse emit accept event"/>',
-                      f'<child widget="{base}/{key}_label"/>'])
-    extra += _widget(f"{base}/{key}_label", [("type", "text"), ("controller", 1), ("width", 300), ("height", 22),
-                                             ("string_list", f"{base}/labels"),
-                                             ("string_index", 11 + len(COOP_SETUP_SCREENS)),
-                                             ("font", "ui\\large_ui"), ("color", "#FF2896FF"), ("text_x", 13),
-                                             ("text_y", 4)], [])
+    extra += opening_row(key, 11 + len(COOP_SETUP_SCREENS),
+                         [f'<on event="a" open="{target}"/>', f'<on event="start" open="{target}"/>'])
     rows.append((f"{base}/op_{key}", None, SETUP_OPTIONS_PLACE - 1))
     # co-op's options, in the place of the gametype's rows, which co-op hides
     # as multiplayer hides co-op's (menu_functions.c's server_settings_update):
@@ -2929,35 +2955,14 @@ def _server_settings() -> list:
     # (_setup_option_screen; COOP_SETUP_SCREENS)
     for index, (key, title, _, _) in enumerate(COOP_SETUP_SCREENS):
         target = f"{base}/{key}/{key}_screen"
-        extra += _widget(f"{base}/op_{key}", [("width", 512), ("height", 28),
-                                             ("flags", "pass_unhandled_to_focused_child"),
-                                             ("bitmap", "bitmaps/option_bkds"), ("color", "#FF2896FF")],
-                         [f'<on event="a" open="{target}"/>', f'<on event="start" open="{target}"/>',
-                          '<on event="left_mouse" run="mouse emit accept event"/>',
-                          f'<child widget="{base}/{key}_label"/>'])
-        extra += _widget(f"{base}/{key}_label", [("type", "text"), ("controller", 1), ("width", 300), ("height", 22),
-                                                 ("string_list", f"{base}/labels"), ("string_index", 10 + index),
-                                                 ("font", "ui\\large_ui"), ("color", "#FF2896FF"), ("text_x", 13),
-                                                 ("text_y", 4)], [])
+        extra += opening_row(key, 10 + index, [f'<on event="a" open="{target}"/>', f'<on event="start" open="{target}"/>'])
         rows.append((f"{base}/op_{key}", None, SETUP_OPTIONS_PLACE + index))
     # the gametype's options for this game (the gametype editor's screens,
     # editing a copy of the gametype chosen: "port setup edit")
     for index, (key, screen) in enumerate(SETUP_OPTION_SCREENS):
         target = f"main_menu/settings_select/multiplayer_setup/{screen}"
-        extra += _widget(f"{base}/op_{key}", [("width", 512), ("height", 28),
-                                             ("flags", "pass_unhandled_to_focused_child"),
-                                             ("bitmap", "bitmaps/option_bkds"), ("color", "#FF2896FF")],
-                         [f'<on event="a" run="port setup edit" open="{target}"/>',
-                          f'<on event="start" run="port setup edit" open="{target}"/>',
-                          '<on event="left_mouse" run="mouse emit accept event"/>',
-                          f'<child widget="{base}/{key}_label"/>', f'<child widget="{base}/{key}_value" x="230" y="1"/>'])
-        extra += _widget(f"{base}/{key}_label", [("type", "text"), ("controller", 1), ("width", 230), ("height", 22),
-                                                 ("string_list", f"{base}/labels"), ("string_index", 3 + index),
-                                                 ("font", "ui\\large_ui"), ("color", "#FF2896FF"), ("text_x", 13),
-                                                 ("text_y", 4)], [])
-        extra += _widget(f"{base}/{key}_value", [("type", "text"), ("controller", 1), ("width", 280), ("height", 22),
-                                                 ("font", "ui\\small_ui"), ("color", "#FF2896FF"), ("align", "center"),
-                                                 ("text_y", 5), ("text_flags", "no_focus_test")], [])
+        extra += opening_row(key, 3 + index, [f'<on event="a" run="port setup edit" open="{target}"/>',
+                                              f'<on event="start" run="port setup edit" open="{target}"/>'], value=True)
         rows.append((f"{base}/op_{key}", None, SETUP_OPTIONS_PLACE + index))
     extra += _button(f"{base}/button_defaults", 3, [])
     extra += _widget(f"{base}/button_ok", [("type", "text"), ("width", 128), ("height", 24),
@@ -3110,7 +3115,7 @@ def _setup_option_screen(base: str, key: str, rows: list) -> list:
     for row_key, *_ in rows:
         if row_key not in SETUP_OPTION_SAME_PLACE:
             place += 1
-        children.append(f'<child widget="{base}/op_{row_key}" x="54" y="{73 + 30 * place}"/>')
+        children.append(f'<child widget="{base}/op_{row_key}" x="54" y="{73 + SETUP_OPTION_PITCH * place}"/>')
     children.append(f'<child widget="{base}/{key}_button_bar" y="414"/>')
     lines += _widget(f"{base}/{key}_menu", [("type", "column_list"), ("width", 640), ("height", 480),
                                            ("flags", "pass_unhandled_to_focused_child up_down_tabs_children"),
@@ -3122,23 +3127,14 @@ def _setup_option_screen(base: str, key: str, rows: list) -> list:
     lines += _button(f"{base}/{key}_button_ok", 1, ['<on event="a" run="port setup options save" back="true"/>',
                                                      '<on event="start" run="port setup options save" back="true"/>'])
     for index, (row_key, label, strings, _) in enumerate(rows):
-        lines += _widget(f"{base}/op_{row_key}", [("width", 512), ("height", 28),
-                                                 ("flags", "pass_unhandled_to_focused_child"),
-                                                 ("bitmap", "bitmaps/option_bkds"), ("color", "#FF2896FF")],
-                         [f'<child widget="{base}/{row_key}_label"/>',
-                          f'<child widget="{base}/{row_key}_spinner" x="286" y="1"/>'])
-        lines += _widget(f"{base}/{row_key}_label", [("type", "text"), ("controller", 1), ("width", 300),
-                                                     ("height", 22), ("string_list", f"{base}/{key}_labels"),
-                                                     ("string_index", index), ("font", "ui\\large_ui"),
-                                                     ("color", "#FF2896FF"), ("text_x", 13), ("text_y", 4)], [])
+        lines += _option_row(f"{base}/op_{row_key}", SETUP_OPTION_PITCH,
+                             [f'<child widget="{base}/{row_key}_label"/>',
+                              f'<child widget="{base}/{row_key}_spinner" x="{OPTION_VALUE_X}"/>'])
+        lines += _option_label(f"{base}/{row_key}_label", SETUP_OPTION_PITCH, OPTION_VALUE_X - 6,
+                               [("string_list", f"{base}/{key}_labels"), ("string_index", index)])
         lines += _widget(f"{base}/{row_key}_spinner",
-                         [("type", "spinner"), ("top", 2), ("width", 206), ("height", 20),
-                          ("flags", "pass_unhandled_to_focused_child left_right_tabs_items"),
-                          ("string_list", f"{base}/var_{row_key}"), ("font", "ui\\large_ui"),
-                          ("color", "#FF2896FF"), ("align", "center"), ("text_y", 4),
-                          ("list_flags", "items_from_strings"),
-                          ("header_bitmap", "bitmaps/arrow_sm_left"), ("footer_bitmap", "bitmaps/arrow_sm_right"),
-                          ("header_bounds", "7 -13 19 -7"), ("footer_bounds", "7 208 19 214")],
+                         [("type", "spinner"), *option_spinner_pairs(SETUP_OPTION_PITCH),
+                          ("string_list", f"{base}/var_{row_key}"), ("list_flags", "items_from_strings")],
                          ['<on event="left_mouse" run="mouse spinner 1wide click"/>'])
         lines += _strings(f"{base}/var_{row_key}", strings)
     lines += _strings(f"{base}/{key}_labels", [label for _, label, *_ in rows])
@@ -3247,11 +3243,11 @@ def _lobby_board(base: str) -> tuple:
                                                          ("height", LOBBY_DOT), ("bitmap", part_dot(LOBBY_DOT))], [])
             lines += _part_text(f"{base}/board_name_{key}", [("width", name_w), ("height", row_h),
                                                              ("font", "ui\\small_ui"), ("color", "#FFFFFFFF"),
-                                                             ("text_y", 2),
+                                                             ("text_y", caps_text_y(row_h)),
                                                              ("wide", wide(0, LOBBY_WIDE_PLAYERS // 2))])
             lines += _part_text(f"{base}/board_tag_{key}", [("width", LOBBY_BOT_TAG_WIDTH), ("height", row_h),
                                                             ("font", "ui\\small_ui"), ("color", PART_DIM),
-                                                            ("align", "right"), ("text_y", 2),
+                                                            ("align", "right"), ("text_y", caps_text_y(row_h)),
                                                             ("wide", wide(LOBBY_WIDE_PLAYERS // 2))])
     # (the details panel: its words as much wider as it, moved with it)
     grown = wide(0, panel_grown)
@@ -3319,15 +3315,16 @@ def _lobby_board(base: str) -> tuple:
         lines += _widget(f"{base}/board_{key}_label", [("type", "text"), ("controller", 1), ("width", 60),
                                                        ("height", LOBBY_CONTROL_HEIGHT), ("text", label),
                                                        ("font", "ui\\small_ui"), ("color", SETTINGS_BLUE),
-                                                       ("text_y", 4)], [])
+                                                       ("text_y", caps_text_y(LOBBY_CONTROL_HEIGHT))], [])
         lines += _widget(f"{base}/board_{key}_spinner",
-                         [("type", "spinner"), ("top", 1), ("width", spinner_w), ("height", 20),
+                         [("type", "spinner"), ("top", caps_text_y(LOBBY_CONTROL_HEIGHT)), ("width", spinner_w),
+                          ("height", LOBBY_CONTROL_HEIGHT - 2 * caps_text_y(LOBBY_CONTROL_HEIGHT)),
                           ("flags", "pass_unhandled_to_focused_child left_right_tabs_items"),
                           *spinner_pairs, ("font", "ui\\small_ui"),
-                          ("color", "#FFFFFFFF"), ("align", "center"), ("text_y", 3),
+                          ("color", "#FFFFFFFF"), ("align", "center"), ("text_y", 0),
                           ("header_bitmap", "bitmaps/arrow_sm_left"), ("footer_bitmap", "bitmaps/arrow_sm_right"),
-                          ("header_bounds", "7 -6 19 0"),
-                          ("footer_bounds", f"7 {spinner_w + 3} 19 {spinner_w + 9}"),
+                          ("header_bounds", arrows_bounds(LOBBY_CONTROL_HEIGHT, 0, spinner_w + 3)[0]),
+                          ("footer_bounds", arrows_bounds(LOBBY_CONTROL_HEIGHT, 0, spinner_w + 3)[1]),
                           ("wide", wide(panel_grown))],
                          [load, start, '<on event="left_mouse" run="mouse spinner 1wide click"/>'])
     items += [f'<child widget="{base}/board_host" x="{inner_left}" y="{top + LOBBY_HOST}"/>',
@@ -3340,14 +3337,14 @@ def _lobby_board(base: str) -> tuple:
                                             ("bitmap", part_outline(inner, LOBBY_CONTROL_HEIGHT)),
                                             ("wide", controls), ("text", "HOST CONTROLS"),
                                             ("font", "ui\\small_ui"), ("color", "#FFCFE3FF"), ("align", "center"),
-                                            ("text_y", 4)],
+                                            ("text_y", caps_text_y(LOBBY_CONTROL_HEIGHT))],
                      [f'<on event="a" run="port host open" open="{HOST_CONTROLS}/host_controls_screen" '
                       'branch="true"/>', start, '<on event="left_mouse" run="mouse emit accept event"/>'])
     lines += _widget(f"{base}/board_settings", [("type", "text"), ("width", inner), ("height", LOBBY_CONTROL_HEIGHT),
                                                 ("bitmap", part_outline(inner, LOBBY_CONTROL_HEIGHT)),
                                                 ("wide", controls), ("text", "GAME SETTINGS"),
                                                 ("font", "ui\\small_ui"), ("color", "#FFCFE3FF"), ("align", "center"),
-                                                ("text_y", 4)],
+                                                ("text_y", caps_text_y(LOBBY_CONTROL_HEIGHT))],
                      ['<on event="a" run="port lobby settings"/>', start,
                       '<on event="left_mouse" run="mouse emit accept event"/>'])
     # (its words the game's: START GAME, or the countdown; from the left, as
@@ -3355,7 +3352,7 @@ def _lobby_board(base: str) -> tuple:
     lines += _widget(f"{base}/board_start", [("type", "text"), ("width", LOBBY_START[0]), ("height", LOBBY_START[1]),
                                              ("bitmap", part_button(*LOBBY_START)), ("wide", controls),
                                              ("font", "ui\\small_ui"), ("color", "#FFFFFFFF"), ("text_x", 12),
-                                             ("text_y", 6)],
+                                             ("text_y", caps_text_y(LOBBY_START[1]))],
                      ['<on event="a" run="port lobby start"/>', start,
                       '<on event="left_mouse" run="mouse emit accept event"/>'])
     children.append(f'<child widget="{base}/board_list"{pointer}/>')
@@ -3639,6 +3636,9 @@ BOTS_ROWS = [
 ]
 # (Server Setup's rows' step)
 SERVER_SETTINGS_SPACING = 20
+# the setup options' screens' (co-op's, map sharing's, OpenCE's options:
+# _setup_option_screen)
+SETUP_OPTION_PITCH = 30
 # Server Setup in a game of this machine alone: its line in the places of
 # the network's rows (GAME, INVITE LINK), which it hides
 LOCAL_NOTE_PLACE = 2
@@ -4187,8 +4187,7 @@ def parts_pictures() -> list:
     rows = [(part_row(BROWSER_LIST_WIDTH, BROWSER_ROW_HEIGHT), highlight(BROWSER_LIST_WIDTH, BROWSER_ROW_HEIGHT) +
              [(framed(BROWSER_LIST_WIDTH, BROWSER_ROW_HEIGHT, "#0d3a7a", 0.9, "#8cc8ff"), BROWSER_LIST_WIDTH,
                BROWSER_ROW_HEIGHT)])]
-    prompt_widths = sorted({width for *_, width, _ in BROWSER_PROMPTS + HUB_PROMPTS + PARTY_PROMPTS +
-                            LOBBY_PROMPTS + FRIENDS_PROMPTS} | {BROWSER_CLEAR[0]})
+    prompt_widths = sorted(set(prompt_picture_widths()) | {BROWSER_CLEAR[0]})
     join_w, join_h = BROWSER_JOIN
     return [
         # (Settings' tab, then its current one: menu_functions.c's
@@ -4222,7 +4221,19 @@ def parts_pictures() -> list:
                                if place[0] == "op_search_field"})),
         (BROWSER_SEARCH_ICON, browser_search_frames(LUCIDE, "search")),
         (BROWSER_SEARCH_CLEAR, browser_search_frames(LUCIDE, "x")),
+        # (the rows of the screens of a list of rows, at each height their
+        # pitches give them: option_row_height; a dark bar, as the PC
+        # version's option_bkds, framed while it has the focus)
+        *((part_option_row(height), option_row_frames(height)) for height in option_row_heights()),
     ]
+
+
+def option_row_frames(height: int) -> list:
+    """part_option_row's frames: the redraws' option_bkds, height tall"""
+    width = OPTION_ROW_WIDTH
+    radius = min(8, (height - 2) / 2)
+    return [(_svg(width, height, [_rounded(width, height, 1, radius, "#001122", 0.6)]), width, height),
+            (_svg(width, height, [_rounded(width, height, 1, radius, "#002244", 1.0, "#2299ff", 2)]), width, height)]
 
 
 def lobby_pictures(framed, highlight) -> list:
@@ -4288,11 +4299,36 @@ def _tab_strip(base: str, strip: str, tabs: list, handlers: list) -> list:
     return lines
 
 
-def _prompts(base: str, bar: str, prompts: list, defined: tuple = (), text_x: int = 8) -> list:
+# the prompts' widths, as fitted (_prompts): their pictures' (parts_pictures)
+_PROMPT_WIDTHS = set()
+
+
+def _prompt_fitted(prompt: tuple, text_x: int, browser: bool) -> tuple:
+    """a prompt as wide as its words need (prompt_fit_width): grown away
+    from the screen's edge it is at, its other end where it was"""
+    name, words, x, width, handler = prompt
+    fitted = prompt_fit_width(words, width, text_x, browser)
+    if fitted > width and x + width / 2 >= 320:
+        x -= fitted - width
+    _PROMPT_WIDTHS.add(fitted)
+    return name, words, x, fitted, handler
+
+
+def prompt_picture_widths() -> list:
+    """the widths of the prompts the screens have (their pictures')"""
+    if not _PROMPT_WIDTHS:
+        multiplayer_files()
+        campaign_files()
+    return sorted(_PROMPT_WIDTHS)
+
+
+def _prompts(base: str, bar: str, prompts: list, defined: tuple = (), text_x: int = 8, browser: bool = False) -> list:
     """a footer of key prompts, a bar of buttons: each its button's picture
-    in its words (the device's, menu_functions.c's), highlighted while it
+    in its words (the device's, menu_functions.c's), as wide as they need
+    (_prompt_fitted; browser: a server browser's keys), highlighted while it
     has the focus, and its function run by A or a click (those another
     footer has, by their names in defined, its)"""
+    prompts = [_prompt_fitted(prompt, text_x, browser) for prompt in prompts]
     lines = _widget(f"{base}/{bar}", [("type", "column_list"), ("width", 640), ("height", PART_PROMPT_HEIGHT + 4),
                                      ("flags", "pass_unhandled_to_focused_child left_right_tabs_items")],
                     [f'<child widget="{base}/{name}" x="{x}" y="1"/>' for name, _, x, _, _ in prompts])
@@ -4305,6 +4341,56 @@ def _prompts(base: str, bar: str, prompts: list, defined: tuple = (), text_x: in
                          [handler, handler.replace('event="a"', 'event="start"'),
                           '<on event="left_mouse" run="mouse emit accept event"/>'])
     return lines
+
+
+# small_ui's letters' advances (ui.map's font tag, which the high-res text
+# keeps: its glyphs are centred on them), printable ASCII from the space
+SMALL_UI_ADVANCES = dict(zip((chr(code) for code in range(32, 127)), (4,3,7,10,8,13,9,6,5,5,7,8,3,5,3,6,9,6,9,9,10,9,9,8,9,9,3,3,6,7,6,8,11,10,10,9,10,8,7,10,10,4,9,9,8,11,10,10,9,10,10,9,9,11,9,12,9,10,9,5,6,4,8,7,5,8,8,7,9,7,5,9,9,4,5,7,4,12,8,8,8,9,6,8,6,9,7,11,7,8,7,6,4,5,8)))
+# a key's cap before the words of a prompt (hud_key_prompts.c's
+# key_cap_metrics and key_cap_layout at full size): how far past the cursor
+# its box starts, the room either side of its name, the gap after it, and
+# its least width (as wide as it is tall)
+KEY_CAP_INSET, KEY_CAP_MARGIN, KEY_CAP_GAP, KEY_CAP_LEAST = 4, 3, 3, 19
+# the keys the keyboard presses the menus' buttons with (ui_widget.c's
+# ui_widget_port_menu_key), by the prompts' names of the buttons, and in a
+# server browser (BROWSER_KEYS) those it has of its own
+MENU_KEYS = {"a-button": "Enter", "b-button": "Esc", "x-button": "E", "y-button": "F", "black-button": "E",
+             "white-button": "Q", "right-trigger": "R", "left-trigger": "L", "back-button": "F1"}
+BROWSER_KEYS = {**MENU_KEYS, "x-button": "Tab", "right-thumb": "/"}
+# the room a prompt keeps between its words' end and its picture's right
+# (its frame's edge, and a unit clear of it)
+PROMPT_RIGHT_ROOM = 4
+
+
+def small_ui_width(text: str) -> int:
+    """text's advance in small_ui"""
+    return sum(SMALL_UI_ADVANCES.get(letter, SMALL_UI_ADVANCES["W"]) for letter in text)
+
+
+def key_cap_advance(name: str) -> int:
+    """how far past the cursor the words after a key's cap start (its box
+    about its name, and the gap)"""
+    letters = small_ui_width(name)
+    width = max(letters + 2 * KEY_CAP_MARGIN, KEY_CAP_LEAST)
+    width += (width - letters) % 2
+    return KEY_CAP_INSET + width + KEY_CAP_GAP
+
+
+def prompt_words_end(words: str, browser: bool = False) -> int:
+    """where a prompt's words ("%b-button BACK") end, from its text's left:
+    its button as the key the keyboard presses it with (a server browser's:
+    BROWSER_KEYS), its words after it (a button the keyboard has no key for
+    is the controller's picture, narrower than a key's cap: as a letter's)"""
+    if words.startswith("%"):
+        button, _, rest = words[1:].partition(" ")
+        key = (BROWSER_KEYS if browser else MENU_KEYS).get(button, "E")
+        return key_cap_advance(key) + small_ui_width(" " + rest)
+    return small_ui_width(words)
+
+
+def prompt_fit_width(words: str, width: int, text_x: int, browser: bool = False) -> int:
+    """a prompt's width: as wide as it was laid out, or as its words need"""
+    return max(width, text_x + prompt_words_end(words, browser) + PROMPT_RIGHT_ROOM)
 
 
 def prompt_wide(x: int, width: int):
@@ -4556,7 +4642,7 @@ def _browser() -> list:
                      ['<on event="a" run="port browser search clear"/>',
                       '<on event="start" run="port browser search clear"/>',
                       '<on event="left_mouse" run="mouse emit accept event"/>'])
-    lines += _prompts(base, "join_game_button_bar", BROWSER_PROMPTS, text_x=BROWSER_PROMPT_TEXT_X)
+    lines += _prompts(base, "join_game_button_bar", BROWSER_PROMPTS, text_x=BROWSER_PROMPT_TEXT_X, browser=True)
     return lines
 
 

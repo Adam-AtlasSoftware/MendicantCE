@@ -67,6 +67,14 @@ A settings screen (Controls Setup, Gamepads, Mouse, Audio, Video or Network
 Setup) is changed in `tools/port_settings.py`, not in its XML, and written
 with the command above.
 
+`python3 tools/ce_menus.py --port-pictures` writes the port's own screens and
+the pictures `tools/port_settings.py` draws (Settings', the shared parts,
+the campaign's) without the PC version's tags: their entries in
+`ce/bitmaps.xml`, each frame drawn again only where its SVG changed, the
+files of those no screen names any more removed, and `menus.json`. The
+rest of `ce/bitmaps.xml` stays as it is. It needs `rsvg-convert`, Pillow and
+NumPy.
+
 ## Elements
 
 A file holds one `<menus>` element (`root` names the main menu's widget, in

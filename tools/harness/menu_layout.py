@@ -53,6 +53,11 @@ def _platform_shown(platform, platforms):
 @lru_cache(maxsize=None)
 def widgets():
     """every <widget> of the menu files, by its name (a nested one a child of the one it is in)"""
+    return widgets_of(ElementTree.parse(path).getroot() for path in sorted(CE.glob("*.xml")))
+
+
+def widgets_of(roots):
+    """every <widget> of the files' <menus> elements (roots), by its name"""
     found = {}
 
     def read(element):
@@ -66,8 +71,8 @@ def widgets():
                 children.append((item.get("name"), int(item.get("x", 0)), int(item.get("y", 0)), item.get("platform")))
         found[element.get("name")] = Widget(dict(element.attrib), children)
 
-    for path in sorted(CE.glob("*.xml")):
-        for element in ElementTree.parse(path).getroot():
+    for root in roots:
+        for element in root:
             if element.tag == "widget":
                 read(element)
     return found

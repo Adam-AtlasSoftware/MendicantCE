@@ -203,12 +203,12 @@
 		<child widget="main_menu/multiplayer_type_select/party/prompt_leave" x="324" y="1"/>
 		<child widget="main_menu/multiplayer_type_select/party/prompt_back" x="516" y="1"/>
 	</widget>
-	<widget name="main_menu/multiplayer_type_select/party/prompt_make" type="text" width="144" height="24" wide="-106 0" bitmap="main_menu/parts/item_144x24" text="%a-button MAKE PARTY" font="ui\small_ui" color="#FFCFE3FF" text_x="8" text_y="3">
+	<widget name="main_menu/multiplayer_type_select/party/prompt_make" type="text" width="154" height="24" wide="-106 0" bitmap="main_menu/parts/item_154x24" text="%a-button MAKE PARTY" font="ui\small_ui" color="#FFCFE3FF" text_x="8" text_y="3">
 		<on event="a" run="port party button"/>
 		<on event="start" run="port party button"/>
 		<on event="left_mouse" run="mouse emit accept event"/>
 	</widget>
-	<widget name="main_menu/multiplayer_type_select/party/prompt_copy" type="text" width="144" height="24" wide="-106 0" bitmap="main_menu/parts/item_144x24" text="%a-button COPY INVITE" font="ui\small_ui" color="#FFCFE3FF" text_x="8" text_y="3">
+	<widget name="main_menu/multiplayer_type_select/party/prompt_copy" type="text" width="150" height="24" wide="-106 0" bitmap="main_menu/parts/item_150x24" text="%a-button COPY INVITE" font="ui\small_ui" color="#FFCFE3FF" text_x="8" text_y="3">
 		<on event="a" run="port party button"/>
 		<on event="start" run="port party button"/>
 		<on event="left_mouse" run="mouse emit accept event"/>

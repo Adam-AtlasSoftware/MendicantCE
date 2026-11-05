@@ -34,13 +34,13 @@
 		<on event="start" run="mp profile set opence options" back="true"/>
 		<on event="left_mouse" run="mouse emit accept event"/>
 	</widget>
-	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/op_oce_mode" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="bitmaps/option_bkds" color="#FF2896FF">
+	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/op_oce_mode" width="512" height="26" flags="pass_unhandled_to_focused_child" bitmap="main_menu/parts/option_row_512x26" color="#FF2896FF">
 		<child widget="main_menu/settings_select/multiplayer_setup/opence_options_edit/oce_mode_label"/>
-		<child widget="main_menu/settings_select/multiplayer_setup/opence_options_edit/oce_mode_spinner" x="286" y="1"/>
+		<child widget="main_menu/settings_select/multiplayer_setup/opence_options_edit/oce_mode_spinner" x="286"/>
 	</widget>
-	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/oce_mode_label" type="text" controller="1" width="300" height="22" string_list="main_menu/settings_select/multiplayer_setup/opence_options_edit/opence_labels" string_index="0" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="4">
+	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/oce_mode_label" type="text" controller="1" width="280" height="26" string_list="main_menu/settings_select/multiplayer_setup/opence_options_edit/opence_labels" string_index="0" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="2">
 	</widget>
-	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/oce_mode_spinner" type="spinner" top="2" width="206" height="20" flags="pass_unhandled_to_focused_child left_right_tabs_items" string_list="main_menu/settings_select/multiplayer_setup/opence_options_edit/var_oce_mode" font="ui\large_ui" color="#FF2896FF" align="center" text_y="4" list_flags="items_from_strings" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="7 -13 19 -7" footer_bounds="7 208 19 214">
+	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/oce_mode_spinner" type="spinner" top="2" width="206" height="22" flags="pass_unhandled_to_focused_child left_right_tabs_items" font="ui\large_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="7 -13 19 -7" footer_bounds="7 213 19 219" string_list="main_menu/settings_select/multiplayer_setup/opence_options_edit/var_oce_mode" list_flags="items_from_strings">
 		<on event="left_mouse" run="mouse spinner 1wide click"/>
 	</widget>
 	<strings name="main_menu/settings_select/multiplayer_setup/opence_options_edit/var_oce_mode">
@@ -49,26 +49,26 @@
 		<string text="INFECTION"/>
 		<string text="GUN GAME"/>
 	</strings>
-	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/op_oce_hardcore" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="bitmaps/option_bkds" color="#FF2896FF">
+	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/op_oce_hardcore" width="512" height="26" flags="pass_unhandled_to_focused_child" bitmap="main_menu/parts/option_row_512x26" color="#FF2896FF">
 		<child widget="main_menu/settings_select/multiplayer_setup/opence_options_edit/oce_hardcore_label"/>
-		<child widget="main_menu/settings_select/multiplayer_setup/opence_options_edit/oce_hardcore_spinner" x="286" y="1"/>
+		<child widget="main_menu/settings_select/multiplayer_setup/opence_options_edit/oce_hardcore_spinner" x="286"/>
 	</widget>
-	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/oce_hardcore_label" type="text" controller="1" width="300" height="22" string_list="main_menu/settings_select/multiplayer_setup/opence_options_edit/opence_labels" string_index="1" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="4">
+	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/oce_hardcore_label" type="text" controller="1" width="280" height="26" string_list="main_menu/settings_select/multiplayer_setup/opence_options_edit/opence_labels" string_index="1" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="2">
 	</widget>
-	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/oce_hardcore_spinner" type="spinner" top="2" width="206" height="20" flags="pass_unhandled_to_focused_child left_right_tabs_items" string_list="main_menu/settings_select/multiplayer_setup/opence_options_edit/var_oce_hardcore" font="ui\large_ui" color="#FF2896FF" align="center" text_y="4" list_flags="items_from_strings" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="7 -13 19 -7" footer_bounds="7 208 19 214">
+	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/oce_hardcore_spinner" type="spinner" top="2" width="206" height="22" flags="pass_unhandled_to_focused_child left_right_tabs_items" font="ui\large_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="7 -13 19 -7" footer_bounds="7 213 19 219" string_list="main_menu/settings_select/multiplayer_setup/opence_options_edit/var_oce_hardcore" list_flags="items_from_strings">
 		<on event="left_mouse" run="mouse spinner 1wide click"/>
 	</widget>
 	<strings name="main_menu/settings_select/multiplayer_setup/opence_options_edit/var_oce_hardcore">
 		<string text="OFF"/>
 		<string text="ON"/>
 	</strings>
-	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/op_inf_zombies" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="bitmaps/option_bkds" color="#FF2896FF">
+	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/op_inf_zombies" width="512" height="26" flags="pass_unhandled_to_focused_child" bitmap="main_menu/parts/option_row_512x26" color="#FF2896FF">
 		<child widget="main_menu/settings_select/multiplayer_setup/opence_options_edit/inf_zombies_label"/>
-		<child widget="main_menu/settings_select/multiplayer_setup/opence_options_edit/inf_zombies_spinner" x="286" y="1"/>
+		<child widget="main_menu/settings_select/multiplayer_setup/opence_options_edit/inf_zombies_spinner" x="286"/>
 	</widget>
-	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/inf_zombies_label" type="text" controller="1" width="300" height="22" string_list="main_menu/settings_select/multiplayer_setup/opence_options_edit/opence_labels" string_index="2" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="4">
+	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/inf_zombies_label" type="text" controller="1" width="280" height="26" string_list="main_menu/settings_select/multiplayer_setup/opence_options_edit/opence_labels" string_index="2" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="2">
 	</widget>
-	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/inf_zombies_spinner" type="spinner" top="2" width="206" height="20" flags="pass_unhandled_to_focused_child left_right_tabs_items" string_list="main_menu/settings_select/multiplayer_setup/opence_options_edit/var_inf_zombies" font="ui\large_ui" color="#FF2896FF" align="center" text_y="4" list_flags="items_from_strings" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="7 -13 19 -7" footer_bounds="7 208 19 214">
+	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/inf_zombies_spinner" type="spinner" top="2" width="206" height="22" flags="pass_unhandled_to_focused_child left_right_tabs_items" font="ui\large_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="7 -13 19 -7" footer_bounds="7 213 19 219" string_list="main_menu/settings_select/multiplayer_setup/opence_options_edit/var_inf_zombies" list_flags="items_from_strings">
 		<on event="left_mouse" run="mouse spinner 1wide click"/>
 	</widget>
 	<strings name="main_menu/settings_select/multiplayer_setup/opence_options_edit/var_inf_zombies">
@@ -79,13 +79,13 @@
 		<string text="8"/>
 		<string text="16"/>
 	</strings>
-	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/op_inf_speed" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="bitmaps/option_bkds" color="#FF2896FF">
+	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/op_inf_speed" width="512" height="26" flags="pass_unhandled_to_focused_child" bitmap="main_menu/parts/option_row_512x26" color="#FF2896FF">
 		<child widget="main_menu/settings_select/multiplayer_setup/opence_options_edit/inf_speed_label"/>
-		<child widget="main_menu/settings_select/multiplayer_setup/opence_options_edit/inf_speed_spinner" x="286" y="1"/>
+		<child widget="main_menu/settings_select/multiplayer_setup/opence_options_edit/inf_speed_spinner" x="286"/>
 	</widget>
-	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/inf_speed_label" type="text" controller="1" width="300" height="22" string_list="main_menu/settings_select/multiplayer_setup/opence_options_edit/opence_labels" string_index="3" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="4">
+	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/inf_speed_label" type="text" controller="1" width="280" height="26" string_list="main_menu/settings_select/multiplayer_setup/opence_options_edit/opence_labels" string_index="3" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="2">
 	</widget>
-	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/inf_speed_spinner" type="spinner" top="2" width="206" height="20" flags="pass_unhandled_to_focused_child left_right_tabs_items" string_list="main_menu/settings_select/multiplayer_setup/opence_options_edit/var_inf_speed" font="ui\large_ui" color="#FF2896FF" align="center" text_y="4" list_flags="items_from_strings" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="7 -13 19 -7" footer_bounds="7 208 19 214">
+	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/inf_speed_spinner" type="spinner" top="2" width="206" height="22" flags="pass_unhandled_to_focused_child left_right_tabs_items" font="ui\large_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="7 -13 19 -7" footer_bounds="7 213 19 219" string_list="main_menu/settings_select/multiplayer_setup/opence_options_edit/var_inf_speed" list_flags="items_from_strings">
 		<on event="left_mouse" run="mouse spinner 1wide click"/>
 	</widget>
 	<strings name="main_menu/settings_select/multiplayer_setup/opence_options_edit/var_inf_speed">
@@ -96,13 +96,13 @@
 		<string text="175%"/>
 		<string text="200%"/>
 	</strings>
-	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/op_inf_damage" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="bitmaps/option_bkds" color="#FF2896FF">
+	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/op_inf_damage" width="512" height="26" flags="pass_unhandled_to_focused_child" bitmap="main_menu/parts/option_row_512x26" color="#FF2896FF">
 		<child widget="main_menu/settings_select/multiplayer_setup/opence_options_edit/inf_damage_label"/>
-		<child widget="main_menu/settings_select/multiplayer_setup/opence_options_edit/inf_damage_spinner" x="286" y="1"/>
+		<child widget="main_menu/settings_select/multiplayer_setup/opence_options_edit/inf_damage_spinner" x="286"/>
 	</widget>
-	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/inf_damage_label" type="text" controller="1" width="300" height="22" string_list="main_menu/settings_select/multiplayer_setup/opence_options_edit/opence_labels" string_index="4" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="4">
+	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/inf_damage_label" type="text" controller="1" width="280" height="26" string_list="main_menu/settings_select/multiplayer_setup/opence_options_edit/opence_labels" string_index="4" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="2">
 	</widget>
-	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/inf_damage_spinner" type="spinner" top="2" width="206" height="20" flags="pass_unhandled_to_focused_child left_right_tabs_items" string_list="main_menu/settings_select/multiplayer_setup/opence_options_edit/var_inf_damage" font="ui\large_ui" color="#FF2896FF" align="center" text_y="4" list_flags="items_from_strings" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="7 -13 19 -7" footer_bounds="7 208 19 214">
+	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/inf_damage_spinner" type="spinner" top="2" width="206" height="22" flags="pass_unhandled_to_focused_child left_right_tabs_items" font="ui\large_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="7 -13 19 -7" footer_bounds="7 213 19 219" string_list="main_menu/settings_select/multiplayer_setup/opence_options_edit/var_inf_damage" list_flags="items_from_strings">
 		<on event="left_mouse" run="mouse spinner 1wide click"/>
 	</widget>
 	<strings name="main_menu/settings_select/multiplayer_setup/opence_options_edit/var_inf_damage">
@@ -111,13 +111,13 @@
 		<string text="200%"/>
 		<string text="250%"/>
 	</strings>
-	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/op_inf_respawn" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="bitmaps/option_bkds" color="#FF2896FF">
+	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/op_inf_respawn" width="512" height="26" flags="pass_unhandled_to_focused_child" bitmap="main_menu/parts/option_row_512x26" color="#FF2896FF">
 		<child widget="main_menu/settings_select/multiplayer_setup/opence_options_edit/inf_respawn_label"/>
-		<child widget="main_menu/settings_select/multiplayer_setup/opence_options_edit/inf_respawn_spinner" x="286" y="1"/>
+		<child widget="main_menu/settings_select/multiplayer_setup/opence_options_edit/inf_respawn_spinner" x="286"/>
 	</widget>
-	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/inf_respawn_label" type="text" controller="1" width="300" height="22" string_list="main_menu/settings_select/multiplayer_setup/opence_options_edit/opence_labels" string_index="5" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="4">
+	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/inf_respawn_label" type="text" controller="1" width="280" height="26" string_list="main_menu/settings_select/multiplayer_setup/opence_options_edit/opence_labels" string_index="5" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="2">
 	</widget>
-	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/inf_respawn_spinner" type="spinner" top="2" width="206" height="20" flags="pass_unhandled_to_focused_child left_right_tabs_items" string_list="main_menu/settings_select/multiplayer_setup/opence_options_edit/var_inf_respawn" font="ui\large_ui" color="#FF2896FF" align="center" text_y="4" list_flags="items_from_strings" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="7 -13 19 -7" footer_bounds="7 208 19 214">
+	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/inf_respawn_spinner" type="spinner" top="2" width="206" height="22" flags="pass_unhandled_to_focused_child left_right_tabs_items" font="ui\large_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="7 -13 19 -7" footer_bounds="7 213 19 219" string_list="main_menu/settings_select/multiplayer_setup/opence_options_edit/var_inf_respawn" list_flags="items_from_strings">
 		<on event="left_mouse" run="mouse spinner 1wide click"/>
 	</widget>
 	<strings name="main_menu/settings_select/multiplayer_setup/opence_options_edit/var_inf_respawn">
@@ -128,13 +128,13 @@
 		<string text="15 SECONDS"/>
 		<string text="30 SECONDS"/>
 	</strings>
-	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/op_inf_countdown" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="bitmaps/option_bkds" color="#FF2896FF">
+	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/op_inf_countdown" width="512" height="26" flags="pass_unhandled_to_focused_child" bitmap="main_menu/parts/option_row_512x26" color="#FF2896FF">
 		<child widget="main_menu/settings_select/multiplayer_setup/opence_options_edit/inf_countdown_label"/>
-		<child widget="main_menu/settings_select/multiplayer_setup/opence_options_edit/inf_countdown_spinner" x="286" y="1"/>
+		<child widget="main_menu/settings_select/multiplayer_setup/opence_options_edit/inf_countdown_spinner" x="286"/>
 	</widget>
-	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/inf_countdown_label" type="text" controller="1" width="300" height="22" string_list="main_menu/settings_select/multiplayer_setup/opence_options_edit/opence_labels" string_index="6" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="4">
+	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/inf_countdown_label" type="text" controller="1" width="280" height="26" string_list="main_menu/settings_select/multiplayer_setup/opence_options_edit/opence_labels" string_index="6" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="2">
 	</widget>
-	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/inf_countdown_spinner" type="spinner" top="2" width="206" height="20" flags="pass_unhandled_to_focused_child left_right_tabs_items" string_list="main_menu/settings_select/multiplayer_setup/opence_options_edit/var_inf_countdown" font="ui\large_ui" color="#FF2896FF" align="center" text_y="4" list_flags="items_from_strings" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="7 -13 19 -7" footer_bounds="7 208 19 214">
+	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/inf_countdown_spinner" type="spinner" top="2" width="206" height="22" flags="pass_unhandled_to_focused_child left_right_tabs_items" font="ui\large_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="7 -13 19 -7" footer_bounds="7 213 19 219" string_list="main_menu/settings_select/multiplayer_setup/opence_options_edit/var_inf_countdown" list_flags="items_from_strings">
 		<on event="left_mouse" run="mouse spinner 1wide click"/>
 	</widget>
 	<strings name="main_menu/settings_select/multiplayer_setup/opence_options_edit/var_inf_countdown">
@@ -144,26 +144,26 @@
 		<string text="15 SECONDS"/>
 		<string text="30 SECONDS"/>
 	</strings>
-	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/op_inf_shields" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="bitmaps/option_bkds" color="#FF2896FF">
+	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/op_inf_shields" width="512" height="26" flags="pass_unhandled_to_focused_child" bitmap="main_menu/parts/option_row_512x26" color="#FF2896FF">
 		<child widget="main_menu/settings_select/multiplayer_setup/opence_options_edit/inf_shields_label"/>
-		<child widget="main_menu/settings_select/multiplayer_setup/opence_options_edit/inf_shields_spinner" x="286" y="1"/>
+		<child widget="main_menu/settings_select/multiplayer_setup/opence_options_edit/inf_shields_spinner" x="286"/>
 	</widget>
-	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/inf_shields_label" type="text" controller="1" width="300" height="22" string_list="main_menu/settings_select/multiplayer_setup/opence_options_edit/opence_labels" string_index="7" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="4">
+	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/inf_shields_label" type="text" controller="1" width="280" height="26" string_list="main_menu/settings_select/multiplayer_setup/opence_options_edit/opence_labels" string_index="7" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="2">
 	</widget>
-	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/inf_shields_spinner" type="spinner" top="2" width="206" height="20" flags="pass_unhandled_to_focused_child left_right_tabs_items" string_list="main_menu/settings_select/multiplayer_setup/opence_options_edit/var_inf_shields" font="ui\large_ui" color="#FF2896FF" align="center" text_y="4" list_flags="items_from_strings" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="7 -13 19 -7" footer_bounds="7 208 19 214">
+	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/inf_shields_spinner" type="spinner" top="2" width="206" height="22" flags="pass_unhandled_to_focused_child left_right_tabs_items" font="ui\large_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="7 -13 19 -7" footer_bounds="7 213 19 219" string_list="main_menu/settings_select/multiplayer_setup/opence_options_edit/var_inf_shields" list_flags="items_from_strings">
 		<on event="left_mouse" run="mouse spinner 1wide click"/>
 	</widget>
 	<strings name="main_menu/settings_select/multiplayer_setup/opence_options_edit/var_inf_shields">
 		<string text="OFF"/>
 		<string text="ON"/>
 	</strings>
-	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/op_gg_order" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="bitmaps/option_bkds" color="#FF2896FF">
+	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/op_gg_order" width="512" height="26" flags="pass_unhandled_to_focused_child" bitmap="main_menu/parts/option_row_512x26" color="#FF2896FF">
 		<child widget="main_menu/settings_select/multiplayer_setup/opence_options_edit/gg_order_label"/>
-		<child widget="main_menu/settings_select/multiplayer_setup/opence_options_edit/gg_order_spinner" x="286" y="1"/>
+		<child widget="main_menu/settings_select/multiplayer_setup/opence_options_edit/gg_order_spinner" x="286"/>
 	</widget>
-	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/gg_order_label" type="text" controller="1" width="300" height="22" string_list="main_menu/settings_select/multiplayer_setup/opence_options_edit/opence_labels" string_index="8" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="4">
+	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/gg_order_label" type="text" controller="1" width="280" height="26" string_list="main_menu/settings_select/multiplayer_setup/opence_options_edit/opence_labels" string_index="8" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="2">
 	</widget>
-	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/gg_order_spinner" type="spinner" top="2" width="206" height="20" flags="pass_unhandled_to_focused_child left_right_tabs_items" string_list="main_menu/settings_select/multiplayer_setup/opence_options_edit/var_gg_order" font="ui\large_ui" color="#FF2896FF" align="center" text_y="4" list_flags="items_from_strings" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="7 -13 19 -7" footer_bounds="7 208 19 214">
+	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/gg_order_spinner" type="spinner" top="2" width="206" height="22" flags="pass_unhandled_to_focused_child left_right_tabs_items" font="ui\large_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="7 -13 19 -7" footer_bounds="7 213 19 219" string_list="main_menu/settings_select/multiplayer_setup/opence_options_edit/var_gg_order" list_flags="items_from_strings">
 		<on event="left_mouse" run="mouse spinner 1wide click"/>
 	</widget>
 	<strings name="main_menu/settings_select/multiplayer_setup/opence_options_edit/var_gg_order">
@@ -171,13 +171,13 @@
 		<string text="WEAKEST FIRST"/>
 		<string text="RANDOM"/>
 	</strings>
-	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/op_gg_melee" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="bitmaps/option_bkds" color="#FF2896FF">
+	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/op_gg_melee" width="512" height="26" flags="pass_unhandled_to_focused_child" bitmap="main_menu/parts/option_row_512x26" color="#FF2896FF">
 		<child widget="main_menu/settings_select/multiplayer_setup/opence_options_edit/gg_melee_label"/>
-		<child widget="main_menu/settings_select/multiplayer_setup/opence_options_edit/gg_melee_spinner" x="286" y="1"/>
+		<child widget="main_menu/settings_select/multiplayer_setup/opence_options_edit/gg_melee_spinner" x="286"/>
 	</widget>
-	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/gg_melee_label" type="text" controller="1" width="300" height="22" string_list="main_menu/settings_select/multiplayer_setup/opence_options_edit/opence_labels" string_index="9" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="4">
+	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/gg_melee_label" type="text" controller="1" width="280" height="26" string_list="main_menu/settings_select/multiplayer_setup/opence_options_edit/opence_labels" string_index="9" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="2">
 	</widget>
-	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/gg_melee_spinner" type="spinner" top="2" width="206" height="20" flags="pass_unhandled_to_focused_child left_right_tabs_items" string_list="main_menu/settings_select/multiplayer_setup/opence_options_edit/var_gg_melee" font="ui\large_ui" color="#FF2896FF" align="center" text_y="4" list_flags="items_from_strings" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="7 -13 19 -7" footer_bounds="7 208 19 214">
+	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/gg_melee_spinner" type="spinner" top="2" width="206" height="22" flags="pass_unhandled_to_focused_child left_right_tabs_items" font="ui\large_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="7 -13 19 -7" footer_bounds="7 213 19 219" string_list="main_menu/settings_select/multiplayer_setup/opence_options_edit/var_gg_melee" list_flags="items_from_strings">
 		<on event="left_mouse" run="mouse spinner 1wide click"/>
 	</widget>
 	<strings name="main_menu/settings_select/multiplayer_setup/opence_options_edit/var_gg_melee">
