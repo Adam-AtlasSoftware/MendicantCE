@@ -115,10 +115,13 @@ enum
 };
 
 /* frames late while the bake runs in play: their mean over the window's
-more than the normal's this many times, or one frame more than the
-normal's this many times (a hitch) */
+more than the normal's this many times and so many ms, or one frame more
+than the normal's this many times and so many ms (a hitch; the ms, so that
+a machine at hundreds of frames a second does not rest for a millisecond) */
 #define WORLD_SDF_PACE_LATE 1.10f
+#define WORLD_SDF_PACE_SLACK_MS 1.0f
 #define WORLD_SDF_PACE_HITCH 2.0f
+#define WORLD_SDF_PACE_HITCH_SLACK_MS 8.0f
 
 /* an object field's least voxel, its margin about the object (a share of
 its longest side, between the least and the most, world units), and the
@@ -273,10 +276,12 @@ struct world_sdf_pace
 {
 	/* the frames' normal time (ms; 0: not known), the mean of a rest's */
 	float normal;
-	/* the rest: frames left of it, its frames' total and count so far, and
-	the next rest's frames */
+	/* the rest: frames left of it, its frames' total and count so far, the
+	late frames' mean it began for (0: one to learn), and the next rest's
+	frames (doubled while resting helps; the least again when frames were
+	as slow while it rested, late for something else) */
 	long rest, rested;
-	float rested_total;
+	float rested_total, late;
 	long next_rest;
 	/* the last frames baked (a ring, the newest at count - 1 mod window),
 	and the frames baked since the last late one */

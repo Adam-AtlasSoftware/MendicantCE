@@ -44,6 +44,11 @@ CONTROLS = [
     # a rest no longer while frames keep running late
     (BAKE, "pace->next_rest = pace->next_rest * 2 < WORLD_SDF_PACE_MOST_REST ? pace->next_rest * 2 : "
      "WORLD_SDF_PACE_MOST_REST;", "", "pace"),
+    # a heavier scene taken for the bake's lateness (its rests ever longer: the field never comes)
+    (BAKE, "\t\t\tpace->next_rest = WORLD_SDF_PACE_LEAST_REST;\n\t\treturn 1;", "\t\t\t;\n\t\treturn 1;", "pace"),
+    # a fast machine's few milliseconds a hitch
+    (BAKE, "pace->normal * WORLD_SDF_PACE_HITCH + WORLD_SDF_PACE_HITCH_SLACK_MS", "pace->normal * WORLD_SDF_PACE_HITCH",
+     "pace"),
     # the normal not learned again as it rests (the first one kept for good)
     (BAKE, "\tpace->normal = pace->rested_total / (float)pace->rested;", "\tif (pace->normal <= 0.0f)\n\t\t"
      "pace->normal = pace->rested_total / (float)pace->rested;", "pace"),

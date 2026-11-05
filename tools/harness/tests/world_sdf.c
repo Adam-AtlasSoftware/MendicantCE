@@ -1555,8 +1555,9 @@ static void pace_case(void)
 	/* within a tenth of it: free */
 	rested = pace_frames(&pace, 200, 17.0f, &running);
 	CHECK(rested == 0 && running, "a little slower: %ld rested", rested);
-	/* a tenth more, held: a rest, the least, within the window's frames */
-	for (index = 0; index < WORLD_SDF_PACE_WINDOW && world_sdf_pace_frame(&pace, 18.5f, 1); index++)
+	/* a tenth and a millisecond more, held: a rest, the least, within the
+	window's frames */
+	for (index = 0; index < WORLD_SDF_PACE_WINDOW && world_sdf_pace_frame(&pace, 20.0f, 1); index++)
 		;
 	CHECK(index < WORLD_SDF_PACE_WINDOW, "late: rested after %ld", index);
 	/* (the rest's frames the new normal) */
@@ -1579,11 +1580,26 @@ static void pace_case(void)
 	/* calm: shorter again */
 	pace_frames(&pace, WORLD_SDF_PACE_CALM, 15.0f, &running);
 	CHECK(pace.next_rest == WORLD_SDF_PACE_MOST_REST / 2, "calm: %ld", pace.next_rest);
+	/* late, but as slow while it rests (a heavier scene, not the bake): the
+	least rest next */
+	for (index = 0; index < WORLD_SDF_PACE_WINDOW && world_sdf_pace_frame(&pace, 20.0f, 1); index++)
+		;
+	CHECK(index < WORLD_SDF_PACE_WINDOW && pace.rest == WORLD_SDF_PACE_MOST_REST / 2, "a heavier scene: %ld", pace.rest);
+	pace_frames(&pace, pace.rest, 20.0f, &running);
+	CHECK(running && pace.next_rest == WORLD_SDF_PACE_LEAST_REST && fabsf(pace.normal - 20.0f) < 1.0e-4f,
+		"not the bake's: the next rest %ld, normal %g", pace.next_rest, pace.normal);
 	/* a frame a little slow now and then is no rest */
 	rested = 0;
 	for (index = 0; index < 400; index++)
-		rested += !world_sdf_pace_frame(&pace, index % 8 ? 15.0f : 22.0f, 1);
+		rested += !world_sdf_pace_frame(&pace, index % 8 ? 20.0f : 30.0f, 1);
 	CHECK(rested == 0, "now and then: %ld", rested);
+	/* at hundreds of frames a second, a frame a few ms long is no hitch */
+	world_sdf_pace_frame(&pace, 1.0f, 0);
+	pace_frames(&pace, WORLD_SDF_PACE_LEARN, 1.6f, &running);
+	rested = 0;
+	for (index = 0; index < 400; index++)
+		rested += !world_sdf_pace_frame(&pace, index % 50 ? 1.6f : 6.0f, 1);
+	CHECK(running && rested == 0, "fast: %ld", rested);
 	/* back to the menus, then a map again: free, then learning again */
 	CHECK(world_sdf_pace_frame(&pace, 100.0f, 0), "the menus again");
 	CHECK(!world_sdf_pace_frame(&pace, 30.0f, 1) && pace.normal == 0.0f, "learning again");
@@ -1591,7 +1607,7 @@ static void pace_case(void)
 	memset(&pace, 0, sizeof(pace));
 	rested = pace_frames(&pace, WORLD_SDF_PACE_LEARN, 16.0f, &running);
 	CHECK(rested == WORLD_SDF_PACE_LEARN - 1 && running, "zeroed: %ld", rested);
-	CHECK(!world_sdf_pace_frame(&pace, 40.0f, 1) && pace.rest == WORLD_SDF_PACE_LEAST_REST, "zeroed: rest %ld",
+	CHECK(!world_sdf_pace_frame(&pace, 50.0f, 1) && pace.rest == WORLD_SDF_PACE_LEAST_REST, "zeroed: rest %ld",
 		pace.rest);
 }
 
