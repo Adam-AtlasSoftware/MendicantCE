@@ -45,7 +45,8 @@ SCREENS = {
                         "browser_panel", "panel_title", "panel_where", "panel_kind", "panel_tick", "panel_opence",
                         "panel_status", "browser_join_bar", "button_join",
                         "join_game_button_bar", "prompt_favorite", "prompt_refresh", "prompt_paste", "prompt_sort",
-                        "prompt_back", "browser_empty", "browser_counts"]),
+                        "prompt_back", "browser_empty", "browser_counts", "join_game_header", "op_search_any",
+                        "op_search_field_any", "op_search_clear_any", "browser_clear_bar", "button_clear_search"]),
     "lobby": (f"{MT}/lobby/lobby_screen",
               ["board_players", "board_row_1_12", "board_name_0_0", "board_panel", "board_gametype", "board_map",
                "board_limits", "board_kind", "board_status", "board_waiting", "board_bots_count",
@@ -161,8 +162,14 @@ def test_touch_targets(screen, width):
             if box.name in other.path or other.name in box.path:
                 continue
             # (a footer's alternatives in one place, the game showing one: PASTE LINK for REFRESH, COPY LINK
-            # for MAKE PARTY)
-            if box[1:5] == other[1:5] and box.path == other.path and box.name.startswith("prompt_"):
+            # for MAKE PARTY; the browser's search's bar and the field typed into in its place)
+            if box[1:5] == other[1:5] and box.path == other.path and (box.name.startswith("prompt_") or
+                                                                      box.name.startswith("op_search_")):
+                continue
+            # (the browser's CLEAR SEARCH, shown in the rows' place while the search leaves the list none:
+            # menu_functions.c's browser_clear_show)
+            if {box.name, other.name} & {"button_clear_search"} and \
+                    any(re.fullmatch(r"server_item_\d+", name) for name in (box.name, other.name)):
                 continue
             assert not box.overlaps(other), f"{screen} at {width}: {name} {box} is over {other_name} {other}"
 

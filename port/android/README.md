@@ -261,7 +261,9 @@ first swipe from an edge in full screen only shows the system bars.
 
 A tap during a cinematic that can be skipped skips it, as A does. On the
 on-screen keyboard, tap a key to press it, "B =BACK" to cancel and
-"A =ENTER" to accept the name.
+"A =ENTER" to accept the name. A menu's text field (the server browser's
+search, a game's name, a password, a friend code) brings up Android's own
+keyboard while it is typed into; its Enter keeps what was typed.
 
 ### Touch controls
 

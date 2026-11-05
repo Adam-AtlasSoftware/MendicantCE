@@ -2818,6 +2818,15 @@ with CLEAR SEARCH under it. The searches stay while you are in the browser,
 Filters opened and closed too, and go when you leave it; they are not kept
 in `config.toml`.
 
+On a phone or a tablet (the touchscreen's browser, which has no column
+titles) the search is one field at the top, beside the title: tap it and
+type on the system's keyboard, and the list shows the games whose server
+name or map has what you typed, matched the same way. Its X clears it; the
+keyboard's Enter, or a tap elsewhere, keeps the words, and a tap on the
+field brings the keyboard back. Every menu text field (a game's name, a
+password, a friend code) brings up the system's keyboard on Android and
+iOS.
+
 The browser lists two kinds of games: the dedicated servers that the
 master servers list (`masters.txt`, `network.masters_file`; the official
 master, `https://master.opencommunityedition.com`, built in, when the file
