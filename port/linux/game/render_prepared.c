@@ -577,17 +577,12 @@ boolean render_prepared_replay(boolean mirrors)
 	made with: more, a draw the walk did not need, makes no difference to
 	play; under another, the draws' pipelines are others) */
 	missing = made ? render_prepared_draws_missing(record, header.draw_count, made, count) : header.draw_count;
-	if (missing && made && header.derivation == prepared.derivation && !prepared.shipped)
+	if (missing && made && header.derivation == prepared.derivation)
 		prepared_log_new(record, header.draw_count);
 	if (made)
 		free(made);
 	free(record);
-	/* (a shipped record's draws are not checked: made by another walk than a
-	player's load, the first start's pass, with which its draws need not
-	agree, it is the same for every player's settings and cannot be made
-	again in its place) */
-	if (!render_prepared_played(formed, unknown, missing, header.derivation == prepared.derivation &&
-		!prepared.shipped))
+	if (!render_prepared_played(formed, unknown, missing, header.derivation == prepared.derivation))
 	{
 		platform_log("render: the map's preparation's record played back does not make its draws (%s, %u objects "
 			"not found, %lu of its %lu draws not made, %lu made): it is made again", formed ? "well formed" :
