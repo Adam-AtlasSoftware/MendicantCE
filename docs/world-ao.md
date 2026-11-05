@@ -169,15 +169,17 @@ never shipped, and never trusted without checks.
 - **Key:** the map's cache file header checksum (`menu_picture_map_checksum`'s source) plus `WORLD_SDF_VERSION`. A
   different map under the same name, or a new version, is baked again. A good file is reused forever.
 - **Format** (little-endian, written field by field, not as a struct):
-  - a 72-byte `struct world_sdf_header`: magic `WSDF`, version (3: the static scenery), map checksum, bsp index, the
-    cells along x/y/z, origin, voxel, range, deflated size, bake ms, bake threads, brick count, the static scenery's
-    part's bytes and its pages' bake ms;
-  - then the cells (4 bytes each, x fastest, then y, then z), the bricks (729 bytes each) and the static scenery's
-    part ([Static scenery](#static-scenery)), deflated as one zlib stream (the game's own zlib, `source/memory/zlib`);
+  - an 80-byte `struct world_sdf_header`: magic `WSDF`, version (4: the vehicles' occlusion fields), map checksum,
+    bsp index, the cells along x/y/z, origin, voxel, range, deflated size, bake ms, bake threads, brick count, the
+    static scenery's part's bytes and its pages' bake ms, the vehicles' part's bytes and their bake ms;
+  - then the cells (4 bytes each, x fastest, then y, then z), the bricks (729 bytes each), the static scenery's
+    part ([Static scenery](#static-scenery)) and the vehicles' part ([Dynamic objects](#dynamic-objects-the-vehicles-occlusion-fields)),
+    deflated as one zlib stream (the game's own zlib, `source/memory/zlib`);
   - then a CRC-32 of the header and the deflated bytes (the menu pictures' CRC).
 - **Writing:** to `<name>.tmp`, then renamed into place, so a crash leaves no half file.
 - **Reading:** a file with the wrong magic, version, checksum, size or CRC, a cell of no kind, a brick's place
-  past the bricks, or a scenery part whose counts, sizes or pages' layers don't hold is deleted and baked again.
+  past the bricks, a scenery part whose counts, sizes or pages' layers don't hold, or a vehicles' part whose counts,
+  sizes, numbers or halves don't hold is deleted and baked again.
 - **Bumping `WORLD_SDF_VERSION`:** whenever the bake's arithmetic, the source geometry or the layout changes.
 
 ## Static scenery
@@ -240,6 +242,58 @@ names a layer to the draws only once the whole field is on the GPU.
 **Measuring:** `HALO_WORLD_AO_COUNTS=1` logs, every 600 windows, a window's shapes, how many are dynamic (by kind),
 and its lightmap pages drawn with a layer and without.
 
+## Dynamic objects: the vehicles' occlusion fields
+
+A vehicle's shape doesn't change, only where it is. So its occlusion of what's about it is baked once, in its own
+space, and read with one filtered fetch where its exact boxes were found shape by shape. (Before this, at b30's start
+two Pelicans' eight boxes were about 1.0 ms of the Radeon's 1.31.)
+
+**What a field holds.** At each voxel of a grid about the vehicle, the share of the cosine-weighted hemisphere its
+collision geometry blocks, for every normal n, as `sat(t + n · v)`: four numbers, RGBA16F. That is the occlusion
+itself, not a distance field: a cone of taps along the normal over a distance field misses what's beside the
+normal, and measured against the exact boxes a single cone was off by 17/255 on average (a tenth of the points by
+40), and five cones of five taps by 7 to 12.
+
+**The bake** (`world_sdf_bake.c`'s `world_sdf_object_*`, pure; each voxel its own, so the same on any threads):
+- **Which:** each vehicle definition of the scenario's vehicle palette with collision geometry.
+- **Geometry:** each node's first BSP's triangles at rest, in node 0's space (the field rides on node 0 as drawn). A
+  wheel's node (named "tire" or "wheel") is left out: wheels turn and spring, so they keep their spheres.
+- **Grid** (`world_sdf_object_layout`): the triangles' bounds grown by half the longest side (1.5 to 4 wu), at
+  0.125 wu, the voxel grown ×1.125 a step until it's at most 96 a side and 65,536 in all. A Warthog is 41×33×33 at
+  0.125, a Pelican 46×40×29 at 0.41.
+- **Each voxel:** 256 fixed directions (a Fibonacci sphere's), each blocked or not by the triangles. Rays are
+  bucketed on a cube's faces, and a triangle tests only the buckets its cone meets. The occlusion at 96 normals is
+  their blocked directions' cosines' sum. t and v are its clamped least squares fit, weighted 0.02 plus each normal's
+  occlusion: a surface under a vehicle faces it, and its contact darkening is what shows.
+- **Solid:** a voxel inside, by the nodes' own BSP point tests, takes its outside neighbours' mean, step by step.
+  The inside's darkness is then never filtered onto a surface just outside facing away.
+- **Past the grid:** its edge's value by `(L / (L + e))²`, with L the edge point's distance from the grid's middle
+  and e the point's past the edge (the 1/r² of a far occluder). Its reach: where that bound falls under 1/510.
+
+**Cache and schedule:** in each BSP's field file, keyed on the map's checksum and the bake version, one entry per
+vehicle tag (its definition, grid, voxel, reach, bounds and texels). It's baked with the field, in the first start's
+pass and on a first load, written whole, checked on read, and redone if missing, stale or damaged. On the GPU the
+fields share one 3D atlas, stacked in columns of at most 256, within 4 MB (`world_sdf_objects_place`). Its texels
+come as part 3 of `WORLD_AO_FIELD`, before the table, and fields are named only once the whole field is on the GPU.
+
+**The window** (`world_proxies_window`): a vehicle whose field is drawn takes it in place of its boxes, as three
+shapes together (`_world_proxy_field`, then two of no kind; never split by the window's end). Its wheels' spheres
+stay. The three hold:
+- the world to its voxels (node 0's frame as drawn, inverted);
+- its last voxel, its place in the atlas and the atlas's size;
+- its geometry's box's half extents, about the grid's middle (the layout centres the grid over it).
+
+Without a field (none baked, not yet uploaded), or for a baked static placement, its boxes shade, as before.
+
+**Its shading** (`world_ao_field_proxy_occlusion`, both emitters line for line):
+- p and n go to its voxels: one fetch at p's clamped place, `sat(s · (t + n · v))`.
+- It's faded over the last quarter of its reach.
+- It's also faded by its geometry's box's bound (`world_proxy_box_fade`'s U, in its voxels). Its geometry is
+  inside that box, so U bounds its occlusion too. Like a box, it's never fetched where U is under 1/510; on the
+  ground beside a Warthog that's a few wu, not its 20 wu reach.
+- Its reach is the field's or the box's, where less.
+- The grid's cells take its box grown as a box's.
+
 ## Proxies (`world_proxies.h`)
 
 Each object definition gets up to 16 shapes, made the first time it's drawn and kept until the map unloads:
@@ -252,7 +306,8 @@ Each object definition gets up to 16 shapes, made the first time it's drawn and 
   all, a capsule from each node to its child, radius 0.12 × the bounding radius. Each shape rides on its node.
 - **Vehicles:** a box for each node's collision geometry (its bounds in the node's space), the smallest merged into
   its nearest ancestor's box (or the largest) until at most 4 are left, plus a sphere for each node named as a wheel
-  ("tire", "wheel"): its own geometry's bounds, else its height above the body's lowest point (0.15 to 1 wu).
+  ("tire", "wheel"): its own geometry's bounds, else its height above the body's lowest point (0.15 to 1 wu). Where
+  its occlusion field is drawn, the field stands in for the boxes ([Dynamic objects](#dynamic-objects-the-vehicles-occlusion-fields)).
 - **Scenery, machines, controls, light fixtures, items (weapons and equipment on the ground, garbage):** one box,
   every node's collision geometry in node 0's space; with no collision geometry, a sphere of the bounding radius at
   its bounding centre.
@@ -445,6 +500,7 @@ the strong preset.
 | Field's atlas: 3D, R8 snorm, linear, clamp | set `XGPU_SPIRV_SET_OCCLUSION` (3), binding `XGPU_SPIRV_BINDING_WORLD_SDF` (1), combined image sampler | `[[texture(XGPU_MSL_TEXTURE_WORLD_SDF)]]` (5), `constexpr sampler` |
 | Field's table: 3D, RGBA8, read by texel | set 3, binding `XGPU_SPIRV_BINDING_WORLD_SDF_TABLE` (3), combined image sampler, `OpImageFetch` | `[[texture(XGPU_MSL_TEXTURE_WORLD_SDF_TABLE)]]` (6), `read` |
 | Static scenery's pages: 2D array, R8 (the coverage's format: read as 1, 1, 1, the byte), linear, clamp | set 3, binding `XGPU_SPIRV_BINDING_WORLD_AO_SCENERY` (4), combined image sampler | `[[texture(XGPU_MSL_TEXTURE_WORLD_AO_SCENERY)]]` (7), `constexpr sampler` |
+| Vehicles' occlusion fields' atlas: 3D, RGBA16F (t, v.xyz), linear, clamp; a texel of none stands in | set 3, binding `XGPU_SPIRV_BINDING_WORLD_AO_OBJECTS` (5), combined image sampler | `[[texture(XGPU_MSL_TEXTURE_WORLD_AO_OBJECTS)]]` (20: past the combiner's 8 to 19), `constexpr sampler` |
 | Block `struct xgpu_world_ao_block` (std140, 19,552 B) | set 3, binding `XGPU_SPIRV_BINDING_WORLD_AO` (2), uniform buffer | `[[buffer(XGPU_MSL_BUFFER_WORLD_AO)]]` (23) |
 | Per draw: owner slot, reference (a lightmap draw's: its page's layer, −1 none; a static placement's own: −1) | the draw uniforms (`xgpu_spirv_uniforms`, 2 floats) | `xgpu_msl_uniforms`, the same |
 
@@ -459,8 +515,8 @@ cells' 64-bit masks each (cell i's word w at `cells[i / 2][2 (i % 2) + w]`).
 
 **Command stream (version 16):**
 - `XGPU_STREAM_WORLD_AO_WINDOW` carries the block (`active` 0: withdrawn);
-- `XGPU_STREAM_WORLD_AO_FIELD` carries a slab of slices of a part, the table (4 bytes a texel) or the atlas (1)
-  (`width` 0: release both). The table comes first; the field is drawn with once both have their last slices. The
+- `XGPU_STREAM_WORLD_AO_FIELD` carries a slab of slices of a part, the table (4 bytes a texel), the atlas (1), the
+  static scenery's pages (1) or the vehicles' fields' atlas (8: four halves) (`width` 0: release every part). The table comes first; the field is drawn with once both have their last slices. The
   decoder checks the slab's part, bounds and size before any backend reads it.
 - `XGPU_STREAM_PIPELINE_STAND_IN` names the pipeline bound's stand-in ([Pipelines](#pipelines-never-in-a-load)).
 
@@ -619,6 +675,59 @@ d40) have texels two surfaces share, and walk the static shapes themselves there
 **The look.** Blood Gulch's frames differ from before by 0.10/255 on average (0.24% of pixels by more than 4/255).
 On b30 the rocks, the ground and the trees look the same in the normal view. In `debug.world_ao_view`, two trees
 whose leaves lie within their own collision come out a little greyer, since the field now holds them.
+
+### The vehicles' occlusion fields
+
+The vehicles' boxes replaced by their baked occlusion ([Dynamic objects](#dynamic-objects-the-vehicles-occlusion-fields)).
+World minus off, GPU ms a frame, measured as for the static scenery: unpaced, windowed 1440p, no input, ten 600-frame
+windows. Before is `world-ao` with the static scenery baked:
+
+| Scene | Radeon 8060S 1440p | RTX 4090 1440p |
+| --- | --- | --- |
+| b30's start | 1.32 → **0.40** | 0.34 → **0.16** |
+| Blood Gulch's start | 0.13 → **0.12** | 0.05 → **0.05** |
+
+**b30's start is still over the Radeon's 0.35, and the vehicles aren't what's left.** The two Pelicans now take two
+fields of the window's 64 shapes (three slots each), not eight boxes. Taking shapes out of the window by kind
+(a measurement-only switch), on the same windows:
+
+| Window | Radeon 1440p | World minus off |
+| --- | --- | --- |
+| every shape | 1.74 | +0.40 |
+| no fields | 1.75 | +0.40 |
+| no capsules | 1.58 | +0.23 |
+| no shapes | 1.48 | +0.13 |
+
+So the vehicles' fields cost nothing measurable. What's left:
+- 0.17 is the marines' capsules (about 52 a window);
+- about 0.10 is the other small shapes (spheres, weapons on the ground);
+- 0.13 is the field and the shaders with no shapes.
+
+Without the box's bound, a field was fetched over its whole reach, and Blood Gulch's Warthogs cost the 4090 +0.09.
+
+**The look.**
+- **b30:** the frames differ from the exact boxes' by 13 to 19/255 on average (the same frames of two "before" runs
+  differ by 0.4 to 1.7). That's the boxes' error, not the field's. On the ground about the Pelican, against the
+  occlusion of its own 288 collision triangles (4,096 rays a point, 1,500 points within 12 wu), the four boxes are
+  off by 23.7/255 on average (they give 40.5 where it's 16.8; at most 201), the field by 1.7 (at most 18). The boxes
+  bound nodes that the hull doesn't fill.
+- **Blood Gulch:** 0.004/255 on average in the normal view and 0.022 in `debug.world_ao_view` (0.04% of pixels by more
+  than 16, at most 121, about the Warthogs). Two "before" runs: 0. Against the Warthog body's own triangles the
+  boxes are off by 0.6/255 on average (at most 59), the field by 0.2 (at most 16).
+- **The fit's own error** (`tools/harness/tests/world_sdf.c`, a box against the integral): ground 2.2/255 on average
+  (at most 18); points about it at any normal, 0.05 wu or more from it, 2.7 (at most 22).
+
+**The bake** (first load, the Radeon box's 32 threads):
+- b30's seven fields, 589 ms in all: the Warthog 41×33×33 at 0.125 (1.7 s of the threads' time, 357 KB); the
+  Pelican 46×40×29 at 0.41 (2.9 s, 427 KB); the lifepod 6.0 s (766 triangles); the Covenant dropship 3.6 s.
+- Blood Gulch's three, 175 ms (Warthog, Scorpion, Ghost).
+- The atlas: 3.5 MB on b30, 1.2 MB on Blood Gulch. The cache files: b30's 1.58 → 2.89 MB, Blood Gulch's 3.11 →
+  3.63 MB.
+
+**Next, for b30's last 0.05:** the marines' capsules are the largest part (0.17).
+- A biped farther off as one capsule (or a sphere) rather than ten. At b30's start the capsules are 8.3 wu from
+  the camera on average, 40% of them past 10 wu.
+- Or a capsule's reach from a bound like the box's, which falls fast on the ground beside it.
 
 ## Determinism
 
