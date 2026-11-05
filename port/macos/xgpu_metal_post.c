@@ -695,6 +695,7 @@ int xgpu_metal_post_ambient_occlusion(uint32_t target, uint8_t format, uint32_t 
 	values.sampling[2] = occlusion_presets[preset].power;
 	values.sampling[3] = (float)scale;
 
+	xgpu_metal_pass_kind(XGPU_METAL_PASS_OCCLUSION_DEPTH);
 	occlusion_pipeline(OCCLUSION_INTERMEDIATE, XGPU_METAL_POST_OCCLUSION_DEPTH, 0, 0, &pipeline);
 	occlusion_draw(&pipeline, occlusion.distances, 0, rectangle, depth, 0, 0, &values);
 	/* (the mask: emptied, then each kind's channel where the stencil has
@@ -707,8 +708,10 @@ int xgpu_metal_post_ambient_occlusion(uint32_t target, uint8_t format, uint32_t 
 		occlusion_pipeline(function, 0, format, depth_format, &pipeline);
 		occlusion_draw(&pipeline, occlusion.mask, depth, rectangle, 0, 0, 0, &fill);
 	}
+	xgpu_metal_pass_kind(XGPU_METAL_PASS_OCCLUSION);
 	occlusion_pipeline(OCCLUSION_INTERMEDIATE, XGPU_METAL_POST_OCCLUSION, 0, 0, &pipeline);
 	occlusion_draw(&pipeline, occlusion.occlusion, 0, inner, occlusion.distances, occlusion.mask, 0, &values);
+	xgpu_metal_pass_kind(XGPU_METAL_PASS_OCCLUSION_BLUR);
 	occlusion_pipeline(OCCLUSION_INTERMEDIATE, XGPU_METAL_POST_OCCLUSION_BLUR, 0, 0, &pipeline);
 	values.sampling[0] = 1.0f;
 	values.sampling[1] = 0.0f;
@@ -720,6 +723,7 @@ int xgpu_metal_post_ambient_occlusion(uint32_t target, uint8_t format, uint32_t 
 	values.sampling[1] = occlusion_presets[preset].steps;
 	/* (the occlusion at each pixel, white where the mask leaves it) */
 	fill.metrics[0] = fill.metrics[1] = fill.metrics[2] = fill.metrics[3] = 1.0f;
+	xgpu_metal_pass_kind(XGPU_METAL_PASS_OCCLUSION_UPSAMPLE);
 	occlusion_pipeline(OCCLUSION_WHITE, 0, XGPU_METAL_FORMAT_BGRA8, 0, &pipeline);
 	occlusion_draw(&pipeline, occlusion.factor, 0, rectangle, 0, 0, 0, &fill);
 	occlusion_pipeline(OCCLUSION_LAY, 0, XGPU_METAL_FORMAT_BGRA8, 0, &pipeline);

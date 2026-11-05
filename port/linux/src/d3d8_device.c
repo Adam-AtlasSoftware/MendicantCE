@@ -219,8 +219,12 @@ static int hdr_setting(void)
 	return XGPU_HDR_OFF;
 }
 
+static void category_send(int category);
+
 void halo_hdr_category(int category)
 {
+	/* (and to the backend, which times the GPU's work by it) */
+	category_send(category);
 	hdr.category = category;
 	/* (the 3D view's categories: past the clear, before the HUD's) */
 	if (category > 0 && category < 26)
@@ -277,6 +281,13 @@ static struct
 	off) */
 	BOOL journal_prepass, journal_ready;
 } ambient_occlusion = { 0, FALSE, FALSE, -1, FALSE, FALSE };
+
+/* the game's renderer's category, and the pre-pass's draws among them, for
+the backend's timing (xgpu_backend_category) */
+static void category_send(int category)
+{
+	xgpu_backend_category(category, ambient_occlusion.prepass);
+}
 
 static void ambient_occlusion_read(void)
 {

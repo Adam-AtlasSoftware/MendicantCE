@@ -115,6 +115,10 @@ void xgpu_backend_picture_top(int top);
 (each channel raised to that power: past 1 brighter), from the next present
 on; 1 none, which costs nothing. An HDR swapchain's frame never is. */
 void xgpu_backend_gamma(float gamma);
+/* the game's renderer's category of the draws from now on (rasterizer.h's
+_rasterizer_profile_*, -1 none), and whether they are display.ambient_occlusion's
+pre-pass: what the backends' GPU timing sums by (HALO_METAL_PASS_TIMES) */
+void xgpu_backend_category(int category, BOOL prepass);
 void xgpu_backend_tone_map(xgpu_target target, const long corners[4]);
 /* display.ambient_occlusion: the occlusion of a window's 3D view (its
 corners in the target's pixels), from the depth target drawn with it, laid

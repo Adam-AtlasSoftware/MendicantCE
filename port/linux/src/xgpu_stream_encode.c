@@ -177,7 +177,9 @@ static struct
 		struct xgpu_stream_vr_info vr_info;
 	} *replies;
 
-	/* what the host last had */
+	/* what the host last had (category: XGPU_STREAM_CATEGORY's value + 1,
+	0 none sent) */
+	uint32_t category;
 	uint32_t pipeline;
 	BOOL dynamic_sent, uniforms_sent;
 	struct xgpu_stream_dynamic_state dynamic;
@@ -476,6 +478,7 @@ static void synchronous(void)
 again as it is next used */
 static void forget_sent(void)
 {
+	stream.category = 0;
 	stream.pipeline = 0;
 	stream.dynamic_sent = FALSE;
 	stream.uniforms_sent = FALSE;
@@ -731,6 +734,18 @@ void xgpu_backend_gamma(float gamma)
 	memcpy(&bits, &gamma, sizeof(bits));
 	if (stream.open)
 		record_value(XGPU_STREAM_GAMMA, bits);
+}
+
+void xgpu_backend_category(int category, BOOL prepass)
+{
+	uint32_t value = (category >= 0 && category < (int)XGPU_STREAM_CATEGORY_NONE ? (uint32_t)category :
+		XGPU_STREAM_CATEGORY_NONE) | (prepass ? XGPU_STREAM_CATEGORY_PREPASS : 0);
+
+	/* (not into a map's preparation: its draws are not timed) */
+	if (!stream.open || stream.preparing || stream.category == value + 1)
+		return;
+	stream.category = value + 1;
+	record_value(XGPU_STREAM_CATEGORY, value);
 }
 
 void xgpu_backend_picture_top(int top)

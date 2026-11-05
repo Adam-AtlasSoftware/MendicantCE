@@ -258,6 +258,9 @@ enum
 	XGPU_STREAM_GAMMA,
 	/* display.panini (xgpu_backend_panini) */
 	XGPU_STREAM_PANINI,
+	/* the game's renderer's category of the draws from now on, for the
+	backends' timing alone (xgpu_backend_category; value: XGPU_STREAM_CATEGORY_*) */
+	XGPU_STREAM_CATEGORY,
 	XGPU_STREAM_RECORD_TYPES,
 };
 
@@ -286,6 +289,12 @@ struct xgpu_stream_value
 	uint32_t header;
 	uint32_t value;
 };
+
+/* CATEGORY's value: the category (rasterizer.h's _rasterizer_profile_*,
+XGPU_STREAM_CATEGORY_NONE outside them), with XGPU_STREAM_CATEGORY_PREPASS
+in display.ambient_occlusion's pre-pass */
+#define XGPU_STREAM_CATEGORY_NONE 255u
+#define XGPU_STREAM_CATEGORY_PREPASS 256u
 
 /* ---------- the backend's life */
 

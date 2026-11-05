@@ -1259,6 +1259,7 @@ target, from just before the record) */
 static void stream_anti_alias(void *context, const struct xgpu_stream_anti_alias *record)
 {
 	struct stream_target *target = target_get(record->target);
+	uint32_t kind;
 
 	(void)context;
 	if (!target || (target->description.format != XGPU_METAL_FORMAT_BGRA8 &&
@@ -1272,8 +1273,10 @@ static void stream_anti_alias(void *context, const struct xgpu_stream_anti_alias
 		return;
 	}
 	target->written++;
+	kind = xgpu_metal_pass_kind(XGPU_METAL_PASS_ANTI_ALIASING);
 	xgpu_metal_post_anti_alias(record->smaa != 0, target->texture, target->description.format,
 		target->description.width, target->description.height, record->corners);
+	xgpu_metal_pass_kind(kind);
 	stream_state_restore();
 }
 
@@ -1286,6 +1289,7 @@ the view) */
 static void stream_panini(void *context, const struct xgpu_stream_panini *record)
 {
 	struct stream_target *target = target_get(record->target);
+	uint32_t kind;
 
 	(void)context;
 	if (!target || (target->description.format != XGPU_METAL_FORMAT_BGRA8 &&
@@ -1298,8 +1302,10 @@ static void stream_panini(void *context, const struct xgpu_stream_panini *record
 		return;
 	}
 	target->written++;
+	kind = xgpu_metal_pass_kind(XGPU_METAL_PASS_PANINI);
 	xgpu_metal_post_panini(target->texture, target->description.format, target->description.width,
 		target->description.height, target->description.samples, record->corners, record->projection);
+	xgpu_metal_pass_kind(kind);
 	stream_state_restore();
 }
 
@@ -1339,6 +1345,7 @@ static void stream_tone_map(void *context, const struct xgpu_stream_tone_map *re
 	uint32_t samples = target ? target->description.samples : 0;
 	struct xgpu_hdr_frame frame;
 	float hdr[4];
+	uint32_t kind;
 
 	(void)context;
 	if (!target || target->description.format != XGPU_METAL_FORMAT_RGBA16F || target->description.depth_or_layers > 1)
@@ -1357,9 +1364,11 @@ static void stream_tone_map(void *context, const struct xgpu_stream_tone_map *re
 	hdr[2] = frame.ui;
 	hdr[3] = 0.0f;
 	target->written++;
+	kind = xgpu_metal_pass_kind(XGPU_METAL_PASS_TONE_MAP);
 	xgpu_metal_post_tone_map(target->texture, target->description.width, target->description.height,
 		depth ? depth->texture : 0, depth ? depth->description.format : XGPU_METAL_FORMAT_NONE, samples,
 		record->corners, hdr);
+	xgpu_metal_pass_kind(kind);
 	stream_state_restore();
 }
 
@@ -1372,6 +1381,7 @@ static void stream_ambient_occlusion(void *context, const struct xgpu_stream_amb
 {
 	struct stream_target *target = target_get(record->target);
 	struct stream_target *depth = stream.color == record->target ? target_get(stream.depth) : NULL;
+	uint32_t kind;
 
 	(void)context;
 	/* (none, white, unless it is found) */
@@ -1386,6 +1396,7 @@ static void stream_ambient_occlusion(void *context, const struct xgpu_stream_amb
 		(void)xgpu_metal_post_ambient_occlusion_prepare(target->description.format, depth->description.format);
 		return;
 	}
+	kind = xgpu_metal_pass_kind(XGPU_METAL_PASS_OCCLUSION_UPSAMPLE);
 	if (record->quality == XGPU_AMBIENT_OCCLUSION_SHOW)
 	{
 		target->written++;
@@ -1396,7 +1407,37 @@ static void stream_ambient_occlusion(void *context, const struct xgpu_stream_amb
 		xgpu_metal_post_ambient_occlusion(target->texture, target->description.format, target->description.width,
 			target->description.height, depth->texture, depth->description.format, record->corners, (int)record->quality,
 			record->camera);
+	xgpu_metal_pass_kind(kind);
 	stream_state_restore();
+}
+
+/* the game's renderer's category of the draws from now on
+(XGPU_STREAM_CATEGORY's value: rasterizer.h's _rasterizer_profile_*), as the
+kind of pass HALO_METAL_PASS_TIMES sums them under */
+static void stream_category(void *context, uint32_t category)
+{
+	/* (_rasterizer_profile_clear to _screen_flash) */
+	static const uint8_t kinds[29] =
+	{
+		XGPU_METAL_PASS_SKY, XGPU_METAL_PASS_SKY, XGPU_METAL_PASS_WORLD,
+		/* (the environment's lightmaps to its reflections) */
+		XGPU_METAL_PASS_WORLD, XGPU_METAL_PASS_WORLD, XGPU_METAL_PASS_WORLD, XGPU_METAL_PASS_WORLD,
+		XGPU_METAL_PASS_WORLD, XGPU_METAL_PASS_WORLD, XGPU_METAL_PASS_WORLD, XGPU_METAL_PASS_WORLD,
+		XGPU_METAL_PASS_WORLD, XGPU_METAL_PASS_WORLD, XGPU_METAL_PASS_WORLD, XGPU_METAL_PASS_WORLD,
+		XGPU_METAL_PASS_WORLD,
+		/* (its transparents and fog) */
+		XGPU_METAL_PASS_TRANSPARENTS, XGPU_METAL_PASS_TRANSPARENTS, XGPU_METAL_PASS_TRANSPARENTS,
+		/* (water and its decals, detail objects, the queued transparents) */
+		XGPU_METAL_PASS_WATER, XGPU_METAL_PASS_WATER, XGPU_METAL_PASS_WORLD, XGPU_METAL_PASS_TRANSPARENTS,
+		/* (the lens flares, the screen's effect; the HUD and the screen's flash) */
+		XGPU_METAL_PASS_EFFECTS, XGPU_METAL_PASS_EFFECTS, XGPU_METAL_PASS_EFFECTS, XGPU_METAL_PASS_EFFECTS,
+		XGPU_METAL_PASS_HUD, XGPU_METAL_PASS_HUD,
+	};
+	uint32_t number = category & ~XGPU_STREAM_CATEGORY_PREPASS;
+
+	(void)context;
+	xgpu_metal_pass_kind((category & XGPU_STREAM_CATEGORY_PREPASS) ? XGPU_METAL_PASS_PREPASS :
+		number < sizeof(kinds) ? kinds[number] : XGPU_METAL_PASS_OTHER);
 }
 
 /* ---------- visibility tests, frames */
@@ -1567,6 +1608,7 @@ const struct host_render_backend *xgpu_metal_stream_backend(void)
 		backend.tone_map = stream_tone_map;
 		backend.ambient_occlusion = stream_ambient_occlusion;
 		backend.gamma = stream_gamma;
+		backend.category = stream_category;
 		backend.panini = stream_panini;
 	}
 	return &backend;
