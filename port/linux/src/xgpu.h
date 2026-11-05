@@ -187,14 +187,11 @@ as four light indices, -1 none: halo_dynamic_lights.h) */
 
 /* ---------- display.ambient_occlusion in the light
 
-The occlusion (found from the 3D view's depth before its opaque surfaces
-shade: d3d8_device.c's halo_screen_ambient_occlusion_begin) is the share of
+The occlusion (found in the world at the pixel: below) is the share of
 the ambient light that reaches a pixel, so it multiplies that light alone,
 in the shaders that light the surfaces, never what a light adds (the
 flashlight, a plasma bolt's glow, the enhanced dynamic lights): the pixel
-key's ambient_occlusion, the occlusion read at the pixel from the
-backend's image of it (XGPU_SPIRV_BINDING_AMBIENT_OCCLUSION,
-XGPU_MSL_TEXTURE_AMBIENT_OCCLUSION; white where none is found):
+key's ambient_occlusion, the light it multiplies:
 
 - XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL: a model lit for each pixel
   (per_pixel_lighting): its ambient and distant lights (the level's light
@@ -221,7 +218,7 @@ enum
 
 The same three lights (XGPU_AMBIENT_OCCLUSION_LIGHT_*, the key's low bits:
 XGPU_AMBIENT_OCCLUSION_LIGHT_OF) multiplied by the occlusion found in the
-world at the pixel instead of GTAO's texel, where the key has
+world at the pixel, where the key has
 XGPU_AMBIENT_OCCLUSION_WORLD (docs/world-ao.md, "Shading";
 port/linux/game/world_ao.c). The pixel's world position p and normal n
 (the lighting's: a model's, or the lightmap pass's own, XGPU_LIGHTING_

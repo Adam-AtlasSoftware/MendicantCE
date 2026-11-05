@@ -297,10 +297,6 @@ static struct render_object_globals render_object_globals = { 0 };
 boolean debug_inactive_objects = FALSE;
 
 static boolean reported_rendered_object_overflow = FALSE;
-/* port: display.ambient_occlusion's depth pre-pass found the window's
-objects (render_ambient_occlusion_prepass): its draw of them, below, finds
-them no second time */
-static boolean rendered_objects_found_early = FALSE;
 
 /* ---------- public code */
 
@@ -392,11 +388,7 @@ void render_objects(
 	profile_enter(render_objects_section);
 
 	rasterizer_models_begin(FALSE);
-	if (!rendered_objects_found_early)
-	{
-		find_rendered_objects();
-	}
-	rendered_objects_found_early = render_ambient_occlusion_prepass;
+	find_rendered_objects();
 
 	data.shadow = FALSE;
 
@@ -821,10 +813,7 @@ static void render_object_list(
 				}
 			}
 
-			/* port: (not in display.ambient_occlusion's depth pre-pass: the
-			widgets draw as transparent geometry, queued for later) */
-			if (!data->shadow && !legs && object->object.first_widget_index != NONE &&
-				!render_ambient_occlusion_prepass)
+			if (!data->shadow && !legs && object->object.first_widget_index != NONE)
 			{
 				struct render_animation animation;
 

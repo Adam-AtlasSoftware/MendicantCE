@@ -38,7 +38,7 @@ port/linux/README.md.
 #include <stdint.h>
 
 #define XGPU_STREAM_MAGIC 0x53504758u /* "XGPS" */
-#define XGPU_STREAM_VERSION 16
+#define XGPU_STREAM_VERSION 17
 #define XGPU_STREAM_LOADING_ART_BYTES (640u * 480u * 4u)
 
 /* ---------- the ring
@@ -251,8 +251,6 @@ enum
 	window sits in it (value: 0 centered, n + 1 n pixels from the top, no
 	lower than the bottom) */
 	XGPU_STREAM_PICTURE_POSITION,
-	/* display.ambient_occlusion (xgpu_backend_ambient_occlusion) */
-	XGPU_STREAM_AMBIENT_OCCLUSION,
 	/* display.gamma: an SDR frame's curve as it is presented (value: the
 	setting, a float's bits; 1 none) */
 	XGPU_STREAM_GAMMA,
@@ -299,10 +297,8 @@ struct xgpu_stream_value
 };
 
 /* CATEGORY's value: the category (rasterizer.h's _rasterizer_profile_*,
-XGPU_STREAM_CATEGORY_NONE outside them), with XGPU_STREAM_CATEGORY_PREPASS
-in display.ambient_occlusion's pre-pass */
+XGPU_STREAM_CATEGORY_NONE outside them) */
 #define XGPU_STREAM_CATEGORY_NONE 255u
-#define XGPU_STREAM_CATEGORY_PREPASS 256u
 
 /* ---------- the backend's life */
 
@@ -362,19 +358,6 @@ struct xgpu_stream_tone_map
 	int32_t corners[4];
 };
 
-/* AMBIENT_OCCLUSION: display.ambient_occlusion over a window's 3D view
-(xgpu_backend_ambient_occlusion): its target (drawn with the stream's depth
-target), its corners, XGPU_AMBIENT_OCCLUSION_* and the camera: its near and
-far planes and its projection's x and y scales and offsets */
-struct xgpu_stream_ambient_occlusion
-{
-	uint32_t header;
-	uint32_t target;
-	uint32_t quality;
-	int32_t corners[4];
-	float camera[6];
-};
-
 /* ---------- display.ambient_occlusion "world" (docs/world-ao.md, #578)
 
 As the GPU sees it, alike in the guest's front end and the hosts' backends.
@@ -388,8 +371,8 @@ As the GPU sees it, alike in the guest's front end and the hosts' backends.
   struct world_proxy), a uniform buffer (std140: vec4s only).
 
 Bindings (the shaders: workstream D; the backends' descriptors: B):
-- SPIR-V: XGPU_SPIRV_SET_OCCLUSION (#574's set, so that a draw still binds
-  at most four sets), bindings XGPU_SPIRV_BINDING_WORLD_SDF and
+- SPIR-V: XGPU_SPIRV_SET_OCCLUSION (a set of its own, so that a draw
+  still binds at most four sets), bindings XGPU_SPIRV_BINDING_WORLD_SDF and
   XGPU_SPIRV_BINDING_WORLD_AO (xgpu_spirv.h);
 - MSL: [[texture(XGPU_MSL_TEXTURE_WORLD_SDF)]] with a constexpr sampler in
   the shader, [[buffer(XGPU_MSL_BUFFER_WORLD_AO)]] (xgpu_msl.h).
@@ -476,19 +459,6 @@ struct xgpu_stream_world_ao_field
 	uint32_t z_first, z_count;
 	uint32_t data, size;
 	uint32_t pad;
-};
-
-/* its quality; the stencil's bits of the pixels the occlusion leaves (the
-first-person weapon's, the game's own, and a surface's lighting itself);
-and an object's pixels' bit (the front end's: d3d8_device.c) */
-enum
-{
-	XGPU_AMBIENT_OCCLUSION_SUBTLE = 1,
-	XGPU_AMBIENT_OCCLUSION_STRONG = 2,
-	XGPU_AMBIENT_OCCLUSION_SHOW = 3,
-	XGPU_AMBIENT_OCCLUSION_KEEP = 0x81,
-	XGPU_AMBIENT_OCCLUSION_SELF_ILLUMINATED = 0x80,
-	XGPU_AMBIENT_OCCLUSION_OBJECT = 0x40
 };
 
 /* ---------- render targets */
@@ -1189,7 +1159,6 @@ XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_capabilities, 20);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_hdr, 24);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_tone_map, 24);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_panini, 56);
-XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_ambient_occlusion, 52);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_world_ao_window, 16 + 32 + 32 + XGPU_WORLD_AO_PROXIES_MAXIMUM * 48 + 32 +
 	XGPU_WORLD_AO_GRID_CELLS_MAXIMUM * 8);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_world_ao_field, 40);

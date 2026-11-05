@@ -58,16 +58,12 @@ The conventions (SPIR-V 1.3, Vulkan 1.1):
 XGPU_HDR_SHADER_BLENDS, xgpu_hdr.h), the colour attachment read as input
 attachment 0 at binding 0 (VK_KHR_dynamic_rendering_local_read) */
 #define XGPU_SPIRV_SET_INPUT 2
-/* display.ambient_occlusion: the occlusion of the 3D view at each pixel
-(xgpu.h's XGPU_AMBIENT_OCCLUSION_LIGHT_*), a combined image sampler at
-binding 0 of its own set, read with texelFetch at the pixel (white where
-the backend found none: a stand-in), for the draws whose pixel key has it */
+/* display.ambient_occlusion "world" (xgpu_stream.h): in a set of its own
+(binding 0 unused), the structure's distance field, its atlas of bricks (a
+combined image sampler, 3D, linear, clamped to its edge) and its table of
+cells (3D, RGBA8, read with texelFetch), and the window's block (a uniform
+buffer) */
 #define XGPU_SPIRV_SET_OCCLUSION 3
-#define XGPU_SPIRV_BINDING_AMBIENT_OCCLUSION 0
-/* display.ambient_occlusion "world" (xgpu_stream.h): in the same set, the
-structure's distance field, its atlas of bricks (a combined image sampler,
-3D, linear, clamped to its edge) and its table of cells (3D, RGBA8, read
-with texelFetch), and the window's block (a uniform buffer) */
 #define XGPU_SPIRV_BINDING_WORLD_SDF 1
 #define XGPU_SPIRV_BINDING_WORLD_AO 2
 #define XGPU_SPIRV_BINDING_WORLD_SDF_TABLE 3

@@ -1912,9 +1912,9 @@ struct pixel_state
 	const struct xgpu_spirv_options *options;
 	struct words locals;
 	unsigned int in_d0, in_d1, in_t[4], in_fog, in_world_normal, in_world_position, in_world_binormal, in_world_tangent;
-	/* (display.ambient_occlusion: its image, the light apart of a model lit
+	/* (display.ambient_occlusion "world": the light apart of a model lit
 	for each vertex, and the occlusion at the pixel once read) */
-	unsigned int ambient_occlusion, in_light_ambient, in_light_point, occlusion;
+	unsigned int in_light_ambient, in_light_point, occlusion;
 	unsigned int textures[4];
 	unsigned int v0, v1, t[4], dots[4], r0, r1, fog;
 	unsigned int zero4;
@@ -2550,44 +2550,6 @@ static void combiner_stage(struct module *m, struct pixel_state *state, int stag
 		if (part->sum != XGPU_REGISTER_ZERO)
 			register_write(m, state, part->sum, alpha, sum[portion]);
 	}
-}
-
-/* ---------- display.ambient_occlusion
-
-The occlusion at the pixel (xgpu.h's XGPU_AMBIENT_OCCLUSION_LIGHT_*): the
-backend's image of it (XGPU_SPIRV_SET_OCCLUSION) read at the pixel, the
-coordinate kept inside it (a stand-in of a texel where it has none). Its
-image and gl_FragCoord are declared before the function, the read in it. */
-
-static void ambient_occlusion_declare(struct module *m, struct pixel_state *state)
-{
-	state->ambient_occlusion = variable(m, type_sampled_image(m, DIM_2D, FALSE, FALSE, TRUE), STORAGE_UNIFORM_CONSTANT,
-		"ambient_occlusion");
-	decorate1(m, state->ambient_occlusion, DECORATION_DESCRIPTOR_SET, XGPU_SPIRV_SET_OCCLUSION);
-	decorate1(m, state->ambient_occlusion, DECORATION_BINDING, XGPU_SPIRV_BINDING_AMBIENT_OCCLUSION);
-	if (!state->frag_coord)
-	{
-		state->frag_coord = variable(m, m->t_v4, STORAGE_INPUT, "gl_FragCoord");
-		decorate1(m, state->frag_coord, DECORATION_BUILT_IN, BUILT_IN_FRAG_COORD);
-	}
-}
-
-static unsigned int ambient_occlusion_read(struct module *m, struct pixel_state *state)
-{
-	unsigned int sampled = load(m, type_sampled_image(m, DIM_2D, FALSE, FALSE, TRUE), state->ambient_occlusion);
-	unsigned int image = op(m, OP_IMAGE, type_sampled_image(m, DIM_2D, FALSE, FALSE, FALSE), 1, &sampled);
-	unsigned int size = image_size(m, image, m->t_iv2), pixel, last, zeros[2], operands[4];
-
-	pixel = op1(m, OP_CONVERT_F_TO_S, m->t_iv2, ext1(m, GLSL_FLOOR, m->t_v2, xy(m, load(m, m->t_v4, state->frag_coord))));
-	zeros[0] = zeros[1] = constant_int(m, 0);
-	last = op2(m, OP_I_SUB, m->t_iv2, size, op(m, OP_COMPOSITE_CONSTRUCT, m->t_iv2, 2,
-		(unsigned int[]){ constant_int(m, 1), constant_int(m, 1) }));
-	pixel = ext3(m, GLSL_S_CLAMP, m->t_iv2, pixel, op(m, OP_COMPOSITE_CONSTRUCT, m->t_iv2, 2, zeros), last);
-	operands[0] = image;
-	operands[1] = pixel;
-	operands[2] = IMAGE_OPERANDS_LOD;
-	operands[3] = constant_int(m, 0);
-	return extract(m, op(m, OP_IMAGE_FETCH, m->t_v4, 4, operands), 0);
 }
 
 /* ---------- display.ambient_occlusion "world"
@@ -4329,10 +4291,12 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	struct module m;
 	struct pixel_state state;
 	BOOL environment = program->dynamic_lights == XGPU_DYNAMIC_LIGHTS_ENVIRONMENT;
-	/* (display.ambient_occlusion: the light the occlusion multiplies, and
-	whether it is found in the world, at the pixel's position: xgpu.h) */
-	int occlusion_light = XGPU_AMBIENT_OCCLUSION_LIGHT_OF(program->ambient_occlusion);
-	BOOL world = (program->ambient_occlusion & XGPU_AMBIENT_OCCLUSION_WORLD) && occlusion_light;
+	/* (display.ambient_occlusion "world": the light the occlusion found in
+	the world multiplies, at the pixel's position: xgpu.h; none without
+	XGPU_AMBIENT_OCCLUSION_WORLD) */
+	int occlusion_light = (program->ambient_occlusion & XGPU_AMBIENT_OCCLUSION_WORLD) ?
+		XGPU_AMBIENT_OCCLUSION_LIGHT_OF(program->ambient_occlusion) : XGPU_AMBIENT_OCCLUSION_LIGHT_NONE;
+	BOOL world = occlusion_light != XGPU_AMBIENT_OCCLUSION_LIGHT_NONE;
 	BOOL world_position = (program->per_pixel_lighting && (program->per_pixel_lighting == 2 ||
 		program->dynamic_lights == XGPU_DYNAMIC_LIGHTS_MODEL)) || environment || world;
 	BOOL count_samples = program->count_samples && options->count_samples;
@@ -4385,8 +4349,6 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	}
 	if (world)
 		world_ao_declare(&m);
-	else if (program->ambient_occlusion)
-		ambient_occlusion_declare(&m, &state);
 	if (count_samples)
 	{
 		unsigned int array = type1(&m, OP_TYPE_RUNTIME_ARRAY, m.t_uint), block;
@@ -4446,12 +4408,10 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 		state.t[stage] = state.zero4;
 		state.dots[stage] = constant_float(&m, 0.0f);
 	}
-	/* display.ambient_occlusion: the occlusion at the pixel, which
+	/* display.ambient_occlusion "world": the occlusion at the pixel, which
 	multiplies the ambient light alone (xgpu.h) */
 	if (world)
 		state.occlusion = world_ao_read(&m, &state, occlusion_light);
-	else if (program->ambient_occlusion)
-		state.occlusion = ambient_occlusion_read(&m, &state);
 	if (program->per_pixel_lighting && program->dynamic_lights == XGPU_DYNAMIC_LIGHTS_MODEL)
 	{
 		unsigned int world_normal = pixel_input(&m, &state, state.in_world_normal, m.t_v4), normal = xyz(&m, world_normal);

@@ -20,7 +20,7 @@ def generated(fault=None):
     types += '#define JOURNAL_PAGE_UNIT %#x\n' % constant(device, 'JOURNAL_PAGE_UNIT')
     code = '\n'.join(function(device, name) for name in ('journal_reserve', 'journal_append', 'journal_runs',
                                                           'journal_read',
-                                                          'journal_settings_blind_of', 'journal_occlusion'))
+                                                          'journal_settings_blind_of'))
     checks = '\n'.join((structure(prepared, 'prepared_header'),
                         *(re.search(r'^#define %s .*$' % name, prepared, re.M).group(0)
                           for name in ('PREPARED_MAGIC', 'PREPARED_VERSION', 'PREPARED_MAXIMUM_WORDS')),
@@ -59,11 +59,9 @@ def generated(fault=None):
     if fault == 'key':
         checks = mutated(checks, 'header->key == key &&', '')
     if fault == 'blind':
-        code = mutated(code, '\twords[2] = (unsigned long)(hdr_view != 0) | (unsigned long)(prepass != 0) << 1 | (unsigned long)(ready != 0) << 2 |\n\t\t(unsigned long)(lights > 0) << 3 | (unsigned long)(environment != 0) << 4;\n', '\twords[2] = 0;\n')
+        code = mutated(code, '\twords[2] = (unsigned long)(hdr_view != 0) | (unsigned long)(lights > 0) << 1 |\n\t\t(unsigned long)(environment != 0) << 2;\n', '\twords[2] = 0;\n')
     if fault == 'tags':
         code = mutated(code, '\twords[1] = (unsigned long)hdr_kind;\n', '\twords[1] = 0;\n')
-    if fault == 'occlusion':
-        code = mutated(code, 'return noted != 0 && quality != 0;', 'return noted != 0;')
     if fault == 'derivation':
         checks = mutated(checks, 'return formed && !unknown && (!missing || !same_derivation);',
                          'return formed && !unknown;')
@@ -81,7 +79,7 @@ def test_prepared_journal(case):
 
 @pytest.mark.parametrize('fault,case', [('repeats', 'roundtrip'), ('delta', 'roundtrip'), ('type', 'malformed'),
                                         ('missing', 'missing'), ('key', 'stale'), ('blind', 'settings'),
-                                        ('tags', 'settings'), ('occlusion', 'settings'), ('derivation', 'key'),
+                                        ('tags', 'settings'), ('derivation', 'key'),
                                         ('scenario', 'key'), ('numbers', 'pages'), ('own_pages', 'pages'),
                                         ('floor', 'pages'), ('shared', 'pages')])
 def test_negative(fault, case):

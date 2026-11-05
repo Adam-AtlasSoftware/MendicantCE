@@ -517,8 +517,8 @@ struct xgpu_vulkan_draw
 {
 	VkPipeline pipeline;
 	uint8_t topology, dynamic_lights, reads_depth, writes_depth;
-	/* its pixel shader reads display.ambient_occlusion's occlusion
-	(xgpu_vulkan_set_ambient_occlusion) */
+	/* its pixel shader reads display.ambient_occlusion "world"'s field and
+	block (XGPU_VULKAN_SET_OCCLUSION) */
 	uint8_t ambient_occlusion;
 	/* its pipeline reads the colour attachment (color_read): the
 	attachment bound as its input, the draw ordered after the pass's
@@ -541,21 +541,16 @@ struct xgpu_vulkan_draw
 #define XGPU_VULKAN_DRAW_GAME 0x80
 void xgpu_vulkan_draw(const struct xgpu_vulkan_draw *draw);
 
-/* display.ambient_occlusion: the occlusion of the 3D view (an image of the
-target's size, its red the share of the ambient light each pixel has) that
-the draws lighting by it read (xgpu_vulkan_draw's ambient_occlusion), at
-binding XGPU_VULKAN_BINDING_OCCLUSION of the pipeline layout's set
-XGPU_VULKAN_SET_OCCLUSION (xgpu_spirv.h's XGPU_SPIRV_SET_OCCLUSION and
-XGPU_SPIRV_BINDING_AMBIENT_OCCLUSION); NULL: a white texel, none */
-#define XGPU_VULKAN_SET_OCCLUSION 3
-#define XGPU_VULKAN_BINDING_OCCLUSION 0
-void xgpu_vulkan_set_ambient_occlusion(struct xgpu_vulkan_image *image);
 /* display.ambient_occlusion "world" (xgpu_vulkan_world_ao.c, xgpu_stream.h's
-struct xgpu_world_ao_block): in the same set, the structure's distance
+struct xgpu_world_ao_block), which the draws lighting by it read
+(xgpu_vulkan_draw's ambient_occlusion) in the pipeline layout's set
+XGPU_VULKAN_SET_OCCLUSION (xgpu_spirv.h's XGPU_SPIRV_SET_OCCLUSION; its
+binding 0 unused): the structure's distance
 field, its atlas of bricks (a 3D image of signed bytes, linear, clamped to
 its edge) and its table of cells (a 3D RGBA8 image, read by texel), each a
 1x1x1 far-outside stand-in where the field is not whole, and the window's
 block (a uniform buffer) */
+#define XGPU_VULKAN_SET_OCCLUSION 3
 #define XGPU_VULKAN_BINDING_WORLD_SDF 1
 #define XGPU_VULKAN_BINDING_WORLD_AO 2
 #define XGPU_VULKAN_BINDING_WORLD_SDF_TABLE 3

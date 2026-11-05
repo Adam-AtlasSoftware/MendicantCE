@@ -342,34 +342,30 @@ static void case_missing(void)
 /* ---------- one record under every settings
 
 A toy front end: a walk's draw is a game state (journal_state: its pipeline
-in render_state[0], its HDR tag in hdr_kind, the occlusion's pre-pass and
-readiness and the enhanced lights' count as journal_capture notes them,
-whatever the settings: the walk draws the union as it records). Its
-pipeline under settings is derived as the front end derives it: the tag
-only with the HDR on, the lights only enhanced, the occlusion's flags as
-they are set (the front end reads the flags, not the setting). Recorded
-under some settings (a draw journaled where it is new in its derived
-pipeline or in journal_settings_blind_of's words: preparation_seen), played
-back under others (the occlusion's flags as journal_occlusion gives them),
-the record's pipelines must be the walk's under those. */
+in render_state[0], its HDR tag in hdr_kind and the enhanced lights' count
+as journal_capture notes them, whatever the settings: the walk draws the
+union as it records). Its pipeline under settings is derived as the front
+end derives it: the tag only with the HDR on, the lights only enhanced.
+Recorded under some settings (a draw journaled where it is new in its
+derived pipeline or in journal_settings_blind_of's words:
+preparation_seen), played back under others, the record's pipelines must
+be the walk's under those. */
 
-enum { SETTING_HDR = 1, SETTING_OCCLUSION = 2, SETTING_LIGHTS = 4, SETTINGS = 8 };
+enum { SETTING_HDR = 1, SETTING_LIGHTS = 2, SETTINGS = 4 };
 #define WALK 400
 #define DERIVED_MAXIMUM (WALK * 2)
 
-struct derived { uint32_t pipeline, tag, prepass, ready, lit; };
+struct derived { uint32_t pipeline, tag, lit; };
 
 static struct journal_state walk[WALK];
 
-static struct derived derive(const struct journal_state *state, int settings, BOOL prepass, BOOL ready)
+static struct derived derive(const struct journal_state *state, int settings)
 {
 	struct derived derived;
 
 	memset(&derived, 0, sizeof(derived));
 	derived.pipeline = state->render_state[0];
 	derived.tag = (settings & SETTING_HDR) ? state->hdr_kind : 0;
-	derived.prepass = prepass != 0;
-	derived.ready = ready != 0;
 	derived.lit = (settings & SETTING_LIGHTS) && state->lights_count > 0;
 	return derived;
 }
@@ -408,28 +404,20 @@ static void walk_make(void)
 	for (index = 0; index < WALK; index++)
 	{
 		struct journal_state *state = &walk[index];
-		/* (a third of the walk the occlusion's pre-pass, a third the
-		surfaces it lit, a third after it) */
-		int part = index % 3;
 
 		state->render_state[0] = (uint32_t)(rand() % 24);
 		state->hdr_kind = (uint32_t)(rand() % 3);
-		state->occlusion_prepass = part == 0;
-		state->occlusion_ready = part == 1;
 		state->lights_count = (uint32_t)(rand() % 2);
 	}
 }
 
-/* the walk's pipelines under settings (the occlusion's flags set where it
-is on) */
+/* the walk's pipelines under settings */
 static int walked(int settings, struct derived *set)
 {
 	int index, count = 0;
-	int quality = (settings & SETTING_OCCLUSION) != 0;
 
 	for (index = 0; index < WALK; index++)
-		count = derived_add(set, count, derive(&walk[index], settings, walk[index].occlusion_prepass && quality,
-			walk[index].occlusion_ready && quality));
+		count = derived_add(set, count, derive(&walk[index], settings));
 	return count;
 }
 
@@ -440,17 +428,15 @@ static int recorded(int settings)
 {
 	struct { struct derived derived; unsigned long blind[3]; } seen[WALK], key;
 	int index, other, seen_count = 0, count = 0;
-	int quality = (settings & SETTING_OCCLUSION) != 0;
 
 	for (index = 0; index < WALK; index++)
 	{
 		const struct journal_state *state = &walk[index];
 
 		memset(&key, 0, sizeof(key));
-		key.derived = derive(state, settings, state->occlusion_prepass && quality, state->occlusion_ready && quality);
+		key.derived = derive(state, settings);
 		journal_settings_blind_of(key.blind, (int)state->hdr_category, (int)state->hdr_kind, (BOOL)state->hdr_view,
-			(BOOL)state->occlusion_prepass, (BOOL)state->occlusion_ready, (int)state->lights_count,
-			(BOOL)state->lights_environment);
+			(int)state->lights_count, (BOOL)state->lights_environment);
 		for (other = 0; other < seen_count && memcmp(&seen[other], &key, sizeof(key)); other++)
 			;
 		if (other < seen_count)
@@ -472,17 +458,13 @@ static void case_settings(void)
 		entries = recorded(recorded_under);
 		for (played_under = 0; played_under < SETTINGS; played_under++)
 		{
-			int quality = (played_under & SETTING_OCCLUSION) != 0;
-
 			wanted_count = walked(played_under, wanted);
 			made_count = 0;
 			for (index = 0; index < entries; index++)
 			{
 				const struct journal_state *state = &recorded_entries[index];
 
-				made_count = derived_add(made, made_count, derive(state, played_under,
-					journal_occlusion(state->occlusion_prepass, quality),
-					journal_occlusion(state->occlusion_ready, quality)));
+				made_count = derived_add(made, made_count, derive(state, played_under));
 			}
 			for (index = 0; index < wanted_count; index++)
 				CHECK(derived_has(made, made_count, wanted[index]), "recorded under settings %d, played under %d: "

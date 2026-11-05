@@ -185,10 +185,12 @@ void world_sdf_upload(struct world_sdf_volume const *uploaded)
 static void off_case(void)
 {
 	float const camera[3] = { 0.0f, 0.0f, 0.0f };
-	static const char *const others[] = { "off", "subtle", "strong", "" };
+	/* (the older "subtle" and "strong" are read as "world" by the settings
+	themselves, before this reads them: port_config.c's config_renamed_words) */
+	static const char *const others[] = { "off", "" };
 	int index;
 
-	for (index = 0; index < 4; index++)
+	for (index = 0; index < 2; index++)
 	{
 		setting = others[index];
 		changes++;

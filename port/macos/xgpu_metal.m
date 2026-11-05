@@ -514,8 +514,7 @@ on the GPU (it runs the vertex stages of later passes ahead), so a render
 pass's time is its fragment stage's, from its start, or the end of those
 that started before it, to its end: the passes' times add up to the time
 the GPU was busy with the frame. A pass draws what follows its first
-draw too (the 3D view's after the occlusion is one pass, its transparents,
-water and HUD in it): HALO_METAL_PASS_TIMES_SPLIT=1 ends the timed frames'
+draw too (the 3D view is one pass, its transparents, water and HUD in it): HALO_METAL_PASS_TIMES_SPLIT=1 ends the timed frames'
 passes where the kind changes, at the cost of their stores and loads.
 HALO_METAL_CAPTURE=<frame>:<path> (with MTL_CAPTURE_ENABLED=1) writes that
 frame and the next, the presentation of the first included, as a GPU trace
@@ -532,8 +531,8 @@ frame's picture's copy for the presentation */
 
 static const char *const profile_kind_names[PROFILE_KINDS] =
 {
-	"other", "sky", "ao pre-pass", "world", "transparents", "water", "effects", "hud", "ao depth", "ao", "ao blur",
-	"ao upsample", "tone map", "anti-aliasing", "panini", "aside", "copies", "present",
+	"other", "sky", "world", "transparents", "water", "effects", "hud", "tone map", "anti-aliasing", "panini", "aside",
+	"copies", "present",
 };
 
 struct profile_pass

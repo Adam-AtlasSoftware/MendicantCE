@@ -63,7 +63,7 @@ table (rasterizer_xbox_vertex_shaders.c and _initialize.c).
 #include <stddef.h>
 #include <stdint.h>
 
-#define XGPU_MANIFEST_VERSION 1
+#define XGPU_MANIFEST_VERSION 2
 #define XGPU_MANIFEST_ATTRIBUTES 16
 #define XGPU_MANIFEST_STREAMS 16
 #define XGPU_MANIFEST_MICROCODE_WORDS (136 * 4)
@@ -107,8 +107,7 @@ program's lighting (nv2a_vertex_lighting's lights: 0 none, 1 or 2; the
 world's transform found in it); its targets: multisampled with
 multisampling (a screen buffer's, or a target multisampled already), the
 colour target in half floats with display.hdr (the back buffer's, the
-screen effects' copy); display.ambient_occlusion's pre-pass drawing and its
-occlusion ready, as they would be with it on; the enhanced dynamic lights'
+screen effects' copy); the enhanced dynamic lights'
 present in the frame and the structure's lightmap pass drawing; the game's
 renderer's category (rasterizer.h's _rasterizer_profile_*, 255 outside one),
 the 3D view drawn and what the game's code says of the draw (xgpu_hdr.h's
@@ -119,10 +118,9 @@ world_ao_applies). */
 struct xgpu_manifest_context
 {
 	uint8_t lights, world_found, multisampled, screen_colour;
-	uint8_t occlusion_prepass, occlusion_ready, lights_present, environment;
-	uint8_t hdr_category, hdr_view;
+	uint8_t lights_present, environment, hdr_category, hdr_view;
 	uint16_t hdr_kind;
-	uint8_t world, unused[3];
+	uint8_t world, unused;
 };
 
 struct xgpu_manifest
@@ -162,9 +160,7 @@ display.ambient_occlusion). The front end derives them here from the draw's
 facts as they are now (d3d8_device.c's prepare_draw); a manifest's draw is
 the draw as no setting changes it, with its context, from which a backend's
 build derives it here under every setting (xgpu_manifest_settings), so that
-it makes every shader any setting draws with. The stencil marks of the
-ambient occlusion's pre-pass (d3d8_device.c's ambient_occlusion_mark) are
-the pipeline's alone, not a shader's: not derived. */
+it makes every shader any setting draws with. */
 
 struct xgpu_draw_facts
 {
@@ -180,11 +176,10 @@ struct xgpu_draw_facts
 	(display.hdr), and the draw's tag there (xgpu_hdr_classify) */
 	int samples, hdr_target;
 	uint16_t hdr;
-	/* display.ambient_occlusion's pre-pass drawing, its occlusion ready;
-	"world"'s light for the draw (xgpu.h's XGPU_AMBIENT_OCCLUSION_WORLD, and
-	_WORLD_VIEW with debug.world_ao_view; 0 none), which the occlusion found
-	on the screen goes before */
-	int occlusion_prepass, occlusion_ready, world;
+	/* display.ambient_occlusion "world"'s light for the draw (xgpu.h's
+	XGPU_AMBIENT_OCCLUSION_WORLD, and _WORLD_VIEW with debug.world_ao_view;
+	0 none) */
+	int world;
 	/* lit for each pixel (display.per_pixel_lighting, or the enhanced
 	dynamic lights); the enhanced lights lighting the frame; the structure's
 	lightmap pass drawing */
@@ -194,11 +189,10 @@ struct xgpu_draw_facts
 };
 
 /* what the facts make of the pipeline (xgpu_backend.h's XGPU_LIGHTING_*,
-XGPU_FORMAT_*; xgpu.h's XGPU_DYNAMIC_LIGHTS_*, XGPU_AMBIENT_OCCLUSION_*),
-and its colour mask cleared (the pre-pass's: depth alone) */
+XGPU_FORMAT_*; xgpu.h's XGPU_DYNAMIC_LIGHTS_*, XGPU_AMBIENT_OCCLUSION_*) */
 struct xgpu_draw_derived
 {
-	uint8_t lighting, color_format, samples, no_color;
+	uint8_t lighting, color_format, samples;
 	uint8_t alpha_test_samples, per_pixel_lighting, dynamic_lights, ambient_occlusion;
 	uint16_t hdr;
 };
@@ -218,12 +212,11 @@ struct xgpu_manifest_settings
 	int samples, hdr, per_pixel_lighting, enhanced_lights, ambient_occlusion;
 };
 
-/* display.ambient_occlusion: off, found on the screen ("subtle", "strong"),
-found in the world ("world"; without debug.world_ao_view's light) */
+/* display.ambient_occlusion: off, or found in the world ("world"; without
+debug.world_ao_view's light) */
 enum
 {
 	XGPU_MANIFEST_OCCLUSION_OFF,
-	XGPU_MANIFEST_OCCLUSION_SCREEN,
 	XGPU_MANIFEST_OCCLUSION_WORLD,
 	XGPU_MANIFEST_OCCLUSIONS
 };

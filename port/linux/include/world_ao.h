@@ -4,10 +4,10 @@ WORLD_AO.H
 display.ambient_occlusion "world" (docs/world-ao.md, #578): ambient
 occlusion found in world space, from the structure's baked distance field
 (world_sdf.h) and the objects' analytic proxies (world_proxies.h), applied
-to the ambient term alone through #574's slot in the shaders
-(xgpu.h's XGPU_AMBIENT_OCCLUSION_LIGHT_*). Render-only and deterministic: no
-noise, no history, nothing from the screen. Off (and "off", "subtle",
-"strong", and Classic's preset, which sets "off") draws exactly as before.
+to the ambient term alone in the shaders (xgpu.h's
+XGPU_AMBIENT_OCCLUSION_LIGHT_*). Render-only and deterministic: no noise, no
+history, nothing from the screen. Off ("off", and Classic's preset, which
+sets "off") draws exactly as before.
 
 The renderer's side of a frame (this file's game hooks, called from
 source/render/render.c), and the front end's (halo_world_ao_*,

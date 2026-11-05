@@ -13,10 +13,8 @@ The passes are those of the Vulkan backend (tools/vulkan_post_shaders.py,
 whose GLSL they are): its vertex shader, FXAA, and the main functions of
 SMAA's three passes after SMAA.hlsl (port/third_party/smaa). Their GLSL is
 compiled to SPIR-V as Vulkan's is, then written as MSL by SPIRV-Cross, so
-the two backends run the same passes, display.ambient_occlusion's too
-(with a fill of its own, the uniforms' first vector as the colour, and
-reading what it needs as Apple's GPUs read it cheaply: OCCLUSION_PREPARE),
-and display.gamma's curve, which the presentation draws (host_metal.m). Only
+the two backends run the same passes, display.hdr's, display.panini's and
+display.gamma's curve, which the presentation draws (host_metal.m). Only
 the interface changes: the uniforms' block is at the Metal backend's draw
 uniforms (buffer XGPU_METAL_BUFFER_DRAW_UNIFORMS,
 port/macos/xgpu_metal_bindings.h), each texture and its sampler at the
@@ -47,88 +45,12 @@ UNIFORMS_BUFFER = 17
 PROGRAMS = (("post", "vert", "xgpu_post_vertex"), ("fxaa", "frag", "xgpu_post_fxaa"),
             ("smaa_edges", "frag", "xgpu_post_smaa_edges"), ("smaa_weights", "frag", "xgpu_post_smaa_weights"),
             ("smaa_blend", "frag", "xgpu_post_smaa_blend"), ("hdr_tone_map", "frag", "xgpu_hdr_tone_map"),
-            ("hdr_encode", "frag", "xgpu_hdr_encode"), ("occlusion_depth", "frag", "xgpu_occlusion_depth"),
-            ("occlusion", "frag", "xgpu_occlusion"), ("occlusion_blur", "frag", "xgpu_occlusion_blur"),
-            ("occlusion_apply", "frag", "xgpu_occlusion_apply"), ("occlusion_fill", "frag", "xgpu_occlusion_fill"),
-            ("gamma", "frag", "xgpu_gamma"), ("panini", "frag", "xgpu_post_panini"))
+            ("hdr_encode", "frag", "xgpu_hdr_encode"), ("gamma", "frag", "xgpu_gamma"),
+            ("panini", "frag", "xgpu_post_panini"))
 # display.hdr's tone map reads the pixel it draws over (its input
 # attachment) as Metal's programmable blending does: [[color(0)]]
 FRAMEBUFFER_FETCH = ("hdr_tone_map",)
-# display.ambient_occlusion's arithmetic in Metal's relaxed maths (its
-# approximate functions, its divides, its reassociation, infinities and NaNs
-# kept), not the safe maths the backend compiles the rest with: its GTAO's
-# arcsines and the blur's and the filtering's exponentials and divides are what
-# its passes cost on Apple's GPUs (the occlusion at 1710x1073 on an M2: 7 ms
-# in safe maths, 2.1 in relaxed), and the occlusion needs no result to the
-# last bit
-RELAXED = ("occlusion", "occlusion_blur", "occlusion_apply")
-RELAXED_PRAGMA = "#pragma METAL fp math_mode(relaxed)\n"
 MSL_VERSION = "20300"
-# display.ambient_occlusion's fill (its mask emptied and marked, its view
-# alone's white): the uniforms' metrics as the colour, as Vulkan's clears'
-# shader writes its colour
-OCCLUSION_FILL_SOURCE = (
-    "uniform vec4 metrics;\n"
-    "out vec4 result;\n"
-    "\n"
-    "void main()\n"
-    "{\n"
-    "\tresult = metrics;\n"
-    "}\n"
-)
-
-# display.ambient_occlusion on Apple's GPUs (xgpu_metal_post.c): the
-# occlusion reads the distance and the mask only at its own pixels' (each the
-# target's pixel at its scale), so they are taken once into one texture at its
-# resolution, RGBA16F: the distance as Vulkan's depth pass has it (red plus
-# green) and the mask (blue an object's pixel, alpha a pixel the occlusion
-# leaves). Its many scattered reads are then of a texture a quarter of the
-# target's size, a read each, where they were of two of the target's size, at
-# a texel in four. The values read are the same.
-OCCLUSION_PREPARE_SOURCE = (
-    "uniform sampler2D depth_texture;\n"
-    "uniform sampler2D mask_texture;\n"
-    + vulkan.OCCLUSION_UNIFORMS +
-    "\n"
-    "void main()\n"
-    "{\n"
-    "\tivec2 full = ivec2(gl_FragCoord.xy) * int(sampling.w);\n"
-    "\tfloat reversed = texelFetch(depth_texture, full, 0).r;\n"
-    "\tfloat near = occlusion.x, far = occlusion.y;\n"
-    "\tfloat distance = reversed > 0.0 ? near * far / (near + reversed * (far - near)) : far;\n"
-    "\tfloat high = unpackHalf2x16(packHalf2x16(vec2(distance, 0.0))).x;\n"
-    "\tresult = vec4(high, distance - high, texelFetch(mask_texture, full, 0).rg);\n"
-    "}\n"
-)
-# the occlusion (Vulkan's GTAO) reading that texture alone, at its scale of 1:
-# the mask its blue and alpha
-OCCLUSION_MASK_READS = (
-    ("uniform sampler2D mask_texture;\n", ""),
-    ("texelFetch(mask_texture, full_texel(texel), 0).rg", "texelFetch(depth_texture, full_texel(texel), 0).ba"),
-    ("texelFetch(mask_texture, full_texel(texel + offset), 0).r",
-     "texelFetch(depth_texture, full_texel(texel + offset), 0).b"),
-    ("texelFetch(mask_texture, full_texel(texel - offset), 0).r",
-     "texelFetch(depth_texture, full_texel(texel - offset), 0).b"),
-)
-# the occlusion filtered up to each pixel (Vulkan's) with the pixel's distance
-# from the depth target itself (distance_texture), as the depth pass finds it,
-# not from a texture of the target's size written for it
-OCCLUSION_APPLY_DISTANCE = (
-    "\tvec2 parts = texelFetch(distance_texture, pixel, 0).rg;\n"
-    "\tfloat z = parts.r + parts.g, object",
-    "\tfloat reversed = texelFetch(distance_texture, pixel, 0).r;\n"
-    "\tfloat z = reversed > 0.0 ? occlusion.x * occlusion.y / (occlusion.x + reversed * (occlusion.y - occlusion.x)) :\n"
-    "\t\tocclusion.y, object",
-)
-
-
-def replaced(text: str, replacements) -> str:
-    """text with each (old, new) replaced, each old found exactly once."""
-    for old, new in replacements:
-        if text.count(old) != 1:
-            raise ValueError(f"{old!r} is not in the source once")
-        text = text.replace(old, new)
-    return text
 
 
 def c_string(name: str, text: str) -> str:
@@ -153,11 +75,6 @@ def generate(args):
         codes[name] = vulkan.SMAA_PREFIX + hlsl + "\n" + main
     for name, code in vulkan.hdr_programs().items():
         codes[f"hdr_{name}"] = code
-    codes["occlusion_depth"] = OCCLUSION_PREPARE_SOURCE
-    codes["occlusion"] = replaced(vulkan.OCCLUSION_SOURCE, OCCLUSION_MASK_READS)
-    codes["occlusion_blur"] = vulkan.OCCLUSION_BLUR_SOURCE
-    codes["occlusion_apply"] = replaced(vulkan.OCCLUSION_APPLY_SOURCE, (OCCLUSION_APPLY_DISTANCE,))
-    codes["occlusion_fill"] = OCCLUSION_FILL_SOURCE
     codes["gamma"] = vulkan.GAMMA_SOURCE
     codes["panini"] = vulkan.PANINI_SOURCE
     text = [
@@ -182,8 +99,6 @@ def generate(args):
                              check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True).stdout
         if entry not in msl:
             raise ValueError(f"{name}: SPIRV-Cross did not name its function {entry}")
-        if name in RELAXED:
-            msl = RELAXED_PRAGMA + msl
         (build / f"{name}.metal").write_text(msl)
         text.append(c_string(f"{name}_source", msl))
         print(f"{name}: {len(msl)} bytes of MSL")

@@ -291,15 +291,6 @@ draws (port/linux/src/d3d8_device.c, xgpu_hdr.h): the category drawing now
 (rasterizer.h's _rasterizer_profile_*, -1 none: rasterizer_profile_begin and
 _end), and what the code drawing knows of them (HALO_HDR_KIND_*, 0 none) */
 void halo_screen_tone_map(short x0, short y0, short x1, short y1);
-/* display.ambient_occlusion over a window's 3D view: its opaque surfaces'
-depth drawn first, alone (begin: FALSE where there is no occlusion), the
-occlusion found from it (the camera's near and far planes and its
-projection's x and y scales and offsets), and their light then drawn with
-it, until end (port/linux/src/d3d8_device.c) */
-int halo_screen_ambient_occlusion_begin(void);
-void halo_screen_ambient_occlusion(short x0, short y0, short x1, short y1, float z_near, float z_far,
-	const float projection[4]);
-void halo_screen_ambient_occlusion_end(void);
 void halo_hdr_category(int category);
 void halo_hdr_draw_kind(int kind);
 /* the display's peak and SDR white, as the backend says them, as text

@@ -150,7 +150,7 @@ def merge(*arguments):
 def test_read(tmp_path, reader):
     pixel, program, draws = manifest_text()
     recording = tmp_path / "recording.txt"
-    recording.write_text("manifest 1\n" + "\n".join([program, pixel, *draws]) + "\n")
+    recording.write_text("manifest 2\n" + "\n".join([program, pixel, *draws]) + "\n")
     manifest = tmp_path / "manifest.txt"
     merge("--replace", manifest, recording)
     result = subprocess.run([str(reader), str(manifest)], capture_output=True, text=True)
@@ -166,7 +166,7 @@ def test_read(tmp_path, reader):
 def test_refuses_a_wrong_pixel_key(tmp_path, reader):
     pixel, program, draws = manifest_text()
     manifest = tmp_path / "manifest.txt"
-    manifest.write_text("manifest 1\n" + "\n".join([program, pixel.replace("fe=1", "fe=0"), *draws]) + "\n")
+    manifest.write_text("manifest 2\n" + "\n".join([program, pixel.replace("fe=1", "fe=0"), *draws]) + "\n")
     result = subprocess.run([str(reader), str(manifest)], capture_output=True, text=True)
     assert result.returncode == 1 and "its hash's" in result.stdout
 
@@ -174,8 +174,8 @@ def test_refuses_a_wrong_pixel_key(tmp_path, reader):
 def test_merge_is_the_same_file(tmp_path):
     pixel, program, draws = manifest_text()
     first, second = tmp_path / "first.txt", tmp_path / "second.txt"
-    first.write_text("manifest 1\n" + "\n".join([program, pixel, draws[1]]) + "\n")
-    second.write_text("manifest 1\n" + "\n".join([pixel, program, draws[0], draws[1]]) + "\n")
+    first.write_text("manifest 2\n" + "\n".join([program, pixel, draws[1]]) + "\n")
+    second.write_text("manifest 2\n" + "\n".join([pixel, program, draws[0], draws[1]]) + "\n")
     one, other = tmp_path / "one.txt", tmp_path / "other.txt"
     merge("--replace", one, first, second)
     merge("--replace", other, second)
@@ -205,7 +205,7 @@ ENUMERATED = ("d vp=0000000000000001 pa=0x0 im=0 li=0 vw=0 bl=1,4,5,0 cm=7 dt=1,
 def recording(tmp_path, *after):
     """a recording: its enumeration (ENUMERATED), then each draw after it
     marked missed"""
-    lines = ["manifest 1", "# enumerating: the map's", ENUMERATED, "# prepared: the misses"]
+    lines = ["manifest 2", "# enumerating: the map's", ENUMERATED, "# prepared: the misses"]
     for draw in after:
         lines += ["# missed: 70000010 70000020", draw]
     path = tmp_path / "recording.txt"

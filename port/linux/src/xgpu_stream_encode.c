@@ -737,10 +737,10 @@ void xgpu_backend_gamma(float gamma)
 		record_value(XGPU_STREAM_GAMMA, bits);
 }
 
-void xgpu_backend_category(int category, BOOL prepass)
+void xgpu_backend_category(int category)
 {
-	uint32_t value = (category >= 0 && category < (int)XGPU_STREAM_CATEGORY_NONE ? (uint32_t)category :
-		XGPU_STREAM_CATEGORY_NONE) | (prepass ? XGPU_STREAM_CATEGORY_PREPASS : 0);
+	uint32_t value = category >= 0 && category < (int)XGPU_STREAM_CATEGORY_NONE ? (uint32_t)category :
+		XGPU_STREAM_CATEGORY_NONE;
 
 	/* (not into a map's preparation: its draws are not timed) */
 	if (!stream.open || stream.preparing || stream.category == value + 1)
@@ -767,22 +767,6 @@ void xgpu_backend_tone_map(xgpu_target target, const long corners[4])
 	record_body->target = target;
 	for (index = 0; index < 4; index++)
 		record_body->corners[index] = (int32_t)corners[index];
-}
-
-void xgpu_backend_ambient_occlusion(xgpu_target target, const long corners[4], int quality, const float camera[6])
-{
-	struct xgpu_stream_ambient_occlusion *record_body;
-	int index;
-
-	if (!stream.open)
-		return;
-	record_body = record(XGPU_STREAM_AMBIENT_OCCLUSION, sizeof(*record_body));
-	record_body->target = target;
-	record_body->quality = (uint32_t)quality;
-	for (index = 0; index < 4; index++)
-		record_body->corners[index] = (int32_t)corners[index];
-	for (index = 0; index < 6; index++)
-		record_body->camera[index] = camera ? camera[index] : 0.0f;
 }
 
 static void stream_finite(float *values, unsigned long count, const char *what, unsigned long first);

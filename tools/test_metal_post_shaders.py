@@ -29,6 +29,9 @@ def test_functions_named():
         # (the uniforms are the backend's draw uniforms, xgpu_metal_bindings.h)
     assert "[[buffer(17)]]" in text
     assert "xgpu_metal_post_area_texture[]" in text and "xgpu_metal_post_search_texture[]" in text
+    # (display.ambient_occlusion is found in the world, in the surfaces' own
+    # shaders: no pass over the screen is left)
+    assert "xgpu_occlusion" not in text and "sampling" not in text
 
 
 @pytest.mark.skipif(not (shutil.which("glslangValidator") and shutil.which("spirv-cross")),

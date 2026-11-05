@@ -37,7 +37,7 @@ import re
 import sys
 from pathlib import Path
 
-VERSION = 1
+VERSION = 2
 HEADER = f"""# The renderer's manifest: every shader and pipeline the game draws with on
 # the stock maps, as the shared front end describes them (format:
 # port/linux/src/xgpu_manifest.h; how it is made: port/assets/render/README.md).
