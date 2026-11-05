@@ -1353,6 +1353,86 @@ static void *bitmap_build(struct halo_menu_bitmap const *source, long tag_index)
 	return group;
 }
 
+/* ---------- the art decoded ahead
+
+A screen's art (its menus' PNGs, menu_files.c) is decoded on threads ahead
+of its first draw: as a screen is shown, the art of each screen its
+widgets open (and its own, if it is not yet), through its children,
+conditional widgets and descriptions, so that the screen chosen next opens
+with its art decoded. The menus' own bitmaps only: the maps' are
+the game's. */
+
+/* the most screens a screen shown looks through: itself, those it opens */
+#define ART_AHEAD_SCREENS 64
+/* the deepest a screen's widgets go */
+#define ART_AHEAD_DEPTH 16
+
+static void art_ahead_bitmap(struct tag_reference const *reference)
+{
+	struct bitmap_group *group;
+	long index;
+
+	if (reference->index == NONE || tag_get_group_tag(reference->index) != BITMAP_GROUP_TAG)
+		return;
+	group = bitmap_group_get(reference->index);
+	for (index = 0; index < group->bitmaps.count; index++)
+	{
+		struct bitmap_data *bitmap = (struct bitmap_data *)group->bitmaps.address + index;
+
+		if (bitmap->hardware_format)
+			halo_menus_art_ahead(bitmap->hardware_format);
+	}
+}
+
+/* a widget's art, and its descendants'; the screens its handlers open,
+added to screens (when opens) */
+static void art_ahead_widget(long tag_index, short depth, boolean opens, long *screens, short *screen_count)
+{
+	struct ui_widget_definition *definition;
+	long index;
+
+	if (tag_index == NONE || depth > ART_AHEAD_DEPTH || tag_get_group_tag(tag_index) != UI_WIDGET_DEFINITION_TAG)
+		return;
+	definition = (struct ui_widget_definition *)tag_get(UI_WIDGET_DEFINITION_TAG, tag_index);
+	art_ahead_bitmap(&definition->background_bitmap);
+	art_ahead_bitmap(&definition->list_header_bitmap);
+	art_ahead_bitmap(&definition->list_footer_bitmap);
+	for (index = 0; index < definition->child_widgets.count; index++)
+	{
+		art_ahead_widget(((struct ui_widget_child_reference *)definition->child_widgets.address)[index].widget_tag.index,
+			(short)(depth + 1), opens, screens, screen_count);
+	}
+	for (index = 0; index < definition->conditional_widgets.count; index++)
+	{
+		art_ahead_widget(
+			((struct ui_widget_conditional_reference *)definition->conditional_widgets.address)[index].widget_tag.index,
+			(short)(depth + 1), opens, screens, screen_count);
+	}
+	art_ahead_widget(definition->extended_description_widget.index, (short)(depth + 1), opens, screens,
+		screen_count);
+	for (index = 0; opens && index < definition->event_handlers.count; index++)
+	{
+		long screen = ((struct ui_widget_event_handler_reference *)definition->event_handlers.address)[index].widget_tag.index;
+		short other;
+
+		for (other = 0; other < *screen_count && screens[other] != screen; other++)
+			;
+		if (screen != NONE && other == *screen_count && *screen_count < ART_AHEAD_SCREENS)
+			screens[(*screen_count)++] = screen;
+	}
+}
+
+void pc_menu_screen_shown(long tag_index)
+{
+	long screens[ART_AHEAD_SCREENS];
+	short screen_count = 0, screen;
+
+	/* (the screen's own art first: drawn now; then those it opens) */
+	art_ahead_widget(tag_index, 0, TRUE, screens, &screen_count);
+	for (screen = 0; screen < screen_count; screen++)
+		art_ahead_widget(screens[screen], 0, FALSE, NULL, NULL);
+}
+
 /* adds a conditional widget to the definition, if it has not got it */
 static void conditional_add(struct ui_widget_definition *definition, long tag_index, long flags)
 {

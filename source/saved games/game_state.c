@@ -405,6 +405,25 @@ void game_state_save_to_persistent_storage(
 	return;
 }
 
+/* port: the saved game's check (saved_game_check.c) */
+int saved_game_check(const char *xbox_path, void *header, long header_size, long checksum_offset,
+	long buffer_size, int *corrupted);
+void saved_game_check_ahead(const char *xbox_path, long header_size, long checksum_offset, long buffer_size);
+
+void game_state_persistent_storage_ahead(
+	void)
+{
+	char path[256];
+
+	if (game_state_persistent_storage_file_expected(path))
+	{
+		saved_game_check_ahead(path, sizeof(struct game_state_header),
+			offsetof(struct game_state_header, checksum), GAME_STATE_SIZE);
+	}
+
+	return;
+}
+
 boolean game_state_test_persistent_storage(
 	char *map_name,
 	short *difficulty,
@@ -412,27 +431,32 @@ boolean game_state_test_persistent_storage(
 {
 	struct game_state_header header;
 	boolean success;
+	char path[256];
+	int file_corrupted = FALSE;
 
-	if (game_state_read_header_from_persistent_storage(
-		&header,
-		&header.checksum,
-		sizeof(*game_state_globals.header),
-		/* the whole of the native builds' larger game state */
-		GAME_STATE_SIZE,
-		corrupted))
+	/* port: the header and the whole file's checksum (20 MB summed, as
+	game_state_read_header_from_persistent_storage sums it), checked on a
+	thread, ahead, as the main menu shows (game_state_persistent_storage_ahead):
+	the menus' screens that ask for it open in a frame */
+	csmemset(&header, 0, sizeof(header));
+	success = game_state_persistent_storage_file(path) &&
+		saved_game_check(path, &header, sizeof(*game_state_globals.header),
+			offsetof(struct game_state_header, checksum),
+			/* the whole of the native builds' larger game state */
+			GAME_STATE_SIZE,
+			&file_corrupted);
+	if (corrupted)
+		*corrupted = file_corrupted ? TRUE : FALSE;
+	if (success)
 	{
 		*difficulty = header.difficulty;
 		csstrncpy(map_name, header.map_name, sizeof(header.map_name));
 		map_name[sizeof(header.map_name) - 1] = 0;
-
-		success = TRUE;
 	}
 	else
 	{
 		*difficulty = _game_difficulty_level_normal;
 		strcpy(map_name, "");
-
-		success = FALSE;
 	}
 
 	return success;

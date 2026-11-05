@@ -124,6 +124,14 @@ void game_state_read_core(
 	long buffer_size);
 const char *game_state_get_persistent_storage_filename(
 	void);
+/* port: the persistent storage's file, and its check begun ahead (on a
+thread: port/linux/src/saved_game_check.c) for the menus that ask for it */
+boolean game_state_persistent_storage_file(
+	char *path);
+boolean game_state_persistent_storage_file_expected(
+	char *path);
+void game_state_persistent_storage_ahead(
+	void);
 boolean game_state_read_header_from_persistent_storage(
 	void *header,
 	unsigned long *header_checksum,

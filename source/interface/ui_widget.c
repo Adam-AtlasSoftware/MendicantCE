@@ -4160,6 +4160,8 @@ void ui_widget_port_go_back(
 	widget_instance_go_back_to_previous(widget);
 }
 
+void pc_menu_screen_shown(long tag_index); /* port: port/linux/game/menu_tags.c */
+
 struct widget_instance *ui_widget_load_by_name_or_tag(
 	char const *name,
 	long tag_index,
@@ -4254,6 +4256,10 @@ struct widget_instance *ui_widget_load_by_name_or_tag(
 				tag_index,
 				local_player_index,
 				widget_stack);
+			/* port: a screen shown: the art of those it opens decoded ahead
+			(port/linux/game/menu_tags.c) */
+			if (!parent)
+				pc_menu_screen_shown(tag_index);
 		}
 		else
 		{

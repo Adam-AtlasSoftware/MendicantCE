@@ -19,6 +19,8 @@ void halo_loading_ready(void);
 /* opt-in map loading timestamps (port/linux/src/sdl_platform.c) */
 int halo_load_trace_enabled(void);
 void halo_load_trace(char const *phase, char const *detail);
+/* each pass of the main loop ended: its long frames traced */
+void halo_load_trace_frame(void);
 /* Preparation batches release texture cache pages only after a complete
 draw and after the render owner has consumed their bytes. */
 void halo_gpu_preparation_checkpoint_set(unsigned long bytes, void (*checkpoint)(void *const *textures));

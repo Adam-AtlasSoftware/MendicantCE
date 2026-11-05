@@ -3974,6 +3974,10 @@ void main_loop(
 			keep step with the frames (port/linux/game/frames_clock.c) */
 			frames_clock_frame(main_globals.seconds_elapsed);
 			profile_scope_enter(main_ui_update_section)
+			/* port: the saved game checked on a thread, ahead of the menus'
+			screens that ask for it (Campaign, Choose Mission) */
+			if (main_globals.main_menu_scenario_loaded)
+				game_state_persistent_storage_ahead();
 			process_ui_widgets();
 			bink_playback_update();
 			profile_scope_exit(main_ui_update_section)
@@ -4091,6 +4095,7 @@ void main_loop(
 		input_frame_end();
 		profile_frame_end();
 		main_frame_rate_debug();
+		halo_load_trace_frame(); /* port: debug.load_trace's long frames */
 
 		if (main_globals.restart_time)
 		{
