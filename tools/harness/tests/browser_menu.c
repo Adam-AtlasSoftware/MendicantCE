@@ -364,7 +364,9 @@ int main(int argc, char **argv)
 		short offline;
 
 #define SEARCH(server, map) (snprintf(searches[_browser_search_server], sizeof(searches[0]), "%s", server), \
-	snprintf(searches[_browser_search_map], sizeof(searches[0]), "%s", map))
+	snprintf(searches[_browser_search_map], sizeof(searches[0]), "%s", map), searches[_browser_search_any][0] = 0)
+#define SEARCH_ANY(server, map, any) (SEARCH(server, map), \
+	snprintf(searches[_browser_search_any], sizeof(searches[0]), "%s", any))
 #define SHOWS() browser_search_shows(searches, "Foozy BG-Snipers", "bloodgulch", L"Blood Gulch")
 		/* nothing searched lists every game */
 		SEARCH("", "");
@@ -406,6 +408,32 @@ int main(int argc, char **argv)
 		CHECK(!SHOWS(), "\"snip\" and \"hang\" list a game on Blood Gulch");
 		SEARCH("halo", "gulch");
 		CHECK(!SHOWS(), "\"halo\" and \"gulch\" list Foozy BG-Snipers");
+		/* the touchscreen's one search: a word of the server's name or of its
+		map (its own name or as shown), in any case, without spaces or
+		punctuation; with the columns' searches, each its own, together */
+		SEARCH_ANY("", "", "snip");
+		CHECK(SHOWS(), "the touchscreen's \"snip\" hides Foozy BG-Snipers");
+		SEARCH_ANY("", "", "Blood Gulch");
+		CHECK(SHOWS(), "the touchscreen's \"Blood Gulch\" hides a game on bloodgulch");
+		SEARCH_ANY("", "", "gulch");
+		CHECK(browser_search_shows(searches, "x", "bloodgulch", L""), "the touchscreen's search not of a map's own name");
+		SEARCH_ANY("", "", "danger");
+		CHECK(browser_search_shows(searches, "x", "map_a", L"Danger Canyon"),
+			"the touchscreen's search not of a map's name as shown");
+		SEARCH_ANY("", "", "hang");
+		CHECK(!SHOWS(), "the touchscreen's \"hang\" lists Foozy BG-Snipers on Blood Gulch");
+		CHECK(browser_search_shows(searches, "Hangar Bay", "x", L""), "the touchscreen's search not of a name");
+		SEARCH_ANY("halo", "", "gulch");
+		CHECK(!SHOWS(), "the touchscreen's \"gulch\" and the server's \"halo\" list Foozy BG-Snipers");
+		SEARCH_ANY("", "hang", "snip");
+		CHECK(!SHOWS(), "the touchscreen's \"snip\" and the map's \"hang\" list a game on Blood Gulch");
+		SEARCH_ANY("snip", "gulch", "foozy");
+		CHECK(SHOWS(), "the three searches hide Foozy BG-Snipers on Blood Gulch");
+		/* (the lists find the maps' names as shown for it, as for the map's) */
+		memset(browser_searches, 0, sizeof(browser_searches));
+		CHECK(!browser_search_reads_map_shown(), "no search reads the maps' names");
+		snprintf(browser_searches[_browser_search_any], sizeof(browser_searches[0]), "gulch");
+		CHECK(browser_search_reads_map_shown(), "the touchscreen's search leaves the maps' names unread");
 		/* the list: the searches and the Filters together, those hidden
 		counted (the searches' apart); the searches stay as the Filters are
 		read again (Filters opened, changed and closed) */
@@ -433,6 +461,17 @@ int main(int argc, char **argv)
 		CHECK(!names[0] && browser_searched_count == 4, "\"zulu\" lists %s, %d searched", names,
 			browser_searched_count);
 		config_set("network.browser_show_full", "true");
+		/* (the touchscreen's: the games on Blood Gulch, then bravo by its
+		name; full games listed again) */
+		browser_filters_read(&browser_filters);
+		memset(browser_searches, 0, sizeof(browser_searches));
+		snprintf(browser_searches[_browser_search_any], sizeof(browser_searches[0]), "blood gulch");
+		listed(_browser_tab_all, names, sizeof(names), &offline);
+		CHECK(!strcmp(names, "alpha coop ") && browser_searched_count == 3,
+			"the touchscreen's \"blood gulch\" lists %s, %d searched", names, browser_searched_count);
+		snprintf(browser_searches[_browser_search_any], sizeof(browser_searches[0]), "BRAVO");
+		listed(_browser_tab_all, names, sizeof(names), &offline);
+		CHECK(!strcmp(names, "bravo* "), "the touchscreen's \"BRAVO\" lists %s", names);
 		browser_filtering = FALSE;
 		listed(_browser_tab_all, names, sizeof(names), &offline);
 		CHECK(!strcmp(names, "echo* bravo* alpha delta coop "), "unfiltered lists %s", names);

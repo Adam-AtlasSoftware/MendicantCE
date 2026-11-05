@@ -163,6 +163,48 @@ void host_orientation(int which)
 	host_logf(HOST_LOG_INFO, "orientation %s", names[which]);
 }
 
+/* the system's keyboard for a menu's text field (sdl_platform.c's
+screen_keyboard_update): SDL's text input on the game's window, which the
+activity's keyboard shows, one line (Enter ends the field), a password's
+hidden; what it types arrives as keys */
+static SDL_Window *text_input_window(void)
+{
+	int count = 0;
+	SDL_Window **windows = SDL_GetWindows(&count);
+	SDL_Window *window = windows && count > 0 ? windows[0] : NULL;
+
+	SDL_free(windows);
+	return window;
+}
+
+void host_android_text_input(int show, int password)
+{
+	SDL_Window *window = text_input_window();
+	SDL_PropertiesID properties;
+
+	if (!window)
+		return;
+	if (!show)
+	{
+		SDL_StopTextInput(window);
+		return;
+	}
+	properties = SDL_CreateProperties();
+	SDL_SetBooleanProperty(properties, SDL_PROP_TEXTINPUT_MULTILINE_BOOLEAN, false);
+	SDL_SetNumberProperty(properties, SDL_PROP_TEXTINPUT_TYPE_NUMBER,
+		password ? SDL_TEXTINPUT_TYPE_TEXT_PASSWORD_HIDDEN : SDL_TEXTINPUT_TYPE_TEXT);
+	if (!SDL_StartTextInputWithProperties(window, properties))
+		host_logf(HOST_LOG_WARN, "text input: %s", SDL_GetError());
+	SDL_DestroyProperties(properties);
+}
+
+int host_android_text_input_active(void)
+{
+	SDL_Window *window = text_input_window();
+
+	return window && SDL_TextInputActive(window);
+}
+
 /* Whether the app runs through an ARM translator. The x86 emulator runs the
 app's ARM code through one, which ro.dalvik.vm.native.bridge names; it
 cannot deliver the page faults of the write tracking to the app

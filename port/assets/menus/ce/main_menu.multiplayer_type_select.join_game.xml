@@ -14,13 +14,14 @@
 		<on event="left_trigger" run="port browser filters" open="main_menu/settings_select/player_setup/player_profile_edit/network_setup/browser_filters/browser_filters_screen"/>
 		<on event="right_thumb" run="port browser search next"/>
 		<child widget="main_menu/multiplayer_type_select/join_game/header_join_game"/>
-		<child widget="main_menu/multiplayer_type_select/join_game/browser_counts"/>
+		<child widget="main_menu/multiplayer_type_select/join_game/browser_counts" platform="pointer"/>
 		<child widget="main_menu/settings/tab_prompt_previous" x="24" y="76" platform="pointer"/>
 		<child widget="main_menu/settings/tab_prompt_next" x="586" y="76" platform="pointer"/>
 		<child widget="main_menu/multiplayer_type_select/join_game/browser_columns_line" platform="pointer"/>
 		<child widget="main_menu/multiplayer_type_select/join_game/browser_empty" platform="pointer"/>
 		<child widget="main_menu/multiplayer_type_select/join_game/join_game_items_list" platform="pointer"/>
 		<child widget="main_menu/multiplayer_type_select/join_game/touch/browser_empty" platform="touch"/>
+		<child widget="main_menu/multiplayer_type_select/join_game/touch/browser_counts" platform="touch"/>
 		<child widget="main_menu/multiplayer_type_select/join_game/touch/join_game_items_list" platform="touch"/>
 	</widget>
 	<widget name="main_menu/multiplayer_type_select/join_game/header_join_game" controller="1" left="35" top="11" width="363" height="59" wide="-106 0">

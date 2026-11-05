@@ -736,6 +736,10 @@
 		<frame png="ce/port/main_menu/parts/tile_368x52__0.png" width="368" height="52"/>
 		<frame png="ce/port/main_menu/parts/tile_368x52__1.png" width="368" height="52"/>
 	</bitmap>
+	<bitmap name="main_menu/parts/touch_button_52x52">
+		<frame png="ce/port/main_menu/parts/touch_button_52x52__0.png" width="52" height="52"/>
+		<frame png="ce/port/main_menu/parts/touch_button_52x52__1.png" width="52" height="52"/>
+	</bitmap>
 	<bitmap name="main_menu/parts/touch_button_60x52">
 		<frame png="ce/port/main_menu/parts/touch_button_60x52__0.png" width="60" height="52"/>
 		<frame png="ce/port/main_menu/parts/touch_button_60x52__1.png" width="60" height="52"/>
@@ -775,6 +779,16 @@
 	<bitmap name="main_menu/parts/touch_button_188x52">
 		<frame png="ce/port/main_menu/parts/touch_button_188x52__0.png" width="188" height="52"/>
 		<frame png="ce/port/main_menu/parts/touch_button_188x52__1.png" width="188" height="52"/>
+	</bitmap>
+	<bitmap name="main_menu/parts/touch_button_200x52">
+		<frame png="ce/port/main_menu/parts/touch_button_200x52__0.png" width="200" height="52"/>
+		<frame png="ce/port/main_menu/parts/touch_button_200x52__1.png" width="200" height="52"/>
+	</bitmap>
+	<bitmap name="main_menu/multiplayer_type_select/join_game/touch/search_icon">
+		<frame png="ce/port/main_menu/multiplayer_type_select/join_game/touch/search_icon__0.png" width="20" height="20"/>
+	</bitmap>
+	<bitmap name="main_menu/multiplayer_type_select/join_game/touch/search_clear">
+		<frame png="ce/port/main_menu/multiplayer_type_select/join_game/touch/search_clear__0.png" width="20" height="20"/>
 	</bitmap>
 	<bitmap name="main_menu/parts/section_368">
 		<frame png="ce/port/main_menu/parts/section_368__0.png" width="368" height="20"/>

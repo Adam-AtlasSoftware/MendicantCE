@@ -7459,7 +7459,9 @@ a touchscreen, an item not chosen yet in a list with a panel that describes
 the item chosen (its extended description: the Multiplayer menu's, the
 settings' help), so that the panel is read before the item opens. A
 mouse's click uses it at once, as do a list's without a panel (the button
-bars) */
+bars, the tabs' strips and the server browser's search, even inside a list
+with a panel: the panel does not describe them). The item's list is the
+nearest column list it is in */
 static boolean ui_mouse_tap_chooses_first(
 	struct widget_instance *widget)
 {
@@ -7470,8 +7472,8 @@ static boolean ui_mouse_tap_chooses_first(
 		return FALSE;
 	for (list = widget->parent, depth = 0; list && depth < 3; list = list->parent, depth++)
 	{
-		if (list->type == _ui_widget_type_column_list && list->parameters.list.extended_description)
-			return TRUE;
+		if (list->type == _ui_widget_type_column_list)
+			return list->parameters.list.extended_description != NULL;
 	}
 	return FALSE;
 }

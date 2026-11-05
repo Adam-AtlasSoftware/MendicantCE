@@ -141,6 +141,11 @@ void host_gesture_insets(int *insets);
 /* display.orientation: asks the activity for the way up, 0 landscape, 1
 portrait (either way up), 2 whichever way the device is held */
 void host_orientation(int which);
+/* the system's keyboard for a menu's text field: brought up (one line, a
+password's hidden) or put away; whether it is up (closed by its own key, it
+is not) */
+void host_android_text_input(int show, int password);
+int host_android_text_input_active(void);
 
 /* ---------- the on-screen touch controls (host_touch.c, android_imports.list) */
 

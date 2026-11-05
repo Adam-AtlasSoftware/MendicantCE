@@ -6864,6 +6864,7 @@ static void browser_focus(struct widget_instance *list, short chosen_row)
 
 /* (the server browser's: below) */
 static void lobby_browser_begin(void);
+static void list_focus_child(struct widget_instance *list, struct widget_instance *focused);
 static boolean direct_link_from_clipboard(void);
 static void lobby_browser_update(struct widget_instance *list);
 static boolean lobby_browser_select(struct widget_instance *widget, short controller, short row,
@@ -6903,6 +6904,21 @@ static boolean browser_initialize(struct widget_instance *screen, struct event_r
 		{
 			browser_prompts_show(list);
 			browser_focus(list, NONE);
+			/* (the list opens on its tabs, or on its first game, as the
+			computer's does: not on the touchscreen's search over them, its
+			first child) */
+			if (list->focused_child && !strcmp(list->focused_child->name, "join_game_header"))
+			{
+				struct widget_instance *tabs = named(list, "browser_tabs", 0);
+
+				if (tabs && tabs->visible)
+					list_focus_child(list, tabs);
+				else
+				{
+					list->focused_child = NULL;
+					browser_focus(list, NONE);
+				}
+			}
 		}
 	}
 	/* (the columns' sort arrows, both of each over its title: the sorted
@@ -7349,8 +7365,9 @@ kept): full games, empty ones and those with a password listed or not, only
 the games whose ping is under a limit (one whose ping is not known is
 listed: a local network game's, a master server's dedicated server's, one
 being timed), the gametypes listed (a co-op game has none: CO-OP is its
-tab). The searches of the SERVER and MAP columns (browser_searches) hide
-the games whose name or map has not their words. The server browser's and
+tab). The searches (browser_searches: the SERVER and MAP columns', and
+the touchscreen's one field for both) hide the games whose name or map has
+not their words. The server browser's and
 the local network's lists are filtered, not Join by Link's, whose games are
 the invites taken. Nothing is sent: the lists' own */
 
@@ -7374,16 +7391,20 @@ static boolean browser_filtering;
 static short browser_filtered_count, browser_searched_count;
 
 /* the searches of the SERVER and MAP columns (their titles' magnifying
-glass; R3, / on the keyboard): the words typed into each, kept while the
-browser is (Filters opened and closed too) and forgotten as it is left; not
-settings. A game is listed if its name has the server's words and its map
-(its name as shown, Blood Gulch, or its own, bloodgulch) the map's, as well
-as the Filters listing it: each matched in any case, without spaces or
+glass; R3, / on the keyboard), and the touchscreen's, which has no column
+titles: one field at the top of its list for both (its words in the
+server's name or in its map, as a phone's search finds them): the words
+typed into each, kept while the browser is (Filters opened and closed too)
+and forgotten as it is left; not settings. A game is listed if its name has
+the server's words, its map (its name as shown, Blood Gulch, or its own,
+bloodgulch) the map's, and one or the other the touchscreen's, as well as
+the Filters listing it: each matched in any case, without spaces or
 punctuation ("blood gulch" finds bloodgulch, "bg-snipers" BG Snipers) */
 enum
 {
 	_browser_search_server,
 	_browser_search_map,
+	_browser_search_any,
 	NUMBER_OF_BROWSER_SEARCHES
 };
 
@@ -7448,10 +7469,21 @@ static boolean browser_search_shows(char const searches[NUMBER_OF_BROWSER_SEARCH
 	char const *name, char const *map, wchar_t const *map_shown)
 {
 	char const *map_words = searches[_browser_search_map];
+	char const *any_words = searches[_browser_search_any];
 
 	if (!browser_ascii_has(name, searches[_browser_search_server]))
 		return FALSE;
-	return browser_ascii_has(map, map_words) || browser_text_has(map_shown, map_words);
+	if (!browser_ascii_has(map, map_words) && !browser_text_has(map_shown, map_words))
+		return FALSE;
+	return browser_ascii_has(name, any_words) || browser_ascii_has(map, any_words) ||
+		browser_text_has(map_shown, any_words);
+}
+
+/* whether a search reads the maps' names as shown (the map's, the
+touchscreen's): the lists find them only then */
+static boolean browser_search_reads_map_shown(void)
+{
+	return browser_searches[_browser_search_map][0] || browser_searches[_browser_search_any][0];
 }
 
 /* whether any search has words */
@@ -8184,11 +8216,20 @@ SEARCH) types into the server's search, again the map's, again the
 server's; a controller's field brings up Steam's keyboard where there is
 one (platform_text_field). A list the searches leave without a game says
 so, with CLEAR SEARCH under it (browser_clear_show). Join by Link's list,
-its invites, is not searched */
+its invites, is not searched.
 
-/* the searches' columns' names (port_settings.py's BROWSER_SEARCHED), and
-their titles' */
-static char const *const browser_search_columns[NUMBER_OF_BROWSER_SEARCHES] = { "server_name", "map" };
+The touchscreen's list has no column titles: its search is one field at
+the top (port_settings.py's _touch_browser), by the same parts' names (its
+"any": op_search_any, a bar saying what it finds, which a tap turns into
+op_search_field_any, with its X), the same functions and the same words
+kept. A tap begins it, and brings up the system's keyboard (Android's,
+iOS's: platform_text_field); a tap on it while it is typed into brings the
+keyboard back (closed by its own key) rather than leaving it; the
+keyboard's Enter, or a tap elsewhere, keeps the words */
+
+/* the searches' columns' names (port_settings.py's BROWSER_SEARCHED, and
+the touchscreen's TOUCH_SEARCHED), and their titles' */
+static char const *const browser_search_columns[NUMBER_OF_BROWSER_SEARCHES] = { "server_name", "map", "any" };
 
 /* the search being typed into, its field (NONE, NULL: none) */
 static short browser_search_active = NONE;
@@ -8289,14 +8330,15 @@ static boolean browser_search_begin(struct widget_instance *widget, short search
 }
 
 /* "port browser search" (a magnifying glass's A, Start or click, or its
-field's: typed into, or if it is, left with its words) */
+field's: typed into, or if it is, left with its words; the touchscreen's
+field typed into again, its keyboard brought back) */
 static boolean browser_search_edit(struct widget_instance *widget)
 {
 	short search = browser_search_of(widget), editing;
 
 	if (search == NONE)
 		return FALSE;
-	if (browser_search_editing(&editing) && editing == search)
+	if (browser_search_editing(&editing) && editing == search && !ui_widget_port_touch_menus())
 	{
 		browser_search_end();
 		return TRUE;
@@ -8304,15 +8346,25 @@ static boolean browser_search_edit(struct widget_instance *widget)
 	return browser_search_begin(widget, search);
 }
 
-/* "port browser search next" (R3, /, the footer's SEARCH): the server's
-search typed into, or after it the map's */
+/* "port browser search next" (R3, /, the footer's SEARCH): the next of the
+searches the layout has typed into, from the first (the computer's: the
+server's, then the map's; the touchscreen's: its one) */
 static boolean browser_search_next(struct widget_instance *widget)
 {
-	short editing;
+	short editing = NONE, step;
 
-	if (browser_search_editing(&editing) && editing == _browser_search_server)
-		return browser_search_begin(widget, _browser_search_map);
-	return browser_search_begin(widget, _browser_search_server);
+	if (!browser_search_editing(&editing))
+		editing = NONE;
+	for (step = 1; step <= NUMBER_OF_BROWSER_SEARCHES; step++)
+	{
+		short search = (short)((editing + step) % NUMBER_OF_BROWSER_SEARCHES);
+
+		if (editing == NONE)
+			search = (short)(step - 1);
+		if (browser_search_part(widget, "op_search_field", search))
+			return browser_search_begin(widget, search);
+	}
+	return FALSE;
 }
 
 /* a search's words cleared (left if it is typed into), its magnifying
@@ -8390,11 +8442,17 @@ static void browser_searches_show(struct widget_instance *list)
 	{
 		char title[48];
 		struct widget_instance *field = browser_search_part(list, "op_search_field", search);
+		struct widget_instance *icon = browser_search_part(list, "op_search", search);
 		boolean shown = !link && (editing == search || browser_searches[search][0]);
 
 		snprintf(title, sizeof(title), "op_sort_header_%s", browser_search_columns[search]);
 		visible_set(named(header, title, 0), !shown);
-		visible_set(browser_search_part(list, "op_search", search), !link && !shown);
+		visible_set(icon, !link && !shown);
+		/* (the touchscreen's bar, whose picture has three frames, which the
+		engine leaves to the game: lit while the list's focus is on it, not
+		merely its titles' own focus, which is on it from the first) */
+		if (icon && icon->animation.number_of_sprite_frames > 2)
+			icon->animation.current_frame_index = (short)(list->focused_child == header && header->focused_child == icon);
 		visible_set(field, shown);
 		visible_set(browser_search_part(list, "op_search_clear", search), shown);
 		if (!field || !shown)
@@ -8453,7 +8511,7 @@ static void browser_offline_search(void)
 		wchar_t shown[ROW_TEXT_LENGTH];
 
 		shown[0] = 0;
-		if (browser_searches[_browser_search_map][0])
+		if (browser_search_reads_map_shown())
 			map_display_name(favorite->map, shown);
 		if (browser_search_shows(browser_searches, favorite->name, favorite->map, shown))
 			browser_offline[kept++] = browser_offline[index];
@@ -8919,7 +8977,7 @@ static short lobby_browser_favorites(short count)
 		entries[index].locked = game->locked != 0;
 		/* (the map's name as shown, for the words searched for alone) */
 		entries[index].map_shown[0] = 0;
-		if (browser_searches[_browser_search_map][0])
+		if (browser_search_reads_map_shown())
 			map_display_name(game->map, entries[index].map_shown);
 	}
 	browser_favorites_match(favorites, count, favorite_of, "net:");
@@ -9400,7 +9458,7 @@ static short local_browser_favorites(struct widget_instance *list)
 		entries[index].engine_type = (short)game->engine_type;
 		entries[index].locked = FALSE;
 		entries[index].map_shown[0] = 0;
-		if (browser_searches[_browser_search_map][0])
+		if (browser_search_reads_map_shown())
 			game_map_name(game, entries[index].map_shown);
 	}
 	browser_favorites_match(favorites, multiplayer.game_count, favorite_of,

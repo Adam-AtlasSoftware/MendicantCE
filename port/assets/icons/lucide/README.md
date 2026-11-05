@@ -18,5 +18,6 @@ https://github.com/lucide-icons/lucide:
 `voice/speaker` (port/linux/game/network_voice.c tints it), the next two,
 amber and red, as `mods/status` and the smaller `mods/status_small`, and
 the star, gold, grey and outlined, as `favorite_star`, and the search's
-magnifying glass and X, blue, as `search_icon` and `search_clear`
-(`tools/port_settings.py`). Credited in `AUTHORS.md`.
+magnifying glass and X, blue, as `search_icon` and `search_clear`, and
+larger for the touchscreen's browser, as `touch/search_icon` and
+`touch/search_clear` (`tools/port_settings.py`). Credited in `AUTHORS.md`.

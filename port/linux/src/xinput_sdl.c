@@ -789,12 +789,9 @@ void platform_text_field(int typing, int password)
 {
 	text_typing_field = typing != 0;
 	text_typing_update();
-#ifndef HALO_ANDROID
-	/* (with no keyboard: Steam's on-screen one, sdl_platform.c) */
+	/* (the system's on-screen keyboard, where there is one: Steam's,
+	Android's, iOS's; sdl_platform.c) */
 	platform_screen_keyboard(text_typing_field, typing && password);
-#else
-	(void)password;
-#endif
 }
 
 static void typing_gamepad(const struct platform_input_state *input, XINPUT_GAMEPAD *pad)
