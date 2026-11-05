@@ -2268,6 +2268,18 @@ void WINAPI D3DDevice_SetViewport(CONST D3DVIEWPORT8 *viewport)
 	viewport_update_constants();
 }
 
+void d3d8_viewport_depth_range(float minimum, float maximum, float previous[2])
+{
+	if (previous)
+	{
+		previous[0] = device.viewport.MinZ;
+		previous[1] = device.viewport.MaxZ;
+	}
+	device.viewport.MinZ = minimum;
+	device.viewport.MaxZ = maximum;
+	viewport_update_constants();
+}
+
 void WINAPI D3DDevice_SetTransform(D3DTRANSFORMSTATETYPE state, CONST D3DMATRIX *matrix)
 {
 	if ((unsigned long)state < D3DTS_MAX)

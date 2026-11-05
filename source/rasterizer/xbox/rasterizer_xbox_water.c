@@ -107,6 +107,13 @@ enum
 	_rasterizer_geometry_sky_bit = 4
 };
 
+/* port: (rasterizer_water_fog_beyond_world) */
+enum
+{
+	_rasterizer_drawing_mode_normal = 0,
+	_render_planar_fog_mode_normal = 1
+};
+
 /* ---------- macros */
 
 #define SHADER_GET_TRANSPARENT_WATER(shader) \
@@ -194,6 +201,13 @@ typedef char verify_water_definition_ripples_offset[
 	offsetof(struct shader_transparent_water_definition, ripples) == 0x124 ? 1 : -1];
 typedef char verify_pixel_shader_definition_size[
 	sizeof(struct pixel_shader_definition) == 0xF0 ? 1 : -1];
+
+/* ---------- prototypes */
+
+static void rasterizer_water_fog_beyond_world(
+	struct transparent_geometry_group const *group,
+	short vertex_type,
+	short permutation_index);
 
 /* ---------- globals */
 
@@ -621,6 +635,10 @@ void rasterizer_water_draw(
 		draw_depth_only = TEST_FLAG(water->flags, _shader_transparent_water_draw_before_fog_bit) &&
 			!TEST_FLAG(group->geometry_flags, _rasterizer_geometry_no_queue_bit) &&
 			!TEST_FLAG(group->geometry_flags, _rasterizer_geometry_sky_bit);
+		/* port: before the water's depth, the planar fog where the world
+		ends under it */
+		if (!TEST_FLAG(group->geometry_flags, _rasterizer_geometry_sky_bit))
+			rasterizer_water_fog_beyond_world(group, vertex_type, permutation_index);
 		if (draw_depth_only)
 		{
 			IDirect3DDevice8_SetRenderState(
@@ -1044,3 +1062,83 @@ void rasterizer_water_draw(
 }
 
 /* ---------- private code */
+
+/* port: the water's surface, where nothing of the world is behind it, given
+the planar fog's whole density. The water's passes take their colour over
+what is under the surface (base_map_color_modulates_background, and the
+reflection added), which the environment fog has drawn in the planar fog's
+colour, as it does every surface under the fog plane. Past the world's
+edge under the water nothing is drawn but the sky, which no fog reaches:
+where the structure's sea floor ends short of the far clip (b30's beach,
+about 930 world units out against a far clip of 1024), the water was laid
+over the sky and its reflection added to the sky's brightness, a band
+along the horizon as bright as the frame can hold. The view goes on there
+under the fog plane without end, so it is fogged with the planar fog's
+maximum density, as the environment fog fogs a surface at any depth past
+its maximum. Drawn at the far plane (a viewport depth range of 1 to 1)
+with the depth test, the pass reaches only what the depth buffer has
+nothing nearer at; before the water writes its depth (a water drawn before
+the fog writes it first, alone). Only where the camera is above the fog
+plane and the water's surface parallel to it, so that the view through the
+water goes down into the fog; and in a preparation always (its
+pipeline). */
+static void rasterizer_water_fog_beyond_world(
+	struct transparent_geometry_group const *group,
+	short vertex_type,
+	short permutation_index)
+{
+	struct render_fog const *fog = &global_window_parameters.fog;
+	struct render_camera const *camera = &global_window_parameters.camera;
+	real water_normal_length = magnitude3d(&group->plane.n);
+	float depth_range[2];
+	boolean fogged;
+
+	if (rasterizer_debug_options.drawing_mode != _rasterizer_drawing_mode_normal ||
+		!rasterizer_debug_options.draw_environment_fog)
+	{
+		return;
+	}
+	fogged = fog->planar_mode == _render_planar_fog_mode_normal &&
+		fog->planar_maximum_density > 0.0f &&
+		water_normal_length > 0.0f &&
+		plane3d_distance_to_point(&fog->plane, &camera->position) > 0.0f &&
+		plane3d_distance_to_point(&group->plane, &camera->position) > 0.0f &&
+		dot_product3d(&group->plane.n, &fog->plane.n) > 0.99f * water_normal_length;
+	if (!fogged && !render_enumerating)
+		return;
+
+	IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_CULLMODE, D3DCULL_NONE);
+	SetRenderStateSmart(
+		D3DRS_COLORWRITEENABLE,
+		D3DCOLORWRITEENABLE_RED |
+		D3DCOLORWRITEENABLE_GREEN |
+		D3DCOLORWRITEENABLE_BLUE);
+	SetRenderStateSmart(D3DRS_ALPHABLENDENABLE, TRUE);
+	SetRenderStateSmart(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+	SetRenderStateSmart(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+	SetRenderStateSmart(D3DRS_BLENDOP, D3DBLENDOP_ADD);
+	SetRenderStateSmart(D3DRS_ALPHATESTENABLE, FALSE);
+	SetRenderStateSmart(D3DRS_ZENABLE, TRUE);
+	SetRenderStateSmart(D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
+	SetRenderStateSmart(D3DRS_ZWRITEENABLE, FALSE);
+	rasterizer_set_vertex_shader_permutation(
+		_vertex_shader_transparent_water_opacity,
+		vertex_type,
+		permutation_index);
+
+	/* the planar fog's colour at its maximum density: rgb = c0, alpha = c0 */
+	csmemset(&pixel_shader, 0, sizeof(pixel_shader));
+	pixel_shader.combiner_count = 1;
+	pixel_shader.final_combiner_inputs_abcd = 0x00000001;
+	pixel_shader.final_combiner_inputs_efg = 0x00001100;
+	pixel_shader.final_combiner_constant_0 =
+		real_rgb_color_to_pixel32(&fog->planar_color) |
+		real_alpha_to_pixel32(PIN(fog->planar_maximum_density, 0.0f, 1.0f));
+	rasterizer_set_pixel_shader(&pixel_shader);
+
+	d3d8_viewport_depth_range(1.0f, 1.0f, depth_range);
+	rasterizer_transparent_geometry_group_draw__internal(group, FALSE);
+	d3d8_viewport_depth_range(depth_range[0], depth_range[1], NULL);
+
+	return;
+}
