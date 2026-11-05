@@ -86,7 +86,7 @@ and the game's code it draws through) or to this file's form must make it 2,
 build, so that an update keeps them; the journal's own form is in the key
 too (halo_gpu_journal_form), and a record whose replay does not make its
 draws is made again all the same. */
-#define PREPARED_VERSION 2
+#define PREPARED_VERSION 3
 /* the most words a record may hold */
 #define PREPARED_MAXIMUM_WORDS (64UL * 1024 * 1024)
 

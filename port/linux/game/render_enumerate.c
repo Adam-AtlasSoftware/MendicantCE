@@ -59,6 +59,8 @@ each structure's first sight, every model and effect).
 #include "rasterizer/rasterizer_model_types.h"
 #include "rasterizer/rasterizer_models.h"
 #include "rasterizer/rasterizer_widgets.h"
+#include <xtl.h>
+#include "rasterizer/xbox/rasterizer_xbox.h"
 #include "render/render.h"
 #include "scenario/scenario.h"
 #include "scenario/sky_definitions.h"
@@ -1716,6 +1718,11 @@ enum
 	_text_justification_left = 0,
 };
 
+/* every font in each style; and with the alpha test on and off, which the
+text's drawing leaves as the draw before it left it (rasterizer_xbox_text.c
+sets none): the HUD's messages are drawn with it on after some of the HUD's
+draws (a10's, at a structure switch), its function the device's
+(D3DCMP_GREATER, rasterizer_xbox.c, which none sets otherwise) */
 static void fonts_draw(void)
 {
 	static wchar_t const unicode_string[] = { 'A', 'g', '0', 0 };
@@ -1724,20 +1731,27 @@ static void fonts_draw(void)
 	struct tag_iterator iterator;
 	long font_index;
 	short style;
+	DWORD alpha_test = D3D__RenderState[D3DRS_ALPHATESTENABLE];
+	int tested;
 
 	bounds.x0 = bounds.y0 = 0;
 	bounds.x1 = 200;
 	bounds.y1 = 50;
-	tag_iterator_new(&iterator, FONT_GROUP_TAG);
-	while ((font_index = tag_iterator_next(&iterator)) != NONE)
+	for (tested = 0; tested < 2; tested++)
 	{
-		for (style = _text_style_plain; style < NUMBER_OF_TEXT_STYLES; style++)
+		IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_ALPHATESTENABLE, tested ? TRUE : FALSE);
+		tag_iterator_new(&iterator, FONT_GROUP_TAG);
+		while ((font_index = tag_iterator_next(&iterator)) != NONE)
 		{
-			draw_string_set_draw_mode(font_index, style, _text_justification_left, 0, &color);
-			rasterizer_draw_unicode_string(&bounds, NULL, NULL, 0, unicode_string);
-			rasterizer_draw_string(&bounds, NULL, NULL, 0, "Ag0");
+			for (style = _text_style_plain; style < NUMBER_OF_TEXT_STYLES; style++)
+			{
+				draw_string_set_draw_mode(font_index, style, _text_justification_left, 0, &color);
+				rasterizer_draw_unicode_string(&bounds, NULL, NULL, 0, unicode_string);
+				rasterizer_draw_string(&bounds, NULL, NULL, 0, "Ag0");
+			}
 		}
 	}
+	IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_ALPHATESTENABLE, alpha_test);
 }
 
 /* a menu's picture, as its widgets draw them (ui_widget.c: every one over
