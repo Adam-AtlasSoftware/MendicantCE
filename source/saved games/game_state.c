@@ -347,10 +347,20 @@ void game_state_save(
 	return;
 }
 
+/* port: a checkpoint's file is written on a thread of its own
+(game_state_xbox.c): one whose write failed is no saved game */
+static void game_state_saved_game_written(
+	void)
+{
+	if (!game_state_write_wait())
+		game_state_globals.saved_game_valid = FALSE;
+}
+
 /* port: whether game_state_revert has a saved state to go back to */
 boolean game_state_port_saved_game_valid(
 	void)
 {
+	game_state_saved_game_written();
 	return game_state_globals.saved_game_valid;
 }
 
@@ -366,6 +376,7 @@ void game_state_port_restamp_revert_time(
 void game_state_revert(
 	void)
 {
+	game_state_saved_game_written();
 	if (!game_state_globals.saved_game_valid && !recover_saved_games_hack)
 	{
 		main_reset_map();
@@ -861,13 +872,39 @@ static boolean game_state_image_lruv_cache_valid(
 	return game_state_image_data_valid(image, blocks_live, allocation->maximum_count, sizeof(struct lruv_cache_block));
 }
 
+long game_state_image_size(
+	void)
+{
+	return game_state_globals.cpu_allocation_size + game_state_globals.gpu_allocation_size;
+}
+
+/* the CPU's allocations, from the game state's start, then the GPU's, from
+its end down: the rest of it is never written */
+void game_state_image_take(
+	void *image)
+{
+	byte const *base = game_state_globals.base_address;
+
+	csmemcpy(image, base, game_state_globals.cpu_allocation_size);
+	csmemcpy((byte *)image + game_state_globals.cpu_allocation_size,
+		base + GAME_STATE_SIZE - game_state_globals.gpu_allocation_size,
+		game_state_globals.gpu_allocation_size);
+}
+
+/* (what is checked is in the CPU's allocations, at the same place in an
+image of either size) */
 boolean game_state_image_accept(
 	void *image,
 	long size)
 {
+	byte *gpu_image;
 	long index;
 
-	if (size != GAME_STATE_SIZE)
+	if (size == GAME_STATE_SIZE)
+		gpu_image = (byte *)image + GAME_STATE_SIZE - game_state_globals.gpu_allocation_size;
+	else if (size == game_state_image_size())
+		gpu_image = (byte *)image + game_state_globals.cpu_allocation_size;
+	else
 		return game_state_image_refuse("the image", "is of another size");
 	for (index = 0; index < game_state_allocation_count; index++)
 	{
@@ -893,7 +930,9 @@ boolean game_state_image_accept(
 		if (!valid)
 			return FALSE;
 	}
-	csmemcpy(game_state_globals.base_address, image, size);
+	csmemcpy(game_state_globals.base_address, image, game_state_globals.cpu_allocation_size);
+	csmemcpy((byte *)game_state_globals.base_address + GAME_STATE_SIZE - game_state_globals.gpu_allocation_size,
+		gpu_image, game_state_globals.gpu_allocation_size);
 	error(_error_silent, "the saved game is taken");
 
 	return TRUE;
