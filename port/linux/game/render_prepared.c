@@ -431,6 +431,9 @@ boolean render_prepared_recorded(boolean mirrors)
 	}
 	if (!fits)
 		fits = render_prepared_shipped(prepared.checksum, prepared.key);
+	if (!fits)
+		platform_log("render: the map's preparation has no record (%s, structure %d%s): it is recorded",
+			prepared.path, global_structure_bsp_index_get(), mirrors ? ", mirrors" : "");
 	return fits;
 }
 
