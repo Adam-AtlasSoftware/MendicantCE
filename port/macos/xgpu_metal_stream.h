@@ -42,7 +42,7 @@ const struct host_render_backend *xgpu_metal_stream_backend(void);
 at a draw: the inputs its vertex layout feeds as integers (unnormalized
 shorts: bit n, input n; none in immediate mode), and for each texture
 stage the axes (bit 0 u, 1 v, 2 w) whose border colour the pixel shader
-draws, the sampler's being one Metal does not have */
+draws (any axis addressed by the border: xgpu_metal_border_axes) */
 struct xgpu_metal_stream_variant
 {
 	uint16_t integer_attributes;

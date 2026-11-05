@@ -6645,7 +6645,10 @@ static int device_make(const struct xgpu_vulkan_options *options)
 	const char *extensions[16];
 	uint32_t extension_count = 0;
 	float priority = 1.0f;
-	int custom_border = device_has_extension(VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME);
+	/* (HALO_VULKAN_NO_CUSTOM_BORDER_COLORS: as a device without them, whose
+	shaders draw the border colours, Metal's way: to test that path) */
+	int custom_border = device_has_extension(VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME) &&
+		!getenv("HALO_VULKAN_NO_CUSTOM_BORDER_COLORS");
 	int non_seamless = device_has_extension(VK_EXT_NON_SEAMLESS_CUBE_MAP_EXTENSION_NAME);
 	/* (display.hdr's: the colour attachment read where it is drawn, in
 	rasterization order where the device can; the swapchain's metadata) */

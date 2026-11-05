@@ -24,10 +24,12 @@ the SPIR-V emitter's (xgpu_spirv.c), spelled for Metal and its conventions:
 - a texture and a sampler for each stage, [[texture(n)]] and [[sampler(n)]];
   Metal samplers have no LOD bias, so D3DTSS_MIPMAPLODBIAS is the lookup's
   (texture_lod_bias);
-- border colors Metal cannot hold (it has transparent black, opaque black
-  and opaque white; the motion tracker's is 0x46000000): the sampler clamps
-  to the edge, and the shader mixes the stage's color in where the
-  coordinates leave the texture (xgpu_msl_options border);
+- border colors, which Metal's samplers hold three of (transparent black,
+  opaque black and opaque white; the motion tracker's is 0x46000000): for
+  every one alike, so that the pipeline does not depend on the color
+  (xgpu_metal_border_axes), the sampler clamps to the edge and the shader
+  mixes the stage's color in where the coordinates leave the texture
+  (xgpu_msl_options border);
 - the VR mode's views are not (the Mac app is flat): a key's multiview is
   drawn as none, a layered render target as its first layer.
 */
@@ -108,8 +110,8 @@ struct xgpu_msl_uniforms
   backend counts with a visibility result buffer, and the shaders do
   nothing);
 - border: for each stage, the axes (bit 0 u, 1 v, 2 w) whose border color
-  the shader draws (its sampler clamping to the edge) where the sampler
-  cannot: part of the pipeline, as the pixel key is;
+  the shader draws (its sampler clamping to the edge): part of the
+  pipeline, as the pixel key is;
 - the pixel shaders' debugging settings, as the GLSL's. */
 struct xgpu_msl_options
 {

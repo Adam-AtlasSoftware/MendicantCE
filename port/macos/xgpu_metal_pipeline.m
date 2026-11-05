@@ -393,19 +393,20 @@ enum
 	_sampler_2d_layered = 4,
 };
 
-int xgpu_metal_border_metal(uint32_t color)
-{
-	return color == 0 || color == 0xff000000u || color == 0xffffffffu;
-}
-
 uint8_t xgpu_metal_border_axes(uint8_t source, uint8_t sampler_type, const struct xgpu_stream_sampler *sampler)
 {
 	uint8_t axes = 0;
 	int axis;
 
-	/* (the shader draws the border of a 2D or 3D texture's sampler) */
-	if (source == _source_none || sampler_type == _sampler_cube || sampler_type == _sampler_2d_layered ||
-		xgpu_metal_border_metal(sampler->border_color))
+	/* (the shader draws the border of a 2D or 3D texture's sampler, whatever
+	its colour, the uniforms': the pipeline is the same for every colour. A
+	draw's border colour is the texture stage's as the draw before left it
+	where the game's code sets none, so that a pipeline told apart by it,
+	Metal's own three colours drawn by the sampler and the others by the
+	shader, was made as the map was prepared for one and missed in play for
+	the other: a10's screen effects, prepared with 0x05050505 and drawn
+	with 0) */
+	if (source == _source_none || sampler_type == _sampler_cube || sampler_type == _sampler_2d_layered)
 		return 0;
 	for (axis = 0; axis < 3; axis++)
 	{

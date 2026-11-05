@@ -702,14 +702,19 @@ static int stream_read_target(void *context, const struct xgpu_stream_read_targe
 /* ---------- textures */
 
 /* the axes (bit 0 u, 1 v, 2 w) whose border colour the shader draws: none
-where the device's samplers have any colour */
+where the device's samplers have any colour; else every axis addressed by
+the border, whatever its colour (the uniforms'), so that the pipeline is the
+same for every colour: a draw's is the stage's as the draw before left it
+where the game's code sets none, and a pipeline told apart by it (the
+device's own colours drawn by the sampler, the others by the shader) was
+made as the map was prepared for one colour and missed in play for another
+(xgpu_metal_pipeline.m's xgpu_metal_border_axes) */
 static uint8_t border_axes(const struct xgpu_stream_sampler *sampler)
 {
 	uint8_t axes = 0;
 	int axis;
 
-	if (stream.capabilities.custom_border_colors || sampler->border_color == 0 || sampler->border_color == 0xff000000u ||
-		sampler->border_color == 0xffffffffu)
+	if (stream.capabilities.custom_border_colors)
 		return 0;
 	for (axis = 0; axis < 3; axis++)
 	{
