@@ -17,6 +17,7 @@ scale (a window made fullscreen) or a full atlas starts it over.
 */
 
 #include "text_hires.h"
+#include "embedded_assets.h"
 #include "platform.h"
 #include "port_config.h"
 /* (the renderer's backend is on the host: the pictures are images) */
@@ -159,11 +160,12 @@ long text_hires_font(char const *tag_name, float cap_height, short const *letter
 	for (index = 0; index < text_hires_embedded_count; index++)
 	{
 		const struct text_hires_embedded *embedded = &text_hires_embedded[index];
-		const unsigned char *data = (const unsigned char *)embedded->data;
+		const unsigned char *data;
 
 		if (!embedded->tag || names_differ(embedded->tag, tag_name))
 			continue;
-		if (!stbtt_InitFont(&fonts[font].info, data, stbtt_GetFontOffsetForIndex(data, 0)) ||
+		data = (const unsigned char *)embedded_assets_data(embedded->data_offset, embedded->size);
+		if (!data || !stbtt_InitFont(&fonts[font].info, data, stbtt_GetFontOffsetForIndex(data, 0)) ||
 			!stbtt_GetCodepointBox(&fonts[font].info, 'H', &x0, &y0, &x1, &y1) || y1 <= y0)
 		{
 			platform_log("high-res text: could not read %s for %s", embedded->file, tag_name);
@@ -335,7 +337,8 @@ unsigned char *text_hires_line(char const *tag_name, char const *text, float cap
 		return NULL;
 	for (index = 0; index < text_hires_embedded_count && !data; index++)
 		if (text_hires_embedded[index].tag && !names_differ(text_hires_embedded[index].tag, tag_name))
-			data = (const unsigned char *)text_hires_embedded[index].data;
+			data = (const unsigned char *)embedded_assets_data(text_hires_embedded[index].data_offset,
+				text_hires_embedded[index].size);
 	if (!data || !stbtt_InitFont(&info, data, stbtt_GetFontOffsetForIndex(data, 0)) ||
 		!stbtt_GetCodepointBox(&info, 'H', &x0, &y0, &x1, &y1) || y1 <= y0)
 		return NULL;

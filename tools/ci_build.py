@@ -298,6 +298,8 @@ def main() -> int:
     shutil.copy2(ROOT / "port/assets/network/relays.txt", dist / "relays.txt")
     # ... and the stock maps' preparations' records (port/linux/src/prepared_shipped.h)
     shutil.copy2(ROOT / "port/assets/prepared/prepared.records", dist / "prepared.records")
+    # ... and the textures', fonts' and menus' bytes (port/linux/src/embedded_assets.h)
+    shutil.copy2(ROOT / "build/windows/openh1.assets", dist / "openh1.assets")
     return 0
 
 

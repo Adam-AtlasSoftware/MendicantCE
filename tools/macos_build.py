@@ -516,8 +516,11 @@ def generate_apple_build(n: Writer, sln: Any, target: ApplePlatform) -> Optional
     # ... and the stock maps' preparations' records (port/linux/src/prepared_shipped.h)
     records = build / "prepared.records"
     n.build(outputs=records, rule=f"{name}_copy", inputs=Path("port/assets/prepared/prepared.records"))
+    # ... and the textures', fonts' and menus' bytes (port/linux/src/embedded_assets.h)
+    assets = build / "openh1.assets"
+    n.build(outputs=assets, rule=f"{name}_copy", inputs=guest["assets"])
     result = {"sparkle": sparkle, "guest": guest, "executable": output, "sdl": libsdl, "library": library, "brokers": brokers,
-              "records": records,
+              "records": records, "assets": assets,
               "metal_objects": metal_objects, "shared_objects": shared_objects, "host_obj_dir": host_obj_dir, "objc_cflags": objc_cflags}
     if name == "macos":
         _generate_macos_app(n, sln, result)
@@ -528,7 +531,7 @@ def _generate_macos_app(n: Writer, sln: Any, built: Dict[str, Any]) -> None:
     """the macOS app, its disk image, the Metal backend's tests and the
     command stream's replay"""
     output, libsdl, library, brokers = built["executable"], built["sdl"], built["library"], built["brokers"]
-    records = built["records"]
+    records, assets = built["records"], built["assets"]
     metal_objects, shared_objects, host_obj_dir = built["metal_objects"], built["shared_objects"], built["host_obj_dir"]
     staged_sdl = BUILD / "libSDL3.0.dylib"
     n.build(outputs=staged_sdl, rule="macos_copy", inputs=libsdl)
@@ -558,14 +561,14 @@ def _generate_macos_app(n: Writer, sln: Any, built: Dict[str, Any]) -> None:
     n.rule(
         name="macos_app",
         command=(f"$python tools/macos_app.py bundle --app {app} --executable {output} --sdl {libsdl} "
-                 f"--icon {icon} --resource {brokers} --resource {records} --resource {library} --bundle-id {bundle_id} {sparkle_options} "
+                 f"--icon {icon} --resource {brokers} --resource {records} --resource {assets} --resource {library} --bundle-id {bundle_id} {sparkle_options} "
                  f"{' '.join(f'--license {source}={name}' for source, name in licenses)} "
                  f"--build {build_number if build_number.isdigit() else 0} "
                  f"--flavor {'release' if release else 'debug'} "
                  f"--minimum {MACOS_MINIMUM} > {BUILD}/app.log"),
         description=f"MACOS APP {app}",
     )
-    n.build(outputs=app_executable, rule="macos_app", inputs=[output, libsdl, brokers, records, library],
+    n.build(outputs=app_executable, rule="macos_app", inputs=[output, libsdl, brokers, records, assets, library],
             implicit=[icon, PORT_DIR / "halo.entitlements", Path("tools/macos_app.py"),
                       *(source for source, _ in licenses)])
     n.build(outputs="macos_app", rule="phony", inputs=[app_executable])
@@ -574,7 +577,7 @@ def _generate_macos_app(n: Writer, sln: Any, built: Dict[str, Any]) -> None:
            description=f"MACOS DMG $out")
     n.build(outputs=dmg, rule="macos_dmg", inputs=[app_executable])
     n.build(outputs="macos_dmg", rule="phony", inputs=[dmg])
-    n.build(outputs="macos", rule="phony", inputs=[output, staged_sdl, brokers, records, library, app_executable])
+    n.build(outputs="macos", rule="phony", inputs=[output, staged_sdl, brokers, records, assets, library, app_executable])
 
     # ---------- the Metal backend's tests (python3 tools/test_macos_metal.py)
 

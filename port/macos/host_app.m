@@ -819,6 +819,17 @@ void host_app_start(void)
 
 				[files removeItemAtPath:copy error:NULL];
 				[files copyItemAtPath:records toPath:copy error:NULL];
+		/* ...and the textures', fonts' and menus' bytes (port/linux/src/
+		embedded_assets.h), the same way */
+		{
+			NSString *assets = [bundle pathForResource:@"openh1" ofType:@"assets"];
+
+			if (assets)
+			{
+				NSString *copy = [support_folder stringByAppendingPathComponent:@"openh1.assets"];
+
+				[files removeItemAtPath:copy error:NULL];
+				[files copyItemAtPath:assets toPath:copy error:NULL];
 			}
 		}
 

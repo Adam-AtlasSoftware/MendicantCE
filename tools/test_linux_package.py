@@ -32,7 +32,7 @@ def build(tmp_path):
     """stand-ins for the build's executable, SDL and SDL's licence"""
     folder = tmp_path / "build"
     folder.mkdir()
-    for name in ("halo", "libSDL3.so.0", "SDL3-LICENSE.txt"):
+    for name in ("halo", "libSDL3.so.0", "SDL3-LICENSE.txt", "openh1.assets"):
         (folder / name).write_bytes(name.encode())
     return folder
 
@@ -53,6 +53,7 @@ def test_tree(build, tmp_path):
     assert "lib/openh1/libSDL3.so.0" in names
     assert "share/openh1/brokers.txt" in names
     assert "share/openh1/prepared.records" in names
+    assert "share/openh1/openh1.assets" in names
     assert "share/applications/openh1.desktop" in names
     assert "share/icons/hicolor/48x48/apps/openh1.png" in names
     assert "share/licenses/openh1/LICENSE" in names
@@ -584,7 +585,7 @@ def unzipped_release(tmp_path, name, vr=False):
     build = tmp_path / f"build-{name}"
     build.mkdir()
     (build / "halo").write_text(GAME + f"# {name}\n")
-    for part in ("libSDL3.so.0", "SDL3-LICENSE.txt"):
+    for part in ("libSDL3.so.0", "SDL3-LICENSE.txt", "openh1.assets"):
         (build / part).write_bytes(part.encode())
     folder = tmp_path / "home/Downloads" / name
     linux_package.stage_tree(folder, build / "halo", build / "libSDL3.so.0", notices(build), vr=vr)

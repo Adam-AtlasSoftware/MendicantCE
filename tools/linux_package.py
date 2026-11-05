@@ -14,6 +14,7 @@ anywhere and starts with bin/openh1:
     share/openh1/brokers.txt                   internet play's brokers (network.brokers_file)
     share/openh1/masters.txt                   the master servers (network.masters_file)
     share/openh1/prepared.records              the stock maps' preparations' records (prepared_shipped.h)
+    share/openh1/openh1.assets                 the textures', fonts' and menus' bytes (embedded_assets.h)
     share/openh1/relays.txt                    the relays offered (network.relays_file: none in it)
     share/openh1/vr                            only in the VR build's (--vr): install.sh's sign of it
     share/openh1/steam/<kind>.png              Steam's library artwork, which install.sh gives its shortcut
@@ -56,6 +57,7 @@ MASTERS = ROOT / "port/assets/network/masters.txt"
 RELAYS = ROOT / "port/assets/network/relays.txt"
 # the stock maps' preparations' records (port/linux/src/prepared_shipped.h)
 PREPARED_RECORDS = ROOT / "port/assets/prepared/prepared.records"
+ASSETS = "openh1.assets"
 INSTALLER = ROOT / "tools/linux_install.sh"  # the tree's install.sh (and the Steam Frame package's)
 STEAM_ART = ROOT / "port/assets/steam"  # <variant>/<kind>.png (tools/steam_art.py)
 DOCUMENTS = [(ROOT / "README.md", "README.md"), (ROOT / "port/linux/README.md", "README.linux.md")]
@@ -135,6 +137,9 @@ def stage_tree(dist: Path, executable: Path, library: Optional[Path], notices: I
     _copy(MASTERS, dist / "share" / NAME / MASTERS.name)
     _copy(RELAYS, dist / "share" / NAME / RELAYS.name)
     _copy(PREPARED_RECORDS, dist / "share" / NAME / PREPARED_RECORDS.name)
+    # (the textures', fonts' and menus' bytes, beside the build's executable:
+    # port/linux/src/embedded_assets.h)
+    _copy(executable.parent / ASSETS, dist / "share" / NAME / ASSETS)
     if vr:
         (dist / "share" / NAME / "vr").write_text(
             "The VR build (HALO_VR). install.sh installs it in ~/Applications/OpenH1-VR, beside the other build.\n")
