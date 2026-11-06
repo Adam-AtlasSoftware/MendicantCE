@@ -834,6 +834,8 @@ void xgpu_backend_world_ao_prepass(int phase, xgpu_target target, const struct x
 	{
 		memset(&record_body->pass, 0, sizeof(record_body->pass));
 	}
+}
+
 void xgpu_backend_world_ao_cascades(unsigned long x, unsigned long y, unsigned long z, unsigned long width,
 	unsigned long height, unsigned long depth, const void *data)
 {
