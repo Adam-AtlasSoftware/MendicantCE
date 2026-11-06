@@ -114,6 +114,11 @@ static inline float3 sign(float3 a)
 static inline int clamp(int x, int low, int high) { return x < low ? low : x > high ? high : x; }
 using std::floor;
 static inline uint ctz(uint x) { return (uint)__builtin_ctz(x); }
+/* a SIMD-group's reduction, as a lane sees it: its own bits and the other
+lanes' (simd_lanes_others, the check's: their cells' shapes) */
+static uint simd_lanes_others;
+static inline uint simd_or(uint x) { return x | simd_lanes_others; }
+static inline uint simd_broadcast_first(uint x) { return x; }
 
 namespace filter { enum value { linear }; }
 namespace address { enum value { clamp_to_edge }; }

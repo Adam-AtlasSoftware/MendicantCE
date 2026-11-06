@@ -430,6 +430,12 @@ int xgpu_metal_astc(void)
 	return metal.device && [metal.device supportsFamily:MTLGPUFamilyApple2];
 }
 
+int xgpu_metal_simd_reductions(void)
+{
+	return metal.device && ([metal.device supportsFamily:MTLGPUFamilyApple7] ||
+		[metal.device supportsFamily:MTLGPUFamilyMac2]);
+}
+
 id<MTLLibrary> xgpu_metal_fixed_library(void)
 {
 	return metal.fixed_library;

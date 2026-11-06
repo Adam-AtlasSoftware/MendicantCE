@@ -7,7 +7,9 @@ world_msl.inc, which tools/test_world_ao_light.py writes from the emitter's
 shader) run on the CPU (metal_shim.h) and compared with their reference,
 world_proxies.c's world_proxy_occlusion and world_proxy_reach and
 world_ao_shading.c's, over the made-up scene's points (scene.c): each
-shape's occlusion and reach, the proxies' product and the field's cone.
+shape's occlusion and reach, the proxies' product (walked by a pixel
+alone, and as one lane of a SIMD-group: metal_shim.h's simd_or) and the
+field's cone.
 
   msl_check <count> <tolerance>   prints the largest difference of each;
                                   exits 1 if one is past the tolerance
@@ -98,7 +100,9 @@ int main(int argc, char **argv)
 		/* (a vehicle's field, and its slots: its own, below) */
 		if (v0.w < 1.0f || v0.w > 3.0f)
 			continue;
-		float difference = std::fabs(world_proxy_reach(v0, v1, v2) - world_proxy_reach(&scene_proxies[shape]));
+		float found = v0.w == 1.0f ? world_proxy_sphere_reach(v2) : v0.w == 2.0f ? world_proxy_capsule_reach(v0, v1, v2) :
+			world_proxy_box_reach(v1, v2);
+		float difference = std::fabs(found - world_proxy_reach(&scene_proxies[shape]));
 
 		worst_reach = difference > worst_reach ? difference : worst_reach;
 	}
@@ -148,9 +152,13 @@ int main(int argc, char **argv)
 						world_proxy_occlusion(&scene_proxies[shape], point, normal));
 			}
 		}
-		/* (every shape, or the dynamic objects' alone: the first three) */
+		/* (every shape, or the dynamic objects' alone: the first three; a
+		third of the points walked as one lane of a SIMD-group whose other
+		lanes' cells hold other shapes, which it must leave out) */
 		int limit = index % 2 ? 64 : 3;
 
+		block.parameters[1].z = index % 3 == 1 ? 1.0f : 0.0f;
+		simd_lanes_others = index % 3 == 1 ? (unsigned int)(index * 2654435761u) : 0u;
 		difference = std::fabs(world_proxies_occlusion(block, objects, p, n, owner, limit) -
 			world_ao_proxies_occlusion(scene_proxies, limit < scene_proxy_count ? limit : scene_proxy_count, point, normal,
 			owner));
