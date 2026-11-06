@@ -250,9 +250,9 @@ tracked since it was seen (a look every third tick: missed once, lost) */
 #define BOTS_CAMO_RUN_SPEED (2.25f / TICKS_PER_SECOND)
 #define BOTS_CAMO_NEAR 8.0f
 #define BOTS_CAMO_GIVEAWAY_NEAR 25.0f
-#define BOTS_CAMO_FLICKER_RATE 30.0f
-#define BOTS_CAMO_FIRED_RATE 3.0f
-#define BOTS_CAMO_HURT_RATE 3.0f
+#define BOTS_CAMO_FLICKER_RATE 20.0f
+#define BOTS_CAMO_FIRED_RATE 2.0f
+#define BOTS_CAMO_HURT_RATE 2.0f
 #define BOTS_CAMO_MELEE_RATE 6.0f
 #define BOTS_CAMO_TRACK_TICKS 6
 

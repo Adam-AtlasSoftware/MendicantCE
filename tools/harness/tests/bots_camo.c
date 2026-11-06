@@ -300,7 +300,7 @@ static void case_losing(void)
 			definition->name, strafe_lost[skill]);
 		CHECK(still_kept[skill] > 0.5f && still_kept[skill] < 1.0f, "%s keeps a still one %.2f of the time",
 			definition->name, still_kept[skill]);
-		CHECK(firing_lost < 0.1f, "%s loses a firing one %.2f of the time", definition->name, firing_lost);
+		CHECK(firing_lost < 0.2f, "%s loses a firing one %.2f of the time", definition->name, firing_lost);
 	}
 	CHECK(strafe_lost[0] > 0.8f, "the easy bot keeps a strafing one %.2f of the time", 1.0f - strafe_lost[0]);
 	CHECK(still_kept[NUMBER_OF_BOTS_SKILLS - 1] > 0.8f, "the legendary bot loses a still one %.2f of the time",
