@@ -216,6 +216,9 @@ static void main_menu_active(boolean active) {}
 static void main_menu_precache_resources(void) { ui_loads++; }
 enum { _error_immediate = 1 };
 
+/* (no replay is recorded: port/linux/game/network_replay.c) */
+static boolean network_replay_recording(void) { return FALSE; }
+static long distributed_recorder_machine(void) { return NONE; }
 #include "under_test.inc"
 
 /* ---------- the machine's frames */

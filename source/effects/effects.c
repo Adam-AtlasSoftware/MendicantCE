@@ -172,6 +172,7 @@ symbols in this file:
 #include "tag_files/tag_groups.h"
 #include "units/bipeds.h"
 #include "units/units.h"
+#include "network_replay.h" /* port: port/linux/game/network_replay_playback.c */
 #undef real_local_random
 
 /* ---------- constants */
@@ -2485,7 +2486,9 @@ static void effect_update(
 				{
 					effect->particle_counts[particle_index] = (byte)(long)
 						(((real)count - MAXIMUM_SPLIT_SCREEN_PARTICLE_COUNT) /
-						local_player_count() +
+						/* port: and a replay's playback, of no local player, as one
+						(port/linux/game/network_replay_playback.c) */
+						(network_replay_playing() ? MAX(local_player_count(), 1) : local_player_count()) +
 						MAXIMUM_SPLIT_SCREEN_PARTICLE_COUNT);
 				}
 			}

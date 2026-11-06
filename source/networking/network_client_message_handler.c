@@ -205,6 +205,7 @@ symbols in this file:
 void network_distributed_handle_message(long machine_index, word const *message, word size);
 /* cseries_windows.c's */
 unsigned long system_milliseconds(void);
+boolean network_replay_playing(void);
 
 /* ---------- constants */
 
@@ -489,6 +490,8 @@ boolean network_game_client_handle_message(
 	the host's below): a datagram, which anyone can send as the host, is
 	taken for nothing else */
 	else if (message_type == _message_type_packet && network_connection_last_read_was_unreliable() &&
+		/* (port: a replay's playback's are the host's, port/linux/game/network_replay_playback.c) */
+		!network_replay_playing() &&
 		((byte *)message)[message_size - 1] != _message_server_game_advertise &&
 		((byte *)message)[message_size - 1] != _message_server_pong)
 	{

@@ -396,6 +396,7 @@ The decompilation's upstream, punpckhdq/halo, is AGPL 3.0 from 17 October
 | [port/linux/README.md](port/linux/README.md) | The Linux builds (64-bit, Vulkan), controls, menus, every setting, updates, frame rate, field of view, system link, internet play, voice chat, the server browser, map sharing, security, map checks, how the port operates, the game source changes |
 | [port/linux/vulkan/README.md](port/linux/vulkan/README.md) | The Vulkan renderer: its files, building and running, VR, the passes |
 | [port/linux/NETCODE.md](port/linux/NETCODE.md) | The distributed netcode, network versions, joining a game in progress, map sharing, transport, testing |
+| [port/linux/REPLAY.md](port/linux/REPLAY.md) | The Theater: replays of network games recorded and played back (SlipstreamCE's, ported), OpenH1 games' too, the cameras and the auto-director, testing a replay against its recording |
 | [port/windows/README.md](port/windows/README.md) | The Windows build, its host, crash reports |
 | [port/android/README.md](port/android/README.md) | The Android build, the guest and host, touch controls, Android settings, finding problems |
 | [port/macos/README.md](port/macos/README.md) | The macOS build, the guest's memory at a base register, 16 KB pages, Darwin's system calls, the Metal renderer and its window |
@@ -416,3 +417,4 @@ The decompilation's upstream, punpckhdq/halo, is AGPL 3.0 from 17 October
 | [tools/stagekit/README.md](tools/stagekit/README.md) | Scenarios staged and instrumented on the real engine, no retail assets |
 | `port/third_party/*/README.md` | Each vendored library |
 | [AUTHORS.md](AUTHORS.md) | Art credits |
+| [CREDITS.md](CREDITS.md) | Code ported from other projects, and its authors |

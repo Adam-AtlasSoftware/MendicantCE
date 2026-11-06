@@ -604,6 +604,7 @@ struct network_game *network_game_server_get_game(struct network_game_server *se
 #include "units/units.h"
 #include "custom_edition_cache.h" /* port: port/linux/game/custom_edition_cache.c */
 #include "latency_meter.h" /* port: port/linux/game/latency_meter.c */
+#include "network_replay.h" /* port: port/linux/game/network_replay_playback.c */
 
 /* network_game_globals.c's */
 boolean network_game_distributed_client(void);
@@ -4555,6 +4556,17 @@ static boolean multiplayer_message_internal(
 }
 
 
+/* port: whether the player's messages and the announcer's lines for them
+are this machine's: one of its local players, or in a replay's playback the
+player watched (port/linux/game/network_replay_playback.c) */
+static boolean game_engine_player_heard(
+	long player_index,
+	struct player_datum const *player)
+{
+	return player->local_player_index != NONE ||
+		(player_index != NONE && player_index == network_replay_watched_player());
+}
+
 static void multiplayer_message(
 	long player_index,
 	long message,
@@ -4562,7 +4574,7 @@ static void multiplayer_message(
 {
 	struct player_datum *player = player_get(player_index);
 
-	if (player->local_player_index != NONE)
+	if (game_engine_player_heard(player_index, player))
 	{
 		wchar_t buffer[1024];
 
@@ -4574,7 +4586,8 @@ static void multiplayer_message(
 			NUMBEROF(buffer)))
 		{
 			buffer[NUMBEROF(buffer) - 1] = 0;
-			hud_print_message(player->local_player_index, buffer);
+			/* (a replay's: the playback's view is local player 0's) */
+			hud_print_message(player->local_player_index != NONE ? player->local_player_index : 0, buffer);
 		}
 	}
 
@@ -5429,6 +5442,16 @@ real game_engine_scoreboard_alpha(
 	}
 
 	return linear_to_non_linear_alpha(PIN(game_engine_globals.hud_message_timers[local_player_index], 0.0f, 1.0f));
+}
+
+/* port: a replay's playback's scores, with Back held: the full-screen
+scoreboard, the watched player's row as a player's own
+(port/linux/game/network_replay_playback.c) */
+void game_engine_port_rasterize_scores(
+	long player_index)
+{
+	if (game_engine || network_coop_active())
+		game_engine_rasterize_in_game_score(player_index, 1.0f);
 }
 
 long game_engine_player_get_team_index(
@@ -11100,13 +11123,13 @@ void game_engine_client_respawn_countdown(
 	{
 		return;
 	}
-	if (player->local_player_index != NONE &&
+	if (game_engine_player_heard(player_index, player) &&
 		(player->respawn_timer == 90 || player->respawn_timer == 60 || player->respawn_timer == 30))
 	{
 		game_engine_play_multiplayer_sound(_multiplayer_sound_countdown_for_respawn);
 	}
 	player->respawn_timer--;
-	if (player->local_player_index != NONE && player->respawn_timer == 1)
+	if (game_engine_player_heard(player_index, player) && player->respawn_timer == 1)
 		game_engine_play_multiplayer_sound(_multiplayer_sound_respawn);
 
 	return;

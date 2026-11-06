@@ -252,6 +252,7 @@ symbols in this file:
 #include "network_standard.h" /* port: port/linux/game/network_standard.c */
 #include "network_host_controls.h" /* port: port/linux/game/network_host_controls.c */
 #include "network_chat.h" /* port: port/linux/game/network_chat.c */
+#include "network_replay.h" /* port: port/linux/game/network_replay.c */
 #include "bungie_net/common/message_header.h"
 #include "bungie_net/network/transport.h"
 #include "bungie_net/network/transport_endpoint_winsock.h"
@@ -1014,6 +1015,8 @@ boolean network_game_server_send_message_to_all_machines(
 		network_event("network_game_server_send_message_to_all_machines() got a message of #%d bytes", message_length);
 		return FALSE;
 	}
+	/* port: and into a replay being recorded (port/linux/game/network_replay.c) */
+	network_replay_record(_network_replay_game_message, message, message_length);
 	for (machine_index = 0; machine_index < MAXIMUM_NETWORK_MACHINE_COUNT; machine_index++)
 	{
 		struct network_game_server_client_machine *machine =

@@ -23,6 +23,10 @@ PE = "main_menu/settings_select/player_setup/player_profile_edit"
 # the mods' screen, and its rows (_mods), which Settings' MODS tab opens
 MODS = "main_menu/mods"
 MOD_ROWS = 11
+# the Theater (port/linux/REPLAY.md, ported from SlipstreamCE's): the replays
+# a host or a client records, its rows (_theater), which Settings' MODS
+# tab's THEATER opens (beside the mods: the page with room)
+THEATER = "main_menu/theater"
 # the main menu's items (ce/main_menu.xml): CAMPAIGN, MULTIPLAYER, SETTINGS
 # and QUIT, a row apart (Profile and Credits are left out: tools/ce_menus.py's
 # LEFT_OUT; its CHILD_OFFSETS move Settings and Quit up into their rows)
@@ -895,7 +899,7 @@ PAGES = {
     # is the main menu's, hidden in a game: settings_rows_show)
     "mods_settings": {
         "screen": "mods_settings_screen", "tab": "MODS",
-        "about": "Texture, sound, text and model packs from the mods folder.",
+        "about": "Texture, sound, text and model packs from the mods folder, and the Theater's recorded games.",
         "rows": [
             (SECTION, "MODS"),
             ("MANAGE MODS ›", None, f"{MODS}/mods_screen",
@@ -904,6 +908,16 @@ PAGES = {
             ("MODS FOLDER", None, None,
              "Each mod is a folder in the mods folder, beside the maps folder, with its mod.toml and its tags. "
              "Mods are turned on and off from the main menu's Settings, not in a game.", None, "mods_folder"),
+            # (port/linux/REPLAY.md: network_replay.c's recording, and the
+            # Theater's replays, the main menu's: hidden in a game,
+            # settings_rows_show)
+            (SECTION, "THEATER"),
+            ("RECORD GAMES", "network.record_replays", ON_OFF,
+             "Records each network game you play or host, from the next one on, to watch again in the Theater.",
+             None),
+            ("THEATER ›", None, f"{THEATER}/theater_screen",
+             "The games recorded: watch one again from any player's view, or a free or cinematic camera.", None,
+             "theater"),
         ],
     },
     # ---- the pages the rows open
@@ -2733,6 +2747,7 @@ TITLES = {
     f"{PE}/vr_controls/header_vr_controls": "VR CONTROLS",
     f"{PE}/vr_display/header_vr_display": "VR DISPLAY",
     "main_menu/mods/header_mods": "MODS",
+    f"{THEATER}/header_theater": "THEATER",
     f"{TRAINING}/header_training": "VR TUTORIAL",
     f"{MT}/join_game/header_server_browser": "SERVER BROWSER",
     f"{MT}/join_game/header_direct_link": "JOIN BY LINK",
@@ -7172,6 +7187,8 @@ def multiplayer_files() -> dict:
         OPENCE_EDIT.replace("/", ".") + ".port.xml": head + _opence_options() + ["</menus>", ""],
         MODS.replace("/", ".") + ".xml": [head[0], "<!-- The port's Mods screen, in the PC version's style "
                                           "(tools/port_settings.py) -->", head[2]] + _mods() + ["</menus>", ""],
+        THEATER.replace("/", ".") + ".xml": [head[0], "<!-- The port's Theater screen, in the PC version's style "
+                                             "(tools/port_settings.py) -->", head[2]] + _theater() + ["</menus>", ""],
         TRAINING.replace("/", ".") + ".xml": [head[0], "<!-- The VR build's VR Tutorial, in the PC version's style "
                                               "(tools/port_settings.py) -->", head[2]] + _training() + ["</menus>", ""],
         UPDATE.replace("/", ".") + ".xml": [head[0], "<!-- The update question (the Steam Frame's, gamescope's), in "
@@ -7364,6 +7381,89 @@ def _mods() -> list:
                                                               '<on event="start" run="port mods move down"/>'])
     lines += _button(f"{base}/button_ok", 1, ['<on event="a" run="port mods save" back="true"/>',
                                               '<on event="start" run="port mods save" back="true"/>'])
+    return lines
+
+
+# ---------- the Theater (port/linux/REPLAY.md): ported from SlipstreamCE's
+# (thelinkin3000/SlipstreamCE, by thelinkin3000 and Carlos Pérez), without
+# its consoles' QR code and hints and Android's IMPORT and EXPORT
+
+THEATER_ROWS = 10
+THEATER_ROW_TOP = 73
+
+
+def _theater() -> list:
+    """the Theater, which Settings' MODS tab's THEATER opens (B goes back),
+    the replays a host or a client records (port/linux/game/network_replay.c),
+    laid out as the Mods screen is: on the left the replays, a row each, the
+    newest first (its map and when, and its length), scrolling over more, A
+    playing the one chosen (network_replay_playback.c); on the right, in the
+    lobby's frame, what the one chosen is; and the buttons: RECORD (ON or OFF,
+    network.record_replays), DELETE (the one chosen, at a second press) and
+    BACK (menu_functions.c's "port theater" functions). Back from a replay,
+    the main menu opens it again (ui_widget.c)"""
+    base = THEATER
+    lines = _widget(f"{base}/theater_screen", [("width", 640), ("height", 480),
+                                                ("flags", "pass_unhandled_to_focused_child pause_game"),
+                                                ("bitmap", "bitmaps/gradient")],
+                    ['<on event="b" back="true"/>', '<on event="back" back="true"/>',
+                     '<child widget="main_menu/new_select/sel_list_desc_bkd"/>',
+                     f'<child widget="{base}/theater_list"/>',
+                     f'<child widget="{base}/header_theater"/>'])
+    lines += _header(f"{base}/header_theater", f"{base}/header_theater")
+    rows = [f'<child widget="{base}/op_replay_{index + 1}" x="20" y="{THEATER_ROW_TOP + 30 * index}"/>'
+            for index in range(THEATER_ROWS)]
+    lines += _widget(f"{base}/theater_list", [("type", "column_list"), ("width", 640), ("height", 480),
+                                              ("flags", "pass_unhandled_to_focused_child up_down_tabs_children"),
+                                              ("description", f"{base}/theater_details")],
+                     ['<data input="port theater update"/>',
+                      # (X deletes the replay chosen, asking first; Y turns
+                      # RECORD on or off: the list's, whatever row has the
+                      # focus)
+                      '<on event="x" run="port theater delete"/>',
+                      '<on event="y" run="port theater record"/>',
+                      *rows, f'<child widget="{base}/button_bar" y="414"/>'])
+    for index in range(THEATER_ROWS):
+        lines += _widget(f"{base}/op_replay_{index + 1}",
+                         [("width", 390), ("height", 28), ("flags", "pass_unhandled_to_focused_child"),
+                          ("bitmap", "bitmaps/sel_list_item_bkd_top" if index == 0 else "bitmaps/sel_list_item_bkd"),
+                          ("color", "#FF2896FF")],
+                         ['<on event="a" run="port theater watch"/>', '<on event="start" run="port theater watch"/>',
+                          '<on event="left_mouse" run="mouse emit accept event"/>',
+                          f'<child widget="{base}/theater_replay_name" x="12"/>',
+                          f'<child widget="{base}/theater_replay_length" x="290"/>'])
+    lines += _widget(f"{base}/theater_replay_name",
+                     [("type", "text"), ("controller", 1), ("width", 276), ("height", 22), ("font", "ui\\large_ui"),
+                      ("color", "#FF2896FF"), ("text_y", 4)], [])
+    lines += _widget(f"{base}/theater_replay_length",
+                     [("type", "text"), ("controller", 1), ("width", 90), ("height", 22), ("font", "ui\\large_ui"),
+                      ("color", "#FF2896FF"), ("align", "right"), ("text_y", 4), ("text_flags", "no_focus_test")], [])
+    # (in the lobby's frame, sel_list_desc_bkd's, as the mods' details)
+    lines += _widget(f"{base}/theater_details", [("width", 640), ("height", 480)],
+                     [f'<child widget="{base}/theater_details_text"/>'])
+    lines += _widget(f"{base}/theater_details_text",
+                     [("type", "text"), ("controller", 1), ("left", 412), ("top", 84), ("width", 200),
+                      ("height", 318), ("font", "ui\\small_ui"), ("color", "#FF2896FF")], [])
+    lines += _widget(f"{base}/button_bar",
+                     [("type", "column_list"), ("width", 640), ("height", 28),
+                      ("flags", "pass_unhandled_to_focused_child left_right_tabs_items")],
+                     [f'<child widget="{base}/button_record" y="1"/>',
+                      f'<child widget="{base}/button_delete" x="130" y="1"/>',
+                      f'<child widget="{base}/button_back" x="510" y="1"/>'])
+    # (its words a string list's, OFF and ON, which "port theater update"
+    # chooses between: a text widget's own words are its string list's again
+    # each time it is drawn, so words set on it would not show)
+    lines += _widget(f"{base}/button_record",
+                     [("type", "text"), ("width", 128), ("height", 24), ("bitmap", "bitmaps/text_button_background"),
+                      ("string_list", f"{base}/record_strings"), ("string_index", 0), ("font", "ui\\small_ui"),
+                      ("color", "#FFFFFFFF"), ("align", "center"), ("text_y", 2)],
+                     ['<on event="a" run="port theater record"/>', '<on event="start" run="port theater record"/>',
+                      '<on event="left_mouse" run="mouse emit accept event"/>'])
+    lines += _strings(f"{base}/record_strings", ["RECORD: OFF", "RECORD: ON"])
+    lines += _text_button(f"{base}/button_delete", "%x-button DELETE", ['<on event="a" run="port theater delete"/>',
+                                                                      '<on event="start" run="port theater delete"/>'])
+    lines += _text_button(f"{base}/button_back", "BACK", ['<on event="a" back="true"/>',
+                                                         '<on event="start" back="true"/>'])
     return lines
 
 

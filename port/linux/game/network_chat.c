@@ -85,6 +85,7 @@ mutes. The host's welcome to OpenCE players is a notice too
 #include "halo_keyboard.h"
 #include "server_director.h"
 #include "network_host_game.h"
+#include "network_replay.h"
 
 #include <stdio.h>
 
@@ -2045,8 +2046,10 @@ void network_chat_update(
 		pressed = held & ~chat_actions_held;
 		chat_actions_held = held;
 		/* (or the controller's D-pad Up, the touch controls' too, which opens
-		the on-screen keyboard) */
-		if ((pressed || requested_port != NONE || TEST_FLAG(pad_pressed, HALO_CHAT_PAD_UP)) && !console_is_active())
+		the on-screen keyboard; not in a replay's playback, whose up is its
+		camera's: network_replay_playback.c) */
+		if ((pressed || requested_port != NONE ||
+			(TEST_FLAG(pad_pressed, HALO_CHAT_PAD_UP) && !network_replay_playing())) && !console_is_active())
 		{
 			/* (no typing where the host has the chat off: it says so, once a
 			while) */

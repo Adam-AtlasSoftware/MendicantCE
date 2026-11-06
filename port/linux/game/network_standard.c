@@ -52,6 +52,7 @@ host tells its OpenH1 clients which players are OpenCE's
 #include "sim_rate.h"
 #include "network_standard.h"
 #include "network_distributed.h"
+#include "network_replay.h"
 #include "halo_port_limits.h"
 
 #include <stdlib.h>
@@ -302,6 +303,10 @@ static short network_standard_machine_kind(
 	{
 		return NONE;
 	}
+	/* (a replay's recorder, an OpenH1 client that sees everything: it is
+	sent OpenH1's messages, as such a client is. network_replay.c) */
+	if (network_replay_recording() && machine_index == distributed_recorder_machine())
+		return _network_standard_join_openh1;
 	return network_standard_globals.machine_kinds[machine_index];
 }
 

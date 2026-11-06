@@ -549,6 +549,8 @@ static char const *const port_function_names[] =
 	/* (a mission in progress started again: campaign_menu.inc's campaign_restart_*) */
 	"port campaign restart ask", "port campaign missions restart", "port campaign restart",
 	"port campaign restart cancel",
+	/* (the Theater, opened from Settings' MODS tab: menu_functions.c) */
+	"port theater record", "port theater watch", "port theater delete",
 };
 
 /* the PC version's game data functions that the Xbox's have not, from
@@ -598,6 +600,8 @@ static char const *const port_game_data_input_names[] =
 	/* (the campaign's screens: campaign_menu.inc) */
 	"port campaign update", "port campaign missions update", "port campaign difficulty update",
 	"port campaign restart update",
+	/* (the Theater) */
+	"port theater update",
 };
 
 static struct

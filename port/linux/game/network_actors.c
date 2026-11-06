@@ -840,7 +840,8 @@ void network_actors_host_tick(
 	boolean openh1 = network_standard_hosting();
 	struct distributed_actor_state_message message;
 	long machine_indices[HALO_PORT_MAXIMUM_NETWORK_MACHINES];
-	short machine_count = distributed_client_machines(machine_indices, HALO_PORT_MAXIMUM_NETWORK_MACHINES);
+	/* (and the replay recorder: network_replay.c) */
+	short machine_count = distributed_viewing_machines(machine_indices, HALO_PORT_MAXIMUM_NETWORK_MACHINES);
 	long now = game_time_get();
 	short state_count = 0;
 	short index;

@@ -1430,6 +1430,34 @@ static const struct config_setting config_settings[] =
 		"drops it (5 to 300; the stock game's 15). Longer keeps players whose\n"
 		"connection stalls (a browser tab in the background) at the cost of\n"
 		"frozen players for longer when one really goes." },
+	{ "network.record_replays", _config_boolean, "false", "HALO_NET_RECORD_REPLAYS", _environment_value,
+		_platform_all,
+		"Each network game is recorded to the data folder's replays/, which\n"
+		"the Theater (Settings, MODS) plays (port/linux/REPLAY.md): a host's, all of\n"
+		"it (what a client that sees everything is sent); a client's, what its\n"
+		"host sends it (far players less often) and its own input. Read at a\n"
+		"game's start; RECORD GAMES and the Theater's RECORD turn it on and off." },
+	{ "network.replay_hints", _config_boolean, "true", "HALO_NET_REPLAY_HINTS", _environment_value,
+		_platform_all,
+		"Watching a replay with a controller: the bars of the buttons and of the\n"
+		"camera's controls over the seek bar. The replay's pause menu's Y turns\n"
+		"them on and off." },
+	{ "network.replay_camera", _config_string, "\"behind\"", "HALO_NET_REPLAY_CAMERA", _environment_value,
+		_platform_all,
+		"The view a replay starts in (Y goes round them): \"behind\" the player\n"
+		"watched, their \"eyes\", the \"free\" camera, the \"cinematic\" one, or\n"
+		"\"director\", the cinematic camera on whom the auto-director chooses\n"
+		"(the player most worth watching: a kill, a fight, the flag)." },
+	{ "network.full_detail_to_clients", _config_boolean, "false", "HALO_NET_FULL_DETAIL_TO_CLIENTS",
+		_environment_value, _platform_all,
+		"Hosting: send every client every player every tick (not those far\n"
+		"from its own, or out of their sight, less often) and every damage\n"
+		"event (not only those near its players), so that a client's replay\n"
+		"holds all of the game. More to send: a client's download grows with\n"
+		"the players. Read each tick." },
+	{ "network.replays_kept", _config_integer, "30", "HALO_NET_REPLAYS_KEPT", _environment_value, _platform_all,
+		"How many replays the replays/ folder keeps: the oldest are deleted as a\n"
+		"recording starts; 0 keeps them all." },
 	{ "network.allow_upnp", _config_boolean, "true", "HALO_NET_ALLOW_UPNP", _environment_value, _platform_all,
 		"Let internet play ask the router (UPnP) to forward its port, for\n"
 		"networks whose NAT stops connections: when a player joins this\n"
@@ -2090,6 +2118,11 @@ static const struct config_setting config_settings[] =
 		_platform_all,
 		"The players of a \"local:\" network test's game (1 to 4): its split\n"
 		"screen, the first controller's player the first." },
+	{ "debug.network_test_units", _config_boolean, "false", "HALO_NETWORK_TEST_UNITS", _environment_value,
+		_platform_all,
+		"With debug.network_test: log every biped no player controls (the\n"
+		"campaign's actors) each second, where it is and its vitality, to\n"
+		"compare a recording's game with its replay's (tools/replay_compare.py)." },
 	{ "debug.network_test_public", _config_boolean, "false", "HALO_NETWORK_TEST_PUBLIC", _environment_value,
 		_platform_all,
 		"The network test's host lists its game in the server browser, as Create\n"
@@ -3998,6 +4031,7 @@ static const struct
 	{ "game.console_log", { "important", "all", "none", NULL }, NULL },
 	{ "game.language", { "", "ja", "de", "fr", "es", "it", NULL }, NULL },
 	{ "network.game_mode", { "openh1", "legacy", "standard", NULL }, NULL },
+	{ "network.replay_camera", { "behind", "eyes", "free", "cinematic", "director", NULL }, NULL },
 	{ "server.game_mode", { "openh1_120", "openh1_60", "openh1_30", "legacy", NULL }, NULL },
 	{ "network.text_chat", { "on", "links", "off", NULL }, NULL },
 	{ "server.chat_filter", { "off", "censor", "block", NULL }, NULL },

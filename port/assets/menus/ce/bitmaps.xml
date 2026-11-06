@@ -407,6 +407,9 @@
 	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/vr_display/header_vr_display">
 		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/vr_display/header_vr_display.png" width="512" height="64"/>
 	</bitmap>
+	<bitmap name="main_menu/theater/header_theater">
+		<frame png="ce/port/main_menu/theater/header_theater.png" width="512" height="64"/>
+	</bitmap>
 	<bitmap name="main_menu/training/header_training">
 		<frame png="ce/port/main_menu/training/header_training.png" width="512" height="64"/>
 	</bitmap>
