@@ -671,7 +671,12 @@ static boolean move_near(struct mendicant_member *member, real_point3d const *po
 	struct mendicant_spacing_claims claims;
 	/* the spacing (with a character): positions near those given this step or
 	near friends are marked down, as if that much further off */
-	boolean spaced = mendicant_spacing_claims_begin(member->actor_index, member->actor, used, positions, count, &claims);
+	boolean spaced;
+
+	/* a soldier dodging a grenade or a vehicle: no new order until it ends */
+	if (mendicant_threat_evading(member->actor_index))
+		return FALSE;
+	spaced = mendicant_spacing_claims_begin(member->actor_index, member->actor, used, positions, count, &claims);
 
 	for (slot = 0; slot < COVER_CANDIDATES; slot++)
 	{

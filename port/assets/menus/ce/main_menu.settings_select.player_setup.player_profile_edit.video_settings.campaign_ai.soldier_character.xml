@@ -21,6 +21,7 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/op_mendicant.grenade_reactions" x="28" y="226"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/op_mendicant.convoy" x="28" y="247"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/op_mendicant.spacing" x="28" y="268"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/op_mendicant.lane_clearing" x="28" y="289"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/button_bar" y="414"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/button_bar" type="column_list" width="640" height="28" flags="pass_unhandled_to_focused_child left_right_tabs_items">
@@ -129,6 +130,15 @@
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/mendicant.spacing_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="ON|OFF" setting="ai.mendicant.spacing" values="true|false" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
 		<on event="created" run="port setting load"/>
 	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/op_mendicant.lane_clearing" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/mendicant.lane_clearing_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/mendicant.lane_clearing_spinner" x="188"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/mendicant.lane_clearing_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/labels" string_index="10" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/mendicant.lane_clearing_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="ON|OFF" setting="ai.mendicant.lane_clearing" values="true|false" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+		<on event="created" run="port setting load"/>
+	</widget>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/labels">
 		<string text="SOLDIER CHARACTER"/>
 		<string text="SOLDIER CHARACTER"/>
@@ -140,6 +150,7 @@
 		<string text="GRENADE REACTIONS"/>
 		<string text="CONVOY"/>
 		<string text="SPACING"/>
+		<string text="LANE CLEARING"/>
 	</strings>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/help_strings">
 		<string text=""/>
@@ -153,5 +164,6 @@
 		<string text="Each soldier sees your grenade in his own time and scatters his own way. No squad dives as one."/>
 		<string text="Your Warthog full? The rest take the other vehicles and follow you, each in his own time."/>
 		<string text="Squads spread out, wider when a grenade lands, so one blast rarely gets two. Grunts still huddle."/>
+		<string text="Drive at them and each gets out of the way in his own time. The slow still dive at the last second."/>
 	</strings>
 </menus>

@@ -160,6 +160,7 @@ static FILE *mendicant_player_file = NULL;
 static char mendicant_sample_path[sizeof(mendicant_config.sample_log)];
 static char mendicant_drill_path[sizeof(mendicant_config.drill_log)];
 static char mendicant_convoy_path[sizeof(mendicant_config.convoy_test_log)];
+static char mendicant_lane_test_path[sizeof(mendicant_config.lane_test_log)];
 static char mendicant_player_path[sizeof(mendicant_config.player_log)];
 static char mendicant_move_test_path[sizeof(mendicant_config.move_test_log)];
 static char mendicant_character_path[sizeof(mendicant_config.character_log)];
@@ -421,6 +422,9 @@ static void mendicant_logs_open(
 	/* the convoy test's scene and measures (mendicant_convoy.c) */
 	mendicant_log_open(&mendicant_convoy_file, mendicant_convoy_path, sizeof(mendicant_convoy_path),
 		mendicant_config.convoy_test_log, "time,record,a,b,c,d,e\n");
+	/* the vehicle lanes' gate scene and its measures (mendicant_lanes_test.c) */
+	mendicant_log_open(&mendicant_lane_test_file, mendicant_lane_test_path, sizeof(mendicant_lane_test_path),
+		mendicant_config.lane_test_log, "time,record,a,b,c,d,e\n");
 	mendicant_log_open(&mendicant_character_file, mendicant_character_path, sizeof(mendicant_character_path),
 		mendicant_config.character_log,
 		"time,epoch,record,actor,encounter,team,kind,quirk,courage,aggression,skill,discipline,caution,"
@@ -886,6 +890,8 @@ void mendicant_initialize_for_new_map(
 	mendicant_firing_reset();
 	mendicant_grenades_reset();
 	mendicant_spacing_reset();
+	mendicant_lanes_reset();
+	mendicant_lanes_test_reset();
 	/* the models: loaded once, again when the file changes */
 	if (mendicant_config.models)
 		mendicant_runtime_load();
@@ -961,6 +967,7 @@ void mendicant_game_state_after_load(
 		mendicant_firing_reset();
 		mendicant_grenades_reset();
 		mendicant_spacing_reset();
+		mendicant_lanes_reset();
 		mendicant_movement_revert();
 		/* the Covenant are drawn again; the Marines come back the same men */
 		mendicant_character_revert();
@@ -1027,6 +1034,7 @@ void mendicant_ai_update_end(
 	mendicant_character_update(game_time_get());
 	mendicant_firing_update(game_time_get());
 	mendicant_grenades_update(game_time_get());
+	mendicant_lanes_update(game_time_get()); /* (before the spacing's steps: a lane's escape goes first) */
 	mendicant_spacing_update(game_time_get());
 	mendicant_aim_release(); /* (an actor whose decision ran without its combat update) */
 	if (mendicant_training)
@@ -1072,6 +1080,7 @@ void mendicant_decide_after(
 	if (mendicant_move_test_file)
 		mendicant_move_test(actor_index);
 	mendicant_grenades_after_decide(actor_index);
+	mendicant_lanes_after_decide(actor_index);
 	mendicant_drill_update();
 
 	return;
@@ -1151,6 +1160,8 @@ void mendicant_action_control_after(
 		mendicant_apply_role(actor_index);
 	/* a soldier on his own holding his aim where a lost enemy was seen */
 	mendicant_firing_action_control(actor_index, action);
+	/* a soldier turning to a vehicle behind him, a Grunt's panicked run off the road */
+	mendicant_lanes_action_control(actor_index, action);
 
 	return;
 }
@@ -1183,8 +1194,13 @@ short mendicant_danger_react(
 	short *escape_direction,
 	real_vector2d *alignment_vector)
 {
+	short lane;
+
 	if (!mendicant_active)
 		return _mendicant_danger_stock;
+	/* a vehicle's: never a group's dive on one frame (mendicant_lanes.c) */
+	if ((lane = mendicant_lanes_danger_react(actor_index)) != _mendicant_danger_stock)
+		return lane;
 	return mendicant_grenades_react(actor_index, escape_found, escape_direction, alignment_vector);
 }
 
@@ -1246,6 +1262,7 @@ void mendicant_firing_position_bonus(
 	if (!mendicant_active)
 		return;
 	mendicant_spacing_bonus(actor_index, evaluation_context, firing_position_count, firing_positions);
+	mendicant_lanes_bonus(actor_index, evaluation_context, firing_position_count, firing_positions);
 }
 
 /* actor_action_try_to_throw_grenade's end: a throw it just ordered that would

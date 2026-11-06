@@ -478,7 +478,7 @@ static boolean convoy_marine_free(
 	unit = convoy_unit(actor->meta.unit_index);
 	if (!unit || unit->object.body_vitality <= 0.0f || actor->meta.unit_index == mendicant_player_unit())
 		return FALSE;
-	if (mendicant_grenade_evading(actor_index))
+	if (mendicant_threat_evading(actor_index))
 		return FALSE;
 	if (unit_out)
 		*unit_out = unit;
@@ -2407,6 +2407,9 @@ void mendicant_player_actions(
 	real_point3d const *goal;
 	real dx, dy;
 
+	/* (the vehicle lanes' gate scene drives him itself) */
+	if (mendicant_lanes_test_actions(actions))
+		return;
 	if (!mendicant_convoy_file || !mendicant_active || !actions)
 		return;
 	if (convoy_test.phase < TEST_BOARD1 || convoy_test.phase >= TEST_END)
