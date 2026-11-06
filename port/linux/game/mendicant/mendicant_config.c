@@ -111,6 +111,7 @@ boolean mendicant_config_read(
 	config->friend_vehicles = config_boolean("ai.mendicant.friend_vehicles") != 0;
 	config->grenade_reactions = config_boolean("ai.mendicant.grenade_reactions") != 0;
 	config->convoy = config_boolean("ai.mendicant.convoy") != 0;
+	config->spacing = config_boolean("ai.mendicant.spacing") != 0;
 #ifdef MENDICANT_LEGACY_ENVIRONMENT
 	/* the training bridge, its runs and its logs: desktop Linux only */
 	mendicant_config_copy_string(config->bridge, sizeof(config->bridge), config_string("ai.mendicant.bridge"));

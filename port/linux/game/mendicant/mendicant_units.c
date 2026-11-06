@@ -665,38 +665,53 @@ for the member's role */
 static boolean move_near(struct mendicant_member *member, real_point3d const *point, real radius, long *used)
 {
 	int count = 0, best[COVER_CANDIDATES], slot, position, chosen;
-	real best_score[COVER_CANDIDATES], chosen_score;
+	real best_score[COVER_CANDIDATES], best_mark[COVER_CANDIDATES], chosen_score, chosen_mark;
 	long encounter_index = member->actor->meta.encounter_index;
 	struct firing_position_definition *positions = mendicant_command_member_positions(member->actor, &count);
+	struct mendicant_spacing_claims claims;
+	/* the spacing (with a character): positions near those given this step or
+	near friends are marked down, as if that much further off */
+	boolean spaced = mendicant_spacing_claims_begin(member->actor_index, member->actor, used, positions, count, &claims);
 
 	for (slot = 0; slot < COVER_CANDIDATES; slot++)
 	{
 		best[slot] = -1;
 		best_score[slot] = radius * radius;
+		best_mark[slot] = 0.0f;
 	}
 	for (position = 0; positions && position < count; position++)
 	{
 		real_point3d const *p = &positions[position].position;
 		real dx = p->x - point->x, dy = p->y - point->y, dz = p->z - point->z;
 		real distance = dx * dx + dy * dy + 4.0f * dz * dz;
+		real rank = distance, mark = 0.0f;
 
-		if (distance < best_score[COVER_CANDIDATES - 1] && used[position] != encounter_index && mendicant_within_reach(p) &&
+		if (spaced && distance < radius * radius)
+		{
+			mark = mendicant_spacing_claims_penalty(&claims, p);
+			rank = ((real)sqrt(distance) + 0.5f * mark) * ((real)sqrt(distance) + 0.5f * mark);
+		}
+		if (distance < radius * radius && rank < best_score[COVER_CANDIDATES - 1] && used[position] != encounter_index &&
+			mendicant_within_reach(p) &&
 			mendicant_position_usable(encounter_index, (short)position, &positions[position]) &&
 			!mendicant_firing_position_owned(encounter_index, (short)position))
 		{
 			slot = COVER_CANDIDATES - 1;
-			while (slot > 0 && best_score[slot - 1] > distance)
+			while (slot > 0 && best_score[slot - 1] > rank)
 			{
 				best[slot] = best[slot - 1];
 				best_score[slot] = best_score[slot - 1];
+				best_mark[slot] = best_mark[slot - 1];
 				slot--;
 			}
 			best[slot] = position;
-			best_score[slot] = distance;
+			best_score[slot] = rank;
+			best_mark[slot] = mark;
 		}
 	}
 	chosen = best[0];
 	chosen_score = 1e30f;
+	chosen_mark = 0.0f;
 	for (slot = 0; slot < COVER_CANDIDATES && best[slot] >= 0; slot++)
 	{
 		/* distance in world units, against the cover bonus */
@@ -706,9 +721,11 @@ static boolean move_near(struct mendicant_member *member, real_point3d const *po
 		{
 			chosen_score = score;
 			chosen = best[slot];
+			chosen_mark = best_mark[slot];
 		}
 	}
-	if (chosen < 0 || chosen_score > radius)
+	/* (near enough by its own distance: the mark only ranks) */
+	if (chosen < 0 || chosen_score - chosen_mark > radius)
 	{
 		/* nothing of its own near enough: borrowed ground near the point */
 		int borrowed = mendicant_maneuver_near(point, radius);

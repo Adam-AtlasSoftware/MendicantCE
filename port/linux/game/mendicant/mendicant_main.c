@@ -448,6 +448,7 @@ static void mendicant_episode_start(
 	leashes, discipline, its counters and its random numbers */
 	mendicant_command_episode_reset(bridge->seed);
 	mendicant_grenades_episode_start(bridge->seed); /* (the grenade test's drops) */
+	mendicant_spacing_episode_start();
 	mendicant_episode_over = FALSE;
 	/* the AI Chief is left out: his reports stay "none" */
 	bridge->chief_actor = NONE;
@@ -499,6 +500,7 @@ static void mendicant_episode_end(
 			(!still && time - mendicant_last_sample_time[index] <= MENDICANT_ALIVE_TICKS);
 	}
 	bridge->end_time = time;
+	mendicant_spacing_report(); /* (its rows before the fight's end) */
 	if (mendicant_fire_file)
 	{
 		fprintf(mendicant_fire_file, "%ld,episode_end,-1,0,0,0,0,0,%ld,%ld,0,0\n", time,
@@ -823,13 +825,13 @@ static void mendicant_status_log(
 		"(%lu again at one time); drill passes %lu, units %lu; strategy %lu/%lu, per-enemy %lu/%lu, stances %lu/%lu "
 		"(Covenant/Marines); roles %lu, orders %lu; model choices moved %lu, held %lu, rejected %lu, late %lu; "
 		"bursts of their own %lu, first shots %lu, grenade reactions %lu, convoy assigned %lu, boarded %lu, "
-		"seated %lu",
+		"seated %lu; spacing searches %lu, steps apart %lu, re-picks %lu",
 		when, global_scenario_index != NONE ? tag_get_name(global_scenario_index) : "", status->last_time, status->ticks, status->repeated, status->jumps,
 		status->ai_updates, status->ai_repeated, status->drill_passes, status->units, status->strategy[0],
 		status->strategy[1], status->per_enemy[0], status->per_enemy[1], status->stances[0], status->stances[1],
 		status->roles, status->orders, status->moved, status->held, status->rejected, status->late, status->bursts,
 		status->first_shots, status->grenade_reactions, status->convoy_assigned, status->convoy_boarded,
-		status->convoy_seated);
+		status->convoy_seated, status->spacing_selections, status->spacing_steps, status->spacing_repicks);
 
 	return;
 }
@@ -881,6 +883,7 @@ void mendicant_initialize_for_new_map(
 	mendicant_combat_reset();
 	mendicant_firing_reset();
 	mendicant_grenades_reset();
+	mendicant_spacing_reset();
 	/* the models: loaded once, again when the file changes */
 	if (mendicant_config.models)
 		mendicant_runtime_load();
@@ -955,6 +958,7 @@ void mendicant_game_state_after_load(
 		mendicant_combat_reset();
 		mendicant_firing_reset();
 		mendicant_grenades_reset();
+		mendicant_spacing_reset();
 		mendicant_movement_revert();
 		/* the Covenant are drawn again; the Marines come back the same men */
 		mendicant_character_revert();
@@ -1021,6 +1025,7 @@ void mendicant_ai_update_end(
 	mendicant_character_update(game_time_get());
 	mendicant_firing_update(game_time_get());
 	mendicant_grenades_update(game_time_get());
+	mendicant_spacing_update(game_time_get());
 	mendicant_aim_release(); /* (an actor whose decision ran without its combat update) */
 	if (mendicant_training)
 		mendicant_training_update();
@@ -1216,6 +1221,29 @@ boolean mendicant_handle_lost_contact(
 	if (!mendicant_active || !mendicant_config.discipline)
 		return actor_action_handle_lost_contact(actor_index);
 	return mendicant_discipline_lost_contact(actor_index);
+}
+
+/* actor_select_firing_position: the soldier's own avoid points in place of
+the game's friend avoidance (TRUE), then his buddy's and shield wall's bonuses */
+boolean mendicant_firing_position_avoid(
+	long actor_index,
+	struct firing_position_evaluation_context *evaluation_context,
+	real friend_radius)
+{
+	if (!mendicant_active)
+		return FALSE;
+	return mendicant_spacing_avoid_points(actor_index, evaluation_context, friend_radius);
+}
+
+void mendicant_firing_position_bonus(
+	long actor_index,
+	struct firing_position_evaluation_context *evaluation_context,
+	short firing_position_count,
+	struct firing_position *firing_positions)
+{
+	if (!mendicant_active)
+		return;
+	mendicant_spacing_bonus(actor_index, evaluation_context, firing_position_count, firing_positions);
 }
 
 /* actor_action_try_to_throw_grenade's end: a throw it just ordered that would

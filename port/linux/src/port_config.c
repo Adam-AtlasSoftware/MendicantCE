@@ -1289,6 +1289,13 @@ static const struct config_setting config_settings[] =
 		"the wheel, the last seat he had when it is free), never parking in\n"
 		"front of his gun, and get out one by one when he does; a gunner stays\n"
 		"on the gun while an enemy is near. With no seat left, they stay put." },
+	{ "ai.mendicant.spacing", _config_boolean, "true", "HALO_AI_MENDICANT_SPACING", _environment_value, _platform_all,
+		"With the soldier character on: each soldier keeps his own distance\n"
+		"from his friends and from where they are going (Grunts in a herd,\n"
+		"Marines and Elites spread out), Marines and Grunts often in pairs,\n"
+		"Jackals in a shield line, and the squad spreads wider while a grenade,\n"
+		"a grenadier, a heavy weapon or a vehicle threatens it, regrouping\n"
+		"after. Hunters and the Flood unchanged." },
 	{ "ai.mendicant.bridge", _config_string, "\"\"", "HALO_AI_MENDICANT_BRIDGE", _environment_value, _platform_linux,
 		"A file the models are asked through instead (a trainer or brain.py maps\n"
 		"it); empty: the models in the game." },

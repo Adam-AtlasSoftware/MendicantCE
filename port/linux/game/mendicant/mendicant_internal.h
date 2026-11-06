@@ -162,7 +162,7 @@ struct mendicant_config
 {
 	boolean enabled, training, discipline, targeting, individuals, aim_difficulty, aim_moving,
 		aim_debug, vehicle_test, models, status, character, fire_personality, lost_target_search, friend_vehicles,
-		grenade_reactions, convoy;
+		grenade_reactions, convoy, spacing;
 	long training_skip, seed, quirks; /* quirks: MENDICANT_QUIRKS_OFF .. _LOUD */
 	real aim, marine_fire, command_radius, variety, personality;
 	real grenade_test; /* training: seconds between test grenades, 0 none */
@@ -200,6 +200,9 @@ struct mendicant_status
 	of their own, grenade reactions, the convoy's assignments, boardings and
 	seats */
 	unsigned long bursts, first_shots, grenade_reactions, convoy_assigned, convoy_boarded, convoy_seated;
+	/* the spacing: firing position searches given a soldier's own avoid
+	points, steps apart, positions given up when the threat jumped */
+	unsigned long spacing_selections, spacing_steps, spacing_repicks;
 };
 extern struct mendicant_status mendicant_status;
 extern boolean mendicant_active;         /* enabled, campaign or co-op, and this machine runs the AI */
@@ -315,6 +318,32 @@ short mendicant_grenades_react(long actor_index, boolean *escape_found, short *e
 	real_vector2d *alignment_vector);
 void mendicant_grenades_after_decide(long actor_index);
 void mendicant_grenades_update(long time);
+/* M6 spacing (mendicant_spacing.c): the bodies of the source hooks
+mendicant_firing_position_avoid and _bonus, the drill's marks (its
+move_near and mendicant_drill_position), and what the platform calls */
+struct firing_position_definition;
+#define MENDICANT_SPACING_CLAIMS 40
+struct mendicant_spacing_claims
+{
+	int count;
+	real radius;
+	real_point3d point[MENDICANT_SPACING_CLAIMS];
+	real room[MENDICANT_SPACING_CLAIMS]; /* each claim's radius */
+};
+void mendicant_spacing_reset(void);
+void mendicant_spacing_episode_start(void);
+void mendicant_spacing_report(void);    /* the fight's sstat rows (before episode_end) */
+void mendicant_spacing_update(long time);
+void mendicant_spacing_hurt(long unit_index, short category); /* a unit hurt: a grenade blast remembered */
+real mendicant_spacing_radius(long actor_index); /* world units; 0 when not his own */
+boolean mendicant_spacing_avoid_points(long actor_index,
+	struct firing_position_evaluation_context *evaluation_context, real friend_radius);
+void mendicant_spacing_bonus(long actor_index, struct firing_position_evaluation_context *evaluation_context,
+	short firing_position_count, struct firing_position *firing_positions);
+boolean mendicant_spacing_claims_begin(long actor_index, struct actor_datum *actor, long const *used,
+	struct firing_position_definition const *positions, int position_count, struct mendicant_spacing_claims *claims);
+real mendicant_spacing_claims_penalty(struct mendicant_spacing_claims const *claims, real_point3d const *point);
+void mendicant_spacing_fallback_point(long actor_index, struct actor_datum *actor, real_point3d *point); /* the drill's free movement */
 
 /* M1 runtime (mendicant_models.c) needs from M2 command: the doctrine as
 the decision mask reads it (mendicant_doctrine.h stays private to M2) */
@@ -471,6 +500,7 @@ enum { GO_STATUS_NONE = 0, GO_STATUS_MOVING, GO_STATUS_ARRIVED, GO_STATUS_YIELDI
 int actor_go_to(long actor_index, real_point3d const *point, real tolerance, int urgency);
 int actor_go_status(long actor_index);
 void actor_go_cancel(long actor_index);
+boolean actor_go_goal(long actor_index, real_point3d *goal); /* the order's goal on the ground; FALSE none */
 void mendicant_follow_cancel(long actor_index);
 int mendicant_line_blocked(real_point3d const *from, real_point3d const *to); /* -1 no BSP, 0 clear, 1 blocked */
 boolean mendicant_ground_under(real_point3d const *point, real_point3d *ground); /* the structure within 6 below */

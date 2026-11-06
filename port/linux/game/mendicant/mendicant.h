@@ -73,6 +73,16 @@ short mendicant_select_firing_position(long actor_index,
 void mendicant_guard_position(long actor_index, short *firing_position_index,
 	long *previous_owner, boolean *cached_path_available);
 
+/* spacing (actor_firing_position.c's actor_select_firing_position): in
+place of the game's friend avoidance, the soldier's own avoid points (TRUE:
+the game's skipped; friend_radius his definition's), and after the
+pre-evaluators the buddy's and shield wall's bonuses on the candidates */
+boolean mendicant_firing_position_avoid(long actor_index,
+	struct firing_position_evaluation_context *evaluation_context, real friend_radius);
+void mendicant_firing_position_bonus(long actor_index,
+	struct firing_position_evaluation_context *evaluation_context,
+	short firing_position_count, struct firing_position *firing_positions);
+
 /* movement (actor_moving.c): TRUE when an ordered actor went to its
 waypoint instead; *result is then what the entry returns */
 boolean mendicant_move_redirect(short kind, long actor_index, real_point3d const *point, boolean *result);
