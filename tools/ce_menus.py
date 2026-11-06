@@ -685,6 +685,8 @@ PORT_PICTURE_GROUPS = [
     lambda: port_settings.pause_pictures(),
     lambda: port_settings.settings_pictures(),
     lambda: port_settings.parts_pictures() + port_settings.campaign_pictures(),
+    # (Forge's FORGE, in the redraws' letters, which svg/ has a copy of)
+    lambda: port_settings.forge_pictures(MENUS / "svg"),
 ]
 
 
@@ -864,6 +866,8 @@ def main() -> None:
     # mods' status icons: Lucide's, port/assets/icons/lucide)
     lines.append(art.port_picture("main_menu/menu_training",
                                   port_settings.menu_item_frames("VR TUTORIAL", art.redraws)))
+    # (Forge's FORGE, game.forge's: port_settings._forge)
+    lines += [art.port_picture(name, frames) for name, frames in port_settings.forge_pictures(art.redraws)]
     lines.append(art.port_picture("mods/status", port_settings.mod_status_frames(ROOT / "port/assets/icons/lucide")))
     lines.append(art.port_picture("mods/status_small",
                                   port_settings.mod_status_frames(ROOT / "port/assets/icons/lucide", 16)))

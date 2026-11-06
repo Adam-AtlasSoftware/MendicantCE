@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Forge's main menu item (SaftiGlas's), in the PC version's style (tools/port_settings.py) -->
+<menus>
+	<widget name="main_menu/main_menu_item_forge" type="text" width="256" height="33" bitmap="main_menu/menu_forge">
+		<on event="a" run="port forge begin" open="main_menu/multiplayer_type_select/connected/connected_map_select_wrapper"/>
+		<on event="start" run="port forge begin" open="main_menu/multiplayer_type_select/connected/connected_map_select_wrapper"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
+	</widget>
+</menus>
