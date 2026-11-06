@@ -89,7 +89,8 @@ static const struct field pixel_fields[] = {
 lighting (lights, world's transform found), ct the targets (multisampled,
 screen colour), cd the dynamic lights
 (present, the lightmap pass), ch the HDR tag's (category, 3D view, kind),
-cw the world's occlusion's light (a recording without it: none) */
+cw the world's occlusion's light (a recording without it: none), cf its
+window found once a pixel by the pre-pass (none) */
 static const struct field context_fields[] = {
 	CONTEXT_FIELD("cl", lights, 1, 2),
 	CONTEXT_FIELD("ct", multisampled, 1, 2),
@@ -97,6 +98,7 @@ static const struct field context_fields[] = {
 	CONTEXT_FIELD("ch", hdr_category, 1, 2),
 	CONTEXT_FIELD("ck", hdr_kind, 2, 1),
 	CONTEXT_FIELD("cw", world, 1, 1),
+	CONTEXT_FIELD("cf", found, 1, 1),
 };
 
 #define FIELD_COUNT(fields) (sizeof(fields) / sizeof((fields)[0]))
@@ -886,6 +888,35 @@ int xgpu_manifest_derive(const struct xgpu_manifest_draw *draw, const struct xgp
 	derived->key.pixel.dynamic_lights = parts.dynamic_lights;
 	derived->key.pixel.ambient_occlusion = parts.ambient_occlusion;
 	return lit;
+}
+
+int xgpu_manifest_world_ao_forms(const struct xgpu_manifest_draw *derived, const struct xgpu_manifest_context *context,
+	const struct xgpu_manifest_settings *settings, struct xgpu_manifest_draw forms[XGPU_MANIFEST_WORLD_AO_FORMS])
+{
+	struct xgpu_stream_pipeline_define twin;
+	uint8_t occlusion = derived->key.pixel.ambient_occlusion;
+	int count = 0;
+
+	forms[count++] = *derived;
+	/* (the pre-pass draws only a found window, with "world" on:
+	d3d8_device.c's world_ao_twins) */
+	if (!context->found || settings->ambient_occlusion != XGPU_MANIFEST_OCCLUSION_WORLD)
+		return count;
+	memset(&twin, 0, sizeof(twin));
+	twin.key = derived->key;
+	if ((occlusion & 0x30u) == XGPU_AMBIENT_OCCLUSION_WORLD)
+	{
+		forms[count] = *derived;
+		forms[count].key.pixel.ambient_occlusion = (uint8_t)(occlusion | XGPU_AMBIENT_OCCLUSION_WORLD_SAMPLED);
+		twin.key = forms[count++].key;
+	}
+	twin.pixel_program.ambient_occlusion = twin.key.pixel.ambient_occlusion;
+	if (xgpu_stream_world_ao_twin(&twin))
+	{
+		forms[count] = *derived;
+		forms[count++].key = twin.key;
+	}
+	return count;
 }
 
 /* ---------- the recorder */

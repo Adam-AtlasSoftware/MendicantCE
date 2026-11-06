@@ -86,7 +86,8 @@ multisampling the pre-pass and the occlusion are a pixel's (at its centre, as th
 Pipelines: the pass's is made with a map's (`prepass_prepare`), and so are the twins
 ([Pipelines](#pipelines-in-the-maps-preparation)). One missed is made on the compilers, never waited for: its
 draw reads 1 until it is. The
-Mac's library holds each world draw's three forms (`xgpu_metal_prebuild.c`).
+Mac's library holds each form a map's preparation makes, derived from the manifest
+(`xgpu_manifest_world_ao_forms`): the inline and sampled draws, their twins, and the occluders' twins.
 
 ## The scene (`world_scene.h`)
 
@@ -698,7 +699,11 @@ the front end gives the draws the keys they will have in play from their window'
   manifest notes it as it would be with `"world"` on (context `cw`), from the window's span as the game draws it,
   whatever the setting and while a map is prepared; the journal keeps the span (`world_span`, form 6). The Mac's
   and iOS's library is built under `"world"` too (`XGPU_MANIFEST_OCCLUSION_WORLD`), so the world's shaders are in
-  it. `debug.world_ao_view`'s aren't (a debug view, compiled at its first draw).
+  it. The manifest also notes a draw's window found once a pixel (context `cf`, the first-person weapon's
+  too), so the library has the sampled forms, their twins and the occluders' twins (the weapon's, a
+  self-illuminated surface's) that the preparation makes. Before, the occluders' were missing: 5 of a30's were
+  compiled as it prepared on the Mac. `debug.world_ao_view`'s aren't in it (a debug view, compiled at its
+  first draw).
 
 The backends' `world_ao_window` and `world_ao_field` callbacks are still unset, so the records are decoded and
 ignored.

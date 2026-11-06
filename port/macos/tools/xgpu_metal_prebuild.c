@@ -425,41 +425,19 @@ int main(int argc, char **argv)
 			for (unlit = 0, lit = 1; unlit < 2 && lit; unlit++)
 			{
 				struct xgpu_manifest_draw derived;
-				int form;
+				struct xgpu_manifest_draw forms[XGPU_MANIFEST_WORLD_AO_FORMS];
+				int form, form_count;
 
 				lit = xgpu_manifest_derive(&manifest.draws[index], &manifest.contexts[index], &settings, unlit, &derived);
-				/* (display.ambient_occlusion "world"'s draw in each of its forms:
-				finding its occlusion itself, reading it found once a pixel, and
-				that's twin in the pre-pass; another's twin as an occluder in the
-				pre-pass: xgpu_stream.h) */
-				for (form = 0; form < 3; form++)
+				/* (display.ambient_occlusion "world"'s forms of it: finding its
+				occlusion itself, reading it found once a pixel, and the
+				pre-pass's twin, or another's as an occluder: xgpu_manifest.h) */
+				form_count = xgpu_manifest_world_ao_forms(&derived, &manifest.contexts[index], &settings, forms);
+				for (form = 0; form < form_count; form++)
 				{
 				struct xgpu_metal_pipeline_state_key state;
-				struct xgpu_manifest_draw draw = derived;
+				struct xgpu_manifest_draw draw = forms[form];
 
-				if (form)
-				{
-					struct xgpu_stream_pipeline_define twin;
-					int world = (draw.key.pixel.ambient_occlusion & 0x30u) == XGPU_AMBIENT_OCCLUSION_WORLD;
-
-					/* (another draw among a window's opaque surfaces': its twin as
-					an occluder, where it is one) */
-					if (!world && (form == 1 || !manifest.contexts[index].world))
-						continue;
-					if (world)
-						draw.key.pixel.ambient_occlusion |= XGPU_AMBIENT_OCCLUSION_WORLD_SAMPLED;
-					else if (draw.key.pixel.ambient_occlusion)
-						break;
-					if (form == 2)
-					{
-						memset(&twin, 0, sizeof(twin));
-						twin.key = draw.key;
-						twin.pixel_program.ambient_occlusion = draw.key.pixel.ambient_occlusion;
-						if (!xgpu_stream_world_ao_twin(&twin))
-							break;
-						draw.key = twin.key;
-					}
-				}
 				if (!derived_new(&draw))
 					continue;
 				derived_count++;
