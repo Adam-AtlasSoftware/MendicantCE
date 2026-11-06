@@ -119,6 +119,7 @@ the way put back (playback_seek_chase); back, once it is let go.
 #include "sound/sound_manager.h"
 #include "network_distributed.h"
 #include "network_replay.h"
+#include "network_standard.h"
 
 #include <math.h>
 #include <pthread.h>
@@ -1066,8 +1067,16 @@ boolean network_replay_watch(
 	if (!network_replay_network_version_playable(network_version))
 	{
 		fclose(file);
-		snprintf(why, (size_t)why_size, "This replay is of network version %lu; this build plays %d.",
-			network_version, HALO_PORT_NETWORK_VERSION);
+		if (network_version & HALO_PORT_STANDARD_VERSION_BIT)
+		{
+			snprintf(why, (size_t)why_size, "This replay is of OpenH1 protocol %lu; this build plays %d.",
+				network_version & ~(unsigned long)HALO_PORT_STANDARD_VERSION_BIT, HALO_PORT_STANDARD_NETWORK_VERSION);
+		}
+		else
+		{
+			snprintf(why, (size_t)why_size, "This replay is of network version %lu; this build plays %d.",
+				network_version, HALO_PORT_NETWORK_VERSION);
+		}
 		return FALSE;
 	}
 	/* (the header kept as the records' start, as the file has it; the
@@ -1121,6 +1130,10 @@ boolean network_replay_watch(
 	playback.setting_up = TRUE;
 	dispose_global_network_game_server();
 	dispose_global_network_game_client();
+	/* port (OpenH1): an OpenH1 game's replay plays as a client that joined
+	an OpenH1 game: at the rate its game record has (sim_rate.c's
+	sim_rate_network), its sub-steps and OpenH1's messages read as such */
+	network_standard_client_joining((network_version & HALO_PORT_STANDARD_VERSION_BIT) != 0, NULL, 0);
 	if (!create_global_network_game_client() || !network_game_client_port_replay_begin(&game))
 	{
 		snprintf(why, (size_t)why_size, "The replay's game cannot be set up.");
@@ -1138,6 +1151,10 @@ boolean network_replay_watch(
 boolean network_replay_network_version_playable(
 	unsigned long network_version)
 {
+	/* port (OpenH1): an OpenH1 game's replay (network_replay.c), of this
+	build's protocol alone: its messages change with each */
+	if (network_version & HALO_PORT_STANDARD_VERSION_BIT)
+		return network_version == HALO_PORT_STANDARD_ADVERTISED_VERSION;
 	return network_version >= REPLAY_OLDEST_NETWORK_VERSION && network_version <= HALO_PORT_NETWORK_VERSION;
 }
 
@@ -1244,6 +1261,8 @@ void network_replay_playback_stop(
 	{
 		error(_error_log, "replay: stopped");
 		playback_theater_wanted = TRUE;
+		/* port (OpenH1): no OpenH1 game joined now (as the next join says) */
+		network_standard_client_joining(FALSE, NULL, 0);
 	}
 	playback_free();
 }

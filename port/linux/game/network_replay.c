@@ -46,6 +46,7 @@ as a recording starts).
 #include "game/players.h"
 #include "network_distributed.h"
 #include "network_replay.h"
+#include "network_standard.h"
 #include "../src/posix.h" /* port: port/linux/src/posix.c */
 
 #include <stdio.h>
@@ -475,7 +476,11 @@ static boolean replay_start(
 	setvbuf(replay.file, replay.buffer, _IOFBF, sizeof(replay.buffer));
 	csmemcpy(header, REPLAY_MAGIC, 8);
 	replay_put_long(header + 8, REPLAY_FORMAT);
-	replay_put_long(header + 12, HALO_PORT_NETWORK_VERSION);
+	/* port (OpenH1): an OpenH1 game's (a Standard game's: its rate agreed)
+	its protocol's version as its advertisement has it, which SlipstreamCE
+	and OpenCE take for a newer version than theirs and do not play */
+	replay_put_long(header + 12, network_standard_agreed_rate() ?
+		HALO_PORT_STANDARD_ADVERTISED_VERSION : HALO_PORT_NETWORK_VERSION);
 	replay_put_long(header + 16, (unsigned long)number);
 	replay_put_long(header + 20, TICKS_PER_SECOND);
 	replay_put_long(header + 24, (unsigned long)game_time_get());
@@ -701,8 +706,16 @@ boolean network_replay_info(
 	}
 	if (!network_replay_network_version_playable(network_version))
 	{
-		snprintf(info->why, sizeof(info->why), "Recorded by a build of network version %lu: this one plays %d.",
-			network_version, HALO_PORT_NETWORK_VERSION);
+		if (network_version & HALO_PORT_STANDARD_VERSION_BIT)
+		{
+			snprintf(info->why, sizeof(info->why), "Recorded by a build of OpenH1 protocol %lu: this one plays %d.",
+				network_version & ~(unsigned long)HALO_PORT_STANDARD_VERSION_BIT, HALO_PORT_STANDARD_NETWORK_VERSION);
+		}
+		else
+		{
+			snprintf(info->why, sizeof(info->why), "Recorded by a build of network version %lu: this one plays %d.",
+				network_version, HALO_PORT_NETWORK_VERSION);
+		}
 		return FALSE;
 	}
 	info->playable = TRUE;

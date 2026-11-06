@@ -45,6 +45,17 @@ BATCH_TYPE = "batch"
 HEADER_FILE = Path(__file__).resolve().parent.parent / "port/linux/game/network_distributed.h"
 
 
+
+# (OpenH1) an OpenH1 game's replay has its protocol's version, as its
+# advertisement does: HALO_PORT_STANDARD_VERSION_BIT and the version
+STANDARD_VERSION_BIT = 0x8000
+
+
+def network_version_text(version):
+    if version & STANDARD_VERSION_BIT:
+        return f"OpenH1 protocol {version & ~STANDARD_VERSION_BIT}"
+    return f"network version {version}"
+
 def message_names(header_file: Path = HEADER_FILE) -> Dict[int, str]:
     """The distributed message types' names, by number, from the enum that
     _distributed_message_player_prediction begins."""
@@ -211,7 +222,7 @@ def report(path: str, replay: Replay, stats: Stats) -> str:
     lines = [
         f"{path}",
         f"  the file: {_size(replay.file_size)}" + (" (its records zlibbed in it, format 3)" if h.format >= 3 else ""),
-        f"  {h.map} ({h.variant or 'no variant'}), network version {h.network_version}, build {h.build}"
+        f"  {h.map} ({h.variant or 'no variant'}), {network_version_text(h.network_version)}, build {h.build}"
         f" {h.version}, replay format {h.format}" + (" (cut short: the game did not finish writing it)"
                                                      if replay.truncated else ""),
         f"  {stats.seconds:,.0f} seconds, {len(replay.records):,} records",
