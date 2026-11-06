@@ -4,13 +4,15 @@ MENU_SHAPES.C
 Shapes the port draws at the display's resolution rather than from a
 picture: a box with rounded corners, filled and edged (the prompts' key
 caps, port/linux/game/hud_key_prompts.c; the name keyboard's panels and
-keys, source/interface/virtual_keyboard.c), a text field's caret (a bar
-about the capitals, source/interface/ui_widget.c), and a band shaded from one
-colour at its top to another at its bottom (the name keyboard's backdrop,
-as the menus' bitmaps\gradient has it). Each is drawn as quadrilaterals of
-the maps' white texture (the game globals' default textures), their
-corners in the display's pixels, so that it is as sharp at any resolution
-as the high-res text drawn with it.
+keys, source/interface/virtual_keyboard.c), a picture with its corners cut
+round (a menu bitmap's radius: the campaign's mission pictures,
+source/interface/ui_widget.c), a text field's caret (a bar about the
+capitals, source/interface/ui_widget.c), and a band shaded from one colour
+at its top to another at its bottom (the name keyboard's backdrop, as the
+menus' bitmaps\gradient has it). Each is drawn as quadrilaterals of the
+maps' white texture (the game globals' default textures), or of the
+picture's, their corners in the display's pixels, so that it is as sharp
+at any resolution as the high-res text drawn with it.
 
 Only what this machine draws: nothing is sent.
 */
@@ -34,6 +36,8 @@ void menu_shape_rounded_box_pixels(real x0, real y0, real x1, real y1, real radi
 	pixel32 color);
 void menu_shape_rounded_box(real x0, real y0, real x1, real y1, real radius, real edge, pixel32 fill,
 	pixel32 color);
+void menu_shape_rounded_picture(struct bitmap_data *bitmap, real x0, real y0, real x1, real y1, real u0, real v0,
+	real u1, real v1, real radius, pixel32 color);
 void menu_shape_band(real x0, real y0, real x1, real y1, pixel32 top, pixel32 bottom);
 void menu_shape_caret(real x, real y0, real y1, real width, pixel32 color);
 real menu_shape_pixels(void);
@@ -59,10 +63,20 @@ static struct bitmap_data *menu_shape_white(void)
 		struct bitmap_data);
 }
 
+/* a picture's texture laid over a shape: the texture's coordinates (u0, v0)
+at the display's pixel x0, y0 and (u1, v1) at x1, y1, each corner's between
+them where it falls (NULL: the maps' white texture, its coordinates 0) */
+struct menu_shape_texture
+{
+	struct bitmap_data *bitmap;
+	real x0, y0, x1, y1;
+	real u0, v0, u1, v1;
+};
+
 /* a quadrilateral, its corners in the display's pixels and their colours,
-the colours blended between them */
-static void menu_shape_quad(struct bitmap_data *white, real pixels, real const x[4], real const y[4],
-	pixel32 const color[4])
+the colours blended between them, of the white texture or a picture's */
+static void menu_shape_quad(struct bitmap_data *white, struct menu_shape_texture const *texture, real pixels,
+	real const x[4], real const y[4], pixel32 const color[4])
 {
 	struct rasterizer_dynamic_screen_geometry_parameters parameters;
 	struct dynamic_screen_vertex vertices[4];
@@ -72,12 +86,14 @@ static void menu_shape_quad(struct bitmap_data *white, real pixels, real const x
 	{
 		vertices[index].position.x = x[index] / pixels + MENU_SHAPE_PIXEL_ORIGIN;
 		vertices[index].position.y = y[index] / pixels + MENU_SHAPE_PIXEL_ORIGIN;
-		vertices[index].texture_coordinates.x = 0.0f;
-		vertices[index].texture_coordinates.y = 0.0f;
+		vertices[index].texture_coordinates.x = !texture ? 0.0f :
+			texture->u0 + (x[index] - texture->x0) * (texture->u1 - texture->u0) / (texture->x1 - texture->x0);
+		vertices[index].texture_coordinates.y = !texture ? 0.0f :
+			texture->v0 + (y[index] - texture->y0) * (texture->v1 - texture->v0) / (texture->y1 - texture->y0);
 		vertices[index].color = color[index];
 	}
 	csmemset(&parameters, 0, sizeof(parameters));
-	parameters.map[0] = white;
+	parameters.map[0] = texture ? texture->bitmap : white;
 	parameters.map_texture_scale[0].i = parameters.map_texture_scale[0].j = 1.0f;
 	parameters.map_scale[0].i = parameters.map_scale[0].j = 1.0f;
 	rasterizer_globals.current_lock_operation = _rasterizer_lock_cinematics;
@@ -85,8 +101,8 @@ static void menu_shape_quad(struct bitmap_data *white, real pixels, real const x
 	rasterizer_globals.current_lock_operation = _rasterizer_lock_none;
 }
 
-static void menu_shape_rectangle(struct bitmap_data *white, real pixels, real x0, real y0, real x1, real y1,
-	pixel32 top, pixel32 bottom)
+static void menu_shape_rectangle(struct bitmap_data *white, struct menu_shape_texture const *texture, real pixels,
+	real x0, real y0, real x1, real y1, pixel32 top, pixel32 bottom)
 {
 	real x[4], y[4];
 	pixel32 colors[4];
@@ -99,19 +115,22 @@ static void menu_shape_rectangle(struct bitmap_data *white, real pixels, real x0
 	x[3] = x0; y[3] = y1;
 	colors[0] = colors[1] = top;
 	colors[2] = colors[3] = bottom;
-	menu_shape_quad(white, pixels, x, y, colors);
+	menu_shape_quad(white, texture, pixels, x, y, colors);
 }
 
 /* a corner's band between two radii about its centre (from the centre for
 inner 0), towards side_x and side_y, its colour at each radius */
-static void menu_shape_corner(struct bitmap_data *white, real pixels, real center_x, real center_y,
-	real side_x, real side_y, real inner, real outer, pixel32 inner_color, pixel32 outer_color, short segments)
+static void menu_shape_corner(struct bitmap_data *white, struct menu_shape_texture const *texture, real pixels,
+	real center_x, real center_y, real side_x, real side_y, real inner, real outer, pixel32 inner_color,
+	pixel32 outer_color, short segments)
 {
 	/* (each quadrilateral's corners turning the same way as the
 	rectangles', which the renderer may cull otherwise) */
 	short turn = side_x * side_y < 0.0f ? 1 : 0;
 	short segment;
 
+	if (outer <= inner)
+		return;
 	for (segment = 0; segment < segments; segment++)
 	{
 		real angle0 = (real)(segment + turn) * (0.5f * (real)M_PI) / segments;
@@ -129,7 +148,74 @@ static void menu_shape_corner(struct bitmap_data *white, real pixels, real cente
 		y[3] = center_y + side_y * inner * sinf(angle0);
 		colors[0] = colors[1] = outer_color;
 		colors[2] = colors[3] = inner_color;
-		menu_shape_quad(white, pixels, x, y, colors);
+		menu_shape_quad(white, texture, pixels, x, y, colors);
+	}
+}
+
+/* a rounded box in the display's pixels (its sides on their edges, its
+corners' radius whole pixels), filled with fill (of a picture's texture,
+or white), and edged edge pixels wide in color (none for 0). Everything is
+inside the box: the curves' edges are blended over their last pixel, inside
+the radius, so that a corner meets its straight sides with none of it past
+them (issue 596: a cap's corners stood a pixel past its edges) */
+static void menu_shape_rounded(struct bitmap_data *white, struct menu_shape_texture const *texture, real pixels,
+	real x0, real y0, real x1, real y1, real radius, real edge, pixel32 fill, pixel32 color)
+{
+	static real const sides[4][2] = { { -1.0f, -1.0f }, { 1.0f, -1.0f }, { 1.0f, 1.0f }, { -1.0f, 1.0f } };
+	boolean edged = edge > 0.0f && (color >> 24) != 0;
+	pixel32 rim = edged ? color : fill;
+	pixel32 clear = rim & 0x00FFFFFFUL;
+	real solid;
+	short segments, corner;
+
+	radius = MIN(radius, floorf(MIN(x1 - x0, y1 - y0) / 2.0f));
+	if (edged)
+		radius = MAX(radius, edge + 1.0f);
+	else
+		edge = 0.0f;
+	radius = MAX(radius, 0.0f);
+	if (x1 - x0 < 2.0f * radius || y1 - y0 < 2.0f * radius || x1 <= x0 || y1 <= y0)
+		return;
+	/* (enough segments that a curve looks round at any size) */
+	segments = (short)MAX(2, MIN(8, (long)(radius / 2.0f)));
+	/* (the fill's corners solid out to the edge, or to the curve's last
+	pixel) */
+	solid = edged ? radius - edge : MAX(radius - 1.0f, 0.0f);
+
+	/* the fill: the middle, above and below it, and the corners */
+	menu_shape_rectangle(white, texture, pixels, x0, y0 + radius, x1, y1 - radius, fill, fill);
+	menu_shape_rectangle(white, texture, pixels, x0 + radius, y0, x1 - radius, y0 + radius, fill, fill);
+	menu_shape_rectangle(white, texture, pixels, x0 + radius, y1 - radius, x1 - radius, y1, fill, fill);
+	/* the edge over it: the four sides, between the corners */
+	if (edged)
+	{
+		menu_shape_rectangle(white, NULL, pixels, x0 + radius, y0, x1 - radius, y0 + edge, color, color);
+		menu_shape_rectangle(white, NULL, pixels, x0 + radius, y1 - edge, x1 - radius, y1, color, color);
+		menu_shape_rectangle(white, NULL, pixels, x0, y0 + radius, x0 + edge, y1 - radius, color, color);
+		menu_shape_rectangle(white, NULL, pixels, x1 - edge, y0 + radius, x1, y1 - radius, color, color);
+	}
+	for (corner = 0; corner < 4 && radius > 0.0f; corner++)
+	{
+		real center_x = sides[corner][0] < 0.0f ? x0 + radius : x1 - radius;
+		real center_y = sides[corner][1] < 0.0f ? y0 + radius : y1 - radius;
+
+		menu_shape_corner(white, texture, pixels, center_x, center_y, sides[corner][0], sides[corner][1],
+			0.0f, solid, fill, fill, segments);
+		if (edged)
+		{
+			/* (the edge blended into the fill over a pixel, then solid to
+			the curve's last pixel) */
+			if (solid >= 1.0f)
+			{
+				menu_shape_corner(white, NULL, pixels, center_x, center_y, sides[corner][0], sides[corner][1],
+					solid - 1.0f, solid, color & 0x00FFFFFFUL, color, segments);
+			}
+			menu_shape_corner(white, NULL, pixels, center_x, center_y, sides[corner][0], sides[corner][1],
+				solid, radius - 1.0f, color, color, segments);
+		}
+		/* (the curve's last pixel blended to nothing, inside the radius) */
+		menu_shape_corner(white, edged ? NULL : texture, pixels, center_x, center_y, sides[corner][0],
+			sides[corner][1], radius - 1.0f, radius, rim, clear, segments);
 	}
 }
 
@@ -151,7 +237,8 @@ real menu_shape_pixels(void)
 
 /* a box in the display's pixels (its sides on their edges), its corners
 rounded by radius pixels: filled, edged edge pixels wide (none for 0, or
-a colour of no alpha), the curves' edges blended over a pixel */
+a colour of no alpha), the curves' edges blended over their last pixel
+(menu_shape_rounded) */
 void menu_shape_rounded_box_pixels(
 	real x0,
 	real y0,
@@ -162,60 +249,11 @@ void menu_shape_rounded_box_pixels(
 	pixel32 fill,
 	pixel32 color)
 {
-	static real const sides[4][2] = { { -1.0f, -1.0f }, { 1.0f, -1.0f }, { 1.0f, 1.0f }, { -1.0f, 1.0f } };
 	struct bitmap_data *white = menu_shape_white();
-	real pixels = menu_shape_pixels();
-	boolean edged = edge > 0.0f && (color >> 24) != 0;
-	pixel32 clear = (edged ? color : fill) & 0x00FFFFFFUL;
-	pixel32 rim = edged ? color : fill;
-	short segments, corner;
 
 	if (!white)
 		return;
-	radius = MIN(radius, floorf(MIN(x1 - x0, y1 - y0) / 2.0f));
-	if (edged)
-		radius = MAX(radius, edge);
-	else
-		edge = 0.0f;
-	radius = MAX(radius, 0.0f);
-	if (x1 - x0 < 2.0f * radius || y1 - y0 < 2.0f * radius || x1 <= x0 || y1 <= y0)
-		return;
-	/* (enough segments that a curve looks round at any size) */
-	segments = (short)MAX(2, MIN(8, (long)(radius / 2.0f)));
-
-	/* the fill: the middle, above and below it, and the corners */
-	menu_shape_rectangle(white, pixels, x0, y0 + radius, x1, y1 - radius, fill, fill);
-	menu_shape_rectangle(white, pixels, x0 + radius, y0, x1 - radius, y0 + radius, fill, fill);
-	menu_shape_rectangle(white, pixels, x0 + radius, y1 - radius, x1 - radius, y1, fill, fill);
-	/* the edge over it: the four sides, between the corners */
-	if (edged)
-	{
-		menu_shape_rectangle(white, pixels, x0 + radius, y0, x1 - radius, y0 + edge, color, color);
-		menu_shape_rectangle(white, pixels, x0 + radius, y1 - edge, x1 - radius, y1, color, color);
-		menu_shape_rectangle(white, pixels, x0, y0 + radius, x0 + edge, y1 - radius, color, color);
-		menu_shape_rectangle(white, pixels, x1 - edge, y0 + radius, x1, y1 - radius, color, color);
-	}
-	for (corner = 0; corner < 4 && radius > 0.0f; corner++)
-	{
-		real center_x = sides[corner][0] < 0.0f ? x0 + radius : x1 - radius;
-		real center_y = sides[corner][1] < 0.0f ? y0 + radius : y1 - radius;
-
-		menu_shape_corner(white, pixels, center_x, center_y, sides[corner][0], sides[corner][1],
-			0.0f, radius, fill, fill, segments);
-		if (edged)
-		{
-			menu_shape_corner(white, pixels, center_x, center_y, sides[corner][0], sides[corner][1],
-				radius - edge, radius, color, color, segments);
-		}
-		/* (the curves' edges blended: outside the edge, and inside it) */
-		menu_shape_corner(white, pixels, center_x, center_y, sides[corner][0], sides[corner][1],
-			radius, radius + 1.0f, rim, clear, segments);
-		if (edged && radius - edge >= 1.0f)
-		{
-			menu_shape_corner(white, pixels, center_x, center_y, sides[corner][0], sides[corner][1],
-				radius - edge - 1.0f, radius - edge, clear, color, segments);
-		}
-	}
+	menu_shape_rounded(white, NULL, menu_shape_pixels(), x0, y0, x1, y1, radius, edge, fill, color);
 }
 
 /* a box in the screen's units (x from the menus' 640's left, which a wide
@@ -245,6 +283,46 @@ void menu_shape_rounded_box(
 		color);
 }
 
+/* a picture (a frame's texture, from u0, v0 at its top left to u1, v1 at
+its bottom right) drawn over a box in the screen's units, its corners cut
+round by radius units, the curves' edges blended over their last pixel:
+its own corners never show past them, and nothing is drawn over them (the
+campaign's mission pictures, issue 687: a picture of what is around a
+square one's corners drawn over them showed it through, and missed where
+the picture moved). The color tints and fades it, as a widget's picture */
+void menu_shape_rounded_picture(
+	struct bitmap_data *bitmap,
+	real x0,
+	real y0,
+	real x1,
+	real y1,
+	real u0,
+	real v0,
+	real u1,
+	real v1,
+	real radius,
+	pixel32 color)
+{
+	struct menu_shape_texture texture;
+	real pixels = menu_shape_pixels();
+
+	if (!bitmap)
+		return;
+	texture.bitmap = bitmap;
+	texture.x0 = menu_shape_pixel_edge(x0, pixels);
+	texture.y0 = menu_shape_pixel_edge(y0, pixels);
+	texture.x1 = menu_shape_pixel_edge(x1, pixels);
+	texture.y1 = menu_shape_pixel_edge(y1, pixels);
+	texture.u0 = u0;
+	texture.v0 = v0;
+	texture.u1 = u1;
+	texture.v1 = v1;
+	if (texture.x1 <= texture.x0 || texture.y1 <= texture.y0)
+		return;
+	menu_shape_rounded(NULL, &texture, pixels, texture.x0, texture.y0, texture.x1, texture.y1,
+		floorf(radius * pixels + 0.5f), 0.0f, color, 0);
+}
+
 /* a band in the screen's units, its colour top at its top shading to
 bottom at its bottom, its sides on the display's pixels' edges */
 void menu_shape_band(
@@ -260,7 +338,7 @@ void menu_shape_band(
 
 	if (!white)
 		return;
-	menu_shape_rectangle(white, pixels, menu_shape_pixel_edge(x0, pixels), menu_shape_pixel_edge(y0, pixels),
+	menu_shape_rectangle(white, NULL, pixels, menu_shape_pixel_edge(x0, pixels), menu_shape_pixel_edge(y0, pixels),
 		menu_shape_pixel_edge(x1, pixels), menu_shape_pixel_edge(y1, pixels), top, bottom);
 }
 
@@ -288,6 +366,6 @@ void menu_shape_caret(
 	top = menu_shape_pixel_edge(origin_y + (y0 - origin_y) * scale, pixels);
 	bottom = menu_shape_pixel_edge(origin_y + (y1 - origin_y) * scale, pixels);
 	shadow = MAX(floorf(scale * pixels + 0.5f), 1.0f);
-	menu_shape_rectangle(white, pixels, left + shadow, top + shadow, right + shadow, bottom + shadow, dark, dark);
-	menu_shape_rectangle(white, pixels, left, top, right, bottom, color, color);
+	menu_shape_rectangle(white, NULL, pixels, left + shadow, top + shadow, right + shadow, bottom + shadow, dark, dark);
+	menu_shape_rectangle(white, NULL, pixels, left, top, right, bottom, color, color);
 }

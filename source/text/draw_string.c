@@ -258,8 +258,12 @@ static struct
 	rectangle2d bounds;
 	struct font_header *last_font_header;
 	/* port: the letters' bounds where they are drawn: the high-res text's
-	glyphs where it draws them (draw_unicode_string_compute_drawn_bounds) */
+	glyphs where it draws them (draw_unicode_string_compute_drawn_bounds),
+	and their ink's left and right in fractions of a unit
+	(draw_unicode_string_drawn_span) */
 	boolean drawn;
+	real drawn_left;
+	real drawn_right;
 } text_bounds_globals = { 0 };
 
 /* port: rasterizer_text.c: where the high-res text draws a font tag's
@@ -267,6 +271,8 @@ character whose bitmap is drawn from x0 (from its column x), its ink's left
 and right; FALSE where it does not draw it (it is drawn from the bitmap) */
 boolean rasterizer_text_port_drawn_span(struct font_character const *character, short x0, short x, short *left,
 	short *right);
+boolean rasterizer_text_port_drawn_span_real(struct font_character const *character, short x0, short x, real *left,
+	real *right);
 
 static struct font_drawing_globals font_drawing_globals = { 0 };
 
@@ -335,7 +341,17 @@ static void text_bounds_draw_character(
 	character's advance, not the tag's bitmap's columns (whose blank ones
 	are not the drawn letter's) */
 	if (text_bounds_globals.drawn)
+	{
+		real left = (real)x0;
+		real right = (real)x1;
+
+		rasterizer_text_port_drawn_span_real(character, x0, x, &left, &right);
 		rasterizer_text_port_drawn_span(character, x0, x, &x0, &x1);
+		if (left < text_bounds_globals.drawn_left)
+			text_bounds_globals.drawn_left = left;
+		if (right > text_bounds_globals.drawn_right)
+			text_bounds_globals.drawn_right = right;
+	}
 	if (x0 < text_bounds_globals.bounds.x0)
 		text_bounds_globals.bounds.x0 = x0;
 	if (y0 < text_bounds_globals.bounds.y0)
@@ -1503,10 +1519,27 @@ void draw_unicode_string_compute_drawn_bounds(
 	rectangle2d *cursor_bounds)
 {
 	text_bounds_globals.drawn = TRUE;
+	text_bounds_globals.drawn_left = 32767.0f;
+	text_bounds_globals.drawn_right = -32768.0f;
 	draw_unicode_string_compute_bounds(bounds, string, text_bounds, cursor_bounds);
 	text_bounds_globals.drawn = FALSE;
 
 	return;
+}
+
+/* port: the letters' ink as draw_unicode_string_compute_drawn_bounds last
+measured it, in fractions of a unit (its text bounds are whole units, each
+side to the nearest): what is centred on drawn letters (a key's cap,
+hud_key_prompts.c) is centred on these, as far from them either side at any
+resolution. FALSE where it measured no letter */
+boolean draw_unicode_string_drawn_span(
+	real *left,
+	real *right)
+{
+	*left = text_bounds_globals.drawn_left;
+	*right = text_bounds_globals.drawn_right;
+
+	return *left <= *right;
 }
 
 /* port: how many rows the draw mode's font's capitals are tall (its H's

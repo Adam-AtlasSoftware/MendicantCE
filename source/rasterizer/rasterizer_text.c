@@ -87,6 +87,7 @@ struct text_hires_glyph
 	float left, top, right, bottom;
 	float u0, v0, u1, v1;
 	float advance;
+	float ink_left, ink_right;
 };
 
 #define TEXT_HIRES_FIT_LETTERS 52
@@ -1089,9 +1090,41 @@ static short drawn_span_unit(
 
 /* port: where the high-res text draws a font tag's character whose bitmap
 is drawn from x0 (from its column x), in the draw mode's font, as
-rasterizer_draw_hires_glyph places it: its ink's left and right, whole
-units; FALSE (left and right as they were) where it is drawn from the tag's
-bitmap (the high-res text off, its font or the glyph not made yet) */
+rasterizer_draw_hires_glyph places it: its ink's left and right, in
+fractions of a unit; FALSE (left and right as they were) where it is drawn
+from the tag's bitmap (the high-res text off, its font or the glyph not
+made yet) */
+boolean rasterizer_text_port_drawn_span_real(
+	struct font_character const *font_character,
+	short x0,
+	short x,
+	real *left,
+	real *right)
+{
+	struct text_hires_glyph glyph;
+	long hires_font;
+	real ink_left;
+
+	if (!hires_text_atlas || !font_character)
+		return FALSE;
+	hires_font = hires_text_font_get(draw_string_get_font(), MAX(text_scale, 1.0f));
+	if (hires_font == NONE || !text_hires_covers(hires_font, font_character->character) ||
+		!text_hires_glyph(hires_font, font_character->character, &glyph))
+	{
+		return FALSE;
+	}
+	ink_left = (real)(x0 - x + font_character->bitmap_origin_x) +
+		(font_character->character_width - glyph.advance) * 0.5f + glyph.left;
+	/* (its outline's own left and right, inside the quad's whole pixels of
+	the atlas: text_hires.c) */
+	*left = ink_left + (glyph.ink_left - glyph.left);
+	*right = ink_left + (glyph.ink_right - glyph.left);
+
+	return TRUE;
+}
+
+/* port: as rasterizer_text_port_drawn_span_real, the glyph's quad's left and
+right (its ink to whole pixels of the atlas) to the nearest whole units */
 boolean rasterizer_text_port_drawn_span(
 	struct font_character const *font_character,
 	short x0,

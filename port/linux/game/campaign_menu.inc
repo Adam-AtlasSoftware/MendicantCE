@@ -11,8 +11,10 @@ campaign_levels_read), a level started as the PC version's lists start it
   while the profile has a saved game, its mission and difficulty under it
   ("port campaign continue" goes on with it), CHOOSE MISSION, CO-OP (the
   Multiplayer's CO-OP CAMPAIGN page) and BACK, and the panel of the mission
-  CONTINUE plays, else the one Choose Mission opens on, with what the item
-  chosen does. RESTART MISSION, under CONTINUE and shown with it, asks first
+  CONTINUE (and RESTART MISSION) plays; CHOOSE MISSION and BACK, which are
+  about no one mission, show the campaign's summary there (how many
+  missions are beaten, on each difficulty, and the one in progress), and
+  CO-OP its own words; and what the item chosen does. RESTART MISSION, under CONTINUE and shown with it, asks first
   ("port campaign restart ask"), then plays CONTINUE's mission from its
   start.
 - Choose Mission ("port campaign missions init", "missions update"): HALO's
@@ -78,8 +80,10 @@ CAMPAIGN_CONTINUE, HUB_ITEM) */
 #define CAMPAIGN_ITEMS_TOP 92
 #define CAMPAIGN_CONTINUE_HEIGHT 46
 #define CAMPAIGN_ITEM_HEIGHT 26
-/* CO-OP's words in the panel: up from a mission's name's place to its top */
+/* the panel's words without a mission (CO-OP's, the summary's): up from a
+mission's name's place to its top, on so many lines at most */
 #define CAMPAIGN_PANEL_COOP_RISE 158
+#define CAMPAIGN_PANEL_WORDS_LINES 3
 #define NUMBER_OF_DIFFICULTIES 4
 /* a card beside the chosen one, a badge not earned (a card's, the panel's):
 their opacity */
@@ -104,15 +108,12 @@ static struct
 	short difficulty_display_index;
 	/* the difficulty chosen on its screen */
 	short difficulty;
-	/* the mission chosen on Choose Mission last, if it has been open */
-	boolean viewed;
-	short viewed_level;
 	/* the row as it was laid out last (NONE: not yet), and its slide: from
 	how far, since when */
 	short shown_first;
 	real slide_from;
 	unsigned long slide_start;
-} campaign_cards = { FALSE, 0, 0, 0, NONE, NONE, 1, FALSE, 0, NONE, 0.0f, 0 };
+} campaign_cards = { FALSE, 0, 0, 0, NONE, NONE, 1, NONE, 0.0f, 0 };
 
 /* the mission the question asks about (the saved game's), else NONE */
 static short campaign_restart_level = NONE;
@@ -413,42 +414,101 @@ static void campaign_panel_show(struct widget_instance *panel, short level)
 	menu_text_box_wrap(named(panel, "panel_objective", 0), text, 3);
 }
 
-/* the mission CHOOSE MISSION's panel shows: the one chosen there last,
-else the first not yet beaten on any difficulty */
-static short campaign_menu_mission(void)
+/* the panel without a mission (CO-OP's, the campaign's summary): a
+mission's picture and number hidden, its title, the line under it (none:
+NULL) and its words at its top, where the picture is; else (title NULL) as
+a mission's */
+static void campaign_panel_words(struct widget_instance *panel, wchar_t const *title, wchar_t const *status,
+	wchar_t const *words)
 {
-	short level;
+	boolean shown = title != NULL;
+	struct widget_instance *box;
 
-	if (campaign_cards.viewed)
-		return campaign_cards.viewed_level;
-	for (level = 0; level < NUMBER_OF_SINGLE_PLAYER_LEVELS; level++)
-	{
-		if (!campaign.levels[level].beaten)
-			return level;
-	}
-	return campaign_cards.opening_level;
+	visible_set(named(panel, "panel_art", 0), !shown);
+	visible_set(named(panel, "panel_art_back", 0), !shown);
+	visible_set(named(panel, "panel_number", 0), !shown);
+	visible_set(named(panel, "panel_status", 0), !shown || status);
+	/* (the words at the panel's top, where the picture is; without a line
+	under the title, right under it) */
+	if ((box = named(panel, "panel_title", 0)) != NULL)
+		box->vertical_offset = (short)(shown ? -CAMPAIGN_PANEL_COOP_RISE : 0);
+	if ((box = named(panel, "panel_status", 0)) != NULL)
+		box->vertical_offset = (short)(shown ? -CAMPAIGN_PANEL_COOP_RISE : 0);
+	if ((box = named(panel, "panel_objective", 0)) != NULL)
+		box->vertical_offset = (short)(shown ? -CAMPAIGN_PANEL_COOP_RISE - (status ? 0 : 16) : 0);
+	if (!shown)
+		return;
+	menu_text_box_fit(named(panel, "panel_title", 0), title, 0);
+	if (status)
+		menu_text_box_fit(named(panel, "panel_status", 0), status, 0);
+	menu_text_box_wrap(named(panel, "panel_objective", 0), words, CAMPAIGN_PANEL_WORDS_LINES);
 }
 
-/* the panel as CO-OP's (a mission's parts hidden, its words), or as a
-mission's */
-static void campaign_panel_coop(struct widget_instance *panel, boolean coop)
+/* text and a number after it ("Easy 3") */
+static void campaign_text_number(wchar_t *text, short size, wchar_t const *words, long number)
 {
-	visible_set(named(panel, "panel_art", 0), !coop);
-	visible_set(named(panel, "panel_art_back", 0), !coop);
-	visible_set(named(panel, "panel_art_corners", 0), !coop);
-	visible_set(named(panel, "panel_number", 0), !coop);
-	visible_set(named(panel, "panel_status", 0), !coop);
-	/* (CO-OP's words at the panel's top, where the picture is) */
-	if (named(panel, "panel_title", 0))
-		named(panel, "panel_title", 0)->vertical_offset = (short)(coop ? -CAMPAIGN_PANEL_COOP_RISE : 0);
-	if (named(panel, "panel_objective", 0))
-		named(panel, "panel_objective", 0)->vertical_offset = (short)(coop ? -CAMPAIGN_PANEL_COOP_RISE - 16 : 0);
-	if (coop)
+	char digits[16];
+	wchar_t wide[16];
+
+	ustrncat(text, words, (long)(size - 1 - (short)ustrlen(text)));
+	snprintf(digits, sizeof(digits), " %ld", number);
+	campaign_widen(digits, wide, (short)NUMBEROF(wide));
+	ustrncat(text, wide, (long)(size - 1 - (short)ustrlen(text)));
+}
+
+/* the campaign's summary, which CHOOSE MISSION and BACK show in the panel (it
+is about no one mission, issue 687): how many of the ten missions are
+beaten, how many on each difficulty, and the mission in progress, if one is
+(its title, the line under it, its words) */
+static void campaign_summary(wchar_t *status, wchar_t *words, short size)
+{
+	wchar_t name[ROW_TEXT_LENGTH];
+	short level, difficulty, beaten = 0;
+	char line[64];
+
+	for (level = 0; level < NUMBER_OF_SINGLE_PLAYER_LEVELS; level++)
 	{
-		menu_text_box_fit(named(panel, "panel_title", 0), L"Co-op", 0);
-		menu_text_box_wrap(named(panel, "panel_objective", 0),
-			L"Play the campaign with a friend: online with your invite link, or split screen with a controller "
-			L"for player 2.", 3);
+		if (campaign.levels[level].beaten)
+			beaten++;
+	}
+	if (!beaten)
+		snprintf(line, sizeof(line), "No mission beaten yet, of %d.", NUMBER_OF_SINGLE_PLAYER_LEVELS);
+	else if (beaten == NUMBER_OF_SINGLE_PLAYER_LEVELS)
+		snprintf(line, sizeof(line), "All %d missions beaten.", NUMBER_OF_SINGLE_PLAYER_LEVELS);
+	else
+		snprintf(line, sizeof(line), "%d of %d missions beaten.", beaten, NUMBER_OF_SINGLE_PLAYER_LEVELS);
+	campaign_widen(line, status, size);
+	/* (each difficulty's count, "Beaten on Easy 3, Normal 1, Heroic 0,
+	Legendary 0.") */
+	campaign_widen("Beaten on ", words, size);
+	for (difficulty = 0; difficulty < NUMBER_OF_DIFFICULTIES; difficulty++)
+	{
+		short count = 0;
+
+		for (level = 0; level < NUMBER_OF_SINGLE_PLAYER_LEVELS; level++)
+		{
+			if (campaign.levels[level].beaten & (1 << difficulty))
+				count++;
+		}
+		campaign_difficulty_name(difficulty, name, ROW_TEXT_LENGTH);
+		if (difficulty)
+			ustrncat(words, L", ", (long)(size - 1 - (short)ustrlen(words)));
+		campaign_text_number(words, size, name, count);
+	}
+	ustrncat(words, L".", (long)(size - 1 - (short)ustrlen(words)));
+	/* (and the saved game's mission, "In progress: Halo, on Easy.") */
+	if (campaign.saved_level != NONE)
+	{
+		ustrncat(words, L" In progress: ", (long)(size - 1 - (short)ustrlen(words)));
+		campaign_level_title(campaign.saved_level, TRUE, name, ROW_TEXT_LENGTH);
+		ustrncat(words, name, (long)(size - 1 - (short)ustrlen(words)));
+		if (campaign.saved_difficulty != NONE)
+		{
+			ustrncat(words, L", on ", (long)(size - 1 - (short)ustrlen(words)));
+			campaign_difficulty_name(campaign.saved_difficulty, name, ROW_TEXT_LENGTH);
+			ustrncat(words, name, (long)(size - 1 - (short)ustrlen(words)));
+		}
+		ustrncat(words, L".", (long)(size - 1 - (short)ustrlen(words)));
 	}
 }
 
@@ -503,15 +563,28 @@ static void campaign_screen_update(struct widget_instance *list)
 		menu_text_box_fit(named(item, "continue_note", 0), text, 0);
 		if (named(item, "continue_art", 0))
 			named(item, "continue_art", 0)->animation.current_frame_index = campaign.saved_level;
-		/* (its picture's corners CONTINUE's fill, focused or not) */
-		if (named(item, "continue_corners", 0))
-			named(item, "continue_corners", 0)->animation.current_frame_index = list->focused_child == item ? 1 : 0;
 	}
-	/* (CONTINUE's and RESTART MISSION's mission; CHOOSE MISSION's the one
-	chosen there last, else the first not yet beaten; CO-OP's its own words) */
-	campaign_panel_coop(panel, hint == 2);
-	if (hint != 2)
-		campaign_panel_show(panel, (hint == 0 || hint == 4) && saved ? campaign.saved_level : campaign_menu_mission());
+	/* (CONTINUE's and RESTART MISSION's mission; CO-OP's its own words;
+	CHOOSE MISSION's and BACK's, which are about no one mission, the
+	campaign's summary: issue 687) */
+	if (hint == 2)
+	{
+		campaign_panel_words(panel, L"Co-op", NULL,
+			L"Play the campaign with a friend: online with your invite link, or split screen with a controller "
+			L"for player 2.");
+	}
+	else if (hint == 1 || hint == 3 || !saved)
+	{
+		wchar_t status[MISSION_TEXT_LENGTH];
+
+		campaign_summary(status, text, MISSION_TEXT_LENGTH);
+		campaign_panel_words(panel, L"Campaign", status, text);
+	}
+	else
+	{
+		campaign_panel_words(panel, NULL, NULL, NULL);
+		campaign_panel_show(panel, campaign.saved_level);
+	}
 	string_get("pc\\main_menu\\campaign\\hints", hint, text);
 	menu_text_box_wrap(named(panel, "panel_hint", 0), text, 2);
 	profile_name_show(screen_of(list));
@@ -663,10 +736,6 @@ static void mission_card_show(struct widget_instance *card, short mission, boole
 			menu_text_box_fit(named(card, name, 0), L"NOT YET BEATEN", 0);
 	}
 	card->animation.current_frame_index = chosen ? MISSION_CARD_CHOSEN : MISSION_CARD_RESTING;
-	/* (its picture's corners the card's fill, resting or chosen) */
-	snprintf(name, sizeof(name), "card_art_corners_%s", kind);
-	if (named(card, name, 0))
-		named(card, name, 0)->animation.current_frame_index = chosen ? 1 : 0;
 }
 
 /* the panel under the cards: the chosen mission's name and objective (on
@@ -810,11 +879,6 @@ static void campaign_missions_update(struct widget_instance *list)
 		}
 	}
 	mission_panel_show(list->parameters.list.extended_description, campaign_cards.chosen, count);
-	if (!campaign_cards.custom && count > 0)
-	{
-		campaign_cards.viewed = TRUE;
-		campaign_cards.viewed_level = campaign_cards.chosen;
-	}
 	if (count <= 0)
 	{
 		campaign_widen("Put Custom Edition campaign maps in your custom_maps folder to play them here.", text,

@@ -83,6 +83,11 @@ boolean pc_menu_tag(long tag_index);
 boolean pc_menu_frame_placement(struct bitmap_data const *bitmap, short *x, short *y, short *width, short *height);
 boolean pc_menu_scaled_frame_at(unsigned long address, long width, long height);
 boolean pc_menu_map_frame_at(unsigned long address, long width, long height, long *tag_index, long *frame);
+short pc_menu_widget_radius(long definition_index);
+short pc_menu_legend_room(long definition_index);
+/* ui_widget.c: how much wider a legends' row is drawn while the keyboard
+plays than the Xbox's pictures and words were */
+short ui_widget_port_key_legend_growth(long definition_index);
 
 /* ---------- constants */
 
@@ -92,6 +97,8 @@ adds to */
 #define MULTIPLAYER_COLLECTION "ui\\shell\\multiplayer"
 /* the campaign's full screen pause screen, which pause_campaign_patch adds to */
 #define CAMPAIGN_PAUSE_SCREEN "ui\\shell\\solo_game\\pause_game\\pause_game"
+/* the campaign's split screen pause screen, which shares its box */
+#define CAMPAIGN_PAUSE_SPLIT_SCREEN "ui\\shell\\solo_game\\pause_game\\pause_game_split_screen"
 /* the tags pause_patch or pause_campaign_patch adds: two buttons and their
 texts (SETTINGS, and HOST CONTROLS, END GAME or FRIENDLY FIRE) */
 #define PAUSE_PATCH_TAGS 4
@@ -260,6 +267,15 @@ struct menu_frame_placement
 	long source_frame;
 };
 
+/* a value of the port's for a tag (pc_menu_widget_radius,
+pc_menu_legend_room) */
+#define MENU_TAG_VALUES 64
+struct menu_tag_value
+{
+	long tag_index;
+	short value;
+};
+
 /* a widget's wide layout (its wide attribute): how far it moves (and what
 is in it) and how much wider it is on a 16:9 screen, and its definition's
 right as the menus' 640 have it (ui_widget_port_wide_layout) */
@@ -382,7 +398,9 @@ boolean ui_widget_port_wheel_sideways(long flags)
 
 static char const *const widget_type_names[] = { "container", "text", "spinner", "column_list" };
 static char const *const list_flag_names[] = { "items_in_code", "items_from_strings", "one_tooltip", "single_preview" };
-static char const *const text_flag_names[] = { "editable", "password", "flashing", "no_focus_test" };
+/* (wrap: the port's, its text fitted to its box, ui_widget.c's
+ui_widget_port_text_fit) */
+static char const *const text_flag_names[] = { "editable", "password", "flashing", "no_focus_test", "wrap" };
 static char const *const align_names[] = { "left", "right", "center" };
 /* (build_number and pid are the PC version's, which this engine has not) */
 static char const *const replace_names[] = { "none", "controller", "build_number", "pid" };
@@ -603,6 +621,14 @@ static struct
 	/* the tags' generation they were added to (cache_files_tags_generation):
 	the settings' definitions are tag indices of that map's */
 	unsigned long generation;
+	/* the widgets whose pictures' corners are cut round (a <widget>'s
+	radius), and the
+	legends' rows whose panel was made wider for them (pause_box_widen), by
+	tag index */
+	struct menu_tag_value radii[MENU_TAG_VALUES];
+	long radius_count;
+	struct menu_tag_value legend_rooms[MENU_TAG_VALUES];
+	long legend_room_count;
 } menu_tags;
 
 /* the build under way */
@@ -1238,6 +1264,39 @@ static long spinner_split(struct halo_menu_widget const *widget, boolean values,
 		pieces[count++] = piece;
 	}
 	return count;
+}
+
+/* a tag's value in a table of them (MENU_TAG_VALUES at most: past that,
+none) */
+static void tag_value_set(struct menu_tag_value *values, long *count, long tag_index, short value)
+{
+	long index;
+
+	for (index = 0; index < *count; index++)
+	{
+		if (values[index].tag_index == tag_index)
+		{
+			values[index].value = value;
+			return;
+		}
+	}
+	if (*count >= MENU_TAG_VALUES)
+		return;
+	values[*count].tag_index = tag_index;
+	values[*count].value = value;
+	(*count)++;
+}
+
+static short tag_value_get(struct menu_tag_value const *values, long count, long tag_index)
+{
+	long index;
+
+	for (index = 0; tag_index != NONE && index < count; index++)
+	{
+		if (values[index].tag_index == tag_index)
+			return values[index].value;
+	}
+	return 0;
 }
 
 static void *bitmap_build(struct halo_menu_bitmap const *source, long tag_index)
@@ -2021,9 +2080,13 @@ the next map after the carnage report; in Basic Training's game, CHAPTERS
 in its place, which opens its chapters (basic_training.c).
 They are copies of the map's LEAVE GAME button (its look), put before it.
 The map's pause screens move to fit them: on the Xbox's own (its box of
-pausebox2 pieces), the box is the port's taller one (pause/pausebox_*:
-tools/port_settings.py), centred where the old one was; on a custom map's,
-what is below the list moves down. */
+pausebox2 pieces), the rows are spaced as the campaign's pause menu's are
+(issue 690), and the box is the port's (pause/pausebox_*:
+tools/port_settings.py) as tall as they and the legends under them need,
+centred where the old one was; on a custom map's, what is below the list
+moves down. The Xbox's box is made as much wider as the legends under it
+are while the keyboard plays (pause_box_widen: issue 596), here and in the
+campaign's pause menu. */
 
 /* (Settings' first tab: tools/port_settings.py) */
 #define PAUSE_SETTINGS_SCREEN "main_menu/settings_select/player_setup/player_profile_edit/video_settings/video_settings_screen"
@@ -2032,7 +2095,22 @@ what is below the list moves down. */
 /* (Basic Training's chapters: tools/port_settings.py's _training) */
 #define PAUSE_TRAINING_SCREEN "main_menu/training/training_screen"
 #define PAUSE_BUTTON_SPACING 35
-#define PAUSE_BOX_FIRST_BUTTONS 3
+/* the port's box's frames (pause/pausebox_*: tools/port_settings.py's
+pause_box_height), one for each number of rows from this, and its layout:
+the campaign's pause menu's (the Xbox's 159-unit box of four rows, at the
+PC version's pitch, PAUSE_CAMPAIGN_ROW_PITCH): its first row this far below
+the box's top, the legends this far below its last row, and the box's
+bottom this far below their top */
+#define PAUSE_BOX_FIRST_ROWS 3
+#define PAUSE_BOX_ROWS_TOP 9
+#define PAUSE_BOX_LEGENDS_GAP 14
+#define PAUSE_BOX_LEGENDS_BOTTOM 25
+/* the Xbox's box's height, which the port's is centred where it was */
+#define PAUSE_BOX_STOCK_HEIGHT 159
+/* the Xbox's rows' height (its pause lists' buttons) */
+#define PAUSE_BOX_ROW_HEIGHT 27
+/* the PC version's pause menu's row pitch (30 apart) */
+#define PAUSE_CAMPAIGN_ROW_PITCH 30
 
 static long ui_function_named(char const *name)
 {
@@ -2233,9 +2311,9 @@ static boolean pause_box_stock(struct ui_widget_definition const *box)
 		tag_name_ends(pieces[2].widget_tag.index, "\\pausebox2_right");
 }
 
-/* the stock box's pieces drawn with the port's taller box: its frame for
-the number of buttons */
-static void pause_box_redraw(struct ui_widget_definition const *box, long buttons)
+/* the stock box's pieces drawn with the port's box: its frame for the number
+of rows */
+static void pause_box_redraw(struct ui_widget_definition const *box, long rows)
 {
 	static char const *const names[] = { "pause/pausebox_left", "pause/pausebox_center", "pause/pausebox_right" };
 	struct ui_widget_child_reference const *pieces = box->child_widgets.address;
@@ -2252,12 +2330,93 @@ static void pause_box_redraw(struct ui_widget_definition const *box, long button
 			continue;
 		group = bitmap_group_get(build.bitmap_tags[bitmap]);
 		sequence = group->sequences.address;
-		/* (one frame: the one for the number of buttons) */
-		sequence->first_bitmap_index = (short)PIN(buttons - PAUSE_BOX_FIRST_BUTTONS, 0, group->bitmaps.count - 1);
+		/* (one frame: the one for the number of rows) */
+		sequence->first_bitmap_index = (short)PIN(rows - PAUSE_BOX_FIRST_ROWS, 0, group->bitmaps.count - 1);
 		sequence->bitmap_count = 1;
 		reference_set(&definition->background_bitmap, BITMAP_GROUP_TAG, build.bitmap_tags[bitmap]);
 		definition->bounds.y1 = (short)(definition->bounds.y0 + 256);
 	}
+}
+
+/* the port's box's height for a number of rows (tools/port_settings.py's
+pause_box_height) */
+static short pause_box_height(long rows)
+{
+	return (short)(PAUSE_BOX_ROWS_TOP + (rows - 1) * PAUSE_CAMPAIGN_ROW_PITCH + PAUSE_BOX_ROW_HEIGHT +
+		PAUSE_BOX_LEGENDS_GAP + PAUSE_BOX_LEGENDS_BOTTOM);
+}
+
+/* whether a screen's child is the legends' row under a pause menu (the
+Xbox's "(B) =CANCEL (A) =SELECT") */
+static boolean pause_legends(long tag_index)
+{
+	return tag_name_ends(tag_index, "\\button_key_sm") || tag_name_ends(tag_index, "\\button_key");
+}
+
+/* the Xbox's pause box (the pausebox2 pieces, and the campaign's mission
+objectives' box beside it: pausebox_*) made `growth` units wider for the
+legends' row under it (ui_widget_port_key_legend_growth: its keys' caps
+wider than the controller's pictures, issue 596), half of it either side,
+so that the room either side of the row is the Xbox's; the objectives' box
+moves right by half of it, as the box's right does, and the screens move
+what is in it (pause_objectives_move) */
+static void pause_box_widen(struct ui_widget_definition *box, short growth)
+{
+	struct ui_widget_child_reference *pieces = box->child_widgets.address;
+	long piece;
+
+	if (growth <= 0)
+		return;
+	for (piece = 0; piece < box->child_widgets.count; piece++)
+	{
+		long tag = pieces[piece].widget_tag.index;
+
+		if (tag_name_ends(tag, "\\pausebox2_left"))
+			pieces[piece].horizontal_offset = (short)(pieces[piece].horizontal_offset - growth / 2);
+		else if (tag_name_ends(tag, "\\pausebox2_left_center"))
+		{
+			struct ui_widget_definition *center = tag_get(UI_WIDGET_DEFINITION_TAG, tag);
+
+			pieces[piece].horizontal_offset = (short)(pieces[piece].horizontal_offset - growth / 2);
+			center->bounds.x1 = (short)(center->bounds.x1 + growth);
+		}
+		else if (tag_name_ends(tag, "\\pausebox2_right") || tag_name_ends(tag, "\\pausebox_left") ||
+			tag_name_ends(tag, "\\pausebox_right_center") || tag_name_ends(tag, "\\pausebox_center") ||
+			tag_name_ends(tag, "\\pausebox_right"))
+		{
+			pieces[piece].horizontal_offset = (short)(pieces[piece].horizontal_offset + growth / 2);
+		}
+	}
+	box->bounds.x1 = (short)(box->bounds.x1 + growth);
+}
+
+/* what a pause screen shows in the mission objectives' box (its caption and
+its text) moved with the box (pause_box_widen) */
+static void pause_objectives_move(struct ui_widget_definition *screen, short growth)
+{
+	struct ui_widget_child_reference *children = screen->child_widgets.address;
+	long child;
+
+	for (child = 0; growth > 0 && child < screen->child_widgets.count; child++)
+	{
+		long tag = children[child].widget_tag.index;
+
+		if (tag_name_ends(tag, "\\mission_objective_text") || tag_name_ends(tag, "\\mission_objectives_caption"))
+			children[child].horizontal_offset = (short)(children[child].horizontal_offset + growth / 2);
+	}
+}
+
+/* how much wider the box above a legends' row is made for it (an even
+number of units: half each side), the row given that room
+(pc_menu_legend_room) */
+static short pause_legends_growth(long legends_tag)
+{
+	short growth = ui_widget_port_key_legend_growth(legends_tag);
+
+	growth = (short)(growth + growth % 2);
+	if (growth > 0)
+		tag_value_set(menu_tags.legend_rooms, &menu_tags.legend_room_count, legends_tag, growth);
+	return growth;
 }
 
 static void pause_patch(struct cache_file_tag_instance *instances)
@@ -2270,8 +2429,8 @@ static void pause_patch(struct cache_file_tag_instance *instances)
 		(network_admin_was_remote() && widget_named(PAUSE_HOST_CONTROLS_SCREEN) != NONE);
 	struct tag_block const *screens;
 	long patched_list = NONE, added = 0, buttons = 0, screen;
-	short grow = 0;
-	boolean box_redrawn = FALSE;
+	short grow = 0, growth = 0;
+	boolean box_redrawn = FALSE, rows_spaced = FALSE;
 
 	if (collection == NONE || quit_function == NONE)
 		return;
@@ -2324,21 +2483,52 @@ static void pause_patch(struct cache_file_tag_instance *instances)
 				box_child = child;
 			}
 		}
-		/* the stock box: taller, centred where it was, the list with it, and
-		what is below it moved down; else only what is below the list (as far
-		as the list grew) */
+		/* the stock box: the port's, its rows as the campaign's pause menu
+		spaces them, its legends under them, as tall as they need, centred
+		where the old one was, and as wide as the legends need; else only
+		what is below the list moves (as far as the list grew) */
+		if (box_child != NONE)
+		{
+			struct ui_widget_definition *list = tag_get(UI_WIDGET_DEFINITION_TAG, patched_list);
+			struct ui_widget_child_reference *rows = list->child_widgets.address;
+			short height = pause_box_height(buttons);
+			short top = (short)(children[box_child].vertical_offset + (PAUSE_BOX_STOCK_HEIGHT - height) / 2);
+			long row;
+
+			if (!rows_spaced)
+			{
+				for (row = 0; row < list->child_widgets.count; row++)
+					rows[row].vertical_offset = (short)(row * PAUSE_CAMPAIGN_ROW_PITCH);
+				list->bounds.y1 = (short)(list->bounds.y0 + (buttons - 1) * PAUSE_CAMPAIGN_ROW_PITCH +
+					PAUSE_BOX_ROW_HEIGHT);
+				rows_spaced = TRUE;
+			}
+			children[box_child].vertical_offset = top;
+			children[list_child].vertical_offset = (short)(top + PAUSE_BOX_ROWS_TOP);
+			for (child = 0; child < definition->child_widgets.count; child++)
+			{
+				if (!pause_legends(children[child].widget_tag.index))
+					continue;
+				children[child].vertical_offset = (short)(top + height - PAUSE_BOX_LEGENDS_BOTTOM);
+				if (!box_redrawn)
+					growth = pause_legends_growth(children[child].widget_tag.index);
+			}
+			if (!box_redrawn)
+			{
+				struct ui_widget_definition *box = tag_get(UI_WIDGET_DEFINITION_TAG,
+					children[box_child].widget_tag.index);
+
+				pause_box_redraw(box, buttons);
+				pause_box_widen(box, growth);
+				box_redrawn = TRUE;
+			}
+			continue;
+		}
 		list_top = children[list_child].vertical_offset;
 		for (child = 0; child < definition->child_widgets.count; child++)
 		{
-			if (box_child != NONE && (child == box_child || child == list_child))
-				children[child].vertical_offset -= grow / 2;
-			else if (children[child].vertical_offset > list_top)
-				children[child].vertical_offset += box_child != NONE ? grow - grow / 2 : grow;
-		}
-		if (box_child != NONE && !box_redrawn)
-		{
-			pause_box_redraw(tag_get(UI_WIDGET_DEFINITION_TAG, children[box_child].widget_tag.index), buttons);
-			box_redrawn = TRUE;
+			if (children[child].vertical_offset > list_top)
+				children[child].vertical_offset += grow;
 		}
 	}
 	if (patched_list != NONE)
@@ -2352,14 +2542,14 @@ Its list gets the same SETTINGS (pause_list_patch) before REVERT TO SAVED, a
 copy of it, and in network co-op FRIENDLY FIRE after SETTINGS. The rows use
 the PC version's pause menu's pitch, so a highlight sits clear of the next
 label. The prompts (B and A) stay that same gap under the last row, and the
-box beside the mission objectives grows with them. Settings there hides the
-rows that do not work in a game (menu_functions.c's settings_rows_show). */
+box beside the mission objectives grows with them, and the box is as wide as
+the legends need (pause_campaign_widen). Settings there hides the rows that
+do not work in a game (menu_functions.c's settings_rows_show). */
 
-/* the PC version's pause menu's row pitch (30 apart). The pause box's frames
-from the third, and the mission objectives' box's, are the stock 159 grown by
-the 36 that five rows at this pitch add (SETTINGS), then by the 66 that six
-add (network co-op's FRIENDLY FIRE too: tools/port_settings.py) */
-#define PAUSE_CAMPAIGN_ROW_PITCH 30
+/* the pause box's frames from the third (pause_box_height's of five and six
+rows), and the mission objectives' box's, are the stock 159 grown by the 36
+that five rows at the PC version's pitch add (SETTINGS), then by the 66 that
+six add (network co-op's FRIENDLY FIRE too: tools/port_settings.py) */
 #define PAUSE_CAMPAIGN_BOX_FRAME 2
 static short const pause_campaign_box_heights[] = { 195, 225 };
 
@@ -2481,6 +2671,45 @@ static void pause_campaign_grow_box(struct ui_widget_definition *widget, short s
 		widget->bounds.y1 = (short)(widget->bounds.y1 + shift);
 }
 
+/* the campaign's pause box (the box of its pieces, which the split screen's
+pause screen shares) as wide as the legends under it need (pause_box_widen),
+the mission objectives' box and what is in it moved with its right */
+static void pause_campaign_widen(struct ui_widget_definition *screen)
+{
+	struct ui_widget_child_reference *children = screen->child_widgets.address;
+	long split_screen = tag_loaded(UI_WIDGET_DEFINITION_TAG, CAMPAIGN_PAUSE_SPLIT_SCREEN);
+	short growth = 0;
+	long child;
+
+	for (child = 0; child < screen->child_widgets.count && !growth; child++)
+	{
+		if (pause_legends(children[child].widget_tag.index))
+			growth = pause_legends_growth(children[child].widget_tag.index);
+	}
+	for (child = 0; growth > 0 && child < screen->child_widgets.count; child++)
+	{
+		struct ui_widget_definition *box;
+		struct ui_widget_child_reference const *pieces;
+		long piece;
+
+		if (children[child].widget_tag.index == NONE)
+			continue;
+		box = tag_get(UI_WIDGET_DEFINITION_TAG, children[child].widget_tag.index);
+		pieces = box->child_widgets.address;
+		for (piece = 0; piece < box->child_widgets.count; piece++)
+		{
+			if (tag_name_ends(pieces[piece].widget_tag.index, "\\pausebox2_left"))
+			{
+				pause_box_widen(box, growth);
+				break;
+			}
+		}
+	}
+	pause_objectives_move(screen, growth);
+	if (split_screen != NONE)
+		pause_objectives_move(tag_get(UI_WIDGET_DEFINITION_TAG, split_screen), growth);
+}
+
 static void pause_campaign_patch(struct cache_file_tag_instance *instances)
 {
 	long screen = tag_loaded(UI_WIDGET_DEFINITION_TAG, CAMPAIGN_PAUSE_SCREEN);
@@ -2550,6 +2779,7 @@ static void pause_campaign_patch(struct cache_file_tag_instance *instances)
 				pause_campaign_shift_prompts(definition, need);
 				pause_campaign_grow_box(definition, need);
 			}
+			pause_campaign_widen(definition);
 			platform_log("menus: the pause menu has SETTINGS%s", build.coop ? " and FRIENDLY FIRE" : "");
 		}
 		return;
@@ -2733,6 +2963,8 @@ void menu_tags_loaded(
 				string_list_build(pieces, NULL, count, NULL));
 		}
 		instance_set(instances, UI_WIDGET_DEFINITION_TAG, build.widget_tags[index], widget->name, "", NULL);
+		if (widget->radius > 0)
+			tag_value_set(menu_tags.radii, &menu_tags.radius_count, build.widget_tags[index], (short)widget->radius);
 	}
 	if (build.failed)
 		goto failed;
@@ -2881,6 +3113,24 @@ boolean pc_menu_scaled_frame_at(
 		}
 	}
 	return FALSE;
+}
+
+/* the radius a menu widget's picture's corners are cut round by, in units
+(its radius attribute: ui_widget.c draws it as menu_shapes.c's rounded
+picture), 0 for square */
+short pc_menu_widget_radius(
+	long definition_index)
+{
+	return tag_value_get(menu_tags.radii, menu_tags.radius_count, definition_index);
+}
+
+/* the room a legends' row's panel was made wider by for it (pause_box_widen:
+ui_widget.c lays the row out in it, not narrowing its gaps), by the row's
+widget definition; 0 for none */
+short pc_menu_legend_room(
+	long definition_index)
+{
+	return tag_value_get(menu_tags.legend_rooms, menu_tags.legend_room_count, definition_index);
 }
 
 /* the frame of a map's bitmap that a menu file scales whose texture is at

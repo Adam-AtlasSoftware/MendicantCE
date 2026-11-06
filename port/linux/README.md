@@ -762,10 +762,15 @@ part of a split screen narrower than the menus (three or four players) has
 the 640's (`port/assets/menus/README.md`, `wide`).
 LEAVE GAME of the host still ends the game for everyone. The buttons go into
 the map's own pause menu, before LEAVE GAME, so the buttons of a custom map
-stay. The Xbox's pause box is drawn taller to hold them (a redraw,
-`port/assets/menus/port_svg/pause`); a custom map's box keeps its size, and
-what is below its list moves down. The few pictures of the settings that
-come from the main menu's map are not drawn there.
+stay. The Xbox's pause box is drawn as tall as they need (a redraw,
+`port/assets/menus/port_svg/pause`), its rows spaced as the campaign's
+pause menu's are; a custom map's box keeps its size, and what is below its
+list moves down. Both pause boxes are as much wider as the keys' caps and
+words of their legends ("Esc = CANCEL Enter = SELECT") are than the Xbox's
+pictures and words, so that the room either side of them is the Xbox's,
+and the legends' caps and capitals are in the middle of their band. The
+few pictures of the settings that come from the main menu's map are not
+drawn there.
 
 In a single-player campaign, the pause menu has SETTINGS too, before REVERT
 TO SAVED, in the same box: a list with room for it centres its rows, and

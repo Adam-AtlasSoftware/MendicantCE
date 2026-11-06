@@ -140,7 +140,7 @@ be a child of many).
 | `font` | `large`, `small`, `terminal`, `heading` (the port's: `large`'s measures, drawn in OpenCE by the high-res text; `large` where the map has no `large_ui`), or a font tag of the map |
 | `color` | The text's colour, `#RRGGBB` or `#AARRGGBB`. Focused text is white. |
 | `align`, `text_x`, `text_y` | `left`, `right` or `center`, and where the text starts in it |
-| `text_flags` | `editable`, `password`, `flashing`, `no_focus_test` |
+| `text_flags` | `editable`, `password`, `flashing`, `no_focus_test`, or the port's `wrap`: its text wrapped to its width less `text_x` each side (its written line breaks kept), in the smaller font or drawn smaller where it would be taller than its height less `text_y` above and below |
 | `list_flags` | `items_in_code`, `items_from_strings` (a spinner showing its strings), `one_tooltip`, `single_preview` |
 | `strings`, `setting`, `values` | A spinner's values as shown, separated by `\|`; its `config.toml` setting and the values written for each (`port setting load` and `port setting save`) |
 | `header_bitmap`, `footer_bitmap`, `header_bounds`, `footer_bounds` | A list's header and footer: a `<bitmap>` and "top left bottom right" |
@@ -148,6 +148,7 @@ be a child of many).
 | `controller` | `1` to `4`, or `any` (the default); a `<child>`'s or `child_controller`: the one it is for |
 | `auto_close`, `auto_close_fade` | It closes itself after this many milliseconds, fading for this many |
 | `wide` | "dx dw": on a 16:9 screen the widget (and what is in it) moves dx and is dw wider, and on a narrower one by its part of that (none at 4:3); a wider one has 16:9's. Below |
+| `radius` | Its picture's corners cut round by this many units (1 to 64), drawn at the display's resolution: nothing of the picture past them (the campaign's mission pictures) |
 | `platform` | `desktop`, `android` or `web`, or several separated by spaces: it is only there; `vr`: only in the VR build while it plays in the headset; `touch`: the touchscreen's builds (Android, iOS, or `debug.touch_menus`), `pointer`: the others; `computer`: the desktop's builds but iOS's. Every element takes this. |
 
 Widget flags: `pass_unhandled_to_focused_child` (an event it does not handle

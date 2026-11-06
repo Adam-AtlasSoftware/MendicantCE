@@ -103,6 +103,11 @@ void draw_unicode_string_compute_drawn_bounds(
 	wchar_t const *string,
 	rectangle2d *text_bounds,
 	rectangle2d *cursor_bounds);
+/* port: the letters' ink as draw_unicode_string_compute_drawn_bounds last
+measured it, in fractions of a unit; FALSE for none */
+boolean draw_unicode_string_drawn_span(
+	real *left,
+	real *right);
 /* port: how many rows the draw mode's font's capitals are tall */
 short draw_string_capital_height(
 	void);

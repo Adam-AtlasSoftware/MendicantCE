@@ -673,23 +673,16 @@ def engine_names(source: Path, start: str, count: int) -> list:
 
 
 def pause_art(art):
-    lines = []
-    for piece in ("left", "center", "right"):
-        heights = [port_settings.pause_box_height(buttons) for buttons in port_settings.PAUSE_BOX_BUTTONS]
-        heights += list(port_settings.PAUSE_BOX_EXTRA_HEIGHTS)
-        lines.append(art.port_picture(f"pause/pausebox_{piece}", [
-            (port_settings.pause_box_svg(piece, height), 4 if piece == "center" else 16, 256) for height in heights]))
-    for piece in ("left", "center", "right"):
-        lines.append(art.port_picture(f"pause/objectives_{piece}", [
-            (port_settings.pause_box_svg(piece, height, header=True), 4 if piece == "center" else 16, 256)
-            for height in port_settings.PAUSE_BOX_EXTRA_HEIGHTS]))
-    return lines
+    return [art.port_picture(name, frames) for name, frames in port_settings.pause_pictures()]
 
 
 # the port's own pictures that tools/port_settings.py draws (each list of
-# (bitmap name, frames) in the order main writes them into bitmaps.xml):
-# Settings', then the shared parts and the campaign's
+# (bitmap name, frames) in the order main writes them into bitmaps.xml): the
+# button bars' buttons (in the PC version's bitmaps' place), the pause
+# boxes', Settings', then the shared parts and the campaign's
 PORT_PICTURE_GROUPS = [
+    lambda: port_settings.text_button_pictures(),
+    lambda: port_settings.pause_pictures(),
     lambda: port_settings.settings_pictures(),
     lambda: port_settings.parts_pictures() + port_settings.campaign_pictures(),
 ]
@@ -849,7 +842,11 @@ def main() -> None:
     lines = ['<?xml version="1.0" encoding="UTF-8"?>',
              "<!-- The PC version's menus' bitmaps, drawn from the redraws, else the PC version's own pictures"
              " (NON_HANDDRAWN.md; tools/ce_menus.py) -->", "<menus>"]
-    lines += [art.bitmap(tag) for tag in sorted(bitmaps)]
+    # (the PC version's bitmaps the port draws its own of in their place:
+    # port_settings.text_button_pictures)
+    drawn = dict(port_settings.text_button_pictures())
+    lines += [art.port_picture(our_name(tag), drawn[our_name(tag)]) if our_name(tag) in drawn else art.bitmap(tag)
+              for tag in sorted(bitmaps)]
     lines += [art.title(name, text) for name, text in sorted(port_settings.TITLES.items())]
     lines += pause_art(art)
     # (voice chat's speaker, of a player who talks and of one muted: Lucide's

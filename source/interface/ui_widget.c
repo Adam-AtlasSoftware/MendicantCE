@@ -856,8 +856,11 @@ enum
 
 enum
 {
-	/* only the bit this file tests is named */
-	_text_box_flashing_text_bit = 2
+	/* only the bits this file tests are named */
+	_text_box_flashing_text_bit = 2,
+	/* port: the menu files' text_flags "wrap" (port/linux/game/menu_tags.c):
+	its text fitted to its box (ui_widget_port_text_fit) */
+	_text_box_port_wrap_bit = 4
 };
 
 enum
@@ -1397,6 +1400,15 @@ boolean pc_menu_frame_placement(
 	short *y,
 	short *width,
 	short *height);
+/* port: the room a legends' row's panel was made wider by for it (the
+pause boxes: port/linux/game/menu_tags.c), by the row's widget; 0 for
+none */
+short pc_menu_legend_room(
+	long definition_index);
+/* port: the radius a menu widget's picture's corners are cut round by (its
+radius attribute: port/linux/game/menu_tags.c), 0 for square */
+short pc_menu_widget_radius(
+	long definition_index);
 /* port: the placeholder bitmap the menus draw a sprite of a high-res
 texture from, or the sheet if it has none (port/linux/game/hud_hires_tags.c) */
 struct bitmap_data const *hud_hires_sprite_bitmap(
@@ -1450,6 +1462,9 @@ static boolean ui_widget_port_key_legend_text(
 	long length);
 static short ui_widget_port_key_legend_shift(
 	struct widget_instance *label);
+static short ui_widget_port_key_legend_drop(
+	struct widget_instance *label,
+	rectangle2d const *bounds);
 static short ui_widget_port_key_label_cap_extra(
 	struct widget_instance *label);
 static boolean ui_widget_port_key_icon_hidden(
@@ -5772,8 +5787,86 @@ static boolean ui_widget_port_text_wrap(
 	return fits;
 }
 
+/* port: a dialog's text (in place, its room's width at most 511
+characters) fitted to its room, width by height from the bounds' top left
+(as justified in them), in the draw mode's font: wrapped at spaces where a
+line would be wider (ui_widget_port_text_wrap); where it is then taller than
+the room (or a word is wider than a line), in the menus' smaller font
+(small_ui), wrapped again; where it is taller still, drawn smaller (its
+scale, by twentieths, down to UI_WIDGET_PORT_TEXT_LEAST_SCALE: the text laid
+out the wider for it, about the room's top and, as justified, its left,
+middle or right), so that it ends inside the room (issue 689: a missing
+map's two reasons ran past the dialog's footer). Sets the draw mode's font
+and the text's scale (rasterizer_text_set_scale) it is drawn in, and the
+bounds it is laid out in; returns the scale (1: as it was) */
+#define UI_WIDGET_PORT_TEXT_LEAST_SCALE 0.6f
+static real ui_widget_port_text_fit(
+	wchar_t *text,
+	rectangle2d *bounds,
+	short width,
+	short height,
+	long *font_index,
+	real_argb_color *color,
+	short justification)
+{
+	wchar_t written[512], wrapped[512];
+	rectangle2d room = *bounds, text_bounds, cursor_bounds;
+	long small_font_index = tag_loaded('font', "ui\\small_ui");
+	real scale = 1.0f, origin_x;
+	short laid_width = width;
+
+	if (width <= 0 || height <= 0)
+		return 1.0f;
+	ustrncpy(written, text, NUMBEROF(written) - 1);
+	written[NUMBEROF(written) - 1] = 0;
+	ustrncpy(wrapped, written, NUMBEROF(wrapped) - 1);
+	wrapped[NUMBEROF(wrapped) - 1] = 0;
+	if (!ui_widget_port_text_wrap(wrapped, &room, width) ||
+		(draw_unicode_string_compute_bounds(&room, wrapped, &text_bounds, &cursor_bounds),
+		cursor_bounds.y1 - room.y0 > height))
+	{
+		if (small_font_index != NONE)
+		{
+			*font_index = small_font_index;
+			draw_string_set_draw_mode(*font_index, NONE, justification, 0, color);
+		}
+		/* (smaller, by twentieths, while it is taller than the room) */
+		for (scale = 1.0f; scale > UI_WIDGET_PORT_TEXT_LEAST_SCALE; scale -= 0.05f)
+		{
+			laid_width = (short)((real)width / scale);
+			ustrncpy(wrapped, written, NUMBEROF(wrapped) - 1);
+			wrapped[NUMBEROF(wrapped) - 1] = 0;
+			if (ui_widget_port_text_wrap(wrapped, &room, laid_width) &&
+				(draw_unicode_string_compute_bounds(&room, wrapped, &text_bounds, &cursor_bounds),
+				(real)(cursor_bounds.y1 - room.y0) * scale <= (real)height))
+			{
+				break;
+			}
+		}
+		scale = MAX(scale, UI_WIDGET_PORT_TEXT_LEAST_SCALE);
+		laid_width = (short)((real)width / scale);
+	}
+	/* (the text no longer than it was: written is a copy of it) */
+	csmemcpy(text, written, (ustrlen(written) + 1) * sizeof(wchar_t));
+	ui_widget_port_text_wrap(text, &room, laid_width);
+	if (scale < 1.0f)
+	{
+		/* (laid out the wider, about the room's top and its side or middle,
+		which the scale keeps where they are) */
+		origin_x = justification == _text_justification_right ? (real)bounds->x1 :
+			justification == _text_justification_center ? (real)(bounds->x0 + bounds->x1) * 0.5f : (real)bounds->x0;
+		bounds->x0 = (short)(origin_x - ((real)bounds->x0 >= origin_x ? 0.0f : (origin_x - (real)bounds->x0) / scale));
+		bounds->x1 = (short)(origin_x + ((real)bounds->x1 <= origin_x ? 0.0f : ((real)bounds->x1 - origin_x) / scale));
+		rasterizer_text_set_scale(scale, origin_x, (real)bounds->y0);
+	}
+
+	return scale;
+}
+
 /* port: port/linux/game/menu_shapes.c */
 void menu_shape_caret(real x, real y0, real y1, real width, pixel32 color);
+void menu_shape_rounded_picture(struct bitmap_data *bitmap, real x0, real y0, real x1, real y1, real u0, real v0,
+	real u1, real v1, real radius, pixel32 color);
 
 /* port: the caret of a menu's field typed into (menu_functions.c's
 text_field_show, each frame it is lit): the text box it is drawn in, and
@@ -5856,6 +5949,9 @@ static void widget_instance_render_text_box(
 	wchar_t prompted[256];
 	/* port: a field typed into: its caret after its text (none yet too) */
 	boolean caret = ui_widget_port_caret_shown(widget);
+	/* port: the scale a dialog's text is drawn at to fit its room
+	(ui_widget_port_text_fit) */
+	real fit_scale = 1.0f;
 
 	if (definition->text_label_string_list.index != NONE)
 	{
@@ -6000,36 +6096,32 @@ static void widget_instance_render_text_box(
 	background draws (narrower than the text box; its picture is padded to a
 	power of two, so a margin of the text's offset on each side and as much
 	again), and as tall as the text box less its offset above and as much
-	below (the dialog's footer). Text that would be taller, or wider (a word
-	longer than a line), is drawn in the menus' smaller font. */
-	if (widget == ui_widget_port_error_text_box && ui_widget_port_error_text)
+	below (the dialog's footer), its written line breaks made spaces first
+	(ui_widget_port_text_unbreak). A text box flagged wrap (the port's
+	dialogs' messages) likewise, in its box less its text's offset on each
+	side, its written breaks kept. Each is fitted to its room
+	(ui_widget_port_text_fit): smaller, where it would be taller */
+	if ((widget == ui_widget_port_error_text_box && ui_widget_port_error_text) ||
+		TEST_FLAG(definition->text_box_flags, _text_box_port_wrap_bit))
 	{
-		struct bitmap_data *background = definition->background_bitmap.index != NONE ?
-			bitmap_group_get_bitmap_from_sequence(definition->background_bitmap.index, 0, 0) : NULL;
 		short width = (short)(definition->bounds.x1 - definition->bounds.x0);
 		short height = (short)(definition->bounds.y1 - definition->bounds.y0 - 2 * definition->vertical_offset);
-		wchar_t wrapped[512];
-		rectangle2d text_bounds;
-		rectangle2d cursor_bounds;
 
-		if (background && background->width > 0 && background->width < width)
-			width = background->width;
-		width = (short)(width - 4 * definition->horizontal_offset);		ui_widget_port_text_unbreak(*text);
-		ustrncpy(wrapped, *text, NUMBEROF(wrapped) - 1);
-		wrapped[NUMBEROF(wrapped) - 1] = 0;
-		if (!ui_widget_port_text_wrap(wrapped, &bounds, width) ||
-			(draw_unicode_string_compute_bounds(&bounds, wrapped, &text_bounds, &cursor_bounds),
-			cursor_bounds.y1 - bounds.y0 > height))
+		if (widget == ui_widget_port_error_text_box)
 		{
-			long small_font_index = tag_loaded('font', "ui\\small_ui");
+			struct bitmap_data *background = definition->background_bitmap.index != NONE ?
+				bitmap_group_get_bitmap_from_sequence(definition->background_bitmap.index, 0, 0) : NULL;
 
-			if (small_font_index != NONE)
-			{
-				font_index = small_font_index;
-				draw_string_set_draw_mode(font_index, NONE, justification, 0, &color);
-			}
+			if (background && background->width > 0 && background->width < width)
+				width = background->width;
+			width = (short)(width - 4 * definition->horizontal_offset);
+			ui_widget_port_text_unbreak(*text);
 		}
-		ui_widget_port_text_wrap(*text, &bounds, width);
+		else
+		{
+			width = (short)(width - 2 * definition->horizontal_offset);
+		}
+		fit_scale = ui_widget_port_text_fit(*text, &bounds, width, height, &font_index, &color, justification);
 	}
 	/* port: the key of a button pictured beside the words in their gap
 	(ui_widget_port_key_label_text), the words left-justified moved left
@@ -6059,7 +6151,8 @@ static void widget_instance_render_text_box(
 	/* port: the key of a button pictured just left of the words (the
 	legends' "(B) =CANCEL", ui_widget_port_key_legend_text) drawn before
 	them, the row of keys and words laid out as wide as they are
-	(ui_widget_port_key_legend_shift), not clipped by the words' box */
+	(ui_widget_port_key_legend_shift), not clipped by the words' box, its
+	capitals on the pictures' middle (ui_widget_port_key_legend_drop) */
 	else if (ui_widget_port_key_legend_text(widget, FALSE, keyed, NUMBEROF(keyed)))
 	{
 		if (justification == _text_justification_left)
@@ -6070,12 +6163,23 @@ static void widget_instance_render_text_box(
 			bounds.x0 = (short)(bounds.x0 + shift);
 			bounds.x1 = (short)(bounds.x1 + 640);
 		}
+		/* (the row's capitals, and its caps, on the middle of the pictures
+		they take the place of) */
+		{
+			short drop = ui_widget_port_key_legend_drop(widget, &bounds);
+
+			bounds.y0 = (short)(bounds.y0 + drop);
+			bounds.y1 = (short)(bounds.y1 + drop);
+		}
 		draw_string_and_hack_in_icons(&bounds, &clip, NULL, 0, keyed, FALSE);
 	}
 	else if (string_has_icons_to_draw(*text))
 		draw_string_and_hack_in_icons(&bounds, &clip, NULL, 0, *text, FALSE);
 	else
 		rasterizer_draw_unicode_string(&bounds, &clip, NULL, 0, *text);
+	/* port: (the text drawn at its own size again) */
+	if (fit_scale != 1.0f)
+		rasterizer_text_set_scale(1.0f, 0.0f, 0.0f);
 	/* port: a field typed into: its caret after its text */
 	if (caret)
 		ui_widget_port_caret_draw(&bounds, *text, &color);
@@ -6645,8 +6749,8 @@ static boolean ui_mouse_list_shows_several(
 }
 
 /* the button a screen key's icon stands for ("a_butn" and so on), or NONE */
-static short ui_mouse_key_button(
-	struct widget_instance *widget)
+static short ui_mouse_key_button_of_tag(
+	long tag_index)
 {
 	static struct
 	{
@@ -6663,7 +6767,7 @@ static short ui_mouse_key_button(
 		{ "start_butn", _gamepad_binary_button_start },
 		{ "back_butn", _gamepad_binary_button_back },
 	};
-	char const *name = tag_get_name(widget->definition_tag_index);
+	char const *name = tag_get_name(tag_index);
 	char const *leaf = name ? strrchr(name, '\\') : NULL;
 	long key_index;
 
@@ -6681,6 +6785,14 @@ static short ui_mouse_key_button(
 	}
 
 	return NONE;
+}
+
+/* port: the controller button a widget's picture is of (its tag's name),
+else NONE */
+static short ui_mouse_key_button(
+	struct widget_instance *widget)
+{
+	return ui_mouse_key_button_of_tag(widget->definition_tag_index);
 }
 
 /* port: an Xbox screen's picture of a controller button beside its words
@@ -6898,15 +7010,15 @@ static boolean ui_widget_port_key_legend_text(
 	return TRUE;
 }
 
-/* where words in a text box's font span, their letters' glyphs, as one line
-from 0 (left and right); FALSE (both 0) for none */
-static boolean ui_widget_port_text_span(
-	struct widget_instance *label,
+/* where words in a text box's font (its definition's) span, their
+letters' glyphs, as one line from 0 (left and right); FALSE (both 0) for
+none. Leaves the draw mode the measuring's */
+static boolean ui_widget_port_definition_text_span(
+	struct ui_widget_definition *definition,
 	wchar_t const *text,
 	short *left,
 	short *right)
 {
-	struct ui_widget_definition *definition = ui_widget_definition_get(label->definition_tag_index);
 	real_argb_color color = definition->text_color;
 	rectangle2d bounds, text_bounds, cursor_bounds;
 
@@ -6929,6 +7041,17 @@ static boolean ui_widget_port_text_span(
 	*right = text_bounds.x1;
 
 	return TRUE;
+}
+
+/* where words in a text box's font span (ui_widget_port_definition_text_span) */
+static boolean ui_widget_port_text_span(
+	struct widget_instance *label,
+	wchar_t const *text,
+	short *left,
+	short *right)
+{
+	return ui_widget_port_definition_text_span(ui_widget_definition_get(label->definition_tag_index), text, left,
+		right);
 }
 
 /* the width of words in a text box's font, as one line from 0; 0 for none */
@@ -6962,90 +7085,244 @@ static short ui_widget_port_key_label_cap_extra(
 	return (short)(hud_key_prompt_cap_advance(left, right) - right);
 }
 
-/* how far right of its words' box a legend's key is drawn: the legends of
-the label's parent drawn in turn as each key's cap and its words, the gaps
-between them as they were, the row centred on the pictures' and words'.
-A row wider than the Xbox's was and a margin either side (the caps and the
-room either side of an "=" are wider than the Xbox's pictures: the pause
-menu's "[Esc] = CANCEL [Enter] = SELECT") has its gaps narrowed to fit, to
-no narrower than UI_WIDGET_PORT_LEGEND_LEAST_GAP. Leaves the draw mode the
-measuring's: the caller sets its own again */
+/* a legend of a row of them (the Xbox's "(B) =CANCEL (A) =SELECT"): where
+the button's picture started and its words ended, as the Xbox laid them
+out, and how far its key's cap and its words take the text as they are
+drawn (hud_key_prompt_legend_advance: the cap, an "=" spaced between it
+and the words, the words) */
 #define UI_WIDGET_PORT_LEGENDS 8
 #define UI_WIDGET_PORT_LEGEND_MARGIN 0
 #define UI_WIDGET_PORT_LEGEND_LEAST_GAP 4
+struct ui_widget_port_legend
+{
+	short icon_left;
+	short words_end;
+	short width;
+};
+
+/* a legend's key's cap and its words measured (the words' text in their
+box's font, the key's name in it) */
+static void ui_widget_port_legend_measure(
+	struct ui_widget_port_legend *legend,
+	struct ui_widget_definition *words_definition,
+	wchar_t const *words,
+	char const *key,
+	short icon_left,
+	short words_left)
+{
+	wchar_t name[16];
+	short name_left, name_right, words_word_left, words_right;
+
+	ui_widget_port_definition_text_span(words_definition, words, &words_word_left, &words_right);
+	ascii_to_wide(key, name, sizeof(name));
+	ui_widget_port_definition_text_span(words_definition, name, &name_left, &name_right);
+	legend->icon_left = icon_left;
+	legend->words_end = (short)(words_left + words_right);
+	legend->width = hud_key_prompt_legend_advance(name_left, name_right, words);
+}
+
+/* a row of legends laid out as each key's cap and its words, in turn, the
+gaps between them as the Xbox had them (between a legend's words and the
+next one's picture: UI_WIDGET_PORT_LEGEND_LEAST_GAP at least), the row
+centred on the Xbox's pictures and words: where each legend starts
+(starts), from the Xbox's row's left (its first picture's). A row wider
+than the Xbox's was, a margin either side and the room its panel was made
+wider by (extra_room: menu_tags.c's pause boxes, grown by
+ui_widget_port_key_legend_growth) has its gaps narrowed to fit, to no
+narrower than UI_WIDGET_PORT_LEGEND_LEAST_GAP. Returns how much wider than
+the Xbox's row the row is at the Xbox's gaps (0: no wider) */
+static short ui_widget_port_legend_row(
+	struct ui_widget_port_legend const *legends,
+	short count,
+	short extra_room,
+	short *starts)
+{
+	short gaps[UI_WIDGET_PORT_LEGENDS];
+	short old_left = SHORT_MAX, old_right = SHORT_MIN;
+	short index, x, room, start, gap_total = 0;
+
+	if (count <= 0)
+		return 0;
+	for (index = 0; index < count; index++)
+	{
+		/* (the gap from the words before, as it was) */
+		gaps[index] = (short)(index ? MAX(legends[index].icon_left - legends[index - 1].words_end,
+			UI_WIDGET_PORT_LEGEND_LEAST_GAP) : 0);
+		gap_total = (short)(gap_total + gaps[index]);
+		old_left = MIN(old_left, legends[index].icon_left);
+		old_right = MAX(old_right, legends[index].words_end);
+	}
+	x = gap_total;
+	for (index = 0; index < count; index++)
+		x = (short)(x + legends[index].width);
+	room = (short)(old_right - old_left + 2 * UI_WIDGET_PORT_LEGEND_MARGIN + extra_room);
+	if (starts)
+	{
+		short laid = x;
+
+		/* (the gaps narrowed, as evenly as they can be, where the row is
+		wider than its room: the panel it is in has room for no more) */
+		if (laid > room && count > 1)
+		{
+			short least = (short)((count - 1) * UI_WIDGET_PORT_LEGEND_LEAST_GAP);
+			short narrowed = (short)MAX(gap_total - (laid - room), MIN(least, gap_total));
+			short left = narrowed;
+
+			for (index = 1; index < count; index++)
+			{
+				gaps[index] = (short)(left / (count - index));
+				left = (short)(left - gaps[index]);
+			}
+			laid = (short)(laid - gap_total + narrowed);
+		}
+		/* (centred on the Xbox's pictures and words) */
+		start = (short)(old_left - (laid - (old_right - old_left)) / 2);
+		for (index = 0; index < count; index++)
+		{
+			start = (short)(start + gaps[index]);
+			starts[index] = start;
+			start = (short)(start + legends[index].width);
+		}
+	}
+
+	return (short)MAX(x - (old_right - old_left), 0);
+}
+
+/* how far right of its words' box a legend's key is drawn: the legends of
+the label's parent laid out in turn (ui_widget_port_legend_row) as each
+key's cap and its words, with the room its panel was made wider by
+(pc_menu_legend_room). Leaves the draw mode the measuring's: the caller
+sets its own again */
 static short ui_widget_port_key_legend_shift(
 	struct widget_instance *label)
 {
+	struct ui_widget_port_legend legends[UI_WIDGET_PORT_LEGENDS];
+	short starts[UI_WIDGET_PORT_LEGENDS];
 	struct widget_instance *icon;
-	wchar_t key[16];
-	short gaps[UI_WIDGET_PORT_LEGENDS], widths[UI_WIDGET_PORT_LEGENDS];
-	short old_left = SHORT_MAX, old_right = SHORT_MIN;
-	short previous_end = SHORT_MIN;
-	short count = 0, label_index = NONE, index, x, label_x = 0, start, room, gap_total = 0;
+	short count = 0, label_index = NONE;
 
 	for (icon = label->parent ? label->parent->child : NULL; icon && count < UI_WIDGET_PORT_LEGENDS; icon = icon->next)
 	{
 		struct widget_instance *words;
 		wchar_t name[256];
-		short icon_left, words_left, words_width, name_left, name_right;
 
 		if (!ui_widget_port_key_icon_key(icon))
 			continue;
 		words = ui_widget_port_key_icon_legend(icon);
 		if (!words || !ui_widget_port_key_legend_text(words, TRUE, name, NUMBEROF(name)))
 			continue;
-		icon_left = ui_widget_port_left_in_parent(icon);
-		words_left = ui_widget_port_left_in_parent(words);
-		words_width = ui_widget_port_text_width(words, words->parameters.text_box.text);
-		/* (the gap from the words before, as it was) */
-		gaps[count] = (short)(previous_end != SHORT_MIN ? MAX(icon_left - previous_end, 4) : 0);
-		gap_total = (short)(gap_total + gaps[count]);
 		if (words == label)
 			label_index = count;
-		/* (the key's cap, as hud_key_prompts.c's key_cap_draw lays it out
-		about its name, then the words, an "=" before them spaced as
-		hud_key_prompt_draw_equals draws it) */
-		ascii_to_wide(ui_widget_port_key_icon_key(icon), key, sizeof(key));
-		ui_widget_port_text_span(words, key, &name_left, &name_right);
-		widths[count] = hud_key_prompt_legend_advance(name_left, name_right, words->parameters.text_box.text);
-		previous_end = (short)(words_left + words_width);
-		old_left = MIN(old_left, icon_left);
-		old_right = MAX(old_right, previous_end);
+		ui_widget_port_legend_measure(&legends[count], ui_widget_definition_get(words->definition_tag_index),
+			words->parameters.text_box.text, ui_widget_port_key_icon_key(icon), ui_widget_port_left_in_parent(icon),
+			ui_widget_port_left_in_parent(words));
 		count++;
 	}
 	if (!count || label_index == NONE)
 		return 0;
-	x = gap_total;
-	for (index = 0; index < count; index++)
-		x = (short)(x + widths[index]);
-	/* (the gaps narrowed, as evenly as they can be, where the row is wider
-	than the Xbox's pictures and words were, and a margin either side: the
-	panel they are in has room for no more) */
-	room = (short)(old_right - old_left + 2 * UI_WIDGET_PORT_LEGEND_MARGIN);
-	if (x > room && count > 1)
-	{
-		short least = (short)((count - 1) * UI_WIDGET_PORT_LEGEND_LEAST_GAP);
-		short narrowed = (short)MAX(gap_total - (x - room), MIN(least, gap_total));
-		short left = narrowed;
+	ui_widget_port_legend_row(legends, count, pc_menu_legend_room(label->parent->definition_tag_index), starts);
 
-		for (index = 1; index < count; index++)
+	return (short)(starts[label_index] - ui_widget_port_left_in_parent(label));
+}
+
+/* how much wider than the Xbox's pictures and words a legends' row (the
+widget whose children they are: ui\shell\main_menu\button_key_sm, under
+the pause menus) is drawn while the keyboard and mouse play, at the gaps
+the Xbox had between them: its keys' caps and their words, as
+ui_widget_port_key_legend_shift lays them out, measured in their fonts.
+For the panel it is in to be made as much wider (menu_tags.c's pause
+boxes): the room either side of the row the Xbox's, whatever a key's cap
+takes. 0 where it is no wider, or has no legends */
+short ui_widget_port_key_legend_growth(
+	long definition_index)
+{
+	struct ui_widget_definition *row = definition_index == NONE ? NULL : ui_widget_definition_get(definition_index);
+	struct ui_widget_child_reference *children;
+	struct ui_widget_port_legend legends[UI_WIDGET_PORT_LEGENDS];
+	short count = 0;
+	long child;
+
+	if (!row)
+		return 0;
+	children = (struct ui_widget_child_reference *)row->child_widgets.address;
+	for (child = 0; child < row->child_widgets.count && count < UI_WIDGET_PORT_LEGENDS; child++)
+	{
+		struct ui_widget_definition *icon;
+		short button = children[child].widget_tag.index == NONE ? NONE :
+			ui_mouse_key_button_of_tag(children[child].widget_tag.index);
+		char const *key = button == NONE ? NULL : ui_widget_port_menu_key(button);
+		short icon_left, icon_right, icon_top, icon_bottom;
+		long other;
+
+		if (!key)
+			continue;
+		icon = ui_widget_definition_get(children[child].widget_tag.index);
+		icon_left = (short)(children[child].horizontal_offset + icon->bounds.x0);
+		icon_right = (short)(icon_left + icon->bounds.x1 - icon->bounds.x0);
+		icon_top = (short)(children[child].vertical_offset + icon->bounds.y0);
+		icon_bottom = (short)(children[child].vertical_offset + icon->bounds.y1);
+		/* (its words: the text box just right of it, in its row, as
+		ui_widget_port_key_icon_legend finds them) */
+		for (other = 0; other < row->child_widgets.count; other++)
 		{
-			gaps[index] = (short)(left / (count - index));
-			left = (short)(left - gaps[index]);
-		}
-		x = (short)(x - gap_total + narrowed);
-	}
-	for (index = 0, start = 0; index <= label_index; index++)
-	{
-		start = (short)(start + gaps[index]);
-		if (index < label_index)
-			start = (short)(start + widths[index]);
-	}
-	label_x = start;
-	/* (centred on the Xbox's pictures and words) */
-	start = (short)(old_left - (x - (old_right - old_left)) / 2);
+			struct ui_widget_definition *words;
+			short words_left;
 
-	return (short)(start + label_x - ui_widget_port_left_in_parent(label));
+			if (children[other].widget_tag.index == NONE)
+				continue;
+			words = ui_widget_definition_get(children[other].widget_tag.index);
+			words_left = (short)(children[other].horizontal_offset + words->bounds.x0);
+			if (words->type != _ui_widget_type_text_box || words->text_label_string_list.index == NONE ||
+				words_left < icon_right - 2 || words_left > icon_right + 8 ||
+				children[other].vertical_offset + words->bounds.y0 >= icon_bottom ||
+				children[other].vertical_offset + words->bounds.y1 <= icon_top)
+			{
+				continue;
+			}
+			ui_widget_port_legend_measure(&legends[count], words,
+				unicode_string_list_get_string(words->text_label_string_list.index, words->string_list_index), key,
+				icon_left, words_left);
+			count++;
+			break;
+		}
+	}
+
+	return ui_widget_port_legend_row(legends, count, 0, NULL);
+}
+
+/* how far down a legend's words are drawn (in bounds, as its text box
+places them, in the draw mode's font) for their capitals' middle, and its
+key's cap's (key_cap_draw), to be the middle of the button's picture the
+cap takes the place of: the Xbox's pictures are in the middle of the
+panel's band the legends are in (the pause menus' footer), its words'
+boxes from the top of it (issue 596's "[Esc] = CANCEL" a unit high) */
+static short ui_widget_port_key_legend_drop(
+	struct widget_instance *label,
+	rectangle2d const *bounds)
+{
+	struct ui_widget_definition *label_definition = ui_widget_definition_get(label->definition_tag_index);
+	struct ui_widget_definition *icon_definition;
+	struct widget_instance *icon;
+	real picture_middle, capitals_middle;
+
+	for (icon = label->parent ? label->parent->child : NULL; icon; icon = icon->next)
+	{
+		if (ui_widget_port_key_icon_key(icon) && ui_widget_port_key_icon_legend(icon) == label)
+			break;
+	}
+	if (!icon)
+		return 0;
+	icon_definition = ui_widget_definition_get(icon->definition_tag_index);
+	/* (from the words' box's top: where it is drawn less its text's
+	offset) */
+	picture_middle = (real)(bounds->y0 - label_definition->vertical_offset) +
+		(real)(icon_definition->bounds.y0 + icon->vertical_offset - label_definition->bounds.y0 -
+			label->vertical_offset) +
+		(real)(icon_definition->bounds.y1 - icon_definition->bounds.y0) * 0.5f;
+	capitals_middle = (real)draw_unicode_string_capital_middle(bounds, L"") +
+		(draw_string_capital_height() % 2 ? 0.5f : 0.0f);
+
+	return (short)floorf(picture_middle - capitals_middle + 0.5f);
 }
 
 /* whether the picture is left out, its key drawn in its words (in their
@@ -8487,6 +8764,7 @@ static void widget_instance_render_recursive(
 			boolean shown = TRUE;
 			boolean stretched = custom_edition_picture &&
 				custom_edition_maps_campaign_level(widget->animation.current_frame_index) == NONE;
+			short radius = pc_menu_widget_radius(widget->definition_tag_index);
 
 			if (pc_menu_frame_placement(bitmap, &frame_x, &frame_y, &frame_width, &frame_height))
 			{
@@ -8519,6 +8797,27 @@ static void widget_instance_render_recursive(
 					color,
 					&multitexture_params,
 					FALSE);
+			}
+			else if (shown && radius > 0 &&
+				(!clip || (clip->x0 <= bounds.x0 && clip->x1 >= bounds.x1 && clip->y0 <= bounds.y0 &&
+					clip->y1 >= bounds.y1)))
+			{
+				/* port: a picture whose corners are cut round (its widget's
+				radius: the campaign's mission pictures), drawn as a shape at
+				the display's resolution, its texture as draw_bitmap_in_rect
+				lays it over the widget */
+				menu_shape_rounded_picture(
+					bitmap,
+					(real)bounds.x0,
+					(real)bounds.y0,
+					(real)bounds.x1,
+					(real)bounds.y1,
+					0.0f,
+					0.0f,
+					stretched ? 1.0f : MIN((real)(texels.x1 - texels.x0) / MAX((real)bitmap->width, 1.0f), 1.0f),
+					stretched ? 1.0f : MIN((real)(texels.y1 - texels.y0) / MAX((real)bitmap->height, 1.0f), 1.0f),
+					(real)radius,
+					color);
 			}
 			else if (shown)
 			{

@@ -219,25 +219,30 @@ static void key_cap_layout(short left, short right, short *box_x0, short *box_x1
 	*after = (short)(*box_x1 + gap - left);
 }
 
-/* a key cap about box (in the HUD's units, laid out as the text is, and
-drawn as it is: rasterizer_text_set_scale, the scoreboard's prompts):
-filled, edged, its corners rounded, their curves' edges blended over a
-pixel */
-static void key_cap_shape(rectangle2d const *box, pixel32 fill, pixel32 color)
+/* a key cap about a box (in the HUD's units, laid out as the text is, and
+drawn as it is: rasterizer_text_set_scale, the scoreboard's prompts), its
+sides in fractions of a unit: filled, edged, its corners rounded, their
+curves' edges blended over a pixel. The box is drawn whole pixels wide and
+high, its middle at the nearest half pixel to its own, so that what it is
+centred on (its name's letters, their capitals) is in its middle at any
+resolution */
+static void key_cap_shape(real box_x0, real box_y0, real box_x1, real box_y1, pixel32 fill, pixel32 color)
 {
 	real text_scale, origin_x, origin_y, pixels, size;
-	real x0, y0, x1, y1;
+	real middle_x, middle_y, width, height, x0, y0;
 
 	rasterizer_text_get_scale(&text_scale, &origin_x, &origin_y);
 	pixels = menu_shape_pixels();
-	/* (the box in whole pixels; the edge and the radius in pixels of the
-	cap as large as it is drawn) */
-	x0 = floorf((origin_x + (box->x0 - origin_x) * text_scale - KEY_CAP_PIXEL_ORIGIN) * pixels + 0.5f);
-	x1 = floorf((origin_x + (box->x1 - origin_x) * text_scale - KEY_CAP_PIXEL_ORIGIN) * pixels + 0.5f);
-	y0 = floorf((origin_y + (box->y0 - origin_y) * text_scale - KEY_CAP_PIXEL_ORIGIN) * pixels + 0.5f);
-	y1 = floorf((origin_y + (box->y1 - origin_y) * text_scale - KEY_CAP_PIXEL_ORIGIN) * pixels + 0.5f);
+	/* (the box's middle and size in the display's pixels; the edge and the
+	radius in pixels of the cap as large as it is drawn) */
+	middle_x = (origin_x + ((box_x0 + box_x1) * 0.5f - origin_x) * text_scale - KEY_CAP_PIXEL_ORIGIN) * pixels;
+	middle_y = (origin_y + ((box_y0 + box_y1) * 0.5f - origin_y) * text_scale - KEY_CAP_PIXEL_ORIGIN) * pixels;
+	width = floorf((box_x1 - box_x0) * text_scale * pixels + 0.5f);
+	height = floorf((box_y1 - box_y0) * text_scale * pixels + 0.5f);
+	x0 = floorf(middle_x - width * 0.5f + 0.5f);
+	y0 = floorf(middle_y - height * 0.5f + 0.5f);
 	size = (local_player_count() > 1 ? 0.75f : 1.0f) * text_scale * pixels;
-	menu_shape_rounded_box_pixels(x0, y0, x1, y1, floorf(KEY_CAP_RADIUS * size + 0.5f),
+	menu_shape_rounded_box_pixels(x0, y0, x0 + width, y0 + height, floorf(KEY_CAP_RADIUS * size + 0.5f),
 		MAX(floorf(KEY_CAP_EDGE * size + 0.5f), 1.0f), fill, color);
 }
 
@@ -348,12 +353,16 @@ short hud_key_prompt_legend_advance(short name_left, short name_right, wchar_t c
 }
 
 /* the key's name at the cursor in a key cap, as the HUD draws a button
-there, the cursor moved past it */
+there, the cursor moved past it. The cap is laid out in whole units
+(key_cap_layout: the text after it, the legends' rows), and drawn about the
+name's letters as they are drawn, in fractions of a unit: as much room
+either side of them, and above and below their capitals */
 static boolean key_cap_draw(wchar_t const *text, rectangle2d *bounds, rectangle2d *cursor, pixel32 color)
 {
-	rectangle2d text_bounds, box, line_start;
+	rectangle2d text_bounds, line_start;
 	short inset, margin, gap, half, middle;
 	short start, left = 0, right = 0, box_x0, box_x1, pen, after;
+	real ink_left, ink_right, ink_middle, capitals_middle;
 	pixel32 fill;
 
 	key_cap_metrics(&inset, &margin, &gap, &half);
@@ -379,20 +388,28 @@ static boolean key_cap_draw(wchar_t const *text, rectangle2d *bounds, rectangle2
 		left = (short)(text_bounds.x0 - start);
 		right = (short)(text_bounds.x1 - start);
 	}
+	/* (the letters' ink in fractions of a unit, else their whole units) */
+	if (!draw_unicode_string_drawn_span(&ink_left, &ink_right))
+	{
+		ink_left = (real)(start + left);
+		ink_right = (real)(start + right);
+	}
 	key_cap_layout(left, right, &box_x0, &box_x1, &pen, &after);
 	/* (the name drawn from its place in the middle of the cap) */
 	*cursor = line_start;
 	cursor->x0 = (short)(start + pen);
 	draw_string_set_indents(cursor->x0 - bounds->x0, 0);
 	draw_unicode_string_compute_bounds(bounds, text, &text_bounds, cursor);
-	/* a key cap: the prompt's colour faintly filled, edged in it */
-	box.x0 = (short)(start + box_x0);
-	box.x1 = (short)(start + box_x1);
+	/* a key cap: the prompt's colour faintly filled, edged in it, its
+	middle the letters' (drawn pen units further on than measured) and its
+	capitals' (half a unit lower than the whole unit for an odd number of
+	rows) */
+	ink_middle = (ink_left + ink_right) * 0.5f + (real)pen;
 	middle = draw_unicode_string_capital_middle(cursor, L"");
-	box.y0 = (short)(middle - half + 1);
-	box.y1 = (short)(middle + half);
+	capitals_middle = (real)middle + (draw_string_capital_height() % 2 ? 0.5f : 0.0f);
 	fill = ((pixel32)((color >> 24) * 3 / 10) << 24) | (color & 0x00FFFFFFUL);
-	key_cap_shape(&box, fill, color);
+	key_cap_shape(ink_middle - (real)(box_x1 - box_x0) * 0.5f, capitals_middle - ((real)half - 0.5f),
+		ink_middle + (real)(box_x1 - box_x0) * 0.5f, capitals_middle + ((real)half - 0.5f), fill, color);
 	text_bounds.x0 = bounds->x0;
 	rasterizer_draw_unicode_string(&text_bounds, NULL, NULL, 0, text);
 	bounds->y0 = cursor->y0;

@@ -4,8 +4,11 @@ each list of rows (Server Setup's, VR's, the setup options') no row over the nex
 lobby's players' rows and controls) and every spinner's value in such a row with its capitals on its middle
 (port_settings.caps_text_y); every footer prompt's key cap and words inside its picture (port_settings.
 prompt_fit_width); Choose Mission's arrows as far from its cards at any width, NOT YET BEATEN in its box, the
-missions' objectives on the lines shown (issue 681). The files as shipped, and the generator's output with a fault,
-which each check must find."""
+missions' objectives on the lines shown (issue 681); the port's questions' messages and buttons in their box, the
+buttons' focus rings clear of it (issue 696); the pause boxes' footers' middle their legends' (issue 596) at the
+campaign pause menu's spacing (issue 690); the map lists' chooser's words and arrows on its middle, its arrows in from
+its ends, and CONTINUE's picture in the middle of its item (issue 687). The files as shipped, and the generator's output
+with a fault, which each check must find."""
 
 import sys
 import xml.etree.ElementTree as ElementTree
@@ -17,8 +20,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import menu_fit, menu_layout  # noqa: E402
 
 port_settings = menu_layout.port_settings
+_PAUSE_BOX_SVG = port_settings.pause_box_svg
 CHECKS = {"rows": menu_fit.rows_overlapping, "centred": menu_fit.texts_off_middle,
-          "prompts": menu_fit.prompt_overflows, "missions": menu_fit.mission_overflows}
+          "prompts": menu_fit.prompt_overflows, "missions": menu_fit.mission_overflows,
+          "dialogs": menu_fit.dialog_overflows, "pause": menu_fit.pause_box_misfits,
+          "chooser": menu_fit.chooser_off_middle, "continue": menu_fit.continue_art_off_middle}
 
 
 def generated():
@@ -78,6 +84,22 @@ NEGATIVE_CONTROLS = {
     "unbeaten-in-text-column": ("MISSION_UNBEATEN_INSET", 10, "missions"),
     # the objective on one line, as before: Keyes's and The Library's cut short
     "objective-one-line": ("MISSION_OBJECTIVE_LINES", 1, "missions"),
+    # a question's message wider than the box, past its edges (issue 696's long mission name past them)
+    "message-past-box": ("DIALOG_MESSAGE", (176, 194, 269, 94), "dialogs"),
+    # the buttons' pill to their picture's edges, as the redraw's focus ring was (issue 696: the ring on the box)
+    "button-pill-to-edges": ("TEXT_BUTTON_PILL", (0, 0, 128, 22), "dialogs"),
+    # the pause box's legends where the Xbox's 159-high box had them, not in its footer's middle (issue 596)
+    "legends-off-footer": ("PAUSE_BOX_LEGENDS_BOTTOM", 26, "pause"),
+    # the footer's line in its band, as before: the band's middle under the legends' (issue 596)
+    "footer-line-in-band": ("pause_box_svg", lambda piece, height, header=False: _PAUSE_BOX_SVG(piece, height, header)
+                            .replace(f'y="{height - 28 - port_settings.PAUSE_BOX_DIVIDER:g}"', f'y="{height - 28}"'),
+                            "pause"),
+    # the chooser's words where they were, high in their row (issue 687)
+    "chooser-words-high": ("MAP_KIND_SPINNER", (9, 2, 238), "chooser"),
+    # the chooser's arrows near the row's ends, as before (issue 687)
+    "chooser-arrows-at-ends": ("MAP_KIND_ARROW_INSET", 3, "chooser"),
+    # CONTINUE's picture against the item's top, as before (issue 687)
+    "continue-art-high": ("CONTINUE_ART_WIDTH", 50, "continue"),
 }
 
 
