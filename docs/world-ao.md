@@ -802,7 +802,7 @@ fields](#the-objects-occlusion-fields)). GPU ms a frame on the Radeon 8060S, unp
 
 a30's trees sway, so every one in view was an exact box walked by every pixel. A field is one fetch.
 
-**The bake** (first load, the 5900X's 29 threads): a30's 13 fields 0.85 s (the scenery's seven 4.9 s of the
+**The bake** (first load, the Radeon box's 29 threads): a30's 13 fields 0.85 s (the scenery's seven 4.9 s of the
 threads' time), b30's 27 fields 1.30 s (the scenery's twenty 12.3 s, 8.6 of it the crashed Pelican's 4,223
 triangles, its least detailed level). The atlas: 4.4 MB on a30, 6.8 MB on b30.
 
