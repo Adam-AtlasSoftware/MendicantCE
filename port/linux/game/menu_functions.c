@@ -1229,9 +1229,18 @@ static boolean map_kind_singleplayer(short kind)
 	return kind == MAP_KIND_SINGLEPLAYER || kind == MAP_KIND_CUSTOM_SINGLEPLAYER;
 }
 
+/* whether the chooser passes over a kind: a singleplayer one unless
+`singleplayer`, and FORGE MAPS with game.forge off */
+static boolean map_kind_skipped(short kind, boolean singleplayer)
+{
+	return (!singleplayer && map_kind_singleplayer(kind)) ||
+		(kind == MAP_KIND_FORGE && !config_boolean("game.forge"));
+}
+
 /* The kind the chooser shows, kept to the multiplayer kinds unless
-`singleplayer`: a singleplayer kind it was turned to becomes the next
-multiplayer one the way it turned from `previous`. */
+`singleplayer` (and to the kinds there are, map_kind_skipped): a kind it
+passes over that it was turned to becomes the next one the way it turned
+from `previous`. */
 static short map_kind_shown(struct widget_instance *list, boolean singleplayer, short previous)
 {
 	struct widget_instance *spinner = named(list, "list_item_0_map_kind_spinner", 0);
@@ -1240,13 +1249,13 @@ static short map_kind_shown(struct widget_instance *list, boolean singleplayer, 
 	if (!spinner)
 		return singleplayer ? MAP_KIND_SINGLEPLAYER : MAP_KIND_MULTIPLAYER;
 	kind = (short)PIN(spinner->parameters.list.selected_index, 0, NUMBER_OF_MAP_KINDS - 1);
-	if (!singleplayer && map_kind_singleplayer(kind))
+	if (map_kind_skipped(kind, singleplayer))
 	{
 		short step = kind == (previous + NUMBER_OF_MAP_KINDS - 1) % NUMBER_OF_MAP_KINDS ? -1 : 1;
 
 		do
 			kind = (short)((kind + step + NUMBER_OF_MAP_KINDS) % NUMBER_OF_MAP_KINDS);
-		while (map_kind_singleplayer(kind));
+		while (map_kind_skipped(kind, singleplayer));
 		spinner->parameters.list.selected_index = kind;
 	}
 	return kind;

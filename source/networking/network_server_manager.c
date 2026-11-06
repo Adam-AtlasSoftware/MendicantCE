@@ -1620,9 +1620,10 @@ static void network_game_server_list(
 	them, and its rate: network_standard.c) */
 	p2p_set_game_listing_standard(network_standard_hosting(), network_standard_opence_joins_open(),
 		(int)network_standard_server_rate(state == _network_game_server_state_pregame && !in_progress));
-	/* port: (a Forge game, which only a build with Forge joins:
-	HALO_PORT_FORGE_VERSION_BIT) */
-	p2p_set_game_listing_forge((game->variant.flags & GAME_VARIANT_FORGE_FLAG) != 0);
+	/* port: (a Forge game, or a Forge map's of any game type, which only a
+	build with Forge joins: HALO_PORT_FORGE_VERSION_BIT) */
+	p2p_set_game_listing_forge((game->variant.flags & GAME_VARIANT_FORGE_FLAG) != 0 ||
+		forge_layout_hosting());
 }
 
 /* port: a bot's score in the game in progress (game_engine.c's), 0 for none */

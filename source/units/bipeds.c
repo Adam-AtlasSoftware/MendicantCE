@@ -4290,8 +4290,9 @@ static boolean biped_physics_prepare(
 			forge_monitor.c) flies as Forge's free camera did: level, the way
 			the player faces whatever the pitch of their view, straight up and
 			down (jump and crouch, game/players.c), and faster with the tools'
-			fast key, which the monitor has as exact facing */
-			if (biped->unit.player_index != NONE)
+			fast key, which the monitor has as exact facing; in games of the
+			Forge game type only, elsewhere as the game had it */
+			if (biped->unit.player_index != NONE && game_engine_variant_is_forge())
 			{
 				set_real_vector3d(&physics.forward, biped->unit.desired_facing_vector.i,
 					biped->unit.desired_facing_vector.j, 0.f);

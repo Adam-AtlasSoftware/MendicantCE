@@ -192,6 +192,9 @@ wchar_t const *forge_custom_map_title(short index);
 wchar_t const *forge_custom_map_description(short index);
 void forge_custom_map_select(short index);
 short forge_custom_map_selected(void);
+/* whether the game hosted plays a Forge layout, chosen as a map or loaded in
+it, which marks its advertisement (port: forge_layout.c) */
+int forge_layout_hosting(void);
 /* system link (port/linux/game/network_distributed.c): the host sends the
 layout of the map, as a variant, to a client that has loaded it, and again
 to every client when the tools or a mod have changed it; the client applies

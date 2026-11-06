@@ -1186,7 +1186,7 @@ the setting for one start of the game. It has priority over the file.
 | `game.auto_pickup` | `false` | `HALO_AUTO_PICKUP` | Multiplayer's second weapon. `false` (the Xbox's way): a player with an empty weapon slot holds the action button over a weapon to pick it up, as the prompt says. `true` (Custom Edition's way): walking over it picks it up and readies it. The campaign always picks it up on walking over, as on the Xbox, and a player with no weapon at all picks up the first one they walk over either way. Games of this computer alone (split screen, bots) take this computer's; an OpenH1 network game takes its host's, as read in the lobby, which the game record carries to its OpenH1 clients so that their prompts show the host's way (`network_standard_walk_over_pickup`, OpenH1 protocol version 18). A Legacy game, and an OpenCE player in an OpenH1 game, always walk over, as OpenCE plays. WEAPON PICKUP in Settings > Online: HOLD (XBOX) or WALK OVER (CE). |
 | `game.sim_rate` | `60` | `HALO_SIM_RATE` | How many steps a second the game takes for what a player feels in their hands: their own movement and aim, projectiles, thrown items, and the VR mode's throws and grabs. `30` (as the game was made), `60` or `120`: 1, 2 or 4 steps inside each of the game's 30 ticks a second. Everything else keeps the 30 ticks: the AI, scripts, cinematics, animations, timers, vehicles, saved games and the network. Any other value is `30` (refer to "Simulation rate" in "How the port operates"). It applies to games of this computer alone: the campaign, split screen and games with bots (a split screen game runs as a network game of one computer that takes no other). Network games with other computers use the rate the game agreed on, hosting or joining: `30` in a Legacy game (OpenCE's netcode steps at 30), and the host's `network.sim_rate` in an OpenH1 game. The playback of a saved film is always `30`. TICK RATE in Video Setup > Graphics > Advanced: ORIGINAL (30), 60 or 120. A change applies from the next tick. Where the game sets the setting aside (a network game with other computers, a film's playback), the row is locked: dimmed, at the game's rate (ORIGINAL (30) in a Legacy game), passed over, and OK leaves the setting as it was. |
 | `game.forge` | `false` | `HALO_FORGE` | `true`: the main menu has FORGE, SaftiGlas's in-game map editor (fly, place and move objects, spawns, zones and AI, saved as map variants in `forge_maps`: `docs/forge_mvar.md`), and the main menu writes Forge's tag pack once from your maps (`maps/openh1_forge.pack`: the monitor of The Maw and some of The Silent Cartographer's characters, `port/linux/TAG_INJECTION.md`). `false`: no FORGE. Read as the game starts. |
-| `game.forge_monitor` | `true` | `HALO_FORGE_MONITOR` | In a Forge game, the builder flies as the monitor (343 Guilty Spark), whose tags Forge's tag pack brings from The Maw. `false`, or without the pack, flies the camera free of the player. The game's machine decides (the host's setting, in a network game). |
+| `game.forge_monitor` | `true` | `HALO_FORGE_MONITOR` | In a Forge game, the builder flies as the monitor (343 Guilty Spark), whose tags Forge's tag pack brings from The Maw. `false`, or without the pack, flies the camera free of the player. This machine's builder only: each machine's own setting. |
 | `game.unlock_all_levels` | `false` | `HALO_UNLOCK_ALL_LEVELS` | `true`: a profile created afterward starts with all the campaign levels finished on all the difficulties. `false`: a new profile starts at The Pillar of Autumn, and each level opens when you finish the level before it, as on the Xbox. Existing profiles keep their progress. To start a profile over, type `profile_reset_campaign` in the console. |
 | `bots.count` | `0` | `HALO_BOTS` | Computer players (bots) in a game this computer hosts (any gametype but Race): `0` to `64` join its lobby with the players, as far as the game has room: a local (split screen) game, or a system link or internet one, where the host plays them and the other machines see them as players (`bots.make_room`). `0`: none, as in the stock game. The lobby's BOTS writes it (ADD n: n; FILL TO: 64). Refer to "Bots". |
 | `bots.skill` | `"normal"` | `HALO_BOT_SKILL` | How well the bots play: `"easy"`, `"normal"`, `"heroic"` or `"legendary"`: how soon they react, how far and how wide they see, how large their aim error is and how fast it settles, how fast they turn. The lobby's BOT SKILL writes it. |
@@ -3488,7 +3488,8 @@ then lists the multiplayer maps, the Custom Edition multiplayer maps and
 map chosen goes straight to Server Setup with the **Forge** game type: slayer
 with no score to reach, no respawn wait, every vehicle, and
 `GAME_VARIANT_FORGE_FLAG`, which turns the tools on. In every other game the
-game plays as usual.
+game plays as usual; with `game.forge` off the map lists have no Forge
+maps.
 
 | Keyboard and mouse | Controller | Effect |
 | --- | --- | --- |
@@ -3528,7 +3529,8 @@ client the tools ask the host to spawn, move or remove; the AI, zones,
 gravity and the Map tab work on the host only.
 
 **Network games.** A Forge game's machines send Forge's messages and have
-Forge's tags in their levels, so a Forge host marks its advertisement and
+Forge's tags in their levels, so a Forge host (or the host of a Forge map,
+whatever its game type, whose layout it sends) marks its advertisement and
 its listing (`HALO_PORT_FORGE_VERSION_BIT`, `halo_port_limits.h`): a build
 without Forge takes it for a newer version and does not join, and a build
 with Forge but without the tag pack is told so, asks for the pack (the main

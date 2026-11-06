@@ -1809,7 +1809,10 @@ static real player_flying_throttle(
 	struct object_datum *object = object_get(unit_index);
 	real throttle = 0.f;
 
-	if (object->object.type == _object_type_biped &&
+	/* (in games of the Forge game type only, whose variant every machine
+	has: elsewhere a player's flying biped stays as the game had it) */
+	if (game_engine_variant_is_forge() &&
+		object->object.type == _object_type_biped &&
 		TEST_FLAG(biped_definition_get(object->definition_index)->biped.flags, _biped_flying_bit))
 	{
 		if (TEST_FLAG(control_flags, _unit_control_jump_bit))

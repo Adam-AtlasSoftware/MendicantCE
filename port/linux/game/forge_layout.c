@@ -2567,6 +2567,8 @@ debug.forge_layout_save (port_config.c): a few seconds into a local game,
 saves the layout to that slot, once, and logs where local player 0 is, for
 automated tests; 0 never */
 long config_integer(char const *name);
+/* (and game.forge: forge_custom_maps_refresh) */
+int config_boolean(char const *name);
 
 /* debug.forge_test_edit (port_config.c): in a system link game, the host
 spawns a scenery object beside its player a few seconds in; a client asks
@@ -2847,12 +2849,17 @@ short forge_custom_maps_refresh(
 {
 	static struct forge_layout_variant variants[FORGE_LAYOUT_MAXIMUM_CUSTOM_MAPS * 4];
 	static char base_names[FORGE_LAYOUT_MAXIMUM_CUSTOM_MAPS * 4][FORGE_LAYOUT_NAME_SIZE];
-	short count = forge_layout_list_variants(NULL, variants, base_names, NUMBEROF(variants));
+	short count;
 	short base_index;
 
+	/* port: with game.forge off, no Forge maps in the map lists, as the game
+	was (and no layout played from one: forge_custom_map_selected) */
+	forge_layout_globals.custom_map_count = 0;
+	if (!config_boolean("game.forge"))
+		return 0;
+	count = forge_layout_list_variants(NULL, variants, base_names, NUMBEROF(variants));
 	/* the listed variants of the game's multiplayer maps, map by map in the
 	order of the map list, each map's by file name */
-	forge_layout_globals.custom_map_count = 0;
 	for (base_index = 0; base_index < FORGE_LAYOUT_MULTIPLAYER_MAP_COUNT; base_index++)
 	{
 		short first = forge_layout_globals.custom_map_count;
@@ -2933,6 +2940,16 @@ void forge_custom_map_select(
 		map ? map->file : "");
 
 	return;
+}
+
+/* port: whether the game hosted plays a Forge layout, which its clients are
+sent (forge_layout_send_to_client): one chosen as a map in the map list, or
+one loaded in the game; its advertisement is then marked, whatever its game
+type (halo_port_limits.h's HALO_PORT_FORGE_VERSION_BIT) */
+int forge_layout_hosting(
+	void)
+{
+	return forge_custom_map_selected() != NONE || forge_layout_globals.loaded_length != 0;
 }
 
 short forge_custom_map_selected(

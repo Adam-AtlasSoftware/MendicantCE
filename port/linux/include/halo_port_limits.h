@@ -130,8 +130,9 @@ record (_network_game_classic_turning_bit, network_standard.c's
 network_standard_turns_with_aim). Legacy games, and what an OpenCE
 machine sees, are unchanged) */
 #define HALO_PORT_STANDARD_BASE_VERSION 41
-/* A Forge game (port/linux/game/forge.c, the Forge game type) advertises
-its version (the network version, or a Standard game's) with this bit too:
+/* A Forge game (port/linux/game/forge.c, the Forge game type), or a game
+of any type on a Forge map (a layout the host sends: forge_layout.c),
+advertises its version (the network version, or a Standard game's) with this bit too:
 its machines send Forge's own messages (network_distributed.h's
 _distributed_message_forge_layout and _forge_edit) and append Forge's tags
 to the level's table (forge_tag_import.c), so only a build that has Forge,

@@ -1265,8 +1265,8 @@ static const struct config_setting config_settings[] =
 	{ "game.forge_monitor", _config_boolean, "true", "HALO_FORGE_MONITOR", _environment_value, _platform_all,
 		"In a Forge game, the builder flies as the monitor (343 Guilty Spark),\n"
 		"whose tags Forge's tag pack brings from The Maw; false, or without the\n"
-		"pack, flies the camera free of the player. The game's machine decides\n"
-		"(the host's setting, in a network game)." },
+		"pack, flies the camera free of the player. This machine's builder only\n"
+		"(each machine's own setting)." },
 
 	{ "game.unlock_all_levels", _config_boolean, "false", "HALO_UNLOCK_ALL_LEVELS", _environment_value, _platform_all,
 		"true: a profile made from now on starts with every campaign level\n"
