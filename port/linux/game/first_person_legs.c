@@ -15,6 +15,16 @@ hit boxes and markers, are the game's as ever. The legs are drawn in the
 world with the world's camera, so they keep their place and size at any
 field of view.
 
+The body is drawn between the game's ticks, a tick behind, with the view
+between them; the view drawn on foot is the newest step's
+(display.direct_camera), a tick's motion on and aimed in the frame. Drawn
+where the body is, the legs trailed the view by that, more or less as each
+step and each frame's aim came, and stepped against it walking and
+strafing (#697). So the pose is first moved as the view between the ticks
+is moved to the view drawn, level (render_interpolation_view_body): the
+legs are where the body has them from its own eye, and move as smoothly as
+the rest of the view at any frame rate.
+
 The eye is not always as far above the hips as standing or crouching puts
 it. Crouching in the air (a crouch jump) brings the eye down to crouching
 height while the body keeps its airborne pose, its hips at the eye's height
@@ -88,6 +98,8 @@ boolean vr_render_body_seat(long object_index, struct vr_body_seat *seat);
 /* port/linux/src/port_config.c */
 int config_boolean(const char *name);
 unsigned long config_changes(void);
+/* port/linux/game/render_interpolation.c */
+boolean render_interpolation_view_body(long unit_index, real_matrix4x3 *move);
 
 enum
 {
@@ -177,6 +189,8 @@ static struct
 #endif
 
 static real_matrix4x3 first_person_legs_matrices[FIRST_PERSON_LEGS_MAXIMUM_NODES];
+/* the body's pose seen from the view drawn (first_person_legs_node_matrices) */
+static real_matrix4x3 first_person_legs_seen[FIRST_PERSON_LEGS_MAXIMUM_NODES];
 static boolean first_person_legs_enabled(
 	void)
 {
@@ -1302,7 +1316,8 @@ static long first_person_legs_surface(
 	return points;
 }
 
-/* the pose to draw the legs with: the body's own (as it is drawn now), all
+/* the pose to draw the legs with: the body's own (as it is drawn now, about
+the view drawn as it is about its own: render_interpolation_view_body), all
 but the legs folded into the hips, the whole set back behind the eye and
 lowered out of the near plane's cut (first_person_legs_drop); NULL: none (a
 body without named legs) */
@@ -1354,6 +1369,19 @@ real_matrix4x3 const *first_person_legs_node_matrices(
 			return body;
 	}
 #endif
+	/* (the body as it is about its own view, between the ticks, about the
+	view drawn: that is the newest step's, a tick's motion on, aimed in the
+	frame; the legs trailed it, sliding and stepping against it, #697) */
+	{
+		real_matrix4x3 move;
+
+		if (render_interpolation_view_body(object_index, &move))
+		{
+			for (index = 0; index < count; index++)
+				matrix4x3_multiply(&move, &nodes[index], &first_person_legs_seen[index]);
+			nodes = first_person_legs_seen;
+		}
+	}
 	/* (the waist's middle as the hips are posed now) */
 	{
 		struct object_mesh const *mesh = object_mesh_get(object_index);

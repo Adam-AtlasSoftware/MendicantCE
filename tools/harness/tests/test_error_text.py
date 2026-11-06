@@ -81,5 +81,9 @@ def test_dialogs_fitted():
     assert "fit_scale = ui_widget_port_text_fit(*text, &bounds, width, height, &font_index, &color, justification);" \
         in renderer
     assert "if (fit_scale != 1.0f)\n\t\trasterizer_text_set_scale(1.0f, 0.0f, 0.0f);" in renderer
-    assert '"no_focus_test", "wrap" };' in read("port/linux/game/menu_tags.c")
+    assert '"no_focus_test", "wrap",\n\t"unbreak" };' in read("port/linux/game/menu_tags.c")
     assert "_text_box_port_wrap_bit = 4" in read("source/interface/ui_widget.c")
+    # (unbreak, the map lists' description's: its breaks made spaces before it is fitted, issue 704)
+    assert "_text_box_port_unbreak_bit = 5" in read("source/interface/ui_widget.c")
+    assert renderer.index("if (TEST_FLAG(definition->text_box_flags, _text_box_port_unbreak_bit))\n"
+                          "\t\t\t\tui_widget_port_text_unbreak(*text);") < renderer.index("fit_scale = ui_widget_port_text_fit(")

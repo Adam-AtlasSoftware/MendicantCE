@@ -860,7 +860,10 @@ enum
 	_text_box_flashing_text_bit = 2,
 	/* port: the menu files' text_flags "wrap" (port/linux/game/menu_tags.c):
 	its text fitted to its box (ui_widget_port_text_fit) */
-	_text_box_port_wrap_bit = 4
+	_text_box_port_wrap_bit = 4,
+	/* port: and "unbreak", with wrap: its written line breaks made spaces
+	first (ui_widget_port_text_unbreak) */
+	_text_box_port_unbreak_bit = 5
 };
 
 enum
@@ -5694,7 +5697,10 @@ static boolean ui_widget_port_in_error_dialog(
 lines in one font, made spaces, so that ui_widget_port_text_wrap breaks it
 where the dialog drawn needs: a line kept as written ran past a dialog
 narrower than it was written for (#523). A blank line (a paragraph) is kept.
-In place. */
+A word the text broke across two lines with a hyphen is whole again
+("Cove-\nnant"), and a hyphen before a capital kept ("Hydro-\nProcessing"):
+the map lists' words, written for the PC version's narrower column (text
+flags "unbreak", issue 704). In place. */
 static void ui_widget_port_text_unbreak(
 	wchar_t *text)
 {
@@ -5705,10 +5711,17 @@ static void ui_widget_port_text_unbreak(
 		if (text[from] == L'\r' || text[from] == L'\n')
 		{
 			long breaks = 0;
+			boolean hyphen = to > 1 && text[to - 1] == L'-' && text[to - 2] != L' ';
 
 			for (; text[from] == L'\r' || text[from] == L'\n'; from++)
 				breaks += text[from] == L'\n' || (text[from] == L'\r' && text[from + 1] != L'\n');
 			from--;
+			if (hyphen && breaks == 1 && text[from + 1])
+			{
+				if (text[from + 1] >= L'a' && text[from + 1] <= L'z')
+					to--;
+				continue;
+			}
 			if (to > 0 && text[to - 1] == L' ')
 				to--;
 			if (breaks > 1)
@@ -6099,7 +6112,8 @@ static void widget_instance_render_text_box(
 	below (the dialog's footer), its written line breaks made spaces first
 	(ui_widget_port_text_unbreak). A text box flagged wrap (the port's
 	dialogs' messages) likewise, in its box less its text's offset on each
-	side, its written breaks kept. Each is fitted to its room
+	side, its written breaks kept, or, flagged unbreak too (the map lists'
+	description), made spaces. Each is fitted to its room
 	(ui_widget_port_text_fit): smaller, where it would be taller */
 	if ((widget == ui_widget_port_error_text_box && ui_widget_port_error_text) ||
 		TEST_FLAG(definition->text_box_flags, _text_box_port_wrap_bit))
@@ -6120,6 +6134,8 @@ static void widget_instance_render_text_box(
 		else
 		{
 			width = (short)(width - 2 * definition->horizontal_offset);
+			if (TEST_FLAG(definition->text_box_flags, _text_box_port_unbreak_bit))
+				ui_widget_port_text_unbreak(*text);
 		}
 		fit_scale = ui_widget_port_text_fit(*text, &bounds, width, height, &font_index, &color, justification);
 	}
