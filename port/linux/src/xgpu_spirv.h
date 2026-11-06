@@ -84,6 +84,9 @@ pre-pass's inputs (an unsigned 2D image, read with texelFetch) at this
 binding of XGPU_SPIRV_SET_TEXTURES; set XGPU_SPIRV_SET_OCCLUSION as the
 surfaces have it */
 #define XGPU_SPIRV_WORLD_AO_PASS_INPUTS 0
+/* (the distance-field scene's cascades: a 3D RG8 snorm image, linear,
+clamped: xgpu.h's XGPU_WORLD_CASCADE*) */
+#define XGPU_SPIRV_BINDING_WORLD_CASCADES 7
 
 /* the locations of what the vertex shader hands the pixel shader */
 enum
@@ -339,5 +342,14 @@ enum
 
 BOOL xgpu_spirv_halo_vertex_shader(const struct xgpu_spirv_options *options, struct xgpu_spirv_module *module);
 BOOL xgpu_spirv_halo_pixel_shader(const struct xgpu_spirv_options *options, struct xgpu_spirv_module *module);
+
+/* the distance-field scene's ray step (port/linux/include/world_cascades.h's
+world_trace_ray) alone, for tools/test_world_trace.py: a fragment shader,
+entry point "main", tracing its ray from its inputs (location 0 the origin,
+1 the direction, 2 t_max and the mask, 3 to 6 the cascades' vec4s) through
+the cascades' texture (XGPU_SPIRV_SET_OCCLUSION,
+XGPU_SPIRV_BINDING_WORLD_CASCADES), writing the hit (1 or 0), t and kind.
+FALSE if out of memory. */
+BOOL xgpu_spirv_world_trace_test(struct xgpu_spirv_module *module);
 
 #endif

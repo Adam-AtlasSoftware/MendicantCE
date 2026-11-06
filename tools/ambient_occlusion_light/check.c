@@ -18,6 +18,11 @@ model lit for each vertex with its ambient light apart:
                                       operations (xgpu_spirv_options
                                       subgroups)
 
+  check trace [<module>]              the distance-field scene's ray step
+                                      alone: the Metal emitter's text, or the
+                                      SPIR-V emitter's module written to
+                                      <module>
+
 <source>: the occlusion's, "world" (display.ambient_occlusion "world":
 XGPU_AMBIENT_OCCLUSION_WORLD, the default), "view" (the world's, shown:
 debug.world_ao_view), or "bare" (the light's bits alone, without
@@ -197,13 +202,41 @@ static int source_set(const char *name)
 	return 1;
 }
 
+/* the distance-field scene's ray step alone (tools/test_world_trace.py):
+the Metal emitter's text, or the SPIR-V emitter's module written to path */
+static int trace(const char *path)
+{
+	struct xgpu_spirv_module module;
+	char *text;
+	FILE *file;
+
+	if (!path)
+	{
+		text = xgpu_msl_world_trace_test();
+		if (!text)
+			return 1;
+		fputs(text, stdout);
+		free(text);
+		return 0;
+	}
+	if (!xgpu_spirv_world_trace_test(&module) || !(file = fopen(path, "wb")))
+		return 1;
+	fwrite(module.words, sizeof(*module.words), module.count, file);
+	fclose(file);
+	free(module.words);
+	return 0;
+}
+
 int main(int argc, char **argv)
 {
+	if (argc >= 2 && !strcmp(argv[1], "trace"))
+		return trace(argc > 2 ? argv[2] : NULL);
 	if ((argc == 2 || (argc == 3 && source_set(argv[2]))) && !strcmp(argv[1], "msl"))
 		return msl();
 	if ((argc == 3 || (argc == 4 && source_set(argv[3]))) &&
 		(!strcmp(argv[1], "spirv") || !strcmp(argv[1], "spirv_subgroups")))
 		return spirv(argv[2], !strcmp(argv[1], "spirv_subgroups"));
-	fprintf(stderr, "check msl [world|view|bare] | check spirv|spirv_subgroups <directory> [world|view|bare]\n");
+	fprintf(stderr, "check msl [world|view|bare] | check spirv|spirv_subgroups <directory> [world|view|bare] | "
+		"check trace [<module>]\n");
 	return 2;
 }

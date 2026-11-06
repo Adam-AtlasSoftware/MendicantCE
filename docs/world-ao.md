@@ -383,6 +383,64 @@ Without a field (none baked, not yet uploaded, past the atlas's room), its shape
 - Its reach is the field's or the box's, where less.
 - The grid's cells take its box grown as a box's.
 
+## The distance-field scene (`world_cascades.h`)
+
+The ground ray tracing needs (#602), and what World AO's rays step through: a global signed distance field about the
+camera, in four nested cascades (a clipmap), as Lumen's global distance field and AMD's Brixelizer have it.
+
+| Cascade | Voxel | Side (64 voxels) | Range each way |
+| --- | --- | --- | --- |
+| 0 | 0.25 wu | 16 wu | 1 wu |
+| 1 | 0.5 wu | 32 wu | 2 wu |
+| 2 | 1 wu | 64 wu | 4 wu |
+| 3 | 2 wu | 128 wu | 8 wu |
+
+- **Two distances a voxel** (RG8 snorm, each over its cascade's range, `WORLD_CASCADE_RANGE_VOXELS` = 4 voxels):
+  - the structure, the level's own field sampled (`world_sdf_sample`, which holds the static scenery too);
+  - the objects, the shapes of every drawn object within reach (`world_proxies_scene`: bipeds' capsules, vehicles'
+    wheels, items' boxes; not the static scenery, which is the structure's, and not the shapes an occlusion field
+    stands in for, since a field holds occlusion, not distance).
+  A ray's mask chooses which it may hit, so the level's pixels trace the objects alone (the lightmaps hold the level's
+  own occlusion) and a model's both.
+- **Still things go in once.** The structure is sampled where a cascade is filled and in the slabs the camera's
+  movement brings in. An object is stamped again only when one of its shapes changed by more than 0.005 wu (the motion
+  decides, not its kind): the region its old and new shapes reach is found again, each shape stamping the voxels
+  within range of it. A shape thinner than a quarter of a cascade's voxel isn't in it (a biped's limbs are in the
+  finest two).
+- **Toroidal places.** A cascade moves with the camera in steps of 4 voxels; a voxel's place is its world index
+  modulo 64, so a step finds and uploads only the slab it brings in. Found whole (the start, a new field, a jump past
+  its side), a cascade is filled 16 slices a frame, the coarsest first, and named ready when done; until then the
+  coarser serve.
+- **On the GPU:** one 3D texture, 65 x 65 x 260 (each cascade with a guard texel past its last along each axis, a copy
+  of its first, so the linear filter is right across the toroidal seam), **2.2 MB** (the CPU keeps the same). The
+  game sends the boxes written (`WORLD_AO_CASCADES` records). A cascade's block vec4 is its first voxel's centre and
+  its voxel (0: not ready).
+- **Cost** (the game's thread, `HALO_WORLD_AO_COUNTS=1`; Ryzen AI Max+ 395): a30's start with the bot walking 0.10 ms a
+  frame (4,400 voxels, 30 KB uploaded), standing 0.03 ms; a10's start 0.03 ms. A cascade filled whole is about 12 ms
+  of work, spread over its 4 frames.
+
+### The ray step
+
+`world_trace_ray(origin, direction, t_max, mask)` (`world_cascades.c`; `world_trace` in both emitters, checked against
+it by `tools/test_world_trace.py`): sphere tracing, at most 24 steps. Each step takes the finest ready cascade whose
+window holds the point, reads its two distances (one filtered fetch), and takes those the mask allows. A hit is a
+distance under a quarter voxel; a step is at least half a voxel. A distance counts only once the ray is outside it: a
+ray starting inside solid (a model's surface within its own capsules) leaves it without hitting it, as front faces
+alone would. It returns whether it hit, how far, and what (structure or objects).
+
+### Hardware ray queries later (#602)
+
+The same call is what a hardware backend implements: `rayQueryEXT` (`VK_KHR_ray_query`) in SPIR-V, Metal's
+`intersector` (M3 and later, A17 Pro) in MSL.
+- **Acceleration structures** from the scene (`world_scene.h`): the structure's collision triangles a BLAS per BSP,
+  built once a map; each object's shapes a BLAS of procedural AABBs (capsules and boxes intersected in a small
+  intersection function) or its collision mesh, instanced in a TLAS refit each frame from the same motion test.
+- **The mask** is the instance mask: bit 0 the structure, bit 1 the objects. **Front faces alone**: cull back-facing
+  triangles; a procedural shape reports no hit from inside.
+- **t_max and the hit:** the ray query's committed t, or a miss.
+- **Choosing:** per device at start (the ray query feature, `supportsRaytracing` and the GPU family); the distance
+  field is the fallback everywhere else, and the result the hardware's is compared against.
+
 ## Proxies (`world_proxies.h`)
 
 Each object definition gets up to 16 shapes, made the first time it's drawn and kept until the map unloads:

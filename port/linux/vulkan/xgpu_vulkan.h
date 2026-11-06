@@ -233,6 +233,8 @@ enum
 	upsample it by, four floats) */
 	XGPU_VULKAN_FORMAT_RG32_UINT,
 	XGPU_VULKAN_FORMAT_RGBA32F,
+	/* two signed bytes (its distance-field scene's cascades) */
+	XGPU_VULKAN_FORMAT_RG8_SNORM,
 	XGPU_VULKAN_FORMAT_COUNT
 };
 
@@ -579,6 +581,12 @@ zeros) */
 void xgpu_vulkan_world_ao_field(uint32_t part, uint32_t width, uint32_t height, uint32_t depth, uint32_t z_first,
 	uint32_t z_count, const void *data);
 void xgpu_vulkan_world_ao_window(const struct xgpu_world_ao_block *block);
+/* a box of the distance-field scene's cascades (xgpu_stream.h's
+WORLD_AO_CASCADES; width 0 released), and their image (a stand-in of
+nothing where there is none) */
+void xgpu_vulkan_world_ao_cascades(uint32_t x, uint32_t y, uint32_t z, uint32_t width, uint32_t height, uint32_t depth,
+	const void *data);
+struct xgpu_vulkan_image *xgpu_vulkan_world_ao_cascades_image(void);
 /* (the core's occlusion set) the field's atlas and table or the stand-ins,
 the sampler, the block's range in the ring for the submission of that
 serial (0: none), and a number that changes whenever any of them does */

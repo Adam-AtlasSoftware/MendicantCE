@@ -836,6 +836,29 @@ void xgpu_backend_world_ao_prepass(int phase, xgpu_target target, const struct x
 	}
 }
 
+void xgpu_backend_world_ao_cascades(unsigned long x, unsigned long y, unsigned long z, unsigned long width,
+	unsigned long height, unsigned long depth, const void *data)
+{
+	struct xgpu_stream_world_ao_cascades *record_body;
+	uint32_t size = (uint32_t)(width * height * depth * 2u);
+	unsigned char *place;
+
+	if (!stream.open)
+		return;
+	if (!width || !data)
+		size = 0;
+	record_body = record_data(XGPU_STREAM_WORLD_AO_CASCADES, sizeof(*record_body), size ? carried_one(size) : 0, &place);
+	record_body->x = (uint32_t)x;
+	record_body->y = (uint32_t)y;
+	record_body->z = (uint32_t)z;
+	record_body->width = size ? (uint32_t)width : 0;
+	record_body->height = (uint32_t)height;
+	record_body->depth = (uint32_t)depth;
+	record_body->size = size;
+	record_body->data = size ? carry_one(&place, data, size) : 0;
+	record_body->pad = 0;
+}
+
 /* (the host writes the ring's display_hdr and display_headroom as it looks
 at its display) */
 BOOL xgpu_backend_display_hdr(float *headroom)

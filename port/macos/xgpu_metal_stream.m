@@ -1478,6 +1478,13 @@ static void stream_world_ao_field(void *context, const struct xgpu_stream_world_
 		record->z_count, record->width && record->size ? host_pointer(record->data) : NULL);
 }
 
+static void stream_world_ao_cascades(void *context, const struct xgpu_stream_world_ao_cascades *record)
+{
+	(void)context;
+	xgpu_metal_world_ao_cascades(record->x, record->y, record->z, record->width, record->height, record->depth,
+		record->width && record->size ? host_pointer(record->data) : NULL);
+}
+
 static void stream_world_ao_window(void *context, const struct xgpu_stream_world_ao_window *record)
 {
 	(void)context;
@@ -1916,6 +1923,7 @@ const struct host_render_backend *xgpu_metal_stream_backend(void)
 		field's 3D texture (XGPU_METAL_TEXTURE_WORLD_SDF) and the window's
 		block (XGPU_METAL_BUFFER_WORLD_AO): xgpu_metal_world_ao.c */
 		backend.world_ao_field = stream_world_ao_field;
+		backend.world_ao_cascades = stream_world_ao_cascades;
 		backend.world_ao_window = stream_world_ao_window;
 		backend.world_ao_prepass = stream_world_ao_prepass;
 	}

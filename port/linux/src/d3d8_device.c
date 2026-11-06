@@ -41,6 +41,7 @@ Conventions carried over from the Xbox:
 #include "halo_linux_source_fixups.h"
 #include "panini_projection.h"
 #include "world_ao.h"
+#include "world_cascades.h"
 #include "world_sdf.h"
 #include "main/console.h"
 
@@ -397,6 +398,19 @@ void halo_world_ao_field(int part, unsigned long width, unsigned long height, un
 	unsigned long z_first, unsigned long z_count, void const *data)
 {
 	xgpu_backend_world_ao_field(part, width, height, depth, z_first, z_count, data);
+}
+
+_Static_assert(XGPU_WORLD_CASCADES == WORLD_CASCADES && XGPU_WORLD_CASCADE_SIDE == WORLD_CASCADE_SIDE &&
+	XGPU_WORLD_CASCADE_SPAN == WORLD_CASCADE_SPAN && XGPU_WORLD_CASCADE_RANGE_VOXELS == WORLD_CASCADE_RANGE_VOXELS &&
+	XGPU_WORLD_TRACE_STEPS == WORLD_TRACE_STEPS && XGPU_WORLD_TRACE_STRUCTURE == WORLD_TRACE_STRUCTURE &&
+	XGPU_WORLD_TRACE_OBJECTS == WORLD_TRACE_OBJECTS && XGPU_STREAM_WORLD_AO_CASCADES_SIDE == WORLD_CASCADE_SPAN &&
+	XGPU_STREAM_WORLD_AO_CASCADES_DEPTH == WORLD_CASCADE_SPAN * WORLD_CASCADES &&
+	WORLD_CASCADE_TEXEL == 2, "the distance-field scene as the emitters and the stream take it (xgpu.h)");
+
+void halo_world_ao_cascades(unsigned long x, unsigned long y, unsigned long z, unsigned long width, unsigned long height,
+	unsigned long depth, void const *data)
+{
+	xgpu_backend_world_ao_cascades(x, y, z, width, height, depth, data);
 }
 
 /* a draw's tag (nv2a_pixel_shader_key.hdr): 0 but into the HDR back
