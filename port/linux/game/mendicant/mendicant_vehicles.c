@@ -208,6 +208,21 @@ static real vehicle_speed(struct unit_datum *vehicle)
 	return (real)sqrt(x * x + y * y + z * z) * 30.0f;
 }
 
+/* the kinds the convoy's Marines may take (mendicant_convoy.c) */
+boolean mendicant_vehicle_for_marines(
+	struct unit_datum *vehicle)
+{
+	int kind = vehicle_kind(vehicle);
+
+	return vehicle_usable(vehicle) && (kind == VEHICLE_WARTHOG || kind == VEHICLE_SCORPION || kind == VEHICLE_GHOST);
+}
+
+real mendicant_vehicle_speed(
+	struct unit_datum *vehicle)
+{
+	return vehicle_speed(vehicle);
+}
+
 /* how many units ride in it (driver, gunner, passengers) */
 static int vehicle_riders(long vehicle_index)
 {
@@ -323,7 +338,7 @@ static void autopilot_update(long time)
 	{
 		struct unit_datum *unit, *vehicle;
 		real_point3d target;
-		real stop, dx, dy, distance, throttle, speed;
+		real stop, dx, dy, distance, throttle, speed, convoy_throttle = 0.0f;
 		real_vector3d facing;
 
 		if (autopilot[slot].unit == NONE || autopilot[slot].unit == 0)
@@ -339,9 +354,12 @@ static void autopilot_update(long time)
 		if (!vehicle_usable(vehicle))
 		{
 			/* flipped: everyone out (an Elite with no animation for it, at once) */
+			if (mendicant_drill_file)
+				fprintf(mendicant_drill_file, "%ld,vehicle,flipped,%ld,hunts=%d\n", time, autopilot[slot].vehicle,
+					autopilot[slot].hunts);
 			if (autopilot[slot].hunts)
 				unit_exit_seat_end(autopilot[slot].unit);
-			else
+			else if (!mendicant_convoy_flipped(autopilot[slot].vehicle))
 				unload_vehicle(autopilot[slot].vehicle);
 			autopilot[slot].unit = NONE;
 			continue;
@@ -351,6 +369,11 @@ static void autopilot_update(long time)
 			if (!vehicles_nearest_enemy_point(SIDE_COVENANT, &vehicle->object.position, &target))
 				continue;
 			stop = 15.0f;
+		}
+		else if (mendicant_convoy_drive(autopilot[slot].unit, autopilot[slot].vehicle, &target, &convoy_throttle))
+		{
+			/* the convoy: his own place behind the Chief, out of the cone in front of him */
+			stop = -1.0f;
 		}
 		else
 		{
@@ -365,7 +388,7 @@ static void autopilot_update(long time)
 		facing.i = dx / distance;
 		facing.j = dy / distance;
 		facing.k = 0.0f;
-		throttle = distance > stop ? 1.0f : 0.0f;
+		throttle = stop < 0.0f ? convoy_throttle : distance > stop ? 1.0f : 0.0f;
 		if (autopilot[slot].hunts && distance <= stop)
 		{
 			/* circle the enemy so the gunner keeps firing */
@@ -414,6 +437,7 @@ void mendicant_vehicles_reset(
 	gunner_left_vehicle = NONE;
 	vehicle_decide_time = 0;
 	vehicle_test_time = 0;
+	mendicant_convoy_reset();
 }
 
 /* After the AI update, every tick: the autopilot; once a second, who gets
@@ -424,12 +448,15 @@ void mendicant_vehicles_update(
 	long time, chief_vehicle, chief_unit;
 	int count, index;
 	struct unit_datum *chief, *chief_ride;
-	boolean chief_drives;
+	boolean chief_drives, convoy;
 
 	if (!mendicant_active)
 		return;
 	time = mendicant_time();
 	autopilot_update(time);
+	/* the convoy (with it on, it has the Marines' boarding and getting out) */
+	mendicant_convoy_update(time);
+	convoy = mendicant_convoy_active();
 	if (time >= vehicle_decide_time && time - vehicle_decide_time < 30)
 		return;
 	vehicle_decide_time = time;
@@ -445,7 +472,7 @@ void mendicant_vehicles_update(
 	/* the Chief got out: his passengers get out with him; a Warthog's gunner
 	stays on the gun while the Chief stays near, and comes after him once he
 	goes further than 20 world units */
-	if (chief_vehicle == NONE && chief_vehicle_last != NONE)
+	if (chief_vehicle == NONE && chief_vehicle_last != NONE && !convoy)
 	{
 		struct unit_datum *left = vehicles_unit(chief_vehicle_last);
 
@@ -462,7 +489,7 @@ void mendicant_vehicles_update(
 			fprintf(mendicant_drill_file, "%ld,vehicle,unload,%ld,gunner_stays=%d\n", time, chief_vehicle_last,
 				gunner_left_vehicle == chief_vehicle_last);
 	}
-	if (gunner_left_vehicle != NONE)
+	if (gunner_left_vehicle != NONE && !convoy)
 	{
 		struct unit_datum *left = vehicles_unit(gunner_left_vehicle);
 
@@ -501,7 +528,7 @@ void mendicant_vehicles_update(
 		team = mendicant_side_of(actor->meta.team_index);
 		type = actor->meta.type;
 		at = &unit->object.position;
-		if (team == TEAM_HUMAN)
+		if (team == TEAM_HUMAN && !convoy)
 		{
 			if (chief_drives && vehicle_speed(chief_ride) < 3.0f && vehicles_range_to(actor, &chief_ride->object.position) < 12.0f)
 			{
@@ -611,9 +638,10 @@ void mendicant_vehicles_update(
 		vehicle = vehicles_unit(vehicle_index);
 		if (!vehicle || vehicle_index == chief_vehicle || vehicle_index == gunner_left_vehicle)
 			continue;
-		if (vehicle->unit.driver_object_index == actor->meta.unit_index && vehicle_kind(vehicle) == VEHICLE_WARTHOG)
+		if (vehicle->unit.driver_object_index == actor->meta.unit_index && (vehicle_kind(vehicle) == VEHICLE_WARTHOG ||
+			(convoy && (vehicle_kind(vehicle) == VEHICLE_SCORPION || vehicle_kind(vehicle) == VEHICLE_GHOST))))
 			autopilot_add(actor->meta.unit_index, vehicle_index, FALSE);
-		if (chief && chief_vehicle == NONE && vehicles_range_to(actor, &chief->object.position) < 15.0f &&
+		if (!convoy && chief && chief_vehicle == NONE && vehicles_range_to(actor, &chief->object.position) < 15.0f &&
 			vehicle_speed(vehicle) < 2.0f)
 		{
 			unload_vehicle(vehicle_index);

@@ -159,6 +159,7 @@ static FILE *mendicant_player_file = NULL;
 #ifdef MENDICANT_DESKTOP
 static char mendicant_sample_path[sizeof(mendicant_config.sample_log)];
 static char mendicant_drill_path[sizeof(mendicant_config.drill_log)];
+static char mendicant_convoy_path[sizeof(mendicant_config.convoy_test_log)];
 static char mendicant_player_path[sizeof(mendicant_config.player_log)];
 static char mendicant_move_test_path[sizeof(mendicant_config.move_test_log)];
 static char mendicant_character_path[sizeof(mendicant_config.character_log)];
@@ -417,6 +418,9 @@ static void mendicant_logs_open(
 		mendicant_config.drill_log, NULL);
 	mendicant_log_open(&mendicant_move_test_file, mendicant_move_test_path, sizeof(mendicant_move_test_path),
 		mendicant_config.move_test_log, NULL);
+	/* the convoy test's scene and measures (mendicant_convoy.c) */
+	mendicant_log_open(&mendicant_convoy_file, mendicant_convoy_path, sizeof(mendicant_convoy_path),
+		mendicant_config.convoy_test_log, "time,record,a,b,c,d,e\n");
 	mendicant_log_open(&mendicant_character_file, mendicant_character_path, sizeof(mendicant_character_path),
 		mendicant_config.character_log,
 		"time,epoch,record,actor,encounter,team,kind,quirk,courage,aggression,skill,discipline,caution,"

@@ -1943,6 +1943,8 @@ void mendicant_follow_chief(long time)
 		unit = move_object(actor->meta.unit_index);
 		if (!unit || unit->object.body_vitality <= 0.0f || actor->input.vehicle_index != NONE)
 			continue; /* the dead, and riders (the vehicles have their own rules) */
+		if (mendicant_convoy_owns(move_actor_index(actor->identifier, index)))
+			continue; /* boarding a vehicle, or staying put while the Chief drives on */
 		chief = player_count == 1 ? move_object(players[0]) :
 			move_object(mendicant_player_unit_nearest(&unit->object.position));
 		if (!chief || chief == unit)

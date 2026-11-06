@@ -1264,6 +1264,13 @@ static const struct config_setting config_settings[] =
 		"frightened freeze), and each goes his own way out, so a squad scatters\n"
 		"instead of diving to one side. A Marine with a plasma grenade stuck to\n"
 		"him often runs away from his friends. Hunters and the Flood unchanged." },
+	{ "ai.mendicant.convoy", _config_boolean, "true", "HALO_AI_MENDICANT_CONVOY", _environment_value, _platform_all,
+		"With the soldier character on: when the Chief drives off in a full\n"
+		"vehicle, the Marines left over take the other vehicles nearby and\n"
+		"follow him, each to his own seat in his own time (the best driver at\n"
+		"the wheel, the last seat he had when it is free), never parking in\n"
+		"front of his gun, and get out one by one when he does; a gunner stays\n"
+		"on the gun while an enemy is near. With no seat left, they stay put." },
 	{ "ai.mendicant.bridge", _config_string, "\"\"", "HALO_AI_MENDICANT_BRIDGE", _environment_value, _platform_linux,
 		"A file the models are asked through instead (a trainer or brain.py maps\n"
 		"it); empty: the models in the game." },
@@ -1285,6 +1292,10 @@ static const struct config_setting config_settings[] =
 		"Training: drop a live grenade among soldiers every this many seconds\n"
 		"of each fight (every third a plasma grenade stuck to a Marine or a\n"
 		"Grunt), for the grenade reactions' measures; 0: none." },
+	{ "ai.mendicant.convoy_test_log", _config_string, "\"\"", "HALO_AI_MENDICANT_CONVOY_TEST_LOG", _environment_value, _platform_linux,
+		"Training: once the player has control, set up a convoy scene by the\n"
+		"Chief (six Marines, two spare Warthogs), drive him out and back, and\n"
+		"log the convoy's measures in this file; empty: no test." },
 	{ "ai.mendicant.aim_debug", _config_boolean, "false", "HALO_AI_MENDICANT_AIM_DEBUG", _environment_value, _platform_linux,
 		"Log the aim each actor is given." },
 	{ "ai.mendicant.character_log", _config_string, "\"\"", "HALO_AI_MENDICANT_CHARACTER_LOG", _environment_value, _platform_linux,

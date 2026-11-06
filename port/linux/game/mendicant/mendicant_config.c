@@ -110,6 +110,7 @@ boolean mendicant_config_read(
 	config->lost_target_search = config_boolean("ai.mendicant.lost_target_search") != 0;
 	config->friend_vehicles = config_boolean("ai.mendicant.friend_vehicles") != 0;
 	config->grenade_reactions = config_boolean("ai.mendicant.grenade_reactions") != 0;
+	config->convoy = config_boolean("ai.mendicant.convoy") != 0;
 #ifdef MENDICANT_LEGACY_ENVIRONMENT
 	/* the training bridge, its runs and its logs: desktop Linux only */
 	mendicant_config_copy_string(config->bridge, sizeof(config->bridge), config_string("ai.mendicant.bridge"));
@@ -121,6 +122,7 @@ boolean mendicant_config_read(
 	mendicant_config_copy_string(config->move_test_log, sizeof(config->move_test_log), config_string("ai.mendicant.move_test_log"));
 	mendicant_config_copy_string(config->character_log, sizeof(config->character_log), config_string("ai.mendicant.character_log"));
 	mendicant_config_copy_string(config->fire_log, sizeof(config->fire_log), config_string("ai.mendicant.fire_log"));
+	mendicant_config_copy_string(config->convoy_test_log, sizeof(config->convoy_test_log), config_string("ai.mendicant.convoy_test_log"));
 	config->vehicle_test = config_boolean("ai.mendicant.vehicle_test") != 0;
 	config->grenade_test = (real)config_real("ai.mendicant.grenade_test");
 	config->aim_debug = config_boolean("ai.mendicant.aim_debug") != 0;
@@ -221,6 +223,7 @@ void mendicant_settings_changed(
 	memcpy(mendicant_config.move_test_log, map_start.move_test_log, sizeof(mendicant_config.move_test_log));
 	memcpy(mendicant_config.character_log, map_start.character_log, sizeof(mendicant_config.character_log));
 	memcpy(mendicant_config.fire_log, map_start.fire_log, sizeof(mendicant_config.fire_log));
+	memcpy(mendicant_config.convoy_test_log, map_start.convoy_test_log, sizeof(mendicant_config.convoy_test_log));
 	/* (in training the character stays as the run set it) */
 	if (mendicant_config.training)
 		mendicant_config.character = map_start.character;

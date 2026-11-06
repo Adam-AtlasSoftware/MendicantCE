@@ -1048,6 +1048,8 @@ PAGES = {
             ("GRENADE REACTIONS", "ai.mendicant.grenade_reactions", ON_OFF,
              "Each soldier sees your grenade in his own time and scatters his own way. No squad dives as one.",
              None),
+            ("CONVOY", "ai.mendicant.convoy", ON_OFF,
+             "Your Warthog full? The rest take the other vehicles and follow you, each in his own time.", None),
             (SECTION, "AIM AND FIRE"),
             ("AIM SPREAD", "ai.mendicant.aim",
              [(f"{value:g}", f"{value:g}") for value in (0.5, 0.65, 0.8, 1, 1.25, 1.5, 2)],

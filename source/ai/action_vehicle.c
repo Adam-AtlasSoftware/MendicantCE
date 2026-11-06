@@ -82,6 +82,7 @@ symbols in this file:
 #include "units/units.h"
 #include "units/vehicle_definitions.h"
 #include "units/vehicles.h"
+#include "mendicant/mendicant.h" /* port: port/linux/game/mendicant/mendicant_convoy.c */
 
 /* ---------- constants */
 
@@ -666,7 +667,9 @@ static short action_vehicle_find_impromptu_seat(
 		real_vector3d candidate_entry_facing;
 		real_point3d candidate_hint_point;
 
-		if (action_vehicle_evaluate_seat(
+		/* port: not a seat another Marine holds or walks to (MENDICANT AI's convoy) */
+		if (!mendicant_seat_withheld(actor_index, vehicle_index, (short)seat_index) &&
+			action_vehicle_evaluate_seat(
 			actor_index,
 			vehicle_index,
 			seat_index,

@@ -156,12 +156,12 @@ struct mendicant_config
 {
 	boolean enabled, training, discipline, targeting, individuals, aim_difficulty, aim_moving,
 		aim_debug, vehicle_test, models, status, character, fire_personality, lost_target_search, friend_vehicles,
-		grenade_reactions;
+		grenade_reactions, convoy;
 	long training_skip, seed, quirks; /* quirks: MENDICANT_QUIRKS_OFF .. _LOUD */
 	real aim, marine_fire, command_radius, variety, personality;
 	real grenade_test; /* training: seconds between test grenades, 0 none */
 	char bridge[256], weights[128], sample_log[256], drill_log[256], player_log[256], move_test_log[256],
-		character_log[256], fire_log[256];
+		character_log[256], fire_log[256], convoy_test_log[256];
 };
 
 /* ---- platform: mendicant_config.c */
@@ -251,6 +251,20 @@ boolean mendicant_grenade_lands_on_friends(struct actor_datum *actor);
 void mendicant_grenade_throw_check(long actor_index, boolean throw_ordered_before); /* mendicant_grenade_throw_checked's body */
 void mendicant_vehicles_update(void);
 void mendicant_vehicle_try(void);
+boolean mendicant_vehicle_for_marines(struct unit_datum *vehicle); /* upright Warthog, Scorpion or Ghost */
+real mendicant_vehicle_speed(struct unit_datum *vehicle);         /* world units a second */
+/* M3 convoy (mendicant_convoy.c): with ai.mendicant.convoy it has the
+Marines' boarding and getting out (the vehicles' older rules step aside);
+following the Chief leaves a Marine it owns alone; the autopilot asks it
+where a Marine follower drives (FALSE: the older rule) */
+extern FILE *mendicant_convoy_file;     /* NULL unless ai.mendicant.convoy_test_log */
+void mendicant_convoy_reset(void);
+boolean mendicant_convoy_active(void);
+void mendicant_convoy_update(long time);
+boolean mendicant_convoy_owns(long actor_index);
+boolean mendicant_convoy_drive(long unit_index, long vehicle_index, real_point3d *target, real *throttle);
+void mendicant_convoy_report(void);
+boolean mendicant_convoy_flipped(long vehicle_index); /* TRUE: the convoy has the crew get out */
 /* the aim's parts the firing personality applies per soldier: the setting and
 the difficulty; a target or a ride moving (on foot, the moving penalty times
 on_foot_scale); 1 with the setting off */

@@ -46,8 +46,8 @@ Video Setup > CAMPAIGN AI (`tools/port_settings.py`'s
 variety, discipline, threat targeting, unit radius, aim spread, spread by
 difficulty, moving targets and the Marines' rate of fire, and on its SOLDIER
 CHARACTER page the character, the personality strength, the quirks, the firing
-personality, the search for a lost target, holding fire for friendly vehicles and the grenade
-reactions. It is reached from
+personality, the search for a lost target, holding fire for friendly vehicles, the grenade
+reactions and the convoy. It is reached from
 the main menu's player profile and from a campaign's pause menu (SETTINGS),
 and works with a controller as the other settings screens do. OK writes the
 changes to config.toml; `menu_functions.c`'s "port settings save" then calls
@@ -312,6 +312,106 @@ all dive the same way. Here:
   friends then and now, c the grenade, d 1 he chose to run, 0 the game's own, -1 the layer off, e
   the friends, f ticks), `gtest` (the grenade test: a, b where, c the grenade, d 1 stuck, e its
   type).
+
+## The convoy
+
+Milestone M3 (`mendicant_convoy.c`, `ai.mendicant.convoy`, with the character on): when the
+Chief's vehicle is full, the Marines left over take the other vehicles nearby and follow him.
+No new driving: the followers use the vehicles' autopilot (`mendicant_vehicles.c`) with a place
+of their own and the cone rule; real driving is M10. Only Marines, only those no script holds
+(obey, a play fight) and not during a cinematic; Hunters, the Flood and the Covenant's vehicles are
+unchanged. With the convoy off, the vehicles' older rules run exactly as before (boarding the
+Chief's slow vehicle, the passengers unloaded together when he gets out, the Warthog's gunner
+until he is 20 world units away, an empty Warthog or Ghost taken as driver).
+
+The game alone: a Marine that helps players (`actor_action_handle_vehicle_entry`) walks to the
+Chief's vehicle when it is within 10 world units and he drives it, and stands there once it is
+full. Several pick the same seat (`action_vehicle_evaluate_seat` only defers to a friend nearer
+the seat), so in the test scene five Marines walk to one seat at once.
+
+| Hook (`mendicant.h`) | In | What it does |
+| --- | --- | --- |
+| `mendicant_seat_withheld` | `actor_action_try_to_enter_vehicle` (`actions.c`) and `action_vehicle_find_impromptu_seat` (`action_vehicle.c`) | TRUE for a seat another Marine holds (the convoy's reservation) or is walking to: the game's own boarding picks another seat or none |
+| `mendicant_player_actions` | `players_update_before_game` (`players.c`), after the bots' actions | the convoy test drives the Chief (training only; nothing otherwise) |
+
+- **Full.** Every 15 ticks while the Chief drives: Marines within 12 world units of his slow
+  vehicle (18 for a man who rode in it before) are given its free seats. It is full when every seat
+  beside him is taken or being walked to, or once he goes faster than 6 world units a second. A
+  seat only promised does not count: the others look for another ride when they see his is
+  taken, not before.
+- **Leftovers and seats.** Marines on foot within 30 world units of his vehicle. The vehicles they
+  may take: an upright Warthog, Scorpion or Ghost within 35 world units of them, standing, empty or
+  driven by a Marine the convoy already drives, nearest first, each filled before the next, so a
+  lone driver does not take the second Warthog while the first has room. Seats come from
+  `vehicle_scripting_find_available_seats`, less those reserved or walked to, and only seats his
+  animations have (`unit_has_animation_to_enter_seat`). A vehicle nobody can drive is skipped.
+- **Who sits where.** The wheel first: skill x 1.2, a born driver (the character's seat
+  preference) +0.6, a born gunner -0.3; then the gun: skill x 0.8, a born gunner +0.6, a born driver
+  -0.3; then the passenger seats. Each score less the distance / 20 and plus 0.25 of his own roll.
+  The seat he last had in that vehicle +3, the vehicle +1 ("my hog"), so crews look like crews.
+- **Reservations.** Each seat given is reserved (vehicle, seat, soldier, until he sets off plus
+  10 s), released when he is in, gives up, is held by a script, dies or runs from a grenade.
+- **When.** His own delay, `0.3 + 1.5 x (1 - loyalty)` s +- 0.3 (0.2-2.5), then a cascade: those
+  given a seat together set off in the order of their own delays, each 0.27-0.67 s after the one
+  before, so one reacts and the rest take it up. He walks to his seat with the game's walk-in
+  (`actor_action_try_to_enter_vehicle` with that one seat); free movement and following the Chief
+  leave him alone meanwhile (`mendicant_convoy_owns`). Refused (no path, no animation): that
+  vehicle is not his for 10 s.
+- **Departure and the column.** A follower's driver waits for his crew, or 6 s from his own
+  seating; in front of the Chief he goes at once. Then the autopilot drives him to his place in
+  the Chief's frame: (-12, +6), (-14, -6), (-24, 0), ... world units (behind, to the right),
+  times his own gap (1.3 - 0.5 x skill), plus +-2 of his own each way; with the Chief on foot,
+  (-7, +9), (-8, -9), (-14, +3), ... from him. Throttle full beyond 15 world units, 0.35-1 from 4
+  to 15, the Chief's own pace when he is moving; a vehicle in the way (within 12 ahead, 2 to a
+  side) is steered around, slower; closing on the Chief's vehicle within 7 he brakes. **The cone
+  rule:** inside 30 degrees either side of the Chief's heading and within 40 world units, a
+  follower never stops (at least half throttle), and one ahead of him with his place behind goes
+  around him (13 to the side he is on), not through him.
+- **Lost or stuck.** More than 60 world units behind for 20 s, or eight seconds of driving
+  without getting anywhere (the autopilot's reversing did not free it), or flipped: the crew get
+  out one by one and walk, and nobody takes that vehicle for a minute.
+- **Getting out.** When the Chief gets out, the riders of his vehicle, and of every follower that
+  has pulled up within 25 world units of him (under 2 world units a second), get out one by one
+  with their own exit animations (`unit_try_and_exit_seat`): each after `0.3 + 0.9 x (1 -
+  initiative)` s plus up to 0.3 of his own, the driver last (0.3-0.8 s after the last rider), no
+  one before 4 s aboard (unless the vehicle flipped). **Gunner stays:** a gunner whose turn comes
+  stays on the gun while the Chief is within 25 world units and an enemy within 50 of the vehicle,
+  looked at again each half second. When the Chief gets back in before they are out, they stay in.
+- **No seat.** Leftovers with no seat anywhere, once he goes faster than 6 world units a second,
+  stay where they are (no run after a Warthog) until he comes back within 30 world units on foot or
+  slow (after at least 3 s), or has been on foot for 20 s. The loudest of them within 25 world
+  units of him says so, once each time he drives off: `convoy_stay_line`, a hook for the voice
+  lines to come ("We'll stay here and keep the area secure, Chief"); there is no voice line system
+  in the game yet, so it is only logged.
+- **Not in M3.** Real driving for followers (the waypoint graph, probe rays, slots that hold
+  through turns, Ghost followers on the engine's own driving: M10). Fireteams kept together (the
+  Marines have no fireteams in the port). The Chief stopping more than 3 s near followers does not
+  make them get out (only his getting out does), to keep crews from climbing in and out.
+- **Measured** (`ai.mendicant.convoy_test_log` on b30's beach, 10 seeds, convoy on and off, the
+  character on in both): see the commit message and `build/authentic_test/logs/m3_final_stats.txt`;
+  every M3 gate passes: leftovers seated when a seat exists 0.89 (off 0.25; higher, at least 0.80),
+  full to first leftover seated median 3.1 s (band 1.5-6), boarding start spread 0.49 s (over 0.4),
+  double-seat conflicts 0 (off 105), dismount spread 1.7 s (over 0.3), followers stopped a second
+  in the front cone 0, gunners staying with an enemy near 17 of 17 (with none near 0 of 17), five
+  distinct spare-driver pairs over 10 seeds (off one). With the Marines in the game's own mode
+  (the models off) the convoy runs too.
+- **Training.** As the character: off unless the run sets it. `ai.mendicant.convoy_test_log`
+  (a host path, desktop Linux): once the player has control, every actor of the level is erased;
+  two spare Warthogs (the level's own Warthog tag) and six Marines (its Marine variant, attached
+  free) are placed by the Chief, who is put at the wheel of a third, waits for his Warthog to fill,
+  drives out along the clearest line, stops, gets out (an enemy, braindead and unhurtable, 30 world
+  units off for the gunner rule), gets back in, drives back, gets out, and once more with one spare
+  Warthog taken away (more Marines than seats). The level's own actors are erased each second.
+- **Log** (the test's file, both layers): `phase`, `setup`, `vehicle`, `marine`, `board` (a
+  Marine starts walking to a seat: slot, vehicle, seat, distance), `seated` and `exit` (slot,
+  vehicle, seat, role 0 passenger, 1 gunner, 2 driver), `driver`, `conflict` (two Marines walking to
+  one seat), `claimed` and `full` (the Chief's seats walked to or taken; taken), `spare` (a spare's
+  free seats, distance, up), `cone_touch` and `cone` (a Marine-driven vehicle slow, and stopped a
+  full second, in the 15 or 30 degree cone in front of the Chief's within 40 world units),
+  `gunner` (4 s after he got out: vehicle, gunner aboard, enemy within 50, the Chief's distance),
+  `pos`, `mpos`, `cpos` each second; and with the convoy on its own rows `convoy_*` (assign, start,
+  board, seated, refused, board_failed, follower, full, hold, stay_line, rejoin, dismount, exit,
+  gunner_stays, abandon, chief_in, chief_out), which go to the drill log when there is no test.
 
 ## Fork release settings
 
@@ -1264,6 +1364,11 @@ How they translate:
 - `game_call4` becomes the four direct calls in section 3.
 - The `follow_going`/`actor_go_cancel` uses (`vehicles.inc:287, 300`) become
   `mendicant_follow_cancel` (M3).
+- With `ai.mendicant.convoy` (the authentic layer's M3, "The convoy" above), `mendicant_convoy.c`
+  takes over the Marines' boarding and getting out, and the autopilot asks it where a Marine
+  follower drives; the Covenant's rules and the autopilot's own are as they were. The older rules'
+  "he drove off" test reads the Chief's own position, which for a rider is his seat's, so it fires
+  at once whenever he drives; kept as it was with the convoy off.
 
 **Knobs:**
 - `aim_scale`, `aim_by_difficulty`, `aim_by_movement`, `aim_debug` (logs through `platform_log`)

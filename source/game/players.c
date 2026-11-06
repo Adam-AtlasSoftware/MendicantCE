@@ -239,6 +239,7 @@ symbols in this file:
 #include "devices/devices.h"
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
 #include "bots.h" /* port: port/linux/game/bots.c */
+#include "mendicant/mendicant.h" /* port: port/linux/game/mendicant/mendicant_convoy.c */
 #include "cutscene/cinematics.h" /* port: network co-op's first spawns */
 #include "editor/editor_stubs.h"
 #include "effects/effects.h"
@@ -4920,6 +4921,8 @@ void players_update_before_game(
 		/* port: the controls of a local game's bots this tick
 		(port/linux/game/bots.c), in place of what their queues held */
 		bots_update_actions(actions);
+		/* port: MENDICANT AI's convoy test drives the Chief (training only) */
+		mendicant_player_actions(actions);
 		/* port: debug.play_log (port/linux/game/play_log.c) */
 		play_log_tick(actions);
 		data_iterator_new(&iterator, player_data);

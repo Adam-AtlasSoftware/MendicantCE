@@ -3770,6 +3770,8 @@ boolean actor_action_try_to_enter_vehicle(
 			short seat_index = (word)precomputed_seat_indices[seat_index_index];
 
 			if (seat_index != NONE &&
+				/* port: not a seat another Marine holds or walks to (MENDICANT AI's convoy) */
+				!mendicant_seat_withheld(actor_index, vehicle_index, seat_index) &&
 				unit_has_animation_to_enter_seat(
 					actor->meta.unit_index,
 					vehicle_index,
