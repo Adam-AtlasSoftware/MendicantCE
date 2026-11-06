@@ -69,6 +69,7 @@ symbols in this file:
 #include "rasterizer/xbox/rasterizer_xbox_internal.h"
 #include "rasterizer/rasterizer_console_vars.h"
 #include "rasterizer/xbox/rasterizer_xbox_pixel_shader.h"
+#include "view_fov.h" /* port: port/linux/game/view_fov.c */
 
 /* ---------- constants */
 
@@ -523,7 +524,8 @@ void rasterizer_active_camouflage_draw(
 		if (TEST_FLAG(group->geometry_flags, _rasterizer_geometry_first_person_bit))
 		{
 			rasterizer_set_frustum_z(
-				rasterizer_globals.first_person_weapon_near_clip_distance,
+				/* port: nearer for a widened or moved weapon (view_fov.c) */
+				viewmodel_near_clip_distance(),
 				rasterizer_globals.first_person_weapon_far_clip_distance);
 		}
 

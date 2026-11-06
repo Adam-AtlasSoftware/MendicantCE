@@ -170,6 +170,7 @@ symbols in this file:
 #include "rasterizer/xbox/rasterizer_xbox_plasma_energy.h"
 #include "rasterizer/xbox/rasterizer_xbox_water.h"
 #include "rasterizer/xbox/shader_transparent_chicago_preprocessor.h"
+#include "view_fov.h" /* port: port/linux/game/view_fov.c */
 
 /* ---------- constants */
 
@@ -1567,7 +1568,8 @@ void rasterizer_transparent_geometry_group_draw(
 								break;
 
 							rasterizer_set_frustum_z(
-								rasterizer_globals.first_person_weapon_near_clip_distance,
+								/* port: nearer for a widened or moved weapon (view_fov.c) */
+								viewmodel_near_clip_distance(),
 								rasterizer_globals.first_person_weapon_far_clip_distance);
 						}
 						else if (!pass)

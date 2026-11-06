@@ -13,10 +13,13 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, function, inline, mutated, read, run, structure  # noqa: E402
 
-CASES = ["stock", "right", "up_and_forward", "turned_view", "on_the_screen", "weapon_fov_across", "weapon_fov_depth",
+CASES = ["stock", "right", "up_and_forward", "forward_recorded", "turned_view", "on_the_screen", "weapon_fov_across", "weapon_fov_depth",
          "weapon_fov_unusable", "held_at_the_range", "changed", "turn_pitch", "turn_yaw", "turn_roll", "turn_and_move",
          "weapon_own", "weapon_own_changed", "slider_steps"]
 CONTROLS = [
+    # the move toward the eye not recorded for the weapon's near plane, or kept once gone
+    ("\t\tapplied_forwards[local_player_index] = offset.forward;", "", "forward_recorded"),
+    ("\t\tapplied_forwards[local_player_index] = 0.0f;", "", "forward_recorded"),
     # the world's axes, not the view's
     ("\tcross_product3d(&camera->forward, &camera->up, &right);",
      "\tright.i = 0.0f; right.j = -1.0f; right.k = 0.0f;", "turned_view"),

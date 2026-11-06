@@ -657,7 +657,8 @@ void _rasterizer_model_begin(
 			/* port: the first-person weapon's projection (view_fov.c) */
 			viewmodel_projection_begin();
 			rasterizer_set_frustum_z(
-				rasterizer_globals.first_person_weapon_near_clip_distance,
+				/* port: nearer for a widened or moved weapon (view_fov.c) */
+				viewmodel_near_clip_distance(),
 				rasterizer_globals.first_person_weapon_far_clip_distance);
 		}
 

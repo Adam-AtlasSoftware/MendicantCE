@@ -1083,7 +1083,7 @@ the setting for one start of the game. It has priority over the file.
 | `display.viewmodel_fov` | `0.0` | `HALO_VIEWMODEL_FOV` | The first-person weapon's and hands' field of view, in degrees across at 16:9, from 20 to 150. `0`: the weapon's stock view, also when `display.fov` widens the world. First Person's Weapon Field of View is a slider like Field of View's. Refer to "Field of view". |
 | `display.viewmodel_offset_x` | `0.0` | `HALO_VIEWMODEL_OFFSET_X` | The first-person weapon and hands moved right (negative: left) along the view, in centimeters, from -20 to 20, for every weapon; with `display.viewmodel_fov`, as far on the screen as at the stock angle (the move is multiplied by the ratio of the angles' tangents). `0`: where the game draws them. Only this machine's drawing changes; not in the VR mode. First Person's WEAPON HORIZONTAL is a slider (-20 to 20, any value between typed). Refer to "Field of view". |
 | `display.viewmodel_offset_y` | `0.0` | `HALO_VIEWMODEL_OFFSET_Y` | The same, up (negative: down), as far on the screen at any `display.viewmodel_fov`: First Person's WEAPON VERTICAL. |
-| `display.viewmodel_offset_z` | `0.0` | `HALO_VIEWMODEL_OFFSET_Z` | The same, forward, away from the view (negative: closer; at -20 the right hand reaches the near plane), the same centimeters at any `display.viewmodel_fov`: First Person's WEAPON DEPTH. |
+| `display.viewmodel_offset_z` | `0.0` | `HALO_VIEWMODEL_OFFSET_Z` | The same, forward, away from the view (negative: closer; the weapon's near plane comes as much closer), the same centimeters at any `display.viewmodel_fov`: First Person's WEAPON DEPTH. |
 | `display.viewmodel_pitch`, `display.viewmodel_yaw`, `display.viewmodel_roll` | `0.0` | `HALO_VIEWMODEL_PITCH`, `_YAW`, `_ROLL` | The first-person weapon and hands turned, in degrees from -15 to 15, about the middle of their nodes: the muzzle up, the muzzle right, the top to the right (negative: the other way). Drawn only, with the move above; the aim and the reticle stay. First Person > WEAPON POSITION's PITCH, YAW and ROLL. |
 | `display.viewmodel_weapon."<tag path>"` | none | none | A weapon's own offsets, added to the ones above (the sums held at their ranges): a table of `x`, `y`, `z` (centimeters), `pitch`, `yaw` and `roll` (degrees) for the weapon of that tag path, any case, `/` for `\`, so a modded map's weapons have theirs too: `[display.viewmodel_weapon."weapons\\pistol\\pistol"]`. Set in a game from the pause menu's Settings, First Person > WEAPON POSITION's THIS WEAPON rows, for the weapon held (RESET THIS WEAPON takes its table out); every local player's weapon takes its own. |
 | `display.lowered_reticle` | `false` | `HALO_LOWERED_RETICLE` | `true`: the reticle is drawn below the middle of the view, as Halo 2's and Halo 3's are, and the view looks that much above the aim, so shots go where the reticle points. On foot and in a seat, first or third person; a scope's zoom brings it back to the middle. Only this machine's view changes; not in the VR mode. First Person's LOWERED RETICLE. Refer to "Field of view". |
@@ -2123,8 +2123,16 @@ only with PANINI PROJECTION on (150 while it is off; below).
   is brought in until its corners, the view's as drawn (split screen's too),
   are 0.2 units from the eye, so nothing that far or farther is clipped at
   any angle. The stock view, and any up to about 138 degrees at 16:9, keep
-  the game's plane and are drawn exactly as before; the weapon keeps its
-  own.
+  the game's plane and are drawn exactly as before.
+- The weapon's own near plane (0.0117 units) comes nearer too, where its
+  projection is wider than the stock angle (`display.viewmodel_fov`, or
+  `display.panini`, which widens it to keep the weapon its size in the
+  middle) or `display.viewmodel_offset_z` moves it toward the eye. A
+  wider projection brings the weapon's rear, beside the eye, onto the
+  screen, and the stock plane cut it there as it bobbed. The plane's
+  corners are kept as far from the eye as at the stock angle, and a move
+  toward the eye brings the plane as much nearer (to a 64th of it at
+  most). At the stock angle and place it is the game's, exactly.
 - A scope's zoom levels keep their stock view: the extra width fades out as
   the zoom comes in. A view narrower than the stock one narrows the zoom
   too.

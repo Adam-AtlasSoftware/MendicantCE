@@ -86,6 +86,11 @@ static int config_viewmodel_weapon(const char *path, double values[CONFIG_WEAPON
 	return 1;
 }
 
+/* each local player's move along the view's forward, recorded for the
+weapon's near plane (view_fov.c's viewmodel_near_clip_distance) */
+#define MAXIMUM_LOCAL_PLAYERS 4
+static real applied_forwards[MAXIMUM_LOCAL_PLAYERS];
+
 #include "under_test.inc"
 
 #define NODES 3
@@ -291,6 +296,22 @@ int main(int argc, char **argv)
 		check_moved(&camera, before, after, 0.f, -UNITS(4.5), UNITS(6.0));
 		CHECK(NEAR(after[1].position.z - before[1].position.z, -UNITS(4.5)), "moved %f along z",
 			after[1].position.z - before[1].position.z);
+	}
+	CASE("forward_recorded")
+	{
+		/* the move toward the eye recorded for the player's weapon's near
+		plane, the weapon's own included and held at the range; none once
+		the offset is gone */
+		settings(0.0, 0.0, -15.0);
+		fake_rifle[2] = -15.0;
+		viewmodel_offset_apply(1, 6, after, NODES, &camera);
+		CHECK(NEAR(applied_forwards[1], -UNITS(20.0)), "recorded %f", applied_forwards[1]);
+		CHECK(applied_forwards[0] == 0.0f, "another player's recorded %f", applied_forwards[0]);
+		settings(0.0, 0.0, 0.0);
+		fake_rifle[2] = 0.0;
+		fake_changes++;
+		viewmodel_offset_apply(1, 6, after, NODES, &camera);
+		CHECK(applied_forwards[1] == 0.0f, "still recorded %f", applied_forwards[1]);
 	}
 	CASE("turned_view")
 	{
