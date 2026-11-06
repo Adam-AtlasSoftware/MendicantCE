@@ -24,6 +24,9 @@ signals:
 	  (VBAP): each speaker's angle on its speaker alone, every angle where
 	  the tangent law hears it, never the LFE, through the mixer too, and
 	  2D voices by the game's AC-3 mix bins;
+	- the LFE on 5.1 as the Xbox's AC-3 carried it: a low pass at 120 Hz,
+	  a 1 kHz tone more than 84 dB down (recorded, nothing over the
+	  capture's last bit), the bass whole;
 	- 3D audio: audio.spatial's choice of the HRTF or the pan; the HRTF's
 	  cues (the time and the level between the ears, the tone of a sound
 	  below against one above, a sound behind duller) and the pan's (none of
@@ -1677,6 +1680,61 @@ int main(int argc, char **argv)
 			free(samples);
 		}
 		output_channels = 2;
+		return 0;
+	}
+	/* the LFE on 5.1, through the whole mix: a 2D voice to the LFE alone,
+	a sine at each frequency, its level from the LFE against its level
+	from the front left (the same voice to it alone, which the low pass
+	leaves as it is): the bass whole, 120 Hz at -3 dB (the Dolby Digital
+	LFE's band), and above it falling 48 dB an octave; an Xbox's AC-3
+	carried a 1 kHz tone to the LFE more than 84 dB down */
+	CASE("lfe")
+	{
+		static const struct { double hertz, lowest, highest; } expected[] = {
+			{ 30.0, -0.1, 0.1 }, { 60.0, -0.1, 0.1 }, { 120.0, -3.5, -2.5 }, { 240.0, -50.0, -46.0 },
+			{ 1000.0, -400.0, -84.0 },
+		};
+		unsigned long frames = 48000, n, chunk;
+		short *samples = malloc(frames * sizeof(short));
+		static float mixed[CHUNK * MAXIMUM_OUTPUT_CHANNELS];
+
+		output_channels = 6;
+		for (index = 0; index < sizeof(expected) / sizeof(expected[0]); index++)
+		{
+			double energy[2] = { 0.0, 0.0 }, level;
+			int speaker;
+
+			for (n = 0; n < frames; n++)
+				samples[n] = (short)(16000.0 * sin(2.0 * PI * expected[index].hertz * n / 48000.0));
+			for (speaker = 0; speaker < 2; speaker++)
+			{
+				struct sdl_stream *stream = voice_new(samples, frames, 1, 48000, 0);
+				unsigned long channel = speaker ? 3 : 0;
+
+				stream->mix_left = stream->mix_right = 0.0f;
+				memset(stream->surround_bins, 0, sizeof(stream->surround_bins));
+				stream->surround_bins[0][channel] = 1.0f;
+				streams = stream;
+				/* (its second quarter second to its fourth: the filter
+				settled, before the voice ends) */
+				for (chunk = 0; chunk < frames / CHUNK - 4; chunk++)
+				{
+					mix(mixed, CHUNK, TRUE);
+					for (n = 0; chunk * CHUNK >= 12000 && n < CHUNK; n++)
+						energy[speaker] += (double)mixed[n * 6 + channel] * mixed[n * 6 + channel];
+				}
+				streams = NULL;
+				for (chunk = 0; chunk < 16; chunk++)
+					mix(mixed, CHUNK, TRUE);
+				voice_delete(stream);
+			}
+			level = energy[1] > 0.0 ? 10.0 * log10(energy[1] / energy[0]) : -400.0;
+			CHECK(energy[0] > 0.0 && level >= expected[index].lowest && level <= expected[index].highest,
+				"a %.0f Hz tone to the LFE on 5.1: %.1f dB of the front left's (%.1f to %.1f)", expected[index].hertz,
+				level, expected[index].lowest, expected[index].highest);
+		}
+		output_channels = 2;
+		free(samples);
 		return 0;
 	}
 	/* audio.spatial: "auto" through the HRTF on any stereo output, as the

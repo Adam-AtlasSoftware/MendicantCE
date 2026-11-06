@@ -1,8 +1,8 @@
 """The real mixer of dsound_sdl.c on known signals (mixer.c): its resampler against the same low pass worked out in
 double precision, sines through it as the ear hears them, voices out of earshot, mono voices, the linear
 resampler, the Xbox ADPCM decoder against reference vectors, the Doppler shift, the limiter, audio.channels' choice
-and the 5.1 pan, and 3D audio: audio.spatial's choice, the HRTF's cues against the pan's, its distance,
-occlusion, reverb and Doppler, the crossfade when the choice changes, and 2D voices left as they are; the master
+and the 5.1 pan, the LFE's low pass, and 3D audio: audio.spatial's choice, the HRTF's cues against the pan's, its
+distance, occlusion, reverb and Doppler, the crossfade when the choice changes, and 2D voices left as they are; the master
 volume on every kind of voice; and the
 hand-off of the game's side of the voices to the mixer, which never waits for a game thread.
 
@@ -24,7 +24,8 @@ from harness import CHECK_FAILED, build, function, mutated, read, run  # noqa: E
 
 SOURCE = "port/linux/src/dsound_sdl.c"
 CASES = ["reference", "impulse", "sines", "aliases", "silent-voice", "mono", "linear", "adpcm", "doppler", "doppler-steady",
-         "limiter", "obstruction", "channels", "surround", "spatial-choice", "hrtf-cues", "hrtf-paths", "hrtf-switch", "dry-2d",
+         "limiter", "obstruction", "channels", "surround", "lfe", "spatial-choice", "hrtf-cues", "hrtf-paths", "hrtf-switch",
+         "dry-2d",
          "master-volume", "buffers", "sound-off",
          "hand-off-never-waits", "hand-off-settings"]
 
@@ -90,6 +91,8 @@ NEGATIVE_CONTROLS = {
                                   "\t\tfloat second = sinf(1.57079633f * (angle - surround_ring_angle[segment]) /\n"
                                   "\t\t\t(surround_ring_angle[segment + 1] - surround_ring_angle[segment]));"),
                                  "surround"),
+    # the LFE on 5.1 full range, as it was (an Xbox's AC-3 carried only its bass)
+    "lfe-full-range": (("\tlfe_lowpass(output, frames);\n", ""), "lfe"),
     # audio.spatial: "auto" panned on stereo; "speakers" through the HRTF; the VR mode by audio.spatial
     "spatial-auto-panned": (('return strcmp(setting, "speakers") != 0;',
                              'return !strcmp(setting, "headphones");'), "spatial-choice"),
