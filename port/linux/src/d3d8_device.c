@@ -5194,8 +5194,13 @@ int halo_world_ao_prepass_begin(void)
 
 /* ... done: the occlusion found from it over the window's view (its bounds
 in the game's units of the screen), as the camera saw it */
-void halo_world_ao_prepass_end(short x0, short y0, short x1, short y1, float const camera[4][4])
+void halo_world_ao_prepass_end(short x0, short y0, short x1, short y1, float const camera[4][4],
+	float const cascades[4][4], unsigned long frame, int history)
 {
+	/* (the previous pass, its camera and corners, which the history is
+	reprojected by) */
+	static struct xgpu_world_ao_pass previous;
+	static int previous_made;
 	struct render_target_entry *target = render_target_get(&device.back_buffer);
 	struct xgpu_world_ao_pass pass;
 	long corners[4];
@@ -5203,12 +5208,30 @@ void halo_world_ao_prepass_end(short x0, short y0, short x1, short y1, float con
 
 	world_ao.prepass = FALSE;
 	if (!target || !world_ao.sampled)
+	{
+		previous_made = 0;
 		return;
+	}
+	memset(&pass, 0, sizeof(pass));
 	view_corners(target, x0, y0, x1, y1, corners);
 	memcpy(pass.camera, camera, sizeof(pass.camera));
 	pass.camera[3][3] = world_ao.scale;
 	for (index = 0; index < 4; index++)
 		pass.corners[index] = (int32_t)corners[index];
+	memcpy(pass.cascades, cascades, sizeof(pass.cascades));
+	if (previous_made)
+	{
+		memcpy(pass.previous, previous.camera, sizeof(pass.previous));
+		memcpy(pass.previous_corners, previous.corners, sizeof(pass.previous_corners));
+	}
+	/* (the history only where the last frame's was this window's, alike in
+	place and scale) */
+	pass.history[0] = history && previous_made && !memcmp(previous.corners, pass.corners, sizeof(pass.corners)) &&
+		previous.camera[3][3] == pass.camera[3][3] ? 1.0f : 0.0f;
+	pass.history[1] = (float)(frame & 0xFFFFu);
+	pass.history[2] = XGPU_WORLD_AO_HISTORY_NEW;
+	previous = pass;
+	previous_made = 1;
 	xgpu_backend_world_ao_prepass(XGPU_WORLD_AO_PREPASS_END, target->target.number, &pass);
 }
 

@@ -66,7 +66,8 @@ _Static_assert(XGPU_METAL_TEXTURE_STAGE(3) == 3 && XGPU_METAL_SAMPLER_STAGE(3) =
 _Static_assert(XGPU_METAL_VERTEX_CONSTANT_COUNT == XGPU_VERTEX_CONSTANT_COUNT, "vertex constants");
 _Static_assert(XGPU_MSL_TEXTURE_WORLD_AO_PIXELS == XGPU_METAL_TEXTURE_WORLD_AO_PIXELS &&
 	XGPU_MSL_TEXTURE_WORLD_AO_OBJECTS == XGPU_METAL_TEXTURE_WORLD_AO_OBJECTS &&
-	XGPU_MSL_BUFFER_WORLD_AO == XGPU_METAL_BUFFER_WORLD_AO, "the world's occlusion's bindings");
+	XGPU_MSL_BUFFER_WORLD_AO == XGPU_METAL_BUFFER_WORLD_AO && XGPU_MSL_WORLD_AO_PASS_HISTORY == XGPU_METAL_WORLD_AO_PASS_HISTORY &&
+	XGPU_MSL_WORLD_AO_PASS_CASCADES == XGPU_METAL_WORLD_AO_PASS_CASCADES, "the world's occlusion's bindings");
 /* (setVertexBytes' limit) */
 _Static_assert(sizeof(struct xgpu_msl_uniforms) <= 4096 && sizeof(struct xgpu_msl_halo_uniforms) <= 4096,
 	"uniforms' size");

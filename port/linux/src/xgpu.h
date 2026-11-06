@@ -345,6 +345,18 @@ WORLD_TRACE_* */
 #define XGPU_WORLD_TRACE_LEAST_STEP 0.5f
 #define XGPU_WORLD_TRACE_STRUCTURE 1
 #define XGPU_WORLD_TRACE_OBJECTS 2
+/* World AO's rays through it (the pass's world_ao_traced; world_ao.h's
+WORLD_AO_RAYS and so on): rays a pixel, cosine-weighted about its normal;
+their reach and their start off the surface (world units); and the share of
+a frame's occlusion blended into the history reprojected (temporal
+accumulation), and the history's tests (the distance's relative
+difference, the normals' least cosine) */
+#define XGPU_WORLD_AO_RAYS 4
+#define XGPU_WORLD_AO_RAY_REACH 3.0f
+#define XGPU_WORLD_AO_RAY_BIAS 0.1f
+#define XGPU_WORLD_AO_HISTORY_NEW 0.2f
+#define XGPU_WORLD_AO_HISTORY_DISTANCE 0.05f
+#define XGPU_WORLD_AO_HISTORY_NORMAL 0.8f
 
 /* ---------- enhanced dynamic lights
 

@@ -2033,9 +2033,11 @@ static void world_ao_functions(struct xgpu_text *text, int light)
 		same shapes in the same order, but each shape's index, so its place
 		and its kind, is the group's. Its loads are then of one place, and
 		only the kinds of the shapes it meets are run. Without them each
-		pixel walks its own cell's */
+		pixel walks its own cell's. The spheres, capsules and boxes below
+		analytic_from are left out (the pass's: the distance-field scene's
+		rays find them, world_ao_traced); occlusion fields never */
 		"static inline float world_proxies_occlusion(constant xgpu_world_ao &w, texture3d<float> objects, float3 p, float3 n,\n"
-		"\tfloat owner, int limit)\n"
+		"\tfloat owner, int limit, int analytic_from)\n"
 		"{\n"
 		"\tfloat product = 1.0;\n"
 		"\tbool simd = w.parameters[1].z != 0.0;\n"
@@ -2063,6 +2065,8 @@ static void world_ao_functions(struct xgpu_text *text, int light)
 		"\t\t\t\tcontinue;\n"
 		"\t\t\tif (v0.w == %d.0)\n"
 		"\t\t\t\tproduct *= 1.0 - world_proxy_field(w, objects, shape, p, n, v0, v1, v2);\n"
+		"\t\t\telse if (shape < analytic_from)\n"
+		"\t\t\t\tcontinue;\n"
 		"\t\t\telse if (v0.w == %d.0)\n"
 		"\t\t\t\tproduct *= world_proxy_capsule_factor(p, n, v0, v1, v2);\n"
 		"\t\t\telse if (v0.w == %d.0)\n"
@@ -2248,7 +2252,7 @@ static void world_ao_read(struct xgpu_text *text, const struct xgpu_pixel_progra
 		xgpu_text_append(text, "\t\tlimit = %d;\n", XGPU_WORLD_AO_SHAPES);
 	xgpu_text_append(text,
 		"\t\tfloat proxies = world_proxies_occlusion(world_ao, world_ao_objects, in.xWorldPosition, world_n, u.world_ao.x,\n"
-		"\t\t\tlimit);\n");
+		"\t\t\tlimit, 0);\n");
 	if (world_ao_paged(program, light))
 		xgpu_text_append(text, "\t\tproxies *= scenery;\n");
 	if (light == XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP)
@@ -2772,12 +2776,18 @@ char *xgpu_msl_world_ao_pass(BOOL pixel)
 		return text.buffer;
 	}
 	world_ao_functions(&text, XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL);
+	xgpu_msl_world_trace(&text);
 	xgpu_text_append(&text,
 		"struct xgpu_world_ao_pass\n"
 		"{\n"
 		"\tfloat4 camera[4];\n"
 		"\tint4 corners;\n"
-		"};\n"
+		"\tfloat4 cascades[%d];\n"
+		"\tfloat4 previous[4];\n"
+		"\tint4 previous_corners;\n"
+		"\tfloat4 history;\n"
+		"};\n", XGPU_WORLD_CASCADES);
+	xgpu_text_append(&text,
 		/* a pixel's world position: its distance from the eye along the ray
 		through its centre */
 		"static inline float3 world_ao_pass_position(constant xgpu_world_ao_pass &pass, constant xgpu_world_ao &world_ao,\n"
@@ -2793,17 +2803,56 @@ char *xgpu_msl_world_ao_pass(BOOL pixel)
 		texel, from the pre-pass) times the shapes of its cell (the dynamic
 		objects', or every one), then the floor and the strength: one call a
 		pixel (world_ao_shading.c's world_ao_pass_occlusion) */
-		"static inline float world_ao_evaluate(constant xgpu_world_ao &world_ao, texture3d<float> world_sdf,\n"
-		"\ttexture3d<float> world_sdf_table, texture3d<float> world_ao_objects, float3 p, uint2 words)\n"
+		"static inline float3 world_ao_pass_unfold(float2 folded)\n"
 		"{\n"
-		"\tfloat2 folded = unpack_snorm2x16_to_float(words.x);\n"
 		"\tfloat z = 1.0 - abs(folded.x) - abs(folded.y), t = max(-z, 0.0);\n"
 		"\tfolded += select(float2(t), float2(-t), folded >= 0.0);\n"
-		"\tfloat3 n = normalize(float3(folded, z));\n"
+		"\treturn normalize(float3(folded, z));\n"
+		"}\n"
+		/* the share of a point's cosine-weighted hemisphere the dynamic
+		objects block, found by a few rays through the distance-field
+		scene's objects (world_ao_shading.c's world_ao_traced): each
+		cosine-weighted about the normal (a frame of it, Duff's; the rays
+		stratified, turned for each pixel and frame), from a little off the
+		surface, to the AO's reach; a hit counts as 1 - (t / reach)^2 */
+		"static inline float world_ao_traced(texture3d<float> world_cascades, constant float4 *cascades, float3 p,\n"
+		"\tfloat3 n, uint2 pixel, float frame)\n"
+		"{\n"
+		"\tfloat s = n.z >= 0.0 ? 1.0 : -1.0;\n"
+		"\tfloat a = -1.0 / (s + n.z), b = n.x * n.y * a;\n"
+		"\tfloat3 x = float3(1.0 + s * n.x * n.x * a, s * b, -s * n.x), y = float3(b, s + n.y * n.y * a, -n.y);\n"
+		"\tfloat turn = fract(52.9829189 * fract(0.06711056 * float(pixel.x) + 0.00583715 * float(pixel.y)) +\n"
+		"\t\t0.618034 * frame);\n"
+		"\tfloat twist = fract(52.9829189 * fract(0.00583715 * float(pixel.x) + 0.06711056 * float(pixel.y)) +\n"
+		"\t\t0.7548777 * frame);\n"
+		"\tfloat occlusion = 0.0;\n"
+		"\tfor (int ray = 0; ray < %d; ray++)\n"
+		"\t{\n"
+		"\t\tfloat u = (float(ray) + turn) / %d.0, angle = 6.28318531 * fract(twist + 0.618034 * float(ray));\n"
+		"\t\tfloat radius = sqrt(u);\n"
+		"\t\tfloat3 d = x * (radius * cos(angle)) + y * (radius * sin(angle)) + n * sqrt(max(1.0 - u, 0.0));\n"
+		"\t\tworld_trace_hit hit = world_trace(world_cascades, cascades, p + n * %.6f, d, %.6f, %d);\n"
+		"\t\tif (hit.hit)\n"
+		"\t\t{\n"
+		"\t\t\tfloat f = hit.t / %.6f;\n"
+		"\t\t\tocclusion += 1.0 - f * f;\n"
+		"\t\t}\n"
+		"\t}\n"
+		"\treturn occlusion / %d.0;\n"
+		"}\n"
+		"static inline float world_ao_evaluate(constant xgpu_world_ao &world_ao, texture3d<float> world_sdf,\n"
+		"\ttexture3d<float> world_sdf_table, texture3d<float> world_ao_objects, texture3d<float> world_cascades,\n"
+		"\tconstant xgpu_world_ao_pass &pass, float3 p, uint2 words, uint2 pixel)\n"
+		"{\n"
+		"\tfloat3 n = world_ao_pass_unfold(unpack_snorm2x16_to_float(words.x));\n"
 		"\tfloat owner = float(int(words.y & 0xFFu)) - 2.0;\n"
 		"\tfloat value = float(as_type<half>(ushort(words.y >> 16)));\n"
 		"\tint limit = (words.y & %uu) != 0u ? %d : int(world_ao.parameters[1].y);\n"
-		"\tfloat proxies = world_proxies_occlusion(world_ao, world_ao_objects, p, n, owner, limit);\n"
+		/* (the dynamic objects' shapes by the rays, their occlusion fields
+		and the static scenery's shapes walked) */
+		"\tfloat proxies = world_proxies_occlusion(world_ao, world_ao_objects, p, n, owner, limit,\n"
+		"\t\tint(world_ao.parameters[1].y));\n"
+		"\tproxies *= 1.0 - world_ao_traced(world_cascades, pass.cascades, p, n, pixel, pass.history.y);\n"
 		"\tif ((words.y & %uu) != 0u)\n"
 		"\t\treturn mix(1.0, max(proxies * value, %.6f), world_ao.parameters[0].y);\n"
 		"\tbool baked = value < 0.0;\n"
@@ -2812,13 +2861,16 @@ char *xgpu_msl_world_ao_pass(BOOL pixel)
 		"\tfield = mix(field, saturate(field / max(baked ? 1.0 : value, %.6f)), world_ao.parameters[1].x);\n"
 		"\treturn mix(1.0, max(mix(1.0, field, world_ao.parameters[0].z) * proxies, %.6f), world_ao.parameters[0].x);\n"
 		"}\n",
+		XGPU_WORLD_AO_RAYS, XGPU_WORLD_AO_RAYS, XGPU_WORLD_AO_RAY_BIAS, XGPU_WORLD_AO_RAY_REACH, XGPU_WORLD_TRACE_OBJECTS,
+		XGPU_WORLD_AO_RAY_REACH, XGPU_WORLD_AO_RAYS,
 		XGPU_WORLD_AO_INPUT_ALL_SHAPES, XGPU_WORLD_AO_SHAPES, XGPU_WORLD_AO_INPUT_LIGHTMAP, XGPU_WORLD_AO_FLOOR,
 		XGPU_WORLD_AO_REFERENCE_LEAST, XGPU_WORLD_AO_FLOOR);
 	xgpu_text_append(&text,
 		"fragment float4 xgpu_world_ao_pass(float4 position [[position]], constant xgpu_world_ao_pass &pass [[buffer(%d)]],\n"
 		"\tconstant xgpu_world_ao &world_ao [[buffer(%d)]], texture2d<uint> inputs [[texture(0)]],\n"
 		"\ttexture3d<float> world_sdf [[texture(%d)]], texture3d<float> world_sdf_table [[texture(%d)]],\n"
-		"\ttexture3d<float> world_ao_objects [[texture(%d)]])\n"
+		"\ttexture3d<float> world_ao_objects [[texture(%d)]], texture2d<float> history [[texture(%d)]],\n"
+		"\ttexture3d<float> world_cascades [[texture(%d)]])\n"
 		"{\n"
 		/* (its block's nearest pixel drawn: found at a quarter of the
 		pixels, each 2x2 block's, pass.camera[3].w 2; else each pixel's) */
@@ -2844,9 +2896,37 @@ char *xgpu_msl_world_ao_pass(BOOL pixel)
 		"\t\treturn float4(1.0, 0.0, 0.0, 0.0);\n"
 		"\tfloat3 p = world_ao_pass_position(pass, world_ao, float2(pixel) + 0.5, nearest);\n"
 		"\tfloat2 packed = unpack_snorm2x16_to_float(words.x);\n"
-		"\treturn float4(world_ao_evaluate(world_ao, world_sdf, world_sdf_table, world_ao_objects, p, words), nearest, packed);\n"
+		"\tfloat occlusion = world_ao_evaluate(world_ao, world_sdf, world_sdf_table, world_ao_objects, world_cascades, pass,\n"
+		"\t\tp, words, pixel);\n"
+		/* the previous frame's occlusion at the same point, where it is the
+		same surface (its distance from that frame's eye within a share of
+		it, its normal near), blended with this frame's (temporal
+		accumulation: the rays' noise averaged over frames) */
+		"\tif (pass.history.x != 0.0)\n"
+		"\t{\n"
+		"\t\tfloat3 v = p - pass.previous[0].xyz, f = pass.previous[1].xyz, r = pass.previous[2].xyz, u = pass.previous[3].xyz;\n"
+		"\t\tfloat along = dot(v, f) / dot(f, f);\n"
+		"\t\tif (along > 0.0)\n"
+		"\t\t{\n"
+		"\t\t\tfloat2 screen = float2(dot(v, r) / dot(r, r), dot(v, u) / dot(u, u)) / along;\n"
+		"\t\t\tfloat2 at = float2(pass.previous_corners.xy) + (screen + 1.0) * 0.5 *\n"
+		"\t\t\t\tfloat2(pass.previous_corners.zw - pass.previous_corners.xy);\n"
+		"\t\t\tint2 texel = int2(floor(at / float(scale)));\n"
+		"\t\t\tif (all(at >= float2(pass.previous_corners.xy)) && all(at < float2(pass.previous_corners.zw)) &&\n"
+		"\t\t\t\ttexel.x < int(history.get_width()) && texel.y < int(history.get_height()))\n"
+		"\t\t\t{\n"
+		"\t\t\t\tfloat4 old = history.read(uint2(texel));\n"
+		"\t\t\t\tfloat distance = length(v);\n"
+		"\t\t\t\tif (old.y > 0.0 && abs(old.y - distance) <= %.6f * distance &&\n"
+		"\t\t\t\t\tdot(world_ao_pass_unfold(old.zw), world_ao_pass_unfold(packed)) >= %.6f)\n"
+		"\t\t\t\t\tocclusion = mix(old.x, occlusion, pass.history.z);\n"
+		"\t\t\t}\n"
+		"\t\t}\n"
+		"\t}\n"
+		"\treturn float4(occlusion, nearest, packed);\n"
 		"}\n",
 		XGPU_MSL_BUFFER_UNIFORMS, XGPU_MSL_BUFFER_WORLD_AO, XGPU_MSL_TEXTURE_WORLD_SDF, XGPU_MSL_TEXTURE_WORLD_SDF_TABLE,
-		XGPU_MSL_TEXTURE_WORLD_AO_OBJECTS, XGPU_WORLD_AO_INPUT_PRESENT);
+		XGPU_MSL_TEXTURE_WORLD_AO_OBJECTS, XGPU_MSL_WORLD_AO_PASS_HISTORY, XGPU_MSL_WORLD_AO_PASS_CASCADES,
+		XGPU_WORLD_AO_INPUT_PRESENT, XGPU_WORLD_AO_HISTORY_DISTANCE, XGPU_WORLD_AO_HISTORY_NORMAL);
 	return text.buffer;
 }

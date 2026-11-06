@@ -54,9 +54,10 @@ int halo_world_ao_prepass_begin(void)
 	return 0;
 }
 
-void halo_world_ao_prepass_end(short x0, short y0, short x1, short y1, float const camera[4][4])
+void halo_world_ao_prepass_end(short x0, short y0, short x1, short y1, float const camera[4][4],
+	float const cascades[4][4], unsigned long frame, int history)
 {
-	(void)x0; (void)y0; (void)x1; (void)y1; (void)camera;
+	(void)x0; (void)y0; (void)x1; (void)y1; (void)camera; (void)cascades; (void)frame; (void)history;
 }
 
 /* the parts (their stubs' behaviour: the real ones are tested apart) */

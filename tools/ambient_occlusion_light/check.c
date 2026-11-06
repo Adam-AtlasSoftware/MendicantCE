@@ -231,6 +231,33 @@ int main(int argc, char **argv)
 {
 	if (argc >= 2 && !strcmp(argv[1], "trace"))
 		return trace(argc > 2 ? argv[2] : NULL);
+	/* (the occlusion's pass, as the Metal emitter writes it; or the SPIR-V
+	emitter's, written to a file, with the subgroups' operations) */
+	if (argc == 3 && !strcmp(argv[1], "pass"))
+	{
+		struct xgpu_spirv_options options;
+		struct xgpu_spirv_module module;
+		FILE *file;
+
+		memset(&options, 0, sizeof(options));
+		options.subgroups = TRUE;
+		if (!xgpu_spirv_world_ao_pass(XGPU_SPIRV_WORLD_AO_OCCLUSION, &options, &module) || !(file = fopen(argv[2], "wb")))
+			return 1;
+		fwrite(module.words, sizeof(*module.words), module.count, file);
+		fclose(file);
+		free(module.words);
+		return 0;
+	}
+	if (argc == 2 && !strcmp(argv[1], "pass"))
+	{
+		char *text = xgpu_msl_world_ao_pass(TRUE);
+
+		if (!text)
+			return 1;
+		fputs(text, stdout);
+		free(text);
+		return 0;
+	}
 	if ((argc == 2 || (argc == 3 && source_set(argv[2]))) && !strcmp(argv[1], "msl"))
 		return msl();
 	if ((argc == 3 || (argc == 4 && source_set(argv[3]))) &&

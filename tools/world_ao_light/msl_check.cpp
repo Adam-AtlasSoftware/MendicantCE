@@ -159,7 +159,7 @@ int main(int argc, char **argv)
 
 		block.parameters[1].z = index % 3 == 1 ? 1.0f : 0.0f;
 		simd_lanes_others = index % 3 == 1 ? (unsigned int)(index * 2654435761u) : 0u;
-		difference = std::fabs(world_proxies_occlusion(block, objects, p, n, owner, limit) -
+		difference = std::fabs(world_proxies_occlusion(block, objects, p, n, owner, limit, 0) -
 			world_ao_proxies_occlusion(scene_proxies, limit < scene_proxy_count ? limit : scene_proxy_count, point, normal,
 			owner));
 		worst_product = difference > worst_product ? difference : worst_product;

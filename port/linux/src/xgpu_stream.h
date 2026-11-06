@@ -468,11 +468,22 @@ bottom), [2].w 0, [3].w the pixels a side of the blocks the occlusion is
 found once for (1 or 2); the window's corners in its target's pixels
 (left, top, right, bottom). A pixel's position: the eye (the block's
 grid[0]) + its distance (from the pre-pass) along normalize([1] + x [2] +
-y [3]) */
+y [3]). Then the distance-field scene's cascades, which the dynamic
+objects' rays step through (world_cascades.h: each the first voxel's
+centre and the voxel, 0 not ready); the window's previous frame's camera
+and corners as these, where its occlusion is reprojected from; and history:
+[0] 1 where the previous frame's occlusion is this window's (one window a
+frame, its corners alike: the backend's previous texture of it), else 0;
+[1] the frame's number (the rays' turn); [2] the share of the new frame's
+occlusion blended into what is reprojected (1: none of the history) */
 struct xgpu_world_ao_pass
 {
 	float camera[4][4];
 	int32_t corners[4];
+	float cascades[4][4];
+	float previous[4][4];
+	int32_t previous_corners[4];
+	float history[4];
 };
 struct xgpu_stream_world_ao_prepass
 {
@@ -1296,7 +1307,7 @@ XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_panini, 56);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_world_ao_window, 16 + 32 + 32 + XGPU_WORLD_AO_PROXIES_MAXIMUM * 48 + 32 +
 	XGPU_WORLD_AO_GRID_CELLS_MAXIMUM * 8);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_world_ao_field, 40);
-XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_world_ao_prepass, 96);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_world_ao_prepass, 96 + 64 + 64 + 16 + 16);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_world_ao_cascades, 40);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_pipeline_stand_in, 12);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_set_targets, 16);

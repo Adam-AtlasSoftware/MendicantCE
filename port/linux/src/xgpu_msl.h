@@ -134,6 +134,10 @@ RGBA32Uint); the field's and the objects' atlas and the window's block where
 the surfaces have them; the pass's struct xgpu_world_ao_pass at buffer
 XGPU_MSL_BUFFER_UNIFORMS. The vertex function's source, or (pixel) the
 pass's. Returns a malloc'd string. */
+/* (the pass's history, the previous frame's occlusion of the window, and
+the distance-field scene's cascades: its textures past the inputs') */
+#define XGPU_MSL_WORLD_AO_PASS_HISTORY 1
+#define XGPU_MSL_WORLD_AO_PASS_CASCADES 2
 char *xgpu_msl_world_ao_pass(BOOL pixel);
 
 /* the vertex program (xgpu_shader.h) as a Metal vertex function,

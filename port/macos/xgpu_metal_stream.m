@@ -158,6 +158,10 @@ static struct
 	uint32_t width, height;
 	uint32_t inputs, depth, pixels;
 	uint32_t pixels_width, pixels_height;
+	/* the previous pass's occlusion (the history its next reprojects; 0
+	none), and its size */
+	uint32_t history;
+	uint32_t history_width, history_height;
 	struct xgpu_stream_pipeline_define *definitions;
 	struct stream_pipeline *entries;
 	uint32_t vertex, pixel;
@@ -1671,8 +1675,24 @@ static void stream_world_ao_prepass(void *context, const struct xgpu_stream_worl
 			rectangle[axis] = low / scale;
 			rectangle[axis + 2] = (high + scale - 1) / scale;
 		}
+		struct xgpu_world_ao_pass uniforms = record->pass;
+
+		/* (the last pass's occlusion kept as the history, this one's drawn
+		into the other: two in turn) */
+		{
+			uint32_t texture = prepass.history, made_width = prepass.history_width, made_height = prepass.history_height;
+
+			prepass.history = prepass.pixels;
+			prepass.history_width = prepass.pixels_width;
+			prepass.history_height = prepass.pixels_height;
+			prepass.pixels = texture;
+			prepass.pixels_width = made_width;
+			prepass.pixels_height = made_height;
+		}
 		prepass.pixels = prepass_texture(prepass.pixels, XGPU_METAL_FORMAT_RGBA32F, width, height, &prepass.pixels_width,
 			&prepass.pixels_height);
+		if (!prepass.history || prepass.history_width != width || prepass.history_height != height)
+			uniforms.history[0] = 0.0f;
 		if (prepass.pixels && rectangle[2] > rectangle[0] && rectangle[3] > rectangle[1] && prepass_pipeline(&pipeline))
 		{
 			if (!xgpu_metal_pipeline_made(&pipeline))
@@ -1699,7 +1719,13 @@ static void stream_world_ao_prepass(void *context, const struct xgpu_stream_worl
 				xgpu_metal_set_texture(0, prepass.inputs, &sampler);
 				for (axis = 1; axis < 4; axis++)
 					xgpu_metal_set_texture((uint32_t)axis, 0, &sampler);
-				xgpu_metal_set_draw_uniforms(&record->pass, sizeof(record->pass));
+				/* (the history, read where it is this window's; the
+				distance-field scene's cascades) */
+				if (uniforms.history[0] != 0.0f)
+					xgpu_metal_set_texture(XGPU_METAL_WORLD_AO_PASS_HISTORY, prepass.history, &sampler);
+				sampler.min_filter = sampler.mag_filter = XGPU_METAL_FILTER_LINEAR;
+				xgpu_metal_set_texture(XGPU_METAL_WORLD_AO_PASS_CASCADES, xgpu_metal_world_ao_cascades_texture(), &sampler);
+				xgpu_metal_set_draw_uniforms(&uniforms, sizeof(uniforms));
 				xgpu_metal_draw(XGPU_METAL_PRIMITIVE_TRIANGLES, 3, 0, 0,
 					(struct xgpu_metal_source){ XGPU_METAL_SOURCE_NONE, 0, 0, 0 });
 				xgpu_metal_pass_kind(kind);
