@@ -331,6 +331,8 @@ struct xgpu_pixel_program
 	unsigned char source_blend, ambient_occlusion;
 	/* display.hdr's tag (nv2a_pixel_shader_key.hdr: xgpu_hdr.h) */
 	unsigned short hdr;
+	/* display.prism_material_overlay (nv2a_pixel_shader_key's: xgpu.h) */
+	unsigned char material_overlay;
 };
 
 /* the texture stage that replaces the fragment's depth, DOT_ZW (the game's

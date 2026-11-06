@@ -584,6 +584,57 @@ static void hdr_programs(void)
 	}
 }
 
+/* display.prism_material_overlay (xgpu.h's "The material overlay"): a
+model's program (its base, detail and multipurpose maps, a reflection
+cube; and with a 2D stage 3) lit for each pixel by the ambient and
+distant lights, and the point lights; the enhanced dynamic lights; the
+world's occlusion; two tiles and four with a class mask, in each debug
+view; a reflection cube with signed channels and alpha kill */
+static void overlay_programs(void)
+{
+	static const unsigned char overlays[] = { 1, 3, 5, 7, 9, 1 | XGPU_OVERLAY_CLASS_MASK, 3 | XGPU_OVERLAY_CLASS_MASK,
+		7 | XGPU_OVERLAY_CLASS_MASK, 9 | XGPU_OVERLAY_CLASS_MASK };
+	struct xgpu_pixel_program program;
+	char name[96];
+	unsigned int overlay, lights, kind, cube;
+
+	for (overlay = 0; overlay < sizeof(overlays); overlay++)
+	{
+		for (lights = 1; lights <= 2; lights++)
+		{
+			for (kind = 0; kind < 3; kind++)
+			{
+				for (cube = 0; cube < 3; cube++)
+				{
+					synthetic_base(&program);
+					synthetic_stage(&program, 0, XGPU_TEXTURE_PROJECT2D, _xgpu_sampler_2d);
+					synthetic_stage(&program, 1, XGPU_TEXTURE_PROJECT2D, _xgpu_sampler_2d);
+					synthetic_stage(&program, 2, XGPU_TEXTURE_PROJECT2D, _xgpu_sampler_2d);
+					if (cube)
+						synthetic_stage(&program, 3, XGPU_TEXTURE_CUBEMAP, _xgpu_sampler_cube);
+					else
+						synthetic_stage(&program, 3, XGPU_TEXTURE_PROJECT2D, _xgpu_sampler_2d);
+					if (cube == 2)
+					{
+						program.stages[3].color_sign = 0x9;
+						program.stages[3].alpha_kill = 1;
+					}
+					program.combiners[0].portions[0].inputs[0].reg = XGPU_REGISTER_V0;
+					program.per_pixel_lighting = (unsigned char)lights;
+					program.material_overlay = overlays[overlay];
+					if (kind == 1)
+						program.dynamic_lights = XGPU_DYNAMIC_LIGHTS_MODEL;
+					if (kind == 2)
+						program.ambient_occlusion = XGPU_AMBIENT_OCCLUSION_WORLD | XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL;
+					snprintf(name, sizeof(name), "overlay%u-lights%u-kind%u-stage3_%u", overlays[overlay], lights, kind,
+						cube);
+					pixel_program(name, "display.prism_material_overlay", &program);
+				}
+			}
+		}
+	}
+}
+
 static void post_programs(void)
 {
 	static const char *const names[XGPU_VULKAN_POST_PROGRAM_COUNT] =
@@ -664,6 +715,7 @@ int main(int argc, char **argv)
 	halo_programs();
 	effect_programs();
 	hdr_programs();
+	overlay_programs();
 	post_programs();
 	fclose(index_file);
 	printf("%lu modules written to %s, %lu variants the same as one of them\n", written, out_dir, same);

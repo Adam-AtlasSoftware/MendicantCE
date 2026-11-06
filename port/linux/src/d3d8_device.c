@@ -3786,6 +3786,50 @@ void halo_dynamic_lights_halos_draw(void)
 	xgpu_backend_dynamic_lights_halos(color->target.number, depth->target.number, color->target.layers, halos);
 }
 
+/* ---------- display.prism_material_overlay
+
+The model draws that follow take a material overlay (xgpu.h's "The
+material overlay"; port/linux/game/mod_materials.c arms it around a model
+shader's draws): its tiles and class mask (xgpu_images.h's images: tiles A
+to D, the last two only with a class mask; 0 none), its uniform
+(XGPU_OVERLAY_UNIFORM_COUNT vec4s) and its debug view
+(display.prism_overlay_view); NULL uniforms disarm it, as it is for every
+other draw. A draw of a model lighting program whose lighting hands on its
+world position is lit for each pixel with it (xgpu_draw_derive); any other
+draw goes as it is. */
+static struct
+{
+	BOOL armed;
+	struct xgpu_material_overlay overlay;
+	unsigned char key;
+} material_overlay;
+
+/* whether the backend draws it (Vulkan's; not Metal's, until its shaders
+are checked against Vulkan's) */
+int d3d8_material_overlay_drawn(void)
+{
+	return xgpu_backend_capabilities.material_overlay != 0;
+}
+
+void d3d8_set_material_overlay(const float *uniforms, const unsigned int *tiles, unsigned int mask, int view)
+{
+	int tile;
+
+	if (!uniforms || !xgpu_backend_capabilities.material_overlay)
+	{
+		material_overlay.armed = FALSE;
+		return;
+	}
+	material_overlay.armed = TRUE;
+	memcpy(material_overlay.overlay.uniforms, uniforms, sizeof(material_overlay.overlay.uniforms));
+	for (tile = 0; tile < XGPU_OVERLAY_TILE_COUNT; tile++)
+		material_overlay.overlay.images[tile] = tiles[tile];
+	material_overlay.overlay.images[XGPU_OVERLAY_TILE_COUNT] = mask;
+	if (view < 0 || view > 4)
+		view = 0;
+	material_overlay.key = (unsigned char)(1 + 2 * view + (mask ? XGPU_OVERLAY_CLASS_MASK : 0));
+}
+
 /* display.per_pixel_lighting: the model lighting programs' draws are lit for
 each pixel (xgpu_spirv.c's model lighting), from shaders of their own; read
 again when a setting changes. The enhanced dynamic lights light models for
@@ -3993,6 +4037,7 @@ static void pipeline_derived(const struct xgpu_draw_derived *derived, struct xgp
 	key->pixel.per_pixel_lighting = derived->per_pixel_lighting;
 	key->pixel.dynamic_lights = derived->dynamic_lights;
 	key->pixel.ambient_occlusion = derived->ambient_occlusion;
+	key->pixel.material_overlay = derived->material_overlay;
 }
 
 /* a draw as no setting changes it (key: before xgpu_draw_derive) to the
@@ -4039,6 +4084,18 @@ static BOOL pipeline_bind(struct vertex_shader_object *program, struct xgpu_draw
 	{
 		pipeline_derived(&derived, pipeline_key);
 		chosen = xgpu_backend_pipeline(pipeline_key);
+	}
+	/* (display.prism_material_overlay's not made: drawn as it would be
+	without it) */
+	if (lit && !chosen && derived.material_overlay)
+	{
+		facts->material_overlay = 0;
+		lit = xgpu_draw_derive(facts, FALSE, &derived);
+		if (lit)
+		{
+			pipeline_derived(&derived, pipeline_key);
+			chosen = xgpu_backend_pipeline(pipeline_key);
+		}
 	}
 	if (lit && !chosen && (derived.ambient_occlusion & XGPU_AMBIENT_OCCLUSION_WORLD))
 	{
@@ -4236,6 +4293,9 @@ static BOOL prepare_draw(BOOL immediate, unsigned long primitive)
 	/* (display.ambient_occlusion "world": its light, where its window is
 	given and the draw takes it: world_ao_key) */
 	facts.world = world_ao_key(XGPU_AMBIENT_OCCLUSION_LIGHT_NONE);
+	/* (display.prism_material_overlay: the overlay a mod armed for the
+	model shader's draws) */
+	facts.material_overlay = material_overlay.armed ? material_overlay.key : 0;
 	if (device.gl_ready)
 		world_ao_twins();
 	basis = pipeline_key;
@@ -4271,6 +4331,9 @@ static BOOL prepare_draw(BOOL immediate, unsigned long primitive)
 	else
 		stats.draws++;
 	xgpu_manifest_note_pipeline(&pipeline_key);
+	/* (its overlay's uniform and images, sent as they change) */
+	if (pipeline_key.pixel.material_overlay)
+		xgpu_backend_material_overlay(&material_overlay.overlay);
 	preparation_time_add(2, traced);
 	traced = preparation_time();
 	/* (the number of the key of xgpu_backend_pipeline's last call, above:

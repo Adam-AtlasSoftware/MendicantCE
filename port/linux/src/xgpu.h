@@ -173,7 +173,58 @@ struct nv2a_pixel_shader_key
 	/* display.hdr: the draw's tag into the HDR back buffer (xgpu_hdr.h:
 	XGPU_HDR_*); 0 into any other target, and without HDR */
 	unsigned short hdr;
+	/* display.prism_material_overlay: a model draw lit for each pixel whose
+	shader a mod's overlay.json names (port/linux/game/mod_materials.c),
+	lit with a micro normal, cavity and roughness from two tiles mixed by
+	its multipurpose map (texture 2): 0 none, else 1 plus twice
+	display.prism_overlay_view, plus XGPU_OVERLAY_CLASS_MASK with four tiles
+	weighted by a class mask and the multipurpose map's rule on top (below:
+	"The material overlay") */
+	unsigned char material_overlay;
 };
+
+/* ---------- the material overlay (display.prism_material_overlay)
+
+A model draw lit for each pixel (per_pixel_lighting, its world position
+handed on: the point lights' or the world's transform) takes a micro
+normal, a cavity and a roughness from up to four tiles of a mod's (RG the
+normal's slopes along u and v, 0.5 none; B the cavity, half of it; A the
+roughness, 0.5 none), repeated across texture 0's coordinates at their
+scale and weighted by its multipurpose map's channel (texture 2, in the
+Xbox's channel order) or a class mask. It changes the light alone: the
+normal model_lighting lights by (the vertices' normal bent along the
+screen-space derivatives' cotangent frame of the world position and the
+coordinates, Schueler's: the vertices need nothing new), its ambient and
+distant lights' sum by the cavity and raised by half the roughness, clamped
+to 0..1; and texture stage 3's reflection cube, its direction bent from the
+vertices' normal to the micro normal and its level of detail raised by
+four times the roughness, darkened by the cavity. The tiles fade with
+their texels' size on the screen (their footprint, the tiles across a
+pixel, log2) and with the draw's distance (the uniform's fade, the CPU's).
+The tiles are images (xgpu_images.h), repeating and filtered trilinearly,
+at XGPU_OVERLAY_BINDING (Vulkan: bindings 4 to 8 of the textures' set),
+tiles A to D then the class mask; the uniform (vec4
+overlay[XGPU_OVERLAY_UNIFORM_COUNT]): [0] the multipurpose channel that
+mixes the two tiles (one-hot, Xbox order: specular, self-illumination,
+change color, auxiliary); [1] lo, hi, invert, has multipurpose; [2] the
+excluded channel (one-hot); [3] above which it is excluded, the draw's
+fade, the footprint fade's start and end (tiles a pixel, log2); [4], [5]
+tile A's and B's scale (tiles per UV unit), normal, cavity and roughness
+strengths; [6] reflection bend, cavity on reflection, tile B's footprint
+fade's start and end ([3]'s are tile A's); with a class mask also [7], [8]
+tile C's and D's as [4] and [5], and [9] C's footprint fade's start and end,
+then D's. The class mask (RGBA: the weights of tiles A to D at the base
+map's coordinates) gives the weights; where the multipurpose channel's rule
+is (has multipurpose, and a channel in [0]), it gives tile A, and the
+mask's B, C and D share the rest (B alone where they are 0). The debug
+views (display.prism_overlay_view, the key's bits 1 to 3): 1 the tiles'
+weights, 2 the micro normal's change, 3 the fade, 4 the light alone. */
+#define XGPU_OVERLAY_BINDING 4
+#define XGPU_OVERLAY_TILE_COUNT 4
+#define XGPU_OVERLAY_IMAGE_COUNT (XGPU_OVERLAY_TILE_COUNT + 1)
+#define XGPU_OVERLAY_UNIFORM_COUNT 10
+#define XGPU_OVERLAY_CLASS_MASK 16
+#define XGPU_OVERLAY_VIEW(material_overlay) (((material_overlay) >> 1) & 7)
 
 /* the vertex constants the per-pixel model lighting reads, in a uniform of
 their own (the vertex shader's 192 would pass the least fragment uniform

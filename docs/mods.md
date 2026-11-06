@@ -307,6 +307,39 @@ only their four-stage maps: see
 [custom_edition_caches.md](custom_edition_caches.md).) As for every
 shader, it must be one the map has.
 
+### The material overlay
+
+A mod can also give the model shaders (`shader_model`) of a map a material
+overlay, which `display.prism_material_overlay` (PRISM, the Vulkan renderer)
+draws: the fine grain of a surface, a weapon's machining or a suit's weave,
+lit at each pixel without changing any color. It is not a tag. The mod's
+`tags/materials/overlay.json` names the shaders by their tag paths and gives
+each one to four classes, and each class a tile in `tags/materials/` (an
+8-bit RGBA PNG: red and green the tangent-space normal's x and y, green up
+the picture; blue the cavity, half of it; alpha the roughness offset; 0.5
+none in each), its size in world units, its strengths and the distances
+it fades over. A class may also give its tile's every mip level, as the
+tools filtered them, in two KTX2 files of BC5 blocks (`levels`: the normal,
+and the cavity and roughness, whose smaller levels grow rougher where the
+fine normals average out), which are drawn instead of the PNG's averages.
+The tiles are read as the map loads and decoded on a thread of their own;
+a draw goes without the overlay until its tiles are ready. Two classes are
+mixed by a channel of the shader's multipurpose map. A shader can also name
+up to four classes and a class mask for its base map (`class_mask`: an RGBA
+PNG at the base map's coordinates, red to alpha the four classes' weights),
+which is found in any mod, so that one built on the player's machine from
+the player's own maps need not be shared: the channel still decides the
+first class, and the mask shares the rest among the others. Until the mask
+is there, the shader draws with its first two classes and the channel. The
+file's format is described at the top of `port/linux/game/mod_materials.c`;
+the overlay.json of the mod loaded last that has one is used, and
+`mods_reload` reads it again. The settings are read each frame:
+`prism_set "material_overlay true"` at the console turns it on in a running
+game, and `prism_set "overlay_view 1"` shows which class each texel takes.
+With the setting off, every draw is the game's. The Mac's Metal renderer
+draws the overlaid shaders as they are, until its shaders are checked
+against Vulkan's.
+
 ## Making a mod
 
 1. Get the tags you want to change as tag files. `invader-extract` extracts

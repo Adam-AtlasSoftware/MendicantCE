@@ -72,6 +72,9 @@ struct xgpu_backend_capabilities
 	/* display.hdr: an RGBA16F back buffer, the draws' tags carried out
 	(xgpu_hdr.h), the tone map and an HDR display's encoding */
 	BOOL hdr;
+	/* display.prism_material_overlay (xgpu.h's "The material overlay"):
+	its shaders and xgpu_backend_material_overlay */
+	BOOL material_overlay;
 };
 
 extern struct xgpu_backend_capabilities xgpu_backend_capabilities;
@@ -281,6 +284,19 @@ struct xgpu_texture_source
 };
 
 void xgpu_backend_set_textures(const struct xgpu_texture_source stages[4]);
+
+/* display.prism_material_overlay (xgpu.h's "The material overlay"): the
+uniform and the images (xgpu_images.h's numbers: tiles A to D, then the
+class mask; 0 none) of the draws that follow whose pixel key has
+material_overlay, sent as they change; the tiles repeat, filtered between
+their levels, the class mask is clamped to its edge */
+struct xgpu_material_overlay
+{
+	float uniforms[XGPU_OVERLAY_UNIFORM_COUNT][4];
+	unsigned int images[XGPU_OVERLAY_IMAGE_COUNT];
+};
+
+void xgpu_backend_material_overlay(const struct xgpu_material_overlay *overlay);
 
 /* ---------- pipelines */
 

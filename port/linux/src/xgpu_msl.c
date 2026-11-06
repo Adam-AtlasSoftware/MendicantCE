@@ -2313,6 +2313,183 @@ static void world_ao_inputs(struct xgpu_text *text, const struct xgpu_pixel_prog
 		"\t}\n");
 }
 
+/* ---------- display.prism_material_overlay
+
+xgpu_spirv.c's overlay_light, overlay_reflection and overlay_view, operation
+for operation (xgpu.h's "The material overlay"): the tiles and class mask at
+XGPU_MSL_TEXTURE_OVERLAY on, through constexpr samplers (the tiles repeating
+and filtered between their levels, the mask clamped), the uniform the
+uniforms' material_overlay. The Metal backend does not draw it yet
+(xgpu_stream_capabilities' material_overlay: its pixel programs never have
+it) until these are checked against Vulkan's on a Mac. */
+
+/* after texture stage 2: the micro normal, cavity and roughness, and v0's
+light by them (t2 the multipurpose map's texel, or none) */
+static void overlay_light(struct xgpu_text *text, const struct xgpu_pixel_program *program, BOOL t2_read, BOOL v0_read,
+	int occlusion_light)
+{
+	BOOL class_mask = (program->material_overlay & XGPU_OVERLAY_CLASS_MASK) != 0;
+	BOOL dynamic = program->dynamic_lights == XGPU_DYNAMIC_LIGHTS_MODEL;
+	const char *occlusion = occlusion_light == XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL ? ", occlusion" : "";
+
+	xgpu_text_append(text,
+		"\t/* the material overlay */\n"
+		"\tconstexpr sampler overlay_tiles(filter::linear, mip_filter::linear, address::repeat);\n"
+		"\tfloat4 overlay_t2 = %s;\n"
+		"\tfloat3 overlay_n = in.xWorldNormal.xyz * rsqrt(max(dot(in.xWorldNormal.xyz, in.xWorldNormal.xyz), 1.0e-24));\n"
+		"\tfloat2 overlay_uv = in.xT0.xy;\n"
+		/* (the derivatives up the screen, as OpenGL's and xgpu_spirv.c's) */
+		"\tfloat3 overlay_dp1 = dfdx(in.xWorldPosition), overlay_dp2 = -dfdy(in.xWorldPosition);\n"
+		"\tfloat2 overlay_du1 = dfdx(overlay_uv), overlay_du2 = -dfdy(overlay_uv);\n"
+		"\tfloat3 overlay_dp2p = cross(overlay_dp2, overlay_n), overlay_dp1p = cross(overlay_n, overlay_dp1);\n"
+		"\tfloat3 overlay_tangent = overlay_dp2p * overlay_du1.x + overlay_dp1p * overlay_du2.x;\n"
+		"\tfloat3 overlay_bitangent = overlay_dp2p * overlay_du1.y + overlay_dp1p * overlay_du2.y;\n"
+		"\tfloat overlay_frame_scale = rsqrt(max(max(dot(overlay_tangent, overlay_tangent), "
+		"dot(overlay_bitangent, overlay_bitangent)), 1.0e-30));\n"
+		"\tfloat overlay_frame = fabs(overlay_du1.x * overlay_du2.y - overlay_du1.y * overlay_du2.x) > 1.0e-14 ? 1.0 : 0.0;\n"
+		"\tfloat overlay_keep = dot(overlay_t2, u.material_overlay[2]) > u.material_overlay[3].x ? 0.0 :\n"
+		"\t\toverlay_frame * u.material_overlay[3].y;\n", t2_read ? "t2" : "float4(0.0)");
+	if (class_mask)
+	{
+		static const int slot_uniform[4] = { 4, 5, 7, 8 };
+		static const char *const footprint[4] = { "[3].zw", "[6].zw", "[9].xy", "[9].zw" };
+		static const char slots[] = "abcd";
+		int slot;
+
+		xgpu_text_append(text,
+			"\tconstexpr sampler overlay_masks(filter::linear, address::clamp_to_edge);\n"
+			"\tfloat4 overlay_q = overlay_m.sample(overlay_masks, overlay_uv);\n"
+			"\tfloat overlay_qs = dot(overlay_q, float4(1.0));\n"
+			"\tfloat4 overlay_wt = overlay_qs > 1.0e-3 ? overlay_q / overlay_qs : float4(1.0, 0.0, 0.0, 0.0);\n"
+			"\tif (u.material_overlay[1].w > 0.5 && dot(u.material_overlay[0], float4(1.0)) > 0.5)\n"
+			"\t{\n"
+			"\t\tfloat overlay_c0 = smoothstep(u.material_overlay[1].x, u.material_overlay[1].y, "
+			"dot(overlay_t2, u.material_overlay[0]));\n"
+			"\t\tif (u.material_overlay[1].z > 0.5) overlay_c0 = 1.0 - overlay_c0;\n"
+			"\t\tfloat overlay_rs = overlay_q.y + overlay_q.z + overlay_q.w;\n"
+			"\t\tfloat3 overlay_rest = overlay_rs > 1.0e-3 ? overlay_q.yzw / overlay_rs : float3(1.0, 0.0, 0.0);\n"
+			"\t\toverlay_wt = float4(overlay_c0, (1.0 - overlay_c0) * overlay_rest);\n"
+			"\t}\n"
+			"\tfloat overlay_w = overlay_wt.x;\n"
+			"\tfloat2 overlay_slope = float2(0.0);\n"
+			"\tfloat overlay_cavity = 0.0, overlay_rough = 0.0;\n"
+			"\tfloat4 overlay_f4;\n");
+		for (slot = 0; slot < 4; slot++)
+		{
+			xgpu_text_append(text,
+				"\t{\n"
+				"\t\tfloat4 s = u.material_overlay[%d];\n"
+				"\t\tfloat2 tile_uv = overlay_uv * s.x, dx = dfdx(tile_uv), dy = dfdy(tile_uv);\n"
+				"\t\tfloat f = overlay_keep * (1.0 - smoothstep(u.material_overlay%s.x, u.material_overlay%s.y,\n"
+				"\t\t\t0.5 * log2(max(max(dot(dx, dx), dot(dy, dy)), 1.0e-12))));\n"
+				"\t\tfloat4 t = overlay_%c.sample(overlay_tiles, tile_uv);\n"
+				"\t\toverlay_f4[%d] = f;\n"
+				"\t\toverlay_slope += overlay_wt[%d] * (t.rg * 2.0 - 1.0) * (s.y * f);\n"
+				"\t\toverlay_cavity += overlay_wt[%d] * (1.0 + (t.b * 2.0 - 1.0) * (s.z * f));\n"
+				"\t\toverlay_rough += overlay_wt[%d] * (t.a - 0.5) * (s.w * f);\n"
+				"\t}\n", slot_uniform[slot], footprint[slot], footprint[slot], slots[slot], slot, slot, slot, slot);
+		}
+		xgpu_text_append(text, "\toverlay_cavity = max(overlay_cavity, 0.0);\n");
+	}
+	else
+	{
+		xgpu_text_append(text,
+			"\tfloat overlay_w = u.material_overlay[1].w > 0.5 ? smoothstep(u.material_overlay[1].x, u.material_overlay[1].y,\n"
+			"\t\tdot(overlay_t2, u.material_overlay[0])) : 1.0;\n"
+			"\tif (u.material_overlay[1].z > 0.5) overlay_w = 1.0 - overlay_w;\n"
+			"\tfloat2 overlay_uv_a = overlay_uv * u.material_overlay[4].x, overlay_uv_b = overlay_uv * u.material_overlay[5].x;\n"
+			"\tfloat2 overlay_dxa = dfdx(overlay_uv_a), overlay_dya = dfdy(overlay_uv_a);\n"
+			"\tfloat2 overlay_dxb = dfdx(overlay_uv_b), overlay_dyb = dfdy(overlay_uv_b);\n"
+			"\tfloat overlay_fa = overlay_keep * (1.0 - smoothstep(u.material_overlay[3].z, u.material_overlay[3].w,\n"
+			"\t\t0.5 * log2(max(max(dot(overlay_dxa, overlay_dxa), dot(overlay_dya, overlay_dya)), 1.0e-12))));\n"
+			"\tfloat overlay_fb = overlay_keep * (1.0 - smoothstep(u.material_overlay[6].z, u.material_overlay[6].w,\n"
+			"\t\t0.5 * log2(max(max(dot(overlay_dxb, overlay_dxb), dot(overlay_dyb, overlay_dyb)), 1.0e-12))));\n"
+			"\tfloat4 overlay_ta = overlay_a.sample(overlay_tiles, overlay_uv_a);\n"
+			"\tfloat4 overlay_tb = overlay_b.sample(overlay_tiles, overlay_uv_b);\n"
+			"\tfloat2 overlay_slope = mix((overlay_tb.rg * 2.0 - 1.0) * (u.material_overlay[5].y * overlay_fb),\n"
+			"\t\t(overlay_ta.rg * 2.0 - 1.0) * (u.material_overlay[4].y * overlay_fa), overlay_w);\n"
+			"\tfloat overlay_cavity = max(mix(1.0 + (overlay_tb.b * 2.0 - 1.0) * (u.material_overlay[5].z * overlay_fb),\n"
+			"\t\t1.0 + (overlay_ta.b * 2.0 - 1.0) * (u.material_overlay[4].z * overlay_fa), overlay_w), 0.0);\n"
+			"\tfloat overlay_rough = mix((overlay_tb.a - 0.5) * (u.material_overlay[5].w * overlay_fb),\n"
+			"\t\t(overlay_ta.a - 0.5) * (u.material_overlay[4].w * overlay_fa), overlay_w);\n");
+	}
+	xgpu_text_append(text,
+		"\tfloat3 overlay_nm = normalize(overlay_n + (overlay_tangent * overlay_slope.x - overlay_bitangent * overlay_slope.y) *\n"
+		"\t\toverlay_frame_scale);\n"
+		"\tfloat3 overlay_light = model_lighting(u, float4(overlay_nm * in.xWorldNormal.w, in.xWorldNormal.w)%s%s);\n",
+		program->per_pixel_lighting == 2 && !dynamic ? ", in.xWorldPosition" : "", occlusion);
+	if (dynamic)
+		xgpu_text_append(text,
+			"\toverlay_light = dynamic_light_add(dynamic_lights, overlay_light, dynamic_light_sum(dynamic_lights,\n"
+			"\t\tdynamic_light_cells, dynamic_light_world, in.xWorldPosition, overlay_nm, overlay_nm, false,\n"
+			"\t\tu.model_lights[%d]));\n", XGPU_MODEL_LIGHT_OWN_LIGHTS);
+	xgpu_text_append(text, "\t%s = saturate(overlay_light * overlay_cavity * (1.0 + 0.5 * overlay_rough));\n",
+		v0_read ? "v0.rgb" : "overlay_light");
+}
+
+/* texture stage 3's reflection cube, bent by the micro normal, blurred by
+the roughness, darkened by the cavity */
+static void overlay_reflection(struct xgpu_text *text, const struct xgpu_pixel_program *program, BOOL read)
+{
+	const struct xgpu_texture_stage *decoded = &program->stages[3];
+
+	if (!read)
+		return;
+	xgpu_text_append(text,
+		"\t/* texture stage 3: the reflection, by the material overlay's normal */\n"
+		"\t{\n"
+		"\t\tfloat3 r = in.xT3.xyz;\n"
+		"\t\tfloat3 e = 2.0 * dot(r, overlay_n) * overlay_n - r;\n"
+		"\t\tfloat3 bent = mix(r, 2.0 * dot(e, overlay_nm) * overlay_nm - e, u.material_overlay[6].x);\n"
+		"\t\tt3 = tex3.sample(tex3_sampler, bent, bias(u.texture_lod_bias[3] + 4.0 * overlay_rough));\n"
+		"\t\tt3.rgb = min(t3.rgb * mix(1.0, overlay_cavity, u.material_overlay[6].y), 1.0);\n"
+		"\t}\n");
+	if (decoded->color_sign)
+	{
+		static const char channels[] = "argb";
+		int bit;
+
+		for (bit = 0; bit < 4; bit++)
+		{
+			if (decoded->color_sign & (1 << bit))
+				xgpu_text_append(text, "\tt3.%c = signed_byte(t3.%c);\n", channels[bit], channels[bit]);
+		}
+	}
+	if (decoded->alpha_kill)
+		xgpu_text_append(text, "\tif (t3.a == 0.0) discard_fragment();\n");
+}
+
+/* display.prism_overlay_view (xgpu_spirv.c's overlay_view) */
+static void overlay_view(struct xgpu_text *text, const struct xgpu_pixel_program *program)
+{
+	BOOL class_mask = (program->material_overlay & XGPU_OVERLAY_CLASS_MASK) != 0;
+
+	switch (XGPU_OVERLAY_VIEW(program->material_overlay))
+	{
+	case 1:
+		if (class_mask)
+			xgpu_text_append(text, "\tresult = overlay_keep > 0.0 ? float4(overlay_wt.x * float3(0.9) + overlay_wt.y * "
+				"float3(0.47, 0.35, 0.86) + overlay_wt.z * float3(0.92, 0.59, 0.16) + overlay_wt.w * "
+				"float3(0.16, 0.78, 0.35), 1.0) : float4(0.0, 0.0, 0.0, 1.0);\n");
+		else
+			xgpu_text_append(text, "\tresult = overlay_keep > 0.0 ? float4(overlay_w, 0.0, 1.0 - overlay_w, 1.0) : "
+				"float4(0.0, 1.0, 0.0, 1.0);\n");
+		break;
+	case 2:
+		xgpu_text_append(text, "\tresult = float4((overlay_nm - overlay_n) * 4.0 + 0.5, 1.0);\n");
+		break;
+	case 3:
+		xgpu_text_append(text, class_mask ? "\tresult = float4(float3(dot(overlay_f4, overlay_wt)), 1.0);\n" :
+			"\tresult = float4(float3(mix(overlay_fb, overlay_fa, overlay_w)), 1.0);\n");
+		break;
+	case 4:
+		xgpu_text_append(text, "\tresult = float4(saturate(overlay_light * overlay_cavity * (1.0 + 0.5 * overlay_rough)), 1.0);\n");
+		break;
+	default:
+		break;
+	}
+}
+
 char *xgpu_msl_pixel_shader(const struct xgpu_pixel_program *program, const struct xgpu_msl_options *options)
 {
 	struct xgpu_text text = { 0 };
@@ -2345,14 +2522,18 @@ char *xgpu_msl_pixel_shader(const struct xgpu_pixel_program *program, const stru
 	BOOL occluder = !world && (program->ambient_occlusion & XGPU_AMBIENT_OCCLUSION_WORLD_INPUTS);
 	BOOL world_sampled = world && !world_inputs && (program->ambient_occlusion & XGPU_AMBIENT_OCCLUSION_WORLD_SAMPLED);
 	BOOL world_inline = world && !world_inputs && !world_sampled;
+	/* (display.prism_material_overlay: a model's lit for each pixel, by
+	its world position; not drawn by the Metal backend yet) */
+	BOOL overlay = program->material_overlay && program->per_pixel_lighting && !environment;
 	int stage;
 
 	pixel_usage(program, &usage);
 	world_position = (program->per_pixel_lighting && (program->per_pixel_lighting == 2 ||
-		program->dynamic_lights == XGPU_DYNAMIC_LIGHTS_MODEL)) || environment || world;
+		program->dynamic_lights == XGPU_DYNAMIC_LIGHTS_MODEL)) || environment || world || overlay;
 	if (comparison && *comparison && program->alpha_test_samples && comparison[0] != '=' && comparison[0] != '!')
 		sample_mask = TRUE;
-	xgpu_text_append(&text, uniforms_declaration, XGPU_MODEL_LIGHT_COUNT, world ? "\tfloat4 world_ao;\n" : "");
+	xgpu_text_append(&text, uniforms_declaration, XGPU_MODEL_LIGHT_COUNT, overlay ?
+		"\tfloat4 world_ao;\n\tfloat4 material_overlay[10];\n" : world ? "\tfloat4 world_ao;\n" : "");
 	if (world_inline)
 		world_ao_functions(&text, occlusion_light);
 	else if (world_sampled || world_inputs)
@@ -2413,6 +2594,15 @@ char *xgpu_msl_pixel_shader(const struct xgpu_pixel_program *program, const stru
 			XGPU_MSL_BUFFER_DYNAMIC_LIGHT_CELLS, XGPU_MSL_BUFFER_DYNAMIC_LIGHT_WORLD);
 	if (count_samples)
 		xgpu_text_append(&text, ",\n\tdevice atomic_uint *visible_samples [[buffer(%d)]]", XGPU_MSL_BUFFER_SAMPLES);
+	if (overlay)
+	{
+		xgpu_text_append(&text, ",\n\ttexture2d<float> overlay_a [[texture(%d)]], texture2d<float> overlay_b [[texture(%d)]]",
+			XGPU_MSL_TEXTURE_OVERLAY, XGPU_MSL_TEXTURE_OVERLAY + 1);
+		if (program->material_overlay & XGPU_OVERLAY_CLASS_MASK)
+			xgpu_text_append(&text, ",\n\ttexture2d<float> overlay_c [[texture(%d)]], texture2d<float> overlay_d [[texture(%d)]], "
+				"texture2d<float> overlay_m [[texture(%d)]]", XGPU_MSL_TEXTURE_OVERLAY + 2, XGPU_MSL_TEXTURE_OVERLAY + 3,
+				XGPU_MSL_TEXTURE_OVERLAY + 4);
+	}
 
 	if (world_sampled)
 		xgpu_text_append(&text, ",\n\ttexture2d<float> world_ao_pixels [[texture(%d)]], constant xgpu_world_ao &world_ao "
@@ -2465,7 +2655,11 @@ char *xgpu_msl_pixel_shader(const struct xgpu_pixel_program *program, const stru
 		world_ao_upsample(&text);
 	else if (world_inputs)
 		world_ao_inputs(&text, program, occlusion_light);
-	if (register_read(&usage, XGPU_REGISTER_V0) && program->per_pixel_lighting &&
+	/* (display.prism_material_overlay's light is found after texture
+	stage 2, by its micro normal: overlay_light) */
+	if (overlay)
+		;
+	else if (register_read(&usage, XGPU_REGISTER_V0) && program->per_pixel_lighting &&
 		program->dynamic_lights == XGPU_DYNAMIC_LIGHTS_MODEL)
 	{
 		xgpu_text_append(&text,
@@ -2491,7 +2685,21 @@ char *xgpu_msl_pixel_shader(const struct xgpu_pixel_program *program, const stru
 	}
 
 	for (stage = 0; stage < 4; stage++)
+	{
+		/* (display.prism_material_overlay's light between the multipurpose
+		map and the reflection, which it bends) */
+		if (stage == 3 && overlay)
+		{
+			overlay_light(&text, program, register_read(&usage, XGPU_REGISTER_T2), register_read(&usage, XGPU_REGISTER_V0),
+				occlusion_light);
+			if (program->stages[3].mode == XGPU_TEXTURE_CUBEMAP && program->stages[3].sampler == _xgpu_sampler_cube)
+			{
+				overlay_reflection(&text, program, register_read(&usage, XGPU_REGISTER_T3));
+				continue;
+			}
+		}
 		texture_stage(&text, program, stage, &usage, options);
+	}
 	/* (the bump map's texel, which the combiners may overwrite: the enhanced
 	dynamic lights read it after them) */
 	if (environment && program->stages[0].sampler == _xgpu_sampler_2d)
@@ -2610,6 +2818,9 @@ char *xgpu_msl_pixel_shader(const struct xgpu_pixel_program *program, const stru
 		xgpu_text_append(&text, "\tresult = float4(float3(%s), 1.0);\n", options->debug_expression);
 	if (options->debug_texture0 && register_read(&usage, XGPU_REGISTER_T0))
 		xgpu_text_append(&text, "\tresult = float4(t0.rgb, 1.0);\n");
+	/* (display.prism_overlay_view) */
+	if (overlay)
+		overlay_view(&text, program);
 	if (options->debug_flat)
 		xgpu_text_append(&text, "\tresult = in.xD0.a > 0.0 ? float4(in.xD0.rgb, 1.0) : float4(1.0, 0.0, 1.0, 1.0);\n");
 	/* (debug.world_ao_view: the occlusion found in the world, in grey) */

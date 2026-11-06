@@ -2809,6 +2809,7 @@ symbols in this file:
 #include "network_host_controls.h" /* port: port/linux/game/network_host_controls.c */
 #include "network_host_game.h" /* port: port/linux/game/network_host_game.c */
 #include "server_director.h" /* port: port/linux/game/server_director.c */
+#include "mods.h" /* port: port/linux/game/mod_materials.c */
 #include "objects/damage.h"
 #include "objects/object_lights.h"
 #include "objects/scenery.h"
@@ -3388,7 +3389,7 @@ typedef void (*hs_token_enumerator)(
 
 struct hs_function_table_storage
 {
-	struct hs_function_definition const *functions[418 + 12];
+	struct hs_function_definition const *functions[418 + 13];
 	struct profile_section profile;
 	hs_token_enumerator token_enumerators[18];
 };
@@ -11885,7 +11886,26 @@ static struct hs_function_definition_with_1_parameter const debug_scenario_place
 	},
 };
 
-long const hs_function_table_count= 418 + 12;
+/* port: the PRISM settings change only this machine's rendering
+(port/linux/game/mod_materials.c) */
+HS_EVALUATE_VOID_STRING(hs_prism_set_evaluate, mod_materials_prism_set)
+
+static struct hs_function_definition_with_1_parameter const prism_set_definition=
+{
+	{
+		_hs_type_void,
+		0,
+		"prism_set",
+		hs_macro_function_parse,
+		hs_prism_set_evaluate,
+		"sets a display.prism_* setting now and in config.toml: \"material_overlay true\", \"overlay_strength 1.5\", \"overlay_view 1\".",
+		NULL,
+		1,
+		{ _hs_type_string },
+	},
+};
+
+long const hs_function_table_count= 418 + 13;
 
 struct hs_enum_definition const hs_enum_table[]=
 {
@@ -12329,6 +12349,7 @@ struct hs_function_table_storage hs_function_table=
 		&debug_camera_set_definition.definition, /* port: the camera at an exact place */
 		&debug_object_place_definition.definition, /* port: an object at an exact place */
 		&debug_scenario_places_definition.definition, /* port: the scenario's places */
+		&prism_set_definition.definition, /* port: local PRISM settings */
 	},
 	{
 		"hs_update",
@@ -12848,6 +12869,7 @@ static boolean const hs_function_allowed_in_maps[]=
 	FALSE, /* debug_camera_set */
 	FALSE, /* debug_object_place */
 	FALSE, /* debug_scenario_places */
+	FALSE, /* prism_set: this machine's rendering */
 };
 typedef char verify_hs_function_allowed_in_maps_size[
 	NUMBEROF(hs_function_allowed_in_maps) == NUMBEROF(hs_function_table.functions) ? 1 : -1];

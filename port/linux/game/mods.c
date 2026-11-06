@@ -4,7 +4,8 @@ MODS.C
 Mods: tag files played over a map's tags on this machine, as a resource
 pack is: a map's sounds (mod_sounds.c), bitmaps (mod_bitmaps.c), text
 (mod_strings.c) and models (mod_models.c) from Halo PC tag files, as the
-Halo Editing Kit and Invader write them, in the mods of the mods folder that
+Halo Editing Kit and Invader write them, and the material overlay of its
+model shaders (mod_materials.c), in the mods of the mods folder that
 are on, in their load order (port/linux/src/port_mods.c; the main menu's
 Mods chooses: menu_functions.c; the mod.toml files: docs/mods.md). Nothing a
 mod plays is anything the machines of a network game must agree on: no tag
@@ -77,6 +78,8 @@ static struct
 	long bitmap_count;
 	long sound_count;
 	long model_count;
+	/* (and model shaders the material overlay covers: mod_materials.c) */
+	long material_count;
 } mods_globals;
 
 /* ---------- private code */
@@ -94,6 +97,7 @@ static void mods_update(
 	mods_globals.bitmap_count = mod_bitmaps_update(remove_all, at_load);
 	mods_globals.sound_count = mod_sounds_update(remove_all, at_load);
 	mods_globals.model_count = mod_models_update(remove_all, at_load);
+	mods_globals.material_count = mod_materials_update(remove_all, at_load);
 	/* (the texture cache's size follows the mods' bitmaps: as the map
 	loads, mods_tags_loaded) */
 	if (!at_load)
@@ -299,6 +303,7 @@ static void mods_let_go(
 	mod_bitmaps_tags_unloaded();
 	mod_models_tags_unloaded(give_back);
 	mod_strings_tags_unloaded();
+	mod_materials_tags_unloaded();
 	mods_globals.map_loaded = FALSE;
 	mods_globals.enabled = FALSE;
 	mods_globals.loose_sounds_enabled = FALSE;
@@ -308,6 +313,7 @@ static void mods_let_go(
 	mods_globals.bitmap_count = 0;
 	mods_globals.sound_count = 0;
 	mods_globals.model_count = 0;
+	mods_globals.material_count = 0;
 
 	return;
 }
@@ -459,6 +465,10 @@ void mods_list(
 			console_printf(FALSE, "mods: on %s, %ld string lists, %ld bitmaps, %ld sounds and %ld models are theirs (%lu KB kept)",
 				mods_globals.map_name, mods_globals.string_count, mods_globals.bitmap_count, mods_globals.sound_count,
 				mods_globals.model_count, mods_globals.kept_bytes / 1024);
+			if (mods_globals.material_count)
+			{
+				console_printf(FALSE, "mods: the material overlay covers %ld model shaders", mods_globals.material_count);
+			}
 		}
 		else
 		{

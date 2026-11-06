@@ -124,6 +124,7 @@ symbols in this file:
 #include "rasterizer/xbox/rasterizer_xbox_internal.h"
 #include "rasterizer/xbox/rasterizer_xbox_models.h"
 #include "view_fov.h" /* port: port/linux/game/view_fov.c */
+#include "mods.h" /* port: port/linux/game/mod_materials.c */
 
 /* ---------- constants */
 
@@ -2334,6 +2335,16 @@ void _rasterizer_model_draw(
 					cc0_pixel = 0xFF000000;
 				}
 
+				/* port: the shader's material overlay, if a mod has one
+				(display.prism_material_overlay: mod_materials.c), for its
+				draws, the two-sided pass's too */
+				mod_materials_draw_begin(
+					shader,
+					camera_distance,
+					(boolean)(shader_model->model.multipurpose_map.index != NONE),
+					shader_model->model.base_map.index,
+					shader_permutation_index);
+
 				set_environment_shader_pixel_shader(
 					real_rgb_color_to_pixel32(&self_illumination_color),
 					shader_model->model.detail_function,
@@ -2448,6 +2459,7 @@ void _rasterizer_model_draw(
 					}
 				}
 				halo_hdr_draw_kind(HALO_HDR_KIND_NONE); /* port: (drawn) */
+				mod_materials_draw_end(); /* port: (mod_materials.c) */
 			}
 
 			if (local_environment_fog_screen_flag)

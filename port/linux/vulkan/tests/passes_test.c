@@ -90,7 +90,7 @@ static VkRenderingAttachmentInfo began_color, began_depth, began_stencil;
 static VkClearAttachment cleared[2];
 static VkClearRect cleared_rect;
 static VkImageViewCreateInfo last_view;
-static VkDescriptorImageInfo written_images[4];
+static VkDescriptorImageInfo written_images[9];
 static VkFormatFeatureFlags depth24_features, depth32_features;
 static unsigned int capability_errors;
 static unsigned int ended_queries;
@@ -186,7 +186,8 @@ static void VKAPI_CALL fake_update(VkDevice device, uint32_t count, const VkWrit
 	uint32_t index;
 
 	(void)device; (void)copies; (void)copy;
-	assert(count == 4);
+	/* (the stages', and display.prism_material_overlay's five after them) */
+	assert(count == 4 || count == 9);
 	set_updates++;
 	for (index = 0; index < count; index++)
 	{
@@ -712,31 +713,47 @@ static void texture_sets_test(void)
 	a[0].kind = b[0].kind = XGPU_VULKAN_IMAGE_2D;
 	a[0].sampler = b[0].sampler = (VkSampler)(uintptr_t)5;
 	allocated_sets = set_updates = 0;
-	set_a = texture_set(a);
-	set_b = texture_set(b);
+	set_a = texture_set(a, NULL);
+	set_b = texture_set(b, NULL);
 	assert(set_a && set_b && set_a != set_b && set_updates == 2);
-	assert(texture_set(a) == set_a && texture_set(b) == set_b);
-	assert(texture_set(a) == set_a && set_updates == 2 && allocated_sets == 2);
+	assert(texture_set(a, NULL) == set_a && texture_set(b, NULL) == set_b);
+	assert(texture_set(a, NULL) == set_a && set_updates == 2 && allocated_sets == 2);
 	assert(vk.statistics.texture_sets_written == 2 && vk.statistics.texture_sets_reused == 3);
 	assert(written_images[0].imageView == second.sampled);
 
 	a[0].sampler = (VkSampler)(uintptr_t)6;
-	set = texture_set(a);
+	set = texture_set(a, NULL);
 	assert(set != set_a && set != set_b && set_updates == 3);
 	assert(written_images[0].sampler == (VkSampler)(uintptr_t)6);
 	a[0].sampler = (VkSampler)(uintptr_t)5;
-	assert(texture_set(a) == set_a && set_updates == 3);
+	assert(texture_set(a, NULL) == set_a && set_updates == 3);
 
 	/* (first destroyed and another image made at its address, as
 	xgpu_vulkan_image_create numbers it; the last set is b's, as
 	xgpu_vulkan_image_destroy forgets the last set when it had first) */
-	assert(texture_set(b) == set_b);
+	assert(texture_set(b, NULL) == set_b);
 	first.number = 3;
 	first.sampled = (VkImageView)(uintptr_t)33;
-	set = texture_set(a);
+	set = texture_set(a, NULL);
 	assert(set != set_a && set != set_b && set_updates == 4);
 	assert(written_images[0].imageView == (VkImageView)(uintptr_t)33);
-	assert(texture_set(b) == set_b && texture_set(a) == set && set_updates == 4);
+	assert(texture_set(b, NULL) == set_b && texture_set(a, NULL) == set && set_updates == 4);
+
+	/* display.prism_material_overlay: the overlay's images after the
+	stages', a set of their own (stand-ins where there is none), found again
+	as the stages' are */
+	{
+		struct xgpu_vulkan_texture overlay[XGPU_VULKAN_OVERLAY_IMAGES];
+		VkDescriptorSet with;
+
+		memset(overlay, 0, sizeof(overlay));
+		overlay[0].image = &second;
+		overlay[0].sampler = (VkSampler)(uintptr_t)7;
+		with = texture_set(a, overlay);
+		assert(with && with != set && set_updates == 5);
+		assert(written_images[4].imageView == second.sampled && written_images[4].sampler == (VkSampler)(uintptr_t)7);
+		assert(texture_set(a, NULL) == set && texture_set(a, overlay) == with && set_updates == 5);
+	}
 
 	/* The slot's next submission: only the pool allocated from is reset,
 	and its sets are forgotten with it. */
@@ -744,9 +761,9 @@ static void texture_sets_test(void)
 	vk.serial += SLOTS;
 	recording_begin();
 	assert(vk.slot == slot && pool_resets == 1 && !slot->texture_set_count && !slot->descriptor_pool_dirty);
-	assert(texture_set(b) && set_updates == 5 && allocated_sets == 5);
-	assert(texture_set(a) && set_updates == 6);
-	assert(texture_set(b) && set_updates == 6);
+	assert(texture_set(b, NULL) && set_updates == 6 && allocated_sets == 6);
+	assert(texture_set(a, NULL) && set_updates == 7);
+	assert(texture_set(b, NULL) && set_updates == 7);
 	slot->descriptor_pools = NULL;
 	slot->descriptor_pool_count = 0;
 	reset();
@@ -3741,14 +3758,14 @@ int main(void)
 		textures[0].kind = XGPU_VULKAN_IMAGE_2D;
 		recording.descriptor_pools = &pool;
 		recording.descriptor_pool_count = 1;
-		assert(texture_set(textures));
+		assert(texture_set(textures, NULL));
 		first_layer = written_images[0].imageView;
 		assert(created_views == 1 && first_layer == array->sampled_2d);
 		assert(first_layer != array->sampled && last_view.viewType == VK_IMAGE_VIEW_TYPE_2D);
 		assert(last_view.subresourceRange.baseArrayLayer == 0 && last_view.subresourceRange.layerCount == 1);
-		assert(texture_set(textures) && created_views == 1);
+		assert(texture_set(textures, NULL) && created_views == 1);
 		textures[0].kind = XGPU_VULKAN_IMAGE_2D_ARRAY;
-		assert(texture_set(textures) && written_images[0].imageView == array->sampled && created_views == 1);
+		assert(texture_set(textures, NULL) && written_images[0].imageView == array->sampled && created_views == 1);
 		xgpu_vulkan_image_destroy(array);
 		for (index = 0; index < vk.garbage_count; index++)
 		{

@@ -117,6 +117,10 @@ struct host_render_backend
 	int (*read_target)(void *context, const struct xgpu_stream_read_target *record);
 
 	void (*set_textures)(void *context, const struct host_render_texture_stage stages[4]);
+	/* display.prism_material_overlay: the overlay of the draws that follow
+	whose pixel program has material_overlay (its stages' level counts
+	checked: none); none: drawn as stage 3's others are */
+	void (*material_overlay)(void *context, const struct xgpu_stream_material_overlay *record);
 
 	void (*set_constants)(void *context, const struct xgpu_stream_constants *record);
 	void (*vertex_program)(void *context, const struct xgpu_stream_vertex_program *record);

@@ -13,7 +13,8 @@ Only `jsmn.h` and `LICENSE` are kept, unchanged.
 
 `port/linux/src/server_json.c` reads JSON with it: the master servers' lists
 of servers, for the server browser of every build (`master_list.c`), and a
-dedicated server's HTTP API requests. It builds into every build: Linux,
-Windows, Android and the web. Its notice goes with each: the releases carry
+dedicated server's HTTP API requests; `port/linux/game/mod_materials.c`
+reads a mod's material overlay (`tags/materials/overlay.json`). It builds
+into every build: Linux, Windows, Android and the web. Its notice goes with each: the releases carry
 `jsmn-LICENSE.txt` (`tools/ci_build.py`), the web build its `licenses.txt`
 (`port/web/licenses.py`).

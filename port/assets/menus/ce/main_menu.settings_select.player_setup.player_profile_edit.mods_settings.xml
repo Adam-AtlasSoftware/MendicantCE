@@ -19,6 +19,8 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_3" x="28" y="172"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_record_replays" x="28" y="192"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_theater" x="28" y="213"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_6" x="28" y="240" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_material_overlay" x="28" y="260" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/button_bar" y="414"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/tabs" y="76"/>
 	</widget>
@@ -126,6 +128,20 @@
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/theater_label" type="text" controller="1" width="332" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" string_index="5" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
 	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_6" width="344" height="18" bitmap="main_menu/settings/section" platform="desktop" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_6_title"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_6_title" type="text" controller="1" width="344" height="18" wide="0 120" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" string_index="6" color="#FF6F9CD0" text_x="2" text_y="1" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_material_overlay" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_material_overlay_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_material_overlay_spinner" x="188"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_material_overlay_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" string_index="7" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_material_overlay_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="ON|OFF" setting="display.prism_material_overlay" values="true|false" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+		<on event="created" run="port setting load"/>
+	</widget>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels">
 		<string text="MODS"/>
 		<string text="MANAGE MODS ›"/>
@@ -133,6 +149,8 @@
 		<string text="THEATER"/>
 		<string text="RECORD GAMES"/>
 		<string text="THEATER ›"/>
+		<string text="MATERIALS"/>
+		<string text="MATERIAL DETAIL"/>
 	</strings>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/help_strings">
 		<string text="Texture, sound, text and model packs from the mods folder, and the Theater's recorded games."/>
@@ -142,5 +160,7 @@
 		<string text=""/>
 		<string text="Records each network game you play or host, from the next one on, to watch again in the Theater."/>
 		<string text="The games recorded: watch one again from any player's view, or a free or cinematic camera."/>
+		<string text=""/>
+		<string text="Gives weapons and armour the fine grain of their surfaces (machining, weave, wear) from a mod's material overlay. It changes only the light on them. Off draws them as the Xbox did."/>
 	</strings>
 </menus>
