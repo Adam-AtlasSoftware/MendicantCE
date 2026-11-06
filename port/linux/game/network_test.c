@@ -33,6 +33,11 @@ Automated system link sessions for testing the netcode without the menus
   menus (and so without a player profile);
 - "log" hosts and joins nothing: the game that runs (map_name, in init.txt,
   plays one without the menus) is logged, as below.
+- "replay:<path>" (port: the Theater, port/linux/REPLAY.md) plays the
+  replay at path from the main menu, as the Theater's WATCH does, and logs
+  its game as "log" does, so that a recording's log and its playback's can
+  be compared, tick by tick (tools/replay_compare.py); "replay ended" is
+  logged at the replay's end;
 - "probe" (halo --probe [<invite>]: a list site's look at a server) searches
   as "join" does, joins nothing, and prints the first game it finds (with
   an invite, only its host's, over its tunnel; without, one on the LAN) on
@@ -104,6 +109,7 @@ Called from the main loop every frame (main.c).
 #include "hs/hs.h"
 #include "network_clock.h"
 #include "network_distributed.h"
+#include "network_replay.h" /* port: the Theater's playback, "replay:" */
 
 #include "../src/p2p.h" /* port: port/linux/src/p2p.c, p2p_lobby.c */
 #include "network_chat.h"
@@ -172,6 +178,8 @@ enum
 	_network_test_follow,
 	_network_test_log,
 	_network_test_probe,
+	/* (port: the Theater) */
+	_network_test_replay,
 };
 
 static struct
@@ -198,6 +206,12 @@ static struct
 	their logs. This is debug.network_test's host alone, a test's machine,
 	whose log nobody posts) */
 	boolean invite_logged;
+	/* "replay:": its path, and whether it was started (and has ended) */
+	char replay_path[256];
+	boolean replay_started;
+	boolean replay_ended;
+	/* debug.network_test_units */
+	boolean log_units;
 	real setup_seconds;
 	boolean started;
 	boolean joined;
@@ -323,7 +337,13 @@ static void network_test_read_settings(
 	{
 		network_test.mode = _network_test_probe;
 	}
+	else if (!strncmp(setting, "replay:", 7) && setting[7])
+	{
+		network_test.mode = _network_test_replay;
+		snprintf(network_test.replay_path, sizeof(network_test.replay_path), "%s", setting + 7);
+	}
 	network_test.public_game = config_boolean("debug.network_test_public") != 0;
+	network_test.log_units = config_boolean("debug.network_test_units") != 0;
 	network_test.start_delay = (real)config_real("debug.network_test_start");
 	network_test.local_players = (short)PIN(config_integer("debug.network_test_players"), 1, MAXIMUM_NUMBER_OF_LOCAL_PLAYERS);
 	network_test.kill_interval = (real)config_real("debug.network_test_kill");
@@ -616,6 +636,39 @@ static void network_test_log_players(
 			camera ? camera->position.x : 0.0f, camera ? camera->position.y : 0.0f, camera ? camera->position.z : 0.0f,
 			local_player_index == NONE ? 0L : (long)player_get(local_player_index)->respawn_timer,
 			divergence_samples, divergence_apart, divergence_mean, divergence_largest);
+		/* (debug.network_test_units: every biped no player controls, alive
+		and in the world, where it is and its body's vitality, so that the
+		campaign's actors in a recording and in its replay can be compared:
+		tools/replay_compare.py) */
+		if (network_test.log_units)
+		{
+			char units[2048];
+			size_t length = 0;
+			long count = 0;
+
+			units[0] = 0;
+			object_iterator_new(&objects, _object_mask_biped, 0);
+			while (object_iterator_next(&objects))
+			{
+				struct unit_datum *unit = (struct unit_datum *)object_get_and_verify_type(objects.index,
+					_object_mask_biped);
+
+				if (unit->unit.player_index != NONE || unit->object.parent_object_index != NONE ||
+					unit->object.body_vitality <= 0.0f ||
+					!TEST_FLAG(unit->object.flags, _object_connected_to_map_bit))
+				{
+					continue;
+				}
+				count++;
+				if (length + 48 < sizeof(units))
+				{
+					length += (size_t)snprintf(units + length, sizeof(units) - length, " (%.2f %.2f %.2f %.2f)",
+						unit->object.position.x, unit->object.position.y, unit->object.position.z,
+						unit->object.body_vitality);
+				}
+			}
+			platform_log("network test: units tick %ld: %ld%s", game_time_get(), count, units);
+		}
 		/* (a client: its own players' hits it showed at once, and how the
 		host's word on them went: network_damage.c) */
 		if (game_connection() == _game_connection_network_client)
@@ -1911,6 +1964,13 @@ void network_test_update(
 		}
 	}
 
+	/* "replay:": its end, once (the playback returns to the main menu) */
+	if (network_test.mode == _network_test_replay && network_test.replay_started && !network_test.replay_ended &&
+		!network_replay_playing())
+	{
+		network_test.replay_ended = TRUE;
+		platform_log("network test: replay ended");
+	}
 	if (!main_menu_loaded)
 		return;
 	/* the intro movie skipped first, as a button press does: the movie
@@ -1930,6 +1990,21 @@ void network_test_update(
 
 	switch (network_test.mode)
 	{
+	case _network_test_replay:
+		if (!network_test.replay_started)
+		{
+			char why[160];
+
+			network_test.replay_started = TRUE;
+			if (network_replay_watch(network_test.replay_path, why, sizeof(why)))
+				platform_log("network test: playing the replay %s", network_test.replay_path);
+			else
+			{
+				network_test.replay_ended = TRUE;
+				platform_log("network test: the replay %s cannot be played: %s", network_test.replay_path, why);
+			}
+		}
+		break;
 	case _network_test_browse:
 	{
 		struct p2p_listing listed[8], games[8];

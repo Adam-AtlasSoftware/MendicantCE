@@ -2000,6 +2000,11 @@ static const struct config_setting config_settings[] =
 		_platform_all,
 		"The players of a \"local:\" network test's game (1 to 4): its split\n"
 		"screen, the first controller's player the first." },
+	{ "debug.network_test_units", _config_boolean, "false", "HALO_NETWORK_TEST_UNITS", _environment_value,
+		_platform_all,
+		"With debug.network_test: log every biped no player controls (the\n"
+		"campaign's actors) each second, where it is and its vitality, to\n"
+		"compare a recording's game with its replay's (tools/replay_compare.py)." },
 	{ "debug.network_test_public", _config_boolean, "false", "HALO_NETWORK_TEST_PUBLIC", _environment_value,
 		_platform_all,
 		"The network test's host lists its game in the server browser, as Create\n"
