@@ -106,6 +106,9 @@ boolean mendicant_config_read(
 	config->character = config_boolean("ai.mendicant.character") != 0;
 	config->personality = (real)config_real("ai.mendicant.personality");
 	config->quirks = mendicant_config_quirks(config_string("ai.mendicant.quirks"));
+	config->fire_personality = config_boolean("ai.mendicant.fire_personality") != 0;
+	config->lost_target_search = config_boolean("ai.mendicant.lost_target_search") != 0;
+	config->friend_vehicles = config_boolean("ai.mendicant.friend_vehicles") != 0;
 #ifdef MENDICANT_LEGACY_ENVIRONMENT
 	/* the training bridge, its runs and its logs: desktop Linux only */
 	mendicant_config_copy_string(config->bridge, sizeof(config->bridge), config_string("ai.mendicant.bridge"));
@@ -116,6 +119,7 @@ boolean mendicant_config_read(
 	mendicant_config_copy_string(config->player_log, sizeof(config->player_log), config_string("ai.mendicant.player_log"));
 	mendicant_config_copy_string(config->move_test_log, sizeof(config->move_test_log), config_string("ai.mendicant.move_test_log"));
 	mendicant_config_copy_string(config->character_log, sizeof(config->character_log), config_string("ai.mendicant.character_log"));
+	mendicant_config_copy_string(config->fire_log, sizeof(config->fire_log), config_string("ai.mendicant.fire_log"));
 	config->vehicle_test = config_boolean("ai.mendicant.vehicle_test") != 0;
 	config->aim_debug = config_boolean("ai.mendicant.aim_debug") != 0;
 
@@ -214,6 +218,7 @@ void mendicant_settings_changed(
 	memcpy(mendicant_config.player_log, map_start.player_log, sizeof(mendicant_config.player_log));
 	memcpy(mendicant_config.move_test_log, map_start.move_test_log, sizeof(mendicant_config.move_test_log));
 	memcpy(mendicant_config.character_log, map_start.character_log, sizeof(mendicant_config.character_log));
+	memcpy(mendicant_config.fire_log, map_start.fire_log, sizeof(mendicant_config.fire_log));
 	/* (in training the character stays as the run set it) */
 	if (mendicant_config.training)
 		mendicant_config.character = map_start.character;

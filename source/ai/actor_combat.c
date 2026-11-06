@@ -166,6 +166,7 @@ symbols in this file:
 #undef normalize3d
 
 #include "math/real_math_declarations.h"
+#include "mendicant/mendicant.h" /* port: port/linux/game/mendicant/mendicant_main.c */
 
 /* ---------- constants */
 
@@ -615,6 +616,8 @@ static void actor_start_pause(
 	}
 
 	actor->control.fire_state_timer = (short)(burst_separation*TICKS_PER_SECOND);
+	/* port: MENDICANT AI: the soldier's own rhythm (port/linux/game/mendicant) */
+	mendicant_pause_started(actor_index);
 
 	return;
 }
@@ -650,6 +653,9 @@ static boolean actor_start_first_burst_delay(
 			firing_variant_definition->ranged_combat.first_burst_delay_upper_bound)*
 			TICKS_PER_SECOND);
 	}
+	/* port: MENDICANT AI: the soldier's own reaction, under orders too
+	(port/linux/game/mendicant) */
+	fire_immediately = mendicant_first_burst_delay(actor_index, fire_immediately);
 
 	return !fire_immediately;
 }
@@ -1411,6 +1417,9 @@ static void actor_start_burst(
 			origin_radius *= 2.0f;
 			return_radius *= 2.0f;
 		}
+		/* port: MENDICANT AI: the soldier's own aim, the walk of his tracers
+		and his burst's length, before the sweep limit (port/linux/game/mendicant) */
+		mendicant_burst_geometry(actor_index, &origin_radius, &return_radius);
 
 		if (actor->control.fire_state_timer > 0 &&
 			burst_geometry->burst_maximum_angular_velocity > 0.0f)
@@ -1916,6 +1925,13 @@ void actor_combat_update(
 		}
 		else if (!actor->orders.combat.override_firing_restrictions &&
 			actor->control.burst_disable_timer > 0)
+		{
+			firing_decision = _firing_disabled;
+			fire = FALSE;
+		}
+		/* port: MENDICANT AI: a soldier flinching from a hit
+		(port/linux/game/mendicant) */
+		else if (mendicant_fire_held(actor_index))
 		{
 			firing_decision = _firing_disabled;
 			fire = FALSE;
@@ -2427,6 +2443,9 @@ void actor_combat_update(
 	}
 
 	actor_debug_info->firing_decision = firing_decision;
+	/* port: MENDICANT AI puts back what it wrote for this soldier's firing
+	variant (port/linux/game/mendicant) */
+	mendicant_combat_update_after(actor_index);
 
 	return;
 }

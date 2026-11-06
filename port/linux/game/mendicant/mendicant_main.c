@@ -146,6 +146,7 @@ FILE *mendicant_drill_file = NULL;
 FILE *mendicant_move_test_file = NULL;
 struct mendicant_status mendicant_status;
 FILE *mendicant_character_file = NULL;
+FILE *mendicant_fire_file = NULL;
 
 /* this map's modules were reset for the AI (L1 found it should run) */
 static boolean mendicant_map_ready = FALSE;
@@ -161,6 +162,7 @@ static char mendicant_drill_path[sizeof(mendicant_config.drill_log)];
 static char mendicant_player_path[sizeof(mendicant_config.player_log)];
 static char mendicant_move_test_path[sizeof(mendicant_config.move_test_log)];
 static char mendicant_character_path[sizeof(mendicant_config.character_log)];
+static char mendicant_fire_path[sizeof(mendicant_config.fire_log)];
 #endif
 static long mendicant_player_sample_time = -1000;
 
@@ -414,6 +416,9 @@ static void mendicant_logs_open(
 		mendicant_config.character_log,
 		"time,epoch,record,actor,encounter,team,kind,quirk,courage,aggression,skill,discipline,caution,"
 		"grenade,initiative,vocal,loyalty,reflex,lead_bias,peek_side,buddy,favourite,seat,mood,fight,seed\n");
+	/* the firing personality's events: a, b, c, d, e by record (docs/mendicant_port.md) */
+	mendicant_log_open(&mendicant_fire_file, mendicant_fire_path, sizeof(mendicant_fire_path),
+		mendicant_config.fire_log, "time,record,actor,kind,quirk,commanded,a,b,c,d,e,f\n");
 #endif
 
 	return;
@@ -835,6 +840,7 @@ void mendicant_initialize_for_new_map(
 	mendicant_command_reset();
 	mendicant_movement_reset();
 	mendicant_combat_reset();
+	mendicant_firing_reset();
 	/* the models: loaded once, again when the file changes */
 	if (mendicant_config.models)
 		mendicant_runtime_load();
@@ -907,6 +913,7 @@ void mendicant_game_state_after_load(
 	{
 		mendicant_command_reset();
 		mendicant_combat_reset();
+		mendicant_firing_reset();
 		mendicant_movement_revert();
 		/* the Covenant are drawn again; the Marines come back the same men */
 		mendicant_character_revert();
@@ -971,6 +978,8 @@ void mendicant_ai_update_end(
 		NULL);
 	mendicant_vehicles_update(); /* the autopilot writes its drivers' controls after the AI's */
 	mendicant_character_update(game_time_get());
+	mendicant_firing_update(game_time_get());
+	mendicant_aim_release(); /* (an actor whose decision ran without its combat update) */
 	if (mendicant_training)
 		mendicant_training_update();
 
@@ -1018,6 +1027,67 @@ void mendicant_decide_after(
 	return;
 }
 
+/* ---------- public code: firing (actor_combat.c, ai.c) */
+
+void mendicant_burst_geometry(
+	long actor_index,
+	real *origin_radius,
+	real *return_radius)
+{
+	if (mendicant_active)
+		mendicant_firing_burst_geometry(actor_index, origin_radius, return_radius);
+
+	return;
+}
+
+void mendicant_pause_started(
+	long actor_index)
+{
+	if (mendicant_active)
+		mendicant_firing_pause_started(actor_index);
+
+	return;
+}
+
+boolean mendicant_first_burst_delay(
+	long actor_index,
+	boolean fire_immediately)
+{
+	if (!mendicant_active)
+		return fire_immediately;
+	return mendicant_firing_first_burst_delay(actor_index, fire_immediately);
+}
+
+boolean mendicant_fire_held(
+	long actor_index)
+{
+	if (!mendicant_active)
+		return FALSE;
+	return mendicant_firing_held(actor_index);
+}
+
+void mendicant_combat_update_after(
+	long actor_index)
+{
+	(void)actor_index;
+	if (mendicant_active)
+		mendicant_aim_release();
+
+	return;
+}
+
+short mendicant_line_of_fire_vehicles(
+	long actor_index,
+	short maximum,
+	real_point3d *centers,
+	real *radii,
+	long *prop_indices)
+{
+	if (!mendicant_active)
+		return 0;
+	return mendicant_firing_vehicle_pills(actor_index, maximum, centers, radii, prop_indices);
+}
+
 /* ---------- public code: actions (actions.c) */
 
 void mendicant_action_control_after(
@@ -1029,6 +1099,8 @@ void mendicant_action_control_after(
 	/* the roles change how fighting, uncovering and guarding actors move and fire */
 	if (action == _actor_action_fight || action == _actor_action_uncover || action == _actor_action_guard)
 		mendicant_apply_role(actor_index);
+	/* a soldier on his own holding his aim where a lost enemy was seen */
+	mendicant_firing_action_control(actor_index, action);
 
 	return;
 }

@@ -45,7 +45,8 @@ Video Setup > CAMPAIGN AI (`tools/port_settings.py`'s
 `ai.mendicant.*` settings: on, the trained models, individuals, drill
 variety, discipline, threat targeting, unit radius, aim spread, spread by
 difficulty, moving targets and the Marines' rate of fire, and on its SOLDIER
-CHARACTER page the character, the personality strength and the quirks. It is reached from
+CHARACTER page the character, the personality strength, the quirks, the firing
+personality, the search for a lost target and holding fire for friendly vehicles. It is reached from
 the main menu's player profile and from a campaign's pause menu (SETTINGS),
 and works with a controller as the other settings screens do. OK writes the
 changes to config.toml; `menu_functions.c`'s "port settings save" then calls
@@ -60,7 +61,7 @@ The authentic soldier layer's foundation (milestone M0): `mendicant_character.c`
 `mendicant_character.h`, and its tables and draw in `mendicant_traits.h` (plain C, so that
 `tools/mendicant/character_test.c` checks the draw on the build machine with no game). The API
 every later behaviour reads is in `mendicant_internal.h` (`mendicant_soldier_*`). M0 changes no
-behaviour: nothing reads the traits yet.
+behaviour by itself; the firing personality (M1, below) is the first reader.
 
 - **Traits.** Ten per soldier, 0..1: courage, aggression, skill, discipline, caution, grenade,
   initiative, vocal, loyalty, reflex. Each is drawn triangular around his kind's mean (Grunt
@@ -83,6 +84,9 @@ behaviour: nothing reads the traits yet.
   liberal 12.5% each), each scaling aim error, the grenade lull, spacing and reaction time
   (weighted means within 1.5% of 1), and gives each soldier a small swing of courage,
   aggression and vocal (+-0.08 times the personality) and his signature roll.
+- **Cohesion.** `mendicant_soldier_cohesion` is 0.6 under a unit's command (its last drill
+  update, which runs once a second, or a held position order; a veteran 0.4, a rookie 0.8) and 1
+  on his own; behaviours pull a multiplier's spread toward 1 by it.
 - **Mean preservation.** `mendicant_soldier_mult(actor, trait, lo, hi)` is linear in the trait,
   divided by its value at the kind's population mean (measured from 4096 draws of the same
   function, with the quirks, at the current settings), so its mean over the kind is 1: the
@@ -113,6 +117,90 @@ behaviour: nothing reads the traits yet.
 cc -O2 -std=c11 -Iport/linux/game/mendicant tools/mendicant/character_test.c -o build/character_test -lm
 build/character_test
 ```
+
+## The firing personality
+
+Milestone M1 (`mendicant_firing.c`): each soldier with a character aims and fires his own way,
+from his traits, his fight's mood and what is happening to him (`ai.mendicant.fire_personality`,
+with the character on). Hunters, the Flood, Sentinels, Engineers and turrets have no character
+and fire exactly as before, as do actors in a scripted play fight.
+
+Everything is written to the actor's own control fields through source hooks in
+`actor_combat.c`, never to the shared firing variant tags:
+
+| Hook (`mendicant.h`) | In | What it sets |
+| --- | --- | --- |
+| `mendicant_burst_geometry` | `actor_start_burst`, before the sweep limit | the burst's error, the radius its tracers start from and walk back by, its length |
+| `mendicant_pause_started` | `actor_start_pause`'s end | the pause |
+| `mendicant_first_burst_delay` | `actor_start_first_burst_delay`'s end | the wait before a first burst, and whether he fires at once |
+| `mendicant_fire_held` | `actor_combat_update`'s firing tests, after the burst disable timer | a flinch (no burst); a target switch's hesitation lengthens the timer |
+| `mendicant_combat_update_after` | `actor_combat_update`'s end | puts back the one tag write left (below) |
+| `mendicant_line_of_fire_vehicles` | `ai_find_line_of_fire_friend_pills`' end (`ai.c`) | friendly vehicles as pills |
+
+For such a soldier `mendicant_aim_actor` no longer scales the variant's error, burst radius and
+burst bounds (the layer off still does, as before); the only write left is a marksman's charged
+plasma pistol (special fire), put back after his combat update and again after the AI's update.
+
+- **Accuracy (design 4.1 A).** Error and start radius times the setting and the difficulty
+  (`ai.mendicant.aim`, `aim_difficulty`), moving (`aim_moving`; on foot the penalty times a skill
+  multiplier), and his own factor, clamped to 0.35..3: skill (1.4..0.65), the layer's settling
+  curve on the same clock run faster or slower by skill, at most 1.2 inside the game's new target
+  window (which already doubles the error; the layer off stacks 1.4 on it), nerve under fire
+  (`perceived_danger`, a near-miss memory; an Elite with shields up feels a third of it), badly
+  wounded (under half health, up to 1.3), a target inside a fifth of his range (courage), and the
+  mood. A Jackal major (error 0) shakes under fire (up to 1.5 degrees). A steady hand also starts
+  his tracers nearer and walks them in faster (start and return radius times a skill multiplier,
+  1.25..0.8). The game then fits the sweep to the new length, as it does for its own.
+- **Reaction (B, BUG B).** Before a first burst: on his own, the game's own wait times a reflex
+  multiplier (1.5..0.6) and the mood. Under a role's orders, which skip the game's wait, a new
+  target (or his target back in sight after 3 s without firing at it) waits `0.08 + 0.5 x (1 -
+  reflex)` s, times the mood, `1 + 0.6 x suppression`, a random 0.8..1.2 and 0.75 (he is already
+  aimed in), at most 1.2 s; an ambush (the hidden role) adds up to 0.35 s by indiscipline, so the
+  volley ripples out. Picking up again on the same target stays at once, as the orders have it. A
+  re-peek within 30 world units of a held angle is met in 0.3 s (a Jackal sharpshooter 0.25 s).
+  A rookie's first contact in a fight (his signature) is 0.6 s late, with the surprise line.
+- **Bursts (C, G).** Length times a discipline multiplier (1.5..0.75), at long range (over 0.7 of
+  his range) another (1.15..0.6: the disciplined shorten), 1.4 for a frightened, undisciplined
+  soldier (a magazine dump), cohesion-blended; on the move Marines 0.85 times an aggression
+  multiplier (a hothead full bursts), Grunts 0.8, Jackals 0.9, Elites up to 1.15 (berserkers and
+  duelists 1.15), with the pause after it scaled alike, so the share of time firing stays. The
+  Marines' assault rifle (`ai.mendicant.marine_fire`) applies per burst and pause, as the tag write
+  does with the layer off. Pauses: a random multiplier from 0.4..1.6 (undisciplined) to 0.9..1.1
+  (disciplined), times nerve under fire; a berserker with shields up pauses at most 0.4 s. At
+  most 3 s of burst unless the game's own was longer; at least 2 ticks.
+- **Hesitation (D), flinch (E).** A switch to a new target while the old one is still up and in
+  sight lengthens the wait by `0.5..0.12 s` by skill (times `1 + 0.5 x suppression`; an Elite
+  over 0.7 aggression switches at once); a Marine whose target fell waits `0.3..0.8 s x
+  discipline` (confirming the kill); at most 0.6 s. A hit of a tenth of his health or more (an
+  Elite's only with shields down) makes him flinch for 6..12 ticks with chance `0.6 x (1 -
+  courage)`, at least 1.5 s apart and at most two in 5 s.
+- **Friends in the line (I, `ai.mendicant.friend_vehicles`).** A friendly ground vehicle with
+  anyone aboard (an acknowledged friendly prop in a vehicle, not his own), within 25 world units,
+  bounding radius 4 or less (a dropship is not a Warthog), is a sphere pill of 0.8 times its
+  bounding radius, unless he stands beside it; at most 8. The game then holds the burst and, after
+  45 ticks, gives its "blocked" line.
+- **Search for a lost target (critique F1, `ai.mendicant.lost_target_search`).** Checked every 10
+  ticks per encounter: when no member sees an enemy, one is engaged, and the members' target was
+  last seen 6 to 30 s ago, once per loss and at most every 20 s: an Elite gives the search line
+  and looks where the enemy went (3 s), Jackals within 40 hold their aim on it (4 s, a
+  sharpshooter 6 s), Marines over 0.55 discipline 3 s, and up to two Grunts with no position
+  order or role go there with `actor_go_to` (stopping 6 world units short; the two bravest with an
+  Elite present, only a brave one without). A held angle sets the look (priority 5 at the point)
+  and, for a soldier with no role, holds fire; roles that aim on their own (support, shift fire,
+  security, overwatch, the ambush) keep theirs. It ends when anyone sees the enemy, or after 20 s;
+  movers are let go when they arrive.
+- **Not in M1.** Leading (F), suppression at the last-seen point by individuals (H), panic spray
+  (J); the Hunter pair rhythm (K) is left out: Hunters stay as they are.
+- **Training.** As the character: off unless the run sets it.
+- **Log.** `ai.mendicant.fire_log` (CSV): `time,record,actor,kind,quirk,commanded,a,b,c,d,e,f`.
+  `burst`: a his error factor, b what the layer off would give him at that moment, c the length
+  the layer off would give (ticks), d his, e moving, f his own factor. `pause`: a his multiplier,
+  c the layer off's, d his. `react`: a his reaction (s), b a new target, c the game's wait, d
+  his, e 1 commanded + 2 pre-aimed. `hesitate`, `flinch`: d ticks. `search_start`: actor the
+  encounter, a seconds since seen, c an Elite called, d movers, e holders. `vehicles` (each 30 s):
+  a friendly vehicles seen, b of them too large, c tests, d pills added. A soldier without a
+  character (the layer off) logs `burst` and `pause` with his species as the kind, for
+  comparison.
 
 ## Fork release settings
 

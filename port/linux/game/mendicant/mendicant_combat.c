@@ -21,7 +21,10 @@ picks targets and throws grenades while the AI runs.
   variant (shared tag data), so the original is kept and each actor's own
   value is written from it. A marksman with a plasma pistol charges his
   shots; Marines with an assault rifle fire longer bursts with shorter
-  pauses (ai.mendicant.marine_fire).
+  pauses (ai.mendicant.marine_fire). With the firing personality on, a
+  soldier with a character keeps the variant's own values and has all of
+  this set on his own control as each burst starts (mendicant_firing.c);
+  only a marksman's charge is written, and put back after his combat update.
 - Targets: Marines go for Elites unless a Grunt or Jackal is hurting them,
   Elites for the Master Chief, Grunts for the Marines unless the Chief is
   hurting them or nearest.
@@ -94,8 +97,14 @@ static struct
 	real burst_duration[2], burst_separation[2];
 } aim_original[AIM_VARIANTS];
 static int aimed_count;
+/* the variant last written for a soldier whose firing is his own (put back
+after his combat update), or -1 */
+static int aim_bracket_slot = -1;
 static int aim_debug_lines;
 static long aim_target[MENDICANT_MAX_ACTORS], aim_target_since[MENDICANT_MAX_ACTORS];
+/* each actor's aim factor as the layer off would set it (the firing log's
+comparison) */
+static real aim_stock[MENDICANT_MAX_ACTORS];
 /* more accurate on Heroic and Legendary, less on Easy */
 static const real aim_difficulty[4] = { 1.4f, 1.0f, 0.8f, 0.65f };
 
@@ -270,10 +279,10 @@ static void grenade_wait(long actor_index, int index, struct actor_datum *actor)
 	grenade_wait_since[index] = -1;
 }
 
-static real aim_factor(long actor_index, struct actor_datum *actor)
+/* the setting and the difficulty */
+static real aim_global_factor(void)
 {
 	real factor = mendicant_config.aim;
-	int index;
 
 	if (mendicant_config.aim_difficulty)
 	{
@@ -282,38 +291,54 @@ static real aim_factor(long actor_index, struct actor_datum *actor)
 		if (difficulty >= 0 && difficulty < 4)
 			factor *= aim_difficulty[difficulty];
 	}
-	if (mendicant_config.aim_moving)
+	return factor;
+}
+
+/* moving: on foot 0.75 still to 1.5 fast (the penalty times on_foot_scale);
+riding, as steady as the vehicle is driven */
+static real aim_motion_factor(struct actor_datum *actor, real on_foot_scale)
+{
+	struct unit_datum *unit;
+	struct unit_datum *vehicle;
+
+	if (!mendicant_config.aim_moving)
+		return 1.0f;
+	unit = combat_unit(actor->meta.unit_index);
+	vehicle = unit && unit->object.parent_object_index != NONE ?
+		combat_unit(unit->object.parent_object_index) : NULL;
+	if (vehicle)
 	{
-		struct unit_datum *unit = combat_unit(actor->meta.unit_index);
-		struct unit_datum *vehicle = unit && unit->object.parent_object_index != NONE ?
-			combat_unit(unit->object.parent_object_index) : NULL;
+		/* riding (a Warthog's gunner): as steady as the vehicle is
+		driven, by its speed and how hard it turns; 0.7 parked or
+		cruising straight, up to 1.5 bouncing and swerving */
+		real x = vehicle->object.translational_velocity.i;
+		real y = vehicle->object.translational_velocity.j;
+		real z = vehicle->object.translational_velocity.k;
+		real speed = (real)sqrt(x * x + y * y + z * z) * 30.0f;
+		real wx = vehicle->object.angular_velocity.i;
+		real wy = vehicle->object.angular_velocity.j;
+		real wz = vehicle->object.angular_velocity.k;
+		real turning = (real)sqrt(wx * wx + wy * wy + wz * wz) * 30.0f; /* radians a second */
+		real rough = combat_minimum(combat_maximum(speed / 15.0f + turning / 2.0f, 0.0f), 1.0f);
 
-		if (vehicle)
-		{
-			/* riding (a Warthog's gunner): as steady as the vehicle is
-			driven, by its speed and how hard it turns; 0.7 parked or
-			cruising straight, up to 1.5 bouncing and swerving */
-			real x = vehicle->object.translational_velocity.i;
-			real y = vehicle->object.translational_velocity.j;
-			real z = vehicle->object.translational_velocity.k;
-			real speed = (real)sqrt(x * x + y * y + z * z) * 30.0f;
-			real wx = vehicle->object.angular_velocity.i;
-			real wy = vehicle->object.angular_velocity.j;
-			real wz = vehicle->object.angular_velocity.k;
-			real turning = (real)sqrt(wx * wx + wy * wy + wz * wz) * 30.0f; /* radians a second */
-			real rough = combat_minimum(combat_maximum(speed / 15.0f + turning / 2.0f, 0.0f), 1.0f);
-
-			factor *= 0.7f + 0.8f * rough;
-		}
-		else if (unit)
-		{
-			real x = unit->object.translational_velocity.i, y = unit->object.translational_velocity.j;
-			real speed = (real)sqrt(x * x + y * y) * 30.0f; /* world units a second */
-			real moving = speed < 0.3f ? 0.0f : speed > 2.0f ? 1.0f : (speed - 0.3f) / 1.7f;
-
-			factor *= 0.75f + 0.75f * moving;
-		}
+		return 0.7f + 0.8f * rough;
 	}
+	if (unit)
+	{
+		real x = unit->object.translational_velocity.i, y = unit->object.translational_velocity.j;
+		real speed = (real)sqrt(x * x + y * y) * 30.0f; /* world units a second */
+		real moving = speed < 0.3f ? 0.0f : speed > 2.0f ? 1.0f : (speed - 0.3f) / 1.7f;
+
+		return 0.75f + 0.75f * moving * on_foot_scale;
+	}
+	return 1.0f;
+}
+
+static real aim_factor(long actor_index, struct actor_datum *actor)
+{
+	real factor = aim_global_factor() * aim_motion_factor(actor, 1.0f);
+	int index;
+
 	/* time on target: wild at a target just seen, settling the longer it
 	stays in sight (1.4 at first, 1.0 after 1.5 s, 0.7 from 4 s) */
 	index = (short)actor_index;
@@ -329,8 +354,7 @@ static real aim_factor(long actor_index, struct actor_datum *actor)
 			aim_target_since[index] = time;
 		}
 		seconds = (time - aim_target_since[index]) / 30.0f;
-		settle = seconds < 1.5f ? 1.4f - 0.4f * seconds / 1.5f :
-			seconds < 4.0f ? 1.0f - 0.3f * (seconds - 1.5f) / 2.5f : 0.7f;
+		settle = mendicant_aim_settle(seconds);
 		factor *= settle;
 	}
 	return factor;
@@ -354,6 +378,8 @@ void mendicant_combat_reset(
 		grenade_wait_since[index] = -1;
 	memset(aim_target, 0, sizeof(aim_target));
 	memset(aim_target_since, 0, sizeof(aim_target_since));
+	for (index = 0; index < MENDICANT_MAX_ACTORS; index++)
+		aim_stock[index] = 1.0f;
 	memset(individual_next, 0, sizeof(individual_next));
 	individual_cursor = 0;
 	mendicant_vehicles_reset();
@@ -596,6 +622,72 @@ void mendicant_aim_restore(
 	if (mendicant_config.aim_debug && aimed_count > 0)
 		platform_log("mendicant: aim restored on %d variants", aimed_count);
 	aimed_count = 0;
+	aim_bracket_slot = -1;
+}
+
+real mendicant_aim_stock_factor(
+	long actor_index)
+{
+	return (unsigned short)actor_index < MENDICANT_MAX_ACTORS ? aim_stock[(unsigned short)actor_index] : 1.0f;
+}
+
+real mendicant_aim_target_seconds(
+	long actor_index)
+{
+	int index = (unsigned short)actor_index;
+
+	if (index >= MENDICANT_MAX_ACTORS)
+		return 0.0f;
+	return (mendicant_time() - aim_target_since[index]) / 30.0f;
+}
+
+real mendicant_aim_settle(
+	real seconds)
+{
+	return seconds < 1.5f ? 1.4f - 0.4f * seconds / 1.5f :
+		seconds < 4.0f ? 1.0f - 0.3f * (seconds - 1.5f) / 2.5f : 0.7f;
+}
+
+real mendicant_aim_global(
+	long actor_index)
+{
+	(void)actor_index;
+	if (mendicant_config.aim == 1.0f && !mendicant_config.aim_difficulty && !mendicant_config.aim_moving)
+		return 1.0f;
+	return aim_global_factor();
+}
+
+real mendicant_aim_motion(
+	long actor_index,
+	real on_foot_scale)
+{
+	struct actor_datum *actor = combat_actor(actor_index);
+
+	if (!actor || (mendicant_config.aim == 1.0f && !mendicant_config.aim_difficulty && !mendicant_config.aim_moving))
+		return 1.0f;
+	return aim_motion_factor(actor, on_foot_scale);
+}
+
+/* After the combat update of a soldier whose firing is his own: the special
+fire his decision wrote (a marksman's charge) back to the level's, so no
+other soldier of the variant reads it. */
+void mendicant_aim_release(
+	void)
+{
+	int slot = aim_bracket_slot;
+	struct actor_variant_definition *variant;
+
+	aim_bracket_slot = -1;
+	if (slot < 0 || slot >= aimed_count || !aim_original[slot].special_saved)
+		return;
+	variant = aim_original[slot].variant;
+	if (!variant || variant->ranged_combat.projectile_error_angle != aim_original[slot].written_error ||
+		variant->ranged_combat.burst_geometry.burst_origin_radius != aim_original[slot].written_radius)
+		return; /* the level's tags loaded again: already the originals */
+	variant->ranged_combat.special_fire_mode = aim_original[slot].special_mode;
+	variant->ranged_combat.special_fire_situation = aim_original[slot].special_situation;
+	variant->ranged_combat.special_fire_chance = aim_original[slot].special_chance;
+	variant->ranged_combat.special_fire_delay = aim_original[slot].special_delay;
 }
 
 /* Each actor's aim, set just before it decides. */
@@ -607,7 +699,7 @@ void mendicant_aim_actor(
 	struct unit_datum *unit;
 	int slot, index, bound;
 	real error, radius, factor;
-	boolean charge, sustained;
+	boolean charge, sustained, personal;
 	real marine_fire;
 
 	if (!actor || (mendicant_config.aim == 1.0f && !mendicant_config.aim_difficulty && !mendicant_config.aim_moving))
@@ -641,6 +733,17 @@ void mendicant_aim_actor(
 		aim_original[slot].radius = radius;
 	}
 	factor = aim_factor(actor_index, actor);
+	/* a soldier whose firing is his own: his aim and bursts are set on his own
+	control as each burst starts (mendicant_firing.c), and the variant keeps
+	the level's values */
+	if ((unsigned short)actor_index < MENDICANT_MAX_ACTORS)
+		aim_stock[(unsigned short)actor_index] = factor;
+	personal = mendicant_firing_personal(actor_index);
+	if (personal)
+	{
+		factor = 1.0f;
+		aim_bracket_slot = slot;
+	}
 	aim_original[slot].written_error = aim_original[slot].error * factor;
 	aim_original[slot].written_radius = aim_original[slot].radius * factor;
 	if (mendicant_config.aim_debug && aim_debug_lines < 40)
@@ -676,7 +779,7 @@ void mendicant_aim_actor(
 	/* Marines with an assault rifle fire longer bursts with shorter pauses:
 	sustained fire that keeps the enemy down */
 	marine_fire = combat_maximum(0.1f, mendicant_config.marine_fire);
-	sustained = marine_fire != 1.0f && mendicant_side_of(actor->meta.team_index) == TEAM_HUMAN && unit &&
+	sustained = !personal && marine_fire != 1.0f && mendicant_side_of(actor->meta.team_index) == TEAM_HUMAN && unit &&
 		mendicant_carries_assault_rifle(unit);
 	for (bound = 0; bound < 2; bound++)
 	{

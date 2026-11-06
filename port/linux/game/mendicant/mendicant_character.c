@@ -778,7 +778,15 @@ real mendicant_soldier_cohesion(
 {
 	int slot = character_slot(actor_index);
 
+	long time = mendicant_time();
+	int quirk;
+
 	if (slot < 0 || !character_get(actor_index))
 		return 1.0f;
-	return commanded_time[slot] == mendicant_time() ? CHARACTER_COHESION_COMMANDED : 1.0f;
+	/* (the drill commands its units every second, so "this tick" missed most
+	ticks: the last update or a held order counts) */
+	if (order_actor[slot] != actor_index && (commanded_time[slot] == 0 || time - commanded_time[slot] >= 60))
+		return 1.0f;
+	quirk = mendicant_soldier_quirk(actor_index);
+	return quirk == MENDICANT_QUIRK_VETERAN ? 0.4f : quirk == MENDICANT_QUIRK_ROOKIE ? 0.8f : CHARACTER_COHESION_COMMANDED;
 }

@@ -155,11 +155,11 @@ struct model_bridge
 struct mendicant_config
 {
 	boolean enabled, training, discipline, targeting, individuals, aim_difficulty, aim_moving,
-		aim_debug, vehicle_test, models, status, character;
+		aim_debug, vehicle_test, models, status, character, fire_personality, lost_target_search, friend_vehicles;
 	long training_skip, seed, quirks; /* quirks: MENDICANT_QUIRKS_OFF .. _LOUD */
 	real aim, marine_fire, command_radius, variety, personality;
 	char bridge[256], weights[128], sample_log[256], drill_log[256], player_log[256], move_test_log[256],
-		character_log[256];
+		character_log[256], fire_log[256];
 };
 
 /* ---- platform: mendicant_config.c */
@@ -196,6 +196,7 @@ extern boolean mendicant_episode_over;
 extern FILE *mendicant_drill_file;       /* NULL unless ai.mendicant.drill_log */
 extern FILE *mendicant_move_test_file;   /* NULL unless ai.mendicant.move_test_log */
 extern FILE *mendicant_character_file;   /* NULL unless ai.mendicant.character_log */
+extern FILE *mendicant_fire_file;        /* NULL unless ai.mendicant.fire_log */
 long mendicant_time(void);               /* game_time_get() */
 long mendicant_player_unit(void);        /* absolute player 0's unit, or NONE (the models' "Chief") */
 int mendicant_player_units(long *units, int maximum); /* every living player's unit, local and remote (co-op) */
@@ -248,6 +249,29 @@ boolean mendicant_grenade_lands_on_friends(struct actor_datum *actor);
 void mendicant_grenade_throw_check(long actor_index, boolean throw_ordered_before); /* mendicant_grenade_throw_checked's body */
 void mendicant_vehicles_update(void);
 void mendicant_vehicle_try(void);
+/* the aim's parts the firing personality applies per soldier: the setting and
+the difficulty; a target or a ride moving (on foot, the moving penalty times
+on_foot_scale); 1 with the setting off */
+real mendicant_aim_global(long actor_index);
+real mendicant_aim_motion(long actor_index, real on_foot_scale);
+real mendicant_aim_stock_factor(long actor_index); /* what the layer off gave him at his last decision */
+real mendicant_aim_target_seconds(long actor_index); /* how long his target has stayed in sight */
+real mendicant_aim_settle(real seconds); /* the settling curve: 1.4 at first, 1.0 after 1.5 s, 0.7 from 4 s */
+/* the shared firing variant written for a soldier whose firing is his own
+(only a marksman's charged plasma pistol), put back after his combat update */
+void mendicant_aim_release(void);
+/* M1 firing personality (mendicant_firing.c): the bodies of the source hooks
+mendicant_burst_geometry, _pause_started, _first_burst_delay, _fire_held,
+_line_of_fire_vehicles, and what the platform calls */
+void mendicant_firing_reset(void);
+boolean mendicant_firing_personal(long actor_index); /* the character on, his own firing */
+void mendicant_firing_burst_geometry(long actor_index, real *origin_radius, real *return_radius);
+void mendicant_firing_pause_started(long actor_index);
+boolean mendicant_firing_first_burst_delay(long actor_index, boolean fire_immediately);
+boolean mendicant_firing_held(long actor_index);
+void mendicant_firing_action_control(long actor_index, short action);
+short mendicant_firing_vehicle_pills(long actor_index, short maximum, real_point3d *centers, real *radii, long *prop_indices);
+void mendicant_firing_update(long time);
 
 /* M1 runtime (mendicant_models.c) needs from M2 command: the doctrine as
 the decision mask reads it (mendicant_doctrine.h stays private to M2) */
@@ -298,7 +322,8 @@ until the behaviour that plays it says it is spent */
 boolean mendicant_soldier_signature_due(long actor_index);
 void mendicant_soldier_signature_spent(long actor_index);
 /* how far his traits pull from the kind's mean: 0.6 under a unit's command
-this tick, 1 on his own */
+(its last drill update, or holding its order; a veteran 0.4, a rookie 0.8),
+1 on his own */
 real mendicant_soldier_cohesion(long actor_index);
 
 /* ---------- what the modules share */

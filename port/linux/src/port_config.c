@@ -1246,6 +1246,18 @@ static const struct config_setting config_settings[] =
 	{ "ai.mendicant.quirks", _config_string, "\"normal\"", "HALO_AI_MENDICANT_QUIRKS", _environment_value, _platform_all,
 		"How often and how strongly soldiers have a quirk, and show it once in a\n"
 		"fight: \"off\", \"subtle\", \"normal\" or \"loud\"." },
+	{ "ai.mendicant.fire_personality", _config_boolean, "true", "HALO_AI_MENDICANT_FIRE_PERSONALITY", _environment_value, _platform_all,
+		"With the soldier character on, each soldier aims and fires in his own\n"
+		"way: accuracy, the wait before his first shot (under orders too), burst\n"
+		"length and rhythm, a pause before a new target, a flinch when hit. Each\n"
+		"kind's averages stay. Hunters and the Flood unchanged." },
+	{ "ai.mendicant.lost_target_search", _config_boolean, "true", "HALO_AI_MENDICANT_LOST_TARGET_SEARCH", _environment_value, _platform_all,
+		"With the soldier character on: six seconds after losing sight of its\n"
+		"enemy, an Elite calls the search, Grunts go to where it was last seen,\n"
+		"Jackals and steady Marines hold their aim on it." },
+	{ "ai.mendicant.friend_vehicles", _config_boolean, "true", "HALO_AI_MENDICANT_FRIEND_VEHICLES", _environment_value, _platform_all,
+		"With the soldier character on: soldiers hold fire when a friendly\n"
+		"vehicle with anyone aboard (the Chief's Warthog) is in the line." },
 	{ "ai.mendicant.bridge", _config_string, "\"\"", "HALO_AI_MENDICANT_BRIDGE", _environment_value, _platform_linux,
 		"A file the models are asked through instead (a trainer or brain.py maps\n"
 		"it); empty: the models in the game." },
@@ -1268,6 +1280,9 @@ static const struct config_setting config_settings[] =
 	{ "ai.mendicant.character_log", _config_string, "\"\"", "HALO_AI_MENDICANT_CHARACTER_LOG", _environment_value, _platform_linux,
 		"A file to log each soldier's drawn character and each fight's mood in\n"
 		"(CSV); empty: none." },
+	{ "ai.mendicant.fire_log", _config_string, "\"\"", "HALO_AI_MENDICANT_FIRE_LOG", _environment_value, _platform_linux,
+		"A file to log the firing personality's bursts, pauses, reactions,\n"
+		"hesitations, flinches and searches in (CSV); empty: none." },
 	{ "display.viewmodel_shield", _config_boolean, "false", "HALO_VIEWMODEL_SHIELD", _environment_value, _platform_all,
 		"The energy shield's flare on the first-person arms too, as on the body\n"
 		"(the stock game draws it on the body only): it shows as the shield\n"

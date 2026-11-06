@@ -69,6 +69,22 @@ void mendicant_guard_position(long actor_index, short *firing_position_index,
 waypoint instead; *result is then what the entry returns */
 boolean mendicant_move_redirect(short kind, long actor_index, real_point3d const *point, boolean *result);
 
+/* firing (actor_combat.c): each soldier's own firing personality, set on
+his own control as the game starts a burst (its error and length, and the
+radii its tracers start from and walk back by, before the sweep limit), a
+pause or the wait before a first burst; mendicant_first_burst_delay returns
+whether he fires at once (it may set a wait where the orders skipped it),
+mendicant_fire_held is TRUE while he flinches from a hit */
+void mendicant_burst_geometry(long actor_index, real *origin_radius, real *return_radius);
+void mendicant_pause_started(long actor_index);
+boolean mendicant_first_burst_delay(long actor_index, boolean fire_immediately);
+boolean mendicant_fire_held(long actor_index);
+void mendicant_combat_update_after(long actor_index);
+/* the line of fire (ai.c): friendly ground vehicles with someone aboard, as
+spheres (at most maximum); the count written */
+short mendicant_line_of_fire_vehicles(long actor_index, short maximum,
+	real_point3d *centers, real *radii, long *prop_indices);
+
 /* target weights (actor_perception.c) */
 real mendicant_target_weight(long actor_index, long prop_index, real weight);
 

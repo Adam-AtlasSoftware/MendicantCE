@@ -2210,6 +2210,36 @@ static short ai_find_line_of_fire_friend_pills(
 		}
 	}
 
+	/* port: MENDICANT AI: a friendly vehicle with someone aboard blocks the
+	line of fire as a friend on foot does (port/linux/game/mendicant) */
+	if (pill_count < maximum_pill_count)
+	{
+		real_point3d centers[8];
+		real radii[8];
+		long prop_indices[8];
+		short vehicle_count = mendicant_line_of_fire_vehicles(
+			actor_index,
+			(short)MIN(8, maximum_pill_count - pill_count),
+			centers,
+			radii,
+			prop_indices);
+		short vehicle_index;
+
+		for (vehicle_index = 0; vehicle_index < vehicle_count; vehicle_index++)
+		{
+			struct line_of_fire_pill *pill = &pills[pill_count++];
+
+			pill->base = centers[vehicle_index];
+			pill->spherical = TRUE;
+			set_real_vector3d(&pill->directed_height, 0.0f, 0.0f, 0.0f);
+			pill->width = radii[vehicle_index];
+			pill->prop_index = prop_indices[vehicle_index];
+			pill->unit_index = prop_indices[vehicle_index] != NONE ?
+				prop_get(prop_indices[vehicle_index])->vehicle_index : NONE;
+			pill->hit = FALSE;
+		}
+	}
+
 	return pill_count;
 }
 
