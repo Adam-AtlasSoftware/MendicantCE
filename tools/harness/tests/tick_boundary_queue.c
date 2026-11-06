@@ -117,6 +117,46 @@ int main(int argc, char **argv)
 			seconds);
 		printf("%s: %ld frames, %ld ticks, no update left queued\n", case_name, frame, taken);
 	}
+	else CASE("view")
+	{
+		/* (60 frames a second at 120, each a little off as a real frame's
+		time is; the player running a world unit a tick: the newest step
+		left the view a quarter of one past the step before, and the view
+		drawn is carried on by the time since it. Then the frame's work
+		waiting at every 7th frame, a step held meanwhile) */
+		double first = 0.0;
+		double view = 0.0, last_view = 0.0;
+		real step, last_step = 0.0f;
+
+		for (index = 0; index < 1200; index++)
+		{
+			real dt = 1.0f / 60.0f * (1.0f + 0.002f * (real)((index * 7) % 5 - 2));
+
+			if (index >= 600 && index % 7 == 3)
+				work_pending = TRUE;
+			main_frame(dt);
+			seconds += dt;
+			view = (double)substeps_run / SUBSTEPS + (double)game_time_get_step_age();
+			if (index == 0)
+				first = view - seconds * TICKS_PER_SECOND;
+			CHECK(index >= 600 || game_time_get_step_age() < 1.0f / SUBSTEPS + 1e-4f,
+				"frame %ld: a sub-step whose time had come left for the next frame (%.3f of a tick since the "
+				"newest step)", index, (double)game_time_get_step_age());
+			CHECK(fabs(view - seconds * TICKS_PER_SECOND - first) < 2e-3,
+				"frame %ld: the view %.4f world units from where the frames' time has it", index,
+				view - seconds * TICKS_PER_SECOND - first);
+			step = (real)(view - last_view);
+			if (index > 0 && index < 600)
+			{
+				CHECK(fabsf(step - dt * TICKS_PER_SECOND) < 2e-3f, "frame %ld: the view stepped %.4f (%.4f the "
+					"frame before), the frame's time %.4f", index, (double)step, (double)last_step,
+					(double)(dt * TICKS_PER_SECOND));
+			}
+			last_view = view;
+			last_step = step;
+		}
+		printf("view: %ld frames, the view as far each frame as its time\n", frame);
+	}
 	else CASE("stall")
 	{
 		/* (a frame of two seconds, a shader compiled, with work waiting: the

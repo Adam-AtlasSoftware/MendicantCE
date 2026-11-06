@@ -65,6 +65,7 @@ union real_vector3d;
 union real_rgb_color;
 int halo_interpolation_enabled(void);
 float game_time_get_tick_fraction(void);
+float game_time_get_step_age(void);
 void render_interpolation_tick(void);
 void render_interpolation_reset(void);
 void render_interpolation_frame_begin(void);
