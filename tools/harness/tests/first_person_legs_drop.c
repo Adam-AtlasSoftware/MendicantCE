@@ -10,7 +10,9 @@ sides), each kept the margin outside it. Checked against a view of its own
 viewport off its window's middle as split screen's are, the near distance
 as near_clip.c brings it in at a wide view) and against a search of its own:
 each drop tried in small steps from none, the first at which no point is in
-the cut the answer.
+the cut the answer. The legs' triangles likewise (#692's second report):
+each tried by clipping it to the cut, so that none of a triangle is in it,
+not only none of its corners.
 */
 
 #include "harness.h"
@@ -136,9 +138,15 @@ static real_point3d at(struct view const *view, real forward, real left, real up
 measures: its depth less than the near distance and the margin (less a
 little: the code's spans end on it), within each side (by more than
 a hundredth of a millimetre, as the spans end on the sides too) */
+/* the way the points are lowered: a drop of 1 moves them along this (the
+code lowers the legs straight down, or down along the view's bottom where
+it faces up) */
+static real_vector3d moved_along = { 0.f, 0.f, -1.f };
+
 static boolean in_cut(struct view const *view, real_point3d point, real drop, real margin)
 {
-	real_vector3d from = { point.x - view->eye.x, point.y - view->eye.y, point.z - drop - view->eye.z };
+	real_vector3d from = { point.x + moved_along.i * drop - view->eye.x, point.y + moved_along.j * drop - view->eye.y,
+		point.z + moved_along.k * drop - view->eye.z };
 	short plane;
 
 	if (dot(from, view->forward) >= view->frustum.z_near + margin)
@@ -180,6 +188,7 @@ static real searched(struct view const *view, real_point3d const *points, long c
 }
 
 static real_point3d points[8192];
+static real point_spans[8192][2];
 static real spans[8192][2];
 
 /* a box of points about the eye (the body's frame, world units), a grid */
@@ -197,7 +206,7 @@ static long box(struct view const *view, real back, real front, real right, real
 
 static real dropped(struct view const *view, long count)
 {
-	return first_person_legs_drop(&view->frustum, points, count, spans);
+	return first_person_legs_drop(&view->frustum, &moved_along, points, count, NULL, 0, point_spans, spans);
 }
 
 /* the drop is the search's, and leaves none in the cut */
@@ -209,6 +218,95 @@ static void check_least(struct view const *view, long count, char const *what)
 	CHECK(fabsf(drop - expected) <= 2.f * STEP, "%s: dropped %.4f, the least that keeps all out of the cut %.4f",
 		what, drop, expected);
 	CHECK(!any_cut(view, points, count, drop, MARGIN * 0.99f), "%s: a point is in the cut at %.4f", what, drop);
+}
+
+/* triangles of points, each three indices */
+static unsigned short triangles[64][3];
+
+/* whether a triangle lowered so has any of it in the cut, by clipping it to
+the cut's planes, each its own way (the sides within by a hundredth of a
+millimetre, the near plane's depth less than the near distance and the
+margin, less a little): something left, it is */
+static boolean triangle_in_cut(struct view const *view, real_point3d const *corners, real drop, real margin)
+{
+	real_point3d polygon[2][16];
+	int count = 3;
+	int from = 0;
+	short plane;
+	int index;
+
+	for (index = 0; index < 3; index++)
+	{
+		polygon[0][index] = corners[index];
+		polygon[0][index].x += moved_along.i * drop;
+		polygon[0][index].y += moved_along.j * drop;
+		polygon[0][index].z += moved_along.k * drop;
+	}
+	for (plane = 0; plane < 5 && count > 0; plane++)
+	{
+		int kept = 0;
+
+		for (index = 0; index < count; index++)
+		{
+			real_point3d a = polygon[from][index];
+			real_point3d b = polygon[from][(index + 1) % count];
+			real_vector3d va = { a.x - view->eye.x, a.y - view->eye.y, a.z - view->eye.z };
+			real_vector3d vb = { b.x - view->eye.x, b.y - view->eye.y, b.z - view->eye.z };
+			/* (each a point's distance past the plane's bound: within, less than none) */
+			real da = plane < 4 ? dot(va, view->frustum.world_planes[plane].n) + 1.0e-5f :
+				dot(va, view->forward) - view->frustum.z_near - margin;
+			real db = plane < 4 ? dot(vb, view->frustum.world_planes[plane].n) + 1.0e-5f :
+				dot(vb, view->forward) - view->frustum.z_near - margin;
+
+			if (da < 0.f)
+				polygon[!from][kept++] = a;
+			if ((da < 0.f) != (db < 0.f))
+			{
+				real t = da / (da - db);
+				real_point3d c = { a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t };
+
+				polygon[!from][kept++] = c;
+			}
+		}
+		count = kept;
+		from = !from;
+	}
+	return count > 0;
+}
+
+static boolean any_triangle_cut(struct view const *view, long count, real drop, real margin)
+{
+	long index;
+
+	for (index = 0; index < count; index++)
+	{
+		real_point3d corners[3] = { points[triangles[index][0]], points[triangles[index][1]],
+			points[triangles[index][2]] };
+
+		if (triangle_in_cut(view, corners, drop, margin))
+			return TRUE;
+	}
+	return FALSE;
+}
+
+/* the drop with the triangles, and the search's: the first drop in small
+steps at which no triangle is in the cut */
+static real dropped_triangles(struct view const *view, long count, long triangle_count)
+{
+	return first_person_legs_drop(&view->frustum, &moved_along, points, count,
+		(unsigned short const (*)[3])triangles, triangle_count, point_spans, spans);
+}
+
+static real searched_triangles(struct view const *view, long triangle_count)
+{
+	real drop;
+
+	for (drop = 0.f; drop < 1.5f; drop += STEP)
+	{
+		if (!any_triangle_cut(view, triangle_count, drop, MARGIN * 0.999f))
+			return drop;
+	}
+	return 1.5f;
 }
 
 /* the views every case is tried in: the stock view, 90, 120, 150 and 160
@@ -335,6 +433,89 @@ int main(int argc, char **argv)
 			points[count++] = at(&view, 0.03f, 0.0f, step * 0.02f);
 		CHECK(searched(&view, points, count) > MOST, "the case needs no more than the most");
 		CHECK(dropped(&view, count) == MOST, "lowered %.4f, not the most %.2f", dropped(&view, count), MOST);
+	}
+	else if (!strcmp(which, "triangle"))
+	{
+		/* a triangle whose corners are all out of the cut, its middle in it:
+		two beside the eye, out past the view's sides, nearer than the near
+		plane, one far ahead (the thigh's plate, crouching in the air). Its
+		corners alone lower nothing; it is lowered by the least that takes
+		all of it out */
+		struct view view = level(120);
+		long count = 0;
+		boolean wider = FALSE;
+
+		points[0] = at(&view, 0.01f, 0.08f, 0.01f);
+		points[1] = at(&view, 0.01f, -0.08f, 0.01f);
+		points[2] = at(&view, 0.3f, 0.0f, 0.02f);
+		triangles[0][0] = 0;
+		triangles[0][1] = 1;
+		triangles[0][2] = 2;
+		CHECK(!any_cut(&view, points, 3, 0.f, MARGIN), "the case's corners are in the cut");
+		CHECK(triangle_in_cut(&view, points, 0.f, MARGIN), "the case's triangle is not in the cut");
+		CHECK(fabsf(dropped_triangles(&view, 3, 1) - searched_triangles(&view, 1)) <= 2.f * STEP,
+			"the bridge: dropped %.4f, the least that keeps it out of the cut %.4f", dropped_triangles(&view, 3, 1),
+			searched_triangles(&view, 1));
+		CHECK(dropped_triangles(&view, 3, 1) > 0.01f, "the bridge: lowered only %.4f", dropped_triangles(&view, 3, 1));
+		/* (a roof: a broad level one just above the eye, over all the cut,
+		its corners and edges far out of it: lowered until the cut's lowest
+		corner is above it) */
+		points[0] = at(&view, -1.f, 1.5f, 0.005f);
+		points[1] = at(&view, -1.f, -1.5f, 0.005f);
+		points[2] = at(&view, 1.5f, 0.0f, 0.005f);
+		CHECK(!any_cut(&view, points, 3, 0.f, MARGIN), "the roof's corners are in the cut");
+		CHECK(fabsf(dropped_triangles(&view, 3, 1) - searched_triangles(&view, 1)) <= 2.f * STEP,
+			"the roof: dropped %.4f, the least that keeps it out of the cut %.4f", dropped_triangles(&view, 3, 1),
+			searched_triangles(&view, 1));
+		CHECK(dropped_triangles(&view, 3, 1) > 0.05f, "the roof: lowered only %.4f", dropped_triangles(&view, 3, 1));
+		/* (and crouching in the air at every view: broad triangles about the
+		hips and thighs, lowered straight down, or down along the view's
+		bottom where it faces up, as the code lowers them, by the least that
+		takes them all out of the cut; more than their corners alone, at
+		some view) */
+		for (index = 0; index < VIEWS; index++)
+		{
+			struct view each = views(index, name, sizeof(name));
+			real_vector3d const *bottom = &each.frustum.world_planes[2].n;
+			unsigned long seed = 12345u + (unsigned long)index * 7919u;
+			long triangle_count = 12;
+			long corner;
+			real drop, expected;
+
+			for (corner = 0; corner < triangle_count * 3; corner++)
+			{
+				real f, l, u;
+
+				seed = seed * 1103515245u + 12345u;
+				f = -0.08f + (real)((seed >> 8) % 1000) / 1000.f * 0.33f;
+				seed = seed * 1103515245u + 12345u;
+				l = -0.15f + (real)((seed >> 8) % 1000) / 1000.f * 0.3f;
+				seed = seed * 1103515245u + 12345u;
+				u = -0.4f + (real)((seed >> 8) % 1000) / 1000.f * 0.46f;
+				points[corner] = at(&each, f, l, u);
+				triangles[corner / 3][corner % 3] = (unsigned short)corner;
+			}
+			count = triangle_count * 3;
+			moved_along.i = 0.f;
+			moved_along.j = 0.f;
+			moved_along.k = -1.f;
+			if (bottom->k > 0.f)
+			{
+				/* (down less its part across the bottom, down + k n: along
+				it, scaled to 1 down) */
+				moved_along.i = bottom->k * bottom->i / (1.f - bottom->k * bottom->k);
+				moved_along.j = bottom->k * bottom->j / (1.f - bottom->k * bottom->k);
+				CHECK(fabsf(dot(moved_along, *bottom)) < 1.0e-4f, "%s: lowered across the bottom", name);
+			}
+			drop = dropped_triangles(&each, count, triangle_count);
+			expected = searched_triangles(&each, triangle_count);
+			CHECK(fabsf(drop - MIN(expected, MOST)) <= 2.f * STEP,
+				"%s: triangles dropped %.4f, the least that keeps them all out of the cut %.4f", name, drop, expected);
+			CHECK(drop >= MOST || !any_triangle_cut(&each, triangle_count, drop, MARGIN * 0.99f),
+				"%s: a triangle is in the cut at %.4f", name, drop);
+			wider |= drop > dropped(&each, count) + 0.003f;
+		}
+		CHECK(wider, "the triangles lowered no more than their corners at any view");
 	}
 	else if (!strcmp(which, "none"))
 	{

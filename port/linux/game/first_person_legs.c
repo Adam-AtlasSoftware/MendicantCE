@@ -31,8 +31,12 @@ height while the body keeps its airborne pose, its hips at the eye's height
 and its thighs beside and before it (#692). The near plane cuts them there,
 and a wide view, whose bottom and sides reach to beside the eye, shows the
 cut pieces, black slivers from the bottom of the screen. So the copy is
-lowered as far as keeps all of it out of the part of the view the near
-plane cuts away (FIRST_PERSON_LEGS_UNCUT beyond it): none of it is cut, at
+lowered as far as keeps all of it, every triangle of its surface, out of
+the part of the view the near plane cuts away (FIRST_PERSON_LEGS_UNCUT
+beyond it), and down along the view's bottom where that faces up (looking
+down so far that the bottom edge of the view points back under the eye),
+so that the waist's rim stays as far below the view as it was set back to:
+none of it is cut, at
 any field of view, window shape, split screen's view or the Panini pass's
 (the view as drawn: its frustum, its near plane as near_clip.c brings it
 in). Standing, walking and crouching on the ground nothing is that near the
@@ -1193,63 +1197,284 @@ static real_matrix4x3 const *first_person_legs_vr_seated(
 }
 #endif
 
-/* how far to lower points so that none is in the part of the view the near
-plane cuts away: the least drop (world units, 0 or more) at which each is
-outside the view's sides or FIRST_PERSON_LEGS_UNCUT or more beyond its near
-plane (view: the frustum as drawn, its planes' distances outward). Each
-point lowered moves along a line, which passes through that part (a convex
-one: between the eye and the near plane, within the sides) over one span
-of drops, found from each plane's distance as the point is lowered; the
-least drop in none of the spans is the answer. cut holds count spans */
+/* the span of drops (world units) over which a point lowered is in the part
+of the view the near plane cuts away: within the view's sides and less than
+FIRST_PERSON_LEGS_UNCUT beyond its near plane (view: the frustum as drawn,
+its planes' distances outward; along: the way it is lowered, a drop of 1
+moving it along this, 1 down and maybe aside). That part is convex (between
+the eye and the near plane, within the sides), so the line the point moves
+along crosses it over one span, found from each plane's distance; FALSE:
+none */
+static boolean first_person_legs_point_span(
+	struct render_frustum const *view,
+	real_vector3d const *along,
+	real_point3d const *point,
+	real span[2])
+{
+	real low = -FIRST_PERSON_LEGS_DROP_MAXIMUM - 1.f;
+	real high = FIRST_PERSON_LEGS_DROP_MAXIMUM + 1.f;
+	short plane;
+
+	/* (lowered by d, a plane's distance outward is its distance less d
+	times how far a drop of 1 takes it inward, up. In the cut: within each
+	side, its distance less than none; nearer than the near plane and the
+	margin, the near plane's (outward toward the eye) more than less the
+	margin. Each a bound on d, below or above, by the way its normal leans) */
+	for (plane = 0; plane < 5 && low < high; plane++)
+	{
+		real_plane3d const *p = &view->world_planes[plane];
+		real distance = plane3d_distance_to_point(p, point);
+		real up = -dot_product3d(&p->n, along);
+		real margin = 0.f;
+
+		if (plane == 4)
+		{
+			/* (-(distance - d * up) < margin) */
+			distance = -distance;
+			up = -up;
+			margin = FIRST_PERSON_LEGS_UNCUT;
+		}
+		/* (distance - d * up < margin) */
+		if (up > 1.0e-6f)
+			low = MAX(low, (distance - margin) / up);
+		else if (up < -1.0e-6f)
+			high = MIN(high, (distance - margin) / up);
+		else if (distance >= margin)
+			high = low;
+	}
+	span[0] = low;
+	span[1] = high;
+	return low < high;
+}
+
+/* the corners of the part of the view the near plane cuts away: the eye,
+where the sides meet, and where each two neighbouring sides (left or right,
+bottom or top) meet the near plane moved FIRST_PERSON_LEGS_UNCUT toward the
+eye's far side, in turn about it (left bottom, right bottom, right top,
+left top); FALSE: the planes meet in no point */
+static boolean first_person_legs_cut_corners(
+	struct render_frustum const *view,
+	real_point3d corners[5])
+{
+	static short const planes[5][3] = { { 0, 1, 2 }, { 0, 2, 4 }, { 1, 2, 4 }, { 1, 3, 4 }, { 0, 3, 4 } };
+	short corner;
+
+	for (corner = 0; corner < 5; corner++)
+	{
+		real_plane3d const *a = &view->world_planes[planes[corner][0]];
+		real_plane3d const *b = &view->world_planes[planes[corner][1]];
+		real_plane3d const *c = &view->world_planes[planes[corner][2]];
+		/* (the near plane where its distance is less the margin) */
+		real cd = planes[corner][2] == 4 ? c->d - FIRST_PERSON_LEGS_UNCUT : c->d;
+		real_vector3d bc, ca, ab;
+		real determinant;
+
+		cross_product3d(&b->n, &c->n, &bc);
+		cross_product3d(&c->n, &a->n, &ca);
+		cross_product3d(&a->n, &b->n, &ab);
+		determinant = dot_product3d(&a->n, &bc);
+		if (determinant > -1.0e-6f && determinant < 1.0e-6f)
+			return FALSE;
+		corners[corner].x = (a->d * bc.i + b->d * ca.i + cd * ab.i) / determinant;
+		corners[corner].y = (a->d * bc.j + b->d * ca.j + cd * ab.j) / determinant;
+		corners[corner].z = (a->d * bc.k + b->d * ca.k + cd * ab.k) / determinant;
+	}
+	return TRUE;
+}
+
+/* the span of drops over which a triangle lowered along this meets the cut
+(corners: first_person_legs_cut_corners'; spans: each of the triangle's
+corners' first_person_legs_point_span, held: whether it has one). Both
+convex, they meet over one span, from where they first touch to where they
+last do: a corner of the one on a face of the other, or an edge of each on
+an edge of the other. FALSE: they never meet */
+static boolean first_person_legs_triangle_span(
+	real_vector3d const *along,
+	real_point3d const *corners,
+	real_point3d const *const triangle[3],
+	real const *const spans[3],
+	boolean const held[3],
+	real span[2])
+{
+	static short const edges[8][2] = { { 0, 1 }, { 0, 2 }, { 0, 3 }, { 0, 4 }, { 1, 2 }, { 2, 3 }, { 3, 4 }, { 4, 1 } };
+	real low = FIRST_PERSON_LEGS_DROP_MAXIMUM + 1.f;
+	real high = -FIRST_PERSON_LEGS_DROP_MAXIMUM - 1.f;
+	real_vector3d sides[3];
+	real_vector3d normal;
+	real toward;
+	short index;
+	short other;
+
+	/* (a corner of the triangle on a face of the cut: its own span's ends) */
+	for (index = 0; index < 3; index++)
+	{
+		if (held[index])
+		{
+			low = MIN(low, spans[index][0]);
+			high = MAX(high, spans[index][1]);
+		}
+		sides[index].i = triangle[(index + 1) % 3]->x - triangle[index]->x;
+		sides[index].j = triangle[(index + 1) % 3]->y - triangle[index]->y;
+		sides[index].k = triangle[(index + 1) % 3]->z - triangle[index]->z;
+	}
+	/* (a corner of the cut on the triangle: the triangle lowered to it, d
+	where the corner is on its plane, the corner within each of its edges) */
+	cross_product3d(&sides[0], &sides[1], &normal);
+	toward = dot_product3d(&normal, along);
+	if (toward > 1.0e-9f || toward < -1.0e-9f)
+	{
+		for (index = 0; index < 5; index++)
+		{
+			real_vector3d to = { corners[index].x - triangle[0]->x, corners[index].y - triangle[0]->y,
+				corners[index].z - triangle[0]->z };
+			real d = dot_product3d(&normal, &to) / toward;
+			boolean within = TRUE;
+
+			for (other = 0; other < 3 && within; other++)
+			{
+				real_vector3d from = { corners[index].x - d * along->i - triangle[other]->x,
+					corners[index].y - d * along->j - triangle[other]->y,
+					corners[index].z - d * along->k - triangle[other]->z };
+				real_vector3d turn;
+
+				within = dot_product3d(cross_product3d(&sides[other], &from, &turn), &normal) >= 0.f;
+			}
+			if (within)
+			{
+				low = MIN(low, d);
+				high = MAX(high, d);
+			}
+		}
+	}
+	/* (an edge of the triangle on an edge of the cut: a + u (b - a) + d along
+	= s + w (t - s), u and w within 0 and 1) */
+	for (index = 0; index < 3; index++)
+	{
+		for (other = 0; other < 8; other++)
+		{
+			real_point3d const *s = &corners[edges[other][0]];
+			real_point3d const *t = &corners[edges[other][1]];
+			real_vector3d e = sides[index];
+			real_vector3d f = { s->x - t->x, s->y - t->y, s->z - t->z };
+			real_vector3d to = { s->x - triangle[index]->x, s->y - triangle[index]->y, s->z - triangle[index]->z };
+			real_vector3d fa, ae, ef;
+			real determinant;
+			real u, w;
+
+			/* (u e + w f + d along = to, by Cramer's rule) */
+			cross_product3d(&f, along, &fa);
+			determinant = dot_product3d(&e, &fa);
+			if (determinant > -1.0e-9f && determinant < 1.0e-9f)
+				continue;
+			cross_product3d(along, &e, &ae);
+			cross_product3d(&e, &f, &ef);
+			u = dot_product3d(&to, &fa) / determinant;
+			w = dot_product3d(&to, &ae) / determinant;
+			if (u >= 0.f && u <= 1.f && w >= 0.f && w <= 1.f)
+			{
+				real d = dot_product3d(&to, &ef) / determinant;
+
+				low = MIN(low, d);
+				high = MAX(high, d);
+			}
+		}
+	}
+	span[0] = low;
+	span[1] = high;
+	return low < high;
+}
+
+/* how far to lower the legs (along this: a drop of 1 moves them 1 down, and
+maybe aside) so that none of their surface is in the part of the view the
+near plane cuts away: the least drop (world units, 0 or more) at which each
+of its triangles (each three of points' indices, triangles of them; NULL:
+each point on its own) is outside the view's sides or
+FIRST_PERSON_LEGS_UNCUT or more beyond its near plane. Lowered, each meets
+that part over one span of drops (first_person_legs_triangle_span); the
+least drop in none of the spans is the answer. Weighing the points alone
+missed what is between them: the legs' plates are broad triangles, and
+crouching in the air a thigh's reached from below the view's bottom, beside
+the eye, to beyond the near plane, its corners out of the cut and its
+middle in it (#692). cut holds a span for each point and triangle,
+point_spans one for each point */
 static real first_person_legs_drop(
 	struct render_frustum const *view,
+	real_vector3d const *along,
 	real_point3d const *points,
 	long count,
+	unsigned short const (*triangles)[3],
+	long triangle_count,
+	real (*point_spans)[2],
 	real (*cut)[2])
 {
 	long spans = 0;
 	long index;
 	real drop = 0.f;
 	boolean moved;
+	real_point3d corners[5];
+	real_point3d box[2];
 
 	for (index = 0; index < count; index++)
 	{
-		real low = -FIRST_PERSON_LEGS_DROP_MAXIMUM - 1.f;
-		real high = FIRST_PERSON_LEGS_DROP_MAXIMUM + 1.f;
-		short plane;
-
-		/* (lowered by d, a plane's distance outward is its distance less d
-		times its normal's up. In the cut: within each side, its distance
-		less than none; nearer than the near plane and the margin, the near
-		plane's (outward toward the eye) more than less the margin. Each a
-		bound on d, below or above, by the way its normal leans) */
-		for (plane = 0; plane < 5 && low < high; plane++)
+		if (first_person_legs_point_span(view, along, &points[index], point_spans[index]) &&
+			point_spans[index][1] > 0.f && !triangles)
 		{
-			real_plane3d const *p = &view->world_planes[plane];
-			real distance = plane3d_distance_to_point(p, &points[index]);
-			real up = p->n.k;
-			real margin = 0.f;
-
-			if (plane == 4)
-			{
-				/* (-(distance - d * up) < margin) */
-				distance = -distance;
-				up = -up;
-				margin = FIRST_PERSON_LEGS_UNCUT;
-			}
-			/* (distance - d * up < margin) */
-			if (up > 1.0e-6f)
-				low = MAX(low, (distance - margin) / up);
-			else if (up < -1.0e-6f)
-				high = MIN(high, (distance - margin) / up);
-			else if (distance >= margin)
-				high = low;
-		}
-		if (low < high && high > 0.f)
-		{
-			cut[spans][0] = low;
-			cut[spans][1] = high;
+			cut[spans][0] = point_spans[index][0];
+			cut[spans][1] = point_spans[index][1];
 			spans++;
+		}
+	}
+	/* (the triangles that can meet the cut lowered from none to the most:
+	those within its bounds and theirs moved back up by the most) */
+	if (triangles && first_person_legs_cut_corners(view, corners))
+	{
+		box[0] = box[1] = corners[0];
+		for (index = 0; index < 10; index++)
+		{
+			real_point3d corner = corners[index % 5];
+
+			if (index >= 5)
+			{
+				corner.x -= along->i * FIRST_PERSON_LEGS_DROP_MAXIMUM;
+				corner.y -= along->j * FIRST_PERSON_LEGS_DROP_MAXIMUM;
+				corner.z -= along->k * FIRST_PERSON_LEGS_DROP_MAXIMUM;
+			}
+			box[0].x = MIN(box[0].x, corner.x);
+			box[0].y = MIN(box[0].y, corner.y);
+			box[0].z = MIN(box[0].z, corner.z);
+			box[1].x = MAX(box[1].x, corner.x);
+			box[1].y = MAX(box[1].y, corner.y);
+			box[1].z = MAX(box[1].z, corner.z);
+		}
+		for (index = 0; index < triangle_count; index++)
+		{
+			real_point3d const *triangle[3];
+			real const *corner_spans[3];
+			boolean held[3];
+			short corner;
+
+			if (triangles[index][0] >= count || triangles[index][1] >= count || triangles[index][2] >= count)
+				continue;
+			for (corner = 0; corner < 3; corner++)
+			{
+				triangle[corner] = &points[triangles[index][corner]];
+				corner_spans[corner] = point_spans[triangles[index][corner]];
+				held[corner] = corner_spans[corner][0] < corner_spans[corner][1];
+			}
+			if (MAX(MAX(triangle[0]->x, triangle[1]->x), triangle[2]->x) < box[0].x ||
+				MIN(MIN(triangle[0]->x, triangle[1]->x), triangle[2]->x) > box[1].x ||
+				MAX(MAX(triangle[0]->y, triangle[1]->y), triangle[2]->y) < box[0].y ||
+				MIN(MIN(triangle[0]->y, triangle[1]->y), triangle[2]->y) > box[1].y ||
+				MAX(MAX(triangle[0]->z, triangle[1]->z), triangle[2]->z) < box[0].z ||
+				MIN(MIN(triangle[0]->z, triangle[1]->z), triangle[2]->z) > box[1].z)
+			{
+				continue;
+			}
+			if (first_person_legs_triangle_span(along, corners, triangle, corner_spans, held, cut[spans]) &&
+				cut[spans][1] > 0.f)
+			{
+				spans++;
+			}
 		}
 	}
 	/* (the least drop past every span it falls in, each span left behind
@@ -1273,9 +1498,12 @@ static real first_person_legs_drop(
 /* the points of the body's surface as drawn with a pose (each node's matrix,
 count of them): its mesh's vertices in the model's space, each node's from
 it (the mesh's inverse) then posed, blended by its two nodes' weights as the
-game's skinning blends them; how many (none: no mesh) */
+game's skinning blends them, each at its vertex's index (the mesh's
+triangles' indices); how many (none: no mesh, or a vertex bound to a node
+the pose has not) */
 static real_point3d first_person_legs_points[OBJECT_MESH_MAXIMUM_VERTICES];
-static real first_person_legs_spans[OBJECT_MESH_MAXIMUM_VERTICES][2];
+static real first_person_legs_point_spans[OBJECT_MESH_MAXIMUM_VERTICES][2];
+static real first_person_legs_spans[MAX(OBJECT_MESH_MAXIMUM_VERTICES, OBJECT_MESH_MAXIMUM_TRIANGLES)][2];
 
 static long first_person_legs_surface(
 	struct object_mesh const *mesh,
@@ -1285,22 +1513,23 @@ static long first_person_legs_surface(
 	real_matrix4x3 skin[FIRST_PERSON_LEGS_MAXIMUM_NODES];
 	long nodes = MIN(count, (long)mesh->node_count);
 	long index;
-	long points = 0;
 
+	if (mesh->vertex_count > OBJECT_MESH_MAXIMUM_VERTICES)
+		return 0;
 	for (index = 0; index < nodes; index++)
 		matrix4x3_multiply(&pose[index], &mesh->inverse[index], &skin[index]);
-	for (index = 0; index < mesh->vertex_count && points < OBJECT_MESH_MAXIMUM_VERTICES; index++)
+	for (index = 0; index < mesh->vertex_count; index++)
 	{
 		struct object_mesh_vertex const *vertex = &mesh->vertices[index];
 		real weight = (real)vertex->weight / 32767.f;
 		real_point3d first;
 		real_point3d second;
-		real_point3d *point = &first_person_legs_points[points];
+		real_point3d *point = &first_person_legs_points[index];
 
-		if (vertex->nodes[0] >= nodes)
-			continue;
+		if (vertex->nodes[0] >= nodes || (weight < 1.f && vertex->nodes[1] >= nodes))
+			return 0;
 		matrix4x3_transform_point(&skin[vertex->nodes[0]], &vertex->position, &first);
-		if (weight >= 1.f || vertex->nodes[1] >= nodes)
+		if (weight >= 1.f)
 		{
 			*point = first;
 		}
@@ -1311,9 +1540,8 @@ static long first_person_legs_surface(
 			point->y = first.y * weight + second.y * (1.f - weight);
 			point->z = first.z * weight + second.z * (1.f - weight);
 		}
-		points++;
 	}
-	return points;
+	return mesh->vertex_count;
 }
 
 /* the pose to draw the legs with: the body's own (as it is drawn now, about
@@ -1450,19 +1678,39 @@ real_matrix4x3 const *first_person_legs_node_matrices(
 	}
 
 	/* (lowered as far as keeps all of it out of the near plane's cut: the
-	hips and thighs come up to the eye as it crouches in the air. Lowered,
-	the waist's rim is only farther below the view's bottom, its normal
-	never up) */
+	hips and thighs come up to the eye as it crouches in the air. Straight
+	down, while the view's bottom faces down: the waist's rim only goes
+	farther below it. Looking down by more than the view's lower half's
+	angle from level, the bottom faces up a little, and straight down
+	brought the rim up into the view, the open waist seen from above (#692):
+	then down along the bottom, the rim as far below it as it was set) */
 	{
 		struct object_mesh const *mesh = object_mesh_get(object_index);
 		long points = mesh ? first_person_legs_surface(mesh, first_person_legs_matrices, count) : 0;
-		real drop = first_person_legs_drop(&global_window_parameters.frustum, first_person_legs_points, points,
-			first_person_legs_spans);
+		real_vector3d const *bottom = &global_window_parameters.frustum.world_planes[2].n;
+		real_vector3d along = { 0.f, 0.f, -1.f };
+		real drop;
 
+		if (bottom->k > 0.f && bottom->k < 1.f)
+		{
+			/* (down less its part across the bottom, scaled to 1 down) */
+			real scale = 1.f / (1.f - bottom->k * bottom->k);
+
+			along.i = bottom->k * bottom->i * scale;
+			along.j = bottom->k * bottom->j * scale;
+			along.k = -1.f;
+		}
+		drop = first_person_legs_drop(&global_window_parameters.frustum, &along, first_person_legs_points, points,
+			mesh ? mesh->triangles : NULL, mesh ? mesh->triangle_count : 0, first_person_legs_point_spans,
+			first_person_legs_spans);
 		if (drop > 0.f)
 		{
 			for (index = 0; index < count; index++)
+			{
+				first_person_legs_matrices[index].position.x += along.i * drop;
+				first_person_legs_matrices[index].position.y += along.j * drop;
 				first_person_legs_matrices[index].position.z -= drop;
+			}
 		}
 	}
 	return first_person_legs_matrices;

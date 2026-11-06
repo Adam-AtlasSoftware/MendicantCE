@@ -2,8 +2,9 @@
 first_person_legs_drop, #692): crouching in the air brings the eye down to the hips, and the near plane cut the thighs
 there, which a wide view showed as black slivers. The legs are lowered by the least that keeps every point of them out
 of the part of the view the near plane cuts away, at any field of view, window shape, split screen's view or pitch;
-standing and crouching on the ground nothing is lowered. And where it is wired: the flat screen's pose, after it is
-set back, with the view as drawn."""
+standing and crouching on the ground nothing is lowered. Every triangle of them, not only every point (#692's second
+report: a thigh's plate reached across the cut, its corners out of it). And where it is wired: the flat screen's pose,
+after it is set back, with the view as drawn, lowered along the view's bottom where it faces up."""
 import re
 import sys
 from pathlib import Path
@@ -13,10 +14,10 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, function, inline, mutated, read, run  # noqa: E402
 
-CASES = ["standing", "crouch_jump", "beside", "above", "chain", "most", "none"]
+CASES = ["standing", "crouch_jump", "beside", "above", "chain", "most", "triangle", "none"]
 CONTROLS = [
     # the near plane's distance taken as the sides' are (outward the cut side): the cut's depth backwards
-    ("\t\t\t\tdistance = -distance;\n", "", "crouch_jump"),
+    ("\t\t\tdistance = -distance;\n", "", "crouch_jump"),
     # no margin: the legs left touching the near plane
     ("margin = FIRST_PERSON_LEGS_UNCUT;", "margin = 0.f;", "crouch_jump"),
     # the margin about the sides too: lowered for what is out of the view (crouching at 160, its waist 0.126 below)
@@ -33,6 +34,8 @@ CONTROLS = [
     ("while (moved && drop < FIRST_PERSON_LEGS_DROP_MAXIMUM);", "while (moved && 0);", "chain"),
     # no most
     ("return MIN(drop, FIRST_PERSON_LEGS_DROP_MAXIMUM);", "return drop;", "most"),
+    # the points alone, as before #692's second report: a triangle across the cut, its corners out of it, not lowered
+    ("if (triangles && first_person_legs_cut_corners(view, corners))", "if (0)", "triangle"),
 ]
 
 
@@ -40,10 +43,11 @@ def generated(fault=None):
     code = read("port/linux/game/first_person_legs.c")
     math = read("source/math/real_math.h")
     text = "\n".join(re.findall(r"^#define FIRST_PERSON_LEGS_(?:UNCUT|DROP_MAXIMUM) .*$", code, re.M)) + "\n" + \
-        function(code, "first_person_legs_drop")
+        "\n".join(function(code, name) for name in ["first_person_legs_point_span", "first_person_legs_cut_corners",
+                                                     "first_person_legs_triangle_span", "first_person_legs_drop"])
     if fault:
         text = mutated(text, *fault)
-    helpers = "\n".join(inline(math, name) for name in ["dot_product3d", "plane3d_distance_to_point"])
+    helpers = "\n".join(inline(math, name) for name in ["dot_product3d", "cross_product3d", "plane3d_distance_to_point"])
     return (("under_test.inc", helpers + "\n" + text),)
 
 
@@ -79,14 +83,22 @@ def test_where_the_pose_takes_it():
     pose = function(code, "first_person_legs_node_matrices")
     # the posed surface weighed in the view as drawn (the rasterizer's frustum, its near plane near_clip.c's), every
     # node lowered by it, after the pose is set back
-    wired = ("first_person_legs_drop(&global_window_parameters.frustum, first_person_legs_points, points,")
+    wired = ("first_person_legs_drop(&global_window_parameters.frustum, &along, first_person_legs_points, points,\n"
+             "\t\t\tmesh ? mesh->triangles : NULL, mesh ? mesh->triangle_count : 0,")
     assert wired in pose
     assert "first_person_legs_surface(mesh, first_person_legs_matrices, count)" in pose
     assert "first_person_legs_matrices[index].position.z -= drop;" in pose
+    assert "first_person_legs_matrices[index].position.x += along.i * drop;" in pose
+    # (down along the view's bottom where it faces up: down + k n, scaled to 1 down, so the waist's rim, set out of
+    # the view, stays out as it is lowered)
+    assert "if (bottom->k > 0.f && bottom->k < 1.f)" in pose
+    assert "along.i = bottom->k * bottom->i * scale;" in pose
     assert pose.index("matrix->position.z += back.k * set_back;") < pose.index(wired)
     assert pose.index(wired) < pose.rindex("return first_person_legs_matrices;")
     # the surface as the game skins it: each node's from the model's space, its two nodes blended by the weight
     surface = function(code, "first_person_legs_surface")
+    # (each point at its vertex's index, the triangles' indices)
+    assert "real_point3d *point = &first_person_legs_points[index];" in surface
     assert "matrix4x3_multiply(&pose[index], &mesh->inverse[index], &skin[index]);" in surface
     assert "real weight = (real)vertex->weight / 32767.f;" in surface
     # drawing alone: the game's node matrices are read, never written
