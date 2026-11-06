@@ -31,6 +31,7 @@ symbols in this file:
 #include "units/units.h"
 #include "view_fov.h" /* port: port/linux/game/view_fov.c */
 #include "rasterizer/rasterizer.h" /* port: (render_particles_cut_run) */
+#include "network_replay.h" /* port: port/linux/game/network_replay_playback.c */
 
 /* ---------- constants */
 
@@ -81,6 +82,12 @@ boolean local_player_is_first_person(
 		director_get_perspective(local_player_index) ==
 		_director_perspective_first_person;
 
+	/* port: a replay's playback has no local player: its view is first
+	person through the watched player's eyes (their weapon's particles
+	those of the arms drawn: first_person_weapons.c), and the player is
+	not looked up (port/linux/game/network_replay_playback.c) */
+	if (network_replay_playing())
+		return local_player_index == 0 && network_replay_viewing_eyes();
 	if (!result)
 	{
 		long player_index = local_player_get_player_index(local_player_index);

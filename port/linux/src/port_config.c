@@ -1318,6 +1318,28 @@ static const struct config_setting config_settings[] =
 		"drops it (5 to 300; the stock game's 15). Longer keeps players whose\n"
 		"connection stalls (a browser tab in the background) at the cost of\n"
 		"frozen players for longer when one really goes." },
+	{ "network.record_replays", _config_boolean, "false", "HALO_NET_RECORD_REPLAYS", _environment_value,
+		_platform_all,
+		"Each network game is recorded to the data folder's replays/, which\n"
+		"the main menu's Theater plays (port/linux/REPLAY.md): a host's, all of\n"
+		"it (what a client that sees everything is sent); a client's, what its\n"
+		"host sends it (far players less often) and its own input. Read at a\n"
+		"game's start; the Theater's RECORD turns it on and off." },
+	{ "network.replay_hints", _config_boolean, "true", "HALO_NET_REPLAY_HINTS", _environment_value,
+		_platform_all,
+		"Watching a replay with a controller: the bars of the buttons and of the\n"
+		"camera's controls over the seek bar. The replay's pause menu turns them\n"
+		"on and off (the north button: Y, the Switch's X, the PS5's triangle)." },
+	{ "network.full_detail_to_clients", _config_boolean, "false", "HALO_NET_FULL_DETAIL_TO_CLIENTS",
+		_environment_value, _platform_all,
+		"Hosting: send every client every player every tick (not those far\n"
+		"from its own, or out of their sight, less often) and every damage\n"
+		"event (not only those near its players), so that a client's replay\n"
+		"holds all of the game. More to send: a client's download grows with\n"
+		"the players. Read each tick." },
+	{ "network.replays_kept", _config_integer, "30", "HALO_NET_REPLAYS_KEPT", _environment_value, _platform_all,
+		"How many replays the replays/ folder keeps: the oldest are deleted as a\n"
+		"recording starts; 0 keeps them all." },
 	{ "network.allow_upnp", _config_boolean, "true", "HALO_NET_ALLOW_UPNP", _environment_value, _platform_all,
 		"Let internet play ask the router (UPnP) to forward its port, for\n"
 		"networks whose NAT stops connections: when a player joins this\n"

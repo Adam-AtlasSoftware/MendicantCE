@@ -207,6 +207,8 @@ void ui_widget_port_draw_button(
 	rectangle2d *bounds,
 	rectangle2d *cursor,
 	pixel32 color);
+/* port: where the last draw_string_and_hack_in_icons left its cursor */
+extern short draw_string_and_hack_in_icons_port_end_x;
 void ui_widgets_dispose(
 	void);
 boolean widget_event_function_list_widget_goto_next_item(

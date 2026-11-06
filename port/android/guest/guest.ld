@@ -29,12 +29,83 @@ SECTIONS
 	.text : { *(.text .text.*) }
 	.rodata : { *(.rodata .rodata.*) }
 	. = ALIGN(0x10000);
+	/* the variables of the game's simulation and of its netcode's client
+	that are not in the game state, together, so that a replay's keyframes
+	copy them whole with it (port/linux/game/network_replay_playback.c,
+	ported from SlipstreamCE's): the simulation's folders, the netcode's
+	client, and the port's modules of either (OpenH1's sub-steps, clock and
+	co-op too). Listed twice, the same: here for their data, below for their
+	zeroed variables. Ahead of .data and .bss, which take the rest */
+	.replay_data : {
+		__replay_data_start = .;
+		*/source/game/*.o(.data .data.*)
+		*/source/objects/*.o(.data .data.*)
+		*/source/units/*.o(.data .data.*)
+		*/source/items/*.o(.data .data.*)
+		*/source/effects/*.o(.data .data.*)
+		*/source/physics/*.o(.data .data.*)
+		*/source/devices/*.o(.data .data.*)
+		*/source/networking/network_client_manager.o(.data .data.*)
+		*/source/networking/network_client_message_handler.o(.data .data.*)
+		*/source/networking/network_game_globals.o(.data .data.*)
+		*/source/networking/network_game_manager.o(.data .data.*)
+		*/port/linux/game/network_distributed.o(.data .data.*)
+		*/port/linux/game/network_objects.o(.data .data.*)
+		*/port/linux/game/network_actors.o(.data .data.*)
+		*/port/linux/game/network_damage.o(.data .data.*)
+		*/port/linux/game/network_shield_effects.o(.data .data.*)
+		*/port/linux/game/network_aim_assist.o(.data .data.*)
+		*/port/linux/game/infection.o(.data .data.*)
+		*/port/linux/game/gun_game.o(.data .data.*)
+		*/port/linux/game/game_modes.o(.data .data.*)
+		*/port/linux/game/network_substeps.o(.data .data.*)
+		*/port/linux/game/network_clock.o(.data .data.*)
+		*/port/linux/game/sim_rate.o(.data .data.*)
+		*/port/linux/game/network_coop.o(.data .data.*)
+		*/port/linux/game/coop_enemies.o(.data .data.*)
+		*/port/linux/game/coop_pickups.o(.data .data.*)
+		*/port/linux/game/coop_scripts.o(.data .data.*)
+		*/port/linux/game/coop_vehicles.o(.data .data.*)
+		__replay_data_end = .;
+	}
 	.data : { *(.data .data.*) }
 	.guest_init : {
 		__guest_init_start = .;
 		KEEP(*(.guest_init))
 		INCLUDE guest_init_array.ld
 		__guest_init_end = .;
+	}
+	.replay_bss : {
+		__replay_bss_start = .;
+		*/source/game/*.o(.bss .bss.* COMMON)
+		*/source/objects/*.o(.bss .bss.* COMMON)
+		*/source/units/*.o(.bss .bss.* COMMON)
+		*/source/items/*.o(.bss .bss.* COMMON)
+		*/source/effects/*.o(.bss .bss.* COMMON)
+		*/source/physics/*.o(.bss .bss.* COMMON)
+		*/source/devices/*.o(.bss .bss.* COMMON)
+		*/source/networking/network_client_manager.o(.bss .bss.* COMMON)
+		*/source/networking/network_client_message_handler.o(.bss .bss.* COMMON)
+		*/source/networking/network_game_globals.o(.bss .bss.* COMMON)
+		*/source/networking/network_game_manager.o(.bss .bss.* COMMON)
+		*/port/linux/game/network_distributed.o(.bss .bss.* COMMON)
+		*/port/linux/game/network_objects.o(.bss .bss.* COMMON)
+		*/port/linux/game/network_actors.o(.bss .bss.* COMMON)
+		*/port/linux/game/network_damage.o(.bss .bss.* COMMON)
+		*/port/linux/game/network_shield_effects.o(.bss .bss.* COMMON)
+		*/port/linux/game/network_aim_assist.o(.bss .bss.* COMMON)
+		*/port/linux/game/infection.o(.bss .bss.* COMMON)
+		*/port/linux/game/gun_game.o(.bss .bss.* COMMON)
+		*/port/linux/game/game_modes.o(.bss .bss.* COMMON)
+		*/port/linux/game/network_substeps.o(.bss .bss.* COMMON)
+		*/port/linux/game/network_clock.o(.bss .bss.* COMMON)
+		*/port/linux/game/sim_rate.o(.bss .bss.* COMMON)
+		*/port/linux/game/network_coop.o(.bss .bss.* COMMON)
+		*/port/linux/game/coop_enemies.o(.bss .bss.* COMMON)
+		*/port/linux/game/coop_pickups.o(.bss .bss.* COMMON)
+		*/port/linux/game/coop_scripts.o(.bss .bss.* COMMON)
+		*/port/linux/game/coop_vehicles.o(.bss .bss.* COMMON)
+		__replay_bss_end = .;
 	}
 	.bss : { *(.bss .bss.*) *(COMMON) }
 	. = ALIGN(0x1000);

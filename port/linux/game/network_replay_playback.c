@@ -129,19 +129,20 @@ the way put back (playback_seek_chase); back, once it is let go.
 
 #include "zlib.h" /* source/memory/zlib */
 
-/* the replay's records, kept in the host's memory (port/android/host/host_replay.c;
-port/android/guest/runtime/guest_host.h) */
-int host_replay_store_append(unsigned int data, unsigned int size);
-unsigned int host_replay_store_read(unsigned int offset, unsigned int destination, unsigned int size);
-void host_replay_store_free(void);
+/* port (OpenH1): the replay's records, kept in memory in chunks
+(network_replay_store.c), the guest's own where SlipstreamCE's Switch kept
+them in its host's */
+int network_replay_store_append(void const *data, uint32_t size);
+uint32_t network_replay_store_read(uint32_t offset, void *destination, uint32_t size);
+void network_replay_store_free(void);
 
 /* the touch controls (port/linux/src/touch_input.c): whether they show, and
 the replay's buttons for them to press, each TOUCH_TARGET_FIELDS ints (x0,
 y0, x1, y1 in ten-thousandths of the screen, and its controller button: its
 touch_input.h's TOUCH_REPLAY_*); and the view swipe, as port 0's player's
-(xinput_sdl.c). The Switch has the Android guest, and no touchscreen */
-#if defined(HALO_ANDROID) && !defined(HALO_SWITCH)
-#define REPLAY_TOUCH 1
+(xinput_sdl.c). port (OpenH1): not yet, its touch controls having no
+replay buttons (REPLAY_TOUCH is not defined) */
+#ifdef REPLAY_TOUCH
 int touch_input_screen_buttons(void);
 void touch_input_replay_targets(const int *targets, int count);
 int touch_input_move(float *forward, float *strafe);
@@ -150,7 +151,6 @@ int halo_linux_touch_look(short gamepad_index, real *yaw, real *pitch, real *gyr
 #define REPLAY_TOUCH_MAXIMUM_TARGETS 16
 #define REPLAY_TOUCH_TARGET_FIELDS 5
 
-FILE *platform_fopen_host(char const *path, char const *mode);
 int config_boolean(char const *name);
 int config_write_boolean(const char *name, int value);
 void network_distributed_handle_message(long machine_index, word const *message, word size);
@@ -168,7 +168,6 @@ void game_state_port_used(void **cpu, long *cpu_size, void **gpu, long *gpu_size
 void game_state_port_restore(void (*read)(void *context), void *context);
 void render_interpolation_reset(void);
 void first_person_weapons_initialize_for_new_map(void);
-boolean hud_hires_prompt_draw(char const *name, real x, real y, real size, pixel32 color, boolean draw);
 
 /* the simulation's and the netcode's variables outside the game state, all
 together (port/android/guest/guest.ld's .replay_data and .replay_bss) */
@@ -220,7 +219,7 @@ static struct
 	{ 41, _distributed_message_votekick_status },
 };
 /* the largest replay file read, and the most of its records kept (inflated,
-in the host's memory: host_replay.c) */
+in memory in chunks: network_replay_store.c) */
 #define REPLAY_MAXIMUM_FILE_SIZE (256 * 1024 * 1024)
 #define REPLAY_MAXIMUM_RECORDS_SIZE (1024 * 1024 * 1024)
 /* the window of the records the guest reads them through (larger than the
@@ -487,7 +486,7 @@ static real const replay_speeds[] = { 0.0f, 0.25f, 0.5f, 1.0f, 2.0f, 4.0f, 8.0f 
 static struct
 {
 	/* the window the replay's records are read through (they are kept in
-	the host's memory: host_replay.c; NULL when no replay is), the records'
+	memory in chunks: network_replay_store.c; NULL when no replay is), the records'
 	size (the file's header with them) and where the next record is */
 	byte *window;
 	long size;
@@ -681,8 +680,8 @@ static byte const *playback_record(
 		if (offset < playback.window_start || offset + length > playback.window_start + playback.window_length)
 		{
 			playback.window_start = offset;
-			playback.window_length = (long)host_replay_store_read((unsigned int)offset,
-				(unsigned int)(uintptr_t)playback.window, REPLAY_WINDOW_SIZE);
+			playback.window_length = (long)network_replay_store_read((uint32_t)offset,
+				playback.window, REPLAY_WINDOW_SIZE);
 			if (length > playback.window_length)
 				return NULL;
 		}
@@ -700,7 +699,7 @@ static byte const *playback_record(
 }
 
 /* the replay's records read from the file (after its header, which is
-kept already) into the host's memory (host_replay.c): as they are (formats
+kept already) into memory in chunks (network_replay_store.c): as they are (formats
 before 4), or inflated (one zlib stream, format 4 on), as much of them as
 there is of a file a crash cut short. The guest's memory, below 4 GB, holds
 none of them but its window's: a long match's replay of 46 MB inflates to
@@ -725,7 +724,7 @@ static boolean playback_keep(
 		size = REPLAY_MAXIMUM_RECORDS_SIZE - (unsigned long)playback.size;
 		*capped = TRUE;
 	}
-	if (size && !host_replay_store_append((unsigned int)(uintptr_t)data, (unsigned int)size))
+	if (size && !network_replay_store_append(data, (uint32_t)size))
 		return FALSE;
 	playback.size += (long)size;
 	return TRUE;
@@ -791,7 +790,7 @@ static int playback_load_records(
 	else if (!ended)
 		error(_error_log, "replay: the file ends before its stream does (cut short): %lu bytes of records kept",
 			(unsigned long)playback.size - header_size);
-	error(_error_log, "replay: %lu MB of records kept in the host's memory",
+	error(_error_log, "replay: %lu MB of records kept in memory",
 		(unsigned long)playback.size >> 20);
 	return REPLAY_LOADED;
 }
@@ -848,7 +847,7 @@ static void playback_free(
 	playback.window = NULL;
 	playback.window_start = 0;
 	playback.window_length = 0;
-	host_replay_store_free();
+	network_replay_store_free();
 	playback.size = 0;
 	playback.next = 0;
 	playback.starting = FALSE;
@@ -1035,7 +1034,7 @@ boolean network_replay_watch(
 
 	why[0] = 0;
 	playback_free();
-	file = platform_fopen_host(path, "rb");
+	file = network_replay_fopen(path, "rb");
 	if (!file)
 	{
 		snprintf(why, (size_t)why_size, "The replay cannot be opened.");
@@ -1072,7 +1071,7 @@ boolean network_replay_watch(
 		return FALSE;
 	}
 	/* (the header kept as the records' start, as the file has it; the
-	records after it into the host's memory, through the window) */
+	records after it into memory, through the window) */
 	if (!(header = (byte *)malloc((size_t)header_size)) ||
 		!(playback.window = (byte *)malloc(REPLAY_WINDOW_SIZE)))
 	{
@@ -3466,75 +3465,17 @@ edge, on a dark bar, the buttons, with the controller's pictures of them
 (the game's prompts' %a-button and so on: ui_widget.c's
 draw_string_and_hack_in_icons; the Switch's and the PS5's own, swapped as a
 playback's buttons are, hud_hires_tags.c); and with Back held, the scores */
-/* a button in the hints: its picture (hud_hires_prompt_draw: Kenney's of
-the controller), and its name on the controller where there is none (the
-Switch's, the PS5's, else the Xbox's; the Switch's A and B as its menus
-have them, as a replay does: xinput_sdl.c) */
-static char const *playback_button_prompt(
-	short button)
-{
-	switch (button)
-	{
-	case FIRST_GAMEPAD_ANALOG_BUTTON + _gamepad_analog_button_a: return "a";
-	case FIRST_GAMEPAD_ANALOG_BUTTON + _gamepad_analog_button_b: return "b";
-	case FIRST_GAMEPAD_ANALOG_BUTTON + _gamepad_analog_button_x: return "x";
-	case FIRST_GAMEPAD_ANALOG_BUTTON + _gamepad_analog_button_y: return "y";
-	case FIRST_GAMEPAD_ANALOG_BUTTON + _gamepad_analog_button_black: return "black";
-	case FIRST_GAMEPAD_ANALOG_BUTTON + _gamepad_analog_button_white: return "white";
-	case _gamepad_binary_button_dpad_left: return "dpad_horizontal";
-	case _gamepad_binary_button_dpad_up: return "dpad_up";
-	case _gamepad_binary_button_dpad_down: return "dpad_down";
-	case _gamepad_binary_button_back: return "back";
-	case _gamepad_binary_button_start: return "start";
-	case _gamepad_binary_button_right_thumb: return "stick_right_press";
-	case _gamepad_binary_button_left_thumb: return "stick_left_press";
-	case _replay_hint_stick_left: return "stick_left";
-	case _replay_hint_stick_right: return "stick_right";
-	}
-	return "";
-}
-
+/* a button in the hints: its name on the controller (port (OpenH1): written,
+where SlipstreamCE drew Kenney's pictures of the controller's buttons,
+which OpenH1 does not ship) */
 static wchar_t const *playback_button_label(
 	short button)
 {
-#if defined(HALO_SWITCH)
-	boolean swapped = config_boolean("controls.nintendo_menu_buttons") != 0;
-#elif defined(HALO_PS5)
-	boolean xbox_buttons = config_boolean("display.xbox_buttons") != 0;
-#endif
-
 	switch (button)
 	{
 	case _gamepad_binary_button_dpad_left: return L"D-PAD";
 	case _gamepad_binary_button_dpad_up: return L"UP";
 	case _gamepad_binary_button_dpad_down: return L"DOWN";
-#if defined(HALO_SWITCH)
-	case FIRST_GAMEPAD_ANALOG_BUTTON + _gamepad_analog_button_a: return swapped ? L"A" : L"B";
-	case FIRST_GAMEPAD_ANALOG_BUTTON + _gamepad_analog_button_b: return swapped ? L"B" : L"A";
-	case FIRST_GAMEPAD_ANALOG_BUTTON + _gamepad_analog_button_x: return L"Y";
-	case FIRST_GAMEPAD_ANALOG_BUTTON + _gamepad_analog_button_y: return L"X";
-	case FIRST_GAMEPAD_ANALOG_BUTTON + _gamepad_analog_button_white: return L"L";
-	case FIRST_GAMEPAD_ANALOG_BUTTON + _gamepad_analog_button_black: return L"R";
-	case _gamepad_binary_button_back: return L"-";
-	case _gamepad_binary_button_start: return L"+";
-	case _gamepad_binary_button_right_thumb: return L"RS";
-	case _gamepad_binary_button_left_thumb: return L"LS";
-	case _replay_hint_stick_left: return L"LEFT STICK";
-	case _replay_hint_stick_right: return L"RIGHT STICK";
-#elif defined(HALO_PS5)
-	case FIRST_GAMEPAD_ANALOG_BUTTON + _gamepad_analog_button_a: return xbox_buttons ? L"A" : L"CROSS";
-	case FIRST_GAMEPAD_ANALOG_BUTTON + _gamepad_analog_button_b: return xbox_buttons ? L"B" : L"CIRCLE";
-	case FIRST_GAMEPAD_ANALOG_BUTTON + _gamepad_analog_button_x: return xbox_buttons ? L"X" : L"SQUARE";
-	case FIRST_GAMEPAD_ANALOG_BUTTON + _gamepad_analog_button_y: return xbox_buttons ? L"Y" : L"TRIANGLE";
-	case FIRST_GAMEPAD_ANALOG_BUTTON + _gamepad_analog_button_white: return xbox_buttons ? L"LB" : L"L1";
-	case FIRST_GAMEPAD_ANALOG_BUTTON + _gamepad_analog_button_black: return xbox_buttons ? L"RB" : L"R1";
-	case _gamepad_binary_button_back: return xbox_buttons ? L"BACK" : L"CREATE";
-	case _gamepad_binary_button_start: return xbox_buttons ? L"START" : L"OPTIONS";
-	case _gamepad_binary_button_right_thumb: return xbox_buttons ? L"RS" : L"R3";
-	case _gamepad_binary_button_left_thumb: return xbox_buttons ? L"LS" : L"L3";
-	case _replay_hint_stick_left: return L"LEFT STICK";
-	case _replay_hint_stick_right: return L"RIGHT STICK";
-#else
 	case FIRST_GAMEPAD_ANALOG_BUTTON + _gamepad_analog_button_a: return L"A";
 	case FIRST_GAMEPAD_ANALOG_BUTTON + _gamepad_analog_button_b: return L"B";
 	case FIRST_GAMEPAD_ANALOG_BUTTON + _gamepad_analog_button_x: return L"X";
@@ -3547,7 +3488,6 @@ static wchar_t const *playback_button_label(
 	case _gamepad_binary_button_left_thumb: return L"LS";
 	case _replay_hint_stick_left: return L"LEFT STICK";
 	case _replay_hint_stick_right: return L"RIGHT STICK";
-#endif
 	}
 	return L"?";
 }
@@ -3572,8 +3512,7 @@ static short playback_draw_hint_text(
 	return (short)(draw_string_and_hack_in_icons_port_end_x + 3);
 }
 
-/* a button of the hints at x, its picture centred on the text's capitals
-(middle), else its name; where it ends */
+/* a button of the hints at x, its name; where it ends */
 static short playback_draw_hint_button(
 	long font_index,
 	rectangle2d const *line,
@@ -3582,17 +3521,7 @@ static short playback_draw_hint_button(
 	short button,
 	boolean visible)
 {
-	char const *prompt = playback_button_prompt(button);
-
-	if (hud_hires_prompt_draw(prompt, 0.0f, 0.0f, 0.0f, 0, FALSE))
-	{
-		if (visible)
-		{
-			hud_hires_prompt_draw(prompt, (real)x, (real)(middle - REPLAY_HINT_ICON_SIZE / 2),
-				(real)REPLAY_HINT_ICON_SIZE, 0xFFFFFFFF, TRUE);
-		}
-		return (short)(x + REPLAY_HINT_ICON_SIZE + REPLAY_HINT_ICON_GAP);
-	}
+	(void)middle;
 	return playback_draw_hint_text(font_index, line, x, playback_button_label(button), visible);
 }
 
@@ -4112,4 +4041,20 @@ void network_replay_playback_draw(
 		playback_draw_hints(font_index, shown, shown_count, behind_camera_hints, NUMBEROF(behind_camera_hints));
 	else
 		playback_draw_hints(font_index, shown, shown_count, NULL, 0);
+}
+
+/* port (OpenH1): a skip ahead's held frame (rasterizer.h). SlipstreamCE
+copies the 3D view through its D3D device's render target and draws it back
+(its rasterizer_xbox_screen_effect.c, on the Switch's warp passes, which
+OpenH1 has not); here the copy fails, so a skip ahead draws its frames as
+they play (network_replay_hold_taken's FALSE) */
+boolean rasterizer_port_hold_capture(
+	void)
+{
+	return FALSE;
+}
+
+void rasterizer_port_hold_draw(
+	void)
+{
 }

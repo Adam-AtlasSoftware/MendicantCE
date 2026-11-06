@@ -3129,6 +3129,16 @@ boolean widget_event_function_list_widget_goto_previous_item(
 			{
 				child = widget->child;
 				item_index = 0;
+				/* port: a list can have no children on this platform (the
+				Theater's button bar on the consoles), as goto_next_item allows */
+				if (!child)
+				{
+					error(
+						_error_silent,
+						"failed to set focus to the previous list item of a column widget");
+
+					return FALSE;
+				}
 				while (child->next)
 				{
 					child = child->next;
@@ -4474,6 +4484,11 @@ void ui_widget_port_draw_button(
 	icon->width_offset = saved_width_offset;
 }
 
+/* port: where the last draw_string_and_hack_in_icons left its cursor (the
+right of its last line), for a caller that centres what it drew
+(port/linux/game/network_replay_playback.c) */
+short draw_string_and_hack_in_icons_port_end_x;
+
 void draw_string_and_hack_in_icons(
 	rectangle2d *bounds,
 	rectangle2d *clip,
@@ -4712,6 +4727,7 @@ void draw_string_and_hack_in_icons(
 		current += hud_key_prompt_draw_equals(bounds, &cursor_bounds, current);
 	if (current)
 		render_state_text(bounds, &cursor_bounds, current);
+	draw_string_and_hack_in_icons_port_end_x = cursor_bounds.x0;
 	draw_string_set_indents(0, 0);
 
 	return;
@@ -5461,9 +5477,19 @@ void main_screen_shell_load(
 		/* port: the menus' main menu, when they are there (port/linux/game/menu_tags.c) */
 		{
 			extern char const *pc_menus_root_name(void);
+			extern boolean network_replay_theater_wanted(void);
 
 			if (!ui_widget_load_by_name_or_tag(pc_menus_root_name(), NONE, NULL, NONE, NONE, NONE, NONE))
 				error(_error_silent, "failed to load main screen shell window");
+			/* (port: back from a replay, the Theater it was played from,
+			over the main menu, which B goes back to:
+			port/linux/game/network_replay_playback.c) */
+			else if (network_replay_theater_wanted() &&
+				!ui_widget_load_by_name_or_tag("pc\\main_menu\\theater\\theater_screen", NONE, NULL, NONE,
+					widget_globals.active_widgets[0]->definition_tag_index, NONE, NONE))
+			{
+				error(_error_silent, "failed to load the theater");
+			}
 		}
 		if (widget_globals.main_menu_deferred_error_code != NONE)
 		{

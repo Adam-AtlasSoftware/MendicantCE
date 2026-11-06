@@ -72,6 +72,7 @@ symbols in this file:
 #include "structures/structure_visibility.h"
 #include "render_enumerate.h" /* port: port/linux/game/render_enumerate.c */
 #include "rasterizer.h"
+#include "network_replay.h" /* port: port/linux/game/network_replay_playback.c */
 #include "rasterizer/rasterizer_lights.h"
 #include "profile.h"
 #include "progress_bar.h"
@@ -426,7 +427,16 @@ static void render_window(
 	panini_window_begin(local_player_index, rasterizer_target, rasterizer_camera, &parameters.frustum);
 	rasterizer_window_begin(&parameters);
 
-	if (!bink_playback_in_progress())
+	/* port: a replay's skip ahead: its held frame in place of the view, the
+	replay's lines drawn over it after (port/linux/game/network_replay_playback.c) */
+	if (rasterizer_target == _render_target_primary && network_replay_frozen())
+	{
+		rasterizer_port_hold_draw();
+		/* (the planar fog's offset set for this view, which the structure's
+		preprocess forgets, else the next view's asserts: none drawn here) */
+		structure_render_port_forget_fog_offset();
+	}
+	else if (!bink_playback_in_progress())
 	{
 		build_sprite_prepare_for_window();
 		render_sky();
@@ -674,6 +684,10 @@ static void render_window(
 			/* port: and drawn through display.panini's projection, the HUD
 			not (port/linux/game/panini.c) */
 			panini_window_draw();
+			/* port: a replay's skip ahead asked for this frame: its view held
+			(port/linux/game/network_replay_playback.c) */
+			if (network_replay_hold_wanted())
+				network_replay_hold_taken(rasterizer_port_hold_capture());
 		}
 		interface_draw_screen();
 		/* port: and every HUD's (port/linux/game/render_enumerate.c) */

@@ -1,20 +1,19 @@
 /*
-HOST_REPLAY.C
+NETWORK_REPLAY_STORE.C
 
-A replay's records, kept in the host's memory for the guest to read a window
-of at a time (port/linux/game/network_replay_playback.c). A long match's
-replay inflates to more than the guest's memory, which lies below 4 GB, has
-room for in one piece: a 46 MB file of 22 minutes inflated to 152 MB, which
-the Switch's guest could not be given (libnx scatters its thread stacks and
-its own mappings across that range). The host's heap has gigabytes.
+A replay's records, kept in memory for the playback to read a window of at
+a time (network_replay_playback.c). A long match's replay inflates to more
+than one piece of memory should be: a 46 MB file of 22 minutes inflated to
+152 MB.
 
 The bytes are kept in chunks, so that no one allocation is large and growing
 never copies what is already kept. One replay at a time, on the game's
-thread alone; the guest's addresses are the host's (the guest's memory is
-the host's to read and write).
+thread alone.
 
-Shared by the Android app's host, the Switch's (tools/switch_build.py) and
-the PS5's (tools/ps5_build.py): it uses the C library alone.
+Ported from SlipstreamCE's host_replay.c (thelinkin3000/SlipstreamCE@f8dbc4411,
+by thelinkin3000; AGPL-3.0-or-later), where the Switch's guest kept them in
+its host's memory: OpenH1's guests keep them in their own heap, so the store
+is the guest's (it uses the C library alone).
 */
 
 #include <stdint.h>
@@ -32,7 +31,7 @@ static struct
 } store;
 
 /* the replay kept before let go (none kept: nothing done) */
-void host_replay_store_free(void)
+void network_replay_store_free(void)
 {
 	uint32_t index;
 
@@ -42,11 +41,11 @@ void host_replay_store_free(void)
 	memset(&store, 0, sizeof(store));
 }
 
-/* size bytes of the guest's at data added to the replay's end; 0 if the
-host has not the memory for them (what was kept before is kept) */
-int host_replay_store_append(uint32_t data, uint32_t size)
+/* size bytes at data added to the replay's end; 0 if there
+is not the memory for them (what was kept before is kept) */
+int network_replay_store_append(void const *data, uint32_t size)
 {
-	const unsigned char *from = (const unsigned char *)(uintptr_t)data;
+	const unsigned char *from = (const unsigned char *)data;
 
 	if (size > UINT32_MAX - store.size)
 		return 0;
@@ -84,11 +83,11 @@ int host_replay_store_append(uint32_t data, uint32_t size)
 	return 1;
 }
 
-/* up to size bytes of the replay from offset copied to the guest's
+/* up to size bytes of the replay from offset copied to
 destination; how many there were */
-uint32_t host_replay_store_read(uint32_t offset, uint32_t destination, uint32_t size)
+uint32_t network_replay_store_read(uint32_t offset, void *destination, uint32_t size)
 {
-	unsigned char *to = (unsigned char *)(uintptr_t)destination;
+	unsigned char *to = (unsigned char *)destination;
 	uint32_t copied = 0;
 
 	if (offset >= store.size)

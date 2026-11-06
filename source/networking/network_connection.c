@@ -1428,6 +1428,14 @@ long network_connection_datagram_socket(
 	return connection->unreliable_endpoint ? connection->unreliable_endpoint->socket : NONE;
 }
 
+/* port: a replay's playback says how each message it hands on came, as a
+read would (port/linux/game/network_replay_playback.c) */
+void network_connection_port_set_last_read_unreliable(
+	boolean unreliable)
+{
+	network_connection_last_read_unreliable = unreliable;
+}
+
 boolean network_server_close_client_connection(
 	struct network_connection *server_connection,
 	struct network_connection *client_connection)

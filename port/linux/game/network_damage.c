@@ -73,6 +73,8 @@ being hit looks and feels like on the clients).
 #include <math.h>
 
 /* damage.c's */
+void network_replay_playback_damage(long object_index, long owner_player_index, long owner_object_index,
+	real_point3d const *origin);
 void damage_replay_player_effect(long player_index, struct damage_data *damage, real total_damage);
 void damage_replay_aftermath(long object_index, struct damage_data *damage, unsigned long being_damaged_flags,
 	real shield_damage, real body_damage, real body_damage_multiplier, short body_part);
@@ -3030,8 +3032,13 @@ static boolean distributed_event_goes_to(
 	short count = damage_event_destinations[event_index].player_count;
 	short index;
 
-	if (count == NONE || damage_event_destinations[event_index].owner_machine_index == machine_index)
+	/* (the replay recorder has every event: network_replay.c; and with
+	network.full_detail_to_clients every client) */
+	if (count == NONE || damage_event_destinations[event_index].owner_machine_index == machine_index ||
+		machine_index == distributed_recorder_machine() || distributed_full_detail_to_clients())
+	{
 		return TRUE;
+	}
 	for (index = 0; index < count; index++)
 	{
 		short player_index = damage_event_destinations[event_index].player_indices[index];
@@ -3111,7 +3118,7 @@ void network_damage_host_tick(
 	short limit = MIN(MAXIMUM_ENTRIES_PER_MESSAGE, RELIABLE_ENTRIES(struct distributed_damage_event));
 	long machine_indices[HALO_PORT_MAXIMUM_NETWORK_MACHINES];
 	short machine_count = damage_event_count ?
-		distributed_client_machines(machine_indices, HALO_PORT_MAXIMUM_NETWORK_MACHINES) : 0;
+		distributed_viewing_machines(machine_indices, HALO_PORT_MAXIMUM_NETWORK_MACHINES) : 0;
 	short machine_number;
 
 	distributed_log_reports();
@@ -3208,6 +3215,12 @@ void network_damage_handle_events(
 				object_try_and_get_and_verify_type(event->object_index, _object_mask_unit))
 			{
 				network_test_note_hit("shown", event->object_index);
+				/* (a replay's cinematic camera shows who did it) */
+				if (event->shield_damage > 0.0f || event->body_damage > 0.0f)
+				{
+					network_replay_playback_damage(event->object_index, damage.owner_player_index,
+						damage.owner_object_index, &damage.origin);
+				}
 				/* (what harm it did the units' states bring: no death from here) */
 				damage_replay_aftermath(event->object_index, &damage,
 					event->being_damaged_flags &

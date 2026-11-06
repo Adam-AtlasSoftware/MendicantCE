@@ -369,6 +369,7 @@ symbols in this file:
 #include "interface/marketing_and_strategic_business_development.h"
 #include "interface/player_ui.h"
 #include "interface/terminal.h"
+#include "network_replay.h" /* port: port/linux/game/network_replay_playback.c */
 #include "saved games/player_profile.h"
 #include "saved games/game_state.h"
 #include "sound/sound_manager.h"
@@ -3564,6 +3565,9 @@ static void main_game_render(
 
 	lock_global_random_seed();
 	collision_log_continue_period(TRUE);
+	/* port: a replay's playback's view, made once for the frame, before the
+	sound listens from it (port/linux/game/network_replay_playback.c) */
+	network_replay_playback_frame();
 	sound_render();
 	force_single_screen = game_engine_force_single_screen();
 	last_local_player_index = NONE;
@@ -3605,10 +3609,23 @@ static void main_game_render(
 				}
 			}
 
-			window->local_player_index = last_local_player_index;
-			observer = observer_get_camera(window->local_player_index);
-			observer = render_interpolation_camera(window->local_player_index, observer);
-			SIM_TRACE(sim_trace_view(window->local_player_index, observer)); /* port: debug.trace */
+			/* port: a replay's playback has no local player: the window is
+			local player 0's, as film playback's is above, so that it is drawn
+			as a player's, with the playback's own view of the player watched
+			(port/linux/game/network_replay_playback.c) */
+			if (window_index == 0 && network_replay_playing() && network_replay_camera())
+			{
+				last_local_player_index = 0;
+				window->local_player_index = 0;
+				observer = network_replay_camera();
+			}
+			else
+			{
+				window->local_player_index = last_local_player_index;
+				observer = observer_get_camera(window->local_player_index);
+				observer = render_interpolation_camera(window->local_player_index, observer);
+				SIM_TRACE(sim_trace_view(window->local_player_index, observer)); /* port: debug.trace */
+			}
 		}
 		else
 		{
@@ -4031,6 +4048,11 @@ void main_loop(
 					kept (menu_pictures_render.c) */
 					if (menu_pictures_preparing())
 						render_frame = menu_pictures_frame_drawn();
+					/* port: a replay's skip ahead: the frame it holds drawn, and its
+					held frames with its lines, though they run no tick or many
+					(port/linux/game/network_replay_playback.c) */
+					if (network_replay_hold_wanted() || network_replay_frozen())
+						render_frame = TRUE;
 
 					profile_scope_enter(main_non_deterministic_update_section)
 					collision_log_continue_period(1);

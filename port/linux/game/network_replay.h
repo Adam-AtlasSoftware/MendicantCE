@@ -2,7 +2,11 @@
 NETWORK_REPLAY.H
 
 The host's replay recording (port/linux/REPLAY.md, phase 0): what a client
-that sees everything would be sent, written to a file instead.
+that sees everything would be sent, written to a file instead; and its
+playback.
+
+Ported from SlipstreamCE's Theater (https://github.com/thelinkin3000/SlipstreamCE,
+f8dbc4411; by thelinkin3000 and Carlos Pérez, AGPL-3.0-or-later).
 */
 
 #ifndef __NETWORK_REPLAY_H
@@ -62,6 +66,11 @@ void network_replay_record_received(void const *message, long size, boolean unre
 path */
 void network_replay_folder(char *path, long size);
 
+/* a replay's file at path (in that folder, or a path under the data
+folder) opened as fopen does */
+#include <stdio.h>
+FILE *network_replay_fopen(char const *path, char const *mode);
+
 /* the replays in that folder: how many, and their bytes (the Theater
 screen, menu_functions.c) */
 void network_replay_summary(long *count, unsigned long long *bytes);
@@ -108,16 +117,6 @@ boolean network_replay_describe(char const *name, char *text, long size);
 
 /* the replay of that name in the folder deleted; FALSE if it could not be */
 boolean network_replay_delete(char const *name);
-
-/* ---------- the replay page (network_replay_page.c): the Switch's and the
-PS5's, on the local network while the Theater is up */
-
-/* the Theater's, each frame: the page while it is up */
-void network_replay_page_wanted(void);
-/* main_loop's, each frame */
-void network_replay_page_update(void);
-/* the page's address ("http://192.168.2.173:8090/"), "" while none is served */
-char const *network_replay_page_address(void);
 
 /* ---------- playback (network_replay_playback.c) */
 

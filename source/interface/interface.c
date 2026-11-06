@@ -108,6 +108,7 @@ symbols in this file:
 #include "map_share.h" /* port: port/linux/game/map_share.c */
 #include "latency_meter.h" /* port: port/linux/game/latency_meter.c */
 #include "network_host_controls.h" /* port: port/linux/game/network_host_controls.c */
+#include "network_replay.h" /* port: port/linux/game/network_replay_playback.c */
 
 /* ---------- constants */
 
@@ -393,6 +394,8 @@ void interface_draw_fullscreen_overlays(
 	map_share_render();
 	/* port: a network game's round trip to the host (display.latency_meter) */
 	latency_meter_draw();
+	/* port: a replay's playback: who is watched */
+	network_replay_playback_draw();
 	terminal_draw();
 	main_framerate_render();
 	render_debug_profile();
@@ -733,6 +736,11 @@ void interface_draw_screen(
 	void)
 {
 	if (render.local_player_index == NONE)
+		return;
+	/* port: a replay's playback's window is local player 0's, who has no
+	player: no HUD, nor the game type's view of a player (its line is drawn
+	over the screen, network_replay_playback_draw) */
+	if (network_replay_playing())
 		return;
 
 	interface_draw_weapon_screen_effect(); /* port: (above) */

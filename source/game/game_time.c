@@ -79,6 +79,7 @@ symbols in this file:
 #include "scenario/scenario_definitions.h"
 #include "profile_sections.h" /* port: port/linux/include/profile_sections.h */
 #include "sim_rate.h" /* port: port/linux/game/sim_rate.c */
+#include "network_replay.h" /* port: port/linux/game/network_replay_playback.c */
 /* port/linux/game/network_distributed.c's */
 void network_distributed_tick(void);
 /* port: port/linux/game/network_clock.c */
@@ -597,6 +598,10 @@ void game_time_update(
 				/* (the distributed netcode: every machine ticks on its own
 				clock, and the host waits for nobody) */
 				connection = TICKS_PER_SECOND;
+				/* port: a replay's skip ahead, more
+				(port/linux/game/network_replay_playback.c) */
+				if (network_replay_playing())
+					connection = network_replay_ticks_per_frame(connection);
 				break;
 			case _game_connection_local:
 				connection = 7;
@@ -785,6 +790,10 @@ static boolean game_time_run_substep(
 	determinism_log_tick_begin();
 	random_math_port_set_ticking(TRUE);
 	LATENCY_LOG(latency_log_substep_begin()); /* port: debug.latency_log */
+	/* port: a replay's records of the tick reached, before its first
+	sub-step runs (port/linux/game/network_replay_playback.c) */
+	if (!sim_substep_next() && network_replay_playing())
+		network_replay_playback_tick();
 	tick_ended = game_tick_substep(sim_substep_next());
 	LATENCY_LOG(latency_log_substep_end()); /* port: debug.latency_log */
 	if (tick_ended)
