@@ -1204,7 +1204,10 @@ void xgpu_backend_set_textures(const struct xgpu_texture_source stages[4])
 }
 
 /* display.prism_material_overlay: the images as stages (the tiles repeating
-and filtered between their levels, the class mask clamped to its edge), and
+and filtered between their levels; the class mask repeating too, at its
+first level: a model's coordinates may lie a whole number of textures away
+from 0..1, as the base map's repeat reads them, and class_masks.py builds
+the mask by the coordinates' fractions, its islands' gutters grown), and
 the uniform, sent as they change */
 void xgpu_backend_material_overlay(const struct xgpu_material_overlay *overlay)
 {
@@ -1239,7 +1242,7 @@ void xgpu_backend_material_overlay(const struct xgpu_material_overlay *overlay)
 		stage->sampler.mip = mask ? XGPU_FILTER_NONE : XGPU_FILTER_LINEAR;
 		stage->sampler.magnify = XGPU_FILTER_LINEAR;
 		for (axis = 0; axis < 3; axis++)
-			stage->sampler.address[axis] = mask ? XGPU_ADDRESS_CLAMP : XGPU_ADDRESS_WRAP;
+			stage->sampler.address[axis] = XGPU_ADDRESS_WRAP;
 #else
 		(void)stage;
 #endif

@@ -289,7 +289,8 @@ void xgpu_backend_set_textures(const struct xgpu_texture_source stages[4]);
 uniform and the images (xgpu_images.h's numbers: tiles A to D, then the
 class mask; 0 none) of the draws that follow whose pixel key has
 material_overlay, sent as they change; the tiles repeat, filtered between
-their levels, the class mask is clamped to its edge */
+their levels, and the class mask repeats at its first level (a model's
+coordinates may lie a whole number of textures from 0..1) */
 struct xgpu_material_overlay
 {
 	float uniforms[XGPU_OVERLAY_UNIFORM_COUNT][4];

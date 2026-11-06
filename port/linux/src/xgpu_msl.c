@@ -2357,7 +2357,7 @@ static void overlay_light(struct xgpu_text *text, const struct xgpu_pixel_progra
 		int slot;
 
 		xgpu_text_append(text,
-			"\tconstexpr sampler overlay_masks(filter::linear, address::clamp_to_edge);\n"
+			"\tconstexpr sampler overlay_masks(filter::linear, address::repeat);\n"
 			"\tfloat4 overlay_q = overlay_m.sample(overlay_masks, overlay_uv);\n"
 			"\tfloat overlay_qs = dot(overlay_q, float4(1.0));\n"
 			"\tfloat4 overlay_wt = overlay_qs > 1.0e-3 ? overlay_q / overlay_qs : float4(1.0, 0.0, 0.0, 0.0);\n"
