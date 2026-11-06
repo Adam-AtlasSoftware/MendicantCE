@@ -1,7 +1,7 @@
 """The HRTF of dsound_sdl.c against the Xbox's (hrtf.c): the time between the ears, their levels apart in each
 octave and what a sound behind loses, over a grid of directions, against the Xbox's own filters; and each ear's
 level in each octave and the time between the ears against recordings of an Xbox's output, every 30 degrees round
-at 40, 20 and 0 degrees below and above.
+at 40, 20 and 0 degrees below and above, and on 5.1 its back pair's at 135 degrees, 40 below and above.
 
     python tools/harness/tests/test_hrtf.py metrics   our figures, beside the Xbox's
 (MIXER_SOURCE=path: of another dsound_sdl.c, to compare)
@@ -31,7 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, run  # noqa: E402
 from harness.tests.test_mixer import generated  # noqa: E402
 
-CASES = ["delays", "levels", "rear", "recorded"]
+CASES = ["delays", "levels", "rear", "recorded", "recorded-behind"]
 
 # a fault in the HRTF, and the case that must catch it
 NEGATIVE_CONTROLS = {
@@ -54,6 +54,9 @@ NEGATIVE_CONTROLS = {
     # the bands an octave up
     "bands-moved": (("{ 500, 1000, 2000, 3000, 4500, 6700, 10000, 14000 }",
                      "{ 1000, 2000, 3000, 4500, 6700, 10000, 14000, 20000 }"), "recorded"),
+    # on 5.1, behind as the direction mirrored ahead and nothing more (the far ear 3 to 4 dB dull at 8 kHz)
+    "behind-as-mirrored": (("if (behind && elevation != 0.0f)", "if (0 && behind && elevation != 0.0f)"),
+                           "recorded-behind"),
 }
 
 

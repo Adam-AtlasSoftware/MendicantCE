@@ -37,6 +37,7 @@ static real sphere[6][8] = {{-.22f,0,.7f},{.22f,0,.7f},{0,-.22f,.7f},{0,.22f,.7f
 #define shader_get_and_verify_type(s,t) (s)
 #define model_data_error(m,e) ((void)0)
 #define render_model_no_geometry FALSE
+#define render_world_ao_prepass FALSE
 #define matrix4x3_transform_point(m,p,o) (*(o)=*(p))
 #define rasterizer_model_draw(s,p,t,ti,tc,v,vi) (selected_geometry[solid_draws++] = (v)->count)
 #define rasterizer_environment_shadow_model_draw(s,p,t,v) (selected_geometry[shadow_draws++] = (v)->count)

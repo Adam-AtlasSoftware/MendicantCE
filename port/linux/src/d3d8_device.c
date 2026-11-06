@@ -281,6 +281,10 @@ _Static_assert(offsetof(struct xgpu_world_ao_block, field) == XGPU_WORLD_AO_BLOC
 _Static_assert(XGPU_WORLD_AO_GRID_X == WORLD_AO_GRID_X && XGPU_WORLD_AO_GRID_Y == WORLD_AO_GRID_Y &&
 	XGPU_WORLD_AO_GRID_Z == WORLD_AO_GRID_Z && XGPU_WORLD_AO_GRID_CELLS == XGPU_WORLD_AO_GRID_CELLS_MAXIMUM,
 	"the world's proxy grid as the game makes it and the emitters read it (world_ao.h, xgpu.h)");
+_Static_assert(XGPU_WORLD_AO_INPUT_LIGHTMAP == XGPU_WORLD_AO_INPUT_LIGHTMAP_BIT &&
+	XGPU_WORLD_AO_INPUT_ALL_SHAPES == XGPU_WORLD_AO_INPUT_ALL_SHAPES_BIT &&
+	XGPU_WORLD_AO_INPUT_PRESENT == XGPU_WORLD_AO_INPUT_PRESENT_BIT,
+	"the pre-pass's inputs as the emitters write them and the CPU reads them (xgpu.h, world_ao.h)");
 _Static_assert(WORLD_AO_FIELD_TABLE == XGPU_STREAM_WORLD_AO_TABLE && WORLD_AO_FIELD_ATLAS == XGPU_STREAM_WORLD_AO_ATLAS &&
 	WORLD_AO_FIELD_SCENERY == XGPU_STREAM_WORLD_AO_SCENERY && WORLD_AO_FIELD_OBJECTS == XGPU_STREAM_WORLD_AO_OBJECTS,
 	"the world's field's parts as the stream carries them");
@@ -295,12 +299,20 @@ static struct
 	int owner;
 	float reference;
 	BOOL failed;
+	/* found once a pixel: the window's pre-pass is drawing (its draws with
+	the world's light drawn as their twins, the others skipped: the
+	backend's), and the surfaces read their pixels' occlusion from its pass
+	(halo_world_ao_prepass_begin, until the window's block is taken away) */
+	BOOL prepass, sampled;
+	/* (the pixels a side of the blocks it is found once for: 2, a quarter
+	of the pixels; 1 with debug.world_ao_full_resolution) */
+	float scale;
 	/* the window's span as the game draws it (WORLD_AO_SPAN_*:
 	halo_world_ao_span), whatever the setting and while a map's pipelines
 	are prepared; a record's draw's as it notes it, played back
 	(journal_restore) */
 	int span;
-} world_ao = { FALSE, FALSE, WORLD_AO_OWNER_NONE, 1.0f, FALSE, WORLD_AO_SPAN_NONE };
+} world_ao = { FALSE, FALSE, WORLD_AO_OWNER_NONE, 1.0f, FALSE, FALSE, FALSE, 2.0f, WORLD_AO_SPAN_NONE };
 
 /* the draw takes the world's light where its window is given: one of the
 window's opaque surfaces, not the first-person weapon, not lighting itself
@@ -317,7 +329,8 @@ static unsigned char world_ao_key(int light)
 {
 	if (!world_ao.active || world_ao.failed || !world_ao_applies())
 		return 0;
-	return (unsigned char)(light | XGPU_AMBIENT_OCCLUSION_WORLD | (world_ao.view ? XGPU_AMBIENT_OCCLUSION_WORLD_VIEW : 0));
+	return (unsigned char)(light | XGPU_AMBIENT_OCCLUSION_WORLD | (world_ao.view ? XGPU_AMBIENT_OCCLUSION_WORLD_VIEW : 0) |
+		(world_ao.sampled ? XGPU_AMBIENT_OCCLUSION_WORLD_SAMPLED : 0));
 }
 
 /* a pipeline with the world's light could not be made: none has it from
@@ -349,6 +362,10 @@ void halo_world_ao_window(float const field[2][4], float const parameters[2][4],
 	world_ao.active = count >= 0;
 	world_ao.owner = WORLD_AO_OWNER_NONE;
 	world_ao.reference = 1.0f;
+	/* (found once a pixel: no more) */
+	if (world_ao.sampled || world_ao.prepass)
+		xgpu_backend_world_ao_prepass(XGPU_WORLD_AO_PREPASS_NONE, 0, NULL);
+	world_ao.sampled = world_ao.prepass = FALSE;
 	if (count < 0)
 	{
 		xgpu_backend_world_ao_window(NULL);
@@ -363,6 +380,9 @@ void halo_world_ao_window(float const field[2][4], float const parameters[2][4],
 	if (count)
 		memcpy(made->proxies, proxies, (size_t)count * sizeof(made->proxies[0]));
 	made->parameters[0][3] = (float)count;
+	/* (found once a pixel: at a quarter of the pixels, or each) */
+	world_ao.scale = config_boolean("debug.world_ao_full_resolution") ? 1.0f : 2.0f;
+	made->parameters[1][3] = world_ao.scale;
 	memcpy(made->grid, grid, sizeof(made->grid));
 	memcpy(made->cells, cells, sizeof(made->cells));
 	xgpu_backend_world_ao_window(made);
@@ -5155,6 +5175,41 @@ static void view_corners(struct render_target_entry *target, short x0, short y0,
 	corners[1] = scaled_pixel(y0, target->target.scale[1]);
 	corners[2] = scaled_pixel(x1, target->target.scale[0]);
 	corners[3] = scaled_pixel(y1, target->target.scale[1]);
+}
+
+/* found once a pixel (xgpu_stream.h's WORLD_AO_PREPASS): the window's
+pre-pass, into the backend's targets of the back buffer's size, where the
+window draws into the back buffer with its depth buffer */
+int halo_world_ao_prepass_begin(void)
+{
+	struct render_target_entry *target;
+
+	if (!device.gl_ready || !world_ao.active || world_ao.failed || device.render_target != &device.back_buffer ||
+		device.depth_stencil != &device.depth_buffer || !(target = render_target_get(&device.back_buffer)))
+		return FALSE;
+	world_ao.prepass = world_ao.sampled = TRUE;
+	xgpu_backend_world_ao_prepass(XGPU_WORLD_AO_PREPASS_BEGIN, target->target.number, NULL);
+	return TRUE;
+}
+
+/* ... done: the occlusion found from it over the window's view (its bounds
+in the game's units of the screen), as the camera saw it */
+void halo_world_ao_prepass_end(short x0, short y0, short x1, short y1, float const camera[4][4])
+{
+	struct render_target_entry *target = render_target_get(&device.back_buffer);
+	struct xgpu_world_ao_pass pass;
+	long corners[4];
+	int index;
+
+	world_ao.prepass = FALSE;
+	if (!target || !world_ao.sampled)
+		return;
+	view_corners(target, x0, y0, x1, y1, corners);
+	memcpy(pass.camera, camera, sizeof(pass.camera));
+	pass.camera[3][3] = world_ao.scale;
+	for (index = 0; index < 4; index++)
+		pass.corners[index] = (int32_t)corners[index];
+	xgpu_backend_world_ao_prepass(XGPU_WORLD_AO_PREPASS_END, target->target.number, &pass);
 }
 
 /* display.panini's pass over a window's 3D view (port/linux/game/panini.c),

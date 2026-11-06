@@ -146,6 +146,28 @@ static struct
 	uint32_t lights_world, lights_world_none;
 } stream;
 
+/* display.ambient_occlusion "world" found once a pixel (xgpu_stream.h's
+WORLD_AO_PREPASS): the pre-pass is drawing (into inputs and depth, its own
+targets of the window's target's size); each pipeline's twin, made of its
+definition (xgpu_stream_world_ao_twin), its functions and its pipeline when
+first drawn (never waited for: its pixels have no inputs, an occlusion of
+1, until they are); the occlusion, and the pass's functions */
+static struct
+{
+	BOOL active, failed;
+	uint32_t width, height;
+	uint32_t inputs, depth, pixels;
+	uint32_t pixels_width, pixels_height;
+	struct xgpu_stream_pipeline_define *definitions;
+	struct stream_pipeline *entries;
+	uint32_t vertex, pixel;
+} prepass;
+
+static void prepass_targets_bind(void)
+{
+	xgpu_metal_set_targets(prepass.inputs, 0, 0, prepass.depth, 0);
+}
+
 void xgpu_metal_stream_set_shaders(const struct xgpu_metal_stream_shaders *shaders)
 {
 	uint32_t index;
@@ -293,6 +315,12 @@ static void stream_set_targets(void *context, const struct xgpu_stream_set_targe
 	/* (the macOS app draws no VR views: views and hud_group are the VR
 	mode's) */
 	stream.color_layer = record->views < 0 ? (uint32_t)(-record->views - 1) + record->base : record->base;
+	/* (the pre-pass draws into its own) */
+	if (prepass.active)
+	{
+		prepass_targets_bind();
+		return;
+	}
 	xgpu_metal_set_targets(target_texture(record->color), 0, stream.color_layer, target_texture(record->depth),
 		record->samples != 0);
 }
@@ -308,8 +336,11 @@ a pass of the stream's own (the glows, anti-aliasing's) drew with its own:
 the next draw sets its pipeline and streams */
 static void stream_state_restore(void)
 {
-	xgpu_metal_set_targets(target_texture(stream.color), 0, stream.color_layer, target_texture(stream.depth),
-		stream.samples != 0);
+	if (prepass.active)
+		prepass_targets_bind();
+	else
+		xgpu_metal_set_targets(target_texture(stream.color), 0, stream.color_layer, target_texture(stream.depth),
+			stream.samples != 0);
 	if (stream.dynamic_set)
 		xgpu_metal_set_dynamic_state(&stream.dynamic);
 	stream.textures_dirty = YES;
@@ -319,6 +350,9 @@ static void stream_state_restore(void)
 static void stream_clear(void *context, const struct xgpu_stream_clear *record)
 {
 	(void)context;
+	/* (none in the pre-pass) */
+	if (prepass.active)
+		return;
 	if (target_get(stream.color))
 		target_get(stream.color)->written++;
 	xgpu_metal_clear((const int32_t (*)[4])record->rectangles, record->count, clear_parts(record->flags), record->color,
@@ -328,6 +362,8 @@ static void stream_clear(void *context, const struct xgpu_stream_clear *record)
 static void stream_clear_target(void *context, const struct xgpu_stream_clear_target *record)
 {
 	(void)context;
+	if (prepass.active)
+		return;
 	if (target_get(record->target))
 		target_get(record->target)->written++;
 	xgpu_metal_set_targets(target_texture(record->target), 0, 0, 0, 0);
@@ -865,6 +901,9 @@ static void pipeline_missed(const struct xgpu_stream_pipeline_key *key)
 
 /* the pipeline and layout for a draw: set_vertices's, or immediate mode's
 (integers: the inputs read as integers); NO if it cannot be drawn */
+static BOOL prepass_draw_prepare(const struct xgpu_metal_vertex_attribute *attributes, const uint16_t *strides,
+	const struct xgpu_metal_source *streams, const float (*constants)[4], uint16_t integers);
+
 static BOOL draw_prepare(const struct xgpu_metal_vertex_attribute *attributes, const uint16_t *strides,
 	const struct xgpu_metal_source *streams, const float (*constants)[4], uint16_t integers)
 {
@@ -875,6 +914,10 @@ static BOOL draw_prepare(const struct xgpu_metal_vertex_attribute *attributes, c
 
 	if (!stream.pipeline_id || !stream.definition)
 		return NO;
+	/* (the pre-pass: the twins of the draws with the world's light, read
+	from their pixels, alone) */
+	if (prepass.active)
+		return prepass_draw_prepare(attributes, strides, streams, constants, integers);
 	entry = &stream.pipelines[stream.pipeline_id];
 	memset(&variant, 0, sizeof(variant));
 	variant.integer_attributes = stream.definition->key.immediate ? 0 : integers;
@@ -1448,6 +1491,233 @@ static void stream_world_ao_window(void *context, const struct xgpu_stream_world
 	xgpu_metal_world_ao_window(record->active ? &record->block : NULL);
 }
 
+/* ---------- display.ambient_occlusion "world" found once a pixel
+
+xgpu_stream.h's WORLD_AO_PREPASS, as xgpu_vulkan_stream.c's: the window's
+opaque surfaces drawn first as their twins into the pre-pass's inputs and
+depth, the others skipped, the clears and the game's targets with them;
+then the occlusion found from them at each 2x2 block's nearest pixel (or
+each pixel's: the pass's camera[3].w), one draw of xgpu_msl_world_ao_pass's
+functions, which the surfaces then read and upsample
+(xgpu_metal_world_ao_set_pixels) until the window is done. The pass's
+pipeline is made as a map's are (prepass_prepare); a twin's on the
+compilers as first drawn, never waited for. */
+
+static uint32_t prepass_texture(uint32_t texture, uint8_t format, uint32_t width, uint32_t height, uint32_t *made_width,
+	uint32_t *made_height)
+{
+	struct xgpu_metal_texture_description description;
+
+	if (texture && *made_width == width && *made_height == height)
+		return texture;
+	if (texture)
+		xgpu_metal_texture_destroy(texture);
+	memset(&description, 0, sizeof(description));
+	description.type = XGPU_METAL_TEXTURE_2D;
+	description.format = format;
+	description.usage = XGPU_METAL_USAGE_SAMPLED | XGPU_METAL_USAGE_TARGET;
+	description.width = (uint16_t)width;
+	description.height = (uint16_t)height;
+	description.depth_or_layers = 1;
+	description.levels = 1;
+	*made_width = width;
+	*made_height = height;
+	return xgpu_metal_texture_create(&description);
+}
+
+/* the pass's pipeline (0: its functions cannot be made) */
+static int prepass_pipeline(struct xgpu_metal_pipeline *pipeline)
+{
+	if (prepass.failed)
+		return 0;
+	if (!prepass.vertex || !prepass.pixel)
+	{
+		if (!stream.shaders.world_ao_pass ||
+			!stream.shaders.world_ao_pass(stream.shaders.context, &prepass.vertex, &prepass.pixel))
+		{
+			host_logf(HOST_LOG_WARN, "metal: display.ambient_occlusion \"world\"'s pass cannot be made: its surfaces "
+				"read 1");
+			prepass.failed = YES;
+			return 0;
+		}
+	}
+	memset(pipeline, 0, sizeof(*pipeline));
+	pipeline->vertex_shader = prepass.vertex;
+	pipeline->pixel_shader = prepass.pixel;
+	pipeline->color_mask = XGPU_WRITE_RED | XGPU_WRITE_GREEN | XGPU_WRITE_BLUE | XGPU_WRITE_ALPHA;
+	pipeline->color_format = XGPU_METAL_FORMAT_RGBA32F;
+	pipeline->samples = 1;
+	return 1;
+}
+
+static void prepass_prepare(void)
+{
+	struct xgpu_metal_pipeline pipeline;
+
+	if (prepass_pipeline(&pipeline))
+		xgpu_metal_prepare(&pipeline);
+}
+
+static BOOL prepass_draw_prepare(const struct xgpu_metal_vertex_attribute *attributes, const uint16_t *strides,
+	const struct xgpu_metal_source *streams, const float (*constants)[4], uint16_t integers)
+{
+	uint32_t id = stream.pipeline_id, index;
+	struct xgpu_stream_pipeline_define twin = *stream.definition;
+	struct xgpu_metal_pipeline pipeline;
+	struct xgpu_metal_stream_variant variant;
+	struct stream_pipeline *entry;
+
+	if (!prepass.entries || !xgpu_stream_world_ao_twin(&twin))
+		return NO;
+	entry = &prepass.entries[id];
+	if (memcmp(&twin, &prepass.definitions[id], sizeof(twin)))
+	{
+		prepass.definitions[id] = twin;
+		memset(entry, 0, sizeof(*entry));
+	}
+	memset(&variant, 0, sizeof(variant));
+	variant.integer_attributes = twin.key.immediate ? 0 : integers;
+	memcpy(variant.border, stream.border, sizeof(variant.border));
+	if (!pipeline_shaders(entry, &prepass.definitions[id], &variant))
+		return NO;
+	xgpu_metal_pipeline_from_key(&twin.key, &pipeline);
+	pipeline.vertex_shader = entry->vertex_shader;
+	pipeline.pixel_shader = entry->pixel_shader;
+	memcpy(pipeline.attributes, attributes, sizeof(pipeline.attributes));
+	memcpy(pipeline.strides, strides, sizeof(pipeline.strides));
+	/* (made on the compilers as first drawn, never waited for) */
+	if (!xgpu_metal_pipeline_made(&pipeline))
+	{
+		xgpu_metal_prepare(&pipeline);
+		return NO;
+	}
+	uniforms_update();
+	textures_bind();
+	xgpu_metal_set_pipeline(&pipeline);
+	for (index = 0; index < XGPU_METAL_STREAM_COUNT; index++)
+		xgpu_metal_set_stream(index, streams[index]);
+	xgpu_metal_set_constant_attributes(constants);
+	return YES;
+}
+
+static void stream_world_ao_prepass(void *context, const struct xgpu_stream_world_ao_prepass *record)
+{
+	struct stream_target *target = target_get(record->target);
+
+	(void)context;
+	if (stream.preparing)
+		return;
+	if (record->phase == XGPU_WORLD_AO_PREPASS_BEGIN)
+	{
+		static const float zero[4];
+		struct xgpu_metal_pipeline pipeline;
+
+		/* (what the surfaces read: 1, until the pass finds it) */
+		xgpu_metal_world_ao_set_pixels(0);
+		if (!target || !prepass_pipeline(&pipeline))
+			return;
+		if (!prepass.definitions)
+		{
+			prepass.definitions = calloc(XGPU_STREAM_PIPELINES, sizeof(*prepass.definitions));
+			prepass.entries = calloc(XGPU_STREAM_PIPELINES, sizeof(*prepass.entries));
+			if (!prepass.definitions || !prepass.entries)
+			{
+				free(prepass.definitions);
+				free(prepass.entries);
+				prepass.definitions = NULL;
+				prepass.entries = NULL;
+				return;
+			}
+		}
+		{
+			uint32_t width = prepass.width, height = prepass.height;
+
+			prepass.inputs = prepass_texture(prepass.inputs, XGPU_METAL_FORMAT_RGBA32UI, target->description.width,
+				target->description.height, &width, &height);
+			width = prepass.width;
+			height = prepass.height;
+			prepass.depth = prepass_texture(prepass.depth, XGPU_METAL_FORMAT_D24S8, target->description.width,
+				target->description.height, &width, &height);
+			prepass.width = width;
+			prepass.height = height;
+		}
+		if (!prepass.inputs || !prepass.depth)
+			return;
+		prepass.active = YES;
+		prepass_targets_bind();
+		xgpu_metal_clear(NULL, 0, XGPU_METAL_CLEAR_COLOR | XGPU_METAL_CLEAR_CHANNELS | XGPU_METAL_CLEAR_DEPTH |
+			XGPU_METAL_CLEAR_STENCIL, zero, 1.0f, 0);
+		return;
+	}
+	if (record->phase == XGPU_WORLD_AO_PREPASS_END && prepass.active)
+	{
+		const int32_t *corners = record->pass.corners;
+		/* (found at a quarter of the pixels: each 2x2 block's) */
+		int32_t scale = record->pass.camera[3][3] >= 2.0f ? 2 : 1, rectangle[4];
+		uint32_t width = ((uint32_t)prepass.width + (uint32_t)scale - 1) / (uint32_t)scale;
+		uint32_t height = ((uint32_t)prepass.height + (uint32_t)scale - 1) / (uint32_t)scale;
+		struct xgpu_metal_pipeline pipeline;
+		struct xgpu_metal_dynamic_state dynamic;
+		struct xgpu_metal_sampler sampler;
+		int axis;
+
+		prepass.active = NO;
+		for (axis = 0; axis < 2; axis++)
+		{
+			int32_t size = (int32_t)(axis ? prepass.height : prepass.width);
+			int32_t low = corners[axis] < 0 ? 0 : corners[axis] > size ? size : corners[axis];
+			int32_t high = corners[axis + 2] < low ? low : corners[axis + 2] > size ? size : corners[axis + 2];
+
+			rectangle[axis] = low / scale;
+			rectangle[axis + 2] = (high + scale - 1) / scale;
+		}
+		prepass.pixels = prepass_texture(prepass.pixels, XGPU_METAL_FORMAT_RGBA32F, width, height, &prepass.pixels_width,
+			&prepass.pixels_height);
+		if (prepass.pixels && rectangle[2] > rectangle[0] && rectangle[3] > rectangle[1] && prepass_pipeline(&pipeline))
+		{
+			if (!xgpu_metal_pipeline_made(&pipeline))
+			{
+				xgpu_metal_prepare(&pipeline);
+			}
+			else
+			{
+				uint32_t kind = xgpu_metal_pass_kind(XGPU_METAL_PASS_WORLD_AO);
+
+				xgpu_metal_set_targets(prepass.pixels, 0, 0, 0, 0);
+				xgpu_metal_set_pipeline(&pipeline);
+				memset(&dynamic, 0, sizeof(dynamic));
+				dynamic.viewport[0] = dynamic.scissor[0] = rectangle[0];
+				dynamic.viewport[1] = dynamic.scissor[1] = rectangle[1];
+				dynamic.viewport[2] = dynamic.scissor[2] = rectangle[2] - rectangle[0];
+				dynamic.viewport[3] = dynamic.scissor[3] = rectangle[3] - rectangle[1];
+				dynamic.depth_range[1] = 1.0f;
+				xgpu_metal_set_dynamic_state(&dynamic);
+				memset(&sampler, 0, sizeof(sampler));
+				sampler.mip_filter = XGPU_METAL_MIP_NONE;
+				sampler.address_u = sampler.address_v = sampler.address_w = XGPU_METAL_ADDRESS_CLAMP;
+				sampler.max_anisotropy = 1;
+				xgpu_metal_set_texture(0, prepass.inputs, &sampler);
+				for (axis = 1; axis < 4; axis++)
+					xgpu_metal_set_texture((uint32_t)axis, 0, &sampler);
+				xgpu_metal_set_draw_uniforms(&record->pass, sizeof(record->pass));
+				xgpu_metal_draw(XGPU_METAL_PRIMITIVE_TRIANGLES, 3, 0, 0,
+					(struct xgpu_metal_source){ XGPU_METAL_SOURCE_NONE, 0, 0, 0 });
+				xgpu_metal_pass_kind(kind);
+				xgpu_metal_world_ao_set_pixels(prepass.pixels);
+			}
+		}
+		stream_state_restore();
+		return;
+	}
+	/* (_NONE: the surfaces read 1) */
+	if (prepass.active)
+	{
+		prepass.active = NO;
+		stream_state_restore();
+	}
+	xgpu_metal_world_ao_set_pixels(0);
+}
+
 /* the game's renderer's category of the draws from now on
 (XGPU_STREAM_CATEGORY's value: rasterizer.h's _rasterizer_profile_*), as the
 kind of pass HALO_METAL_PASS_TIMES sums them under */
@@ -1497,11 +1767,15 @@ static void stream_present(void *context, uint32_t back_buffer)
 	stream.back_buffer = back_buffer;
 }
 
+static void prepass_prepare(void);
+
 static void stream_prepare(void *context)
 {
 	(void)context;
 	stream.preparing = YES;
 	xgpu_metal_prepare_begin();
+	/* (display.ambient_occlusion "world"'s pass's pipeline, as the map's are) */
+	prepass_prepare();
 }
 
 static void stream_exiting(void *context)
@@ -1651,6 +1925,7 @@ const struct host_render_backend *xgpu_metal_stream_backend(void)
 		backend.world_ao_field = stream_world_ao_field;
 		backend.world_ao_cascades = stream_world_ao_cascades;
 		backend.world_ao_window = stream_world_ao_window;
+		backend.world_ao_prepass = stream_world_ao_prepass;
 	}
 	return &backend;
 }

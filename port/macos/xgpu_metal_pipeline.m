@@ -47,6 +47,8 @@ static const struct xgpu_metal_format_information formats[XGPU_METAL_FORMAT_COUN
 	[XGPU_METAL_FORMAT_R8_SNORM] = { MTLPixelFormatR8Snorm, 1, 0, 0, 0, SWIZZLE(Red, Green, Blue, Alpha), 0 },
 	[XGPU_METAL_FORMAT_R8] = { MTLPixelFormatR8Unorm, 1, 0, 0, 0, SWIZZLE(Red, Green, Blue, Alpha), 0 },
 	[XGPU_METAL_FORMAT_RG8] = { MTLPixelFormatRG8Unorm, 2, 0, 0, 0, SWIZZLE(Red, Green, Blue, Alpha), 0 },
+	[XGPU_METAL_FORMAT_RGBA32UI] = { MTLPixelFormatRGBA32Uint, 16, 0, 0, 0, SWIZZLE(Red, Green, Blue, Alpha), 0 },
+	[XGPU_METAL_FORMAT_RGBA32F] = { MTLPixelFormatRGBA32Float, 16, 0, 0, 0, SWIZZLE(Red, Green, Blue, Alpha), 0 },
 	[XGPU_METAL_FORMAT_RG8_SNORM] = { MTLPixelFormatRG8Snorm, 2, 0, 0, 0, SWIZZLE(Red, Green, Blue, Alpha), 0 },
 };
 
@@ -289,7 +291,8 @@ NSString *const xgpu_metal_fixed_source =
 static uint8_t target_format(uint8_t format)
 {
 	return format == 1 ? XGPU_METAL_FORMAT_BGRA8 : format == 2 ? XGPU_METAL_FORMAT_D24S8 :
-		format == 3 ? XGPU_METAL_FORMAT_RGBA16F : XGPU_METAL_FORMAT_NONE;
+		format == 3 ? XGPU_METAL_FORMAT_RGBA16F :
+		format == XGPU_STREAM_FORMAT_WORLD_AO_INPUTS ? XGPU_METAL_FORMAT_RGBA32UI : XGPU_METAL_FORMAT_NONE;
 }
 
 void xgpu_metal_pipeline_from_key(const struct xgpu_stream_pipeline_key *key, struct xgpu_metal_pipeline *pipeline)

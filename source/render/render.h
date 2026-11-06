@@ -171,6 +171,11 @@ void render_object_shadows(
 
 extern struct render_globals render;
 extern boolean render_particle_systems_enabled;
+/* port: display.ambient_occlusion "world"'s pre-pass of the window's
+opaque surfaces is being drawn (port/linux/game/world_ao.c): their draws
+alone, not what they queue for later (the transparent parts, the widgets,
+the fog screen's models), nor a second search for the objects (render.c) */
+extern boolean render_world_ao_prepass;
 
 /* ---------- public code */
 

@@ -33,6 +33,7 @@ renderer" in port/linux/README.md.
 
 /* (xgpu_stream.h) */
 struct xgpu_world_ao_block;
+struct xgpu_world_ao_pass;
 
 struct xgpu_vertex_program;
 
@@ -130,6 +131,10 @@ uploaded (width 0: released) */
 void xgpu_backend_world_ao_window(const struct xgpu_world_ao_block *block);
 void xgpu_backend_world_ao_field(int part, unsigned long width, unsigned long height, unsigned long depth,
 	unsigned long z_first, unsigned long z_count, const void *data);
+/* ... found once a pixel (xgpu_stream.h's WORLD_AO_PREPASS): the pre-pass
+begun (XGPU_WORLD_AO_PREPASS_BEGIN, its targets target's size), ended and
+the occlusion found from it over the window (_END, pass), or none (_NONE) */
+void xgpu_backend_world_ao_prepass(int phase, xgpu_target target, const struct xgpu_world_ao_pass *pass);
 /* a box of the distance-field scene's cascades' texture (xgpu.h's
 XGPU_WORLD_CASCADE*): its first texel, its size, two signed bytes a texel,
 x fastest (width 0: released) */
@@ -359,6 +364,10 @@ enum
 	XGPU_FORMAT_NONE, XGPU_FORMAT_BGRA8, XGPU_FORMAT_D24S8,
 	/* half floats: the back buffer with display.hdr (xgpu_hdr.h) */
 	XGPU_FORMAT_RGBA16F,
+	/* (display.ambient_occlusion "world"'s pre-pass's inputs: four 32-bit
+	unsigned words, xgpu.h's XGPU_AMBIENT_OCCLUSION_WORLD_INPUTS; the
+	backends' own target, never the game's) */
+	XGPU_FORMAT_WORLD_AO_INPUTS,
 };
 
 /* the vertex shader's lighting variant: none, a model lighting program's

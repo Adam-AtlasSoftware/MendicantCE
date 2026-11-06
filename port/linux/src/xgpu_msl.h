@@ -65,6 +65,10 @@ past the combiner's places, 8 to 19) */
 /* (the distance-field scene's cascades: xgpu.h's XGPU_WORLD_CASCADE*) */
 #define XGPU_MSL_TEXTURE_WORLD_CASCADES 22
 #define XGPU_MSL_BUFFER_WORLD_AO 23
+/* (display.ambient_occlusion "world" found once a pixel: its texture, a
+float a pixel, which the draws with XGPU_AMBIENT_OCCLUSION_WORLD_SAMPLED
+read; past the combiner's places and the objects' atlas) */
+#define XGPU_MSL_TEXTURE_WORLD_AO_PIXELS 21
 
 /* the draw's values both stages read, laid out alike in C and in Metal
 (float4s, and floats in fours): d3d8_gl.c's draw uniforms, the per-pixel
@@ -118,6 +122,19 @@ struct xgpu_msl_options
 	const char *debug_expression;
 	BOOL debug_texture0, debug_flat;
 };
+
+/* display.ambient_occlusion "world" found once a pixel (xgpu_stream.h's
+WORLD_AO_PREPASS): its pass's functions, one source. xgpu_world_ao_vertex
+covers the viewport with one triangle; xgpu_world_ao_pass draws the
+occlusion into an RGBA32Float target, at each 2x2 block's nearest pixel at a
+quarter of the pixels (the pass's camera[3].w 2) or at each pixel (1): the
+occlusion, the pixel's distance from the eye, its normal octahedral (what
+the surfaces upsample it by). Its textures: the pre-pass's inputs (0,
+RGBA32Uint); the field's and the objects' atlas and the window's block where
+the surfaces have them; the pass's struct xgpu_world_ao_pass at buffer
+XGPU_MSL_BUFFER_UNIFORMS. The vertex function's source, or (pixel) the
+pass's. Returns a malloc'd string. */
+char *xgpu_msl_world_ao_pass(BOOL pixel);
 
 /* the vertex program (xgpu_shader.h) as a Metal vertex function,
 xgpu_vertex: packed_attribute_mask's attributes are NORMPACKED3,

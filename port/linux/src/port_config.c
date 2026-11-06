@@ -2324,6 +2324,13 @@ static const struct config_setting config_settings[] =
 	{ "debug.world_ao_view", _config_boolean, "false", "HALO_WORLD_AO_VIEW", _environment_value, _platform_all,
 		"With display.ambient_occlusion \"world\", the surfaces it shades drawn as\n"
 		"its occlusion alone, in grey." },
+	{ "debug.world_ao_inline", _config_boolean, "false", "HALO_WORLD_AO_INLINE", _environment_value, _platform_all,
+		"With display.ambient_occlusion \"world\", each surface finds its own\n"
+		"occlusion as it draws (as before it was found once a pixel), to compare." },
+	{ "debug.world_ao_full_resolution", _config_boolean, "false", "HALO_WORLD_AO_FULL_RESOLUTION", _environment_value,
+		_platform_all,
+		"With display.ambient_occlusion \"world\", its occlusion found at every\n"
+		"pixel, not at a quarter of them (one a 2x2 block, upsampled), to compare." },
 	{ "debug.world_ao_test", _config_string, "\"\"", "HALO_WORLD_AO_TEST", _environment_value, _platform_all,
 		"With display.ambient_occlusion \"world\", a made-up field and shapes in\n"
 		"place of the level's and the objects' (docs/world-ao.md, \"D. Shading\"):\n"

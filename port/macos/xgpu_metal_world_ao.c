@@ -51,6 +51,9 @@ static struct
 	uint32_t zeros;
 	struct xgpu_metal_source block;
 	int made;
+	/* the occlusion found once a pixel the draws read (0: its stand-in, an
+	occlusion of 1) */
+	uint32_t pixels, pixels_stand_in;
 	/* (whether the GPU has the SIMD-groups' reductions: the block's
 	parameters[1].z) */
 	int simd;
@@ -121,6 +124,19 @@ static void world_ao_make(void)
 	if (world_ao.stand_ins[XGPU_STREAM_WORLD_AO_ATLAS])
 		xgpu_metal_texture_upload(world_ao.stand_ins[XGPU_STREAM_WORLD_AO_ATLAS], 0, 0, 0, 0, 0, 1, 1, 1, &far_outside,
 			1, 1);
+	{
+		struct xgpu_metal_texture_description description;
+		static const float one[4] = { 1.0f, 0.0f, 0.0f, 0.0f };
+
+		memset(&description, 0, sizeof(description));
+		description.type = XGPU_METAL_TEXTURE_2D;
+		description.format = XGPU_METAL_FORMAT_RGBA32F;
+		description.usage = XGPU_METAL_USAGE_SAMPLED;
+		description.width = description.height = description.depth_or_layers = description.levels = 1;
+		world_ao.pixels_stand_in = xgpu_metal_texture_create(&description);
+		if (world_ao.pixels_stand_in)
+			xgpu_metal_texture_upload(world_ao.pixels_stand_in, 0, 0, 0, 0, 0, 1, 1, 1, one, 16, 16);
+		xgpu_metal_set_world_ao_pixels(world_ao.pixels_stand_in);
 	world_ao.cascades_stand_in = world_ao_cascades_make(1, 1, 1);
 	if (world_ao.cascades_stand_in)
 	{
@@ -280,4 +296,11 @@ void xgpu_metal_world_ao_window(const struct xgpu_world_ao_block *block)
 		world_ao.block.size = world_ao.zeros ? sizeof(*block) : 0;
 	}
 	world_ao_bind();
+}
+
+void xgpu_metal_world_ao_set_pixels(uint32_t texture)
+{
+	world_ao_make();
+	world_ao.pixels = texture;
+	xgpu_metal_set_world_ao_pixels(texture ? texture : world_ao.pixels_stand_in);
 }

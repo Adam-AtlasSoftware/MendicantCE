@@ -319,7 +319,7 @@ static struct
 	/* the enhanced dynamic lights' block, cells and world */
 	struct xgpu_metal_source dynamic_lights[3];
 	/* display.ambient_occlusion "world"'s field and block */
-	uint32_t world_ao_field, world_ao_table, world_ao_scenery, world_ao_objects;
+	uint32_t world_ao_field, world_ao_table, world_ao_scenery, world_ao_objects, world_ao_pixels;
 	struct xgpu_metal_source world_ao_block;
 
 	/* an image for the presentation that a picture is copied into (a
@@ -537,7 +537,8 @@ frame's picture's copy for the presentation */
 
 static const char *const profile_kind_names[PROFILE_KINDS] =
 {
-	"other", "sky", "world", "transparents", "water", "effects", "hud", "tone map", "anti-aliasing", "panini", "aside",
+	"other", "sky", "world", "transparents", "water", "effects", "hud", "tone map", "anti-aliasing", "panini", "world ao",
+	"aside",
 	"copies", "present",
 };
 
@@ -3632,6 +3633,12 @@ void xgpu_metal_set_world_ao(uint32_t field, uint32_t table, uint32_t scenery, u
 	metal.dirty |= _dirty_world_ao;
 }
 
+void xgpu_metal_set_world_ao_pixels(uint32_t texture)
+{
+	metal.world_ao_pixels = texture;
+	metal.dirty |= _dirty_world_ao;
+}
+
 void xgpu_metal_set_constant_attributes(const float (*values)[4])
 {
 	if (!memcmp(metal.constant_attributes, values, sizeof(metal.constant_attributes)))
@@ -3827,6 +3834,9 @@ static BOOL draw_state_apply(id<MTLRenderCommandEncoder> render)
 			[render setFragmentTexture:scenery->texture atIndex:XGPU_METAL_TEXTURE_WORLD_AO_SCENERY];
 		if (objects)
 			[render setFragmentTexture:objects->texture atIndex:XGPU_METAL_TEXTURE_WORLD_AO_OBJECTS];
+		if (texture_get(metal.world_ao_pixels))
+			[render setFragmentTexture:texture_get(metal.world_ao_pixels)->texture
+				atIndex:XGPU_METAL_TEXTURE_WORLD_AO_PIXELS];
 		if (buffer)
 		{
 			[render setVertexBuffer:buffer offset:offset atIndex:XGPU_METAL_BUFFER_WORLD_AO];
@@ -3835,11 +3845,11 @@ static BOOL draw_state_apply(id<MTLRenderCommandEncoder> render)
 	}
 	/* (the field too: in use until the draw's command buffer is done) */
 	{
-		uint32_t const fields[4] = { metal.world_ao_field, metal.world_ao_table, metal.world_ao_scenery,
-			metal.world_ao_objects };
+		uint32_t const fields[5] = { metal.world_ao_field, metal.world_ao_table, metal.world_ao_scenery,
+			metal.world_ao_objects, metal.world_ao_pixels };
 		int part;
 
-		for (part = 0; part < 4; part++)
+		for (part = 0; part < 5; part++)
 		{
 			struct texture_entry *entry = texture_get(fields[part]);
 

@@ -424,10 +424,42 @@ int main(int argc, char **argv)
 			/* (unlit only where lit: else the same draw) */
 			for (unlit = 0, lit = 1; unlit < 2 && lit; unlit++)
 			{
-				struct xgpu_metal_pipeline_state_key state;
-				struct xgpu_manifest_draw draw;
+				struct xgpu_manifest_draw derived;
+				int form;
 
-				lit = xgpu_manifest_derive(&manifest.draws[index], &manifest.contexts[index], &settings, unlit, &draw);
+				lit = xgpu_manifest_derive(&manifest.draws[index], &manifest.contexts[index], &settings, unlit, &derived);
+				/* (display.ambient_occlusion "world"'s draw in each of its forms:
+				finding its occlusion itself, reading it found once a pixel, and
+				that's twin in the pre-pass; another's twin as an occluder in the
+				pre-pass: xgpu_stream.h) */
+				for (form = 0; form < 3; form++)
+				{
+				struct xgpu_metal_pipeline_state_key state;
+				struct xgpu_manifest_draw draw = derived;
+
+				if (form)
+				{
+					struct xgpu_stream_pipeline_define twin;
+					int world = (draw.key.pixel.ambient_occlusion & 0x30u) == XGPU_AMBIENT_OCCLUSION_WORLD;
+
+					/* (another draw among a window's opaque surfaces': its twin as
+					an occluder, where it is one) */
+					if (!world && (form == 1 || !manifest.contexts[index].world))
+						continue;
+					if (world)
+						draw.key.pixel.ambient_occlusion |= XGPU_AMBIENT_OCCLUSION_WORLD_SAMPLED;
+					else if (draw.key.pixel.ambient_occlusion)
+						break;
+					if (form == 2)
+					{
+						memset(&twin, 0, sizeof(twin));
+						twin.key = draw.key;
+						twin.pixel_program.ambient_occlusion = draw.key.pixel.ambient_occlusion;
+						if (!xgpu_stream_world_ao_twin(&twin))
+							break;
+						draw.key = twin.key;
+					}
+				}
 				if (!derived_new(&draw))
 					continue;
 				derived_count++;
@@ -446,6 +478,7 @@ int main(int argc, char **argv)
 				if (pipeline_new(&state))
 					prebuild_script_pipeline(&state, function_name(state.vertex_shader),
 						function_name(state.pixel_shader));
+				}
 			}
 		}
 	}
@@ -485,6 +518,9 @@ int main(int argc, char **argv)
 
 		if (!xgpu_metal_shaders()->halo(NULL, &halo_vertex, &halo_pixel))
 			fail("cannot write the glows' functions");
+		/* (display.ambient_occlusion "world"'s pass's) */
+		if (!xgpu_metal_shaders()->world_ao_pass(NULL, &halo_vertex, &halo_pixel))
+			fail("cannot write the world occlusion's pass's functions");
 		for (index = 0; index < XGPU_METAL_POST_FUNCTION_COUNT; index++)
 			xgpu_metal_pixel_shader_create(xgpu_metal_post_functions[index].source, xgpu_metal_post_functions[index].size,
 				xgpu_metal_post_functions[index].entry, NULL);

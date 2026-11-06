@@ -107,6 +107,13 @@ handed to the renderer before its opaque surfaces draw, and taken away
 after the lightmap pass (the later passes never read it) */
 void world_ao_window_begin(short local_player_index, short rasterizer_target, float const camera_position[3]);
 void world_ao_window_end(void);
+/* ... found once a pixel (port/linux/src/xgpu_stream.h's WORLD_AO_PREPASS):
+the window's opaque surfaces' pre-pass begun (FALSE: none, the surfaces
+find their own as they draw), and ended, the occlusion found from it over
+the window's viewport (the game's screen's bounds) as the camera saw it
+(xgpu_stream.h's struct xgpu_world_ao_pass's camera) */
+int world_ao_prepass_begin(void);
+void world_ao_prepass_end(short x0, short y0, short x1, short y1, float const camera[4][4]);
 /* which object is drawn now (render_objects: its own proxies do not shade
 it; -1 none, the structure); the first-person weapon drawn (TRUE) and done
 (FALSE: none drawn now), which the occlusion leaves as it is */
@@ -195,6 +202,55 @@ float world_ao_occlusion(float const parameters[2][4], struct world_sdf_volume c
 alone, or every one (the lightmap pass where its page has no layer) */
 long world_ao_proxies_walked(float const parameters[2][4], long count, float reference, int lightmap);
 
+/* found once a pixel (port/linux/src/xgpu_stream.h's WORLD_AO_PREPASS:
+the pre-pass's inputs, then the occlusion's pass; the
+emitters' world_ao_pass_*). A pixel's world position, its distance from
+the eye (the block's grid[0], from which the pre-pass measured it) along
+the ray through its centre (x, y in its target's pixels) as the camera
+(struct xgpu_world_ao_pass's) saw it */
+void world_ao_pass_position(float const camera[4][4], long const corners[4], float x, float y, float distance,
+	float const eye[3], float point[3]);
+/* a pixel's inputs as the pre-pass writes them (xgpu.h's
+XGPU_AMBIENT_OCCLUSION_WORLD_INPUTS: the normal octahedral, the owner, the
+reference or the page's texel as a half, the lightmap pass's, every shape
+walked; its distance from the eye, a float's bits; a word spare), and read
+again (0: none drawn there) */
+#define XGPU_WORLD_AO_INPUT_LIGHTMAP_BIT 0x100u
+#define XGPU_WORLD_AO_INPUT_ALL_SHAPES_BIT 0x200u
+#define XGPU_WORLD_AO_INPUT_PRESENT_BIT 0x400u
+void world_ao_inputs_pack(float const normal[3], float owner, float value, int lightmap, int all_shapes,
+	float distance, unsigned int words[4]);
+int world_ao_inputs_unpack(unsigned int const words[4], float normal[3], float *owner, float *value, int *lightmap,
+	int *all_shapes, float *distance);
+/* the occlusion at a pixel from its inputs (1 none) and its position, as
+the occlusion's pass finds it: world_ao_occlusion's, its proxies those of
+the point's cell alone */
+float world_ao_pass_occlusion(float const parameters[2][4], struct world_sdf_volume const *volume,
+	struct world_proxy const *proxies, long count, float const grid[2][4],
+	unsigned int const cells[WORLD_AO_GRID_CELLS / 2][4], float const point[3], unsigned int const words[4]);
+
+/* the occlusion found at a quarter of the pixels (scale 2: each 2x2
+block's, at its nearest pixel; 1, each pixel's own), as the pass writes it
+(four floats a texel: the occlusion, the pixel's distance from the eye
+(0 none), its normal octahedral) and a surface's pixel reads it (at its
+centre x, y, in its target's pixels, its distance from the eye, how
+squarely it faces the eye (|n . the eye's ray|) and its unit normal): the
+four texels about it by their bilinear weights and their closeness, each
+their distance's (relative, by how squarely the surface faces the eye, no
+less than WORLD_AO_UPSAMPLE_FACING; WORLD_AO_UPSAMPLE_DEPTH of it halving
+it) times their normal's (the cosine's eighth power); where their weights'
+sum is under WORLD_AO_UPSAMPLE_LEAST, the closest texel of the 4x4 about
+it (the emitters' world_ao_upsample) */
+struct world_ao_pass_texel
+{
+	float occlusion, distance, normal[2];
+};
+#define WORLD_AO_UPSAMPLE_DEPTH 0.02f
+#define WORLD_AO_UPSAMPLE_FACING 0.2f
+#define WORLD_AO_UPSAMPLE_LEAST 1.0e-4f
+float world_ao_upsample(struct world_ao_pass_texel const *texels, long width, long height, float scale, float x,
+	float y, float distance, float facing, float const normal[3]);
+
 /* ---------- the front end's (port/linux/src/d3d8_device.c) */
 
 /* the window's world occlusion: the field's place and the parameters
@@ -215,6 +271,10 @@ the world's light when it is on, which the renderer's manifest notes of
 each draw with it off too, so that the Mac's and iOS's shader libraries
 have the world's (xgpu_manifest.h's context) */
 void halo_world_ao_span(int span);
+/* the window's pre-pass begun (FALSE: none can be drawn), and ended, the
+occlusion found from it (xgpu_backend_world_ao_prepass) */
+int halo_world_ao_prepass_begin(void);
+void halo_world_ao_prepass_end(short x0, short y0, short x1, short y1, float const camera[4][4]);
 /* a part of the field uploaded (WORLD_AO_FIELD_*: world_sdf.h's table of
 cells, 4 bytes each, or its atlas of bricks' voxels, signed bytes), slices
 z_first to z_first + z_count - 1 of a width * height * depth volume; width

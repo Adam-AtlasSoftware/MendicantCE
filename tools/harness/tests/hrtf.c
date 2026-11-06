@@ -27,6 +27,10 @@ same calls through this mixer with no HRTF beside it): each ear's level in
 each octave from 125 Hz to 16 kHz against no HRTF's, and the time between
 the ears (below 1.5 kHz), every 30 degrees round at 40, 20 and 0 degrees
 below and above (recorded_figures), which the mixer's table was fitted to.
+Third, "recorded-behind": on 5.1 (its AC-3 decoded), the back pair's at 135
+degrees, 40 below and 40 above, which the mixer plays as the direction
+mirrored ahead and then brighter on the far ear (hrtf_behind), the same
+way, to 16.9 kHz (the AC-3's bandwidth; recorded_behind).
 (The notch's figures, the deepest single frequency from 4 to 16 kHz, are
 printed but not judged: the table's bands are a third of an octave and
 wider, and the recordings' notches ahead are two, at 6.3 and 10 kHz, as
@@ -105,6 +109,10 @@ static int direction_at(int azimuth, int elevation)
 	return (elevation + 40) / 10 * AZIMUTHS + ((azimuth % 360 + 360) % 360) / 15;
 }
 
+/* whether our_response places its sound as 5.1's back pair plays one
+behind (hrtf_place's behind) */
+static BOOL placing_behind;
+
 /* our response from direction (both ears, FRAMES each), through the HRTF
 as the mixer has it (hrtf_place, hrtf_process), 3 units away; its
 parameters in placed */
@@ -119,7 +127,7 @@ static void our_response(int direction, float *left, float *right, struct hrtf_p
 	hrtf_initialize();
 	memset(&parameters, 0, sizeof(parameters));
 	hrtf_place((float)(3.0 * sin(azimuth) * cos(elevation)), (float)(3.0 * sin(elevation)),
-		(float)(3.0 * cos(azimuth) * cos(elevation)), 3.0f, &parameters);
+		(float)(3.0 * cos(azimuth) * cos(elevation)), 3.0f, placing_behind, &parameters);
 	parameters.gain = 1.0f;
 	if (placed)
 		*placed = parameters;
@@ -185,13 +193,14 @@ static void spectrum(const float *x, double *power_db, double *re_out, double *i
 	}
 }
 
-static double band_db(const double *power_db, double center)
+/* the mean power (dB) of the octave about center, to top Hz */
+static double band_db_to(const double *power_db, double center, double top)
 {
 	double low = center / sqrt(2.0), high = center * sqrt(2.0), sum = 0.0;
 	int k, count = 0;
 
-	if (high > 22000.0)
-		high = 22000.0;
+	if (high > top)
+		high = top;
 	for (k = 0; k < BINS; k++)
 	{
 		if (bin_hertz(k) >= low && bin_hertz(k) < high)
@@ -201,6 +210,11 @@ static double band_db(const double *power_db, double center)
 		}
 	}
 	return 10.0 * log10(sum / count + 1e-20);
+}
+
+static double band_db(const double *power_db, double center)
+{
+	return band_db_to(power_db, center, 22000.0);
 }
 
 /* the lag (ms) of the left ear's greatest cross-correlation with the
@@ -393,6 +407,21 @@ static const struct
 	{ 180, +40, 0.000, { 0.8, 0.6, -0.2, -0.8, -0.7, -5.1, -6.2, -19.1 }, { 0.8, 0.6, -0.2, -0.8, -0.7, -5.1, -6.2, -19.1 } },
 };
 
+/* the Xbox's back pair on 5.1 recorded at 135 degrees (see
+"recorded-behind"): the elevation, each ear's level in each octave (dB, to
+16.9 kHz; left, then right). Its front pair at 45 degrees, the direction
+mirrored, was 3.2 and 3.6 dB duller on the far ear at 8 kHz, below and
+above: -11.5 and -14.0 dB */
+static const struct
+{
+	int elevation;
+	double left[OCTAVES], right[OCTAVES];
+} recorded_behind[] =
+{
+	{ -40, { -1.8, -1.9, -2.5, -3.7, -4.7, -10.9, -8.3, -12.5 }, { 2.3, 2.5, 3.2, 4.4, 3.4, -0.1, 2.1, -5.0 } },
+	{ +40, { 0.3, -0.1, -1.6, -5.4, -5.3, -6.3, -10.4, -16.4 }, { 2.8, 2.7, 2.5, 2.7, 2.6, 2.9, 2.4, 0.9 } },
+};
+
 static void print_figures(const char *name, const struct figures *f)
 {
 	int i, b;
@@ -568,6 +597,39 @@ int main(int argc, char **argv)
 				}
 			}
 		}
+		return 0;
+	}
+	/* on 5.1, the back pair at 135 degrees, 40 below and above: each ear's
+	level in each octave as recorded's tolerances */
+	CASE("recorded-behind")
+	{
+		int d;
+
+		placing_behind = TRUE;
+		for (d = 0; d < (int)(sizeof(recorded_behind) / sizeof(recorded_behind[0])); d++)
+		{
+			static float left[FRAMES], right[FRAMES];
+			double re[2][BINS], im[2][BINS], power[2][BINS];
+			int elevation = recorded_behind[d].elevation, ear;
+
+			/* (behind, as the direction mirrored ahead) */
+			our_response(direction_at(45, elevation), left, right, NULL);
+			spectrum(left, power[0], re[0], im[0]);
+			spectrum(right, power[1], re[1], im[1]);
+			for (ear = 0; ear < 2; ear++)
+			{
+				for (b = 0; b < OCTAVES; b++)
+				{
+					double level = band_db_to(power[ear], octaves[b], 16900.0);
+					double xbox = ear ? recorded_behind[d].right[b] : recorded_behind[d].left[b];
+
+					CHECK(fabs(level - xbox) < (octaves[b] <= 2000 ? 1.0 : octaves[b] <= 8000 ? 2.0 : 3.0),
+						"5.1's back pair, 135 degrees round, %d up: the %s ear %+.1f dB at %.0f Hz, the Xbox's %+.1f",
+						elevation, ear ? "right" : "left", level, octaves[b], xbox);
+				}
+			}
+		}
+		placing_behind = FALSE;
 		return 0;
 	}
 	/* behind, the high frequencies within 3 dB of the Xbox's loss */
