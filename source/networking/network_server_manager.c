@@ -486,6 +486,7 @@ void p2p_set_game_player_counts(int count, int maximum);
 void p2p_set_game_listing(const char *name, const char *map, const char *gametype, int engine_type, int kind,
 	int open, int in_progress, int has_teams);
 void p2p_set_game_listing_standard(int standard, int mixed, int rate);
+void p2p_set_game_listing_forge(int forge);
 /* (and its bots, apart from its players: network_game_server_port_bots) */
 void p2p_set_game_bots(int count);
 /* port: game_engine.c's (a player's score as the game type has it) */
@@ -1619,6 +1620,9 @@ static void network_game_server_list(
 	them, and its rate: network_standard.c) */
 	p2p_set_game_listing_standard(network_standard_hosting(), network_standard_opence_joins_open(),
 		(int)network_standard_server_rate(state == _network_game_server_state_pregame && !in_progress));
+	/* port: (a Forge game, which only a build with Forge joins:
+	HALO_PORT_FORGE_VERSION_BIT) */
+	p2p_set_game_listing_forge((game->variant.flags & GAME_VARIANT_FORGE_FLAG) != 0);
 }
 
 /* port: a bot's score in the game in progress (game_engine.c's), 0 for none */

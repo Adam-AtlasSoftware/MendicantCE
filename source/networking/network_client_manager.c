@@ -844,6 +844,9 @@ static struct
 	/* (the bots the host plays, which its player count leaves out:
 	port/linux/game/bots.c) */
 	byte bots;
+	/* port: a Forge game's (HALO_PORT_FORGE_VERSION_BIT, taken off the
+	version) */
+	boolean forge;
 } network_game_client_advertised_versions[MAXIMUM_NETWORK_ADVERTISED_GAMES];
 
 /* port: the OpenH1 protocol version of the advertised game at the index: a
@@ -2733,6 +2736,11 @@ static boolean add_advertised_game(
 			network_game_client_advertised_versions[game_index].version = (word)(
 				advertisement->__unknown5A[HALO_PORT_ADVERTISED_VERSION_OFFSET] |
 				(advertisement->__unknown5A[HALO_PORT_ADVERTISED_VERSION_OFFSET + 1] << 8));
+			/* port: (a Forge game's mark, off the version: this build has
+			Forge, network_game_client_advertised_game_compatible) */
+			network_game_client_advertised_versions[game_index].forge =
+				(network_game_client_advertised_versions[game_index].version & HALO_PORT_FORGE_VERSION_BIT) != 0;
+			network_game_client_advertised_versions[game_index].version &= (word)~HALO_PORT_FORGE_VERSION_BIT;
 			network_game_client_advertised_versions[game_index].flags =
 				advertisement->__unknown5A[HALO_PORT_ADVERTISED_FLAGS_OFFSET];
 			network_game_client_advertised_versions[game_index].kind =
@@ -3390,6 +3398,26 @@ boolean network_game_client_advertised_game_compatible(
 	theirs = network_game_client_advertised_versions[game_index].version;
 	distributed = (network_game_client_advertised_versions[game_index].flags &
 		HALO_PORT_ADVERTISED_DISTRIBUTED_FLAG) != 0;
+	/* port: a Forge game, which needs Forge's tag pack (forge_tag_import.c):
+	without it the player is told, the pack is asked for (the main menu
+	writes it), and nothing is joined */
+	if (network_game_client_advertised_versions[game_index].forge)
+	{
+		extern boolean forge_tag_pack_ready(boolean request);
+
+		if (!forge_tag_pack_ready(tell))
+		{
+			if (tell)
+			{
+				network_event("not joining a Forge game: this machine has not got Forge's tag pack yet");
+				platform_show_message("Halo: cannot join this game yet",
+					"This is a Forge game, which needs some data from your maps.\n\n"
+					"OpenH1 is preparing it at the main menu now: join again once it is ready.");
+			}
+			return FALSE;
+		}
+		network_event("joining a Forge game");
+	}
 	/* port: an OpenH1 Standard game (network_standard.c), of a protocol
 	version of its own */
 	if (theirs & HALO_PORT_STANDARD_VERSION_BIT)
