@@ -135,9 +135,10 @@ float world_ao_reference(struct world_sdf_volume const *volume, float const ligh
 owners than owner leave */
 float world_ao_proxies_occlusion(struct world_proxy const *proxies, long count, float const point[3],
 	float const normal[3], float owner);
-/* the atlas of the vehicles' occlusion fields the reference reads
+/* the atlas of the objects' occlusion fields the reference reads
 (world_sdf.h's struct world_sdf_objects, as the GPU has it: width x height
-x depth texels of four half floats; NULL none), and a vehicle's field's
+x depth texels of four half floats; NULL none: the tests', and the bake's
+while it bakes the static scenery's pages), and an object's field's
 occlusion at a point (its three shapes from proxy: xgpu_stream.h's
 XGPU_WORLD_AO_PROXY_FIELD), as the shaders find it */
 void world_ao_objects_atlas(unsigned short const *texels, unsigned long width, unsigned long height,
@@ -226,7 +227,7 @@ enum
 	/* (the static scenery's pages: width x height bytes, depth layers;
 	sent before the table) */
 	WORLD_AO_FIELD_SCENERY = 2,
-	/* (the vehicles' occlusion fields' atlas: width x height texels of 4
+	/* (the objects' occlusion fields' atlas: width x height texels of 4
 	half floats, depth slices; sent before the table) */
 	WORLD_AO_FIELD_OBJECTS = 3,
 };

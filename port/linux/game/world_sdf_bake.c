@@ -905,7 +905,7 @@ void world_sdf_atlas_layer(struct world_sdf_volume const *volume, unsigned long 
 	}
 }
 
-/* ---------- the objects' occlusion fields (docs/world-ao.md, "Dynamic objects")
+/* ---------- the objects' occlusion fields (docs/world-ao.md, "The objects' occlusion fields")
 
 A vehicle's or a piece of scenery's shape does not change, only where it
 is: its occlusion of what is about it is baked once, in its own space. At

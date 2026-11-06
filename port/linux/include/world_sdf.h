@@ -224,11 +224,12 @@ struct world_sdf_scenery
 	unsigned char *texels;
 };
 
-/* a vehicle's occlusion field (docs/world-ao.md, "Dynamic objects"): the
-share of a point's cosine-weighted hemisphere its collision geometry blocks
-there, as sat(t + n . v) of the point's unit normal n in the object's space
-(node 0's, at rest), at each of width x height x depth voxels' centres from
-origin, voxel apart, in that space: t and v.xyz, 4 half floats a voxel, x
+/* an object's occlusion field (docs/world-ao.md, "The objects' occlusion
+fields"): the share of a point's cosine-weighted hemisphere its geometry
+blocks there (a vehicle's collision, a piece of scenery's drawn triangles,
+each by its opacity), as sat(t + n . v) of the point's unit normal n in the
+object's space (node 0's, at rest), at each of width x height x depth
+voxels' centres from origin, voxel apart, in that space: t and v.xyz, 4 half floats a voxel, x
 fastest. Between voxels, trilinear; past the grid, its edge's value by
 (L / (L + e))^2, L its edge's distance from the grid's middle, e the
 point's past the edge (voxels). reach: past it, from the grid's middle
