@@ -197,6 +197,9 @@ struct mendicant_status
 	/* the spacing: firing position searches given a soldier's own avoid
 	points, steps apart, positions given up when the threat jumped */
 	unsigned long spacing_selections, spacing_steps, spacing_repicks;
+	/* the lane clearing: soldiers who found themselves in a vehicle's lane,
+	moves out of it of their own, the game's dives from a vehicle */
+	unsigned long lane_episodes, lane_moves, lane_dives;
 };
 extern struct mendicant_status mendicant_status;
 extern boolean mendicant_active;         /* enabled, campaign or co-op, and this machine runs the AI */

@@ -1162,6 +1162,7 @@ static void lane_soldier_update(
 			soldier->reaction = MENDICANT_LANE_NONE;
 			if (own)
 				lane_episode_draw(actor_index, actor, soldier, best, time);
+			mendicant_status.lane_episodes++;
 			lane_log("lane", actor_index, actor, best_arrival, distance, (long)(short)best->object, soldier->reaction,
 				best->player ? 1 : 0, own ? soldier->reaction_time : -1.0f);
 		}
@@ -1300,6 +1301,7 @@ static void lane_soldier_update(
 	lane_count_start(lane->object, time);
 	if (soldier->reaction >= 0 && soldier->reaction < MENDICANT_LANE_REACTIONS)
 		lane_counts[soldier->reaction]++;
+	mendicant_status.lane_moves++;
 	lane_log("lmove", actor_index, actor, soldier->arrival, distance, (long)(short)lane->object, soldier->reaction,
 		time - soldier->seen_time, soldier->lead);
 	if (ACTOR_IS_ELITE(actor->meta.type))
@@ -1438,6 +1440,7 @@ void mendicant_lanes_after_decide(
 			soldier->dive_time = time;
 		if (soldier->his_own)
 			lane_count_start(actor->danger_zone.object_index, time); /* (a dive is a start too) */
+		mendicant_status.lane_dives++;
 		lane_log("ldive", actor_index, actor, actor->danger_zone.current_distance_from_actor,
 			soldier->vehicle != NONE ? soldier->arrival : -1.0f, (long)(short)actor->danger_zone.object_index,
 			soldier->reaction, soldier->move_time ? 1 : 0, soldier->seen_time ? (real)(time - soldier->seen_time) / 30.0f : -1.0f);
