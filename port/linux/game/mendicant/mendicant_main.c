@@ -35,6 +35,7 @@ episodes end at episode_ticks with the fight at the level's start.
 #include "objects/objects.h"
 #include "units/units.h"
 #include "game/game.h"
+#include "main/main.h"
 #include "game/game_engine.h"
 #include "game/players.h"
 #include "networking/network_game_globals.h"
@@ -143,6 +144,7 @@ boolean mendicant_training = FALSE;
 boolean mendicant_episode_over = FALSE;
 FILE *mendicant_drill_file = NULL;
 FILE *mendicant_move_test_file = NULL;
+struct mendicant_status mendicant_status;
 
 /* this map's modules were reset for the AI (L1 found it should run) */
 static boolean mendicant_map_ready = FALSE;
@@ -763,6 +765,45 @@ void mendicant_training_tally(
 	return;
 }
 
+/* ai.mendicant.status: this map's tally so far, as one line of debug.txt */
+static void mendicant_status_log(
+	char const *when)
+{
+	struct mendicant_status const *status = &mendicant_status;
+
+	if (!mendicant_config.status || !status->ticks)
+		return;
+	platform_log("mendicant: %s %s at tick %ld: %lu ticks (%lu begun again at one time, %lu clock jumps), AI %lu "
+		"(%lu again at one time); drill passes %lu, units %lu; strategy %lu/%lu, per-enemy %lu/%lu, stances %lu/%lu "
+		"(Covenant/Marines); roles %lu, orders %lu; model choices moved %lu, held %lu, rejected %lu, late %lu",
+		when, main_get_map_name(), status->last_time, status->ticks, status->repeated, status->jumps,
+		status->ai_updates, status->ai_repeated, status->drill_passes, status->units, status->strategy[0],
+		status->strategy[1], status->per_enemy[0], status->per_enemy[1], status->stances[0], status->stances[1],
+		status->roles, status->orders, status->moved, status->held, status->rejected, status->late);
+
+	return;
+}
+
+/* a tick of the tally: counted, and apart when the game's clock has not
+moved since the last (more than once a tick) or moved by other than one */
+static void mendicant_status_tick(
+	long *last_time,
+	unsigned long *count,
+	unsigned long *repeated,
+	unsigned long *jumps)
+{
+	long time = mendicant_time();
+
+	if (*last_time != NONE && time == *last_time)
+		(*repeated)++;
+	else if (*last_time != NONE && time != *last_time + 1 && jumps)
+		(*jumps)++;
+	*last_time = time;
+	(*count)++;
+
+	return;
+}
+
 /* ---------- public code: a map's start and end (ai.c) */
 
 void mendicant_initialize_for_new_map(
@@ -777,6 +818,8 @@ void mendicant_initialize_for_new_map(
 	mendicant_map_ready = FALSE;
 	mendicant_tick_began = FALSE;
 	mendicant_training = FALSE;
+	memset(&mendicant_status, 0, sizeof(mendicant_status));
+	mendicant_status.last_time = mendicant_status.ai_time = NONE;
 	if (!mendicant_config.enabled || !mendicant_host_runs_ai())
 		return;
 
@@ -808,6 +851,7 @@ void mendicant_dispose_from_old_map(
 {
 	if (mendicant_map_ready)
 	{
+		mendicant_status_log("map end");
 		/* first: the level's own firing position lists back before its tags go */
 		mendicant_movement_dispose();
 	}
@@ -885,6 +929,8 @@ void mendicant_game_tick_begin(
 	free movement's orders are served first */
 	mendicant_movement_tick_begin();
 	mendicant_tick_began = TRUE;
+	mendicant_status_tick(&mendicant_status.last_time, &mendicant_status.ticks, &mendicant_status.repeated,
+		&mendicant_status.jumps);
 
 	return;
 }
@@ -897,6 +943,9 @@ void mendicant_game_tick_end(
 	/* level loads, resets and saves, between ticks, see only the level's own lists */
 	mendicant_movement_tick_end();
 	mendicant_tick_began = FALSE;
+	/* (a line a minute of the game's clock) */
+	if (mendicant_status.ticks % (60 * 30) == 0)
+		mendicant_status_log("status");
 
 	return;
 }
@@ -906,6 +955,8 @@ void mendicant_ai_update_end(
 {
 	if (!mendicant_active)
 		return;
+	mendicant_status_tick(&mendicant_status.ai_time, &mendicant_status.ai_updates, &mendicant_status.ai_repeated,
+		NULL);
 	mendicant_vehicles_update(); /* the autopilot writes its drivers' controls after the AI's */
 	if (mendicant_training)
 		mendicant_training_update();

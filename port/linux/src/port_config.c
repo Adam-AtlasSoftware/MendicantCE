@@ -1230,6 +1230,10 @@ static const struct config_setting config_settings[] =
 		"The Marines' rate of fire, against the stock game's 1.0 (0.1 or more)." },
 	{ "ai.mendicant.command_radius", _config_real, "35.0", "HALO_AI_MENDICANT_COMMAND_RADIUS", _environment_value, _platform_all,
 		"How far (world units) from its leader a soldier is still in its unit." },
+	{ "ai.mendicant.status", _config_boolean, "false", "HALO_AI_MENDICANT_STATUS", _environment_value, _platform_all,
+		"Log a line a minute of a map, and at its end, to debug.txt: the ticks\n"
+		"the AI ran, the units it led, the models' decisions and the orders\n"
+		"given (tests)." },
 	{ "ai.mendicant.bridge", _config_string, "\"\"", "HALO_AI_MENDICANT_BRIDGE", _environment_value, _platform_linux,
 		"A file the models are asked through instead (a trainer or brain.py maps\n"
 		"it); empty: the models in the game." },

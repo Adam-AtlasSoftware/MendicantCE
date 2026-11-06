@@ -190,6 +190,7 @@ static void mendicant_models_strategy(struct model_bridge *bridge, int side)
 		memcpy(mendicant_models_plan_features + 16, bridge->plan_extra, sizeof(float) * 32);
 		memcpy(mendicant_models_plan_features + MENDICANT_INFER_SUMMARY_FEATURES, bridge->plan_entities,
 			sizeof(float) * MENDICANT_INFER_ENTITIES * MENDICANT_INFER_ENTITY_FEATURES);
+		mendicant_status.strategy[side]++;
 		mendicant_infer_strategy_logits(&weights->strategy[side], &mendicant_models_workspace,
 			mendicant_models_plan_features, mendicant_models_logits);
 		mendicant_infer_decision_mask(mendicant_models_allowed, (int)weights->chains, (int)weights->step_choices,
@@ -237,6 +238,7 @@ static void mendicant_models_squad(struct model_bridge *bridge, int side, int co
 	{
 		float side_sign;
 
+		mendicant_status.per_enemy[side]++;
 		mendicant_infer_squad_scores(&weights->squad[side], bridge->team, &bridge->features[0][0][0], count,
 			mendicant_models_scores, &side_sign);
 		mendicant_infer_assign(mendicant_models_scores, &bridge->candidate_count[0], &bridge->positions[0][0], count,
@@ -252,6 +254,7 @@ static void mendicant_models_squad(struct model_bridge *bridge, int side, int co
 			float logits[MENDICANT_INFER_STANCES];
 			float u;
 
+			mendicant_status.stances[side]++;
 			mendicant_infer_stance_logits(&weights->squad[side], &bridge->features[member][0][0], bridge->team, logits);
 			u = mendicant_infer_random(&mendicant_models.random_state);
 			bridge->stance[member] = (short)mendicant_infer_sample(logits, all_allowed, MENDICANT_INFER_STANCES, 1.0f, u,

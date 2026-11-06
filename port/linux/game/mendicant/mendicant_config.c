@@ -87,6 +87,7 @@ boolean mendicant_config_read(
 	config->aim_moving = config_boolean("ai.mendicant.aim_moving") != 0;
 	config->marine_fire = (real)config_real("ai.mendicant.marine_fire");
 	config->command_radius = (real)config_real("ai.mendicant.command_radius");
+	config->status = config_boolean("ai.mendicant.status") != 0;
 #ifdef MENDICANT_LEGACY_ENVIRONMENT
 	/* the training bridge, its runs and its logs: desktop Linux only */
 	mendicant_config_copy_string(config->bridge, sizeof(config->bridge), config_string("ai.mendicant.bridge"));

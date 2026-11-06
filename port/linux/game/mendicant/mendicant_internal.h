@@ -154,7 +154,7 @@ struct model_bridge
 struct mendicant_config
 {
 	boolean enabled, training, discipline, targeting, individuals, aim_difficulty, aim_moving,
-		aim_debug, vehicle_test, models;
+		aim_debug, vehicle_test, models, status;
 	long training_skip, seed;
 	real aim, marine_fire, command_radius, variety;
 	char bridge[256], weights[128], sample_log[256], drill_log[256], player_log[256], move_test_log[256];
@@ -174,6 +174,20 @@ void mendicant_bridge_submit(void);
 boolean mendicant_bridge_answered(void); /* response_sequence == request_sequence */
 
 /* ---- platform: mendicant_main.c */
+/* this map's tally for ai.mendicant.status's line in debug.txt: the ticks the
+AI ran (a tick begun twice at one game time, or the clock moved by other than
+one tick, counted apart: a checkpoint's revert or a load moves it), the
+drill's passes and the units it led, the models' decisions (by side:
+Covenant, Marines), the roles and orders given, and what became of the
+model's own choices for members */
+struct mendicant_status
+{
+	long last_time, ai_time;
+	unsigned long ticks, repeated, jumps, ai_updates, ai_repeated, drill_passes, units, strategy[2], per_enemy[2],
+		stances[2], roles, orders;
+	unsigned long moved, held, rejected, late;
+};
+extern struct mendicant_status mendicant_status;
 extern boolean mendicant_active;         /* enabled, campaign or co-op, and this machine runs the AI */
 extern boolean mendicant_training;       /* ai.mendicant.training with the shared-memory bridge */
 extern boolean mendicant_episode_over;

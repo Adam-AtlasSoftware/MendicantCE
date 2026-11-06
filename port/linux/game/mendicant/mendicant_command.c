@@ -237,6 +237,8 @@ void mendicant_set_role(long actor_index, int role)
 		return;
 	if ((role == ROLE_ASSAULT || role == ROLE_GRENADIER) && actor_role[slot] != role)
 		actor_grenade_due[slot] = 1; /* going in: a grenade first */
+	if (actor_role[slot] != role)
+		mendicant_status.roles++;
 	actor_role[slot] = (char)role;
 }
 
@@ -248,6 +250,7 @@ void mendicant_order(long actor_index, short position)
 
 	if (slot >= 0 && slot < MENDICANT_MAX_ACTORS)
 		mendicant_go_release_drill(actor_index);
+	mendicant_status.orders++;
 	order_actor[(short)actor_index] = actor_index;
 	order_position[(short)actor_index] = position;
 }
@@ -499,6 +502,9 @@ static void bridge_apply(long time)
 			rejected++;
 		}
 	}
+	mendicant_status.moved += moved;
+	mendicant_status.held += held;
+	mendicant_status.rejected += rejected;
 	if (mendicant_drill_file)
 	{
 		fprintf(mendicant_drill_file, "%ld,model,%ld,squad=%ld,commanded=%d,moved=%d,held=%d,rejected=%d,latency=%ld\n",
@@ -523,6 +529,7 @@ static void bridge_poll(long time)
 		/* a model a second late loses the decision to the drill */
 		bridge_pending = FALSE;
 		bridge_lost_last = TRUE;
+		mendicant_status.late++;
 		mendicant_units_retry(bridge->encounter, time);
 		if (mendicant_drill_file)
 			fprintf(mendicant_drill_file, "%ld,model_late,%ld\n", time, (long)bridge->encounter);
@@ -852,6 +859,8 @@ void mendicant_drill_update(void)
 	}
 
 	command_lone_survivors(units, unit_count, time);
+	mendicant_status.drill_passes++;
+	mendicant_status.units += unit_count;
 	for (index = 0; index < unit_count; index++)
 	{
 		for (member = 0; member < units[index].count; member++)
