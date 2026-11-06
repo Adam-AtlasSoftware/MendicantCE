@@ -74,6 +74,10 @@ static boolean game_time_run_substep(void)
 	return TRUE;
 }
 
+/* (no replay plays: port/linux/game/network_replay_playback.c) */
+static boolean network_replay_playing(void) { return FALSE; }
+static long network_replay_ticks_per_frame(long ticks) { return ticks; }
+static void network_replay_playback_tick(void) {}
 #include "under_test.inc"
 
 /* main_loop's frame: its work waits while a tick is open, else runs */

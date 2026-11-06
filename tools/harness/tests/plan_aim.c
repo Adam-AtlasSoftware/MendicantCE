@@ -70,6 +70,9 @@ static boolean distributed_forward_covers(long machine_index, short player_index
     (void)machine_index; (void)player_index; return FALSE;
 }
 static boolean distributed_prediction_at_tick_start(short player_index) { return at_tick_start[player_index]; }
+/* (no replay's recorder, network_replay.c, and network.full_detail_to_clients off) */
+static short distributed_viewing_machines(long *indices, short maximum) { return distributed_client_machines(indices, maximum); }
+static boolean distributed_full_detail = FALSE;
 #include "under_test.inc"
 
 static void aim(real_vector3d direction, char zoom) {

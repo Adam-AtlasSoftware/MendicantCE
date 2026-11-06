@@ -206,6 +206,9 @@ static boolean sim_rate_supported(long rate)
 	return rate == 30 || rate == 60 || rate == 120;
 }
 
+/* (no replay is recorded: port/linux/game/network_replay.c) */
+static boolean network_replay_recording(void) { return FALSE; }
+static long distributed_recorder_machine(void) { return NONE; }
 #include "under_test.inc"
 
 /* ---------- the cases */

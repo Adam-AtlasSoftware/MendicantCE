@@ -39,6 +39,9 @@ static void display_error(short error, short local_player_index, boolean a, bool
 static void display_error_when_main_menu_loaded(short error) { shown_error = error; }
 static void network_event(const char *text, ...) { }
 static void error(int level, const char *text, ...) { }
+/* (no replay plays: port/linux/game/network_replay_playback.c) */
+static boolean network_replay_playing(void) { return FALSE; }
+static boolean network_replay_playback_idle(struct network_game_client *client) { return TRUE; }
 static boolean network_game_client_process_incoming_messages(struct network_game_client *client)
 {
 	messages_processed++;
