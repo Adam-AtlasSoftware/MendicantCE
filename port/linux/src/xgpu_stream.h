@@ -475,7 +475,9 @@ and corners as these, where its occlusion is reprojected from; and history:
 [0] 1 where the previous frame's occlusion is this window's (one window a
 frame, its corners alike: the backend's previous texture of it), else 0;
 [1] the frame's number (the rays' turn); [2] the share of the new frame's
-occlusion blended into what is reprojected (1: none of the history) */
+occlusion blended into what is reprojected (1: none of the history); [3] 1
+where the dynamic objects' occlusion is traced, 0 where their shapes are
+walked instead (HALO_WORLD_AO_NO_TRACE, for measuring against) */
 struct xgpu_world_ao_pass
 {
 	float camera[4][4];

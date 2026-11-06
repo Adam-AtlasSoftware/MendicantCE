@@ -2855,9 +2855,11 @@ char *xgpu_msl_world_ao_pass(BOOL pixel)
 		"\tint limit = (words.y & %uu) != 0u ? %d : int(world_ao.parameters[1].y);\n"
 		/* (the dynamic objects' shapes by the rays, their occlusion fields
 		and the static scenery's shapes walked) */
+		"\tbool traced = pass.history.w != 0.0;\n"
 		"\tfloat proxies = world_proxies_occlusion(world_ao, world_ao_objects, p, n, owner, limit,\n"
-		"\t\tint(world_ao.parameters[1].y));\n"
-		"\tproxies *= 1.0 - world_ao_traced(world_cascades, pass.cascades, p, n, pixel, pass.history.y);\n"
+		"\t\ttraced ? int(world_ao.parameters[1].y) : 0);\n"
+		"\tif (traced)\n"
+		"\t\tproxies *= 1.0 - world_ao_traced(world_cascades, pass.cascades, p, n, pixel, pass.history.y);\n"
 		"\tif ((words.y & %uu) != 0u)\n"
 		"\t\treturn mix(1.0, max(proxies * value, %.6f), world_ao.parameters[0].y);\n"
 		"\tbool baked = value < 0.0;\n"

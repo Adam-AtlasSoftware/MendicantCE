@@ -5230,6 +5230,17 @@ void halo_world_ao_prepass_end(short x0, short y0, short x1, short y1, float con
 		previous.camera[3][3] == pass.camera[3][3] ? 1.0f : 0.0f;
 	pass.history[1] = (float)(frame & 0xFFFFu);
 	pass.history[2] = XGPU_WORLD_AO_HISTORY_NEW;
+	{
+		/* (HALO_WORLD_AO_NO_TRACE, measuring: the shapes walked, as before
+		the distance-field scene, no history) */
+		static int traced = -1;
+
+		if (traced < 0)
+			traced = getenv("HALO_WORLD_AO_NO_TRACE") == NULL;
+		pass.history[3] = traced ? 1.0f : 0.0f;
+		if (!traced)
+			pass.history[0] = 0.0f;
+	}
 	previous = pass;
 	previous_made = 1;
 	xgpu_backend_world_ao_prepass(XGPU_WORLD_AO_PREPASS_END, target->target.number, &pass);

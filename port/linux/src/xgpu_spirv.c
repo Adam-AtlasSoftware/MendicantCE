@@ -5287,8 +5287,9 @@ static unsigned int world_ao_traced(struct module *m, struct pixel_state *state,
 	in a cascade whose range holds the reach) */
 	store(m, occlusion_variable, constant_float(m, 0.0f));
 	probe = world_cascade_find(m, cascades, p, XGPU_WORLD_AO_RAY_CASCADE);
-	selection_begin(m, op1(m, OP_LOGICAL_NOT, m->t_bool, op2(m, OP_S_LESS_THAN, m->t_bool, probe, constant_int(m, 0))),
-		&near_merge);
+	selection_begin(m, op2(m, OP_LOGICAL_AND, m->t_bool, compare(m, OP_F_UNORD_NOT_EQUAL, extract(m,
+		world_ao_pass_vector(m, pass, WORLD_AO_PASS_HISTORY, 0), 3), constant_float(m, 0.0f)),
+		op1(m, OP_LOGICAL_NOT, m->t_bool, op2(m, OP_S_LESS_THAN, m->t_bool, probe, constant_int(m, 0)))), &near_merge);
 	near = compare(m, OP_F_ORD_LESS_THAN, extract(m, world_cascade_sample(m, pass->cascades, cascades, probe, p, &voxel), 1),
 		constant_float(m, XGPU_WORLD_AO_RAY_REACH));
 	selection_begin(m, near, &rays_merge);
@@ -5329,9 +5330,11 @@ static unsigned int world_ao_evaluate(struct module *m, struct pixel_state *stat
 		op1(m, OP_CONVERT_F_TO_S, m->t_int, extract(m, parameters1, 1)));
 	/* (the dynamic objects' shapes by the rays, their occlusion fields and
 	the static scenery's shapes walked) */
+	unsigned int traced = compare(m, OP_F_UNORD_NOT_EQUAL, extract(m, world_ao_pass_vector(m, pass, WORLD_AO_PASS_HISTORY,
+		0), 3), constant_float(m, 0.0f));
 	unsigned int proxies = fmul(m, 1, world_proxies_occlusion(m, state, p, n, owner, limit,
-		op1(m, OP_CONVERT_F_TO_S, m->t_int, extract(m, parameters1, 1))),
-		fsub(m, 1, constant_float(m, 1.0f), world_ao_traced(m, state, pass, p, n, pixel)));
+		op3(m, OP_SELECT, m->t_int, traced, op1(m, OP_CONVERT_F_TO_S, m->t_int, extract(m, parameters1, 1)),
+		constant_int(m, 0))), fsub(m, 1, constant_float(m, 1.0f), world_ao_traced(m, state, pass, p, n, pixel)));
 	unsigned int lightmap = unot_zero(m, uand(m, word1, constant_uint(m, XGPU_WORLD_AO_INPUT_LIGHTMAP)));
 	unsigned int level = ext3(m, GLSL_F_MIX, m->t_float, constant_float(m, 1.0f), fmax_scalar(m, 1,
 		fmul(m, 1, proxies, value), XGPU_WORLD_AO_FLOOR), extract(m, parameters0, 1));
