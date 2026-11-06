@@ -525,6 +525,10 @@ static long interpolation_tick;
 static long interpolation_frame;
 static boolean interpolation_rendering;
 static real interpolation_fraction = 1.0f;
+/* how long ago the clock's newest step fell due, in ticks
+(game_time_get_step_age): what is drawn from the newest step is carried on
+by this much */
+static real interpolation_step_age;
 static struct later_particle later_particles[MAXIMUM_LATER_PARTICLES];
 static short later_particle_count;
 static struct interpolation_ghost ghosts[MAXIMUM_GHOSTS];
@@ -1982,6 +1986,7 @@ void render_interpolation_frame_begin(void)
 	interpolation_rendering = FALSE;
 	interpolation_frame++;
 	interpolation_fraction = game_time_get_tick_fraction();
+	interpolation_step_age = game_time_get_step_age();
 	/* (the sub-step drawn: at 30 the tick's one, as far as the fraction) */
 	interpolation_substep_count = sim_substep_count();
 	sim_substep_blend(interpolation_fraction, &interpolation_substep_index, &interpolation_substep_fraction);
@@ -2855,9 +2860,10 @@ static void render_interpolation_newest_camera(
 	struct interpolated_camera *camera = &interpolated_cameras[local_player_index];
 	long unit_index = player_control_get_unit_index(local_player_index);
 	real_vector3d const *velocity = &object_get(unit_index)->object.translational_velocity;
-	real steps = interpolation_fraction * (real)interpolation_substep_count;
-	/* (the time since the newest step, in ticks: past the last whole sub-step) */
-	real since = (steps - (real)floor(steps)) / (real)interpolation_substep_count;
+	/* (the time since the newest step, in ticks: the clock's, not the
+	fraction's part past its last whole sub-step, which is a sub-step short
+	while a step's time has come and it has not run: OpenH1 #706) */
+	real since = interpolation_step_age;
 
 	drawn->position = observer->position;
 	if (velocity->i * velocity->i + velocity->j * velocity->j + velocity->k * velocity->k <=
@@ -3356,8 +3362,8 @@ static boolean render_interpolation_newest_vehicle(
 		return FALSE;
 	/* (the frame's time, from the newest step's end, in ticks) */
 	step = render_interpolation_newest_step(vehicle_index);
-	since = (interpolation_fraction * (real)interpolation_substep_count -
-		(real)(step - interpolation_tick * interpolation_substep_count)) / (real)interpolation_substep_count;
+	since = interpolation_step_age - (real)(step - (interpolation_tick * interpolation_substep_count +
+		sim_substep_next())) / (real)interpolation_substep_count;
 	render_interpolation_newest_history(history, vehicle_index, step, root);
 	render_interpolation_newest_motion(history, vehicle, &motion);
 	newest_motion_carried(&motion, since, &shift, &turn);

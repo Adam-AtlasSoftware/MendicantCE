@@ -152,6 +152,8 @@ static short sim_substep_count(void) { return fake_substep_count; }
 /* the open tick's next sub-step (the world's, below) */
 static short sim_substep_next(void);
 static real game_time_get_tick_fraction(void) { return fake_fraction; }
+/* (the clock's time since its newest step, in ticks: the frame's part of a sub-step past it) */
+static real game_time_get_step_age(void) { return fake_fraction - (real)sim_substep_next() / (real)fake_substep_count; }
 static short director_get_perspective(short local_player_index) { return perspective; }
 static boolean director_inhibited_facing(short local_player_index) { return FALSE; }
 static long scripted_camera_object_relative_to(void) { return NONE; }
