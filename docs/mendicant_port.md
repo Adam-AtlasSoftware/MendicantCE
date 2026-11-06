@@ -90,8 +90,9 @@ python3 tools/mendicant/package.py --game halo-windows-release.zip \
 
 `package.py` (fork-only) makes `mendicant-ai-<version>-<platform>.zip`, the platform `linux`
 (32-bit x86), `linux-x86_64` (the 64-bit build, `configure.py --x64` and `ninja linux_x86_64`: the
-game as an x32 guest built into the 64-bit `halo`, so its `halo_guest.elf` is not shipped) or
-`windows`, told apart by the executable: the files the platform's
+game as an x32 guest built into the 64-bit `halo`, so its `halo_guest.elf` is not shipped),
+`windows` (32-bit) or `windows-x64` (the same x32 guest inside the 64-bit Windows host,
+`tools/windows_x64_build.py`), told apart by the executable: the files the platform's
 release zip has (from a build folder, as `tools/ci_build.py` collects them; from the workflow's
 release artifact, as they are), `mods/mendicant_ai/` (`mod.toml`, and the models where
 `ai.mendicant.weights` finds them: `tags/mendicant/models.aibw`), `README_MENDICANT.txt`,
@@ -99,6 +100,54 @@ release artifact, as they are), `mods/mendicant_ai/` (`mod.toml`, and the models
 settings, saves and logs, strips debug information from ELF files (the full copies go to
 `<zip stem>-symbols/` beside the zip) and overwrites any path of the packaging machine left in a
 binary's strings with one of the same length.
+
+### Testing a Windows build
+
+A checklist for a tester on Windows 10 or 11 (64-bit), for the `windows-x64` package and the
+32-bit `windows` one as its fallback.
+
+1. Download: the GitHub Actions run of the branch (Actions, the run, Artifacts):
+   `mendicantce-windows-x64` (and `mendicantce-windows` to compare). Each holds
+   `mendicant-ai-<version>-windows-x64.zip` (or `-windows.zip`). Unzip it into a new, empty folder.
+2. Game data: put a `maps` folder of the Xbox maps beside `halo.exe` (or a disc image `.iso`/`.xiso`
+   there, which the first start extracts). `ui.map` and the campaign maps (`b30.map` at least) are
+   enough.
+3. Start `halo.exe`. It reaches the main menu with the window, sound and controls as usual.
+4. CAMPAIGN, a new game of The Silent Cartographer (b30), Normal; play a few minutes through the
+   beach fight. Pause, SETTINGS, CAMPAIGN AI shows MENDICANT AI ON.
+5. Optional co-op: on another machine of the same network (any of the fork's builds: Linux,
+   32-bit or 64-bit Windows), host a co-op game of b30 (Multiplayer, System Link, Create Game, and
+   b30 on its Map screen); join it from the Windows build, play a few minutes, then swap who hosts.
+6. Quit from the menu.
+
+The log, `halo.log` beside `halo.exe`, should show (the 64-bit build's `halo-host:` lines are its
+host's; the 32-bit build has none):
+
+| Line | Means |
+| --- | --- |
+| `halo-host: guest image 70000000-73373000, 305 imports (0 unavailable)` | the host loaded the game (64-bit only; any import unavailable is a bug) |
+| `halo-host: the game's memory below 4 GB is taken; starting again with it reserved` | something took the game's addresses before the host could reserve them; the host started itself again with them reserved. Harmless if the game then runs; report it with the list of programs that inject into games (overlays, antivirus) |
+| `halo-linux: mods: mendicant_ai (MENDICANT AI <version>) plays 1 tag files` | the mod was found |
+| `halo-linux: mendicant: models ./mods/mendicant_ai/tags/mendicant/models.aibw: strategy yes/yes, per-enemy yes/yes, stance yes/yes (Covenant/Marines)` | the trained models loaded (logged at the first map start). `no models` or `refused` means the drills fall back to the scripted rule |
+| `halo-linux: network: machine 1 (<name>) plays ...` | (co-op host) the other machine joined |
+| `halo-host: the game exited (0)` | a clean quit (64-bit only); any other number, or no such line, is a crash |
+
+`debug.txt` beside the `maps` folder is the engine's log: `starting precaching of map 'b30'` at
+the level's load, and a crash's backtrace.
+
+Sending logs: zip `halo.log` and `debug.txt` straight after the problem (the next start
+overwrites `halo.log`), and say which build (`windows-x64` or `windows`), the Windows version, the
+level, the difficulty and roughly when it happened. If the 64-bit build does not start at all,
+say so and try the 32-bit one.
+
+The same checks run on Linux under Wine 11 with the game silent and headless
+(`HALO_NO_AUDIO=1 SDL_AUDIODRIVER=dummy`,
+`WINEDLLOVERRIDES='winepulse.drv=d;winealsa.drv=d;wineoss.drv=d'`, `HALO_NULL_RENDERER=1
+HALO_HIDDEN_WINDOW=1 HALO_UPDATE_AUTO=false`, `HALO_TELNET_CONSOLE=1` and `map_name b30` on the
+console); co-op without a second machine: `HALO_NETWORK_TEST=host:b30:coop` on one build and
+`HALO_NETWORK_TEST=join` on the other, each with its own `HALO_NET_ADDRESS` (127.0.0.201,
+127.0.0.202) and the other's as `HALO_NET_BROADCAST`. Wine is not Windows: a tester's run on
+Windows is still the check that counts.
 
 ## The specification
 
