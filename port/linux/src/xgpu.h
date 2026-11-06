@@ -352,7 +352,11 @@ a frame's occlusion blended into the history reprojected (temporal
 accumulation), and the history's tests (the distance's relative
 difference, the normals' least cosine) */
 #define XGPU_WORLD_AO_RAYS 4
-#define XGPU_WORLD_AO_RAY_REACH 3.0f
+#define XGPU_WORLD_AO_RAY_REACH 2.0f
+/* (a pixel no object is within the reach of casts none: the objects'
+distance at it read first in the finest cascade whose range, 4 voxels,
+holds the reach, cascade 1's 2 wu) */
+#define XGPU_WORLD_AO_RAY_CASCADE 1
 #define XGPU_WORLD_AO_RAY_BIAS 0.1f
 #define XGPU_WORLD_AO_HISTORY_NEW 0.2f
 #define XGPU_WORLD_AO_HISTORY_DISTANCE 0.05f

@@ -2101,10 +2101,10 @@ static const char world_trace_functions[] =
 	"};\n"
 	/* the cascade a point is in: the finest ready whose window holds it
 	with its filter's neighbours (-1 none) */
-	"static inline int world_cascade_find(constant float4 *cascades, float3 p)\n"
+	"static inline int world_cascade_find(constant float4 *cascades, float3 p, int first)\n"
 	"{\n"
 	"\tint found = -1;\n"
-	"\tfor (int cascade = " WORLD_AO_TEXT(XGPU_WORLD_CASCADES) " - 1; cascade >= 0; cascade--)\n"
+	"\tfor (int cascade = " WORLD_AO_TEXT(XGPU_WORLD_CASCADES) " - 1; cascade >= first; cascade--)\n"
 	"\t{\n"
 	"\t\tfloat4 c = cascades[cascade];\n"
 	"\t\tif (c.w <= 0.0)\n"
@@ -2142,7 +2142,7 @@ static const char world_trace_functions[] =
 	"\tfor (int step = 0; step < " WORLD_AO_TEXT(XGPU_WORLD_TRACE_STEPS) "; step++)\n"
 	"\t{\n"
 	"\t\tfloat3 p = origin + direction * t;\n"
-	"\t\tint cascade = world_cascade_find(cascades, p);\n"
+	"\t\tint cascade = world_cascade_find(cascades, p, 0);\n"
 	"\t\tif (cascade < 0)\n"
 	"\t\t\tbreak;\n"
 	"\t\tfloat4 c = cascades[cascade];\n"
@@ -2826,6 +2826,11 @@ char *xgpu_msl_world_ao_pass(BOOL pixel)
 		"\tfloat twist = fract(52.9829189 * fract(0.00583715 * float(pixel.x) + 0.06711056 * float(pixel.y)) +\n"
 		"\t\t0.7548777 * frame);\n"
 		"\tfloat occlusion = 0.0;\n"
+		/* (none where no object is within reach: the objects' distance
+		there, in a cascade whose range holds the reach) */
+		"\tint probe = world_cascade_find(cascades, p, %d);\n"
+		"\tif (probe < 0 || world_cascade_sample(world_cascades, cascades[probe], probe, p).y >= %.6f)\n"
+		"\t\treturn 0.0;\n"
 		"\tfor (int ray = 0; ray < %d; ray++)\n"
 		"\t{\n"
 		"\t\tfloat u = (float(ray) + turn) / %d.0, angle = 6.28318531 * fract(twist + 0.618034 * float(ray));\n"
@@ -2861,6 +2866,7 @@ char *xgpu_msl_world_ao_pass(BOOL pixel)
 		"\tfield = mix(field, saturate(field / max(baked ? 1.0 : value, %.6f)), world_ao.parameters[1].x);\n"
 		"\treturn mix(1.0, max(mix(1.0, field, world_ao.parameters[0].z) * proxies, %.6f), world_ao.parameters[0].x);\n"
 		"}\n",
+		XGPU_WORLD_AO_RAY_CASCADE, XGPU_WORLD_AO_RAY_REACH,
 		XGPU_WORLD_AO_RAYS, XGPU_WORLD_AO_RAYS, XGPU_WORLD_AO_RAY_BIAS, XGPU_WORLD_AO_RAY_REACH, XGPU_WORLD_TRACE_OBJECTS,
 		XGPU_WORLD_AO_RAY_REACH, XGPU_WORLD_AO_RAYS,
 		XGPU_WORLD_AO_INPUT_ALL_SHAPES, XGPU_WORLD_AO_SHAPES, XGPU_WORLD_AO_INPUT_LIGHTMAP, XGPU_WORLD_AO_FLOOR,

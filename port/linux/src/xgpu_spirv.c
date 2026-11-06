@@ -3394,46 +3394,17 @@ cascades_texture, a combined image sampler of RG8 snorm), hitting what mask
 outside it. A structured loop, its values in locals; the hit (1 or 0), t
 and kind (as floats) in result. A hardware backend's ray queries (#602)
 would take the same arguments (docs/world-ao.md) */
-static void world_trace(struct module *m, struct words *locals, unsigned int cascades_texture,
-	const unsigned int cascades[XGPU_WORLD_CASCADES], unsigned int origin, unsigned int direction, unsigned int t_max,
-	unsigned int mask, unsigned int result[3])
+/* the cascade a point is in: the finest ready, from first on, whose window
+holds it with its filter's neighbours (-1 none; world_cascades.c's
+world_cascades_find) */
+static unsigned int world_cascade_find(struct module *m, const unsigned int cascades[XGPU_WORLD_CASCADES], unsigned int p,
+	int first)
 {
-	unsigned int t_variable = local(m, locals, m->t_float), step_variable = local(m, locals, m->t_int);
-	unsigned int done_variable = local(m, locals, m->t_bool), structure_variable = local(m, locals, m->t_bool);
-	unsigned int objects_variable = local(m, locals, m->t_bool), hit_variable = local(m, locals, m->t_float);
-	unsigned int distance_variable = local(m, locals, m->t_float), kind_variable = local(m, locals, m->t_float);
-	unsigned int header = id_new(m), condition = id_new(m), body = id_new(m), next = id_new(m), merge = id_new(m);
-	unsigned int operands[4], t, p, found, chosen[4], voxel, at, place, uvw[3], sampled, d[2], nearest, inside;
-	unsigned int range, enabled[2], active[2], variables[2], is_hit, kind, advance, t_next, found_merge, hit_merge;
-	int cascade, component, channel;
+	unsigned int found;
+	int cascade;
 
-	store(m, t_variable, constant_float(m, 0.0f));
-	store(m, step_variable, constant_int(m, 0));
-	store(m, done_variable, constant_bool(m, FALSE));
-	store(m, structure_variable, constant_bool(m, FALSE));
-	store(m, objects_variable, constant_bool(m, FALSE));
-	store(m, hit_variable, constant_float(m, 0.0f));
-	store(m, distance_variable, t_max);
-	store(m, kind_variable, constant_float(m, 0.0f));
-	branch(m, header);
-	label_at(m, header);
-	operands[0] = merge;
-	operands[1] = next;
-	operands[2] = 0;
-	op_void(m, OP_LOOP_MERGE, 3, operands);
-	branch(m, condition);
-	label_at(m, condition);
-	branch_conditional(m, op2(m, OP_LOGICAL_AND, m->t_bool, op2(m, OP_S_LESS_THAN, m->t_bool,
-		load(m, m->t_int, step_variable), constant_int(m, XGPU_WORLD_TRACE_STEPS)),
-		op1(m, OP_LOGICAL_NOT, m->t_bool, load(m, m->t_bool, done_variable))), body, merge);
-	label_at(m, body);
-	t = load(m, m->t_float, t_variable);
-	p = fadd(m, 3, origin, fscale(m, 3, direction, t));
-	/* the cascade: the finest ready whose window holds p with its filter's
-	neighbours (-1 none); q = (p - c.xyz) / c.w within 0 and the side less
-	one */
 	found = constant_int(m, -1);
-	for (cascade = XGPU_WORLD_CASCADES - 1; cascade >= 0; cascade--)
+	for (cascade = XGPU_WORLD_CASCADES - 1; cascade >= first; cascade--)
 	{
 		unsigned int c = cascades[cascade], w = extract(m, c, 3), q, least, most, inside_window;
 
@@ -3448,9 +3419,17 @@ static void world_trace(struct module *m, struct words *locals, unsigned int cas
 			compare(m, OP_F_ORD_LESS_THAN_EQUAL, most, constant_float(m, (float)(XGPU_WORLD_CASCADE_SIDE - 1))));
 		found = op3(m, OP_SELECT, m->t_int, inside_window, constant_int(m, cascade), found);
 	}
-	store(m, done_variable, op2(m, OP_S_LESS_THAN, m->t_bool, found, constant_int(m, 0)));
-	selection_begin(m, op1(m, OP_LOGICAL_NOT, m->t_bool, op2(m, OP_S_LESS_THAN, m->t_bool, found, constant_int(m, 0))),
-		&found_merge);
+	return found;
+}
+
+/* its two distances at a point (world units: a vec4's x and y), and its
+voxel (world_cascades_sample) */
+static unsigned int world_cascade_sample(struct module *m, unsigned int cascades_texture,
+	const unsigned int cascades[XGPU_WORLD_CASCADES], unsigned int found, unsigned int p, unsigned int *voxel_out)
+{
+	unsigned int operands[4], chosen[4], voxel, at, place, uvw[3], sampled, range;
+	int cascade, component;
+
 	/* (its vec4, each component chosen by found) */
 	for (component = 0; component < 4; component++)
 	{
@@ -3478,6 +3457,54 @@ static void world_trace(struct module *m, struct words *locals, unsigned int cas
 	operands[3] = constant_float(m, 0.0f);
 	range = fmul(m, 1, constant_float(m, (float)XGPU_WORLD_CASCADE_RANGE_VOXELS), voxel);
 	sampled = fscale(m, 4, op(m, OP_IMAGE_SAMPLE_EXPLICIT_LOD, m->t_v4, 4, operands), range);
+	*voxel_out = voxel;
+	return sampled;
+}
+
+static void world_trace(struct module *m, struct words *locals, unsigned int cascades_texture,
+	const unsigned int cascades[XGPU_WORLD_CASCADES], unsigned int origin, unsigned int direction, unsigned int t_max,
+	unsigned int mask, unsigned int result[3])
+{
+	unsigned int t_variable = local(m, locals, m->t_float), step_variable = local(m, locals, m->t_int);
+	unsigned int done_variable = local(m, locals, m->t_bool), structure_variable = local(m, locals, m->t_bool);
+	unsigned int objects_variable = local(m, locals, m->t_bool), hit_variable = local(m, locals, m->t_float);
+	unsigned int distance_variable = local(m, locals, m->t_float), kind_variable = local(m, locals, m->t_float);
+	unsigned int header = id_new(m), condition = id_new(m), body = id_new(m), next = id_new(m), merge = id_new(m);
+	unsigned int operands[3], t, p, found, voxel, sampled, d[2], nearest, inside;
+	unsigned int range, enabled[2], active[2], variables[2], is_hit, kind, advance, t_next, found_merge, hit_merge;
+	int channel;
+
+	store(m, t_variable, constant_float(m, 0.0f));
+	store(m, step_variable, constant_int(m, 0));
+	store(m, done_variable, constant_bool(m, FALSE));
+	store(m, structure_variable, constant_bool(m, FALSE));
+	store(m, objects_variable, constant_bool(m, FALSE));
+	store(m, hit_variable, constant_float(m, 0.0f));
+	store(m, distance_variable, t_max);
+	store(m, kind_variable, constant_float(m, 0.0f));
+	branch(m, header);
+	label_at(m, header);
+	operands[0] = merge;
+	operands[1] = next;
+	operands[2] = 0;
+	op_void(m, OP_LOOP_MERGE, 3, operands);
+	branch(m, condition);
+	label_at(m, condition);
+	branch_conditional(m, op2(m, OP_LOGICAL_AND, m->t_bool, op2(m, OP_S_LESS_THAN, m->t_bool,
+		load(m, m->t_int, step_variable), constant_int(m, XGPU_WORLD_TRACE_STEPS)),
+		op1(m, OP_LOGICAL_NOT, m->t_bool, load(m, m->t_bool, done_variable))), body, merge);
+	label_at(m, body);
+	t = load(m, m->t_float, t_variable);
+	p = fadd(m, 3, origin, fscale(m, 3, direction, t));
+	/* the cascade: the finest ready whose window holds p with its filter's
+	neighbours (-1 none); q = (p - c.xyz) / c.w within 0 and the side less
+	one */
+	found = world_cascade_find(m, cascades, p, 0);
+	store(m, done_variable, op2(m, OP_S_LESS_THAN, m->t_bool, found, constant_int(m, 0)));
+	selection_begin(m, op1(m, OP_LOGICAL_NOT, m->t_bool, op2(m, OP_S_LESS_THAN, m->t_bool, found, constant_int(m, 0))),
+		&found_merge);
+	sampled = world_cascade_sample(m, cascades_texture, cascades, found, p, &voxel);
+	range = fmul(m, 1, constant_float(m, (float)XGPU_WORLD_CASCADE_RANGE_VOXELS), voxel);
 	d[0] = extract(m, sampled, 0);
 	d[1] = extract(m, sampled, 1);
 	/* each channel the mask allows, once the ray is outside it; inside one
@@ -5234,7 +5261,8 @@ static unsigned int world_ao_traced(struct module *m, struct pixel_state *state,
 {
 	unsigned int cascades[XGPU_WORLD_CASCADES], frame = extract(m, world_ao_pass_vector(m, pass, WORLD_AO_PASS_HISTORY, 0), 1);
 	unsigned int nx = extract(m, n, 0), ny = extract(m, n, 1), nz = extract(m, n, 2), s, a, b, x, y, px, py;
-	unsigned int turn, twist, occlusion = constant_float(m, 0.0f), origin;
+	unsigned int turn, twist, occlusion = constant_float(m, 0.0f), origin, probe, near, voxel, near_merge, rays_merge;
+	unsigned int occlusion_variable = local(m, &state->locals, m->t_float);
 	int cascade, ray;
 
 	for (cascade = 0; cascade < XGPU_WORLD_CASCADES; cascade++)
@@ -5255,6 +5283,15 @@ static unsigned int world_ao_traced(struct module *m, struct pixel_state *state,
 		m->t_float, fadd(m, 1, fmul(m, 1, constant_float(m, 0.00583715f), px), fmul(m, 1, constant_float(m, 0.06711056f),
 		py)))), fmul(m, 1, constant_float(m, 0.7548777f), frame)));
 	origin = fadd(m, 3, p, fscale(m, 3, n, constant_float(m, XGPU_WORLD_AO_RAY_BIAS)));
+	/* (none where no object is within reach: the objects' distance there,
+	in a cascade whose range holds the reach) */
+	store(m, occlusion_variable, constant_float(m, 0.0f));
+	probe = world_cascade_find(m, cascades, p, XGPU_WORLD_AO_RAY_CASCADE);
+	selection_begin(m, op1(m, OP_LOGICAL_NOT, m->t_bool, op2(m, OP_S_LESS_THAN, m->t_bool, probe, constant_int(m, 0))),
+		&near_merge);
+	near = compare(m, OP_F_ORD_LESS_THAN, extract(m, world_cascade_sample(m, pass->cascades, cascades, probe, p, &voxel), 1),
+		constant_float(m, XGPU_WORLD_AO_RAY_REACH));
+	selection_begin(m, near, &rays_merge);
 	for (ray = 0; ray < XGPU_WORLD_AO_RAYS; ray++)
 	{
 		unsigned int u = fdiv(m, 1, fadd(m, 1, constant_float(m, (float)ray), turn), constant_float(m, (float)XGPU_WORLD_AO_RAYS));
@@ -5270,7 +5307,10 @@ static unsigned int world_ao_traced(struct module *m, struct pixel_state *state,
 		f = fdiv(m, 1, hit[1], constant_float(m, XGPU_WORLD_AO_RAY_REACH));
 		occlusion = fadd(m, 1, occlusion, fmul(m, 1, hit[0], fsub(m, 1, constant_float(m, 1.0f), fmul(m, 1, f, f))));
 	}
-	return fdiv(m, 1, occlusion, constant_float(m, (float)XGPU_WORLD_AO_RAYS));
+	store(m, occlusion_variable, fdiv(m, 1, occlusion, constant_float(m, (float)XGPU_WORLD_AO_RAYS)));
+	selection_end(m, rays_merge);
+	selection_end(m, near_merge);
+	return load(m, m->t_float, occlusion_variable);
 }
 
 static unsigned int world_ao_evaluate(struct module *m, struct pixel_state *state, struct world_ao_pass_state *pass,
