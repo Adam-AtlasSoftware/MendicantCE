@@ -114,13 +114,15 @@ the 3D view drawn and what the game's code says of the draw (xgpu_hdr.h's
 xgpu_hdr_draw, HALO_HDR_KIND_*); display.ambient_occlusion "world"'s light
 for it, as it would be with "world" on (drawn among a window's opaque
 surfaces, not the first-person weapon, not lighting itself: d3d8_device.c's
-world_ao_applies). */
+world_ao_applies); and whether its window is one the pre-pass finds the
+world's occlusion for once a pixel (its span found, the first-person
+weapon's too: world_ao_span_found), where the pre-pass draws its twin. */
 struct xgpu_manifest_context
 {
 	uint8_t lights, world_found, multisampled, screen_colour;
 	uint8_t lights_present, environment, hdr_category, hdr_view;
 	uint16_t hdr_kind;
-	uint8_t world, unused;
+	uint8_t world, found;
 };
 
 struct xgpu_manifest
@@ -230,6 +232,17 @@ or unlit (xgpu_draw_derive) into derived; returns whether it is lit. The
 HDR tag is classified by xgpu_hdr.c (linked with this) */
 int xgpu_manifest_derive(const struct xgpu_manifest_draw *draw, const struct xgpu_manifest_context *context,
 	const struct xgpu_manifest_settings *settings, int unlit, struct xgpu_manifest_draw *derived);
+/* display.ambient_occlusion "world"'s forms of a derived draw (derived, as
+xgpu_manifest_derive gave it under the settings; its context) into forms:
+the draw itself; under "world", where its window is found once a pixel
+(context's found), the draw reading
+its occlusion from the pass (XGPU_AMBIENT_OCCLUSION_WORLD_SAMPLED) where it
+has the world's light, and the pre-pass's twin (xgpu_stream_world_ao_twin:
+that one's, writing its pixel's inputs, or another opaque one's as an
+occluder). Returns how many (1 to XGPU_MANIFEST_WORLD_AO_FORMS) */
+#define XGPU_MANIFEST_WORLD_AO_FORMS 3
+int xgpu_manifest_world_ao_forms(const struct xgpu_manifest_draw *derived, const struct xgpu_manifest_context *context,
+	const struct xgpu_manifest_settings *settings, struct xgpu_manifest_draw forms[XGPU_MANIFEST_WORLD_AO_FORMS]);
 
 /* ---------- the recorder (the front end's; debug.render_manifest) */
 

@@ -338,10 +338,16 @@ static BOOL world_ao_preparing(void)
 	return world_ao.preparing && !world_ao.failed && world_ao_mode() != 0;
 }
 
+/* the window's span is one the pre-pass finds once a pixel (its first-person
+weapon's too), whatever the setting */
+static BOOL world_ao_span_found(void)
+{
+	return world_ao.span == WORLD_AO_SPAN_FOUND || world_ao.span == WORLD_AO_SPAN_FOUND_FIRST_PERSON;
+}
+
 static BOOL world_ao_found(void)
 {
-	return (world_ao.span == WORLD_AO_SPAN_FOUND || world_ao.span == WORLD_AO_SPAN_FOUND_FIRST_PERSON) &&
-		!config_boolean("debug.world_ao_inline");
+	return world_ao_span_found() && !config_boolean("debug.world_ao_inline");
 }
 
 /* a draw's pixel key's occlusion, for the light it multiplies, found in the
@@ -4012,6 +4018,8 @@ static void manifest_note_basis(const struct vertex_shader_object *program, cons
 	span as the game draws it, whatever the setting, as the journal notes
 	it) */
 	context.world = world_ao_applies() ? 1 : 0;
+	/* (...and where the pre-pass draws its twin: world_ao_twins) */
+	context.found = world_ao_span_found() ? 1 : 0;
 	xgpu_manifest_note_basis(key, &context);
 }
 
