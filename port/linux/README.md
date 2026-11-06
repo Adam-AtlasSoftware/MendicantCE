@@ -2326,10 +2326,12 @@ set back behind the eye as far as keeps the open waist below the view
 the further down you look. It is drawn with the world's camera, so it keeps
 its place and size at any field of view. Where the eye comes down to the
 hips (a crouch jump: the eye drops to crouching height while the body keeps
-its airborne pose), the body is lowered as far as keeps it out of the part
-of the view the near plane cuts away, so a wide view never shows the hips
-and thighs cut into slivers beside the eye; standing and crouching on the
-ground it is where it was. Hit boxes, markers and everything
+its airborne pose), the body is lowered as far as keeps all of its surface
+(every triangle, not only every corner) out of the part of the view the
+near plane cuts away, so a wide view never shows the hips and thighs cut
+into slivers beside the eye; looking far down, it is lowered along the
+view's bottom, so the open waist stays below it. Standing and crouching on
+the ground it is where it was. Hit boxes, markers and everything
 the game does with the body are unchanged. In the VR mode the chest is drawn
 too, under the real head (VR, "Your body").
 
