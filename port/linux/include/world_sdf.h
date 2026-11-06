@@ -30,8 +30,10 @@ pure arithmetic in port/linux/game/world_sdf_bake.c).
 /* the cache's version: bumped whenever the bake or the format changes, so
 that every field is baked again (2: sparse bricks, within the placements'
 reach; 3: the static scenery in the field, and its occlusion of the level
-in lightmap pages; 4: the vehicles' occlusion fields) */
-#define WORLD_SDF_VERSION 4
+in lightmap pages; 4: the vehicles' occlusion fields; 5: the scenery's
+occlusion fields, of its drawn triangles, its leaves by their coverage,
+which its static placements' pages are baked with too) */
+#define WORLD_SDF_VERSION 5
 /* the file's magic, "WSDF" */
 #define WORLD_SDF_MAGIC 0x46445357UL
 
@@ -84,16 +86,23 @@ enum
 	height, placement_count) and a placement's bytes */
 	WORLD_SDF_SCENERY_COUNTS = 5 * 4,
 	WORLD_SDF_SCENERY_PLACEMENT = 4 * 4,
-	/* the vehicles' occlusion fields (struct world_sdf_object): the most a
-	field holds, the most voxels and voxels along a side one has, the GPU
-	atlas's most texels along a side and bytes (4 halves a texel), the
-	directions a voxel looks along and the normals its fit is made at, and
-	an object's bytes in the file before its texels */
-	WORLD_SDF_OBJECT_MAXIMUM = 32,
+	/* the objects' occlusion fields (struct world_sdf_object): the most a
+	field holds, the most triangles of a piece of scenery's drawn geometry
+	(its most detailed level within it, else its least), the most voxels
+	(a vehicle's, a piece of scenery's) and voxels along a side one has, the GPU atlas's most texels along a
+	side and bytes (4 halves a texel), the directions a voxel looks along
+	and the normals its fit is made at, and an object's bytes in the file
+	before its texels */
+	WORLD_SDF_OBJECT_MAXIMUM = 64,
+	WORLD_SDF_OBJECT_MOST_TRIANGLES = 2048,
 	WORLD_SDF_OBJECT_MOST_VOXELS = 65536,
+	/* (a piece of scenery's: a map has many, their occlusion is about
+	them on the ground, softer than a vehicle's about its wheels, and their
+	bake's time and the atlas's room go as their voxels) */
+	WORLD_SDF_OBJECT_SCENERY_VOXELS = 16384,
 	WORLD_SDF_OBJECT_MOST_SIDE = 96,
 	WORLD_SDF_OBJECT_ATLAS_SIDE = 256,
-	WORLD_SDF_OBJECT_ATLAS_BYTES = 4 * 1024 * 1024,
+	WORLD_SDF_OBJECT_ATLAS_BYTES = 8 * 1024 * 1024,
 	WORLD_SDF_OBJECT_TEXEL = 8,
 	WORLD_SDF_OBJECT_RAYS = 256,
 	WORLD_SDF_OBJECT_NORMALS = 96,
@@ -183,7 +192,7 @@ struct world_sdf_header
 	took of the bake */
 	unsigned long scenery_bytes;
 	unsigned long scenery_milliseconds;
-	/* the vehicles' occlusion fields' part's bytes, and the milliseconds
+	/* the objects' occlusion fields' part's bytes, and the milliseconds
 	they took of the bake */
 	unsigned long objects_bytes;
 	unsigned long objects_milliseconds;
@@ -239,7 +248,7 @@ struct world_sdf_object
 	unsigned long atlas[3];
 };
 
-/* a field's vehicles' occlusion fields, and the GPU's atlas they are put
+/* a field's objects' occlusion fields, and the GPU's atlas they are put
 in (width x height x depth texels, each object at its atlas place; made
 when the field is taken, not in the file). Its part of the file: the count
 (4 bytes); each object's definition, width, height, depth, origin, voxel,
@@ -428,13 +437,14 @@ x fastest: WORLD_SDF_ATLAS_LAYER_BYTES; the places past the last brick 0) */
 unsigned long world_sdf_atlas_layers(struct world_sdf_header const *header);
 void world_sdf_atlas_layer(struct world_sdf_volume const *volume, unsigned long layer, signed char *voxels);
 
-/* ---------- the vehicles' occlusion fields (struct world_sdf_object) */
+/* ---------- the objects' occlusion fields (struct world_sdf_object) */
 
 /* an object field's grid about its geometry's bounds (x0 y0 z0 x1 y1 z1,
-its space): grown by its margin, at the least voxel that fits
-WORLD_SDF_OBJECT_MOST_VOXELS and WORLD_SDF_OBJECT_MOST_SIDE (its texels
-not made) */
-void world_sdf_object_layout(float const bounds[6], struct world_sdf_object *object);
+its space): grown by its margin, at the least voxel that fits most_voxels
+(WORLD_SDF_OBJECT_MOST_VOXELS a vehicle's, WORLD_SDF_OBJECT_SCENERY_VOXELS
+a piece of scenery's) and WORLD_SDF_OBJECT_MOST_SIDE (its texels not
+made) */
+void world_sdf_object_layout(float const bounds[6], unsigned long most_voxels, struct world_sdf_object *object);
 /* the directions and weights every slice reads, made once a bake and
 shared by its threads (a slice allocates nothing: the guest's memory
 mapped and unmapped meanwhile makes the renderer drop and remake its
@@ -448,11 +458,15 @@ and solid its whole slice's: a row's are its own, so the rows may be
 baked apart, a few at a time): each voxel's t, v.xyz (4 floats, x
 fastest) fitted to the occlusion of these triangles (9 floats each) at
 WORLD_SDF_OBJECT_NORMALS normals, from WORLD_SDF_OBJECT_RAYS directions
-looked along; solid[x] 1 where inside(point) (its collision's point test:
-a voxel in solid, whose value is its neighbours' after) */
+looked along. opacities: each triangle's, 0 to 1, the share of a
+direction crossing it that it blocks (an alpha-tested leaf's texture's
+coverage); NULL, every one opaque. solid[x] 1 where inside(point) (its
+collision's point test: a voxel in solid, whose value is its neighbours'
+after) */
 void world_sdf_object_slice(struct world_sdf_object_tables const *tables, struct world_sdf_object const *object,
-	float const *positions, long triangle_count, int (*inside)(void *context, float const point[3]), void *context,
-	unsigned long z, unsigned long first_row, unsigned long end_row, float *values, unsigned char *solid);
+	float const *positions, float const *opacities, long triangle_count, int (*inside)(void *context,
+	float const point[3]), void *context, unsigned long z, unsigned long first_row, unsigned long end_row, float *values,
+	unsigned char *solid);
 /* an object's texels made from its voxels' values (each in solid its
 neighbours' outside, step by step), and its reach; FALSE if no memory */
 int world_sdf_object_finish(struct world_sdf_object *object, float const *values, unsigned char const *solid);
@@ -463,8 +477,10 @@ float world_sdf_half_value(unsigned short half);
 the object's space, as the shaders find it (0 to 1) */
 float world_sdf_object_occlusion(struct world_sdf_object const *object, float const point[3], float const normal[3]);
 /* the objects put in an atlas (each atlas place set, and the atlas's
-size): those that fit WORLD_SDF_OBJECT_ATLAS_SIDE and _BYTES, in order;
-how many did (the rest: none, atlas[0] ~0) */
+size): those that fit WORLD_SDF_OBJECT_ATLAS_SIDE and _BYTES, in order, in
+columns along z, rows of them along x and the rows along y, of the depth
+and width that place the most in the least bytes; how many did (the rest:
+none, atlas[0] ~0) */
 unsigned long world_sdf_objects_place(struct world_sdf_objects *objects);
 
 #endif

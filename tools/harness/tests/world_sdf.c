@@ -1005,7 +1005,7 @@ static void round_trip_case(void)
 	CHECK(bytes && size == 80 + payload + 4 + 4, "%lu", size);
 	/* (the header field by field, little-endian, at fixed places) */
 	CHECK(bytes[0] == 'W' && bytes[1] == 'S' && bytes[2] == 'D' && bytes[3] == 'F', "magic");
-	CHECK(sdf_get32(bytes + 4) == 4, "version");
+	CHECK(sdf_get32(bytes + 4) == 5, "version");
 	CHECK(sdf_get32(bytes + 8) == 0xC0FFEE12UL && sdf_get32(bytes + 12) == 2, "checksum, bsp");
 	CHECK(sdf_get32(bytes + 16) == volume.header.width && sdf_get32(bytes + 20) == volume.header.height &&
 		sdf_get32(bytes + 24) == volume.header.depth, "size");
@@ -1249,7 +1249,7 @@ static void object_bake(struct world_sdf_object *object, int backwards)
 	box_add(object_low, object_high);
 	memcpy(bounds, object_low, sizeof(object_low));
 	memcpy(bounds + 3, object_high, sizeof(object_high));
-	world_sdf_object_layout(bounds, object);
+	world_sdf_object_layout(bounds, WORLD_SDF_OBJECT_MOST_VOXELS, object);
 	slice = object->width * object->height;
 	values = malloc(slice * object->depth * 4 * sizeof(float));
 	solid = malloc(slice * object->depth);
@@ -1262,7 +1262,7 @@ static void object_bake(struct world_sdf_object *object, int backwards)
 		{
 			unsigned long y = backwards ? object->height - 1 - row : row;
 
-			world_sdf_object_slice(tables, object, positions, triangle_count, inside_object, NULL, at, y, y + 1,
+			world_sdf_object_slice(tables, object, positions, NULL, triangle_count, inside_object, NULL, at, y, y + 1,
 				values + at * slice * 4, solid + at * slice);
 		}
 	}
@@ -1281,7 +1281,7 @@ static void object_layout_case(void)
 	struct world_sdf_object object;
 	int axis;
 
-	world_sdf_object_layout(small, &object);
+	world_sdf_object_layout(small, WORLD_SDF_OBJECT_MOST_VOXELS, &object);
 	CHECK(object.voxel == WORLD_SDF_OBJECT_LEAST_VOXEL, "%g", object.voxel);
 	for (axis = 0; axis < 3; axis++)
 	{
@@ -1294,7 +1294,7 @@ static void object_layout_case(void)
 			1.0e-4f, "small high %d", axis);
 	}
 	CHECK(!memcmp(object.bounds, small, sizeof(small)), "its bounds");
-	world_sdf_object_layout(large, &object);
+	world_sdf_object_layout(large, WORLD_SDF_OBJECT_MOST_VOXELS, &object);
 	CHECK(object.voxel > WORLD_SDF_OBJECT_LEAST_VOXEL, "%g", object.voxel);
 	CHECK(object.width * object.height * object.depth <= WORLD_SDF_OBJECT_MOST_VOXELS &&
 		object.width <= WORLD_SDF_OBJECT_MOST_SIDE && object.height <= WORLD_SDF_OBJECT_MOST_SIDE &&
@@ -1309,6 +1309,97 @@ static void object_layout_case(void)
 		CHECK(w * h * d > WORLD_SDF_OBJECT_MOST_VOXELS || w > WORLD_SDF_OBJECT_MOST_SIDE, "a finer voxel fits");
 	}
 	CHECK(object.origin[0] <= -6.0f - WORLD_SDF_OBJECT_MOST_MARGIN + 1.0e-4f, "large margin");
+}
+
+/* a field of horizontal square cards (x, y within 1 of 0) at these
+heights, each of this opacity (NULL: all opaque), baked as world_sdf.c
+bakes a piece of scenery's (no solid) */
+static void cards_bake(struct world_sdf_object *object, float const *heights, int count, float const *opacities)
+{
+	float bounds[6] = { -1.0f, -1.0f, 0.0f, 1.0f, 1.0f, 0.0f };
+	unsigned long slice, z, y;
+	float *values;
+	unsigned char *solid;
+	struct world_sdf_object_tables *tables = world_sdf_object_tables_make();
+	int card;
+
+	CHECK(tables, "tables");
+	triangle_count = 0;
+	for (card = 0; card < count; card++)
+	{
+		float const a[3] = { -1.0f, -1.0f, heights[card] }, b[3] = { 1.0f, -1.0f, heights[card] };
+		float const c[3] = { 1.0f, 1.0f, heights[card] }, d[3] = { -1.0f, 1.0f, heights[card] };
+
+		quad_add(a, b, c, d);
+		bounds[2] = card ? (heights[card] < bounds[2] ? heights[card] : bounds[2]) : heights[card];
+		bounds[5] = card ? (heights[card] > bounds[5] ? heights[card] : bounds[5]) : heights[card];
+	}
+	{
+		float per_triangle[16];
+		int index;
+
+		for (index = 0; opacities && index < triangle_count; index++)
+			per_triangle[index] = opacities[index / 2];
+		world_sdf_object_layout(bounds, WORLD_SDF_OBJECT_MOST_VOXELS, object);
+		slice = object->width * object->height;
+		values = malloc(slice * object->depth * 4 * sizeof(float));
+		solid = malloc(slice * object->depth);
+		for (z = 0; z < object->depth; z++)
+			for (y = 0; y < object->height; y++)
+				world_sdf_object_slice(tables, object, positions, opacities ? per_triangle : NULL, triangle_count, NULL,
+					NULL, z, y, y + 1, values + z * slice * 4, solid + z * slice);
+	}
+	CHECK(world_sdf_object_finish(object, values, solid), "finished");
+	world_sdf_object_tables_free(tables);
+	free(values);
+	free(solid);
+}
+
+static void object_opacity_case(void)
+{
+	/* a card of leaves (#666): a card half drawn by its alpha test blocks
+	half of what crosses it, so the ground under it is half as occluded as
+	under a solid one. Two such cards, one above the other: what crosses
+	both (the upper one's cone, from under them) is let through a quarter,
+	what crosses the lower alone a half, so 0.5 L + 0.25 U, L and U the
+	lower's and the upper's alone, solid. Opaque cards (opacity 1) exactly
+	as with none given (a vehicle's) */
+	static const float half[1] = { 0.5f }, halves[2] = { 0.5f, 0.5f }, ones[2] = { 1.0f, 1.0f };
+	static const float low[1] = { 1.0f }, high[1] = { 1.6f }, both[2] = { 1.0f, 1.6f };
+	struct world_sdf_object solid, upper, partial, stacked, opaque, given;
+	float const up[3] = { 0.0f, 0.0f, 1.0f };
+	int index;
+
+	cards_bake(&solid, low, 1, NULL);
+	cards_bake(&upper, high, 1, NULL);
+	cards_bake(&partial, low, 1, half);
+	cards_bake(&stacked, both, 2, halves);
+	cards_bake(&opaque, both, 2, NULL);
+	cards_bake(&given, both, 2, ones);
+	CHECK(opaque.width == given.width && opaque.height == given.height && opaque.depth == given.depth &&
+		!memcmp(opaque.texels, given.texels, opaque.width * opaque.height * opaque.depth * 4 * sizeof(unsigned short)),
+		"opaque cards as with no opacities");
+	for (index = 0; index < 5; index++)
+	{
+		/* (the ground under the cards, from their middle to near an edge) */
+		float const point[3] = { 0.2f * (float)index, 0.1f * (float)index, 0.0f };
+		float a = world_sdf_object_occlusion(&solid, point, up), b = world_sdf_object_occlusion(&partial, point, up);
+		float c = world_sdf_object_occlusion(&stacked, point, up), d = world_sdf_object_occlusion(&opaque, point, up);
+		float u = world_sdf_object_occlusion(&upper, point, up);
+
+		printf("cards at %g %g: solid %.3f, half %.3f; upper %.3f; two halves %.3f, two solid %.3f\n", point[0],
+			point[1], a, b, u, c, d);
+		CHECK(a > 0.2f && u > 0.1f, "a solid card occludes the ground under it: %g, %g", a, u);
+		CHECK(fabsf(b - 0.5f * a) < 0.03f, "a card half drawn: half a solid one's: %g against %g", b, a);
+		CHECK(fabsf(c - (0.5f * a + 0.25f * u)) < 0.03f, "two half cards: %g, not %g", c, 0.5f * a + 0.25f * u);
+		CHECK(c < d - 0.04f, "two half cards less than two solid: %g, %g", c, d);
+	}
+	free(solid.texels);
+	free(upper.texels);
+	free(partial.texels);
+	free(stacked.texels);
+	free(opaque.texels);
+	free(given.texels);
 }
 
 static void object_bake_case(void)
@@ -1458,13 +1549,44 @@ static void object_half_case(void)
 	}
 }
 
+/* each placed object within the atlas, and apart from every other */
+static void atlas_apart(struct world_sdf_objects const *objects)
+{
+	unsigned long i, j;
+
+	for (i = 0; i < objects->count; i++)
+	{
+		struct world_sdf_object const *a = &objects->objects[i];
+
+		if (a->atlas[0] == ~0UL)
+			continue;
+		CHECK(a->atlas[0] + a->width <= objects->atlas_width && a->atlas[1] + a->height <= objects->atlas_height &&
+			a->atlas[2] + a->depth <= objects->atlas_depth && objects->atlas_width <= WORLD_SDF_OBJECT_ATLAS_SIDE &&
+			objects->atlas_height <= WORLD_SDF_OBJECT_ATLAS_SIDE && objects->atlas_depth <= WORLD_SDF_OBJECT_ATLAS_SIDE,
+			"object %lu past the atlas", i);
+		for (j = 0; j < i; j++)
+		{
+			struct world_sdf_object const *b = &objects->objects[j];
+
+			if (b->atlas[0] == ~0UL)
+				continue;
+			CHECK(a->atlas[0] >= b->atlas[0] + b->width || b->atlas[0] >= a->atlas[0] + a->width ||
+				a->atlas[1] >= b->atlas[1] + b->height || b->atlas[1] >= a->atlas[1] + a->height ||
+				a->atlas[2] >= b->atlas[2] + b->depth || b->atlas[2] >= a->atlas[2] + a->depth,
+				"objects %lu and %lu overlap", i, j);
+		}
+	}
+	CHECK(objects->atlas_width * objects->atlas_height * objects->atlas_depth * WORLD_SDF_OBJECT_TEXEL <=
+		WORLD_SDF_OBJECT_ATLAS_BYTES, "past the budget");
+}
+
 static void object_atlas_case(void)
 {
 	/* objects stacked in columns, apart, within the atlas's side and bytes;
 	one too large none, and those past the budget none */
 	struct world_sdf_objects objects;
 	struct world_sdf_object list[6];
-	unsigned long placed, i, j;
+	unsigned long placed, i;
 
 	memset(list, 0, sizeof(list));
 	for (i = 0; i < 6; i++)
@@ -1483,21 +1605,7 @@ static void object_atlas_case(void)
 		objects.atlas_width * objects.atlas_height * objects.atlas_depth * WORLD_SDF_OBJECT_TEXEL <=
 		WORLD_SDF_OBJECT_ATLAS_BYTES, "%lu placed in %lux%lux%lu", placed, objects.atlas_width, objects.atlas_height,
 		objects.atlas_depth);
-	for (i = 0; i < 6; i++)
-	{
-		if (list[i].atlas[0] == ~0UL)
-			continue;
-		CHECK(list[i].atlas[0] + list[i].width <= objects.atlas_width && list[i].height <= objects.atlas_height &&
-			list[i].atlas[2] + list[i].depth <= objects.atlas_depth, "object %lu past the atlas", i);
-		for (j = 0; j < i; j++)
-		{
-			if (list[j].atlas[0] == ~0UL)
-				continue;
-			CHECK(list[i].atlas[0] >= list[j].atlas[0] + list[j].width || list[j].atlas[0] >= list[i].atlas[0] + list[i].width ||
-				list[i].atlas[2] >= list[j].atlas[2] + list[j].depth || list[j].atlas[2] >= list[i].atlas[2] + list[i].depth,
-				"objects %lu and %lu overlap", i, j);
-		}
-	}
+	atlas_apart(&objects);
 	/* (small ones all fit) */
 	for (i = 0; i < 6; i++)
 	{
@@ -1505,6 +1613,42 @@ static void object_atlas_case(void)
 		list[i].depth = 50;
 	}
 	CHECK(world_sdf_objects_place(&objects) == 6, "the small ones");
+	{
+		/* a map's (b30's): seven vehicles' fields, then thirty pieces of
+		scenery's, smaller: all of them, apart, in the budget, in not much
+		more than their own bytes (in one row of columns, as high as the
+		highest, took 1.7 times them; as deep as the atlas, too, 1.8) */
+		struct world_sdf_object many[37];
+		unsigned long own = 0;
+
+		memset(many, 0, sizeof(many));
+		for (i = 0; i < 37; i++)
+		{
+			many[i].width = i < 7 ? 37 + 2 * i : 20 + i % 7;
+			many[i].height = i < 7 ? 33 + i : 20 + i % 5;
+			many[i].depth = i < 7 ? 29 + i : 19 + i % 9;
+			own += many[i].width * many[i].height * many[i].depth;
+		}
+		objects.count = 37;
+		objects.objects = many;
+		placed = world_sdf_objects_place(&objects);
+		CHECK(placed == 37, "a map's: %lu placed in %lux%lux%lu", placed, objects.atlas_width, objects.atlas_height,
+			objects.atlas_depth);
+		CHECK(objects.atlas_width * objects.atlas_height * objects.atlas_depth < own * 3 / 2,
+			"a map's in %lux%lux%lu, %lu texels their own", objects.atlas_width, objects.atlas_height,
+			objects.atlas_depth, own);
+		atlas_apart(&objects);
+		/* (the first first: three large ones, of which two fit the budget,
+		then small ones: the two, and none after the third) */
+		for (i = 0; i < 37; i++)
+			many[i].width = many[i].height = many[i].depth = i < 3 ? 72 : 10;
+		placed = world_sdf_objects_place(&objects);
+		CHECK(placed == 2 && many[0].atlas[0] != ~0UL && many[1].atlas[0] != ~0UL, "the first two placed (%lu)",
+			placed);
+		for (i = 1; i < 37; i++)
+			CHECK(many[i].atlas[0] == ~0UL || many[i - 1].atlas[0] != ~0UL, "%lu placed past one not", i);
+		atlas_apart(&objects);
+	}
 }
 
 /* the bake's threads: the processors less the game's own (its thread, the
@@ -1643,6 +1787,8 @@ int main(int argc, char **argv)
 		object_layout_case();
 	else if (!strcmp(name, "object_bake"))
 		object_bake_case();
+	else if (!strcmp(name, "object_opacity"))
+		object_opacity_case();
 	else if (!strcmp(name, "object_determinism"))
 		object_determinism_case();
 	else if (!strcmp(name, "object_half"))
