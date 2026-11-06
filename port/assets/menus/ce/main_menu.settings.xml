@@ -103,7 +103,7 @@
 		<string text="The mouse, the controller and the keys."/>
 		<string text="Internet play, sharing maps and updates."/>
 		<string text="The HUD, the players' names, the scoreboard and the chat."/>
-		<string text="Your player profiles, your name and color, and the disk space the maps take."/>
+		<string text="Your player profiles, your name and color, the campaign's AI and the disk space the maps take."/>
 		<string text="Texture, sound, text and model packs from the mods folder."/>
 	</strings>
 	<strings name="main_menu/settings/button_help">

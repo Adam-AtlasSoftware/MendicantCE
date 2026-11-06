@@ -383,6 +383,9 @@
 	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness/header_brightness">
 		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness/header_brightness.png" width="512" height="64"/>
 	</bitmap>
+	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/header_campaign_ai">
+		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/header_campaign_ai.png" width="512" height="64"/>
+	</bitmap>
 	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/header_first_person">
 		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/header_first_person.png" width="512" height="64"/>
 	</bitmap>

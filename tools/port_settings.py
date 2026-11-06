@@ -853,7 +853,7 @@ PAGES = {
     },
     "profile_settings": {
         "screen": "profile_settings_screen", "tab": "PROFILES",
-        "about": "Your player profiles, your name and color, and the disk space the maps take.",
+        "about": "Your player profiles, your name and color, the campaign's AI and the disk space the maps take.",
         "rows": [
             # (with no profile, NAME, COLOR and MANAGE PROFILES are hidden and
             # CREATE PROFILE shown; in a game, those whose screens are
@@ -871,6 +871,12 @@ PAGES = {
             ("MANAGE PROFILES ›", None, PROFILE_MANAGER,
              "Switch to another player profile, make a new one or delete one. Your changes so far are kept.", None,
              "profiles", "port settings profiles"),
+            # (this computer's, every profile's: Advanced Graphics has no room
+            # left for its row)
+            (SECTION, "CAMPAIGN"),
+            ("CAMPAIGN AI ›", None, _page_screen(*CAMPAIGN_AI),
+             "MENDICANT AI: the campaign's Marines and Covenant fight as units led through drills, and how well "
+             "the AI aims and fires.", None),
             # (game.map_cache_megabytes: 0 keeps every stock map unpacked, 730
             # the Xbox's room, the least it takes; another number shows the
             # nearer: port/linux/src/map_cache.c, port/linux/game/map_cache_prefill.c)
@@ -961,9 +967,6 @@ PAGES = {
             ("ANIMATIONS", "game.enhanced_animations", [("CLASSIC", "false"), ("ENHANCED", "true")],
              "Enhanced: you turn with your aim in a jump and a grenade throw, and your legs keep moving as you "
              "throw. Classic moves as the Xbox did, so the AI plays as it did. Online: the host's choice.", None),
-            ("CAMPAIGN AI ›", None, _page_screen(*CAMPAIGN_AI),
-             "MENDICANT AI: the campaign's Marines and Covenant fight as units led through drills, and how well "
-             "the AI aims and fires.", None),
         ],
     },
     BRIGHTNESS_PAGE[0]: {
