@@ -2078,6 +2078,136 @@ static void world_ao_functions(struct xgpu_text *text, int light)
 		XGPU_WORLD_AO_GRID_X - 1, XGPU_WORLD_AO_FIELD, XGPU_WORLD_AO_CAPSULE, XGPU_WORLD_AO_SPHERE, XGPU_WORLD_AO_BOX);
 }
 
+/* ---------- the distance-field scene's ray step
+
+world_trace: port/linux/game/world_cascades.c's world_trace_ray operation
+for operation (tools/test_world_trace.py runs this text as C++ against it):
+from origin along the unit direction to at most t_max, through the
+cascades (cascades[k]: the first voxel's centre and the voxel, 0 not
+ready; the texture's at XGPU_MSL_TEXTURE_WORLD_CASCADES), hitting what mask
+allows (XGPU_WORLD_TRACE_*), each distance only once the ray is outside it.
+The hardware's ray queries (#602) would implement the same signature
+(docs/world-ao.md) */
+static const char world_trace_functions[] =
+	"struct world_trace_hit\n"
+	"{\n"
+	"\tbool hit;\n"
+	"\tfloat t;\n"
+	"\tint kind;\n"
+	"};\n"
+	/* the cascade a point is in: the finest ready whose window holds it
+	with its filter's neighbours (-1 none) */
+	"static inline int world_cascade_find(constant float4 *cascades, float3 p)\n"
+	"{\n"
+	"\tint found = -1;\n"
+	"\tfor (int cascade = " WORLD_AO_TEXT(XGPU_WORLD_CASCADES) " - 1; cascade >= 0; cascade--)\n"
+	"\t{\n"
+	"\t\tfloat4 c = cascades[cascade];\n"
+	"\t\tif (c.w <= 0.0)\n"
+	"\t\t\tcontinue;\n"
+	"\t\tfloat3 q = (p - c.xyz) / c.w;\n"
+	"\t\tfloat least = min(min(q.x, q.y), q.z), most = max(max(q.x, q.y), q.z);\n"
+	"\t\tif (least >= 0.0 && most <= " WORLD_AO_TEXT(XGPU_WORLD_CASCADE_SIDE) ".0 - 1.0)\n"
+	"\t\t\tfound = cascade;\n"
+	"\t}\n"
+	"\treturn found;\n"
+	"}\n"
+	/* its two distances there (world units): the voxels' centres'
+	coordinate modulo the side, a texel in (the guard past the last) */
+	"static inline float4 world_cascade_sample(texture3d<float> world_cascades, float4 c, int cascade, float3 p)\n"
+	"{\n"
+	"\tconstexpr sampler cascades_sampler(filter::linear, address::clamp_to_edge, coord::normalized);\n"
+	"\tfloat3 at = p / c.w - 0.5;\n"
+	"\tfloat3 place = at - " WORLD_AO_TEXT(XGPU_WORLD_CASCADE_SIDE) ".0 * floor(at / " WORLD_AO_TEXT(XGPU_WORLD_CASCADE_SIDE) ".0);\n"
+	"\tfloat3 uvw = float3((place.x + 0.5) / " WORLD_AO_TEXT(XGPU_WORLD_CASCADE_SPAN) ".0, (place.y + 0.5) / "
+		WORLD_AO_TEXT(XGPU_WORLD_CASCADE_SPAN) ".0,\n"
+	"\t\t(place.z + 0.5 + " WORLD_AO_TEXT(XGPU_WORLD_CASCADE_SPAN) ".0 * float(cascade)) / ("
+		WORLD_AO_TEXT(XGPU_WORLD_CASCADE_SPAN) ".0 * " WORLD_AO_TEXT(XGPU_WORLD_CASCADES) ".0));\n"
+	"\treturn world_cascades.sample(cascades_sampler, uvw, level(0.0)) * (" WORLD_AO_TEXT(XGPU_WORLD_CASCADE_RANGE_VOXELS)
+		".0 * c.w);\n"
+	"}\n"
+	"static inline world_trace_hit world_trace(texture3d<float> world_cascades, constant float4 *cascades, float3 origin,\n"
+	"\tfloat3 direction, float t_max, int mask)\n"
+	"{\n"
+	"\tworld_trace_hit result;\n"
+	"\tresult.hit = false;\n"
+	"\tresult.t = t_max;\n"
+	"\tresult.kind = 0;\n"
+	"\tbool active_structure = false, active_objects = false;\n"
+	"\tfloat t = 0.0;\n"
+	"\tfor (int step = 0; step < " WORLD_AO_TEXT(XGPU_WORLD_TRACE_STEPS) "; step++)\n"
+	"\t{\n"
+	"\t\tfloat3 p = origin + direction * t;\n"
+	"\t\tint cascade = world_cascade_find(cascades, p);\n"
+	"\t\tif (cascade < 0)\n"
+	"\t\t\tbreak;\n"
+	"\t\tfloat4 c = cascades[cascade];\n"
+	"\t\tfloat voxel = c.w;\n"
+	"\t\tfloat4 d = world_cascade_sample(world_cascades, c, cascade, p);\n"
+	"\t\tfloat nearest = " WORLD_AO_TEXT(XGPU_WORLD_CASCADE_RANGE_VOXELS) ".0 * voxel;\n"
+	"\t\tfloat inside = nearest;\n"
+	"\t\tif ((mask & " WORLD_AO_TEXT(XGPU_WORLD_TRACE_STRUCTURE) ") != 0)\n"
+	"\t\t{\n"
+	"\t\t\tif (d.x >= 0.0)\n"
+	"\t\t\t\tactive_structure = true;\n"
+	"\t\t\tif (active_structure)\n"
+	"\t\t\t\tnearest = min(nearest, d.x);\n"
+	"\t\t\telse\n"
+	"\t\t\t\tinside = min(inside, -d.x);\n"
+	"\t\t}\n"
+	"\t\tif ((mask & " WORLD_AO_TEXT(XGPU_WORLD_TRACE_OBJECTS) ") != 0)\n"
+	"\t\t{\n"
+	"\t\t\tif (d.y >= 0.0)\n"
+	"\t\t\t\tactive_objects = true;\n"
+	"\t\t\tif (active_objects)\n"
+	"\t\t\t\tnearest = min(nearest, d.y);\n"
+	"\t\t\telse\n"
+	"\t\t\t\tinside = min(inside, -d.y);\n"
+	"\t\t}\n"
+	"\t\tif (nearest < " WORLD_AO_TEXT(XGPU_WORLD_TRACE_HIT) " * voxel)\n"
+	"\t\t{\n"
+	"\t\t\tresult.hit = true;\n"
+	"\t\t\tresult.t = t;\n"
+	"\t\t\tresult.kind = (mask & " WORLD_AO_TEXT(XGPU_WORLD_TRACE_STRUCTURE) ") != 0 && active_structure && d.x <= nearest ? "
+		WORLD_AO_TEXT(XGPU_WORLD_TRACE_STRUCTURE) " : " WORLD_AO_TEXT(XGPU_WORLD_TRACE_OBJECTS) ";\n"
+	"\t\t\tbreak;\n"
+	"\t\t}\n"
+	"\t\tt += max(min(nearest, inside), " WORLD_AO_TEXT(XGPU_WORLD_TRACE_LEAST_STEP) " * voxel);\n"
+	"\t\tif (t >= t_max)\n"
+	"\t\t\tbreak;\n"
+	"\t}\n"
+	"\treturn result;\n"
+	"}\n";
+
+void xgpu_msl_world_trace(struct xgpu_text *text)
+{
+	xgpu_text_append(text, "%s", world_trace_functions);
+}
+
+char *xgpu_msl_world_trace_test(void)
+{
+	struct xgpu_text text = { 0 };
+
+	xgpu_text_append(&text, "#include <metal_stdlib>\nusing namespace metal;\n");
+	xgpu_msl_world_trace(&text);
+	xgpu_text_append(&text,
+		"struct world_trace_in\n"
+		"{\n"
+		"\tfloat4 position [[position]];\n"
+		"\tfloat3 origin [[user(origin)]];\n"
+		"\tfloat3 direction [[user(direction)]];\n"
+		"\tfloat4 parameters [[user(parameters), flat]];\n"
+		"};\n"
+		"fragment float4 xgpu_world_trace_test(world_trace_in in [[stage_in]],\n"
+		"\ttexture3d<float> world_cascades [[texture(%d)]], constant float4 *cascades [[buffer(0)]])\n"
+		"{\n"
+		"\tworld_trace_hit hit = world_trace(world_cascades, cascades, in.origin, in.direction, in.parameters.x,\n"
+		"\t\tint(in.parameters.y));\n"
+		"\treturn float4(hit.hit ? 1.0 : 0.0, hit.t, float(hit.kind), 0.0);\n"
+		"}\n", XGPU_MSL_TEXTURE_WORLD_CASCADES);
+	return text.buffer;
+}
+
 /* the occlusion at the pixel, for the light it multiplies
 (XGPU_AMBIENT_OCCLUSION_LIGHT_*): a model's, the field's relative to its
 reference faded in, times the others' proxies; the lightmap pass's, the

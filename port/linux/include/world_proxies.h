@@ -91,6 +91,14 @@ first, *dynamic_count of them; the static scenery's that the drawn field
 and its pages hold after (world_sdf.h's world_sdf_scenery_baked) */
 long world_proxies_window(float const camera_position[3], struct world_proxy *proxies, long *owners,
 	long maximum, long *dynamic_count);
+/* the scene's shapes about the camera (the distance-field scene's objects,
+world_cascades.h): every drawn instance's within reach of it, in the world,
+whatever the window sees, but for the static scenery the field holds and
+the shapes an occlusion field stands in for (drawn or on its way: the field
+is not a distance); at most maximum, each instance's together; owners[i] is
+the instance's id. Returns how many */
+long world_proxies_scene(float const camera_position[3], float reach, struct world_proxy *proxies, long *owners,
+	long maximum);
 /* whether an object is a static scenery placement that the drawn field
 and its pages hold (world_sdf.h's world_sdf_scenery_baked): its draws take
 none of the field, which holds its own geometry

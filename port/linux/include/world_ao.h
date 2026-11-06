@@ -302,5 +302,10 @@ enum
 };
 void halo_world_ao_field(int part, unsigned long width, unsigned long height, unsigned long depth,
 	unsigned long z_first, unsigned long z_count, void const *data);
+/* a box of the distance-field scene's cascades' texture (world_cascades.h:
+its first texel x, y, z, its size, two signed bytes a texel, x fastest);
+width 0 releases it */
+void halo_world_ao_cascades(unsigned long x, unsigned long y, unsigned long z, unsigned long width, unsigned long height,
+	unsigned long depth, void const *data);
 
 #endif

@@ -135,6 +135,11 @@ void xgpu_backend_world_ao_field(int part, unsigned long width, unsigned long he
 begun (XGPU_WORLD_AO_PREPASS_BEGIN, its targets target's size), ended and
 the occlusion found from it over the window (_END, pass), or none (_NONE) */
 void xgpu_backend_world_ao_prepass(int phase, xgpu_target target, const struct xgpu_world_ao_pass *pass);
+/* a box of the distance-field scene's cascades' texture (xgpu.h's
+XGPU_WORLD_CASCADE*): its first texel, its size, two signed bytes a texel,
+x fastest (width 0: released) */
+void xgpu_backend_world_ao_cascades(unsigned long x, unsigned long y, unsigned long z, unsigned long width,
+	unsigned long height, unsigned long depth, const void *data);
 BOOL xgpu_backend_display_hdr(float *headroom);
 BOOL xgpu_backend_display_white(float *nits);
 
