@@ -134,6 +134,11 @@ older one whose messages are this one's but for the kinds
 network_replay_skips_message leaves out (port/linux/network_format.txt) */
 boolean network_replay_network_version_playable(unsigned long network_version);
 
+/* whether a Forge game's replay (its version marked with
+HALO_PORT_FORGE_VERSION_BIT) can be played: Forge's tag pack is written
+(forge_tag_import.c); request asks the main menu to write it */
+boolean network_replay_forge_playable(boolean request);
+
 /* whether a distributed message of the kind is not read from the replay
 being played: one whose layout changed since its network version
 (network_distributed.c) */

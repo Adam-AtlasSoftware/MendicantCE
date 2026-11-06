@@ -481,6 +481,13 @@ static boolean replay_start(
 	and OpenCE take for a newer version than theirs and do not play */
 	replay_put_long(header + 12, network_standard_agreed_rate() ?
 		HALO_PORT_STANDARD_ADVERTISED_VERSION : HALO_PORT_NETWORK_VERSION);
+	/* port (OpenH1): a Forge game's, or a Forge map's, marked as its
+	advertisement is (halo_port_limits.h's HALO_PORT_FORGE_VERSION_BIT): its
+	level has Forge's tags appended (forge_tag_import.c), which a machine
+	without Forge's tag pack cannot load, and a build without Forge takes the
+	mark for a newer version and does not play it */
+	if (game_variant_set_is_forge() || forge_layout_hosting())
+		header[13] |= (byte)(HALO_PORT_FORGE_VERSION_BIT >> 8);
 	replay_put_long(header + 16, (unsigned long)number);
 	replay_put_long(header + 20, TICKS_PER_SECOND);
 	replay_put_long(header + 24, (unsigned long)game_time_get());
@@ -703,6 +710,17 @@ boolean network_replay_info(
 	{
 		snprintf(info->why, sizeof(info->why), "Recorded before replays could be played back: it cannot be watched.");
 		return FALSE;
+	}
+	/* port (OpenH1): a Forge game's (HALO_PORT_FORGE_VERSION_BIT), which
+	needs Forge's tag pack, as joining one does */
+	if (network_version & HALO_PORT_FORGE_VERSION_BIT)
+	{
+		network_version &= ~(unsigned long)HALO_PORT_FORGE_VERSION_BIT;
+		if (!network_replay_forge_playable(FALSE))
+		{
+			snprintf(info->why, sizeof(info->why), "A Forge game: the main menu has not written Forge's tag pack yet.");
+			return FALSE;
+		}
 	}
 	if (!network_replay_network_version_playable(network_version))
 	{

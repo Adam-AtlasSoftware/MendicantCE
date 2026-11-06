@@ -152,3 +152,11 @@ def test_format_4_metadata():
     text = replay_stats.report("x", replay, replay_stats.measure(replay, NAMES))
     assert "30 seconds long" in text and "played by Carlo" in text
 
+
+
+def test_version_forge():
+    # (a Forge game's replay: HALO_PORT_FORGE_VERSION_BIT beside an OpenH1
+    # game's protocol, or a Legacy game's network version)
+    assert replay_stats.network_version_text(0x8000 | 0x4000 | 19) == "OpenH1 protocol 19, a Forge game"
+    assert replay_stats.network_version_text(0x4000 | 41) == "network version 41, a Forge game"
+    assert replay_stats.network_version_text(0x8000 | 19) == "OpenH1 protocol 19"

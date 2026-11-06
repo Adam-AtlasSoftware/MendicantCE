@@ -49,12 +49,17 @@ HEADER_FILE = Path(__file__).resolve().parent.parent / "port/linux/game/network_
 # (OpenH1) an OpenH1 game's replay has its protocol's version, as its
 # advertisement does: HALO_PORT_STANDARD_VERSION_BIT and the version
 STANDARD_VERSION_BIT = 0x8000
+# (OpenH1) a Forge game's, or a Forge map's, marked too:
+# HALO_PORT_FORGE_VERSION_BIT
+FORGE_VERSION_BIT = 0x4000
 
 
 def network_version_text(version):
+    forge = ", a Forge game" if version & FORGE_VERSION_BIT else ""
+    version &= ~FORGE_VERSION_BIT
     if version & STANDARD_VERSION_BIT:
-        return f"OpenH1 protocol {version & ~STANDARD_VERSION_BIT}"
-    return f"network version {version}"
+        return f"OpenH1 protocol {version & ~STANDARD_VERSION_BIT}{forge}"
+    return f"network version {version}{forge}"
 
 def message_names(header_file: Path = HEADER_FILE) -> Dict[int, str]:
     """The distributed message types' names, by number, from the enum that

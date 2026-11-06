@@ -128,6 +128,11 @@ def compare(recording, playback, tolerance=1.0, skip_ticks=0):
     # slack per five, the file's sync period)
     reached = play_last is not None and rec_last is not None and play_last >= rec_last - 5 * 30
     good = bool(players) and reached and all(player["median"] <= tolerance for player in players.values())
+    units = compare_units(rec_units, play_units, tolerance, skip_ticks)
+    # (units recorded that the playback has none of: its level lacks what
+    # they are, a Forge game's played without Forge's tag pack)
+    if units and units["recorded_units_mean"] > 0 and not units["matched"]:
+        good = False
     return {
         "recording_ticks": [min(rec_ticks), rec_last] if rec_ticks else None,
         "playback_ticks": [min(play_ticks), play_last] if play_ticks else None,
@@ -136,7 +141,7 @@ def compare(recording, playback, tolerance=1.0, skip_ticks=0):
         "playback_logged_end": ended,
         "tolerance": tolerance,
         "players": players,
-        "units": compare_units(rec_units, play_units, tolerance, skip_ticks),
+        "units": units,
         "pass": good,
     }
 
@@ -158,7 +163,11 @@ def main():
               f"max {player['max']:.3f} at tick {player['max_tick']}, "
               f"{100 * player['within_tolerance']:.0f}% within {result['tolerance']}")
     units = result["units"]
-    if units:
+    if units and not units["matched"]:
+        print(f"  units (bipeds no player controls): {units['ticks']} ticks, {units['recorded_units_mean']:.1f} a tick "
+              f"recorded; counts equal at {100 * units['count_equal_share']:.0f}% of ticks (most apart "
+              f"{units['count_difference_max']}); none matched")
+    elif units:
         print(f"  units (bipeds no player controls): {units['ticks']} ticks, {units['recorded_units_mean']:.1f} a tick "
               f"recorded; counts equal at {100 * units['count_equal_share']:.0f}% of ticks (most apart "
               f"{units['count_difference_max']}); {units['matched']} matched, median {units['median']:.3f}, "

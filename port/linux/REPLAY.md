@@ -212,7 +212,7 @@ bytes, too few for `OpenCE Android | local build (<commit>)`):
 | --- | --- | --- |
 | 0 | 8 | `OCREPLAY` |
 | 8 | 4 | The format, 4 (3 had no length, server or player; 2's records were not compressed; 1 had no game record; 0 a 216-byte header) |
-| 12 | 4 | The network version (`HALO_PORT_NETWORK_VERSION`) |
+| 12 | 4 | The network version (`HALO_PORT_NETWORK_VERSION`); an OpenH1 game's protocol version with `HALO_PORT_STANDARD_VERSION_BIT`, as its advertisement has it; a Forge game's (or a Forge map's) with `HALO_PORT_FORGE_VERSION_BIT` too, which plays only where Forge's tag pack is written, as joining one does |
 | 16 | 4 | The build's number |
 | 20 | 4 | Ticks a second (30) |
 | 24 | 4 | The host's tick at the start |

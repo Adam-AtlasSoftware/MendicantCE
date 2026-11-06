@@ -1090,6 +1090,21 @@ boolean network_replay_watch(
 		snprintf(why, (size_t)why_size, "This replay was recorded by a build that could not play it back.");
 		return FALSE;
 	}
+	/* port (OpenH1): a Forge game's (HALO_PORT_FORGE_VERSION_BIT, which the
+	messages' layouts do not depend on), played only with Forge's tag pack,
+	as one is joined: without it the level has not the tags its objects are
+	of; the pack is asked for (the main menu writes it) */
+	if (network_version & HALO_PORT_FORGE_VERSION_BIT)
+	{
+		network_version &= ~(unsigned long)HALO_PORT_FORGE_VERSION_BIT;
+		if (!network_replay_forge_playable(TRUE))
+		{
+			fclose(file);
+			snprintf(why, (size_t)why_size, "This replay is of a Forge game, which needs some data from your maps: "
+				"OpenH1 is preparing it at the main menu, play it again once it is ready.");
+			return FALSE;
+		}
+	}
 	if (!network_replay_network_version_playable(network_version))
 	{
 		fclose(file);
@@ -1178,6 +1193,14 @@ boolean network_replay_watch(
 	spectate_director_reset();
 	error(_error_log, "replay: playing %s (%s), from tick %ld", path, game.map.name, playback.start_tick);
 	return TRUE;
+}
+
+boolean network_replay_forge_playable(
+	boolean request)
+{
+	extern boolean forge_tag_pack_ready(boolean request);
+
+	return forge_tag_pack_ready(request);
 }
 
 boolean network_replay_network_version_playable(
