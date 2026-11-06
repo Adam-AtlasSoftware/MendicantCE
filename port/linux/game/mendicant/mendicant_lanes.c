@@ -1337,7 +1337,7 @@ boolean mendicant_lane_evading(
 {
 	int slot = (int)(unsigned short)actor_index;
 
-	if (actor_index == NONE || slot >= MENDICANT_MAX_ACTORS)
+	if (actor_index == NONE || slot >= MENDICANT_MAX_ACTORS || !lane_layer_on())
 		return FALSE;
 	return lane_soldiers[slot].actor == actor_index && lane_soldiers[slot].evading;
 }
@@ -1356,8 +1356,28 @@ void mendicant_lanes_update(
 	int index;
 
 	mendicant_lanes_test_update(time);
-	if (!actor_data || !actor_data->valid || !lane_watching())
+	if (!actor_data || !actor_data->valid)
 		return;
+	/* the layer turned off (the settings menu) with no log watching: any
+	escape still under way ends here, its order with it (else it would hold
+	its soldier at its point) */
+	if (!lane_watching())
+	{
+		for (index = 0; index < MENDICANT_MAX_ACTORS; index++)
+		{
+			struct lane_soldier *soldier = &lane_soldiers[index];
+
+			if (soldier->actor == NONE || (soldier->vehicle == NONE && !soldier->evading))
+				continue;
+			lane_go_end(soldier->actor, soldier);
+			soldier->vehicle = NONE;
+			soldier->started = FALSE;
+			soldier->too_late = FALSE;
+			soldier->reaction = MENDICANT_LANE_NONE;
+			soldier->freeze_until = soldier->wrong_until = 0;
+		}
+		return;
+	}
 	if (time < lane_update_time)
 		lane_update_time = 0; /* (the clock went back) */
 	if (time - lane_update_time < LANE_UPDATE_TICKS && lane_update_time)
