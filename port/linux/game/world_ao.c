@@ -138,6 +138,10 @@ static struct
 	struct world_cascades_object objects[WORLD_CASCADES_MAXIMUM_OBJECTS];
 	/* a box's bytes on their way */
 	signed char *box;
+	/* the windows drawn this frame (windows_frame) and the frame before
+	(last_windows, last_frame) */
+	unsigned long windows_frame, last_frame;
+	long windows, last_windows;
 	/* (measuring) */
 	double seconds, most_seconds, shapes_seconds, cascades_seconds;
 	long frames, voxels, moved, boxes;
@@ -555,6 +559,14 @@ void world_ao_window_begin(short local_player_index, short rasterizer_target, fl
 		world_ao.fade = world_ao.volume ? world_sdf_fade() : 0.0f;
 		/* (the distance-field scene about the camera, once a frame) */
 		world_ao_scene_update(camera_position, world_ao.cascades);
+		if (world_ao_scene.windows_frame != world_ao_scene.frame)
+		{
+			world_ao_scene.last_windows = world_ao_scene.windows;
+			world_ao_scene.last_frame = world_ao_scene.windows_frame;
+			world_ao_scene.windows_frame = world_ao_scene.frame;
+			world_ao_scene.windows = 0;
+		}
+		world_ao_scene.windows++;
 	}
 	if (world_ao.count < 0)
 		world_ao.count = 0;
@@ -601,7 +613,12 @@ int world_ao_prepass_begin(void)
 
 void world_ao_prepass_end(short x0, short y0, short x1, short y1, float const camera[4][4])
 {
-	halo_world_ao_prepass_end(x0, y0, x1, y1, camera);
+	/* (the previous frame's occlusion reprojected only where one window
+	draws a frame, this one and the last: split screen's share the
+	backend's texture) */
+	halo_world_ao_prepass_end(x0, y0, x1, y1, camera, (float const (*)[4])world_ao.cascades, world_ao_scene.frame,
+		world_ao_scene.windows == 1 && world_ao_scene.last_windows == 1 &&
+		world_ao_scene.windows_frame == world_ao_scene.last_frame + 1);
 }
 
 void world_ao_window_end(void)

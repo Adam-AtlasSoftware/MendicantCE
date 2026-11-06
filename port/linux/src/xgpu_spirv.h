@@ -84,6 +84,11 @@ pre-pass's inputs (an unsigned 2D image, read with texelFetch) at this
 binding of XGPU_SPIRV_SET_TEXTURES; set XGPU_SPIRV_SET_OCCLUSION as the
 surfaces have it */
 #define XGPU_SPIRV_WORLD_AO_PASS_INPUTS 0
+/* (and the window's previous frame's occlusion, a 2D float image read with
+texelFetch, and the distance-field scene's cascades, a 3D RG8 snorm one,
+linear, clamped: the dynamic objects' rays step through them) */
+#define XGPU_SPIRV_WORLD_AO_PASS_HISTORY 1
+#define XGPU_SPIRV_WORLD_AO_PASS_CASCADES 2
 /* (the distance-field scene's cascades: a 3D RG8 snorm image, linear,
 clamped: xgpu.h's XGPU_WORLD_CASCADE*) */
 #define XGPU_SPIRV_BINDING_WORLD_CASCADES 7

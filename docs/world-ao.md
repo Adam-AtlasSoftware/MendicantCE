@@ -78,6 +78,31 @@ surface removal leaves the opaque layers' overdraw out, not the alpha-tested fol
   surface faces the eye, and normal); where none is close, the closest of the 4x4 about it (`world_ao_upsample`).
   A thin silhouette keeps its own value, and the wall behind keeps the wall's.
 
+- **The dynamic objects by rays** (`world_ao_traced`). The pass no longer walks the dynamic objects' spheres,
+  capsules and boxes: it casts `XGPU_WORLD_AO_RAYS` (4) short rays a pixel through the distance-field scene's objects
+  ([The distance-field scene](#the-distance-field-scene-world_cascadesh)), cosine-weighted about the normal (Duff's
+  frame; stratified, turned for each pixel and frame by interleaved gradient noise), from 0.1 wu off the surface to
+  2 wu. A hit at t counts 1 − (t / 2)². The share is the cosine-weighted share of the hemisphere the objects block,
+  the same quantity the shapes' exact forms found. A pixel no object is within 2 wu of casts none: one fetch of the
+  objects' distance in cascade 1, whose range is 2 wu, says so first. Still walked: the occlusion fields (vehicles,
+  scenery: they hold occlusion, not distance), and the static scenery's shapes where a lightmap page has no layer.
+- **Temporal accumulation.** Each frame's occlusion is blended into the last frame's at the same point (a fifth of
+  the new). The point is reprojected by the window's previous camera, and the history is taken only where it is the
+  same surface: its distance from that frame's eye within 5%, its normal within about 37°. Otherwise this frame's
+  stands alone. The backend keeps two occlusion textures in turn. The front end gives the history only where one
+  window draws a frame, this one and the last, alike in place (split screen's windows share the texture), so a
+  camera cut, a resize or a second window starts afresh. `HALO_WORLD_AO_NO_TRACE=1` (for measuring) walks the shapes
+  as before, without history.
+
+On the M2 (Metal, 3420x2146, quarter resolution; the pass and the GPU's busy time a frame, medians; the same build
+with `HALO_WORLD_AO_NO_TRACE=1` the shapes' walk):
+
+| Scene | Walked: pass / busy | Traced: pass / busy |
+| --- | --- | --- |
+| a30's start | 4.70 / 11.8 ms | **1.66 / 8.3 ms** |
+| a10's start | 37.6 / 48.0 ms | **10.2 / 20.1 ms** |
+| a30 outdoors, the walk toward the first bridge | 4.59 / 16.0 ms (most 11.0 / 23.4) | **3.80 / 14.7 ms** (most 4.8 / 18.5) |
+
 `debug.world_ao_full_resolution` finds it at every pixel; `debug.world_ao_inline` finds it in the surfaces as
 before. VR's eye passes, a mirror's view and any window not drawn into the back buffer with its depth buffer find it
 inline. The first-person weapon, transparents, decals, water and the sky take no world light, as before. With

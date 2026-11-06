@@ -829,6 +829,8 @@ void xgpu_backend_world_ao_prepass(int phase, xgpu_target target, const struct x
 	{
 		record_body->pass = *pass;
 		stream_finite(&record_body->pass.camera[0][0], 16, "world occlusion's camera", 0);
+		stream_finite(&record_body->pass.cascades[0][0], 32, "world occlusion's cascades and previous camera", 0);
+		stream_finite(&record_body->pass.history[0], 4, "world occlusion's history", 0);
 	}
 	else
 	{

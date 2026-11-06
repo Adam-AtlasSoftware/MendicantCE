@@ -60,5 +60,9 @@ halves: past the combiner's places, 8 to 19) */
 /* (and the occlusion found once a pixel, which the draws that read it
 read: past the objects' atlas) */
 #define XGPU_METAL_TEXTURE_WORLD_AO_PIXELS 21
+/* (the World AO pass's own: the window's previous occlusion and the
+distance-field scene's cascades, XGPU_MSL_WORLD_AO_PASS_*) */
+#define XGPU_METAL_WORLD_AO_PASS_HISTORY 1
+#define XGPU_METAL_WORLD_AO_PASS_CASCADES 2
 
 #endif

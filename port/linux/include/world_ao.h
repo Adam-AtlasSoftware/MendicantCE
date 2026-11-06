@@ -280,10 +280,14 @@ void halo_world_ao_span(int span);
 /* the window's pre-pass begun (FALSE: none can be drawn), and ended, the
 occlusion found from it (xgpu_backend_world_ao_prepass); whether one would
 be drawn into the window's target as it is now, whatever the setting
-(halo_world_ao_prepass_found: its span WORLD_AO_SPAN_FOUND) */
+(halo_world_ao_prepass_found: its span WORLD_AO_SPAN_FOUND); ended with the
+distance-field scene's cascades (world_cascades.h's block), the frame's
+number, and whether this window's previous frame's occlusion may be
+reprojected (one window a frame, this and the last) */
 int halo_world_ao_prepass_found(void);
 int halo_world_ao_prepass_begin(void);
-void halo_world_ao_prepass_end(short x0, short y0, short x1, short y1, float const camera[4][4]);
+void halo_world_ao_prepass_end(short x0, short y0, short x1, short y1, float const camera[4][4],
+	float const cascades[4][4], unsigned long frame, int history);
 /* a part of the field uploaded (WORLD_AO_FIELD_*: world_sdf.h's table of
 cells, 4 bytes each, or its atlas of bricks' voxels, signed bytes), slices
 z_first to z_first + z_count - 1 of a width * height * depth volume; width

@@ -335,6 +335,10 @@ static struct
 	int active, failed, twins;
 	uint32_t width, height, twins_made;
 	struct xgpu_vulkan_image *inputs, *depth, *pixels;
+	/* the previous pass's occlusion (the history the next reprojects:
+	the two in turn), and the cascades' linear sampler */
+	struct xgpu_vulkan_image *history;
+	VkSampler linear;
 	struct xgpu_stream_pipeline_define *definitions;
 	struct stream_pipeline *entries;
 	/* (draw_pipeline: the twin's entry drawn with, in place of the
@@ -2778,8 +2782,10 @@ static int prepass_shaders(void)
 		sampler.address[0] = sampler.address[1] = sampler.address[2] = XGPU_VULKAN_ADDRESS_CLAMP;
 		sampler.anisotropy = 1;
 		prepass.sampler = xgpu_vulkan_sampler(&sampler);
+		sampler.minify = sampler.magnify = XGPU_VULKAN_FILTER_LINEAR;
+		prepass.linear = xgpu_vulkan_sampler(&sampler);
 	}
-	if (index < 2 || !prepass.sampler)
+	if (index < 2 || !prepass.sampler || !prepass.linear)
 	{
 		host_logf(HOST_LOG_WARN, "vulkan: display.ambient_occlusion \"world\"'s pass cannot be made: its surfaces read 1");
 		prepass.failed = 1;
@@ -2911,6 +2917,13 @@ static void prepass_pass_draw(struct xgpu_vulkan_image *into, const int32_t rect
 		draw.textures[stage].kind = XGPU_VULKAN_IMAGE_2D;
 		draw.textures[stage].sampler = prepass.sampler;
 	}
+	/* (the history, read where it is this window's; the distance-field
+	scene's cascades, linear) */
+	if (uniforms->history[0] != 0.0f)
+		draw.textures[XGPU_SPIRV_WORLD_AO_PASS_HISTORY].image = prepass.history;
+	draw.textures[XGPU_SPIRV_WORLD_AO_PASS_CASCADES].image = xgpu_vulkan_world_ao_cascades_image();
+	draw.textures[XGPU_SPIRV_WORLD_AO_PASS_CASCADES].kind = XGPU_VULKAN_IMAGE_3D;
+	draw.textures[XGPU_SPIRV_WORLD_AO_PASS_CASCADES].sampler = prepass.linear;
 	/* (the draw set's uniforms' range, which the constants' share) */
 	bytes = xgpu_vulkan_upload(192 * 16, 256, &draw.uniforms);
 	if (!bytes)
@@ -2988,12 +3001,26 @@ static void stream_world_ao_prepass(void *context, const struct xgpu_stream_worl
 			rectangle[axis] = low / scale;
 			rectangle[axis + 2] = (high + scale - 1) / scale;
 		}
-		prepass.pixels = prepass_image(prepass.pixels, XGPU_VULKAN_FORMAT_RGBA32F,
-			(prepass.width + (uint32_t)scale - 1) / (uint32_t)scale, (prepass.height + (uint32_t)scale - 1) / (uint32_t)scale);
+		struct xgpu_world_ao_pass uniforms = record->pass;
+		uint32_t width = (prepass.width + (uint32_t)scale - 1) / (uint32_t)scale;
+		uint32_t height = (prepass.height + (uint32_t)scale - 1) / (uint32_t)scale;
+
+		/* (the last pass's occlusion kept as the history, this one's drawn
+		into the other: two in turn) */
+		{
+			struct xgpu_vulkan_image *last = prepass.pixels;
+
+			prepass.pixels = prepass.history;
+			prepass.history = last;
+		}
+		prepass.pixels = prepass_image(prepass.pixels, XGPU_VULKAN_FORMAT_RGBA32F, width, height);
+		if (!prepass.history || xgpu_vulkan_image_description(prepass.history)->width != width ||
+			xgpu_vulkan_image_description(prepass.history)->height != height)
+			uniforms.history[0] = 0.0f;
 		if (prepass.pixels && rectangle[2] > rectangle[0] && rectangle[3] > rectangle[1] &&
 			xgpu_vulkan_pipeline_ready(&prepass.pass))
 		{
-			prepass_pass_draw(prepass.pixels, rectangle, &record->pass);
+			prepass_pass_draw(prepass.pixels, rectangle, &uniforms);
 			xgpu_vulkan_world_ao_set_pixels(prepass.pixels);
 		}
 		targets_bind();
