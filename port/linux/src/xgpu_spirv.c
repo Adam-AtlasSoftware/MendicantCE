@@ -4502,6 +4502,9 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	BOOL world_inputs = world && (program->ambient_occlusion & XGPU_AMBIENT_OCCLUSION_WORLD_INPUTS);
 	BOOL world_sampled = world && !world_inputs && (program->ambient_occlusion & XGPU_AMBIENT_OCCLUSION_WORLD_SAMPLED);
 	BOOL world_inline = world && !world_inputs && !world_sampled;
+	/* (an occluder's twin in the pre-pass: no inputs, where its alpha test
+	keeps it) */
+	BOOL occluder = !world && (program->ambient_occlusion & XGPU_AMBIENT_OCCLUSION_WORLD_INPUTS);
 	unsigned int world_ao_words = 0;
 	BOOL world_position = (program->per_pixel_lighting && (program->per_pixel_lighting == 2 ||
 		program->dynamic_lights == XGPU_DYNAMIC_LIGHTS_MODEL)) || environment || world;
@@ -4604,7 +4607,7 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 		state.in_world_binormal = interface_variable(&m, m.t_v3, STORAGE_INPUT, XGPU_SPIRV_LOCATION_WORLD_BINORMAL, "xWorldBinormal");
 		state.in_world_tangent = interface_variable(&m, m.t_v3, STORAGE_INPUT, XGPU_SPIRV_LOCATION_WORLD_TANGENT, "xWorldTangent");
 	}
-	color_out = interface_variable(&m, world_inputs ? m.t_uv4 : m.t_v4, STORAGE_OUTPUT, 0, "fragment_color");
+	color_out = interface_variable(&m, world_inputs || occluder ? m.t_uv4 : m.t_v4, STORAGE_OUTPUT, 0, "fragment_color");
 	if (sample_mask)
 	{
 		unsigned int operands[3], array = id_new(&m);
@@ -4861,6 +4864,9 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	/* (finite: finite4; the pre-pass's twin, its inputs) */
 	if (world_inputs)
 		store(&m, color_out, world_ao_words);
+	else if (occluder)
+		store(&m, color_out, op(&m, OP_COMPOSITE_CONSTRUCT, m.t_uv4, 4, (unsigned int[]){ constant_uint(&m, 0),
+			constant_uint(&m, 0), constant_uint(&m, 0), constant_uint(&m, 0) }));
 	else
 		store(&m, color_out, finite4(&m, result));
 	/* else its depth, no farther than the card: the conservative depth's

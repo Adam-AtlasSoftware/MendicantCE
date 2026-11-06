@@ -63,8 +63,10 @@ surface removal leaves the opaque layers' overdraw out, not the alpha-tested fol
   transparent parts, widgets and fog screen left for the second walk, the objects found once). In the first, the
   backend draws each draw with the world's light as its **twin** (`xgpu_stream_world_ao_twin`: the same pipeline, its
   pixel key `XGPU_AMBIENT_OCCLUSION_WORLD_INPUTS`, into an RGBA32Uint target and a depth target of its own) and
-  skips every other draw and clear. A twin writes its pixel's inputs: the normal (octahedral), the owner slot, the
-  reference or the static scenery's page's texel, the lightmap pass's flags, and its distance from the eye.
+  draws every other opaque depth-writing draw as an **occluder** (its test made strictly nearer, writing no inputs:
+  the first-person weapon, a surface lighting itself), so no hidden surface's occlusion is found. Blended draws and
+  clears are skipped. A twin writes its pixel's inputs: the normal (octahedral), the owner slot, the reference or the
+  static scenery's page's texel, the lightmap pass's flags, and its distance from the eye.
 - **The pass** (`xgpu_msl_world_ao_pass`, `xgpu_spirv_world_ao_pass`): one triangle over the window. By default it
   runs at a quarter of the pixels: each 2x2 block's nearest drawn pixel, its position found again along the camera's
   ray (`world_ao_pass_position`), its occlusion one call (`world_ao_evaluate`: the static term, the field relative

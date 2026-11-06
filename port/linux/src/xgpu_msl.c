@@ -2206,6 +2206,9 @@ char *xgpu_msl_pixel_shader(const struct xgpu_pixel_program *program, const stru
 	/* (found once a pixel: read from its texture, or the pre-pass's inputs
 	written in the colour's place: xgpu.h) */
 	BOOL world_inputs = world && (program->ambient_occlusion & XGPU_AMBIENT_OCCLUSION_WORLD_INPUTS);
+	/* (an occluder's twin in the pre-pass: no inputs, where its alpha test
+	keeps it) */
+	BOOL occluder = !world && (program->ambient_occlusion & XGPU_AMBIENT_OCCLUSION_WORLD_INPUTS);
 	BOOL world_sampled = world && !world_inputs && (program->ambient_occlusion & XGPU_AMBIENT_OCCLUSION_WORLD_SAMPLED);
 	BOOL world_inline = world && !world_inputs && !world_sampled;
 	int stage;
@@ -2242,7 +2245,8 @@ char *xgpu_msl_pixel_shader(const struct xgpu_pixel_program *program, const stru
 		xgpu_text_append(&text, "\tfloat3 xWorldPosition [[user(xWorldPosition)]];\n");
 	if (environment)
 		xgpu_text_append(&text, "\tfloat3 xWorldBinormal [[user(xWorldBinormal)]];\n\tfloat3 xWorldTangent [[user(xWorldTangent)]];\n");
-	xgpu_text_append(&text, "};\nstruct xgpu_fragment_out\n{\n\t%s color [[color(0)]];\n", world_inputs ? "uint4" : "float4");
+	xgpu_text_append(&text, "};\nstruct xgpu_fragment_out\n{\n\t%s color [[color(0)]];\n",
+		world_inputs || occluder ? "uint4" : "float4");
 	if (sample_mask)
 		xgpu_text_append(&text, "\tuint sample_mask [[sample_mask]];\n");
 	if (replaces_depth)
@@ -2481,9 +2485,11 @@ char *xgpu_msl_pixel_shader(const struct xgpu_pixel_program *program, const stru
 		xgpu_text_append(&text, "\tatomic_fetch_add_explicit(visible_samples, 1u, memory_order_relaxed);\n");
 	/* (the pre-pass's twin: its inputs in its colour's place, where its
 	alpha test keeps it) */
-	if (world_inputs)
+	if (world_inputs || occluder)
 	{
 		xgpu_text_append(&text, "\t(void)result;\n");
+		if (occluder)
+			xgpu_text_append(&text, "\tuint4 world_ao_inputs = uint4(0u);\n");
 		if (replaces_depth)
 			xgpu_text_append(&text, "\toutput.depth = max(1.0 - replaced_depth, in.frag_position.z);\n");
 		xgpu_text_append(&text, "\toutput.color = world_ao_inputs;\n\treturn output;\n}\n");

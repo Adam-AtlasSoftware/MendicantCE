@@ -430,7 +430,8 @@ int main(int argc, char **argv)
 				lit = xgpu_manifest_derive(&manifest.draws[index], &manifest.contexts[index], &settings, unlit, &derived);
 				/* (display.ambient_occlusion "world"'s draw in each of its forms:
 				finding its occlusion itself, reading it found once a pixel, and
-				that's twin in the pre-pass: xgpu_stream.h) */
+				that's twin in the pre-pass; another's twin as an occluder in the
+				pre-pass: xgpu_stream.h) */
 				for (form = 0; form < 3; form++)
 				{
 				struct xgpu_metal_pipeline_state_key state;
@@ -439,10 +440,16 @@ int main(int argc, char **argv)
 				if (form)
 				{
 					struct xgpu_stream_pipeline_define twin;
+					int world = (draw.key.pixel.ambient_occlusion & 0x30u) == XGPU_AMBIENT_OCCLUSION_WORLD;
 
-					if ((draw.key.pixel.ambient_occlusion & 0x30u) != XGPU_AMBIENT_OCCLUSION_WORLD)
+					/* (another draw among a window's opaque surfaces': its twin as
+					an occluder, where it is one) */
+					if (!world && (form == 1 || !manifest.contexts[index].world))
+						continue;
+					if (world)
+						draw.key.pixel.ambient_occlusion |= XGPU_AMBIENT_OCCLUSION_WORLD_SAMPLED;
+					else if (draw.key.pixel.ambient_occlusion)
 						break;
-					draw.key.pixel.ambient_occlusion |= XGPU_AMBIENT_OCCLUSION_WORLD_SAMPLED;
 					if (form == 2)
 					{
 						memset(&twin, 0, sizeof(twin));

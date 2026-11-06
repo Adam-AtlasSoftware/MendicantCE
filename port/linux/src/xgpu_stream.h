@@ -769,24 +769,48 @@ struct xgpu_stream_pipeline_define
 };
 
 /* a pipeline's twin in the pre-pass, made of its definition in place
-(nonzero: one with the world's light read from its pixel,
-XGPU_AMBIENT_OCCLUSION_WORLD_SAMPLED; else 0, none): its pixel key's
-occlusion XGPU_AMBIENT_OCCLUSION_WORLD_INPUTS (its light kept), into the
-inputs' target (xgpu_backend.h's XGPU_FORMAT_WORLD_AO_INPUTS: RGBA32Uint), one sample,
-nothing blended, every channel written, no HDR tag, no enhanced dynamic
-lights, no samples counted; its depth, stencil, raster, vertex program and
-alpha test as they are. The backends, and the Mac's library's build, make
-it alike */
+(nonzero; 0 none, the draw not drawn in the pre-pass):
+- of one with the world's light read from its pixel
+  (XGPU_AMBIENT_OCCLUSION_WORLD_SAMPLED), its pixel key's occlusion
+  XGPU_AMBIENT_OCCLUSION_WORLD_INPUTS (its light kept): it writes its
+  pixel's inputs;
+- of another opaque one that writes the depth where it is nearer or as
+  near (an occluder: the first-person weapon, a surface lighting itself),
+  _INPUTS alone, its test made strictly nearer (so that it never takes the
+  pixel of a surface it draws over at its own depth): it writes none, so
+  that no surface it hides has its occlusion found;
+into the inputs' target (xgpu_backend.h's XGPU_FORMAT_WORLD_AO_INPUTS:
+RGBA32Uint), one sample, nothing blended, every channel written, no HDR tag,
+no enhanced dynamic lights, no samples counted; its depth, stencil, raster,
+vertex program and alpha test as they are. The backends, and the Mac's
+library's build, make it alike */
 #define XGPU_STREAM_WORLD_AO_SAMPLED 0x50u
 #define XGPU_STREAM_WORLD_AO_INPUTS 0x90u
+#define XGPU_STREAM_WORLD_AO_OCCLUDER 0x80u
 #define XGPU_STREAM_FORMAT_WORLD_AO_INPUTS 4u
+/* (xgpu_backend.h's XGPU_COMPARE_LESS and _LESS_EQUAL) */
+#define XGPU_STREAM_COMPARE_LESS 1u
+#define XGPU_STREAM_COMPARE_LESS_EQUAL 3u
 static inline int xgpu_stream_world_ao_twin(struct xgpu_stream_pipeline_define *definition)
 {
 	uint8_t occlusion = definition->pixel_program.ambient_occlusion;
 
-	if ((occlusion & XGPU_STREAM_WORLD_AO_SAMPLED) != XGPU_STREAM_WORLD_AO_SAMPLED || (occlusion & 0x80u))
+	if (occlusion & 0x80u)
 		return 0;
-	occlusion = (uint8_t)((occlusion & 0x0fu) | XGPU_STREAM_WORLD_AO_INPUTS);
+	if ((occlusion & XGPU_STREAM_WORLD_AO_SAMPLED) == XGPU_STREAM_WORLD_AO_SAMPLED)
+	{
+		occlusion = (uint8_t)((occlusion & 0x0fu) | XGPU_STREAM_WORLD_AO_INPUTS);
+	}
+	else
+	{
+		if (occlusion || !definition->key.depth_test || !definition->key.depth_write || definition->key.blend ||
+			!definition->key.color_mask || definition->key.pixel.source_blend ||
+			(definition->key.depth_function != XGPU_STREAM_COMPARE_LESS &&
+			definition->key.depth_function != XGPU_STREAM_COMPARE_LESS_EQUAL))
+			return 0;
+		occlusion = (uint8_t)XGPU_STREAM_WORLD_AO_OCCLUDER;
+		definition->key.depth_function = (uint8_t)XGPU_STREAM_COMPARE_LESS;
+	}
 	definition->key.pixel.ambient_occlusion = definition->pixel_program.ambient_occlusion = occlusion;
 	definition->key.blend = definition->key.blend_source = definition->key.blend_destination = 0;
 	definition->key.blend_operation = 0;

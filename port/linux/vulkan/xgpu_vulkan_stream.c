@@ -2774,8 +2774,9 @@ static struct xgpu_vulkan_image *prepass_image(struct xgpu_vulkan_image *image, 
 	return xgpu_vulkan_image_create(&description);
 }
 
-/* a draw of the pre-pass: its pipeline's twin's where it has the world's
-light read from its pixels (its shaders made now, a few a frame); else none */
+/* a draw of the pre-pass: its pipeline's twin's (xgpu_stream_world_ao_twin:
+where it has the world's light read from its pixels, or is an occluder; its
+shaders made now, a few a frame); else none */
 static void prepass_draw(const struct draw_input *input)
 {
 	uint32_t id = stream.pipeline_id;
@@ -2809,6 +2810,8 @@ static void prepass_draw(const struct draw_input *input)
 			return;
 	}
 	stream.definition = &prepass.definitions[id];
+	/* (an occluder's: strictly nearer) */
+	stream.pipeline.depth_function = twin.key.depth_function;
 	prepass.drawing = entry;
 	(void)draw_pipeline(input, 1);
 	prepass.drawing = NULL;
