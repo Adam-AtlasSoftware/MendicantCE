@@ -86,8 +86,10 @@ static unsigned char actor_disciplined[MENDICANT_MAX_ACTORS];
 static long bridge_request_time;
 static long pending_members[MENDICANT_MAX_SQUAD];
 static short pending_positions[MENDICANT_MAX_SQUAD][BRIDGE_CANDIDATES];
-/* the drill's random numbers (xorshift32): it runs on across maps, as the
-hook library's did */
+/* the drill's random numbers (xorshift32). Training starts them from the
+hook library's constant and moves them on by each episode's seed; in play
+each map's start seeds them from the session's nonce
+(mendicant_character.c), so two launches no longer play the same drills */
 static unsigned long drill_random = 2463534242UL;
 static long drill_update_time;
 /* what discipline declined this episode: panics, berserks, charges, lone pursuits */
@@ -262,6 +264,14 @@ unsigned long mendicant_drill_rand(void)
 	drill_random ^= (drill_random << 5) & 0xFFFFFFFFUL;
 	drill_random &= 0xFFFFFFFFUL;
 	return drill_random;
+}
+
+/* play: the drill's numbers from a 64-bit seed (never 0, xorshift's fixed point) */
+void mendicant_drill_seed(unsigned long long seed)
+{
+	drill_random = (unsigned long)((seed ^ (seed >> 32)) & 0xFFFFFFFFUL);
+	if (!drill_random)
+		drill_random = 2463534242UL;
 }
 
 /* a request is out to the models and not answered yet */

@@ -60,6 +60,21 @@ static void mendicant_config_copy_string(
 	return;
 }
 
+/* ai.mendicant.quirks' words: off, subtle, normal (anything else), loud */
+static long mendicant_config_quirks(
+	char const *text)
+{
+	if (!text)
+		return MENDICANT_QUIRKS_NORMAL;
+	if (!strcmp(text, "off"))
+		return MENDICANT_QUIRKS_OFF;
+	if (!strcmp(text, "subtle"))
+		return MENDICANT_QUIRKS_SUBTLE;
+	if (!strcmp(text, "loud"))
+		return MENDICANT_QUIRKS_LOUD;
+	return MENDICANT_QUIRKS_NORMAL;
+}
+
 /* ---------- public code */
 
 /* reads every key; TRUE when anything differs from the last read */
@@ -88,6 +103,9 @@ boolean mendicant_config_read(
 	config->marine_fire = (real)config_real("ai.mendicant.marine_fire");
 	config->command_radius = (real)config_real("ai.mendicant.command_radius");
 	config->status = config_boolean("ai.mendicant.status") != 0;
+	config->character = config_boolean("ai.mendicant.character") != 0;
+	config->personality = (real)config_real("ai.mendicant.personality");
+	config->quirks = mendicant_config_quirks(config_string("ai.mendicant.quirks"));
 #ifdef MENDICANT_LEGACY_ENVIRONMENT
 	/* the training bridge, its runs and its logs: desktop Linux only */
 	mendicant_config_copy_string(config->bridge, sizeof(config->bridge), config_string("ai.mendicant.bridge"));
@@ -97,6 +115,7 @@ boolean mendicant_config_read(
 	mendicant_config_copy_string(config->drill_log, sizeof(config->drill_log), config_string("ai.mendicant.drill_log"));
 	mendicant_config_copy_string(config->player_log, sizeof(config->player_log), config_string("ai.mendicant.player_log"));
 	mendicant_config_copy_string(config->move_test_log, sizeof(config->move_test_log), config_string("ai.mendicant.move_test_log"));
+	mendicant_config_copy_string(config->character_log, sizeof(config->character_log), config_string("ai.mendicant.character_log"));
 	config->vehicle_test = config_boolean("ai.mendicant.vehicle_test") != 0;
 	config->aim_debug = config_boolean("ai.mendicant.aim_debug") != 0;
 
@@ -144,6 +163,17 @@ boolean mendicant_config_read(
 		config->individuals = atoi(legacy) > 0;
 	if ((legacy = mendicant_legacy("HALO_AI_MENDICANT_VARIETY", "AI_BRAIN_VARIETY")) != NULL)
 		config->variety = (real)atof(legacy);
+	if ((legacy = mendicant_legacy("HALO_AI_MENDICANT_SEED", "AI_BRAIN_SEED")) != NULL)
+		config->seed = atol(legacy);
+	if ((legacy = mendicant_legacy("HALO_AI_MENDICANT_CHARACTER", "AI_BRAIN_CHARACTER")) != NULL)
+		config->character = strcmp(legacy, "0") != 0 && strcmp(legacy, "false") != 0;
+	if ((legacy = mendicant_legacy("HALO_AI_MENDICANT_CHARACTER_LOG", "AI_BRAIN_CHARACTER_LOG")) != NULL)
+		mendicant_config_copy_string(config->character_log, sizeof(config->character_log), legacy);
+	/* the soldier character in training: off unless the run sets it, as the
+	models were trained on stock soldiers (docs/mendicant_port.md, "The
+	soldier character") */
+	if (config->training && !getenv("HALO_AI_MENDICANT_CHARACTER") && !getenv("AI_BRAIN_CHARACTER"))
+		config->character = FALSE;
 	/* training as the hook library trained: the per-soldier models only when asked
 	for (trainer.py's --mode individual sets AI_BRAIN_INDIVIDUALS), so strategy
 	episodes have no stance requests of theirs */
@@ -183,6 +213,11 @@ void mendicant_settings_changed(
 	memcpy(mendicant_config.drill_log, map_start.drill_log, sizeof(mendicant_config.drill_log));
 	memcpy(mendicant_config.player_log, map_start.player_log, sizeof(mendicant_config.player_log));
 	memcpy(mendicant_config.move_test_log, map_start.move_test_log, sizeof(mendicant_config.move_test_log));
+	memcpy(mendicant_config.character_log, map_start.character_log, sizeof(mendicant_config.character_log));
+	/* (in training the character stays as the run set it) */
+	if (mendicant_config.training)
+		mendicant_config.character = map_start.character;
+	mendicant_character_settings();
 	if (mendicant_config.aim == 1.0f && !mendicant_config.aim_difficulty && !mendicant_config.aim_moving)
 		mendicant_aim_restore();
 

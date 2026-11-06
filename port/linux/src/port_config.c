@@ -1211,7 +1211,8 @@ static const struct config_setting config_settings[] =
 		"How freely the models choose among the drills they rate well: 0 always\n"
 		"the best, 1 as trained, more for more variety." },
 	{ "ai.mendicant.seed", _config_integer, "0", "HALO_AI_MENDICANT_SEED", _environment_value, _platform_all,
-		"The models' random seed; 0: a new one each map." },
+		"The AI's random seed (the models' sampling, the soldiers' characters\n"
+		"and the drills); 0: a new one each map and each launch." },
 	{ "ai.mendicant.individuals", _config_boolean, "true", "HALO_AI_MENDICANT_INDIVIDUALS", _environment_value, _platform_all,
 		"Soldiers not in a unit's drill choose their own way of fighting (the\n"
 		"per-soldier models)." },
@@ -1234,6 +1235,17 @@ static const struct config_setting config_settings[] =
 		"Log a line a minute of a map, and at its end, to debug.txt: the ticks\n"
 		"the AI ran, the units it led, the models' decisions and the orders\n"
 		"given (tests)." },
+	{ "ai.mendicant.character", _config_boolean, "true", "HALO_AI_MENDICANT_CHARACTER", _environment_value, _platform_all,
+		"Each Covenant soldier and Marine has a character of his own (courage,\n"
+		"aggression, skill, discipline...), drawn for each fight, and some have a\n"
+		"quirk (a coward, a veteran, a duelist). Hunters and the Flood unchanged.\n"
+		"Off in training unless set for the run." },
+	{ "ai.mendicant.personality", _config_real, "1.0", "HALO_AI_MENDICANT_PERSONALITY", _environment_value, _platform_all,
+		"How far soldiers' characters differ from their kind's average: 0 all\n"
+		"alike, 1 as designed, up to 2. The averages stay where they are." },
+	{ "ai.mendicant.quirks", _config_string, "\"normal\"", "HALO_AI_MENDICANT_QUIRKS", _environment_value, _platform_all,
+		"How often and how strongly soldiers have a quirk, and show it once in a\n"
+		"fight: \"off\", \"subtle\", \"normal\" or \"loud\"." },
 	{ "ai.mendicant.bridge", _config_string, "\"\"", "HALO_AI_MENDICANT_BRIDGE", _environment_value, _platform_linux,
 		"A file the models are asked through instead (a trainer or brain.py maps\n"
 		"it); empty: the models in the game." },
@@ -1253,6 +1265,9 @@ static const struct config_setting config_settings[] =
 		"Test boarding: soldiers try the nearest vehicle." },
 	{ "ai.mendicant.aim_debug", _config_boolean, "false", "HALO_AI_MENDICANT_AIM_DEBUG", _environment_value, _platform_linux,
 		"Log the aim each actor is given." },
+	{ "ai.mendicant.character_log", _config_string, "\"\"", "HALO_AI_MENDICANT_CHARACTER_LOG", _environment_value, _platform_linux,
+		"A file to log each soldier's drawn character and each fight's mood in\n"
+		"(CSV); empty: none." },
 	{ "display.viewmodel_shield", _config_boolean, "false", "HALO_VIEWMODEL_SHIELD", _environment_value, _platform_all,
 		"The energy shield's flare on the first-person arms too, as on the body\n"
 		"(the stock game draws it on the body only): it shows as the shield\n"

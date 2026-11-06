@@ -145,6 +145,7 @@ boolean mendicant_episode_over = FALSE;
 FILE *mendicant_drill_file = NULL;
 FILE *mendicant_move_test_file = NULL;
 struct mendicant_status mendicant_status;
+FILE *mendicant_character_file = NULL;
 
 /* this map's modules were reset for the AI (L1 found it should run) */
 static boolean mendicant_map_ready = FALSE;
@@ -159,6 +160,7 @@ static char mendicant_sample_path[sizeof(mendicant_config.sample_log)];
 static char mendicant_drill_path[sizeof(mendicant_config.drill_log)];
 static char mendicant_player_path[sizeof(mendicant_config.player_log)];
 static char mendicant_move_test_path[sizeof(mendicant_config.move_test_log)];
+static char mendicant_character_path[sizeof(mendicant_config.character_log)];
 #endif
 static long mendicant_player_sample_time = -1000;
 
@@ -408,6 +410,10 @@ static void mendicant_logs_open(
 		mendicant_config.drill_log, NULL);
 	mendicant_log_open(&mendicant_move_test_file, mendicant_move_test_path, sizeof(mendicant_move_test_path),
 		mendicant_config.move_test_log, NULL);
+	mendicant_log_open(&mendicant_character_file, mendicant_character_path, sizeof(mendicant_character_path),
+		mendicant_config.character_log,
+		"time,epoch,record,actor,encounter,team,kind,quirk,courage,aggression,skill,discipline,caution,"
+		"grenade,initiative,vocal,loyalty,reflex,lead_bias,peek_side,buddy,favourite,seat,mood,fight,seed\n");
 #endif
 
 	return;
@@ -842,6 +848,9 @@ void mendicant_initialize_for_new_map(
 
 	mendicant_map_ready = TRUE;
 	mendicant_active = TRUE;
+	/* the soldier character: the session's nonce, a new epoch, the drill's
+	random numbers seeded in play (BUG A) */
+	mendicant_character_map_start();
 
 	return;
 }
@@ -854,6 +863,7 @@ void mendicant_dispose_from_old_map(
 		mendicant_status_log("map end");
 		/* first: the level's own firing position lists back before its tags go */
 		mendicant_movement_dispose();
+		mendicant_character_dispose();
 	}
 	mendicant_aim_restore();
 	mendicant_active = FALSE;
@@ -898,6 +908,8 @@ void mendicant_game_state_after_load(
 		mendicant_command_reset();
 		mendicant_combat_reset();
 		mendicant_movement_revert();
+		/* the Covenant are drawn again; the Marines come back the same men */
+		mendicant_character_revert();
 	}
 
 	return;
@@ -958,6 +970,7 @@ void mendicant_ai_update_end(
 	mendicant_status_tick(&mendicant_status.ai_time, &mendicant_status.ai_updates, &mendicant_status.ai_repeated,
 		NULL);
 	mendicant_vehicles_update(); /* the autopilot writes its drivers' controls after the AI's */
+	mendicant_character_update(game_time_get());
 	if (mendicant_training)
 		mendicant_training_update();
 
@@ -982,6 +995,7 @@ void mendicant_decide_before(
 	/* (an actor of a type not listed is not sampled: the hook library never saw one) */
 	if (type < MENDICANT_ACTOR_TYPE_SLOTS)
 		mendicant_sample_actor(type, actor_index);
+	mendicant_character_touch(actor_index); /* (drawn and logged at his first decision; nothing reads it yet) */
 	mendicant_discipline_before_decide(actor_index);
 	mendicant_aim_actor(actor_index);
 	if (mendicant_config.vehicle_test)

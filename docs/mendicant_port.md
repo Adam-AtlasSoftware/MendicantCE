@@ -44,7 +44,8 @@ Video Setup > CAMPAIGN AI (`tools/port_settings.py`'s
 `python3 tools/ce_menus.py --settings-only`) sets the player's
 `ai.mendicant.*` settings: on, the trained models, individuals, drill
 variety, discipline, threat targeting, unit radius, aim spread, spread by
-difficulty, moving targets and the Marines' rate of fire. It is reached from
+difficulty, moving targets and the Marines' rate of fire, and on its SOLDIER
+CHARACTER page the character, the personality strength and the quirks. It is reached from
 the main menu's player profile and from a campaign's pause menu (SETTINGS),
 and works with a controller as the other settings screens do. OK writes the
 changes to config.toml; `menu_functions.c`'s "port settings save" then calls
@@ -52,6 +53,113 @@ changes to config.toml; `menu_functions.c`'s "port settings save" then calls
 models, the seed, the bridge, training and the logs as the map started with
 them until the next map's start. The weights, the seed, the bridge, training,
 the logs and the tests stay in config.toml only.
+
+## The soldier character
+
+The authentic soldier layer's foundation (milestone M0): `mendicant_character.c`, its types in
+`mendicant_character.h`, and its tables and draw in `mendicant_traits.h` (plain C, so that
+`tools/mendicant/character_test.c` checks the draw on the build machine with no game). The API
+every later behaviour reads is in `mendicant_internal.h` (`mendicant_soldier_*`). M0 changes no
+behaviour: nothing reads the traits yet.
+
+- **Traits.** Ten per soldier, 0..1: courage, aggression, skill, discipline, caution, grenade,
+  initiative, vocal, loyalty, reflex. Each is drawn triangular around his kind's mean (Grunt
+  minor, major, spec ops, scripted flee; Jackal minor, major; Elite minor, major, commander, spec
+  ops, stealth; Marine, armored Marine, sergeant: the unique leader), half-width twice the
+  table's spread, times `ai.mendicant.personality` (0 makes every soldier his kind's mean).
+  Hunters, the Flood, Sentinels, Engineers and turrets have no character: every reader gets the
+  neutral value (a trait 0.5, a multiplier 1).
+- **Constants.** Lead bias (0.6-1.25, about 1 in 10 over 1.1), peek side, buddy preference, a
+  favourite weapon (about 1 Marine in 5: shotgun or sniper rifle) and a wanted seat (driver or
+  gunner, 1 Marine in 6).
+- **Quirks.** At most one, a few loud archetypes with a signature beat each (the one thing it does
+  plainly, once in a fight): Grunts Coward, Brave, Panic-thrower (35%); Jackals Sharpshooter,
+  Skittish, Charger (27%); Elites Duelist, Tactician, Berserker (30%); Marines Veteran, Rookie,
+  Hothead, Joker, Pack rat (35%). The sergeant and the scripted cowards have none.
+  `ai.mendicant.quirks` scales the rate (off 0, subtle 0.6, normal 1, loud 1.3), the push (0,
+  0.7, 1, 1.35) and the chance the beat is due in a fight (0, 0.4, 0.75, 1).
+- **Fights.** An encounter's fight starts when its in-combat count leaves 0 after 20 s of quiet
+  (checked twice a second). It draws a mood (steady 35%, jittery, fired up 20% each, sparing,
+  liberal 12.5% each), each scaling aim error, the grenade lull, spacing and reaction time
+  (weighted means within 1.5% of 1), and gives each soldier a small swing of courage,
+  aggression and vocal (+-0.08 times the personality) and his signature roll.
+- **Mean preservation.** `mendicant_soldier_mult(actor, trait, lo, hi)` is linear in the trait,
+  divided by its value at the kind's population mean (measured from 4096 draws of the same
+  function, with the quirks, at the current settings), so its mean over the kind is 1: the
+  spread changes, the averages do not.
+- **Seeding.** A session nonce (64 bits from `posix_random_bytes` at the first map, or from
+  `ai.mendicant.seed` when that is set) and an epoch, moved on at each map start and each loaded
+  game state. A Covenant soldier's seed is the nonce, the epoch, his datum index and his variant
+  tag: a checkpoint revert meets new Covenant. A Marine's is the nonce, the map's name, his datum index (which
+  the revert restores), his unit's tag and its face and voice variant, with no epoch: the
+  squad that travels with the Chief keeps its men. Its random numbers are splitmix64, its own: no
+  game seed is read or moved. The nonce is in the log (`mendicant: character on, nonce ...`) so
+  that a playtest can be replayed with `ai.mendicant.seed`.
+- **BUG A.** The drill's xorshift started from one constant, so every launch played the same
+  "random" drills. In play each map's start now seeds it from the nonce and the map's name (and
+  the session's map count when the nonce is random); training keeps the hook library's seeding
+  (the constant, moved on by each episode's seed).
+- **Store.** One entry per actor slot, outside game state, checked against the full datum index
+  and the epoch and drawn lazily; every decision touches its actor (`mendicant_decide_before`),
+  so each soldier is drawn and logged at his first decision. Settings changed in the menu
+  redraw everyone at once with the new spread (the Marines from the same seeds).
+- **Training.** Off unless `ai.mendicant.character` is set for the run: the models were trained
+  on stock soldiers.
+- **Log.** `ai.mendicant.character_log` (CSV): `time,epoch,record,actor,encounter,team,kind,quirk`,
+  the ten traits, `lead_bias,peek_side,buddy,favourite,seat,mood,fight,seed`; records `session`
+  (the nonce in `seed`), `soldier`, `fight` (its mood) and `revert`.
+
+```sh
+cc -O2 -std=c11 -Iport/linux/game/mendicant tools/mendicant/character_test.c -o build/character_test -lm
+build/character_test
+```
+
+## Fork release settings
+
+The fork's own builds (the MENDICANT AI test builds) differ from upstream in three settings and
+nothing else. They hang on one define, `HALO_FORK_MENDICANT`, which `tools/linux_build.py`'s
+`configuration_defines` adds to every unit of every native build (Linux, Windows, Android, web);
+each place that reads it is marked `fork:`. The upstream pull request leaves out that line of
+`configuration_defines` (or the whole `#ifdef` blocks), and the builds are then upstream's.
+
+| Setting | Upstream | Fork build | Where |
+| --- | --- | --- | --- |
+| Self-update | `update.auto` true; numbered builds ask GitHub for `OpenCommunityEdition/OpenCE`'s latest release and offer to install it | never looked for (`updater_start` and `updater_server_check` return at once and log `update: not looked for: the MENDICANT AI fork does not update itself`); `update.auto` defaults to false so the menu shows OFF | `port/linux/src/updater.c`, `port/linux/src/port_config.c` |
+| Crash reports (Windows) | numbered builds write a minidump and, with the player's yes, send it to upstream's Sentry | none: `crash_reports_enabled` is 0, so no minidump, no consent box, no upload; the backtrace still goes into `debug.txt` and `halo.log` | `port/windows/src/win32_crash.c` |
+| MENDICANT AI | `ai.mendicant.enabled` false | true | `port/linux/src/port_config.c` (`FORK_MENDICANT_ENABLED_DEFAULT`) |
+
+The AI's code path is the same in both: only the default changes, and `ai.mendicant.enabled =
+false` (or `HALO_AI_MENDICANT=false`) gives the stock AI exactly as before.
+`tools/mendicant/ai_off_parity.py` sets `HALO_AI_MENDICANT=false` itself for that reason. `tools/test_profile.py`'s
+`test_configuration_defines` leaves the fork's define out of what it checks (marked `fork:`).
+
+### The test build's package
+
+```sh
+<mod>/.venv/bin/python -I tools/mendicant/export_models.py --mod <mod> \
+    --covenant <mod>/data/frozen/covenant.pt --marines <mod>/data/frozen/marines.pt \
+    --covenant-strategy <mod>/data/frozen/covenant_strategy_best.pt \
+    --marines-strategy <mod>/data/frozen/marines_strategy_best.pt \
+    --out build/release/mods/mendicant_ai/tags/mendicant/models.aibw
+python3 tools/mendicant/package.py --game build/linux \
+    --models build/release/mods/mendicant_ai/tags/mendicant/models.aibw --out build/release
+python3 tools/mendicant/package.py --game build/linux_x86_64 \
+    --models build/release/mods/mendicant_ai/tags/mendicant/models.aibw --out build/release
+python3 tools/mendicant/package.py --game halo-windows-release.zip \
+    --models build/release/mods/mendicant_ai/tags/mendicant/models.aibw --out build/release
+```
+
+`package.py` (fork-only) makes `mendicant-ai-<version>-<platform>.zip`, the platform `linux`
+(32-bit x86), `linux-x86_64` (the 64-bit build, `configure.py --x64` and `ninja linux_x86_64`: the
+game as an x32 guest built into the 64-bit `halo`, so its `halo_guest.elf` is not shipped) or
+`windows`, told apart by the executable: the files the platform's
+release zip has (from a build folder, as `tools/ci_build.py` collects them; from the workflow's
+release artifact, as they are), `mods/mendicant_ai/` (`mod.toml`, and the models where
+`ai.mendicant.weights` finds them: `tags/mendicant/models.aibw`), `README_MENDICANT.txt`,
+`LICENSE.txt` (the AGPL) and `SOURCE.txt` (the source offer, AGPL section 13). It leaves out maps,
+settings, saves and logs, strips debug information from ELF files (the full copies go to
+`<zip stem>-symbols/` beside the zip) and overwrites any path of the packaging machine left in a
+binary's strings with one of the same length.
 
 ## The specification
 
@@ -1006,6 +1114,11 @@ unknown. Teach it to descend one more level when a section's value is itself a t
 | `AI_BRAIN_MOVE_TEST` | `ai.mendicant.move_test_log` (string, `""`, desktop) | `HALO_AI_MENDICANT_MOVE_TEST_LOG` |
 | `AI_BRAIN_VEHICLE_TEST` | `ai.mendicant.vehicle_test` (boolean, `false`, desktop) | `HALO_AI_MENDICANT_VEHICLE_TEST` |
 | `AI_BRAIN_AIM_DEBUG` | `ai.mendicant.aim_debug` (boolean, `false`, desktop) | `HALO_AI_MENDICANT_AIM_DEBUG` |
+| `AI_BRAIN_CHARACTER` (new) | `ai.mendicant.character` (boolean, `true`, all; off in training unless set) | `HALO_AI_MENDICANT_CHARACTER` |
+| (new) | `ai.mendicant.personality` (real, `1.0`, 0..2, all) | `HALO_AI_MENDICANT_PERSONALITY` |
+| (new) | `ai.mendicant.quirks` (string, `"normal"`: `off`, `subtle`, `normal`, `loud`; all) | `HALO_AI_MENDICANT_QUIRKS` |
+| `AI_BRAIN_CHARACTER_LOG` (new) | `ai.mendicant.character_log` (string, `""`, desktop) | `HALO_AI_MENDICANT_CHARACTER_LOG` |
+| `AI_BRAIN_SEED` (new) | `ai.mendicant.seed` also pins the character's nonce and the drill's numbers | `HALO_AI_MENDICANT_SEED` |
 | `AI_BRAIN_CHIEF`, `AI_BRAIN_CHIEF_MODEL`, `AI_BRAIN_CHIEF_DEBUG`, `OBSERVER_CAMERA`, `OBSERVER_SCRIPTED`, `AI_BRAIN_LIBRARY`, `AI_BRAIN_RUNS`, `AI_BRAIN_UNIT_LOGS` | **none.** The AI Chief and theater are left out. `LIBRARY`, `RUNS` and `UNIT_LOGS` are trainer-side. | |
 | play.sh `DEATHLESS`, `AMMO`, `CHEATS`, `DRILLS`, `HALO_DIR` | **none.** These stay script-side: console cheats, `watch_drills.py`, the install folder. | |
 

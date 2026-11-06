@@ -8,6 +8,7 @@ and math/real_math.h. */
 #include <stdio.h>
 
 #include "mendicant.h"
+#include "mendicant_character.h"
 
 /* ---------- the platform's part (mendicant_main.c, mendicant_config.c,
 mendicant_bridge.c) and what it calls in the others */
@@ -154,10 +155,11 @@ struct model_bridge
 struct mendicant_config
 {
 	boolean enabled, training, discipline, targeting, individuals, aim_difficulty, aim_moving,
-		aim_debug, vehicle_test, models, status;
-	long training_skip, seed;
-	real aim, marine_fire, command_radius, variety;
-	char bridge[256], weights[128], sample_log[256], drill_log[256], player_log[256], move_test_log[256];
+		aim_debug, vehicle_test, models, status, character;
+	long training_skip, seed, quirks; /* quirks: MENDICANT_QUIRKS_OFF .. _LOUD */
+	real aim, marine_fire, command_radius, variety, personality;
+	char bridge[256], weights[128], sample_log[256], drill_log[256], player_log[256], move_test_log[256],
+		character_log[256];
 };
 
 /* ---- platform: mendicant_config.c */
@@ -193,6 +195,7 @@ extern boolean mendicant_training;       /* ai.mendicant.training with the share
 extern boolean mendicant_episode_over;
 extern FILE *mendicant_drill_file;       /* NULL unless ai.mendicant.drill_log */
 extern FILE *mendicant_move_test_file;   /* NULL unless ai.mendicant.move_test_log */
+extern FILE *mendicant_character_file;   /* NULL unless ai.mendicant.character_log */
 long mendicant_time(void);               /* game_time_get() */
 long mendicant_player_unit(void);        /* absolute player 0's unit, or NONE (the models' "Chief") */
 int mendicant_player_units(long *units, int maximum); /* every living player's unit, local and remote (co-op) */
@@ -253,6 +256,51 @@ int mendicant_doctrine_step_choices(void);    /* STEPS + 1 (33) */
 void mendicant_doctrine_chain_covenant(unsigned char *chain_covenant); /* 1 for a Covenant chain */
 unsigned long mendicant_doctrine_hash(void);  /* FNV-1a, export_models.py's doctrine_hash text */
 
+/* ---- the soldier character (mendicant_character.c, mendicant_traits.h):
+what the platform calls */
+void mendicant_character_map_start(void);     /* the session's nonce (once), a new epoch, an empty store */
+void mendicant_character_revert(void);        /* a loaded game state: a new epoch */
+void mendicant_character_settings(void);      /* ai.mendicant.character/personality/quirks changed */
+void mendicant_character_dispose(void);
+void mendicant_character_touch(long actor_index); /* each decision: drawn (and logged) if new */
+void mendicant_character_update(long time);   /* each tick after the AI's update: fights start and end */
+unsigned long long mendicant_character_nonce(void);
+
+/* ---- the soldier character: what every behaviour reads (M0's API).
+Every call takes an actor's datum index. With ai.mendicant.character off, or
+for an actor with no character (Hunters, Flood, Sentinels, Engineers, turrets,
+a stale index), each returns the neutral value: a trait 0.5, a multiplier 1,
+no quirk, the steady mood. Traits stay fixed for a soldier's life within an
+attempt; after a revert the Covenant are drawn again and the Marines are the
+same men (seeded from who they are, not from the attempt). */
+boolean mendicant_soldier_has(long actor_index);           /* a drawn character, the layer on */
+int mendicant_soldier_kind(long actor_index);              /* MENDICANT_KIND_* */
+int mendicant_soldier_quirk(long actor_index);             /* MENDICANT_QUIRK_* */
+real mendicant_soldier_base(long actor_index, int trait);  /* 0..1 as drawn */
+real mendicant_soldier_trait(long actor_index, int trait); /* 0..1 with this fight's mood on it */
+/* lo at trait 0 and hi at trait 1, divided by its value at the kind's mean:
+its mean over the kind is 1 (1 +- 0.01), so only the spread changes. For a
+quantity where less is better (aim error), give hi < lo. */
+real mendicant_soldier_mult(long actor_index, int trait, real lo, real hi);
+real mendicant_soldier_lead_bias(long actor_index);        /* 0.6..1.25, 1 neutral */
+int mendicant_soldier_peek_side(long actor_index);         /* MENDICANT_SIDE_* */
+real mendicant_soldier_buddy(long actor_index);            /* 0..1 */
+int mendicant_soldier_favourite(long actor_index);         /* MENDICANT_FAVOURITE_* */
+int mendicant_soldier_seat(long actor_index);              /* MENDICANT_SEAT_* */
+/* deterministic per (soldier, fight, salt, half second): the character's own
+numbers, never the game's */
+unsigned long mendicant_soldier_roll(long actor_index, unsigned long salt);
+real mendicant_soldier_rollf(long actor_index, unsigned long salt); /* 0..1 */
+int mendicant_soldier_mood(long actor_index);              /* his encounter's fight mood, MENDICANT_MOOD_* */
+real mendicant_soldier_mood_scale(long actor_index, int scale); /* MENDICANT_MOOD_AIM .. _REACTION */
+/* a quirk's signature beat: due once in a fight (by the quirk visibility),
+until the behaviour that plays it says it is spent */
+boolean mendicant_soldier_signature_due(long actor_index);
+void mendicant_soldier_signature_spent(long actor_index);
+/* how far his traits pull from the kind's mean: 0.6 under a unit's command
+this tick, 1 on his own */
+real mendicant_soldier_cohesion(long actor_index);
+
 /* ---------- what the modules share */
 
 struct unit_datum;
@@ -304,6 +352,7 @@ boolean mendicant_actor_can_drill(struct actor_datum *actor);
 void mendicant_order(long actor_index, short position); /* releases a go order by drill or follow first */
 void mendicant_set_role(long actor_index, int role);
 unsigned long mendicant_drill_rand(void);
+void mendicant_drill_seed(unsigned long long seed); /* play: the session's own sequence (training keeps its seeding) */
 boolean mendicant_bridge_waiting(void);  /* a request is out and not answered */
 /* candidates, team features, then mendicant_bridge_submit (individuals use it too) */
 void mendicant_bridge_request(long key, struct mendicant_member *members, int count,

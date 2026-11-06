@@ -1199,7 +1199,7 @@ the setting for one start of the game. It has priority over the file.
 | `ai.mendicant.models` | `true` | `HALO_AI_MENDICANT_MODELS` | The trained models (`ai.mendicant.weights`) choose the drills and each soldier's way of fighting; `false`, or no weights found: the scripted drill. |
 | `ai.mendicant.weights` | `"mendicant/models.aibw"` | `HALO_AI_MENDICANT_WEIGHTS` | The models' file, looked up in the mods as a tag file is (a mod's `tags/mendicant/models.aibw`; `tools/mendicant/export_models.py` writes it). |
 | `ai.mendicant.variety` | `1.0` | `HALO_AI_MENDICANT_VARIETY` | How freely the models choose among the drills they rate well: 0 always the best, 1 as trained. |
-| `ai.mendicant.seed` | `0` | `HALO_AI_MENDICANT_SEED` | The models' random seed; 0: a new one each map. |
+| `ai.mendicant.seed` | `0` | `HALO_AI_MENDICANT_SEED` | The AI's random seed (the models' sampling, the soldiers' characters and the drills; the log line `mendicant: character ..., nonce` shows the one used); 0: a new one each map and each launch. |
 | `ai.mendicant.individuals` | `true` | `HALO_AI_MENDICANT_INDIVIDUALS` | Soldiers not in a unit's drill choose their own way of fighting (the per-soldier models). |
 | `ai.mendicant.discipline` | `true` | `HALO_AI_MENDICANT_DISCIPLINE` | Commanded soldiers hold their nerve: fewer panics, berserk charges and lone pursuits. |
 | `ai.mendicant.targeting` | `true` | `HALO_AI_MENDICANT_TARGETING` | Soldiers choose targets by threat. |
@@ -1209,10 +1209,14 @@ the setting for one start of the game. It has priority over the file.
 | `ai.mendicant.marine_fire` | `1.8` | `HALO_AI_MENDICANT_MARINE_FIRE` | The Marines' rate of fire, against the stock game's 1.0 (0.1 or more). |
 | `ai.mendicant.command_radius` | `35.0` | `HALO_AI_MENDICANT_COMMAND_RADIUS` | How far (world units) from its leader a soldier is still in its unit. |
 | `ai.mendicant.status` | `false` | `HALO_AI_MENDICANT_STATUS` | Log a line a minute of a map, and at its end, to `debug.txt`: the ticks the AI ran (once a 30 Hz tick, at any `game.sim_rate`), the drill's passes and the units it led, the models' strategy, per-enemy and stance decisions by side, and the members' orders moved, held, rejected and late (tests). |
+| `ai.mendicant.character` | `true` | `HALO_AI_MENDICANT_CHARACTER` | Each Covenant soldier and Marine has a character of his own (ten traits drawn from his species and rank, a mood for each fight) and some a quirk (a coward, a veteran, a duelist). Hunters and the Flood are unchanged. Off in training unless the run sets it. Video Setup > CAMPAIGN AI > SOLDIER CHARACTER sets it and the two below, at once. |
+| `ai.mendicant.personality` | `1.0` | `HALO_AI_MENDICANT_PERSONALITY` | How far soldiers' characters differ from their kind's average: 0 all alike, 1 as designed, up to 2. The averages stay where they are. |
+| `ai.mendicant.quirks` | `"normal"` | `HALO_AI_MENDICANT_QUIRKS` | How often and how strongly soldiers have a quirk and show it once in a fight: `"off"`, `"subtle"`, `"normal"` or `"loud"`. |
 | `ai.mendicant.bridge` | `""` | `HALO_AI_MENDICANT_BRIDGE` | Linux only: a file the models are asked through instead (a trainer maps it); empty: the models in the game. |
 | `ai.mendicant.training` | `false` | `HALO_AI_MENDICANT_TRAINING` | Linux only: training episodes for the trainer on `ai.mendicant.bridge`. |
 | `ai.mendicant.training_skip` | `7` | `HALO_AI_MENDICANT_TRAINING_SKIP` | Linux only: in training, what is skipped: the sum of 1 the picture, 2 the sound, 4 the mixer. |
 | `ai.mendicant.sample_log`, `ai.mendicant.drill_log`, `ai.mendicant.player_log`, `ai.mendicant.move_test_log` | `""` | `HALO_AI_MENDICANT_SAMPLE_LOG`, … | Linux only: files (host paths) to log each actor's decisions, the units' drills, the player's fighting and a free-movement test in; empty: none. (Unlike the hook library, which wrote `ai_brain_samples.csv` by default, nothing is logged unless a file is named; `AI_BRAIN_LOG` still names the sample log.) |
+| `ai.mendicant.character_log` | `""` | `HALO_AI_MENDICANT_CHARACTER_LOG` | Linux only: a file (host path) to log each soldier's drawn character and each fight's mood in (CSV); empty: none. |
 | `ai.mendicant.vehicle_test`, `ai.mendicant.aim_debug` | `false` | `HALO_AI_MENDICANT_VEHICLE_TEST`, `HALO_AI_MENDICANT_AIM_DEBUG` | Linux only: tests: soldiers try the nearest vehicle; the aim each actor is given is logged. |
 | `paths.data` | `""` | `HALO_DATA_ROOT` | The data root. Refer to "Start the game". |
 | `paths.saves` | `""` | `HALO_SAVE_ROOT` | The save root. Refer to "Files and folders". |
