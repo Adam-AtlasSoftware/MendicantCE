@@ -384,7 +384,22 @@ static void autopilot_update(long time)
 		}
 		dx = target.x - vehicle->object.position.x;
 		dy = target.y - vehicle->object.position.y;
-		distance = (real)sqrt(dx * dx + dy * dy) + 0.001f;
+		distance = (real)sqrt(dx * dx + dy * dy);
+		if (distance < 0.01f)
+		{
+			/* on the spot: the way the vehicle faces */
+			dx = vehicle->object.forward.i;
+			dy = vehicle->object.forward.j;
+			distance = (real)sqrt(dx * dx + dy * dy);
+			if (distance < 0.01f)
+			{
+				dx = 1.0f;
+				dy = 0.0f;
+				distance = 1.0f;
+			}
+		}
+		/* a unit normal: the unit's update asserts on it (the old + 0.001 left
+		it short of one near the target) */
 		facing.i = dx / distance;
 		facing.j = dy / distance;
 		facing.k = 0.0f;
