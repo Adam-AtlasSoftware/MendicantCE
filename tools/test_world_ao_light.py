@@ -261,6 +261,17 @@ def test_msl_control(reference, tmp_path):
     assert msl_check(reference, msl_of(faulty, "world")["model", 1], tmp_path).returncode == 1
 
 
+# (and a SIMD-group's walk taking the other lanes' shapes as its own)
+MSL_SIMD_FAULT = ('"\\t\\t\\tif ((own & (1u << lowest)) == 0u)\\n"', '"\\t\\t\\tif (false)\\n"')
+
+
+def test_msl_simd_control(reference, tmp_path):
+    if not CC:
+        pytest.skip("no C compiler")
+    faulty = check_build(tmp_path / "build", faulted("xgpu_msl.c", MSL_SIMD_FAULT))
+    assert msl_check(reference, msl_of(faulty, "world")["model", 1], tmp_path).returncode == 1
+
+
 def test_the_constants_alike():
     # (world_ao.h's for the CPU, xgpu.h's for the emitters)
     game = (INCLUDE / "world_ao.h").read_text()
