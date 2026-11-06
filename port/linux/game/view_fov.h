@@ -40,6 +40,12 @@ real mouse_zoom_look_scale(short local_player_index, long unit_index, short zoom
 passes: balanced and nestable, the current local render view only */
 void viewmodel_projection_begin(void);
 void viewmodel_projection_end(void);
+/* the first-person weapon's near clip distance for the projection drawn now
+(near_clip.c's render_first_person_near_clip_distance): the game's
+(rasterizer_first_person_weapon_near_clip_distance) at the weapon's stock
+angle and place, nearer where its projection is widened or it is moved
+toward the eye; the game's in the VR mode */
+real viewmodel_near_clip_distance(void);
 
 /* where the first-person weapon and hands are drawn: moved along the view's
 right, up and forward, in world units (display.viewmodel_offset_x, _y and

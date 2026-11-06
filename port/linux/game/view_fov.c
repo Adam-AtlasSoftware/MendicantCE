@@ -33,6 +33,7 @@ that draw the first-person weapon (rasterizer and render sources).
 #include "units/units.h"
 
 #include "mouse_sensitivity.h"
+#include "near_clip.h"
 #include "panini_projection.h"
 
 #include <math.h>
@@ -424,6 +425,11 @@ static unsigned long projection_depth;
 static boolean projection_applied;
 static struct render_camera saved_render_camera, saved_rasterizer_camera;
 static struct render_frustum saved_render_frustum, saved_rasterizer_frustum;
+/* the stock angle the applied projection widens (the view's own, before it) */
+static real projection_stock_vertical;
+/* how far each local player's weapon is moved along the view's forward this
+frame (display.viewmodel_offset_z and the weapon's own; world units) */
+static real applied_forwards[MAXIMUM_LOCAL_PLAYERS];
 
 static real viewmodel_vertical(void)
 {
@@ -509,6 +515,11 @@ void viewmodel_projection_begin(void)
 		return;
 	}
 
+	/* (the stock angle: the unit's own, unzoomed or zoomed, as the view
+	had it before display.fov widened it) */
+	projection_stock_vertical = render_fov_authored_vertical(render.local_player_index);
+	if (!projection_stock_vertical)
+		projection_stock_vertical = global_window_parameters.camera.vertical_field_of_view;
 	saved_render_camera = render.camera;
 	saved_render_frustum = render.frustum;
 	saved_rasterizer_camera = global_window_parameters.camera;
@@ -537,6 +548,31 @@ void viewmodel_projection_end(void)
 	global_window_parameters.frustum = saved_rasterizer_frustum;
 	projection_applied = FALSE;
 	rasterizer_set_frustum_z(0.0f, 0.0f);
+}
+
+real viewmodel_near_clip_distance(void)
+{
+	real z_near = rasterizer_globals.first_person_weapon_near_clip_distance;
+#ifdef HALO_VR
+	/* (the VR mode's eyes keep the game's: vr_render_projection_set knows
+	the weapon's passes by it) */
+	return z_near;
+#else
+	short local_player_index = render.local_player_index;
+	real forward = 0.0f;
+
+	if (global_window_parameters.rasterizer_target == _rasterizer_target_render_primary &&
+		local_player_index >= 0 && local_player_index < MAXIMUM_LOCAL_PLAYERS)
+	{
+		forward = applied_forwards[local_player_index];
+	}
+	/* (the projection drawn now, the weapon's when it has its own; the
+	stock angle the view's own, before the weapon's widened it) */
+	return render_first_person_near_clip_distance(&global_window_parameters.camera,
+		&global_window_parameters.frustum.frustum_bounds,
+		projection_applied ? projection_stock_vertical : global_window_parameters.camera.vertical_field_of_view,
+		z_near, forward);
+#endif
 }
 
 /* ---------- the weapon a first-person offset is for */
@@ -753,8 +789,14 @@ void viewmodel_offset_apply(short local_player_index, long weapon_index, struct 
 	real drawn, stock;
 	short node_index;
 
+	if (local_player_index >= 0 && local_player_index < MAXIMUM_LOCAL_PLAYERS)
+		applied_forwards[local_player_index] = 0.0f;
 	if (!node_matrices || node_count <= 0 || !viewmodel_offset(weapon_index, &offset))
 		return;
+	/* (its move toward the eye, for the weapon's near plane:
+	viewmodel_near_clip_distance) */
+	if (local_player_index >= 0 && local_player_index < MAXIMUM_LOCAL_PLAYERS)
+		applied_forwards[local_player_index] = offset.forward;
 	/* (the view's right: forward across up, as the world has z up and y
 	left) */
 	cross_product3d(&camera->forward, &camera->up, &right);

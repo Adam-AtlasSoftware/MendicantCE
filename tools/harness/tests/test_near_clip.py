@@ -38,7 +38,7 @@ CONTROLS = [
 def generated(fault=None):
     code = read("port/linux/game/near_clip.c")
     text = "\n".join(re.findall(r"^#define NEAR_CLIP_\w+ .*$", code, re.M)) + "\n" + \
-        function(code, "render_near_clip_distance")
+        function(code, "near_clip_corner") + "\n" + function(code, "render_near_clip_distance")
     if fault:
         text = mutated(text, *fault)
     bounds = function(read("source/render/render_cameras.c"), "render_camera_build_frustum_bounds")
