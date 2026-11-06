@@ -539,7 +539,9 @@ vdf.write_bytes(data[:-2] + b"\\0" + str(len(data)).encode() + b"\\0" + fields +
 """,
     # (as Steam's command: "steam -shutdown" closes the running Steam, which writes its localconfig.vdf as it
     # exits: the file in ~/steam-exit-writes, if there is one, as Steam's own newer state; STEAM_STAYS, a Steam
-    # that does not close. "steam" starts it, noting whether its Steam Input setting for the shortcut is there.)
+    # that does not close. "steam" starts it, noting whether its Steam Input setting for the shortcut is there.
+    # install.sh runs both in the background, so the call is noted before ~/running changes: a test that sees
+    # Steam closed or started (started_again) has its call already, never one that comes after it has read them)
     "steam": f"""#!{sys.executable}
 import os, sys
 from pathlib import Path
@@ -558,9 +560,9 @@ else:
     note = " ".join(["steam"] + sys.argv[1:]) + (" (its localconfig.vdf has UseSteamControllerConfig)"
         if localconfig.exists() and b"UseSteamControllerConfig" in localconfig.read_bytes() else "")
     names.append("steam")
-running.write_text("".join(name + "\\n" for name in names))
 with open(home / "calls.txt", "a") as calls:
     calls.write(note + "\\n")
+running.write_text("".join(name + "\\n" for name in names))
 """,
 }
 GAME = "#!/bin/sh\necho \"started in $(pwd)\" >> \"$HOME/calls.txt\"\n"
@@ -1069,6 +1071,17 @@ def started_again(home):
     return calls(home)
 
 
+def called(home, call):
+    """the calls, once call is among them: a call install.sh leaves running in the background (steam -shutdown,
+    to a Steam that does not close) may note itself after install.sh has finished"""
+    path = home / "calls.txt"
+    for _ in range(50):
+        if path.exists() and call in path.read_text().splitlines():
+            break
+        time.sleep(0.1)
+    return calls(home)
+
+
 STEAM_TOOLS = ("kdialog", "steamos-add-to-steam", "steam")
 HOW = "in Game Mode, Steam > OpenH1 > the controller icon > Disable Steam Input."
 
@@ -1219,7 +1232,8 @@ def test_steam_input_left_as_it_was(release, tmp_path, case):
     assert (path.read_bytes() if path.exists() else None) == before
     assert not (path.parent / "localconfig.vdf.before-openh1").exists()
     assert HOW in output
-    steam = [line for line in calls(home) if line.startswith("steam ")]
+    noted = called(home, "steam -shutdown") if case == "steam stays" else calls(home)
+    steam = [line for line in noted if line.startswith("steam ")]
     assert steam == (["steam -shutdown"] if case == "steam stays" else [])
     assert (home / "running").read_text().split() == ["steam"]
 
