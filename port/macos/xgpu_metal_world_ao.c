@@ -137,6 +137,7 @@ static void world_ao_make(void)
 		if (world_ao.pixels_stand_in)
 			xgpu_metal_texture_upload(world_ao.pixels_stand_in, 0, 0, 0, 0, 0, 1, 1, 1, one, 16, 16);
 		xgpu_metal_set_world_ao_pixels(world_ao.pixels_stand_in);
+	}
 	world_ao.cascades_stand_in = world_ao_cascades_make(1, 1, 1);
 	if (world_ao.cascades_stand_in)
 	{
