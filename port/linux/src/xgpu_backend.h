@@ -130,6 +130,11 @@ uploaded (width 0: released) */
 void xgpu_backend_world_ao_window(const struct xgpu_world_ao_block *block);
 void xgpu_backend_world_ao_field(int part, unsigned long width, unsigned long height, unsigned long depth,
 	unsigned long z_first, unsigned long z_count, const void *data);
+/* a box of the distance-field scene's cascades' texture (xgpu.h's
+XGPU_WORLD_CASCADE*): its first texel, its size, two signed bytes a texel,
+x fastest (width 0: released) */
+void xgpu_backend_world_ao_cascades(unsigned long x, unsigned long y, unsigned long z, unsigned long width,
+	unsigned long height, unsigned long depth, const void *data);
 BOOL xgpu_backend_display_hdr(float *headroom);
 BOOL xgpu_backend_display_white(float *nits);
 

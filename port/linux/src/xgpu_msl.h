@@ -62,6 +62,8 @@ constexpr linear sampler clamped to its edge) and its table of cells
 /* (the vehicles' occlusion fields' atlas: a 3D texture of four halves;
 past the combiner's places, 8 to 19) */
 #define XGPU_MSL_TEXTURE_WORLD_AO_OBJECTS 20
+/* (the distance-field scene's cascades: xgpu.h's XGPU_WORLD_CASCADE*) */
+#define XGPU_MSL_TEXTURE_WORLD_CASCADES 22
 #define XGPU_MSL_BUFFER_WORLD_AO 23
 
 /* the draw's values both stages read, laid out alike in C and in Metal
@@ -160,5 +162,16 @@ struct xgpu_msl_halo_uniforms
 };
 
 char *xgpu_msl_halo_shader(BOOL pixel);
+
+/* the distance-field scene's ray step (port/linux/include/world_cascades.h's
+world_trace_ray: struct world_trace_hit and world_trace(world_cascades,
+cascades, origin, direction, t_max, mask), the cascades' texture and their
+four vec4s as xgpu.h's XGPU_WORLD_CASCADE* describes them) appended to a
+shader's text; and a fragment function of it alone,
+xgpu_world_trace_test (its ray from its inputs, the hit, t and kind
+written), for tools/test_world_trace.py. A malloc'd string */
+struct xgpu_text;
+void xgpu_msl_world_trace(struct xgpu_text *text);
+char *xgpu_msl_world_trace_test(void);
 
 #endif

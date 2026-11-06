@@ -137,6 +137,9 @@ enum
 	/* the backend's own targets: a byte (red), two (red, green) */
 	XGPU_METAL_FORMAT_R8,
 	XGPU_METAL_FORMAT_RG8,
+	/* two signed bytes (display.ambient_occlusion "world"'s distance-field
+	scene's cascades) */
+	XGPU_METAL_FORMAT_RG8_SNORM,
 	XGPU_METAL_FORMAT_COUNT
 };
 
@@ -524,6 +527,12 @@ struct xgpu_world_ao_block;
 void xgpu_metal_world_ao_field(uint32_t part, uint32_t width, uint32_t height, uint32_t depth, uint32_t z_first,
 	uint32_t z_count, const void *data);
 void xgpu_metal_world_ao_window(const struct xgpu_world_ao_block *block);
+/* a box of the distance-field scene's cascades (xgpu_stream.h's
+WORLD_AO_CASCADES; width 0 released), and their texture (a stand-in of
+nothing where there is none) */
+void xgpu_metal_world_ao_cascades(uint32_t x, uint32_t y, uint32_t z, uint32_t width, uint32_t height, uint32_t depth,
+	const void *data);
+uint32_t xgpu_metal_world_ao_cascades_texture(void);
 /* the values of the 16 inputs no stream feeds */
 void xgpu_metal_set_constant_attributes(const float (*values)[4]);
 /* indices: 16-bit, or XGPU_METAL_SOURCE_NONE */

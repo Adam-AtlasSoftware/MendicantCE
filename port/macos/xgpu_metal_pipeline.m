@@ -47,6 +47,7 @@ static const struct xgpu_metal_format_information formats[XGPU_METAL_FORMAT_COUN
 	[XGPU_METAL_FORMAT_R8_SNORM] = { MTLPixelFormatR8Snorm, 1, 0, 0, 0, SWIZZLE(Red, Green, Blue, Alpha), 0 },
 	[XGPU_METAL_FORMAT_R8] = { MTLPixelFormatR8Unorm, 1, 0, 0, 0, SWIZZLE(Red, Green, Blue, Alpha), 0 },
 	[XGPU_METAL_FORMAT_RG8] = { MTLPixelFormatRG8Unorm, 2, 0, 0, 0, SWIZZLE(Red, Green, Blue, Alpha), 0 },
+	[XGPU_METAL_FORMAT_RG8_SNORM] = { MTLPixelFormatRG8Snorm, 2, 0, 0, 0, SWIZZLE(Red, Green, Blue, Alpha), 0 },
 };
 
 const struct xgpu_metal_format_information *xgpu_metal_format_information(uint32_t format)

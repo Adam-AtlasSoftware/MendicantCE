@@ -8,7 +8,9 @@ sparse (world_sdf.h): its atlas of bricks, a 3D image of signed bytes
 its table of cells, a 3D RGBA8 image read by texel; and the window's block
 (struct xgpu_world_ao_block), a uniform buffer; and the static scenery's
 pages of the level's occlusion, a 2D array of bytes (R8 unorm) read through
-the same sampler. All are in display.ambient_occlusion's set
+the same sampler; and the distance-field scene's cascades (world_cascades.h),
+one 3D image of two signed bytes a texel (VK_FORMAT_R8G8_SNORM), written a
+box at a time (WORLD_AO_CASCADES records), through the same sampler. All are in display.ambient_occlusion's set
 (XGPU_VULKAN_SET_OCCLUSION), at XGPU_VULKAN_BINDING_WORLD_SDF,
 _WORLD_SDF_TABLE, _WORLD_AO and _WORLD_AO_SCENERY, which the core writes
 (xgpu_vulkan.c's occlusion_set) from what this file hands it.
@@ -47,6 +49,9 @@ static struct
 	_OBJECTS), and their stand-ins */
 	struct world_ao_part parts[4];
 	struct xgpu_vulkan_image *stand_ins[4];
+	/* the distance-field scene's cascades (made as their first box comes;
+	NULL none), and their stand-in (nothing anywhere) */
+	struct xgpu_vulkan_image *cascades, *cascades_stand_in;
 	VkSampler sampler;
 	/* the window's block (zeros: none), and where it is in the ring for
 	the submission it was written for */
@@ -76,6 +81,22 @@ static struct xgpu_vulkan_image *world_ao_image(uint32_t part, uint32_t width, u
 	return xgpu_vulkan_image_create(&description);
 }
 
+/* the distance-field scene's cascades: two signed bytes a texel */
+static struct xgpu_vulkan_image *world_ao_cascades_image(uint32_t width, uint32_t height, uint32_t depth)
+{
+	struct xgpu_vulkan_image_description description;
+
+	memset(&description, 0, sizeof(description));
+	description.type = XGPU_VULKAN_IMAGE_3D;
+	description.format = XGPU_VULKAN_FORMAT_RG8_SNORM;
+	description.usage = XGPU_VULKAN_USAGE_SAMPLED;
+	description.width = width;
+	description.height = height;
+	description.depth_or_layers = depth;
+	description.levels = 1;
+	return xgpu_vulkan_image_create(&description);
+}
+
 int xgpu_vulkan_world_ao_create(void)
 {
 	/* (a cell far outside; a voxel +127, far outside) */
@@ -93,6 +114,14 @@ int xgpu_vulkan_world_ao_create(void)
 	world_ao.stand_ins[XGPU_STREAM_WORLD_AO_OBJECTS] = world_ao_image(XGPU_STREAM_WORLD_AO_OBJECTS, 1, 1, 1);
 	if (!world_ao.stand_ins[0] || !world_ao.stand_ins[1] || !world_ao.stand_ins[2] || !world_ao.stand_ins[3])
 		return 0;
+	{
+		static const signed char nothing[2] = { 127, 127 };
+
+		world_ao.cascades_stand_in = world_ao_cascades_image(1, 1, 1);
+		if (!world_ao.cascades_stand_in)
+			return 0;
+		xgpu_vulkan_image_upload(world_ao.cascades_stand_in, 0, 0, 0, 0, 0, 1, 1, 1, nothing, 2, 2);
+	}
 	xgpu_vulkan_image_upload(world_ao.stand_ins[XGPU_STREAM_WORLD_AO_OBJECTS], 0, 0, 0, 0, 0, 1, 1, 1, no_occlusion, 8, 8);
 	xgpu_vulkan_image_upload(world_ao.stand_ins[XGPU_STREAM_WORLD_AO_SCENERY], 0, 0, 0, 0, 0, 1, 1, 1, &none, 1, 1);
 	xgpu_vulkan_image_upload(world_ao.stand_ins[XGPU_STREAM_WORLD_AO_TABLE], 0, 0, 0, 0, 0, 1, 1, 1, outside_cell, 4, 4);
@@ -165,6 +194,48 @@ void xgpu_vulkan_world_ao_field(uint32_t part_index, uint32_t width, uint32_t he
 		part->whole = 1;
 		world_ao.number++;
 	}
+}
+
+void xgpu_vulkan_world_ao_cascades(uint32_t x, uint32_t y, uint32_t z, uint32_t width, uint32_t height, uint32_t depth,
+	const void *data)
+{
+	if (!width || !data)
+	{
+		if (world_ao.cascades)
+			xgpu_vulkan_image_destroy(world_ao.cascades);
+		world_ao.cascades = NULL;
+		world_ao.number++;
+		return;
+	}
+	/* (made as the first box comes, nothing anywhere until each part of it
+	is written: the game writes every cascade whole before it names it) */
+	if (!world_ao.cascades)
+	{
+		size_t bytes = (size_t)XGPU_STREAM_WORLD_AO_CASCADES_SIDE * XGPU_STREAM_WORLD_AO_CASCADES_SIDE *
+			XGPU_STREAM_WORLD_AO_CASCADES_DEPTH * 2u;
+		signed char *nothing = malloc(bytes);
+
+		world_ao.cascades = world_ao_cascades_image(XGPU_STREAM_WORLD_AO_CASCADES_SIDE, XGPU_STREAM_WORLD_AO_CASCADES_SIDE,
+			XGPU_STREAM_WORLD_AO_CASCADES_DEPTH);
+		world_ao.number++;
+		if (!world_ao.cascades || !nothing)
+		{
+			free(nothing);
+			return;
+		}
+		memset(nothing, 127, bytes);
+		xgpu_vulkan_image_upload(world_ao.cascades, 0, 0, 0, 0, 0, XGPU_STREAM_WORLD_AO_CASCADES_SIDE,
+			XGPU_STREAM_WORLD_AO_CASCADES_SIDE, XGPU_STREAM_WORLD_AO_CASCADES_DEPTH, nothing,
+			XGPU_STREAM_WORLD_AO_CASCADES_SIDE * 2u, XGPU_STREAM_WORLD_AO_CASCADES_SIDE * XGPU_STREAM_WORLD_AO_CASCADES_SIDE * 2u);
+		free(nothing);
+	}
+	xgpu_vulkan_image_upload(world_ao.cascades, 0, 0, x, y, z, width, height, depth, data, width * 2u,
+		width * height * 2u);
+}
+
+struct xgpu_vulkan_image *xgpu_vulkan_world_ao_cascades_image(void)
+{
+	return world_ao.cascades ? world_ao.cascades : world_ao.cascades_stand_in;
 }
 
 void xgpu_vulkan_world_ao_window(const struct xgpu_world_ao_block *block)

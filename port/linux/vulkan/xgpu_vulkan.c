@@ -2251,6 +2251,7 @@ static VkFormat vulkan_format(uint8_t format)
 	case XGPU_VULKAN_FORMAT_RGB10A2: return VK_FORMAT_A2B10G10R10_UNORM_PACK32;
 	case XGPU_VULKAN_FORMAT_ASTC: return VK_FORMAT_ASTC_4x4_UNORM_BLOCK;
 	case XGPU_VULKAN_FORMAT_R8_SNORM: return VK_FORMAT_R8_SNORM;
+	case XGPU_VULKAN_FORMAT_RG8_SNORM: return VK_FORMAT_R8G8_SNORM;
 	default: return VK_FORMAT_UNDEFINED;
 	}
 }
@@ -2611,6 +2612,7 @@ void xgpu_vulkan_image_upload(struct xgpu_vulkan_image *image, uint32_t level, u
 	int blocks = format_blocks(description->format);
 	uint32_t texel = description->format == XGPU_VULKAN_FORMAT_COVERAGE ||
 		description->format == XGPU_VULKAN_FORMAT_R8_SNORM ? 1 :
+		description->format == XGPU_VULKAN_FORMAT_RG8_SNORM ? 2 :
 		description->format == XGPU_VULKAN_FORMAT_RGBA32_UINT ? 16 :
 		description->format == XGPU_VULKAN_FORMAT_RGBA16F ? 8 : 4;
 	uint32_t rows = blocks ? (height + 3) / 4 : height;

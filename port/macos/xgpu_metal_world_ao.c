@@ -9,7 +9,10 @@ sparse (world_sdf.h): its atlas of bricks, a 3D texture of signed bytes
 sampler clamped to its edge, at XGPU_METAL_TEXTURE_WORLD_SDF, and its
 table of cells, a 3D RGBA8 texture they read by texel, at
 XGPU_METAL_TEXTURE_WORLD_SDF_TABLE; and the window's block (struct
-xgpu_world_ao_block) at XGPU_METAL_BUFFER_WORLD_AO (xgpu_metal_set_world_ao).
+xgpu_world_ao_block) at XGPU_METAL_BUFFER_WORLD_AO (xgpu_metal_set_world_ao);
+and the distance-field scene's cascades (world_cascades.h), one 3D texture
+of two signed bytes a texel (MTLPixelFormatRG8Snorm), written a box at a
+time (WORLD_AO_CASCADES records).
 
 The field arrives a few slices at a time (the command stream's
 WORLD_AO_FIELD records), its table first, then its atlas: each texture is
@@ -26,6 +29,7 @@ zeros of the backend's own.
 #include "xgpu_metal_bindings.h"
 #include "xgpu_stream.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 /* a part of the field: its texture (0 none), its size, and whether its last
@@ -50,7 +54,26 @@ static struct
 	/* (whether the GPU has the SIMD-groups' reductions: the block's
 	parameters[1].z) */
 	int simd;
+	/* the distance-field scene's cascades (made as their first box comes;
+	0 none), and their stand-in (nothing anywhere) */
+	uint32_t cascades, cascades_stand_in;
 } world_ao;
+
+/* the distance-field scene's cascades: two signed bytes a texel */
+static uint32_t world_ao_cascades_make(uint32_t width, uint32_t height, uint32_t depth)
+{
+	struct xgpu_metal_texture_description description;
+
+	memset(&description, 0, sizeof(description));
+	description.type = XGPU_METAL_TEXTURE_3D;
+	description.format = XGPU_METAL_FORMAT_RG8_SNORM;
+	description.usage = XGPU_METAL_USAGE_SAMPLED;
+	description.width = (uint16_t)width;
+	description.height = (uint16_t)height;
+	description.depth_or_layers = (uint16_t)depth;
+	description.levels = 1;
+	return xgpu_metal_texture_create(&description);
+}
 
 static uint32_t world_ao_texture(uint32_t part, uint32_t width, uint32_t height, uint32_t depth)
 {
@@ -98,6 +121,13 @@ static void world_ao_make(void)
 	if (world_ao.stand_ins[XGPU_STREAM_WORLD_AO_ATLAS])
 		xgpu_metal_texture_upload(world_ao.stand_ins[XGPU_STREAM_WORLD_AO_ATLAS], 0, 0, 0, 0, 0, 1, 1, 1, &far_outside,
 			1, 1);
+	world_ao.cascades_stand_in = world_ao_cascades_make(1, 1, 1);
+	if (world_ao.cascades_stand_in)
+	{
+		static const signed char nothing[2] = { 127, 127 };
+
+		xgpu_metal_texture_upload(world_ao.cascades_stand_in, 0, 0, 0, 0, 0, 1, 1, 1, nothing, 2, 2);
+	}
 	world_ao.zeros = xgpu_metal_buffer_create(sizeof(struct xgpu_world_ao_block));
 	if (world_ao.zeros)
 	{
@@ -186,6 +216,47 @@ void xgpu_metal_world_ao_field(uint32_t part_index, uint32_t width, uint32_t hei
 		part->whole = 1;
 		world_ao_bind();
 	}
+}
+
+void xgpu_metal_world_ao_cascades(uint32_t x, uint32_t y, uint32_t z, uint32_t width, uint32_t height, uint32_t depth,
+	const void *data)
+{
+	world_ao_make();
+	if (!width || !data)
+	{
+		if (world_ao.cascades)
+			xgpu_metal_texture_destroy(world_ao.cascades);
+		world_ao.cascades = 0;
+		return;
+	}
+	/* (made as the first box comes, nothing anywhere until each part of it
+	is written: the game writes every cascade whole before it names it) */
+	if (!world_ao.cascades)
+	{
+		size_t bytes = (size_t)XGPU_STREAM_WORLD_AO_CASCADES_SIDE * XGPU_STREAM_WORLD_AO_CASCADES_SIDE *
+			XGPU_STREAM_WORLD_AO_CASCADES_DEPTH * 2u;
+		signed char *nothing = malloc(bytes);
+
+		world_ao.cascades = world_ao_cascades_make(XGPU_STREAM_WORLD_AO_CASCADES_SIDE, XGPU_STREAM_WORLD_AO_CASCADES_SIDE,
+			XGPU_STREAM_WORLD_AO_CASCADES_DEPTH);
+		if (!world_ao.cascades || !nothing)
+		{
+			free(nothing);
+			return;
+		}
+		memset(nothing, 127, bytes);
+		xgpu_metal_texture_upload(world_ao.cascades, 0, 0, 0, 0, 0, XGPU_STREAM_WORLD_AO_CASCADES_SIDE,
+			XGPU_STREAM_WORLD_AO_CASCADES_SIDE, XGPU_STREAM_WORLD_AO_CASCADES_DEPTH, nothing,
+			XGPU_STREAM_WORLD_AO_CASCADES_SIDE * 2u, XGPU_STREAM_WORLD_AO_CASCADES_SIDE * XGPU_STREAM_WORLD_AO_CASCADES_SIDE * 2u);
+		free(nothing);
+	}
+	xgpu_metal_texture_upload(world_ao.cascades, 0, 0, x, y, z, width, height, depth, data, width * 2u, width * height * 2u);
+}
+
+uint32_t xgpu_metal_world_ao_cascades_texture(void)
+{
+	world_ao_make();
+	return world_ao.cascades ? world_ao.cascades : world_ao.cascades_stand_in;
 }
 
 void xgpu_metal_world_ao_window(const struct xgpu_world_ao_block *block)

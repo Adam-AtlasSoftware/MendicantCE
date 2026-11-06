@@ -8,7 +8,8 @@ very text on the CPU: float3 and float4 (their components, .xyz, .yzw, a
 component by index), their arithmetic, the few library functions, the
 constant address space, and a 3D texture sampled linear and clamped to its
 edge as a GPU samples it (of signed bytes, or of four floats a texel), and
-one read by texel.
+one read by texel (and of two signed bytes a texel: the distance-field
+scene's cascades, tools/world_trace/trace_check.cpp).
 */
 
 #ifndef METAL_SHIM_H
@@ -141,8 +142,11 @@ template <typename T> struct texture3d
 {
 	const signed char *voxels;
 	const unsigned char *texels;
-	/* (or four floats a texel, filtered: the vehicles' fields' atlas) */
+	/* (or four floats a texel, filtered: the vehicles' fields' atlas; or
+	two signed bytes a texel, sampled as RG8 snorm: the distance-field
+	scene's cascades) */
 	const float *values;
+	const signed char *pairs = nullptr;
 	int width, height, depth;
 	float4 read(uint3 at) const
 	{
@@ -182,11 +186,21 @@ template <typename T> struct texture3d
 					results[part] += weight * values[((at[2] * height + at[1]) * width + at[0]) * 4 + part];
 				continue;
 			}
+			if (pairs)
+			{
+				for (int part = 0; part < 2; part++)
+				{
+					float texel = (float)pairs[((at[2] * height + at[1]) * width + at[0]) * 2 + part] / 127.0f;
+
+					results[part] += weight * (texel < -1.0f ? -1.0f : texel);
+				}
+				continue;
+			}
 			float texel = (float)voxels[(at[2] * height + at[1]) * width + at[0]] / 127.0f;
 
 			result += weight * (texel < -1.0f ? -1.0f : texel);
 		}
-		if (values)
+		if (values || pairs)
 			return float4(results[0], results[1], results[2], results[3]);
 		return float4(result, 0.0f, 0.0f, 1.0f);
 	}

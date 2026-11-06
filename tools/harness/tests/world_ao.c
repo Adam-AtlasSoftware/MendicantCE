@@ -9,6 +9,7 @@ tools/test_world_ao_light.py. */
 
 #include "harness.h"
 #include "world_ao.h"
+#include "world_cascades.h"
 #include "world_proxies.h"
 #include "world_scene.h"
 #include "world_sdf.h"
@@ -180,6 +181,68 @@ void world_sdf_upload(struct world_sdf_volume const *uploaded)
 	fields_handed++;
 }
 
+/* (the distance-field scene: world_cascades.c's, tested apart; here, how
+many frames it was updated in) */
+static int scene_updates;
+float world_sdf_sample(struct world_sdf_volume const *sampled, float const point[3])
+{
+	(void)sampled;
+	return point[2];
+}
+unsigned long long SDL_GetTicksNS(void)
+{
+	return 0;
+}
+long world_proxies_scene(float const camera_position[3], float reach, struct world_proxy *proxies, long *owners,
+	long maximum)
+{
+	(void)camera_position;
+	(void)reach;
+	(void)proxies;
+	(void)owners;
+	(void)maximum;
+	return 0;
+}
+int world_cascades_create(struct world_cascades *cascades)
+{
+	memset(cascades, 0, sizeof(*cascades));
+	return 1;
+}
+void world_cascades_free(struct world_cascades *cascades)
+{
+	(void)cascades;
+}
+void world_cascades_update(struct world_cascades *cascades, float const camera[3], int structure_changed,
+	world_cascades_structure structure, void *context, struct world_cascades_object const *objects, long object_count,
+	struct world_proxy const *shapes)
+{
+	(void)cascades;
+	(void)camera;
+	(void)structure_changed;
+	(void)structure;
+	(void)context;
+	(void)objects;
+	(void)object_count;
+	(void)shapes;
+	scene_updates++;
+}
+void world_cascades_block(struct world_cascades const *cascades, float block[WORLD_CASCADES][4])
+{
+	(void)cascades;
+	memset(block, 0, sizeof(float) * 4 * WORLD_CASCADES);
+}
+void halo_world_ao_cascades(unsigned long x, unsigned long y, unsigned long z, unsigned long width, unsigned long height,
+	unsigned long depth, void const *data)
+{
+	(void)x;
+	(void)y;
+	(void)z;
+	(void)width;
+	(void)height;
+	(void)depth;
+	(void)data;
+}
+
 #include "under_test.inc"
 
 static void off_case(void)
@@ -279,6 +342,13 @@ static void window_case(void)
 	world_ao_object_begin(200);
 	CHECK(object_owner == 1 && object_reference == 1.0f, "%d %g", object_owner, object_reference);
 	world_ao_window_end();
+	/* (the distance-field scene: updated once a frame, whatever its windows,
+	never while a map's pipelines are prepared) */
+	CHECK(scene_updates == 1, "%d updates in a frame of three windows", scene_updates);
+	world_ao_frame_begin();
+	world_ao_window_begin(0, 0, camera);
+	world_ao_window_end();
+	CHECK(scene_updates == 2, "%d updates in two frames", scene_updates);
 }
 
 static void test_case(void)

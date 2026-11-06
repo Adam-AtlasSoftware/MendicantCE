@@ -302,6 +302,26 @@ it, in half diagonals) */
 objects' atlas) */
 #define XGPU_WORLD_AO_FIELD 4
 
+/* ---------- the distance-field scene (port/linux/include/world_cascades.h)
+
+The cascades about the camera, one 3D texture of two signed bytes a texel
+(RG8 snorm: the structure's distance, the objects'), each cascade
+XGPU_WORLD_CASCADE_SPAN texels a side (its side and a guard), one above the
+other along z; a cascade's block vec4 is its first voxel's centre and its
+voxel (0: not ready). world_trace, the emitters' ray step through them
+(xgpu_spirv.c's, xgpu_msl.c's), is world_cascades.c's world_trace_ray
+operation for operation; these are world_cascades.h's WORLD_CASCADE* and
+WORLD_TRACE_* */
+#define XGPU_WORLD_CASCADES 4
+#define XGPU_WORLD_CASCADE_SIDE 64
+#define XGPU_WORLD_CASCADE_SPAN 65
+#define XGPU_WORLD_CASCADE_RANGE_VOXELS 4
+#define XGPU_WORLD_TRACE_STEPS 24
+#define XGPU_WORLD_TRACE_HIT 0.25f
+#define XGPU_WORLD_TRACE_LEAST_STEP 0.5f
+#define XGPU_WORLD_TRACE_STRUCTURE 1
+#define XGPU_WORLD_TRACE_OBJECTS 2
+
 /* ---------- enhanced dynamic lights
 
 display.dynamic_lights "enhanced" (d3d8_device.c, halo_dynamic_lights_set):

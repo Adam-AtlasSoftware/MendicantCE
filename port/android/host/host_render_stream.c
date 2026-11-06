@@ -232,6 +232,7 @@ static const uint32_t record_minimum[XGPU_STREAM_RECORD_TYPES] =
 	[XGPU_STREAM_PANINI] = sizeof(struct xgpu_stream_panini),
 	[XGPU_STREAM_WORLD_AO_WINDOW] = sizeof(struct xgpu_stream_world_ao_window),
 	[XGPU_STREAM_WORLD_AO_FIELD] = sizeof(struct xgpu_stream_world_ao_field),
+	[XGPU_STREAM_WORLD_AO_CASCADES] = sizeof(struct xgpu_stream_world_ao_cascades),
 	[XGPU_STREAM_PIPELINE_STAND_IN] = sizeof(struct xgpu_stream_pipeline_stand_in),
 	/* (and its folder's path, at least its NUL) */
 	[XGPU_STREAM_SCREENSHOT] = sizeof(struct xgpu_stream_screenshot) + XGPU_STREAM_RECORD_ALIGNMENT,
@@ -525,6 +526,20 @@ static int decode_record(struct host_render_decoder *decoder, const unsigned cha
 			!data_inside(decoder, start, size, field->data, field->size)))
 			return XGPU_STREAM_ERROR_BOUNDS;
 		CALL(world_ao_field, field);
+		break;
+	}
+	case XGPU_STREAM_WORLD_AO_CASCADES:
+	{
+		const struct xgpu_stream_world_ao_cascades *box = (const void *)start;
+
+		if (box->width && (box->x >= XGPU_STREAM_WORLD_AO_CASCADES_SIDE ||
+			box->width > XGPU_STREAM_WORLD_AO_CASCADES_SIDE - box->x || box->y >= XGPU_STREAM_WORLD_AO_CASCADES_SIDE ||
+			box->height > XGPU_STREAM_WORLD_AO_CASCADES_SIDE - box->y || box->z >= XGPU_STREAM_WORLD_AO_CASCADES_DEPTH ||
+			box->depth > XGPU_STREAM_WORLD_AO_CASCADES_DEPTH - box->z || !box->height || !box->depth ||
+			(uint64_t)box->width * box->height * box->depth * 2u != box->size ||
+			!data_inside(decoder, start, size, box->data, box->size)))
+			return XGPU_STREAM_ERROR_BOUNDS;
+		CALL(world_ao_cascades, box);
 		break;
 	}
 	case XGPU_STREAM_TARGET_CREATE:

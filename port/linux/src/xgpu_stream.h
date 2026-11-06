@@ -38,7 +38,7 @@ port/linux/README.md.
 #include <stdint.h>
 
 #define XGPU_STREAM_MAGIC 0x53504758u /* "XGPS" */
-#define XGPU_STREAM_VERSION 17
+#define XGPU_STREAM_VERSION 18
 #define XGPU_STREAM_LOADING_ART_BYTES (640u * 480u * 4u)
 
 /* ---------- the ring
@@ -267,6 +267,9 @@ enum
 	XGPU_STREAM_CATEGORY,
 	/* the enhanced dynamic lights' world (xgpu_backend_dynamic_lights_world) */
 	XGPU_STREAM_DYNAMIC_LIGHTS_WORLD,
+	/* display.ambient_occlusion "world"'s distance-field scene: a box of
+	its cascades (xgpu_backend_world_ao_cascades) */
+	XGPU_STREAM_WORLD_AO_CASCADES,
 	XGPU_STREAM_RECORD_TYPES,
 };
 
@@ -457,6 +460,23 @@ struct xgpu_stream_world_ao_field
 	uint32_t part;
 	uint32_t width, height, depth;
 	uint32_t z_first, z_count;
+	uint32_t data, size;
+	uint32_t pad;
+};
+
+/* WORLD_AO_CASCADES: a box of the distance-field scene's cascades'
+texture (xgpu.h's XGPU_WORLD_CASCADE*: XGPU_WORLD_CASCADE_SPAN texels
+square, XGPU_WORLD_CASCADE_SPAN * XGPU_WORLD_CASCADES deep, two signed bytes
+a texel, RG8 snorm; xgpu_backend_world_ao_cascades): its first texel x, y,
+z and its size, its bytes at data (size: width * height * depth * 2, x
+fastest); width 0 releases the texture */
+#define XGPU_STREAM_WORLD_AO_CASCADES_SIDE 65u
+#define XGPU_STREAM_WORLD_AO_CASCADES_DEPTH (65u * 4u)
+struct xgpu_stream_world_ao_cascades
+{
+	uint32_t header;
+	uint32_t x, y, z;
+	uint32_t width, height, depth;
 	uint32_t data, size;
 	uint32_t pad;
 };
@@ -1162,6 +1182,7 @@ XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_panini, 56);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_world_ao_window, 16 + 32 + 32 + XGPU_WORLD_AO_PROXIES_MAXIMUM * 48 + 32 +
 	XGPU_WORLD_AO_GRID_CELLS_MAXIMUM * 8);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_world_ao_field, 40);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_world_ao_cascades, 40);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_pipeline_stand_in, 12);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_set_targets, 16);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_clear, 36);
