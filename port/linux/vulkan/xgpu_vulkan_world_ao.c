@@ -52,6 +52,9 @@ static struct
 	the submission it was written for */
 	struct xgpu_world_ao_block block;
 	uint64_t block_serial;
+	/* the occlusion found once a pixel the draws read (NULL: its stand-in,
+	a texel of 1) */
+	struct xgpu_vulkan_image *pixels, *pixels_stand_in;
 	struct xgpu_vulkan_range block_range;
 	/* bumped whenever what the set names changes */
 	uint64_t number;
@@ -97,6 +100,21 @@ int xgpu_vulkan_world_ao_create(void)
 	xgpu_vulkan_image_upload(world_ao.stand_ins[XGPU_STREAM_WORLD_AO_SCENERY], 0, 0, 0, 0, 0, 1, 1, 1, &none, 1, 1);
 	xgpu_vulkan_image_upload(world_ao.stand_ins[XGPU_STREAM_WORLD_AO_TABLE], 0, 0, 0, 0, 0, 1, 1, 1, outside_cell, 4, 4);
 	xgpu_vulkan_image_upload(world_ao.stand_ins[XGPU_STREAM_WORLD_AO_ATLAS], 0, 0, 0, 0, 0, 1, 1, 1, &far_outside, 1, 1);
+	{
+		struct xgpu_vulkan_image_description description;
+		/* (an occlusion of 1, at no distance) */
+		static const float one[4] = { 1.0f, 0.0f, 0.0f, 0.0f };
+
+		memset(&description, 0, sizeof(description));
+		description.type = XGPU_VULKAN_IMAGE_2D;
+		description.format = XGPU_VULKAN_FORMAT_RGBA32F;
+		description.usage = XGPU_VULKAN_USAGE_SAMPLED;
+		description.width = description.height = description.depth_or_layers = description.levels = 1;
+		world_ao.pixels_stand_in = xgpu_vulkan_image_create(&description);
+		if (!world_ao.pixels_stand_in)
+			return 0;
+		xgpu_vulkan_image_upload(world_ao.pixels_stand_in, 0, 0, 0, 0, 0, 1, 1, 1, one, 16, 16);
+	}
 	memset(&sampler, 0, sizeof(sampler));
 	sampler.minify = sampler.magnify = XGPU_VULKAN_FILTER_LINEAR;
 	sampler.mip = XGPU_VULKAN_MIP_NONE;
@@ -207,6 +225,19 @@ struct xgpu_vulkan_image *xgpu_vulkan_world_ao_objects_image(void)
 	struct world_ao_part const *part = &world_ao.parts[XGPU_STREAM_WORLD_AO_OBJECTS];
 
 	return part->image && part->whole ? part->image : world_ao.stand_ins[XGPU_STREAM_WORLD_AO_OBJECTS];
+}
+
+void xgpu_vulkan_world_ao_set_pixels(struct xgpu_vulkan_image *image)
+{
+	if (world_ao.pixels == image)
+		return;
+	world_ao.pixels = image;
+	world_ao.number++;
+}
+
+struct xgpu_vulkan_image *xgpu_vulkan_world_ao_pixels_image(void)
+{
+	return world_ao.pixels ? world_ao.pixels : world_ao.pixels_stand_in;
 }
 
 VkSampler xgpu_vulkan_world_ao_sampler(void)

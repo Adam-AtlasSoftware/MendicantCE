@@ -815,6 +815,27 @@ void xgpu_backend_world_ao_field(int part, unsigned long width, unsigned long he
 	record_body->data = size ? carry_one(&place, data, size) : 0;
 }
 
+void xgpu_backend_world_ao_prepass(int phase, xgpu_target target, const struct xgpu_world_ao_pass *pass)
+{
+	struct xgpu_stream_world_ao_prepass *record_body;
+
+	if (!stream.open)
+		return;
+	record_body = record(XGPU_STREAM_WORLD_AO_PREPASS, sizeof(*record_body));
+	record_body->phase = (uint32_t)phase;
+	record_body->target = (uint32_t)target;
+	record_body->pad = 0;
+	if (pass)
+	{
+		record_body->pass = *pass;
+		stream_finite(&record_body->pass.camera[0][0], 16, "world occlusion's camera", 0);
+	}
+	else
+	{
+		memset(&record_body->pass, 0, sizeof(record_body->pass));
+	}
+}
+
 /* (the host writes the ring's display_hdr and display_headroom as it looks
 at its display) */
 BOOL xgpu_backend_display_hdr(float *headroom)

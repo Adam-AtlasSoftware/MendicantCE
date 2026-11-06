@@ -157,6 +157,8 @@ static boolean render_preparing_frame; /* port: enumerate a view without drawing
 
 extern short global_screenshot_count;
 
+/* port: display.ambient_occlusion "world"'s pre-pass is being drawn (render_window) */
+boolean render_world_ao_prepass = FALSE;
 boolean render_contrails_enabled = TRUE;
 boolean render_particles_enabled = TRUE;
 boolean render_particle_systems_enabled = TRUE;
@@ -398,6 +400,7 @@ static void render_window(
 {
 	struct rasterizer_window_begin_parameters parameters;
 	short rendered_cluster_index;
+	boolean world_ao_prepassed; /* port: (below) */
 
 	profile_render_window_start(TRUE);
 	render.scene_index++;
@@ -452,10 +455,73 @@ static void render_window(
 		say which they are: world_ao_object_begin), taken away after the
 		lightmap pass, which the later passes never read */
 		world_ao_window_begin(local_player_index, rasterizer_target, &render.camera.position.x);
+		/* port: ... found once a pixel: the opaque surfaces' inputs to it
+		drawn first, alone (the pre-pass: the same draws as below, their
+		transparent parts, widgets and fog left for below:
+		render_world_ao_prepass), the occlusion found from them at each
+		pixel, and the surfaces then drawn reading theirs (not in the VR
+		mode's eye or scope passes, nor a mirror's view) */
+		world_ao_prepassed = FALSE;
+		if (rasterizer_target == _render_target_primary && !rasterizer_camera->mirrored &&
+#ifdef HALO_VR
+			!render_vr_eye_pass && !render_vr_scope_pass &&
+#endif
+			parameters.frustum.projection_valid)
+		{
+			float pass_camera[4][4];
+			real_point2d screen_point;
+			real_vector3d view_vector, middle, step;
+			short axis;
+
+			pass_camera[0][0] = parameters.camera.position.x;
+			pass_camera[0][1] = parameters.camera.position.y;
+			pass_camera[0][2] = parameters.camera.position.z;
+			pass_camera[0][3] = parameters.frustum.z_near;
+			/* the ray at the screen's middle, one unit along the view's axis,
+			and its change a unit of the screen's x and y */
+			screen_point.x = 0.0f;
+			screen_point.y = 0.0f;
+			render_camera_screen_to_view(&parameters.camera, &parameters.frustum, &screen_point, &view_vector);
+			matrix4x3_transform_vector(&parameters.frustum.view_to_world, &view_vector, &middle);
+			pass_camera[1][0] = middle.i;
+			pass_camera[1][1] = middle.j;
+			pass_camera[1][2] = middle.k;
+			pass_camera[1][3] = parameters.frustum.z_far;
+			for (axis = 0; axis < 2; axis++)
+			{
+				screen_point.x = axis == 0 ? 1.0f : 0.0f;
+				screen_point.y = axis == 1 ? 1.0f : 0.0f;
+				render_camera_screen_to_view(&parameters.camera, &parameters.frustum, &screen_point, &view_vector);
+				matrix4x3_transform_vector(&parameters.frustum.view_to_world, &view_vector, &step);
+				pass_camera[2 + axis][0] = step.i - middle.i;
+				pass_camera[2 + axis][1] = step.j - middle.j;
+				pass_camera[2 + axis][2] = step.k - middle.k;
+				pass_camera[2 + axis][3] = 0.0f;
+			}
+			world_ao_prepassed = world_ao_prepass_begin();
+			if (world_ao_prepassed)
+			{
+				render_world_ao_prepass = TRUE;
+				render_objects();
+				render_enumerate_models();
+				structure_render_preprocess();
+				structure_render_lightmaps();
+				render_world_ao_prepass = FALSE;
+				world_ao_prepass_end(
+					parameters.camera.viewport_bounds.x0,
+					parameters.camera.viewport_bounds.y0,
+					parameters.camera.viewport_bounds.x1,
+					parameters.camera.viewport_bounds.y1,
+					(float const (*)[4])pass_camera);
+			}
+		}
 		render_objects();
 		/* port: and through every model's parts */
 		render_enumerate_models();
-		structure_render_preprocess();
+		if (!world_ao_prepassed)
+		{
+			structure_render_preprocess();
+		}
 		structure_render_lightmaps();
 		world_ao_window_end();
 #ifdef HALO_VR

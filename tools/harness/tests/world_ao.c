@@ -41,6 +41,23 @@ unsigned long config_changes(void)
 	return changes;
 }
 
+int config_boolean(const char *name)
+{
+	(void)name;
+	return 0;
+}
+
+/* (found once a pixel: the front end's pre-pass, none here) */
+int halo_world_ao_prepass_begin(void)
+{
+	return 0;
+}
+
+void halo_world_ao_prepass_end(short x0, short y0, short x1, short y1, float const camera[4][4])
+{
+	(void)x0; (void)y0; (void)x1; (void)y1; (void)camera;
+}
+
 /* the parts (their stubs' behaviour: the real ones are tested apart) */
 void world_scene_map_loaded(void) {}
 void world_scene_map_unloaded(void) {}

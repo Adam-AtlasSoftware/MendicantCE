@@ -137,6 +137,11 @@ enum
 	/* the backend's own targets: a byte (red), two (red, green) */
 	XGPU_METAL_FORMAT_R8,
 	XGPU_METAL_FORMAT_RG8,
+	/* (display.ambient_occlusion "world" found once a pixel: the pre-pass's
+	inputs, four 32-bit unsigned integers; the occlusion and what the
+	surfaces upsample it by, four floats) */
+	XGPU_METAL_FORMAT_RGBA32UI,
+	XGPU_METAL_FORMAT_RGBA32F,
 	XGPU_METAL_FORMAT_COUNT
 };
 
@@ -524,6 +529,11 @@ struct xgpu_world_ao_block;
 void xgpu_metal_world_ao_field(uint32_t part, uint32_t width, uint32_t height, uint32_t depth, uint32_t z_first,
 	uint32_t z_count, const void *data);
 void xgpu_metal_world_ao_window(const struct xgpu_world_ao_block *block);
+/* ... found once a pixel: the texture of it the draws that read it read
+from now on (XGPU_METAL_TEXTURE_WORLD_AO_PIXELS; 0: its stand-in, 1); and
+the backend's, which the fragments read */
+void xgpu_metal_world_ao_set_pixels(uint32_t texture);
+void xgpu_metal_set_world_ao_pixels(uint32_t texture);
 /* the values of the 16 inputs no stream feeds */
 void xgpu_metal_set_constant_attributes(const float (*values)[4]);
 /* indices: 16-bit, or XGPU_METAL_SOURCE_NONE */
@@ -576,6 +586,8 @@ enum
 	XGPU_METAL_PASS_TONE_MAP,
 	XGPU_METAL_PASS_ANTI_ALIASING,
 	XGPU_METAL_PASS_PANINI,
+	/* (display.ambient_occlusion "world" found once a pixel: its pass) */
+	XGPU_METAL_PASS_WORLD_AO,
 	XGPU_METAL_PASS_KINDS
 };
 /* sets what the passes from now on draw; returns what it was */

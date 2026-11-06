@@ -84,6 +84,9 @@ struct xgpu_metal_stream_shaders
 	uint32_t (*uniforms)(void *context, const struct xgpu_metal_stream_uniform_inputs *inputs, void *bytes,
 		uint32_t size);
 	int (*halo)(void *context, uint32_t *vertex_shader, uint32_t *pixel_shader);
+	/* display.ambient_occlusion "world" found once a pixel: its pass's
+	functions (xgpu_msl.h's xgpu_msl_world_ao_pass) */
+	int (*world_ao_pass)(void *context, uint32_t *vertex_shader, uint32_t *pixel_shader);
 };
 
 void xgpu_metal_stream_set_shaders(const struct xgpu_metal_stream_shaders *shaders);

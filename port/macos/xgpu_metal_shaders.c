@@ -64,6 +64,9 @@ _Static_assert(XGPU_MSL_HALO_MIDDLE == 0 && XGPU_MSL_HALO_COLOR == 1 && XGPU_MSL
 	XGPU_MSL_HALO_MIDDLE < 16 && XGPU_MSL_HALO_COLOR < 16 && XGPU_MSL_HALO_CORNER < 16, "glows' attributes");
 _Static_assert(XGPU_METAL_TEXTURE_STAGE(3) == 3 && XGPU_METAL_SAMPLER_STAGE(3) == 3, "stages' textures and samplers");
 _Static_assert(XGPU_METAL_VERTEX_CONSTANT_COUNT == XGPU_VERTEX_CONSTANT_COUNT, "vertex constants");
+_Static_assert(XGPU_MSL_TEXTURE_WORLD_AO_PIXELS == XGPU_METAL_TEXTURE_WORLD_AO_PIXELS &&
+	XGPU_MSL_TEXTURE_WORLD_AO_OBJECTS == XGPU_METAL_TEXTURE_WORLD_AO_OBJECTS &&
+	XGPU_MSL_BUFFER_WORLD_AO == XGPU_METAL_BUFFER_WORLD_AO, "the world's occlusion's bindings");
 /* (setVertexBytes' limit) */
 _Static_assert(sizeof(struct xgpu_msl_uniforms) <= 4096 && sizeof(struct xgpu_msl_halo_uniforms) <= 4096,
 	"uniforms' size");
@@ -378,9 +381,35 @@ static int halo_make(void *context, uint32_t *vertex_shader, uint32_t *pixel_sha
 	return *vertex_shader && *pixel_shader;
 }
 
+/* ---------- display.ambient_occlusion "world" found once a pixel */
+
+static int world_ao_pass_make(void *context, uint32_t *vertex_shader, uint32_t *pixel_shader)
+{
+	static const char *const entries[2] = { "xgpu_world_ao_vertex", "xgpu_world_ao_pass" };
+	int pixel;
+
+	(void)context;
+	*vertex_shader = *pixel_shader = 0;
+	for (pixel = 0; pixel < 2; pixel++)
+	{
+		char *source = xgpu_msl_world_ao_pass(pixel);
+
+		if (!source)
+			return 0;
+		if (dump_folder())
+			dump(entries[pixel], source);
+		/* (the app's library's, made ahead of time: tools/xgpu_metal_prebuild.c) */
+		*(pixel ? pixel_shader : vertex_shader) = xgpu_metal_pixel_shader_create(source, strlen(source), entries[pixel],
+			NULL);
+		free(source);
+	}
+	return *vertex_shader && *pixel_shader;
+}
+
 const struct xgpu_metal_stream_shaders *xgpu_metal_shaders(void)
 {
-	static const struct xgpu_metal_stream_shaders shaders = { NULL, shaders_make, uniforms_make, halo_make };
+	static const struct xgpu_metal_stream_shaders shaders = { NULL, shaders_make, uniforms_make, halo_make,
+		world_ao_pass_make };
 
 	return &shaders;
 }

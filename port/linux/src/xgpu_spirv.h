@@ -73,6 +73,17 @@ bytes, sampled at the lightmap pass's lightmap coordinates) */
 /* (the vehicles' occlusion fields' atlas: a 3D image of four halves, t
 and v.xyz, sampled at a field's voxels' place) */
 #define XGPU_SPIRV_BINDING_WORLD_AO_OBJECTS 5
+/* (found once a pixel: the occlusion's texture, a float a pixel, read with
+texelFetch at the pixel by the draws with
+XGPU_AMBIENT_OCCLUSION_WORLD_SAMPLED) */
+#define XGPU_SPIRV_BINDING_WORLD_AO_PIXELS 6
+/* the passes after the pre-pass (xgpu_spirv_world_ao_pass), drawn as the
+backend's own draws: the pass's struct xgpu_world_ao_pass at the start of
+the uniforms (XGPU_SPIRV_SET_DRAW, XGPU_SPIRV_BINDING_UNIFORMS); the
+pre-pass's inputs (an unsigned 2D image, read with texelFetch) at this
+binding of XGPU_SPIRV_SET_TEXTURES; set XGPU_SPIRV_SET_OCCLUSION as the
+surfaces have it */
+#define XGPU_SPIRV_WORLD_AO_PASS_INPUTS 0
 
 /* the locations of what the vertex shader hands the pixel shader */
 enum
@@ -265,6 +276,20 @@ unsigned long xgpu_spirv_vertex_inputs(const struct xgpu_vertex_program *program
 "main". FALSE if out of memory. */
 BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const struct xgpu_spirv_options *options,
 	struct xgpu_spirv_module *module);
+
+/* display.ambient_occlusion "world" found once a pixel (xgpu_stream.h's
+WORLD_AO_PREPASS): the passes after the pre-pass, entry point "main": the
+vertex shader covering the viewport with one triangle (pass 0) and the
+occlusion (1: a vec4 a texel, each 2x2 block's nearest pixel's at a quarter
+of the pixels: the occlusion, the distance, the normal octahedral). Their bindings:
+XGPU_SPIRV_WORLD_AO_PASS_*. options: subgroups alone. FALSE if out of
+memory. */
+enum
+{
+	XGPU_SPIRV_WORLD_AO_VERTEX,
+	XGPU_SPIRV_WORLD_AO_OCCLUSION,
+};
+BOOL xgpu_spirv_world_ao_pass(int pass, const struct xgpu_spirv_options *options, struct xgpu_spirv_module *module);
 
 /* the enhanced dynamic lights' glows (xgpu_backend.h's
 xgpu_backend_dynamic_lights_halos):
