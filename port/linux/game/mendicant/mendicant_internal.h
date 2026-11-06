@@ -190,6 +190,10 @@ struct mendicant_status
 	unsigned long ticks, repeated, jumps, ai_updates, ai_repeated, drill_passes, units, strategy[2], per_enemy[2],
 		stances[2], roles, orders;
 	unsigned long moved, held, rejected, late;
+	/* the authentic layer: bursts and first shots
+	of their own, grenade reactions, the convoy's assignments, boardings and
+	seats */
+	unsigned long bursts, first_shots, grenade_reactions, convoy_assigned, convoy_boarded, convoy_seated;
 };
 extern struct mendicant_status mendicant_status;
 extern boolean mendicant_active;         /* enabled, campaign or co-op, and this machine runs the AI */

@@ -562,7 +562,7 @@ static void convoy_assign(
 		convoy_pass[convoy_pass_count++] = actor_index;
 	if (soldier->role == CONVOY_SEAT_DRIVER && !chief_vehicle)
 		convoy_follower_get(vehicle_index, TRUE, actor_index);
-	convoy_counts[0]++;
+	convoy_counts[0]++; mendicant_status.convoy_assigned++;
 	convoy_log("assign", (long)(unsigned short)actor_index, seat_index, soldier->role, (real)delay / 30.0f,
 		chief_vehicle ? 1.0f : 0.0f);
 }
@@ -1010,7 +1010,7 @@ static void convoy_soldiers_update(
 				{
 					soldier->state = CONVOY_BOARDING;
 					soldier->start_at = time;
-					convoy_counts[1]++;
+					convoy_counts[1]++; mendicant_status.convoy_boarded++;
 					convoy_log("board", (long)(unsigned short)actor_index, soldier->seat, soldier->role, 0.0f, 0.0f);
 				}
 				else
@@ -1038,7 +1038,7 @@ static void convoy_soldiers_update(
 				soldier->last_vehicle = soldier->vehicle;
 				soldier->last_seat = soldier->seat;
 				convoy_release(actor_index);
-				convoy_counts[2]++;
+				convoy_counts[2]++; mendicant_status.convoy_seated++;
 				if (soldier->role == CONVOY_SEAT_DRIVER)
 				{
 					struct convoy_follower *follower = convoy_follower_get(soldier->vehicle, TRUE, actor_index);

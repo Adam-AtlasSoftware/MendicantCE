@@ -553,6 +553,7 @@ void mendicant_firing_burst_geometry(
 	variant = actor_combat_get_firing_variant_definition(actor_index);
 	if (!variant)
 		return;
+	mendicant_status.bursts++;
 	kind = mendicant_soldier_kind(actor_index);
 	quirk = mendicant_soldier_quirk(actor_index);
 	unit = firing_unit(actor->meta.unit_index);
@@ -690,6 +691,7 @@ boolean mendicant_firing_first_burst_delay(
 
 	if (!actor || !mendicant_firing_personal(actor_index) || (soldier = firing_soldier_get(actor_index)) == NULL)
 		return fire_immediately;
+	mendicant_status.first_shots++;
 	override = actor->orders.combat.override_firing_restrictions;
 	if (actor->control.current_fire_target_type == 1 /* _actor_fire_target_prop */)
 	{

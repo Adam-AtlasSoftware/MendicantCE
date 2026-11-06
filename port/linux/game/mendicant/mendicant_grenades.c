@@ -794,6 +794,7 @@ static void grenade_reacted(
 	if (!soldier->react_time)
 	{
 		soldier->react_time = mendicant_time();
+		mendicant_status.grenade_reactions++;
 		soldier->react_position = actor->input.position.body_position;
 		soldier->move_logged = FALSE;
 		grenade_log("greact", actor_index, actor, soldier->dir_x, soldier->dir_y, (long)(short)soldier->object, reaction,
