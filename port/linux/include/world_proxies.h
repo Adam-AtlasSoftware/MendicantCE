@@ -101,6 +101,19 @@ struct world_proxies_frame;
 maximum): how many. The static scenery's, baked where it stands */
 long world_proxies_place(long definition, struct world_proxies_frame const *frames, short node_count,
 	struct world_proxy *proxies, long maximum);
+struct world_proxies_source_field;
+/* an object's occlusion field placed on its node 0 (frame), in the GPU's
+layout (xgpu_stream.h's XGPU_WORLD_AO_PROXY_FIELD): the world to its
+voxels' place, g = (frame^-1 (p) - origin) / voxel, each row an axis of the
+frame over its scale squared and the voxel (a frame of one scale). The
+window's, and the static scenery's pages' where a placement has one */
+void world_proxies_field_place(struct world_proxies_source_field const *field, struct world_proxies_frame const *frame,
+	struct world_proxy proxies[WORLD_PROXY_FIELD_SLOTS]);
+/* whether a definition's occlusion field stands in for this shape of its
+set where the field is drawn: a vehicle's boxes (its wheels' spheres
+stay), and the one shape of anything else (its box, or a sphere of its
+bound where it has no collision geometry) */
+int world_proxy_set_fielded(struct world_proxy_set const *set, short shape_index);
 
 /* ---------- the arithmetic (shared with D's shaders: their reference;
 tools/harness/tests/world_proxies.c) */

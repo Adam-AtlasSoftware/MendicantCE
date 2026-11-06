@@ -67,8 +67,8 @@ struct world_proxies_source
 	struct world_proxies_source_node nodes[WORLD_PROXIES_SOURCE_MAXIMUM_NODES];
 };
 
-/* a vehicle's occlusion field drawn now (world_sdf.h's struct
-world_sdf_object, docs/world-ao.md "Dynamic objects"), as the window places
+/* an object's occlusion field drawn now (world_sdf.h's struct
+world_sdf_object, docs/world-ao.md "The objects' occlusion fields"), as the window places
 it on node 0: its first voxel's centre and the voxel, in node 0's space; its
 voxels along x, y, z; its reach from the grid's middle, in voxels; its
 place in the GPU's atlas of them and the atlas's size, in texels; its

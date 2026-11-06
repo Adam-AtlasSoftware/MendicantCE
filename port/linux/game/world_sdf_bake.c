@@ -905,17 +905,20 @@ void world_sdf_atlas_layer(struct world_sdf_volume const *volume, unsigned long 
 	}
 }
 
-/* ---------- the vehicles' occlusion fields (docs/world-ao.md, "Dynamic objects")
+/* ---------- the objects' occlusion fields (docs/world-ao.md, "The objects' occlusion fields")
 
-A vehicle's shape does not change, only where it is: its occlusion of what
-is about it is baked once, in its own space. At each voxel of a grid about
-it, the share of the cosine-weighted hemisphere its collision geometry
-blocks, for every normal, is fitted as sat(t + n . v): four numbers, which
-the shaders read with one filtered fetch. Each voxel looks along
-WORLD_SDF_OBJECT_RAYS fixed directions (a Fibonacci sphere's) and finds which
-the triangles block; the occlusion at each of WORLD_SDF_OBJECT_NORMALS
-normals is the blocked directions' cosines' sum, and t, v are its clamped
-least squares fit. A voxel in solid takes its neighbours' outside, so that
+A vehicle's or a piece of scenery's shape does not change, only where it
+is: its occlusion of what is about it is baked once, in its own space. At
+each voxel of a grid about it, the share of the cosine-weighted hemisphere
+its geometry blocks, for every normal, is fitted as sat(t + n . v): four
+numbers, which the shaders read with one filtered fetch. Each voxel looks
+along WORLD_SDF_OBJECT_RAYS fixed directions (a Fibonacci sphere's) and
+finds how much of each the triangles block: all of it for an opaque
+triangle, its opacity for one partly so (alpha-tested leaves, whose texture
+lets the rest through), each triangle crossed letting through its share of
+what is left. The occlusion at each of WORLD_SDF_OBJECT_NORMALS normals is
+the directions' cosines' sum, each by its share blocked, and t, v are its
+clamped least squares fit. A voxel in solid takes its neighbours' outside, so that
 a point just outside the geometry is never filtered with the inside's
 darkness. Pure, and each voxel its own: the same on any number of threads. */
 
@@ -943,7 +946,7 @@ static void sdf_cross(float const a[3], float const b[3], float out[3])
 	out[2] = a[0] * b[1] - a[1] * b[0];
 }
 
-void world_sdf_object_layout(float const bounds[6], struct world_sdf_object *object)
+void world_sdf_object_layout(float const bounds[6], unsigned long most_voxels, struct world_sdf_object *object)
 {
 	float longest = 0.0f, margin, voxel = WORLD_SDF_OBJECT_LEAST_VOXEL, low[3], size[3];
 	int axis;
@@ -969,7 +972,7 @@ void world_sdf_object_layout(float const bounds[6], struct world_sdf_object *obj
 		for (axis = 0; axis < 3; axis++)
 			count[axis] = (unsigned long)ceilf(size[axis] / voxel) + 1;
 		if ((count[0] <= WORLD_SDF_OBJECT_MOST_SIDE && count[1] <= WORLD_SDF_OBJECT_MOST_SIDE &&
-			count[2] <= WORLD_SDF_OBJECT_MOST_SIDE && count[0] * count[1] * count[2] <= WORLD_SDF_OBJECT_MOST_VOXELS) ||
+			count[2] <= WORLD_SDF_OBJECT_MOST_SIDE && count[0] * count[1] * count[2] <= most_voxels) ||
 			voxel > 1000.0f)
 		{
 			object->width = count[0];
@@ -1197,14 +1200,17 @@ void world_sdf_object_tables_free(struct world_sdf_object_tables *tables)
 }
 
 void world_sdf_object_slice(struct world_sdf_object_tables const *tables, struct world_sdf_object const *object,
-	float const *positions, long triangle_count, int (*inside)(void *context, float const point[3]), void *context,
-	unsigned long z, unsigned long first_row, unsigned long end_row, float *values, unsigned char *solid)
+	float const *positions, float const *opacities, long triangle_count, int (*inside)(void *context,
+	float const point[3]), void *context, unsigned long z, unsigned long first_row, unsigned long end_row, float *values,
+	unsigned char *solid)
 {
 	float const (*rays)[3] = tables->rays;
 	float const (*normals)[3] = tables->normals;
 	float const *weights = tables->weights;
 	struct sdf_object_buckets const *buckets = &tables->buckets;
-	unsigned char blocked[WORLD_SDF_OBJECT_RAYS];
+	/* (each direction's light let through: the product of 1 less the
+	opacity of each triangle it crosses; 0 once an opaque one blocks it) */
+	float through[WORLD_SDF_OBJECT_RAYS];
 	float occlusions[WORLD_SDF_OBJECT_NORMALS];
 	unsigned long x, y;
 	long k, j, triangle;
@@ -1226,11 +1232,13 @@ void world_sdf_object_slice(struct world_sdf_object_tables const *tables, struct
 				value[1] = value[2] = value[3] = 0.0f;
 				continue;
 			}
-			memset(blocked, 0, sizeof(blocked));
+			for (j = 0; j < WORLD_SDF_OBJECT_RAYS; j++)
+				through[j] = 1.0f;
 			for (triangle = 0; triangle < triangle_count; triangle++)
 			{
 				float const *t = positions + triangle * 9;
 				float a[3], b[3], c[3], ab[3], bc[3], ca[3], determinant, side;
+				float passed = opacities ? 1.0f - opacities[triangle] : 0.0f;
 				int axis;
 
 				for (axis = 0; axis < 3; axis++)
@@ -1281,10 +1289,10 @@ void world_sdf_object_slice(struct world_sdf_object_tables const *tables, struct
 						for (ray = buckets->firsts[bucket]; ray < buckets->firsts[bucket + 1]; ray++)
 						{
 							j = buckets->rays[ray];
-							if (!blocked[j] && side * sdf_dot(rays[j], ab) >= 0.0f &&
+							if (through[j] > 0.0f && side * sdf_dot(rays[j], ab) >= 0.0f &&
 								side * sdf_dot(rays[j], bc) >= 0.0f && side * sdf_dot(rays[j], ca) >= 0.0f)
 							{
-								blocked[j] = 1;
+								through[j] *= passed;
 							}
 						}
 					}
@@ -1297,12 +1305,13 @@ void world_sdf_object_slice(struct world_sdf_object_tables const *tables, struct
 				for (j = 0; j < WORLD_SDF_OBJECT_RAYS; j++)
 				{
 					float const *row = weights + j * WORLD_SDF_OBJECT_NORMALS;
+					float blocked = 1.0f - through[j];
 
-					if (!blocked[j])
+					if (blocked <= 0.0f)
 						continue;
 					any = 1;
 					for (k = 0; k < WORLD_SDF_OBJECT_NORMALS; k++)
-						occlusions[k] += row[k];
+						occlusions[k] += row[k] * blocked;
 				}
 				/* (nothing blocked: none, for every normal) */
 				if (!any)
@@ -1528,50 +1537,102 @@ float world_sdf_object_occlusion(struct world_sdf_object const *object, float co
 	}
 }
 
-unsigned long world_sdf_objects_place(struct world_sdf_objects *objects)
+/* the objects put in columns along z at most depth_cap deep, each next
+column beside the last, and a row of columns at most width_cap wide, each
+next row above the last, in order, until one does not fit the columns'
+depth, the atlas's side or bytes (those after it: none; one larger than any
+atlas is passed over); how many, and the atlas's size */
+static unsigned long sdf_objects_columns(struct world_sdf_objects *objects, unsigned long depth_cap,
+	unsigned long width_cap, unsigned long size[3])
 {
-	unsigned long index, placed = 0, column_x = 0, column_width = 0, z = 0, width = 0, height = 0, depth = 0;
+	unsigned long index, placed = 0, column_x = 0, column_width = 0, row_y = 0, row_height = 0, z = 0;
+	unsigned long width = 0, height = 0, depth = 0;
 
 	for (index = 0; index < objects->count; index++)
 		objects->objects[index].atlas[0] = ~0UL;
 	for (index = 0; index < objects->count; index++)
 	{
 		struct world_sdf_object *object = &objects->objects[index];
-		unsigned long new_width, new_height;
+		unsigned long new_width, new_height, new_depth;
 
 		if (object->width > WORLD_SDF_OBJECT_ATLAS_SIDE || object->height > WORLD_SDF_OBJECT_ATLAS_SIDE ||
 			object->depth > WORLD_SDF_OBJECT_ATLAS_SIDE)
 		{
 			continue;
 		}
-		/* (stacked along z in columns, the next column beside the last) */
-		if (z + object->depth > WORLD_SDF_OBJECT_ATLAS_SIDE)
+		/* (the first come first: one deeper or wider than the columns ends
+		them, so that no smaller one after it takes its place) */
+		if (object->depth > depth_cap || object->width > width_cap)
+			break;
+		/* (stacked along z in columns, the next column beside the last, the
+		next row of them above the last) */
+		if (z + object->depth > depth_cap)
 		{
 			column_x += column_width;
 			column_width = 0;
 			z = 0;
 		}
-		if (column_x + object->width > WORLD_SDF_OBJECT_ATLAS_SIDE)
+		if (column_x + object->width > width_cap)
+		{
+			row_y += row_height;
+			row_height = 0;
+			column_x = 0;
+			column_width = 0;
+			z = 0;
+		}
+		if (row_y + object->height > WORLD_SDF_OBJECT_ATLAS_SIDE)
 			break;
 		new_width = column_x + object->width > width ? column_x + object->width : width;
-		new_height = object->height > height ? object->height : height;
-		if (new_width * new_height * (z + object->depth > depth ? z + object->depth : depth) * WORLD_SDF_OBJECT_TEXEL >
-			WORLD_SDF_OBJECT_ATLAS_BYTES)
-		{
+		new_height = row_y + object->height > height ? row_y + object->height : height;
+		new_depth = z + object->depth > depth ? z + object->depth : depth;
+		if (new_width * new_height * new_depth * WORLD_SDF_OBJECT_TEXEL > WORLD_SDF_OBJECT_ATLAS_BYTES)
 			break;
-		}
 		object->atlas[0] = column_x;
-		object->atlas[1] = 0;
+		object->atlas[1] = row_y;
 		object->atlas[2] = z;
 		z += object->depth;
 		column_width = object->width > column_width ? object->width : column_width;
+		row_height = object->height > row_height ? object->height : row_height;
 		width = new_width;
 		height = new_height;
-		depth = z > depth ? z : depth;
+		depth = new_depth;
 		placed++;
 	}
-	objects->atlas_width = width;
-	objects->atlas_height = height;
-	objects->atlas_depth = depth;
+	size[0] = width;
+	size[1] = height;
+	size[2] = depth;
+	return placed;
+}
+
+unsigned long world_sdf_objects_place(struct world_sdf_objects *objects)
+{
+	/* (the columns' depth and the rows' width that place the most, in
+	order, in the least bytes: columns as deep as the atlas may be are each
+	that deep however few the last holds, and one row of them is as high as
+	its highest object) */
+	unsigned long depth_cap, width_cap, best_depth = WORLD_SDF_OBJECT_ATLAS_SIDE;
+	unsigned long best_width = WORLD_SDF_OBJECT_ATLAS_SIDE, best_placed = 0, best_bytes = 0, size[3], placed;
+
+	for (depth_cap = 8; depth_cap <= WORLD_SDF_OBJECT_ATLAS_SIDE; depth_cap += 4)
+	{
+		for (width_cap = 8; width_cap <= WORLD_SDF_OBJECT_ATLAS_SIDE; width_cap += 8)
+		{
+			unsigned long bytes;
+
+			placed = sdf_objects_columns(objects, depth_cap, width_cap, size);
+			bytes = size[0] * size[1] * size[2];
+			if (placed > best_placed || (placed == best_placed && placed && bytes < best_bytes))
+			{
+				best_placed = placed;
+				best_bytes = bytes;
+				best_depth = depth_cap;
+				best_width = width_cap;
+			}
+		}
+	}
+	placed = sdf_objects_columns(objects, best_depth, best_width, size);
+	objects->atlas_width = size[0];
+	objects->atlas_height = size[1];
+	objects->atlas_depth = size[2];
 	return placed;
 }

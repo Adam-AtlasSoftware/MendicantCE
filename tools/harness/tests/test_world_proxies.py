@@ -16,7 +16,7 @@ SOURCE = "port/linux/include/world_proxies_source.h"
 GAME = "port/linux/game/world_proxies.c"
 CONTROLS = [
     # a vehicle whose field is on its way shaded by its boxes meanwhile (six times an Apple M2's frame, #651)
-    ("boxless = fielded && !instance->baked && instance->field_awaited;", "boxless = 0;", "field"),
+    ("boxless = fielded && instance->field_awaited;", "boxless = 0;", "field"),
     # the static scenery's shapes taken among the dynamic objects' by their distance alone
     ("return baked != candidate->baked ? !baked : distance < candidate->distance;",
      "return distance < candidate->distance;", "baked"),
@@ -53,7 +53,14 @@ CONTROLS = [
     # a vehicle's field counted as one slot (its three then cut apart by a window's end)
     ("slot_count = WORLD_PROXY_FIELD_SLOTS;", "slot_count = 1;", "field"),
     # its boxes kept beside its field
-    ("if (boxless && shape->kind == _world_proxy_box)\n\t\t\t\t\tcontinue;", "", "field"),
+    ("if (boxless && world_proxy_set_fielded(set, shape_index))\n\t\t\t\t\tcontinue;", "", "field"),
+    # a piece of scenery's sphere (no collision geometry) kept, not its field in its place (#666's dark discs)
+    ("return set->shapes[shape_index].kind == _world_proxy_box || set->count == 1;",
+     "return set->shapes[shape_index].kind == _world_proxy_box;", "field"),
+    # a baked placement's box kept (its pages baked with its field: a page without a layer walked the box)
+    ("fielded = fielded && !boxless && world_proxies_source_field(instance->definition, &field);",
+     "fielded = fielded && !instance->baked && !boxless && world_proxies_source_field(instance->definition, &field);",
+     "field"),
     # the rows to its voxels without the frame's scale squared
     ("over = 1.0f / (scale * scale * field->voxel);", "over = 1.0f / (scale * field->voxel);", "field"),
     # its reach the field's alone (its box's bound not taken)

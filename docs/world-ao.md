@@ -193,11 +193,11 @@ never shipped, and never trusted without checks.
 - **Key:** the map's cache file header checksum (`menu_picture_map_checksum`'s source) plus `WORLD_SDF_VERSION`. A
   different map under the same name, or a new version, is baked again. A good file is reused forever.
 - **Format** (little-endian, written field by field, not as a struct):
-  - an 80-byte `struct world_sdf_header`: magic `WSDF`, version (4: the vehicles' occlusion fields), map checksum,
+  - an 80-byte `struct world_sdf_header`: magic `WSDF`, version (5: the scenery's occlusion fields), map checksum,
     bsp index, the cells along x/y/z, origin, voxel, range, deflated size, bake ms, bake threads, brick count, the
     static scenery's part's bytes and its pages' bake ms, the vehicles' part's bytes and their bake ms;
   - then the cells (4 bytes each, x fastest, then y, then z), the bricks (729 bytes each), the static scenery's
-    part ([Static scenery](#static-scenery)) and the vehicles' part ([Dynamic objects](#dynamic-objects-the-vehicles-occlusion-fields)),
+    part ([Static scenery](#static-scenery)) and the objects' part ([The objects' occlusion fields](#the-objects-occlusion-fields)),
     deflated as one zlib stream (the game's own zlib, `source/memory/zlib`);
   - then a CRC-32 of the header and the deflated bytes (the menu pictures' CRC).
 - **Writing:** to `<name>.tmp`, then renamed into place, so a crash leaves no half file.
@@ -226,7 +226,9 @@ field's cone reaches 2.4 wu, where scenery boxes reach 19 to 98. So the static s
 baked in the BSP's own lightmap space:
 - One page of bytes per lightmap page that a static shape's reach touches. Each texel is the exact product the
   proxy loop computes, Π (1 − occlusion × fade) over the static shapes (`world_ao_scenery_page`), at the texel
-  centre's place and interpolated normal on the surfaces drawn with that lightmap.
+  centre's place and interpolated normal on the surfaces drawn with that lightmap. A placement whose definition has
+  an occlusion field ([below](#the-objects-occlusion-fields)) is that field on its node 0 as placed, not its box:
+  the objects' fields are baked first, and the pages' reference reads their atlas (`sdf_scenery_fields`).
 - The pages' side is the largest of 512, 256... whose layers fit 4 MB. Texels the surfaces don't cover take
   their covered neighbours' mean, two steps out, for the filter at chart edges.
 - A page none of whose texels is shaded shares one layer of none.
@@ -266,28 +268,50 @@ names a layer to the draws only once the whole field is on the GPU.
 **Measuring:** `HALO_WORLD_AO_COUNTS=1` logs, every 600 windows, a window's shapes, how many are dynamic (by kind),
 and its lightmap pages drawn with a layer and without.
 
-## Dynamic objects: the vehicles' occlusion fields
+## The objects' occlusion fields
 
 A vehicle's shape doesn't change, only where it is. So its occlusion of what's about it is baked once, in its own
 space, and read with one filtered fetch where its exact boxes were found shape by shape. (Before this, at b30's start
 two Pelicans' eight boxes were about 1.0 ms of the Radeon's 1.31.)
 
-**What a field holds.** At each voxel of a grid about the vehicle, the share of the cosine-weighted hemisphere its
-collision geometry blocks, for every normal n, as `sat(t + n · v)`: four numbers, RGBA16F. That is the occlusion
+The scenery's too (#666). A piece of scenery stood for by one box about its collision geometry, or a sphere of its
+bound without any, is solid where a tree is mostly air, and a point inside a box or sphere is wholly occluded. A
+tree's box reaches a little under the ground, so every texel of the ground inside it was occluded whole: a dark
+square, with hard edges, about most of a30's trees (they sway, so they're dynamic objects: their boxes were walked by
+every pixel), and in the static scenery's pages about b30's (the pages hold the same product). A shrub's sphere made a
+disc. Its field is baked from what is drawn: its model's triangles, each blocking the share of a direction that
+crosses it which its shader draws. That is all of it for an opaque surface; for an alpha-tested one (a leaf's card)
+the share of its base map's texels that pass the alpha test (alpha over 0x7F, the models' `D3DRS_ALPHAREF`), so a
+canopy is as see-through as it looks, and the ground under a tree is darkened softly, most where the most cards and
+the trunk are overhead.
+
+**What a field holds.** At each voxel of a grid about the object, the share of the cosine-weighted hemisphere its
+geometry blocks, for every normal n, as `sat(t + n · v)`: four numbers, RGBA16F. That is the occlusion
 itself, not a distance field: a cone of taps along the normal over a distance field misses what's beside the
 normal, and measured against the exact boxes a single cone was off by 17/255 on average (a tenth of the points by
 40), and five cones of five taps by 7 to 12.
 
 **The bake** (`world_sdf_bake.c`'s `world_sdf_object_*`, pure; each voxel its own, so the same on any threads):
-- **Which:** each vehicle definition of the scenario's vehicle palette with collision geometry.
-- **Geometry:** each node's first BSP's triangles at rest, in node 0's space (the field rides on node 0 as drawn). A
-  wheel's node (named "tire" or "wheel") is left out: wheels turn and spring, so they keep their spheres.
+- **Which** (`sdf_object_definitions`): each vehicle definition of the scenario's vehicle palette with collision
+  geometry; then each definition of the scenery, machines, controls and light fixtures palettes placed in this BSP
+  whose proxies are one box or sphere and that can't move (scenery, or a device with no animations: a door's field at
+  rest would be wrong once it opens), the most placed first. A tree that sways moves its upper nodes; its field rides
+  node 0, as its box did.
+- **Geometry:** a vehicle's, each node's first BSP's triangles at rest, in node 0's space (the field rides on node 0
+  as drawn). A wheel's node (named "tire" or "wheel") is left out: wheels turn and spring, so they keep their
+  spheres. A piece of scenery's, the triangles it's drawn with (its regions' first permutations, at its most detailed
+  level within 2,048 triangles, else its least; read from the vertex and index buffers it's drawn from, as
+  `object_mesh.c` reads them), each with its shader's opacity: none for a transparent shader (glass, effects), 1 for
+  an opaque one, and an alpha-tested model shader's base map's coverage (`xgpu_texture_alpha_coverage`, at its first
+  level no larger than 512). Its collision nodes' solids, if any, are its point test.
 - **Grid** (`world_sdf_object_layout`): the triangles' bounds grown by half the longest side (1.5 to 4 wu), at
-  0.125 wu, the voxel grown ×1.125 a step until it's at most 96 a side and 65,536 in all. A Warthog is 41×33×33 at
-  0.125, a Pelican 46×40×29 at 0.41.
-- **Each voxel:** 256 fixed directions (a Fibonacci sphere's), each blocked or not by the triangles. Rays are
-  bucketed on a cube's faces, and a triangle tests only the buckets its cone meets. The occlusion at 96 normals is
-  their blocked directions' cosines' sum. t and v are its clamped least squares fit, weighted 0.02 plus each normal's
+  0.125 wu, the voxel grown ×1.125 a step until it's at most 96 a side and 65,536 in all (a piece of scenery's 16,384:
+  its occlusion is about it on the ground, softer than a vehicle's about its wheels). A Warthog is 41×33×33 at 0.125, a
+  Pelican 46×40×29 at 0.41, a30's pine 20×20×27 at 0.46.
+- **Each voxel:** 256 fixed directions (a Fibonacci sphere's), each let through by the triangles it crosses, each
+  passing on 1 − its opacity of what's left (an opaque one: none). Rays are bucketed on a cube's faces, and a triangle
+  tests only the buckets its cone meets. The occlusion at 96 normals is their directions' cosines' sum, each by its
+  share blocked. t and v are its clamped least squares fit, weighted 0.02 plus each normal's
   occlusion: a surface under a vehicle faces it, and its contact darkening is what shows.
 - **Solid:** a voxel inside, by the nodes' own BSP point tests, takes its outside neighbours' mean, step by step.
   The inside's darkness is then never filtered onto a surface just outside facing away.
@@ -295,19 +319,24 @@ normal, and measured against the exact boxes a single cone was off by 17/255 on 
   and e the point's past the edge (the 1/r² of a far occluder). Its reach: where that bound falls under 1/510.
 
 **Cache and schedule:** in each BSP's field file, keyed on the map's checksum and the bake version, one entry per
-vehicle tag (its definition, grid, voxel, reach, bounds and texels). It's baked with the field, in the first start's
-pass and on a first load, written whole, checked on read, and redone if missing, stale or damaged. On the GPU the
-fields share one 3D atlas, stacked in columns of at most 256, within 4 MB (`world_sdf_objects_place`). Its texels
+object tag (its definition, grid, voxel, reach, bounds and texels). It's baked with the field, in the first start's
+pass and on a first load, written whole, checked on read, and redone if missing, stale or damaged. A piece of
+scenery's alpha-tested textures are loaded for it as a draw loads them, when its geometry is copied (a few, once a
+BSP). On the GPU the fields share one 3D atlas within 8 MB (`world_sdf_objects_place`): in columns along z, rows of
+them along x and the rows along y, of the depth and width that place the most, in order, in the least bytes (one
+row of columns as deep as the atlas took 1.8 times the fields' own bytes; b30's 7 vehicles and 20 pieces of scenery
+didn't fit). One past its room keeps its shapes. Its texels
 come as part 3 of `WORLD_AO_FIELD`, before the table, and fields are named only once the whole field is on the GPU.
 
-**The window** (`world_proxies_window`): a vehicle whose field is drawn takes it in place of its boxes, as three
-shapes together (`_world_proxy_field`, then two of no kind; never split by the window's end). Its wheels' spheres
-stay. The three hold:
+**The window** (`world_proxies_window`): an object whose field is drawn takes it in place of the shapes it stands in
+for (`world_proxy_set_fielded`: a vehicle's boxes, a piece of scenery's one box or sphere), as three shapes together
+(`_world_proxy_field`, then two of no kind; never split by the window's end). A vehicle's wheels' spheres stay. A
+baked static placement takes its field too (a page without a layer walks it). The three hold:
 - the world to its voxels (node 0's frame as drawn, inverted);
 - its last voxel, its place in the atlas and the atlas's size;
 - its geometry's box's half extents, about the grid's middle (the layout centres the grid over it).
 
-Without a field (none baked, not yet uploaded), or for a baked static placement, its boxes shade, as before.
+Without a field (none baked, not yet uploaded, past the atlas's room), its shapes shade, as before.
 
 **Its shading** (`world_ao_field_proxy_occlusion`, both emitters line for line):
 - p and n go to its voxels: one fetch at p's clamped place, `sat(s · (t + n · v))`.
@@ -331,9 +360,10 @@ Each object definition gets up to 16 shapes, made the first time it's drawn and 
 - **Vehicles:** a box for each node's collision geometry (its bounds in the node's space), the smallest merged into
   its nearest ancestor's box (or the largest) until at most 4 are left, plus a sphere for each node named as a wheel
   ("tire", "wheel"): its own geometry's bounds, else its height above the body's lowest point (0.15 to 1 wu). Where
-  its occlusion field is drawn, the field stands in for the boxes ([Dynamic objects](#dynamic-objects-the-vehicles-occlusion-fields)).
+  its occlusion field is drawn, the field stands in for the boxes ([The objects' occlusion fields](#the-objects-occlusion-fields)).
 - **Scenery, machines, controls, light fixtures, items (weapons and equipment on the ground, garbage):** one box,
-  every node's collision geometry in node 0's space; with no collision geometry, a sphere of the bounding radius at
+  every node's collision geometry in node 0's space (where a piece of scenery's occlusion field is drawn, the field
+  instead); with no collision geometry, a sphere of the bounding radius at
   its bounding centre.
 - **Anything else** with a model: its bounding sphere.
 - **None:** projectiles, sound scenery, a weapon or equipment held (its holder covers it, and it would shade the
@@ -708,7 +738,7 @@ whose leaves lie within their own collision come out a little greyer, since the 
 
 ### The vehicles' occlusion fields
 
-The vehicles' boxes replaced by their baked occlusion ([Dynamic objects](#dynamic-objects-the-vehicles-occlusion-fields)).
+The vehicles' boxes replaced by their baked occlusion ([The objects' occlusion fields](#the-objects-occlusion-fields)).
 World minus off, GPU ms a frame, measured as for the static scenery: unpaced, windowed 1440p, no input, ten 600-frame
 windows. Before is `world-ao` with the static scenery baked:
 
@@ -758,6 +788,23 @@ Without the box's bound, a field was fetched over its whole reach, and Blood Gul
 - A biped farther off as one capsule (or a sphere) rather than ten. At b30's start the capsules are 8.3 wu from
   the camera on average, 40% of them past 10 wu.
 - Or a capsule's reach from a bound like the box's, which falls fast on the ground beside it.
+
+### The scenery's occlusion fields (#666)
+
+The scenery's boxes and spheres replaced by fields of what's drawn ([The objects' occlusion
+fields](#the-objects-occlusion-fields)). GPU ms a frame on the Radeon 8060S, unpaced, windowed 1440p, twelve
+600-frame windows; a30 a scripted walk to a pine by the lifepod, b30 its start with no input:
+
+| Scene | World before | World after | Off |
+| --- | --- | --- | --- |
+| a30, by a pine | 6.76 (+6.24) | **2.09 (+1.58)** | 0.52 |
+| b30's start | 1.47 (+0.37) | **1.49 (+0.38)** | 1.10 |
+
+a30's trees sway, so every one in view was an exact box walked by every pixel. A field is one fetch.
+
+**The bake** (first load, the Radeon box's 29 threads): a30's 13 fields 0.85 s (the scenery's seven 4.9 s of the
+threads' time), b30's 27 fields 1.30 s (the scenery's twenty 12.3 s, 8.6 of it the crashed Pelican's 4,223
+triangles, its least detailed level). The atlas: 4.4 MB on a30, 6.8 MB on b30.
 
 ## Determinism
 

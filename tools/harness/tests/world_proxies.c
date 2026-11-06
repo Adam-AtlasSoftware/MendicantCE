@@ -18,8 +18,8 @@ slots together, its wheels' spheres kept, its place, its reach, its boxes where 
 static long dynamic_count;
 static struct
 {
-	struct world_proxies_source sources[4]; /* by definition */
-	int source_known[4];
+	struct world_proxies_source sources[8]; /* by definition */
+	int source_known[8];
 	struct world_proxies_source_instance instances[FAKE_INSTANCES];
 	long instance_count;
 	/* each instance's nodes (by its index in instances) */
@@ -36,7 +36,7 @@ int world_proxies_source_definition(long definition, struct world_proxies_source
 	long index = definition & 0xFFFF; /* (a tag index's absolute index; its salt above) */
 
 	fake.definitions_read++;
-	if (definition == -1 || index >= 4 || !fake.source_known[index])
+	if (definition == -1 || index >= 8 || !fake.source_known[index])
 		return 0;
 	*source = fake.sources[index];
 	return 1;
@@ -73,13 +73,14 @@ int world_proxies_source_frustum(float planes[4][4])
 	return fake.frustum;
 }
 
-/* (a vehicle's occlusion field, of definition 3, where field_known) */
+/* (an occlusion field: a vehicle's, of definition 3, and a piece of
+scenery's, of definition 5, where field_known) */
 static int field_known;
 static struct world_proxies_source_field fake_field;
 
 int world_proxies_source_field(long definition, struct world_proxies_source_field *field)
 {
-	if (!field_known || (definition & 0xFFFF) != 3)
+	if (!field_known || ((definition & 0xFFFF) != 3 && (definition & 0xFFFF) != 5))
 		return 0;
 	*field = fake_field;
 	return 1;
@@ -994,14 +995,6 @@ static void field_case(void)
 	for (index = 0; index < count; index++)
 		kinds[(int)proxies[index].v[0][3]]++;
 	CHECK(count == 1 && kinds[_world_proxy_sphere] == 1, "awaited: %ld", count);
-	/* (a baked one keeps its box: it is not the vehicle's field) */
-	fake.instances[0].baked = 1;
-	count = world_proxies_window(camera, proxies, owners, WORLD_PROXY_MAXIMUM_PER_WINDOW, &dynamic_count);
-	memset(kinds, 0, sizeof(kinds));
-	for (index = 0; index < count; index++)
-		kinds[(int)proxies[index].v[0][3]]++;
-	CHECK(kinds[_world_proxy_box] == 1, "awaited and baked: %ld", count);
-	fake.instances[0].baked = 0;
 	fake.instances[0].field_awaited = 0;
 	/* drawn: its field in three slots together, in place of its box, and
 	its wheel's sphere */
@@ -1105,13 +1098,41 @@ static void field_case(void)
 		kinds[(int)proxies[index].v[0][3]]++;
 	CHECK(count == 4 && kinds[_world_proxy_field] == 1 && kinds[_world_proxy_none] == 2 && owners[0] == 41,
 		"four: %ld, %d fields", count, kinds[_world_proxy_field]);
-	/* (a baked vehicle keeps its boxes: the field stands for a moving one) */
+	/* (a baked placement takes its field too, after the dynamic objects':
+its pages were baked with it, and a page without a layer walks it) */
 	fake.instances[0].baked = 1;
 	count = world_proxies_window(camera, proxies, owners, WORLD_PROXY_MAXIMUM_PER_WINDOW, &dynamic_count);
 	memset(kinds, 0, sizeof(kinds));
 	for (index = 0; index < count; index++)
 		kinds[(int)proxies[index].v[0][3]]++;
-	CHECK(kinds[_world_proxy_field] == 0 && kinds[_world_proxy_box] == 1, "baked");
+	CHECK(count == 5 && kinds[_world_proxy_field] == 1 && kinds[_world_proxy_box] == 0 && dynamic_count == 1 &&
+		owners[0] == 41, "baked: %ld, %ld dynamic", count, dynamic_count);
+	fake.instances[0].baked = 0;
+	/* a piece of scenery with no collision geometry (a shrub: one sphere of
+	its bound, which held the ground inside it wholly occluded, #666): its
+	field in place of its sphere; on its way, neither */
+	memset(&fake.sources[5], 0, sizeof(fake.sources[5]));
+	fake.sources[5].shape_class = _world_proxies_source_box;
+	fake.sources[5].node_count = 1;
+	fake.sources[5].bounding_radius = 1.5f;
+	fake.sources[5].nodes[0].parent = -1;
+	identity(&fake.sources[5].nodes[0].default_frame, 0.0f, 0.0f, 0.0f);
+	fake.source_known[5] = 1;
+	fake.instance_count = 0;
+	add_instance(42, 5, 2.0f, 0.0f, 0.0f);
+	field_known = 0;
+	count = world_proxies_window(camera, proxies, owners, WORLD_PROXY_MAXIMUM_PER_WINDOW, &dynamic_count);
+	CHECK(count == 1 && (int)proxies[0].v[0][3] == _world_proxy_sphere, "the shrub without: %ld", count);
+	fake.instances[0].field_awaited = 1;
+	count = world_proxies_window(camera, proxies, owners, WORLD_PROXY_MAXIMUM_PER_WINDOW, &dynamic_count);
+	CHECK(count == 0, "the shrub's on its way: %ld", count);
+	fake.instances[0].field_awaited = 0;
+	field_known = 1;
+	count = world_proxies_window(camera, proxies, owners, WORLD_PROXY_MAXIMUM_PER_WINDOW, &dynamic_count);
+	memset(kinds, 0, sizeof(kinds));
+	for (index = 0; index < count; index++)
+		kinds[(int)proxies[index].v[0][3]]++;
+	CHECK(count == 3 && kinds[_world_proxy_field] == 1 && kinds[_world_proxy_sphere] == 0, "the shrub with: %ld", count);
 }
 
 static void none_case(void)

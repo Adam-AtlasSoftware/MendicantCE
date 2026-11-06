@@ -47,19 +47,27 @@ into place, and a file that fails any check is deleted (and baked again).
 #include "cache/cache_files.h"
 #include "game/game.h"
 #include "bitmaps/bitmap_group.h"
+#include "cache/texture_cache.h"
 #include "math/real_math.h"
 #include "models/model_animation_definitions.h"
 #include "models/model_definitions.h"
 #include "objects/object_definitions.h"
+#include "objects/object_types.h"
 #include "physics/bsp3d.h"
 #include "physics/collision_bsp_definitions.h"
 #include "physics/collision_model_definitions.h"
+#include "rasterizer/rasterizer.h"
 #include "rasterizer/rasterizer_geometry.h"
 #include "rasterizer/rasterizer_geometry_environment.h"
+#include "rasterizer/rasterizer_model_types.h"
+#include "shaders/shader_definitions.h"
+#include "shaders/shaders.h"
 #include "structures/structure_bsp_definitions.h"
 #include "tag_files/tag_files.h"
 #include "scenario/scenario.h"
 #include "scenario/scenario_definitions.h"
+
+#include <xtl.h>
 
 #include "memory/zlib/zlib.h"
 
@@ -69,6 +77,7 @@ into place, and a file that fails any check is deleted (and baked again).
 #include "world_proxies_source.h"
 #include "world_scene.h"
 #include "world_sdf.h"
+#include "../src/xgpu_coverage.h"
 
 #include <pthread.h>
 #include <stdio.h>
@@ -198,16 +207,20 @@ struct sdf_page
 	long covered, shared;
 };
 
-/* a vehicle's copies for its occlusion field (docs/world-ao.md, "Dynamic
-objects"): its definition, its collision triangles but its wheels' (in node
-0's space, at rest: the field rides on node 0) and their bounds, its nodes'
-solids (the sign's), and the bake's grid, values and solid voxels */
+/* an object's copies for its occlusion field (docs/world-ao.md, "The
+objects' occlusion fields"): its definition, its triangles (a vehicle's
+collision but its wheels', a piece of scenery's drawn ones; in node 0's
+space, at rest: the field rides on node 0), each one's opacity (NULL: all
+opaque) and their bounds, its nodes' solids (the sign's), and the bake's
+grid, values and solid voxels */
 struct sdf_object_copy
 {
 	long definition;
 	float *positions;
-	long triangle_count;
+	float *opacities;
+	long triangle_count, opacities_room;
 	float bounds[6];
+	int bounded, scenery;
 	struct sdf_solid *solids;
 	long solid_count;
 	struct world_sdf_object field;
@@ -243,6 +256,10 @@ struct sdf_job
 	lightmaps), the side its pages are baked at, and the next a worker takes */
 	struct world_sdf_placement *placements;
 	long placement_count;
+	/* (each placement's node 0 as placed, and its first shape: its own
+	are those to the next one's first) */
+	struct world_proxies_frame *placement_frames;
+	long *placement_shapes;
 	struct sdf_solid *solids;
 	long solid_count;
 	struct world_proxy *shapes;
@@ -250,9 +267,13 @@ struct sdf_job
 	struct sdf_page *pages;
 	long page_count;
 	unsigned long page_side;
-	/* the vehicles' copies (their occlusion fields') */
+	/* the objects' copies (their occlusion fields'), and the opacities of
+the shaders they are drawn with, by tag (sdf_shader_opacity) */
 	struct sdf_object_copy *object_copies;
 	long object_count;
+	long opacity_tags[64];
+	float opacities[64];
+	long opacity_count;
 	/* (their slices' directions and weights, made once: a slice allocates
 	nothing) */
 	struct world_sdf_object_tables *object_tables;
@@ -313,7 +334,7 @@ static struct
 	atlas's layers (one at a time, made in layer) */
 	unsigned long uploaded_pages, uploaded_cells, uploaded_layers;
 	signed char *layer;
-	/* (and before the table, the vehicles' fields' atlas's z slices, each
+	/* (and before the table, the objects' fields' atlas's z slices, each
 	made in objects_slice) */
 	unsigned long uploaded_objects;
 	unsigned char *objects_slice;
@@ -611,7 +632,7 @@ static unsigned long sdf_scenery_gpu_bytes(struct world_sdf_scenery const *scene
 	return scenery->layer_count * scenery->width * scenery->height;
 }
 
-/* ---------- the vehicles' occlusion fields' part (world_sdf.h's struct world_sdf_objects) */
+/* ---------- the objects' occlusion fields' part (world_sdf.h's struct world_sdf_objects) */
 
 static unsigned long sdf_objects_most_bytes(void)
 {
@@ -1259,6 +1280,24 @@ static void sdf_job_scratch_free(struct sdf_job *job)
 	job->kinds = NULL;
 }
 
+/* an object's copies let go of */
+static void sdf_object_copy_free(struct sdf_object_copy *copy)
+{
+	long solid;
+
+	for (solid = 0; solid < copy->solid_count; solid++)
+	{
+		free(copy->solids[solid].bsp.nodes);
+		free(copy->solids[solid].bsp.planes);
+	}
+	free(copy->solids);
+	free(copy->positions);
+	free(copy->opacities);
+	free(copy->values);
+	free(copy->solid);
+	free(copy->field.texels);
+}
+
 /* a job's copies let go of */
 static void sdf_job_copies_free(struct sdf_job *job)
 {
@@ -1281,21 +1320,7 @@ static void sdf_job_copies_free(struct sdf_job *job)
 		free(job->pages[index].texels);
 	}
 	for (index = 0; index < job->object_count; index++)
-	{
-		struct sdf_object_copy *copy = &job->object_copies[index];
-		long solid;
-
-		for (solid = 0; solid < copy->solid_count; solid++)
-		{
-			free(copy->solids[solid].bsp.nodes);
-			free(copy->solids[solid].bsp.planes);
-		}
-		free(copy->solids);
-		free(copy->positions);
-		free(copy->values);
-		free(copy->solid);
-		free(copy->field.texels);
-	}
+		sdf_object_copy_free(&job->object_copies[index]);
 	free(job->object_copies);
 	job->object_copies = NULL;
 	job->object_count = 0;
@@ -1303,10 +1328,14 @@ static void sdf_job_copies_free(struct sdf_job *job)
 	free(job->pages);
 	free(job->shapes);
 	free(job->placements);
+	free(job->placement_frames);
+	free(job->placement_shapes);
 	job->solids = NULL;
 	job->pages = NULL;
 	job->shapes = NULL;
 	job->placements = NULL;
+	job->placement_frames = NULL;
+	job->placement_shapes = NULL;
 	job->solid_count = job->page_count = job->shape_count = job->placement_count = 0;
 }
 
@@ -1464,7 +1493,7 @@ static void sdf_bake_pages(struct sdf_job *job)
 	}
 }
 
-/* the vehicles' fields' rows baked, a row at a time (each object's z
+/* the objects' fields' rows baked, a row at a time (each object's z
 slices' rows in turn), until there are none */
 static void sdf_bake_objects_slices(struct sdf_job *job)
 {
@@ -1486,8 +1515,9 @@ static void sdf_bake_objects_slices(struct sdf_job *job)
 				unsigned long z = (item - first) / copy->field.height, y = (item - first) % copy->field.height;
 				unsigned long long began = sdf_now();
 
-				world_sdf_object_slice(job->object_tables, &copy->field, copy->positions, copy->triangle_count,
-					sdf_object_inside, copy, z, y, y + 1, copy->values + z * slice * 4, copy->solid + z * slice);
+				world_sdf_object_slice(job->object_tables, &copy->field, copy->positions, copy->opacities,
+					copy->triangle_count, sdf_object_inside, copy, z, y, y + 1, copy->values + z * slice * 4,
+					copy->solid + z * slice);
 				__atomic_fetch_add(&copy->nanoseconds, sdf_now() - began, __ATOMIC_RELAXED);
 				break;
 			}
@@ -1582,6 +1612,94 @@ static int sdf_bake_gather(struct sdf_job *job)
 	return 1;
 }
 
+/* the static placements' shapes the pages are baked with: a placement
+whose definition has an occlusion field in the atlas takes it on its node 0
+as placed, in place of its shapes (as the window does: world_proxies.c), and
+the pages' reference reads the fields' atlas, made here (*atlas, freed after
+the pages: world_ao_objects_atlas; the baker is the only thread that bakes
+pages, and the game's own never reads it). FALSE if no memory */
+static int sdf_scenery_fields(struct sdf_job *job, unsigned short **atlas)
+{
+	struct world_sdf_objects const *objects = &job->volume.objects;
+	struct world_proxy *shapes;
+	unsigned long texels, index, y, z;
+	long placement, count = 0, fielded = 0;
+
+	*atlas = NULL;
+	for (index = 0; index < objects->count; index++)
+		fielded += objects->objects[index].atlas[0] != ~0UL;
+	if (!fielded || !job->placement_count)
+		return 1;
+	texels = objects->atlas_width * objects->atlas_height * objects->atlas_depth;
+	*atlas = calloc(texels * 4 + 1, sizeof(**atlas));
+	shapes = malloc(((size_t)job->shape_count + (size_t)job->placement_count * WORLD_PROXY_FIELD_SLOTS) *
+		sizeof(*shapes) + 1);
+	if (!*atlas || !shapes)
+	{
+		free(shapes);
+		return 0;
+	}
+	for (index = 0; index < objects->count; index++)
+	{
+		struct world_sdf_object const *object = &objects->objects[index];
+
+		if (object->atlas[0] == ~0UL)
+			continue;
+		for (z = 0; z < object->depth; z++)
+		for (y = 0; y < object->height; y++)
+		{
+			memcpy(*atlas + (((object->atlas[2] + z) * objects->atlas_height + object->atlas[1] + y) *
+				objects->atlas_width + object->atlas[0]) * 4, object->texels + ((z * object->height + y) * object->width) * 4,
+				object->width * 4 * sizeof(**atlas));
+		}
+	}
+	for (placement = 0; placement < job->placement_count; placement++)
+	{
+		long first = job->placement_shapes[placement];
+		long end = placement + 1 < job->placement_count ? job->placement_shapes[placement + 1] : job->shape_count;
+		struct world_sdf_object const *object = NULL;
+
+		for (index = 0; index < objects->count && !object; index++)
+		{
+			if (objects->objects[index].definition == job->placements[placement].definition &&
+				objects->objects[index].atlas[0] != ~0UL)
+			{
+				object = &objects->objects[index];
+			}
+		}
+		if (object)
+		{
+			struct world_proxies_source_field field;
+			int axis;
+
+			for (axis = 0; axis < 3; axis++)
+			{
+				field.origin[axis] = object->origin[axis];
+				field.place[axis] = object->atlas[axis];
+			}
+			field.atlas[0] = objects->atlas_width;
+			field.atlas[1] = objects->atlas_height;
+			field.atlas[2] = objects->atlas_depth;
+			field.voxel = object->voxel;
+			field.reach = object->reach;
+			memcpy(field.bounds, object->bounds, sizeof(field.bounds));
+			field.size[0] = object->width;
+			field.size[1] = object->height;
+			field.size[2] = object->depth;
+			world_proxies_field_place(&field, &job->placement_frames[placement], shapes + count);
+			count += WORLD_PROXY_FIELD_SLOTS;
+			continue;
+		}
+		memcpy(shapes + count, job->shapes + first, (size_t)(end - first) * sizeof(*shapes));
+		count += end - first;
+	}
+	free(job->shapes);
+	job->shapes = shapes;
+	job->shape_count = count;
+	world_ao_objects_atlas(*atlas, objects->atlas_width, objects->atlas_height, objects->atlas_depth);
+	return 1;
+}
+
 /* the static scenery's part of a field: its pages baked (those a static
 shape reaches) at the finest side that fits (the lightmap pages' own, at
 most WORLD_SDF_SCENERY_MOST_SIDE, halved until the layers fit
@@ -1596,10 +1714,13 @@ static int sdf_bake_scenery(struct sdf_job *job)
 	unsigned long long began = sdf_now();
 	unsigned long side = WORLD_SDF_SCENERY_MOST_SIDE, size, reached = 0;
 	long index, white = WORLD_SDF_SCENERY_NO_LAYER;
+	unsigned short *atlas = NULL;
 
 	memset(scenery, 0, sizeof(*scenery));
 	if (job->page_count <= 0 && !job->placement_count)
 		return 1;
+	if (!sdf_scenery_fields(job, &atlas))
+		return 0;
 	scenery->placement_count = (unsigned long)job->placement_count;
 	scenery->placements = malloc(scenery->placement_count * sizeof(*scenery->placements) + 1);
 	scenery->page_count = job->page_count > 0 ? (unsigned long)job->page_count : 0;
@@ -1621,6 +1742,9 @@ static int sdf_bake_scenery(struct sdf_job *job)
 	job->page_side = side;
 	if (reached)
 		sdf_pass(job, _sdf_pass_scenery);
+	/* (the pages' reference no longer reads the fields' atlas) */
+	world_ao_objects_atlas(NULL, 0, 0, 0);
+	free(atlas);
 	size = side * side;
 	scenery->width = scenery->height = side;
 	scenery->texels = malloc((reached + 1) * size + 1);
@@ -1664,7 +1788,7 @@ static int sdf_bake_scenery(struct sdf_job *job)
 	return 1;
 }
 
-/* the vehicles' occlusion fields (docs/world-ao.md, "Dynamic objects"):
+/* the objects' occlusion fields (docs/world-ao.md, "The objects' occlusion fields"):
 each laid out about its geometry, its rows baked on the bake's threads, its
 voxels in solid filled and its reach found; FALSE if no memory. Their
 milliseconds in the header */
@@ -1680,7 +1804,8 @@ static int sdf_bake_objects(struct sdf_job *job)
 		struct sdf_object_copy *copy = &job->object_copies[index];
 		unsigned long voxels;
 
-		world_sdf_object_layout(copy->bounds, &copy->field);
+		world_sdf_object_layout(copy->bounds, copy->scenery ? WORLD_SDF_OBJECT_SCENERY_VOXELS :
+			WORLD_SDF_OBJECT_MOST_VOXELS, &copy->field);
 		copy->field.definition = copy->definition;
 		voxels = copy->field.width * copy->field.height * copy->field.depth;
 		copy->values = malloc(voxels * 4 * sizeof(float));
@@ -1706,11 +1831,27 @@ static int sdf_bake_objects(struct sdf_job *job)
 
 		if (!world_sdf_object_finish(&copy->field, copy->values, copy->solid))
 			return 0;
-		platform_log("world sdf: %s bsp %d: %s's occlusion field: %ld triangles, %lux%lux%lu voxels of %.3f, reach "
-			"%.1f, %.1f ms on the threads, %lu bytes", job->key.map, (int)job->key.bsp, copy->name, copy->triangle_count,
-			copy->field.width, copy->field.height, copy->field.depth, (double)copy->field.voxel,
-			(double)(copy->field.reach * copy->field.voxel), (double)copy->nanoseconds / 1e6,
-			copy->field.width * copy->field.height * copy->field.depth * (unsigned long)WORLD_SDF_OBJECT_TEXEL);
+		{
+			/* (a piece of scenery's triangles partly drawn, its leaves', and
+			their mean opacity) */
+			long triangle, partly = 0;
+			double opacity = 0.0;
+
+			for (triangle = 0; copy->opacities && triangle < copy->triangle_count; triangle++)
+			{
+				if (copy->opacities[triangle] < 1.0f)
+				{
+					partly++;
+					opacity += copy->opacities[triangle];
+				}
+			}
+			platform_log("world sdf: %s bsp %d: %s's occlusion field: %ld triangles (%ld partly drawn, %.2f of each), "
+				"%lux%lux%lu voxels of %.3f, reach %.1f, %.1f ms on the threads, %lu bytes", job->key.map,
+				(int)job->key.bsp, copy->name, copy->triangle_count, partly, partly ? opacity / (double)partly : 1.0,
+				copy->field.width, copy->field.height, copy->field.depth, (double)copy->field.voxel,
+				(double)(copy->field.reach * copy->field.voxel), (double)copy->nanoseconds / 1e6,
+				copy->field.width * copy->field.height * copy->field.depth * (unsigned long)WORLD_SDF_OBJECT_TEXEL);
+		}
 		objects->objects[objects->count++] = copy->field;
 		copy->field.texels = NULL;
 		free(copy->values);
@@ -1718,7 +1859,15 @@ static int sdf_bake_objects(struct sdf_job *job)
 		copy->values = NULL;
 		copy->solid = NULL;
 	}
-	world_sdf_objects_place(objects);
+	if (world_sdf_objects_place(objects) < objects->count)
+	{
+		for (index = 0; index < (long)objects->count; index++)
+		{
+			if (objects->objects[index].atlas[0] == ~0UL)
+				platform_log("world sdf: %s bsp %d: %s's occlusion field is past the atlas's room: its shapes shade",
+					job->key.map, (int)job->key.bsp, job->object_copies[index].name);
+		}
+	}
 	job->volume.header.objects_milliseconds = (unsigned long)((sdf_now() - began) / 1000000ULL);
 	return 1;
 }
@@ -1771,7 +1920,9 @@ static int sdf_bake(struct sdf_job *job)
 			job->marked[job->marked_count++] = cell;
 	}
 	threads = sdf_pass(job, _sdf_pass_bake);
-	if (!sdf_bake_gather(job) || !sdf_bake_scenery(job) || !sdf_bake_objects(job))
+	/* (the objects' fields before the static scenery's pages, which the
+fields shade where a placement has one) */
+	if (!sdf_bake_gather(job) || !sdf_bake_objects(job) || !sdf_bake_scenery(job))
 		return 0;
 	sdf_job_scratch_free(job);
 	header->bake_milliseconds = (unsigned long)((sdf_now() - began) / 1000000ULL);
@@ -1783,7 +1934,7 @@ static int sdf_bake(struct sdf_job *job)
 	free(file);
 	platform_log("world sdf: %s bsp %d: %ld triangles copied in %.1f ms; within %.0fx%.0fx%.0f, %lux%lux%lu cells, %lu "
 		"bricks, voxel %.3f; static scenery %lu placements, %ld shapes, %lu of %ld lightmap pages in %lu layers of "
-		"%lux%lu (%lu ms); %lu vehicles' occlusion fields (%lu ms, %lu bytes in the atlas); in %lu ms on %lu threads, "
+		"%lux%lu (%lu ms); %lu objects' occlusion fields (%lu ms, %lu bytes in the atlas); in %lu ms on %lu threads, "
 		"%lu bytes in memory, %lu cached%s", job->key.map,
 		(int)job->key.bsp, job->triangle_count, job->copy_milliseconds, (double)(job->bounds[3] - job->bounds[0]),
 		(double)(job->bounds[4] - job->bounds[1]), (double)(job->bounds[5] - job->bounds[2]), header->width,
@@ -2055,6 +2206,24 @@ static int sdf_bsp_copy(struct collision_bsp const *collision, struct sdf_bsp *c
 
 /* ---------- the static scenery (docs/world-ao.md, "Static scenery") */
 
+/* whether a placement is in this BSP, as the game places a placement in a
+BSP (object_types.c): its position or its bounding centre in a leaf */
+static int sdf_placement_in_bsp(long definition_index, struct scenario_object_datum const *placement)
+{
+	struct object_definition const *definition = object_definition_get(definition_index);
+	real_matrix4x3 matrix;
+	real_point3d offset;
+
+	if (!definition)
+		return 0;
+	if (scenario_leaf_index_from_point(&placement->position) != NONE)
+		return 1;
+	matrix4x3_rotation_from_angles(&matrix, placement->rotation.yaw, placement->rotation.pitch, placement->rotation.roll);
+	matrix.position = placement->position;
+	matrix4x3_transform_point(&matrix, &definition->object.bounding_offset, &offset);
+	return scenario_leaf_index_from_point(&offset) != NONE;
+}
+
 /* a placement's definition if it is static (FALSE if not): no script can
 name it, it is made at the map's start on every difficulty, in this BSP
 (as the game places a placement in a BSP: object_types.c), and nothing
@@ -2064,8 +2233,6 @@ static long sdf_scenery_static(struct tag_block const *palette, struct scenario_
 {
 	struct scenario_object_palette_entry const *entry;
 	struct object_definition const *definition;
-	real_matrix4x3 matrix;
-	real_point3d offset;
 	long index;
 
 	if (placement->name_index != NONE || (placement->placement_flags & ((1 << NUMBER_OF_SCENARIO_OBJECT_LOCATION_PLACEMENT_FLAGS) - 1)) ||
@@ -2091,12 +2258,7 @@ static long sdf_scenery_static(struct tag_block const *palette, struct scenario_
 		if (collision && collision->resistance.maximum_body_vitality > 0.0f)
 			return NONE;
 	}
-	matrix4x3_rotation_from_angles(&matrix, placement->rotation.yaw, placement->rotation.pitch, placement->rotation.roll);
-	matrix.position = placement->position;
-	matrix4x3_transform_point(&matrix, &definition->object.bounding_offset, &offset);
-	if (scenario_leaf_index_from_point(&placement->position) == NONE && scenario_leaf_index_from_point(&offset) == NONE)
-		return NONE;
-	return index;
+	return sdf_placement_in_bsp(index, placement) ? index : NONE;
 }
 
 static void sdf_frame_from(real_matrix4x3 const *matrix, struct world_proxies_frame *frame)
@@ -2192,7 +2354,7 @@ static int sdf_scenery_copy(struct sdf_job *job)
 {
 	struct scenario *scenario = global_scenario_get();
 	long index, positions_room = job->triangle_count, solids_room = 0, shapes_room = 0;
-	long placements_room = 0;
+	long placements_room = 0, frames_room, firsts_room;
 	struct sdf_scenery_kind kinds[SDF_SCENERY_KINDS];
 	int kind;
 
@@ -2233,12 +2395,20 @@ static int sdf_scenery_copy(struct sdf_job *job)
 			matrix4x3_multiply(&matrix, &rest, &nodes[node_index]);
 			sdf_frame_from(&nodes[node_index], &frames[node_index]);
 		}
+		frames_room = placements_room;
+		firsts_room = placements_room;
 		if (!sdf_grow((void **)&job->placements, &placements_room, job->placement_count, 1, sizeof(*job->placements)) ||
+			!sdf_grow((void **)&job->placement_frames, &frames_room, job->placement_count, 1,
+			sizeof(*job->placement_frames)) ||
+			!sdf_grow((void **)&job->placement_shapes, &firsts_room, job->placement_count, 1,
+			sizeof(*job->placement_shapes)) ||
 			!sdf_grow((void **)&job->shapes, &shapes_room, job->shape_count, WORLD_PROXY_MAXIMUM_PER_DEFINITION,
 			sizeof(*job->shapes)))
 		{
 			return 0;
 		}
+		job->placement_frames[job->placement_count] = frames[0];
+		job->placement_shapes[job->placement_count] = job->shape_count;
 		job->placements[job->placement_count].definition = definition_index;
 		job->placements[job->placement_count].position[0] = placement->position.x;
 		job->placements[job->placement_count].position[1] = placement->position.y;
@@ -2314,12 +2484,28 @@ static int sdf_scenery_copy(struct sdf_job *job)
 	return 1;
 }
 
-/* the vehicles' copies for their occlusion fields (docs/world-ao.md,
-"Dynamic objects"): each vehicle definition of the scenario's palette, its
-collision nodes' triangles (each node's first BSP) but its wheels' (which
-keep their spheres: they turn and spring) in node 0's space at rest, and
-their solids; FALSE if no memory (none kept). A vehicle whose collision has
-no triangles keeps its proxies' boxes */
+/* ---------- the objects' copies for their occlusion fields (docs/world-ao.md,
+"The objects' occlusion fields")
+
+Two kinds of definition get one:
+- each vehicle of the scenario's vehicle palette with collision geometry:
+  its collision nodes' triangles (each node's first BSP) but its wheels'
+  (which keep their spheres: they turn and spring), opaque;
+- each piece of scenery, and each device that cannot move (no animations),
+  of the scenario's scenery and devices' palettes placed in this BSP, whose
+  proxies stand one box or sphere for it: the triangles it is drawn with
+  (its model's most detailed geometry within WORLD_SDF_OBJECT_MOST_TRIANGLES),
+  each with its shader's opacity. A box about a tree is solid where the
+  tree is mostly air, and the ground inside it was wholly occluded: a dark
+  square about every tree (#666). Its leaves are cards whose texture's alpha
+  test cuts them out, so a card blocks the share of its texture that is
+  drawn.
+Both are in node 0's space at rest (the field rides on node 0), with their
+collision nodes' solids (the sign's). The vehicles come first, then the
+scenery the most placed first: when the atlas is full, the rest keep their
+shapes. FALSE if no memory (none kept). One with no triangles keeps its
+proxies' shapes */
+
 /* whether a vehicle palette's definition gets an occlusion field (a
 vehicle's model of nodes, with collision geometry) */
 static int sdf_object_fielded(long definition_index, struct world_proxies_source *source)
@@ -2337,13 +2523,541 @@ static int sdf_object_fielded(long definition_index, struct world_proxies_source
 		source->shape_class == _world_proxies_source_vehicle;
 }
 
-static int sdf_objects_copy(struct sdf_job *job)
+/* whether a scenery or devices' palette definition gets an occlusion field
+of its drawn triangles: a model of nodes, proxies of one box or sphere
+(world_proxies.c's for scenery and devices; none for one too small), and a
+device that cannot move (no animations: a door's field at rest would be
+wrong once it opens) */
+static int sdf_object_scenery(long definition_index, struct world_proxies_source *source)
+{
+	struct object_definition const *definition;
+	struct model const *model;
+
+	if (definition_index == NONE || !(definition = object_definition_get(definition_index)) ||
+		definition->object.model.index == NONE || !(model = model_definition_get(definition->object.model.index)) ||
+		!model->nodes.address || model->nodes.count <= 0 || !model->geometries.address || !model->regions.address ||
+		!world_proxies_source_definition(definition_index, source) ||
+		source->shape_class != _world_proxies_source_box || !world_proxies_definition(definition_index))
+	{
+		return 0;
+	}
+	if (definition->object.type != _object_type_scenery && definition->object.animation_graph.index != NONE)
+	{
+		struct animation_graph const *graph = animation_graph_definition_get(definition->object.animation_graph.index);
+
+		if (graph && graph->animations.count > 0)
+			return 0;
+	}
+	return 1;
+}
+
+/* the definitions that get occlusion fields, in the order the atlas takes
+them: the vehicles', then the scenery's placed in this BSP, the most placed
+first; how many (at most maximum). kinds[i]: 1 a vehicle, 0 scenery */
+static long sdf_object_definitions(long *definitions, unsigned char *kinds, long maximum)
 {
 	struct scenario *scenario = global_scenario_get();
 	struct world_proxies_source *source;
-	long entry_index;
+	struct sdf_scenery_kind palettes[SDF_SCENERY_KINDS];
+	long count = 0, placed[WORLD_SDF_OBJECT_MAXIMUM], index, scenery_first;
+	int kind;
 
-	if (!scenario || !scenario->vehicle_palette.address || scenario->vehicle_palette.count <= 0)
+	if (!scenario || !(source = malloc(sizeof(*source))))
+		return 0;
+	for (index = 0; scenario->vehicle_palette.address && index < scenario->vehicle_palette.count && count < maximum;
+		index++)
+	{
+		long definition = TAG_BLOCK_GET_ELEMENT(&scenario->vehicle_palette, index,
+			struct scenario_object_palette_entry)->reference.index, other;
+		int known = 0;
+
+		for (other = 0; other < count; other++)
+			known = known || definitions[other] == definition;
+		if (!known && sdf_object_fielded(definition, source))
+		{
+			kinds[count] = 1;
+			definitions[count++] = definition;
+		}
+	}
+	scenery_first = count;
+	sdf_scenery_kinds(scenario, palettes);
+	for (kind = 0; kind < SDF_SCENERY_KINDS; kind++)
+	for (index = 0; palettes[kind].placements->address && index < palettes[kind].placements->count; index++)
+	{
+		struct scenario_object_datum const *placement = (struct scenario_object_datum const *)
+			((byte const *)palettes[kind].placements->address + index * palettes[kind].size);
+		long definition, other;
+
+		if (placement->palette_entry_index < 0 || placement->palette_entry_index >= palettes[kind].palette->count ||
+			!palettes[kind].palette->address)
+		{
+			continue;
+		}
+		definition = TAG_BLOCK_GET_ELEMENT(palettes[kind].palette, placement->palette_entry_index,
+			struct scenario_object_palette_entry)->reference.index;
+		if (definition == NONE || !sdf_placement_in_bsp(definition, placement))
+			continue;
+		for (other = scenery_first; other < count && definitions[other] != definition; other++)
+			;
+		if (other < count)
+		{
+			placed[other]++;
+			continue;
+		}
+		if (count >= maximum || !sdf_object_scenery(definition, source))
+			continue;
+		kinds[count] = 0;
+		placed[count] = 1;
+		definitions[count++] = definition;
+	}
+	free(source);
+	/* (the most placed first, then in the palettes' order: an insertion
+	sort, stable) */
+	for (index = scenery_first + 1; index < count; index++)
+	{
+		long definition = definitions[index], times = placed[index], at = index;
+
+		while (at > scenery_first && placed[at - 1] < times)
+		{
+			definitions[at] = definitions[at - 1];
+			placed[at] = placed[at - 1];
+			at--;
+		}
+		definitions[at] = definition;
+		placed[at] = times;
+	}
+	return count;
+}
+
+/* each node at rest in node 0's space: the root's inverse by the node's
+rest (each the default pose's in the model's space) */
+static short sdf_object_rest(struct model const *model, real_matrix4x3 rest[WORLD_PROXIES_SOURCE_MAXIMUM_NODES])
+{
+	short node_count = (short)MIN(model->nodes.count, WORLD_PROXIES_SOURCE_MAXIMUM_NODES), node_index;
+	real_matrix4x3 inverse_root = TAG_BLOCK_GET_ELEMENT(&model->nodes, 0, struct model_node)->runtime_default_inverse_matrix;
+
+	for (node_index = 0; node_index < node_count; node_index++)
+	{
+		struct model_node const *model_node = TAG_BLOCK_GET_ELEMENT(&model->nodes, node_index, struct model_node);
+		real_matrix4x3 at_rest;
+
+		matrix4x3_inverse(&model_node->runtime_default_inverse_matrix, &at_rest);
+		matrix4x3_multiply(&inverse_root, &at_rest, &rest[node_index]);
+	}
+	return node_count;
+}
+
+/* a point taken into a copy's bounds */
+static void sdf_object_bound(struct sdf_object_copy *copy, float const point[3])
+{
+	int axis;
+
+	for (axis = 0; axis < 3; axis++)
+	{
+		if (!copy->bounded)
+			copy->bounds[axis] = copy->bounds[3 + axis] = point[axis];
+		copy->bounds[axis] = point[axis] < copy->bounds[axis] ? point[axis] : copy->bounds[axis];
+		copy->bounds[3 + axis] = point[axis] > copy->bounds[3 + axis] ? point[axis] : copy->bounds[3 + axis];
+	}
+	copy->bounded = 1;
+}
+
+/* a copy's collision nodes' solids (the sign's point test), and with
+triangles, their triangles (opaque) too, but a vehicle's wheels' (source's
+nodes); FALSE if no memory */
+static int sdf_object_collision_copy(struct sdf_object_copy *copy, struct collision_model const *collision,
+	real_matrix4x3 const *rest, short node_count, struct world_proxies_source const *source, int triangles)
+{
+	long node_index, positions_room = copy->triangle_count, solids_room = copy->solid_count;
+
+	for (node_index = 0; collision && collision->nodes.address && node_index < collision->nodes.count &&
+		node_index < node_count; node_index++)
+	{
+		struct collision_node const *node = TAG_BLOCK_GET_ELEMENT(&collision->nodes, node_index, struct collision_node);
+		struct collision_bsp const *bsp;
+		struct sdf_solid *solid;
+		real_matrix4x3 inverse;
+		long count, triangle, vertex;
+		float low[3] = { 0.0f, 0.0f, 0.0f }, high[3] = { 0.0f, 0.0f, 0.0f }, *at;
+		int axis;
+
+		if (source->nodes[node_index].wheel || !node->bsps.address || node->bsps.count <= 0)
+			continue;
+		bsp = TAG_BLOCK_GET_ELEMENT(&node->bsps, 0, struct collision_bsp);
+		count = world_scene_collision_fan(bsp, NULL);
+		if (count <= 0)
+			continue;
+		if (!sdf_grow((void **)&copy->positions, &positions_room, copy->triangle_count, count, 9 * sizeof(float)) ||
+			!sdf_grow((void **)&copy->solids, &solids_room, copy->solid_count, 1, sizeof(*copy->solids)))
+		{
+			return 0;
+		}
+		/* (put after the copy's triangles, kept only with triangles) */
+		at = copy->positions + copy->triangle_count * 9;
+		world_scene_collision_fan(bsp, at);
+		for (triangle = 0; triangle < count; triangle++)
+		{
+			for (vertex = 0; vertex < 3; vertex++)
+			{
+				float local[3], *point = at + triangle * 9 + vertex * 3;
+
+				memcpy(local, point, sizeof(local));
+				sdf_point_from(&rest[node_index], local, point);
+				for (axis = 0; axis < 3; axis++)
+				{
+					if (!triangle && !vertex)
+						low[axis] = high[axis] = point[axis];
+					low[axis] = point[axis] < low[axis] ? point[axis] : low[axis];
+					high[axis] = point[axis] > high[axis] ? point[axis] : high[axis];
+				}
+				if (triangles)
+					sdf_object_bound(copy, point);
+			}
+		}
+		if (triangles)
+			copy->triangle_count += count;
+		solid = &copy->solids[copy->solid_count];
+		memset(solid, 0, sizeof(*solid));
+		if (!sdf_bsp_copy(bsp, &solid->bsp))
+		{
+			free(solid->bsp.nodes);
+			free(solid->bsp.planes);
+			return 0;
+		}
+		copy->solid_count++;
+		matrix4x3_inverse(&rest[node_index], &inverse);
+		for (axis = 0; axis < 3; axis++)
+		{
+			solid->to_local[axis][0] = inverse.scale * inverse.n[0][axis];
+			solid->to_local[axis][1] = inverse.scale * inverse.n[1][axis];
+			solid->to_local[axis][2] = inverse.scale * inverse.n[2][axis];
+			solid->to_local[axis][3] = inverse.n[3][axis];
+			solid->centre[axis] = 0.5f * (low[axis] + high[axis]);
+		}
+		solid->radius = 0.5f * sqrtf((high[0] - low[0]) * (high[0] - low[0]) + (high[1] - low[1]) * (high[1] - low[1]) +
+			(high[2] - low[2]) * (high[2] - low[2])) + 0.01f;
+	}
+	return 1;
+}
+
+/* this build's model geometry and part (models.c's; object_mesh.c reads
+them the same way) and a model's shader reference */
+struct sdf_model_geometry
+{
+	byte reserved[0x24];
+	struct tag_block parts;
+};
+
+struct sdf_model_part
+{
+	unsigned long flags;
+	short shader_index;
+	char previous_part_index;
+	char next_part_index;
+	short centroid_primary_node_index;
+	short centroid_secondary_node_index;
+	real centroid_primary_node_weight;
+	real centroid_secondary_node_weight;
+	real_point3d centroid;
+	struct tag_block uncompressed_vertices;
+	struct tag_block compressed_vertices;
+	struct tag_block triangles;
+	struct triangle_buffer triangle_buffer;
+	struct vertex_buffer vertex_buffer;
+};
+
+struct sdf_model_shader
+{
+	struct tag_reference shader;
+	short permutation_index;
+	word pad;
+	long unused[3];
+};
+
+/* a model shader's flags and base map (rasterizer_xbox_models.c's) */
+struct sdf_shader_model
+{
+	struct shader shader;
+	word flags;
+	byte reserved[0x7A];
+	struct tag_reference base_map;
+};
+
+typedef char verify_sdf_model_part_size[sizeof(struct sdf_model_part) == 0x68 ? 1 : -1];
+typedef char verify_sdf_model_shader_size[sizeof(struct sdf_model_shader) == 0x20 ? 1 : -1];
+typedef char verify_sdf_shader_model_flags[offsetof(struct sdf_shader_model, flags) == 0x28 ? 1 : -1];
+typedef char verify_sdf_shader_model_base_map[offsetof(struct sdf_shader_model, base_map) == 0xA4 ? 1 : -1];
+
+enum
+{
+	/* a part the game does not draw */
+	_sdf_model_part_stripped_bit = 0,
+	/* a model shader (shader_definitions.h's type), and its flag drawn
+	without its base map's alpha test */
+	_sdf_shader_type_model = 4,
+	_sdf_shader_model_not_alpha_tested_bit = 2,
+	/* a model's detail levels (super low to super high) */
+	SDF_MODEL_DETAIL_LEVELS = 5,
+};
+
+/* the share of a bitmap's first texture's texels its alpha test draws
+(alpha over 0x7F, the models' D3DRS_ALPHAREF: rasterizer_xbox_models.c),
+at its first level no larger than 512 a side; 1 if it cannot be read (a
+solid card). Its texels are loaded as a draw loads them, and waited for */
+static float sdf_bitmap_coverage(long bitmap_tag)
+{
+	struct bitmap_group *group;
+	struct bitmap_data const *bitmap;
+	DWORD const *header;
+
+	if (bitmap_tag == NONE || !(group = bitmap_group_get(bitmap_tag)) || !group->bitmaps.address ||
+		group->bitmaps.count <= 0)
+	{
+		return 1.0f;
+	}
+	header = texture_cache_port_load((unsigned long)bitmap_tag, 0);
+	bitmap = TAG_BLOCK_GET_ELEMENT(&group->bitmaps, 0, struct bitmap_data);
+	if (!header || !bitmap->base_address)
+		return 1.0f;
+	return xgpu_texture_alpha_coverage((unsigned int)header[3], (unsigned int)header[4],
+		(unsigned char const *)bitmap->base_address, 0x7F, 512);
+}
+
+/* a shader's opacity in a field: 0 for none (transparent: glass,
+effects), 1 for an opaque surface, and an alpha-tested model shader's base
+map's coverage (its leaves' cards); remembered in the job by its tag */
+static float sdf_shader_opacity(struct sdf_job *job, long shader_tag)
+{
+	struct shader *shader;
+	float opacity = 1.0f;
+	long index;
+
+	if (shader_tag == NONE)
+		return 0.0f;
+	for (index = 0; index < job->opacity_count; index++)
+	{
+		if (job->opacity_tags[index] == shader_tag)
+			return job->opacities[index];
+	}
+	shader = shader_definition_get(shader_tag);
+	if (!shader || !shader_type_is_valid_for_model(shader->base.type) || shader_type_is_transparent(shader->base.type))
+		opacity = 0.0f;
+	else if (shader->base.type == _sdf_shader_type_model)
+	{
+		struct sdf_shader_model const *model = (struct sdf_shader_model const *)shader;
+
+		if (!TEST_FLAG(model->flags, _sdf_shader_model_not_alpha_tested_bit))
+			opacity = sdf_bitmap_coverage(model->base_map.index);
+	}
+	if (job->opacity_count < (long)(sizeof(job->opacity_tags) / sizeof(job->opacity_tags[0])))
+	{
+		job->opacity_tags[job->opacity_count] = shader_tag;
+		job->opacities[job->opacity_count++] = opacity;
+	}
+	return opacity;
+}
+
+/* the geometry a region's first permutation draws at a detail level (NONE:
+none) */
+static short sdf_model_geometry(struct model const *model, short region_index, short level)
+{
+	struct model_region const *region = TAG_BLOCK_GET_ELEMENT(&model->regions, region_index, struct model_region);
+	struct model_region_permutation const *permutation;
+	short geometry;
+
+	if (!region->permutations.address || region->permutations.count <= 0)
+		return NONE;
+	permutation = TAG_BLOCK_GET_ELEMENT(&region->permutations, 0, struct model_region_permutation);
+	geometry = permutation->geometry_indices[level];
+	return geometry >= 0 && geometry < model->geometries.count ? geometry : NONE;
+}
+
+/* the triangles a model draws at a detail level, about (its parts' index
+counts: a strip's count is its triangles' and its turns'); -1 if it draws
+none at that level */
+static long sdf_model_level_triangles(struct model const *model, short level)
+{
+	long total = 0;
+	short region_index, part_index;
+	int any = 0;
+
+	for (region_index = 0; region_index < model->regions.count; region_index++)
+	{
+		short geometry_index = sdf_model_geometry(model, region_index, level);
+		struct sdf_model_geometry const *geometry;
+
+		if (geometry_index == NONE)
+			continue;
+		geometry = TAG_BLOCK_GET_ELEMENT(&model->geometries, geometry_index, struct sdf_model_geometry);
+		for (part_index = 0; geometry->parts.address && part_index < geometry->parts.count &&
+			part_index < MAXIMUM_PARTS_PER_MODEL_GEOMETRY; part_index++)
+		{
+			total += TAG_BLOCK_GET_ELEMENT(&geometry->parts, part_index, struct sdf_model_part)->triangle_buffer.count;
+			any = 1;
+		}
+	}
+	return any ? total : -1;
+}
+
+/* a part's drawn triangles onto a copy (model space to node 0's by
+to_root), each with its shader's opacity; FALSE if no memory */
+static int sdf_object_part_copy(struct sdf_job *job, struct sdf_object_copy *copy, struct model const *model,
+	struct sdf_model_part const *part, real_matrix4x3 const *to_root, long *room)
+{
+	struct vertex_buffer const *vertex_buffer = &part->vertex_buffer;
+	struct triangle_buffer const *triangle_buffer = &part->triangle_buffer;
+	byte *vertices = NULL;
+	BYTE *indices = NULL;
+	long stride, index_count, index;
+	float opacity;
+	int good = 1;
+
+	if (TEST_FLAG(part->flags, _sdf_model_part_stripped_bit) || part->shader_index < 0 ||
+		part->shader_index >= model->shaders.count || !model->shaders.address)
+	{
+		return 1;
+	}
+	opacity = sdf_shader_opacity(job, TAG_BLOCK_GET_ELEMENT(&model->shaders, part->shader_index,
+		struct sdf_model_shader)->shader.index);
+	if (opacity <= 0.0f || !vertex_buffer->hardware_format || vertex_buffer->count <= 0 ||
+		!triangle_buffer->hardware_format || triangle_buffer->count <= 0)
+	{
+		return 1;
+	}
+	if (vertex_buffer->type == _rasterizer_vertex_type_model_compressed)
+		stride = sizeof(struct model_vertex_compressed);
+	else if (vertex_buffer->type == _rasterizer_vertex_type_model_uncompressed)
+		stride = sizeof(struct model_vertex_uncompressed);
+	else
+		return 1;
+	if (triangle_buffer->type == _triangle_buffer_type_precompiled_strip)
+		index_count = triangle_buffer->count + 2;
+	else if (triangle_buffer->type == _triangle_buffer_type_triangles)
+		index_count = triangle_buffer->count * 3;
+	else
+		return 1;
+	IDirect3DVertexBuffer8_Lock((IDirect3DVertexBuffer8 *)vertex_buffer->hardware_format, 0, 0, &vertices,
+		D3DLOCK_READONLY);
+	IDirect3DIndexBuffer8_Lock((IDirect3DIndexBuffer8 *)triangle_buffer->hardware_format, 0, 0, &indices,
+		D3DLOCK_READONLY);
+	if (vertices && indices)
+	{
+		unsigned short const *list = (unsigned short const *)indices;
+		long step = triangle_buffer->type == _triangle_buffer_type_precompiled_strip ? 1 : 3;
+
+		for (index = 0; good && index + 2 < index_count; index += step)
+		{
+			unsigned short corners[3];
+			float *out;
+			int corner, axis;
+
+			corners[0] = list[index];
+			corners[1] = list[index + 1];
+			corners[2] = list[index + 2];
+			/* (a strip's turns: its degenerate triangles) */
+			if (corners[0] == corners[1] || corners[1] == corners[2] || corners[0] == corners[2] ||
+				corners[0] >= vertex_buffer->count || corners[1] >= vertex_buffer->count ||
+				corners[2] >= vertex_buffer->count)
+			{
+				continue;
+			}
+			if (!sdf_grow((void **)&copy->positions, room, copy->triangle_count, 1, 9 * sizeof(float)) ||
+				!sdf_grow((void **)&copy->opacities, &copy->opacities_room, copy->triangle_count, 1, sizeof(float)))
+			{
+				good = 0;
+				break;
+			}
+			out = copy->positions + copy->triangle_count * 9;
+			for (corner = 0; corner < 3; corner++)
+			{
+				/* (both kinds of vertex start with the position, in the model's
+				space) */
+				real_point3d const *position = (real_point3d const *)(vertices + corners[corner] * stride);
+				real_point3d point;
+
+				matrix4x3_transform_point(to_root, position, &point);
+				out[corner * 3] = point.x;
+				out[corner * 3 + 1] = point.y;
+				out[corner * 3 + 2] = point.z;
+				for (axis = 0; axis < 3; axis++)
+					good = good && out[corner * 3 + axis] == out[corner * 3 + axis] &&
+						fabsf(out[corner * 3 + axis]) < 1.0e6f;
+			}
+			if (!good)
+			{
+				/* (a vertex not a number: left out) */
+				good = 1;
+				continue;
+			}
+			for (corner = 0; corner < 3; corner++)
+				sdf_object_bound(copy, out + corner * 3);
+			copy->opacities[copy->triangle_count++] = opacity;
+		}
+	}
+	if (vertices)
+		IDirect3DVertexBuffer8_Unlock((IDirect3DVertexBuffer8 *)vertex_buffer->hardware_format);
+	if (indices)
+		IDirect3DIndexBuffer8_Unlock((IDirect3DIndexBuffer8 *)triangle_buffer->hardware_format);
+	return good;
+}
+
+/* a piece of scenery's drawn triangles (its regions' first permutations,
+at the most detailed level within WORLD_SDF_OBJECT_MOST_TRIANGLES, else
+the least), each with its shader's opacity, in node 0's space; FALSE if no
+memory */
+static int sdf_object_render_copy(struct sdf_job *job, struct sdf_object_copy *copy, struct model const *model)
+{
+	real_matrix4x3 to_root = TAG_BLOCK_GET_ELEMENT(&model->nodes, 0, struct model_node)->runtime_default_inverse_matrix;
+	long room = copy->triangle_count, least = -1, triangles;
+	short level, chosen = NONE, region_index, part_index;
+
+	for (level = SDF_MODEL_DETAIL_LEVELS - 1; level >= 0; level--)
+	{
+		triangles = sdf_model_level_triangles(model, level);
+		if (triangles < 0)
+			continue;
+		if (triangles <= WORLD_SDF_OBJECT_MOST_TRIANGLES)
+		{
+			chosen = level;
+			break;
+		}
+		if (least < 0 || triangles < least)
+		{
+			least = triangles;
+			chosen = level;
+		}
+	}
+	if (chosen == NONE)
+		return 1;
+	for (region_index = 0; region_index < model->regions.count; region_index++)
+	{
+		short geometry_index = sdf_model_geometry(model, region_index, chosen);
+		struct sdf_model_geometry const *geometry;
+
+		if (geometry_index == NONE)
+			continue;
+		geometry = TAG_BLOCK_GET_ELEMENT(&model->geometries, geometry_index, struct sdf_model_geometry);
+		for (part_index = 0; geometry->parts.address && part_index < geometry->parts.count &&
+			part_index < MAXIMUM_PARTS_PER_MODEL_GEOMETRY; part_index++)
+		{
+			if (!sdf_object_part_copy(job, copy, model, TAG_BLOCK_GET_ELEMENT(&geometry->parts, part_index,
+				struct sdf_model_part), &to_root, &room))
+			{
+				return 0;
+			}
+		}
+	}
+	return 1;
+}
+
+static int sdf_objects_copy(struct sdf_job *job)
+{
+	struct world_proxies_source *source;
+	long definitions[WORLD_SDF_OBJECT_MAXIMUM], count, index;
+	unsigned char kinds[WORLD_SDF_OBJECT_MAXIMUM];
+
+	count = sdf_object_definitions(definitions, kinds, WORLD_SDF_OBJECT_MAXIMUM);
+	if (!count)
 		return 1;
 	job->object_copies = calloc(WORLD_SDF_OBJECT_MAXIMUM, sizeof(*job->object_copies));
 	source = malloc(sizeof(*source));
@@ -2352,125 +3066,43 @@ static int sdf_objects_copy(struct sdf_job *job)
 		free(source);
 		return 0;
 	}
-	for (entry_index = 0; entry_index < scenario->vehicle_palette.count && job->object_count < WORLD_SDF_OBJECT_MAXIMUM;
-		entry_index++)
+	for (index = 0; index < count; index++)
 	{
-		struct scenario_object_palette_entry const *entry = TAG_BLOCK_GET_ELEMENT(&scenario->vehicle_palette, entry_index,
-			struct scenario_object_palette_entry);
-		long definition_index = entry->reference.index, other, node_index, positions_room = 0, solids_room = 0;
-		struct object_definition const *definition;
-		struct model const *model;
-		struct collision_model const *collision;
-		struct sdf_object_copy *copy;
-		real_matrix4x3 rest[WORLD_PROXIES_SOURCE_MAXIMUM_NODES], inverse_root;
+		long definition_index = definitions[index];
+		struct object_definition const *definition = object_definition_get(definition_index);
+		struct model const *model = model_definition_get(definition->object.model.index);
+		struct collision_model const *collision = definition->object.collision_model.index != NONE ?
+			collision_model_definition_get(definition->object.collision_model.index) : NULL;
+		struct sdf_object_copy *copy = &job->object_copies[job->object_count];
+		real_matrix4x3 rest[WORLD_PROXIES_SOURCE_MAXIMUM_NODES];
 		short node_count;
-		int duplicate = 0, axis;
+		int good;
 
-		for (other = 0; other < job->object_count; other++)
-			duplicate = duplicate || job->object_copies[other].definition == definition_index;
-		if (duplicate || !sdf_object_fielded(definition_index, source))
+		if (!world_proxies_source_definition(definition_index, source))
 			continue;
-		definition = object_definition_get(definition_index);
-		model = model_definition_get(definition->object.model.index);
-		collision = collision_model_definition_get(definition->object.collision_model.index);
-		copy = &job->object_copies[job->object_count];
 		memset(copy, 0, sizeof(*copy));
 		copy->definition = definition_index;
+		copy->scenery = !kinds[index];
 		snprintf(copy->name, sizeof(copy->name), "%s", tag_get_name(definition_index));
-		node_count = (short)MIN(model->nodes.count, WORLD_PROXIES_SOURCE_MAXIMUM_NODES);
-		/* (each node at rest in node 0's space: the root's inverse by the
-		node's rest, each the default pose's in the model's space) */
-		for (node_index = 0; node_index < node_count; node_index++)
+		node_count = sdf_object_rest(model, rest);
+		/* (a vehicle: its collision's triangles, opaque; a piece of scenery:
+		its drawn ones, and its collision's solids alone) */
+		good = kinds[index] ? sdf_object_collision_copy(copy, collision, rest, node_count, source, 1) :
+			sdf_object_render_copy(job, copy, model) &&
+			sdf_object_collision_copy(copy, collision, rest, node_count, source, 0);
+		job->object_count++;
+		if (!good)
 		{
-			struct model_node const *model_node = TAG_BLOCK_GET_ELEMENT(&model->nodes, node_index, struct model_node);
-
-			matrix4x3_inverse(&model_node->runtime_default_inverse_matrix, &rest[node_index]);
+			free(source);
+			return 0;
 		}
-		inverse_root = TAG_BLOCK_GET_ELEMENT(&model->nodes, 0, struct model_node)->runtime_default_inverse_matrix;
-		for (node_index = 0; node_index < node_count; node_index++)
-		{
-			real_matrix4x3 in_root;
-
-			matrix4x3_multiply(&inverse_root, &rest[node_index], &in_root);
-			rest[node_index] = in_root;
-		}
-		for (node_index = 0; node_index < collision->nodes.count && node_index < node_count; node_index++)
-		{
-			struct collision_node const *node = TAG_BLOCK_GET_ELEMENT(&collision->nodes, node_index, struct collision_node);
-			struct collision_bsp const *bsp;
-			struct sdf_solid *solid;
-			real_matrix4x3 inverse;
-			long count, triangle, vertex;
-			float low[3] = { 0.0f, 0.0f, 0.0f }, high[3] = { 0.0f, 0.0f, 0.0f };
-
-			if (source->nodes[node_index].wheel || !node->bsps.address || node->bsps.count <= 0)
-				continue;
-			bsp = TAG_BLOCK_GET_ELEMENT(&node->bsps, 0, struct collision_bsp);
-			count = world_scene_collision_fan(bsp, NULL);
-			if (count <= 0)
-				continue;
-			if (!sdf_grow((void **)&copy->positions, &positions_room, copy->triangle_count, count, 9 * sizeof(float)) ||
-				!sdf_grow((void **)&copy->solids, &solids_room, copy->solid_count, 1, sizeof(*copy->solids)))
-			{
-				job->object_count++;
-				free(source);
-				return 0;
-			}
-			world_scene_collision_fan(bsp, copy->positions + copy->triangle_count * 9);
-			for (triangle = copy->triangle_count; triangle < copy->triangle_count + count; triangle++)
-			{
-				for (vertex = 0; vertex < 3; vertex++)
-				{
-					float local[3], *at = copy->positions + triangle * 9 + vertex * 3;
-
-					memcpy(local, at, sizeof(local));
-					sdf_point_from(&rest[node_index], local, at);
-					for (axis = 0; axis < 3; axis++)
-					{
-						if (triangle == copy->triangle_count && !vertex)
-							low[axis] = high[axis] = at[axis];
-						low[axis] = at[axis] < low[axis] ? at[axis] : low[axis];
-						high[axis] = at[axis] > high[axis] ? at[axis] : high[axis];
-						if (!copy->triangle_count && triangle == 0 && !vertex)
-							copy->bounds[axis] = copy->bounds[3 + axis] = at[axis];
-						copy->bounds[axis] = at[axis] < copy->bounds[axis] ? at[axis] : copy->bounds[axis];
-						copy->bounds[3 + axis] = at[axis] > copy->bounds[3 + axis] ? at[axis] : copy->bounds[3 + axis];
-					}
-				}
-			}
-			copy->triangle_count += count;
-			solid = &copy->solids[copy->solid_count];
-			memset(solid, 0, sizeof(*solid));
-			if (!sdf_bsp_copy(bsp, &solid->bsp))
-			{
-				free(solid->bsp.nodes);
-				free(solid->bsp.planes);
-				job->object_count++;
-				free(source);
-				return 0;
-			}
-			copy->solid_count++;
-			matrix4x3_inverse(&rest[node_index], &inverse);
-			for (axis = 0; axis < 3; axis++)
-			{
-				solid->to_local[axis][0] = inverse.scale * inverse.n[0][axis];
-				solid->to_local[axis][1] = inverse.scale * inverse.n[1][axis];
-				solid->to_local[axis][2] = inverse.scale * inverse.n[2][axis];
-				solid->to_local[axis][3] = inverse.n[3][axis];
-				solid->centre[axis] = 0.5f * (low[axis] + high[axis]);
-			}
-			solid->radius = 0.5f * sqrtf((high[0] - low[0]) * (high[0] - low[0]) + (high[1] - low[1]) * (high[1] - low[1]) +
-				(high[2] - low[2]) * (high[2] - low[2])) + 0.01f;
-		}
-		/* (none: its boxes, as before) */
+		/* (none: its shapes, as before) */
 		if (copy->triangle_count <= 0)
 		{
-			free(copy->positions);
-			free(copy->solids);
+			job->object_count--;
+			sdf_object_copy_free(copy);
 			memset(copy, 0, sizeof(*copy));
-			continue;
 		}
-		job->object_count++;
 	}
 	free(source);
 	return 1;
@@ -2601,7 +3233,6 @@ static int sdf_placement_order(void const *a, void const *b);
 static void sdf_awaited_make(void)
 {
 	struct scenario *scenario = global_scenario_get();
-	struct world_proxies_source *source;
 	struct sdf_scenery_kind kinds[SDF_SCENERY_KINDS];
 	long room = 0, index;
 	int kind;
@@ -2635,19 +3266,12 @@ static void sdf_awaited_make(void)
 	}
 	if (world_sdf.awaited_count)
 		qsort(world_sdf.awaited, world_sdf.awaited_count, sizeof(*world_sdf.awaited), sdf_placement_order);
-	/* (the vehicles, as sdf_objects_copy finds them) */
-	if (scenario->vehicle_palette.address && (source = malloc(sizeof(*source))) != NULL)
+	/* (the vehicles and the scenery, as sdf_objects_copy finds them) */
 	{
-		for (index = 0; index < scenario->vehicle_palette.count &&
-			world_sdf.awaited_object_count < WORLD_SDF_OBJECT_MAXIMUM; index++)
-		{
-			long definition = TAG_BLOCK_GET_ELEMENT(&scenario->vehicle_palette, index,
-				struct scenario_object_palette_entry)->reference.index;
+		unsigned char vehicles[WORLD_SDF_OBJECT_MAXIMUM];
 
-			if (!world_sdf_object_awaited(definition) && sdf_object_fielded(definition, source))
-				world_sdf.awaited_objects[world_sdf.awaited_object_count++] = definition;
-		}
-		free(source);
+		world_sdf.awaited_object_count = sdf_object_definitions(world_sdf.awaited_objects, vehicles,
+			WORLD_SDF_OBJECT_MAXIMUM);
 	}
 }
 
@@ -2731,7 +3355,7 @@ static int sdf_upload_done(struct world_sdf_volume const *volume, unsigned long 
 		cells >= volume->header.depth && layers >= sdf_upload_layers(&volume->header);
 }
 
-/* a z slice of the vehicles' fields' atlas (atlas_width x atlas_height
+/* a z slice of the objects' fields' atlas (atlas_width x atlas_height
 texels of 4 halves, x fastest; zeros where no object is: no occlusion) */
 static void sdf_objects_slice(struct world_sdf_objects const *objects, unsigned long z, unsigned char *slice)
 {
@@ -2781,7 +3405,7 @@ static int sdf_upload(struct world_sdf_volume const *volume, unsigned long *page
 		*pages += 1;
 		sent += page_bytes;
 	}
-	/* (then the vehicles' fields' atlas, a slice at a time) */
+	/* (then the objects' fields' atlas, a slice at a time) */
 	while (*pages >= scenery->layer_count && *objects < fields->atlas_depth && sent < budget && objects_slice)
 	{
 		sdf_objects_slice(fields, *objects, objects_slice);

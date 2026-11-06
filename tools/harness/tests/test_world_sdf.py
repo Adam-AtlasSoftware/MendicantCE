@@ -3,9 +3,9 @@ port/linux/game/world_sdf_bake.c, port/linux/game/world_sdf.c, docs/world-ao.md)
 budget, the encoding's round trip, the sparse field's sample as the GPU reads it (the whole grid's it stands for,
 exactly), its atlas, the bake against exact distances (a plane, a box room, a sphere, a box signed by a BSP's point
 test, a soup of triangles against every triangle; the bricks' shared faces alike), and the cache file's round trip
-and rejections. The vehicles' occlusion fields: their layout, a box's bake against the hemisphere's integral (its
-inside never filtered out past its faces, its reach), their bytes the same in any slices' order, half floats, the
-atlas's places, and their part of the file."""
+and rejections. The objects' occlusion fields: their layout, a box's bake against the hemisphere's integral (its
+inside never filtered out past its faces, its reach), a card's by its opacity (an alpha-tested leaf's: #666), their
+bytes the same in any slices' order, half floats, the atlas's places, and their part of the file."""
 import sys
 from pathlib import Path
 
@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, enum_with, function, mutated, read, run, structure  # noqa: E402
 
 CASES = ["layout", "encoding", "sample", "atlas", "bake", "plane", "room", "sphere", "bsp", "soup", "round_trip", "rejection",
-         "object_layout", "object_bake", "object_determinism", "object_half", "object_atlas", "threads", "pace"]
+         "object_layout", "object_bake", "object_opacity", "object_determinism", "object_half", "object_atlas", "threads", "pace"]
 HEADER = "port/linux/include/world_sdf.h"
 BAKE = "port/linux/game/world_sdf_bake.c"
 SCHEDULE = "port/linux/game/world_sdf.c"
@@ -101,10 +101,25 @@ CONTROLS = [
     (BAKE, "object->reach = sqrtf(most) > farthest ? sqrtf(most) : farthest;", "object->reach = farthest;", "object_bake"),
     # the fit unweighted (the normals that see most of it as the others: its contact darkening short)
     (BAKE, "weight = WORLD_SDF_OBJECT_FIT_WEIGHT + occlusions[k];", "weight = 1.0;", "object_bake"),
+    # a card's opacity taken as solid (an alpha-tested leaf's card blocking all that crosses it: #666's squares)
+    (BAKE, "through[j] *= passed;", "through[j] = 0.0f;", "object_opacity"),
+    # each card crossed blocking its opacity of the whole, not of what the cards before it let through
+    (BAKE, "through[j] *= passed;", "through[j] -= 1.0f - passed;", "object_opacity"),
+    # the share a direction is blocked counted whole whatever its cards' opacity
+    (BAKE, "occlusions[k] += row[k] * blocked;", "occlusions[k] += row[k];", "object_opacity"),
     # the half's rounding truncated
     (BAKE, "if (rest > 0x1000u || (rest == 0x1000u && (half & 1u)))", "if (0)", "object_half"),
     # a column's next object put where the last began
     (BAKE, "\t\tz += object->depth;\n", "\n", "object_atlas"),
+    # a row's next one put where the last began (over its columns)
+    (BAKE, "\t\t\trow_y += row_height;\n", "\n", "object_atlas"),
+    # the columns as deep as the atlas may be, in one row (a map's vehicles' and scenery's past the budget)
+    (BAKE, "placed = sdf_objects_columns(objects, depth_cap, width_cap, size);",
+     "placed = sdf_objects_columns(objects, WORLD_SDF_OBJECT_ATLAS_SIDE, WORLD_SDF_OBJECT_ATLAS_SIDE, size);",
+     "object_atlas"),
+    # a smaller object after one that does not fit taking its place (the vehicles' first)
+    (BAKE, "\t\tif (object->depth > depth_cap || object->width > width_cap)\n\t\t\tbreak;",
+     "\t\tif (object->depth > depth_cap || object->width > width_cap)\n\t\t\tcontinue;", "object_atlas"),
     # an object's texels not checked for no number
     (SCHEDULE, "if ((object->texels[texel] & 0x7C00u) == 0x7C00u)", "if (0)", "rejection"),
     # an object's bounds read one word on
