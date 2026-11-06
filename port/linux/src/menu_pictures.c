@@ -38,6 +38,7 @@ VR, or with display.menu_pictures off.
 #include "port_config.h"
 #include "xgpu.h"
 #include "xgpu_images.h"
+#include "memory/zlib/zlib.h"
 
 #include <SDL3/SDL.h>
 #include <errno.h>
@@ -82,9 +83,6 @@ int halo_vr_running(void);
 /* d3d8_device.c's: the frame being drawn's pixels so far (BGRA, rows from
 the top; malloc's), and its size */
 unsigned char *d3d8_back_buffer_read(unsigned long *width, unsigned long *height);
-/* the game's zlib (source/memory/zlib, data_compress.c's) */
-int compress2(unsigned char *destination, unsigned long *destination_size, const unsigned char *source,
-	unsigned long source_size, int level);
 
 /* ---------- the pure parts (tools/harness/tests/menu_pictures.c) */
 
@@ -813,6 +811,43 @@ static unsigned char *picture_chunk(unsigned char *out, char const *type, unsign
 	return out + 12 + size;
 }
 
+/* the game's zlib's deflate with the C library's allocator: its compress2
+allocates with the game's own, which only the game's thread may call, and
+the pictures are written on their own (picture_finish_thread). The same
+deflate as compress2's, so the same bytes */
+static voidpf picture_zalloc(voidpf opaque, uInt items, uInt size)
+{
+	(void)opaque;
+	return calloc(items, size);
+}
+
+static void picture_zfree(voidpf opaque, voidpf address)
+{
+	(void)opaque;
+	free(address);
+}
+
+static int picture_deflate(unsigned char *destination, unsigned long *destination_size, const unsigned char *source,
+	unsigned long source_size, int level)
+{
+	z_stream stream;
+	int result;
+
+	memset(&stream, 0, sizeof(stream));
+	stream.zalloc = picture_zalloc;
+	stream.zfree = picture_zfree;
+	if (deflateInit(&stream, level) != Z_OK)
+		return -1;
+	stream.next_in = (Bytef *)source;
+	stream.avail_in = (uInt)source_size;
+	stream.next_out = destination;
+	stream.avail_out = (uInt)*destination_size;
+	result = deflate(&stream, Z_FINISH);
+	*destination_size = stream.total_out;
+	deflateEnd(&stream);
+	return result == Z_STREAM_END ? 0 : -1;
+}
+
 static int picture_png_write(char const *path, unsigned char const *rgba, unsigned long width, unsigned long height)
 {
 	unsigned long stride = width * 4, raw_size = height * (stride + 1);
@@ -829,7 +864,7 @@ static int picture_png_write(char const *path, unsigned char const *rgba, unsign
 			raw[row * (stride + 1)] = 0;
 			memcpy(raw + row * (stride + 1) + 1, rgba + row * stride, stride);
 		}
-		if (compress2(png + 8 + 25 + 8, &packed_size, raw, raw_size, 1) == 0)
+		if (picture_deflate(png + 8 + 25 + 8, &packed_size, raw, raw_size, 1) == 0)
 		{
 			memcpy(png, "\x89PNG\r\n\x1a\n", 8);
 			header[0] = (unsigned char)(width >> 24);
