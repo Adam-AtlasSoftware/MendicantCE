@@ -306,7 +306,7 @@ static struct
 	uint32_t pipeline_misses;
 	/* display.ambient_occlusion "world": each pipeline's definition as last
 	bound, and its stand-in (0 none: PIPELINE_STAND_IN), which draws until
-	its own is made, and always while a map is prepared; the pipelines whose
+	its own is made (prepared only where its own cannot be); the pipelines whose
 	shaders wait to be made after the load (and in which variant) */
 	const struct xgpu_stream_pipeline_define *definitions[XGPU_STREAM_PIPELINES];
 	uint16_t stand_ins[XGPU_STREAM_PIPELINES];

@@ -136,8 +136,10 @@ def run(tmp_path, fault=None):
         text = text.replace(*fault)
     source = tmp_path / "world_ao_preparation.c"
     source.write_text(HARNESS.replace("@FUNCTIONS@", "\n".join(function(text, name) for name in FUNCTIONS)))
+    # (world_ao.h alone: its folder's own stdio.h is the game's)
+    shutil.copy(ROOT / "port/linux/include/world_ao.h", tmp_path / "world_ao.h")
     binary = tmp_path / "world_ao_preparation"
-    subprocess.run([cc, "-std=c11", "-Wall", "-Werror", "-Wno-unused-function", f"-I{ROOT / 'port/linux/include'}",
+    subprocess.run([cc, "-std=c11", "-Wall", "-Werror", "-Wno-unused-function", f"-I{tmp_path}",
                     str(source), "-o", str(binary)], check=True)
     return subprocess.run([str(binary)], capture_output=True, text=True)
 

@@ -524,11 +524,10 @@ void world_ao_window_begin(short local_player_index, short rasterizer_target, fl
 	/* (its span, whatever the setting: halo_world_ao_span) */
 	world_ao.span = WORLD_AO_SPAN_OPEN;
 	halo_world_ao_span(WORLD_AO_SPAN_OPEN);
-	/* (none while a map's pipelines are prepared: its draws then are the
-	ones without the world, exactly as with it off, so that the world never
-	lengthens a load. The world's pipelines are made after it, their
-	stand-ins, these, drawing until they are: d3d8_device.c's
-	world_ao_stand_in) */
+	/* (none while a map's pipelines are prepared, nothing being seen then:
+	the front end gives its draws the keys they have in play from their span
+	alone, and makes the pre-pass's twins of them, d3d8_device.c's
+	world_ao_key) */
 	if (!mode)
 		return;
 	if (render_enumerating)

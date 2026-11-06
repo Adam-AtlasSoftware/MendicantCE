@@ -27,7 +27,8 @@ CONTROLS = [
     ("\tif (render_enumerating)\n\t{\n\t\tworld_sdf_frame_prepared();\n\t\treturn;\n\t}", "", "window"),
     # the window's span told only while the setting is on (the manifest's world draws then lost)
     ("\t(void)rasterizer_target;\n\t/* (its span, whatever the setting: halo_world_ao_span) */\n"
-     "\thalo_world_ao_span(WORLD_AO_SPAN_OPEN);\n", "\t(void)rasterizer_target;\n", "off"),
+     "\tworld_ao.span = WORLD_AO_SPAN_OPEN;\n\thalo_world_ao_span(WORLD_AO_SPAN_OPEN);\n",
+     "\t(void)rasterizer_target;\n\tworld_ao.span = WORLD_AO_SPAN_OPEN;\n", "off"),
     ("\thalo_world_ao_span(!drawing ? world_ao.span : world_ao.span == WORLD_AO_SPAN_FOUND ?\n", "\t(void)(!drawing ? world_ao.span : world_ao.span == WORLD_AO_SPAN_FOUND ?\n", "off"),
     # the window found once a pixel told only while the setting is on (a map's preparation then makes the
     # pipelines without the pre-pass's reads and no twins)

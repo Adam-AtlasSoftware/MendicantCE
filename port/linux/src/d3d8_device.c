@@ -4070,8 +4070,8 @@ static BOOL pipeline_bind(struct vertex_shader_object *program, struct xgpu_draw
 /* display.ambient_occlusion "world": each pipeline with the world's light
 (by its number: xgpu_backend_pipeline_number) told its stand-in, the
 pipeline the draw would have without the world, which the backend draws
-with until the world's is made (and while a map is prepared: the world's
-pipelines are never made in a load). Found the first time the number is
+with until the world's is made (a map's preparation makes the world's:
+world_ao_key; the stand-in is drawn where it missed them, or they fail). Found the first time the number is
 drawn with: the draw derived again from its facts without the world's
 light (basis: its pipeline before the derivation), then the world's bound
 again. */
