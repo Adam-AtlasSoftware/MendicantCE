@@ -75,6 +75,9 @@ enum
 	/* (a dedicated server's, of the desktop builds: written into config.toml
 	only in server mode) */
 	_platform_server = 64,
+	/* (of the desktop builds, only a native Linux one: MENDICANT AI's
+	training bridge and logs, which the guest builds compile out) */
+	_platform_linux = 128,
 };
 
 struct config_setting
@@ -1226,24 +1229,24 @@ static const struct config_setting config_settings[] =
 		"The Marines' rate of fire, against the stock game's 1.0 (0.1 or more)." },
 	{ "ai.mendicant.command_radius", _config_real, "35.0", "HALO_AI_MENDICANT_COMMAND_RADIUS", _environment_value, _platform_all,
 		"How far (world units) from its leader a soldier is still in its unit." },
-	{ "ai.mendicant.bridge", _config_string, "\"\"", "HALO_AI_MENDICANT_BRIDGE", _environment_value, _platform_desktop,
+	{ "ai.mendicant.bridge", _config_string, "\"\"", "HALO_AI_MENDICANT_BRIDGE", _environment_value, _platform_linux,
 		"A file the models are asked through instead (a trainer or brain.py maps\n"
 		"it); empty: the models in the game." },
-	{ "ai.mendicant.training", _config_boolean, "false", "HALO_AI_MENDICANT_TRAINING", _environment_value, _platform_desktop,
+	{ "ai.mendicant.training", _config_boolean, "false", "HALO_AI_MENDICANT_TRAINING", _environment_value, _platform_linux,
 		"Run training episodes for the trainer on ai.mendicant.bridge." },
-	{ "ai.mendicant.training_skip", _config_integer, "7", "HALO_AI_MENDICANT_TRAINING_SKIP", _environment_value, _platform_desktop,
+	{ "ai.mendicant.training_skip", _config_integer, "7", "HALO_AI_MENDICANT_TRAINING_SKIP", _environment_value, _platform_linux,
 		"In training, what is skipped: the sum of 1 the picture, 2 the sound, 4 the mixer." },
-	{ "ai.mendicant.sample_log", _config_string, "\"\"", "HALO_AI_MENDICANT_SAMPLE_LOG", _environment_value, _platform_desktop,
+	{ "ai.mendicant.sample_log", _config_string, "\"\"", "HALO_AI_MENDICANT_SAMPLE_LOG", _environment_value, _platform_linux,
 		"A file to log every actor's decisions in (CSV); empty: none." },
-	{ "ai.mendicant.drill_log", _config_string, "\"\"", "HALO_AI_MENDICANT_DRILL_LOG", _environment_value, _platform_desktop,
+	{ "ai.mendicant.drill_log", _config_string, "\"\"", "HALO_AI_MENDICANT_DRILL_LOG", _environment_value, _platform_linux,
 		"A file to log the units' drills in; empty: none." },
-	{ "ai.mendicant.player_log", _config_string, "\"\"", "HALO_AI_MENDICANT_PLAYER_LOG", _environment_value, _platform_desktop,
+	{ "ai.mendicant.player_log", _config_string, "\"\"", "HALO_AI_MENDICANT_PLAYER_LOG", _environment_value, _platform_linux,
 		"A file to log the player's fighting in (CSV); empty: none." },
-	{ "ai.mendicant.move_test_log", _config_string, "\"\"", "HALO_AI_MENDICANT_MOVE_TEST_LOG", _environment_value, _platform_desktop,
+	{ "ai.mendicant.move_test_log", _config_string, "\"\"", "HALO_AI_MENDICANT_MOVE_TEST_LOG", _environment_value, _platform_linux,
 		"A file to log a free-movement test in; empty: no test." },
-	{ "ai.mendicant.vehicle_test", _config_boolean, "false", "HALO_AI_MENDICANT_VEHICLE_TEST", _environment_value, _platform_desktop,
+	{ "ai.mendicant.vehicle_test", _config_boolean, "false", "HALO_AI_MENDICANT_VEHICLE_TEST", _environment_value, _platform_linux,
 		"Test boarding: soldiers try the nearest vehicle." },
-	{ "ai.mendicant.aim_debug", _config_boolean, "false", "HALO_AI_MENDICANT_AIM_DEBUG", _environment_value, _platform_desktop,
+	{ "ai.mendicant.aim_debug", _config_boolean, "false", "HALO_AI_MENDICANT_AIM_DEBUG", _environment_value, _platform_linux,
 		"Log the aim each actor is given." },
 	{ "display.viewmodel_shield", _config_boolean, "false", "HALO_VIEWMODEL_SHIELD", _environment_value, _platform_all,
 		"The energy shield's flare on the first-person arms too, as on the body\n"
@@ -2543,7 +2546,7 @@ static const struct config_setting config_settings[] =
 #elif defined(HALO_GUEST)
 #define CONFIG_BUILD_PLATFORM (_platform_desktop | _platform_guest)
 #else
-#define CONFIG_BUILD_PLATFORM _platform_desktop
+#define CONFIG_BUILD_PLATFORM (_platform_desktop | _platform_linux)
 #endif
 
 /* a dedicated server (server.enabled, --server, HALO_SERVER: decided as the

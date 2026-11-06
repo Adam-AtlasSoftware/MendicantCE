@@ -101,6 +101,7 @@ symbols in this file:
 #include "console.h"
 #include "game_state.h"
 #include "coop_vehicles.h" /* port: preserve replacement-vehicle homes across reverts */
+#include "mendicant/mendicant.h" /* port: port/linux/game/mendicant/mendicant_main.c */
 #include "game.h"
 #include "tag_files.h"
 #include "cache_files.h"
@@ -186,6 +187,9 @@ static game_state_before_save_proc before_save_procs[] =
 	dummy,
 	/* port: the host's vehicle home table follows the saved object handles. */
 	coop_vehicles_before_save,
+	/* port: no encounter saved held active by MENDICANT AI's orders
+	(port/linux/game/mendicant) */
+	mendicant_game_state_before_save,
 };
 
 static game_state_before_load_proc before_load_procs[] =
@@ -222,7 +226,10 @@ static game_state_after_load_proc after_load_procs[] =
 	director_initialize_for_saved_game,
 	scripted_hud_messages_clear,
 	/* port: restore matching homes or forget an unrelated disk/core load. */
-	coop_vehicles_after_load
+	coop_vehicles_after_load,
+	/* port: no firing position index beyond the level's own lists (MENDICANT
+	AI's maneuver slots), and its orders start over (port/linux/game/mendicant) */
+	mendicant_game_state_after_load
 };
 
 /* ---------- public code */

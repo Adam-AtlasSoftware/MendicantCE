@@ -503,6 +503,10 @@ FIRST_PERSON = ("video_settings/first_person", "first_person_screen")
 BRIGHTNESS_PAGE = ("video_settings/brightness", "brightness_screen")
 # (Android's: the picture on a tall screen, and portrait's frame)
 SCREEN_LAYOUT = ("video_settings/screen_layout", "screen_layout_screen")
+# (MENDICANT AI's settings, port/linux/game/mendicant: Enabled and Trained
+# Models take effect at the next map's start, the others at once; the
+# settings' save calls mendicant_settings_changed, menu_functions.c)
+CAMPAIGN_AI = ("video_settings/campaign_ai", "campaign_ai_screen")
 # (First Person's shields: the arms' flare, its color, the overshield and its color; their
 # own page, so that First Person's view rows fit)
 SHIELDS = ("video_settings/first_person/shields", "shields_screen")
@@ -957,6 +961,9 @@ PAGES = {
             ("ANIMATIONS", "game.enhanced_animations", [("CLASSIC", "false"), ("ENHANCED", "true")],
              "Enhanced: you turn with your aim in a jump and a grenade throw, and your legs keep moving as you "
              "throw. Classic moves as the Xbox did, so the AI plays as it did. Online: the host's choice.", None),
+            ("CAMPAIGN AI ›", None, _page_screen(*CAMPAIGN_AI),
+             "MENDICANT AI: the campaign's Marines and Covenant fight as units led through drills, and how well "
+             "the AI aims and fires.", None),
         ],
     },
     BRIGHTNESS_PAGE[0]: {
@@ -990,6 +997,42 @@ PAGES = {
              "hdr_display"),
             # (OpenCE's HDR DISPLAY row is left out: HDR output is display.hdr's
             # own, port/linux/README.md; its OVERSHIELD row is First Person's)
+        ],
+    },
+    CAMPAIGN_AI[0]: {
+        "screen": CAMPAIGN_AI[1], "title": "CAMPAIGN AI",
+        "rows": [
+            (SECTION, "MENDICANT AI"),
+            ("MENDICANT AI", "ai.mendicant.enabled", ON_OFF,
+             "The campaign's Marines and Covenant fight as units, an Elite or a sergeant leading each through "
+             "drills. From the next map; off: the stock AI. On the host of a campaign or co-op game only.", None),
+            ("TRAINED MODELS", "ai.mendicant.models", ON_OFF,
+             "Trained models choose the drills and each soldier's way of fighting; off: the scripted drill. From "
+             "the next map.", None),
+            ("INDIVIDUALS", "ai.mendicant.individuals", ON_OFF,
+             "Soldiers outside a unit's drill choose their own way of fighting.", None),
+            ("DRILL VARIETY", "ai.mendicant.variety",
+             [("BEST", "0"), ("0.25", "0.25"), ("0.5", "0.5"), ("0.75", "0.75"), ("TRAINED", "1"), ("1.5", "1.5"),
+              ("2", "2")],
+             "How freely units choose among the drills they rate well. Best: always the best one.", None),
+            ("DISCIPLINE", "ai.mendicant.discipline", ON_OFF,
+             "Commanded soldiers hold their nerve: fewer panics, berserk charges and lone pursuits.", None),
+            ("THREAT TARGETING", "ai.mendicant.targeting", ON_OFF,
+             "Soldiers choose targets by threat: what is hurting them, Elites first.", None),
+            ("UNIT RADIUS", "ai.mendicant.command_radius",
+             [(str(units), str(units)) for units in (15, 20, 25, 30, 35, 40, 50, 60)],
+             "How far from its leader, in world units, a soldier is still in its unit.", None),
+            (SECTION, "AIM AND FIRE"),
+            ("AIM SPREAD", "ai.mendicant.aim",
+             [(f"{value:g}", f"{value:g}") for value in (0.5, 0.65, 0.8, 1, 1.25, 1.5, 2)],
+             "How widely the AI's shots spread: 1 as the stock game; less is sharper.", None),
+            ("SPREAD BY DIFFICULTY", "ai.mendicant.aim_difficulty", ON_OFF,
+             "Wider on Easy, sharper on Heroic and Legendary.", None),
+            ("MOVING TARGETS", "ai.mendicant.aim_moving", [("HARDER", "true"), ("SAME", "false")],
+             "Aim worse at a target moving fast, and from a vehicle as it swerves.", None),
+            ("MARINE FIRE RATE", "ai.mendicant.marine_fire",
+             [(f"{value:g}", f"{value:g}") for value in (0.5, 1, 1.25, 1.5, 1.8, 2, 2.5, 3)],
+             "How fast the Marines fire, against the stock game's 1.", None),
         ],
     },
     FIRST_PERSON[0]: {
