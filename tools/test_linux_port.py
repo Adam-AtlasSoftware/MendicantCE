@@ -295,7 +295,7 @@ def test_menu_settings_exist():
     root = MENUS.parent.parent.parent
     config = (root / "port/linux/src/port_config.c").read_text()
     functions = (root / "port/linux/game/menu_functions.c").read_text()
-    known = set(re.findall(r'^\t\{ "([a-z_]+\.[a-z_]+)", _config_', config, re.M))
+    known = set(re.findall(r'^\t\{ "([a-z_]+(?:\.[a-z_]+)+)", _config_', config, re.M))
     profile = set(re.findall(r'\{ "(profile\.[a-z_]+)", \d', functions))
     for path in (MENUS / "ce").glob("*.xml"):
         for setting in re.findall(r'setting="([^"]+)"', path.read_text()):
