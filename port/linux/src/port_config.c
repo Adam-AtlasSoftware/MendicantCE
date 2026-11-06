@@ -1204,8 +1204,9 @@ static const struct config_setting config_settings[] =
 	{ "ai.mendicant.models", _config_boolean, "true", "HALO_AI_MENDICANT_MODELS", _environment_value, _platform_all,
 		"Let the trained models (ai.mendicant.weights) choose the drills and each\n"
 		"soldier's way of fighting; false, or no weights found: the scripted drill." },
-	{ "ai.mendicant.weights", _config_string, "\"mendicant\\\\models.aibw\"", "HALO_AI_MENDICANT_WEIGHTS", _environment_value, _platform_all,
-		"The models' file, looked up in the mods folder's mods as a tag file is." },
+	{ "ai.mendicant.weights", _config_string, "\"mendicant/models.aibw\"", "HALO_AI_MENDICANT_WEIGHTS", _environment_value, _platform_all,
+		"The models' file, looked up in the mods folder's mods as a tag file is\n"
+		"(mods/<mod>/tags/mendicant/models.aibw)." },
 	{ "ai.mendicant.variety", _config_real, "1.0", "HALO_AI_MENDICANT_VARIETY", _environment_value, _platform_all,
 		"How freely the models choose among the drills they rate well: 0 always\n"
 		"the best, 1 as trained, more for more variety." },
