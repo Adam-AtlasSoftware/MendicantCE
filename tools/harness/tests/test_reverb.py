@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, run  # noqa: E402
 from harness.tests.test_mixer import generated  # noqa: E402
 
-CASES = ["parameters", "response", "levels", "transition"]
+CASES = ["parameters", "response", "levels", "transition", "change"]
 
 # a fault in the reverb, and the case that must catch it
 NEGATIVE_CONTROLS = {
@@ -50,9 +50,8 @@ NEGATIVE_CONTROLS = {
                  "\tif (delay > size) delay = size;"), "response"),
     # the four channels on stereo each side's pair summed whole, not the back at -3 dB as the Xbox's downmix
     "stereo-back-whole": (("(held[0] + 0.70710678f * held[2]) * level", "(held[0] + held[2]) * level"), "levels"),
-    # a step of the game's mid-fade restarting the fade from the environment before
-    "fade-restarted": (("if (reverb.serial != environment_serial && !reverb.fade)",
-                        "if (reverb.serial != environment_serial)"), "transition"),
+    # a new environment faded to over 85 ms, as it was (a sound started with it echoing as the room before)
+    "fade-slow": (("#define REVERB_FADE_FRAMES 96", "#define REVERB_FADE_FRAMES 4096"), "change"),
 }
 
 

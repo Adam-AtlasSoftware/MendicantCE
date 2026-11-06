@@ -1928,8 +1928,8 @@ half a second.
 In stereo the world's sounds reach each ear as they would reach your head,
 as the Xbox's DirectSound put its 3D sounds through its HRTF: a sound to
 your left is a little later and duller at your right ear, one behind is
-duller, and one above or below has a tone of its own (the notch of the
-pinna's), so ahead, behind, above and below can be told apart. The Xbox did
+duller, and one above or below has a tone of its own, so ahead, behind,
+above and below can be told apart. The Xbox did
 this on any stereo output, the television's speakers too (the game asks for
 DirectSound's full HRTF whatever the dashboard's speaker setting, and the
 capture shows no crosstalk cancellation after it: the effects image's
@@ -1939,12 +1939,18 @@ on headphones and speakers alike. A capture of an Xbox set to stereo has the
 HRTF's spread: above 4 kHz the difference of its sides is as loud as their
 sum and they hardly correlate (coherence 0.15 at 4 to 8 kHz), where the pan
 has them 15 dB apart (coherence 0.94). The menus, the music, the HUD and the
-other 2D sounds are as they were. The model is the VR mode's ("Sound from
-your head": Brown and Duda's, a few filters a sound), its parameters fitted
-to the Xbox's own HRTF (the filters and delays the XDK DirectSound in the
-game's default.xbe looks up for each direction; `tools/harness/tests/hrtf.c`
-holds the figures); a sound's distance, occlusion, reverb and Doppler shift
-are the pan's. On stereo the reverb's back channels play at -3 dB with the
+other 2D sounds are as they were. Each ear hears a sound at its own level
+in nine bands and after its own delay, from a table of the directions an
+Xbox was recorded from (its final output, a sweep through Halo's own sound
+calls every 15 degrees round, at 40 and 20 degrees below and above and
+level), interpolated between them; above and below 40 degrees, towards the
+mean of the rows at 40 (`hrtf_place`). Recorded and played here the same
+way, every one of the 120 directions is within 3 dB of the Xbox's in each
+octave and each ear, and within 60 us in the time between the ears (below
+1.5 kHz, mostly within 10 us); and it agrees with the figures measured on
+the Xbox's own filters (`tools/harness/tests/hrtf.c` holds both). The VR
+mode's HRTF ("Sound from your head") is the same. A sound's distance,
+occlusion, reverb and Doppler shift are the pan's. On stereo the reverb's back channels play at -3 dB with the
 front ones, as the Xbox's stereo downmix played its back speakers' sound.
 
 `audio.spatial` (Settings > Audio > 3D AUDIO) chooses: `"auto"` and
@@ -1973,11 +1979,12 @@ sound plays on headphones; the world's sounds through the HRTF"):
   later), or those connected: wired, Bluetooth and USB headsets and
   headphones, hearing aids.
 
-The HRTF costs about 15 ns a 3D sound a frame on an Apple M2 core: the
-mixer's bench (`tools/harness/tests/test_mixer.py bench 24 16 indoor hrtf`,
-24 sounds indoors) takes 3.6% of a core through it and 1.9% panned (the VR
-mode's HRTF took 4.7% before it had a pass of its own); a game on Blood
-Gulch with bots, 2.0% and 1.4%. `test_mixer.py circle out.wav hrtf` (or
+The HRTF costs a few tens of nanoseconds a 3D sound a frame: the mixer's
+bench (`tools/harness/tests/test_mixer.py bench 24 16 indoor hrtf`, 24
+sounds indoors) takes 4.8% of a Ryzen AI Max+ 395 core through it and 2.2%
+panned, as the model before the recorded table did (on an Apple M2 core
+that model took 3.6% and 1.9%; a game on Blood Gulch with bots, 2.0% and
+1.4%). `test_mixer.py circle out.wav hrtf` (or
 `pan`) writes a sound going round the listener, to listen to.
 
 ## Sound delay
@@ -5192,14 +5199,11 @@ each 10 ms it mixes, with no step.
   your body, not your head: they stay where they are as your head turns.
 - The HRTF (`vr.hrtf`, the default): each sound reaches each ear as it
   would your head's, not panned between them: a little later at the far ear
-  (up to 0.66 ms, the way around a head), duller there and brighter at the
-  near ear (the head's shadow, above about 1 kHz), a notch of the pinna's
-  that rises with the sound from below your ears (6 kHz) to above them (11
-  kHz), and a sound behind duller (up to 7 dB above 2.5 kHz). It is a model
-  of a head (Brown and Duda's), not one measured: it needs no dataset, and
-  costs a few filters a sound. Over all directions a sound is as bright as
-  panned. Behind and before, above and below are best told apart by turning
-  your head, which the listener now follows. `false`: panned left and right,
+  (up to 0.72 ms), duller there and brighter at the near ear, a tone of its
+  own from below or above, and a sound behind duller (11 dB at 8 kHz, 30 dB
+  at 16 kHz): the stereo game's HRTF, as recorded from an Xbox ("3D audio").
+  Behind and before, above and below are best told apart by turning your
+  head, which the listener now follows. `false`: panned left and right,
   as on the flat screen (from your head all the same).
 - Only the first player's, in the headset; on the flat screen, and played
   flat (`vr.enabled = false`), the sound is the flat game's.
@@ -6356,11 +6360,12 @@ does; making the eye images from the four layers cost 0.2 ms more there.
   place too, while the game's camera did not turn; in the skipped ride in,
   whose frames are many ticks apart, the tick's listener led the
   interpolated view by up to 2.7 m, as the flat game's does.
-- The HRTF (`vr.hrtf`, `src/dsound_sdl.c`, `hrtf_place`) is Brown and
-  Duda's structural model: for each mono 3D voice a high-shelf of the
-  pinna's shadow behind, a peaking notch (RBJ's), a 64-frame delay line,
-  and for each ear a delay read from it (Catmull-Rom) and a one-pole
-  one-zero head shadow, all ramped over each mix. Measured as above, with a
+- The HRTF (`vr.hrtf`, `src/dsound_sdl.c`, `hrtf_place`) was then Brown
+  and Duda's structural model (now a table recorded from an Xbox, "3D
+  audio"): for each mono 3D voice a high-shelf of the pinna's shadow
+  behind, a peaking notch (RBJ's), a 64-frame delay line, and for each ear
+  a delay read from it (Catmull-Rom) and a one-pole one-zero head shadow,
+  all ramped over each mix. Measured as above, with a
   sound 3 m away level with the head (`debug.vr_test_sound`,
   `debug.audio_log`, `debug.audio_record`): 90 degrees to the left, the
   right ear 0.63 ms later, the high frequencies 5.7 dB up at the left ear

@@ -107,33 +107,17 @@ voice is shifted either way (an octave) */
 is a glide, not a step of pitch */
 #define DOPPLER_SMOOTHING_SECONDS 0.08f
 
-/* the HRTF (hrtf): the frames a voice keeps for its ears' delays, the head's
-radius (metres: Woodworth's delay) and the speed of sound (metres a
-second), the head shadow's corner (Hz), its least alpha and the angle from
-the ear where it is least (degrees), its alpha over all directions
-(diffuse), the level between the ears at every frequency (dB each ear, at
-the ear's axis), the distance within which a sound's direction fades out
-(world units), the pinna's notch (its frequency from the elevation low to
-the elevation high, its depth and its Q) and the shadow of the pinna behind
-(its frequency and its depth). Fitted to the Xbox's own HRTF (see the HRTF's
-comment below) */
+/* the HRTF (hrtf): the frames each ear keeps for its delay, the distance
+within which a sound's direction fades out (world units), the bands each
+ear's level is set in (HRTF_BANDS, split at hrtf_crossovers), and the
+directions the table (hrtf_table) holds: every 15 degrees round from ahead
+to behind, at 40, 20 and 0 degrees below and above. Measured on an Xbox
+(see the HRTF's comment below) */
 #define HRTF_FRAMES 64
-#define HRTF_HEAD_RADIUS 0.0885f
-#define HRTF_SPEED_OF_SOUND 343.0f
-#define HRTF_SHADOW_CORNER 1815.0f
-#define HRTF_SHADOW_ALPHA_MIN 0.103f
-#define HRTF_SHADOW_THETA_MIN 162.4f
-#define HRTF_DIFFUSE_ALPHA 1.097f
-#define HRTF_LEVEL_DECIBELS 2.07f
 #define HRTF_NEAR 0.25f
-#define HRTF_NOTCH_LOW 7040.0f
-#define HRTF_NOTCH_HIGH 14290.0f
-#define HRTF_NOTCH_ELEVATION_LOW -16.0f
-#define HRTF_NOTCH_ELEVATION_HIGH 17.4f
-#define HRTF_NOTCH_DECIBELS -11.4f
-#define HRTF_NOTCH_Q 1.85f
-#define HRTF_REAR_FREQUENCY 2110.0f
-#define HRTF_REAR_DEPTH 0.99f
+#define HRTF_BANDS 9
+#define HRTF_AZIMUTHS 13
+#define HRTF_ELEVATIONS 5
 /* the crossfade between the pan and the HRTF when the choice changes
 (audio.spatial): 100 ms */
 #define HRTF_FADE_FRAMES 4800
@@ -158,16 +142,13 @@ struct voice_packet
 the mixer ramps from one mix to the next as it does the gains */
 struct hrtf_parameters
 {
-	/* each ear's delay (frames; left, right), and its head shadow, a one-pole
-	one-zero filter's zero (its pole is the same for all: hrtf) */
+	/* each ear's delay (frames; left, right), and its weights of the
+	bands' low passes and of the sound itself (hrtf_process: each band at
+	its level, HRTF_BANDS of them told apart by HRTF_BANDS - 1 low passes) */
 	float delay[2];
-	float shadow_b0[2], shadow_b1[2];
-	/* the pinna's notch (a peaking filter's b0, b1, b2, a1, a2) at its
-	frequency, and how much of the high frequencies a sound behind loses
-	(0 to 1) */
-	float notch[5];
-	float notch_frequency;
-	float rear;
+	float weights[2][HRTF_BANDS];
+	/* (each ear's level in each band, dB: for the log, not ramped) */
+	float decibels[2][HRTF_BANDS];
 	/* each ear's gain: the pan's in the middle (-3 dB), with the voice's
 	distance and direct path, the head's filters doing the rest */
 	float gain;
@@ -302,17 +283,13 @@ struct sdl_stream
 	/* through the HRTF (hrtf): whether its filters ran in the last mix (their
 	states are the voice's), how much of the voice they play (0 the pan's to
 	1 theirs, crossfaded over HRTF_FADE_FRAMES as the choice changes), the
-	parameters the mixer is ramping from, the voice's last HRTF_FRAMES frames
-	as the ears take them (its direct path's, notched; the oldest first),
-	and the filters' states: the rear's low pass, the notch's last two
-	inputs and outputs, each ear's shadow's last input and output */
+	parameters the mixer is ramping from, each ear's last HRTF_FRAMES frames
+	before its delay (the oldest first), and the bands' low passes' states */
 	BOOL hrtf_on;
 	float hrtf_mix;
 	struct hrtf_parameters hrtf_current;
-	float hrtf_frames[HRTF_FRAMES];
-	float hrtf_rear;
-	float hrtf_notch[4];
-	float hrtf_shadow[2][2];
+	float hrtf_frames[2][HRTF_FRAMES];
+	float hrtf_bands[HRTF_BANDS - 1][2];
 };
 
 /* the game's side of the voices (the hand-off), which the mixer only tries,
@@ -607,83 +584,251 @@ listener's: the camera's, or in VR the head as it is tracked,
 sound_manager.c refresh_listener), rather than panned between them: a
 sound behind or above is told from one ahead or below. The Xbox's
 DirectSound put its 3D voices through its own HRTF (DirectSoundUseFullHRTF)
-and left the 2D ones (the menus, the music, the HUD) dry; so here. Not the
-Xbox's measured filters but a model of a head's (Brown and Duda, "A
-structural model for binaural sound synthesis", 1998), a few filters a
-voice, its parameters from the direction, fitted to the Xbox's HRTF:
-	- each ear its own delay, from the time the sound takes around a sphere
-	  of a head's size (Woodworth's), in whole frames, as the Xbox's: to the
-	  far ear up to 32 frames (0.67 ms) later;
-	- each ear the head's shadow, a one-pole one-zero shelf above about 2
-	  kHz, from 5 dB louder facing the sound to 21 dB quieter in the shadow
-	  (Brown and Duda's), the louder and quieter about what a sound from
-	  everywhere has (the diffuse field: HRTF_DIFFUSE_ALPHA), so that over
-	  all directions the sound is no brighter nor duller than panned;
-	- the ears' level apart at every frequency, the nearer ear up to 2 dB up
-	  and the farther 2 dB down, as the Xbox's (Brown and Duda's shelf has
-	  none below it; the Xbox's 4 dB to the side is its largest cue below 1
-	  kHz but the time);
-	- the pinna's notch, its frequency rising with the sound from below the
-	  ears (7 kHz) to above them (14 kHz), as a pinna's first notch does
-	  (it is what tells up from down);
-	- a sound behind loses some of its high frequencies (the pinna's shadow,
-	  above 2 kHz, down to 20 dB at 16 kHz behind).
-The direction is DirectSound's own: its azimuth and elevation from the
-ratio of the sides of each octant, 45 degrees times the lesser over the
-greater (not the arc tangent; 30 degrees is heard at 26), as the Xbox's
-calculator (CDirectSound3DCalculator) worked them out for its table.
+and left the 2D ones (the menus, the music, the HUD) dry; so here.
 
-The figures come from the Xbox's own code and filters (tools/harness/tests
-hrtf.c holds them, and test_hrtf.py says how to measure them again from
-one's own default.xbe): the XDK DirectSound linked into the game looks up a
-pair of 31-tap filters and a whole-frame delay for each direction, on a grid
-of 6 degrees of elevation and 3 to 12 of azimuth, and hands them to the
-MCPX's voice processor. Their delays, the ears' levels apart in each
-octave, the notch and the loss behind, over every 15 degrees round and every
-10 from 40 below to 60 above, are what the model's parameters are fitted to
-by least squares.
+Each ear hears the voice at its own level in each of HRTF_BANDS bands (to
+500 Hz, 1, 2, 3, 4.5, 6.7, 10 and 14 kHz, and above) and after its own
+delay, from a table of the directions an Xbox was recorded from (its final
+output, a sweep 2 m away through Halo's own DirectSound calls, every 15
+degrees round at 40, 20 and 0 degrees below and above, the sweep through
+OpenH1's mixer with no HRTF beside it): for each, each ear's level in each
+band (dB, least squares over its third octaves and octaves, the bands'
+filters as they are here) and the left ear's delay after the right for a
+sound to the right (frames: the Xbox's time between the ears, the lag of
+their greatest cross-correlation below 1.5 kHz, less what the bands add to
+it). A sound to the left is the mirror of one to the right. Between the
+directions recorded, the table is interpolated (the levels in dB), round
+and up and down; above and below 40 degrees, towards the poles, the mean
+over all round of the rows at 40 degrees, the ears alike and at once.
+What the Xbox's recordings showed, and the model this replaces (Brown and
+Duda's) did not:
+	- the time between the ears hardly falls with the elevation: to the side
+	  0.72 ms level, 0.70 at 20 degrees up or down, 0.61 at 40 (a sphere's
+	  falls with its cosine, 0.53 at 40);
+	- ahead, the ears' high frequencies a few dB up and down by the band
+	  (5 kHz down 3 dB, 6.3 kHz down 5, 12.5 kHz level, 16 kHz down 4);
+	- behind, a loss that grows with the frequency, 2 dB at 2.5 kHz, 11 at
+	  8 kHz, 30 at 16 kHz, not a low pass's from 2 kHz;
+	- to the side, the near ear 4 to 5 dB up to 1.5 kHz, level about 3 kHz
+	  and 3 to 5 dB up again from 5 to 12 kHz; the far ear 9 to 23 dB down
+	  above 3 kHz;
+	- below and above, each its own peaks and dips (40 degrees below, 3 dB up
+	  at 1.2 to 1.6 kHz; above, 3 to 4 dB down from 5 kHz and 8 dB at 16
+	  kHz).
+The bands: HRTF_BANDS - 1 low passes (2nd order, Butterworth) of the
+voice, each band one's output less the one below's, the top band the voice
+less the highest low pass's; so the bands add up to the voice itself, and a
+direction whose bands are all at one level is that level and nothing else.
+Each ear sums the low passes' outputs and the voice, weighted (the band's
+gain less the next's), into its own line, and reads it its delay later
+(Catmull-Rom), whole frames for a still sound, as the Xbox's.
 
-On stereo the Xbox played its table all round, behind duller than ahead,
-and every 3D voice from its front mix bins alone; so here, on "auto" and
-"headphones" alike. (On Dolby Surround and Dolby Digital, DirectSound
-instead heard a sound behind through the filters of the direction mirrored
-ahead, azimuth 180 - azimuth, and gave its back mix bins 0.5 + (1 -
-|elevation| / 90)(|azimuth| / 90 - 1) of the power, clamped, for the back
-speakers to place it: so 5.1 here, surround_split.)
+A sound close to the head (within HRTF_NEAR) fades to the middle, the ears
+alike and at once, as the pan centres one within its minimum distance. The
+parameters are ramped across each mix, as the gains are: a turn of the head
+moves the sound smoothly from ear to ear, with no step. Distance, the direct
+path's obstruction and occlusion (its low pass), the room send and the
+Doppler shift are the pan's, before the head's. When the choice changes
+(audio.spatial set mid-game), each voice crossfades between the pan and the
+HRTF over HRTF_FADE_FRAMES, both running meanwhile: no click. "speakers"
+keeps the pan. On 5.1 the same, on the front and back pairs, a sound behind
+heard as the direction mirrored ahead (surround_split). */
 
-A sound close to the head (within HRTF_NEAR) fades to the middle, as the pan
-centres one within its minimum distance. The parameters are ramped across
-each mix, as the gains are: a turn of the head moves the sound smoothly
-from ear to ear, with no step. Distance, the direct path's obstruction and
-occlusion (its low pass), the room send and the Doppler shift are the
-pan's, before the head's filters. When the choice changes (audio.spatial
-set mid-game), each voice crossfades between the pan and the HRTF over
-HRTF_FADE_FRAMES, both running meanwhile: no click. "speakers" keeps the
-pan. On 5.1 the same, on the front and back pairs (surround_split). */
+/* a direction of the table: each ear's level in each band (dB) and the left
+ear's delay (frames) after the right, for a sound to the right */
+struct hrtf_direction
+{
+	float left[HRTF_BANDS], right[HRTF_BANDS];
+	float delay;
+};
+
+static const float hrtf_crossovers[HRTF_BANDS - 1] = { 500, 1000, 2000, 3000, 4500, 6700, 10000, 14000 };
+
+/* round from ahead (0 degrees) to behind (180) to the right, every 15
+degrees; 40, 20 and 0 degrees below, and 20 and 40 above */
+static const struct hrtf_direction hrtf_table[HRTF_ELEVATIONS][HRTF_AZIMUTHS] =
+{
+	/* -40 degrees */
+	{
+		{ { -0.3f, -1.2f, 4.2f, 0.1f, 0.8f, -12.2f, -4.4f, 3.6f, -2.8f },
+		  { -0.3f, -1.2f, 4.2f, 0.1f, 0.8f, -12.2f, -4.4f, 3.6f, -2.8f }, 0.00f }, /* 0 */
+		{ { -0.8f, -1.2f, 2.6f, -2.0f, 0.4f, -18.3f, -3.3f, 0.7f, -7.7f },
+		  { 0.8f, -0.6f, 5.0f, 1.5f, 1.6f, -7.6f, -3.9f, 4.9f, -0.5f }, 4.00f }, /* 15 */
+		{ { -1.1f, -1.9f, 0.6f, -2.2f, -5.1f, -22.9f, -0.8f, -5.6f, -11.2f },
+		  { 1.3f, 0.6f, 5.2f, 2.3f, 3.2f, -11.4f, -0.3f, 5.6f, -2.0f }, 7.50f }, /* 30 */
+		{ { -1.6f, -2.3f, -5.7f, -1.5f, -9.6f, -26.9f, -7.0f, -12.3f, -16.9f },
+		  { 2.0f, 2.2f, 4.9f, 3.9f, 2.7f, -16.1f, 7.5f, -13.1f, -1.8f }, 16.50f }, /* 45 */
+		{ { -1.3f, -1.7f, -5.9f, -7.0f, -40.8f, -45.5f, -9.4f, -26.9f, -23.6f },
+		  { 2.6f, 2.8f, 5.8f, 1.5f, 3.5f, -14.4f, 7.0f, -5.0f, -2.0f }, 21.50f }, /* 60 */
+		{ { -1.2f, -0.4f, -6.4f, -40.6f, -33.9f, -14.1f, -30.1f, -17.1f, -33.5f },
+		  { 2.7f, 2.9f, 6.4f, -1.9f, 3.9f, -6.3f, 0.2f, 6.2f, -14.0f }, 22.56f }, /* 75 */
+		{ { -1.2f, -1.1f, -2.9f, -29.0f, -14.7f, -16.7f, -16.5f, -18.1f, -22.7f },
+		  { 2.9f, 2.9f, 6.7f, -1.0f, 0.8f, 0.5f, -11.9f, 7.1f, -0.2f }, 25.00f }, /* 90 */
+		{ { -1.4f, -1.0f, -5.5f, -36.2f, -19.6f, -13.6f, -28.4f, -16.1f, -23.1f },
+		  { 2.6f, 2.3f, 6.3f, 0.5f, -3.3f, 0.1f, -12.5f, 6.5f, 0.0f }, 23.00f }, /* 105 */
+		{ { -1.4f, -1.7f, -9.1f, -5.6f, -34.7f, -39.8f, -11.9f, -20.8f, -38.9f },
+		  { 2.5f, 2.0f, 6.0f, 1.4f, -5.7f, -2.6f, -8.9f, 6.3f, -2.2f }, 21.19f }, /* 120 */
+		{ { -1.6f, -3.4f, -4.9f, -3.0f, -12.7f, -20.7f, -6.8f, -19.2f, -22.6f },
+		  { 1.3f, 1.1f, 5.7f, 0.5f, -6.7f, -8.3f, -6.7f, 2.1f, -10.6f }, 14.06f }, /* 135 */
+		{ { -1.7f, -2.5f, -1.0f, -3.0f, -6.2f, -15.9f, -6.3f, -16.7f, -22.0f },
+		  { 0.7f, -0.2f, 5.0f, 0.6f, -6.8f, -15.3f, -4.2f, -4.3f, -16.2f }, 8.12f }, /* 150 */
+		{ { -1.0f, -2.0f, 0.8f, -0.1f, -5.4f, -17.6f, -6.1f, -14.5f, -23.6f },
+		  { -0.1f, -1.0f, 4.5f, -0.9f, -5.9f, -16.7f, -4.4f, -9.8f, -22.1f }, 4.12f }, /* 165 */
+		{ { -0.7f, -1.5f, 2.9f, 0.1f, -6.8f, -16.9f, -5.1f, -13.3f, -23.6f },
+		  { -0.7f, -1.5f, 2.9f, 0.1f, -6.8f, -16.9f, -5.1f, -13.3f, -23.6f }, 0.00f }, /* 180 */
+	},
+	/* -20 degrees */
+	{
+		{ { 0.1f, 0.3f, 3.3f, -13.8f, 5.8f, -9.8f, -14.3f, 4.8f, -3.8f },
+		  { 0.1f, 0.3f, 3.3f, -13.8f, 5.8f, -9.8f, -14.3f, 4.8f, -3.8f }, 0.00f }, /* 0 */
+		{ { -0.4f, -0.9f, 1.2f, -14.8f, 4.5f, -15.7f, -17.4f, 2.2f, -8.4f },
+		  { 0.4f, 1.0f, 4.7f, -16.6f, 6.5f, -3.5f, -13.5f, 5.8f, -0.5f }, 4.19f }, /* 15 */
+		{ { -0.7f, -1.6f, -1.3f, -10.5f, -1.6f, -18.0f, -14.7f, -3.9f, -13.1f },
+		  { 1.4f, 1.9f, 6.0f, -14.9f, 7.4f, -1.2f, -4.7f, 5.9f, -1.9f }, 9.94f }, /* 30 */
+		{ { -0.8f, -2.0f, -4.7f, -4.4f, -6.3f, -12.3f, -16.5f, -9.1f, -18.5f },
+		  { 2.0f, 2.6f, 6.2f, -11.8f, 7.6f, -3.9f, 4.3f, -1.6f, -1.1f }, 18.31f }, /* 45 */
+		{ { -0.9f, -1.1f, -4.2f, -13.6f, -14.3f, -12.5f, -15.9f, -11.2f, -21.2f },
+		  { 3.1f, 3.1f, 6.6f, -4.9f, 4.4f, 2.1f, 2.3f, 2.5f, -0.4f }, 24.38f }, /* 60 */
+		{ { -1.1f, 1.0f, -6.5f, -8.1f, -13.6f, -36.4f, -13.9f, -18.4f, -21.0f },
+		  { 3.2f, 3.3f, 6.6f, -0.2f, -3.7f, 5.8f, -3.4f, 5.0f, 1.9f }, 27.19f }, /* 75 */
+		{ { -1.2f, 0.6f, -3.6f, -23.7f, -6.0f, -25.1f, -15.5f, -16.2f, -19.9f },
+		  { 3.2f, 3.1f, 6.7f, 0.3f, -10.1f, 4.9f, -2.8f, 4.6f, 2.7f }, 28.81f }, /* 90 */
+		{ { -1.3f, 1.2f, -8.3f, -31.9f, -9.2f, -37.9f, -17.7f, -15.5f, -21.4f },
+		  { 2.8f, 2.7f, 6.7f, 0.1f, -13.2f, 1.8f, 0.1f, 3.5f, 2.5f }, 26.13f }, /* 105 */
+		{ { -1.1f, -0.7f, -7.7f, -10.1f, -8.3f, -26.6f, -10.9f, -22.0f, -21.4f },
+		  { 2.5f, 2.6f, 6.6f, -0.1f, -12.5f, -1.6f, 0.6f, 2.9f, 0.0f }, 24.56f }, /* 120 */
+		{ { -1.2f, -2.3f, -8.2f, -1.7f, -10.8f, -33.4f, -14.4f, -13.5f, -25.0f },
+		  { 1.6f, 1.7f, 6.7f, -8.5f, -3.1f, -9.5f, -1.0f, 0.6f, -8.9f }, 18.56f }, /* 135 */
+		{ { -1.4f, -2.2f, -2.6f, -4.9f, -5.6f, -26.2f, -12.9f, -18.7f, -27.5f },
+		  { 0.6f, 1.0f, 5.6f, -8.4f, -0.5f, -18.5f, -1.8f, -7.1f, -15.1f }, 10.50f }, /* 150 */
+		{ { -1.2f, -1.3f, 0.4f, -3.1f, -2.5f, -25.8f, -9.6f, -15.5f, -24.0f },
+		  { -0.1f, -0.2f, 4.4f, -9.0f, -1.0f, -16.6f, -6.3f, -17.3f, -20.4f }, 4.81f }, /* 165 */
+		{ { -0.7f, -0.8f, 2.5f, -3.4f, -3.4f, -24.6f, -6.6f, -23.7f, -26.0f },
+		  { -0.7f, -0.8f, 2.5f, -3.4f, -3.4f, -24.6f, -6.6f, -23.7f, -26.0f }, 0.00f }, /* 180 */
+	},
+	/* level */
+	{
+		{ { 1.1f, 0.6f, 0.4f, 0.6f, 2.1f, -1.4f, -13.0f, 2.2f, -4.4f },
+		  { 1.1f, 0.6f, 0.4f, 0.6f, 2.1f, -1.4f, -13.0f, 2.2f, -4.4f }, 0.00f }, /* 0 */
+		{ { 0.6f, -0.3f, -1.1f, -2.8f, 1.7f, -5.4f, -16.4f, 0.7f, -13.2f },
+		  { 1.8f, 1.5f, 2.3f, -1.1f, 5.1f, -0.1f, -7.5f, 2.2f, 0.0f }, 4.69f }, /* 15 */
+		{ { 0.4f, -1.7f, -4.4f, -1.8f, -7.8f, -10.9f, -14.3f, -5.8f, -18.1f },
+		  { 2.1f, 2.7f, 3.6f, -1.2f, 6.7f, -0.2f, 0.1f, 1.3f, -0.7f }, 10.19f }, /* 30 */
+		{ { 0.2f, -0.6f, -10.6f, 0.3f, -10.2f, -24.0f, -14.0f, -10.7f, -20.1f },
+		  { 3.0f, 3.6f, 4.7f, -1.3f, 7.8f, -1.6f, 5.0f, -2.9f, -1.2f }, 19.56f }, /* 45 */
+		{ { -0.5f, 1.4f, -7.8f, -24.8f, -3.8f, -29.2f, -18.5f, -14.4f, -27.6f },
+		  { 3.4f, 4.3f, 5.4f, 0.5f, 5.2f, 1.1f, 5.6f, -0.6f, -0.4f }, 24.81f }, /* 60 */
+		{ { -0.9f, 1.4f, -2.6f, -18.8f, -16.7f, -24.6f, -12.0f, -18.3f, -20.9f },
+		  { 3.4f, 4.4f, 5.3f, 2.7f, -0.1f, 1.4f, 5.2f, 3.4f, 1.3f }, 29.06f }, /* 75 */
+		{ { -0.9f, 0.6f, 0.0f, -11.1f, -9.1f, -23.4f, -11.4f, -15.0f, -20.9f },
+		  { 3.6f, 4.5f, 5.5f, 3.6f, -3.7f, -0.3f, 5.0f, 5.3f, 1.3f }, 31.50f }, /* 90 */
+		{ { -1.0f, 1.3f, -2.6f, -28.9f, -16.7f, -11.6f, -19.4f, -14.2f, -22.4f },
+		  { 3.2f, 4.3f, 5.2f, 3.5f, -5.7f, -5.4f, 5.0f, 5.5f, 0.1f }, 28.44f }, /* 105 */
+		{ { -0.7f, 1.3f, -10.4f, -12.8f, -6.2f, -37.7f, -16.6f, -15.7f, -28.3f },
+		  { 2.9f, 4.3f, 4.3f, 5.0f, -12.5f, -17.6f, 6.5f, 2.3f, -3.9f }, 25.12f }, /* 120 */
+		{ { -0.3f, -1.7f, -8.7f, -1.4f, -12.3f, -25.1f, -11.9f, -21.4f, -25.7f },
+		  { 1.9f, 3.7f, 3.6f, 4.2f, -16.1f, -21.8f, 5.6f, -8.7f, -10.6f }, 19.94f }, /* 135 */
+		{ { -0.6f, -2.1f, -3.3f, -4.8f, -5.7f, -30.2f, -10.2f, -31.3f, -28.3f },
+		  { 1.1f, 2.6f, 2.7f, 1.9f, -6.3f, -20.6f, 0.1f, -20.9f, -18.2f }, 11.00f }, /* 150 */
+		{ { -0.5f, -0.9f, -0.6f, -3.4f, -1.8f, -24.1f, -8.4f, -39.3f, -26.6f },
+		  { 0.8f, 1.1f, 2.6f, -1.8f, -6.0f, -9.5f, -19.0f, -24.8f, -54.2f }, 5.44f }, /* 165 */
+		{ { 0.2f, -0.1f, 1.5f, -2.2f, -3.1f, -13.3f, -9.8f, -31.9f, -26.2f },
+		  { 0.2f, -0.1f, 1.5f, -2.2f, -3.1f, -13.3f, -9.8f, -31.9f, -26.2f }, 0.00f }, /* 180 */
+	},
+	/* +20 degrees */
+	{
+		{ { 1.5f, 0.2f, -0.6f, 2.8f, 0.3f, -0.4f, -6.3f, -1.3f, -6.8f },
+		  { 1.5f, 0.2f, -0.6f, 2.8f, 0.3f, -0.4f, -6.3f, -1.3f, -6.8f }, 0.00f }, /* 0 */
+		{ { 1.0f, -0.9f, -1.8f, -0.9f, 1.2f, -3.9f, -9.7f, -5.1f, -11.9f },
+		  { 2.2f, 0.9f, 0.7f, 3.7f, 1.4f, 2.3f, -4.7f, 1.1f, -2.6f }, 4.25f }, /* 15 */
+		{ { 0.2f, -2.0f, -4.2f, -2.2f, -8.6f, -6.2f, -18.0f, -9.2f, -16.4f },
+		  { 3.1f, 1.9f, 1.6f, 4.8f, 1.6f, 4.2f, -0.1f, 1.5f, -2.6f }, 9.94f }, /* 30 */
+		{ { 0.6f, -1.5f, -9.4f, 0.0f, -10.5f, -17.9f, -19.5f, -15.1f, -24.7f },
+		  { 3.7f, 3.2f, 2.5f, 5.3f, 2.6f, 2.5f, 6.3f, -6.8f, -1.1f }, 18.38f }, /* 45 */
+		{ { 0.2f, 0.4f, -5.5f, -17.3f, -6.8f, -18.8f, -19.8f, -16.7f, -26.2f },
+		  { 4.1f, 3.9f, 2.9f, 6.3f, -0.3f, 3.4f, 6.2f, -0.4f, -2.3f }, 24.31f }, /* 60 */
+		{ { -0.2f, 1.6f, -4.7f, -6.0f, -27.0f, -30.3f, -10.4f, -30.8f, -25.6f },
+		  { 4.1f, 3.7f, 2.8f, 7.1f, -6.4f, 2.4f, 5.3f, 4.2f, -10.0f }, 27.94f }, /* 75 */
+		{ { -0.2f, 0.4f, -0.2f, -15.0f, -3.0f, -12.7f, -8.3f, -22.4f, -24.8f },
+		  { 4.3f, 3.6f, 3.2f, 7.3f, -9.9f, -0.7f, 5.5f, 5.5f, -8.0f }, 30.56f }, /* 90 */
+		{ { -0.5f, 1.0f, -2.5f, -15.6f, -10.3f, -17.2f, -15.8f, -16.4f, -25.5f },
+		  { 4.4f, 3.4f, 3.7f, 7.4f, -11.8f, -4.9f, 5.6f, 5.6f, -7.2f }, 28.50f }, /* 105 */
+		{ { -0.2f, 0.2f, -5.6f, -13.0f, -8.2f, -32.9f, -13.6f, -21.8f, -27.9f },
+		  { 4.0f, 2.9f, 3.8f, 6.7f, -14.6f, -15.4f, 7.0f, 1.3f, -10.2f }, 24.88f }, /* 120 */
+		{ { 0.0f, -1.7f, -7.2f, -2.2f, -12.0f, -28.0f, -11.3f, -21.0f, -30.0f },
+		  { 3.2f, 2.3f, 3.0f, 5.4f, -8.9f, -18.5f, 5.0f, -9.3f, -17.3f }, 19.06f }, /* 135 */
+		{ { -0.4f, -2.1f, -3.6f, -4.5f, -10.4f, -8.7f, -16.6f, -22.8f, -29.5f },
+		  { 2.6f, 1.2f, 2.3f, 3.7f, -8.3f, -8.3f, -1.8f, -21.7f, -19.2f }, 11.00f }, /* 150 */
+		{ { 0.2f, -1.0f, -1.8f, -0.7f, -5.7f, -7.7f, -12.3f, -27.3f, -27.3f },
+		  { 1.7f, -0.1f, 1.7f, 1.6f, -12.5f, -1.8f, -19.1f, -25.4f, -25.7f }, 5.19f }, /* 165 */
+		{ { 1.0f, -0.6f, 0.2f, 1.5f, -14.0f, -2.2f, -16.3f, -24.9f, -27.5f },
+		  { 1.0f, -0.6f, 0.2f, 1.5f, -14.0f, -2.2f, -16.3f, -24.9f, -27.5f }, 0.00f }, /* 180 */
+	},
+	/* +40 degrees */
+	{
+		{ { 1.1f, -0.2f, -0.1f, 2.3f, -1.5f, -0.9f, -7.0f, -0.1f, -17.9f },
+		  { 1.1f, -0.2f, -0.1f, 2.3f, -1.5f, -0.9f, -7.0f, -0.1f, -17.9f }, 0.00f }, /* 0 */
+		{ { 0.6f, -0.8f, -1.2f, -2.2f, 2.5f, -10.9f, -5.4f, -5.6f, -21.5f },
+		  { 2.0f, 0.1f, 1.4f, 3.3f, -1.8f, 3.4f, -13.2f, 4.4f, -15.2f }, 3.88f }, /* 15 */
+		{ { 0.4f, -1.6f, -2.9f, -4.0f, -0.7f, -12.4f, -4.2f, -12.6f, -20.9f },
+		  { 2.4f, 0.7f, 2.2f, 3.6f, -1.8f, 5.6f, -11.7f, 5.4f, -2.3f }, 7.62f }, /* 30 */
+		{ { 0.6f, -1.5f, -6.8f, -2.8f, -4.8f, -6.6f, -29.7f, -15.2f, -17.5f },
+		  { 2.7f, 2.3f, 3.0f, 2.3f, 2.4f, 2.3f, 4.8f, 0.5f, 0.0f }, 16.81f }, /* 45 */
+		{ { 0.4f, -0.7f, -4.4f, -4.7f, -14.4f, -5.3f, -18.9f, -12.0f, -25.6f },
+		  { 2.9f, 3.0f, 3.2f, 3.2f, 2.4f, 0.0f, 6.3f, 0.4f, -0.4f }, 22.31f }, /* 60 */
+		{ { 0.3f, -0.8f, -1.5f, -15.2f, -8.7f, -9.7f, -9.6f, -17.9f, -21.9f },
+		  { 3.5f, 2.9f, 3.1f, 4.4f, 0.4f, 0.4f, 4.2f, 4.3f, -1.9f }, 24.44f }, /* 75 */
+		{ { 0.2f, -0.7f, -1.1f, -17.8f, -5.2f, -20.1f, -10.4f, -16.5f, -28.5f },
+		  { 3.6f, 2.9f, 3.2f, 4.6f, -0.2f, -1.4f, 3.3f, 5.9f, -5.1f }, 25.31f }, /* 90 */
+		{ { 0.2f, -1.1f, -1.3f, -14.6f, -8.5f, -20.2f, -6.5f, -22.8f, -26.0f },
+		  { 3.1f, 3.0f, 3.5f, 4.2f, 0.0f, -8.0f, 4.9f, 4.4f, -10.1f }, 24.69f }, /* 105 */
+		{ { 0.1f, -1.2f, -2.9f, -8.5f, -12.1f, -14.5f, -6.4f, -36.7f, -26.2f },
+		  { 3.0f, 2.4f, 3.2f, 4.1f, -1.5f, -11.6f, 5.0f, 1.7f, -12.3f }, 23.00f }, /* 120 */
+		{ { 0.2f, -2.0f, -5.5f, -2.8f, -20.5f, -3.9f, -25.1f, -28.1f, -28.3f },
+		  { 2.1f, 1.6f, 3.4f, 2.3f, -3.5f, -7.9f, 2.5f, -16.1f, -21.5f }, 15.44f }, /* 135 */
+		{ { 0.1f, -2.0f, -3.5f, -1.7f, -17.3f, -3.5f, -12.8f, -35.4f, -27.1f },
+		  { 1.7f, 0.3f, 2.9f, 1.3f, -15.4f, 2.1f, -9.8f, -17.9f, -24.1f }, 8.44f }, /* 150 */
+		{ { 0.5f, -1.3f, -2.0f, 0.5f, -11.5f, -3.8f, -10.3f, -31.6f, -26.4f },
+		  { 1.4f, -0.6f, 2.0f, 0.7f, -18.4f, 1.6f, -11.5f, -19.2f, -24.0f }, 4.25f }, /* 165 */
+		{ { 1.0f, -1.0f, 0.4f, 1.2f, -19.2f, -0.1f, -9.6f, -25.8f, -24.9f },
+		  { 1.0f, -1.0f, 0.4f, 1.2f, -19.2f, -0.1f, -9.6f, -25.8f, -24.9f }, 0.00f }, /* 180 */
+	},
+};
+static const struct hrtf_direction hrtf_poles[2] =
+{
+	{ { 0.5f, 0.1f, 3.4f, -0.7f, -1.7f, -8.1f, -1.4f, 1.1f, -5.8f },
+	  { 0.5f, 0.1f, 3.4f, -0.7f, -1.7f, -8.1f, -1.4f, 1.1f, -5.8f }, 0.0f },
+	{ { 1.6f, 0.5f, 0.9f, 1.1f, -2.5f, -1.3f, -0.3f, -0.6f, -8.1f },
+	  { 1.6f, 0.5f, 0.9f, 1.1f, -2.5f, -1.3f, -0.3f, -0.6f, -8.1f }, 0.0f },
+};
 
 static struct
 {
-	/* the head shadow's pole (a1 of y = b0 x + b1 x' - a1 y', the same for
-	every direction) and the bilinear transform's constant over the pole;
-	the rear's low pass's coefficient */
-	float shadow_a1;
-	float shadow_k;
-	float rear_lowpass;
+	/* each low pass's b0 (and b2), b1, a1 and a2 (a0 1) */
+	float lowpass[HRTF_BANDS - 1][4];
 } hrtf;
 
 static void hrtf_initialize(void)
 {
-	float pole = 2.0f * 3.14159265f * HRTF_SHADOW_CORNER;
+	int band;
 
-	hrtf.shadow_k = 1.0f / tanf(pole / (2.0f * OUTPUT_RATE));
-	hrtf.shadow_a1 = (1.0f - hrtf.shadow_k) / (1.0f + hrtf.shadow_k);
-	hrtf.rear_lowpass = expf(-2.0f * 3.14159265f * HRTF_REAR_FREQUENCY / OUTPUT_RATE);
+	/* (RBJ's low pass, Q 1 / sqrt(2)) */
+	for (band = 0; band < HRTF_BANDS - 1; band++)
+	{
+		float w = 2.0f * 3.14159265f * hrtf_crossovers[band] / OUTPUT_RATE;
+		float alpha = sinf(w) / (2.0f * 0.70710678f), cosine = cosf(w), a0 = 1.0f + alpha;
+
+		hrtf.lowpass[band][0] = 0.5f * (1.0f - cosine) / a0;
+		hrtf.lowpass[band][1] = (1.0f - cosine) / a0;
+		hrtf.lowpass[band][2] = -2.0f * cosine / a0;
+		hrtf.lowpass[band][3] = (1.0f - alpha) / a0;
+	}
 }
 
 /* DirectSound's azimuth (degrees, -180 to 180, the right positive) and
 elevation (-90 to 90) of a direction right, up and ahead: in each octant
 45 degrees times the lesser side over the greater, and 90 less the
-greater's turn past 45 */
+greater's turn past 45 (surround_split's) */
 static void hrtf_angles(float right, float up, float ahead, float *azimuth, float *elevation)
 {
 	float horizontal = sqrtf(right * right + ahead * ahead), height = fabsf(up);
@@ -705,64 +850,85 @@ static void hrtf_angles(float right, float up, float ahead, float *azimuth, floa
 		*azimuth = -*azimuth;
 }
 
+/* out blended from a to b by t (0 to 1) */
+static void hrtf_blend(const struct hrtf_direction *a, const struct hrtf_direction *b, float t,
+	struct hrtf_direction *out)
+{
+	int band;
+
+	for (band = 0; band < HRTF_BANDS; band++)
+	{
+		out->left[band] = a->left[band] + (b->left[band] - a->left[band]) * t;
+		out->right[band] = a->right[band] + (b->right[band] - a->right[band]) * t;
+	}
+	out->delay = a->delay + (b->delay - a->delay) * t;
+}
+
+/* the table at azimuth (degrees, 0 ahead to 180 behind, to the right) and
+elevation (-90 to 90), interpolated round, and up and down between its rows
+and the poles */
+static void hrtf_lookup(float azimuth, float elevation, struct hrtf_direction *out)
+{
+	static const float rows[HRTF_ELEVATIONS + 2] = { -90.0f, -40.0f, -20.0f, 0.0f, 20.0f, 40.0f, 90.0f };
+	float column = azimuth / 15.0f, round;
+	struct hrtf_direction at[2];
+	int first, row, side;
+
+	column = column < 0.0f ? 0.0f : column > HRTF_AZIMUTHS - 1 ? (float)(HRTF_AZIMUTHS - 1) : column;
+	first = (int)column < HRTF_AZIMUTHS - 1 ? (int)column : HRTF_AZIMUTHS - 2;
+	round = column - (float)first;
+	elevation = elevation < -90.0f ? -90.0f : elevation > 90.0f ? 90.0f : elevation;
+	for (row = 0; row < HRTF_ELEVATIONS && elevation > rows[row + 1]; row++)
+		;
+	for (side = 0; side < 2; side++)
+	{
+		int at_row = row + side;
+
+		if (at_row == 0)
+			at[side] = hrtf_poles[0];
+		else if (at_row == HRTF_ELEVATIONS + 1)
+			at[side] = hrtf_poles[1];
+		else
+			hrtf_blend(&hrtf_table[at_row - 1][first], &hrtf_table[at_row - 1][first + 1], round, &at[side]);
+	}
+	hrtf_blend(&at[0], &at[1], (elevation - rows[row]) / (rows[row + 1] - rows[row]), out);
+}
+
 /* the HRTF's parameters for a sound right, up and ahead of the head, as
 far away (world units) */
 static void hrtf_place(float right, float up, float ahead, float distance, struct hrtf_parameters *parameters)
 {
-	float strength = distance < HRTF_NEAR ? distance / HRTF_NEAR : 1.0f;
-	float lateral = 0.0f, rise = 0.0f, front = 1.0f, delay[2], elevation, frequency, a, w, alpha, a0;
-	int ear;
+	float strength = distance < HRTF_NEAR ? distance / HRTF_NEAR : 1.0f, azimuth = 0.0f, elevation = 0.0f;
+	struct hrtf_direction direction;
+	int mirrored = 0, ear, band;
 
 	if (distance > 1.0e-4f)
 	{
-		float azimuth;
-
-		hrtf_angles(right, up, ahead, &azimuth, &elevation);
-		azimuth *= 3.14159265f / 180.0f;
-		elevation *= 3.14159265f / 180.0f;
-		lateral = sinf(azimuth) * cosf(elevation);
-		rise = sinf(elevation);
-		front = cosf(azimuth) * cosf(elevation);
+		azimuth = atan2f(fabsf(right), ahead) * (180.0f / 3.14159265f);
+		elevation = atan2f(up, sqrtf(right * right + ahead * ahead)) * (180.0f / 3.14159265f);
+		mirrored = right < 0.0f;
 	}
+	hrtf_lookup(azimuth, elevation, &direction);
 	for (ear = 0; ear < 2; ear++)
 	{
-		/* the angle from the ear's axis: Brown and Duda's alpha, 2 facing
-		the sound, HRTF_SHADOW_ALPHA_MIN at HRTF_SHADOW_THETA_MIN from it */
-		float cosine = ear ? lateral : -lateral;
-		float theta = acosf(cosine < -1.0f ? -1.0f : (cosine > 1.0f ? 1.0f : cosine));
-		float shadow = 1.0f + strength *
-			(((1.0f + 0.5f * HRTF_SHADOW_ALPHA_MIN) + (1.0f - 0.5f * HRTF_SHADOW_ALPHA_MIN) *
-			cosf(theta * (180.0f / HRTF_SHADOW_THETA_MIN))) / HRTF_DIFFUSE_ALPHA - 1.0f);
-		float gain = powf(10.0f, strength * HRTF_LEVEL_DECIBELS * cosf(theta) / 20.0f);
+		/* (a sound to the left: the right's ears swapped) */
+		const float *decibels = ear ^ mirrored ? direction.right : direction.left;
+		float gain[HRTF_BANDS];
 
-		parameters->shadow_b0[ear] = gain * (1.0f + shadow * hrtf.shadow_k) / (1.0f + hrtf.shadow_k);
-		parameters->shadow_b1[ear] = gain * (1.0f - shadow * hrtf.shadow_k) / (1.0f + hrtf.shadow_k);
-		/* Woodworth's: the way around the head to the ear */
-		delay[ear] = theta < 0.5f * 3.14159265f ? 1.0f - cosf(theta) : theta - 0.5f * 3.14159265f + 1.0f;
+		for (band = 0; band < HRTF_BANDS; band++)
+		{
+			parameters->decibels[ear][band] = strength * decibels[band];
+			gain[band] = powf(10.0f, parameters->decibels[ear][band] / 20.0f);
+		}
+		/* (each band a low pass less the one below: each low pass's weight
+		its band's gain less the next's) */
+		for (band = 0; band < HRTF_BANDS - 1; band++)
+			parameters->weights[ear][band] = gain[band] - gain[band + 1];
+		parameters->weights[ear][HRTF_BANDS - 1] = gain[HRTF_BANDS - 1];
 	}
 	/* (the nearer ear at no delay; whole frames, as the Xbox's) */
-	for (ear = 0; ear < 2; ear++)
-	{
-		parameters->delay[ear] = floorf(strength * (delay[ear] - (delay[0] < delay[1] ? delay[0] : delay[1])) *
-			(HRTF_HEAD_RADIUS / HRTF_SPEED_OF_SOUND) * OUTPUT_RATE + 0.5f);
-	}
-	/* the notch, from HRTF_NOTCH_ELEVATION_LOW to _HIGH (RBJ's peaking
-	filter) */
-	elevation = asinf(rise < -1.0f ? -1.0f : (rise > 1.0f ? 1.0f : rise)) * (180.0f / 3.14159265f);
-	elevation = (elevation - HRTF_NOTCH_ELEVATION_LOW) / (HRTF_NOTCH_ELEVATION_HIGH - HRTF_NOTCH_ELEVATION_LOW);
-	frequency = HRTF_NOTCH_LOW + (HRTF_NOTCH_HIGH - HRTF_NOTCH_LOW) *
-		(elevation < 0.0f ? 0.0f : (elevation > 1.0f ? 1.0f : elevation));
-	a = powf(10.0f, strength * HRTF_NOTCH_DECIBELS / 40.0f);
-	w = 2.0f * 3.14159265f * frequency / OUTPUT_RATE;
-	alpha = sinf(w) / (2.0f * HRTF_NOTCH_Q);
-	a0 = 1.0f + alpha / a;
-	parameters->notch[0] = (1.0f + alpha * a) / a0;
-	parameters->notch[1] = -2.0f * cosf(w) / a0;
-	parameters->notch[2] = (1.0f - alpha * a) / a0;
-	parameters->notch[3] = parameters->notch[1];
-	parameters->notch[4] = (1.0f - alpha / a) / a0;
-	parameters->notch_frequency = frequency;
-	parameters->rear = front < 0.0f ? -front * strength * HRTF_REAR_DEPTH : 0.0f;
+	parameters->delay[mirrored] = floorf(strength * direction.delay + 0.5f);
+	parameters->delay[!mirrored] = 0.0f;
 }
 
 /* the frame delay frames before newest (at least 1: one frame each side of
@@ -784,17 +950,14 @@ static float hrtf_read(const float *newest, float delay)
 /* parameters moved on by step (a frame's share of a ramp) */
 static void hrtf_step(struct hrtf_parameters *parameters, const struct hrtf_parameters *step)
 {
-	int index;
+	int ear, band;
 
-	for (index = 0; index < 2; index++)
+	for (ear = 0; ear < 2; ear++)
 	{
-		parameters->delay[index] += step->delay[index];
-		parameters->shadow_b0[index] += step->shadow_b0[index];
-		parameters->shadow_b1[index] += step->shadow_b1[index];
+		parameters->delay[ear] += step->delay[ear];
+		for (band = 0; band < HRTF_BANDS; band++)
+			parameters->weights[ear][band] += step->weights[ear][band];
 	}
-	for (index = 0; index < 5; index++)
-		parameters->notch[index] += step->notch[index];
-	parameters->rear += step->rear;
 	parameters->gain += step->gain;
 	parameters->pair[0] += step->pair[0];
 	parameters->pair[1] += step->pair[1];
@@ -805,74 +968,67 @@ ear, added to output (frames of output_channels: on 5.1 to the front pair
 and the back pair, at their gains) at mix of the voice (a frame's step of it
 ramp_mix: the crossfade with the pan, which the voice's mix added), from
 the voice's parameters (stream->hrtf_current) to target, ramped over
-ramp_frames; a pass of its own over the mix, its delay line one run of
+ramp_frames; a pass of its own over the mix, each ear's line one run of
 frames (the voice's last and these), so that it keeps to registers */
 static void hrtf_process(struct sdl_stream *stream, const float *direct, float *output, unsigned long frames,
 	unsigned long ramp_frames, const struct hrtf_parameters *target, float mix, float ramp_mix)
 {
-	float line[HRTF_FRAMES + MIX_CHUNK_FRAMES];
+	float line[2][HRTF_FRAMES + MIX_CHUNK_FRAMES];
 	struct hrtf_parameters now = stream->hrtf_current, ramp;
-	float rear = stream->hrtf_rear, notch[4], shadow[2][2];
+	float state[HRTF_BANDS - 1][2];
 	unsigned long frame;
-	int index;
+	int ear, band;
 
-	for (index = 0; index < 2; index++)
+	for (ear = 0; ear < 2; ear++)
 	{
-		ramp.delay[index] = (target->delay[index] - now.delay[index]) / (float)ramp_frames;
-		ramp.shadow_b0[index] = (target->shadow_b0[index] - now.shadow_b0[index]) / (float)ramp_frames;
-		ramp.shadow_b1[index] = (target->shadow_b1[index] - now.shadow_b1[index]) / (float)ramp_frames;
+		ramp.delay[ear] = (target->delay[ear] - now.delay[ear]) / (float)ramp_frames;
+		for (band = 0; band < HRTF_BANDS; band++)
+			ramp.weights[ear][band] = (target->weights[ear][band] - now.weights[ear][band]) / (float)ramp_frames;
+		memcpy(line[ear], stream->hrtf_frames[ear], sizeof(stream->hrtf_frames[ear]));
 	}
-	for (index = 0; index < 5; index++)
-		ramp.notch[index] = (target->notch[index] - now.notch[index]) / (float)ramp_frames;
-	ramp.rear = (target->rear - now.rear) / (float)ramp_frames;
 	ramp.gain = (target->gain - now.gain) / (float)ramp_frames;
 	ramp.pair[0] = (target->pair[0] - now.pair[0]) / (float)ramp_frames;
 	ramp.pair[1] = (target->pair[1] - now.pair[1]) / (float)ramp_frames;
-	memcpy(notch, stream->hrtf_notch, sizeof(notch));
-	memcpy(shadow, stream->hrtf_shadow, sizeof(shadow));
-	memcpy(line, stream->hrtf_frames, sizeof(stream->hrtf_frames));
+	memcpy(state, stream->hrtf_bands, sizeof(state));
 	for (frame = 0; frame < frames; frame++)
 	{
-		/* behind, the high frequencies taken off; the pinna's notch; then
-		each ear its own delay and the head's shadow */
-		float x = direct[frame], notched;
-		int ear;
+		/* the low passes (transposed direct form II), then each ear its
+		bands' levels and its delay */
+		float x = direct[frame], low[HRTF_BANDS - 1];
 
-		rear = flush_denormal(x + hrtf.rear_lowpass * (rear - x));
-		x -= now.rear * (x - rear);
-		notched = now.notch[0] * x + now.notch[1] * notch[0] + now.notch[2] * notch[1] - now.notch[3] * notch[2] -
-			now.notch[4] * notch[3];
-		notched = flush_denormal(notched);
-		notch[1] = notch[0];
-		notch[0] = x;
-		notch[3] = notch[2];
-		notch[2] = notched;
-		line[HRTF_FRAMES + frame] = notched;
+		for (band = 0; band < HRTF_BANDS - 1; band++)
+		{
+			const float *c = hrtf.lowpass[band];
+			float y = c[0] * x + state[band][0];
+
+			state[band][0] = flush_denormal(c[1] * x - c[2] * y + state[band][1]);
+			state[band][1] = flush_denormal(c[0] * x - c[3] * y);
+			low[band] = y;
+		}
 		for (ear = 0; ear < 2; ear++)
 		{
-			float heard = hrtf_read(line + HRTF_FRAMES + frame, 1.0f + now.delay[ear]);
-			float shadowed = flush_denormal(now.shadow_b0[ear] * heard + now.shadow_b1[ear] * shadow[ear][0] -
-				hrtf.shadow_a1 * shadow[ear][1]);
+			const float *weights = now.weights[ear];
+			float heard = weights[HRTF_BANDS - 1] * x;
 
-			shadow[ear][0] = heard;
-			shadow[ear][1] = shadowed;
-			shadowed *= now.gain * mix;
+			for (band = 0; band < HRTF_BANDS - 1; band++)
+				heard += weights[band] * low[band];
+			line[ear][HRTF_FRAMES + frame] = heard;
+			heard = hrtf_read(line[ear] + HRTF_FRAMES + frame, 1.0f + now.delay[ear]) * now.gain * mix;
 			if (output_channels == 6)
 			{
-				output[frame * 6 + ear] += shadowed * now.pair[0];
-				output[frame * 6 + 4 + ear] += shadowed * now.pair[1];
+				output[frame * 6 + ear] += heard * now.pair[0];
+				output[frame * 6 + 4 + ear] += heard * now.pair[1];
 			}
 			else
-				output[frame * 2 + ear] += shadowed;
+				output[frame * 2 + ear] += heard;
 		}
 		hrtf_step(&now, &ramp);
 		mix += ramp_mix;
 	}
-	memcpy(stream->hrtf_frames, line + frames, sizeof(stream->hrtf_frames));
+	for (ear = 0; ear < 2; ear++)
+		memcpy(stream->hrtf_frames[ear], line[ear] + frames, sizeof(stream->hrtf_frames[ear]));
 	stream->hrtf_current = *target;
-	stream->hrtf_rear = rear;
-	memcpy(stream->hrtf_notch, notch, sizeof(notch));
-	memcpy(stream->hrtf_shadow, shadow, sizeof(shadow));
+	memcpy(stream->hrtf_bands, state, sizeof(state));
 }
 
 /* audio.spatial ("auto", "headphones" or "speakers"; another is "auto"):
@@ -1532,9 +1688,7 @@ static void mix_voice(struct sdl_stream *stream, float *output, float *send, uns
 	{
 		stream->hrtf_current = target_hrtf;
 		memset(stream->hrtf_frames, 0, sizeof(stream->hrtf_frames));
-		stream->hrtf_rear = 0.0f;
-		memset(stream->hrtf_notch, 0, sizeof(stream->hrtf_notch));
-		memset(stream->hrtf_shadow, 0, sizeof(stream->hrtf_shadow));
+		memset(stream->hrtf_bands, 0, sizeof(stream->hrtf_bands));
 	}
 	stream->hrtf_on = hrtf_running;
 	stream->hrtf_mix = hrtf_mix_end;
@@ -1817,10 +1971,15 @@ every retail default.xbe), redone in floating point:
 A change of environment crossfades each delay's read from its old length to
 its new one, and each gain and filter, over REVERB_FADE_FRAMES: what is
 reverberating carries on, without the click of a jump or the pitch shift of
-a sliding delay (the DSP faded each tap out and in again, one by one); the
-game moves the environment a step each tick on the way to another
-(scenario.c), and each step waits for the fade to the last to end (mix).
-audio.reverb = false fades the reverb out over as long and stops it. Once
+a sliding delay (the DSP faded each tap out and in again, one by one). The
+fade is short, 2 ms: recorded on an Xbox, a click played as the
+environment was set, 2 ms into its sound, echoed as the new room alone, in
+every environment (over 85 ms, as it was, its echo here was the room before's
+for the most part, and 1 to 4 dB under the Xbox's, and the cave's, its
+reverberation turned over, faded through nothing). The game moves the
+environment a step each tick on the way to another (scenario.c), and each
+step waits for the fade to the last to end (mix). audio.reverb = false fades
+the reverb out over REVERB_LEVEL_FADE_FRAMES and stops it. Once
 nothing has been sent for REVERB_QUIET_FRAMES and the reverberation is 120 dB
 down, the reverb stops until something is sent again (outdoors, in the
 menus). */
@@ -1832,7 +1991,8 @@ menus). */
 #define REVERB_LINES 4
 #define REVERB_CHAIN 4
 #define REVERB_COMB_SIZE 720
-#define REVERB_FADE_FRAMES 4096 /* 85 ms */
+#define REVERB_FADE_FRAMES 96 /* 2 ms */
+#define REVERB_LEVEL_FADE_FRAMES 4096 /* 85 ms */
 /* the input's delay, the chain and a loop, played out */
 #define REVERB_QUIET_FRAMES (2 * (REVERB_INPUT_SIZE * REVERB_CHAIN + REVERB_LOOP_SIZE))
 #define REVERB_QUIET_PEAK 1.0e-6f
@@ -2238,8 +2398,8 @@ static void reverb_process(const float *send, float *output, unsigned long frame
 		peak = fabsf(send[frame]) > peak ? fabsf(send[frame]) : peak;
 		if (reverb.fade && !--reverb.fade)
 			reverb.from = reverb.to;
-		reverb.level = clamp_real(target_level, reverb.level - 1.0f / REVERB_FADE_FRAMES,
-			reverb.level + 1.0f / REVERB_FADE_FRAMES);
+		reverb.level = clamp_real(target_level, reverb.level - 1.0f / REVERB_LEVEL_FADE_FRAMES,
+			reverb.level + 1.0f / REVERB_LEVEL_FADE_FRAMES);
 	}
 	reverb.quiet = peak > REVERB_QUIET_PEAK ? 0 : reverb.quiet + frames;
 }
@@ -3997,15 +4157,11 @@ static void voices_log(void)
 
 		if (report->hrtf_on)
 		{
-			/* (the shadows' gains at the highest frequencies: (b0 - b1) /
-			(1 - a1)) */
-			snprintf(heard, sizeof(heard), "; HRTF: the right ear %+.0f us after the left, high frequencies left "
-				"%+.1f dB, right %+.1f dB, notch %.0f Hz, behind %+.1f dB",
-				(parameters->delay[1] - parameters->delay[0]) * 1.0e6f / OUTPUT_RATE,
-				20.0f * log10f((parameters->shadow_b0[0] - parameters->shadow_b1[0]) / (1.0f - hrtf.shadow_a1)),
-				20.0f * log10f((parameters->shadow_b0[1] - parameters->shadow_b1[1]) / (1.0f - hrtf.shadow_a1)),
-				parameters->notch_frequency, 20.0f * log10f(1.0f - parameters->rear * (1.0f - (1.0f - hrtf.rear_lowpass) /
-				(1.0f + hrtf.rear_lowpass))));
+			snprintf(heard, sizeof(heard), "; HRTF: the right ear %+.0f us after the left; left ear 250 Hz %+.1f "
+				"dB, 2 kHz %+.1f, 8 kHz %+.1f; right ear %+.1f, %+.1f, %+.1f",
+				(parameters->delay[1] - parameters->delay[0]) * 1.0e6f / OUTPUT_RATE, parameters->decibels[0][0],
+				parameters->decibels[0][2], parameters->decibels[0][6], parameters->decibels[1][0],
+				parameters->decibels[1][2], parameters->decibels[1][6]);
 		}
 		platform_log("audio: voice %p: %.2f m ahead, %.2f right, %.2f up (minimum distance %.2f m); gains left %.1f "
 			"dB, right %.1f dB; Doppler x%.3f%s", (const void *)report->stream, report->ahead, report->right,

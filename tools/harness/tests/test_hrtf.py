@@ -1,5 +1,7 @@
 """The HRTF of dsound_sdl.c against the Xbox's (hrtf.c): the time between the ears, their levels apart in each
-octave, the pinna's notch and what a sound behind loses, over a grid of directions.
+octave and what a sound behind loses, over a grid of directions, against the Xbox's own filters; and each ear's
+level in each octave and the time between the ears against recordings of an Xbox's output, every 30 degrees round
+at 40, 20 and 0 degrees below and above.
 
     python tools/harness/tests/test_hrtf.py metrics   our figures, beside the Xbox's
 (MIXER_SOURCE=path: of another dsound_sdl.c, to compare)
@@ -29,27 +31,29 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, run  # noqa: E402
 from harness.tests.test_mixer import generated  # noqa: E402
 
-CASES = ["delays", "levels", "notch", "rear"]
+CASES = ["delays", "levels", "rear", "recorded"]
 
 # a fault in the HRTF, and the case that must catch it
 NEGATIVE_CONTROLS = {
-    # the direction's angles as arc tangents, not DirectSound's octants (30 degrees heard at 30, not 26)
-    "arc-tangent-angles": (("*azimuth = side / front * 45.0f;", "*azimuth = atanf(side / front) * 57.2957795f;"),
-                           "delays"),
+    # the time between the ears 15% short (a sphere's, at 40 degrees up or down)
+    "delays-short": (("floorf(strength * direction.delay + 0.5f)", "floorf(0.85f * strength * direction.delay + 0.5f)"),
+                     "delays"),
     # the ears' delays to a fraction of a frame, not whole ones as the Xbox's
-    "fractional-delays": (("(HRTF_HEAD_RADIUS / HRTF_SPEED_OF_SOUND) * OUTPUT_RATE + 0.5f);",
-                           "(HRTF_HEAD_RADIUS / HRTF_SPEED_OF_SOUND) * OUTPUT_RATE + 0.25f) + 0.25f;"), "delays"),
-    # the head shadow's corner as Brown and Duda's (2c / a, about 1.2 kHz): the ears too far apart at 1 to 4 kHz
-    "brown-duda-corner": (("float pole = 2.0f * 3.14159265f * HRTF_SHADOW_CORNER;",
-                           "float pole = 2.0f * HRTF_SPEED_OF_SOUND / (HRTF_HEAD_RADIUS * HRTF_DIFFUSE_ALPHA);"),
-                          "levels"),
-    # no level between the ears below the shelf
-    "no-broadband-level": (("#define HRTF_LEVEL_DECIBELS 2.07f", "#define HRTF_LEVEL_DECIBELS 0.0f"), "levels"),
-    # the notch's law as it was (6 kHz at 30 below to 11 kHz at 60 above)
-    "notch-as-it-was": (("#define HRTF_NOTCH_ELEVATION_LOW -16.0f\n#define HRTF_NOTCH_ELEVATION_HIGH 17.4f",
-                         "#define HRTF_NOTCH_ELEVATION_LOW -30.0f\n#define HRTF_NOTCH_ELEVATION_HIGH 60.0f"), "notch"),
-    # behind as it was (up to 7 dB above 2.5 kHz)
-    "rear-as-it-was": (("#define HRTF_REAR_DEPTH 0.99f", "#define HRTF_REAR_DEPTH 0.55f"), "rear"),
+    "fractional-delays": (("floorf(strength * direction.delay + 0.5f)",
+                           "(floorf(strength * direction.delay + 0.25f) + 0.25f)"), "delays"),
+    # both ears at the far ear's levels: no level between them
+    "ears-alike": (("const float *decibels = ear ^ mirrored ? direction.right : direction.left;",
+                    "const float *decibels = mirrored ? direction.right : direction.left;"), "levels"),
+    # behind heard as the direction mirrored ahead (the stereo Xbox played its table all round)
+    "rear-as-front": (("azimuth = atan2f(fabsf(right), ahead)", "azimuth = atan2f(fabsf(right), fabsf(ahead))"),
+                      "rear"),
+    # no elevation: above and below as level
+    "no-elevation": (("elevation = atan2f(up,", "elevation = 0.0f * atan2f(up,"), "recorded"),
+    # above and below swapped
+    "upside-down": (("elevation = atan2f(up,", "elevation = atan2f(-up,"), "recorded"),
+    # the bands an octave up
+    "bands-moved": (("{ 500, 1000, 2000, 3000, 4500, 6700, 10000, 14000 }",
+                     "{ 1000, 2000, 3000, 4500, 6700, 10000, 14000, 20000 }"), "recorded"),
 }
 
 

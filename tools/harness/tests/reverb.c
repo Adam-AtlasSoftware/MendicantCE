@@ -25,7 +25,10 @@ from a default.xbe):
 	  (scenario.c scenario_get_sound_environment) on the way from one to
 	  another, and the reverb follows: each fade goes on from where the last
 	  got to, never back towards the environment left, and it reaches the
-	  new one soon after the game does.
+	  new one soon after the game does;
+	- "change": a new environment set while the reverb reverberates is
+	  the reverb's within 2 ms, as an Xbox's recordings show (a click
+	  played 2 ms after the environment was set echoed as the new room).
 "metrics" prints the figures of each environment, beside the Xbox's;
 "measure" prints those of four-channel responses (raw floats) given, in the
 form of xbox_figures.
@@ -726,6 +729,52 @@ int main(int argc, char **argv)
 		reverb within two fades after */
 		CHECK(!reverb.silent && settled && settled < 30 * 1600 + 2 * REVERB_FADE_FRAMES + 128,
 			"the reverb reached the mountains' at %.0f ms", settled * 1000.0 / OUTPUT_RATE);
+		return 0;
+	}
+
+	/* the hallway reverberating (a 3D voice of noise sending to it), then
+	the cave set at once: within 2 ms of the mix taking it, the reverb is
+	the cave's, its fade over */
+	CASE("change")
+	{
+		struct sdl_stream *stream = calloc(1, sizeof(*stream));
+		DSI3DL2LISTENER cave = listener_from_tag(&environments[2]);
+		float output[32 * 2];
+		unsigned long chunk, frame = 0, n;
+
+		resampler_initialize();
+		resampler_phases_initialize();
+		stream->channels = 1;
+		stream->sample_rate = OUTPUT_RATE;
+		stream->volume = 1.0f;
+		stream->has_3d = TRUE;
+		stream->mode = DS3DMODE_NORMAL;
+		stream->position[2] = 2.0f;
+		stream->minimum_distance = 1.0f;
+		stream->maximum_distance = 50.0f;
+		stream->mixing[0].frames = OUTPUT_RATE;
+		stream->mixing[0].samples = malloc(stream->mixing[0].frames * sizeof(short));
+		for (n = 0; n < stream->mixing[0].frames; n++)
+			stream->mixing[0].samples[n] = (short)(((n * 2654435761u) >> 16) & 0x1fff) - 0x1000;
+		stream->packets[0] = stream->mixing[0];
+		stream->packet_count = stream->submitted = stream->mixing_count = stream->mixing_next = 1;
+		resampler_reset(stream);
+		streams = stream;
+		environment_set = listener_from_tag(&environments[5]);
+		environment_changed = TRUE;
+		for (chunk = 0; chunk < 100; chunk++)
+			mix(output, 32, FALSE);
+		CHECK(!reverb.silent && !reverb.fade, "the hallway's reverb not running, or still fading in");
+		environment_set = cave;
+		environment_changed = TRUE;
+		for (chunk = 0; chunk < 4 && (reverb.fade || memcmp(&reverb.properties, &cave, sizeof(cave))); chunk++)
+		{
+			mix(output, 32, FALSE);
+			frame += 32;
+		}
+		CHECK(!reverb.fade && !memcmp(&reverb.properties, &cave, sizeof(cave)) && reverb.from.input_gain == -0.5f,
+			"%.1f ms after the cave was set, the reverb still fading to it (%d frames to go)",
+			frame * 1000.0 / OUTPUT_RATE, (int)reverb.fade);
 		return 0;
 	}
 
