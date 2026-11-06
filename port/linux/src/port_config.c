@@ -75,8 +75,9 @@ enum
 	/* (a dedicated server's, of the desktop builds: written into config.toml
 	only in server mode) */
 	_platform_server = 64,
-	/* (of the desktop builds, only a native Linux one: MENDICANT AI's
-	training bridge and logs, which the guest builds compile out) */
+	/* (of the desktop builds, the Linux ones: MENDICANT AI's training
+	bridge and logs, which Windows and the Apple builds compile out; port:
+	the 64-bit Linux builds' guest too) */
 	_platform_linux = 128,
 };
 
@@ -2599,8 +2600,11 @@ static const struct config_setting config_settings[] =
 #define CONFIG_BUILD_PLATFORM (_platform_desktop | _platform_windows | _platform_guest)
 #elif defined(HALO_IOS)
 #define CONFIG_BUILD_PLATFORM (_platform_desktop | _platform_guest | _platform_ios)
-#elif defined(HALO_GUEST)
+#elif defined(HALO_GUEST) && defined(HALO_MACOS)
 #define CONFIG_BUILD_PLATFORM (_platform_desktop | _platform_guest)
+#elif defined(HALO_GUEST)
+/* (port: the 64-bit Linux builds' guest has MENDICANT AI's training bridge) */
+#define CONFIG_BUILD_PLATFORM (_platform_desktop | _platform_guest | _platform_linux)
 #else
 #define CONFIG_BUILD_PLATFORM (_platform_desktop | _platform_linux)
 #endif

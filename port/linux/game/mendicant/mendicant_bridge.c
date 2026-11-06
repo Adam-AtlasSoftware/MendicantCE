@@ -8,11 +8,14 @@ and the answer the models give, in one of two places.
   once by mendicant_runtime_answer (mendicant_runtime.c) when the weights are
   loaded. With no weights there is no bridge (mendicant_bridge is NULL), and
   the Covenant run the drill alone, as the hook library did without brain.py.
-- Shared memory (desktop Linux, ai.mendicant.bridge is a path): the file
+- Shared memory (desktop Linux, ai.mendicant.bridge is a path; port: the
+  Linux builds' x32 and arm64_32 guests too): the file
   trainer.py or brain.py maps, with the layout ai_brain.c had (magic
   0x41494231, 34948 bytes), so both run against this build unchanged. The
-  game publishes request_sequence last; the model answers with
-  response_sequence last. In training the game runs as fast as it can, so a
+  game publishes request_sequence last (a release store); the model answers
+  with response_sequence last (read with acquire). In the 64-bit builds' guest
+  the file is opened and mapped by the guest's own system calls, which the
+  host performs (port/android/host/host_syscall.c: MAP_SHARED passes through). In training the game runs as fast as it can, so a
   request waits up to 200 ms for the trainer's answer.
 */
 
@@ -29,9 +32,9 @@ void platform_log(char const *format, ...);
 
 /* ---------- constants */
 
-/* (the 32-bit desktop Linux build's: not the 64-bit builds' guest, nor
-Windows, Android or the web) */
-#if !defined(HALO_WINDOWS) && !defined(HALO_ANDROID) && !defined(HALO_WEB) && !defined(HALO_GUEST)
+/* (desktop Linux's, port: the Linux builds' guest included; not Windows,
+Android, the Apple builds or the web) */
+#if !defined(HALO_WINDOWS) && !defined(HALO_ANDROID) && !defined(HALO_WEB) && !defined(HALO_MACOS)
 #define MENDICANT_SHARED_MEMORY 1
 #endif
 
@@ -152,8 +155,7 @@ void mendicant_bridge_submit(
 	if (!bridge)
 		return;
 
-	__sync_synchronize();
-	bridge->request_sequence++;
+	MENDICANT_BRIDGE_PUBLISH(bridge->request_sequence, bridge->request_sequence + 1);
 
 #ifdef MENDICANT_SHARED_MEMORY
 	if (bridge == mendicant_shared_bridge)
@@ -164,8 +166,7 @@ void mendicant_bridge_submit(
 
 			do
 			{
-				__sync_synchronize();
-				if (bridge->response_sequence == bridge->request_sequence)
+				if (MENDICANT_BRIDGE_READ(bridge->response_sequence) == bridge->request_sequence)
 					break;
 				posix_mendicant_yield();
 			}
@@ -188,6 +189,5 @@ boolean mendicant_bridge_answered(
 
 	if (!bridge)
 		return FALSE;
-	__sync_synchronize();
-	return bridge->response_sequence == bridge->request_sequence;
+	return MENDICANT_BRIDGE_READ(bridge->response_sequence) == bridge->request_sequence;
 }

@@ -45,6 +45,12 @@ trainer.py and brain.py (64-bit) read it unchanged. Packed to 4: the game's
 -malign-double would move step_mask (mendicant_bridge.c checks the offsets).
 The game publishes request_sequence last; the model answers with
 response_sequence last. long is 32 bits in every build (ILP32). */
+/* port: the counters that publish and answer across processes (the trainer,
+brain.py) are stored with release and read with acquire, so that the 64-bit
+builds' arm64_32 guest orders the fields written before them as x86 does */
+#define MENDICANT_BRIDGE_PUBLISH(counter, value) __atomic_store_n(&(counter), (value), __ATOMIC_RELEASE)
+#define MENDICANT_BRIDGE_READ(counter) __atomic_load_n(&(counter), __ATOMIC_ACQUIRE)
+
 #pragma pack(push, 4)
 struct model_bridge
 {

@@ -53,10 +53,10 @@ void platform_log(char const *format, ...);
 
 /* ---------- constants */
 
-/* the training bridge, its runs and the logs: desktop Linux only (the
-32-bit build: not the 64-bit builds' guest, whose system calls are the
-host's, nor Windows, Android or the web) */
-#if !defined(HALO_WINDOWS) && !defined(HALO_ANDROID) && !defined(HALO_WEB) && !defined(HALO_GUEST)
+/* the training bridge, its runs and the logs: desktop Linux only (port: the
+Linux builds' guest included, whose system calls the host makes; not
+Windows, Android, the Apple builds or the web) */
+#if !defined(HALO_WINDOWS) && !defined(HALO_ANDROID) && !defined(HALO_WEB) && !defined(HALO_MACOS)
 #define MENDICANT_DESKTOP 1
 #endif
 
@@ -509,8 +509,7 @@ static void mendicant_episode_end(
 	mendicant_command_episode_report(bridge); /* chains, samples, leashes, discipline */
 	mendicant_episode_over = TRUE;
 	mendicant_orders_clear_all();
-	__sync_synchronize();
-	bridge->episodes++;
+	MENDICANT_BRIDGE_PUBLISH(bridge->episodes, bridge->episodes + 1);
 
 	return;
 }
@@ -672,7 +671,7 @@ static void mendicant_scenario_update(
 		mendicant_episode_over = TRUE;
 		mendicant_apply_difficulty();
 	}
-	if (bridge->setup_request != bridge->setup_ack)
+	if (MENDICANT_BRIDGE_READ(bridge->setup_request) != bridge->setup_ack)
 	{
 		mendicant_episode_start();
 		bridge->episode_start_time = time;
@@ -681,8 +680,7 @@ static void mendicant_scenario_update(
 		memset((void *)bridge->knobbed, 0, sizeof(bridge->knobbed));
 		memset(mendicant_side_had, 0, sizeof(mendicant_side_had));
 		mendicant_side_seen_time[0] = mendicant_side_seen_time[1] = time;
-		__sync_synchronize();
-		bridge->setup_ack = bridge->setup_request;
+		MENDICANT_BRIDGE_PUBLISH(bridge->setup_ack, bridge->setup_request);
 		return;
 	}
 	if (mendicant_episode_over)

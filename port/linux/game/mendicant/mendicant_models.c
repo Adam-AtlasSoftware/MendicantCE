@@ -389,6 +389,5 @@ void mendicant_runtime_answer(struct model_bridge *bridge)
 	mendicant_models_squad(bridge, side, count);
 
 	/* the answer is complete before it is published */
-	__sync_synchronize();
-	bridge->response_sequence = bridge->request_sequence;
+	MENDICANT_BRIDGE_PUBLISH(bridge->response_sequence, bridge->request_sequence);
 }

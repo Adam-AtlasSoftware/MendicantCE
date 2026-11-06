@@ -582,8 +582,9 @@ def generate_guest_image(n: Writer, sln: Any, config: Dict[str, Any], *, arch: G
     guest_host_only = {"memory_watch.c"}  # replaced by guest_memory_watch.c
     # (the posix_*.c are the host's, which the guest calls through
     # guest_posix.c; but a dedicated server's signals, standard input and
-    # files are the guest's own calls: posix_server.c)
-    guest_posix = {"posix_server.c"}
+    # files are the guest's own calls: posix_server.c; and MENDICANT AI's
+    # training bridge, the file the trainer maps: posix_mendicant.c)
+    guest_posix = {"posix_server.c", "posix_mendicant.c"}
     for source in sorted((LINUX_DIR / "src").glob("*.c")):
         if (source.name.startswith("posix_") and source.name not in guest_posix) or source.name in guest_host_only:
             continue
