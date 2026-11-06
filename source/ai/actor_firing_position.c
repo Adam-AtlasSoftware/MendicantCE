@@ -169,6 +169,7 @@ symbols in this file:
 #include "units/vehicles.h"
 #include "scenario/scenario.h"
 #include "scenario/scenario_definitions.h"
+#include "mendicant/mendicant.h" /* port: port/linux/game/mendicant/mendicant_main.c */
 
 /* ---------- constants */
 
@@ -1935,7 +1936,12 @@ short actor_select_firing_position(
 				definition->firing_position.old_avoidance_radius;
 			evaluation_context->avoid_point_count++;
 		}
-		if (definition->firing_position.friend_avoidance_radius>0.0f)
+		/* port: MENDICANT AI's spacing gives a soldier his own avoid points
+		(his friends where they stand or are going, his radius) in place of
+		these (port/linux/game/mendicant/mendicant_spacing.c) */
+		if (!mendicant_firing_position_avoid(actor_index, evaluation_context,
+				definition->firing_position.friend_avoidance_radius) &&
+			definition->firing_position.friend_avoidance_radius>0.0f)
 		{
 			switch (evaluation_context->evaluation_mode)
 			{
@@ -2360,6 +2366,9 @@ short actor_select_firing_position(
 				short index;
 
 				firing_position_pre_evaluate(actor_index, evaluation_context, firing_position_count, firing_positions);
+				/* port: MENDICANT AI's spacing: a buddy's and a shield wall's
+				bonuses, before the sort (port/linux/game/mendicant) */
+				mendicant_firing_position_bonus(actor_index, evaluation_context, firing_position_count, firing_positions);
 				for (index= 0; index<firing_position_count; index++)
 				{
 					sorted_indices[index]= index;

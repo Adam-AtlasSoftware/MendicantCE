@@ -246,6 +246,13 @@ static long move_actor_index(short identifier, short absolute_index)
 	return (long)(((unsigned long)(unsigned short)identifier << 16) | (unsigned long)(unsigned short)absolute_index);
 }
 
+/* an actor's full index from its datum */
+static long move_actor_full_index(struct actor_datum *actor)
+{
+	return move_actor_index(actor->identifier,
+		(short)(((byte *)actor - (byte *)actor_data->data) / actor_data->size));
+}
+
 static short move_slot(long actor_index)
 {
 	return (short)actor_index;
@@ -1021,6 +1028,18 @@ int actor_go_status(long actor_index)
 	return order ? order->status : GO_STATUS_NONE;
 }
 
+/* An order's goal (on the ground), FALSE with none: so an owner can tell its
+order from one another owner gave since */
+boolean actor_go_goal(long actor_index, real_point3d *goal)
+{
+	struct go_order *order = go_find(actor_index);
+
+	if (!order || order->status == GO_STATUS_NONE)
+		return FALSE;
+	*goal = order->goal;
+	return TRUE;
+}
+
 /* Ends an order; the actor's own action takes it from there (next tick it picks its positions). */
 void actor_go_cancel(long actor_index)
 {
@@ -1653,9 +1672,14 @@ int mendicant_drill_position(struct actor_datum *actor, struct mendicant_geometr
 	long encounter_index = actor->meta.encounter_index;
 	struct firing_position_definition *positions = move_member_positions(actor, &count);
 	real_point3d const *target = geometry->target;
+	struct mendicant_spacing_claims claims;
+	boolean spaced;
 
 	if (!positions)
 		return -1;
+	/* the spacing (with a character): 6 x (radius - distance) from positions
+	given this step and friends' */
+	spaced = mendicant_spacing_claims_begin(move_actor_full_index(actor), actor, used, positions, count, &claims);
 	for (attempt = 0; attempt < 2; attempt++)
 	{
 		/* the best few places by the drill's geometry, re-ranked by cover from the enemy;
@@ -1686,6 +1710,8 @@ int mendicant_drill_position(struct actor_datum *actor, struct mendicant_geometr
 				(real)fabs(point->z - target->z) > FLANK_HEIGHT_MAXIMUM)
 				continue;
 			score = (real)fabs(angle - angle_middle) + 2.0f * (real)fabs(range - range_middle) + 0.3f * travel;
+			if (spaced)
+				score += mendicant_spacing_claims_penalty(&claims, point);
 			if (score < best_score[COVER_CANDIDATES - 1] && !mendicant_firing_position_owned(encounter_index, (short)position))
 			{
 				slot = COVER_CANDIDATES - 1;
@@ -1783,9 +1809,13 @@ lasts until the member's next position order. */
 boolean mendicant_go_fallback(struct mendicant_member *member, real_point3d const *point, real tolerance)
 {
 	int slot;
+	real_point3d spaced = *point;
 
-	if (!mendicant_actor_can_drill(member->actor) || move_distance_to(member->actor, point) > 80.0f ||
-		actor_go_to(member->actor_index, point, tolerance, 1) != 1)
+	if (!mendicant_actor_can_drill(member->actor) || move_distance_to(member->actor, point) > 80.0f)
+		return FALSE;
+	/* the spacing (with a character): not onto a friend's point */
+	mendicant_spacing_fallback_point(member->actor_index, member->actor, &spaced);
+	if (actor_go_to(member->actor_index, &spaced, tolerance, 1) != 1)
 		return FALSE;
 	slot = move_slot(member->actor_index);
 	if (slot >= 0 && slot < MENDICANT_MAX_ACTORS)

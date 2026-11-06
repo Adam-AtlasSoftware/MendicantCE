@@ -1072,6 +1072,9 @@ PAGES = {
              None),
             ("CONVOY", "ai.mendicant.convoy", ON_OFF,
              "Your Warthog full? The rest take the other vehicles and follow you, each in his own time.", None),
+            ("SPACING", "ai.mendicant.spacing", ON_OFF,
+             "Squads spread out, wider when a grenade lands, so one blast rarely gets two. Grunts still huddle.",
+             None),
         ],
     },
     FIRST_PERSON[0]: {

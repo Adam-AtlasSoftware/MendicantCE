@@ -47,7 +47,7 @@ variety, discipline, threat targeting, unit radius, aim spread, spread by
 difficulty, moving targets and the Marines' rate of fire, and on its SOLDIER
 CHARACTER page the character, the personality strength, the quirks, the firing
 personality, the search for a lost target, holding fire for friendly vehicles, the grenade
-reactions and the convoy. It is reached from
+reactions, the convoy and the spacing. It is reached from
 the main menu's player profile and from a campaign's pause menu (SETTINGS),
 and works with a controller as the other settings screens do. OK writes the
 changes to config.toml; `menu_functions.c`'s "port settings save" then calls
@@ -414,6 +414,114 @@ the seat), so in the test scene five Marines walk to one seat at once.
   `pos`, `mpos`, `cpos` each second; and with the convoy on its own rows `convoy_*` (assign, start,
   board, seated, refused, board_failed, follower, full, hold, stay_line, rejoin, dismount, exit,
   gunner_stays, abandon, chief_in, chief_out), which go to the drill log when there is no test.
+
+## Spacing
+
+Milestone M6 (`mendicant_spacing.c`, `ai.mendicant.spacing`, with the character on): where each
+soldier with a character stands relative to his friends. Hunters, the Flood, Sentinels, Engineers
+and turrets have no character and stand as before, as do actors in a play fight or a script's
+command list.
+
+The game's only spacing rule is one friend avoidance radius per actor definition, given to the
+friends' bodies (never where they are going), worth at most 10 of a firing position's points
+(`pre_evaluator_global`: 10 x the square root of the nearest d^2/r^2), in the fight, uncover and
+avoid searches only. Two soldiers can pick neighbouring positions in the same tick, and a drill's
+ring stands a world unit apart. Here:
+
+| Hook (`mendicant.h`) | In | What it does |
+| --- | --- | --- |
+| `mendicant_firing_position_avoid` | `actor_select_firing_position`, in place of the friend avoidance block | TRUE: the soldier's own avoid points are in and the game's friend points skipped; FALSE: the game's own |
+| `mendicant_firing_position_bonus` | the same, after `firing_position_pre_evaluate`, before the sort | the clearance, buddy and shield-wall bonuses on the valid candidates |
+
+- **S1 personal space.** His radius: by kind, from his caution (Grunts 1.4-2.2 world units,
+  Jackals 1.8-2.6, Marines 2.6-3.6, Elites 3.0-4.5), times the fight's spacing mood, times the
+  threat (below), at least 0.75 and at least his definition's friend avoidance radius. The avoid
+  points (fight, cover, uncover, guard and avoid searches): his 12 nearest friends on foot within
+  30 world units where they stand for spacing (the firing position each holds or is going to,
+  else where free movement takes him, else where he is), each at his radius or, when more, the
+  room that friend's kind wants (0.75 of the friend's own radius before the threat: a Grunt gives
+  his Elite room), a friend with a plasma grenade stuck to
+  him again at 4.5, a Marine's Chief at 0.7 of the radius (or the vehicle he drives), and up to 3
+  friendly vehicles in use within 15 (their bounding radius, 1-4, plus half his). At most 28
+  entries of the game's 32 (the guard search adds owned posts after them, as it did); the array
+  is never written past 32. The game's score of the points stays as it is, and a position clear
+  of every friend by that room scores up to 10 more (Jackals 7, Grunts 5: 10 x the square root of
+  the nearest d^2/r^2), a penalty kept as a missing bonus so no score goes below 0.
+- **S2 buddies.** Two Marines, or two Grunts, within 12 world units, neither paired, whose buddy
+  preferences (M0) average 0.5 or more, pair up until one dies, boards a vehicle or is 20 away. A
+  candidate 0.8-1.6 of his radius from his buddy's position scores 4 x his buddy preference more.
+  Elites and Jackals do not pair.
+- **S3 species.** A Jackal scores 3 more for a position 1.5-3 world units beside a Jackal friend
+  within 6, across the line from that friend to the target (within 1 along it): a shield line.
+  Grunts' small radius keeps them a herd until a grenade doubles it.
+- **S4 threat.** The radius is multiplied by `1 + 0.6 x explosive + 0.4 x grenadier + 0.3 x
+  heavy` (Grunts 1.0 for the explosive), at most 2.2, all perceived: explosive 1 for a live
+  grenade he or one of his nearest friends within 12 has noticed (or a friend with one stuck to
+  him), 0.5 for 6 s after a grenade's blast hurt someone within 8; grenadier for a target seen in
+  the last 3 s, 6-20 world units off, on foot, carrying grenades; heavy for a target seen lately
+  within 40 in a vehicle or with a rocket launcher, fuel rod or cannon. A rise reaches each soldier
+  after his own 1-16 ticks (from his reflex), so a squad does not move in one tick; the fall back
+  to 1 takes 8-15 s (his caution), the squad drifting back together.
+- **S5 re-pick.** The fight action searches each time the soldier thinks, so a grown radius moves
+  whoever it crowds at his next thought. When the multiplier jumps by 0.4 or more and a friend is
+  inside the new radius, a fighting soldier at his position gives it up (the fight action's
+  position timer set to 1, as when his time there runs out).
+- **Stepping apart.** A soldier in a fight (definite or more), the wait after a search or a guard,
+  standing with no firing position of his own (none in reach of his encounter), not under orders,
+  in no convoy or grenade escape and with no free movement, whose nearest friend is inside 0.55 of
+  his radius (at least 1 world unit), steps 1-3 world units apart by free movement at a walk: of 8
+  ways, the one most away from the friends within twice his radius and across the line to his
+  target rather than along it, with his own noise, on ground at his height and a clear line. At
+  most every 4-8 s; the order ends on arrival or after 2.5 s, and only if it is still his.
+- **The drill** (`move_near`, `mendicant_drill_position`, `mendicant_go_fallback`): a member the
+  layer spaces marks a candidate within his radius of a position already given this step, or of
+  a friend's claimed position, by `3 x (radius - distance)` each (at most 6 x the radius):
+  `move_near` ranks by distance plus half the mark (still only positions within its radius, and
+  its fallback test by distance alone); the drill's band adds it to its score. Free movement to a
+  point goes to the point or one of sixteen around it (at his radius and 1.6 times it), whichever
+  is least marked. Each claim is marked within the same pairwise room as the avoid points.
+  The layer off, or a soldier with no character, takes exactly the old paths.
+- **Not in M6.** Hunters' converging pair (Hunters are unchanged), cover classes and bounding (M9),
+  vehicle lanes (M4).
+- **Log** (the fire log, both layers): `space` each second for each Grunt, Jackal, Elite and
+  Marine on foot with combat status 2 or more (a his nearest friend on foot within 30, -1 none,
+  b his speed in world units a tick, c friends within 2, d friends within 4 + 1000 x within 12,
+  e the threat flags, 1 a live grenade, 2 a blast lately, 4 a grenadier, 8 heavy, then 16 he has a
+  firing position, 32 at his destination, his action x 256, his combat status x 8192, f his
+  multiplier, 1 with the layer off); at a fight's end `sstat` (a samples, b firing position changes
+  seen, c searches given his own points, d the most avoid entries any search had, e searches
+  found over 32, f bonuses refused as not finite or out of range) and `sstat2` (a avoid points
+  given, b drill candidates marked, c bonuses given, d buddy pairs made, e steps apart, f re-picks).
+  `build/authentic_test/bin/m6_stats.py` reads them.
+- **Measured** (the trainer's frozen benchmark, 50 scenarios, the game's own AI and the drills;
+  natural fights 800 each way, the grenade test every 3 s 400 each way; `m6_stats.py`; a soldier
+  counted while standing, speed under 0.02 world units a tick, combat status definite or more, not
+  in a command list). Stationary soldiers with a friend within 2 world units, layer on against off
+  (lower; the design: at most 0.5 for Marines and Elites): natural fights Marines 0.18 (0.12 against
+  0.69), Elites 0.48 (0.35 against 0.73), Jackals 0.53, Grunts 0.59; the grenade test Marines 0.16,
+  Elites 0.48. Two layer-off samples on other seeds differ by 0.96-1.03 (natural) and 0.81-1.09
+  (grenade test). Median nearest friend (at most 6): Marines 3.25 world units (1.21 off), Elites
+  2.61 (1.35), Jackals 2.35, Grunts 2.21 (1.33). Marines standing with exactly one friend at 2-4
+  world units, fire teams: 0.42 against 0.20. Under a grenade's threat, friends within 4 over
+  friends within 12 (lower; the design: half): 0.79 of the layer off's in natural fights, 0.87 on
+  the grenade test (Marines 0.73 and 0.68, Grunts 0.84 and 0.92); off against off 0.93 and 1.01.
+  Detonations hurting two or more (M2's gate, the design's 0.6): 0.92 of the layer off's on the
+  grenade test (M2 alone 0.98; off against off 1.03); soldiers hurt per detonation 0.95. Neither
+  threat gate is met: the encounters' firing positions are packed close (the layer off stands
+  1.2-1.5 world units from the nearest friend), a grenade is in the air for about a second, and most
+  of those caught did not notice it in time, which M2 keeps as the game has it; the radius grows
+  with the threat and the squad re-picks, but there is rarely a place 4 world units clear to go to
+  in that time. Avoid entries: at most 16 in any search (32 is the array's size), none over, no
+  bonus refused. The firing position changes a minute are the layer off's (0.97), so the soldiers
+  do not shuffle. The assert build (the game's asserts live, the "evaluation >= 0" one among them):
+  600 bench fights (grenade test and natural) and b30, c40 and a30 for 7 minutes each, no assert,
+  no crash. Balance (1600 natural fights against the layer off's 800): Grunts 0.88, 0.97, 0.99
+  (damage a minute, kills, deaths), Marines 1.09, 1.04, 1.01; against the previous commit's layer
+  Grunts 0.96, 1.00, 0.98 and Marines 1.04, 0.98, 1.05; the spacing alone (the layer on, spacing
+  off against on, the same seeds) Grunts 0.98, 1.04, 0.98 and Marines 1.05, 0.95, 1.02. The Grunts'
+  damage a minute was 0.92 of the layer off's at the previous commit; two layer-off samples differ
+  by 0.98. The layer off replays the previous commit's 800 fights bit for bit; the convoy scene's
+  gates are unchanged (seated 0.88, first boarder 2.65 s, start spread 0.50 s, no double seats).
 
 ## Fork release settings
 
