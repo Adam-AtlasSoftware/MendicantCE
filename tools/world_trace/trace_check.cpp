@@ -36,7 +36,7 @@ int main(int argc, char **argv)
 {
 	static struct world_cascades cascades;
 	float block[WORLD_CASCADES][4], worst = 0.0f;
-	long count = argc > 2 ? atol(argv[1]) : 0, index, hits = 0, differing = 0;
+	long count = argc > 2 ? atol(argv[1]) : 0, index, hits = 0, unlike = 0;
 	float tolerance = argc > 2 ? (float)atof(argv[2]) : 0.0f;
 	float4 vectors[WORLD_CASCADES];
 	texture3d<float> texture;
@@ -68,13 +68,13 @@ int main(int argc, char **argv)
 		difference = std::fabs(hit.t - reference.t);
 		if ((int)hit.hit != reference.hit || hit.kind != reference.kind || difference > tolerance)
 		{
-			if (differing++ < 10)
+			if (unlike++ < 10)
 				printf("ray %ld: %d %d %g, the reference's %d %d %g\n", index, (int)hit.hit, hit.kind, hit.t, reference.hit,
 					reference.kind, reference.t);
 		}
 		worst = difference > worst ? difference : worst;
 		hits += reference.hit;
 	}
-	printf("%ld rays (%ld hit), %ld differ, the largest difference of t %.3g\n", count, hits, differing, worst);
-	return differing ? 1 : 0;
+	printf("%ld rays (%ld hit), %ld differ, the largest difference of t %.3g\n", count, hits, unlike, worst);
+	return unlike ? 1 : 0;
 }

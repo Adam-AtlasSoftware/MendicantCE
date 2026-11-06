@@ -46,7 +46,7 @@ def main():
                 result[part] += weight * max(texels[texel + part] / 127.0, -1.0)
         return [spirv_run.f32(result[0]), spirv_run.f32(result[1]), 0.0, 1.0]
 
-    worst, differing = 0.0, 0
+    worst, unlike = 0.0, 0
     for index, ray in enumerate(scene["rays"]):
         inputs = {"origin": ray["origin"], "direction": ray["direction"],
                   "parameters": [ray["t_max"], float(ray["mask"]), 0.0, 0.0]}
@@ -56,12 +56,12 @@ def main():
         difference = abs(colour[1] - ray["t"])
         worst = max(worst, difference)
         if int(colour[0]) != ray["hit"] or int(colour[2]) != ray["kind"] or difference > tolerance:
-            differing += 1
-            if differing <= 10:
+            unlike += 1
+            if unlike <= 10:
                 print(f"ray {index}: {colour[:3]}, the reference's {ray['hit']} {ray['kind']} {ray['t']}")
-    print(f"{len(scene['rays'])} rays ({sum(ray['hit'] for ray in scene['rays'])} hit), {differing} differ, "
+    print(f"{len(scene['rays'])} rays ({sum(ray['hit'] for ray in scene['rays'])} hit), {unlike} differ, "
           f"the largest difference of t {worst:.3g}")
-    return 1 if differing else 0
+    return 1 if unlike else 0
 
 
 if __name__ == "__main__":
