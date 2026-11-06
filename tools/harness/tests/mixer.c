@@ -60,6 +60,22 @@ typedef struct
 	LONG lReverb;
 	float flReverbDelay, flDiffusion, flDensity, flHFReference;
 } DSI3DL2LISTENER;
+/* (a voice's I3DL2 source: IDirectSoundStream_SetI3DL2Source, which
+test_mixer.py adds for this test) */
+#define UNDER_TEST_I3DL2_SOURCE
+typedef long HRESULT;
+#define WINAPI
+#define DS_OK 0
+typedef struct { LONG lHFLevel; float flLFRatio; } DSI3DL2OBSTRUCTION, DSI3DL2OCCLUSION;
+typedef struct
+{
+	LONG lDirect, lDirectHF, lRoom, lRoomHF;
+	float flRoomRolloffFactor;
+	DSI3DL2OBSTRUCTION Obstruction;
+	DSI3DL2OCCLUSION Occlusion;
+} DSI3DL2BUFFER;
+typedef const DSI3DL2BUFFER *LPCDSI3DL2BUFFER;
+typedef IDirectSoundStream *LPDIRECTSOUNDSTREAM;
 #define DSBVOLUME_MIN (-10000)
 #define DS3DMODE_NORMAL 0x00000000
 #define DS3DMODE_HEADRELATIVE 0x00000001
@@ -749,6 +765,119 @@ static double ears_power(const float *output, unsigned long frames)
 	return 10.0 * log10(power + 1e-30);
 }
 
+/* the octave bands of the figures the Xbox's were measured in (63 Hz to 16
+kHz) */
+#define OCTAVES 9
+static const double octave_hertz[OCTAVES] = { 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000 };
+
+/* the power (dB) in each octave band (octave_hertz: from f / sqrt 2 to f
+sqrt 2) of frames of a channel of signal (frames of stride floats), from
+its spectrum over 4096-frame Hann windows */
+static void octave_levels(const float *signal, unsigned long frames, unsigned long stride, unsigned long channel,
+	double *levels)
+{
+	enum { SIZE = 4096 };
+	static double re[SIZE], im[SIZE];
+	double power[OCTAVES] = { 0 };
+	unsigned long first, n, k, size, band;
+
+	for (first = 0; first + SIZE <= frames; first += SIZE / 2)
+	{
+		for (n = 0; n < SIZE; n++)
+		{
+			unsigned long reversed = 0, bits = n;
+
+			for (k = 1; k < SIZE; k <<= 1, bits >>= 1)
+				reversed = (reversed << 1) | (bits & 1);
+			re[reversed] = signal[(first + n) * stride + channel] * (0.5 - 0.5 * cos(2.0 * PI * n / SIZE));
+			im[reversed] = 0.0;
+		}
+		for (size = 2; size <= SIZE; size <<= 1)
+		{
+			for (n = 0; n < SIZE; n += size)
+			{
+				for (k = 0; k < size / 2; k++)
+				{
+					double angle = -2.0 * PI * k / size, wr = cos(angle), wi = sin(angle);
+					unsigned long a = n + k, b = n + k + size / 2;
+					double tr = re[b] * wr - im[b] * wi, ti = re[b] * wi + im[b] * wr;
+
+					re[b] = re[a] - tr;
+					im[b] = im[a] - ti;
+					re[a] += tr;
+					im[a] += ti;
+				}
+			}
+		}
+		for (k = 1; k < SIZE / 2; k++)
+		{
+			double hertz = (double)k * OUTPUT_RATE / SIZE;
+
+			for (band = 0; band < OCTAVES; band++)
+			{
+				if (hertz >= octave_hertz[band] / sqrt(2.0) && hertz < octave_hertz[band] * sqrt(2.0))
+					power[band] += re[k] * re[k] + im[k] * im[k];
+			}
+		}
+	}
+	for (band = 0; band < OCTAVES; band++)
+		levels[band] = 10.0 * log10(power[band] + 1e-30);
+}
+
+/* frames of a voice mixed alone on 5.1, CHUNK at a time, after its first mix
+(its ramps): each speaker's energy (dB; -400 silent), and the frames
+themselves in output (frames of 6; NULL: not wanted) */
+static void render_surround(struct sdl_stream *stream, unsigned long frames, double *energy_db, float *output)
+{
+	static float buffer[CHUNK * MAXIMUM_OUTPUT_CHANNELS], send[CHUNK];
+	double energy[MAXIMUM_OUTPUT_CHANNELS] = { 0 };
+	unsigned long done, frame, speaker, saved = output_channels;
+
+	output_channels = 6;
+	for (done = 0; done < frames + CHUNK; done += CHUNK)
+	{
+		memset(buffer, 0, sizeof(buffer));
+		memset(send, 0, sizeof(send));
+		mix_voice(stream, buffer, send, CHUNK);
+		if (!done)
+			continue;
+		for (frame = 0; frame < CHUNK && done - CHUNK + frame < frames; frame++)
+		{
+			for (speaker = 0; speaker < MAXIMUM_OUTPUT_CHANNELS; speaker++)
+			{
+				float x = buffer[frame * MAXIMUM_OUTPUT_CHANNELS + speaker];
+
+				energy[speaker] += (double)x * x;
+				if (output)
+					output[(done - CHUNK + frame) * MAXIMUM_OUTPUT_CHANNELS + speaker] = x;
+			}
+		}
+	}
+	output_channels = saved;
+	for (speaker = 0; speaker < MAXIMUM_OUTPUT_CHANNELS; speaker++)
+		energy_db[speaker] = energy[speaker] > 0.0 ? 10.0 * log10(energy[speaker]) : -400.0;
+}
+
+/* frames of a voice mixed alone on stereo, after its first mix: its left
+channel, and its room send, as frames of mono */
+static void render_with_send(struct sdl_stream *stream, unsigned long frames, float *left, float *room)
+{
+	static float buffer[CHUNK * 2], send[CHUNK];
+	unsigned long done, frame;
+
+	for (done = 0; done < frames + CHUNK; done += CHUNK)
+	{
+		memset(buffer, 0, sizeof(buffer));
+		memset(send, 0, sizeof(send));
+		mix_voice(stream, buffer, send, CHUNK);
+		for (frame = 0; done && frame < CHUNK && done - CHUNK + frame < frames; frame++)
+		{
+			left[done - CHUNK + frame] = buffer[frame * 2];
+			room[done - CHUNK + frame] = send[frame];
+		}
+	}
+}
+
 /* "circle": a sound going round the listener, ear high, 8 seconds from
 ahead to the right, behind, the left and ahead again, then 4 over the
 head, ahead to above, behind and below, through the HRTF or panned, to a
@@ -1182,47 +1311,151 @@ int main(int argc, char **argv)
 		voice_delete(stream);
 		return 0;
 	}
-	/* the limiter leaves a mix up to full scale as it is (the menus' music
-	reaches it), and holds two such voices' sum to it */
+	/* the mix at the Xbox's output level, half (-6.02 dB): recorded on an
+	Xbox, a voice through its front left mix bin alone at 0.5 of full scale
+	came out at 0.2505, every other sound at half too, and a sum of 1.40 came
+	out whole at 0.70. So a voice at full scale comes out at half, two such
+	voices' sum whole (not limited), and the limiter holds three's to full
+	scale */
 	CASE("limiter")
 	{
 		unsigned long frames = 48000 * 2, n, chunk;
 		short *samples = malloc(frames * 2 * sizeof(short));
 		double *signal = malloc(frames * sizeof(double)), *exact = malloc(frames * sizeof(double));
 		static float mixed[CHUNK * 2];
-		struct sdl_stream *first, *second;
-		float alone = 0.0f, both = 0.0f;
+		struct sdl_stream *voices[3];
+		float peaks[3] = { 0.0f, 0.0f, 0.0f };
+		unsigned long count, voice;
 
 		for (n = 0; n < frames; n++)
 			signal[n] = 0.999 * sin(2.0 * PI * 997.0 * n / 48000.0);
 		for (n = 0; n < frames; n++)
 			samples[n * 2] = samples[n * 2 + 1] = (short)lround(signal[n] * 32768.0);
 		reverb_initialize();
-		first = voice_new(samples, frames, 2, 48000, 0);
-		streams = first;
-		for (chunk = 0; chunk < OUTPUT_RATE / 2 / CHUNK; chunk++)
+		/* (one voice, then two, then three, each lot started together) */
+		for (count = 1; count <= 3; count++)
 		{
-			mix(mixed, CHUNK, TRUE);
-			for (n = 0; chunk && n < CHUNK * 2; n++)
-				alone = fabsf(mixed[n]) > alone ? fabsf(mixed[n]) : alone;
+			streams = NULL;
+			for (voice = 0; voice < count; voice++)
+			{
+				voices[voice] = voice_new(samples, frames, 2, 48000, 0);
+				voices[voice]->next = streams;
+				streams = voices[voice];
+			}
+			for (chunk = 0; chunk < OUTPUT_RATE / 2 / CHUNK; chunk++)
+			{
+				mix(mixed, CHUNK, TRUE);
+				for (n = 0; chunk && n < CHUNK * 2; n++)
+					peaks[count - 1] = fabsf(mixed[n]) > peaks[count - 1] ? fabsf(mixed[n]) : peaks[count - 1];
+			}
+			streams = NULL;
+			/* (the last of the mix played out) */
+			for (chunk = 0; chunk < 4; chunk++)
+				mix(mixed, CHUNK, TRUE);
+			for (voice = 0; voice < count; voice++)
+				voice_delete(voices[voice]);
 		}
-		CHECK(alone > 0.998f && alone < 1.0f, "a voice at -0.01 dBFS comes out at %.2f dBFS", decibels(alone));
-		second = voice_new(samples, frames, 2, 48000, 0);
-		second->next = first;
-		streams = second;
-		for (chunk = 0; chunk < OUTPUT_RATE / 2 / CHUNK; chunk++)
-		{
-			mix(mixed, CHUNK, TRUE);
-			for (n = 0; chunk && n < CHUNK * 2; n++)
-				both = fabsf(mixed[n]) > both ? fabsf(mixed[n]) : both;
-		}
-		CHECK(both <= 1.0f + 1.0e-6f && both > 0.99f, "two voices at -0.01 dBFS come out at %.2f dBFS",
-			decibels(both));
-		streams = NULL;
-		voice_delete(first);
-		voice_delete(second);
+		CHECK(peaks[0] > 0.4985f && peaks[0] < 0.5f, "a voice at -0.01 dBFS comes out at %.2f dBFS (the Xbox's -6.03)",
+			decibels(peaks[0]));
+		CHECK(peaks[1] > 0.998f && peaks[1] < 1.0f, "two voices at -0.01 dBFS come out at %.2f dBFS (the Xbox's "
+			"-0.01: not limited)", decibels(peaks[1]));
+		CHECK(peaks[2] <= 1.0f + 1.0e-6f && peaks[2] > 0.99f, "three voices at -0.01 dBFS come out at %.2f dBFS",
+			decibels(peaks[2]));
 		free(exact);
 		free(signal);
+		free(samples);
+		return 0;
+	}
+	/* obstruction and occlusion, as the Xbox recorded them: a voice of noise
+	2 units ahead in a hall (the reverb on), its direct path's octave levels
+	(the recording's impulse response, the direct sound's 9 ms) against the
+	voice unobstructed, within 2 dB of the Xbox's at each, for obstruction
+	alone (its LF ratio 0 and 0.5) and with occlusion. The Xbox muffles the
+	reverb's send as the direct path for both: a voice obstructed by -1200
+	(LF ratio 0) was recorded the same as one occluded by -1200, sample for
+	sample; so the send of an obstructed voice is muffled as its direct path,
+	and obstruction's LF ratio lowers the direct path alone (its recording
+	4.5 dB louder than occlusion's, the reverb's part) */
+	CASE("obstruction")
+	{
+		static const struct { const char *name; LONG obstruction; float ratio; LONG occlusion; double xbox[OCTAVES]; }
+			cases[] = {
+			{ "obstructed by -1200", -1200, 0.0f, 0, { -0.6, -0.3, -0.6, -0.9, -2.3, -5.6, -10.0, -15.7, -19.4 } },
+			{ "obstructed by -1200, LF ratio 0.5", -1200, 0.5f, 0,
+				{ -6.5, -6.1, -6.4, -6.4, -6.7, -8.0, -10.6, -15.2, -18.3 } },
+			{ "obstructed by -4000", -4000, 0.0f, 0, { -4.2, -9.4, -14.8, -20.5, -26.2, -32.1, -37.7, -43.7, -47.5 } },
+			{ "obstructed and occluded by -1500", -1500, 0.0f, -1500,
+				{ -1.3, -2.7, -6.2, -10.8, -16.4, -22.2, -27.8, -33.8, -37.6 } },
+		};
+		unsigned long frames = 24000, band;
+		short *samples = noise_samples(frames + 8192);
+		float *left = malloc(frames * sizeof(float)), *room = malloc(frames * sizeof(float));
+		double open_direct[OCTAVES], open_room[OCTAVES], direct[OCTAVES], send[OCTAVES];
+		int which;
+
+		hrtf_initialize();
+		listener_reset();
+		environment.lRoom = 0;
+		environment.lRoomHF = 0;
+		for (which = -1; which < (int)(sizeof(cases) / sizeof(cases[0])); which++)
+		{
+			DSI3DL2BUFFER source;
+			struct sdl_stream *stream = voice_placed(samples, frames + 8192, 48000, 0.0f, 0.0f, 2.0f);
+
+			memset(&source, 0, sizeof(source));
+			if (which >= 0)
+			{
+				source.Obstruction.lHFLevel = cases[which].obstruction;
+				source.Obstruction.flLFRatio = cases[which].ratio;
+				source.Occlusion.lHFLevel = cases[which].occlusion;
+			}
+			IDirectSoundStream_SetI3DL2Source(&stream->object, &source, 0);
+			stream->direct = stream->pending.direct;
+			stream->direct_hf = stream->pending.direct_hf;
+			stream->room = stream->pending.room;
+			stream->room_hf = stream->pending.room_hf;
+			render_with_send(stream, frames, left, room);
+			voice_delete(stream);
+			octave_levels(left, frames, 1, 0, which < 0 ? open_direct : direct);
+			octave_levels(room, frames, 1, 0, which < 0 ? open_room : send);
+			if (which < 0)
+				continue;
+			for (band = 0; band < OCTAVES; band++)
+			{
+				CHECK(fabs(direct[band] - open_direct[band] - cases[which].xbox[band]) < 2.0,
+					"%s: the direct path at %.0f Hz %+.1f dB (the Xbox's %+.1f)", cases[which].name, octave_hertz[band],
+					direct[band] - open_direct[band], cases[which].xbox[band]);
+				/* (the send muffled as the direct path; not lowered by
+				obstruction's LF ratio) */
+				CHECK(fabs((send[band] - open_room[band]) - (direct[band] - open_direct[band]) +
+					(cases[which].obstruction * cases[which].ratio / 100.0)) < 0.5,
+					"%s: the room send at %.0f Hz %+.1f dB, the direct path %+.1f dB", cases[which].name, octave_hertz[band],
+					send[band] - open_room[band], direct[band] - open_direct[band]);
+			}
+		}
+		/* (obstructed and occluded alike, LF ratio 0) */
+		{
+			DSI3DL2BUFFER obstructed, occluded;
+			struct sdl_stream *first = voice_placed(samples, 64, 48000, 0.0f, 0.0f, 2.0f);
+			struct sdl_stream *second = voice_placed(samples, 64, 48000, 0.0f, 0.0f, 2.0f);
+
+			memset(&obstructed, 0, sizeof(obstructed));
+			memset(&occluded, 0, sizeof(occluded));
+			obstructed.Obstruction.lHFLevel = -1200;
+			occluded.Occlusion.lHFLevel = -1200;
+			IDirectSoundStream_SetI3DL2Source(&first->object, &obstructed, 0);
+			IDirectSoundStream_SetI3DL2Source(&second->object, &occluded, 0);
+			CHECK(first->pending.direct == second->pending.direct && first->pending.direct_hf == second->pending.direct_hf &&
+				first->pending.room == second->pending.room && first->pending.room_hf == second->pending.room_hf,
+				"obstructed by -1200: %ld %ld, room %ld %ld; occluded: %ld %ld, room %ld %ld", first->pending.direct,
+				first->pending.direct_hf, first->pending.room, first->pending.room_hf, second->pending.direct,
+				second->pending.direct_hf, second->pending.room, second->pending.room_hf);
+			voice_delete(first);
+			voice_delete(second);
+		}
+		environment.lRoom = DSBVOLUME_MIN;
+		free(left);
+		free(room);
 		free(samples);
 		return 0;
 	}
@@ -1246,12 +1479,17 @@ int main(int argc, char **argv)
 		}
 		return 0;
 	}
-	/* the 5.1 pan (VBAP): a sound at each speaker's angle plays from that
-	speaker alone; one at any angle from the two either side of it, their
-	power summing to 1, their gains' vector sum pointing its way (where the
-	tangent law puts the image); never from the LFE. A 3D voice through the
-	mixer on 5.1: from its speaker's channel, nearly all of it. 2D voices by
-	the mix bins the game gives them on AC-3 */
+	/* the 5.1 pan (VBAP) of a stereo voice positioned in the world: a sound
+	at each speaker's angle plays from that speaker alone; one at any angle
+	from the two either side of it, their power summing to 1, their gains'
+	vector sum pointing its way (where the tangent law puts the image); never
+	from the LFE. A 3D voice on 5.1 as the Xbox's AC-3, recorded: from the
+	front pair and the back pair, never the center or the LFE, its power
+	split between them by its direction as measured, through the HRTF and
+	panned alike; the same sound on both pairs, the near side the louder to
+	the side, a sound behind the sound ahead mirrored. 2D voices by the mix
+	bins the game gives them on AC-3, and a voice the center, a back or the
+	LFE alone plays from it */
 	CASE("surround")
 	{
 		/* each speaker's angle (degrees, clockwise from ahead) and its channel
@@ -1298,46 +1536,108 @@ int main(int argc, char **argv)
 				"a sound at %.1f degrees: power %f, %lu speakers, heard %.2f degrees off", degree / 10.0, power,
 				sounding, heard);
 		}
-		/* through the mixer: a 1 kHz mono 3D voice 50 units away at each
-		speaker's angle, 5.1 out */
-		output_channels = 6;
-		for (index = 0; index < sizeof(speakers) / sizeof(speakers[0]); index++)
+		/* through the mixer: a mono 3D voice of noise 2 units away, as the
+		Xbox recordings' sweeps were, around and above and below; the back
+		pair's share of the power the recordings' (their AC-3 decoded), to
+		the third place */
 		{
-			unsigned long frames = 22050, count = 8192, n;
-			short *samples = malloc(frames * sizeof(short));
-			float *output = calloc(count * MAXIMUM_OUTPUT_CHANNELS, sizeof(float));
-			static float send[8192];
-			double radians = speakers[index].degrees * PI / 180.0, energy[MAXIMUM_OUTPUT_CHANNELS] = { 0 }, total = 0.0;
-			struct sdl_stream *stream;
+			static const struct { double azimuth, elevation, back; } xbox[] = {
+				{ 0, 0, 0.000 }, { 30, 0, 0.000 }, { 60, 0, 0.212 }, { 90, 0, 0.500 }, { 120, 0, 0.789 },
+				{ 150, 0, 1.000 }, { 180, 0, 1.000 }, { 210, 0, 1.000 }, { 240, 0, 0.788 }, { 270, 0, 0.500 },
+				{ 300, 0, 0.211 }, { 330, 0, 0.000 }, { 45, -40, 0.211 }, { 135, -40, 0.791 }, { 45, 40, 0.209 },
+				{ 135, 40, 0.791 },
+			};
+			unsigned long frames = 24000;
+			short *samples = noise_samples(frames + 8192);
+			double ahead_db[2][MAXIMUM_OUTPUT_CHANNELS], behind_db[2][MAXIMUM_OUTPUT_CHANNELS];
+			int through;
 
-			for (n = 0; n < frames; n++)
-				samples[n] = (short)lround(16000.0 * sin(2.0 * PI * 1000.0 * n / 22050.0));
-			stream = voice_new(samples, frames, 1, 22050, 0);
-			stream->has_3d = TRUE;
-			stream->mode = DS3DMODE_NORMAL;
-			stream->position[0] = (float)(50.0 * sin(radians));
-			stream->position[2] = (float)(50.0 * cos(radians));
-			stream->minimum_distance = 1.0f;
-			stream->maximum_distance = 1000.0f;
-			mix_voice(stream, output, send, count);
-			for (n = 0; n < count; n++)
+			hrtf_initialize();
+			listener_reset();
+			for (through = 0; through < 2; through++)
 			{
-				for (speaker = 0; speaker < MAXIMUM_OUTPUT_CHANNELS; speaker++)
+				hrtf_enabled = through;
+				for (index = 0; index < sizeof(xbox) / sizeof(xbox[0]); index++)
 				{
-					energy[speaker] += (double)output[n * MAXIMUM_OUTPUT_CHANNELS + speaker] *
-						output[n * MAXIMUM_OUTPUT_CHANNELS + speaker];
+					double azimuth = xbox[index].azimuth * PI / 180.0, elevation = xbox[index].elevation * PI / 180.0;
+					double energy_db[MAXIMUM_OUTPUT_CHANNELS], front, back, share;
+					struct sdl_stream *stream = voice_placed(samples, frames + 8192, 48000,
+						(float)(2.0 * sin(azimuth) * cos(elevation)), (float)(2.0 * sin(elevation)),
+						(float)(2.0 * cos(azimuth) * cos(elevation)));
+
+					render_surround(stream, frames, energy_db, NULL);
+					voice_delete(stream);
+					front = pow(10.0, energy_db[0] / 10.0) + pow(10.0, energy_db[1] / 10.0);
+					back = pow(10.0, energy_db[4] / 10.0) + pow(10.0, energy_db[5] / 10.0);
+					share = back / (front + back);
+					CHECK(energy_db[2] == -400.0 && energy_db[3] == -400.0 && fabs(share - xbox[index].back) < 0.005,
+						"%s, a 3D voice at %.0f degrees, %+.0f up on 5.1: the back pair's share %.3f (the Xbox's %.3f), "
+						"the center %.1f dB, the LFE %.1f dB", through ? "through the HRTF" : "panned",
+						xbox[index].azimuth, xbox[index].elevation, share, xbox[index].back, energy_db[2], energy_db[3]);
+					/* (the pairs the same sound: the speakers as far apart in
+					each, the near one the louder to the side; through the HRTF
+					by more than the pan's) */
+					if (xbox[index].back > 0.0 && xbox[index].back < 1.0)
+					{
+						double front_apart = energy_db[1] - energy_db[0], back_apart = energy_db[5] - energy_db[4];
+
+						CHECK(fabs(front_apart - back_apart) < 0.05 &&
+							(xbox[index].azimuth < 180.0 ? front_apart : -front_apart) > (through ? 3.0 : 1.0),
+							"%s, a 3D voice at %.0f degrees, %+.0f up on 5.1: the front pair %+.2f dB apart, the back "
+							"pair %+.2f dB", through ? "through the HRTF" : "panned", xbox[index].azimuth,
+							xbox[index].elevation, front_apart, back_apart);
+					}
+					if (xbox[index].azimuth == 0.0 && xbox[index].elevation == 0.0)
+						memcpy(ahead_db[through], energy_db, sizeof(energy_db));
+					if (xbox[index].azimuth == 180.0)
+						memcpy(behind_db[through], energy_db, sizeof(energy_db));
 				}
+				/* a sound behind from the back pair as a sound ahead from the
+				front pair: the same direction mirrored, not duller (the
+				HRTF's behind) */
+				CHECK(fabs(ahead_db[through][0] - ahead_db[through][1]) < 0.05 &&
+					fabs(behind_db[through][4] - behind_db[through][5]) < 0.05 &&
+					fabs(behind_db[through][4] - ahead_db[through][0]) < 0.05,
+					"%s on 5.1: ahead the front pair at %.2f and %.2f dB, behind the back pair at %.2f and %.2f dB",
+					through ? "through the HRTF" : "panned", ahead_db[through][0], ahead_db[through][1],
+					behind_db[through][4], behind_db[through][5]);
 			}
-			for (speaker = 0; speaker < MAXIMUM_OUTPUT_CHANNELS; speaker++)
-				total += energy[speaker];
-			CHECK(total > 0.0 && energy[speakers[index].channel] > 0.9 * total && energy[3] == 0.0,
-				"a 3D voice at %.0f degrees on 5.1: %.1f%% from channel %lu (its speaker), the LFE %g",
-				speakers[index].degrees, total > 0.0 ? 100.0 * energy[speakers[index].channel] / total : 0.0,
-				speakers[index].channel, energy[3]);
-			voice_delete(stream);
-			free(output);
+			hrtf_enabled = FALSE;
 			free(samples);
 		}
+		/* 2D voices: one at full volume to the center alone, a back alone or
+		the LFE alone plays from that speaker alone, at its level (a voice
+		whose left and right gains are 0 was skipped) */
+		{
+			static const unsigned long alone[] = { 2, 4, 5, 3 };
+			unsigned long frames = 24000, speaker;
+			short *samples = noise_samples(frames + 8192);
+			double energy_db[MAXIMUM_OUTPUT_CHANNELS], reference_db[MAXIMUM_OUTPUT_CHANNELS];
+			struct sdl_stream *stream;
+
+			stream = voice_new(samples, frames + 8192, 1, 48000, 0);
+			memset(stream->surround_bins, 0, sizeof(stream->surround_bins));
+			stream->surround_bins[0][0] = 1.0f;
+			render_surround(stream, frames, reference_db, NULL);
+			voice_delete(stream);
+			for (index = 0; index < sizeof(alone) / sizeof(alone[0]); index++)
+			{
+				stream = voice_new(samples, frames + 8192, 1, 48000, 0);
+				stream->mix_left = stream->mix_right = 0.0f;
+				memset(stream->surround_bins, 0, sizeof(stream->surround_bins));
+				stream->surround_bins[0][alone[index]] = 1.0f;
+				render_surround(stream, frames, energy_db, NULL);
+				voice_delete(stream);
+				for (speaker = 0; speaker < MAXIMUM_OUTPUT_CHANNELS; speaker++)
+				{
+					CHECK(speaker == alone[index] ? fabs(energy_db[speaker] - reference_db[0]) < 0.01 :
+						energy_db[speaker] == -400.0, "a 2D voice to channel %lu alone on 5.1: channel %lu at %.2f dB "
+						"(the front left's alone %.2f dB)", alone[index], speaker, energy_db[speaker], reference_db[0]);
+				}
+			}
+			free(samples);
+		}
+		output_channels = 6;
 		/* a mono 2D voice at half to the front three; a stereo one's left
 		whole to the front left and at half to the back left, its right
 		likewise; none to the center or the LFE */
@@ -1354,7 +1654,7 @@ int main(int argc, char **argv)
 			stream = voice_new(samples, frames, 1, 48000, 0);
 			memset(stream->surround_bins, 0, sizeof(stream->surround_bins));
 			stream->surround_bins[0][0] = stream->surround_bins[0][1] = stream->surround_bins[0][2] = 0.5f;
-			voice_surround_gains(stream, surround);
+			voice_surround_gains(stream, 1.0f, 1.0f, NULL, surround);
 			CHECK(surround[0][0] == 0.5f && surround[0][1] == 0.5f && surround[0][2] == 0.5f && surround[0][3] == 0.0f &&
 				surround[0][4] == 0.0f && surround[0][5] == 0.0f, "a mono 2D voice: %g %g %g %g %g %g", surround[0][0],
 				surround[0][1], surround[0][2], surround[0][3], surround[0][4], surround[0][5]);

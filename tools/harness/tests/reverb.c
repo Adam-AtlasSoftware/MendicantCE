@@ -600,7 +600,7 @@ int main(int argc, char **argv)
 		speakers' mix bins (its encode processor's: left = front left + 0.707
 		center + 0.707 back left), each side its front and its back at -3 dB */
 		struct sdl_stream stream;
-		float left, right, room, direct_lowpass, room_lowpass, output[2 * 2048], *four;
+		float left, right, pair[2], room, direct_lowpass, room_lowpass, output[2 * 2048], *four;
 		static float send[2048];
 		BOOL hrtf_on;
 		struct hrtf_parameters hrtf;
@@ -618,7 +618,7 @@ int main(int argc, char **argv)
 		stream.maximum_distance = 100.0f;
 		stream.room = stream.room_hf = DSBVOLUME_MIN;
 		listener.position[0] = listener.position[1] = listener.position[2] = 0.0f;
-		voice_gains(&stream, &left, &right, &room, &direct_lowpass, &room_lowpass, &hrtf_on, &hrtf);
+		voice_gains(&stream, &left, &right, pair, &room, &direct_lowpass, &room_lowpass, &hrtf_on, &hrtf);
 		CHECK(fabs(left * left + right * right - 1.0) < 1e-4, "the direct path's energy %.3f", left * left + right * right);
 
 		properties.lReflections = DSBVOLUME_MIN;

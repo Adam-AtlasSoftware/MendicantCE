@@ -477,7 +477,8 @@ static const struct config_setting config_settings[] =
 		"Play sound. Changed while the game runs, the sound fades out or in at\n"
 		"once (a game started without sound opens its audio device then)." },
 	{ "audio.volume", _config_real, "1.0", "HALO_VOLUME", _environment_value, _platform_all,
-		"The volume of everything, 0.0 to 1.0." },
+		"The volume of everything, 0.0 to 1.0; 1.0 is the Xbox's level. Up to\n"
+		"2.0 is louder (2.0 as loud as before the Xbox's level was matched)." },
 	{ "audio.music_volume", _config_real, "1.0", "HALO_MUSIC_VOLUME", _environment_value, _platform_all,
 		"The music's volume, 0.0 to 1.0 (of audio.volume)." },
 	{ "audio.effects_volume", _config_real, "1.0", "HALO_EFFECTS_VOLUME", _environment_value, _platform_all,
@@ -507,8 +508,9 @@ static const struct config_setting config_settings[] =
 		"\"headphones\" through a model of a head (HRTF), each from its\n"
 		"direction, ahead, behind, above or below, as the Xbox's 3D audio was on\n"
 		"any stereo output, speakers or headphones; \"speakers\" panned left and\n"
-		"right. The menus, music and HUD are not placed.\n"
-		"The VR mode keeps vr.hrtf; 5.1 is always panned." },
+		"right. The menus, music and HUD are not placed. On 5.1 the same, on\n"
+		"the front and back pairs of speakers, as the Xbox's Dolby Digital.\n"
+		"The VR mode keeps vr.hrtf." },
 	{ "audio.resampler", _config_string, "\"sinc\"", "HALO_AUDIO_RESAMPLER", _environment_value, _platform_all,
 		"How sounds are converted to the output's rate: \"sinc\" with a\n"
 		"band-limited low pass; \"linear\" between neighbouring samples,\n"

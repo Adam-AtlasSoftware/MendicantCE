@@ -24,7 +24,7 @@ from harness import CHECK_FAILED, build, function, mutated, read, run  # noqa: E
 
 SOURCE = "port/linux/src/dsound_sdl.c"
 CASES = ["reference", "impulse", "sines", "aliases", "silent-voice", "mono", "linear", "adpcm", "doppler", "doppler-steady",
-         "limiter", "channels", "surround", "spatial-choice", "hrtf-cues", "hrtf-paths", "hrtf-switch", "dry-2d",
+         "limiter", "obstruction", "channels", "surround", "spatial-choice", "hrtf-cues", "hrtf-paths", "hrtf-switch", "dry-2d",
          "master-volume", "buffers", "sound-off",
          "hand-off-never-waits", "hand-off-settings"]
 
@@ -54,6 +54,17 @@ NEGATIVE_CONTROLS = {
                             "doppler"),
     # the limiter's ceiling under full scale, as it was
     "limiter-ceiling": (("#define LIMITER_CEILING 1.0f", "#define LIMITER_CEILING 0.891f"), "limiter"),
+    # the mix at full level (twice the Xbox's), as it was; or held to full scale before it is halved
+    "output-not-halved": (("#define OUTPUT_GAIN 0.5f", "#define OUTPUT_GAIN 1.0f"), "limiter"),
+    "limited-before-halved": (("#define LIMITER_CEILING 1.0f", "#define LIMITER_CEILING 0.5f"), "limiter"),
+    # obstruction: the reverb's send left bright (as it was), lowered by its LF ratio, or no muffling at all
+    "obstruction-send-bright": (("source->Occlusion.lHFLevel +\n\t\t(source->Obstruction.lHFLevel -", "source->Occlusion.lHFLevel +\n\t\t0 * (source->Obstruction.lHFLevel -"),
+                                "obstruction"),
+    "obstruction-lowers-send": (("room = source->lRoom + (LONG)", "room = source->lRoom + (LONG)(source->Obstruction.lHFLevel * source->Obstruction.flLFRatio) + (LONG)"),
+                                "obstruction"),
+    "obstruction-not-muffling": (("direct_hf = source->lDirect + source->lDirectHF + source->Obstruction.lHFLevel",
+                                  "direct_hf = source->lDirect + source->lDirectHF + 0 * source->Obstruction.lHFLevel"),
+                                 "obstruction"),
     # audio.channels "auto" stereo whatever the device (as every build was before the host said its channels)
     "auto-always-stereo": (('!strcmp(setting, "auto") && device_channels >= 6', '!strcmp(setting, "auto") && 0'),
                            "channels"),
@@ -63,6 +74,15 @@ NEGATIVE_CONTROLS = {
                                 "surround_ring_channel[SURROUND_RING_SPEAKERS] = { 2, 1, 4, 5, 0 }"), "surround"),
     "surround-back-on-lfe": (("surround_ring_channel[SURROUND_RING_SPEAKERS] = { 2, 1, 5, 4, 0 }",
                               "surround_ring_channel[SURROUND_RING_SPEAKERS] = { 2, 1, 5, 3, 0 }"), "surround"),
+    # 3D voices on 5.1: the split between the pairs another (linear in the angle), the HRTF's or the pan's back pair
+    # silent, a sound behind not mirrored ahead (the HRTF's duller behind), a 2D voice to the center alone skipped
+    "surround-split-linear": (("share = 0.5f + (1.0f - fabsf(elevation) / 90.0f) * (fabsf(azimuth) / 90.0f - 1.0f);",
+                               "share = fabsf(azimuth) / 180.0f;"), "surround"),
+    "surround-hrtf-front-only": (("output[frame * 6 + 4 + ear] += shadowed * now.pair[1];",
+                                  "output[frame * 6 + 4 + ear] += 0.0f * now.pair[1];"), "surround"),
+    "surround-pan-front-only": (("gains[0][4] = left * pair[1];", "gains[0][4] = 0.0f * pair[1];"), "surround"),
+    "surround-not-mirrored": (("output_channels == 6 ? fabsf(ahead) : ahead, distance", "ahead, distance"), "surround"),
+    "surround-center-skipped": (("!ramp_room && !surround_heard)", "!ramp_room && (!surround_heard || TRUE))"), "surround"),
     "surround-linear-in-angle": (("float first = sinf(surround_ring_angle[segment + 1] - angle);\n"
                                   "\t\tfloat second = sinf(angle - surround_ring_angle[segment]);",
                                   "float first = cosf(1.57079633f * (angle - surround_ring_angle[segment]) /\n"
@@ -121,6 +141,10 @@ def generated(source=None, fault=None, scalar=False):
     text = source if source is not None else read(SOURCE)
     code = text[text.index("#define OUTPUT_RATE"):text.index("/* ---------- output")]
     code += "\n" + function(text, "sound_device_wanted") + "\n"
+    # (a voice's I3DL2 source, as the game sets it, for mixer.c's obstruction)
+    setter = text[text.index("#define STREAM_SETTER(body)"):]
+    code += "\n#ifdef UNDER_TEST_I3DL2_SOURCE\n" + function(text, "stream_from_interface") + "\n" + \
+        setter[:setter.index("\n\n")] + "\n\n" + function(text, "IDirectSoundStream_SetI3DL2Source") + "\n#endif\n"
     if fault:
         code = mutated(code, *fault)
     return (("under_test.inc", ("#define RESAMPLER_SCALAR\n" if scalar else "") + code),)
