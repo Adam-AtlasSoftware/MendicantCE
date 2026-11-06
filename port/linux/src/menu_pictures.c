@@ -1145,28 +1145,38 @@ void menu_pictures_render_given_up(
 	platform_log("menu pictures: %s %s: given up, the original is drawn", menu_picture_poses[pose].name, why);
 }
 
-int menu_pictures_render_kept(
-	long pose)
+/* a kept frame's picture made from its pixels: cut, its colours matched,
+framed, written and noted, then drawn; else its render failed (the
+finisher's: picture_finish_thread) */
+struct picture_finish_job
 {
-	unsigned long width = 0, height = 0;
-	/* (each step's time, for the log) */
-	Uint64 began = SDL_GetTicksNS(), read_at, cut_at = 0, framed_at = 0, written_at = 0;
-	unsigned char *bgra = d3d8_back_buffer_read(&width, &height);
+	long pose, scale;
+	unsigned char *bgra;
+	unsigned long width, height;
+	/* (when the frame was read, and how long that took, for the log) */
+	Uint64 read_at;
+	double read_milliseconds;
+	struct picture_finish_job *next;
+};
+
+static void picture_finish(struct picture_finish_job *job)
+{
+	long pose = job->pose, scale = job->scale;
 	struct menu_picture_state *state = &menu_pictures.pictures[pose];
 	struct menu_picture_pose const *picture = &menu_picture_poses[pose];
-	long scale = menu_pictures.wanted_scale;
 	unsigned long picture_width = (unsigned long)(MENU_PICTURE_WIDTH * scale);
 	unsigned long picture_height = (unsigned long)(MENU_PICTURE_HEIGHT * scale);
 	unsigned long frame_width = (unsigned long)(MENU_PICTURE_FRAME_WIDTH * scale);
 	unsigned long frame_height = (unsigned long)(MENU_PICTURE_FRAME_HEIGHT * scale);
 	unsigned char *cut = malloc(picture_width * picture_height * 4);
 	unsigned char *frame = malloc(frame_width * frame_height * 4);
+	Uint64 began = SDL_GetTicksNS(), cut_at = 0, framed_at = 0, written_at = 0;
 	struct menu_picture_note note;
 	char path[1100];
 	int written = 0;
 
-	read_at = SDL_GetTicksNS();
-	if (bgra && cut && frame && menu_picture_cut(bgra, width, height, picture->aspect, cut, picture_width, picture_height))
+	if (cut && frame && menu_picture_cut(job->bgra, job->width, job->height, picture->aspect, cut, picture_width,
+		picture_height))
 	{
 		cut_at = SDL_GetTicksNS();
 		if (picture->colour_curve && state->original)
@@ -1177,19 +1187,19 @@ int menu_pictures_render_kept(
 		picture_path(path, sizeof(path), pose, "png");
 		written = picture_png_write(path, frame, frame_width, frame_height);
 		written_at = SDL_GetTicksNS();
-		platform_log("menu pictures: %s, %lux%lu from a %lux%lu frame%s: %s (read %.1f ms, cut %.1f, colours and "
-			"frame %.1f, written %.1f)", picture->name, picture_width, picture_height, width, height,
-			picture->colour_curve ? (state->original ? ", colours matched" : ", colours not matched (no original)") :
-			"", written ? path : "not written", (read_at - began) / 1e6, (cut_at - read_at) / 1e6,
-			(framed_at - cut_at) / 1e6, (written_at - framed_at) / 1e6);
+		platform_log("menu pictures: %s, %lux%lu from a %lux%lu frame%s: %s (read %.1f ms, waited %.1f, cut %.1f, "
+			"colours and frame %.1f, written %.1f)", picture->name, picture_width, picture_height, job->width,
+			job->height, picture->colour_curve ? (state->original ? ", colours matched" :
+			", colours not matched (no original)") : "", written ? path : "not written", job->read_milliseconds,
+			(began - job->read_at) / 1e6, (cut_at - began) / 1e6, (framed_at - cut_at) / 1e6,
+			(written_at - framed_at) / 1e6);
 	}
 	free(cut);
-	free(bgra);
 	if (!written)
 	{
 		free(frame);
 		menu_pictures_render_failed(pose, "was not written");
-		return 0;
+		return;
 	}
 	note = state->noted_before ? state->note_before : (struct menu_picture_note){ 0 };
 	menu_picture_note_begin(&note, picture, state->map_checksum, scale);
@@ -1198,7 +1208,7 @@ int menu_pictures_render_kept(
 	{
 		free(frame);
 		platform_log("menu pictures: cannot write the note of %s", picture->name);
-		return 0;
+		return;
 	}
 	state->rendering = 0;
 	/* (drawn at once: the preparing screen's, then the menus') */
@@ -1208,6 +1218,113 @@ int menu_pictures_render_kept(
 	state->decision = 1UL << _menu_picture_use_bit;
 	pthread_mutex_unlock(&menu_pictures.lock);
 	picture_pixels_set(pose, frame, frame_width, frame_height, scale);
+}
+
+/* The kept frames' pictures are made on a thread of their own, in the
+order they were kept, while the pass goes on to the next map: the game's
+thread only reads the frame back (the GPU's work, waited for), and the
+main menu waits for the last (menu_pictures_render_finished). Each picture
+is made from its own frame's pixels as it was on the game's thread, so the
+files are the same. */
+static struct
+{
+	pthread_mutex_t lock;
+	pthread_cond_t changed;
+	struct picture_finish_job *first, *last;
+	/* jobs queued and not yet finished; the thread is running */
+	long pending;
+	int running;
+} picture_finisher = { PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, NULL, NULL, 0, 0 };
+
+static void *picture_finish_thread(void *unused)
+{
+	(void)unused;
+	pthread_mutex_lock(&picture_finisher.lock);
+	for (;;)
+	{
+		struct picture_finish_job *job;
+
+		while (!picture_finisher.first)
+			pthread_cond_wait(&picture_finisher.changed, &picture_finisher.lock);
+		job = picture_finisher.first;
+		picture_finisher.first = job->next;
+		if (!picture_finisher.first)
+			picture_finisher.last = NULL;
+		pthread_mutex_unlock(&picture_finisher.lock);
+		picture_finish(job);
+		free(job->bgra);
+		free(job);
+		pthread_mutex_lock(&picture_finisher.lock);
+		picture_finisher.pending--;
+		pthread_cond_broadcast(&picture_finisher.changed);
+	}
+	return NULL;
+}
+
+/* a job handed to the finisher (started the first time); else, without
+one, made here */
+static void picture_finish_queue(struct picture_finish_job *job)
+{
+	pthread_mutex_lock(&picture_finisher.lock);
+	if (!picture_finisher.running)
+	{
+		pthread_t thread;
+		pthread_attr_t attributes;
+
+		pthread_attr_init(&attributes);
+		pthread_attr_setdetachstate(&attributes, PTHREAD_CREATE_DETACHED);
+		picture_finisher.running = pthread_create(&thread, &attributes, picture_finish_thread, NULL) == 0;
+		pthread_attr_destroy(&attributes);
+	}
+	if (!picture_finisher.running)
+	{
+		pthread_mutex_unlock(&picture_finisher.lock);
+		picture_finish(job);
+		free(job->bgra);
+		free(job);
+		return;
+	}
+	job->next = NULL;
+	if (picture_finisher.last)
+		picture_finisher.last->next = job;
+	else
+		picture_finisher.first = job;
+	picture_finisher.last = job;
+	picture_finisher.pending++;
+	pthread_cond_broadcast(&picture_finisher.changed);
+	pthread_mutex_unlock(&picture_finisher.lock);
+}
+
+void menu_pictures_render_finished(void)
+{
+	pthread_mutex_lock(&picture_finisher.lock);
+	while (picture_finisher.pending > 0)
+		pthread_cond_wait(&picture_finisher.changed, &picture_finisher.lock);
+	pthread_mutex_unlock(&picture_finisher.lock);
+}
+
+int menu_pictures_render_kept(
+	long pose)
+{
+	unsigned long width = 0, height = 0;
+	Uint64 began = SDL_GetTicksNS();
+	unsigned char *bgra = d3d8_back_buffer_read(&width, &height);
+	struct picture_finish_job *job = bgra ? calloc(1, sizeof(*job)) : NULL;
+
+	if (!job)
+	{
+		free(bgra);
+		menu_pictures_render_failed(pose, "was not written");
+		return 0;
+	}
+	job->pose = pose;
+	job->scale = menu_pictures.wanted_scale;
+	job->bgra = bgra;
+	job->width = width;
+	job->height = height;
+	job->read_at = SDL_GetTicksNS();
+	job->read_milliseconds = (job->read_at - began) / 1e6;
+	picture_finish_queue(job);
 	return 1;
 }
 

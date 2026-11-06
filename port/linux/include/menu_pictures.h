@@ -134,14 +134,18 @@ unsigned int menu_pictures_texture(long pose, unsigned long *levels);
 colour curve */
 void menu_pictures_keep_original(long pose, void const *texture);
 /* a pose's render begun (noted first: a game gone in the middle of it
-counts it as failed), failed, or its frame kept (the frame being drawn's, so far: cut, its
-colours matched, written and noted; 0 if that failed) */
+counts it as failed), failed, or its frame kept (the frame being drawn's,
+read back; 0 if that failed; then cut, its colours matched, written and
+noted on the pictures' own thread, or failed there) */
 void menu_pictures_render_begin(long pose);
 void menu_pictures_render_failed(long pose, char const *why);
 int menu_pictures_render_kept(long pose);
 /* ...or given up on for good (its pose and map's), as one that stopped the
 game: not tried again */
 void menu_pictures_render_given_up(long pose, char const *why);
+/* the kept frames' pictures all made (their files written, drawn): they are
+made on a thread of their own as the pass goes on (menu_pictures.c) */
+void menu_pictures_render_finished(void);
 /* the scale the pictures are rendered at (menu_picture_scale_for_height) */
 long menu_pictures_scale(void);
 
