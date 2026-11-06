@@ -148,7 +148,13 @@ plasma pistol (special fire), put back after his combat update and again after t
   window (which already doubles the error; the layer off stacks 1.4 on it), nerve under fire
   (`perceived_danger`, a near-miss memory; an Elite with shields up feels a third of it), badly
   wounded (under half health, up to 1.3), a target inside a fifth of his range (courage), and the
-  mood. A Jackal major (error 0) shakes under fire (up to 1.5 degrees). A steady hand also starts
+  mood, times a family calibration (Grunts 1.033, Jackals 1.059, Elites 1.024, Marines 0.917) that
+  brings each family's mean error back to the layer off's burst for burst: the factors that are
+  not traits (the new target cap, wounds, close range) do not average out, and over the trainer's
+  frozen benchmark they left the Marines 9% less accurate and the Covenant 2-6% more, which cut
+  the Marines' kills by about 20%. A weapon with no projectile error (a Jackal major's) shakes
+  under fire (up to 0.75 degrees; at 1.5 the Marines still made 17% fewer kills after the
+  calibration). A steady hand also starts
   his tracers nearer and walks them in faster (start and return radius times a skill multiplier,
   1.25..0.8). The game then fits the sweep to the new length, as it does for its own.
 - **Reaction (B, BUG B).** Before a first burst: on his own, the game's own wait times a reflex
@@ -200,7 +206,13 @@ plasma pistol (special fire), put back after his combat update and again after t
   encounter, a seconds since seen, c an Elite called, d movers, e holders. `vehicles` (each 30 s):
   a friendly vehicles seen, b of them too large, c tests, d pills added. A soldier without a
   character (the layer off) logs `burst` and `pause` with his species as the kind, for
-  comparison.
+  comparison. `hit` (every unit hurt, the layer on or off; units.c's damage aftermath): actor
+  and kind the attacker's actor and actor type (99 the player, -1 nobody), quirk the victim's
+  actor type, commanded 1 if it killed, a and b shield and body damage, c and d the victim's and
+  the attacker's team, e the victim's actor. In training, `episode` and `episode_end` rows (c
+  the trainer's scenario, d its seed) mark each fight, and the sample log has an `episode` row
+  (actor -1, encounter the scenario, squad the seed), so a run of many fights can be cut back
+  into them.
 
 ## Fork release settings
 

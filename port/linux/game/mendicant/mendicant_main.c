@@ -445,6 +445,14 @@ static void mendicant_episode_start(
 	/* the map starts every fight the same way; the trainer's seed makes each one differ */
 	*get_global_random_seed_address() ^= bridge->seed;
 	*get_global_local_random_seed_address() ^= bridge->seed * 2654435761UL;
+	/* the logs mark each fight with the trainer's scenario and seed, so a run
+	of many fights can be cut back into them */
+	if (mendicant_fire_file)
+		fprintf(mendicant_fire_file, "%ld,episode,-1,0,0,0,0,0,%ld,%ld,0,0\n", mendicant_time(),
+			(long)(int)bridge->scenario_id, (long)(int)bridge->seed);
+	if (mendicant_sample_file)
+		fprintf(mendicant_sample_file, "%ld,-1,-1,-1,%ld,%ld,-1,0,0,0,0,0,0,0,0,0,0,0,0,-1,-1,0,0\n", mendicant_time(),
+			(long)(int)bridge->scenario_id, (long)(int)bridge->seed);
 
 	return;
 }
@@ -481,6 +489,12 @@ static void mendicant_episode_end(
 			(!still && time - mendicant_last_sample_time[index] <= MENDICANT_ALIVE_TICKS);
 	}
 	bridge->end_time = time;
+	if (mendicant_fire_file)
+	{
+		fprintf(mendicant_fire_file, "%ld,episode_end,-1,0,0,0,0,0,%ld,%ld,0,0\n", time,
+			(long)(int)bridge->scenario_id, (long)(int)bridge->seed);
+		fflush(mendicant_fire_file);
+	}
 	mendicant_movement_report(bridge);      /* the drill log's movement line */
 	mendicant_command_episode_report(bridge); /* chains, samples, leashes, discipline */
 	mendicant_episode_over = TRUE;

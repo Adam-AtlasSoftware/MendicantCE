@@ -70,6 +70,19 @@ that and keeps each kind's mean within the balance band) */
 /* an ordered soldier is already aimed in: this share of his own reaction
 (it keeps the cost of the staggered opening within the balance band) */
 #define FIRING_COMMANDED_REACTION 0.75f
+/* each family's aim, so that burst for burst its error keeps the layer off's
+mean (lower than 1: more accurate). The factors below that are not traits
+(settling inside the game's new target window, wounds, a target too close)
+do not average out: measured over the trainer's frozen benchmark (50 fights
+on a30, a50, b30 and c40, 3,800-6,500 bursts a family), the Marines' error
+came out 9% above the layer off's and the Covenant's 2-6% below, which moved
+the Marines' kills down by 20%. With these and the shake under fire halved
+(below), each family's damage, kills and deaths came back within the band
+(docs/mendicant_port.md, "The firing personality"). */
+#define FIRING_AIM_GRUNT 1.033f
+#define FIRING_AIM_JACKAL 1.059f
+#define FIRING_AIM_ELITE 1.024f
+#define FIRING_AIM_MARINE 0.917f
 /* the longest wait before a first burst, a hesitation, a flinch (seconds) */
 #define FIRING_REACTION_MAXIMUM 1.2f
 #define FIRING_HESITATION_MAXIMUM 0.6f
@@ -565,8 +578,9 @@ void mendicant_firing_burst_geometry(
 	nerves = mendicant_soldier_mult(actor_index, MENDICANT_TRAIT_COURAGE, 1.0f + 1.2f * suppression, 1.0f);
 	wounds = 1.0f + 0.6f * firing_clamp(0.5f - actor->input.body_vitality, 0.0f, 0.5f); /* badly hurt: up to 1.3 */
 	close = range < 0.2f ? firing_blend(mendicant_soldier_mult(actor_index, MENDICANT_TRAIT_COURAGE, 1.5f, 1.0f), cohesion) : 1.0f;
-	error = firing_clamp(skill * settle * nerves * wounds * close * mendicant_soldier_mood_scale(actor_index, MENDICANT_MOOD_AIM),
-		0.35f, 3.0f);
+	error = firing_clamp(skill * settle * nerves * wounds * close * mendicant_soldier_mood_scale(actor_index, MENDICANT_MOOD_AIM) *
+		(FIRING_KIND_MARINE(kind) ? FIRING_AIM_MARINE : FIRING_KIND_ELITE(kind) ? FIRING_AIM_ELITE :
+		FIRING_KIND_GRUNT(kind) ? FIRING_AIM_GRUNT : FIRING_AIM_JACKAL), 0.35f, 3.0f);
 	global = mendicant_aim_global(actor_index);
 	motion = mendicant_aim_motion(actor_index,
 		mendicant_soldier_mult(actor_index, MENDICANT_TRAIT_SKILL, 1.3f, 0.7f));
@@ -574,7 +588,7 @@ void mendicant_firing_burst_geometry(
 	walk = firing_blend(mendicant_soldier_mult(actor_index, MENDICANT_TRAIT_SKILL, 1.25f, 0.8f), cohesion);
 	actor->control.burst_error *= global * motion * error;
 	if (variant->ranged_combat.projectile_error_angle <= 0.0f && suppression > 0.0f)
-		actor->control.burst_error += 0.026f * suppression * (1.0f - courage); /* 1.5 degrees: even a Jackal major shakes */
+		actor->control.burst_error += 0.013f * suppression * (1.0f - courage); /* up to 0.75 degrees: even a Jackal major shakes */
 	*origin_radius *= global * motion * error * walk;
 	*return_radius *= walk;
 
@@ -944,4 +958,69 @@ void mendicant_firing_update(
 			firing_vehicle_seen, firing_vehicle_large, firing_vehicle_tests, firing_vehicle_pills);
 		fflush(mendicant_fire_file);
 	}
+}
+
+/* ---------- the fire log's hits */
+
+/* who is behind a unit's damage or in its body: an actor (his index and
+actor type), the player (type 99), else nobody (-1); a vehicle stands for
+whoever works its gun, else its driver */
+static void firing_hit_party(
+	long object_index,
+	long *actor_index,
+	int *type)
+{
+	struct unit_datum *unit = object_index != NONE && object_header_data && object_header_data->valid ?
+		(struct unit_datum *)object_try_and_get_and_verify_type(object_index, _object_mask_unit) : NULL;
+	struct actor_datum *actor;
+
+	*actor_index = NONE;
+	*type = -1;
+	if (unit && unit->unit.actor_index == NONE && unit->unit.player_index == NONE)
+	{
+		long seat = unit->unit.gunner_object_index != NONE ? unit->unit.gunner_object_index : unit->unit.driver_object_index;
+
+		unit = seat != NONE ? (struct unit_datum *)object_try_and_get_and_verify_type(seat, _object_mask_unit) : NULL;
+	}
+	if (!unit)
+		return;
+	if (unit->unit.player_index != NONE)
+	{
+		*type = 99;
+		return;
+	}
+	if ((actor = firing_actor(unit->unit.actor_index)) != NULL)
+	{
+		*actor_index = unit->unit.actor_index;
+		*type = actor->meta.type;
+	}
+}
+
+/* a unit was hurt (units.c's unit_damage_aftermath): a "hit" row of the fire
+log (actor and kind: the attacker's actor and actor type; quirk: the
+victim's actor type; commanded: it killed; a, b: shield and body damage; c,
+d: the victim's and the attacker's team; e: the victim's actor), for the
+balance measures. Nothing without the log. */
+void mendicant_unit_damaged(
+	long unit_index,
+	long owner_object_index,
+	short owner_team,
+	real shield_damage,
+	real body_damage,
+	boolean lethal)
+{
+	struct unit_datum *victim;
+	long victim_actor, owner_actor;
+	int victim_type, owner_type;
+
+	if (!mendicant_fire_file || !mendicant_active || !object_header_data || !object_header_data->valid)
+		return;
+	victim = (struct unit_datum *)object_try_and_get_and_verify_type(unit_index, _object_mask_unit);
+	if (!victim)
+		return;
+	firing_hit_party(unit_index, &victim_actor, &victim_type);
+	firing_hit_party(owner_object_index, &owner_actor, &owner_type);
+	fprintf(mendicant_fire_file, "%ld,hit,%d,%d,%d,%d,%.4f,%.4f,%d,%d,%d,0\n", mendicant_time(), (int)(short)owner_actor,
+		owner_type, victim_type, lethal ? 1 : 0, shield_damage, body_damage, (int)victim->object.owner_team_index,
+		(int)owner_team, (int)(short)victim_actor);
 }

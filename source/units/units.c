@@ -683,6 +683,7 @@ symbols in this file:
 #include "objects/damage_effect_definitions.h"
 #include "objects/object_lights.h"
 #include "physics/breakable_surfaces.h"
+#include "mendicant/mendicant.h" /* port: port/linux/game/mendicant (the fire log's hits) */
 #include "physics/collision_bsp.h"
 #include "physics/collision_models.h"
 #include "physics/collision_usage.h"
@@ -7392,6 +7393,15 @@ void unit_damage_aftermath(
 			damage_data->owner_team_index,
 			damage_data->owner_object_index);
 	}
+
+	/* port: MENDICANT AI's fire log: who hurt whom (port/linux/game/mendicant) */
+	mendicant_unit_damaged(
+		unit_index,
+		damage_data->owner_object_index,
+		damage_data->owner_team_index,
+		shield_damage,
+		body_damage,
+		lethal);
 
 	if (!TEST_FLAG(
 			damage_data->flags,

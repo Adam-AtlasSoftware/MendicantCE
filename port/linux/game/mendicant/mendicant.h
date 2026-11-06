@@ -85,6 +85,11 @@ spheres (at most maximum); the count written */
 short mendicant_line_of_fire_vehicles(long actor_index, short maximum,
 	real_point3d *centers, real *radii, long *prop_indices);
 
+/* a unit was hurt (units.c's unit_damage_aftermath): the fire log's "hit"
+row, for the balance measures (nothing without ai.mendicant.fire_log) */
+void mendicant_unit_damaged(long unit_index, long owner_object_index, short owner_team,
+	real shield_damage, real body_damage, boolean lethal);
+
 /* target weights (actor_perception.c) */
 real mendicant_target_weight(long actor_index, long prop_index, real weight);
 
