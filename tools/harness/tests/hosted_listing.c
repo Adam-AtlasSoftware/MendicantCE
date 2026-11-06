@@ -175,6 +175,8 @@ static struct
 	boolean cooperative_no_player_collisions;
 	wchar_t game_name[32];
 	char game_password[32];
+	/* (the main menu's FORGE's game: forge_begin) */
+	boolean forge;
 } multiplayer;
 
 static short *server_settings_maximum_players_index(void) { return &multiplayer.maximum_players_index; }

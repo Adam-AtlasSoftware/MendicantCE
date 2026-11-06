@@ -50,6 +50,9 @@ void posix_random_bytes(void *buffer, posix_ulong size)
 	memcpy(buffer, random_bytes, size);
 }
 
+/* halo_port_limits.h's: a Forge game's listing (p2p_lobby.c's listing_read) */
+#define HALO_PORT_FORGE_VERSION_BIT 0x4000
+
 #include "master_list.h"
 #include "server_master.h"
 
