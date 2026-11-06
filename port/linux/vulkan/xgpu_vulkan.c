@@ -881,6 +881,16 @@ static void memory_release(struct allocation *allocation)
 }
 
 /* a buffer of its own memory, host-visible (mapped) or device-local */
+/* (buffer_make's host: 0 the device's memory, BUFFER_HOST written by the
+CPU and read by the GPU, BUFFER_READBACK written by the GPU and read by the
+CPU) */
+enum
+{
+	BUFFER_DEVICE,
+	BUFFER_HOST,
+	BUFFER_READBACK,
+};
+
 static int buffer_make(VkDeviceSize size, VkBufferUsageFlags usage, int host, VkBuffer *buffer,
 	struct allocation *memory, void **mapped)
 {
@@ -896,9 +906,17 @@ static int buffer_make(VkDeviceSize size, VkBufferUsageFlags usage, int host, Vk
 	if (!check(vkCreateBuffer(vk.device, &info, NULL, buffer), "vkCreateBuffer"))
 		return 0;
 	vkGetBufferMemoryRequirements(vk.device, *buffer, &requirements);
-	type = host ? memory_type(requirements.memoryTypeBits,
-		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 0) :
-		memory_type(requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 0);
+	/* (memory the CPU reads from is the host's cached memory where the
+	device has it: uncached, write-combined memory, which the CPU writes
+	quickly, it reads a few hundred MB a second at most, and a 4K frame of
+	the menus' pictures took 140 ms to read on an RTX 4090, the game waiting) */
+	type = host == BUFFER_READBACK ? memory_type(requirements.memoryTypeBits,
+		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT,
+		0) : -1;
+	if (type < 0)
+		type = host ? memory_type(requirements.memoryTypeBits,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 0) :
+			memory_type(requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 0);
 	if (type < 0 || !memory_dedicated(requirements.size, (uint32_t)type, memory))
 	{
 		vkDestroyBuffer(vk.device, *buffer, NULL);
@@ -3031,7 +3049,7 @@ int xgpu_vulkan_read_pixels(struct xgpu_vulkan_image *image, uint32_t layer, voi
 			memory_release(&vk.readback_memory);
 			vk.readback = VK_NULL_HANDLE;
 		}
-		if (!buffer_make(size, VK_BUFFER_USAGE_TRANSFER_DST_BIT, 1, &vk.readback, &vk.readback_memory,
+		if (!buffer_make(size, VK_BUFFER_USAGE_TRANSFER_DST_BIT, BUFFER_READBACK, &vk.readback, &vk.readback_memory,
 			(void **)&vk.readback_mapped))
 		{
 			vk.readback_size = 0;

@@ -38,8 +38,9 @@ the camera put at the pose (debug_camera_set, camera_pose.c); and one
 frame drawn, each texture it draws with waited for (xbox_texture_cache.c),
 with only the pipelines it draws with made (render_enumerate.c's map's
 enumeration left out), at the window's size, and kept as it is presented
-instead of shown (d3d8_device.c; menu_pictures_render_kept cuts and scales
-it). The phase has the game to itself (menu_pictures_exclusive): the map
+instead of shown (d3d8_device.c; menu_pictures_render_kept reads it back,
+and the pictures' own thread cuts, scales and writes it while the pass goes
+on to the next map; the main menu waits for the last). The phase has the game to itself (menu_pictures_exclusive): the map
 loader, the copy of a map's file into the cache and the texture cache's
 spare memory it takes are the pass's alone, no movie starts (bink_playback.c),
 and the main menu's menus are not loaded yet, so a frame kept is the scene
@@ -391,6 +392,8 @@ static void prepare_next(
 	prepare.captured = FALSE;
 	if (prepare.index >= prepare.count)
 	{
+		/* (the kept frames' pictures made, on their own thread meanwhile) */
+		menu_pictures_render_finished();
 		/* (every stock map's preparation recorded, or tried) */
 		if (!prepare.overdue)
 			render_prepared_stock_done();
@@ -940,6 +943,7 @@ void menu_pictures_abandon(
 	if (prepare.state != _prepare_menu && prepare.index < prepare.count)
 		menu_pictures_render_given_up(prepare.poses[prepare.index], why);
 	platform_log("menu pictures: the pass stopped (%s)", why);
+	menu_pictures_render_finished();
 	main_queue_map_name(NULL);
 	prepare.capture_wanted = FALSE;
 	prepare.state = _prepare_off;
