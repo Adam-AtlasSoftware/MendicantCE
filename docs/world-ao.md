@@ -789,6 +789,23 @@ Without the box's bound, a field was fetched over its whole reach, and Blood Gul
   the camera on average, 40% of them past 10 wu.
 - Or a capsule's reach from a bound like the box's, which falls fast on the ground beside it.
 
+### The scenery's occlusion fields (#666)
+
+The scenery's boxes and spheres replaced by fields of what's drawn ([The objects' occlusion
+fields](#the-objects-occlusion-fields)). GPU ms a frame on the Radeon 8060S, unpaced, windowed 1440p, twelve
+600-frame windows; a30 a scripted walk to a pine by the lifepod, b30 its start with no input:
+
+| Scene | World before | World after | Off |
+| --- | --- | --- | --- |
+| a30, by a pine | 6.76 (+6.24) | **2.09 (+1.58)** | 0.52 |
+| b30's start | 1.47 (+0.37) | **1.49 (+0.38)** | 1.10 |
+
+a30's trees sway, so every one in view was an exact box walked by every pixel. A field is one fetch.
+
+**The bake** (first load, the 5900X's 29 threads): a30's 13 fields 0.85 s (the scenery's seven 4.9 s of the
+threads' time), b30's 27 fields 1.30 s (the scenery's twenty 12.3 s, 8.6 of it the crashed Pelican's 4,223
+triangles, its least detailed level). The atlas: 4.4 MB on a30, 6.8 MB on b30.
+
 ## Determinism
 
 The feature only ever writes:
