@@ -135,6 +135,7 @@ struct game_options;
 #include "effects/contrails.h"
 #include "effects/decals.h"
 #include "effects/effects.h"
+#include "effects/material_effects.h"
 #include "effects/particle_systems.h"
 #include "effects/particles.h"
 #include "effects/player_effects.h"
@@ -355,6 +356,9 @@ static void game_tick_macro_step(
 	lights_port_recover();
 	/* port: the rate this tick simulates at (game.sim_rate) */
 	sim_rate_tick_begin();
+	/* port: the cameras as the tick begins, which its fast phase decides
+	material effects by (material_effects.c) */
+	material_effects_tick_begin();
 
 	/* port: a client of another's game, the host's rules (its own cheats and
 	game speed, set before it joined too, put back) */
