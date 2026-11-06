@@ -78,7 +78,7 @@ NEGATIVE_CONTROLS = {
     # silent, a sound behind not mirrored ahead (the HRTF's duller behind), a 2D voice to the center alone skipped
     "surround-split-linear": (("share = 0.5f + (1.0f - fabsf(elevation) / 90.0f) * (fabsf(azimuth) / 90.0f - 1.0f);",
                                "share = fabsf(azimuth) / 180.0f;"), "surround"),
-    "surround-hrtf-front-only": (("output[frame * 6 + 4 + ear] += shadowed * now.pair[1];",
+    "surround-hrtf-front-only": (("output[frame * 6 + 4 + ear] += heard * now.pair[1];",
                                   "output[frame * 6 + 4 + ear] += 0.0f * now.pair[1];"), "surround"),
     "surround-pan-front-only": (("gains[0][4] = left * pair[1];", "gains[0][4] = 0.0f * pair[1];"), "surround"),
     "surround-not-mirrored": (("output_channels == 6 ? fabsf(ahead) : ahead, distance", "ahead, distance"), "surround"),
@@ -96,13 +96,14 @@ NEGATIVE_CONTROLS = {
     "spatial-speakers-hrtf": (('return strcmp(setting, "speakers") != 0;', 'return TRUE;'), "spatial-choice"),
     "spatial-vr-ignored": (("if (vr_running)\n\t\treturn vr_hrtf;", "if (vr_running && 0)\n\t\treturn vr_hrtf;"),
                            "spatial-choice"),
-    # the HRTF: no time between the ears, no head shadow, the notch fixed (no elevation), nothing behind
-    "hrtf-no-delay": (("parameters->delay[ear] = floorf(strength *", "parameters->delay[ear] = 0.0f * floorf(strength *"),
+    # the HRTF: no time between the ears, no level between them, no elevation, nothing behind
+    "hrtf-no-delay": (("parameters->delay[mirrored] = floorf(", "parameters->delay[mirrored] = 0.0f * floorf("),
                       "hrtf-cues"),
-    "hrtf-no-shadow": (("float shadow = 1.0f + strength *", "float shadow = 1.0f + 0.0f * strength *"), "hrtf-cues"),
-    "hrtf-no-elevation": (("elevation = (elevation - HRTF_NOTCH_ELEVATION_LOW) /",
-                           "elevation = (0.0f - HRTF_NOTCH_ELEVATION_LOW) /"), "hrtf-cues"),
-    "hrtf-no-rear": (("#define HRTF_REAR_DEPTH 0.99f", "#define HRTF_REAR_DEPTH 0.0f"), "hrtf-cues"),
+    "hrtf-no-shadow": (("const float *decibels = ear ^ mirrored ? direction.right : direction.left;",
+                        "const float *decibels = direction.right;"), "hrtf-cues"),
+    "hrtf-no-elevation": (("elevation = atan2f(up,", "elevation = 0.0f * atan2f(up,"), "hrtf-cues"),
+    "hrtf-no-rear": (("azimuth = atan2f(fabsf(right), ahead)", "azimuth = atan2f(fabsf(right), fabsf(ahead))"),
+                     "hrtf-cues"),
     # through the HRTF: the distance left out
     "hrtf-no-distance": (("hrtf_out->gain = 0.70710678f * attenuation *", "hrtf_out->gain = 0.70710678f *"),
                          "hrtf-paths"),

@@ -2,28 +2,35 @@
 HRTF.C (test)
 
 The HRTF of port/linux/src/dsound_sdl.c (test_hrtf.py takes the mixer as
-under_test.inc, as test_mixer.py does) against the Xbox's: the filters and
-delays the XDK DirectSound linked into the game's default.xbe looks up for
-each direction once the game asks for its full HRTF (DirectSoundUseFullHRTF,
-sound_dsound_xbox.c), as the MCPX's voice processor plays them. The Xbox's
-figures below (xbox_figures) were measured on its own filters (see
-test_hrtf.py on how to measure them again from a default.xbe); this holds
-the figures only. Every figure is taken the same way from the Xbox's
-responses and from ours, on a grid of directions every 15 degrees round and
-every 10 from 40 below to 60 above, from impulse responses of 512 frames at
-48 kHz:
+under_test.inc, as test_mixer.py does) against the Xbox's, two ways. First,
+the filters and delays the XDK DirectSound linked into the game's
+default.xbe looks up for each direction once the game asks for its full
+HRTF (DirectSoundUseFullHRTF, sound_dsound_xbox.c), as the MCPX's voice
+processor plays them. The Xbox's figures below (xbox_figures) were measured
+on its own filters (see test_hrtf.py on how to measure them again from a
+default.xbe); this holds the figures only. Every figure is taken the same
+way from the Xbox's responses and from ours, on a grid of directions every
+15 degrees round and every 10 from 40 below to 60 above, from impulse
+responses of 512 frames at 48 kHz:
 	- "delays": the time between the ears (the lag of their greatest
 	  cross-correlation below 1.5 kHz, to a sixteenth of a frame), to the
 	  side, ahead of it and behind it; the delays in whole frames, as the
 	  Xbox's;
 	- "levels": the level between the ears in each octave from 125 Hz to 16
 	  kHz, over every direction and to the side;
-	- "notch": the deepest notch from 4 to 16 kHz ahead, below, level and
-	  above, against the 2 to 16 kHz mean (each against the mean over all
-	  directions: a directional transfer function);
 	- "rear": what a sound behind loses above 2.5 kHz, against its low
 	  frequencies, beside the direction mirrored ahead (the Xbox on stereo
 	  played its table all round, its front mix bins alone).
+Second, "recorded": the Xbox's own output, recorded (a sweep 2 m away played
+through Halo's DirectSound calls on stereo, its final mix captured, the
+same calls through this mixer with no HRTF beside it): each ear's level in
+each octave from 125 Hz to 16 kHz against no HRTF's, and the time between
+the ears (below 1.5 kHz), every 30 degrees round at 40, 20 and 0 degrees
+below and above (recorded_figures), which the mixer's table was fitted to.
+(The notch's figures, the deepest single frequency from 4 to 16 kHz, are
+printed but not judged: the table's bands are a third of an octave and
+wider, and the recordings' notches ahead are two, at 6.3 and 10 kHz, as
+deep as each other.)
 "metrics" prints our figures beside the Xbox's; "measure" prints the
 figures of responses given (raw floats: for each direction of the grid,
 elevation by elevation from below and round from ahead to the right, 512
@@ -339,6 +346,53 @@ static const struct figures xbox_figures =
 	{ -4.5, -9.7, -12.0, -10.2, -7.5 }
 };
 
+/* the Xbox's output recorded from each direction (see "recorded"): the
+azimuth and elevation, the time between the ears (ms, the left later
+positive), each ear's level in each octave (dB, left, then right) */
+static const struct
+{
+	int azimuth, elevation;
+	double delay;
+	double left[OCTAVES], right[OCTAVES];
+} recorded_figures[] =
+{
+	{   0, -40, 0.000, { -0.3, -0.1, 0.8, 2.6, 1.4, -4.1, 0.0, -1.2 }, { -0.3, -0.1, 0.8, 2.6, 1.4, -4.1, 0.0, -1.2 } },
+	{  30, -40, 0.186, { -1.2, -1.2, -1.2, -0.7, -2.4, -7.9, -4.0, -9.7 }, { 1.3, 1.5, 2.3, 4.0, 2.9, -1.4, 2.3, 0.1 } },
+	{  60, -40, 0.555, { -1.3, -1.5, -2.1, -4.4, -8.0, -17.1, -15.3, -24.4 }, { 2.7, 3.0, 3.6, 4.4, 2.9, 0.2, 2.8, -3.1 } },
+	{  90, -40, 0.617, { -1.2, -1.2, -1.5, -2.8, -7.0, -17.9, -19.0, -22.6 }, { 3.0, 3.3, 4.0, 4.6, 2.5, -1.1, 3.0, 1.8 } },
+	{ 120, -40, 0.551, { -1.4, -1.6, -2.4, -5.3, -9.2, -15.7, -16.8, -22.5 }, { 2.5, 2.7, 3.2, 4.1, 2.2, -4.2, 2.6, 0.3 } },
+	{ 150, -40, 0.181, { -1.7, -1.8, -2.0, -2.0, -3.0, -7.8, -10.6, -18.8 }, { 0.6, 0.8, 1.5, 3.1, 2.0, -6.3, -6.9, -10.5 } },
+	{ 180, -40, 0.000, { -0.7, -0.6, -0.1, 1.3, 0.7, -6.1, -9.8, -16.0 }, { -0.7, -0.6, -0.1, 1.3, 0.7, -6.1, -9.8, -16.0 } },
+	{   0, -20, 0.000, { 0.1, 0.3, 1.0, 1.7, -0.8, -1.6, -1.2, -0.7 }, { 0.1, 0.3, 1.0, 1.7, -0.8, -1.6, -1.2, -0.7 } },
+	{  30, -20, 0.260, { -0.8, -1.0, -1.5, -2.6, -5.1, -8.5, -10.0, -10.1 }, { 1.6, 1.9, 3.0, 4.3, 1.4, 2.2, 1.3, 0.3 } },
+	{  60, -20, 0.609, { -0.9, -1.0, -1.5, -3.6, -8.4, -15.5, -14.3, -17.9 }, { 3.1, 3.4, 4.0, 4.6, 2.3, 2.7, 2.6, -0.2 } },
+	{  90, -20, 0.697, { -1.1, -1.0, -0.8, -1.6, -8.0, -13.0, -18.5, -20.4 }, { 3.2, 3.5, 4.1, 4.6, 1.9, 0.7, 3.0, 3.2 } },
+	{ 120, -20, 0.612, { -1.1, -1.2, -1.7, -4.4, -9.6, -13.3, -16.2, -22.9 }, { 2.5, 2.9, 3.7, 4.4, 1.8, -2.9, 1.9, 0.6 } },
+	{ 150, -20, 0.243, { -1.5, -1.7, -2.2, -3.1, -4.5, -8.2, -15.9, -23.2 }, { 0.7, 1.1, 2.2, 3.6, 0.8, -5.8, -6.2, -11.4 } },
+	{ 180, -20, 0.000, { -0.7, -0.5, 0.0, 1.1, -0.6, -5.7, -11.9, -19.4 }, { -0.7, -0.5, 0.0, 1.1, -0.6, -5.7, -11.9, -19.4 } },
+	{   0,  +0, 0.000, { 1.0, 0.9, 0.6, 0.3, 0.4, -1.2, -3.7, -2.2 }, { 1.0, 0.9, 0.6, 0.3, 0.4, -1.2, -3.7, -2.2 } },
+	{  30,  +0, 0.279, { 0.2, -0.1, -1.4, -4.1, -4.7, -8.7, -11.8, -12.1 }, { 2.2, 2.4, 2.9, 3.1, 2.7, 2.5, -0.2, -0.6 } },
+	{  60,  +0, 0.655, { -0.3, -0.3, -0.5, -2.3, -10.5, -11.2, -18.4, -21.5 }, { 3.5, 3.9, 4.5, 4.6, 3.1, 3.3, 2.5, -1.2 } },
+	{  90,  +0, 0.723, { -0.8, -0.6, -0.1, 0.0, -4.4, -12.1, -16.2, -19.5 }, { 3.7, 4.1, 4.6, 4.6, 2.2, 1.3, 4.4, 2.3 } },
+	{ 120,  +0, 0.648, { -0.5, -0.6, -0.8, -2.8, -11.1, -11.9, -18.7, -21.9 }, { 3.0, 3.4, 4.1, 4.2, 1.4, -2.2, 3.3, -1.5 } },
+	{ 150,  +0, 0.257, { -0.7, -1.0, -1.9, -3.7, -4.8, -8.2, -15.9, -22.9 }, { 1.3, 1.6, 2.3, 2.8, 0.2, -5.3, -6.2, -14.5 } },
+	{ 180,  +0, 0.000, { 0.2, 0.2, 0.3, 0.5, -0.8, -4.9, -11.4, -22.0 }, { 0.2, 0.2, 0.3, 0.5, -0.8, -4.9, -11.4, -22.0 } },
+	{   0, +20, 0.000, { 1.4, 1.1, 0.3, -0.1, 0.9, -0.7, -4.3, -6.0 }, { 1.4, 1.1, 0.3, -0.1, 0.9, -0.7, -4.3, -6.0 } },
+	{  30, +20, 0.276, { 0.0, -0.3, -1.6, -4.3, -4.6, -7.7, -13.0, -14.9 }, { 3.0, 2.8, 2.1, 2.2, 3.2, 2.8, 0.5, -2.4 } },
+	{  60, +20, 0.638, { 0.2, 0.1, -0.4, -2.8, -8.8, -12.6, -18.9, -23.7 }, { 4.0, 4.0, 3.8, 3.4, 3.8, 3.2, 3.3, -2.6 } },
+	{  90, +20, 0.703, { -0.2, -0.1, 0.0, -0.6, -4.9, -8.0, -11.0, -20.8 }, { 4.2, 4.2, 3.7, 3.3, 3.5, 0.5, 4.3, -0.2 } },
+	{ 120, +20, 0.625, { -0.1, -0.2, -0.7, -2.9, -8.4, -13.0, -17.9, -25.2 }, { 3.8, 3.8, 3.4, 3.1, 3.3, -3.1, 3.7, -2.8 } },
+	{ 150, +20, 0.267, { -0.5, -0.8, -1.8, -4.0, -5.1, -8.8, -13.8, -24.3 }, { 2.4, 2.3, 1.8, 1.5, 1.6, -4.1, -6.4, -15.9 } },
+	{ 180, +20, 0.000, { 0.9, 0.7, 0.0, -0.7, -0.3, -4.9, -9.0, -21.6 }, { 0.9, 0.7, 0.0, -0.7, -0.3, -4.9, -9.0, -21.6 } },
+	{   0, +40, 0.000, { 1.0, 0.8, 0.1, -0.1, 0.4, -1.5, -3.9, -6.6 }, { 1.0, 0.8, 0.1, -0.1, 0.4, -1.5, -3.9, -6.6 } },
+	{  30, +40, 0.212, { 0.2, -0.1, -1.3, -3.3, -3.7, -4.7, -8.2, -14.4 }, { 2.3, 2.1, 1.4, 1.9, 2.1, 1.7, 0.4, 0.0 } },
+	{  60, +40, 0.560, { 0.3, 0.1, -0.8, -3.7, -6.5, -9.8, -12.4, -18.4 }, { 2.9, 3.0, 3.1, 3.0, 2.7, 2.7, 3.3, -0.8 } },
+	{  90, +40, 0.612, { 0.1, 0.0, -0.5, -2.2, -5.4, -10.6, -14.0, -19.5 }, { 3.5, 3.5, 3.1, 2.9, 2.6, 0.8, 3.6, -0.4 } },
+	{ 120, +40, 0.556, { 0.0, -0.2, -1.0, -3.4, -6.0, -12.2, -11.8, -20.3 }, { 2.9, 2.9, 2.7, 2.7, 2.0, -1.7, 2.1, -2.5 } },
+	{ 150, +40, 0.206, { -0.1, -0.4, -1.5, -3.8, -4.2, -7.6, -9.6, -22.4 }, { 1.6, 1.5, 1.2, 1.4, 0.7, -3.5, -4.5, -16.9 } },
+	{ 180, +40, 0.000, { 0.8, 0.6, -0.2, -0.8, -0.7, -5.1, -6.2, -19.1 }, { 0.8, 0.6, -0.2, -0.8, -0.7, -5.1, -6.2, -19.1 } },
+};
+
 static void print_figures(const char *name, const struct figures *f)
 {
 	int i, b;
@@ -428,9 +482,9 @@ int main(int argc, char **argv)
 	}
 
 	/* the time between the ears within 0.06 ms of the Xbox's (its filters
-	add a little to its whole frames, as the head's shadow adds to ours);
-	every delay a whole frame, as the Xbox's, and to the side 30 to 32
-	frames, as its 30 (0.625 ms) */
+	add a little to its whole frames, as our bands add to ours); every delay
+	a whole frame, as the Xbox's, and to the side 32 to 34 frames (the
+	recordings' 0.72 ms less what the bands add) */
 	CASE("delays")
 	{
 		int d;
@@ -455,17 +509,15 @@ int main(int argc, char **argv)
 				elevation_of(d), placed.delay[0], placed.delay[1]);
 			if (azimuth_of(d) == 90 && elevation_of(d) == 0)
 			{
-				CHECK(placed.delay[0] >= 30.0f && placed.delay[0] <= 32.0f && placed.delay[1] == 0.0f,
-					"to the right, the left ear %g frames later, not 30 to 32", placed.delay[0]);
+				CHECK(placed.delay[0] >= 32.0f && placed.delay[0] <= 34.0f && placed.delay[1] == 0.0f,
+					"to the right, the left ear %g frames later, not 32 to 34", placed.delay[0]);
 			}
 		}
 		return 0;
 	}
 	/* the level between the ears: over every direction within 1.5 dB of the
 	Xbox's in each octave, and at 45, 90 and 135 degrees within 2 dB to 500
-	Hz and 8 dB above (the Xbox's 31 taps have peaks and dips a shelf has
-	not, and behind the side differ from ahead of it, where Brown and Duda's
-	shadow is the same at 45 degrees from the ear's axis either way) */
+	Hz and 3 dB above */
 	CASE("levels")
 	{
 		for (b = 0; b < OCTAVES; b++)
@@ -475,22 +527,46 @@ int main(int argc, char **argv)
 				xbox_figures.level_mean[b]);
 			for (i = 0; i < 3; i++)
 			{
-				CHECK(fabs(ours.level[i][b] - xbox_figures.level[i][b]) < (octaves[b] <= 500 ? 2.0 : 8.0),
+				CHECK(fabs(ours.level[i][b] - xbox_figures.level[i][b]) < (octaves[b] <= 500 ? 2.0 : 3.0),
 					"the level between the ears at %.0f Hz, %d degrees round: %.1f dB, the Xbox's %.1f", octaves[b],
 					45 + 45 * i, ours.level[i][b], xbox_figures.level[i][b]);
 			}
 		}
 		return 0;
 	}
-	/* the notch ahead within 1.5 kHz of the Xbox's, below, level and above,
-	and at least 3 dB deep */
-	CASE("notch")
+	/* each ear's level in each octave within 1 dB of the Xbox's recorded to
+	2 kHz, 2 dB at 4 and 8 kHz and 3 dB at 16 kHz (the table's bands are
+	wider than the recordings' peaks and dips up there), and the time
+	between the ears within 0.025 ms, from every direction recorded */
+	CASE("recorded")
 	{
-		for (i = 0; i < 3; i++)
+		int d;
+
+		for (d = 0; d < (int)(sizeof(recorded_figures) / sizeof(recorded_figures[0])); d++)
 		{
-			CHECK(fabs(ours.notch_hz[i] - xbox_figures.notch_hz[i]) < 1500.0 && ours.notch_db[i] < -3.0,
-				"the notch ahead, %d up: %.0f Hz %.1f dB, the Xbox's %.0f Hz %.1f dB", -30 + 30 * i, ours.notch_hz[i],
-				ours.notch_db[i], xbox_figures.notch_hz[i], xbox_figures.notch_db[i]);
+			static float left[FRAMES], right[FRAMES];
+			double re[2][BINS], im[2][BINS], power[2][BINS], delay;
+			int azimuth = recorded_figures[d].azimuth, elevation = recorded_figures[d].elevation, ear;
+
+			our_response(direction_at(azimuth, elevation), left, right, NULL);
+			spectrum(left, power[0], re[0], im[0]);
+			spectrum(right, power[1], re[1], im[1]);
+			delay = ears_delay_ms(re[0], im[0], re[1], im[1]);
+			CHECK(fabs(delay - recorded_figures[d].delay) < 0.025, "%d degrees round, %d up: the left ear %.3f ms "
+				"later, the Xbox's %.3f", azimuth, elevation, delay, recorded_figures[d].delay);
+			for (ear = 0; ear < 2; ear++)
+			{
+				for (b = 0; b < OCTAVES; b++)
+				{
+					double level = band_db(power[ear], octaves[b]);
+					double xbox = ear ? recorded_figures[d].right[b] : recorded_figures[d].left[b];
+
+					CHECK(fabs(level - xbox) < (octaves[b] <= 2000 ? 1.0 : octaves[b] <= 8000 ? 2.0 : 3.0),
+						"%d degrees round, %d up: the %s ear "
+						"%+.1f dB at %.0f Hz, the Xbox's %+.1f", azimuth, elevation, ear ? "right" : "left", level,
+						octaves[b], xbox);
+				}
+			}
 		}
 		return 0;
 	}

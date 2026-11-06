@@ -25,8 +25,8 @@ signals:
 	  the tangent law hears it, never the LFE, through the mixer too, and
 	  2D voices by the game's AC-3 mix bins;
 	- 3D audio: audio.spatial's choice of the HRTF or the pan; the HRTF's
-	  cues (the time and the level between the ears, the notch moving with
-	  the sound up and down, a sound behind duller) and the pan's (none of
+	  cues (the time and the level between the ears, the tone of a sound
+	  below against one above, a sound behind duller) and the pan's (none of
 	  above, below or behind); distance, occlusion, the room send and the
 	  Doppler shift through the HRTF as panned; the crossfade as the choice
 	  changes (no click); 2D voices as they were.
@@ -1701,18 +1701,20 @@ int main(int argc, char **argv)
 		return 0;
 	}
 	/* a 3D voice of noise through the HRTF: to the left (90 degrees), the
-	right ear 0.66 ms later (Woodworth's 31.5 frames) and its high
-	frequencies well down; ahead and behind, the ears alike, and behind
-	duller above a few kHz; above, the pinna's notch moved up from ahead's
-	10.5 kHz to 14.3 kHz, below down to 7 kHz. Panned: to the left, louder in
-	the left ear but at the same time; above, below and behind exactly as
-	ahead (no cue of them) */
+	right ear 0.69 ms later (33 frames, an Xbox's recorded 0.72 ms less
+	what the bands add) and its high frequencies well down; ahead, behind,
+	straight above and straight below, the ears alike, and behind duller
+	above a few kHz (an Xbox's recorded 30 dB at 16 kHz); 40 degrees below
+	ahead brighter at 8 kHz than 40 above, and louder at 1.4 kHz (the
+	recordings' 5.4 dB and 2.7 dB). Panned: to the left, louder in the left
+	ear but at the same time; above, below and behind exactly as ahead (no
+	cue of them) */
 	CASE("hrtf-cues")
 	{
 		unsigned long frames = 48000;
-		float *left_hrtf, *ahead_hrtf, *behind_hrtf, *above_hrtf, *below_hrtf, *left_pan, *ahead_pan, *above_pan,
-			*below_pan, *behind_pan;
-		double notch_ahead, notch_above, notch_below, rear_db, low_db;
+		float *left_hrtf, *ahead_hrtf, *behind_hrtf, *above_hrtf, *below_hrtf, *up_hrtf, *down_hrtf, *left_pan,
+			*ahead_pan, *above_pan, *below_pan, *behind_pan;
+		double rear_db, low_db, bright_db, middle_db;
 		long delay;
 		int ear;
 
@@ -1723,6 +1725,9 @@ int main(int argc, char **argv)
 		behind_hrtf = placed_noise(TRUE, 0.0f, 0.0f, -3.0f, frames);
 		above_hrtf = placed_noise(TRUE, 0.0f, 3.0f, 0.0f, frames);
 		below_hrtf = placed_noise(TRUE, 0.0f, -3.0f, 0.0f, frames);
+		/* (40 degrees up and down, ahead) */
+		up_hrtf = placed_noise(TRUE, 0.0f, 1.92836f, 2.29813f, frames);
+		down_hrtf = placed_noise(TRUE, 0.0f, -1.92836f, 2.29813f, frames);
 		left_pan = placed_noise(FALSE, -3.0f, 0.0f, 0.0f, frames);
 		ahead_pan = placed_noise(FALSE, 0.0f, 0.0f, 3.0f, frames);
 		behind_pan = placed_noise(FALSE, 0.0f, 0.0f, -3.0f, frames);
@@ -1730,7 +1735,7 @@ int main(int argc, char **argv)
 		below_pan = placed_noise(FALSE, 0.0f, -3.0f, 0.0f, frames);
 
 		delay = ears_delay(left_hrtf, frames);
-		CHECK(delay >= 29 && delay <= 34, "to the left through the HRTF, the right ear %ld frames later, not 32", delay);
+		CHECK(delay >= 31 && delay <= 35, "to the left through the HRTF, the right ear %ld frames later, not 33", delay);
 		CHECK(ears_level(left_hrtf, frames) > 10.0, "to the left through the HRTF, the left ear's high frequencies "
 			"%+.1f dB over the right's", ears_level(left_hrtf, frames));
 		delay = ears_delay(left_pan, frames);
@@ -1742,19 +1747,21 @@ int main(int argc, char **argv)
 			"ahead and behind through the HRTF, the ears differ: %ld and %ld frames, %+.2f and %+.2f dB",
 			ears_delay(ahead_hrtf, frames), ears_delay(behind_hrtf, frames), ears_level(ahead_hrtf, frames),
 			ears_level(behind_hrtf, frames));
+		CHECK(labs(ears_delay(above_hrtf, frames)) <= 1 && fabs(ears_level(above_hrtf, frames)) < 0.5 &&
+			labs(ears_delay(below_hrtf, frames)) <= 1 && fabs(ears_level(below_hrtf, frames)) < 0.5,
+			"straight above and below through the HRTF, the ears differ: %ld and %ld frames, %+.2f and %+.2f dB",
+			ears_delay(above_hrtf, frames), ears_delay(below_hrtf, frames), ears_level(above_hrtf, frames),
+			ears_level(below_hrtf, frames));
 		for (ear = 0; ear < 2; ear++)
 		{
 			rear_db = ear_band(behind_hrtf, frames, ear, 15000.0) - ear_band(ahead_hrtf, frames, ear, 15000.0);
 			low_db = ear_band(behind_hrtf, frames, ear, 300.0) - ear_band(ahead_hrtf, frames, ear, 300.0);
-			CHECK(rear_db < -4.0 && fabs(low_db) < 1.0, "behind through the HRTF, 15 kHz %+.1f dB and 300 Hz %+.1f dB "
+			CHECK(rear_db < -15.0 && fabs(low_db) < 1.0, "behind through the HRTF, 15 kHz %+.1f dB and 300 Hz %+.1f dB "
 				"of ahead's (ear %d)", rear_db, low_db, ear);
-			/* (each notch: its band against the other's) */
-			notch_ahead = ear_band(ahead_hrtf, frames, ear, 10500.0) - ear_band(ahead_hrtf, frames, ear, 14300.0);
-			notch_above = ear_band(above_hrtf, frames, ear, 10500.0) - ear_band(above_hrtf, frames, ear, 14300.0);
-			notch_below = ear_band(below_hrtf, frames, ear, 7040.0) - ear_band(below_hrtf, frames, ear, 10500.0);
-			CHECK(notch_above - notch_ahead > 8.0 && notch_below < -4.0, "the notch: ahead 10.5 kHz %+.1f dB of 14.3 "
-				"kHz, above %+.1f dB; below 7 kHz %+.1f dB of 10.5 kHz (ear %d)", notch_ahead, notch_above, notch_below,
-				ear);
+			bright_db = ear_band(down_hrtf, frames, ear, 8000.0) - ear_band(up_hrtf, frames, ear, 8000.0);
+			middle_db = ear_band(down_hrtf, frames, ear, 1400.0) - ear_band(up_hrtf, frames, ear, 1400.0);
+			CHECK(bright_db > 3.0 && middle_db > 1.5, "40 degrees below against 40 above, through the HRTF: 8 kHz %+.1f "
+				"dB, 1.4 kHz %+.1f dB (ear %d)", bright_db, middle_db, ear);
 		}
 		for (index = 0; index < frames * 2; index++)
 		{
@@ -1767,6 +1774,8 @@ int main(int argc, char **argv)
 		free(behind_hrtf);
 		free(above_hrtf);
 		free(below_hrtf);
+		free(up_hrtf);
+		free(down_hrtf);
 		free(left_pan);
 		free(ahead_pan);
 		free(behind_pan);
