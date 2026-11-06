@@ -39,6 +39,8 @@ drive the controller.
 
 #include "platform.h"
 #include "sdl_platform.h"
+#include "../include/halo_forge.h"
+#include "../include/halo_mod.h"
 #include "port_config.h"
 #include "touch_input.h"
 #include "mouse_sensitivity.h"
@@ -137,6 +139,8 @@ drawn view may then take what has come since (halo_linux_mouse_look_late) */
 static BOOL mouse_look_taken;
 static unsigned long mouse_polls_unconsumed = 0;
 static float mouse_wheel_accumulated = 0.0f;
+/* the wheel's turns the dev tools have not read yet (halo_linux_forge_read_wheel) */
+static float forge_wheel_accumulated = 0.0f;
 /* the wheel's switch (wheel_update): when the wheel last moved, until when
 Y is held, and whether a scroll is under way */
 static Uint64 wheel_moved_ms = 0;
@@ -152,6 +156,10 @@ static Uint64 stick_aimed_ms = 0;
 #ifdef HALO_TOUCH_CONTROLS
 static Uint64 touch_aimed_ms = 0;
 #endif
+/* while the dev tools' free camera flies (not the monitor, whose look is the
+player's), the touch controls' swipe and gyroscope turn the camera
+(halo_linux_forge_touch_look) and not the player (halo_linux_touch_look) */
+static volatile int forge_free_camera = FALSE;
 
 /* the right stick's deflection that counts as aiming with it, clear of a
 worn stick's drift */
@@ -611,7 +619,7 @@ int halo_linux_touch_look(short gamepad_index, float *yaw, float *pitch, float *
 	*pitch = 0.0f;
 	*gyro_yaw = 0.0f;
 	*gyro_pitch = 0.0f;
-	if (gamepad_index != 0)
+	if (gamepad_index != 0 || forge_free_camera)
 		return FALSE;
 #ifdef HALO_TOUCH_CONTROLS
 	touch_input_look(0.0022f, yaw, pitch, gyro_yaw, gyro_pitch);
@@ -744,10 +752,218 @@ static void mouse_poll(const struct platform_input_state *input)
 		if (input->mouse_dx != 0.0f || input->mouse_dy != 0.0f)
 			mouse_aimed_ms = SDL_GetTicks();
 		mouse_wheel_accumulated += input->mouse_wheel;
+		forge_wheel_accumulated += input->mouse_wheel;
 		if (input->mouse_wheel != 0.0f)
 			wheel_moved_ms = SDL_GetTicks();
 	}
 	pthread_mutex_unlock(&mouse_lock);
+}
+
+/* ---------- dev tools (see halo_linux_forge_read_keys) */
+
+/* the dev tools are on in a local or system link game of the Forge game type
+(port/linux/game/forge.c, forge_mode_on) */
+static int forge_enabled(void)
+{
+	return forge_mode_on();
+}
+
+/* while the dev tools' menu is open or they place an object, the buttons
+that work them belong to them rather than to controller 1 */
+static volatile int forge_menu_keys_captured = FALSE;
+
+void halo_linux_forge_capture_menu_keys(int capture)
+{
+	forge_menu_keys_captured = capture;
+}
+
+/* while the dev tools have a line of text typed (forge_text_entry_begin),
+the keyboard is theirs: it drives neither controller 1 nor the mods' keys */
+static volatile int forge_text_captured = FALSE;
+
+void halo_linux_forge_capture_text(int capture)
+{
+	forge_text_captured = capture;
+}
+
+/* (only while the tools are on: a game that ends with a line still open
+leaves the keyboard free) */
+static int forge_typing(void)
+{
+	return forge_text_captured && forge_enabled();
+}
+
+/* while the camera flies, the D-pad (up lands it, right opens the menu, and
+the game would walk the monitor with the rest), the shoulder buttons (which
+rise and sink) and the left trigger (faster) belong to the dev tools: the
+game would otherwise also switch cameras on the held right shoulder (black) */
+static volatile int forge_flying_keys = FALSE;
+
+void halo_linux_forge_set_flying(int flying)
+{
+	forge_flying_keys = flying;
+}
+
+void halo_linux_forge_set_free_camera(int free_camera)
+{
+	forge_free_camera = free_camera;
+}
+
+/* the touch controls' swipe and gyroscope since the last call, for the free
+camera (camera/director.c), in radians at the mouse's rate per pixel as
+halo_linux_mouse_look's are; nothing but with the touch controls */
+int halo_linux_forge_touch_look(float *yaw, float *pitch)
+{
+	*yaw = 0.0f;
+	*pitch = 0.0f;
+#ifdef HALO_TOUCH_CONTROLS
+	{
+		float gyro_yaw = 0.0f;
+		float gyro_pitch = 0.0f;
+
+		touch_input_look(0.0022f, yaw, pitch, &gyro_yaw, &gyro_pitch);
+		*yaw += gyro_yaw;
+		*pitch += gyro_pitch;
+		if (*yaw == 0.0f && *pitch == 0.0f)
+			return FALSE;
+		touch_used();
+		return TRUE;
+	}
+#else
+	return FALSE;
+#endif
+}
+
+/* the buttons the touch controls pressed on port 0 at its last read, before the dev tools' filter: the dev tools take
+them as they take the first gamepad's (halo_linux_forge_read_keys) */
+static XINPUT_GAMEPAD forge_touch_pad;
+
+static void forge_touch_pad_note(const XINPUT_GAMEPAD *before, const XINPUT_GAMEPAD *after)
+{
+	int index;
+
+	memset(&forge_touch_pad, 0, sizeof(forge_touch_pad));
+	forge_touch_pad.wButtons = (WORD)(after->wButtons & ~before->wButtons);
+	for (index = 0; index < (int)sizeof(after->bAnalogButtons); index++)
+	{
+		if (after->bAnalogButtons[index] > before->bAnalogButtons[index])
+			forge_touch_pad.bAnalogButtons[index] = after->bAnalogButtons[index];
+	}
+}
+
+/* while the camera flies, the D-pad, the shoulder buttons and the left
+trigger belong to the dev tools; while they are captured, A, B, X, Y,
+start, back and the triggers too. A menu of the game's (the pause menu)
+keeps the D-pad that moves about it. */
+static void forge_filter_gamepad(XINPUT_GAMEPAD *pad, BOOL menus)
+{
+	if ((forge_flying_keys && !menus) || forge_menu_keys_captured)
+	{
+		pad->wButtons &= ~(XINPUT_GAMEPAD_DPAD_UP | XINPUT_GAMEPAD_DPAD_DOWN |
+			XINPUT_GAMEPAD_DPAD_LEFT | XINPUT_GAMEPAD_DPAD_RIGHT);
+		pad->bAnalogButtons[XINPUT_GAMEPAD_LEFT_TRIGGER] = 0;
+		pad->bAnalogButtons[XINPUT_GAMEPAD_WHITE] = 0;
+		pad->bAnalogButtons[XINPUT_GAMEPAD_BLACK] = 0;
+	}
+	if (forge_menu_keys_captured)
+	{
+		pad->wButtons &= ~(XINPUT_GAMEPAD_START | XINPUT_GAMEPAD_BACK);
+		pad->bAnalogButtons[XINPUT_GAMEPAD_A] = 0;
+		pad->bAnalogButtons[XINPUT_GAMEPAD_B] = 0;
+		pad->bAnalogButtons[XINPUT_GAMEPAD_X] = 0;
+		pad->bAnalogButtons[XINPUT_GAMEPAD_Y] = 0;
+		pad->bAnalogButtons[XINPUT_GAMEPAD_WHITE] = 0;
+		pad->bAnalogButtons[XINPUT_GAMEPAD_BLACK] = 0;
+		pad->bAnalogButtons[XINPUT_GAMEPAD_LEFT_TRIGGER] = 0;
+		pad->bAnalogButtons[XINPUT_GAMEPAD_RIGHT_TRIGGER] = 0;
+	}
+}
+
+/* ---------- source mods' keys (halo_mod.h) */
+
+_Static_assert(HALO_MOD_KEY_A == SDL_SCANCODE_A && HALO_MOD_KEY_Z == SDL_SCANCODE_Z &&
+	HALO_MOD_KEY_1 == SDL_SCANCODE_1 && HALO_MOD_KEY_0 == SDL_SCANCODE_0 &&
+	HALO_MOD_KEY_SPACE == SDL_SCANCODE_SPACE && HALO_MOD_KEY_F1 == SDL_SCANCODE_F1 &&
+	HALO_MOD_KEY_F12 == SDL_SCANCODE_F12 && HALO_MOD_KEY_INSERT == SDL_SCANCODE_INSERT &&
+	HALO_MOD_KEY_UP == SDL_SCANCODE_UP && HALO_MOD_KEY_LEFT_CTRL == SDL_SCANCODE_LCTRL &&
+	HALO_MOD_KEY_RIGHT_ALT == SDL_SCANCODE_RALT,
+	"halo_mod.h's keys are SDL scancodes");
+
+/* keys kept from controller 1 and the dev tools while Ctrl is held */
+static volatile unsigned char mod_ctrl_shortcuts[SDL_SCANCODE_COUNT];
+
+void halo_mod_ctrl_shortcut(int key)
+{
+	if (key > SDL_SCANCODE_UNKNOWN && key < SDL_SCANCODE_COUNT)
+		mod_ctrl_shortcuts[key] = TRUE;
+}
+
+static BOOL ctrl_down(const unsigned char *keys)
+{
+	return keys[SDL_SCANCODE_LCTRL] || keys[SDL_SCANCODE_RCTRL];
+}
+
+/* the keys as the game and the dev tools see them: without the mods' Ctrl
+shortcuts while Ctrl is held */
+static void mod_filter_keys(struct platform_input_state *input)
+{
+	int scancode;
+
+	if (!ctrl_down(input->keys))
+		return;
+	for (scancode = 0; scancode < SDL_SCANCODE_COUNT; scancode++)
+	{
+		if (mod_ctrl_shortcuts[scancode])
+			input->keys[scancode] = 0;
+	}
+}
+
+int halo_mod_key_down(int key)
+{
+	struct platform_input_state input;
+
+	if (console_is_active() || forge_typing())
+		return FALSE;
+	platform_input_read(&input, FALSE);
+	switch (key)
+	{
+	case HALO_MOD_KEY_CTRL:
+		return ctrl_down(input.keys);
+	case HALO_MOD_KEY_SHIFT:
+		return input.keys[SDL_SCANCODE_LSHIFT] || input.keys[SDL_SCANCODE_RSHIFT];
+	case HALO_MOD_KEY_ALT:
+		return input.keys[SDL_SCANCODE_LALT] || input.keys[SDL_SCANCODE_RALT];
+	default:
+		return key > SDL_SCANCODE_UNKNOWN && key < SDL_SCANCODE_COUNT && input.keys[key];
+	}
+}
+
+void halo_linux_forge_read_text_keys(unsigned char *keys, int count)
+{
+	struct platform_input_state input;
+
+	memset(keys, 0, (size_t)count);
+	if (console_is_active())
+		return;
+	platform_input_read(&input, FALSE);
+	memcpy(keys, input.keys, (size_t)(count < SDL_SCANCODE_COUNT ? count : SDL_SCANCODE_COUNT));
+}
+
+const char *halo_mod_key_name(int key)
+{
+	switch (key)
+	{
+	case HALO_MOD_KEY_CTRL:
+		return "Ctrl";
+	case HALO_MOD_KEY_SHIFT:
+		return "Shift";
+	case HALO_MOD_KEY_ALT:
+		return "Alt";
+	default:
+		if (key > SDL_SCANCODE_UNKNOWN && key < SDL_SCANCODE_COUNT && *SDL_GetScancodeName((SDL_Scancode)key))
+			return SDL_GetScancodeName((SDL_Scancode)key);
+		return "?";
+	}
 }
 
 /* ---------- keyboard and mouse as a controller */
@@ -3072,6 +3288,106 @@ int halo_linux_flick_look(short gamepad_index, float *yaw)
 	return *yaw != 0.0f;
 }
 
+/* the dev tools' keys and buttons (port/linux/game/forge.c): the keyboard,
+the mouse's buttons, the SDL gamepad that is merged into controller 1
+(port_gamepad) and the touch controls (forge_touch_pad) */
+int halo_linux_forge_read_keys(struct halo_linux_forge_keys *keys)
+{
+	struct platform_input_state input;
+	const unsigned char *k = input.keys;
+	const unsigned char *m = input.mouse_buttons;
+	SDL_Gamepad *gamepads[PORT_COUNT];
+	SDL_Gamepad *gamepad;
+	BOOL mouse;
+	BOOL captured = forge_menu_keys_captured;
+	const XINPUT_GAMEPAD *touch = &forge_touch_pad;
+
+	memset(keys, 0, sizeof(*keys));
+	if (!forge_enabled() || console_is_active())
+		return FALSE;
+	platform_input_read(&input, FALSE);
+	mod_filter_keys(&input);
+	mouse = !input.mouse_released;
+	gamepad = port_gamepad(gamepads, sdl_gamepads(gamepads), 0);
+
+#define PAD_BUTTON(button) (gamepad && SDL_GetGamepadButton(gamepad, (button)))
+#define PAD_TRIGGER(axis) (gamepad && SDL_GetGamepadAxis(gamepad, (axis)) > 8192)
+#define TOUCH_DIGITAL(button) ((touch->wButtons & (button)) != 0)
+#define TOUCH_ANALOG(button) (touch->bAnalogButtons[(button)] > 0x40)
+	keys->toggle_flying = k[SDL_SCANCODE_HOME] || (!captured && (PAD_BUTTON(SDL_GAMEPAD_BUTTON_DPAD_UP) || TOUCH_DIGITAL(XINPUT_GAMEPAD_DPAD_UP)));
+	keys->menu = k[SDL_SCANCODE_1] || (!captured && (PAD_BUTTON(SDL_GAMEPAD_BUTTON_DPAD_RIGHT) || TOUCH_DIGITAL(XINPUT_GAMEPAD_DPAD_RIGHT)));
+	keys->up = k[SDL_SCANCODE_R] || PAD_BUTTON(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER) || TOUCH_ANALOG(XINPUT_GAMEPAD_BLACK);
+	keys->down = k[SDL_SCANCODE_F] || PAD_BUTTON(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER) || TOUCH_ANALOG(XINPUT_GAMEPAD_WHITE);
+	keys->fast = k[SDL_SCANCODE_LSHIFT] || k[SDL_SCANCODE_RSHIFT] || PAD_TRIGGER(SDL_GAMEPAD_AXIS_LEFT_TRIGGER) ||
+		TOUCH_ANALOG(XINPUT_GAMEPAD_LEFT_TRIGGER);
+	if (!forge_typing())
+	{
+		bindings_read();
+#define MOVE_KEY(action) (input_held(&input, bindings[action][0]) || input_held(&input, bindings[action][1]))
+		keys->move_forward = MOVE_KEY(HALO_KEYBOARD_MOVE_FORWARD) - MOVE_KEY(HALO_KEYBOARD_MOVE_BACKWARD);
+		keys->move_right = MOVE_KEY(HALO_KEYBOARD_STRAFE_RIGHT) - MOVE_KEY(HALO_KEYBOARD_STRAFE_LEFT);
+#undef MOVE_KEY
+	}
+	keys->faster = k[SDL_SCANCODE_UP] != 0;
+	keys->slower = k[SDL_SCANCODE_DOWN] != 0;
+	keys->menu_up = k[SDL_SCANCODE_UP] || PAD_BUTTON(SDL_GAMEPAD_BUTTON_DPAD_UP) || TOUCH_DIGITAL(XINPUT_GAMEPAD_DPAD_UP);
+	keys->menu_down = k[SDL_SCANCODE_DOWN] || PAD_BUTTON(SDL_GAMEPAD_BUTTON_DPAD_DOWN) ||
+		TOUCH_DIGITAL(XINPUT_GAMEPAD_DPAD_DOWN);
+	keys->menu_left = k[SDL_SCANCODE_LEFT] || PAD_BUTTON(SDL_GAMEPAD_BUTTON_DPAD_LEFT) ||
+		TOUCH_DIGITAL(XINPUT_GAMEPAD_DPAD_LEFT);
+	keys->menu_right = k[SDL_SCANCODE_RIGHT] || PAD_BUTTON(SDL_GAMEPAD_BUTTON_DPAD_RIGHT) ||
+		TOUCH_DIGITAL(XINPUT_GAMEPAD_DPAD_RIGHT);
+	keys->menu_select = k[SDL_SCANCODE_RETURN] || k[SDL_SCANCODE_KP_ENTER] ||
+		(mouse && m[SDL_BUTTON_LEFT]) || PAD_BUTTON(SDL_GAMEPAD_BUTTON_SOUTH) || TOUCH_ANALOG(XINPUT_GAMEPAD_A);
+	keys->menu_close = k[SDL_SCANCODE_ESCAPE] || k[SDL_SCANCODE_BACKSPACE] || PAD_BUTTON(SDL_GAMEPAD_BUTTON_EAST) ||
+		TOUCH_ANALOG(XINPUT_GAMEPAD_B);
+	keys->mouse_right = mouse && m[SDL_BUTTON_RIGHT];
+	keys->mouse_left = mouse && m[SDL_BUTTON_LEFT];
+	keys->grab = k[SDL_SCANCODE_F4] != 0;
+	keys->rotation_axis = k[SDL_SCANCODE_T] != 0;
+	keys->rotation_snap = k[SDL_SCANCODE_V] != 0;
+	keys->remove_object = k[SDL_SCANCODE_DELETE] || PAD_BUTTON(SDL_GAMEPAD_BUTTON_BACK) ||
+		TOUCH_DIGITAL(XINPUT_GAMEPAD_BACK);
+	keys->tab_previous = k[SDL_SCANCODE_PAGEUP] || PAD_BUTTON(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER) ||
+		TOUCH_ANALOG(XINPUT_GAMEPAD_WHITE);
+	keys->tab_next = k[SDL_SCANCODE_PAGEDOWN] || PAD_BUTTON(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER) ||
+		TOUCH_ANALOG(XINPUT_GAMEPAD_BLACK);
+	keys->pad_menu = PAD_BUTTON(SDL_GAMEPAD_BUTTON_WEST) || TOUCH_ANALOG(XINPUT_GAMEPAD_X);
+	keys->pad_remove = PAD_BUTTON(SDL_GAMEPAD_BUTTON_NORTH) || TOUCH_ANALOG(XINPUT_GAMEPAD_Y);
+	keys->pad_turn = PAD_TRIGGER(SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) || TOUCH_ANALOG(XINPUT_GAMEPAD_RIGHT_TRIGGER);
+	keys->pad_left_trigger = PAD_TRIGGER(SDL_GAMEPAD_AXIS_LEFT_TRIGGER) || TOUCH_ANALOG(XINPUT_GAMEPAD_LEFT_TRIGGER);
+	keys->pad_select = PAD_BUTTON(SDL_GAMEPAD_BUTTON_SOUTH) || TOUCH_ANALOG(XINPUT_GAMEPAD_A);
+	keys->pad_cancel = PAD_BUTTON(SDL_GAMEPAD_BUTTON_EAST) || TOUCH_ANALOG(XINPUT_GAMEPAD_B);
+	keys->pad_start = PAD_BUTTON(SDL_GAMEPAD_BUTTON_START) || TOUCH_DIGITAL(XINPUT_GAMEPAD_START);
+	if (gamepad)
+	{
+		/* SDL's y is down; a dead zone so a resting stick is still */
+		float x = (float)SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTX) / 32767.0f;
+		float y = -(float)SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTY) / 32767.0f;
+
+		keys->pad_look_x = fabsf(x) > 0.2f ? x : 0.0f;
+		keys->pad_look_y = fabsf(y) > 0.2f ? y : 0.0f;
+	}
+#undef PAD_BUTTON
+#undef PAD_TRIGGER
+#undef TOUCH_DIGITAL
+#undef TOUCH_ANALOG
+	return TRUE;
+}
+
+/* the wheel for the dev tools' menu: the whole notches turned since the
+last call, up positive (what is left of a notch is kept for the next) */
+int halo_linux_forge_read_wheel(void)
+{
+	int notches;
+
+	pthread_mutex_lock(&mouse_lock);
+	notches = (int)forge_wheel_accumulated;
+	forge_wheel_accumulated -= (float)notches;
+	pthread_mutex_unlock(&mouse_lock);
+	return notches;
+}
+
 /* ---------- XAPI */
 
 VOID WINAPI XInitDevices(DWORD preallocation_type_count, PXDEVICE_PREALLOC_TYPE preallocation_types)
@@ -3235,8 +3551,10 @@ DWORD WINAPI XInputGetState(HANDLE device, PXINPUT_STATE state)
 		BOOL console_active;
 		unsigned long discord_ask;
 		short aiming_deflection;
+		XINPUT_GAMEPAD forge_touch_before;
 
 		platform_input_read(&input, TRUE);
+		mod_filter_keys(&input);
 		mouse_poll(&input);
 		wheel_update();
 		pthread_mutex_lock(&mouse_lock);
@@ -3248,8 +3566,10 @@ DWORD WINAPI XInputGetState(HANDLE device, PXINPUT_STATE state)
 		/* (a Discord friend's ask answered first, its keys taken) */
 		discord_ask = discord_ask_serial();
 		discord_ask_keys(&input, discord_ask);
-		/* (a chat line typed takes the keyboard as the console does) */
-		console_active = console_is_active() || network_chat_typing();
+		/* (a name being typed in Forge has the keyboard,
+		forge_text_entry_begin; a chat line typed takes it as the console
+		does) */
+		console_active = console_is_active() || forge_typing() || network_chat_typing();
 		held = console_active ? 0 : keyboard_bound_actions(&input);
 		keyboard_screenshot(held);
 		if (!console_active)
@@ -3297,6 +3617,9 @@ DWORD WINAPI XInputGetState(HANDLE device, PXINPUT_STATE state)
 		substep_frame_devices = state->Gamepad;
 		test_input_gamepad(&state->Gamepad);
 		substep_frame_reading = state->Gamepad;
+		/* (before Forge's filter: what the touch controls press is Forge's
+		as the gamepad's is, and kept from the game as it is) */
+		forge_touch_before = state->Gamepad;
 		touch_input_gamepad(&state->Gamepad);
 		/* (debug.latency_log: when the input was read) */
 		latency_log_read(state->Gamepad.bAnalogButtons[XINPUT_GAMEPAD_RIGHT_TRIGGER], state->Gamepad.sThumbLX,
@@ -3310,6 +3633,7 @@ DWORD WINAPI XInputGetState(HANDLE device, PXINPUT_STATE state)
 #ifdef HALO_TOUCH_CONTROLS
 		touch_input_controls(&state->Gamepad, input.menus);
 #endif
+		forge_touch_pad_note(&forge_touch_before, &state->Gamepad);
 		/* (the HUD's prompts follow the device played with last) */
 		prompt_device_update(held, port_gamepad(gamepads, count, 0), count,
 			memcmp(&state->Gamepad, &substep_frame_reading, sizeof(state->Gamepad)) != 0);
@@ -3328,6 +3652,19 @@ DWORD WINAPI XInputGetState(HANDLE device, PXINPUT_STATE state)
 		/* (and a vote running takes the D-pad's left and right:
 		network_votekick.c) */
 		vote_pad_hold_over(&state->Gamepad);
+		/* (Forge's buttons, in a Forge game: forge_filter_gamepad) */
+		if (forge_enabled())
+		{
+			forge_filter_gamepad(&state->Gamepad, input.menus);
+			/* the keyboard's actions do not go through the controller: all
+			but those that move the player, which fly the monitor while it
+			holds an object as before */
+			if (forge_menu_keys_captured)
+			{
+				keyboard_actions_held &= (1UL << HALO_KEYBOARD_MOVE_FORWARD) | (1UL << HALO_KEYBOARD_MOVE_BACKWARD) |
+					(1UL << HALO_KEYBOARD_STRAFE_LEFT) | (1UL << HALO_KEYBOARD_STRAFE_RIGHT);
+			}
+		}
 		/* (a right stick dead zone set below it aims from that) */
 		aiming_deflection = halo_stick_dead_range(1);
 		if (aiming_deflection > STICK_AIMING_DEFLECTION)

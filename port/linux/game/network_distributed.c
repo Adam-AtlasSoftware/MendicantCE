@@ -3359,9 +3359,14 @@ static void distributed_handle_unit_state(
 			network_player_detach_unit(player_index);
 		network_player_attach_unit(player_index, state->unit_index);
 		/* (a unit of a life this machine missed the end of, no player's
-		now: unit_kill_no_statistics is for players' units only) */
-		if (unit_index != NONE && unit_index != state->unit_index)
+		now: unit_kill_no_statistics is for players' units only; not the
+		body a Forge builder left for the monitor's or the monitor they
+		left, which the host removes: forge_monitor.c) */
+		if (unit_index != NONE && unit_index != state->unit_index &&
+			!forge_unit_is_monitor(unit_index) && !forge_unit_is_monitor(state->unit_index))
+		{
 			unit_kill(unit_index);
+		}
 	}
 	unit_index = state->unit_index;
 	/* the seat it rides: a client's own player's, once it has ridden
@@ -6268,6 +6273,8 @@ void network_distributed_handle_message(
 	case _distributed_message_game_state:
 	case _distributed_message_objects_synchronized:
 	case _distributed_message_notice:
+	case _distributed_message_forge_layout:
+	case _distributed_message_forge_edit:
 	case _distributed_message_client_ready: entry_size = 0; break;
 	case _distributed_message_client_identity: entry_size = sizeof(struct distributed_client_identity); break;
 	case _distributed_message_client_build: entry_size = sizeof(struct distributed_client_build); break;
@@ -6321,6 +6328,7 @@ void network_distributed_handle_message(
 	case _distributed_message_hit_reports:
 	case _distributed_message_vehicle_prediction:
 	case _distributed_message_player_inputs:
+	case _distributed_message_forge_edit:
 	case _distributed_message_coop_skip_vote:
 	case _distributed_message_votekick:
 	case _distributed_message_chat_up:
@@ -6482,6 +6490,12 @@ void network_distributed_handle_message(
 	case _distributed_message_objects_synchronized:
 		network_objects_handle_synchronized();
 		break;
+	case _distributed_message_forge_layout:
+		forge_layout_handle_message(entries, size - sizeof(header));
+		break;
+	case _distributed_message_forge_edit:
+		forge_layout_handle_edit(machine_index, entries, size - sizeof(header));
+		break;
 	case _distributed_message_client_identity:
 		/* (a client's Discord user, as it tells it: kept only of what is
 		allowed, whatever it sent; a machine whose pass checked is its
@@ -6566,6 +6580,8 @@ void network_distributed_handle_message(
 		network_aim_assist_send_policy(machine_index);
 		network_shield_effects_send(machine_index);
 		network_objects_client_asked(machine_index, header.count != 0);
+		/* the map's Forge layout, for what the host's objects do not bring */
+		forge_layout_send_to_client(machine_index);
 		/* (a machine new at its index, which may have joined the game in
 		progress: every player's statistics and the game type's state, after
 		the objects it names) */

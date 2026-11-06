@@ -1185,6 +1185,8 @@ the setting for one start of the game. It has priority over the file.
 | `game.map_cache_megabytes` | `0` | `HALO_MAP_CACHE_MEGABYTES` | The most the cache of decompressed maps (`z:\cacheNNN.map`, up to 32) may take of the disk, in MB. Settings' Profiles tab sets it as MAP STORAGE: Instant Loading (`0`) or Disk Space Saver (`730`: the Xbox's room; a map is unpacked as it is played and none ahead, `port/linux/game/map_cache_prefill.c` copying only at `0`). A change gives maps up at once, the least useful first, never the map open, and back at `0` copies the stock maps again in the background. `0`: what the disk has room for, short of a twentieth of the disk, at least 2 GB and at most 5 GB, which the cache always leaves free (the system's need is a fixed amount: a twentieth alone kept 23.5 GB of a 471 GB disk free); at least 730 MB (the Xbox's six cache files'). Every stock map takes 3.0 GB (the campaign's 2.4 GB, the multiplayer maps' 0.57 GB, the main menu's 34 MB): the menus' pictures' pass at the first start decompresses them all, and the cache keeps them, so that no later load waits for a map to be decompressed (`port/linux/game/map_cache_prefill.c` copies, in the background, what the pass did not). Short of room, the map played least recently is given up first, and before any played map those never played, the least useful first (the campaign's levels in order, then the multiplayer maps most played); never the map open. |
 | `game.auto_pickup` | `false` | `HALO_AUTO_PICKUP` | Multiplayer's second weapon. `false` (the Xbox's way): a player with an empty weapon slot holds the action button over a weapon to pick it up, as the prompt says. `true` (Custom Edition's way): walking over it picks it up and readies it. The campaign always picks it up on walking over, as on the Xbox, and a player with no weapon at all picks up the first one they walk over either way. Games of this computer alone (split screen, bots) take this computer's; an OpenH1 network game takes its host's, as read in the lobby, which the game record carries to its OpenH1 clients so that their prompts show the host's way (`network_standard_walk_over_pickup`, OpenH1 protocol version 18). A Legacy game, and an OpenCE player in an OpenH1 game, always walk over, as OpenCE plays. WEAPON PICKUP in Settings > Online: HOLD (XBOX) or WALK OVER (CE). |
 | `game.sim_rate` | `60` | `HALO_SIM_RATE` | How many steps a second the game takes for what a player feels in their hands: their own movement and aim, projectiles, thrown items, and the VR mode's throws and grabs. `30` (as the game was made), `60` or `120`: 1, 2 or 4 steps inside each of the game's 30 ticks a second. Everything else keeps the 30 ticks: the AI, scripts, cinematics, animations, timers, vehicles, saved games and the network. Any other value is `30` (refer to "Simulation rate" in "How the port operates"). It applies to games of this computer alone: the campaign, split screen and games with bots (a split screen game runs as a network game of one computer that takes no other). Network games with other computers use the rate the game agreed on, hosting or joining: `30` in a Legacy game (OpenCE's netcode steps at 30), and the host's `network.sim_rate` in an OpenH1 game. The playback of a saved film is always `30`. TICK RATE in Video Setup > Graphics > Advanced: ORIGINAL (30), 60 or 120. A change applies from the next tick. Where the game sets the setting aside (a network game with other computers, a film's playback), the row is locked: dimmed, at the game's rate (ORIGINAL (30) in a Legacy game), passed over, and OK leaves the setting as it was. |
+| `game.forge` | `false` | `HALO_FORGE` | `true`: the main menu has FORGE, SaftiGlas's in-game map editor (fly, place and move objects, spawns, zones and AI, saved as map variants in `forge_maps`: `docs/forge_mvar.md`), and the main menu writes Forge's tag pack once from your maps (`maps/openh1_forge.pack`: the monitor of The Maw and some of The Silent Cartographer's characters, `port/linux/TAG_INJECTION.md`). `false`: no FORGE. Read as the game starts. |
+| `game.forge_monitor` | `true` | `HALO_FORGE_MONITOR` | In a Forge game, the builder flies as the monitor (343 Guilty Spark), whose tags Forge's tag pack brings from The Maw. `false`, or without the pack, flies the camera free of the player. The game's machine decides (the host's setting, in a network game). |
 | `game.unlock_all_levels` | `false` | `HALO_UNLOCK_ALL_LEVELS` | `true`: a profile created afterward starts with all the campaign levels finished on all the difficulties. `false`: a new profile starts at The Pillar of Autumn, and each level opens when you finish the level before it, as on the Xbox. Existing profiles keep their progress. To start a profile over, type `profile_reset_campaign` in the console. |
 | `bots.count` | `0` | `HALO_BOTS` | Computer players (bots) in a game this computer hosts (any gametype but Race): `0` to `64` join its lobby with the players, as far as the game has room: a local (split screen) game, or a system link or internet one, where the host plays them and the other machines see them as players (`bots.make_room`). `0`: none, as in the stock game. The lobby's BOTS writes it (ADD n: n; FILL TO: 64). Refer to "Bots". |
 | `bots.skill` | `"normal"` | `HALO_BOT_SKILL` | How well the bots play: `"easy"`, `"normal"`, `"heroic"` or `"legendary"`: how soon they react, how far and how wide they see, how large their aim error is and how fast it settles, how fast they turn. The lobby's BOT SKILL writes it. |
@@ -1340,6 +1342,10 @@ the setting for one start of the game. It has priority over the file.
 | `debug.update_key` | `""` | `HALO_UPDATE_KEY` | A test's release key (its Ed25519 public key, 64 hex digits), trusted beside OpenH1's to sign the `SHA256SUMS` of `debug.update_url`'s releases, and only while `debug.update_url` is set: never for GitHub's (`tools/test_dedicated_server.py`). Empty: OpenH1's key alone. |
 | `debug.update_time_scale` | `1.0` | `HALO_UPDATE_TIME_SCALE` | How much faster than real time a dedicated server's `server.auto_update` counts its minutes (between checks, empty, of a game), for tests. |
 | `debug.load_trace` | `false` | `HALO_LOAD_TRACE` | Log map loading checkpoints, and start-up's from the host's `main` (`host.main`, `host.guest_main`), with absolute monotonic wall, thread and process CPU seconds. Subtract timestamps to measure phases; process CPU includes worker threads. Each frame of the game's main loop longer than 25 ms is logged too (`frame.long`, its milliseconds; `frame.longest` for a frame longer than any before), to find and measure hitches on every platform. Set `HALO_LOAD_TRACE_DETAIL=1` to add sampled preparation CPU timings and detailed renderer traces; measure final loading times without these extra diagnostics. |
+| `debug.forge_layout_save` | `0` | `HALO_FORGE_LAYOUT_SAVE` | For automated tests of Forge: in a local game or as a network game's host, save the Forge layout as this map variant of the map (`1` to `64`, as its Map tab lists them; one past those there are is a new one) fifteen seconds in (after `debug.forge_test_edit`'s spawn), once, and log it. `0`: never. |
+| `debug.forge_layout_load` | `0` | `HALO_FORGE_LAYOUT_LOAD` | For automated tests of Forge: play each multiplayer map with this map variant of it (`1` to `64`, as its Map tab lists them), as choosing it in the map list does, when none was chosen there. `0`: none. |
+| `debug.forge_test_edit` | `0` | `HALO_FORGE_TEST_EDIT` | For automated tests of Forge in a network game (with `debug.network_test` and the `forge` variant): `1`, the host spawns a scenery object a few seconds in, and a client asks it to spawn one, then to move it and to remove it; both log what they send and take. `0`: never. |
+| `debug.forge_test_ai` | `0` | `HALO_FORGE_TEST_AI` | For automated tests of Forge's AI: in a local game or as a network game's host, a few seconds in, once, two squads of this many characters (at most 8) stand in front of the player facing each other, the level's first two characters whose teams differ (Forge's tag pack brings them to a multiplayer map); every two seconds for thirty, how many of each live, fight and follow is logged. `0`: never. |
 | `debug.fixed_step` | `false` | `HALO_FIXED_STEP` | `true`: a game of this computer alone runs one step a frame (a tick at `game.sim_rate` 30, a sub-step at 60 and 120), whatever time has passed, so that it plays the same every time (tests); the sound is timed by the frames too, mixed with no device. |
 | `debug.fatal_asserts` | `false` | `HALO_FATAL_ASSERTS` | `true` (tests): a failed assertion ends the run, with its reason, its place and the call stack's return addresses (`addr2line -f -e build/<build>/halo_guest.elf`) on stderr and in `debug.txt`, exit status 70. Without it a release build carries on past a failed assertion, as the retail game did (noted in `debug.txt`), and a debug build halts. A warning is only counted. Either way, a run in which any failed sums them up on stderr when it exits (`asserts: ...`: each place, assert or warn, how many times), and the determinism log has their totals (`asserts <failed> <warnings>`). StageKit's runs, the scorecard's and the 30 Hz gate's set it (`tools/stagekit/tests/runner.py`). |
 | `debug.exit_after` | `0.0` | `HALO_EXIT_AFTER` | The game stops after this number of seconds (from when its window opens; with `debug.null_renderer`, or no display, from its first frame; a dedicated server stops as `quit` stops it). `0`: never. |
@@ -3465,6 +3471,71 @@ servers and drives each through the API as the owner, from the machine
 itself (`server.web_owner_password`), drains a server before an update
 (`sv_stop game`, `POST /api/stop`) and bans an address on every server at
 once (`POST /api/bans`); `docs/dedicated_server.md`, "Panels and fleets".
+
+## Forge
+
+Forge is SaftiGlas's in-game map editor, from
+[halo-ce-universal](https://github.com/SaftiGlas/halo-ce-universal)
+(`port/linux/game/forge*.c`, `halo_mods.c`, `gravity.c`). It is off unless
+`game.forge` is on: then the main menu has **FORGE** above Campaign, and
+the main menu writes Forge's tag pack once from your maps
+(`maps/openh1_forge.pack`, about 85 MB: `port/linux/TAG_INJECTION.md`).
+
+**FORGE** makes a game as Multiplayer's Create Game does (an internet game,
+with its invite, when internet play is on, else a LAN game). The Map screen
+then lists the multiplayer maps, the Custom Edition multiplayer maps and
+**FORGE MAPS** (the map variants saved with Show in the map list), and the
+map chosen goes straight to Server Setup with the **Forge** game type: slayer
+with no score to reach, no respawn wait, every vehicle, and
+`GAME_VARIANT_FORGE_FLAG`, which turns the tools on. In every other game the
+game plays as usual.
+
+| Keyboard and mouse | Controller | Effect |
+| --- | --- | --- |
+| home | D-pad up | forge mode: the player becomes the monitor (343 Guilty Spark) and flies; again gives the player their body back where the monitor is. Without the monitor, the camera leaves the player and flies freely; again moves the player to the camera |
+| 1, flying | flying, D-pad right or X | open or close Forge's menu, whose tabs are AI, objects, prefabs, spawns, zones, gravity and the map (LB and RB, page up and down change tab) |
+| X, the crosshair on an object | flying, X on an object | the object's popup: move, duplicate, size, turn, tilt, roll, height, team, placed at start, game types, group, comment, remove |
+| F4, flying also enter or left click | flying, A | pick up the object under the crosshair |
+| delete | flying, Y | remove the object under the crosshair |
+| left, right; up, down | D-pad | turn a held object about the chosen axis; raise and lower it |
+| T; V | ; X | the axis (yaw, pitch, roll); the step (free, 15, 45, 90, 180 degrees) |
+| right mouse button + mouse | RT + right stick | turn the held object; RT + left stick brings it nearer and takes it further |
+| enter, left click; escape | A; B | put it down; cancel |
+
+**The monitor** (`forge_monitor.c`) is the player's unit in forge mode, which
+every machine sees: W A S D (the left stick) fly it level, R and F (RB and
+LB) straight up and down, shift (LT) faster. It takes no damage. Its tags
+come from The Maw by Forge's tag pack, copied into every Forge game's level
+(`forge_tag_import.c`); `game.forge_monitor = false` flies a free camera
+instead (this machine's builder only).
+
+**AI** (`forge_ai.c`): the AI tab places characters at the crosshair, with a
+faction, an aggression, a squad (in a V behind its leader), attack on sight
+and patrol waypoints (a command list of the level's, so the game's own
+pathfinding takes them round). A multiplayer map has no characters of its
+own: Forge's tag pack brings Elites, Grunts, Jackals and armoured Marines of
+The Silent Cartographer to every Forge game's level (the Hunters and the
+Flood are left to the campaign).
+
+**Map variants** (`forge_layout.c`, `forge_mvar.c`): the Map tab saves what
+Forge changed (objects placed, moved or removed, spawns, zones, AI and
+waypoints, gravity) as a map variant, a file of its own,
+`forge_maps/<map>_<name>.mvar` in the data root; its format is
+[docs/forge_mvar.md](../../docs/forge_mvar.md). Only the game's machine
+saves (a local game, a network game's host); the host sends its variant to
+each machine that joins, and again within half a second of a change. On a
+client the tools ask the host to spawn, move or remove; the AI, zones,
+gravity and the Map tab work on the host only.
+
+**Network games.** A Forge game's machines send Forge's messages and have
+Forge's tags in their levels, so a Forge host marks its advertisement and
+its listing (`HALO_PORT_FORGE_VERSION_BIT`, `halo_port_limits.h`): a build
+without Forge takes it for a newer version and does not join, and a build
+with Forge but without the tag pack is told so, asks for the pack (the main
+menu writes it), and joins once it is ready. Every other game is advertised
+as before: the network version is unchanged. Not ported: the sky tab (its
+sky was drawn with OpenGL; OpenH1's renderers are Vulkan's and Metal's) and
+SaftiGlas's launcher and source mods.
 
 ## Mods
 

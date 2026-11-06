@@ -27,6 +27,7 @@ are not those it was drawn for), the sprite is drawn from its bitmap.
 #include "bitmaps/bitmap_group.h"
 #include "bitmaps/bitmap_group_lookup.h"
 #include "bitmaps/bitmaps.h"
+#include "math/integer_math.h"
 #include "rasterizer/xbox/rasterizer_xbox_hardware_bitmaps.h"
 #include "tag_files/tag_groups.h"
 #include "game/players.h"
@@ -476,12 +477,25 @@ static boolean ce_hud_buttons_stock(struct icon_hud_element_definition const *ic
 	return TRUE;
 }
 
-/* Match the controller entry itself: weapon icons may reuse its sequence.
- * Draw the existing Xbox menu faces with straight alpha, independently of
- * the messaging sheet and its tint. CE custom sheets also need this fallback
- * with High-Res HUD off: their stock button entries can name weapon art. */
-boolean hud_hires_button_draw(struct icon_hud_element_definition const *icon,
-	rectangle2d *cursor, pixel32 color)
+/* the HUD's button style (display.hud_button_style): 0 classic, 1 gems, 2
+the menus' own; the buttons made in another style are forgotten */
+static short hud_buttons_current_style(void)
+{
+	short style = (!strcmp(config_string("display.hud_button_style"), "dark_gems") || !strcmp(config_string("display.hud_button_style"), "menu_gems")) ? 2 :
+		!strcmp(config_string("display.hud_button_style"), "gems");
+
+	if (style != hud_buttons_style)
+	{
+		hud_buttons_forget();
+		hud_buttons_style = style;
+	}
+	return style;
+}
+
+/* the placeholder that draws a button's high-res texture (slot: A, B, X, Y,
+Black, White, then the triggers' and sticks' faces), made when first asked
+for; NULL when there is none */
+static struct bitmap_data *hud_button_bitmap(short style, short slot)
 {
 	static char const *names[] = {
 		"ui\\shell\\bitmaps\\a_butn", "ui\\shell\\bitmaps\\b_butn",
@@ -495,13 +509,72 @@ boolean hud_hires_button_draw(struct icon_hud_element_definition const *icon,
 		"ui\\hud\\buttons\\gem_a", "ui\\hud\\buttons\\gem_b",
 		"ui\\hud\\buttons\\gem_x", "ui\\hud\\buttons\\gem_y",
 		"ui\\shell\\bitmaps\\black_butn", "ui\\shell\\bitmaps\\white_butn"};
+	struct bitmap_data *bitmap;
+	long asset;
+
+	if (slot < 0 || slot >= 14)
+		return NULL;
+	if (!hud_buttons[slot].attempted)
+	{
+		hud_buttons[slot].attempted = TRUE;
+		for (asset = 0; asset < hud_hires_asset_count(); asset++)
+		{
+			if (strcmp(hud_hires_asset_tag(asset), slot >= 6 ? hud_button_control_name(slot) : style == 0 ? classic_names[slot] :
+				style == 1 ? gem_names[slot] : names[slot])) continue;
+			bitmap = bitmap_2d_new(slot >= 6 ? 64 : 32, slot >= 6 ? 64 : 32, 0, 11);
+			if (!bitmap) break;
+			if (!rasterizer_bitmap_new(bitmap))
+			{
+				bitmap_delete(bitmap);
+				break;
+			}
+			hud_hires_register_placeholder(asset, bitmap->hardware_format);
+			hud_buttons[slot].asset = asset;
+			hud_buttons[slot].bitmap = bitmap;
+			break;
+		}
+	}
+	return hud_buttons[slot].bitmap;
+}
+
+/* a controller button's face as the HUD draws it, in its style (0 A, 1 B,
+2 X, 3 Y, 4 Black, 5 White), for the port's own menus (Forge's,
+port/linux/game/forge.c; SaftiGlas's): the bitmap, whose face is the art
+rectangle; NULL when the texture is not there */
+struct bitmap_data *hud_hires_button_face(short index, rectangle2d *art)
+{
+	short style = hud_buttons_current_style();
+	real x = 0.0f, y = 0.0f, width = 1.0f, height = 1.0f;
+	real left, top;
+
+	if (index < 0 || index >= 6)
+		return NULL;
+	/* the face's own bounds, in the placeholder's texels (an eighth of the
+	art's): hud_button_face_bounds turns a unit face into the art around it,
+	168 by 208 eighths, so the face is that turned back; Black and White's
+	faces are A's */
+	hud_button_face_bounds(style, index < 4 ? index : 0, &x, &y, &width, &height);
+	left = -x * 168.0f / width / 8.0f;
+	top = -y * 208.0f / height / 8.0f;
+	set_rectangle2d(art, (short)(left + 0.5f), (short)(top + 0.5f),
+		(short)(left + 168.0f / width / 8.0f + 0.5f), (short)(top + 208.0f / height / 8.0f + 0.5f));
+	return hud_button_bitmap(style, index);
+}
+
+/* Match the controller entry itself: weapon icons may reuse its sequence.
+ * Draw the existing Xbox menu faces with straight alpha, independently of
+ * the messaging sheet and its tint. CE custom sheets also need this fallback
+ * with High-Res HUD off: their stock button entries can name weapon art. */
+boolean hud_hires_button_draw(struct icon_hud_element_definition const *icon,
+	rectangle2d *cursor, pixel32 color)
+{
 	struct icon_hud_element_definition const *buttons;
 	struct rasterizer_dynamic_screen_geometry_parameters parameters;
 	struct dynamic_screen_vertex vertices[4];
 	struct bitmap_data *bitmap;
 	real viewport, scale, x, y, width, height, u, v;
 	short advance;
-	long index, asset;
+	long index;
 	short i;
 	short style, slot;
 
@@ -521,34 +594,8 @@ boolean hud_hires_button_draw(struct icon_hud_element_definition const *icon,
 	slot = index < 6 ? (short)index : hud_button_control_slot((short)index,
 		icon->frame_rate > 0 ? game_time_get() / icon->frame_rate : 0);
 	if (slot < 0) return FALSE;
-	style = (!strcmp(config_string("display.hud_button_style"), "dark_gems") || !strcmp(config_string("display.hud_button_style"), "menu_gems")) ? 2 :
-		!strcmp(config_string("display.hud_button_style"), "gems");
-	if (style != hud_buttons_style)
-	{
-		hud_buttons_forget();
-		hud_buttons_style = style;
-	}
-	if (!hud_buttons[slot].attempted)
-	{
-		hud_buttons[slot].attempted = TRUE;
-		for (asset = 0; asset < hud_hires_asset_count(); asset++)
-		{
-			if (strcmp(hud_hires_asset_tag(asset), slot >= 6 ? hud_button_control_name(slot) : style == 0 ? classic_names[index] :
-				style == 1 ? gem_names[index] : names[index])) continue;
-			bitmap = bitmap_2d_new(slot >= 6 ? 64 : 32, slot >= 6 ? 64 : 32, 0, 11);
-			if (!bitmap) break;
-			if (!rasterizer_bitmap_new(bitmap))
-			{
-				bitmap_delete(bitmap);
-				break;
-			}
-			hud_hires_register_placeholder(asset, bitmap->hardware_format);
-			hud_buttons[slot].asset = asset;
-			hud_buttons[slot].bitmap = bitmap;
-			break;
-		}
-	}
-	bitmap = hud_buttons[slot].bitmap;
+	style = hud_buttons_current_style();
+	bitmap = hud_button_bitmap(style, slot);
 	if (!bitmap) return FALSE;
 	viewport = local_player_count() > 1 ? 0.75f : 1.0f;
 	scale = viewport;

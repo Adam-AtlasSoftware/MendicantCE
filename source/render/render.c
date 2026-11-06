@@ -694,6 +694,8 @@ static void render_window(
 	{
 	render_camera_debug_frustum(&render.camera, &render.frustum);
 	render_debug();
+	/* port: Forge's parts' world drawing (port/linux/game/halo_mods.c) */
+	halo_mods_render_world();
 	editor_render();
 	/* port: prepare debug geometry too (port/linux/game/render_enumerate.c) */
 	render_enumerate_debug();

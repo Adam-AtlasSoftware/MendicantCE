@@ -207,6 +207,13 @@ static wchar_t *const fallback_multiplayer_game_text_strings[] =
 typedef char fallback_multiplayer_game_text_string_count_check[
 	NUMBEROF(fallback_multiplayer_game_text_strings) == 184 - FIRST_FALLBACK_MULTIPLAYER_GAME_TEXT_STRING ? 1 : -1];
 
+/* port: the Forge game type, the last default game variant (saved
+games/playlist_profile.c): its name, and its description in the game type
+list (whose default descriptions start at 10) */
+#define DEFAULT_GAME_VARIANT_NAMES_TAG_NAME "ui\\default_multiplayer_game_setting_names"
+#define GAME_VARIANT_DESCRIPTIONS_TAG_NAME "ui\\shell\\strings\\game_variant_descriptions"
+#define FORGE_DEFAULT_GAME_VARIANT_INDEX 26
+
 /* the built-in string for a string list too short to hold string_index,
 or NULL */
 static wchar_t *fallback_string(long tag_index, short string_index)
@@ -214,6 +221,43 @@ static wchar_t *fallback_string(long tag_index, short string_index)
 	char const *tag_name = tag_get_name(tag_index);
 	short fallback_index = string_index - FIRST_FALLBACK_MULTIPLAYER_GAME_TEXT_STRING;
 
+	/* port: the Forge maps of the multiplayer map list (port/linux/game/
+	forge_layout.c): their names, and a description */
+	if (string_index >= FORGE_CUSTOM_MAP_NAME_STRING &&
+		string_index < FORGE_CUSTOM_MAP_NAME_STRING + FORGE_CUSTOM_MAP_STRING_COUNT)
+	{
+		return (wchar_t *)forge_custom_map_title((short)(string_index - FORGE_CUSTOM_MAP_NAME_STRING));
+	}
+	if (string_index >= FORGE_CUSTOM_MAP_DESCRIPTION_STRING &&
+		string_index < FORGE_CUSTOM_MAP_DESCRIPTION_STRING + FORGE_CUSTOM_MAP_STRING_COUNT)
+	{
+		static wchar_t description[128];
+		short custom_index = (short)(string_index - FORGE_CUSTOM_MAP_DESCRIPTION_STRING);
+		char const *base = forge_custom_map_base_title(custom_index);
+		char text[128];
+		short character;
+
+		/* the layout's own, when it has one (the Map tab's Description row) */
+		if (forge_custom_map_description(custom_index))
+			return (wchar_t *)forge_custom_map_description(custom_index);
+
+		_snprintf(text, sizeof(text), "A Forge map made on %s.", base);
+		text[sizeof(text) - 1] = 0;
+		for (character = 0; text[character]; character++)
+			description[character] = (wchar_t)(unsigned char)text[character];
+		description[character] = 0;
+		return description;
+	}
+	if (string_index == FORGE_DEFAULT_GAME_VARIANT_INDEX &&
+		!csstrcasecmp(tag_name, DEFAULT_GAME_VARIANT_NAMES_TAG_NAME))
+	{
+		return L"Forge";
+	}
+	if (string_index == FORGE_DEFAULT_GAME_VARIANT_INDEX + 10 &&
+		!csstrcasecmp(tag_name, GAME_VARIANT_DESCRIPTIONS_TAG_NAME))
+	{
+		return L"Build the map: fly with D-pad up, spawn and move objects, zones and AI, and save the layout.";
+	}
 	/* (a Custom Edition map's name or description, by its display index) */
 	if (!csstrcasecmp(tag_name, LEVEL_NAMES_TAG_NAME) || !csstrcasecmp(tag_name, PC_LEVEL_NAMES_TAG_NAME))
 		return custom_edition_maps_name(string_index);

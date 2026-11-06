@@ -291,6 +291,9 @@ boolean network_objects_may_delete(long object_index);
 /* port: an unarmed player's melee's length, in ticks (a weapon's is about
 this: its first person melee animation, sped up a quarter) */
 #define UNARMED_MELEE_TICKS 16
+/* port: how much faster a player's flying biped is with the tools' fast key
+(Forge's monitor; the free camera's FORGE_FAST_SCALE, camera/director_forge.c) */
+#define PLAYER_FLYING_FAST_SCALE 4.f
 
 /* ---------- constants */
 
@@ -4281,6 +4284,25 @@ static boolean biped_physics_prepare(
 						(definition->biped.flying_crouch_velocity_modifier - 1.f) *
 						biped->biped.crouch + 1.f;
 				}
+			}
+
+			/* port: a player's flying biped (Forge's monitor, port/linux/game/
+			forge_monitor.c) flies as Forge's free camera did: level, the way
+			the player faces whatever the pitch of their view, straight up and
+			down (jump and crouch, game/players.c), and faster with the tools'
+			fast key, which the monitor has as exact facing */
+			if (biped->unit.player_index != NONE)
+			{
+				set_real_vector3d(&physics.forward, biped->unit.desired_facing_vector.i,
+					biped->unit.desired_facing_vector.j, 0.f);
+				if (normalize3d(&physics.forward) == 0.f)
+				{
+					set_real_vector3d(&physics.forward, biped->object.forward.i, biped->object.forward.j, 0.f);
+					if (normalize3d(&physics.forward) == 0.f)
+						physics.forward = *global_forward3d;
+				}
+				crouch_modifier = TEST_FLAG(biped->unit.control_flags, _unit_control_exact_facing_bit) ?
+					PLAYER_FLYING_FAST_SCALE : 1.f;
 			}
 
 			physics.movement_desired.i =

@@ -155,6 +155,9 @@ void game_difficulty_level_set(short difficulty);
 short game_difficulty_level_get(void);
 short game_difficulty_level_get_ignore_easy(void);
 void game_set_game_variant(struct game_variant *variant);
+/* port: whether the variant set is Forge, known before the map's tags load
+(port/linux/game/forge_monitor.c) */
+boolean game_variant_set_is_forge(void);
 /* port: the PC options the game plays by (game_engine.h): the variant's
 defaults once it is set, then the network game's */
 struct game_variant_options;

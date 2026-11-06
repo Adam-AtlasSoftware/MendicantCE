@@ -1472,7 +1472,10 @@ void lights_preprocess_scene(
 				lights_port.radius_writes++;
 			}
 
-			if (definition->lens_flare.index != NONE)
+			/* port: not the lens flares of Forge's monitor in its own first
+			person view, which they would fill (port/linux/game/forge_monitor.c) */
+			if (definition->lens_flare.index != NONE &&
+				!(object && forge_monitor_hides_lens_flares(object_get_ultimate_parent(light->object_index))))
 			{
 				struct rasterizer_lens_flare_submit_parameters lens_flare_parameters;
 

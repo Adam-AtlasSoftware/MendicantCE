@@ -394,6 +394,8 @@ void interface_draw_fullscreen_overlays(
 	/* port: a network game's round trip to the host (display.latency_meter) */
 	latency_meter_draw();
 	terminal_draw();
+	/* port: dev tools, in games of the Forge game type (port/linux/game/forge.c) */
+	forge_render();
 	main_framerate_render();
 	render_debug_profile();
 

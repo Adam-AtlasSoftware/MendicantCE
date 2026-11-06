@@ -364,6 +364,8 @@ static void game_tick_macro_step(
 	game speed, set before it joined too, put back) */
 	profile_scope(game_tick_cheats_enforce_section, cheats_network_client_enforce();)
 	profile_scope(game_tick_remove_quitting_players_section, remove_quitting_players_from_game();)
+	/* port: source mods' tick hooks, local games only (port/linux/game/halo_mods.c) */
+	halo_mods_tick();
 	profile_scope(game_tick_allegiance_section, game_allegiance_update();)
 	/* port: the speakers' mouths, before the units' update eases them shut
 	(game_sound.c; the sound manager moved them in the frames) */
@@ -550,6 +552,15 @@ void game_set_game_variant(
 	game_variant_options_default(&game_variant_global, &game_variant_options_global);
 
 	return;
+}
+
+/* port: whether the variant set, which the next map is played with, is
+Forge: known before the map's tags load, unlike the game engine's
+(port/linux/game/forge_monitor.c) */
+boolean game_variant_set_is_forge(
+	void)
+{
+	return game_variant_global.game_engine_index != 0 && (game_variant_global.flags & GAME_VARIANT_FORGE_FLAG) != 0;
 }
 
 void game_set_game_variant_options(
@@ -786,6 +797,8 @@ void game_initialize_for_new_map(
 	/* (the map's objects, placed as on the host: a distributed client's own
 	from now on go elsewhere, port/linux/game/network_objects.c) */
 	network_objects_placed();
+	/* port: source mods' new map hooks (port/linux/game/halo_mods.c) */
+	halo_mods_new_map();
 	ui_widgets_safe_to_load(TRUE);
 
 	halo_load_trace("initialize.end", NULL); /* port: loading measurement */

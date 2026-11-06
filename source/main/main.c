@@ -4013,6 +4013,7 @@ void main_loop(
 					if (!network_chat_typing())
 						debug_keys_update();
 					cheats_update();
+					forge_update();
 					player_control_update((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
 
 					connection = main_globals.connection;

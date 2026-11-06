@@ -154,6 +154,9 @@ on the host's word */
 long network_objects_new_object_index(void);
 boolean network_objects_creating_host_object(void);
 boolean network_objects_may_delete(long object_index);
+/* port/linux/game/forge_layout.c's: a Forge layout's spawned object is made
+as the layout has it, not as the game type remaps it */
+boolean forge_layout_creating_object(void);
 boolean network_objects_client_deleting(void);
 /* port/linux/game/network_coop.c's: the scripts' attaching, on co-op's clients */
 void network_coop_note_attach(long parent_index, char const *parent_marker_name, long child_index,
@@ -4031,6 +4034,8 @@ long object_new(
 	if (game_engine_running() && definition_index!=NONE
 		/* (the host's object, which the host made as the game type has it) */
 		&& !network_objects_creating_host_object()
+		/* port: (a Forge layout's, forge_layout.c) */
+		&& !forge_layout_creating_object()
 		)
 	{
 		definition_index = game_engine_remap_object_definition(definition_index);

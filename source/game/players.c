@@ -1746,6 +1746,81 @@ void network_player_detach_unit(
 		player_control_new_unit(player->local_player_index, NONE);
 }
 
+/* port: Forge's monitor (port/linux/game/forge_monitor.c): the player's
+unit made again as one of another definition, at position and facing as it
+does, with the player's colour; the unit it had goes, with what it carries.
+The new unit, or NONE: the player then keeps the one it has (it has none,
+or rides a vehicle, or the new one could not be made). The game's machine
+only: a client takes the host's (network_player_attach_unit). */
+long player_replace_unit(
+	long player_index,
+	long definition_index,
+	real_point3d const *position)
+{
+	struct player_datum *player = player_get(player_index);
+	long old_unit_index = player->unit_index;
+	struct unit_datum *old_unit = old_unit_index != NONE ? unit_try_and_get(old_unit_index) : NULL;
+	struct object_placement_data placement_data;
+	real_rgb_color change_color;
+	real_rgb_color change_color_storage;
+	long unit_index;
+	struct unit_datum *unit;
+
+	if (!old_unit || old_unit->object.parent_object_index != NONE ||
+		TEST_FLAG(old_unit->object.damage_flags, _object_dead_bit))
+	{
+		return NONE;
+	}
+	object_placement_data_new(&placement_data, definition_index, NONE);
+	placement_data.position = *position;
+	set_real_vector3d(&placement_data.forward, old_unit->object.forward.i, old_unit->object.forward.j, 0.f);
+	if (normalize3d(&placement_data.forward) == 0.f)
+		placement_data.forward = *global_forward3d;
+	placement_data.up = *global_up3d;
+	change_color = *game_engine_player_get_change_color(&change_color_storage, player_index);
+	placement_data_set_change_color(&placement_data, &change_color);
+	unit_index = object_new(&placement_data);
+	unit = unit_index != NONE ? unit_try_and_get(unit_index) : NULL;
+	if (!unit)
+		return NONE;
+
+	old_unit->unit.player_index = NONE;
+	unit_set_actively_controlled(old_unit_index, FALSE);
+	unit->object.owner_player_index = player_index;
+	unit->object.owner_team_index = (short)player->team_index;
+	unit->unit.player_index = player_index;
+	player->unit_index = unit_index;
+	unit_set_actively_controlled(unit_index, TRUE);
+	if (player->local_player_index != NONE)
+		player_control_new_unit(player->local_player_index, unit_index);
+	player->action_result = _player_action_result_reload;
+	player->action_object_index = NONE;
+	object_delete(old_unit_index);
+
+	return unit_index;
+}
+
+/* port: how a player's flying biped rises (1) and sinks (-1): with jump and
+with crouch, which every machine has of every player; 0 for any other unit */
+static real player_flying_throttle(
+	long unit_index,
+	unsigned long control_flags)
+{
+	struct object_datum *object = object_get(unit_index);
+	real throttle = 0.f;
+
+	if (object->object.type == _object_type_biped &&
+		TEST_FLAG(biped_definition_get(object->definition_index)->biped.flags, _biped_flying_bit))
+	{
+		if (TEST_FLAG(control_flags, _unit_control_jump_bit))
+			throttle += 1.f;
+		if (TEST_FLAG(control_flags, _unit_control_crouch_modifier_bit))
+			throttle -= 1.f;
+	}
+
+	return throttle;
+}
+
 /* Exact: January emits this private dead-unit replacement helper from the
    reconstructed player_teleport_internal caller below. */
 static void player_pseudo_kill(
@@ -5082,7 +5157,9 @@ void players_update_before_game(
 						control_data.looking_vector = control_data.aiming_vector;
 					control_data.throttle.i = action->throttle.i;
 					control_data.throttle.j = action->throttle.j;
-					control_data.throttle.k = 0.f;
+					/* port: a flying biped (Forge's monitor, port/linux/game/
+					forge_monitor.c) rises with jump and sinks with crouch */
+					control_data.throttle.k = player_flying_throttle(player->unit_index, action->control_flags);
 					control_data.primary_trigger = action->primary_trigger;
 					control_data.animation_state = _unit_animation_state_in_combat;
 					control_data.weapon_index = action->desired_weapon_index;

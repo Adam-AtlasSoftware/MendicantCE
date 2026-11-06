@@ -575,6 +575,10 @@ boolean game_engine_can_score(
 real game_engine_get_starting_location_rating(
 	long player_index,
 	struct player_starting_location const *starting_location);
+/* port: an item of the collection, as the map's item spawn points make one
+(port/linux/game/forge_spawns.c), or NONE */
+long game_engine_random_item(
+	long item_collection_index);
 boolean game_engine_should_spawn_player(
 	long player_index);
 void game_engine_client_respawn_countdown(
@@ -611,6 +615,16 @@ struct game_variant *game_engine_get_variant(
 struct game_variant *game_engine_get_variant_by_name(
 	struct game_variant *variant,
 	char const *name);
+
+/* port: game_variant.flags of the Forge game type (a slayer variant with
+the dev tools on, port/linux/game/forge.c); copies of it that players save
+keep it. Bit 0 is the system default bit, the high byte the default's
+index. */
+#define GAME_VARIANT_FORGE_FLAG 0x0002
+
+/* port: TRUE while the game being played is of the Forge game type */
+boolean game_engine_variant_is_forge(
+	void);
 
 boolean game_engine_get_goal_in_use(
 	short goal_index);

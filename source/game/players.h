@@ -358,6 +358,12 @@ boolean player_teleport(
 	long player_index,
 	long source_unit_index,
 	real_point3d const *position);
+/* port: the player's unit made again as one of another definition, or NONE
+(Forge's monitor, port/linux/game/forge_monitor.c) */
+long player_replace_unit(
+	long player_index,
+	long definition_index,
+	real_point3d const *position);
 
 boolean local_player_exists(
 	long local_player_index);
