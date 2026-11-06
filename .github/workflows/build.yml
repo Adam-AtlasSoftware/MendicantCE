@@ -14,6 +14,8 @@ name: Build
 #   without it, gzip, slower to save and restore);
 # - one job per platform builds both configurations, so its set-up (tools,
 #   downloads, caches) is paid once;
+# - the tests that need no build run in the tests job's shards, beside the
+#   builds, rather than after linux-x86_64's;
 # - compiles go through ccache, whose cache, master's latest build's, every
 #   run starts from, so a commit only recompiles what it changed from
 #   master; downloads (SDL, musl, FFmpeg, the Vulkan headers, Gradle, the
@@ -281,11 +283,8 @@ jobs:
     # 64-bit host, drawn with Vulkan), made as the 64-bit ARM one is: Ubuntu
     # 22.04 (glibc 2.35, so the build starts on older distributions too) with
     # its clang for the host and the development files SDL3 builds with, the
-    # guest's compiler (x32) the pinned LLVM; and the tests: the guest's call
-    # boundary and image checks, which need this processor, and the rest,
-    # among them those that compile the engine's code in the game's 32-bit
-    # x86 ABI (tools/harness, tools/x86_game_abi.py: test tools only, with
-    # gcc-multilib's 32-bit C library; nothing 32-bit ships).
+    # guest's compiler (x32) the pinned LLVM; and the tests that read the
+    # build (those that need none are the tests job's).
     runs-on: ubuntu-24.04
     # (.github/ci-image/Dockerfile, as the 64-bit ARM job's)
     container:
@@ -337,20 +336,39 @@ jobs:
           path: .cache/llvm
           key: guest-llvm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/guest_toolchain.py') }}
 
-      # the tests that need no build, started in the background beside the
-      # builds (a build that finds its objects in the compile cache leaves the
-      # processors mostly idle), their output and result in RUNNER_TEMP for
-      # the Test step, which waits for them: with the guests' LLVM on the
-      # PATH (clang, ld.lld and LLVM's tools), on every processor, each
-      # file's tests together (pytest-xdist's loadfile)
-      - name: Start the tests
-        run: |
-          PATH="$(python3 tools/guest_toolchain.py --cache "$CI_GUEST_LLVM_CACHE"):$PATH"
-          (python3 -m pytest -q -rs -n auto --dist loadfile --durations=10 tools/test_host_units.py tools/test_host_pages.py tools/test_android_elf_alignment.py tools/test_guest_image_check.py tools/test_check_host_imports.py tools/test_host_syscall.py tools/test_guest_layout.py tools/test_linux_guest_build.py tools/test_build_errors.py tools/test_guest_toolchain.py tools/test_linux_port.py tools/test_join_page.py tools/test_linux_package.py tools/test_install_layout.py tools/test_android_asm_convert.py tools/test_guest_asm_cache.py tools/test_guest_branch_relax.py tools/test_host_watch_hash.py tools/test_touch_menu.py tools/harness tools/test_controller_remap.py tools/test_controller_remap_context.py tools/test_net_compare.py tools/test_loading_ring.py tools/test_preparation.py tools/test_progress_ownership.py \
-            > "$RUNNER_TEMP/tests.log" 2>&1 && status=0 || status=$?; echo "$status" > "$RUNNER_TEMP/tests.status") < /dev/null > /dev/null 2>&1 &
-
       - name: Debug
         run: python3 tools/ci_build.py linux_x86_64 debug
+
+      # the tests that read the debug build, started in the background beside
+      # the scorecard, their output and result in RUNNER_TEMP for the Test
+      # step, which waits for them (before the release builds, which
+      # configure and build in the same folder): the profiling build's checks,
+      # which read the build's build.ninja and objects, with the system's
+      # clang, whose sanitizers' runtimes the pinned LLVM leaves out; the
+      # screenshot key's files with the SDL3 the build made; the light
+      # partitions' storage, with the guests' LLVM on the PATH; and the
+      # Vulkan backend's core over a fake Vulkan, and the VR host's OpenXR
+      # binding, with the system's clang (its sanitizers): the pinned Vulkan
+      # headers, which the build fetched, and the OpenXR headers, fetched
+      # here first (before the VR release, which fetches them too, on
+      # master); the VR mode's vehicles' seats and steering against a fake
+      # world; the VR mode's effects' thickness bake, eye transforms and
+      # shaders; the Vulkan and Metal texture caches' idle time against a
+      # fake clock; display.hdr's contract (the classification, the
+      # reference, the two backends' one GLSL source); and
+      # display.ambient_occlusion's, the ambient light alone by it in both
+      # emitters' shaders. (The tests that need no build are the tests job's.)
+      - name: Start the build's tests
+        id: build-tests
+        run: |
+          python3 -c "import sys; sys.path.insert(0, '.'); from pathlib import Path; from tools.linux_guest_build import fetch_openxr_headers; fetch_openxr_headers(Path('build/linux_x86_64/third_party/openxr'))"
+          (status=0
+           python3 -m pytest -q -rs tools/test_profile.py tools/test_host_units.py::test_host_screenshot || status=1
+           (PATH="$(python3 tools/guest_toolchain.py --cache "$CI_GUEST_LLVM_CACHE"):$PATH" python3 tools/test_light_storage.py) || status=1
+           python3 -m pytest -q -rs -n auto --dist loadfile tools/test_vulkan_passes.py tools/test_host_vr_vulkan.py tools/test_vr_vehicles.py \
+             tools/test_vr_effects.py tools/test_host_texture_idle.py tools/test_hdr.py tools/test_hdr_backends.py tools/test_screen_passes_samples.py \
+             tools/test_ambient_occlusion_light.py || status=1
+           echo "$status" > "$RUNNER_TEMP/tests.status") < /dev/null > "$RUNNER_TEMP/tests.log" 2>&1 &
 
       # the 60/120 Hz scorecard on the debug build (tools/scorecard/ci.py):
       # StageKit, the rates compared, the known bugs caught, and the 30 Hz
@@ -370,6 +388,15 @@ jobs:
           path: .scorecard-baseline
           key: scorecard-baseline-${{ github.sha }}
 
+      # (the build's tests started beside the scorecard, waited for, their
+      # output shown, their result the step's, the scorecard's passed or not)
+      - name: Test
+        if: ${{ !cancelled() && steps.build-tests.outcome == 'success' }}
+        run: |
+          for second in $(seq 1200); do [ -f "$RUNNER_TEMP/tests.status" ] && break; sleep 1; done
+          cat "$RUNNER_TEMP/tests.log"
+          [ "$(cat "$RUNNER_TEMP/tests.status")" = 0 ]
+
       # (the profiling build, configure.py --profile, which no other step
       # compiles: only when a run started by hand asks for it, as it costs a
       # build of its own)
@@ -386,36 +413,6 @@ jobs:
       - name: VR release
         if: github.ref == 'refs/heads/master'
         run: python3 tools/ci_build.py linux_x86_64 release --vr
-
-      # (the profiling build's checks, which read the build's build.ninja and
-      # objects, with the system's clang, whose sanitizers' runtimes the
-      # pinned LLVM leaves out; then the tests started beside the builds,
-      # waited for, their output shown, their result the step's)
-      - name: Test
-        run: |
-          python3 -m pytest -q -rs tools/test_profile.py
-          for second in $(seq 1200); do [ -f "$RUNNER_TEMP/tests.status" ] && break; sleep 1; done
-          cat "$RUNNER_TEMP/tests.log"
-          [ "$(cat "$RUNNER_TEMP/tests.status")" = 0 ]
-          PATH="$(python3 tools/guest_toolchain.py --cache "$CI_GUEST_LLVM_CACHE"):$PATH"
-          python3 tools/test_light_storage.py
-
-      # the Vulkan backend's core over a fake Vulkan, and the VR host's OpenXR
-      # binding, with the system's clang (its sanitizers): the pinned Vulkan
-      # headers, which the build fetched, and the OpenXR headers, which only
-      # the VR release fetches, fetched here where it did not run (branches);
-      # the VR mode's vehicles' seats and steering against a fake world; the
-      # VR mode's effects' thickness bake, eye transforms and shaders; the
-      # Vulkan and Metal texture caches' idle time against a fake clock; and
-      # display.hdr's contract (the classification, the reference, the two
-      # backends' one GLSL source); display.ambient_occlusion's, the ambient
-      # light alone by it in both emitters' shaders
-      - name: Test the Vulkan backend and the VR host
-        run: |
-          python3 -c "import sys; sys.path.insert(0, '.'); from pathlib import Path; from tools.linux_guest_build import fetch_openxr_headers; fetch_openxr_headers(Path('build/linux_x86_64/third_party/openxr'))"
-          python3 -m pytest -q -n auto --dist loadfile tools/test_vulkan_passes.py tools/test_host_vr_vulkan.py tools/test_vr_vehicles.py \
-            tools/test_vr_effects.py tools/test_host_texture_idle.py tools/test_hdr.py tools/test_hdr_backends.py tools/test_screen_passes_samples.py \
-            tools/test_ambient_occlusion_light.py
 
       - name: Compile cache
         run: ccache --show-stats
@@ -450,6 +447,66 @@ jobs:
         with:
           name: halo-linux-x86_64-vr-release
           path: dist/halo-linux-x86_64-vr-release
+          retention-days: 3
+
+  tests:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.build != 'false' }}
+    # The tests that need no build (among them those that compile the
+    # engine's code in the game's 32-bit x86 ABI: tools/harness,
+    # tools/x86_game_abi.py, with gcc-multilib's 32-bit C library), on
+    # runners of their own beside the builds rather than in linux-x86_64's,
+    # where they were its longest step: split by file into shards of about
+    # the same time (tools/ci_test_shards.py, by tools/ci_test_times.json,
+    # which the shards' JUnit XML, uploaded, makes again), each file's tests
+    # together on every processor (pytest-xdist's loadfile). Every shard
+    # reports its own check, tests (1) to tests (4), and runs to the end
+    # whatever the others do.
+    runs-on: ubuntu-24.04
+    # (.github/ci-image/Dockerfile: linux-x86_64's packages and system clang)
+    container:
+      image: ghcr.io/openh1/ci-linux:ubuntu-22.04-x86_64
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    name: tests (${{ matrix.shard }})
+    steps:
+      - uses: actions/checkout@v4
+
+      # (as linux-x86_64's)
+      - name: Install the toolchain
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          packages="$(cat .github/ci-image/packages.txt .github/ci-image/packages-x86_64.txt)"
+          if ! dpkg -s $packages > /dev/null 2>&1; then
+            apt-get -o Acquire::Retries=5 update
+            apt-get -o Acquire::Retries=5 install -y --no-install-recommends $packages
+          fi
+
+      # the guests' LLVM, linux-x86_64's cache (which that job saves)
+      - uses: actions/cache/restore@v4
+        with:
+          path: .cache/llvm
+          key: guest-llvm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/guest_toolchain.py') }}
+
+      # with the guests' LLVM on the PATH (clang, ld.lld and LLVM's tools)
+      - name: Test
+        run: |
+          PATH="$(python3 tools/guest_toolchain.py --cache "$CI_GUEST_LLVM_CACHE"):$PATH"
+          files="$(python3 tools/ci_test_shards.py ${{ matrix.shard }} 4 tools/test_host_units.py tools/test_host_pages.py tools/test_android_elf_alignment.py tools/test_guest_image_check.py tools/test_check_host_imports.py tools/test_host_syscall.py tools/test_guest_layout.py tools/test_linux_guest_build.py tools/test_build_errors.py tools/test_guest_toolchain.py tools/test_linux_port.py tools/test_join_page.py tools/test_linux_package.py tools/test_install_layout.py tools/test_android_asm_convert.py tools/test_guest_asm_cache.py tools/test_guest_branch_relax.py tools/test_host_watch_hash.py tools/test_touch_menu.py tools/harness tools/test_controller_remap.py tools/test_controller_remap_context.py tools/test_net_compare.py tools/test_loading_ring.py tools/test_preparation.py tools/test_progress_ownership.py tools/test_ci_test_shards.py)"
+          python3 -m pytest -q -rs -n auto --dist loadfile --durations=10 -o junit_family=xunit1 --junitxml "$RUNNER_TEMP/junit.xml" $files
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: tests-junit-${{ matrix.shard }}
+          path: ${{ runner.temp }}/junit.xml
           retention-days: 3
 
   android:
@@ -1014,16 +1071,17 @@ jobs:
     # key (SHA256SUMS.sig, which the self-updaters check: the public key is
     # port/assets/release-key.pub; tools/release_sign.py); then all but the
     # newest five build-* releases go, tags and all. Only for master, and
-    # only when every platform built, except that a macOS job GitHub
+    # only when every platform built and the tests passed, except that a macOS job GitHub
     # cancelled (no macOS runner free: "The job was not acquired by Runner")
     # does not hold the release back: the last release's macOS disk images
     # and appcast are carried over ("Carry the macOS build over"), and the
     # next build with a macOS runner brings the Mac up to date. A macOS
     # build that failed still stops the release.
-    needs: [linux-x86_64, linux-arm64, android, windows, macos]
+    needs: [linux-x86_64, tests, linux-arm64, android, windows, macos]
     if: >-
       ${{ !cancelled() && github.ref == 'refs/heads/master' &&
-      needs['linux-x86_64'].result == 'success' && needs['linux-arm64'].result == 'success' &&
+      needs['linux-x86_64'].result == 'success' && needs.tests.result == 'success' &&
+      needs['linux-arm64'].result == 'success' &&
       needs.android.result == 'success' && needs.windows.result == 'success' &&
       (needs.macos.result == 'success' || needs.macos.result == 'cancelled') }}
     runs-on: ubuntu-24.04
@@ -1218,10 +1276,10 @@ jobs:
   notify:
     # A Discord embed for the run, to the DISCORD_WEBHOOK secret (nothing
     # without it): green when every platform built, red when one did not,
-    # with each platform's result, this run's release (master only), and
+    # with each platform's result and the tests', this run's release (master only), and
     # links to the latest release's builds.
     # (not for a push of documentation alone, which builds nothing)
-    needs: [changes, linux-x86_64, linux-arm64, android, windows, macos, release]
+    needs: [changes, linux-x86_64, tests, linux-arm64, android, windows, macos, release]
     if: ${{ !cancelled() && needs.changes.outputs.build != 'false' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -1230,6 +1288,7 @@ jobs:
         env:
           WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           LINUX_X86_64: ${{ needs['linux-x86_64'].result }}
+          TESTS: ${{ needs.tests.result }}
           LINUX_ARM64: ${{ needs['linux-arm64'].result }}
           ANDROID: ${{ needs.android.result }}
           WINDOWS: ${{ needs.windows.result }}
@@ -1256,7 +1315,7 @@ jobs:
               *) echo "➖ Skipped" ;;
             esac
           }
-          if [ "$LINUX_X86_64" = success ] && [ "$LINUX_ARM64" = success ] && [ "$ANDROID" = success ] && [ "$WINDOWS" = success ] && [ "$MACOS" = success ]; then
+          if [ "$LINUX_X86_64" = success ] && [ "$TESTS" = success ] && [ "$LINUX_ARM64" = success ] && [ "$ANDROID" = success ] && [ "$WINDOWS" = success ] && [ "$MACOS" = success ]; then
             title="Build succeeded"; color=5763719
           else
             title="Build failed"; color=15548997
@@ -1273,7 +1332,7 @@ jobs:
             --arg title "$title" --argjson color "$color" --arg url "$RUN_URL" \
             --arg description "[\`${SHA:0:7}\`]($COMMIT_URL) $subject — $ACTOR ($BRANCH)" \
             --arg release "$release" --arg downloads "$downloads" \
-            --arg linux_x86_64 "$(status "$LINUX_X86_64")" --arg linux_arm64 "$(status "$LINUX_ARM64")" --arg windows "$(status "$WINDOWS")" --arg macos "$(status "$MACOS")" --arg android "$(status "$ANDROID")" \
+            --arg linux_x86_64 "$(status "$LINUX_X86_64")" --arg linux_arm64 "$(status "$LINUX_ARM64")" --arg windows "$(status "$WINDOWS")" --arg macos "$(status "$MACOS")" --arg android "$(status "$ANDROID")" --arg tests "$(status "$TESTS" | sed 's/Built/Passed/')" \
             --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             '{embeds: [{
               title: $title, url: $url, color: $color, description: $description, timestamp: $timestamp,
@@ -1283,6 +1342,7 @@ jobs:
                 {name: "Windows", value: $windows, inline: true},
                 {name: "macOS", value: $macos, inline: true},
                 {name: "Android", value: $android, inline: true},
+                {name: "Tests", value: $tests, inline: true},
                 {name: "Release", value: $release},
                 {name: "Latest release builds", value: $downloads}
               ]
