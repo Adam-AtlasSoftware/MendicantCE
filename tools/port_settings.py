@@ -624,11 +624,6 @@ PAGES = {
              "How wide you see on foot, in degrees across 16:9. Default is the Xbox's. Above 150 needs Panini "
              "Projection (First Person). In vehicles: First Person.|Click the number (or press A) to type 20 to "
              "160.", None),
-            # (display.scale_scoped_fov: view_fov.c, port/linux/include/zoom_fov.h)
-            ("SCOPED FIELD OF VIEW", "display.scale_scoped_fov", [("XBOX", "false"), ("SCALED", "true")],
-             "How far a scope zooms at your Field of View. Xbox zooms to the same view whatever yours is, as the "
-             "Xbox did. Scaled zooms your own view by the same magnification, so a wider view stays wider zoomed.",
-             None),
             ("ORIENTATION", "display.orientation",
              [("LANDSCAPE", "landscape"), ("PORTRAIT", "portrait"), ("AUTO", "auto")],
              "Which way up you hold the device. Portrait has a strip of buttons along the top, the picture under "
@@ -1011,6 +1006,11 @@ PAGES = {
              "How wide you see in a vehicle, in degrees across a 16:9 screen. Default keeps the game's view; Match "
              "uses your Field of View. Above 150 needs Panini Projection.|Click the number (or press A) to type "
              "any from 20 to 160.", None),
+            # (display.scale_scoped_fov: view_fov.c, port/linux/include/zoom_fov.h)
+            ("SCOPED FIELD OF VIEW", "display.scale_scoped_fov", [("XBOX", "false"), ("SCALED", "true")],
+             "How far a scope zooms at your Field of View. Xbox zooms to the same view whatever yours is, as the "
+             "Xbox did. Scaled zooms your own view by the same magnification, so a wider view stays wider zoomed.",
+             None),
             # (display.panini, port/linux/game/panini.c, and its vertical
             # compression; none in the VR build: menu_functions.c's
             # panini_rows_show)

@@ -65,6 +65,8 @@ static real fake_panini;
 static unsigned long config_changes(void) { return fake_changes; }
 static double config_real(const char *name) { (void)name; return fake_fov; }
 static char const *config_string(const char *name) { (void)name; return fake_vehicle_fov; }
+/* (display.scale_scoped_fov: off, the Xbox's zoom levels) */
+static int config_boolean(const char *name) { (void)name; return 0; }
 static unsigned long system_milliseconds(void) { return fake_now; }
 static boolean cinematic_in_progress(void) { return FALSE; }
 static director_perspective director_get_perspective(short local_player_index)
