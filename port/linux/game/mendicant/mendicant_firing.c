@@ -1017,7 +1017,10 @@ void mendicant_unit_damaged(
 	int victim_type, owner_type;
 
 	if (mendicant_active)
+	{
 		mendicant_spacing_hurt(unit_index, category); /* a grenade's blast, for the spacing's threat */
+		mendicant_lanes_hurt(unit_index, owner_object_index, lethal); /* run over: his friends remember */
+	}
 	if (!mendicant_fire_file || !mendicant_active || !object_header_data || !object_header_data->valid)
 		return;
 	victim = (struct unit_datum *)object_try_and_get_and_verify_type(unit_index, _object_mask_unit);

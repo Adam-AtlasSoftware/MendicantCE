@@ -233,6 +233,18 @@ static struct spacing_soldier *spacing_soldier_get(
 	return soldier;
 }
 
+/* his slot when it is his (no reset: a slot another actor has taken since
+is that actor's, never cleared for an old index) */
+static struct spacing_soldier *spacing_soldier_find(
+	long actor_index)
+{
+	int slot = (int)(unsigned short)actor_index;
+
+	if (actor_index == NONE || slot >= MENDICANT_MAX_ACTORS || spacing_soldiers[slot].actor != actor_index)
+		return NULL;
+	return &spacing_soldiers[slot];
+}
+
 /* the layer spaces him: a character, the layer on, on foot, not in a script's hands */
 static boolean spacing_his_own(
 	long actor_index,
@@ -581,7 +593,7 @@ static boolean spacing_buddy_valid(
 		spacing_distance_squared(&buddy->input.position.body_position, &actor->input.position.body_position) >
 			SPACING_BUDDY_KEEP * SPACING_BUDDY_KEEP)
 		return FALSE;
-	other = spacing_soldier_get(soldier->buddy);
+	other = spacing_soldier_find(soldier->buddy);
 	return other && other->buddy == actor_index;
 }
 
@@ -601,7 +613,7 @@ static void spacing_buddy_update(
 		return;
 	if (soldier->buddy != NONE)
 	{
-		struct spacing_soldier *old = spacing_soldier_get(soldier->buddy);
+		struct spacing_soldier *old = spacing_soldier_find(soldier->buddy);
 
 		if (old && old->buddy == actor_index)
 			old->buddy = NONE;

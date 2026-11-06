@@ -162,12 +162,12 @@ struct mendicant_config
 {
 	boolean enabled, training, discipline, targeting, individuals, aim_difficulty, aim_moving,
 		aim_debug, vehicle_test, models, status, character, fire_personality, lost_target_search, friend_vehicles,
-		grenade_reactions, convoy, spacing;
+		grenade_reactions, convoy, spacing, lane_clearing;
 	long training_skip, seed, quirks; /* quirks: MENDICANT_QUIRKS_OFF .. _LOUD */
 	real aim, marine_fire, command_radius, variety, personality;
 	real grenade_test; /* training: seconds between test grenades, 0 none */
 	char bridge[256], weights[128], sample_log[256], drill_log[256], player_log[256], move_test_log[256],
-		character_log[256], fire_log[256], convoy_test_log[256];
+		character_log[256], fire_log[256], convoy_test_log[256], lane_test_log[256];
 };
 
 /* ---- platform: mendicant_config.c */
@@ -203,6 +203,9 @@ struct mendicant_status
 	/* the spacing: firing position searches given a soldier's own avoid
 	points, steps apart, positions given up when the threat jumped */
 	unsigned long spacing_selections, spacing_steps, spacing_repicks;
+	/* the lane clearing: soldiers who found themselves in a vehicle's lane,
+	moves out of it of their own, the game's dives from a vehicle */
+	unsigned long lane_episodes, lane_moves, lane_dives;
 };
 extern struct mendicant_status mendicant_status;
 extern boolean mendicant_active;         /* enabled, campaign or co-op, and this machine runs the AI */
@@ -344,6 +347,58 @@ boolean mendicant_spacing_claims_begin(long actor_index, struct actor_datum *act
 	struct firing_position_definition const *positions, int position_count, struct mendicant_spacing_claims *claims);
 real mendicant_spacing_claims_penalty(struct mendicant_spacing_claims const *claims, real_point3d const *point);
 void mendicant_spacing_fallback_point(long actor_index, struct actor_datum *actor, real_point3d *point); /* the drill's free movement */
+
+/* M4 vehicle lanes (mendicant_lanes.c, mendicant_lanes_test.c): the bodies
+of the source hooks' lane parts (the action control's look and gait, the
+firing positions' bonus), and what the platform calls; free movement and the
+drill ask mendicant_threat_evading (a grenade's or a lane's escape) before
+another owner takes or ends an order (mendicant_go_by_lane is set around the
+lane module's own) */
+enum
+{
+	MENDICANT_LANE_NONE = -1,
+	MENDICANT_LANE_SIDESTEP = 0, /* off the road on his side (toward cover) */
+	MENDICANT_LANE_FREEZE,       /* a Grunt's: stopped dead, then the panic run */
+	MENDICANT_LANE_WRONG_WAY,    /* a Grunt's: a step the wrong way first */
+	MENDICANT_LANE_SHIELD_STEP,  /* a Jackal's: one late, short sidestep */
+	MENDICANT_LANE_MATADOR,      /* an Elite's: stands and shoots the driver */
+	MENDICANT_LANE_REACTIONS
+};
+enum
+{
+	MENDICANT_LANE_OUTCOME_MOVED = 0,
+	MENDICANT_LANE_OUTCOME_DIVED,
+	MENDICANT_LANE_OUTCOME_HIT,
+	MENDICANT_LANE_OUTCOME_STOOD,
+	MENDICANT_LANE_OUTCOME_DIED
+};
+struct mendicant_lane_view
+{
+	long vehicle;        /* his episode's vehicle, NONE none */
+	long seen_time, move_time, dive_time;
+	int reaction;        /* MENDICANT_LANE_* */
+	real reaction_time, lead, memory;
+	boolean too_late;
+};
+struct player_action;
+extern boolean mendicant_go_by_lane;
+extern FILE *mendicant_lane_test_file; /* NULL unless ai.mendicant.lane_test_log */
+void mendicant_lanes_reset(void);
+boolean mendicant_lane_evading(long actor_index);
+boolean mendicant_threat_evading(long actor_index); /* a grenade's or a lane's escape */
+void mendicant_lanes_update(long time);
+void mendicant_lanes_after_decide(long actor_index);
+void mendicant_lanes_action_control(long actor_index, short action);
+short mendicant_lanes_danger_react(long actor_index); /* a vehicle's dive held a moment (_mendicant_danger_moved) or the game's */
+void mendicant_lanes_bonus(long actor_index, struct firing_position_evaluation_context *evaluation_context,
+	short firing_position_count, struct firing_position *firing_positions);
+void mendicant_lanes_hurt(long unit_index, long owner_object_index, boolean lethal);
+boolean mendicant_lanes_view(long actor_index, struct mendicant_lane_view *view);
+/* the gate scene (mendicant_lanes_test.c) */
+void mendicant_lanes_test_reset(void);
+void mendicant_lanes_test_update(long time);
+void mendicant_lanes_test_hurt(long unit_index, boolean lethal);
+boolean mendicant_lanes_test_actions(struct player_action *actions); /* TRUE: the scene drives the Chief */
 
 /* M1 runtime (mendicant_models.c) needs from M2 command: the doctrine as
 the decision mask reads it (mendicant_doctrine.h stays private to M2) */
@@ -504,6 +559,7 @@ boolean actor_go_goal(long actor_index, real_point3d *goal); /* the order's goal
 void mendicant_follow_cancel(long actor_index);
 int mendicant_line_blocked(real_point3d const *from, real_point3d const *to); /* -1 no BSP, 0 clear, 1 blocked */
 boolean mendicant_ground_under(real_point3d const *point, real_point3d *ground); /* the structure within 6 below */
+boolean mendicant_go_direct(long actor_index, real_point3d const *point); /* a straight way on foot there (no way round) */
 int mendicant_drill_position(struct actor_datum *actor, struct mendicant_geometry const *geometry, int side,
 	real angle_low, real angle_high, real range_low, real range_high, long *used);
 

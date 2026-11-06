@@ -354,6 +354,54 @@ static int go_search(long actor_index, real_point3d const *goal, long goal_surfa
 	return go_search_from(actor_index, NULL, NONE, goal, goal_surface, endpoint, endpoint_surface);
 }
 
+/* a safety move's way (mendicant_lanes.c): one search reaches the point's
+ground and every step of its path heads toward the point (none turns back
+more than 60 degrees from the straight way), so the soldier goes straight
+there, not round by some other way */
+boolean mendicant_go_direct(long actor_index, real_point3d const *point)
+{
+	struct path_state *state = &go_path_state;
+	struct path_result result;
+	struct actor_datum *actor = move_actor(actor_index);
+	real_point3d ground, from;
+	long surface;
+	real wx, wy, length;
+	int step;
+
+	if (!actor || !global_structure_bsp || !go_ground(point, &ground, &surface))
+		return FALSE;
+	memset(state, 0, sizeof(*state));
+	actor_path_input_new(actor_index, &state->input);
+	state->debug = NULL;
+	state->destination_valid = TRUE;
+	state->destination.point = ground;
+	state->destination.surface_index = surface;
+	state->destination.target_radius = 100000.0f;
+	state->structure = global_structure_bsp;
+	go_stats.searches++;
+	memset(&result, 0, sizeof(result));
+	if (!path_state_find(state) || !path_state_build_path(state, &result) || !result.valid ||
+		result.endpoint.surface_index != surface)
+		return FALSE;
+	from = actor->input.pathfinding_point;
+	wx = ground.x - from.x;
+	wy = ground.y - from.y;
+	length = (real)sqrt(wx * wx + wy * wy);
+	if (length < 0.5f)
+		return TRUE;
+	wx /= length;
+	wy /= length;
+	for (step = 0; step < result.step_count && step < 4; step++)
+	{
+		real sx = result.steps[step].point.x - from.x, sy = result.steps[step].point.y - from.y;
+		real s = (real)sqrt(sx * sx + sy * sy);
+
+		if (s > 0.3f && (sx * wx + sy * wy) / s < 0.5f)
+			return FALSE;
+	}
+	return TRUE;
+}
+
 static struct go_order *go_find(long actor_index)
 {
 	int i;
@@ -995,8 +1043,9 @@ int actor_go_to(long actor_index, real_point3d const *point, real tolerance, int
 
 	if (!move_actor(actor_index))
 		return 0;
-	/* a grenade escape (mendicant_grenades.c) is not taken over by another owner */
-	if (!mendicant_go_by_grenade && mendicant_grenade_evading(actor_index))
+	/* a grenade's or a lane's escape (mendicant_grenades.c, mendicant_lanes.c)
+	is not taken over by another owner (the lane module defers to a grenade's itself) */
+	if (!mendicant_go_by_grenade && !mendicant_go_by_lane && mendicant_threat_evading(actor_index))
 		return 0;
 	if (!go_ground(point, &ground, &surface))
 		return -1;
@@ -1045,8 +1094,8 @@ void actor_go_cancel(long actor_index)
 {
 	struct go_order *order;
 
-	/* a grenade escape (mendicant_grenades.c) is ended only by its own owner */
-	if (!mendicant_go_by_grenade && mendicant_grenade_evading(actor_index))
+	/* a grenade's or a lane's escape is ended only by its own owner */
+	if (!mendicant_go_by_grenade && !mendicant_go_by_lane && mendicant_threat_evading(actor_index))
 		return;
 	order = go_find(actor_index);
 
@@ -1788,6 +1837,11 @@ boolean mendicant_assign_position(struct mendicant_member *member, short positio
 {
 	short action = member->actor->state.action;
 
+	/* a soldier dodging a grenade or a vehicle is not re-ordered until his
+	escape ends; the drill gives him his order again then (he has none) */
+	if (mendicant_threat_evading(member->actor_index))
+		return FALSE;
+
 	if (action != _actor_action_fight && action != _actor_action_uncover)
 	{
 		mendicant_order(member->actor_index, position);
@@ -1811,7 +1865,8 @@ boolean mendicant_go_fallback(struct mendicant_member *member, real_point3d cons
 	int slot;
 	real_point3d spaced = *point;
 
-	if (!mendicant_actor_can_drill(member->actor) || move_distance_to(member->actor, point) > 80.0f)
+	if (!mendicant_actor_can_drill(member->actor) || move_distance_to(member->actor, point) > 80.0f ||
+		mendicant_threat_evading(member->actor_index))
 		return FALSE;
 	/* the spacing (with a character): not onto a friend's point */
 	mendicant_spacing_fallback_point(member->actor_index, member->actor, &spaced);

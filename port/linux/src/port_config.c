@@ -1296,6 +1296,14 @@ static const struct config_setting config_settings[] =
 		"Jackals in a shield line, and the squad spreads wider while a grenade,\n"
 		"a grenadier, a heavy weapon or a vehicle threatens it, regrouping\n"
 		"after. Hunters and the Flood unchanged." },
+	{ "ai.mendicant.lane_clearing", _config_boolean, "true", "HALO_AI_MENDICANT_LANE_CLEARING", _environment_value, _platform_all,
+		"With the soldier character on: soldiers who see or hear a vehicle\n"
+		"coming get out of its way early, each in his own time and way:\n"
+		"Marines step off the road (well clear of the Chief's own Warthog),\n"
+		"Elites a beat ahead of their Grunts or standing to shoot the driver,\n"
+		"Grunts late and scattering (some freeze, then bolt), Jackals one short\n"
+		"step with the shield up. The slow still dive at the last second, and\n"
+		"they learn after a pass. Hunters and the Flood unchanged." },
 	{ "ai.mendicant.bridge", _config_string, "\"\"", "HALO_AI_MENDICANT_BRIDGE", _environment_value, _platform_linux,
 		"A file the models are asked through instead (a trainer or brain.py maps\n"
 		"it); empty: the models in the game." },
@@ -1321,6 +1329,11 @@ static const struct config_setting config_settings[] =
 		"Training: once the player has control, set up a convoy scene by the\n"
 		"Chief (six Marines, two spare Warthogs), drive him out and back, and\n"
 		"log the convoy's measures in this file; empty: no test." },
+	{ "ai.mendicant.lane_test_log", _config_string, "\"\"", "HALO_AI_MENDICANT_LANE_TEST_LOG", _environment_value, _platform_linux,
+		"Training: once the player has control, put the Chief at the wheel of a\n"
+		"Warthog, drive him at 15 world units a second through a line of each\n"
+		"species twice, and log the lane clearing's measures in this file;\n"
+		"empty: no test." },
 	{ "ai.mendicant.aim_debug", _config_boolean, "false", "HALO_AI_MENDICANT_AIM_DEBUG", _environment_value, _platform_linux,
 		"Log the aim each actor is given." },
 	{ "ai.mendicant.character_log", _config_string, "\"\"", "HALO_AI_MENDICANT_CHARACTER_LOG", _environment_value, _platform_linux,

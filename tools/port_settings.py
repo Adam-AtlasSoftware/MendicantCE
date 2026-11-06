@@ -1103,6 +1103,9 @@ PAGES = {
             ("SPACING", "ai.mendicant.spacing", ON_OFF,
              "Squads spread out, wider when a grenade lands, so one blast rarely gets two. Grunts still huddle.",
              None),
+            ("LANE CLEARING", "ai.mendicant.lane_clearing", ON_OFF,
+             "Drive at them and each gets out of the way in his own time. The slow still dive at the last second.",
+             None),
         ],
     },
     FIRST_PERSON[0]: {

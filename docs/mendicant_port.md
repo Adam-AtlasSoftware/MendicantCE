@@ -47,7 +47,7 @@ variety, discipline, threat targeting, unit radius, aim spread, spread by
 difficulty, moving targets and the Marines' rate of fire, and on its SOLDIER
 CHARACTER page the character, the personality strength, the quirks, the firing
 personality, the search for a lost target, holding fire for friendly vehicles, the grenade
-reactions, the convoy and the spacing. It is reached from
+reactions, the convoy, the spacing and the lane clearing. It is reached from
 the main menu's player profile and from a campaign's pause menu (SETTINGS),
 and works with a controller as the other settings screens do. OK writes the
 changes to config.toml; `menu_functions.c`'s "port settings save" then calls
@@ -522,6 +522,121 @@ ring stands a world unit apart. Here:
   damage a minute was 0.92 of the layer off's at the previous commit; two layer-off samples differ
   by 0.98. The layer off replays the previous commit's 800 fights bit for bit; the convoy scene's
   gates are unchanged (seated 0.88, first boarder 2.65 s, start spread 0.50 s, no double seats).
+
+## Vehicle lanes
+
+Milestone M4 (`mendicant_lanes.c`, `ai.mendicant.lane_clearing`, with the character on): how each
+soldier with a character gets out of the way of a moving vehicle, the Chief's Warthog and the
+enemy's alike. Hunters, the Flood, Sentinels, Engineers and turrets have no character and react
+as before, as do actors in a play fight or a script's command list. No new source hook: it uses
+the danger avoidance's (`mendicant_danger_react`), the action control's, the firing positions'
+bonus and the tick's.
+
+The game sees a vehicle only within its radius plus 10 world units, predicts it 1.5 s ahead on a
+straight line and dives when it is under a second away (`actions.c`'s danger avoidance, urgency
+under 30 ticks): everyone ignores the Warthog until the last moment, then the group dives on one
+frame, or, failing the notice roll, nobody moves. Here:
+
+- **Lanes.** Every other tick, each vehicle that does collision damage and moves faster than
+  4 world units a second, driven or rolling, has its path predicted 3 s ahead in quarter seconds,
+  its velocity turned at its yaw rate (at most 2.5 radians a second; no climb beyond 1 a second).
+  A soldier on foot within 60 world units is in its lane when the path passes within its radius
+  (its bounding sphere's, 0.8-4) plus 1 of him, 0.3-3 s from now, within 4 of his height.
+- **Fairness.** He reacts only to a vehicle he can see or hear: the game's danger zone already
+  perceives it, or it is within 25 world units and faster than 8 a second (its engine), or he sees
+  it (within his kind's vision range, inside half its widest vision angle, 45-90 degrees, nothing
+  of the level between his eyes and it), or he fully perceives its driver. A Marine keeps an eye on
+  the Chief: the Chief's own vehicle is seen wherever a line of sight to it runs within 60. A
+  vehicle behind him (more than about 107 degrees off his facing) costs a glance first: 0.4 s,
+  his head turned to it.
+- **Timing.** A reaction time: the kind's base (Marines 0.35 s, 0.8 of it for the Chief's own
+  vehicle; Elites 0.25, Jackals 0.4, Grunts 0.5) times his reflex's multiplier (1.45 to 0.55, mean 1
+  over his kind, pulled to 1 under a unit's command by the cohesion), the fight's reaction mood and
+  his own roll (+-60%), a rookie +0.2 s, a veteran -0.1 s, less 0.15 s for each point he remembers
+  (below), 0.08-1.5 s. A lead, how long before it reaches him he goes at the earliest, from his
+  caution and his own roll: Marines 2-3.5 s (3-4 s for the Chief's own vehicle), Elites 1.8-3,
+  Grunts 0.8-2 (+0.45 s for each point remembered), Jackals 1.1-1.4 (late). He goes once both have
+  passed (or a beat after his Elite, below). No move made 0.9 s out: the game's dive from there.
+- **Each kind's way.** Off the road at a run (the combat gait, up off his knee), straight across to
+  his radius plus a margin past the lane (a turn of 25 degrees only for cover from the vehicle,
+  45 degrees only when nothing straighter fits), to ground a man walks to (no steeper than the
+  ground under him allows) with a straight way there on foot (one path search reaches it and none
+  of its first steps turns back from it), clear of every lane: Marines 2-4 world units past the lane
+  on the side they stand, toward cover, never across a friend's vehicle's front; Elites 1.5-3.5,
+  toward cover; Grunts 1.5-4 to their own side, one in five a 1.2 step the wrong way first (with
+  time), about one in three (by courage; a coward nearly always, the brave one never, half as often
+  once he has seen a pass) frozen 0.3-0.8 s, then a panicked run 3-6 past it with the flee scream;
+  a Grunt within 8 of an Elite who went goes 0.2-0.5 s after him; Jackals one short step, 0.5-1.3
+  past it, their shield to the vehicle. An aggressive Elite (aggression over 0.6, at most 35%; a
+  berserker or duelist 40%) facing an enemy vehicle under 16 a second stands and shoots the driver,
+  the game's dive taking him at the last second (the matador). Across the road only with 2 s to
+  spare. A soldier no further from the road after 0.6 s (his way was no way) goes straight across
+  instead, then the other side if there is time (1.5 s, 1.2 for an enemy's vehicle), else stays
+  where his order holds him: never let back into the road while it comes.
+- **Never as one.** No third soldier starts (a move, or the game's dive) within two ticks of two
+  others on the same vehicle: the move waits a tick or two, and the game's dive waits too
+  (`mendicant_lanes_danger_react` answers `_mendicant_danger_moved`) while it is more than 0.35 s
+  off.
+- **Memory.** Each pass a soldier lived through within 6 world units, and each friend he saw run
+  over within 25 (1.5 a death, 0.75 a wound), count for him and fade over a minute (at most 3).
+- **The escape** is free movement (`actor_go_to`, urgency 2) that no other owner can take over or end
+  while it lasts (`mendicant_go_by_lane`, `mendicant_lane_evading`; a grenade's escape still goes
+  first); the drill does not re-order a soldier in a grenade's or a lane's escape (`move_near`,
+  `mendicant_assign_position` and `mendicant_go_fallback` skip him: `mendicant_threat_evading`),
+  and gives him his order again when it ends. It ends when the vehicle has passed him or turned
+  away, or after 3.5 s; at most one early move per vehicle per soldier per 3 s.
+- **Firing positions.** While a lane threatens him (fight, cover, uncover, guard and avoid
+  searches), a position clear of it by its margin plus 0.5 scores 8 more (a missing bonus: no score
+  below 0); a Marine's are kept out of the Chief's own vehicle's lane within 40 world units even
+  before it threatens him. His position under the lane for a second is let go
+  (`actor_discard_firing_position`, temporary), as the game does with its shorter line.
+- **Not in M4.** Hunters (unchanged: they keep the game's dive), the follow offset beside the
+  Chief's heading and the Covenant's vehicles (M10).
+- **Log** (the fire log, both layers): `lane` an episode begins (a seconds until it reaches him, b
+  his distance from its line, c the vehicle, d his reaction, 0 sidestep, 1 freeze, 2 wrong way first,
+  3 a Jackal's step, 4 the matador, -1 the layer off, e 1 a player drives it, f his reaction time),
+  `lmove` his move begins (a seconds left, b distance, c vehicle, d reaction, e ticks since it began,
+  f his lead), `lend` it is over (a the nearest it came, b his last distance, c vehicle, d reaction,
+  e 0 he moved, 1 the game dived him, 2 hit, 3 stood, 4 died otherwise, f his reaction time),
+  `ldive` the game's dive from a vehicle, `lhit` run over (a 1 killed), `lstuck` no further from
+  the road (e 1 a second time), `lfail` no way off found (the ways refused: c blocked, d no ground he
+  walks to, e in a lane, f no straight way on foot).
+- **The gate scene** (`ai.mendicant.lane_test_log`, `mendicant_lanes_test.c`, training; run by
+  `build/authentic_test/bin/lane_run.py`, read by `m4_stats.py`): the clearest straight, level,
+  visible way from the Chief or any firing position of the loaded part of the level, its scenery
+  taken away; the Chief at the wheel of a Warthog (a Ghost where there is none) driven at 15 world
+  units a second (held by script; a Warthog's own top speed is near 7), twice through a line of each
+  species the level has, 40-75 world units ahead, facing him, told he is there; the second pass with
+  the same soldiers put back. b40's longest such way is 52 world units (the line 40 ahead, about
+  2.7 s of warning at most), a30's 85, c40's 58.
+- **Measured** (the gate scene, b40, a30 and c40, 10 seeds, 260 passes a layer, 840 soldiers in the
+  lane; the layer off is `ai.mendicant.lane_clearing` false, the stock the character off; `m4_stats.py`).
+  Run over, in the lane 3 s out (lower; the design: below the stock, Grunts under 40%, others under
+  15%): Grunts 0.03 (off 0.13, stock 0.13), Jackals 0.07 (0.25, 0.24), Elites 0.03 (0.14, 0.17),
+  Marines 0.01 (0.31, 0.31), Hunters 0 (unchanged, 0). Out of the lane a second before it got there
+  (higher; Marines and Elites over 60%, Hunters under 20%): Marines 0.84, Elites 0.77, Grunts 0.17,
+  Jackals 0 (they step late by design), Hunters 0 (off: 0 for every kind). The game's dive (10-40%):
+  0.34 (off 0.75, Hunters 1.00 either way). Reaction time, the lane's start to his move: spread 0.49 s
+  over all (higher; over 0.15), Grunts 0.33, Jackals 0.22, Marines 0.15, Elites 0.14; passes with
+  three or more starting within two ticks: 0 (off 37 of 260). Moves before the vehicle could be seen
+  or heard (the scene's own check: an unblocked line from his head, or within 25): 0. Marines hit by
+  the Chief's own Warthog: 2 of 160 (off 49; the design: 0, not met: both on b40, whose short way
+  gives under 2.7 s, a Marine whose way off went no further from the road). Grunts, the same soldier
+  on the second pass (109 pairs): reaction 0.68 s against 0.98, lead 1.83 s against 1.50 (faster);
+  run over 0.02 against 0.03. Matadors: 20 Elites, 3 run over (0.15; under 0.30). The natural
+  benchmark (800 fights each way): the layer off replays the previous commit's 800 fights bit for bit;
+  vehicles come in a few scenarios (218 lane episodes with the layer on, 253 off; run over 15 against
+  13); balance against the layer off (1600 fights against 800; damage a minute, kills, deaths):
+  Grunts 0.96, 1.08, 0.99, Marines 1.03, 1.01, 1.04; against the previous commit's layer Grunts 1.09,
+  1.12, 1.00, Marines 0.95, 0.97, 1.02 (two layer-off samples: Grunt damage 0.98, Marine deaths
+  1.12); the lane clearing alone (the layer on, it off against on, the same seeds) Grunts 0.98, 0.94,
+  1.00, Marines 1.03, 1.07, 0.96. On the grenade test (400 fights each way) M2's and M6's gates
+  stay near the previous commit's: detonations hurting two or more 0.92 (0.92), deaths per noticed
+  grenade 0.84 (0.84), stationary Marines with a friend within 2 wu 0.12 (0.16), Elites 0.54
+  (0.48), pairs under 4 wu under a grenade's threat 0.92 (0.87).
+  The assert build (the game's asserts live): 400 natural and 200 grenade-test bench fights and the
+  gate scene on b40 and a30, 5 seeds, both layers (Marines hit 0 of 80 with the layer, 24 off), no
+  assert, no crash; on c40 the unoptimised build did not get past the level's opening in 45 minutes.
 
 ## Fork release settings
 
