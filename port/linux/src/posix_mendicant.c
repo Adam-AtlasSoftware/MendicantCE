@@ -5,11 +5,11 @@ MENDICANT AI's platform side (port/linux/game/mendicant): the model bridge's
 shared memory, which a trainer or brain.py maps from the same path, and the
 clock, yield and sleep that the training wait and the paused episode use.
 Desktop Linux only (the web build and Windows leave this file out; Android
-skips posix_*). Port: in the Linux builds it is the guest's own (tools/android_build.py's guest_posix),
-whose open, ftruncate, mmap (MAP_SHARED of a file), clock_gettime and
-sched_yield the host performs (port/android/host/host_syscall.c), so the
-trainer maps the same file. The other guests (Android, Windows, the Apple
-builds) compile it empty.
+skips posix_*). Port: in the Linux builds it is the guest's own
+(tools/android_build.py's guest_posix), whose open, ftruncate, mmap
+(MAP_SHARED of a file), clock_gettime and sched_yield the host performs
+(port/android/host/host_syscall.c), so the trainer maps the same file. The
+other guests (Android, Windows, the Apple builds) compile it empty.
 */
 
 #if !defined(HALO_GUEST) || !(defined(HALO_WINDOWS) || defined(HALO_ANDROID) || defined(HALO_MACOS))

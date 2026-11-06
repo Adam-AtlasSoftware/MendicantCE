@@ -15,8 +15,9 @@ and the answer the models give, in one of two places.
   game publishes request_sequence last (a release store); the model answers
   with response_sequence last (read with acquire). In the 64-bit builds' guest
   the file is opened and mapped by the guest's own system calls, which the
-  host performs (port/android/host/host_syscall.c: MAP_SHARED passes through). In training the game runs as fast as it can, so a
-  request waits up to 200 ms for the trainer's answer.
+  host performs (port/android/host/host_syscall.c: MAP_SHARED passes
+  through). In training the game runs as fast as it can, so a request waits
+  up to 200 ms for the trainer's answer.
 */
 
 #include "cseries.h"
