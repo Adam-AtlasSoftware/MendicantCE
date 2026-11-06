@@ -39,7 +39,7 @@ Python:
 
 ## The settings screen
 
-Video Setup > CAMPAIGN AI (`tools/port_settings.py`'s
+Settings > Profiles > CAMPAIGN AI (`tools/port_settings.py`'s
 `video_settings/campaign_ai` and its AIM AND FIRE page, written by
 `python3 tools/ce_menus.py --settings-only`) sets the player's
 `ai.mendicant.*` settings: on, the trained models, individuals, drill

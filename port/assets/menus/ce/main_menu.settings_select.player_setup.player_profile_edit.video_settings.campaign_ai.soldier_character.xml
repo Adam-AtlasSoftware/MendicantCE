@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The port's settings screen, in the PC version's style (tools/port_settings.py) -->
+<menus>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/soldier_character_screen" width="640" height="480" flags="pass_unhandled_to_focused_child pause_game" bitmap="bitmaps/gradient">
+		<on event="b" run="port settings page cancel" back="true"/>
+		<on event="back" run="port settings page cancel" back="true"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/header_soldier_character"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/options_menu"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/header_soldier_character" controller="1" left="35" top="11" width="605" height="59" bitmap="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/header_soldier_character" wide="-106 0">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/options_menu" type="column_list" width="640" height="480" flags="pass_unhandled_to_focused_child up_down_tabs_children" description="main_menu/settings/page_panel">
+		<data input="port settings page"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/section_0" x="28" y="80"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/op_mendicant.character" x="28" y="100"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/op_mendicant.personality" x="28" y="121"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/op_mendicant.quirks" x="28" y="142"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/op_mendicant.fire_personality" x="28" y="163"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/op_mendicant.lost_target_search" x="28" y="184"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/op_mendicant.friend_vehicles" x="28" y="205"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/op_mendicant.grenade_reactions" x="28" y="226"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/op_mendicant.convoy" x="28" y="247"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/button_bar" y="414"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/button_bar" type="column_list" width="640" height="28" flags="pass_unhandled_to_focused_child left_right_tabs_items">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/button_defaults" x="24" y="1"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/button_ok" x="358" y="1"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/button_cancel" x="488" y="1"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/button_defaults" type="text" width="128" height="24" bitmap="bitmaps/text_button_background" string_list="strings/common_button_captions" string_index="3" font="ui\small_ui" color="#FFFFFFFF" align="center" text_y="2" wide="-106 0">
+		<on event="a" run="port settings defaults"/>
+		<on event="start" run="port settings defaults"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/button_ok" type="text" width="128" height="24" bitmap="bitmaps/text_button_background" string_list="strings/common_button_captions" string_index="1" font="ui\small_ui" color="#FFFFFFFF" align="center" text_y="2" wide="106 0">
+		<on event="a" run="port settings keep" back="true"/>
+		<on event="start" run="port settings keep" back="true"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/button_cancel" type="text" width="128" height="24" bitmap="bitmaps/text_button_background" string_list="strings/common_button_captions" string_index="2" font="ui\small_ui" color="#FFFFFFFF" align="center" text_y="2" wide="106 0">
+		<on event="a" run="port settings page cancel" back="true"/>
+		<on event="start" run="port settings page cancel" back="true"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/section_0" width="344" height="18" bitmap="main_menu/settings/section" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/section_0_title"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/section_0_title" type="text" controller="1" width="344" height="18" wide="0 120" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/labels" color="#FF6F9CD0" text_x="2" text_y="1" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/op_mendicant.character" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/mendicant.character_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/mendicant.character_spinner" x="188"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/mendicant.character_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/labels" string_index="1" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/mendicant.character_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="ON|OFF" setting="ai.mendicant.character" values="true|false" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+		<on event="created" run="port setting load"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/op_mendicant.personality" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/mendicant.personality_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/mendicant.personality_spinner" x="188"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/mendicant.personality_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/labels" string_index="2" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/mendicant.personality_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="ALIKE|MILD|NORMAL|STRONG|WILD" setting="ai.mendicant.personality" values="0|0.5|1|1.5|2" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+		<on event="created" run="port setting load"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/op_mendicant.quirks" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/mendicant.quirks_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/mendicant.quirks_spinner" x="188"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/mendicant.quirks_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/labels" string_index="3" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/mendicant.quirks_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="OFF|SUBTLE|NORMAL|LOUD" setting="ai.mendicant.quirks" values="off|subtle|normal|loud" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+		<on event="created" run="port setting load"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/op_mendicant.fire_personality" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/mendicant.fire_personality_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/mendicant.fire_personality_spinner" x="188"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/mendicant.fire_personality_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/labels" string_index="4" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/mendicant.fire_personality_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="ON|OFF" setting="ai.mendicant.fire_personality" values="true|false" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+		<on event="created" run="port setting load"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/op_mendicant.lost_target_search" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/mendicant.lost_target_search_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/mendicant.lost_target_search_spinner" x="188"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/mendicant.lost_target_search_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/labels" string_index="5" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/mendicant.lost_target_search_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="ON|OFF" setting="ai.mendicant.lost_target_search" values="true|false" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+		<on event="created" run="port setting load"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/op_mendicant.friend_vehicles" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/mendicant.friend_vehicles_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/mendicant.friend_vehicles_spinner" x="188"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/mendicant.friend_vehicles_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/labels" string_index="6" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/mendicant.friend_vehicles_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="ON|OFF" setting="ai.mendicant.friend_vehicles" values="true|false" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+		<on event="created" run="port setting load"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/op_mendicant.grenade_reactions" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/mendicant.grenade_reactions_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/mendicant.grenade_reactions_spinner" x="188"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/mendicant.grenade_reactions_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/labels" string_index="7" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/mendicant.grenade_reactions_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="ON|OFF" setting="ai.mendicant.grenade_reactions" values="true|false" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+		<on event="created" run="port setting load"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/op_mendicant.convoy" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/mendicant.convoy_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/mendicant.convoy_spinner" x="188"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/mendicant.convoy_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/labels" string_index="8" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/mendicant.convoy_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="ON|OFF" setting="ai.mendicant.convoy" values="true|false" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+		<on event="created" run="port setting load"/>
+	</widget>
+	<strings name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/labels">
+		<string text="SOLDIER CHARACTER"/>
+		<string text="SOLDIER CHARACTER"/>
+		<string text="PERSONALITY"/>
+		<string text="QUIRKS"/>
+		<string text="FIRING PERSONALITY"/>
+		<string text="SEARCH LOST TARGET"/>
+		<string text="FRIENDS IN THE LINE"/>
+		<string text="GRENADE REACTIONS"/>
+		<string text="CONVOY"/>
+	</strings>
+	<strings name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/help_strings">
+		<string text=""/>
+		<string text=""/>
+		<string text="Each soldier his own nerve, aggression, skill and voice, drawn each fight. Hunters and the Flood as ever."/>
+		<string text="How far soldiers differ from their kind's average. The averages stay where they are."/>
+		<string text="How often a soldier has a quirk (a coward, a veteran, a duelist), and how plainly he shows it."/>
+		<string text="Each soldier aims, reacts and paces his bursts his own way. No squad fires in one volley."/>
+		<string text="Lose them and an Elite calls the search, Grunts go looking, Jackals watch the corner you left by."/>
+		<string text="Soldiers hold fire when a friendly vehicle with anyone aboard, your Warthog, is in the way."/>
+		<string text="Each soldier sees your grenade in his own time and scatters his own way. No squad dives as one."/>
+		<string text="Your Warthog full? The rest take the other vehicles and follow you, each in his own time."/>
+	</strings>
+</menus>

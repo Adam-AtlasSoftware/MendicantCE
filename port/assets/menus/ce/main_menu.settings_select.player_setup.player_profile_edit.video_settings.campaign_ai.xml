@@ -19,11 +19,12 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/op_mendicant.discipline" x="28" y="184"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/op_mendicant.targeting" x="28" y="205"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/op_mendicant.command_radius" x="28" y="226"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/section_8" x="28" y="253"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/op_mendicant.aim" x="28" y="273"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/op_mendicant.aim_difficulty" x="28" y="294"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/op_mendicant.aim_moving" x="28" y="315"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/op_mendicant.marine_fire" x="28" y="336"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/op_soldier_character" x="28" y="247"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/section_9" x="28" y="274"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/op_mendicant.aim" x="28" y="294"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/op_mendicant.aim_difficulty" x="28" y="315"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/op_mendicant.aim_moving" x="28" y="336"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/op_mendicant.marine_fire" x="28" y="357"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/button_bar" y="414"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/button_bar" type="column_list" width="640" height="28" flags="pass_unhandled_to_focused_child left_right_tabs_items">
@@ -114,16 +115,24 @@
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/mendicant.command_radius_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="15|20|25|30|35|40|50|60" setting="ai.mendicant.command_radius" values="15|20|25|30|35|40|50|60" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
 		<on event="created" run="port setting load"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/section_8" width="344" height="18" bitmap="main_menu/settings/section" wide="-106 120">
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/section_8_title"/>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/op_soldier_character" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 120">
+		<on event="a" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/soldier_character_screen"/>
+		<on event="start" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character/soldier_character_screen"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character_label"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/section_8_title" type="text" controller="1" width="344" height="18" wide="0 120" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/labels" string_index="8" color="#FF6F9CD0" text_x="2" text_y="1" font="ui\small_ui">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/soldier_character_label" type="text" controller="1" width="332" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/labels" string_index="8" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/section_9" width="344" height="18" bitmap="main_menu/settings/section" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/section_9_title"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/section_9_title" type="text" controller="1" width="344" height="18" wide="0 120" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/labels" string_index="9" color="#FF6F9CD0" text_x="2" text_y="1" font="ui\small_ui">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/op_mendicant.aim" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 120">
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/mendicant.aim_label"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/mendicant.aim_spinner" x="188"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/mendicant.aim_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/labels" string_index="9" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/mendicant.aim_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/labels" string_index="10" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/mendicant.aim_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="0.5|0.65|0.8|1|1.25|1.5|2" setting="ai.mendicant.aim" values="0.5|0.65|0.8|1|1.25|1.5|2" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
 		<on event="created" run="port setting load"/>
@@ -132,7 +141,7 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/mendicant.aim_difficulty_label"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/mendicant.aim_difficulty_spinner" x="188"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/mendicant.aim_difficulty_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/labels" string_index="10" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/mendicant.aim_difficulty_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/labels" string_index="11" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/mendicant.aim_difficulty_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="ON|OFF" setting="ai.mendicant.aim_difficulty" values="true|false" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
 		<on event="created" run="port setting load"/>
@@ -141,7 +150,7 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/mendicant.aim_moving_label"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/mendicant.aim_moving_spinner" x="188"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/mendicant.aim_moving_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/labels" string_index="11" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/mendicant.aim_moving_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/labels" string_index="12" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/mendicant.aim_moving_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="HARDER|SAME" setting="ai.mendicant.aim_moving" values="true|false" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
 		<on event="created" run="port setting load"/>
@@ -150,7 +159,7 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/mendicant.marine_fire_label"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/mendicant.marine_fire_spinner" x="188"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/mendicant.marine_fire_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/labels" string_index="12" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/mendicant.marine_fire_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/labels" string_index="13" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/mendicant.marine_fire_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="0.5|1|1.25|1.5|1.8|2|2.5|3" setting="ai.mendicant.marine_fire" values="0.5|1|1.25|1.5|1.8|2|2.5|3" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
 		<on event="created" run="port setting load"/>
@@ -164,6 +173,7 @@
 		<string text="DISCIPLINE"/>
 		<string text="THREAT TARGETING"/>
 		<string text="UNIT RADIUS"/>
+		<string text="SOLDIER CHARACTER ›"/>
 		<string text="AIM AND FIRE"/>
 		<string text="AIM SPREAD"/>
 		<string text="SPREAD BY DIFFICULTY"/>
@@ -180,6 +190,7 @@
 		<string text="Commanded soldiers hold their nerve: fewer panics, berserk charges and lone pursuits."/>
 		<string text="Soldiers choose targets by threat: what is hurting them, Elites first."/>
 		<string text="How far from its leader, in world units, a soldier is still in its unit."/>
+		<string text="Each soldier his own nerve, aim and pace, his own grenade reactions, and the convoy behind your Warthog."/>
 		<string text=""/>
 		<string text="How widely the AI's shots spread: 1 as the stock game; less is sharper."/>
 		<string text="Wider on Easy, sharper on Heroic and Legendary."/>
