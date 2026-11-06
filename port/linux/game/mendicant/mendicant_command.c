@@ -266,7 +266,8 @@ unsigned long mendicant_drill_rand(void)
 	return drill_random;
 }
 
-/* play: the drill's numbers from a 64-bit seed (never 0, xorshift's fixed point) */
+/* the drill's numbers from a 64-bit seed (never 0, xorshift's fixed point):
+play's session sequence, and each training episode's */
 void mendicant_drill_seed(unsigned long long seed)
 {
 	drill_random = (unsigned long)((seed ^ (seed >> 32)) & 0xFFFFFFFFUL);
@@ -1026,7 +1027,10 @@ void mendicant_command_reset(void)
 }
 
 /* a training episode starts: every unit and order gone, the counters at 0,
-and the drill's random numbers moved on by the trainer's seed */
+and the drill's random numbers started from the trainer's seed alone. They
+were moved on from the last fight's (xored in), so a fight's drills hung on
+every fight that process had played before it, and the same scenario and seed
+played different drills from run to run. */
 void mendicant_command_episode_reset(unsigned long seed)
 {
 	csmemset(order_actor, 0xff, sizeof(order_actor));
@@ -1037,7 +1041,13 @@ void mendicant_command_episode_reset(unsigned long seed)
 	mendicant_units_episode_reset();
 	leash_corrections = 0;
 	csmemset(discipline_declined, 0, sizeof(discipline_declined));
-	drill_random ^= (seed * 2246822519UL + 1) & 0xFFFFFFFFUL;
+	{
+		unsigned long long mixed = (unsigned long long)seed + 0x9E3779B97F4A7C15ULL;
+
+		mixed = (mixed ^ (mixed >> 30)) * 0xBF58476D1CE4E5B9ULL;
+		mixed = (mixed ^ (mixed >> 27)) * 0x94D049BB133111EBULL;
+		mendicant_drill_seed(mixed ^ (mixed >> 31));
+	}
 	bridge_pending = FALSE;
 	bridge_lost_last = FALSE;
 	drill_update_time = 0;

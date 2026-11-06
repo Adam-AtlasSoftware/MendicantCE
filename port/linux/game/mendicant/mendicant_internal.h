@@ -377,7 +377,7 @@ boolean mendicant_actor_can_drill(struct actor_datum *actor);
 void mendicant_order(long actor_index, short position); /* releases a go order by drill or follow first */
 void mendicant_set_role(long actor_index, int role);
 unsigned long mendicant_drill_rand(void);
-void mendicant_drill_seed(unsigned long long seed); /* play: the session's own sequence (training keeps its seeding) */
+void mendicant_drill_seed(unsigned long long seed); /* play: the session's own sequence; training: each episode's from its seed */
 boolean mendicant_bridge_waiting(void);  /* a request is out and not answered */
 /* candidates, team features, then mendicant_bridge_submit (individuals use it too) */
 void mendicant_bridge_request(long key, struct mendicant_member *members, int count,

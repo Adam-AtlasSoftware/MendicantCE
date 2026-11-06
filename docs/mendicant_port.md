@@ -101,8 +101,10 @@ behaviour by itself; the firing personality (M1, below) is the first reader.
   that a playtest can be replayed with `ai.mendicant.seed`.
 - **BUG A.** The drill's xorshift started from one constant, so every launch played the same
   "random" drills. In play each map's start now seeds it from the nonce and the map's name (and
-  the session's map count when the nonce is random); training keeps the hook library's seeding
-  (the constant, moved on by each episode's seed).
+  the session's map count when the nonce is random). In training each episode starts it from
+  that episode's seed alone. The hook library xored each seed into whatever the last fight left,
+  so a fight's drills hung on every fight the process had played before it, and the same
+  scenario and seed played different drills from run to run.
 - **Store.** One entry per actor slot, outside game state, checked against the full datum index
   and the epoch and drawn lazily; every decision touches its actor (`mendicant_decide_before`),
   so each soldier is drawn and logged at his first decision. Settings changed in the menu
@@ -1300,7 +1302,7 @@ Android skips `posix_*` already (`tools/android_build.py:485`). In game code, ev
 | `episode_end`, with deaths by vitality (`actors_alive`: the body's `object.body_vitality > 0`, else sampled within 300 ticks) | 3026-3062 | Calls the M2 and M3 report functions, then `mendicant_orders_clear_all()` |
 | `game_speed_set` | 3079 | Becomes `game_time_set_speed` |
 | `scale_vitality` | 3086 | |
-| `scenario_actors`: knobs on first sight, living counts, strays, wipe end | 3099-3160 | The `chief_unit` test is dropped; `player_unit()` stays |
+| `scenario_actors`: knobs on first sight, living counts, strays, wipe end | 3099-3160 | The `chief_unit` test is dropped; `player_unit()` stays. Strays are erased here on the tick they are found (section 10.7) |
 | `apply_difficulty` | 3183 | Becomes `game_difficulty_level_set` + `global_difficulty_level` |
 | `scenario_update` | 3193-3235 | `chief_update` and `scenario_chief` dropped |
 | `training_update` | 3237-3257 | `chief_update` dropped |
@@ -1334,7 +1336,7 @@ today.
 
 | Log | Source | Notes |
 |---|---|---|
-| sample log | `sample_actor`, `ai_brain.c:327-372` | Off unless `ai.mendicant.sample_log` is set. The hook library wrote `ai_brain_samples.csv` in the working directory, and refused to hook at all if it could not (section 10.7). |
+| sample log | `sample_actor`, `ai_brain.c:327-372` | Off unless `ai.mendicant.sample_log` is set. The hook library wrote `ai_brain_samples.csv` in the working directory, and refused to hook at all if it could not (section 10.7). A last column the hook library did not have, `fire_target`: the actor's fire target at his last combat update, -1 none, 1 outside every player's potentially visible set (`actor_combat.c` then holds his fire: `_firing_outside_active_area`), 0 one he may shoot. |
 | player log | `player_sample`, 3310-3362 | |
 | drill log | `drill_file` | |
 | move test log | | |
@@ -1432,6 +1434,17 @@ Only the game sources under `source/` use `rglob` (`linux_build.py:36`).
     puts the level's own firing position lists back before the copies are freed.
 14. **The mixer's skip** (`training_skip` 4) follows the frame's and the sound's: training on with
     the trainer's bridge open (`mendicant_skip_mixer`), not the settings alone.
+15. **A training fight is a function of its seed.** Two things made the same scenario and seed
+    play differently from run to run, so a benchmark compared fights that differed for reasons
+    other than what was changed. Each episode now starts the drill's random numbers from its own
+    seed (BUG A above; the hook library xored the seed into the last fight's state). And the
+    scenario's strays, the level's own encounters that wake up in the arena, are erased by the
+    game on the tick `scenario_actors` finds them (`ai_erase`, as the console's). The trainer
+    erased them from `stray_mask` at its next look, half a second of wall clock later, which at
+    full speed is some hundreds of ticks, so a stray could join the fight for a varying time. The
+    mask is still published, and the trainer's own erase then finds nothing left to erase.
+    With the layer off and the same seeds, two benchmark runs now play every fight identically
+    (fire log for fire log).
 
 ---
 

@@ -263,7 +263,7 @@ static void mendicant_sample_actor(
 		return;
 
 	fprintf(mendicant_sample_file,
-		"%ld,%d,%d,%d,%ld,%d,%d,%.2f,%.2f,%.2f,%.3f,%.3f,%.3f,%.3f,%d,%d,%d,%d,%d,%ld,%d,%d,%d\n",
+		"%ld,%d,%d,%d,%ld,%d,%d,%.2f,%.2f,%.2f,%.3f,%.3f,%.3f,%.3f,%d,%d,%d,%d,%d,%ld,%d,%d,%d,%d\n",
 		game_time_get(), (int)(short)actor_index, (int)type,
 		(int)actor->meta.team_index,
 		actor->meta.encounter_index,
@@ -280,7 +280,12 @@ static void mendicant_sample_actor(
 		actor->target.target_prop_index,
 		(int)actor->firing_positions.current_position_index,
 		(int)actor->state.action, /* before this decision */
-		(int)actor->state.combat_status);
+		(int)actor->state.combat_status,
+		/* his fire target at his last combat update: -1 none, 1 outside every
+		player's potentially visible set (the game holds fire at it,
+		actor_combat.c), 0 a target he may shoot */
+		actor->control.current_fire_target_type <= 0 /* _actor_fire_target_none */ ? -1 :
+			actor->control.current_fire_target_outside_active_area ? 1 : 0);
 	fflush(mendicant_sample_file); /* a crash or kill must not lose the samples */
 
 	return;
@@ -402,7 +407,7 @@ static void mendicant_logs_open(
 		"time,actor,type,team,encounter,squad,platoon,x,y,z,body,shield,"
 		"recent_body_damage,recent_shield_damage,known_enemies,visible_enemies,"
 		"area_friends,close_friends,target_type,target,firing_position,action,"
-		"combat_status\n");
+		"combat_status,fire_target\n");
 	mendicant_log_open(&mendicant_player_file, mendicant_player_path, sizeof(mendicant_player_path),
 		mendicant_config.player_log,
 		"time,part,x,y,z,velocity_x,velocity_y,velocity_z,body,shield,aim_x,aim_y,aim_z,"
@@ -451,7 +456,7 @@ static void mendicant_episode_start(
 		fprintf(mendicant_fire_file, "%ld,episode,-1,0,0,0,0,0,%ld,%ld,0,0\n", mendicant_time(),
 			(long)(int)bridge->scenario_id, (long)(int)bridge->seed);
 	if (mendicant_sample_file)
-		fprintf(mendicant_sample_file, "%ld,-1,-1,-1,%ld,%ld,-1,0,0,0,0,0,0,0,0,0,0,0,0,-1,-1,0,0\n", mendicant_time(),
+		fprintf(mendicant_sample_file, "%ld,-1,-1,-1,%ld,%ld,-1,0,0,0,0,0,0,0,0,0,0,0,0,-1,-1,0,0,-1\n", mendicant_time(),
 			(long)(int)bridge->scenario_id, (long)(int)bridge->seed);
 
 	return;
@@ -523,13 +528,18 @@ static void mendicant_scale_vitality(
 }
 
 /* Every tick of a scenario's episode: each actor gets the knobs the first time it is seen (those
-the level's scripts or ai_spawn_actor add later too), the living are counted, strays found. */
+the level's scripts or ai_spawn_actor add later too), the living are counted, and strays (the
+level's own encounters, not the fight's) are erased on the tick they are found. The trainer
+erased them from the mask, on whatever tick its next look fell (half a second of wall clock, some
+hundreds of ticks at full speed), so a stray could fight for a while and the same fight with the
+same seed went differently from run to run. The mask is still published. */
 static void mendicant_scenario_actors(
 	long time)
 {
 	struct model_bridge *bridge = mendicant_bridge;
 	long living[TEAMS];
 	unsigned long strays[8];
+	long stray_encounters[256];
 	long side_living[2];
 	long player_unit = mendicant_player_unit();
 	short index;
@@ -567,7 +577,10 @@ static void mendicant_scenario_actors(
 			for (entry = 0; entry < bridge->allow_count && entry < 64; entry++)
 				allowed |= bridge->allow[entry] == slot;
 			if (!allowed && slot < 256)
+			{
 				strays[slot / 32] |= 1UL << (slot % 32);
+				stray_encounters[slot] = encounter;
+			}
 		}
 		if (mendicant_first_sight[index] == identifier)
 			continue;
@@ -587,6 +600,11 @@ static void mendicant_scenario_actors(
 	for (team = 0; team < TEAMS; team++)
 		bridge->living[team] = living[team];
 	memcpy((void *)bridge->stray_mask, strays, sizeof(strays));
+	for (index = 0; index < 256; index++)
+	{
+		if (strays[index / 32] & (1UL << (index % 32)))
+			ai_erase(stray_encounters[index], NONE, NONE, FALSE); /* as the console's ai_erase */
+	}
 
 	/* the sides: Covenant, and the humans (Marines, and the player's team) */
 	side_living[0] = living[TEAM_COVENANT];
