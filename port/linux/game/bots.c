@@ -2552,13 +2552,15 @@ static real bots_camo_notice_rate(struct bots_skill_definition const *skill, str
 
 /* the rate a second at which the bot loses a camouflaged enemy it fights:
 more as it crosses the bot's sight and the further it is, much less while
-it gives itself away */
+it gives itself away (by the square of the giveaways: one firing on is
+hardly lost) */
 static real bots_camo_lose_rate(struct bots_skill_definition const *skill, struct bots_camo_sight const *sight)
 {
 	real across = MIN(sight->across / BOTS_CAMO_RUN_SPEED, 1.5f);
+	real giveaway = 1.0f + bots_camo_giveaway(sight);
 
 	return skill->camo_lose * (0.15f + across) * (1.0f - 0.5f * bots_camo_size(sight->distance, BOTS_CAMO_NEAR)) /
-		(1.0f + bots_camo_giveaway(sight));
+		(giveaway * giveaway);
 }
 
 /* whether the bot sees a camouflaged enemy at a look that many seconds
@@ -2576,10 +2578,10 @@ static boolean bots_camo_seen(struct bots_bot *bot, struct bots_skill_definition
 
 /* how much a camouflaged target blurs the bot's aim (1: not): its error
 and wander up to three times as large and settling as much slower, the less
-the more it gives itself away (a shot's worth: not at all) */
+the more it gives itself away (half a shot's worth: not at all) */
 static real bots_camo_blur(struct bots_camo_sight const *sight)
 {
-	real away = MIN(bots_camo_giveaway(sight) / BOTS_CAMO_FIRED_RATE, 1.0f);
+	real away = MIN(bots_camo_giveaway(sight) / (0.5f * BOTS_CAMO_FIRED_RATE), 1.0f);
 
 	return 1.0f + 2.0f * sight->camouflage * (1.0f - away);
 }

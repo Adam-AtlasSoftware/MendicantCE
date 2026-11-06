@@ -44,7 +44,7 @@ NEGATIVE_CONTROLS = {
                     "view"),
     "view-flat": (("return 1.0f - 0.7f * sight->off_view;", "return 1.0f;"), "bots_camo_view", "view"),
     "never-lost": (("return skill->camo_lose *", "return 0.0f * skill->camo_lose *"), "bots_camo_lose_rate", "losing"),
-    "lost-while-firing": (("/\n\t\t(1.0f + bots_camo_giveaway(sight));", "/ 1.0f;"), "bots_camo_lose_rate", "losing"),
+    "lost-while-firing": (("/\n\t\t(giveaway * giveaway);", "/ 1.0f;"), "bots_camo_lose_rate", "losing"),
     "no-blur": (("return 1.0f + 2.0f * sight->camouflage", "return 1.0f + 0.0f * sight->camouflage"), "bots_camo_blur",
                 "aim"),
     "blur-ignores-giveaway": (("(1.0f - away)", "(1.0f - 0.0f * away)"), "bots_camo_blur", "aim"),
