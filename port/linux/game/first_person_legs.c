@@ -9,9 +9,24 @@ animation moves them.
 
 Only the drawing is changed: a copy of the body's pose, all but its hips and
 legs folded into a lid over the waist, the whole set back a little behind
-the eye so the camera never looks out through the hips. The body itself, its hit boxes and markers, are the game's
-as ever. The legs are drawn in the world with the world's camera, so they
-keep their place and size at any field of view.
+the eye so the camera never looks out through the hips, and lowered where
+the near plane would cut it (first_person_legs_drop). The body itself, its
+hit boxes and markers, are the game's as ever. The legs are drawn in the
+world with the world's camera, so they keep their place and size at any
+field of view.
+
+The eye is not always as far above the hips as standing or crouching puts
+it. Crouching in the air (a crouch jump) brings the eye down to crouching
+height while the body keeps its airborne pose, its hips at the eye's height
+and its thighs beside and before it (#692). The near plane cuts them there,
+and a wide view, whose bottom and sides reach to beside the eye, shows the
+cut pieces, black slivers from the bottom of the screen. So the copy is
+lowered as far as keeps all of it out of the part of the view the near
+plane cuts away (FIRST_PERSON_LEGS_UNCUT beyond it): none of it is cut, at
+any field of view, window shape, split screen's view or the Panini pass's
+(the view as drawn: its frustum, its near plane as near_clip.c brings it
+in). Standing, walking and crouching on the ground nothing is that near the
+eye, and the legs are drawn where they were.
 
 In the VR mode the whole body is drawn but its head and arms (the arms are
 the VR mode's own, from its shoulders to the controllers: vr_hands.c), and
@@ -86,6 +101,12 @@ enum
 #define FIRST_PERSON_LEGS_SET_BACK_MAXIMUM 0.33f
 /* how far out of the view the waist's rim is kept (world units: 3 cm) */
 #define FIRST_PERSON_LEGS_OUT_OF_VIEW 0.01f
+/* how far beyond the near plane the legs are kept where they are in view
+(world units: 3 cm; the points of their surface are weighed, so a little
+more, for the triangles between them), and the farthest they are lowered
+for it (world units: about 1.5 m) */
+#define FIRST_PERSON_LEGS_UNCUT 0.01f
+#define FIRST_PERSON_LEGS_DROP_MAXIMUM 0.5f
 /* the point the upper body folds into: the middle of the waist's rim, a
 little above it (world units: about 3 cm), so the skin that joined hips to
 chest closes the waist as a low lid, flush with the belt (the body's model is
@@ -1158,9 +1179,133 @@ static real_matrix4x3 const *first_person_legs_vr_seated(
 }
 #endif
 
+/* how far to lower points so that none is in the part of the view the near
+plane cuts away: the least drop (world units, 0 or more) at which each is
+outside the view's sides or FIRST_PERSON_LEGS_UNCUT or more beyond its near
+plane (view: the frustum as drawn, its planes' distances outward). Each
+point lowered moves along a line, which passes through that part (a convex
+one: between the eye and the near plane, within the sides) over one span
+of drops, found from each plane's distance as the point is lowered; the
+least drop in none of the spans is the answer. cut holds count spans */
+static real first_person_legs_drop(
+	struct render_frustum const *view,
+	real_point3d const *points,
+	long count,
+	real (*cut)[2])
+{
+	long spans = 0;
+	long index;
+	real drop = 0.f;
+	boolean moved;
+
+	for (index = 0; index < count; index++)
+	{
+		real low = -FIRST_PERSON_LEGS_DROP_MAXIMUM - 1.f;
+		real high = FIRST_PERSON_LEGS_DROP_MAXIMUM + 1.f;
+		short plane;
+
+		/* (lowered by d, a plane's distance outward is its distance less d
+		times its normal's up. In the cut: within each side, its distance
+		less than none; nearer than the near plane and the margin, the near
+		plane's (outward toward the eye) more than less the margin. Each a
+		bound on d, below or above, by the way its normal leans) */
+		for (plane = 0; plane < 5 && low < high; plane++)
+		{
+			real_plane3d const *p = &view->world_planes[plane];
+			real distance = plane3d_distance_to_point(p, &points[index]);
+			real up = p->n.k;
+			real margin = 0.f;
+
+			if (plane == 4)
+			{
+				/* (-(distance - d * up) < margin) */
+				distance = -distance;
+				up = -up;
+				margin = FIRST_PERSON_LEGS_UNCUT;
+			}
+			/* (distance - d * up < margin) */
+			if (up > 1.0e-6f)
+				low = MAX(low, (distance - margin) / up);
+			else if (up < -1.0e-6f)
+				high = MIN(high, (distance - margin) / up);
+			else if (distance >= margin)
+				high = low;
+		}
+		if (low < high && high > 0.f)
+		{
+			cut[spans][0] = low;
+			cut[spans][1] = high;
+			spans++;
+		}
+	}
+	/* (the least drop past every span it falls in, each span left behind
+	for good: the drop only grows) */
+	do
+	{
+		moved = FALSE;
+		for (index = 0; index < spans; index++)
+		{
+			if (cut[index][0] <= drop && drop < cut[index][1])
+			{
+				drop = cut[index][1];
+				moved = TRUE;
+			}
+		}
+	}
+	while (moved && drop < FIRST_PERSON_LEGS_DROP_MAXIMUM);
+	return MIN(drop, FIRST_PERSON_LEGS_DROP_MAXIMUM);
+}
+
+/* the points of the body's surface as drawn with a pose (each node's matrix,
+count of them): its mesh's vertices in the model's space, each node's from
+it (the mesh's inverse) then posed, blended by its two nodes' weights as the
+game's skinning blends them; how many (none: no mesh) */
+static real_point3d first_person_legs_points[OBJECT_MESH_MAXIMUM_VERTICES];
+static real first_person_legs_spans[OBJECT_MESH_MAXIMUM_VERTICES][2];
+
+static long first_person_legs_surface(
+	struct object_mesh const *mesh,
+	real_matrix4x3 const *pose,
+	long count)
+{
+	real_matrix4x3 skin[FIRST_PERSON_LEGS_MAXIMUM_NODES];
+	long nodes = MIN(count, (long)mesh->node_count);
+	long index;
+	long points = 0;
+
+	for (index = 0; index < nodes; index++)
+		matrix4x3_multiply(&pose[index], &mesh->inverse[index], &skin[index]);
+	for (index = 0; index < mesh->vertex_count && points < OBJECT_MESH_MAXIMUM_VERTICES; index++)
+	{
+		struct object_mesh_vertex const *vertex = &mesh->vertices[index];
+		real weight = (real)vertex->weight / 32767.f;
+		real_point3d first;
+		real_point3d second;
+		real_point3d *point = &first_person_legs_points[points];
+
+		if (vertex->nodes[0] >= nodes)
+			continue;
+		matrix4x3_transform_point(&skin[vertex->nodes[0]], &vertex->position, &first);
+		if (weight >= 1.f || vertex->nodes[1] >= nodes)
+		{
+			*point = first;
+		}
+		else
+		{
+			matrix4x3_transform_point(&skin[vertex->nodes[1]], &vertex->position, &second);
+			point->x = first.x * weight + second.x * (1.f - weight);
+			point->y = first.y * weight + second.y * (1.f - weight);
+			point->z = first.z * weight + second.z * (1.f - weight);
+		}
+		points++;
+	}
+	return points;
+}
+
 /* the pose to draw the legs with: the body's own (as it is drawn now), all
-but the legs folded into the hips, the whole set back behind the eye; NULL:
-none (a body without named legs) */
+but the legs folded into the hips, the whole set back behind the eye and
+lowered out of the near plane's cut (first_person_legs_drop); NULL: none (a
+body without named legs) */
 real_matrix4x3 const *first_person_legs_node_matrices(
 	long object_index,
 	real_matrix4x3 const *nodes)
@@ -1274,6 +1419,23 @@ real_matrix4x3 const *first_person_legs_node_matrices(
 		matrix->position.x += back.i * set_back;
 		matrix->position.y += back.j * set_back;
 		matrix->position.z += back.k * set_back;
+	}
+
+	/* (lowered as far as keeps all of it out of the near plane's cut: the
+	hips and thighs come up to the eye as it crouches in the air. Lowered,
+	the waist's rim is only farther below the view's bottom, its normal
+	never up) */
+	{
+		struct object_mesh const *mesh = object_mesh_get(object_index);
+		long points = mesh ? first_person_legs_surface(mesh, first_person_legs_matrices, count) : 0;
+		real drop = first_person_legs_drop(&global_window_parameters.frustum, first_person_legs_points, points,
+			first_person_legs_spans);
+
+		if (drop > 0.f)
+		{
+			for (index = 0; index < count; index++)
+				first_person_legs_matrices[index].position.z -= drop;
+		}
 	}
 	return first_person_legs_matrices;
 }
