@@ -202,20 +202,9 @@ struct held_block
 	struct held_block *next;
 };
 
-/* the loaded map's tag, as cache_files.c has it. The semantics header only
-names it (menu_tags.c defines it the same way) */
-struct cache_file_tag_instance
-{
-	long group_tag;
-	long parent_group_tags[2];
-	long tag_index;
-	char *name;
-	void *base_address;
-	unsigned long unused[2];
-};
-
-typedef char tag_import_tag_table_size[
-	sizeof(struct cache_file_tag_instance) == 0x20 ? 1 : -1];
+/* the loaded map's tag, as cache_files.c has it: struct
+cache_file_tag_instance, which tag_groups.h defines (port: OpenH1's tag_get
+fast path reads the same table) */
 
 /* a pack, read (tag_pack.h): its manifest's name, and what it holds */
 struct pack
