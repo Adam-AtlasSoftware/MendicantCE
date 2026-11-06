@@ -2238,7 +2238,7 @@ name's keyboard, the colours' pictures) or make a profile */
 static char const *const settings_in_game_hidden[] =
 {
 	"op_online", "op_allow_upnp", "op_join_from_clipboard", "op_auto", "op_name", "op_color", "op_create_profile",
-	"op_profiles", "op_mods",
+	"op_profiles", "op_mods", "op_theater",
 };
 
 static struct
