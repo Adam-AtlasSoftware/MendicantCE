@@ -35,6 +35,7 @@ that draw the first-person weapon (rasterizer and render sources).
 #include "mouse_sensitivity.h"
 #include "near_clip.h"
 #include "panini_projection.h"
+#include "zoom_fov.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -92,10 +93,10 @@ static real fov_tangent(double degrees)
 
 /* display.fov's and display.vehicle_fov's tangents (0: the stock view):
 the vehicle's "default" is the stock view, "match" display.fov's, and a
-number an angle as display.fov's is */
-static void fov_requested_tangents(real *on_foot, real *seated)
+number an angle as display.fov's is; and display.scale_scoped_fov */
+static void fov_requested_tangents(real *on_foot, real *seated, boolean *scale_scoped)
 {
-	static boolean initialized;
+	static boolean initialized, scaled;
 	static unsigned long read_at;
 	static real foot_tangent, vehicle_tangent;
 	unsigned long changes = config_changes();
@@ -109,6 +110,7 @@ static void fov_requested_tangents(real *on_foot, real *seated)
 		initialized = TRUE;
 		read_at = changes;
 		foot_tangent = fov_tangent(config_real("display.fov"));
+		scaled = config_boolean("display.scale_scoped_fov") ? TRUE : FALSE;
 		while (end != vehicle && (*end == ' ' || *end == '\t'))
 			end++;
 		if (!_stricmp(vehicle, "match"))
@@ -120,6 +122,7 @@ static void fov_requested_tangents(real *on_foot, real *seated)
 	}
 	*on_foot = foot_tangent;
 	*seated = vehicle_tangent;
+	*scale_scoped = scaled;
 }
 
 /* the local player's unit, when its view is one the fields of view widen:
@@ -208,7 +211,9 @@ static real vehicle_fov_weight(short local_player_index, struct unit_datum const
 /* the view's vertical angle for display.fov on foot and display.vehicle_fov
 seated, the weight of the vehicle's between them: the game's own dead, in a
 cinematic, a scripted camera or a view the director holds, and at a scope's
-full zoom; between, the zoom's own transition. A vehicle's seat, first or
+full zoom (display.scale_scoped_fov off, the Xbox's: zoom_fov.h); between,
+the zoom's own transition. With it on, the zoom's views are the player's
+zoomed by the same magnification. A vehicle's seat, first or
 third person, and its entering and exiting take the vehicle's, so the view
 and its reticle keep one size in the seat ("default": the stock view, its
 reticle at the stock size). The reticle's size, the unzoomed view's scale
@@ -220,11 +225,12 @@ static real render_fov_adjust(short local_player_index, real native_vertical_fie
 	long unit_index, weapon_index;
 	struct unit_datum *unit;
 	real foot_tangent, vehicle_tangent, requested_tangent;
-	real unzoomed_angle, unzoomed_tangent, native_tangent, adjusted_tangent;
+	real unzoomed_angle, unzoomed_tangent, native_tangent, scoped_tangent, adjusted_tangent;
+	boolean scale_scoped;
 
 	*reticle_size = 1.0f;
 	*unzoomed_drawn_tangent = 0.0f;
-	fov_requested_tangents(&foot_tangent, &vehicle_tangent);
+	fov_requested_tangents(&foot_tangent, &vehicle_tangent, &scale_scoped);
 	if (!foot_tangent && !vehicle_tangent)
 		return native_vertical_field_of_view;
 	unit = render_fov_unit(local_player_index, &unit_index);
@@ -259,39 +265,23 @@ static real render_fov_adjust(short local_player_index, real native_vertical_fie
 	if (requested_tangent == unzoomed_tangent)
 		return native_vertical_field_of_view;
 
+	/* (the zoom: the Xbox's levels, the player's width faded out along its
+	transition, or display.scale_scoped_fov's, the player's view zoomed:
+	zoom_fov.h) */
 	native_tangent = tanf(native_vertical_field_of_view * 0.5f);
-	if (requested_tangent < unzoomed_tangent)
+	scoped_tangent = 0.0f;
+	weapon_index = unit_inventory_get_weapon(unit_index, unit->unit.current_weapon_index);
+	if (weapon_index != NONE)
 	{
-		/* (a view narrower than the stock one: the zoom narrows it further) */
-		adjusted_tangent = native_tangent * (requested_tangent / unzoomed_tangent);
+		real scoped_angle = weapon_get_field_of_view(weapon_index, unzoomed_angle, 0);
+
+		if (scoped_angle > 0.0f && scoped_angle < unzoomed_angle)
+			scoped_tangent = 0.75f * render_camera_get_adjusted_field_of_view_tangent(scoped_angle);
 	}
-	else
-	{
-		real blend = 1.0f;
-
-		weapon_index = unit_inventory_get_weapon(unit_index, unit->unit.current_weapon_index);
-		if (weapon_index != NONE)
-		{
-			real scoped_angle = weapon_get_field_of_view(weapon_index, unzoomed_angle, 0);
-
-			if (scoped_angle > 0.0f && scoped_angle < unzoomed_angle)
-			{
-				real scoped_tangent = 0.75f * render_camera_get_adjusted_field_of_view_tangent(scoped_angle);
-				/* (a scope's full zoom keeps its stock angle exactly: the
-				observer's arctangent and tangent can land just above it) */
-				if (native_tangent <= scoped_tangent * 1.000001f)
-					return native_vertical_field_of_view;
-
-				/* (the extra width fades out along the scope's own
-				transition, so every zoom level reached is the stock view) */
-				blend = PIN((native_tangent - scoped_tangent) /
-					(unzoomed_tangent - scoped_tangent), 0.0f, 1.0f);
-			}
-		}
-		if (blend == 0.0f)
-			return native_vertical_field_of_view;
-		adjusted_tangent = native_tangent + (requested_tangent - unzoomed_tangent) * blend;
-	}
+	adjusted_tangent = zoom_fov_tangent(native_tangent, unzoomed_tangent, requested_tangent, scoped_tangent,
+		scale_scoped);
+	if (adjusted_tangent == native_tangent)
+		return native_vertical_field_of_view;
 	return 2.0f * atanf(adjusted_tangent);
 }
 

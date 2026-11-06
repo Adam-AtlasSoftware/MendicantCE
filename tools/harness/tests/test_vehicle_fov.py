@@ -74,6 +74,8 @@ def generated(fault=None):
     ]) + "\n"
     text = "\n".join([
         function(read("source/render/render_cameras.c"), "render_camera_get_adjusted_field_of_view_tangent"),
+        # (the zoom's arithmetic, display.scale_scoped_fov's: the game's own header)
+        read("port/linux/include/zoom_fov.h"),
         world,
     ])
     return (("config.inc", config), ("under_test.inc", text))
