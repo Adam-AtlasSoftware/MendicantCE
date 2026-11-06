@@ -2944,12 +2944,15 @@ void forge_custom_map_select(
 
 /* port: whether the game hosted plays a Forge layout, which its clients are
 sent (forge_layout_send_to_client): one chosen as a map in the map list, or
-one loaded in the game; its advertisement is then marked, whatever its game
-type (halo_port_limits.h's HALO_PORT_FORGE_VERSION_BIT) */
+one loaded in the game (its slot); its advertisement is then marked,
+whatever its game type (halo_port_limits.h's HALO_PORT_FORGE_VERSION_BIT).
+Not the layout kept for clients (loaded_length): forge_layout_new_map keeps
+one, of no Forge objects, on every map a host loads, campaign co-op's and
+every multiplayer game's, which marked them all */
 int forge_layout_hosting(
 	void)
 {
-	return forge_custom_map_selected() != NONE || forge_layout_globals.loaded_length != 0;
+	return forge_custom_map_selected() != NONE || forge_layout_globals.current_slot != 0;
 }
 
 short forge_custom_map_selected(
@@ -3249,6 +3252,11 @@ void forge_layout_send_to_client(
 	unsigned long offset = 0;
 
 	if (game_connection() != _game_connection_network_server || forge_layout_globals.loaded_length == 0)
+		return;
+	/* port: a Forge game's, or a Forge layout's of another game type, alone:
+	other games' clients may be builds without Forge, which do not know the
+	message */
+	if (!game_variant_set_is_forge() && !forge_layout_hosting())
 		return;
 	while (offset < forge_layout_globals.loaded_length)
 	{
