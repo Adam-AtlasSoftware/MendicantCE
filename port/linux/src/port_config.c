@@ -1321,15 +1321,15 @@ static const struct config_setting config_settings[] =
 	{ "network.record_replays", _config_boolean, "false", "HALO_NET_RECORD_REPLAYS", _environment_value,
 		_platform_all,
 		"Each network game is recorded to the data folder's replays/, which\n"
-		"the main menu's Theater plays (port/linux/REPLAY.md): a host's, all of\n"
+		"the Theater (Settings, MODS) plays (port/linux/REPLAY.md): a host's, all of\n"
 		"it (what a client that sees everything is sent); a client's, what its\n"
 		"host sends it (far players less often) and its own input. Read at a\n"
-		"game's start; the Theater's RECORD turns it on and off." },
+		"game's start; RECORD GAMES and the Theater's RECORD turn it on and off." },
 	{ "network.replay_hints", _config_boolean, "true", "HALO_NET_REPLAY_HINTS", _environment_value,
 		_platform_all,
 		"Watching a replay with a controller: the bars of the buttons and of the\n"
-		"camera's controls over the seek bar. The replay's pause menu turns them\n"
-		"on and off (the north button: Y, the Switch's X, the PS5's triangle)." },
+		"camera's controls over the seek bar. The replay's pause menu's Y turns\n"
+		"them on and off." },
 	{ "network.replay_camera", _config_string, "\"behind\"", "HALO_NET_REPLAY_CAMERA", _environment_value,
 		_platform_all,
 		"The view a replay starts in (Y goes round them): \"behind\" the player\n"

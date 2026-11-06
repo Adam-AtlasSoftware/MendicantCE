@@ -549,7 +549,7 @@ static char const *const port_function_names[] =
 	/* (a mission in progress started again: campaign_menu.inc's campaign_restart_*) */
 	"port campaign restart ask", "port campaign missions restart", "port campaign restart",
 	"port campaign restart cancel",
-	/* (the main menu's Theater: menu_functions.c) */
+	/* (the Theater, opened from Settings' MODS tab: menu_functions.c) */
 	"port theater record", "port theater watch", "port theater delete",
 };
 
@@ -600,7 +600,7 @@ static char const *const port_game_data_input_names[] =
 	/* (the campaign's screens: campaign_menu.inc) */
 	"port campaign update", "port campaign missions update", "port campaign difficulty update",
 	"port campaign restart update",
-	/* (the main menu's Theater) */
+	/* (the Theater) */
 	"port theater update",
 };
 

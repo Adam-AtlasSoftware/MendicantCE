@@ -499,7 +499,9 @@ DELETE (pressed twice), IMPORT and EXPORT (Android) and BACK. A recording shorte
   view copied (`rasterizer_port_hold_capture`), and drawn back in place of
   the view each frame until the skip is there (`rasterizer_port_hold_draw`),
   the replay's lines over it as they change (the seek bar's playhead
-  moving), and the sound paused; then the playback is at normal speed. The replay's records go to the game before each
+  moving), and the sound paused; then the playback is at normal speed.
+  (In OpenH1 the copy is not made: `rasterizer_port_hold_capture` gives
+  FALSE, so a skip ahead draws its frames as they play; "In OpenH1" above.) The replay's records go to the game before each
   tick (`network_replay_playback_tick`), as a client reads its host's
   between ticks, so a frame of many ticks plays as the recording did. They
   take up to 256 MB (a log line says each one's size and how long its

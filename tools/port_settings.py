@@ -7302,7 +7302,6 @@ def _mods() -> list:
     return lines
 
 
-
 # ---------- the Theater (port/linux/REPLAY.md): ported from SlipstreamCE's
 # (thelinkin3000/SlipstreamCE, by thelinkin3000 and Carlos Pérez), without
 # its consoles' QR code and hints and Android's IMPORT and EXPORT
@@ -7384,6 +7383,7 @@ def _theater() -> list:
     lines += _text_button(f"{base}/button_back", "BACK", ['<on event="a" back="true"/>',
                                                          '<on event="start" back="true"/>'])
     return lines
+
 
 def _training() -> list:
     """the VR build's VR TUTORIAL (port/linux/game/basic_training.c): the
