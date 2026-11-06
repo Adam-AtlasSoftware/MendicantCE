@@ -584,7 +584,7 @@ static void hdr_programs(void)
 	}
 }
 
-/* display.prism.material_overlay (xgpu.h's "The material overlay"): a
+/* display.prism_material_overlay (xgpu.h's "The material overlay"): a
 model's program (its base, detail and multipurpose maps, a reflection
 cube; and with a 2D stage 3) lit for each pixel by the ambient and
 distant lights, and the point lights; the enhanced dynamic lights; the
@@ -628,7 +628,7 @@ static void overlay_programs(void)
 						program.ambient_occlusion = XGPU_AMBIENT_OCCLUSION_WORLD | XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL;
 					snprintf(name, sizeof(name), "overlay%u-lights%u-kind%u-stage3_%u", overlays[overlay], lights, kind,
 						cube);
-					pixel_program(name, "display.prism.material_overlay", &program);
+					pixel_program(name, "display.prism_material_overlay", &program);
 				}
 			}
 		}

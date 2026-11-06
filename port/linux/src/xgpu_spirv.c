@@ -839,7 +839,7 @@ enum
 	/* (display.ambient_occlusion "world": past the others, declared by the
 	pixel shaders that read it alone: declare_uniforms_world) */
 	U_WORLD_AO = U_COUNT,
-	/* (display.prism.material_overlay: after it, declared by its pixel
+	/* (display.prism_material_overlay: after it, declared by its pixel
 	shaders alone: declare_uniforms_overlay) */
 	U_MATERIAL_OVERLAY,
 };
@@ -908,7 +908,7 @@ static void declare_uniforms_world(struct module *m)
 	declare_uniforms_members(m, U_COUNT + 1);
 }
 
-/* (and display.prism.material_overlay's, U_MATERIAL_OVERLAY, after the
+/* (and display.prism_material_overlay's, U_MATERIAL_OVERLAY, after the
 world's) */
 static void declare_uniforms_overlay(struct module *m)
 {
@@ -1948,7 +1948,7 @@ struct pixel_state
 	unit, the eye, the scene's distance and the fade's span */
 	unsigned int replaced_depth;
 	unsigned int effect_base, effect_column2, effect_eye, effect_to_scene, effect_span;
-	/* display.prism.material_overlay (overlay_light): its images (tiles A
+	/* display.prism_material_overlay (overlay_light): its images (tiles A
 	to D, the class mask; 0 not declared), and what its light found: the
 	vertices' normal (unit) and the micro normal, the cavity, the
 	roughness, tile A's weight, the share kept (not excluded, a frame
@@ -3881,7 +3881,7 @@ static unsigned int world_ao_upsample(struct module *m, struct pixel_state *stat
 
 /* ---------- per-pixel model lighting */
 
-/* (lit by the normal given, display.prism.material_overlay's: else the
+/* (lit by the normal given, display.prism_material_overlay's: else the
 vertices') */
 static unsigned int model_lighting(struct module *m, struct pixel_state *state, BOOL point_lights, BOOL dynamic_lights,
 	unsigned int occlusion, unsigned int given_normal)
@@ -4734,7 +4734,7 @@ static unsigned int effect_fade(struct module *m, int fade_mode, unsigned int re
 	}
 }
 
-/* ---------- display.prism.material_overlay
+/* ---------- display.prism_material_overlay
 
 xgpu.h's "The material overlay": a model draw lit for each pixel takes a
 micro normal, a cavity and a roughness from a mod's tiles, between texture
@@ -4990,7 +4990,7 @@ static void overlay_reflection(struct module *m, struct pixel_state *state)
 		discard_if(m, compare(m, OP_F_ORD_EQUAL, extract(m, state->t[3], 3), constant_float(m, 0.0f)));
 }
 
-/* display.prism.overlay_view: 1 the tiles' weights (red tile A, blue tile
+/* display.prism_overlay_view: 1 the tiles' weights (red tile A, blue tile
 B, green excluded; with a class mask A white, B purple, C orange, D green,
 excluded black), 2 the micro normal's change, 3 the fade, 4 the light
 alone; else the result as it is */
@@ -5053,7 +5053,7 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	keeps it) */
 	BOOL occluder = !world && (program->ambient_occlusion & XGPU_AMBIENT_OCCLUSION_WORLD_INPUTS);
 	unsigned int world_ao_words = 0;
-	/* (display.prism.material_overlay: a model's lit for each pixel, by
+	/* (display.prism_material_overlay: a model's lit for each pixel, by
 	its world position) */
 	BOOL overlay = program->material_overlay && program->per_pixel_lighting && !environment;
 	BOOL world_position = (program->per_pixel_lighting && (program->per_pixel_lighting == 2 ||
@@ -5194,7 +5194,7 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 		state.occlusion = constant_float(&m, 1.0f);
 		world_ao_words = world_ao_inputs(&m, &state, occlusion_light);
 	}
-	/* (display.prism.material_overlay's light is found after texture
+	/* (display.prism_material_overlay's light is found after texture
 	stage 2, by its micro normal: overlay_light) */
 	if (overlay)
 		;
@@ -5233,7 +5233,7 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 		effect_fade_value = effect_prelude(&m, &state);
 	for (stage = 0; stage < 4; stage++)
 	{
-		/* (display.prism.material_overlay's light between the multipurpose
+		/* (display.prism_material_overlay's light between the multipurpose
 		map and the reflection, which it bends) */
 		if (stage == 3 && overlay)
 		{
@@ -5365,7 +5365,7 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	}
 	if (options->debug_texture0)
 		result = vec4_of(&m, xyz(&m, state.t[0]), constant_float(&m, 1.0f));
-	/* (display.prism.overlay_view) */
+	/* (display.prism_overlay_view) */
 	if (overlay)
 		result = overlay_view(&m, &state, result);
 	if (options->debug_flat)

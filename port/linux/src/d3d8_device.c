@@ -3786,14 +3786,14 @@ void halo_dynamic_lights_halos_draw(void)
 	xgpu_backend_dynamic_lights_halos(color->target.number, depth->target.number, color->target.layers, halos);
 }
 
-/* ---------- display.prism.material_overlay
+/* ---------- display.prism_material_overlay
 
 The model draws that follow take a material overlay (xgpu.h's "The
 material overlay"; port/linux/game/mod_materials.c arms it around a model
 shader's draws): its tiles and class mask (xgpu_images.h's images: tiles A
 to D, the last two only with a class mask; 0 none), its uniform
 (XGPU_OVERLAY_UNIFORM_COUNT vec4s) and its debug view
-(display.prism.overlay_view); NULL uniforms disarm it, as it is for every
+(display.prism_overlay_view); NULL uniforms disarm it, as it is for every
 other draw. A draw of a model lighting program whose lighting hands on its
 world position is lit for each pixel with it (xgpu_draw_derive); any other
 draw goes as it is. */
@@ -4085,7 +4085,7 @@ static BOOL pipeline_bind(struct vertex_shader_object *program, struct xgpu_draw
 		pipeline_derived(&derived, pipeline_key);
 		chosen = xgpu_backend_pipeline(pipeline_key);
 	}
-	/* (display.prism.material_overlay's not made: drawn as it would be
+	/* (display.prism_material_overlay's not made: drawn as it would be
 	without it) */
 	if (lit && !chosen && derived.material_overlay)
 	{
@@ -4293,7 +4293,7 @@ static BOOL prepare_draw(BOOL immediate, unsigned long primitive)
 	/* (display.ambient_occlusion "world": its light, where its window is
 	given and the draw takes it: world_ao_key) */
 	facts.world = world_ao_key(XGPU_AMBIENT_OCCLUSION_LIGHT_NONE);
-	/* (display.prism.material_overlay: the overlay a mod armed for the
+	/* (display.prism_material_overlay: the overlay a mod armed for the
 	model shader's draws) */
 	facts.material_overlay = material_overlay.armed ? material_overlay.key : 0;
 	if (device.gl_ready)

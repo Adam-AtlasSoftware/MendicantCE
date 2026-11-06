@@ -2313,7 +2313,7 @@ static void world_ao_inputs(struct xgpu_text *text, const struct xgpu_pixel_prog
 		"\t}\n");
 }
 
-/* ---------- display.prism.material_overlay
+/* ---------- display.prism_material_overlay
 
 xgpu_spirv.c's overlay_light, overlay_reflection and overlay_view, operation
 for operation (xgpu.h's "The material overlay"): the tiles and class mask at
@@ -2459,7 +2459,7 @@ static void overlay_reflection(struct xgpu_text *text, const struct xgpu_pixel_p
 		xgpu_text_append(text, "\tif (t3.a == 0.0) discard_fragment();\n");
 }
 
-/* display.prism.overlay_view (xgpu_spirv.c's overlay_view) */
+/* display.prism_overlay_view (xgpu_spirv.c's overlay_view) */
 static void overlay_view(struct xgpu_text *text, const struct xgpu_pixel_program *program)
 {
 	BOOL class_mask = (program->material_overlay & XGPU_OVERLAY_CLASS_MASK) != 0;
@@ -2522,7 +2522,7 @@ char *xgpu_msl_pixel_shader(const struct xgpu_pixel_program *program, const stru
 	BOOL occluder = !world && (program->ambient_occlusion & XGPU_AMBIENT_OCCLUSION_WORLD_INPUTS);
 	BOOL world_sampled = world && !world_inputs && (program->ambient_occlusion & XGPU_AMBIENT_OCCLUSION_WORLD_SAMPLED);
 	BOOL world_inline = world && !world_inputs && !world_sampled;
-	/* (display.prism.material_overlay: a model's lit for each pixel, by
+	/* (display.prism_material_overlay: a model's lit for each pixel, by
 	its world position; not drawn by the Metal backend yet) */
 	BOOL overlay = program->material_overlay && program->per_pixel_lighting && !environment;
 	int stage;
@@ -2655,7 +2655,7 @@ char *xgpu_msl_pixel_shader(const struct xgpu_pixel_program *program, const stru
 		world_ao_upsample(&text);
 	else if (world_inputs)
 		world_ao_inputs(&text, program, occlusion_light);
-	/* (display.prism.material_overlay's light is found after texture
+	/* (display.prism_material_overlay's light is found after texture
 	stage 2, by its micro normal: overlay_light) */
 	if (overlay)
 		;
@@ -2686,7 +2686,7 @@ char *xgpu_msl_pixel_shader(const struct xgpu_pixel_program *program, const stru
 
 	for (stage = 0; stage < 4; stage++)
 	{
-		/* (display.prism.material_overlay's light between the multipurpose
+		/* (display.prism_material_overlay's light between the multipurpose
 		map and the reflection, which it bends) */
 		if (stage == 3 && overlay)
 		{
@@ -2818,7 +2818,7 @@ char *xgpu_msl_pixel_shader(const struct xgpu_pixel_program *program, const stru
 		xgpu_text_append(&text, "\tresult = float4(float3(%s), 1.0);\n", options->debug_expression);
 	if (options->debug_texture0 && register_read(&usage, XGPU_REGISTER_T0))
 		xgpu_text_append(&text, "\tresult = float4(t0.rgb, 1.0);\n");
-	/* (display.prism.overlay_view) */
+	/* (display.prism_overlay_view) */
 	if (overlay)
 		overlay_view(&text, program);
 	if (options->debug_flat)

@@ -34,7 +34,7 @@ types), ak (alpha kill), sg (colour sign), at (the alpha test's function),
 fe, ft, cn, ca, pt, pl, as, mv, sb, dl (fog enabled, fog table mode, count
 samples, coverage alpha, point threshold, per-pixel lighting, alpha test
 samples, multiview, source blend, dynamic lights), and mo (the material
-overlay, display.prism.material_overlay's: only where it is not 0).
+overlay, display.prism_material_overlay's: only where it is not 0).
 d: a draw's configuration: its pipeline key's fields (vp the vertex
 program, pa packed attributes, im immediate, li lighting, vw views, bl
 blend enabled/source/destination/operation, cm colour mask, dt depth
@@ -189,7 +189,7 @@ struct xgpu_draw_facts
 	int per_pixel, lights_active, environment;
 	/* the backend has a sample mask (xgpu_backend_capabilities) */
 	int sample_mask;
-	/* display.prism.material_overlay: the overlay a mod gives the draw's
+	/* display.prism_material_overlay: the overlay a mod gives the draw's
 	shader (nv2a_pixel_shader_key's material_overlay, xgpu.h; 0 none),
 	which lights it for each pixel whatever display.per_pixel_lighting says,
 	where its lighting has its world position */

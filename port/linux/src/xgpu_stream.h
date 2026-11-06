@@ -273,7 +273,7 @@ enum
 	/* display.ambient_occlusion "world"'s distance-field scene: a box of
 	its cascades (xgpu_backend_world_ao_cascades) */
 	XGPU_STREAM_WORLD_AO_CASCADES,
-	/* display.prism.material_overlay: the overlay of the draws that follow
+	/* display.prism_material_overlay: the overlay of the draws that follow
 	(xgpu_stream_material_overlay) */
 	XGPU_STREAM_MATERIAL_OVERLAY,
 	XGPU_STREAM_RECORD_TYPES,
@@ -320,7 +320,7 @@ struct xgpu_stream_capabilities
 	int32_t most_anisotropy;
 	uint8_t sample_counting, bgra_vertex_colors, base_vertex, sample_mask;
 	uint8_t mixed_constant_blend, dynamic_lights, dynamic_lights_preparable, hdr;
-	/* display.prism.material_overlay drawn (MATERIAL_OVERLAY) */
+	/* display.prism_material_overlay drawn (MATERIAL_OVERLAY) */
 	uint8_t material_overlay, unused[3];
 };
 
@@ -702,7 +702,7 @@ struct xgpu_stream_set_textures
 	uint32_t changed;
 };
 
-/* display.prism.material_overlay (xgpu.h's "The material overlay"): the
+/* display.prism_material_overlay (xgpu.h's "The material overlay"): the
 uniform and images of the draws that follow whose pixel key has
 material_overlay, sent as it changes. Its stages are images
 (XGPU_STREAM_SOURCE_IMAGE, with no levels' targets; their format may be
@@ -771,7 +771,7 @@ struct xgpu_stream_pixel_key
 	uint8_t source_blend, dynamic_lights, vr_effect, ambient_occlusion;
 	/* display.hdr's tag (xgpu_hdr.h) */
 	uint16_t hdr;
-	/* display.prism.material_overlay (xgpu.h; in what was padding: the
+	/* display.prism_material_overlay (xgpu.h; in what was padding: the
 	keys without it hash as they did) */
 	uint8_t material_overlay, unused;
 };
@@ -812,7 +812,7 @@ struct xgpu_stream_pixel_program
 	uint8_t count_samples, coverage_alpha, point_threshold, per_pixel_lighting, dynamic_lights, multiview;
 	uint8_t source_blend;
 	uint8_t ambient_occlusion;
-	/* display.prism.material_overlay (xgpu.h; in what was padding) */
+	/* display.prism_material_overlay (xgpu.h; in what was padding) */
 	uint8_t material_overlay;
 	/* display.hdr's tag (xgpu_hdr.h) */
 	uint16_t hdr;
@@ -843,7 +843,8 @@ struct xgpu_stream_pipeline_define
   that no surface it hides has its occlusion found;
 into the inputs' target (xgpu_backend.h's XGPU_FORMAT_WORLD_AO_INPUTS:
 RGBA32Uint), one sample, nothing blended, every channel written, no HDR tag,
-no enhanced dynamic lights, no samples counted; its depth, stencil, raster,
+no enhanced dynamic lights, no material overlay (its images are bound for
+the colour pass's draws alone), no samples counted; its depth, stencil, raster,
 vertex program and alpha test as they are. The backends, and the Mac's
 library's build, make it alike */
 #define XGPU_STREAM_WORLD_AO_SAMPLED 0x50u
@@ -884,6 +885,7 @@ static inline int xgpu_stream_world_ao_twin(struct xgpu_stream_pipeline_define *
 	definition->key.pixel.source_blend = definition->pixel_program.source_blend = 0;
 	definition->key.pixel.count_samples = definition->pixel_program.count_samples = 0;
 	definition->key.pixel.dynamic_lights = definition->pixel_program.dynamic_lights = 0;
+	definition->key.pixel.material_overlay = definition->pixel_program.material_overlay = 0;
 	return 1;
 }
 

@@ -1,7 +1,7 @@
 /*
 MOD_MATERIALS.C
 
-The material overlay of mods (mods.c): display.prism.material_overlay. A mod
+The material overlay of mods (mods.c): display.prism_material_overlay. A mod
 names model shaders (soso tags, by their paths) in its
 tags\materials\overlay.json, and gives each a micro normal, cavity and
 roughness from tiles of its own (tags\materials\...\name.png), which the
@@ -77,8 +77,8 @@ The overlay is taken up when the map's tags load and mods_reload; its tiles
 are read then (or when it is first turned on) and decoded on a thread of
 their own, a draw going without the overlay until its tiles are ready; the
 settings are read again each
-frame they change (display.prism.material_overlay,
-display.prism.overlay_strength, display.prism.overlay_view), so the overlay
+frame they change (display.prism_material_overlay,
+display.prism_overlay_strength, display.prism_overlay_view), so the overlay
 can be turned on and off in a stopped game (prism_set). Off, no draw is
 armed, nothing is made for it, and every draw is the game's.
 */
@@ -1341,13 +1341,18 @@ static void settings_read(
 		return;
 	}
 	mod_materials_globals.settings_read = config_changes() + 1;
-	mod_materials_globals.enabled = config_boolean("display.prism.material_overlay") != 0;
-	mod_materials_globals.strength = (real)config_real("display.prism.overlay_strength");
+	mod_materials_globals.enabled = config_boolean("display.prism_material_overlay") != 0;
+	mod_materials_globals.strength = (real)config_real("display.prism_overlay_strength");
 	if (!mods_finite_real(mod_materials_globals.strength) || mod_materials_globals.strength < 0.0f)
 	{
 		mod_materials_globals.strength = 0.0f;
 	}
-	mod_materials_globals.view = (int)config_integer("display.prism.overlay_view");
+	/* (0 to 2, as config.toml's comment says) */
+	if (mod_materials_globals.strength > 2.0f)
+	{
+		mod_materials_globals.strength = 2.0f;
+	}
+	mod_materials_globals.view = (int)config_integer("display.prism_overlay_view");
 	if (mod_materials_globals.view < 0 || mod_materials_globals.view > 4)
 	{
 		mod_materials_globals.view = 0;
@@ -1504,7 +1509,7 @@ void mod_materials_draw_end(
 }
 
 /* (the script function prism_set) "<setting> <value>": one of the
-display.prism settings, set as config.toml's line is (config_write) */
+display.prism_* settings, set as config.toml's line is (config_write) */
 void mod_materials_prism_set(
 	char const *text)
 {
@@ -1516,7 +1521,7 @@ void mod_materials_prism_set(
 		console_warning("prism_set \"<setting> <value>\": material_overlay, overlay_strength or overlay_view");
 		return;
 	}
-	snprintf(name, sizeof(name), "display.prism.%.*s", (int)(space - text), text);
+	snprintf(name, sizeof(name), "display.prism_%.*s", (int)(space - text), text);
 	if (!config_write(name, space + 1))
 	{
 		console_warning("%s cannot be set to %s", name, space + 1);

@@ -280,7 +280,7 @@ static void synthetic_vertex(const char *name, const struct xgpu_vertex_program 
 	emit(variant, "packed 0x5, shorts 0x60", xgpu_msl_vertex_shader(program, 0x5, 0x60, NULL, &options));
 }
 
-/* display.prism.material_overlay (xgpu.h): a model's program lit for each
+/* display.prism_material_overlay (xgpu.h): a model's program lit for each
 pixel with two tiles and with four and a class mask, in each debug view, by
 the point lights and the enhanced dynamic lights, with a reflection cube
 and without (spirv_corpus.c's overlay_programs) */
@@ -312,7 +312,7 @@ static void overlay_programs(void)
 					if (kind)
 						program.dynamic_lights = XGPU_DYNAMIC_LIGHTS_MODEL;
 					snprintf(name, sizeof(name), "overlay%u-lights%u-kind%u-cube%u", overlays[overlay], lights, kind, cube);
-					pixel_program(name, "display.prism.material_overlay", &program);
+					pixel_program(name, "display.prism_material_overlay", &program);
 				}
 			}
 		}

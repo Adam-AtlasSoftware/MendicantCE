@@ -82,7 +82,7 @@ static const struct field pixel_fields[] = {
 	PIXEL_FIELD("dl", dynamic_lights, 1, 1, 0),
 	PIXEL_FIELD("ve", vr_effect, 1, 1, 0),
 	PIXEL_FIELD("ao", ambient_occlusion, 1, 1, 0),
-	/* (display.prism.material_overlay's: a mod's, never the game's own) */
+	/* (display.prism_material_overlay's: a mod's, never the game's own) */
 	{ "mo", offsetof(struct xgpu_stream_pixel_key, material_overlay), 1, 1, 0, 1 },
 };
 
@@ -766,7 +766,7 @@ int xgpu_draw_derive(const struct xgpu_draw_facts *facts, int unlit, struct xgpu
 		derived->alpha_test_samples = (uint8_t)facts->samples;
 	derived->hdr = facts->hdr_target ? facts->hdr : 0;
 	derived->lighting = XGPU_LIGHTING_NONE;
-	/* (display.prism.material_overlay: lit for each pixel, by the
+	/* (display.prism_material_overlay: lit for each pixel, by the
 	position its lighting hands on) */
 	if (!unlit && facts->lights && !facts->lighting_failed && facts->material_overlay &&
 		(facts->lights == 2 || facts->world_found))

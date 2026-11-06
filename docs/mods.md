@@ -304,7 +304,7 @@ shader, it must be one the map has.
 ### The material overlay
 
 A mod can also give the model shaders (`shader_model`) of a map a material
-overlay, which `display.prism.material_overlay` (PRISM, the Vulkan renderer)
+overlay, which `display.prism_material_overlay` (PRISM, the Vulkan renderer)
 draws: the fine grain of a surface, a weapon's machining or a suit's weave,
 lit at each pixel without changing any color. It is not a tag. The mod's
 `tags/materials/overlay.json` names the shaders by their tag paths and gives

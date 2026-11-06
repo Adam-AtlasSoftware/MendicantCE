@@ -545,7 +545,7 @@ struct xgpu_vulkan_draw
 	struct xgpu_vulkan_range indices;
 	struct xgpu_vulkan_range constants, uniforms;
 	struct xgpu_vulkan_texture textures[4];
-	/* display.prism.material_overlay: its pixel shader reads the overlay's
+	/* display.prism_material_overlay: its pixel shader reads the overlay's
 	images (tiles A to D, the class mask; none: a stand-in) at bindings
 	XGPU_VULKAN_BINDING_OVERLAY on of the textures' set (xgpu.h's "The
 	material overlay") */

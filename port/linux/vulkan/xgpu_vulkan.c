@@ -4453,8 +4453,8 @@ static VkDescriptorPool descriptor_pool_get(void)
 		if (!grown)
 			return VK_NULL_HANDLE;
 		slot->descriptor_pools = grown;
-		/* (the most a set has: a texture set with display.prism.
-		material_overlay's images, the stages' four and its five; the
+		/* (the most a set has: a texture set with
+		display.prism_material_overlay's images, the stages' four and its five; the
 		occlusion's has five: the field's atlas and table, the static
 		scenery's pages, the vehicles' fields' atlas and the occlusion found
 		once a pixel) */
@@ -4659,7 +4659,7 @@ static void texture_set_remember(struct slot *slot, const struct texture_set_key
 }
 
 /* the descriptor set of the stages' textures, and with overlay the material
-overlay's images after them (display.prism.material_overlay: bindings
+overlay's images after them (display.prism_material_overlay: bindings
 XGPU_VULKAN_BINDING_OVERLAY on; else those are not written, as no shader
 without it reads them): the last draw's, one written before in this
 submission (the game's draws come back to the same few), or a new one */
@@ -6971,7 +6971,7 @@ static int layouts_make(void)
 	if (!check(vkCreateDescriptorSetLayout(vk.device, &info, NULL, &vk.draw_layout), "vkCreateDescriptorSetLayout"))
 		return 0;
 	memset(textures, 0, sizeof(textures));
-	/* (the stages', then display.prism.material_overlay's images: written
+	/* (the stages', then display.prism_material_overlay's images: written
 	only for the draws whose shaders read them) */
 	for (index = 0; index < TEXTURE_SET_BINDINGS; index++)
 	{

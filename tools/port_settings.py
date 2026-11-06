@@ -894,7 +894,7 @@ PAGES = {
             # (PRISM's material overlay: drawn by the Vulkan renderer alone,
             # for the model shaders a mod's overlay.json names)
             (SECTION, "MATERIALS"),
-            ("MATERIAL DETAIL", "display.prism.material_overlay", ON_OFF,
+            ("MATERIAL DETAIL", "display.prism_material_overlay", ON_OFF,
              "Gives weapons and armour the fine grain of their surfaces (machining, weave, wear) from a mod's "
              "material overlay. It changes only the light on them. Off draws them as the Xbox did.", "desktop"),
         ],

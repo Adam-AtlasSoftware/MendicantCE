@@ -191,7 +191,7 @@ static struct
 	BOOL stages_sent[4];
 	struct xgpu_stream_texture_stage stages[4];
 	struct xgpu_stream_texture_level levels[4][XGPU_STREAM_MIP_LEVELS];
-	/* display.prism.material_overlay's, as last sent */
+	/* display.prism_material_overlay's, as last sent */
 	BOOL overlay_sent;
 	struct xgpu_stream_material_overlay overlay;
 	/* the values of the inputs no stream feeds (set_vertices'), and of
@@ -1203,7 +1203,7 @@ void xgpu_backend_set_textures(const struct xgpu_texture_source stages[4])
 	}
 }
 
-/* display.prism.material_overlay: the images as stages (the tiles repeating
+/* display.prism_material_overlay: the images as stages (the tiles repeating
 and filtered between their levels, the class mask clamped to its edge), and
 the uniform, sent as they change */
 void xgpu_backend_material_overlay(const struct xgpu_material_overlay *overlay)

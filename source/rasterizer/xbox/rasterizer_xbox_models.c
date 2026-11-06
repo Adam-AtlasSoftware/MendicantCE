@@ -2336,7 +2336,7 @@ void _rasterizer_model_draw(
 				}
 
 				/* port: the shader's material overlay, if a mod has one
-				(display.prism.material_overlay: mod_materials.c), for its
+				(display.prism_material_overlay: mod_materials.c), for its
 				draws, the two-sided pass's too */
 				mod_materials_draw_begin(
 					shader,

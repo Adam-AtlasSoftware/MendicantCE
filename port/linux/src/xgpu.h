@@ -173,17 +173,17 @@ struct nv2a_pixel_shader_key
 	/* display.hdr: the draw's tag into the HDR back buffer (xgpu_hdr.h:
 	XGPU_HDR_*); 0 into any other target, and without HDR */
 	unsigned short hdr;
-	/* display.prism.material_overlay: a model draw lit for each pixel whose
+	/* display.prism_material_overlay: a model draw lit for each pixel whose
 	shader a mod's overlay.json names (port/linux/game/mod_materials.c),
 	lit with a micro normal, cavity and roughness from two tiles mixed by
 	its multipurpose map (texture 2): 0 none, else 1 plus twice
-	display.prism.overlay_view, plus XGPU_OVERLAY_CLASS_MASK with four tiles
+	display.prism_overlay_view, plus XGPU_OVERLAY_CLASS_MASK with four tiles
 	weighted by a class mask and the multipurpose map's rule on top (below:
 	"The material overlay") */
 	unsigned char material_overlay;
 };
 
-/* ---------- the material overlay (display.prism.material_overlay)
+/* ---------- the material overlay (display.prism_material_overlay)
 
 A model draw lit for each pixel (per_pixel_lighting, its world position
 handed on: the point lights' or the world's transform) takes a micro
@@ -217,7 +217,7 @@ then D's. The class mask (RGBA: the weights of tiles A to D at the base
 map's coordinates) gives the weights; where the multipurpose channel's rule
 is (has multipurpose, and a channel in [0]), it gives tile A, and the
 mask's B, C and D share the rest (B alone where they are 0). The debug
-views (display.prism.overlay_view, the key's bits 1 to 3): 1 the tiles'
+views (display.prism_overlay_view, the key's bits 1 to 3): 1 the tiles'
 weights, 2 the micro normal's change, 3 the fade, 4 the light alone. */
 #define XGPU_OVERLAY_BINDING 4
 #define XGPU_OVERLAY_TILE_COUNT 4

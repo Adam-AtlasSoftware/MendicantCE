@@ -156,7 +156,7 @@ struct xgpu_spirv_uniforms
 	two spare; declared in the pixel shaders that read it alone, the last
 	member, so that the others' words are as they were */
 	float world_ao[4];
-	/* display.prism.material_overlay's uniform (xgpu.h's "The material
+	/* display.prism_material_overlay's uniform (xgpu.h's "The material
 	overlay": XGPU_OVERLAY_UNIFORM_COUNT vec4s), declared in the pixel
 	shaders that read it alone, after world_ao */
 	float material_overlay[10][4];

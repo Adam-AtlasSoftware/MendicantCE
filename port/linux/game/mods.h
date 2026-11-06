@@ -142,7 +142,7 @@ long mod_materials_update(boolean remove_all, boolean at_load);
 void mod_materials_tags_unloaded(void);
 /* (rasterizer_xbox_models.c, around a model shader's draws) the shader's
 material overlay armed for the draws that follow, if a mod has one and
-display.prism.material_overlay is on (its base map and the draw's
+display.prism_material_overlay is on (its base map and the draw's
 permutation pick the bitmap its class mask is of); and disarmed */
 void mod_materials_draw_begin(struct shader const *shader, real camera_distance, boolean has_multipurpose,
 	long base_map_index, short permutation_index);

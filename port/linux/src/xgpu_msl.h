@@ -69,7 +69,7 @@ past the combiner's places, 8 to 19) */
 float a pixel, which the draws with XGPU_AMBIENT_OCCLUSION_WORLD_SAMPLED
 read; past the combiner's places and the objects' atlas) */
 #define XGPU_MSL_TEXTURE_WORLD_AO_PIXELS 21
-/* display.prism.material_overlay (xgpu.h): its tiles A to D and class mask
+/* display.prism_material_overlay (xgpu.h): its tiles A to D and class mask
 (not drawn by the Metal backend yet: xgpu_msl.c's overlay_light) */
 #define XGPU_MSL_TEXTURE_OVERLAY 24
 
@@ -107,7 +107,7 @@ struct xgpu_msl_uniforms
 	two spare; declared in the pixel shaders that read it alone, the last
 	member, so that the others' text is as it was */
 	float world_ao[4];
-	/* display.prism.material_overlay's uniform (xgpu.h), after it, declared
+	/* display.prism_material_overlay's uniform (xgpu.h), after it, declared
 	in its pixel shaders alone */
 	float material_overlay[10][4];
 };

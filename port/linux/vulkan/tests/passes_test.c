@@ -186,7 +186,7 @@ static void VKAPI_CALL fake_update(VkDevice device, uint32_t count, const VkWrit
 	uint32_t index;
 
 	(void)device; (void)copies; (void)copy;
-	/* (the stages', and display.prism.material_overlay's five after them) */
+	/* (the stages', and display.prism_material_overlay's five after them) */
 	assert(count == 4 || count == 9);
 	set_updates++;
 	for (index = 0; index < count; index++)
@@ -739,7 +739,7 @@ static void texture_sets_test(void)
 	assert(written_images[0].imageView == (VkImageView)(uintptr_t)33);
 	assert(texture_set(b, NULL) == set_b && texture_set(a, NULL) == set && set_updates == 4);
 
-	/* display.prism.material_overlay: the overlay's images after the
+	/* display.prism_material_overlay: the overlay's images after the
 	stages', a set of their own (stand-ins where there is none), found again
 	as the stages' are */
 	{

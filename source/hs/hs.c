@@ -2809,6 +2809,7 @@ symbols in this file:
 #include "network_host_controls.h" /* port: port/linux/game/network_host_controls.c */
 #include "network_host_game.h" /* port: port/linux/game/network_host_game.c */
 #include "server_director.h" /* port: port/linux/game/server_director.c */
+#include "mods.h" /* port: port/linux/game/mod_materials.c */
 #include "objects/damage.h"
 #include "objects/object_lights.h"
 #include "objects/scenery.h"
@@ -11887,8 +11888,6 @@ static struct hs_function_definition_with_1_parameter const debug_scenario_place
 
 /* port: the PRISM settings change only this machine's rendering
 (port/linux/game/mod_materials.c) */
-void mod_materials_prism_set(char const *text);
-
 HS_EVALUATE_VOID_STRING(hs_prism_set_evaluate, mod_materials_prism_set)
 
 static struct hs_function_definition_with_1_parameter const prism_set_definition=
@@ -11899,7 +11898,7 @@ static struct hs_function_definition_with_1_parameter const prism_set_definition
 		"prism_set",
 		hs_macro_function_parse,
 		hs_prism_set_evaluate,
-		"sets a display.prism setting now and in config.toml: \"material_overlay true\", \"overlay_strength 1.5\", \"overlay_view 1\".",
+		"sets a display.prism_* setting now and in config.toml: \"material_overlay true\", \"overlay_strength 1.5\", \"overlay_view 1\".",
 		NULL,
 		1,
 		{ _hs_type_string },
