@@ -891,6 +891,12 @@ PAGES = {
             ("MODS FOLDER", None, None,
              "Each mod is a folder in the mods folder, beside the maps folder, with its mod.toml and its tags. "
              "Mods are turned on and off from the main menu's Settings, not in a game.", None, "mods_folder"),
+            # (PRISM's material overlay: drawn by the Vulkan renderer alone,
+            # for the model shaders a mod's overlay.json names)
+            (SECTION, "MATERIALS"),
+            ("MATERIAL DETAIL", "display.prism.material_overlay", ON_OFF,
+             "Gives weapons and armour the fine grain of their surfaces (machining, weave, wear) from a mod's "
+             "material overlay. It changes only the light on them. Off draws them as the Xbox did.", "desktop"),
         ],
     },
     # ---- the pages the rows open

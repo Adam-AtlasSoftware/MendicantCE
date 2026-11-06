@@ -280,6 +280,45 @@ static void synthetic_vertex(const char *name, const struct xgpu_vertex_program 
 	emit(variant, "packed 0x5, shorts 0x60", xgpu_msl_vertex_shader(program, 0x5, 0x60, NULL, &options));
 }
 
+/* display.prism.material_overlay (xgpu.h): a model's program lit for each
+pixel with two tiles and with four and a class mask, in each debug view, by
+the point lights and the enhanced dynamic lights, with a reflection cube
+and without (spirv_corpus.c's overlay_programs) */
+static void overlay_programs(void)
+{
+	static const unsigned char overlays[] = { 1, 3, 5, 7, 9, 1 | XGPU_OVERLAY_CLASS_MASK, 3 | XGPU_OVERLAY_CLASS_MASK,
+		7 | XGPU_OVERLAY_CLASS_MASK, 9 | XGPU_OVERLAY_CLASS_MASK };
+	struct xgpu_pixel_program program;
+	char name[96];
+	unsigned int overlay, lights, kind, cube;
+
+	for (overlay = 0; overlay < sizeof(overlays); overlay++)
+	{
+		for (lights = 1; lights <= 2; lights++)
+		{
+			for (kind = 0; kind < 2; kind++)
+			{
+				for (cube = 0; cube < 2; cube++)
+				{
+					synthetic_base(&program);
+					synthetic_stage(&program, 0, XGPU_TEXTURE_PROJECT2D, _xgpu_sampler_2d);
+					synthetic_stage(&program, 1, XGPU_TEXTURE_PROJECT2D, _xgpu_sampler_2d);
+					synthetic_stage(&program, 2, XGPU_TEXTURE_PROJECT2D, _xgpu_sampler_2d);
+					synthetic_stage(&program, 3, cube ? XGPU_TEXTURE_CUBEMAP : XGPU_TEXTURE_PROJECT2D,
+						cube ? _xgpu_sampler_cube : _xgpu_sampler_2d);
+					program.combiners[0].portions[0].inputs[0].reg = XGPU_REGISTER_V0;
+					program.per_pixel_lighting = (unsigned char)lights;
+					program.material_overlay = overlays[overlay];
+					if (kind)
+						program.dynamic_lights = XGPU_DYNAMIC_LIGHTS_MODEL;
+					snprintf(name, sizeof(name), "overlay%u-lights%u-kind%u-cube%u", overlays[overlay], lights, kind, cube);
+					pixel_program(name, "display.prism.material_overlay", &program);
+				}
+			}
+		}
+	}
+}
+
 int main(int argc, char **argv)
 {
 	const char *dir;
@@ -331,6 +370,7 @@ int main(int argc, char **argv)
 		free(data);
 	}
 	synthetic_pixel_programs(synthetic_pixel);
+	overlay_programs();
 	synthetic_vertex_programs(synthetic_vertex);
 	fclose(index_file);
 	printf("%lu shaders written to %s, %lu variants the same as one of them\n", written, out_dir, same);

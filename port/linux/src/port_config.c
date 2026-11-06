@@ -388,6 +388,23 @@ static const struct config_setting config_settings[] =
 		"pixel by the lights the game gives them, without the facets the light\n"
 		"of each vertex shows across curved surfaces; false lights each vertex,\n"
 		"as the Xbox does." GRAPHICS_CHOOSES },
+	{ "display.prism.material_overlay", _config_boolean, "false", "HALO_PRISM_MATERIAL_OVERLAY", _environment_value,
+		_platform_desktop,
+		"PRISM: light the model shaders a mod's material overlay names\n"
+		"(tags/materials/overlay.json) for each pixel, with the fine grain of\n"
+		"their surfaces (a micro normal, cavity and roughness from the mod's\n"
+		"tiles); no color changes. Read each frame (the console's prism_set\n"
+		"\"material_overlay true\"). Vulkan only; false draws them as the Xbox does." },
+	{ "display.prism.overlay_strength", _config_real, "1.0", "HALO_PRISM_OVERLAY_STRENGTH", _environment_value,
+		_platform_desktop,
+		"PRISM: how strong the material overlay is, 0 to 2 (0 lights the\n"
+		"overlaid shaders for each pixel and adds nothing)." },
+	{ "display.prism.overlay_view", _config_integer, "0", "HALO_PRISM_OVERLAY_VIEW", _environment_value,
+		_platform_desktop,
+		"PRISM, for checking an overlay: 1 shows its two tiles' weights (red A,\n"
+		"blue B, green left alone; with a class mask its four: white A, purple B,\n"
+		"orange C, green D, black left alone), 2 the micro normal, 3 its fade, 4\n"
+		"the light alone; 0 the game." },
 	{ "display.structure_culling", _config_integer, STRUCTURE_CULLING_DEFAULT, "HALO_STRUCTURE_CULLING", _environment_value,
 		_platform_all,
 		"Which tests skip the level's triangles the camera cannot see, as bits\n"

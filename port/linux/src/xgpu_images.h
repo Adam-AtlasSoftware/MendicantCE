@@ -15,11 +15,15 @@ XGPU_STREAM_SOURCE_IMAGE). xgpu_images.c.
 #include "xgpu.h"
 
 /* an image's pixels: 4 bytes each, red, green, blue and alpha (the PNGs'
-order); or a byte each, the coverage (alpha) of white */
+order); or a byte each, the coverage (alpha) of white; or RGBA, every one
+of its levels given, level 0 first, each half the one before (at least 1)
+right after it (the material overlay's tiles: xgpu_stream.h's
+XGPU_STREAM_IMAGE_RGBA_LEVELS) */
 enum
 {
 	XGPU_IMAGE_RGBA,
 	XGPU_IMAGE_COVERAGE,
+	XGPU_IMAGE_RGBA_LEVELS,
 };
 
 struct xgpu_image

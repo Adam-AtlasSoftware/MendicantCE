@@ -33,7 +33,8 @@ states that are not 0, then tm (the texture modes), sa (the samplers'
 types), ak (alpha kill), sg (colour sign), at (the alpha test's function),
 fe, ft, cn, ca, pt, pl, as, mv, sb, dl (fog enabled, fog table mode, count
 samples, coverage alpha, point threshold, per-pixel lighting, alpha test
-samples, multiview, source blend, dynamic lights).
+samples, multiview, source blend, dynamic lights), and mo (the material
+overlay, display.prism.material_overlay's: only where it is not 0).
 d: a draw's configuration: its pipeline key's fields (vp the vertex
 program, pa packed attributes, im immediate, li lighting, vw views, bl
 blend enabled/source/destination/operation, cm colour mask, dt depth
@@ -188,6 +189,11 @@ struct xgpu_draw_facts
 	int per_pixel, lights_active, environment;
 	/* the backend has a sample mask (xgpu_backend_capabilities) */
 	int sample_mask;
+	/* display.prism.material_overlay: the overlay a mod gives the draw's
+	shader (nv2a_pixel_shader_key's material_overlay, xgpu.h; 0 none),
+	which lights it for each pixel whatever display.per_pixel_lighting says,
+	where its lighting has its world position */
+	int material_overlay;
 };
 
 /* what the facts make of the pipeline (xgpu_backend.h's XGPU_LIGHTING_*,
@@ -197,6 +203,7 @@ struct xgpu_draw_derived
 	uint8_t lighting, color_format, samples;
 	uint8_t alpha_test_samples, per_pixel_lighting, dynamic_lights, ambient_occlusion;
 	uint16_t hdr;
+	uint8_t material_overlay;
 };
 
 /* the pipeline the facts give a draw, lit as the settings light it, or

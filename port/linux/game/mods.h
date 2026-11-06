@@ -134,4 +134,20 @@ void mod_models_tags_unloaded(boolean give_back);
 nodes is drawn with, by its vertex buffer: their count, 0 for any other */
 short mod_models_part_palette(struct vertex_buffer const *vertex_buffer, byte const **nodes);
 
+/* ---------- prototypes/MOD_MATERIALS.C */
+
+struct shader;
+
+long mod_materials_update(boolean remove_all, boolean at_load);
+void mod_materials_tags_unloaded(void);
+/* (rasterizer_xbox_models.c, around a model shader's draws) the shader's
+material overlay armed for the draws that follow, if a mod has one and
+display.prism.material_overlay is on (its base map and the draw's
+permutation pick the bitmap its class mask is of); and disarmed */
+void mod_materials_draw_begin(struct shader const *shader, real camera_distance, boolean has_multipurpose,
+	long base_map_index, short permutation_index);
+void mod_materials_draw_end(void);
+/* (the script function prism_set) */
+void mod_materials_prism_set(char const *text);
+
 #endif

@@ -101,7 +101,7 @@ enum
 	EXECUTION_MODE_ORIGIN_UPPER_LEFT = 7, EXECUTION_MODE_EARLY_FRAGMENT_TESTS = 9, EXECUTION_MODE_DEPTH_REPLACING = 12,
 	EXECUTION_MODE_DEPTH_GREATER = 14, EXECUTION_MODE_DEPTH_LESS = 15,
 	DIM_2D = 1, DIM_3D = 2, DIM_CUBE = 3, DIM_SUBPASS_DATA = 6,
-	IMAGE_OPERANDS_LOD = 2, IMAGE_OPERANDS_SAMPLE = 0x40,
+	IMAGE_OPERANDS_BIAS = 1, IMAGE_OPERANDS_LOD = 2, IMAGE_OPERANDS_SAMPLE = 0x40,
 	SCOPE_DEVICE = 1, SCOPE_SUBGROUP = 3, GROUP_OPERATION_REDUCE = 0,
 };
 
@@ -839,11 +839,14 @@ enum
 	/* (display.ambient_occlusion "world": past the others, declared by the
 	pixel shaders that read it alone: declare_uniforms_world) */
 	U_WORLD_AO = U_COUNT,
+	/* (display.prism.material_overlay: after it, declared by its pixel
+	shaders alone: declare_uniforms_overlay) */
+	U_MATERIAL_OVERLAY,
 };
 
 static void declare_uniforms_members(struct module *m, int count)
 {
-	static const unsigned long offsets[U_COUNT + 1] =
+	static const unsigned long offsets[U_COUNT + 2] =
 	{
 		offsetof(struct xgpu_spirv_uniforms, viewport_scale), offsetof(struct xgpu_spirv_uniforms, viewport_offset),
 		offsetof(struct xgpu_spirv_uniforms, point_size), offsetof(struct xgpu_spirv_uniforms, screen_offset),
@@ -859,9 +862,9 @@ static void declare_uniforms_members(struct module *m, int count)
 		offsetof(struct xgpu_spirv_uniforms, fovea_view), offsetof(struct xgpu_spirv_uniforms, fovea_sample),
 		offsetof(struct xgpu_spirv_uniforms, visibility_counter), offsetof(struct xgpu_spirv_uniforms, depth_bias),
 		offsetof(struct xgpu_spirv_uniforms, effect_unproject), offsetof(struct xgpu_spirv_uniforms, effect_eye),
-		offsetof(struct xgpu_spirv_uniforms, world_ao),
+		offsetof(struct xgpu_spirv_uniforms, world_ao), offsetof(struct xgpu_spirv_uniforms, material_overlay),
 	};
-	unsigned int members[U_COUNT + 1], block;
+	unsigned int members[U_COUNT + 2], block;
 	int member;
 
 	for (member = 0; member < count; member++)
@@ -880,6 +883,7 @@ static void declare_uniforms_members(struct module *m, int count)
 		case U_EFFECT_UNPROJECT: members[member] = block_array(m, 16); break;
 		case U_SCREEN_CORRECTION: members[member] = block_array(m, 2); break;
 		case U_MODEL_LIGHTS: members[member] = block_array(m, XGPU_MODEL_LIGHT_COUNT); break;
+		case U_MATERIAL_OVERLAY: members[member] = block_array(m, XGPU_OVERLAY_UNIFORM_COUNT); break;
 		default: members[member] = m->t_v4; break;
 		}
 	}
@@ -902,6 +906,13 @@ static void declare_uniforms(struct module *m)
 static void declare_uniforms_world(struct module *m)
 {
 	declare_uniforms_members(m, U_COUNT + 1);
+}
+
+/* (and display.prism.material_overlay's, U_MATERIAL_OVERLAY, after the
+world's) */
+static void declare_uniforms_overlay(struct module *m)
+{
+	declare_uniforms_members(m, U_COUNT + 2);
 }
 
 /* a member of the uniforms (an element of an array member): a float or a
@@ -1937,6 +1948,15 @@ struct pixel_state
 	unit, the eye, the scene's distance and the fade's span */
 	unsigned int replaced_depth;
 	unsigned int effect_base, effect_column2, effect_eye, effect_to_scene, effect_span;
+	/* display.prism.material_overlay (overlay_light): its images (tiles A
+	to D, the class mask; 0 not declared), and what its light found: the
+	vertices' normal (unit) and the micro normal, the cavity, the
+	roughness, tile A's weight, the share kept (not excluded, a frame
+	there), the four tiles' weights and fades (with a class mask) and the
+	two tiles' fades (without) */
+	unsigned int overlay_images[XGPU_OVERLAY_IMAGE_COUNT];
+	unsigned int overlay_n, overlay_nm, overlay_cavity, overlay_rough, overlay_w, overlay_keep;
+	unsigned int overlay_wt, overlay_f4, overlay_fa, overlay_fb;
 };
 
 static unsigned int pixel_input(struct module *m, struct pixel_state *state, unsigned int variable_id, unsigned int type)
@@ -3861,16 +3881,27 @@ static unsigned int world_ao_upsample(struct module *m, struct pixel_state *stat
 
 /* ---------- per-pixel model lighting */
 
+/* (lit by the normal given, display.prism.material_overlay's: else the
+vertices') */
 static unsigned int model_lighting(struct module *m, struct pixel_state *state, BOOL point_lights, BOOL dynamic_lights,
-	unsigned int occlusion)
+	unsigned int occlusion, unsigned int given_normal)
 {
-	unsigned int world_normal = pixel_input(m, state, state->in_world_normal, m->t_v4);
-	unsigned int normal = xyz(m, world_normal), n, facing, light;
+	unsigned int n, facing, light;
 	int index;
 
-	/* n = xWorldNormal.xyz * (xWorldNormal.w * inversesqrt(max(dot(...), 1.0e-24))) */
-	n = fscale(m, 3, normal, fmul(m, 1, extract(m, world_normal, 3), ext1(m, GLSL_INVERSE_SQRT, m->t_float,
-		fmax_scalar(m, 1, fdot(m, normal, normal), (float)1.0e-24))));
+	if (given_normal)
+	{
+		n = given_normal;
+	}
+	else
+	{
+		unsigned int world_normal = pixel_input(m, state, state->in_world_normal, m->t_v4);
+		unsigned int normal = xyz(m, world_normal);
+
+		/* n = xWorldNormal.xyz * (xWorldNormal.w * inversesqrt(max(dot(...), 1.0e-24))) */
+		n = fscale(m, 3, normal, fmul(m, 1, extract(m, world_normal, 3), ext1(m, GLSL_INVERSE_SQRT, m->t_float,
+			fmax_scalar(m, 1, fdot(m, normal, normal), (float)1.0e-24))));
+	}
 	facing = fdot(m, n, fneg(m, 3, xyz(m, uniform(m, U_MODEL_LIGHTS, 7))));
 	/* light = ml[11].xyz + max(max(facing, -facing * ml[0].z), 0.0) * ml[8].xyz + max(dot(n, -ml[9].xyz), 0.0) * ml[10].xyz */
 	light = fadd(m, 3, fadd(m, 3, xyz(m, uniform(m, U_MODEL_LIGHTS, 11)),
@@ -4703,6 +4734,302 @@ static unsigned int effect_fade(struct module *m, int fade_mode, unsigned int re
 	}
 }
 
+/* ---------- display.prism.material_overlay
+
+xgpu.h's "The material overlay": a model draw lit for each pixel takes a
+micro normal, a cavity and a roughness from a mod's tiles, between texture
+stage 2 (the multipurpose map that mixes them) and stage 3 (the reflection
+it bends), as the OpenGL renderer's GLSL of PRISM did (port/linux/game/
+mod_materials.c reads the tiles): the tangent frame from the screen-space
+derivatives of the world position and texture 0's coordinates (Schueler's
+cotangent frame), each tile faded by its footprint (the tiles across a
+pixel, log2) and the draw's fade, the light by the micro normal times the
+cavity and half the roughness, clamped. xgpu_msl.c's overlay_* are its
+twin. */
+
+static void overlay_declare(struct module *m, struct pixel_state *state, BOOL class_mask)
+{
+	static const char *const names[XGPU_OVERLAY_IMAGE_COUNT] = { "overlay_a", "overlay_b", "overlay_c", "overlay_d",
+		"overlay_m" };
+	int index;
+
+	for (index = 0; index < XGPU_OVERLAY_IMAGE_COUNT; index++)
+	{
+		if (!class_mask && index >= 2)
+			break;
+		state->overlay_images[index] = variable(m, type_sampled_image(m, DIM_2D, FALSE, FALSE, TRUE),
+			STORAGE_UNIFORM_CONSTANT, names[index]);
+		decorate1(m, state->overlay_images[index], DECORATION_DESCRIPTOR_SET, XGPU_SPIRV_SET_TEXTURES);
+		decorate1(m, state->overlay_images[index], DECORATION_BINDING, XGPU_OVERLAY_BINDING + index);
+	}
+}
+
+static unsigned int overlay_uniform(struct module *m, int index)
+{
+	return uniform(m, U_MATERIAL_OVERLAY, index);
+}
+
+/* texture(overlay_<image>, uv) */
+static unsigned int overlay_sample(struct module *m, struct pixel_state *state, int image, unsigned int uv)
+{
+	unsigned int sampled = load(m, type_sampled_image(m, DIM_2D, FALSE, FALSE, TRUE), state->overlay_images[image]);
+
+	return op2(m, OP_IMAGE_SAMPLE_IMPLICIT_LOD, m->t_v4, sampled, uv);
+}
+
+static unsigned int overlay_smooth_step(struct module *m, unsigned int low, unsigned int high, unsigned int x)
+{
+	return ext3(m, GLSL_SMOOTH_STEP, m->t_float, low, high, x);
+}
+
+static unsigned int overlay_mix(struct module *m, int count, unsigned int a, unsigned int b, unsigned int t)
+{
+	return ext3(m, GLSL_F_MIX, vector_type(m, count), a, b, splat(m, count, t));
+}
+
+/* a tile's fade by its footprint: keep * (1.0 - smoothstep(low, high,
+0.5 * log2(max(max(dot(dx, dx), dot(dy, dy)), 1.0e-12)))), dx and dy uv's
+derivatives */
+static unsigned int overlay_footprint(struct module *m, unsigned int keep, unsigned int uv, unsigned int low,
+	unsigned int high)
+{
+	unsigned int dx = op1(m, OP_DPDX, m->t_v2, uv), dy = op1(m, OP_DPDY, m->t_v2, uv);
+	unsigned int across = fmul(m, 1, constant_float(m, 0.5f), ext1(m, GLSL_LOG2, m->t_float,
+		fmax_scalar(m, 1, ext2(m, GLSL_F_MAX, m->t_float, fdot(m, dx, dx), fdot(m, dy, dy)), 1.0e-12f)));
+
+	return fmul(m, 1, keep, fsub(m, 1, constant_float(m, 1.0f), overlay_smooth_step(m, low, high, across)));
+}
+
+/* a > 0.5 (the uniform's flags) */
+static unsigned int overlay_flag(struct module *m, unsigned int a)
+{
+	return compare(m, OP_F_ORD_GREATER_THAN, a, constant_float(m, 0.5f));
+}
+
+/* the micro normal, cavity and roughness, and the light of the draw (v0's
+rgb) by them: after texture stage 2 */
+static void overlay_light(struct module *m, struct pixel_state *state, BOOL point_lights, BOOL dynamic_lights,
+	unsigned int occlusion)
+{
+	const struct xgpu_pixel_program *program = state->program;
+	BOOL class_mask = (program->material_overlay & XGPU_OVERLAY_CLASS_MASK) != 0;
+	unsigned int one = constant_float(m, 1.0f), zero = constant_float(m, 0.0f);
+	unsigned int world_normal = pixel_input(m, state, state->in_world_normal, m->t_v4), normal = xyz(m, world_normal);
+	unsigned int n, uv, p, dp1, dp2, du1, du2, dp2p, dp1p, tangent, bitangent, frame_scale, frame;
+	unsigned int ov0 = overlay_uniform(m, 0), ov1 = overlay_uniform(m, 1), ov2 = overlay_uniform(m, 2);
+	unsigned int ov3 = overlay_uniform(m, 3), t2 = state->t[2];
+	unsigned int w, keep, slope, cavity, rough, nm, lit;
+	static const unsigned int rgb[4] = { 4, 5, 6, 3 };
+
+	/* overlay_n = normalize(xWorldNormal.xyz), the frame (no frame where
+	the coordinates do not change across the triangle) */
+	n = fscale(m, 3, normal, ext1(m, GLSL_INVERSE_SQRT, m->t_float, fmax_scalar(m, 1, fdot(m, normal, normal),
+		(float)1.0e-24)));
+	uv = xy(m, pixel_input(m, state, state->in_t[0], m->t_v4));
+	p = pixel_input(m, state, state->in_world_position, m->t_v3);
+	/* (the derivatives up the screen, as OpenGL's: Vulkan's y runs down,
+	and the frame turned with it would bend the micro normal the other
+	way, its bumps dents) */
+	dp1 = op1(m, OP_DPDX, m->t_v3, p);
+	dp2 = fneg(m, 3, op1(m, OP_DPDY, m->t_v3, p));
+	du1 = op1(m, OP_DPDX, m->t_v2, uv);
+	du2 = fneg(m, 2, op1(m, OP_DPDY, m->t_v2, uv));
+	dp2p = ext2(m, GLSL_CROSS, m->t_v3, dp2, n);
+	dp1p = ext2(m, GLSL_CROSS, m->t_v3, n, dp1);
+	tangent = fadd(m, 3, fscale(m, 3, dp2p, extract(m, du1, 0)), fscale(m, 3, dp1p, extract(m, du2, 0)));
+	bitangent = fadd(m, 3, fscale(m, 3, dp2p, extract(m, du1, 1)), fscale(m, 3, dp1p, extract(m, du2, 1)));
+	frame_scale = ext1(m, GLSL_INVERSE_SQRT, m->t_float, fmax_scalar(m, 1, ext2(m, GLSL_F_MAX, m->t_float,
+		fdot(m, tangent, tangent), fdot(m, bitangent, bitangent)), (float)1.0e-30));
+	frame = op3(m, OP_SELECT, m->t_float, compare(m, OP_F_ORD_GREATER_THAN, ext1(m, GLSL_F_ABS, m->t_float,
+		fsub(m, 1, fmul(m, 1, extract(m, du1, 0), extract(m, du2, 1)), fmul(m, 1, extract(m, du1, 1), extract(m, du2, 0)))),
+		constant_float(m, (float)1.0e-14)), one, zero);
+	/* the share kept: none where the excluded channel is above its
+	threshold (self-illuminated texels), the draw's fade */
+	keep = op3(m, OP_SELECT, m->t_float, compare(m, OP_F_ORD_GREATER_THAN, fdot(m, t2, ov2), extract(m, ov3, 0)), zero,
+		fmul(m, 1, frame, extract(m, ov3, 1)));
+	if (class_mask)
+	{
+		/* the class mask's weights (tile A where there are none), the
+		multipurpose channel's rule giving tile A where the shader has one
+		and the mask's B, C and D sharing the rest (B alone where they are 0) */
+		static const int slot_uniform[4] = { 4, 5, 7, 8 };
+		static const int footprint_vector[4] = { 3, 6, 9, 9 }, footprint_first[4] = { 2, 2, 0, 2 };
+		static const unsigned int yzw[3] = { 1, 2, 3 }, c0_rest[4] = { 0, 4, 5, 6 };
+		unsigned int q = overlay_sample(m, state, XGPU_OVERLAY_TILE_COUNT, uv), qs = fdot(m, q, constant_splat(m, 4, 1.0f));
+		unsigned int wt, c0, rest, rs, rule, fades[4];
+		int slot;
+
+		wt = select_n(m, 4, compare(m, OP_F_ORD_GREATER_THAN, qs, constant_float(m, 1.0e-3f)),
+			fdiv(m, 4, q, splat(m, 4, qs)), constant_v4(m, 1.0f, 0.0f, 0.0f, 0.0f));
+		c0 = overlay_smooth_step(m, extract(m, ov1, 0), extract(m, ov1, 1), fdot(m, t2, ov0));
+		c0 = op3(m, OP_SELECT, m->t_float, overlay_flag(m, extract(m, ov1, 2)), fsub(m, 1, one, c0), c0);
+		rs = fadd(m, 1, fadd(m, 1, extract(m, q, 1), extract(m, q, 2)), extract(m, q, 3));
+		rest = select_n(m, 3, compare(m, OP_F_ORD_GREATER_THAN, rs, constant_float(m, 1.0e-3f)),
+			fdiv(m, 3, shuffle(m, 3, q, q, yzw), splat(m, 3, rs)), constant_vector(m, 3, (const float[]){ 1.0f, 0.0f, 0.0f }));
+		rule = op2(m, OP_LOGICAL_AND, m->t_bool, overlay_flag(m, extract(m, ov1, 3)),
+			overlay_flag(m, fdot(m, ov0, constant_splat(m, 4, 1.0f))));
+		wt = select_n(m, 4, rule, shuffle(m, 4, splat(m, 4, c0), fscale(m, 3, rest, fsub(m, 1, one, c0)), c0_rest), wt);
+		w = extract(m, wt, 0);
+		slope = constant_splat(m, 2, 0.0f);
+		cavity = zero;
+		rough = zero;
+		for (slot = 0; slot < 4; slot++)
+		{
+			unsigned int scale = overlay_uniform(m, slot_uniform[slot]), footprint = overlay_uniform(m, footprint_vector[slot]);
+			unsigned int tile_uv = fscale(m, 2, uv, extract(m, scale, 0)), weight = extract(m, wt, slot);
+			unsigned int f = overlay_footprint(m, keep, tile_uv, extract(m, footprint, footprint_first[slot]),
+				extract(m, footprint, footprint_first[slot] + 1));
+			unsigned int t = overlay_sample(m, state, slot, tile_uv);
+
+			fades[slot] = f;
+			/* slope += wt * (t.rg * 2 - 1) * (normal * f); cavity += wt * (1 + (t.b * 2 - 1) * (cavity * f));
+			rough += wt * (t.a - 0.5) * (rough * f) */
+			slope = fadd(m, 2, slope, fscale(m, 2, fsub(m, 2, fscale(m, 2, xy(m, t), constant_float(m, 2.0f)),
+				constant_splat(m, 2, 1.0f)), fmul(m, 1, weight, fmul(m, 1, extract(m, scale, 1), f))));
+			cavity = fadd(m, 1, cavity, fmul(m, 1, weight, fadd(m, 1, one, fmul(m, 1, fsub(m, 1, fmul(m, 1,
+				extract(m, t, 2), constant_float(m, 2.0f)), one), fmul(m, 1, extract(m, scale, 2), f)))));
+			rough = fadd(m, 1, rough, fmul(m, 1, weight, fmul(m, 1, fsub(m, 1, extract(m, t, 3), constant_float(m, 0.5f)),
+				fmul(m, 1, extract(m, scale, 3), f))));
+		}
+		cavity = fmax_scalar(m, 1, cavity, 0.0f);
+		state->overlay_wt = wt;
+		state->overlay_f4 = construct4(m, fades[0], fades[1], fades[2], fades[3]);
+	}
+	else
+	{
+		unsigned int ov4 = overlay_uniform(m, 4), ov5 = overlay_uniform(m, 5), ov6 = overlay_uniform(m, 6);
+		unsigned int uv_a = fscale(m, 2, uv, extract(m, ov4, 0)), uv_b = fscale(m, 2, uv, extract(m, ov5, 0));
+		unsigned int fa, fb, ta, tb, two = constant_float(m, 2.0f);
+
+		/* the multipurpose channel's rule (tile A everywhere without a
+		multipurpose map) */
+		w = op3(m, OP_SELECT, m->t_float, overlay_flag(m, extract(m, ov1, 3)),
+			overlay_smooth_step(m, extract(m, ov1, 0), extract(m, ov1, 1), fdot(m, t2, ov0)), one);
+		w = op3(m, OP_SELECT, m->t_float, overlay_flag(m, extract(m, ov1, 2)), fsub(m, 1, one, w), w);
+		fa = overlay_footprint(m, keep, uv_a, extract(m, ov3, 2), extract(m, ov3, 3));
+		fb = overlay_footprint(m, keep, uv_b, extract(m, ov6, 2), extract(m, ov6, 3));
+		ta = overlay_sample(m, state, 0, uv_a);
+		tb = overlay_sample(m, state, 1, uv_b);
+		slope = overlay_mix(m, 2,
+			fscale(m, 2, fsub(m, 2, fscale(m, 2, xy(m, tb), two), constant_splat(m, 2, 1.0f)), fmul(m, 1, extract(m, ov5, 1), fb)),
+			fscale(m, 2, fsub(m, 2, fscale(m, 2, xy(m, ta), two), constant_splat(m, 2, 1.0f)), fmul(m, 1, extract(m, ov4, 1), fa)),
+			w);
+		cavity = fmax_scalar(m, 1, overlay_mix(m, 1,
+			fadd(m, 1, one, fmul(m, 1, fsub(m, 1, fmul(m, 1, extract(m, tb, 2), two), one), fmul(m, 1, extract(m, ov5, 2), fb))),
+			fadd(m, 1, one, fmul(m, 1, fsub(m, 1, fmul(m, 1, extract(m, ta, 2), two), one), fmul(m, 1, extract(m, ov4, 2), fa))),
+			w), 0.0f);
+		rough = overlay_mix(m, 1,
+			fmul(m, 1, fsub(m, 1, extract(m, tb, 3), constant_float(m, 0.5f)), fmul(m, 1, extract(m, ov5, 3), fb)),
+			fmul(m, 1, fsub(m, 1, extract(m, ta, 3), constant_float(m, 0.5f)), fmul(m, 1, extract(m, ov4, 3), fa)),
+			w);
+		state->overlay_fa = fa;
+		state->overlay_fb = fb;
+	}
+	/* the micro normal (the tiles' y is up their pictures: against v, whose
+	rows run down) */
+	nm = ext1(m, GLSL_NORMALIZE, m->t_v3, fadd(m, 3, n, fscale(m, 3, fsub(m, 3,
+		fscale(m, 3, tangent, extract(m, slope, 0)), fscale(m, 3, bitangent, extract(m, slope, 1))), frame_scale)));
+	/* the light, lit at the length the vertices' normal has, as
+	model_lighting's (the enhanced dynamic lights' by the unit normal, as
+	theirs); a rougher texel scatters a little more of it back, a smoother
+	one less, so that scratches and scuffs in a coating read as faintly
+	paler lines and polished chips as darker ones (the roughness averages to
+	none, and so does this): clamp(light * cavity * (1.0 + 0.5 * rough)) */
+	lit = model_lighting(m, state, point_lights, dynamic_lights, occlusion, fscale(m, 3, nm, extract(m, world_normal, 3)));
+	if (dynamic_lights)
+		lit = dynamic_light_add(m, lit, dynamic_light_sum(m, state, p, nm, nm, FALSE), FALSE);
+	lit = saturate(m, 3, fscale(m, 3, lit, fmul(m, 1, cavity, fadd(m, 1, one, fmul(m, 1, constant_float(m, 0.5f), rough)))));
+	state->v0 = shuffle(m, 4, state->v0, lit, rgb);
+	state->overlay_n = n;
+	state->overlay_nm = nm;
+	state->overlay_cavity = cavity;
+	state->overlay_rough = rough;
+	state->overlay_w = w;
+	state->overlay_keep = keep;
+}
+
+/* texture stage 3's reflection cube, its direction bent from the vertices'
+normal to the micro normal (the programs' reflection of the eye's
+direction, reflected back by the one normal and again by the other), its
+level of detail raised by the roughness, darkened by the cavity */
+static void overlay_reflection(struct module *m, struct pixel_state *state)
+{
+	const struct xgpu_texture_stage *decoded = &state->program->stages[3];
+	unsigned int r = xyz(m, pixel_input(m, state, state->in_t[3], m->t_v4)), n = state->overlay_n, nm = state->overlay_nm;
+	unsigned int e, bent, operands[4], texel, darkened;
+	static const unsigned int rgb[4] = { 4, 5, 6, 3 };
+
+	/* e = 2.0 * dot(r, n) * n - r; bent = mix(r, 2.0 * dot(e, nm) * nm - e, overlay[6].x) */
+	e = fsub(m, 3, fscale(m, 3, n, fmul(m, 1, constant_float(m, 2.0f), fdot(m, r, n))), r);
+	bent = overlay_mix(m, 3, r, fsub(m, 3, fscale(m, 3, nm, fmul(m, 1, constant_float(m, 2.0f), fdot(m, e, nm))), e),
+		extract(m, overlay_uniform(m, 6), 0));
+	operands[0] = texture_load(m, state, 3);
+	operands[1] = bent;
+	operands[2] = IMAGE_OPERANDS_BIAS;
+	operands[3] = fmul(m, 1, constant_float(m, 4.0f), state->overlay_rough);
+	texel = op(m, OP_IMAGE_SAMPLE_IMPLICIT_LOD, m->t_v4, 4, operands);
+	/* t3.rgb = min(t3.rgb * mix(1.0, cavity, overlay[6].y), 1.0) */
+	darkened = ext2(m, GLSL_F_MIN, m->t_v3, fscale(m, 3, xyz(m, texel), overlay_mix(m, 1, constant_float(m, 1.0f),
+		state->overlay_cavity, extract(m, overlay_uniform(m, 6), 1))), constant_splat(m, 3, 1.0f));
+	state->t[3] = shuffle(m, 4, texel, darkened, rgb);
+	if (decoded->color_sign)
+	{
+		static const unsigned int channels[4] = { 3, 0, 1, 2 };
+		int bit;
+
+		for (bit = 0; bit < 4; bit++)
+		{
+			if (decoded->color_sign & (1 << bit))
+			{
+				state->t[3] = op3(m, OP_COMPOSITE_INSERT, m->t_v4,
+					signed_byte(m, extract(m, state->t[3], channels[bit])), state->t[3], channels[bit]);
+			}
+		}
+	}
+	if (decoded->alpha_kill)
+		discard_if(m, compare(m, OP_F_ORD_EQUAL, extract(m, state->t[3], 3), constant_float(m, 0.0f)));
+}
+
+/* display.prism.overlay_view: 1 the tiles' weights (red tile A, blue tile
+B, green excluded; with a class mask A white, B purple, C orange, D green,
+excluded black), 2 the micro normal's change, 3 the fade, 4 the light
+alone; else the result as it is */
+static unsigned int overlay_view(struct module *m, struct pixel_state *state, unsigned int result)
+{
+	const struct xgpu_pixel_program *program = state->program;
+	BOOL class_mask = (program->material_overlay & XGPU_OVERLAY_CLASS_MASK) != 0;
+	unsigned int one = constant_float(m, 1.0f), kept = compare(m, OP_F_ORD_GREATER_THAN, state->overlay_keep,
+		constant_float(m, 0.0f));
+
+	switch (XGPU_OVERLAY_VIEW(program->material_overlay))
+	{
+	case 1:
+		if (class_mask)
+		{
+			unsigned int wt = state->overlay_wt, colour;
+
+			colour = fadd(m, 3, fadd(m, 3, fadd(m, 3,
+				fscale(m, 3, constant_vector(m, 3, (const float[]){ 0.9f, 0.9f, 0.9f }), extract(m, wt, 0)),
+				fscale(m, 3, constant_vector(m, 3, (const float[]){ 0.47f, 0.35f, 0.86f }), extract(m, wt, 1))),
+				fscale(m, 3, constant_vector(m, 3, (const float[]){ 0.92f, 0.59f, 0.16f }), extract(m, wt, 2))),
+				fscale(m, 3, constant_vector(m, 3, (const float[]){ 0.16f, 0.78f, 0.35f }), extract(m, wt, 3)));
+			return select_n(m, 4, kept, vec4_of(m, colour, one), constant_v4(m, 0.0f, 0.0f, 0.0f, 1.0f));
+		}
+		return select_n(m, 4, kept, construct4(m, state->overlay_w, constant_float(m, 0.0f),
+			fsub(m, 1, one, state->overlay_w), one), constant_v4(m, 0.0f, 1.0f, 0.0f, 1.0f));
+	case 2:
+		return vec4_of(m, fadd(m, 3, fscale(m, 3, fsub(m, 3, state->overlay_nm, state->overlay_n), constant_float(m, 4.0f)),
+			constant_splat(m, 3, 0.5f)), one);
+	case 3:
+		return vec4_of(m, splat(m, 3, class_mask ? fdot(m, state->overlay_f4, state->overlay_wt) :
+			ext3(m, GLSL_F_MIX, m->t_float, state->overlay_fb, state->overlay_fa, state->overlay_w)), one);
+	case 4:
+		return vec4_of(m, xyz(m, state->v0), one);
+	default:
+		return result;
+	}
+}
+
 BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const struct xgpu_spirv_options *options,
 	struct xgpu_spirv_module *module)
 {
@@ -4726,8 +5053,11 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	keeps it) */
 	BOOL occluder = !world && (program->ambient_occlusion & XGPU_AMBIENT_OCCLUSION_WORLD_INPUTS);
 	unsigned int world_ao_words = 0;
+	/* (display.prism.material_overlay: a model's lit for each pixel, by
+	its world position) */
+	BOOL overlay = program->material_overlay && program->per_pixel_lighting && !environment;
 	BOOL world_position = (program->per_pixel_lighting && (program->per_pixel_lighting == 2 ||
-		program->dynamic_lights == XGPU_DYNAMIC_LIGHTS_MODEL)) || environment || world;
+		program->dynamic_lights == XGPU_DYNAMIC_LIGHTS_MODEL)) || environment || world || overlay;
 	BOOL count_samples = program->count_samples && options->count_samples;
 	unsigned int comparison = program->alpha_test ? comparison_opcode(program->alpha_test) : 0;
 	BOOL sample_mask = comparison && program->alpha_test_samples && program->alpha_test != D3DCMP_EQUAL &&
@@ -4748,7 +5078,9 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	state.program = program;
 	state.options = options;
 	module_begin(&m, EXECUTION_MODEL_FRAGMENT);
-	if (world)
+	if (overlay)
+		declare_uniforms_overlay(&m);
+	else if (world)
 		declare_uniforms_world(&m);
 	else
 		declare_uniforms(&m);
@@ -4767,6 +5099,8 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 		decorate1(&m, state.textures[stage], DECORATION_DESCRIPTOR_SET, XGPU_SPIRV_SET_TEXTURES);
 		decorate1(&m, state.textures[stage], DECORATION_BINDING, stage);
 	}
+	if (overlay)
+		overlay_declare(&m, &state, (program->material_overlay & XGPU_OVERLAY_CLASS_MASK) != 0);
 	if (effect)
 		effect_declare(&m, &state);
 	else if (replaces_depth)
@@ -4860,13 +5194,17 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 		state.occlusion = constant_float(&m, 1.0f);
 		world_ao_words = world_ao_inputs(&m, &state, occlusion_light);
 	}
-	if (program->per_pixel_lighting && program->dynamic_lights == XGPU_DYNAMIC_LIGHTS_MODEL)
+	/* (display.prism.material_overlay's light is found after texture
+	stage 2, by its micro normal: overlay_light) */
+	if (overlay)
+		;
+	else if (program->per_pixel_lighting && program->dynamic_lights == XGPU_DYNAMIC_LIGHTS_MODEL)
 	{
 		unsigned int world_normal = pixel_input(&m, &state, state.in_world_normal, m.t_v4), normal = xyz(&m, world_normal);
 		unsigned int n = fscale(&m, 3, normal, ext1(&m, GLSL_INVERSE_SQRT, m.t_float,
 			fmax_scalar(&m, 1, fdot(&m, normal, normal), (float)1.0e-24)));
 		unsigned int lit = model_lighting(&m, &state, program->per_pixel_lighting == 2, TRUE,
-			occlusion_light == XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL ? state.occlusion : 0);
+			occlusion_light == XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL ? state.occlusion : 0, 0);
 		unsigned int sum = dynamic_light_sum(&m, &state, pixel_input(&m, &state, state.in_world_position, m.t_v3), n, n, FALSE);
 		static const unsigned int rgb[4] = { 4, 5, 6, 3 };
 
@@ -4877,7 +5215,7 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 		static const unsigned int rgb[4] = { 4, 5, 6, 3 };
 
 		state.v0 = shuffle(&m, 4, state.v0, model_lighting(&m, &state, program->per_pixel_lighting == 2, FALSE,
-			occlusion_light == XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL ? state.occlusion : 0), rgb);
+			occlusion_light == XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL ? state.occlusion : 0, 0), rgb);
 	}
 	else if (occlusion_light == XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX)
 	{
@@ -4894,7 +5232,22 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	if (effect)
 		effect_fade_value = effect_prelude(&m, &state);
 	for (stage = 0; stage < 4; stage++)
+	{
+		/* (display.prism.material_overlay's light between the multipurpose
+		map and the reflection, which it bends) */
+		if (stage == 3 && overlay)
+		{
+			overlay_light(&m, &state, program->per_pixel_lighting == 2,
+				program->dynamic_lights == XGPU_DYNAMIC_LIGHTS_MODEL,
+				occlusion_light == XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL ? state.occlusion : 0);
+			if (program->stages[3].mode == XGPU_TEXTURE_CUBEMAP && program->stages[3].sampler == _xgpu_sampler_cube)
+			{
+				overlay_reflection(&m, &state);
+				continue;
+			}
+		}
 		texture_stage(&m, &state, stage);
+	}
 	if (effect && replaces_depth && state.replaced_depth)
 		effect_fade_value = effect_zsprite_fade(&m, &state, &zsprite_hidden);
 	/* (the bump map's texel, which the combiners may overwrite: the enhanced
@@ -5012,6 +5365,9 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	}
 	if (options->debug_texture0)
 		result = vec4_of(&m, xyz(&m, state.t[0]), constant_float(&m, 1.0f));
+	/* (display.prism.overlay_view) */
+	if (overlay)
+		result = overlay_view(&m, &state, result);
 	if (options->debug_flat)
 	{
 		unsigned int d0 = pixel_input(&m, &state, state.in_d0, m.t_v4);

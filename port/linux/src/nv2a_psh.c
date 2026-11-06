@@ -180,4 +180,5 @@ void nv2a_pixel_program_decode(const struct nv2a_pixel_shader_key *key, struct x
 	program->source_blend = key->source_blend;
 	program->ambient_occlusion = key->ambient_occlusion;
 	program->hdr = key->hdr;
+	program->material_overlay = key->material_overlay;
 }

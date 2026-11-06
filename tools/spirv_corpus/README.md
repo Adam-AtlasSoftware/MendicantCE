@@ -25,6 +25,11 @@ each:
   expanded or not, and the alpha limit over each of eleven blends, reading
   the pixel drawn over from a target of one sample and of four, and the
   dynamic lights past white;
+- display.prism.material_overlay's (`overlay*`, `port/linux/src/xgpu.h`): a
+  model's program lit for each pixel with two tiles and with four and a class
+  mask, in each debug view, by the point lights, the enhanced dynamic lights
+  and the world's occlusion, with a reflection cube (signed and alpha-killed
+  too) and without;
 - anti-aliasing's passes (FXAA and SMAA's three, and their vertex shader)
   and display.hdr's tone map (of one sample and of more) and encoding, as
   `tools/vulkan_post_shaders.py` generated them

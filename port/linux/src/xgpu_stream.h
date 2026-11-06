@@ -38,7 +38,7 @@ port/linux/README.md.
 #include <stdint.h>
 
 #define XGPU_STREAM_MAGIC 0x53504758u /* "XGPS" */
-#define XGPU_STREAM_VERSION 19
+#define XGPU_STREAM_VERSION 20
 #define XGPU_STREAM_LOADING_ART_BYTES (640u * 480u * 4u)
 
 /* ---------- the ring
@@ -273,6 +273,9 @@ enum
 	/* display.ambient_occlusion "world"'s distance-field scene: a box of
 	its cascades (xgpu_backend_world_ao_cascades) */
 	XGPU_STREAM_WORLD_AO_CASCADES,
+	/* display.prism.material_overlay: the overlay of the draws that follow
+	(xgpu_stream_material_overlay) */
+	XGPU_STREAM_MATERIAL_OVERLAY,
 	XGPU_STREAM_RECORD_TYPES,
 };
 
@@ -317,6 +320,8 @@ struct xgpu_stream_capabilities
 	int32_t most_anisotropy;
 	uint8_t sample_counting, bgra_vertex_colors, base_vertex, sample_mask;
 	uint8_t mixed_constant_blend, dynamic_lights, dynamic_lights_preparable, hdr;
+	/* display.prism.material_overlay drawn (MATERIAL_OVERLAY) */
+	uint8_t material_overlay, unused[3];
 };
 
 struct xgpu_stream_reply_record
@@ -697,6 +702,21 @@ struct xgpu_stream_set_textures
 	uint32_t changed;
 };
 
+/* display.prism.material_overlay (xgpu.h's "The material overlay"): the
+uniform and images of the draws that follow whose pixel key has
+material_overlay, sent as it changes. Its stages are images
+(XGPU_STREAM_SOURCE_IMAGE, with no levels' targets; their format may be
+XGPU_STREAM_IMAGE_RGBA_LEVELS: data holds every level, level 0 first, each
+half the one before, at least 1, right after it) or none (source 0): tiles A
+to D, then the class mask, at the backend's XGPU_OVERLAY_BINDING on */
+#define XGPU_STREAM_IMAGE_RGBA_LEVELS 2
+struct xgpu_stream_material_overlay
+{
+	uint32_t header;
+	float uniforms[10][4];
+	struct xgpu_stream_texture_stage stages[5];
+};
+
 /* ---------- pipelines */
 
 /* the vertex constants first .. first + count, count vec4s following */
@@ -751,6 +771,9 @@ struct xgpu_stream_pixel_key
 	uint8_t source_blend, dynamic_lights, vr_effect, ambient_occlusion;
 	/* display.hdr's tag (xgpu_hdr.h) */
 	uint16_t hdr;
+	/* display.prism.material_overlay (xgpu.h; in what was padding: the
+	keys without it hash as they did) */
+	uint8_t material_overlay, unused;
 };
 
 /* xgpu_backend.h's struct xgpu_pipeline_key */
@@ -789,6 +812,8 @@ struct xgpu_stream_pixel_program
 	uint8_t count_samples, coverage_alpha, point_threshold, per_pixel_lighting, dynamic_lights, multiview;
 	uint8_t source_blend;
 	uint8_t ambient_occlusion;
+	/* display.prism.material_overlay (xgpu.h; in what was padding) */
+	uint8_t material_overlay;
 	/* display.hdr's tag (xgpu_hdr.h) */
 	uint16_t hdr;
 };
@@ -1306,7 +1331,8 @@ struct xgpu_stream_vr_screen_corrections
 
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_ring, 104);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_frame_end, 12);
-XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_capabilities, 20);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_capabilities, 24);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_material_overlay, 4 + 160 + 5 * 72);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_hdr, 24);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_tone_map, 24);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_panini, 56);

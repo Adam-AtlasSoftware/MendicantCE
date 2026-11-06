@@ -510,6 +510,10 @@ enum
 	XGPU_VULKAN_TOPOLOGY_TRIANGLES, XGPU_VULKAN_TOPOLOGY_TRIANGLE_STRIP, XGPU_VULKAN_TOPOLOGY_TRIANGLE_FAN,
 };
 
+/* (xgpu.h's XGPU_OVERLAY_BINDING and XGPU_OVERLAY_IMAGE_COUNT) */
+#define XGPU_VULKAN_BINDING_OVERLAY 4
+#define XGPU_VULKAN_OVERLAY_IMAGES 5
+
 /* a draw: its pipeline, topology and dynamic state; its vertices' bindings
 (those of bindings' bits) and indices (16-bit; buffer VK_NULL_HANDLE: none);
 the vertex constants and uniforms (ranges of the upload ring, or another
@@ -541,6 +545,12 @@ struct xgpu_vulkan_draw
 	struct xgpu_vulkan_range indices;
 	struct xgpu_vulkan_range constants, uniforms;
 	struct xgpu_vulkan_texture textures[4];
+	/* display.prism.material_overlay: its pixel shader reads the overlay's
+	images (tiles A to D, the class mask; none: a stand-in) at bindings
+	XGPU_VULKAN_BINDING_OVERLAY on of the textures' set (xgpu.h's "The
+	material overlay") */
+	uint8_t material_overlay;
+	struct xgpu_vulkan_texture overlay[XGPU_VULKAN_OVERLAY_IMAGES];
 	uint32_t count, first_index;
 	int32_t vertex_offset;
 };

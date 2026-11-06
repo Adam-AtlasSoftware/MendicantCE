@@ -234,6 +234,7 @@ static const uint32_t record_minimum[XGPU_STREAM_RECORD_TYPES] =
 	[XGPU_STREAM_WORLD_AO_FIELD] = sizeof(struct xgpu_stream_world_ao_field),
 	[XGPU_STREAM_WORLD_AO_PREPASS] = sizeof(struct xgpu_stream_world_ao_prepass),
 	[XGPU_STREAM_WORLD_AO_CASCADES] = sizeof(struct xgpu_stream_world_ao_cascades),
+	[XGPU_STREAM_MATERIAL_OVERLAY] = sizeof(struct xgpu_stream_material_overlay),
 	[XGPU_STREAM_PIPELINE_STAND_IN] = sizeof(struct xgpu_stream_pipeline_stand_in),
 	/* (and its folder's path, at least its NUL) */
 	[XGPU_STREAM_SCREENSHOT] = sizeof(struct xgpu_stream_screenshot) + XGPU_STREAM_RECORD_ALIGNMENT,
@@ -546,6 +547,21 @@ static int decode_record(struct host_render_decoder *decoder, const unsigned cha
 			!data_inside(decoder, start, size, box->data, box->size)))
 			return XGPU_STREAM_ERROR_BOUNDS;
 		CALL(world_ao_cascades, box);
+		break;
+	}
+	case XGPU_STREAM_MATERIAL_OVERLAY:
+	{
+		const struct xgpu_stream_material_overlay *overlay = (const void *)start;
+		int stage;
+
+		/* (images alone, or none: no targets' levels) */
+		for (stage = 0; stage < 5; stage++)
+		{
+			if ((overlay->stages[stage].source && overlay->stages[stage].source != XGPU_STREAM_SOURCE_IMAGE) ||
+				overlay->stages[stage].level_count)
+				return XGPU_STREAM_ERROR_RECORD;
+		}
+		CALL(material_overlay, overlay);
 		break;
 	}
 	case XGPU_STREAM_TARGET_CREATE:

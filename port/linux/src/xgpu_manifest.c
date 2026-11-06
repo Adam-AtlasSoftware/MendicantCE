@@ -33,18 +33,20 @@ uint64_t xgpu_manifest_hash(const void *data, size_t size, uint64_t hash)
 }
 
 /* a field of a key: its name, place, the size of each value (1, 2 or 4
-bytes), how many, and whether it is written in hex */
+bytes), how many, whether it is written in hex, and whether it is left out
+where it is 0 (a field added since the manifest was made: its lines stay as
+they were) */
 struct field
 {
 	const char *name;
 	size_t offset;
-	unsigned char size, count, hex;
+	unsigned char size, count, hex, optional;
 };
 
 #define KEY_FIELD(name, member, size, count, hex) \
-	{ name, offsetof(struct xgpu_stream_pipeline_key, member), size, count, hex }
+	{ name, offsetof(struct xgpu_stream_pipeline_key, member), size, count, hex, 0 }
 #define PIXEL_FIELD(name, member, size, count, hex) \
-	{ name, offsetof(struct xgpu_stream_pixel_key, member), size, count, hex }
+	{ name, offsetof(struct xgpu_stream_pixel_key, member), size, count, hex, 0 }
 
 static const struct field key_fields[] = {
 	KEY_FIELD("pa", packed_attributes, 4, 1, 1),
@@ -80,10 +82,12 @@ static const struct field pixel_fields[] = {
 	PIXEL_FIELD("dl", dynamic_lights, 1, 1, 0),
 	PIXEL_FIELD("ve", vr_effect, 1, 1, 0),
 	PIXEL_FIELD("ao", ambient_occlusion, 1, 1, 0),
+	/* (display.prism.material_overlay's: a mod's, never the game's own) */
+	{ "mo", offsetof(struct xgpu_stream_pixel_key, material_overlay), 1, 1, 0, 1 },
 };
 
 #define CONTEXT_FIELD(name, member, size, count) \
-	{ name, offsetof(struct xgpu_manifest_context, member), size, count, 0 }
+	{ name, offsetof(struct xgpu_manifest_context, member), size, count, 0, 0 }
 
 /* a d record's context (xgpu_manifest_context): cl the vertex program's
 lighting (lights, world's transform found), ct the targets (multisampled,
@@ -195,6 +199,13 @@ static void fields_write(struct text *text, const void *structure, const struct 
 
 	for (index = 0; index < count; index++)
 	{
+		if (fields[index].optional)
+		{
+			for (value = 0; value < fields[index].count && !field_value(structure, &fields[index], value); value++)
+				;
+			if (value == fields[index].count)
+				continue;
+		}
 		text_add(text, " %s=", fields[index].name);
 		for (value = 0; value < fields[index].count; value++)
 		{
@@ -755,7 +766,12 @@ int xgpu_draw_derive(const struct xgpu_draw_facts *facts, int unlit, struct xgpu
 		derived->alpha_test_samples = (uint8_t)facts->samples;
 	derived->hdr = facts->hdr_target ? facts->hdr : 0;
 	derived->lighting = XGPU_LIGHTING_NONE;
-	if (!unlit && facts->lights && !facts->lighting_failed && facts->per_pixel)
+	/* (display.prism.material_overlay: lit for each pixel, by the
+	position its lighting hands on) */
+	if (!unlit && facts->lights && !facts->lighting_failed && facts->material_overlay &&
+		(facts->lights == 2 || facts->world_found))
+		derived->material_overlay = (uint8_t)facts->material_overlay;
+	if (!unlit && facts->lights && !facts->lighting_failed && (facts->per_pixel || derived->material_overlay))
 	{
 		/* a model lighting program's draw lit for each pixel: the enhanced
 		dynamic lights in its two point lights' place, its ambient light by
@@ -876,6 +892,8 @@ int xgpu_manifest_derive(const struct xgpu_manifest_draw *draw, const struct xgp
 	facts.lights_active = settings->enhanced_lights && context->lights_present;
 	facts.environment = context->environment;
 	facts.sample_mask = 1;
+	/* (a mod's material overlay, where a recording has one) */
+	facts.material_overlay = key->pixel.material_overlay;
 	lit = xgpu_draw_derive(&facts, unlit, &parts);
 	/* (its bytes, padding too: a draw's hash is of them) */
 	memcpy(derived, draw, sizeof(*derived));
@@ -887,6 +905,7 @@ int xgpu_manifest_derive(const struct xgpu_manifest_draw *draw, const struct xgp
 	derived->key.pixel.per_pixel_lighting = parts.per_pixel_lighting;
 	derived->key.pixel.dynamic_lights = parts.dynamic_lights;
 	derived->key.pixel.ambient_occlusion = parts.ambient_occlusion;
+	derived->key.pixel.material_overlay = parts.material_overlay;
 	return lit;
 }
 

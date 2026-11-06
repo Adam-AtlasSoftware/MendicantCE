@@ -191,6 +191,9 @@ static struct
 	BOOL stages_sent[4];
 	struct xgpu_stream_texture_stage stages[4];
 	struct xgpu_stream_texture_level levels[4][XGPU_STREAM_MIP_LEVELS];
+	/* display.prism.material_overlay's, as last sent */
+	BOOL overlay_sent;
+	struct xgpu_stream_material_overlay overlay;
 	/* the values of the inputs no stream feeds (set_vertices'), and of
 	the registers immediate mode's vertices do not write (each the host's
 	own) */
@@ -484,6 +487,7 @@ static void forget_sent(void)
 	stream.dynamic_sent = FALSE;
 	stream.uniforms_sent = FALSE;
 	memset(stream.stages_sent, 0, sizeof(stream.stages_sent));
+	stream.overlay_sent = FALSE;
 	stream.vertex_attributes.sent = 0;
 	stream.immediate_attributes.sent = 0;
 }
@@ -642,6 +646,7 @@ void xgpu_backend_initialize(void)
 	xgpu_backend_capabilities.mixed_constant_blend = stream.capabilities.mixed_constant_blend;
 	xgpu_backend_capabilities.dynamic_lights = stream.capabilities.dynamic_lights;
 	xgpu_backend_capabilities.hdr = stream.capabilities.hdr;
+	xgpu_backend_capabilities.material_overlay = stream.capabilities.material_overlay;
 }
 
 /* (at exit) the frames submitted played, the render thread ended */
@@ -1196,6 +1201,57 @@ void xgpu_backend_set_textures(const struct xgpu_texture_source stages[4])
 		memcpy(stream.levels[stage], levels[stage], level_bytes);
 		stream.stages_sent[stage] = TRUE;
 	}
+}
+
+/* display.prism.material_overlay: the images as stages (the tiles repeating
+and filtered between their levels, the class mask clamped to its edge), and
+the uniform, sent as they change */
+void xgpu_backend_material_overlay(const struct xgpu_material_overlay *overlay)
+{
+	struct xgpu_stream_material_overlay described, *record_body;
+	int index;
+
+	if (!stream.open)
+		return;
+	memset(&described, 0, sizeof(described));
+	memcpy(described.uniforms, overlay->uniforms, sizeof(described.uniforms));
+	for (index = 0; index < XGPU_OVERLAY_IMAGE_COUNT; index++)
+	{
+		struct xgpu_stream_texture_stage *stage = &described.stages[index];
+#ifndef XGPU_STREAM_TEST
+		const struct xgpu_image *image = xgpu_image_get(overlay->images[index]);
+		BOOL mask = index == XGPU_OVERLAY_TILE_COUNT;
+		int axis;
+
+		if (!image)
+			continue;
+		stage->source = XGPU_STREAM_SOURCE_IMAGE;
+		stage->sampler_type = _xgpu_sampler_2d;
+		stage->sampled = 1;
+		stage->resource = overlay->images[index];
+		stage->resource_format = (uint32_t)image->format;
+		stage->resource_size = (uint32_t)image->serial;
+		stage->data = STREAM_ADDRESS(image->pixels);
+		stage->width = (uint32_t)image->width;
+		stage->height = (uint32_t)image->height;
+		stage->levels = (uint32_t)image->levels;
+		stage->sampler.minify = XGPU_FILTER_LINEAR;
+		stage->sampler.mip = mask ? XGPU_FILTER_NONE : XGPU_FILTER_LINEAR;
+		stage->sampler.magnify = XGPU_FILTER_LINEAR;
+		for (axis = 0; axis < 3; axis++)
+			stage->sampler.address[axis] = mask ? XGPU_ADDRESS_CLAMP : XGPU_ADDRESS_WRAP;
+#else
+		(void)stage;
+#endif
+	}
+	if (stream.overlay_sent && !memcmp(&described.uniforms, &stream.overlay.uniforms, sizeof(described.uniforms)) &&
+		!memcmp(described.stages, stream.overlay.stages, sizeof(described.stages)))
+		return;
+	record_body = record(XGPU_STREAM_MATERIAL_OVERLAY, sizeof(*record_body));
+	memcpy(record_body->uniforms, described.uniforms, sizeof(record_body->uniforms));
+	memcpy(record_body->stages, described.stages, sizeof(record_body->stages));
+	stream.overlay = described;
+	stream.overlay_sent = TRUE;
 }
 
 /* ---------- pipelines */

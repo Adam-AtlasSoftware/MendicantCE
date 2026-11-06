@@ -257,6 +257,9 @@ static struct
 	int feedback_bound;
 	uint32_t textures_serial;
 	struct xgpu_vulkan_texture textures[4];
+	/* display.prism.material_overlay's, as last sent (its images looked up
+	at each draw that reads them: the cache keeps those it is asked for) */
+	struct xgpu_stream_material_overlay overlay;
 	/* the copy of a target drawn into that a draw samples: of which
 	target, as of which of its draws */
 	struct xgpu_vulkan_image *feedback;
@@ -943,6 +946,38 @@ static struct xgpu_vulkan_image *composite_get(const struct host_render_texture_
 	return composite->image;
 }
 
+/* display.prism.material_overlay: the uniform and images of the draws that
+follow whose pixel program has it */
+static void stream_material_overlay(void *context, const struct xgpu_stream_material_overlay *record)
+{
+	(void)context;
+	if (memcmp(stream.overlay.uniforms, record->uniforms, sizeof(stream.overlay.uniforms)))
+		stream.uniforms_dirty = 1;
+	stream.overlay = *record;
+}
+
+/* ...its images and samplers, for a draw that reads them (a stand-in where
+one is missing: the overlay's tiles of nothing, all 0.5, are not drawn
+then, as mod_materials.c arms none before they are made) */
+static void overlay_bind(struct xgpu_vulkan_texture overlay[XGPU_VULKAN_OVERLAY_IMAGES])
+{
+	int index;
+
+	memset(overlay, 0, XGPU_VULKAN_OVERLAY_IMAGES * sizeof(overlay[0]));
+	for (index = 0; index < XGPU_VULKAN_OVERLAY_IMAGES; index++)
+	{
+		const struct xgpu_stream_texture_stage *stage = &stream.overlay.stages[index];
+
+		overlay[index].kind = XGPU_VULKAN_IMAGE_2D;
+		if (stage->source != XGPU_STREAM_SOURCE_IMAGE)
+			continue;
+		overlay[index].sampler = sampler_get(&stage->sampler, 0);
+		overlay[index].image = xgpu_vulkan_textures_get(stage);
+		if (overlay[index].image && xgpu_vulkan_image_description(overlay[index].image)->type != XGPU_VULKAN_IMAGE_2D)
+			overlay[index].image = NULL;
+	}
+}
+
 /* the stages' images and samplers for a draw */
 static void textures_bind(void)
 {
@@ -1132,6 +1167,7 @@ static void pixel_program_convert(const struct xgpu_stream_pixel_program *wire, 
 	program->source_blend = wire->source_blend;
 	program->ambient_occlusion = wire->ambient_occlusion;
 	program->hdr = wire->hdr;
+	program->material_overlay = wire->material_overlay;
 }
 
 /* debug.gpu_dump_shaders (HALO_VULKAN_SHADERS) writes each module into its
@@ -1512,6 +1548,8 @@ static int uniforms_update(int effect)
 		/* (display.ambient_occlusion "world": the draw's object) */
 		to->world_ao[0] = from->world_ao[0];
 		to->world_ao[1] = from->world_ao[1];
+		/* (display.prism.material_overlay's, read by its shaders alone) */
+		memcpy(to->material_overlay, stream.overlay.uniforms, sizeof(to->material_overlay));
 		memcpy(to->blend_constant, stream.dynamic.blend_color, sizeof(to->blend_constant));
 		for (stage = 0; stage < 4; stage++)
 		{
@@ -2048,6 +2086,11 @@ static int draw_pipeline(const struct draw_input *input, int apart)
 	if (attempt == 3)
 		return 1;
 	memcpy(draw.textures, stream.textures, sizeof(draw.textures));
+	/* (display.prism.material_overlay's images, where its shader reads
+	them) */
+	draw.material_overlay = stream.definition->pixel_program.material_overlay != 0 && !prepass.drawing;
+	if (draw.material_overlay)
+		overlay_bind(draw.overlay);
 	draw.constants = stream.constants_range;
 	draw.uniforms = stream.uniforms_range;
 	draw.dynamic = &stream.dynamic;
@@ -3249,6 +3292,8 @@ static void stream_initialize(void *context, struct xgpu_stream_capabilities *ca
 	shaders, reading the pixels they draw over, the tone map in place:
 	where the device reads its colour attachments, the desktop's) */
 	capabilities->hdr = stream.capabilities.color_read != 0;
+	/* (display.prism.material_overlay: its shaders, xgpu_spirv.c's) */
+	capabilities->material_overlay = 1;
 }
 
 static void stream_prepare(void *context)
@@ -3343,6 +3388,7 @@ const struct host_render_backend *xgpu_vulkan_stream_backend(void)
 		backend.clear_target = stream_clear_target;
 		backend.read_target = stream_read_target;
 		backend.set_textures = stream_set_textures;
+		backend.material_overlay = stream_material_overlay;
 		backend.set_constants = stream_set_constants;
 		backend.vertex_program = stream_vertex_program;
 		backend.vertex_lighting = stream_vertex_lighting;

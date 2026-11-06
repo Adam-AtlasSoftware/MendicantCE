@@ -802,7 +802,25 @@ enum
 {
 	_image_rgba,
 	_image_coverage,
+	/* (every level given: xgpu_stream.h's XGPU_STREAM_IMAGE_RGBA_LEVELS) */
+	_image_rgba_levels,
 };
+
+/* the bytes of an image's levels given, level 0 first, each half the one
+before (at least 1) */
+static uint64_t levels_bytes(uint32_t width, uint32_t height, uint32_t levels)
+{
+	uint64_t bytes = 0;
+	uint32_t level;
+
+	for (level = 0; level < levels; level++)
+	{
+		uint32_t level_width = width >> level ? width >> level : 1, level_height = height >> level ? height >> level : 1;
+
+		bytes += (uint64_t)level_width * level_height * 4;
+	}
+	return bytes;
+}
 
 static struct xgpu_vulkan_image *image_get(const struct xgpu_stream_texture_stage *stage)
 {
@@ -811,8 +829,12 @@ static struct xgpu_vulkan_image *image_get(const struct xgpu_stream_texture_stag
 	const void *pixels = host_pointer(stage->data);
 	uint32_t width = stage->width, height = stage->height;
 	uint32_t texel = stage->resource_format == _image_coverage ? 1 : 4;
+	int given = stage->resource_format == _image_rgba_levels;
+	uint32_t most = width && height && width <= 16384 && height <= 16384 ? levels_most(width, height, 1) : 1;
+	uint32_t given_levels = given ? (stage->levels < most ? stage->levels : most) : 1;
 
-	if (!pixels || !width || !height || width > 16384 || height > 16384 || !readable(stage->data, width * height * texel))
+	if (!pixels || !width || !height || width > 16384 || height > 16384 ||
+		!readable(stage->data, given ? (uint32_t)levels_bytes(width, height, given_levels) : width * height * texel))
 		return NULL;
 	for (entry = *bucket; entry; entry = entry->next)
 	{
@@ -837,7 +859,6 @@ static struct xgpu_vulkan_image *image_get(const struct xgpu_stream_texture_stag
 		entry->description.levels != stage->levels || entry->size_word != stage->resource_format)
 	{
 		struct xgpu_vulkan_image_description made;
-		uint32_t most = levels_most(width, height, 1);
 
 		if (entry->image)
 			xgpu_vulkan_image_destroy(entry->image);
@@ -858,6 +879,24 @@ static struct xgpu_vulkan_image *image_get(const struct xgpu_stream_texture_stag
 			return NULL;
 	}
 	entry->format_word = stage->resource_size;
+	if (given)
+	{
+		/* (each level as it is given) */
+		const unsigned char *level_pixels = pixels;
+		uint32_t level;
+
+		for (level = 0; level < given_levels; level++)
+		{
+			uint32_t level_width = width >> level ? width >> level : 1, level_height = height >> level ? height >> level : 1;
+
+			xgpu_vulkan_image_upload(entry->image, level, 0, 0, 0, 0, level_width, level_height, 1, level_pixels,
+				level_width * 4, 0);
+			level_pixels += (size_t)level_width * level_height * 4;
+		}
+		cache.statistics.images++;
+		cache.statistics.bytes += levels_bytes(width, height, given_levels);
+		return entry->image;
+	}
 	xgpu_vulkan_image_upload(entry->image, 0, 0, 0, 0, 0, width, height, 1, pixels, width * texel, 0);
 	if (stage->levels > 1)
 		xgpu_vulkan_image_make_levels(entry->image, 1);
