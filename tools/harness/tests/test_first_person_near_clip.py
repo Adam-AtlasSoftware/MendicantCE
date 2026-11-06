@@ -23,8 +23,8 @@ CONTROLS = [
      "stock / drawn;", "widened"),
     # widened where it is narrower
     ("drawn > stock", "drawn < stock", "widened"),
-    # nearer whatever the angle: the stock angle no longer the game's
-    ("if (reached < result)\n\t\t\tresult = reached;", "result = reached * 0.99f;", "stock"),
+    # a narrower projection's too: the plane farther than the game's
+    ("drawn > stock", "drawn != stock", "narrower"),
     # the move toward the eye left out
     ("if (forward_offset < 0.0f)", "if (0)", "moved"),
     # no least: the plane behind the eye

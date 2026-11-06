@@ -105,14 +105,12 @@ real render_first_person_near_clip_distance(struct render_camera const *camera,
 	if (!(z_near > 0.0f))
 		return z_near;
 	/* (a projection wider than the stock angle: its corners as far from the
-	eye as the stock angle's, in this viewport) */
+	eye as the stock angle's, in this viewport; a narrower one keeps the
+	game's) */
 	if (stock > 0.0f && drawn > stock && drawn < 1.0e6f)
 	{
-		real reached = z_near * near_clip_corner(camera, frustum_bounds, stock) /
+		result = z_near * near_clip_corner(camera, frustum_bounds, stock) /
 			near_clip_corner(camera, frustum_bounds, drawn);
-
-		if (reached < result)
-			result = reached;
 	}
 	/* (the weapon moved nearer the eye: the plane with it) */
 	if (forward_offset < 0.0f)
