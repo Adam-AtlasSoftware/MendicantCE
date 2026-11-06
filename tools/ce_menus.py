@@ -713,8 +713,8 @@ def port_pictures_only() -> None:
     of them, each group where its first was (as main writes them), the rest
     of it as it was; a frame drawn again only where its SVG changed; files of
     pictures it no longer has removed, and menus.json listing what it has"""
-    for name, lines in [*port_settings.settings_files().items(), *port_settings.multiplayer_files().items(),
-                        *port_settings.campaign_files().items()]:
+    ports = {**port_settings.settings_files(), **port_settings.multiplayer_files(), **port_settings.campaign_files()}
+    for name, lines in ports.items():
         (CE / name).write_text("\n".join(lines))
     art = Art.__new__(Art)
     art.pngs = []
@@ -758,6 +758,10 @@ def port_pictures_only() -> None:
     listed = json.loads((MENUS / "menus.json").read_text())
     pngs = sorted((set(name for name in listed["files"] if name.endswith(".png")) - old_pngs) | set(art.pngs))
     xmls = [name for name in listed["files"] if not name.endswith(".png")]
+    # (and a file of the port's screens new to it, before the first listed
+    # after it)
+    for name in sorted(set(f"ce/{name}" for name in ports) - set(xmls)):
+        xmls.insert(next((index for index, listed_name in enumerate(xmls) if listed_name > name), len(xmls)), name)
     listed["files"] = xmls + pngs
     (MENUS / "menus.json").write_text(json.dumps(listed, indent=1) + "\n")
     added = sorted(set(name for name, _ in bitmap_blocks((CE / "bitmaps.xml").read_text())) - set(old_names))
@@ -813,8 +817,9 @@ def main() -> None:
     folders = defaultdict(list)
     for tag in sorted(widgets):
         folder = our_name(tag).rsplit("/", 1)[0] if "/" in our_name(tag) else "shell"
-        # (the settings screens this port has its own of: tools/port_settings.py)
-        if not port_settings.replaced(folder):
+        # (the settings screens this port has its own of, and the widgets:
+        # tools/port_settings.py)
+        if not port_settings.replaced(folder) and our_name(tag) not in port_settings.REPLACED_WIDGETS:
             folders[folder].append(tag)
     string_lists, bitmaps = set(), set()
     for widget in widgets.values():

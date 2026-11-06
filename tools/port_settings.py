@@ -2593,19 +2593,7 @@ WIDGET_PATCHES = {
         '<on event="back" run="port map list back"/>',
     ]},
     "main_menu/solo_level_select/solo_level_select_list": {"swap": {"main_menu/new_select/list_item_0": MAP_KIND_CHOOSER}},
-    # (each description shows the other kind's maps too: a campaign level's
-    # picture, name and words on the Map screen, a multiplayer map's on New
-    # Game's)
-    f"{MT}/mp_map_select/mp_map_right_item": {"children": [
-        '<child widget="main_menu/solo_level_select/replay_level_right_name"/>',
-        '<child widget="main_menu/solo_level_select/replay_level_right_pic"/>',
-        '<child widget="main_menu/solo_level_select/replay_level_right_data"/>',
-    ]},
-    "main_menu/solo_level_select/replay_level_right_item": {"children": [
-        f'<child widget="{MT}/mp_map_select/mp_map_right_name"/>',
-        f'<child widget="{MT}/mp_map_select/mp_map_right_pic"/>',
-        f'<child widget="{MT}/mp_map_select/mp_map_right_data"/>',
-    ]},
+    # (their descriptions: the port's, _map_description)
     # (Item Options' loadout rows, over its buttons)
     "main_menu/settings_select/multiplayer_setup/item_options_edit/item_options_menu": {"insert_before": {
         "main_menu/settings_select/multiplayer_setup/item_options_edit/item_button_bar": [
@@ -3933,6 +3921,89 @@ def _map_kind() -> list:
     lines += _strings("main_menu/new_select/var_map_kinds",
                       ["SINGLEPLAYER", "MULTIPLAYER", "CUSTOM SINGLEPLAYER", "CUSTOM MULTIPLAYER"])
     return lines
+
+
+# the map lists' description (the Map screen's and New Game's: the box beside
+# the list, main_menu/new_select/sel_list_desc_bkd, whose picture is drawn at
+# its size from the widget's corner, a frame MAP_DESC_FRAME with an edge
+# MAP_DESC_EDGE wide). The port lays it out, not the PC version's tags: its
+# picture, name and words in a column across the box, MAP_DESC_ROOM in from
+# its edge either side, centred in it, the words wrapped to the column (text
+# flags "wrap unbreak": the PC version's line breaks, written for its 146-unit
+# column at the box's left, made spaces), so that the box's right is not left
+# empty (issue 704). The widgets keep the PC version's names, which
+# menu_functions.c's level_description finds them by
+MAP_DESC_FRAME = (400, 73, 220, 335)
+MAP_DESC_EDGE, MAP_DESC_ROOM = 2, 10
+# (the picture at its size, ui.map's 140 by 114: CAMPAIGN_PICTURE; the name
+# under it, room for two lines of large_ui; New Game's difficulty badges, the
+# Xbox's small ones, at the column's foot; the gap between each and the next)
+MAP_DESC_NAME_HEIGHT = 46
+MAP_DESC_BADGE, MAP_DESC_BADGE_STEP = (44, 48), 50
+MAP_DESC_GAP = 6
+# (the two lists' descriptions: their folder, their widgets' names' start,
+# the list of the names, the picture, and the description's own name)
+MAP_DESCRIPTIONS = {
+    "mp": (f"{MT}/mp_map_select", "mp_map", "main_menu/mp_map_list", "ui\\shell\\bitmaps\\mp_map_grafix",
+           "mp_map_extended_desc"),
+    "solo": ("main_menu/solo_level_select", "replay_level", "main_menu/map_list", "ui\\shell\\bitmaps\\sp_levels",
+             "solo_level_extended_desc"),
+}
+
+
+def map_desc_column() -> tuple:
+    """the description's column: its left and width (MAP_DESC_ROOM in from the box's edge either side), its top
+    and bottom"""
+    left, top, width, height = MAP_DESC_FRAME
+    inset = MAP_DESC_EDGE + MAP_DESC_ROOM
+    return left + inset, width - 2 * inset, top + inset, top + height - inset
+
+
+def _map_description(kind: str) -> list:
+    """a map list's description (MAP_DESCRIPTIONS): the picture, name and words of its own kind's map, and of the
+    other's (each list shows either kind's maps: menu_functions.c's map lists), and on New Game's its difficulty
+    badges"""
+    folder, prefix, names, pictures, description = MAP_DESCRIPTIONS[kind]
+    x, width, top, bottom = map_desc_column()
+    picture_width, picture_height = CAMPAIGN_PICTURE
+    name_top = top + picture_height + MAP_DESC_GAP
+    words_top = name_top + MAP_DESC_NAME_HEIGHT + MAP_DESC_GAP
+    badge_width, badge_height = MAP_DESC_BADGE
+    badges_top = bottom - badge_height
+    badges_left = x + (width - badge_width - 2 * MAP_DESC_BADGE_STEP) // 2
+    other = MAP_DESCRIPTIONS["solo" if kind == "mp" else "mp"]
+    item = f"{folder}/{prefix}_right_item"
+    children = [f'<child widget="{folder}/{prefix}_right_{part}"/>' for part in ("name", "pic", "data")]
+    if kind == "solo":
+        children += [f'<child widget="{folder}/difficulty_indicator" x="{badges_left + MAP_DESC_BADGE_STEP * index}" '
+                     f'y="{badges_top}"/>' for index in range(3)]
+    children += [f'<child widget="{other[0]}/{other[1]}_right_{part}"/>' for part in ("name", "pic", "data")]
+    lines = _widget(f"{folder}/{description}", [("width", 640), ("height", 480)],
+                    ['<child widget="main_menu/current_profile_name"/>', f'<child widget="{item}"/>'])
+    lines += _widget(item, [("controller", 1), ("left", x), ("top", top), ("width", width), ("height", bottom - top)],
+                     children)
+
+    def words(part, words_top, height, strings, font):
+        return _widget(f"{folder}/{prefix}_right_{part}",
+                       [("type", "text"), ("controller", 1), ("left", x), ("top", words_top), ("width", width),
+                        ("height", height), ("string_list", strings), ("string_index", 2), ("font", font),
+                        ("color", SETTINGS_BLUE), ("align", "center"), ("text_flags", "wrap unbreak")], [])
+
+    lines += words("name", name_top, MAP_DESC_NAME_HEIGHT, names, "ui\\large_ui")
+    lines += _widget(f"{folder}/{prefix}_right_pic",
+                     [("controller", 1), ("left", x + (width - picture_width) // 2), ("top", top),
+                      ("width", picture_width), ("height", picture_height), ("bitmap", pictures),
+                      ("radius", ART_CORNER_RADIUS)], [])
+    # (New Game's words end above its badges; the Map screen's, which has none, at the column's foot)
+    words_bottom = badges_top - MAP_DESC_GAP if kind == "solo" else bottom
+    lines += words("data", words_top, words_bottom - words_top, f"{folder}/map_data", "ui\\small_ui")
+    return lines
+
+
+# (the PC version's widgets the port writes its own of: tools/ce_menus.py
+# leaves them out of their folders' files)
+REPLACED_WIDGETS = {f"{folder}/{name}" for folder, prefix, _, _, description in MAP_DESCRIPTIONS.values()
+                    for name in [description, *(f"{prefix}_right_{part}" for part in ("item", "name", "pic", "data"))]}
 
 
 def favorite_star_frames(icons: Path) -> list:
@@ -7003,6 +7074,9 @@ def multiplayer_files() -> dict:
         f"{HOST_CONTROLS}/touch".replace("/", ".") + ".xml": head + _touch_host_controls()[1] + ["</menus>", ""],
         MT.replace("/", ".") + ".port.xml": head + _multiplayer_status() + ["</menus>", ""],
         "main_menu/new_select".replace("/", ".") + ".port.xml": head + _map_kind() + ["</menus>", ""],
+        **{MAP_DESCRIPTIONS[kind][0].replace("/", ".") + ".port.xml":
+           [head[0], "<!-- The map lists' description, laid out by the port (tools/port_settings.py) -->", head[2]] +
+           _map_description(kind) + ["</menus>", ""] for kind in MAP_DESCRIPTIONS},
         "main_menu/settings_select/multiplayer_setup/item_options_edit".replace("/", ".") + ".port.xml": head + _item_options_extras() + ["</menus>", ""],
         PLAYER_EDIT.replace("/", ".") + ".port.xml": head + _player_options_extras() + ["</menus>", ""],
         TEAMPLAY_EDIT.replace("/", ".") + ".port.xml": head + _teamplay_options_extras() + ["</menus>", ""],

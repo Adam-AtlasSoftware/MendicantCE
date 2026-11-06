@@ -399,8 +399,10 @@ boolean ui_widget_port_wheel_sideways(long flags)
 static char const *const widget_type_names[] = { "container", "text", "spinner", "column_list" };
 static char const *const list_flag_names[] = { "items_in_code", "items_from_strings", "one_tooltip", "single_preview" };
 /* (wrap: the port's, its text fitted to its box, ui_widget.c's
-ui_widget_port_text_fit) */
-static char const *const text_flag_names[] = { "editable", "password", "flashing", "no_focus_test", "wrap" };
+ui_widget_port_text_fit; unbreak, with wrap: its written line breaks made
+spaces first, ui_widget_port_text_unbreak) */
+static char const *const text_flag_names[] = { "editable", "password", "flashing", "no_focus_test", "wrap",
+	"unbreak" };
 static char const *const align_names[] = { "left", "right", "center" };
 /* (build_number and pid are the PC version's, which this engine has not) */
 static char const *const replace_names[] = { "none", "controller", "build_number", "pid" };
