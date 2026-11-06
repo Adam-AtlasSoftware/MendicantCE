@@ -59,7 +59,10 @@ def generated(fault=None):
     if fault == 'key':
         checks = mutated(checks, 'header->key == key &&', '')
     if fault == 'blind':
-        code = mutated(code, '\twords[2] = (unsigned long)(hdr_view != 0) | (unsigned long)(lights > 0) << 1 |\n\t\t(unsigned long)(environment != 0) << 2;\n', '\twords[2] = 0;\n')
+        code = mutated(code, '\twords[2] = (unsigned long)(hdr_view != 0) | (unsigned long)(lights > 0) << 1 |\n\t\t(unsigned long)(environment != 0) << 2 | (unsigned long)world_span << 3;\n', '\twords[2] = 0;\n')
+    if fault == 'span':
+        # (a record made with the setting off: a found window's draw and a mirror's merged)
+        code = mutated(code, ' | (unsigned long)world_span << 3;', ';')
     if fault == 'tags':
         code = mutated(code, '\twords[1] = (unsigned long)hdr_kind;\n', '\twords[1] = 0;\n')
     if fault == 'derivation':
@@ -79,7 +82,7 @@ def test_prepared_journal(case):
 
 @pytest.mark.parametrize('fault,case', [('repeats', 'roundtrip'), ('delta', 'roundtrip'), ('type', 'malformed'),
                                         ('missing', 'missing'), ('key', 'stale'), ('blind', 'settings'),
-                                        ('tags', 'settings'), ('derivation', 'key'),
+                                        ('tags', 'settings'), ('span', 'settings'), ('derivation', 'key'),
                                         ('scenario', 'key'), ('numbers', 'pages'), ('own_pages', 'pages'),
                                         ('floor', 'pages'), ('shared', 'pages')])
 def test_negative(fault, case):

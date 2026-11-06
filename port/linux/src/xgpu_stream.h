@@ -452,12 +452,16 @@ on are the pre-pass's, into targets of target's size), _END (the pre-pass
 done: the occlusion found over the window's corners (left, top, right,
 bottom, in target's pixels) as the camera saw it (struct
 xgpu_world_ao_pass)), or _NONE (the occlusion found no more: the surfaces
-read 1 from here on) */
+read 1 from here on). While a map is prepared (the others then ignored):
+_TWINS (the draws from here on would be drawn in the pre-pass in play:
+each one's twin made with it, xgpu_stream_world_ao_twin) and _NONE (no
+more) */
 enum
 {
 	XGPU_WORLD_AO_PREPASS_NONE,
 	XGPU_WORLD_AO_PREPASS_BEGIN,
 	XGPU_WORLD_AO_PREPASS_END,
+	XGPU_WORLD_AO_PREPASS_TWINS,
 };
 /* the camera, as the occlusion's pass finds a pixel's world position
 (world_ao.h's world_ao_pass_position): [0] its position and its near

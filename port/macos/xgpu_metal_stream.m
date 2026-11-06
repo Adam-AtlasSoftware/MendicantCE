@@ -151,10 +151,12 @@ WORLD_AO_PREPASS): the pre-pass is drawing (into inputs and depth, its own
 targets of the window's target's size); each pipeline's twin, made of its
 definition (xgpu_stream_world_ao_twin), its functions and its pipeline when
 first drawn (never waited for: its pixels have no inputs, an occlusion of
-1, until they are); the occlusion, and the pass's functions */
+1, until they are), or as a map is prepared (twins: its draws are the
+pre-pass's in play, XGPU_WORLD_AO_PREPASS_TWINS); the occlusion, and the
+pass's functions */
 static struct
 {
-	BOOL active, failed;
+	BOOL active, failed, twins;
 	uint32_t width, height;
 	uint32_t inputs, depth, pixels;
 	uint32_t pixels_width, pixels_height;
@@ -938,6 +940,9 @@ static BOOL draw_prepare(const struct xgpu_metal_vertex_attribute *attributes, c
 		allocating transient draw data for an unseen picture. */
 		textures_bind();
 		xgpu_metal_prepare(&pipeline);
+		/* (where its draws are the pre-pass's in play: its twin's too) */
+		if (prepass.twins)
+			(void)prepass_draw_prepare(attributes, strides, streams, constants, integers);
 		return NO;
 	}
 	if (stream.prepared && !xgpu_metal_pipeline_known(&pipeline))
@@ -1562,6 +1567,22 @@ static void prepass_prepare(void)
 		xgpu_metal_prepare(&pipeline);
 }
 
+/* the twins' definitions and entries, made once (NO: none can be) */
+static BOOL prepass_tables(void)
+{
+	if (prepass.definitions)
+		return YES;
+	prepass.definitions = calloc(XGPU_STREAM_PIPELINES, sizeof(*prepass.definitions));
+	prepass.entries = calloc(XGPU_STREAM_PIPELINES, sizeof(*prepass.entries));
+	if (prepass.definitions && prepass.entries)
+		return YES;
+	free(prepass.definitions);
+	free(prepass.entries);
+	prepass.definitions = NULL;
+	prepass.entries = NULL;
+	return NO;
+}
+
 static BOOL prepass_draw_prepare(const struct xgpu_metal_vertex_attribute *attributes, const uint16_t *strides,
 	const struct xgpu_metal_source *streams, const float (*constants)[4], uint16_t integers)
 {
@@ -1571,7 +1592,7 @@ static BOOL prepass_draw_prepare(const struct xgpu_metal_vertex_attribute *attri
 	struct xgpu_metal_stream_variant variant;
 	struct stream_pipeline *entry;
 
-	if (!prepass.entries || !xgpu_stream_world_ao_twin(&twin))
+	if (!prepass_tables() || !xgpu_stream_world_ao_twin(&twin))
 		return NO;
 	entry = &prepass.entries[id];
 	if (memcmp(&twin, &prepass.definitions[id], sizeof(twin)))
@@ -1589,9 +1610,17 @@ static BOOL prepass_draw_prepare(const struct xgpu_metal_vertex_attribute *attri
 	pipeline.pixel_shader = entry->pixel_shader;
 	memcpy(pipeline.attributes, attributes, sizeof(pipeline.attributes));
 	memcpy(pipeline.strides, strides, sizeof(pipeline.strides));
-	/* (made on the compilers as first drawn, never waited for) */
+	/* (made as the map is prepared; else on the compilers as first drawn,
+	never waited for, and missed) */
+	if (stream.preparing)
+	{
+		xgpu_metal_prepare(&pipeline);
+		return NO;
+	}
 	if (!xgpu_metal_pipeline_made(&pipeline))
 	{
+		if (stream.prepared && !xgpu_metal_pipeline_known(&pipeline))
+			pipeline_missed(&twin.key);
 		xgpu_metal_prepare(&pipeline);
 		return NO;
 	}
@@ -1609,7 +1638,14 @@ static void stream_world_ao_prepass(void *context, const struct xgpu_stream_worl
 	struct stream_target *target = target_get(record->target);
 
 	(void)context;
+	/* (a map prepared: whether its draws are the pre-pass's in play, their
+	twins made with them, draw_prepare) */
 	if (stream.preparing)
+	{
+		prepass.twins = record->phase == XGPU_WORLD_AO_PREPASS_TWINS;
+		return;
+	}
+	if (record->phase == XGPU_WORLD_AO_PREPASS_TWINS)
 		return;
 	if (record->phase == XGPU_WORLD_AO_PREPASS_BEGIN)
 	{
@@ -1618,21 +1654,8 @@ static void stream_world_ao_prepass(void *context, const struct xgpu_stream_worl
 
 		/* (what the surfaces read: 1, until the pass finds it) */
 		xgpu_metal_world_ao_set_pixels(0);
-		if (!target || !prepass_pipeline(&pipeline))
+		if (!target || !prepass_pipeline(&pipeline) || !prepass_tables())
 			return;
-		if (!prepass.definitions)
-		{
-			prepass.definitions = calloc(XGPU_STREAM_PIPELINES, sizeof(*prepass.definitions));
-			prepass.entries = calloc(XGPU_STREAM_PIPELINES, sizeof(*prepass.entries));
-			if (!prepass.definitions || !prepass.entries)
-			{
-				free(prepass.definitions);
-				free(prepass.entries);
-				prepass.definitions = NULL;
-				prepass.entries = NULL;
-				return;
-			}
-		}
 		{
 			uint32_t width = prepass.width, height = prepass.height;
 
@@ -1815,6 +1838,7 @@ static uint32_t stream_prepared(void *context)
 	(void)context;
 	stream.preparing = NO;
 	stream.prepared = YES;
+	prepass.twins = NO;
 	return (uint32_t)(xgpu_metal_prepared() * 1000.0 + 0.5);
 }
 
