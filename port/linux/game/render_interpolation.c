@@ -3953,6 +3953,90 @@ boolean render_interpolation_view_flashlight(
 	return TRUE;
 }
 
+/* a view's heading, level: its forward along the ground (FALSE: it looks
+straight up or down, and has none) */
+static boolean view_heading(
+	struct observer_result const *view,
+	real *i,
+	real *j)
+{
+	real length = (real)sqrt(view->forward.i * view->forward.i + view->forward.j * view->forward.j);
+
+	if (length < 1e-4f)
+		return FALSE;
+	*i = view->forward.i / length;
+	*j = view->forward.j / length;
+	return TRUE;
+}
+
+/* The local player's own body in the first person on foot, drawn below the
+view as its legs (display.first_person_legs: first_person_legs.c). The body
+is drawn between the ticks, a tick behind, as the view between the ticks is;
+the view drawn is the newest step's (display.direct_camera), a tick's motion
+on, and points where the player aims in the frame. Drawn where the body has
+them, the legs trailed the view by a tick's motion, and by more or less as
+each step's speed and each frame's aim came: they slid under the view and
+stepped against it, and swung about it as the aim turned (#697). Here the
+move that takes the view between the ticks to the view drawn, level: turned
+about the vertical from the one's heading to the other's, and moved from the
+one's place to the other's (the body stands upright, whatever the pitch).
+The legs' pose taken by it is where the body has them from its own view, now
+seen from the view drawn: they move as the body moves about its eye, as
+smoothly as the frames draw it. FALSE (and the move none) for any other
+unit, view or window, and in the VR mode, whose body has its own place */
+boolean render_interpolation_view_body(
+	long unit_index,
+	real_matrix4x3 *move)
+{
+	short local_player_index = render.local_player_index;
+	struct observer_result const *from, *to;
+	real from_i, from_j, to_i, to_j, c = 1.0f, s = 0.0f;
+
+	move->scale = 1.0f;
+	move->forward.i = 1.0f;
+	move->forward.j = 0.0f;
+	move->forward.k = 0.0f;
+	move->left.i = 0.0f;
+	move->left.j = 1.0f;
+	move->left.k = 0.0f;
+	move->up.i = 0.0f;
+	move->up.j = 0.0f;
+	move->up.k = 1.0f;
+	move->position.x = 0.0f;
+	move->position.y = 0.0f;
+	move->position.z = 0.0f;
+	if (local_player_index < 0 || local_player_index >= MAXIMUM_LOCAL_PLAYERS ||
+		!drawn_views_valid[local_player_index] || unit_index == NONE ||
+		player_control_get_unit_index(local_player_index) != unit_index ||
+		director_get_perspective(local_player_index) != _director_perspective_first_person ||
+		director_inhibited_facing(local_player_index) || cinematic_in_progress() ||
+		object_get(unit_index)->object.parent_object_index != NONE)
+	{
+		return FALSE;
+	}
+#ifdef HALO_VR
+	if (halo_vr_running())
+		return FALSE;
+#endif
+	from = &blended_views[local_player_index];
+	to = &drawn_views[local_player_index];
+	/* (the turn from one heading to the other: none if either has none) */
+	if (view_heading(from, &from_i, &from_j) && view_heading(to, &to_i, &to_j))
+	{
+		c = from_i * to_i + from_j * to_j;
+		s = from_i * to_j - from_j * to_i;
+	}
+	move->forward.i = c;
+	move->forward.j = s;
+	move->left.i = -s;
+	move->left.j = c;
+	/* (the view between the ticks' place, turned, onto the view drawn's) */
+	move->position.x = to->position.x - (c * from->position.x - s * from->position.y);
+	move->position.y = to->position.y - (s * from->position.x + c * from->position.y);
+	move->position.z = to->position.z - from->position.z;
+	return TRUE;
+}
+
 /* The window's own player's unit on foot, its view drawn from the newest
 step (render_interpolation_newest_camera): how far the view drawn is carried
 on from where the newest step left it, which the unit's camera point (the
