@@ -257,13 +257,15 @@ tracked since it was seen (a look every third tick: missed once, lost) */
 #define BOTS_CAMO_TRACK_TICKS 6
 
 /* how a camouflaged enemy moves and gives itself away, as the camo tally
-of halo.log's minute line sorts it (bots_camo_state) */
+of halo.log's minute line sorts it (bots_camo_state): quiet and still,
+walking or running; or giving itself away (firing, hit, a blow, its
+camouflage flickering) */
 enum
 {
 	_bots_camo_still = 0,
 	_bots_camo_walking,
 	_bots_camo_running,
-	_bots_camo_firing,
+	_bots_camo_giveaway,
 	NUMBER_OF_BOTS_CAMO_STATES,
 };
 /* the tally's distances (under 5, 10, 20 world units, and further) */
@@ -631,8 +633,9 @@ struct bots_bot
 	long throw_tick;
 	long blow_tick;
 	/* (the camo tally) its target's camo state as it fired (NONE: not
-	camouflaged) */
+	camouflaged), and the target's distance (bots_camo_band; NONE: none) */
 	short tally_camo_state;
+	short tally_band;
 
 	/* a camouflaged enemy it lost, firing at it (bots_bot_fire_back): the
 	shot it last took the way of, and where it put the shooter then */
@@ -709,6 +712,10 @@ static struct
 	long camo_shots[NUMBER_OF_BOTS_CAMO_STATES];
 	long camo_hits[NUMBER_OF_BOTS_CAMO_STATES];
 	long camo_fire_backs;
+	/* the aim's tally by the target's distance (bots_camo_band), of targets
+	not camouflaged and camouflaged: rounds fired, ticks they struck */
+	long range_shots[2][BOTS_CAMO_BANDS];
+	long range_hits[2][BOTS_CAMO_BANDS];
 	/* the fights' habits: combos (_bots_combo_*), blows, dodges of an aim,
 	jumps, crouches */
 	long combos[4];
@@ -2090,6 +2097,8 @@ void bots_initialize_for_new_map(void)
 	csmemset(bots_globals.camo_shots, 0, sizeof(bots_globals.camo_shots));
 	csmemset(bots_globals.camo_hits, 0, sizeof(bots_globals.camo_hits));
 	bots_globals.camo_fire_backs = 0;
+	csmemset(bots_globals.range_shots, 0, sizeof(bots_globals.range_shots));
+	csmemset(bots_globals.range_hits, 0, sizeof(bots_globals.range_hits));
 	csmemset(bots_globals.combos, 0, sizeof(bots_globals.combos));
 	bots_globals.blows = 0;
 	bots_globals.dodges = 0;
@@ -2626,13 +2635,14 @@ static boolean bots_camo_sight_get(struct bots_bot const *bot, struct bots_skill
 	return TRUE;
 }
 
-/* (the camo tally) the enemy's state: firing, else by its speed */
+/* (the camo tally) the enemy's state: giving itself away, else by its
+speed */
 static short bots_camo_state(struct bots_camo_sight const *sight)
 {
 	real speed = (real)sqrt(sight->across * sight->across + sight->along * sight->along);
 
-	if (sight->fired > 0.0f || sight->melee)
-		return _bots_camo_firing;
+	if (sight->fired > 0.0f || sight->melee || sight->hurt > 0.1f || sight->camouflage < 0.9f)
+		return _bots_camo_giveaway;
 	if (speed > BOTS_CAMO_RUN_SPEED * 0.7f)
 		return _bots_camo_running;
 	return speed > BOTS_CAMO_RUN_SPEED * 0.1f ? _bots_camo_walking : _bots_camo_still;
@@ -4028,6 +4038,7 @@ static void bots_bot_reset(struct bots_bot *bot, long player_index, long bot_ind
 	bot->opened_player_index = NONE;
 	bot->tally_weapon_index = NONE;
 	bot->tally_camo_state = NONE;
+	bot->tally_band = NONE;
 	bot->shots_heard_tick = NONE;
 	bot->throw_tick = bot->blow_tick = -TICKS_PER_SECOND * 10;
 	bot->form = 1.0f + bots_random_signed(bot) * 0.2f;
@@ -4301,6 +4312,8 @@ static void bots_tally_shots(struct bots_bot *bot, long weapon_index)
 			bots_globals.aim_head_shots++;
 		if (bot->tally_camo_state != NONE)
 			bots_globals.camo_shots[bot->tally_camo_state]++;
+		if (bot->tally_band != NONE)
+			bots_globals.range_shots[bot->tally_camo_state != NONE][bot->tally_band]++;
 	}
 	bot->tally_fired_tick = weapon->weapon.game_time_last_fired;
 	bot->tally_weapon_index = weapon_index;
@@ -4341,6 +4354,8 @@ static void bots_tally_hits(long now)
 					continue;
 				}
 				bots_globals.aim_hits[bot->tally_family]++;
+				if (bot->tally_band != NONE)
+					bots_globals.range_hits[bot->tally_camo_state != NONE][bot->tally_band]++;
 				/* (the camo tally: a camouflaged unit struck, by its state as
 				the bot fired) */
 				if (bot->tally_camo_state != NONE && (unit->unit.active_camouflage > 0.0f ||
@@ -4772,6 +4787,7 @@ static void bots_bot_fight(struct bots_bot *bot, struct bots_tick *tick)
 	if (new_target)
 		bot->aimed_since_tick = NONE;
 	tick->target_distance = bots_distance3d(&tick->eye, &aim_point);
+	bot->tally_band = bots_camo_band(tick->target_distance);
 	/* (how near its middle is, for a blow; whether it aims at the bot: its
 	aim passing within half a unit of the bot's middle, more far off) */
 	close = bots_distance3d(&tick->eye, &target_object->object.bounding_sphere_center);
@@ -6685,6 +6701,7 @@ static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_
 	tick.weapon_index = bots_vehicle_unit_weapon(tick.player->unit_index);
 	bots_tally_shots(bot, tick.weapon_index);
 	bot->tally_camo_state = NONE;
+	bot->tally_band = NONE;
 	/* (its target in sight, once it has reacted to it: until then it goes
 	on as it was, as a player who has not yet taken in who is there; a
 	Warthog's driver, with nothing to fire, drives the fight
@@ -6884,6 +6901,26 @@ static void bots_report(void)
 		}
 		platform_log("bots: tick %ld, aim (%s): hits/rounds%s", now, bots_skills[bots_globals.skill].name,
 			aim[0] ? aim : ", none");
+		/* (by the target's distance, under 5, 10, 20 units and further:
+		those not camouflaged, and those camouflaged) */
+		{
+			char range[400];
+			int range_length = 0;
+			short camouflaged, band;
+
+			for (camouflaged = 0; camouflaged < 2; camouflaged++)
+			{
+				range_length += snprintf(range + range_length, sizeof(range) - (size_t)range_length, "%s",
+					camouflaged ? "; camouflaged" : "");
+				for (band = 0; band < BOTS_CAMO_BANDS; band++)
+				{
+					range_length += snprintf(range + range_length, sizeof(range) - (size_t)range_length, " %ld/%ld",
+						bots_globals.range_hits[camouflaged][band], bots_globals.range_shots[camouflaged][band]);
+				}
+			}
+			platform_log("bots: tick %ld, aim (%s) by distance <5 <10 <20 more: hits/rounds%s", now,
+				bots_skills[bots_globals.skill].name, range);
+		}
 		platform_log("bots: tick %ld, habits: combos %ld (grenade-shoot %ld, grenade-blow %ld, shoot-blow %ld), "
 			"blows %ld, dodges %ld, jumps %ld, crouches %ld, teleports %ld", now,
 			bots_globals.combos[_bots_combo_grenade_shoot] + bots_globals.combos[_bots_combo_grenade_blow] +
@@ -6898,7 +6935,7 @@ static void bots_report(void)
 	looks at one fought and those it was lost at; the rounds fired at one
 	and the ticks they struck; the shots of one lost fired back at */
 	{
-		static char const *const states[NUMBER_OF_BOTS_CAMO_STATES] = { "still", "walking", "running", "firing" };
+		static char const *const states[NUMBER_OF_BOTS_CAMO_STATES] = { "still", "walking", "running", "giveaway" };
 		char camo[600];
 		int camo_length = 0;
 		short state, band;
