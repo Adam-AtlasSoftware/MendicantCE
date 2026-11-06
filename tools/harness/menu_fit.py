@@ -312,3 +312,81 @@ def continue_art_off_middle(widgets, names):
     if top != bottom or left != top:
         return [f"continue_art: {left} from the item's left, {top} from its top, {bottom} from its bottom"]
     return []
+
+
+def unbroken(text):
+    """a string of strings.xml as the description draws it (ui_widget.c's ui_widget_port_text_unbreak): its
+    paragraphs, each on one line, a word broken with a hyphen whole again (a hyphen before a capital kept)"""
+    text = text.replace("\\n", "\n")
+    text = re.sub(r"(?<=[^ \n])-\n(?=[a-z])", "", text)
+    text = re.sub(r"(?<=[^ \n]-)\n(?=[^\n])", "", text)
+    return [" ".join(paragraph.split()) for paragraph in re.split(r"\n\s*\n", text) if paragraph.strip()]
+
+
+def map_description_misfits(widgets, names):
+    """The map lists' description (issue 704: the box's right left empty beside the PC version's 146-unit column), at
+    4:3 and 16:9: its pictures, names, words and New Game's badges inside the box's frame (port_settings.
+    MAP_DESC_FRAME, less its edge) and in its middle, a kind's apart; the names and words as wide as the frame less
+    MAP_DESC_ROOM either side, centred and wrapped to it (text_flags "wrap unbreak"); and each stock map's words,
+    wrapped so, on the lines their box holds"""
+    import xml.etree.ElementTree as ElementTree
+    strings = {element.get("name"): [string.get("text") for string in element.iter("string")]
+               for element in ElementTree.parse(menu_layout.CE / "strings.xml").getroot().iter("strings")}
+    screens = {"mp": f"{port_settings.MT}/mp_map_select/mp_map_select_screen",
+               "solo": "main_menu/solo_level_select/solo_level_select_screen"}
+    _, _, frame_width, frame_height = port_settings.MAP_DESC_FRAME
+    edge, room = port_settings.MAP_DESC_EDGE, port_settings.MAP_DESC_ROOM
+    problems = []
+    for kind, (folder, prefix, _, _, _) in port_settings.MAP_DESCRIPTIONS.items():
+        if f"{folder}/{prefix}_right_data" not in names:
+            continue
+        for aspect in ("4:3", "16:9"):
+            boxes = menu_layout.layout(screens[kind], port_settings.WIDE_SCREENS[aspect], every=widgets)
+            box = menu_layout.one(boxes, "sel_list_desc_bkd")
+            x0, y0 = box.x0 + edge, box.y0 + edge
+            x1, y1 = box.x0 + frame_width - edge, box.y0 + frame_height - edge
+            drawn = [found for found in boxes if f"{prefix}_right_item" in found.path]
+            groups = {}
+            for found in drawn:
+                groups.setdefault("replay_level" if found.name == "difficulty_indicator" else
+                                  found.name.split("_right_")[0], []).append(found)
+            for found in drawn:
+                where = f"{kind} {aspect}: {found.name}"
+                if not (found.x0 >= x0 + room and found.x1 <= x1 - room and found.y0 >= y0 + room and
+                        found.y1 <= y1 - room):
+                    problems.append(f"{where} {found} not {room} inside the box's frame ({x0}, {y0}, {x1}, {y1})")
+                if found.name == "difficulty_indicator":
+                    continue
+                if abs((found.x0 - x0) - (x1 - found.x1)) > 1:
+                    problems.append(f"{where}: {found.x0 - x0} in from the frame's left, {x1 - found.x1} from its right")
+                if found.name.endswith(("_right_name", "_right_data")):
+                    attributes = next(widget.attributes for name, widget in widgets.items()
+                                      if name.endswith("/" + found.name))
+                    if found.x1 - found.x0 < x1 - x0 - 2 * room:
+                        problems.append(f"{where}: {found.x1 - found.x0} wide, the frame {x1 - x0} less {room} "
+                                        "either side")
+                    if attributes.get("align") != "center" or \
+                            not {"wrap", "unbreak"} <= set(attributes.get("text_flags", "").split()):
+                        problems.append(f"{where}: not centred and wrapped to its box (align center, text_flags "
+                                        "wrap unbreak)")
+            badges = [found for found in drawn if found.name == "difficulty_indicator"]
+            if badges:
+                middle = (min(found.x0 for found in badges) + max(found.x1 for found in badges)) / 2
+                if abs(middle - (x0 + x1) / 2) > 1:
+                    problems.append(f"{kind} {aspect}: the badges' middle {middle:g}, the frame's {(x0 + x1) / 2:g}")
+            for group in groups.values():
+                for index, first in enumerate(group):
+                    for second in group[index + 1:]:
+                        if first.overlaps(second) and first.name != second.name:
+                            problems.append(f"{kind} {aspect}: {first.name} over {second.name}")
+        data = widgets[f"{folder}/{prefix}_right_data"].attributes
+        width, height = int(data["width"]), int(data["height"])
+        holds = 1 + (height - port_settings.SMALL_UI_ASCENT - port_settings.SMALL_UI_DESCENT) // \
+            port_settings.SMALL_UI_LINE
+        for text in strings[data["string_list"]]:
+            paragraphs = unbroken(text)
+            needs = sum(wrapped_lines(paragraph, width) for paragraph in paragraphs) + len(paragraphs) - 1
+            if needs > holds:
+                problems.append(f"{prefix}_right_data: \"{' / '.join(paragraphs)}\" takes {needs} lines, its box "
+                                f"holds {holds}")
+    return problems

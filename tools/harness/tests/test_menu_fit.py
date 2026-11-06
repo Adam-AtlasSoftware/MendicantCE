@@ -7,8 +7,9 @@ prompt_fit_width); Choose Mission's arrows as far from its cards at any width, N
 missions' objectives on the lines shown (issue 681); the port's questions' messages and buttons in their box, the
 buttons' focus rings clear of it (issue 696); the pause boxes' footers' middle their legends' (issue 596) at the
 campaign pause menu's spacing (issue 690); the map lists' chooser's words and arrows on its middle, its arrows in from
-its ends, and CONTINUE's picture in the middle of its item (issue 687). The files as shipped, and the generator's output
-with a fault, which each check must find."""
+its ends, and CONTINUE's picture in the middle of its item (issue 687); the map lists' description laid out across its
+box, centred, its words wrapped to it (issue 704). The files as shipped, and the generator's output with a fault, which
+each check must find."""
 
 import sys
 import xml.etree.ElementTree as ElementTree
@@ -24,7 +25,8 @@ _PAUSE_BOX_SVG = port_settings.pause_box_svg
 CHECKS = {"rows": menu_fit.rows_overlapping, "centred": menu_fit.texts_off_middle,
           "prompts": menu_fit.prompt_overflows, "missions": menu_fit.mission_overflows,
           "dialogs": menu_fit.dialog_overflows, "pause": menu_fit.pause_box_misfits,
-          "chooser": menu_fit.chooser_off_middle, "continue": menu_fit.continue_art_off_middle}
+          "chooser": menu_fit.chooser_off_middle, "continue": menu_fit.continue_art_off_middle,
+          "description": menu_fit.map_description_misfits}
 
 
 def generated():
@@ -100,6 +102,8 @@ NEGATIVE_CONTROLS = {
     "chooser-arrows-at-ends": ("MAP_KIND_ARROW_INSET", 3, "chooser"),
     # CONTINUE's picture against the item's top, as before (issue 687)
     "continue-art-high": ("CONTINUE_ART_WIDTH", 50, "continue"),
+    # the map lists' description in the PC version's 146-unit column at the box's left, as before (issue 704)
+    "description-pc-column": ("map_desc_column", lambda: (439, 146, 87, 396), "description"),
 }
 
 

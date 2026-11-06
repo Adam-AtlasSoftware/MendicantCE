@@ -106,6 +106,12 @@ int main(int argc, char **argv)
 		unbroken(L"one \r\n two", L"one two");
 		unbroken(L"first.\r\n\r\nsecond", L"first.\r\rsecond");
 		unbroken(L"no breaks", L"no breaks");
+		/* (a word broken with a hyphen whole again; a hyphen before a
+		capital, or before a paragraph, kept: the map lists' words) */
+		unbroken(L"the Cove-\nnant fear", L"the Covenant fear");
+		unbroken(L"Hydro-\nProcessing Center", L"Hydro-Processing Center");
+		unbroken(L"Deep-Space\nAnomaly", L"Deep-Space Anomaly");
+		unbroken(L"up -\ndown", L"up - down");
 		unbroken(L"", L"");
 		return 0;
 	}
