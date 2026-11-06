@@ -75,6 +75,13 @@ UPDATE runs "port update now" (updater_update_now: on the Frame, the game
 quits, and its launcher installs the update; under gamescope, the game puts
 the update in place and starts it in its own process).
 
+Forge (the main menu's FORGE, with game.forge on; SaftiGlas's, from
+halo-ce-universal): "port forge begin" makes a game as Create Game does
+(internet with internet play on, else LAN), then the Map screen lists the
+multiplayer kinds of maps only, and the map chosen goes straight to Server
+Setup with the Forge game type (game_engine.c's build_game_variant_forge),
+which Server Setup's GAME TYPE row does not change.
+
 The rest are the PC version's, which its menus (port/assets/menus/ce)
 name and the Xbox's has not: they do nothing yet, and succeed, so that what
 their handlers open opens.
@@ -83,6 +90,7 @@ their handlers open opens.
 #include "cseries.h"
 #include "cache/cache_files.h"
 #include "game/game.h"
+#include "game/game_engine_playlist.h"
 #include "input/input.h"
 #include "interface/event_manager.h"
 #include "interface/player_ui.h"
@@ -1183,7 +1191,8 @@ static boolean campaign_continue(short controller)
 chooser of SINGLEPLAYER (the campaign's levels), MULTIPLAYER maps (the
 Xbox's), CUSTOM SINGLEPLAYER or CUSTOM MULTIPLAYER maps (the Custom Edition
 maps of the custom_maps folder, by the scenario type their files give:
-custom_edition_maps.c) (port_settings.MAP_KIND_CHOOSER), then the kind's
+custom_edition_maps.c) or FORGE MAPS (the Forge layouts listed as maps:
+forge_layout.c) (port_settings.MAP_KIND_CHOOSER), then the kind's
 rows, scrolling as list_scroll scrolls. A singleplayer kind's map is played
 as the campaign is (alone, or hosted as network co-op), a multiplayer kind's
 as multiplayer maps are. */
@@ -1194,6 +1203,7 @@ enum
 	MAP_KIND_MULTIPLAYER,
 	MAP_KIND_CUSTOM_SINGLEPLAYER,
 	MAP_KIND_CUSTOM_MULTIPLAYER,
+	MAP_KIND_FORGE,
 	NUMBER_OF_MAP_KINDS
 };
 
@@ -1201,6 +1211,10 @@ enum
 #define MAP_KIND_ROWS 10
 
 static void visible_set(struct widget_instance *widget, boolean visible);
+short ui_widget_port_forge_map_level(short custom_index);
+
+/* the Forge maps, read as a map list opens (forge_custom_maps_refresh) */
+static short forge_map_count;
 /* (party_menu.inc's) */
 static void party_screen_noted(struct widget_instance *widget);
 static void party_hub_note(wchar_t *text, short size);
@@ -1218,9 +1232,18 @@ static boolean map_kind_singleplayer(short kind)
 	return kind == MAP_KIND_SINGLEPLAYER || kind == MAP_KIND_CUSTOM_SINGLEPLAYER;
 }
 
+/* whether the chooser passes over a kind: a singleplayer one unless
+`singleplayer`, and FORGE MAPS with game.forge off */
+static boolean map_kind_skipped(short kind, boolean singleplayer)
+{
+	return (!singleplayer && map_kind_singleplayer(kind)) ||
+		(kind == MAP_KIND_FORGE && !config_boolean("game.forge"));
+}
+
 /* The kind the chooser shows, kept to the multiplayer kinds unless
-`singleplayer`: a singleplayer kind it was turned to becomes the next
-multiplayer one the way it turned from `previous`. */
+`singleplayer` (and to the kinds there are, map_kind_skipped): a kind it
+passes over that it was turned to becomes the next one the way it turned
+from `previous`. */
 static short map_kind_shown(struct widget_instance *list, boolean singleplayer, short previous)
 {
 	struct widget_instance *spinner = named(list, "list_item_0_map_kind_spinner", 0);
@@ -1229,13 +1252,13 @@ static short map_kind_shown(struct widget_instance *list, boolean singleplayer, 
 	if (!spinner)
 		return singleplayer ? MAP_KIND_SINGLEPLAYER : MAP_KIND_MULTIPLAYER;
 	kind = (short)PIN(spinner->parameters.list.selected_index, 0, NUMBER_OF_MAP_KINDS - 1);
-	if (!singleplayer && map_kind_singleplayer(kind))
+	if (map_kind_skipped(kind, singleplayer))
 	{
 		short step = kind == (previous + NUMBER_OF_MAP_KINDS - 1) % NUMBER_OF_MAP_KINDS ? -1 : 1;
 
 		do
 			kind = (short)((kind + step + NUMBER_OF_MAP_KINDS) % NUMBER_OF_MAP_KINDS);
-		while (map_kind_singleplayer(kind));
+		while (map_kind_skipped(kind, singleplayer));
 		spinner->parameters.list.selected_index = kind;
 	}
 	return kind;
@@ -1335,6 +1358,23 @@ static void custom_multiplayer_map_text(short map, wchar_t *text)
 	custom_map_text(FALSE, map, text);
 }
 
+/* a Forge map's name, its layout's */
+static void forge_map_text(short map, wchar_t *text)
+{
+	wchar_t const *name = forge_custom_map_title(map);
+
+	ustrncpy(text, name ? name : L"", ROW_TEXT_LENGTH - 1);
+	text[ROW_TEXT_LENGTH - 1] = 0;
+}
+
+/* a multiplayer or Custom Edition kind's rows' text */
+static void (*map_kind_text(short kind))(short entry, wchar_t *text)
+{
+	return kind == MAP_KIND_MULTIPLAYER ? multiplayer_map_text :
+		kind == MAP_KIND_CUSTOM_SINGLEPLAYER ? custom_campaign_map_text :
+		kind == MAP_KIND_FORGE ? forge_map_text : custom_multiplayer_map_text;
+}
+
 /* the description's map (each list's has both kinds' widgets): a campaign
 level's picture, name and words (level_description sets them), or a map's
 by its display index (a multiplayer map's, or a Custom Edition map's), or
@@ -1365,6 +1405,19 @@ static void map_description_show(struct widget_instance *description, short leve
 		widget->parameters.text_box.string_list_index = map;
 }
 
+/* a Forge map's description: its base map's picture, and its own name and
+words (the built-in strings: text/text_group.c) */
+static void forge_map_description_show(struct widget_instance *description, short map)
+{
+	struct widget_instance *widget;
+
+	map_description_show(description, NONE, forge_custom_map_base_index(map));
+	if ((widget = named(description, "mp_map_right_name", 0)) != NULL)
+		widget->parameters.text_box.string_list_index = (short)(FORGE_CUSTOM_MAP_NAME_STRING + map);
+	if ((widget = named(description, "mp_map_right_data", 0)) != NULL)
+		widget->parameters.text_box.string_list_index = (short)(FORGE_CUSTOM_MAP_DESCRIPTION_STRING + map);
+}
+
 /* New Game's list: SINGLEPLAYER's levels, the profile's reached, or
 MULTIPLAYER's maps, played alone to walk around (no game engine: a campaign
 game on the map); CUSTOM SINGLEPLAYER's maps played as the campaign's levels
@@ -1390,6 +1443,8 @@ static short map_kind_count(short kind, short multiplayer_map_count)
 		return xbox_multiplayer_map_count(multiplayer_map_count);
 	case MAP_KIND_CUSTOM_SINGLEPLAYER:
 		return custom_edition_maps_count(TRUE);
+	case MAP_KIND_FORGE:
+		return forge_map_count;
 	default:
 		return custom_edition_maps_count(FALSE);
 	}
@@ -1432,6 +1487,7 @@ static boolean level_list_initialize(struct widget_instance *list, short control
 		level = 0;
 	campaign.shown_level = level;
 	level_list.map_count = ui_widget_port_multiplayer_maps(&level_list.map_names, &last_used);
+	forge_map_count = forge_custom_maps_refresh();
 	level_list.kind = MAP_KIND_SINGLEPLAYER;
 	level_list.chosen = level;
 	level_list.first = map_kind_first(level, NUMBER_OF_SINGLE_PLAYER_LEVELS);
@@ -1458,15 +1514,16 @@ static void level_list_update(struct widget_instance *list)
 	}
 	count = map_kind_count(kind, level_list.map_count);
 	entry = map_kind_rows_update(list, &level_list.first, count,
-		kind == MAP_KIND_SINGLEPLAYER ? level_row_text :
-		kind == MAP_KIND_MULTIPLAYER ? multiplayer_map_text :
-		kind == MAP_KIND_CUSTOM_SINGLEPLAYER ? custom_campaign_map_text : custom_multiplayer_map_text);
+		kind == MAP_KIND_SINGLEPLAYER ? level_row_text : map_kind_text(kind));
 	if (entry != NONE)
 		level_list.chosen = entry;
 	if (kind != MAP_KIND_SINGLEPLAYER)
 	{
-		map_description_show(description, NONE,
-			level_list.chosen < count ? map_kind_display_index(kind, level_list.chosen) : NONE);
+		if (kind == MAP_KIND_FORGE && level_list.chosen < count)
+			forge_map_description_show(description, level_list.chosen);
+		else
+			map_description_show(description, NONE,
+				level_list.chosen < count ? map_kind_display_index(kind, level_list.chosen) : NONE);
 		profile_name_show(description);
 		return;
 	}
@@ -1496,14 +1553,19 @@ static boolean level_choose(struct widget_instance *list, short controller)
 
 	if (level_list.kind != MAP_KIND_SINGLEPLAYER && (level_list.chosen < 0 || level_list.chosen >= count))
 		return campaign_fail();
-	if (level_list.kind == MAP_KIND_MULTIPLAYER || level_list.kind == MAP_KIND_CUSTOM_MULTIPLAYER)
+	if (level_list.kind == MAP_KIND_MULTIPLAYER || level_list.kind == MAP_KIND_CUSTOM_MULTIPLAYER ||
+		level_list.kind == MAP_KIND_FORGE)
 	{
 		struct player_profile profile;
+		/* (a Forge map is its base map, walked around with its layout) */
+		short forge_level = level_list.kind == MAP_KIND_FORGE ? ui_widget_port_forge_map_level(level_list.chosen) : NONE;
 		char const *map_name = level_list.kind == MAP_KIND_MULTIPLAYER ? level_list.map_names[level_list.chosen] :
+			level_list.kind == MAP_KIND_FORGE ? (forge_level != NONE ? level_list.map_names[forge_level] : NULL) :
 			custom_map_level_name(level_list.kind, level_list.chosen);
 
 		if (!map_name || !campaign_profile(controller, &profile))
 			return campaign_fail();
+		forge_custom_map_select(level_list.kind == MAP_KIND_FORGE ? level_list.chosen : NONE);
 		campaign_start(map_name, main_get_difficulty(), controller);
 		return FALSE;
 	}
@@ -5218,6 +5280,9 @@ static struct
 	/* Server Setup's PASSWORD (a public internet game's; empty: none), kept
 	while the game runs, never written down */
 	char game_password[PASSWORD_LENGTH + 1];
+	/* the game made by the main menu's FORGE (forge_begin), until Create
+	Game makes another */
+	boolean forge;
 } multiplayer = { .maximum_players_index = NUMBEROF(maximum_players) - 1 };
 
 /* ---- a text field (Direct Link's link, the game's name): the keyboard
@@ -6018,10 +6083,11 @@ static boolean multiplayer_player(short controller)
 /* Create Game's ("join controller to mp game", first): player 1 in, and
 the server made: an internet one (an invite, Discord), a LAN one, or
 (OFFLINE) one of this machine alone */
-static boolean multiplayer_host(struct widget_instance *widget, struct event_record *event, short controller,
-	boolean *widget_deleted)
+static boolean multiplayer_host_mode(struct widget_instance *widget, struct event_record *event, short controller,
+	short mode, boolean *widget_deleted)
 {
-	multiplayer_mode_set(widget);
+	multiplayer.mode = mode;
+	multiplayer.forge = FALSE;
 	if (!multiplayer_player(controller))
 		return FALSE;
 	p2p_set_hosting_allowed(multiplayer.mode == _multiplayer_mode_host_internet);
@@ -6033,6 +6099,31 @@ static boolean multiplayer_host(struct widget_instance *widget, struct event_rec
 	if (multiplayer.mode == _multiplayer_mode_host_local)
 		return ui_widget_port_host_local(widget, event, widget_deleted);
 	return ui_widget_port_host(widget, event, widget_deleted);
+}
+
+static boolean multiplayer_host(struct widget_instance *widget, struct event_record *event, short controller,
+	boolean *widget_deleted)
+{
+	multiplayer_mode_set(widget);
+	return multiplayer_host_mode(widget, event, controller, multiplayer.mode, widget_deleted);
+}
+
+/* "port forge begin" (the main menu's FORGE): a game made, as Create Game
+makes one, whose map the Map screen chooses (map_list_choose): an internet
+one (its invite in Server Setup) with internet play on, else a LAN one */
+static boolean forge_begin(struct widget_instance *widget, struct event_record *event, short controller,
+	boolean *widget_deleted)
+{
+	short mode = config_boolean("network.online") ? _multiplayer_mode_host_internet : _multiplayer_mode_host_lan;
+
+	if (!multiplayer_host_mode(widget, event, controller, mode, widget_deleted) ||
+		!global_network_game_server_get())
+	{
+		platform_log("menus: the Forge game could not be made (is its port in use?)");
+		return campaign_fail();
+	}
+	multiplayer.forge = TRUE;
+	return TRUE;
 }
 
 /* ---- the map list (the Map screen's): its chooser's SINGLEPLAYER levels,
@@ -6100,10 +6191,13 @@ static boolean map_list_initialize(struct widget_instance *list)
 	char const *const *names;
 	short last_used = 0;
 
-	map_list.hosting = global_network_game_server_get() != NULL && !network_game_is_splitscreen_local();
+	/* (Forge's lists the multiplayer kinds only) */
+	map_list.hosting = global_network_game_server_get() != NULL && !network_game_is_splitscreen_local() &&
+		!multiplayer.forge;
 	/* (the maps folders looked for again as the list opens) */
 	custom_edition_maps_look_again();
 	map_list.map_count = ui_widget_port_multiplayer_maps(&names, &last_used);
+	forge_map_count = forge_custom_maps_refresh();
 	/* (a Custom Edition map's kind, when it was one) */
 	map_list.kind = MAP_KIND_MULTIPLAYER;
 	if (last_used >= xbox_multiplayer_map_count(map_list.map_count))
@@ -6118,6 +6212,12 @@ static boolean map_list_initialize(struct widget_instance *list)
 		last_used = 0;
 	}
 	multiplayer.campaign_first = FALSE;
+	/* (the Forge map played last, if it is still there) */
+	if (forge_custom_map_selected() != NONE)
+	{
+		map_list.kind = MAP_KIND_FORGE;
+		last_used = forge_custom_map_selected();
+	}
 	map_kind_set(list, map_list.kind);
 	map_step_open(list, MAP_STEP_MAPS, last_used);
 	return TRUE;
@@ -6139,9 +6239,7 @@ static void map_list_update(struct widget_instance *list)
 	}
 	count = map_step_count();
 	entry = map_kind_rows_update(list, &map_list.first, count, map_list.step == MAP_STEP_DIFFICULTIES ?
-		map_difficulty_text : kind == MAP_KIND_SINGLEPLAYER ? map_level_text :
-		kind == MAP_KIND_MULTIPLAYER ? multiplayer_map_text :
-		kind == MAP_KIND_CUSTOM_SINGLEPLAYER ? custom_campaign_map_text : custom_multiplayer_map_text);
+		map_difficulty_text : kind == MAP_KIND_SINGLEPLAYER ? map_level_text : map_kind_text(kind));
 	if (entry != NONE)
 		map_list.chosen = entry;
 	visible_set(named(description, "mp_map_right_item", 0), map_list.chosen < count);
@@ -6152,6 +6250,10 @@ static void map_list_update(struct widget_instance *list)
 		map_description_show(description, shown, NONE);
 		level_description(description, "replay_level", shown, FALSE, NULL, NONE);
 	}
+	else if (kind == MAP_KIND_FORGE && map_list.chosen < count)
+	{
+		forge_map_description_show(description, map_list.chosen);
+	}
 	else
 	{
 		map_description_show(description, NONE,
@@ -6161,9 +6263,31 @@ static void map_list_update(struct widget_instance *list)
 	profile_name_show(description);
 }
 
+/* (the gametype editor's: Server Setup's copy of the game's gametype) */
+static void gametype_setup_end(void);
+boolean ui_widget_port_game_variant_set(struct game_variant *variant, struct game_variant_options const *options);
+
+/* the Forge game type for Forge's game (forge_begin), its options the
+defaults, then Server Setup in the gametypes' place */
+static boolean map_list_forge(struct widget_instance *list, boolean *widget_deleted)
+{
+	struct game_variant variant;
+	struct game_variant_options options;
+
+	build_game_variant_forge(&variant);
+	ustrncpy(variant.human_readable_game_description, L"Forge",
+		NUMBEROF(variant.human_readable_game_description) - 1);
+	game_variant_options_default(&variant, &options);
+	gametype_setup_end();
+	if (!ui_widget_port_game_variant_set(&variant, &options))
+		return campaign_fail();
+	return ui_widget_port_open(list, SERVER_SETUP_NAME, widget_deleted);
+}
+
 /* "mp level select" (the list's OK): the map chosen, or a level's
 difficulties, or the level at the difficulty chosen. FALSE stays on the Map
-screen (the gametypes open on TRUE). */
+screen (the gametypes open on TRUE; Forge's game opens Server Setup
+itself). */
 static boolean map_list_choose(struct widget_instance *list, boolean *widget_deleted)
 {
 	short chosen;
@@ -6185,10 +6309,31 @@ static boolean map_list_choose(struct widget_instance *list, boolean *widget_del
 	}
 	/* (a multiplayer map: the Xbox's, then the Custom Edition ones, in the
 	multiplayer maps) */
-	if (map_list.kind == MAP_KIND_MULTIPLAYER)
-		return ui_widget_port_multiplayer_map_choose(chosen);
-	if (map_list.kind == MAP_KIND_CUSTOM_MULTIPLAYER)
-		return ui_widget_port_multiplayer_map_choose((short)(xbox_multiplayer_map_count(map_list.map_count) + chosen));
+	if (map_list.kind == MAP_KIND_MULTIPLAYER || map_list.kind == MAP_KIND_CUSTOM_MULTIPLAYER ||
+		map_list.kind == MAP_KIND_FORGE)
+	{
+		if (map_list.kind == MAP_KIND_MULTIPLAYER)
+		{
+			if (!ui_widget_port_multiplayer_map_choose(chosen))
+				return FALSE;
+		}
+		else if (map_list.kind == MAP_KIND_CUSTOM_MULTIPLAYER)
+		{
+			if (!ui_widget_port_multiplayer_map_choose((short)(xbox_multiplayer_map_count(map_list.map_count) +
+				chosen)))
+			{
+				return FALSE;
+			}
+		}
+		/* (a Forge map: its base map, played with its layout) */
+		else
+		{
+			if (!ui_widget_port_multiplayer_map_choose(ui_widget_port_forge_map_level(chosen)))
+				return FALSE;
+			forge_custom_map_select(chosen);
+		}
+		return multiplayer.forge ? map_list_forge(list, widget_deleted) : TRUE;
+	}
 	ui_play_audio_feedback_sound(SOUND_FORWARD);
 	map_list.level = chosen;
 	map_step_open(list, MAP_STEP_DIFFICULTIES, (short)PIN(main_get_difficulty(), 0, NUMBER_OF_GAME_DIFFICULTY_LEVELS - 1));
@@ -10953,6 +11098,7 @@ static void lobby_map_show(struct widget_instance *description, char const *map_
 	char const *const *names;
 	short count = xbox_multiplayer_map_count(ui_widget_port_multiplayer_maps(&names, NULL)), map = 19, index;
 	short level = campaign_level_of(map_name);
+	short name;
 	struct widget_instance *widget;
 
 	/* (by the scenario's own name: a map vote's choices name only that) */
@@ -10973,8 +11119,15 @@ static void lobby_map_show(struct widget_instance *description, char const *map_
 	visible_set(named(description, "replay_level_right_name", 0), level != NONE);
 	if ((widget = named(description, "lobby_map_pic", 0)) != NULL)
 		widget->animation.current_frame_index = map;
+	/* (the host's Forge map, by its own name: text/text_group.c) */
+	name = map;
+	if (level == NONE && global_network_game_server_get() && forge_custom_map_selected() != NONE &&
+		ui_widget_port_forge_map_level(forge_custom_map_selected()) == map)
+	{
+		name = (short)(FORGE_CUSTOM_MAP_NAME_STRING + forge_custom_map_selected());
+	}
 	if ((widget = named(description, "lobby_map_name", 0)) != NULL)
-		widget->parameters.text_box.string_list_index = map;
+		widget->parameters.text_box.string_list_index = name;
 	if (level == NONE)
 		return;
 	if ((widget = named(description, "replay_level_right_pic", 0)) != NULL)
@@ -11937,9 +12090,13 @@ static void gametype_setup_type(wchar_t *text)
 	text[ROW_TEXT_LENGTH - 1] = 0;
 }
 
-/* "port setup edit" (a Server Setup option's row): its screen edits the copy */
-static boolean gametype_setup_edit(void)
+/* "port setup edit" (a Server Setup option's row): its screen edits the
+copy. Forge's game (forge_begin) keeps its game type: its GAME TYPE row
+opens nothing, its options' rows do. */
+static boolean gametype_setup_edit(struct widget_instance *row)
 {
+	if (multiplayer.forge && !strcmp(row->name, "op_game_type"))
+		return campaign_fail();
 	gametype_setup_begin();
 	return gametype_edit.setup || campaign_fail();
 }
@@ -12401,7 +12558,7 @@ boolean pc_menu_event_function_invoke(
 		}
 		else if (!strcmp(name, "port setup edit"))
 		{
-			return gametype_setup_edit();
+			return gametype_setup_edit(widget);
 		}
 		/* (co-op's options' screens: their settings shown, and OK's) */
 		else if (!strcmp(name, "port setup options init"))
@@ -12775,6 +12932,10 @@ boolean pc_menu_event_function_invoke(
 		else if (!strcmp(name, "port coop begin"))
 		{
 			return coop_begin(controller);
+		}
+		else if (!strcmp(name, "port forge begin"))
+		{
+			return forge_begin(widget, event, controller, widget_deleted);
 		}
 		else if (!strcmp(name, "port coop player 2 list initialize"))
 		{

@@ -70,6 +70,8 @@ static int halo_linux_touch_look(short gamepad_index, real *yaw, real *pitch, re
 static int halo_linux_mouse_aiming(short gamepad_index) { return 0; }
 static int halo_linux_touch_aiming(short gamepad_index) { return 0; }
 static int halo_linux_mouse_look(short gamepad_index, real *yaw, real *pitch) { return 0; }
+/* (the director's flying camera has the facing: Forge's, port/linux/game/forge.c) */
+static boolean director_inhibited_facing(short local_player_index) { return FALSE; }
 static int halo_linux_gyro_look(short gamepad_index, real *yaw, real *pitch)
 {
 	*yaw = world_gyro_yaw;

@@ -3888,6 +3888,13 @@ void main_loop(
 			network_shield_effects_update();
 			/* port: map sharing, in the lobby and in game (port/linux/game/map_share.c) */
 			map_share_update();
+			/* port: the tag packs, written at the main menu when they are
+			wanted (port/linux/game/tag_pack.c) */
+			{
+				extern void tag_pack_update(boolean main_menu);
+
+				tag_pack_update(main_globals.main_menu_scenario_loaded);
+			}
 			/* port: network games' text chat (port/linux/game/network_chat.c) */
 			network_chat_update();
 			/* port: the party, which follows its leader into its games
@@ -4031,6 +4038,7 @@ void main_loop(
 					if (!network_chat_typing())
 						debug_keys_update();
 					cheats_update();
+					forge_update();
 					player_control_update((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
 
 					connection = main_globals.connection;

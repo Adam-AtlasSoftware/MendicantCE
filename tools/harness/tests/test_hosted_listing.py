@@ -52,7 +52,7 @@ def generated(fault=None):
     config += re.search(r"static short const cooperative_friendly_fire_modes\[\] =\s*\{[^}]*\};", menus).group(0)
     config += "\n"
     code = "\n\n".join([function(menus, name) for name in (
-        "multiplayer_mode_set", "multiplayer_host", "server_settings_private", "server_settings_private_set",
+        "multiplayer_mode_set", "multiplayer_host_mode", "multiplayer_host", "server_settings_private", "server_settings_private_set",
         "server_settings_initialize", "ui_widget_port_cooperative_settings_apply",
         "server_start")] + [function(host, name) for name in (
         "host_notice", "host_confirming", "host_confirmed", "host_game", "host_game_teams", "host_game_rows_read",

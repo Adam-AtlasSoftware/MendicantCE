@@ -917,6 +917,10 @@ static long adjust_score_for_ranking(
 	long score,
 	long player_index);
 
+/* port: the Forge game type (game_engine_playlist.h) */
+struct game_variant *build_game_variant_forge(
+	struct game_variant *variant);
+
 /* ---------- globals */
 
 short debug_player_color = NONE;
@@ -8802,10 +8806,44 @@ struct game_variant *game_engine_get_variant_by_name(
 		result = *build_game_variant_king(&temporary);
 	else if (csstrcmp(name, "team_king") == 0)
 		result = *build_game_variant_team_king(&temporary);
+	else if (csstrcmp(name, "forge") == 0)
+		result = *build_game_variant_forge(&temporary);
 
 	*variant = result;
 
 	return variant;
+}
+
+/* port: the Forge game type, slayer with no score to reach, no respawn
+wait, no suicide penalty and every vehicle, and the Forge flag that turns
+the dev tools on (port/linux/game/forge.c). The main menu's FORGE plays it
+(port/linux/game/menu_functions.c's forge_begin); it is not one of the
+gametypes to choose. */
+struct game_variant *build_game_variant_forge(
+	struct game_variant *variant)
+{
+	struct game_variant result = { 0 };
+
+	build_game_variant_slayer(&result);
+	result.universal_variant.score_to_win = 999;
+	result.universal_variant.respawn_time = 0;
+	result.universal_variant.respawn_time_growth = 0;
+	result.universal_variant.suicide_penalty = 0;
+	/* every vehicle the map has (slayer's set is warthogs only) */
+	result.universal_variant.vehicle_set = 0;
+	result.game_engine_variant.slayer.no_kill_penalty = TRUE;
+	result.flags |= GAME_VARIANT_FORGE_FLAG;
+
+	*variant = result;
+
+	return variant;
+}
+
+/* port: TRUE while the game being played is of the Forge game type */
+boolean game_engine_variant_is_forge(
+	void)
+{
+	return game_engine_running() && (global_variant.flags & GAME_VARIANT_FORGE_FLAG) != 0;
 }
 
 boolean game_engine_get_goal_in_use(
@@ -10652,6 +10690,13 @@ static long random_item(
 	return NONE;
 }
 
+/* port: an item of the collection, as the map's item spawn points make one
+(the Spawns tab, port/linux/game/forge_spawns.c), or NONE */
+long game_engine_random_item(
+	long item_collection_index)
+{
+	return item_collection_index != NONE ? random_item(item_collection_index) : NONE;
+}
 
 static void game_engine_update_item_spawn(
 	void)

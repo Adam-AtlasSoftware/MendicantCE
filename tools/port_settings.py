@@ -42,6 +42,13 @@ PROFILE_MANAGER = "main_menu/profile_manager/player_profile_manager"
 TRAINING = "main_menu/training"
 TRAINING_ITEM_PLACE = (192, 211)
 TRAINING_CHAPTERS = 8
+# Forge (SaftiGlas's, port/linux/game/forge.c): its main menu item, with
+# game.forge on, a row above the first (as VR TUTORIAL is in the headset:
+# menu_files.c's "forge" platform is never the headset's), and its picture
+FORGE = "main_menu/forge"
+FORGE_ITEM = "main_menu/main_menu_item_forge"
+FORGE_ITEM_BITMAP = "main_menu/menu_forge"
+FORGE_ITEM_PLACE = (192, 211)
 # the update question (the Steam Frame's, gamescope's), over the main menu (_update)
 UPDATE = "main_menu/update"
 YES_NO = [("YES", "true"), ("NO", "false")]
@@ -54,9 +61,10 @@ VERTICAL_SENSITIVITIES = [(f"{value:g}X", f"{value:g}") for value in (0.25, 0.5,
                                                                        1.5, 2)]
 VOLUMES = [(str(step), f"{step / 10:g}") for step in range(11)]
 # the platforms a menu element's platform attribute names (menu_files.c's
-# MENU_PLATFORM, "vr": the VR build, playing in the headset, and "hdr": a
-# renderer that draws display.hdr)
-MENU_PLATFORMS = ("desktop", "android", "vr", "hdr", "touch", "pointer", "computer")
+# MENU_PLATFORM, "vr": the VR build, playing in the headset, "hdr": a
+# renderer that draws display.hdr, and "forge": game.forge on, out of the
+# headset)
+MENU_PLATFORMS = ("desktop", "android", "vr", "hdr", "touch", "pointer", "computer", "forge")
 # display.hdr_paper_white_nits's values: the system's SDR white, or nits
 PAPER_WHITES = [("SYSTEM", "0")] + [(f"{nits} NITS", str(nits)) for nits in range(80, 501, 20)]
 # display.hdr_ui_nits's: paper white's, or nits
@@ -2606,11 +2614,13 @@ WIDGET_PATCHES = {
     "main_menu/main_menu_item_settings": {"handlers": [
         f'<on event="{event}" run="port settings begin" open="{PE}/video_settings/video_settings_screen"/>'
         for event in ("a", "start")] + ['<on event="left_mouse" run="mouse emit accept event"/>']},
-    # (in the headset, VR TUTORIAL above the first: _training)
+    # (in the headset, VR TUTORIAL above the first: _training; with
+    # game.forge on, FORGE in its place: _forge)
     "main_menu/main_menu_select_list": {"insert_before": {
         "main_menu/main_menu_item_load_camp": [
             f'<child widget="main_menu/main_menu_item_training" x="{TRAINING_ITEM_PLACE[0]}" '
-            f'y="{TRAINING_ITEM_PLACE[1]}" platform="vr"/>']}},
+            f'y="{TRAINING_ITEM_PLACE[1]}" platform="vr"/>',
+            f'<child widget="{FORGE_ITEM}" x="{FORGE_ITEM_PLACE[0]}" y="{FORGE_ITEM_PLACE[1]}" platform="forge"/>']}},
     # (Quit's game data input notes the main menu shown, over which the
     # update question opens: _update)
     "main_menu/main_menu_item_quit_game": {"inputs": ["port update question"]},
@@ -4021,7 +4031,7 @@ def _map_kind() -> list:
                                         f"{arrow_top + 12} {MAP_KIND_ROW[0] - MAP_KIND_ARROW_INSET - left}")],
                      ['<on event="left_mouse" run="mouse spinner 1wide click"/>'])
     lines += _strings("main_menu/new_select/var_map_kinds",
-                      ["SINGLEPLAYER", "MULTIPLAYER", "CUSTOM SINGLEPLAYER", "CUSTOM MULTIPLAYER"])
+                      ["SINGLEPLAYER", "MULTIPLAYER", "CUSTOM SINGLEPLAYER", "CUSTOM MULTIPLAYER", "FORGE MAPS"])
     return lines
 
 
@@ -7191,6 +7201,8 @@ def multiplayer_files() -> dict:
                                              "(tools/port_settings.py) -->", head[2]] + _theater() + ["</menus>", ""],
         TRAINING.replace("/", ".") + ".xml": [head[0], "<!-- The VR build's VR Tutorial, in the PC version's style "
                                               "(tools/port_settings.py) -->", head[2]] + _training() + ["</menus>", ""],
+        FORGE.replace("/", ".") + ".xml": [head[0], "<!-- Forge's main menu item (SaftiGlas's), in the PC version's "
+                                           "style (tools/port_settings.py) -->", head[2]] + _forge() + ["</menus>", ""],
         UPDATE.replace("/", ".") + ".xml": [head[0], "<!-- The update question (the Steam Frame's, gamescope's), in "
                                             "the style of the PC version's Quit (tools/port_settings.py) -->",
                                             head[2]]
@@ -7220,7 +7232,9 @@ MENU_ITEM_TOP, MENU_ITEM_SCALE, MENU_ITEM_MIDDLE = 6.57, 0.9037, 130.0
 # RU, IA as EA and NA, AL as AD and AI), and a word's space as LOAD GAME's D
 # to G, less D's side
 MENU_ITEM_SPACES = {"VR": 0.3, "R ": 6.0, " T": 6.0, "TU": 2.12, "UT": 1.66, "TO": 0.75, "OR": 3.0, "RI": 3.25,
-                    "IA": 1.3, "AL": 1.58}
+                    "IA": 1.3, "AL": 1.58,
+                    # (FORGE's, as SaftiGlas spaced it from PROFILES' and SETTINGS' redraws)
+                    "FO": 2.0, "RG": 1.8, "GE": 1.6}
 # a space's own width (none: the spaces about it are its pairs')
 MENU_ITEM_SPACE_WIDTH = 0.0
 # the mods' status icons (port/assets/icons/lucide): a mod out of the order it
@@ -7564,6 +7578,24 @@ def _update() -> list:
     lines += _strings(f"{base}/update_prompt",
                       ["A new version is ready. Update now? The game will close, update and start again."])
     return lines
+
+
+def _forge() -> list:
+    """the main menu's FORGE (game.forge; SaftiGlas's, from
+    halo-ce-universal): a game made, as Create Game makes one (internet with
+    internet play on, else LAN: menu_functions.c's forge_begin), then the Map
+    screen, whose map goes straight to Server Setup with the Forge game type
+    (map_list_choose)"""
+    open_map = f"{MT}/connected/connected_map_select_wrapper"
+    return _widget(FORGE_ITEM, [("type", "text"), ("width", 256), ("height", 33), ("bitmap", FORGE_ITEM_BITMAP)],
+                   [f'<on event="a" run="port forge begin" open="{open_map}"/>',
+                    f'<on event="start" run="port forge begin" open="{open_map}"/>',
+                    '<on event="left_mouse" run="mouse emit accept event"/>'])
+
+
+def forge_pictures(redraws: Path) -> list:
+    """FORGE's picture (FORGE_ITEM_BITMAP), in the redraws' own letters"""
+    return [(FORGE_ITEM_BITMAP, menu_item_frames("FORGE", redraws))]
 
 
 def main() -> None:

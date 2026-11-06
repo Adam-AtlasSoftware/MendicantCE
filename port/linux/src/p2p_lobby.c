@@ -206,6 +206,8 @@ static struct
 	/* a Standard game (port/linux/game/network_standard.c), one OpenCE
 	players join too, and its rate */
 	int standard, mixed, rate;
+	/* a Forge game (p2p_set_game_listing_forge: HALO_PORT_FORGE_VERSION_BIT) */
+	int forge;
 	int flags;
 	int player_count, maximum_player_count;
 	/* the bots its host plays, apart from its players (p2p_set_game_bots) */
@@ -338,6 +340,10 @@ static int listing_make_token(unsigned char *bytes, int flags, const unsigned ch
 		int version = lobby.standard && !lobby.mixed ?
 			HALO_PORT_STANDARD_ADVERTISED_VERSION : HALO_PORT_NETWORK_VERSION;
 
+		/* (a Forge game's: halo_port_limits.h's HALO_PORT_FORGE_VERSION_BIT) */
+		if (lobby.forge)
+			version |= HALO_PORT_FORGE_VERSION_BIT;
+
 		bytes[size++] = (unsigned char)(version >> 8);
 		bytes[size++] = (unsigned char)version;
 	}
@@ -419,6 +425,10 @@ static int listing_read(const unsigned char *bytes, int size, struct listing *li
 	}
 	offset = 3;
 	listing->version = bytes[offset] << 8 | bytes[offset + 1];
+	/* (a Forge game's mark, which this build, having Forge, reads past: the
+	game itself tells whether this machine can join it, its advertisement's
+	HALO_PORT_FORGE_VERSION_BIT) */
+	listing->version &= ~HALO_PORT_FORGE_VERSION_BIT;
 	offset += 2;
 	listing->flags = bytes[offset++];
 	listing->sequence = get_long(bytes + offset);
@@ -1165,6 +1175,20 @@ void p2p_set_game_listing_standard(int standard, int mixed, int rate)
 	lobby.standard = standard;
 	lobby.mixed = mixed;
 	lobby.rate = rate;
+	if (lobby.listed)
+		republish_soon(0);
+	pthread_mutex_unlock(&p2p_lock);
+}
+
+void p2p_set_game_listing_forge(int forge)
+{
+	forge = forge ? 1 : 0;
+	/* (only the game's server writes it: unchanged, it need not wait for the
+	lock) */
+	if (forge == lobby.forge)
+		return;
+	pthread_mutex_lock(&p2p_lock);
+	lobby.forge = forge;
 	if (lobby.listed)
 		republish_soon(0);
 	pthread_mutex_unlock(&p2p_lock);

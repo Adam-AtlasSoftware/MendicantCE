@@ -114,6 +114,11 @@ void render_interpolation_particles_due(void);
 void render_interpolation_object_deleted(long object_index);
 void render_interpolation_ghosts_draw(void);
 
+/* Forge, SaftiGlas's in-game map editor (port/linux/game/forge.c) */
+#include "halo_forge.h"
+/* what Forge's parts can use (port/linux/game/halo_mods.c) */
+#include "halo_mod.h"
+
 /* whether the map being loaded, by the name it was loaded by, is a
 downloaded one, whose scripts may call and set less: one map sharing
 downloaded, or one game.downloaded_maps names (port/linux/game/map_share.c) */

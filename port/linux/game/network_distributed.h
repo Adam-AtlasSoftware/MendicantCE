@@ -156,6 +156,13 @@ enum
 	stream */
 	_distributed_message_map_vote = 94,
 	_distributed_message_map_vote_choice = 95,
+	/* Forge (port/linux/game/forge_layout.c; SaftiGlas's numbers): the
+	host's Forge layout of the map, in parts, to a client that has loaded
+	(reliable), and a client's Forge tools' ask of the host to spawn, move
+	or remove an object (reliable). Only a Forge game sends them, and only
+	a build that knows Forge joins one (HALO_PORT_FORGE_VERSION_BIT) */
+	_distributed_message_forge_layout = 96,
+	_distributed_message_forge_edit = 97,
 
 	/* an OpenH1 game's sub-step inputs (network_substeps.c), at 60 and 120
 	only, numbered clear of the kinds upstream adds: a client's own players'

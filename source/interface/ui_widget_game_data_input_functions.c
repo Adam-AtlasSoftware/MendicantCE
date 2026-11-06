@@ -687,6 +687,10 @@ static byte const local_player_controller_bitmap_frames[2][MAXIMUM_LOCAL_PLAYERS
 	{{3, 5, 4}, {6, 8, 7}, {9, 11, 10}, {12, 14, 13}}
 };
 
+/* port: the Forge map a level of the multiplayer level list is, or NONE
+(ui_widget_event_handler_functions.c) */
+short ui_widget_port_forge_level(short level_index);
+
 /* port: the display index of a Custom Edition multiplayer map this machine
 has, which the menus show by its own name and picture even when its name
 holds an Xbox level's (port/linux/game/custom_edition_maps.c), or NONE */
@@ -2422,6 +2426,14 @@ static void multiplayer_game_set_text_box_for_map_name(
 	if (game)
 	{
 		map_name = game->map.name;
+	/* port: a Forge map chosen in the map list shows its own name */
+	if (forge_custom_map_selected() != NONE &&
+		strstr(map_name, forge_custom_map_base_name(forge_custom_map_selected())))
+	{
+		widget->parameters.text_box.string_list_index =
+			(short)(FORGE_CUSTOM_MAP_NAME_STRING + forge_custom_map_selected());
+		return;
+	}
 	/* port: a Custom Edition map shows its own name */
 	if (custom_edition_map_display_index(map_name) != NONE)
 	{
@@ -4246,6 +4258,20 @@ static void mp_level_select_list_update_displayed_items(
 				_ui_widget_type_text_box,
 			"expected a text box widget for the list item's third child (map description)");
 
+		/* port: past the game's 13 maps and the Custom Edition ones, the
+		Forge maps (forge_layout.c): their base map's picture, and their name
+		and description from the built-in strings (text/text_group.c) */
+		if (ui_widget_port_forge_level((short)displayed_item_indices[item_index]) != NONE)
+		{
+			short custom_index = ui_widget_port_forge_level((short)displayed_item_indices[item_index]);
+
+			map_name->parameters.text_box.string_list_index =
+				(short)(FORGE_CUSTOM_MAP_NAME_STRING + custom_index);
+			map_bitmap->animation.current_frame_index = forge_custom_map_base_index(custom_index);
+			map_description->parameters.text_box.string_list_index =
+				(short)(FORGE_CUSTOM_MAP_DESCRIPTION_STRING + custom_index);
+			continue;
+		}
 		/* port: the Custom Edition maps after the Xbox levels show their own
 		names, pictures and descriptions (port/linux/game/custom_edition_maps.c) */
 		displayed_item_indices[item_index] = custom_edition_maps_level_display_index(

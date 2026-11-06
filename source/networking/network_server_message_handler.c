@@ -1939,6 +1939,13 @@ static boolean network_game_server_handle_message_client_broadcast_game_search(
 			network version, its rate and protocol version beside it:
 			network_standard.c) */
 			network_standard_advertise(advertisement.reserved, network_game_server_in_lobby(server));
+			/* port: (a Forge game's version marked, which only a build with
+			Forge joins: halo_port_limits.h's HALO_PORT_FORGE_VERSION_BIT; a
+			Forge map's too, of any game type, whose layout the host sends:
+			forge_layout.c) */
+			if ((game->variant.flags & GAME_VARIANT_FORGE_FLAG) || forge_layout_hosting())
+				advertisement.reserved[HALO_PORT_ADVERTISED_VERSION_OFFSET + 1] |=
+					(byte)(HALO_PORT_FORGE_VERSION_BIT >> 8);
 			advertisement.reserved[HALO_PORT_ADVERTISED_FLAGS_OFFSET] =
 				HALO_PORT_ADVERTISED_DISTRIBUTED_FLAG;
 			if (network_game_server_get_state(server, NULL) != _network_game_server_state_pregame ||

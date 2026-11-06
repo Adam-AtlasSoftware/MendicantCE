@@ -1367,6 +1367,19 @@ static const struct config_setting config_settings[] =
 		"gray, yellow, green, pink, purple, cyan, cobalt, orange, teal, sage,\n"
 		"brown, tan, maroon or salmon." },
 
+	{ "game.forge", _config_boolean, "false", "HALO_FORGE", _environment_value, _platform_all,
+		"true: the main menu has FORGE (SaftiGlas's in-game map editor: fly,\n"
+		"place and move objects, spawns, zones and AI, saved as map variants in\n"
+		"forge_maps), and the main menu writes Forge's tag pack once from your\n"
+		"maps (the monitor of The Maw, some of The Silent Cartographer's\n"
+		"characters: maps/openh1_forge.pack). false: no FORGE, as the game was.\n"
+		"Read as the game starts." },
+	{ "game.forge_monitor", _config_boolean, "true", "HALO_FORGE_MONITOR", _environment_value, _platform_all,
+		"In a Forge game, the builder flies as the monitor (343 Guilty Spark),\n"
+		"whose tags Forge's tag pack brings from The Maw; false, or without the\n"
+		"pack, flies the camera free of the player. This machine's builder only\n"
+		"(each machine's own setting)." },
+
 	{ "game.unlock_all_levels", _config_boolean, "false", "HALO_UNLOCK_ALL_LEVELS", _environment_value, _platform_all,
 		"true: a profile made from now on starts with every campaign level\n"
 		"finished on every difficulty, so any level can be played. false: a new\n"
@@ -2248,6 +2261,28 @@ static const struct config_setting config_settings[] =
 	{ "debug.update_time_scale", _config_real, "1.0", "HALO_UPDATE_TIME_SCALE", _environment_value, _platform_server,
 		"How much faster than real time a dedicated server's server.auto_update\n"
 		"counts its minutes (between checks, empty, of a game), for tests." },
+	{ "debug.forge_layout_save", _config_integer, "0", "HALO_FORGE_LAYOUT_SAVE", _environment_value, _platform_desktop,
+		"For automated tests of Forge: in a local game or as a network game's\n"
+		"host, save the Forge layout as this map variant of the map (1 to 64, as\n"
+		"its Map tab lists them; one past those there are is a new one)\n"
+		"fifteen seconds in (after debug.forge_test_edit's spawn), once, and log\n"
+		"it; 0 never." },
+	{ "debug.forge_layout_load", _config_integer, "0", "HALO_FORGE_LAYOUT_LOAD", _environment_value, _platform_desktop,
+		"For automated tests of Forge: play each multiplayer map with this map\n"
+		"variant of it (1 to 64, as its Map tab lists them), as choosing it in the\n"
+		"map list does, when none was chosen there; 0 none." },
+	{ "debug.forge_test_edit", _config_integer, "0", "HALO_FORGE_TEST_EDIT", _environment_value, _platform_desktop,
+		"For automated tests of Forge in a network game (with debug.network_test and\n"
+		"the forge variant): 1, the host spawns a scenery object a few seconds in,\n"
+		"and a client asks it to spawn one, then to move it and to remove it; both\n"
+		"log what they send and take. 0 never." },
+	{ "debug.forge_test_ai", _config_integer, "0", "HALO_FORGE_TEST_AI", _environment_value, _platform_desktop,
+		"For automated tests of Forge's AI: in a local game or as a network game's\n"
+		"host, a few seconds in, once, two squads of this many characters (at most\n"
+		"8) stand in front of the player facing each other, the level's first two\n"
+		"characters whose teams differ (Forge's tag pack brings them to a\n"
+		"multiplayer map); every two seconds for thirty, how many of each live,\n"
+		"fight and follow is logged. 0 never." },
 	{ "debug.fixed_step", _config_boolean, "false", "HALO_FIXED_STEP", _environment_set_is_true, _platform_all,
 		"A game of this machine alone runs one tick a frame, whatever time has\n"
 		"passed, so that it plays the same every time (tests); game_speed has no\n"

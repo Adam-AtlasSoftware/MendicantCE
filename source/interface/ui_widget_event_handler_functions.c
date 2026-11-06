@@ -2995,6 +2995,57 @@ static boolean create_and_begin_editing_new_player_profile(
 	return result;
 }
 
+/* port: the multiplayer map list, the game's 13 maps, the Custom Edition
+maps (port/linux/game/custom_edition_maps.c) and then the Forge layouts
+shown as maps (port/linux/game/forge_layout.c), in local and system link
+games: a system link host sends its layout to its clients as they join
+(network_distributed.c), who need not have it */
+#define MAXIMUM_PORT_FORGE_LEVELS 64
+#define MAXIMUM_PORT_MULTIPLAYER_LEVELS (16 + CUSTOM_EDITION_MAPS_MAXIMUM + MAXIMUM_PORT_FORGE_LEVELS)
+
+static char *port_multiplayer_levels[MAXIMUM_PORT_MULTIPLAYER_LEVELS];
+static char port_custom_level_paths[MAXIMUM_PORT_FORGE_LEVELS][96];
+static short port_multiplayer_level_count = 13;
+/* the first Forge map of the list, after the Custom Edition maps */
+static short port_forge_first_level = 13;
+
+static void port_multiplayer_levels_build(
+	void)
+{
+	short level_index;
+	short level_count;
+	short custom_count = 0;
+	char **levels = custom_edition_maps_level_list(event_handler_functions.multiplayer_levels, 13, &level_count);
+
+	level_count = (short)MIN(level_count, MAXIMUM_PORT_MULTIPLAYER_LEVELS - MAXIMUM_PORT_FORGE_LEVELS);
+	for (level_index = 0; level_index < level_count; level_index++)
+		port_multiplayer_levels[level_index] = levels[level_index];
+	custom_count = (short)MIN(forge_custom_maps_refresh(), MAXIMUM_PORT_FORGE_LEVELS);
+	for (level_index = 0; level_index < custom_count; level_index++)
+	{
+		char const *base_name = forge_custom_map_base_name(level_index);
+
+		_snprintf(port_custom_level_paths[level_index], sizeof(port_custom_level_paths[level_index]),
+			"levels\\test\\%s\\%s", base_name, base_name);
+		port_custom_level_paths[level_index][sizeof(port_custom_level_paths[level_index]) - 1] = 0;
+		port_multiplayer_levels[level_count + level_index] = port_custom_level_paths[level_index];
+	}
+	port_forge_first_level = level_count;
+	port_multiplayer_level_count = (short)(level_count + custom_count);
+
+	return;
+}
+
+/* port: the Forge map a level of the multiplayer level list is, or NONE
+(ui_widget_game_data_input_functions.c) */
+short ui_widget_port_forge_level(
+	short level_index)
+{
+	return level_index >= port_forge_first_level && level_index < port_multiplayer_level_count
+		? (short)(level_index - port_forge_first_level)
+		: NONE;
+}
+
 static boolean multiplayer_level_list_initialize(
 	struct widget_instance *widget,
 	struct event_record *event,
@@ -3002,7 +3053,7 @@ static boolean multiplayer_level_list_initialize(
 {
 	char map_name[256];
 	struct ui_widget_definition *definition = ui_widget_definition_get(widget->definition_tag_index);
-	short level_count = 13;
+	short level_count;
 	char **levels;
 
 	match_vassert("c:\\halo\\SOURCE\\interface\\ui_widget_event_handler_functions.c", 1228,
@@ -3013,10 +3064,11 @@ static boolean multiplayer_level_list_initialize(
 		"expected 3 list items for 'multiplayer level list' widget");
 	/* port: the Xbox levels, then the Custom Edition maps in the maps
 	folders, looked for again as the list opens
-	(port/linux/game/custom_edition_maps.c) */
+	(port/linux/game/custom_edition_maps.c), then the Forge maps */
 	custom_edition_maps_look_again();
-	levels = custom_edition_maps_level_list(event_handler_functions.multiplayer_levels, level_count,
-		&level_count);
+	port_multiplayer_levels_build();
+	level_count = port_multiplayer_level_count;
+	levels = port_multiplayer_levels;
 	widget->generated_list = levels;
 	widget->generated_count = level_count;
 	if (saved_game_file_retrieve_last_used_multiplayer_map(map_name))
@@ -3030,6 +3082,9 @@ static boolean multiplayer_level_list_initialize(
 		if (widget->data3C.selected_index == level_count)
 			widget->data3C.selected_index = 0;
 	}
+	/* port: the Forge map played last, if it is still there */
+	if (forge_custom_map_selected() != NONE)
+		widget->data3C.selected_index = (short)(port_forge_first_level + forge_custom_map_selected());
 	return TRUE;
 }
 
@@ -5736,6 +5791,8 @@ static boolean multiplayer_level_select(
 		return FALSE;
 	}
 	map_name = ((char **)level_list->generated_list)[level_list->data3C.selected_index];
+	/* port: a Forge map is its base map played with its layout */
+	forge_custom_map_select(ui_widget_port_forge_level(level_list->data3C.selected_index));
 	file = fopen("d:\\map_automation.txt", "r");
 	if (file)
 	{
@@ -6017,12 +6074,34 @@ boolean ui_widget_port_multiplayer_map_choose(
 			return FALSE;
 		}
 	}
+	/* (a map of the game's or a Custom Edition one, with no Forge layout;
+	the Map screen's FORGE MAPS choose one after: menu_functions.c) */
+	forge_custom_map_select(NONE);
 	main_set_multiplayer_map_name(map_name);
 	game_engine_override_map_name(map_name);
 	if (server)
 		network_game_server_change_map_name(server, map_name);
 	saved_game_file_remember_last_used_multiplayer_map(map_name);
 	return TRUE;
+}
+
+/* port: the multiplayer map (of ui_widget_port_multiplayer_maps) a Forge map
+(port/linux/game/forge_layout.c) is a layout of, or NONE */
+short ui_widget_port_forge_map_level(
+	short custom_index)
+{
+	char const *base_name = forge_custom_map_base_name(custom_index);
+	short level_index;
+
+	for (level_index = 0; level_index < 13; level_index++)
+	{
+		char const *level_name = strrchr(event_handler_functions.multiplayer_levels[level_index], '\\');
+
+		level_name = level_name ? level_name + 1 : event_handler_functions.multiplayer_levels[level_index];
+		if (!_stricmp(level_name, base_name))
+			return level_index;
+	}
+	return NONE;
 }
 
 /* the gametypes (the built-in ones and those saved): their count, and the

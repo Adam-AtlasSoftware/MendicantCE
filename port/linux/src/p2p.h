@@ -154,6 +154,9 @@ its listing's version that game's protocol version), one OpenCE players join
 too (mixed: its version the network version, the protocol's in its stamp),
 and its rate */
 void p2p_set_game_listing_standard(int standard, int mixed, int rate);
+/* whether the game listed is a Forge game (halo_port_limits.h's
+HALO_PORT_FORGE_VERSION_BIT) */
+void p2p_set_game_listing_forge(int forge);
 /* ... and the bots its host plays (port/linux/game/bots.c), which the
 players' count (p2p_set_game_player_counts) leaves out */
 void p2p_set_game_bots(int count);

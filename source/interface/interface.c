@@ -397,6 +397,8 @@ void interface_draw_fullscreen_overlays(
 	/* port: a replay's playback: who is watched */
 	network_replay_playback_draw();
 	terminal_draw();
+	/* port: dev tools, in games of the Forge game type (port/linux/game/forge.c) */
+	forge_render();
 	main_framerate_render();
 	render_debug_profile();
 

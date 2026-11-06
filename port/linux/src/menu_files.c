@@ -419,7 +419,8 @@ apps, or debug.touch_menus): the menus' "touch" platform, the others'
 platforms it is for, separated by spaces; "vr" the VR build, playing in the
 headset; "hdr" a renderer that draws display.hdr: xgpu_backend.h; "touch"
 the touchscreen's builds, "pointer" the rest: MENU_TOUCH; "computer" the
-desktop's builds but iOS's, whose phone has no window to size nor mouse) */
+desktop's builds but iOS's, whose phone has no window to size nor mouse;
+"forge" game.forge on, but in the headset, whose VR TUTORIAL has its row) */
 static int for_this_platform(struct reader *reader, const XML_Char **attributes)
 {
 	int index;
@@ -440,10 +441,10 @@ static int for_this_platform(struct reader *reader, const XML_Char **attributes)
 					if ((length != 7 || strncmp(name, "desktop", 7)) && (length != 7 || strncmp(name, "android", 7)) &&
 						(length != 2 || strncmp(name, "vr", 2)) && (length != 3 || strncmp(name, "hdr", 3)) &&
 						(length != 5 || strncmp(name, "touch", 5)) && (length != 7 || strncmp(name, "pointer", 7)) &&
-						(length != 8 || strncmp(name, "computer", 8)))
+						(length != 8 || strncmp(name, "computer", 8)) && (length != 5 || strncmp(name, "forge", 5)))
 					{
 						reader_error(reader, "platform=\"%s\" names one that is not desktop, android, vr, hdr, "
-							"touch, pointer or computer", attributes[index + 1]);
+							"touch, pointer, computer or forge", attributes[index + 1]);
 						return 1;
 					}
 #if !defined(HALO_ANDROID) && !defined(HALO_IOS)
@@ -456,6 +457,14 @@ static int for_this_platform(struct reader *reader, const XML_Char **attributes)
 						found = 1;
 					if (length == 3 && !strncmp(name, "hdr", 3) && xgpu_backend_capabilities.hdr)
 						found = 1;
+					if (length == 5 && !strncmp(name, "forge", 5) && config_boolean("game.forge"))
+					{
+						found = 1;
+#ifdef HALO_VR
+						if (halo_vr_running())
+							found = 0;
+#endif
+					}
 					if (length == strlen(MENU_PLATFORM) && !strncmp(name, MENU_PLATFORM, length))
 						found = 1;
 #ifdef HALO_VR

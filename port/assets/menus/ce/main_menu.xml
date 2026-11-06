@@ -44,6 +44,7 @@
 		<data input="main menu fake animate"/>
 		<on event="down"/>
 		<child widget="main_menu/main_menu_item_training" x="192" y="211" platform="vr"/>
+		<child widget="main_menu/main_menu_item_forge" x="192" y="211" platform="forge"/>
 		<child widget="main_menu/main_menu_item_load_camp" x="194" y="247"/>
 		<child widget="main_menu/main_menu_item_multiplayer" x="192" y="283"/>
 		<child widget="main_menu/main_menu_item_settings" x="192" y="319"/>
