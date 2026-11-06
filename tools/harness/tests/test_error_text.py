@@ -1,8 +1,11 @@
 """The port's own error messages (#523): their written line breaks made spaces before the dialog wraps them to its
 own width (ui_widget.c's ui_widget_port_text_unbreak), a blank line kept; the wrap (ui_widget_port_text_wrap)
 measures a line's last word before a break too, which it skipped, so that a written line ran past the dialog; the
-dialog's text box unbreaks before it wraps."""
+dialog's text box unbreaks before it wraps; and a dialog's text (the error's, a question's message) is fitted to its
+room (ui_widget_port_text_fit): wrapped, in the smaller font, then drawn smaller, so that it ends inside it (issue
+689's two reasons ran past the footer, issue 696's long mission name past the box)."""
 
+import re
 import sys
 from pathlib import Path
 
@@ -19,18 +22,27 @@ NEGATIVE_CONTROLS = {
     "paragraph-lost": (("\t\t\tif (breaks > 1)\n\t\t\t\ttext[to++] = L'\\r';\n", ""), "unbreak"),
     # a line's last word before a break not measured, as before
     "last-word-unmeasured": (("\t\tif (line_end && index == line_start)", "\t\tif (line_end)"), "wrap"),
+    # a text taller than its room in the smaller font drawn at its size, as before (issue 689: past the footer)
+    "not-drawn-smaller": (("scale > UI_WIDGET_PORT_TEXT_LEAST_SCALE; scale -= 0.05f)", "0; )"), "fit"),
+    # the smaller font not tried first
+    "no-smaller-font": (("\t\t\t*font_index = small_font_index;\n", ""), "fit"),
+    # its lines wrapped at the room's width when drawn smaller, not as wide as they are drawn: more of them
+    "wrapped-narrow": (("\tui_widget_port_text_wrap(text, &room, laid_width);", "\tui_widget_port_text_wrap(text, &room, width);"),
+                       "fit"),
 }
 
 
 def generated(fault=None):
     source = read("source/interface/ui_widget.c")
     code = function(source, "ui_widget_port_text_unbreak") + "\n\n" + function(source, "ui_widget_port_text_wrap")
+    code += "\n\n" + re.search(r"^#define UI_WIDGET_PORT_TEXT_LEAST_SCALE [^\n]+$", source, re.M).group(0)
+    code += "\n" + function(source, "ui_widget_port_text_fit")
     if fault:
         code = mutated(code, *NEGATIVE_CONTROLS[fault][0])
     return (("under_test.inc", code + "\n"),)
 
 
-@pytest.mark.parametrize("case", ["unbreak", "wrap"])
+@pytest.mark.parametrize("case", ["unbreak", "wrap", "fit"])
 def test_case(case):
     status, output = run(build("error_text", generated()), case)
     assert status == 0, output
@@ -57,4 +69,17 @@ def test_dialog_names_its_key():
 
 def test_dialog_unbreaks_before_wrapping():
     renderer = function(read("source/interface/ui_widget.c"), "widget_instance_render_text_box")
-    assert "\t\tui_widget_port_text_unbreak(*text);\n\t\tustrncpy(wrapped, *text," in renderer
+    error = renderer.split("if (widget == ui_widget_port_error_text_box)\n", 1)[1]
+    assert error.index("ui_widget_port_text_unbreak(*text);") < error.index("fit_scale = ui_widget_port_text_fit(")
+
+
+def test_dialogs_fitted():
+    """The error text, and a text flagged wrap (the port's questions' messages: text_flags "wrap", menu_tags.c), are
+    fitted to their room; the scale they are drawn at is undone after them."""
+    renderer = function(read("source/interface/ui_widget.c"), "widget_instance_render_text_box")
+    assert "TEST_FLAG(definition->text_box_flags, _text_box_port_wrap_bit))" in renderer
+    assert "fit_scale = ui_widget_port_text_fit(*text, &bounds, width, height, &font_index, &color, justification);" \
+        in renderer
+    assert "if (fit_scale != 1.0f)\n\t\trasterizer_text_set_scale(1.0f, 0.0f, 0.0f);" in renderer
+    assert '"no_focus_test", "wrap" };' in read("port/linux/game/menu_tags.c")
+    assert "_text_box_port_wrap_bit = 4" in read("source/interface/ui_widget.c")

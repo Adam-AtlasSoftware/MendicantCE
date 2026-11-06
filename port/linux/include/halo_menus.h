@@ -111,6 +111,8 @@ struct halo_menu_widget
 		*header_bounds, *footer_bounds, *wide;
 	long x, y, left, top, width, height, text_x, text_y, auto_close, auto_close_fade, string_index;
 	long has_width, has_height;
+	/* its picture's corners cut round by this many units (0: square) */
+	long radius;
 	/* indices in their arrays, or HALO_MENU_NONE */
 	long parent, first_child, first_handler, first_input, first_conditional, first_replace;
 	char const *file;

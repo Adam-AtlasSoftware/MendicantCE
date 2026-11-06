@@ -31,13 +31,16 @@ extern const struct text_hires_embedded text_hires_embedded[];
 extern const unsigned int text_hires_embedded_count;
 
 /* a glyph: its quad, in units of the 480 lines from the pen on the baseline,
-its texels in the atlas, in texels of the atlas's placeholder bitmap, and
-the font's advance for it, in units */
+its texels in the atlas, in texels of the atlas's placeholder bitmap, the
+font's advance for it, in units, and its ink's left and right from the pen,
+in units: its outline's, which its quad (whole pixels of the atlas) is out
+to */
 struct text_hires_glyph
 {
 	float left, top, right, bottom;
 	float u0, v0, u1, v1;
 	float advance;
+	float ink_left, ink_right;
 };
 
 /* the letters a font is fitted to its tag by: A to Z, then a to z */

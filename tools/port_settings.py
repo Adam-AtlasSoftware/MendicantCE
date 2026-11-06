@@ -2691,19 +2691,30 @@ def title_backdrop(width: float) -> str:
 # the in-game pause menu's box, taller for the buttons this port adds
 # (menu_tags.c's pause_patch: SETTINGS, and the host's END GAME): the
 # pausebox5 redraw's rounded box (ui-svg-handmade/shell/bitmaps), drawn to
-# hold each number of buttons, one frame each (the Xbox's 2-button box is
-# 159 units high, and each button 35 more)
+# hold each number of rows, one frame each. The rows are the campaign's
+# pause menu's (issue 690): the first PAUSE_BOX_ROWS_TOP below the box's
+# top, 27 high at the PC version's pitch (30), the legends
+# PAUSE_BOX_LEGENDS_GAP under the last and PAUSE_BOX_LEGENDS_BOTTOM above the
+# box's bottom, as the Xbox's campaign box of four rows (159 high) has them
+# (menu_tags.c's pause_box_height)
 PAUSE_BOX_BUTTONS = [3, 4]
+PAUSE_BOX_ROWS_TOP, PAUSE_BOX_ROW_PITCH, PAUSE_BOX_ROW_HEIGHT = 9, 30, 27
+PAUSE_BOX_LEGENDS_GAP, PAUSE_BOX_LEGENDS_BOTTOM = 14, 25
+# the line over the footer the legends are in, and the header's under it
+PAUSE_BOX_DIVIDER = 0.75
+
+
+def pause_box_height(rows: int) -> int:
+    return (PAUSE_BOX_ROWS_TOP + (rows - 1) * PAUSE_BOX_ROW_PITCH + PAUSE_BOX_ROW_HEIGHT + PAUSE_BOX_LEGENDS_GAP +
+            PAUSE_BOX_LEGENDS_BOTTOM)
+
+
 # the campaign pause box, tall enough for five rows (SETTINGS added) or six
-# (network co-op's FRIENDLY FIRE too) at the PC version's pause menu's pitch
-# (30) with the prompts still under the last row: the stock box is 159, and
-# those rows need 36 and 66 more (menu_tags.c's pause_campaign_patch); the
-# mission objectives' box beside it grows with it
-PAUSE_BOX_EXTRA_HEIGHTS = [195, 225]
-
-
-def pause_box_height(buttons: int) -> int:
-    return 159 + (buttons - 2) * 35
+# (network co-op's FRIENDLY FIRE too), with the prompts still under the last
+# row: the stock box is 159, and those rows need 36 and 66 more
+# (menu_tags.c's pause_campaign_patch); the mission objectives' box beside
+# it grows with it
+PAUSE_BOX_EXTRA_HEIGHTS = [pause_box_height(5), pause_box_height(6)]
 
 
 def pause_box_svg(piece: str, height: int, header: bool = False) -> str:
@@ -2740,9 +2751,11 @@ def pause_box_svg(piece: str, height: int, header: bool = False) -> str:
         lines += (['  <g transform="matrix(-1 0 0 1 16 0)">'] + cap + ['  </g>']) if piece == "right" else \
             [line[2:] for line in cap]
     # The stock objectives have a 28-unit header; the button key has a
-    # 28-unit footer. Clip the black fill to the rounded panel interior.
+    # 28-unit footer. Clip the black fill to the rounded panel interior. The
+    # footer's line is above its band, so that the band's middle is its
+    # legends' (PAUSE_BOX_LEGENDS_BOTTOM up, 20 high: issue 596)
     top = 2 if header else height - 28
-    divider = 28 if header else height - 28
+    divider = 28 if header else height - 28 - PAUSE_BOX_DIVIDER
     if piece == "left":
         lines += [f'  <defs><clipPath id="strip"><rect x="2" y="2" width="{width + 16}" height="{height - 4}" rx="7.5"/></clipPath></defs>']
     if piece == "right":
@@ -2751,10 +2764,76 @@ def pause_box_svg(piece: str, height: int, header: bool = False) -> str:
     opacity = ' fill-opacity="0.75"' if not header else ""
     lines += [f'  <g{clip}>',
               f'    <rect x="0" y="{top}" width="{width}" height="26" fill="black"{opacity}/>',
-              f'    <rect x="0" y="{divider}" width="{width}" height="0.75" fill="#2896ff"/>',
+              f'    <rect x="0" y="{divider:g}" width="{width}" height="{PAUSE_BOX_DIVIDER:g}" fill="#2896ff"/>',
               '  </g>']
     lines += ["</svg>", ""]
     return "\n".join(lines)
+
+
+def pause_pictures() -> list:
+    """(bitmap name, [(SVG, width, height)] for its frames) of the pause
+    boxes' pieces: the box's, a frame for each number of rows
+    (PAUSE_BOX_BUTTONS, then the campaign's PAUSE_BOX_EXTRA_HEIGHTS), and
+    the campaign's mission objectives' box's (tools/ce_menus.py draws
+    them)"""
+    heights = [pause_box_height(rows) for rows in PAUSE_BOX_BUTTONS] + list(PAUSE_BOX_EXTRA_HEIGHTS)
+    pictures = [(f"pause/pausebox_{piece}", [(pause_box_svg(piece, height), 4 if piece == "center" else 16, 256)
+                                             for height in heights]) for piece in ("left", "center", "right")]
+    pictures += [(f"pause/objectives_{piece}", [(pause_box_svg(piece, height, header=True),
+                                                 4 if piece == "center" else 16, 256)
+                                                for height in PAUSE_BOX_EXTRA_HEIGHTS])
+                 for piece in ("left", "center", "right")]
+    return pictures
+
+
+# the button bars' buttons (bitmaps/text_button_background: the PC version's
+# OK, CANCEL, BACK and the port's questions' buttons), drawn by the port in
+# the redraw's look (ui-svg-handmade's text_button_background): resting, and
+# with the focus. The redraw's focus ring stood past the resting button, to
+# the widget's edges, and so touched the box a question's buttons are in
+# (issue 696); here both are the same pill, TEXT_BUTTON_PILL in the 128 by 32
+# picture (the widget 24 high): the ring inside it, and a margin round it
+TEXT_BUTTON = "bitmaps/text_button_background"
+TEXT_BUTTON_SIZE = (128, 32)
+TEXT_BUTTON_PILL = (4, 2, 124, 20)
+
+
+def _pill(x0: float, y0: float, x1: float, y1: float, radius: float) -> str:
+    """a rounded box's path"""
+    r = radius
+    return (f"M{x0 + r:g},{y0:g}H{x1 - r:g}A{r:g},{r:g} 0 0 1 {x1:g},{y0 + r:g}V{y1 - r:g}"
+            f"A{r:g},{r:g} 0 0 1 {x1 - r:g},{y1:g}H{x0 + r:g}A{r:g},{r:g} 0 0 1 {x0:g},{y1 - r:g}V{y0 + r:g}"
+            f"A{r:g},{r:g} 0 0 1 {x0 + r:g},{y0:g}Z")
+
+
+def text_button_pictures() -> list:
+    """(bitmap name, [(SVG, width, height)]) of the button bars' buttons:
+    resting (an edge of the accent round a dark fill) and with the focus (a
+    wider, lighter edge, a soft white ring inside it), the redraw's colours
+    and edges, each within TEXT_BUTTON_PILL"""
+    width, height = TEXT_BUTTON_SIZE
+    x0, y0, x1, y1 = TEXT_BUTTON_PILL
+    radius = (y1 - y0) / 2 - 1.3
+
+    def inset(by):
+        return _pill(x0 + by, y0 + by, x1 - by, y1 - by, max(radius - by, 0.5))
+
+    resting = _svg(width, height, [
+        f'  <path d="{inset(0)}{inset(1.32)}" fill="#2299ff" fill-rule="evenodd"/>',
+        f'  <path d="{inset(1.32)}" fill="#002244"/>'])
+    focused = _svg(width, height, [
+        "  <defs>",
+        '    <filter id="b" x="-5%" y="-30%" width="110%" height="160%"><feGaussianBlur stdDeviation="0.74"/>'
+        "</filter>",
+        f'    <mask id="m" maskUnits="userSpaceOnUse" x="0" y="0" width="{width}" height="{height}">'
+        f'<path d="{inset(0)}" fill="#fff"/></mask>',
+        "  </defs>",
+        f'  <path d="{inset(2.6)}" fill="#004488" fill-opacity="0.6"/>',
+        f'  <path d="{inset(0)}{inset(2.6)}" fill="#3399ff" fill-rule="evenodd"/>',
+        f'  <g mask="url(#m)"><path d="{inset(1)}" fill="none" stroke="#eeeeff" stroke-width="2.02" '
+        'filter="url(#b)"/></g>',
+        f'  <path d="{inset(0)}{inset(0.27)}" fill="#2299ff" fill-rule="evenodd"/>'])
+    return [(TEXT_BUTTON, [(resting, width, height), (focused, width, height)])]
 
 
 # where the PC headers' text is (units of their 512x64), and its colour
@@ -3808,24 +3887,48 @@ def _teamplay_options_extras() -> list:
     return lines
 
 
+# the map lists' chooser (MAP_KIND_CHOOSER): its row (bitmaps/option_bkds_sm),
+# its spinner's place and width in it (its words' capitals on the row's
+# middle, half a unit high: a spinner draws its value from its box's top,
+# large_ui's capitals LARGE_UI_ASCENT down), and its arrows' inset from the
+# row's ends (issue 687: they were 3 units from them, against its curve)
+MAP_KIND_ROW = (256, 28)
+MAP_KIND_SPINNER = (9, (MAP_KIND_ROW[1] - LARGE_UI_CAPS) // 2 - LARGE_UI_ASCENT + LARGE_UI_CAPS, 238)
+MAP_KIND_ARROW_INSET = 8
+
+
+def map_kind_arrow_top() -> int:
+    """the chooser's arrows' top in its spinner: their points (ARROW_SM_MIDDLE down the picture) where its
+    words' capitals' middle is"""
+    caps_middle = MAP_KIND_SPINNER[1] + LARGE_UI_ASCENT - LARGE_UI_CAPS / 2
+    return int(caps_middle - ARROW_SM_MIDDLE) - MAP_KIND_SPINNER[1]
+
+
 def _map_kind() -> list:
     """the map lists' first row (New Game's and the Map screen's), as the
     gametype list's chooser: a spinner of SINGLEPLAYER or MULTIPLAYER maps,
     or the Custom Edition maps of the custom_maps folder of either kind
     (menu_functions.c's map lists), for either controller (split screen
     co-op's New Game takes both)"""
-    lines = _widget(MAP_KIND_CHOOSER, [("width", 256), ("height", 28), ("flags", "pass_unhandled_to_focused_child"),
+    left, top, width = MAP_KIND_SPINNER
+    lines = _widget(MAP_KIND_CHOOSER, [("width", MAP_KIND_ROW[0]), ("height", MAP_KIND_ROW[1]),
+                                       ("flags", "pass_unhandled_to_focused_child"),
                                        ("bitmap", "bitmaps/option_bkds_sm"), ("font", "ui\\large_ui"),
                                        ("color", "#FF2896FF"), ("align", "center"), ("text_y", 3)],
-                    [f'<child widget="{MAP_KIND_CHOOSER}_spinner" x="9" y="2"/>'])
+                    [f'<child widget="{MAP_KIND_CHOOSER}_spinner" x="{left}" y="{top}"/>'])
     # (wider than the gametype chooser's, for CUSTOM SINGLEPLAYER, its
-    # arrows at the row's ends)
+    # arrows MAP_KIND_ARROW_INSET in from the row's ends, their points on the
+    # row's middle as its words' capitals are)
+    arrow_top = map_kind_arrow_top()
     lines += _widget(f"{MAP_KIND_CHOOSER}_spinner",
-                     [("type", "spinner"), ("width", 238), ("height", 22), ("flags", "left_right_tabs_items"),
+                     [("type", "spinner"), ("width", width), ("height", 22), ("flags", "left_right_tabs_items"),
                       ("string_list", "main_menu/new_select/var_map_kinds"), ("font", "ui\\large_ui"),
                       ("color", "#FF2896FF"), ("align", "center"), ("text_y", 1), ("list_flags", "items_from_strings"),
                       ("header_bitmap", "bitmaps/arrow_sm_left"), ("footer_bitmap", "bitmaps/arrow_sm_right"),
-                      ("header_bounds", "7 -6 19 0"), ("footer_bounds", "7 238 19 244")],
+                      ("header_bounds", f"{arrow_top} {MAP_KIND_ARROW_INSET - left} {arrow_top + 12} "
+                                        f"{MAP_KIND_ARROW_INSET - left + ARROW_SM_WIDTH}"),
+                      ("footer_bounds", f"{arrow_top} {MAP_KIND_ROW[0] - MAP_KIND_ARROW_INSET - left - ARROW_SM_WIDTH} "
+                                        f"{arrow_top + 12} {MAP_KIND_ROW[0] - MAP_KIND_ARROW_INSET - left}")],
                      ['<on event="left_mouse" run="mouse spinner 1wide click"/>'])
     lines += _strings("main_menu/new_select/var_map_kinds",
                       ["SINGLEPLAYER", "MULTIPLAYER", "CUSTOM SINGLEPLAYER", "CUSTOM MULTIPLAYER"])
@@ -6198,8 +6301,9 @@ CAMPAIGN_NEW = "#FFF2B34A"
 # one have them (large_ui's: issue 681; not the titles' face, OpenCE, which
 # the menus' heading font, pc\\heading, draws)
 CAMPAIGN_TITLE_FONT = "ui\\large_ui"
-# CONTINUE's picture of the saved game's mission, at its left
-CONTINUE_ART_WIDTH = 50
+# CONTINUE's picture of the saved game's mission, at its left, as far in
+# from the item's left, top and bottom (issue 687: it touched its top)
+CONTINUE_ART_WIDTH, CONTINUE_ART_INSET = 44, 5
 # the levels' pictures (ui.map's sp_levels: the ten levels', then a level
 # not reached), 2:1
 CAMPAIGN_PICTURES = "ui\\shell\\bitmaps\\sp_levels"
@@ -6243,9 +6347,11 @@ CAMPAIGN_ART = campaign_art_size(176)
 # pictures' size in them (4 in from the edges), the badges' size and step
 MISSION_BIG, MISSION_SMALL = (158, 240), (132, 211)
 MISSION_ART_INSET = 6
-# a picture's corners: rounded, by a picture over them of what is around it
-# (art_corners: the card's fill, resting or chosen; the panel's; CONTINUE's,
-# focused or not), so that its square corners never cross the card's curve
+# a picture's corners: cut round (its widget's radius: ui_widget.c draws it
+# with menu_shapes.c's rounded picture), so that its square corners never
+# cross the card's curve, and nothing of the picture shows past them (issue
+# 687: a picture of what was around the corners, drawn over them, let the
+# picture show through, and missed it where it moved)
 ART_CORNER_RADIUS = 5
 MISSION_BADGE = {MISSION_BIG: (36, 38), MISSION_SMALL: (28, 31)}
 MISSION_CARDS_TOP = 84
@@ -6310,20 +6416,6 @@ def mission_card(size: tuple) -> str:
     return f"{CAMPAIGN}/card_{size[0]}x{size[1]}"
 
 
-def art_corners(width: int, height: int) -> str:
-    return f"{CAMPAIGN}/art_corners_{width}x{height}"
-
-
-def corners(width: int, height: int, fill: str, opacity: float) -> tuple:
-    """a picture's corners rounded: what is around it, outside a rounded
-    rectangle of its size"""
-    r = ART_CORNER_RADIUS
-    return (_svg(width, height, [
-        f'  <path fill-rule="evenodd" fill="{fill}" fill-opacity="{opacity:g}" d="M0 0H{width}V{height}H0Z '
-        f'M{r} 0H{width - r}A{r} {r} 0 0 1 {width} {r}V{height - r}A{r} {r} 0 0 1 {width - r} {height}H{r}'
-        f'A{r} {r} 0 0 1 0 {height - r}V{r}A{r} {r} 0 0 1 {r} 0Z"/>']), width, height)
-
-
 def campaign_pictures() -> list:
     """(bitmap name, [(SVG, width, height)] for its frames) of the campaign's
     own parts, in the shared parts' look (tools/ce_menus.py draws them)"""
@@ -6352,18 +6444,10 @@ def campaign_pictures() -> list:
                                               framed(*size, "#0f2a44", 0.95, "#4fb3ff", 10, 2.5),
                                               framed(*size, "#08131f", 0.7, "#16324d")]))
         art = campaign_art_size(size[0] - 2 * MISSION_ART_INSET)
-        pictures.append((f"{CAMPAIGN}/art_back_{art[0]}x{art[1]}", [framed(*art, "#12304a", 1.0, "none", 7, 0)]))
+        pictures.append((f"{CAMPAIGN}/art_back_{art[0]}x{art[1]}",
+                         [framed(*art, "#12304a", 1.0, "none", ART_CORNER_RADIUS, 0)]))
     pictures.append((f"{CAMPAIGN}/art_back_{CAMPAIGN_ART[0]}x{CAMPAIGN_ART[1]}",
-                     [framed(*CAMPAIGN_ART, "#12304a", 1.0, "none", 7, 0)]))
-    # (the pictures' corners: the cards', resting and chosen; the panel's;
-    # CONTINUE's, as its frames)
-    for size in (MISSION_BIG, MISSION_SMALL):
-        art = campaign_art_size(size[0] - 2 * MISSION_ART_INSET)
-        pictures.append((art_corners(*art), [corners(*art, "#0a1b2e", 0.85), corners(*art, "#0f2a44", 0.95)]))
-    pictures.append((art_corners(*CAMPAIGN_ART), [corners(*CAMPAIGN_ART, "#000e23", 0.88)]))
-    continue_art = campaign_art_size(CONTINUE_ART_WIDTH)
-    pictures.append((art_corners(*continue_art), [corners(*continue_art, "#0a1b2e", 0.9),
-                                                  corners(*continue_art, "#0f2a44", 0.95)]))
+                     [framed(*CAMPAIGN_ART, "#12304a", 1.0, "none", ART_CORNER_RADIUS, 0)]))
     arrow_w, arrow_h = MISSION_ARROW
     for side in ("left", "right"):
         pictures.append((f"{CAMPAIGN}/arrow_{side}", [
@@ -6456,24 +6540,22 @@ def _campaign_menu() -> list:
                      ['<data input="port campaign update"/>', *children,
                       f'<child widget="{CAMPAIGN}/campaign_prompts" y="414"/>'])
     cw, ch = CAMPAIGN_CONTINUE
+    continue_text_x = CONTINUE_ART_INSET + CONTINUE_ART_WIDTH + 9
     lines += _widget(f"{CAMPAIGN}/item_continue", [("type", "text"), ("width", cw), ("height", ch),
                                                    ("wide", items_wide), ("bitmap", f"{CAMPAIGN}/continue_{cw}x{ch}"),
                                                    ("text", "CONTINUE"), ("font", "ui\\large_ui"),
-                                                   ("color", "#FFFFFFFF"), ("text_x", CONTINUE_ART_WIDTH + 14),
+                                                   ("color", "#FFFFFFFF"), ("text_x", continue_text_x),
                                                    ("text_y", 2)],
                      [*(f'<on event="{event}" run="port campaign continue"/>' for event in ("a", "start")),
                       '<on event="left_mouse" run="mouse emit accept event"/>',
-                      f'<child widget="{CAMPAIGN}/continue_art"/>', f'<child widget="{CAMPAIGN}/continue_corners"/>',
-                      f'<child widget="{CAMPAIGN}/continue_note"/>'])
+                      f'<child widget="{CAMPAIGN}/continue_art"/>', f'<child widget="{CAMPAIGN}/continue_note"/>'])
     art_w, art_h = campaign_art_size(CONTINUE_ART_WIDTH)
-    lines += _widget(f"{CAMPAIGN}/continue_art", [("controller", 1), ("left", 6), ("top", (ch - art_h) // 2),
-                                                  ("width", art_w), ("height", art_h),
-                                                  ("bitmap", f"{CAMPAIGN}/art_{art_w}x{art_h}")], [])
-    lines += _widget(f"{CAMPAIGN}/continue_corners", [("controller", 1), ("left", 6), ("top", (ch - art_h) // 2),
-                                                      ("width", art_w), ("height", art_h),
-                                                      ("bitmap", art_corners(art_w, art_h))], [])
+    lines += _widget(f"{CAMPAIGN}/continue_art", [("controller", 1), ("left", CONTINUE_ART_INSET),
+                                                  ("top", (ch - art_h) // 2), ("width", art_w), ("height", art_h),
+                                                  ("bitmap", f"{CAMPAIGN}/art_{art_w}x{art_h}"),
+                                                  ("radius", ART_CORNER_RADIUS)], [])
     lines += _level_pictures(f"{CAMPAIGN}/art_{art_w}x{art_h}", art_w, art_h)
-    lines += _campaign_text(f"{CAMPAIGN}/continue_note", CONTINUE_ART_WIDTH + 14, 24, cw - CONTINUE_ART_WIDTH - 22, 18,
+    lines += _campaign_text(f"{CAMPAIGN}/continue_note", continue_text_x, 24, cw - continue_text_x - 8, 18,
                             "ui\\small_ui", CAMPAIGN_TEXT, wide_layout=wide(0, HUB_WIDE_ITEMS))
     for name, words, handlers in (
             ("item_restart", "RESTART MISSION", [f'<on event="{event}" run="port campaign restart ask" '
@@ -6503,22 +6585,21 @@ def _campaign_menu() -> list:
                                                         ("wide", middle)], []), "panel_art_back")
     lines += add(_widget(f"{CAMPAIGN}/panel_art", [("controller", 1), ("left", x + (inner - art_w) // 2), ("top", top + 12),
                                                    ("width", art_w), ("height", art_h),
-                                                   ("bitmap", f"{CAMPAIGN}/art_{art_w}x{art_h}"), ("wide", middle)],
-                         []), "panel_art")
-    lines += add(_widget(f"{CAMPAIGN}/panel_art_corners", [("controller", 1), ("left", x + (inner - art_w) // 2),
-                                                           ("top", top + 12), ("width", art_w), ("height", art_h),
-                                                           ("bitmap", art_corners(art_w, art_h)), ("wide", middle)],
-                         []), "panel_art_corners")
+                                                   ("bitmap", f"{CAMPAIGN}/art_{art_w}x{art_h}"), ("wide", middle),
+                                                   ("radius", ART_CORNER_RADIUS)], []), "panel_art")
+    # (its words in its middle, under the picture, as wide as it is: on a
+    # wide screen a line as long as a panel there, not one at its left with
+    # the panel's right empty, issue 687)
     lines += add(_campaign_text(f"{CAMPAIGN}/panel_number", x, top + 158, inner, 16, "ui\\small_ui", CAMPAIGN_DIM,
-                                wide_layout=grown), "panel_number")
+                                align="center", wide_layout=grown), "panel_number")
     lines += add(_campaign_text(f"{CAMPAIGN}/panel_title", x, top + 173, inner, 24, CAMPAIGN_TITLE_FONT, "#FFFFFFFF",
-                                wide_layout=grown), "panel_title")
+                                align="center", wide_layout=grown), "panel_title")
     lines += add(_campaign_text(f"{CAMPAIGN}/panel_status", x, top + 197, inner, 18, "ui\\small_ui", CAMPAIGN_ACCENT,
-                                wide_layout=grown), "panel_status")
+                                align="center", wide_layout=grown), "panel_status")
     lines += add(_campaign_text(f"{CAMPAIGN}/panel_objective", x, top + 216, inner, 50, "ui\\small_ui",
-                                SETTINGS_BLUE, wide_layout=grown), "panel_objective")
+                                SETTINGS_BLUE, align="center", wide_layout=grown), "panel_objective")
     lines += add(_campaign_text(f"{CAMPAIGN}/panel_hint", x, top + 270, inner, 44, "ui\\small_ui",
-                                CAMPAIGN_DIM, wide_layout=grown), "panel_hint")
+                                CAMPAIGN_DIM, align="center", wide_layout=grown), "panel_hint")
     lines += _widget(f"{CAMPAIGN}/campaign_panel", [("controller", 1), ("left", left), ("top", top), ("width", width),
                                                     ("height", height), ("bitmap", part_panel(width, height)),
                                                     ("wide", wide(*HUB_WIDE_PANEL))], panel)
@@ -6529,25 +6610,49 @@ def _campaign_menu() -> list:
     return lines
 
 
+# the port's questions in the PC version's Quit's box (bitmaps/alert_bkd,
+# ce/main_menu.quit_select.xml: its 239-unit picture drawn 280 wide, from
+# 180 across and 160 down, its body from 29 to 130 down it): their message's
+# text box, in the body, DIALOG_MESSAGE_MARGIN in from the box's sides (so
+# that its middle is the box's), the text fitted to it (text_flags wrap:
+# ui_widget.c's ui_widget_port_text_fit)
+DIALOG_LEFT, DIALOG_TOP, DIALOG_WIDTH, DIALOG_HEIGHT = 180, 160, 280, 160
+DIALOG_BOX_WIDTH = round(DIALOG_WIDTH * 239 / 256)
+DIALOG_MESSAGE_MARGIN = 14
+DIALOG_MESSAGE = (DIALOG_LEFT + DIALOG_MESSAGE_MARGIN, DIALOG_TOP + 34,
+                  DIALOG_BOX_WIDTH - 2 * DIALOG_MESSAGE_MARGIN, 94)
+
+
+def _dialog_message(name: str, pairs: list, inner: list = ()) -> list:
+    """a question's message, centred in its box's body, its text fitted to
+    it, white (as the Quit box's question is drawn: its box has the
+    focus)"""
+    left, top, width, height = DIALOG_MESSAGE
+    return _widget(name, [("type", "text"), ("controller", 1), ("left", left), ("top", top), ("width", width),
+                          ("height", height), *pairs, ("font", "ui\\small_ui"), ("color", "#FFFFFFFF"),
+                          ("align", "center"), ("text_flags", "wrap")], list(inner))
+
+
 def _restart_question() -> list:
     """the question before a mission in progress starts again (the Campaign
     menu's RESTART MISSION, Choose Mission's RESTART on its card), laid out
     as the PC version's Quit is (ce/main_menu.quit_select.xml), as internet
     play's connecting box is: "Restart <mission>? Your progress in it will
-    be lost." (its text the game's: "port campaign restart update"), CANCEL
-    (with the focus, and B) back to the screen it was asked from, RESTART
-    the mission from its start at the saved game's difficulty"""
+    be lost." (its text the game's: "port campaign restart update", fitted
+    to the box: a long mission's name wraps), CANCEL (with the focus, and B)
+    back to the screen it was asked from, RESTART the mission from its start
+    at the saved game's difficulty"""
     base = CAMPAIGN
     lines = _widget(f"{base}/restart_screen",
-                    [("type", "text"), ("controller", 1), ("left", 180), ("top", 160), ("width", 280), ("height", 160),
-                     ("flags", "pass_unhandled_to_focused_child"), ("bitmap", "bitmaps/alert_bkd"),
-                     ("font", "ui\\small_ui"), ("color", "#FF2896FF"), ("align", "center"), ("text_x", -10),
-                     ("text_y", 40)],
-                    ['<data input="port campaign restart update"/>',
-                     '<on event="b" run="port campaign restart cancel" back="true"/>',
+                    [("controller", 1), ("left", DIALOG_LEFT), ("top", DIALOG_TOP), ("width", DIALOG_WIDTH),
+                     ("height", DIALOG_HEIGHT), ("flags", "pass_unhandled_to_focused_child"),
+                     ("bitmap", "bitmaps/alert_bkd")],
+                    ['<on event="b" run="port campaign restart cancel" back="true"/>',
                      '<on event="back" run="port campaign restart cancel" back="true"/>',
+                     f'<child widget="{base}/restart_message"/>',
                      f'<child widget="{base}/restart_button_bar" x="182" y="293"/>',
                      f'<child widget="{base}/header_restart" x="182" y="164"/>'])
+    lines += _dialog_message(f"{base}/restart_message", [], ['<data input="port campaign restart update"/>'])
     lines += _widget(f"{base}/header_restart",
                      [("type", "text"), ("controller", 1), ("width", 270), ("height", 20), ("text", "RESTART MISSION"),
                       ("font", "ui\\large_ui"), ("color", "#FF2896FF")], [])
@@ -6580,7 +6685,7 @@ def _mission_card(size: tuple, slot: int) -> list:
     # (the missions' names in the menus' heading font: OpenCE, the titles' face)
     font = CAMPAIGN_TITLE_FONT if size == MISSION_BIG else "ui\\small_ui"
     children = [f'<child widget="{CAMPAIGN}/{name}_{kind}"/>' for name in
-                ("card_art_back", "card_art", "card_custom_art", "card_art_corners", "card_card_tag",
+                ("card_art_back", "card_art", "card_custom_art", "card_card_tag",
                  "card_card_title", "card_resume",
                  "card_number", "card_title")]
     # (the badges in a row under the name, across the card)
@@ -6601,13 +6706,12 @@ def _mission_card(size: tuple, slot: int) -> list:
                                                           ("bitmap", f"{CAMPAIGN}/art_back_{art_w}x{art_h}")], [])
     lines += _widget(f"{CAMPAIGN}/card_art_{kind}", [("controller", 1), ("left", inset), ("top", inset),
                                                      ("width", art_w), ("height", art_h),
-                                                     ("bitmap", f"{CAMPAIGN}/art_{art_w}x{art_h}")], [])
+                                                     ("bitmap", f"{CAMPAIGN}/art_{art_w}x{art_h}"),
+                                                     ("radius", ART_CORNER_RADIUS)], [])
     lines += _widget(f"{CAMPAIGN}/card_custom_art_{kind}", [("controller", 1), ("left", inset), ("top", inset),
                                                             ("width", art_w), ("height", art_h),
-                                                            ("bitmap", CAMPAIGN_CUSTOM_PICTURES)], [])
-    lines += _widget(f"{CAMPAIGN}/card_art_corners_{kind}", [("controller", 1), ("left", inset), ("top", inset),
-                                                             ("width", art_w), ("height", art_h),
-                                                             ("bitmap", art_corners(art_w, art_h))], [])
+                                                            ("bitmap", CAMPAIGN_CUSTOM_PICTURES),
+                                                            ("radius", ART_CORNER_RADIUS)], [])
     # (a map's title card, without a picture: CUSTOM over its name)
     lines += _widget(f"{CAMPAIGN}/card_card_tag_{kind}", [("type", "text"), ("controller", 1), ("left", inset + 10),
                                                           ("top", inset + art_h - 48), ("width", BROWSER_PILL),
@@ -7177,13 +7281,14 @@ def _update() -> list:
     CHECK FOR UPDATES"""
     base = UPDATE
     lines = _widget(f"{base}/update_screen",
-                    [("type", "text"), ("controller", 1), ("left", 180), ("top", 160), ("width", 280), ("height", 160),
-                     ("flags", "pass_unhandled_to_focused_child"), ("bitmap", "bitmaps/alert_bkd"),
-                     ("string_list", f"{base}/update_prompt"), ("font", "ui\\small_ui"), ("color", "#FF2896FF"),
-                     ("align", "center"), ("text_x", -10), ("text_y", 40)],
+                    [("controller", 1), ("left", DIALOG_LEFT), ("top", DIALOG_TOP), ("width", DIALOG_WIDTH),
+                     ("height", DIALOG_HEIGHT), ("flags", "pass_unhandled_to_focused_child"),
+                     ("bitmap", "bitmaps/alert_bkd")],
                     ['<on event="b" back="true"/>', '<on event="back" back="true"/>',
+                     f'<child widget="{base}/update_message"/>',
                      f'<child widget="{base}/button_bar" x="182" y="293"/>',
                      f'<child widget="{base}/header_update" x="182" y="164"/>'])
+    lines += _dialog_message(f"{base}/update_message", [("string_list", f"{base}/update_prompt")])
     lines += _widget(f"{base}/header_update",
                      [("type", "text"), ("controller", 1), ("width", 200), ("height", 20), ("text", "NEW VERSION"),
                       ("font", "ui\\large_ui"), ("color", "#FF2896FF")], [])
@@ -7196,7 +7301,7 @@ def _update() -> list:
     lines += _text_button(f"{base}/button_later", "NOT NOW", ['<on event="a" back="true"/>',
                                                               '<on event="start" back="true"/>'])
     lines += _strings(f"{base}/update_prompt",
-                      ["A new version is ready.\\nUpdate now? The game will\\nclose, update and start again."])
+                      ["A new version is ready. Update now? The game will close, update and start again."])
     return lines
 
 

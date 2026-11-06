@@ -105,6 +105,7 @@ static struct
 	short x, y, width, height;
 	short left, top;    /* the glyph's corner, in pixels from the pen on the baseline */
 	float advance;      /* in units of the 480 lines */
+	float ink_left, ink_right;  /* its outline's left and right, in pixels from the pen */
 } glyphs[GLYPH_CACHE_SIZE];
 
 /* the glyphs asked of the thread, and those it has rasterized: rings of
@@ -121,6 +122,9 @@ struct glyph_job
 	/* (done) where it is, its corner and advance; full: the atlas is */
 	short x, y, width, height, left, top;
 	float advance;
+	/* (done) its ink's left and right from the pen, in pixels: the outline's,
+	which its bitmap's box (left and width, whole pixels) is out to */
+	float ink_left, ink_right;
 	int full;
 };
 
@@ -249,7 +253,7 @@ static void *rasterizer_thread(void *unused)
 	{
 		struct glyph_job job;
 		struct font_face *face;
-		int index, x0 = 0, y0 = 0, x1 = 0, y1 = 0, advance = 0, bearing = 0;
+		int index, x0 = 0, y0 = 0, x1 = 0, y1 = 0, advance = 0, bearing = 0, ink_x0 = 0, ink_x1 = 0;
 		unsigned char *pixels = NULL;
 
 		while (!rasterizer.wanted_count)
@@ -262,11 +266,19 @@ static void *rasterizer_thread(void *unused)
 			continue;
 		pthread_mutex_unlock(&rasterizer.lock);
 		face = &fonts[job.font].faces[job.face];
+		job.ink_left = job.ink_right = 0.0f;
 		index = stbtt_FindGlyphIndex(&face->info, (int)job.code);
 		if (index)
 		{
 			stbtt_GetGlyphBitmapBox(&face->info, index, job.pixels_x, job.pixels, &x0, &y0, &x1, &y1);
 			stbtt_GetGlyphHMetrics(&face->info, index, &advance, &bearing);
+			/* (the outline's own left and right, which the box rounds out
+			to whole pixels) */
+			if (stbtt_GetGlyphBox(&face->info, index, &ink_x0, NULL, &ink_x1, NULL))
+			{
+				job.ink_left = (float)ink_x0 * job.pixels_x;
+				job.ink_right = (float)ink_x1 * job.pixels_x;
+			}
 		}
 		job.width = (short)(x1 - x0);
 		job.height = (short)(y1 - y0);
@@ -349,6 +361,8 @@ static void glyphs_take(void)
 		glyphs[slot].left = job->left;
 		glyphs[slot].top = job->top;
 		glyphs[slot].advance = job->advance;
+		glyphs[slot].ink_left = job->ink_left;
+		glyphs[slot].ink_right = job->ink_right;
 		glyphs[slot].state = _glyph_ready;
 		atlas_changed = 1;
 	}
@@ -605,6 +619,11 @@ int text_hires_glyph(long font, unsigned long code, struct text_hires_glyph *gly
 	glyph->right = (glyphs[slot].left + glyphs[slot].width) / pixel_scale;
 	glyph->bottom = (glyphs[slot].top + glyphs[slot].height) / pixel_scale;
 	glyph->advance = glyphs[slot].advance;
+	/* (no outline's: its box's) */
+	glyph->ink_left = glyphs[slot].ink_right > glyphs[slot].ink_left ? glyphs[slot].ink_left / pixel_scale :
+		glyph->left;
+	glyph->ink_right = glyphs[slot].ink_right > glyphs[slot].ink_left ? glyphs[slot].ink_right / pixel_scale :
+		glyph->right;
 	glyph->u0 = (float)glyphs[slot].x * placeholder_width / ATLAS_SIZE;
 	glyph->v0 = (float)glyphs[slot].y * placeholder_height / ATLAS_SIZE;
 	glyph->u1 = (float)(glyphs[slot].x + glyphs[slot].width) * placeholder_width / ATLAS_SIZE;

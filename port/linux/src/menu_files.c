@@ -690,6 +690,7 @@ static void read_widget(struct reader *reader, const XML_Char **attributes, long
 		{ "height", NULL, &widget.height, &widget.has_height }, { "text_x", NULL, &widget.text_x },
 		{ "text_y", NULL, &widget.text_y }, { "auto_close", NULL, &widget.auto_close },
 		{ "auto_close_fade", NULL, &widget.auto_close_fade }, { "string_index", NULL, &widget.string_index },
+		{ "radius", NULL, &widget.radius },
 	};
 
 	memset(&widget, 0, sizeof(widget));
@@ -701,6 +702,8 @@ static void read_widget(struct reader *reader, const XML_Char **attributes, long
 	read_attributes(reader, "widget", attributes, table, sizeof(table) / sizeof(*table));
 	if (!reader->failed && !widget.name)
 		reader_error(reader, "a <widget> needs a name");
+	else if (!reader->failed && (widget.radius < 0 || widget.radius > 64))
+		reader_error(reader, "a <widget>'s radius is 0 to 64");
 	GROW(reader, menus->widgets, index);
 	menus->widgets[index] = widget;
 	menus->widget_count++;

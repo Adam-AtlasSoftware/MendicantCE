@@ -183,3 +183,132 @@ def mission_overflows(widgets, names):
         if int(box["width"]) < need:
             problems.append(f"card_unbeaten_{kind}: {box['width']} wide, NOT YET BEATEN {need}")
     return problems
+
+
+def dialog_overflows(widgets, names):
+    """The port's questions in the Quit box's look (issue 696): the message's box in the box's body, as far in from
+    its sides (its middle the box's: the alert picture drawn DIALOG_WIDTH wide), its text fitted to it (text_flags
+    wrap: a long mission's name wraps, ui_widget.c's ui_widget_port_text_fit); each button's pill (the button bars'
+    picture: TEXT_BUTTON_PILL) at least BUTTON_ROOM from the box's edge and the footer's line, and from the button
+    beside it, so that the ring the focus draws round it touches neither"""
+    problems = []
+    left, top = port_settings.DIALOG_LEFT, port_settings.DIALOG_TOP
+    box_right = left + port_settings.DIALOG_BOX_WIDTH
+    # (the alert picture's box: its edge 2 wide, its body from 29 to 130 and its footer from 131 to 157 down it)
+    inner_left, inner_right, body_top, body_bottom = left + 2, box_right - 2, top + 29, top + 130
+    footer_top, footer_bottom = top + 131, top + 157
+    pill_x0, pill_y0, pill_x1, pill_y1 = port_settings.TEXT_BUTTON_PILL
+    for screen in ("restart_screen", "update_screen"):
+        name = next((name for name in names if name.endswith(f"/{screen}")), None)
+        if not name:
+            continue
+        boxes = menu_layout.layout(name, 640, every=widgets)
+        messages = [box for box in boxes if box.name.endswith("_message")]
+        if len(messages) != 1:
+            problems.append(f"{screen}: {len(messages)} messages")
+            continue
+        message = messages[0]
+        attributes = widgets[next(child for child in widgets if child.endswith("/" + message.name))].attributes
+        if "wrap" not in attributes.get("text_flags", "").split():
+            problems.append(f"{message.name}: its text not fitted to it (text_flags wrap)")
+        if message.x0 < inner_left or message.x1 > inner_right or message.y0 < body_top or message.y1 > body_bottom:
+            problems.append(f"{message.name}: {message} past the box's body")
+        if abs((message.x0 - inner_left) - (inner_right - message.x1)) > 1:
+            problems.append(f"{message.name}: {message.x0 - inner_left} in from the box's left, "
+                            f"{inner_right - message.x1} from its right")
+        buttons = sorted((box for box in boxes if box.name.startswith(("restart_button_", "button_")) and
+                          widgets.get(next((child for child in widgets if child.endswith("/" + box.name)), ""),
+                                      menu_layout.Widget({}, [])).attributes.get("bitmap") == port_settings.TEXT_BUTTON),
+                         key=lambda box: box.x0)
+        pills = [(box.x0 + pill_x0, box.y0 + pill_y0, box.x0 + pill_x1, box.y0 + pill_y1, box.name) for box in buttons]
+        if len(pills) != 2:
+            problems.append(f"{screen}: {len(pills)} buttons")
+        for x0, y0, x1, y1, button in pills:
+            # (the picture drawn as wide as the alert picture is stretched: the PC's 256 drawn 280 wide)
+            room = min(x0 - inner_left, inner_right - x1, y0 - footer_top, footer_bottom - y1)
+            if room < BUTTON_ROOM:
+                problems.append(f"{button}: its pill {room} from the box's edge or footer")
+        for (_, _, right, _, first), (left_next, _, _, _, second) in zip(pills, pills[1:]):
+            if left_next - right < BUTTON_ROOM:
+                problems.append(f"{first} and {second}: {left_next - right} apart")
+    return problems
+
+
+# (the room a question's button keeps round it: the focus's ring is drawn in its pill, which this keeps clear of the
+# box's edge, its footer's line and the button beside it)
+BUTTON_ROOM = 2
+
+
+def pause_box_misfits(widgets, names):
+    """The pause boxes' pictures (pause/pausebox_*: issues 596 and 690): each frame as tall as its rows need at the
+    campaign pause menu's spacing (pause_box_height), and its footer's band (below its line, above its edge) with its
+    middle the legends' (PAUSE_BOX_LEGENDS_BOTTOM up from the box's bottom, the Xbox's 20-high pictures' middle)"""
+    import re as _re
+    problems = []
+    for rows in [*port_settings.PAUSE_BOX_BUTTONS, 5, 6]:
+        height = port_settings.pause_box_height(rows)
+        svg = port_settings.pause_box_svg("center", height)
+        rects = [tuple(float(value) for value in match) for match in
+                 _re.findall(r'<rect x="[^"]*" y="([^"]+)" width="[^"]*" height="([^"]+)" fill="(?:black|#2896ff)"',
+                             svg)]
+        # (the line over the footer, and the edge under it)
+        line = next(((y, h) for y, h in rects if h < 1 and y > height / 2), None)
+        edge = next(((y, h) for y, h in rects if h == 2 and y > height / 2), None)
+        if not line or not edge:
+            problems.append(f"{rows} rows: no footer line or edge")
+            continue
+        band_middle = (line[0] + line[1] + edge[0]) / 2
+        legends_middle = height - port_settings.PAUSE_BOX_LEGENDS_BOTTOM + 10
+        if abs(band_middle - legends_middle) > 0.05:
+            problems.append(f"{rows} rows: the footer's middle {band_middle:g}, the legends' {legends_middle:g}")
+        rows_bottom = port_settings.PAUSE_BOX_ROWS_TOP + (rows - 1) * port_settings.PAUSE_BOX_ROW_PITCH + \
+            port_settings.PAUSE_BOX_ROW_HEIGHT
+        if rows_bottom + port_settings.PAUSE_BOX_LEGENDS_GAP > height - port_settings.PAUSE_BOX_LEGENDS_BOTTOM:
+            problems.append(f"{rows} rows: the last row over the legends")
+        if line[0] < rows_bottom:
+            problems.append(f"{rows} rows: the footer's line over the last row")
+    return problems
+
+
+def chooser_off_middle(widgets, names):
+    """The map lists' chooser (SINGLEPLAYER or MULTIPLAYER, issue 687): its words' capitals and its arrows' points on
+    its row's middle (half a unit off, where whole units cannot), its arrows at least CHOOSER_ARROW_ROOM in from the
+    row's ends (its picture's curve)"""
+    name = port_settings.MAP_KIND_CHOOSER
+    if name not in names:
+        return []
+    problems = []
+    row = widgets[name].attributes
+    height, width = int(row["height"]), int(row["width"])
+    spinner_name, x, y, _ = widgets[name].children[0]
+    spinner = widgets[spinner_name].attributes
+    middle = capitals_middle(spinner, y)
+    if abs(middle - height / 2) > SLACK:
+        problems.append(f"{spinner_name}: its capitals' middle {middle:g}, its row's {height / 2:g}")
+    for key in ("header_bounds", "footer_bounds"):
+        top, left, bottom, right = (int(value) for value in spinner[key].split())
+        point = y + top + port_settings.ARROW_SM_MIDDLE
+        if abs(point - height / 2) > SLACK:
+            problems.append(f"{spinner_name}'s {key}: its arrow's point at {point:g}, the row's middle {height / 2:g}")
+        room = min(x + left, width - (x + right))
+        if room < CHOOSER_ARROW_ROOM:
+            problems.append(f"{spinner_name}'s {key}: its arrow {room} from the row's end")
+    return problems
+
+
+CHOOSER_ARROW_ROOM = 6
+
+
+def continue_art_off_middle(widgets, names):
+    """CONTINUE's picture (issue 687: its top against the item's, room under it) as far from the item's top as from
+    its bottom and its left"""
+    item = f"{port_settings.CAMPAIGN}/item_continue"
+    if item not in names:
+        return []
+    height = int(widgets[item].attributes["height"])
+    art = widgets[f"{port_settings.CAMPAIGN}/continue_art"].attributes
+    top, left, art_height = int(art["top"]), int(art["left"]), int(art["height"])
+    bottom = height - top - art_height
+    if top != bottom or left != top:
+        return [f"continue_art: {left} from the item's left, {top} from its top, {bottom} from its bottom"]
+    return []
