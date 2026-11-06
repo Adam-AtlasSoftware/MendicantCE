@@ -281,13 +281,15 @@ static void synthetic_vertex(const char *name, const struct xgpu_vertex_program 
 }
 
 /* display.prism_material_overlay (xgpu.h): a model's program lit for each
-pixel with two tiles and with four and a class mask, in each debug view, by
+pixel with two tiles and with four and a class mask, in each debug view (and
+four whose mask wins over the channel rule), by
 the point lights and the enhanced dynamic lights, with a reflection cube
 and without (spirv_corpus.c's overlay_programs) */
 static void overlay_programs(void)
 {
 	static const unsigned char overlays[] = { 1, 3, 5, 7, 9, 1 | XGPU_OVERLAY_CLASS_MASK, 3 | XGPU_OVERLAY_CLASS_MASK,
-		7 | XGPU_OVERLAY_CLASS_MASK, 9 | XGPU_OVERLAY_CLASS_MASK };
+		7 | XGPU_OVERLAY_CLASS_MASK, 9 | XGPU_OVERLAY_CLASS_MASK,
+		1 | XGPU_OVERLAY_CLASS_MASK | XGPU_OVERLAY_CLASS_MASK_WINS, 3 | XGPU_OVERLAY_CLASS_MASK | XGPU_OVERLAY_CLASS_MASK_WINS };
 	struct xgpu_pixel_program program;
 	char name[96];
 	unsigned int overlay, lights, kind, cube;

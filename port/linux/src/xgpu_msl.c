@@ -2366,14 +2366,20 @@ static void overlay_light(struct xgpu_text *text, const struct xgpu_pixel_progra
 			"\t\tfloat overlay_c0 = smoothstep(u.material_overlay[1].x, u.material_overlay[1].y, "
 			"dot(overlay_t2, u.material_overlay[0]));\n"
 			"\t\tif (u.material_overlay[1].z > 0.5) overlay_c0 = 1.0 - overlay_c0;\n"
-			"\t\tfloat overlay_rs = overlay_q.y + overlay_q.z + overlay_q.w;\n"
-			"\t\tfloat3 overlay_rest = overlay_rs > 1.0e-3 ? overlay_q.yzw / overlay_rs : float3(1.0, 0.0, 0.0);\n"
-			"\t\toverlay_wt = float4(overlay_c0, (1.0 - overlay_c0) * overlay_rest);\n"
+			"%s"
 			"\t}\n"
 			"\tfloat overlay_w = overlay_wt.x;\n"
 			"\tfloat2 overlay_slope = float2(0.0);\n"
 			"\tfloat overlay_cavity = 0.0, overlay_rough = 0.0;\n"
-			"\tfloat4 overlay_f4;\n");
+			"\tfloat4 overlay_f4;\n",
+			(program->material_overlay & XGPU_OVERLAY_CLASS_MASK_WINS) ?
+			/* (the mask's A, C and D kept, the rule deciding A against B
+			over the mask's B alone: xgpu_spirv.c's) */
+			"\t\toverlay_wt = float4(overlay_wt.x + overlay_wt.y * overlay_c0, overlay_wt.y * (1.0 - overlay_c0), "
+			"overlay_wt.z, overlay_wt.w);\n" :
+			"\t\tfloat overlay_rs = overlay_q.y + overlay_q.z + overlay_q.w;\n"
+			"\t\tfloat3 overlay_rest = overlay_rs > 1.0e-3 ? overlay_q.yzw / overlay_rs : float3(1.0, 0.0, 0.0);\n"
+			"\t\toverlay_wt = float4(overlay_c0, (1.0 - overlay_c0) * overlay_rest);\n");
 		for (slot = 0; slot < 4; slot++)
 		{
 			xgpu_text_append(text,

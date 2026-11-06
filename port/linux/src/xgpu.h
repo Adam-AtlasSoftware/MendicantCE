@@ -178,8 +178,9 @@ struct nv2a_pixel_shader_key
 	lit with a micro normal, cavity and roughness from two tiles mixed by
 	its multipurpose map (texture 2): 0 none, else 1 plus twice
 	display.prism_overlay_view, plus XGPU_OVERLAY_CLASS_MASK with four tiles
-	weighted by a class mask and the multipurpose map's rule on top (below:
-	"The material overlay") */
+	weighted by a class mask and the multipurpose map's rule on top, plus
+	XGPU_OVERLAY_CLASS_MASK_WINS where the mask's own tiles A, C and D are
+	kept over the rule (below: "The material overlay") */
 	unsigned char material_overlay;
 };
 
@@ -216,7 +217,12 @@ tile C's and D's as [4] and [5], and [9] C's footprint fade's start and end,
 then D's. The class mask (RGBA: the weights of tiles A to D at the base
 map's coordinates) gives the weights; where the multipurpose channel's rule
 is (has multipurpose, and a channel in [0]), it gives tile A, and the
-mask's B, C and D share the rest (B alone where they are 0). The debug
+mask's B, C and D share the rest (B alone where they are 0); with
+XGPU_OVERLAY_CLASS_MASK_WINS the mask's A, C and D are kept where the mask
+gives them and the rule decides between tiles A and B over the mask's B
+alone (a texel the mask names plate stays plate where the multipurpose
+channel dips, at a scratch the base map paints; its C and D, a buckle's
+metal, are not taken by the rule's A). The debug
 views (display.prism_overlay_view, the key's bits 1 to 3): 1 the tiles'
 weights, 2 the micro normal's change, 3 the fade, 4 the light alone. */
 #define XGPU_OVERLAY_BINDING 4
@@ -224,6 +230,7 @@ weights, 2 the micro normal's change, 3 the fade, 4 the light alone. */
 #define XGPU_OVERLAY_IMAGE_COUNT (XGPU_OVERLAY_TILE_COUNT + 1)
 #define XGPU_OVERLAY_UNIFORM_COUNT 10
 #define XGPU_OVERLAY_CLASS_MASK 16
+#define XGPU_OVERLAY_CLASS_MASK_WINS 32
 #define XGPU_OVERLAY_VIEW(material_overlay) (((material_overlay) >> 1) & 7)
 
 /* the vertex constants the per-pixel model lighting reads, in a uniform of

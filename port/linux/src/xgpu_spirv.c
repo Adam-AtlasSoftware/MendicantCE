@@ -4851,7 +4851,9 @@ static void overlay_light(struct module *m, struct pixel_state *state, BOOL poin
 	{
 		/* the class mask's weights (tile A where there are none), the
 		multipurpose channel's rule giving tile A where the shader has one
-		and the mask's B, C and D sharing the rest (B alone where they are 0) */
+		and the mask's B, C and D sharing the rest (B alone where they are 0);
+		or, where the mask wins (XGPU_OVERLAY_CLASS_MASK_WINS), the rule
+		deciding A against B over the mask's B alone */
 		static const int slot_uniform[4] = { 4, 5, 7, 8 };
 		static const int footprint_vector[4] = { 3, 6, 9, 9 }, footprint_first[4] = { 2, 2, 0, 2 };
 		static const unsigned int yzw[3] = { 1, 2, 3 }, c0_rest[4] = { 0, 4, 5, 6 };
@@ -4868,7 +4870,24 @@ static void overlay_light(struct module *m, struct pixel_state *state, BOOL poin
 			fdiv(m, 3, shuffle(m, 3, q, q, yzw), splat(m, 3, rs)), constant_vector(m, 3, (const float[]){ 1.0f, 0.0f, 0.0f }));
 		rule = op2(m, OP_LOGICAL_AND, m->t_bool, overlay_flag(m, extract(m, ov1, 3)),
 			overlay_flag(m, fdot(m, ov0, constant_splat(m, 4, 1.0f))));
-		wt = select_n(m, 4, rule, shuffle(m, 4, splat(m, 4, c0), fscale(m, 3, rest, fsub(m, 1, one, c0)), c0_rest), wt);
+		if (program->material_overlay & XGPU_OVERLAY_CLASS_MASK_WINS)
+		{
+			/* (the mask's A, C and D kept, the rule deciding A against B
+			over the mask's B alone: wt = (wt.x + wt.y * c0, wt.y * (1 - c0),
+			wt.z, wt.w)) */
+			unsigned int b = extract(m, wt, 1);
+			unsigned int kept[4];
+
+			kept[0] = fadd(m, 1, extract(m, wt, 0), fmul(m, 1, b, c0));
+			kept[1] = fmul(m, 1, b, fsub(m, 1, one, c0));
+			kept[2] = extract(m, wt, 2);
+			kept[3] = extract(m, wt, 3);
+			wt = select_n(m, 4, rule, construct(m, 4, kept), wt);
+		}
+		else
+		{
+			wt = select_n(m, 4, rule, shuffle(m, 4, splat(m, 4, c0), fscale(m, 3, rest, fsub(m, 1, one, c0)), c0_rest), wt);
+		}
 		w = extract(m, wt, 0);
 		slope = constant_splat(m, 2, 0.0f);
 		cavity = zero;

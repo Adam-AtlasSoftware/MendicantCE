@@ -32,7 +32,8 @@ overlay.json, of the mod loaded last that has one (port_mods_file_find):
 	    "characters\\cyborg\\shaders\\armor": {
 	      "slots": ["plate", "undersuit", "hard_polymer", "rubber_grip"],
 	      "mask": { "channel": "b", "lo": 0.35, "hi": 0.65 },
-	      "class_mask": ["masks/characters_cyborg_shaders_armor_0.png"], ... },
+	      "class_mask": ["masks/characters_cyborg_shaders_armor_0.png"],
+	      "class_mask_wins": false, ... },
 	    "characters\\cyborg\\shaders\\visor": null
 	  }
 	}
@@ -68,7 +69,12 @@ player's machine from the player's own maps, so a mod names them but does
 not carry them: they are found in whichever mod has them). With its mask,
 the channel rule (mask) decides slot A, as above, and the mask's other
 slots share the rest in their proportions (B alone where they are all 0);
-without a channel rule the mask's four weights are the classes. A shader
+without a channel rule the mask's four weights are the classes. With
+"class_mask_wins": true the mask's own slots A, C and D are kept where it
+gives them, and the channel rule decides between A and B over the mask's B
+alone: plate the mask names stays plate where the channel dips (a scratch
+CE paints into the multipurpose map), and a class C or D the mask names (a
+buckle's metal inside the plate) is not taken by the rule's A. A shader
 whose class mask is not there (not built yet, or another map's), or not
 ready yet, draws with slots A and B and the channel rule alone, as a shader
 of two classes does.
@@ -128,7 +134,8 @@ unsigned int xgpu_image_create(void *pixels, unsigned long width, unsigned long 
 	int format, int owned);
 void xgpu_image_delete(unsigned int image);
 int d3d8_material_overlay_drawn(void);
-void d3d8_set_material_overlay(float const *uniforms, unsigned int const *tiles, unsigned int mask, int view);
+void d3d8_set_material_overlay(float const *uniforms, unsigned int const *tiles, unsigned int mask, int view,
+	int mask_wins);
 
 /* ---------- constants */
 
@@ -230,6 +237,9 @@ struct overlay_shader
 	NONE for none) */
 	short mask_count;
 	short masks[MAXIMUM_CLASS_MASKS];
+	/* "class_mask_wins": the mask's slots A, C and D kept over the
+	channel rule (xgpu.h's XGPU_OVERLAY_CLASS_MASK_WINS) */
+	boolean mask_wins;
 	real tiles_per_uv[NUMBER_OF_SLOTS];
 	real strength;
 	/* the uniform, before each draw's fade and strength */
@@ -1204,6 +1214,7 @@ static boolean shader_read(
 	entry->uniforms[6][0] = json_real(json, json_member(json, reflection, "bend"), 1.0f);
 	entry->uniforms[6][1] = json_real(json, json_member(json, reflection, "cavity"), 0.5f);
 	entry->strength = json_real(json, json_member(json, value, "strength"), 1.0f);
+	entry->mask_wins = json_boolean(json, json_member(json, value, "class_mask_wins"), FALSE);
 
 	return TRUE;
 }
@@ -1490,7 +1501,7 @@ void mod_materials_draw_begin(
 		uniforms[slot_uniform[slot]][2] = overlay_class->cavity * fade;
 		uniforms[slot_uniform[slot]][3] = overlay_class->rough * fade;
 	}
-	d3d8_set_material_overlay(uniforms[0], tiles, mask_texture, mod_materials_globals.view);
+	d3d8_set_material_overlay(uniforms[0], tiles, mask_texture, mod_materials_globals.view, entry->mask_wins);
 	mod_materials_globals.armed = TRUE;
 
 	return;
@@ -1501,7 +1512,7 @@ void mod_materials_draw_end(
 {
 	if (mod_materials_globals.armed)
 	{
-		d3d8_set_material_overlay(NULL, NULL, 0, 0);
+		d3d8_set_material_overlay(NULL, NULL, 0, 0, 0);
 		mod_materials_globals.armed = FALSE;
 	}
 

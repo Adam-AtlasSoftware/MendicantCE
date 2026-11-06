@@ -3792,8 +3792,10 @@ The model draws that follow take a material overlay (xgpu.h's "The
 material overlay"; port/linux/game/mod_materials.c arms it around a model
 shader's draws): its tiles and class mask (xgpu_images.h's images: tiles A
 to D, the last two only with a class mask; 0 none), its uniform
-(XGPU_OVERLAY_UNIFORM_COUNT vec4s) and its debug view
-(display.prism_overlay_view); NULL uniforms disarm it, as it is for every
+(XGPU_OVERLAY_UNIFORM_COUNT vec4s), its debug view
+(display.prism_overlay_view) and whether the class mask's own classes win
+over the multipurpose channel's rule (mask_wins: XGPU_OVERLAY_CLASS_MASK_WINS,
+with a mask alone); NULL uniforms disarm it, as it is for every
 other draw. A draw of a model lighting program whose lighting hands on its
 world position is lit for each pixel with it (xgpu_draw_derive); any other
 draw goes as it is. */
@@ -3811,7 +3813,8 @@ int d3d8_material_overlay_drawn(void)
 	return xgpu_backend_capabilities.material_overlay != 0;
 }
 
-void d3d8_set_material_overlay(const float *uniforms, const unsigned int *tiles, unsigned int mask, int view)
+void d3d8_set_material_overlay(const float *uniforms, const unsigned int *tiles, unsigned int mask, int view,
+	int mask_wins)
 {
 	int tile;
 
@@ -3827,7 +3830,8 @@ void d3d8_set_material_overlay(const float *uniforms, const unsigned int *tiles,
 	material_overlay.overlay.images[XGPU_OVERLAY_TILE_COUNT] = mask;
 	if (view < 0 || view > 4)
 		view = 0;
-	material_overlay.key = (unsigned char)(1 + 2 * view + (mask ? XGPU_OVERLAY_CLASS_MASK : 0));
+	material_overlay.key = (unsigned char)(1 + 2 * view + (mask ? XGPU_OVERLAY_CLASS_MASK : 0) +
+		(mask && mask_wins ? XGPU_OVERLAY_CLASS_MASK_WINS : 0));
 }
 
 /* display.per_pixel_lighting: the model lighting programs' draws are lit for

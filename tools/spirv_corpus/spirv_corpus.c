@@ -589,11 +589,12 @@ model's program (its base, detail and multipurpose maps, a reflection
 cube; and with a 2D stage 3) lit for each pixel by the ambient and
 distant lights, and the point lights; the enhanced dynamic lights; the
 world's occlusion; two tiles and four with a class mask, in each debug
-view; a reflection cube with signed channels and alpha kill */
+view, and four whose mask wins over the channel rule (XGPU_OVERLAY_CLASS_MASK_WINS); a reflection cube with signed channels and alpha kill */
 static void overlay_programs(void)
 {
 	static const unsigned char overlays[] = { 1, 3, 5, 7, 9, 1 | XGPU_OVERLAY_CLASS_MASK, 3 | XGPU_OVERLAY_CLASS_MASK,
-		7 | XGPU_OVERLAY_CLASS_MASK, 9 | XGPU_OVERLAY_CLASS_MASK };
+		7 | XGPU_OVERLAY_CLASS_MASK, 9 | XGPU_OVERLAY_CLASS_MASK,
+		1 | XGPU_OVERLAY_CLASS_MASK | XGPU_OVERLAY_CLASS_MASK_WINS, 3 | XGPU_OVERLAY_CLASS_MASK | XGPU_OVERLAY_CLASS_MASK_WINS };
 	struct xgpu_pixel_program program;
 	char name[96];
 	unsigned int overlay, lights, kind, cube;
