@@ -120,6 +120,7 @@ the way put back (playback_seek_chase); back, once it is let go.
 #include "network_distributed.h"
 #include "network_replay.h"
 #include "network_standard.h"
+#include "spectate_director.h"
 
 #include <math.h>
 #include <pthread.h>
@@ -153,6 +154,7 @@ int halo_linux_touch_look(short gamepad_index, real *yaw, real *pitch, real *gyr
 #define REPLAY_TOUCH_TARGET_FIELDS 5
 
 int config_boolean(char const *name);
+char const *config_string(char const *name);
 int config_write_boolean(const char *name, int value);
 void network_distributed_handle_message(long machine_index, word const *message, word size);
 void network_connection_port_set_last_read_unreliable(boolean unreliable);
@@ -476,8 +478,15 @@ enum
 	_replay_view_eyes,
 	_replay_view_free,
 	_replay_view_cinematic,
+	/* port (OpenH1): the cinematic camera on whom NoahSurprenant's
+	auto-director chooses (spectate_director.c) */
+	_replay_view_director,
 	NUMBER_OF_REPLAY_VIEWS
 };
+
+/* whether the view is the cinematic camera's (the director's is too) */
+#define playback_cinematic() \
+	(playback.view == _replay_view_cinematic || playback.view == _replay_view_director)
 
 /* the speeds the shoulder buttons go through (0 a pause), and the
 normal one's */
@@ -1017,6 +1026,23 @@ static void playback_index_facings(
 		(unsigned long)(total * sizeof(struct replay_facing) / 1024));
 }
 
+/* port (OpenH1): network.replay_camera's view, the one a replay starts
+in (behind, SlipstreamCE's, unless it says another) */
+static short playback_starting_view(
+	void)
+{
+	static char const *const names[NUMBER_OF_REPLAY_VIEWS] = { "behind", "eyes", "free", "cinematic", "director" };
+	char const *wanted = config_string("network.replay_camera");
+	short view;
+
+	for (view = 0; wanted && view < NUMBER_OF_REPLAY_VIEWS; view++)
+	{
+		if (!strcmp(wanted, names[view]))
+			return view;
+	}
+	return _replay_view_behind;
+}
+
 boolean network_replay_watch(
 	char const *path,
 	char *why,
@@ -1144,6 +1170,12 @@ boolean network_replay_watch(
 	}
 	playback.setting_up = FALSE;
 	playback.starting = TRUE;
+	/* port (OpenH1): the view it starts in (network.replay_camera), and the
+	director's signals of none */
+	playback.view = playback_starting_view();
+	if (playback.view == _replay_view_free || playback_cinematic())
+		playback.free_placing = TRUE;
+	spectate_director_reset();
 	error(_error_log, "replay: playing %s (%s), from tick %ld", path, game.map.name, playback.start_tick);
 	return TRUE;
 }
@@ -1689,6 +1721,9 @@ static void playback_keyframe_restore(
 	if (!seeking)
 		playback_skip_stop();
 	network_distributed_replay_restored();
+	/* port (OpenH1): the director's signals begin again from the game
+	put back */
+	spectate_director_reset();
 	render_interpolation_reset();
 	first_person_weapons_initialize_for_new_map();
 	game_time_set_speed(seeking ? REPLAY_SKIP_SPEED : replay_speeds[playback.speed]);
@@ -1946,7 +1981,7 @@ boolean network_replay_playback_idle(
 		playback.view = (short)((playback.view + 1) % NUMBER_OF_REPLAY_VIEWS);
 		/* (the free camera follows the player until it is flown; behind
 		turns with them until it is, at its distance) */
-		if (playback.view == _replay_view_free || playback.view == _replay_view_cinematic)
+		if (playback.view == _replay_view_free || playback_cinematic())
 			playback.free_placing = TRUE;
 		if (playback.view == _replay_view_behind)
 		{
@@ -2356,7 +2391,7 @@ void network_replay_playback_damage(
 	struct player_datum *player;
 	struct object_datum *object;
 
-	if (!playback.playing || playback.view != _replay_view_cinematic || playback.watched == NONE)
+	if (!playback.playing || !playback_cinematic() || playback.watched == NONE)
 		return;
 	player = player_try_and_get(playback.watched);
 	if (!player || player->unit_index == NONE)
@@ -2501,7 +2536,7 @@ static void playback_free_camera_framing(
 		lead = (real)atan(tangent_across * FREE_CAMERA_THIRD *
 			(real)sin(playback_angle_between(focus_yaw, (real)atan2(aim.j, aim.i))));
 		wanted_yaw = lead;
-		if (playback.view == _replay_view_cinematic)
+		if (playback_cinematic())
 		{
 			playback_cinematic_threat(unit_index, &aim, focus_yaw, focus_pitch, focus_yaw + lead,
 				&wanted_yaw, &wanted_pitch);
@@ -2962,7 +2997,7 @@ static boolean playback_free_camera(
 	real game_seconds = playback.paused ? 0.0f : seconds * replay_speeds[playback.speed];
 
 	playback_sticks(&move_x, &move_y, &turn_x, &turn_y, &rise);
-	if (playback.view == _replay_view_cinematic)
+	if (playback_cinematic())
 	{
 		move_x = move_y = turn_x = turn_y = rise = 0.0f;
 		playback.touch_yaw = playback.touch_pitch = 0.0f;
@@ -3031,7 +3066,7 @@ static boolean playback_free_camera(
 		playback_focus(unit_index, &playback.free_focus);
 		playback.free_focus_valid = TRUE;
 		/* (first, so that its aim is from where it now is) */
-		if (playback.view == _replay_view_cinematic && playback.watched != NONE)
+		if (playback_cinematic() && playback.watched != NONE)
 			playback_cinematic_move(unit_index, game_seconds);
 	}
 	/* (the right stick, or a swipe, takes the aim) */
@@ -3411,6 +3446,22 @@ void network_replay_playback_frame(
 		halo_linux_touch_look(0, &playback.touch_yaw, &playback.touch_pitch, &gyro_yaw, &gyro_pitch);
 	}
 #endif
+	/* port (OpenH1): the director's view: whom to watch, its cut (a hard
+	one placed again, as the cinematic camera is when it loses sight of
+	them; one to someone near glides there on the camera's springs). A or
+	X choosing another, it goes on from them */
+	if (playback.view == _replay_view_director)
+	{
+		boolean glide;
+		long chosen = spectate_director_update(main_get_seconds_elapsed(), playback.watched, &glide);
+
+		if (chosen != NONE && chosen != playback.watched)
+		{
+			playback.watched = chosen;
+			if (!glide)
+				playback.free_placing = TRUE;
+		}
+	}
 	player = playback.watched != NONE ? player_try_and_get(playback.watched) : NULL;
 	/* (the first player alive, before anyone is watched, or once the one
 	watched has left; one who died is watched again when they spawn, the
@@ -3424,7 +3475,7 @@ void network_replay_playback_frame(
 	playback.first_person = FALSE;
 	/* (the free camera, until it is placed, is the view before it; the
 	cinematic one's too) */
-	if ((playback.view == _replay_view_free || playback.view == _replay_view_cinematic) &&
+	if ((playback.view == _replay_view_free || playback_cinematic()) &&
 		playback_free_camera(unit_index, main_get_seconds_elapsed()))
 		;
 	else if (unit_index == NONE)
@@ -3884,7 +3935,8 @@ static void playback_draw_pause_menu(
 void network_replay_playback_draw(
 	void)
 {
-	static wchar_t const *const view_names[NUMBER_OF_REPLAY_VIEWS] = { L"BEHIND", L"EYES", L"FREE CAMERA", L"CINEMATIC" };
+	static wchar_t const *const view_names[NUMBER_OF_REPLAY_VIEWS] = { L"BEHIND", L"EYES", L"FREE CAMERA", L"CINEMATIC",
+		L"DIRECTOR" };
 	/* (the third, R3: behind flown round the player, how to have it turn
 	with them again; the free camera, how to have it track them, or stop;
 	left out otherwise) */

@@ -6,7 +6,8 @@
 /* a new game: everyone's signals forgotten, nobody watched */
 void spectate_director_reset(
 	void);
-/* (spectate.c, each frame of the DIRECTOR camera) whom to watch, given who
+/* (each frame of the DIRECTOR camera: the Theater's,
+network_replay_playback.c) whom to watch, given who
 is watched now (another than the director chose: a person picked them); with
 glide whether a cut to them glides (else it is hard) */
 long spectate_director_update(

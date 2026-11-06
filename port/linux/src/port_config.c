@@ -1330,6 +1330,12 @@ static const struct config_setting config_settings[] =
 		"Watching a replay with a controller: the bars of the buttons and of the\n"
 		"camera's controls over the seek bar. The replay's pause menu turns them\n"
 		"on and off (the north button: Y, the Switch's X, the PS5's triangle)." },
+	{ "network.replay_camera", _config_string, "\"behind\"", "HALO_NET_REPLAY_CAMERA", _environment_value,
+		_platform_all,
+		"The view a replay starts in (Y goes round them): \"behind\" the player\n"
+		"watched, their \"eyes\", the \"free\" camera, the \"cinematic\" one, or\n"
+		"\"director\", the cinematic camera on whom the auto-director chooses\n"
+		"(the player most worth watching: a kill, a fight, the flag)." },
 	{ "network.full_detail_to_clients", _config_boolean, "false", "HALO_NET_FULL_DETAIL_TO_CLIENTS",
 		_environment_value, _platform_all,
 		"Hosting: send every client every player every tick (not those far\n"
@@ -3893,6 +3899,7 @@ static const struct
 	{ "game.console_log", { "important", "all", "none", NULL }, NULL },
 	{ "game.language", { "", "ja", "de", "fr", "es", "it", NULL }, NULL },
 	{ "network.game_mode", { "openh1", "legacy", "standard", NULL }, NULL },
+	{ "network.replay_camera", { "behind", "eyes", "free", "cinematic", "director", NULL }, NULL },
 	{ "server.game_mode", { "openh1_120", "openh1_60", "openh1_30", "legacy", NULL }, NULL },
 	{ "network.text_chat", { "on", "links", "off", NULL }, NULL },
 	{ "server.chat_filter", { "off", "censor", "block", NULL }, NULL },

@@ -23,6 +23,11 @@ And the shot rules, so the picture never jitters:
 
 Every cut is logged with its reason and the game tick, which the tests read
 (tools/test_spectator.py).
+
+port (OpenH1): ported from NoahSurprenant/OpenCE@333491574 (branch
+spectator-p5) by Noah Surprenant (AGPL-3.0-or-later), whose spectators
+OpenH1 has not: here it chooses whom the Theater's DIRECTOR view watches
+in a replay (network_replay_playback.c).
 */
 
 #include "cseries.h"
@@ -35,7 +40,6 @@ Every cut is logged with its reason and the game tick, which the tests read
 #include "text/unicode.h"
 #include "units/units.h"
 
-#include "spectate.h"
 #include "spectate_director.h"
 
 #include <math.h>

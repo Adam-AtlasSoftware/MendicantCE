@@ -4086,6 +4086,16 @@ void main_loop(
 					render_interpolation_frame_end();
 					profile_render_end();
 				}
+				/* port: a replay's playback's view made though the frame is
+				not drawn (debug.null_renderer), so that its cameras and the
+				director go on choosing as they would on a screen
+				(port/linux/game/network_replay_playback.c) */
+				else if (render_frame && frames_undrawn && network_replay_playing())
+				{
+					render_interpolation_frame_begin();
+					network_replay_playback_frame();
+					render_interpolation_frame_end();
+				}
 			}
 			/* port: nothing drawn on a dedicated server, nor waited for */
 			else if (!halo_server_mode())
