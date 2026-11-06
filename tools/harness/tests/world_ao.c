@@ -37,7 +37,8 @@ const char *config_string(const char *name)
 	return setting;
 }
 
-unsigned long config_changes(void)
+/* (the settings as the front end took them up: d3d8_device.c's) */
+unsigned long halo_gpu_settings_taken(void)
 {
 	return changes;
 }

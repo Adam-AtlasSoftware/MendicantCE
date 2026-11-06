@@ -29,7 +29,7 @@ the Classic preset's "off") draws exactly as before.
 
 const char *config_string(const char *name);
 int config_boolean(const char *name);
-unsigned long config_changes(void);
+unsigned long halo_gpu_settings_taken(void);
 unsigned long long SDL_GetTicksNS(void);
 /* (render_enumerate.c's: the window drawn is a map's first frame's, unseen,
 which prepares its pipelines) */
@@ -62,9 +62,14 @@ static struct
 	float cascades[WORLD_CASCADES][4];
 } world_ao;
 
+/* (read again as the front end takes the settings up between frames,
+d3d8_device.c's halo_gpu_settings_taken, not as they are written: the map
+is prepared again under the change at the same frame, render_enumerate.c's
+enumerated_derivation_check, so that no frame draws the world's pipelines
+before they are made) */
 int world_ao_mode(void)
 {
-	unsigned long changes = config_changes();
+	unsigned long changes = halo_gpu_settings_taken();
 
 	if (!world_ao.initialized || world_ao.read_at != changes)
 	{

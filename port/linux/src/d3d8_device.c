@@ -6567,17 +6567,18 @@ static void journal_operation(unsigned long op, const void *arguments, unsigned 
 
 /* the front end's state that a draw's pipeline is derived from under some
 settings and not under others (the HDR's tags, with display.hdr; the
-enhanced lights', with display.dynamic_lights "enhanced"), as three words: recording a map's preparation, a draw is
+enhanced lights', with display.dynamic_lights "enhanced"; the window's
+span, with display.ambient_occlusion "world": world_ao_key), as three words: recording a map's preparation, a draw is
 journaled where it is new in these or in its pipeline (preparation_seen),
 so that its record holds every draw a load under other settings tells
 apart; 0 otherwise */
 static void journal_settings_blind_of(unsigned long words[3], int hdr_category, int hdr_kind, BOOL hdr_view,
-	int lights, BOOL environment)
+	int lights, BOOL environment, int world_span)
 {
 	words[0] = (unsigned long)hdr_category;
 	words[1] = (unsigned long)hdr_kind;
 	words[2] = (unsigned long)(hdr_view != 0) | (unsigned long)(lights > 0) << 1 |
-		(unsigned long)(environment != 0) << 2;
+		(unsigned long)(environment != 0) << 2 | (unsigned long)world_span << 3;
 }
 
 static void journal_settings_blind(unsigned long words[3])
@@ -6585,7 +6586,7 @@ static void journal_settings_blind(unsigned long words[3])
 	words[0] = words[1] = words[2] = 0;
 	if (journal_recording)
 		journal_settings_blind_of(words, hdr.category, hdr.kind, hdr.view, dynamic_lights.count,
-			dynamic_lights.environment);
+			dynamic_lights.environment, world_ao.span);
 }
 
 static void journal_page(unsigned long page)
