@@ -39,7 +39,8 @@ from the front and back pairs as the Xbox's did (surround_split), stereo
 voices positioned in the world are panned around the five full range
 speakers by VBAP (surround_pan), and the reverb plays from the front and
 back pairs. The mix bins 0-5 are in SDL's 5.1 order (FL, FR, FC, LFE, BL,
-BR), so bin n is output channel n. The game sends nothing to the LFE bin.
+BR), so bin n is output channel n. The game sends nothing to the LFE bin;
+what is sent to it plays below 120 Hz, as the Xbox's AC-3 carried it (lfe).
 Stereo output mixes exactly as before.
 
 Packets the mixer has finished are completed from DirectSoundDoWork, which
@@ -632,7 +633,8 @@ Doppler shift are the pan's, before the head's. When the choice changes
 (audio.spatial set mid-game), each voice crossfades between the pan and the
 HRTF over HRTF_FADE_FRAMES, both running meanwhile: no click. "speakers"
 keeps the pan. On 5.1 the same, on the front and back pairs, a sound behind
-heard as the direction mirrored ahead (surround_split). */
+heard as the direction mirrored ahead (surround_split), above and below a
+little brighter on the far ear, as the Xbox's back pair (hrtf_behind). */
 
 /* a direction of the table: each ear's level in each band (dB) and the left
 ear's delay (frames) after the right, for a sound to the right */
@@ -802,6 +804,26 @@ static const struct hrtf_direction hrtf_poles[2] =
 	  { 1.6f, 0.5f, 0.9f, 1.1f, -2.5f, -1.3f, -0.3f, -0.6f, -8.1f }, 0.0f },
 };
 
+/* On 5.1 the Xbox's back pair played a sound behind as the direction
+mirrored ahead (surround_split), but not quite: recorded there (its AC-3
+decoded), at 135 degrees, 40 below and 40 above, the far ear 3 to 4 dB
+brighter at 8 and 16 kHz than the 45 degrees it mirrors, and the near ear
+within a dB of it, where at 120 and 150 degrees, level, the mirror is the
+Xbox's to 0.6 dB. What the back pair adds to each ear's levels in each band
+(dB, for a sound to the right; least squares as the table's, held near 0)
+at 135 degrees, 40 below and 40 above; it fades out towards 90 and 180
+degrees round (sin 2 azimuth), level and the poles (hrtf_place) */
+static const struct
+{
+	float left[HRTF_BANDS], right[HRTF_BANDS];
+} hrtf_behind[2] =
+{
+	{ { -0.1f, 0.1f, 1.6f, 0.2f, -1.6f, -1.6f, 1.4f, 4.2f, -1.5f },
+	  { 0.2f, 0.1f, 0.3f, 0.1f, -0.1f, -1.2f, 0.0f, 4.2f, -2.2f } },
+	{ { -0.1f, -0.4f, 0.5f, 0.5f, -4.2f, 4.3f, 3.3f, 4.9f, -5.4f },
+	  { 0.1f, -0.2f, 0.1f, 0.3f, 0.1f, 0.3f, -0.8f, 0.6f, 1.1f } },
+};
+
 static struct
 {
 	/* each low pass's b0 (and b2), b1, a1 and a2 (a0 1) */
@@ -895,8 +917,10 @@ static void hrtf_lookup(float azimuth, float elevation, struct hrtf_direction *o
 }
 
 /* the HRTF's parameters for a sound right, up and ahead of the head, as
-far away (world units) */
-static void hrtf_place(float right, float up, float ahead, float distance, struct hrtf_parameters *parameters)
+far away (world units); behind: on 5.1, a sound behind mirrored ahead, as
+the back pair plays it (hrtf_behind) */
+static void hrtf_place(float right, float up, float ahead, float distance, BOOL behind,
+	struct hrtf_parameters *parameters)
 {
 	float strength = distance < HRTF_NEAR ? distance / HRTF_NEAR : 1.0f, azimuth = 0.0f, elevation = 0.0f;
 	struct hrtf_direction direction;
@@ -909,6 +933,20 @@ static void hrtf_place(float right, float up, float ahead, float distance, struc
 		mirrored = right < 0.0f;
 	}
 	hrtf_lookup(azimuth, elevation, &direction);
+	if (behind && elevation != 0.0f)
+	{
+		/* (all of it at 45 degrees mirrored, 40 up or down; none ahead or to
+		the side, level or at the poles) */
+		float height = fabsf(elevation);
+		float share = sinf(2.0f * azimuth * (3.14159265f / 180.0f)) *
+			(height < 40.0f ? height / 40.0f : (90.0f - height) / 50.0f);
+
+		for (band = 0; band < HRTF_BANDS; band++)
+		{
+			direction.left[band] += share * hrtf_behind[elevation > 0.0f].left[band];
+			direction.right[band] += share * hrtf_behind[elevation > 0.0f].right[band];
+		}
+	}
 	for (ear = 0; ear < 2; ear++)
 	{
 		/* (a sound to the left: the right's ears swapped) */
@@ -1145,7 +1183,8 @@ static void spatialize(const struct sdl_stream *stream, float *left, float *righ
 	if (*hrtf_on)
 	{
 		/* (on 5.1 a sound behind as the direction mirrored ahead) */
-		hrtf_place(side, up, output_channels == 6 ? fabsf(ahead) : ahead, distance, hrtf_out);
+		hrtf_place(side, up, output_channels == 6 ? fabsf(ahead) : ahead, distance,
+			output_channels == 6 && ahead < 0.0f, hrtf_out);
 		hrtf_out->gain = 0.70710678f * attenuation * gain_from_millibels(stream->direct);
 		hrtf_out->pair[0] = pair[0];
 		hrtf_out->pair[1] = pair[1];
@@ -2417,6 +2456,102 @@ static BOOL reverb_sent(const float *send, unsigned long frames)
 	return FALSE;
 }
 
+/* ---------- the LFE
+
+An Xbox set to Dolby Digital plays its LFE mix bin from the AC-3's LFE
+channel, which carries only the lowest frequencies: recorded (its AC-3
+decoded), a 1 kHz tone sent to the LFE alone came out at nothing over the
+capture's last bit, more than 84 dB down, where it played here whole. So on
+5.1 the LFE channel goes through a low pass at the Dolby Digital LFE's 120
+Hz: 8th order Butterworth (48 dB an octave, 147 dB down at 1 kHz), as four
+biquads (RBJ's, in double precision: their poles are close to 1). The
+game itself sends nothing to the LFE bin; a sound given it (a mod's) is
+heard there as an Xbox played it. */
+
+#define LFE_CUTOFF 120.0
+#define LFE_SECTIONS 4
+
+static struct
+{
+	/* each biquad's b0 (and b2), b1, a1 and a2 (a0 1), and its state
+	(transposed direct form II) */
+	double coefficients[LFE_SECTIONS][4];
+	double state[LFE_SECTIONS][2];
+	BOOL ready;
+} lfe;
+
+static void lfe_initialize(void)
+{
+	int section;
+
+	for (section = 0; section < LFE_SECTIONS; section++)
+	{
+		/* (the Butterworth's Q of each pair of poles) */
+		double q = 1.0 / (2.0 * cos((2 * section + 1) * 3.14159265358979 / (4 * LFE_SECTIONS)));
+		double w = 2.0 * 3.14159265358979 * LFE_CUTOFF / OUTPUT_RATE;
+		double alpha = sin(w) / (2.0 * q), cosine = cos(w), a0 = 1.0 + alpha;
+
+		lfe.coefficients[section][0] = 0.5 * (1.0 - cosine) / a0;
+		lfe.coefficients[section][1] = (1.0 - cosine) / a0;
+		lfe.coefficients[section][2] = -2.0 * cosine / a0;
+		lfe.coefficients[section][3] = (1.0 - alpha) / a0;
+	}
+	memset(lfe.state, 0, sizeof(lfe.state));
+	lfe.ready = TRUE;
+}
+
+/* the LFE channel of frames of output (frames of 6) low passed; on stereo
+nothing, the filters emptied */
+static void lfe_lowpass(float *output, unsigned long frames)
+{
+	unsigned long frame;
+	int section;
+
+	if (!lfe.ready)
+		lfe_initialize();
+	if (output_channels != 6)
+	{
+		memset(lfe.state, 0, sizeof(lfe.state));
+		return;
+	}
+	/* (nothing sent and nothing ringing, as nearly always: nothing to do) */
+	for (section = 0; section < LFE_SECTIONS; section++)
+	{
+		if (lfe.state[section][0] || lfe.state[section][1])
+			break;
+	}
+	if (section == LFE_SECTIONS)
+	{
+		for (frame = 0; frame < frames && !output[frame * 6 + 3]; frame++)
+			;
+		if (frame == frames)
+			return;
+	}
+	for (frame = 0; frame < frames; frame++)
+	{
+		double x = output[frame * 6 + 3];
+
+		for (section = 0; section < LFE_SECTIONS; section++)
+		{
+			const double *c = lfe.coefficients[section];
+			double *state = lfe.state[section];
+			double y = c[0] * x + state[0];
+
+			state[0] = c[1] * x - c[2] * y + state[1];
+			state[1] = c[0] * x - c[3] * y;
+			x = y;
+		}
+		output[frame * 6 + 3] = flush_denormal((float)x);
+	}
+	/* (fed silence, the state decays into the denormals within a second or
+	two: flush_denormal's) */
+	for (section = 0; section < LFE_SECTIONS; section++)
+	{
+		if (fabs(lfe.state[section][0]) < 1.0e-20 && fabs(lfe.state[section][1]) < 1.0e-20)
+			lfe.state[section][0] = lfe.state[section][1] = 0.0;
+	}
+}
+
 /* ---------- limiter
 
 The game sets its mix bins' headroom to 0 (sound_dsound_xbox.c), so the voices
@@ -3072,6 +3207,8 @@ static void mix(float *output, unsigned long frames, BOOL wait)
 		if ((!enabled && reverb.level <= 0.0f) || reverb.quiet > REVERB_QUIET_FRAMES)
 			reverb_clear();
 	}
+	/* (on 5.1, the LFE's band) */
+	lfe_lowpass(output, frames);
 	/* the game's mix at the Xbox's output level (OUTPUT_GAIN) */
 	{
 		unsigned long sample, samples = frames * output_channels;
