@@ -35,7 +35,7 @@ episodes end at episode_ticks with the fight at the level's start.
 #include "objects/objects.h"
 #include "units/units.h"
 #include "game/game.h"
-#include "main/main.h"
+#include "tag_files/tag_files.h"
 #include "game/game_engine.h"
 #include "game/players.h"
 #include "networking/network_game_globals.h"
@@ -776,7 +776,7 @@ static void mendicant_status_log(
 	platform_log("mendicant: %s %s at tick %ld: %lu ticks (%lu begun again at one time, %lu clock jumps), AI %lu "
 		"(%lu again at one time); drill passes %lu, units %lu; strategy %lu/%lu, per-enemy %lu/%lu, stances %lu/%lu "
 		"(Covenant/Marines); roles %lu, orders %lu; model choices moved %lu, held %lu, rejected %lu, late %lu",
-		when, main_get_map_name(), status->last_time, status->ticks, status->repeated, status->jumps,
+		when, global_scenario_index != NONE ? tag_get_name(global_scenario_index) : "", status->last_time, status->ticks, status->repeated, status->jumps,
 		status->ai_updates, status->ai_repeated, status->drill_passes, status->units, status->strategy[0],
 		status->strategy[1], status->per_enemy[0], status->per_enemy[1], status->stances[0], status->stances[1],
 		status->roles, status->orders, status->moved, status->held, status->rejected, status->late);

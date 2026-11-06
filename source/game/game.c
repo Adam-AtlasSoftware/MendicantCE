@@ -344,6 +344,9 @@ static void game_tick_macro_step(
 {
 	real seconds_per_tick;
 
+	/* port: MENDICANT AI's movement around each tick, its sub-steps too, from
+	here to the end of game_tick_after_substeps (port/linux/game/mendicant) */
+	mendicant_game_tick_begin();
 	match_assert(
 		"c:\\halo\\SOURCE\\game\\game.c",
 		0x28D,
@@ -435,6 +438,8 @@ static void game_tick_after_substeps(
 	/* port: and at its end, before the frame draws the lights */
 	game_state_check_data_arrays();
 	lights_port_recover();
+	/* port: the end of MENDICANT AI's tick (port/linux/game/mendicant) */
+	mendicant_game_tick_end();
 
 	return;
 }
@@ -457,19 +462,11 @@ boolean game_tick_substep(
 	profile_enter(game_update_section);
 
 	if (substep_index == 0)
-	{
-		/* port: MENDICANT AI's movement around each tick, its sub-steps
-		too (port/linux/game/mendicant) */
-		mendicant_game_tick_begin();
 		game_tick_macro_step();
-	}
 	profile_scope(game_tick_substeps_section, sim_substep_run(substep_index);)
 	tick_ended = sim_substep_next() == 0;
 	if (tick_ended)
-	{
 		game_tick_after_substeps();
-		mendicant_game_tick_end();
-	}
 	/* port: the controllers' motors for what the step did (a shot, a hit),
 	as it ends, not at the next tick's rumble_update (player_rumble.c) */
 	rumble_port_step_end();
