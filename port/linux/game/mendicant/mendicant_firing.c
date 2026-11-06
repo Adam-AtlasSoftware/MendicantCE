@@ -1007,7 +1007,8 @@ void mendicant_unit_damaged(
 	short owner_team,
 	real shield_damage,
 	real body_damage,
-	boolean lethal)
+	boolean lethal,
+	short category)
 {
 	struct unit_datum *victim;
 	long victim_actor, owner_actor;
@@ -1020,7 +1021,7 @@ void mendicant_unit_damaged(
 		return;
 	firing_hit_party(unit_index, &victim_actor, &victim_type);
 	firing_hit_party(owner_object_index, &owner_actor, &owner_type);
-	fprintf(mendicant_fire_file, "%ld,hit,%d,%d,%d,%d,%.4f,%.4f,%d,%d,%d,0\n", mendicant_time(), (int)(short)owner_actor,
+	fprintf(mendicant_fire_file, "%ld,hit,%d,%d,%d,%d,%.4f,%.4f,%d,%d,%d,%d\n", mendicant_time(), (int)(short)owner_actor,
 		owner_type, victim_type, lethal ? 1 : 0, shield_damage, body_damage, (int)victim->object.owner_team_index,
-		(int)owner_team, (int)(short)victim_actor);
+		(int)owner_team, (int)(short)victim_actor, (int)category);
 }

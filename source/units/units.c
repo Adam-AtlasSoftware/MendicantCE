@@ -7401,7 +7401,8 @@ void unit_damage_aftermath(
 		damage_data->owner_team_index,
 		shield_damage,
 		body_damage,
-		lethal);
+		lethal,
+		damage_definition->category);
 
 	if (!TEST_FLAG(
 			damage_data->flags,

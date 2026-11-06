@@ -443,6 +443,7 @@ static void mendicant_episode_start(
 	/* the command layer's part: orders, units, plan memory, roles, enrolment,
 	leashes, discipline, its counters and its random numbers */
 	mendicant_command_episode_reset(bridge->seed);
+	mendicant_grenades_episode_start(bridge->seed); /* (the grenade test's drops) */
 	mendicant_episode_over = FALSE;
 	/* the AI Chief is left out: his reports stay "none" */
 	bridge->chief_actor = NONE;
@@ -873,6 +874,7 @@ void mendicant_initialize_for_new_map(
 	mendicant_movement_reset();
 	mendicant_combat_reset();
 	mendicant_firing_reset();
+	mendicant_grenades_reset();
 	/* the models: loaded once, again when the file changes */
 	if (mendicant_config.models)
 		mendicant_runtime_load();
@@ -946,6 +948,7 @@ void mendicant_game_state_after_load(
 		mendicant_command_reset();
 		mendicant_combat_reset();
 		mendicant_firing_reset();
+		mendicant_grenades_reset();
 		mendicant_movement_revert();
 		/* the Covenant are drawn again; the Marines come back the same men */
 		mendicant_character_revert();
@@ -1011,6 +1014,7 @@ void mendicant_ai_update_end(
 	mendicant_vehicles_update(); /* the autopilot writes its drivers' controls after the AI's */
 	mendicant_character_update(game_time_get());
 	mendicant_firing_update(game_time_get());
+	mendicant_grenades_update(game_time_get());
 	mendicant_aim_release(); /* (an actor whose decision ran without its combat update) */
 	if (mendicant_training)
 		mendicant_training_update();
@@ -1054,6 +1058,7 @@ void mendicant_decide_after(
 		return;
 	if (mendicant_move_test_file)
 		mendicant_move_test(actor_index);
+	mendicant_grenades_after_decide(actor_index);
 	mendicant_drill_update();
 
 	return;
@@ -1138,6 +1143,38 @@ void mendicant_action_control_after(
 }
 
 /* actor_action_try_to_panic's entry: TRUE refuses the panic */
+/* ---------- public code: grenade reactions (actor_perception.c, actions.c) */
+
+short mendicant_danger_notice(
+	long actor_index)
+{
+	return mendicant_active ? mendicant_grenades_notice(actor_index) : 0;
+}
+
+boolean mendicant_danger_hold(
+	long actor_index)
+{
+	return mendicant_active && mendicant_grenades_hold(actor_index);
+}
+
+boolean mendicant_danger_avoid(
+	long actor_index,
+	short action_class)
+{
+	return mendicant_active && mendicant_grenades_avoid(actor_index, action_class);
+}
+
+short mendicant_danger_react(
+	long actor_index,
+	boolean *escape_found,
+	short *escape_direction,
+	real_vector2d *alignment_vector)
+{
+	if (!mendicant_active)
+		return _mendicant_danger_stock;
+	return mendicant_grenades_react(actor_index, escape_found, escape_direction, alignment_vector);
+}
+
 boolean mendicant_veto_panic(
 	long actor_index)
 {

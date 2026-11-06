@@ -988,6 +988,9 @@ int actor_go_to(long actor_index, real_point3d const *point, real tolerance, int
 
 	if (!move_actor(actor_index))
 		return 0;
+	/* a grenade escape (mendicant_grenades.c) is not taken over by another owner */
+	if (!mendicant_go_by_grenade && mendicant_grenade_evading(actor_index))
+		return 0;
 	if (!go_ground(point, &ground, &surface))
 		return -1;
 	order = go_find(actor_index);
@@ -1021,7 +1024,12 @@ int actor_go_status(long actor_index)
 /* Ends an order; the actor's own action takes it from there (next tick it picks its positions). */
 void actor_go_cancel(long actor_index)
 {
-	struct go_order *order = go_find(actor_index);
+	struct go_order *order;
+
+	/* a grenade escape (mendicant_grenades.c) is ended only by its own owner */
+	if (!mendicant_go_by_grenade && mendicant_grenade_evading(actor_index))
+		return;
+	order = go_find(actor_index);
 
 	if (order)
 	{
@@ -1586,6 +1594,16 @@ int mendicant_line_blocked(real_point3d const *from, real_point3d const *to)
 	vector.j = to->y - from->y;
 	vector.k = to->z - from->z;
 	return collision_test_vector(MOVE_COVER_COLLISION_FLAGS, from, &vector, NONE, &collision) != FALSE;
+}
+
+/* the structure's ground within 6 world units under a point */
+boolean mendicant_ground_under(real_point3d const *point, real_point3d *ground)
+{
+	long surface;
+
+	if (!global_structure_bsp || global_current_collision_user_depth < 1)
+		return FALSE;
+	return go_ground(point, ground, &surface);
 }
 
 /* 2: cover to fight from (blocked crouched, clear standing), 1: concealed (blocked both), 0: exposed */

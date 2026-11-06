@@ -155,9 +155,11 @@ struct model_bridge
 struct mendicant_config
 {
 	boolean enabled, training, discipline, targeting, individuals, aim_difficulty, aim_moving,
-		aim_debug, vehicle_test, models, status, character, fire_personality, lost_target_search, friend_vehicles;
+		aim_debug, vehicle_test, models, status, character, fire_personality, lost_target_search, friend_vehicles,
+		grenade_reactions;
 	long training_skip, seed, quirks; /* quirks: MENDICANT_QUIRKS_OFF .. _LOUD */
 	real aim, marine_fire, command_radius, variety, personality;
+	real grenade_test; /* training: seconds between test grenades, 0 none */
 	char bridge[256], weights[128], sample_log[256], drill_log[256], player_log[256], move_test_log[256],
 		character_log[256], fire_log[256];
 };
@@ -272,6 +274,22 @@ boolean mendicant_firing_held(long actor_index);
 void mendicant_firing_action_control(long actor_index, short action);
 short mendicant_firing_vehicle_pills(long actor_index, short maximum, real_point3d *centers, real *radii, long *prop_indices);
 void mendicant_firing_update(long time);
+/* M2 grenade reactions (mendicant_grenades.c): the bodies of the source
+hooks mendicant_danger_notice, _hold, _avoid and _react, and what the platform
+calls; free movement asks mendicant_grenade_evading before another owner
+takes or ends an order (mendicant_go_by_grenade is set around the grenade
+module's own) */
+extern boolean mendicant_go_by_grenade;
+void mendicant_grenades_reset(void);
+void mendicant_grenades_episode_start(unsigned long seed);
+boolean mendicant_grenade_evading(long actor_index);
+short mendicant_grenades_notice(long actor_index);
+boolean mendicant_grenades_hold(long actor_index);
+boolean mendicant_grenades_avoid(long actor_index, short action_class);
+short mendicant_grenades_react(long actor_index, boolean *escape_found, short *escape_direction,
+	real_vector2d *alignment_vector);
+void mendicant_grenades_after_decide(long actor_index);
+void mendicant_grenades_update(long time);
 
 /* M1 runtime (mendicant_models.c) needs from M2 command: the doctrine as
 the decision mask reads it (mendicant_doctrine.h stays private to M2) */
@@ -430,6 +448,7 @@ int actor_go_status(long actor_index);
 void actor_go_cancel(long actor_index);
 void mendicant_follow_cancel(long actor_index);
 int mendicant_line_blocked(real_point3d const *from, real_point3d const *to); /* -1 no BSP, 0 clear, 1 blocked */
+boolean mendicant_ground_under(real_point3d const *point, real_point3d *ground); /* the structure within 6 below */
 int mendicant_drill_position(struct actor_datum *actor, struct mendicant_geometry const *geometry, int side,
 	real angle_low, real angle_high, real range_low, real range_high, long *used);
 

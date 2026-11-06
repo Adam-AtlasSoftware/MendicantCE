@@ -1258,6 +1258,12 @@ static const struct config_setting config_settings[] =
 	{ "ai.mendicant.friend_vehicles", _config_boolean, "true", "HALO_AI_MENDICANT_FRIEND_VEHICLES", _environment_value, _platform_all,
 		"With the soldier character on: soldiers hold fire when a friendly\n"
 		"vehicle with anyone aboard (the Chief's Warthog) is in the line." },
+	{ "ai.mendicant.grenade_reactions", _config_boolean, "true", "HALO_AI_MENDICANT_GRENADE_REACTIONS", _environment_value, _platform_all,
+		"With the soldier character on: each soldier notices a live grenade and\n"
+		"reacts in his own time and way (a dive, a run clear, a step back, a\n"
+		"frightened freeze), and each goes his own way out, so a squad scatters\n"
+		"instead of diving to one side. A Marine with a plasma grenade stuck to\n"
+		"him often runs away from his friends. Hunters and the Flood unchanged." },
 	{ "ai.mendicant.bridge", _config_string, "\"\"", "HALO_AI_MENDICANT_BRIDGE", _environment_value, _platform_linux,
 		"A file the models are asked through instead (a trainer or brain.py maps\n"
 		"it); empty: the models in the game." },
@@ -1275,6 +1281,10 @@ static const struct config_setting config_settings[] =
 		"A file to log a free-movement test in; empty: no test." },
 	{ "ai.mendicant.vehicle_test", _config_boolean, "false", "HALO_AI_MENDICANT_VEHICLE_TEST", _environment_value, _platform_linux,
 		"Test boarding: soldiers try the nearest vehicle." },
+	{ "ai.mendicant.grenade_test", _config_real, "0.0", "HALO_AI_MENDICANT_GRENADE_TEST", _environment_value, _platform_linux,
+		"Training: drop a live grenade among soldiers every this many seconds\n"
+		"of each fight (every third a plasma grenade stuck to a Marine or a\n"
+		"Grunt), for the grenade reactions' measures; 0: none." },
 	{ "ai.mendicant.aim_debug", _config_boolean, "false", "HALO_AI_MENDICANT_AIM_DEBUG", _environment_value, _platform_linux,
 		"Log the aim each actor is given." },
 	{ "ai.mendicant.character_log", _config_string, "\"\"", "HALO_AI_MENDICANT_CHARACTER_LOG", _environment_value, _platform_linux,

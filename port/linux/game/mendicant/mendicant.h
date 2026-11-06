@@ -22,6 +22,14 @@ enum
 	_mendicant_move_point,
 };
 
+/* mendicant_danger_react's answers */
+enum
+{
+	_mendicant_danger_stock = 0, /* the game's own reaction */
+	_mendicant_danger_dive,      /* the game's dive, in the direction written */
+	_mendicant_danger_moved,     /* the soldier's own reaction is under way: no dive, no avoid action */
+};
+
 /* a map's start and end (ai.c) */
 void mendicant_initialize_for_new_map(void);
 void mendicant_dispose_from_old_map(void);
@@ -86,9 +94,26 @@ short mendicant_line_of_fire_vehicles(long actor_index, short maximum,
 	real_point3d *centers, real *radii, long *prop_indices);
 
 /* a unit was hurt (units.c's unit_damage_aftermath): the fire log's "hit"
-row, for the balance measures (nothing without ai.mendicant.fire_log) */
+row, for the balance measures (nothing without ai.mendicant.fire_log); the
+damage's category (a grenade's is 3) */
 void mendicant_unit_damaged(long unit_index, long owner_object_index, short owner_team,
-	real shield_damage, real body_damage, boolean lethal);
+	real shield_damage, real body_damage, boolean lethal, short category);
+
+/* grenade reactions (actor_perception.c, actions.c): each soldier notices a
+live grenade in his own time, in place of the game's acknowledgement timer
+(-1 not yet, 1 now, 0 the game's own), takes it in before he reacts
+(TRUE: no avoidance yet), and reacts his own way once the game has found its
+way out for him (inside the blast, on foot): mendicant_danger_react returns
+_mendicant_danger_stock, _dive (escape_found, escape_direction and the
+alignment written) or _moved */
+short mendicant_danger_notice(long actor_index);
+boolean mendicant_danger_hold(long actor_index);
+/* near the blast but not in it, where the game would take the avoid action
+(passive or pursuing) or stay put (fighting): TRUE when the soldier steps
+clear his own way instead */
+boolean mendicant_danger_avoid(long actor_index, short action_class);
+short mendicant_danger_react(long actor_index, boolean *escape_found, short *escape_direction,
+	real_vector2d *alignment_vector);
 
 /* target weights (actor_perception.c) */
 real mendicant_target_weight(long actor_index, long prop_index, real weight);

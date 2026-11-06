@@ -6202,11 +6202,28 @@ void actor_perception_update(
 		if (actor->danger_zone.danger_type > _actor_danger_zone_none)
 		{
 			boolean acknowledge_danger = FALSE;
+			/* port: MENDICANT AI: each soldier notices a live grenade in his
+			own time, in place of the game's acknowledgement timer: -1 not
+			yet, 1 now, 0 the game's own
+			(port/linux/game/mendicant/mendicant_grenades.c) */
+			short mendicant_notice =
+				actor->danger_zone.attached_to_us || actor->danger_zone.noticed_danger ?
+					0 : mendicant_danger_notice(actor_index);
 
-			if (actor->danger_zone.attached_to_us ||
+			if (mendicant_notice < 0)
+			{
+				/* not yet */
+			}
+			else if (actor->danger_zone.attached_to_us ||
 				actor->danger_zone.hostility != 0)
 			{
 				actor->danger_zone.noticed_danger = TRUE;
+				acknowledge_danger = actor->danger_zone.acknowledgement_timer > 0;
+				actor->danger_zone.acknowledgement_timer = 0;
+			}
+			else if (mendicant_notice > 0)
+			{
+				/* port: his own time came: the game's notice chance decides */
 				acknowledge_danger = actor->danger_zone.acknowledgement_timer > 0;
 				actor->danger_zone.acknowledgement_timer = 0;
 			}

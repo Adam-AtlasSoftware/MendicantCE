@@ -46,7 +46,8 @@ Video Setup > CAMPAIGN AI (`tools/port_settings.py`'s
 variety, discipline, threat targeting, unit radius, aim spread, spread by
 difficulty, moving targets and the Marines' rate of fire, and on its SOLDIER
 CHARACTER page the character, the personality strength, the quirks, the firing
-personality, the search for a lost target and holding fire for friendly vehicles. It is reached from
+personality, the search for a lost target, holding fire for friendly vehicles and the grenade
+reactions. It is reached from
 the main menu's player profile and from a campaign's pause menu (SETTINGS),
 and works with a controller as the other settings screens do. OK writes the
 changes to config.toml; `menu_functions.c`'s "port settings save" then calls
@@ -214,7 +215,103 @@ plasma pistol (special fire), put back after his combat update and again after t
   the attacker's team, e the victim's actor. In training, `episode` and `episode_end` rows (c
   the trainer's scenario, d its seed) mark each fight, and the sample log has an `episode` row
   (actor -1, encounter the scenario, squad the seed), so a run of many fights can be cut back
-  into them.
+  into them. f is the damage's category (3 a grenade's).
+
+## Grenade reactions
+
+Milestone M2 (`mendicant_grenades.c`, `ai.mendicant.grenade_reactions`, with the character on):
+how each soldier with a character notices a live grenade, how long he takes to react, what he
+does and which way he goes. Hunters, the Flood, Sentinels, Engineers and turrets have no
+character and react as before, as do actors in a play fight or a script's command list.
+
+The game, for an enemy grenade (its danger zone's hostility 0), counts 30 ticks of seeing it
+before it acknowledges it in a fight (at once just after an uncertain moment), rolls the actor
+definition's notice chance, then rolls its dive chance; a friend's or his own is noticed at once.
+Every soldier who sees it on the same tick acknowledges it on the same tick, and the escape is
+worked out from the grenade's motion alone, so soldiers on the same side of a rolling grenade
+all dive the same way. Here:
+
+| Hook (`mendicant.h`) | In | What it does |
+| --- | --- | --- |
+| `mendicant_danger_notice` | `actor_perception_update`, the danger zone's acknowledgement | -1 not yet, 1 now (an enemy's: the game's notice chance still rolls), 0 the game's own |
+| `mendicant_danger_hold` | `actor_action_handle_danger_avoidance`, after the attached test | TRUE while he takes it in: no avoidance, no shout, no avoid action yet |
+| `mendicant_danger_react` | the same, after `actor_action_find_escape_from_danger` (inside the blast, on foot) | the game's own, the game's dive in his direction (also from a grenade lying still), or his own reaction under way |
+| `mendicant_danger_avoid` | the same, where the game takes the avoid action (near the blast, not in it) | TRUE when he steps clear his own way; also when fighting, where the game leaves him standing |
+
+- **Notice** (an enemy's grenade). In place of the game's 30 ticks, his own: 30 times a reflex multiplier (1.45..0.55,
+  its mean over his kind 1, so each kind keeps the game's average), the mood, 2-6 ticks more for
+  one that came from behind him, +-3 ticks of his own noise, Elites 0.85, Grunts 1.1; 0 to 45
+  ticks. His own grenade or a friend's he saw thrown: the game's own, at once. His clock runs only while he perceives the grenade, as
+  the game's does, and the game's notice chance still decides an enemy's. Nothing is noticed early
+  because it is about to go off: an early notice for every soldier made the layer a buff (deaths
+  per noticed grenade 0.63 of the layer off's on the grenade test).
+- **The wait.** From noticing it to moving: `9 x (1 - nerve)` ticks (nerve: 0.55 courage, 0.45
+  reflex), times the mood, plus 0-3 of his own; a rookie 4 more, a veteran 2 fewer, Elites 0.6,
+  Grunts 1.2; at most 12. Under 22 ticks to the blast, or within 1.2 world units, he goes at once.
+  The game's "grenade!" shout comes with his reaction, not before it.
+- **The reaction**, by his kind and quirk, then caution (more running) and aggression (more
+  stepping back), then his own roll: the dive (the game's dive animations, in his own direction;
+  his choice stands in for the variant's dive chance), the run clear (free movement, 2-3.5 world
+  units past the blast), the step back (0.5-1.3 past it), and for a Grunt (more for a frightened
+  one or a panic-thrower, never the brave one) or a rookie Marine the freeze: he stops dead for
+  8-15 ticks, then bolts. Grunts run most, Jackals step back behind their shields, Elites step back
+  or dive when it is close (berserkers and duelists shrug it off), Marines dive most. A dive with
+  no room, or no animation, becomes the run; a run with no way becomes the game's own. Near the
+  blast but not in it, a step back or a run, never a dive.
+- **Dispersal.** His way out is one of 16 directions, scored: away from the grenade (never toward
+  it), away from friends within 8 world units (Marines: the Chief too), away from the ends and
+  directions the others reacting to the same grenade were given (each grenade keeps up to 8),
+  toward the side he peeks from and his facing, his own noise, and of the best six the ones with
+  a clear line, ground at his height (no ledge, no pit) and cover from the blast preferred. A slow,
+  jumpy soldier (reflex under 0.35) goes the obvious way a quarter of the time; one who likes a
+  buddy may go with the last soldier's way. The escape is free movement at urgency 2, which no
+  other owner (the drill, following the Chief, the search) can take or end while it lasts
+  (`mendicant_go_by_grenade`, `mendicant_grenade_evading`); it ends when the grenade is gone or
+  after 3 s.
+- **Stuck plasma.** A Marine with a plasma grenade on him runs 6-9 world units away from the middle
+  of his friends (and the Chief) within 12, with chance `0.4 + 0.5 x selfless` (selfless: 0.5
+  loyalty, 0.3 courage, 0.2 discipline), the nearest of five ways that fits; otherwise, and for
+  Elites (berserk or flight), the game's own blind panic, scream and all. A Grunt panics as the
+  game has it, into his friends (5-20% by courage run away), the coward never, the brave one 85%;
+  a Jackal 20-50%.
+- **Signature (quirks).** The Grunt coward, the first time a grenade comes his way in a fight,
+  bolts the farthest (5-7 past the blast) screaming the flee line (no flee stimulus: his friends
+  do not catch it from him). The panic-thrower freezes twice as often. A thrown panic grenade
+  waits for M5.
+- **Measured** (the trainer's frozen benchmark, 50 scenarios, the game's own AI and the drills;
+  the grenade test every 3 s, 400 fights each way; natural fights 800 each way). Natural fights
+  throw too few grenades (0.13 detonations a fight) to judge reactions, so the gates come from the
+  grenade test. In this harness the game is not as synchronised as the design assumed: its
+  30-tick acknowledgement and notice chance already spread soldiers out (pairs within 2 ticks
+  0.14, escape angle 84 degrees). With the layer: pairs within 2 ticks 0.11 (lower, under 0.3),
+  escape angle 88 degrees (higher, over 70), reaction-kind entropy Grunts 2.1 and Marines 1.6 bits
+  (the game 0.75 and 0.97; over 1), deaths per noticed grenade 0.85 of the layer off's (band
+  0.75-1.25; grenade deaths per fight 0.99), stuck Marines running from friends 70% (40-90%; the
+  layer off 50%). Detonations hurting two or more: 0.98 of the layer off's, not the design's 0.6:
+  most of the soldiers caught never noticed the grenade in time (the game's notice chance and
+  timer, which the layer keeps so as not to make soldiers better at surviving grenades); spacing
+  is M6. An earlier version that let a close blast cut the notice short, and that ran past the
+  blast's edge, made the Marines dodge the Grunts' grenades: Grunt damage fell to 0.79 and kills
+  to 0.70 of the layer with reactions off. Now Grunts and Marines are within the band (damage a
+  minute, kills, deaths: Grunts 0.98, 1.05, 1.00; Marines 1.03, 1.01, 1.12, the last within the
+  difference between two layer-off runs, 1.12).
+- **Not in M2.** Cover hugging behind an obstacle (needs the firing positions' cover classes, M9),
+  Hunters' shrug (Hunters are unchanged), vehicles' lanes (M4).
+- **Training.** As the character: off unless the run sets it. `ai.mendicant.grenade_test` (seconds,
+  0 none) throws a live grenade among soldiers during each fight (from the nearest enemy's side,
+  plasma from the Covenant, frags from the humans, arriving over 20 ticks 0.5-2 world units from a
+  soldier, one with a friend within 5 nine times in ten; every third a plasma grenade at a Marine's
+  or Grunt's chest, to stick), with its own random numbers from the fight's seed.
+- **Log** (the fire log, both layers): `gnotice` (a the distance, b ticks to the blast or -1, c the
+  grenade, d the hostility, e ticks since its danger zone was first seen, f the blast radius),
+  `greact` (a, b his way out, 0 0 for the game's own, c the grenade, d 0 the game's dive, 1 his
+  dive, 2 run, 3 step back, 4 freeze, 5 the game's avoid action, 6 the coward's bolt, e ticks since
+  it was first seen, f the distance), `gmove` 30 ticks later (a, b how far he moved, c, d as
+  `greact`, e the reaction's tick), `gdive` (his dive asked for: d the game's dive decision, e its
+  danger decision), `gstuck` 45 ticks after a stick or at his death (a, b his mean distance to his
+  friends then and now, c the grenade, d 1 he chose to run, 0 the game's own, -1 the layer off, e
+  the friends, f ticks), `gtest` (the grenade test: a, b where, c the grenade, d 1 stuck, e its
+  type).
 
 ## Fork release settings
 

@@ -4464,6 +4464,7 @@ boolean actor_action_handle_danger_avoidance(
 	boolean within_escape_radius = FALSE;
 	boolean path_re_enters_danger = FALSE;
 	boolean body_within_danger;
+	boolean mendicant_dive = FALSE; /* port: MENDICANT AI asked for the dive */
 	short escape_direction;
 	real escape_distance;
 	real_vector3d danger_line_delta;
@@ -4489,6 +4490,14 @@ boolean actor_action_handle_danger_avoidance(
 	{
 		debug_info->danger_decision = _danger_avoidance_attached_to_us;
 		goto try_avoid_action;
+	}
+
+	/* port: MENDICANT AI: a soldier takes a grenade in before he reacts
+	(port/linux/game/mendicant/mendicant_grenades.c) */
+	if (mendicant_danger_hold(actor_index))
+	{
+		debug_info->danger_decision = _danger_avoidance_unnoticed;
+		return FALSE;
 	}
 
 	{
@@ -4698,6 +4707,24 @@ boolean actor_action_handle_danger_avoidance(
 					&alignment_vector,
 					&escape_is_ledge);
 
+				/* port: MENDICANT AI: each soldier his own reaction and his own
+				way out (port/linux/game/mendicant/mendicant_grenades.c) */
+				switch (mendicant_danger_react(
+					actor_index,
+					&escape_found,
+					&escape_direction,
+					&alignment_vector))
+				{
+				case _mendicant_danger_moved:
+					debug_info->danger_decision = _danger_avoidance_can_avoid;
+					result = TRUE;
+					goto try_avoid_action;
+				case _mendicant_danger_dive:
+					escape_is_ledge = FALSE;
+					mendicant_dive = TRUE;
+					break;
+				}
+
 				if (escape_direction == NONE)
 				{
 					debug_info->danger_decision =
@@ -4728,7 +4755,8 @@ boolean actor_action_handle_danger_avoidance(
 						break;
 
 					case _actor_danger_zone_projectile:
-						if ((escape_found || escape_is_ledge) && urgency < 7.0f)
+						/* port: MENDICANT AI's dive also from a grenade lying still */
+						if ((escape_found || escape_is_ledge) && (urgency < 7.0f || mendicant_dive))
 						{
 							debug_info->danger_decision =
 								_danger_avoidance_can_avoid;
@@ -4799,7 +4827,13 @@ try_avoid_action:
 		struct action_state_data action_data;
 		short action_class = actor_action_class(actor_index);
 
-		if ((action_class == _action_class_passive ||
+		/* port: MENDICANT AI: a soldier near a grenade's blast steps clear his
+		own way (port/linux/game/mendicant/mendicant_grenades.c) */
+		if (mendicant_danger_avoid(actor_index, action_class))
+		{
+			result = TRUE;
+		}
+		else if ((action_class == _action_class_passive ||
 				action_class == _action_class_pursuit) &&
 			action_avoid_setup(actor_index, &action_data.avoid))
 		{

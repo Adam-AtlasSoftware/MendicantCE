@@ -109,6 +109,7 @@ boolean mendicant_config_read(
 	config->fire_personality = config_boolean("ai.mendicant.fire_personality") != 0;
 	config->lost_target_search = config_boolean("ai.mendicant.lost_target_search") != 0;
 	config->friend_vehicles = config_boolean("ai.mendicant.friend_vehicles") != 0;
+	config->grenade_reactions = config_boolean("ai.mendicant.grenade_reactions") != 0;
 #ifdef MENDICANT_LEGACY_ENVIRONMENT
 	/* the training bridge, its runs and its logs: desktop Linux only */
 	mendicant_config_copy_string(config->bridge, sizeof(config->bridge), config_string("ai.mendicant.bridge"));
@@ -121,6 +122,7 @@ boolean mendicant_config_read(
 	mendicant_config_copy_string(config->character_log, sizeof(config->character_log), config_string("ai.mendicant.character_log"));
 	mendicant_config_copy_string(config->fire_log, sizeof(config->fire_log), config_string("ai.mendicant.fire_log"));
 	config->vehicle_test = config_boolean("ai.mendicant.vehicle_test") != 0;
+	config->grenade_test = (real)config_real("ai.mendicant.grenade_test");
 	config->aim_debug = config_boolean("ai.mendicant.aim_debug") != 0;
 
 	/* the hook library's names, each with the meaning it had there */
