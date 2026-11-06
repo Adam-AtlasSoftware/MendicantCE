@@ -513,6 +513,7 @@ static void spacing_repick(
 		return;
 	actor->state.action_data.fight.firing_position_timer = 1;
 	spacing_stats.repicks++;
+	mendicant_status.spacing_repicks++;
 }
 
 /* his multiplier moves toward what the threat calls for: up after his own
@@ -816,6 +817,7 @@ static void spacing_step_apart(
 	soldier->stepping = TRUE;
 	soldier->step_until = time + SPACING_STEP_TICKS;
 	spacing_stats.steps++;
+	mendicant_status.spacing_steps++;
 }
 
 /* ---------- public code */
@@ -1020,6 +1022,7 @@ boolean mendicant_spacing_avoid_points(
 	}
 	spacing_stats.points += count - evaluation_context->avoid_point_count;
 	spacing_stats.selections++;
+	mendicant_status.spacing_selections++;
 	evaluation_context->avoid_point_count = count;
 	if (count > spacing_stats.most)
 		spacing_stats.most = count;

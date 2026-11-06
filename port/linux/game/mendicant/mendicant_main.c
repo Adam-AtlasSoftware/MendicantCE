@@ -827,13 +827,13 @@ static void mendicant_status_log(
 		"(%lu again at one time); drill passes %lu, units %lu; strategy %lu/%lu, per-enemy %lu/%lu, stances %lu/%lu "
 		"(Covenant/Marines); roles %lu, orders %lu; model choices moved %lu, held %lu, rejected %lu, late %lu; "
 		"bursts of their own %lu, first shots %lu, grenade reactions %lu, convoy assigned %lu, boarded %lu, "
-		"seated %lu",
+		"seated %lu; spacing searches %lu, steps apart %lu, re-picks %lu",
 		when, global_scenario_index != NONE ? tag_get_name(global_scenario_index) : "", status->last_time, status->ticks, status->repeated, status->jumps,
 		status->ai_updates, status->ai_repeated, status->drill_passes, status->units, status->strategy[0],
 		status->strategy[1], status->per_enemy[0], status->per_enemy[1], status->stances[0], status->stances[1],
 		status->roles, status->orders, status->moved, status->held, status->rejected, status->late, status->bursts,
 		status->first_shots, status->grenade_reactions, status->convoy_assigned, status->convoy_boarded,
-		status->convoy_seated);
+		status->convoy_seated, status->spacing_selections, status->spacing_steps, status->spacing_repicks);
 
 	return;
 }
