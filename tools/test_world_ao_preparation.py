@@ -14,7 +14,7 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 DEVICE = "port/linux/src/d3d8_device.c"
 FUNCTIONS = ["static BOOL world_ao_applies(void)", "static BOOL world_ao_preparing(void)",
-             "static BOOL world_ao_found(void)", "static unsigned char world_ao_key(int light)",
+             "static BOOL world_ao_span_found(void)", "static BOOL world_ao_found(void)", "static unsigned char world_ao_key(int light)",
              "static void world_ao_twins(void)"]
 
 HARNESS = r"""
@@ -105,8 +105,8 @@ CONTROLS = [
     # the world's keys made while preparing only for a given window (the pipelines then missed in play)
     ("\telse if (world_ao_preparing())\n", "\telse if (0 && world_ao_preparing())\n"),
     # every window prepared as found once a pixel (a mirror's world pipelines then missed)
-    ("\treturn (world_ao.span == WORLD_AO_SPAN_FOUND || world_ao.span == WORLD_AO_SPAN_FOUND_FIRST_PERSON) &&\n",
-     "\treturn (world_ao.span != WORLD_AO_SPAN_NONE || world_ao.span == WORLD_AO_SPAN_FOUND_FIRST_PERSON) &&\n"),
+    ("\treturn world_ao.span == WORLD_AO_SPAN_FOUND || world_ao.span == WORLD_AO_SPAN_FOUND_FIRST_PERSON;\n",
+     "\treturn world_ao.span != WORLD_AO_SPAN_NONE || world_ao.span == WORLD_AO_SPAN_FOUND_FIRST_PERSON;\n"),
     # the found window's draws not lit by the world (its span read as a plain one's)
     ("\treturn (world_ao.span == WORLD_AO_SPAN_OPEN || world_ao.span == WORLD_AO_SPAN_FOUND) &&\n",
      "\treturn (world_ao.span == WORLD_AO_SPAN_OPEN) &&\n"),

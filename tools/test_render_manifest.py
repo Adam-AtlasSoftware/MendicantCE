@@ -446,3 +446,83 @@ def test_manifest_holds_the_worlds_draws(tmp_path):
     world, cleared = map(int, result.stdout.split())
     assert world > 0, f"no draw of the committed manifest takes the world's light. {REMAKE}."
     assert cleared == 0
+
+
+WORLD_FORMS = r"""
+#include "xgpu_manifest.h"
+#include "xgpu.h"
+#include <stdio.h>
+#include <string.h>
+
+/* the committed manifest's draws under display.ambient_occlusion "world" in
+every other setting's combination, each in its World AO forms as the Mac's
+library is built (xgpu_manifest_world_ao_forms): how many read the
+occlusion from the pass, are a twin writing its pixel's inputs, and are an
+occluder's twin (of a found window's draw without the world's light: the
+first-person weapon, a surface lighting itself); with argv[2] every
+context's found cleared */
+int main(int argc, char **argv)
+{
+	struct xgpu_manifest manifest;
+	struct xgpu_manifest_settings settings;
+	char error[256];
+	uint32_t index, sampled = 0, inputs = 0, occluders = 0;
+	int combination;
+
+	if (!xgpu_manifest_read(argv[1], &manifest, error, sizeof(error)))
+	{
+		printf("error: %s\n", error);
+		return 1;
+	}
+	for (combination = 0; xgpu_manifest_settings(combination, &settings); combination++)
+	{
+		if (settings.ambient_occlusion != XGPU_MANIFEST_OCCLUSION_WORLD)
+			continue;
+		for (index = 0; index < manifest.draw_count; index++)
+		{
+			struct xgpu_manifest_draw derived, forms[XGPU_MANIFEST_WORLD_AO_FORMS];
+			struct xgpu_manifest_context context = manifest.contexts[index];
+			int form, count;
+
+			if (argc > 2)
+				context.found = 0;
+			xgpu_manifest_derive(&manifest.draws[index], &context, &settings, 0, &derived);
+			count = xgpu_manifest_world_ao_forms(&derived, &context, &settings, forms);
+			for (form = 1; form < count; form++)
+			{
+				uint8_t occlusion = forms[form].key.pixel.ambient_occlusion;
+
+				sampled += (occlusion & 0xf0u) == (XGPU_AMBIENT_OCCLUSION_WORLD | XGPU_AMBIENT_OCCLUSION_WORLD_SAMPLED);
+				inputs += (occlusion & 0xf0u) == XGPU_STREAM_WORLD_AO_INPUTS;
+				occluders += occlusion == XGPU_STREAM_WORLD_AO_OCCLUDER;
+			}
+		}
+	}
+	printf("%u %u %u\n", sampled, inputs, occluders);
+	xgpu_manifest_free(&manifest);
+	return 0;
+}
+"""
+
+
+def test_library_has_the_world_ao_forms(tmp_path):
+    """the Mac's and iOS's libraries are built with each World AO form a map's
+    preparation makes (xgpu_metal_prebuild.c, xgpu_manifest_world_ao_forms):
+    besides the inline draw, where the committed manifest notes a draw's window
+    found once a pixel (cf), the draw reading the pass, its twin writing the
+    pre-pass's inputs, and the occluders' twins (the first-person weapon's,
+    a self-illuminated surface's), so that none is compiled as a map
+    prepares. Negative control: without cf, none of those is derived"""
+    (tmp_path / "forms.c").write_text(WORLD_FORMS)
+    binary = compile_reader(tmp_path, tmp_path / "forms.c", tmp_path / "forms")
+
+    def counts(*extra):
+        result = subprocess.run([str(binary), str(COMMITTED), *extra], capture_output=True, text=True)
+        assert result.returncode == 0, result.stdout
+        return tuple(map(int, result.stdout.split()))
+
+    sampled, inputs, occluders = counts()
+    assert sampled > 0 and inputs > 0 and occluders > 0, (
+        f"World AO forms derived from the committed manifest: {sampled} sampled, {inputs} input twins, "
+        f"{occluders} occluder twins. {REMAKE}.")
+    assert counts("without-found") == (0, 0, 0)
