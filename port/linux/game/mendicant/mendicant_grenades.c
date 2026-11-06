@@ -1373,7 +1373,7 @@ boolean mendicant_grenades_avoid(
 	int reaction;
 
 	if (!actor || actor->danger_zone.danger_type != GRENADE_DANGER_PROJECTILE || !actor->danger_zone.noticed_danger ||
-		actor->danger_zone.attached_to_us || !grenade_his_own(actor_index, actor))
+		actor->danger_zone.attached_to_us || actor->input.vehicle_index != NONE || !grenade_his_own(actor_index, actor))
 		return FALSE;
 	if (action_class != _action_class_passive && action_class != _action_class_pursuit &&
 		action_class != _action_class_active)
@@ -1420,8 +1420,9 @@ short mendicant_grenades_react(
 	long time = mendicant_time();
 	int reaction;
 
-	if (!actor || actor->danger_zone.danger_type != GRENADE_DANGER_PROJECTILE || !grenade_his_own(actor_index, actor))
-		return _mendicant_danger_stock;
+	if (!actor || actor->danger_zone.danger_type != GRENADE_DANGER_PROJECTILE || actor->input.vehicle_index != NONE ||
+		!grenade_his_own(actor_index, actor))
+		return _mendicant_danger_stock; /* (a driver: the game's own) */
 	soldier = grenade_soldier_get(actor_index);
 	if (!soldier)
 		return _mendicant_danger_stock;

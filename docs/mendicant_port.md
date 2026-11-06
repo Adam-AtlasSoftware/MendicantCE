@@ -235,7 +235,7 @@ all dive the same way. Here:
 | --- | --- | --- |
 | `mendicant_danger_notice` | `actor_perception_update`, the danger zone's acknowledgement | -1 not yet, 1 now (an enemy's: the game's notice chance still rolls), 0 the game's own |
 | `mendicant_danger_hold` | `actor_action_handle_danger_avoidance`, after the attached test | TRUE while he takes it in: no avoidance, no shout, no avoid action yet |
-| `mendicant_danger_react` | the same, after `actor_action_find_escape_from_danger` (inside the blast, on foot) | the game's own, the game's dive in his direction (also from a grenade lying still), or his own reaction under way |
+| `mendicant_danger_react` | the same, after `actor_action_find_escape_from_danger` (inside the blast, on foot; a driver keeps the game's own) | the game's own, the game's dive in his direction (also from a grenade lying still), or his own reaction under way |
 | `mendicant_danger_avoid` | the same, where the game takes the avoid action (near the blast, not in it) | TRUE when he steps clear his own way; also when fighting, where the game leaves him standing |
 
 - **Notice** (an enemy's grenade). In place of the game's 30 ticks, his own: 30 times a reflex multiplier (1.45..0.55,
@@ -331,7 +331,7 @@ the seat), so in the test scene five Marines walk to one seat at once.
 
 | Hook (`mendicant.h`) | In | What it does |
 | --- | --- | --- |
-| `mendicant_seat_withheld` | `actor_action_try_to_enter_vehicle` (`actions.c`) and `action_vehicle_find_impromptu_seat` (`action_vehicle.c`) | TRUE for a seat another Marine holds (the convoy's reservation) or is walking to: the game's own boarding picks another seat or none |
+| `mendicant_seat_withheld` | `action_vehicle_find_impromptu_seat` (`action_vehicle.c`) | TRUE for a seat another Marine holds (the convoy's reservation) or is walking to: a Marine's own boarding picks another seat or none. A script's or a command list's boarding (`ai_go_to_vehicle`, `actor_action_try_to_enter_vehicle`) is left alone |
 | `mendicant_player_actions` | `players_update_before_game` (`players.c`), after the bots' actions | the convoy test drives the Chief (training only; nothing otherwise) |
 
 - **Full.** Every 15 ticks while the Chief drives: Marines within 12 world units of his slow
@@ -342,7 +342,9 @@ the seat), so in the test scene five Marines walk to one seat at once.
 - **Leftovers and seats.** Marines on foot within 30 world units of his vehicle. The vehicles they
   may take: an upright Warthog, Scorpion or Ghost within 35 world units of them, standing, empty or
   driven by a Marine the convoy already drives, nearest first, each filled before the next, so a
-  lone driver does not take the second Warthog while the first has room. Seats come from
+  lone driver does not take the second Warthog while the first has room (the autopilot takes a
+  Scorpion or a Ghost only from a Marine the convoy itself put at its wheel, never a script's
+  driver). Seats come from
   `vehicle_scripting_find_available_seats`, less those reserved or walked to, and only seats his
   animations have (`unit_has_animation_to_enter_seat`). A vehicle nobody can drive is skipped.
 - **Who sits where.** The wheel first: skill x 1.2, a born driver (the character's seat

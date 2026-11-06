@@ -638,8 +638,10 @@ void mendicant_vehicles_update(
 		vehicle = vehicles_unit(vehicle_index);
 		if (!vehicle || vehicle_index == chief_vehicle || vehicle_index == gunner_left_vehicle)
 			continue;
+		/* (a Scorpion or a Ghost only when the convoy put him at its wheel) */
 		if (vehicle->unit.driver_object_index == actor->meta.unit_index && (vehicle_kind(vehicle) == VEHICLE_WARTHOG ||
-			(convoy && (vehicle_kind(vehicle) == VEHICLE_SCORPION || vehicle_kind(vehicle) == VEHICLE_GHOST))))
+			(convoy && (vehicle_kind(vehicle) == VEHICLE_SCORPION || vehicle_kind(vehicle) == VEHICLE_GHOST) &&
+				mendicant_convoy_seated_driver(((long)(unsigned short)actor->identifier << 16) | index, vehicle_index))))
 			autopilot_add(actor->meta.unit_index, vehicle_index, FALSE);
 		if (!convoy && chief && chief_vehicle == NONE && vehicles_range_to(actor, &chief->object.position) < 15.0f &&
 			vehicle_speed(vehicle) < 2.0f)

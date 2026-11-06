@@ -263,6 +263,7 @@ boolean mendicant_convoy_active(void);
 void mendicant_convoy_update(long time);
 boolean mendicant_convoy_owns(long actor_index);
 boolean mendicant_convoy_drive(long unit_index, long vehicle_index, real_point3d *target, real *throttle);
+boolean mendicant_convoy_seated_driver(long actor_index, long vehicle_index); /* sent to that wheel by the convoy */
 void mendicant_convoy_report(void);
 boolean mendicant_convoy_flipped(long vehicle_index); /* TRUE: the convoy has the crew get out */
 /* the aim's parts the firing personality applies per soldier: the setting and

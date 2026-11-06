@@ -115,8 +115,8 @@ boolean mendicant_danger_avoid(long actor_index, short action_class);
 short mendicant_danger_react(long actor_index, boolean *escape_found, short *escape_direction,
 	real_vector2d *alignment_vector);
 
-/* the convoy (actions.c, players.c): the game's own boarding does not send
-a Marine to a seat another holds or walks to (TRUE: skip that seat); the
+/* the convoy (action_vehicle.c, players.c): a Marine's own boarding does not
+go for a seat another holds or walks to (TRUE: skip that seat); the
 convoy test drives the Chief (player 0's actions, after they are read) */
 boolean mendicant_seat_withheld(long actor_index, long vehicle_index, short seat_index);
 struct player_action;

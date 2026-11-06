@@ -8,10 +8,10 @@ other vehicles nearby and follow him, rather than standing there or racing
 after him on foot.
 
 - Seats: every seat a Marine goes for is reserved for him (vehicle, seat,
-  soldier, an expiry), and the game's own boarding (actions.c,
+  soldier, an expiry), and a Marine's own boarding (action_vehicle.c,
   mendicant_seat_withheld) does not send a second Marine to a reserved seat or
   to a seat another is already walking to, so two Marines never go for one
-  seat.
+  seat. A script's boarding (ai_go_to_vehicle, a command list) is left alone.
 - Who sits where: the vehicles are filled one at a time, nearest first, so a
   lone driver does not take the second Warthog while the first has room. The
   wheel goes to the most skilled (a born driver more often), the gun to the
@@ -145,6 +145,7 @@ struct convoy_soldier
 	long refused_until;
 	long hold_since;
 	boolean gunner_holding; /* stayed on the gun at this dismount */
+	boolean seated_by_convoy; /* riding: the convoy sent him to this seat */
 };
 
 struct convoy_reservation
@@ -981,6 +982,7 @@ static void convoy_soldiers_update(
 				struct unit_datum *vehicle = convoy_unit(unit->object.parent_object_index);
 
 				soldier->state = CONVOY_RIDING;
+				soldier->seated_by_convoy = FALSE;
 				soldier->vehicle = unit->object.parent_object_index;
 				soldier->seat = unit->unit.parent_seat_index;
 				soldier->role = vehicle ? (unsigned char)convoy_seat_role(vehicle, soldier->seat) : CONVOY_SEAT_PASSENGER;
@@ -1028,6 +1030,7 @@ static void convoy_soldiers_update(
 				struct unit_datum *vehicle = convoy_unit(soldier->vehicle);
 
 				soldier->state = CONVOY_RIDING;
+				soldier->seated_by_convoy = TRUE;
 				soldier->seat = unit->unit.parent_seat_index;
 				soldier->role = vehicle ? (unsigned char)convoy_seat_role(vehicle, soldier->seat) : soldier->role;
 				soldier->seated_at = time;
@@ -1184,8 +1187,25 @@ boolean mendicant_convoy_owns(
 		(soldier->state == CONVOY_ASSIGNED || soldier->state == CONVOY_BOARDING || soldier->state == CONVOY_HOLDING);
 }
 
-/* the game's own boarding (actions.c): a Marine does not go for a seat
-another holds or walks to */
+/* the convoy sent this Marine to the wheel he holds (the vehicles' autopilot
+takes a Scorpion or a Ghost only then: no script's driver is taken over) */
+boolean mendicant_convoy_seated_driver(
+	long actor_index,
+	long vehicle_index)
+{
+	int slot = (int)(unsigned short)actor_index;
+	struct convoy_soldier *soldier;
+
+	if (!convoy_on() || actor_index == NONE || slot >= MENDICANT_MAX_ACTORS)
+		return FALSE;
+	soldier = &convoy_soldiers[slot];
+	return soldier->actor == actor_index && soldier->state == CONVOY_RIDING && soldier->seated_by_convoy &&
+		soldier->vehicle == vehicle_index && soldier->role == CONVOY_SEAT_DRIVER;
+}
+
+/* a Marine's own boarding (action_vehicle.c, the impromptu seat): he does
+not go for a seat another holds or walks to (a script's boarding is not
+asked) */
 boolean mendicant_seat_withheld(
 	long actor_index,
 	long vehicle_index,
@@ -1422,7 +1442,7 @@ boolean mendicant_convoy_drive(
 		else if (time - follower->behind_since > CONVOY_LOST_TICKS && !follower->abandoned)
 		{
 			follower->abandoned = TRUE;
-		follower->abandoned_at = mendicant_time();
+			follower->abandoned_at = mendicant_time();
 			convoy_counts[7]++;
 			convoy_log("abandon", follower->slot, 0, 0, distance, 0.0f);
 			convoy_dismount(vehicle_index, time, "lost");
@@ -1511,7 +1531,7 @@ boolean mendicant_convoy_drive(
 		if (follower->stuck_ticks > 240)
 		{
 			follower->abandoned = TRUE;
-		follower->abandoned_at = mendicant_time();
+			follower->abandoned_at = mendicant_time();
 			convoy_counts[7]++;
 			convoy_log("abandon", follower->slot, 1, 0, distance, 0.0f);
 			convoy_dismount(vehicle_index, time, "stuck");
@@ -1528,20 +1548,27 @@ boolean mendicant_convoy_drive(
 }
 
 /* a Marine follower's vehicle flipped (the autopilot): its crew get out one
-by one, and nobody takes it again */
+by one, and nobody takes it again; FALSE when the convoy seated nobody in it
+(the autopilot's own unload then) */
 boolean mendicant_convoy_flipped(
 	long vehicle_index)
 {
 	struct convoy_follower *follower;
+	int index;
+	boolean riders = FALSE;
 
 	if (!convoy_on())
 		return FALSE;
 	follower = convoy_follower_get(vehicle_index, FALSE, NONE);
 	if (follower)
+	{
 		follower->abandoned = TRUE;
 		follower->abandoned_at = mendicant_time();
+	}
 	convoy_dismount(vehicle_index, mendicant_time(), "flipped");
-	return TRUE;
+	for (index = 0; index < MENDICANT_MAX_ACTORS && !riders; index++)
+		riders = convoy_soldiers[index].state == CONVOY_RIDING && convoy_soldiers[index].vehicle == vehicle_index;
+	return riders;
 }
 
 /* the end of a map's or test's tallies, in the drill log */
