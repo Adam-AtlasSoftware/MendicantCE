@@ -530,7 +530,7 @@ static int decode_record(struct host_render_decoder *decoder, const unsigned cha
 		break;
 	}
 	case XGPU_STREAM_WORLD_AO_PREPASS:
-		if (((const struct xgpu_stream_world_ao_prepass *)(const void *)start)->phase > XGPU_WORLD_AO_PREPASS_END)
+		if (((const struct xgpu_stream_world_ao_prepass *)(const void *)start)->phase > XGPU_WORLD_AO_PREPASS_TWINS)
 			return XGPU_STREAM_ERROR_BOUNDS;
 		CALL(world_ao_prepass, (const void *)start);
 		break;

@@ -27,11 +27,12 @@ shades with what of the field and the proxies is ready (D's shading).
 - **Only the ambient light.** The flashlight, the dynamic lights (classic and enhanced), specular, self-illumination,
   decals, transparents and the first-person weapon stay as they are, exactly as with #574's GTAO.
 - **Never block or lengthen a load.** The owner's long-term goal is no load screens at all. A map with no field yet
-  loads exactly as fast as it does today ([The bake's schedule](#the-bakes-schedule)), and a map's pipelines are
-  prepared as with the setting off: the world's are made after the load ([Pipelines](#pipelines-never-in-a-load)).
+  loads exactly as fast as it does today ([The bake's schedule](#the-bakes-schedule)). With the setting on, a map's
+  preparation makes the world's pipelines and the pre-pass's twins with the rest, so none is made in play (#672;
+  [Pipelines](#pipelines-in-the-maps-preparation)).
 - **Off is pixel-identical.** Off emits no stream records and no new shader code: the emitters write byte-identical
   shaders. The game tells the front end only where a window's opaque surfaces are drawn (`halo_world_ao_span`),
-  which the renderer's manifest notes ([Pipelines](#pipelines-never-in-a-load)). The Classic preset sets `display.ambient_occlusion = "off"`, so Classic always bypasses all of this.
+  which the renderer's manifest notes ([Pipelines](#pipelines-in-the-maps-preparation)). The Classic preset sets `display.ambient_occlusion = "off"`, so Classic always bypasses all of this.
 
 ## The frame
 
@@ -82,8 +83,9 @@ before. VR's eye passes, a mirror's view and any window not drawn into the back 
 inline. The first-person weapon, transparents, decals, water and the sky take no world light, as before. With
 multisampling the pre-pass and the occlusion are a pixel's (at its centre, as the surfaces found it before).
 
-Pipelines: the pass's is made with a map's (`prepass_prepare`). The twins are made as their world pipelines are
-(after the load, on the compilers, never waited for: a draw whose twin isn't made yet reads 1 until it is). The
+Pipelines: the pass's is made with a map's (`prepass_prepare`), and so are the twins
+([Pipelines](#pipelines-in-the-maps-preparation)). One missed is made on the compilers, never waited for: its
+draw reads 1 until it is. The
 Mac's library holds each world draw's three forms (`xgpu_metal_prebuild.c`).
 
 ## The scene (`world_scene.h`)
@@ -666,24 +668,31 @@ cells' 64-bit masks each (cell i's word w at `cells[i / 2][2 (i % 2) + w]`).
 - `XGPU_STREAM_WORLD_AO_FIELD` carries a slab of slices of a part, the table (4 bytes a texel), the atlas (1), the
   static scenery's pages (1) or the vehicles' fields' atlas (8: four halves) (`width` 0: release every part). The table comes first; the field is drawn with once both have their last slices. The
   decoder checks the slab's part, bounds and size before any backend reads it.
-- `XGPU_STREAM_PIPELINE_STAND_IN` names the pipeline bound's stand-in ([Pipelines](#pipelines-never-in-a-load)).
+- `XGPU_STREAM_PIPELINE_STAND_IN` names the pipeline bound's stand-in ([Pipelines](#pipelines-in-the-maps-preparation)).
 
-### Pipelines: never in a load
+### Pipelines: in the map's preparation
 
-A map's pipelines are made as it starts (`render_enumerate.c`), and the load waits for them. With `"world"`, the
-draws then would be the world's, whose shaders are bigger, and the load longer (10 to 15 ms on the 5900X). So:
-- **No world window while a map's pipelines are prepared** (`world_ao_window_begin` while `render_enumerating`):
-  the load's draws are exactly the ones without the world, and the load makes exactly the pipelines it makes with
-  the setting off.
-- **A stand-in for each world pipeline** (`d3d8_device.c`'s `world_ao_stand_in`): the first time a pipeline with
-  the world's light is drawn with, the front end chooses the draw's keys again with the world off and tells the
-  backend that pipeline's number (`xgpu_backend_pipeline_stand_in`).
-- **The world's made apart** (Vulkan, `xgpu_vulkan_stream.c`): a world pipeline's shaders aren't made when it is
-  bound. Its draws use the stand-in (made in the load) until the world's shaders and pipeline are made: the shaders
-  two a frame after the frame's draws (`world_make_some`, never while a map is prepared), the pipeline on the
-  pipeline compilers, never waited for (`xgpu_vulkan_pipeline_ready`). No draw waits, no frame hitches; the world's
-  light comes in over the first frames of play, as the field fades in. The Metal backend has no stand-in callback
-  yet: its world pipelines are made at their first draw, from the app's library.
+A map's pipelines are made as it starts (`render_enumerate.c`, or played back from its record), and the load waits
+for them. No world window is given then (`world_ao_window_begin` while `render_enumerating`: nothing is seen), so
+the front end gives the draws the keys they will have in play from their window's span alone (`d3d8_device.c`'s
+`world_ao_key` while `world_ao.preparing`, #672):
+- **The span:** `WORLD_AO_SPAN_OPEN` for a window's opaque surfaces, `WORLD_AO_SPAN_FOUND` where the pre-pass finds
+  them once a pixel (`world_ao_prepass_begin`: the primary view into the back buffer with its depth buffer), and each
+  one's first-person form, whatever the setting. The journal keeps it (`world_span`, form 8) and tells draws apart
+  by it (`journal_settings_blind_of`), so a record made with the setting off makes every pipeline with it on.
+- **The keys:** with `"world"` on, the world's light; read from the pre-pass in a found window (not with
+  `debug.world_ao_inline`). A mirror's window has the world's light alone.
+- **The twins:** in a found window the backend is told to make each draw's twin too
+  (`XGPU_WORLD_AO_PREPASS_TWINS`), with no limit a frame while preparing.
+- **The setting switched on in play:** `world_ao_mode` follows the settings as the front end takes them up between
+  frames (`halo_gpu_settings_taken`), so the map is prepared again at the frame the world's draws begin.
+- **A stand-in for each world pipeline** (`world_ao_stand_in`) is still told to the backend; Vulkan prepares and
+  draws it only where the world's shaders cannot be made.
+- **Misses are logged** on both backends: a world pipeline, its shaders or a twin made after the preparation is a
+  `pipeline missed map preparation` line. a30's lifepod walk: Vulkan 60 before (none of them logged then), 0 after;
+  a10's start 24 to 0; switched on in play 44 to 0. Metal on the walk: 16 to 0.
+- **The cost:** with `"world"` on, a30's record makes 659 pipelines, not 553: 400 ms, not 275, with the GPU's
+  pipeline cache cold (the Radeon 8060S); with the setting off nothing changes.
 - **The settings' one derivation:** the world's light is a fact of the draw (`xgpu_draw_facts.world`, from
   `world_ao_key`), and `xgpu_draw_derive` (`xgpu_manifest.c`) gives it the same places as above. The renderer's
   manifest notes it as it would be with `"world"` on (context `cw`), from the window's span as the game draws it,

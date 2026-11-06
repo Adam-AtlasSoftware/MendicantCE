@@ -306,7 +306,7 @@ static struct
 	uint32_t pipeline_misses;
 	/* display.ambient_occlusion "world": each pipeline's definition as last
 	bound, and its stand-in (0 none: PIPELINE_STAND_IN), which draws until
-	its own is made, and always while a map is prepared; the pipelines whose
+	its own is made (prepared only where its own cannot be); the pipelines whose
 	shaders wait to be made after the load (and in which variant) */
 	const struct xgpu_stream_pipeline_define *definitions[XGPU_STREAM_PIPELINES];
 	uint16_t stand_ins[XGPU_STREAM_PIPELINES];
@@ -326,12 +326,13 @@ static struct
 WORLD_AO_PREPASS): the pre-pass is drawing (into inputs and depth, its own
 targets of the window's target's size); each pipeline's twin, made of its
 definition (xgpu_stream_world_ao_twin) and its shaders when first drawn, a
-few a frame; the occlusion, and the pass's shaders, sampler and
-pipeline's description */
+few a frame, or as a map is prepared (twins: its draws are the pre-pass's
+in play, XGPU_WORLD_AO_PREPASS_TWINS); the occlusion, and the pass's
+shaders, sampler and pipeline's description */
 #define WORLD_AO_TWINS_A_FRAME 4
 static struct
 {
-	int active, failed;
+	int active, failed, twins;
 	uint32_t width, height, twins_made;
 	struct xgpu_vulkan_image *inputs, *depth, *pixels;
 	struct xgpu_stream_pipeline_define *definitions;
@@ -1783,6 +1784,20 @@ static void pipeline_missed(const struct xgpu_vulkan_pipeline_description *pipel
 		(unsigned)key->depth_format, stream.pipeline_misses);
 }
 
+/* ... and shaders not made as the map was prepared, which a world
+pipeline's draws (its stand-in's drawn until they are: world_wait) or a
+twin's (nothing drawn) wait for */
+static void shaders_missed(const char *whose, const struct xgpu_stream_pipeline_define *definition)
+{
+	const struct xgpu_stream_pipeline_key *key = &definition->key;
+
+	stream.pipeline_misses++;
+	host_logf(HOST_LOG_WARN, "vulkan: pipeline missed map preparation: %s shaders, vertex %08x%08x, key %08x "
+		"(lighting %u, occlusion %u), total %u", whose, (unsigned)key->vertex_program[1],
+		(unsigned)key->vertex_program[0], bytes_hash(key, sizeof(*key)), (unsigned)key->lighting,
+		(unsigned)key->pixel.ambient_occlusion, stream.pipeline_misses);
+}
+
 /* A native key can depend on backend state absent from the manifest.
 Detailed traces retain every newly compiled description for comparison
 with a later miss in this process; shader handles are process-local. */
@@ -1942,23 +1957,22 @@ static int draw_pipeline(const struct draw_input *input, int apart)
 		uint64_t vertex_program = stream.definition->key.vertex_program[0] |
 			((uint64_t)stream.definition->key.vertex_program[1] << 32);
 
-		if (apart)
-		{
-			draw.pipeline = xgpu_vulkan_pipeline_ready(&pipeline);
-			if (!draw.pipeline)
-				return 0;
-		}
-		else if (stream.preparing)
+		if (stream.preparing)
 			(void)xgpu_vulkan_pipeline_prepare(&pipeline);
+		else if (apart)
+			draw.pipeline = xgpu_vulkan_pipeline_ready(&pipeline);
 		else if (stream.prepared)
 			draw.pipeline = xgpu_vulkan_pipeline_ready(&pipeline);
 		else
 			draw.pipeline = xgpu_vulkan_pipeline(&pipeline);
 		if (xgpu_vulkan_pipeline_count() != before)
 			pipeline_description_trace(&pipeline, vertex_program, &variant);
-		/* (a world pipeline made apart has its stand-in: not a miss) */
-		if (!apart && !stream.preparing && stream.prepared && xgpu_vulkan_pipeline_count() != before)
+		/* (a world pipeline or a twin made apart too: its stand-in drawn,
+		or nothing, until it is made, but missed all the same) */
+		if (!stream.preparing && stream.prepared && xgpu_vulkan_pipeline_count() != before)
 			pipeline_missed(&pipeline, vertex_program);
+		if (apart && !stream.preparing && !draw.pipeline)
+			return 0;
 	}
 	if (stream.preparing)
 	{
@@ -2081,6 +2095,10 @@ static void world_wait(uint32_t id, const struct variant *variant)
 	}
 	if (stream.world_waiting_count == WORLD_WAITING_MOST)
 		return;
+	/* (its shaders not made as the map was prepared: a miss, as a
+	pipeline's) */
+	if (stream.prepared && !stream.preparing)
+		shaders_missed("a world pipeline's", stream.definition);
 	stream.world_waiting[stream.world_waiting_count].id = (uint16_t)id;
 	stream.world_waiting[stream.world_waiting_count].variant = *variant;
 	stream.world_waiting_count++;
@@ -2117,6 +2135,14 @@ is made, else the stand-in's (and the world's made after the load); every
 other with its own */
 static void prepass_draw(const struct draw_input *input);
 
+/* (a map prepared, where its draws are the pre-pass's in play: the draw's
+twin made too) */
+static void prepass_twin_prepare(const struct draw_input *input)
+{
+	if (stream.preparing && prepass.twins)
+		prepass_draw(input);
+}
+
 static void draw_input(const struct draw_input *input)
 {
 	uint32_t id = stream.pipeline_id, stand_in = id ? stream.stand_ins[id] : 0;
@@ -2133,10 +2159,24 @@ static void draw_input(const struct draw_input *input)
 	if (!stand_in || !definition || !world_definition(definition) || !stream.definitions[stand_in])
 	{
 		draw_pipeline(input, 0);
+		prepass_twin_prepare(input);
 		return;
 	}
-	if (!stream.preparing && draw_pipeline(input, 1))
+	/* (a map prepared: the world's pipeline made as the others, and its
+	twin; its stand-in only where its shaders cannot be made) */
+	if (stream.preparing)
+	{
+		draw_pipeline(input, 0);
+		if (stream.pipelines[id].state != XGPU_STREAM_PIPELINE_FAILED)
+		{
+			prepass_twin_prepare(input);
+			return;
+		}
+	}
+	else if (draw_pipeline(input, 1))
+	{
 		return;
+	}
 	{
 		struct variant variant;
 
@@ -2781,6 +2821,22 @@ static struct xgpu_vulkan_image *prepass_image(struct xgpu_vulkan_image *image, 
 	return xgpu_vulkan_image_create(&description);
 }
 
+/* the twins' definitions and entries, made once (0: none can be) */
+static int prepass_tables(void)
+{
+	if (prepass.definitions)
+		return 1;
+	prepass.definitions = calloc(XGPU_STREAM_PIPELINES, sizeof(*prepass.definitions));
+	prepass.entries = calloc(XGPU_STREAM_PIPELINES, sizeof(*prepass.entries));
+	if (prepass.definitions && prepass.entries)
+		return 1;
+	free(prepass.definitions);
+	free(prepass.entries);
+	prepass.definitions = NULL;
+	prepass.entries = NULL;
+	return 0;
+}
+
 /* a draw of the pre-pass: its pipeline's twin's (xgpu_stream_world_ao_twin:
 where it has the world's light read from its pixels, or is an occluder; its
 shaders made now, a few a frame); else none */
@@ -2793,7 +2849,7 @@ static void prepass_draw(const struct draw_input *input)
 	struct stream_pipeline *entry;
 	struct variant variant;
 
-	if (!id || id >= XGPU_STREAM_PIPELINES || !definition)
+	if (!id || id >= XGPU_STREAM_PIPELINES || !definition || !prepass_tables())
 		return;
 	twin = *definition;
 	if (!xgpu_stream_world_ao_twin(&twin))
@@ -2808,9 +2864,17 @@ static void prepass_draw(const struct draw_input *input)
 	variant.integer_attributes = twin.key.immediate ? 0 : input->integers;
 	if (entry->state != XGPU_STREAM_PIPELINE_MADE || memcmp(&entry->variant, &variant, sizeof(variant)))
 	{
-		if (entry->state == XGPU_STREAM_PIPELINE_FAILED || prepass.twins_made >= WORLD_AO_TWINS_A_FRAME)
+		if (entry->state == XGPU_STREAM_PIPELINE_FAILED ||
+			(!stream.preparing && prepass.twins_made >= WORLD_AO_TWINS_A_FRAME))
 			return;
-		prepass.twins_made++;
+		/* (not made as the map was prepared: a miss, as a pipeline's; none
+		limited while it is) */
+		if (!stream.preparing)
+		{
+			if (stream.prepared)
+				shaders_missed("a twin's", &twin);
+			prepass.twins_made++;
+		}
 		if (entry->state == XGPU_STREAM_PIPELINE_MADE)
 			entry->state = XGPU_STREAM_PIPELINE_UNKNOWN;
 		if (!pipeline_shaders(entry, &prepass.definitions[id], &variant))
@@ -2873,7 +2937,14 @@ static void stream_world_ao_prepass(void *context, const struct xgpu_stream_worl
 	struct stream_target *target = target_get(record->target);
 
 	(void)context;
+	/* (a map prepared: whether its draws are the pre-pass's in play, their
+	twins made with them, prepass_twin_prepare) */
 	if (stream.preparing)
+	{
+		prepass.twins = record->phase == XGPU_WORLD_AO_PREPASS_TWINS;
+		return;
+	}
+	if (record->phase == XGPU_WORLD_AO_PREPASS_TWINS)
 		return;
 	if (record->phase == XGPU_WORLD_AO_PREPASS_BEGIN)
 	{
@@ -2882,21 +2953,8 @@ static void stream_world_ao_prepass(void *context, const struct xgpu_stream_worl
 
 		/* (what the surfaces read: 1, until the pass finds it) */
 		xgpu_vulkan_world_ao_set_pixels(NULL);
-		if (!target || !prepass_shaders())
+		if (!target || !prepass_shaders() || !prepass_tables())
 			return;
-		if (!prepass.definitions)
-		{
-			prepass.definitions = calloc(XGPU_STREAM_PIPELINES, sizeof(*prepass.definitions));
-			prepass.entries = calloc(XGPU_STREAM_PIPELINES, sizeof(*prepass.entries));
-			if (!prepass.definitions || !prepass.entries)
-			{
-				free(prepass.definitions);
-				free(prepass.entries);
-				prepass.definitions = NULL;
-				prepass.entries = NULL;
-				return;
-			}
-		}
 		prepass.inputs = prepass_image(prepass.inputs, XGPU_VULKAN_FORMAT_RGBA32_UINT, target->width, target->height);
 		prepass.depth = prepass_image(prepass.depth, XGPU_VULKAN_FORMAT_D24S8, target->width, target->height);
 		if (!prepass.inputs || !prepass.depth)
@@ -3223,6 +3281,7 @@ static uint32_t stream_prepared(void *context)
 		(unsigned long long)xgpu_vulkan_pipeline_count());
 	stream.preparing = 0;
 	stream.prepared = 1;
+	prepass.twins = 0;
 	/* (the pipelines just made kept, where they are new: Android seldom
 	lets the app exit cleanly, which also saves them) */
 	if (xgpu_vulkan_pipeline_count() != stream.prepare_pipelines)

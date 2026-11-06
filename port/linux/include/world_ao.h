@@ -38,12 +38,18 @@ enum
 };
 
 /* the window's span as the game draws it (halo_world_ao_span): outside
-one, its opaque surfaces, the first-person weapon among them */
+one, its opaque surfaces, the first-person weapon among them; and the same
+in a window whose occlusion the pre-pass finds once a pixel where the
+setting is on (world_ao_prepass_begin: the primary view, into the back
+buffer with its depth buffer, whatever the setting), so that a map's
+preparation makes the pipelines its draws have then, and their twins */
 enum
 {
 	WORLD_AO_SPAN_NONE,
 	WORLD_AO_SPAN_OPEN,
 	WORLD_AO_SPAN_FIRST_PERSON,
+	WORLD_AO_SPAN_FOUND,
+	WORLD_AO_SPAN_FOUND_FIRST_PERSON,
 };
 
 /* the shading's constants (docs/world-ao.md, "Shading"; the emitters' are
@@ -272,7 +278,10 @@ each draw with it off too, so that the Mac's and iOS's shader libraries
 have the world's (xgpu_manifest.h's context) */
 void halo_world_ao_span(int span);
 /* the window's pre-pass begun (FALSE: none can be drawn), and ended, the
-occlusion found from it (xgpu_backend_world_ao_prepass) */
+occlusion found from it (xgpu_backend_world_ao_prepass); whether one would
+be drawn into the window's target as it is now, whatever the setting
+(halo_world_ao_prepass_found: its span WORLD_AO_SPAN_FOUND) */
+int halo_world_ao_prepass_found(void);
 int halo_world_ao_prepass_begin(void);
 void halo_world_ao_prepass_end(short x0, short y0, short x1, short y1, float const camera[4][4]);
 /* a part of the field uploaded (WORLD_AO_FIELD_*: world_sdf.h's table of
