@@ -30,7 +30,10 @@ so).
 | `port/linux/game/level_tag_import.c` | A level's import, each user's roots in a fixed order (`cache_files.c` calls it as the level's tags load) |
 | `tools/tag_pack.py` | Writes the same packs on a computer, and lists each manifest's content hash |
 
-OpenCE has no user of it yet: a user adds its roots in `level_tag_import.c`.
+It is Watanoge's, from
+[halo-content-evolved](https://github.com/Watanoge/halo-content-evolved)
+(OpenCE pull request #523). In OpenH1 its user is Forge
+(`forge_tag_import.c`); another user adds its roots in `level_tag_import.c`.
 
 ## Making a pack
 
@@ -271,7 +274,11 @@ offset in the map, the size, where the bytes are in the pack. Identical
 ranges of bytes are stored once. Format 1 (a build's before) had 8-byte
 names and its content in the version word.
 
-## OpenCE's packs
+## OpenH1's packs
 
-None yet: each is listed here with its maps, when it is wanted, its size
-and what uses it.
+Each is listed here with its maps, when it is wanted, its size and what
+uses it.
+
+| Pack | Maps | Wanted | Size | Used by |
+| --- | --- | --- | --- | --- |
+| `openh1_forge` | `c40`, `b30` | `setting:game.forge`, and when a Forge game is joined without it | about 85 MB | Forge (`forge_tag_import.c`): the monitor of The Maw, and The Silent Cartographer's Elites, Grunts, Jackals and armoured Marines, in every Forge game's level |

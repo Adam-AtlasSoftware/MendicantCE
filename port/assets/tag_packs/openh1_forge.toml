@@ -1,0 +1,27 @@
+# Forge's tag pack (port/linux/game/forge_tag_import.c): the monitor of The
+# Maw, which a Forge game's builder flies as, and some of The Silent
+# Cartographer's characters, which Forge's AI tab places on any map. Written
+# once at the main menu from the player's own maps when game.forge is on.
+name = "openh1_forge"
+version = 1
+legacy_file_names = []
+maps = ["c40", "b30"]
+minimum_bitmaps = 1
+minimum_sounds = 0
+wanted = ["setting:game.forge"]
+
+[keep]
+include_prefixes = ["characters\\monitor\\", "characters\\elite\\", "characters\\grunt\\",
+                    "characters\\jackal\\", "characters\\marine_armored\\", "characters\\marine\\",
+                    "weapons\\plasma pistol\\", "weapons\\plasma rifle\\", "weapons\\needler\\",
+                    "weapons\\assault rifle\\", "sound\\dialog\\elite\\", "sound\\dialog\\grunt\\",
+                    "sound\\dialog\\jackal\\", "sound\\dialog\\marines\\"]
+exclude_contains = []
+exclude_bitmap_prefixes = []
+exclude_sound_prefixes = []
+
+[text]
+notice = "Forge needs some data from\nyour maps. It takes a moment."
+building = "Building Forge's data:\n"
+ready = "Forge's data is ready."
+failed = "Forge's data could not\nbe built. Is the disk full?"
