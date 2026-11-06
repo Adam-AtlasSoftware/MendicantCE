@@ -16,8 +16,11 @@ What a bot does each tick, in a player's terms:
 - It looks for enemies (every third tick, the bots in turn): the nearest
   player of the other team (anyone in a game without teams) within its
   sight's reach and field of view whom a line of sight reaches (the AI's own
-  sight test: the level, vehicles, scenery and machines block it), nearer
-  for one in active camouflage; and it notices who shot it.
+  sight test: the level, vehicles, scenery and machines block it); one in
+  active camouflage only by a chance at each look, as people are fooled now
+  and then (the shimmer of one near, moving, in the centre of its view; a
+  shot's flicker, a shield's flare), and lost by one too ("active
+  camouflage" below); and it notices who shot it.
 - It reacts after a moment (its skill's reaction time, each target's its
   own, spread as people's are: until then it goes on as it was), then turns
   towards the target as a player's hand does (a spring: the less skilled flick past
@@ -234,6 +237,40 @@ enum
 	NUMBER_OF_BOTS_FAMILIES,
 };
 
+/* active camouflage as a bot sees it (bots_camo_*): a running player's
+speed (world units a tick: a cyborg's 2.25 a second); the distance at which
+a camouflaged player's shimmer is half as plain as close by, and its
+giveaways half as plain (the flash of a shot, a shield's flare); the
+giveaways' rates a second (before the skill's camo_notice): the camouflage
+gone (units.c's active_camouflage under 1: a shot's flicker, a hit, its
+fading in and out, a rate this many times the part gone), a shot (fading
+over half a second), a hit (the object's current damage: its shield's
+flare, two seconds), a blow; the ticks a camouflaged target counts as
+tracked since it was seen (a look every third tick: missed once, lost) */
+#define BOTS_CAMO_RUN_SPEED (2.25f / TICKS_PER_SECOND)
+#define BOTS_CAMO_NEAR 8.0f
+#define BOTS_CAMO_GIVEAWAY_NEAR 25.0f
+#define BOTS_CAMO_FLICKER_RATE 20.0f
+#define BOTS_CAMO_FIRED_RATE 2.0f
+#define BOTS_CAMO_HURT_RATE 2.0f
+#define BOTS_CAMO_MELEE_RATE 6.0f
+#define BOTS_CAMO_TRACK_TICKS 6
+
+/* how a camouflaged enemy moves and gives itself away, as the camo tally
+of halo.log's minute line sorts it (bots_camo_state): quiet and still,
+walking or running; or giving itself away (firing, hit, a blow, its
+camouflage flickering) */
+enum
+{
+	_bots_camo_still = 0,
+	_bots_camo_walking,
+	_bots_camo_running,
+	_bots_camo_giveaway,
+	NUMBER_OF_BOTS_CAMO_STATES,
+};
+/* the tally's distances (under 5, 10, 20 world units, and further) */
+#define BOTS_CAMO_BANDS 4
+
 /* how far a player's blow reaches (world units from the head: the rays of
 unit_cause_player_melee_damage), to the target's surface */
 #define BOTS_MELEE_REACH 0.8f
@@ -316,18 +353,24 @@ struct bots_skill_definition
 	it does (bots_strafe) */
 	real dodge_reaction_seconds;
 	real dodge_chance;
+	/* active camouflage (bots_camo_*): how quickly it notices a camouflaged
+	enemy (a rate a second, for one running in the centre of its view at
+	BOTS_CAMO_NEAR) and loses one it fights (a rate a second, for one
+	crossing its view at a run), each also as the enemy gives itself away */
+	real camo_notice;
+	real camo_lose;
 };
 
 static struct bots_skill_definition const bots_skills[NUMBER_OF_BOTS_SKILLS] =
 {
 	{ "easy", 0.55f, 30.0f, 100.0f, 12.0f, 1.4f, 8.0f, 7.0f, 0.45f, 1.8f, 4.0f, 0.70f, 1.5f, 0.6f, 2.2f, 0.3f, 0.20f, 0.10f,
-		6, 14, 0.35f, 0.60f, 0.40f },
+		6, 14, 0.35f, 0.60f, 0.40f, 0.5f, 1.2f },
 	{ "normal", 0.36f, 42.0f, 120.0f, 7.0f, 0.9f, 13.0f, 9.0f, 0.6f, 1.1f, 3.0f, 0.80f, 2.2f, 0.4f, 1.8f, 0.7f, 0.40f, 0.25f,
-		9, 9, 0.6f, 0.40f, 0.65f },
+		9, 9, 0.6f, 0.40f, 0.65f, 0.8f, 0.8f },
 	{ "heroic", 0.28f, 50.0f, 140.0f, 4.0f, 0.6f, 20.0f, 15.0f, 0.65f, 0.5f, 1.8f, 0.88f, 3.0f, 0.15f, 1.5f, 0.8f, 0.60f, 0.40f,
-		12, 6, 0.85f, 0.30f, 0.85f },
+		12, 6, 0.85f, 0.30f, 0.85f, 1.1f, 0.55f },
 	{ "legendary", 0.22f, 60.0f, 160.0f, 2.2f, 0.35f, 30.0f, 20.0f, 1.0f, 0.25f, 1.2f, 0.95f, 4.0f, 0.05f, 1.25f, 1.0f, 0.75f,
-		0.50f, 16, 4, 1.0f, 0.20f, 1.00f },
+		0.50f, 16, 4, 1.0f, 0.20f, 1.00f, 1.5f, 0.35f },
 };
 
 struct bots_bot
@@ -589,6 +632,15 @@ struct bots_bot
 	boolean tally_head;
 	long throw_tick;
 	long blow_tick;
+	/* (the camo tally) its target's camo state as it fired (NONE: not
+	camouflaged), and the target's distance (bots_camo_band; NONE: none) */
+	short tally_camo_state;
+	short tally_band;
+
+	/* a camouflaged enemy it lost, firing at it (bots_bot_fire_back): the
+	shot it last took the way of, and where it put the shooter then */
+	long shots_heard_tick;
+	real_point3d shots_point;
 };
 
 /* ---------- globals */
@@ -648,6 +700,22 @@ static struct
 	long aim_hits[NUMBER_OF_BOTS_FAMILIES];
 	long aim_head_shots;
 	long aim_scan_tick;
+	/* the camo tally (bots_camo_*), by the camouflaged enemy's state and
+	distance: the looks at one in a line of sight not yet noticed, and those
+	it was noticed at; the looks at one fought, and those it was lost at; by
+	its state, the bots' rounds fired at one and the ticks they struck one;
+	the bursts fired back at the shots of one lost */
+	long camo_looks[NUMBER_OF_BOTS_CAMO_STATES][BOTS_CAMO_BANDS];
+	long camo_notices[NUMBER_OF_BOTS_CAMO_STATES][BOTS_CAMO_BANDS];
+	long camo_tracks[NUMBER_OF_BOTS_CAMO_STATES];
+	long camo_losses[NUMBER_OF_BOTS_CAMO_STATES];
+	long camo_shots[NUMBER_OF_BOTS_CAMO_STATES];
+	long camo_hits[NUMBER_OF_BOTS_CAMO_STATES];
+	long camo_fire_backs;
+	/* the aim's tally by the target's distance (bots_camo_band), of targets
+	not camouflaged and camouflaged: rounds fired, ticks they struck */
+	long range_shots[2][BOTS_CAMO_BANDS];
+	long range_hits[2][BOTS_CAMO_BANDS];
 	/* the fights' habits: combos (_bots_combo_*), blows, dodges of an aim,
 	jumps, crouches */
 	long combos[4];
@@ -2022,6 +2090,15 @@ void bots_initialize_for_new_map(void)
 	csmemset(bots_globals.aim_hits, 0, sizeof(bots_globals.aim_hits));
 	bots_globals.aim_head_shots = 0;
 	bots_globals.aim_scan_tick = 0;
+	csmemset(bots_globals.camo_looks, 0, sizeof(bots_globals.camo_looks));
+	csmemset(bots_globals.camo_notices, 0, sizeof(bots_globals.camo_notices));
+	csmemset(bots_globals.camo_tracks, 0, sizeof(bots_globals.camo_tracks));
+	csmemset(bots_globals.camo_losses, 0, sizeof(bots_globals.camo_losses));
+	csmemset(bots_globals.camo_shots, 0, sizeof(bots_globals.camo_shots));
+	csmemset(bots_globals.camo_hits, 0, sizeof(bots_globals.camo_hits));
+	bots_globals.camo_fire_backs = 0;
+	csmemset(bots_globals.range_shots, 0, sizeof(bots_globals.range_shots));
+	csmemset(bots_globals.range_hits, 0, sizeof(bots_globals.range_hits));
 	csmemset(bots_globals.combos, 0, sizeof(bots_globals.combos));
 	bots_globals.blows = 0;
 	bots_globals.dodges = 0;
@@ -2397,6 +2474,185 @@ static void bots_search(struct bots_bot *bot, long unit_index)
 	bot->path_tick = game_time_get();
 }
 
+/* ---------- active camouflage
+
+A bot sees a camouflaged enemy as a player does: now and then, never
+surely nor never. The game's own camouflage says how hidden the enemy is
+(units.c's active_camouflage: 1 whole, rising from 0 over four seconds once
+picked up; each shot takes the weapon's "ding" off it, 0.1 for most, and it
+grows back at the weapon's rate, a flicker; a hit takes the damage's part
+off it; game_engine.c). At each look the bot notices one in a line of sight
+by a chance from a rate a second (bots_camo_notice_rate): its shimmer, the
+plainer the nearer (half as plain at BOTS_CAMO_NEAR), the faster it moves
+(across the bot's sight more than along it; a still one hardly at all) and
+the nearer the centre of the bot's view; and its giveaways, much plainer
+for a moment: the camouflage gone (a shot's flicker, a hit, fading), a shot,
+its shield's flare as it is hit, a blow. Out of view, only one close by
+(its steps) or, for a bot hurt, one firing (the shots' way). The skill's
+camo_notice scales it all. Once fought, a camouflaged target is lost by a
+chance too (bots_camo_lose_rate), the more as it crosses the bot's sight and
+the further it is, much less while it gives itself away, and the less the
+more skilled the bot; lost, the bot searches where it last saw it (its
+goal, its look) and fires back at the shots of one still firing at it
+(bots_bot_fire_back). Its aim at one is blurred (bots_camo_blur): an error
+and a wander up to three times as large, settling as much slower, as
+plain again as the enemy gives itself away. The same for every enemy, a
+player or a bot. All of it is the game state at the tick and the bot's own
+random numbers, and none of it runs for a game without camouflage. */
+
+/* a camouflaged enemy as a bot sees it */
+struct bots_camo_sight
+{
+	/* its camouflage: the unit's active_camouflage (0 to 1) */
+	real camouflage;
+	real distance;
+	/* how far off the centre of the bot's view, a part of half its view
+	(more than 1: out of it) */
+	real off_view;
+	/* its speed across the bot's sight and along it (world units a tick) */
+	real across;
+	real along;
+	/* its giveaways, 0 to 1: a shot (1 as it fires, gone in half a
+	second), a hit (its shield's flare, a wound), a blow */
+	real fired;
+	real hurt;
+	boolean melee;
+	/* the bot was hurt in the last two seconds: it turns to the shots */
+	boolean bot_hurt;
+};
+
+/* how plain a shape is at that distance (1 close by, a half at near) */
+static real bots_camo_size(real distance, real near)
+{
+	real part = distance / near;
+
+	return 1.0f / (1.0f + part * part);
+}
+
+/* the giveaways' rate a second, before the skill's scale */
+static real bots_camo_giveaway(struct bots_camo_sight const *sight)
+{
+	real rate = BOTS_CAMO_FLICKER_RATE * (1.0f - sight->camouflage) + BOTS_CAMO_FIRED_RATE * sight->fired +
+		BOTS_CAMO_HURT_RATE * sight->hurt + (sight->melee ? BOTS_CAMO_MELEE_RATE : 0.0f);
+
+	return rate * bots_camo_size(sight->distance, BOTS_CAMO_GIVEAWAY_NEAR);
+}
+
+/* how much its place in the bot's view lets it be seen: 1 at the centre, a
+third at the view's edge; out of view, a little close by (its steps), and
+for a bot hurt, some while it fires */
+static real bots_camo_view(struct bots_camo_sight const *sight)
+{
+	if (sight->off_view <= 1.0f)
+		return 1.0f - 0.7f * sight->off_view;
+	if (sight->distance <= 3.0f)
+		return 0.15f;
+	return sight->bot_hurt && sight->fired > 0.0f ? 0.3f : 0.0f;
+}
+
+/* the rate a second at which the bot notices a camouflaged enemy */
+static real bots_camo_notice_rate(struct bots_skill_definition const *skill, struct bots_camo_sight const *sight)
+{
+	real motion = MIN((sight->across + 0.4f * sight->along) / BOTS_CAMO_RUN_SPEED, 1.5f);
+	real shimmer = bots_camo_size(sight->distance, BOTS_CAMO_NEAR) * (0.1f + 1.4f * motion);
+
+	return skill->camo_notice * bots_camo_view(sight) * (shimmer + bots_camo_giveaway(sight));
+}
+
+/* the rate a second at which the bot loses a camouflaged enemy it fights:
+more as it crosses the bot's sight and the further it is, much less while
+it gives itself away (by the square of the giveaways: one firing on is
+hardly lost) */
+static real bots_camo_lose_rate(struct bots_skill_definition const *skill, struct bots_camo_sight const *sight)
+{
+	real across = MIN(sight->across / BOTS_CAMO_RUN_SPEED, 1.5f);
+	real giveaway = 1.0f + bots_camo_giveaway(sight);
+
+	return skill->camo_lose * (0.15f + across) * (1.0f - 0.5f * bots_camo_size(sight->distance, BOTS_CAMO_NEAR)) /
+		(giveaway * giveaway);
+}
+
+/* whether the bot sees a camouflaged enemy at a look that many seconds
+after its last: noticed by the chance its noticing rate gives over them, or,
+tracked (seen at its last look), kept but for the chance its losing rate
+gives. One of its random numbers */
+static boolean bots_camo_seen(struct bots_bot *bot, struct bots_skill_definition const *skill,
+	struct bots_camo_sight const *sight, boolean tracked, real seconds)
+{
+	real rate = tracked ? bots_camo_lose_rate(skill, sight) : bots_camo_notice_rate(skill, sight);
+	boolean happens = bots_random_real(bot) < 1.0f - (real)exp(-rate * seconds);
+
+	return tracked ? !happens : happens;
+}
+
+/* how much a camouflaged target blurs the bot's aim (1: not): its error
+and wander up to three times as large and settling as much slower, the less
+the more it gives itself away (half a shot's worth: not at all) */
+static real bots_camo_blur(struct bots_camo_sight const *sight)
+{
+	real away = MIN(bots_camo_giveaway(sight) / (0.5f * BOTS_CAMO_FIRED_RATE), 1.0f);
+
+	return 1.0f + 2.0f * sight->camouflage * (1.0f - away);
+}
+
+/* the camouflaged enemy (its unit) as the bot sees it from its eye, FALSE
+for one not camouflaged (or in a vehicle, which is seen as it is) */
+static boolean bots_camo_sight_get(struct bots_bot const *bot, struct bots_skill_definition const *skill,
+	real_point3d const *eye, long unit_index, long now, boolean bot_hurt, struct bots_camo_sight *sight)
+{
+	struct unit_datum *unit = unit_get(unit_index);
+	struct object_datum *object = object_get(unit_index);
+	real_vector3d const *velocity = &object->object.translational_velocity;
+	real_point3d const *point = &object->object.bounding_sphere_center;
+	real dx = point->x - eye->x, dy = point->y - eye->y, dz = point->z - eye->z;
+	real distance = (real)sqrt(dx * dx + dy * dy + dz * dz);
+	real along = 0.0f, speed_squared, bearing;
+	long weapon_index;
+
+	if (unit->unit.active_camouflage <= 0.0f || object->object.parent_object_index != NONE)
+		return FALSE;
+	sight->camouflage = unit->unit.active_camouflage;
+	sight->distance = distance;
+	bearing = (real)fabs(bots_angle_difference((real)atan2(dy, dx), bot->yaw));
+	sight->off_view = bearing / (0.5f * skill->field_of_view_degrees * BOTS_DEGREES);
+	if (distance > 0.01f)
+		along = (velocity->i * dx + velocity->j * dy + velocity->k * dz) / distance;
+	speed_squared = velocity->i * velocity->i + velocity->j * velocity->j + velocity->k * velocity->k;
+	sight->along = (real)fabs(along);
+	sight->across = (real)sqrt(MAX(speed_squared - along * along, 0.0f));
+	sight->fired = 0.0f;
+	weapon_index = bots_current_weapon(unit);
+	if (weapon_index != NONE)
+	{
+		long since = now - weapon_get(weapon_index)->weapon.game_time_last_fired;
+
+		if (since >= 0 && since < TICKS_PER_SECOND / 2)
+			sight->fired = 1.0f - (real)since / (TICKS_PER_SECOND / 2);
+	}
+	sight->hurt = MAX(object->object.current_shield_damage, MIN(object->object.current_body_damage * 4.0f, 1.0f));
+	sight->melee = unit->unit.melee_attack_state != 0;
+	sight->bot_hurt = bot_hurt;
+	return TRUE;
+}
+
+/* (the camo tally) the enemy's state: giving itself away, else by its
+speed */
+static short bots_camo_state(struct bots_camo_sight const *sight)
+{
+	real speed = (real)sqrt(sight->across * sight->across + sight->along * sight->along);
+
+	if (sight->fired > 0.0f || sight->melee || sight->hurt > 0.1f || sight->camouflage < 0.9f)
+		return _bots_camo_giveaway;
+	if (speed > BOTS_CAMO_RUN_SPEED * 0.7f)
+		return _bots_camo_running;
+	return speed > BOTS_CAMO_RUN_SPEED * 0.1f ? _bots_camo_walking : _bots_camo_still;
+}
+
+static short bots_camo_band(real distance)
+{
+	return distance < 5.0f ? 0 : distance < 10.0f ? 1 : distance < 20.0f ? 2 : 3;
+}
+
 /* ---------- perception */
 
 /* whether the bot sees the point from its eyes (the AI's sight test) */
@@ -2459,7 +2715,8 @@ sight's reach and view, the one of the least score (nearest, most ahead, the
 one it fights favoured) a line of sight reaches, the first in the players'
 order of those of that score. The enemies are scored first and their lines
 of sight cast from the least score up, until one reaches its enemy, which is
-the answer. A score that is not a number (none is: the players' positions
+the answer (one in active camouflage only if the bot notices it, or keeps
+it, at this look: bots_target_seen). A score that is not a number (none is: the players' positions
 are), or more enemies than kept, take the players' order */
 struct bots_target_candidate
 {
@@ -2467,6 +2724,11 @@ struct bots_target_candidate
 	long unit_index;
 	real score;
 	real_point3d point;
+	/* in active camouflage, as the bot sees it, and tracked (the target it
+	fights, seen at its last look) */
+	boolean camo;
+	boolean tracked;
+	struct bots_camo_sight sight;
 };
 
 /* an enemy's score as a target (its point the bounding sphere's centre);
@@ -2476,22 +2738,17 @@ static boolean bots_target_score(struct bots_bot *bot, struct player_datum *play
 	struct bots_target_candidate *candidate)
 {
 	struct object_datum *object;
-	struct unit_datum *other_unit;
 	real distance, reach, bearing;
 	real half_view = 0.5f * skill->field_of_view_degrees * BOTS_DEGREES;
 
 	if (!bots_is_enemy(player, other))
 		return FALSE;
 	object = object_get(other->unit_index);
-	other_unit = unit_get(other->unit_index);
 	if (TEST_FLAG(object->object.damage_flags, _object_dead_bit))
 		return FALSE;
 	candidate->point = object->object.bounding_sphere_center;
 	distance = bots_distance3d(eye, &candidate->point);
 	reach = skill->sight_distance;
-	/* (active camouflage: seen only close) */
-	if (TEST_FLAG(other_unit->unit.flags, _unit_active_camouflaged_bit))
-		reach *= 0.3f;
 	/* (the one it fights: a little further) */
 	if (player_index == bot->target_player_index)
 		reach *= 1.25f;
@@ -2505,6 +2762,10 @@ static boolean bots_target_score(struct bots_bot *bot, struct player_datum *play
 		return FALSE;
 	candidate->player_index = player_index;
 	candidate->unit_index = other->unit_index;
+	/* (active camouflage: seen by a chance, bots_target_seen) */
+	candidate->camo = bots_camo_sight_get(bot, skill, eye, other->unit_index, game_time_get(), hurt, &candidate->sight);
+	candidate->tracked = candidate->camo && player_index == bot->target_player_index &&
+		game_time_get() - bot->target_seen_tick <= BOTS_CAMO_TRACK_TICKS;
 	candidate->score = distance + bearing * 4.0f - (player_index == bot->target_player_index ? 6.0f : 0.0f);
 	/* (its team's: the enemy a teammate hurts, a teammate's killer) */
 	if (bot != &bots_globals.player_bot)
@@ -2532,6 +2793,39 @@ static boolean bots_target_score(struct bots_bot *bot, struct player_datum *play
 		}
 	}
 	return TRUE;
+}
+
+/* whether the bot sees a candidate at this look, that many seconds after
+its last: a line of sight reaches it, and one in active camouflage it
+notices, or keeps (bots_camo_seen); the camo tally kept when tally */
+static boolean bots_target_seen(struct bots_bot *bot, struct player_datum *player, real_point3d const *eye,
+	struct bots_skill_definition const *skill, struct bots_target_candidate const *candidate, real seconds,
+	boolean tally)
+{
+	short state, band;
+	boolean seen;
+
+	if (!bots_line_of_sight(player->unit_index, eye, &candidate->point, candidate->unit_index))
+		return FALSE;
+	if (!candidate->camo)
+		return TRUE;
+	seen = bots_camo_seen(bot, skill, &candidate->sight, candidate->tracked, seconds);
+	if (tally)
+	{
+		state = bots_camo_state(&candidate->sight);
+		band = bots_camo_band(candidate->sight.distance);
+		if (candidate->tracked)
+		{
+			bots_globals.camo_tracks[state]++;
+			bots_globals.camo_losses[state] += !seen;
+		}
+		else
+		{
+			bots_globals.camo_looks[state][band]++;
+			bots_globals.camo_notices[state][band] += seen;
+		}
+	}
+	return seen;
 }
 
 static long bots_find_target(struct bots_bot *bot, struct player_datum *player, real_point3d const *eye)
@@ -2571,7 +2865,7 @@ static long bots_find_target(struct bots_bot *bot, struct player_datum *player, 
 		{
 			if (!bots_target_score(bot, player, other, iterator.datum_index, eye, skill, hurt, &candidate) ||
 				candidate.score >= best_score ||
-				!bots_line_of_sight(player->unit_index, eye, &candidate.point, candidate.unit_index))
+				!bots_target_seen(bot, player, eye, skill, &candidate, 3.0f / TICKS_PER_SECOND, TRUE))
 			{
 				continue;
 			}
@@ -2590,7 +2884,8 @@ static long bots_find_target(struct bots_bot *bot, struct player_datum *player, 
 			if (candidates[index].score < candidates[least].score)
 				least = index;
 		}
-		if (bots_line_of_sight(player->unit_index, eye, &candidates[least].point, candidates[least].unit_index))
+		/* (a look every third tick) */
+		if (bots_target_seen(bot, player, eye, skill, &candidates[least], 3.0f / TICKS_PER_SECOND, TRUE))
 			return candidates[least].player_index;
 		/* (out, the others kept in their order) */
 		candidate_count--;
@@ -3742,6 +4037,9 @@ static void bots_bot_reset(struct bots_bot *bot, long player_index, long bot_ind
 	bot->aimed_since_tick = NONE;
 	bot->opened_player_index = NONE;
 	bot->tally_weapon_index = NONE;
+	bot->tally_camo_state = NONE;
+	bot->tally_band = NONE;
+	bot->shots_heard_tick = NONE;
 	bot->throw_tick = bot->blow_tick = -TICKS_PER_SECOND * 10;
 	bot->form = 1.0f + bots_random_signed(bot) * 0.2f;
 	bot->vehicle_shunned_index = NONE;
@@ -3799,11 +4097,14 @@ target with (and its flinches) settles in its skill's time; its wander
 never does: a point going round the mark, never nearer than 0.4 of the
 floor's size (its form's and disturbance's times: 1 standing still), whose
 way turns smoothly, about a turn a few seconds, so that the aim wobbles
-slowly as a hand's does */
-static void bots_aim_settle(struct bots_bot *bot, struct bots_skill_definition const *skill, real disturbance)
+slowly as a hand's does. A camouflaged target's blur (bots_camo_blur; 1
+for one not) makes the wander that many times as large and the settling
+that many times as slow */
+static void bots_aim_settle(struct bots_bot *bot, struct bots_skill_definition const *skill, real disturbance,
+	real blur)
 {
-	real settle = (real)exp(-1.1f / (skill->aim_settle_seconds * TICKS_PER_SECOND));
-	real size = skill->aim_floor_degrees * BOTS_DEGREES * bot->form * disturbance;
+	real settle = (real)exp(-1.1f / (skill->aim_settle_seconds * blur * TICKS_PER_SECOND));
+	real size = skill->aim_floor_degrees * BOTS_DEGREES * bot->form * disturbance * blur;
 	real radius;
 
 	bot->aim_error_yaw *= settle;
@@ -4009,6 +4310,10 @@ static void bots_tally_shots(struct bots_bot *bot, long weapon_index)
 		bots_globals.aim_shots[family]++;
 		if (family == _bots_family_sniper && bot->tally_head)
 			bots_globals.aim_head_shots++;
+		if (bot->tally_camo_state != NONE)
+			bots_globals.camo_shots[bot->tally_camo_state]++;
+		if (bot->tally_band != NONE)
+			bots_globals.range_shots[bot->tally_camo_state != NONE][bot->tally_band]++;
 	}
 	bot->tally_fired_tick = weapon->weapon.game_time_last_fired;
 	bot->tally_weapon_index = weapon_index;
@@ -4049,6 +4354,15 @@ static void bots_tally_hits(long now)
 					continue;
 				}
 				bots_globals.aim_hits[bot->tally_family]++;
+				if (bot->tally_band != NONE)
+					bots_globals.range_hits[bot->tally_camo_state != NONE][bot->tally_band]++;
+				/* (the camo tally: a camouflaged unit struck, by its state as
+				the bot fired) */
+				if (bot->tally_camo_state != NONE && (unit->unit.active_camouflage > 0.0f ||
+					TEST_FLAG(unit->unit.flags, _unit_active_camouflaged_bit)))
+				{
+					bots_globals.camo_hits[bot->tally_camo_state]++;
+				}
 			}
 		}
 	}
@@ -4151,9 +4465,10 @@ static void bots_bot_survey(struct bots_bot *bot, struct bots_tick *tick)
 	{
 		struct bots_target_candidate candidate;
 
+		/* (a survey every third of a second) */
 		if (iterator.datum_index != bot->target_player_index &&
 			bots_target_score(bot, tick->player, other, iterator.datum_index, eye, tick->skill, FALSE, &candidate) &&
-			bots_line_of_sight(tick->player->unit_index, eye, &candidate.point, candidate.unit_index))
+			bots_target_seen(bot, tick->player, eye, tick->skill, &candidate, 10.0f / TICKS_PER_SECOND, FALSE))
 		{
 			bots_knowledge_saw(bot->index, iterator.datum_index, &object_get(other->unit_index)->object.position);
 		}
@@ -4211,6 +4526,14 @@ static void bots_bot_look(struct bots_bot *bot, struct bots_tick *tick)
 			if (target != bot->target_player_index || tick->now - bot->target_seen_tick > TICKS_PER_SECOND * 2)
 			{
 				real error = tick->skill->aim_error_degrees * BOTS_DEGREES;
+				struct bots_camo_sight sight;
+
+				/* (one camouflaged: as much larger as the aim's blur) */
+				if (bots_camo_sight_get(bot, tick->skill, bots_tick_eye(tick), target_player->unit_index, tick->now,
+					FALSE, &sight))
+				{
+					error *= bots_camo_blur(&sight);
+				}
 
 				bot->target_first_seen_tick = tick->now;
 				bot->reaction_ticks = bots_reaction_ticks(bot, tick->skill);
@@ -4449,12 +4772,22 @@ static void bots_bot_fight(struct bots_bot *bot, struct bots_tick *tick)
 	boolean aimed;
 	short family = tick->weapon_index != NONE ?
 		bots_weapon_kind(weapon_get(tick->weapon_index)->definition_index)->family : (short)_bots_family_other;
+	struct bots_camo_sight camo;
+	real blur = 1.0f;
 
 	tick->fighting = TRUE;
 	bots_tick_eye(tick);
+	/* (a camouflaged target: the aim blurred, bots_camo_blur) */
+	if (bots_camo_sight_get(bot, skill, &tick->eye, target_player->unit_index, now,
+		now - bot->hurt_tick < TICKS_PER_SECOND * 2, &camo))
+	{
+		blur = bots_camo_blur(&camo);
+		bot->tally_camo_state = bots_camo_state(&camo);
+	}
 	if (new_target)
 		bot->aimed_since_tick = NONE;
 	tick->target_distance = bots_distance3d(&tick->eye, &aim_point);
+	bot->tally_band = bots_camo_band(tick->target_distance);
 	/* (how near its middle is, for a blow; whether it aims at the bot: its
 	aim passing within half a unit of the bot's middle, more far off) */
 	close = bots_distance3d(&tick->eye, &target_object->object.bounding_sphere_center);
@@ -4511,7 +4844,7 @@ static void bots_bot_fight(struct bots_bot *bot, struct bots_tick *tick)
 		real disturbance = (1.0f + (real)sqrt(own->i * own->i + own->j * own->j) * 3.0f +
 			(biped && TEST_FLAG(biped->biped.flags, _biped_airborne_bit) ? 1.5f : 0.0f)) * (tick->crouching ? 0.75f : 1.0f);
 
-		bots_aim_settle(bot, skill, disturbance);
+		bots_aim_settle(bot, skill, disturbance, blur);
 	}
 	desired_yaw = (real)atan2(dy, dx) + bot->aim_error_yaw + bot->wander_yaw;
 	desired_pitch = (real)atan2(dz, horizontal) + bot->aim_error_pitch + bot->wander_pitch;
@@ -4658,6 +4991,106 @@ static void bots_bot_fight(struct bots_bot *bot, struct bots_tick *tick)
 		tick->moving = !tick->planted;
 		tick->throttle_scale = 1.0f;
 	}
+}
+
+/* a camouflaged enemy the bot fought and lost (unseen for half a second to
+four seconds) firing at it still (its weapon fired in the last second, the
+bot hurt in it): it fires back where the shots come from, as a player
+sprays at a shimmer. It takes the shots' way at each shot (the shooter's
+place then, off by up to a tenth of the distance either way: a tracer's
+way, a muzzle's flash), turns its hand to it with its aim blurred three
+times (bots_aim_settle), and fires in bursts while near it, strafing. TRUE
+while it does */
+static boolean bots_bot_fire_back(struct bots_bot *bot, struct bots_tick *tick)
+{
+	struct bots_skill_definition const *skill = tick->skill;
+	struct player_datum *target_player;
+	struct object_datum *target_object;
+	long now = tick->now, weapon_index, fired_tick;
+	real dx, dy, dz, horizontal, distance, yaw_off, pitch_off, cone;
+	real_point3d const *eye;
+
+	if (bot->smooth || bot->target_player_index == NONE || tick->weapon_index == NONE ||
+		tick->vehicle_index != NONE || now - bot->target_seen_tick <= TICKS_PER_SECOND / 2 ||
+		now - bot->target_seen_tick > TICKS_PER_SECOND * 4 || now - bot->hurt_tick > TICKS_PER_SECOND ||
+		bots_weapon_empty(tick->weapon_index) || bots_objectives_carrying(bot->player_index))
+	{
+		return FALSE;
+	}
+	target_player = player_try_and_get(bot->target_player_index);
+	if (!target_player || target_player->unit_index == NONE)
+		return FALSE;
+	target_object = object_get(target_player->unit_index);
+	if (unit_get(target_player->unit_index)->unit.active_camouflage <= 0.0f ||
+		target_object->object.parent_object_index != NONE ||
+		TEST_FLAG(target_object->object.damage_flags, _object_dead_bit))
+	{
+		return FALSE;
+	}
+	weapon_index = bots_current_weapon(unit_get(target_player->unit_index));
+	if (weapon_index == NONE)
+		return FALSE;
+	fired_tick = weapon_get(weapon_index)->weapon.game_time_last_fired;
+	if (now - fired_tick < 0 || now - fired_tick > TICKS_PER_SECOND)
+		return FALSE;
+	eye = bots_tick_eye(tick);
+	if (fired_tick != bot->shots_heard_tick)
+	{
+		real off = bots_distance3d(eye, &target_object->object.bounding_sphere_center) * 0.1f;
+
+		bot->shots_heard_tick = fired_tick;
+		bot->shots_point = target_object->object.bounding_sphere_center;
+		bot->shots_point.x += bots_random_signed(bot) * off;
+		bot->shots_point.y += bots_random_signed(bot) * off;
+		bot->shots_point.z += bots_random_signed(bot) * off * 0.3f;
+		bots_globals.camo_fire_backs++;
+	}
+	dx = bot->shots_point.x - eye->x;
+	dy = bot->shots_point.y - eye->y;
+	dz = bot->shots_point.z - eye->z;
+	horizontal = (real)sqrt(dx * dx + dy * dy);
+	distance = (real)sqrt(dx * dx + dy * dy + dz * dz);
+	bots_aim_settle(bot, skill, 1.0f, 3.0f);
+	yaw_off = bots_angle_difference((real)atan2(dy, dx) + bot->aim_error_yaw + bot->wander_yaw, bot->yaw);
+	pitch_off = (real)atan2(dz, horizontal) + bot->aim_error_pitch + bot->wander_pitch - bot->pitch;
+	bots_turn(bot, yaw_off, pitch_off, skill->turn_degrees_per_tick * BOTS_DEGREES, skill->aim_frequency,
+		skill->aim_damping, 0.0f, 0.0f);
+	/* (fired while the aim is about the shots' way: a man's width either
+	side, as one sprays at a place) */
+	yaw_off = (real)fabs(bots_angle_difference((real)atan2(dy, dx), bot->yaw));
+	pitch_off = (real)fabs((real)atan2(dz, horizontal) - bot->pitch);
+	cone = (real)atan(0.7f / MAX(distance, 0.5f)) * skill->fire_cone + 0.01f;
+	if (yaw_off < cone && pitch_off < cone * 1.5f)
+	{
+		short tap_ticks = bots_weapon_tap_ticks(tick->weapon_index);
+
+		if (tap_ticks > 0)
+		{
+			if (now >= bot->burst_until_tick)
+			{
+				tick->flags |= FLAG(_unit_control_weapon_primary_trigger_bit);
+				bot->burst_until_tick = now + tap_ticks + skill->pause_ticks;
+				bot->tap_release_tick = now + MIN(BOTS_PRESS_TICKS, tap_ticks - 1);
+			}
+			else if (now < bot->tap_release_tick)
+				tick->flags |= FLAG(_unit_control_weapon_primary_trigger_bit);
+		}
+		else if (now < bot->burst_until_tick)
+			tick->flags |= FLAG(_unit_control_weapon_primary_trigger_bit);
+		else if (now >= bot->pause_until_tick)
+		{
+			bot->burst_until_tick = now + skill->burst_ticks;
+			bot->pause_until_tick = bot->burst_until_tick + skill->pause_ticks * 2;
+			tick->flags |= FLAG(_unit_control_weapon_primary_trigger_bit);
+		}
+	}
+	bots_strafe(bot, skill, FALSE, now);
+	tick->fighting = TRUE;
+	tick->target_distance = distance;
+	tick->moving = TRUE;
+	tick->move_direction = (real)atan2(dy, dx) + BOTS_PI * 0.5f * bot->strafe_sign;
+	tick->throttle_scale = 1.0f;
+	return TRUE;
 }
 
 /* where a walking bot looks (radians), as people look as they walk
@@ -6267,6 +6700,8 @@ static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_
 	/* (the weapon it fires: in a vehicle, its seat's) */
 	tick.weapon_index = bots_vehicle_unit_weapon(tick.player->unit_index);
 	bots_tally_shots(bot, tick.weapon_index);
+	bot->tally_camo_state = NONE;
+	bot->tally_band = NONE;
 	/* (its target in sight, once it has reacted to it: until then it goes
 	on as it was, as a player who has not yet taken in who is there; a
 	Warthog's driver, with nothing to fire, drives the fight
@@ -6299,6 +6734,9 @@ static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_
 				FLAG(_unit_control_weapon_secondary_trigger_bit));
 		}
 	}
+	/* (a camouflaged enemy it lost firing at it: fired back at) */
+	else
+		bots_bot_fire_back(bot, &tick);
 	/* (in a vehicle, bots.vehicles: driving or riding) */
 	if (!bot->smooth && tick.vehicle_index != NONE)
 		bots_bot_vehicle(bot, &tick);
@@ -6463,6 +6901,26 @@ static void bots_report(void)
 		}
 		platform_log("bots: tick %ld, aim (%s): hits/rounds%s", now, bots_skills[bots_globals.skill].name,
 			aim[0] ? aim : ", none");
+		/* (by the target's distance, under 5, 10, 20 units and further:
+		those not camouflaged, and those camouflaged) */
+		{
+			char range[400];
+			int range_length = 0;
+			short camouflaged, band;
+
+			for (camouflaged = 0; camouflaged < 2; camouflaged++)
+			{
+				range_length += snprintf(range + range_length, sizeof(range) - (size_t)range_length, "%s",
+					camouflaged ? "; camouflaged" : "");
+				for (band = 0; band < BOTS_CAMO_BANDS; band++)
+				{
+					range_length += snprintf(range + range_length, sizeof(range) - (size_t)range_length, " %ld/%ld",
+						bots_globals.range_hits[camouflaged][band], bots_globals.range_shots[camouflaged][band]);
+				}
+			}
+			platform_log("bots: tick %ld, aim (%s) by distance <5 <10 <20 more: hits/rounds%s", now,
+				bots_skills[bots_globals.skill].name, range);
+		}
 		platform_log("bots: tick %ld, habits: combos %ld (grenade-shoot %ld, grenade-blow %ld, shoot-blow %ld), "
 			"blows %ld, dodges %ld, jumps %ld, crouches %ld, teleports %ld", now,
 			bots_globals.combos[_bots_combo_grenade_shoot] + bots_globals.combos[_bots_combo_grenade_blow] +
@@ -6470,6 +6928,44 @@ static void bots_report(void)
 			bots_globals.combos[_bots_combo_grenade_shoot], bots_globals.combos[_bots_combo_grenade_blow],
 			bots_globals.combos[_bots_combo_shoot_blow], bots_globals.blows, bots_globals.dodges,
 			bots_globals.jumps, bots_globals.crouches, bots_globals.teleports);
+	}
+	/* active camouflage (bots_camo_*), once a bot has seen a camouflaged
+	enemy: by the enemy's state, the looks at one not yet noticed and those
+	it was noticed at, by distance (under 5, 10, 20 units, further); the
+	looks at one fought and those it was lost at; the rounds fired at one
+	and the ticks they struck; the shots of one lost fired back at */
+	{
+		static char const *const states[NUMBER_OF_BOTS_CAMO_STATES] = { "still", "walking", "running", "giveaway" };
+		char camo[600];
+		int camo_length = 0;
+		short state, band;
+		long seen = 0;
+
+		camo[0] = 0;
+		for (state = 0; state < NUMBER_OF_BOTS_CAMO_STATES; state++)
+		{
+			seen += bots_globals.camo_tracks[state];
+			for (band = 0; band < BOTS_CAMO_BANDS; band++)
+				seen += bots_globals.camo_looks[state][band];
+		}
+		for (state = 0; seen && state < NUMBER_OF_BOTS_CAMO_STATES && camo_length < (int)sizeof(camo) - 120; state++)
+		{
+			camo_length += snprintf(camo + camo_length, sizeof(camo) - (size_t)camo_length, "; %s noticed",
+				states[state]);
+			for (band = 0; band < BOTS_CAMO_BANDS; band++)
+			{
+				camo_length += snprintf(camo + camo_length, sizeof(camo) - (size_t)camo_length, " %ld/%ld",
+					bots_globals.camo_notices[state][band], bots_globals.camo_looks[state][band]);
+			}
+			camo_length += snprintf(camo + camo_length, sizeof(camo) - (size_t)camo_length,
+				", lost %ld/%ld, hits/rounds %ld/%ld", bots_globals.camo_losses[state], bots_globals.camo_tracks[state],
+				bots_globals.camo_hits[state], bots_globals.camo_shots[state]);
+		}
+		if (seen)
+		{
+			platform_log("bots: tick %ld, camo (%s): looks by distance <5 <10 <20 more%s; shots fired back at %ld", now,
+				bots_skills[bots_globals.skill].name, camo, bots_globals.camo_fire_backs);
+		}
 	}
 	/* the vehicles: the seats taken, the seconds driven and ridden, the
 	kills and deaths in them, the ways out, and the places drivers no longer

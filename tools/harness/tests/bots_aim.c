@@ -136,14 +136,14 @@ static void case_floor(void)
 		bot.wander_radius = 1.0f;
 		bot.aim_error_yaw = 10.0f * BOTS_DEGREES;
 		for (tick = 0; tick < 3 * (long)(skill_definition->aim_settle_seconds * TICKS_PER_SECOND); tick++)
-			bots_aim_settle(&bot, skill_definition, 1.0f);
+			bots_aim_settle(&bot, skill_definition, 1.0f, 1.0f);
 		CHECK(fabsf(DEGREES(bot.aim_error_yaw)) < 10.0f * 0.1f, "%s: the error did not settle (%.2f degrees)",
 			skill_definition->name, DEGREES(bot.aim_error_yaw));
 		for (tick = 0; tick < ticks; tick++)
 		{
 			real yaw, pitch;
 
-			bots_aim_settle(&bot, skill_definition, 1.0f);
+			bots_aim_settle(&bot, skill_definition, 1.0f, 1.0f);
 			yaw = DEGREES(bot.wander_yaw);
 			pitch = DEGREES(bot.wander_pitch) / 0.6f;
 			CHECK(sqrt(yaw * yaw + pitch * pitch) >= floor * 0.4f - 0.01f,
