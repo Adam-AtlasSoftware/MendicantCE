@@ -1609,7 +1609,7 @@ fragment function whole: every one is called. */
 
 /* the shapes' occlusion, world_proxies.c's world_proxy_occlusion
 (sphere_occlusion, capsule_occlusion, box_occlusion) line for line, and
-world_proxy_reach (their kinds: xgpu.h's XGPU_WORLD_AO_*) */
+their reach, each kind's own factor below (their kinds: xgpu.h's XGPU_WORLD_AO_*) */
 #define WORLD_AO_TEXT(value) WORLD_AO_TEXT_OF(value)
 #define WORLD_AO_TEXT_OF(value) #value
 static const char world_proxies_shapes[] =
@@ -1764,29 +1764,6 @@ static const char world_proxies_shapes[] =
 	"\t}\n"
 	"\treturn clamp(abs(occlusion) / (2.0 * 3.14159265358979), 0.0, 1.0);\n"
 	"}\n"
-	"static inline float world_proxy_bound(float4 v0, float4 v1, float4 v2)\n"
-	"{\n"
-	"\tif (v0.w == " WORLD_AO_TEXT(XGPU_WORLD_AO_CAPSULE) ".0)\n"
-	"\t\treturn 0.5 * length(v1.xyz - v0.xyz) + v2.x;\n"
-	"\tif (v0.w == " WORLD_AO_TEXT(XGPU_WORLD_AO_BOX) ".0)\n"
-	"\t\treturn sqrt(dot(v1.xyz, v1.xyz) + dot(v2, v2));\n"
-	"\treturn v2.x;\n"
-	"}\n"
-	"static inline float world_proxy_reach(float4 v0, float4 v1, float4 v2)\n"
-	"{\n"
-	"\tif (v0.w == " WORLD_AO_TEXT(XGPU_WORLD_AO_CAPSULE) ".0)\n"
-	"\t{\n"
-	"\t\tfloat l = length(v1.xyz - v0.xyz), radius = v2.x;\n"
-	"\t\treturn 0.5 * l + 16.0 * sqrt(radius * radius + 2.0 * radius * l / 3.14159265358979);\n"
-	"\t}\n"
-	"\tif (v0.w == " WORLD_AO_TEXT(XGPU_WORLD_AO_BOX) ".0)\n"
-	"\t{\n"
-	"\t\tfloat x = length(v1.xyz), y = length(v2.xyz), z = v2.w;\n"
-	"\t\tfloat areas = sqrt((y * z) * (y * z) + (x * z) * (x * z) + (x * y) * (x * y));\n"
-	"\t\treturn sqrt(x * x + y * y + z * z) + sqrt(" WORLD_AO_TEXT(XGPU_WORLD_AO_LEAST) " * 4.0 / 3.14159265358979 * areas);\n"
-	"\t}\n"
-	"\treturn 16.0 * v2.x;\n"
-	"}\n"
 	/* world_proxy_box_fade: the box's bound on its occlusion made a fade */
 	"static inline float world_proxy_box_fade(float3 p, float3 n, float3 centre, float3 half_x, float3 half_y, float extent_z)\n"
 	"{\n"
@@ -1833,7 +1810,7 @@ static void world_ao_struct(struct xgpu_text *text)
 
 /* found once a pixel: a surface's pixel's occlusion read from the pass's
 texels (world_ao_shading.c's world_ao_upsample): at a quarter of the
-pixels (the block's parameters[1].z, 2), the four about it by their
+pixels (the block's parameters[1].w, 2), the four about it by their
 bilinear weights and their closeness (their distances' and normals' to its
 own), or where none is close the closest of the 4x4 about it; at each
 pixel (1), its own */
@@ -1842,7 +1819,7 @@ static void world_ao_upsample(struct xgpu_text *text)
 	xgpu_text_append(text,
 		"\tfloat occlusion;\n"
 		"\t{\n"
-		"\t\tfloat scale = world_ao.parameters[1].z;\n"
+		"\t\tfloat scale = world_ao.parameters[1].w;\n"
 		"\t\tif (scale <= 1.0)\n"
 		"\t\t\tocclusion = world_ao_pixels.read(uint2(in.frag_position.xy)).r;\n"
 		"\t\telse\n"
@@ -1989,15 +1966,79 @@ static void world_ao_functions(struct xgpu_text *text, int light)
 		"\treturn saturate(scale * (tv.x + dot(local, tv.yzw))) * fade;\n"
 		"}\n", XGPU_WORLD_AO_LEAST * 4.0f / XGPU_WORLD_AO_PI, XGPU_WORLD_AO_REACH_FADE);
 	xgpu_text_append(text,
+		/* each kind's factor where it can shade p (world_ao.c's
+		world_ao_proxy_factor), 1 where it cannot: within its reach of its
+		centre (a capsule's segment's middle), not wholly below p's tangent
+		plane (its centre's height under the plane past the radius that holds
+		it), faded out over the last of its reach (a box by its bound). Each
+		kind has its own, so that a walk runs only the kinds of the shapes it
+		meets (world_proxies_occlusion) */
+		"static inline float world_proxy_sphere_reach(float4 v2)\n"
+		"{\n"
+		"\treturn 16.0 * v2.x;\n"
+		"}\n"
+		"static inline float world_proxy_capsule_reach(float4 v0, float4 v1, float4 v2)\n"
+		"{\n"
+		"\tfloat l = length(v1.xyz - v0.xyz), radius = v2.x;\n"
+		"\treturn 0.5 * l + 16.0 * sqrt(radius * radius + 2.0 * radius * l / 3.14159265358979);\n"
+		"}\n"
+		"static inline float world_proxy_box_reach(float4 v1, float4 v2)\n"
+		"{\n"
+		"\tfloat x = length(v1.xyz), y = length(v2.xyz), z = v2.w;\n"
+		"\tfloat areas = sqrt((y * z) * (y * z) + (x * z) * (x * z) + (x * y) * (x * y));\n"
+		"\treturn sqrt(x * x + y * y + z * z) + sqrt(" WORLD_AO_TEXT(XGPU_WORLD_AO_LEAST) " * 4.0 / 3.14159265358979 * areas);\n"
+		"}\n"
+		"static inline float world_proxy_sphere_factor(float3 p, float3 n, float4 v0, float4 v2)\n"
+		"{\n"
+		"\tfloat3 centre = v0.xyz;\n"
+		"\tfloat reach = world_proxy_sphere_reach(v2), away = length(p - centre);\n"
+		"\tif (away >= reach || dot(n, centre - p) < -v2.x)\n"
+		"\t\treturn 1.0;\n"
+		"\tfloat fade = saturate((reach - away) / (reach * %.6f));\n"
+		"\treturn 1.0 - world_proxy_sphere(p, n, centre, v2.x) * fade;\n"
+		"}\n"
+		"static inline float world_proxy_capsule_factor(float3 p, float3 n, float4 v0, float4 v1, float4 v2)\n"
+		"{\n"
+		"\tfloat3 centre = (v0.xyz + v1.xyz) * 0.5;\n"
+		"\tfloat reach = world_proxy_capsule_reach(v0, v1, v2), away = length(p - centre);\n"
+		"\tif (away >= reach || dot(n, centre - p) < -(0.5 * length(v1.xyz - v0.xyz) + v2.x))\n"
+		"\t\treturn 1.0;\n"
+		"\tfloat fade = saturate((reach - away) / (reach * %.6f));\n"
+		"\treturn 1.0 - world_proxy_capsule(p, n, v0.xyz, v1.xyz, v2.x) * fade;\n"
+		"}\n"
+		"static inline float world_proxy_box_factor(float3 p, float3 n, float4 v0, float4 v1, float4 v2)\n"
+		"{\n"
+		"\tfloat3 centre = v0.xyz;\n"
+		"\tfloat reach = world_proxy_box_reach(v1, v2), away = length(p - centre);\n"
+		"\tif (away >= reach || dot(n, centre - p) < -sqrt(dot(v1.xyz, v1.xyz) + dot(v2, v2)))\n"
+		"\t\treturn 1.0;\n"
+		"\tfloat fade = world_proxy_box_fade(p, n, v0.xyz, v1.xyz, v2.xyz, v2.w);\n"
+		"\tif (fade <= 0.0)\n"
+		"\t\treturn 1.0;\n"
+		"\treturn 1.0 - world_proxy_box(p, n, v0.xyz, v1.xyz, v2.xyz, v2.w) * fade;\n"
+		"}\n", XGPU_WORLD_AO_REACH_FADE, XGPU_WORLD_AO_REACH_FADE);
+	xgpu_text_append(text,
 		/* A_prox(p, n): the shapes of the pixel's cell of the grid (those
 		whose reach touches it: world_ao_grid) below the draw's limit (the
 		dynamic objects' first: world_ao_read), lowest first, of the draw's
 		object's others within their reach, each faded out over the last of
-		it (a box by its bound) */
+		it (a box by its bound).
+
+		Where the GPU has the SIMD-groups' reductions (the block's
+		parameters[1].z, set by the backend: xgpu_metal_world_ao.c), a
+		SIMD-group walks the shapes of all of its pixels' cells together
+		(simd_or), lowest first, each pixel taking only its own cell's, as
+		the SPIR-V emitter's subgroups do (xgpu_spirv.c's
+		world_proxies_occlusion): each pixel's product is the same, of the
+		same shapes in the same order, but each shape's index, so its place
+		and its kind, is the group's. Its loads are then of one place, and
+		only the kinds of the shapes it meets are run. Without them each
+		pixel walks its own cell's */
 		"static inline float world_proxies_occlusion(constant xgpu_world_ao &w, texture3d<float> objects, float3 p, float3 n,\n"
 		"\tfloat owner, int limit)\n"
 		"{\n"
 		"\tfloat product = 1.0;\n"
+		"\tbool simd = w.parameters[1].z != 0.0;\n"
 		"\tfloat3 offset = p - w.grid[0].xyz;\n"
 		"\tfloat3 at = sign(offset) * log2(1.0 + abs(offset) * w.grid[1].w) * w.grid[1].xyz + float3(%d.0, %d.0, %d.0);\n"
 		"\tint cell = (clamp(int(floor(at.z)), 0, %d) * %d + clamp(int(floor(at.y)), 0, %d)) * %d +\n"
@@ -2008,48 +2049,33 @@ static void world_ao_functions(struct xgpu_text *text, int light)
 		"\t{\n"
 		"\t\tint allowed = clamp(limit - word * 32, 0, 32);\n"
 		"\t\tuint keep = allowed < 32 ? (1u << uint(clamp(allowed, 0, 31))) - 1u : 0xFFFFFFFFu;\n"
-		"\t\tfor (uint bits = words[word] & keep; bits != 0u; bits &= bits - 1u)\n"
+		"\t\tuint own = words[word] & keep, bits = own;\n"
+		"\t\tif (simd)\n"
+		"\t\t\tbits = simd_broadcast_first(simd_or(own));\n"
+		"\t\tfor (; bits != 0u; bits &= bits - 1u)\n"
 		"\t\t{\n"
-		"\t\t\tint shape = word * 32 + int(ctz(bits));\n"
+		"\t\t\tuint lowest = ctz(bits);\n"
+		"\t\t\tif ((own & (1u << lowest)) == 0u)\n"
+		"\t\t\t\tcontinue;\n"
+		"\t\t\tint shape = word * 32 + int(lowest);\n"
 		"\t\t\tfloat4 v0 = w.proxies[shape * 3], v1 = w.proxies[shape * 3 + 1], v2 = w.proxies[shape * 3 + 2];\n"
 		"\t\t\tif (v1.w == owner)\n"
 		"\t\t\t\tcontinue;\n"
 		"\t\t\tif (v0.w == %d.0)\n"
-		"\t\t\t{\n"
 		"\t\t\t\tproduct *= 1.0 - world_proxy_field(w, objects, shape, p, n, v0, v1, v2);\n"
-		"\t\t\t\tcontinue;\n"
-		"\t\t\t}\n"
-		"\t\t\tfloat3 centre = v0.w == %d.0 ? (v0.xyz + v1.xyz) * 0.5 : v0.xyz;\n"
-		"\t\t\tfloat reach = world_proxy_reach(v0, v1, v2);\n"
-		"\t\t\tfloat away = length(p - centre);\n"
-		"\t\t\tif (away >= reach)\n"
-		"\t\t\t\tcontinue;\n"
-		"\t\t\tif (dot(n, centre - p) < -world_proxy_bound(v0, v1, v2))\n"
-		"\t\t\t\tcontinue;\n"
-		"\t\t\tfloat fade = saturate((reach - away) / (reach * %.6f));\n"
-		"\t\t\tif (v0.w == %d.0)\n"
-		"\t\t\t{\n"
-		"\t\t\t\tfade = world_proxy_box_fade(p, n, v0.xyz, v1.xyz, v2.xyz, v2.w);\n"
-		"\t\t\t\tif (fade <= 0.0)\n"
-		"\t\t\t\t\tcontinue;\n"
-		"\t\t\t}\n"
-		"\t\t\tfloat occlusion = 0.0;\n"
-		"\t\t\tif (v0.w == %d.0)\n"
-		"\t\t\t\tocclusion = world_proxy_sphere(p, n, v0.xyz, v2.x);\n"
-		"\t\t\tif (v0.w == %d.0)\n"
-		"\t\t\t\tocclusion = world_proxy_capsule(p, n, v0.xyz, v1.xyz, v2.x);\n"
-		"\t\t\tif (v0.w == %d.0)\n"
-		"\t\t\t\tocclusion = world_proxy_box(p, n, v0.xyz, v1.xyz, v2.xyz, v2.w);\n"
-		"\t\t\tproduct *= 1.0 - occlusion * fade;\n"
+		"\t\t\telse if (v0.w == %d.0)\n"
+		"\t\t\t\tproduct *= world_proxy_capsule_factor(p, n, v0, v1, v2);\n"
+		"\t\t\telse if (v0.w == %d.0)\n"
+		"\t\t\t\tproduct *= world_proxy_sphere_factor(p, n, v0, v2);\n"
+		"\t\t\telse if (v0.w == %d.0)\n"
+		"\t\t\t\tproduct *= world_proxy_box_factor(p, n, v0, v1, v2);\n"
 		"\t\t}\n"
 		"\t}\n"
 		"\treturn product;\n"
 		"}\n",
 		XGPU_WORLD_AO_GRID_X / 2, XGPU_WORLD_AO_GRID_Y / 2, XGPU_WORLD_AO_GRID_Z / 2,
 		XGPU_WORLD_AO_GRID_Z - 1, XGPU_WORLD_AO_GRID_Y, XGPU_WORLD_AO_GRID_Y - 1, XGPU_WORLD_AO_GRID_X,
-		XGPU_WORLD_AO_GRID_X - 1, XGPU_WORLD_AO_FIELD,
-		XGPU_WORLD_AO_CAPSULE, XGPU_WORLD_AO_REACH_FADE, XGPU_WORLD_AO_BOX, XGPU_WORLD_AO_SPHERE,
-		XGPU_WORLD_AO_CAPSULE, XGPU_WORLD_AO_BOX);
+		XGPU_WORLD_AO_GRID_X - 1, XGPU_WORLD_AO_FIELD, XGPU_WORLD_AO_CAPSULE, XGPU_WORLD_AO_SPHERE, XGPU_WORLD_AO_BOX);
 }
 
 /* the occlusion at the pixel, for the light it multiplies

@@ -3526,7 +3526,7 @@ static unsigned int world_ao_inputs(struct module *m, struct pixel_state *state,
 
 /* found once a pixel: a surface's pixel's occlusion read from the pass's
 texels (xgpu_msl.c's world_ao_upsample, world_ao_shading.c's): at a
-quarter of the pixels (the block's parameters[1].z, 2), the four about it
+quarter of the pixels (the block's parameters[1].w, 2), the four about it
 by their bilinear weights and their distances' and normals' nearness to its
 own; at each pixel (1), its own */
 static unsigned int world_ao_unfold(struct module *m, unsigned int packed)
@@ -3575,7 +3575,7 @@ static unsigned int world_ao_upsample(struct module *m, struct pixel_state *stat
 {
 	unsigned int sampled = load(m, type_sampled_image(m, DIM_2D, FALSE, FALSE, TRUE), m->world_ao_pixels);
 	unsigned int image = op(m, OP_IMAGE, type_sampled_image(m, DIM_2D, FALSE, FALSE, FALSE), 1, &sampled);
-	unsigned int frag = load(m, m->t_v4, state->frag_coord), scale = extract(m, world_ao_vector(m, 1, constant_int(m, 1)), 2);
+	unsigned int frag = load(m, m->t_v4, state->frag_coord), scale = extract(m, world_ao_vector(m, 1, constant_int(m, 1)), 3);
 	unsigned int own = extract(m, world_ao_pixels_fetch(m, image, op1(m, OP_CONVERT_F_TO_S, m->t_iv2, xy(m, frag))), 0);
 	unsigned int normal = xyz(m, pixel_input(m, state, state->in_world_normal, m->t_v4));
 	unsigned int n = fscale(m, 3, normal, ext1(m, GLSL_INVERSE_SQRT, m->t_float,

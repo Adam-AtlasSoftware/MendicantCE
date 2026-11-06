@@ -241,6 +241,12 @@ static const struct config_setting config_settings[] =
 		"getting in and out too: \"default\" keeps the stock view, \"match\" takes\n"
 		"display.fov's, and a number is degrees across at 16:9 (20 to 150,\n"
 		"or to 160 with display.panini on)." },
+	{ "display.scale_scoped_fov", _config_boolean, "false", "HALO_SCALE_SCOPED_FOV", _environment_value, _platform_all,
+		"Zoom a scope from the view's own field of view (display.fov,\n"
+		"display.vehicle_fov): each zoom level magnifies it as much as the\n"
+		"Xbox's magnifies the stock view (the tangent of half the angle\n"
+		"scaled by the player's over the stock one's). false keeps the\n"
+		"Xbox's: every zoom level is the weapon's own, whatever the view." },
 	{ "display.panini", _config_real, "0.0", "HALO_PANINI", _environment_value, _platform_all,
 		"Draw the 3D view through the Panini projection, at this strength\n"
 		"(Panini's d), 0 to 1; 0 off. At a wide field of view what is at the\n"

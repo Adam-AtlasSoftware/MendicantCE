@@ -261,7 +261,7 @@ draw shows A in grey. */
 XGPU_AMBIENT_OCCLUSION_WORLD, the draw reads its pixel's occlusion from the
 backend's texture of it (XGPU_SPIRV_BINDING_WORLD_AO_PIXELS,
 XGPU_MSL_TEXTURE_WORLD_AO_PIXELS) where it would find it, upsampled where it
-was found at a quarter of the pixels (the block's parameters[1].z 2: each
+was found at a quarter of the pixels (the block's parameters[1].w 2: each
 2x2 block's at its nearest pixel; world_ao.h's world_ao_upsample); its twin
 in the pre-pass (_INPUTS in its place) writes its pixel's inputs to the
 occlusion instead of its colour, its alpha test as it is: four words, the

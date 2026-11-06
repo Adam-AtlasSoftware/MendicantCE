@@ -597,7 +597,7 @@ backend binds 1×1×1 stand-ins: a table cell far outside and an atlas texel of 
 
 The block: `field[0]` origin.xyz (the first voxel's centre) and 1/voxel; `field[1]` the cells along x, y, z and the
 atlas's layers (range is `WORLD_SDF_RANGE_VOXELS` / `field[0].w`); `parameters[0]` strength on
-objects, strength on the level, fade, proxy count; `parameters[1]` reference weight, the dynamic objects' shapes' count (the static scenery's after them) and 2 spare; then 64 × 3 vec4
+objects, strength on the level, fade, proxy count; `parameters[1]` reference weight, the dynamic objects' shapes' count (the static scenery's after them), whether the walk of the shapes is a SIMD-group's (Metal's, set by the backend; Vulkan's is the emitter's) and the pixels a side of the blocks the occlusion is found once for (1 or 2: [Found once a pixel](#found-once-a-pixel)); then 64 × 3 vec4
 proxies; then the grid: `grid[0]` the camera, `grid[1]` each axis's scale and 1 / cell; then 1,024 uvec4 cells, two
 cells' 64-bit masks each (cell i's word w at `cells[i / 2][2 (i % 2) + w]`).
 
@@ -712,7 +712,7 @@ each pixel takes only its own cell's: the same product of the same shapes in the
 place and kind are the subgroup's, so its loads are scalar and only the kinds present run. Each kind finds its reach,
 bound and fade in its own branch; a box finds its frame once for its bound and its faces, branches between its far
 patches and its exact faces, and takes one face of each pair (the side the pixel is on). Without subgroups (or
-`HALO_VULKAN_NO_SUBGROUPS`) each pixel walks its own cell, as before. The Metal emitter is unchanged.
+`HALO_VULKAN_NO_SUBGROUPS`) each pixel walks its own cell, as before. The Metal emitter walks the same way where the GPU has the SIMD-groups' reductions (`simd_or`: the Apple7 family and Apple silicon Macs; the backend sets the block's `parameters[1].z`), each kind's reach, bound and fade in its own function; an A12 or A13 walks each pixel's own cell.
 
 World minus off, GPU ms a frame, offscreen Vulkan, fixed step, unpaced, windowed, release; before is `world-ao`
 with F, after this:

@@ -16,8 +16,10 @@ WORLD_AO_FIELD records), its table first, then its atlas: each texture is
 made as its first slices come, and both are bound once both have had their
 last; until then, and with none, 1x1x1 stand-ins (a table cell far outside:
 no occlusion). The block arrives with each window (WORLD_AO_WINDOW) and is
-copied into the frame's upload ring; with none, a block of zeros of the
-backend's own.
+copied into the frame's upload ring, its parameters[1].z set where the GPU
+has the SIMD-groups' reductions (the shaders' walk of the shapes is then a
+SIMD-group's: xgpu_msl.c's world_proxies_occlusion); with none, a block of
+zeros of the backend's own.
 */
 
 #include "xgpu_metal.h"
@@ -48,6 +50,9 @@ static struct
 	/* the occlusion found once a pixel the draws read (0: its stand-in, an
 	occlusion of 1) */
 	uint32_t pixels, pixels_stand_in;
+	/* (whether the GPU has the SIMD-groups' reductions: the block's
+	parameters[1].z) */
+	int simd;
 } world_ao;
 
 static uint32_t world_ao_texture(uint32_t part, uint32_t width, uint32_t height, uint32_t depth)
@@ -80,6 +85,7 @@ static void world_ao_make(void)
 	if (world_ao.made)
 		return;
 	world_ao.made = 1;
+	world_ao.simd = xgpu_metal_simd_reductions();
 	world_ao.stand_ins[XGPU_STREAM_WORLD_AO_OBJECTS] = world_ao_texture(XGPU_STREAM_WORLD_AO_OBJECTS, 1, 1, 1);
 	if (world_ao.stand_ins[XGPU_STREAM_WORLD_AO_OBJECTS])
 		xgpu_metal_texture_upload(world_ao.stand_ins[XGPU_STREAM_WORLD_AO_OBJECTS], 0, 0, 0, 0, 0, 1, 1, 1, no_occlusion,
@@ -204,7 +210,13 @@ void xgpu_metal_world_ao_window(const struct xgpu_world_ao_block *block)
 	world_ao_make();
 	if (block)
 	{
-		world_ao.block = xgpu_metal_stream(block, sizeof(*block));
+		/* (its parameters[1].z, the backend's: whether the walk of the shapes
+		is a SIMD-group's, xgpu_msl.c's world_proxies_occlusion) */
+		static struct xgpu_world_ao_block copy;
+
+		memcpy(&copy, block, sizeof(copy));
+		copy.parameters[1][2] = world_ao.simd ? 1.0f : 0.0f;
+		world_ao.block = xgpu_metal_stream(&copy, sizeof(copy));
 	}
 	else
 	{

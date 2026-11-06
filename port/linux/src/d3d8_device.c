@@ -381,7 +381,7 @@ void halo_world_ao_window(float const field[2][4], float const parameters[2][4],
 	made->parameters[0][3] = (float)count;
 	/* (found once a pixel: at a quarter of the pixels, or each) */
 	world_ao.scale = config_boolean("debug.world_ao_full_resolution") ? 1.0f : 2.0f;
-	made->parameters[1][2] = world_ao.scale;
+	made->parameters[1][3] = world_ao.scale;
 	memcpy(made->grid, grid, sizeof(made->grid));
 	memcpy(made->cells, cells, sizeof(made->cells));
 	xgpu_backend_world_ao_window(made);

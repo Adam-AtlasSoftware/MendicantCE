@@ -140,7 +140,7 @@ be a child of many).
 | `font` | `large`, `small`, `terminal`, `heading` (the port's: `large`'s measures, drawn in OpenCE by the high-res text; `large` where the map has no `large_ui`), or a font tag of the map |
 | `color` | The text's colour, `#RRGGBB` or `#AARRGGBB`. Focused text is white. |
 | `align`, `text_x`, `text_y` | `left`, `right` or `center`, and where the text starts in it |
-| `text_flags` | `editable`, `password`, `flashing`, `no_focus_test`, or the port's `wrap`: its text wrapped to its width less `text_x` each side (its written line breaks kept), in the smaller font or drawn smaller where it would be taller than its height less `text_y` above and below |
+| `text_flags` | `editable`, `password`, `flashing`, `no_focus_test`, or the port's `wrap`: its text wrapped to its width less `text_x` each side (its written line breaks kept; with the port's `unbreak` too, made spaces, a word broken with a hyphen whole again), in the smaller font or drawn smaller where it would be taller than its height less `text_y` above and below |
 | `list_flags` | `items_in_code`, `items_from_strings` (a spinner showing its strings), `one_tooltip`, `single_preview` |
 | `strings`, `setting`, `values` | A spinner's values as shown, separated by `\|`; its `config.toml` setting and the values written for each (`port setting load` and `port setting save`) |
 | `header_bitmap`, `footer_bitmap`, `header_bounds`, `footer_bounds` | A list's header and footer: a `<bitmap>` and "top left bottom right" |

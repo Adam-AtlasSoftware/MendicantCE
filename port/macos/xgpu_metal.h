@@ -427,6 +427,10 @@ int xgpu_metal_block_compression(void);
 family and later: every iPhone the app runs on, Apple silicon Macs), not an
 Intel Mac's */
 int xgpu_metal_astc(void);
+/* whether the GPU has the SIMD-groups' reductions in fragment functions
+(simd_or): the Apple7 family (A14, M1) and later and Apple silicon Macs; not
+the A12 or A13 an iPhone of the oldest the app runs on may have */
+int xgpu_metal_simd_reductions(void);
 /* (after the frames in flight that use it) */
 void xgpu_metal_texture_destroy(uint32_t texture);
 /* makes its levels past the first from the first, in the frame's order */

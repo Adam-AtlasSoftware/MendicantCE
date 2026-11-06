@@ -5,27 +5,6 @@
 	</widget>
 	<widget name="main_menu/solo_level_select/header_replay_level" controller="1" left="35" top="11" width="605" height="59" bitmap="main_menu/solo_level_select/header_load_level">
 	</widget>
-	<widget name="main_menu/solo_level_select/replay_level_right_data" type="text" controller="1" left="417" top="258" width="146" height="136" string_list="main_menu/solo_level_select/map_data" string_index="2" font="ui\small_ui" color="#FF2896FF">
-	</widget>
-	<widget name="main_menu/solo_level_select/replay_level_right_item" controller="1" left="406" top="75" width="162" height="326" bitmap="bitmaps/spinner_list_3_wide_item_background">
-		<child widget="main_menu/solo_level_select/replay_level_right_name"/>
-		<child widget="main_menu/solo_level_select/replay_level_right_pic"/>
-		<child widget="main_menu/solo_level_select/replay_level_right_data"/>
-		<child widget="main_menu/solo_level_select/difficulty_indicator" x="416" y="343"/>
-		<child widget="main_menu/solo_level_select/difficulty_indicator" x="466" y="343"/>
-		<child widget="main_menu/solo_level_select/difficulty_indicator" x="516" y="343"/>
-		<child widget="main_menu/multiplayer_type_select/mp_map_select/mp_map_right_name"/>
-		<child widget="main_menu/multiplayer_type_select/mp_map_select/mp_map_right_pic"/>
-		<child widget="main_menu/multiplayer_type_select/mp_map_select/mp_map_right_data"/>
-	</widget>
-	<widget name="main_menu/solo_level_select/replay_level_right_name" type="text" controller="1" left="417" top="204" width="146" height="43" string_list="main_menu/map_list" string_index="2" font="ui\large_ui" color="#FF2896FF">
-	</widget>
-	<widget name="main_menu/solo_level_select/replay_level_right_pic" controller="1" left="419" top="87" width="140" height="114" bitmap="ui\shell\bitmaps\sp_levels">
-	</widget>
-	<widget name="main_menu/solo_level_select/solo_level_extended_desc" width="640" height="480">
-		<child widget="main_menu/current_profile_name"/>
-		<child widget="main_menu/solo_level_select/replay_level_right_item" x="22" y="2"/>
-	</widget>
 	<widget name="main_menu/solo_level_select/solo_level_select_button_bar" type="column_list" width="640" height="28" flags="pass_unhandled_to_focused_child left_right_tabs_items">
 		<data input="common button bar update"/>
 		<child widget="main_menu/solo_level_select/solo_level_select_button_ok" x="380" y="1"/>
