@@ -8,6 +8,81 @@ it, adding keyframes for seeking, and putting the version in a header. That
 direction is right. What follows fits it to this netcode
 ([NETCODE.md](NETCODE.md)).
 
+## In OpenH1
+
+This file is SlipstreamCE's (thelinkin3000/SlipstreamCE, `f8dbc4411`, by
+thelinkin3000 and Carlos Pérez), and so is the Theater it describes, ported
+to OpenH1 (`CREDITS.md`). What follows it is SlipstreamCE's design, as it
+was; where OpenH1's differs:
+
+- **OpenH1 games.** SlipstreamCE records OpenCE's netcode, OpenH1's Legacy
+  games (network version 41). An OpenH1 game (a Standard game, protocol
+  19, at 30, 60 or 120) is recorded too: the recorder is an OpenH1 client to
+  its host (`network_standard.c`'s machine kind), so it is sent the
+  sub-steps and OpenH1's other messages, and the header's network version
+  is the game's advertised one, the protocol's with
+  `HALO_PORT_STANDARD_VERSION_BIT` (32787 for protocol 19), which OpenCE's
+  and SlipstreamCE's builds refuse as a newer version. Its playback joins
+  as an OpenH1 client does, at the game record's rate. A build plays an
+  OpenH1 game's replay of its own protocol only.
+- **The tick.** An OpenH1 tick is sub-steps (`game.sim_rate`): a playback
+  hands the tick's records over before its first sub-step
+  (`game_time.c`'s `game_time_run_substep`); a skip ahead raises OpenH1's
+  ticks a frame (`TICKS_PER_SECOND`).
+- **Files.** The game's `fopen` and `remove` take the game's paths, under
+  the data folder (`platform_translate_path`), so a replay is opened by its
+  path there (`network_replay_fopen`). The records are kept in the guest's
+  heap (`network_replay_store.c`, SlipstreamCE's `host_replay.c`, the
+  Switch's host's), read through the same window.
+- **Keyframes.** The guest's linker script (`port/android/guest/guest.ld`)
+  gathers the variables as SlipstreamCE's does, with OpenH1's sub-steps,
+  clock, sim rate and co-op modules.
+- **The Theater** is in Settings' MODS tab (THEATER, with RECORD GAMES),
+  not the main menu, whose file OpenH1 writes from the PC version's tags;
+  back from a replay, the main menu opens it again.
+- **The DIRECTOR view**, after CINEMATIC: the cinematic camera on the
+  player the auto-director finds most worth watching
+  (`port/linux/game/spectate_director.c`, from Noah Surprenant's
+  spectators, NoahSurprenant/OpenCE `spectator-p5`): a kill, a fight, being
+  hurt, the flag, a fast vehicle, enemies near, a turn for those not shown;
+  shots of 5 to 15 s; the fallen held 2 s, then their killer. A hard cut
+  places the camera again, a near one glides. `network.replay_camera` is
+  the view a replay starts in (`"director"` for an unattended watch).
+- **Left out**: the consoles' replay page and QR code, the Switch's and
+  PS5's buttons, Kenney's button pictures (the bar writes the buttons'
+  names), the skip ahead's held frame (a skip draws its frames as it
+  plays), Android's touch buttons, IMPORT and EXPORT, and the overlay
+  menu's Record Replays, which OpenH1 has not.
+- **Testing without a screen.** `debug.network_test` `"replay:<path>"`
+  plays a replay from the main menu and logs its game each second as the
+  recording host logged its own (`debug.network_test_units` adds the
+  campaign's actors); `tools/replay_compare.py` matches the two logs by
+  tick. With `debug.null_renderer` a frame is not drawn, but a playback's
+  view is still made each frame, so its cameras and the director run.
+
+```
+# record: a Legacy (or OpenH1) game of the host and 5 bots
+HALO_NETWORK_TEST=host:bloodgulch HALO_BOTS=5 HALO_TEST_INPUT=bot:7 \
+  HALO_NET_GAME_MODE=legacy HALO_NET_RECORD_REPLAYS=true ... halo > rec.log
+# play it back, in another data folder with the file in its replays/
+HALO_NETWORK_TEST=replay:replays/<name>.ocreplay ... halo > play.log
+python3 tools/replay_compare.py rec.log play.log
+```
+
+Measured on OpenH1 (headless, null renderer, no sound):
+
+| Game | Recorded | Played back to | Players apart (median, most) | Actors |
+| --- | --- | --- | --- | --- |
+| bloodgulch, Legacy, 6 players (5 bots) | 90 s, 573 KB | its end (tick 2700) | 0.026 to 0.038, 0.066 | |
+| bloodgulch, OpenH1 60 Tick, 6 players | 90 s | its end, at 60 | 0.026 to 0.037, 0.096 | |
+| b30 co-op, Legacy, 1 player | 230 s, 2.4 MB | its end (tick 6900) | 0.035, 0.053 | 34 a tick, counts equal at 99% of ticks, median 0.000, 90th percentile 0.036 |
+| b30 co-op, OpenH1 120 Tick, 1 player | 190 s | its end, at 120 | 0.033, 0.054 | 35 a tick, 98%, 0.000, 0.036 |
+
+So a co-op level plays back with its actors where the host had them
+(SlipstreamCE had not tried co-op): they come in the host's messages, as a
+client's do. Its scripts and cutscenes are as a co-op client has them;
+nothing past the players' and the actors' places was compared.
+
 ## What a replay is here
 
 The Xbox's films replayed each tick's input, which works only because the
