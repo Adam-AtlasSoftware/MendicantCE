@@ -192,6 +192,7 @@ struct game_options;
 #include "profile_sections.h" /* port: port/linux/include/profile_sections.h */
 #include "sim_rate.h" /* port: port/linux/game/sim_rate.c */
 #include "basic_training.h" /* port: port/linux/game/basic_training.c */
+#include "mendicant/mendicant.h" /* port: port/linux/game/mendicant/mendicant_main.c */
 
 /* network_game_globals.c's */
 boolean network_game_distributed_client(void);
@@ -373,7 +374,12 @@ static void game_tick_macro_step(
 	distributed netcode has from the host: its own would fight the host's
 	positions, and could place objects of their own) */
 	if (!network_game_distributed_client())
+	{
 		profile_scope(game_tick_ai_section, ai_update();)
+		/* port: MENDICANT AI's vehicles and training after the AI
+		(port/linux/game/mendicant) */
+		mendicant_ai_update_end();
+	}
 	else
 		profile_scope(game_tick_actors_drive_section, network_actors_drive();)
 	profile_scope(game_tick_players_before_section, players_update_before_game();)
@@ -451,11 +457,19 @@ boolean game_tick_substep(
 	profile_enter(game_update_section);
 
 	if (substep_index == 0)
+	{
+		/* port: MENDICANT AI's movement around each tick, its sub-steps
+		too (port/linux/game/mendicant) */
+		mendicant_game_tick_begin();
 		game_tick_macro_step();
+	}
 	profile_scope(game_tick_substeps_section, sim_substep_run(substep_index);)
 	tick_ended = sim_substep_next() == 0;
 	if (tick_ended)
+	{
 		game_tick_after_substeps();
+		mendicant_game_tick_end();
+	}
 	/* port: the controllers' motors for what the step did (a shot, a hit),
 	as it ends, not at the next tick's rumble_update (player_rumble.c) */
 	rumble_port_step_end();
