@@ -311,7 +311,11 @@ static struct
 	are prepared; a record's draw's as it notes it, played back
 	(journal_restore) */
 	int span;
-} world_ao = { FALSE, FALSE, WORLD_AO_OWNER_NONE, 1.0f, FALSE, FALSE, FALSE, 2.0f, WORLD_AO_SPAN_NONE };
+	/* a map's pipelines are prepared (halo_gpu_prepare until
+	halo_gpu_prepared); the backend told to make the draws' twins too
+	(world_ao_twins) */
+	BOOL preparing, twins;
+} world_ao = { FALSE, FALSE, WORLD_AO_OWNER_NONE, 1.0f, FALSE, FALSE, FALSE, 2.0f, WORLD_AO_SPAN_NONE, FALSE, FALSE };
 
 /* the draw takes the world's light where its window is given: one of the
 window's opaque surfaces, not the first-person weapon, not lighting itself
@@ -319,17 +323,64 @@ window's opaque surfaces, not the first-person weapon, not lighting itself
 the setting off and in a map's preparation: manifest_note_basis) */
 static BOOL world_ao_applies(void)
 {
-	return world_ao.span == WORLD_AO_SPAN_OPEN && !(hdr.kind & HALO_HDR_KIND_SELF_ILLUMINATION);
+	return (world_ao.span == WORLD_AO_SPAN_OPEN || world_ao.span == WORLD_AO_SPAN_FOUND) &&
+		!(hdr.kind & HALO_HDR_KIND_SELF_ILLUMINATION);
+}
+
+/* while a map's pipelines are prepared, the world's light as the window's
+draws will have it in play where the setting is on (no window is given
+then: world_ao.c's world_ao_window_begin): the world's for every one, read
+from the pre-pass where it would find the window's once a pixel (its span
+found: the primary view into the back buffer, world_ao_prepass_begin) */
+static BOOL world_ao_preparing(void)
+{
+	return world_ao.preparing && !world_ao.failed && world_ao_mode() != 0;
+}
+
+static BOOL world_ao_found(void)
+{
+	return (world_ao.span == WORLD_AO_SPAN_FOUND || world_ao.span == WORLD_AO_SPAN_FOUND_FIRST_PERSON) &&
+		!config_boolean("debug.world_ao_inline");
 }
 
 /* a draw's pixel key's occlusion, for the light it multiplies, found in the
 world (0: none) */
 static unsigned char world_ao_key(int light)
 {
-	if (!world_ao.active || world_ao.failed || !world_ao_applies())
+	BOOL view, sampled;
+
+	if (world_ao.failed || !world_ao_applies())
 		return 0;
-	return (unsigned char)(light | XGPU_AMBIENT_OCCLUSION_WORLD | (world_ao.view ? XGPU_AMBIENT_OCCLUSION_WORLD_VIEW : 0) |
-		(world_ao.sampled ? XGPU_AMBIENT_OCCLUSION_WORLD_SAMPLED : 0));
+	if (world_ao.active)
+	{
+		view = world_ao.view;
+		sampled = world_ao.sampled;
+	}
+	else if (world_ao_preparing())
+	{
+		view = config_boolean("debug.world_ao_view");
+		sampled = world_ao_found();
+	}
+	else
+	{
+		return 0;
+	}
+	return (unsigned char)(light | XGPU_AMBIENT_OCCLUSION_WORLD | (view ? XGPU_AMBIENT_OCCLUSION_WORLD_VIEW : 0) |
+		(sampled ? XGPU_AMBIENT_OCCLUSION_WORLD_SAMPLED : 0));
+}
+
+/* ... and the pre-pass's twins of the window's draws made with them (each
+draw's: xgpu_stream_world_ao_twin, those with the world's light read from
+the pre-pass and the occluders, the first-person weapon among them), the
+backend told as the draws' need changes (XGPU_WORLD_AO_PREPASS_TWINS) */
+static void world_ao_twins(void)
+{
+	BOOL twins = world_ao_preparing() && world_ao_found();
+
+	if (twins == world_ao.twins)
+		return;
+	world_ao.twins = twins;
+	xgpu_backend_world_ao_prepass(twins ? XGPU_WORLD_AO_PREPASS_TWINS : XGPU_WORLD_AO_PREPASS_NONE, 0, NULL);
 }
 
 /* a pipeline with the world's light could not be made: none has it from
@@ -4163,6 +4214,8 @@ static BOOL prepare_draw(BOOL immediate, unsigned long primitive)
 	/* (display.ambient_occlusion "world": its light, where its window is
 	given and the draw takes it: world_ao_key) */
 	facts.world = world_ao_key(XGPU_AMBIENT_OCCLUSION_LIGHT_NONE);
+	if (device.gl_ready)
+		world_ao_twins();
 	basis = pipeline_key;
 	ready = pipeline_bind(program, &facts, &pipeline_key);
 	if (ready && (pipeline_key.pixel.ambient_occlusion & XGPU_AMBIENT_OCCLUSION_WORLD))
@@ -4268,6 +4321,10 @@ void halo_gpu_prepare(int new_map)
 	preparation.attempts = preparation.sampled_draws = 0;
 	memset(preparation.sampled_seconds, 0, sizeof(preparation.sampled_seconds));
 	xgpu_manifest_enumerating(1, new_map);
+	/* (display.ambient_occlusion "world": its pipelines and twins made too,
+	the backend's flag cleared as it begins: world_ao_key) */
+	world_ao.preparing = TRUE;
+	world_ao.twins = FALSE;
 	if (device.gl_ready)
 		xgpu_backend_prepare();
 }
@@ -4300,6 +4357,8 @@ double halo_gpu_prepared(void)
 	preparation.active = FALSE;
 	preparation.sample = FALSE;
 	preparation.checkpoint = NULL;
+	/* (the backend's twins' flag cleared as it ends) */
+	world_ao.preparing = world_ao.twins = FALSE;
 	preparation.duplicate = FALSE;
 	platform_log("GPU: preparation reused %lu of %lu tracked draws", preparation.duplicates, preparation.draws);
 	preparation_clear();
@@ -5166,6 +5225,11 @@ static void view_corners(struct render_target_entry *target, short x0, short y0,
 /* found once a pixel (xgpu_stream.h's WORLD_AO_PREPASS): the window's
 pre-pass, into the backend's targets of the back buffer's size, where the
 window draws into the back buffer with its depth buffer */
+int halo_world_ao_prepass_found(void)
+{
+	return device.render_target == &device.back_buffer && device.depth_stencil == &device.depth_buffer;
+}
+
 int halo_world_ao_prepass_begin(void)
 {
 	struct render_target_entry *target;
@@ -6590,8 +6654,9 @@ unsigned int *halo_gpu_journal_take(unsigned int *count, unsigned int *unknown)
 makes it 2, 3 and so on; its state's size is in it as well (5: the pages'
 runs in JOURNAL_PAGE_UNIT's units, not the platform's pages; 6: the world's
 window's span, world_span; 7: without the screen's ambient occlusion, its
-pre-pass, its flags and its operations) */
-#define JOURNAL_FORM 7
+pre-pass, its flags and its operations; 8: world_span's
+WORLD_AO_SPAN_FOUND, the window found once a pixel) */
+#define JOURNAL_FORM 8
 
 unsigned int halo_gpu_journal_form(void)
 {

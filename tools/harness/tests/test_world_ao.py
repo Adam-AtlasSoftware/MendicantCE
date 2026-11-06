@@ -28,7 +28,12 @@ CONTROLS = [
     # the window's span told only while the setting is on (the manifest's world draws then lost)
     ("\t(void)rasterizer_target;\n\t/* (its span, whatever the setting: halo_world_ao_span) */\n"
      "\thalo_world_ao_span(WORLD_AO_SPAN_OPEN);\n", "\t(void)rasterizer_target;\n", "off"),
-    ("\thalo_world_ao_span(drawing ? WORLD_AO_SPAN_FIRST_PERSON : WORLD_AO_SPAN_OPEN);\n", "", "off"),
+    ("\thalo_world_ao_span(!drawing ? world_ao.span : world_ao.span == WORLD_AO_SPAN_FOUND ?\n", "\t(void)(!drawing ? world_ao.span : world_ao.span == WORLD_AO_SPAN_FOUND ?\n", "off"),
+    # the window found once a pixel told only while the setting is on (a map's preparation then makes the
+    # pipelines without the pre-pass's reads and no twins)
+    ("\tif (halo_world_ao_prepass_found())\n", "\tif (world_ao.window && halo_world_ao_prepass_found())\n", "off"),
+    # the first-person weapon's span after it the plain window's, where the window is found once a pixel
+    ("\thalo_world_ao_span(!drawing ? world_ao.span :", "\thalo_world_ao_span(!drawing ? WORLD_AO_SPAN_OPEN :", "off"),
     # the made-up field uploaded each window
     ("\tif (!world_ao_test.uploaded)\n\t\tworld_ao_test_field(camera_position);",
      "\tworld_ao_test_field(camera_position);", "test"),

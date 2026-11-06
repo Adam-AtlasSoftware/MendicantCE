@@ -42,6 +42,9 @@ static struct
 	takes it away): its proxies and their objects (datum handles), the
 	field's volume (for the objects' references; NULL none) and its fade */
 	int window;
+	/* the window's span (WORLD_AO_SPAN_OPEN, _FOUND, or _NONE outside one),
+	whatever the setting: the first-person weapon's drawn in it */
+	int span;
 	struct world_proxy proxies[WORLD_PROXY_MAXIMUM_PER_WINDOW];
 	long owners[WORLD_PROXY_MAXIMUM_PER_WINDOW];
 	/* (the dynamic objects' first, dynamic_count of them; the static
@@ -340,6 +343,7 @@ void world_ao_window_begin(short local_player_index, short rasterizer_target, fl
 	(void)local_player_index;
 	(void)rasterizer_target;
 	/* (its span, whatever the setting: halo_world_ao_span) */
+	world_ao.span = WORLD_AO_SPAN_OPEN;
 	halo_world_ao_span(WORLD_AO_SPAN_OPEN);
 	/* (none while a map's pipelines are prepared: its draws then are the
 	ones without the world, exactly as with it off, so that the world never
@@ -396,6 +400,15 @@ void world_ao_window_begin(short local_player_index, short rasterizer_target, fl
 
 int world_ao_prepass_begin(void)
 {
+	/* (its span, whatever the setting and while a map's pipelines are
+	prepared: the surfaces found once a pixel where it is on, which a map's
+	preparation makes the pipelines and twins of: d3d8_device.c's
+	world_ao_key) */
+	if (halo_world_ao_prepass_found())
+	{
+		world_ao.span = WORLD_AO_SPAN_FOUND;
+		halo_world_ao_span(WORLD_AO_SPAN_FOUND);
+	}
 	if (!world_ao.window || config_boolean("debug.world_ao_inline"))
 		return 0;
 	return halo_world_ao_prepass_begin();
@@ -408,6 +421,7 @@ void world_ao_prepass_end(short x0, short y0, short x1, short y1, float const ca
 
 void world_ao_window_end(void)
 {
+	world_ao.span = WORLD_AO_SPAN_NONE;
 	halo_world_ao_span(WORLD_AO_SPAN_NONE);
 	if (!world_ao.window)
 		return;
@@ -467,7 +481,9 @@ void world_ao_lightmap_begin(void const *lightmap_bitmap)
 
 void world_ao_first_person(int drawing)
 {
-	halo_world_ao_span(drawing ? WORLD_AO_SPAN_FIRST_PERSON : WORLD_AO_SPAN_OPEN);
+	/* (the window's own span again after it) */
+	halo_world_ao_span(!drawing ? world_ao.span : world_ao.span == WORLD_AO_SPAN_FOUND ?
+		WORLD_AO_SPAN_FOUND_FIRST_PERSON : WORLD_AO_SPAN_FIRST_PERSON);
 	if (!world_ao.window)
 		return;
 	halo_world_ao_object(drawing ? WORLD_AO_OWNER_UNLIT : WORLD_AO_OWNER_NONE, 1.0f);

@@ -48,6 +48,13 @@ int config_boolean(const char *name)
 }
 
 /* (found once a pixel: the front end's pre-pass, none here) */
+static int prepass_found;
+
+int halo_world_ao_prepass_found(void)
+{
+	return prepass_found;
+}
+
 int halo_world_ao_prepass_begin(void)
 {
 	return 0;
@@ -223,6 +230,20 @@ static void off_case(void)
 		CHECK(span == WORLD_AO_SPAN_OPEN, "%s: after it: %d", setting, span);
 		world_ao_window_end();
 		CHECK(span == WORLD_AO_SPAN_NONE, "%s: the span closed: %d", setting, span);
+		/* (a window the pre-pass would find once a pixel: its span told so
+		whatever the setting, the first-person weapon's in it, and the
+		window's again after it: a map's preparation makes their pipelines) */
+		prepass_found = 1;
+		world_ao_window_begin(0, 0, camera);
+		CHECK(!world_ao_prepass_begin(), "%s: a pre-pass begun while off", setting);
+		CHECK(span == WORLD_AO_SPAN_FOUND, "%s: the found span: %d", setting, span);
+		world_ao_first_person(1);
+		CHECK(span == WORLD_AO_SPAN_FOUND_FIRST_PERSON, "%s: its first-person weapon's span: %d", setting, span);
+		world_ao_first_person(0);
+		CHECK(span == WORLD_AO_SPAN_FOUND, "%s: after it, found: %d", setting, span);
+		world_ao_window_end();
+		CHECK(span == WORLD_AO_SPAN_NONE, "%s: the found span closed: %d", setting, span);
+		prepass_found = 0;
 	}
 	CHECK(scene_frames == 0 && sdf_frames == 0 && windows_handed == 0, "%d %d %d", scene_frames, sdf_frames,
 		windows_handed);
