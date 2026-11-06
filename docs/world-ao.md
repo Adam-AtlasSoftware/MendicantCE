@@ -93,6 +93,15 @@ surface removal leaves the opaque layers' overdraw out, not the alpha-tested fol
   camera cut, a resize or a second window starts afresh. `HALO_WORLD_AO_NO_TRACE=1` (for measuring) walks the shapes
   as before, without history.
 
+On the M2 (Metal, 3420x2146, quarter resolution; the pass and the GPU's busy time a frame, medians; the same build
+with `HALO_WORLD_AO_NO_TRACE=1` the shapes' walk):
+
+| Scene | Walked: pass / busy | Traced: pass / busy |
+| --- | --- | --- |
+| a30's start | 4.70 / 11.8 ms | **1.66 / 8.3 ms** |
+| a10's start | 37.6 / 48.0 ms | **10.2 / 20.1 ms** |
+| a30 outdoors, the walk toward the first bridge | 4.59 / 16.0 ms (most 11.0 / 23.4) | **3.80 / 14.7 ms** (most 4.8 / 18.5) |
+
 `debug.world_ao_full_resolution` finds it at every pixel; `debug.world_ao_inline` finds it in the surfaces as
 before. VR's eye passes, a mirror's view and any window not drawn into the back buffer with its depth buffer find it
 inline. The first-person weapon, transparents, decals, water and the sky take no world light, as before. With
