@@ -228,6 +228,11 @@ enum
 	XGPU_VULKAN_FORMAT_ASTC,
 	/* a signed byte (display.ambient_occlusion "world"'s distance field) */
 	XGPU_VULKAN_FORMAT_R8_SNORM,
+	/* (display.ambient_occlusion "world" found once a pixel: the tiles'
+	masks, two 32-bit unsigned integers; the occlusion and what the surfaces
+	upsample it by, four floats) */
+	XGPU_VULKAN_FORMAT_RG32_UINT,
+	XGPU_VULKAN_FORMAT_RGBA32F,
 	XGPU_VULKAN_FORMAT_COUNT
 };
 
@@ -560,6 +565,10 @@ bytes, linear, clamped, a 1x1 page of none where they have not all come) */
 /* (and the vehicles' occlusion fields' atlas: a 3D image of four halves,
 linear, clamped, a texel of none where it has not all come) */
 #define XGPU_VULKAN_BINDING_WORLD_AO_OBJECTS 5
+/* (and the occlusion found once a pixel, which the draws that read it
+read: a 2D image of four floats, read by texel, a 1x1 of 1 where none is
+found) */
+#define XGPU_VULKAN_BINDING_WORLD_AO_PIXELS 6
 struct xgpu_world_ao_block;
 /* the stand-ins and the sampler made (the core's start): 0 if they cannot be */
 int xgpu_vulkan_world_ao_create(void);
@@ -578,6 +587,10 @@ struct xgpu_vulkan_image *xgpu_vulkan_world_ao_table_image(void);
 struct xgpu_vulkan_image *xgpu_vulkan_world_ao_scenery_image(void);
 struct xgpu_vulkan_image *xgpu_vulkan_world_ao_objects_image(void);
 VkSampler xgpu_vulkan_world_ao_sampler(void);
+/* the occlusion found once a pixel the draws read from now on (NULL: its
+stand-in, 1), and what they read */
+void xgpu_vulkan_world_ao_set_pixels(struct xgpu_vulkan_image *image);
+struct xgpu_vulkan_image *xgpu_vulkan_world_ao_pixels_image(void);
 int xgpu_vulkan_world_ao_block(uint64_t serial, VkDescriptorBufferInfo *info);
 uint64_t xgpu_vulkan_world_ao_number(void);
 

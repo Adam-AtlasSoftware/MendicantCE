@@ -42,13 +42,47 @@ render_frame ──► world_ao_frame_begin ─► world_scene_frame_begin (obje
                                       └► world_sdf_frame (upload a finished field, a few slices a frame)
 render_window ─► world_ao_window_begin ─► world_proxies_window (≤64 shapes) + field place
                                        └► halo_world_ao_window ─► XGPU_STREAM_WORLD_AO_WINDOW ─► backend block
+                 world_ao_prepass_begin ─► the pre-pass: render_objects + structure_render_lightmaps again,
+                                           each world draw as its twin, writing its pixel's inputs
+                 world_ao_prepass_end ─► the occlusion's pass (a quarter of the pixels) ─► the AO texture
                  render_objects (world_ao_object_begin per object: owner slot, reference)
-                 structure_render_lightmaps
+                 structure_render_lightmaps (each surface reads its pixel's occlusion, upsampled)
                ─► world_ao_window_end (block withdrawn; later passes never see it)
 ```
 
 The hooks are in `source/render/render.c` (`render_frame`, `render_window`) and `source/scenario/scenario.c`
 (`scenario_load`, `scenario_switch_structure_bsp`, `scenario_unload`), each marked `port:`.
+
+## Found once a pixel
+
+The occlusion was found in the surfaces' shaders as each draws, so a pixel paid for it once per opaque layer
+drawn over it (a30's start on a Radeon 8060S: 2.0 to 2.4 evaluations a visible pixel; an Apple GPU's hidden
+surface removal leaves the opaque layers' overdraw out, not the alpha-tested foliage's). It is now found once:
+
+- **The pre-pass.** `render_window` walks the window's opaque surfaces twice (`render_world_ao_prepass`: their
+  transparent parts, widgets and fog screen left for the second walk, the objects found once). In the first, the
+  backend draws each draw with the world's light as its **twin** (`xgpu_stream_world_ao_twin`: the same pipeline, its
+  pixel key `XGPU_AMBIENT_OCCLUSION_WORLD_INPUTS`, into an RGBA32Uint target and a depth target of its own) and
+  skips every other draw and clear. A twin writes its pixel's inputs: the normal (octahedral), the owner slot, the
+  reference or the static scenery's page's texel, the lightmap pass's flags, and its distance from the eye.
+- **The pass** (`xgpu_msl_world_ao_pass`, `xgpu_spirv_world_ao_pass`): one triangle over the window. By default it
+  runs at a quarter of the pixels: each 2x2 block's nearest drawn pixel, its position found again along the camera's
+  ray (`world_ao_pass_position`), its occlusion one call (`world_ao_evaluate`: the static term, the field relative
+  to its reference or the page's texel, times the dynamic shapes' product). It writes the occlusion, the distance
+  and the normal.
+- **The surfaces** (`XGPU_AMBIENT_OCCLUSION_WORLD_SAMPLED`) read it in place of finding it: the four texels about
+  the pixel, by their bilinear weights and their closeness (distance, relative and scaled by how squarely the
+  surface faces the eye, and normal); where none is close, the closest of the 4x4 about it (`world_ao_upsample`).
+  A thin silhouette keeps its own value, and the wall behind keeps the wall's.
+
+`debug.world_ao_full_resolution` finds it at every pixel; `debug.world_ao_inline` finds it in the surfaces as
+before. VR's eye passes, a mirror's view and any window not drawn into the back buffer with its depth buffer find it
+inline. The first-person weapon, transparents, decals, water and the sky take no world light, as before. With
+multisampling the pre-pass and the occlusion are a pixel's (at its centre, as the surfaces found it before).
+
+Pipelines: the pass's is made with a map's (`prepass_prepare`). The twins are made as their world pipelines are
+(after the load, on the compilers, never waited for: a draw whose twin isn't made yet reads 1 until it is). The
+Mac's library holds each world draw's three forms (`xgpu_metal_prebuild.c`).
 
 ## The scene (`world_scene.h`)
 

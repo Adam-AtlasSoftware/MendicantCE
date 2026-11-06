@@ -257,6 +257,30 @@ line. With XGPU_AMBIENT_OCCLUSION_WORLD_VIEW too (debug.world_ao_view) the
 draw shows A in grey. */
 #define XGPU_AMBIENT_OCCLUSION_WORLD 0x10
 #define XGPU_AMBIENT_OCCLUSION_WORLD_VIEW 0x20
+/* found once a pixel (xgpu_stream.h's WORLD_AO_PREPASS): with
+XGPU_AMBIENT_OCCLUSION_WORLD, the draw reads its pixel's occlusion from the
+backend's texture of it (XGPU_SPIRV_BINDING_WORLD_AO_PIXELS,
+XGPU_MSL_TEXTURE_WORLD_AO_PIXELS) where it would find it, upsampled where it
+was found at a quarter of the pixels (the block's parameters[1].z 2: each
+2x2 block's at its nearest pixel; world_ao.h's world_ao_upsample); its twin
+in the pre-pass (_INPUTS in its place) writes its pixel's inputs to the
+occlusion instead of its colour, its alpha test as it is: four words, the
+normal octahedral, two signed 16-bit halves (x low); the owner slot plus 2
+in its low byte, the XGPU_WORLD_AO_INPUT_* bits, and in its high half the
+reference (a model's) or the static scenery's page's texel (the lightmap
+pass's: 1 where it has none) as a half float; its distance from the eye
+(the block's grid[0]), a float's bits; and a spare word. The occlusion's
+pass reads them (world_ao_shading.c's world_ao_pass_*) */
+#define XGPU_AMBIENT_OCCLUSION_WORLD_SAMPLED 0x40
+#define XGPU_AMBIENT_OCCLUSION_WORLD_INPUTS 0x80
+#define XGPU_WORLD_AO_INPUT_LIGHTMAP 0x100u
+#define XGPU_WORLD_AO_INPUT_ALL_SHAPES 0x200u
+#define XGPU_WORLD_AO_INPUT_PRESENT 0x400u
+/* (the surfaces' upsampling of the occlusion found at a quarter of the
+pixels: world_ao.h's WORLD_AO_UPSAMPLE_*) */
+#define XGPU_WORLD_AO_UPSAMPLE_DEPTH 0.02f
+#define XGPU_WORLD_AO_UPSAMPLE_FACING 0.2f
+#define XGPU_WORLD_AO_UPSAMPLE_LEAST 1.0e-4f
 #define XGPU_AMBIENT_OCCLUSION_LIGHT_OF(value) ((value) & 0x0f)
 #define XGPU_WORLD_AO_K 1.6f
 #define XGPU_WORLD_AO_STEP 0.15f

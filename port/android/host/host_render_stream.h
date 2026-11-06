@@ -100,6 +100,9 @@ struct host_render_backend
 	field (its bytes: host_pointer(record->data)); none: not drawn */
 	void (*world_ao_window)(void *context, const struct xgpu_stream_world_ao_window *record);
 	void (*world_ao_field)(void *context, const struct xgpu_stream_world_ao_field *record);
+	/* ... found once a pixel (xgpu_stream.h's WORLD_AO_PREPASS); none: the
+	pre-pass's draws are drawn as the surfaces' (xgpu_stream.h) */
+	void (*world_ao_prepass)(void *context, const struct xgpu_stream_world_ao_prepass *record);
 
 	void (*target_create)(void *context, const struct xgpu_stream_target_create *record);
 	void (*target_delete)(void *context, uint32_t target);

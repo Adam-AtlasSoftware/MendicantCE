@@ -506,6 +506,284 @@ float world_ao_occlusion(float const parameters[2][4], struct world_sdf_volume c
 	return mix(1.0f, field > WORLD_AO_FLOOR ? field : WORLD_AO_FLOOR, parameters[0][0]);
 }
 
+/* ---------- found once a pixel (xgpu_stream.h's WORLD_AO_PREPASS)
+
+The window's surfaces' inputs drawn first (the pre-pass), then the
+occlusion found once at each pixel (or each 2x2 block) from them, as the
+backends' pass finds it (the emitters' world_ao_pass_*), and the surfaces'
+upsampling of it. */
+
+void world_ao_pass_position(float const camera[4][4], long const corners[4], float x, float y, float distance,
+	float const eye[3], float point[3])
+{
+	float sx = 2.0f * (x - (float)corners[0]) / (float)(corners[2] - corners[0]) - 1.0f;
+	float sy = 2.0f * (y - (float)corners[1]) / (float)(corners[3] - corners[1]) - 1.0f;
+	float ray[3], length;
+	int axis;
+
+	for (axis = 0; axis < 3; axis++)
+		ray[axis] = camera[1][axis] + sx * camera[2][axis] + sy * camera[3][axis];
+	length = sqrtf(ray[0] * ray[0] + ray[1] * ray[1] + ray[2] * ray[2]);
+	for (axis = 0; axis < 3; axis++)
+		point[axis] = eye[axis] + distance * ray[axis] / length;
+}
+
+/* a float as a half's bits, rounded to the nearest (even), and back */
+static unsigned int world_ao_half(float value)
+{
+	unsigned int bits, sign, exponent, mantissa, half;
+
+	memcpy(&bits, &value, sizeof(bits));
+	sign = (bits >> 16) & 0x8000u;
+	exponent = (bits >> 23) & 0xffu;
+	mantissa = bits & 0x7fffffu;
+	if (exponent == 0xffu)
+		return sign | 0x7c00u | (mantissa ? 0x200u : 0);
+	if (exponent > 142)
+		return sign | 0x7c00u;
+	if (exponent < 113)
+	{
+		/* (below the halves' least normal: as a subnormal) */
+		unsigned int shift;
+
+		if (exponent < 102)
+			return sign;
+		mantissa |= 0x800000u;
+		shift = 126 - exponent;
+		half = mantissa >> shift;
+		if ((mantissa >> (shift - 1)) & 1u && (half & 1u || mantissa & ((1u << (shift - 1)) - 1u)))
+			half++;
+		return sign | half;
+	}
+	half = ((exponent - 112) << 10) | (mantissa >> 13);
+	if (mantissa & 0x1000u && (half & 1u || mantissa & 0xfffu))
+		half++;
+	return sign | half;
+}
+
+static float world_ao_half_float(unsigned int half)
+{
+	unsigned int sign = (half & 0x8000u) << 16, exponent = (half >> 10) & 0x1fu, mantissa = half & 0x3ffu, bits;
+	float value;
+
+	if (!exponent)
+	{
+		value = ldexpf((float)mantissa, -24);
+		return sign ? -value : value;
+	}
+	bits = sign | (exponent == 31 ? 0x7f800000u | (mantissa << 13) : ((exponent + 112) << 23) | (mantissa << 13));
+	memcpy(&value, &bits, sizeof(value));
+	return value;
+}
+
+/* a signed 16-bit half of a word, as the shaders' packSnorm2x16 */
+static unsigned int world_ao_snorm16(float value)
+{
+	float clamped = value < -1.0f ? -1.0f : value > 1.0f ? 1.0f : value;
+
+	return (unsigned int)(int)roundf(clamped * 32767.0f) & 0xffffu;
+}
+
+static float world_ao_snorm16_float(unsigned int bits)
+{
+	float value = (float)(short)(unsigned short)bits / 32767.0f;
+
+	return value < -1.0f ? -1.0f : value;
+}
+
+void world_ao_inputs_pack(float const normal[3], float owner, float value, int lightmap, int all_shapes,
+	float distance, unsigned int words[4])
+{
+	float length = fabsf(normal[0]) + fabsf(normal[1]) + fabsf(normal[2]), x, y;
+
+	/* (octahedral: the lower half folded over its diagonals) */
+	if (length <= 0.0f)
+		length = 1.0f;
+	x = normal[0] / length;
+	y = normal[1] / length;
+	if (normal[2] < 0.0f)
+	{
+		float fx = (1.0f - fabsf(y)) * (x >= 0.0f ? 1.0f : -1.0f), fy = (1.0f - fabsf(x)) * (y >= 0.0f ? 1.0f : -1.0f);
+
+		x = fx;
+		y = fy;
+	}
+	words[0] = world_ao_snorm16(x) | world_ao_snorm16(y) << 16;
+	words[1] = ((unsigned int)(int)(owner + 2.0f) & 0xffu) | XGPU_WORLD_AO_INPUT_PRESENT_BIT |
+		(lightmap ? XGPU_WORLD_AO_INPUT_LIGHTMAP_BIT : 0) | (all_shapes ? XGPU_WORLD_AO_INPUT_ALL_SHAPES_BIT : 0) |
+		world_ao_half(value) << 16;
+	memcpy(&words[2], &distance, sizeof(distance));
+	words[3] = 0;
+}
+
+int world_ao_inputs_unpack(unsigned int const words[4], float normal[3], float *owner, float *value, int *lightmap,
+	int *all_shapes, float *distance)
+{
+	float x = world_ao_snorm16_float(words[0] & 0xffffu), y = world_ao_snorm16_float(words[0] >> 16);
+	float z = 1.0f - fabsf(x) - fabsf(y), t = z < 0.0f ? -z : 0.0f, length;
+
+	if (!(words[1] & XGPU_WORLD_AO_INPUT_PRESENT_BIT))
+		return 0;
+	x += x >= 0.0f ? -t : t;
+	y += y >= 0.0f ? -t : t;
+	length = sqrtf(x * x + y * y + z * z);
+	normal[0] = x / length;
+	normal[1] = y / length;
+	normal[2] = z / length;
+	*owner = (float)(int)(words[1] & 0xffu) - 2.0f;
+	*value = world_ao_half_float(words[1] >> 16);
+	*lightmap = (words[1] & XGPU_WORLD_AO_INPUT_LIGHTMAP_BIT) != 0;
+	*all_shapes = (words[1] & XGPU_WORLD_AO_INPUT_ALL_SHAPES_BIT) != 0;
+	memcpy(distance, &words[2], sizeof(*distance));
+	return 1;
+}
+
+float world_ao_pass_occlusion(float const parameters[2][4], struct world_sdf_volume const *volume,
+	struct world_proxy const *proxies, long count, float const grid[2][4],
+	unsigned int const cells[WORLD_AO_GRID_CELLS / 2][4], float const point[3], unsigned int const words[4])
+{
+	float normal[3], owner, value, proxied = 1.0f, factor, field, reference, distance;
+	int lightmap, all_shapes, cell, word, bit;
+	long limit;
+
+	if (!world_ao_inputs_unpack(words, normal, &owner, &value, &lightmap, &all_shapes, &distance))
+		return 1.0f;
+	/* (the shapes walked: the dynamic objects' alone, or every one) */
+	limit = all_shapes ? count : (long)parameters[1][1] < count ? (long)parameters[1][1] : count;
+	cell = world_ao_grid_cell(grid, point);
+	for (word = 0; word < 2; word++)
+	{
+		unsigned int bits = cells[cell >> 1][((cell & 1) << 1) + word];
+
+		for (bit = 0; bit < 32; bit++)
+		{
+			if (word * 32 + bit < limit && (bits >> bit) & 1u &&
+				world_ao_proxy_factor(&proxies[word * 32 + bit], point, normal, owner, &factor))
+				proxied *= factor;
+		}
+	}
+	/* (the static term: the lightmap pass's page's texel, a model's field
+	relative to its reference; then the dynamic shapes' product) */
+	if (lightmap)
+	{
+		proxied *= value;
+		return mix(1.0f, proxied > WORLD_AO_FLOOR ? proxied : WORLD_AO_FLOOR, parameters[0][1]);
+	}
+	reference = value;
+	if (reference < 0.0f)
+	{
+		float inside = volume ? world_sdf_sample(volume, point) : 0.0f;
+
+		field = world_ao_field_occlusion_from(volume, point, normal, inside < 0.0f ? inside : 0.0f);
+		reference = 1.0f;
+	}
+	else
+	{
+		field = world_ao_field_occlusion(volume, point, normal);
+	}
+	field = mix(field, saturate(field / (reference > WORLD_AO_REFERENCE_LEAST ? reference : WORLD_AO_REFERENCE_LEAST)),
+		parameters[1][0]);
+	field = mix(1.0f, field, parameters[0][2]) * proxied;
+	return mix(1.0f, field > WORLD_AO_FLOOR ? field : WORLD_AO_FLOOR, parameters[0][0]);
+}
+
+/* a pixel's occlusion read from the pass's texels (struct
+world_ao_pass_texel: found at a quarter of the pixels, each at its 2x2
+block's nearest pixel): the four about it, each by its bilinear weight and
+its closeness (world_ao_upsample_closeness); where none is close, the
+closest of the 4x4 about it. At scale 1 the pixel's own */
+static void world_ao_unfold(float x, float y, float normal[3])
+{
+	float z = 1.0f - fabsf(x) - fabsf(y), t = z < 0.0f ? -z : 0.0f, length;
+
+	x += x >= 0.0f ? -t : t;
+	y += y >= 0.0f ? -t : t;
+	length = sqrtf(x * x + y * y + z * z);
+	normal[0] = x / length;
+	normal[1] = y / length;
+	normal[2] = z / length;
+}
+
+/* a texel's closeness to the pixel: its distance's to the pixel's
+(relative, by how squarely the pixel's surface faces the eye, so that a
+surface seen edge on, whose distance changes fast across it, keeps its
+texels), and its normal's (the cosine's eighth power) */
+static float world_ao_upsample_closeness(float distance, float facing, float const normal[3],
+	struct world_ao_pass_texel const *texel)
+{
+	float texel_normal[3], relative, along;
+
+	if (texel->distance <= 0.0f || distance <= 0.0f)
+		return 0.0f;
+	world_ao_unfold(texel->normal[0], texel->normal[1], texel_normal);
+	relative = fabsf(texel->distance / distance - 1.0f) * (facing > WORLD_AO_UPSAMPLE_FACING ? facing :
+		WORLD_AO_UPSAMPLE_FACING) * (1.0f / WORLD_AO_UPSAMPLE_DEPTH);
+	along = normal[0] * texel_normal[0] + normal[1] * texel_normal[1] + normal[2] * texel_normal[2];
+	along = along > 0.0f ? along : 0.0f;
+	along *= along;
+	along *= along;
+	along *= along;
+	return along / (1.0f + relative * relative);
+}
+
+float world_ao_upsample(struct world_ao_pass_texel const *texels, long width, long height, float scale, float x,
+	float y, float distance, float facing, float const normal[3])
+{
+	float at_x, at_y, fx, fy, sum = 0.0f, weights = 0.0f, best = -1.0f, nearest = 1.0f;
+	long base_x, base_y, i, j;
+
+	if (scale <= 1.0f)
+	{
+		long px = (long)x, py = (long)y;
+
+		px = px < 0 ? 0 : px >= width ? width - 1 : px;
+		py = py < 0 ? 0 : py >= height ? height - 1 : py;
+		return texels[py * width + px].occlusion;
+	}
+	at_x = x / scale - 0.5f;
+	at_y = y / scale - 0.5f;
+	base_x = (long)floorf(at_x);
+	base_y = (long)floorf(at_y);
+	fx = at_x - (float)base_x;
+	fy = at_y - (float)base_y;
+	for (j = 0; j < 2; j++)
+	{
+		for (i = 0; i < 2; i++)
+		{
+			long tx = base_x + i, ty = base_y + j;
+			float closeness;
+
+			tx = tx < 0 ? 0 : tx >= width ? width - 1 : tx;
+			ty = ty < 0 ? 0 : ty >= height ? height - 1 : ty;
+			closeness = world_ao_upsample_closeness(distance, facing, normal, &texels[ty * width + tx]);
+			sum += (i ? fx : 1.0f - fx) * (j ? fy : 1.0f - fy) * closeness * texels[ty * width + tx].occlusion;
+			weights += (i ? fx : 1.0f - fx) * (j ? fy : 1.0f - fy) * closeness;
+		}
+	}
+	if (weights > WORLD_AO_UPSAMPLE_LEAST)
+		return sum / weights;
+	/* (none close: the closest of the 4x4 about it, a thin surface's own
+	texel a block or two away) */
+	for (j = -1; j < 3; j++)
+	{
+		for (i = -1; i < 3; i++)
+		{
+			long tx = base_x + i, ty = base_y + j;
+			float closeness;
+
+			tx = tx < 0 ? 0 : tx >= width ? width - 1 : tx;
+			ty = ty < 0 ? 0 : ty >= height ? height - 1 : ty;
+			closeness = world_ao_upsample_closeness(distance, facing, normal, &texels[ty * width + tx]);
+			if (closeness > best)
+			{
+				best = closeness;
+				nearest = texels[ty * width + tx].occlusion;
+			}
+		}
+	}
+	return nearest;
+}
+
 /* ---------- the static scenery's pages (world_sdf.h's struct world_sdf_scenery) */
 
 /* (an owner no shape has: every shape shades the level) */

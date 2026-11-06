@@ -57,5 +57,8 @@ stage's, nor a combiner's place, whose 3D ones begin at 8) */
 halves: past the combiner's places, 8 to 19) */
 #define XGPU_METAL_TEXTURE_WORLD_AO_OBJECTS 20
 #define XGPU_METAL_BUFFER_WORLD_AO 23
+/* (and the occlusion found once a pixel, which the draws that read it
+read: past the objects' atlas) */
+#define XGPU_METAL_TEXTURE_WORLD_AO_PIXELS 21
 
 #endif

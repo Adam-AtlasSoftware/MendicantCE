@@ -27,6 +27,7 @@ the Classic preset's "off") draws exactly as before.
 #include <string.h>
 
 const char *config_string(const char *name);
+int config_boolean(const char *name);
 unsigned long config_changes(void);
 /* (render_enumerate.c's: the window drawn is a map's first frame's, unseen,
 which prepares its pipelines) */
@@ -391,6 +392,18 @@ void world_ao_window_begin(short local_player_index, short rasterizer_target, fl
 		(unsigned int const (*)[4])world_ao.cells);
 	world_ao.window = 1;
 	world_ao_counts_window();
+}
+
+int world_ao_prepass_begin(void)
+{
+	if (!world_ao.window || config_boolean("debug.world_ao_inline"))
+		return 0;
+	return halo_world_ao_prepass_begin();
+}
+
+void world_ao_prepass_end(short x0, short y0, short x1, short y1, float const camera[4][4])
+{
+	halo_world_ao_prepass_end(x0, y0, x1, y1, camera);
 }
 
 void world_ao_window_end(void)

@@ -322,7 +322,11 @@ static void render_model_parts(
 	long flags)
 {
 	boolean immediate = TEST_FLAG(flags, _render_model_immediate_bit);
-	short last_pass = TEST_FLAG(flags, _render_model_shadow_bit) ? _render_model_pass_solid : _render_model_pass_transparent;
+	/* port: display.ambient_occlusion "world"'s pre-pass draws the opaque
+	parts alone, the transparent ones queued by the window's own draw
+	(render_world_ao_prepass) */
+	short last_pass = TEST_FLAG(flags, _render_model_shadow_bit) ? _render_model_pass_solid :
+		render_world_ao_prepass ? _render_model_pass_decal : _render_model_pass_transparent;
 	struct render_sort_filth sort_filth[MAXIMUM_PARTS_PER_MODEL_GEOMETRY];
 	real_point3d centroid;
 	short pass;

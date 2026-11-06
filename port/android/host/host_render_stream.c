@@ -232,6 +232,7 @@ static const uint32_t record_minimum[XGPU_STREAM_RECORD_TYPES] =
 	[XGPU_STREAM_PANINI] = sizeof(struct xgpu_stream_panini),
 	[XGPU_STREAM_WORLD_AO_WINDOW] = sizeof(struct xgpu_stream_world_ao_window),
 	[XGPU_STREAM_WORLD_AO_FIELD] = sizeof(struct xgpu_stream_world_ao_field),
+	[XGPU_STREAM_WORLD_AO_PREPASS] = sizeof(struct xgpu_stream_world_ao_prepass),
 	[XGPU_STREAM_PIPELINE_STAND_IN] = sizeof(struct xgpu_stream_pipeline_stand_in),
 	/* (and its folder's path, at least its NUL) */
 	[XGPU_STREAM_SCREENSHOT] = sizeof(struct xgpu_stream_screenshot) + XGPU_STREAM_RECORD_ALIGNMENT,
@@ -527,6 +528,11 @@ static int decode_record(struct host_render_decoder *decoder, const unsigned cha
 		CALL(world_ao_field, field);
 		break;
 	}
+	case XGPU_STREAM_WORLD_AO_PREPASS:
+		if (((const struct xgpu_stream_world_ao_prepass *)(const void *)start)->phase > XGPU_WORLD_AO_PREPASS_END)
+			return XGPU_STREAM_ERROR_BOUNDS;
+		CALL(world_ao_prepass, (const void *)start);
+		break;
 	case XGPU_STREAM_TARGET_CREATE:
 		CALL(target_create, (const void *)start);
 		break;
