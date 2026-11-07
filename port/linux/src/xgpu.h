@@ -184,6 +184,12 @@ struct nv2a_pixel_shader_key
 	plus XGPU_OVERLAY_SURFACE_ONLY with a surface map and no tiles (below:
 	"The material overlay") */
 	unsigned char material_overlay;
+	/* display.prism_materials "pbr": a model draw lit for each pixel whose
+	shader a mod gives a material (port/linux/game/mod_pbr.c), shaded with
+	its albedo, normal, occlusion, roughness and metal, emissive, clear coat
+	and detail by the GGX path (below: "PBR materials"): 0 none, else
+	XGPU_PBR_ON and the images it reads (XGPU_PBR_*) */
+	unsigned char material_pbr;
 };
 
 /* ---------- the material overlay (display.prism_material_overlay)
@@ -260,6 +266,89 @@ as CE's cube map does. */
 #define XGPU_OVERLAY_SURFACE 64
 #define XGPU_OVERLAY_SURFACE_ONLY 128
 #define XGPU_OVERLAY_VIEW(material_overlay) (((material_overlay) >> 1) & 7)
+
+/* ---------- PBR materials (display.prism_materials "pbr")
+
+A model draw lit for each pixel (per_pixel_lighting, its world position
+handed on) whose shader a mod gives a material (mods' materials\<shader
+tag>.material.json: port/linux/game/mod_pbr.c) is shaded by a GGX path in
+place of the light CE's combiners are given, between texture stage 2 (the
+multipurpose map) and stage 3 (the reflection cube), as the material
+overlay is (and with it, where a mod gives the shader both: the overlay's
+micro normal, cavity and roughness are the material's finest detail
+layer). CE's combiners still make the colour: the albedo replaces texture
+0's colour (its alpha, the base map's, kept: the alpha test and blend are
+CE's), the diffuse light (v0) and the specular light (texture 3) are the
+material's, and the combiners then apply CE's detail map, change colour,
+self-illumination, specular mask and fog as the shader says. Its images
+(XGPU_MATERIAL_BINDING on: Vulkan, bindings 11 to 16 of the textures'
+set) are the texture store's (KTX2 files of the mod, no stock bitmap:
+XGPU_STREAM_TEXTURE_STORE_KIND_MATERIAL), sampled at the base map's
+coordinates (the detail tiled), repeating, trilinear and anisotropic: the
+albedo (RGB, the CE base map's colour space), the normal (tangent space:
+RG x and y, y up the picture, 0.5 flat), the ORM (R the occlusion, G the
+roughness, B the metal, as glTF's), the emissive (RGB), the clear coat's
+mask (R) and a detail tile (RG its normal's slopes, B the cavity, half
+of it, A the roughness offset, 0.5 none: the overlay tiles' packed_v1).
+The uniform (vec4 material[XGPU_MATERIAL_UNIFORM_COUNT]), the backend's
+from the material's definition (MATERIAL_DEFINE) and the store:
+
+  [0]  albedo factor (rgb), alpha unused
+  [1]  emissive factor (rgb), normal strength
+  [2]  roughness, metal (factors: of the ORM's, else the values), occlusion
+       strength, reflection strength (the cube's)
+  [3]  clear coat strength, its roughness, dielectric F0, wrap (1: CE's
+       translucency term on distant light 0 kept)
+  [4]  detail: scale (tiles a base map coordinate), normal, cavity,
+       roughness strengths
+  [5]  each image drawn (1) or not yet resident (0: its fallback, the
+       stock base map for the albedo, flat, the factors, none): albedo,
+       normal, ORM, emissive
+  [6]  clear coat mask, detail; the cube's least detailed level; spare
+  [7]  CE's specular mask (multipurpose red) kept (1) or not (0), CE's
+       self-illumination kept, CE's reflection tint and brightness
+       (perpendicular, parallel: v1) kept, direct specular scale
+  [8]  the detail's mask: all, metal, dielectric (one-hot); CE's
+       reflection: the cube's light whole, as CE's shader adds it (1), or
+       by the split sum alone (0), mixed
+
+Light: the model's lights as CE gives them (rasterizer_set_model_lighting:
+the ambient, two distant, two point lights; the enhanced dynamic lights in
+the point lights' place, diffuse only), the world's occlusion on the
+ambient and distant ones (display.ambient_occlusion), the ORM's occlusion
+and the overlay's cavity on the ambient and the reflection; Lambert diffuse
+times (1 - metal), GGX specular (Smith visibility, Schlick Fresnel, F0 from
+the dielectric's and the albedo by the metal) on each light times pi
+(CE's lights are the Lambert term's radiance), the reflection cube at the
+reflection about the bent normal at the level of the roughness (levels'
+share) times Karis's analytic split-sum; the clear coat a second lobe on
+the vertices' normal, F0 0.04, darkening what is under it by its Fresnel.
+The view direction is the reflection the vertex program computed for
+texture 3, reflected back (the overlay's). */
+#define XGPU_MATERIAL_BINDING (XGPU_OVERLAY_BINDING + XGPU_OVERLAY_IMAGE_COUNT)
+#define XGPU_MATERIAL_IMAGE_COUNT 6
+#define XGPU_MATERIAL_UNIFORM_COUNT 9
+enum
+{
+	XGPU_MATERIAL_IMAGE_ALBEDO,
+	XGPU_MATERIAL_IMAGE_NORMAL,
+	XGPU_MATERIAL_IMAGE_ORM,
+	XGPU_MATERIAL_IMAGE_EMISSIVE,
+	XGPU_MATERIAL_IMAGE_CLEARCOAT,
+	XGPU_MATERIAL_IMAGE_DETAIL,
+};
+/* the pixel key's material_pbr: on, and each image it reads (a bit each,
+from XGPU_PBR_ALBEDO: XGPU_MATERIAL_IMAGE_* + 1); the clear coat's lobe
+is drawn with XGPU_PBR_CLEARCOAT_LOBE, with or without its mask */
+#define XGPU_PBR_ON 1u
+#define XGPU_PBR_IMAGE(image) (2u << (image))
+#define XGPU_PBR_ALBEDO XGPU_PBR_IMAGE(XGPU_MATERIAL_IMAGE_ALBEDO)
+#define XGPU_PBR_NORMAL XGPU_PBR_IMAGE(XGPU_MATERIAL_IMAGE_NORMAL)
+#define XGPU_PBR_ORM XGPU_PBR_IMAGE(XGPU_MATERIAL_IMAGE_ORM)
+#define XGPU_PBR_EMISSIVE XGPU_PBR_IMAGE(XGPU_MATERIAL_IMAGE_EMISSIVE)
+#define XGPU_PBR_CLEARCOAT XGPU_PBR_IMAGE(XGPU_MATERIAL_IMAGE_CLEARCOAT)
+#define XGPU_PBR_DETAIL XGPU_PBR_IMAGE(XGPU_MATERIAL_IMAGE_DETAIL)
+#define XGPU_PBR_CLEARCOAT_LOBE 128u
 
 /* the vertex constants the per-pixel model lighting reads, in a uniform of
 their own (the vertex shader's 192 would pass the least fragment uniform

@@ -3840,6 +3840,45 @@ void d3d8_set_material_overlay(const float *uniforms, const unsigned int *tiles,
 		(surface && surface[0] && surface[1] ? XGPU_OVERLAY_SURFACE : 0) + (surface_only ? XGPU_OVERLAY_SURFACE_ONLY : 0));
 }
 
+/* ---------- display.prism_materials
+
+The model draws that follow take a material (xgpu.h's "PBR materials";
+port/linux/game/mod_pbr.c arms it around a model shader's draws, as the
+overlay is): its id (MATERIAL_DEFINE's) and its pixel key bits
+(XGPU_PBR_*); id 0 disarms it. Lit for each pixel as the overlay's draws
+are (xgpu_draw_derive); the id goes to the backend as it changes, before the
+first draw that reads it. */
+static struct
+{
+	BOOL armed;
+	unsigned long id, sent;
+	unsigned char key;
+} material_pbr;
+
+int d3d8_materials_drawn(void)
+{
+	return xgpu_backend_capabilities.materials != 0;
+}
+
+void d3d8_set_material_pbr(unsigned long id, unsigned int flags)
+{
+	if (!id || !(flags & XGPU_PBR_ON) || !xgpu_backend_capabilities.materials)
+	{
+		material_pbr.armed = FALSE;
+		return;
+	}
+	material_pbr.armed = TRUE;
+	material_pbr.id = id;
+	material_pbr.key = (unsigned char)flags;
+}
+
+/* (a map's materials defined again: the id last sent forgotten) */
+void d3d8_materials_reset(void)
+{
+	material_pbr.armed = FALSE;
+	material_pbr.sent = 0;
+}
+
 /* display.per_pixel_lighting: the model lighting programs' draws are lit for
 each pixel (xgpu_spirv.c's model lighting), from shaders of their own; read
 again when a setting changes. The enhanced dynamic lights light models for
@@ -4048,6 +4087,7 @@ static void pipeline_derived(const struct xgpu_draw_derived *derived, struct xgp
 	key->pixel.dynamic_lights = derived->dynamic_lights;
 	key->pixel.ambient_occlusion = derived->ambient_occlusion;
 	key->pixel.material_overlay = derived->material_overlay;
+	key->pixel.material_pbr = derived->material_pbr;
 }
 
 /* a draw as no setting changes it (key: before xgpu_draw_derive) to the
@@ -4094,6 +4134,18 @@ static BOOL pipeline_bind(struct vertex_shader_object *program, struct xgpu_draw
 	{
 		pipeline_derived(&derived, pipeline_key);
 		chosen = xgpu_backend_pipeline(pipeline_key);
+	}
+	/* (display.prism_materials' not made: drawn as it would be without
+	it) */
+	if (lit && !chosen && derived.material_pbr)
+	{
+		facts->material_pbr = 0;
+		lit = xgpu_draw_derive(facts, FALSE, &derived);
+		if (lit)
+		{
+			pipeline_derived(&derived, pipeline_key);
+			chosen = xgpu_backend_pipeline(pipeline_key);
+		}
 	}
 	/* (display.prism_material_overlay's not made: drawn as it would be
 	without it) */
@@ -4306,6 +4358,8 @@ static BOOL prepare_draw(BOOL immediate, unsigned long primitive)
 	/* (display.prism_material_overlay: the overlay a mod armed for the
 	model shader's draws) */
 	facts.material_overlay = material_overlay.armed ? material_overlay.key : 0;
+	/* (display.prism_materials: the material a mod armed) */
+	facts.material_pbr = material_pbr.armed ? material_pbr.key : 0;
 	if (device.gl_ready)
 		world_ao_twins();
 	basis = pipeline_key;
@@ -4344,6 +4398,12 @@ static BOOL prepare_draw(BOOL immediate, unsigned long primitive)
 	/* (its overlay's uniform and images, sent as they change) */
 	if (pipeline_key.pixel.material_overlay)
 		xgpu_backend_material_overlay(&material_overlay.overlay);
+	/* (its material's id, sent as it changes) */
+	if (pipeline_key.pixel.material_pbr && material_pbr.sent != material_pbr.id)
+	{
+		xgpu_backend_material_bind(material_pbr.id);
+		material_pbr.sent = material_pbr.id;
+	}
 	preparation_time_add(2, traced);
 	traced = preparation_time();
 	/* (the number of the key of xgpu_backend_pipeline's last call, above:

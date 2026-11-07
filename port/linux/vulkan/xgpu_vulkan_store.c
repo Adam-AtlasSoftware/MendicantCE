@@ -167,6 +167,7 @@ static int store_make(void)
 	settings.budget_floor = 128ull << 20;
 	settings.budget_ceiling = 6ull << 30;
 	settings.side_maximum = XGPU_KTX2_SIDE_MAXIMUM;
+	settings.material_side_maximum = XGPU_STREAM_TEXTURE_STORE_MATERIAL_SIDE;
 	store_glue.store = xgpu_texture_store_create(&backend, &settings);
 	if (!store_glue.store)
 		store_glue.failed = 1;
@@ -221,6 +222,7 @@ void xgpu_vulkan_store_map(void *context, const struct xgpu_stream_texture_store
 		asked[index].stock.height = queries[index].stock_height;
 		asked[index].stock.levels = queries[index].stock_levels;
 		asked[index].stock.cube = queries[index].stock_type == 1;
+		asked[index].material = queries[index].kind == XGPU_STREAM_TEXTURE_STORE_KIND_MATERIAL;
 	}
 	xgpu_texture_store_map(store_glue.store, record->generation, record->budget_megabytes,
 		(record->flags & XGPU_STREAM_TEXTURE_STORE_LOADING) != 0, count, asked, answered);

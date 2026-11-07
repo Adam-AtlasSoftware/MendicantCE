@@ -194,6 +194,10 @@ struct xgpu_draw_facts
 	which lights it for each pixel whatever display.per_pixel_lighting says,
 	where its lighting has its world position */
 	int material_overlay;
+	/* display.prism_materials: the material a mod gives the draw's shader
+	(nv2a_pixel_shader_key's material_pbr, xgpu.h; 0 none), lit for each
+	pixel as the overlay is */
+	int material_pbr;
 };
 
 /* what the facts make of the pipeline (xgpu_backend.h's XGPU_LIGHTING_*,
@@ -203,7 +207,7 @@ struct xgpu_draw_derived
 	uint8_t lighting, color_format, samples;
 	uint8_t alpha_test_samples, per_pixel_lighting, dynamic_lights, ambient_occlusion;
 	uint16_t hdr;
-	uint8_t material_overlay;
+	uint8_t material_overlay, material_pbr;
 };
 
 /* the pipeline the facts give a draw, lit as the settings light it, or

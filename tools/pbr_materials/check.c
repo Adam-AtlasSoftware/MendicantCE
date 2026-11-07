@@ -1,0 +1,124 @@
+/*
+CHECK.C
+
+display.prism_materials' shaders (port/linux/src/xgpu.h's "PBR materials";
+tools/test_pbr_materials.py): the SPIR-V emitter's pixel shaders of a model
+lit for each pixel with a material, as the backend makes them, written for
+the test to validate and read. A model shader's shape (texture 0 the base
+map, 2 the multipurpose map, 3 the reflection cube: v0 by texture 0, plus
+texture 3 by r1's alpha, fogged), lit by its point lights or the enhanced
+dynamic lights, with and without the material overlay (a surface map), for
+every material_pbr the key may have:
+
+  check spirv <directory>      <name>.spv for each case: pbr-<bits>-<lights>-<overlay>-<cube>,
+                               and base-<lights>-<overlay> (material_pbr 0)
+
+Built by the test with the shader decoders and both emitters, as
+tools/ambient_occlusion_light is.
+*/
+
+#include "xgpu.h"
+#include "xgpu_backend.h"
+#include "xgpu_shader.h"
+#include "xgpu_msl.h"
+#include "xgpu_spirv.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+void platform_log(const char *format, ...) { (void)format; }
+
+/* the model shader's shape: t0 * v0 + t3 * r1.a, alpha t0's */
+static void program_make(struct xgpu_pixel_program *program, int dynamic_lights, int overlay, int cube,
+	unsigned int pbr)
+{
+	memset(program, 0, sizeof(*program));
+	program->stages[0].declared_mode = program->stages[0].mode = XGPU_TEXTURE_PROJECT2D;
+	program->stages[0].sampler = _xgpu_sampler_2d;
+	program->stages[2].declared_mode = program->stages[2].mode = XGPU_TEXTURE_PROJECT2D;
+	program->stages[2].sampler = _xgpu_sampler_2d;
+	if (cube)
+	{
+		program->stages[3].declared_mode = program->stages[3].mode = XGPU_TEXTURE_CUBEMAP;
+		program->stages[3].sampler = _xgpu_sampler_cube;
+	}
+	program->combiner_count = 1;
+	/* (r0 = t0 * v0 + t3 * r1.a) */
+	program->combiners[0].portions[0].inputs[0].reg = XGPU_REGISTER_T0;
+	program->combiners[0].portions[0].inputs[1].reg = XGPU_REGISTER_V0;
+	program->combiners[0].portions[0].inputs[2].reg = XGPU_REGISTER_T3;
+	program->combiners[0].portions[0].inputs[3].reg = XGPU_REGISTER_R1;
+	program->combiners[0].portions[0].inputs[3].alpha = 1;
+	program->combiners[0].portions[0].sum = XGPU_REGISTER_R0;
+	program->final.present = 1;
+	program->final.inputs[0].reg = XGPU_REGISTER_FOG;
+	program->final.inputs[0].alpha = 1;
+	program->final.inputs[1].reg = XGPU_REGISTER_R0;
+	program->final.inputs[2].reg = XGPU_REGISTER_FOG;
+	program->final.inputs[6].reg = XGPU_REGISTER_T0;
+	program->final.inputs[6].alpha = 1;
+	program->per_pixel_lighting = 2;
+	program->dynamic_lights = dynamic_lights ? XGPU_DYNAMIC_LIGHTS_MODEL : 0;
+	program->material_overlay = overlay ? (unsigned char)(1 + XGPU_OVERLAY_SURFACE + XGPU_OVERLAY_SURFACE_ONLY) : 0;
+	program->material_pbr = (unsigned char)pbr;
+}
+
+static int write_module(const char *directory, const char *name, const struct xgpu_spirv_module *module)
+{
+	char path[1024];
+	FILE *file;
+
+	snprintf(path, sizeof(path), "%s/%s.spv", directory, name);
+	if (!(file = fopen(path, "wb")))
+		return 1;
+	fwrite(module->words, 4, module->count, file);
+	fclose(file);
+	return 0;
+}
+
+static int spirv(const char *directory)
+{
+	struct xgpu_pixel_program program;
+	struct xgpu_spirv_options options;
+	struct xgpu_spirv_module module;
+	char name[128];
+	unsigned int bits;
+	int lights, overlay, cube;
+
+	memset(&options, 0, sizeof(options));
+	for (lights = 0; lights < 2; lights++)
+	{
+		for (overlay = 0; overlay < 2; overlay++)
+		{
+			program_make(&program, lights, overlay, 1, 0);
+			snprintf(name, sizeof(name), "base-%d-%d", lights, overlay);
+			if (!xgpu_spirv_pixel_shader(&program, &options, &module) || write_module(directory, name, &module))
+				return 1;
+			free(module.words);
+			for (cube = 0; cube < 2; cube++)
+			{
+				/* (every image's bit and the clear coat's lobe, with XGPU_PBR_ON) */
+				for (bits = 0; bits < 128; bits++)
+				{
+					unsigned int pbr = XGPU_PBR_ON | (bits << 1);
+
+					program_make(&program, lights, overlay, cube, pbr);
+					snprintf(name, sizeof(name), "pbr-%03u-%d-%d-%d", pbr, lights, overlay, cube);
+					if (!xgpu_spirv_pixel_shader(&program, &options, &module) || write_module(directory, name, &module))
+						return 1;
+					free(module.words);
+				}
+			}
+		}
+	}
+	return 0;
+}
+
+int main(int argc, char **argv)
+{
+	if (argc == 3 && !strcmp(argv[1], "spirv"))
+		return spirv(argv[2]);
+	fprintf(stderr, "check spirv <directory>\n");
+	return 2;
+}

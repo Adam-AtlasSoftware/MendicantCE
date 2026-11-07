@@ -82,6 +82,8 @@ static struct
 	long material_count;
 	/* (and bitmaps the texture store replaces: mod_textures.c) */
 	long texture_count;
+	/* (and model shaders given materials: mod_pbr.c) */
+	long pbr_count;
 } mods_globals;
 
 /* ---------- private code */
@@ -100,6 +102,9 @@ static void mods_update(
 	mods_globals.sound_count = mod_sounds_update(remove_all, at_load);
 	mods_globals.model_count = mod_models_update(remove_all, at_load);
 	mods_globals.material_count = mod_materials_update(remove_all, at_load);
+	/* (display.prism_materials' files, whose images go with the texture
+	store's record) */
+	mods_globals.pbr_count = mod_pbr_update(remove_all, at_load);
 	mods_globals.texture_count = mod_textures_update(remove_all, at_load);
 	/* (the texture cache's size follows the mods' bitmaps: as the map
 	loads, mods_tags_loaded) */
@@ -308,6 +313,7 @@ static void mods_let_go(
 	mod_strings_tags_unloaded();
 	mod_materials_tags_unloaded();
 	mod_textures_tags_unloaded();
+	mod_pbr_tags_unloaded();
 	mods_globals.map_loaded = FALSE;
 	mods_globals.enabled = FALSE;
 	mods_globals.loose_sounds_enabled = FALSE;
@@ -319,6 +325,7 @@ static void mods_let_go(
 	mods_globals.model_count = 0;
 	mods_globals.material_count = 0;
 	mods_globals.texture_count = 0;
+	mods_globals.pbr_count = 0;
 
 	return;
 }

@@ -838,6 +838,102 @@ static void test_budget_wobble(void)
 	fake.quiet = 0;
 }
 
+/* display.prism_materials' images (no stock bitmap): any power-of-two size
+up to the material side (8192, past the replacements' 4096), 2D alone,
+usable once their levels from 256 texels down are resident, the view's
+stock that level */
+static void test_material(void)
+{
+	struct xgpu_texture_store *store = store_make(1u << 20, 256u << 10, 1u << 20, 0);
+	struct xgpu_ktx2_stock none = { 0, 0, 0, 0 };
+	struct xgpu_store_query queries[4];
+	struct xgpu_store_answer answers[4];
+	struct xgpu_texture_store_view view;
+	struct made made = made_bc7(1024, 512);
+	char paths[4][4200];
+	unsigned char *bytes;
+	uint64_t size;
+	int frames, usable_frame = -1;
+
+	fake.quiet = 1;
+	snprintf(paths[0], sizeof(paths[0]), "%s/mods/test/textures/max/material_albedo.ktx2", folder);
+	snprintf(paths[1], sizeof(paths[1]), "%s/mods/test/textures/max/material_big.ktx2", folder);
+	snprintf(paths[2], sizeof(paths[2]), "%s/mods/test/textures/max/material_cube.ktx2", folder);
+	snprintf(paths[3], sizeof(paths[3]), "%s/mods/test/textures/max/material_small.ktx2", folder);
+	made.salt = 9;
+	bytes = ktx2_make(&made, &size);
+	file_write(paths[0], bytes, size);
+	free(bytes);
+	/* (8192 on a side: a material's, not a replacement's) */
+	made = made_bc7(8192, 16);
+	made.vk_format = 141;
+	bytes = ktx2_make(&made, &size);
+	file_write(paths[1], bytes, size);
+	free(bytes);
+	made = made_bc7(64, 64);
+	made.faces = 6;
+	bytes = ktx2_make(&made, &size);
+	file_write(paths[2], bytes, size);
+	free(bytes);
+	made = made_bc7(64, 32);
+	bytes = ktx2_make(&made, &size);
+	file_write(paths[3], bytes, size);
+	free(bytes);
+	for (frames = 0; frames < 4; frames++)
+	{
+		query_make(&queries[frames], paths[frames], &none);
+		queries[frames].material = 1;
+	}
+	fake.serial = 1;
+	fake.completed = 0;
+	fake.gpu_follows = 1;
+	xgpu_texture_store_map(store, 11, 0, 0, 4, queries, answers);
+	CHECK(answers[0].id == XGPU_TEXTURE_STORE_ID(11, 0) && answers[0].width == 1024 && answers[0].height == 512 &&
+		answers[0].levels == 11);
+	CHECK(answers[1].id == XGPU_TEXTURE_STORE_ID(11, 1) && answers[1].width == 8192 &&
+		answers[1].format == XGPU_KTX2_FORMAT_BC5);
+	CHECK(!answers[2].id && answers[2].status == XGPU_KTX2_INVALID);
+	CHECK(answers[3].id == XGPU_TEXTURE_STORE_ID(11, 2));
+	/* (as a bitmap's replacement, the 8192 one is too large, and with no
+	stock size every one is refused) */
+	{
+		struct xgpu_store_query query = queries[1];
+		struct xgpu_store_answer answer;
+
+		query.material = 0;
+		xgpu_texture_store_map(store, 12, 0, 0, 1, &query, &answer);
+		CHECK(!answer.id && answer.status == XGPU_KTX2_SIZE);
+		query = queries[0];
+		query.material = 0;
+		xgpu_texture_store_map(store, 13, 0, 0, 1, &query, &answer);
+		CHECK(!answer.id && answer.status == XGPU_KTX2_SIZE);
+	}
+	xgpu_texture_store_map(store, 14, 0, 0, 4, queries, answers);
+	CHECK(!xgpu_texture_store_use(store, answers[0].id, &view));
+	for (frames = 0; frames < 400 && usable_frame < 0; frames++)
+	{
+		if (xgpu_texture_store_use(store, answers[0].id, &view))
+		{
+			usable_frame = frames;
+			/* (1024 by 512: usable at 256 by 128, level 2, its stock) */
+			CHECK(view.scale == 2 && view.resident <= 2 && view.stock.width == 256 && view.stock.height == 128 &&
+				view.stock.levels == 9 && !view.cube);
+		}
+		run_work(store, 0);
+		frame(store);
+	}
+	CHECK(usable_frame >= 0);
+	/* (a material smaller than 256: usable whole, its stock itself) */
+	for (frames = 0; frames < 400 && !xgpu_texture_store_use(store, answers[3].id, &view); frames++)
+	{
+		run_work(store, 0);
+		frame(store);
+	}
+	CHECK(frames < 400 && view.scale == 0 && view.stock.width == 64 && view.stock.height == 32 && view.resident == 0);
+	xgpu_texture_store_destroy(store);
+	fake.quiet = 0;
+}
+
 int main(int argc, char **argv)
 {
 	char mods[4300];
@@ -859,6 +955,7 @@ int main(int argc, char **argv)
 	mkdir(mods, 0755);
 	test_ktx2();
 	test_map();
+	test_material();
 	test_residency(threads);
 	if (!threads)
 	{

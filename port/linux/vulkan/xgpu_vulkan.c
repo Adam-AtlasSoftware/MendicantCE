@@ -269,14 +269,19 @@ struct garbage
 
 /* what a texture set has: the stages' images (and their numbers), kinds
 and samplers, as the draws name them (samplers are never destroyed), and
-the material overlay's after them (none: not written) */
-#define TEXTURE_SET_BINDINGS (4 + XGPU_VULKAN_OVERLAY_IMAGES)
+the material overlay's after them, then display.prism_materials' (none:
+not written; the materials' only where the device has them: the layout's
+bindings, vk.texture_bindings) */
+#define TEXTURE_SET_OVERLAY_BINDINGS (4 + XGPU_VULKAN_OVERLAY_IMAGES)
+#define TEXTURE_SET_BINDINGS (TEXTURE_SET_OVERLAY_BINDINGS + XGPU_VULKAN_MATERIAL_IMAGES)
+_Static_assert(XGPU_VULKAN_BINDING_MATERIAL == TEXTURE_SET_OVERLAY_BINDINGS, "the materials' bindings");
 struct texture_set_key
 {
 	struct xgpu_vulkan_image *images[TEXTURE_SET_BINDINGS];
 	uint64_t numbers[TEXTURE_SET_BINDINGS];
 	VkSampler samplers[TEXTURE_SET_BINDINGS];
 	uint8_t kinds[TEXTURE_SET_BINDINGS];
+	/* (1 the overlay's written, 3 the materials' too) */
 	uint8_t overlay;
 };
 
@@ -523,8 +528,11 @@ static struct
 		VkDeviceSize index_offset;
 	} bound;
 	VkDescriptorSet bound_textures;
-	struct xgpu_vulkan_texture last_textures[4 + XGPU_VULKAN_OVERLAY_IMAGES];
+	struct xgpu_vulkan_texture last_textures[TEXTURE_SET_BINDINGS];
 	uint8_t last_overlay;
+	/* the textures' layout's bindings (TEXTURE_SET_OVERLAY_BINDINGS, or
+	TEXTURE_SET_BINDINGS with display.prism_materials) */
+	uint32_t texture_bindings;
 	VkDescriptorSet last_texture_set;
 	int last_texture_valid;
 
@@ -2556,7 +2564,7 @@ void xgpu_vulkan_image_destroy(struct xgpu_vulkan_image *image)
 	}
 	if (vk.last_texture_valid)
 	{
-		for (index = 0; index < 4 + XGPU_VULKAN_OVERLAY_IMAGES; index++)
+		for (index = 0; index < TEXTURE_SET_BINDINGS; index++)
 		{
 			if (vk.last_textures[index].image == image)
 				vk.last_texture_valid = 0;
@@ -4570,7 +4578,7 @@ static VkDescriptorPool descriptor_pool_get(void)
 		scenery's pages, the vehicles' fields' atlas and the occlusion found
 		once a pixel) */
 		sizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-		sizes[0].descriptorCount = SETS_A_POOL * TEXTURE_SET_BINDINGS;
+		sizes[0].descriptorCount = SETS_A_POOL * (vk.texture_bindings ? vk.texture_bindings : TEXTURE_SET_BINDINGS);
 		/* (display.hdr's input sets, where draws can read their colour
 		attachment) */
 		sizes[2].type = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT;
@@ -4772,9 +4780,13 @@ static void texture_set_remember(struct slot *slot, const struct texture_set_key
 /* the descriptor set of the stages' textures, and with overlay the material
 overlay's images after them (display.prism_material_overlay: bindings
 XGPU_VULKAN_BINDING_OVERLAY on; else those are not written, as no shader
-without it reads them): the last draw's, one written before in this
-submission (the game's draws come back to the same few), or a new one */
-static VkDescriptorSet texture_set(const struct xgpu_vulkan_texture textures[4], const struct xgpu_vulkan_texture *overlay)
+without it reads them), and with material the material's after those
+(display.prism_materials: XGPU_VULKAN_BINDING_MATERIAL on, the overlay's
+written too, stand-ins where there is none): the last draw's, one written
+before in this submission (the game's draws come back to the same few), or
+a new one */
+static VkDescriptorSet texture_set(const struct xgpu_vulkan_texture textures[4], const struct xgpu_vulkan_texture *overlay,
+	const struct xgpu_vulkan_texture *material)
 {
 	VkDescriptorImageInfo images[TEXTURE_SET_BINDINGS];
 	VkWriteDescriptorSet writes[TEXTURE_SET_BINDINGS];
@@ -4783,19 +4795,26 @@ static VkDescriptorSet texture_set(const struct xgpu_vulkan_texture textures[4],
 	struct texture_set_key key;
 	struct texture_set_entry *entry;
 	uint32_t bucket;
-	int stage, count = overlay ? TEXTURE_SET_BINDINGS : 4;
+	uint8_t written;
+	int stage, count;
 
+	if (material && vk.texture_bindings < TEXTURE_SET_BINDINGS)
+		material = NULL;
+	written = (uint8_t)(material ? 3 : overlay ? 1 : 0);
+	count = material ? TEXTURE_SET_BINDINGS : overlay ? TEXTURE_SET_OVERLAY_BINDINGS : 4;
 	memset(all, 0, sizeof(all));
 	memcpy(all, textures, 4 * sizeof(all[0]));
 	if (overlay)
 		memcpy(&all[4], overlay, XGPU_VULKAN_OVERLAY_IMAGES * sizeof(all[0]));
-	if (vk.last_texture_valid && vk.last_overlay == (overlay != NULL) &&
+	if (material)
+		memcpy(&all[TEXTURE_SET_OVERLAY_BINDINGS], material, XGPU_VULKAN_MATERIAL_IMAGES * sizeof(all[0]));
+	if (vk.last_texture_valid && vk.last_overlay == written &&
 		!memcmp(vk.last_textures, all, sizeof(vk.last_textures)))
 		return vk.last_texture_set;
 	/* (by the images' numbers too: a destroyed image's sets are never
 	found, even by an image made at its address) */
 	memset(&key, 0, sizeof(key));
-	key.overlay = overlay != NULL;
+	key.overlay = written;
 	for (stage = 0; stage < count; stage++)
 	{
 		key.images[stage] = all[stage].image;
@@ -4809,7 +4828,7 @@ static VkDescriptorSet texture_set(const struct xgpu_vulkan_texture textures[4],
 	{
 		/* (its images are marked used: it was written in this submission) */
 		memcpy(vk.last_textures, all, sizeof(vk.last_textures));
-		vk.last_overlay = overlay != NULL;
+		vk.last_overlay = written;
 		vk.last_texture_set = entry->set;
 		vk.last_texture_valid = 1;
 		vk.statistics.texture_sets_reused++;
@@ -4852,7 +4871,7 @@ static VkDescriptorSet texture_set(const struct xgpu_vulkan_texture textures[4],
 	vkUpdateDescriptorSets(vk.device, (uint32_t)count, writes, 0, NULL);
 	texture_set_remember(vk.slot, &key, bucket, set);
 	memcpy(vk.last_textures, all, sizeof(vk.last_textures));
-	vk.last_overlay = overlay != NULL;
+	vk.last_overlay = written;
 	vk.last_texture_set = set;
 	vk.last_texture_valid = 1;
 	vk.statistics.texture_sets_written++;
@@ -4886,7 +4905,8 @@ void xgpu_vulkan_draw(const struct xgpu_vulkan_draw *draw)
 		return;
 	/* (the texture set first: it may begin the recording) */
 	recording_begin();
-	sets[1] = texture_set(draw->textures, draw->material_overlay ? draw->overlay : NULL);
+	sets[1] = texture_set(draw->textures, draw->material_overlay || draw->material ? draw->overlay : NULL,
+		draw->material ? draw->material_images : NULL);
 	if (!sets[1])
 		return;
 	/* A draw that samples the depth attachment it is tested against (the
@@ -4913,6 +4933,9 @@ void xgpu_vulkan_draw(const struct xgpu_vulkan_draw *draw)
 		/* (and the material overlay's) */
 		for (index = 0; draw->material_overlay && index < XGPU_VULKAN_OVERLAY_IMAGES; index++)
 			image_use(draw->overlay[index].image);
+		/* (and the material's) */
+		for (index = 0; draw->material && index < XGPU_VULKAN_MATERIAL_IMAGES; index++)
+			image_use(draw->material_images[index].image);
 		/* (and the enhanced dynamic lights' cells, which the draws' set
 		names: no upload of them put aside before this pass) */
 		if (draw->dynamic_lights)
@@ -7012,6 +7035,13 @@ static int device_make(const struct xgpu_vulkan_options *options)
 	vk.capabilities.anisotropy = available.features.samplerAnisotropy ?
 		(uint32_t)vk.properties.limits.maxSamplerAnisotropy : 1;
 	vk.capabilities.block_compression = available.features.textureCompressionBC;
+	/* (display.prism_materials: the textures' set's 17 images, the lights'
+	cells and the occlusion's five a pixel shader may sample, each a
+	sampler and an image; block-compressed images, which the store's are) */
+	vk.capabilities.materials = available.features.textureCompressionBC &&
+		vk.properties.limits.maxPerStageDescriptorSamplers >= 24 &&
+		vk.properties.limits.maxPerStageDescriptorSampledImages >= 24 &&
+		vk.properties.limits.maxDescriptorSetSamplers >= 32 && getenv("HALO_MATERIALS_OFF") == NULL;
 	vk.capabilities.astc = available.features.textureCompressionASTC_LDR && format_has(VK_FORMAT_ASTC_4x4_UNORM_BLOCK, 0,
 		VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT |
 		VK_FORMAT_FEATURE_TRANSFER_DST_BIT);
@@ -7095,7 +7125,11 @@ static int layouts_make(void)
 		textures[index].descriptorCount = 1;
 		textures[index].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 	}
-	info.bindingCount = TEXTURE_SET_BINDINGS;
+	/* (display.prism_materials' images too, where a pixel shader may
+	sample them all: the textures' set's, the lights' cells and the
+	occlusion's five besides) */
+	vk.texture_bindings = vk.capabilities.materials ? TEXTURE_SET_BINDINGS : TEXTURE_SET_OVERLAY_BINDINGS;
+	info.bindingCount = vk.texture_bindings;
 	info.pBindings = textures;
 	if (!check(vkCreateDescriptorSetLayout(vk.device, &info, NULL, &vk.texture_layout), "vkCreateDescriptorSetLayout"))
 		return 0;

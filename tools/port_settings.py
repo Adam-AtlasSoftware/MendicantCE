@@ -941,6 +941,11 @@ PAGES = {
              [("AUTO", "0"), ("512 MB", "512"), ("1 GB", "1024"), ("2 GB", "2048"), ("4 GB", "4096")],
              "How much of the graphics card's memory mods' textures may take. Auto takes six tenths of what is "
              "free; past it, those not seen lately go back to the game's.", "desktop"),
+            # (PRISM's materials: the GGX path for the model shaders a mod
+            # gives a material, drawn by the Vulkan renderer alone)
+            ("MATERIALS", "display.prism_materials", [("STOCK", "stock"), ("PBR", "pbr")],
+             "Lights armour and weapons with the materials mods give them: their colour, bumps, roughness, "
+             "metal and coats under the level's own lights. Stock draws them as the Xbox did.", "desktop"),
         ],
     },
     # ---- the pages the rows open

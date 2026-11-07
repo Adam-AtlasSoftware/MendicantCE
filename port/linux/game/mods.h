@@ -158,4 +158,19 @@ void mod_materials_draw_end(void);
 /* (the script function prism_set) */
 void mod_materials_prism_set(char const *text);
 
+/* ---------- prototypes/MOD_PBR.C (display.prism_materials: a mod's
+materials, xgpu.h's "PBR materials") */
+
+long mod_pbr_update(boolean remove_all, boolean at_load);
+void mod_pbr_tags_unloaded(void);
+/* (mod_textures.c, once a frame: TRUE if the materials were read again) */
+boolean mod_pbr_frame(void);
+/* (mod_textures.c) the images' files, and the store's ids of them */
+long mod_pbr_texture_count(void);
+long mod_pbr_texture_file(long index);
+void mod_pbr_textures_answered(unsigned long const *ids, long count);
+/* (mod_materials.c's draw_begin and draw_end) */
+boolean mod_pbr_draw_begin(struct shader const *shader);
+void mod_pbr_draw_end(void);
+
 #endif
