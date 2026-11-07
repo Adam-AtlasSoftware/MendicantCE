@@ -38,7 +38,7 @@ port/linux/README.md.
 #include <stdint.h>
 
 #define XGPU_STREAM_MAGIC 0x53504758u /* "XGPS" */
-#define XGPU_STREAM_VERSION 22
+#define XGPU_STREAM_VERSION 23
 #define XGPU_STREAM_LOADING_ART_BYTES (640u * 480u * 4u)
 
 /* ---------- the ring
@@ -276,6 +276,9 @@ enum
 	/* display.prism_material_overlay: the overlay of the draws that follow
 	(xgpu_stream_material_overlay) */
 	XGPU_STREAM_MATERIAL_OVERLAY,
+	/* display.prism_textures: the map's replacement textures
+	(xgpu_stream_texture_store_map) */
+	XGPU_STREAM_TEXTURE_STORE_MAP,     /* synchronous */
 	XGPU_STREAM_RECORD_TYPES,
 };
 
@@ -320,8 +323,10 @@ struct xgpu_stream_capabilities
 	int32_t most_anisotropy;
 	uint8_t sample_counting, bgra_vertex_colors, base_vertex, sample_mask;
 	uint8_t mixed_constant_blend, dynamic_lights, dynamic_lights_preparable, hdr;
-	/* display.prism_material_overlay drawn (MATERIAL_OVERLAY) */
-	uint8_t material_overlay, unused[3];
+	/* display.prism_material_overlay drawn (MATERIAL_OVERLAY); PRISM's
+	texture store (TEXTURE_STORE_MAP, SET_TEXTURES' store ids): its files
+	opened and drawn by the host (0: the guest never asks) */
+	uint8_t material_overlay, texture_store, unused[2];
 };
 
 struct xgpu_stream_reply_record
@@ -695,12 +700,82 @@ struct xgpu_stream_texture_level
 
 /* the stages whose bits are set in changed follow, in order, each an
 xgpu_stream_texture_stage and its level_count levels; the others are as
-they were */
+they were. With XGPU_STREAM_TEXTURES_STORE in changed, four uint32_t
+follow them: each stage's texture store id from now on (0 none; the
+store's TEXTURE_STORE_MAP), sent only when they change, which they never
+do without a store (display.prism_textures stock: the record is as it was
+before the store). No other bit may be set. */
+#define XGPU_STREAM_TEXTURES_STAGES 0x0fu
+#define XGPU_STREAM_TEXTURES_STORE 0x100u
 struct xgpu_stream_set_textures
 {
 	uint32_t header;
 	uint32_t changed;
 };
+
+/* ---------- PRISM's texture store (display.prism_textures; the host's
+port/linux/vulkan/xgpu_texture_store.h)
+
+TEXTURE_STORE_MAP: the map's replacement textures, as the guest found them
+in the mods' textures folders (port/linux/game/mod_textures.c), sent at a
+map's load, as the mods are found again and as the setting changes. The
+host checks each file's header against the stock bitmap it replaces and
+answers each query (query_count of them, at queries, their paths' bytes at
+strings) with an id, into reply (query_count answers). generation is new
+at each record; an id carries its low 12 bits (XGPU_TEXTURE_STORE_ID), and
+a stage naming an id of an older generation is drawn stock. query_count 0
+closes the store (its images let go of). The queries, paths and answers are
+in a buffer of the guest's own, freed once the record is answered. */
+struct xgpu_stream_texture_store_map
+{
+	uint32_t header, reply;
+	uint32_t generation;
+	/* 1 enhanced, 2 max (for the host's log: the guest chose the files) */
+	uint32_t tier;
+	/* display.prism_texture_budget_mb (0: auto) */
+	uint32_t budget_megabytes;
+	uint32_t query_count, queries;
+	uint32_t strings, strings_size;
+	/* XGPU_STREAM_TEXTURE_STORE_LOADING: a map is loading (the uploads'
+	larger rate, until the first frame drawn after it) */
+	uint32_t flags;
+};
+#define XGPU_STREAM_TEXTURE_STORE_LOADING 1u
+/* a query: its file's path (offset into strings and length, NUL-terminated
+there; a host path, as the guest opens it), the size and modification
+time the guest found (a file changed since is refused), and the stock
+bitmap: its kind (XGPU_STREAM_TEXTURE_STORE_KIND_*), type (0 2D, 1 cube),
+levels and first level's size */
+#define XGPU_STREAM_TEXTURE_STORE_KIND_BITMAP 0
+struct xgpu_stream_texture_store_query
+{
+	uint32_t path, path_length;
+	uint32_t second_path, second_path_length;
+	uint32_t file_size, stamp_seconds;
+	uint8_t kind, stock_type, stock_levels, unused;
+	uint16_t stock_width, stock_height;
+};
+/* an answer: the id (0 refused), the file's size and levels, and why it was
+refused (XGPU_STREAM_TEXTURE_STORE_*), its format (the store's
+XGPU_KTX2_FORMAT_*) */
+enum
+{
+	XGPU_STREAM_TEXTURE_STORE_ACCEPTED,
+	XGPU_STREAM_TEXTURE_STORE_UNREADABLE,
+	XGPU_STREAM_TEXTURE_STORE_CHANGED,
+	XGPU_STREAM_TEXTURE_STORE_FORMAT,
+	XGPU_STREAM_TEXTURE_STORE_SIZE,
+	XGPU_STREAM_TEXTURE_STORE_DEVICE,
+	XGPU_STREAM_TEXTURE_STORE_PATH,
+};
+struct xgpu_stream_texture_store_answer
+{
+	uint32_t id;
+	uint16_t width, height;
+	uint8_t levels, status, format, unused;
+};
+/* the most queries a record has */
+#define XGPU_STREAM_TEXTURE_STORE_QUERIES 65536u
 
 /* display.prism_material_overlay (xgpu.h's "The material overlay"): the
 uniform and images of the draws that follow whose pixel key has
@@ -1339,6 +1414,9 @@ XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_ring, 104);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_frame_end, 12);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_capabilities, 24);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_material_overlay, 4 + 176 + 7 * 72);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_texture_store_map, 40);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_texture_store_query, 32);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_texture_store_answer, 12);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_hdr, 24);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_tone_map, 24);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_panini, 56);

@@ -105,6 +105,9 @@ none) */
 void host_render_record_shots(const char *directory, const char *frames);
 /* nonzero if the frame's picture is taken */
 int host_render_record_shot_wanted(uint32_t frame);
+/* a recording is made or played (not frames shot alone): what the stream
+plays must be the recording's alone (display.prism_textures' files are not) */
+int host_render_record_replaying(void);
 /* the frames the decoder has ended since the stream began (the replay
 counts them again from 0 each time it plays the recording) */
 uint32_t host_render_record_frame(void);

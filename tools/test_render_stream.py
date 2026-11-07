@@ -86,3 +86,51 @@ def test_render_stream(tmp_path, sanitizer):
     result = subprocess.run([str(binary)], capture_output=True, text=True, timeout=900)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "ThreadSanitizer" not in result.stderr, result.stderr
+
+
+def test_stock_bytes_are_the_base_encoders(tmp_path):
+    # display.prism_textures stock: the encoder with no texture store hook
+    # (and with a hook that has no ids) writes the same records, byte for
+    # byte, as the base branch's encoder (HALO_STREAM_BASE, default
+    # h1-integration: the texture store's base), over a repeatable run of
+    # texture stages (port/android/tests/render_stream_bytes.c); with ids
+    # they differ (the check sees them)
+    cc = compiler()
+    if not cc:
+        pytest.skip("no C compiler")
+    if sys.platform not in ("linux", "darwin") or platform.architecture()[0] != "64bit":
+        pytest.skip("needs a 64-bit Linux or macOS host")
+    base_ref = os.environ.get("HALO_STREAM_BASE", "h1-integration")
+    names = ("xgpu.h", "xgpu_backend.h", "xgpu_shader.h", "xgpu_stream.h", "xgpu_stream_encode.c",
+             "xgpu_stream_describe.c")
+    outputs = {}
+    for side in ("base", "new"):
+        folder = tmp_path / side
+        folder.mkdir()
+        for name in names:
+            if side == "base":
+                shown = subprocess.run(["git", "-C", str(ROOT), "show", f"{base_ref}:port/linux/src/{name}"],
+                                       capture_output=True)
+                if shown.returncode:
+                    pytest.skip(f"the base {base_ref} is not in this checkout")
+                (folder / name).write_bytes(shown.stdout)
+            else:
+                shutil.copy(ROOT / "port" / "linux" / "src" / name, folder / name)
+        shutil.copy(ROOT / "port" / "android" / "tests" / "render_stream" / "platform.h", folder / "platform.h")
+        binary = folder / "bytes"
+        subprocess.run(
+            [cc, "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-O1", "-g", "-D_GNU_SOURCE", "-D_DARWIN_C_SOURCE",
+             "-DHALO_GUEST_BASE=1", "-DXGPU_STREAM_TEST=1", *(["-DBYTES_HOOK=1"] if side == "new" else []),
+             f"-I{folder}", f"-I{ROOT / 'port' / 'linux' / 'src'}", f"-I{ROOT / 'port' / 'android' / 'host'}",
+             f"-I{ROOT / 'port' / 'android' / 'include'}",
+             str(ROOT / "port" / "android" / "tests" / "render_stream_bytes.c"), str(folder / "xgpu_stream_encode.c"),
+             str(folder / "xgpu_stream_describe.c"), "-o", str(binary)],
+            check=True)
+        for mode in (["none"] if side == "base" else ["none", "zero", "ids"]):
+            output = folder / f"{mode}.bin"
+            subprocess.run([str(binary), str(output), mode], check=True, timeout=120)
+            outputs[side, mode] = output.read_bytes()
+    assert len(outputs["base", "none"]) > 100000
+    assert outputs["new", "none"] == outputs["base", "none"]
+    assert outputs["new", "zero"] == outputs["base", "none"]
+    assert outputs["new", "ids"] != outputs["base", "none"]

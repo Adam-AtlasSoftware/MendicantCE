@@ -60,6 +60,7 @@ its swapchain.
 #include "xgpu_vulkan_post.h"
 #include "xgpu_vulkan_stream.h"
 #include "xgpu_vulkan_textures.h"
+#include "xgpu_vulkan_store.h"
 #ifdef HALO_VR
 #include "host_vulkan_vr.h"
 #endif
@@ -256,6 +257,9 @@ static struct
 	unsigned int textures_dirty;
 	int feedback_bound;
 	uint32_t textures_serial;
+	/* display.prism_textures: the texture store's epoch the stages were
+	looked at with (xgpu_vulkan_store_epoch) */
+	uint32_t store_epoch;
 	struct xgpu_vulkan_texture textures[4];
 	/* display.prism_material_overlay's, as last sent (its images looked up
 	at each draw that reads them: the cache keeps those it is asked for) */
@@ -770,8 +774,9 @@ static uint8_t border_axes(const struct xgpu_stream_sampler *sampler)
 }
 
 /* the sampler the record describes; axes: those whose border the shader
-draws, clamped to the edge here */
-static VkSampler sampler_get(const struct xgpu_stream_sampler *from, uint8_t axes)
+draws, clamped to the edge here; min_lod and max_lod (the texture store's,
+max_lod 0: none) the levels sampled, else the record's first */
+static VkSampler sampler_get_levels(const struct xgpu_stream_sampler *from, uint8_t axes, float min_lod, float max_lod)
 {
 	struct xgpu_vulkan_sampler_description to;
 	int axis;
@@ -786,9 +791,73 @@ static VkSampler sampler_get(const struct xgpu_stream_sampler *from, uint8_t axe
 	to.anisotropy = (uint8_t)(from->minify == _filter_anisotropic && from->anisotropy > 1 ?
 		(from->anisotropy > 16 ? 16 : from->anisotropy) : 1);
 	to.lod_bias = from->lod_bias;
-	to.min_lod = (float)from->first_level;
+	to.min_lod = max_lod > 0.0f ? min_lod : (float)from->first_level;
+	to.max_lod = max_lod;
 	to.border_color = from->border_color;
 	return xgpu_vulkan_sampler(&to);
+}
+
+static VkSampler sampler_get(const struct xgpu_stream_sampler *from, uint8_t axes)
+{
+	return sampler_get_levels(from, axes, 0.0f, 0.0f);
+}
+
+/* display.prism_textures: a stage of an Xbox texture with a store id whose
+replacement is usable, and whose stage is the stock bitmap's it was made
+for (its size and kind: the texture cache may have put another bitmap at
+its header since), drawn with the replacement: its image, and a sampler of
+the levels that stand for the stock's (an image's level j + scale is the
+stock's level j, its levels above the stock's first sampled only where the
+game samples its first: MAXMIPLEVEL 0) that are resident; 1 if it is */
+static int store_bind(const struct host_render_texture_stage *source, struct xgpu_vulkan_texture *texture, uint8_t axes)
+{
+	const struct xgpu_stream_texture_stage *stage = &source->stage;
+	struct xgpu_texture_store_view view;
+	struct xgpu_texture_description description;
+	uint32_t resident, first, last, stock_levels;
+	float min_lod, max_lod;
+
+	if (!source->store || !xgpu_vulkan_store_use(source->store, &view))
+		return 0;
+	xgpu_texture_describe(stage->resource_format, stage->resource_size, &description);
+	if (description.width != view.stock.width || description.height != view.stock.height ||
+		(description.cube_map != 0) != (view.cube != 0) || description.depth > 1 || description.linear)
+		return 0;
+	resident = view.resident - view.top;
+	first = stage->sampler.first_level ? stage->sampler.first_level + view.scale : 0;
+	first = first > view.top ? first - view.top : 0;
+	if (first < resident)
+		first = resident;
+	stock_levels = description.levels ? (uint32_t)description.levels : 1;
+	last = stock_levels - 1 + view.scale;
+	last = last > view.top ? last - view.top : 0;
+	if (last >= view.levels - view.top)
+		last = view.levels - view.top - 1;
+	if (last < first)
+		last = first;
+	min_lod = (float)first;
+	/* (max_lod 0 is none: a level's 0 is a thousandth past it) */
+	max_lod = (float)last + 0.001f;
+	if (stage->sampler.mip == _filter_none)
+	{
+		/* (a stage the game samples without mip levels samples the stock's
+		first level alone: the replacement's levels from the resident one
+		down to the one of the stock's size, mipmapped between them, so that
+		minified it looks as the stock does, not as a 4096-texel image
+		sampled without levels) */
+		struct xgpu_stream_sampler sampler = stage->sampler;
+		uint32_t stock_first = view.scale > view.top ? view.scale - view.top : 0;
+
+		if (stock_first < first)
+			stock_first = first;
+		sampler.mip = stage->sampler.minify == _filter_point ? _filter_point : _filter_linear;
+		texture->image = view.image;
+		texture->sampler = sampler_get_levels(&sampler, axes, min_lod, (float)stock_first + 0.001f);
+		return 1;
+	}
+	texture->image = view.image;
+	texture->sampler = sampler_get_levels(&stage->sampler, axes, min_lod, max_lod);
+	return 1;
 }
 
 /* a stage of a palettized Xbox texture, whose palette's colours are read as
@@ -990,12 +1059,13 @@ static void textures_bind(void)
 	stages that did not change keep what they have: each stage's image
 	and sampler are its own stage's alone, and the targets' changes mark
 	them all) */
-	if (serial != stream.textures_serial || stream.feedback_bound)
+	if (serial != stream.textures_serial || stream.feedback_bound || xgpu_vulkan_store_epoch() != stream.store_epoch)
 		dirty = TEXTURES_ALL;
 	if (!dirty)
 		return;
 	stream.textures_dirty = 0;
 	stream.textures_serial = serial;
+	stream.store_epoch = xgpu_vulkan_store_epoch();
 	stream.feedback_bound = 0;
 	for (index = 0; index < 4; index++)
 	{
@@ -1032,6 +1102,11 @@ static void textures_bind(void)
 			{
 				texture->image = target->image;
 			}
+		}
+		else if (stage->source == _source_texture && source->store && store_bind(source, texture, stream.border[index]))
+		{
+			/* (display.prism_textures: the replacement, the stock texture not
+			looked for) */
 		}
 		else if (stage->source == _source_texture || stage->source == XGPU_STREAM_SOURCE_IMAGE)
 		{
@@ -3201,6 +3276,9 @@ static void stream_frame_end(void *context)
 	}
 #endif
 	xgpu_vulkan_frame_end(back_buffer ? back_buffer->image : NULL, present_window);
+	/* (display.prism_textures: the replacements' levels read since copied
+	before the next frame's draws) */
+	xgpu_vulkan_store_frame();
 	/* (debug.load_trace: each frame's end on the render thread, whose
 	spacing tools/load_benchmark.py reads as the frames' times after a load) */
 	if (stream.trace_frames)
@@ -3244,6 +3322,12 @@ static void stream_frame_end(void *context)
 				textures.images, textures.thickness, textures.thickness_seconds * 1000.0,
 				statistics.gpu_frames ? statistics.gpu_milliseconds / statistics.gpu_frames : 0.0,
 				statistics.frames_timed ? statistics.frame_seconds * 1000.0 / statistics.frames_timed : 0.0);
+			{
+				char text[640];
+
+				if (xgpu_vulkan_store_statistics(text, sizeof(text)))
+					host_logf(HOST_LOG_INFO, "%s", text);
+			}
 		}
 	}
 	/* (each stage's texture looked for at least once a frame, so that the
@@ -3294,6 +3378,8 @@ static void stream_initialize(void *context, struct xgpu_stream_capabilities *ca
 	capabilities->hdr = stream.capabilities.color_read != 0;
 	/* (display.prism_material_overlay: its shaders, xgpu_spirv.c's) */
 	capabilities->material_overlay = 1;
+	/* (display.prism_textures: PRISM's texture store, xgpu_vulkan_store.c) */
+	capabilities->texture_store = (uint8_t)xgpu_vulkan_store_available();
 }
 
 static void stream_prepare(void *context)
@@ -3389,6 +3475,7 @@ const struct host_render_backend *xgpu_vulkan_stream_backend(void)
 		backend.read_target = stream_read_target;
 		backend.set_textures = stream_set_textures;
 		backend.material_overlay = stream_material_overlay;
+		backend.texture_store_map = xgpu_vulkan_store_map;
 		backend.set_constants = stream_set_constants;
 		backend.vertex_program = stream_vertex_program;
 		backend.vertex_lighting = stream_vertex_lighting;

@@ -2037,6 +2037,277 @@ static void test_malformed(void)
 	host_render_decoder_free(decoder);
 }
 
+
+/* ---------- display.prism_textures: the texture store's records */
+
+static struct
+{
+	uint32_t calls, count, generation, tier, budget, flags;
+	char paths[4][128];
+	uint32_t stock_width[4], stock_type[4], file_size[4];
+} store_seen;
+
+static void test_store_initialize(void *context, struct xgpu_stream_capabilities *capabilities)
+{
+	test_initialize(context, capabilities);
+	capabilities->texture_store = 1;
+}
+
+static void test_texture_store_map(void *context, const struct xgpu_stream_texture_store_map *record,
+	const struct xgpu_stream_texture_store_query *queries, const char *strings,
+	struct xgpu_stream_texture_store_answer *answers)
+{
+	uint32_t index;
+
+	(void)context;
+	store_seen.calls++;
+	store_seen.count = record->query_count;
+	store_seen.generation = record->generation;
+	store_seen.tier = record->tier;
+	store_seen.budget = record->budget_megabytes;
+	store_seen.flags = record->flags;
+	for (index = 0; index < record->query_count; index++)
+	{
+		const char *path = strings + queries[index].path;
+
+		if (index < 4)
+		{
+			snprintf(store_seen.paths[index], sizeof(store_seen.paths[index]), "%s", path);
+			store_seen.stock_width[index] = queries[index].stock_width;
+			store_seen.stock_type[index] = queries[index].stock_type;
+			store_seen.file_size[index] = queries[index].file_size;
+		}
+		if (strstr(path, "bad"))
+		{
+			answers[index].status = XGPU_STREAM_TEXTURE_STORE_FORMAT;
+			continue;
+		}
+		answers[index].id = ((record->generation & 0xfffu) << 20) | (index + 1);
+		answers[index].width = (uint16_t)(queries[index].stock_width * 4);
+		answers[index].height = (uint16_t)(queries[index].stock_height * 4);
+		answers[index].levels = 11;
+	}
+}
+
+static D3DBaseTexture *store_textures[2];
+static unsigned long store_hook_ids[2];
+
+static unsigned long store_hook(unsigned long resource)
+{
+	return resource == (unsigned long)(uintptr_t)store_textures[0] ? store_hook_ids[0] :
+		resource == (unsigned long)(uintptr_t)store_textures[1] ? store_hook_ids[1] : 0;
+}
+
+static void store_stages(struct xgpu_texture_source stages[4])
+{
+	int stage;
+
+	memset(stages, 0, 4 * sizeof(stages[0]));
+	for (stage = 0; stage < 2; stage++)
+	{
+		stages[stage].source = XGPU_SOURCE_TEXTURE;
+		stages[stage].sampled = 1;
+		stages[stage].resource = (DWORD)(uintptr_t)store_textures[stage];
+		stages[stage].data = store_textures[stage]->Data;
+		stages[stage].width = stages[stage].height = 256;
+		stages[stage].levels = 9;
+	}
+}
+
+static uint32_t set_textures_records;
+
+static void test_texture_store(void)
+{
+	struct host_render_backend store_backend = test_backend;
+	struct xgpu_texture_store_query queries[3];
+	struct xgpu_texture_store_answer answers[3];
+	struct xgpu_texture_source stages[4];
+	int index;
+
+	for (index = 0; index < 2; index++)
+	{
+		store_textures[index] = guest_allocate(sizeof(*store_textures[index]));
+		store_textures[index]->Data = 0x10000u * (uint32_t)(index + 1);
+		store_textures[index]->Format = 0x00880000u;
+	}
+	/* (a backend without a store: the capability 0, no map sent, no ids) */
+	stream_begin(1u << 20, 2, 0);
+	CHECK(!xgpu_backend_capabilities.texture_store);
+	memset(queries, 0, sizeof(queries));
+	queries[0].path = "/data/mods/a/textures/max/x#0.ktx2";
+	CHECK(!xgpu_backend_texture_store_map(1, 2, 0, TRUE, queries, 1, answers) && !answers[0].id);
+	store_hook_ids[0] = 5;
+	xgpu_backend_texture_store_hook(store_hook);
+	store_stages(stages);
+	xgpu_backend_set_textures(stages);
+	xgpu_backend_consume();
+	text_printf(&expected, "flush\n");
+	CHECK(backend_state.stages[0].store == 0 && backend_state.stages[1].store == 0);
+	xgpu_backend_texture_store_hook(NULL);
+	stream_end("texture store: none");
+
+	/* (a backend with one) */
+	memset(&store_seen, 0, sizeof(store_seen));
+	store_backend.initialize = test_store_initialize;
+	store_backend.texture_store_map = test_texture_store_map;
+	host_render_stream_set_backend(&store_backend);
+	stream_begin(1u << 20, 2, 0);
+	CHECK(xgpu_backend_capabilities.texture_store);
+	memset(queries, 0, sizeof(queries));
+	queries[0].path = "/data/mods/a/textures/max/characters/cyborg/bitmaps/cyborg#0.ktx2";
+	queries[0].file_size = 22369776;
+	queries[0].stock_width = queries[0].stock_height = 256;
+	queries[0].stock_levels = 9;
+	queries[1].path = "/data/mods/a/textures/max/bad#0.ktx2";
+	queries[1].stock_width = queries[1].stock_height = 64;
+	queries[2].path = "/data/mods/a/textures/enhanced/sky#0.ktx2";
+	queries[2].cube = TRUE;
+	queries[2].stock_width = queries[2].stock_height = 128;
+	CHECK(xgpu_backend_texture_store_map(0x1234, 2, 512, TRUE, queries, 3, answers));
+	CHECK(store_seen.calls == 1 && store_seen.count == 3 && store_seen.generation == 0x1234 && store_seen.tier == 2 &&
+		store_seen.budget == 512 && store_seen.flags == XGPU_STREAM_TEXTURE_STORE_LOADING);
+	CHECK(!strcmp(store_seen.paths[0], queries[0].path) && !strcmp(store_seen.paths[2], queries[2].path));
+	CHECK(store_seen.stock_width[0] == 256 && store_seen.file_size[0] == 22369776 && store_seen.stock_type[2] == 1);
+	CHECK(answers[0].id == ((0x234u << 20) | 1) && answers[0].width == 1024 && answers[0].levels == 11 &&
+		answers[0].status == XGPU_STREAM_TEXTURE_STORE_ACCEPTED);
+	CHECK(!answers[1].id && answers[1].status == XGPU_STREAM_TEXTURE_STORE_FORMAT);
+	CHECK(answers[2].id == ((0x234u << 20) | 3));
+	/* (no hook: no ids) */
+	store_stages(stages);
+	xgpu_backend_set_textures(stages);
+	xgpu_backend_consume();
+	text_printf(&expected, "flush\n");
+	CHECK(backend_state.stages[0].store == 0);
+	/* (the hook's ids with the stages) */
+	store_hook_ids[0] = answers[0].id;
+	store_hook_ids[1] = answers[2].id;
+	xgpu_backend_texture_store_hook(store_hook);
+	stages[0].width = 128;
+	xgpu_backend_set_textures(stages);
+	xgpu_backend_consume();
+	text_printf(&expected, "flush\n");
+	CHECK(backend_state.stages[0].store == answers[0].id && backend_state.stages[1].store == answers[2].id &&
+		backend_state.stages[2].store == 0 && backend_state.stages[0].stage.width == 128);
+	/* (the ids alone changed: a record of them alone) */
+	store_hook_ids[1] = 0;
+	xgpu_backend_set_textures(stages);
+	xgpu_backend_consume();
+	text_printf(&expected, "flush\n");
+	CHECK(backend_state.stages[0].store == answers[0].id && backend_state.stages[1].store == 0);
+	/* (closed) */
+	CHECK(xgpu_backend_texture_store_map(0x1235, 0, 0, FALSE, NULL, 0, NULL));
+	CHECK(store_seen.calls == 2 && store_seen.count == 0);
+	xgpu_backend_texture_store_hook(NULL);
+	xgpu_backend_set_textures(stages);
+	xgpu_backend_consume();
+	text_printf(&expected, "flush\n");
+	CHECK(backend_state.stages[0].store == 0);
+	stream_end("texture store");
+	host_render_stream_set_backend(&test_backend);
+}
+
+/* the store's malformed records: SET_TEXTURES' other bits, its ids cut
+short; a map's queries outside the guest's memory, a path past the paths'
+bytes or not ending in its NUL */
+static void test_texture_store_malformed(void)
+{
+	struct host_render_backend store_backend = test_backend;
+	struct xgpu_stream_ring *ring = guest_allocate(sizeof(*ring));
+	uint32_t *buffer = xgpu_stream_test_allocate(XGPU_STREAM_RING_ALIGNMENT, 0x10000);
+	unsigned char *pipelines = guest_allocate(XGPU_STREAM_PIPELINES);
+	struct xgpu_stream_texture_store_query *queries = guest_allocate(2 * sizeof(*queries));
+	struct xgpu_stream_texture_store_answer *answers = guest_allocate(2 * sizeof(*answers));
+	char *strings = guest_allocate(64);
+	struct xgpu_stream_texture_store_map *map;
+	struct host_render_decoder *decoder;
+
+	store_backend.texture_store_map = test_texture_store_map;
+	ring->buffer = guest_address(buffer);
+	ring->size = 0x10000;
+	ring->pipelines = guest_address(pipelines);
+	decoder = host_render_decoder_new(&store_backend, ring);
+
+	buffer[0] = XGPU_STREAM_HEADER(XGPU_STREAM_SET_TEXTURES, 8);
+	buffer[1] = 0x10;
+	CHECK(host_render_decode(decoder, 0, 8) == 0 && ring->error == XGPU_STREAM_ERROR_RECORD);
+	ring->error = 0;
+	buffer[1] = XGPU_STREAM_TEXTURES_STORE;
+	CHECK(host_render_decode(decoder, 0, 8) == 0 && ring->error == XGPU_STREAM_ERROR_RECORD);
+	ring->error = 0;
+	buffer[0] = XGPU_STREAM_HEADER(XGPU_STREAM_SET_TEXTURES, 24);
+	buffer[2] = 7;
+	buffer[3] = 0;
+	buffer[4] = 9;
+	buffer[5] = 0;
+	CHECK(host_render_decode(decoder, 0, 24) == 24 && ring->error == 0);
+	CHECK(backend_state.stages[0].store == 7 && backend_state.stages[2].store == 9);
+
+	memset(queries, 0, 2 * sizeof(*queries));
+	strcpy(strings, "/mods/x/textures/max/a#0.ktx2");
+	queries[0].path_length = (uint32_t)strlen(strings);
+	map = (struct xgpu_stream_texture_store_map *)buffer;
+	memset(map, 0, sizeof(*map));
+	map->header = XGPU_STREAM_HEADER(XGPU_STREAM_TEXTURE_STORE_MAP, sizeof(*map));
+	map->reply = guest_address(answers);
+	map->generation = 3;
+	map->query_count = 1;
+	map->queries = guest_address(queries);
+	map->strings = guest_address(strings);
+	map->strings_size = queries[0].path_length + 1;
+	store_seen.calls = 0;
+	CHECK(host_render_decode(decoder, 0, sizeof(*map)) == sizeof(*map) && ring->error == 0 && store_seen.calls == 1 &&
+		answers[0].id == ((3u << 20) | 1));
+	/* (a path not ending in its NUL inside the paths' bytes) */
+	map->strings_size = queries[0].path_length;
+	CHECK(host_render_decode(decoder, 0, sizeof(*map)) == 0 && ring->error == XGPU_STREAM_ERROR_BOUNDS);
+	ring->error = 0;
+	map->strings_size = queries[0].path_length + 1;
+	queries[0].path = 40;
+	CHECK(host_render_decode(decoder, 0, sizeof(*map)) == 0 && ring->error == XGPU_STREAM_ERROR_BOUNDS);
+	ring->error = 0;
+	queries[0].path = 0;
+	/* (a NUL inside the path) */
+	queries[0].path_length = 40;
+	map->strings_size = 64;
+	CHECK(host_render_decode(decoder, 0, sizeof(*map)) == 0 && ring->error == XGPU_STREAM_ERROR_BOUNDS);
+	ring->error = 0;
+	queries[0].path_length = (uint32_t)strlen(strings);
+	/* (queries at no address, or no reply) */
+	map->queries = 0;
+	CHECK(host_render_decode(decoder, 0, sizeof(*map)) == 0 && ring->error == XGPU_STREAM_ERROR_BOUNDS);
+	ring->error = 0;
+	map->queries = guest_address(queries);
+	map->reply = 0;
+	CHECK(host_render_decode(decoder, 0, sizeof(*map)) == 0 && ring->error == XGPU_STREAM_ERROR_BOUNDS);
+	ring->error = 0;
+	/* (answers that would wrap past the guest's memory) */
+	map->reply = 0xfffffff8u;
+	CHECK(host_render_decode(decoder, 0, sizeof(*map)) == 0 && ring->error == XGPU_STREAM_ERROR_BOUNDS);
+	ring->error = 0;
+	map->reply = guest_address(answers);
+	map->query_count = XGPU_STREAM_TEXTURE_STORE_QUERIES + 1;
+	CHECK(host_render_decode(decoder, 0, sizeof(*map)) == 0 && ring->error == XGPU_STREAM_ERROR_BOUNDS);
+	ring->error = 0;
+	/* (closed: no queries, no reply) */
+	map->query_count = 0;
+	map->reply = map->queries = map->strings = 0;
+	map->strings_size = 0;
+	CHECK(host_render_decode(decoder, 0, sizeof(*map)) == sizeof(*map) && ring->error == 0 && store_seen.count == 0);
+	/* (a backend with no store: every answer refused) */
+	host_render_decoder_free(decoder);
+	decoder = host_render_decoder_new(&test_backend, ring);
+	map->query_count = 1;
+	map->reply = guest_address(answers);
+	map->queries = guest_address(queries);
+	map->strings = guest_address(strings);
+	map->strings_size = queries[0].path_length + 1;
+	answers[0].id = 99;
+	CHECK(host_render_decode(decoder, 0, sizeof(*map)) == sizeof(*map) && ring->error == 0 && answers[0].id == 0 &&
+		answers[0].status == XGPU_STREAM_TEXTURE_STORE_DEVICE);
+	host_render_decoder_free(decoder);
+	(void)set_textures_records;
+}
+
 int main(void)
 {
 	struct host_render_backend asynchronous_backend = test_backend;
@@ -2047,7 +2318,9 @@ int main(void)
 	backend_state.fails_vertex_program = 100;
 
 	test_malformed();
+	test_texture_store_malformed();
 	test_round_trip();
+	test_texture_store();
 	test_vertices_kept();
 	test_pipeline_failure();
 	test_ring_full(2);

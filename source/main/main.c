@@ -727,6 +727,7 @@ void vr_death_test_update(void);
 #include "server_director.h" /* port: port/linux/game/server_director.c */
 #include "load_zone.h" /* port: port/linux/game/load_zone.c */
 #include "mendicant/mendicant.h" /* port: port/linux/game/mendicant/mendicant_main.c */
+#include "mods.h" /* port: port/linux/game/mod_textures.c */
 
 /* ---------- prototypes */
 
@@ -3569,6 +3570,9 @@ static void main_game_render(
 	/* port: a replay's playback's view, made once for the frame, before the
 	sound listens from it (port/linux/game/network_replay_playback.c) */
 	network_replay_playback_frame();
+	/* port: display.prism_textures read again, the map's replacements sent
+	again if it changed (port/linux/game/mod_textures.c) */
+	mod_textures_frame();
 	/* port: MENDICANT AI's training may run without sound (port/linux/game/mendicant) */
 	if (!mendicant_skip_sound_render())
 		sound_render();

@@ -244,6 +244,7 @@ struct host_render_texture_stage
 {
     struct xgpu_stream_texture_stage stage;
     struct xgpu_stream_texture_level levels[XGPU_STREAM_MIP_LEVELS];
+    uint32_t store;
 };
 struct xgpu_vulkan_image_description { uint8_t type; };
 struct xgpu_vulkan_image { struct xgpu_vulkan_image_description description; };
@@ -255,7 +256,7 @@ static struct
     uint8_t border[4];
     unsigned int textures_dirty;
     int feedback_bound, uniforms_dirty;
-    uint32_t textures_serial, color;
+    uint32_t textures_serial, color, store_epoch;
     struct xgpu_vulkan_texture textures[4];
 } stream;
 static struct xgpu_vulkan_image images[4];
@@ -279,6 +280,23 @@ static struct xgpu_vulkan_image *xgpu_vulkan_textures_get(const struct xgpu_stre
 static const struct xgpu_vulkan_image_description *xgpu_vulkan_image_description(const struct xgpu_vulkan_image *image)
 { return &image->description; }
 static void targets_bind(void) { binds++; }
+/* display.prism_textures: the store's epoch, and its replacements once
+usable */
+static uint32_t store_epoch_now;
+static int store_usable;
+static unsigned store_binds;
+static struct xgpu_vulkan_image store_image;
+static uint32_t xgpu_vulkan_store_epoch(void) { return store_epoch_now; }
+static int store_bind(const struct host_render_texture_stage *source, struct xgpu_vulkan_texture *texture, uint8_t axes)
+{
+    (void)axes;
+    store_binds++;
+    if (!store_usable)
+        return 0;
+    texture->image = &store_image;
+    texture->sampler = 100 + source->store;
+    return 1;
+}
 """ + set_textures + bind + r"""
 static void set(struct host_render_texture_stage stages[4])
 {
@@ -330,10 +348,176 @@ int main(void)
     textures_bind();
     for (index = 0; index < 4; index++)
         assert(looked_up[index] == 1);
+    /* display.prism_textures: a store id on stage 0 (its stage changed),
+    its replacement not usable yet: the stock texture */
+    stages[1].stage.resource_format = 0x0c00;
+    stages[1].stage.palette = 0;
+    set(stages);
+    stages[0].store = 7;
+    store_binds = 0;
+    set(stages);
+    assert(store_binds == 1 && looked_up[0] == 1 && !looked_up[1] && stream.textures[0].image == &images[0]);
+    /* usable: the store's epoch changed, all looked at again, stage 0 the
+    replacement with its own sampler and its stock texture not looked for */
+    store_usable = 1;
+    store_epoch_now++;
+    store_binds = 0;
+    set(stages);
+    assert(store_binds == 1 && !looked_up[0] && looked_up[1] == 1 && looked_up[2] == 1 && looked_up[3] == 1);
+    assert(stream.textures[0].image == &store_image && stream.textures[0].sampler == 107);
+    /* the same again: none */
+    store_binds = 0;
+    set(stages);
+    assert(!store_binds && !looked_up[0] && !looked_up[1] && !looked_up[2] && !looked_up[3]);
+    /* the id alone changed (the stage's bytes the same): that stage */
+    stages[0].store = 8;
+    set(stages);
+    assert(store_binds == 1 && !looked_up[1] && stream.textures[0].sampler == 108);
+    /* no id: the stock texture again */
+    stages[0].store = 0;
+    set(stages);
+    assert(looked_up[0] == 1 && stream.textures[0].image == &images[0]);
     return 0;
 }
 """)
     binary = tmp_path / "textures_bind"
     subprocess.run([_native_cc(), "-std=gnu11", "-O1", "-Wall", "-Wextra", "-Werror", "-Wno-unused-function",
                     f"-I{ROOT / 'port/linux/src'}", str(source), "-o", str(binary)], check=True)
+    subprocess.run([str(binary)], check=True)
+
+
+def test_texture_store_formats_and_levels(tmp_path):
+    # display.prism_textures: the store's BC1 (no alpha), BC4, BC5 and BC7
+    # images are made in their Vulkan formats with 8- and 16-byte blocks; and
+    # a replacement's sampler (store_bind) samples the levels standing for the
+    # stock texture's: from the resident level (or MAXMIPLEVEL's, shifted by
+    # the size's scale) to the stock's last level shifted by it, the first
+    # alone without a mip filter; a stage of another size than the stock
+    # bitmap's (another bitmap at its header) is drawn stock
+    candidates = [ROOT / f"build/{name}/third_party/vulkan-headers" for name in ("linux_x86_64", "linux_arm64")]
+    headers = next((path for path in candidates + [Path("/usr/include")]
+                    if (path / "vulkan/vulkan_core.h").exists()), None)
+    if headers is None:
+        pytest.skip("needs Vulkan headers (configure.py fetches them for the Linux build)")
+    core = (ROOT / "port/linux/vulkan/xgpu_vulkan.c").read_text()
+    formats = core[core.index("static VkFormat vulkan_format(uint8_t format)"):core.index("static VkComponentSwizzle swizzle_of(")]
+    stream = (ROOT / "port/linux/vulkan/xgpu_vulkan_stream.c").read_text()
+    bind = stream[stream.index("static int store_bind("):stream.index("/* a stage of a palettized Xbox texture")]
+    source = tmp_path / "store_formats.c"
+    source.write_text(r"""
+#include <assert.h>
+#include <stdint.h>
+#include <string.h>
+#define VK_NO_PROTOTYPES
+#include <vulkan/vulkan_core.h>
+#include "xgpu_vulkan.h"
+#include "xgpu_stream.h"
+#include "xgpu_texture_store.h"
+static struct { VkFormat depth_format; } vk;
+""" + formats + r"""
+typedef unsigned long DWORD;
+typedef int BOOL;
+enum { _filter_none, _filter_point, _filter_linear };
+struct xgpu_texture_description { DWORD format; unsigned long width, height, depth, levels; BOOL cube_map, linear; };
+struct host_render_texture_stage
+{
+    struct xgpu_stream_texture_stage stage;
+    struct xgpu_stream_texture_level levels[XGPU_STREAM_MIP_LEVELS];
+    uint32_t store;
+};
+static struct xgpu_texture_description described;
+static void xgpu_texture_describe(DWORD format, DWORD size, struct xgpu_texture_description *description)
+{ (void)format; (void)size; *description = described; }
+static struct xgpu_texture_store_view current;
+static int usable;
+static int xgpu_vulkan_store_use(uint32_t id, struct xgpu_texture_store_view *view)
+{ (void)id; *view = current; return usable; }
+static float got_min, got_max;
+static int got_mip;
+static VkSampler sampler_get_levels(const struct xgpu_stream_sampler *from, uint8_t axes, float min_lod, float max_lod)
+{ (void)axes; got_min = min_lod; got_max = max_lod; got_mip = from->mip; return (VkSampler)(uintptr_t)1; }
+""" + bind + r"""
+int main(void)
+{
+    struct host_render_texture_stage source;
+    struct xgpu_vulkan_texture texture;
+    static struct xgpu_vulkan_image *image;
+
+    assert(vulkan_format(XGPU_VULKAN_FORMAT_BC1_RGB) == VK_FORMAT_BC1_RGB_UNORM_BLOCK);
+    assert(vulkan_format(XGPU_VULKAN_FORMAT_BC4) == VK_FORMAT_BC4_UNORM_BLOCK);
+    assert(vulkan_format(XGPU_VULKAN_FORMAT_BC5) == VK_FORMAT_BC5_UNORM_BLOCK);
+    assert(vulkan_format(XGPU_VULKAN_FORMAT_BC7) == VK_FORMAT_BC7_UNORM_BLOCK);
+    assert(format_blocks(XGPU_VULKAN_FORMAT_BC4) && format_blocks(XGPU_VULKAN_FORMAT_BC5) &&
+        format_blocks(XGPU_VULKAN_FORMAT_BC7) && format_blocks(XGPU_VULKAN_FORMAT_BC1_RGB));
+    assert(format_block_bytes(XGPU_VULKAN_FORMAT_BC4) == 8 && format_block_bytes(XGPU_VULKAN_FORMAT_BC1_RGB) == 8 &&
+        format_block_bytes(XGPU_VULKAN_FORMAT_DXT1) == 8 && format_block_bytes(XGPU_VULKAN_FORMAT_BC5) == 16 &&
+        format_block_bytes(XGPU_VULKAN_FORMAT_BC7) == 16 && format_block_bytes(XGPU_VULKAN_FORMAT_DXT5) == 16);
+
+    /* a 4096 BC7 over a 256 stock of 9 levels: scale 4, 13 levels */
+    image = (struct xgpu_vulkan_image *)(uintptr_t)0x1000;
+    memset(&source, 0, sizeof(source));
+    source.store = 5;
+    source.stage.sampler.mip = _filter_linear;
+    described.width = described.height = 256;
+    described.levels = 9;
+    memset(&current, 0, sizeof(current));
+    current.image = image;
+    current.scale = 4;
+    current.levels = 13;
+    current.stock.width = current.stock.height = 256;
+    /* (not usable: stock) */
+    usable = 0;
+    memset(&texture, 0, sizeof(texture));
+    assert(!store_bind(&source, &texture, 0) && !texture.image);
+    /* (usable at the stock resolution: levels 4 to 12) */
+    usable = 1;
+    current.resident = 4;
+    assert(store_bind(&source, &texture, 0) && texture.image == image);
+    assert(got_min == 4.0f && got_max > 12.0f && got_max < 12.01f);
+    /* (whole: from level 0) */
+    current.resident = 0;
+    assert(store_bind(&source, &texture, 0) && got_min == 0.0f && got_max > 12.0f && got_max < 12.01f);
+    /* (MAXMIPLEVEL 2: the stock's level 2 is the image's 6) */
+    source.stage.sampler.first_level = 2;
+    assert(store_bind(&source, &texture, 0) && got_min == 6.0f);
+    source.stage.sampler.first_level = 0;
+    /* (a stock of 5 levels: down to its last, the image's 8) */
+    described.levels = 5;
+    assert(store_bind(&source, &texture, 0) && got_max > 8.0f && got_max < 8.01f);
+    described.levels = 9;
+    /* (cut back to the stock resolution: the image from the asset's level
+    4, its resident level its first) */
+    current.top = 4;
+    current.resident = 4;
+    assert(store_bind(&source, &texture, 0) && got_min == 0.0f && got_max > 8.0f && got_max < 8.01f);
+    current.top = 0;
+    /* (no mip filter: the stock's first level alone, so the replacement's
+    from its resident level down to the one of the stock's size, mipmapped
+    between them; point minifying keeps point mips) */
+    source.stage.sampler.mip = _filter_none;
+    current.resident = 1;
+    assert(store_bind(&source, &texture, 0) && got_min == 1.0f && got_max > 4.0f && got_max < 4.01f &&
+        got_mip == _filter_linear);
+    source.stage.sampler.minify = _filter_point;
+    assert(store_bind(&source, &texture, 0) && got_mip == _filter_point);
+    source.stage.sampler.minify = _filter_linear;
+    current.top = 4;
+    current.resident = 4;
+    assert(store_bind(&source, &texture, 0) && got_min == 0.0f && got_max > 0.0f && got_max < 0.01f);
+    current.top = 0;
+    source.stage.sampler.mip = _filter_linear;
+    /* (another size at the header, or a cube against a 2D: stock) */
+    described.width = 128;
+    memset(&texture, 0, sizeof(texture));
+    assert(!store_bind(&source, &texture, 0) && !texture.image);
+    described.width = 256;
+    described.cube_map = 1;
+    assert(!store_bind(&source, &texture, 0));
+    return 0;
+}
+""")
+    binary = tmp_path / "store_formats"
+    subprocess.run([_native_cc(), "-std=gnu11", "-O1", "-Wall", "-Wextra", "-Werror", "-Wno-unused-function",
+                    f"-I{headers}", f"-I{ROOT / 'port/linux/vulkan'}", f"-I{ROOT / 'port/linux/src'}", str(source),
+                    "-o", str(binary)], check=True)
     subprocess.run([str(binary)], check=True)
