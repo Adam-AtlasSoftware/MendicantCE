@@ -200,6 +200,10 @@ struct xgpu_draw_facts
 	/* PRISM v2's model light, with the overlay alone (xgpu.h's
 	XGPU_PRISM_*; 0 none) */
 	int prism_lighting;
+	/* display.prism_shadows "cascaded": the window's surfaces read the sun's
+	shadows (a structure's lightmap pass: XGPU_PRISM_SHADOWS_CASCADED, lit
+	by its world position and normal) */
+	int prism_sun;
 };
 
 /* what the facts make of the pipeline (xgpu_backend.h's XGPU_LIGHTING_*,

@@ -352,6 +352,44 @@ first value nothing is armed and every draw is as the game draws it.
 #define XGPU_PRISM_SHADOWS_SOFT 8
 #define XGPU_PRISM_SHADOWS_TRACED 16
 #define XGPU_PRISM_SHADOWS_OF(value) ((value) & 24)
+/* (_SOFT or _TRACED: the distance-field scene's, not the sun's maps) */
+#define XGPU_PRISM_SHADOWS_TRACES(value) (XGPU_PRISM_SHADOWS_OF(value) == XGPU_PRISM_SHADOWS_SOFT || \
+	XGPU_PRISM_SHADOWS_OF(value) == XGPU_PRISM_SHADOWS_TRACED)
+/* ---------- PRISM's sun shadows (display.prism_shadows "cascaded")
+
+The level's sun (its sky's brightest light that lights the outside, a
+lens flare's direction) casts real shadows: the window's casters drawn
+from it into shadow maps (cascades fitted about the camera, out to a few
+dozen world units; xgpu_stream.h's PRISM_SHADOWS, its block) before the
+window's surfaces, the objects into one atlas and the structure into
+another. A draw whose key has XGPU_PRISM_SHADOWS_CASCADED reads them
+(XGPU_SPIRV_SET_SHADOWS) at its pixel's world position, pushed along its
+normal 1.5 texels (facing the sun) to 4 (edge on) of the cascade it falls
+in:
+
+  v_m = the moving casters' visibility (PCSS: the mean depth of the
+        blockers among 8 taps about the point, the penumbra by the distance
+        from them to it times light.y, then 12 compared taps over it, each a
+        2x2 bilinear test),
+  v_s = the structure's (4 compared taps, a texel apart),
+  both 1 past the last cascade (faded over its last fade.x of it);
+
+- a structure's lightmap pass (its light before the textures multiply it,
+  the enhanced dynamic lights added after): light times
+  1 - light.x * (1 - v_m) * v_s * smoothstep(0, 0.25, N.sun): the moving
+  casters take light.x of the light where the sun reached it (the
+  structure's own shadows, already in the lightmap, are never darkened
+  again, and a face turned away from the sun has none to lose);
+- a model whose lighting has its world position (lit for each pixel
+  then, with or without a material overlay): its first distant light's
+  share by
+  mix(1, v_m * mix(1, v_s, fade.y), fade.z) (its own limbs, other
+  characters, vehicles, scenery, and the structure where the lightmap
+  sample under it is sunlit: a Marine half under a ledge).
+
+Hardware filtering does the comparisons (a depth compare sampler); the
+draws without the key never read them. */
+#define XGPU_PRISM_SHADOWS_CASCADED 24
 
 /* the vertex constants the per-pixel model lighting reads, in a uniform of
 their own (the vertex shader's 192 would pass the least fragment uniform

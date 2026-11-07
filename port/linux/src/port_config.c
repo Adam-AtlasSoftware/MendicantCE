@@ -450,7 +450,18 @@ static const struct config_setting config_settings[] =
 		"limbs and other characters and vehicles. \"stock\": none, as the game\n"
 		"draws (its own shadow under each object stays in every choice);\n"
 		"\"soft\": near ones, with wide soft edges; \"traced\": out to 8 world\n"
-		"units, crisper. Vulkan only; read each frame." GRAPHICS_CHOOSES },
+		"units, crisper. \"cascaded\": the sky's sun casts real shadows (shadow\n"
+		"maps about the camera, out to about 150 metres, their edges as soft as\n"
+		"the distance from what casts them): characters, vehicles, weapons and\n"
+		"scenery onto the level and onto each other, and the level onto them;\n"
+		"the level's own baked shadows are never darkened twice, and the game's\n"
+		"shadow under each object gives way to them. Where no sky is seen, none.\n"
+		"Vulkan only; read each frame." GRAPHICS_CHOOSES },
+	{ "display.prism_shadow_resolution", _config_integer, "2048", "HALO_PRISM_SHADOW_RESOLUTION", _environment_value,
+		_platform_desktop,
+		"PRISM, with display.prism_shadows \"cascaded\": each shadow map's texels\n"
+		"along a side (three maps): 1024, 2048 or 4096. Higher is crisper and\n"
+		"costs more of the GPU's memory and time. Read each frame." },
 	{ "display.prism_lightmaps", _config_string, "\"stock\"", "HALO_PRISM_LIGHTMAPS", _environment_value,
 		_platform_desktop,
 		"PRISM: the level's own baked light, drawn smoother: \"stock\" as the Xbox\n"
@@ -4165,6 +4176,7 @@ static const struct
 	{ "display.ambient_occlusion", { "off", "world", NULL }, "off" },
 	{ "display.prism_lightmaps", { "stock", "smooth", "rebaked", NULL }, "stock" },
 	{ "display.prism_bloom", { "off", "glow", "full", NULL }, "off" },
+	{ "display.prism_shadows", { "stock", "soft", "traced", "cascaded", NULL }, "stock" },
 	{ "display.astc_textures", { "auto", "always", "off", NULL }, NULL },
 	{ "display.picture_position", { "center", "top", "bottom", NULL }, NULL },
 	{ "display.orientation", { "landscape", "portrait", "auto", NULL }, NULL },

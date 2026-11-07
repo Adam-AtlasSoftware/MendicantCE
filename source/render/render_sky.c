@@ -304,6 +304,75 @@ void render_sky(
 	return;
 }
 
+/* port: PRISM's sun shadows (port/linux/game/prism_shadows.c,
+display.prism_shadows "cascaded"): the direction toward a sky's sun, its
+brightest light (power times its colour's brightest channel; a light with
+none, a lens flare's), as render_sky aims the light's lens flare (its
+marker in the sky's model at rest, else its direction); FALSE where the sky
+has no light. The light's colour and power too (its fields in the tag's
+light: flags at 0x4C, colour at 0x50, power at 0x5C) */
+boolean render_sky_sun(
+	short sky_index,
+	real_vector3d *direction,
+	real_rgb_color *color,
+	real *power)
+{
+	struct sky *sky;
+	short best = NONE, i;
+	real best_score = -1.f;
+
+	if (sky_index < 0 || !(sky = scenario_get_sky(sky_index)))
+	{
+		return FALSE;
+	}
+	for (i = 0; i < sky->lights.count; i++)
+	{
+		struct sky_light *light = TAG_BLOCK_GET_ELEMENT(&sky->lights, i, struct sky_light);
+		real_rgb_color const *light_color = (real_rgb_color const *)((byte const *)light + 0x50);
+		real light_power = *(real const *)((byte const *)light + 0x5C);
+		real brightest = MAX(light_color->red, MAX(light_color->green, light_color->blue));
+		real score = light_power > 0.f && brightest > 0.f ? light_power * brightest :
+			light->lens_flare.index != NONE ? 0.f : -1.f;
+
+		if (score > best_score)
+		{
+			best_score = score;
+			best = i;
+		}
+	}
+	if (best == NONE)
+	{
+		return FALSE;
+	}
+	{
+		struct sky_light *light = TAG_BLOCK_GET_ELEMENT(&sky->lights, best, struct sky_light);
+
+		*color = *(real_rgb_color const *)((byte const *)light + 0x50);
+		*power = *(real const *)((byte const *)light + 0x5C);
+		vector3d_from_euler_angles2d(direction, &light->direction);
+		if (csstrlen(light->marker_name) != 0 && sky->model.index != NONE)
+		{
+			real_matrix4x3 node_matrices[MAXIMUM_NODES_PER_ANIMATION];
+			struct real_orientation node_orientations[MAXIMUM_NODES_PER_ANIMATION];
+			struct object_marker marker;
+			struct model *model = model_definition_get(sky->model.index);
+
+			if (model->nodes.count <= MAXIMUM_NODES_PER_ANIMATION)
+			{
+				model_get_node_orientations(model, node_orientations);
+				model_node_matrices_from_orientations(model, node_matrices, node_orientations, global_origin3d,
+					global_forward3d, global_up3d);
+				if (model_get_marker_by_name(sky->model.index, light->marker_name, NULL, NULL, NONE, node_matrices,
+					FALSE, &marker, 1) != 0 && magnitude_squared3d((real_vector3d *)&marker.matrix.position) > 0.f)
+				{
+					*direction = *(real_vector3d *)&marker.matrix.position;
+				}
+			}
+		}
+	}
+	return normalize3d(direction) > 0.f;
+}
+
 /* ---------- private code */
 
 /* port: a map's sky past what render_sky has room for; said once */

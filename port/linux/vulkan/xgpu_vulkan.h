@@ -538,6 +538,9 @@ struct xgpu_vulkan_draw
 	attachment bound as its input, the draw ordered after the pass's
 	draws before it */
 	uint8_t reads_color;
+	/* its pixel shader reads display.prism_shadows "cascaded"'s atlases and
+	block (XGPU_VULKAN_SET_SHADOWS: xgpu_vulkan_prism_shadows) */
+	uint8_t prism_shadows;
 	/* HALO_VULKAN_DRAW_TIMES (measuring): the game's draw's kind, its
 	pixel key's ambient_occlusion, its pipeline key's lighting and its
 	per_pixel_lighting, and XGPU_VULKAN_DRAW_GAME; zeros the backend's own */
@@ -560,6 +563,25 @@ struct xgpu_vulkan_draw
 
 #define XGPU_VULKAN_DRAW_GAME 0x80
 void xgpu_vulkan_draw(const struct xgpu_vulkan_draw *draw);
+
+/* display.prism_shadows "cascaded" (xgpu_spirv.h's XGPU_SPIRV_SET_SHADOWS,
+xgpu.h's "PRISM's sun shadows"): the set the draws reading the sun's
+shadows bind (xgpu_vulkan_draw's prism_shadows), in the pipeline layout's
+set XGPU_VULKAN_SET_SHADOWS: the moving casters' atlas compared (a depth
+compare sampler, linear, clamped, greater or equal) and as it is (nearest),
+the structure's compared, and the block (bytes of it, a uniform buffer),
+from now on (the atlases: depth images; NULL none, no draw then reads
+them). The device must bind five sets (its maxBoundDescriptorSets) */
+#define XGPU_VULKAN_SET_SHADOWS 4
+#define XGPU_VULKAN_BINDING_SHADOWS_MOVING 0
+#define XGPU_VULKAN_BINDING_SHADOWS_MOVING_DEPTH 1
+#define XGPU_VULKAN_BINDING_SHADOWS_STRUCTURE 2
+#define XGPU_VULKAN_BINDING_SHADOWS_BLOCK 3
+#define XGPU_VULKAN_SHADOWS_BLOCK_BYTES 384
+void xgpu_vulkan_prism_shadows(struct xgpu_vulkan_image *moving, struct xgpu_vulkan_image *structure,
+	const void *block, uint32_t size);
+/* whether the device has the shadows' set (five sets bound) */
+int xgpu_vulkan_prism_shadows_possible(void);
 
 /* display.ambient_occlusion "world" (xgpu_vulkan_world_ao.c, xgpu_stream.h's
 struct xgpu_world_ao_block), which the draws lighting by it read

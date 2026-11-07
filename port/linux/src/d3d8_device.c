@@ -2171,6 +2171,13 @@ static BOOL hdr_display_text(int kind, char *text, unsigned int size)
 	return TRUE;
 }
 
+/* display.prism_shadows "cascaded"'s pass drawing, and the window's surfaces
+reading it (halo_prism_shadows_pass) */
+static struct
+{
+	BOOL drawing, receiving;
+} prism_sun;
+
 /* ---------- PRISM's lighting (display.prism_lightmaps, display.prism_bloom)
 
 Read as the settings change: the lightmap pass's lightmap smoothed (the
@@ -4385,6 +4392,9 @@ static BOOL prepare_draw(BOOL immediate, unsigned long primitive)
 	/* (display.prism_lightmaps: the lightmap pass's lightmap smoothed) */
 	facts.lightmap_filter = prism_lightmaps_filter();
 	facts.prism_lighting = material_overlay.armed ? material_overlay.prism_lighting : 0;
+	/* (display.prism_shadows "cascaded": the lightmap pass by the sun's
+	shadows, where the window drew their pass) */
+	facts.prism_sun = prism_sun.receiving && device.render_target == &device.back_buffer;
 	if (device.gl_ready)
 		world_ao_twins();
 	basis = pipeline_key;
@@ -5505,6 +5515,52 @@ void halo_screen_panini(short x0, short y0, short x1, short y1, const float proj
 	frame's resolve would put that over the pass) */
 	view_corners(target, x0, y0, x1, y1, corners);
 	xgpu_backend_panini(target->target.number, corners, projection);
+}
+
+/* display.prism_shadows "cascaded" (port/linux/game/prism_shadows.c,
+xgpu_stream.h's PRISM_SHADOWS): the sun's shadow maps' pass of a window that
+draws into the back buffer with its depth buffer, where the backend draws
+it; FALSE where it does not (nothing sent: the window draws as without
+it). Its block is the floats of struct xgpu_prism_shadows_block. The
+window's surfaces read it from _END to _NONE (prism_sun.receiving) */
+int halo_prism_shadows_pass(int phase, int resolution, int cascades, const float *block)
+{
+	struct xgpu_prism_shadows_block copy;
+
+	if (phase == XGPU_PRISM_SHADOWS_BEGIN)
+	{
+		prism_sun.drawing = prism_sun.receiving = FALSE;
+		if (!device.gl_ready || !xgpu_backend_capabilities.prism_shadows || !block ||
+			device.render_target != &device.back_buffer || device.depth_stencil != &device.depth_buffer ||
+			cascades < 1 || cascades > XGPU_PRISM_SHADOWS_CASCADES_MOST ||
+			resolution < XGPU_PRISM_SHADOWS_RESOLUTION_LEAST || resolution > XGPU_PRISM_SHADOWS_RESOLUTION_MOST)
+			return FALSE;
+		memcpy(&copy, block, sizeof(copy));
+		xgpu_backend_prism_shadows(phase, resolution, cascades, &copy);
+		prism_sun.drawing = TRUE;
+		return TRUE;
+	}
+	if (phase == XGPU_PRISM_SHADOWS_STRUCTURE)
+	{
+		if (!prism_sun.drawing)
+			return FALSE;
+		xgpu_backend_prism_shadows(phase, resolution, cascades, NULL);
+		return TRUE;
+	}
+	if (phase == XGPU_PRISM_SHADOWS_END)
+	{
+		if (!prism_sun.drawing || !block)
+			return FALSE;
+		memcpy(&copy, block, sizeof(copy));
+		xgpu_backend_prism_shadows(phase, resolution, cascades, &copy);
+		prism_sun.drawing = FALSE;
+		prism_sun.receiving = TRUE;
+		return TRUE;
+	}
+	if (prism_sun.receiving || prism_sun.drawing)
+		xgpu_backend_prism_shadows(XGPU_PRISM_SHADOWS_NONE, resolution, cascades, NULL);
+	prism_sun.drawing = prism_sun.receiving = FALSE;
+	return FALSE;
 }
 
 /* display.hdr's tone map of a window's 3D view (source/render/render.c),

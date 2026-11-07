@@ -1404,10 +1404,14 @@ PAGES = {
             ("REFLECTIONS", "display.prism_reflections", [("CLASSIC", "stock"), ("LOCAL", "local")],
              "Local: shiny armour reflects the place it is in, captured on this computer from your maps. Classic "
              "reflects the game's own painted reflections.", "desktop"),
-            ("CHARACTER SHADOWS", "display.prism_shadows", [("CLASSIC", "stock"), ("SOFT", "soft"),
-                                                             ("TRACED", "traced")],
-             "Characters shade themselves and each other from the level's main light. Needs ambient occlusion "
-             "World. Classic keeps the Xbox's shadows alone.", "desktop"),
+            ("SHADOWS", "display.prism_shadows", [("CLASSIC", "stock"), ("SOFT", "soft"),
+                                                   ("TRACED", "traced"), ("SUN", "cascaded")],
+             "Sun: the sky's sun casts real shadows of characters, vehicles and scenery onto the level and each "
+             "other. Soft and Traced: characters shade themselves from the main light (need ambient occlusion "
+             "World). Classic keeps the Xbox's shadows alone.", "desktop"),
+            ("SHADOW DETAIL", "display.prism_shadow_resolution", [("LOW", "1024"), ("HIGH", "2048"),
+                                                                  ("ULTRA", "4096")],
+             "How sharp the sun's shadows are, and how much of the graphics card they take.", "desktop"),
             (SECTION, "LIGHTING"),
             # (PRISM's lighting: drawn by the Vulkan renderer alone,
             # port/linux/src/d3d8_device.c's prism_lighting_read)

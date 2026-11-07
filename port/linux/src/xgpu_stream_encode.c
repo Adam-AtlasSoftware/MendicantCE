@@ -649,6 +649,7 @@ void xgpu_backend_initialize(void)
 	xgpu_backend_capabilities.material_overlay = stream.capabilities.material_overlay;
 	xgpu_backend_capabilities.lightmap_filter = stream.capabilities.lightmap_filter;
 	xgpu_backend_capabilities.bloom = stream.capabilities.bloom;
+	xgpu_backend_capabilities.prism_shadows = stream.capabilities.prism_shadows;
 }
 
 /* (at exit) the frames submitted played, the render thread ended */
@@ -843,6 +844,28 @@ void xgpu_backend_world_ao_prepass(int phase, xgpu_target target, const struct x
 	else
 	{
 		memset(&record_body->pass, 0, sizeof(record_body->pass));
+	}
+}
+
+void xgpu_backend_prism_shadows(int phase, int resolution, int cascades, const struct xgpu_prism_shadows_block *block)
+{
+	struct xgpu_stream_prism_shadows *record_body;
+
+	if (!stream.open)
+		return;
+	record_body = record(XGPU_STREAM_PRISM_SHADOWS, sizeof(*record_body));
+	record_body->phase = (uint32_t)phase;
+	record_body->resolution = (uint32_t)resolution;
+	record_body->cascades = (uint32_t)cascades;
+	if (block)
+	{
+		record_body->block = *block;
+		stream_finite(&record_body->block.cascades[0][0][0], sizeof(*block) / sizeof(float), "the sun's shadows' block",
+			0);
+	}
+	else
+	{
+		memset(&record_body->block, 0, sizeof(record_body->block));
 	}
 }
 
