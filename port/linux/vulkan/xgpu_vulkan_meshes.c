@@ -20,7 +20,10 @@ are of. A draw of a part of an instance whose mesh is in:
 The rest of a part drawn in several draws (no state between them: the
 engine's 10000 triangles a draw) is not drawn again. Instances whose bones
 are the same (the same mesh, level and matrices: a shadow's and the view's)
-share one skinning in a submission.
+share one skinning in a submission. An object's shadow is drawn at the
+level its view was drawn at this frame (or the last, if the shadow comes
+first), not at the shadow's own smaller size, so the two share the one
+skinning rather than skinning a second level.
 */
 
 #include "host.h"
@@ -35,6 +38,8 @@ share one skinning in a submission.
 
 #define INSTANCES 512u
 #define SHARED_SKINS 32u
+/* objects' levels in the view, by object and mesh (for their shadows) */
+#define VIEW_LEVELS 256u
 /* (rasterizer_xbox.c's node matrices' first vertex constant register: c60,
 D3D's -36) */
 #define NODE_MATRIX_REGISTER 60u
@@ -83,6 +88,15 @@ static struct
 		struct xgpu_vulkan_range skinned;
 	} shared[SHARED_SKINS];
 	uint32_t shared_next;
+	/* the size each object was drawn at in the view (its shadow drawn at
+	it), and the frame */
+	struct
+	{
+		uint32_t object, mesh;
+		uint64_t frame;
+		float lod_pixels;
+	} views[VIEW_LEVELS];
+	uint64_t frame;
 	float bones[XGPU_PMESH_BONES_MAXIMUM][3][4];
 	/* the springs' state of every instance, and the latest game clock */
 	struct xgpu_rig_states *rig_states;
@@ -90,7 +104,7 @@ static struct
 	uint64_t rig_evaluations, rig_failures;
 	/* statistics */
 	uint64_t instances_seen, instances_drawable, swaps, pieces, skips, chunks, stock_parts, layout_refusals,
-		prepare_failures, shared_skins;
+		prepare_failures, shared_skins, shadows_at_view;
 	uint64_t level_instances[XGPU_PMESH_LODS_MAXIMUM];
 	float largest_pixels;
 } meshes;
@@ -182,6 +196,7 @@ void xgpu_vulkan_meshes_map(void *context, const struct xgpu_stream_mesh_store_m
 	if (meshes.rig_states)
 		xgpu_rig_states_clear(meshes.rig_states);
 	memset(meshes.shared, 0, sizeof(meshes.shared));
+	memset(meshes.views, 0, sizeof(meshes.views));
 	meshes.part = NULL;
 	if (!count && !meshes.store)
 		return;
@@ -243,8 +258,29 @@ void xgpu_vulkan_meshes_instance(void *context, const struct xgpu_stream_mesh_in
 	const float (*matrices)[3][4])
 {
 	struct instance *instance = &meshes.instances[record->instance % INSTANCES];
+	float lod_pixels = record->lod_pixels;
 
 	(void)context;
+	/* (an object's view's size kept; its shadow drawn at it, where the
+	view was drawn this frame or the last) */
+	if (record->object != 0xffffffffu)
+	{
+		uint32_t slot = (record->object ^ (record->mesh * 2654435761u)) % VIEW_LEVELS;
+
+		if (!(record->flags & XGPU_STREAM_MESH_INSTANCE_SHADOW))
+		{
+			meshes.views[slot].object = record->object;
+			meshes.views[slot].mesh = record->mesh;
+			meshes.views[slot].frame = meshes.frame + 1;
+			meshes.views[slot].lod_pixels = record->lod_pixels;
+		}
+		else if (meshes.views[slot].frame && meshes.views[slot].object == record->object &&
+			meshes.views[slot].mesh == record->mesh && meshes.views[slot].frame >= meshes.frame)
+		{
+			lod_pixels = meshes.views[slot].lod_pixels;
+			meshes.shadows_at_view++;
+		}
+	}
 	memset(instance, 0, offsetof(struct instance, matrices));
 	instance->hash = 0;
 	memset(&instance->skinned, 0, sizeof(instance->skinned));
@@ -261,7 +297,7 @@ void xgpu_vulkan_meshes_instance(void *context, const struct xgpu_stream_mesh_in
 	instance->node_count = record->node_count;
 	memcpy(instance->matrices, matrices, record->node_count * sizeof(matrices[0]));
 	meshes.instances_seen++;
-	if (!meshes.store || !xgpu_mesh_store_use(meshes.store, record->mesh, record->lod_pixels, &instance->view))
+	if (!meshes.store || !xgpu_mesh_store_use(meshes.store, record->mesh, lod_pixels, &instance->view))
 		return;
 	if (instance->view.node_count > instance->node_count)
 		return;
@@ -269,8 +305,8 @@ void xgpu_vulkan_meshes_instance(void *context, const struct xgpu_stream_mesh_in
 	instance->drawable = 1;
 	meshes.instances_drawable++;
 	meshes.level_instances[instance->view.lod]++;
-	if (record->lod_pixels > meshes.largest_pixels)
-		meshes.largest_pixels = record->lod_pixels;
+	if (lod_pixels > meshes.largest_pixels)
+		meshes.largest_pixels = lod_pixels;
 }
 
 void xgpu_vulkan_meshes_draw_part(void *context, const struct xgpu_stream_mesh_draw *record)
@@ -494,6 +530,7 @@ int xgpu_vulkan_meshes_piece(uint32_t index, struct xgpu_vulkan_draw *draw)
 
 void xgpu_vulkan_meshes_frame(void)
 {
+	meshes.frame++;
 	if (meshes.store)
 		xgpu_mesh_store_frame(meshes.store);
 	if (meshes.rig_states)
@@ -516,7 +553,7 @@ int xgpu_vulkan_meshes_statistics(char *text, unsigned long size)
 		"swaps %llu (%llu pieces), %llu parts skipped, %llu draws of parts drawn, %llu parts stock, %llu layouts "
 		"refused, %llu skinnings failed; %llu dispatches (%llu shared), %llu vertices skinned, %llu ring full; "
 		"instances by level %llu/%llu/%llu/%llu, largest %.0f px; last resident %.2f s after the map; rigs %llu "
-		"evaluated (%llu failed), %u spring states",
+		"evaluated (%llu failed), %u spring states; %llu shadows at their view's level",
 		statistics.entries, statistics.resident, statistics.reading, statistics.failed, statistics.refused_budget,
 		(double)statistics.resident_bytes / 1048576.0, (double)statistics.budget_bytes / 1048576.0,
 		(double)statistics.read_bytes / 1048576.0, statistics.evictions, (unsigned long long)statistics.uses,
@@ -530,6 +567,7 @@ int xgpu_vulkan_meshes_statistics(char *text, unsigned long size)
 		(unsigned long long)meshes.level_instances[1], (unsigned long long)meshes.level_instances[2],
 		(unsigned long long)meshes.level_instances[3], (double)meshes.largest_pixels, statistics.last_resident_seconds,
 		(unsigned long long)meshes.rig_evaluations, (unsigned long long)meshes.rig_failures,
-		meshes.rig_states ? xgpu_rig_states_count(meshes.rig_states) : 0u);
+		meshes.rig_states ? xgpu_rig_states_count(meshes.rig_states) : 0u,
+		(unsigned long long)meshes.shadows_at_view);
 	return 1;
 }
