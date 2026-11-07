@@ -421,6 +421,10 @@ static struct
 	VkFormat depth_format;
 	/* NVIDIA's own driver (its anisotropic filtering: anisotropic_bias) */
 	int nvidia;
+	/* display.prism_rt: the device has acceleration structures and ray
+	queries (their extensions and features enabled: device_make), and
+	buffer device addresses */
+	int ray_tracing;
 	/* cube maps sampled face by face (VK_EXT_non_seamless_cube_map) */
 	int non_seamless;
 
@@ -2461,6 +2465,9 @@ struct xgpu_vulkan_image *xgpu_vulkan_image_create(const struct xgpu_vulkan_imag
 			VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 	if ((description->usage & XGPU_VULKAN_USAGE_INPUT) && vk.capabilities.color_read)
 		info.usage |= VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
+	/* (display.prism_rt's images, which its compute passes write) */
+	if (description->usage & XGPU_VULKAN_USAGE_STORAGE)
+		info.usage |= VK_IMAGE_USAGE_STORAGE_BIT;
 	/* (with discards, where the device has lazily allocated memory: a
 	multisampled target is an attachment alone, transient) */
 	image->transient = vk.transient && description->samples > 1 && (description->usage & XGPU_VULKAN_USAGE_TARGET);
@@ -7187,9 +7194,18 @@ static int device_make(const struct xgpu_vulkan_options *options)
 	VkPhysicalDeviceRasterizationOrderAttachmentAccessFeaturesEXT available_order, order;
 	VkDeviceQueueCreateInfo queue;
 	VkDeviceCreateInfo info;
-	const char *extensions[16];
+	const char *extensions[24];
 	uint32_t extension_count = 0;
 	float priority = 1.0f;
+	/* (display.prism_rt: hardware ray queries, where the device has them
+	and HALO_VULKAN_NO_RT is not set: the extensions and their features
+	enabled, nothing else changed; docs/prism_rt.md) */
+	int ray_tracing = device_has_extension(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
+		device_has_extension(VK_KHR_RAY_QUERY_EXTENSION_NAME) &&
+		device_has_extension(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME) && !getenv("HALO_VULKAN_NO_RT");
+	VkPhysicalDeviceAccelerationStructureFeaturesKHR available_structures, structures;
+	VkPhysicalDeviceRayQueryFeaturesKHR available_queries, queries;
+	VkPhysicalDeviceBufferDeviceAddressFeatures addresses;
 	/* (HALO_VULKAN_NO_CUSTOM_BORDER_COLORS: as a device without them, whose
 	shaders draw the border colours, Metal's way: to test that path) */
 	int custom_border = device_has_extension(VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME) &&
@@ -7256,6 +7272,17 @@ static int device_make(const struct xgpu_vulkan_options *options)
 	{
 		*chain = &available_id;
 		available_id.pNext = &available_wait;
+		chain = &available_wait.pNext;
+	}
+	memset(&available_structures, 0, sizeof(available_structures));
+	available_structures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
+	memset(&available_queries, 0, sizeof(available_queries));
+	available_queries.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
+	if (ray_tracing)
+	{
+		*chain = &available_structures;
+		available_structures.pNext = &available_queries;
+		chain = &available_queries.pNext;
 	}
 	vkGetPhysicalDeviceFeatures2(vk.physical, &available);
 	if (!required_features(&available, &available12, &available13) || !depth_format_choose())
@@ -7381,6 +7408,28 @@ static int device_make(const struct xgpu_vulkan_options *options)
 		extensions[extension_count++] = VK_GOOGLE_DISPLAY_TIMING_EXTENSION_NAME;
 		vk.display_timing = 1;
 	}
+	vk.ray_tracing = 0;
+	if (ray_tracing && available_structures.accelerationStructure && available_queries.rayQuery &&
+		available12.bufferDeviceAddress)
+	{
+		memset(&structures, 0, sizeof(structures));
+		structures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
+		structures.accelerationStructure = VK_TRUE;
+		memset(&queries, 0, sizeof(queries));
+		queries.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
+		queries.rayQuery = VK_TRUE;
+		memset(&addresses, 0, sizeof(addresses));
+		addresses.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
+		addresses.bufferDeviceAddress = VK_TRUE;
+		structures.pNext = &queries;
+		queries.pNext = &addresses;
+		*chain = &structures;
+		chain = &addresses.pNext;
+		extensions[extension_count++] = VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME;
+		extensions[extension_count++] = VK_KHR_RAY_QUERY_EXTENSION_NAME;
+		extensions[extension_count++] = VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME;
+		vk.ray_tracing = 1;
+	}
 
 	memset(&queue, 0, sizeof(queue));
 	queue.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
@@ -7463,6 +7512,8 @@ static int device_make(const struct xgpu_vulkan_options *options)
 		vk.capabilities.block_compression ? ", BC" : "", vk.capabilities.astc ? ", ASTC" : "",
 		vk.capabilities.color_read ? (vk.capabilities.raster_order ? ", local reads (ordered)" : ", local reads") : "",
 		vk.colorspaces ? ", swapchain colour spaces" : "", vk.validation ? ", validated" : "");
+	if (vk.ray_tracing)
+		host_logf(HOST_LOG_INFO, "vulkan: ray queries and acceleration structures (display.prism_rt)");
 	return 1;
 }
 
@@ -8079,4 +8130,46 @@ void xgpu_vulkan_initialize_undo(void)
 	}
 	memset(&vk, 0, sizeof(vk));
 	vk.library = library;
+}
+
+/* ---------- display.prism_rt's access (xgpu_vulkan_rt.c; xgpu_vulkan.h) */
+
+int xgpu_vulkan_rt_device(struct xgpu_vulkan_rt_device *device)
+{
+	memset(device, 0, sizeof(*device));
+	if (!vk.device || !vk.ray_tracing)
+		return 0;
+	device->physical = vk.physical;
+	device->device = vk.device;
+	device->get_device_proc = vkGetDeviceProcAddr;
+	device->get_physical_properties2 = vkGetPhysicalDeviceProperties2;
+	device->memory = &vk.memory_properties;
+	device->timestamp_period = vk.capabilities.gpu_timestamps ? vk.properties.limits.timestampPeriod : 0.0f;
+	device->nvidia = vk.nvidia;
+	return 1;
+}
+
+VkCommandBuffer xgpu_vulkan_compute_commands(void)
+{
+	return main_commands();
+}
+
+void xgpu_vulkan_image_compute_use(struct xgpu_vulkan_image *image, int written)
+{
+	if (!image)
+		return;
+	image->used = vk.serial;
+	image_use(image);
+	if (written)
+		image_written(image);
+}
+
+VkImage xgpu_vulkan_image_handle(const struct xgpu_vulkan_image *image)
+{
+	return image ? image->image : VK_NULL_HANDLE;
+}
+
+VkImageView xgpu_vulkan_image_view(const struct xgpu_vulkan_image *image)
+{
+	return image ? image->sampled : VK_NULL_HANDLE;
 }

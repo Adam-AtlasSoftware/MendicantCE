@@ -118,6 +118,12 @@ struct entry
 	generation it failed at) */
 	struct xgpu_vulkan_image *thickness;
 	uint32_t thickness_generation, thickness_failed;
+	/* (display.prism_rt) whether its first level is a cutout (a fifth of
+	its texels or more under half alpha: an alpha-tested draw's holes),
+	as of that generation (0 not looked at): 1 opaque, 2 a cutout, 3 not
+	known */
+	uint8_t cutout;
+	uint32_t cutout_generation;
 };
 
 static struct
@@ -788,6 +794,45 @@ struct xgpu_vulkan_image *xgpu_vulkan_textures_thickness(const struct xgpu_strea
 	if (entry->thickness_failed && entry->thickness_failed == entry->generation)
 		return NULL;
 	return thickness_bake(entry, palette);
+}
+
+/* display.prism_rt: whether a stage's Xbox texture is a cutout (its first
+level's alpha read once a generation, as the thickness reads its texels):
+1 yes, 0 no, -1 not known (an image, a cube, too large, unreadable) */
+int xgpu_vulkan_textures_cutout(const struct xgpu_stream_texture_stage *stage)
+{
+	const struct xgpu_texture_description *description;
+	const D3DCOLOR *palette;
+	const unsigned char *source;
+	struct entry *entry;
+	DWORD *texels;
+	uint32_t width, height, index, clear = 0;
+
+	if (stage->source != XGPU_SOURCE_TEXTURE || !stage->resource || !(entry = xbox_entry_current(stage, &palette)) ||
+		!entry->generation)
+		return -1;
+	if (entry->cutout && entry->cutout_generation == entry->generation)
+		return entry->cutout == 2 ? 1 : entry->cutout == 1 ? 0 : -1;
+	entry->cutout = 3;
+	entry->cutout_generation = entry->generation;
+	description = &entry->description;
+	width = (uint32_t)description->width;
+	height = (uint32_t)description->height;
+	source = host_pointer(entry->address);
+	if (description->cube_map || description->depth > 1 || !source || width > 2048 || height > 2048 ||
+		!(texels = converted_get((size_t)width * height)))
+		return -1;
+	if (description->compressed)
+		xgpu_texture_decode_dxt(description, 0, source, texels);
+	else if (!xgpu_texture_decode_level(description, 0, source, palette, texels))
+		return -1;
+	for (index = 0; index < width * height; index++)
+	{
+		if ((texels[index] >> 24) < 0x80u)
+			clear++;
+	}
+	entry->cutout = (uint64_t)clear * 5 >= (uint64_t)width * height ? 2 : 1;
+	return entry->cutout == 2;
 }
 
 uint32_t xgpu_vulkan_textures_thickness_epoch(void)

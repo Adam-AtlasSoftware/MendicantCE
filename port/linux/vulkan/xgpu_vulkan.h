@@ -258,6 +258,8 @@ enum
 	/* and read where it is drawn (an input attachment: display.hdr's back
 	buffer) */
 	XGPU_VULKAN_USAGE_INPUT = 4,
+	/* written by a compute pass (display.prism_rt's) */
+	XGPU_VULKAN_USAGE_STORAGE = 8,
 };
 
 struct xgpu_vulkan_image_description
@@ -862,6 +864,33 @@ struct xgpu_vulkan_statistics
 	double wait_seconds;
 };
 void xgpu_vulkan_statistics(struct xgpu_vulkan_statistics *statistics);
+
+/* ---------- display.prism_rt's access (xgpu_vulkan_rt.c; docs/prism_rt.md)
+
+The device's handles where it has ray queries and acceleration structures
+(0: none, nothing traced); the main commands outside a pass, for compute
+work in the stream's order (a pass being drawn ended first); an image a
+compute pass reads (and writes: written), marked as a copy marks it (the
+pass that drew it stores it, it lives until the submission is done); an
+image's handle and its sampled view (the whole of a 2D image's one level,
+which a storage descriptor can name too where the image has
+XGPU_VULKAN_USAGE_STORAGE). */
+struct xgpu_vulkan_rt_device
+{
+	VkPhysicalDevice physical;
+	VkDevice device;
+	PFN_vkGetDeviceProcAddr get_device_proc;
+	PFN_vkGetPhysicalDeviceProperties2 get_physical_properties2;
+	const VkPhysicalDeviceMemoryProperties *memory;
+	/* nanoseconds a timestamp's tick (0: no timestamps) */
+	float timestamp_period;
+	int nvidia;
+};
+int xgpu_vulkan_rt_device(struct xgpu_vulkan_rt_device *device);
+VkCommandBuffer xgpu_vulkan_compute_commands(void);
+void xgpu_vulkan_image_compute_use(struct xgpu_vulkan_image *image, int written);
+VkImage xgpu_vulkan_image_handle(const struct xgpu_vulkan_image *image);
+VkImageView xgpu_vulkan_image_view(const struct xgpu_vulkan_image *image);
 void xgpu_vulkan_statistics_peek(struct xgpu_vulkan_statistics *statistics);
 
 #endif

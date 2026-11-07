@@ -32,6 +32,11 @@ palette): one kept from xgpu_vulkan_textures_thickness may be drawn with
 only while this is the same as when it was looked up */
 uint32_t xgpu_vulkan_textures_thickness_epoch(void);
 
+/* display.prism_rt: whether a stage's Xbox texture is a cutout (a fifth of
+its first level's texels or more under half alpha), read once each time its
+texels change: 1 yes, 0 no, -1 not known */
+int xgpu_vulkan_textures_cutout(const struct xgpu_stream_texture_stage *stage);
+
 /* A texture whose header is named by the VR stream (the visor's plasma
 noise), checked and decoded through the same cache as a draw's stage. */
 struct xgpu_vulkan_image *xgpu_vulkan_textures_header(uint32_t header);

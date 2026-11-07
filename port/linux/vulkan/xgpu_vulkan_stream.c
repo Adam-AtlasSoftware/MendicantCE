@@ -62,6 +62,7 @@ its swapchain.
 #include "xgpu_vulkan_textures.h"
 #include "xgpu_vulkan_store.h"
 #include "xgpu_vulkan_meshes.h"
+#include "xgpu_vulkan_rt.h"
 #ifdef HALO_VR
 #include "host_vulkan_vr.h"
 #endif
@@ -2007,6 +2008,9 @@ struct draw_input
 	const uint16_t *indices;
 	struct xgpu_vulkan_range index_range;
 	int32_t vertex_offset;
+	/* (display.prism_rt's capture: the indices' bytes as the CPU has them,
+	the mirror's or the host's; NULL none) */
+	const uint16_t *cpu_indices;
 };
 
 /* the draw's indices in the ring: as they are, or a line loop made a list
@@ -2646,6 +2650,7 @@ static void stream_draw_indices(void *context, const struct xgpu_stream_draw_ind
 	input.indices = host_pointer(record->indices);
 	if (!input.indices)
 		return;
+	input.cpu_indices = input.indices;
 	draw_input(&input);
 }
 
@@ -2663,6 +2668,8 @@ static void stream_draw_indexed(void *context, const struct xgpu_stream_draw_ind
 			return;
 		input.index_range.buffer = xgpu_vulkan_buffer_handle(buffer);
 		input.index_range.offset = record->offset;
+		input.cpu_indices = (const uint16_t *)((const unsigned char *)xgpu_vulkan_buffer_contents(buffer) +
+			record->offset);
 		/* (a loop's indices, made into a list, are read from the mirror's
 		bytes; others are not read) */
 		if (record->primitive == _primitive_line_loop)
@@ -2674,6 +2681,7 @@ static void stream_draw_indexed(void *context, const struct xgpu_stream_draw_ind
 		input.indices = host_pointer(record->indices);
 		if (!input.indices)
 			return;
+		input.cpu_indices = input.indices;
 	}
 	/* (the streams start at vertex minimum) */
 	input.vertex_offset = -(int32_t)record->minimum;
@@ -3139,6 +3147,20 @@ static void stream_world_ao_field(void *context, const struct xgpu_stream_world_
 		record->z_count, record->width && record->size ? host_pointer(record->data) : NULL);
 }
 
+/* display.prism_rt: the structure's triangles and each frame's settings
+(xgpu_vulkan_rt.c) */
+static void stream_rt_static(void *context, const struct xgpu_stream_rt_static *record, const float *positions)
+{
+	(void)context;
+	xgpu_vulkan_rt_static(record, positions);
+}
+
+static void stream_rt_frame(void *context, const struct xgpu_stream_rt_frame *record)
+{
+	(void)context;
+	xgpu_vulkan_rt_frame(record);
+}
+
 static void stream_world_ao_window(void *context, const struct xgpu_stream_world_ao_window *record)
 {
 	(void)context;
@@ -3261,6 +3283,101 @@ static int prepass_tables(void)
 	return 0;
 }
 
+/* display.prism_rt (xgpu_vulkan_rt.c): a twin of an object's draw (the
+world's light, a model's) captured as it is drawn: its vertices as the CPU
+has them (the stock layout's position, float x y z at the first
+attribute's place; its nodes and weight at 28 and 30 past it where the
+layout has them) and the constants it is drawn with; an alpha-tested one
+passed over */
+static void prepass_rt_capture(const struct draw_input *input, const struct xgpu_stream_pipeline_define *twin)
+{
+	uint8_t occlusion = twin->pixel_program.ambient_occlusion;
+	int light = occlusion & 0x0f;
+	const struct xgpu_vulkan_attribute *position = &input->attributes[0];
+	struct vertex_source *source;
+	struct xgpu_vulkan_rt_draw draw;
+	uint32_t index, alpha = twin->pixel_program.alpha_test;
+	int alpha_tested;
+
+	if (!xgpu_vulkan_rt_active() || !(occlusion & XGPU_AMBIENT_OCCLUSION_WORLD) ||
+		(light != XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL && light != XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX))
+		return;
+	/* (an alpha test that keeps every texel but the fully clear ones: CE's
+models' greater than 0, whose base maps' alpha is a mask of another kind
+then, drawn opaque) */
+	alpha_tested = alpha && alpha != 0x207u && !((alpha == 0x204u || alpha == 0x206u) &&
+		stream.uniforms.alpha_reference < 1.5f);
+	/* (CE's models are all alpha tested at 127, their base maps' alpha the
+	holes: only those whose base map has holes are left out, until the
+	traces test the alpha themselves) */
+	if (alpha_tested && xgpu_vulkan_textures_cutout(&stream.stages[0].stage) == 0)
+		alpha_tested = 0;
+
+	if (alpha_tested || position->format != VK_FORMAT_R32G32B32_SFLOAT ||
+		position->binding >= 16 || !(input->present & (1u << position->binding)) ||
+		input->strides[position->binding] < 12 ||
+		(input->primitive != _primitive_triangles && input->primitive != _primitive_triangle_strip &&
+		input->primitive != _primitive_triangle_fan))
+	{
+		static int told;
+
+		if (told < 12 && getenv("HALO_PRISM_RT_DEBUG"))
+		{
+			int a;
+
+			told++;
+			host_logf(HOST_LOG_INFO, "prism rt: passed over: alpha %u reference %.1f primitive %u",
+				twin->pixel_program.alpha_test, (double)stream.uniforms.alpha_reference, input->primitive);
+			for (a = 0; a < 16; a++)
+				if (input->attributes[a].format)
+					host_logf(HOST_LOG_INFO, "  attribute %d: format %d binding %u offset %u stride %u", a,
+						(int)input->attributes[a].format, input->attributes[a].binding, input->attributes[a].offset,
+						input->strides[input->attributes[a].binding]);
+		}
+		xgpu_vulkan_rt_skipped();
+		return;
+	}
+	memset(&draw, 0, sizeof(draw));
+	source = &input->sources[position->binding];
+	if (source->segment)
+	{
+		const uint8_t *contents = (const uint8_t *)xgpu_vulkan_buffer_contents(source->segment);
+
+		if (!contents || source->offset >= MIRROR_SEGMENT_SIZE)
+			return;
+		draw.vertices = contents + source->offset;
+		draw.bytes = MIRROR_SEGMENT_SIZE - source->offset;
+	}
+	else
+	{
+		draw.vertices = (const uint8_t *)source->data;
+		draw.bytes = source->bytes;
+	}
+	draw.stride = input->strides[position->binding];
+	draw.position_offset = position->offset;
+	draw.nodes_offset = draw.weight_offset = -1;
+	for (index = 1; index < 16; index++)
+	{
+		const struct xgpu_vulkan_attribute *attribute = &input->attributes[index];
+
+		if (attribute->format == VK_FORMAT_UNDEFINED || attribute->binding != position->binding)
+			continue;
+		if (attribute->offset == position->offset + 28u && attribute->offset + 2u <= draw.stride)
+			draw.nodes_offset = attribute->offset;
+		else if (attribute->offset == position->offset + 30u && attribute->offset + 2u <= draw.stride)
+			draw.weight_offset = attribute->offset;
+	}
+	draw.indices = input->cpu_indices;
+	draw.count = input->count;
+	draw.index_base = -input->vertex_offset;
+	draw.primitive = input->primitive == _primitive_triangle_strip ? XGPU_VULKAN_RT_STRIP :
+		input->primitive == _primitive_triangle_fan ? XGPU_VULKAN_RT_FAN : XGPU_VULKAN_RT_LIST;
+	draw.constants = (const float (*)[4])stream.constants;
+	if (input->indices && !input->cpu_indices)
+		return;
+	xgpu_vulkan_rt_capture(&draw);
+}
+
 /* a draw of the pre-pass: its pipeline's twin's (xgpu_stream_world_ao_twin:
 where it has the world's light read from its pixels, or is an occluder; its
 shaders made now, a few a frame); else none */
@@ -3310,6 +3427,9 @@ static void prepass_draw(const struct draw_input *input)
 	prepass.drawing = entry;
 	(void)draw_pipeline(input, 1);
 	prepass.drawing = NULL;
+	/* (display.prism_rt: an object's, captured as drawn) */
+	if (!stream.preparing)
+		prepass_rt_capture(input, &twin);
 	stream.definition = definition;
 	stream.pipeline = pipeline;
 	stream.pipeline_id = id;
@@ -3393,6 +3513,7 @@ static void stream_world_ao_prepass(void *context, const struct xgpu_stream_worl
 		prepass.width = target->width;
 		prepass.height = target->height;
 		prepass.active = 1;
+		xgpu_vulkan_rt_window_begin();
 		xgpu_vulkan_set_target_views(prepass.inputs, prepass.depth, 0, 1);
 		whole[0][0] = whole[0][1] = 0;
 		whole[0][2] = (int32_t)target->width;
@@ -3430,6 +3551,19 @@ static void stream_world_ao_prepass(void *context, const struct xgpu_stream_worl
 
 			prepass.pixels = prepass.history;
 			prepass.history = last;
+		}
+		/* (display.prism_rt: the traced light read in the occlusion's place,
+		world AO's pass not drawn) */
+		{
+			struct xgpu_vulkan_image *traced = xgpu_vulkan_rt_window_end(prepass.inputs, prepass.width,
+				prepass.height, &uniforms);
+
+			if (traced)
+			{
+				xgpu_vulkan_world_ao_set_pixels(traced);
+				targets_bind();
+				return;
+			}
 		}
 		prepass.pixels = prepass_image(prepass.pixels, XGPU_VULKAN_FORMAT_RGBA32F, width, height);
 		if (!prepass.history || xgpu_vulkan_image_description(prepass.history)->width != width ||
@@ -3690,6 +3824,9 @@ static void stream_initialize(void *context, struct xgpu_stream_capabilities *ca
 	/* (display.prism_materials: the GGX path's shaders, xgpu_spirv.c's, and
 	the textures' set's bindings for its images, xgpu_vulkan.c's) */
 	capabilities->materials = (uint8_t)(capabilities->texture_store && stream.capabilities.materials);
+	/* (display.prism_rt: ray queries and acceleration structures,
+	xgpu_vulkan_rt.c) */
+	capabilities->ray_tracing = (uint8_t)xgpu_vulkan_rt_available();
 }
 
 static void stream_prepare(void *context)
@@ -3835,6 +3972,9 @@ const struct host_render_backend *xgpu_vulkan_stream_backend(void)
 		backend.world_ao_cascades = stream_world_ao_cascades;
 		backend.world_ao_window = stream_world_ao_window;
 		backend.world_ao_prepass = stream_world_ao_prepass;
+		/* display.prism_rt (docs/prism_rt.md, xgpu_vulkan_rt.c) */
+		backend.rt_static = stream_rt_static;
+		backend.rt_frame = stream_rt_frame;
 #ifdef HALO_VR
 		host_vulkan_vr_backend(&backend);
 #endif
