@@ -378,9 +378,12 @@ BOOL xgpu_backend_mesh_store_available(void);
 running number (nonzero), the mesh's id, the object's datum (0xffffffff
 none), the size its level of detail is chosen by, XGPU_STREAM_MESH_INSTANCE_*
 and its nodes' matrices as the vertex shader's constants have them (three
-rows of four each, node_count of them, at most XGPU_STREAM_MESH_NODES_MAXIMUM) */
+rows of four each, node_count of them, at most XGPU_STREAM_MESH_NODES_MAXIMUM);
+the game's clock (ticks and the interpolation's fraction) and the object's
+function values A-D (NULL: 0), for helper bones */
 void xgpu_backend_mesh_instance(unsigned long instance, unsigned long mesh, unsigned long object, float lod_pixels,
-	unsigned long flags, const float (*matrices)[3][4], unsigned long node_count);
+	unsigned long flags, const float (*matrices)[3][4], unsigned long node_count, unsigned long game_ticks,
+	float game_fraction, const float *functions);
 /* the draws from now on are a model part's of an instance (MESH_DRAW;
 instance 0: no part's): its region, permutation, shader, geometry and part,
 XGPU_STREAM_MESH_DRAW_* */

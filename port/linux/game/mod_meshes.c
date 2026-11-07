@@ -46,6 +46,7 @@ reads them.
 #include "cseries.h"
 #include "errors.h"
 #include "cache/cache_files.h"
+#include "game/game.h"
 #include "main/console.h"
 #include "math/real_math.h"
 #include "models/model_definitions.h"
@@ -85,7 +86,8 @@ int xgpu_backend_mesh_store_map(unsigned long generation, unsigned long tier, un
 	struct xgpu_mesh_store_answer *answers);
 int xgpu_backend_mesh_store_available(void);
 void xgpu_backend_mesh_instance(unsigned long instance, unsigned long mesh, unsigned long object, float lod_pixels,
-	unsigned long flags, float const (*matrices)[3][4], unsigned long node_count);
+	unsigned long flags, float const (*matrices)[3][4], unsigned long node_count, unsigned long game_ticks,
+	float game_fraction, float const *functions);
 void xgpu_backend_mesh_draw(unsigned long instance, int region, int permutation, int shader, unsigned long flags,
 	int geometry, int part);
 
@@ -93,6 +95,7 @@ void xgpu_backend_mesh_draw(unsigned long instance, int region, int permutation,
 char *tag_get_name(long tag_index);
 char const *config_string(char const *name);
 long config_integer(char const *name);
+int config_boolean(char const *name);
 unsigned long config_changes(void);
 char const *platform_data_root(void);
 /* (sys/stat.h's, which the game's strict ANSI hides; not translated, so
@@ -124,6 +127,7 @@ enum
 /* (xgpu_stream.h's) */
 #define MESH_INSTANCE_SHADOW 1u
 #define MESH_INSTANCE_FIRST_PERSON 2u
+#define MESH_INSTANCE_NO_SECONDARY 4u
 #define MESH_DRAW_CARRIER 1u
 #define MAXIMUM_QUERIES 4096
 /* a model's table's entries (regions, permutations and shaders its parts
@@ -193,6 +197,8 @@ static struct
 	unsigned long settings_read;
 	int tier, sent_tier;
 	long budget, sent_budget;
+	/* display.prism_secondary_motion */
+	boolean secondary_motion;
 	char dump[256];
 	/* a store is open on the host (a record with files sent) */
 	boolean open;
@@ -257,6 +263,7 @@ static void settings_read(
 	{
 		mod_meshes_globals.budget = 0;
 	}
+	mod_meshes_globals.secondary_motion = config_boolean("display.prism_secondary_motion") != 0;
 	dump = config_string("debug.prism_mesh_dump");
 	strncpy(mod_meshes_globals.dump, dump ? dump : "", sizeof(mod_meshes_globals.dump) - 1);
 	mod_meshes_globals.dump[sizeof(mod_meshes_globals.dump) - 1] = 0;
@@ -1081,6 +1088,7 @@ void mod_meshes_model_begin(
 {
 	struct mesh_model const *mesh;
 	float matrices[MAXIMUM_NODES_PER_MODEL][3][4];
+	real const *functions;
 	long absolute, node_index, node_count;
 
 	mod_meshes_globals.drawing = NULL;
@@ -1108,11 +1116,16 @@ void mod_meshes_model_begin(
 		mod_meshes_globals.instances = 1;
 	}
 	mod_meshes_globals.instance = mod_meshes_globals.instances;
+	/* (an object's function values drive helper bones: render-side, the
+	interpolated values the renderer reads anyway) */
+	functions = object_index != NONE ? render_interpolation_object_function_values(object_index) : NULL;
 	xgpu_backend_mesh_instance(mod_meshes_globals.instance, mesh->id, (unsigned long)object_index,
 		(float)level_of_detail_pixels,
 		(TEST_FLAG(flags, _render_model_shadow_bit) ? MESH_INSTANCE_SHADOW : 0) |
-		(TEST_FLAG(flags, _render_model_first_person_bit) ? MESH_INSTANCE_FIRST_PERSON : 0),
-		(float const (*)[3][4])matrices, (unsigned long)node_count);
+		(TEST_FLAG(flags, _render_model_first_person_bit) ? MESH_INSTANCE_FIRST_PERSON : 0) |
+		(mod_meshes_globals.secondary_motion ? 0 : MESH_INSTANCE_NO_SECONDARY),
+		(float const (*)[3][4])matrices, (unsigned long)node_count, (unsigned long)game_time_get(),
+		(float)render_interpolation_fraction(), (float const *)functions);
 	mod_meshes_globals.drawing = mesh;
 
 	return;

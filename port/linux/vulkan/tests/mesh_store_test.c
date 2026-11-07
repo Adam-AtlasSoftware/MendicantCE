@@ -176,6 +176,10 @@ static unsigned char *pmesh_make(const struct breakage *broken, uint32_t node_cr
 		put_float(bone + 16, 1.0f);
 		put_float(bone + 16 + 20, 1.0f);
 		put_float(bone + 16 + 40, 1.0f);
+		/* (its inverse: a helper's rig checks the two agree) */
+		put_float(bone + 64, 1.0f);
+		put_float(bone + 64 + 20, 1.0f);
+		put_float(bone + 64 + 40, 1.0f);
 	}
 	/* the levels */
 	{

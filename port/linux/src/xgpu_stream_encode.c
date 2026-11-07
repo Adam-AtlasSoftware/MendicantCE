@@ -1414,7 +1414,8 @@ BOOL xgpu_backend_mesh_store_map(unsigned long generation, unsigned long tier, u
 }
 
 void xgpu_backend_mesh_instance(unsigned long instance, unsigned long mesh, unsigned long object, float lod_pixels,
-	unsigned long flags, const float (*matrices)[3][4], unsigned long node_count)
+	unsigned long flags, const float (*matrices)[3][4], unsigned long node_count, unsigned long game_ticks,
+	float game_fraction, const float *functions)
 {
 	struct xgpu_stream_mesh_instance *record_body;
 
@@ -1428,6 +1429,12 @@ void xgpu_backend_mesh_instance(unsigned long instance, unsigned long mesh, unsi
 	record_body->lod_pixels = lod_pixels;
 	record_body->node_count = (uint16_t)node_count;
 	record_body->flags = (uint16_t)flags;
+	record_body->game_ticks = (uint32_t)game_ticks;
+	record_body->game_fraction = game_fraction;
+	if (functions)
+		memcpy(record_body->functions, functions, sizeof(record_body->functions));
+	else
+		memset(record_body->functions, 0, sizeof(record_body->functions));
 	if (node_count)
 		memcpy(record_body + 1, matrices, node_count * sizeof(matrices[0]));
 }

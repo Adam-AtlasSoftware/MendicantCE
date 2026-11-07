@@ -241,7 +241,7 @@ int main(int argc, char **argv)
 				memset(matrices, 0, sizeof(matrices));
 				matrices[0][0][0] = matrices[0][1][1] = matrices[0][2][2] = (float)(next() % 7);
 				xgpu_backend_mesh_instance((unsigned long)(frame * 20 + draw + 1), 0x00100001ul, 0xe0010004ul, 400.0f,
-					0, (const float (*)[3][4])matrices, 19);
+					0, (const float (*)[3][4])matrices, 19, (unsigned long)frame, 0.5f, NULL);
 				xgpu_backend_mesh_draw((unsigned long)(frame * 20 + draw + 1), 0, 0, 2, XGPU_STREAM_MESH_DRAW_CARRIER, 0, 2);
 				xgpu_backend_mesh_draw(0, 0, 0, 0, 0, 0, 0);
 			}

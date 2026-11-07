@@ -75,6 +75,20 @@ section, the same bytes compiled by `tools/prism_rig.py compile` (`PRIG`, versio
 header then 84 bytes a rule: `struct xgpu_rig_helper`); `tools/test_prism_rig.py` checks that the two
 compilers give the same bytes.
 
+## In the mesh store
+
+The mesh store reads a `.pmesh`'s optional `RIG` section (kind `RIG `, the compiled bytes; the art
+pipeline's `prism_pmesh_export.py export --rig <file>.rig.json` compiles and adds it) when the map
+loads, with the `SKEL` section's bones (their names hashed as above, whatever hash the `.pmesh`'s own
+entries carry), and refuses the file (`FORMAT`, the reason in the host's log) if the two do not agree.
+A mesh with helpers but no `RIG` section has every helper follow its parent. Each `MESH_INSTANCE`
+carries the game's ticks and the interpolation's fraction, the object's function values A-D and
+`XGPU_STREAM_MESH_INSTANCE_NO_SECONDARY` (`display.prism_secondary_motion` off); the instance's
+springs are keyed by the object's datum and the mesh's id (no state for an instance of no object),
+evaluated when its skin is first needed in a submission (a shadow's and the view's skin of the same
+object, matrices and clock are shared), and aged once a frame. The `meshstore:` statistics line
+counts the rigs evaluated and failed and the spring states held.
+
 ## Springs and the game's clock
 
 Springs move on the game's clock, never the frame's: the instance's time is the game's ticks / 30

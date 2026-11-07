@@ -2318,8 +2318,8 @@ static struct
 	uint32_t node_count[4], node_crc[4], table_count[4];
 	uint8_t table0[4][4];
 	float scale[4][2];
-	uint32_t instances, instance, mesh, object, node_count_seen, instance_flags;
-	float lod_pixels, matrix_last;
+	uint32_t instances, instance, mesh, object, node_count_seen, instance_flags, game_ticks;
+	float lod_pixels, matrix_last, game_fraction, function_c;
 	uint32_t draws;
 	struct xgpu_stream_mesh_draw draw;
 } mesh_seen;
@@ -2381,6 +2381,9 @@ static void test_mesh_instance(void *context, const struct xgpu_stream_mesh_inst
 	mesh_seen.lod_pixels = record->lod_pixels;
 	mesh_seen.node_count_seen = record->node_count;
 	mesh_seen.instance_flags = record->flags;
+	mesh_seen.game_ticks = record->game_ticks;
+	mesh_seen.game_fraction = record->game_fraction;
+	mesh_seen.function_c = record->functions[2];
 	mesh_seen.matrix_last = record->node_count ? matrices[record->node_count - 1][2][3] : 0.0f;
 }
 
@@ -2398,6 +2401,7 @@ static void test_mesh_store(void)
 	struct xgpu_mesh_store_answer answers[2];
 	static const unsigned char table[3][4] = { { 0, 0, 2, 0 }, { 0, 0, 3, 0 }, { 1, 2, 0, 0 } };
 	float matrices[19][3][4];
+	static const float functions[4] = { 0.5f, 0.0f, 1.0f, 0.25f };
 	int node;
 
 	memset(matrices, 0, sizeof(matrices));
@@ -2413,7 +2417,7 @@ static void test_mesh_store(void)
 	memset(queries, 0, sizeof(queries));
 	queries[0].path = "/data/mods/a/meshes/max/characters/cyborg/cyborg.pmesh";
 	CHECK(!xgpu_backend_mesh_store_map(1, 2, 0, TRUE, queries, 1, answers) && !answers[0].id);
-	xgpu_backend_mesh_instance(1, 0x00100001ul, 7, 400.0f, 0, (const float (*)[3][4])matrices, 19);
+	xgpu_backend_mesh_instance(1, 0x00100001ul, 7, 400.0f, 0, (const float (*)[3][4])matrices, 19, 0, 0.0f, NULL);
 	xgpu_backend_mesh_draw(1, 0, 0, 2, XGPU_STREAM_MESH_DRAW_CARRIER, 0, 2);
 	xgpu_backend_consume();
 	text_printf(&expected, "flush\n");
@@ -2451,19 +2455,20 @@ static void test_mesh_store(void)
 	CHECK(!answers[1].id && answers[1].status == XGPU_STREAM_MESH_STORE_NODES);
 	/* (an instance, its matrices, a part named and none) */
 	xgpu_backend_mesh_instance(41, answers[0].id, 0xe0010004ul, 512.5f, XGPU_STREAM_MESH_INSTANCE_SHADOW,
-		(const float (*)[3][4])matrices, 19);
+		(const float (*)[3][4])matrices, 19, 9001, 0.25f, functions);
 	xgpu_backend_mesh_draw(41, 0, 0, 2, XGPU_STREAM_MESH_DRAW_CARRIER, 1, 2);
 	xgpu_backend_consume();
 	text_printf(&expected, "flush\n");
 	CHECK(mesh_seen.instances == 1 && mesh_seen.instance == 41 && mesh_seen.mesh == answers[0].id &&
 		mesh_seen.object == 0xe0010004u && mesh_seen.lod_pixels == 512.5f && mesh_seen.node_count_seen == 19 &&
 		mesh_seen.instance_flags == XGPU_STREAM_MESH_INSTANCE_SHADOW && mesh_seen.matrix_last == 4.5f);
+	CHECK(mesh_seen.game_ticks == 9001 && mesh_seen.game_fraction == 0.25f && mesh_seen.function_c == 1.0f);
 	CHECK(mesh_seen.draws == 1 && mesh_seen.draw.instance == 41 && mesh_seen.draw.shader == 2 &&
 		mesh_seen.draw.flags == XGPU_STREAM_MESH_DRAW_CARRIER && mesh_seen.draw.geometry == 1 && mesh_seen.draw.part == 2);
 	xgpu_backend_mesh_draw(0, 0, 0, 0, 0, 0, 0);
 	/* (more nodes than a model has: not sent) */
 	xgpu_backend_mesh_instance(42, answers[0].id, 0, 1.0f, 0, (const float (*)[3][4])matrices,
-		XGPU_STREAM_MESH_NODES_MAXIMUM + 1);
+		XGPU_STREAM_MESH_NODES_MAXIMUM + 1, 0, 0.0f, NULL);
 	xgpu_backend_consume();
 	text_printf(&expected, "flush\n");
 	CHECK(mesh_seen.draws == 2 && mesh_seen.draw.instance == 0 && mesh_seen.instances == 1);

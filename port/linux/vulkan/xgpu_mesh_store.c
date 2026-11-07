@@ -17,6 +17,7 @@ store does.
 */
 
 #include "xgpu_mesh_store.h"
+#include "xgpu_rig.h"
 #include "xgpu_stream.h"
 
 #include <stdarg.h>
@@ -55,6 +56,7 @@ struct entry
 	float radius;
 	float inverse_scale[2];
 	uint16_t *bone_nodes;
+	struct xgpu_rig *rig;
 	struct
 	{
 		float cutoff;
@@ -344,6 +346,47 @@ static int query_check(struct xgpu_mesh_store *store, const struct xgpu_mesh_sto
 				REFUSE(XGPU_STREAM_MESH_STORE_FORMAT, "helper bone %u has no parent before it", index);
 			entry->bone_nodes[index] = entry->bone_nodes[parent];
 		}
+	}
+	/* (helper bones: their rig, the RIG section's rules or none, each
+	helper then following its parent) */
+	if (entry->bone_count > entry->node_count)
+	{
+		struct xgpu_rig_bone *rig_bones = calloc(entry->bone_count, sizeof(*rig_bones));
+		unsigned char *rig_bytes = NULL;
+		uint64_t rig_offset, rig_size, names_size = size - (uint64_t)entry->bone_count * XGPU_PMESH_BONE_BYTES;
+		uint32_t rig_crc;
+		enum xgpu_rig_status rig_status;
+		char rig_error[128];
+
+		if (!rig_bones)
+			REFUSE(XGPU_STREAM_MESH_STORE_UNREADABLE, "out of memory");
+		for (index = 0; index < entry->bone_count; index++)
+		{
+			const unsigned char *bone = skeleton + index * XGPU_PMESH_BONE_BYTES;
+			const char *names = (const char *)skeleton + (uint64_t)entry->bone_count * XGPU_PMESH_BONE_BYTES;
+			uint32_t name = read32(bone + 12), at;
+
+			for (at = name; at < names_size && names[at]; at++)
+				;
+			rig_bones[index].name_hash = name < names_size ? xgpu_rig_name_hash(names + name, at - name) : 0;
+			rig_bones[index].parent = (int16_t)read16(bone + 4);
+			rig_bones[index].flags = read16(bone + 6);
+			rig_bones[index].ce_node = (int16_t)read16(bone + 8);
+			memcpy(rig_bones[index].bind_world, bone + 16, 48);
+			memcpy(rig_bones[index].inverse_bind, bone + 64, 48);
+		}
+		if (section_find(table, section_count, XGPU_PMESH_RIG, entry->file_size, &rig_offset, &rig_size, &rig_crc) &&
+			!(rig_bytes = section_read(descriptor, rig_offset, rig_size, rig_crc)))
+		{
+			free(rig_bones);
+			REFUSE(XGPU_STREAM_MESH_STORE_FORMAT, "its rig is damaged");
+		}
+		entry->rig = xgpu_rig_create(rig_bones, entry->bone_count, entry->node_count, rig_bytes,
+			rig_bytes ? (size_t)rig_size : 0, &rig_status, rig_error, sizeof(rig_error));
+		free(rig_bones);
+		free(rig_bytes);
+		if (!entry->rig)
+			REFUSE(XGPU_STREAM_MESH_STORE_FORMAT, "its rig is refused (%d): %s", (int)rig_status, rig_error);
 	}
 	/* the levels */
 	if (!section_find(table, section_count, XGPU_PMESH_VERT, entry->file_size, &entry->vertex_offset,
@@ -816,6 +859,7 @@ static void entries_free(struct xgpu_mesh_store *store)
 		free(entry->path);
 		free(entry->bone_nodes);
 		free(entry->pieces);
+		xgpu_rig_destroy(entry->rig);
 	}
 	free(store->entries);
 	store->entries = NULL;
@@ -884,6 +928,7 @@ void xgpu_mesh_store_map(struct xgpu_mesh_store *store, uint32_t generation, uin
 			free(entry->bone_nodes);
 			free(entry->pieces);
 			free(entry->path);
+			xgpu_rig_destroy(entry->rig);
 			memset(entry, 0, sizeof(*entry));
 			entry->state = _entry_failed;
 			continue;
@@ -941,6 +986,7 @@ int xgpu_mesh_store_use(struct xgpu_mesh_store *store, uint32_t id, float lod_pi
 	view->piece_count = entry->lods[lod].piece_count;
 	view->bone_count = entry->bone_count;
 	view->bone_nodes = entry->bone_nodes;
+	view->rig = entry->rig;
 	view->node_count = entry->node_count;
 	view->inverse_scale[0] = entry->inverse_scale[0];
 	view->inverse_scale[1] = entry->inverse_scale[1];

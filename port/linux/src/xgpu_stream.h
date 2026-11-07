@@ -885,9 +885,18 @@ struct xgpu_stream_mesh_instance
 	uint16_t node_count;
 	/* XGPU_STREAM_MESH_INSTANCE_* */
 	uint16_t flags;
+	/* the game's clock (game_time_get's ticks, and the interpolation's
+	fraction of the next) and the object's function values A-D: what an
+	extended skeleton's springs and driven helpers move by (xgpu_rig.h) */
+	uint32_t game_ticks;
+	float game_fraction;
+	float functions[4];
 };
 #define XGPU_STREAM_MESH_INSTANCE_SHADOW 1u
 #define XGPU_STREAM_MESH_INSTANCE_FIRST_PERSON 2u
+/* display.prism_secondary_motion off: springs and driven helpers follow
+their parents */
+#define XGPU_STREAM_MESH_INSTANCE_NO_SECONDARY 4u
 /* the most nodes an instance has (model_definitions.h's MAXIMUM_NODES_PER_MODEL) */
 #define XGPU_STREAM_MESH_NODES_MAXIMUM 64u
 
@@ -1577,7 +1586,7 @@ XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_texture_store_answer, 12);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_mesh_store_map, 40);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_mesh_store_query, 40);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_mesh_store_answer, 16);
-XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_mesh_instance, 24);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_mesh_instance, 48);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_mesh_draw, 16);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_material_define, 12 + 6 * 4 + 9 * 16);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_hdr, 24);

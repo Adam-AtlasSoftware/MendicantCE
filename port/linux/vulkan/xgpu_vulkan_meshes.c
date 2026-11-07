@@ -11,7 +11,8 @@ are of. A draw of a part of an instance whose mesh is in:
 - whose region and permutation the mesh has no piece of: drawn stock;
 - of a carrier (the first part of its geometry with its shader): skinned
   once a submission (its level's vertices, by its bones: the instance's node
-  matrices, and a helper bone its nearest node's), then drawn as each of the
+  matrices, and a helper bone's by its rig, xgpu_rig.c, on the game's clock
+  the instance carries), then drawn as each of the
   level's pieces with the part's region, permutation and shader, with the
   part's own pipeline, its constants but node 0's matrix the identity (the
   skinned vertices are in the world), 32-bit indices, a triangle list;
@@ -24,6 +25,7 @@ share one skinning in a submission.
 
 #include "host.h"
 #include "xgpu_mesh_store.h"
+#include "xgpu_rig.h"
 #include "xgpu_vulkan_meshes.h"
 
 #include <stddef.h>
@@ -42,6 +44,11 @@ struct instance
 	uint32_t id;
 	int drawable;
 	struct xgpu_mesh_store_view view;
+	/* the object (0xffffffff none), mesh, flags, the game's clock and the
+	object's functions: a rig's springs and drivers */
+	uint32_t object, mesh, flags;
+	double game_seconds;
+	float functions[4];
 	uint32_t node_count;
 	float matrices[XGPU_STREAM_MESH_NODES_MAXIMUM][3][4];
 	uint32_t hash;
@@ -77,6 +84,10 @@ static struct
 	} shared[SHARED_SKINS];
 	uint32_t shared_next;
 	float bones[XGPU_PMESH_BONES_MAXIMUM][3][4];
+	/* the springs' state of every instance, and the latest game clock */
+	struct xgpu_rig_states *rig_states;
+	double game_seconds;
+	uint64_t rig_evaluations, rig_failures;
 	/* statistics */
 	uint64_t instances_seen, instances_drawable, swaps, pieces, skips, chunks, stock_parts, layout_refusals,
 		prepare_failures, shared_skins;
@@ -168,6 +179,8 @@ void xgpu_vulkan_meshes_map(void *context, const struct xgpu_stream_mesh_store_m
 	(void)context;
 	/* (the instances and the part of the old meshes forgotten) */
 	memset(meshes.instances, 0, sizeof(meshes.instances));
+	if (meshes.rig_states)
+		xgpu_rig_states_clear(meshes.rig_states);
 	memset(meshes.shared, 0, sizeof(meshes.shared));
 	meshes.part = NULL;
 	if (!count && !meshes.store)
@@ -237,6 +250,14 @@ void xgpu_vulkan_meshes_instance(void *context, const struct xgpu_stream_mesh_in
 	memset(&instance->skinned, 0, sizeof(instance->skinned));
 	instance->skinned_serial = 0;
 	instance->id = record->instance;
+	instance->object = record->object;
+	instance->mesh = record->mesh;
+	instance->flags = record->flags;
+	instance->game_seconds = (double)record->game_ticks / 30.0 +
+		(record->game_fraction > 0.0f && record->game_fraction < 1.0f ? (double)record->game_fraction / 30.0 : 0.0);
+	memcpy(instance->functions, record->functions, sizeof(instance->functions));
+	if (instance->game_seconds > meshes.game_seconds || instance->game_seconds + 1.0 < meshes.game_seconds)
+		meshes.game_seconds = instance->game_seconds;
 	instance->node_count = record->node_count;
 	memcpy(instance->matrices, matrices, record->node_count * sizeof(matrices[0]));
 	meshes.instances_seen++;
@@ -348,6 +369,7 @@ static int instance_skin(struct instance *instance)
 		if (meshes.shared[index].serial == serial && meshes.shared[index].rest == view->rest &&
 			meshes.shared[index].lod == view->lod && meshes.shared[index].hash == instance->hash && owner &&
 			owner->id == meshes.shared[index].owner_id && owner->node_count == instance->node_count &&
+			(!view->rig || (owner->object == instance->object && owner->game_seconds == instance->game_seconds)) &&
 			!memcmp(owner->matrices, instance->matrices, instance->node_count * sizeof(instance->matrices[0])))
 		{
 			instance->skinned = meshes.shared[index].skinned;
@@ -356,14 +378,40 @@ static int instance_skin(struct instance *instance)
 			return 1;
 		}
 	}
-	/* (a bone's matrix: its node's, the instance's) */
-	for (index = 0; index < view->bone_count; index++)
+	/* (a bone's matrix: its node's, the instance's; helpers' by the rig) */
+	if (view->rig)
 	{
-		uint32_t node = view->bone_nodes[index];
+		struct xgpu_rig_instance rig_instance;
 
-		if (node >= instance->node_count)
+		if (!meshes.rig_states)
+			meshes.rig_states = xgpu_rig_states_create();
+		memset(&rig_instance, 0, sizeof(rig_instance));
+		rig_instance.key = instance->object != 0xffffffffu ?
+			((uint64_t)instance->object << 32) | instance->mesh : 0;
+		rig_instance.game_seconds = instance->game_seconds;
+		rig_instance.ce_matrices = (const float (*)[12])instance->matrices;
+		rig_instance.ce_matrix_count = instance->node_count;
+		rig_instance.flags = (instance->flags & XGPU_STREAM_MESH_INSTANCE_NO_SECONDARY) ?
+			XGPU_RIG_INSTANCE_NO_SECONDARY : 0;
+		memcpy(rig_instance.functions, instance->functions, sizeof(rig_instance.functions));
+		meshes.rig_evaluations++;
+		if (xgpu_rig_evaluate(view->rig, meshes.rig_states, &rig_instance, (float (*)[12])meshes.bones, NULL) !=
+			XGPU_RIG_OK)
+		{
+			meshes.rig_failures++;
 			return 0;
-		memcpy(meshes.bones[index], instance->matrices[node], sizeof(meshes.bones[0]));
+		}
+	}
+	else
+	{
+		for (index = 0; index < view->bone_count; index++)
+		{
+			uint32_t node = view->bone_nodes[index];
+
+			if (node >= instance->node_count)
+				return 0;
+			memcpy(meshes.bones[index], instance->matrices[node], sizeof(meshes.bones[0]));
+		}
 	}
 	if (!xgpu_vulkan_mesh_skin(view->rest, view->vertex_first, view->vertex_count,
 		(const float (*)[4])meshes.bones, view->bone_count, view->inverse_scale, &instance->skinned))
@@ -448,6 +496,8 @@ void xgpu_vulkan_meshes_frame(void)
 {
 	if (meshes.store)
 		xgpu_mesh_store_frame(meshes.store);
+	if (meshes.rig_states)
+		xgpu_rig_states_age(meshes.rig_states, meshes.game_seconds);
 }
 
 int xgpu_vulkan_meshes_statistics(char *text, unsigned long size)
@@ -465,7 +515,8 @@ int xgpu_vulkan_meshes_statistics(char *text, unsigned long size)
 		"of %.1f MB, read %.1f MB, %u evictions; %llu uses (%llu stale, %llu stock); instances %llu (%llu drawable); "
 		"swaps %llu (%llu pieces), %llu parts skipped, %llu draws of parts drawn, %llu parts stock, %llu layouts "
 		"refused, %llu skinnings failed; %llu dispatches (%llu shared), %llu vertices skinned, %llu ring full; "
-		"instances by level %llu/%llu/%llu/%llu, largest %.0f px; last resident %.2f s after the map",
+		"instances by level %llu/%llu/%llu/%llu, largest %.0f px; last resident %.2f s after the map; rigs %llu "
+		"evaluated (%llu failed), %u spring states",
 		statistics.entries, statistics.resident, statistics.reading, statistics.failed, statistics.refused_budget,
 		(double)statistics.resident_bytes / 1048576.0, (double)statistics.budget_bytes / 1048576.0,
 		(double)statistics.read_bytes / 1048576.0, statistics.evictions, (unsigned long long)statistics.uses,
@@ -477,6 +528,8 @@ int xgpu_vulkan_meshes_statistics(char *text, unsigned long size)
 		(unsigned long long)dispatches, (unsigned long long)meshes.shared_skins, (unsigned long long)vertices,
 		(unsigned long long)ring_full, (unsigned long long)meshes.level_instances[0],
 		(unsigned long long)meshes.level_instances[1], (unsigned long long)meshes.level_instances[2],
-		(unsigned long long)meshes.level_instances[3], (double)meshes.largest_pixels, statistics.last_resident_seconds);
+		(unsigned long long)meshes.level_instances[3], (double)meshes.largest_pixels, statistics.last_resident_seconds,
+		(unsigned long long)meshes.rig_evaluations, (unsigned long long)meshes.rig_failures,
+		meshes.rig_states ? xgpu_rig_states_count(meshes.rig_states) : 0u);
 	return 1;
 }

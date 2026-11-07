@@ -24,8 +24,8 @@ checks it, the art pipeline's exporter makes it):
 	  (int16, -1 a helper), 2 bytes, the name's offset in the names that
 	  follow, its bind pose (3 rows of 4, model space) and the inverse; then
 	  the names, each ending in its NUL. Bone i < node count is the model's
-	  node i, skinned by that node's matrix; a helper by its nearest node
-	  ancestor's (until rigs drive helpers)
+	  node i, skinned by that node's matrix; a helper by the matrix its
+	  rule gives it (xgpu_rig.h), else by its parent's
 	LODS: a level each, 48 bytes: the pixels it is drawn from (the size the
 	  game chooses its levels by; the first level the most detailed), its
 	  pieces (first and count), its vertices (first and count) and indices
@@ -39,6 +39,8 @@ checks it, the art pipeline's exporter makes it):
 	  sign (int8: negative or not) and 3 bytes
 	INDX: uint32 each, a piece's relative to its first vertex, triangle
 	  lists (each a triangle as the stock part's front face winds it)
+	RIG : optional, the helper bones' rules (xgpu_rig.h's PRIG bytes,
+	  tools/prism_rig.py compile); without it a helper follows its parent
 	META: anything (the exporter's notes); skipped
 
 The store's portable core (xgpu_mesh_store.c), with no device of its own: a
@@ -67,6 +69,8 @@ at once.
 
 #include <stdint.h>
 
+struct xgpu_rig;
+
 #define XGPU_PMESH_MAGIC 0x48534d50u /* "PMSH" */
 #define XGPU_PMESH_VERSION 1
 #define XGPU_PMESH_HEADER_BYTES 64u
@@ -82,6 +86,9 @@ at once.
 #define XGPU_PMESH_VERT XGPU_PMESH_KIND('V', 'E', 'R', 'T')
 #define XGPU_PMESH_INDX XGPU_PMESH_KIND('I', 'N', 'D', 'X')
 #define XGPU_PMESH_META XGPU_PMESH_KIND('M', 'E', 'T', 'A')
+/* the helper bones' rules (xgpu_rig.h's compiled rig: tools/prism_rig.py
+compile; optional) */
+#define XGPU_PMESH_RIG XGPU_PMESH_KIND('R', 'I', 'G', ' ')
 #define XGPU_PMESH_BONES_MAXIMUM 1024u
 #define XGPU_PMESH_LODS_MAXIMUM 8u
 #define XGPU_PMESH_PIECES_MAXIMUM 4096u
@@ -175,6 +182,8 @@ struct xgpu_mesh_store_view
 	uint32_t piece_count;
 	uint32_t bone_count;
 	const uint16_t *bone_nodes;
+	/* the helper bones' rig (NULL: no helpers; every bone a node's) */
+	const struct xgpu_rig *rig;
 	uint32_t node_count;
 	float inverse_scale[2];
 	const uint8_t *present;

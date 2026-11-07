@@ -14,7 +14,8 @@ import numpy as np
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-SOURCES = [ROOT / "port/linux/vulkan/tests/mesh_store_test.c", ROOT / "port/linux/vulkan/xgpu_mesh_store.c"]
+SOURCES = [ROOT / "port/linux/vulkan/tests/mesh_store_test.c", ROOT / "port/linux/vulkan/xgpu_mesh_store.c",
+           ROOT / "port/linux/vulkan/xgpu_rig.c"]
 sys.path.insert(0, str(ROOT / "tools"))
 import pmesh  # noqa: E402
 
@@ -34,7 +35,7 @@ def test_mesh_store(tmp_path, mode):
     try:
         subprocess.run([cc, "-std=gnu11", "-O1", "-g", "-Wall", "-Wextra", "-Werror", "-D_GNU_SOURCE", *flags,
                         f"-I{ROOT / 'port/linux/vulkan'}", f"-I{ROOT / 'port/linux/src'}", *map(str, SOURCES),
-                        "-o", str(binary), "-lpthread"],
+                        "-o", str(binary), "-lpthread", "-lm"],
                        check=True, capture_output=True, text=True)
     except subprocess.CalledProcessError as error:
         if mode != "plain" and "sanitize" in (error.stderr or ""):

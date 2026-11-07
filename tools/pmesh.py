@@ -54,7 +54,7 @@ def kind(name: str) -> int:
     return struct.unpack("<I", name.encode())[0]
 
 
-SKEL, LODS, SUBM, VERT, INDX, META = (kind(k) for k in ("SKEL", "LODS", "SUBM", "VERT", "INDX", "META"))
+SKEL, LODS, SUBM, VERT, INDX, META, RIG = (kind(k) for k in ("SKEL", "LODS", "SUBM", "VERT", "INDX", "META", "RIG "))
 
 
 @dataclass
@@ -104,6 +104,8 @@ class Mesh:
     center: tuple = (0.0, 0.0, 0.0)
     radius: float = 0.0
     meta: dict = field(default_factory=dict)
+    # the helper bones' rules: the RIG section (tools/prism_rig.py compile's bytes; b"" none)
+    rig: bytes = b""
 
 
 def octahedral(vectors: np.ndarray) -> np.ndarray:
@@ -169,6 +171,8 @@ def write_pmesh(path: Path, mesh: Mesh) -> int:
     indices = np.ascontiguousarray(mesh.indices, dtype="<u4").tobytes()
     meta = json.dumps(mesh.meta, sort_keys=True).encode()
     sections = [(SKEL, skeleton), (LODS, levels), (SUBM, pieces), (VERT, vertices), (INDX, indices), (META, meta)]
+    if mesh.rig:
+        sections.insert(5, (RIG, bytes(mesh.rig)))
     table_offset = HEADER_BYTES
     at = table_offset + SECTION_BYTES * len(sections)
     table = b""
@@ -237,7 +241,8 @@ def read_pmesh(path: Path, check_crcs: bool = True) -> Mesh:
             meta = json.loads(sections[META] or b"{}")
         except ValueError:
             meta = {}
-    return Mesh(node_count, node_crc, bones, levels, pieces, vertices, indices, (cx, cy, cz), radius, meta)
+    return Mesh(node_count, node_crc, bones, levels, pieces, vertices, indices, (cx, cy, cz), radius, meta,
+                sections.get(RIG, b""))
 
 
 def model_table(dump: dict) -> set:

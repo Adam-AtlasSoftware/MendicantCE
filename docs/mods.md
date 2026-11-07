@@ -408,7 +408,8 @@ bones, tangents and two texture coordinate sets, and levels of detail of its
 own, each drawn from a size in pixels it names. Its skeleton is the model's
 own nodes (the same names, parents and default pose: the file carries their
 checksum, which must match the map's model) followed by any helper bones
-(each following its nearest node until rigs drive them); its pieces each
+(driven by the rig in the file's `RIG` section: `docs/prism_rigs.md`; a helper
+without a rule follows its parent); its pieces each
 replace the model's parts of one region, permutation and shader.
 
 The game goes on loading, simulating and drawing the stock model: its nodes
