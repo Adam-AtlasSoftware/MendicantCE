@@ -84,10 +84,10 @@ static const struct field pixel_fields[] = {
 	PIXEL_FIELD("ao", ambient_occlusion, 1, 1, 0),
 	/* (display.prism_material_overlay's: a mod's, never the game's own) */
 	{ "mo", offsetof(struct xgpu_stream_pixel_key, material_overlay), 1, 1, 0, 1 },
-	/* (display.prism_lightmaps's: derived, never the game's own) */
-	{ "lf", offsetof(struct xgpu_stream_pixel_key, lightmap_filter), 1, 1, 0, 1 },
-	/* (PRISM v2's model light: the settings', with a mod's overlay alone) */
-	{ "pp", offsetof(struct xgpu_stream_pixel_key, prism_lighting), 1, 1, 0, 1 },
+	/* (PRISM's light, XGPU_STREAM_PRISM: display.prism_lightmaps' filter,
+	derived; PRISM v2's model light, the settings', with a mod's overlay
+	alone; never the game's own) */
+	{ "pp", offsetof(struct xgpu_stream_pixel_key, prism), 1, 1, 0, 1 },
 };
 
 #define CONTEXT_FIELD(name, member, size, count) \
@@ -907,8 +907,8 @@ int xgpu_manifest_derive(const struct xgpu_manifest_draw *draw, const struct xgp
 	/* (a mod's material overlay, where a recording has one) */
 	facts.material_overlay = key->pixel.material_overlay;
 	/* (display.prism_lightmaps': as a recording has it) */
-	facts.lightmap_filter = key->pixel.lightmap_filter;
-	facts.prism_lighting = key->pixel.prism_lighting;
+	facts.lightmap_filter = XGPU_STREAM_PRISM_LIGHTMAP_FILTER(key->pixel.prism);
+	facts.prism_lighting = XGPU_STREAM_PRISM_LIGHTING(key->pixel.prism);
 	lit = xgpu_draw_derive(&facts, unlit, &parts);
 	/* (its bytes, padding too: a draw's hash is of them) */
 	memcpy(derived, draw, sizeof(*derived));
@@ -921,8 +921,7 @@ int xgpu_manifest_derive(const struct xgpu_manifest_draw *draw, const struct xgp
 	derived->key.pixel.dynamic_lights = parts.dynamic_lights;
 	derived->key.pixel.ambient_occlusion = parts.ambient_occlusion;
 	derived->key.pixel.material_overlay = parts.material_overlay;
-	derived->key.pixel.lightmap_filter = parts.lightmap_filter;
-	derived->key.pixel.prism_lighting = parts.prism_lighting;
+	derived->key.pixel.prism = XGPU_STREAM_PRISM(parts.prism_lighting, parts.lightmap_filter);
 	return lit;
 }
 

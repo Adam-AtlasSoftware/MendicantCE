@@ -779,10 +779,21 @@ struct xgpu_stream_pixel_key
 	uint8_t source_blend, dynamic_lights, vr_effect, ambient_occlusion;
 	/* display.hdr's tag (xgpu_hdr.h) */
 	uint16_t hdr;
-	/* display.prism_material_overlay, display.prism_lightmaps, PRISM v2's
-	model light (xgpu.h; each 0 as the game draws) */
-	uint8_t material_overlay, lightmap_filter, prism_lighting, unused;
+	/* display.prism_material_overlay (xgpu.h); PRISM's light, the native
+	key's prism_lighting and lightmap_filter in one byte (XGPU_STREAM_PRISM_*,
+	below). Both in what was padding: the keys without them hash as they did */
+	uint8_t material_overlay, prism;
 };
+
+/* the pixel key's prism byte: PRISM v2's model light (xgpu.h's
+XGPU_PRISM_*, below XGPU_STREAM_PRISM_LIGHTMAP_SHIFT) and display.prism_lightmaps'
+filter (XGPU_LIGHTMAP_FILTER_*, shifted by it); 0 as the game draws */
+#define XGPU_STREAM_PRISM_LIGHTMAP_SHIFT 6
+#define XGPU_STREAM_PRISM_LIGHTING_MASK ((1 << XGPU_STREAM_PRISM_LIGHTMAP_SHIFT) - 1)
+#define XGPU_STREAM_PRISM(prism_lighting, lightmap_filter) \
+	((uint8_t)(((prism_lighting) & XGPU_STREAM_PRISM_LIGHTING_MASK) | ((lightmap_filter) << XGPU_STREAM_PRISM_LIGHTMAP_SHIFT)))
+#define XGPU_STREAM_PRISM_LIGHTING(prism) ((prism) & XGPU_STREAM_PRISM_LIGHTING_MASK)
+#define XGPU_STREAM_PRISM_LIGHTMAP_FILTER(prism) ((prism) >> XGPU_STREAM_PRISM_LIGHTMAP_SHIFT)
 
 /* xgpu_backend.h's struct xgpu_pipeline_key */
 struct xgpu_stream_pipeline_key
@@ -897,8 +908,8 @@ static inline int xgpu_stream_world_ao_twin(struct xgpu_stream_pipeline_define *
 	definition->key.pixel.count_samples = definition->pixel_program.count_samples = 0;
 	definition->key.pixel.dynamic_lights = definition->pixel_program.dynamic_lights = 0;
 	definition->key.pixel.material_overlay = definition->pixel_program.material_overlay = 0;
-	definition->key.pixel.lightmap_filter = definition->pixel_program.lightmap_filter = 0;
-	definition->key.pixel.prism_lighting = definition->pixel_program.prism_lighting = 0;
+	definition->key.pixel.prism = 0;
+	definition->pixel_program.lightmap_filter = definition->pixel_program.prism_lighting = 0;
 	return 1;
 }
 
@@ -1363,10 +1374,10 @@ XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_read_target, 28);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_screenshot, 32);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_sampler, 24);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_texture_stage, 72);
-XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_pixel_key, 268);
-XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_pipeline_key, 312);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_pixel_key, 264);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_pipeline_key, 308);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_pixel_program, 440);
-XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_pipeline_define, 760);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_pipeline_define, 756);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_dynamic_state, 68);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_draw_uniforms, 580);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_vertex_element, 6);
