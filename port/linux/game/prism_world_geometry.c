@@ -31,7 +31,7 @@ and incident radiosity of the point of its surface it lies over, so the
 baked light lands where the stock light was.
 
 The file: <data root>/prism_world/<the BSP tag's path, / for \>.pwg, little
-endian, written by art_pipeline/world_geo/wg_write.py:
+endian, written by art_pipeline/world_geo (wg_common.py's write_pwg):
 
   header, 64 bytes: "PWG1", version (1), material count, flags (0), the
     BSP tag's path (48 bytes, informational)
@@ -49,6 +49,19 @@ endian, written by art_pipeline/world_geo/wg_write.py:
     the lightmap vertices, uncompressed (20 bytes), one for each vertex;
     the triangles, three 16-bit indices each;
     each array padded to 4 bytes.
+
+Version 2 (flags bit 0) adds a far level of detail: the record's bytes 40
+to 47 are the part's near triangle count (its first triangles; the rest
+are the far ones) and the distance (world units, a float) beyond which a
+surface is drawn far; after the triangles come, for each of the part's
+surfaces, the first and count of its far triangles (32 bits each: a range
+of the part's triangles, which may be its near ones) and its bounding
+sphere (centre and radius, 4 floats). A far surface keeps every vertex its
+near triangles have on the stock triangle's edges (art_pipeline/world_geo/
+wg2_lod.py), so near and far surfaces side by side meet without a crack.
+The camera's distance to the sphere, less its radius, scaled by the view's
+zoom (the vertical field of view against 70 degrees), chooses: the same for
+every pass of the frame, so the z-equal passes agree.
 
 A material whose remodel has more than 65535 vertices (the 16-bit indices)
 comes in parts, records one after another, each of a run of its surfaces in
@@ -87,6 +100,7 @@ byte.
 #include "shaders/shader_definitions.h"
 #include "shaders/shaders.h"
 #include "structures/structure_bsp_definitions.h"
+#include "render/render.h"
 #include "prism_world_geometry.h"
 
 #include <math.h>
@@ -111,7 +125,8 @@ extern D3DDevice *global_d3d_device;
 /* ---------- constants */
 
 #define PWG_MAGIC "PWG1"
-#define PWG_VERSION 1
+#define PWG_VERSION 2
+#define PWG_FLAG_FAR 1
 #define PWG_HEADER_SIZE 64
 #define PWG_MATERIAL_SIZE 64
 #define PWG_FOLDER "prism_world"
@@ -122,8 +137,9 @@ extern D3DDevice *global_d3d_device;
 /* the largest file read (a whole BSP remodelled at about 16 times the
 stock triangles is near 40 MB) */
 #define MAXIMUM_FILE_BYTES (256UL * 1024 * 1024)
-/* the most of the Xbox's contiguous memory a BSP's remodel takes */
-#define MAXIMUM_CONTIGUOUS_BYTES (96UL * 1024 * 1024)
+/* the most of the Xbox's contiguous memory a BSP's remodel takes (of the
+port's 512 MB: platform.h's PLATFORM_CONTIGUOUS_SIZE) */
+#define MAXIMUM_CONTIGUOUS_BYTES (176UL * 1024 * 1024)
 /* the most surfaces one chunk names (render.h's visible structure surfaces,
 and the lights' and shadows' MAXIMUM_LOCALLY_RENDERED_SURFACES) */
 #define MAXIMUM_CHUNK_SURFACES 32768
@@ -166,6 +182,11 @@ struct world_material
 	long part_count;
 	long triangle_count;
 	unsigned long *surface_first_triangle;
+	/* the far level (version 2), NULL none: each surface's far triangles
+	(first, count) and bounding sphere (x, y, z, radius); the distance */
+	unsigned long *far_triangles;
+	float *bounds;
+	float far_distance;
 };
 
 struct world_run
@@ -201,11 +222,18 @@ struct prism_world_geometry_globals
 	struct world_run *runs;
 	long run_count;
 
+	/* the camera of the frame (structure_render_preprocess's), and the
+	zoom's scale of the far levels' distances */
+	real_point3d camera;
+	float distance_scale;
+
 	/* what was drawn (the log, every STATISTICS_FRAMES frames) */
 	unsigned long frames;
 	unsigned long draws;
 	unsigned long triangles;
 	unsigned long stock_triangles;
+	unsigned long far_surfaces;
+	unsigned long surfaces;
 };
 
 /* ---------- globals */
@@ -304,6 +332,8 @@ static void world_geometry_release(
 		for (index = 0; index < world_geometry.material_count; index++)
 		{
 			free(world_geometry.materials[index].surface_first_triangle);
+			free(world_geometry.materials[index].far_triangles);
+			free(world_geometry.materials[index].bounds);
 		}
 	}
 	free(world_geometry.materials);
@@ -384,6 +414,12 @@ struct pwg_material_view
 	byte const *vertices;
 	byte const *lightmap_vertices;
 	byte const *triangles;
+	/* version 2's far level: the near triangle count, the distance, the
+	surfaces' (first, count) pairs and spheres; NULL none */
+	unsigned long near_triangle_count;
+	float far_distance;
+	byte const *far_triangles;
+	byte const *bounds;
 	struct structure_material *material;
 	boolean usable;
 };
@@ -402,12 +438,16 @@ static boolean pwg_parse(
 	unsigned long material_count;
 	unsigned long offset;
 	unsigned long index;
+	unsigned long version;
+	boolean far;
 
-	if (size < PWG_HEADER_SIZE || memcmp(bytes, PWG_MAGIC, 4) || read_u32(bytes + 4) != PWG_VERSION)
+	if (size < PWG_HEADER_SIZE || memcmp(bytes, PWG_MAGIC, 4) ||
+		(version = read_u32(bytes + 4)) < 1 || version > PWG_VERSION)
 	{
-		platform_log("prism world geometry: %s is not a remodel of version %d", path, PWG_VERSION);
+		platform_log("prism world geometry: %s is not a remodel of version 1 to %d", path, PWG_VERSION);
 		return FALSE;
 	}
+	far = version >= 2 && (read_u32(bytes + 12) & PWG_FLAG_FAR);
 	material_count = read_u32(bytes + 8);
 	if (!material_count || material_count > 4096)
 	{
@@ -441,6 +481,12 @@ static boolean pwg_parse(
 		view->positions = read_f64(record + 24);
 		view->part_first_surface = read_u32(record + 32);
 		view->part_surface_count = read_u32(record + 36);
+		view->near_triangle_count = far ? read_u32(record + 40) : view->triangle_count;
+		memcpy(&view->far_distance, record + 44, sizeof(view->far_distance));
+		if (!far || !isfinite(view->far_distance) || view->far_distance <= 0.0f)
+		{
+			view->far_distance = 0.0f;
+		}
 		offset += PWG_MATERIAL_SIZE;
 		if (view->surface_count > 0x100000 || view->vertex_count > 0xFFFF || view->triangle_count > 0x400000 ||
 			view->part_first_surface > view->surface_count ||
@@ -451,8 +497,9 @@ static boolean pwg_parse(
 		data_size = pad4((view->part_surface_count + 1) * 4) +
 			pad4(view->vertex_count * ENVIRONMENT_VERTEX_UNCOMPRESSED_SIZE) +
 			pad4(view->vertex_count * ENVIRONMENT_LIGHTMAP_VERTEX_UNCOMPRESSED_SIZE) +
-			pad4(view->triangle_count * 6);
-		if (size - offset < data_size)
+			pad4(view->triangle_count * 6) +
+			(far ? view->part_surface_count * (8 + 16) : 0);
+		if (view->near_triangle_count > view->triangle_count || size - offset < data_size)
 		{
 			goto truncated;
 		}
@@ -464,6 +511,15 @@ static boolean pwg_parse(
 		offset += pad4(view->vertex_count * ENVIRONMENT_LIGHTMAP_VERTEX_UNCOMPRESSED_SIZE);
 		view->triangles = bytes + offset;
 		offset += pad4(view->triangle_count * 6);
+		view->far_triangles = NULL;
+		view->bounds = NULL;
+		if (far)
+		{
+			view->far_triangles = bytes + offset;
+			offset += view->part_surface_count * 8;
+			view->bounds = bytes + offset;
+			offset += view->part_surface_count * 16;
+		}
 	}
 	*views_out = views;
 	*view_count_out = (long)material_count;
@@ -532,17 +588,43 @@ static boolean pwg_material_check(
 	{
 		unsigned long first = read_u32(view->surface_first_triangle + 4 * index);
 
-		if (first < previous || first > view->triangle_count || (index == 0 && first != 0))
+		if (first < previous || first > view->near_triangle_count || (index == 0 && first != 0))
 		{
 			reason = "has its surfaces' triangles out of order";
 			goto refused;
 		}
 		previous = first;
 	}
-	if (previous != view->triangle_count)
+	if (previous != view->near_triangle_count)
 	{
 		reason = "does not end its surfaces' triangles at its triangle count";
 		goto refused;
+	}
+	if (view->far_triangles)
+	{
+		for (index = 0; index < view->part_surface_count; index++)
+		{
+			unsigned long first = read_u32(view->far_triangles + 8 * index);
+			unsigned long count = read_u32(view->far_triangles + 8 * index + 4);
+			int axis;
+
+			if (first > view->triangle_count || count > view->triangle_count - first)
+			{
+				reason = "has a surface's far triangles outside its triangles";
+				goto refused;
+			}
+			for (axis = 0; axis < 4; axis++)
+			{
+				float value;
+
+				memcpy(&value, view->bounds + 16 * index + 4 * axis, sizeof(value));
+				if (!isfinite(value) || (axis == 3 && value < 0.0f))
+				{
+					reason = "has a surface's bounds that are no number";
+					goto refused;
+				}
+			}
+		}
 	}
 	for (index = 0; index < view->triangle_count * 3; index++)
 	{
@@ -710,6 +792,29 @@ static boolean world_geometry_make(
 		{
 			made->surface_first_triangle[element] = read_u32(view->surface_first_triangle + 4 * element);
 		}
+		made->far_triangles = NULL;
+		made->bounds = NULL;
+		made->far_distance = view->far_distance;
+		if (view->far_triangles && view->far_distance > 0.0f)
+		{
+			made->far_triangles = malloc(view->part_surface_count * 2 * sizeof(unsigned long) + 1);
+			made->bounds = malloc(view->part_surface_count * 4 * sizeof(float) + 1);
+			if (!made->far_triangles || !made->bounds)
+			{
+				free(made->far_triangles);
+				free(made->bounds);
+				made->far_triangles = NULL;
+				made->bounds = NULL;
+			}
+			else
+			{
+				for (element = 0; element < view->part_surface_count * 2; element++)
+				{
+					made->far_triangles[element] = read_u32(view->far_triangles + 4 * element);
+				}
+				memcpy(made->bounds, view->bounds, view->part_surface_count * 4 * sizeof(float));
+			}
+		}
 
 		/* the vertices, then the lightmap vertices (compressed from a copy:
 		the file's bytes need not be aligned) */
@@ -874,10 +979,14 @@ static void statistics_frame(
 	world_geometry.frames++;
 	if (world_geometry.frames >= STATISTICS_FRAMES)
 	{
-		platform_log("prism world geometry: %lu frames: %.1f draws, %.0f triangles a frame for %.0f stock",
+		platform_log("prism world geometry: %lu frames: %.1f draws, %.0f triangles a frame for %.0f stock, "
+			"%.1f%% of the surfaces drawn far",
 			world_geometry.frames, (double)world_geometry.draws / world_geometry.frames,
 			(double)world_geometry.triangles / world_geometry.frames,
-			(double)world_geometry.stock_triangles / world_geometry.frames);
+			(double)world_geometry.stock_triangles / world_geometry.frames,
+			world_geometry.surfaces ? 100.0 * (double)world_geometry.far_surfaces / world_geometry.surfaces : 0.0);
+		world_geometry.far_surfaces = 0;
+		world_geometry.surfaces = 0;
 		world_geometry.frames = 0;
 		world_geometry.draws = 0;
 		world_geometry.triangles = 0;
@@ -911,6 +1020,15 @@ void prism_world_geometry_frame(
 		(world_geometry.tried_bsp != bsp || world_geometry.tried_tag_index != tag_index))
 	{
 		world_geometry_load(bsp, tag_index);
+	}
+	/* (the frame's camera, which every pass of the structure's draws this
+	frame shares; a narrower view, a zoom, draws near surfaces from further) */
+	world_geometry.camera = render.camera.position;
+	{
+		float fov = render.camera.vertical_field_of_view;
+
+		world_geometry.distance_scale = isfinite(fov) && fov > 0.01f && fov < 3.1f ?
+			(float)(tan(0.5 * 70.0 * 3.14159265358979 / 180.0) / tan(0.5 * (double)fov)) : 1.0f;
 	}
 	statistics_frame();
 
@@ -963,6 +1081,23 @@ struct vertex_buffer const *prism_world_geometry_chunk(
 		}
 		begin = (long)of->surface_first_triangle[surface - of->part_first_surface];
 		end = (long)of->surface_first_triangle[surface - of->part_first_surface + 1];
+		if (of->far_triangles)
+		{
+			long local = surface - of->part_first_surface;
+			float const *sphere = of->bounds + 4 * local;
+			float dx = sphere[0] - world_geometry.camera.x;
+			float dy = sphere[1] - world_geometry.camera.y;
+			float dz = sphere[2] - world_geometry.camera.z;
+			float beyond = sqrtf(dx * dx + dy * dy + dz * dz) - sphere[3];
+
+			world_geometry.surfaces++;
+			if (beyond > of->far_distance * world_geometry.distance_scale)
+			{
+				begin = (long)of->far_triangles[2 * local];
+				end = begin + (long)of->far_triangles[2 * local + 1];
+				world_geometry.far_surfaces++;
+			}
+		}
 		if (end <= begin)
 		{
 			continue;
@@ -1043,6 +1178,14 @@ int prism_world_geometry_draw(
 	}
 
 	return TRUE;
+}
+
+int prism_world_geometry_drawn(
+	void)
+{
+	settings_read();
+
+	return world_geometry.enabled && world_geometry.loaded_bsp && world_geometry.loaded_bsp == global_structure_bsp_get();
 }
 
 void prism_world_geometry_map_unloaded(

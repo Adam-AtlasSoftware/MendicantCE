@@ -479,10 +479,12 @@ static const struct config_setting config_settings[] =
 		_platform_desktop,
 		"PRISM v2: \"remodel\" draws the level's walls, rock and ground from a\n"
 		"denser remodel built on this machine from your maps (prism_world\\,\n"
-		"art_pipeline/world_geo: bevelled edges, rounded rock, relief from the\n"
-		"level's own textures), lit by the level's own lightmaps; collision,\n"
-		"paths and visibility stay the map's. A level without a remodel is\n"
-		"drawn stock. \"stock\" draws the map's own. Read each frame\n"
+		"art_pipeline/world_geo: cliff strata, overhangs and chipped rock, sand\n"
+		"ripples, deep bevels and panel grooves on the metal, after the level's\n"
+		"own textures), lit by the level's own lightmaps with the light the new\n"
+		"shape takes; far surfaces drawn from a coarser level. Collision, paths\n"
+		"and visibility stay the map's. A level without a remodel is drawn\n"
+		"stock. \"stock\" draws the map's own. Read each frame\n"
 		"(prism_set \"world_geometry remodel\")." },
 	{ "display.structure_culling", _config_integer, STRUCTURE_CULLING_DEFAULT, "HALO_STRUCTURE_CULLING", _environment_value,
 		_platform_all,
