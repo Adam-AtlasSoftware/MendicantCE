@@ -1957,6 +1957,8 @@ struct pixel_state
 	unsigned int overlay_images[XGPU_OVERLAY_IMAGE_COUNT];
 	unsigned int overlay_n, overlay_nm, overlay_cavity, overlay_rough, overlay_w, overlay_keep;
 	unsigned int overlay_wt, overlay_f4, overlay_fa, overlay_fb;
+	/* (with a surface map, XGPU_OVERLAY_SURFACE) its roughness, 0 none */
+	unsigned int overlay_surface_rough;
 };
 
 static unsigned int pixel_input(struct module *m, struct pixel_state *state, unsigned int variable_id, unsigned int type)
@@ -4747,16 +4749,16 @@ pixel, log2) and the draw's fade, the light by the micro normal times the
 cavity and half the roughness, clamped. xgpu_msl.c's overlay_* are its
 twin. */
 
-static void overlay_declare(struct module *m, struct pixel_state *state, BOOL class_mask)
+static void overlay_declare(struct module *m, struct pixel_state *state, BOOL class_mask, BOOL surface)
 {
 	static const char *const names[XGPU_OVERLAY_IMAGE_COUNT] = { "overlay_a", "overlay_b", "overlay_c", "overlay_d",
-		"overlay_m" };
+		"overlay_m", "overlay_s" };
 	int index;
 
 	for (index = 0; index < XGPU_OVERLAY_IMAGE_COUNT; index++)
 	{
-		if (!class_mask && index >= 2)
-			break;
+		if (index == XGPU_OVERLAY_SURFACE_IMAGE ? !surface : !class_mask && index >= 2)
+			continue;
 		state->overlay_images[index] = variable(m, type_sampled_image(m, DIM_2D, FALSE, FALSE, TRUE),
 			STORAGE_UNIFORM_CONSTANT, names[index]);
 		decorate1(m, state->overlay_images[index], DECORATION_DESCRIPTOR_SET, XGPU_SPIRV_SET_TEXTURES);
@@ -4944,6 +4946,22 @@ static void overlay_light(struct module *m, struct pixel_state *state, BOOL poin
 		state->overlay_fa = fa;
 		state->overlay_fb = fb;
 	}
+	/* the surface map (XGPU_OVERLAY_SURFACE): its normal's slope added to
+	the tiles' (slope = xy / z, z = sqrt(1 - dot(xy, xy)), at least 0.3,
+	times [10].x), its occlusion on the cavity (mix(1, ao, [10].y)), where
+	there is a frame; its roughness kept for the reflection's highlight */
+	state->overlay_surface_rough = 0;
+	if (program->material_overlay & XGPU_OVERLAY_SURFACE)
+	{
+		unsigned int ov10 = overlay_uniform(m, 10);
+		unsigned int s = overlay_sample(m, state, XGPU_OVERLAY_SURFACE_IMAGE, uv);
+		unsigned int sxy = fsub(m, 2, fscale(m, 2, xy(m, s), constant_float(m, 2.0f)), constant_splat(m, 2, 1.0f));
+		unsigned int sz = ext1(m, GLSL_SQRT, m->t_float, fmax_scalar(m, 1, fsub(m, 1, one, fdot(m, sxy, sxy)), 0.09f));
+
+		slope = fadd(m, 2, slope, fscale(m, 2, sxy, fmul(m, 1, fdiv(m, 1, extract(m, ov10, 0), sz), frame)));
+		cavity = fmul(m, 1, cavity, overlay_mix(m, 1, one, extract(m, s, 2), fmul(m, 1, extract(m, ov10, 1), frame)));
+		state->overlay_surface_rough = extract(m, s, 3);
+	}
 	/* the micro normal (the tiles' y is up their pictures: against v, whose
 	rows run down) */
 	nm = ext1(m, GLSL_NORMALIZE, m->t_v3, fadd(m, 3, n, fscale(m, 3, fsub(m, 3,
@@ -4990,6 +5008,24 @@ static void overlay_reflection(struct module *m, struct pixel_state *state)
 	/* t3.rgb = min(t3.rgb * mix(1.0, cavity, overlay[6].y), 1.0) */
 	darkened = ext2(m, GLSL_F_MIN, m->t_v3, fscale(m, 3, xyz(m, texel), overlay_mix(m, 1, constant_float(m, 1.0f),
 		state->overlay_cavity, extract(m, overlay_uniform(m, 6), 1))), constant_splat(m, 3, 1.0f));
+	/* (XGPU_OVERLAY_SURFACE) the level's dominant light's highlight along
+	the bent reflection: pow(max(dot(normalize(bent), -ml[7].xyz), 0),
+	max(w * (1 - rough)^2, 4)) * (1 - rough) * z * ml[8].rgb, added before
+	the clamp (xgpu.h's "The surface map") */
+	if (state->overlay_surface_rough)
+	{
+		unsigned int ov10 = overlay_uniform(m, 10), one = constant_float(m, 1.0f);
+		unsigned int smooth = fsub(m, 1, one, state->overlay_surface_rough);
+		unsigned int exponent = fmax_scalar(m, 1, fmul(m, 1, extract(m, ov10, 3), fmul(m, 1, smooth, smooth)), 4.0f);
+		unsigned int direction = ext1(m, GLSL_NORMALIZE, m->t_v3, bent);
+		unsigned int along = fmax_scalar(m, 1, fdot(m, direction, fneg(m, 3, xyz(m, uniform(m, U_MODEL_LIGHTS, 7)))),
+			0.0f);
+		unsigned int highlight = fmul(m, 1, fmul(m, 1, ext2(m, GLSL_POW, m->t_float, along, exponent), smooth),
+			extract(m, ov10, 2));
+
+		darkened = ext2(m, GLSL_F_MIN, m->t_v3, fadd(m, 3, darkened, fscale(m, 3, xyz(m, uniform(m, U_MODEL_LIGHTS, 8)),
+			highlight)), constant_splat(m, 3, 1.0f));
+	}
 	state->t[3] = shuffle(m, 4, texel, darkened, rgb);
 	if (decoded->color_sign)
 	{
@@ -5119,7 +5155,8 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 		decorate1(&m, state.textures[stage], DECORATION_BINDING, stage);
 	}
 	if (overlay)
-		overlay_declare(&m, &state, (program->material_overlay & XGPU_OVERLAY_CLASS_MASK) != 0);
+		overlay_declare(&m, &state, (program->material_overlay & XGPU_OVERLAY_CLASS_MASK) != 0,
+			(program->material_overlay & XGPU_OVERLAY_SURFACE) != 0);
 	if (effect)
 		effect_declare(&m, &state);
 	else if (replaces_depth)

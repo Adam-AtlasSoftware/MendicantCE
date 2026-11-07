@@ -38,7 +38,7 @@ port/linux/README.md.
 #include <stdint.h>
 
 #define XGPU_STREAM_MAGIC 0x53504758u /* "XGPS" */
-#define XGPU_STREAM_VERSION 20
+#define XGPU_STREAM_VERSION 21
 #define XGPU_STREAM_LOADING_ART_BYTES (640u * 480u * 4u)
 
 /* ---------- the ring
@@ -708,13 +708,14 @@ material_overlay, sent as it changes. Its stages are images
 (XGPU_STREAM_SOURCE_IMAGE, with no levels' targets; their format may be
 XGPU_STREAM_IMAGE_RGBA_LEVELS: data holds every level, level 0 first, each
 half the one before, at least 1, right after it) or none (source 0): tiles A
-to D, then the class mask, at the backend's XGPU_OVERLAY_BINDING on */
+to D, then the class mask, then the surface map, at the backend's
+XGPU_OVERLAY_BINDING on */
 #define XGPU_STREAM_IMAGE_RGBA_LEVELS 2
 struct xgpu_stream_material_overlay
 {
 	uint32_t header;
-	float uniforms[10][4];
-	struct xgpu_stream_texture_stage stages[5];
+	float uniforms[11][4];
+	struct xgpu_stream_texture_stage stages[6];
 };
 
 /* ---------- pipelines */
@@ -1334,7 +1335,7 @@ struct xgpu_stream_vr_screen_corrections
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_ring, 104);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_frame_end, 12);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_capabilities, 24);
-XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_material_overlay, 4 + 160 + 5 * 72);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_material_overlay, 4 + 176 + 6 * 72);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_hdr, 24);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_tone_map, 24);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_panini, 56);

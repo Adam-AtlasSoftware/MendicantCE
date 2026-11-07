@@ -79,6 +79,16 @@ whose class mask is not there (not built yet, or another map's), or not
 ready yet, draws with slots A and B and the channel rule alone, as a shader
 of two classes does.
 
+PRISM v2 (prototype, display.prism_surface_maps, off unless set): a shader
+may also name a surface map for each of its base map's bitmaps
+("surface_map": one PNG or an array, found in whichever mod has it, as the
+class masks are: built on the player's machine from the player's maps), an
+RGBA PNG at the base map's coordinates (RG the normal's x and y, y up the
+picture; B the ambient occlusion; A the roughness), and its strengths
+("surface": { "normal": 1.0, "occlusion": 1.0, "specular": 0.5,
+"exponent": 48 }): xgpu.h's "The surface map". display.prism_specular
+scales the highlight (0 to 2).
+
 The overlay is taken up when the map's tags load and mods_reload; its tiles
 are read then (or when it is first turned on) and decoded on a thread of
 their own, a draw going without the overlay until its tiles are ready; the
@@ -134,8 +144,8 @@ unsigned int xgpu_image_create(void *pixels, unsigned long width, unsigned long 
 	int format, int owned);
 void xgpu_image_delete(unsigned int image);
 int d3d8_material_overlay_drawn(void);
-void d3d8_set_material_overlay(float const *uniforms, unsigned int const *tiles, unsigned int mask, int view,
-	int mask_wins);
+void d3d8_set_material_overlay(float const *uniforms, unsigned int const *tiles, unsigned int mask, int view, int mask_wins,
+	unsigned int surface);
 
 /* ---------- constants */
 
@@ -161,7 +171,7 @@ level given, level 0 first) */
 #define MAXIMUM_NAME 256
 
 /* as xgpu_spirv.c reads them (xgpu.h XGPU_OVERLAY_UNIFORM_COUNT) */
-#define OVERLAY_UNIFORM_COUNT 10
+#define OVERLAY_UNIFORM_COUNT 11
 /* the class masks a shader names, one per bitmap of its base map */
 #define MAXIMUM_CLASS_MASKS 8
 
@@ -240,6 +250,13 @@ struct overlay_shader
 	/* "class_mask_wins": the mask's slots A, C and D kept over the
 	channel rule (xgpu.h's XGPU_OVERLAY_CLASS_MASK_WINS) */
 	boolean mask_wins;
+	/* "surface_map" (display.prism_surface_maps, xgpu.h's "The surface
+	map"): its images by the base map's bitmap (classes[] of their own, as
+	the masks are; NONE none), and "surface": the normal's, occlusion's and
+	highlight's strengths and the highlight's sharpest exponent */
+	short surface_count;
+	short surfaces[MAXIMUM_CLASS_MASKS];
+	real surface[4];
 	real tiles_per_uv[NUMBER_OF_SLOTS];
 	real strength;
 	/* the uniform, before each draw's fade and strength */
@@ -261,6 +278,9 @@ static struct
 	boolean enabled;
 	real strength;
 	int view;
+	/* display.prism_surface_maps and display.prism_specular */
+	boolean surface_maps;
+	real specular;
 	/* a draw is armed (mod_materials_draw_end disarms it) */
 	boolean armed;
 } mod_materials_globals;
@@ -1131,6 +1151,8 @@ static boolean shader_read(
 	int exclude = json_member(json, value, "exclude");
 	int reflection = json_member(json, value, "reflection");
 	int class_mask = json_member(json, value, "class_mask");
+	int surface_map = json_member(json, value, "surface_map");
+	int surface = json_member(json, value, "surface");
 	real uv_wu = json_real(json, json_member(json, value, "uv_wu"), 0.0f);
 	real uv_scale = json_real(json, json_member(json, value, "uv_scale"), 0.0f);
 	short slot;
@@ -1180,6 +1202,28 @@ static boolean shader_read(
 			entry->mask_count = (short)(index + 1);
 		}
 	}
+	/* the surface maps, by the base map's bitmap, as the masks */
+	entry->surface_count = 0;
+	if (surface_map >= 0 && (json->tokens[surface_map].type == JSMN_STRING ||
+		json->tokens[surface_map].type == JSMN_ARRAY))
+	{
+		boolean one = json->tokens[surface_map].type == JSMN_STRING;
+		int count = one ? 1 : json->tokens[surface_map].size;
+		int element = one ? surface_map : surface_map + 1;
+		int index;
+
+		for (index = 0; index < count && index < MAXIMUM_CLASS_MASKS; index++, element++)
+		{
+			char file[MAXIMUM_NAME];
+
+			entry->surfaces[index] = json_string(json, element, file, sizeof(file)) && file[0] ? mask_add(file) : NONE;
+			entry->surface_count = (short)(index + 1);
+		}
+	}
+	entry->surface[0] = json_real(json, json_member(json, surface, "normal"), 1.0f);
+	entry->surface[1] = json_real(json, json_member(json, surface, "occlusion"), 1.0f);
+	entry->surface[2] = json_real(json, json_member(json, surface, "specular"), 0.5f);
+	entry->surface[3] = json_real(json, json_member(json, surface, "exponent"), 48.0f);
 	/* (one class: tile A everywhere, the mask's step below any channel) */
 	entry->uniforms[1][0] = -2.0f;
 	entry->uniforms[1][1] = -1.0f;
@@ -1368,6 +1412,16 @@ static void settings_read(
 	{
 		mod_materials_globals.view = 0;
 	}
+	mod_materials_globals.surface_maps = config_boolean("display.prism_surface_maps") != 0;
+	mod_materials_globals.specular = (real)config_real("display.prism_specular");
+	if (!mods_finite_real(mod_materials_globals.specular) || mod_materials_globals.specular < 0.0f)
+	{
+		mod_materials_globals.specular = 0.0f;
+	}
+	if (mod_materials_globals.specular > 2.0f)
+	{
+		mod_materials_globals.specular = 2.0f;
+	}
 
 	return;
 }
@@ -1432,6 +1486,8 @@ void mod_materials_draw_begin(
 	float uniforms[OVERLAY_UNIFORM_COUNT][4];
 	unsigned int tiles[NUMBER_OF_SLOTS];
 	unsigned int mask_texture = 0;
+	unsigned int surface_texture = 0;
+	short bitmap = 0;
 	short slot;
 	short slot_count = 2;
 
@@ -1456,17 +1512,16 @@ void mod_materials_draw_begin(
 	/* the class mask of the base map's bitmap (the one the draw's
 	permutation picks, as rasterizer_set_texture does), once it and the
 	other tiles are ready; until then, or without one, two classes */
+	if (base_map_index != NONE && permutation_index > 0)
+	{
+		long count = bitmap_group_get(base_map_index)->bitmaps.count;
+
+		bitmap = count > 0 ? (short)(permutation_index % count) : 0;
+	}
 	if (entry->mask_count)
 	{
-		short bitmap = 0;
 		short mask;
 
-		if (base_map_index != NONE && permutation_index > 0)
-		{
-			long count = bitmap_group_get(base_map_index)->bitmaps.count;
-
-			bitmap = count > 0 ? (short)(permutation_index % count) : 0;
-		}
 		mask = bitmap < entry->mask_count ? entry->masks[bitmap] : NONE;
 		if (mask != NONE && class_tile_load(&mod_materials_globals.classes[mask]) &&
 			class_tile_load(&mod_materials_globals.classes[entry->slots[_slot_c]]) &&
@@ -1476,7 +1531,22 @@ void mod_materials_draw_begin(
 			slot_count = NUMBER_OF_SLOTS;
 		}
 	}
+	/* the surface map of the base map's bitmap (display.prism_surface_maps),
+	once it is ready */
+	if (mod_materials_globals.surface_maps && entry->surface_count)
+	{
+		short surface = bitmap < entry->surface_count ? entry->surfaces[bitmap] : NONE;
+
+		if (surface != NONE && class_tile_load(&mod_materials_globals.classes[surface]))
+		{
+			surface_texture = mod_materials_globals.classes[surface].texture;
+		}
+	}
 	memcpy(uniforms, entry->uniforms, sizeof(uniforms));
+	uniforms[10][0] = (float)entry->surface[0];
+	uniforms[10][1] = (float)entry->surface[1];
+	uniforms[10][2] = (float)(entry->surface[2] * mod_materials_globals.specular);
+	uniforms[10][3] = (float)entry->surface[3];
 	/* (no multipurpose map: the default white texture, which is no mask) */
 	uniforms[1][3] = has_multipurpose ? 1.0f : 0.0f;
 	if (!has_multipurpose)
@@ -1501,7 +1571,8 @@ void mod_materials_draw_begin(
 		uniforms[slot_uniform[slot]][2] = overlay_class->cavity * fade;
 		uniforms[slot_uniform[slot]][3] = overlay_class->rough * fade;
 	}
-	d3d8_set_material_overlay(uniforms[0], tiles, mask_texture, mod_materials_globals.view, entry->mask_wins);
+	d3d8_set_material_overlay(uniforms[0], tiles, mask_texture, mod_materials_globals.view, entry->mask_wins,
+		surface_texture);
 	mod_materials_globals.armed = TRUE;
 
 	return;
@@ -1512,7 +1583,7 @@ void mod_materials_draw_end(
 {
 	if (mod_materials_globals.armed)
 	{
-		d3d8_set_material_overlay(NULL, NULL, 0, 0, 0);
+		d3d8_set_material_overlay(NULL, NULL, 0, 0, 0, 0);
 		mod_materials_globals.armed = FALSE;
 	}
 
@@ -1529,7 +1600,8 @@ void mod_materials_prism_set(
 
 	if (!space || space == text || (size_t)(space - text) >= sizeof(name) - 16)
 	{
-		console_warning("prism_set \"<setting> <value>\": material_overlay, overlay_strength or overlay_view");
+		console_warning("prism_set \"<setting> <value>\": material_overlay, overlay_strength, overlay_view, surface_maps "
+			"or specular");
 		return;
 	}
 	snprintf(name, sizeof(name), "display.prism_%.*s", (int)(space - text), text);
