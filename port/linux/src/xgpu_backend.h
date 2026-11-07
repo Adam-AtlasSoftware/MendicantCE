@@ -75,6 +75,12 @@ struct xgpu_backend_capabilities
 	/* display.prism_material_overlay (xgpu.h's "The material overlay"):
 	its shaders and xgpu_backend_material_overlay */
 	BOOL material_overlay;
+	/* display.prism_lightmaps (xgpu.h's "The lightmaps smoothed"): the
+	pixel key's lightmap_filter */
+	BOOL lightmap_filter;
+	/* display.prism_bloom: xgpu_backend_bloom's glow about the 3D view's
+	light past white, before its tone map (with the half floats: hdr) */
+	BOOL bloom;
 };
 
 extern struct xgpu_backend_capabilities xgpu_backend_capabilities;
@@ -126,7 +132,15 @@ void xgpu_backend_gamma(float gamma);
 _rasterizer_profile_*, -1 none): what the backends' GPU timing sums by
 (HALO_METAL_PASS_TIMES) */
 void xgpu_backend_category(int category);
-void xgpu_backend_tone_map(xgpu_target target, const long corners[4]);
+/* display.prism_bloom (where xgpu_backend_capabilities' bloom): the view's
+light past paper white glows (XGPU_BLOOM_GLOW: small and faint; _FULL:
+wider and brighter) before the tone map: its share past 1 (the threshold),
+halved again and again (dual filtering, Marius Bjorge's: a 13-tap
+downsample, a 9-tap tent up, XGPU_BLOOM_LEVELS of each) and added back
+over the view by XGPU_BLOOM_STRENGTH; 0 none, the view as it is */
+#define XGPU_BLOOM_GLOW 1
+#define XGPU_BLOOM_FULL 2
+void xgpu_backend_tone_map(xgpu_target target, const long corners[4], int bloom);
 /* display.ambient_occlusion "world" (xgpu_stream.h, docs/world-ao.md):
 the block the opaque surfaces' ambient light reads from here on (the
 field's place, the window's proxies; NULL none), and slices of the field

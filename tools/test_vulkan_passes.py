@@ -120,8 +120,8 @@ int main(void)
 
 def test_post_shaders(tmp_path):
     # The anti-aliasing passes' generated file (tools/vulkan_post_shaders.py),
-    # with display.hdr's tone map and encoding, display.gamma's curve and
-    # display.panini's projection: SMAA's lookup textures are
+    # with display.hdr's tone map and encoding, display.gamma's curve,
+    # display.panini's projection and display.prism_bloom's passes: SMAA's lookup textures are
     # port/third_party/smaa's, inflated, and each module is valid for Vulkan
     # 1.1 where spirv-val is installed.
     text = (ROOT / "port/linux/vulkan/xgpu_vulkan_post_shaders.c").read_text()
@@ -133,7 +133,7 @@ def test_post_shaders(tmp_path):
         assert len(texels) == size
         assert struct.pack(f"<{len(words)}I", *words)[:size] == texels
     modules = sorted(name for name in arrays if name.endswith(("_vert", "_frag")))
-    assert modules == ["clear_frag", "fxaa_frag", "gamma_frag", "hdr_encode_frag", "hdr_tone_map_frag", "hdr_tone_map_ms_frag",
+    assert modules == ["bloom_down_frag", "bloom_up_frag", "clear_frag", "fxaa_frag", "gamma_frag", "hdr_encode_frag", "hdr_tone_map_frag", "hdr_tone_map_ms_frag",
                        "panini_frag", "post_vert", "rotate_frag", "smaa_blend_frag", "smaa_edges_frag",
                        "smaa_weights_frag"]
     validator = shutil.which("spirv-val")

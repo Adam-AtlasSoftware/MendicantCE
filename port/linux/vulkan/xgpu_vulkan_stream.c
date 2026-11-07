@@ -1168,6 +1168,7 @@ static void pixel_program_convert(const struct xgpu_stream_pixel_program *wire, 
 	program->ambient_occlusion = wire->ambient_occlusion;
 	program->hdr = wire->hdr;
 	program->material_overlay = wire->material_overlay;
+	program->lightmap_filter = wire->lightmap_filter;
 }
 
 /* debug.gpu_dump_shaders (HALO_VULKAN_SHADERS) writes each module into its
@@ -3146,6 +3147,10 @@ static void stream_tone_map(void *context, const struct xgpu_stream_tone_map *re
 	target->written++;
 	if (color_image == target->multisampled)
 		target->unresolved = 1;
+	/* (display.prism_bloom: its passes, then the view's pass again for the
+	tone map) */
+	if (record->bloom && xgpu_vulkan_post_bloom(color_image, record->corners, (int)record->bloom))
+		targets_bind();
 	xgpu_vulkan_post_tone_map(color_image, depth_image, record->corners, hdr);
 	/* (the stream's targets again: the same, so that the pass goes on) */
 	targets_bind();
@@ -3294,6 +3299,10 @@ static void stream_initialize(void *context, struct xgpu_stream_capabilities *ca
 	capabilities->hdr = stream.capabilities.color_read != 0;
 	/* (display.prism_material_overlay: its shaders, xgpu_spirv.c's) */
 	capabilities->material_overlay = 1;
+	/* (display.prism_lightmaps: xgpu_spirv.c's; display.prism_bloom:
+	xgpu_vulkan_post.c's passes, where the half floats are drawn) */
+	capabilities->lightmap_filter = 1;
+	capabilities->bloom = stream.capabilities.color_read != 0;
 }
 
 static void stream_prepare(void *context)

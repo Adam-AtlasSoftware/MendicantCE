@@ -647,6 +647,8 @@ void xgpu_backend_initialize(void)
 	xgpu_backend_capabilities.dynamic_lights = stream.capabilities.dynamic_lights;
 	xgpu_backend_capabilities.hdr = stream.capabilities.hdr;
 	xgpu_backend_capabilities.material_overlay = stream.capabilities.material_overlay;
+	xgpu_backend_capabilities.lightmap_filter = stream.capabilities.lightmap_filter;
+	xgpu_backend_capabilities.bloom = stream.capabilities.bloom;
 }
 
 /* (at exit) the frames submitted played, the render thread ended */
@@ -761,7 +763,7 @@ void xgpu_backend_picture_top(int top)
 		record_value(XGPU_STREAM_PICTURE_POSITION, top < 0 ? 0 : (uint32_t)top + 1);
 }
 
-void xgpu_backend_tone_map(xgpu_target target, const long corners[4])
+void xgpu_backend_tone_map(xgpu_target target, const long corners[4], int bloom)
 {
 	struct xgpu_stream_tone_map *record_body;
 	int index;
@@ -772,6 +774,7 @@ void xgpu_backend_tone_map(xgpu_target target, const long corners[4])
 	record_body->target = target;
 	for (index = 0; index < 4; index++)
 		record_body->corners[index] = (int32_t)corners[index];
+	record_body->bloom = bloom > 0 ? (uint32_t)bloom : 0;
 }
 
 static void stream_finite(float *values, unsigned long count, const char *what, unsigned long first);

@@ -67,6 +67,11 @@ d3d8_device.c's halo_gpu_settings_taken, not as they are written: the map
 is prepared again under the change at the same frame, render_enumerate.c's
 enumerated_derivation_check, so that no frame draws the world's pipelines
 before they are made) */
+/* (prism_lightmaps.c) */
+void prism_lightmaps_begin(void const *lightmap_bitmap);
+void prism_lightmaps_bsp_switched(void);
+void prism_lightmaps_map_unloaded(void);
+
 int world_ao_mode(void)
 {
 	unsigned long changes = halo_gpu_settings_taken();
@@ -92,6 +97,7 @@ void world_ao_map_loaded(void)
 
 void world_ao_bsp_switched(short bsp_index)
 {
+	prism_lightmaps_bsp_switched();
 	if (!world_ao_mode())
 		return;
 	world_scene_bsp_switched(bsp_index);
@@ -102,6 +108,7 @@ static void world_ao_scene_release(void);
 
 void world_ao_map_unloaded(void)
 {
+	prism_lightmaps_map_unloaded();
 	world_ao_scene_release();
 	world_sdf_map_unloaded();
 	world_proxies_map_unloaded();
@@ -669,6 +676,8 @@ void world_ao_lightmap_begin(void const *lightmap_bitmap)
 {
 	int layer;
 
+	/* (display.prism_lightmaps' finer copies: prism_lightmaps.c) */
+	prism_lightmaps_begin(lightmap_bitmap);
 	/* (the structure's: none of the objects' shapes its own; its page's
 	layer where the lightmap draws take their reference, or none) */
 	if (!world_ao.window)

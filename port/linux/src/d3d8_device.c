@@ -2171,6 +2171,53 @@ static BOOL hdr_display_text(int kind, char *text, unsigned int size)
 	return TRUE;
 }
 
+/* ---------- PRISM's lighting (display.prism_lightmaps, display.prism_bloom)
+
+Read as the settings change: the lightmap pass's lightmap smoothed (the
+pixel key's lightmap_filter: xgpu.h's "The lightmaps smoothed"), where the
+backend draws it; and the bloom before the tone map (xgpu_backend.h), where
+the backend draws it, which draws the 3D view in half floats (hdr_read). */
+static struct
+{
+	unsigned long read_at;
+	BOOL read;
+	int filter, bloom;
+} prism_lighting;
+
+static void prism_lighting_read(void)
+{
+	const char *lightmaps, *bloom;
+
+	if (prism_lighting.read && prism_lighting.read_at == config_changes())
+		return;
+	prism_lighting.read = TRUE;
+	prism_lighting.read_at = config_changes();
+	lightmaps = config_string("display.prism_lightmaps");
+	bloom = config_string("display.prism_bloom");
+	/* ("rebaked" is not built: drawn as "smooth", prism_lightmaps.c says so) */
+	prism_lighting.filter = xgpu_backend_capabilities.lightmap_filter && lightmaps &&
+		(!strcmp(lightmaps, "smooth") || !strcmp(lightmaps, "rebaked")) ? XGPU_LIGHTMAP_FILTER_SMOOTH : 0;
+	prism_lighting.bloom = !xgpu_backend_capabilities.bloom || !bloom ? 0 : !strcmp(bloom, "glow") ? XGPU_BLOOM_GLOW :
+		!strcmp(bloom, "full") ? XGPU_BLOOM_FULL : 0;
+#ifdef HALO_VR
+	/* (not in the headset, whose eyes are drawn without the tone map) */
+	if (halo_vr_running())
+		prism_lighting.bloom = 0;
+#endif
+}
+
+int prism_lightmaps_filter(void)
+{
+	prism_lighting_read();
+	return prism_lighting.filter;
+}
+
+int prism_bloom_mode(void)
+{
+	prism_lighting_read();
+	return prism_lighting.bloom;
+}
+
 /* (between frames: halo_screen_commit) the settings and the display as
 they are now; the back buffer made again if the frame is drawn otherwise */
 static void hdr_read(void)
@@ -2189,6 +2236,10 @@ static void hdr_read(void)
 	{
 		display = xgpu_backend_display_hdr(&headroom);
 		active = setting == XGPU_HDR_ON || (setting == XGPU_HDR_AUTO && display);
+		/* (display.prism_bloom: the half floats, whose light past white it
+		glows, on any display: the tone map rolls them off under SDR white) */
+		if (setting != XGPU_HDR_OFF && prism_bloom_mode())
+			active = TRUE;
 	}
 #ifdef HALO_VR
 	if (halo_vr_running())
@@ -3725,6 +3776,18 @@ void halo_dynamic_lights_set(const struct halo_dynamic_light *lights, int count,
 	dynamic_lights.count = count;
 }
 
+int halo_lightmap_pass_drawing(void)
+{
+	return dynamic_lights.environment;
+}
+
+/* the texture's header bound to the stage now (NULL none): the lightmap
+page the lightmap pass begins with (port/linux/game/prism_lightmaps.c) */
+void const *halo_texture_bound(int stage)
+{
+	return stage >= 0 && stage < D3DTSS_MAXSTAGES ? (void const *)device.textures[stage] : NULL;
+}
+
 /* the game draws the structure's lightmap pass (rasterizer_xbox_environment.c);
 as it begins, the world's projection is the 3D view's (the glows' then) */
 void halo_dynamic_lights_environment(int drawing)
@@ -4048,6 +4111,7 @@ static void pipeline_derived(const struct xgpu_draw_derived *derived, struct xgp
 	key->pixel.dynamic_lights = derived->dynamic_lights;
 	key->pixel.ambient_occlusion = derived->ambient_occlusion;
 	key->pixel.material_overlay = derived->material_overlay;
+	key->pixel.lightmap_filter = derived->lightmap_filter;
 }
 
 /* a draw as no setting changes it (key: before xgpu_draw_derive) to the
@@ -4306,6 +4370,8 @@ static BOOL prepare_draw(BOOL immediate, unsigned long primitive)
 	/* (display.prism_material_overlay: the overlay a mod armed for the
 	model shader's draws) */
 	facts.material_overlay = material_overlay.armed ? material_overlay.key : 0;
+	/* (display.prism_lightmaps: the lightmap pass's lightmap smoothed) */
+	facts.lightmap_filter = prism_lightmaps_filter();
 	if (device.gl_ready)
 		world_ao_twins();
 	basis = pipeline_key;
@@ -5452,7 +5518,7 @@ void halo_screen_tone_map(short x0, short y0, short x1, short y1)
 	corners[1] = scaled_pixel(y0, target->target.scale[1]);
 	corners[2] = scaled_pixel(x1, target->target.scale[0]);
 	corners[3] = scaled_pixel(y1, target->target.scale[1]);
-	xgpu_backend_tone_map(target->target.number, corners);
+	xgpu_backend_tone_map(target->target.number, corners, prism_bloom_mode());
 }
 
 /* display.overshield_effect's rise (rasterizer_xbox_plasma_energy.c,

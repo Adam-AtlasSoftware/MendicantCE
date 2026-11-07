@@ -2030,11 +2030,16 @@ void mod_materials_prism_set(
 
 	if (!space || space == text || (size_t)(space - text) >= sizeof(name) - 16)
 	{
-		console_warning("prism_set \"<setting> <value>\": material_overlay, overlay_strength, overlay_view, surface_maps "
-			"or specular");
+		console_warning("prism_set \"<setting> <value>\": material_overlay, overlay_strength, overlay_view, surface_maps, "
+			"specular, lightmaps, lightmap_upsample, bloom, or a whole display.<name>");
 		return;
 	}
-	snprintf(name, sizeof(name), "display.prism_%.*s", (int)(space - text), text);
+	/* (a whole name: display.ambient_occlusion, beside PRISM's own, for
+	checking them together on one stopped frame) */
+	if (!strncmp(text, "display.", 8))
+		snprintf(name, sizeof(name), "%.*s", (int)(space - text), text);
+	else
+		snprintf(name, sizeof(name), "display.prism_%.*s", (int)(space - text), text);
 	if (!config_write(name, space + 1))
 	{
 		console_warning("%s cannot be set to %s", name, space + 1);

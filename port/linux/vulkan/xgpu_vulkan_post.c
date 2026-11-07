@@ -704,6 +704,208 @@ void xgpu_vulkan_post_tone_map(struct xgpu_vulkan_image *target, struct xgpu_vul
 	xgpu_vulkan_draw(&draw);
 }
 
+/* ---------- display.prism_bloom (xgpu_backend.h's XGPU_BLOOM_*)
+
+The window's 3D view, in half floats before its tone map, glows where its
+light is past paper white: the rectangle copied (FXAA's copy), halved into
+the first of the bloom's images by the 13-tap filter with the threshold
+(each tap's light past 1 alone), halved again into each next (as many as
+the mode's levels), then each added back into the one above it through the
+3 by 3 tent (the pipeline's blend: one and one), and the first, through
+the tent again, into the target over the rectangle by the mode's strength,
+its colour alone (the game keeps its own values in alpha). Images of a
+half, a quarter... of the target's size, sampled at the target's
+coordinates scaled; each pass reads no texel outside the rectangle's
+(bounds). A multisampled view (MSAA) has none. */
+
+#define BLOOM_LEVELS_MOST 6
+
+static const struct
+{
+	int levels;
+	float strength;
+} bloom_modes[3] = { { 0, 0.0f }, { 4, 0.06f }, { 6, 0.14f } };
+
+static struct
+{
+	struct xgpu_vulkan_image *levels[BLOOM_LEVELS_MOST];
+	uint32_t width, height;
+	struct xgpu_vulkan_pipeline_description down, up;
+	int failed, multisampled_logged;
+} bloom;
+
+static int bloom_prepare(void)
+{
+	if (bloom.failed)
+		return 0;
+	if (bloom.down.pixel_shader && bloom.up.pixel_shader)
+		return 1;
+	if (!shaders_make(XGPU_VULKAN_POST_BLOOM_DOWN) || !shaders_make(XGPU_VULKAN_POST_BLOOM_UP) || !sampler_make())
+	{
+		host_logf(HOST_LOG_WARN, "vulkan: display.prism_bloom's passes cannot be made: no bloom");
+		bloom.failed = 1;
+		return 0;
+	}
+	memset(&bloom.down, 0, sizeof(bloom.down));
+	bloom.down.vertex_shader = post.vertex;
+	bloom.down.pixel_shader = post.pixel[XGPU_VULKAN_POST_BLOOM_DOWN];
+	bloom.down.primitive_class = XGPU_VULKAN_CLASS_TRIANGLES;
+	bloom.down.color_mask = 15;
+	bloom.down.color_format = XGPU_VULKAN_FORMAT_RGBA16F;
+	bloom.down.samples = 1;
+	bloom.up = bloom.down;
+	bloom.up.pixel_shader = post.pixel[XGPU_VULKAN_POST_BLOOM_UP];
+	/* (added: one and one, XGPU_BLEND_ONE; its colour alone) */
+	bloom.up.color_mask = 7;
+	bloom.up.blend = 1;
+	bloom.up.blend_source = bloom.up.blend_destination = 1;
+	bloom.up.blend_operation = 0;
+	return 1;
+}
+
+/* the images for a target's size: 1 if they are made */
+static int bloom_images_fit(uint32_t width, uint32_t height)
+{
+	int level;
+
+	if (bloom.width != width || bloom.height != height)
+	{
+		for (level = 0; level < BLOOM_LEVELS_MOST; level++)
+		{
+			xgpu_vulkan_image_destroy(bloom.levels[level]);
+			bloom.levels[level] = NULL;
+		}
+		bloom.width = width;
+		bloom.height = height;
+	}
+	for (level = 0; level < BLOOM_LEVELS_MOST; level++)
+	{
+		uint32_t w = width >> (level + 1), h = height >> (level + 1);
+
+		if (!bloom.levels[level])
+			bloom.levels[level] = image_make(XGPU_VULKAN_FORMAT_RGBA16F,
+				XGPU_VULKAN_USAGE_SAMPLED | XGPU_VULKAN_USAGE_TARGET, w ? w : 1, h ? h : 1);
+		if (!bloom.levels[level])
+			return 0;
+	}
+	return 1;
+}
+
+/* a pass: source sampled (its rectangle's texels alone) into a rectangle
+of into, by the pipeline, with the threshold and strength */
+static void bloom_draw(const struct xgpu_vulkan_pipeline_description *description, struct xgpu_vulkan_image *into,
+	const int32_t rectangle[4], struct xgpu_vulkan_image *source, const int32_t source_rectangle[4], float threshold,
+	float strength)
+{
+	const struct xgpu_vulkan_image_description *from = xgpu_vulkan_image_description(source);
+	const struct xgpu_vulkan_image_description *to = xgpu_vulkan_image_description(into);
+	struct xgpu_vulkan_post_uniforms *uniforms;
+	struct xgpu_vulkan_dynamic_state dynamic;
+	struct xgpu_vulkan_draw draw;
+	int stage;
+
+	if (rectangle[2] <= rectangle[0] || rectangle[3] <= rectangle[1])
+		return;
+	memset(&draw, 0, sizeof(draw));
+	draw.pipeline = xgpu_vulkan_pipeline(description);
+	if (!draw.pipeline)
+		return;
+	for (stage = 0; stage < 4; stage++)
+	{
+		draw.textures[stage].image = stage ? NULL : source;
+		draw.textures[stage].kind = XGPU_VULKAN_IMAGE_2D;
+		draw.textures[stage].sampler = post.sampler;
+	}
+	uniforms = xgpu_vulkan_upload(UNIFORMS_RANGE, 256, &draw.uniforms);
+	if (!uniforms)
+		return;
+	memset(uniforms, 0, sizeof(*uniforms));
+	uniforms->metrics[0] = 1.0f / (float)from->width;
+	uniforms->metrics[1] = 1.0f / (float)from->height;
+	uniforms->metrics[2] = (float)from->width;
+	uniforms->metrics[3] = (float)from->height;
+	uniforms->bounds[0] = ((float)source_rectangle[0] + 0.5f) / (float)from->width;
+	uniforms->bounds[1] = ((float)source_rectangle[1] + 0.5f) / (float)from->height;
+	uniforms->bounds[2] = ((float)source_rectangle[2] - 0.5f) / (float)from->width;
+	uniforms->bounds[3] = ((float)source_rectangle[3] - 0.5f) / (float)from->height;
+	uniforms->hdr[0] = 1.0f / (float)to->width;
+	uniforms->hdr[1] = 1.0f / (float)to->height;
+	uniforms->hdr[2] = threshold;
+	uniforms->hdr[3] = strength;
+	draw.constants = draw.uniforms;
+	memset(&dynamic, 0, sizeof(dynamic));
+	dynamic.viewport[0] = dynamic.scissor[0] = rectangle[0];
+	dynamic.viewport[1] = dynamic.scissor[1] = rectangle[1];
+	dynamic.viewport[2] = dynamic.scissor[2] = rectangle[2] - rectangle[0];
+	dynamic.viewport[3] = dynamic.scissor[3] = rectangle[3] - rectangle[1];
+	dynamic.depth_range[1] = 1.0f;
+	draw.dynamic = &dynamic;
+	draw.topology = XGPU_VULKAN_TOPOLOGY_TRIANGLES;
+	draw.count = 3;
+	xgpu_vulkan_set_target_views(into, NULL, 0, 1);
+	xgpu_vulkan_draw(&draw);
+}
+
+int xgpu_vulkan_post_bloom(struct xgpu_vulkan_image *target, const int32_t corners[4], int mode)
+{
+	const struct xgpu_vulkan_image_description *description;
+	int32_t rectangles[BLOOM_LEVELS_MOST + 1][4];
+	int index, level, levels;
+
+	if (!target || mode <= 0 || mode >= (int)(sizeof(bloom_modes) / sizeof(bloom_modes[0])))
+		return 0;
+	description = xgpu_vulkan_image_description(target);
+	if (description->format != XGPU_VULKAN_FORMAT_RGBA16F)
+		return 0;
+	if (description->samples > 1)
+	{
+		if (!bloom.multisampled_logged)
+			host_logf(HOST_LOG_INFO, "vulkan: display.prism_bloom: none over a multisampled view (MSAA)");
+		bloom.multisampled_logged = 1;
+		return 0;
+	}
+	if (!bloom_prepare())
+		return 0;
+	/* (inside the target) */
+	for (index = 0; index < 4; index++)
+	{
+		int32_t most = (int32_t)(index & 1 ? description->height : description->width);
+
+		rectangles[0][index] = corners[index] < 0 ? 0 : corners[index] > most ? most : corners[index];
+	}
+	if (rectangles[0][2] <= rectangles[0][0] || rectangles[0][3] <= rectangles[0][1])
+		return 1;
+	if (!images_fit(0, description->format, description->width, description->height) ||
+		!bloom_images_fit(description->width, description->height))
+		return 0;
+	levels = bloom_modes[mode].levels;
+	for (level = 1; level <= levels; level++)
+	{
+		for (index = 0; index < 4; index++)
+		{
+			/* (the half's pixels, out to the ones the rectangle's last reach) */
+			int32_t value = index < 2 ? rectangles[level - 1][index] / 2 : (rectangles[level - 1][index] + 1) / 2;
+
+			rectangles[level][index] = value;
+		}
+		if (rectangles[level][2] <= rectangles[level][0])
+			rectangles[level][2] = rectangles[level][0] + 1;
+		if (rectangles[level][3] <= rectangles[level][1])
+			rectangles[level][3] = rectangles[level][1] + 1;
+	}
+	/* the view's pixels, read while the target is drawn into */
+	xgpu_vulkan_image_copy_rectangle(target, 0, post.color, rectangles[0]);
+	bloom_draw(&bloom.down, bloom.levels[0], rectangles[1], post.color, rectangles[0], 1.0f, 1.0f);
+	for (level = 1; level < levels; level++)
+		bloom_draw(&bloom.down, bloom.levels[level], rectangles[level + 1], bloom.levels[level - 1], rectangles[level],
+			0.0f, 1.0f);
+	for (level = levels - 1; level > 0; level--)
+		bloom_draw(&bloom.up, bloom.levels[level - 1], rectangles[level], bloom.levels[level], rectangles[level + 1],
+			0.0f, 1.0f);
+	bloom_draw(&bloom.up, target, rectangles[0], bloom.levels[0], rectangles[1], 0.0f, bloom_modes[mode].strength);
+	return 1;
+}
+
 /* the encoding's pipeline for a swapchain's format: the frame sampled,
 every channel written (the swapchain's alpha is opaque) */
 static void encode_description(uint8_t format, struct xgpu_vulkan_pipeline_description *description)

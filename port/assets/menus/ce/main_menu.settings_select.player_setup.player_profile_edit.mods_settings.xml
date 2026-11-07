@@ -21,6 +21,9 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_theater" x="28" y="213"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_6" x="28" y="240" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_material_overlay" x="28" y="260" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_8" x="28" y="287" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_lightmaps" x="28" y="307" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_bloom" x="28" y="328" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/button_bar" y="414"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/tabs" y="76"/>
 	</widget>
@@ -142,6 +145,29 @@
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_material_overlay_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="ON|OFF" setting="display.prism_material_overlay" values="true|false" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
 		<on event="created" run="port setting load"/>
 	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_8" width="344" height="18" bitmap="main_menu/settings/section" platform="desktop" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_8_title"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_8_title" type="text" controller="1" width="344" height="18" wide="0 120" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" string_index="8" color="#FF6F9CD0" text_x="2" text_y="1" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_lightmaps" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lightmaps_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lightmaps_spinner" x="188"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lightmaps_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" string_index="9" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lightmaps_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="STOCK|SMOOTH" setting="display.prism_lightmaps" values="stock|smooth" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+		<on event="created" run="port setting load"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_bloom" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_bloom_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_bloom_spinner" x="188"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_bloom_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" string_index="10" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_bloom_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="OFF|GLOW|FULL" setting="display.prism_bloom" values="off|glow|full" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+		<on event="created" run="port setting load"/>
+	</widget>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels">
 		<string text="MODS"/>
 		<string text="MANAGE MODS ›"/>
@@ -151,6 +177,9 @@
 		<string text="THEATER ›"/>
 		<string text="MATERIALS"/>
 		<string text="MATERIAL DETAIL"/>
+		<string text="LIGHTING"/>
+		<string text="LIGHTMAPS"/>
+		<string text="BLOOM"/>
 	</strings>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/help_strings">
 		<string text="Texture, sound, text and model packs from the mods folder, and the Theater's recorded games."/>
@@ -162,5 +191,8 @@
 		<string text="The games recorded: watch one again from any player's view, or a free or cinematic camera."/>
 		<string text=""/>
 		<string text="Gives weapons and armour the fine grain of their surfaces (machining, weave, wear) from a mod's material overlay. It changes only the light on them. Off draws them as the Xbox did."/>
+		<string text=""/>
+		<string text="Smooth: the levels' own light drawn without its colour bands and blocky edges, from a finer copy built on this machine the first time a level is played. The light stays where it was."/>
+		<string text="A soft glow about light brighter than white: plasma, the sun, lights and blasts. The Xbox had none; Glow is faint, Full wider. Nothing lit only to white glows."/>
 	</strings>
 </menus>

@@ -660,9 +660,11 @@ PAGES = {
             # (Classic or Enhanced, CUSTOM while any setting it chooses is
             # another value: menu_functions.c's graphics_preset_show; choosing
             # either sets them all again, as config_write does)
-            ("QUALITY", "display.graphics", [("ENHANCED", "enhanced"), ("CLASSIC", "classic"), ("CUSTOM", "custom")],
+            ("QUALITY", "display.graphics",
+             [("ENHANCED", "enhanced"), ("CLASSIC", "classic"), ("PRISM", "prism"), ("CUSTOM", "custom")],
              "Enhanced: smoother edges, sharper textures and shadows, smoother lighting. Classic looks as the "
-             "Xbox did.|Changing one shows CUSTOM.", None),
+             "Xbox did. PRISM: Enhanced with the levels' light smoothed and ambient occlusion.|Changing one "
+             "shows CUSTOM.", None),
             # (display.battery_saver: port/linux/src/battery_saver.c)
             ("BATTERY SAVER", "display.battery_saver", [("OFF", "off"), ("ON", "on"), ("AUTO", "auto")],
              "Up to 60 frames a second and Classic graphics, for a longer battery and a cooler device. Auto turns "
@@ -932,6 +934,15 @@ PAGES = {
             ("MATERIAL DETAIL", "display.prism_material_overlay", ON_OFF,
              "Gives weapons and armour the fine grain of their surfaces (machining, weave, wear) from a mod's "
              "material overlay. It changes only the light on them. Off draws them as the Xbox did.", "desktop"),
+            (SECTION, "LIGHTING"),
+            # (PRISM's lighting: drawn by the Vulkan renderer alone,
+            # port/linux/src/d3d8_device.c's prism_lighting_read)
+            ("LIGHTMAPS", "display.prism_lightmaps", [("STOCK", "stock"), ("SMOOTH", "smooth")],
+             "Smooth: the levels' own light drawn without its colour bands and blocky edges, from a finer copy "
+             "built on this machine the first time a level is played. The light stays where it was.", "desktop"),
+            ("BLOOM", "display.prism_bloom", [("OFF", "off"), ("GLOW", "glow"), ("FULL", "full")],
+             "A soft glow about light brighter than white: plasma, the sun, lights and blasts. The Xbox had none; "
+             "Glow is faint, Full wider. Nothing lit only to white glows.", "desktop"),
         ],
     },
     # ---- the pages the rows open
