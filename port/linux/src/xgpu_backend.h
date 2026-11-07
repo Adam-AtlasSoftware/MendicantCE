@@ -303,7 +303,8 @@ struct xgpu_material_overlay
 void xgpu_backend_material_overlay(const struct xgpu_material_overlay *overlay);
 
 /* display.prism_textures: PRISM's texture store (xgpu_stream.h's
-TEXTURE_STORE_MAP). The map's replacement textures, a query each: the
+TEXTURE_STORE_MAP; port/linux/game/mod_textures.c declares these for
+itself: keep the two the same). The map's replacement textures, a query each: the
 file's host path, its size and modification time as found, and the stock
 bitmap it replaces (cube: a cube map; its levels and first level's size).
 The host answers each with an id (0 refused, status why: XGPU_STREAM_
@@ -331,6 +332,8 @@ as each stage of an Xbox texture is described for a draw; NULL: none asked,
 the stages as they were before the store */
 typedef unsigned long (*xgpu_texture_store_hook)(unsigned long resource);
 void xgpu_backend_texture_store_hook(xgpu_texture_store_hook hook);
+/* the backend has the store (xgpu_backend_capabilities' texture_store) */
+BOOL xgpu_backend_texture_store_available(void);
 
 /* ---------- pipelines */
 

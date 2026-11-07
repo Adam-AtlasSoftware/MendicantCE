@@ -484,7 +484,7 @@ static int decode_record(struct host_render_decoder *decoder, const unsigned cha
 		CALL(initialize, &capabilities);
 		/* (a recording's replay could not read the store's files: drawn
 		stock while one is made or played) */
-		if (host_render_record_active || !backend->texture_store_map)
+		if (host_render_record_replaying() || !backend->texture_store_map)
 			capabilities.texture_store = 0;
 		answer(((const struct xgpu_stream_reply_record *)start)->reply, &capabilities, sizeof(capabilities));
 		break;

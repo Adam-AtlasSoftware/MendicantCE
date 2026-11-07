@@ -409,6 +409,19 @@ static const struct config_setting config_settings[] =
 		"blue B, green left alone; with a class mask its four: white A, purple B,\n"
 		"orange C, green D, black left alone), 2 the micro normal, 3 its fade, 4\n"
 		"the light alone; 0 the game." },
+	{ "display.prism_textures", _config_string, "\"stock\"", "HALO_PRISM_TEXTURES", _environment_value,
+		_platform_desktop,
+		"PRISM: the replacement textures mods ship (textures/<tier>/ in a mod:\n"
+		"KTX2 files the renderer reads straight into the graphics card's\n"
+		"memory, drawn in place of the map's once they are in): \"stock\" none,\n"
+		"the game's own; \"enhanced\" the mods' enhanced tier; \"max\" their max\n"
+		"tier, else enhanced. Read each frame (the console's prism_set\n"
+		"\"textures max\"). Vulkan only; the Mac's Metal renderer draws stock." },
+	{ "display.prism_texture_budget_mb", _config_integer, "0", "HALO_PRISM_TEXTURE_BUDGET_MB", _environment_value,
+		_platform_desktop,
+		"PRISM: the graphics card's memory the replacement textures may take,\n"
+		"in MB; past it those not drawn lately go back to the stock resolution,\n"
+		"then stock. 0 is six tenths of what the card has free." },
 	{ "display.structure_culling", _config_integer, STRUCTURE_CULLING_DEFAULT, "HALO_STRUCTURE_CULLING", _environment_value,
 		_platform_all,
 		"Which tests skip the level's triangles the camera cannot see, as bits\n"

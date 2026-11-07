@@ -154,6 +154,10 @@ struct xgpu_texture_store_statistics
 	uint32_t evictions, demotions, promotions, allocation_failures;
 	uint64_t read_bytes;
 	uint32_t queued_jobs;
+	/* ids looked up by draws (xgpu_texture_store_use), of an older
+	generation among them, and entries drawn in the last frames */
+	uint64_t uses, stale_uses;
+	uint32_t drawn;
 	/* seconds from the map's record to the last entry made usable and
 	full (of those drawn) */
 	double last_usable_seconds, last_full_seconds;

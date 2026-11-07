@@ -1229,6 +1229,11 @@ void xgpu_backend_set_textures(const struct xgpu_texture_source stages[4])
 
 /* ---------- display.prism_textures: PRISM's texture store */
 
+BOOL xgpu_backend_texture_store_available(void)
+{
+	return stream.open && stream.capabilities.texture_store;
+}
+
 void xgpu_backend_texture_store_hook(xgpu_texture_store_hook hook)
 {
 	stream.store_hook = stream.open && stream.capabilities.texture_store ? hook : NULL;

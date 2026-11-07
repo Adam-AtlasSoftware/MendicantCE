@@ -340,6 +340,51 @@ With the setting off, every draw is the game's. The Mac's Metal renderer
 draws the overlaid shaders as they are, until its shaders are checked
 against Vulkan's.
 
+### Textures
+
+`display.prism_textures` (PRISM's texture store; `stock` by default) draws
+replacement textures a mod ships in its `textures` folder, beside `tags`:
+
+    mods/<mod>/textures/<tier>/<the bitmap tag's path>#<bitmap index>.ktx2
+    mods/prism_chief/textures/max/characters/cyborg/bitmaps/cyborg#0.ktx2
+
+The tiers are `enhanced` and `max`; `max` takes a bitmap's `enhanced` file
+where it has no `max` one. The mod loaded last that has a bitmap's file
+wins, as for tag files, and a mod's `maps` apply.
+
+A file is a KTX2 of BC1, BC3, BC4, BC5 or BC7 blocks (ASTC 4x4 on devices
+without BC: most Android phones), with no supercompression, every level of
+its chain (`levelCount` floor(log2(the longer side)) + 1), one face (six
+for a cube map), no layers or depth, and the stock bitmap's size times 2^k
+on both sides (the same k, 0 or more), at most 4096 on a side. `_SRGB`
+formats are sampled as UNORM, as the stock textures are. The bitmaps that
+can take one are 2D or cube maps whose sides are powers of two, not
+palettized (P8) and not linear; the HUD's and the menus' high-res pictures
+come first (`port/assets/hud`).
+
+The game goes on loading the stock bitmap (or a mod's `.bitmap` of it):
+it is drawn until the replacement's levels down from the stock
+resolution are in the graphics card's memory, and it is where every size
+the game computes with comes from. The host reads the files itself, straight
+into the card's memory, never into the game's: the game's 256 MB texture
+cache and its 64 MB desktop cache are not touched, and a file can be as
+large as the card holds. Each level of the replacement stands for the stock
+level of its size (level j + k for the stock's j), so a texture far away
+looks as the stock does and only one near is sharper. The files are checked
+as the map loads (the host's log says which were refused and why: size,
+format, unreadable, changed, device, path), and read as they are first drawn,
+on worker threads, the smallest levels first.
+
+`display.prism_texture_budget_mb` (0: six tenths of what the card has free,
+between 128 MB and 6 GB) bounds the card's memory they take; past it, those
+not drawn in the last 10 frames go back to the stock resolution, then to the
+stock texture, the least recently drawn first. Both settings apply in a
+running game (`prism_set "textures max"`). Only the Vulkan renderer has the
+store; Metal's (macOS, iOS) draws the stock textures. Textures are drawn,
+not simulated: a network game's machines need not have the same files.
+`tools/texstore_synth.py` makes placeholder files from an extract's PNGs
+(upscaled, BC7), for tests.
+
 ## Making a mod
 
 1. Get the tags you want to change as tag files. `invader-extract` extracts

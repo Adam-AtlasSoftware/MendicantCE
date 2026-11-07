@@ -266,10 +266,12 @@ int xgpu_vulkan_store_statistics(char *text, unsigned long size)
 	xgpu_texture_store_statistics(store_glue.store, &statistics);
 	if (!statistics.entries)
 		return 0;
-	snprintf(text, size, "texstore: %u indexed, %u usable, %u full, %u failed, %u streaming; resident %.1f MB of %.1f MB; "
+	snprintf(text, size, "texstore: %u indexed, %u drawn lately, %u usable, %u full, %u failed, %u streaming; %llu uses "
+		"(%llu stale); resident %.1f MB of %.1f MB; "
 		"uploaded %.1f MB in %llu pieces, at most %.1f MB a frame; %u evictions, %u demotions, %u promotions, "
 		"%u allocations failed; read %.1f MB; %u jobs queued; last usable %.2f s, last full %.2f s after the map",
-		statistics.entries, statistics.usable, statistics.full, statistics.failed, statistics.streaming,
+		statistics.entries, statistics.drawn, statistics.usable, statistics.full, statistics.failed, statistics.streaming,
+		(unsigned long long)statistics.uses, (unsigned long long)statistics.stale_uses,
 		(double)statistics.resident_bytes / 1048576.0, (double)statistics.budget_bytes / 1048576.0,
 		(double)statistics.uploaded_bytes / 1048576.0, (unsigned long long)statistics.pieces,
 		(double)statistics.frame_bytes_most / 1048576.0, statistics.evictions, statistics.demotions,

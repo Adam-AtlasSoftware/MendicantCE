@@ -78,6 +78,11 @@ static void active_update(void)
 	host_render_record_active = recorder.file || recorder.restorer || recorder.range_count;
 }
 
+int host_render_record_replaying(void)
+{
+	return recorder.file || recorder.restorer;
+}
+
 /* ---------- contents */
 
 static uint64_t load64(const unsigned char *bytes)

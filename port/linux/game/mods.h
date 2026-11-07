@@ -140,6 +140,14 @@ struct shader;
 
 long mod_materials_update(boolean remove_all, boolean at_load);
 void mod_materials_tags_unloaded(void);
+
+/* ---------- prototypes/MOD_TEXTURES.C (display.prism_textures: the
+replacements the host draws, port/linux/vulkan/xgpu_texture_store.h) */
+
+long mod_textures_update(boolean remove_all, boolean at_load);
+void mod_textures_tags_unloaded(void);
+/* (main_game_render, once a frame) */
+void mod_textures_frame(void);
 /* (rasterizer_xbox_models.c, around a model shader's draws) the shader's
 material overlay armed for the draws that follow, if a mod has one and
 display.prism_material_overlay is on (its base map and the draw's

@@ -1055,8 +1055,12 @@ int xgpu_texture_store_use(struct xgpu_texture_store *store, uint32_t id, struct
 	uint32_t index = (id & 0xfffffu) - 1;
 	struct entry *entry;
 
+	store->statistics.uses++;
 	if (!id || (id >> 20) != (store->guest_generation & 0xfffu) || index >= store->entry_count)
+	{
+		store->statistics.stale_uses++;
 		return 0;
+	}
 	entry = &store->entries[index];
 	if (entry->last_used != store->frame)
 	{
@@ -1118,6 +1122,8 @@ void xgpu_texture_store_statistics(const struct xgpu_texture_store *store,
 			statistics->full++;
 		if (entry->queued)
 			statistics->streaming++;
+		if (entry->last_used && entry->last_used + XGPU_TEXTURE_STORE_KEEP_FRAMES >= store->frame)
+			statistics->drawn++;
 	}
 }
 
