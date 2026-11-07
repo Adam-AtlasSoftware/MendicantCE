@@ -450,6 +450,12 @@ static const struct config_setting config_settings[] =
 		"PRISM: the graphics card's memory the replacement meshes may take, in\n"
 		"MB; a mesh past it is drawn stock. 0 is a fifth of what the card has\n"
 		"free, at most 1024." },
+	{ "display.prism_secondary_motion", _config_boolean, "true", "HALO_PRISM_SECONDARY_MOTION", _environment_value,
+		_platform_desktop,
+		"PRISM: the springs and driven helper bones of the replacement meshes'\n"
+		"extended skeletons (a pouch's swing, a knee's volume: docs/prism_rigs.md);\n"
+		"false: those helpers follow their parents (twists, copies and aims\n"
+		"still turn). Only for replacement meshes (display.prism_models)." },
 	{ "display.structure_culling", _config_integer, STRUCTURE_CULLING_DEFAULT, "HALO_STRUCTURE_CULLING", _environment_value,
 		_platform_all,
 		"Which tests skip the level's triangles the camera cannot see, as bits\n"
