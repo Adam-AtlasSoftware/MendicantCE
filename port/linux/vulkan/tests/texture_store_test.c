@@ -420,7 +420,7 @@ static void file_write(const char *path, const unsigned char *bytes, uint64_t si
 	fclose(file);
 }
 
-static void query_make(struct xgpu_texture_store_query *query, const char *path, const struct xgpu_ktx2_stock *stock)
+static void query_make(struct xgpu_store_query *query, const char *path, const struct xgpu_ktx2_stock *stock)
 {
 	struct stat information;
 
@@ -471,8 +471,8 @@ static void test_map(void)
 {
 	struct xgpu_texture_store *store = store_make(1u << 20, 256u << 10, 1u << 20, 0);
 	struct xgpu_ktx2_stock stock = { 64, 64, 7, 0 };
-	struct xgpu_texture_store_query queries[6];
-	struct xgpu_texture_store_answer answers[6];
+	struct xgpu_store_query queries[6];
+	struct xgpu_store_answer answers[6];
 	char paths[6][4200];
 	struct made made = made_bc7(256, 256);
 	unsigned char *bytes;
@@ -530,8 +530,8 @@ static void test_residency(int threads)
 	bands; 256 KB of staging; 128 KB a frame) */
 	struct xgpu_texture_store *store = store_make(256u << 10, 64u << 10, 128u << 10, threads ? 2 : 0);
 	struct xgpu_ktx2_stock stock = { 256, 256, 9, 0 };
-	struct xgpu_texture_store_query query;
-	struct xgpu_texture_store_answer answer;
+	struct xgpu_store_query query;
+	struct xgpu_store_answer answer;
 	struct xgpu_texture_store_view view;
 	struct made made = made_bc7(1024, 1024);
 	char path[4200];
@@ -618,8 +618,8 @@ static void test_budget(void)
 {
 	struct xgpu_texture_store *store = store_make(4u << 20, 1u << 20, 64u << 20, 0);
 	struct xgpu_ktx2_stock stock = { 256, 256, 9, 0 };
-	struct xgpu_texture_store_query queries[3];
-	struct xgpu_texture_store_answer answers[3];
+	struct xgpu_store_query queries[3];
+	struct xgpu_store_answer answers[3];
 	struct xgpu_texture_store_view view;
 	struct xgpu_texture_store_statistics statistics;
 	char paths[3][4200];

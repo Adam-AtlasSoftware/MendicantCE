@@ -850,7 +850,7 @@ static int ends_with(const char *text, const char *end)
 }
 
 /* a query's file opened and its header checked: XGPU_KTX2_*, and the file */
-static int query_check(struct xgpu_texture_store *store, const struct xgpu_texture_store_query *query,
+static int query_check(struct xgpu_texture_store *store, const struct xgpu_store_query *query,
 	struct xgpu_ktx2_file *file, char **path)
 {
 #if STORE_FILES
@@ -971,8 +971,8 @@ void xgpu_texture_store_destroy(struct xgpu_texture_store *store)
 }
 
 void xgpu_texture_store_map(struct xgpu_texture_store *store, uint32_t generation, uint32_t budget_megabytes,
-	int loading, uint32_t count, const struct xgpu_texture_store_query *queries,
-	struct xgpu_texture_store_answer *answers)
+	int loading, uint32_t count, const struct xgpu_store_query *queries,
+	struct xgpu_store_answer *answers)
 {
 	uint32_t index, accepted = 0, refused[XGPU_KTX2_PATH + 1];
 	double started = seconds_now();
@@ -1001,7 +1001,7 @@ void xgpu_texture_store_map(struct xgpu_texture_store *store, uint32_t generatio
 		count = 0;
 	for (index = 0; index < count; index++)
 	{
-		struct xgpu_texture_store_answer *answer = &answers[index];
+		struct xgpu_store_answer *answer = &answers[index];
 		struct xgpu_ktx2_file file;
 		char *path = NULL;
 		int status = query_check(store, &queries[index], &file, &path);

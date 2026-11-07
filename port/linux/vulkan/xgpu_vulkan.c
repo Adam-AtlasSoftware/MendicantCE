@@ -76,6 +76,7 @@ options' gamma) first, where the setting is not 1.
 	F(vkEnumeratePhysicalDevices) F(vkGetPhysicalDeviceProperties) \
 	F(vkGetPhysicalDeviceFeatures2) F(vkGetPhysicalDeviceQueueFamilyProperties) \
 	F(vkGetPhysicalDeviceProperties2) F(vkGetPhysicalDeviceMemoryProperties) F(vkGetPhysicalDeviceFormatProperties) F(vkCreateDevice) \
+	F(vkGetPhysicalDeviceMemoryProperties2) \
 	F(vkGetDeviceProcAddr) F(vkEnumerateDeviceExtensionProperties) F(vkDestroyInstance)
 
 #define SURFACE_FUNCTIONS(F) \
@@ -630,6 +631,8 @@ static struct
 	unsigned int display_surface_told;
 	float display_headroom_told, display_white_told;
 	int colorspaces, hdr_metadata;
+	/* VK_EXT_memory_budget (the texture store's budget) */
+	int memory_budget;
 	void (*display_hdr)(int hdr, float headroom, float white_nits, int white_reported);
 	struct xgpu_vulkan_image *(*encode)(struct xgpu_vulkan_image *image, const struct xgpu_hdr_frame *frame,
 		uint8_t format);
@@ -2258,6 +2261,10 @@ static VkFormat vulkan_format(uint8_t format)
 	case XGPU_VULKAN_FORMAT_RG32_UINT: return VK_FORMAT_R32G32_UINT;
 	case XGPU_VULKAN_FORMAT_RGBA32F: return VK_FORMAT_R32G32B32A32_SFLOAT;
 	case XGPU_VULKAN_FORMAT_RG8_SNORM: return VK_FORMAT_R8G8_SNORM;
+	case XGPU_VULKAN_FORMAT_BC1_RGB: return VK_FORMAT_BC1_RGB_UNORM_BLOCK;
+	case XGPU_VULKAN_FORMAT_BC4: return VK_FORMAT_BC4_UNORM_BLOCK;
+	case XGPU_VULKAN_FORMAT_BC5: return VK_FORMAT_BC5_UNORM_BLOCK;
+	case XGPU_VULKAN_FORMAT_BC7: return VK_FORMAT_BC7_UNORM_BLOCK;
 	default: return VK_FORMAT_UNDEFINED;
 	}
 }
@@ -2265,7 +2272,15 @@ static VkFormat vulkan_format(uint8_t format)
 static int format_blocks(uint8_t format)
 {
 	return format == XGPU_VULKAN_FORMAT_DXT1 || format == XGPU_VULKAN_FORMAT_DXT3 || format == XGPU_VULKAN_FORMAT_DXT5 ||
-		format == XGPU_VULKAN_FORMAT_ASTC;
+		format == XGPU_VULKAN_FORMAT_ASTC || format == XGPU_VULKAN_FORMAT_BC1_RGB || format == XGPU_VULKAN_FORMAT_BC4 ||
+		format == XGPU_VULKAN_FORMAT_BC5 || format == XGPU_VULKAN_FORMAT_BC7;
+}
+
+/* a block format's block bytes: 8 for BC1 and BC4, else 16 */
+static uint32_t format_block_bytes(uint8_t format)
+{
+	return format == XGPU_VULKAN_FORMAT_DXT1 || format == XGPU_VULKAN_FORMAT_BC1_RGB || format == XGPU_VULKAN_FORMAT_BC4 ?
+		8 : 16;
 }
 
 static VkComponentSwizzle swizzle_of(uint32_t source)
@@ -2622,7 +2637,7 @@ void xgpu_vulkan_image_upload(struct xgpu_vulkan_image *image, uint32_t level, u
 		description->format == XGPU_VULKAN_FORMAT_RGBA32_UINT || description->format == XGPU_VULKAN_FORMAT_RGBA32F ? 16 :
 		description->format == XGPU_VULKAN_FORMAT_RGBA16F || description->format == XGPU_VULKAN_FORMAT_RG32_UINT ? 8 : 4;
 	uint32_t rows = blocks ? (height + 3) / 4 : height;
-	uint32_t row_bytes = blocks ? (description->format == XGPU_VULKAN_FORMAT_DXT1 ? 8 : 16) * ((width + 3) / 4) :
+	uint32_t row_bytes = blocks ? format_block_bytes(description->format) * ((width + 3) / 4) :
 		width * texel;
 	uint32_t size, slice, row;
 	struct xgpu_vulkan_range range;
@@ -2702,6 +2717,101 @@ void xgpu_vulkan_image_make_levels(struct xgpu_vulkan_image *image, uint32_t fro
 		vkCmdBlitImage(commands, image->image, VK_IMAGE_LAYOUT_GENERAL, image->image, VK_IMAGE_LAYOUT_GENERAL, 1, &blit,
 			VK_FILTER_LINEAR);
 	}
+	transfer_done(commands);
+}
+
+/* ---------- PRISM's texture store */
+
+static int format_has(VkFormat format, int buffer, VkFormatFeatureFlags features);
+
+int xgpu_vulkan_format_sampled(uint8_t format)
+{
+	VkFormat vulkan = vulkan_format(format);
+
+	if (vulkan == VK_FORMAT_UNDEFINED || (format_blocks(format) && format != XGPU_VULKAN_FORMAT_ASTC &&
+		!vk.capabilities.block_compression) || (format == XGPU_VULKAN_FORMAT_ASTC && !vk.capabilities.astc))
+		return 0;
+	return format_has(vulkan, 0, VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT |
+		VK_FORMAT_FEATURE_TRANSFER_DST_BIT);
+}
+
+int xgpu_vulkan_memory_budget(uint64_t *budget, uint64_t *usage)
+{
+	uint32_t index;
+
+	*budget = *usage = 0;
+	if (!vk.device)
+		return 0;
+	if (vk.memory_budget && vkGetPhysicalDeviceMemoryProperties2)
+	{
+		VkPhysicalDeviceMemoryBudgetPropertiesEXT heaps;
+		VkPhysicalDeviceMemoryProperties2 properties;
+
+		memset(&heaps, 0, sizeof(heaps));
+		heaps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT;
+		memset(&properties, 0, sizeof(properties));
+		properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2;
+		properties.pNext = &heaps;
+		vkGetPhysicalDeviceMemoryProperties2(vk.physical, &properties);
+		for (index = 0; index < properties.memoryProperties.memoryHeapCount; index++)
+		{
+			if (!(properties.memoryProperties.memoryHeaps[index].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT))
+				continue;
+			*budget += heaps.heapBudget[index];
+			*usage += heaps.heapUsage[index];
+		}
+		return *budget != 0;
+	}
+	for (index = 0; index < vk.memory_properties.memoryHeapCount; index++)
+	{
+		if ((vk.memory_properties.memoryHeaps[index].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) &&
+			vk.memory_properties.memoryHeaps[index].size > *budget)
+			*budget = vk.memory_properties.memoryHeaps[index].size;
+	}
+	return *budget != 0;
+}
+
+uint64_t xgpu_vulkan_completed(void)
+{
+	return completed_serial();
+}
+
+uint64_t xgpu_vulkan_image_bytes(const struct xgpu_vulkan_image *image)
+{
+	return image ? image->memory.size : 0;
+}
+
+VkBuffer xgpu_vulkan_staging_create(uint32_t size, void **mapped)
+{
+	VkBuffer buffer = VK_NULL_HANDLE;
+	struct allocation memory;
+
+	*mapped = NULL;
+	memset(&memory, 0, sizeof(memory));
+	if (!buffer_make(size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, BUFFER_HOST, &buffer, &memory, mapped))
+		return VK_NULL_HANDLE;
+	return buffer;
+}
+
+void xgpu_vulkan_image_copy_from_buffer(struct xgpu_vulkan_image *image, uint32_t level, uint32_t layer, uint32_t y,
+	uint32_t width, uint32_t height, VkBuffer buffer, VkDeviceSize offset)
+{
+	VkCommandBuffer commands = upload_commands(image->used, 1);
+	VkBufferImageCopy copy;
+
+	image_use(image);
+	image_written(image);
+	memset(&copy, 0, sizeof(copy));
+	copy.bufferOffset = offset;
+	copy.imageSubresource.aspectMask = image->aspect;
+	copy.imageSubresource.mipLevel = level;
+	copy.imageSubresource.baseArrayLayer = layer;
+	copy.imageSubresource.layerCount = 1;
+	copy.imageOffset.y = (int32_t)y;
+	copy.imageExtent.width = width;
+	copy.imageExtent.height = height;
+	copy.imageExtent.depth = 1;
+	vkCmdCopyBufferToImage(commands, buffer, image->image, VK_IMAGE_LAYOUT_GENERAL, 1, &copy);
 	transfer_done(commands);
 }
 
@@ -3395,13 +3505,14 @@ VkSampler xgpu_vulkan_sampler(const struct xgpu_vulkan_sampler_description *desc
 	without mipmaps samples its base level whatever its least LOD) */
 	if (description->mip == XGPU_VULKAN_MIP_NONE)
 	{
-		info.minLod = 0.0f;
-		info.maxLod = 0.25f;
+		/* (the texture store's: its resident level alone) */
+		info.minLod = description->max_lod > 0.0f ? description->min_lod : 0.0f;
+		info.maxLod = description->max_lod > 0.0f ? description->max_lod : 0.25f;
 	}
 	else
 	{
 		info.minLod = description->min_lod;
-		info.maxLod = VK_LOD_CLAMP_NONE;
+		info.maxLod = description->max_lod > 0.0f ? description->max_lod : VK_LOD_CLAMP_NONE;
 	}
 	info.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
 	if (description->border_color == 0xff000000u)
@@ -6829,6 +6940,10 @@ static int device_make(const struct xgpu_vulkan_options *options)
 		extensions[extension_count++] = VK_EXT_HDR_METADATA_EXTENSION_NAME;
 		vk.hdr_metadata = 1;
 	}
+	/* (the texture store's budget: what the device's memory has free) */
+	vk.memory_budget = device_has_extension(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
+	if (vk.memory_budget)
+		extensions[extension_count++] = VK_EXT_MEMORY_BUDGET_EXTENSION_NAME;
 	vk.present_wait = vk.display_timing = 0;
 	if ((vk.surface || vk.surface_create) && present_ids && available_id.presentId && available_wait.presentWait)
 	{

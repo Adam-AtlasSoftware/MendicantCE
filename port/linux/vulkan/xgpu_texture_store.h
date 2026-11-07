@@ -115,7 +115,7 @@ struct xgpu_texture_store_settings
 
 /* a file the map's record asks about: its path (host's), size and
 modification time as the guest found them, and the stock bitmap */
-struct xgpu_texture_store_query
+struct xgpu_store_query
 {
 	const char *path;
 	uint64_t file_size;
@@ -125,7 +125,7 @@ struct xgpu_texture_store_query
 
 /* the store's answer: an id (0 refused) and why (XGPU_KTX2_*), the file's
 size, levels and format */
-struct xgpu_texture_store_answer
+struct xgpu_store_answer
 {
 	uint32_t id;
 	uint32_t status;
@@ -172,8 +172,8 @@ its images destroyed), each query's header read and checked, its answer
 written. count 0 closes the store. budget_megabytes: 0 auto. loading: the
 loading rate of uploads until the next call of xgpu_texture_store_loading. */
 void xgpu_texture_store_map(struct xgpu_texture_store *store, uint32_t generation, uint32_t budget_megabytes,
-	int loading, uint32_t count, const struct xgpu_texture_store_query *queries,
-	struct xgpu_texture_store_answer *answers);
+	int loading, uint32_t count, const struct xgpu_store_query *queries,
+	struct xgpu_store_answer *answers);
 void xgpu_texture_store_budget(struct xgpu_texture_store *store, uint32_t budget_megabytes);
 void xgpu_texture_store_loading(struct xgpu_texture_store *store, int loading);
 /* an id drawn this frame: 1 and the view where its entry is usable, else

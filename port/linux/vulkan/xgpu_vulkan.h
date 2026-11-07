@@ -235,6 +235,12 @@ enum
 	XGPU_VULKAN_FORMAT_RGBA32F,
 	/* two signed bytes (its distance-field scene's cascades) */
 	XGPU_VULKAN_FORMAT_RG8_SNORM,
+	/* PRISM's texture store's replacements (xgpu_vulkan_store.c): BC1
+	without alpha, BC4 (one channel), BC5 (two), BC7 */
+	XGPU_VULKAN_FORMAT_BC1_RGB,
+	XGPU_VULKAN_FORMAT_BC4,
+	XGPU_VULKAN_FORMAT_BC5,
+	XGPU_VULKAN_FORMAT_BC7,
 	XGPU_VULKAN_FORMAT_COUNT
 };
 
@@ -333,11 +339,40 @@ struct xgpu_vulkan_sampler_description
 	float min_lod;
 	/* ARGB, 8 bits each (address border) */
 	uint32_t border_color;
+	/* the least detailed level sampled (0: every level; without mip
+	levels, the first): the texture store's, whose levels below the stock
+	texture's are not sampled, and whose levels above the resident one
+	are not there yet (min_lod) */
+	float max_lod;
 };
 
 /* the sampler of a description, made the first time; VK_NULL_HANDLE if it
 cannot be */
 VkSampler xgpu_vulkan_sampler(const struct xgpu_vulkan_sampler_description *description);
+
+/* ---------- PRISM's texture store (xgpu_vulkan_store.c) */
+
+/* the device samples the format (XGPU_VULKAN_FORMAT_*) with linear
+filtering and copies into it */
+int xgpu_vulkan_format_sampled(uint8_t format);
+/* the device-local heaps' budget and what is used of them, in bytes
+(VK_EXT_memory_budget), or the largest's size and 0 without it; 0 if not
+known */
+int xgpu_vulkan_memory_budget(uint64_t *budget, uint64_t *usage);
+/* the number of the last submission the GPU has done */
+uint64_t xgpu_vulkan_completed(void);
+/* an image's memory, in bytes */
+uint64_t xgpu_vulkan_image_bytes(const struct xgpu_vulkan_image *image);
+/* a buffer the CPU writes and copies are made from, mapped (its
+address); VK_NULL_HANDLE if it cannot be made */
+VkBuffer xgpu_vulkan_staging_create(uint32_t size, void **mapped);
+/* rows of a level and layer (a cube's face) of an image, y to y + height,
+the whole width, copied from a buffer (bytes from offset, rows of blocks
+packed), in the stream's order: draws recorded before it see the old
+texels, draws after it the new ones. The buffer's bytes are read by the
+submission being recorded (xgpu_vulkan_serial). */
+void xgpu_vulkan_image_copy_from_buffer(struct xgpu_vulkan_image *image, uint32_t level, uint32_t layer, uint32_t y,
+	uint32_t width, uint32_t height, VkBuffer buffer, VkDeviceSize offset);
 
 /* ---------- shaders and pipelines */
 
