@@ -2036,7 +2036,7 @@ void mod_materials_prism_set(
 	if (!space || space == text || (size_t)(space - text) >= sizeof(name) - 16)
 	{
 		console_warning("prism_set \"<setting> <value>\": material_overlay, overlay_strength, overlay_view, surface_maps, "
-			"specular, reflections, shadows, lightmaps, lightmap_upsample, bloom, or a whole display.<name>");
+			"specular, reflections, shadows, lightmaps, lightmap_upsample, bloom, world_geometry, or a whole display.<name>");
 		return;
 	}
 	/* (a whole name: display.ambient_occlusion, beside PRISM's own, for

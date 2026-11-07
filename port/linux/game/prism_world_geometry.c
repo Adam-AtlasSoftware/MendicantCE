@@ -1,0 +1,1056 @@
+/*
+PRISM_WORLD_GEOMETRY.C
+
+PRISM v2's remodelled level geometry (display.prism_world_geometry,
+"stock" unless set): the structure BSP's surfaces drawn from a denser mesh
+built on this machine from the player's own map (art_pipeline/world_geo:
+bevelled edges, rounded rock, relief from the level's own textures), in the
+BSP's place on screen and nowhere else.
+
+The game keeps its BSP. Collision, physics, the AI's paths, visibility
+(clusters, portals, the potentially visible sets), decals, the lights'
+lightmap samples under objects and every other reader of the tag read the
+tag as the map has it: nothing here writes to it. Only the drawing of the
+surfaces the game has already chosen to draw changes.
+
+The remodel is cut along the BSP's own surfaces: every triangle of it
+belongs to one of the stock triangles (a surface), and the triangles of
+each surface are consecutive in its material's index list. So whatever set
+of surfaces a pass draws (the frame's visible ones, a light's, a shadow's),
+the remodel draws exactly the triangles that stand for them, as runs of its
+own index list: structure_render_pass hands each material's chunk of
+surfaces to prism_world_geometry_chunk, which gives the pass the remodel's
+vertices in place of the material's, and the draws of those vertices
+(prism_world_geometry_draw, at the top of the two functions that draw
+the structure: rasterizer_xbox_draw_primitives.c) draw the runs. Every
+other step of the pass (its shaders, textures, the lightmap and its
+dominant light direction per vertex, fog, the dynamic lights) is the
+game's, because the remodel's vertices are the game's two environment
+vertex formats: each corner carries the base map and lightmap coordinates
+and incident radiosity of the point of its surface it lies over, so the
+baked light lands where the stock light was.
+
+The file: <data root>/prism_world/<the BSP tag's path, / for \>.pwg, little
+endian, written by art_pipeline/world_geo/wg_write.py:
+
+  header, 64 bytes: "PWG1", version (1), material count, flags (0), the
+    BSP tag's path (48 bytes, informational)
+  each material, 64 bytes, then its data:
+    lightmap index (16 bits), material index (16 bits),
+    the material's stock surface count, stock vertex count,
+    the remodel's vertex count (at most 65535), triangle count,
+    topology check (32 bits), position check (64-bit float), the part's
+    first surface of the material's and its surface count (32 bits each),
+    24 bytes zero;
+    surface_first_triangle[the part's surface count + 1] (32 bits each: the
+      remodel's triangles of the part's surface s are [first[s],
+      first[s + 1]));
+    the vertices, uncompressed environment vertices (56 bytes);
+    the lightmap vertices, uncompressed (20 bytes), one for each vertex;
+    the triangles, three 16-bit indices each;
+    each array padded to 4 bytes.
+
+A material whose remodel has more than 65535 vertices (the 16-bit indices)
+comes in parts, records one after another, each of a run of its surfaces in
+order; a surface's triangles are all in one part.
+
+The checks are of the map's own material: the topology check is the sum
+over its surfaces s of (3 a + 5 b + 7 c) (s + 1), modulo 2^32, where a, b,
+c are its vertex indices; the position check is the sum over its vertices
+of x + 2 y + 3 z. A material whose counts or checks differ (another map
+revision, a modded map) stays stock, and the log says so; so does one whose
+shader is transparent. The file is untrusted input: every count, offset
+and index is checked against what was read.
+
+Memory: the remodel's vertices and triangles, compressed by the game's own
+rasterizer_geometry_compress_vertices, sit in the Xbox's contiguous memory
+as the map's geometry does, each array inside one of the renderer's mirror
+segments (MIRROR_SEGMENT_BYTES), so that the GPU draws them from its copy
+and nothing is streamed per draw. They are freed when the BSP changes and
+with the map.
+
+Off ("stock"), prism_world_geometry_frame reads the setting and returns,
+prism_world_geometry_chunk returns the material's own vertices and
+prism_world_geometry_draw returns FALSE: the game draws as before, byte for
+byte.
+*/
+
+/* ---------- headers */
+
+#include "cseries.h"
+#include "cseries/cseries_windows.h"
+#include "errors.h"
+#include "tag_files/tag_groups.h"
+#include "rasterizer/rasterizer.h"
+#include "rasterizer/rasterizer_geometry.h"
+#include "scenario/scenario.h"
+#include "shaders/shader_definitions.h"
+#include "shaders/shaders.h"
+#include "structures/structure_bsp_definitions.h"
+#include "prism_world_geometry.h"
+
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <xtl.h>
+
+/* (the C library's allocator: the file and the tables are ours alone) */
+#undef malloc
+#undef free
+
+/* the game's (port) */
+char *tag_get_name(long tag_index);
+/* the platform's (port/linux/src) */
+char const *config_string(char const *name);
+unsigned long config_changes(void);
+void platform_log(char const *format, ...);
+/* (rasterizer_xbox.h) */
+extern D3DDevice *global_d3d_device;
+
+/* ---------- constants */
+
+#define PWG_MAGIC "PWG1"
+#define PWG_VERSION 1
+#define PWG_HEADER_SIZE 64
+#define PWG_MATERIAL_SIZE 64
+#define PWG_FOLDER "prism_world"
+
+#define ENVIRONMENT_VERTEX_UNCOMPRESSED_SIZE 56
+#define ENVIRONMENT_LIGHTMAP_VERTEX_UNCOMPRESSED_SIZE 20
+
+/* the largest file read (a whole BSP remodelled at about 16 times the
+stock triangles is near 40 MB) */
+#define MAXIMUM_FILE_BYTES (256UL * 1024 * 1024)
+/* the most of the Xbox's contiguous memory a BSP's remodel takes */
+#define MAXIMUM_CONTIGUOUS_BYTES (96UL * 1024 * 1024)
+/* the most surfaces one chunk names (render.h's visible structure surfaces,
+and the lights' and shadows' MAXIMUM_LOCALLY_RENDERED_SURFACES) */
+#define MAXIMUM_CHUNK_SURFACES 32768
+/* as rasterizer_xbox_draw_primitives.c's
+RASTERIZER_MAXIMUM_PRIMITIVES_PER_DRAW_COMMAND */
+#define MAXIMUM_TRIANGLES_PER_DRAW 10000
+/* port/linux/src/xgpu_backend.h's XGPU_MIRROR_SEGMENT_SIZE, as
+mod_models.c's MIRROR_SEGMENT_BYTES */
+#define MIRROR_SEGMENT_BYTES 0x400000UL
+/* the frames between the log's lines of what was drawn */
+#define STATISTICS_FRAMES 1800
+
+/* ---------- structures */
+
+/* a Direct3D resource as every resource starts (D3DResource_Register):
+Common, Data, Lock */
+struct world_resource
+{
+	unsigned long common;
+	unsigned long data;
+	unsigned long lock;
+};
+
+struct world_material
+{
+	/* the remodel's vertices and lightmap vertices, side by side as a
+	structure_material's are (the passes draw `vertices + 1` as the
+	lightmap's) */
+	struct vertex_buffer buffers[2];
+	struct world_resource vertex_resources[2];
+	struct world_resource index_resource;
+	short lightmap_index;
+	short material_index;
+	/* the material's first surface in the BSP; this part's surfaces, from
+	its first, of the material's; and on a material's first part, how many
+	parts it has (the next ones follow it) */
+	long first_surface_index;
+	long part_first_surface;
+	long surface_count;
+	long part_count;
+	long triangle_count;
+	unsigned long *surface_first_triangle;
+};
+
+struct world_run
+{
+	long part;
+	long first_triangle;
+	long triangle_count;
+};
+
+struct prism_world_geometry_globals
+{
+	boolean enabled;
+	unsigned long settings_read;
+
+	/* the BSP the remodel is of (its tag, and where its tags are), and the
+	BSP last tried and found without one */
+	long loaded_tag_index;
+	struct structure_bsp *loaded_bsp;
+	long tried_tag_index;
+	struct structure_bsp *tried_bsp;
+
+	struct world_material *materials;
+	long material_count;
+	/* lightmap index -> its first entry in lookup; lookup -> the material
+	of the remodel or NONE */
+	long *lightmap_first;
+	short *lookup;
+	long lightmap_count;
+	byte *geometry;
+
+	/* the chunk prism_world_geometry_chunk gave last, and its runs */
+	struct world_material *current;
+	struct world_run *runs;
+	long run_count;
+
+	/* what was drawn (the log, every STATISTICS_FRAMES frames) */
+	unsigned long frames;
+	unsigned long draws;
+	unsigned long triangles;
+	unsigned long stock_triangles;
+};
+
+/* ---------- globals */
+
+static struct prism_world_geometry_globals world_geometry =
+{
+	FALSE, 0,
+	NONE, NULL, NONE, NULL,
+};
+
+/* ---------- private code */
+
+static unsigned long read_u32(
+	byte const *bytes)
+{
+	return (unsigned long)bytes[0] | ((unsigned long)bytes[1] << 8) |
+		((unsigned long)bytes[2] << 16) | ((unsigned long)bytes[3] << 24);
+}
+
+static short read_s16(
+	byte const *bytes)
+{
+	return (short)((unsigned short)bytes[0] | ((unsigned short)bytes[1] << 8));
+}
+
+static double read_f64(
+	byte const *bytes)
+{
+	double value;
+
+	memcpy(&value, bytes, sizeof(value));
+	return value;
+}
+
+static unsigned long pad4(
+	unsigned long size)
+{
+	return (size + 3) & ~3UL;
+}
+
+/* where a block of bytes goes at offset in memory whose start is aligned
+to a mirror segment: there, or the next segment's start if it would span
+two (mod_models.c's segment_place) */
+static unsigned long segment_place(
+	unsigned long offset,
+	unsigned long bytes)
+{
+	/* (every array at 32 bytes: the vertices' attributes must start on
+	their components' size, which an odd count of 16-bit triangles before
+	them would break) */
+	offset = (offset + 31) & ~31UL;
+	if (bytes && bytes <= MIRROR_SEGMENT_BYTES &&
+		offset / MIRROR_SEGMENT_BYTES != (offset + bytes - 1) / MIRROR_SEGMENT_BYTES)
+	{
+		offset = (offset / MIRROR_SEGMENT_BYTES + 1) * MIRROR_SEGMENT_BYTES;
+	}
+
+	return offset;
+}
+
+static void settings_read(
+	void)
+{
+	char const *value;
+	boolean enabled;
+
+	if (world_geometry.settings_read == config_changes() + 1)
+	{
+		return;
+	}
+	world_geometry.settings_read = config_changes() + 1;
+	value = config_string("display.prism_world_geometry");
+	enabled = value && !strcmp(value, "remodel");
+	if (enabled != world_geometry.enabled)
+	{
+		/* (turned on again: a BSP that had no remodel is looked for again) */
+		world_geometry.tried_tag_index = NONE;
+		world_geometry.tried_bsp = NULL;
+	}
+	world_geometry.enabled = enabled;
+
+	return;
+}
+
+static void world_geometry_release(
+	void)
+{
+	if (world_geometry.geometry)
+	{
+		XPhysicalFree(world_geometry.geometry);
+	}
+	if (world_geometry.materials)
+	{
+		long index;
+
+		for (index = 0; index < world_geometry.material_count; index++)
+		{
+			free(world_geometry.materials[index].surface_first_triangle);
+		}
+	}
+	free(world_geometry.materials);
+	free(world_geometry.lightmap_first);
+	free(world_geometry.lookup);
+	free(world_geometry.runs);
+	world_geometry.geometry = NULL;
+	world_geometry.materials = NULL;
+	world_geometry.material_count = 0;
+	world_geometry.lightmap_first = NULL;
+	world_geometry.lookup = NULL;
+	world_geometry.lightmap_count = 0;
+	world_geometry.runs = NULL;
+	world_geometry.run_count = 0;
+	world_geometry.current = NULL;
+	world_geometry.loaded_tag_index = NONE;
+	world_geometry.loaded_bsp = NULL;
+
+	return;
+}
+
+/* the checks of the map's own material (the file's header comment) */
+static boolean material_stock_checks(
+	struct structure_bsp *bsp,
+	struct structure_material const *material,
+	unsigned long *topology,
+	double *positions)
+{
+	long vertex_size = rasterizer_geometry_get_vertex_size(material->vertices.type);
+	byte const *vertices = (byte const *)material->compressed_vertex_data.address;
+	unsigned long sum = 0;
+	double position_sum = 0.0;
+	long index;
+
+	if (!vertices || vertex_size < 12 || material->vertices.count <= 0 ||
+		material->first_surface_index < 0 || material->surface_count <= 0 ||
+		material->first_surface_index + material->surface_count > bsp->surfaces.count ||
+		(unsigned long)material->compressed_vertex_data.size < (unsigned long)material->vertices.count * (unsigned long)vertex_size)
+	{
+		return FALSE;
+	}
+	for (index = 0; index < material->surface_count; index++)
+	{
+		struct structure_surface const *surface = TAG_BLOCK_GET_ELEMENT(
+			&bsp->surfaces,
+			material->first_surface_index + index,
+			struct structure_surface);
+
+		sum += (3UL * (unsigned short)surface->vertex_indices[0] + 5UL * (unsigned short)surface->vertex_indices[1] +
+			7UL * (unsigned short)surface->vertex_indices[2]) * (unsigned long)(index + 1);
+	}
+	for (index = 0; index < material->vertices.count; index++)
+	{
+		float point[3];
+
+		memcpy(point, vertices + index * vertex_size, sizeof(point));
+		position_sum += (double)point[0] + 2.0 * (double)point[1] + 3.0 * (double)point[2];
+	}
+	*topology = sum;
+	*positions = position_sum;
+
+	return TRUE;
+}
+
+struct pwg_material_view
+{
+	short lightmap_index;
+	short material_index;
+	unsigned long surface_count;
+	unsigned long stock_vertex_count;
+	unsigned long vertex_count;
+	unsigned long triangle_count;
+	unsigned long topology;
+	double positions;
+	unsigned long part_first_surface;
+	unsigned long part_surface_count;
+	byte const *surface_first_triangle;
+	byte const *vertices;
+	byte const *lightmap_vertices;
+	byte const *triangles;
+	struct structure_material *material;
+	boolean usable;
+};
+
+/* the file's materials read and checked against its size, the map's BSP
+and themselves; FALSE if the file is not one */
+static boolean pwg_parse(
+	byte const *bytes,
+	unsigned long size,
+	struct structure_bsp *bsp,
+	struct pwg_material_view **views_out,
+	long *view_count_out,
+	char const *path)
+{
+	struct pwg_material_view *views;
+	unsigned long material_count;
+	unsigned long offset;
+	unsigned long index;
+
+	if (size < PWG_HEADER_SIZE || memcmp(bytes, PWG_MAGIC, 4) || read_u32(bytes + 4) != PWG_VERSION)
+	{
+		platform_log("prism world geometry: %s is not a remodel of version %d", path, PWG_VERSION);
+		return FALSE;
+	}
+	material_count = read_u32(bytes + 8);
+	if (!material_count || material_count > 4096)
+	{
+		platform_log("prism world geometry: %s has %lu materials", path, material_count);
+		return FALSE;
+	}
+	views = calloc(material_count, sizeof(*views));
+	if (!views)
+	{
+		return FALSE;
+	}
+	offset = PWG_HEADER_SIZE;
+	for (index = 0; index < material_count; index++)
+	{
+		struct pwg_material_view *view = &views[index];
+		byte const *record;
+		unsigned long data_size;
+
+		if (size - offset < PWG_MATERIAL_SIZE)
+		{
+			goto truncated;
+		}
+		record = bytes + offset;
+		view->lightmap_index = read_s16(record);
+		view->material_index = read_s16(record + 2);
+		view->surface_count = read_u32(record + 4);
+		view->stock_vertex_count = read_u32(record + 8);
+		view->vertex_count = read_u32(record + 12);
+		view->triangle_count = read_u32(record + 16);
+		view->topology = read_u32(record + 20);
+		view->positions = read_f64(record + 24);
+		view->part_first_surface = read_u32(record + 32);
+		view->part_surface_count = read_u32(record + 36);
+		offset += PWG_MATERIAL_SIZE;
+		if (view->surface_count > 0x100000 || view->vertex_count > 0xFFFF || view->triangle_count > 0x400000 ||
+			view->part_first_surface > view->surface_count ||
+			view->part_surface_count > view->surface_count - view->part_first_surface)
+		{
+			goto truncated;
+		}
+		data_size = pad4((view->part_surface_count + 1) * 4) +
+			pad4(view->vertex_count * ENVIRONMENT_VERTEX_UNCOMPRESSED_SIZE) +
+			pad4(view->vertex_count * ENVIRONMENT_LIGHTMAP_VERTEX_UNCOMPRESSED_SIZE) +
+			pad4(view->triangle_count * 6);
+		if (size - offset < data_size)
+		{
+			goto truncated;
+		}
+		view->surface_first_triangle = bytes + offset;
+		offset += pad4((view->part_surface_count + 1) * 4);
+		view->vertices = bytes + offset;
+		offset += pad4(view->vertex_count * ENVIRONMENT_VERTEX_UNCOMPRESSED_SIZE);
+		view->lightmap_vertices = bytes + offset;
+		offset += pad4(view->vertex_count * ENVIRONMENT_LIGHTMAP_VERTEX_UNCOMPRESSED_SIZE);
+		view->triangles = bytes + offset;
+		offset += pad4(view->triangle_count * 6);
+	}
+	*views_out = views;
+	*view_count_out = (long)material_count;
+
+	return TRUE;
+
+truncated:
+	platform_log("prism world geometry: %s is cut short or has a material too large (material %lu)", path, index);
+	free(views);
+
+	return FALSE;
+}
+
+/* whether a material of the file is the map's (its counts and checks), its
+shader is opaque and its own tables hold together */
+static boolean pwg_material_check(
+	struct structure_bsp *bsp,
+	struct pwg_material_view *view,
+	char const *path)
+{
+	struct structure_lightmap *lightmap;
+	struct structure_material *material;
+	struct shader *shader;
+	unsigned long topology;
+	double positions;
+	unsigned long index;
+	unsigned long previous = 0;
+	char const *reason = NULL;
+
+	if (view->lightmap_index < 0 || view->lightmap_index >= bsp->lightmaps.count)
+	{
+		reason = "names no lightmap of the BSP";
+		goto refused;
+	}
+	lightmap = TAG_BLOCK_GET_ELEMENT(&bsp->lightmaps, view->lightmap_index, struct structure_lightmap);
+	if (view->material_index < 0 || view->material_index >= lightmap->materials.count)
+	{
+		reason = "names no material of its lightmap";
+		goto refused;
+	}
+	material = TAG_BLOCK_GET_ELEMENT(&lightmap->materials, view->material_index, struct structure_material);
+	if ((unsigned long)material->surface_count != view->surface_count ||
+		(unsigned long)material->vertices.count != view->stock_vertex_count)
+	{
+		reason = "is of another material (its surface or vertex count differs)";
+		goto refused;
+	}
+	if (!material_stock_checks(bsp, material, &topology, &positions) || topology != view->topology ||
+		fabs(positions - view->positions) > 1e-3 + 1e-6 * fabs(positions))
+	{
+		reason = "is of another material (its surfaces or vertices differ)";
+		goto refused;
+	}
+	shader = material->shader.index == NONE ? NULL : shader_definition_get(material->shader.index);
+	if (!shader || shader_type_is_transparent(shader->base.type))
+	{
+		reason = "is a transparent material's, which stays stock";
+		goto refused;
+	}
+	if (!view->vertex_count || !view->triangle_count)
+	{
+		reason = "is empty";
+		goto refused;
+	}
+	for (index = 0; index <= view->part_surface_count; index++)
+	{
+		unsigned long first = read_u32(view->surface_first_triangle + 4 * index);
+
+		if (first < previous || first > view->triangle_count || (index == 0 && first != 0))
+		{
+			reason = "has its surfaces' triangles out of order";
+			goto refused;
+		}
+		previous = first;
+	}
+	if (previous != view->triangle_count)
+	{
+		reason = "does not end its surfaces' triangles at its triangle count";
+		goto refused;
+	}
+	for (index = 0; index < view->triangle_count * 3; index++)
+	{
+		unsigned long vertex = (unsigned long)view->triangles[2 * index] | ((unsigned long)view->triangles[2 * index + 1] << 8);
+
+		if (vertex >= view->vertex_count)
+		{
+			reason = "has a triangle of no vertex";
+			goto refused;
+		}
+	}
+	for (index = 0; index < view->vertex_count * (ENVIRONMENT_VERTEX_UNCOMPRESSED_SIZE / 4); index++)
+	{
+		float value;
+
+		memcpy(&value, view->vertices + 4 * index, sizeof(value));
+		if (!isfinite(value))
+		{
+			reason = "has a vertex that is no number";
+			goto refused;
+		}
+	}
+	for (index = 0; index < view->vertex_count * (ENVIRONMENT_LIGHTMAP_VERTEX_UNCOMPRESSED_SIZE / 4); index++)
+	{
+		float value;
+
+		memcpy(&value, view->lightmap_vertices + 4 * index, sizeof(value));
+		if (!isfinite(value))
+		{
+			reason = "has a lightmap vertex that is no number";
+			goto refused;
+		}
+	}
+	view->material = material;
+	view->usable = TRUE;
+
+	return TRUE;
+
+refused:
+	platform_log("prism world geometry: %s lightmap %d material %d %s; it stays stock",
+		path, (int)view->lightmap_index, (int)view->material_index, reason);
+
+	return FALSE;
+}
+
+/* the usable materials' vertices compressed into one block of contiguous
+memory, each array inside a mirror segment, and their buffers made */
+static boolean world_geometry_make(
+	struct structure_bsp *bsp,
+	struct pwg_material_view *views,
+	long view_count,
+	char const *path)
+{
+	long vertex_size = rasterizer_geometry_get_vertex_size(_rasterizer_vertex_type_environment_compressed);
+	long lightmap_vertex_size = rasterizer_geometry_get_vertex_size(_rasterizer_vertex_type_environment_lightmap_compressed);
+	unsigned long total = 0, alignment, offset;
+	unsigned long triangles = 0, stock_triangles = 0, vertices = 0;
+	long usable = 0, index, lightmap_index, entry_count = 0;
+	byte *scratch = NULL;
+	unsigned long scratch_size = 0;
+
+	for (index = 0; index < view_count; index++)
+	{
+		struct pwg_material_view const *view = &views[index];
+
+		if (!view->usable)
+		{
+			continue;
+		}
+		usable++;
+		total = segment_place(total, view->vertex_count * vertex_size) + view->vertex_count * vertex_size;
+		total = segment_place(total, view->vertex_count * lightmap_vertex_size) + view->vertex_count * lightmap_vertex_size;
+		total = segment_place(total, view->triangle_count * 6) + view->triangle_count * 6;
+		if (view->vertex_count * ENVIRONMENT_VERTEX_UNCOMPRESSED_SIZE > scratch_size)
+		{
+			scratch_size = view->vertex_count * ENVIRONMENT_VERTEX_UNCOMPRESSED_SIZE;
+		}
+	}
+	if (!usable)
+	{
+		platform_log("prism world geometry: %s has no material of this map that can be drawn", path);
+		return FALSE;
+	}
+	if (total > MAXIMUM_CONTIGUOUS_BYTES)
+	{
+		platform_log("prism world geometry: %s needs %lu KB of contiguous memory, more than the %lu KB it may take",
+			path, total / 1024, MAXIMUM_CONTIGUOUS_BYTES / 1024);
+		return FALSE;
+	}
+	for (alignment = 0x1000; alignment < MIRROR_SEGMENT_BYTES && alignment < total + 1; alignment <<= 1)
+	{
+	}
+	world_geometry.geometry = XPhysicalAlloc(total + 1, (unsigned long)-1, alignment, PAGE_READWRITE);
+	world_geometry.materials = calloc(usable, sizeof(*world_geometry.materials));
+	world_geometry.lightmap_first = calloc(bsp->lightmaps.count + 1, sizeof(*world_geometry.lightmap_first));
+	world_geometry.runs = malloc(MAXIMUM_CHUNK_SURFACES * sizeof(*world_geometry.runs));
+	scratch = malloc(scratch_size + 1);
+	for (lightmap_index = 0; lightmap_index < bsp->lightmaps.count && world_geometry.lightmap_first; lightmap_index++)
+	{
+		world_geometry.lightmap_first[lightmap_index] = entry_count;
+		entry_count += TAG_BLOCK_GET_ELEMENT(&bsp->lightmaps, lightmap_index, struct structure_lightmap)->materials.count;
+	}
+	if (world_geometry.lightmap_first)
+	{
+		world_geometry.lightmap_first[bsp->lightmaps.count] = entry_count;
+	}
+	world_geometry.lookup = malloc((entry_count + 1) * sizeof(*world_geometry.lookup));
+	if (!world_geometry.geometry || !world_geometry.materials || !world_geometry.lightmap_first ||
+		!world_geometry.runs || !scratch || !world_geometry.lookup)
+	{
+		platform_log("prism world geometry: %s: out of memory (%lu KB of contiguous memory)", path, total / 1024);
+		free(scratch);
+		return FALSE;
+	}
+	world_geometry.lightmap_count = bsp->lightmaps.count;
+	for (index = 0; index < entry_count; index++)
+	{
+		world_geometry.lookup[index] = NONE;
+	}
+
+	offset = 0;
+	for (index = 0; index < view_count; index++)
+	{
+		struct pwg_material_view const *view = &views[index];
+		struct world_material *made = &world_geometry.materials[world_geometry.material_count];
+		long entry;
+		byte *compressed;
+		word *indices;
+		unsigned long element;
+
+		if (!view->usable)
+		{
+			continue;
+		}
+		entry = world_geometry.lightmap_first[view->lightmap_index] + view->material_index;
+		if (world_geometry.lookup[entry] != NONE)
+		{
+			/* (a material's next part: right after its last, and after its
+			surfaces) */
+			struct world_material *first_part = &world_geometry.materials[world_geometry.lookup[entry]];
+			struct world_material *last_part = made - 1;
+
+			if (first_part + first_part->part_count != made ||
+				(long)view->part_first_surface < last_part->part_first_surface + last_part->surface_count)
+			{
+				platform_log("prism world geometry: %s names lightmap %d material %d again out of order; "
+					"the first is drawn", path, (int)view->lightmap_index, (int)view->material_index);
+				continue;
+			}
+		}
+		made->lightmap_index = view->lightmap_index;
+		made->material_index = view->material_index;
+		made->first_surface_index = view->material->first_surface_index;
+		made->part_first_surface = (long)view->part_first_surface;
+		made->surface_count = (long)view->part_surface_count;
+		made->part_count = 1;
+		made->triangle_count = (long)view->triangle_count;
+		made->surface_first_triangle = malloc((view->part_surface_count + 1) * sizeof(unsigned long));
+		if (!made->surface_first_triangle)
+		{
+			free(scratch);
+			return FALSE;
+		}
+		for (element = 0; element <= view->part_surface_count; element++)
+		{
+			made->surface_first_triangle[element] = read_u32(view->surface_first_triangle + 4 * element);
+		}
+
+		/* the vertices, then the lightmap vertices (compressed from a copy:
+		the file's bytes need not be aligned) */
+		offset = segment_place(offset, view->vertex_count * vertex_size);
+		compressed = world_geometry.geometry + offset;
+		memcpy(scratch, view->vertices, view->vertex_count * ENVIRONMENT_VERTEX_UNCOMPRESSED_SIZE);
+		rasterizer_geometry_compress_vertices(
+			_rasterizer_vertex_type_environment_uncompressed,
+			(long)view->vertex_count,
+			compressed,
+			(long)view->vertex_count * vertex_size,
+			scratch,
+			(long)view->vertex_count * ENVIRONMENT_VERTEX_UNCOMPRESSED_SIZE);
+		made->vertex_resources[0].common = D3DCOMMON_TYPE_VERTEXBUFFER | 1;
+		made->vertex_resources[0].data = 0;
+		D3DResource_Register((D3DResource *)&made->vertex_resources[0], compressed);
+		made->buffers[0].type = _rasterizer_vertex_type_environment_compressed;
+		made->buffers[0].count = (long)view->vertex_count;
+		made->buffers[0].offset = 0;
+		made->buffers[0].base_address = compressed;
+		made->buffers[0].hardware_format = &made->vertex_resources[0];
+		offset += view->vertex_count * vertex_size;
+
+		offset = segment_place(offset, view->vertex_count * lightmap_vertex_size);
+		compressed = world_geometry.geometry + offset;
+		memcpy(scratch, view->lightmap_vertices, view->vertex_count * ENVIRONMENT_LIGHTMAP_VERTEX_UNCOMPRESSED_SIZE);
+		rasterizer_geometry_compress_vertices(
+			_rasterizer_vertex_type_environment_lightmap_uncompressed,
+			(long)view->vertex_count,
+			compressed,
+			(long)view->vertex_count * lightmap_vertex_size,
+			scratch,
+			(long)view->vertex_count * ENVIRONMENT_LIGHTMAP_VERTEX_UNCOMPRESSED_SIZE);
+		made->vertex_resources[1].common = D3DCOMMON_TYPE_VERTEXBUFFER | 1;
+		made->vertex_resources[1].data = 0;
+		D3DResource_Register((D3DResource *)&made->vertex_resources[1], compressed);
+		made->buffers[1].type = _rasterizer_vertex_type_environment_lightmap_compressed;
+		made->buffers[1].count = (long)view->vertex_count;
+		made->buffers[1].offset = 0;
+		made->buffers[1].base_address = compressed;
+		made->buffers[1].hardware_format = &made->vertex_resources[1];
+		offset += view->vertex_count * lightmap_vertex_size;
+
+		/* the triangles: an index buffer's data is ordinary (virtual)
+		memory at its Data address (xdk_d3d8.h) */
+		offset = segment_place(offset, view->triangle_count * 6);
+		indices = (word *)(world_geometry.geometry + offset);
+		for (element = 0; element < view->triangle_count * 3; element++)
+		{
+			indices[element] = (word)((unsigned long)view->triangles[2 * element] |
+				((unsigned long)view->triangles[2 * element + 1] << 8));
+		}
+		made->index_resource.common = D3DCOMMON_TYPE_INDEXBUFFER | 1;
+		made->index_resource.data = (unsigned long)indices;
+		offset += view->triangle_count * 6;
+
+		if (world_geometry.lookup[entry] == NONE)
+		{
+			world_geometry.lookup[entry] = (short)world_geometry.material_count;
+		}
+		else
+		{
+			world_geometry.materials[world_geometry.lookup[entry]].part_count++;
+		}
+		world_geometry.material_count++;
+		triangles += view->triangle_count;
+		stock_triangles += view->part_surface_count;
+		vertices += view->vertex_count;
+	}
+	free(scratch);
+	platform_log("prism world geometry: %s: %ld of %ld material parts remodelled, %lu triangles for %lu (%.1fx), "
+		"%lu vertices, %lu KB of contiguous memory",
+		path, world_geometry.material_count, view_count, triangles, stock_triangles,
+		stock_triangles ? (double)triangles / (double)stock_triangles : 0.0, vertices, total / 1024);
+
+	return TRUE;
+}
+
+/* the remodel of the BSP whose tag is tag_index, when there is one */
+static void world_geometry_load(
+	struct structure_bsp *bsp,
+	long tag_index)
+{
+	char path[512];
+	char const *name = tag_get_name(tag_index);
+	struct pwg_material_view *views = NULL;
+	long view_count = 0, index;
+	byte *bytes = NULL;
+	unsigned long size = 0;
+	FILE *file;
+	size_t length;
+
+	world_geometry.tried_tag_index = tag_index;
+	world_geometry.tried_bsp = bsp;
+	if (!name || !bsp)
+	{
+		return;
+	}
+	snprintf(path, sizeof(path), "%s/%s.pwg", PWG_FOLDER, name);
+	for (length = strlen(PWG_FOLDER); path[length]; length++)
+	{
+		if (path[length] == '\\')
+		{
+			path[length] = '/';
+		}
+	}
+	file = fopen(path, "rb");
+	if (!file)
+	{
+		platform_log("prism world geometry: no remodel of %s (%s): drawn stock", name, path);
+		return;
+	}
+	if (!fseek(file, 0, SEEK_END))
+	{
+		long end = ftell(file);
+
+		size = end > 0 ? (unsigned long)end : 0;
+	}
+	fseek(file, 0, SEEK_SET);
+	if (size && size <= MAXIMUM_FILE_BYTES)
+	{
+		bytes = malloc(size);
+	}
+	if (!bytes || fread(bytes, 1, size, file) != size)
+	{
+		platform_log("prism world geometry: %s cannot be read (%lu bytes)", path, size);
+		fclose(file);
+		free(bytes);
+		return;
+	}
+	fclose(file);
+
+	if (pwg_parse(bytes, size, bsp, &views, &view_count, path))
+	{
+		for (index = 0; index < view_count; index++)
+		{
+			pwg_material_check(bsp, &views[index], path);
+		}
+		if (world_geometry_make(bsp, views, view_count, path))
+		{
+			world_geometry.loaded_tag_index = tag_index;
+			world_geometry.loaded_bsp = bsp;
+		}
+		else
+		{
+			world_geometry_release();
+		}
+	}
+	free(views);
+	free(bytes);
+
+	return;
+}
+
+static void statistics_frame(
+	void)
+{
+	if (!world_geometry.loaded_bsp)
+	{
+		return;
+	}
+	world_geometry.frames++;
+	if (world_geometry.frames >= STATISTICS_FRAMES)
+	{
+		platform_log("prism world geometry: %lu frames: %.1f draws, %.0f triangles a frame for %.0f stock",
+			world_geometry.frames, (double)world_geometry.draws / world_geometry.frames,
+			(double)world_geometry.triangles / world_geometry.frames,
+			(double)world_geometry.stock_triangles / world_geometry.frames);
+		world_geometry.frames = 0;
+		world_geometry.draws = 0;
+		world_geometry.triangles = 0;
+		world_geometry.stock_triangles = 0;
+	}
+
+	return;
+}
+
+/* ---------- public code */
+
+void prism_world_geometry_frame(
+	void)
+{
+	struct structure_bsp *bsp;
+	long tag_index;
+
+	settings_read();
+	world_geometry.current = NULL;
+	if (!world_geometry.enabled)
+	{
+		return;
+	}
+	bsp = global_structure_bsp_get();
+	tag_index = global_structure_bsp_tag_index_get();
+	if (world_geometry.loaded_bsp && (world_geometry.loaded_bsp != bsp || world_geometry.loaded_tag_index != tag_index))
+	{
+		world_geometry_release();
+	}
+	if (!world_geometry.loaded_bsp && bsp && tag_index != NONE &&
+		(world_geometry.tried_bsp != bsp || world_geometry.tried_tag_index != tag_index))
+	{
+		world_geometry_load(bsp, tag_index);
+	}
+	statistics_frame();
+
+	return;
+}
+
+struct vertex_buffer const *prism_world_geometry_chunk(
+	short lightmap_index,
+	short material_index,
+	long const *surface_indices,
+	long surface_count,
+	struct vertex_buffer const *stock)
+{
+	struct world_material *made;
+	long entry, index, part;
+
+	world_geometry.current = NULL;
+	if (!world_geometry.enabled || !world_geometry.loaded_bsp || !world_geometry.lookup ||
+		lightmap_index < 0 || lightmap_index >= world_geometry.lightmap_count || surface_count <= 0 ||
+		surface_count > MAXIMUM_CHUNK_SURFACES)
+	{
+		return stock;
+	}
+	entry = world_geometry.lightmap_first[lightmap_index] + material_index;
+	if (material_index < 0 || entry >= world_geometry.lightmap_first[lightmap_index + 1] ||
+		world_geometry.lookup[entry] == NONE)
+	{
+		return stock;
+	}
+	made = &world_geometry.materials[world_geometry.lookup[entry]];
+
+	/* each surface's triangles, in the part that has them, joined into runs
+	where they meet */
+	world_geometry.run_count = 0;
+	part = 0;
+	for (index = 0; index < surface_count; index++)
+	{
+		long surface = surface_indices[index] - made->first_surface_index;
+		struct world_material const *of;
+		long begin, end;
+
+		while (part < made->part_count - 1 && surface >= made[part].part_first_surface + made[part].surface_count)
+		{
+			part++;
+		}
+		of = &made[part];
+		if (surface < of->part_first_surface || surface >= of->part_first_surface + of->surface_count)
+		{
+			continue;
+		}
+		begin = (long)of->surface_first_triangle[surface - of->part_first_surface];
+		end = (long)of->surface_first_triangle[surface - of->part_first_surface + 1];
+		if (end <= begin)
+		{
+			continue;
+		}
+		if (world_geometry.run_count &&
+			world_geometry.runs[world_geometry.run_count - 1].part == part &&
+			world_geometry.runs[world_geometry.run_count - 1].first_triangle +
+				world_geometry.runs[world_geometry.run_count - 1].triangle_count == begin)
+		{
+			world_geometry.runs[world_geometry.run_count - 1].triangle_count += end - begin;
+		}
+		else
+		{
+			world_geometry.runs[world_geometry.run_count].part = part;
+			world_geometry.runs[world_geometry.run_count].first_triangle = begin;
+			world_geometry.runs[world_geometry.run_count].triangle_count = end - begin;
+			world_geometry.run_count++;
+		}
+	}
+	world_geometry.current = made;
+	world_geometry.stock_triangles += (unsigned long)surface_count;
+
+	return made->buffers;
+}
+
+int prism_world_geometry_draw(
+	struct vertex_buffer const *vertex_buffer0,
+	struct vertex_buffer const *vertex_buffer1)
+{
+	struct world_material *made = world_geometry.current;
+	long run;
+
+	if (!world_geometry.materials || !vertex_buffer0)
+	{
+		return FALSE;
+	}
+	if (!made || vertex_buffer0 != made->buffers)
+	{
+		/* (another material's remodel, which no pass should draw now:
+		nothing; any other vertices are the game's) */
+		return (byte const *)vertex_buffer0 >= (byte const *)world_geometry.materials &&
+			(byte const *)vertex_buffer0 < (byte const *)(world_geometry.materials + world_geometry.material_count);
+	}
+	for (run = 0; run < world_geometry.run_count; run++)
+	{
+		struct world_material *part = &made[world_geometry.runs[run].part];
+		long first = world_geometry.runs[run].first_triangle;
+		long count = world_geometry.runs[run].triangle_count;
+
+		if (!run || world_geometry.runs[run - 1].part != world_geometry.runs[run].part)
+		{
+			/* (the lightmap's vertices where the pass draws them: vertices + 1,
+			or the vertices again when the lightmap is missing) */
+			struct vertex_buffer const *second = vertex_buffer1 == vertex_buffer0 ? &part->buffers[0] : &part->buffers[1];
+
+			IDirect3DDevice8_SetStreamSource(global_d3d_device, 0,
+				(IDirect3DVertexBuffer8 *)part->buffers[0].hardware_format,
+				rasterizer_geometry_get_vertex_size(part->buffers[0].type));
+			if (vertex_buffer1)
+			{
+				IDirect3DDevice8_SetStreamSource(global_d3d_device, 1,
+					(IDirect3DVertexBuffer8 *)second->hardware_format,
+					rasterizer_geometry_get_vertex_size(second->type));
+			}
+			IDirect3DDevice8_SetIndices(global_d3d_device, (IDirect3DIndexBuffer8 *)&part->index_resource, 0);
+		}
+		while (count > 0)
+		{
+			long local = MIN(count, MAXIMUM_TRIANGLES_PER_DRAW);
+
+			IDirect3DDevice8_DrawIndexedPrimitive(global_d3d_device, D3DPT_TRIANGLELIST, 0,
+				part->buffers[0].count, (UINT)(3 * first), (UINT)local);
+			world_geometry.draws++;
+			world_geometry.triangles += (unsigned long)local;
+			first += local;
+			count -= local;
+		}
+	}
+
+	return TRUE;
+}
+
+void prism_world_geometry_map_unloaded(
+	void)
+{
+	world_geometry_release();
+	world_geometry.tried_tag_index = NONE;
+	world_geometry.tried_bsp = NULL;
+
+	return;
+}

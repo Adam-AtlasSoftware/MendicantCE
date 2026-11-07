@@ -946,6 +946,12 @@ PAGES = {
                                                              ("TRACED", "traced")],
              "Characters shade themselves and each other from the level's main light. Needs ambient occlusion "
              "World. Classic keeps the Xbox's shadows alone.", "desktop"),
+            # (PRISM's remodelled level geometry, built on this machine:
+            # port/linux/game/prism_world_geometry.c)
+            ("WORLD GEOMETRY", "display.prism_world_geometry", [("XBOX", "stock"), ("REMODEL", "remodel")],
+             "Remodel draws the level's rock, sand and Forerunner walls from a denser model built on this computer "
+             "from your maps: rounded rock, bevelled edges, the same light. You still walk and collide on the "
+             "original. Xbox draws the map's own.", "desktop"),
             (SECTION, "LIGHTING"),
             # (PRISM's lighting: drawn by the Vulkan renderer alone,
             # port/linux/src/d3d8_device.c's prism_lighting_read)
