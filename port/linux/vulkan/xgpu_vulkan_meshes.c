@@ -25,9 +25,10 @@ level its view was drawn at this frame (or the last, if the shadow comes
 first), not at the shadow's own smaller size, so the two share the one
 skinning rather than skinning a second level.
 A draw with a material (display.prism_materials) whose stream has its wide
-pipeline (xgpu_vulkan_stream.c) reads the skinning's wide stream too: the
-mesh's own tangents and float uv0 at binding 1 (xgpu_vulkan_mesh_skin), not
-the stock vertex's packed frame and base-map-scaled coordinates. A mesh
+pipeline (xgpu_vulkan_stream.c) reads the skinning's wide stream too, at
+binding 1 (xgpu_vulkan_mesh_skin): the mesh's uv0 as floats in place of the
+stock vertex's 16-bit coordinates over the base map scale, and its own
+tangents where the shaders have room for them. A mesh
 drawn so once is skinned wide from then on (WIDE_MESHES), so its draws
 without a material and its shadow share that skinning.
 */

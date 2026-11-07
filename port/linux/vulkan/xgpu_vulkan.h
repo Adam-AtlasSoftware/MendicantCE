@@ -408,8 +408,9 @@ void xgpu_vulkan_mesh_buffer_copy(struct xgpu_vulkan_mesh_buffer *from, uint64_t
 recorded: 1 and the range of the skinned vertices (32 bytes each, the stock
 compressed model layout), read by that submission's draws; and with wide
 (not NULL) the range of their wide stream (16 bytes each: the tangent and
-its sign, snorm16x4, and uv0's floats, xgpu_spirv.h's
-XGPU_SPIRV_MESH_WIDE_INPUT) a material's draws read beside them; 0 where
+its sign, snorm16x4, and uv0 over the base map scale as two floats,
+unclamped; xgpu_spirv.h's XGPU_SPIRV_MESH_WIDE_INPUT) a material's draws
+read beside them; 0 where
 they cannot be (the skin ring full: drawn stock) */
 int xgpu_vulkan_mesh_skin(struct xgpu_vulkan_mesh_buffer *rest, uint32_t first, uint32_t count,
 	const float (*bones)[4], uint32_t bone_count, const float inverse_scale[2], struct xgpu_vulkan_range *skinned,

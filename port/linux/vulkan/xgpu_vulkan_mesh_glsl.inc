@@ -14,8 +14,10 @@ texture coordinates int16x2 over the model's base map scale; nodes 0 and 0,
 weight 1), which the model's own pipelines draw with an identity for node 0;
 and where wide_base is not ~0, from wide_base (in words) the wide stream a
 material's pipelines read beside it (16 bytes a vertex: the tangent in the
-world, x and y snorm16, then z and the bitangent's sign snorm16; uv0 as two
-floats, unscaled and unclamped). */
+world, x and y snorm16, then z and the bitangent's sign snorm16; uv0 over
+the base map scale as two floats, unclamped: the value the stock vertex's
+int16 normalised coordinates stand for, which the model's vertex program
+reads in their place). */
 
 static const char skin_source[] =
 	"#version 450\n"
@@ -90,7 +92,7 @@ static const char skin_source[] =
 	"        uint s = skin.wide_base + i * 4u;\n"
 	"        skinned[s] = packSnorm2x16(tangent.xy);\n"
 	"        skinned[s + 1u] = packSnorm2x16(vec2(tangent.z, handedness));\n"
-	"        skinned[s + 2u] = floatBitsToUint(uv.x);\n"
-	"        skinned[s + 3u] = floatBitsToUint(uv.y);\n"
+	"        skinned[s + 2u] = floatBitsToUint(uv.x * skin.inverse_scale.x);\n"
+	"        skinned[s + 3u] = floatBitsToUint(uv.y * skin.inverse_scale.y);\n"
 	"    }\n"
 	"}\n";

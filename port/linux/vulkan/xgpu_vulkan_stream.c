@@ -186,6 +186,9 @@ struct stream_pipeline
 	uint8_t wide_state;
 	struct variant wide_variant;
 	VkShaderModule wide_vertex_shader, wide_pixel_shader;
+	/* its shaders hand on and read the mesh's tangent (else they are the
+	pipeline's own: xgpu_spirv_vertex_mesh_tangent) */
+	uint8_t wide_tangent;
 };
 
 struct program_entry
@@ -356,8 +359,9 @@ static struct
 	logged, the folder the shader modules are written into (NULL: none) */
 	int statistics;
 	const char *shader_folder;
-	/* pipeline_shaders makes a wide variant's (pipeline_wide_shaders) */
-	int shaders_wide;
+	/* pipeline_shaders makes a wide variant's (pipeline_wide_shaders), and
+	whether they hand on the mesh's tangent */
+	int shaders_wide, shaders_wide_tangent;
 } stream;
 
 /* display.ambient_occlusion "world" found once a pixel (xgpu_stream.h's
@@ -1523,12 +1527,14 @@ static int pipeline_shaders(struct stream_pipeline *entry, const struct xgpu_str
 	options.debug_flat = getenv("HALO_GPU_DEBUG_FLAT") != NULL;
 	options.reversed_depth = XGPU_VULKAN_REVERSED_DEPTH;
 	options.subgroups = stream.capabilities.subgroups;
-	/* (pipeline_wide_shaders') */
-	options.mesh_wide = stream.shaders_wide;
 	program = malloc(sizeof(*program));
 	if (!program)
 		return 0;
 	vertex_program_convert(program_record->record, program);
+	/* (pipeline_wide_shaders': the mesh's tangent where the vertex shader
+	has room for it) */
+	options.mesh_wide = stream.shaders_wide && xgpu_spirv_vertex_mesh_tangent(program, lighting);
+	stream.shaders_wide_tangent = options.mesh_wide;
 	entry->inputs = (uint16_t)xgpu_spirv_vertex_inputs(program, lighting);
 	if (xgpu_spirv_vertex_shader(program, packed, integers, lighting, &options, &module))
 	{
@@ -1575,10 +1581,10 @@ static int pipeline_shaders(struct stream_pipeline *entry, const struct xgpu_str
 
 /* display.prism_models with display.prism_materials: a pipeline's wide
 variant's shaders for a variant (a mesh store mesh drawn with a material:
-the vertex shader hands on the mesh's tangent and uv0 from the wide stream,
-XGPU_SPIRV_MESH_WIDE_INPUT, and the pixel shader's GGX path reads them),
-made once; 0 if there is none (a program reading that input, a VR effect,
-HALO_MESH_WIDE_OFF) */
+where the vertex shader has room, it hands on the mesh's tangent from the
+wide stream, XGPU_SPIRV_MESH_WIDE_INPUT, and the pixel shader's GGX path
+reads it; else the pipeline's own shaders), made once; 0 if there is none
+(a VR effect, HALO_MESH_WIDE_OFF) */
 static int pipeline_wide_shaders(struct stream_pipeline *entry, const struct xgpu_stream_pipeline_define *definition,
 	const struct variant *variant)
 {
@@ -1596,9 +1602,10 @@ static int pipeline_wide_shaders(struct stream_pipeline *entry, const struct xgp
 	}
 	memset(&made, 0, sizeof(made));
 	stream.shaders_wide = 1;
+	stream.shaders_wide_tangent = 0;
 	ok = pipeline_shaders(&made, definition, variant);
 	stream.shaders_wide = 0;
-	if (!ok || made.effect || (made.inputs & (1u << XGPU_SPIRV_MESH_WIDE_INPUT)))
+	if (!ok || made.effect)
 	{
 		entry->wide_state = XGPU_STREAM_PIPELINE_FAILED;
 		return 0;
@@ -1607,6 +1614,7 @@ static int pipeline_wide_shaders(struct stream_pipeline *entry, const struct xgp
 	entry->wide_variant = *variant;
 	entry->wide_vertex_shader = made.vertex_shader;
 	entry->wide_pixel_shader = made.pixel_shader;
+	entry->wide_tangent = (uint8_t)stream.shaders_wide_tangent;
 	return 1;
 }
 
@@ -2335,22 +2343,42 @@ static int draw_pipeline(const struct draw_input *input, int apart)
 			primitive_class(input->primitive) == XGPU_VULKAN_CLASS_TRIANGLES);
 		if (mesh_verdict == XGPU_VULKAN_MESHES_SKIP)
 			return 1;
-		/* (with a material: its wide variant, the mesh's own frame and
-		coordinates at binding 1, where it is made; else the stock layout's
-		swap) */
+		/* (with a material: its wide variant, where it is made, the mesh's
+		own coordinates and frame at binding 1: the program's texture
+		coordinate input (the stock vertex's int16x2 at byte 24) read as two
+		floats from the wide stream's byte 8, unclamped and whole, and the
+		tangent from its start where the shaders read it; else the stock
+		layout's swap) */
 		if (mesh_verdict == XGPU_VULKAN_MESHES_SWAP && stream.definition->key.pixel.material_pbr &&
 			pipeline_wide_shaders(entry, stream.definition, &variant))
 		{
 			struct xgpu_vulkan_pipeline_description wide = pipeline;
-			VkPipeline made;
+			VkPipeline made = VK_NULL_HANDLE;
+			int changed = 0;
 
 			wide.vertex_shader = entry->wide_vertex_shader;
 			wide.pixel_shader = entry->wide_pixel_shader;
-			wide.attributes[XGPU_SPIRV_MESH_WIDE_INPUT].format = VK_FORMAT_R32G32B32A32_UINT;
-			wide.attributes[XGPU_SPIRV_MESH_WIDE_INPUT].binding = 1;
-			wide.attributes[XGPU_SPIRV_MESH_WIDE_INPUT].offset = 0;
+			for (index = 0; index < 16; index++)
+			{
+				if (wide.attributes[index].format == VK_FORMAT_R16G16_SNORM && wide.attributes[index].binding == 0 &&
+					wide.attributes[index].offset == 24)
+				{
+					wide.attributes[index].format = VK_FORMAT_R32G32_SFLOAT;
+					wide.attributes[index].binding = 1;
+					wide.attributes[index].offset = 8;
+					changed = 1;
+				}
+			}
+			if (entry->wide_tangent)
+			{
+				wide.attributes[XGPU_SPIRV_MESH_WIDE_INPUT].format = VK_FORMAT_R32G32B32A32_UINT;
+				wide.attributes[XGPU_SPIRV_MESH_WIDE_INPUT].binding = 1;
+				wide.attributes[XGPU_SPIRV_MESH_WIDE_INPUT].offset = 0;
+				changed = 1;
+			}
 			wide.strides[1] = 16;
-			made = stream.prepared ? xgpu_vulkan_pipeline_ready(&wide) : xgpu_vulkan_pipeline(&wide);
+			if (changed)
+				made = stream.prepared ? xgpu_vulkan_pipeline_ready(&wide) : xgpu_vulkan_pipeline(&wide);
 			if (made)
 			{
 				stock_pipeline = draw.pipeline;

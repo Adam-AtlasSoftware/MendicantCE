@@ -4,9 +4,10 @@ material_pbr a key may have, lit by the point lights or the enhanced dynamic lig
 the material overlay and the reflection cube, pass spirv-val; each reads the material's images at
 bindings 11 to 16 of the textures' set exactly where its bits say, and its uniform's members; the
 shaders without a material read none of it. display.prism_models' wide variant (a mesh store mesh drawn
-with a material): its pixel shaders read the mesh's tangent and uv0 (xMeshTangent, xMeshUv), its
-vertex shader hands them on from the wide stream's input (location 15), a program reading that input
-itself gets no variant, and the shaders without the variant name none of it."""
+with a material): its pixel shaders read the mesh's tangent (xMeshTangent), a vertex shader with room
+(no more than 32 scalars handed on with it) hands it on from the wide stream's input (location 15), a
+lit model's (32 already) and a program reading that input itself do not, and the shaders without the
+variant name none of it."""
 import re
 import shutil
 import struct
@@ -65,16 +66,16 @@ def words_of(module):
 
 
 def test_cases_made(modules):
-    # 2 lights x 2 overlays x (1 without a material + 2 cubes x 128 bits + 128 wide), 3 vertex shaders
-    assert len(modules) == 2 * 2 * (1 + 2 * 128 + 128) + 3
+    # 2 lights x 2 overlays x (1 without a material + 2 cubes x 128 bits + 128 wide), 4 vertex shaders
+    assert len(modules) == 2 * 2 * (1 + 2 * 128 + 128) + 4
 
 
 def test_wide_variant(modules):
     for name, module in modules.items():
         if name.startswith("wide"):
-            assert b"xMeshTangent" in module and b"xMeshUv" in module, name
-        elif name in ("vertex-wide",):
-            assert b"xMeshWide" in module and b"xMeshTangent" in module and b"xMeshUv" in module, name
+            assert b"xMeshTangent" in module, name
+        elif name == "vertex-wide-room":
+            assert b"xMeshWide" in module and b"xMeshTangent" in module, name
         else:
             assert b"xMesh" not in module, name
 

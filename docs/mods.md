@@ -428,11 +428,13 @@ frame: an object's shadow is drawn at the level of detail its view was, so
 the two share the skinning. The stock part's vertex holds texture
 coordinates over the model's base map scale (16 bits each), so a uv0 past
 that scale is clamped there (the log counts them); a piece whose shader has
-a material (below) is drawn by its pipeline's wide variant, which reads the
-mesh's own tangents and full-precision uv0 (any range) from a second stream
-the skinning writes, so the material's images and its normal map's frame are
-the mesh's, not the stock vertex's (`HALO_MESH_WIDE_OFF=1`: not, for
-comparisons). The objects that draw the model are culled by the mesh's radius
+a material (below) is drawn by its pipeline's wide variant, which reads a
+second stream the skinning writes: the mesh's uv0 as floats (any range, full
+precision) in place of the stock vertex's coordinates, and, where the
+shader hands on few enough values for it to stay fast (32 numbers a vertex
+with it; not the model shaders lit for each pixel, which hand on 32
+already), the mesh's own tangents for the normal map's frame instead of the
+screen's derivatives (`HALO_MESH_WIDE_OFF=1`: not, for comparisons). The objects that draw the model are culled by the mesh's radius
 where it is larger (their render-only radius; the bounding radius physics,
 the AI and the network read is left as it is).
 
