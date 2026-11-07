@@ -329,6 +329,7 @@ static void mods_let_go(
 	mods_globals.model_count = 0;
 	mods_globals.material_count = 0;
 	mods_globals.texture_count = 0;
+	mods_globals.mesh_count = 0;
 	mods_globals.pbr_count = 0;
 
 	return;

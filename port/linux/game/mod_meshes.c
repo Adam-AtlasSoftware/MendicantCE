@@ -1210,6 +1210,13 @@ void mod_meshes_debug_pose(
 	{
 		name++;
 	}
+	/* (it changes the unit's animation, which is the game's state: never in a network game, where every
+	machine must keep the same) */
+	if (game_connection() != _game_connection_local)
+	{
+		console_warning("debug_pose: only in a local game");
+		return;
+	}
 	if (frame < 0 || !name || !*name || player_index == NONE)
 	{
 		console_warning("prism_set \"debug_pose <frame> <animation>\": a player and one of its graph's base animations");
