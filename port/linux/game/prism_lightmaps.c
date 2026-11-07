@@ -833,7 +833,11 @@ static int plm_settings(void)
 					enabled ? "on" : "off", factor);
 			plm.enabled = enabled;
 		}
-		if (plm.enabled && ((unsigned long)factor != plm.factor || rebaked != plm.rebaked_mode))
+		/* (the pages are let go whenever the kind they were made as
+		changes, on or off: else turning "rebaked" off and "smooth" on
+		again found the rebaked pages, two halves side by side, still ready
+		and drew them as smooth pages) */
+		if ((unsigned long)factor != plm.factor || rebaked != plm.rebaked_mode)
 		{
 			plm_release();
 			plm.factor = (unsigned long)factor;
@@ -1115,7 +1119,8 @@ unsigned int prism_lightmaps_replacement(unsigned long data, unsigned long *leve
 	if (plm.current < 0 || !plm.enabled || data != plm.current_data)
 		return 0;
 	page = &plm.pages[plm.current];
-	if (page->state != _plm_page_ready || !page->image)
+	/* (a rebaked page is drawn only as one: never read as a smooth page) */
+	if (page->state != _plm_page_ready || !page->image || (page->rebaked && !plm.rebaked_mode))
 		return 0;
 	*levels = page->levels;
 	return page->image;
