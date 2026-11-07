@@ -624,6 +624,8 @@ void xgpu_backend_initialize(void)
 		stream_free(stream.asides[--stream.aside_count].data);
 	memset(&stream.vertices, 0, sizeof(stream.vertices));
 	forget_sent();
+	/* (a new decoder's stages have no store ids) */
+	memset(stream.store_ids, 0, sizeof(stream.store_ids));
 	if (host_render_stream_open(STREAM_ADDRESS(ring)))
 	{
 		fprintf(stderr, "the renderer's command stream: the host has no renderer for it\n");

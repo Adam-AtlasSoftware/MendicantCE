@@ -357,7 +357,14 @@ without BC: most Android phones), with no supercompression, every level of
 its chain (`levelCount` floor(log2(the longer side)) + 1), one face (six
 for a cube map), no layers or depth, and the stock bitmap's size times 2^k
 on both sides (the same k, 0 or more), at most 4096 on a side. `_SRGB`
-formats are sampled as UNORM, as the stock textures are. The bitmaps that
+formats are sampled as UNORM, as the stock textures are. A replacement is
+sampled as its blocks decode, whatever the stock bitmap's format: BC4 gives
+red alone (green and blue 0, alpha 1) and BC5 red and green (blue 0, alpha
+1), so they suit only bitmaps whose shaders read those channels; a bump
+map, whose shader reads all three of its normal's, a Y8 or A8 bitmap
+(stock grey or alpha alone, which the stock decoding spreads to the other
+channels) and anything with alpha need BC1, BC3 or BC7 with every channel
+as the stock decodes it. The bitmaps that
 can take one are 2D or cube maps whose sides are powers of two, not
 palettized (P8) and not linear; the HUD's and the menus' high-res pictures
 come first (`port/assets/hud`).

@@ -2280,6 +2280,10 @@ static void test_texture_store_malformed(void)
 	map->reply = 0;
 	CHECK(host_render_decode(decoder, 0, sizeof(*map)) == 0 && ring->error == XGPU_STREAM_ERROR_BOUNDS);
 	ring->error = 0;
+	/* (answers that would wrap past the guest's memory) */
+	map->reply = 0xfffffff8u;
+	CHECK(host_render_decode(decoder, 0, sizeof(*map)) == 0 && ring->error == XGPU_STREAM_ERROR_BOUNDS);
+	ring->error = 0;
 	map->reply = guest_address(answers);
 	map->query_count = XGPU_STREAM_TEXTURE_STORE_QUERIES + 1;
 	CHECK(host_render_decode(decoder, 0, sizeof(*map)) == 0 && ring->error == XGPU_STREAM_ERROR_BOUNDS);

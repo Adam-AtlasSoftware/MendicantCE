@@ -343,6 +343,12 @@ static void budget_read(struct xgpu_texture_store *store)
 			chosen = store->settings.budget_floor;
 		if (chosen > store->settings.budget_ceiling)
 			chosen = store->settings.budget_ceiling;
+		/* (the device's free memory moves as others allocate: the budget
+		kept where the new one is within an eighth of it, so that it does
+		not cut entries back and grow them again as it wobbles) */
+		if (store->budget && !store->warned_memory && chosen < store->budget + store->budget / 8 &&
+			chosen + store->budget / 8 > store->budget)
+			chosen = store->budget;
 	}
 	else
 	{
@@ -356,6 +362,7 @@ static void budget_read(struct xgpu_texture_store *store)
 
 /* ---------- the staging buffer's pieces (store->lock) */
 
+#if STORE_FILES
 /* a piece of size bytes, or -1 if there is no room now */
 static int piece_take(struct xgpu_texture_store *store, uint32_t size)
 {
@@ -398,6 +405,8 @@ static int piece_take(struct xgpu_texture_store *store, uint32_t size)
 	store->pieces[index].state = _piece_reading;
 	return (int)index;
 }
+
+#endif
 
 /* the pieces given back, oldest first, as far as they all are */
 static void pieces_trim(struct xgpu_texture_store *store)
@@ -700,6 +709,14 @@ static void pieces_copy(struct xgpu_texture_store *store)
 			{
 				entry->failed = 1;
 				say(store, 1, "texstore: %s cannot be read: drawn as it is now", entry->path);
+				/* (an image that never became usable holds nothing drawn: let
+				go of, the entry drawn stock from now on) */
+				if (!entry_usable(entry))
+				{
+					UNLOCK(store);
+					entry_release(store, entry);
+					LOCK(store);
+				}
 			}
 			piece->state = _piece_released;
 			released = 1;
@@ -831,6 +848,7 @@ static void entries_free(struct xgpu_texture_store *store)
 	store->resident_bytes = 0;
 }
 
+#if STORE_FILES
 static int ends_with(const char *text, const char *end)
 {
 	size_t length = strlen(text), end_length = strlen(end), index;
@@ -848,6 +866,8 @@ static int ends_with(const char *text, const char *end)
 	}
 	return 1;
 }
+
+#endif
 
 /* a query's file opened and its header checked: XGPU_KTX2_*, and the file */
 static int query_check(struct xgpu_texture_store *store, const struct xgpu_store_query *query,

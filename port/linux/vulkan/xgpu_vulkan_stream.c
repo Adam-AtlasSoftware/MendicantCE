@@ -837,7 +837,24 @@ static int store_bind(const struct host_render_texture_stage *source, struct xgp
 		last = first;
 	min_lod = (float)first;
 	/* (max_lod 0 is none: a level's 0 is a thousandth past it) */
-	max_lod = stage->sampler.mip == _filter_none ? (float)first + 0.25f : (float)last + 0.001f;
+	max_lod = (float)last + 0.001f;
+	if (stage->sampler.mip == _filter_none)
+	{
+		/* (a stage the game samples without mip levels samples the stock's
+		first level alone: the replacement's levels from the resident one
+		down to the one of the stock's size, mipmapped between them, so that
+		minified it looks as the stock does, not as a 4096-texel image
+		sampled without levels) */
+		struct xgpu_stream_sampler sampler = stage->sampler;
+		uint32_t stock_first = view.scale > view.top ? view.scale - view.top : 0;
+
+		if (stock_first < first)
+			stock_first = first;
+		sampler.mip = stage->sampler.minify == _filter_point ? _filter_point : _filter_linear;
+		texture->image = view.image;
+		texture->sampler = sampler_get_levels(&sampler, axes, min_lod, (float)stock_first + 0.001f);
+		return 1;
+	}
 	texture->image = view.image;
 	texture->sampler = sampler_get_levels(&stage->sampler, axes, min_lod, max_lod);
 	return 1;

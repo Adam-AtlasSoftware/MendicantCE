@@ -433,8 +433,9 @@ static int usable;
 static int xgpu_vulkan_store_use(uint32_t id, struct xgpu_texture_store_view *view)
 { (void)id; *view = current; return usable; }
 static float got_min, got_max;
+static int got_mip;
 static VkSampler sampler_get_levels(const struct xgpu_stream_sampler *from, uint8_t axes, float min_lod, float max_lod)
-{ (void)from; (void)axes; got_min = min_lod; got_max = max_lod; return (VkSampler)(uintptr_t)1; }
+{ (void)axes; got_min = min_lod; got_max = max_lod; got_mip = from->mip; return (VkSampler)(uintptr_t)1; }
 """ + bind + r"""
 int main(void)
 {
@@ -490,10 +491,20 @@ int main(void)
     current.resident = 4;
     assert(store_bind(&source, &texture, 0) && got_min == 0.0f && got_max > 8.0f && got_max < 8.01f);
     current.top = 0;
-    /* (no mip filter: the resident level alone) */
+    /* (no mip filter: the stock's first level alone, so the replacement's
+    from its resident level down to the one of the stock's size, mipmapped
+    between them; point minifying keeps point mips) */
     source.stage.sampler.mip = _filter_none;
     current.resident = 1;
-    assert(store_bind(&source, &texture, 0) && got_min == 1.0f && got_max == 1.25f);
+    assert(store_bind(&source, &texture, 0) && got_min == 1.0f && got_max > 4.0f && got_max < 4.01f &&
+        got_mip == _filter_linear);
+    source.stage.sampler.minify = _filter_point;
+    assert(store_bind(&source, &texture, 0) && got_mip == _filter_point);
+    source.stage.sampler.minify = _filter_linear;
+    current.top = 4;
+    current.resident = 4;
+    assert(store_bind(&source, &texture, 0) && got_min == 0.0f && got_max > 0.0f && got_max < 0.01f);
+    current.top = 0;
     source.stage.sampler.mip = _filter_linear;
     /* (another size at the header, or a cube against a 2D: stock) */
     described.width = 128;

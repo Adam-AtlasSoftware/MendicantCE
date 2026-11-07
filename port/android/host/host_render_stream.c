@@ -670,7 +670,9 @@ static int decode_record(struct host_render_decoder *decoder, const unsigned cha
 		if (map->query_count > XGPU_STREAM_TEXTURE_STORE_QUERIES || (map->query_count && !map->reply) ||
 			!data_inside(decoder, start, size, map->queries,
 				map->query_count * (uint32_t)sizeof(struct xgpu_stream_texture_store_query)) ||
-			!data_inside(decoder, start, size, map->strings, map->strings_size))
+			!data_inside(decoder, start, size, map->strings, map->strings_size) ||
+			!data_inside(decoder, start, size, map->reply,
+				map->query_count * (uint32_t)sizeof(struct xgpu_stream_texture_store_answer)))
 			return XGPU_STREAM_ERROR_BOUNDS;
 		if (map->query_count)
 		{

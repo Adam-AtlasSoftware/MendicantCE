@@ -743,6 +743,77 @@ static void test_budget(void)
 	fake.quiet = 0;
 }
 
+/* a file cut short after its header was accepted: the entry failed, drawn
+stock, its image (never usable) let go of */
+static void test_read_failure(void)
+{
+	struct xgpu_texture_store *store = store_make(1u << 20, 256u << 10, 1u << 20, 0);
+	struct xgpu_ktx2_stock stock = { 64, 64, 7, 0 };
+	struct xgpu_store_query query;
+	struct xgpu_store_answer answer;
+	struct xgpu_texture_store_view view;
+	struct xgpu_texture_store_statistics statistics;
+	struct made made = made_bc7(256, 256);
+	char path[4200];
+	unsigned char *bytes;
+	uint64_t size;
+	int frames, usable = 0;
+
+	fake.quiet = 1;
+	fake.gpu_follows = 1;
+	snprintf(path, sizeof(path), "%s/mods/test/textures/max/cut#0.ktx2", folder);
+	bytes = ktx2_make(&made, &size);
+	file_write(path, bytes, size);
+	free(bytes);
+	query_make(&query, path, &stock);
+	xgpu_texture_store_map(store, 9, 64, 0, 1, &query, &answer);
+	CHECK(answer.id != 0);
+	/* (the level index alone left: every level's read comes up short) */
+	CHECK(truncate(path, 80 + 24 * 9) == 0);
+	for (frames = 0; frames < 50; frames++)
+	{
+		usable |= xgpu_texture_store_use(store, answer.id, &view);
+		run_work(store, 0);
+		frame(store);
+	}
+	xgpu_texture_store_statistics(store, &statistics);
+	CHECK(!usable && statistics.failed == 1 && statistics.usable == 0);
+	CHECK(fake.live_images == 0 && statistics.resident_bytes == 0);
+	xgpu_texture_store_destroy(store);
+	fake.quiet = 0;
+}
+
+/* the auto budget: six tenths of what others leave free, kept while it
+moves by less than an eighth, followed past that */
+static void test_budget_wobble(void)
+{
+	struct xgpu_texture_store *store = store_make(1u << 20, 256u << 10, 1u << 20, 0);
+	struct xgpu_texture_store_statistics statistics;
+	int frames;
+
+	fake.quiet = 1;
+	fake.memory_budget = 1000ull << 20;
+	fake.memory_usage = 100ull << 20;
+	xgpu_texture_store_map(store, 11, 0, 0, 0, NULL, NULL);
+	xgpu_texture_store_statistics(store, &statistics);
+	CHECK(statistics.budget_bytes == (900ull << 20) / 10 * 6);
+	/* (others take 50 MB more: within an eighth, kept) */
+	fake.memory_usage = 150ull << 20;
+	for (frames = 0; frames < 61; frames++)
+		frame(store);
+	xgpu_texture_store_statistics(store, &statistics);
+	CHECK(statistics.budget_bytes == (900ull << 20) / 10 * 6);
+	/* (200 MB more: followed) */
+	fake.memory_usage = 300ull << 20;
+	for (frames = 0; frames < 61; frames++)
+		frame(store);
+	xgpu_texture_store_statistics(store, &statistics);
+	CHECK(statistics.budget_bytes == (700ull << 20) / 10 * 6);
+	fake.memory_budget = fake.memory_usage = 0;
+	xgpu_texture_store_destroy(store);
+	fake.quiet = 0;
+}
+
 int main(int argc, char **argv)
 {
 	char mods[4300];
@@ -766,7 +837,11 @@ int main(int argc, char **argv)
 	test_map();
 	test_residency(threads);
 	if (!threads)
+	{
 		test_budget();
+		test_read_failure();
+		test_budget_wobble();
+	}
 	if (failures)
 	{
 		fprintf(stderr, "%d failed\n", failures);
