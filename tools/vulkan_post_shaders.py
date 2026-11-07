@@ -34,6 +34,8 @@ display.gamma's curve (GAMMA) is the last pass of an SDR frame, in both
 backends.
 display.panini's projection (PANINI) is a pass over a window's 3D view as
 FXAA's is, in both backends; its uniforms add window, panini and tangents.
+display.prism_bloom's halving and doubling (BLOOM_DOWN, BLOOM_UP) are
+Vulkan's alone, so far.
 
 Beside them, CLEAR is the pixel shader of the core's clears of some of a
 target's colour channels (xgpu_vulkan.c, xgpu_vulkan_clear), which
@@ -67,7 +69,7 @@ SAMPLER = re.compile(r"^uniform sampler2D (\w+);\n", re.M)
 UNIFORMS = ("metrics", "bounds", "hdr", "window", "panini", "tangents")
 # the fragment programs, in xgpu_vulkan_post_shaders.h's order
 PROGRAMS = ("fxaa", "smaa_edges", "smaa_weights", "smaa_blend", "rotate", "hdr_tone_map", "hdr_tone_map_ms",
-            "hdr_encode", "gamma", "panini")
+            "hdr_encode", "gamma", "panini", "bloom_down", "bloom_up")
 # one triangle over the whole viewport
 VERTEX_SOURCE = (
     "void main()\n"
@@ -312,6 +314,87 @@ PANINI_SOURCE = (
     "\tresult = sum / float(taps.x * taps.y);\n"
     "}\n"
 )
+# display.prism_bloom's passes (xgpu_vulkan_post_bloom; xgpu_backend.h's
+# XGPU_BLOOM_*), dual filtering over the 3D view's half floats before its
+# tone map. Their uniforms: metrics, the source's 1 / width, 1 / height,
+# width, height; bounds, the source's texels read (the rectangle's outermost
+# texel centres, as FXAA's); hdr, 1 / width and 1 / height of the image
+# drawn (its pixels' coordinates as the source's), the threshold (the first
+# halving's: each tap's light past it alone, at most 16; 0 none) and the
+# strength (the tent's sum by it). The halving (BLOOM_DOWN) is Jimenez's
+# 13 taps (Call of Duty: Advanced Warfare), its first's groups weighed by one
+# over one plus their luma (Karis's: no fireflies); the doubling back
+# (BLOOM_UP) a 3 by 3 tent of the smaller, added (the pipeline's blend) to
+# the larger, and at last to the view
+BLOOM_DOWN_SOURCE = (
+    "uniform sampler2D color_texture;\n"
+    "\n"
+    "uniform vec4 metrics;\n"
+    "uniform vec4 bounds;\n"
+    "uniform vec4 hdr;\n"
+    "out vec4 result;\n"
+    "\n"
+    "vec3 tap(vec2 uv, vec2 offset)\n"
+    "{\n"
+    "\tvec3 color = textureLod(color_texture, clamp(uv + offset * metrics.xy, bounds.xy, bounds.zw), 0.0).rgb;\n"
+    "\tcolor = max(color, vec3(0.0));\n"
+    "\treturn hdr.z > 0.0 ? min(max(color - vec3(hdr.z), vec3(0.0)), vec3(16.0)) : color;\n"
+    "}\n"
+    "\n"
+    "float karis(vec3 color)\n"
+    "{\n"
+    "\treturn hdr.z > 0.0 ? 1.0 / (1.0 + dot(color, vec3(0.2126, 0.7152, 0.0722)) * 0.25) : 1.0;\n"
+    "}\n"
+    "\n"
+    "void main()\n"
+    "{\n"
+    "\tvec2 uv = gl_FragCoord.xy * hdr.xy;\n"
+    "\tvec3 a = tap(uv, vec2(-2.0, -2.0)), b = tap(uv, vec2(0.0, -2.0)), c = tap(uv, vec2(2.0, -2.0));\n"
+    "\tvec3 d = tap(uv, vec2(-2.0, 0.0)), e = tap(uv, vec2(0.0, 0.0)), f = tap(uv, vec2(2.0, 0.0));\n"
+    "\tvec3 g = tap(uv, vec2(-2.0, 2.0)), h = tap(uv, vec2(0.0, 2.0)), i = tap(uv, vec2(2.0, 2.0));\n"
+    "\tvec3 j = tap(uv, vec2(-1.0, -1.0)), k = tap(uv, vec2(1.0, -1.0));\n"
+    "\tvec3 l = tap(uv, vec2(-1.0, 1.0)), m = tap(uv, vec2(1.0, 1.0));\n"
+    "\tvec3 groups[5];\n"
+    "\tfloat weights[5], sum = 0.0;\n"
+    "\tvec3 color = vec3(0.0);\n"
+    "\tgroups[0] = (j + k + l + m) * 0.25;\n"
+    "\tgroups[1] = (a + b + d + e) * 0.25;\n"
+    "\tgroups[2] = (b + c + e + f) * 0.25;\n"
+    "\tgroups[3] = (d + e + g + h) * 0.25;\n"
+    "\tgroups[4] = (e + f + h + i) * 0.25;\n"
+    "\tfor (int n = 0; n < 5; n++)\n"
+    "\t{\n"
+    "\t\tweights[n] = (n == 0 ? 0.5 : 0.125) * karis(groups[n]);\n"
+    "\t\tcolor += groups[n] * weights[n];\n"
+    "\t\tsum += weights[n];\n"
+    "\t}\n"
+    "\tresult = vec4(color / sum, 1.0);\n"
+    "}\n"
+)
+BLOOM_UP_SOURCE = (
+    "uniform sampler2D color_texture;\n"
+    "\n"
+    "uniform vec4 metrics;\n"
+    "uniform vec4 bounds;\n"
+    "uniform vec4 hdr;\n"
+    "out vec4 result;\n"
+    "\n"
+    "vec3 tap(vec2 uv, vec2 offset)\n"
+    "{\n"
+    "\treturn textureLod(color_texture, clamp(uv + offset * metrics.xy, bounds.xy, bounds.zw), 0.0).rgb;\n"
+    "}\n"
+    "\n"
+    "void main()\n"
+    "{\n"
+    "\tvec2 uv = gl_FragCoord.xy * hdr.xy;\n"
+    "\tvec3 color = tap(uv, vec2(0.0)) * 4.0;\n"
+    "\tcolor += (tap(uv, vec2(-1.0, 0.0)) + tap(uv, vec2(1.0, 0.0)) + tap(uv, vec2(0.0, -1.0)) +\n"
+    "\t\ttap(uv, vec2(0.0, 1.0))) * 2.0;\n"
+    "\tcolor += tap(uv, vec2(-1.0, -1.0)) + tap(uv, vec2(1.0, -1.0)) + tap(uv, vec2(-1.0, 1.0)) +\n"
+    "\t\ttap(uv, vec2(1.0, 1.0));\n"
+    "\tresult = vec4(max(color, vec3(0.0)) * (hdr.w / 16.0), 0.0);\n"
+    "}\n"
+)
 # the clears' pixel shader (its uniforms at the passes' binding)
 CLEAR = """#version 450
 layout(std140, set = 0, binding = 1) uniform ClearUniforms
@@ -412,6 +495,8 @@ def generate(args):
     programs["hdr_encode"] = ("frag", hdr["encode"])
     programs["gamma"] = ("frag", GAMMA_SOURCE)
     programs["panini"] = ("frag", PANINI_SOURCE)
+    programs["bloom_down"] = ("frag", BLOOM_DOWN_SOURCE)
+    programs["bloom_up"] = ("frag", BLOOM_UP_SOURCE)
     programs["clear"] = ("frag", CLEAR)
     text = [
         "/* Generated by tools/vulkan_post_shaders.py from its GLSL, xgpu_hdr.c and port/third_party/smaa. "

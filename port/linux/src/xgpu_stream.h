@@ -38,7 +38,7 @@ port/linux/README.md.
 #include <stdint.h>
 
 #define XGPU_STREAM_MAGIC 0x53504758u /* "XGPS" */
-#define XGPU_STREAM_VERSION 22
+#define XGPU_STREAM_VERSION 23
 #define XGPU_STREAM_LOADING_ART_BYTES (640u * 480u * 4u)
 
 /* ---------- the ring
@@ -320,8 +320,10 @@ struct xgpu_stream_capabilities
 	int32_t most_anisotropy;
 	uint8_t sample_counting, bgra_vertex_colors, base_vertex, sample_mask;
 	uint8_t mixed_constant_blend, dynamic_lights, dynamic_lights_preparable, hdr;
-	/* display.prism_material_overlay drawn (MATERIAL_OVERLAY) */
-	uint8_t material_overlay, unused[3];
+	/* display.prism_material_overlay drawn (MATERIAL_OVERLAY); the
+	lightmaps smoothed (display.prism_lightmaps: the pixel key's
+	lightmap_filter); display.prism_bloom drawn (BLOOM) */
+	uint8_t material_overlay, lightmap_filter, bloom, unused;
 };
 
 struct xgpu_stream_reply_record
@@ -367,6 +369,8 @@ struct xgpu_stream_tone_map
 	uint32_t header;
 	uint32_t target;
 	int32_t corners[4];
+	/* display.prism_bloom first (XGPU_BLOOM_*: xgpu_backend.h; 0 none) */
+	uint32_t bloom;
 };
 
 /* ---------- display.ambient_occlusion "world" (docs/world-ao.md, #578)
@@ -775,9 +779,9 @@ struct xgpu_stream_pixel_key
 	uint8_t source_blend, dynamic_lights, vr_effect, ambient_occlusion;
 	/* display.hdr's tag (xgpu_hdr.h) */
 	uint16_t hdr;
-	/* display.prism_material_overlay (xgpu.h; in what was padding: the
-	keys without it hash as they did) */
-	uint8_t material_overlay, unused;
+	/* display.prism_material_overlay, display.prism_lightmaps (xgpu.h; in
+	what was padding: the keys without them hash as they did) */
+	uint8_t material_overlay, lightmap_filter;
 };
 
 /* xgpu_backend.h's struct xgpu_pipeline_key */
@@ -820,6 +824,8 @@ struct xgpu_stream_pixel_program
 	uint8_t material_overlay;
 	/* display.hdr's tag (xgpu_hdr.h) */
 	uint16_t hdr;
+	/* display.prism_lightmaps (xgpu.h) */
+	uint8_t lightmap_filter, unused[3];
 };
 
 /* a pipeline key the guest numbered (from 1, below XGPU_STREAM_PIPELINES),
@@ -890,6 +896,7 @@ static inline int xgpu_stream_world_ao_twin(struct xgpu_stream_pipeline_define *
 	definition->key.pixel.count_samples = definition->pixel_program.count_samples = 0;
 	definition->key.pixel.dynamic_lights = definition->pixel_program.dynamic_lights = 0;
 	definition->key.pixel.material_overlay = definition->pixel_program.material_overlay = 0;
+	definition->key.pixel.lightmap_filter = definition->pixel_program.lightmap_filter = 0;
 	return 1;
 }
 
@@ -1340,7 +1347,7 @@ XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_frame_end, 12);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_capabilities, 24);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_material_overlay, 4 + 176 + 7 * 72);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_hdr, 24);
-XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_tone_map, 24);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_tone_map, 28);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_panini, 56);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_world_ao_window, 16 + 32 + 32 + XGPU_WORLD_AO_PROXIES_MAXIMUM * 48 + 32 +
 	XGPU_WORLD_AO_GRID_CELLS_MAXIMUM * 8);
@@ -1356,8 +1363,8 @@ XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_sampler, 24);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_texture_stage, 72);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_pixel_key, 264);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_pipeline_key, 308);
-XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_pixel_program, 436);
-XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_pipeline_define, 752);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_pixel_program, 440);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_pipeline_define, 756);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_dynamic_state, 68);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_draw_uniforms, 580);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_vertex_element, 6);

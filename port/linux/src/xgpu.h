@@ -184,7 +184,40 @@ struct nv2a_pixel_shader_key
 	plus XGPU_OVERLAY_SURFACE_ONLY with a surface map and no tiles (below:
 	"The material overlay") */
 	unsigned char material_overlay;
+	/* display.prism_lightmaps: a structure's lightmap pass whose stage 2 is
+	its lightmap (a 2D texture at projected coordinates) reads it smoothed
+	(XGPU_LIGHTMAP_FILTER_*, below: "The lightmaps smoothed"); 0 as the
+	Xbox read it */
+	unsigned char lightmap_filter;
 };
+
+/* ---------- the lightmaps smoothed (display.prism_lightmaps)
+
+A lightmap pass's draw with lightmap_filter XGPU_LIGHTMAP_FILTER_SMOOTH
+reads texture stage 2 (the lightmap page, R5G6B5 as the game has it, or
+the finer copy rebuilt on this machine that replaces it: prism_lightmaps.c)
+in place of its one bilinear sample with:
+
+  c = the cubic B-spline of the 4 by 4 texels about the point, as four
+      bilinear samples (the weights' sums at each pair's place);
+  m, M = the least and most of each channel over the 2 by 2 texels the
+      bilinear sample reads (three gathers), c clamped to [m, M]: the
+      B-spline's wider reach never pulls light across a chart's edge or a
+      shadow's into the cell (no bleed of a gutter's black);
+  d = the mean of the four bilinear samples XGPU_LIGHTMAP_DEBAND_REACH
+      texels away along the diagonals, each weighed by how close it is to c
+      (1 within a quantum of the 16-bit format, R and B 1/31, G 1/63, 0 past
+      XGPU_LIGHTMAP_DEBAND_LIMIT of them): where the light is even (a band's
+      step of one quantum) c moves toward d by the weights' mean; where it
+      changes (an edge, a shadow) it stays c;
+  t2 = c + (n - 0.5) / 255, n interleaved gradient noise of the pixel
+       (Jimenez's), so that the steps left in the 8-bit target do not band.
+
+Its alpha is the bilinear sample's, as the combiners read it. Nothing else
+changes: the bump's response, the self-illumination, the dynamic lights. */
+#define XGPU_LIGHTMAP_FILTER_SMOOTH 1
+#define XGPU_LIGHTMAP_DEBAND_REACH 1.5f
+#define XGPU_LIGHTMAP_DEBAND_LIMIT 2.0f
 
 /* ---------- the material overlay (display.prism_material_overlay)
 

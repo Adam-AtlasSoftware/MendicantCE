@@ -211,7 +211,9 @@ static const struct config_setting config_settings[] =
 		"port's improvements together (anti-aliasing, sharper textures and\n"
 		"shadows, models' detail and lighting for each pixel, the enhanced\n"
 		"dynamic lights), the same on every machine (a renderer that lacks one\n"
-		"draws without it). Each of those settings, set here, wins over it." },
+		"draws without it); \"prism\" is \"enhanced\" with PRISM's lighting on top\n"
+		"(display.prism_lightmaps \"smooth\", display.ambient_occlusion \"world\").\n"
+		"Each of those settings, set here, wins over it." },
 	{ "display.anti_aliasing", _config_string, GRAPHICS_ANTI_ALIASING, "HALO_ANTI_ALIASING", _environment_value,
 		_platform_all,
 		"Smoothing of jagged edges, which the Xbox did not have: \"off\"; \"fxaa\"\n"
@@ -422,6 +424,30 @@ static const struct config_setting config_settings[] =
 		_platform_desktop,
 		"PRISM v2: how strong the surface maps' highlight is, 0 to\n"
 		"2 (0 none)." },
+	{ "display.prism_lightmaps", _config_string, "\"stock\"", "HALO_PRISM_LIGHTMAPS", _environment_value,
+		_platform_desktop,
+		"PRISM: the level's own baked light, drawn smoother: \"stock\" as the Xbox\n"
+		"drew it; \"smooth\" reads each lightmap with a cubic filter and evens out\n"
+		"the steps of its 16-bit colour (its bands) where the light is even, and\n"
+		"draws it from a finer copy rebuilt on this machine from your map, chart\n"
+		"by chart (display.prism_lightmap_upsample). The light stays where it\n"
+		"was, in its colours; models still take theirs from the stock lightmap.\n"
+		"\"rebaked\" is not built yet and draws as \"smooth\". Vulkan; read each\n"
+		"frame (prism_set \"lightmaps smooth\")." GRAPHICS_CHOOSES },
+	{ "display.prism_lightmap_upsample", _config_integer, "2", "HALO_PRISM_LIGHTMAP_UPSAMPLE", _environment_value,
+		_platform_desktop,
+		"PRISM, with display.prism_lightmaps \"smooth\": how much finer the\n"
+		"lightmaps' copies are, 2 or 4 times along each side, built the first time\n"
+		"a level is played with it (in the background, cached in the data\n"
+		"folder's prism_lightmaps); 0 none: the cubic filter alone." },
+	{ "display.prism_bloom", _config_string, "\"off\"", "HALO_PRISM_BLOOM", _environment_value,
+		_platform_desktop,
+		"PRISM, beyond CE (the Xbox had no bloom): a soft glow about the light\n"
+		"past white alone (plasma, the sun, lights, muzzle flashes, explosions,\n"
+		"self-illuminated panels): \"off\"; \"glow\" small and faint; \"full\"\n"
+		"wider and brighter. Never a haze over the scene, never on what is lit\n"
+		"no brighter than white. Draws the 3D view in half floats on any\n"
+		"display, as display.hdr does. Vulkan; read each frame." },
 	{ "display.structure_culling", _config_integer, STRUCTURE_CULLING_DEFAULT, "HALO_STRUCTURE_CULLING", _environment_value,
 		_platform_all,
 		"Which tests skip the level's triangles the camera cannot see, as bits\n"
@@ -3732,6 +3758,8 @@ static const struct
 	/* (battery saver's: only the drawing's, so that it never changes how a
 	game plays in the middle of it) */
 	int simulation;
+	/* "prism"'s, as the table above writes it (NULL: "enhanced"'s) */
+	const char *prism;
 } config_graphics[] =
 {
 	{ "display.anti_aliasing", "\"off\"" },
@@ -3741,7 +3769,8 @@ static const struct
 	/* ("native" in VR, whose eyes' many lines the Xbox's 480 stand for) */
 	{ "display.model_detail", "\"auto\"" },
 	{ "display.dynamic_lights", "\"classic\"" },
-	{ "display.ambient_occlusion", "\"off\"" },
+	{ "display.ambient_occlusion", "\"off\"", 0, "\"world\"" },
+	{ "display.prism_lightmaps", "\"stock\"", 0, "\"smooth\"" },
 	{ "game.enhanced_animations", "false", 1 },
 	{ "display.menu_fade", "true", 1 },
 };
@@ -3761,14 +3790,17 @@ static long config_graphics_entry(long setting)
 	return -1;
 }
 
-/* the value the preset (display.graphics's value: "classic", else
-"enhanced") gives the setting, as the table above writes it */
+/* the value the preset (display.graphics's value: "classic", "prism",
+else "enhanced") gives the setting, as the table above writes it */
 static const char *config_graphics_text(const char *graphics, long setting)
 {
 	long entry = config_graphics_entry(setting);
 
-	return entry >= 0 && graphics && !strcmp(graphics, "classic") ? config_graphics[entry].classic :
-		config_settings[setting].default_value;
+	if (entry >= 0 && graphics && !strcmp(graphics, "classic"))
+		return config_graphics[entry].classic;
+	if (entry >= 0 && graphics && !strcmp(graphics, "prism") && config_graphics[entry].prism)
+		return config_graphics[entry].prism;
+	return config_settings[setting].default_value;
 }
 
 static int config_values_equal(const struct config_value *a, const struct config_value *b, enum config_type type)
@@ -4087,6 +4119,8 @@ static const struct
 	{ "display.resolution_scaling", { "native", "original", NULL }, NULL },
 	{ "display.anti_aliasing", { "off", "fxaa", "smaa", "ssaa2x", "msaa2x", "msaa4x", "msaa8x", NULL }, NULL },
 	{ "display.ambient_occlusion", { "off", "world", NULL }, "off" },
+	{ "display.prism_lightmaps", { "stock", "smooth", "rebaked", NULL }, "stock" },
+	{ "display.prism_bloom", { "off", "glow", "full", NULL }, "off" },
 	{ "display.astc_textures", { "auto", "always", "off", NULL }, NULL },
 	{ "display.picture_position", { "center", "top", "bottom", NULL }, NULL },
 	{ "display.orientation", { "landscape", "portrait", "auto", NULL }, NULL },
@@ -4551,7 +4585,7 @@ static void config_load(void)
 	{
 		const char *graphics = config_values[config_setting_index("display.graphics")].string;
 
-		if (strcmp(graphics, "classic") && strcmp(graphics, "enhanced"))
+		if (strcmp(graphics, "classic") && strcmp(graphics, "enhanced") && strcmp(graphics, "prism"))
 			platform_log("settings: display.graphics \"%s\" is unknown, so enhanced", graphics);
 		config_graphics_apply();
 	}

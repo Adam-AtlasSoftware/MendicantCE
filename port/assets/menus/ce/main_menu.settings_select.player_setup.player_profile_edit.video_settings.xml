@@ -230,7 +230,7 @@
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/labels" string_index="13" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="ENHANCED|CLASSIC|CUSTOM" setting="display.graphics" values="enhanced|classic|custom" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="ENHANCED|CLASSIC|PRISM|CUSTOM" setting="display.graphics" values="enhanced|classic|prism|custom" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
 		<on event="created" run="port setting load"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_battery_saver" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 120">
@@ -292,7 +292,7 @@
 		<string text="Your weapon's field of view and whether it is drawn, the Panini projection, how far you see, your legs and arms, your shield's color, and the view from a vehicle's passenger seat."/>
 		<string text="Plays the Xbox's intro movie as the game starts, and its attract movies on an idle main menu. Any button skips the intro.|They are the bink folder of your Xbox disc image, copied with the maps. Without them, put the disc's bink folder beside your maps folder."/>
 		<string text=""/>
-		<string text="Enhanced: smoother edges, sharper textures and shadows, smoother lighting. Classic looks as the Xbox did.|Changing one shows CUSTOM."/>
+		<string text="Enhanced: smoother edges, sharper textures and shadows, smoother lighting. Classic looks as the Xbox did. PRISM: Enhanced with the levels' light smoothed and ambient occlusion.|Changing one shows CUSTOM."/>
 		<string text="Up to 60 frames a second and Classic graphics, for a longer battery and a cooler device. Auto turns it on while the device runs on its battery. Your own settings come back as it turns off."/>
 		<string text="How bright the picture is: its gamma, and on an HDR display, HDR's look, how bright white and the HUD are, and the display's peak."/>
 		<string text="Anti-aliasing, texture filtering, model detail, shadows, the lighting and the shields' glow, smooth motion and the tick rate."/>

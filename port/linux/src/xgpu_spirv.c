@@ -46,7 +46,7 @@ enum
 	OP_DECORATE = 71, OP_MEMBER_DECORATE = 72,
 	OP_VECTOR_EXTRACT_DYNAMIC = 77, OP_VECTOR_SHUFFLE = 79, OP_COMPOSITE_CONSTRUCT = 80, OP_COMPOSITE_EXTRACT = 81,
 	OP_COMPOSITE_INSERT = 82,
-	OP_IMAGE_SAMPLE_IMPLICIT_LOD = 87, OP_IMAGE_SAMPLE_EXPLICIT_LOD = 88, OP_IMAGE_FETCH = 95, OP_IMAGE_READ = 98, OP_IMAGE = 100, OP_IMAGE_QUERY_SIZE_LOD = 103,
+	OP_IMAGE_SAMPLE_IMPLICIT_LOD = 87, OP_IMAGE_SAMPLE_EXPLICIT_LOD = 88, OP_IMAGE_FETCH = 95, OP_IMAGE_GATHER = 96, OP_IMAGE_READ = 98, OP_IMAGE = 100, OP_IMAGE_QUERY_SIZE_LOD = 103,
 	OP_CONVERT_F_TO_S = 110, OP_CONVERT_S_TO_F = 111, OP_BITCAST = 124,
 	OP_F_NEGATE = 127, OP_I_ADD = 128, OP_F_ADD = 129, OP_I_SUB = 130, OP_F_SUB = 131, OP_I_MUL = 132, OP_F_MUL = 133,
 	OP_F_DIV = 136, OP_VECTOR_TIMES_SCALAR = 142, OP_DOT = 148,
@@ -2114,6 +2114,107 @@ static unsigned int sample(struct module *m, struct pixel_state *state, int stag
 	return texel;
 }
 
+/* display.prism_lightmaps: whether the draw reads its stage 2, the
+lightmap, smoothed (xgpu.h's "The lightmaps smoothed") */
+static BOOL lightmap_smoothed(const struct xgpu_pixel_program *program, const struct xgpu_spirv_options *options)
+{
+	return program->lightmap_filter == XGPU_LIGHTMAP_FILTER_SMOOTH &&
+		program->stages[2].mode == XGPU_TEXTURE_PROJECT2D && program->stages[2].sampler == _xgpu_sampler_2d &&
+		!(options->border[2] & 3);
+}
+
+/* the lightmap's bilinear sample at uv (a vec2: the stage's scale applied) */
+static unsigned int lightmap_tap(struct module *m, struct pixel_state *state, unsigned int uv)
+{
+	return op2(m, OP_IMAGE_SAMPLE_IMPLICIT_LOD, m->t_v4, texture_load(m, state, 2), uv);
+}
+
+/* the lightmap smoothed at the projected coordinates (a vec4, as sample
+takes them): xgpu.h's "The lightmaps smoothed", xgpu_msl.c's
+lightmap_smooth, step for step */
+static unsigned int lightmap_smooth(struct module *m, struct pixel_state *state, unsigned int coordinates)
+{
+	static const unsigned int xx[2] = { 0, 2 }, yy[2] = { 1, 3 }, xy_of[2] = { 0, 3 };
+	static const float diagonals[4][2] = { { -1.0f, -1.0f }, { 1.0f, -1.0f }, { -1.0f, 1.0f }, { 1.0f, 1.0f } };
+	unsigned int uv = fmul(m, 2, xy(m, coordinates), xy(m, uniform(m, U_TEXTURE_SCALE, 2)));
+	unsigned int image = op(m, OP_IMAGE, type_sampled_image(m, DIM_2D, FALSE, FALSE, FALSE), 1,
+		(unsigned int[]){ texture_load(m, state, 2) });
+	unsigned int size = op1(m, OP_CONVERT_S_TO_F, m->t_v2, image_size(m, image, m->t_iv2));
+	unsigned int texel = fdiv(m, 2, constant_splat(m, 2, 1.0f), size);
+	unsigned int st = fsub(m, 2, fmul(m, 2, uv, size), constant_splat(m, 2, 0.5f));
+	unsigned int base = ext1(m, GLSL_FLOOR, m->t_v2, st), f = fsub(m, 2, st, base);
+	unsigned int f2 = fmul(m, 2, f, f), f3 = fmul(m, 2, f2, f), one_f = fsub(m, 2, constant_splat(m, 2, 1.0f), f);
+	unsigned int sixth = constant_splat(m, 2, 1.0f / 6.0f);
+	unsigned int w0, w1, w3, g0, g1, p0, p1, c, bilinear, low[3], high[3], quantum, sum, weight_sum, noise, frag;
+	int index, channel;
+
+	/* the cubic B-spline's weights of the texels at base - 1 to base + 2,
+	in pairs: (w0 + w1) at the first pair's bilinear place, (w2 + w3) at the
+	second's (texel centres at index + 0.5) */
+	w0 = fmul(m, 2, fmul(m, 2, fmul(m, 2, one_f, one_f), one_f), sixth);
+	w1 = fmul(m, 2, fadd(m, 2, fsub(m, 2, fscale(m, 2, f3, constant_float(m, 3.0f)), fscale(m, 2, f2,
+		constant_float(m, 6.0f))), constant_splat(m, 2, 4.0f)), sixth);
+	w3 = fmul(m, 2, f3, sixth);
+	g0 = fadd(m, 2, w0, w1);
+	g1 = fsub(m, 2, constant_splat(m, 2, 1.0f), g0);
+	p0 = fmul(m, 2, fadd(m, 2, fsub(m, 2, base, constant_splat(m, 2, 0.5f)),
+		fdiv(m, 2, w1, fmax_scalar(m, 2, g0, 1.0e-6f))), texel);
+	p1 = fmul(m, 2, fadd(m, 2, fadd(m, 2, base, constant_splat(m, 2, 1.5f)),
+		fdiv(m, 2, w3, fmax_scalar(m, 2, g1, 1.0e-6f))), texel);
+	c = 0;
+	for (index = 0; index < 4; index++)
+	{
+		unsigned int px = index & 1 ? p1 : p0, py = index & 2 ? p1 : p0;
+		unsigned int gx = index & 1 ? g1 : g0, gy = index & 2 ? g1 : g0;
+		unsigned int tap = xyz(m, lightmap_tap(m, state, shuffle(m, 2, px, py, xy_of)));
+		unsigned int weighed = fscale(m, 3, tap, fmul(m, 1, extract(m, gx, 0), extract(m, gy, 1)));
+
+		c = index ? fadd(m, 3, c, weighed) : weighed;
+	}
+	/* clamped to the least and most of each channel of the 2 by 2 texels
+	the bilinear sample reads */
+	bilinear = lightmap_tap(m, state, uv);
+	for (channel = 0; channel < 3; channel++)
+	{
+		unsigned int gathered = op3(m, OP_IMAGE_GATHER, m->t_v4, texture_load(m, state, 2), uv, constant_int(m, channel));
+		unsigned int a = shuffle(m, 2, gathered, gathered, xx), b = shuffle(m, 2, gathered, gathered, yy);
+		unsigned int least = ext2(m, GLSL_F_MIN, m->t_v2, a, b), most = ext2(m, GLSL_F_MAX, m->t_v2, a, b);
+
+		low[channel] = ext2(m, GLSL_F_MIN, m->t_float, extract(m, least, 0), extract(m, least, 1));
+		high[channel] = ext2(m, GLSL_F_MAX, m->t_float, extract(m, most, 0), extract(m, most, 1));
+	}
+	c = ext3(m, GLSL_F_CLAMP, m->t_v3, c, construct(m, 3, low), construct(m, 3, high));
+	/* evened out where the light is even: the diagonal taps within a
+	quantum of c weigh 1, past XGPU_LIGHTMAP_DEBAND_LIMIT quanta 0 */
+	quantum = construct(m, 3, (unsigned int[]){ constant_float(m, 31.0f), constant_float(m, 63.0f),
+		constant_float(m, 31.0f) });
+	sum = c;
+	weight_sum = constant_float(m, 1.0f);
+	for (index = 0; index < 4; index++)
+	{
+		unsigned int offset = fmul(m, 2, construct(m, 2, (unsigned int[]){
+			constant_float(m, diagonals[index][0] * XGPU_LIGHTMAP_DEBAND_REACH),
+			constant_float(m, diagonals[index][1] * XGPU_LIGHTMAP_DEBAND_REACH) }), texel);
+		unsigned int tap = xyz(m, lightmap_tap(m, state, fadd(m, 2, uv, offset)));
+		unsigned int difference = fmul(m, 3, ext1(m, GLSL_F_ABS, m->t_v3, fsub(m, 3, tap, c)), quantum);
+		unsigned int largest = ext2(m, GLSL_F_MAX, m->t_float, ext2(m, GLSL_F_MAX, m->t_float, extract(m, difference, 0),
+			extract(m, difference, 1)), extract(m, difference, 2));
+		unsigned int weight = saturate(m, 1, fdiv(m, 1, fsub(m, 1, constant_float(m, XGPU_LIGHTMAP_DEBAND_LIMIT), largest),
+			constant_float(m, XGPU_LIGHTMAP_DEBAND_LIMIT - 1.0f)));
+
+		sum = fadd(m, 3, sum, fscale(m, 3, tap, weight));
+		weight_sum = fadd(m, 1, weight_sum, weight);
+	}
+	c = fdiv(m, 3, sum, splat(m, 3, weight_sum));
+	/* dithered: interleaved gradient noise of the pixel, a 255th about */
+	frag = xy(m, load(m, m->t_v4, state->frag_coord));
+	noise = ext1(m, GLSL_FRACT, m->t_float, fmul(m, 1, constant_float(m, 52.9829189f), ext1(m, GLSL_FRACT, m->t_float,
+		fdot(m, frag, construct(m, 2, (unsigned int[]){ constant_float(m, 0.06711056f),
+		constant_float(m, 0.00583715f) })))));
+	c = fadd(m, 3, c, splat(m, 3, fdiv(m, 1, fsub(m, 1, noise, constant_float(m, 0.5f)), constant_float(m, 255.0f))));
+	return vec4_of(m, saturate(m, 3, c), extract(m, bilinear, 3));
+}
+
 /* a vec4 of the parts (floats) */
 static unsigned int vec4_parts(struct module *m, unsigned int x, unsigned int y, unsigned int z, unsigned int w)
 {
@@ -2147,7 +2248,11 @@ static void texture_stage(struct module *m, struct pixel_state *state, int stage
 
 			coordinates = shuffle(m, 4, coordinates, fadd(m, 2, xy(m, coordinates), state->t0_offset), moved);
 		}
-		state->t[stage] = sample(m, state, stage, coordinates);
+		/* (display.prism_lightmaps: the lightmap pass's lightmap smoothed) */
+		if (stage == 2 && lightmap_smoothed(program, state->options))
+			state->t[stage] = lightmap_smooth(m, state, coordinates);
+		else
+			state->t[stage] = sample(m, state, stage, coordinates);
 		if (stage == 0 && program->point_threshold && decoded->sampler == _xgpu_sampler_2d)
 		{
 			/* IDs must not be averaged with another segment or corrupted by
@@ -5197,6 +5302,12 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 			state.frag_coord = variable(&m, m.t_v4, STORAGE_INPUT, "gl_FragCoord");
 			decorate1(&m, state.frag_coord, DECORATION_BUILT_IN, BUILT_IN_FRAG_COORD);
 		}
+	}
+	/* (display.prism_lightmaps: its dither's pixel) */
+	if (lightmap_smoothed(program, options) && !state.frag_coord)
+	{
+		state.frag_coord = variable(&m, m.t_v4, STORAGE_INPUT, "gl_FragCoord");
+		decorate1(&m, state.frag_coord, DECORATION_BUILT_IN, BUILT_IN_FRAG_COORD);
 	}
 	if (count_samples)
 	{
