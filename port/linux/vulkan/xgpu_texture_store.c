@@ -885,8 +885,9 @@ static int query_check(struct xgpu_texture_store *store, const struct xgpu_store
 		return XGPU_KTX2_PATH;
 	if (!realpath(query->path, resolved))
 		return XGPU_KTX2_UNREADABLE;
-	/* (a file in a mods folder alone, whatever links lead there) */
-	if (!strstr(resolved, "/mods/") || !ends_with(resolved, ".ktx2"))
+	/* (a file the guest found in a mods folder, a KTX2 file wherever its
+	links lead: a mods folder linked to another disk is the player's own) */
+	if (!strstr(query->path, "/mods/") || !ends_with(resolved, ".ktx2"))
 		return XGPU_KTX2_PATH;
 	descriptor = open(resolved, O_RDONLY | O_CLOEXEC);
 	if (descriptor < 0)

@@ -509,6 +509,30 @@ static void test_map(void)
 	CHECK(!answers[3].id && answers[3].status == XGPU_KTX2_DEVICE && fake.asked_astc);
 	CHECK(!answers[4].id && answers[4].status == XGPU_KTX2_CHANGED);
 	CHECK(!answers[5].id && answers[5].status == XGPU_KTX2_CHANGED);
+	/* (a mods folder's link to a file elsewhere: the player's own, read; a
+	link to a file that is not a KTX2: refused) */
+	{
+		char linked[4300], target[4300];
+		struct xgpu_store_query query;
+		struct xgpu_store_answer answer;
+
+		snprintf(linked, sizeof(linked), "%s/mods/test/textures/max/linked#0.ktx2", folder);
+		unlink(linked);
+		CHECK(symlink(paths[2], linked) == 0);
+		query_make(&query, linked, &stock);
+		xgpu_texture_store_map(store, 8, 0, 0, 1, &query, &answer);
+		CHECK(answer.id == XGPU_TEXTURE_STORE_ID(8, 0) && answer.status == XGPU_KTX2_ACCEPTED);
+		snprintf(target, sizeof(target), "%s/outside.bin", folder);
+		bytes = ktx2_make(&made, &size);
+		file_write(target, bytes, size);
+		free(bytes);
+		unlink(linked);
+		CHECK(symlink(target, linked) == 0);
+		query_make(&query, linked, &stock);
+		xgpu_texture_store_map(store, 9, 0, 0, 1, &query, &answer);
+		CHECK(!answer.id && answer.status == XGPU_KTX2_PATH);
+		unlink(linked);
+	}
 	/* (an id of another generation, or none, is drawn stock) */
 	{
 		struct xgpu_texture_store_view view;
