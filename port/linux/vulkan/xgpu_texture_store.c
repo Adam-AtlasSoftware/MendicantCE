@@ -869,9 +869,27 @@ static int ends_with(const char *text, const char *end)
 
 #endif
 
-/* a query's file opened and its header checked: XGPU_KTX2_*, and the file */
+/* a material's image's (no stock bitmap) level the store treats as the stock
+resolution: the first no larger than XGPU_TEXTURE_STORE_MATERIAL_USABLE on its
+longer side (its levels from it down make it usable), and that level as the
+stock it stands for */
+static void material_stock(struct xgpu_ktx2_file *file, struct xgpu_ktx2_stock *stock)
+{
+	uint32_t side = file->width > file->height ? file->width : file->height, scale = 0;
+
+	while ((side >> scale) > XGPU_TEXTURE_STORE_MATERIAL_USABLE && scale + 1 < file->levels)
+		scale++;
+	file->scale = scale;
+	memset(stock, 0, sizeof(*stock));
+	stock->width = file->width >> scale ? file->width >> scale : 1;
+	stock->height = file->height >> scale ? file->height >> scale : 1;
+	stock->levels = file->levels - scale;
+}
+
+/* a query's file opened and its header checked: XGPU_KTX2_*, and the file
+(a material's: its stock made, material_stock) */
 static int query_check(struct xgpu_texture_store *store, const struct xgpu_store_query *query,
-	struct xgpu_ktx2_file *file, char **path)
+	struct xgpu_ktx2_file *file, char **path, struct xgpu_ktx2_stock *stock)
 {
 #if STORE_FILES
 	unsigned char header[XGPU_KTX2_INDEX_BYTES];
@@ -908,10 +926,18 @@ static int query_check(struct xgpu_texture_store *store, const struct xgpu_store
 	close(descriptor);
 	if (got < (ssize_t)XGPU_KTX2_HEADER_BYTES)
 		return XGPU_KTX2_UNREADABLE;
-	status = xgpu_ktx2_parse(header, (uint32_t)got, (uint64_t)information.st_size, &query->stock,
-		store->settings.side_maximum, file);
+	status = xgpu_ktx2_parse(header, (uint32_t)got, (uint64_t)information.st_size, query->material ? NULL : &query->stock,
+		query->material ? store->settings.material_side_maximum : store->settings.side_maximum, file);
 	if (status != XGPU_KTX2_ACCEPTED)
 		return status;
+	*stock = query->stock;
+	if (query->material)
+	{
+		/* (a material's image is 2D) */
+		if (file->faces != 1)
+			return XGPU_KTX2_INVALID;
+		material_stock(file, stock);
+	}
 	if (store->backend.format_supported && !store->backend.format_supported(store->backend.context, file->format))
 		return XGPU_KTX2_DEVICE;
 	if (file->srgb && !store->warned_srgb)
@@ -925,6 +951,7 @@ static int query_check(struct xgpu_texture_store *store, const struct xgpu_store
 	(void)store;
 	(void)query;
 	(void)file;
+	(void)stock;
 	*path = NULL;
 	return XGPU_KTX2_DEVICE;
 #endif
@@ -945,6 +972,8 @@ struct xgpu_texture_store *xgpu_texture_store_create(const struct xgpu_texture_s
 		store->settings.piece_maximum = store->backend.staging_size / 2;
 	if (!store->settings.side_maximum)
 		store->settings.side_maximum = XGPU_KTX2_SIDE_MAXIMUM;
+	if (!store->settings.material_side_maximum)
+		store->settings.material_side_maximum = XGPU_TEXTURE_STORE_MATERIAL_SIDE;
 	if (!store->settings.budget_ceiling)
 		store->settings.budget_ceiling = 6ull << 30;
 	if (store->settings.workers > WORKERS_MAXIMUM)
@@ -1024,8 +1053,9 @@ void xgpu_texture_store_map(struct xgpu_texture_store *store, uint32_t generatio
 	{
 		struct xgpu_store_answer *answer = &answers[index];
 		struct xgpu_ktx2_file file;
+		struct xgpu_ktx2_stock stock;
 		char *path = NULL;
-		int status = query_check(store, &queries[index], &file, &path);
+		int status = query_check(store, &queries[index], &file, &path, &stock);
 
 		memset(answer, 0, sizeof(*answer));
 		answer->status = (uint32_t)status;
@@ -1041,7 +1071,7 @@ void xgpu_texture_store_map(struct xgpu_texture_store *store, uint32_t generatio
 
 			entry->path = path;
 			entry->file = file;
-			entry->stock = queries[index].stock;
+			entry->stock = stock;
 			entry->resident = file.levels;
 			answer->id = XGPU_TEXTURE_STORE_ID(generation, store->entry_count);
 			answer->width = file.width;

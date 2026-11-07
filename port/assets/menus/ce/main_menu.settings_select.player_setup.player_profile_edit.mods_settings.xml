@@ -23,6 +23,7 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_material_overlay" x="28" y="260" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_textures" x="28" y="281" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_texture_budget_mb" x="28" y="302" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_materials" x="28" y="323" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/button_bar" y="414"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/tabs" y="76"/>
 	</widget>
@@ -162,6 +163,15 @@
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_texture_budget_mb_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="AUTO|512 MB|1 GB|2 GB|4 GB" setting="display.prism_texture_budget_mb" values="0|512|1024|2048|4096" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
 		<on event="created" run="port setting load"/>
 	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_materials" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_materials_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_materials_spinner" x="188"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_materials_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" string_index="10" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_materials_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="STOCK|PBR" setting="display.prism_materials" values="stock|pbr" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+		<on event="created" run="port setting load"/>
+	</widget>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels">
 		<string text="MODS"/>
 		<string text="MANAGE MODS ›"/>
@@ -173,6 +183,7 @@
 		<string text="MATERIAL DETAIL"/>
 		<string text="TEXTURE DETAIL"/>
 		<string text="TEXTURE MEMORY"/>
+		<string text="MATERIALS"/>
 	</strings>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/help_strings">
 		<string text="Texture, sound, text and model packs from the mods folder, and the Theater's recorded games."/>
@@ -186,5 +197,6 @@
 		<string text="Gives weapons and armour the fine grain of their surfaces (machining, weave, wear) from a mod's material overlay. It changes only the light on them. Off draws them as the Xbox did."/>
 		<string text="Draws the sharper textures mods ship in place of the game's, once they are in the graphics card's memory. Stock draws the game's own."/>
 		<string text="How much of the graphics card's memory mods' textures may take. Auto takes six tenths of what is free; past it, those not seen lately go back to the game's."/>
+		<string text="Lights armour and weapons with the materials mods give them: their colour, bumps, roughness, metal and coats under the level's own lights. Stock draws them as the Xbox did."/>
 	</strings>
 </menus>

@@ -109,19 +109,27 @@ struct xgpu_texture_store_settings
 	uint32_t frame_bytes, loading_bytes;
 	/* the auto budget's least and most */
 	uint64_t budget_floor, budget_ceiling;
-	/* the longer side of a replacement */
-	uint32_t side_maximum;
+	/* the longer side of a replacement, and of a material's image (0:
+	XGPU_TEXTURE_STORE_MATERIAL_SIDE) */
+	uint32_t side_maximum, material_side_maximum;
 };
 
 /* a file the map's record asks about: its path (host's), size and
-modification time as the guest found them, and the stock bitmap */
+modification time as the guest found them, and the stock bitmap; or
+(material) a material's image (display.prism_materials), which replaces no
+bitmap: 2D, its side up to the material side, usable once its levels from
+XGPU_TEXTURE_STORE_MATERIAL_USABLE texels down are resident (the store
+treats that level as the stock resolution: the view's stock is it) */
 struct xgpu_store_query
 {
 	const char *path;
 	uint64_t file_size;
 	uint32_t stamp_seconds;
 	struct xgpu_ktx2_stock stock;
+	int material;
 };
+#define XGPU_TEXTURE_STORE_MATERIAL_SIDE 8192u
+#define XGPU_TEXTURE_STORE_MATERIAL_USABLE 256u
 
 /* the store's answer: an id (0 refused) and why (XGPU_KTX2_*), the file's
 size, levels and format */

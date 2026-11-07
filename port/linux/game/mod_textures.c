@@ -50,6 +50,7 @@ struct xgpu_texture_store_query
 	unsigned long file_size, stamp_seconds;
 	int cube;
 	unsigned long stock_width, stock_height, stock_levels;
+	int kind;
 };
 struct xgpu_texture_store_answer
 {
@@ -101,6 +102,9 @@ enum
 
 /* the most queries a record has (xgpu_stream.h's) */
 #define MAXIMUM_QUERIES 65536
+/* a query's kind (xgpu_stream.h's XGPU_STREAM_TEXTURE_STORE_KIND_*): a
+bitmap's replacement, or a material's image (mod_pbr.c) */
+#define QUERY_KIND_MATERIAL 1
 #define MAXIMUM_PATH 1024
 
 /* ---------- definitions */
@@ -287,17 +291,20 @@ static void textures_send(
 	struct tag_iterator iterator;
 	long tag_index, count = 0, capacity = 0, tag_count = 0, replaceable = 0, index;
 	long refused = 0;
+	/* (display.prism_materials' images: mod_pbr.c's, after the bitmaps') */
+	long material_count = mod_pbr_texture_count(), material_first;
 
 	ids_clear();
 	mod_textures_globals.sent_tier = mod_textures_globals.tier;
 	mod_textures_globals.sent_budget = mod_textures_globals.budget;
-	if (mod_textures_globals.tier == _tier_stock || !xgpu_backend_texture_store_available())
+	if ((mod_textures_globals.tier == _tier_stock && !material_count) || !xgpu_backend_texture_store_available())
 	{
 		store_close();
+		mod_pbr_textures_answered(NULL, 0);
 		return;
 	}
 	tag_iterator_new(&iterator, BITMAP_GROUP_TAG);
-	while ((tag_index = tag_iterator_next(&iterator)) != NONE)
+	while (mod_textures_globals.tier != _tier_stock && (tag_index = tag_iterator_next(&iterator)) != NONE)
 	{
 		struct bitmap_group const *group = bitmap_group_get(tag_index);
 		char const *tag_name = tag_get_name(tag_index);
@@ -365,9 +372,59 @@ static void textures_send(
 			count++;
 		}
 	}
+	/* the materials' images, which replace no bitmap */
+	material_first = count;
+	if (material_count && count + material_count <= MAXIMUM_QUERIES)
+	{
+		struct xgpu_texture_store_query *more_queries = memory_zeroed((size_t)(count + material_count) * sizeof(*queries));
+		long *more_tags = memory_zeroed((size_t)(count + material_count) * sizeof(*query_tag));
+		long *more_bitmaps = memory_zeroed((size_t)(count + material_count) * sizeof(*query_bitmap));
+
+		if (more_queries && more_tags && more_bitmaps)
+		{
+			if (count)
+			{
+				memcpy(more_queries, queries, (size_t)count * sizeof(*queries));
+				memcpy(more_tags, query_tag, (size_t)count * sizeof(*query_tag));
+				memcpy(more_bitmaps, query_bitmap, (size_t)count * sizeof(*query_bitmap));
+			}
+			memory_release(queries);
+			memory_release(query_tag);
+			memory_release(query_bitmap);
+			queries = more_queries;
+			query_tag = more_tags;
+			query_bitmap = more_bitmaps;
+			capacity = count + material_count;
+			for (index = 0; index < material_count; index++)
+			{
+				long file = mod_pbr_texture_file(index);
+				unsigned long size, stamp[2];
+
+				/* (a file not there now: a query of none, refused) */
+				memset(&queries[count], 0, sizeof(queries[count]));
+				queries[count].kind = QUERY_KIND_MATERIAL;
+				if (file >= 0 && port_mods_file_stamp(file, &size, stamp))
+				{
+					queries[count].path = port_mods_file_path(file);
+					queries[count].file_size = size;
+					queries[count].stamp_seconds = stamp[0];
+				}
+				query_tag[count] = NONE;
+				query_bitmap[count] = (long)index;
+				count++;
+			}
+		}
+		else
+		{
+			memory_release(more_queries);
+			memory_release(more_tags);
+			memory_release(more_bitmaps);
+		}
+	}
 	if (!count)
 	{
 		store_close();
+		mod_pbr_textures_answered(NULL, 0);
 		error(_error_silent, "texstore: %s: no replacements of the map's %ld bitmaps that can take one",
 			mod_textures_globals.tier == _tier_max ? "max" : "enhanced", replaceable);
 		memory_release(queries);
@@ -377,7 +434,7 @@ static void textures_send(
 	}
 	answers = malloc((size_t)count * sizeof(*answers));
 	mod_textures_globals.tags = tag_count > 0 ? memory_zeroed((size_t)tag_count * sizeof(*mod_textures_globals.tags)) : NULL;
-	if (!answers || !mod_textures_globals.tags || !xgpu_backend_texture_store_map(++mod_textures_globals.generation,
+	if (!answers || (tag_count > 0 && !mod_textures_globals.tags) || !xgpu_backend_texture_store_map(++mod_textures_globals.generation,
 		(unsigned long)mod_textures_globals.tier, (unsigned long)mod_textures_globals.budget, at_load, queries,
 		(unsigned long)count, answers))
 	{
@@ -387,11 +444,28 @@ static void textures_send(
 		memory_release(query_bitmap);
 		memory_release(mod_textures_globals.tags);
 		mod_textures_globals.tags = NULL;
+		mod_pbr_textures_answered(NULL, 0);
 		return;
 	}
 	mod_textures_globals.open = TRUE;
 	mod_textures_globals.tag_count = tag_count;
-	for (index = 0; index < count; index++)
+	/* (the materials' ids, by their images) */
+	if (count > material_first)
+	{
+		unsigned long *ids = memory_zeroed((size_t)(count - material_first) * sizeof(*ids));
+
+		for (index = material_first; ids && index < count; index++)
+		{
+			ids[index - material_first] = answers[index].id;
+		}
+		mod_pbr_textures_answered(ids, ids ? count - material_first : 0);
+		memory_release(ids);
+	}
+	else
+	{
+		mod_pbr_textures_answered(NULL, 0);
+	}
+	for (index = 0; index < material_first; index++)
 	{
 		long absolute = (long)DATUM_INDEX_TO_ABSOLUTE_INDEX(query_tag[index]);
 		struct texture_ids *ids = &mod_textures_globals.tags[absolute];
@@ -418,9 +492,10 @@ static void textures_send(
 	{
 		xgpu_backend_texture_store_hook(mod_textures_id);
 	}
-	error(_error_silent, "texstore: %s: %ld files of the map's %ld bitmaps that can take one, %ld accepted, %ld refused",
-		mod_textures_globals.tier == _tier_max ? "max" : "enhanced", count, replaceable, mod_textures_globals.accepted,
-		refused);
+	error(_error_silent, "texstore: %s: %ld files of the map's %ld bitmaps that can take one, %ld accepted, %ld refused; "
+		"%ld materials' images", mod_textures_globals.tier == _tier_max ? "max" :
+		mod_textures_globals.tier == _tier_enhanced ? "enhanced" : "stock", material_first, replaceable,
+		mod_textures_globals.accepted, refused, count - material_first);
 	if (mods_say())
 	{
 		console_printf(FALSE, "textures: %ld replaced, %ld refused", mod_textures_globals.accepted, refused);
@@ -472,7 +547,8 @@ void mod_textures_frame(
 	{
 		return;
 	}
-	if (mod_textures_globals.tier != mod_textures_globals.sent_tier ||
+	/* (display.prism_materials read again: their images with the record) */
+	if (mod_pbr_frame() || mod_textures_globals.tier != mod_textures_globals.sent_tier ||
 		mod_textures_globals.budget != mod_textures_globals.sent_budget)
 	{
 		textures_send(FALSE);

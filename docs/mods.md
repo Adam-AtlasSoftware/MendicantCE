@@ -444,6 +444,66 @@ scene's armature, meshes, weights, levels and materials as a `.pmesh` and
 warns of markers the new surface swallows) checks a remodel against the map's
 model. A model's data is the map's: keep what these write to yourself.
 
+### Materials
+
+`display.prism_materials` (PRISM's materials; `stock` by default) lights a
+model shader by a material a mod gives it, in its `materials` folder,
+beside `tags` and `textures`:
+
+    mods/<mod>/materials/<the shader tag's path>.material.json
+    mods/prism_chief/materials/characters/cyborg/shaders/armor.material.json
+
+```json
+{ "format": 1,
+  "albedo": "textures/materials/cyborg/armor_albedo.ktx2", "albedo_factor": [1, 1, 1],
+  "normal": "textures/materials/cyborg/armor_normal.ktx2", "normal_scale": 1.0,
+  "orm": "textures/materials/cyborg/armor_orm.ktx2",
+  "roughness": 1.0, "metal": 1.0, "occlusion": 1.0,
+  "emissive": null, "emissive_factor": [1, 1, 1],
+  "clearcoat": { "strength": 1.0, "roughness": 0.05, "mask": null },
+  "detail": { "map": "textures/materials/tiles/weave.ktx2", "scale": 64,
+              "normal": 0.15, "cavity": 0.2, "roughness": 0.2, "mask": "all" },
+  "reflection": 1.0, "specular": 0.5, "wrap": true, "direct_specular": 1.0, "ce_reflection": 1.0,
+  "multipurpose": { "specular_mask": true, "self_illumination": true, "reflection_tint": true } }
+```
+
+The images are KTX2 files of the mod's (a path in the mod's folder; the
+texture store reads them, as it reads the replacement textures, straight
+into the graphics card's memory, up to 8192 on a side, drawn once their
+levels from 256 texels down are in): the albedo (the base map's colours:
+it replaces texture 0's colour, its alpha, the stock base map's, kept),
+the normal (tangent space, red and green its x and y, y up the picture),
+the ORM (red the occlusion, green the roughness, blue the metal, as
+glTF's: the factors multiply them, and are the values without it), the
+emissive, the clear coat's mask (red) and a detail tile (red and green its
+normal's slopes, blue the cavity, alpha a roughness offset: the material
+overlay's packing, repeated `scale` times across the base map's
+coordinates). A shader the material overlay names too (`overlay.json`)
+takes the overlay's tiles as its finest detail; a surface map
+(`display.prism_surface_maps`) of a shader with a material is not drawn:
+the material's normal and occlusion are the shader's.
+
+The shader's draws are lit for each pixel by a GGX path: Lambert diffuse
+and GGX specular for the level's own lights as CE gives the model (its
+ambient, two distant and two point lights, or the enhanced dynamic lights,
+diffuse), the world's occlusion and the ORM's, and the shader's reflection
+cube at the level of the roughness, by the split sum, or (`ce_reflection`
+1) whole, as CE's shader adds it, so that the art's brightness holds; the
+clear coat is a second lobe on the vertices' normal (a visor's). CE's
+combiners still make the colour: they apply the shader's detail map,
+change colour, self-illumination, specular mask (`specular_mask`), its
+reflection tint and brightness (`reflection_tint`) and the fog, as the
+shader says. `specular` is the dielectric's reflectance (F0 0.08 times it),
+`wrap` keeps CE's translucent back light on the first distant light.
+
+Materials are drawn, not simulated: a network game's machines need not
+have the same ones, and nothing is sent between them. Only the Vulkan
+renderer draws them (Metal's draws the shaders as the Xbox did); the
+setting applies in a running game (`prism_set "materials pbr"`).
+`tools/prism_material_pack.py` makes a material's images (BC7) from
+pictures, and the Chief's armour and visor materials from the player's own
+prototype pictures (local only).
+
 ## Making a mod
 
 1. Get the tags you want to change as tag files. `invader-extract` extracts

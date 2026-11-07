@@ -456,6 +456,16 @@ static const struct config_setting config_settings[] =
 		"extended skeletons (a pouch's swing, a knee's volume: docs/prism_rigs.md);\n"
 		"false: those helpers follow their parents (twists, copies and aims\n"
 		"still turn). Only for replacement meshes (display.prism_models)." },
+	{ "display.prism_materials", _config_string, "\"stock\"", "HALO_PRISM_MATERIALS", _environment_value,
+		_platform_desktop,
+		"PRISM: the materials mods give model shaders (materials/<shader>.\n"
+		"material.json in a mod: albedo, normal, occlusion, roughness and metal,\n"
+		"emissive, clear coat and detail images the renderer reads straight into\n"
+		"the graphics card's memory): \"pbr\" lights those shaders' draws by them\n"
+		"(GGX, under the level's own lights and reflections; CE's change colour,\n"
+		"self-illumination and detail maps kept); \"stock\" none, as the Xbox\n"
+		"drew them. Read each frame (the console's prism_set \"materials pbr\").\n"
+		"Vulkan only; the Mac's Metal renderer draws stock." },
 	{ "display.structure_culling", _config_integer, STRUCTURE_CULLING_DEFAULT, "HALO_STRUCTURE_CULLING", _environment_value,
 		_platform_all,
 		"Which tests skip the level's triangles the camera cannot see, as bits\n"

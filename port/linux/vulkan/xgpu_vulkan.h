@@ -186,6 +186,10 @@ struct xgpu_vulkan_capabilities
 	subgroup arithmetic in the fragment stage): xgpu_spirv_options
 	subgroups */
 	int subgroups;
+	/* display.prism_materials: the textures' set has the materials'
+	images too (XGPU_VULKAN_BINDING_MATERIAL on): where a pixel shader may
+	sample that many images */
+	int materials;
 };
 void xgpu_vulkan_capabilities(struct xgpu_vulkan_capabilities *capabilities);
 
@@ -582,6 +586,9 @@ enum
 /* (xgpu.h's XGPU_OVERLAY_BINDING and XGPU_OVERLAY_IMAGE_COUNT) */
 #define XGPU_VULKAN_BINDING_OVERLAY 4
 #define XGPU_VULKAN_OVERLAY_IMAGES 7
+/* (xgpu.h's XGPU_MATERIAL_BINDING and XGPU_MATERIAL_IMAGE_COUNT) */
+#define XGPU_VULKAN_BINDING_MATERIAL 11
+#define XGPU_VULKAN_MATERIAL_IMAGES 6
 
 /* a draw: its pipeline, topology and dynamic state; its vertices' bindings
 (those of bindings' bits) and indices (16-bit; buffer VK_NULL_HANDLE: none);
@@ -620,6 +627,12 @@ struct xgpu_vulkan_draw
 	material overlay") */
 	uint8_t material_overlay;
 	struct xgpu_vulkan_texture overlay[XGPU_VULKAN_OVERLAY_IMAGES];
+	/* display.prism_materials: its pixel shader reads a material's images
+	(the texture store's: albedo, normal, ORM, emissive, clear coat mask,
+	detail; none: a stand-in) at bindings XGPU_VULKAN_BINDING_MATERIAL on
+	(xgpu.h's "PBR materials"), the overlay's bindings written too */
+	uint8_t material;
+	struct xgpu_vulkan_texture material_images[XGPU_VULKAN_MATERIAL_IMAGES];
 	uint32_t count, first_index;
 	int32_t vertex_offset;
 	/* its indices: 0 16-bit, 1 32-bit (PRISM's mesh store's) */

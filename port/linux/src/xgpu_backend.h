@@ -81,6 +81,9 @@ struct xgpu_backend_capabilities
 	/* display.prism_models: the host opens and draws a mod's replacement
 	meshes (xgpu_backend_mesh_store_map) */
 	BOOL mesh_store;
+	/* display.prism_materials: the GGX path's shaders, a material's images
+	from the store (xgpu_backend_material_define) */
+	BOOL materials;
 };
 
 extern struct xgpu_backend_capabilities xgpu_backend_capabilities;
@@ -309,7 +312,9 @@ void xgpu_backend_material_overlay(const struct xgpu_material_overlay *overlay);
 TEXTURE_STORE_MAP; port/linux/game/mod_textures.c declares these for
 itself: keep the two the same). The map's replacement textures, a query each: the
 file's host path, its size and modification time as found, and the stock
-bitmap it replaces (cube: a cube map; its levels and first level's size).
+bitmap it replaces (cube: a cube map; its levels and first level's size),
+or (kind XGPU_STREAM_TEXTURE_STORE_KIND_MATERIAL) a material's image, which
+replaces none (its stock fields 0).
 The host answers each with an id (0 refused, status why: XGPU_STREAM_
 TEXTURE_STORE_*) and the file's size and levels. generation is new at
 each call (nonzero); count 0 closes the store. FALSE where the backend has
@@ -320,6 +325,7 @@ struct xgpu_texture_store_query
 	unsigned long file_size, stamp_seconds;
 	BOOL cube;
 	unsigned long stock_width, stock_height, stock_levels;
+	int kind;
 };
 struct xgpu_texture_store_answer
 {
@@ -380,6 +386,17 @@ instance 0: no part's): its region, permutation, shader, geometry and part,
 XGPU_STREAM_MESH_DRAW_* */
 void xgpu_backend_mesh_draw(unsigned long instance, int region, int permutation, int shader, unsigned long flags,
 	int geometry, int part);
+/* display.prism_materials (xgpu.h's "PBR materials", xgpu_stream.h's
+MATERIAL_DEFINE; port/linux/game/mod_pbr.c declares these for itself: keep
+the two the same): a material's id (1 to XGPU_STREAM_MATERIALS; 0 forgets
+them all), its pixel key bits (XGPU_PBR_*), its images' store ids (0 none)
+and uniform; and the material of the draws that follow (0 none). Nothing is
+sent where the backend has no materials (xgpu_backend_capabilities'
+materials). */
+void xgpu_backend_material_define(unsigned long id, unsigned int flags, const unsigned long *textures,
+	const float *uniforms);
+void xgpu_backend_material_bind(unsigned long id);
+BOOL xgpu_backend_materials_available(void);
 
 /* ---------- pipelines */
 

@@ -656,6 +656,7 @@ void xgpu_backend_initialize(void)
 	xgpu_backend_capabilities.material_overlay = stream.capabilities.material_overlay;
 	xgpu_backend_capabilities.texture_store = stream.capabilities.texture_store;
 	xgpu_backend_capabilities.mesh_store = stream.capabilities.mesh_store;
+	xgpu_backend_capabilities.materials = stream.capabilities.materials && stream.capabilities.texture_store;
 }
 
 /* (at exit) the frames submitted played, the render thread ended */
@@ -1291,7 +1292,8 @@ BOOL xgpu_backend_texture_store_map(unsigned long generation, unsigned long tier
 		at += length + 1;
 		wire[index].file_size = (uint32_t)query->file_size;
 		wire[index].stamp_seconds = (uint32_t)query->stamp_seconds;
-		wire[index].kind = XGPU_STREAM_TEXTURE_STORE_KIND_BITMAP;
+		wire[index].kind = query->kind == XGPU_STREAM_TEXTURE_STORE_KIND_MATERIAL ?
+			XGPU_STREAM_TEXTURE_STORE_KIND_MATERIAL : XGPU_STREAM_TEXTURE_STORE_KIND_BITMAP;
 		wire[index].stock_type = query->cube ? 1 : 0;
 		wire[index].stock_levels = (uint8_t)query->stock_levels;
 		wire[index].stock_width = (uint16_t)query->stock_width;
@@ -1445,6 +1447,39 @@ void xgpu_backend_mesh_draw(unsigned long instance, int region, int permutation,
 	record_body->flags = (uint8_t)flags;
 	record_body->geometry = (uint16_t)geometry;
 	record_body->part = (uint16_t)part;
+}
+
+/* ---------- display.prism_materials */
+
+BOOL xgpu_backend_materials_available(void)
+{
+	return stream.open && stream.capabilities.materials && stream.capabilities.texture_store;
+}
+
+void xgpu_backend_material_define(unsigned long id, unsigned int flags, const unsigned long *textures,
+	const float *uniforms)
+{
+	struct xgpu_stream_material_define *record_body;
+	int index;
+
+	if (!xgpu_backend_materials_available() || id > XGPU_STREAM_MATERIALS)
+		return;
+	record_body = record(XGPU_STREAM_MATERIAL_DEFINE, sizeof(*record_body));
+	record_body->id = (uint32_t)id;
+	record_body->flags = id ? (uint32_t)(flags & 0xffu) : 0;
+	for (index = 0; index < XGPU_STREAM_MATERIAL_IMAGES; index++)
+		record_body->textures[index] = id && textures ? (uint32_t)textures[index] : 0;
+	if (id && uniforms)
+		memcpy(record_body->uniforms, uniforms, sizeof(record_body->uniforms));
+	else
+		memset(record_body->uniforms, 0, sizeof(record_body->uniforms));
+}
+
+void xgpu_backend_material_bind(unsigned long id)
+{
+	if (!xgpu_backend_materials_available())
+		return;
+	record_value(XGPU_STREAM_MATERIAL_BIND, (uint32_t)id);
 }
 
 /* display.prism_material_overlay: the images as stages (the tiles repeating

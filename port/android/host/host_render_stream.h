@@ -131,6 +131,12 @@ struct host_render_backend
 	void (*texture_store_map)(void *context, const struct xgpu_stream_texture_store_map *record,
 		const struct xgpu_stream_texture_store_query *queries, const char *strings,
 		struct xgpu_stream_texture_store_answer *answers);
+	/* display.prism_materials: a material defined (its id at most
+	XGPU_STREAM_MATERIALS, its flags a byte: checked), and the material of the
+	draws that follow (an id at most XGPU_STREAM_MATERIALS); NULL: none (the
+	capabilities' materials then 0) */
+	void (*material_define)(void *context, const struct xgpu_stream_material_define *record);
+	void (*material_bind)(void *context, uint32_t id);
 
 	/* display.prism_models: the map's replacement meshes (the queries, their
 	paths and tables checked: inside the guest's memory, each path ending in

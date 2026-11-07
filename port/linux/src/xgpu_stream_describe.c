@@ -44,6 +44,7 @@ void xgpu_stream_pixel_key_describe(const struct nv2a_pixel_shader_key *key, str
 	wire->ambient_occlusion = key->ambient_occlusion;
 	wire->hdr = key->hdr;
 	wire->material_overlay = key->material_overlay;
+	wire->material_pbr = key->material_pbr;
 }
 
 void xgpu_stream_pipeline_key_describe(const struct xgpu_pipeline_key *key, struct xgpu_stream_pipeline_key *wire)
@@ -131,4 +132,5 @@ void xgpu_stream_pixel_key_restore(const struct xgpu_stream_pixel_key *wire, str
 	key->ambient_occlusion = wire->ambient_occlusion;
 	key->hdr = wire->hdr;
 	key->material_overlay = wire->material_overlay;
+	key->material_pbr = wire->material_pbr;
 }

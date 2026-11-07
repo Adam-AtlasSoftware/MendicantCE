@@ -239,6 +239,8 @@ static const uint32_t record_minimum[XGPU_STREAM_RECORD_TYPES] =
 	[XGPU_STREAM_MESH_STORE_MAP] = sizeof(struct xgpu_stream_mesh_store_map),
 	[XGPU_STREAM_MESH_INSTANCE] = sizeof(struct xgpu_stream_mesh_instance),
 	[XGPU_STREAM_MESH_DRAW] = sizeof(struct xgpu_stream_mesh_draw),
+	[XGPU_STREAM_MATERIAL_DEFINE] = sizeof(struct xgpu_stream_material_define),
+	[XGPU_STREAM_MATERIAL_BIND] = sizeof(struct xgpu_stream_value),
 	[XGPU_STREAM_PIPELINE_STAND_IN] = sizeof(struct xgpu_stream_pipeline_stand_in),
 	/* (and its folder's path, at least its NUL) */
 	[XGPU_STREAM_SCREENSHOT] = sizeof(struct xgpu_stream_screenshot) + XGPU_STREAM_RECORD_ALIGNMENT,
@@ -494,6 +496,9 @@ static int decode_record(struct host_render_decoder *decoder, const unsigned cha
 		if (host_render_record_replaying() || !backend->mesh_store_map || !backend->mesh_instance ||
 			!backend->mesh_draw)
 			capabilities.mesh_store = 0;
+		/* (display.prism_materials: their images are the store's) */
+		if (!capabilities.texture_store || !backend->material_define || !backend->material_bind)
+			capabilities.materials = 0;
 		answer(((const struct xgpu_stream_reply_record *)start)->reply, &capabilities, sizeof(capabilities));
 		break;
 	}
@@ -577,6 +582,20 @@ static int decode_record(struct host_render_decoder *decoder, const unsigned cha
 		CALL(material_overlay, overlay);
 		break;
 	}
+	case XGPU_STREAM_MATERIAL_DEFINE:
+	{
+		const struct xgpu_stream_material_define *material = (const void *)start;
+
+		if (material->id > XGPU_STREAM_MATERIALS || material->flags > 0xffu)
+			return XGPU_STREAM_ERROR_RECORD;
+		CALL(material_define, material);
+		break;
+	}
+	case XGPU_STREAM_MATERIAL_BIND:
+		if (value->value > XGPU_STREAM_MATERIALS)
+			return XGPU_STREAM_ERROR_RECORD;
+		CALL(material_bind, value->value);
+		break;
 	case XGPU_STREAM_TARGET_CREATE:
 		CALL(target_create, (const void *)start);
 		break;
@@ -693,6 +712,8 @@ static int decode_record(struct host_render_decoder *decoder, const unsigned cha
 				if (query->path >= map->strings_size || query->path_length >= map->strings_size - query->path ||
 					strings[query->path + query->path_length] || memchr(strings + query->path, 0, query->path_length))
 					return XGPU_STREAM_ERROR_BOUNDS;
+				if (query->kind > XGPU_STREAM_TEXTURE_STORE_KIND_MATERIAL)
+					return XGPU_STREAM_ERROR_RECORD;
 			}
 		}
 		answers = map->query_count ? host_pointer(map->reply) : NULL;
