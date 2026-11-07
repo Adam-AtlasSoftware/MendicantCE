@@ -375,6 +375,39 @@ submission being recorded (xgpu_vulkan_serial). */
 void xgpu_vulkan_image_copy_from_buffer(struct xgpu_vulkan_image *image, uint32_t level, uint32_t layer, uint32_t y,
 	uint32_t width, uint32_t height, VkBuffer buffer, VkDeviceSize offset);
 
+/* ---------- PRISM's mesh store (xgpu_vulkan_meshes.c) */
+
+/* a mesh's buffer: its vertices (.pmesh VERT, read by the skinning), its
+32-bit indices (drawn), or a staging buffer the CPU writes them into
+(mapped: its address) */
+enum
+{
+	XGPU_VULKAN_MESH_BUFFER_REST,
+	XGPU_VULKAN_MESH_BUFFER_INDICES,
+	XGPU_VULKAN_MESH_BUFFER_STAGING,
+};
+struct xgpu_vulkan_mesh_buffer;
+struct xgpu_vulkan_range;
+/* NULL if it cannot be made */
+struct xgpu_vulkan_mesh_buffer *xgpu_vulkan_mesh_buffer_create(uint64_t size, int kind, void **mapped);
+/* after the work recorded so far */
+void xgpu_vulkan_mesh_buffer_destroy(struct xgpu_vulkan_mesh_buffer *buffer);
+/* its memory's bytes */
+uint64_t xgpu_vulkan_mesh_buffer_bytes(const struct xgpu_vulkan_mesh_buffer *buffer);
+VkBuffer xgpu_vulkan_mesh_buffer_handle(const struct xgpu_vulkan_mesh_buffer *buffer);
+/* bytes of one copied into another, in the early commands (before the
+submission's draws) */
+void xgpu_vulkan_mesh_buffer_copy(struct xgpu_vulkan_mesh_buffer *from, uint64_t from_offset,
+	struct xgpu_vulkan_mesh_buffer *to, uint64_t to_offset, uint64_t size);
+/* vertices first to first + count of a mesh's, skinned by bone_count bones
+(three rows of four each), in the early commands of the submission being
+recorded: 1 and the range of the skinned vertices (32 bytes each, the stock
+compressed model layout), read by that submission's draws; 0 where they
+cannot be (the skin ring full: drawn stock) */
+int xgpu_vulkan_mesh_skin(struct xgpu_vulkan_mesh_buffer *rest, uint32_t first, uint32_t count,
+	const float (*bones)[4], uint32_t bone_count, const float inverse_scale[2], struct xgpu_vulkan_range *skinned);
+void xgpu_vulkan_mesh_skin_statistics(uint64_t *dispatches, uint64_t *vertices, uint64_t *ring_full);
+
 /* ---------- shaders and pipelines */
 
 /* a shader module of SPIR-V words (count of them): the same for the same
@@ -589,6 +622,8 @@ struct xgpu_vulkan_draw
 	struct xgpu_vulkan_texture overlay[XGPU_VULKAN_OVERLAY_IMAGES];
 	uint32_t count, first_index;
 	int32_t vertex_offset;
+	/* its indices: 0 16-bit, 1 32-bit (PRISM's mesh store's) */
+	uint8_t index_type;
 };
 
 #define XGPU_VULKAN_DRAW_GAME 0x80

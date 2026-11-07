@@ -2308,6 +2308,285 @@ static void test_texture_store_malformed(void)
 	(void)set_textures_records;
 }
 
+/* ---------- display.prism_models: the mesh store's records */
+
+static struct
+{
+	uint32_t map_calls, count, generation, tier, budget, flags;
+	char paths[4][128];
+	uint32_t node_count[4], node_crc[4], table_count[4];
+	uint8_t table0[4][4];
+	float scale[4][2];
+	uint32_t instances, instance, mesh, object, node_count_seen, instance_flags;
+	float lod_pixels, matrix_last;
+	uint32_t draws;
+	struct xgpu_stream_mesh_draw draw;
+} mesh_seen;
+
+static void test_mesh_initialize(void *context, struct xgpu_stream_capabilities *capabilities)
+{
+	test_initialize(context, capabilities);
+	capabilities->mesh_store = 1;
+}
+
+static void test_mesh_store_map(void *context, const struct xgpu_stream_mesh_store_map *record,
+	const struct xgpu_stream_mesh_store_query *queries, const char *strings,
+	struct xgpu_stream_mesh_store_answer *answers)
+{
+	uint32_t index;
+
+	(void)context;
+	mesh_seen.map_calls++;
+	mesh_seen.count = record->query_count;
+	mesh_seen.generation = record->generation;
+	mesh_seen.tier = record->tier;
+	mesh_seen.budget = record->budget_megabytes;
+	mesh_seen.flags = record->flags;
+	for (index = 0; index < record->query_count; index++)
+	{
+		const char *path = strings + queries[index].path;
+
+		if (index < 4)
+		{
+			snprintf(mesh_seen.paths[index], sizeof(mesh_seen.paths[index]), "%s", path);
+			mesh_seen.node_count[index] = queries[index].node_count;
+			mesh_seen.node_crc[index] = queries[index].node_crc;
+			mesh_seen.table_count[index] = queries[index].table_count;
+			if (queries[index].table_count)
+				memcpy(mesh_seen.table0[index], strings + queries[index].table, 4);
+			mesh_seen.scale[index][0] = queries[index].base_map_scale[0];
+			mesh_seen.scale[index][1] = queries[index].base_map_scale[1];
+		}
+		if (strstr(path, "bad"))
+		{
+			answers[index].status = XGPU_STREAM_MESH_STORE_NODES;
+			continue;
+		}
+		answers[index].id = ((record->generation & 0xfffu) << 20) | (index + 1);
+		answers[index].render_radius = 0.75f;
+		answers[index].bones = 19;
+		answers[index].lods = 2;
+	}
+}
+
+static void test_mesh_instance(void *context, const struct xgpu_stream_mesh_instance *record,
+	const float (*matrices)[3][4])
+{
+	(void)context;
+	mesh_seen.instances++;
+	mesh_seen.instance = record->instance;
+	mesh_seen.mesh = record->mesh;
+	mesh_seen.object = record->object;
+	mesh_seen.lod_pixels = record->lod_pixels;
+	mesh_seen.node_count_seen = record->node_count;
+	mesh_seen.instance_flags = record->flags;
+	mesh_seen.matrix_last = record->node_count ? matrices[record->node_count - 1][2][3] : 0.0f;
+}
+
+static void test_mesh_draw(void *context, const struct xgpu_stream_mesh_draw *record)
+{
+	(void)context;
+	mesh_seen.draws++;
+	mesh_seen.draw = *record;
+}
+
+static void test_mesh_store(void)
+{
+	struct host_render_backend mesh_backend = test_backend;
+	struct xgpu_mesh_store_query queries[2];
+	struct xgpu_mesh_store_answer answers[2];
+	static const unsigned char table[3][4] = { { 0, 0, 2, 0 }, { 0, 0, 3, 0 }, { 1, 2, 0, 0 } };
+	float matrices[19][3][4];
+	int node;
+
+	memset(matrices, 0, sizeof(matrices));
+	for (node = 0; node < 19; node++)
+	{
+		matrices[node][0][0] = matrices[node][1][1] = matrices[node][2][2] = 1.0f;
+		matrices[node][2][3] = (float)node * 0.25f;
+	}
+	/* (a backend without a store: the capability 0, no map, no records) */
+	memset(&mesh_seen, 0, sizeof(mesh_seen));
+	stream_begin(1u << 20, 2, 0);
+	CHECK(!xgpu_backend_capabilities.mesh_store && !xgpu_backend_mesh_store_available());
+	memset(queries, 0, sizeof(queries));
+	queries[0].path = "/data/mods/a/meshes/max/characters/cyborg/cyborg.pmesh";
+	CHECK(!xgpu_backend_mesh_store_map(1, 2, 0, TRUE, queries, 1, answers) && !answers[0].id);
+	xgpu_backend_mesh_instance(1, 0x00100001ul, 7, 400.0f, 0, (const float (*)[3][4])matrices, 19);
+	xgpu_backend_mesh_draw(1, 0, 0, 2, XGPU_STREAM_MESH_DRAW_CARRIER, 0, 2);
+	xgpu_backend_consume();
+	text_printf(&expected, "flush\n");
+	CHECK(mesh_seen.instances == 0 && mesh_seen.draws == 0);
+	stream_end("mesh store: none");
+
+	/* (a backend with one) */
+	memset(&mesh_seen, 0, sizeof(mesh_seen));
+	mesh_backend.initialize = test_mesh_initialize;
+	mesh_backend.mesh_store_map = test_mesh_store_map;
+	mesh_backend.mesh_instance = test_mesh_instance;
+	mesh_backend.mesh_draw = test_mesh_draw;
+	host_render_stream_set_backend(&mesh_backend);
+	stream_begin(1u << 20, 2, 0);
+	CHECK(xgpu_backend_capabilities.mesh_store && xgpu_backend_mesh_store_available());
+	memset(queries, 0, sizeof(queries));
+	queries[0].path = "/data/mods/a/meshes/max/characters/cyborg/cyborg.pmesh";
+	queries[0].file_size = 37418358;
+	queries[0].node_count = 19;
+	queries[0].node_crc = 0xf346d05cul;
+	queries[0].table = &table[0][0];
+	queries[0].table_count = 3;
+	queries[0].base_map_scale[0] = 1.0f;
+	queries[0].base_map_scale[1] = 2.0f;
+	queries[1].path = "/data/mods/a/meshes/max/bad.pmesh";
+	queries[1].node_count = 1;
+	CHECK(xgpu_backend_mesh_store_map(0x1234, 2, 512, TRUE, queries, 2, answers));
+	CHECK(mesh_seen.map_calls == 1 && mesh_seen.count == 2 && mesh_seen.generation == 0x1234 && mesh_seen.tier == 2 &&
+		mesh_seen.budget == 512 && mesh_seen.flags == XGPU_STREAM_MESH_STORE_LOADING);
+	CHECK(!strcmp(mesh_seen.paths[0], queries[0].path) && !strcmp(mesh_seen.paths[1], queries[1].path));
+	CHECK(mesh_seen.node_count[0] == 19 && mesh_seen.node_crc[0] == 0xf346d05cu && mesh_seen.table_count[0] == 3 &&
+		mesh_seen.table0[0][2] == 2 && mesh_seen.scale[0][1] == 2.0f && mesh_seen.table_count[1] == 0);
+	CHECK(answers[0].id == ((0x234u << 20) | 1) && answers[0].render_radius == 0.75f && answers[0].bones == 19 &&
+		answers[0].lods == 2 && answers[0].status == XGPU_STREAM_MESH_STORE_ACCEPTED);
+	CHECK(!answers[1].id && answers[1].status == XGPU_STREAM_MESH_STORE_NODES);
+	/* (an instance, its matrices, a part named and none) */
+	xgpu_backend_mesh_instance(41, answers[0].id, 0xe0010004ul, 512.5f, XGPU_STREAM_MESH_INSTANCE_SHADOW,
+		(const float (*)[3][4])matrices, 19);
+	xgpu_backend_mesh_draw(41, 0, 0, 2, XGPU_STREAM_MESH_DRAW_CARRIER, 1, 2);
+	xgpu_backend_consume();
+	text_printf(&expected, "flush\n");
+	CHECK(mesh_seen.instances == 1 && mesh_seen.instance == 41 && mesh_seen.mesh == answers[0].id &&
+		mesh_seen.object == 0xe0010004u && mesh_seen.lod_pixels == 512.5f && mesh_seen.node_count_seen == 19 &&
+		mesh_seen.instance_flags == XGPU_STREAM_MESH_INSTANCE_SHADOW && mesh_seen.matrix_last == 4.5f);
+	CHECK(mesh_seen.draws == 1 && mesh_seen.draw.instance == 41 && mesh_seen.draw.shader == 2 &&
+		mesh_seen.draw.flags == XGPU_STREAM_MESH_DRAW_CARRIER && mesh_seen.draw.geometry == 1 && mesh_seen.draw.part == 2);
+	xgpu_backend_mesh_draw(0, 0, 0, 0, 0, 0, 0);
+	/* (more nodes than a model has: not sent) */
+	xgpu_backend_mesh_instance(42, answers[0].id, 0, 1.0f, 0, (const float (*)[3][4])matrices,
+		XGPU_STREAM_MESH_NODES_MAXIMUM + 1);
+	xgpu_backend_consume();
+	text_printf(&expected, "flush\n");
+	CHECK(mesh_seen.draws == 2 && mesh_seen.draw.instance == 0 && mesh_seen.instances == 1);
+	/* (closed) */
+	CHECK(xgpu_backend_mesh_store_map(0x1235, 0, 0, FALSE, NULL, 0, NULL));
+	CHECK(mesh_seen.map_calls == 2 && mesh_seen.count == 0);
+	stream_end("mesh store");
+	host_render_stream_set_backend(&test_backend);
+}
+
+/* the mesh store's malformed records: an instance of no number, of more
+nodes than a model has or whose matrices are cut short; a map's table
+outside the strings or not 4-byte aligned, a path not ending in its NUL, too
+many nodes; and a backend without the store answering every query refused */
+static void test_mesh_store_malformed(void)
+{
+	struct host_render_backend mesh_backend = test_backend;
+	struct xgpu_stream_ring *ring = guest_allocate(sizeof(*ring));
+	uint32_t *buffer = xgpu_stream_test_allocate(XGPU_STREAM_RING_ALIGNMENT, 0x10000);
+	unsigned char *pipelines = guest_allocate(XGPU_STREAM_PIPELINES);
+	struct xgpu_stream_mesh_store_query *queries = guest_allocate(2 * sizeof(*queries));
+	struct xgpu_stream_mesh_store_answer *answers = guest_allocate(2 * sizeof(*answers));
+	char *strings = guest_allocate(128);
+	struct xgpu_stream_mesh_store_map *map;
+	struct xgpu_stream_mesh_instance *instance;
+	struct host_render_decoder *decoder;
+	uint32_t size;
+
+	mesh_backend.mesh_store_map = test_mesh_store_map;
+	mesh_backend.mesh_instance = test_mesh_instance;
+	mesh_backend.mesh_draw = test_mesh_draw;
+	ring->buffer = guest_address(buffer);
+	ring->size = 0x10000;
+	ring->pipelines = guest_address(pipelines);
+	decoder = host_render_decoder_new(&mesh_backend, ring);
+	memset(&mesh_seen, 0, sizeof(mesh_seen));
+
+	/* (an instance of 2 nodes, whole) */
+	instance = (struct xgpu_stream_mesh_instance *)buffer;
+	size = sizeof(*instance) + 2 * 48;
+	memset(buffer, 0, size);
+	instance->header = XGPU_STREAM_HEADER(XGPU_STREAM_MESH_INSTANCE, size);
+	instance->instance = 5;
+	instance->mesh = 9;
+	instance->node_count = 2;
+	((float *)(instance + 1))[23] = 3.5f;
+	CHECK(host_render_decode(decoder, 0, size) == size && ring->error == 0 && mesh_seen.instances == 1 &&
+		mesh_seen.matrix_last == 3.5f);
+	/* (its matrices cut short) */
+	instance->node_count = 3;
+	CHECK(host_render_decode(decoder, 0, size) == 0 && ring->error == XGPU_STREAM_ERROR_RECORD);
+	ring->error = 0;
+	/* (more than a model's nodes) */
+	instance->node_count = XGPU_STREAM_MESH_NODES_MAXIMUM + 1;
+	CHECK(host_render_decode(decoder, 0, size) == 0 && ring->error == XGPU_STREAM_ERROR_RECORD);
+	ring->error = 0;
+	/* (no number) */
+	instance->node_count = 2;
+	instance->instance = 0;
+	CHECK(host_render_decode(decoder, 0, size) == 0 && ring->error == XGPU_STREAM_ERROR_RECORD);
+	ring->error = 0;
+	/* (a draw record shorter than its fixed part) */
+	buffer[0] = XGPU_STREAM_HEADER(XGPU_STREAM_MESH_DRAW, 12);
+	CHECK(host_render_decode(decoder, 0, 12) == 0 && ring->error == XGPU_STREAM_ERROR_RECORD);
+	ring->error = 0;
+
+	memset(queries, 0, 2 * sizeof(*queries));
+	strcpy(strings, "/mods/x/meshes/max/a.pmesh");
+	queries[0].path_length = (uint32_t)strlen(strings);
+	queries[0].table = 28;
+	queries[0].table_count = 2;
+	queries[0].node_count = 19;
+	map = (struct xgpu_stream_mesh_store_map *)buffer;
+	memset(map, 0, sizeof(*map));
+	map->header = XGPU_STREAM_HEADER(XGPU_STREAM_MESH_STORE_MAP, sizeof(*map));
+	map->reply = guest_address(answers);
+	map->generation = 3;
+	map->query_count = 1;
+	map->queries = guest_address(queries);
+	map->strings = guest_address(strings);
+	map->strings_size = 36;
+	CHECK(host_render_decode(decoder, 0, sizeof(*map)) == sizeof(*map) && ring->error == 0 && mesh_seen.map_calls == 1 &&
+		answers[0].id == ((3u << 20) | 1));
+	/* (a table past the strings, or not aligned) */
+	queries[0].table_count = 3;
+	CHECK(host_render_decode(decoder, 0, sizeof(*map)) == 0 && ring->error == XGPU_STREAM_ERROR_BOUNDS);
+	ring->error = 0;
+	queries[0].table_count = 2;
+	queries[0].table = 27;
+	CHECK(host_render_decode(decoder, 0, sizeof(*map)) == 0 && ring->error == XGPU_STREAM_ERROR_BOUNDS);
+	ring->error = 0;
+	queries[0].table = 28;
+	queries[0].table_count = XGPU_STREAM_MESH_STORE_TABLE_MAXIMUM + 1;
+	CHECK(host_render_decode(decoder, 0, sizeof(*map)) == 0 && ring->error == XGPU_STREAM_ERROR_BOUNDS);
+	ring->error = 0;
+	queries[0].table_count = 2;
+	/* (too many nodes) */
+	queries[0].node_count = XGPU_STREAM_MESH_NODES_MAXIMUM + 1;
+	CHECK(host_render_decode(decoder, 0, sizeof(*map)) == 0 && ring->error == XGPU_STREAM_ERROR_BOUNDS);
+	ring->error = 0;
+	queries[0].node_count = 19;
+	/* (a path not ending in its NUL inside the strings) */
+	queries[0].path_length = 30;
+	CHECK(host_render_decode(decoder, 0, sizeof(*map)) == 0 && ring->error == XGPU_STREAM_ERROR_BOUNDS);
+	ring->error = 0;
+	queries[0].path_length = (uint32_t)strlen(strings);
+	/* (too many queries; no reply) */
+	map->query_count = XGPU_STREAM_MESH_STORE_QUERIES + 1;
+	CHECK(host_render_decode(decoder, 0, sizeof(*map)) == 0 && ring->error == XGPU_STREAM_ERROR_BOUNDS);
+	ring->error = 0;
+	map->query_count = 1;
+	map->reply = 0;
+	CHECK(host_render_decode(decoder, 0, sizeof(*map)) == 0 && ring->error == XGPU_STREAM_ERROR_BOUNDS);
+	ring->error = 0;
+	map->reply = guest_address(answers);
+	/* (a backend with no store: every answer refused, nothing else called) */
+	host_render_decoder_free(decoder);
+	decoder = host_render_decoder_new(&test_backend, ring);
+	answers[0].id = 99;
+	CHECK(host_render_decode(decoder, 0, sizeof(*map)) == sizeof(*map) && ring->error == 0 && answers[0].id == 0 &&
+		answers[0].status == XGPU_STREAM_MESH_STORE_DEVICE);
+	host_render_decoder_free(decoder);
+}
+
 int main(void)
 {
 	struct host_render_backend asynchronous_backend = test_backend;
@@ -2319,8 +2598,10 @@ int main(void)
 
 	test_malformed();
 	test_texture_store_malformed();
+	test_mesh_store_malformed();
 	test_round_trip();
 	test_texture_store();
+	test_mesh_store();
 	test_vertices_kept();
 	test_pipeline_failure();
 	test_ring_full(2);

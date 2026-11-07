@@ -263,6 +263,7 @@ static struct xgpu_vulkan_image images[4];
 static unsigned looked_up[4], samplers, binds;
 static uint32_t serial = 1;
 static uint32_t host_memory_watch_serial(void) { return serial; }
+static void xgpu_vulkan_meshes_state_changed(void) {}
 static uint8_t border_axes(const struct xgpu_stream_sampler *sampler) { (void)sampler; return 0; }
 static VkSampler sampler_get(const struct xgpu_stream_sampler *from, uint8_t axes)
 { (void)axes; samplers++; return 1 + from->minify; }

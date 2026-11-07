@@ -3573,6 +3573,8 @@ static void main_game_render(
 	/* port: display.prism_textures read again, the map's replacements sent
 	again if it changed (port/linux/game/mod_textures.c) */
 	mod_textures_frame();
+	/* port: display.prism_models too (port/linux/game/mod_meshes.c) */
+	mod_meshes_frame();
 	/* port: MENDICANT AI's training may run without sound (port/linux/game/mendicant) */
 	if (!mendicant_skip_sound_render())
 		sound_render();

@@ -61,6 +61,7 @@ its swapchain.
 #include "xgpu_vulkan_stream.h"
 #include "xgpu_vulkan_textures.h"
 #include "xgpu_vulkan_store.h"
+#include "xgpu_vulkan_meshes.h"
 #ifdef HALO_VR
 #include "host_vulkan_vr.h"
 #endif
@@ -875,6 +876,7 @@ static void stream_set_textures(void *context, const struct host_render_texture_
 	int index;
 
 	(void)context;
+	xgpu_vulkan_meshes_state_changed();
 	for (index = 0; index < 4; index++)
 	{
 		const struct xgpu_stream_texture_stage *stage = &stages[index].stage;
@@ -1020,6 +1022,7 @@ follow whose pixel program has it */
 static void stream_material_overlay(void *context, const struct xgpu_stream_material_overlay *record)
 {
 	(void)context;
+	xgpu_vulkan_meshes_state_changed();
 	if (memcmp(stream.overlay.uniforms, record->uniforms, sizeof(stream.overlay.uniforms)))
 		stream.uniforms_dirty = 1;
 	stream.overlay = *record;
@@ -1149,6 +1152,7 @@ static void stream_set_constants(void *context, const struct xgpu_stream_constan
 		return;
 	memcpy(stream.constants[record->first], record->values, (size_t)count * sizeof(stream.constants[0]));
 	stream.constants_dirty = 1;
+	xgpu_vulkan_meshes_state_changed();
 	/* (the world's projection or the screen conversion: the effects' views) */
 	if (record->first < 4 || (record->first <= SCREEN_CONVERSION + 1 && record->first + count > SCREEN_CONVERSION))
 		stream.uniforms_effect = stream.effect_valid = 0;
@@ -1428,6 +1432,7 @@ static int stream_pipeline(void *context, uint32_t id, const struct xgpu_stream_
 
 	(void)context;
 	stream.pipeline_id = 0;
+	xgpu_vulkan_meshes_state_changed();
 	if (!id || id >= XGPU_STREAM_PIPELINES)
 		return 0;
 	entry = &stream.pipelines[id];
@@ -1501,6 +1506,7 @@ static void stream_draw_state(void *context, const struct xgpu_stream_dynamic_st
 	const struct xgpu_stream_draw_uniforms *uniforms, uint32_t uniforms_serial)
 {
 	(void)context;
+	xgpu_vulkan_meshes_state_changed();
 	if (dynamic)
 	{
 		if (memcmp(stream.dynamic.blend_color, dynamic->blend_color, sizeof(stream.dynamic.blend_color)))
@@ -2005,6 +2011,9 @@ static int draw_pipeline(const struct draw_input *input, int apart)
 	struct variant variant;
 	uint32_t index, attempt;
 	double traced;
+	/* display.prism_models: what the draw is, by the part it is of
+	(xgpu_vulkan_meshes.h) */
+	int mesh_verdict = XGPU_VULKAN_MESHES_STOCK;
 
 	if (!stream.pipeline_id || !stream.definition || !input->count)
 		return 1;
@@ -2107,6 +2116,15 @@ static int draw_pipeline(const struct draw_input *input, int apart)
 	}
 	if (!draw.pipeline)
 		return 1;
+	/* (display.prism_models: a part a mesh replaces, drawn as its pieces,
+	or not at all; a twin of the pre-pass as it is) */
+	if (!prepass.drawing)
+	{
+		mesh_verdict = xgpu_vulkan_meshes_verdict(&pipeline, draw.bindings,
+			primitive_class(input->primitive) == XGPU_VULKAN_CLASS_TRIANGLES);
+		if (mesh_verdict == XGPU_VULKAN_MESHES_SKIP)
+			return 1;
+	}
 	draw.topology = primitive_topology(input->primitive);
 	draw.count = input->count;
 	draw.vertex_offset = input->vertex_offset;
@@ -2154,6 +2172,12 @@ static int draw_pipeline(const struct draw_input *input, int apart)
 			preparation_end(2, traced);
 			return 1;
 		}
+		/* (display.prism_models: the mesh skinned and the constants of its
+		pieces, in the same submission; drawn stock where they cannot be) */
+		if (mesh_verdict == XGPU_VULKAN_MESHES_SWAP &&
+			!xgpu_vulkan_meshes_prepare((const float (*)[4])stream.constants, CONSTANTS_RANGE / 16) &&
+			serial == xgpu_vulkan_serial())
+			mesh_verdict = XGPU_VULKAN_MESHES_STOCK;
 		preparation_end(2, traced);
 		if (serial == xgpu_vulkan_serial())
 			break;
@@ -2196,7 +2220,16 @@ static int draw_pipeline(const struct draw_input *input, int apart)
 	if (!prepass.drawing && target_get(stream.color))
 		target_get(stream.color)->written++;
 	traced = preparation_start();
-	xgpu_vulkan_draw(&draw);
+	if (mesh_verdict == XGPU_VULKAN_MESHES_SWAP)
+	{
+		struct xgpu_vulkan_draw piece;
+		uint32_t piece_index;
+
+		for (piece_index = 0; piece = draw, xgpu_vulkan_meshes_piece(piece_index, &piece); piece_index++)
+			xgpu_vulkan_draw(&piece);
+	}
+	else
+		xgpu_vulkan_draw(&draw);
 	preparation_end(3, traced);
 	return 1;
 }
@@ -3279,6 +3312,8 @@ static void stream_frame_end(void *context)
 	/* (display.prism_textures: the replacements' levels read since copied
 	before the next frame's draws) */
 	xgpu_vulkan_store_frame();
+	/* (display.prism_models: the meshes read since copied too) */
+	xgpu_vulkan_meshes_frame();
 	/* (debug.load_trace: each frame's end on the render thread, whose
 	spacing tools/load_benchmark.py reads as the frames' times after a load) */
 	if (stream.trace_frames)
@@ -3323,9 +3358,11 @@ static void stream_frame_end(void *context)
 				statistics.gpu_frames ? statistics.gpu_milliseconds / statistics.gpu_frames : 0.0,
 				statistics.frames_timed ? statistics.frame_seconds * 1000.0 / statistics.frames_timed : 0.0);
 			{
-				char text[640];
+				char text[1024];
 
 				if (xgpu_vulkan_store_statistics(text, sizeof(text)))
+					host_logf(HOST_LOG_INFO, "%s", text);
+				if (xgpu_vulkan_meshes_statistics(text, sizeof(text)))
 					host_logf(HOST_LOG_INFO, "%s", text);
 			}
 		}
@@ -3380,6 +3417,8 @@ static void stream_initialize(void *context, struct xgpu_stream_capabilities *ca
 	capabilities->material_overlay = 1;
 	/* (display.prism_textures: PRISM's texture store, xgpu_vulkan_store.c) */
 	capabilities->texture_store = (uint8_t)xgpu_vulkan_store_available();
+	/* (display.prism_models: PRISM's mesh store, xgpu_vulkan_meshes.c) */
+	capabilities->mesh_store = (uint8_t)xgpu_vulkan_meshes_available();
 }
 
 static void stream_prepare(void *context)
@@ -3476,6 +3515,9 @@ const struct host_render_backend *xgpu_vulkan_stream_backend(void)
 		backend.set_textures = stream_set_textures;
 		backend.material_overlay = stream_material_overlay;
 		backend.texture_store_map = xgpu_vulkan_store_map;
+		backend.mesh_store_map = xgpu_vulkan_meshes_map;
+		backend.mesh_instance = xgpu_vulkan_meshes_instance;
+		backend.mesh_draw = xgpu_vulkan_meshes_draw_part;
 		backend.set_constants = stream_set_constants;
 		backend.vertex_program = stream_vertex_program;
 		backend.vertex_lighting = stream_vertex_lighting;

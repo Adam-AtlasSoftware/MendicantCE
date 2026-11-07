@@ -42,6 +42,9 @@ static real sphere[6][8] = {{-.22f,0,.7f},{.22f,0,.7f},{0,-.22f,.7f},{0,.22f,.7f
 #define rasterizer_model_draw(s,p,t,ti,tc,v,vi) (selected_geometry[solid_draws++] = (v)->count)
 #define rasterizer_environment_shadow_model_draw(s,p,t,v) (selected_geometry[shadow_draws++] = (v)->count)
 #define rasterizer_debug_model_vertices(...) ((void)0)
+/* (display.prism_models' part naming: port/linux/game/mod_meshes.c, nothing here) */
+#define mod_meshes_part(...) ((void)0)
+#define mod_meshes_part_end() ((void)0)
 #define D3DLOCK_READONLY 128
 
 static void tag_iterator_new(struct tag_iterator *iterator, long tag)

@@ -132,6 +132,21 @@ struct host_render_backend
 		const struct xgpu_stream_texture_store_query *queries, const char *strings,
 		struct xgpu_stream_texture_store_answer *answers);
 
+	/* display.prism_models: the map's replacement meshes (the queries, their
+	paths and tables checked: inside the guest's memory, each path ending in
+	its NUL), an answer each written (zeroed before; queries, strings and
+	answers NULL when query_count is 0, which closes the store); an object
+	drawn with a mesh, its node_count matrices (checked: no more than
+	XGPU_STREAM_MESH_NODES_MAXIMUM, inside the record); the model part the
+	draws that follow are of. NULL (any of them): no store (INITIALIZE's
+	mesh_store then 0, and every answer refused) */
+	void (*mesh_store_map)(void *context, const struct xgpu_stream_mesh_store_map *record,
+		const struct xgpu_stream_mesh_store_query *queries, const char *strings,
+		struct xgpu_stream_mesh_store_answer *answers);
+	void (*mesh_instance)(void *context, const struct xgpu_stream_mesh_instance *record,
+		const float (*matrices)[3][4]);
+	void (*mesh_draw)(void *context, const struct xgpu_stream_mesh_draw *record);
+
 	void (*set_constants)(void *context, const struct xgpu_stream_constants *record);
 	void (*vertex_program)(void *context, const struct xgpu_stream_vertex_program *record);
 	void (*vertex_lighting)(void *context, const struct xgpu_stream_vertex_lighting *record);

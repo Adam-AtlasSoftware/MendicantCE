@@ -82,6 +82,8 @@ static struct
 	long material_count;
 	/* (and bitmaps the texture store replaces: mod_textures.c) */
 	long texture_count;
+	/* (and models the mesh store replaces: mod_meshes.c) */
+	long mesh_count;
 } mods_globals;
 
 /* ---------- private code */
@@ -101,6 +103,7 @@ static void mods_update(
 	mods_globals.model_count = mod_models_update(remove_all, at_load);
 	mods_globals.material_count = mod_materials_update(remove_all, at_load);
 	mods_globals.texture_count = mod_textures_update(remove_all, at_load);
+	mods_globals.mesh_count = mod_meshes_update(remove_all, at_load);
 	/* (the texture cache's size follows the mods' bitmaps: as the map
 	loads, mods_tags_loaded) */
 	if (!at_load)
@@ -308,6 +311,7 @@ static void mods_let_go(
 	mod_strings_tags_unloaded();
 	mod_materials_tags_unloaded();
 	mod_textures_tags_unloaded();
+	mod_meshes_tags_unloaded();
 	mods_globals.map_loaded = FALSE;
 	mods_globals.enabled = FALSE;
 	mods_globals.loose_sounds_enabled = FALSE;
