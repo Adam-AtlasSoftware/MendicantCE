@@ -211,8 +211,10 @@ static const struct config_setting config_settings[] =
 		"port's improvements together (anti-aliasing, sharper textures and\n"
 		"shadows, models' detail and lighting for each pixel, the enhanced\n"
 		"dynamic lights), the same on every machine (a renderer that lacks one\n"
-		"draws without it); \"prism\" is \"enhanced\" with PRISM's lighting on top\n"
-		"(display.prism_lightmaps \"smooth\", display.ambient_occlusion \"world\").\n"
+		"draws without it); \"prism\" is \"enhanced\" with PRISM's faithful light on\n"
+		"top (display.prism_lightmaps \"smooth\", display.ambient_occlusion\n"
+		"\"world\", display.prism_surface_maps true, display.prism_specular\n"
+		"\"subtle\", display.prism_shadows \"soft\"; never what is beyond CE).\n"
 		"Each of those settings, set here, wins over it." },
 	{ "display.anti_aliasing", _config_string, GRAPHICS_ANTI_ALIASING, "HALO_ANTI_ALIASING", _environment_value,
 		_platform_all,
@@ -420,7 +422,7 @@ static const struct config_setting config_settings[] =
 		"occlusion dims the model's ambient and level light alone (its own\n"
 		"creases), as display.ambient_occlusion's does, and the two multiply.\n"
 		"Needs neither the material overlay nor an overlay.json entry. Vulkan\n"
-		"only; read each frame (prism_set \"surface_maps true\")." },
+		"only; read each frame (prism_set \"surface_maps true\")." GRAPHICS_CHOOSES },
 	{ "display.prism_specular", _config_string, "\"off\"", "HALO_PRISM_SPECULAR", _environment_value,
 		_platform_desktop,
 		"PRISM v2: highlights on the models (characters, weapons, vehicles)\n"
@@ -430,7 +432,7 @@ static const struct config_setting config_settings[] =
 		"specular mask, CE's Fresnel and tint), capped so that a model is never\n"
 		"much brighter on average. \"off\": none, as the game draws; \"subtle\":\n"
 		"the main light alone, soft; \"full\": every light, sharper. Vulkan only;\n"
-		"read each frame (prism_set \"specular full\")." },
+		"read each frame (prism_set \"specular full\")." GRAPHICS_CHOOSES },
 	{ "display.prism_reflections", _config_string, "\"stock\"", "HALO_PRISM_REFLECTIONS", _environment_value,
 		_platform_desktop,
 		"PRISM v2: what the models' reflections show. \"stock\": the shader's\n"
@@ -448,7 +450,7 @@ static const struct config_setting config_settings[] =
 		"limbs and other characters and vehicles. \"stock\": none, as the game\n"
 		"draws (its own shadow under each object stays in every choice);\n"
 		"\"soft\": near ones, with wide soft edges; \"traced\": out to 8 world\n"
-		"units, crisper. Vulkan only; read each frame." },
+		"units, crisper. Vulkan only; read each frame." GRAPHICS_CHOOSES },
 	{ "display.prism_lightmaps", _config_string, "\"stock\"", "HALO_PRISM_LIGHTMAPS", _environment_value,
 		_platform_desktop,
 		"PRISM: the level's own baked light, drawn smoother: \"stock\" as the Xbox\n"
@@ -3810,6 +3812,9 @@ static const struct
 	{ "display.dynamic_lights", "\"classic\"" },
 	{ "display.ambient_occlusion", "\"off\"", 0, "\"world\"" },
 	{ "display.prism_lightmaps", "\"stock\"", 0, "\"smooth\"" },
+	{ "display.prism_surface_maps", "false", 0, "true" },
+	{ "display.prism_specular", "\"off\"", 0, "\"subtle\"" },
+	{ "display.prism_shadows", "\"stock\"", 0, "\"soft\"" },
 	{ "game.enhanced_animations", "false", 1 },
 	{ "display.menu_fade", "true", 1 },
 };

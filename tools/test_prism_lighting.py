@@ -99,3 +99,21 @@ def test_settings_off_by_default():
     assert '{ "display.prism_lightmaps", "\\"stock\\"", 0, "\\"smooth\\"" }' in config
     assert '{ "display.ambient_occlusion", "\\"off\\"", 0, "\\"world\\"" }' in config
     assert "display.prism_bloom\", \"" not in config.split("config_graphics[] =", 1)[1].split("};", 1)[0]
+
+
+def test_prism_preset_is_faithful():
+    """display.graphics "prism": the model light's faithful choices on, off in classic and enhanced; what is beyond
+    CE (bloom, the remodelled level geometry) and the local reflections (they change the scene's colour) in no
+    preset"""
+    config = (SOURCE / "port_config.c").read_text()
+    for name, default in (("prism_specular", '"off"'), ("prism_shadows", '"stock"'), ("prism_reflections", '"stock"'),
+                          ("prism_world_geometry", '"stock"')):
+        assert re.search(r'"display\.%s", _config_string, "%s"' % (name, re.escape(default).replace('"', '\\\\"')),
+                         config), name
+    assert re.search(r'"display\.prism_surface_maps", _config_boolean, "false"', config)
+    table = config.split("config_graphics[] =", 1)[1].split("};", 1)[0]
+    assert '{ "display.prism_surface_maps", "false", 0, "true" }' in table
+    assert '{ "display.prism_specular", "\\"off\\"", 0, "\\"subtle\\"" }' in table
+    assert '{ "display.prism_shadows", "\\"stock\\"", 0, "\\"soft\\"" }' in table
+    for name in ("prism_bloom", "prism_world_geometry", "prism_reflections"):
+        assert '"display.%s"' % name not in table, name

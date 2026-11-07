@@ -551,6 +551,8 @@ CONTROL_COMMAND_ROWS = {f"command_{n}" for n in range(1, CONTROL_ROWS + 1)}
 # (an action's row: its name, then its two bindings' columns, to the row's end)
 CONTROL_BINDINGS_X, CONTROL_BINDING_WIDTH = (136, 240), 104
 STREAMER = ("interface_settings/streamer_mode", "streamer_mode_screen")
+# (PRISM's graphics: Mods' PRISM GRAPHICS)
+PRISM_PAGE = ("mods_settings/prism", "prism_settings_screen")
 # (Online's Discord account: port/linux/src/player_link.c)
 DISCORD_ACCOUNT = ("network_setup/discord_account", "discord_account_screen")
 # (the server browsers' Filters, which their FILTERS opens too: menu_functions.c's
@@ -928,39 +930,12 @@ PAGES = {
             ("THEATER ›", None, f"{THEATER}/theater_screen",
              "The games recorded: watch one again from any player's view, or a free or cinematic camera.", None,
              "theater"),
-            # (PRISM's material overlay: drawn by the Vulkan renderer alone,
-            # for the model shaders a mod's overlay.json names)
-            (SECTION, "MATERIALS"),
-            ("MATERIAL DETAIL", "display.prism_material_overlay", ON_OFF,
-             "Gives weapons and armour the fine grain of their surfaces (machining, weave, wear) from a mod's "
-             "material overlay. It changes only the light on them. Off draws them as the Xbox did.", "desktop"),
-            # (PRISM v2's model light: the Vulkan renderer's alone, xgpu.h's
-            # "PRISM v2's model light"; each off as the Xbox drew)
-            ("HIGHLIGHTS", "display.prism_specular", [("OFF", "off"), ("SUBTLE", "subtle"), ("FULL", "full")],
-             "Characters, weapons and vehicles catch the level's own lights as highlights, where their armour is "
-             "shiny. Off draws them as the Xbox did.", "desktop"),
-            ("REFLECTIONS", "display.prism_reflections", [("CLASSIC", "stock"), ("LOCAL", "local")],
-             "Local: shiny armour reflects the place it is in, captured on this computer from your maps. Classic "
-             "reflects the game's own painted reflections.", "desktop"),
-            ("CHARACTER SHADOWS", "display.prism_shadows", [("CLASSIC", "stock"), ("SOFT", "soft"),
-                                                             ("TRACED", "traced")],
-             "Characters shade themselves and each other from the level's main light. Needs ambient occlusion "
-             "World. Classic keeps the Xbox's shadows alone.", "desktop"),
-            # (PRISM's remodelled level geometry, built on this machine:
-            # port/linux/game/prism_world_geometry.c)
-            ("WORLD GEOMETRY", "display.prism_world_geometry", [("XBOX", "stock"), ("REMODEL", "remodel")],
-             "Remodel draws the level's rock, sand and Forerunner walls from a denser model built on this computer "
-             "from your maps: rounded rock, bevelled edges, the same light. You still walk and collide on the "
-             "original. Xbox draws the map's own.", "desktop"),
-            (SECTION, "LIGHTING"),
-            # (PRISM's lighting: drawn by the Vulkan renderer alone,
-            # port/linux/src/d3d8_device.c's prism_lighting_read)
-            ("LIGHTMAPS", "display.prism_lightmaps", [("STOCK", "stock"), ("SMOOTH", "smooth")],
-             "Smooth: the levels' own light drawn without its colour bands and blocky edges, from a finer copy "
-             "built on this machine the first time a level is played. The light stays where it was.", "desktop"),
-            ("BLOOM", "display.prism_bloom", [("OFF", "off"), ("GLOW", "glow"), ("FULL", "full")],
-             "A soft glow about light brighter than white: plasma, the sun, lights and blasts. The Xbox had none; "
-             "Glow is faint, Full wider. Nothing lit only to white glows.", "desktop"),
+            # (PRISM: the graphics beyond the Xbox's, drawn by the Vulkan
+            # renderer, on a page of their own: PRISM's rows outgrew this one)
+            (SECTION, "PRISM"),
+            ("PRISM GRAPHICS ›", None, _page_screen(*PRISM_PAGE),
+             "Finer light, materials and level geometry, built on this computer from your own maps. Video's "
+             "Quality PRISM turns on the faithful ones.", "desktop"),
         ],
     },
     # ---- the pages the rows open
@@ -1407,6 +1382,49 @@ PAGES = {
             ("PORTRAIT FRAME", "display.frame_style", [("PLAIN", "plain"), ("HALO", "halo"), ("XBOX", "xbox")],
              "The look of the screen around the picture when you play in portrait: plain black, Halo's blue lines "
              "and rings, or Xbox green. It is never drawn over the picture.", "android"),
+        ],
+    },
+    PRISM_PAGE[0]: {
+        "screen": PRISM_PAGE[1], "title": "PRISM GRAPHICS",
+        "rows": [
+            # (PRISM's material overlay: drawn by the Vulkan renderer alone,
+            # for the model shaders a mod's overlay.json names)
+            (SECTION, "MATERIALS"),
+            ("MATERIAL DETAIL", "display.prism_material_overlay", ON_OFF,
+             "Gives weapons and armour the fine grain of their surfaces (machining, weave, wear) from a mod's "
+             "material overlay. It changes only the light on them. Off draws them as the Xbox did.", "desktop"),
+            ("SURFACE DETAIL", "display.prism_surface_maps", ON_OFF,
+             "Lights characters, weapons and vehicles by the surface maps baked on this computer for a mod's "
+             "remodels: their dents, seams and creases. Off draws them as the Xbox did.", "desktop"),
+            # (PRISM v2's model light: the Vulkan renderer's alone, xgpu.h's
+            # "PRISM v2's model light"; each off as the Xbox drew)
+            ("HIGHLIGHTS", "display.prism_specular", [("OFF", "off"), ("SUBTLE", "subtle"), ("FULL", "full")],
+             "Characters, weapons and vehicles catch the level's own lights as highlights, where their armour is "
+             "shiny. Off draws them as the Xbox did.", "desktop"),
+            ("REFLECTIONS", "display.prism_reflections", [("CLASSIC", "stock"), ("LOCAL", "local")],
+             "Local: shiny armour reflects the place it is in, captured on this computer from your maps. Classic "
+             "reflects the game's own painted reflections.", "desktop"),
+            ("CHARACTER SHADOWS", "display.prism_shadows", [("CLASSIC", "stock"), ("SOFT", "soft"),
+                                                             ("TRACED", "traced")],
+             "Characters shade themselves and each other from the level's main light. Needs ambient occlusion "
+             "World. Classic keeps the Xbox's shadows alone.", "desktop"),
+            (SECTION, "LIGHTING"),
+            # (PRISM's lighting: drawn by the Vulkan renderer alone,
+            # port/linux/src/d3d8_device.c's prism_lighting_read)
+            ("LIGHTMAPS", "display.prism_lightmaps", [("STOCK", "stock"), ("SMOOTH", "smooth")],
+             "Smooth: the levels' own light drawn without its colour bands and blocky edges, from a finer copy "
+             "built on this machine the first time a level is played. The light stays where it was.", "desktop"),
+            # (beyond CE: what the Xbox never drew, off in every preset)
+            (SECTION, "BEYOND CE"),
+            # (PRISM's remodelled level geometry, built on this machine:
+            # port/linux/game/prism_world_geometry.c)
+            ("WORLD GEOMETRY", "display.prism_world_geometry", [("XBOX", "stock"), ("REMODEL", "remodel")],
+             "Remodel draws the level's rock, sand and Forerunner walls from a denser model built on this computer "
+             "from your maps: rounded rock, bevelled edges, the same light. You still walk and collide on the "
+             "original. Xbox draws the map's own.", "desktop"),
+            ("BLOOM", "display.prism_bloom", [("OFF", "off"), ("GLOW", "glow"), ("FULL", "full")],
+             "A soft glow about light brighter than white: plasma, the sun, lights and blasts. The Xbox had none; "
+             "Glow is faint, Full wider. Nothing lit only to white glows.", "desktop"),
         ],
     },
     STREAMER[0]: {
