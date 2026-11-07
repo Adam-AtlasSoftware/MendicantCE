@@ -5455,13 +5455,13 @@ int xgpu_vulkan_mesh_skin(struct xgpu_vulkan_mesh_buffer *rest, uint32_t first, 
 	memcpy(to, bones, (size_t)bone_count * 48);
 	/* (the stock layout's vertices, then the wide stream's where asked
 	for: one span of the ring) */
-	if (!skin_ring_take((uint64_t)count * (wide ? 48 : 32), &output))
+	if (!skin_ring_take((uint64_t)count * (wide ? 64 : 32), &output))
 	{
 		skin.ring_full++;
 		return 0;
 	}
 	if (wide)
-		wide_output = (output + (uint64_t)count * 32 + 15) & ~(VkDeviceSize)15;
+		wide_output = output + (uint64_t)count * 32;
 	commands = early_commands();
 	barrier(commands, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
 		VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT);

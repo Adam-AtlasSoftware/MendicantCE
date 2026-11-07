@@ -104,23 +104,7 @@ enum
 	/* (a model lit for each vertex, its ambient light apart: xgpu.h's
 	XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX) */
 	XGPU_SPIRV_LOCATION_LIGHT_AMBIENT, XGPU_SPIRV_LOCATION_LIGHT_POINT,
-	/* (display.prism_models with display.prism_materials: a mesh store
-	mesh's own tangent, xgpu_spirv_options' mesh_wide) */
-	XGPU_SPIRV_LOCATION_MESH_TANGENT,
 };
-
-/* (mesh_wide) the vertex input of a mesh store mesh's tangent: a uvec4 a
-vertex of its wide stream (xgpu_vulkan_mesh_skin), the tangent in the world
-x and y snorm16, then z and its bitangent's sign snorm16 (the stream's last
-8 bytes, uv0's floats over the base map scale, feed the program's own
-texture coordinate input instead of the stock vertex's 16 bits: the
-pipeline's, xgpu_vulkan_stream.c). */
-#define XGPU_SPIRV_MESH_WIDE_INPUT 15
-/* the most scalars a vertex shader hands on (beyond its position) for the
-mesh's tangent to be added to them: past 32, NVIDIA's GPUs shade vertices
-at a fraction of the rate (measured: a 461,000-vertex mesh's draw 44%
-slower on an RTX 2060 with 6 more) */
-#define XGPU_SPIRV_MESH_WIDE_OUTPUTS 32
 
 /* the draw's values both stages read, laid out alike in C and in the
 shaders' uniform block (std140: vec4s, and floats in fours): the backend's
@@ -223,13 +207,6 @@ struct xgpu_spirv_options
 	(world_proxies_occlusion), each shape's place and kind then the same for
 	all of its pixels */
 	BOOL subgroups;
-	/* display.prism_models with display.prism_materials: a mesh store
-	mesh drawn with a material, where the vertex shader has room for its
-	tangent (xgpu_spirv_vertex_mesh_tangent): the vertex shader hands on
-	the wide stream's tangent (XGPU_SPIRV_MESH_WIDE_INPUT), the pixel
-	shader's GGX path takes its frame from it, not from the screen's
-	derivatives of texture 0's coordinates */
-	BOOL mesh_wide;
 };
 
 /* ---------- the VR mode's effects
@@ -305,12 +282,6 @@ FALSE if out of memory. */
 BOOL xgpu_spirv_vertex_shader(const struct xgpu_vertex_program *program, unsigned long packed_attribute_mask,
 	unsigned long integer_attribute_mask, const struct nv2a_vertex_lighting *lighting,
 	const struct xgpu_spirv_options *options, struct xgpu_spirv_module *module);
-
-/* whether the program's vertex shader with mesh_wide hands on the mesh's
-tangent: the input free and its outputs (with its lighting's) no more than
-XGPU_SPIRV_MESH_WIDE_OUTPUTS scalars with it */
-BOOL xgpu_spirv_vertex_mesh_tangent(const struct xgpu_vertex_program *program,
-	const struct nv2a_vertex_lighting *lighting);
 
 /* the vertex inputs (bit n v<n>) the vertex shader of a program and its
 lighting reads: the pipeline's vertex layout has these alone */

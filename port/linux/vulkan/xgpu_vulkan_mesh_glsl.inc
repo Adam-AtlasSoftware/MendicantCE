@@ -12,12 +12,13 @@ constants hold them, or a helper bone's), written from out_base (in words) in th
 position f32x3; normal, binormal and tangent packed 11:11:10, signed;
 texture coordinates int16x2 over the model's base map scale; nodes 0 and 0,
 weight 1), which the model's own pipelines draw with an identity for node 0;
-and where wide_base is not ~0, from wide_base (in words) the wide stream a
-material's pipelines read beside it (16 bytes a vertex: the tangent in the
-world, x and y snorm16, then z and the bitangent's sign snorm16; uv0 over
-the base map scale as two floats, unclamped: the value the stock vertex's
-int16 normalised coordinates stand for, which the model's vertex program
-reads in their place). */
+and where wide_base is not ~0, from wide_base (in words) the same vertices
+in the wide layout a material's pipelines read instead (32 bytes too: the
+same position, normal, binormal and tangent, then uv0 over the base map
+scale as two floats, unclamped, where the stock layout has its int16
+coordinates, nodes and weight: the value the int16 normalised coordinates
+stand for, which the model's vertex program reads in their place; the
+nodes and weight are the pipeline's constants). */
 
 static const char skin_source[] =
 	"#version 450\n"
@@ -78,21 +79,28 @@ static const char skin_source[] =
 	"    vec3 tangent = normalize(vec3(dot(r0.xyz, t), dot(r1.xyz, t), dot(r2.xyz, t)));\n"
 	"    vec3 binormal = cross(normal, tangent) * handedness;\n"
 	"    ivec2 q = ivec2(clamp(round(uv * skin.inverse_scale * 32767.0), vec2(-32767.0), vec2(32767.0)));\n"
+	"    uint packed_normal = pack_normal(normal);\n"
+	"    uint packed_binormal = pack_normal(binormal);\n"
+	"    uint packed_tangent = pack_normal(tangent);\n"
 	"    uint o = skin.out_base + i * 8u;\n"
 	"    skinned[o] = floatBitsToUint(position.x);\n"
 	"    skinned[o + 1u] = floatBitsToUint(position.y);\n"
 	"    skinned[o + 2u] = floatBitsToUint(position.z);\n"
-	"    skinned[o + 3u] = pack_normal(normal);\n"
-	"    skinned[o + 4u] = pack_normal(binormal);\n"
-	"    skinned[o + 5u] = pack_normal(tangent);\n"
+	"    skinned[o + 3u] = packed_normal;\n"
+	"    skinned[o + 4u] = packed_binormal;\n"
+	"    skinned[o + 5u] = packed_tangent;\n"
 	"    skinned[o + 6u] = (uint(q.x) & 0xffffu) | (uint(q.y) << 16);\n"
 	"    skinned[o + 7u] = 0x7fff0000u;\n"
 	"    if (skin.wide_base != 0xffffffffu)\n"
 	"    {\n"
-	"        uint s = skin.wide_base + i * 4u;\n"
-	"        skinned[s] = packSnorm2x16(tangent.xy);\n"
-	"        skinned[s + 1u] = packSnorm2x16(vec2(tangent.z, handedness));\n"
-	"        skinned[s + 2u] = floatBitsToUint(uv.x * skin.inverse_scale.x);\n"
-	"        skinned[s + 3u] = floatBitsToUint(uv.y * skin.inverse_scale.y);\n"
+	"        uint s = skin.wide_base + i * 8u;\n"
+	"        skinned[s] = floatBitsToUint(position.x);\n"
+	"        skinned[s + 1u] = floatBitsToUint(position.y);\n"
+	"        skinned[s + 2u] = floatBitsToUint(position.z);\n"
+	"        skinned[s + 3u] = packed_normal;\n"
+	"        skinned[s + 4u] = packed_binormal;\n"
+	"        skinned[s + 5u] = packed_tangent;\n"
+	"        skinned[s + 6u] = floatBitsToUint(uv.x * skin.inverse_scale.x);\n"
+	"        skinned[s + 7u] = floatBitsToUint(uv.y * skin.inverse_scale.y);\n"
 	"    }\n"
 	"}\n";

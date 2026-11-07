@@ -25,10 +25,10 @@ level its view was drawn at this frame (or the last, if the shadow comes
 first), not at the shadow's own smaller size, so the two share the one
 skinning rather than skinning a second level.
 A draw with a material (display.prism_materials) whose stream has its wide
-pipeline (xgpu_vulkan_stream.c) reads the skinning's wide stream too, at
-binding 1 (xgpu_vulkan_mesh_skin): the mesh's uv0 as floats in place of the
-stock vertex's 16-bit coordinates over the base map scale, and its own
-tangents where the shaders have room for them. A mesh
+pipeline (xgpu_vulkan_stream.c) reads the skinning's wide copy instead
+(xgpu_vulkan_mesh_skin): the same 32-byte vertices with the mesh's uv0 as
+floats in place of the stock vertex's 16-bit coordinates over the base map
+scale and its nodes and weight (the pipeline's constants then). A mesh
 drawn so once is skinned wide from then on (WIDE_MESHES), so its draws
 without a material and its shadow share that skinning.
 */
@@ -554,12 +554,7 @@ int xgpu_vulkan_meshes_piece(uint32_t index, struct xgpu_vulkan_draw *draw)
 		if (piece->region != meshes.key.region || piece->permutation != meshes.key.permutation ||
 			piece->shader != meshes.key.shader || found++ != index)
 			continue;
-		draw->vertices[0] = instance->skinned;
-		if (meshes.piece_wide)
-		{
-			draw->vertices[1] = instance->wide;
-			draw->bindings |= 2u;
-		}
+		draw->vertices[0] = meshes.piece_wide ? instance->wide : instance->skinned;
 		draw->indices.buffer = xgpu_vulkan_mesh_buffer_handle(view->indices);
 		draw->indices.offset = 0;
 		draw->index_type = 1;

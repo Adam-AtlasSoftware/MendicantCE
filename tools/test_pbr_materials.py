@@ -3,11 +3,7 @@ pixel shaders of a model lit for each pixel with a material (tools/pbr_materials
 material_pbr a key may have, lit by the point lights or the enhanced dynamic lights, with and without
 the material overlay and the reflection cube, pass spirv-val; each reads the material's images at
 bindings 11 to 16 of the textures' set exactly where its bits say, and its uniform's members; the
-shaders without a material read none of it. display.prism_models' wide variant (a mesh store mesh drawn
-with a material): its pixel shaders read the mesh's tangent (xMeshTangent), a vertex shader with room
-(no more than 32 scalars handed on with it) hands it on from the wide stream's input (location 15), a
-lit model's (32 already) and a program reading that input itself do not, and the shaders without the
-variant name none of it."""
+shaders without a material read none of it."""
 import re
 import shutil
 import struct
@@ -66,24 +62,12 @@ def words_of(module):
 
 
 def test_cases_made(modules):
-    # 2 lights x 2 overlays x (1 without a material + 2 cubes x 128 bits + 128 wide), 4 vertex shaders
-    assert len(modules) == 2 * 2 * (1 + 2 * 128 + 128) + 4
-
-
-def test_wide_variant(modules):
-    for name, module in modules.items():
-        if name.startswith("wide"):
-            assert b"xMeshTangent" in module, name
-        elif name == "vertex-wide-room":
-            assert b"xMeshWide" in module and b"xMeshTangent" in module, name
-        else:
-            assert b"xMesh" not in module, name
+    # 2 lights x 2 overlays x (1 without a material + 2 cubes x 128 bits)
+    assert len(modules) == 2 * 2 * (1 + 2 * 128)
 
 
 def test_material_images_where_the_bits_say(modules):
     for name, module in modules.items():
-        if name.startswith("vertex"):
-            continue
         bindings = texture_bindings(words_of(module))
         material = [binding for binding in bindings if 11 <= binding <= 16]
         if name.startswith("base"):

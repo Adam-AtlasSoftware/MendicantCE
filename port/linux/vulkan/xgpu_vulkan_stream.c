@@ -179,16 +179,6 @@ struct stream_pipeline
 	/* and a z-sprite's (xgpu_shader.h, xgpu_pixel_program_depth_stage),
 	which tests the depth itself, by its fade: xgpu_spirv.c */
 	uint8_t effect_tests_depth;
-	/* display.prism_models' wide variant (a mesh store mesh drawn with a
-	material: xgpu_spirv_options' mesh_wide, pipeline_wide_shaders), made
-	the first time one is drawn: its state (XGPU_STREAM_PIPELINE_*), its
-	variant and its shaders */
-	uint8_t wide_state;
-	struct variant wide_variant;
-	VkShaderModule wide_vertex_shader, wide_pixel_shader;
-	/* its shaders hand on and read the mesh's tangent (else they are the
-	pipeline's own: xgpu_spirv_vertex_mesh_tangent) */
-	uint8_t wide_tangent;
 };
 
 struct program_entry
@@ -359,9 +349,9 @@ static struct
 	logged, the folder the shader modules are written into (NULL: none) */
 	int statistics;
 	const char *shader_folder;
-	/* pipeline_shaders makes a wide variant's (pipeline_wide_shaders), and
-	whether they hand on the mesh's tangent */
-	int shaders_wide, shaders_wide_tangent;
+	/* display.prism_models' wide layout for a material's draws (not
+	HALO_MESH_WIDE_OFF): 1 on, 2 off, 0 not read yet */
+	int mesh_wide;
 } stream;
 
 /* display.ambient_occlusion "world" found once a pixel (xgpu_stream.h's
@@ -1350,7 +1340,6 @@ static void stream_pipeline_define(void *context, const struct xgpu_stream_pipel
 	if (record->id && record->id < XGPU_STREAM_PIPELINES)
 	{
 		stream.pipelines[record->id].state = XGPU_STREAM_PIPELINE_UNKNOWN;
-		stream.pipelines[record->id].wide_state = XGPU_STREAM_PIPELINE_UNKNOWN;
 		stream.stand_ins[record->id] = 0;
 	}
 	if (record->id == stream.pipeline_id)
@@ -1531,15 +1520,11 @@ static int pipeline_shaders(struct stream_pipeline *entry, const struct xgpu_str
 	if (!program)
 		return 0;
 	vertex_program_convert(program_record->record, program);
-	/* (pipeline_wide_shaders': the mesh's tangent where the vertex shader
-	has room for it) */
-	options.mesh_wide = stream.shaders_wide && xgpu_spirv_vertex_mesh_tangent(program, lighting);
-	stream.shaders_wide_tangent = options.mesh_wide;
 	entry->inputs = (uint16_t)xgpu_spirv_vertex_inputs(program, lighting);
 	if (xgpu_spirv_vertex_shader(program, packed, integers, lighting, &options, &module))
 	{
-		snprintf(name, sizeof(name), "vs%08x%08x_%lx_%lx_%u_view%u_fovea%u%s", (unsigned)(hash >> 32), (unsigned)hash,
-			packed, integers, key->lighting, key->views, variant->foveated, options.mesh_wide ? "_wide" : "");
+		snprintf(name, sizeof(name), "vs%08x%08x_%lx_%lx_%u_view%u_fovea%u", (unsigned)(hash >> 32), (unsigned)hash,
+			packed, integers, key->lighting, key->views, variant->foveated);
 		shader_dump(name, &module);
 		entry->vertex_shader = xgpu_vulkan_shader(module.words, module.count);
 		free(module.words);
@@ -1560,9 +1545,9 @@ static int pipeline_shaders(struct stream_pipeline *entry, const struct xgpu_str
 
 	if (xgpu_spirv_pixel_shader(&pixel, &options, &module))
 	{
-		snprintf(name, sizeof(name), "ps_%08x_%02x%02x%02x%02x_fovea%u_effect%u%u%s", bytes_hash(&definition->pixel_program,
+		snprintf(name, sizeof(name), "ps_%08x_%02x%02x%02x%02x_fovea%u_effect%u%u", bytes_hash(&definition->pixel_program,
 			sizeof(definition->pixel_program)), options.border[0], options.border[1], options.border[2], options.border[3],
-			variant->foveated, (unsigned)options.effect, (unsigned)options.effect_fade, options.mesh_wide ? "_wide" : "");
+			variant->foveated, (unsigned)options.effect, (unsigned)options.effect_fade);
 		shader_dump(name, &module);
 		entry->pixel_shader = xgpu_vulkan_shader(module.words, module.count);
 		free(module.words);
@@ -1577,45 +1562,6 @@ static int pipeline_shaders(struct stream_pipeline *entry, const struct xgpu_str
 	host_logf(HOST_LOG_WARN, "vulkan: the shaders of a pipeline (vertex program %08x%08x) cannot be made",
 		(unsigned)(hash >> 32), (unsigned)hash);
 	return 0;
-}
-
-/* display.prism_models with display.prism_materials: a pipeline's wide
-variant's shaders for a variant (a mesh store mesh drawn with a material:
-where the vertex shader has room, it hands on the mesh's tangent from the
-wide stream, XGPU_SPIRV_MESH_WIDE_INPUT, and the pixel shader's GGX path
-reads it; else the pipeline's own shaders), made once; 0 if there is none
-(a VR effect, HALO_MESH_WIDE_OFF) */
-static int pipeline_wide_shaders(struct stream_pipeline *entry, const struct xgpu_stream_pipeline_define *definition,
-	const struct variant *variant)
-{
-	struct stream_pipeline made;
-	int ok;
-
-	if (entry->wide_state == XGPU_STREAM_PIPELINE_MADE && !memcmp(&entry->wide_variant, variant, sizeof(*variant)))
-		return 1;
-	if (entry->wide_state == XGPU_STREAM_PIPELINE_FAILED)
-		return 0;
-	if (getenv("HALO_MESH_WIDE_OFF") || definition->key.pixel.vr_effect)
-	{
-		entry->wide_state = XGPU_STREAM_PIPELINE_FAILED;
-		return 0;
-	}
-	memset(&made, 0, sizeof(made));
-	stream.shaders_wide = 1;
-	stream.shaders_wide_tangent = 0;
-	ok = pipeline_shaders(&made, definition, variant);
-	stream.shaders_wide = 0;
-	if (!ok || made.effect)
-	{
-		entry->wide_state = XGPU_STREAM_PIPELINE_FAILED;
-		return 0;
-	}
-	entry->wide_state = XGPU_STREAM_PIPELINE_MADE;
-	entry->wide_variant = *variant;
-	entry->wide_vertex_shader = made.vertex_shader;
-	entry->wide_pixel_shader = made.pixel_shader;
-	entry->wide_tangent = (uint8_t)stream.shaders_wide_tangent;
-	return 1;
 }
 
 /* a definition whose pixel shader has display.ambient_occlusion "world"'s
@@ -2231,8 +2177,9 @@ static int draw_pipeline(const struct draw_input *input, int apart)
 	/* display.prism_models: what the draw is, by the part it is of
 	(xgpu_vulkan_meshes.h), and whether its pieces are drawn by the
 	pipeline's wide variant */
-	int mesh_verdict = XGPU_VULKAN_MESHES_STOCK, mesh_wide = 0;
+	int mesh_verdict = XGPU_VULKAN_MESHES_STOCK, mesh_wide = 0, mesh_nodes = -1, mesh_weight = -1;
 	VkPipeline stock_pipeline = VK_NULL_HANDLE;
+	uint32_t stock_bindings = 0;
 
 	if (!stream.pipeline_id || !stream.definition || !input->count)
 		return 1;
@@ -2343,47 +2290,70 @@ static int draw_pipeline(const struct draw_input *input, int apart)
 			primitive_class(input->primitive) == XGPU_VULKAN_CLASS_TRIANGLES);
 		if (mesh_verdict == XGPU_VULKAN_MESHES_SKIP)
 			return 1;
-		/* (with a material: its wide variant, where it is made, the mesh's
-		own coordinates and frame at binding 1: the program's texture
-		coordinate input (the stock vertex's int16x2 at byte 24) read as two
-		floats from the wide stream's byte 8, unclamped and whole, and the
-		tangent from its start where the shaders read it; else the stock
-		layout's swap) */
+		/* (with a material: the wide layout's pipeline, where it is made:
+		the stock layout's but for the texture coordinates, two floats at
+		byte 24 (uv0 over the base map scale, unclamped and whole) in place
+		of the int16 coordinates, nodes and weight, which are constants then
+		(node 0, weight 1); else the stock layout's swap) */
+		if (!stream.mesh_wide)
+			stream.mesh_wide = getenv("HALO_MESH_WIDE_OFF") ? 2 : 1;
 		if (mesh_verdict == XGPU_VULKAN_MESHES_SWAP && stream.definition->key.pixel.material_pbr &&
-			pipeline_wide_shaders(entry, stream.definition, &variant))
+			stream.mesh_wide == 1)
 		{
 			struct xgpu_vulkan_pipeline_description wide = pipeline;
+			unsigned long special = stream.definition->key.immediate ? 0 :
+				(unsigned long)stream.definition->key.packed_attributes | input->integers;
 			VkPipeline made = VK_NULL_HANDLE;
-			int changed = 0;
+			int uv = -1, nodes = -1, weight = -1;
 
-			wide.vertex_shader = entry->wide_vertex_shader;
-			wide.pixel_shader = entry->wide_pixel_shader;
 			for (index = 0; index < 16; index++)
 			{
-				if (wide.attributes[index].format == VK_FORMAT_R16G16_SNORM && wide.attributes[index].binding == 0 &&
-					wide.attributes[index].offset == 24)
+				const struct xgpu_vulkan_attribute *attribute = &pipeline.attributes[index];
+
+				if (!attribute->format || attribute->binding != 0)
+					continue;
+				if (attribute->offset == 24 && attribute->format == VK_FORMAT_R16G16_SNORM)
+					uv = (int)index;
+				else if (attribute->offset >= 24)
 				{
-					wide.attributes[index].format = VK_FORMAT_R32G32_SFLOAT;
-					wide.attributes[index].binding = 1;
-					wide.attributes[index].offset = 8;
-					changed = 1;
+					if (attribute->offset == 28 && attribute->format == VK_FORMAT_R8G8_UNORM && !(special & (1ul << index)))
+						nodes = (int)index;
+					else if (attribute->offset == 30 && attribute->format == VK_FORMAT_R16_SNORM &&
+						!(special & (1ul << index)))
+						weight = (int)index;
+					else
+						uv = -2;
 				}
 			}
-			if (entry->wide_tangent)
+			if (uv >= 0)
 			{
-				wide.attributes[XGPU_SPIRV_MESH_WIDE_INPUT].format = VK_FORMAT_R32G32B32A32_UINT;
-				wide.attributes[XGPU_SPIRV_MESH_WIDE_INPUT].binding = 1;
-				wide.attributes[XGPU_SPIRV_MESH_WIDE_INPUT].offset = 0;
-				changed = 1;
-			}
-			wide.strides[1] = 16;
-			if (changed)
+				wide.attributes[uv].format = VK_FORMAT_R32G32_SFLOAT;
+				if (nodes >= 0)
+				{
+					wide.attributes[nodes].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+					wide.attributes[nodes].binding = XGPU_VULKAN_BINDING_CONSTANT;
+					wide.attributes[nodes].offset = (uint16_t)(nodes * 16);
+				}
+				if (weight >= 0)
+				{
+					wide.attributes[weight].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+					wide.attributes[weight].binding = XGPU_VULKAN_BINDING_CONSTANT;
+					wide.attributes[weight].offset = (uint16_t)(weight * 16);
+				}
+				if (nodes >= 0 || weight >= 0)
+					wide.strides[XGPU_VULKAN_BINDING_CONSTANT] = 0;
 				made = stream.prepared ? xgpu_vulkan_pipeline_ready(&wide) : xgpu_vulkan_pipeline(&wide);
+			}
 			if (made)
 			{
 				stock_pipeline = draw.pipeline;
+				stock_bindings = draw.bindings;
 				draw.pipeline = made;
+				if (nodes >= 0 || weight >= 0)
+					draw.bindings |= 1u << XGPU_VULKAN_BINDING_CONSTANT;
 				mesh_wide = 1;
+				mesh_nodes = nodes;
+				mesh_weight = weight;
 			}
 		}
 	}
@@ -2432,6 +2402,21 @@ static int draw_pipeline(const struct draw_input *input, int apart)
 				return 1;
 			}
 			memcpy(to, input->values, 16 * 16);
+			/* (the wide layout's nodes and weight: node 0, weight 1, as the
+			stock layout's two bytes and short read, the components they
+			lack 0, 0, 1: the model's program takes the second node's weight
+			as w - x) */
+			if (mesh_wide && mesh_nodes >= 0)
+			{
+				memset((float *)to + mesh_nodes * 4, 0, 16);
+				((float *)to)[mesh_nodes * 4 + 3] = 1.0f;
+			}
+			if (mesh_wide && mesh_weight >= 0)
+			{
+				memset((float *)to + mesh_weight * 4, 0, 16);
+				((float *)to)[mesh_weight * 4] = 1.0f;
+				((float *)to)[mesh_weight * 4 + 3] = 1.0f;
+			}
 		}
 		if (!indices_upload(input, &draw))
 		{
@@ -2450,9 +2435,13 @@ static int draw_pipeline(const struct draw_input *input, int apart)
 	}
 	if (attempt == 3)
 		return 1;
-	/* (a swap drawn stock after all: by the stock pipeline) */
+	/* (a swap drawn stock after all: by the stock pipeline, with its own
+	bindings) */
 	if (mesh_wide && mesh_verdict != XGPU_VULKAN_MESHES_SWAP)
+	{
 		draw.pipeline = stock_pipeline;
+		draw.bindings = stock_bindings;
+	}
 	memcpy(draw.textures, stream.textures, sizeof(draw.textures));
 	/* (display.prism_material_overlay's images, where its shader reads
 	them) */
