@@ -47,6 +47,9 @@ reads them.
 #include "errors.h"
 #include "cache/cache_files.h"
 #include "game/game.h"
+#include "game/players.h"
+#include "objects/objects.h"
+#include "units/units.h"
 #include "main/console.h"
 #include "math/real_math.h"
 #include "models/model_definitions.h"
@@ -1179,6 +1182,55 @@ void mod_meshes_model_end(
 {
 	mod_meshes_part_end();
 	mod_meshes_globals.drawing = NULL;
+
+	return;
+}
+
+/* (the console's prism_set "debug_pose <frame> <animation>") the first player's unit put in one of its
+own graph's base animations at a frame, as unit_custom_animation_at_frame does, the graph the unit's own
+(a script's tag references need not name it), and its nodes posed there at once (a stopped game shows the
+pose without a tick, so without the animation's root motion): for checking a replacement mesh's
+deformation in captures.
+Only the console calls it. */
+void mod_meshes_debug_pose(
+	char const *arguments)
+{
+	long player_index = data_next_index(player_data, NONE);
+	long frame = -1;
+	char const *name = arguments;
+	struct player_datum *player;
+	struct unit_datum *unit;
+
+	while (name && *name >= '0' && *name <= '9')
+	{
+		frame = (frame < 0 ? 0 : frame * 10) + (*name - '0');
+		name++;
+	}
+	while (name && *name == ' ')
+	{
+		name++;
+	}
+	if (frame < 0 || !name || !*name || player_index == NONE)
+	{
+		console_warning("prism_set \"debug_pose <frame> <animation>\": a player and one of its graph's base animations");
+		return;
+	}
+	player = player_get(player_index);
+	if (player->unit_index == NONE)
+	{
+		console_warning("debug_pose: the player has no unit");
+		return;
+	}
+	unit = unit_get(player->unit_index);
+	if (!unit_custom_animation_at_frame(player->unit_index, unit->object.animation.animation_graph_index, name, FALSE,
+		(short)frame))
+	{
+		console_warning("debug_pose: '%s' at frame %ld could not be started", name, frame);
+		return;
+	}
+	/* (the nodes posed at that frame now, with no tick run: no root motion, the game may stay stopped) */
+	object_compute_node_matrices_recursive(player->unit_index);
+	console_printf(FALSE, "debug_pose: %s at %ld", name, frame);
 
 	return;
 }

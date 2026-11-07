@@ -435,6 +435,10 @@ another. Both settings apply in a running game (`prism_set "models max"`).
 Meshes are drawn, not simulated: a network game's machines need not have the
 same files.
 
+The console's `prism_set "debug_pose <frame> <animation>"` puts the first player's unit in one of its own
+graph's base animations at a frame and poses its nodes at once (no tick: a stopped game shows the pose,
+without the animation's root motion), for checking a replacement mesh's deformation in captures.
+
 `debug.prism_mesh_dump` writes a map's models as the game draws them (their
 parts' vertices and strips, nodes, regions, permutations, shaders, markers)
 to the data folder's `prism_dump`, which `tools/pmesh_from_dump.py` makes a

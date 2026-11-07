@@ -2026,11 +2026,20 @@ void mod_materials_draw_end(
 
 /* (the script function prism_set) "<setting> <value>": one of the
 display.prism_* settings, set as config.toml's line is (config_write) */
+void mod_meshes_debug_pose(char const *arguments);
+
 void mod_materials_prism_set(
 	char const *text)
 {
 	char name[96];
 	char const *space = text ? strchr(text, ' ') : NULL;
+
+	/* (a capture's pose: mod_meshes.c) */
+	if (text && !strncmp(text, "debug_pose ", 11))
+	{
+		mod_meshes_debug_pose(text + 11);
+		return;
+	}
 
 	if (!space || space == text || (size_t)(space - text) >= sizeof(name) - 16)
 	{
