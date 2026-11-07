@@ -235,6 +235,9 @@ enum
 	XGPU_VULKAN_FORMAT_RGBA32F,
 	/* two signed bytes (its distance-field scene's cascades) */
 	XGPU_VULKAN_FORMAT_RG8_SNORM,
+	/* BC5: two channels of BC4 blocks (PRISM's surface maps: the normal's
+	x and y; the occlusion and roughness) */
+	XGPU_VULKAN_FORMAT_BC5,
 	XGPU_VULKAN_FORMAT_COUNT
 };
 
@@ -512,7 +515,7 @@ enum
 
 /* (xgpu.h's XGPU_OVERLAY_BINDING and XGPU_OVERLAY_IMAGE_COUNT) */
 #define XGPU_VULKAN_BINDING_OVERLAY 4
-#define XGPU_VULKAN_OVERLAY_IMAGES 6
+#define XGPU_VULKAN_OVERLAY_IMAGES 7
 
 /* a draw: its pipeline, topology and dynamic state; its vertices' bindings
 (those of bindings' bits) and indices (16-bit; buffer VK_NULL_HANDLE: none);

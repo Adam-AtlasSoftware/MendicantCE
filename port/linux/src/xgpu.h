@@ -180,8 +180,9 @@ struct nv2a_pixel_shader_key
 	display.prism_overlay_view, plus XGPU_OVERLAY_CLASS_MASK with four tiles
 	weighted by a class mask and the multipurpose map's rule on top, plus
 	XGPU_OVERLAY_CLASS_MASK_WINS where the mask's own tiles A, C and D are
-	kept over the rule, plus XGPU_OVERLAY_SURFACE with a surface map
-	(below: "The material overlay") */
+	kept over the rule, plus XGPU_OVERLAY_SURFACE with a surface map,
+	plus XGPU_OVERLAY_SURFACE_ONLY with a surface map and no tiles (below:
+	"The material overlay") */
 	unsigned char material_overlay;
 };
 
@@ -204,8 +205,8 @@ four times the roughness, darkened by the cavity. The tiles fade with
 their texels' size on the screen (their footprint, the tiles across a
 pixel, log2) and with the draw's distance (the uniform's fade, the CPU's).
 The tiles are images (xgpu_images.h), repeating and filtered trilinearly,
-at XGPU_OVERLAY_BINDING (Vulkan: bindings 4 to 9 of the textures' set),
-tiles A to D then the class mask, then the surface map (below); the uniform (vec4
+at XGPU_OVERLAY_BINDING (Vulkan: bindings 4 to 10 of the textures' set),
+tiles A to D then the class mask, then the surface map's two images (below); the uniform (vec4
 overlay[XGPU_OVERLAY_UNIFORM_COUNT]): [0] the multipurpose channel that
 mixes the two tiles (one-hot, Xbox order: specular, self-illumination,
 change color, auxiliary); [1] lo, hi, invert, has multipurpose; [2] the
@@ -228,11 +229,17 @@ views (display.prism_overlay_view, the key's bits 1 to 3): 1 the tiles'
 weights, 2 the micro normal's change, 3 the fade, 4 the light alone.
 
 The surface map (display.prism_surface_maps, PRISM v2; off unless set):
-an RGBA image at the base map's coordinates, read once (not tiled), the
-image after the class mask: RG the tangent-space normal's x and y (y up
-the picture, 0.5 flat; its slope added to the tiles' in the same frame),
-B the ambient occlusion (1 open), multiplying the cavity by
-mix(1, B, [10].y), A the roughness (0 polished, 1 matte). [10]: x the
+two BC5 images at the base map's coordinates, read once (not tiled), the
+images after the class mask (port/linux/game/mod_materials.c makes them
+from one RGBA PNG): the first's RG the tangent-space normal's x and y (y
+up the picture, 0.5 flat; its slope added to the tiles' in the same
+frame), the second's R the ambient occlusion (1 open), multiplying the
+cavity by mix(1, R, [10].y), its G the roughness (0 polished, 1 matte).
+With XGPU_OVERLAY_SURFACE_ONLY (a shader the overlay does not name, or
+the overlay off) there are no tiles: the slope is the surface map's alone,
+the cavity its occlusion, the roughness offset 0, and the uniform's [2],
+[3].x and .y (the excluded channel, its threshold, the fade) and [6] (the
+reflection's bend and cavity) are mod_materials.c's defaults. [10]: x the
 normal's strength, y the occlusion's, z the specular's, w the specular's
 sharpest exponent. With z above 0 the reflection stage adds a specular
 highlight of the level's own dominant light (the model's first distant
@@ -245,11 +252,13 @@ as CE's cube map does. */
 #define XGPU_OVERLAY_BINDING 4
 #define XGPU_OVERLAY_TILE_COUNT 4
 #define XGPU_OVERLAY_SURFACE_IMAGE (XGPU_OVERLAY_TILE_COUNT + 1)
-#define XGPU_OVERLAY_IMAGE_COUNT (XGPU_OVERLAY_TILE_COUNT + 2)
+#define XGPU_OVERLAY_SURFACE_IMAGES 2
+#define XGPU_OVERLAY_IMAGE_COUNT (XGPU_OVERLAY_TILE_COUNT + 1 + XGPU_OVERLAY_SURFACE_IMAGES)
 #define XGPU_OVERLAY_UNIFORM_COUNT 11
 #define XGPU_OVERLAY_CLASS_MASK 16
 #define XGPU_OVERLAY_CLASS_MASK_WINS 32
 #define XGPU_OVERLAY_SURFACE 64
+#define XGPU_OVERLAY_SURFACE_ONLY 128
 #define XGPU_OVERLAY_VIEW(material_overlay) (((material_overlay) >> 1) & 7)
 
 /* the vertex constants the per-pixel model lighting reads, in a uniform of

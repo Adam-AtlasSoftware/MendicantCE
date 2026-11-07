@@ -90,7 +90,7 @@ static VkRenderingAttachmentInfo began_color, began_depth, began_stencil;
 static VkClearAttachment cleared[2];
 static VkClearRect cleared_rect;
 static VkImageViewCreateInfo last_view;
-static VkDescriptorImageInfo written_images[9];
+static VkDescriptorImageInfo written_images[TEXTURE_SET_BINDINGS];
 static VkFormatFeatureFlags depth24_features, depth32_features;
 static unsigned int capability_errors;
 static unsigned int ended_queries;
@@ -186,8 +186,8 @@ static void VKAPI_CALL fake_update(VkDevice device, uint32_t count, const VkWrit
 	uint32_t index;
 
 	(void)device; (void)copies; (void)copy;
-	/* (the stages', and display.prism_material_overlay's five after them) */
-	assert(count == 4 || count == 9);
+	/* (the stages', and display.prism_material_overlay's after them) */
+	assert(count == 4 || count == TEXTURE_SET_BINDINGS);
 	set_updates++;
 	for (index = 0; index < count; index++)
 	{

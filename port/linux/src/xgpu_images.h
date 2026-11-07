@@ -18,12 +18,14 @@ XGPU_STREAM_SOURCE_IMAGE). xgpu_images.c.
 order); or a byte each, the coverage (alpha) of white; or RGBA, every one
 of its levels given, level 0 first, each half the one before (at least 1)
 right after it (the material overlay's tiles: xgpu_stream.h's
-XGPU_STREAM_IMAGE_RGBA_LEVELS) */
+XGPU_STREAM_IMAGE_RGBA_LEVELS); or every level given as BC5 blocks (16
+bytes a block of 4 by 4: the surface maps, XGPU_STREAM_IMAGE_BC5_LEVELS) */
 enum
 {
 	XGPU_IMAGE_RGBA,
 	XGPU_IMAGE_COVERAGE,
 	XGPU_IMAGE_RGBA_LEVELS,
+	XGPU_IMAGE_BC5_LEVELS,
 };
 
 struct xgpu_image

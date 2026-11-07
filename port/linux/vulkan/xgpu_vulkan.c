@@ -2258,6 +2258,7 @@ static VkFormat vulkan_format(uint8_t format)
 	case XGPU_VULKAN_FORMAT_RG32_UINT: return VK_FORMAT_R32G32_UINT;
 	case XGPU_VULKAN_FORMAT_RGBA32F: return VK_FORMAT_R32G32B32A32_SFLOAT;
 	case XGPU_VULKAN_FORMAT_RG8_SNORM: return VK_FORMAT_R8G8_SNORM;
+	case XGPU_VULKAN_FORMAT_BC5: return VK_FORMAT_BC5_UNORM_BLOCK;
 	default: return VK_FORMAT_UNDEFINED;
 	}
 }
@@ -2265,7 +2266,7 @@ static VkFormat vulkan_format(uint8_t format)
 static int format_blocks(uint8_t format)
 {
 	return format == XGPU_VULKAN_FORMAT_DXT1 || format == XGPU_VULKAN_FORMAT_DXT3 || format == XGPU_VULKAN_FORMAT_DXT5 ||
-		format == XGPU_VULKAN_FORMAT_ASTC;
+		format == XGPU_VULKAN_FORMAT_ASTC || format == XGPU_VULKAN_FORMAT_BC5;
 }
 
 static VkComponentSwizzle swizzle_of(uint32_t source)

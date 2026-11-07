@@ -804,11 +804,20 @@ enum
 	_image_coverage,
 	/* (every level given: xgpu_stream.h's XGPU_STREAM_IMAGE_RGBA_LEVELS) */
 	_image_rgba_levels,
+	/* (every level given as BC5 blocks: XGPU_STREAM_IMAGE_BC5_LEVELS) */
+	_image_bc5_levels,
 };
+
+/* the bytes of a level of an image given (RGBA, or BC5's 16-byte blocks
+of 4 by 4) */
+static uint64_t level_bytes(uint32_t width, uint32_t height, int bc5)
+{
+	return bc5 ? (uint64_t)((width + 3) / 4) * ((height + 3) / 4) * 16 : (uint64_t)width * height * 4;
+}
 
 /* the bytes of an image's levels given, level 0 first, each half the one
 before (at least 1) */
-static uint64_t levels_bytes(uint32_t width, uint32_t height, uint32_t levels)
+static uint64_t levels_bytes(uint32_t width, uint32_t height, uint32_t levels, int bc5)
 {
 	uint64_t bytes = 0;
 	uint32_t level;
@@ -817,7 +826,7 @@ static uint64_t levels_bytes(uint32_t width, uint32_t height, uint32_t levels)
 	{
 		uint32_t level_width = width >> level ? width >> level : 1, level_height = height >> level ? height >> level : 1;
 
-		bytes += (uint64_t)level_width * level_height * 4;
+		bytes += level_bytes(level_width, level_height, bc5);
 	}
 	return bytes;
 }
@@ -829,13 +838,23 @@ static struct xgpu_vulkan_image *image_get(const struct xgpu_stream_texture_stag
 	const void *pixels = host_pointer(stage->data);
 	uint32_t width = stage->width, height = stage->height;
 	uint32_t texel = stage->resource_format == _image_coverage ? 1 : 4;
-	int given = stage->resource_format == _image_rgba_levels;
+	int bc5 = stage->resource_format == _image_bc5_levels;
+	int given = stage->resource_format == _image_rgba_levels || bc5;
 	uint32_t most = width && height && width <= 16384 && height <= 16384 ? levels_most(width, height, 1) : 1;
 	uint32_t given_levels = given ? (stage->levels < most ? stage->levels : most) : 1;
 
 	if (!pixels || !width || !height || width > 16384 || height > 16384 ||
-		!readable(stage->data, given ? (uint32_t)levels_bytes(width, height, given_levels) : width * height * texel))
+		!readable(stage->data, given ? (uint32_t)levels_bytes(width, height, given_levels, bc5) : width * height * texel))
 		return NULL;
+	/* (BC5 needs the device's block compression) */
+	if (bc5)
+	{
+		struct xgpu_vulkan_capabilities capabilities;
+
+		xgpu_vulkan_capabilities(&capabilities);
+		if (!capabilities.block_compression)
+			return NULL;
+	}
 	for (entry = *bucket; entry; entry = entry->next)
 	{
 		if (entry->kind == _entry_image && entry->data == stage->resource)
@@ -864,7 +883,8 @@ static struct xgpu_vulkan_image *image_get(const struct xgpu_stream_texture_stag
 			xgpu_vulkan_image_destroy(entry->image);
 		memset(&made, 0, sizeof(made));
 		made.type = XGPU_VULKAN_IMAGE_2D;
-		made.format = stage->resource_format == _image_coverage ? XGPU_VULKAN_FORMAT_COVERAGE : XGPU_VULKAN_FORMAT_RGBA8;
+		made.format = stage->resource_format == _image_coverage ? XGPU_VULKAN_FORMAT_COVERAGE :
+			bc5 ? XGPU_VULKAN_FORMAT_BC5 : XGPU_VULKAN_FORMAT_RGBA8;
 		made.usage = XGPU_VULKAN_USAGE_SAMPLED;
 		made.width = width;
 		made.height = height;
@@ -889,12 +909,14 @@ static struct xgpu_vulkan_image *image_get(const struct xgpu_stream_texture_stag
 		{
 			uint32_t level_width = width >> level ? width >> level : 1, level_height = height >> level ? height >> level : 1;
 
+			/* (a level at a time: the largest, 4096 by 4096, is 16 MB of
+			BC5, under the upload's quarter of the ring) */
 			xgpu_vulkan_image_upload(entry->image, level, 0, 0, 0, 0, level_width, level_height, 1, level_pixels,
-				level_width * 4, 0);
-			level_pixels += (size_t)level_width * level_height * 4;
+				bc5 ? 0 : level_width * 4, 0);
+			level_pixels += level_bytes(level_width, level_height, bc5);
 		}
 		cache.statistics.images++;
-		cache.statistics.bytes += levels_bytes(width, height, given_levels);
+		cache.statistics.bytes += levels_bytes(width, height, given_levels, bc5);
 		return entry->image;
 	}
 	xgpu_vulkan_image_upload(entry->image, 0, 0, 0, 0, 0, width, height, 1, pixels, width * texel, 0);

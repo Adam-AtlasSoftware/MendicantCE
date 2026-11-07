@@ -4749,15 +4749,16 @@ pixel, log2) and the draw's fade, the light by the micro normal times the
 cavity and half the roughness, clamped. xgpu_msl.c's overlay_* are its
 twin. */
 
-static void overlay_declare(struct module *m, struct pixel_state *state, BOOL class_mask, BOOL surface)
+static void overlay_declare(struct module *m, struct pixel_state *state, BOOL class_mask, BOOL surface,
+	BOOL surface_only)
 {
 	static const char *const names[XGPU_OVERLAY_IMAGE_COUNT] = { "overlay_a", "overlay_b", "overlay_c", "overlay_d",
-		"overlay_m", "overlay_s" };
+		"overlay_m", "overlay_sn", "overlay_sa" };
 	int index;
 
 	for (index = 0; index < XGPU_OVERLAY_IMAGE_COUNT; index++)
 	{
-		if (index == XGPU_OVERLAY_SURFACE_IMAGE ? !surface : !class_mask && index >= 2)
+		if (index >= XGPU_OVERLAY_SURFACE_IMAGE ? !surface : surface_only || (!class_mask && index >= 2))
 			continue;
 		state->overlay_images[index] = variable(m, type_sampled_image(m, DIM_2D, FALSE, FALSE, TRUE),
 			STORAGE_UNIFORM_CONSTANT, names[index]);
@@ -4815,6 +4816,8 @@ static void overlay_light(struct module *m, struct pixel_state *state, BOOL poin
 {
 	const struct xgpu_pixel_program *program = state->program;
 	BOOL class_mask = (program->material_overlay & XGPU_OVERLAY_CLASS_MASK) != 0;
+	BOOL surface_only = (program->material_overlay & XGPU_OVERLAY_SURFACE_ONLY) &&
+		(program->material_overlay & XGPU_OVERLAY_SURFACE);
 	unsigned int one = constant_float(m, 1.0f), zero = constant_float(m, 0.0f);
 	unsigned int world_normal = pixel_input(m, state, state->in_world_normal, m->t_v4), normal = xyz(m, world_normal);
 	unsigned int n, uv, p, dp1, dp2, du1, du2, dp2p, dp1p, tangent, bitangent, frame_scale, frame;
@@ -4849,7 +4852,18 @@ static void overlay_light(struct module *m, struct pixel_state *state, BOOL poin
 	threshold (self-illuminated texels), the draw's fade */
 	keep = op3(m, OP_SELECT, m->t_float, compare(m, OP_F_ORD_GREATER_THAN, fdot(m, t2, ov2), extract(m, ov3, 0)), zero,
 		fmul(m, 1, frame, extract(m, ov3, 1)));
-	if (class_mask)
+	if (surface_only)
+	{
+		/* (XGPU_OVERLAY_SURFACE_ONLY: no tiles; the surface map's alone,
+		below) */
+		w = one;
+		slope = constant_splat(m, 2, 0.0f);
+		cavity = one;
+		rough = zero;
+		state->overlay_fa = zero;
+		state->overlay_fb = zero;
+	}
+	else if (class_mask)
 	{
 		/* the class mask's weights (tile A where there are none), the
 		multipurpose channel's rule giving tile A where the shader has one
@@ -4953,14 +4967,17 @@ static void overlay_light(struct module *m, struct pixel_state *state, BOOL poin
 	state->overlay_surface_rough = 0;
 	if (program->material_overlay & XGPU_OVERLAY_SURFACE)
 	{
+		/* (two images: the normal's x and y; the occlusion and the
+		roughness) */
 		unsigned int ov10 = overlay_uniform(m, 10);
 		unsigned int s = overlay_sample(m, state, XGPU_OVERLAY_SURFACE_IMAGE, uv);
+		unsigned int q = overlay_sample(m, state, XGPU_OVERLAY_SURFACE_IMAGE + 1, uv);
 		unsigned int sxy = fsub(m, 2, fscale(m, 2, xy(m, s), constant_float(m, 2.0f)), constant_splat(m, 2, 1.0f));
 		unsigned int sz = ext1(m, GLSL_SQRT, m->t_float, fmax_scalar(m, 1, fsub(m, 1, one, fdot(m, sxy, sxy)), 0.09f));
 
 		slope = fadd(m, 2, slope, fscale(m, 2, sxy, fmul(m, 1, fdiv(m, 1, extract(m, ov10, 0), sz), frame)));
-		cavity = fmul(m, 1, cavity, overlay_mix(m, 1, one, extract(m, s, 2), fmul(m, 1, extract(m, ov10, 1), frame)));
-		state->overlay_surface_rough = extract(m, s, 3);
+		cavity = fmul(m, 1, cavity, overlay_mix(m, 1, one, extract(m, q, 0), fmul(m, 1, extract(m, ov10, 1), frame)));
+		state->overlay_surface_rough = extract(m, q, 1);
 	}
 	/* the micro normal (the tiles' y is up their pictures: against v, whose
 	rows run down) */
@@ -5156,7 +5173,8 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	}
 	if (overlay)
 		overlay_declare(&m, &state, (program->material_overlay & XGPU_OVERLAY_CLASS_MASK) != 0,
-			(program->material_overlay & XGPU_OVERLAY_SURFACE) != 0);
+			(program->material_overlay & XGPU_OVERLAY_SURFACE) != 0,
+			(program->material_overlay & XGPU_OVERLAY_SURFACE_ONLY) && (program->material_overlay & XGPU_OVERLAY_SURFACE));
 	if (effect)
 		effect_declare(&m, &state);
 	else if (replaces_depth)

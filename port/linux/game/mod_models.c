@@ -171,6 +171,15 @@ in all); past it, their geometry is drawn from the heap */
 #define MAXIMUM_CONTIGUOUS_GEOMETRY_BYTES (128UL * 1024 * 1024)
 #endif
 
+/* the renderer's mirror of contiguous memory is kept in segments of this
+many bytes (port/linux/src/xgpu_backend.h's XGPU_MIRROR_SEGMENT_SIZE), and
+a draw's vertices or indices that span two of them cannot be drawn from it:
+they are copied into the stream every time they are drawn (d3d8_device.c's
+mirror_range). A part's vertices and its strip are laid out so that none of
+them spans two (a heavy model's part of 27,000 vertices drawn a few dozen
+times a frame, its palette's draws each, streamed 32 MB a frame: 6.5 ms) */
+#define MIRROR_SEGMENT_BYTES 0x400000UL
+
 /* ---------- structures */
 
 /* this build's model geometry, part and shader reference, as models.c and
@@ -1188,18 +1197,36 @@ static boolean part_palette_make(
 	return TRUE;
 }
 
+/* where a block of bytes goes at offset in a geometry whose start is
+aligned to a mirror segment (MIRROR_SEGMENT_BYTES): there, or the next
+segment's start if it would span two (a block longer than a segment spans
+them anyway) */
+static unsigned long segment_place(
+	unsigned long offset,
+	unsigned long bytes)
+{
+	if (bytes && bytes <= MIRROR_SEGMENT_BYTES &&
+		offset / MIRROR_SEGMENT_BYTES != (offset + bytes - 1) / MIRROR_SEGMENT_BYTES)
+	{
+		offset = (offset / MIRROR_SEGMENT_BYTES + 1) * MIRROR_SEGMENT_BYTES;
+	}
+
+	return offset;
+}
+
 /* geometry the renderer draws from: in the Xbox's contiguous memory, as a
 map's is (custom_edition_geometry.c's geometry_allocate), while the mods'
 models take no more of it than MAXIMUM_CONTIGUOUS_GEOMETRY_BYTES; else the
 heap */
 static void *geometry_allocate(
 	unsigned long size,
+	unsigned long alignment,
 	boolean *contiguous)
 {
 	void *geometry = NULL;
 
 	if (size <= MAXIMUM_CONTIGUOUS_GEOMETRY_BYTES - mod_models_globals.contiguous_bytes)
-		geometry = XPhysicalAlloc(size, (unsigned long)-1, 0, PAGE_READWRITE);
+		geometry = XPhysicalAlloc(size, (unsigned long)-1, alignment, PAGE_READWRITE);
 	*contiguous = geometry != NULL;
 	if (geometry)
 		mod_models_globals.contiguous_bytes += size;
@@ -1448,17 +1475,33 @@ static boolean geometries_make(
 	struct model_vertex_uncompressed *scratch;
 	struct model_vertex_compressed *vertices;
 	word *strips;
+	unsigned long vertex_offset, strip_offset, alignment;
 	long vertex_total = 0;
 	long geometry_index;
 	long part_index;
 	long first = 0;
 
 	*reason = "out of memory";
+	/* (every part's vertices, then every part's strip, each placed so that
+	it spans no two of the mirror's segments: segment_place) */
 	for (part_index = 0; part_index < file->part_count; part_index++)
 	{
 		vertex_total += file->parts[part_index].vertex_count;
-		geometry_bytes += (unsigned long)file->parts[part_index].vertex_count * (unsigned long)vertex_size +
+		geometry_bytes = segment_place(geometry_bytes,
+			(unsigned long)file->parts[part_index].vertex_count * (unsigned long)vertex_size) +
+			(unsigned long)file->parts[part_index].vertex_count * (unsigned long)vertex_size;
+	}
+	for (part_index = 0; part_index < file->part_count; part_index++)
+	{
+		geometry_bytes = segment_place(geometry_bytes,
+			(unsigned long)file->parts[part_index].strip_index_count * sizeof(word)) +
 			(unsigned long)file->parts[part_index].strip_index_count * sizeof(word);
+	}
+	/* (the start aligned as the layout assumes: to a segment, or, for a
+	geometry of less than one, to the power of two it fits, which no segment
+	boundary falls inside) */
+	for (alignment = 0x1000; alignment < MIRROR_SEGMENT_BYTES && alignment < geometry_bytes + 1; alignment <<= 1)
+	{
 	}
 	/* (every part's vertices, as this build keeps them uncompressed, at once:
 	their normals may be blended across parts. parts_check read them) */
@@ -1481,7 +1524,7 @@ static boolean geometries_make(
 	made->parts = malloc((size_t)file->part_count * sizeof(*made->parts) + 1);
 	made->palettes = palettes ? malloc((size_t)file->part_count * sizeof(*made->palettes) + 1) : NULL;
 	made->geometry_size = geometry_bytes + 1;
-	made->geometry = geometry_allocate(made->geometry_size, &made->geometry_contiguous);
+	made->geometry = geometry_allocate(made->geometry_size, alignment, &made->geometry_contiguous);
 	if (!made->geometries || !made->parts || (palettes && !made->palettes) || !made->geometry)
 	{
 		free(uncompressed);
@@ -1490,8 +1533,16 @@ static boolean geometries_make(
 	csmemset(made->parts, 0, (size_t)file->part_count * sizeof(*made->parts));
 	made->kept_bytes += geometry_bytes + (unsigned long)file->geometry_count * sizeof(*made->geometries) +
 		(unsigned long)file->part_count * (sizeof(*made->parts) + (palettes ? sizeof(*made->palettes) : 0));
-	vertices = (struct model_vertex_compressed *)made->geometry;
-	strips = (word *)(vertices + vertex_total);
+	vertex_offset = 0;
+	strip_offset = 0;
+	for (part_index = 0; part_index < file->part_count; part_index++)
+	{
+		vertex_offset = segment_place(vertex_offset,
+			(unsigned long)file->parts[part_index].vertex_count * (unsigned long)vertex_size) +
+			(unsigned long)file->parts[part_index].vertex_count * (unsigned long)vertex_size;
+	}
+	strip_offset = vertex_offset;
+	vertex_offset = 0;
 	scratch = uncompressed;
 
 	for (geometry_index = 0; geometry_index < file->geometry_count; geometry_index++)
@@ -1508,6 +1559,11 @@ static boolean geometries_make(
 			struct model_geometry_part *part = &made->parts[first + part_index];
 			byte const *element = file->bytes + source->offset;
 			long strip_index;
+
+			vertex_offset = segment_place(vertex_offset, (unsigned long)source->vertex_count * (unsigned long)vertex_size);
+			strip_offset = segment_place(strip_offset, (unsigned long)source->strip_index_count * sizeof(word));
+			vertices = (struct model_vertex_compressed *)(made->geometry + vertex_offset);
+			strips = (word *)(made->geometry + strip_offset);
 
 			part->flags = mods_read_be32(element) & ~FLAG(PART_LOCAL_NODES_BIT);
 			part->shader_index = mods_read_short(element + PART_SHADER_OFFSET);
@@ -1551,8 +1607,8 @@ static boolean geometries_make(
 				free(uncompressed);
 				return FALSE;
 			}
-			vertices += source->vertex_count;
-			strips += source->strip_index_count;
+			vertex_offset += (unsigned long)source->vertex_count * (unsigned long)vertex_size;
+			strip_offset += (unsigned long)source->strip_index_count * sizeof(word);
 			scratch += source->vertex_count;
 		}
 		first += count;

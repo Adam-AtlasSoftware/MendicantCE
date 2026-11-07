@@ -411,16 +411,16 @@ static const struct config_setting config_settings[] =
 		"the light alone; 0 the game." },
 	{ "display.prism_surface_maps", _config_boolean, "false", "HALO_PRISM_SURFACE_MAPS", _environment_value,
 		_platform_desktop,
-		"PRISM v2 (prototype): with the material overlay on, light the shaders\n"
-		"whose overlay names a surface map (built on this machine from your\n"
-		"maps) by its normal, ambient occlusion and roughness at the base map's\n"
-		"coordinates, and add the level's own sun or main light as a highlight\n"
-		"where the shader's reflection shows. Further from the original look\n"
-		"than the overlay alone. Vulkan only; read each frame (prism_set\n"
-		"\"surface_maps true\")." },
+		"PRISM v2: light the model shaders whose base map has a surface map\n"
+		"in a mod (tags\\<bitmap>.surface.png, baked on this machine from your\n"
+		"maps and a remodel; or one the material overlay names) by its normal,\n"
+		"ambient occlusion and roughness at the base map's coordinates, and add\n"
+		"the level's own sun or main light as a highlight where the shader's\n"
+		"reflection shows. Needs neither the material overlay nor an overlay.json\n"
+		"entry. Vulkan only; read each frame (prism_set \"surface_maps true\")." },
 	{ "display.prism_specular", _config_real, "1.0", "HALO_PRISM_SPECULAR", _environment_value,
 		_platform_desktop,
-		"PRISM v2 (prototype): how strong the surface maps' highlight is, 0 to\n"
+		"PRISM v2: how strong the surface maps' highlight is, 0 to\n"
 		"2 (0 none)." },
 	{ "display.structure_culling", _config_integer, STRUCTURE_CULLING_DEFAULT, "HALO_STRUCTURE_CULLING", _environment_value,
 		_platform_all,

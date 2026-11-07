@@ -79,15 +79,30 @@ whose class mask is not there (not built yet, or another map's), or not
 ready yet, draws with slots A and B and the channel rule alone, as a shader
 of two classes does.
 
-PRISM v2 (prototype, display.prism_surface_maps, off unless set): a shader
-may also name a surface map for each of its base map's bitmaps
-("surface_map": one PNG or an array, found in whichever mod has it, as the
-class masks are: built on the player's machine from the player's maps), an
-RGBA PNG at the base map's coordinates (RG the normal's x and y, y up the
-picture; B the ambient occlusion; A the roughness), and its strengths
+PRISM v2 surface maps (display.prism_surface_maps, off unless set): an
+RGBA PNG at a base map's coordinates (RG the normal's x and y, y up the
+picture; B the ambient occlusion; A the roughness, 1 matte and without a
+highlight), baked from a remodel's high-poly onto its game mesh at CE's own
+UVs (art_pipeline/prism_bake_ce.py, prism_surface_pack.py: built on the
+player's machine from the player's maps). A mod gives one for a bitmap by
+putting it next to the bitmap's tag: tags\<bitmap>.surface.png for the
+bitmap's first picture, tags\<bitmap>.surface<n>.png for its picture n.
+Every model shader whose base map that is draws with it, whether or not
+overlay.json names the shader and whether or not the overlay is on: with
+no tiles the surface map lights the draw alone (xgpu.h's
+XGPU_OVERLAY_SURFACE_ONLY), at the strengths below. overlay.json may still
+name a shader's surface maps itself ("surface_map": one PNG or an array by
+the bitmap's index, under tags\materials\, which wins) and its strengths
 ("surface": { "normal": 1.0, "occlusion": 1.0, "specular": 0.5,
-"exponent": 48 }): xgpu.h's "The surface map". display.prism_specular
-scales the highlight (0 to 2).
+"exponent": 48 }, also the defaults): xgpu.h's "The surface map".
+display.prism_specular scales the highlight (0 to 2).
+
+A surface map is decoded on a thread of its own when a draw first needs
+it, its levels box-filtered and each encoded as two BC5 images (the
+normal's x and y; the occlusion and roughness): a byte a texel for both,
+so a 4096 by 4096 map is 22 MB with its levels (an RGBA image of it, 85
+MB, is past what the renderer uploads at once: 32 MB a level). The draws
+go without it until it is ready.
 
 The overlay is taken up when the map's tags load and mods_reload; its tiles
 are read then (or when it is first turned on) and decoded on a thread of
@@ -145,7 +160,7 @@ unsigned int xgpu_image_create(void *pixels, unsigned long width, unsigned long 
 void xgpu_image_delete(unsigned int image);
 int d3d8_material_overlay_drawn(void);
 void d3d8_set_material_overlay(float const *uniforms, unsigned int const *tiles, unsigned int mask, int view, int mask_wins,
-	unsigned int surface);
+	unsigned int const *surface, int surface_only);
 
 /* ---------- constants */
 
@@ -161,6 +176,12 @@ void d3d8_set_material_overlay(float const *uniforms, unsigned int const *tiles,
 level given, level 0 first) */
 #define IMAGE_RGBA 0
 #define IMAGE_RGBA_LEVELS 2
+#define IMAGE_BC5_LEVELS 3
+/* a surface map's file next to its bitmap's tag, and the bitmaps whose
+surface maps are looked for (a power of two, at least twice the most
+bitmap tags drawn) */
+#define SURFACE_FILE_EXTENSION ".surface"
+#define SURFACE_TABLE_SIZE 2048
 /* KTX2's: VK_FORMAT_BC5_UNORM_BLOCK */
 #define KTX2_BC5_UNORM 141
 #define MAXIMUM_TOKENS 16384
@@ -214,6 +235,11 @@ struct overlay_class
 	/* (a class mask: no name, its PNG alone, its levels averaged) */
 	char name[64];
 	boolean mask;
+	/* (a surface map: tile is the mod file's whole path, its second
+	image, texture2, the occlusion and roughness; pixels2 their levels) */
+	boolean surface;
+	unsigned int texture2;
+	byte *pixels2;
 	char tile[MAXIMUM_NAME];
 	/* (levels) the tile's mip levels made by the tools, two KTX2s of BC5
 	blocks: the normal's x and y, and the cavity (half of it) and the
@@ -281,6 +307,14 @@ static struct
 	/* display.prism_surface_maps and display.prism_specular */
 	boolean surface_maps;
 	real specular;
+	/* the surface maps found next to the bitmaps drawn, by the bitmap
+	tag's index (tag NONE empty; surfaces[] NONE none, per picture) */
+	struct
+	{
+		long tag;
+		short surfaces[MAXIMUM_CLASS_MASKS];
+	} surface_table[SURFACE_TABLE_SIZE];
+	long surface_tags;
 	/* a draw is armed (mod_materials_draw_end disarms it) */
 	boolean armed;
 } mod_materials_globals;
@@ -297,6 +331,8 @@ static boolean tiles_running, tiles_stopping;
 #endif
 
 static void tiles_stop(void);
+static short surface_add(char const *path);
+static void surface_table_clear(void);
 
 /* ---------- private code */
 
@@ -365,6 +401,84 @@ static void table_add(
 	return;
 }
 
+/* ---------- the surface maps next to the bitmaps */
+
+static void surface_table_clear(
+	void)
+{
+	long index;
+
+	for (index = 0; index < SURFACE_TABLE_SIZE; index++)
+	{
+		mod_materials_globals.surface_table[index].tag = NONE;
+	}
+	mod_materials_globals.surface_tags = 0;
+
+	return;
+}
+
+/* the surface map of a bitmap tag's picture (a class), looked for next to
+its tag the first time it is asked for: tags\<bitmap>.surface.png, or
+tags\<bitmap>.surface<n>.png for picture n; NONE without one */
+static short surface_of_bitmap(
+	long tag_index,
+	short bitmap)
+{
+	unsigned long index = ((unsigned long)tag_index * 2654435761UL) & (SURFACE_TABLE_SIZE - 1);
+	long probes;
+
+	if (tag_index == NONE || bitmap < 0 || bitmap >= MAXIMUM_CLASS_MASKS)
+	{
+		return NONE;
+	}
+	for (probes = 0; probes < SURFACE_TABLE_SIZE; probes++)
+	{
+		if (mod_materials_globals.surface_table[index].tag == tag_index)
+		{
+			return mod_materials_globals.surface_table[index].surfaces[bitmap];
+		}
+		if (mod_materials_globals.surface_table[index].tag == NONE)
+		{
+			break;
+		}
+		index = (index + 1) & (SURFACE_TABLE_SIZE - 1);
+	}
+	/* (a full table looks no further: half full at most) */
+	if (probes == SURFACE_TABLE_SIZE || mod_materials_globals.surface_tags >= SURFACE_TABLE_SIZE / 2)
+	{
+		return NONE;
+	}
+	mod_materials_globals.surface_table[index].tag = tag_index;
+	mod_materials_globals.surface_tags++;
+	{
+		char const *name = tag_get_name(tag_index);
+		long count = bitmap_group_get(tag_index)->bitmaps.count;
+		short picture;
+
+		for (picture = 0; picture < MAXIMUM_CLASS_MASKS; picture++)
+		{
+			char path[MAXIMUM_NAME + 32];
+
+			mod_materials_globals.surface_table[index].surfaces[picture] = NONE;
+			if (!name || picture >= count)
+			{
+				continue;
+			}
+			if (picture)
+				snprintf(path, sizeof(path), "%s%s%d.png", name, SURFACE_FILE_EXTENSION, picture);
+			else
+				snprintf(path, sizeof(path), "%s%s.png", name, SURFACE_FILE_EXTENSION);
+			if (port_mods_file_find(path, mods_map_name()) != NONE)
+			{
+				mod_materials_globals.surface_table[index].surfaces[picture] = surface_add(path);
+				error(_error_silent, "mods: the surface map %s found for the bitmap %s", path, name);
+			}
+		}
+	}
+
+	return mod_materials_globals.surface_table[index].surfaces[bitmap];
+}
+
 /* every tile and shader let go */
 static void materials_dispose(
 	void)
@@ -379,8 +493,13 @@ static void materials_dispose(
 		{
 			xgpu_image_delete(mod_materials_globals.classes[index].texture);
 		}
+		if (mod_materials_globals.classes[index].texture2)
+		{
+			xgpu_image_delete(mod_materials_globals.classes[index].texture2);
+		}
 	}
 	mod_materials_globals.class_count = 0;
+	surface_table_clear();
 	mod_materials_globals.shader_count = 0;
 	table_clear();
 
@@ -636,7 +755,8 @@ static short mask_add(
 
 	for (index = 0; index < mod_materials_globals.class_count; index++)
 	{
-		if (mod_materials_globals.classes[index].mask && !strcmp(mod_materials_globals.classes[index].tile, file))
+		if ((mod_materials_globals.classes[index].mask || mod_materials_globals.classes[index].surface) &&
+			!strcmp(mod_materials_globals.classes[index].tile, file))
 		{
 			return index;
 		}
@@ -653,6 +773,22 @@ static short mask_add(
 	strncpy(overlay_class->tile, file, sizeof(overlay_class->tile) - 1);
 
 	return mod_materials_globals.class_count++;
+}
+
+/* a class of a surface map (its mod file's path), once for every shader
+or bitmap that names it, or NONE if there is no room */
+static short surface_add(
+	char const *path)
+{
+	short index = mask_add(path);
+
+	if (index != NONE)
+	{
+		mod_materials_globals.classes[index].mask = FALSE;
+		mod_materials_globals.classes[index].surface = TRUE;
+	}
+
+	return index;
 }
 
 /* ---------- the tiles
@@ -675,6 +811,7 @@ static unsigned long read_u32(
 /* a mod's file, all of it (malloc), or NULL */
 static byte *tile_file_read(
 	char const *name,
+	boolean whole_path,
 	unsigned long *size)
 {
 	char path[MAXIMUM_NAME + 16];
@@ -684,7 +821,7 @@ static byte *tile_file_read(
 	char *character;
 
 	*size = 0;
-	snprintf(path, sizeof(path), "materials\\%s", name);
+	snprintf(path, sizeof(path), whole_path ? "%s" : "materials\\%s", name);
 	for (character = path; *character; character++)
 	{
 		if (*character == '/')
@@ -803,6 +940,168 @@ static boolean ktx2_bc5_decode(
 	return TRUE;
 }
 
+/* a BC4 block of 16 values (each 4 bytes apart in values, rows stride
+bytes apart; columns and rows of them, the rest repeating the last):
+its two ends the least and most, every value the nearest of the eight
+between them */
+static void bc4_block_encode(
+	byte const *values,
+	unsigned long stride,
+	unsigned long columns,
+	unsigned long rows,
+	byte *block)
+{
+	byte v[16];
+	unsigned long long bits = 0;
+	int low = 255, high = 0, index;
+
+	for (index = 0; index < 16; index++)
+	{
+		unsigned long row = (unsigned long)index / 4 < rows ? (unsigned long)index / 4 : rows - 1;
+		unsigned long column = (unsigned long)index % 4 < columns ? (unsigned long)index % 4 : columns - 1;
+
+		v[index] = values[row * stride + column * 4];
+		low = v[index] < low ? v[index] : low;
+		high = v[index] > high ? v[index] : high;
+	}
+	block[0] = (byte)high;
+	block[1] = (byte)low;
+	if (high > low)
+	{
+		for (index = 0; index < 16; index++)
+		{
+			/* (palette 0 the high end, 1 the low, 2 to 7 between from high
+			to low) */
+			int step = ((high - v[index]) * 14 + (high - low)) / (2 * (high - low));
+			unsigned long long code = step == 0 ? 0 : step == 7 ? 1 : (unsigned long long)(step + 1);
+
+			bits |= code << (3 * index);
+		}
+	}
+	for (index = 0; index < 6; index++)
+		block[2 + index] = (byte)(bits >> (8 * index));
+}
+
+/* an RGBA level's channels first and first + 1 as BC5 blocks at out */
+static void bc5_level_encode(
+	byte const *pixels,
+	unsigned long width,
+	unsigned long height,
+	int first,
+	byte *out)
+{
+	unsigned long x, y;
+
+	for (y = 0; y < height; y += 4)
+	{
+		for (x = 0; x < width; x += 4)
+		{
+			byte const *at = pixels + (y * width + x) * 4 + first;
+			unsigned long columns = width - x < 4 ? width - x : 4, rows = height - y < 4 ? height - y : 4;
+
+			bc4_block_encode(at, width * 4, columns, rows, out);
+			bc4_block_encode(at + 1, width * 4, columns, rows, out + 8);
+			out += 16;
+		}
+	}
+}
+
+/* a surface map's PNG (RGBA: the normal's x and y, the occlusion, the
+roughness) decoded, its levels box-filtered, every level encoded as two
+BC5 images: pixels the normal's, pixels2 the occlusion's and roughness's */
+static void surface_decode(
+	struct overlay_class *overlay_class)
+{
+	byte *level = NULL, *normal = NULL, *occlusion = NULL;
+	unsigned long width = 0, height = 0, level_count = 1, bytes = 0, at = 0, largest;
+	unsigned long start = system_milliseconds();
+
+	if (overlay_class->files[_tile_file_png])
+	{
+		level = hud_hires_png_pixels(overlay_class->files[_tile_file_png], overlay_class->file_sizes[_tile_file_png],
+			&width, &height);
+	}
+	if (level && width && height && width <= MAXIMUM_TILE_SIZE && height <= MAXIMUM_TILE_SIZE)
+	{
+		unsigned long index;
+
+		for (largest = width > height ? width : height; largest > 1; largest >>= 1)
+			level_count++;
+		for (index = 0; index < level_count; index++)
+		{
+			unsigned long w = width >> index ? width >> index : 1, h = height >> index ? height >> index : 1;
+
+			bytes += ((w + 3) / 4) * ((h + 3) / 4) * 16;
+		}
+		normal = malloc(bytes);
+		occlusion = malloc(bytes);
+	}
+	if (normal && occlusion)
+	{
+		unsigned long index, w = width, h = height;
+
+		for (index = 0; index < level_count; index++)
+		{
+			bc5_level_encode(level, w, h, 0, normal + at);
+			bc5_level_encode(level, w, h, 2, occlusion + at);
+			at += ((w + 3) / 4) * ((h + 3) / 4) * 16;
+			if (index + 1 < level_count)
+			{
+				/* (the next level: each texel the mean of the 2 by 2 under
+				it, or of the 2 by 1 at an edge one texel wide) */
+				unsigned long nw = w > 1 ? w / 2 : 1, nh = h > 1 ? h / 2 : 1, x, y;
+				byte *next = malloc(nw * nh * 4);
+
+				if (!next)
+				{
+					free(normal);
+					free(occlusion);
+					normal = occlusion = NULL;
+					break;
+				}
+				for (y = 0; y < nh; y++)
+				{
+					for (x = 0; x < nw; x++)
+					{
+						unsigned long x0 = x * 2, y0 = y * 2, x1 = w > 1 ? x0 + 1 : x0, y1 = h > 1 ? y0 + 1 : y0;
+						int channel;
+
+						for (channel = 0; channel < 4; channel++)
+						{
+							next[(y * nw + x) * 4 + channel] = (byte)((level[(y0 * w + x0) * 4 + channel] +
+								level[(y0 * w + x1) * 4 + channel] + level[(y1 * w + x0) * 4 + channel] +
+								level[(y1 * w + x1) * 4 + channel] + 2) / 4);
+						}
+					}
+				}
+				free(level);
+				level = next;
+				w = nw;
+				h = nh;
+			}
+		}
+	}
+	else
+	{
+		free(normal);
+		free(occlusion);
+		normal = occlusion = NULL;
+	}
+	free(level);
+	overlay_class->levels_given = normal != NULL;
+	overlay_class->width = width;
+	overlay_class->height = height;
+	overlay_class->level_count = level_count;
+	overlay_class->pixels = normal;
+	overlay_class->pixels2 = occlusion;
+	overlay_class->decode_milliseconds = system_milliseconds() - start;
+	free(overlay_class->files[_tile_file_png]);
+	overlay_class->files[_tile_file_png] = NULL;
+	overlay_class->file_sizes[_tile_file_png] = 0;
+
+	return;
+}
+
 /* a class's tile decoded from its files (which it frees): its levels, or
 its PNG's level 0 */
 static void tile_decode(
@@ -815,6 +1114,11 @@ static void tile_decode(
 	unsigned long start = system_milliseconds();
 	boolean levels_given = FALSE;
 
+	if (overlay_class->surface)
+	{
+		surface_decode(overlay_class);
+		return;
+	}
 	if (normal && cavity_rough && overlay_class->file_sizes[_tile_file_normal] >= 80)
 	{
 		unsigned long largest;
@@ -933,12 +1237,12 @@ static void tiles_start(
 
 		if (overlay_class->levels[0][0] && overlay_class->levels[1][0])
 		{
-			overlay_class->files[_tile_file_normal] = tile_file_read(overlay_class->levels[0],
+			overlay_class->files[_tile_file_normal] = tile_file_read(overlay_class->levels[0], FALSE,
 				&overlay_class->file_sizes[_tile_file_normal]);
-			overlay_class->files[_tile_file_cavity_rough] = tile_file_read(overlay_class->levels[1],
+			overlay_class->files[_tile_file_cavity_rough] = tile_file_read(overlay_class->levels[1], FALSE,
 				&overlay_class->file_sizes[_tile_file_cavity_rough]);
 		}
-		overlay_class->files[_tile_file_png] = tile_file_read(overlay_class->tile,
+		overlay_class->files[_tile_file_png] = tile_file_read(overlay_class->tile, overlay_class->surface,
 			&overlay_class->file_sizes[_tile_file_png]);
 		overlay_class->state = _tile_queued;
 	}
@@ -991,9 +1295,60 @@ static void tiles_stop(
 		}
 		free(overlay_class->pixels);
 		overlay_class->pixels = NULL;
+		free(overlay_class->pixels2);
+		overlay_class->pixels2 = NULL;
 		overlay_class->state = _tile_none;
 	}
 	tiles_started = FALSE;
+
+	return;
+}
+
+/* a class the tiles' start did not read (added after it) read and queued,
+and the decoding thread started again if it has finished */
+static void tiles_kick(
+	struct overlay_class *overlay_class)
+{
+	int state;
+
+#ifdef TILES_DECODE_AHEAD
+	pthread_mutex_lock(&tiles_lock);
+	state = overlay_class->state;
+	pthread_mutex_unlock(&tiles_lock);
+#else
+	state = overlay_class->state;
+#endif
+	if (state == _tile_none)
+	{
+		overlay_class->files[_tile_file_png] = tile_file_read(overlay_class->tile, overlay_class->surface,
+			&overlay_class->file_sizes[_tile_file_png]);
+#ifdef TILES_DECODE_AHEAD
+		pthread_mutex_lock(&tiles_lock);
+		overlay_class->state = _tile_queued;
+		pthread_mutex_unlock(&tiles_lock);
+#else
+		tile_decode(overlay_class);
+		overlay_class->state = _tile_decoded;
+#endif
+		state = _tile_queued;
+	}
+#ifdef TILES_DECODE_AHEAD
+	if (state == _tile_queued)
+	{
+		pthread_mutex_lock(&tiles_lock);
+		if (!tiles_running && !tiles_stopping)
+		{
+			pthread_t thread;
+
+			tiles_running = TRUE;
+			if (pthread_create(&thread, NULL, tiles_thread_main, NULL) == 0)
+				pthread_detach(thread);
+			else
+				tiles_running = FALSE;
+		}
+		pthread_mutex_unlock(&tiles_lock);
+	}
+#endif
 
 	return;
 }
@@ -1015,6 +1370,9 @@ static boolean class_tile_load(
 		return overlay_class->texture != 0;
 	}
 	tiles_start();
+	/* (a class added after the tiles were started: a surface map found
+	next to a bitmap as it is first drawn) */
+	tiles_kick(overlay_class);
 #ifdef TILES_DECODE_AHEAD
 	pthread_mutex_lock(&tiles_lock);
 	state = overlay_class->state;
@@ -1035,14 +1393,27 @@ static boolean class_tile_load(
 		/* (an image of the texels, which it takes: the host reads them where
 		they are, and makes its levels past the first unless they are given) */
 		overlay_class->texture = xgpu_image_create(overlay_class->pixels, overlay_class->width, overlay_class->height,
-			overlay_class->level_count, overlay_class->levels_given ? IMAGE_RGBA_LEVELS : IMAGE_RGBA, TRUE);
+			overlay_class->level_count, overlay_class->surface ? IMAGE_BC5_LEVELS :
+			overlay_class->levels_given ? IMAGE_RGBA_LEVELS : IMAGE_RGBA, TRUE);
 		overlay_class->pixels = NULL;
+		if (overlay_class->surface)
+		{
+			overlay_class->texture2 = overlay_class->pixels2 ? xgpu_image_create(overlay_class->pixels2,
+				overlay_class->width, overlay_class->height, overlay_class->level_count, IMAGE_BC5_LEVELS, TRUE) : 0;
+			overlay_class->pixels2 = NULL;
+			if (!overlay_class->texture2 && overlay_class->texture)
+			{
+				xgpu_image_delete(overlay_class->texture);
+				overlay_class->texture = 0;
+			}
+		}
 		made_any = TRUE;
 		last_made = system_milliseconds();
 		if (overlay_class->texture)
 		{
 			error(_error_silent, "mods: the material overlay's %s %s: %lu levels (%s), decoded in %lu ms on the "
-				"tiles' thread, made an image in %lu ms", overlay_class->mask ? "class mask" : "tile",
+				"tiles' thread, made an image in %lu ms", overlay_class->surface ? "surface map (two BC5 images)" :
+				overlay_class->mask ? "class mask" : "tile",
 				overlay_class->tile, overlay_class->level_count,
 				overlay_class->levels_given ? "its own" : "averaged from the PNG", overlay_class->decode_milliseconds,
 				system_milliseconds() - start);
@@ -1050,7 +1421,12 @@ static boolean class_tile_load(
 	}
 	if (!overlay_class->texture)
 	{
-		if (overlay_class->mask)
+		if (overlay_class->surface)
+		{
+			error(_error_silent, "mods: the surface map %s cannot be read (an 8-bit RGBA PNG of at most %d by %d): "
+				"its draws go without it", overlay_class->tile, MAXIMUM_TILE_SIZE, MAXIMUM_TILE_SIZE);
+		}
+		else if (overlay_class->mask)
 		{
 			error(_error_silent, "mods: the material overlay's class mask %s is not built or cannot be read (an "
 				"8-bit RGBA PNG): its shaders draw with their two classes' rule", overlay_class->tile);
@@ -1062,7 +1438,7 @@ static boolean class_tile_load(
 		}
 		return FALSE;
 	}
-	if (!overlay_class->levels_given && overlay_class->levels[0][0])
+	if (!overlay_class->surface && !overlay_class->levels_given && overlay_class->levels[0][0])
 	{
 		error(_error_silent, "mods: the material overlay's levels of %s cannot be read: its PNG's are drawn",
 			overlay_class->tile);
@@ -1216,7 +1592,10 @@ static boolean shader_read(
 		{
 			char file[MAXIMUM_NAME];
 
-			entry->surfaces[index] = json_string(json, element, file, sizeof(file)) && file[0] ? mask_add(file) : NONE;
+			char path[MAXIMUM_NAME + 16];
+
+			entry->surfaces[index] = json_string(json, element, file, sizeof(file)) && file[0] &&
+				snprintf(path, sizeof(path), "materials\\%s", file) > 0 ? surface_add(path) : NONE;
 			entry->surface_count = (short)(index + 1);
 		}
 	}
@@ -1482,71 +1861,116 @@ void mod_materials_draw_begin(
 	long base_map_index,
 	short permutation_index)
 {
-	struct overlay_shader const *entry;
+	struct overlay_shader const *entry = NULL;
 	float uniforms[OVERLAY_UNIFORM_COUNT][4];
 	unsigned int tiles[NUMBER_OF_SLOTS];
 	unsigned int mask_texture = 0;
-	unsigned int surface_texture = 0;
+	unsigned int surface_textures[2] = { 0, 0 };
+	boolean overlay = FALSE;
+	short surface = NONE;
 	short bitmap = 0;
 	short slot;
 	short slot_count = 2;
 
-	if (!mod_materials_globals.shader_count)
-	{
-		return;
-	}
 	settings_read();
 	/* (a renderer without the overlay: Metal's, until its shaders match
 	Vulkan's) */
-	if (!mod_materials_globals.enabled || !d3d8_material_overlay_drawn() || !(entry = shader_find(shader)))
+	if ((!mod_materials_globals.enabled && !mod_materials_globals.surface_maps) || !d3d8_material_overlay_drawn())
 	{
 		return;
 	}
-	/* (the tiles are made the first time they are drawn: with the setting
-	off the renderer makes nothing for the overlay) */
-	if (!class_tile_load(&mod_materials_globals.classes[entry->slots[_slot_a]]) ||
-		!class_tile_load(&mod_materials_globals.classes[entry->slots[_slot_b]]))
-	{
-		return;
-	}
-	/* the class mask of the base map's bitmap (the one the draw's
-	permutation picks, as rasterizer_set_texture does), once it and the
-	other tiles are ready; until then, or without one, two classes */
+	/* the base map's bitmap the draw's permutation picks, as
+	rasterizer_set_texture does */
 	if (base_map_index != NONE && permutation_index > 0)
 	{
 		long count = bitmap_group_get(base_map_index)->bitmaps.count;
 
 		bitmap = count > 0 ? (short)(permutation_index % count) : 0;
 	}
-	if (entry->mask_count)
+	if (mod_materials_globals.shader_count)
 	{
-		short mask;
-
-		mask = bitmap < entry->mask_count ? entry->masks[bitmap] : NONE;
-		if (mask != NONE && class_tile_load(&mod_materials_globals.classes[mask]) &&
-			class_tile_load(&mod_materials_globals.classes[entry->slots[_slot_c]]) &&
-			class_tile_load(&mod_materials_globals.classes[entry->slots[_slot_d]]))
-		{
-			mask_texture = mod_materials_globals.classes[mask].texture;
-			slot_count = NUMBER_OF_SLOTS;
-		}
+		entry = shader_find(shader);
 	}
-	/* the surface map of the base map's bitmap (display.prism_surface_maps),
-	once it is ready */
-	if (mod_materials_globals.surface_maps && entry->surface_count)
+	/* the overlay's tiles, where overlay.json names the shader and they are
+	ready (they are made the first time they are drawn: with the setting off
+	the renderer makes nothing for the overlay) */
+	if (mod_materials_globals.enabled && entry)
 	{
-		short surface = bitmap < entry->surface_count ? entry->surfaces[bitmap] : NONE;
-
+		overlay = class_tile_load(&mod_materials_globals.classes[entry->slots[_slot_a]]) &&
+			class_tile_load(&mod_materials_globals.classes[entry->slots[_slot_b]]);
+	}
+	/* the surface map of the base map's bitmap (display.prism_surface_maps):
+	the one overlay.json names for the shader, else the one next to the
+	bitmap's tag (whether or not overlay.json names the shader); once it is
+	ready */
+	if (mod_materials_globals.surface_maps)
+	{
+		if (entry && entry->surface_count)
+		{
+			surface = bitmap < entry->surface_count ? entry->surfaces[bitmap] : NONE;
+		}
+		else
+		{
+			surface = surface_of_bitmap(base_map_index, bitmap);
+		}
 		if (surface != NONE && class_tile_load(&mod_materials_globals.classes[surface]))
 		{
-			surface_texture = mod_materials_globals.classes[surface].texture;
+			surface_textures[0] = mod_materials_globals.classes[surface].texture;
+			surface_textures[1] = mod_materials_globals.classes[surface].texture2;
 		}
 	}
-	memcpy(uniforms, entry->uniforms, sizeof(uniforms));
-	uniforms[10][0] = (float)entry->surface[0];
-	uniforms[10][1] = (float)entry->surface[1];
-	uniforms[10][2] = (float)(entry->surface[2] * mod_materials_globals.specular);
-	uniforms[10][3] = (float)entry->surface[3];
+	if (!overlay && !surface_textures[0])
+	{
+		return;
+	}
+	if (overlay)
+	{
+		/* the class mask, once it and the other tiles are ready; until
+		then, or without one, two classes */
+		if (entry->mask_count)
+		{
+			short mask = bitmap < entry->mask_count ? entry->masks[bitmap] : NONE;
+
+			if (mask != NONE && class_tile_load(&mod_materials_globals.classes[mask]) &&
+				class_tile_load(&mod_materials_globals.classes[entry->slots[_slot_c]]) &&
+				class_tile_load(&mod_materials_globals.classes[entry->slots[_slot_d]]))
+			{
+				mask_texture = mod_materials_globals.classes[mask].texture;
+				slot_count = NUMBER_OF_SLOTS;
+			}
+		}
+		memcpy(uniforms, entry->uniforms, sizeof(uniforms));
+	}
+	else
+	{
+		/* (the surface map alone: xgpu.h's XGPU_OVERLAY_SURFACE_ONLY. The
+		self-illuminated texels, the multipurpose map's green above a half,
+		left alone as overlay.json's exclude leaves them; the reflection bent
+		fully by the surface map's normal and darkened by half its
+		occlusion) */
+		memset(uniforms, 0, sizeof(uniforms));
+		uniforms[1][0] = -2.0f;
+		uniforms[1][1] = -1.0f;
+		uniforms[2][1] = 1.0f;
+		uniforms[3][0] = 0.5f;
+		uniforms[6][0] = 1.0f;
+		uniforms[6][1] = 0.5f;
+	}
+	if (entry)
+	{
+		uniforms[10][0] = (float)entry->surface[0];
+		uniforms[10][1] = (float)entry->surface[1];
+		uniforms[10][2] = (float)(entry->surface[2] * mod_materials_globals.specular);
+		uniforms[10][3] = (float)entry->surface[3];
+	}
+	else
+	{
+		/* (overlay.json's defaults) */
+		uniforms[10][0] = 1.0f;
+		uniforms[10][1] = 1.0f;
+		uniforms[10][2] = 0.5f * (float)mod_materials_globals.specular;
+		uniforms[10][3] = 48.0f;
+	}
 	/* (no multipurpose map: the default white texture, which is no mask) */
 	uniforms[1][3] = has_multipurpose ? 1.0f : 0.0f;
 	if (!has_multipurpose)
@@ -1554,6 +1978,12 @@ void mod_materials_draw_begin(
 		uniforms[3][0] = 2.0f;
 	}
 	uniforms[3][1] = 1.0f;
+	if (!overlay)
+	{
+		d3d8_set_material_overlay(uniforms[0], NULL, 0, mod_materials_globals.view, FALSE, surface_textures, TRUE);
+		mod_materials_globals.armed = TRUE;
+		return;
+	}
 	for (slot = 0; slot < NUMBER_OF_SLOTS; slot++)
 	{
 		struct overlay_class const *overlay_class = &mod_materials_globals.classes[entry->slots[slot]];
@@ -1572,7 +2002,7 @@ void mod_materials_draw_begin(
 		uniforms[slot_uniform[slot]][3] = overlay_class->rough * fade;
 	}
 	d3d8_set_material_overlay(uniforms[0], tiles, mask_texture, mod_materials_globals.view, entry->mask_wins,
-		surface_texture);
+		surface_textures[0] ? surface_textures : NULL, FALSE);
 	mod_materials_globals.armed = TRUE;
 
 	return;
@@ -1583,7 +2013,7 @@ void mod_materials_draw_end(
 {
 	if (mod_materials_globals.armed)
 	{
-		d3d8_set_material_overlay(NULL, NULL, 0, 0, 0, 0);
+		d3d8_set_material_overlay(NULL, NULL, 0, 0, 0, NULL, 0);
 		mod_materials_globals.armed = FALSE;
 	}
 

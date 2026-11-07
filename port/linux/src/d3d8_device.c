@@ -3795,7 +3795,8 @@ to D, the last two only with a class mask; 0 none), its uniform
 (XGPU_OVERLAY_UNIFORM_COUNT vec4s), its debug view
 (display.prism_overlay_view) and whether the class mask's own classes win
 over the multipurpose channel's rule (mask_wins: XGPU_OVERLAY_CLASS_MASK_WINS,
-with a mask alone), and its surface map (display.prism_surface_maps: 0 none); NULL uniforms disarm it, as it is for every
+with a mask alone), and its surface map's two images (display.prism_surface_maps: NULL
+none) with or without the tiles (surface_only); NULL uniforms disarm it, as it is for every
 other draw. A draw of a model lighting program whose lighting hands on its
 world position is lit for each pixel with it (xgpu_draw_derive); any other
 draw goes as it is. */
@@ -3814,7 +3815,7 @@ int d3d8_material_overlay_drawn(void)
 }
 
 void d3d8_set_material_overlay(const float *uniforms, const unsigned int *tiles, unsigned int mask, int view,
-	int mask_wins, unsigned int surface)
+	int mask_wins, const unsigned int *surface, int surface_only)
 {
 	int tile;
 
@@ -3826,13 +3827,17 @@ void d3d8_set_material_overlay(const float *uniforms, const unsigned int *tiles,
 	material_overlay.armed = TRUE;
 	memcpy(material_overlay.overlay.uniforms, uniforms, sizeof(material_overlay.overlay.uniforms));
 	for (tile = 0; tile < XGPU_OVERLAY_TILE_COUNT; tile++)
-		material_overlay.overlay.images[tile] = tiles[tile];
+		material_overlay.overlay.images[tile] = tiles ? tiles[tile] : 0;
 	material_overlay.overlay.images[XGPU_OVERLAY_TILE_COUNT] = mask;
-	material_overlay.overlay.images[XGPU_OVERLAY_SURFACE_IMAGE] = surface;
+	for (tile = 0; tile < XGPU_OVERLAY_SURFACE_IMAGES; tile++)
+		material_overlay.overlay.images[XGPU_OVERLAY_SURFACE_IMAGE + tile] = surface ? surface[tile] : 0;
+	if (!surface || !surface[0] || !surface[1])
+		surface_only = 0;
 	if (view < 0 || view > 4)
 		view = 0;
 	material_overlay.key = (unsigned char)(1 + 2 * view + (mask ? XGPU_OVERLAY_CLASS_MASK : 0) +
-		(mask && mask_wins ? XGPU_OVERLAY_CLASS_MASK_WINS : 0) + (surface ? XGPU_OVERLAY_SURFACE : 0));
+		(mask && mask_wins ? XGPU_OVERLAY_CLASS_MASK_WINS : 0) +
+		(surface && surface[0] && surface[1] ? XGPU_OVERLAY_SURFACE : 0) + (surface_only ? XGPU_OVERLAY_SURFACE_ONLY : 0));
 }
 
 /* display.per_pixel_lighting: the model lighting programs' draws are lit for
