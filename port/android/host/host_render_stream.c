@@ -241,6 +241,8 @@ static const uint32_t record_minimum[XGPU_STREAM_RECORD_TYPES] =
 	[XGPU_STREAM_MESH_DRAW] = sizeof(struct xgpu_stream_mesh_draw),
 	[XGPU_STREAM_MATERIAL_DEFINE] = sizeof(struct xgpu_stream_material_define),
 	[XGPU_STREAM_MATERIAL_BIND] = sizeof(struct xgpu_stream_value),
+	[XGPU_STREAM_RT_STATIC] = sizeof(struct xgpu_stream_rt_static),
+	[XGPU_STREAM_RT_FRAME] = sizeof(struct xgpu_stream_rt_frame),
 	[XGPU_STREAM_PIPELINE_STAND_IN] = sizeof(struct xgpu_stream_pipeline_stand_in),
 	/* (and its folder's path, at least its NUL) */
 	[XGPU_STREAM_SCREENSHOT] = sizeof(struct xgpu_stream_screenshot) + XGPU_STREAM_RECORD_ALIGNMENT,
@@ -499,6 +501,10 @@ static int decode_record(struct host_render_decoder *decoder, const unsigned cha
 		/* (display.prism_materials: their images are the store's) */
 		if (!capabilities.texture_store || !backend->material_define || !backend->material_bind)
 			capabilities.materials = 0;
+		/* (display.prism_rt: where the backend traces, its capture of a
+		frame not a recording's) */
+		if (host_render_record_replaying() || !backend->rt_static || !backend->rt_frame)
+			capabilities.ray_tracing = 0;
 		answer(((const struct xgpu_stream_reply_record *)start)->reply, &capabilities, sizeof(capabilities));
 		break;
 	}
@@ -591,6 +597,25 @@ static int decode_record(struct host_render_decoder *decoder, const unsigned cha
 		CALL(material_define, material);
 		break;
 	}
+	case XGPU_STREAM_RT_STATIC:
+	{
+		const struct xgpu_stream_rt_static *rt = (const void *)start;
+		const float *positions = NULL;
+
+		if (rt->phase > XGPU_RT_STATIC_RELEASE || rt->count > XGPU_STREAM_RT_SLICE_TRIANGLES ||
+			(uint64_t)rt->count * 9 * sizeof(float) != rt->size ||
+			(rt->size && !data_inside(decoder, start, size, rt->data, rt->size)))
+			return XGPU_STREAM_ERROR_BOUNDS;
+		if (rt->size)
+			positions = (const float *)host_pointer(rt->data);
+		CALL(rt_static, rt, positions);
+		break;
+	}
+	case XGPU_STREAM_RT_FRAME:
+		if (((const struct xgpu_stream_rt_frame *)(const void *)start)->light_count > XGPU_STREAM_RT_LIGHTS)
+			return XGPU_STREAM_ERROR_RECORD;
+		CALL(rt_frame, (const void *)start);
+		break;
 	case XGPU_STREAM_MATERIAL_BIND:
 		if (value->value > XGPU_STREAM_MATERIALS)
 			return XGPU_STREAM_ERROR_RECORD;

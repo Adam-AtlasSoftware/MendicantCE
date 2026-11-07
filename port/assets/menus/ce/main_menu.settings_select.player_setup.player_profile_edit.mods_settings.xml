@@ -24,6 +24,8 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_textures" x="28" y="281" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_texture_budget_mb" x="28" y="302" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_materials" x="28" y="323" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_rt" x="28" y="344" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_rt_quality" x="28" y="365" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/button_bar" y="414"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/tabs" y="76"/>
 	</widget>
@@ -172,6 +174,24 @@
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_materials_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="STOCK|PBR" setting="display.prism_materials" values="stock|pbr" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
 		<on event="created" run="port setting load"/>
 	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_rt" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt_spinner" x="188"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" string_index="11" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="OFF|SHADOWS|GI|PATH TRACED" setting="display.prism_rt" values="off|shadows|gi|pathtraced" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+		<on event="created" run="port setting load"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_rt_quality" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt_quality_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt_quality_spinner" x="188"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt_quality_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" string_index="12" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt_quality_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="LOW|MEDIUM|HIGH|ULTRA" setting="display.prism_rt_quality" values="low|medium|high|ultra" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+		<on event="created" run="port setting load"/>
+	</widget>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels">
 		<string text="MODS"/>
 		<string text="MANAGE MODS ›"/>
@@ -184,6 +204,8 @@
 		<string text="TEXTURE DETAIL"/>
 		<string text="TEXTURE MEMORY"/>
 		<string text="MATERIALS"/>
+		<string text="RAY TRACING"/>
+		<string text="RAY TRACING QUALITY"/>
 	</strings>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/help_strings">
 		<string text="Texture, sound, text and model packs from the mods folder, and the Theater's recorded games."/>
@@ -198,5 +220,7 @@
 		<string text="Draws the sharper textures mods ship in place of the game's, once they are in the graphics card's memory. Stock draws the game's own."/>
 		<string text="How much of the graphics card's memory mods' textures may take. Auto takes six tenths of what is free; past it, those not seen lately go back to the game's."/>
 		<string text="Lights armour and weapons with the materials mods give them: their colour, bumps, roughness, metal and coats under the level's own lights. Stock draws them as the Xbox did."/>
+		<string text="On graphics cards that trace rays: Shadows casts the sun's shadows of everything on screen and traced ambient occlusion; GI also bounces the light of plasma, muzzle flashes and the sky about the characters. The level keeps its own brightness and colours. Off draws the game's own light."/>
+		<string text="More rays a pixel: softer, steadier shadows and more of the bounced light, at more of the graphics card's time. Low suits the Steam Deck."/>
 	</strings>
 </menus>

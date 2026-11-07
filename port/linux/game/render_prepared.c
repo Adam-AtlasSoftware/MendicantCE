@@ -143,7 +143,7 @@ static char const *const prepared_settings[] =
 	"display.ambient_occlusion", "display.anisotropic_filtering", "display.anti_aliasing", "display.astc_textures",
 	"display.dynamic_lights", "display.graphics", "display.hdr", "display.hdr_mode", "display.high_res_hud",
 	"display.high_res_text", "display.model_detail", "display.overshield_effect", "display.panini",
-	"display.panini_vertical", "display.per_pixel_lighting", "display.shadow_resolution", "display.shield_glow", "display.structure_culling",
+	"display.panini_vertical", "display.per_pixel_lighting", "display.prism_rt", "display.shadow_resolution", "display.shield_glow", "display.structure_culling",
 	"display.first_person_legs", "display.viewmodel_shield", "display.viewmodel_visible",
 };
 

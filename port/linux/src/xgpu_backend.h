@@ -84,6 +84,9 @@ struct xgpu_backend_capabilities
 	/* display.prism_materials: the GGX path's shaders, a material's images
 	from the store (xgpu_backend_material_define) */
 	BOOL materials;
+	/* display.prism_rt: hardware ray queries (xgpu_backend_rt_static,
+	xgpu_backend_rt_frame; docs/prism_rt.md) */
+	BOOL ray_tracing;
 };
 
 extern struct xgpu_backend_capabilities xgpu_backend_capabilities;
@@ -400,6 +403,17 @@ void xgpu_backend_material_define(unsigned long id, unsigned int flags, const un
 	const float *uniforms);
 void xgpu_backend_material_bind(unsigned long id);
 BOOL xgpu_backend_materials_available(void);
+
+/* ---------- display.prism_rt (docs/prism_rt.md; xgpu_stream.h's RT_STATIC
+and RT_FRAME, their fields): the structure's triangles for the acceleration
+structures, a slice at a time (phase XGPU_RT_STATIC_*; positions count * 9
+floats), and each frame's mode, settings, sun, sky and lights (frame: a
+struct xgpu_stream_rt_frame's body, its header unused). Nothing is sent
+where the backend cannot trace (xgpu_backend_capabilities' ray_tracing). */
+void xgpu_backend_rt_static(int phase, unsigned long generation, unsigned long first, unsigned long count,
+	unsigned long triangles, const float *positions);
+struct xgpu_stream_rt_frame;
+void xgpu_backend_rt_frame(const struct xgpu_stream_rt_frame *frame);
 
 /* ---------- pipelines */
 

@@ -438,11 +438,29 @@ void halo_world_ao_window(float const field[2][4], float const parameters[2][4],
 		memcpy(made->proxies, proxies, (size_t)count * sizeof(made->proxies[0]));
 	made->parameters[0][3] = (float)count;
 	/* (found once a pixel: at a quarter of the pixels, or each) */
-	world_ao.scale = config_boolean("debug.world_ao_full_resolution") ? 1.0f : 2.0f;
+	world_ao.scale = config_boolean("debug.world_ao_full_resolution") || prism_rt_full_resolution() ? 1.0f : 2.0f;
 	made->parameters[1][3] = world_ao.scale;
 	memcpy(made->grid, grid, sizeof(made->grid));
 	memcpy(made->cells, cells, sizeof(made->cells));
 	xgpu_backend_world_ao_window(made);
+}
+
+/* display.prism_rt (port/linux/game/prism_rt.c): whether the renderer
+traces rays, and its records */
+int halo_prism_rt_available(void)
+{
+	return xgpu_backend_capabilities.ray_tracing;
+}
+
+void halo_prism_rt_static(int phase, unsigned long generation, unsigned long first, unsigned long count,
+	unsigned long triangles, float const *positions)
+{
+	xgpu_backend_rt_static(phase, generation, first, count, triangles, positions);
+}
+
+void halo_prism_rt_frame(void const *frame)
+{
+	xgpu_backend_rt_frame((const struct xgpu_stream_rt_frame *)frame);
 }
 
 void halo_world_ao_object(int owner, float reference)

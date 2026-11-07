@@ -152,6 +152,13 @@ struct host_render_backend
 	void (*mesh_instance)(void *context, const struct xgpu_stream_mesh_instance *record,
 		const float (*matrices)[3][4]);
 	void (*mesh_draw)(void *context, const struct xgpu_stream_mesh_draw *record);
+	/* display.prism_rt: the structure's triangles (phase checked, its data
+	inside the guest's memory: count * 9 floats, at most
+	XGPU_STREAM_RT_SLICE_TRIANGLES), each frame's lights and settings
+	(light_count at most XGPU_STREAM_RT_LIGHTS). NULL (either): no ray
+	tracing (INITIALIZE's ray_tracing then 0, and nothing sent) */
+	void (*rt_static)(void *context, const struct xgpu_stream_rt_static *record, const float *positions);
+	void (*rt_frame)(void *context, const struct xgpu_stream_rt_frame *record);
 
 	void (*set_constants)(void *context, const struct xgpu_stream_constants *record);
 	void (*vertex_program)(void *context, const struct xgpu_stream_vertex_program *record);

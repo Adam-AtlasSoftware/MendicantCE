@@ -466,6 +466,47 @@ static const struct config_setting config_settings[] =
 		"self-illumination and detail maps kept); \"stock\" none, as the Xbox\n"
 		"drew them. Read each frame (the console's prism_set \"materials pbr\").\n"
 		"Vulkan only; the Mac's Metal renderer draws stock." },
+	{ "display.prism_rt", _config_string, "\"off\"", "HALO_PRISM_RT", _environment_value, _platform_desktop,
+		"PRISM: hardware ray tracing (docs/prism_rt.md), on graphics cards that\n"
+		"have it: \"shadows\" the sun's shadows of everything on screen traced\n"
+		"(characters, vehicles, scenery and the level's own shapes), taking light\n"
+		"only where the level's lightmap had the sun, and traced ambient occlusion\n"
+		"(in place of display.ambient_occlusion's); \"gi\" also the light that\n"
+		"bounces from the plasma, muzzle flashes and the sky's light about the\n"
+		"objects; \"pathtraced\" every light traced (the most costly). \"off\"\n"
+		"none, the game's own light. CE's brightness and colours are kept; read\n"
+		"each frame (the console's prism_set \"rt shadows\"). Vulkan only: greyed\n"
+		"out where the card cannot trace rays." },
+	{ "display.prism_rt_quality", _config_string, "\"medium\"", "HALO_PRISM_RT_QUALITY", _environment_value,
+		_platform_desktop,
+		"PRISM ray tracing's quality: \"low\" (Steam Deck: half the pixels, one\n"
+		"ray), \"medium\", \"high\" or \"ultra\" (more rays each pixel, softer\n"
+		"and steadier shadows, more of the light that bounces)." },
+	{ "display.prism_rt_resolution", _config_string, "\"auto\"", "HALO_PRISM_RT_RESOLUTION", _environment_value,
+		_platform_desktop,
+		"PRISM ray tracing's pixels: \"half\" a ray for each 2x2 block,\n"
+		"\"full\" each pixel, \"auto\" full but at low quality." },
+	{ "display.prism_rt_denoiser", _config_string, "\"spatiotemporal\"", "HALO_PRISM_RT_DENOISER",
+		_environment_value, _platform_desktop,
+		"PRISM ray tracing's filter of its rays' noise: \"spatiotemporal\" (the\n"
+		"frames before and the pixels about), \"temporal\" (the frames before\n"
+		"alone) or \"off\" (the rays as they are: for checking)." },
+	{ "display.prism_rt_reflections", _config_string, "\"off\"", "HALO_PRISM_RT_REFLECTIONS", _environment_value,
+		_platform_desktop,
+		"PRISM ray tracing's reflections (with \"gi\" or above): \"visor\" the\n"
+		"Chief's visor and polished metal, \"all\" the level's shiny surfaces and\n"
+		"water too; \"off\" the game's own reflections." },
+	{ "display.prism_rt_mood", _config_integer, "100", "HALO_PRISM_RT_MOOD", _environment_value, _platform_desktop,
+		"PRISM ray tracing: how closely its light keeps to the brightness the\n"
+		"level had (0 to 100; 100 keeps CE's mood, 0 the traced light alone)." },
+	{ "display.prism_rt_objects", _config_string, "\"auto\"", "HALO_PRISM_RT_OBJECTS", _environment_value,
+		_platform_desktop,
+		"PRISM ray tracing: the objects' shapes traced: \"auto\", \"view_lod\"\n"
+		"(as drawn) or \"low_lod\" (a coarser level of detail, cheaper)." },
+	{ "display.prism_rt_rate", _config_string, "\"full\"", "HALO_PRISM_RT_RATE", _environment_value,
+		_platform_desktop,
+		"PRISM ray tracing: \"half\" traces the bounced light every other frame\n"
+		"(shadows every frame); \"full\" every frame." },
 	{ "display.structure_culling", _config_integer, STRUCTURE_CULLING_DEFAULT, "HALO_STRUCTURE_CULLING", _environment_value,
 		_platform_all,
 		"Which tests skip the level's triangles the camera cannot see, as bits\n"
@@ -2405,6 +2446,11 @@ static const struct config_setting config_settings[] =
 		"menu to the frame that shows it; a rumble's step to the motors' write\n"
 		"(port/linux/game/latency_log.c, tools/latency_summary.py); empty for\n"
 		"none." },
+	{ "debug.prism_rt_view", _config_string, "\"off\"", "HALO_PRISM_RT_VIEW", _environment_value, _platform_desktop,
+		"With display.prism_rt, show one of its parts in place of the picture:\n"
+		"\"visibility\" the sun's (white lit, black in a shadow), \"ao\" the\n"
+		"traced ambient occlusion, \"gi\" the bounced light, \"normals\", \"heat\"\n"
+		"(the rays' cost); \"off\" the game. For checking." },
 	{ "debug.prism_mesh_dump", _config_string, "\"\"", "HALO_PRISM_MESH_DUMP", _environment_value, _platform_all,
 		"A model tag's name (or \"*\" for all) whose geometry, nodes, regions,\n"
 		"shaders and markers are written as the game draws them to the data\n"
@@ -3792,6 +3838,7 @@ static const struct
 	{ "display.model_detail", "\"auto\"" },
 	{ "display.dynamic_lights", "\"classic\"" },
 	{ "display.ambient_occlusion", "\"off\"" },
+	{ "display.prism_rt", "\"off\"" },
 	{ "game.enhanced_animations", "false", 1 },
 	{ "display.menu_fade", "true", 1 },
 };
@@ -4137,6 +4184,15 @@ static const struct
 	{ "display.resolution_scaling", { "native", "original", NULL }, NULL },
 	{ "display.anti_aliasing", { "off", "fxaa", "smaa", "ssaa2x", "msaa2x", "msaa4x", "msaa8x", NULL }, NULL },
 	{ "display.ambient_occlusion", { "off", "world", NULL }, "off" },
+	{ "display.prism_rt", { "off", "shadows", "gi", "pathtraced", NULL }, "off" },
+	{ "display.prism_rt_quality", { "medium", "low", "high", "ultra", NULL }, "medium" },
+	{ "display.prism_rt_resolution", { "auto", "half", "full", NULL }, "auto" },
+	{ "display.prism_rt_denoiser", { "spatiotemporal", "temporal", "off", NULL }, "spatiotemporal" },
+	{ "display.prism_rt_reflections", { "off", "visor", "all", NULL }, "off" },
+	{ "display.prism_rt_objects", { "auto", "view_lod", "low_lod", NULL }, "auto" },
+	{ "display.prism_rt_rate", { "full", "half", NULL }, "full" },
+	{ "debug.prism_rt_view", { "off", "visibility", "ao", "gi", "reflections", "albedo", "normals", "probes",
+		"heat", NULL }, "off" },
 	{ "display.astc_textures", { "auto", "always", "off", NULL }, NULL },
 	{ "display.picture_position", { "center", "top", "bottom", NULL }, NULL },
 	{ "display.orientation", { "landscape", "portrait", "auto", NULL }, NULL },

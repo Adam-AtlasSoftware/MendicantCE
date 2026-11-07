@@ -2178,6 +2178,33 @@ static void gyro_rows_show(struct widget_instance *list)
 		discord_text_set(value, halo_gyro_calibrating() ? "HOLD STILL" : gyro_calibrated ? "DONE" : "");
 }
 
+/* Advanced Graphics' Ray Tracing and its quality (display.prism_rt,
+docs/prism_rt.md): greyed out where the renderer cannot trace rays (the
+graphics card has no ray queries, Metal, the null renderer) */
+int halo_prism_rt_available(void);
+
+static void prism_rt_rows_show(struct widget_instance *list)
+{
+	static char const *const rows[][2] =
+	{
+		{ "op_prism_rt", "prism_rt_spinner" }, { "op_prism_rt_quality", "prism_rt_quality_spinner" },
+	};
+	boolean locked = !halo_prism_rt_available();
+	short index;
+
+	for (index = 0; index < (short)NUMBEROF(rows); index++)
+	{
+		struct widget_instance *row = named(list, rows[index][0], 0);
+		struct widget_instance *spinner = named(list, rows[index][1], 0);
+
+		if (!row || !spinner || spinner->disabled == locked)
+			continue;
+		row->disabled = locked;
+		spinner->disabled = locked;
+		row->alpha_modifier = locked ? 0.4f : 1.0f;
+	}
+}
+
 static void sim_rate_row_show(struct widget_instance *list)
 {
 	struct widget_instance *row = named(list, "op_sim_rate", 0);
@@ -3408,6 +3435,7 @@ static void settings_page_update(struct widget_instance *list)
 	controls_page_update(list);
 	graphics_preset_show(list);
 	sim_rate_row_show(list);
+	prism_rt_rows_show(list);
 	viewmodel_weapon_rows_show(list);
 	gyro_rows_show(list);
 	settings_each(screen, setting_stash);

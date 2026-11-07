@@ -30,6 +30,9 @@ the Classic preset's "off") draws exactly as before.
 const char *config_string(const char *name);
 int config_boolean(const char *name);
 unsigned long halo_gpu_settings_taken(void);
+/* prism_rt.c's (display.prism_rt: its G-buffer is the pre-pass's) */
+void prism_rt_frame_begin(void);
+void prism_rt_map_unloaded(void);
 unsigned long long SDL_GetTicksNS(void);
 /* (render_enumerate.c's: the window drawn is a map's first frame's, unseen,
 which prepares its pipelines) */
@@ -78,6 +81,10 @@ int world_ao_mode(void)
 		world_ao.initialized = 1;
 		world_ao.read_at = changes;
 		world_ao.mode = setting && !strcmp(setting, "world") ? WORLD_AO_PROXIES | WORLD_AO_FIELD : 0;
+		/* (display.prism_rt: the pre-pass drawn, which its rays start from,
+		whatever this setting) */
+		if (prism_rt_mode())
+			world_ao.mode = WORLD_AO_PROXIES | WORLD_AO_FIELD;
 	}
 	return world_ao.mode;
 }
@@ -102,6 +109,7 @@ static void world_ao_scene_release(void);
 
 void world_ao_map_unloaded(void)
 {
+	prism_rt_map_unloaded();
 	world_ao_scene_release();
 	world_sdf_map_unloaded();
 	world_proxies_map_unloaded();
@@ -290,6 +298,7 @@ void world_ao_frame_begin(void)
 	if (!world_ao_mode())
 		return;
 	world_scene_frame_begin();
+	prism_rt_frame_begin();
 	/* (not with debug.world_ao_test's made-up field, which the level's
 	would overwrite in the backend's one texture) */
 	test = config_string("debug.world_ao_test");

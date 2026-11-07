@@ -946,6 +946,19 @@ PAGES = {
             ("MATERIALS", "display.prism_materials", [("STOCK", "stock"), ("PBR", "pbr")],
              "Lights armour and weapons with the materials mods give them: their colour, bumps, roughness, "
              "metal and coats under the level's own lights. Stock draws them as the Xbox did.", "desktop"),
+            # (PRISM's ray tracing, docs/prism_rt.md: drawn by the Vulkan
+            # renderer where the graphics card traces rays; nothing sent
+            # otherwise)
+            ("RAY TRACING", "display.prism_rt",
+             [("OFF", "off"), ("SHADOWS", "shadows"), ("GI", "gi"), ("PATH TRACED", "pathtraced")],
+             "On graphics cards that trace rays: Shadows casts the sun's shadows of everything on screen and "
+             "traced ambient occlusion; GI also bounces the light of plasma, muzzle flashes and the sky about the "
+             "characters. The level keeps its own brightness and colours. Off draws the game's own light.",
+             "desktop"),
+            ("RAY TRACING QUALITY", "display.prism_rt_quality",
+             [("LOW", "low"), ("MEDIUM", "medium"), ("HIGH", "high"), ("ULTRA", "ultra")],
+             "More rays a pixel: softer, steadier shadows and more of the bounced light, at more of the graphics "
+             "card's time. Low suits the Steam Deck.", "desktop"),
         ],
     },
     # ---- the pages the rows open

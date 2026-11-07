@@ -96,6 +96,13 @@ other value, the VR mode's eye passes until they are done, the Classic
 preset) */
 int world_ao_mode(void);
 
+/* display.prism_rt (port/linux/game/prism_rt.c; docs/prism_rt.md): its
+mode (0 off, or where the renderer cannot trace), which draws world AO's
+pre-pass as its G-buffer whatever display.ambient_occlusion says; whether
+the pre-pass's pass is found at every pixel (else a quarter) */
+int prism_rt_mode(void);
+int prism_rt_full_resolution(void);
+
 /* the map loaded (scenario_load: its scene found, its fields looked for in
 the cache; a missing one baked in the background, never here), a BSP
 switched to (scenario_switch_structure_bsp), the map unloaded

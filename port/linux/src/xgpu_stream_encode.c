@@ -657,6 +657,7 @@ void xgpu_backend_initialize(void)
 	xgpu_backend_capabilities.texture_store = stream.capabilities.texture_store;
 	xgpu_backend_capabilities.mesh_store = stream.capabilities.mesh_store;
 	xgpu_backend_capabilities.materials = stream.capabilities.materials && stream.capabilities.texture_store;
+	xgpu_backend_capabilities.ray_tracing = stream.capabilities.ray_tracing;
 }
 
 /* (at exit) the frames submitted played, the render thread ended */
@@ -1454,6 +1455,43 @@ void xgpu_backend_mesh_draw(unsigned long instance, int region, int permutation,
 	record_body->flags = (uint8_t)flags;
 	record_body->geometry = (uint16_t)geometry;
 	record_body->part = (uint16_t)part;
+}
+
+/* ---------- display.prism_rt (docs/prism_rt.md) */
+
+void xgpu_backend_rt_static(int phase, unsigned long generation, unsigned long first, unsigned long count,
+	unsigned long triangles, const float *positions)
+{
+	struct xgpu_stream_rt_static *record_body;
+	uint32_t size = phase == XGPU_RT_STATIC_TRIANGLES && positions ? (uint32_t)(count * 9 * sizeof(float)) : 0;
+	unsigned char *place;
+
+	if (!stream.open || !stream.capabilities.ray_tracing || count > XGPU_STREAM_RT_SLICE_TRIANGLES)
+		return;
+	record_body = record_data(XGPU_STREAM_RT_STATIC, sizeof(*record_body), size ? carried_one(size) : 0, &place);
+	record_body->phase = (uint32_t)phase;
+	record_body->generation = (uint32_t)generation;
+	record_body->first = (uint32_t)first;
+	record_body->count = size ? (uint32_t)count : 0;
+	record_body->triangles = (uint32_t)triangles;
+	record_body->size = size;
+	record_body->data = size ? carry_one(&place, positions, size) : 0;
+}
+
+void xgpu_backend_rt_frame(const struct xgpu_stream_rt_frame *frame)
+{
+	struct xgpu_stream_rt_frame *record_body;
+	uint32_t header;
+
+	if (!stream.open || !stream.capabilities.ray_tracing || !frame)
+		return;
+	record_body = record(XGPU_STREAM_RT_FRAME, sizeof(*record_body));
+	header = record_body->header;
+	*record_body = *frame;
+	record_body->header = header;
+	if (record_body->light_count > XGPU_STREAM_RT_LIGHTS)
+		record_body->light_count = XGPU_STREAM_RT_LIGHTS;
+	stream_finite(&record_body->settings[0], 16 + 16 + XGPU_STREAM_RT_LIGHTS * 12, "ray tracing's frame", 0);
 }
 
 /* ---------- display.prism_materials */

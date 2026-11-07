@@ -2044,10 +2044,17 @@ void mod_materials_prism_set(
 	if (!space || space == text || (size_t)(space - text) >= sizeof(name) - 16)
 	{
 		console_warning("prism_set \"<setting> <value>\": material_overlay, overlay_strength, overlay_view, surface_maps, "
-			"specular or materials");
+			"specular, materials, rt, rt_quality, rt_resolution, rt_denoiser, rt_mood or rt_view");
 		return;
 	}
-	snprintf(name, sizeof(name), "display.prism_%.*s", (int)(space - text), text);
+	/* (display.prism_rt's debug view: debug.prism_rt_view; a setting's whole
+name, with its dot: as it is) */
+	if (space - text == 7 && !strncmp(text, "rt_view", 7))
+		snprintf(name, sizeof(name), "debug.prism_rt_view");
+	else if (memchr(text, '.', (size_t)(space - text)))
+		snprintf(name, sizeof(name), "%.*s", (int)(space - text), text);
+	else
+		snprintf(name, sizeof(name), "display.prism_%.*s", (int)(space - text), text);
 	if (!config_write(name, space + 1))
 	{
 		console_warning("%s cannot be set to %s", name, space + 1);
