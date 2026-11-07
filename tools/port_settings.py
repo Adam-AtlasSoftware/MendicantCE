@@ -932,6 +932,12 @@ PAGES = {
             ("MATERIAL DETAIL", "display.prism_material_overlay", ON_OFF,
              "Gives weapons and armour the fine grain of their surfaces (machining, weave, wear) from a mod's "
              "material overlay. It changes only the light on them. Off draws them as the Xbox did.", "desktop"),
+            # (PRISM's remodelled level geometry, built on this machine:
+            # port/linux/game/prism_world_geometry.c)
+            ("WORLD GEOMETRY", "display.prism_world_geometry", [("XBOX", "stock"), ("REMODEL", "remodel")],
+             "Remodel draws the level's rock, sand and Forerunner walls from a denser model built on this computer "
+             "from your maps: rounded rock, bevelled edges, the same light. You still walk and collide on the "
+             "original. Xbox draws the map's own.", "desktop"),
         ],
     },
     # ---- the pages the rows open

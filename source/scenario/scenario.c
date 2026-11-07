@@ -200,6 +200,7 @@ symbols in this file:
 #include "structure_bsp_cache.h" /* port: port/linux/game/structure_bsp_cache.c */
 #include "load_zone.h" /* port: port/linux/game/load_zone.c */
 #include "world_ao.h" /* port: port/linux/game/world_ao.c */
+#include "prism_world_geometry.h" /* port: port/linux/game/prism_world_geometry.c */
 
 /* ---------- constants */
 
@@ -377,6 +378,8 @@ void scenario_unload(
 	/* port: and display.ambient_occlusion "world"'s scene, proxies and
 	field (port/linux/game/world_ao.c) */
 	world_ao_map_unloaded();
+	/* port: and PRISM's remodel of its bsp (port/linux/game/prism_world_geometry.c) */
+	prism_world_geometry_map_unloaded();
 	/* port: and the copies of its bsps (port/linux/game/structure_bsp_cache.c) */
 	structure_bsp_cache_dispose();
 	scenario_tags_unload();

@@ -2031,7 +2031,7 @@ void mod_materials_prism_set(
 	if (!space || space == text || (size_t)(space - text) >= sizeof(name) - 16)
 	{
 		console_warning("prism_set \"<setting> <value>\": material_overlay, overlay_strength, overlay_view, surface_maps "
-			"or specular");
+			"specular or world_geometry");
 		return;
 	}
 	snprintf(name, sizeof(name), "display.prism_%.*s", (int)(space - text), text);

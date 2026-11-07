@@ -422,6 +422,15 @@ static const struct config_setting config_settings[] =
 		_platform_desktop,
 		"PRISM v2: how strong the surface maps' highlight is, 0 to\n"
 		"2 (0 none)." },
+	{ "display.prism_world_geometry", _config_string, "\"stock\"", "HALO_PRISM_WORLD_GEOMETRY", _environment_value,
+		_platform_desktop,
+		"PRISM v2: \"remodel\" draws the level's walls, rock and ground from a\n"
+		"denser remodel built on this machine from your maps (prism_world\\,\n"
+		"art_pipeline/world_geo: bevelled edges, rounded rock, relief from the\n"
+		"level's own textures), lit by the level's own lightmaps; collision,\n"
+		"paths and visibility stay the map's. A level without a remodel is\n"
+		"drawn stock. \"stock\" draws the map's own. Read each frame\n"
+		"(prism_set \"world_geometry remodel\")." },
 	{ "display.structure_culling", _config_integer, STRUCTURE_CULLING_DEFAULT, "HALO_STRUCTURE_CULLING", _environment_value,
 		_platform_all,
 		"Which tests skip the level's triangles the camera cannot see, as bits\n"
