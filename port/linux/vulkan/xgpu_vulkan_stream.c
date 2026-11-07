@@ -76,7 +76,8 @@ _Static_assert(XGPU_SPIRV_SET_OCCLUSION == XGPU_VULKAN_SET_OCCLUSION &&
 	XGPU_SPIRV_BINDING_WORLD_AO == XGPU_VULKAN_BINDING_WORLD_AO &&
 	XGPU_SPIRV_BINDING_WORLD_SDF_TABLE == XGPU_VULKAN_BINDING_WORLD_SDF_TABLE &&
 	XGPU_SPIRV_BINDING_WORLD_AO_SCENERY == XGPU_VULKAN_BINDING_WORLD_AO_SCENERY &&
-	XGPU_SPIRV_BINDING_WORLD_AO_OBJECTS == XGPU_VULKAN_BINDING_WORLD_AO_OBJECTS,
+	XGPU_SPIRV_BINDING_WORLD_AO_OBJECTS == XGPU_VULKAN_BINDING_WORLD_AO_OBJECTS &&
+	XGPU_SPIRV_BINDING_WORLD_CASCADES == XGPU_VULKAN_BINDING_WORLD_CASCADES,
 	"display.ambient_occlusion \"world\"'s bindings");
 
 /* the mirror's segments: 4 MB of the contiguous window each */
@@ -1169,6 +1170,7 @@ static void pixel_program_convert(const struct xgpu_stream_pixel_program *wire, 
 	program->hdr = wire->hdr;
 	program->material_overlay = wire->material_overlay;
 	program->lightmap_filter = wire->lightmap_filter;
+	program->prism_lighting = wire->prism_lighting;
 }
 
 /* debug.gpu_dump_shaders (HALO_VULKAN_SHADERS) writes each module into its
@@ -2096,7 +2098,10 @@ static int draw_pipeline(const struct draw_input *input, int apart)
 	draw.uniforms = stream.uniforms_range;
 	draw.dynamic = &stream.dynamic;
 	draw.dynamic_lights = stream.definition->pixel_program.dynamic_lights != 0;
-	draw.ambient_occlusion = stream.definition->pixel_program.ambient_occlusion != 0;
+	/* (display.ambient_occlusion "world"'s set: its light, or PRISM v2's
+	shadows, which trace its cascades: xgpu.h) */
+	draw.ambient_occlusion = stream.definition->pixel_program.ambient_occlusion != 0 ||
+		(XGPU_PRISM_SHADOWS_OF(stream.definition->pixel_program.prism_lighting) && draw.material_overlay);
 	draw.reads_color = pipeline.color_read;
 	{
 		const struct xgpu_stream_pipeline_key *key = &stream.definition->key;

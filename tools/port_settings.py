@@ -934,6 +934,18 @@ PAGES = {
             ("MATERIAL DETAIL", "display.prism_material_overlay", ON_OFF,
              "Gives weapons and armour the fine grain of their surfaces (machining, weave, wear) from a mod's "
              "material overlay. It changes only the light on them. Off draws them as the Xbox did.", "desktop"),
+            # (PRISM v2's model light: the Vulkan renderer's alone, xgpu.h's
+            # "PRISM v2's model light"; each off as the Xbox drew)
+            ("HIGHLIGHTS", "display.prism_specular", [("OFF", "off"), ("SUBTLE", "subtle"), ("FULL", "full")],
+             "Characters, weapons and vehicles catch the level's own lights as highlights, where their armour is "
+             "shiny. Off draws them as the Xbox did.", "desktop"),
+            ("REFLECTIONS", "display.prism_reflections", [("CLASSIC", "stock"), ("LOCAL", "local")],
+             "Local: shiny armour reflects the place it is in, captured on this computer from your maps. Classic "
+             "reflects the game's own painted reflections.", "desktop"),
+            ("CHARACTER SHADOWS", "display.prism_shadows", [("CLASSIC", "stock"), ("SOFT", "soft"),
+                                                             ("TRACED", "traced")],
+             "Characters shade themselves and each other from the level's main light. Needs ambient occlusion "
+             "World. Classic keeps the Xbox's shadows alone.", "desktop"),
             (SECTION, "LIGHTING"),
             # (PRISM's lighting: drawn by the Vulkan renderer alone,
             # port/linux/src/d3d8_device.c's prism_lighting_read)

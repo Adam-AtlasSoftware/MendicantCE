@@ -335,6 +335,8 @@ struct xgpu_pixel_program
 	unsigned char material_overlay;
 	/* display.prism_lightmaps (nv2a_pixel_shader_key's: xgpu.h) */
 	unsigned char lightmap_filter;
+	/* PRISM v2's model light (nv2a_pixel_shader_key's: xgpu.h) */
+	unsigned char prism_lighting;
 };
 
 /* the texture stage that replaces the fragment's depth, DOT_ZW (the game's

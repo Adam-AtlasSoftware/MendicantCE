@@ -31,6 +31,9 @@ const char *config_string(const char *name);
 int config_boolean(const char *name);
 unsigned long halo_gpu_settings_taken(void);
 unsigned long long SDL_GetTicksNS(void);
+/* (PRISM v2's model light: prism_light.c) */
+void prism_light_window_begin(float const camera[3]);
+void prism_light_object_begin(long object_index);
 /* (render_enumerate.c's: the window drawn is a map's first frame's, unseen,
 which prepares its pipelines) */
 extern unsigned char render_enumerating;
@@ -540,6 +543,9 @@ void world_ao_window_begin(short local_player_index, short rasterizer_target, fl
 	/* (its span, whatever the setting: halo_world_ao_span) */
 	world_ao.span = WORLD_AO_SPAN_OPEN;
 	halo_world_ao_span(WORLD_AO_SPAN_OPEN);
+	/* (PRISM v2's probes are chosen by the camera where no object is
+	drawn: prism_light.c) */
+	prism_light_window_begin(camera_position);
 	/* (none while a map's pipelines are prepared, nothing being seen then:
 	the front end gives its draws the keys they have in play from their span
 	alone, and makes the pre-pass's twins of them, d3d8_device.c's
@@ -645,6 +651,9 @@ void world_ao_object_begin(long object_index)
 	float reference = 1.0f;
 	long index;
 
+	/* (PRISM v2's probes nearest the object drawn, whatever the setting:
+	prism_light.c) */
+	prism_light_object_begin(object_index);
 	if (!world_ao.window)
 		return;
 	if (object_index != -1)
@@ -690,8 +699,25 @@ void world_ao_lightmap_begin(void const *lightmap_bitmap)
 	halo_world_ao_object(WORLD_AO_OWNER_NONE, (float)layer);
 }
 
+/* the distance-field scene's cascades as the window has them (PRISM v2's
+shadows, prism_light.c: xgpu.h's "PRISM v2's model light"); 0 outside a
+window of the world's light, or none ready */
+int world_ao_window_cascades(float cascades[WORLD_CASCADES][4])
+{
+	int cascade, ready = 0;
+
+	if (!world_ao.window)
+		return 0;
+	memcpy(cascades, world_ao.cascades, sizeof(world_ao.cascades));
+	for (cascade = 0; cascade < WORLD_CASCADES; cascade++)
+		ready |= world_ao.cascades[cascade][3] > 0.0f;
+	return ready;
+}
+
 void world_ao_first_person(int drawing)
 {
+	/* (PRISM v2's probes about the camera for the first-person weapon) */
+	prism_light_object_begin(-1);
 	/* (the window's own span again after it) */
 	halo_world_ao_span(!drawing ? world_ao.span : world_ao.span == WORLD_AO_SPAN_FOUND ?
 		WORLD_AO_SPAN_FOUND_FIRST_PERSON : WORLD_AO_SPAN_FIRST_PERSON);

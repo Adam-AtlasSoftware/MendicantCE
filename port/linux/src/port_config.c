@@ -416,14 +416,39 @@ static const struct config_setting config_settings[] =
 		"PRISM v2: light the model shaders whose base map has a surface map\n"
 		"in a mod (tags\\<bitmap>.surface.png, baked on this machine from your\n"
 		"maps and a remodel; or one the material overlay names) by its normal,\n"
-		"ambient occlusion and roughness at the base map's coordinates, and add\n"
-		"the level's own sun or main light as a highlight where the shader's\n"
-		"reflection shows. Needs neither the material overlay nor an overlay.json\n"
-		"entry. Vulkan only; read each frame (prism_set \"surface_maps true\")." },
-	{ "display.prism_specular", _config_real, "1.0", "HALO_PRISM_SPECULAR", _environment_value,
+		"ambient occlusion and roughness at the base map's coordinates. Its\n"
+		"occlusion dims the model's ambient and level light alone (its own\n"
+		"creases), as display.ambient_occlusion's does, and the two multiply.\n"
+		"Needs neither the material overlay nor an overlay.json entry. Vulkan\n"
+		"only; read each frame (prism_set \"surface_maps true\")." },
+	{ "display.prism_specular", _config_string, "\"off\"", "HALO_PRISM_SPECULAR", _environment_value,
 		_platform_desktop,
-		"PRISM v2: how strong the surface maps' highlight is, 0 to\n"
-		"2 (0 none)." },
+		"PRISM v2: highlights on the models (characters, weapons, vehicles)\n"
+		"from the level's own lights about them (its sun or main light, and the\n"
+		"two nearest lights), as rough or as polished as their surface map says,\n"
+		"only where the shader's own reflection shows (the multipurpose map's\n"
+		"specular mask, CE's Fresnel and tint), capped so that a model is never\n"
+		"much brighter on average. \"off\": none, as the game draws; \"subtle\":\n"
+		"the main light alone, soft; \"full\": every light, sharper. Vulkan only;\n"
+		"read each frame (prism_set \"specular full\")." },
+	{ "display.prism_reflections", _config_string, "\"stock\"", "HALO_PRISM_REFLECTIONS", _environment_value,
+		_platform_desktop,
+		"PRISM v2: what the models' reflections show. \"stock\": the shader's\n"
+		"own cube map, as the game draws; \"local\": the place the model is in,\n"
+		"from the level's probes, captured on this machine by the game's own\n"
+		"renderer (tools/prism_probes.py; <data>/prism/probes/<map>.probes),\n"
+		"blurred by the surface's roughness and tinted as CE tints its cube.\n"
+		"Stylised cube maps (shields, glows) keep their own. A map with no\n"
+		"probes draws as stock. Vulkan only; read each frame." },
+	{ "display.prism_shadows", _config_string, "\"stock\"", "HALO_PRISM_SHADOWS", _environment_value,
+		_platform_desktop,
+		"PRISM v2: shadows on the models from the level's main light about\n"
+		"them, traced through the distance-field scene's objects\n"
+		"(display.ambient_occlusion \"world\"'s: without it, stock): their own\n"
+		"limbs and other characters and vehicles. \"stock\": none, as the game\n"
+		"draws (its own shadow under each object stays in every choice);\n"
+		"\"soft\": near ones, with wide soft edges; \"traced\": out to 8 world\n"
+		"units, crisper. Vulkan only; read each frame." },
 	{ "display.prism_lightmaps", _config_string, "\"stock\"", "HALO_PRISM_LIGHTMAPS", _environment_value,
 		_platform_desktop,
 		"PRISM: the level's own baked light, drawn smoother: \"stock\" as the Xbox\n"
@@ -2961,6 +2986,11 @@ static const struct
 	place) */
 	{ "display.ambient_occlusion", "subtle", "world" },
 	{ "display.ambient_occlusion", "strong", "world" },
+	/* (PRISM v2's prototype: display.prism_specular was a strength, 0 to 2) */
+	{ "display.prism_specular", "0", "off" },
+	{ "display.prism_specular", "0.0", "off" },
+	{ "display.prism_specular", "1", "full" },
+	{ "display.prism_specular", "1.0", "full" },
 	{ NULL, NULL, NULL },
 };
 

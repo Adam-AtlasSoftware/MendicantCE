@@ -79,6 +79,10 @@ void world_sdf_bsp_switched(short bsp_index) { (void)bsp_index; }
 void world_sdf_frame(void) { sdf_frames++; }
 void world_sdf_frame_prepared(void) {}
 void world_proxies_map_unloaded(void) {}
+/* (PRISM v2's model light's hooks: port/linux/game/prism_light.c, not
+tested here) */
+void prism_light_window_begin(float const camera[3]) { (void)camera; }
+void prism_light_object_begin(long object_index) { (void)object_index; }
 
 /* the field: a volume whose header world_sdf_current hands on, half faded in */
 static struct world_sdf_volume volume;

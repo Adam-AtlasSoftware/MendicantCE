@@ -149,5 +149,12 @@ void mod_materials_draw_begin(struct shader const *shader, real camera_distance,
 void mod_materials_draw_end(void);
 /* (the script function prism_set) */
 void mod_materials_prism_set(char const *text);
+/* PRISM v2's model light (prism_light.c) */
+void prism_light_map_loaded(void);
+void prism_light_map_unloaded(void);
+void prism_light_window_begin(float const camera[3]);
+void prism_light_object_begin(long object_index);
+int prism_light_draw(float uniforms[][4], unsigned int *probes);
+int prism_light_wanted(void);
 
 #endif

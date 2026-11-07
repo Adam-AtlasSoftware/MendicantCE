@@ -38,7 +38,7 @@ port/linux/README.md.
 #include <stdint.h>
 
 #define XGPU_STREAM_MAGIC 0x53504758u /* "XGPS" */
-#define XGPU_STREAM_VERSION 23
+#define XGPU_STREAM_VERSION 24
 #define XGPU_STREAM_LOADING_ART_BYTES (640u * 480u * 4u)
 
 /* ---------- the ring
@@ -714,15 +714,15 @@ XGPU_STREAM_IMAGE_RGBA_LEVELS: data holds every level, level 0 first, each
 half the one before, at least 1, right after it) or none (source 0): tiles A
 to D, then the class mask, then the surface map's two images (their
 format XGPU_STREAM_IMAGE_BC5_LEVELS: data holds every level's BC5 blocks,
-level 0 first, 16 bytes a block of 4 by 4), at the backend's
-XGPU_OVERLAY_BINDING on */
+level 0 first, 16 bytes a block of 4 by 4), then PRISM v2's probes' atlas
+(XGPU_STREAM_IMAGE_RGBA_LEVELS), at the backend's XGPU_OVERLAY_BINDING on */
 #define XGPU_STREAM_IMAGE_RGBA_LEVELS 2
 #define XGPU_STREAM_IMAGE_BC5_LEVELS 3
 struct xgpu_stream_material_overlay
 {
 	uint32_t header;
-	float uniforms[11][4];
-	struct xgpu_stream_texture_stage stages[7];
+	float uniforms[20][4];
+	struct xgpu_stream_texture_stage stages[8];
 };
 
 /* ---------- pipelines */
@@ -779,9 +779,9 @@ struct xgpu_stream_pixel_key
 	uint8_t source_blend, dynamic_lights, vr_effect, ambient_occlusion;
 	/* display.hdr's tag (xgpu_hdr.h) */
 	uint16_t hdr;
-	/* display.prism_material_overlay, display.prism_lightmaps (xgpu.h; in
-	what was padding: the keys without them hash as they did) */
-	uint8_t material_overlay, lightmap_filter;
+	/* display.prism_material_overlay, display.prism_lightmaps, PRISM v2's
+	model light (xgpu.h; each 0 as the game draws) */
+	uint8_t material_overlay, lightmap_filter, prism_lighting, unused;
 };
 
 /* xgpu_backend.h's struct xgpu_pipeline_key */
@@ -824,8 +824,9 @@ struct xgpu_stream_pixel_program
 	uint8_t material_overlay;
 	/* display.hdr's tag (xgpu_hdr.h) */
 	uint16_t hdr;
-	/* display.prism_lightmaps (xgpu.h) */
-	uint8_t lightmap_filter, unused[3];
+	/* display.prism_lightmaps, PRISM v2's model light (xgpu.h's
+	XGPU_LIGHTMAP_FILTER_*, XGPU_PRISM_*) */
+	uint8_t lightmap_filter, prism_lighting, unused[2];
 };
 
 /* a pipeline key the guest numbered (from 1, below XGPU_STREAM_PIPELINES),
@@ -897,6 +898,7 @@ static inline int xgpu_stream_world_ao_twin(struct xgpu_stream_pipeline_define *
 	definition->key.pixel.dynamic_lights = definition->pixel_program.dynamic_lights = 0;
 	definition->key.pixel.material_overlay = definition->pixel_program.material_overlay = 0;
 	definition->key.pixel.lightmap_filter = definition->pixel_program.lightmap_filter = 0;
+	definition->key.pixel.prism_lighting = definition->pixel_program.prism_lighting = 0;
 	return 1;
 }
 
@@ -1345,7 +1347,7 @@ struct xgpu_stream_vr_screen_corrections
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_ring, 104);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_frame_end, 12);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_capabilities, 24);
-XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_material_overlay, 4 + 176 + 7 * 72);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_material_overlay, 4 + 320 + 8 * 72);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_hdr, 24);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_tone_map, 28);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_panini, 56);
@@ -1361,10 +1363,10 @@ XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_read_target, 28);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_screenshot, 32);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_sampler, 24);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_texture_stage, 72);
-XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_pixel_key, 264);
-XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_pipeline_key, 308);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_pixel_key, 268);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_pipeline_key, 312);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_pixel_program, 440);
-XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_pipeline_define, 756);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_pipeline_define, 760);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_dynamic_state, 68);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_draw_uniforms, 580);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_vertex_element, 6);

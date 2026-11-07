@@ -2383,7 +2383,11 @@ XGPU_MSL_TEXTURE_OVERLAY on, through constexpr samplers (the tiles repeating
 and filtered between their levels, the mask clamped), the uniform the
 uniforms' material_overlay. The Metal backend does not draw it yet
 (xgpu_stream_capabilities' material_overlay: its pixel programs never have
-it) until these are checked against Vulkan's on a Mac. */
+it) until these are checked against Vulkan's on a Mac. Nor PRISM v2's
+surface maps and model light (xgpu.h's XGPU_OVERLAY_SURFACE and "PRISM v2's
+model light": prism_lighting, armed with the overlay alone): a program with
+them is not written here (xgpu_msl_pixel_shader refuses it, and the draw
+goes as the game draws it). */
 
 /* after texture stage 2: the micro normal, cavity and roughness, and v0's
 light by them (t2 the multipurpose map's texel, or none) */
@@ -2595,13 +2599,16 @@ char *xgpu_msl_pixel_shader(const struct xgpu_pixel_program *program, const stru
 	BOOL overlay = program->material_overlay && program->per_pixel_lighting && !environment;
 	int stage;
 
+	/* (PRISM v2's surface maps and model light: Vulkan's alone, above) */
+	if (program->prism_lighting || (program->material_overlay & (XGPU_OVERLAY_SURFACE | XGPU_OVERLAY_SURFACE_ONLY)))
+		return NULL;
 	pixel_usage(program, &usage);
 	world_position = (program->per_pixel_lighting && (program->per_pixel_lighting == 2 ||
 		program->dynamic_lights == XGPU_DYNAMIC_LIGHTS_MODEL)) || environment || world || overlay;
 	if (comparison && *comparison && program->alpha_test_samples && comparison[0] != '=' && comparison[0] != '!')
 		sample_mask = TRUE;
 	xgpu_text_append(&text, uniforms_declaration, XGPU_MODEL_LIGHT_COUNT, overlay ?
-		"\tfloat4 world_ao;\n\tfloat4 material_overlay[11];\n" : world ? "\tfloat4 world_ao;\n" : "");
+		"\tfloat4 world_ao;\n\tfloat4 material_overlay[20];\n" : world ? "\tfloat4 world_ao;\n" : "");
 	if (lightmap_smoothed(program, options))
 		lightmap_smooth_function(&text);
 	if (world_inline)

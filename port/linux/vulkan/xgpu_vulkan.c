@@ -615,6 +615,8 @@ static struct
 	VkDescriptorSetLayout occlusion_layout, empty_layout;
 	VkDescriptorSet occlusion_set;
 	uint64_t occlusion_serial, occlusion_world_number;
+	/* (the cascades' image it names: PRISM v2's shadows) */
+	struct xgpu_vulkan_image *occlusion_cascades;
 	/* the window's display (any thread, atomic: HDR on, its SDR white's
 	and its headroom's bits, and whether they changed since the render
 	thread looked); the front end's state; the HDR outputs the surface
@@ -4554,19 +4556,21 @@ occlusion binds it: the last one, where it is of the same field and
 submission, else one written now */
 static VkDescriptorSet occlusion_set(void)
 {
-	VkDescriptorImageInfo field_image, table_image, scenery_image, objects_image, pixels_image;
+	VkDescriptorImageInfo field_image, table_image, scenery_image, objects_image, pixels_image, cascades_image;
 	VkDescriptorBufferInfo block;
-	VkWriteDescriptorSet writes[6];
+	VkWriteDescriptorSet writes[7];
 	struct xgpu_vulkan_image *field = xgpu_vulkan_world_ao_field_image();
 	struct xgpu_vulkan_image *table = xgpu_vulkan_world_ao_table_image();
 	struct xgpu_vulkan_image *scenery = xgpu_vulkan_world_ao_scenery_image();
 	struct xgpu_vulkan_image *objects = xgpu_vulkan_world_ao_objects_image();
 	struct xgpu_vulkan_image *pixels = xgpu_vulkan_world_ao_pixels_image();
+	struct xgpu_vulkan_image *cascades = xgpu_vulkan_world_ao_cascades_image();
 	uint64_t serial = vk.serial;
 	int index;
 
 	if (!field || !field->sampled || !table || !table->sampled || !scenery || !scenery->sampled ||
-		!objects || !objects->sampled || !pixels || !pixels->sampled || !vk.occlusion_layout)
+		!objects || !objects->sampled || !pixels || !pixels->sampled || !cascades || !cascades->sampled ||
+		!vk.occlusion_layout)
 		return VK_NULL_HANDLE;
 	/* (display.ambient_occlusion "world"'s block in this submission's ring) */
 	if (!xgpu_vulkan_world_ao_block(serial, &block))
@@ -4576,7 +4580,9 @@ static VkDescriptorSet occlusion_set(void)
 	scenery->used = vk.serial;
 	objects->used = vk.serial;
 	pixels->used = vk.serial;
-	if (vk.occlusion_set && vk.occlusion_serial == vk.serial && vk.occlusion_world_number == xgpu_vulkan_world_ao_number())
+	cascades->used = vk.serial;
+	if (vk.occlusion_set && vk.occlusion_serial == vk.serial && vk.occlusion_world_number == xgpu_vulkan_world_ao_number() &&
+		vk.occlusion_cascades == cascades)
 		return vk.occlusion_set;
 	vk.occlusion_set = set_allocate(vk.occlusion_layout);
 	if (!vk.occlusion_set)
@@ -4595,8 +4601,11 @@ static VkDescriptorSet occlusion_set(void)
 	objects_image.imageView = objects->sampled;
 	pixels_image = field_image;
 	pixels_image.imageView = pixels->sampled;
+	cascades_image = field_image;
+	cascades_image.imageView = cascades->sampled;
+	vk.occlusion_cascades = cascades;
 	memset(writes, 0, sizeof(writes));
-	for (index = 0; index < 6; index++)
+	for (index = 0; index < 7; index++)
 	{
 		writes[index].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 		writes[index].dstSet = vk.occlusion_set;
@@ -4616,7 +4625,9 @@ static VkDescriptorSet occlusion_set(void)
 	writes[4].pImageInfo = &objects_image;
 	writes[5].dstBinding = XGPU_VULKAN_BINDING_WORLD_AO_PIXELS;
 	writes[5].pImageInfo = &pixels_image;
-	vkUpdateDescriptorSets(vk.device, 6, writes, 0, NULL);
+	writes[6].dstBinding = XGPU_VULKAN_BINDING_WORLD_CASCADES;
+	writes[6].pImageInfo = &cascades_image;
+	vkUpdateDescriptorSets(vk.device, 7, writes, 0, NULL);
 	return vk.occlusion_set;
 }
 
@@ -4814,6 +4825,7 @@ void xgpu_vulkan_draw(const struct xgpu_vulkan_draw *draw)
 			image_use(xgpu_vulkan_world_ao_table_image());
 			image_use(xgpu_vulkan_world_ao_scenery_image());
 			image_use(xgpu_vulkan_world_ao_objects_image());
+			image_use(xgpu_vulkan_world_ao_cascades_image());
 		}
 	}
 	commands = vk.pass_commands;
@@ -7039,7 +7051,11 @@ static int layouts_make(void)
 	textures[5].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 	textures[5].descriptorCount = 1;
 	textures[5].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-	info.bindingCount = 6;
+	textures[6].binding = XGPU_VULKAN_BINDING_WORLD_CASCADES;
+	textures[6].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	textures[6].descriptorCount = 1;
+	textures[6].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+	info.bindingCount = 7;
 	info.pBindings = textures;
 	if (!check(vkCreateDescriptorSetLayout(vk.device, &info, NULL, &vk.occlusion_layout), "vkCreateDescriptorSetLayout"))
 		return 0;

@@ -1959,6 +1959,10 @@ struct pixel_state
 	unsigned int overlay_wt, overlay_f4, overlay_fa, overlay_fb;
 	/* (with a surface map, XGPU_OVERLAY_SURFACE) its roughness, 0 none */
 	unsigned int overlay_surface_rough;
+	/* PRISM v2's model light (xgpu.h's XGPU_PRISM_*): the surface map's
+	occlusion (1 without one), the first distant light's shadow (1 none),
+	and the cascades' texture (with its shadows; 0 not declared) */
+	unsigned int prism_ao, prism_shadow, prism_cascades;
 };
 
 static unsigned int pixel_input(struct module *m, struct pixel_state *state, unsigned int variable_id, unsigned int type)
@@ -3991,7 +3995,7 @@ static unsigned int world_ao_upsample(struct module *m, struct pixel_state *stat
 /* (lit by the normal given, display.prism_material_overlay's: else the
 vertices') */
 static unsigned int model_lighting(struct module *m, struct pixel_state *state, BOOL point_lights, BOOL dynamic_lights,
-	unsigned int occlusion, unsigned int given_normal)
+	unsigned int occlusion, unsigned int given_normal, unsigned int shadow)
 {
 	unsigned int n, facing, light;
 	int index;
@@ -4010,10 +4014,14 @@ static unsigned int model_lighting(struct module *m, struct pixel_state *state, 
 			fmax_scalar(m, 1, fdot(m, normal, normal), (float)1.0e-24))));
 	}
 	facing = fdot(m, n, fneg(m, 3, xyz(m, uniform(m, U_MODEL_LIGHTS, 7))));
-	/* light = ml[11].xyz + max(max(facing, -facing * ml[0].z), 0.0) * ml[8].xyz + max(dot(n, -ml[9].xyz), 0.0) * ml[10].xyz */
+	/* light = ml[11].xyz + max(max(facing, -facing * ml[0].z), 0.0) * ml[8].xyz + max(dot(n, -ml[9].xyz), 0.0) * ml[10].xyz
+	(the first distant light's share by PRISM v2's shadow, where it has one) */
+	facing = fmax_scalar(m, 1, ext2(m, GLSL_F_MAX, m->t_float, facing,
+		fmul(m, 1, fneg(m, 1, facing), extract(m, uniform(m, U_MODEL_LIGHTS, 0), 2))), 0.0f);
+	if (shadow)
+		facing = fmul(m, 1, facing, shadow);
 	light = fadd(m, 3, fadd(m, 3, xyz(m, uniform(m, U_MODEL_LIGHTS, 11)),
-		fscale(m, 3, xyz(m, uniform(m, U_MODEL_LIGHTS, 8)), fmax_scalar(m, 1, ext2(m, GLSL_F_MAX, m->t_float, facing,
-		fmul(m, 1, fneg(m, 1, facing), extract(m, uniform(m, U_MODEL_LIGHTS, 0), 2))), 0.0f))),
+		fscale(m, 3, xyz(m, uniform(m, U_MODEL_LIGHTS, 8)), facing)),
 		fscale(m, 3, xyz(m, uniform(m, U_MODEL_LIGHTS, 10)), fmax_scalar(m, 1,
 		fdot(m, n, fneg(m, 3, xyz(m, uniform(m, U_MODEL_LIGHTS, 9)))), 0.0f)));
 	/* (display.ambient_occlusion: the ambient and distant lights, the
@@ -4855,15 +4863,16 @@ cavity and half the roughness, clamped. xgpu_msl.c's overlay_* are its
 twin. */
 
 static void overlay_declare(struct module *m, struct pixel_state *state, BOOL class_mask, BOOL surface,
-	BOOL surface_only)
+	BOOL no_tiles, BOOL probes)
 {
 	static const char *const names[XGPU_OVERLAY_IMAGE_COUNT] = { "overlay_a", "overlay_b", "overlay_c", "overlay_d",
-		"overlay_m", "overlay_sn", "overlay_sa" };
+		"overlay_m", "overlay_sn", "overlay_sa", "prism_probes" };
 	int index;
 
 	for (index = 0; index < XGPU_OVERLAY_IMAGE_COUNT; index++)
 	{
-		if (index >= XGPU_OVERLAY_SURFACE_IMAGE ? !surface : surface_only || (!class_mask && index >= 2))
+		if (index == XGPU_OVERLAY_PROBE_IMAGE ? !probes : index >= XGPU_OVERLAY_SURFACE_IMAGE ? !surface :
+			no_tiles || (!class_mask && index >= 2))
 			continue;
 		state->overlay_images[index] = variable(m, type_sampled_image(m, DIM_2D, FALSE, FALSE, TRUE),
 			STORAGE_UNIFORM_CONSTANT, names[index]);
@@ -4916,13 +4925,189 @@ static unsigned int overlay_flag(struct module *m, unsigned int a)
 
 /* the micro normal, cavity and roughness, and the light of the draw (v0's
 rgb) by them: after texture stage 2 */
+/* ---------- PRISM v2's model light (xgpu.h's "PRISM v2's model light";
+xgpu_msl.c's prism_* are its twin) */
+
+/* the first distant light's shadow by the objects in the distance-field
+scene (docs/world-ao.md's world_trace, mask objects: the hardware ray
+queries of #602 take its place unchanged), its cascades the overlay's [13]
+to [16]: rays from p pushed [12].w along n toward -ml[7], out to [12].y, a
+hit at t counting smoothstep(0.05, 0.25, t) (a model's own shapes about its
+surface are not its shadow); with _SOFT the mean of [12].z rays, the light's
+direction tilted [12].z * 0.04 about it four ways (its edges softened), with
+_TRACED the one ray; then mix(1, 1 - hits, [12].x) */
+static unsigned int prism_shadow(struct module *m, struct pixel_state *state, unsigned int p, unsigned int n)
+{
+	static const float tilts[4][2] = { { 1.0f, 0.0f }, { -1.0f, 0.0f }, { 0.0f, 1.0f }, { 0.0f, -1.0f } };
+	unsigned int ov12 = overlay_uniform(m, 12), cascades[XGPU_WORLD_CASCADES];
+	unsigned int origin, direction, up, u, v, spread, hits, result[3], ray;
+	int cascade, count, index;
+
+	for (cascade = 0; cascade < XGPU_WORLD_CASCADES; cascade++)
+		cascades[cascade] = overlay_uniform(m, 13 + cascade);
+	direction = ext1(m, GLSL_NORMALIZE, m->t_v3, fneg(m, 3, xyz(m, uniform(m, U_MODEL_LIGHTS, 7))));
+	origin = fadd(m, 3, p, fscale(m, 3, n, extract(m, ov12, 3)));
+	count = XGPU_PRISM_SHADOWS_OF(state->program->prism_lighting) == XGPU_PRISM_SHADOWS_SOFT ? 4 : 1;
+	/* (a frame about the light's direction: u across it, v the third) */
+	up = select_n(m, 3, compare(m, OP_F_ORD_GREATER_THAN, ext1(m, GLSL_F_ABS, m->t_float, extract(m, direction, 2)),
+		constant_float(m, 0.9f)), constant_vector(m, 3, (const float[]){ 1.0f, 0.0f, 0.0f }),
+		constant_vector(m, 3, (const float[]){ 0.0f, 0.0f, 1.0f }));
+	u = ext1(m, GLSL_NORMALIZE, m->t_v3, ext2(m, GLSL_CROSS, m->t_v3, direction, up));
+	v = ext2(m, GLSL_CROSS, m->t_v3, direction, u);
+	spread = fmul(m, 1, extract(m, ov12, 2), constant_float(m, 0.04f));
+	hits = constant_float(m, 0.0f);
+	for (index = 0; index < count; index++)
+	{
+		ray = count == 1 ? direction : ext1(m, GLSL_NORMALIZE, m->t_v3, fadd(m, 3, direction,
+			fscale(m, 3, fadd(m, 3, fscale(m, 3, u, constant_float(m, tilts[index][0])),
+			fscale(m, 3, v, constant_float(m, tilts[index][1]))), spread)));
+		world_trace(m, &state->locals, state->prism_cascades, cascades, origin, ray, extract(m, ov12, 1),
+			constant_int(m, XGPU_WORLD_TRACE_OBJECTS), result);
+		hits = fadd(m, 1, hits, fmul(m, 1, result[0], ext3(m, GLSL_SMOOTH_STEP, m->t_float, constant_float(m, 0.05f),
+			constant_float(m, 0.25f), result[1])));
+	}
+	hits = fmul(m, 1, hits, constant_float(m, 1.0f / (float)count));
+	return overlay_mix(m, 1, constant_float(m, 1.0f), fsub(m, 1, constant_float(m, 1.0f), hits), extract(m, ov12, 0));
+}
+
+/* the roughness the highlights and the probes read: the surface map's
+(else [11].y) plus the tiles' offset, at least [11].z, at most 1 */
+static unsigned int prism_roughness(struct module *m, struct pixel_state *state)
+{
+	unsigned int ov11 = overlay_uniform(m, 11);
+	unsigned int base = state->overlay_surface_rough ? state->overlay_surface_rough : extract(m, ov11, 1);
+
+	return ext3(m, GLSL_F_CLAMP, m->t_float, fadd(m, 1, base, state->overlay_rough), extract(m, ov11, 2),
+		constant_float(m, 1.0f));
+}
+
+/* GGX's distribution times Smith's visibility (Schlick-GGX, k = a / 2)
+times N.L, for unit n, v and l and a = r^2 */
+static unsigned int prism_ggx(struct module *m, unsigned int n, unsigned int v, unsigned int l, unsigned int a)
+{
+	unsigned int one = constant_float(m, 1.0f), h, nh, nl, nv, a2, denominator, distribution, k, visibility;
+
+	h = ext1(m, GLSL_NORMALIZE, m->t_v3, fadd(m, 3, v, l));
+	nh = saturate(m, 1, fdot(m, n, h));
+	nl = saturate(m, 1, fdot(m, n, l));
+	nv = fmax_scalar(m, 1, fdot(m, n, v), 1.0e-3f);
+	a2 = fmul(m, 1, a, a);
+	/* D = a2 / (pi (nh^2 (a2 - 1) + 1)^2) */
+	denominator = fadd(m, 1, fmul(m, 1, fmul(m, 1, nh, nh), fsub(m, 1, a2, one)), one);
+	distribution = fdiv(m, 1, a2, fmul(m, 1, constant_float(m, XGPU_WORLD_AO_PI), fmul(m, 1, denominator, denominator)));
+	/* V = 0.25 / ((nl (1 - k) + k) (nv (1 - k) + k)) */
+	k = fmul(m, 1, a, constant_float(m, 0.5f));
+	visibility = fdiv(m, 1, constant_float(m, 0.25f), fmul(m, 1,
+		fadd(m, 1, fmul(m, 1, nl, fsub(m, 1, one, k)), k), fadd(m, 1, fmul(m, 1, nv, fsub(m, 1, one, k)), k)));
+	return fmul(m, 1, fmul(m, 1, distribution, visibility), nl);
+}
+
+/* the highlights of the level's lights along the micro normal toward the
+eye (e: the reflection's direction reflected back), r the roughness: the
+first distant light's (by its shadow), with _FULL the two point lights' as
+model_lighting weighs them; times [11].x and the surface map's occlusion,
+at most [11].w */
+static unsigned int prism_specular(struct module *m, struct pixel_state *state, unsigned int e, unsigned int r)
+{
+	const struct xgpu_pixel_program *program = state->program;
+	unsigned int ov11 = overlay_uniform(m, 11), n = state->overlay_nm, v, a, l, sum;
+	int index;
+
+	v = ext1(m, GLSL_NORMALIZE, m->t_v3, e);
+	a = fmul(m, 1, r, r);
+	l = ext1(m, GLSL_NORMALIZE, m->t_v3, fneg(m, 3, xyz(m, uniform(m, U_MODEL_LIGHTS, 7))));
+	sum = fscale(m, 3, xyz(m, uniform(m, U_MODEL_LIGHTS, 8)), fmul(m, 1, prism_ggx(m, n, v, l, a),
+		state->prism_shadow ? state->prism_shadow : constant_float(m, 1.0f)));
+	for (index = 0; XGPU_PRISM_SPECULAR_OF(program->prism_lighting) == XGPU_PRISM_SPECULAR_FULL &&
+		program->per_pixel_lighting == 2 && program->dynamic_lights != XGPU_DYNAMIC_LIGHTS_MODEL && index < 2; index++)
+	{
+		int first = 1 + index * 3;
+		unsigned int position = pixel_input(m, state, state->in_world_position, m->t_v3);
+		unsigned int first_light = uniform(m, U_MODEL_LIGHTS, first), cone = uniform(m, U_MODEL_LIGHTS, first + 1);
+		unsigned int color = uniform(m, U_MODEL_LIGHTS, first + 2);
+		unsigned int to_light = fsub(m, 3, xyz(m, first_light), position);
+		unsigned int distance_squared = fdot(m, to_light, to_light);
+		unsigned int lp = fscale(m, 3, to_light, ext1(m, GLSL_INVERSE_SQRT, m->t_float,
+			fmax_scalar(m, 1, distance_squared, (float)1.0e-12)));
+		unsigned int weight;
+
+		/* max(1.0 - d2 * w, 0.0) * clamp(dot(l, -cone.xyz) * cone.w + color.w, 0, 1) */
+		weight = fmul(m, 1, fmax_scalar(m, 1, fsub(m, 1, constant_float(m, 1.0f),
+			fmul(m, 1, distance_squared, extract(m, first_light, 3))), 0.0f),
+			saturate(m, 1, fadd(m, 1, fmul(m, 1, fdot(m, lp, fneg(m, 3, xyz(m, cone))), extract(m, cone, 3)),
+			extract(m, color, 3))));
+		sum = fadd(m, 3, sum, fscale(m, 3, xyz(m, color), fmul(m, 1, weight, prism_ggx(m, n, v, lp, a))));
+	}
+	sum = fscale(m, 3, sum, fmul(m, 1, extract(m, ov11, 0), state->prism_ao ? state->prism_ao :
+		constant_float(m, 1.0f)));
+	return ext2(m, GLSL_F_MIN, m->t_v3, sum, splat(m, 3, extract(m, ov11, 3)));
+}
+
+/* a probe's texel along the unit direction d at a level: its octahedral
+cell (cell s of the atlas's [17].y a side), kept half a texel of the level
+inside it */
+static unsigned int prism_probe_texel(struct module *m, struct pixel_state *state, unsigned int uv, unsigned int cell,
+	unsigned int lod)
+{
+	unsigned int ov17 = overlay_uniform(m, 17), cells = extract(m, ov17, 1), operands[4], at[2], column, row, inset;
+
+	inset = fdiv(m, 1, fmul(m, 1, constant_float(m, 0.5f), ext1(m, GLSL_EXP2, m->t_float, lod)), extract(m, ov17, 2));
+	uv = ext3(m, GLSL_F_CLAMP, m->t_v2, uv, splat(m, 2, inset), splat(m, 2, fsub(m, 1, constant_float(m, 1.0f), inset)));
+	row = ext1(m, GLSL_FLOOR, m->t_float, fdiv(m, 1, fadd(m, 1, cell, constant_float(m, 0.5f)), cells));
+	column = fsub(m, 1, cell, fmul(m, 1, row, cells));
+	at[0] = fdiv(m, 1, fadd(m, 1, column, extract(m, uv, 0)), cells);
+	at[1] = fdiv(m, 1, fadd(m, 1, row, extract(m, uv, 1)), cells);
+	operands[0] = load(m, type_sampled_image(m, DIM_2D, FALSE, FALSE, TRUE), state->overlay_images[XGPU_OVERLAY_PROBE_IMAGE]);
+	operands[1] = construct(m, 2, at);
+	operands[2] = IMAGE_OPERANDS_LOD;
+	operands[3] = lod;
+	return xyz(m, op(m, OP_IMAGE_SAMPLE_EXPLICIT_LOD, m->t_v4, 4, operands));
+}
+
+/* the level's probes' reflection along the unit direction d at the pixel:
+the nearer of [18] and [19] mixed by their distances (one alone where [17].x
+is below 2), blurred by the roughness r */
+static unsigned int prism_probe(struct module *m, struct pixel_state *state, unsigned int d, unsigned int r)
+{
+	unsigned int ov17 = overlay_uniform(m, 17), ov18 = overlay_uniform(m, 18), ov19 = overlay_uniform(m, 19);
+	unsigned int one = constant_float(m, 1.0f), zero = constant_float(m, 0.0f);
+	unsigned int p = pixel_input(m, state, state->in_world_position, m->t_v3);
+	unsigned int levels, lod, o, ox, oy, folded[2], uv, c0, c1, d0, d1, w1, sum, delta;
+
+	/* lod = clamp(log2([17].z) * r * [17].w, 0, log2([17].z) - 2) */
+	levels = ext1(m, GLSL_LOG2, m->t_float, fmax_scalar(m, 1, extract(m, ov17, 2), 4.0f));
+	lod = ext3(m, GLSL_F_CLAMP, m->t_float, fmul(m, 1, fmul(m, 1, levels, r), extract(m, ov17, 3)), zero,
+		fsub(m, 1, levels, constant_float(m, 2.0f)));
+	/* octahedral: o = d.xy / (|x| + |y| + |z|); below, (1 - |o.yx|) * sign(o.xy) */
+	sum = fadd(m, 1, fadd(m, 1, ext1(m, GLSL_F_ABS, m->t_float, extract(m, d, 0)),
+		ext1(m, GLSL_F_ABS, m->t_float, extract(m, d, 1))), ext1(m, GLSL_F_ABS, m->t_float, extract(m, d, 2)));
+	o = fscale(m, 2, xy(m, d), fdiv(m, 1, one, fmax_scalar(m, 1, sum, 1.0e-6f)));
+	ox = extract(m, o, 0);
+	oy = extract(m, o, 1);
+	folded[0] = fmul(m, 1, fsub(m, 1, one, ext1(m, GLSL_F_ABS, m->t_float, oy)),
+		fselect(m, compare(m, OP_F_ORD_GREATER_THAN_EQUAL, ox, zero), one, constant_float(m, -1.0f)));
+	folded[1] = fmul(m, 1, fsub(m, 1, one, ext1(m, GLSL_F_ABS, m->t_float, ox)),
+		fselect(m, compare(m, OP_F_ORD_GREATER_THAN_EQUAL, oy, zero), one, constant_float(m, -1.0f)));
+	o = select_n(m, 2, compare(m, OP_F_ORD_LESS_THAN, extract(m, d, 2), zero), construct(m, 2, folded), o);
+	uv = fadd(m, 2, fscale(m, 2, o, constant_float(m, 0.5f)), constant_splat(m, 2, 0.5f));
+	c0 = prism_probe_texel(m, state, uv, extract(m, ov18, 3), lod);
+	c1 = prism_probe_texel(m, state, uv, extract(m, ov19, 3), lod);
+	delta = fsub(m, 3, p, xyz(m, ov18));
+	d0 = fdot(m, delta, delta);
+	delta = fsub(m, 3, p, xyz(m, ov19));
+	d1 = fdot(m, delta, delta);
+	/* (the second's weight d0 / (d0 + d1): the nearer weighs more) */
+	w1 = fselect(m, compare(m, OP_F_ORD_GREATER_THAN, extract(m, ov17, 0), constant_float(m, 1.5f)),
+		fdiv(m, 1, d0, fmax_scalar(m, 1, fadd(m, 1, d0, d1), 1.0e-6f)), zero);
+	return ext3(m, GLSL_F_MIX, m->t_v3, c0, c1, splat(m, 3, w1));
+}
+
 static void overlay_light(struct module *m, struct pixel_state *state, BOOL point_lights, BOOL dynamic_lights,
 	unsigned int occlusion)
 {
 	const struct xgpu_pixel_program *program = state->program;
 	BOOL class_mask = (program->material_overlay & XGPU_OVERLAY_CLASS_MASK) != 0;
-	BOOL surface_only = (program->material_overlay & XGPU_OVERLAY_SURFACE_ONLY) &&
-		(program->material_overlay & XGPU_OVERLAY_SURFACE);
+	BOOL surface_only = (program->material_overlay & XGPU_OVERLAY_SURFACE_ONLY) != 0;
 	unsigned int one = constant_float(m, 1.0f), zero = constant_float(m, 0.0f);
 	unsigned int world_normal = pixel_input(m, state, state->in_world_normal, m->t_v4), normal = xyz(m, world_normal);
 	unsigned int n, uv, p, dp1, dp2, du1, du2, dp2p, dp1p, tangent, bitangent, frame_scale, frame;
@@ -4960,7 +5145,7 @@ static void overlay_light(struct module *m, struct pixel_state *state, BOOL poin
 	if (surface_only)
 	{
 		/* (XGPU_OVERLAY_SURFACE_ONLY: no tiles; the surface map's alone,
-		below) */
+		below, or none: PRISM v2's light alone) */
 		w = one;
 		slope = constant_splat(m, 2, 0.0f);
 		cavity = one;
@@ -5067,9 +5252,12 @@ static void overlay_light(struct module *m, struct pixel_state *state, BOOL poin
 	}
 	/* the surface map (XGPU_OVERLAY_SURFACE): its normal's slope added to
 	the tiles' (slope = xy / z, z = sqrt(1 - dot(xy, xy)), at least 0.3,
-	times [10].x), its occlusion on the cavity (mix(1, ao, [10].y)), where
-	there is a frame; its roughness kept for the reflection's highlight */
+	times [10].x), its occlusion (mix(1, ao, [10].y)) on the ambient and
+	distant lights alone, as display.ambient_occlusion's (the two
+	multiplied), where there is a frame; its roughness kept for the
+	reflection and PRISM v2's highlights */
 	state->overlay_surface_rough = 0;
+	state->prism_ao = one;
 	if (program->material_overlay & XGPU_OVERLAY_SURFACE)
 	{
 		/* (two images: the normal's x and y; the occlusion and the
@@ -5081,7 +5269,8 @@ static void overlay_light(struct module *m, struct pixel_state *state, BOOL poin
 		unsigned int sz = ext1(m, GLSL_SQRT, m->t_float, fmax_scalar(m, 1, fsub(m, 1, one, fdot(m, sxy, sxy)), 0.09f));
 
 		slope = fadd(m, 2, slope, fscale(m, 2, sxy, fmul(m, 1, fdiv(m, 1, extract(m, ov10, 0), sz), frame)));
-		cavity = fmul(m, 1, cavity, overlay_mix(m, 1, one, extract(m, q, 0), fmul(m, 1, extract(m, ov10, 1), frame)));
+		state->prism_ao = overlay_mix(m, 1, one, extract(m, q, 0), fmul(m, 1, extract(m, ov10, 1), frame));
+		occlusion = occlusion ? fmul(m, 1, occlusion, state->prism_ao) : state->prism_ao;
 		state->overlay_surface_rough = extract(m, q, 1);
 	}
 	/* the micro normal (the tiles' y is up their pictures: against v, whose
@@ -5094,7 +5283,12 @@ static void overlay_light(struct module *m, struct pixel_state *state, BOOL poin
 	one less, so that scratches and scuffs in a coating read as faintly
 	paler lines and polished chips as darker ones (the roughness averages to
 	none, and so does this): clamp(light * cavity * (1.0 + 0.5 * rough)) */
-	lit = model_lighting(m, state, point_lights, dynamic_lights, occlusion, fscale(m, 3, nm, extract(m, world_normal, 3)));
+	/* (PRISM v2's shadow of the first distant light, its share alone) */
+	state->prism_shadow = one;
+	if (state->prism_cascades)
+		state->prism_shadow = prism_shadow(m, state, p, n);
+	lit = model_lighting(m, state, point_lights, dynamic_lights, occlusion, fscale(m, 3, nm, extract(m, world_normal, 3)),
+		state->prism_cascades ? state->prism_shadow : 0);
 	if (dynamic_lights)
 		lit = dynamic_light_add(m, lit, dynamic_light_sum(m, state, p, nm, nm, FALSE), FALSE);
 	lit = saturate(m, 3, fscale(m, 3, lit, fmul(m, 1, cavity, fadd(m, 1, one, fmul(m, 1, constant_float(m, 0.5f), rough)))));
@@ -5115,7 +5309,7 @@ static void overlay_reflection(struct module *m, struct pixel_state *state)
 {
 	const struct xgpu_texture_stage *decoded = &state->program->stages[3];
 	unsigned int r = xyz(m, pixel_input(m, state, state->in_t[3], m->t_v4)), n = state->overlay_n, nm = state->overlay_nm;
-	unsigned int e, bent, operands[4], texel, darkened;
+	unsigned int e, bent, operands[4], texel, darkened, rough = 0;
 	static const unsigned int rgb[4] = { 4, 5, 6, 3 };
 
 	/* e = 2.0 * dot(r, n) * n - r; bent = mix(r, 2.0 * dot(e, nm) * nm - e, overlay[6].x) */
@@ -5127,27 +5321,22 @@ static void overlay_reflection(struct module *m, struct pixel_state *state)
 	operands[2] = IMAGE_OPERANDS_BIAS;
 	operands[3] = fmul(m, 1, constant_float(m, 4.0f), state->overlay_rough);
 	texel = op(m, OP_IMAGE_SAMPLE_IMPLICIT_LOD, m->t_v4, 4, operands);
-	/* t3.rgb = min(t3.rgb * mix(1.0, cavity, overlay[6].y), 1.0) */
+	/* (PRISM v2: the roughness its light reads, and the level's probes in
+	the cube's place, its alpha kept) */
+	if (state->program->prism_lighting)
+		rough = prism_roughness(m, state);
+	if (state->program->prism_lighting & XGPU_PRISM_REFLECTIONS_LOCAL)
+		texel = vec4_of(m, prism_probe(m, state, ext1(m, GLSL_NORMALIZE, m->t_v3, bent), rough), extract(m, texel, 3));
+	/* t3.rgb = min(t3.rgb * mix(1.0, cavity, overlay[6].y), 1.0) (and the
+	surface map's occlusion with it) */
 	darkened = ext2(m, GLSL_F_MIN, m->t_v3, fscale(m, 3, xyz(m, texel), overlay_mix(m, 1, constant_float(m, 1.0f),
-		state->overlay_cavity, extract(m, overlay_uniform(m, 6), 1))), constant_splat(m, 3, 1.0f));
-	/* (XGPU_OVERLAY_SURFACE) the level's dominant light's highlight along
-	the bent reflection: pow(max(dot(normalize(bent), -ml[7].xyz), 0),
-	max(w * (1 - rough)^2, 4)) * (1 - rough) * z * ml[8].rgb, added before
-	the clamp (xgpu.h's "The surface map") */
-	if (state->overlay_surface_rough)
-	{
-		unsigned int ov10 = overlay_uniform(m, 10), one = constant_float(m, 1.0f);
-		unsigned int smooth = fsub(m, 1, one, state->overlay_surface_rough);
-		unsigned int exponent = fmax_scalar(m, 1, fmul(m, 1, extract(m, ov10, 3), fmul(m, 1, smooth, smooth)), 4.0f);
-		unsigned int direction = ext1(m, GLSL_NORMALIZE, m->t_v3, bent);
-		unsigned int along = fmax_scalar(m, 1, fdot(m, direction, fneg(m, 3, xyz(m, uniform(m, U_MODEL_LIGHTS, 7)))),
-			0.0f);
-		unsigned int highlight = fmul(m, 1, fmul(m, 1, ext2(m, GLSL_POW, m->t_float, along, exponent), smooth),
-			extract(m, ov10, 2));
-
-		darkened = ext2(m, GLSL_F_MIN, m->t_v3, fadd(m, 3, darkened, fscale(m, 3, xyz(m, uniform(m, U_MODEL_LIGHTS, 8)),
-			highlight)), constant_splat(m, 3, 1.0f));
-	}
+		state->prism_ao ? fmul(m, 1, state->overlay_cavity, state->prism_ao) : state->overlay_cavity,
+		extract(m, overlay_uniform(m, 6), 1))), constant_splat(m, 3, 1.0f));
+	/* (PRISM v2's highlights, before the clamp: xgpu.h's "PRISM v2's model
+	light") */
+	if (XGPU_PRISM_SPECULAR_OF(state->program->prism_lighting))
+		darkened = ext2(m, GLSL_F_MIN, m->t_v3, fadd(m, 3, darkened, prism_specular(m, state, e, rough)),
+			constant_splat(m, 3, 1.0f));
 	state->t[3] = shuffle(m, 4, texel, darkened, rgb);
 	if (decoded->color_sign)
 	{
@@ -5277,9 +5466,16 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 		decorate1(&m, state.textures[stage], DECORATION_BINDING, stage);
 	}
 	if (overlay)
+	{
 		overlay_declare(&m, &state, (program->material_overlay & XGPU_OVERLAY_CLASS_MASK) != 0,
 			(program->material_overlay & XGPU_OVERLAY_SURFACE) != 0,
-			(program->material_overlay & XGPU_OVERLAY_SURFACE_ONLY) && (program->material_overlay & XGPU_OVERLAY_SURFACE));
+			(program->material_overlay & XGPU_OVERLAY_SURFACE_ONLY) != 0,
+			(program->prism_lighting & XGPU_PRISM_REFLECTIONS_LOCAL) != 0);
+		/* (PRISM v2's shadows: the distance-field scene's cascades, in the
+		world's light's set, which the backend binds for them too) */
+		if (XGPU_PRISM_SHADOWS_OF(program->prism_lighting))
+			state.prism_cascades = world_cascades_declare(&m);
+	}
 	if (effect)
 		effect_declare(&m, &state);
 	else if (replaces_depth)
@@ -5389,7 +5585,7 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 		unsigned int n = fscale(&m, 3, normal, ext1(&m, GLSL_INVERSE_SQRT, m.t_float,
 			fmax_scalar(&m, 1, fdot(&m, normal, normal), (float)1.0e-24)));
 		unsigned int lit = model_lighting(&m, &state, program->per_pixel_lighting == 2, TRUE,
-			occlusion_light == XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL ? state.occlusion : 0, 0);
+			occlusion_light == XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL ? state.occlusion : 0, 0, 0);
 		unsigned int sum = dynamic_light_sum(&m, &state, pixel_input(&m, &state, state.in_world_position, m.t_v3), n, n, FALSE);
 		static const unsigned int rgb[4] = { 4, 5, 6, 3 };
 
@@ -5400,7 +5596,7 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 		static const unsigned int rgb[4] = { 4, 5, 6, 3 };
 
 		state.v0 = shuffle(&m, 4, state.v0, model_lighting(&m, &state, program->per_pixel_lighting == 2, FALSE,
-			occlusion_light == XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL ? state.occlusion : 0, 0), rgb);
+			occlusion_light == XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL ? state.occlusion : 0, 0, 0), rgb);
 	}
 	else if (occlusion_light == XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX)
 	{

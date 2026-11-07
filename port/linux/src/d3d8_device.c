@@ -3858,8 +3858,11 @@ to D, the last two only with a class mask; 0 none), its uniform
 (XGPU_OVERLAY_UNIFORM_COUNT vec4s), its debug view
 (display.prism_overlay_view) and whether the class mask's own classes win
 over the multipurpose channel's rule (mask_wins: XGPU_OVERLAY_CLASS_MASK_WINS,
-with a mask alone), and its surface map's two images (display.prism_surface_maps: NULL
-none) with or without the tiles (surface_only); NULL uniforms disarm it, as it is for every
+with a mask alone), its surface map's two images (display.prism_surface_maps: NULL
+none) with or without the tiles (surface_only: no tiles), and PRISM v2's
+model light (prism_lighting, xgpu.h's XGPU_PRISM_*, 0 none; with neither
+tiles nor a surface map the overlay carries it alone) with its probes'
+atlas (probes, 0 none); NULL uniforms disarm it, as it is for every
 other draw. A draw of a model lighting program whose lighting hands on its
 world position is lit for each pixel with it (xgpu_draw_derive); any other
 draw goes as it is. */
@@ -3867,7 +3870,7 @@ static struct
 {
 	BOOL armed;
 	struct xgpu_material_overlay overlay;
-	unsigned char key;
+	unsigned char key, prism_lighting;
 } material_overlay;
 
 /* whether the backend draws it (Vulkan's; not Metal's, until its shaders
@@ -3878,11 +3881,12 @@ int d3d8_material_overlay_drawn(void)
 }
 
 void d3d8_set_material_overlay(const float *uniforms, const unsigned int *tiles, unsigned int mask, int view,
-	int mask_wins, const unsigned int *surface, int surface_only)
+	int mask_wins, const unsigned int *surface, int surface_only, int prism_lighting, unsigned int probes)
 {
+	BOOL surfaced = surface && surface[0] && surface[1];
 	int tile;
 
-	if (!uniforms || !xgpu_backend_capabilities.material_overlay)
+	if (!uniforms || !xgpu_backend_capabilities.material_overlay || (surface_only && !surfaced && !prism_lighting))
 	{
 		material_overlay.armed = FALSE;
 		return;
@@ -3890,17 +3894,23 @@ void d3d8_set_material_overlay(const float *uniforms, const unsigned int *tiles,
 	material_overlay.armed = TRUE;
 	memcpy(material_overlay.overlay.uniforms, uniforms, sizeof(material_overlay.overlay.uniforms));
 	for (tile = 0; tile < XGPU_OVERLAY_TILE_COUNT; tile++)
-		material_overlay.overlay.images[tile] = tiles ? tiles[tile] : 0;
-	material_overlay.overlay.images[XGPU_OVERLAY_TILE_COUNT] = mask;
+		material_overlay.overlay.images[tile] = tiles && !surface_only ? tiles[tile] : 0;
+	material_overlay.overlay.images[XGPU_OVERLAY_TILE_COUNT] = surface_only ? 0 : mask;
 	for (tile = 0; tile < XGPU_OVERLAY_SURFACE_IMAGES; tile++)
-		material_overlay.overlay.images[XGPU_OVERLAY_SURFACE_IMAGE + tile] = surface ? surface[tile] : 0;
-	if (!surface || !surface[0] || !surface[1])
-		surface_only = 0;
+		material_overlay.overlay.images[XGPU_OVERLAY_SURFACE_IMAGE + tile] = surfaced ? surface[tile] : 0;
+	/* (the probes' atlas, read with XGPU_PRISM_REFLECTIONS_LOCAL alone) */
+	if (!probes)
+		prism_lighting &= ~XGPU_PRISM_REFLECTIONS_LOCAL;
+	material_overlay.overlay.images[XGPU_OVERLAY_PROBE_IMAGE] = (prism_lighting & XGPU_PRISM_REFLECTIONS_LOCAL) ?
+		probes : 0;
 	if (view < 0 || view > 4)
 		view = 0;
+	if (surface_only)
+		mask = 0;
 	material_overlay.key = (unsigned char)(1 + 2 * view + (mask ? XGPU_OVERLAY_CLASS_MASK : 0) +
 		(mask && mask_wins ? XGPU_OVERLAY_CLASS_MASK_WINS : 0) +
-		(surface && surface[0] && surface[1] ? XGPU_OVERLAY_SURFACE : 0) + (surface_only ? XGPU_OVERLAY_SURFACE_ONLY : 0));
+		(surfaced ? XGPU_OVERLAY_SURFACE : 0) + (surface_only ? XGPU_OVERLAY_SURFACE_ONLY : 0));
+	material_overlay.prism_lighting = (unsigned char)prism_lighting;
 }
 
 /* display.per_pixel_lighting: the model lighting programs' draws are lit for
@@ -4112,6 +4122,7 @@ static void pipeline_derived(const struct xgpu_draw_derived *derived, struct xgp
 	key->pixel.ambient_occlusion = derived->ambient_occlusion;
 	key->pixel.material_overlay = derived->material_overlay;
 	key->pixel.lightmap_filter = derived->lightmap_filter;
+	key->pixel.prism_lighting = derived->prism_lighting;
 }
 
 /* a draw as no setting changes it (key: before xgpu_draw_derive) to the
@@ -4164,6 +4175,7 @@ static BOOL pipeline_bind(struct vertex_shader_object *program, struct xgpu_draw
 	if (lit && !chosen && derived.material_overlay)
 	{
 		facts->material_overlay = 0;
+		facts->prism_lighting = 0;
 		lit = xgpu_draw_derive(facts, FALSE, &derived);
 		if (lit)
 		{
@@ -4372,6 +4384,7 @@ static BOOL prepare_draw(BOOL immediate, unsigned long primitive)
 	facts.material_overlay = material_overlay.armed ? material_overlay.key : 0;
 	/* (display.prism_lightmaps: the lightmap pass's lightmap smoothed) */
 	facts.lightmap_filter = prism_lightmaps_filter();
+	facts.prism_lighting = material_overlay.armed ? material_overlay.prism_lighting : 0;
 	if (device.gl_ready)
 		world_ao_twins();
 	basis = pipeline_key;

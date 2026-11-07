@@ -197,6 +197,9 @@ struct xgpu_draw_facts
 	/* display.prism_lightmaps: the lightmap pass's lightmap smoothed
 	(xgpu.h's XGPU_LIGHTMAP_FILTER_*; 0 as the Xbox read it) */
 	int lightmap_filter;
+	/* PRISM v2's model light, with the overlay alone (xgpu.h's
+	XGPU_PRISM_*; 0 none) */
+	int prism_lighting;
 };
 
 /* what the facts make of the pipeline (xgpu_backend.h's XGPU_LIGHTING_*,
@@ -206,7 +209,7 @@ struct xgpu_draw_derived
 	uint8_t lighting, color_format, samples;
 	uint8_t alpha_test_samples, per_pixel_lighting, dynamic_lights, ambient_occlusion;
 	uint16_t hdr;
-	uint8_t material_overlay, lightmap_filter;
+	uint8_t material_overlay, lightmap_filter, prism_lighting;
 };
 
 /* the pipeline the facts give a draw, lit as the settings light it, or
