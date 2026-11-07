@@ -71,6 +71,9 @@ struct entry
 	/* the worker's verdict (0 good), its reason */
 	int read_failed;
 	char reason[160];
+	/* (the worker's) vertices whose uv0 is past the base map scale: the
+	stock layout's clamped there, the wide stream's whole */
+	uint64_t uv_wide_vertices;
 	void *rest, *indices, *staging;
 	unsigned char *staging_mapped;
 	uint64_t bytes;
@@ -556,13 +559,17 @@ static int entry_read(struct entry *entry, const char *path, unsigned char *stag
 
 #if STORE_FILES
 /* a mesh's vertices and indices checked (and weightless vertices given
-their first joint): 0 good, 1 bad, 2 past the stock layout's uv range */
+their first joint): 0 good, 1 bad. A vertex whose uv0 is past the stock
+layout's range (the base map scale) is counted, not refused: the stock
+layout clamps it, and a draw with a material reads it whole from the wide
+stream (xgpu_vulkan_mesh_skin) */
 static int entry_check(struct entry *entry, unsigned char *staging, const unsigned char *indices,
 	uint64_t vertex_total, char *reason, size_t reason_size)
 {
 	uint64_t vertex;
 	uint32_t piece_index;
 
+	entry->uv_wide_vertices = 0;
 	if (xgpu_mesh_store_crc32(0, staging, entry->vertex_size) != entry->vertex_crc ||
 		xgpu_mesh_store_crc32(0, indices, entry->index_size) != entry->index_crc)
 	{
@@ -582,12 +589,13 @@ static int entry_check(struct entry *entry, unsigned char *staging, const unsign
 		}
 		/* (the stock layout's texture coordinates: int16 over the base map
 		scale) */
-		if (!(u >= -1.0001f && u <= 1.0001f && v >= -1.0001f && v <= 1.0001f))
+		if (!finite_float(u) || !finite_float(v))
 		{
-			snprintf(reason, reason_size, "vertex %llu's uv0 (%g, %g) is past the model's base map scale (uv range)",
-				(unsigned long long)vertex, (double)read_float(at + 24), (double)read_float(at + 28));
-			return 2;
+			snprintf(reason, reason_size, "vertex %llu's uv0 is not a number", (unsigned long long)vertex);
+			return 1;
 		}
+		if (!(u >= -1.0001f && u <= 1.0001f && v >= -1.0001f && v <= 1.0001f))
+			entry->uv_wide_vertices++;
 		for (k = 0; k < 4; k++)
 		{
 			if (at[40 + k] && read16(at + 32 + 2 * k) >= entry->bone_count)
@@ -1030,6 +1038,9 @@ void xgpu_mesh_store_frame(struct xgpu_mesh_store *store)
 		say(store, 0, "meshstore: %s in: %.1f MB, %u levels, %u pieces, %u bones, %.2f s after the map", entry->path,
 			(double)entry->bytes / 1048576.0, entry->lod_count, entry->piece_count, entry->bone_count,
 			store->statistics.last_resident_seconds);
+		if (entry->uv_wide_vertices)
+			say(store, 0, "meshstore: %s: %llu vertices' uv0 past the model's base map scale: clamped in the stock "
+				"layout, whole in a material's draws", entry->path, (unsigned long long)entry->uv_wide_vertices);
 	}
 	unlock(store);
 }

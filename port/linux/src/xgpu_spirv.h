@@ -104,7 +104,17 @@ enum
 	/* (a model lit for each vertex, its ambient light apart: xgpu.h's
 	XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX) */
 	XGPU_SPIRV_LOCATION_LIGHT_AMBIENT, XGPU_SPIRV_LOCATION_LIGHT_POINT,
+	/* (display.prism_models with display.prism_materials: a mesh store
+	mesh's own tangent frame and texture coordinates, xgpu_spirv_options'
+	mesh_wide) */
+	XGPU_SPIRV_LOCATION_MESH_TANGENT, XGPU_SPIRV_LOCATION_MESH_UV,
 };
+
+/* (mesh_wide) the vertex input of a mesh store mesh's wide stream: a uvec4
+a vertex, the mesh's tangent in the world (x and y snorm16, then z and its
+bitangent's sign snorm16) and its float uv0 (two floats' bits), from
+xgpu_vulkan_mesh_skin. A program reading this input has no wide variant. */
+#define XGPU_SPIRV_MESH_WIDE_INPUT 15
 
 /* the draw's values both stages read, laid out alike in C and in the
 shaders' uniform block (std140: vec4s, and floats in fours): the backend's
@@ -207,6 +217,13 @@ struct xgpu_spirv_options
 	(world_proxies_occlusion), each shape's place and kind then the same for
 	all of its pixels */
 	BOOL subgroups;
+	/* display.prism_models with display.prism_materials: a mesh store
+	mesh drawn with a material (the vertex shader hands on the wide
+	stream's tangent and uv0, XGPU_SPIRV_MESH_WIDE_INPUT; the pixel
+	shader's GGX path takes its frame and the material's coordinates from
+	them, not from texture 0's coordinates, which are the stock vertex's,
+	over the model's base map scale) */
+	BOOL mesh_wide;
 };
 
 /* ---------- the VR mode's effects

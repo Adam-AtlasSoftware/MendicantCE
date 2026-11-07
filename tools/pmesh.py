@@ -299,12 +299,18 @@ def check(mesh: Mesh, dump: dict | None = None) -> list:
     joints, weights = mesh.vertices["joints"], mesh.vertices["weights"]
     if np.any((weights > 0) & (joints >= len(mesh.bones))):
         problems.append("a vertex names a bone past the skeleton")
-    if dump is not None:
-        scale = np.asarray(dump["base_map_scale"], dtype=np.float64)
-        uv = mesh.vertices["uv0"] / scale
-        if np.any(np.abs(uv) > 1.0001):
-            problems.append(f"uv0 past the base map scale {scale.tolist()}: max |uv/scale| {np.abs(uv).max():.4f}")
+    if not np.all(np.isfinite(mesh.vertices["uv0"])):
+        problems.append("a uv0 is not a number")
     return problems
+
+
+def uv_past_scale(mesh: Mesh, dump: dict) -> int:
+    """the vertices whose uv0 is past the model's base map scale: not refused (the host clamps them in the
+    stock compressed layout, so a draw without a material shows them clamped; a draw with a material reads
+    them whole from the wide stream)"""
+    scale = np.asarray(dump["base_map_scale"], dtype=np.float64)
+    uv = mesh.vertices["uv0"] / scale
+    return int(np.count_nonzero(np.any(np.abs(uv) > 1.0001, axis=1)))
 
 
 def summary(mesh: Mesh) -> str:

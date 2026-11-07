@@ -11,7 +11,12 @@ dynamic lights, with and without the material overlay (a surface map), for
 every material_pbr the key may have:
 
   check spirv <directory>      <name>.spv for each case: pbr-<bits>-<lights>-<overlay>-<cube>,
-                               and base-<lights>-<overlay> (material_pbr 0)
+                               and base-<lights>-<overlay> (material_pbr 0); and
+                               display.prism_models' wide variant (xgpu_spirv_options'
+                               mesh_wide): wide-<bits>-<lights>-<overlay> (the cube's), and
+                               vertex-wide, vertex-stock and vertex-reads-wide (a model's
+                               vertex program, lit, with and without the variant, and one
+                               that reads the wide stream's input itself: no variant)
 
 Built by the test with the shader decoders and both emitters, as
 tools/ambient_occlusion_light is.
@@ -64,6 +69,39 @@ static void program_make(struct xgpu_pixel_program *program, int dynamic_lights,
 	program->material_pbr = (unsigned char)pbr;
 }
 
+/* a model's vertex program's shape: the position from v0, lit (its
+normal from r0, its position from r1); reading v<reads> too where not 0 */
+static void vertex_make(struct xgpu_vertex_program *program, struct nv2a_vertex_lighting *lighting, int reads)
+{
+	int index;
+
+	memset(program, 0, sizeof(*program));
+	program->instruction_count = reads ? 2 : 1;
+	for (index = 0; index < program->instruction_count; index++)
+	{
+		struct xgpu_vertex_instruction *instruction = &program->instructions[index];
+
+		instruction->mac = XGPU_MAC_MOV;
+		instruction->a.file = XGPU_VERTEX_INPUT;
+		instruction->a.index = index ? reads : 0;
+		instruction->a.swizzle[0] = 0;
+		instruction->a.swizzle[1] = 1;
+		instruction->a.swizzle[2] = 2;
+		instruction->a.swizzle[3] = 3;
+		instruction->writes_output = 1;
+		instruction->output_is_register = 1;
+		instruction->output = index ? XGPU_OUTPUT_TEXTURE0 : XGPU_OUTPUT_POSITION;
+		instruction->output_mask = 15;
+	}
+	program->instructions[program->instruction_count - 1].last = 1;
+	memset(lighting, 0, sizeof(*lighting));
+	lighting->lights = 2;
+	lighting->normal_instruction = 0;
+	lighting->normal_register = 0;
+	lighting->position_instruction = 0;
+	lighting->position_register = 1;
+}
+
 static int write_module(const char *directory, const char *name, const struct xgpu_spirv_module *module)
 {
 	char path[1024];
@@ -110,7 +148,43 @@ static int spirv(const char *directory)
 					free(module.words);
 				}
 			}
+			/* (the wide variant: the mesh's frame and uv0) */
+			options.mesh_wide = TRUE;
+			for (bits = 0; bits < 128; bits++)
+			{
+				unsigned int pbr = XGPU_PBR_ON | (bits << 1);
+
+				program_make(&program, lights, overlay, 1, pbr);
+				snprintf(name, sizeof(name), "wide-%03u-%d-%d", pbr, lights, overlay);
+				if (!xgpu_spirv_pixel_shader(&program, &options, &module) || write_module(directory, name, &module))
+					return 1;
+				free(module.words);
+			}
+			options.mesh_wide = FALSE;
 		}
+	}
+	{
+		static const char *const names[3] = { "vertex-stock", "vertex-wide", "vertex-reads-wide" };
+		struct xgpu_vertex_program *vertex = malloc(sizeof(*vertex));
+		struct nv2a_vertex_lighting lighting;
+		int kind;
+
+		if (!vertex)
+			return 1;
+		for (kind = 0; kind < 3; kind++)
+		{
+			vertex_make(vertex, &lighting, kind == 2 ? XGPU_SPIRV_MESH_WIDE_INPUT : 0);
+			options.mesh_wide = kind != 0;
+			if (!xgpu_spirv_vertex_shader(vertex, 0, 0, &lighting, &options, &module) ||
+				write_module(directory, names[kind], &module))
+			{
+				free(vertex);
+				return 1;
+			}
+			free(module.words);
+		}
+		options.mesh_wide = FALSE;
+		free(vertex);
 	}
 	return 0;
 }

@@ -5173,6 +5173,8 @@ static struct
 	} dead[SKIN_DEAD_SETS];
 	uint32_t dead_count;
 	uint64_t dispatches, vertices, ring_full;
+	/* vertices given the wide stream too */
+	uint64_t wide_vertices;
 } skin;
 
 static int skin_make(void)
@@ -5206,7 +5208,7 @@ static int skin_make(void)
 		return 0;
 	memset(&push, 0, sizeof(push));
 	push.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-	push.size = 24;
+	push.size = 28;
 	memset(&layout_info, 0, sizeof(layout_info));
 	layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 	layout_info.setLayoutCount = 1;
@@ -5429,17 +5431,18 @@ static int skin_ring_take(uint64_t size, VkDeviceSize *offset)
 }
 
 int xgpu_vulkan_mesh_skin(struct xgpu_vulkan_mesh_buffer *rest, uint32_t first, uint32_t count,
-	const float (*bones)[4], uint32_t bone_count, const float inverse_scale[2], struct xgpu_vulkan_range *skinned)
+	const float (*bones)[4], uint32_t bone_count, const float inverse_scale[2], struct xgpu_vulkan_range *skinned,
+	struct xgpu_vulkan_range *wide)
 {
 	struct xgpu_vulkan_range bone_range;
 	VkCommandBuffer commands;
-	VkDeviceSize output;
+	VkDeviceSize output, wide_output = 0;
 	float *to;
 	struct
 	{
 		uint32_t first, count;
 		float inverse_scale[2];
-		uint32_t bone_base, out_base;
+		uint32_t bone_base, out_base, wide_base;
 	} push;
 
 	if (!rest || !rest->set || !count || !bone_count || !skin.made ||
@@ -5450,11 +5453,15 @@ int xgpu_vulkan_mesh_skin(struct xgpu_vulkan_mesh_buffer *rest, uint32_t first, 
 	if (!to || bone_range.buffer != vk.ring)
 		return 0;
 	memcpy(to, bones, (size_t)bone_count * 48);
-	if (!skin_ring_take((uint64_t)count * 32, &output))
+	/* (the stock layout's vertices, then the wide stream's where asked
+	for: one span of the ring) */
+	if (!skin_ring_take((uint64_t)count * (wide ? 48 : 32), &output))
 	{
 		skin.ring_full++;
 		return 0;
 	}
+	if (wide)
+		wide_output = (output + (uint64_t)count * 32 + 15) & ~(VkDeviceSize)15;
 	commands = early_commands();
 	barrier(commands, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
 		VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT);
@@ -5466,6 +5473,7 @@ int xgpu_vulkan_mesh_skin(struct xgpu_vulkan_mesh_buffer *rest, uint32_t first, 
 	push.inverse_scale[1] = inverse_scale[1];
 	push.bone_base = (uint32_t)(bone_range.offset / 16);
 	push.out_base = (uint32_t)(output / 4);
+	push.wide_base = wide ? (uint32_t)(wide_output / 4) : 0xffffffffu;
 	vkCmdPushConstants(commands, skin.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
 	vkCmdDispatch(commands, (count + 63) / 64, 1, 1);
 	barrier(commands, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT,
@@ -5474,6 +5482,12 @@ int xgpu_vulkan_mesh_skin(struct xgpu_vulkan_mesh_buffer *rest, uint32_t first, 
 	skin.vertices += count;
 	skinned->buffer = skin.ring;
 	skinned->offset = output;
+	if (wide)
+	{
+		wide->buffer = skin.ring;
+		wide->offset = wide_output;
+		skin.wide_vertices += count;
+	}
 	return 1;
 }
 
@@ -5482,6 +5496,11 @@ void xgpu_vulkan_mesh_skin_statistics(uint64_t *dispatches, uint64_t *vertices, 
 	*dispatches = skin.dispatches;
 	*vertices = skin.vertices;
 	*ring_full = skin.ring_full;
+}
+
+uint64_t xgpu_vulkan_mesh_skin_wide_vertices(void)
+{
+	return skin.wide_vertices;
 }
 
 /* ---------- submissions */

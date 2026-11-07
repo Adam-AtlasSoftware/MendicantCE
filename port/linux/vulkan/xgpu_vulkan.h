@@ -406,11 +406,17 @@ void xgpu_vulkan_mesh_buffer_copy(struct xgpu_vulkan_mesh_buffer *from, uint64_t
 /* vertices first to first + count of a mesh's, skinned by bone_count bones
 (three rows of four each), in the early commands of the submission being
 recorded: 1 and the range of the skinned vertices (32 bytes each, the stock
-compressed model layout), read by that submission's draws; 0 where they
-cannot be (the skin ring full: drawn stock) */
+compressed model layout), read by that submission's draws; and with wide
+(not NULL) the range of their wide stream (16 bytes each: the tangent and
+its sign, snorm16x4, and uv0's floats, xgpu_spirv.h's
+XGPU_SPIRV_MESH_WIDE_INPUT) a material's draws read beside them; 0 where
+they cannot be (the skin ring full: drawn stock) */
 int xgpu_vulkan_mesh_skin(struct xgpu_vulkan_mesh_buffer *rest, uint32_t first, uint32_t count,
-	const float (*bones)[4], uint32_t bone_count, const float inverse_scale[2], struct xgpu_vulkan_range *skinned);
+	const float (*bones)[4], uint32_t bone_count, const float inverse_scale[2], struct xgpu_vulkan_range *skinned,
+	struct xgpu_vulkan_range *wide);
 void xgpu_vulkan_mesh_skin_statistics(uint64_t *dispatches, uint64_t *vertices, uint64_t *ring_full);
+/* the vertices skinned with their wide stream, all told */
+uint64_t xgpu_vulkan_mesh_skin_wide_vertices(void);
 
 /* ---------- shaders and pipelines */
 

@@ -11,7 +11,11 @@ constants hold them, or a helper bone's), written from out_base (in words) in th
 (rasterizer_model_types.h's struct model_vertex_compressed, 32 bytes:
 position f32x3; normal, binormal and tangent packed 11:11:10, signed;
 texture coordinates int16x2 over the model's base map scale; nodes 0 and 0,
-weight 1), which the model's own pipelines draw with an identity for node 0. */
+weight 1), which the model's own pipelines draw with an identity for node 0;
+and where wide_base is not ~0, from wide_base (in words) the wide stream a
+material's pipelines read beside it (16 bytes a vertex: the tangent in the
+world, x and y snorm16, then z and the bitangent's sign snorm16; uv0 as two
+floats, unscaled and unclamped). */
 
 static const char skin_source[] =
 	"#version 450\n"
@@ -19,7 +23,7 @@ static const char skin_source[] =
 	"layout(std430, set = 0, binding = 0) readonly buffer Rest { uint rest[]; };\n"
 	"layout(std430, set = 0, binding = 1) readonly buffer Bones { vec4 bones[]; };\n"
 	"layout(std430, set = 0, binding = 2) writeonly buffer Skinned { uint skinned[]; };\n"
-	"layout(push_constant) uniform Skin { uint first; uint count; vec2 inverse_scale; uint bone_base; uint out_base; } skin;\n"
+	"layout(push_constant) uniform Skin { uint first; uint count; vec2 inverse_scale; uint bone_base; uint out_base; uint wide_base; } skin;\n"
 	"\n"
 	"uint pack_normal(vec3 v)\n"
 	"{\n"
@@ -81,4 +85,12 @@ static const char skin_source[] =
 	"    skinned[o + 5u] = pack_normal(tangent);\n"
 	"    skinned[o + 6u] = (uint(q.x) & 0xffffu) | (uint(q.y) << 16);\n"
 	"    skinned[o + 7u] = 0x7fff0000u;\n"
+	"    if (skin.wide_base != 0xffffffffu)\n"
+	"    {\n"
+	"        uint s = skin.wide_base + i * 4u;\n"
+	"        skinned[s] = packSnorm2x16(tangent.xy);\n"
+	"        skinned[s + 1u] = packSnorm2x16(vec2(tangent.z, handedness));\n"
+	"        skinned[s + 2u] = floatBitsToUint(uv.x);\n"
+	"        skinned[s + 3u] = floatBitsToUint(uv.y);\n"
+	"    }\n"
 	"}\n";

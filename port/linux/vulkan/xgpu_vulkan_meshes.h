@@ -48,9 +48,12 @@ primitives triangles */
 int xgpu_vulkan_meshes_verdict(const struct xgpu_vulkan_pipeline_description *pipeline, uint32_t draw_bindings,
 	int triangles);
 /* the swap's skinned vertices and constants (the draw's, node 0's matrix
-the identity) in the submission being recorded: 0 if they cannot be (then
-drawn stock) */
-int xgpu_vulkan_meshes_prepare(const float (*constants)[4], uint32_t constant_count);
+the identity) in the submission being recorded, and with wide its vertices'
+wide stream too (a draw with a material, by its wide pipeline: the pieces
+then bind it at binding 1; the mesh is skinned wide from then on, so its
+other draws share the one skinning): 0 if they cannot be (then drawn
+stock) */
+int xgpu_vulkan_meshes_prepare(const float (*constants)[4], uint32_t constant_count, int wide);
 /* the swap's pieces: the draw of piece index (from 0) made from the stock
 draw; 0 once there are no more */
 int xgpu_vulkan_meshes_piece(uint32_t index, struct xgpu_vulkan_draw *draw);

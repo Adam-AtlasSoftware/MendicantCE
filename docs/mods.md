@@ -422,9 +422,17 @@ model's parts with their own shaders, passes, shadows and fog. The stock
 model is drawn until the mesh is in, at a region and permutation the mesh has
 nothing for, and on a renderer without the store (Metal's). The files are
 checked as the map loads (the host's log says which were refused and why:
-format, nodes, a piece no part of the model has, a uv past the model's base
-map scale, unreadable, changed, budget, device, path) and read as they are
-first drawn. The objects that draw the model are culled by the mesh's radius
+format, nodes, a piece no part of the model has, unreadable, changed, budget,
+device, path) and read as they are first drawn. A mesh is skinned once a
+frame: an object's shadow is drawn at the level of detail its view was, so
+the two share the skinning. The stock part's vertex holds texture
+coordinates over the model's base map scale (16 bits each), so a uv0 past
+that scale is clamped there (the log counts them); a piece whose shader has
+a material (below) is drawn by its pipeline's wide variant, which reads the
+mesh's own tangents and full-precision uv0 (any range) from a second stream
+the skinning writes, so the material's images and its normal map's frame are
+the mesh's, not the stock vertex's (`HALO_MESH_WIDE_OFF=1`: not, for
+comparisons). The objects that draw the model are culled by the mesh's radius
 where it is larger (their render-only radius; the bounding radius physics,
 the AI and the network read is left as it is).
 

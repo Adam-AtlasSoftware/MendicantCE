@@ -1580,6 +1580,7 @@ BOOL xgpu_spirv_vertex_shader(const struct xgpu_vertex_program *program, unsigne
 	unsigned int position_out, point_size_out, color_outs[6], fog_out;
 	unsigned int world_normal_out = 0, world_position_out = 0, world_binormal_out = 0, world_tangent_out = 0;
 	unsigned int light_ambient_out = 0, light_point_out = 0;
+	unsigned int mesh_wide_in = 0, mesh_tangent_out = 0, mesh_uv_out = 0;
 	unsigned int world_normal = 0, world_position = 0;
 	unsigned int clip_position = 0, view = 0, screen_points = 0, centre_clip = 0, eye = 0;
 	BOOL environment = lighting && lighting->lights == XGPU_ENVIRONMENT_LIGHTING;
@@ -1634,6 +1635,14 @@ BOOL xgpu_spirv_vertex_shader(const struct xgpu_vertex_program *program, unsigne
 	{
 		light_ambient_out = interface_variable(&m, m.t_v3, STORAGE_OUTPUT, XGPU_SPIRV_LOCATION_LIGHT_AMBIENT, "xLightAmbient");
 		light_point_out = interface_variable(&m, m.t_v3, STORAGE_OUTPUT, XGPU_SPIRV_LOCATION_LIGHT_POINT, "xLightPoint");
+	}
+	/* (display.prism_models' wide stream: the mesh's tangent and uv0 handed
+	on as they are, its vertices skinned into the world already) */
+	if (options->mesh_wide && !(inputs & (1UL << XGPU_SPIRV_MESH_WIDE_INPUT)))
+	{
+		mesh_wide_in = interface_variable(&m, m.t_uv4, STORAGE_INPUT, XGPU_SPIRV_MESH_WIDE_INPUT, "xMeshWide");
+		mesh_tangent_out = interface_variable(&m, m.t_v4, STORAGE_OUTPUT, XGPU_SPIRV_LOCATION_MESH_TANGENT, "xMeshTangent");
+		mesh_uv_out = interface_variable(&m, m.t_v2, STORAGE_OUTPUT, XGPU_SPIRV_LOCATION_MESH_UV, "xMeshUv");
 	}
 
 	main_id = function_begin(&m);
@@ -1919,6 +1928,19 @@ BOOL xgpu_spirv_vertex_shader(const struct xgpu_vertex_program *program, unsigne
 		store(&m, world_binormal_out, xyz(&m, state.inputs[2]));
 		store(&m, world_tangent_out, xyz(&m, state.inputs[3]));
 	}
+	if (mesh_wide_in)
+	{
+		unsigned int wide = load(&m, m.t_uv4, mesh_wide_in);
+		unsigned int txy = ext1(&m, GLSL_UNPACK_SNORM_2X16, m.t_v2, op2(&m, OP_COMPOSITE_EXTRACT, m.t_uint, wide, 0));
+		unsigned int tzw = ext1(&m, GLSL_UNPACK_SNORM_2X16, m.t_v2, op2(&m, OP_COMPOSITE_EXTRACT, m.t_uint, wide, 1));
+		unsigned int uv[2];
+
+		store(&m, mesh_tangent_out, construct4(&m, extract(&m, txy, 0), extract(&m, txy, 1), extract(&m, tzw, 0),
+			extract(&m, tzw, 1)));
+		uv[0] = op1(&m, OP_BITCAST, m.t_float, op2(&m, OP_COMPOSITE_EXTRACT, m.t_uint, wide, 2));
+		uv[1] = op1(&m, OP_BITCAST, m.t_float, op2(&m, OP_COMPOSITE_EXTRACT, m.t_uint, wide, 3));
+		store(&m, mesh_uv_out, construct(&m, 2, uv));
+	}
 	precise_dependencies(&m, position_out);
 	if (!module_end(&m, EXECUTION_MODEL_VERTEX, main_id, &locals, module))
 	{
@@ -1977,6 +1999,9 @@ struct pixel_state
 	the emissive light it adds to r0 after the general combiners (0 none) */
 	unsigned int material_images[XGPU_MATERIAL_IMAGE_COUNT];
 	unsigned int pbr_emissive;
+	/* (xgpu_spirv_options' mesh_wide) the mesh's tangent (xyz, the
+	bitangent's sign in w) and uv0; 0 not declared */
+	unsigned int in_mesh_tangent, in_mesh_uv;
 };
 
 static unsigned int pixel_input(struct module *m, struct pixel_state *state, unsigned int variable_id, unsigned int type)
@@ -5270,6 +5295,26 @@ static BOOL pbr_light(struct module *m, struct pixel_state *state, BOOL overlay,
 		cavity = one;
 		rough_offset = zero;
 	}
+	/* (a mesh store mesh's wide stream: the material's coordinates its own
+	uv0, at full precision and past the base map's scale, and its frame the
+	mesh's tangent made square to the normal; its sign gives the bitangent
+	n x t up the picture (MikkTSpace's and glTF's, v up), and this frame's
+	is down it, along v as surface_frame's: no derivatives, so no seams at
+	the triangles' edges) */
+	if (state->in_mesh_tangent && state->in_mesh_uv)
+	{
+		unsigned int mesh_tangent = pixel_input(m, state, state->in_mesh_tangent, m->t_v4);
+		unsigned int t = xyz(m, mesh_tangent), square;
+
+		square = fsub(m, 3, t, fscale(m, 3, n, fdot(m, n, t)));
+		tangent = fscale(m, 3, square, ext1(m, GLSL_INVERSE_SQRT, m->t_float, fmax_scalar(m, 1, fdot(m, square, square),
+			(float)1.0e-24)));
+		bitangent = fscale(m, 3, ext2(m, GLSL_CROSS, m->t_v3, n, tangent), fneg(m, 1, extract(m, mesh_tangent, 3)));
+		uv = pixel_input(m, state, state->in_mesh_uv, m->t_v2);
+		frame_scale = one;
+		frame = op3(m, OP_SELECT, m->t_float, compare(m, OP_F_ORD_GREATER_THAN, fdot(m, square, square),
+			constant_float(m, (float)1.0e-12)), one, zero);
+	}
 	u0 = material_uniform(m, 0);
 	u1 = material_uniform(m, 1);
 	u2 = material_uniform(m, 2);
@@ -5616,6 +5661,11 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	{
 		state.in_world_binormal = interface_variable(&m, m.t_v3, STORAGE_INPUT, XGPU_SPIRV_LOCATION_WORLD_BINORMAL, "xWorldBinormal");
 		state.in_world_tangent = interface_variable(&m, m.t_v3, STORAGE_INPUT, XGPU_SPIRV_LOCATION_WORLD_TANGENT, "xWorldTangent");
+	}
+	if (pbr && options->mesh_wide)
+	{
+		state.in_mesh_tangent = interface_variable(&m, m.t_v4, STORAGE_INPUT, XGPU_SPIRV_LOCATION_MESH_TANGENT, "xMeshTangent");
+		state.in_mesh_uv = interface_variable(&m, m.t_v2, STORAGE_INPUT, XGPU_SPIRV_LOCATION_MESH_UV, "xMeshUv");
 	}
 	color_out = interface_variable(&m, world_inputs || occluder ? m.t_uv4 : m.t_v4, STORAGE_OUTPUT, 0, "fragment_color");
 	if (sample_mask)

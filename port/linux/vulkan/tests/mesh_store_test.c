@@ -6,7 +6,7 @@ each buffer in memory: the .pmesh checks at the map's record (magic, the
 model's nodes, the parts it draws, the sections' CRCs, levels, helper bones,
 a file changed since the guest found it, a path outside a mods folder), the
 reading's checks (the vertices' and indices' CRCs, joints, weights, indices,
-the stock layout's uv range), residency (stock until read, then each level
+a uv0 past the stock layout's range drawn all the same), residency (stock until read, then each level
 by its pixels, a helper bone skinned by its nearest node), the budget (the
 least recently drawn let go of, nothing drawn lately let go of), a new
 generation's ids and a closed store's buffers. Run by tools/test_mesh_store.py
@@ -421,15 +421,20 @@ int main(int argc, char **argv)
 	CHECK(xgpu_mesh_store_use(store, answers[0].id, 20.0f, &view));
 	CHECK(view.lod == 1 && view.vertex_first == 2 * TRIANGLES * 3 && view.vertex_count == 3 && view.piece_count == 1);
 	/* ---- the read's checks: each drawn stock for good */
-	for (index = 10; index < 14; index++)
+	for (index = 10; index < 13; index++)
 	{
 		CHECK(!xgpu_mesh_store_use(store, answers[index].id, 500.0f, &view));
 		settle(store, threads);
 		CHECK(!xgpu_mesh_store_use(store, answers[index].id, 500.0f, &view));
 	}
+	/* (a uv0 past the base map scale: drawn, the stock layout clamping it
+	and a material's draws reading it whole) */
+	CHECK(!xgpu_mesh_store_use(store, answers[13].id, 500.0f, &view));
+	settle(store, threads);
+	CHECK(xgpu_mesh_store_use(store, answers[13].id, 500.0f, &view));
 	xgpu_mesh_store_statistics(store, &statistics);
-	CHECK(statistics.failed == 4 && statistics.resident == 1 && statistics.entries == 6);
-	CHECK(live_buffers == 2);
+	CHECK(statistics.failed == 3 && statistics.resident == 2 && statistics.entries == 6);
+	CHECK(live_buffers == 4);
 
 	/* ---- the budget: room for one of two meshes, the other let go of only
 	when not drawn lately */

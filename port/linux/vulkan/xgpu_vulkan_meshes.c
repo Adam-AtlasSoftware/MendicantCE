@@ -24,6 +24,12 @@ share one skinning in a submission. An object's shadow is drawn at the
 level its view was drawn at this frame (or the last, if the shadow comes
 first), not at the shadow's own smaller size, so the two share the one
 skinning rather than skinning a second level.
+A draw with a material (display.prism_materials) whose stream has its wide
+pipeline (xgpu_vulkan_stream.c) reads the skinning's wide stream too: the
+mesh's own tangents and float uv0 at binding 1 (xgpu_vulkan_mesh_skin), not
+the stock vertex's packed frame and base-map-scaled coordinates. A mesh
+drawn so once is skinned wide from then on (WIDE_MESHES), so its draws
+without a material and its shadow share that skinning.
 */
 
 #include "host.h"
@@ -40,6 +46,8 @@ skinning rather than skinning a second level.
 #define SHARED_SKINS 32u
 /* objects' levels in the view, by object and mesh (for their shadows) */
 #define VIEW_LEVELS 256u
+/* meshes skinned with their wide stream (a draw with a material read it) */
+#define WIDE_MESHES 64u
 /* (rasterizer_xbox.c's node matrices' first vertex constant register: c60,
 D3D's -36) */
 #define NODE_MATRIX_REGISTER 60u
@@ -57,8 +65,10 @@ struct instance
 	uint32_t node_count;
 	float matrices[XGPU_STREAM_MESH_NODES_MAXIMUM][3][4];
 	uint32_t hash;
-	/* its skinned vertices, and the submission they were skinned in */
-	struct xgpu_vulkan_range skinned;
+	/* its skinned vertices (and their wide stream, where skinned_wide),
+	and the submission they were skinned in */
+	struct xgpu_vulkan_range skinned, wide;
+	int skinned_wide;
 	uint64_t skinned_serial;
 };
 
@@ -72,9 +82,13 @@ static struct
 	struct xgpu_stream_mesh_draw key;
 	/* a draw of the part swapped or skipped since a state record */
 	int drawn_since_state;
-	/* the swap prepared: its constants and pieces' first */
+	/* the swap prepared: its constants and pieces' first, and whether its
+	pieces read the wide stream */
 	struct xgpu_vulkan_range constants;
 	uint32_t piece_cursor;
+	int piece_wide;
+	/* the meshes skinned wide (store ids; 0 none) */
+	uint32_t wide_meshes[WIDE_MESHES];
 	int layout_logged;
 	/* skinnings in the submission, shared by instances of the same bones */
 	struct
@@ -85,7 +99,8 @@ static struct
 		/* the instance skinned (its matrices compared, not the hash alone) */
 		const struct instance *owner;
 		uint32_t owner_id;
-		struct xgpu_vulkan_range skinned;
+		struct xgpu_vulkan_range skinned, wide;
+		int skinned_wide;
 	} shared[SHARED_SKINS];
 	uint32_t shared_next;
 	/* the size each object was drawn at in the view (its shadow drawn at
@@ -104,7 +119,7 @@ static struct
 	uint64_t rig_evaluations, rig_failures;
 	/* statistics */
 	uint64_t instances_seen, instances_drawable, swaps, pieces, skips, chunks, stock_parts, layout_refusals,
-		prepare_failures, shared_skins, shadows_at_view;
+		prepare_failures, shared_skins, shadows_at_view, wide_swaps;
 	uint64_t level_instances[XGPU_PMESH_LODS_MAXIMUM];
 	float largest_pixels;
 } meshes;
@@ -197,6 +212,7 @@ void xgpu_vulkan_meshes_map(void *context, const struct xgpu_stream_mesh_store_m
 		xgpu_rig_states_clear(meshes.rig_states);
 	memset(meshes.shared, 0, sizeof(meshes.shared));
 	memset(meshes.views, 0, sizeof(meshes.views));
+	memset(meshes.wide_meshes, 0, sizeof(meshes.wide_meshes));
 	meshes.part = NULL;
 	if (!count && !meshes.store)
 		return;
@@ -284,6 +300,8 @@ void xgpu_vulkan_meshes_instance(void *context, const struct xgpu_stream_mesh_in
 	memset(instance, 0, offsetof(struct instance, matrices));
 	instance->hash = 0;
 	memset(&instance->skinned, 0, sizeof(instance->skinned));
+	memset(&instance->wide, 0, sizeof(instance->wide));
+	instance->skinned_wide = 0;
 	instance->skinned_serial = 0;
 	instance->id = record->instance;
 	instance->object = record->object;
@@ -388,27 +406,43 @@ int xgpu_vulkan_meshes_verdict(const struct xgpu_vulkan_pipeline_description *pi
 	return XGPU_VULKAN_MESHES_SWAP;
 }
 
+/* the mesh skinned wide from now on (a draw with a material read it), or
+whether it is */
+static int wide_mesh(uint32_t mesh, int mark)
+{
+	uint32_t slot = mesh % WIDE_MESHES;
+
+	if (mark)
+		meshes.wide_meshes[slot] = mesh;
+	return mesh && meshes.wide_meshes[slot] == mesh;
+}
+
 /* the instance's level skinned in the submission being recorded (shared
-with an instance of the same bones skinned in it) */
-static int instance_skin(struct instance *instance)
+with an instance of the same bones skinned in it), with its wide stream
+where wide or where its mesh is skinned wide */
+static int instance_skin(struct instance *instance, int wide)
 {
 	uint64_t serial = xgpu_vulkan_serial();
 	const struct xgpu_mesh_store_view *view = &instance->view;
 	uint32_t index;
 
-	if (instance->skinned_serial == serial && instance->skinned.buffer)
+	wide = wide_mesh(instance->mesh, wide);
+	if (instance->skinned_serial == serial && instance->skinned.buffer && (instance->skinned_wide || !wide))
 		return 1;
 	for (index = 0; index < SHARED_SKINS; index++)
 	{
 		const struct instance *owner = meshes.shared[index].owner;
 
-		if (meshes.shared[index].serial == serial && meshes.shared[index].rest == view->rest &&
+		if (meshes.shared[index].serial == serial && (meshes.shared[index].skinned_wide || !wide) &&
+			meshes.shared[index].rest == view->rest &&
 			meshes.shared[index].lod == view->lod && meshes.shared[index].hash == instance->hash && owner &&
 			owner->id == meshes.shared[index].owner_id && owner->node_count == instance->node_count &&
 			(!view->rig || (owner->object == instance->object && owner->game_seconds == instance->game_seconds)) &&
 			!memcmp(owner->matrices, instance->matrices, instance->node_count * sizeof(instance->matrices[0])))
 		{
 			instance->skinned = meshes.shared[index].skinned;
+			instance->wide = meshes.shared[index].wide;
+			instance->skinned_wide = meshes.shared[index].skinned_wide;
 			instance->skinned_serial = serial;
 			meshes.shared_skins++;
 			return 1;
@@ -450,8 +484,10 @@ static int instance_skin(struct instance *instance)
 		}
 	}
 	if (!xgpu_vulkan_mesh_skin(view->rest, view->vertex_first, view->vertex_count,
-		(const float (*)[4])meshes.bones, view->bone_count, view->inverse_scale, &instance->skinned))
+		(const float (*)[4])meshes.bones, view->bone_count, view->inverse_scale, &instance->skinned,
+		wide ? &instance->wide : NULL))
 		return 0;
+	instance->skinned_wide = wide;
 	instance->skinned_serial = xgpu_vulkan_serial();
 	index = meshes.shared_next++ % SHARED_SKINS;
 	meshes.shared[index].serial = instance->skinned_serial;
@@ -461,10 +497,12 @@ static int instance_skin(struct instance *instance)
 	meshes.shared[index].owner = instance;
 	meshes.shared[index].owner_id = instance->id;
 	meshes.shared[index].skinned = instance->skinned;
+	meshes.shared[index].wide = instance->wide;
+	meshes.shared[index].skinned_wide = instance->skinned_wide;
 	return 1;
 }
 
-int xgpu_vulkan_meshes_prepare(const float (*constants)[4], uint32_t constant_count)
+int xgpu_vulkan_meshes_prepare(const float (*constants)[4], uint32_t constant_count, int wide)
 {
 	struct instance *instance = meshes.part;
 	float (*to)[4];
@@ -472,7 +510,7 @@ int xgpu_vulkan_meshes_prepare(const float (*constants)[4], uint32_t constant_co
 
 	if (!instance || !instance->drawable || constant_count < NODE_MATRIX_REGISTER + 3)
 		return 0;
-	if (!instance_skin(instance))
+	if (!instance_skin(instance, wide))
 	{
 		meshes.prepare_failures++;
 		return 0;
@@ -489,6 +527,7 @@ int xgpu_vulkan_meshes_prepare(const float (*constants)[4], uint32_t constant_co
 	to[NODE_MATRIX_REGISTER + 1][1] = 1.0f;
 	to[NODE_MATRIX_REGISTER + 2][2] = 1.0f;
 	meshes.piece_cursor = 0;
+	meshes.piece_wide = wide && instance->skinned_wide;
 	return 1;
 }
 
@@ -504,6 +543,7 @@ int xgpu_vulkan_meshes_piece(uint32_t index, struct xgpu_vulkan_draw *draw)
 	if (index == 0)
 	{
 		meshes.swaps++;
+		meshes.wide_swaps += meshes.piece_wide ? 1 : 0;
 		meshes.drawn_since_state = 1;
 	}
 	for (piece_index = 0; piece_index < view->piece_count; piece_index++)
@@ -514,6 +554,11 @@ int xgpu_vulkan_meshes_piece(uint32_t index, struct xgpu_vulkan_draw *draw)
 			piece->shader != meshes.key.shader || found++ != index)
 			continue;
 		draw->vertices[0] = instance->skinned;
+		if (meshes.piece_wide)
+		{
+			draw->vertices[1] = instance->wide;
+			draw->bindings |= 2u;
+		}
 		draw->indices.buffer = xgpu_vulkan_mesh_buffer_handle(view->indices);
 		draw->indices.offset = 0;
 		draw->index_type = 1;
@@ -553,7 +598,8 @@ int xgpu_vulkan_meshes_statistics(char *text, unsigned long size)
 		"swaps %llu (%llu pieces), %llu parts skipped, %llu draws of parts drawn, %llu parts stock, %llu layouts "
 		"refused, %llu skinnings failed; %llu dispatches (%llu shared), %llu vertices skinned, %llu ring full; "
 		"instances by level %llu/%llu/%llu/%llu, largest %.0f px; last resident %.2f s after the map; rigs %llu "
-		"evaluated (%llu failed), %u spring states; %llu shadows at their view's level",
+		"evaluated (%llu failed), %u spring states; %llu shadows at their view's level; %llu swaps wide, %llu "
+		"vertices skinned wide",
 		statistics.entries, statistics.resident, statistics.reading, statistics.failed, statistics.refused_budget,
 		(double)statistics.resident_bytes / 1048576.0, (double)statistics.budget_bytes / 1048576.0,
 		(double)statistics.read_bytes / 1048576.0, statistics.evictions, (unsigned long long)statistics.uses,
@@ -568,6 +614,7 @@ int xgpu_vulkan_meshes_statistics(char *text, unsigned long size)
 		(unsigned long long)meshes.level_instances[3], (double)meshes.largest_pixels, statistics.last_resident_seconds,
 		(unsigned long long)meshes.rig_evaluations, (unsigned long long)meshes.rig_failures,
 		meshes.rig_states ? xgpu_rig_states_count(meshes.rig_states) : 0u,
-		(unsigned long long)meshes.shadows_at_view);
+		(unsigned long long)meshes.shadows_at_view, (unsigned long long)meshes.wide_swaps,
+		(unsigned long long)xgpu_vulkan_mesh_skin_wide_vertices());
 	return 1;
 }

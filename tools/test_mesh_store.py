@@ -93,7 +93,8 @@ def test_pmesh_round_trip(tmp_path):
     assert any("no part's" in p for p in pmesh.check(back, dump))
     dump["geometries"][0]["parts"][0]["shader"] = 1
     dump["base_map_scale"] = [0.25, 1.0]
-    assert any("uv0" in p for p in pmesh.check(back, dump))
+    # (a uv0 past the base map scale is not refused: clamped in the stock layout, whole in the wide stream)
+    assert pmesh.check(back, dump) == [] and pmesh.uv_past_scale(back, dump) == len(back.vertices)
     # (a damaged section)
     data = bytearray(path.read_bytes())
     data[-40] ^= 0xFF
