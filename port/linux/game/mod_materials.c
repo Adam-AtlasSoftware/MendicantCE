@@ -315,6 +315,9 @@ static struct
 		short surfaces[MAXIMUM_CLASS_MASKS];
 	} surface_table[SURFACE_TABLE_SIZE];
 	long surface_tags;
+	/* the mods are off (mods_enable false): no surface map is looked for
+	next to a bitmap, since the map's own bitmap has the mod's name */
+	boolean mods_off;
 	/* a draw is armed (mod_materials_draw_end disarms it) */
 	boolean armed;
 } mod_materials_globals;
@@ -427,7 +430,7 @@ static short surface_of_bitmap(
 	unsigned long index = ((unsigned long)tag_index * 2654435761UL) & (SURFACE_TABLE_SIZE - 1);
 	long probes;
 
-	if (tag_index == NONE || bitmap < 0 || bitmap >= MAXIMUM_CLASS_MASKS)
+	if (tag_index == NONE || bitmap < 0 || bitmap >= MAXIMUM_CLASS_MASKS || mod_materials_globals.mods_off)
 	{
 		return NONE;
 	}
@@ -1830,6 +1833,7 @@ long mod_materials_update(
 	}
 
 	materials_dispose();
+	mod_materials_globals.mods_off = remove_all;
 	if (remove_all)
 	{
 		return 0;
