@@ -37,4 +37,8 @@ int prism_world_geometry_draw(
 /* the map's tags are about to go: everything made of them freed */
 void prism_world_geometry_map_unloaded(void);
 
+/* whether the remodel is drawn for the BSP now (structure_culling.c then
+skips no surface for facing away) */
+int prism_world_geometry_drawn(void);
+
 #endif /* __PRISM_WORLD_GEOMETRY_H */

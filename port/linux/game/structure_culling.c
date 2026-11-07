@@ -180,6 +180,7 @@ in its copy for a build of one (structure_culling_jobs), else there */
 
 boolean tag_index_is_group(long tag_index, long group_tag);
 long config_integer(char const *name); /* port/linux/src/port_config.c */
+int prism_world_geometry_drawn(void); /* port/linux/game/prism_world_geometry.c */
 static void structure_culling_pairing_points(struct structure_bsp *structure,
 	struct structure_culling_material const *materials, long offset, struct structure_culling_pairing const *pairing,
 	real_point3d *points);
@@ -1090,6 +1091,13 @@ boolean structure_culling_traverse(struct structure_bsp *structure)
 	real_plane3d planes[6];
 	real radius = structure_culling_camera_radius;
 	struct profile_section *section;
+	/* (PRISM's remodelled level, display.prism_world_geometry, stands
+	behind and before its stock triangles' planes: a triangle facing away
+	may have relief facing the camera, so no surface is skipped for its
+	facing while it is drawn; the GPU culls the remodel's own triangles) */
+	long facing_tests = prism_world_geometry_drawn() ? structure_culling_tests &
+		~(FLAG(_structure_culling_bucket_facing_bit) | FLAG(_structure_culling_triangle_facing_bit)) :
+		structure_culling_tests;
 
 	/* split screen deliberately keeps only the last window's call */
 	structure_culling_submitted = structure_culling_outside = structure_culling_facing = 0;
@@ -1204,12 +1212,12 @@ boolean structure_culling_traverse(struct structure_bsp *structure)
 				bucket_reason = 1;
 			}
 			else if (bucket->facing_eligible &&
-				(TEST_FLAG(structure_culling_tests, _structure_culling_bucket_facing_bit) ||
-					TEST_FLAG(structure_culling_tests, _structure_culling_triangle_facing_bit)))
+				(TEST_FLAG(facing_tests, _structure_culling_bucket_facing_bit) ||
+					TEST_FLAG(facing_tests, _structure_culling_triangle_facing_bit)))
 			{
 				facing = structure_culling_cone_facing(&bucket->cone, &render.camera.position, radius);
 				if (facing == _structure_culling_facing_away &&
-					TEST_FLAG(structure_culling_tests, _structure_culling_bucket_facing_bit))
+					TEST_FLAG(facing_tests, _structure_culling_bucket_facing_bit))
 				{
 					bucket_reason = 2;
 				}
@@ -1219,7 +1227,7 @@ boolean structure_culling_traverse(struct structure_bsp *structure)
 				continue;
 			}
 			triangle_facing = bucket->facing_eligible && facing == _structure_culling_facing_mixed &&
-				TEST_FLAG(structure_culling_tests, _structure_culling_triangle_facing_bit);
+				TEST_FLAG(facing_tests, _structure_culling_triangle_facing_bit);
 			for (p = bucket->first_pairing; p < bucket->first_pairing + bucket->pairing_count; ++p)
 			{
 				struct structure_culling_pairing const *pairing = &structure_culling.pairings[p];
