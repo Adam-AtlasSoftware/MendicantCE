@@ -2329,8 +2329,9 @@ static void world_ao_read(struct xgpu_text *text, const struct xgpu_pixel_progra
 			"\t\tfloat field = world_sdf_occlusion(world_ao, world_sdf, world_sdf_table, in.xWorldPosition, world_n,\n"
 			"\t\t\tbaked ? inside : 0.0);\n"
 			"\t\tfield = mix(field, saturate(field / max(baked ? 1.0 : u.world_ao.y, %.6f)), world_ao.parameters[1].x);\n"
-			"\t\tocclusion = mix(1.0, max(mix(1.0, field, world_ao.parameters[0].z) * proxies, %.6f), world_ao.parameters[0].x);\n",
-			XGPU_WORLD_AO_REFERENCE_LEAST, XGPU_WORLD_AO_FLOOR);
+			"\t\tocclusion = mix(1.0, max(mix(1.0, field, world_ao.parameters[0].z) * proxies, baked ? %.6f : %.6f),\n"
+			"\t\t\tworld_ao.parameters[0].x);\n",
+			XGPU_WORLD_AO_REFERENCE_LEAST, XGPU_WORLD_AO_SCENERY_FLOOR, XGPU_WORLD_AO_FLOOR);
 	xgpu_text_append(text, "\t}\n");
 }
 
@@ -3154,13 +3155,14 @@ char *xgpu_msl_world_ao_pass(BOOL pixel)
 		"\tfloat inside = min(world_sdf_distance(world_ao, world_sdf, world_sdf_table, p), 0.0);\n"
 		"\tfloat field = world_sdf_occlusion(world_ao, world_sdf, world_sdf_table, p, n, baked ? inside : 0.0);\n"
 		"\tfield = mix(field, saturate(field / max(baked ? 1.0 : value, %.6f)), world_ao.parameters[1].x);\n"
-		"\treturn mix(1.0, max(mix(1.0, field, world_ao.parameters[0].z) * proxies, %.6f), world_ao.parameters[0].x);\n"
+		"\treturn mix(1.0, max(mix(1.0, field, world_ao.parameters[0].z) * proxies, baked ? %.6f : %.6f),\n"
+		"\t\tworld_ao.parameters[0].x);\n"
 		"}\n",
 		XGPU_WORLD_AO_RAY_CASCADE, XGPU_WORLD_AO_RAY_REACH,
 		XGPU_WORLD_AO_RAYS, XGPU_WORLD_AO_RAYS, XGPU_WORLD_AO_RAY_BIAS, XGPU_WORLD_AO_RAY_REACH, XGPU_WORLD_TRACE_OBJECTS,
 		XGPU_WORLD_AO_RAY_REACH, XGPU_WORLD_AO_RAYS,
 		XGPU_WORLD_AO_INPUT_ALL_SHAPES, XGPU_WORLD_AO_SHAPES, XGPU_WORLD_AO_INPUT_LIGHTMAP, XGPU_WORLD_AO_FLOOR,
-		XGPU_WORLD_AO_REFERENCE_LEAST, XGPU_WORLD_AO_FLOOR);
+		XGPU_WORLD_AO_REFERENCE_LEAST, XGPU_WORLD_AO_SCENERY_FLOOR, XGPU_WORLD_AO_FLOOR);
 	xgpu_text_append(&text,
 		"fragment float4 xgpu_world_ao_pass(float4 position [[position]], constant xgpu_world_ao_pass &pass [[buffer(%d)]],\n"
 		"\tconstant xgpu_world_ao &world_ao [[buffer(%d)]], texture2d<uint> inputs [[texture(0)]],\n"

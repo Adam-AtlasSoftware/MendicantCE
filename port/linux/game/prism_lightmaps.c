@@ -42,6 +42,24 @@ _x<factor>.plm: "PLM1", the version, the map's cache checksum, the page's
 width and height, the factor, a hash of the stock texels (FNV-1a of the
 decoded ARGB), the deflated size; then the deflated RGBA texels and a
 CRC-32 of the header and them. A file that fails a check is built again.
+
+display.prism_lightmaps "rebaked": each page drawn from the page baked
+again offline on this machine from CE's own light sources (art_pipeline's
+relight_bake.py and relight_encode.py: Cycles, the BSP's sky lights and
+emitting shaders, bounce light, the factor times CE's size, calibrated
+area by area against CE's page), read from <data>/prism_lightmaps/rebaked/
+<map>_<bsp>_<page>.prl (local, never shipped): "PRL1", the version (2),
+CE's page's width and height, the factor, the hash of CE's page's texels
+(as above: a page baked against another map's page is not drawn), the
+flags (1: the direction follows), the deflated size, the inflated size, a
+CRC-32 of the 36 bytes before it and the deflated bytes; then the deflated
+bytes: the light (RGBA8, rows from v = 0), then its direction (RGB d * 0.5
++ 0.5, A a), each the factor times CE's size. The image made of it is the
+two side by side (xgpu.h's XGPU_LIGHTMAP_FILTER_REBAKED), its levels made
+by the host; the draws of the pages that have one are keyed so, draw by
+draw (prism_lightmaps_rebaked_drawing). A page with no file, or a file
+that fails a check, is drawn as "smooth" draws it (its finer copy, with
+display.prism_lightmap_upsample 2 or 4; else the stock page filtered).
 */
 
 #include "cseries.h"
@@ -94,6 +112,7 @@ void prism_lightmaps_begin(void const *lightmap_bitmap);
 void prism_lightmaps_bsp_switched(void);
 void prism_lightmaps_map_unloaded(void);
 unsigned int prism_lightmaps_replacement(unsigned long data, unsigned long *levels);
+int prism_lightmaps_rebaked_drawing(void);
 
 /* ---------- constants */
 
@@ -106,6 +125,11 @@ unsigned int prism_lightmaps_replacement(unsigned long data, unsigned long *leve
 #define PLM_SIDE_MOST 2048
 /* xgpu_images.h's XGPU_IMAGE_RGBA */
 #define PLM_IMAGE_RGBA 0
+/* the rebaked pages' files */
+#define PRL_MAGIC 0x314c5250UL /* "PRL1" */
+#define PRL_VERSION 2
+#define PRL_HEADER 40
+#define PRL_FACTOR_MOST 8
 
 enum
 {
@@ -132,11 +156,16 @@ struct plm_job
 	unsigned char *rgba;
 	int from_cache;
 	unsigned long milliseconds;
+	/* display.prism_lightmaps "rebaked": its file's path (empty none),
+	and whether rgba is the rebaked page's two halves (its factor the
+	file's) */
+	char rebaked_path[256];
+	int rebaked;
 };
 
 struct plm_page
 {
-	int state;
+	int state, rebaked;
 	unsigned int image;
 	unsigned long levels, data;
 };
@@ -157,7 +186,7 @@ static struct
 	unsigned long current_data;
 	/* the settings as config_changes() was */
 	unsigned long read_at;
-	int read, enabled;
+	int read, enabled, rebaked_mode;
 	unsigned long ready_count, built_count, cached_count;
 } plm;
 
@@ -637,6 +666,82 @@ done:
 	return good;
 }
 
+/* the page's rebaked file, where it holds this page's light: 1 (job->rgba
+the two halves side by side, job->factor the file's) */
+static int plm_rebaked_read(struct plm_job *job)
+{
+	unsigned char *bytes = NULL, *payload = NULL, *rgba = NULL;
+	unsigned long size = 0, factor, deflated, inflated, side_w, side_h, row, half;
+	FILE *file;
+	int good = 0;
+
+	if (!job->rebaked_path[0] || !(file = fopen(job->rebaked_path, "rb")))
+		return 0;
+	if (fseek(file, 0, SEEK_END) == 0)
+		size = (unsigned long)ftell(file);
+	fseek(file, 0, SEEK_SET);
+	if (size > PRL_HEADER && size < 512UL * 1024 * 1024 && (bytes = malloc(size)) != NULL &&
+		fread(bytes, 1, size, file) == size)
+	{
+		factor = plm_get32(bytes + 16);
+		deflated = plm_get32(bytes + 28);
+		inflated = plm_get32(bytes + 32);
+		side_w = job->width * factor;
+		side_h = job->height * factor;
+		half = side_w * side_h * 4;
+		if (plm_get32(bytes) != PRL_MAGIC || plm_get32(bytes + 4) != PRL_VERSION)
+			platform_log("prism lightmaps: %s: not a rebaked page of this version", job->rebaked_path);
+		else if (plm_get32(bytes + 8) != job->width || plm_get32(bytes + 12) != job->height)
+			platform_log("prism lightmaps: %s: baked for a page of another size", job->rebaked_path);
+		else if (plm_get32(bytes + 20) != job->hash)
+			platform_log("prism lightmaps: %s: baked against another page (its hash %08lx, the page's %08lx)",
+				job->rebaked_path, plm_get32(bytes + 20), job->hash);
+		else if (factor < 1 || factor > PRL_FACTOR_MOST || side_w > PLM_SIDE_MOST || side_h > PLM_SIDE_MOST ||
+			!(plm_get32(bytes + 24) & 1) || inflated != half * 2 || PRL_HEADER + deflated != size)
+			platform_log("prism lightmaps: %s: damaged", job->rebaked_path);
+		else
+			good = 2;
+	}
+	fclose(file);
+	if (good == 2)
+	{
+		good = 0;
+		/* (the CRC runs over the header's first 36 bytes and the deflated
+		bytes, as one run) */
+		good = plm_crc32(plm_crc32(0, bytes, 36), bytes + PRL_HEADER, deflated) == plm_get32(bytes + 36);
+		if (!good)
+			platform_log("prism lightmaps: %s: damaged (its CRC)", job->rebaked_path);
+		if (good)
+		{
+			good = 0;
+			factor = plm_get32(bytes + 16);
+			side_w = job->width * factor;
+			side_h = job->height * factor;
+			half = side_w * side_h * 4;
+			inflated = half * 2;
+			if ((payload = malloc(inflated)) != NULL && (rgba = malloc(inflated)) != NULL &&
+				z_uncompress(payload, &inflated, bytes + PRL_HEADER, deflated) == 0 && inflated == half * 2)
+			{
+				/* the light's rows on the left, the direction's on the right */
+				for (row = 0; row < side_h; row++)
+				{
+					memcpy(rgba + row * side_w * 8, payload + row * side_w * 4, side_w * 4);
+					memcpy(rgba + row * side_w * 8 + side_w * 4, payload + half + row * side_w * 4, side_w * 4);
+				}
+				job->rgba = rgba;
+				rgba = NULL;
+				job->factor = factor;
+				job->rebaked = 1;
+				good = 1;
+			}
+		}
+	}
+	free(bytes);
+	free(payload);
+	free(rgba);
+	return good;
+}
+
 static void *plm_worker(void *context)
 {
 	(void)context;
@@ -654,9 +759,15 @@ static void *plm_worker(void *context)
 		plm_queue = job->next;
 		pthread_mutex_unlock(&plm_lock);
 		started = SDL_GetTicksNS();
-		job->from_cache = plm_cache_read(job);
-		if (!job->from_cache && plm_build(job))
-			plm_cache_write(job);
+		job->from_cache = 0;
+		/* (display.prism_lightmaps "rebaked": the rebaked page, else the
+		finer copy where display.prism_lightmap_upsample asks for one) */
+		if (!plm_rebaked_read(job) && job->factor)
+		{
+			job->from_cache = plm_cache_read(job);
+			if (!job->from_cache && plm_build(job))
+				plm_cache_write(job);
+		}
 		job->milliseconds = (unsigned long)((SDL_GetTicksNS() - started) / 1000000ULL);
 		pthread_mutex_lock(&plm_lock);
 		job->next = NULL;
@@ -709,28 +820,25 @@ static int plm_settings(void)
 
 		plm.read = 1;
 		plm.read_at = config_changes();
+		char const *mode = config_string("display.prism_lightmaps");
+		int rebaked = mode && !strcmp(mode, "rebaked");
+
 		factor = factor >= 4 ? 4 : factor >= 2 ? 2 : 0;
 		{
-			int enabled = factor && prism_lightmaps_filter() && !config_boolean("debug.null_renderer") &&
+			int enabled = (factor || rebaked) && prism_lightmaps_filter() && !config_boolean("debug.null_renderer") &&
 				!halo_server_mode();
 
-			if (enabled != plm.enabled)
-				platform_log("prism lightmaps: the finer copies %s (x%ld)", enabled ? "on" : "off", factor);
+			if (enabled != plm.enabled || rebaked != plm.rebaked_mode)
+				platform_log("prism lightmaps: %s %s (finer copies x%ld)", rebaked ? "the rebaked pages" : "the finer copies",
+					enabled ? "on" : "off", factor);
 			plm.enabled = enabled;
 		}
-		if (plm.enabled && (unsigned long)factor != plm.factor)
+		if (plm.enabled && ((unsigned long)factor != plm.factor || rebaked != plm.rebaked_mode))
 		{
 			plm_release();
 			plm.factor = (unsigned long)factor;
 		}
-		if (!strcmp(config_string("display.prism_lightmaps"), "rebaked"))
-		{
-			static int said;
-
-			if (!said)
-				platform_log("prism lightmaps: \"rebaked\" is not built yet: drawn as \"smooth\"");
-			said = 1;
-		}
+		plm.rebaked_mode = rebaked;
 	}
 	return plm.enabled;
 }
@@ -822,7 +930,8 @@ static void plm_collect(void)
 		done = job->next;
 		if (job->generation == plm.generation && page && page->state == _plm_page_queued)
 		{
-			unsigned long width = job->width * job->factor, height = job->height * job->factor, side, levels = 1;
+			unsigned long width = job->width * job->factor * (job->rebaked ? 2 : 1), height = job->height * job->factor, side,
+				levels = 1;
 
 			for (side = width > height ? width : height; side > 1; side >>= 1)
 				levels++;
@@ -832,6 +941,7 @@ static void plm_collect(void)
 				/* (the image owns the texels now) */
 				job->rgba = NULL;
 				page->levels = levels;
+				page->rebaked = job->rebaked;
 				page->state = _plm_page_ready;
 				plm.ready_count++;
 				if (job->from_cache)
@@ -840,13 +950,14 @@ static void plm_collect(void)
 					plm.built_count++;
 				platform_log("prism lightmaps: %s bsp %d page %ld: %lux%lu to %lux%lu, %ld triangles, %s in %lu ms",
 					plm.map, (int)plm.bsp, job->page, job->width, job->height, width, height, job->triangle_count,
-					job->from_cache ? "from the cache" : "built and cached", job->milliseconds);
+					job->rebaked ? "rebaked (light and direction)" : job->from_cache ? "from the cache" : "built and cached",
+					job->milliseconds);
 			}
 			else
 			{
 				page->state = _plm_page_failed;
-				platform_log("prism lightmaps: %s bsp %d page %ld: not built (memory); drawn as it is", plm.map,
-					(int)plm.bsp, job->page);
+				platform_log("prism lightmaps: %s bsp %d page %ld: %s; drawn as it is", plm.map, (int)plm.bsp, job->page,
+					job->rgba ? "not built (memory)" : "no rebaked page and no finer copy");
 			}
 		}
 		plm_job_free(job);
@@ -869,7 +980,7 @@ static void plm_queue_page(void const *texture, long page_index, unsigned long d
 		return;
 	job->argb = xgpu_texture_565_argb(texture, &width, &height);
 	if (!job->argb || !width || !height || width * plm.factor > PLM_SIDE_MOST || height * plm.factor > PLM_SIDE_MOST ||
-		!plm.triangle_counts[page_index])
+		(!plm.triangle_counts[page_index] && !plm.rebaked_mode) || (!plm.factor && !plm.rebaked_mode))
 	{
 		platform_log("prism lightmaps: %s bsp %d page %ld drawn as it is (%s, %lux%lu, %ld triangles)", plm.map,
 			(int)plm.bsp, page_index, job->argb ? "its size" : "not an R5G6B5 texture", width, height,
@@ -885,7 +996,7 @@ static void plm_queue_page(void const *texture, long page_index, unsigned long d
 		for (byte = 0; byte < 4; byte++)
 			hash = ((hash ^ ((argb >> (byte * 8)) & 0xff)) * 16777619UL) & 0xffffffffUL;
 	}
-	job->uvs = malloc((size_t)plm.triangle_counts[page_index] * 6 * sizeof(float));
+	job->uvs = malloc(((size_t)plm.triangle_counts[page_index] + 1) * 6 * sizeof(float));
 	if (!job->uvs)
 	{
 		plm_job_free(job);
@@ -917,6 +1028,13 @@ static void plm_queue_page(void const *texture, long page_index, unsigned long d
 	files: port/linux/include/stdio.h; world_sdf.c's sdf_path) */
 	snprintf(job->path, sizeof(job->path), "prism_lightmaps/%s_%d_%ld_x%lu.plm", name, (int)plm.bsp, page_index,
 		plm.factor);
+	if (plm.rebaked_mode)
+		snprintf(job->rebaked_path, sizeof(job->rebaked_path), "prism_lightmaps/rebaked/%s_%d_%ld.prl", name, (int)plm.bsp,
+			page_index);
+	/* (no finer copy to fall back on without display.prism_lightmap_upsample,
+	or without the page's triangles) */
+	if (!plm.triangle_counts[page_index])
+		job->factor = 0;
 	page->state = _plm_page_queued;
 	page->data = data;
 	pthread_mutex_lock(&plm_lock);
@@ -1001,6 +1119,20 @@ unsigned int prism_lightmaps_replacement(unsigned long data, unsigned long *leve
 		return 0;
 	*levels = page->levels;
 	return page->image;
+}
+
+/* (d3d8_device.c, draw by draw) whether the draw is the lightmap pass of a
+page drawn from its rebaked copy: the page last begun is ready rebaked and
+its texture is the one bound to stage 2 */
+int prism_lightmaps_rebaked_drawing(void)
+{
+	void const *texture;
+
+	if (plm.current < 0 || !plm.enabled || !plm.rebaked_mode || plm.pages[plm.current].state != _plm_page_ready ||
+		!plm.pages[plm.current].rebaked || !plm.pages[plm.current].image)
+		return 0;
+	texture = halo_texture_bound(2);
+	return texture && ((unsigned long const *)texture)[1] == plm.current_data;
 }
 
 void prism_lightmaps_bsp_switched(void)

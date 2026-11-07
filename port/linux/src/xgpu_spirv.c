@@ -1963,6 +1963,9 @@ struct pixel_state
 	occlusion (1 without one), the first distant light's shadow (1 none),
 	and the cascades' texture (with its shadows; 0 not declared) */
 	unsigned int prism_ao, prism_shadow, prism_cascades;
+	/* display.prism_lightmaps "rebaked": the page's direction half's
+	sample (texture stage 2's; 0 none) */
+	unsigned int rebaked_direction;
 };
 
 static unsigned int pixel_input(struct module *m, struct pixel_state *state, unsigned int variable_id, unsigned int type)
@@ -2127,6 +2130,15 @@ static BOOL lightmap_smoothed(const struct xgpu_pixel_program *program, const st
 		!(options->border[2] & 3);
 }
 
+/* display.prism_lightmaps "rebaked": whether the draw reads its stage 2
+as a rebaked page's two halves (xgpu.h's XGPU_LIGHTMAP_FILTER_REBAKED) */
+static BOOL lightmap_rebaked(const struct xgpu_pixel_program *program, const struct xgpu_spirv_options *options)
+{
+	return program->lightmap_filter == XGPU_LIGHTMAP_FILTER_REBAKED &&
+		program->stages[2].mode == XGPU_TEXTURE_PROJECT2D && program->stages[2].sampler == _xgpu_sampler_2d &&
+		program->stages[3].mode == XGPU_TEXTURE_CUBEMAP && !(options->border[2] & 3);
+}
+
 /* the lightmap's bilinear sample at uv (a vec2: the stage's scale applied) */
 static unsigned int lightmap_tap(struct module *m, struct pixel_state *state, unsigned int uv)
 {
@@ -2219,6 +2231,34 @@ static unsigned int lightmap_smooth(struct module *m, struct pixel_state *state,
 	return vec4_of(m, saturate(m, 3, c), extract(m, bilinear, 3));
 }
 
+/* a rebaked page's two halves at the projected coordinates (xgpu.h's
+XGPU_LIGHTMAP_FILTER_REBAKED): the light (returned, dithered) and its
+direction (state->rebaked_direction) */
+static unsigned int lightmap_rebaked_read(struct module *m, struct pixel_state *state, unsigned int coordinates)
+{
+	unsigned int uv = fmul(m, 2, xy(m, coordinates), xy(m, uniform(m, U_TEXTURE_SCALE, 2)));
+	unsigned int image = op(m, OP_IMAGE, type_sampled_image(m, DIM_2D, FALSE, FALSE, FALSE), 1,
+		(unsigned int[]){ texture_load(m, state, 2) });
+	unsigned int size = op1(m, OP_CONVERT_S_TO_F, m->t_v2, image_size(m, image, m->t_iv2));
+	unsigned int half_texel = fdiv(m, 1, constant_float(m, 0.5f), extract(m, size, 0));
+	unsigned int u = fmul(m, 1, extract(m, uv, 0), constant_float(m, 0.5f)), v = extract(m, uv, 1);
+	unsigned int u_light = ext3(m, GLSL_F_CLAMP, m->t_float, u, half_texel,
+		fsub(m, 1, constant_float(m, 0.5f), half_texel));
+	unsigned int u_direction = fadd(m, 1, u_light, constant_float(m, 0.5f));
+	unsigned int light = lightmap_tap(m, state, construct(m, 2, (unsigned int[]){ u_light, v }));
+	unsigned int frag, noise, c;
+
+	state->rebaked_direction = lightmap_tap(m, state, construct(m, 2, (unsigned int[]){ u_direction, v }));
+	/* dithered: interleaved gradient noise of the pixel, a 255th about */
+	frag = xy(m, load(m, m->t_v4, state->frag_coord));
+	noise = ext1(m, GLSL_FRACT, m->t_float, fmul(m, 1, constant_float(m, 52.9829189f), ext1(m, GLSL_FRACT, m->t_float,
+		fdot(m, frag, construct(m, 2, (unsigned int[]){ constant_float(m, 0.06711056f),
+		constant_float(m, 0.00583715f) })))));
+	c = fadd(m, 3, xyz(m, light), splat(m, 3, fdiv(m, 1, fsub(m, 1, noise, constant_float(m, 0.5f)),
+		constant_float(m, 255.0f))));
+	return vec4_of(m, saturate(m, 3, c), extract(m, light, 3));
+}
+
 /* a vec4 of the parts (floats) */
 static unsigned int vec4_parts(struct module *m, unsigned int x, unsigned int y, unsigned int z, unsigned int w)
 {
@@ -2255,6 +2295,9 @@ static void texture_stage(struct module *m, struct pixel_state *state, int stage
 		/* (display.prism_lightmaps: the lightmap pass's lightmap smoothed) */
 		if (stage == 2 && lightmap_smoothed(program, state->options))
 			state->t[stage] = lightmap_smooth(m, state, coordinates);
+		/* (display.prism_lightmaps "rebaked": its light and direction) */
+		else if (stage == 2 && lightmap_rebaked(program, state->options))
+			state->t[stage] = lightmap_rebaked_read(m, state, coordinates);
 		else
 			state->t[stage] = sample(m, state, stage, coordinates);
 		if (stage == 0 && program->point_threshold && decoded->sampler == _xgpu_sampler_2d)
@@ -3792,8 +3835,8 @@ static unsigned int world_ao_read(struct module *m, struct pixel_state *state, i
 	/* (a negative reference, a static scenery placement's own draw: the
 	field holds its own geometry, so its taps are taken from the pixel's own
 	depth in it, relative to no reference) */
+	unsigned int baked = compare(m, OP_F_ORD_LESS_THAN, extract(m, object, 1), constant_float(m, 0.0f));
 	{
-		unsigned int baked = compare(m, OP_F_ORD_LESS_THAN, extract(m, object, 1), constant_float(m, 0.0f));
 		unsigned int field0 = world_ao_vector(m, 0, constant_int(m, 0)), field1 = world_ao_vector(m, 0, constant_int(m, 1));
 		unsigned int inside = ext2(m, GLSL_F_MIN, m->t_float, world_sdf_distance(m, state, field0, field1, p),
 			constant_float(m, 0.0f));
@@ -3805,7 +3848,10 @@ static unsigned int world_ao_read(struct module *m, struct pixel_state *state, i
 	field = ext3(m, GLSL_F_MIX, m->t_float, field, relative, extract(m, parameters1, 0));
 	occlusion = fmul(m, 1, ext3(m, GLSL_F_MIX, m->t_float, constant_float(m, 1.0f), field, extract(m, parameters0, 2)),
 		proxies);
-	return ext3(m, GLSL_F_MIX, m->t_float, constant_float(m, 1.0f), fmax_scalar(m, 1, occlusion, XGPU_WORLD_AO_FLOOR),
+	/* (a static scenery placement's own draw kept above its own floor: a
+	boulder's underside on the ground, deep in the field, is not black) */
+	return ext3(m, GLSL_F_MIX, m->t_float, constant_float(m, 1.0f), ext2(m, GLSL_F_MAX, m->t_float, occlusion,
+		fselect(m, baked, constant_float(m, XGPU_WORLD_AO_SCENERY_FLOOR), constant_float(m, XGPU_WORLD_AO_FLOOR))),
 		extract(m, parameters0, 0));
 }
 
@@ -5270,7 +5316,19 @@ static void overlay_light(struct module *m, struct pixel_state *state, BOOL poin
 
 		slope = fadd(m, 2, slope, fscale(m, 2, sxy, fmul(m, 1, fdiv(m, 1, extract(m, ov10, 0), sz), frame)));
 		state->prism_ao = overlay_mix(m, 1, one, extract(m, q, 0), fmul(m, 1, extract(m, ov10, 1), frame));
-		occlusion = occlusion ? fmul(m, 1, occlusion, state->prism_ao) : state->prism_ao;
+		if (occlusion)
+		{
+			/* (a static scenery placement's own draw, the world's occlusion's
+			negative reference: the two together kept above its floor, so that
+			a boulder's underside is not black: XGPU_WORLD_AO_SCENERY_FLOOR) */
+			unsigned int baked = compare(m, OP_F_ORD_LESS_THAN, extract(m, uniform(m, U_WORLD_AO, -1), 1),
+				constant_float(m, 0.0f));
+
+			occlusion = ext2(m, GLSL_F_MAX, m->t_float, fmul(m, 1, occlusion, state->prism_ao),
+				fselect(m, baked, constant_float(m, XGPU_WORLD_AO_SCENERY_FLOOR), constant_float(m, 0.0f)));
+		}
+		else
+			occlusion = state->prism_ao;
 		state->overlay_surface_rough = extract(m, q, 1);
 	}
 	/* the micro normal (the tiles' y is up their pictures: against v, whose
@@ -5500,7 +5558,7 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 		}
 	}
 	/* (display.prism_lightmaps: its dither's pixel) */
-	if (lightmap_smoothed(program, options) && !state.frag_coord)
+	if ((lightmap_smoothed(program, options) || lightmap_rebaked(program, options)) && !state.frag_coord)
 	{
 		state.frag_coord = variable(&m, m.t_v4, STORAGE_INPUT, "gl_FragCoord");
 		decorate1(&m, state.frag_coord, DECORATION_BUILT_IN, BUILT_IN_FRAG_COORD);
@@ -5628,7 +5686,13 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 			}
 		}
 		texture_stage(&m, &state, stage);
+		/* (display.prism_lightmaps "rebaked": the page's direction in place of
+		the vertices' incident radiosity, xgpu.h) */
+		if (stage == 3 && state.rebaked_direction)
+			state.t[3] = vec4_of(&m, xyz(&m, state.rebaked_direction), constant_float(&m, 1.0f));
 	}
+	if (state.rebaked_direction)
+		state.v0 = vec4_of(&m, xyz(&m, state.v0), extract(&m, state.rebaked_direction, 3));
 	if (effect && replaces_depth && state.replaced_depth)
 		effect_fade_value = effect_zsprite_fade(&m, &state, &zsprite_hidden);
 	/* (the bump map's texel, which the combiners may overwrite: the enhanced
@@ -6087,9 +6151,10 @@ static unsigned int world_ao_evaluate(struct module *m, struct pixel_state *stat
 	unsigned int model;
 
 	field = ext3(m, GLSL_F_MIX, m->t_float, field, relative, extract(m, parameters1, 0));
-	model = ext3(m, GLSL_F_MIX, m->t_float, constant_float(m, 1.0f), fmax_scalar(m, 1, fmul(m, 1,
+	model = ext3(m, GLSL_F_MIX, m->t_float, constant_float(m, 1.0f), ext2(m, GLSL_F_MAX, m->t_float, fmul(m, 1,
 		ext3(m, GLSL_F_MIX, m->t_float, constant_float(m, 1.0f), field, extract(m, parameters0, 2)), proxies),
-		XGPU_WORLD_AO_FLOOR), extract(m, parameters0, 0));
+		fselect(m, baked, constant_float(m, XGPU_WORLD_AO_SCENERY_FLOOR), constant_float(m, XGPU_WORLD_AO_FLOOR))),
+		extract(m, parameters0, 0));
 	return fselect(m, lightmap, level, model);
 }
 

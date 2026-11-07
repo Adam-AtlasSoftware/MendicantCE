@@ -476,7 +476,7 @@ float world_ao_occlusion(float const parameters[2][4], struct world_sdf_volume c
 	float reference, int lightmap, float scenery)
 {
 	float proxied = world_ao_proxies_occlusion(proxies, world_ao_proxies_walked(parameters, count, reference, lightmap),
-		point, normal, owner), field;
+		point, normal, owner), field, ao_floor;
 
 	if (lightmap)
 	{
@@ -489,6 +489,7 @@ float world_ao_occlusion(float const parameters[2][4], struct world_sdf_volume c
 	field holds its own geometry, so taken from the pixel's own depth in it,
 	where its surface is inside its collision (a canopy within its hull), and
 	relative to none) */
+	ao_floor = reference < 0.0f ? WORLD_AO_SCENERY_FLOOR : WORLD_AO_FLOOR;
 	if (reference < 0.0f)
 	{
 		float inside = volume ? world_sdf_sample(volume, point) : 0.0f;
@@ -503,7 +504,7 @@ float world_ao_occlusion(float const parameters[2][4], struct world_sdf_volume c
 	field = mix(field, saturate(field / (reference > WORLD_AO_REFERENCE_LEAST ? reference : WORLD_AO_REFERENCE_LEAST)),
 		parameters[1][0]);
 	field = mix(1.0f, field, parameters[0][2]) * proxied;
-	return mix(1.0f, field > WORLD_AO_FLOOR ? field : WORLD_AO_FLOOR, parameters[0][0]);
+	return mix(1.0f, field > ao_floor ? field : ao_floor, parameters[0][0]);
 }
 
 /* ---------- found once a pixel (xgpu_stream.h's WORLD_AO_PREPASS)
@@ -642,7 +643,7 @@ float world_ao_pass_occlusion(float const parameters[2][4], struct world_sdf_vol
 	struct world_proxy const *proxies, long count, float const grid[2][4],
 	unsigned int const cells[WORLD_AO_GRID_CELLS / 2][4], float const point[3], unsigned int const words[4])
 {
-	float normal[3], owner, value, proxied = 1.0f, factor, field, reference, distance;
+	float normal[3], owner, value, proxied = 1.0f, factor, field, reference, distance, ao_floor;
 	int lightmap, all_shapes, cell, word, bit;
 	long limit;
 
@@ -670,6 +671,7 @@ float world_ao_pass_occlusion(float const parameters[2][4], struct world_sdf_vol
 		return mix(1.0f, proxied > WORLD_AO_FLOOR ? proxied : WORLD_AO_FLOOR, parameters[0][1]);
 	}
 	reference = value;
+	ao_floor = reference < 0.0f ? WORLD_AO_SCENERY_FLOOR : WORLD_AO_FLOOR;
 	if (reference < 0.0f)
 	{
 		float inside = volume ? world_sdf_sample(volume, point) : 0.0f;
@@ -684,7 +686,7 @@ float world_ao_pass_occlusion(float const parameters[2][4], struct world_sdf_vol
 	field = mix(field, saturate(field / (reference > WORLD_AO_REFERENCE_LEAST ? reference : WORLD_AO_REFERENCE_LEAST)),
 		parameters[1][0]);
 	field = mix(1.0f, field, parameters[0][2]) * proxied;
-	return mix(1.0f, field > WORLD_AO_FLOOR ? field : WORLD_AO_FLOOR, parameters[0][0]);
+	return mix(1.0f, field > ao_floor ? field : ao_floor, parameters[0][0]);
 }
 
 /* a pixel's occlusion read from the pass's texels (struct

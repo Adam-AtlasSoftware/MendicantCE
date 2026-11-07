@@ -5,7 +5,10 @@ off, they change nothing; on, what they draw is valid.
   the key's lightmap_filter read stage 2 as they always did (one sample, no
   smoothing); with it, the lightmap is smoothed (xgpu.h's "The lightmaps
   smoothed") in both emitters, and only where stage 2 is a plain 2D lookup
-  (a border keeps the plain sample). The SPIR-V modules pass spirv-val.
+  (a border keeps the plain sample); with XGPU_LIGHTMAP_FILTER_REBAKED the
+  SPIR-V emitter reads the rebaked page's two halves (more code than the plain
+  sample; a border keeps the plain sample), the Metal emitter (which never
+  asks for it) the plain sample. The SPIR-V modules pass spirv-val.
 - Vulkan's bloom passes are in the post shaders' generated file, and the
   generator's other programs are as they were (tools/vulkan_post_shaders.py
   --check, where glslangValidator and spirv-val are installed).
@@ -67,16 +70,24 @@ def test_msl_smoothed(shaders):
         assert "float4 frag_position [[position]];" in source, name
     # (a border on the stage: the plain sample)
     assert "lightmap_smooth" not in shaders["lightmap_border", 1]
+    # (the rebaked pages: Vulkan's alone; Metal draws its plain sample)
+    for name in ("lightmap", "lightmap_dynamic", "lightmap_world", "lightmap_border"):
+        assert "lightmap_smooth" not in shaders[name, 2], name
+        assert "tex2.sample(" in shaders[name, 2], name
 
 
 def test_spirv(check, tmp_path):
     subprocess.run([str(check), "spirv", str(tmp_path)], check=True)
     modules = {path.stem: path.read_bytes() for path in tmp_path.glob("*.spv")}
-    assert len(modules) == 8
+    assert len(modules) == 12
     for name in ("lightmap", "lightmap_dynamic", "lightmap_world"):
         # (the smoothed one is longer: its taps, gathers and dither)
         assert len(modules[f"{name}-1"]) > len(modules[f"{name}-0"]) + 400, name
+        # (the rebaked one: its two halves' taps, the direction in place of the cube's, its dither)
+        assert len(modules[f"{name}-2"]) > len(modules[f"{name}-0"]) + 200, name
+        assert modules[f"{name}-2"] != modules[f"{name}-1"], name
     assert modules["lightmap_border-1"] == modules["lightmap_border-0"]
+    assert modules["lightmap_border-2"] == modules["lightmap_border-0"]
     if not VALIDATOR:
         pytest.skip("no spirv-val")
     for path in sorted(tmp_path.glob("*.spv")):

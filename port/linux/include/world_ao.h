@@ -64,6 +64,8 @@ level ("world" is the strong preset); the reference's weight */
 #define WORLD_AO_REFERENCE_LEAST 0.25f
 #define WORLD_AO_REACH_FADE 0.25f
 #define WORLD_AO_FLOOR 0.2f
+/* (a static scenery placement's own draw: xgpu.h's XGPU_WORLD_AO_SCENERY_FLOOR) */
+#define WORLD_AO_SCENERY_FLOOR 0.5f
 #define WORLD_AO_STRENGTH_OBJECTS 1.0f
 #define WORLD_AO_STRENGTH_LEVEL 0.8f
 #define WORLD_AO_REFERENCE_WEIGHT 1.0f

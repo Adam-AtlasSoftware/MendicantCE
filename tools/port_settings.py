@@ -1411,9 +1411,11 @@ PAGES = {
             (SECTION, "LIGHTING"),
             # (PRISM's lighting: drawn by the Vulkan renderer alone,
             # port/linux/src/d3d8_device.c's prism_lighting_read)
-            ("LIGHTMAPS", "display.prism_lightmaps", [("STOCK", "stock"), ("SMOOTH", "smooth")],
-             "Smooth: the levels' own light drawn without its colour bands and blocky edges, from a finer copy "
-             "built on this machine the first time a level is played. The light stays where it was.", "desktop"),
+            ("LIGHTMAPS", "display.prism_lightmaps", [("STOCK", "stock"), ("SMOOTH", "smooth"),
+                                                       ("REBAKED", "rebaked")],
+             "Smooth: the levels' own light without its bands and blocky edges. Rebaked: light baked again on this "
+             "computer from the level's own lamps and sky, finer, bouncing, lighting bumps from its direction.",
+             "desktop"),
             # (beyond CE: what the Xbox never drew, off in every preset)
             (SECTION, "BEYOND CE"),
             # (PRISM's remodelled level geometry, built on this machine:
