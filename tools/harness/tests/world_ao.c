@@ -83,6 +83,11 @@ void world_proxies_map_unloaded(void) {}
 tested here) */
 void prism_light_window_begin(float const camera[3]) { (void)camera; }
 void prism_light_object_begin(long object_index) { (void)object_index; }
+/* (display.prism_lightmaps' finer copies' hooks: port/linux/game/prism_lightmaps.c,
+not under test) */
+void prism_lightmaps_begin(void const *lightmap_bitmap) { (void)lightmap_bitmap; }
+void prism_lightmaps_bsp_switched(void) { }
+void prism_lightmaps_map_unloaded(void) { }
 
 /* the field: a volume whose header world_sdf_current hands on, half faded in */
 static struct world_sdf_volume volume;
