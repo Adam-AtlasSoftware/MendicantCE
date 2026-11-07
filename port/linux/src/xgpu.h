@@ -222,6 +222,28 @@ in place of its one bilinear sample with:
 Its alpha is the bilinear sample's, as the combiners read it. Nothing else
 changes: the bump's response, the self-illumination, the dynamic lights. */
 #define XGPU_LIGHTMAP_FILTER_SMOOTH 1
+/* display.prism_lightmaps "rebaked": the lightmap pass's page is a page
+baked again on this machine (prism_lightmaps.c's .prl, the factor times
+CE's size) laid out as two halves side by side: on the left the light L,
+on the right its direction (RGB d * 0.5 + 0.5, a unit vector in the
+vertices' tangent frame, the frame CE's incident radiosity is in; A how
+much of the light comes from it, a). The draw (lightmap_filter
+XGPU_LIGHTMAP_FILTER_REBAKED, stage 2 the page, stage 3 the normalization
+cube of the vertices' incident radiosity) reads
+
+  t2   = the left half's bilinear sample at (u / 2, v), u clamped half a
+         texel inside it, dithered as above;
+  t3   = vec4(the right half's at (u / 2 + 1 / 2, v), 1): d in place of
+         the vertices' direction;
+  v0.a = the right half's alpha: a in place of the vertices' |R|;
+
+so the combiners' own sum, L x (1 - a + a max(0, n . d)) x the material's
+colour with n the bump map's normal at the pixel, lights each pixel's
+normal from the texel's own dominant direction, as CE lit it from the
+vertices'. Only the lightmap pass of a page that has its rebaked copy
+drawn is keyed so (d3d8_device.c asks prism_lightmaps.c, draw by draw);
+any other is XGPU_LIGHTMAP_FILTER_SMOOTH. */
+#define XGPU_LIGHTMAP_FILTER_REBAKED 2
 #define XGPU_LIGHTMAP_DEBAND_REACH 1.5f
 #define XGPU_LIGHTMAP_DEBAND_LIMIT 2.0f
 
@@ -466,6 +488,10 @@ pixels: world_ao.h's WORLD_AO_UPSAMPLE_*) */
 #define XGPU_WORLD_AO_REFERENCE_LEAST 0.25f
 #define XGPU_WORLD_AO_REACH_FADE 0.25f
 #define XGPU_WORLD_AO_FLOOR 0.2f
+/* (a static scenery placement's own draw, a negative reference: its floor
+in place of XGPU_WORLD_AO_FLOOR, so that the field's depth under a
+boulder resting on the ground does not take its underside to black) */
+#define XGPU_WORLD_AO_SCENERY_FLOOR 0.5f
 /* the field's (world_sdf.h's WORLD_SDF_*: d3d8_device.c checks they agree) */
 #define XGPU_WORLD_SDF_BRICK 8
 #define XGPU_WORLD_SDF_BRICK_SPAN 9

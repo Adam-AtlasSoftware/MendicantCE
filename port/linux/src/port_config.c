@@ -459,8 +459,15 @@ static const struct config_setting config_settings[] =
 		"draws it from a finer copy rebuilt on this machine from your map, chart\n"
 		"by chart (display.prism_lightmap_upsample). The light stays where it\n"
 		"was, in its colours; models still take theirs from the stock lightmap.\n"
-		"\"rebaked\" is not built yet and draws as \"smooth\". Vulkan; read each\n"
-		"frame (prism_set \"lightmaps smooth\")." GRAPHICS_CHOOSES },
+		"\"rebaked\" draws each page that has one from a page baked again on this\n"
+		"machine from the level's own light sources (its sky's lights, its\n"
+		"emitting surfaces, bounce light), four times finer, matched area by\n"
+		"area to the stock page's exposure and colour, its dominant direction\n"
+		"and colour per texel lighting each pixel's bump (the data folder's\n"
+		"prism_lightmaps/rebaked, made by art_pipeline's relight tools; never\n"
+		"shipped); the other pages as \"smooth\". Models still take their light\n"
+		"from the stock lightmap. Vulkan; read each frame (prism_set\n"
+		"\"lightmaps smooth\")." GRAPHICS_CHOOSES },
 	{ "display.prism_lightmap_upsample", _config_integer, "2", "HALO_PRISM_LIGHTMAP_UPSAMPLE", _environment_value,
 		_platform_desktop,
 		"PRISM, with display.prism_lightmaps \"smooth\": how much finer the\n"

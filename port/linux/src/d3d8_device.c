@@ -2194,7 +2194,8 @@ static void prism_lighting_read(void)
 	prism_lighting.read_at = config_changes();
 	lightmaps = config_string("display.prism_lightmaps");
 	bloom = config_string("display.prism_bloom");
-	/* ("rebaked" is not built: drawn as "smooth", prism_lightmaps.c says so) */
+	/* ("rebaked": the pages that have a rebaked copy are keyed so draw by
+	draw; the others are drawn as "smooth") */
 	prism_lighting.filter = xgpu_backend_capabilities.lightmap_filter && lightmaps &&
 		(!strcmp(lightmaps, "smooth") || !strcmp(lightmaps, "rebaked")) ? XGPU_LIGHTMAP_FILTER_SMOOTH : 0;
 	prism_lighting.bloom = !xgpu_backend_capabilities.bloom || !bloom ? 0 : !strcmp(bloom, "glow") ? XGPU_BLOOM_GLOW :
@@ -2205,6 +2206,9 @@ static void prism_lighting_read(void)
 		prism_lighting.bloom = 0;
 #endif
 }
+
+/* (port/linux/game/prism_lightmaps.c) */
+int prism_lightmaps_rebaked_drawing(void);
 
 int prism_lightmaps_filter(void)
 {
@@ -4382,8 +4386,12 @@ static BOOL prepare_draw(BOOL immediate, unsigned long primitive)
 	/* (display.prism_material_overlay: the overlay a mod armed for the
 	model shader's draws) */
 	facts.material_overlay = material_overlay.armed ? material_overlay.key : 0;
-	/* (display.prism_lightmaps: the lightmap pass's lightmap smoothed) */
+	/* (display.prism_lightmaps: the lightmap pass's lightmap smoothed, or
+	read as its rebaked page's light and direction where that page is drawn:
+	prism_lightmaps.c) */
 	facts.lightmap_filter = prism_lightmaps_filter();
+	if (facts.lightmap_filter && halo_lightmap_pass_drawing() && prism_lightmaps_rebaked_drawing())
+		facts.lightmap_filter = XGPU_LIGHTMAP_FILTER_REBAKED;
 	facts.prism_lighting = material_overlay.armed ? material_overlay.prism_lighting : 0;
 	if (device.gl_ready)
 		world_ao_twins();

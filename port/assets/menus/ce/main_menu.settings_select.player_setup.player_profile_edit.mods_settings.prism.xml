@@ -105,7 +105,7 @@
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/prism_lightmaps_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/labels" string_index="7" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/prism_lightmaps_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="STOCK|SMOOTH" setting="display.prism_lightmaps" values="stock|smooth" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/prism_lightmaps_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="STOCK|SMOOTH|REBAKED" setting="display.prism_lightmaps" values="stock|smooth|rebaked" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
 		<on event="created" run="port setting load"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/section_8" width="344" height="18" bitmap="main_menu/settings/section" platform="desktop" wide="-106 120">
@@ -153,7 +153,7 @@
 		<string text="Local: shiny armour reflects the place it is in, captured on this computer from your maps. Classic reflects the game's own painted reflections."/>
 		<string text="Characters shade themselves and each other from the level's main light. Needs ambient occlusion World. Classic keeps the Xbox's shadows alone."/>
 		<string text=""/>
-		<string text="Smooth: the levels' own light drawn without its colour bands and blocky edges, from a finer copy built on this machine the first time a level is played. The light stays where it was."/>
+		<string text="Smooth: the levels' own light without its bands and blocky edges. Rebaked: light baked again on this computer from the level's own lamps and sky, finer, bouncing, lighting bumps from its direction."/>
 		<string text=""/>
 		<string text="Remodel draws the level's rock, sand and Forerunner walls from a denser model built on this computer from your maps: rounded rock, bevelled edges, the same light. You still walk and collide on the original. Xbox draws the map's own."/>
 		<string text="A soft glow about light brighter than white: plasma, the sun, lights and blasts. The Xbox had none; Glow is faint, Full wider. Nothing lit only to white glows."/>

@@ -5,11 +5,13 @@ display.prism_lightmaps' lightmap pass (port/linux/src/xgpu.h's "The
 lightmaps smoothed"; tools/test_prism_lighting.py): the pixel shaders of a
 structure's lightmap pass (its bump map in stage 0, its lightmap in stage 2
 at projected coordinates), alone, with the enhanced dynamic lights and with
-display.ambient_occlusion "world", each with the key's lightmap_filter 0
-and XGPU_LIGHTMAP_FILTER_SMOOTH, as the emitters write them:
+display.ambient_occlusion "world", each with the key's lightmap_filter 0,
+XGPU_LIGHTMAP_FILTER_SMOOTH and XGPU_LIGHTMAP_FILTER_REBAKED (stage 3 the
+normalization cube of the vertices' incident radiosity, as CE's pass has
+it), as the emitters write them:
 
   check msl                 the Metal emitter's, each after a line
-                            "==== <case> <filter: 0 or 1>"
+                            "==== <case> <filter: 0, 1 or 2>"
   check spirv <directory>   the SPIR-V emitter's, <case>-<filter>.spv
 
 Built by the test with the shader decoders and both emitters, as
@@ -50,6 +52,8 @@ static void program_make(struct xgpu_pixel_program *program, int index, int filt
 	program->stages[0].sampler = _xgpu_sampler_2d;
 	program->stages[2].declared_mode = program->stages[2].mode = XGPU_TEXTURE_PROJECT2D;
 	program->stages[2].sampler = _xgpu_sampler_2d;
+	program->stages[3].declared_mode = program->stages[3].mode = XGPU_TEXTURE_CUBEMAP;
+	program->stages[3].sampler = _xgpu_sampler_cube;
 	program->final.present = 1;
 	program->final.inputs[0].reg = XGPU_REGISTER_T2;
 	program->final.inputs[1].reg = XGPU_REGISTER_T0;
@@ -57,7 +61,8 @@ static void program_make(struct xgpu_pixel_program *program, int index, int filt
 	program->final.inputs[6].alpha = 1;
 	program->dynamic_lights = cases[index].dynamic_lights;
 	program->ambient_occlusion = cases[index].ambient_occlusion;
-	program->lightmap_filter = (unsigned char)(filter ? XGPU_LIGHTMAP_FILTER_SMOOTH : 0);
+	program->lightmap_filter = (unsigned char)(filter == 2 ? XGPU_LIGHTMAP_FILTER_REBAKED : filter ?
+		XGPU_LIGHTMAP_FILTER_SMOOTH : 0);
 }
 
 static int msl(void)
@@ -70,7 +75,7 @@ static int msl(void)
 
 	for (index = 0; index < sizeof(cases) / sizeof(cases[0]); index++)
 	{
-		for (filter = 0; filter < 2; filter++)
+		for (filter = 0; filter < 3; filter++)
 		{
 			memset(&options, 0, sizeof(options));
 			options.border[2] = cases[index].border;
@@ -95,7 +100,7 @@ static int spirv(const char *directory)
 
 	for (index = 0; index < sizeof(cases) / sizeof(cases[0]); index++)
 	{
-		for (filter = 0; filter < 2; filter++)
+		for (filter = 0; filter < 3; filter++)
 		{
 			char path[1024];
 			FILE *file;
