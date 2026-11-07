@@ -30,8 +30,8 @@ def sources() -> dict[str, str]:
     found = {}
     for match in DECLARATION.finditer(text):
         found[match.group(1)] = "".join(ast.literal_eval(s) for s in STRINGS.findall(match.group(2)))
-    if "trace" not in found or "resolve" not in found:
-        raise SystemExit(f"{SOURCE}: no trace_source or resolve_source")
+    if not {"trace", "resolve", "probes"} <= set(found):
+        raise SystemExit(f"{SOURCE}: no trace_source, resolve_source or probes_source")
     return found
 
 

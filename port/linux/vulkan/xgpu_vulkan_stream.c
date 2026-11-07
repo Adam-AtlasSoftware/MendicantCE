@@ -3299,8 +3299,12 @@ static void prepass_rt_capture(const struct draw_input *input, const struct xgpu
 	uint32_t index, alpha = twin->pixel_program.alpha_test;
 	int alpha_tested;
 
-	if (!xgpu_vulkan_rt_active() || !(occlusion & XGPU_AMBIENT_OCCLUSION_WORLD) ||
-		(light != XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL && light != XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX))
+	/* (the occluders too: an object lighting itself, the Elites' armour,
+	casts its shadow as any other; the first-person weapon among them is
+	left out by its place, xgpu_vulkan_rt_window_end) */
+	if (!xgpu_vulkan_rt_active() || (occlusion != XGPU_STREAM_WORLD_AO_OCCLUDER &&
+		(!(occlusion & XGPU_AMBIENT_OCCLUSION_WORLD) ||
+		(light != XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL && light != XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX))))
 		return;
 	/* (an alpha test that keeps every texel but the fully clear ones: CE's
 models' greater than 0, whose base maps' alpha is a mask of another kind
@@ -3373,6 +3377,7 @@ then, drawn opaque) */
 	draw.primitive = input->primitive == _primitive_triangle_strip ? XGPU_VULKAN_RT_STRIP :
 		input->primitive == _primitive_triangle_fan ? XGPU_VULKAN_RT_FAN : XGPU_VULKAN_RT_LIST;
 	draw.constants = (const float (*)[4])stream.constants;
+	draw.occluder = occlusion == XGPU_STREAM_WORLD_AO_OCCLUDER;
 	if (input->indices && !input->cpu_indices)
 		return;
 	xgpu_vulkan_rt_capture(&draw);

@@ -54,6 +54,8 @@ more), each reused once its submission is done. GPU time: HALO_VULKAN_STATS
 /* the objects' triangles a window at most (past it: the farthest drawn
 last are left out) */
 #define RT_OBJECT_TRIANGLES 600000u
+/* gi's probes at most (32 x 16 x 32) */
+#define RT_PROBES_MOST (32u * 16u * 32u)
 
 /* the pass block (the GLSL's Pass, std140) */
 struct rt_pass
@@ -67,6 +69,18 @@ struct rt_pass
 	float rays[4];
 	uint32_t info[4];
 	int32_t size[4];
+	/* gi's probes: the volume's first probe's place (its cell times the
+	spacing) and the spacing; the probes a side and all; the first updated
+	this frame, the rays a probe, the mood, whether gi is on; the sky's
+	radiance; the sun's; the structure's vertices' and the objects'
+	vertices' addresses (low, high), the objects' indices' */
+	float probe_origin[4];
+	int32_t probe_count[4];
+	uint32_t probe_info[4];
+	float sky[4];
+	float sun_radiance[4];
+	uint32_t addresses[4];
+	uint32_t addresses2[4];
 };
 
 /* ---------- the functions */
@@ -77,7 +91,7 @@ struct rt_pass
 	F(vkCreateShaderModule) F(vkDestroyShaderModule) F(vkCreateComputePipelines) F(vkCreateDescriptorPool) \
 	F(vkResetDescriptorPool) F(vkAllocateDescriptorSets) F(vkUpdateDescriptorSets) F(vkCmdBindPipeline) \
 	F(vkCmdBindDescriptorSets) F(vkCmdDispatch) F(vkCmdPipelineBarrier) F(vkCreateSampler) F(vkCreateQueryPool) \
-	F(vkCmdResetQueryPool) F(vkCmdWriteTimestamp) F(vkGetQueryPoolResults) F(vkGetBufferDeviceAddress) \
+	F(vkCmdResetQueryPool) F(vkCmdWriteTimestamp) F(vkCmdFillBuffer) F(vkGetQueryPoolResults) F(vkGetBufferDeviceAddress) \
 	F(vkCreateAccelerationStructureKHR) F(vkDestroyAccelerationStructureKHR) \
 	F(vkGetAccelerationStructureBuildSizesKHR) F(vkCmdBuildAccelerationStructuresKHR) \
 	F(vkGetAccelerationStructureDeviceAddressKHR)
@@ -119,12 +133,21 @@ struct rt_slot
 
 /* a window's captured objects: their world-space vertices and triangles,
 in the slot's geometry buffer */
+#define RT_CAPTURED_DRAWS 4096u
 struct rt_capture
 {
 	VkDeviceSize vertex_offset, index_offset;
 	uint32_t vertex_count, triangle_count;
 	uint32_t vertex_room, index_room;
 	int open, full;
+	/* the occluders' draws: their triangles and bounds (the first-person
+	weapon's left out at the window's end) */
+	struct
+	{
+		uint32_t first, count;
+		float bounds[6];
+	} occluders[RT_CAPTURED_DRAWS];
+	uint32_t occluder_count;
 };
 
 static struct
@@ -132,9 +155,16 @@ static struct
 	int tried, made;
 	struct xgpu_vulkan_rt_device device;
 	VkDeviceSize scratch_alignment;
-	VkDescriptorSetLayout trace_layout, resolve_layout;
-	VkPipelineLayout trace_pipeline_layout, resolve_pipeline_layout;
-	VkPipeline trace, resolve;
+	VkDescriptorSetLayout trace_layout, resolve_layout, probes_layout;
+	VkPipelineLayout trace_pipeline_layout, resolve_pipeline_layout, probes_pipeline_layout;
+	VkPipeline trace, resolve, probes;
+	/* gi's probes (RT_PROBES_MOST of them, four vec4s each: their
+	irradiance's spherical harmonics, a channel each, then the place they
+	were found at and whether they are valid), zeroed once; the frames whose
+	probes were updated */
+	struct rt_buffer probe_buffer;
+	int probes_zeroed;
+	uint32_t probe_frame;
 	VkSampler nearest, linear;
 	VkQueryPool queries;
 	struct rt_slot slots[RT_SLOTS];
@@ -149,7 +179,7 @@ static struct
 	uint32_t receiving_generation;
 	float *receiving;
 	uint32_t receiving_count, receiving_total;
-	struct rt_buffer static_storage;
+	struct rt_buffer static_storage, static_vertices;
 	VkAccelerationStructureKHR static_structure;
 	VkDeviceAddress static_address;
 	uint32_t static_triangles, static_generation;
@@ -164,7 +194,7 @@ static struct
 	double milliseconds, milliseconds_most;
 	uint64_t timed_frames;
 	int statistics;
-	int logged_first;
+	int logged_first, logged_gi;
 } rt;
 
 /* ---------- memory */
@@ -350,7 +380,12 @@ static int make(void)
 	static const VkDescriptorType trace_types[] =
 	{
 		VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,
-		VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+		VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+	};
+	static const VkDescriptorType probes_types[] =
+	{
+		VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
 	};
 	static const VkDescriptorType resolve_types[] =
 	{
@@ -386,10 +421,14 @@ static int make(void)
 		if (structure_properties.minAccelerationStructureScratchOffsetAlignment > rt.scratch_alignment)
 			rt.scratch_alignment = structure_properties.minAccelerationStructureScratchOffsetAlignment;
 	}
-	if (!pipeline_make(trace_types, 4, xgpu_vulkan_rt_trace_words, xgpu_vulkan_rt_trace_count, &rt.trace_layout,
+	if (!pipeline_make(trace_types, 5, xgpu_vulkan_rt_trace_words, xgpu_vulkan_rt_trace_count, &rt.trace_layout,
 		&rt.trace_pipeline_layout, &rt.trace) ||
 		!pipeline_make(resolve_types, 6, xgpu_vulkan_rt_resolve_words, xgpu_vulkan_rt_resolve_count,
-		&rt.resolve_layout, &rt.resolve_pipeline_layout, &rt.resolve))
+		&rt.resolve_layout, &rt.resolve_pipeline_layout, &rt.resolve) ||
+		!pipeline_make(probes_types, 3, xgpu_vulkan_rt_probes_words, xgpu_vulkan_rt_probes_count,
+		&rt.probes_layout, &rt.probes_pipeline_layout, &rt.probes) ||
+		!buffer_make((VkDeviceSize)RT_PROBES_MOST * 64, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+		VK_BUFFER_USAGE_TRANSFER_DST_BIT, 0, &rt.probe_buffer))
 	{
 		host_logf(HOST_LOG_WARN, "prism rt: its compute pipelines cannot be made: no ray tracing");
 		return 0;
@@ -408,11 +447,11 @@ static int make(void)
 	for (index = 0; index < RT_SLOTS; index++)
 	{
 		struct rt_slot *slot = &rt.slots[index];
-		VkDescriptorPoolSize sizes[4];
+		VkDescriptorPoolSize sizes[5];
 		VkDescriptorPoolCreateInfo pool;
 
-		if (!buffer_make(RT_GEOMETRY_BYTES, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR, 1,
-			&slot->geometry) ||
+		if (!buffer_make(RT_GEOMETRY_BYTES, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, 1, &slot->geometry) ||
 			!buffer_make(RT_INSTANCES * sizeof(VkAccelerationStructureInstanceKHR),
 			VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR, 1, &slot->instances) ||
 			!buffer_make(RT_STORAGE_BYTES, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR, 0, &slot->storage) ||
@@ -424,15 +463,17 @@ static int make(void)
 		sizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 		sizes[0].descriptorCount = 64;
 		sizes[1].type = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
-		sizes[1].descriptorCount = 16;
+		sizes[1].descriptorCount = 24;
 		sizes[2].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
 		sizes[2].descriptorCount = 48;
 		sizes[3].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		sizes[3].descriptorCount = 32;
+		sizes[3].descriptorCount = 48;
+		sizes[4].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		sizes[4].descriptorCount = 32;
 		memset(&pool, 0, sizeof(pool));
 		pool.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-		pool.maxSets = 32;
-		pool.poolSizeCount = 4;
+		pool.maxSets = 48;
+		pool.poolSizeCount = 5;
 		pool.pPoolSizes = sizes;
 		if (vkCreateDescriptorPool(rt.device.device, &pool, NULL, &slot->pool) != VK_SUCCESS)
 			return 0;
@@ -449,9 +490,9 @@ static int make(void)
 			rt.queries = VK_NULL_HANDLE;
 	}
 	{
-		const char *stats = getenv("HALO_VULKAN_STATS");
+		const char *stats = getenv("HALO_VULKAN_STATS"), *gpu = getenv("HALO_GPU_STATS");
 
-		rt.statistics = stats && *stats && strcmp(stats, "0");
+		rt.statistics = (stats && *stats && strcmp(stats, "0")) || (gpu && *gpu && strcmp(gpu, "0"));
 	}
 	rt.made = 1;
 	host_logf(HOST_LOG_INFO, "prism rt: made (ray queries in compute; %u MB a frame's slot, %u slots)",
@@ -557,8 +598,8 @@ static void static_build(void)
 
 	if (!count)
 		return;
-	if (!buffer_make((VkDeviceSize)count * 36, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR, 1,
-		&vertices))
+	if (!buffer_make((VkDeviceSize)count * 36, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, 1, &vertices))
 		return;
 	memcpy(vertices.mapped, rt.receiving, (size_t)count * 36);
 	memset(&geometry, 0, sizeof(geometry));
@@ -619,11 +660,14 @@ static void static_build(void)
 	vkCmdPipelineBarrier(commands, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
 		VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &barrier,
 		0, NULL, 0, NULL);
-	/* (the last set's after this submission; the build's inputs too) */
+	/* (the last set's after this submission, the build's scratch too; its
+	triangles kept, which gi's rays read the faces' normals of) */
 	if (rt.static_structure)
 		garbage_add(&rt.static_storage, rt.static_structure);
-	garbage_add(&vertices, VK_NULL_HANDLE);
+	if (rt.static_vertices.buffer)
+		garbage_add(&rt.static_vertices, VK_NULL_HANDLE);
 	garbage_add(&scratch, VK_NULL_HANDLE);
+	rt.static_vertices = vertices;
 	rt.static_storage = storage;
 	rt.static_structure = structure;
 	memset(&address, 0, sizeof(address));
@@ -671,6 +715,8 @@ void xgpu_vulkan_rt_static(const struct xgpu_stream_rt_static *record, const flo
 		rt.receiving_count = rt.receiving_total = 0;
 		if (rt.static_structure)
 			garbage_add(&rt.static_storage, rt.static_structure);
+		if (rt.static_vertices.buffer)
+			garbage_add(&rt.static_vertices, VK_NULL_HANDLE);
 		rt.static_structure = VK_NULL_HANDLE;
 		rt.static_address = 0;
 		rt.static_triangles = 0;
@@ -724,7 +770,7 @@ void xgpu_vulkan_rt_capture(const struct xgpu_vulkan_rt_draw *draw)
 	struct rt_slot *slot = &rt.slots[rt.slot];
 	struct rt_capture *capture = &rt.capture;
 	uint32_t lowest = 0xffffffffu, highest = 0, index, vertices, triangles = 0, first;
-	float *to_vertices;
+	float *to_vertices, bounds[6] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
 	uint32_t *to_indices;
 
 	if (!capture->open || capture->full || !draw->vertices || !draw->count || !draw->stride || !draw->constants)
@@ -750,6 +796,8 @@ void xgpu_vulkan_rt_capture(const struct xgpu_vulkan_rt_draw *draw)
 		highest = draw->count - 1;
 	}
 	vertices = highest - lowest + 1;
+	if (draw->occluder && capture->occluder_count == RT_CAPTURED_DRAWS)
+		return;
 	if ((uint64_t)(highest + 1) * draw->stride > draw->bytes || vertices > 65536)
 		return;
 	if (capture->vertex_count + vertices > capture->vertex_room)
@@ -798,6 +846,16 @@ void xgpu_vulkan_rt_capture(const struct xgpu_vulkan_rt_draw *draw)
 		}
 		if (!isfinite(out[0]) || !isfinite(out[1]) || !isfinite(out[2]))
 			out[0] = out[1] = out[2] = 0.0f;
+		if (draw->occluder)
+		{
+			for (axis = 0; axis < 3; axis++)
+			{
+				if (!index || out[axis] < bounds[axis])
+					bounds[axis] = out[axis];
+				if (!index || out[axis] > bounds[axis + 3])
+					bounds[axis + 3] = out[axis];
+			}
+		}
 		to_vertices[index * 3] = out[0];
 		to_vertices[index * 3 + 1] = out[1];
 		to_vertices[index * 3 + 2] = out[2];
@@ -847,6 +905,13 @@ void xgpu_vulkan_rt_capture(const struct xgpu_vulkan_rt_draw *draw)
 		}
 	}
 #undef RT_VERTEX
+	if (draw->occluder && triangles)
+	{
+		capture->occluders[capture->occluder_count].first = capture->triangle_count;
+		capture->occluders[capture->occluder_count].count = triangles;
+		memcpy(capture->occluders[capture->occluder_count].bounds, bounds, sizeof(bounds));
+		capture->occluder_count++;
+	}
 	capture->vertex_count += vertices;
 	capture->triangle_count += triangles;
 	rt.draws++;
@@ -902,6 +967,37 @@ static VkDeviceAddress slot_scratch(struct rt_slot *slot, VkDeviceSize size)
 		return 0;
 	slot->scratch_used = offset + size;
 	return align_up(slot->scratch.address + offset, rt.scratch_alignment);
+}
+
+/* the occluders all within 1 world unit of the eye (the first-person
+weapon and hands, which CE never let cast shadows) taken out of the
+window's triangles */
+static void first_person_drop(struct rt_slot *slot, const float eye[3])
+{
+	uint32_t *indices = (uint32_t *)((uint8_t *)slot->geometry.mapped + rt.capture.index_offset);
+	uint32_t index, removed = 0;
+
+	for (index = rt.capture.occluder_count; index-- > 0;)
+	{
+		const float *bounds = rt.capture.occluders[index].bounds;
+		uint32_t first = rt.capture.occluders[index].first, count = rt.capture.occluders[index].count;
+		float far = 0.0f;
+		int axis;
+
+		for (axis = 0; axis < 3; axis++)
+		{
+			float a = fabsf(bounds[axis] - eye[axis]), b = fabsf(bounds[axis + 3] - eye[axis]);
+
+			far += (a > b ? a : b) * (a > b ? a : b);
+		}
+		if (far > 1.0f)
+			continue;
+		memmove(indices + (size_t)first * 3, indices + (size_t)(first + count) * 3,
+			(size_t)(rt.capture.triangle_count - first - count) * 12);
+		rt.capture.triangle_count -= count;
+		removed += count;
+	}
+	(void)removed;
 }
 
 /* the objects' bottom-level structure (0: none) */
@@ -1089,17 +1185,18 @@ struct xgpu_vulkan_image *xgpu_vulkan_rt_window_end(struct xgpu_vulkan_image *in
 	struct rt_pass block;
 	struct xgpu_vulkan_range uniforms;
 	VkDescriptorSetAllocateInfo allocate;
-	VkDescriptorSetLayout layouts[2];
-	VkDescriptorSet sets[2];
-	VkWriteDescriptorSet writes[10];
+	VkDescriptorSetLayout layouts[3];
+	VkDescriptorSet sets[3];
+	VkWriteDescriptorSet writes[14];
 	VkDescriptorImageInfo images[10];
-	VkDescriptorBufferInfo buffer;
+	VkDescriptorBufferInfo buffer, probe_buffer;
 	VkWriteDescriptorSetAccelerationStructureKHR scene_write;
 	VkAccelerationStructureKHR scene;
 	VkCommandBuffer commands;
 	VkDeviceAddress objects;
 	struct xgpu_vulkan_image *history, *state;
-	uint32_t scale, out_width, out_height, quality;
+	uint32_t scale, out_width, out_height, quality, probes_updated = 0;
+	int gi;
 	void *bytes;
 
 	if (!rt.capture.open || !xgpu_vulkan_rt_active() || !inputs)
@@ -1145,10 +1242,58 @@ struct xgpu_vulkan_image *xgpu_vulkan_rt_window_end(struct xgpu_vulkan_image *in
 	/* (the debug views: the light's factor alone, the occlusion alone, the
 structure's and the objects' visibility of the sun as they are) */
 	block.info[3] = rt.frame.view == XGPU_RT_VIEW_VISIBILITY ? 1u : rt.frame.view == XGPU_RT_VIEW_AO ? 2u :
-		rt.frame.view == XGPU_RT_VIEW_ALBEDO ? 3u : rt.frame.view == XGPU_RT_VIEW_PROBES ? 4u : 0u;
+		rt.frame.view == XGPU_RT_VIEW_ALBEDO ? 3u : rt.frame.view == XGPU_RT_VIEW_PROBES ? 4u :
+		rt.frame.view == XGPU_RT_VIEW_GI ? 2u : 0u;
 	block.size[0] = (int32_t)width;
 	block.size[1] = (int32_t)height;
 	block.size[2] = (int32_t)scale;
+	/* gi's probes: a volume about the camera, its sides and spacing by
+	quality (medium 24 x 12 x 24 at 1.5 world units), a quarter of them
+	updated a frame; the sky's outdoor radiance (its ambient radiosity) and
+	the sun's (its colour by its power) */
+	gi = rt.frame.mode >= XGPU_RT_GI && rt.static_vertices.buffer;
+	{
+		static const int32_t sides[4][3] = { { 24, 12, 24 }, { 16, 8, 16 }, { 32, 16, 32 }, { 32, 16, 32 } };
+		static const float spacings[4] = { 1.5f, 2.0f, 1.5f, 1.0f };
+		static const uint32_t probe_rays[4] = { 128, 64, 192, 256 };
+		float spacing = spacings[quality];
+		int axis;
+
+		for (axis = 0; axis < 3; axis++)
+		{
+			block.probe_count[axis] = sides[quality][axis];
+			block.probe_origin[axis] = (floorf(pass->camera[0][axis] / spacing) - (float)(sides[quality][axis] / 2)) *
+				spacing;
+		}
+		block.probe_origin[3] = spacing;
+		block.probe_count[3] = sides[quality][0] * sides[quality][1] * sides[quality][2];
+		probes_updated = (uint32_t)block.probe_count[3] / 4u;
+		block.probe_info[0] = (rt.probe_frame * probes_updated) % (uint32_t)block.probe_count[3];
+		block.probe_info[1] = probe_rays[quality];
+		block.probe_info[2] = rt.frame.mood;
+		block.probe_info[3] = gi ? 1u : 0u;
+		block.sky[0] = rt.frame.sky[0] * rt.frame.sky[3];
+		block.sky[1] = rt.frame.sky[1] * rt.frame.sky[3];
+		block.sky[2] = rt.frame.sky[2] * rt.frame.sky[3];
+		block.sun_radiance[0] = rt.frame.sun_color[0] * rt.frame.sun_color[3];
+		block.sun_radiance[1] = rt.frame.sun_color[1] * rt.frame.sun_color[3];
+		block.sun_radiance[2] = rt.frame.sun_color[2] * rt.frame.sun_color[3];
+		block.addresses[0] = (uint32_t)rt.static_vertices.address;
+		block.addresses[1] = (uint32_t)(rt.static_vertices.address >> 32);
+		block.addresses[2] = (uint32_t)(slot->geometry.address + rt.capture.vertex_offset);
+		block.addresses[3] = (uint32_t)((slot->geometry.address + rt.capture.vertex_offset) >> 32);
+		block.addresses2[0] = (uint32_t)(slot->geometry.address + rt.capture.index_offset);
+		block.addresses2[1] = (uint32_t)((slot->geometry.address + rt.capture.index_offset) >> 32);
+	}
+	if (gi && !rt.logged_gi)
+	{
+		rt.logged_gi = 1;
+		host_logf(HOST_LOG_INFO, "prism rt: gi's probes: %dx%dx%d at %.2f wu, %u rays, %u a frame; sky %.3f %.3f %.3f, "
+			"sun %.3f %.3f %.3f", block.probe_count[0], block.probe_count[1], block.probe_count[2],
+			(double)block.probe_origin[3], block.probe_info[1], probes_updated, (double)block.sky[0], (double)block.sky[1],
+			(double)block.sky[2], (double)block.sun_radiance[0], (double)block.sun_radiance[1],
+			(double)block.sun_radiance[2]);
+	}
 	bytes = xgpu_vulkan_upload(sizeof(block), 256, &uniforms);
 	if (!bytes)
 		return NULL;
@@ -1167,9 +1312,18 @@ structure's and the objects' visibility of the sun as they are) */
 		vkCmdResetQueryPool(commands, rt.queries, rt.slot * 2, 2);
 		vkCmdWriteTimestamp(commands, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, rt.queries, rt.slot * 2);
 	}
+	/* (the probes zeroed once: none valid) */
+	if (!rt.probes_zeroed)
+	{
+		vkCmdFillBuffer(commands, rt.probe_buffer.buffer, 0, VK_WHOLE_SIZE, 0);
+		barrier_global(commands, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
+			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+		rt.probes_zeroed = 1;
+	}
 	/* the vertices written by the CPU, read by the builds */
 	barrier_global(commands, VK_PIPELINE_STAGE_HOST_BIT, VK_ACCESS_HOST_WRITE_BIT,
 		VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, VK_ACCESS_SHADER_READ_BIT);
+	first_person_drop(slot, pass->camera[0]);
 	objects = objects_build(commands, slot);
 	if (objects)
 		barrier_global(commands, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
@@ -1187,10 +1341,11 @@ structure's and the objects' visibility of the sun as they are) */
 	/* the sets */
 	layouts[0] = rt.trace_layout;
 	layouts[1] = rt.resolve_layout;
+	layouts[2] = rt.probes_layout;
 	memset(&allocate, 0, sizeof(allocate));
 	allocate.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
 	allocate.descriptorPool = slot->pool;
-	allocate.descriptorSetCount = 2;
+	allocate.descriptorSetCount = 3;
 	allocate.pSetLayouts = layouts;
 	if (vkAllocateDescriptorSets(rt.device.device, &allocate, sets) != VK_SUCCESS)
 		return NULL;
@@ -1226,7 +1381,35 @@ structure's and the objects' visibility of the sun as they are) */
 	writes[9] = writes[3];
 	writes[9].dstSet = sets[1];
 	writes[9].dstBinding = 5;
-	vkUpdateDescriptorSets(rt.device.device, 10, writes, 0, NULL);
+	/* (the probes: the trace reads them, the probes' pass writes them) */
+	memset(&probe_buffer, 0, sizeof(probe_buffer));
+	probe_buffer.buffer = rt.probe_buffer.buffer;
+	probe_buffer.range = VK_WHOLE_SIZE;
+	writes[10] = writes[3];
+	writes[10].dstBinding = 4;
+	writes[10].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	writes[10].pBufferInfo = &probe_buffer;
+	writes[11] = writes[1];
+	writes[11].dstSet = sets[2];
+	writes[11].dstBinding = 0;
+	writes[12] = writes[10];
+	writes[12].dstSet = sets[2];
+	writes[12].dstBinding = 1;
+	writes[13] = writes[3];
+	writes[13].dstSet = sets[2];
+	writes[13].dstBinding = 2;
+	vkUpdateDescriptorSets(rt.device.device, 14, writes, 0, NULL);
+	/* gi: the probes updated, a workgroup each, before the trace reads them */
+	if (gi && probes_updated)
+	{
+		vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.probes);
+		vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.probes_pipeline_layout, 0, 1, &sets[2], 0,
+			NULL);
+		vkCmdDispatch(commands, probes_updated, 1, 1);
+		barrier_global(commands, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT,
+			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+		rt.probe_frame++;
+	}
 	/* the trace, then the resolve */
 	vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.trace);
 	vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.trace_pipeline_layout, 0, 1, &sets[0], 0,

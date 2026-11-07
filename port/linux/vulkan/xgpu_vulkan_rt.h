@@ -53,6 +53,10 @@ struct xgpu_vulkan_rt_draw
 	int32_t index_base;
 	int primitive;
 	const float (*constants)[4];
+	/* an occluder of the pre-pass (no world light of its own): traced, but
+	left out where it is all within reach of the eye (the first-person
+	weapon and hands) */
+	int occluder;
 };
 void xgpu_vulkan_rt_capture(const struct xgpu_vulkan_rt_draw *draw);
 /* a draw the capture passed over (its layout or alpha test), counted */

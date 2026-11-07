@@ -324,8 +324,13 @@ window's opaque surfaces, not the first-person weapon, not lighting itself
 the setting off and in a map's preparation: manifest_note_basis) */
 static BOOL world_ao_applies(void)
 {
+	/* (display.prism_rt: a model lighting itself too, the Elites' armour,
+	whose occlusion slot is its vertex light's, before its self-illumination
+	is added: not a lightmap pass's, whose slot is after) */
+	BOOL self_lit_model = (hdr.kind & ~0xffu) == HALO_HDR_KIND_SELF_ILLUMINATION_STAGES(1 << 1) && prism_rt_mode();
+
 	return (world_ao.span == WORLD_AO_SPAN_OPEN || world_ao.span == WORLD_AO_SPAN_FOUND) &&
-		!(hdr.kind & HALO_HDR_KIND_SELF_ILLUMINATION);
+		(!(hdr.kind & HALO_HDR_KIND_SELF_ILLUMINATION) || self_lit_model);
 }
 
 /* while a map's pipelines are prepared, the world's light as the window's

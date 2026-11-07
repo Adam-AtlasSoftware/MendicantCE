@@ -38,6 +38,7 @@ the settings. Nothing crosses the network.
 #include "render/render.h"
 #include "scenario/scenario.h"
 #include "scenario/scenario_definitions.h"
+#include "scenario/sky_definitions.h"
 #include "shaders/shader_definitions.h"
 #include "structures/structure_bsp_definitions.h"
 #include "world_scene.h"
@@ -390,6 +391,20 @@ void prism_rt_frame_begin(void)
 	frame.generation = (unsigned int)prism_rt.generation;
 	frame.settings[0] = PRISM_RT_SUN_STRENGTH;
 	frame.settings[1] = PRISM_RT_MODEL_STRENGTH;
+	/* (the sky's outdoor ambient radiosity: its colour at 0x48 and power at
+0x54 of the tag, before its fogs) */
+	if (prism_rt.sky_index != NONE)
+	{
+		struct sky *sky = scenario_get_sky(prism_rt.sky_index);
+
+		if (sky)
+		{
+			memcpy(frame.sky, (byte const *)sky + 0x48, 3 * sizeof(float));
+			memcpy(&frame.sky[3], (byte const *)sky + 0x54, sizeof(float));
+			if (!(frame.sky[3] >= 0.0f && frame.sky[3] < 1000.0f))
+				memset(frame.sky, 0, sizeof(frame.sky));
+		}
+	}
 	if (prism_rt.sun_found)
 	{
 		frame.sun[0] = prism_rt.sun.i;

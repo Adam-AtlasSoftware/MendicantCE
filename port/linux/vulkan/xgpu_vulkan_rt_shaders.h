@@ -15,5 +15,7 @@ extern const uint32_t xgpu_vulkan_rt_trace_words[];
 extern const size_t xgpu_vulkan_rt_trace_count;
 extern const uint32_t xgpu_vulkan_rt_resolve_words[];
 extern const size_t xgpu_vulkan_rt_resolve_count;
+extern const uint32_t xgpu_vulkan_rt_probes_words[];
+extern const size_t xgpu_vulkan_rt_probes_count;
 
 #endif
