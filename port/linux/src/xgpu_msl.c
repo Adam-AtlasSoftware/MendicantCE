@@ -2539,7 +2539,7 @@ char *xgpu_msl_pixel_shader(const struct xgpu_pixel_program *program, const stru
 	if (comparison && *comparison && program->alpha_test_samples && comparison[0] != '=' && comparison[0] != '!')
 		sample_mask = TRUE;
 	xgpu_text_append(&text, uniforms_declaration, XGPU_MODEL_LIGHT_COUNT, overlay ?
-		"\tfloat4 world_ao;\n\tfloat4 material_overlay[10];\n" : world ? "\tfloat4 world_ao;\n" : "");
+		"\tfloat4 world_ao;\n\tfloat4 material_overlay[11];\n" : world ? "\tfloat4 world_ao;\n" : "");
 	if (world_inline)
 		world_ao_functions(&text, occlusion_light);
 	else if (world_sampled || world_inputs)

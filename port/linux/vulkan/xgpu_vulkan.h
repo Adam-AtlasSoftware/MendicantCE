@@ -512,7 +512,7 @@ enum
 
 /* (xgpu.h's XGPU_OVERLAY_BINDING and XGPU_OVERLAY_IMAGE_COUNT) */
 #define XGPU_VULKAN_BINDING_OVERLAY 4
-#define XGPU_VULKAN_OVERLAY_IMAGES 5
+#define XGPU_VULKAN_OVERLAY_IMAGES 6
 
 /* a draw: its pipeline, topology and dynamic state; its vertices' bindings
 (those of bindings' bits) and indices (16-bit; buffer VK_NULL_HANDLE: none);

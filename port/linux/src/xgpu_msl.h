@@ -109,7 +109,7 @@ struct xgpu_msl_uniforms
 	float world_ao[4];
 	/* display.prism_material_overlay's uniform (xgpu.h), after it, declared
 	in its pixel shaders alone */
-	float material_overlay[10][4];
+	float material_overlay[11][4];
 };
 
 /* what the Metal Shading Language is written for (xgpu_msl.c):
