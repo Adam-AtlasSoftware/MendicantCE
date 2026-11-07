@@ -326,7 +326,7 @@ static void render_model_parts(
 	parts alone, the transparent ones queued by the window's own draw
 	(render_world_ao_prepass) */
 	short last_pass = TEST_FLAG(flags, _render_model_shadow_bit) ? _render_model_pass_solid :
-		render_world_ao_prepass ? _render_model_pass_decal : _render_model_pass_transparent;
+		render_port_prepass ? _render_model_pass_decal : _render_model_pass_transparent;
 	struct render_sort_filth sort_filth[MAXIMUM_PARTS_PER_MODEL_GEOMETRY];
 	real_point3d centroid;
 	short pass;

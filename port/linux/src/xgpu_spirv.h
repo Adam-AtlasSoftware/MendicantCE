@@ -93,6 +93,19 @@ linear, clamped: the dynamic objects' rays step through them) */
 clamped: xgpu.h's XGPU_WORLD_CASCADE*) */
 #define XGPU_SPIRV_BINDING_WORLD_CASCADES 7
 
+/* display.prism_shadows "cascaded" (xgpu.h's "PRISM's sun shadows"): in a
+set of its own, the moving casters' atlas compared (a depth compare
+sampler, linear: each tap a 2x2 test, reversed depth's greater or equal)
+and read as it is (nearest), the structure's compared, and the block
+(struct xgpu_prism_shadows_block, a uniform buffer) */
+#define XGPU_SPIRV_SET_SHADOWS 4
+#define XGPU_SPIRV_BINDING_SHADOWS_MOVING 0
+#define XGPU_SPIRV_BINDING_SHADOWS_MOVING_DEPTH 1
+#define XGPU_SPIRV_BINDING_SHADOWS_STRUCTURE 2
+#define XGPU_SPIRV_BINDING_SHADOWS_BLOCK 3
+#define XGPU_SPIRV_SHADOWS_BLOCK_VECTORS 24
+#define XGPU_SPIRV_SHADOWS_CASCADES 4
+
 /* the locations of what the vertex shader hands the pixel shader */
 enum
 {
@@ -203,6 +216,11 @@ struct xgpu_spirv_options
 	(world_proxies_occlusion), each shape's place and kind then the same for
 	all of its pixels */
 	BOOL subgroups;
+	/* display.prism_shadows "cascaded": a caster's shadow twin
+	(xgpu_stream_prism_shadow_twin): its vertex shader's position the
+	program's clip position times the uniforms' eye_correction[0] (the
+	cascade's, the backend's: its clip space from the camera's), as it is */
+	BOOL shadow_caster;
 };
 
 /* ---------- the VR mode's effects

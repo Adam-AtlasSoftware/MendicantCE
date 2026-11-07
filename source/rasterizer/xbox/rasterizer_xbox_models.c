@@ -718,7 +718,7 @@ void _rasterizer_model_begin(
 		/* port: (not in display.ambient_occlusion "world"'s pre-pass: the fog
 		screen draws its models again at the window's end, queued by its
 		own draw: render_world_ao_prepass) */
-		if (!local_sky_flag && !render_world_ao_prepass &&
+		if (!local_sky_flag && !render_port_prepass &&
 			rasterizer_environment_fog_screen_model_begin(parameters))
 		{
 			local_environment_fog_screen_flag = TRUE;
@@ -2509,7 +2509,7 @@ struct transparent_geometry_group *_rasterizer_model_transparent_geometry_submit
 	pre-pass: the window's own draw queues it, render_world_ao_prepass) */
 	if (rasterizer_debug_options.draw_models &&
 		rasterizer_debug_options.draw_model_transparent_geometry &&
-		!render_world_ao_prepass)
+		!render_port_prepass)
 	{
 		alpha_blended_decal =
 			shader &&

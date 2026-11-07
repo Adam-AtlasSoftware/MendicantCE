@@ -46,7 +46,7 @@ enum
 	OP_DECORATE = 71, OP_MEMBER_DECORATE = 72,
 	OP_VECTOR_EXTRACT_DYNAMIC = 77, OP_VECTOR_SHUFFLE = 79, OP_COMPOSITE_CONSTRUCT = 80, OP_COMPOSITE_EXTRACT = 81,
 	OP_COMPOSITE_INSERT = 82,
-	OP_IMAGE_SAMPLE_IMPLICIT_LOD = 87, OP_IMAGE_SAMPLE_EXPLICIT_LOD = 88, OP_IMAGE_FETCH = 95, OP_IMAGE_GATHER = 96, OP_IMAGE_READ = 98, OP_IMAGE = 100, OP_IMAGE_QUERY_SIZE_LOD = 103,
+	OP_IMAGE_SAMPLE_IMPLICIT_LOD = 87, OP_IMAGE_SAMPLE_EXPLICIT_LOD = 88, OP_IMAGE_SAMPLE_DREF_EXPLICIT_LOD = 90, OP_IMAGE_FETCH = 95, OP_IMAGE_GATHER = 96, OP_IMAGE_READ = 98, OP_IMAGE = 100, OP_IMAGE_QUERY_SIZE_LOD = 103,
 	OP_CONVERT_F_TO_S = 110, OP_CONVERT_S_TO_F = 111, OP_BITCAST = 124,
 	OP_F_NEGATE = 127, OP_I_ADD = 128, OP_F_ADD = 129, OP_I_SUB = 130, OP_F_SUB = 131, OP_I_MUL = 132, OP_F_MUL = 133,
 	OP_F_DIV = 136, OP_VECTOR_TIMES_SCALAR = 142, OP_DOT = 148,
@@ -155,6 +155,8 @@ bitwise or (GroupNonUniformArithmetic) */
 	unsigned int world_ao, world_sdf, world_sdf_table, world_ao_scenery, world_ao_objects;
 	/* (found once a pixel: its texture, and the passes' inputs) */
 	unsigned int world_ao_pixels, t_uv2;
+	/* (display.prism_shadows "cascaded": the atlases and the block) */
+	unsigned int sun_moving, sun_moving_depth, sun_structure, sun_block;
 };
 
 static void words_push(struct module *m, struct words *words, unsigned int word)
@@ -1766,6 +1768,13 @@ BOOL xgpu_spirv_vertex_shader(const struct xgpu_vertex_program *program, unsigne
 		state.position = shuffle(&m, 4, state.position, corrected, xy_zw);
 	}
 
+	/* display.prism_shadows "cascaded": a caster's twin, its clip position
+	into the cascade's (eye_correction[0], the backend's), as it is; none
+	where the program has none (its draw is off every cascade) */
+	if (options->shadow_caster)
+		store(&m, position_out, clip_captured ? eye_position(&m, constant_int(&m, 0), clip_position) :
+			constant_v4(&m, 0.0f, 0.0f, 0.0f, -1.0f));
+	else
 	/* the clip position (the conversion done with c[-38] and
 	c[-37] undone, pixel centres at half-integers, a w of zero behind the
 	camera) */
@@ -1966,6 +1975,8 @@ struct pixel_state
 	/* display.prism_lightmaps "rebaked": the page's direction half's
 	sample (texture stage 2's; 0 none) */
 	unsigned int rebaked_direction;
+	/* (PRISM's sun shadows read: XGPU_PRISM_SHADOWS_CASCADED) */
+	BOOL prism_sun;
 };
 
 static unsigned int pixel_input(struct module *m, struct pixel_state *state, unsigned int variable_id, unsigned int type)
@@ -4969,6 +4980,277 @@ static unsigned int overlay_flag(struct module *m, unsigned int a)
 	return compare(m, OP_F_ORD_GREATER_THAN, a, constant_float(m, 0.5f));
 }
 
+/* ---------- PRISM's sun shadows (xgpu.h's "PRISM's sun shadows",
+display.prism_shadows "cascaded")
+
+The set's atlases and block declared (XGPU_SPIRV_SET_SHADOWS); then, at a
+pixel's world position and unit normal, the moving casters' visibility
+(PCSS) and the structure's. */
+
+static unsigned int sun_image_type(struct module *m, BOOL depth)
+{
+	unsigned int operands[7], image;
+
+	operands[0] = m->t_float;
+	operands[1] = DIM_2D;
+	operands[2] = depth ? 1 : 0;
+	operands[3] = 0;
+	operands[4] = 0;
+	operands[5] = 1;
+	operands[6] = 0;
+	image = intern(m, OP_TYPE_IMAGE, FALSE, 7, operands);
+	return type1(m, OP_TYPE_SAMPLED_IMAGE, image);
+}
+
+static void prism_sun_declare(struct module *m, struct pixel_state *state)
+{
+	unsigned int members[1], block;
+
+	m->sun_moving = variable(m, sun_image_type(m, TRUE), STORAGE_UNIFORM_CONSTANT, "sun_moving");
+	decorate1(m, m->sun_moving, DECORATION_DESCRIPTOR_SET, XGPU_SPIRV_SET_SHADOWS);
+	decorate1(m, m->sun_moving, DECORATION_BINDING, XGPU_SPIRV_BINDING_SHADOWS_MOVING);
+	m->sun_moving_depth = variable(m, sun_image_type(m, FALSE), STORAGE_UNIFORM_CONSTANT, "sun_moving_depth");
+	decorate1(m, m->sun_moving_depth, DECORATION_DESCRIPTOR_SET, XGPU_SPIRV_SET_SHADOWS);
+	decorate1(m, m->sun_moving_depth, DECORATION_BINDING, XGPU_SPIRV_BINDING_SHADOWS_MOVING_DEPTH);
+	m->sun_structure = variable(m, sun_image_type(m, TRUE), STORAGE_UNIFORM_CONSTANT, "sun_structure");
+	decorate1(m, m->sun_structure, DECORATION_DESCRIPTOR_SET, XGPU_SPIRV_SET_SHADOWS);
+	decorate1(m, m->sun_structure, DECORATION_BINDING, XGPU_SPIRV_BINDING_SHADOWS_STRUCTURE);
+	members[0] = block_array(m, XGPU_SPIRV_SHADOWS_BLOCK_VECTORS);
+	block = type_struct(m, 1, members);
+	decorate(m, block, DECORATION_BLOCK, 0, NULL);
+	member_decorate(m, block, 0, DECORATION_OFFSET, 0);
+	name(m, block, "prism_sun_block");
+	m->sun_block = variable(m, block, STORAGE_UNIFORM, "prism_sun");
+	decorate1(m, m->sun_block, DECORATION_DESCRIPTOR_SET, XGPU_SPIRV_SET_SHADOWS);
+	decorate1(m, m->sun_block, DECORATION_BINDING, XGPU_SPIRV_BINDING_SHADOWS_BLOCK);
+	if (!state->frag_coord)
+	{
+		state->frag_coord = variable(m, m->t_v4, STORAGE_INPUT, "gl_FragCoord");
+		decorate1(m, state->frag_coord, DECORATION_BUILT_IN, BUILT_IN_FRAG_COORD);
+	}
+}
+
+/* the block's vec4 (struct xgpu_prism_shadows_block: [0] to [15] the
+cascades' rows, [16] sun, [17] light, [18] texel, [19] depth, [20] fade) */
+static unsigned int prism_sun_vector(struct module *m, int index)
+{
+	unsigned int operands[3], pointer;
+
+	operands[0] = m->sun_block;
+	operands[1] = constant_int(m, 0);
+	operands[2] = constant_int(m, index);
+	pointer = op(m, OP_ACCESS_CHAIN, type_pointer(m, STORAGE_UNIFORM, m->t_v4), 3, operands);
+	return load(m, m->t_v4, pointer);
+}
+
+/* dot(row.xyz, p) + row.w */
+static unsigned int prism_sun_row(struct module *m, unsigned int row, unsigned int p)
+{
+	return fadd(m, 1, fdot(m, xyz(m, row), p), extract(m, row, 3));
+}
+
+/* texture(atlas, vec3(uv, reference)): a 2x2 compared bilinearly */
+static unsigned int prism_sun_compare(struct module *m, unsigned int atlas, unsigned int uv, unsigned int reference)
+{
+	unsigned int operands[5];
+
+	operands[0] = load(m, sun_image_type(m, TRUE), atlas);
+	operands[1] = uv;
+	operands[2] = reference;
+	operands[3] = IMAGE_OPERANDS_LOD;
+	operands[4] = constant_float(m, 0.0f);
+	return op(m, OP_IMAGE_SAMPLE_DREF_EXPLICIT_LOD, m->t_float, 5, operands);
+}
+
+/* textureLod(atlas_depth, uv, 0).r */
+static unsigned int prism_sun_depth(struct module *m, unsigned int uv)
+{
+	unsigned int operands[4];
+
+	operands[0] = load(m, sun_image_type(m, FALSE), m->sun_moving_depth);
+	operands[1] = uv;
+	operands[2] = IMAGE_OPERANDS_LOD;
+	operands[3] = constant_float(m, 0.0f);
+	return extract(m, op(m, OP_IMAGE_SAMPLE_EXPLICIT_LOD, m->t_v4, 4, operands), 0);
+}
+
+#define PRISM_SUN_BLOCKER_TAPS 8
+#define PRISM_SUN_FILTER_TAPS 12
+/* (Vogel's disks: tap i at sqrt((i + 0.5) / n) along the golden angle's
+turns, the filter's a radian further) */
+static const float prism_sun_blocker_taps[PRISM_SUN_BLOCKER_TAPS][2] = { { 0.250000f, 0.000000f }, { -0.319290f, 0.292496f }, { 0.048872f, -0.556877f }, { 0.402444f, 0.524918f }, { -0.738535f, -0.130636f }, { 0.699605f, -0.445031f }, { -0.234004f, 0.870484f }, { -0.446271f, -0.859268f } };
+static const float prism_sun_filter_taps[PRISM_SUN_FILTER_TAPS][2] = { { 0.110289f, 0.171765f }, { -0.341818f, -0.090335f }, { 0.404167f, -0.212091f }, { -0.183109f, 0.508073f }, { -0.236054f, -0.565048f }, { 0.614397f, 0.284341f }, { -0.701305f, 0.223244f }, { 0.393492f, -0.685685f }, { 0.184198f, 0.821221f }, { -0.730040f, -0.508633f }, { 0.927140f, -0.124145f }, { -0.627697f, 0.751219f } };
+
+/* the moving casters' visibility and the structure's at p (the world
+position) with the unit normal n: the cascade the point (pushed a texel and
+a half of each along n, half a texel toward the sun) falls inside first,
+its tile's coordinates; 1 past the cascades (the last's faded toward its
+edge). Moving: PCSS (the blockers' mean depth among Vogel's taps over the
+search's reach, the penumbra by the blocker's distance times light.y, then
+compared taps over it, turned by the pixel's interleaved gradient noise);
+structure: four compared taps a texel apart */
+static void prism_sun_visibility(struct module *m, struct pixel_state *state, unsigned int p, unsigned int n,
+	unsigned int *moving, unsigned int *structure)
+{
+	unsigned int sun = prism_sun_vector(m, 16), light = prism_sun_vector(m, 17), texel = prism_sun_vector(m, 18);
+	unsigned int depth = prism_sun_vector(m, 19), fade = prism_sun_vector(m, 20);
+	unsigned int count = extract(m, sun, 3), resolution = extract(m, light, 3), inverse_width = extract(m, light, 2);
+	unsigned int one = constant_float(m, 1.0f), zero = constant_float(m, 0.0f), half = constant_float(m, 0.5f);
+	unsigned int chosen = constant_float(m, -1.0f), clip = constant_splat(m, 3, 0.0f), size = zero, range = one;
+	unsigned int edge, last_fade, inside_any, frag, noise, angle, rotate_c, rotate_s, tile_texel, local, uv_texel;
+	unsigned int reference, bias, search, blocker_sum, blockers, blocker_depth, distance, penumbra, sum, structure_sum;
+	unsigned int base_u, base_v, low, high;
+	int cascade, tap;
+
+	/* (the push along the normal grows as the face turns from the sun: 1.5
+	texels facing it, 4 edge on) */
+	unsigned int push = fadd(m, 1, constant_float(m, 1.5f), fmul(m, 1, constant_float(m, 2.5f),
+		fsub(m, 1, constant_float(m, 1.0f), saturate(m, 1, fdot(m, n, xyz(m, sun))))));
+
+	for (cascade = XGPU_SPIRV_SHADOWS_CASCADES - 1; cascade >= 0; cascade--)
+	{
+		unsigned int t = extract(m, texel, (unsigned int)cascade);
+		unsigned int q = fadd(m, 3, p, fadd(m, 3, fscale(m, 3, n, fmul(m, 1, t, push)),
+			fscale(m, 3, xyz(m, sun), fmul(m, 1, t, half))));
+		unsigned int c[3], projected, inside, reach;
+
+		c[0] = prism_sun_row(m, prism_sun_vector(m, cascade * 4 + 0), q);
+		c[1] = prism_sun_row(m, prism_sun_vector(m, cascade * 4 + 1), q);
+		c[2] = prism_sun_row(m, prism_sun_vector(m, cascade * 4 + 2), q);
+		projected = construct(m, 3, c);
+		reach = ext2(m, GLSL_F_MAX, m->t_float, ext1(m, GLSL_F_ABS, m->t_float, c[0]),
+			ext1(m, GLSL_F_ABS, m->t_float, c[1]));
+		/* (inside: the filter's reach kept in the tile, and a cascade the
+		block has) */
+		inside = op2(m, OP_LOGICAL_AND, m->t_bool, compare(m, OP_F_ORD_LESS_THAN, reach, constant_float(m, 0.97f)),
+			op2(m, OP_LOGICAL_AND, m->t_bool, compare(m, OP_F_ORD_LESS_THAN, constant_float(m, (float)cascade), count),
+			op2(m, OP_LOGICAL_AND, m->t_bool, compare(m, OP_F_ORD_GREATER_THAN, c[2], zero),
+			compare(m, OP_F_ORD_LESS_THAN, c[2], one))));
+		chosen = fselect(m, inside, constant_float(m, (float)cascade), chosen);
+		clip = select_n(m, 3, inside, projected, clip);
+		size = fselect(m, inside, t, size);
+		range = fselect(m, inside, extract(m, depth, (unsigned int)cascade), range);
+	}
+	inside_any = compare(m, OP_F_ORD_GREATER_THAN_EQUAL, chosen, zero);
+	/* (the last cascade's shadow faded toward its edge) */
+	edge = ext2(m, GLSL_F_MAX, m->t_float, ext1(m, GLSL_F_ABS, m->t_float, extract(m, clip, 0)),
+		ext1(m, GLSL_F_ABS, m->t_float, extract(m, clip, 1)));
+	last_fade = fselect(m, compare(m, OP_F_ORD_EQUAL, chosen, fsub(m, 1, count, one)),
+		ext3(m, GLSL_SMOOTH_STEP, m->t_float, extract(m, fade, 0), constant_float(m, 0.97f), edge), zero);
+	/* the noise's turn */
+	frag = xy(m, load(m, m->t_v4, state->frag_coord));
+	noise = ext1(m, GLSL_FRACT, m->t_float, fmul(m, 1, constant_float(m, 52.9829189f), ext1(m, GLSL_FRACT, m->t_float,
+		fdot(m, frag, construct(m, 2, (unsigned int[]){ constant_float(m, 0.06711056f),
+		constant_float(m, 0.00583715f) })))));
+	angle = fmul(m, 1, noise, constant_float(m, 6.2831853f));
+	rotate_c = ext1(m, GLSL_COS, m->t_float, angle);
+	rotate_s = ext1(m, GLSL_SIN, m->t_float, angle);
+	/* the point's texel in the atlas (x along the tiles, y down the tile),
+	and the tile's least and most texel centres */
+	tile_texel = fmul(m, 1, fmax_scalar(m, 1, chosen, 0.0f), resolution);
+	local = fadd(m, 2, fscale(m, 2, xy(m, clip), half), constant_splat(m, 2, 0.5f));
+	base_u = fadd(m, 1, tile_texel, fmul(m, 1, extract(m, local, 0), resolution));
+	base_v = fmul(m, 1, extract(m, local, 1), resolution);
+	uv_texel = construct(m, 2, (unsigned int[]){ base_u, base_v });
+	low = construct(m, 2, (unsigned int[]){ fadd(m, 1, tile_texel, constant_float(m, 0.5f)), constant_float(m, 0.5f) });
+	high = construct(m, 2, (unsigned int[]){ fsub(m, 1, fadd(m, 1, tile_texel, resolution), constant_float(m, 0.5f)),
+		fsub(m, 1, resolution, constant_float(m, 0.5f)) });
+	/* the receiver's depth (reversed), a quarter texel's depth nearer the
+	sun */
+	bias = fdiv(m, 1, fmul(m, 1, size, constant_float(m, 0.25f)), fmax_scalar(m, 1, range, 1.0e-3f));
+	reference = fadd(m, 1, extract(m, clip, 2), bias);
+	/* the blockers: within the penumbra the farthest blocker the search
+	assumes (3 world units off) makes, 2 to 16 texels */
+	search = ext3(m, GLSL_F_CLAMP, m->t_float, fdiv(m, 1, fmul(m, 1, extract(m, light, 1), constant_float(m, 3.0f)),
+		fmax_scalar(m, 1, size, 1.0e-6f)), constant_float(m, 2.0f), constant_float(m, 16.0f));
+	blocker_sum = zero;
+	blockers = zero;
+	for (tap = 0; tap < PRISM_SUN_BLOCKER_TAPS; tap++)
+	{
+		float ox = prism_sun_blocker_taps[tap][0], oy = prism_sun_blocker_taps[tap][1];
+		unsigned int dx = fsub(m, 1, fmul(m, 1, constant_float(m, ox), rotate_c), fmul(m, 1, constant_float(m, oy), rotate_s));
+		unsigned int dy = fadd(m, 1, fmul(m, 1, constant_float(m, ox), rotate_s), fmul(m, 1, constant_float(m, oy), rotate_c));
+		unsigned int at = ext3(m, GLSL_F_CLAMP, m->t_v2, fadd(m, 2, uv_texel,
+			fscale(m, 2, construct(m, 2, (unsigned int[]){ dx, dy }), search)), low, high);
+		unsigned int uv = construct(m, 2, (unsigned int[]){ fmul(m, 1, extract(m, at, 0), inverse_width),
+			fdiv(m, 1, extract(m, at, 1), resolution) });
+		unsigned int stored = prism_sun_depth(m, uv);
+		unsigned int blocks = fselect(m, compare(m, OP_F_ORD_GREATER_THAN, stored, reference), one, zero);
+
+		blocker_sum = fadd(m, 1, blocker_sum, fmul(m, 1, stored, blocks));
+		blockers = fadd(m, 1, blockers, blocks);
+	}
+	blocker_depth = fdiv(m, 1, blocker_sum, fmax_scalar(m, 1, blockers, 1.0f));
+	/* the penumbra: the blockers' distance off (world units) times light.y,
+	in texels, 1 to 20 */
+	distance = fmul(m, 1, fmax_scalar(m, 1, fsub(m, 1, blocker_depth, extract(m, clip, 2)), 0.0f), range);
+	penumbra = ext3(m, GLSL_F_CLAMP, m->t_float, fdiv(m, 1, fmul(m, 1, distance, extract(m, light, 1)),
+		fmax_scalar(m, 1, size, 1.0e-6f)), constant_float(m, 1.0f), constant_float(m, 20.0f));
+	sum = zero;
+	for (tap = 0; tap < PRISM_SUN_FILTER_TAPS; tap++)
+	{
+		float ox = prism_sun_filter_taps[tap][0], oy = prism_sun_filter_taps[tap][1];
+		unsigned int dx = fsub(m, 1, fmul(m, 1, constant_float(m, ox), rotate_c), fmul(m, 1, constant_float(m, oy), rotate_s));
+		unsigned int dy = fadd(m, 1, fmul(m, 1, constant_float(m, ox), rotate_s), fmul(m, 1, constant_float(m, oy), rotate_c));
+		unsigned int at = ext3(m, GLSL_F_CLAMP, m->t_v2, fadd(m, 2, uv_texel,
+			fscale(m, 2, construct(m, 2, (unsigned int[]){ dx, dy }), penumbra)), low, high);
+		unsigned int uv = construct(m, 2, (unsigned int[]){ fmul(m, 1, extract(m, at, 0), inverse_width),
+			fdiv(m, 1, extract(m, at, 1), resolution) });
+
+		sum = fadd(m, 1, sum, prism_sun_compare(m, m->sun_moving, uv, reference));
+	}
+	sum = fmul(m, 1, sum, constant_float(m, 1.0f / (float)PRISM_SUN_FILTER_TAPS));
+	/* (no blocker among the search's taps: lit) */
+	sum = fselect(m, compare(m, OP_F_ORD_GREATER_THAN, blockers, zero), sum, one);
+	/* the structure's: four taps a texel apart, its depth a texel and a
+	half's nearer the sun (its own faces' acne kept off) */
+	structure_sum = zero;
+	for (tap = 0; tap < 4; tap++)
+	{
+		static const float offsets[4][2] = { { -0.75f, -0.25f }, { 0.25f, -0.75f }, { 0.75f, 0.25f }, { -0.25f, 0.75f } };
+		unsigned int at = ext3(m, GLSL_F_CLAMP, m->t_v2, fadd(m, 2, uv_texel,
+			constant_vector(m, 2, offsets[tap])), low, high);
+		unsigned int uv = construct(m, 2, (unsigned int[]){ fmul(m, 1, extract(m, at, 0), inverse_width),
+			fdiv(m, 1, extract(m, at, 1), resolution) });
+
+		structure_sum = fadd(m, 1, structure_sum, prism_sun_compare(m, m->sun_structure, uv,
+			fadd(m, 1, reference, fmul(m, 1, bias, constant_float(m, 6.0f)))));
+	}
+	structure_sum = fmul(m, 1, structure_sum, constant_float(m, 0.25f));
+	*moving = fselect(m, inside_any, overlay_mix(m, 1, sum, one, last_fade), one);
+	*structure = fselect(m, inside_any, overlay_mix(m, 1, structure_sum, one, last_fade), one);
+}
+
+/* a model's first distant light's share by the sun's shadows:
+mix(1, v_m * mix(1, v_s, fade.y), fade.z * a), a how near the light comes
+from the sun (smoothstep(0.5, 0.8, its direction toward the light . sun):
+the lightmap's dominant light under it is the sun's) */
+static unsigned int prism_sun_model(struct module *m, struct pixel_state *state, unsigned int p, unsigned int n)
+{
+	unsigned int moving, structure, sun = xyz(m, prism_sun_vector(m, 16)), fade = prism_sun_vector(m, 20);
+	unsigned int toward = ext1(m, GLSL_NORMALIZE, m->t_v3, fneg(m, 3, xyz(m, uniform(m, U_MODEL_LIGHTS, 7))));
+	unsigned int one = constant_float(m, 1.0f), along, visible;
+
+	prism_sun_visibility(m, state, p, n, &moving, &structure);
+	along = ext3(m, GLSL_SMOOTH_STEP, m->t_float, constant_float(m, 0.5f), constant_float(m, 0.8f), fdot(m, toward, sun));
+	visible = fmul(m, 1, moving, overlay_mix(m, 1, one, structure, extract(m, fade, 1)));
+	return overlay_mix(m, 1, one, visible, fmul(m, 1, extract(m, fade, 2), along));
+}
+
+/* a lightmap pass's light's factor: 1 - light.x (1 - v_m) v_s
+smoothstep(0, 0.25, n . sun) */
+static unsigned int prism_sun_lightmap(struct module *m, struct pixel_state *state, unsigned int p, unsigned int n)
+{
+	unsigned int moving, structure, sun = prism_sun_vector(m, 16), light = prism_sun_vector(m, 17);
+	unsigned int one = constant_float(m, 1.0f), facing, take;
+
+	prism_sun_visibility(m, state, p, n, &moving, &structure);
+	facing = ext3(m, GLSL_SMOOTH_STEP, m->t_float, constant_float(m, 0.0f), constant_float(m, 0.25f),
+		fdot(m, n, xyz(m, sun)));
+	take = fmul(m, 1, fmul(m, 1, extract(m, light, 0), fsub(m, 1, one, moving)), fmul(m, 1, structure, facing));
+	return fsub(m, 1, one, take);
+}
+
 /* the micro normal, cavity and roughness, and the light of the draw (v0's
 rgb) by them: after texture stage 2 */
 /* ---------- PRISM v2's model light (xgpu.h's "PRISM v2's model light";
@@ -5345,8 +5627,11 @@ static void overlay_light(struct module *m, struct pixel_state *state, BOOL poin
 	state->prism_shadow = one;
 	if (state->prism_cascades)
 		state->prism_shadow = prism_shadow(m, state, p, n);
+	/* (or the sun's shadow maps': PRISM's sun shadows) */
+	else if (state->prism_sun)
+		state->prism_shadow = prism_sun_model(m, state, p, n);
 	lit = model_lighting(m, state, point_lights, dynamic_lights, occlusion, fscale(m, 3, nm, extract(m, world_normal, 3)),
-		state->prism_cascades ? state->prism_shadow : 0);
+		state->prism_cascades || state->prism_sun ? state->prism_shadow : 0);
 	if (dynamic_lights)
 		lit = dynamic_light_add(m, lit, dynamic_light_sum(m, state, p, nm, nm, FALSE), FALSE);
 	lit = saturate(m, 3, fscale(m, 3, lit, fmul(m, 1, cavity, fadd(m, 1, one, fmul(m, 1, constant_float(m, 0.5f), rough)))));
@@ -5480,8 +5765,13 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	/* (display.prism_material_overlay: a model's lit for each pixel, by
 	its world position) */
 	BOOL overlay = program->material_overlay && program->per_pixel_lighting && !environment;
+	/* (PRISM's sun shadows: a structure's lightmap pass, or a model's with
+	the overlay: xgpu.h) */
+	BOOL sun = XGPU_PRISM_SHADOWS_OF(program->prism_lighting) == XGPU_PRISM_SHADOWS_CASCADED;
+	BOOL sun_lightmap = sun && !overlay && !program->per_pixel_lighting;
+	BOOL sun_model = sun && !overlay && program->per_pixel_lighting;
 	BOOL world_position = (program->per_pixel_lighting && (program->per_pixel_lighting == 2 ||
-		program->dynamic_lights == XGPU_DYNAMIC_LIGHTS_MODEL)) || environment || world || overlay;
+		program->dynamic_lights == XGPU_DYNAMIC_LIGHTS_MODEL)) || environment || world || overlay || sun_lightmap || sun_model;
 	BOOL count_samples = program->count_samples && options->count_samples;
 	unsigned int comparison = program->alpha_test ? comparison_opcode(program->alpha_test) : 0;
 	BOOL sample_mask = comparison && program->alpha_test_samples && program->alpha_test != D3DCMP_EQUAL &&
@@ -5531,7 +5821,7 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 			(program->prism_lighting & XGPU_PRISM_REFLECTIONS_LOCAL) != 0);
 		/* (PRISM v2's shadows: the distance-field scene's cascades, in the
 		world's light's set, which the backend binds for them too) */
-		if (XGPU_PRISM_SHADOWS_OF(program->prism_lighting))
+		if (XGPU_PRISM_SHADOWS_TRACES(program->prism_lighting))
 			state.prism_cascades = world_cascades_declare(&m);
 	}
 	if (effect)
@@ -5556,6 +5846,12 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 			state.frag_coord = variable(&m, m.t_v4, STORAGE_INPUT, "gl_FragCoord");
 			decorate1(&m, state.frag_coord, DECORATION_BUILT_IN, BUILT_IN_FRAG_COORD);
 		}
+	}
+	/* (PRISM's sun shadows: their set, and the pixel for the filter's turn) */
+	if (sun && (overlay || sun_lightmap || sun_model))
+	{
+		prism_sun_declare(&m, &state);
+		state.prism_sun = overlay;
 	}
 	/* (display.prism_lightmaps: its dither's pixel) */
 	if ((lightmap_smoothed(program, options) || lightmap_rebaked(program, options)) && !state.frag_coord)
@@ -5591,7 +5887,7 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 		state.in_light_point = interface_variable(&m, m.t_v3, STORAGE_INPUT, XGPU_SPIRV_LOCATION_LIGHT_POINT,
 			"xLightPoint");
 	}
-	if (program->per_pixel_lighting || environment || world)
+	if (program->per_pixel_lighting || environment || world || sun_lightmap)
 		state.in_world_normal = interface_variable(&m, m.t_v4, STORAGE_INPUT, XGPU_SPIRV_LOCATION_WORLD_NORMAL, "xWorldNormal");
 	if (world_position)
 		state.in_world_position = interface_variable(&m, m.t_v3, STORAGE_INPUT, XGPU_SPIRV_LOCATION_WORLD_POSITION, "xWorldPosition");
@@ -5643,7 +5939,8 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 		unsigned int n = fscale(&m, 3, normal, ext1(&m, GLSL_INVERSE_SQRT, m.t_float,
 			fmax_scalar(&m, 1, fdot(&m, normal, normal), (float)1.0e-24)));
 		unsigned int lit = model_lighting(&m, &state, program->per_pixel_lighting == 2, TRUE,
-			occlusion_light == XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL ? state.occlusion : 0, 0, 0);
+			occlusion_light == XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL ? state.occlusion : 0, 0,
+			sun_model ? prism_sun_model(&m, &state, pixel_input(&m, &state, state.in_world_position, m.t_v3), n) : 0);
 		unsigned int sum = dynamic_light_sum(&m, &state, pixel_input(&m, &state, state.in_world_position, m.t_v3), n, n, FALSE);
 		static const unsigned int rgb[4] = { 4, 5, 6, 3 };
 
@@ -5652,9 +5949,20 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	else if (program->per_pixel_lighting)
 	{
 		static const unsigned int rgb[4] = { 4, 5, 6, 3 };
+		unsigned int shadow = 0;
 
+		/* (PRISM's sun shadows: the first distant light's share) */
+		if (sun_model)
+		{
+			unsigned int world_normal = pixel_input(&m, &state, state.in_world_normal, m.t_v4);
+			unsigned int normal = xyz(&m, world_normal);
+
+			shadow = prism_sun_model(&m, &state, pixel_input(&m, &state, state.in_world_position, m.t_v3),
+				fscale(&m, 3, normal, ext1(&m, GLSL_INVERSE_SQRT, m.t_float, fmax_scalar(&m, 1, fdot(&m, normal, normal),
+				(float)1.0e-24))));
+		}
 		state.v0 = shuffle(&m, 4, state.v0, model_lighting(&m, &state, program->per_pixel_lighting == 2, FALSE,
-			occlusion_light == XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL ? state.occlusion : 0, 0, 0), rgb);
+			occlusion_light == XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL ? state.occlusion : 0, 0, shadow), rgb);
 	}
 	else if (occlusion_light == XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX)
 	{
@@ -5742,6 +6050,30 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 		static const unsigned int rgb[4] = { 4, 5, 6, 3 };
 
 		result = shuffle(&m, 4, result, fscale(&m, 3, xyz(&m, result), state.occlusion), rgb);
+	}
+	/* (PRISM's sun shadows: the lightmap pass's light by the moving
+	casters' shadows where the sun reached it, before the enhanced dynamic
+	lights add theirs) */
+	if (sun_lightmap)
+	{
+		static const unsigned int rgb[4] = { 4, 5, 6, 3 };
+		unsigned int normal = ext1(&m, GLSL_NORMALIZE, m.t_v3, xyz(&m, pixel_input(&m, &state, state.in_world_normal,
+			m.t_v4)));
+		unsigned int factor = prism_sun_lightmap(&m, &state, pixel_input(&m, &state, state.in_world_position, m.t_v3),
+			normal);
+
+		result = shuffle(&m, 4, result, fscale(&m, 3, xyz(&m, result), factor), rgb);
+		/* (HALO_PRISM_SUN_DEBUG, measuring: the moving casters' visibility
+		red, the structure's green, the factor blue) */
+		if (getenv("HALO_PRISM_SUN_DEBUG"))
+		{
+			unsigned int moving, structure;
+
+			prism_sun_visibility(&m, &state, pixel_input(&m, &state, state.in_world_position, m.t_v3), normal, &moving,
+				&structure);
+			result = vec4_of(&m, construct(&m, 3, (unsigned int[]){ moving, structure, factor }),
+				constant_float(&m, 1.0f));
+		}
 	}
 
 	if (environment)

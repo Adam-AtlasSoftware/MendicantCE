@@ -51,6 +51,9 @@ unsigned int xgpu_image_create(void *pixels, unsigned long width, unsigned long 
 void xgpu_image_delete(unsigned int image);
 /* the game's (port/linux/game/world_ao.c) */
 int world_ao_window_cascades(float cascades[4][4]);
+/* (PRISM's sun shadows: prism_shadows.c) */
+int prism_shadows_receiving(void);
+void prism_shadows_map_changed(void);
 
 /* ---------- constants */
 
@@ -61,6 +64,7 @@ the game's sources do not see the renderer's headers) */
 #define PRISM_REFLECTIONS_LOCAL 4
 #define PRISM_SHADOWS_SOFT 8
 #define PRISM_SHADOWS_TRACED 16
+#define PRISM_SHADOWS_CASCADED 24
 #define PRISM_UNIFORM_FIRST 11
 #define PRISM_UNIFORM_COUNT 20
 #define PRISM_IMAGE_RGBA_LEVELS 2
@@ -112,7 +116,8 @@ static void settings_read(
 		setting_is("display.prism_specular", "subtle") ? PRISM_SPECULAR_SUBTLE : 0;
 	prism_light.reflections = setting_is("display.prism_reflections", "local");
 	prism_light.shadows = setting_is("display.prism_shadows", "traced") ? PRISM_SHADOWS_TRACED :
-		setting_is("display.prism_shadows", "soft") ? PRISM_SHADOWS_SOFT : 0;
+		setting_is("display.prism_shadows", "soft") ? PRISM_SHADOWS_SOFT :
+		setting_is("display.prism_shadows", "cascaded") ? PRISM_SHADOWS_CASCADED : 0;
 
 	return;
 }
@@ -275,6 +280,7 @@ void prism_light_map_loaded(
 	void)
 {
 	probes_release();
+	prism_shadows_map_changed();
 	settings_read();
 	if (prism_light.reflections && !config_boolean("debug.null_renderer"))
 	{
@@ -288,6 +294,7 @@ void prism_light_map_unloaded(
 	void)
 {
 	probes_release();
+	prism_shadows_map_changed();
 
 	return;
 }
@@ -340,7 +347,16 @@ int prism_light_draw(
 		lighting |= prism_light.specular;
 		memcpy(uniforms[11], parameters[prism_light.specular - 1], sizeof(uniforms[11]));
 	}
-	if (prism_light.shadows && world_ao_window_cascades((float (*)[4])uniforms[13]))
+	/* (the sun's shadows, where the window drew their pass: prism_shadows.c;
+	their block is the backend's) */
+	if (prism_light.shadows == PRISM_SHADOWS_CASCADED)
+	{
+		if (prism_shadows_receiving())
+		{
+			lighting |= PRISM_SHADOWS_CASCADED;
+		}
+	}
+	else if (prism_light.shadows && world_ao_window_cascades((float (*)[4])uniforms[13]))
 	{
 		/* soft: out to 2 world units, four rays tilted 0.12 about the light;
 		traced: one ray out to 6 (each pushed 0.04 off the surface) */

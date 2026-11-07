@@ -783,7 +783,14 @@ int xgpu_draw_derive(const struct xgpu_draw_facts *facts, int unlit, struct xgpu
 		derived->material_overlay = (uint8_t)facts->material_overlay;
 		derived->prism_lighting = (uint8_t)facts->prism_lighting;
 	}
-	if (!unlit && facts->lights && !facts->lighting_failed && (facts->per_pixel || derived->material_overlay))
+	/* (display.prism_shadows "cascaded": a model whose lighting has its
+	world position lit for each pixel, its first distant light by the sun's
+	shadows) */
+	if (!unlit && facts->lights && !facts->lighting_failed && facts->prism_sun && !facts->blend &&
+		(facts->lights == 2 || facts->world_found) && !derived->material_overlay)
+		derived->prism_lighting = XGPU_PRISM_SHADOWS_CASCADED;
+	if (!unlit && facts->lights && !facts->lighting_failed && (facts->per_pixel || derived->material_overlay ||
+		derived->prism_lighting))
 	{
 		/* a model lighting program's draw lit for each pixel: the enhanced
 		dynamic lights in its two point lights' place, its ambient light by
@@ -820,17 +827,24 @@ int xgpu_draw_derive(const struct xgpu_draw_facts *facts, int unlit, struct xgpu
 			derived->hdr |= XGPU_HDR_LIGHTS;
 		if (facts->world && !facts->blend)
 			derived->ambient_occlusion = (uint8_t)(facts->world | XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP);
+		/* (display.prism_shadows "cascaded": its light by the sun's shadows) */
+		if (facts->prism_sun && !facts->blend)
+			derived->prism_lighting = XGPU_PRISM_SHADOWS_CASCADED;
 		derived->lighting = XGPU_LIGHTING_ENVIRONMENT;
 		return 1;
 	}
-	if (!unlit && facts->world && facts->environment && !facts->immediate && !facts->lighting_failed &&
-		!facts->blend && (facts->packed_attributes & 0xe) == 0xe)
+	if (!unlit && (facts->world || facts->prism_sun) && facts->environment && !facts->immediate &&
+		!facts->lighting_failed && !facts->blend && (facts->packed_attributes & 0xe) == 0xe)
 	{
 		/* the world's occlusion over a structure's lightmap pass without the
 		enhanced dynamic lights: lit as its program lights it, its vertex
 		shader handing on the world position and normal alone for its light
-		by the proxies' occlusion */
-		derived->ambient_occlusion = (uint8_t)(facts->world | XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP);
+		by the proxies' occlusion (or by the sun's shadows: display.prism_shadows
+		"cascaded") */
+		if (facts->world)
+			derived->ambient_occlusion = (uint8_t)(facts->world | XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP);
+		if (facts->prism_sun)
+			derived->prism_lighting = XGPU_PRISM_SHADOWS_CASCADED;
 		derived->lighting = XGPU_LIGHTING_ENVIRONMENT;
 		return 1;
 	}

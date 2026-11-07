@@ -34,6 +34,7 @@ renderer" in port/linux/README.md.
 /* (xgpu_stream.h) */
 struct xgpu_world_ao_block;
 struct xgpu_world_ao_pass;
+struct xgpu_prism_shadows_block;
 
 struct xgpu_vertex_program;
 
@@ -81,6 +82,9 @@ struct xgpu_backend_capabilities
 	/* display.prism_bloom: xgpu_backend_bloom's glow about the 3D view's
 	light past white, before its tone map (with the half floats: hdr) */
 	BOOL bloom;
+	/* display.prism_shadows "cascaded": xgpu_backend_prism_shadows's pass
+	and the receivers' XGPU_PRISM_SHADOWS_CASCADED */
+	BOOL prism_shadows;
 };
 
 extern struct xgpu_backend_capabilities xgpu_backend_capabilities;
@@ -157,6 +161,12 @@ XGPU_WORLD_CASCADE*): its first texel, its size, two signed bytes a texel,
 x fastest (width 0: released) */
 void xgpu_backend_world_ao_cascades(unsigned long x, unsigned long y, unsigned long z, unsigned long width,
 	unsigned long height, unsigned long depth, const void *data);
+/* display.prism_shadows "cascaded" (xgpu_stream.h's PRISM_SHADOWS, xgpu.h's
+"PRISM's sun shadows"): the casters' pass begun (XGPU_PRISM_SHADOWS_BEGIN),
+the structure's casters from here on (_STRUCTURE), ended with the block the
+receivers read (_END), or no shadow (_NONE); the atlases' resolution and
+the cascades' count */
+void xgpu_backend_prism_shadows(int phase, int resolution, int cascades, const struct xgpu_prism_shadows_block *block);
 BOOL xgpu_backend_display_hdr(float *headroom);
 BOOL xgpu_backend_display_white(float *nits);
 
