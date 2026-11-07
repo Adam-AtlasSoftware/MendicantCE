@@ -678,6 +678,7 @@ the strong preset.
 | Static scenery's pages: 2D array, R8 (the coverage's format: read as 1, 1, 1, the byte), linear, clamp | set 3, binding `XGPU_SPIRV_BINDING_WORLD_AO_SCENERY` (4), combined image sampler | `[[texture(XGPU_MSL_TEXTURE_WORLD_AO_SCENERY)]]` (7), `constexpr sampler` |
 | Vehicles' occlusion fields' atlas: 3D, RGBA16F (t, v.xyz), linear, clamp; a texel of none stands in | set 3, binding `XGPU_SPIRV_BINDING_WORLD_AO_OBJECTS` (5), combined image sampler | `[[texture(XGPU_MSL_TEXTURE_WORLD_AO_OBJECTS)]]` (20: past the combiner's 8 to 19), `constexpr sampler` |
 | Block `struct xgpu_world_ao_block` (std140, 19,552 B) | set 3, binding `XGPU_SPIRV_BINDING_WORLD_AO` (2), uniform buffer | `[[buffer(XGPU_MSL_BUFFER_WORLD_AO)]]` (23) |
+| The distance-field scene's cascades (PRISM v2's shadows in the models' draws, `display.prism_shadows`: also bound for a draw that does not take the world's light, a self-illuminated shader's): 3D, RG8 snorm, linear | set 3, binding `XGPU_SPIRV_BINDING_WORLD_CASCADES` (7), combined image sampler | not drawn (Vulkan only) |
 | Per draw: owner slot, reference (a lightmap draw's: its page's layer, −1 none; a static placement's own: −1) | the draw uniforms (`xgpu_spirv_uniforms`, 2 floats) | `xgpu_msl_uniforms`, the same |
 
 Set 3 is #574's occlusion set, so a draw still binds at most 4 sets, the Vulkan minimum. With no field yet, the

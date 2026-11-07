@@ -1241,8 +1241,10 @@ void xgpu_backend_material_overlay(const struct xgpu_material_overlay *overlay)
 		stage->sampler.minify = XGPU_FILTER_LINEAR;
 		stage->sampler.mip = mask ? XGPU_FILTER_NONE : XGPU_FILTER_LINEAR;
 		stage->sampler.magnify = XGPU_FILTER_LINEAR;
+		/* (PRISM v2's probes' atlas: its cells' coordinates kept inside
+		them, clamped at the atlas's edges) */
 		for (axis = 0; axis < 3; axis++)
-			stage->sampler.address[axis] = XGPU_ADDRESS_WRAP;
+			stage->sampler.address[axis] = index == XGPU_OVERLAY_PROBE_IMAGE ? XGPU_ADDRESS_CLAMP : XGPU_ADDRESS_WRAP;
 #else
 		(void)stage;
 #endif

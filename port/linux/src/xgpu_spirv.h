@@ -159,7 +159,7 @@ struct xgpu_spirv_uniforms
 	/* display.prism_material_overlay's uniform (xgpu.h's "The material
 	overlay": XGPU_OVERLAY_UNIFORM_COUNT vec4s), declared in the pixel
 	shaders that read it alone, after world_ao */
-	float material_overlay[11][4];
+	float material_overlay[XGPU_OVERLAY_UNIFORM_COUNT][4];
 };
 
 /* what the SPIR-V is written for (xgpu_spirv.c):

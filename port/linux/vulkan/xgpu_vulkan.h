@@ -515,7 +515,7 @@ enum
 
 /* (xgpu.h's XGPU_OVERLAY_BINDING and XGPU_OVERLAY_IMAGE_COUNT) */
 #define XGPU_VULKAN_BINDING_OVERLAY 4
-#define XGPU_VULKAN_OVERLAY_IMAGES 7
+#define XGPU_VULKAN_OVERLAY_IMAGES 8
 
 /* a draw: its pipeline, topology and dynamic state; its vertices' bindings
 (those of bindings' bits) and indices (16-bit; buffer VK_NULL_HANDLE: none);
@@ -584,6 +584,10 @@ linear, clamped, a texel of none where it has not all come) */
 read: a 2D image of four floats, read by texel, a 1x1 of 1 where none is
 found) */
 #define XGPU_VULKAN_BINDING_WORLD_AO_PIXELS 6
+/* (and the distance-field scene's cascades, which PRISM v2's shadows trace
+in the models' draws: xgpu.h's "PRISM v2's model light"; a 3D image of two
+signed bytes, linear, a far-outside texel where none has come) */
+#define XGPU_VULKAN_BINDING_WORLD_CASCADES 7
 struct xgpu_world_ao_block;
 /* the stand-ins and the sampler made (the core's start): 0 if they cannot be */
 int xgpu_vulkan_world_ao_create(void);

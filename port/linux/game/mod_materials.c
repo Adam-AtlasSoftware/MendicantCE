@@ -95,7 +95,8 @@ name a shader's surface maps itself ("surface_map": one PNG or an array by
 the bitmap's index, under tags\materials\, which wins) and its strengths
 ("surface": { "normal": 1.0, "occlusion": 1.0, "specular": 0.5,
 "exponent": 48 }, also the defaults): xgpu.h's "The surface map".
-display.prism_specular scales the highlight (0 to 2).
+Its "specular" and "exponent" were the prototype's highlight's; PRISM v2's
+highlights are display.prism_specular's now (prism_light.c).
 
 A surface map is decoded on a thread of its own when a draw first needs
 it, its levels box-filtered and each encoded as two BC5 images (the
@@ -160,7 +161,7 @@ unsigned int xgpu_image_create(void *pixels, unsigned long width, unsigned long 
 void xgpu_image_delete(unsigned int image);
 int d3d8_material_overlay_drawn(void);
 void d3d8_set_material_overlay(float const *uniforms, unsigned int const *tiles, unsigned int mask, int view, int mask_wins,
-	unsigned int const *surface, int surface_only);
+	unsigned int const *surface, int surface_only, int prism_lighting, unsigned int probes);
 
 /* ---------- constants */
 
@@ -192,7 +193,7 @@ bitmap tags drawn) */
 #define MAXIMUM_NAME 256
 
 /* as xgpu_spirv.c reads them (xgpu.h XGPU_OVERLAY_UNIFORM_COUNT) */
-#define OVERLAY_UNIFORM_COUNT 11
+#define OVERLAY_UNIFORM_COUNT 20
 /* the class masks a shader names, one per bitmap of its base map */
 #define MAXIMUM_CLASS_MASKS 8
 
@@ -304,9 +305,8 @@ static struct
 	boolean enabled;
 	real strength;
 	int view;
-	/* display.prism_surface_maps and display.prism_specular */
+	/* display.prism_surface_maps */
 	boolean surface_maps;
-	real specular;
 	/* the surface maps found next to the bitmaps drawn, by the bitmap
 	tag's index (tag NONE empty; surfaces[] NONE none, per picture) */
 	struct
@@ -1792,15 +1792,6 @@ static void settings_read(
 		mod_materials_globals.view = 0;
 	}
 	mod_materials_globals.surface_maps = config_boolean("display.prism_surface_maps") != 0;
-	mod_materials_globals.specular = (real)config_real("display.prism_specular");
-	if (!mods_finite_real(mod_materials_globals.specular) || mod_materials_globals.specular < 0.0f)
-	{
-		mod_materials_globals.specular = 0.0f;
-	}
-	if (mod_materials_globals.specular > 2.0f)
-	{
-		mod_materials_globals.specular = 2.0f;
-	}
 
 	return;
 }
@@ -1823,7 +1814,6 @@ long mod_materials_update(
 {
 	long count;
 
-	(void)at_load;
 	if (!mod_materials_table_cleared)
 	{
 		table_clear();
@@ -1838,6 +1828,11 @@ long mod_materials_update(
 	/* (the tiles decoded as the map loads with the overlay on; otherwise
 	when it is first turned on) */
 	settings_read();
+	/* (PRISM v2's probes, as the map loads) */
+	if (at_load)
+	{
+		prism_light_map_loaded();
+	}
 	if (count && mod_materials_globals.enabled && !config_boolean("debug.null_renderer") && d3d8_material_overlay_drawn())
 	{
 		tiles_start();
@@ -1850,6 +1845,7 @@ void mod_materials_tags_unloaded(
 	void)
 {
 	materials_dispose();
+	prism_light_map_unloaded();
 
 	return;
 }
@@ -1866,7 +1862,10 @@ void mod_materials_draw_begin(
 	unsigned int tiles[NUMBER_OF_SLOTS];
 	unsigned int mask_texture = 0;
 	unsigned int surface_textures[2] = { 0, 0 };
+	unsigned int probes = 0;
 	boolean overlay = FALSE;
+	boolean prism = FALSE;
+	int prism_lighting;
 	short surface = NONE;
 	short bitmap = 0;
 	short slot;
@@ -1875,7 +1874,10 @@ void mod_materials_draw_begin(
 	settings_read();
 	/* (a renderer without the overlay: Metal's, until its shaders match
 	Vulkan's) */
-	if ((!mod_materials_globals.enabled && !mod_materials_globals.surface_maps) || !d3d8_material_overlay_drawn())
+	/* (PRISM v2's model light, prism_light.c: every model shader's draws,
+	with or without an overlay) */
+	prism = prism_light_wanted() != 0;
+	if ((!mod_materials_globals.enabled && !mod_materials_globals.surface_maps && !prism) || !d3d8_material_overlay_drawn())
 	{
 		return;
 	}
@@ -1919,7 +1921,7 @@ void mod_materials_draw_begin(
 			surface_textures[1] = mod_materials_globals.classes[surface].texture2;
 		}
 	}
-	if (!overlay && !surface_textures[0])
+	if (!overlay && !surface_textures[0] && !prism)
 	{
 		return;
 	}
@@ -1960,17 +1962,15 @@ void mod_materials_draw_begin(
 	{
 		uniforms[10][0] = (float)entry->surface[0];
 		uniforms[10][1] = (float)entry->surface[1];
-		uniforms[10][2] = (float)(entry->surface[2] * mod_materials_globals.specular);
-		uniforms[10][3] = (float)entry->surface[3];
 	}
 	else
 	{
 		/* (overlay.json's defaults) */
 		uniforms[10][0] = 1.0f;
 		uniforms[10][1] = 1.0f;
-		uniforms[10][2] = 0.5f * (float)mod_materials_globals.specular;
-		uniforms[10][3] = 48.0f;
 	}
+	/* (PRISM v2's model light: [11] on) */
+	prism_lighting = prism ? prism_light_draw(uniforms, &probes) : 0;
 	/* (no multipurpose map: the default white texture, which is no mask) */
 	uniforms[1][3] = has_multipurpose ? 1.0f : 0.0f;
 	if (!has_multipurpose)
@@ -1980,7 +1980,8 @@ void mod_materials_draw_begin(
 	uniforms[3][1] = 1.0f;
 	if (!overlay)
 	{
-		d3d8_set_material_overlay(uniforms[0], NULL, 0, mod_materials_globals.view, FALSE, surface_textures, TRUE);
+		d3d8_set_material_overlay(uniforms[0], NULL, 0, mod_materials_globals.view, FALSE, surface_textures, TRUE,
+			prism_lighting, probes);
 		mod_materials_globals.armed = TRUE;
 		return;
 	}
@@ -2002,7 +2003,7 @@ void mod_materials_draw_begin(
 		uniforms[slot_uniform[slot]][3] = overlay_class->rough * fade;
 	}
 	d3d8_set_material_overlay(uniforms[0], tiles, mask_texture, mod_materials_globals.view, entry->mask_wins,
-		surface_textures[0] ? surface_textures : NULL, FALSE);
+		surface_textures[0] ? surface_textures : NULL, FALSE, prism_lighting, probes);
 	mod_materials_globals.armed = TRUE;
 
 	return;
@@ -2013,7 +2014,7 @@ void mod_materials_draw_end(
 {
 	if (mod_materials_globals.armed)
 	{
-		d3d8_set_material_overlay(NULL, NULL, 0, 0, 0, NULL, 0);
+		d3d8_set_material_overlay(NULL, NULL, 0, 0, 0, NULL, 0, 0, 0);
 		mod_materials_globals.armed = FALSE;
 	}
 
@@ -2030,8 +2031,8 @@ void mod_materials_prism_set(
 
 	if (!space || space == text || (size_t)(space - text) >= sizeof(name) - 16)
 	{
-		console_warning("prism_set \"<setting> <value>\": material_overlay, overlay_strength, overlay_view, surface_maps "
-			"or specular");
+		console_warning("prism_set \"<setting> <value>\": material_overlay, overlay_strength, overlay_view, surface_maps, "
+			"specular, reflections or shadows");
 		return;
 	}
 	snprintf(name, sizeof(name), "display.prism_%.*s", (int)(space - text), text);

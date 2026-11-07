@@ -84,6 +84,8 @@ static const struct field pixel_fields[] = {
 	PIXEL_FIELD("ao", ambient_occlusion, 1, 1, 0),
 	/* (display.prism_material_overlay's: a mod's, never the game's own) */
 	{ "mo", offsetof(struct xgpu_stream_pixel_key, material_overlay), 1, 1, 0, 1 },
+	/* (PRISM v2's model light: the settings', with a mod's overlay alone) */
+	{ "pp", offsetof(struct xgpu_stream_pixel_key, prism_lighting), 1, 1, 0, 1 },
 };
 
 #define CONTEXT_FIELD(name, member, size, count) \
@@ -770,7 +772,10 @@ int xgpu_draw_derive(const struct xgpu_draw_facts *facts, int unlit, struct xgpu
 	position its lighting hands on) */
 	if (!unlit && facts->lights && !facts->lighting_failed && facts->material_overlay &&
 		(facts->lights == 2 || facts->world_found))
+	{
 		derived->material_overlay = (uint8_t)facts->material_overlay;
+		derived->prism_lighting = (uint8_t)facts->prism_lighting;
+	}
 	if (!unlit && facts->lights && !facts->lighting_failed && (facts->per_pixel || derived->material_overlay))
 	{
 		/* a model lighting program's draw lit for each pixel: the enhanced
@@ -894,6 +899,7 @@ int xgpu_manifest_derive(const struct xgpu_manifest_draw *draw, const struct xgp
 	facts.sample_mask = 1;
 	/* (a mod's material overlay, where a recording has one) */
 	facts.material_overlay = key->pixel.material_overlay;
+	facts.prism_lighting = key->pixel.prism_lighting;
 	lit = xgpu_draw_derive(&facts, unlit, &parts);
 	/* (its bytes, padding too: a draw's hash is of them) */
 	memcpy(derived, draw, sizeof(*derived));
@@ -906,6 +912,7 @@ int xgpu_manifest_derive(const struct xgpu_manifest_draw *draw, const struct xgp
 	derived->key.pixel.dynamic_lights = parts.dynamic_lights;
 	derived->key.pixel.ambient_occlusion = parts.ambient_occlusion;
 	derived->key.pixel.material_overlay = parts.material_overlay;
+	derived->key.pixel.prism_lighting = parts.prism_lighting;
 	return lit;
 }
 

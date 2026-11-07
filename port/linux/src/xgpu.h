@@ -181,9 +181,15 @@ struct nv2a_pixel_shader_key
 	weighted by a class mask and the multipurpose map's rule on top, plus
 	XGPU_OVERLAY_CLASS_MASK_WINS where the mask's own tiles A, C and D are
 	kept over the rule, plus XGPU_OVERLAY_SURFACE with a surface map,
-	plus XGPU_OVERLAY_SURFACE_ONLY with a surface map and no tiles (below:
-	"The material overlay") */
+	plus XGPU_OVERLAY_SURFACE_ONLY with no tiles (with a surface map, or
+	without one for PRISM v2's light alone: prism_lighting) (below: "The
+	material overlay") */
 	unsigned char material_overlay;
+	/* PRISM v2's model light (display.prism_specular, prism_reflections,
+	prism_shadows), on a draw with a material overlay alone (its uniform
+	and images carry its parameters): XGPU_PRISM_* (below: "PRISM v2's
+	model light"); 0 none, as the game draws */
+	unsigned char prism_lighting;
 };
 
 /* ---------- the material overlay (display.prism_material_overlay)
@@ -233,33 +239,86 @@ two BC5 images at the base map's coordinates, read once (not tiled), the
 images after the class mask (port/linux/game/mod_materials.c makes them
 from one RGBA PNG): the first's RG the tangent-space normal's x and y (y
 up the picture, 0.5 flat; its slope added to the tiles' in the same
-frame), the second's R the ambient occlusion (1 open), multiplying the
-cavity by mix(1, R, [10].y), its G the roughness (0 polished, 1 matte).
+frame), the second's R the ambient occlusion (1 open): mix(1, R, [10].y)
+multiplies the ambient and distant lights alone, as
+display.ambient_occlusion's occlusion does (the two multiplied: PRISM
+v2's model self-occlusion), and the reflection with the cavity and PRISM
+v2's highlights; its G the roughness (0 polished, 1 matte).
 With XGPU_OVERLAY_SURFACE_ONLY (a shader the overlay does not name, or
 the overlay off) there are no tiles: the slope is the surface map's alone,
-the cavity its occlusion, the roughness offset 0, and the uniform's [2],
+the cavity 1, the roughness offset 0, and the uniform's [2],
 [3].x and .y (the excluded channel, its threshold, the fade) and [6] (the
 reflection's bend and cavity) are mod_materials.c's defaults. [10]: x the
-normal's strength, y the occlusion's, z the specular's, w the specular's
-sharpest exponent. With z above 0 the reflection stage adds a specular
-highlight of the level's own dominant light (the model's first distant
-light, the lightmap's under the object: its direction and colour), Phong
-along the reflection the micro normal bends, its exponent from
-w * (1 - A)^2 (at least 4), times (1 - A) and z; added to texture stage
-3's reflection, so the shader's own reflection mask and tint (the
-multipurpose map's specular channel, CE's Fresnel) decide where it shows,
-as CE's cube map does. */
+normal's strength, y the occlusion's; z and w unused (the prototype's
+highlight, now PRISM v2's model light's: below). With
+XGPU_OVERLAY_SURFACE_ONLY and no surface map the overlay carries PRISM v2's
+model light alone (below). */
 #define XGPU_OVERLAY_BINDING 4
 #define XGPU_OVERLAY_TILE_COUNT 4
 #define XGPU_OVERLAY_SURFACE_IMAGE (XGPU_OVERLAY_TILE_COUNT + 1)
 #define XGPU_OVERLAY_SURFACE_IMAGES 2
-#define XGPU_OVERLAY_IMAGE_COUNT (XGPU_OVERLAY_TILE_COUNT + 1 + XGPU_OVERLAY_SURFACE_IMAGES)
-#define XGPU_OVERLAY_UNIFORM_COUNT 11
+/* (PRISM v2's local reflections' probes: below) */
+#define XGPU_OVERLAY_PROBE_IMAGE (XGPU_OVERLAY_SURFACE_IMAGE + XGPU_OVERLAY_SURFACE_IMAGES)
+#define XGPU_OVERLAY_IMAGE_COUNT (XGPU_OVERLAY_PROBE_IMAGE + 1)
+#define XGPU_OVERLAY_UNIFORM_COUNT 20
 #define XGPU_OVERLAY_CLASS_MASK 16
 #define XGPU_OVERLAY_CLASS_MASK_WINS 32
 #define XGPU_OVERLAY_SURFACE 64
 #define XGPU_OVERLAY_SURFACE_ONLY 128
 #define XGPU_OVERLAY_VIEW(material_overlay) (((material_overlay) >> 1) & 7)
+
+/* ---------- PRISM v2's model light (display.prism_specular,
+prism_reflections, prism_shadows; off unless set)
+
+A model draw lit for each pixel with a material overlay (the tiles, a
+surface map, or neither: XGPU_OVERLAY_SURFACE_ONLY without
+XGPU_OVERLAY_SURFACE, the overlay's frame and light with nothing added)
+whose key's prism_lighting is not 0. With all three settings at their
+first value nothing is armed and every draw is as the game draws it.
+
+- XGPU_PRISM_SPECULAR_SUBTLE or _FULL: texture stage 3's reflection
+  (a cube map: the shader's reflection, which its combiners mask by the
+  multipurpose map's specular channel and weigh by CE's Fresnel and tint)
+  gains the level's lights' highlights: GGX's distribution with Smith's
+  visibility (Schlick-GGX, k = a / 2), a = r^2,
+  r = max(the surface map's roughness, else [11].y, [11].z), along the
+  micro normal toward the eye (the reflection's own direction reflected
+  back), N.L-weighted, times the light's colour and [11].x, the sum
+  capped at [11].w before it is added (the clamp to 1 after is the
+  stage's). Subtle: the model's first distant light alone (ml[7], ml[8]:
+  the lightmap's dominant light under it); full: also the two point
+  lights (ml[1] to ml[6], as model_lighting weighs them). No Fresnel of
+  its own: the combiners' is CE's. The light's shadow (below) darkens it.
+- XGPU_PRISM_REFLECTIONS_LOCAL: the reflection read from the level's
+  probes in place of the cube (image XGPU_OVERLAY_PROBE_IMAGE: an atlas of
+  [17].y by [17].y octahedral cells of [17].z texels each, levels
+  prefiltered by the tools; cell s at (s mod [17].y, s / [17].y)): the
+  nearer of the probes [18] and [19] (xyz its place, w its cell; [17].x
+  of them, 0 to 2) by the pixel's world position, the two mixed by their
+  distances where both are given, at level log2([17].z) * r * [17].w
+  (the roughness's blur), the octahedral cell's border kept off by half
+  a texel of the level read.
+- XGPU_PRISM_SHADOWS_SOFT or _TRACED (where display.ambient_occlusion
+  "world" draws its window: the distance-field scene's cascades at
+  XGPU_SPIRV_BINDING_WORLD_CASCADES of its set, which the backend binds
+  for these draws whether or not they take the world's light, as a
+  self-illuminated shader does not; their block in [13] to [16]): the
+  first distant light's share of the light, and its highlight, by
+  mix(1, 1 - h, [12].x), h the share of rays from the pixel pushed [12].w
+  along its normal toward -ml[7] that world_trace (docs/world-ao.md) finds
+  hitting the objects (its channel 1: the characters' capsules, the
+  vehicles' wheels and boxes, its own among them) within [12].y, each hit
+  at t counting smoothstep(0.05, 0.25, t) (a model's own shapes about its
+  surface are not its shadow). Soft: four rays, the light's direction
+  tilted [12].z * 0.04 four ways, out to 2 world units; traced: one ray,
+  out to 6. Hardware ray queries (#602) take world_trace's place. */
+#define XGPU_PRISM_SPECULAR_SUBTLE 1
+#define XGPU_PRISM_SPECULAR_FULL 2
+#define XGPU_PRISM_SPECULAR_OF(value) ((value) & 3)
+#define XGPU_PRISM_REFLECTIONS_LOCAL 4
+#define XGPU_PRISM_SHADOWS_SOFT 8
+#define XGPU_PRISM_SHADOWS_TRACED 16
+#define XGPU_PRISM_SHADOWS_OF(value) ((value) & 24)
 
 /* the vertex constants the per-pixel model lighting reads, in a uniform of
 their own (the vertex shader's 192 would pass the least fragment uniform
