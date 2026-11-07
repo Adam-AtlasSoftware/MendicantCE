@@ -75,6 +75,9 @@ struct xgpu_backend_capabilities
 	/* display.prism_material_overlay (xgpu.h's "The material overlay"):
 	its shaders and xgpu_backend_material_overlay */
 	BOOL material_overlay;
+	/* display.prism_textures: the host opens and draws a mod's replacement
+	textures (xgpu_backend_texture_store_map) */
+	BOOL texture_store;
 };
 
 extern struct xgpu_backend_capabilities xgpu_backend_capabilities;
@@ -298,6 +301,36 @@ struct xgpu_material_overlay
 };
 
 void xgpu_backend_material_overlay(const struct xgpu_material_overlay *overlay);
+
+/* display.prism_textures: PRISM's texture store (xgpu_stream.h's
+TEXTURE_STORE_MAP). The map's replacement textures, a query each: the
+file's host path, its size and modification time as found, and the stock
+bitmap it replaces (cube: a cube map; its levels and first level's size).
+The host answers each with an id (0 refused, status why: XGPU_STREAM_
+TEXTURE_STORE_*) and the file's size and levels. generation is new at
+each call (nonzero); count 0 closes the store. FALSE where the backend has
+no store (every answer 0). */
+struct xgpu_texture_store_query
+{
+	const char *path;
+	unsigned long file_size, stamp_seconds;
+	BOOL cube;
+	unsigned long stock_width, stock_height, stock_levels;
+};
+struct xgpu_texture_store_answer
+{
+	unsigned long id;
+	unsigned long width, height, levels;
+	int status, format;
+};
+BOOL xgpu_backend_texture_store_map(unsigned long generation, unsigned long tier, unsigned long budget_megabytes,
+	BOOL loading, const struct xgpu_texture_store_query *queries, unsigned long count,
+	struct xgpu_texture_store_answer *answers);
+/* the store id of the texture whose header is at resource (0 none), asked
+as each stage of an Xbox texture is described for a draw; NULL: none asked,
+the stages as they were before the store */
+typedef unsigned long (*xgpu_texture_store_hook)(unsigned long resource);
+void xgpu_backend_texture_store_hook(xgpu_texture_store_hook hook);
 
 /* ---------- pipelines */
 

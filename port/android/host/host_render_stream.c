@@ -235,6 +235,7 @@ static const uint32_t record_minimum[XGPU_STREAM_RECORD_TYPES] =
 	[XGPU_STREAM_WORLD_AO_PREPASS] = sizeof(struct xgpu_stream_world_ao_prepass),
 	[XGPU_STREAM_WORLD_AO_CASCADES] = sizeof(struct xgpu_stream_world_ao_cascades),
 	[XGPU_STREAM_MATERIAL_OVERLAY] = sizeof(struct xgpu_stream_material_overlay),
+	[XGPU_STREAM_TEXTURE_STORE_MAP] = sizeof(struct xgpu_stream_texture_store_map),
 	[XGPU_STREAM_PIPELINE_STAND_IN] = sizeof(struct xgpu_stream_pipeline_stand_in),
 	/* (and its folder's path, at least its NUL) */
 	[XGPU_STREAM_SCREENSHOT] = sizeof(struct xgpu_stream_screenshot) + XGPU_STREAM_RECORD_ALIGNMENT,
@@ -481,6 +482,10 @@ static int decode_record(struct host_render_decoder *decoder, const unsigned cha
 
 		memset(&capabilities, 0, sizeof(capabilities));
 		CALL(initialize, &capabilities);
+		/* (a recording's replay could not read the store's files: drawn
+		stock while one is made or played) */
+		if (host_render_record_active || !backend->texture_store_map)
+			capabilities.texture_store = 0;
 		answer(((const struct xgpu_stream_reply_record *)start)->reply, &capabilities, sizeof(capabilities));
 		break;
 	}
@@ -616,6 +621,8 @@ static int decode_record(struct host_render_decoder *decoder, const unsigned cha
 		const unsigned char *end = start + size;
 		int stage;
 
+		if (textures->changed & ~(XGPU_STREAM_TEXTURES_STAGES | XGPU_STREAM_TEXTURES_STORE))
+			return XGPU_STREAM_ERROR_RECORD;
 		for (stage = 0; stage < 4; stage++)
 		{
 			struct host_render_texture_stage *to = &decoder->stages[stage];
@@ -636,7 +643,58 @@ static int decode_record(struct host_render_decoder *decoder, const unsigned cha
 			memcpy(to->levels, place, level_bytes);
 			place += level_bytes;
 		}
+		/* (the stages' store ids: display.prism_textures) */
+		if (textures->changed & XGPU_STREAM_TEXTURES_STORE)
+		{
+			uint32_t ids[4];
+
+			if ((size_t)(end - place) < sizeof(ids))
+				return XGPU_STREAM_ERROR_RECORD;
+			memcpy(ids, place, sizeof(ids));
+			for (stage = 0; stage < 4; stage++)
+				decoder->stages[stage].store = ids[stage];
+		}
 		CALL(set_textures, decoder->stages);
+		break;
+	}
+	case XGPU_STREAM_TEXTURE_STORE_MAP:
+	{
+		const struct xgpu_stream_texture_store_map *map = (const void *)start;
+		const struct xgpu_stream_texture_store_query *queries = NULL;
+		const char *strings = NULL;
+		struct xgpu_stream_texture_store_answer *answers;
+		uint32_t index;
+
+		/* (the queries and their paths inside the guest's memory, each path
+		ending in its NUL inside the paths' bytes) */
+		if (map->query_count > XGPU_STREAM_TEXTURE_STORE_QUERIES || (map->query_count && !map->reply) ||
+			!data_inside(decoder, start, size, map->queries,
+				map->query_count * (uint32_t)sizeof(struct xgpu_stream_texture_store_query)) ||
+			!data_inside(decoder, start, size, map->strings, map->strings_size))
+			return XGPU_STREAM_ERROR_BOUNDS;
+		if (map->query_count)
+		{
+			queries = host_pointer(map->queries);
+			strings = host_pointer(map->strings);
+			for (index = 0; index < map->query_count; index++)
+			{
+				const struct xgpu_stream_texture_store_query *query = &queries[index];
+
+				if (query->path >= map->strings_size || query->path_length >= map->strings_size - query->path ||
+					strings[query->path + query->path_length] || memchr(strings + query->path, 0, query->path_length))
+					return XGPU_STREAM_ERROR_BOUNDS;
+			}
+		}
+		answers = map->query_count ? host_pointer(map->reply) : NULL;
+		if (answers)
+			memset(answers, 0, map->query_count * sizeof(*answers));
+		if (backend->texture_store_map)
+			backend->texture_store_map(context, map, queries, strings, answers);
+		else
+		{
+			for (index = 0; index < map->query_count; index++)
+				answers[index].status = XGPU_STREAM_TEXTURE_STORE_DEVICE;
+		}
 		break;
 	}
 	case XGPU_STREAM_CONSTANTS:
