@@ -913,8 +913,10 @@ static void plm_queue_page(void const *texture, long page_index, unsigned long d
 			(letter >= '0' && letter <= '9') || letter == '-' ? letter : '_';
 	}
 	name[index] = 0;
-	snprintf(job->path, sizeof(job->path), "%s/prism_lightmaps/%s_%d_%ld_x%lu.plm", platform_data_root(), name,
-		(int)plm.bsp, page_index, plm.factor);
+	/* (from the data root, as the game's fopen, remove and rename find
+	files: port/linux/include/stdio.h; world_sdf.c's sdf_path) */
+	snprintf(job->path, sizeof(job->path), "prism_lightmaps/%s_%d_%ld_x%lu.plm", name, (int)plm.bsp, page_index,
+		plm.factor);
 	page->state = _plm_page_queued;
 	page->data = data;
 	pthread_mutex_lock(&plm_lock);
