@@ -89,7 +89,8 @@ def test_render_stream(tmp_path, sanitizer):
 
 
 def test_stock_bytes_are_the_base_encoders(tmp_path):
-    # display.prism_textures stock: the encoder with no texture store hook
+    # display.prism_textures and display.prism_models stock: the encoder with
+    # no texture store hook and no mesh calls
     # (and with a hook that has no ids) writes the same records, byte for
     # byte, as the base branch's encoder (HALO_STREAM_BASE, default
     # h1-integration: the texture store's base), over a repeatable run of
@@ -120,13 +121,14 @@ def test_stock_bytes_are_the_base_encoders(tmp_path):
         binary = folder / "bytes"
         subprocess.run(
             [cc, "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-O1", "-g", "-D_GNU_SOURCE", "-D_DARWIN_C_SOURCE",
-             "-DHALO_GUEST_BASE=1", "-DXGPU_STREAM_TEST=1", *(["-DBYTES_HOOK=1"] if side == "new" else []),
+             "-DHALO_GUEST_BASE=1", "-DXGPU_STREAM_TEST=1",
+             *(["-DBYTES_HOOK=1", "-DBYTES_MESH=1"] if side == "new" else []),
              f"-I{folder}", f"-I{ROOT / 'port' / 'linux' / 'src'}", f"-I{ROOT / 'port' / 'android' / 'host'}",
              f"-I{ROOT / 'port' / 'android' / 'include'}",
              str(ROOT / "port" / "android" / "tests" / "render_stream_bytes.c"), str(folder / "xgpu_stream_encode.c"),
              str(folder / "xgpu_stream_describe.c"), "-o", str(binary)],
             check=True)
-        for mode in (["none"] if side == "base" else ["none", "zero", "ids"]):
+        for mode in (["none"] if side == "base" else ["none", "zero", "ids", "meshcap", "mesh"]):
             output = folder / f"{mode}.bin"
             subprocess.run([str(binary), str(output), mode], check=True, timeout=120)
             outputs[side, mode] = output.read_bytes()
@@ -134,3 +136,8 @@ def test_stock_bytes_are_the_base_encoders(tmp_path):
     assert outputs["new", "none"] == outputs["base", "none"]
     assert outputs["new", "zero"] == outputs["base", "none"]
     assert outputs["new", "ids"] != outputs["base", "none"]
+    # display.prism_models stock: the mesh store's capability on, nothing of it
+    # called (the guest's stock tier installs no hook): the same bytes; a model
+    # drawn with a mesh: its instances and parts' draws in them
+    assert outputs["new", "meshcap"] == outputs["base", "none"]
+    assert outputs["new", "mesh"] != outputs["base", "none"]

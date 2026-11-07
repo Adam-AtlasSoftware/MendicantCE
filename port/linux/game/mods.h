@@ -33,6 +33,7 @@ MB; a bitmap's pixels are read as they are drawn) */
 struct sound_permutation;
 struct bitmap_data;
 struct vertex_buffer;
+struct render_skinning;
 
 /* ---------- prototypes/PORT_MODS.C (the platform layer's: port_mods.h) */
 
@@ -148,6 +149,24 @@ long mod_textures_update(boolean remove_all, boolean at_load);
 void mod_textures_tags_unloaded(void);
 /* (main_game_render, once a frame) */
 void mod_textures_frame(void);
+
+/* ---------- prototypes/MOD_MESHES.C (display.prism_models: the meshes the
+host draws in place of models' parts, port/linux/vulkan/xgpu_mesh_store.h) */
+
+long mod_meshes_update(boolean remove_all, boolean at_load);
+void mod_meshes_tags_unloaded(void);
+/* (main_game_render, once a frame) */
+void mod_meshes_frame(void);
+/* (models.c's render_model, around its parts) the model drawn, its nodes'
+matrices sent where a mod's mesh replaces it; and the drawing done */
+void mod_meshes_model_begin(long model_index, struct render_skinning const *skinning, real level_of_detail_pixels,
+	unsigned long flags, long object_index);
+void mod_meshes_model_end(void);
+/* (models.c's render_model_parts, around an opaque, decal or shadow part's
+draws) the part the draws that follow are of; and none */
+void mod_meshes_part(short region_index, short permutation_index, short geometry_index, short part_index,
+	short shader_index);
+void mod_meshes_part_end(void);
 /* (rasterizer_xbox_models.c, around a model shader's draws) the shader's
 material overlay armed for the draws that follow, if a mod has one and
 display.prism_material_overlay is on (its base map and the draw's

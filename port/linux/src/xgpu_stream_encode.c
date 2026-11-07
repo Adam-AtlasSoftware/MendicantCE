@@ -655,6 +655,7 @@ void xgpu_backend_initialize(void)
 	xgpu_backend_capabilities.hdr = stream.capabilities.hdr;
 	xgpu_backend_capabilities.material_overlay = stream.capabilities.material_overlay;
 	xgpu_backend_capabilities.texture_store = stream.capabilities.texture_store;
+	xgpu_backend_capabilities.mesh_store = stream.capabilities.mesh_store;
 }
 
 /* (at exit) the frames submitted played, the render thread ended */
@@ -1318,6 +1319,132 @@ BOOL xgpu_backend_texture_store_map(unsigned long generation, unsigned long tier
 	}
 	stream_free(buffer);
 	return TRUE;
+}
+
+/* ---------- display.prism_models: PRISM's mesh store */
+
+BOOL xgpu_backend_mesh_store_available(void)
+{
+	return stream.open && stream.capabilities.mesh_store;
+}
+
+BOOL xgpu_backend_mesh_store_map(unsigned long generation, unsigned long tier, unsigned long budget_megabytes,
+	BOOL loading, const struct xgpu_mesh_store_query *queries, unsigned long count,
+	struct xgpu_mesh_store_answer *answers)
+{
+	struct xgpu_stream_mesh_store_map *record_body;
+	struct xgpu_stream_mesh_store_query *wire;
+	struct xgpu_stream_mesh_store_answer *replies;
+	unsigned char *buffer;
+	char *strings;
+	uint32_t strings_size = 0, query_bytes, answer_bytes, at = 0;
+	unsigned long index;
+
+	if (answers && count)
+		memset(answers, 0, count * sizeof(*answers));
+	if (!stream.open || !stream.capabilities.mesh_store || count > XGPU_STREAM_MESH_STORE_QUERIES ||
+		(count && (!queries || !answers)))
+		return FALSE;
+	/* (the strings: each path and its NUL, then its table, 4-byte aligned) */
+	for (index = 0; index < count; index++)
+	{
+		size_t length = queries[index].path ? strlen(queries[index].path) : 0;
+
+		if (length > 4096 || queries[index].table_count > XGPU_STREAM_MESH_STORE_TABLE_MAXIMUM ||
+			(queries[index].table_count && !queries[index].table) ||
+			queries[index].node_count > XGPU_STREAM_MESH_NODES_MAXIMUM)
+			return FALSE;
+		strings_size = align_up(strings_size + (uint32_t)length + 1, 4) + (uint32_t)queries[index].table_count * 4;
+	}
+	query_bytes = (uint32_t)count * (uint32_t)sizeof(*wire);
+	answer_bytes = (uint32_t)count * (uint32_t)sizeof(*replies);
+	buffer = stream_allocate(16, align_up(query_bytes + answer_bytes + strings_size + 1, 16));
+	if (!buffer)
+		return FALSE;
+	wire = (struct xgpu_stream_mesh_store_query *)buffer;
+	replies = (struct xgpu_stream_mesh_store_answer *)(buffer + query_bytes);
+	strings = (char *)(buffer + query_bytes + answer_bytes);
+	memset(buffer, 0, query_bytes + answer_bytes + strings_size + 1);
+	for (index = 0; index < count; index++)
+	{
+		const struct xgpu_mesh_store_query *query = &queries[index];
+		uint32_t length = query->path ? (uint32_t)strlen(query->path) : 0;
+
+		wire[index].path = at;
+		wire[index].path_length = length;
+		if (length)
+			memcpy(strings + at, query->path, length);
+		strings[at + length] = 0;
+		at = align_up(at + length + 1, 4);
+		wire[index].table = at;
+		wire[index].table_count = (uint32_t)query->table_count;
+		if (query->table_count)
+			memcpy(strings + at, query->table, query->table_count * 4);
+		at += (uint32_t)query->table_count * 4;
+		wire[index].file_size = (uint32_t)query->file_size;
+		wire[index].stamp_seconds = (uint32_t)query->stamp_seconds;
+		wire[index].node_count = (uint32_t)query->node_count;
+		wire[index].node_crc = (uint32_t)query->node_crc;
+		wire[index].base_map_scale[0] = query->base_map_scale[0];
+		wire[index].base_map_scale[1] = query->base_map_scale[1];
+	}
+	record_body = record(XGPU_STREAM_MESH_STORE_MAP, sizeof(*record_body));
+	record_body->reply = STREAM_ADDRESS(replies);
+	record_body->generation = (uint32_t)generation;
+	record_body->tier = (uint32_t)tier;
+	record_body->budget_megabytes = (uint32_t)budget_megabytes;
+	record_body->query_count = (uint32_t)count;
+	record_body->queries = count ? STREAM_ADDRESS(wire) : 0;
+	record_body->strings = count ? STREAM_ADDRESS(strings) : 0;
+	record_body->strings_size = count ? strings_size : 0;
+	record_body->flags = loading ? XGPU_STREAM_MESH_STORE_LOADING : 0;
+	synchronous();
+	for (index = 0; index < count; index++)
+	{
+		answers[index].id = replies[index].id;
+		answers[index].render_radius = replies[index].render_radius;
+		answers[index].bones = replies[index].bones;
+		answers[index].lods = replies[index].lods;
+		answers[index].status = replies[index].status;
+	}
+	stream_free(buffer);
+	return TRUE;
+}
+
+void xgpu_backend_mesh_instance(unsigned long instance, unsigned long mesh, unsigned long object, float lod_pixels,
+	unsigned long flags, const float (*matrices)[3][4], unsigned long node_count)
+{
+	struct xgpu_stream_mesh_instance *record_body;
+
+	if (!stream.open || !stream.capabilities.mesh_store || !instance || node_count > XGPU_STREAM_MESH_NODES_MAXIMUM)
+		return;
+	record_body = record(XGPU_STREAM_MESH_INSTANCE,
+		(uint32_t)(sizeof(*record_body) + node_count * sizeof(matrices[0])));
+	record_body->instance = (uint32_t)instance;
+	record_body->mesh = (uint32_t)mesh;
+	record_body->object = (uint32_t)object;
+	record_body->lod_pixels = lod_pixels;
+	record_body->node_count = (uint16_t)node_count;
+	record_body->flags = (uint16_t)flags;
+	if (node_count)
+		memcpy(record_body + 1, matrices, node_count * sizeof(matrices[0]));
+}
+
+void xgpu_backend_mesh_draw(unsigned long instance, int region, int permutation, int shader, unsigned long flags,
+	int geometry, int part)
+{
+	struct xgpu_stream_mesh_draw *record_body;
+
+	if (!stream.open || !stream.capabilities.mesh_store)
+		return;
+	record_body = record(XGPU_STREAM_MESH_DRAW, sizeof(*record_body));
+	record_body->instance = (uint32_t)instance;
+	record_body->region = (uint8_t)region;
+	record_body->permutation = (uint8_t)permutation;
+	record_body->shader = (uint8_t)shader;
+	record_body->flags = (uint8_t)flags;
+	record_body->geometry = (uint16_t)geometry;
+	record_body->part = (uint16_t)part;
 }
 
 /* display.prism_material_overlay: the images as stages (the tiles repeating

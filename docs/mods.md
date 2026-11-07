@@ -392,6 +392,58 @@ not simulated: a network game's machines need not have the same files.
 `tools/texstore_synth.py` makes placeholder files from an extract's PNGs
 (upscaled, BC7), for tests.
 
+### Meshes
+
+`display.prism_models` (PRISM's mesh store; `stock` by default) draws
+replacement meshes a mod ships in its `meshes` folder, beside `tags`:
+
+    mods/<mod>/meshes/<tier>/<the model tag's path>.pmesh
+    mods/prism_chief/meshes/max/characters/cyborg/cyborg.pmesh
+
+The tiers, the load order and a mod's `maps` are as for textures. A `.pmesh`
+(its format: `port/linux/vulkan/xgpu_mesh_store.h`; written and checked by
+`tools/pmesh.py`) has none of the stock model's limits: 32-bit indices, any
+number of vertices and triangles, four bone weights a vertex, up to 1024
+bones, tangents and two texture coordinate sets, and levels of detail of its
+own, each drawn from a size in pixels it names. Its skeleton is the model's
+own nodes (the same names, parents and default pose: the file carries their
+checksum, which must match the map's model) followed by any helper bones
+(each following its nearest node until rigs drive them); its pieces each
+replace the model's parts of one region, permutation and shader.
+
+The game goes on loading, simulating and drawing the stock model: its nodes
+are animated as they always are, and its collision, markers and attachments
+are the stock model's. The renderer reads the file itself, straight into the
+graphics card's memory (none of it in the game's memory, its 128 MB pool of
+mods' geometry or the per-draw stream), and each frame skins the mesh by the
+nodes' matrices the game draws the model with, then draws it in place of the
+model's parts with their own shaders, passes, shadows and fog. The stock
+model is drawn until the mesh is in, at a region and permutation the mesh has
+nothing for, and on a renderer without the store (Metal's). The files are
+checked as the map loads (the host's log says which were refused and why:
+format, nodes, a piece no part of the model has, a uv past the model's base
+map scale, unreadable, changed, budget, device, path) and read as they are
+first drawn. The objects that draw the model are culled by the mesh's radius
+where it is larger (their render-only radius; the bounding radius physics,
+the AI and the network read is left as it is).
+
+`display.prism_model_budget_mb` (0: a fifth of what the card has free,
+between 128 MB and 1 GB) bounds the card's memory they take; a mesh past it
+is drawn stock, and one not drawn in the last 10 frames is let go of for
+another. Both settings apply in a running game (`prism_set "models max"`).
+Meshes are drawn, not simulated: a network game's machines need not have the
+same files.
+
+`debug.prism_mesh_dump` writes a map's models as the game draws them (their
+parts' vertices and strips, nodes, regions, permutations, shaders, markers)
+to the data folder's `prism_dump`, which `tools/pmesh_from_dump.py` makes a
+`.pmesh` of (the stock geometry as it is, or split into many more triangles,
+for tests), and from which the art pipeline's Blender exporter
+(`prism_pmesh_export.py`: `import-dump` makes a test scene, `export` writes a
+scene's armature, meshes, weights, levels and materials as a `.pmesh` and
+warns of markers the new surface swallows) checks a remodel against the map's
+model. A model's data is the map's: keep what these write to yourself.
+
 ## Making a mod
 
 1. Get the tags you want to change as tag files. `invader-extract` extracts

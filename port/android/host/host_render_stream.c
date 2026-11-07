@@ -236,6 +236,9 @@ static const uint32_t record_minimum[XGPU_STREAM_RECORD_TYPES] =
 	[XGPU_STREAM_WORLD_AO_CASCADES] = sizeof(struct xgpu_stream_world_ao_cascades),
 	[XGPU_STREAM_MATERIAL_OVERLAY] = sizeof(struct xgpu_stream_material_overlay),
 	[XGPU_STREAM_TEXTURE_STORE_MAP] = sizeof(struct xgpu_stream_texture_store_map),
+	[XGPU_STREAM_MESH_STORE_MAP] = sizeof(struct xgpu_stream_mesh_store_map),
+	[XGPU_STREAM_MESH_INSTANCE] = sizeof(struct xgpu_stream_mesh_instance),
+	[XGPU_STREAM_MESH_DRAW] = sizeof(struct xgpu_stream_mesh_draw),
 	[XGPU_STREAM_PIPELINE_STAND_IN] = sizeof(struct xgpu_stream_pipeline_stand_in),
 	/* (and its folder's path, at least its NUL) */
 	[XGPU_STREAM_SCREENSHOT] = sizeof(struct xgpu_stream_screenshot) + XGPU_STREAM_RECORD_ALIGNMENT,
@@ -486,6 +489,11 @@ static int decode_record(struct host_render_decoder *decoder, const unsigned cha
 		stock while one is made or played) */
 		if (host_render_record_replaying() || !backend->texture_store_map)
 			capabilities.texture_store = 0;
+		/* (the mesh store's too, and where the backend has none: Metal's,
+		the null renderer) */
+		if (host_render_record_replaying() || !backend->mesh_store_map || !backend->mesh_instance ||
+			!backend->mesh_draw)
+			capabilities.mesh_store = 0;
 		answer(((const struct xgpu_stream_reply_record *)start)->reply, &capabilities, sizeof(capabilities));
 		break;
 	}
@@ -699,6 +707,70 @@ static int decode_record(struct host_render_decoder *decoder, const unsigned cha
 		}
 		break;
 	}
+	case XGPU_STREAM_MESH_STORE_MAP:
+	{
+		const struct xgpu_stream_mesh_store_map *map = (const void *)start;
+		const struct xgpu_stream_mesh_store_query *queries = NULL;
+		const char *strings = NULL;
+		struct xgpu_stream_mesh_store_answer *answers;
+		uint32_t index;
+
+		/* (the queries, their paths and tables inside the guest's memory,
+		each path ending in its NUL inside the strings' bytes, each table
+		inside them too, 4-byte aligned) */
+		if (map->query_count > XGPU_STREAM_MESH_STORE_QUERIES || (map->query_count && !map->reply) ||
+			!data_inside(decoder, start, size, map->queries,
+				map->query_count * (uint32_t)sizeof(struct xgpu_stream_mesh_store_query)) ||
+			!data_inside(decoder, start, size, map->strings, map->strings_size) ||
+			!data_inside(decoder, start, size, map->reply,
+				map->query_count * (uint32_t)sizeof(struct xgpu_stream_mesh_store_answer)))
+			return XGPU_STREAM_ERROR_BOUNDS;
+		if (map->query_count)
+		{
+			queries = host_pointer(map->queries);
+			strings = host_pointer(map->strings);
+			for (index = 0; index < map->query_count; index++)
+			{
+				const struct xgpu_stream_mesh_store_query *query = &queries[index];
+
+				if (query->path >= map->strings_size || query->path_length >= map->strings_size - query->path ||
+					strings[query->path + query->path_length] || memchr(strings + query->path, 0, query->path_length))
+					return XGPU_STREAM_ERROR_BOUNDS;
+				if (query->table_count > XGPU_STREAM_MESH_STORE_TABLE_MAXIMUM || (query->table & 3) ||
+					query->table > map->strings_size || query->table_count * 4 > map->strings_size - query->table ||
+					query->node_count > XGPU_STREAM_MESH_NODES_MAXIMUM)
+					return XGPU_STREAM_ERROR_BOUNDS;
+			}
+		}
+		answers = map->query_count ? host_pointer(map->reply) : NULL;
+		if (answers)
+			memset(answers, 0, map->query_count * sizeof(*answers));
+		if (backend->mesh_store_map)
+			backend->mesh_store_map(context, map, queries, strings, answers);
+		else
+		{
+			for (index = 0; index < map->query_count; index++)
+				answers[index].status = XGPU_STREAM_MESH_STORE_DEVICE;
+		}
+		break;
+	}
+	case XGPU_STREAM_MESH_INSTANCE:
+	{
+		const struct xgpu_stream_mesh_instance *instance = (const void *)start;
+		float matrices[XGPU_STREAM_MESH_NODES_MAXIMUM][3][4];
+
+		/* (its matrices inside the record: node_count of them, no more than a
+		model has) */
+		if (!instance->instance || instance->node_count > XGPU_STREAM_MESH_NODES_MAXIMUM ||
+			(size - sizeof(*instance)) / sizeof(matrices[0]) < instance->node_count)
+			return XGPU_STREAM_ERROR_RECORD;
+		memcpy(matrices, start + sizeof(*instance), instance->node_count * sizeof(matrices[0]));
+		CALL(mesh_instance, instance, (const float (*)[3][4])matrices);
+		break;
+	}
+	case XGPU_STREAM_MESH_DRAW:
+		CALL(mesh_draw, (const struct xgpu_stream_mesh_draw *)start);
+		break;
 	case XGPU_STREAM_CONSTANTS:
 	{
 		const struct xgpu_stream_constants *constants = (const void *)start;

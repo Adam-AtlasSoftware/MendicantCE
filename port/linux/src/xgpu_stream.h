@@ -38,7 +38,7 @@ port/linux/README.md.
 #include <stdint.h>
 
 #define XGPU_STREAM_MAGIC 0x53504758u /* "XGPS" */
-#define XGPU_STREAM_VERSION 23
+#define XGPU_STREAM_VERSION 24
 #define XGPU_STREAM_LOADING_ART_BYTES (640u * 480u * 4u)
 
 /* ---------- the ring
@@ -279,6 +279,11 @@ enum
 	/* display.prism_textures: the map's replacement textures
 	(xgpu_stream_texture_store_map) */
 	XGPU_STREAM_TEXTURE_STORE_MAP,     /* synchronous */
+	/* display.prism_models: the map's replacement meshes, an object's
+	nodes, and the mesh a model part's draws take (xgpu_stream_mesh_*) */
+	XGPU_STREAM_MESH_STORE_MAP,        /* synchronous */
+	XGPU_STREAM_MESH_INSTANCE,
+	XGPU_STREAM_MESH_DRAW,
 	XGPU_STREAM_RECORD_TYPES,
 };
 
@@ -325,8 +330,9 @@ struct xgpu_stream_capabilities
 	uint8_t mixed_constant_blend, dynamic_lights, dynamic_lights_preparable, hdr;
 	/* display.prism_material_overlay drawn (MATERIAL_OVERLAY); PRISM's
 	texture store (TEXTURE_STORE_MAP, SET_TEXTURES' store ids): its files
-	opened and drawn by the host (0: the guest never asks) */
-	uint8_t material_overlay, texture_store, unused[2];
+	opened and drawn by the host (0: the guest never asks); PRISM's mesh
+	store (MESH_STORE_MAP, MESH_INSTANCE, MESH_DRAW: display.prism_models) */
+	uint8_t material_overlay, texture_store, mesh_store, unused;
 };
 
 struct xgpu_stream_reply_record
@@ -776,6 +782,116 @@ struct xgpu_stream_texture_store_answer
 };
 /* the most queries a record has */
 #define XGPU_STREAM_TEXTURE_STORE_QUERIES 65536u
+
+/* ---------- PRISM's mesh store (display.prism_models; the host's
+port/linux/vulkan/xgpu_mesh_store.h, docs/mods.md "Meshes")
+
+MESH_STORE_MAP: the map's replacement meshes, as the guest found them in
+the mods' meshes folders (port/linux/game/mod_meshes.c): a .pmesh file for a
+model tag, which the host reads straight into the GPU's memory. Sent at a
+map's load, as the mods are found again and as the setting changes; the host
+checks each file's header, skeleton and pieces against what the guest tells
+of the model (its nodes' count and checksum, the region, permutation and
+shader of each part it can draw) and answers each query with an id whose top
+12 bits are the record's generation (as TEXTURE_STORE_MAP's), and the radius
+the mesh reaches (the render-only culling radius the guest grows). query_count
+0 closes the store. The queries, their tables and paths and the answers are
+in a buffer of the guest's own, freed once the record is answered. */
+struct xgpu_stream_mesh_store_map
+{
+	uint32_t header, reply;
+	uint32_t generation;
+	/* 1 enhanced, 2 max (for the host's log: the guest chose the files) */
+	uint32_t tier;
+	/* display.prism_model_budget_mb (0: auto) */
+	uint32_t budget_megabytes;
+	uint32_t query_count, queries;
+	uint32_t strings, strings_size;
+	/* XGPU_STREAM_MESH_STORE_LOADING: a map is loading */
+	uint32_t flags;
+};
+#define XGPU_STREAM_MESH_STORE_LOADING 1u
+/* a query: its file's path (offset into strings and length, NUL-terminated
+there; a host path, as the guest opens it), the size and modification time
+the guest found, the model's node count and checksum (mod_meshes.c's CRC-32
+of the nodes' names, parents and default transforms: the .pmesh skeleton's
+must match it), its table (offset into strings and count of 4-byte entries
+{region, permutation, shader, 0}: each a part the model can draw) and its
+base map scale (the stock layout's texture coordinates are of it) */
+struct xgpu_stream_mesh_store_query
+{
+	uint32_t path, path_length;
+	uint32_t file_size, stamp_seconds;
+	uint32_t node_count, node_crc;
+	uint32_t table, table_count;
+	float base_map_scale[2];
+};
+/* an answer: the id (0 refused) and why (XGPU_STREAM_MESH_STORE_*), the
+radius the mesh reaches from the model's origin (model units, every level of
+detail and the bind pose), its bones and levels of detail */
+enum
+{
+	XGPU_STREAM_MESH_STORE_ACCEPTED,
+	XGPU_STREAM_MESH_STORE_UNREADABLE,
+	XGPU_STREAM_MESH_STORE_CHANGED,
+	XGPU_STREAM_MESH_STORE_FORMAT,
+	XGPU_STREAM_MESH_STORE_NODES,
+	XGPU_STREAM_MESH_STORE_TABLE,
+	XGPU_STREAM_MESH_STORE_UV_RANGE,
+	XGPU_STREAM_MESH_STORE_BUDGET,
+	XGPU_STREAM_MESH_STORE_DEVICE,
+	XGPU_STREAM_MESH_STORE_PATH,
+};
+struct xgpu_stream_mesh_store_answer
+{
+	uint32_t id;
+	float render_radius;
+	uint16_t bones;
+	uint8_t lods, status;
+	uint32_t unused;
+};
+/* the most queries a record has, and table entries a query has */
+#define XGPU_STREAM_MESH_STORE_QUERIES 4096u
+#define XGPU_STREAM_MESH_STORE_TABLE_MAXIMUM 4096u
+
+/* MESH_INSTANCE: a model drawn with a mesh of the store (once each time
+render_model draws it), its nodes' matrices as the vertex shader's
+constants hold them (three rows of four: x' = row 0 . (x, y, z, 1), ...),
+node_count of them following the record's fixed part. The instance is the
+guest's running number (never 0); the draws that follow name it. */
+struct xgpu_stream_mesh_instance
+{
+	uint32_t header;
+	uint32_t instance;
+	uint32_t mesh;
+	/* the object's datum (0xffffffff: none) */
+	uint32_t object;
+	/* the size the level of detail is chosen by (display.model_detail's
+	scale applied), in the 480-line screen's pixels */
+	float lod_pixels;
+	uint16_t node_count;
+	/* XGPU_STREAM_MESH_INSTANCE_* */
+	uint16_t flags;
+};
+#define XGPU_STREAM_MESH_INSTANCE_SHADOW 1u
+#define XGPU_STREAM_MESH_INSTANCE_FIRST_PERSON 2u
+/* the most nodes an instance has (model_definitions.h's MAXIMUM_NODES_PER_MODEL) */
+#define XGPU_STREAM_MESH_NODES_MAXIMUM 64u
+
+/* MESH_DRAW: the draws that follow, until the next MESH_DRAW, are a model
+part's of an instance: drawn as the part's own until the instance's mesh is
+in the GPU's memory, then (a carrier: XGPU_STREAM_MESH_DRAW_CARRIER, the
+first part of its geometry with its shader) as every piece of the mesh's
+level of detail with the part's region, permutation and shader, or (any
+other part) not at all. instance 0: the draws that follow are no part's. */
+struct xgpu_stream_mesh_draw
+{
+	uint32_t header;
+	uint32_t instance;
+	uint8_t region, permutation, shader, flags;
+	uint16_t geometry, part;
+};
+#define XGPU_STREAM_MESH_DRAW_CARRIER 1u
 
 /* display.prism_material_overlay (xgpu.h's "The material overlay"): the
 uniform and images of the draws that follow whose pixel key has
@@ -1417,6 +1533,11 @@ XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_material_overlay, 4 + 176 + 7 * 72);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_texture_store_map, 40);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_texture_store_query, 32);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_texture_store_answer, 12);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_mesh_store_map, 40);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_mesh_store_query, 40);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_mesh_store_answer, 16);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_mesh_instance, 24);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_mesh_draw, 16);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_hdr, 24);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_tone_map, 24);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_panini, 56);

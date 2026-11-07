@@ -78,6 +78,9 @@ struct xgpu_backend_capabilities
 	/* display.prism_textures: the host opens and draws a mod's replacement
 	textures (xgpu_backend_texture_store_map) */
 	BOOL texture_store;
+	/* display.prism_models: the host opens and draws a mod's replacement
+	meshes (xgpu_backend_mesh_store_map) */
+	BOOL mesh_store;
 };
 
 extern struct xgpu_backend_capabilities xgpu_backend_capabilities;
@@ -334,6 +337,49 @@ typedef unsigned long (*xgpu_texture_store_hook)(unsigned long resource);
 void xgpu_backend_texture_store_hook(xgpu_texture_store_hook hook);
 /* the backend has the store (xgpu_backend_capabilities' texture_store) */
 BOOL xgpu_backend_texture_store_available(void);
+
+/* display.prism_models: PRISM's mesh store (xgpu_stream.h's MESH_STORE_MAP).
+The map's replacement meshes, a query each: the file's host path, its size
+and modification time as found, the model's node count and checksum, its
+table (table_count entries of 4 bytes: region, permutation, shader, 0; each a
+part the model can draw) and base map scale. The host answers each with an
+id (0 refused, status why: XGPU_STREAM_MESH_STORE_*), the radius the mesh
+reaches, its bones and levels of detail. generation is new at each call
+(nonzero); count 0 closes the store. FALSE where the backend has no store
+(every answer 0). */
+struct xgpu_mesh_store_query
+{
+	const char *path;
+	unsigned long file_size, stamp_seconds;
+	unsigned long node_count, node_crc;
+	const unsigned char *table;
+	unsigned long table_count;
+	float base_map_scale[2];
+};
+struct xgpu_mesh_store_answer
+{
+	unsigned long id;
+	float render_radius;
+	unsigned long bones, lods;
+	int status;
+};
+BOOL xgpu_backend_mesh_store_map(unsigned long generation, unsigned long tier, unsigned long budget_megabytes,
+	BOOL loading, const struct xgpu_mesh_store_query *queries, unsigned long count,
+	struct xgpu_mesh_store_answer *answers);
+/* the backend has the store (xgpu_backend_capabilities' mesh_store) */
+BOOL xgpu_backend_mesh_store_available(void);
+/* a model drawn with a mesh of the store (MESH_INSTANCE): the guest's
+running number (nonzero), the mesh's id, the object's datum (0xffffffff
+none), the size its level of detail is chosen by, XGPU_STREAM_MESH_INSTANCE_*
+and its nodes' matrices as the vertex shader's constants have them (three
+rows of four each, node_count of them, at most XGPU_STREAM_MESH_NODES_MAXIMUM) */
+void xgpu_backend_mesh_instance(unsigned long instance, unsigned long mesh, unsigned long object, float lod_pixels,
+	unsigned long flags, const float (*matrices)[3][4], unsigned long node_count);
+/* the draws from now on are a model part's of an instance (MESH_DRAW;
+instance 0: no part's): its region, permutation, shader, geometry and part,
+XGPU_STREAM_MESH_DRAW_* */
+void xgpu_backend_mesh_draw(unsigned long instance, int region, int permutation, int shader, unsigned long flags,
+	int geometry, int part);
 
 /* ---------- pipelines */
 

@@ -9,7 +9,11 @@ repeatable run of texture stages, targets, clears and constants, frames
 apart, into a ring whose host is this file: each submit's records are
 written as they are to the file argv[1], and released at once. INITIALIZE's
 answer has the texture store's capability set (a byte the base's
-capabilities left unused), so that only the hook decides.
+capabilities left unused), so that only the hook decides; with BYTES_MESH,
+argv[2] "meshcap" sets the mesh store's capability too (the next byte) and
+calls nothing of it (display.prism_models stock: the records must be the
+same), and "mesh" sends a model's instance and its parts' draws each frame
+(they differ).
 */
 
 #include "xgpu_backend.h"
@@ -65,6 +69,10 @@ void nv2a_pixel_program_decode(const struct nv2a_pixel_shader_key *key, struct x
 	memset(program, 0, sizeof(*program));
 }
 
+#ifdef BYTES_MESH
+static int mesh_capability, mesh_calls;
+#endif
+
 #ifdef BYTES_HOOK
 /* argv[2] "zero": a store hook that has no ids (the guest's with a tier but
 no replacement drawn); "ids": one that has some */
@@ -112,6 +120,10 @@ void host_render_stream_submit(unsigned int flags)
 			answer->largest_target = 16384;
 			/* (texture_store's place: the byte after material_overlay) */
 			((uint8_t *)&answer->material_overlay)[1] = 1;
+#ifdef BYTES_MESH
+			/* (mesh_store's: the byte after it) */
+			((uint8_t *)&answer->material_overlay)[2] = (uint8_t)mesh_capability;
+#endif
 		}
 		written += size;
 	}
@@ -163,6 +175,10 @@ int main(int argc, char **argv)
 		textures[index]->Size = (uint32_t)index * 7;
 	}
 	xgpu_stream_encode_configure(1u << 20, 2);
+#ifdef BYTES_MESH
+	mesh_capability = argc > 2 && (!strcmp(argv[2], "meshcap") || !strcmp(argv[2], "mesh"));
+	mesh_calls = argc > 2 && !strcmp(argv[2], "mesh");
+#endif
 	xgpu_backend_initialize();
 #ifdef BYTES_HOOK
 	if (argc > 2 && strcmp(argv[2], "none"))
@@ -216,6 +232,20 @@ int main(int argc, char **argv)
 			constants[0][0] = constants[1][1] = (float)(next() % 1000);
 			constants[0][1] = constants[0][2] = constants[0][3] = constants[1][0] = constants[1][2] = constants[1][3] = 0.0f;
 			xgpu_backend_set_constants(next() % 96, constants, 2);
+#ifdef BYTES_MESH
+			/* (display.prism_models: a model's nodes and a part's draws named) */
+			if (mesh_calls && !(draw % 5))
+			{
+				float matrices[19][3][4];
+
+				memset(matrices, 0, sizeof(matrices));
+				matrices[0][0][0] = matrices[0][1][1] = matrices[0][2][2] = (float)(next() % 7);
+				xgpu_backend_mesh_instance((unsigned long)(frame * 20 + draw + 1), 0x00100001ul, 0xe0010004ul, 400.0f,
+					0, (const float (*)[3][4])matrices, 19);
+				xgpu_backend_mesh_draw((unsigned long)(frame * 20 + draw + 1), 0, 0, 2, XGPU_STREAM_MESH_DRAW_CARRIER, 0, 2);
+				xgpu_backend_mesh_draw(0, 0, 0, 0, 0, 0, 0);
+			}
+#endif
 			if (!(draw % 7))
 				xgpu_backend_clear(16, color, 1.0f, 0, NULL, 0);
 		}
