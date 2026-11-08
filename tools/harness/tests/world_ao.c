@@ -49,6 +49,18 @@ int config_boolean(const char *name)
 	return 0;
 }
 
+/* (display.ambient_occlusion_strength: full, the shade the cases check) */
+double config_real(const char *name)
+{
+	(void)name;
+	return 1.0;
+}
+
+unsigned long config_changes(void)
+{
+	return changes;
+}
+
 /* (found once a pixel: the front end's pre-pass, none here) */
 static int prepass_found;
 

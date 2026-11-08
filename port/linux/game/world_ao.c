@@ -29,6 +29,25 @@ the Classic preset's "off") draws exactly as before.
 
 const char *config_string(const char *name);
 int config_boolean(const char *name);
+double config_real(const char *name);
+unsigned long config_changes(void);
+
+/* display.ambient_occlusion_strength, read as the settings change: the
+objects' and the level's strengths by it (0 to 1.5) */
+static float world_ao_strength(void)
+{
+	static unsigned long read_at;
+	static float strength = 1.0f;
+	double value;
+
+	if (read_at != config_changes() + 1)
+	{
+		read_at = config_changes() + 1;
+		value = config_real("display.ambient_occlusion_strength");
+		strength = value < 0.0 ? 0.0f : value > 1.5 ? 1.5f : (float)value;
+	}
+	return strength;
+}
 unsigned long halo_gpu_settings_taken(void);
 unsigned long long SDL_GetTicksNS(void);
 /* (PRISM v2's model light: prism_light.c) */
@@ -588,8 +607,10 @@ void world_ao_window_begin(short local_player_index, short rasterizer_target, fl
 		world_ao.dynamic_count = world_ao.count;
 	world_ao_field_place(world_ao.volume ? &world_ao.volume->header : NULL, field);
 	memset(parameters, 0, sizeof(parameters));
-	parameters[0][0] = WORLD_AO_STRENGTH_OBJECTS;
-	parameters[0][1] = WORLD_AO_STRENGTH_LEVEL;
+	parameters[0][0] = WORLD_AO_STRENGTH_OBJECTS * world_ao_strength();
+	parameters[0][1] = WORLD_AO_STRENGTH_LEVEL * world_ao_strength();
+	if (parameters[0][0] > 1.0f)
+		parameters[0][0] = 1.0f;
 	parameters[0][2] = world_ao.fade;
 	parameters[0][3] = (float)world_ao.count;
 	parameters[1][0] = WORLD_AO_REFERENCE_WEIGHT;

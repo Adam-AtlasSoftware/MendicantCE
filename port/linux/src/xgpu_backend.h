@@ -144,6 +144,13 @@ downsample, a 9-tap tent up, XGPU_BLOOM_LEVELS of each) and added back
 over the view by XGPU_BLOOM_STRENGTH; 0 none, the view as it is */
 #define XGPU_BLOOM_GLOW 1
 #define XGPU_BLOOM_FULL 2
+/* display.prism_tone (with the bloom's capability): the view graded before
+its bloom by its local mean (local contrast, its light lifted, a little
+more saturation: XGPU_PRISM_TONE_PRISM; more of each: _VIVID), handed to
+xgpu_backend_tone_map in bloom's bits XGPU_PRISM_TONE_SHIFT and up; 0 none */
+#define XGPU_PRISM_TONE_PRISM 1
+#define XGPU_PRISM_TONE_VIVID 2
+#define XGPU_PRISM_TONE_SHIFT 8
 void xgpu_backend_tone_map(xgpu_target target, const long corners[4], int bloom);
 /* display.ambient_occlusion "world" (xgpu_stream.h, docs/world-ao.md):
 the block the opaque surfaces' ambient light reads from here on (the

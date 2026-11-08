@@ -2188,12 +2188,12 @@ static struct
 {
 	unsigned long read_at;
 	BOOL read;
-	int filter, bloom;
+	int filter, bloom, tone;
 } prism_lighting;
 
 static void prism_lighting_read(void)
 {
-	const char *lightmaps, *bloom;
+	const char *lightmaps, *bloom, *tone;
 
 	if (prism_lighting.read && prism_lighting.read_at == config_changes())
 		return;
@@ -2201,16 +2201,20 @@ static void prism_lighting_read(void)
 	prism_lighting.read_at = config_changes();
 	lightmaps = config_string("display.prism_lightmaps");
 	bloom = config_string("display.prism_bloom");
+	tone = config_string("display.prism_tone");
 	/* ("rebaked": the pages that have a rebaked copy are keyed so draw by
 	draw; the others are drawn as "smooth") */
 	prism_lighting.filter = xgpu_backend_capabilities.lightmap_filter && lightmaps &&
 		(!strcmp(lightmaps, "smooth") || !strcmp(lightmaps, "rebaked")) ? XGPU_LIGHTMAP_FILTER_SMOOTH : 0;
 	prism_lighting.bloom = !xgpu_backend_capabilities.bloom || !bloom ? 0 : !strcmp(bloom, "glow") ? XGPU_BLOOM_GLOW :
 		!strcmp(bloom, "full") ? XGPU_BLOOM_FULL : 0;
+	/* (display.prism_tone: the bloom's capability, its passes' kin) */
+	prism_lighting.tone = !xgpu_backend_capabilities.bloom || !tone ? 0 : !strcmp(tone, "prism") ? XGPU_PRISM_TONE_PRISM :
+		!strcmp(tone, "vivid") ? XGPU_PRISM_TONE_VIVID : 0;
 #ifdef HALO_VR
 	/* (not in the headset, whose eyes are drawn without the tone map) */
 	if (halo_vr_running())
-		prism_lighting.bloom = 0;
+		prism_lighting.bloom = prism_lighting.tone = 0;
 #endif
 }
 
@@ -2227,6 +2231,13 @@ int prism_bloom_mode(void)
 {
 	prism_lighting_read();
 	return prism_lighting.bloom;
+}
+
+/* display.prism_tone's mode (XGPU_PRISM_TONE_*; 0 none) */
+static int prism_tone_mode(void)
+{
+	prism_lighting_read();
+	return prism_lighting.tone;
 }
 
 /* (between frames: halo_screen_commit) the settings and the display as
@@ -2248,8 +2259,9 @@ static void hdr_read(void)
 		display = xgpu_backend_display_hdr(&headroom);
 		active = setting == XGPU_HDR_ON || (setting == XGPU_HDR_AUTO && display);
 		/* (display.prism_bloom: the half floats, whose light past white it
-		glows, on any display: the tone map rolls them off under SDR white) */
-		if (setting != XGPU_HDR_OFF && prism_bloom_mode())
+		glows, on any display: the tone map rolls them off under SDR white;
+		display.prism_tone's grade, which lifts the light, as well) */
+		if (setting != XGPU_HDR_OFF && (prism_bloom_mode() || prism_tone_mode()))
 			active = TRUE;
 	}
 #ifdef HALO_VR
@@ -5595,7 +5607,7 @@ void halo_screen_tone_map(short x0, short y0, short x1, short y1)
 	corners[1] = scaled_pixel(y0, target->target.scale[1]);
 	corners[2] = scaled_pixel(x1, target->target.scale[0]);
 	corners[3] = scaled_pixel(y1, target->target.scale[1]);
-	xgpu_backend_tone_map(target->target.number, corners, prism_bloom_mode());
+	xgpu_backend_tone_map(target->target.number, corners, prism_bloom_mode() | (prism_tone_mode() << XGPU_PRISM_TONE_SHIFT));
 }
 
 /* display.overshield_effect's rise (rasterizer_xbox_plasma_energy.c,

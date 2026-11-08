@@ -373,7 +373,9 @@ struct xgpu_stream_tone_map
 	uint32_t header;
 	uint32_t target;
 	int32_t corners[4];
-	/* display.prism_bloom first (XGPU_BLOOM_*: xgpu_backend.h; 0 none) */
+	/* display.prism_bloom first (XGPU_BLOOM_*: xgpu_backend.h; 0 none) in
+	the low 8 bits, display.prism_tone's grade (XGPU_PRISM_TONE_*) from
+	XGPU_PRISM_TONE_SHIFT */
 	uint32_t bloom;
 };
 
@@ -547,7 +549,11 @@ cascade's texel in world units; depth: each cascade's depth range in world
 units; fade: x where the last cascade's shadow starts to fade (the share of
 its radius), y the structure's share for a model (1: as the moving
 casters'), z a model's share of its first distant light the casters take, w
-unused */
+unused; tune: the bake's sun visibility (a lightmap texel's dominant
+incident direction's nearness to the sun from x to y, cosines, times its
+directional share times z, at most 1: the share of its light the casters
+may take) and w the cascades' blend's band (the share of a cascade's half
+width short of its edge where its pixels start to take the next) */
 struct xgpu_prism_shadows_block
 {
 	float cascades[XGPU_PRISM_SHADOWS_CASCADES_MOST][4][4];
@@ -556,7 +562,8 @@ struct xgpu_prism_shadows_block
 	float texel[4];
 	float depth[4];
 	float fade[4];
-	float spare[3][4];
+	float tune[4];
+	float spare[2][4];
 };
 struct xgpu_stream_prism_shadows
 {

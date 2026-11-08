@@ -31,6 +31,7 @@ the camera, the sky's tag and the settings. */
 /* the platform's (port/linux/src) */
 char const *config_string(char const *name);
 long config_integer(char const *name);
+double config_real(char const *name);
 unsigned long config_changes(void);
 void platform_log(const char *format, ...);
 int halo_prism_shadows_pass(int phase, int resolution, int cascades, float const *block);
@@ -51,13 +52,14 @@ enum
 #define PRISM_SHADOWS_CASCADES 3
 #define PRISM_SHADOWS_CASCADES_MOST 4
 /* (struct xgpu_prism_shadows_block's floats: four cascades' matrices, then
-sun, light, texel, depth, fade and three spare) */
+sun, light, texel, depth, fade, tune and two spare) */
 #define PRISM_SHADOWS_BLOCK_FLOATS (PRISM_SHADOWS_CASCADES_MOST * 16 + 8 * 4)
 #define BLOCK_SUN (PRISM_SHADOWS_CASCADES_MOST * 16)
 #define BLOCK_LIGHT (BLOCK_SUN + 4)
 #define BLOCK_TEXEL (BLOCK_SUN + 8)
 #define BLOCK_DEPTH (BLOCK_SUN + 12)
 #define BLOCK_FADE (BLOCK_SUN + 16)
+#define BLOCK_TUNE (BLOCK_SUN + 20)
 
 /* the cascades' far ends in world units (a Spartan is 0.7 tall): the first
 holds the characters near the camera at a few millimetres a texel, the last
@@ -73,11 +75,29 @@ the share of a lightmap's sunlit light the moving casters take away; the
 penumbra's growth a world unit from the blocker (the sun's apparent size,
 widened: about 1.4 degrees); where the last cascade starts to fade; the
 structure's share on a model; a model's sunlit share the casters take */
-#define PRISM_SHADOWS_STRENGTH 0.65f
-#define PRISM_SHADOWS_SOFTNESS 0.025f
+#define PRISM_SHADOWS_STRENGTH 0.85f
+#define PRISM_SHADOWS_SOFTNESS 0.035f
 #define PRISM_SHADOWS_FADE 0.8f
-#define PRISM_SHADOWS_STRUCTURE_ON_MODELS 1.0f
+#define PRISM_SHADOWS_STRUCTURE_ON_MODELS 0.35f
 #define PRISM_SHADOWS_MODEL_STRENGTH 0.85f
+/* the bake's sun visibility (struct xgpu_prism_shadows_block's tune): a
+lightmap texel's share of the sun, its dominant incident direction's
+nearness to the sun from tune.x to tune.y (cosines) times its directional
+share times tune.z (at most 1): where the bake already shadowed it, the
+casters take nothing; and the cascades' blend's band (the share of a
+cascade's half width short of its edge where its pixels start to take the
+next) */
+#define PRISM_SHADOWS_BAKED_FROM 0.3f
+#define PRISM_SHADOWS_BAKED_TO 0.8f
+#define PRISM_SHADOWS_BAKED_GAIN 1.25f
+#define PRISM_SHADOWS_BLEND_BAND 0.15f
+/* a dim sun (a moon, a hazy sky: its light's power) casts weaker and
+softer shadows: the strength by PIN((power - FROM) / RANGE, LEAST, 1), the
+softness by 1 + SOFTER (1 - that) */
+#define PRISM_SHADOWS_POWER_FROM 0.4f
+#define PRISM_SHADOWS_POWER_RANGE 1.2f
+#define PRISM_SHADOWS_POWER_LEAST 0.35f
+#define PRISM_SHADOWS_POWER_SOFTER 1.5f
 
 /* ---------- globals */
 
@@ -86,10 +106,14 @@ static struct
 	unsigned long settings_read;
 	boolean wanted;
 	int resolution;
+	/* display.prism_shadow_softness and _strength */
+	real softness;
+	real strength;
 	/* the map's sun (from its sky when a window last saw it), found */
 	short sky_index;
 	boolean sun_found;
 	real_vector3d sun;
+	real sun_power;
 	/* a pass was drawn for the window being drawn: its surfaces read it */
 	boolean receiving;
 	boolean logged;
@@ -113,6 +137,8 @@ static void settings_read(
 	prism_shadows.wanted = value && !strcmp(value, "cascaded");
 	resolution = config_integer("display.prism_shadow_resolution");
 	prism_shadows.resolution = resolution >= 4096 ? 4096 : resolution >= 2048 ? 2048 : resolution >= 1024 ? 1024 : 2048;
+	prism_shadows.softness = PIN(config_real("display.prism_shadow_softness"), 0.25f, 4.f);
+	prism_shadows.strength = PIN(config_real("display.prism_shadow_strength"), 0.f, 1.f);
 
 	return;
 }
@@ -134,6 +160,7 @@ static boolean sun_find(
 		return TRUE;
 	}
 	prism_shadows.sun_found = render_sky_sun(sky_index, &prism_shadows.sun, &color, &power);
+	prism_shadows.sun_power = prism_shadows.sun_found ? power : 0.f;
 	prism_shadows.sky_index = sky_index;
 	if (prism_shadows.sun_found)
 	{
@@ -160,6 +187,8 @@ static void block_build(
 	real tangent_y = MAX(fabs(frustum->frustum_bounds.y0), fabs(frustum->frustum_bounds.y1));
 	real corner = (real)sqrt(tangent_x * tangent_x + tangent_y * tangent_y);
 	real start = MAX(camera->z_near, 0.01f);
+	real dim = PIN((prism_shadows.sun_power - PRISM_SHADOWS_POWER_FROM) / PRISM_SHADOWS_POWER_RANGE,
+		PRISM_SHADOWS_POWER_LEAST, 1.f);
 	short cascade;
 
 	memset(block, 0, sizeof(prism_shadows.block));
@@ -228,13 +257,18 @@ static void block_build(
 	block[BLOCK_SUN + 1] = sun->j;
 	block[BLOCK_SUN + 2] = sun->k;
 	block[BLOCK_SUN + 3] = (float)PRISM_SHADOWS_CASCADES;
-	block[BLOCK_LIGHT + 0] = PRISM_SHADOWS_STRENGTH;
-	block[BLOCK_LIGHT + 1] = PRISM_SHADOWS_SOFTNESS;
+	block[BLOCK_LIGHT + 0] = PRISM_SHADOWS_STRENGTH * prism_shadows.strength * dim;
+	block[BLOCK_LIGHT + 1] = PRISM_SHADOWS_SOFTNESS * prism_shadows.softness *
+		(1.f + PRISM_SHADOWS_POWER_SOFTER * (1.f - dim));
 	block[BLOCK_LIGHT + 2] = 1.f / (float)(prism_shadows.resolution * PRISM_SHADOWS_CASCADES);
 	block[BLOCK_LIGHT + 3] = (float)prism_shadows.resolution;
 	block[BLOCK_FADE + 0] = PRISM_SHADOWS_FADE;
 	block[BLOCK_FADE + 1] = PRISM_SHADOWS_STRUCTURE_ON_MODELS;
-	block[BLOCK_FADE + 2] = PRISM_SHADOWS_MODEL_STRENGTH;
+	block[BLOCK_FADE + 2] = PRISM_SHADOWS_MODEL_STRENGTH * prism_shadows.strength * dim;
+	block[BLOCK_TUNE + 0] = PRISM_SHADOWS_BAKED_FROM;
+	block[BLOCK_TUNE + 1] = PRISM_SHADOWS_BAKED_TO;
+	block[BLOCK_TUNE + 2] = PRISM_SHADOWS_BAKED_GAIN;
+	block[BLOCK_TUNE + 3] = PRISM_SHADOWS_BLEND_BAND;
 
 	return;
 }

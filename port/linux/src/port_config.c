@@ -454,14 +454,28 @@ static const struct config_setting config_settings[] =
 		"maps about the camera, out to about 150 metres, their edges as soft as\n"
 		"the distance from what casts them): characters, vehicles, weapons and\n"
 		"scenery onto the level and onto each other, and the level onto them;\n"
-		"the level's own baked shadows are never darkened twice, and the game's\n"
-		"shadow under each object gives way to them. Where no sky is seen, none.\n"
+		"never where the level's baked light already has the sun's shadow (the\n"
+		"lightmap's own sun, texel by texel), lighter and softer from a dim sun\n"
+		"or a moon, the cascades blended into each other; the game's shadow\n"
+		"under each object gives way to them. Where no sky is seen, none.\n"
 		"Vulkan only; read each frame." GRAPHICS_CHOOSES },
 	{ "display.prism_shadow_resolution", _config_integer, "2048", "HALO_PRISM_SHADOW_RESOLUTION", _environment_value,
 		_platform_desktop,
 		"PRISM, with display.prism_shadows \"cascaded\": each shadow map's texels\n"
 		"along a side (three maps): 1024, 2048 or 4096. Higher is crisper and\n"
 		"costs more of the GPU's memory and time. Read each frame." },
+	{ "display.prism_shadow_softness", _config_real, "1.0", "HALO_PRISM_SHADOW_SOFTNESS", _environment_value,
+		_platform_desktop,
+		"PRISM, with display.prism_shadows \"cascaded\": how fast the sun's\n"
+		"shadows soften with the distance from what casts them (the sun's\n"
+		"apparent size), 0.25 to 4: 1 about a degree and a half, more is softer.\n"
+		"Read each frame." },
+	{ "display.prism_shadow_strength", _config_real, "1.0", "HALO_PRISM_SHADOW_STRENGTH", _environment_value,
+		_platform_desktop,
+		"PRISM, with display.prism_shadows \"cascaded\": how much of the sun's\n"
+		"light a shadow takes, 0 to 1 (1: all of the sun's share the level's\n"
+		"baked light gave the spot; never what the bake already shadowed).\n"
+		"Read each frame." },
 	{ "display.prism_lightmaps", _config_string, "\"stock\"", "HALO_PRISM_LIGHTMAPS", _environment_value,
 		_platform_desktop,
 		"PRISM: the level's own baked light, drawn smoother: \"stock\" as the Xbox\n"
@@ -493,6 +507,15 @@ static const struct config_setting config_settings[] =
 		"wider and brighter. Never a haze over the scene, never on what is lit\n"
 		"no brighter than white. Draws the 3D view in half floats on any\n"
 		"display, as display.hdr does. Vulkan; read each frame." },
+	{ "display.prism_tone", _config_string, "\"off\"", "HALO_PRISM_TONE", _environment_value,
+		_platform_desktop,
+		"PRISM, beyond CE: the 3D view graded by the light about each pixel:\n"
+		"its local contrast raised (rock, armour and corridors read with more\n"
+		"depth), the darker light lifted and the colour a little richer, the\n"
+		"picture as bright as CE's or brighter with PRISM's light on. \"off\":\n"
+		"none, as the game draws; \"prism\": a lift; \"vivid\": more of each.\n"
+		"Draws the 3D view in half floats, as display.hdr does. Vulkan; read\n"
+		"each frame (prism_set \"tone prism\")." },
 	{ "display.prism_world_geometry", _config_string, "\"stock\"", "HALO_PRISM_WORLD_GEOMETRY", _environment_value,
 		_platform_desktop,
 		"PRISM v2: \"remodel\" draws the level's walls, rock and ground from a\n"
@@ -1493,6 +1516,11 @@ static const struct config_setting config_settings[] =
 		"lights and your weapon keep theirs: \"off\" or \"world\". The older\n"
 		"\"subtle\" and \"strong\" are read as \"world\"."
 		GRAPHICS_CHOOSES },
+	{ "display.ambient_occlusion_strength", _config_real, "0.8", "HALO_AMBIENT_OCCLUSION_STRENGTH",
+		_environment_value, _platform_all,
+		"How deep display.ambient_occlusion \"world\"'s shade is, 0 to 1.5: 1 the\n"
+		"full depth found, 0.8 lighter (the default: the levels' and the\n"
+		"foliage's light kept), 0 none. Read each frame." },
 	{ "display.shield_color", _config_string, "\"default\"", "HALO_SHIELD_COLOR", _environment_value, _platform_all,
 		"Your energy shield's color, as this machine draws it: \"default\" (the\n"
 		"shield's own) or a multiplayer armor color: white, black, red, blue,\n"
@@ -4185,6 +4213,7 @@ static const struct
 	{ "display.ambient_occlusion", { "off", "world", NULL }, "off" },
 	{ "display.prism_lightmaps", { "stock", "smooth", "rebaked", NULL }, "stock" },
 	{ "display.prism_bloom", { "off", "glow", "full", NULL }, "off" },
+	{ "display.prism_tone", { "off", "prism", "vivid", NULL }, "off" },
 	{ "display.prism_shadows", { "stock", "soft", "traced", "cascaded", NULL }, "stock" },
 	{ "display.astc_textures", { "auto", "always", "off", NULL }, NULL },
 	{ "display.picture_position", { "center", "top", "bottom", NULL }, NULL },
