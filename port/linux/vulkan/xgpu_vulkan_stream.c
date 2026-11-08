@@ -231,6 +231,12 @@ static struct
 	struct stream_target **targets;
 	uint32_t target_count;
 	struct xgpu_vulkan_buffer *segments[MIRROR_SEGMENT_MAXIMUM];
+	/* (display.prism_rt's capture: each mirror segment's bytes in the host's
+	cached memory, made the first time a traced frame reads the segment and
+	written with it from then on; the segment's own memory is write-combined,
+	which the CPU reads a few hundred MB a second at most: read from it, a
+	frame's objects took the render thread about 30 ms) */
+	uint8_t *segment_copies[MIRROR_SEGMENT_MAXIMUM];
 	struct program_entry *programs[PROGRAM_BUCKETS], *lightings[PROGRAM_BUCKETS];
 	struct stream_pipeline pipelines[XGPU_STREAM_PIPELINES];
 
@@ -1867,6 +1873,32 @@ static void stream_mirror_write(void *context, const struct xgpu_stream_mirror_w
 		return;
 	xgpu_vulkan_buffer_write(segment_buffer((int32_t)record->segment), record->offset, host_pointer(record->data),
 		record->size, record->unused != 0);
+	if (record->segment < MIRROR_SEGMENT_MAXIMUM && stream.segment_copies[record->segment] && host_pointer(record->data))
+		memcpy(stream.segment_copies[record->segment] + record->offset, host_pointer(record->data), record->size);
+}
+
+/* a mirror segment's bytes as the CPU reads them quickly (display.prism_rt's
+capture): its copy, made now from the segment's memory if it has none */
+static const uint8_t *segment_copy(const struct xgpu_vulkan_buffer *buffer)
+{
+	int32_t segment;
+
+	for (segment = 0; segment < MIRROR_SEGMENT_MAXIMUM; segment++)
+		if (stream.segments[segment] == buffer)
+			break;
+	if (segment == MIRROR_SEGMENT_MAXIMUM || !buffer)
+		return NULL;
+	if (!stream.segment_copies[segment])
+	{
+		const void *contents = xgpu_vulkan_buffer_contents(stream.segments[segment]);
+		uint8_t *copy;
+
+		if (!contents || !(copy = malloc(MIRROR_SEGMENT_SIZE)))
+			return NULL;
+		memcpy(copy, contents, MIRROR_SEGMENT_SIZE);
+		stream.segment_copies[segment] = copy;
+	}
+	return stream.segment_copies[segment];
 }
 
 /* an element's vertex format; the unnormalized shorts read as integers where
@@ -2009,8 +2041,11 @@ struct draw_input
 	struct xgpu_vulkan_range index_range;
 	int32_t vertex_offset;
 	/* (display.prism_rt's capture: the indices' bytes as the CPU has them,
-	the mirror's or the host's; NULL none) */
+	the host's (cpu_indices) or the mirror's (index_segment at
+	index_segment_offset, read through its copy); none) */
 	const uint16_t *cpu_indices;
+	const struct xgpu_vulkan_buffer *index_segment;
+	uint32_t index_segment_offset;
 };
 
 /* the draw's indices in the ring: as they are, or a line loop made a list
@@ -2668,8 +2703,8 @@ static void stream_draw_indexed(void *context, const struct xgpu_stream_draw_ind
 			return;
 		input.index_range.buffer = xgpu_vulkan_buffer_handle(buffer);
 		input.index_range.offset = record->offset;
-		input.cpu_indices = (const uint16_t *)((const unsigned char *)xgpu_vulkan_buffer_contents(buffer) +
-			record->offset);
+		input.index_segment = buffer;
+		input.index_segment_offset = record->offset;
 		/* (a loop's indices, made into a list, are read from the mirror's
 		bytes; others are not read) */
 		if (record->primitive == _primitive_line_loop)
@@ -3345,7 +3380,7 @@ then, drawn opaque) */
 	source = &input->sources[position->binding];
 	if (source->segment)
 	{
-		const uint8_t *contents = (const uint8_t *)xgpu_vulkan_buffer_contents(source->segment);
+		const uint8_t *contents = segment_copy(source->segment);
 
 		if (!contents || source->offset >= MIRROR_SEGMENT_SIZE)
 			return;
@@ -3372,13 +3407,21 @@ then, drawn opaque) */
 			draw.weight_offset = attribute->offset;
 	}
 	draw.indices = input->cpu_indices;
+	if (input->index_segment)
+	{
+		const uint8_t *contents = segment_copy(input->index_segment);
+
+		if (!contents)
+			return;
+		draw.indices = (const uint16_t *)(contents + input->index_segment_offset);
+	}
 	draw.count = input->count;
 	draw.index_base = -input->vertex_offset;
 	draw.primitive = input->primitive == _primitive_triangle_strip ? XGPU_VULKAN_RT_STRIP :
 		input->primitive == _primitive_triangle_fan ? XGPU_VULKAN_RT_FAN : XGPU_VULKAN_RT_LIST;
 	draw.constants = (const float (*)[4])stream.constants;
 	draw.occluder = occlusion == XGPU_STREAM_WORLD_AO_OCCLUDER;
-	if (input->indices && !input->cpu_indices)
+	if (input->indices && !draw.indices)
 		return;
 	xgpu_vulkan_rt_capture(&draw);
 }
