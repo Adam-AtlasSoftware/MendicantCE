@@ -1180,7 +1180,7 @@ struct xgpu_vulkan_image *xgpu_vulkan_rt_window_end(struct xgpu_vulkan_image *in
 	/* rays a pixel: the sun's and the occlusion's, by quality (medium, low,
 	high, ultra) */
 	static const float sun_rays[4] = { 1.0f, 1.0f, 2.0f, 4.0f };
-	static const float ao_rays[4] = { 2.0f, 1.0f, 4.0f, 8.0f };
+	static const float ao_rays[4] = { 1.0f, 1.0f, 2.0f, 4.0f };
 	struct rt_slot *slot = &rt.slots[rt.slot];
 	struct rt_pass block;
 	struct xgpu_vulkan_range uniforms;
