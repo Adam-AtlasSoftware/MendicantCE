@@ -360,10 +360,11 @@ int prism_rt_full_resolution(void)
 /* the sun's shadows traced in this frame (a mode on and a sun found): the
 game's own shadow under each object is not drawn then (render.c), as
 prism-world2's cascaded shadows leave it out, or the sand under a Pelican
-is darkened twice, by CE's shadow and by the traced one */
+is darkened twice, by CE's shadow and by the traced one; not for a sun
+under the horizon (a10's ship: its rooms' objects keep CE's shadows) */
 int prism_rt_sun_shadows(void)
 {
-	return prism_rt_mode() != PRISM_RT_OFF && prism_rt.sun_found && !render_enumerating;
+	return prism_rt_mode() != PRISM_RT_OFF && prism_rt.sun_found && prism_rt.sun.k > 0.0f && !render_enumerating;
 }
 
 void prism_rt_map_unloaded(void)

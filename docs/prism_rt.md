@@ -24,11 +24,12 @@ Hardware ray tracing for the Vulkan renderer, off by default. It follows the des
     sphere, so its brightness stays CE's and only how the light falls across it changes, within 1/k to k
     (k = 1.25 at `display.prism_rt_mood` 100, 1 at 0); the level's light is untouched (its bounce is in the lightmap);
   - no auto-exposure, no grade.
-- **CE's own object shadows are left out while the sun's are traced** (any mode on, a sun found:
+- **CE's own object shadows are left out while the sun's are traced** (any mode on, a sun above the horizon found:
   `prism_rt_sun_shadows`, render.c), as prism-world2's cascaded shadows leave them out. Drawn as well, CE's soft
   shadow under each object and the traced one stacked: the sand under the b30 Pelican went to a tenth of its light
-  (the darkest tenth of that corner 24 in stock, 8 in `gi`, 29 with CE's shadow left out). Indoors with no sun, CE's
-  shadows stay.
+  (the darkest tenth of that corner 24 in stock, 8 in `gi`, 29 with CE's shadow left out). With no sun, or one under the
+  horizon (a10's ship), CE's shadows stay; in a sunlit level's rooms they are lost (the traced sun does not reach
+  there), as with world2's.
 
 ## The frame
 
