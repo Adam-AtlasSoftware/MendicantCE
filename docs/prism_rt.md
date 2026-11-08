@@ -134,7 +134,37 @@ Colour in `gi` (the traced colour path exists now, `pathtraced`'s; `gi` does not
 at probe hits, local lights' shadows outside `pathtraced`, reflections, alpha-tested traces, remodel relief, the
 compaction of the structure's BLAS, Deck and RDNA tuning, Metal (and Metal's emitter of the traced light).
 
-## Measured (b30, the game stopped at tick 1350, the game's camera; GPU ms a frame, `debug.gpu_stats`)
+## Measured, uncapped (b30 at tick 1350, the game's camera; idle GPUs at full clocks)
+
+The tables further down were taken with the game rendering at its 30 Hz tick (interpolation off, a fixed frame
+time). That leaves the GPUs so lightly loaded that the drivers hold them near 900 MHz (P3 on the 2060, logged), so
+every figure there is 2 to 2.5 times high and the 2060's are not "shared GPU" noise but mostly its low clock. These
+are taken with `HALO_INTERPOLATION=true HALO_FRAME_TIME=0` (both GPUs at 1.8-1.9 GHz, P0, logged beside the
+results in `rt_runs/review_uncap_*`), after the capture's cached copy of the mirror (below). Added GPU ms against
+stock in the same run, 2 rounds' median; in brackets the whole game's frames a second (CPU included). Lower ms is
+better, higher fps is better.
+
+| GPU, size | stock | world AO | RT shadows | RT GI | PT low | PT medium | PT high | PT ultra |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| RTX 3070 Ti, 1080p | 1.53 (484) | +0.30 (389) | +2.59 (107) | +2.67 (105) | +2.89 (106) | +3.39 (103) | +4.59 (97) | +6.86 (94) |
+| RTX 3070 Ti, 1440p | 2.24 (371) | +0.49 (302) | +2.47 (101) | +2.43 (102) | +4.92 (92) | +5.76 (88) | +7.91 (90) | +11.85 (66) |
+| RTX 2060, 1080p | 3.08 (293) | +0.85 (230) | +2.15 (101) | +2.35 (96) | +7.14 (90) | +8.25 (81) | +11.68 (64) | +16.80 (48) |
+| RTX 2060, 1440p | 4.35 (212) | +1.26 (165) | +3.49 (89) | +3.71 (88) | +12.73 (56) | +14.63 (50) | +20.26 (39) | +29.12 (29) |
+
+Against the design's targets: the 3070 Ti is inside every one (GI 3 / 4.5 ms; `pathtraced` 9 / 14 ms, even at
+ultra), the 2060 inside its GI targets (3.5 / 5.5 ms). Any RT mode holds the game near 100 frames a second on this
+machine's CPU however light the GPU's share: the objects are still skinned on the CPU each frame (the design's
+compute pass is the next step). Before the cached copy the capture read the mirror's write-combined memory, and
+RT frames came 45-47 ms apart at the 30 Hz tick (about 21 frames a second) against stock's 33.3 ms; the earlier
+tables' "between" column showed it.
+
+**The capture's reads.** A captured draw's vertices and indices are read from a copy of the mirror's segment in the
+host's cached memory (`segment_copy`, xgpu_vulkan_stream.c: made the first time a traced frame reads that segment,
+4 MB each, then written alongside it); RT off makes none, and indexed draws no longer touch the segment's contents.
+
+## Measured at the 30 Hz tick (b30, the game stopped at tick 1350, the game's camera; GPU ms a frame, `debug.gpu_stats`)
+
+(GPUs held near 900 MHz by the light load: see above; kept for the record.)
 
 Each state against stock measured just before it in the same run (lower is better). The GPUs were shared with other
 work during these runs (Blender bakes and other game instances, logged beside the results), so the absolute times are
