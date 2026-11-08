@@ -143,3 +143,24 @@ high and noisy; the deltas are the better guide, and a clean run should be taken
 
 "passes" is the ray tracing's own GPU time (its structures' builds, the probes, the trace and the resolve), from its
 timestamps.
+
+### `pathtraced` (b30 at tick 1350, the game's camera, no dynamic lights in view; added GPU ms against stock in the same run, 2 rounds' median; "passes" the ray tracing's own timestamps)
+
+| GPU, size | stock | world AO | RT shadows | RT GI | PT low (checkerboard) | PT medium | PT high | PT ultra |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| RTX 3070 Ti, 1080p | 2.46 | +0.56 | +2.75 | +2.53 | +5.64 (5.97) | +7.34 (7.06) | +9.61 (9.62) | +14.44 (13.94) |
+| RTX 3070 Ti, 1440p | 3.23 | +0.94 | +4.28 | +4.30 | +11.09 (10.76) | +11.34 (11.46) | +13.09 (12.89) | +13.67 (13.98) |
+| RTX 2060, 1080p (shared) | 6.43 | +3.01 | +8.85 | +8.36 | +11.04 (12.80) | +11.49 (13.39) | +12.58 (15.13) | +16.32 (18.13) |
+| RTX 2060, 1440p (shared, 84% busy before) | 4.98 | +4.59 | +7.15 | +9.62 | +17.18 (14.90) | +18.63 (14.45) | +26.36 (23.16) | +45.07 (34.15) |
+
+Another process kept the 2060 busy throughout (30 to 84% before each run): its figures are upper bounds. On the
+3070 Ti, medium at 1080p is within the design's 9 ms for `pathtraced`; 1440p is not (14 ms target: medium 11.3, ultra
+13.7). Low's checkerboard saves little at 1440p: the fixed passes (the object BLAS, the probes, three a-trous passes
+over full-resolution half-float images) dominate, the next thing to cut. Memory: ten full-resolution RGBA16F images and
+one RGBA32F (about 170 MB at 1080p, 300 MB at 1440p).
+
+Mood gate (frame mean against stock, 15% allowed): b30 Chief -5.9%, Elites -1.1%; a50 at night with the flashlight,
+first person +7.3%, Elites -9.3%; a10 0.0% (no sun indoors: the factor is 1, the a10 window leak of `shadows` is gone);
+c10 -0.7% to +1.0%. The p10 check fails where the flashlight's traced shadows fall (a50: they are the added light's,
+outside the factor view's mask) and under the b30 Pelican. Vulkan validation: no messages in any capture. Off: 46 of
+46 frames identical to the base build at b30, with world AO on too, and with `HALO_VULKAN_NO_RT=1`.
