@@ -85,3 +85,18 @@ renderer cannot trace. `HALO_VULKAN_STATS=1` logs the passes' GPU time every 600
 Colour in GI and the dynamic lights' bounce on the level (both need the surfaces' shaders to add a traced colour, a new
 binding and key bit), CE's lightmap radiance at probe hits, local lights' shadows, reflections, path tracing,
 alpha-tested traces, remodel relief, the compaction of the structure's BLAS, Deck and RDNA tuning, Metal.
+
+## Measured (b30, the game stopped at tick 1350, the game's camera; GPU ms a frame, `debug.gpu_stats`)
+
+Each state against stock measured just before it in the same run (lower is better). The GPUs were shared with other
+work during these runs (Blender bakes and other game instances, logged beside the results), so the absolute times are
+high and noisy; the deltas are the better guide, and a clean run should be taken before any of them is quoted as final.
+
+| GPU, size | stock | world AO | RT shadows (medium) | RT GI (medium) | RT shadows (low, half res) |
+| --- | --- | --- | --- | --- | --- |
+| RTX 3070 Ti, 1080p | 2.09 | +0.64 | +2.60 (passes 1.88) | +2.64 (1.85) | +1.59 (0.64) |
+| RTX 3070 Ti, 1440p | 3.7-4.7 | +0.98 | +3.85 (2.82) | +4.02 (3.03) | +2.25 (1.43) |
+| RTX 2060, 1080p | 8.6-9.0 (shared) | +0.34 | +3.75 (4.96) | +4.65 (5.56) | +2.51 (3.30) |
+
+"passes" is the ray tracing's own GPU time (its structures' builds, the probes, the trace and the resolve), from its
+timestamps.
