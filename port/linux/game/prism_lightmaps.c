@@ -45,9 +45,12 @@ CRC-32 of the header and them. A file that fails a check is built again.
 
 display.prism_lightmaps "rebaked": each page drawn from the page baked
 again offline on this machine from CE's own light sources (art_pipeline's
-relight_bake.py and relight_encode.py: Cycles, the BSP's sky lights and
-emitting shaders, bounce light, the factor times CE's size, calibrated
-area by area against CE's page), read from <data>/prism_lightmaps/rebaked/
+relight_bake.py, relight_calib.py and relight_encode.py: Cycles, the BSP's
+sky lights and emitting shaders, bounce light, the factor times CE's size;
+each light's strength and colour fitted to the pools of light CE's page
+shows, so a lamp's pool keeps CE's hue and brightness, then matched area by
+area to CE's page, the BSP's mean brightness CE's or a little above, never
+below), read from <data>/prism_lightmaps/rebaked/
 <map>_<bsp>_<page>.prl (local, never shipped): "PRL1", the version (2),
 CE's page's width and height, the factor, the hash of CE's page's texels
 (as above: a page baked against another map's page is not drawn), the
