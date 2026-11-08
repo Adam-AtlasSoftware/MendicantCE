@@ -88,6 +88,8 @@ static const struct field pixel_fields[] = {
 	derived; PRISM v2's model light, the settings', with a mod's overlay
 	alone; never the game's own) */
 	{ "pp", offsetof(struct xgpu_stream_pixel_key, prism), 1, 1, 0, 1 },
+	/* (display.prism_materials': a mod's too) */
+	{ "mp", offsetof(struct xgpu_stream_pixel_key, material_pbr), 1, 1, 0, 1 },
 };
 
 #define CONTEXT_FIELD(name, member, size, count) \
@@ -150,9 +152,35 @@ static uint64_t draw_vertex_program(const struct xgpu_manifest_draw *draw)
 }
 #endif
 
+/* (the key's bytes before material_pbr's word, then that word where it is
+not 0: a key without display.prism_materials hashes as it did before the
+word was added, so the names in manifests and prepared records stand) */
 static uint64_t pixel_hash(const struct xgpu_stream_pixel_key *pixel)
 {
-	return xgpu_manifest_hash(pixel, sizeof(*pixel), XGPU_MANIFEST_HASH_START);
+	size_t head = offsetof(struct xgpu_stream_pixel_key, material_pbr);
+	uint64_t hash = xgpu_manifest_hash(pixel, head, XGPU_MANIFEST_HASH_START);
+	static const uint8_t zero[sizeof(*pixel)];
+
+	if (memcmp((const uint8_t *)pixel + head, zero, sizeof(*pixel) - head))
+		hash = xgpu_manifest_hash((const uint8_t *)pixel + head, sizeof(*pixel) - head, hash);
+	return hash;
+}
+
+/* a draw's hash: its bytes, its pixel key's material_pbr word left out
+where it is 0 (pixel_hash's rule: the stock draws hash as they did before
+the word, so the shipped records' enumerations stand) */
+uint64_t xgpu_manifest_draw_hash(const struct xgpu_manifest_draw *draw, uint64_t hash)
+{
+	size_t word = offsetof(struct xgpu_manifest_draw, key) + offsetof(struct xgpu_stream_pipeline_key, pixel) +
+		offsetof(struct xgpu_stream_pixel_key, material_pbr);
+	size_t width = sizeof(draw->key.pixel) - offsetof(struct xgpu_stream_pixel_key, material_pbr);
+	static const uint8_t zero[sizeof(draw->key.pixel)];
+	const uint8_t *bytes = (const uint8_t *)draw;
+
+	hash = xgpu_manifest_hash(bytes, word, hash);
+	if (memcmp(bytes + word, zero, width))
+		hash = xgpu_manifest_hash(bytes + word, width, hash);
+	return xgpu_manifest_hash(bytes + word + width, sizeof(*draw) - word - width, hash);
 }
 
 #ifndef XGPU_MANIFEST_READER_ONLY
@@ -789,8 +817,12 @@ int xgpu_draw_derive(const struct xgpu_draw_facts *facts, int unlit, struct xgpu
 	if (!unlit && facts->lights && !facts->lighting_failed && facts->prism_sun && !facts->blend &&
 		(facts->lights == 2 || facts->world_found) && !derived->material_overlay)
 		derived->prism_lighting = XGPU_PRISM_SHADOWS_CASCADED;
+	/* (display.prism_materials: alike) */
+	if (!unlit && facts->lights && !facts->lighting_failed && facts->material_pbr &&
+		(facts->lights == 2 || facts->world_found))
+		derived->material_pbr = (uint8_t)facts->material_pbr;
 	if (!unlit && facts->lights && !facts->lighting_failed && (facts->per_pixel || derived->material_overlay ||
-		derived->prism_lighting))
+		derived->prism_lighting || derived->material_pbr))
 	{
 		/* a model lighting program's draw lit for each pixel: the enhanced
 		dynamic lights in its two point lights' place, its ambient light by
@@ -923,6 +955,7 @@ int xgpu_manifest_derive(const struct xgpu_manifest_draw *draw, const struct xgp
 	/* (display.prism_lightmaps': as a recording has it) */
 	facts.lightmap_filter = XGPU_STREAM_PRISM_LIGHTMAP_FILTER(key->pixel.prism);
 	facts.prism_lighting = XGPU_STREAM_PRISM_LIGHTING(key->pixel.prism);
+	facts.material_pbr = key->pixel.material_pbr;
 	lit = xgpu_draw_derive(&facts, unlit, &parts);
 	/* (its bytes, padding too: a draw's hash is of them) */
 	memcpy(derived, draw, sizeof(*derived));
@@ -936,6 +969,7 @@ int xgpu_manifest_derive(const struct xgpu_manifest_draw *draw, const struct xgp
 	derived->key.pixel.ambient_occlusion = parts.ambient_occlusion;
 	derived->key.pixel.material_overlay = parts.material_overlay;
 	derived->key.pixel.prism = XGPU_STREAM_PRISM(parts.prism_lighting, parts.lightmap_filter);
+	derived->key.pixel.material_pbr = parts.material_pbr;
 	return lit;
 }
 
@@ -1302,7 +1336,7 @@ void xgpu_manifest_record_draw(int immediate, unsigned long written)
 		memcpy(draw.strides, recorder.strides, sizeof(draw.strides));
 	}
 	memcpy(draw.stages, recorder.stages, sizeof(draw.stages));
-	hash = xgpu_manifest_hash(&draw, sizeof(draw), XGPU_MANIFEST_HASH_START);
+	hash = xgpu_manifest_draw_hash(&draw, XGPU_MANIFEST_HASH_START);
 	if (recorder.enumerating)
 		enumeration_add(&draw, hash);
 	if (recorder.state <= 0)
@@ -1317,7 +1351,7 @@ void xgpu_manifest_record_draw(int immediate, unsigned long written)
 	{
 		draw.key = recorder.basis;
 		recorded = xgpu_manifest_hash(&recorder.context, sizeof(recorder.context),
-			xgpu_manifest_hash(&draw, sizeof(draw), XGPU_MANIFEST_HASH_START));
+			xgpu_manifest_draw_hash(&draw, XGPU_MANIFEST_HASH_START));
 	}
 	else
 	{

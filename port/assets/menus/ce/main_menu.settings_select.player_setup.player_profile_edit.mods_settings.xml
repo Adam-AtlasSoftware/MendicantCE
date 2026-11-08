@@ -21,6 +21,7 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_theater" x="28" y="213"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_6" x="28" y="240" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_graphics" x="28" y="260" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_assets" x="28" y="281" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/button_bar" y="414"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/tabs" y="76"/>
 	</widget>
@@ -141,6 +142,14 @@
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_graphics_label" type="text" controller="1" width="332" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" string_index="7" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
 	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_assets" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 120">
+		<on event="a" open="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/prism_assets_settings_screen"/>
+		<on event="start" open="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/prism_assets_settings_screen"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets_label"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets_label" type="text" controller="1" width="332" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" string_index="8" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	</widget>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels">
 		<string text="MODS"/>
 		<string text="MANAGE MODS ›"/>
@@ -150,6 +159,7 @@
 		<string text="THEATER ›"/>
 		<string text="PRISM"/>
 		<string text="PRISM GRAPHICS ›"/>
+		<string text="PRISM ASSETS ›"/>
 	</strings>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/help_strings">
 		<string text="Texture, sound, text and model packs from the mods folder, and the Theater's recorded games."/>
@@ -161,5 +171,6 @@
 		<string text="The games recorded: watch one again from any player's view, or a free or cinematic camera."/>
 		<string text=""/>
 		<string text="Finer light, materials and level geometry, built on this computer from your own maps. Video's Quality PRISM turns on the faithful ones."/>
+		<string text="The sharper textures, remodelled characters and materials mods ship, and how much of the graphics card they take."/>
 	</strings>
 </menus>

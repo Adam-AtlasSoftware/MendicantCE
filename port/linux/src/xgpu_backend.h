@@ -85,6 +85,15 @@ struct xgpu_backend_capabilities
 	/* display.prism_shadows "cascaded": xgpu_backend_prism_shadows's pass
 	and the receivers' XGPU_PRISM_SHADOWS_CASCADED */
 	BOOL prism_shadows;
+	/* display.prism_textures: the host opens and draws a mod's replacement
+	textures (xgpu_backend_texture_store_map) */
+	BOOL texture_store;
+	/* display.prism_models: the host opens and draws a mod's replacement
+	meshes (xgpu_backend_mesh_store_map) */
+	BOOL mesh_store;
+	/* display.prism_materials: the GGX path's shaders, a material's images
+	from the store (xgpu_backend_material_define) */
+	BOOL materials;
 };
 
 extern struct xgpu_backend_capabilities xgpu_backend_capabilities;
@@ -329,6 +338,99 @@ struct xgpu_material_overlay
 };
 
 void xgpu_backend_material_overlay(const struct xgpu_material_overlay *overlay);
+
+/* display.prism_textures: PRISM's texture store (xgpu_stream.h's
+TEXTURE_STORE_MAP; port/linux/game/mod_textures.c declares these for
+itself: keep the two the same). The map's replacement textures, a query each: the
+file's host path, its size and modification time as found, and the stock
+bitmap it replaces (cube: a cube map; its levels and first level's size),
+or (kind XGPU_STREAM_TEXTURE_STORE_KIND_MATERIAL) a material's image, which
+replaces none (its stock fields 0).
+The host answers each with an id (0 refused, status why: XGPU_STREAM_
+TEXTURE_STORE_*) and the file's size and levels. generation is new at
+each call (nonzero); count 0 closes the store. FALSE where the backend has
+no store (every answer 0). */
+struct xgpu_texture_store_query
+{
+	const char *path;
+	unsigned long file_size, stamp_seconds;
+	BOOL cube;
+	unsigned long stock_width, stock_height, stock_levels;
+	int kind;
+};
+struct xgpu_texture_store_answer
+{
+	unsigned long id;
+	unsigned long width, height, levels;
+	int status, format;
+};
+BOOL xgpu_backend_texture_store_map(unsigned long generation, unsigned long tier, unsigned long budget_megabytes,
+	BOOL loading, const struct xgpu_texture_store_query *queries, unsigned long count,
+	struct xgpu_texture_store_answer *answers);
+/* the store id of the texture whose header is at resource (0 none), asked
+as each stage of an Xbox texture is described for a draw; NULL: none asked,
+the stages as they were before the store */
+typedef unsigned long (*xgpu_texture_store_hook)(unsigned long resource);
+void xgpu_backend_texture_store_hook(xgpu_texture_store_hook hook);
+/* the backend has the store (xgpu_backend_capabilities' texture_store) */
+BOOL xgpu_backend_texture_store_available(void);
+
+/* display.prism_models: PRISM's mesh store (xgpu_stream.h's MESH_STORE_MAP).
+The map's replacement meshes, a query each: the file's host path, its size
+and modification time as found, the model's node count and checksum, its
+table (table_count entries of 4 bytes: region, permutation, shader, 0; each a
+part the model can draw) and base map scale. The host answers each with an
+id (0 refused, status why: XGPU_STREAM_MESH_STORE_*), the radius the mesh
+reaches, its bones and levels of detail. generation is new at each call
+(nonzero); count 0 closes the store. FALSE where the backend has no store
+(every answer 0). */
+struct xgpu_mesh_store_query
+{
+	const char *path;
+	unsigned long file_size, stamp_seconds;
+	unsigned long node_count, node_crc;
+	const unsigned char *table;
+	unsigned long table_count;
+	float base_map_scale[2];
+};
+struct xgpu_mesh_store_answer
+{
+	unsigned long id;
+	float render_radius;
+	unsigned long bones, lods;
+	int status;
+};
+BOOL xgpu_backend_mesh_store_map(unsigned long generation, unsigned long tier, unsigned long budget_megabytes,
+	BOOL loading, const struct xgpu_mesh_store_query *queries, unsigned long count,
+	struct xgpu_mesh_store_answer *answers);
+/* the backend has the store (xgpu_backend_capabilities' mesh_store) */
+BOOL xgpu_backend_mesh_store_available(void);
+/* a model drawn with a mesh of the store (MESH_INSTANCE): the guest's
+running number (nonzero), the mesh's id, the object's datum (0xffffffff
+none), the size its level of detail is chosen by, XGPU_STREAM_MESH_INSTANCE_*
+and its nodes' matrices as the vertex shader's constants have them (three
+rows of four each, node_count of them, at most XGPU_STREAM_MESH_NODES_MAXIMUM);
+the game's clock (ticks and the interpolation's fraction) and the object's
+function values A-D (NULL: 0), for helper bones */
+void xgpu_backend_mesh_instance(unsigned long instance, unsigned long mesh, unsigned long object, float lod_pixels,
+	unsigned long flags, const float (*matrices)[3][4], unsigned long node_count, unsigned long game_ticks,
+	float game_fraction, const float *functions);
+/* the draws from now on are a model part's of an instance (MESH_DRAW;
+instance 0: no part's): its region, permutation, shader, geometry and part,
+XGPU_STREAM_MESH_DRAW_* */
+void xgpu_backend_mesh_draw(unsigned long instance, int region, int permutation, int shader, unsigned long flags,
+	int geometry, int part);
+/* display.prism_materials (xgpu.h's "PBR materials", xgpu_stream.h's
+MATERIAL_DEFINE; port/linux/game/mod_pbr.c declares these for itself: keep
+the two the same): a material's id (1 to XGPU_STREAM_MATERIALS; 0 forgets
+them all), its pixel key bits (XGPU_PBR_*), its images' store ids (0 none)
+and uniform; and the material of the draws that follow (0 none). Nothing is
+sent where the backend has no materials (xgpu_backend_capabilities'
+materials). */
+void xgpu_backend_material_define(unsigned long id, unsigned int flags, const unsigned long *textures,
+	const float *uniforms);
+void xgpu_backend_material_bind(unsigned long id);
+BOOL xgpu_backend_materials_available(void);
 
 /* ---------- pipelines */
 

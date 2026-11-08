@@ -940,6 +940,18 @@ long port_mods_scan(void)
 		port_mods.played_count++;
 		snprintf(path, sizeof(path), "%s/%s/tags", root, mod->folder);
 		files_list(mod_index, path, "", 0);
+		/* (display.prism_textures' KTX2 files: textures\<tier>\<tag>#<n>.ktx2,
+		port/linux/game/mod_textures.c) */
+		snprintf(path, sizeof(path), "%s/%s/textures", root, mod->folder);
+		files_list(mod_index, path, "textures", 0);
+		/* (display.prism_models' meshes: meshes\<tier>\<tag>.pmesh,
+		port/linux/game/mod_meshes.c) */
+		snprintf(path, sizeof(path), "%s/%s/meshes", root, mod->folder);
+		files_list(mod_index, path, "meshes", 0);
+		/* (display.prism_materials' files: materials\<shader tag>.material.json,
+		port/linux/game/mod_pbr.c) */
+		snprintf(path, sizeof(path), "%s/%s/materials", root, mod->folder);
+		files_list(mod_index, path, "materials", 0);
 		platform_log("mods: %s (%s%s%s) plays %ld tag files%s", mod->folder, mod->name, mod->version[0] ? " " : "",
 			mod->version, mod->file_count, mod->maps ? " on the maps it names" : "");
 	}

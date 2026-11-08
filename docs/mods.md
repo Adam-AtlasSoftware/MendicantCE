@@ -340,6 +340,186 @@ With the setting off, every draw is the game's. The Mac's Metal renderer
 draws the overlaid shaders as they are, until its shaders are checked
 against Vulkan's.
 
+### Textures
+
+`display.prism_textures` (PRISM's texture store; `stock` by default) draws
+replacement textures a mod ships in its `textures` folder, beside `tags`:
+
+    mods/<mod>/textures/<tier>/<the bitmap tag's path>#<bitmap index>.ktx2
+    mods/prism_chief/textures/max/characters/cyborg/bitmaps/cyborg#0.ktx2
+
+The tiers are `enhanced` and `max`; `max` takes a bitmap's `enhanced` file
+where it has no `max` one. The mod loaded last that has a bitmap's file
+wins, as for tag files, and a mod's `maps` apply.
+
+A file is a KTX2 of BC1, BC3, BC4, BC5 or BC7 blocks (ASTC 4x4 on devices
+without BC: most Android phones), with no supercompression, every level of
+its chain (`levelCount` floor(log2(the longer side)) + 1), one face (six
+for a cube map), no layers or depth, and the stock bitmap's size times 2^k
+on both sides (the same k, 0 or more), at most 4096 on a side. `_SRGB`
+formats are sampled as UNORM, as the stock textures are. A replacement is
+sampled as its blocks decode, whatever the stock bitmap's format: BC4 gives
+red alone (green and blue 0, alpha 1) and BC5 red and green (blue 0, alpha
+1), so they suit only bitmaps whose shaders read those channels; a bump
+map, whose shader reads all three of its normal's, a Y8 or A8 bitmap
+(stock grey or alpha alone, which the stock decoding spreads to the other
+channels) and anything with alpha need BC1, BC3 or BC7 with every channel
+as the stock decodes it. The bitmaps that
+can take one are 2D or cube maps whose sides are powers of two, not
+palettized (P8) and not linear; the HUD's and the menus' high-res pictures
+come first (`port/assets/hud`).
+
+The game goes on loading the stock bitmap (or a mod's `.bitmap` of it):
+it is drawn until the replacement's levels down from the stock
+resolution are in the graphics card's memory, and it is where every size
+the game computes with comes from. The host reads the files itself, straight
+into the card's memory, never into the game's: the game's 256 MB texture
+cache and its 64 MB desktop cache are not touched, and a file can be as
+large as the card holds. Each level of the replacement stands for the stock
+level of its size (level j + k for the stock's j), so a texture far away
+looks as the stock does and only one near is sharper. The files are checked
+as the map loads (the host's log says which were refused and why: size,
+format, unreadable, changed, device, path), and read as they are first drawn,
+on worker threads, the smallest levels first.
+
+`display.prism_texture_budget_mb` (0: six tenths of what the card has free,
+between 128 MB and 6 GB) bounds the card's memory they take; past it, those
+not drawn in the last 10 frames go back to the stock resolution, then to the
+stock texture, the least recently drawn first. Both settings apply in a
+running game (`prism_set "textures max"`). Only the Vulkan renderer has the
+store; Metal's (macOS, iOS) draws the stock textures. Textures are drawn,
+not simulated: a network game's machines need not have the same files.
+`tools/texstore_synth.py` makes placeholder files from an extract's PNGs
+(upscaled, BC7), for tests.
+
+### Meshes
+
+`display.prism_models` (PRISM's mesh store; `stock` by default) draws
+replacement meshes a mod ships in its `meshes` folder, beside `tags`:
+
+    mods/<mod>/meshes/<tier>/<the model tag's path>.pmesh
+    mods/prism_chief/meshes/max/characters/cyborg/cyborg.pmesh
+
+The tiers, the load order and a mod's `maps` are as for textures. A `.pmesh`
+(its format: `port/linux/vulkan/xgpu_mesh_store.h`; written and checked by
+`tools/pmesh.py`) has none of the stock model's limits: 32-bit indices, any
+number of vertices and triangles, four bone weights a vertex, up to 1024
+bones, tangents and two texture coordinate sets, and levels of detail of its
+own, each drawn from a size in pixels it names. Its skeleton is the model's
+own nodes (the same names, parents and default pose: the file carries their
+checksum, which must match the map's model) followed by any helper bones
+(driven by the rig in the file's `RIG` section: `docs/prism_rigs.md`; a helper
+without a rule follows its parent); its pieces each
+replace the model's parts of one region, permutation and shader.
+
+The game goes on loading, simulating and drawing the stock model: its nodes
+are animated as they always are, and its collision, markers and attachments
+are the stock model's. The renderer reads the file itself, straight into the
+graphics card's memory (none of it in the game's memory, its 128 MB pool of
+mods' geometry or the per-draw stream), and each frame skins the mesh by the
+nodes' matrices the game draws the model with, then draws it in place of the
+model's parts with their own shaders, passes, shadows and fog. The stock
+model is drawn until the mesh is in, at a region and permutation the mesh has
+nothing for, and on a renderer without the store (Metal's). The files are
+checked as the map loads (the host's log says which were refused and why:
+format, nodes, a piece no part of the model has, unreadable, changed, budget,
+device, path) and read as they are first drawn. A mesh is skinned once a
+frame: an object's shadow is drawn at the level of detail its view was, so
+the two share the skinning. The stock part's vertex holds texture
+coordinates over the model's base map scale (16 bits each), so a uv0 past
+that scale is clamped there (the log counts them); a piece whose shader has
+a material (below) is drawn from a wide copy the skinning writes beside the
+stock vertices, as large (32 bytes) but with the mesh's uv0 as floats (any
+range, full precision) where the stock vertex has its 16-bit coordinates,
+nodes and weight (the pipeline gives node 0 and weight 1 instead), so the
+material's images, the base map and the normal map's frame all follow the
+mesh's own coordinates (`HALO_MESH_WIDE_OFF=1`: the stock vertices, for
+comparisons). The objects that draw the model are culled by the mesh's radius
+where it is larger (their render-only radius; the bounding radius physics,
+the AI and the network read is left as it is).
+
+`display.prism_model_budget_mb` (0: a fifth of what the card has free,
+between 128 MB and 1 GB) bounds the card's memory they take; a mesh past it
+is drawn stock, and one not drawn in the last 10 frames is let go of for
+another. Both settings apply in a running game (`prism_set "models max"`).
+Meshes are drawn, not simulated: a network game's machines need not have the
+same files.
+
+The console's `prism_set "debug_pose <frame> <animation>"` puts the first player's unit in one of its own
+graph's base animations at a frame and poses its nodes at once (no tick: a stopped game shows the pose,
+without the animation's root motion), for checking a replacement mesh's deformation in captures. It changes
+the game's state, so a network game refuses it.
+
+`debug.prism_mesh_dump` writes a map's models as the game draws them (their
+parts' vertices and strips, nodes, regions, permutations, shaders, markers)
+to the data folder's `prism_dump`, which `tools/pmesh_from_dump.py` makes a
+`.pmesh` of (the stock geometry as it is, or split into many more triangles,
+for tests), and from which the art pipeline's Blender exporter
+(`prism_pmesh_export.py`: `import-dump` makes a test scene, `export` writes a
+scene's armature, meshes, weights, levels and materials as a `.pmesh` and
+warns of markers the new surface swallows) checks a remodel against the map's
+model. A model's data is the map's: keep what these write to yourself.
+
+### Materials
+
+`display.prism_materials` (PRISM's materials; `stock` by default) lights a
+model shader by a material a mod gives it, in its `materials` folder,
+beside `tags` and `textures`:
+
+    mods/<mod>/materials/<the shader tag's path>.material.json
+    mods/prism_chief/materials/characters/cyborg/shaders/armor.material.json
+
+```json
+{ "format": 1,
+  "albedo": "textures/materials/cyborg/armor_albedo.ktx2", "albedo_factor": [1, 1, 1],
+  "normal": "textures/materials/cyborg/armor_normal.ktx2", "normal_scale": 1.0,
+  "orm": "textures/materials/cyborg/armor_orm.ktx2",
+  "roughness": 1.0, "metal": 1.0, "occlusion": 1.0,
+  "emissive": null, "emissive_factor": [1, 1, 1],
+  "clearcoat": { "strength": 1.0, "roughness": 0.05, "mask": null },
+  "detail": { "map": "textures/materials/tiles/weave.ktx2", "scale": 64,
+              "normal": 0.15, "cavity": 0.2, "roughness": 0.2, "mask": "all" },
+  "reflection": 1.0, "specular": 0.5, "wrap": true, "direct_specular": 1.0, "ce_reflection": 1.0,
+  "multipurpose": { "specular_mask": true, "self_illumination": true, "reflection_tint": true } }
+```
+
+The images are KTX2 files of the mod's (a path in the mod's folder; the
+texture store reads them, as it reads the replacement textures, straight
+into the graphics card's memory, up to 8192 on a side, drawn once their
+levels from 256 texels down are in): the albedo (the base map's colours:
+it replaces texture 0's colour, its alpha, the stock base map's, kept),
+the normal (tangent space, red and green its x and y, y up the picture),
+the ORM (red the occlusion, green the roughness, blue the metal, as
+glTF's: the factors multiply them, and are the values without it), the
+emissive, the clear coat's mask (red) and a detail tile (red and green its
+normal's slopes, blue the cavity, alpha a roughness offset: the material
+overlay's packing, repeated `scale` times across the base map's
+coordinates). A shader the material overlay names too (`overlay.json`)
+takes the overlay's tiles as its finest detail; a surface map
+(`display.prism_surface_maps`) of a shader with a material is not drawn:
+the material's normal and occlusion are the shader's.
+
+The shader's draws are lit for each pixel by a GGX path: Lambert diffuse
+and GGX specular for the level's own lights as CE gives the model (its
+ambient, two distant and two point lights, or the enhanced dynamic lights,
+diffuse), the world's occlusion and the ORM's, and the shader's reflection
+cube at the level of the roughness, by the split sum, or (`ce_reflection`
+1) whole, as CE's shader adds it, so that the art's brightness holds; the
+clear coat is a second lobe on the vertices' normal (a visor's). CE's
+combiners still make the colour: they apply the shader's detail map,
+change colour, self-illumination, specular mask (`specular_mask`), its
+reflection tint and brightness (`reflection_tint`) and the fog, as the
+shader says. `specular` is the dielectric's reflectance (F0 0.08 times it),
+`wrap` keeps CE's translucent back light on the first distant light.
+
+Materials are drawn, not simulated: a network game's machines need not
+have the same ones, and nothing is sent between them. Only the Vulkan
+renderer draws them (Metal's draws the shaders as the Xbox did); the
+setting applies in a running game (`prism_set "materials pbr"`).
+`tools/prism_material_pack.py` makes a material's images (BC7) from
+pictures, and the Chief's armour and visor materials from the player's own
+prototype pictures (local only).
+
 ## Making a mod
 
 1. Get the tags you want to change as tag files. `invader-extract` extracts

@@ -144,6 +144,9 @@ struct xgpu_manifest
 
 /* FNV-1a, 64 bits: a pixel key's name, a draw's identity */
 uint64_t xgpu_manifest_hash(const void *data, size_t size, uint64_t hash);
+/* a draw's hash (its bytes; a stock draw's as before display.prism_materials'
+word in its pixel key) */
+uint64_t xgpu_manifest_draw_hash(const struct xgpu_manifest_draw *draw, uint64_t hash);
 #define XGPU_MANIFEST_HASH_START 14695981039346656037ULL
 
 /* reads a manifest; returns 1, or 0 with a message in error (the line) */
@@ -204,6 +207,10 @@ struct xgpu_draw_facts
 	shadows (a structure's lightmap pass: XGPU_PRISM_SHADOWS_CASCADED, lit
 	by its world position and normal) */
 	int prism_sun;
+	/* display.prism_materials: the material a mod gives the draw's shader
+	(nv2a_pixel_shader_key's material_pbr, xgpu.h; 0 none), lit for each
+	pixel as the overlay is */
+	int material_pbr;
 };
 
 /* what the facts make of the pipeline (xgpu_backend.h's XGPU_LIGHTING_*,
@@ -213,7 +220,7 @@ struct xgpu_draw_derived
 	uint8_t lighting, color_format, samples;
 	uint8_t alpha_test_samples, per_pixel_lighting, dynamic_lights, ambient_occlusion;
 	uint16_t hdr;
-	uint8_t material_overlay, lightmap_filter, prism_lighting;
+	uint8_t material_overlay, lightmap_filter, prism_lighting, material_pbr;
 };
 
 /* the pipeline the facts give a draw, lit as the settings light it, or

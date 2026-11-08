@@ -33,6 +33,7 @@ MB; a bitmap's pixels are read as they are drawn) */
 struct sound_permutation;
 struct bitmap_data;
 struct vertex_buffer;
+struct render_skinning;
 
 /* ---------- prototypes/PORT_MODS.C (the platform layer's: port_mods.h) */
 
@@ -140,6 +141,32 @@ struct shader;
 
 long mod_materials_update(boolean remove_all, boolean at_load);
 void mod_materials_tags_unloaded(void);
+
+/* ---------- prototypes/MOD_TEXTURES.C (display.prism_textures: the
+replacements the host draws, port/linux/vulkan/xgpu_texture_store.h) */
+
+long mod_textures_update(boolean remove_all, boolean at_load);
+void mod_textures_tags_unloaded(void);
+/* (main_game_render, once a frame) */
+void mod_textures_frame(void);
+
+/* ---------- prototypes/MOD_MESHES.C (display.prism_models: the meshes the
+host draws in place of models' parts, port/linux/vulkan/xgpu_mesh_store.h) */
+
+long mod_meshes_update(boolean remove_all, boolean at_load);
+void mod_meshes_tags_unloaded(void);
+/* (main_game_render, once a frame) */
+void mod_meshes_frame(void);
+/* (models.c's render_model, around its parts) the model drawn, its nodes'
+matrices sent where a mod's mesh replaces it; and the drawing done */
+void mod_meshes_model_begin(long model_index, struct render_skinning const *skinning, real level_of_detail_pixels,
+	unsigned long flags, long object_index);
+void mod_meshes_model_end(void);
+/* (models.c's render_model_parts, around an opaque, decal or shadow part's
+draws) the part the draws that follow are of; and none */
+void mod_meshes_part(short region_index, short permutation_index, short geometry_index, short part_index,
+	short shader_index);
+void mod_meshes_part_end(void);
 /* (rasterizer_xbox_models.c, around a model shader's draws) the shader's
 material overlay armed for the draws that follow, if a mod has one and
 display.prism_material_overlay is on (its base map and the draw's
@@ -156,5 +183,20 @@ void prism_light_window_begin(float const camera[3]);
 void prism_light_object_begin(long object_index);
 int prism_light_draw(float uniforms[][4], unsigned int *probes);
 int prism_light_wanted(void);
+
+/* ---------- prototypes/MOD_PBR.C (display.prism_materials: a mod's
+materials, xgpu.h's "PBR materials") */
+
+long mod_pbr_update(boolean remove_all, boolean at_load);
+void mod_pbr_tags_unloaded(void);
+/* (mod_textures.c, once a frame: TRUE if the materials were read again) */
+boolean mod_pbr_frame(void);
+/* (mod_textures.c) the images' files, and the store's ids of them */
+long mod_pbr_texture_count(void);
+long mod_pbr_texture_file(long index);
+void mod_pbr_textures_answered(unsigned long const *ids, long count);
+/* (mod_materials.c's draw_begin and draw_end) */
+boolean mod_pbr_draw_begin(struct shader const *shader);
+void mod_pbr_draw_end(void);
 
 #endif

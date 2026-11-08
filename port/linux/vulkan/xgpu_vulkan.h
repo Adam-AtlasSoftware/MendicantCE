@@ -186,6 +186,10 @@ struct xgpu_vulkan_capabilities
 	subgroup arithmetic in the fragment stage): xgpu_spirv_options
 	subgroups */
 	int subgroups;
+	/* display.prism_materials: the textures' set has the materials'
+	images too (XGPU_VULKAN_BINDING_MATERIAL on): where a pixel shader may
+	sample that many images */
+	int materials;
 };
 void xgpu_vulkan_capabilities(struct xgpu_vulkan_capabilities *capabilities);
 
@@ -235,9 +239,13 @@ enum
 	XGPU_VULKAN_FORMAT_RGBA32F,
 	/* two signed bytes (its distance-field scene's cascades) */
 	XGPU_VULKAN_FORMAT_RG8_SNORM,
-	/* BC5: two channels of BC4 blocks (PRISM's surface maps: the normal's
-	x and y; the occlusion and roughness) */
+	/* PRISM's texture store's replacements (xgpu_vulkan_store.c): BC1
+	without alpha, BC4 (one channel), BC5 (two: also the surface maps'
+	normal x and y, occlusion and roughness), BC7 */
+	XGPU_VULKAN_FORMAT_BC1_RGB,
+	XGPU_VULKAN_FORMAT_BC4,
 	XGPU_VULKAN_FORMAT_BC5,
+	XGPU_VULKAN_FORMAT_BC7,
 	XGPU_VULKAN_FORMAT_COUNT
 };
 
@@ -336,11 +344,80 @@ struct xgpu_vulkan_sampler_description
 	float min_lod;
 	/* ARGB, 8 bits each (address border) */
 	uint32_t border_color;
+	/* the least detailed level sampled (0: every level; without mip
+	levels, the first): the texture store's, whose levels below the stock
+	texture's are not sampled, and whose levels above the resident one
+	are not there yet (min_lod) */
+	float max_lod;
 };
 
 /* the sampler of a description, made the first time; VK_NULL_HANDLE if it
 cannot be */
 VkSampler xgpu_vulkan_sampler(const struct xgpu_vulkan_sampler_description *description);
+
+/* ---------- PRISM's texture store (xgpu_vulkan_store.c) */
+
+/* the device samples the format (XGPU_VULKAN_FORMAT_*) with linear
+filtering and copies into it */
+int xgpu_vulkan_format_sampled(uint8_t format);
+/* the device-local heaps' budget and what is used of them, in bytes
+(VK_EXT_memory_budget), or the largest's size and 0 without it; 0 if not
+known */
+int xgpu_vulkan_memory_budget(uint64_t *budget, uint64_t *usage);
+/* the number of the last submission the GPU has done */
+uint64_t xgpu_vulkan_completed(void);
+/* an image's memory, in bytes */
+uint64_t xgpu_vulkan_image_bytes(const struct xgpu_vulkan_image *image);
+/* a buffer the CPU writes and copies are made from, mapped (its
+address); VK_NULL_HANDLE if it cannot be made */
+VkBuffer xgpu_vulkan_staging_create(uint32_t size, void **mapped);
+/* rows of a level and layer (a cube's face) of an image, y to y + height,
+the whole width, copied from a buffer (bytes from offset, rows of blocks
+packed), in the stream's order: draws recorded before it see the old
+texels, draws after it the new ones. The buffer's bytes are read by the
+submission being recorded (xgpu_vulkan_serial). */
+void xgpu_vulkan_image_copy_from_buffer(struct xgpu_vulkan_image *image, uint32_t level, uint32_t layer, uint32_t y,
+	uint32_t width, uint32_t height, VkBuffer buffer, VkDeviceSize offset);
+
+/* ---------- PRISM's mesh store (xgpu_vulkan_meshes.c) */
+
+/* a mesh's buffer: its vertices (.pmesh VERT, read by the skinning), its
+32-bit indices (drawn), or a staging buffer the CPU writes them into
+(mapped: its address) */
+enum
+{
+	XGPU_VULKAN_MESH_BUFFER_REST,
+	XGPU_VULKAN_MESH_BUFFER_INDICES,
+	XGPU_VULKAN_MESH_BUFFER_STAGING,
+};
+struct xgpu_vulkan_mesh_buffer;
+struct xgpu_vulkan_range;
+/* NULL if it cannot be made */
+struct xgpu_vulkan_mesh_buffer *xgpu_vulkan_mesh_buffer_create(uint64_t size, int kind, void **mapped);
+/* after the work recorded so far */
+void xgpu_vulkan_mesh_buffer_destroy(struct xgpu_vulkan_mesh_buffer *buffer);
+/* its memory's bytes */
+uint64_t xgpu_vulkan_mesh_buffer_bytes(const struct xgpu_vulkan_mesh_buffer *buffer);
+VkBuffer xgpu_vulkan_mesh_buffer_handle(const struct xgpu_vulkan_mesh_buffer *buffer);
+/* bytes of one copied into another, in the early commands (before the
+submission's draws) */
+void xgpu_vulkan_mesh_buffer_copy(struct xgpu_vulkan_mesh_buffer *from, uint64_t from_offset,
+	struct xgpu_vulkan_mesh_buffer *to, uint64_t to_offset, uint64_t size);
+/* vertices first to first + count of a mesh's, skinned by bone_count bones
+(three rows of four each), in the early commands of the submission being
+recorded: 1 and the range of the skinned vertices (32 bytes each, the stock
+compressed model layout), read by that submission's draws; and with wide
+(not NULL) the range of the same vertices in the wide layout a material's
+draws read instead (32 bytes each: as the stock layout to byte 24, then uv0
+over the base map scale as two floats, unclamped, in place of the int16
+coordinates, nodes and weight); 0 where
+they cannot be (the skin ring full: drawn stock) */
+int xgpu_vulkan_mesh_skin(struct xgpu_vulkan_mesh_buffer *rest, uint32_t first, uint32_t count,
+	const float (*bones)[4], uint32_t bone_count, const float inverse_scale[2], struct xgpu_vulkan_range *skinned,
+	struct xgpu_vulkan_range *wide);
+void xgpu_vulkan_mesh_skin_statistics(uint64_t *dispatches, uint64_t *vertices, uint64_t *ring_full);
+/* the vertices skinned with their wide stream, all told */
+uint64_t xgpu_vulkan_mesh_skin_wide_vertices(void);
 
 /* ---------- shaders and pipelines */
 
@@ -516,6 +593,10 @@ enum
 /* (xgpu.h's XGPU_OVERLAY_BINDING and XGPU_OVERLAY_IMAGE_COUNT) */
 #define XGPU_VULKAN_BINDING_OVERLAY 4
 #define XGPU_VULKAN_OVERLAY_IMAGES 8
+/* (xgpu.h's XGPU_MATERIAL_BINDING and XGPU_MATERIAL_IMAGE_COUNT: past the
+overlay's images) */
+#define XGPU_VULKAN_BINDING_MATERIAL 12
+#define XGPU_VULKAN_MATERIAL_IMAGES 6
 
 /* a draw: its pipeline, topology and dynamic state; its vertices' bindings
 (those of bindings' bits) and indices (16-bit; buffer VK_NULL_HANDLE: none);
@@ -557,8 +638,16 @@ struct xgpu_vulkan_draw
 	material overlay") */
 	uint8_t material_overlay;
 	struct xgpu_vulkan_texture overlay[XGPU_VULKAN_OVERLAY_IMAGES];
+	/* display.prism_materials: its pixel shader reads a material's images
+	(the texture store's: albedo, normal, ORM, emissive, clear coat mask,
+	detail; none: a stand-in) at bindings XGPU_VULKAN_BINDING_MATERIAL on
+	(xgpu.h's "PBR materials"), the overlay's bindings written too */
+	uint8_t material;
+	struct xgpu_vulkan_texture material_images[XGPU_VULKAN_MATERIAL_IMAGES];
 	uint32_t count, first_index;
 	int32_t vertex_offset;
+	/* its indices: 0 16-bit, 1 32-bit (PRISM's mesh store's) */
+	uint8_t index_type;
 };
 
 #define XGPU_VULKAN_DRAW_GAME 0x80

@@ -337,6 +337,9 @@ struct xgpu_pixel_program
 	unsigned char lightmap_filter;
 	/* PRISM v2's model light (nv2a_pixel_shader_key's: xgpu.h) */
 	unsigned char prism_lighting;
+	/* display.prism_materials (nv2a_pixel_shader_key's: xgpu.h's "PBR
+	materials") */
+	unsigned char material_pbr;
 };
 
 /* the texture stage that replaces the fragment's depth, DOT_ZW (the game's

@@ -183,4 +183,5 @@ void nv2a_pixel_program_decode(const struct nv2a_pixel_shader_key *key, struct x
 	program->material_overlay = key->material_overlay;
 	program->lightmap_filter = key->lightmap_filter;
 	program->prism_lighting = key->prism_lighting;
+	program->material_pbr = key->material_pbr;
 }

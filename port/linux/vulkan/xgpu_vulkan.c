@@ -43,6 +43,7 @@ options' gamma) first, where the setting is not 1.
 #include "xgpu_vulkan_loading.h"
 #include "xgpu_vulkan_pacing.h"
 #include "xgpu_vulkan_post_shaders.h"
+#include "xgpu_vulkan_mesh_shaders.h"
 #include "host.h"
 #include "host_load_trace.h"
 #include "../src/loading_presentation.h"
@@ -76,6 +77,7 @@ options' gamma) first, where the setting is not 1.
 	F(vkEnumeratePhysicalDevices) F(vkGetPhysicalDeviceProperties) \
 	F(vkGetPhysicalDeviceFeatures2) F(vkGetPhysicalDeviceQueueFamilyProperties) \
 	F(vkGetPhysicalDeviceProperties2) F(vkGetPhysicalDeviceMemoryProperties) F(vkGetPhysicalDeviceFormatProperties) F(vkCreateDevice) \
+	F(vkGetPhysicalDeviceMemoryProperties2) \
 	F(vkGetDeviceProcAddr) F(vkEnumerateDeviceExtensionProperties) F(vkDestroyInstance)
 
 #define SURFACE_FUNCTIONS(F) \
@@ -105,7 +107,8 @@ options' gamma) first, where the setting is not 1.
 	F(vkCmdDraw) F(vkCmdDrawIndexed) F(vkCmdClearAttachments) F(vkCmdCopyBuffer) F(vkCmdCopyBufferToImage) \
 	F(vkCmdCopyImageToBuffer) F(vkCmdCopyImage) F(vkCmdBlitImage) F(vkCmdResolveImage) F(vkCmdClearColorImage) \
 	F(vkCmdClearDepthStencilImage) F(vkCmdBeginQuery) F(vkCmdEndQuery) F(vkCmdWriteTimestamp) \
-	F(vkCmdExecuteCommands)
+	F(vkCmdExecuteCommands) F(vkCreateComputePipelines) F(vkCmdDispatch) F(vkCmdPushConstants) \
+	F(vkFreeDescriptorSets)
 
 #define SWAPCHAIN_FUNCTIONS(F) \
 	F(vkCreateSwapchainKHR) F(vkDestroySwapchainKHR) F(vkGetSwapchainImagesKHR) F(vkAcquireNextImageKHR) \
@@ -268,14 +271,19 @@ struct garbage
 
 /* what a texture set has: the stages' images (and their numbers), kinds
 and samplers, as the draws name them (samplers are never destroyed), and
-the material overlay's after them (none: not written) */
-#define TEXTURE_SET_BINDINGS (4 + XGPU_VULKAN_OVERLAY_IMAGES)
+the material overlay's after them, then display.prism_materials' (none:
+not written; the materials' only where the device has them: the layout's
+bindings, vk.texture_bindings) */
+#define TEXTURE_SET_OVERLAY_BINDINGS (4 + XGPU_VULKAN_OVERLAY_IMAGES)
+#define TEXTURE_SET_BINDINGS (TEXTURE_SET_OVERLAY_BINDINGS + XGPU_VULKAN_MATERIAL_IMAGES)
+_Static_assert(XGPU_VULKAN_BINDING_MATERIAL == TEXTURE_SET_OVERLAY_BINDINGS, "the materials' bindings");
 struct texture_set_key
 {
 	struct xgpu_vulkan_image *images[TEXTURE_SET_BINDINGS];
 	uint64_t numbers[TEXTURE_SET_BINDINGS];
 	VkSampler samplers[TEXTURE_SET_BINDINGS];
 	uint8_t kinds[TEXTURE_SET_BINDINGS];
+	/* (1 the overlay's written, 3 the materials' too) */
 	uint8_t overlay;
 };
 
@@ -521,10 +529,15 @@ static struct
 		VkDeviceSize vertex_offsets[XGPU_VULKAN_BINDINGS];
 		VkBuffer indices;
 		VkDeviceSize index_offset;
+		/* (the draw's index_type: 16-bit, or the mesh store's 32-bit) */
+		uint8_t index_type;
 	} bound;
 	VkDescriptorSet bound_textures;
-	struct xgpu_vulkan_texture last_textures[4 + XGPU_VULKAN_OVERLAY_IMAGES];
+	struct xgpu_vulkan_texture last_textures[TEXTURE_SET_BINDINGS];
 	uint8_t last_overlay;
+	/* the textures' layout's bindings (TEXTURE_SET_OVERLAY_BINDINGS, or
+	TEXTURE_SET_BINDINGS with display.prism_materials) */
+	uint32_t texture_bindings;
 	VkDescriptorSet last_texture_set;
 	int last_texture_valid;
 
@@ -644,6 +657,8 @@ static struct
 	unsigned int display_surface_told;
 	float display_headroom_told, display_white_told;
 	int colorspaces, hdr_metadata;
+	/* VK_EXT_memory_budget (the texture store's budget) */
+	int memory_budget;
 	void (*display_hdr)(int hdr, float headroom, float white_nits, int white_reported);
 	struct xgpu_vulkan_image *(*encode)(struct xgpu_vulkan_image *image, const struct xgpu_hdr_frame *frame,
 		uint8_t format);
@@ -2272,7 +2287,10 @@ static VkFormat vulkan_format(uint8_t format)
 	case XGPU_VULKAN_FORMAT_RG32_UINT: return VK_FORMAT_R32G32_UINT;
 	case XGPU_VULKAN_FORMAT_RGBA32F: return VK_FORMAT_R32G32B32A32_SFLOAT;
 	case XGPU_VULKAN_FORMAT_RG8_SNORM: return VK_FORMAT_R8G8_SNORM;
+	case XGPU_VULKAN_FORMAT_BC1_RGB: return VK_FORMAT_BC1_RGB_UNORM_BLOCK;
+	case XGPU_VULKAN_FORMAT_BC4: return VK_FORMAT_BC4_UNORM_BLOCK;
 	case XGPU_VULKAN_FORMAT_BC5: return VK_FORMAT_BC5_UNORM_BLOCK;
+	case XGPU_VULKAN_FORMAT_BC7: return VK_FORMAT_BC7_UNORM_BLOCK;
 	default: return VK_FORMAT_UNDEFINED;
 	}
 }
@@ -2280,7 +2298,15 @@ static VkFormat vulkan_format(uint8_t format)
 static int format_blocks(uint8_t format)
 {
 	return format == XGPU_VULKAN_FORMAT_DXT1 || format == XGPU_VULKAN_FORMAT_DXT3 || format == XGPU_VULKAN_FORMAT_DXT5 ||
-		format == XGPU_VULKAN_FORMAT_ASTC || format == XGPU_VULKAN_FORMAT_BC5;
+		format == XGPU_VULKAN_FORMAT_ASTC || format == XGPU_VULKAN_FORMAT_BC1_RGB || format == XGPU_VULKAN_FORMAT_BC4 ||
+		format == XGPU_VULKAN_FORMAT_BC5 || format == XGPU_VULKAN_FORMAT_BC7;
+}
+
+/* a block format's block bytes: 8 for BC1 and BC4, else 16 */
+static uint32_t format_block_bytes(uint8_t format)
+{
+	return format == XGPU_VULKAN_FORMAT_DXT1 || format == XGPU_VULKAN_FORMAT_BC1_RGB || format == XGPU_VULKAN_FORMAT_BC4 ?
+		8 : 16;
 }
 
 static VkComponentSwizzle swizzle_of(uint32_t source)
@@ -2556,7 +2582,7 @@ void xgpu_vulkan_image_destroy(struct xgpu_vulkan_image *image)
 	}
 	if (vk.last_texture_valid)
 	{
-		for (index = 0; index < 4 + XGPU_VULKAN_OVERLAY_IMAGES; index++)
+		for (index = 0; index < TEXTURE_SET_BINDINGS; index++)
 		{
 			if (vk.last_textures[index].image == image)
 				vk.last_texture_valid = 0;
@@ -2637,7 +2663,7 @@ void xgpu_vulkan_image_upload(struct xgpu_vulkan_image *image, uint32_t level, u
 		description->format == XGPU_VULKAN_FORMAT_RGBA32_UINT || description->format == XGPU_VULKAN_FORMAT_RGBA32F ? 16 :
 		description->format == XGPU_VULKAN_FORMAT_RGBA16F || description->format == XGPU_VULKAN_FORMAT_RG32_UINT ? 8 : 4;
 	uint32_t rows = blocks ? (height + 3) / 4 : height;
-	uint32_t row_bytes = blocks ? (description->format == XGPU_VULKAN_FORMAT_DXT1 ? 8 : 16) * ((width + 3) / 4) :
+	uint32_t row_bytes = blocks ? format_block_bytes(description->format) * ((width + 3) / 4) :
 		width * texel;
 	uint32_t size, slice, row;
 	struct xgpu_vulkan_range range;
@@ -2717,6 +2743,101 @@ void xgpu_vulkan_image_make_levels(struct xgpu_vulkan_image *image, uint32_t fro
 		vkCmdBlitImage(commands, image->image, VK_IMAGE_LAYOUT_GENERAL, image->image, VK_IMAGE_LAYOUT_GENERAL, 1, &blit,
 			VK_FILTER_LINEAR);
 	}
+	transfer_done(commands);
+}
+
+/* ---------- PRISM's texture store */
+
+static int format_has(VkFormat format, int buffer, VkFormatFeatureFlags features);
+
+int xgpu_vulkan_format_sampled(uint8_t format)
+{
+	VkFormat vulkan = vulkan_format(format);
+
+	if (vulkan == VK_FORMAT_UNDEFINED || (format_blocks(format) && format != XGPU_VULKAN_FORMAT_ASTC &&
+		!vk.capabilities.block_compression) || (format == XGPU_VULKAN_FORMAT_ASTC && !vk.capabilities.astc))
+		return 0;
+	return format_has(vulkan, 0, VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT |
+		VK_FORMAT_FEATURE_TRANSFER_DST_BIT);
+}
+
+int xgpu_vulkan_memory_budget(uint64_t *budget, uint64_t *usage)
+{
+	uint32_t index;
+
+	*budget = *usage = 0;
+	if (!vk.device)
+		return 0;
+	if (vk.memory_budget && vkGetPhysicalDeviceMemoryProperties2)
+	{
+		VkPhysicalDeviceMemoryBudgetPropertiesEXT heaps;
+		VkPhysicalDeviceMemoryProperties2 properties;
+
+		memset(&heaps, 0, sizeof(heaps));
+		heaps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT;
+		memset(&properties, 0, sizeof(properties));
+		properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2;
+		properties.pNext = &heaps;
+		vkGetPhysicalDeviceMemoryProperties2(vk.physical, &properties);
+		for (index = 0; index < properties.memoryProperties.memoryHeapCount; index++)
+		{
+			if (!(properties.memoryProperties.memoryHeaps[index].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT))
+				continue;
+			*budget += heaps.heapBudget[index];
+			*usage += heaps.heapUsage[index];
+		}
+		return *budget != 0;
+	}
+	for (index = 0; index < vk.memory_properties.memoryHeapCount; index++)
+	{
+		if ((vk.memory_properties.memoryHeaps[index].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) &&
+			vk.memory_properties.memoryHeaps[index].size > *budget)
+			*budget = vk.memory_properties.memoryHeaps[index].size;
+	}
+	return *budget != 0;
+}
+
+uint64_t xgpu_vulkan_completed(void)
+{
+	return completed_serial();
+}
+
+uint64_t xgpu_vulkan_image_bytes(const struct xgpu_vulkan_image *image)
+{
+	return image ? image->memory.size : 0;
+}
+
+VkBuffer xgpu_vulkan_staging_create(uint32_t size, void **mapped)
+{
+	VkBuffer buffer = VK_NULL_HANDLE;
+	struct allocation memory;
+
+	*mapped = NULL;
+	memset(&memory, 0, sizeof(memory));
+	if (!buffer_make(size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, BUFFER_HOST, &buffer, &memory, mapped))
+		return VK_NULL_HANDLE;
+	return buffer;
+}
+
+void xgpu_vulkan_image_copy_from_buffer(struct xgpu_vulkan_image *image, uint32_t level, uint32_t layer, uint32_t y,
+	uint32_t width, uint32_t height, VkBuffer buffer, VkDeviceSize offset)
+{
+	VkCommandBuffer commands = upload_commands(image->used, 1);
+	VkBufferImageCopy copy;
+
+	image_use(image);
+	image_written(image);
+	memset(&copy, 0, sizeof(copy));
+	copy.bufferOffset = offset;
+	copy.imageSubresource.aspectMask = image->aspect;
+	copy.imageSubresource.mipLevel = level;
+	copy.imageSubresource.baseArrayLayer = layer;
+	copy.imageSubresource.layerCount = 1;
+	copy.imageOffset.y = (int32_t)y;
+	copy.imageExtent.width = width;
+	copy.imageExtent.height = height;
+	copy.imageExtent.depth = 1;
+	vkCmdCopyBufferToImage(commands, buffer, image->image, VK_IMAGE_LAYOUT_GENERAL, 1, &copy);
 	transfer_done(commands);
 }
 
@@ -3429,13 +3550,14 @@ VkSampler xgpu_vulkan_sampler(const struct xgpu_vulkan_sampler_description *desc
 	without mipmaps samples its base level whatever its least LOD) */
 	if (description->mip == XGPU_VULKAN_MIP_NONE)
 	{
-		info.minLod = 0.0f;
-		info.maxLod = 0.25f;
+		/* (the texture store's: its resident level alone) */
+		info.minLod = description->max_lod > 0.0f ? description->min_lod : 0.0f;
+		info.maxLod = description->max_lod > 0.0f ? description->max_lod : 0.25f;
 	}
 	else
 	{
 		info.minLod = description->min_lod;
-		info.maxLod = VK_LOD_CLAMP_NONE;
+		info.maxLod = description->max_lod > 0.0f ? description->max_lod : VK_LOD_CLAMP_NONE;
 	}
 	info.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
 	if (description->border_color == 0xff000000u)
@@ -4493,7 +4615,7 @@ static VkDescriptorPool descriptor_pool_get(void)
 		scenery's pages, the vehicles' fields' atlas and the occlusion found
 		once a pixel) */
 		sizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-		sizes[0].descriptorCount = SETS_A_POOL * TEXTURE_SET_BINDINGS;
+		sizes[0].descriptorCount = SETS_A_POOL * (vk.texture_bindings ? vk.texture_bindings : TEXTURE_SET_BINDINGS);
 		/* (display.hdr's input sets, where draws can read their colour
 		attachment) */
 		sizes[2].type = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT;
@@ -4777,9 +4899,13 @@ static void texture_set_remember(struct slot *slot, const struct texture_set_key
 /* the descriptor set of the stages' textures, and with overlay the material
 overlay's images after them (display.prism_material_overlay: bindings
 XGPU_VULKAN_BINDING_OVERLAY on; else those are not written, as no shader
-without it reads them): the last draw's, one written before in this
-submission (the game's draws come back to the same few), or a new one */
-static VkDescriptorSet texture_set(const struct xgpu_vulkan_texture textures[4], const struct xgpu_vulkan_texture *overlay)
+without it reads them), and with material the material's after those
+(display.prism_materials: XGPU_VULKAN_BINDING_MATERIAL on, the overlay's
+written too, stand-ins where there is none): the last draw's, one written
+before in this submission (the game's draws come back to the same few), or
+a new one */
+static VkDescriptorSet texture_set(const struct xgpu_vulkan_texture textures[4], const struct xgpu_vulkan_texture *overlay,
+	const struct xgpu_vulkan_texture *material)
 {
 	VkDescriptorImageInfo images[TEXTURE_SET_BINDINGS];
 	VkWriteDescriptorSet writes[TEXTURE_SET_BINDINGS];
@@ -4788,19 +4914,26 @@ static VkDescriptorSet texture_set(const struct xgpu_vulkan_texture textures[4],
 	struct texture_set_key key;
 	struct texture_set_entry *entry;
 	uint32_t bucket;
-	int stage, count = overlay ? TEXTURE_SET_BINDINGS : 4;
+	uint8_t written;
+	int stage, count;
 
+	if (material && vk.texture_bindings < TEXTURE_SET_BINDINGS)
+		material = NULL;
+	written = (uint8_t)(material ? 3 : overlay ? 1 : 0);
+	count = material ? TEXTURE_SET_BINDINGS : overlay ? TEXTURE_SET_OVERLAY_BINDINGS : 4;
 	memset(all, 0, sizeof(all));
 	memcpy(all, textures, 4 * sizeof(all[0]));
 	if (overlay)
 		memcpy(&all[4], overlay, XGPU_VULKAN_OVERLAY_IMAGES * sizeof(all[0]));
-	if (vk.last_texture_valid && vk.last_overlay == (overlay != NULL) &&
+	if (material)
+		memcpy(&all[TEXTURE_SET_OVERLAY_BINDINGS], material, XGPU_VULKAN_MATERIAL_IMAGES * sizeof(all[0]));
+	if (vk.last_texture_valid && vk.last_overlay == written &&
 		!memcmp(vk.last_textures, all, sizeof(vk.last_textures)))
 		return vk.last_texture_set;
 	/* (by the images' numbers too: a destroyed image's sets are never
 	found, even by an image made at its address) */
 	memset(&key, 0, sizeof(key));
-	key.overlay = overlay != NULL;
+	key.overlay = written;
 	for (stage = 0; stage < count; stage++)
 	{
 		key.images[stage] = all[stage].image;
@@ -4814,7 +4947,7 @@ static VkDescriptorSet texture_set(const struct xgpu_vulkan_texture textures[4],
 	{
 		/* (its images are marked used: it was written in this submission) */
 		memcpy(vk.last_textures, all, sizeof(vk.last_textures));
-		vk.last_overlay = overlay != NULL;
+		vk.last_overlay = written;
 		vk.last_texture_set = entry->set;
 		vk.last_texture_valid = 1;
 		vk.statistics.texture_sets_reused++;
@@ -4857,7 +4990,7 @@ static VkDescriptorSet texture_set(const struct xgpu_vulkan_texture textures[4],
 	vkUpdateDescriptorSets(vk.device, (uint32_t)count, writes, 0, NULL);
 	texture_set_remember(vk.slot, &key, bucket, set);
 	memcpy(vk.last_textures, all, sizeof(vk.last_textures));
-	vk.last_overlay = overlay != NULL;
+	vk.last_overlay = written;
 	vk.last_texture_set = set;
 	vk.last_texture_valid = 1;
 	vk.statistics.texture_sets_written++;
@@ -4891,7 +5024,8 @@ void xgpu_vulkan_draw(const struct xgpu_vulkan_draw *draw)
 		return;
 	/* (the texture set first: it may begin the recording) */
 	recording_begin();
-	sets[1] = texture_set(draw->textures, draw->material_overlay ? draw->overlay : NULL);
+	sets[1] = texture_set(draw->textures, draw->material_overlay || draw->material ? draw->overlay : NULL,
+		draw->material ? draw->material_images : NULL);
 	if (!sets[1])
 		return;
 	/* A draw that samples the depth attachment it is tested against (the
@@ -4918,6 +5052,9 @@ void xgpu_vulkan_draw(const struct xgpu_vulkan_draw *draw)
 		/* (and the material overlay's) */
 		for (index = 0; draw->material_overlay && index < XGPU_VULKAN_OVERLAY_IMAGES; index++)
 			image_use(draw->overlay[index].image);
+		/* (and the material's) */
+		for (index = 0; draw->material && index < XGPU_VULKAN_MATERIAL_IMAGES; index++)
+			image_use(draw->material_images[index].image);
 		/* (and the enhanced dynamic lights' cells, which the draws' set
 		names: no upload of them put aside before this pass) */
 		if (draw->dynamic_lights)
@@ -5103,11 +5240,14 @@ void xgpu_vulkan_draw(const struct xgpu_vulkan_draw *draw)
 	}
 	if (draw->indices.buffer)
 	{
-		if (vk.bound.indices != draw->indices.buffer || vk.bound.index_offset != draw->indices.offset)
+		if (vk.bound.indices != draw->indices.buffer || vk.bound.index_offset != draw->indices.offset ||
+			vk.bound.index_type != draw->index_type)
 		{
-			vkCmdBindIndexBuffer(commands, draw->indices.buffer, draw->indices.offset, VK_INDEX_TYPE_UINT16);
+			vkCmdBindIndexBuffer(commands, draw->indices.buffer, draw->indices.offset,
+				draw->index_type ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_UINT16);
 			vk.bound.indices = draw->indices.buffer;
 			vk.bound.index_offset = draw->indices.offset;
+			vk.bound.index_type = draw->index_type;
 		}
 		draw_times_draw(commands, draw, 0);
 		vkCmdDrawIndexed(commands, draw->count, 1, draw->first_index, draw->vertex_offset, 0);
@@ -5119,6 +5259,385 @@ void xgpu_vulkan_draw(const struct xgpu_vulkan_draw *draw)
 	}
 	draw_times_draw(commands, draw, 1);
 	vk.statistics.draws++;
+}
+
+/* ---------- PRISM's mesh store: buffers and skinning (xgpu_vulkan_meshes.c)
+
+A mesh's vertices and indices are device-local buffers filled from staging
+buffers of their own by copies in the early commands. Its skinning is a
+compute dispatch in the early commands of the submission whose draws read it
+(xgpu_vulkan_mesh_skin): the bones in the upload ring, the vertices written
+in the stock compressed layout into a device-local ring of its own, whose
+spans are given back as their submissions are done. One descriptor set per
+mesh's vertex buffer: its vertices, the upload ring and the skin ring, whole
+(the bones' and the skinned vertices' places are push constants). */
+
+#define SKIN_RING_SIZE (128ull << 20)
+#define SKIN_SPANS 64
+#define SKIN_DEAD_SETS 256
+
+struct xgpu_vulkan_mesh_buffer
+{
+	VkBuffer buffer;
+	struct allocation memory;
+	uint64_t size;
+	void *mapped;
+	int kind;
+	VkDescriptorSet set;
+};
+
+static struct
+{
+	int made, failed;
+	VkDescriptorSetLayout set_layout;
+	VkPipelineLayout layout;
+	VkPipeline pipeline;
+	VkDescriptorPool pool;
+	VkBuffer ring;
+	struct allocation ring_memory;
+	/* running positions: from free_from to head are a submission's still */
+	uint64_t head, free_from;
+	struct
+	{
+		uint64_t serial, end;
+	} spans[SKIN_SPANS];
+	uint32_t span_first, span_count;
+	/* sets let go of, freed once their submission is done */
+	struct
+	{
+		uint64_t serial;
+		VkDescriptorSet set;
+	} dead[SKIN_DEAD_SETS];
+	uint32_t dead_count;
+	uint64_t dispatches, vertices, ring_full;
+	/* vertices given the wide stream too */
+	uint64_t wide_vertices;
+} skin;
+
+static int skin_make(void)
+{
+	VkDescriptorSetLayoutBinding bindings[3];
+	VkDescriptorSetLayoutCreateInfo set_info;
+	VkPushConstantRange push;
+	VkPipelineLayoutCreateInfo layout_info;
+	VkComputePipelineCreateInfo pipeline_info;
+	VkDescriptorPoolSize sizes[1];
+	VkDescriptorPoolCreateInfo pool_info;
+	VkShaderModule module;
+	uint32_t index;
+
+	if (skin.made || skin.failed)
+		return skin.made;
+	skin.failed = 1;
+	memset(bindings, 0, sizeof(bindings));
+	for (index = 0; index < 3; index++)
+	{
+		bindings[index].binding = index;
+		bindings[index].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		bindings[index].descriptorCount = 1;
+		bindings[index].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+	}
+	memset(&set_info, 0, sizeof(set_info));
+	set_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	set_info.bindingCount = 3;
+	set_info.pBindings = bindings;
+	if (!check(vkCreateDescriptorSetLayout(vk.device, &set_info, NULL, &skin.set_layout), "vkCreateDescriptorSetLayout"))
+		return 0;
+	memset(&push, 0, sizeof(push));
+	push.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+	push.size = 28;
+	memset(&layout_info, 0, sizeof(layout_info));
+	layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+	layout_info.setLayoutCount = 1;
+	layout_info.pSetLayouts = &skin.set_layout;
+	layout_info.pushConstantRangeCount = 1;
+	layout_info.pPushConstantRanges = &push;
+	if (!check(vkCreatePipelineLayout(vk.device, &layout_info, NULL, &skin.layout), "vkCreatePipelineLayout"))
+		return 0;
+	module = xgpu_vulkan_shader_constant(xgpu_vulkan_mesh_skin_words, xgpu_vulkan_mesh_skin_count);
+	if (!module)
+		return 0;
+	memset(&pipeline_info, 0, sizeof(pipeline_info));
+	pipeline_info.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+	pipeline_info.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	pipeline_info.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	pipeline_info.stage.module = module;
+	pipeline_info.stage.pName = "main";
+	pipeline_info.layout = skin.layout;
+	if (!check(vkCreateComputePipelines(vk.device, VK_NULL_HANDLE, 1, &pipeline_info, NULL, &skin.pipeline),
+		"vkCreateComputePipelines"))
+		return 0;
+	sizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	sizes[0].descriptorCount = 3 * 512;
+	memset(&pool_info, 0, sizeof(pool_info));
+	pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+	pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+	pool_info.maxSets = 512;
+	pool_info.poolSizeCount = 1;
+	pool_info.pPoolSizes = sizes;
+	if (!check(vkCreateDescriptorPool(vk.device, &pool_info, NULL, &skin.pool), "vkCreateDescriptorPool"))
+		return 0;
+	memset(&skin.ring_memory, 0, sizeof(skin.ring_memory));
+	if (!buffer_make(SKIN_RING_SIZE, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+		BUFFER_DEVICE, &skin.ring, &skin.ring_memory, NULL))
+		return 0;
+	skin.failed = 0;
+	skin.made = 1;
+	host_logf(HOST_LOG_INFO, "meshstore: skinning made: a %llu MB ring of skinned vertices",
+		(unsigned long long)(SKIN_RING_SIZE >> 20));
+	return 1;
+}
+
+/* the sets whose submissions are done, freed */
+static void skin_dead_collect(void)
+{
+	uint64_t done = completed_serial();
+	uint32_t index = 0;
+
+	while (index < skin.dead_count)
+	{
+		if (skin.dead[index].serial <= done)
+		{
+			vkFreeDescriptorSets(vk.device, skin.pool, 1, &skin.dead[index].set);
+			skin.dead[index] = skin.dead[--skin.dead_count];
+			continue;
+		}
+		index++;
+	}
+}
+
+struct xgpu_vulkan_mesh_buffer *xgpu_vulkan_mesh_buffer_create(uint64_t size, int kind, void **mapped)
+{
+	struct xgpu_vulkan_mesh_buffer *made;
+	VkBufferUsageFlags usage = kind == XGPU_VULKAN_MESH_BUFFER_STAGING ? VK_BUFFER_USAGE_TRANSFER_SRC_BIT :
+		kind == XGPU_VULKAN_MESH_BUFFER_INDICES ? VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT :
+		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+
+	if (mapped)
+		*mapped = NULL;
+	if (!size || (kind == XGPU_VULKAN_MESH_BUFFER_REST && !skin_make()))
+		return NULL;
+	made = calloc(1, sizeof(*made));
+	if (!made)
+		return NULL;
+	made->size = size;
+	made->kind = kind;
+	if (!buffer_make(size, usage, kind == XGPU_VULKAN_MESH_BUFFER_STAGING ? BUFFER_HOST : BUFFER_DEVICE, &made->buffer,
+		&made->memory, &made->mapped))
+	{
+		free(made);
+		return NULL;
+	}
+	if (kind == XGPU_VULKAN_MESH_BUFFER_REST)
+	{
+		VkDescriptorSetAllocateInfo allocate;
+		VkDescriptorBufferInfo buffers[3];
+		VkWriteDescriptorSet writes[3];
+		uint32_t index;
+
+		skin_dead_collect();
+		memset(&allocate, 0, sizeof(allocate));
+		allocate.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+		allocate.descriptorPool = skin.pool;
+		allocate.descriptorSetCount = 1;
+		allocate.pSetLayouts = &skin.set_layout;
+		if (vkAllocateDescriptorSets(vk.device, &allocate, &made->set) != VK_SUCCESS)
+		{
+			struct garbage item;
+
+			memset(&item, 0, sizeof(item));
+			item.kind = _garbage_buffer;
+			item.serial = vk.serial;
+			item.buffer = made->buffer;
+			item.memory = made->memory;
+			garbage_add(&item);
+			free(made);
+			return NULL;
+		}
+		memset(buffers, 0, sizeof(buffers));
+		buffers[0].buffer = made->buffer;
+		buffers[0].range = VK_WHOLE_SIZE;
+		buffers[1].buffer = vk.ring;
+		buffers[1].range = VK_WHOLE_SIZE;
+		buffers[2].buffer = skin.ring;
+		buffers[2].range = VK_WHOLE_SIZE;
+		memset(writes, 0, sizeof(writes));
+		for (index = 0; index < 3; index++)
+		{
+			writes[index].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			writes[index].dstSet = made->set;
+			writes[index].dstBinding = index;
+			writes[index].descriptorCount = 1;
+			writes[index].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+			writes[index].pBufferInfo = &buffers[index];
+		}
+		vkUpdateDescriptorSets(vk.device, 3, writes, 0, NULL);
+	}
+	if (mapped)
+		*mapped = made->mapped;
+	return made;
+}
+
+void xgpu_vulkan_mesh_buffer_destroy(struct xgpu_vulkan_mesh_buffer *buffer)
+{
+	struct garbage item;
+
+	if (!buffer)
+		return;
+	/* (after the submission being recorded, which may read it) */
+	memset(&item, 0, sizeof(item));
+	item.kind = _garbage_buffer;
+	item.serial = vk.serial;
+	item.buffer = buffer->buffer;
+	item.memory = buffer->memory;
+	garbage_add(&item);
+	if (buffer->set)
+	{
+		skin_dead_collect();
+		if (skin.dead_count < SKIN_DEAD_SETS)
+		{
+			skin.dead[skin.dead_count].serial = vk.serial;
+			skin.dead[skin.dead_count].set = buffer->set;
+			skin.dead_count++;
+		}
+	}
+	free(buffer);
+}
+
+uint64_t xgpu_vulkan_mesh_buffer_bytes(const struct xgpu_vulkan_mesh_buffer *buffer)
+{
+	return buffer ? buffer->memory.size : 0;
+}
+
+VkBuffer xgpu_vulkan_mesh_buffer_handle(const struct xgpu_vulkan_mesh_buffer *buffer)
+{
+	return buffer ? buffer->buffer : VK_NULL_HANDLE;
+}
+
+void xgpu_vulkan_mesh_buffer_copy(struct xgpu_vulkan_mesh_buffer *from, uint64_t from_offset,
+	struct xgpu_vulkan_mesh_buffer *to, uint64_t to_offset, uint64_t size)
+{
+	VkCommandBuffer commands;
+	VkBufferCopy copy;
+
+	if (!from || !to || !size || from_offset + size > from->size || to_offset + size > to->size)
+		return;
+	commands = early_commands();
+	memset(&copy, 0, sizeof(copy));
+	copy.srcOffset = from_offset;
+	copy.dstOffset = to_offset;
+	copy.size = size;
+	vkCmdCopyBuffer(commands, from->buffer, to->buffer, 1, &copy);
+	transfer_done(commands);
+}
+
+/* bytes of the skin ring for the submission being recorded: its offset, or
+0 where the ring is full (nothing waited for) */
+static int skin_ring_take(uint64_t size, VkDeviceSize *offset)
+{
+	uint64_t done = completed_serial(), start;
+
+	while (skin.span_count && skin.spans[skin.span_first].serial <= done)
+	{
+		skin.free_from = skin.spans[skin.span_first].end;
+		skin.span_first = (skin.span_first + 1) % SKIN_SPANS;
+		skin.span_count--;
+	}
+	if (!skin.span_count)
+		skin.free_from = skin.head;
+	start = (skin.head + 255) & ~(uint64_t)255;
+	if (start % SKIN_RING_SIZE + size > SKIN_RING_SIZE)
+		start += SKIN_RING_SIZE - start % SKIN_RING_SIZE;
+	if (size > SKIN_RING_SIZE || start + size - skin.free_from > SKIN_RING_SIZE)
+		return 0;
+	if (skin.span_count && skin.spans[(skin.span_first + skin.span_count - 1) % SKIN_SPANS].serial == vk.serial)
+		skin.spans[(skin.span_first + skin.span_count - 1) % SKIN_SPANS].end = start + size;
+	else if (skin.span_count < SKIN_SPANS)
+	{
+		uint32_t last = (skin.span_first + skin.span_count) % SKIN_SPANS;
+
+		skin.spans[last].serial = vk.serial;
+		skin.spans[last].end = start + size;
+		skin.span_count++;
+	}
+	else
+		return 0;
+	skin.head = start + size;
+	*offset = start % SKIN_RING_SIZE;
+	return 1;
+}
+
+int xgpu_vulkan_mesh_skin(struct xgpu_vulkan_mesh_buffer *rest, uint32_t first, uint32_t count,
+	const float (*bones)[4], uint32_t bone_count, const float inverse_scale[2], struct xgpu_vulkan_range *skinned,
+	struct xgpu_vulkan_range *wide)
+{
+	struct xgpu_vulkan_range bone_range;
+	VkCommandBuffer commands;
+	VkDeviceSize output, wide_output = 0;
+	float *to;
+	struct
+	{
+		uint32_t first, count;
+		float inverse_scale[2];
+		uint32_t bone_base, out_base, wide_base;
+	} push;
+
+	if (!rest || !rest->set || !count || !bone_count || !skin.made ||
+		(uint64_t)(first + count) * 48 > rest->size || first + count < first)
+		return 0;
+	/* (the bones first: their upload may submit the recording) */
+	to = xgpu_vulkan_upload(bone_count * 48, 256, &bone_range);
+	if (!to || bone_range.buffer != vk.ring)
+		return 0;
+	memcpy(to, bones, (size_t)bone_count * 48);
+	/* (the stock layout's vertices, then the wide stream's where asked
+	for: one span of the ring) */
+	if (!skin_ring_take((uint64_t)count * (wide ? 64 : 32), &output))
+	{
+		skin.ring_full++;
+		return 0;
+	}
+	if (wide)
+		wide_output = output + (uint64_t)count * 32;
+	commands = early_commands();
+	barrier(commands, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
+		VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT);
+	vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, skin.pipeline);
+	vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, skin.layout, 0, 1, &rest->set, 0, NULL);
+	push.first = first;
+	push.count = count;
+	push.inverse_scale[0] = inverse_scale[0];
+	push.inverse_scale[1] = inverse_scale[1];
+	push.bone_base = (uint32_t)(bone_range.offset / 16);
+	push.out_base = (uint32_t)(output / 4);
+	push.wide_base = wide ? (uint32_t)(wide_output / 4) : 0xffffffffu;
+	vkCmdPushConstants(commands, skin.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
+	vkCmdDispatch(commands, (count + 63) / 64, 1, 1);
+	barrier(commands, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT,
+		VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT);
+	skin.dispatches++;
+	skin.vertices += count;
+	skinned->buffer = skin.ring;
+	skinned->offset = output;
+	if (wide)
+	{
+		wide->buffer = skin.ring;
+		wide->offset = wide_output;
+		skin.wide_vertices += count;
+	}
+	return 1;
+}
+
+void xgpu_vulkan_mesh_skin_statistics(uint64_t *dispatches, uint64_t *vertices, uint64_t *ring_full)
+{
+	*dispatches = skin.dispatches;
+	*vertices = skin.vertices;
+	*ring_full = skin.ring_full;
+}
+
+uint64_t xgpu_vulkan_mesh_skin_wide_vertices(void)
+{
+	return skin.wide_vertices;
 }
 
 /* ---------- submissions */
@@ -6967,6 +7486,10 @@ static int device_make(const struct xgpu_vulkan_options *options)
 		extensions[extension_count++] = VK_EXT_HDR_METADATA_EXTENSION_NAME;
 		vk.hdr_metadata = 1;
 	}
+	/* (the texture store's budget: what the device's memory has free) */
+	vk.memory_budget = device_has_extension(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
+	if (vk.memory_budget)
+		extensions[extension_count++] = VK_EXT_MEMORY_BUDGET_EXTENSION_NAME;
 	vk.present_wait = vk.display_timing = 0;
 	if ((vk.surface || vk.surface_create) && present_ids && available_id.presentId && available_wait.presentWait)
 	{
@@ -7035,6 +7558,13 @@ static int device_make(const struct xgpu_vulkan_options *options)
 	vk.capabilities.anisotropy = available.features.samplerAnisotropy ?
 		(uint32_t)vk.properties.limits.maxSamplerAnisotropy : 1;
 	vk.capabilities.block_compression = available.features.textureCompressionBC;
+	/* (display.prism_materials: the textures' set's 17 images, the lights'
+	cells and the occlusion's five a pixel shader may sample, each a
+	sampler and an image; block-compressed images, which the store's are) */
+	vk.capabilities.materials = available.features.textureCompressionBC &&
+		vk.properties.limits.maxPerStageDescriptorSamplers >= 24 &&
+		vk.properties.limits.maxPerStageDescriptorSampledImages >= 24 &&
+		vk.properties.limits.maxDescriptorSetSamplers >= 32 && getenv("HALO_MATERIALS_OFF") == NULL;
 	vk.capabilities.astc = available.features.textureCompressionASTC_LDR && format_has(VK_FORMAT_ASTC_4x4_UNORM_BLOCK, 0,
 		VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT |
 		VK_FORMAT_FEATURE_TRANSFER_DST_BIT);
@@ -7118,7 +7648,11 @@ static int layouts_make(void)
 		textures[index].descriptorCount = 1;
 		textures[index].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 	}
-	info.bindingCount = TEXTURE_SET_BINDINGS;
+	/* (display.prism_materials' images too, where a pixel shader may
+	sample them all: the textures' set's, the lights' cells and the
+	occlusion's five besides) */
+	vk.texture_bindings = vk.capabilities.materials ? TEXTURE_SET_BINDINGS : TEXTURE_SET_OVERLAY_BINDINGS;
+	info.bindingCount = vk.texture_bindings;
 	info.pBindings = textures;
 	if (!check(vkCreateDescriptorSetLayout(vk.device, &info, NULL, &vk.texture_layout), "vkCreateDescriptorSetLayout"))
 		return 0;
@@ -7638,8 +8172,9 @@ int xgpu_vulkan_initialize(const struct xgpu_vulkan_options *options)
 		if (vk.surface_create)
 			vkCreateSemaphore(vk.device, &semaphore, NULL, &vk.acquired[index]);
 	}
+	/* (and storage: the mesh store's bones, xgpu_vulkan_mesh_skin) */
 	if (!buffer_make(RING_SIZE, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
-		VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, 1, &vk.ring, &vk.ring_memory,
+		VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, 1, &vk.ring, &vk.ring_memory,
 		(void **)&vk.ring_mapped))
 		return 0;
 	memset(&queries, 0, sizeof(queries));

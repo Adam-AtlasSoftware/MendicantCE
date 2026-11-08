@@ -189,7 +189,7 @@ static uint32_t derived_used, derived_capacity;
 
 static int derived_new(const struct xgpu_manifest_draw *draw)
 {
-	uint64_t hash = xgpu_manifest_hash(draw, sizeof(*draw), XGPU_MANIFEST_HASH_START);
+	uint64_t hash = xgpu_manifest_draw_hash(draw, XGPU_MANIFEST_HASH_START);
 	uint32_t slot;
 
 	if (!hash)

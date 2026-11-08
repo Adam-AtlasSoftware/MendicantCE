@@ -844,11 +844,14 @@ enum
 	/* (display.prism_material_overlay: after it, declared by its pixel
 	shaders alone: declare_uniforms_overlay) */
 	U_MATERIAL_OVERLAY,
+	/* (display.prism_materials: after that, declared by its pixel shaders
+	alone: declare_uniforms_material) */
+	U_MATERIAL,
 };
 
 static void declare_uniforms_members(struct module *m, int count)
 {
-	static const unsigned long offsets[U_COUNT + 2] =
+	static const unsigned long offsets[U_COUNT + 3] =
 	{
 		offsetof(struct xgpu_spirv_uniforms, viewport_scale), offsetof(struct xgpu_spirv_uniforms, viewport_offset),
 		offsetof(struct xgpu_spirv_uniforms, point_size), offsetof(struct xgpu_spirv_uniforms, screen_offset),
@@ -865,8 +868,9 @@ static void declare_uniforms_members(struct module *m, int count)
 		offsetof(struct xgpu_spirv_uniforms, visibility_counter), offsetof(struct xgpu_spirv_uniforms, depth_bias),
 		offsetof(struct xgpu_spirv_uniforms, effect_unproject), offsetof(struct xgpu_spirv_uniforms, effect_eye),
 		offsetof(struct xgpu_spirv_uniforms, world_ao), offsetof(struct xgpu_spirv_uniforms, material_overlay),
+		offsetof(struct xgpu_spirv_uniforms, material),
 	};
-	unsigned int members[U_COUNT + 2], block;
+	unsigned int members[U_COUNT + 3], block;
 	int member;
 
 	for (member = 0; member < count; member++)
@@ -886,6 +890,7 @@ static void declare_uniforms_members(struct module *m, int count)
 		case U_SCREEN_CORRECTION: members[member] = block_array(m, 2); break;
 		case U_MODEL_LIGHTS: members[member] = block_array(m, XGPU_MODEL_LIGHT_COUNT); break;
 		case U_MATERIAL_OVERLAY: members[member] = block_array(m, XGPU_OVERLAY_UNIFORM_COUNT); break;
+		case U_MATERIAL: members[member] = block_array(m, XGPU_MATERIAL_UNIFORM_COUNT); break;
 		default: members[member] = m->t_v4; break;
 		}
 	}
@@ -915,6 +920,12 @@ world's) */
 static void declare_uniforms_overlay(struct module *m)
 {
 	declare_uniforms_members(m, U_COUNT + 2);
+}
+
+/* (and display.prism_materials', U_MATERIAL, after the overlay's) */
+static void declare_uniforms_material(struct module *m)
+{
+	declare_uniforms_members(m, U_COUNT + 3);
 }
 
 /* a member of the uniforms (an element of an array member): a float or a
@@ -1977,6 +1988,13 @@ struct pixel_state
 	unsigned int rebaked_direction;
 	/* (PRISM's sun shadows read: XGPU_PRISM_SHADOWS_CASCADED) */
 	BOOL prism_sun;
+	/* the overlay's frame (surface_frame), for display.prism_materials'
+	normal on top of the micro normal */
+	unsigned int frame_uv, frame_p, frame_tangent, frame_bitangent, frame_scale, frame_valid;
+	/* display.prism_materials (pbr_light): its images (0 not declared), and
+	the emissive light it adds to r0 after the general combiners (0 none) */
+	unsigned int material_images[XGPU_MATERIAL_IMAGE_COUNT];
+	unsigned int pbr_emissive;
 };
 
 static unsigned int pixel_input(struct module *m, struct pixel_state *state, unsigned int variable_id, unsigned int type)
@@ -4615,6 +4633,13 @@ static unsigned int combiners(struct module *m, struct pixel_state *state)
 
 	for (stage = 0; stage < (int)state->program->combiner_count && stage < 8; stage++)
 		combiner_stage(m, state, stage);
+	/* (display.prism_materials' emissive light, before the fog) */
+	if (state->pbr_emissive)
+	{
+		static const unsigned int rgb[4] = { 4, 5, 6, 3 };
+
+		state->r0 = shuffle(m, 4, state->r0, fadd(m, 3, xyz(m, state->r0), state->pbr_emissive), rgb);
+	}
 	if (!final->present)
 		return state->r0;
 	ef_product = vec4_of(m, fmul(m, 3, final_input(m, state, &final->inputs[4], FALSE, 0, 0),
@@ -5474,21 +5499,20 @@ static unsigned int prism_probe(struct module *m, struct pixel_state *state, uns
 	return ext3(m, GLSL_F_MIX, m->t_v3, c0, c1, splat(m, 3, w1));
 }
 
-static void overlay_light(struct module *m, struct pixel_state *state, BOOL point_lights, BOOL dynamic_lights,
-	unsigned int occlusion)
+/* a model draw's normal (normalize(xWorldNormal.xyz): n), texture 0's
+coordinates and the world position, and the frame (Schueler's cotangent
+frame of their screen-space derivatives: tangent, bitangent, the scale
+that makes the longer of them 1, and 1 where there is a frame, 0 where the
+coordinates do not change across the triangle), as the material overlay and
+display.prism_materials take them; kept in the state too */
+static void surface_frame(struct module *m, struct pixel_state *state, unsigned int normal, unsigned int *n_out,
+	unsigned int *uv_out, unsigned int *p_out, unsigned int *tangent_out, unsigned int *bitangent_out,
+	unsigned int *frame_scale_out, unsigned int *frame_out)
 {
-	const struct xgpu_pixel_program *program = state->program;
-	BOOL class_mask = (program->material_overlay & XGPU_OVERLAY_CLASS_MASK) != 0;
-	BOOL surface_only = (program->material_overlay & XGPU_OVERLAY_SURFACE_ONLY) != 0;
 	unsigned int one = constant_float(m, 1.0f), zero = constant_float(m, 0.0f);
-	unsigned int world_normal = pixel_input(m, state, state->in_world_normal, m->t_v4), normal = xyz(m, world_normal);
 	unsigned int n, uv, p, dp1, dp2, du1, du2, dp2p, dp1p, tangent, bitangent, frame_scale, frame;
-	unsigned int ov0 = overlay_uniform(m, 0), ov1 = overlay_uniform(m, 1), ov2 = overlay_uniform(m, 2);
-	unsigned int ov3 = overlay_uniform(m, 3), t2 = state->t[2];
-	unsigned int w, keep, slope, cavity, rough, nm, lit;
-	static const unsigned int rgb[4] = { 4, 5, 6, 3 };
 
-	/* overlay_n = normalize(xWorldNormal.xyz), the frame (no frame where
+	/* n = normalize(xWorldNormal.xyz), the frame (no frame where
 	the coordinates do not change across the triangle) */
 	n = fscale(m, 3, normal, ext1(m, GLSL_INVERSE_SQRT, m->t_float, fmax_scalar(m, 1, fdot(m, normal, normal),
 		(float)1.0e-24)));
@@ -5510,6 +5534,32 @@ static void overlay_light(struct module *m, struct pixel_state *state, BOOL poin
 	frame = op3(m, OP_SELECT, m->t_float, compare(m, OP_F_ORD_GREATER_THAN, ext1(m, GLSL_F_ABS, m->t_float,
 		fsub(m, 1, fmul(m, 1, extract(m, du1, 0), extract(m, du2, 1)), fmul(m, 1, extract(m, du1, 1), extract(m, du2, 0)))),
 		constant_float(m, (float)1.0e-14)), one, zero);
+	*n_out = n;
+	*uv_out = state->frame_uv = uv;
+	*p_out = state->frame_p = p;
+	*tangent_out = state->frame_tangent = tangent;
+	*bitangent_out = state->frame_bitangent = bitangent;
+	*frame_scale_out = state->frame_scale = frame_scale;
+	*frame_out = state->frame_valid = frame;
+}
+
+/* the micro normal, cavity and roughness, and the light of the draw (v0's
+rgb) by them: after texture stage 2 */
+static void overlay_light(struct module *m, struct pixel_state *state, BOOL point_lights, BOOL dynamic_lights,
+	unsigned int occlusion)
+{
+	const struct xgpu_pixel_program *program = state->program;
+	BOOL class_mask = (program->material_overlay & XGPU_OVERLAY_CLASS_MASK) != 0;
+	BOOL surface_only = (program->material_overlay & XGPU_OVERLAY_SURFACE_ONLY) != 0;
+	unsigned int one = constant_float(m, 1.0f), zero = constant_float(m, 0.0f);
+	unsigned int world_normal = pixel_input(m, state, state->in_world_normal, m->t_v4), normal = xyz(m, world_normal);
+	unsigned int n, uv, p, tangent, bitangent, frame_scale, frame;
+	unsigned int ov0 = overlay_uniform(m, 0), ov1 = overlay_uniform(m, 1), ov2 = overlay_uniform(m, 2);
+	unsigned int ov3 = overlay_uniform(m, 3), t2 = state->t[2];
+	unsigned int w, keep, slope, cavity, rough, nm, lit;
+	static const unsigned int rgb[4] = { 4, 5, 6, 3 };
+
+	surface_frame(m, state, normal, &n, &uv, &p, &tangent, &bitangent, &frame_scale, &frame);
 	/* the share kept: none where the excluded channel is above its
 	threshold (self-illuminated texels), the draw's fade */
 	keep = op3(m, OP_SELECT, m->t_float, compare(m, OP_F_ORD_GREATER_THAN, fdot(m, t2, ov2), extract(m, ov3, 0)), zero,
@@ -5783,6 +5833,340 @@ static unsigned int overlay_view(struct module *m, struct pixel_state *state, un
 	}
 }
 
+/* ---------- display.prism_materials (xgpu.h's "PBR materials")
+
+A model draw lit for each pixel whose shader a mod gives a material: its
+light found by a GGX path between texture stage 2 and stage 3, CE's
+combiners making the colour of it (the albedo in texture 0's place, the
+diffuse light in v0's, the specular light in texture 3's), as the material
+overlay's light is found there (and with the overlay too, its micro normal,
+cavity and roughness under the material's). */
+
+static void material_declare(struct module *m, struct pixel_state *state)
+{
+	static const char *const names[XGPU_MATERIAL_IMAGE_COUNT] = { "material_albedo", "material_normal", "material_orm",
+		"material_emissive", "material_clearcoat", "material_detail" };
+	int index;
+
+	for (index = 0; index < XGPU_MATERIAL_IMAGE_COUNT; index++)
+	{
+		if (!(state->program->material_pbr & XGPU_PBR_IMAGE(index)))
+			continue;
+		state->material_images[index] = variable(m, type_sampled_image(m, DIM_2D, FALSE, FALSE, TRUE),
+			STORAGE_UNIFORM_CONSTANT, names[index]);
+		decorate1(m, state->material_images[index], DECORATION_DESCRIPTOR_SET, XGPU_SPIRV_SET_TEXTURES);
+		decorate1(m, state->material_images[index], DECORATION_BINDING, XGPU_MATERIAL_BINDING + index);
+	}
+}
+
+static unsigned int material_uniform(struct module *m, int index)
+{
+	return uniform(m, U_MATERIAL, index);
+}
+
+/* texture(material_<image>, uv) */
+static unsigned int material_sample(struct module *m, struct pixel_state *state, int image, unsigned int uv)
+{
+	unsigned int sampled = load(m, type_sampled_image(m, DIM_2D, FALSE, FALSE, TRUE), state->material_images[image]);
+
+	return op2(m, OP_IMAGE_SAMPLE_IMPLICIT_LOD, m->t_v4, sampled, uv);
+}
+
+/* textureLod(tex3, direction, lod): the reflection cube */
+static unsigned int material_cube(struct module *m, struct pixel_state *state, unsigned int direction, unsigned int lod)
+{
+	unsigned int operands[4];
+
+	operands[0] = texture_load(m, state, 3);
+	operands[1] = direction;
+	operands[2] = IMAGE_OPERANDS_LOD;
+	operands[3] = lod;
+	return op(m, OP_IMAGE_SAMPLE_EXPLICIT_LOD, m->t_v4, 4, operands);
+}
+
+/* a light's GGX specular term, times pi (CE's lights are the Lambert
+term's radiance) and n.l: F * D * Vis * ndl * pi, as a vec3 of f0 (a vec3)
+or a float (f0_scalar: the clear coat's 0.04); n, v, l unit, ndl and ndv
+their dot products (clamped), a2 the roughness's alpha squared:
+D = a2 / (pi ((n.h)^2 (a2 - 1) + 1)^2),
+Vis = 0.5 / (ndl sqrt(ndv^2 (1 - a2) + a2) + ndv sqrt(ndl^2 (1 - a2) + a2)),
+F = f0 + (1 - f0) (1 - v.h)^5 */
+static unsigned int pbr_ggx(struct module *m, unsigned int n, unsigned int v, unsigned int l, unsigned int ndl,
+	unsigned int ndv, unsigned int a2, unsigned int f0, BOOL f0_scalar)
+{
+	unsigned int one = constant_float(m, 1.0f);
+	unsigned int h = ext1(m, GLSL_NORMALIZE, m->t_v3, fadd(m, 3, l, v));
+	unsigned int ndh = fmax_scalar(m, 1, fdot(m, n, h), 0.0f), vdh = fmax_scalar(m, 1, fdot(m, v, h), 0.0f);
+	unsigned int d = fadd(m, 1, fmul(m, 1, fmul(m, 1, ndh, ndh), fsub(m, 1, a2, one)), one);
+	unsigned int distribution = fdiv(m, 1, a2, fmax_scalar(m, 1, fmul(m, 1, d, d), 1.0e-7f));
+	unsigned int one_less = fsub(m, 1, one, a2);
+	unsigned int visibility = fdiv(m, 1, constant_float(m, 0.5f), fmax_scalar(m, 1, fadd(m, 1,
+		fmul(m, 1, ndl, ext1(m, GLSL_SQRT, m->t_float, fadd(m, 1, fmul(m, 1, fmul(m, 1, ndv, ndv), one_less), a2))),
+		fmul(m, 1, ndv, ext1(m, GLSL_SQRT, m->t_float, fadd(m, 1, fmul(m, 1, fmul(m, 1, ndl, ndl), one_less), a2)))),
+		1.0e-5f));
+	unsigned int edge = ext2(m, GLSL_POW, m->t_float, fmax_scalar(m, 1, fsub(m, 1, one, vdh), 0.0f), constant_float(m, 5.0f));
+	/* (the 1 / pi of D cancels the pi CE's lights carry) */
+	unsigned int term = fmul(m, 1, fmul(m, 1, distribution, visibility), ndl);
+
+	if (f0_scalar)
+		return splat(m, 3, fmul(m, 1, term, fadd(m, 1, f0, fmul(m, 1, fsub(m, 1, one, f0), edge))));
+	return fscale(m, 3, fadd(m, 3, f0, fscale(m, 3, fsub(m, 3, constant_splat(m, 3, 1.0f), f0), edge)), term);
+}
+
+/* the material's light: after texture stage 2, before stage 3 (whose
+reflection it makes where stage 3 is the reflection cube: its return) */
+static BOOL pbr_light(struct module *m, struct pixel_state *state, BOOL overlay, BOOL point_lights, BOOL dynamic_lights,
+	unsigned int occlusion)
+{
+	const struct xgpu_pixel_program *program = state->program;
+	unsigned int flags = program->material_pbr;
+	BOOL cube = program->stages[3].mode == XGPU_TEXTURE_CUBEMAP && program->stages[3].sampler == _xgpu_sampler_cube;
+	unsigned int one = constant_float(m, 1.0f), zero = constant_float(m, 0.0f);
+	unsigned int world_normal, normal, n, uv, p, tangent, bitangent, frame_scale, frame, base, cavity, rough_offset;
+	unsigned int u0, u1, u2, u3, u4, u5, u6, u7, u8, slope, ao, rough, metal, a2, albedo, t0, v, nm, ndv, f0;
+	unsigned int diffuse, specular, facing, l, ndl, wrapped, light, environment, reflected, k;
+	static const unsigned int rgb[4] = { 4, 5, 6, 3 };
+	int index;
+
+	/* the frame, and the overlay's micro normal, cavity and roughness
+	where it has them (its light, which it puts in v0, is replaced below) */
+	if (overlay)
+	{
+		overlay_light(m, state, point_lights, dynamic_lights, occlusion);
+		n = state->overlay_n;
+		uv = state->frame_uv;
+		p = state->frame_p;
+		tangent = state->frame_tangent;
+		bitangent = state->frame_bitangent;
+		frame_scale = state->frame_scale;
+		frame = state->frame_valid;
+		base = state->overlay_nm;
+		cavity = state->overlay_cavity;
+		rough_offset = state->overlay_rough;
+	}
+	else
+	{
+		world_normal = pixel_input(m, state, state->in_world_normal, m->t_v4);
+		normal = xyz(m, world_normal);
+		surface_frame(m, state, normal, &n, &uv, &p, &tangent, &bitangent, &frame_scale, &frame);
+		base = n;
+		cavity = one;
+		rough_offset = zero;
+	}
+	u0 = material_uniform(m, 0);
+	u1 = material_uniform(m, 1);
+	u2 = material_uniform(m, 2);
+	u3 = material_uniform(m, 3);
+	u4 = material_uniform(m, 4);
+	u5 = material_uniform(m, 5);
+	u6 = material_uniform(m, 6);
+	u7 = material_uniform(m, 7);
+	u8 = material_uniform(m, 8);
+	slope = constant_splat(m, 2, 0.0f);
+	/* the normal map's slope (xy / z, z at least 0.09), by its strength
+	and whether it is resident */
+	if (flags & XGPU_PBR_NORMAL)
+	{
+		unsigned int texel = material_sample(m, state, XGPU_MATERIAL_IMAGE_NORMAL, uv);
+		unsigned int sxy = fsub(m, 2, fscale(m, 2, xy(m, texel), constant_float(m, 2.0f)), constant_splat(m, 2, 1.0f));
+		unsigned int sz = ext1(m, GLSL_SQRT, m->t_float, fmax_scalar(m, 1, fsub(m, 1, one, fdot(m, sxy, sxy)), 0.0081f));
+
+		slope = fscale(m, 2, sxy, fdiv(m, 1, fmul(m, 1, extract(m, u1, 3), extract(m, u5, 1)), sz));
+	}
+	/* the occlusion, roughness and metal (glTF's: the factors times the
+	ORM's, the factors alone where it is not resident) */
+	ao = one;
+	rough = extract(m, u2, 0);
+	metal = extract(m, u2, 1);
+	if (flags & XGPU_PBR_ORM)
+	{
+		unsigned int texel = material_sample(m, state, XGPU_MATERIAL_IMAGE_ORM, uv), w = extract(m, u5, 2);
+
+		ao = ext3(m, GLSL_F_MIX, m->t_float, one, extract(m, texel, 0), fmul(m, 1, w, extract(m, u2, 2)));
+		rough = fmul(m, 1, rough, ext3(m, GLSL_F_MIX, m->t_float, one, extract(m, texel, 1), w));
+		metal = fmul(m, 1, metal, ext3(m, GLSL_F_MIX, m->t_float, one, extract(m, texel, 2), w));
+	}
+	metal = saturate(m, 1, metal);
+	/* the detail tile (packed as the overlay's tiles), at its scale, where
+	its mask says (all, metal, dielectric), faded as its tiles shrink on the
+	screen (32 to 8 pixels a tile) */
+	if (flags & XGPU_PBR_DETAIL)
+	{
+		unsigned int tile_uv = fscale(m, 2, uv, extract(m, u4, 0));
+		unsigned int texel = material_sample(m, state, XGPU_MATERIAL_IMAGE_DETAIL, tile_uv);
+		unsigned int masks = construct(m, 3, (const unsigned int[]){ one, metal, fsub(m, 1, one, metal) });
+		unsigned int mask = fmul(m, 1, fdot(m, xyz(m, u8), masks), extract(m, u6, 1));
+		unsigned int fade = overlay_footprint(m, mask, tile_uv, constant_float(m, -5.0f), constant_float(m, -3.0f));
+
+		slope = fadd(m, 2, slope, fscale(m, 2, fsub(m, 2, fscale(m, 2, xy(m, texel), constant_float(m, 2.0f)),
+			constant_splat(m, 2, 1.0f)), fmul(m, 1, extract(m, u4, 1), fade)));
+		cavity = fmul(m, 1, cavity, fmax_scalar(m, 1, fadd(m, 1, one, fmul(m, 1, fsub(m, 1, fmul(m, 1, extract(m, texel, 2),
+			constant_float(m, 2.0f)), one), fmul(m, 1, extract(m, u4, 2), fade))), 0.0f));
+		rough_offset = fadd(m, 1, rough_offset, fmul(m, 1, fsub(m, 1, extract(m, texel, 3), constant_float(m, 0.5f)),
+			fmul(m, 1, extract(m, u4, 3), fade)));
+	}
+	/* the normal: the micro normal (or the vertices') bent by the slopes
+	in the frame (their y up the pictures: against v) */
+	if (flags & (XGPU_PBR_NORMAL | XGPU_PBR_DETAIL))
+		nm = ext1(m, GLSL_NORMALIZE, m->t_v3, fadd(m, 3, base, fscale(m, 3, fsub(m, 3,
+			fscale(m, 3, tangent, extract(m, slope, 0)), fscale(m, 3, bitangent, extract(m, slope, 1))),
+			fmul(m, 1, frame_scale, frame))));
+	else
+		nm = base;
+	rough = ext3(m, GLSL_F_CLAMP, m->t_float, fadd(m, 1, rough, rough_offset), constant_float(m, 0.045f), one);
+	ao = fmul(m, 1, ao, cavity);
+	a2 = fmul(m, 1, fmul(m, 1, rough, rough), fmul(m, 1, rough, rough));
+	/* the albedo, in texture 0's colour (its alpha kept: CE's alpha test
+	and blend), tinted by its factor */
+	t0 = state->t[0];
+	albedo = xyz(m, t0);
+	if (flags & XGPU_PBR_ALBEDO)
+		albedo = ext3(m, GLSL_F_MIX, m->t_v3, albedo, xyz(m, material_sample(m, state, XGPU_MATERIAL_IMAGE_ALBEDO, uv)),
+			splat(m, 3, extract(m, u5, 0)));
+	albedo = fmul(m, 3, albedo, xyz(m, u0));
+	state->t[0] = shuffle(m, 4, t0, albedo, rgb);
+	/* the view: the reflection texture 3's coordinates hold, reflected back
+	(the overlay's), else along the normal */
+	if (cube)
+	{
+		unsigned int r = xyz(m, pixel_input(m, state, state->in_t[3], m->t_v4));
+
+		v = ext1(m, GLSL_NORMALIZE, m->t_v3, fsub(m, 3, fscale(m, 3, n, fmul(m, 1, constant_float(m, 2.0f), fdot(m, r, n))), r));
+	}
+	else
+	{
+		v = n;
+	}
+	ndv = fmax_scalar(m, 1, fdot(m, nm, v), 1.0e-4f);
+	f0 = ext3(m, GLSL_F_MIX, m->t_v3, splat(m, 3, extract(m, u3, 2)), albedo, splat(m, 3, metal));
+	/* the ambient (by the occlusion) and the distant lights, the first
+	with CE's translucency on its back where the material keeps CE's wrap */
+	l = fneg(m, 3, xyz(m, uniform(m, U_MODEL_LIGHTS, 7)));
+	facing = fdot(m, nm, l);
+	ndl = fmax_scalar(m, 1, facing, 0.0f);
+	wrapped = ext3(m, GLSL_F_MIX, m->t_float, ndl, fmax_scalar(m, 1, ext2(m, GLSL_F_MAX, m->t_float, facing,
+		fmul(m, 1, fneg(m, 1, facing), extract(m, uniform(m, U_MODEL_LIGHTS, 0), 2))), 0.0f), extract(m, u3, 3));
+	light = xyz(m, uniform(m, U_MODEL_LIGHTS, 8));
+	/* (its share by PRISM's sun shadows or PRISM v2's traced ones, as the
+	overlay's light takes them: the overlay's own, else the sun's maps) */
+	if (overlay && (state->prism_cascades || state->prism_sun))
+		light = fscale(m, 3, light, state->prism_shadow);
+	else if (!overlay && state->prism_sun)
+		light = fscale(m, 3, light, prism_sun_model(m, state, p, n));
+	diffuse = fscale(m, 3, light, wrapped);
+	specular = fmul(m, 3, light, pbr_ggx(m, nm, v, l, ndl, ndv, a2, f0, FALSE));
+	l = fneg(m, 3, xyz(m, uniform(m, U_MODEL_LIGHTS, 9)));
+	ndl = fmax_scalar(m, 1, fdot(m, nm, l), 0.0f);
+	light = xyz(m, uniform(m, U_MODEL_LIGHTS, 10));
+	diffuse = fadd(m, 3, diffuse, fscale(m, 3, light, ndl));
+	specular = fadd(m, 3, specular, fmul(m, 3, light, pbr_ggx(m, nm, v, l, ndl, ndv, a2, f0, FALSE)));
+	diffuse = fadd(m, 3, diffuse, fscale(m, 3, xyz(m, uniform(m, U_MODEL_LIGHTS, 11)), ao));
+	/* (display.ambient_occlusion: the level's light about the model by the
+	world's occlusion, not the point lights') */
+	if (occlusion)
+	{
+		diffuse = fscale(m, 3, diffuse, occlusion);
+		specular = fscale(m, 3, specular, occlusion);
+	}
+	/* the point lights, CE's falloff and cone */
+	for (index = 0; point_lights && !dynamic_lights && index < 2; index++)
+	{
+		int first = 1 + index * 3;
+		unsigned int first_light = uniform(m, U_MODEL_LIGHTS, first), cone = uniform(m, U_MODEL_LIGHTS, first + 1);
+		unsigned int color = uniform(m, U_MODEL_LIGHTS, first + 2);
+		unsigned int to_light = fsub(m, 3, xyz(m, first_light), p);
+		unsigned int distance_squared = fdot(m, to_light, to_light);
+		unsigned int towards = fscale(m, 3, to_light, ext1(m, GLSL_INVERSE_SQRT, m->t_float,
+			fmax_scalar(m, 1, distance_squared, (float)1.0e-12)));
+		unsigned int falloff = fmul(m, 1, fmax_scalar(m, 1, fsub(m, 1, one, fmul(m, 1, distance_squared,
+			extract(m, first_light, 3))), 0.0f), saturate(m, 1, fadd(m, 1, fmul(m, 1, fdot(m, towards, fneg(m, 3, xyz(m, cone))),
+			extract(m, cone, 3)), extract(m, color, 3))));
+		unsigned int point_ndl = saturate(m, 1, fdot(m, towards, nm));
+		unsigned int lit = fscale(m, 3, xyz(m, color), falloff);
+
+		diffuse = fadd(m, 3, diffuse, fscale(m, 3, lit, point_ndl));
+		specular = fadd(m, 3, specular, fmul(m, 3, lit, pbr_ggx(m, nm, v, towards, point_ndl, ndv, a2, f0, FALSE)));
+	}
+	if (dynamic_lights)
+		diffuse = dynamic_light_add(m, diffuse, dynamic_light_sum(m, state, p, nm, nm, FALSE), FALSE);
+	specular = fscale(m, 3, specular, extract(m, u7, 3));
+	/* the reflection cube at the reflection about the normal, at the level
+	of the roughness, by Karis's analytic split sum:
+	r = rough * (-1, -0.0275, -0.572, 0.022) + (1, 0.0425, 1.04, -0.04),
+	a = min(r.x^2, exp2(-9.28 ndv)) r.x + r.y, (A, B) = (-1.04, 1.04) a + r.zw */
+	environment = constant_v4(m, 0.0f, 0.0f, 0.0f, 1.0f);
+	if (cube)
+	{
+		unsigned int direction = fsub(m, 3, fscale(m, 3, nm, fmul(m, 1, constant_float(m, 2.0f), fdot(m, nm, v))), v);
+		unsigned int r = fadd(m, 4, fscale(m, 4, constant_v4(m, -1.0f, -0.0275f, -0.572f, 0.022f), rough),
+			constant_v4(m, 1.0f, 0.0425f, 1.04f, -0.04f));
+		unsigned int rx = extract(m, r, 0);
+		unsigned int a = fadd(m, 1, fmul(m, 1, ext2(m, GLSL_F_MIN, m->t_float, fmul(m, 1, rx, rx),
+			ext1(m, GLSL_EXP2, m->t_float, fmul(m, 1, constant_float(m, -9.28f), ndv))), rx), extract(m, r, 1));
+		unsigned int scale = fadd(m, 1, fmul(m, 1, constant_float(m, -1.04f), a), extract(m, r, 2));
+		unsigned int bias = fadd(m, 1, fmul(m, 1, constant_float(m, 1.04f), a), extract(m, r, 3));
+
+		environment = material_cube(m, state, direction, fmul(m, 1, rough, extract(m, u6, 2)));
+		/* (CE's own reflection, the cube as its shader adds it, mixed in by
+		[8].w: the art's brightness kept where the material asks) */
+		reflected = fmul(m, 3, xyz(m, environment), ext3(m, GLSL_F_MIX, m->t_v3, fadd(m, 3, fscale(m, 3, f0, scale),
+			splat(m, 3, bias)), constant_splat(m, 3, 1.0f), splat(m, 3, extract(m, u8, 3))));
+		specular = fadd(m, 3, specular, fscale(m, 3, reflected, fmul(m, 1, ao, extract(m, u2, 3))));
+	}
+	/* the clear coat: a lobe on the vertices' normal, F0 0.04, over the
+	rest by its Fresnel */
+	k = one;
+	if (flags & XGPU_PBR_CLEARCOAT_LOBE)
+	{
+		unsigned int coat = extract(m, u3, 0), coat_rough = fmax_scalar(m, 1, extract(m, u3, 1), 0.02f);
+		unsigned int coat_a2 = fmul(m, 1, fmul(m, 1, coat_rough, coat_rough), fmul(m, 1, coat_rough, coat_rough));
+		unsigned int coat_ndv = fmax_scalar(m, 1, fdot(m, n, v), 1.0e-4f), fresnel, coat_l, coat_ndl, lit;
+		unsigned int f004 = constant_float(m, 0.04f);
+
+		if (flags & XGPU_PBR_CLEARCOAT)
+			coat = fmul(m, 1, coat, ext3(m, GLSL_F_MIX, m->t_float, one, extract(m, material_sample(m, state,
+				XGPU_MATERIAL_IMAGE_CLEARCOAT, uv), 0), extract(m, u6, 0)));
+		fresnel = fmul(m, 1, coat, fadd(m, 1, f004, fmul(m, 1, constant_float(m, 0.96f),
+			ext2(m, GLSL_POW, m->t_float, fsub(m, 1, one, coat_ndv), constant_float(m, 5.0f)))));
+		k = fsub(m, 1, one, fresnel);
+		coat_l = fneg(m, 3, xyz(m, uniform(m, U_MODEL_LIGHTS, 7)));
+		coat_ndl = fmax_scalar(m, 1, fdot(m, n, coat_l), 0.0f);
+		lit = fscale(m, 3, fmul(m, 3, xyz(m, uniform(m, U_MODEL_LIGHTS, 8)),
+			pbr_ggx(m, n, v, coat_l, coat_ndl, coat_ndv, coat_a2, f004, TRUE)), coat);
+		if (cube)
+		{
+			unsigned int direction = fsub(m, 3, fscale(m, 3, n, fmul(m, 1, constant_float(m, 2.0f), coat_ndv)), v);
+
+			lit = fadd(m, 3, lit, fscale(m, 3, xyz(m, material_cube(m, state, direction, fmul(m, 1, coat_rough,
+				extract(m, u6, 2)))), fresnel));
+		}
+		specular = fadd(m, 3, fscale(m, 3, specular, k), lit);
+	}
+	/* the diffuse light into v0 (the combiners multiply it by the albedo and
+	CE's change colour, and add CE's self-illumination to it), the specular
+	into texture 3 (CE's specular mask and tint on it, as the material says) */
+	state->v0 = shuffle(m, 4, state->v0, saturate(m, 3, fscale(m, 3, diffuse, fmul(m, 1, fsub(m, 1, one, metal), k))), rgb);
+	if (cube)
+		state->t[3] = shuffle(m, 4, environment, saturate(m, 3, specular), rgb);
+	/* CE's masks: the specular (multipurpose red) kept or 1, the
+	self-illumination (green) kept or none; CE's reflection tint and
+	brightness (v1) kept or 1 */
+	{
+		unsigned int t2 = state->t[2];
+
+		t2 = op3(m, OP_COMPOSITE_INSERT, m->t_v4, ext3(m, GLSL_F_MIX, m->t_float, one, extract(m, t2, 0),
+			extract(m, u7, 0)), t2, 0);
+		t2 = op3(m, OP_COMPOSITE_INSERT, m->t_v4, fmul(m, 1, extract(m, t2, 1), extract(m, u7, 1)), t2, 1);
+		state->t[2] = t2;
+		state->v1 = ext3(m, GLSL_F_MIX, m->t_v4, constant_splat(m, 4, 1.0f), state->v1, splat(m, 4, extract(m, u7, 2)));
+	}
+	/* the emissive light, added to r0 after the general combiners */
+	if (flags & XGPU_PBR_EMISSIVE)
+		state->pbr_emissive = fscale(m, 3, fmul(m, 3, xyz(m, material_sample(m, state, XGPU_MATERIAL_IMAGE_EMISSIVE, uv)),
+			xyz(m, u1)), extract(m, u5, 3));
+	return cube;
+}
+
 BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const struct xgpu_spirv_options *options,
 	struct xgpu_spirv_module *module)
 {
@@ -5814,8 +6198,10 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	BOOL sun = XGPU_PRISM_SHADOWS_OF(program->prism_lighting) == XGPU_PRISM_SHADOWS_CASCADED;
 	BOOL sun_lightmap = sun && !overlay && !program->per_pixel_lighting;
 	BOOL sun_model = sun && !overlay && program->per_pixel_lighting;
+	/* (display.prism_materials: alike, by its GGX path) */
+	BOOL pbr = (program->material_pbr & XGPU_PBR_ON) && program->per_pixel_lighting && !environment;
 	BOOL world_position = (program->per_pixel_lighting && (program->per_pixel_lighting == 2 ||
-		program->dynamic_lights == XGPU_DYNAMIC_LIGHTS_MODEL)) || environment || world || overlay || sun_lightmap || sun_model;
+		program->dynamic_lights == XGPU_DYNAMIC_LIGHTS_MODEL)) || environment || world || overlay || sun_lightmap || sun_model || pbr;
 	BOOL count_samples = program->count_samples && options->count_samples;
 	unsigned int comparison = program->alpha_test ? comparison_opcode(program->alpha_test) : 0;
 	BOOL sample_mask = comparison && program->alpha_test_samples && program->alpha_test != D3DCMP_EQUAL &&
@@ -5838,7 +6224,9 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	state.program = program;
 	state.options = options;
 	module_begin(&m, EXECUTION_MODEL_FRAGMENT);
-	if (overlay)
+	if (pbr)
+		declare_uniforms_material(&m);
+	else if (overlay)
 		declare_uniforms_overlay(&m);
 	else if (world)
 		declare_uniforms_world(&m);
@@ -5870,6 +6258,8 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 		if (XGPU_PRISM_SHADOWS_TRACES(program->prism_lighting))
 			state.prism_cascades = world_cascades_declare(&m);
 	}
+	if (pbr)
+		material_declare(&m, &state);
 	if (effect)
 		effect_declare(&m, &state);
 	else if (replaces_depth)
@@ -5897,7 +6287,9 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	if (sun && (overlay || sun_lightmap || sun_model))
 	{
 		prism_sun_declare(&m, &state);
-		state.prism_sun = overlay;
+		/* (read by the overlay's light, and by the GGX path's: a material's
+		model with or without the overlay) */
+		state.prism_sun = overlay || (pbr && sun_model);
 	}
 	/* (display.prism_lightmaps: its dither's pixel) */
 	if ((lightmap_smoothed(program, options) || lightmap_rebaked(program, options)) && !state.frag_coord)
@@ -5976,8 +6368,9 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 		world_ao_words = world_ao_inputs(&m, &state, occlusion_light);
 	}
 	/* (display.prism_material_overlay's light is found after texture
-	stage 2, by its micro normal: overlay_light) */
-	if (overlay)
+	stage 2, by its micro normal: overlay_light; display.prism_materials'
+	alike, pbr_light) */
+	if (overlay || pbr)
 		;
 	else if (program->per_pixel_lighting && program->dynamic_lights == XGPU_DYNAMIC_LIGHTS_MODEL)
 	{
@@ -6028,7 +6421,14 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	{
 		/* (display.prism_material_overlay's light between the multipurpose
 		map and the reflection, which it bends) */
-		if (stage == 3 && overlay)
+		if (stage == 3 && pbr)
+		{
+			if (pbr_light(&m, &state, overlay, program->per_pixel_lighting == 2,
+				program->dynamic_lights == XGPU_DYNAMIC_LIGHTS_MODEL,
+				occlusion_light == XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL ? state.occlusion : 0))
+				continue;
+		}
+		else if (stage == 3 && overlay)
 		{
 			overlay_light(&m, &state, program->per_pixel_lighting == 2,
 				program->dynamic_lights == XGPU_DYNAMIC_LIGHTS_MODEL,

@@ -1874,6 +1874,9 @@ void mod_materials_draw_begin(
 	short bitmap = 0;
 	short slot;
 	short slot_count = 2;
+	/* (display.prism_materials: the shader's material, mod_pbr.c, whose
+	normal and occlusion supersede a surface map's) */
+	boolean material = mod_pbr_draw_begin(shader);
 
 	settings_read();
 	/* (a renderer without the overlay: Metal's, until its shaders match
@@ -1909,7 +1912,7 @@ void mod_materials_draw_begin(
 	the one overlay.json names for the shader, else the one next to the
 	bitmap's tag (whether or not overlay.json names the shader); once it is
 	ready */
-	if (mod_materials_globals.surface_maps)
+	if (mod_materials_globals.surface_maps && !material)
 	{
 		if (entry && entry->surface_count)
 		{
@@ -2016,6 +2019,7 @@ void mod_materials_draw_begin(
 void mod_materials_draw_end(
 	void)
 {
+	mod_pbr_draw_end();
 	if (mod_materials_globals.armed)
 	{
 		d3d8_set_material_overlay(NULL, NULL, 0, 0, 0, NULL, 0, 0, 0);
@@ -2027,16 +2031,25 @@ void mod_materials_draw_end(
 
 /* (the script function prism_set) "<setting> <value>": one of the
 display.prism_* settings, set as config.toml's line is (config_write) */
+void mod_meshes_debug_pose(char const *arguments);
+
 void mod_materials_prism_set(
 	char const *text)
 {
 	char name[96];
 	char const *space = text ? strchr(text, ' ') : NULL;
 
+	/* (a capture's pose: mod_meshes.c) */
+	if (text && !strncmp(text, "debug_pose ", 11))
+	{
+		mod_meshes_debug_pose(text + 11);
+		return;
+	}
+
 	if (!space || space == text || (size_t)(space - text) >= sizeof(name) - 16)
 	{
 		console_warning("prism_set \"<setting> <value>\": material_overlay, overlay_strength, overlay_view, surface_maps, "
-			"specular, reflections, shadows, lightmaps, lightmap_upsample, bloom, world_geometry, or a whole display.<name>");
+			"specular, reflections, shadows, lightmaps, lightmap_upsample, bloom, world_geometry, tone, materials, or a whole display.<name>");
 		return;
 	}
 	/* (a whole name: display.ambient_occlusion, beside PRISM's own, for

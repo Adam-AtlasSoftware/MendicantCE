@@ -60,6 +60,8 @@ its swapchain.
 #include "xgpu_vulkan_post.h"
 #include "xgpu_vulkan_stream.h"
 #include "xgpu_vulkan_textures.h"
+#include "xgpu_vulkan_store.h"
+#include "xgpu_vulkan_meshes.h"
 #ifdef HALO_VR
 #include "host_vulkan_vr.h"
 #endif
@@ -212,6 +214,16 @@ struct composite
 	uint32_t level_targets[XGPU_STREAM_MIP_LEVELS], level_written[XGPU_STREAM_MIP_LEVELS];
 };
 
+/* display.prism_materials: a material as MATERIAL_DEFINE gave it */
+struct stream_material
+{
+	uint32_t flags;
+	uint32_t textures[XGPU_STREAM_MATERIAL_IMAGES];
+	float uniforms[XGPU_STREAM_MATERIAL_UNIFORMS][4];
+};
+_Static_assert(XGPU_STREAM_MATERIAL_IMAGES == XGPU_VULKAN_MATERIAL_IMAGES, "the materials' images");
+_Static_assert(XGPU_STREAM_MATERIAL_UNIFORMS == XGPU_MATERIAL_UNIFORM_COUNT, "the materials' uniform");
+
 static struct
 {
 	struct xgpu_vulkan_capabilities capabilities;
@@ -258,10 +270,24 @@ static struct
 	unsigned int textures_dirty;
 	int feedback_bound;
 	uint32_t textures_serial;
+	/* display.prism_textures: the texture store's epoch the stages were
+	looked at with (xgpu_vulkan_store_epoch) */
+	uint32_t store_epoch;
 	struct xgpu_vulkan_texture textures[4];
 	/* display.prism_material_overlay's, as last sent (its images looked up
 	at each draw that reads them: the cache keeps those it is asked for) */
 	struct xgpu_stream_material_overlay overlay;
+	/* display.prism_materials: the materials defined (by id, XGPU_STREAM_
+	MATERIALS + 1 of them, made at the first; flags 0: none), the one
+	bound, and what its draws read of the store as last looked up (its
+	images and samplers, each drawn or not yet: the uniform's [5], [6]) at
+	the store's epoch */
+	struct stream_material *materials;
+	uint32_t material_bound;
+	struct xgpu_vulkan_texture material_images[XGPU_VULKAN_MATERIAL_IMAGES];
+	float material_resident[XGPU_VULKAN_MATERIAL_IMAGES];
+	float material_levels;
+	uint32_t material_looked, material_epoch, material_frame;
 	/* the copy of a target drawn into that a draw samples: of which
 	target, as of which of its draws */
 	struct xgpu_vulkan_image *feedback;
@@ -325,6 +351,9 @@ static struct
 	logged, the folder the shader modules are written into (NULL: none) */
 	int statistics;
 	const char *shader_folder;
+	/* display.prism_models' wide layout for a material's draws (not
+	HALO_MESH_WIDE_OFF): 1 on, 2 off, 0 not read yet */
+	int mesh_wide;
 } stream;
 
 /* display.ambient_occlusion "world" found once a pixel (xgpu_stream.h's
@@ -814,8 +843,9 @@ static uint8_t border_axes(const struct xgpu_stream_sampler *sampler)
 }
 
 /* the sampler the record describes; axes: those whose border the shader
-draws, clamped to the edge here */
-static VkSampler sampler_get(const struct xgpu_stream_sampler *from, uint8_t axes)
+draws, clamped to the edge here; min_lod and max_lod (the texture store's,
+max_lod 0: none) the levels sampled, else the record's first */
+static VkSampler sampler_get_levels(const struct xgpu_stream_sampler *from, uint8_t axes, float min_lod, float max_lod)
 {
 	struct xgpu_vulkan_sampler_description to;
 	int axis;
@@ -830,9 +860,73 @@ static VkSampler sampler_get(const struct xgpu_stream_sampler *from, uint8_t axe
 	to.anisotropy = (uint8_t)(from->minify == _filter_anisotropic && from->anisotropy > 1 ?
 		(from->anisotropy > 16 ? 16 : from->anisotropy) : 1);
 	to.lod_bias = from->lod_bias;
-	to.min_lod = (float)from->first_level;
+	to.min_lod = max_lod > 0.0f ? min_lod : (float)from->first_level;
+	to.max_lod = max_lod;
 	to.border_color = from->border_color;
 	return xgpu_vulkan_sampler(&to);
+}
+
+static VkSampler sampler_get(const struct xgpu_stream_sampler *from, uint8_t axes)
+{
+	return sampler_get_levels(from, axes, 0.0f, 0.0f);
+}
+
+/* display.prism_textures: a stage of an Xbox texture with a store id whose
+replacement is usable, and whose stage is the stock bitmap's it was made
+for (its size and kind: the texture cache may have put another bitmap at
+its header since), drawn with the replacement: its image, and a sampler of
+the levels that stand for the stock's (an image's level j + scale is the
+stock's level j, its levels above the stock's first sampled only where the
+game samples its first: MAXMIPLEVEL 0) that are resident; 1 if it is */
+static int store_bind(const struct host_render_texture_stage *source, struct xgpu_vulkan_texture *texture, uint8_t axes)
+{
+	const struct xgpu_stream_texture_stage *stage = &source->stage;
+	struct xgpu_texture_store_view view;
+	struct xgpu_texture_description description;
+	uint32_t resident, first, last, stock_levels;
+	float min_lod, max_lod;
+
+	if (!source->store || !xgpu_vulkan_store_use(source->store, &view))
+		return 0;
+	xgpu_texture_describe(stage->resource_format, stage->resource_size, &description);
+	if (description.width != view.stock.width || description.height != view.stock.height ||
+		(description.cube_map != 0) != (view.cube != 0) || description.depth > 1 || description.linear)
+		return 0;
+	resident = view.resident - view.top;
+	first = stage->sampler.first_level ? stage->sampler.first_level + view.scale : 0;
+	first = first > view.top ? first - view.top : 0;
+	if (first < resident)
+		first = resident;
+	stock_levels = description.levels ? (uint32_t)description.levels : 1;
+	last = stock_levels - 1 + view.scale;
+	last = last > view.top ? last - view.top : 0;
+	if (last >= view.levels - view.top)
+		last = view.levels - view.top - 1;
+	if (last < first)
+		last = first;
+	min_lod = (float)first;
+	/* (max_lod 0 is none: a level's 0 is a thousandth past it) */
+	max_lod = (float)last + 0.001f;
+	if (stage->sampler.mip == _filter_none)
+	{
+		/* (a stage the game samples without mip levels samples the stock's
+		first level alone: the replacement's levels from the resident one
+		down to the one of the stock's size, mipmapped between them, so that
+		minified it looks as the stock does, not as a 4096-texel image
+		sampled without levels) */
+		struct xgpu_stream_sampler sampler = stage->sampler;
+		uint32_t stock_first = view.scale > view.top ? view.scale - view.top : 0;
+
+		if (stock_first < first)
+			stock_first = first;
+		sampler.mip = stage->sampler.minify == _filter_point ? _filter_point : _filter_linear;
+		texture->image = view.image;
+		texture->sampler = sampler_get_levels(&sampler, axes, min_lod, (float)stock_first + 0.001f);
+		return 1;
+	}
+	texture->image = view.image;
+	texture->sampler = sampler_get_levels(&stage->sampler, axes, min_lod, max_lod);
+	return 1;
 }
 
 /* a stage of a palettized Xbox texture, whose palette's colours are read as
@@ -850,6 +944,7 @@ static void stream_set_textures(void *context, const struct host_render_texture_
 	int index;
 
 	(void)context;
+	xgpu_vulkan_meshes_state_changed();
 	for (index = 0; index < 4; index++)
 	{
 		const struct xgpu_stream_texture_stage *stage = &stages[index].stage;
@@ -995,9 +1090,142 @@ follow whose pixel program has it */
 static void stream_material_overlay(void *context, const struct xgpu_stream_material_overlay *record)
 {
 	(void)context;
+	xgpu_vulkan_meshes_state_changed();
 	if (memcmp(stream.overlay.uniforms, record->uniforms, sizeof(stream.overlay.uniforms)))
 		stream.uniforms_dirty = 1;
 	stream.overlay = *record;
+}
+
+/* ---------- display.prism_materials (xgpu.h's "PBR materials") */
+
+static void stream_material_define(void *context, const struct xgpu_stream_material_define *record)
+{
+	struct stream_material *material;
+
+	(void)context;
+	if (!record->id)
+	{
+		/* (every material forgotten) */
+		free(stream.materials);
+		stream.materials = NULL;
+		stream.material_looked = 0;
+		stream.uniforms_dirty = 1;
+		return;
+	}
+	if (!stream.materials)
+	{
+		stream.materials = calloc(XGPU_STREAM_MATERIALS + 1, sizeof(*stream.materials));
+		if (!stream.materials)
+			return;
+	}
+	material = &stream.materials[record->id];
+	material->flags = record->flags;
+	memcpy(material->textures, record->textures, sizeof(material->textures));
+	memcpy(material->uniforms, record->uniforms, sizeof(material->uniforms));
+	if (record->id == stream.material_bound)
+	{
+		stream.material_looked = 0;
+		stream.uniforms_dirty = 1;
+	}
+}
+
+static void stream_material_bind(void *context, uint32_t id)
+{
+	(void)context;
+	if (id != stream.material_bound)
+	{
+		stream.material_bound = id;
+		stream.material_looked = 0;
+		stream.uniforms_dirty = 1;
+	}
+}
+
+/* the bound material's images (a draw that reads them, each frame it is
+drawn: the store streams and keeps what is drawn): its store entries that
+are usable, with a sampler of their resident levels, repeating, trilinear
+and anisotropic; the others none (the shader's fallback: the uniform says
+which, its [5] and [6], marked dirty where that changed) */
+static void material_resolve(void)
+{
+	const struct stream_material *material = stream.materials && stream.material_bound ?
+		&stream.materials[stream.material_bound] : NULL;
+	const struct xgpu_vulkan_texture *cube = &stream.textures[3];
+	float resident[XGPU_VULKAN_MATERIAL_IMAGES];
+	float levels = cube->image ? (float)(xgpu_vulkan_image_description(cube->image)->levels - 1) : 0.0f;
+	uint32_t epoch = xgpu_vulkan_store_epoch();
+	int index;
+
+	/* (the reflection cube's least detailed level, as each draw has it: the
+	uniform's [6].z) */
+	if (levels != stream.material_levels)
+	{
+		stream.material_levels = levels;
+		stream.uniforms_dirty = 1;
+	}
+	/* (once a frame, or as the bound material or the store changes) */
+	if (stream.material_looked == stream.material_frame + 1 && stream.material_epoch == epoch)
+		return;
+	stream.material_looked = stream.material_frame + 1;
+	stream.material_epoch = epoch;
+	memset(stream.material_images, 0, sizeof(stream.material_images));
+	for (index = 0; index < XGPU_VULKAN_MATERIAL_IMAGES; index++)
+	{
+		struct xgpu_texture_store_view view;
+
+		resident[index] = 0.0f;
+		stream.material_images[index].kind = XGPU_VULKAN_IMAGE_2D;
+		if (!material || !material->textures[index] || !xgpu_vulkan_store_use(material->textures[index], &view) ||
+			view.cube || view.top >= view.levels)
+			continue;
+		{
+			struct xgpu_stream_sampler sampler;
+			uint32_t first = view.resident > view.top ? view.resident - view.top : 0;
+
+			memset(&sampler, 0, sizeof(sampler));
+			sampler.minify = _filter_anisotropic;
+			sampler.magnify = _filter_linear;
+			sampler.mip = _filter_linear;
+			sampler.address[0] = sampler.address[1] = sampler.address[2] = XGPU_VULKAN_ADDRESS_WRAP;
+			sampler.anisotropy = stream.capabilities.anisotropy > 16 ? 16 : stream.capabilities.anisotropy;
+			stream.material_images[index].image = view.image;
+			stream.material_images[index].sampler = sampler_get_levels(&sampler, 0, (float)first,
+				(float)(view.levels - view.top - 1) + 0.001f);
+			resident[index] = 1.0f;
+		}
+	}
+	if (memcmp(resident, stream.material_resident, sizeof(resident)))
+	{
+		memcpy(stream.material_resident, resident, sizeof(resident));
+		stream.uniforms_dirty = 1;
+	}
+}
+
+/* ...its uniform, as xgpu.h's "PBR materials" has it: the definition's, what
+is resident, and the reflection cube's least detailed level (texture 3's,
+as material_resolve found it) */
+static void material_uniforms(float uniforms[XGPU_MATERIAL_UNIFORM_COUNT][4])
+{
+	const struct stream_material *material = stream.materials && stream.material_bound ?
+		&stream.materials[stream.material_bound] : NULL;
+	int index;
+
+	memset(uniforms, 0, XGPU_MATERIAL_UNIFORM_COUNT * sizeof(uniforms[0]));
+	if (material)
+		memcpy(uniforms, material->uniforms, XGPU_MATERIAL_UNIFORM_COUNT * sizeof(uniforms[0]));
+	else
+	{
+		/* (no material: its fallbacks, CE's masks kept) */
+		uniforms[0][0] = uniforms[0][1] = uniforms[0][2] = 1.0f;
+		uniforms[2][0] = 1.0f;
+		uniforms[2][3] = 1.0f;
+		uniforms[3][2] = 0.04f;
+		uniforms[7][0] = uniforms[7][1] = uniforms[7][2] = uniforms[7][3] = 1.0f;
+	}
+	for (index = 0; index < 4; index++)
+		uniforms[5][index] = stream.material_resident[index];
+	uniforms[6][0] = stream.material_resident[XGPU_MATERIAL_IMAGE_CLEARCOAT];
+	uniforms[6][1] = stream.material_resident[XGPU_MATERIAL_IMAGE_DETAIL];
+	uniforms[6][2] = stream.material_levels;
 }
 
 /* ...its images and samplers, for a draw that reads them (a stand-in where
@@ -1034,12 +1262,13 @@ static void textures_bind(void)
 	stages that did not change keep what they have: each stage's image
 	and sampler are its own stage's alone, and the targets' changes mark
 	them all) */
-	if (serial != stream.textures_serial || stream.feedback_bound)
+	if (serial != stream.textures_serial || stream.feedback_bound || xgpu_vulkan_store_epoch() != stream.store_epoch)
 		dirty = TEXTURES_ALL;
 	if (!dirty)
 		return;
 	stream.textures_dirty = 0;
 	stream.textures_serial = serial;
+	stream.store_epoch = xgpu_vulkan_store_epoch();
 	stream.feedback_bound = 0;
 	for (index = 0; index < 4; index++)
 	{
@@ -1076,6 +1305,11 @@ static void textures_bind(void)
 			{
 				texture->image = target->image;
 			}
+		}
+		else if (stage->source == _source_texture && source->store && store_bind(source, texture, stream.border[index]))
+		{
+			/* (display.prism_textures: the replacement, the stock texture not
+			looked for) */
 		}
 		else if (stage->source == _source_texture || stage->source == XGPU_STREAM_SOURCE_IMAGE)
 		{
@@ -1118,6 +1352,7 @@ static void stream_set_constants(void *context, const struct xgpu_stream_constan
 		return;
 	memcpy(stream.constants[record->first], record->values, (size_t)count * sizeof(stream.constants[0]));
 	stream.constants_dirty = 1;
+	xgpu_vulkan_meshes_state_changed();
 	/* (the world's projection or the screen conversion: the effects' views) */
 	if (record->first < 4 || (record->first <= SCREEN_CONVERSION + 1 && record->first + count > SCREEN_CONVERSION))
 		stream.uniforms_effect = stream.effect_valid = 0;
@@ -1343,6 +1578,8 @@ static int pipeline_shaders(struct stream_pipeline *entry, const struct xgpu_str
 	}
 	free(program);
 	pixel_program_convert(&definition->pixel_program, &pixel);
+	/* (display.prism_materials': the key's alone, xgpu_stream.h) */
+	pixel.material_pbr = definition->key.pixel.material_pbr;
 	/* (a VR effect's, where its program leaves the effects' textures free) */
 	entry->effect = entry->effect_tests_depth = 0;
 	if (key->pixel.vr_effect && key->pixel.vr_effect <= XGPU_SPIRV_EFFECT_THICK && xgpu_spirv_effect_possible(&pixel))
@@ -1400,6 +1637,7 @@ static int stream_pipeline(void *context, uint32_t id, const struct xgpu_stream_
 
 	(void)context;
 	stream.pipeline_id = 0;
+	xgpu_vulkan_meshes_state_changed();
 	if (!id || id >= XGPU_STREAM_PIPELINES)
 		return 0;
 	entry = &stream.pipelines[id];
@@ -1473,6 +1711,7 @@ static void stream_draw_state(void *context, const struct xgpu_stream_dynamic_st
 	const struct xgpu_stream_draw_uniforms *uniforms, uint32_t uniforms_serial)
 {
 	(void)context;
+	xgpu_vulkan_meshes_state_changed();
 	if (dynamic)
 	{
 		if (memcmp(stream.dynamic.blend_color, dynamic->blend_color, sizeof(stream.dynamic.blend_color)))
@@ -1597,6 +1836,11 @@ static int uniforms_update(int effect)
 		to->world_ao[1] = from->world_ao[1];
 		/* (display.prism_material_overlay's, read by its shaders alone) */
 		memcpy(to->material_overlay, stream.overlay.uniforms, sizeof(to->material_overlay));
+		/* (display.prism_materials', alike: whatever the draw's pipeline,
+		as the range may serve the material's draws that follow; none where
+		no material is defined) */
+		if (stream.materials)
+			material_uniforms(to->material);
 		memcpy(to->blend_constant, stream.dynamic.blend_color, sizeof(to->blend_constant));
 		for (stage = 0; stage < 4; stage++)
 		{
@@ -1981,6 +2225,12 @@ static int draw_pipeline(const struct draw_input *input, int apart)
 	struct variant variant;
 	uint32_t index, attempt;
 	double traced;
+	/* display.prism_models: what the draw is, by the part it is of
+	(xgpu_vulkan_meshes.h), and whether its pieces are drawn by the
+	pipeline's wide variant */
+	int mesh_verdict = XGPU_VULKAN_MESHES_STOCK, mesh_wide = 0, mesh_nodes = -1, mesh_weight = -1;
+	VkPipeline stock_pipeline = VK_NULL_HANDLE;
+	uint32_t stock_bindings = 0;
 
 	if (!stream.pipeline_id || !stream.definition || !input->count)
 		return 1;
@@ -2103,6 +2353,81 @@ static int draw_pipeline(const struct draw_input *input, int apart)
 	}
 	if (!draw.pipeline)
 		return 1;
+	/* (display.prism_models: a part a mesh replaces, drawn as its pieces,
+	or not at all; a twin of the pre-pass as it is) */
+	if (!prepass.drawing)
+	{
+		mesh_verdict = xgpu_vulkan_meshes_verdict(&pipeline, draw.bindings,
+			primitive_class(input->primitive) == XGPU_VULKAN_CLASS_TRIANGLES);
+		if (mesh_verdict == XGPU_VULKAN_MESHES_SKIP)
+			return 1;
+		/* (with a material: the wide layout's pipeline, where it is made:
+		the stock layout's but for the texture coordinates, two floats at
+		byte 24 (uv0 over the base map scale, unclamped and whole) in place
+		of the int16 coordinates, nodes and weight, which are constants then
+		(node 0, weight 1); else the stock layout's swap) */
+		if (!stream.mesh_wide)
+			stream.mesh_wide = getenv("HALO_MESH_WIDE_OFF") ? 2 : 1;
+		if (mesh_verdict == XGPU_VULKAN_MESHES_SWAP && stream.definition->key.pixel.material_pbr &&
+			stream.mesh_wide == 1)
+		{
+			struct xgpu_vulkan_pipeline_description wide = pipeline;
+			unsigned long special = stream.definition->key.immediate ? 0 :
+				(unsigned long)stream.definition->key.packed_attributes | input->integers;
+			VkPipeline made = VK_NULL_HANDLE;
+			int uv = -1, nodes = -1, weight = -1;
+
+			for (index = 0; index < 16; index++)
+			{
+				const struct xgpu_vulkan_attribute *attribute = &pipeline.attributes[index];
+
+				if (!attribute->format || attribute->binding != 0)
+					continue;
+				if (attribute->offset == 24 && attribute->format == VK_FORMAT_R16G16_SNORM)
+					uv = (int)index;
+				else if (attribute->offset >= 24)
+				{
+					if (attribute->offset == 28 && attribute->format == VK_FORMAT_R8G8_UNORM && !(special & (1ul << index)))
+						nodes = (int)index;
+					else if (attribute->offset == 30 && attribute->format == VK_FORMAT_R16_SNORM &&
+						!(special & (1ul << index)))
+						weight = (int)index;
+					else
+						uv = -2;
+				}
+			}
+			if (uv >= 0)
+			{
+				wide.attributes[uv].format = VK_FORMAT_R32G32_SFLOAT;
+				if (nodes >= 0)
+				{
+					wide.attributes[nodes].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+					wide.attributes[nodes].binding = XGPU_VULKAN_BINDING_CONSTANT;
+					wide.attributes[nodes].offset = (uint16_t)(nodes * 16);
+				}
+				if (weight >= 0)
+				{
+					wide.attributes[weight].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+					wide.attributes[weight].binding = XGPU_VULKAN_BINDING_CONSTANT;
+					wide.attributes[weight].offset = (uint16_t)(weight * 16);
+				}
+				if (nodes >= 0 || weight >= 0)
+					wide.strides[XGPU_VULKAN_BINDING_CONSTANT] = 0;
+				made = stream.prepared ? xgpu_vulkan_pipeline_ready(&wide) : xgpu_vulkan_pipeline(&wide);
+			}
+			if (made)
+			{
+				stock_pipeline = draw.pipeline;
+				stock_bindings = draw.bindings;
+				draw.pipeline = made;
+				if (nodes >= 0 || weight >= 0)
+					draw.bindings |= 1u << XGPU_VULKAN_BINDING_CONSTANT;
+				mesh_wide = 1;
+				mesh_nodes = nodes;
+				mesh_weight = weight;
+			}
+		}
+	}
 	draw.topology = primitive_topology(input->primitive);
 	draw.count = input->count;
 	draw.vertex_offset = input->vertex_offset;
@@ -2116,6 +2441,10 @@ static int draw_pipeline(const struct draw_input *input, int apart)
 		textures_bind();
 		if (entry->effect)
 			draw.reads_depth = (uint8_t)effect_textures(effect_draw_textures);
+		/* (display.prism_materials: the material's images looked up, its
+		uniform marked where what is resident changed) */
+		if (stream.definition->key.pixel.material_pbr && !prepass.drawing)
+			material_resolve();
 		preparation_end(0, traced);
 		serial = xgpu_vulkan_serial();
 		traced = preparation_start();
@@ -2144,18 +2473,46 @@ static int draw_pipeline(const struct draw_input *input, int apart)
 				return 1;
 			}
 			memcpy(to, input->values, 16 * 16);
+			/* (the wide layout's nodes and weight: node 0, weight 1, as the
+			stock layout's two bytes and short read, the components they
+			lack 0, 0, 1: the model's program takes the second node's weight
+			as w - x) */
+			if (mesh_wide && mesh_nodes >= 0)
+			{
+				memset((float *)to + mesh_nodes * 4, 0, 16);
+				((float *)to)[mesh_nodes * 4 + 3] = 1.0f;
+			}
+			if (mesh_wide && mesh_weight >= 0)
+			{
+				memset((float *)to + mesh_weight * 4, 0, 16);
+				((float *)to)[mesh_weight * 4] = 1.0f;
+				((float *)to)[mesh_weight * 4 + 3] = 1.0f;
+			}
 		}
 		if (!indices_upload(input, &draw))
 		{
 			preparation_end(2, traced);
 			return 1;
 		}
+		/* (display.prism_models: the mesh skinned and the constants of its
+		pieces, in the same submission; drawn stock where they cannot be) */
+		if (mesh_verdict == XGPU_VULKAN_MESHES_SWAP &&
+			!xgpu_vulkan_meshes_prepare((const float (*)[4])stream.constants, CONSTANTS_RANGE / 16, mesh_wide) &&
+			serial == xgpu_vulkan_serial())
+			mesh_verdict = XGPU_VULKAN_MESHES_STOCK;
 		preparation_end(2, traced);
 		if (serial == xgpu_vulkan_serial())
 			break;
 	}
 	if (attempt == 3)
 		return 1;
+	/* (a swap drawn stock after all: by the stock pipeline, with its own
+	bindings) */
+	if (mesh_wide && mesh_verdict != XGPU_VULKAN_MESHES_SWAP)
+	{
+		draw.pipeline = stock_pipeline;
+		draw.bindings = stock_bindings;
+	}
 	memcpy(draw.textures, stream.textures, sizeof(draw.textures));
 	/* (display.prism_material_overlay's images, where its shader reads
 	them) */
@@ -2163,6 +2520,15 @@ static int draw_pipeline(const struct draw_input *input, int apart)
 		!shadow.drawing;
 	if (draw.material_overlay)
 		overlay_bind(draw.overlay);
+	/* (display.prism_materials' images, where its shader reads them: the
+	overlay's bindings written too, stand-ins where it has none) */
+	draw.material = stream.definition->key.pixel.material_pbr != 0 && !prepass.drawing;
+	if (draw.material)
+	{
+		if (!draw.material_overlay)
+			memset(draw.overlay, 0, sizeof(draw.overlay));
+		memcpy(draw.material_images, stream.material_images, sizeof(draw.material_images));
+	}
 	draw.constants = stream.constants_range;
 	draw.uniforms = stream.uniforms_range;
 	draw.dynamic = &stream.dynamic;
@@ -2206,7 +2572,16 @@ static int draw_pipeline(const struct draw_input *input, int apart)
 	if (!prepass.drawing && !shadow.drawing && target_get(stream.color))
 		target_get(stream.color)->written++;
 	traced = preparation_start();
-	xgpu_vulkan_draw(&draw);
+	if (mesh_verdict == XGPU_VULKAN_MESHES_SWAP)
+	{
+		struct xgpu_vulkan_draw piece;
+		uint32_t piece_index;
+
+		for (piece_index = 0; piece = draw, xgpu_vulkan_meshes_piece(piece_index, &piece); piece_index++)
+			xgpu_vulkan_draw(&piece);
+	}
+	else
+		xgpu_vulkan_draw(&draw);
 	preparation_end(3, traced);
 	return 1;
 }
@@ -3562,6 +3937,7 @@ static void stream_frame_end(void *context)
 	world_make_some();
 	prepass.twins_made = 0;
 	shadow.twins_made = 0;
+	stream.material_frame++;
 	target_resolve(back_buffer);
 #ifdef HALO_VR
 	/* (the headset shows the frames: the window, hidden, is not presented
@@ -3573,6 +3949,11 @@ static void stream_frame_end(void *context)
 	}
 #endif
 	xgpu_vulkan_frame_end(back_buffer ? back_buffer->image : NULL, present_window);
+	/* (display.prism_textures: the replacements' levels read since copied
+	before the next frame's draws) */
+	xgpu_vulkan_store_frame();
+	/* (display.prism_models: the meshes read since copied too) */
+	xgpu_vulkan_meshes_frame();
 	/* (debug.load_trace: each frame's end on the render thread, whose
 	spacing tools/load_benchmark.py reads as the frames' times after a load) */
 	if (stream.trace_frames)
@@ -3617,6 +3998,14 @@ static void stream_frame_end(void *context)
 				statistics.gpu_frames ? statistics.gpu_milliseconds / statistics.gpu_frames : 0.0,
 				statistics.frames_timed ? statistics.frame_seconds * 1000.0 / statistics.frames_timed : 0.0,
 				statistics.local_reads);
+			{
+				char text[1024];
+
+				if (xgpu_vulkan_store_statistics(text, sizeof(text)))
+					host_logf(HOST_LOG_INFO, "%s", text);
+				if (xgpu_vulkan_meshes_statistics(text, sizeof(text)))
+					host_logf(HOST_LOG_INFO, "%s", text);
+			}
 		}
 	}
 	/* (each stage's texture looked for at least once a frame, so that the
@@ -3674,6 +4063,13 @@ static void stream_initialize(void *context, struct xgpu_stream_capabilities *ca
 	/* (display.prism_shadows "cascaded": its pass and set, where the device
 	binds five sets) */
 	capabilities->prism_shadows = xgpu_vulkan_prism_shadows_possible() != 0;
+	/* (display.prism_textures: PRISM's texture store, xgpu_vulkan_store.c) */
+	capabilities->texture_store = (uint8_t)xgpu_vulkan_store_available();
+	/* (display.prism_models: PRISM's mesh store, xgpu_vulkan_meshes.c) */
+	capabilities->mesh_store = (uint8_t)xgpu_vulkan_meshes_available();
+	/* (display.prism_materials: the GGX path's shaders, xgpu_spirv.c's, and
+	the textures' set's bindings for its images, xgpu_vulkan.c's) */
+	capabilities->materials = (uint8_t)(capabilities->texture_store && stream.capabilities.materials);
 }
 
 static void stream_prepare(void *context)
@@ -3769,6 +4165,12 @@ const struct host_render_backend *xgpu_vulkan_stream_backend(void)
 		backend.read_target = stream_read_target;
 		backend.set_textures = stream_set_textures;
 		backend.material_overlay = stream_material_overlay;
+		backend.texture_store_map = xgpu_vulkan_store_map;
+		backend.mesh_store_map = xgpu_vulkan_meshes_map;
+		backend.mesh_instance = xgpu_vulkan_meshes_instance;
+		backend.mesh_draw = xgpu_vulkan_meshes_draw_part;
+		backend.material_define = stream_material_define;
+		backend.material_bind = stream_material_bind;
 		backend.set_constants = stream_set_constants;
 		backend.vertex_program = stream_vertex_program;
 		backend.vertex_lighting = stream_vertex_lighting;

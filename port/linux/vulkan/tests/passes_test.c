@@ -32,6 +32,7 @@ lights' cells' upload put aside before a draw that reads them).
 #include "../xgpu_vulkan.c"
 #include "../xgpu_vulkan_post.c"
 #include "../xgpu_vulkan_post_shaders.c"
+#include "../xgpu_vulkan_mesh_shaders.c"
 #include "../xgpu_vulkan_world_ao.c"
 #include <assert.h>
 #include <stdarg.h>
@@ -186,8 +187,9 @@ static void VKAPI_CALL fake_update(VkDevice device, uint32_t count, const VkWrit
 	uint32_t index;
 
 	(void)device; (void)copies; (void)copy;
-	/* (the stages', and display.prism_material_overlay's after them) */
-	assert(count == 4 || count == TEXTURE_SET_BINDINGS);
+	/* (the stages', and display.prism_material_overlay's after them, and
+	display.prism_materials' after those) */
+	assert(count == 4 || count == TEXTURE_SET_OVERLAY_BINDINGS || count == TEXTURE_SET_BINDINGS);
 	set_updates++;
 	for (index = 0; index < count; index++)
 	{
@@ -713,31 +715,31 @@ static void texture_sets_test(void)
 	a[0].kind = b[0].kind = XGPU_VULKAN_IMAGE_2D;
 	a[0].sampler = b[0].sampler = (VkSampler)(uintptr_t)5;
 	allocated_sets = set_updates = 0;
-	set_a = texture_set(a, NULL);
-	set_b = texture_set(b, NULL);
+	set_a = texture_set(a, NULL, NULL);
+	set_b = texture_set(b, NULL, NULL);
 	assert(set_a && set_b && set_a != set_b && set_updates == 2);
-	assert(texture_set(a, NULL) == set_a && texture_set(b, NULL) == set_b);
-	assert(texture_set(a, NULL) == set_a && set_updates == 2 && allocated_sets == 2);
+	assert(texture_set(a, NULL, NULL) == set_a && texture_set(b, NULL, NULL) == set_b);
+	assert(texture_set(a, NULL, NULL) == set_a && set_updates == 2 && allocated_sets == 2);
 	assert(vk.statistics.texture_sets_written == 2 && vk.statistics.texture_sets_reused == 3);
 	assert(written_images[0].imageView == second.sampled);
 
 	a[0].sampler = (VkSampler)(uintptr_t)6;
-	set = texture_set(a, NULL);
+	set = texture_set(a, NULL, NULL);
 	assert(set != set_a && set != set_b && set_updates == 3);
 	assert(written_images[0].sampler == (VkSampler)(uintptr_t)6);
 	a[0].sampler = (VkSampler)(uintptr_t)5;
-	assert(texture_set(a, NULL) == set_a && set_updates == 3);
+	assert(texture_set(a, NULL, NULL) == set_a && set_updates == 3);
 
 	/* (first destroyed and another image made at its address, as
 	xgpu_vulkan_image_create numbers it; the last set is b's, as
 	xgpu_vulkan_image_destroy forgets the last set when it had first) */
-	assert(texture_set(b, NULL) == set_b);
+	assert(texture_set(b, NULL, NULL) == set_b);
 	first.number = 3;
 	first.sampled = (VkImageView)(uintptr_t)33;
-	set = texture_set(a, NULL);
+	set = texture_set(a, NULL, NULL);
 	assert(set != set_a && set != set_b && set_updates == 4);
 	assert(written_images[0].imageView == (VkImageView)(uintptr_t)33);
-	assert(texture_set(b, NULL) == set_b && texture_set(a, NULL) == set && set_updates == 4);
+	assert(texture_set(b, NULL, NULL) == set_b && texture_set(a, NULL, NULL) == set && set_updates == 4);
 
 	/* display.prism_material_overlay: the overlay's images after the
 	stages', a set of their own (stand-ins where there is none), found again
@@ -749,10 +751,39 @@ static void texture_sets_test(void)
 		memset(overlay, 0, sizeof(overlay));
 		overlay[0].image = &second;
 		overlay[0].sampler = (VkSampler)(uintptr_t)7;
-		with = texture_set(a, overlay);
+		with = texture_set(a, overlay, NULL);
 		assert(with && with != set && set_updates == 5);
 		assert(written_images[4].imageView == second.sampled && written_images[4].sampler == (VkSampler)(uintptr_t)7);
-		assert(texture_set(a, NULL) == set && texture_set(a, overlay) == with && set_updates == 5);
+		assert(texture_set(a, NULL, NULL) == set && texture_set(a, overlay, NULL) == with && set_updates == 5);
+	}
+
+	/* display.prism_materials: the material's images after the overlay's
+	(written too: stand-ins where there are none), a set of their own found
+	again; none where the layout has not their bindings */
+	{
+		struct xgpu_vulkan_texture overlay[XGPU_VULKAN_OVERLAY_IMAGES];
+		struct xgpu_vulkan_texture material[XGPU_VULKAN_MATERIAL_IMAGES];
+		VkDescriptorSet with;
+		uint32_t bindings = vk.texture_bindings;
+
+		memset(overlay, 0, sizeof(overlay));
+		memset(material, 0, sizeof(material));
+		material[2].image = &second;
+		material[2].sampler = (VkSampler)(uintptr_t)8;
+		vk.texture_bindings = TEXTURE_SET_BINDINGS;
+		with = texture_set(a, overlay, material);
+		assert(with && with != set && set_updates == 6);
+		assert(written_images[XGPU_VULKAN_BINDING_MATERIAL + 2].imageView == second.sampled &&
+			written_images[XGPU_VULKAN_BINDING_MATERIAL + 2].sampler == (VkSampler)(uintptr_t)8);
+		/* (the overlay's bindings and the material's others: stand-ins) */
+		assert(written_images[4].imageView == vk.stand_ins[XGPU_VULKAN_IMAGE_2D]->sampled &&
+			written_images[XGPU_VULKAN_BINDING_MATERIAL].imageView == vk.stand_ins[XGPU_VULKAN_IMAGE_2D]->sampled);
+		assert(texture_set(a, overlay, material) == with && texture_set(a, NULL, NULL) == set && set_updates == 6);
+		/* (a layout without the materials' bindings: the overlay's set, a
+		new one of the overlay's bindings alone) */
+		vk.texture_bindings = TEXTURE_SET_OVERLAY_BINDINGS;
+		assert(texture_set(a, overlay, material) == texture_set(a, overlay, NULL) && set_updates == 7);
+		vk.texture_bindings = bindings;
 	}
 
 	/* The slot's next submission: only the pool allocated from is reset,
@@ -761,9 +792,9 @@ static void texture_sets_test(void)
 	vk.serial += SLOTS;
 	recording_begin();
 	assert(vk.slot == slot && pool_resets == 1 && !slot->texture_set_count && !slot->descriptor_pool_dirty);
-	assert(texture_set(b, NULL) && set_updates == 6 && allocated_sets == 6);
-	assert(texture_set(a, NULL) && set_updates == 7);
-	assert(texture_set(b, NULL) && set_updates == 7);
+	assert(texture_set(b, NULL, NULL) && set_updates == 8 && allocated_sets == 8);
+	assert(texture_set(a, NULL, NULL) && set_updates == 9);
+	assert(texture_set(b, NULL, NULL) && set_updates == 9);
 	slot->descriptor_pools = NULL;
 	slot->descriptor_pool_count = 0;
 	reset();
@@ -3758,14 +3789,14 @@ int main(void)
 		textures[0].kind = XGPU_VULKAN_IMAGE_2D;
 		recording.descriptor_pools = &pool;
 		recording.descriptor_pool_count = 1;
-		assert(texture_set(textures, NULL));
+		assert(texture_set(textures, NULL, NULL));
 		first_layer = written_images[0].imageView;
 		assert(created_views == 1 && first_layer == array->sampled_2d);
 		assert(first_layer != array->sampled && last_view.viewType == VK_IMAGE_VIEW_TYPE_2D);
 		assert(last_view.subresourceRange.baseArrayLayer == 0 && last_view.subresourceRange.layerCount == 1);
-		assert(texture_set(textures, NULL) && created_views == 1);
+		assert(texture_set(textures, NULL, NULL) && created_views == 1);
 		textures[0].kind = XGPU_VULKAN_IMAGE_2D_ARRAY;
-		assert(texture_set(textures, NULL) && written_images[0].imageView == array->sampled && created_views == 1);
+		assert(texture_set(textures, NULL, NULL) && written_images[0].imageView == array->sampled && created_views == 1);
 		xgpu_vulkan_image_destroy(array);
 		for (index = 0; index < vk.garbage_count; index++)
 		{

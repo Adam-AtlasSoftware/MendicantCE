@@ -87,6 +87,7 @@ symbols in this file:
 #include "cache/cache_files.h"
 #include "rasterizer/rasterizer_transparent_geometry.h"
 #include "model_detail.h" /* port: port/linux/game/model_detail.c */
+#include "mods.h" /* port: port/linux/game/mod_meshes.c */
 
 /* ---------- constants */
 
@@ -463,6 +464,9 @@ static void render_model_parts(
 								{
 									match_assert("c:\\halo\\SOURCE\\models\\models.c", 491, !TEST_FLAG(flags, _render_model_shadow_bit));
 
+									/* port: the part named for display.prism_models' mesh store
+									(port/linux/game/mod_meshes.c) */
+									mod_meshes_part(region_index, permutation_index, geometry_index, part_index, part->shader_index);
 									rasterizer_model_draw(
 										shader,
 										forced_shader_permutation_index ? forced_shader_permutation_index : shader_reference->permutation_index,
@@ -471,10 +475,14 @@ static void render_model_parts(
 										part->triangle_buffer.count,
 										&part->vertex_buffer,
 										NONE);
+									mod_meshes_part_end(); /* port */
 								}
 							}
 							else if (pass==_render_model_pass_solid)
 							{
+								/* port: the part named for display.prism_models' mesh store
+								(port/linux/game/mod_meshes.c) */
+								mod_meshes_part(region_index, permutation_index, geometry_index, part_index, part->shader_index);
 								if (TEST_FLAG(flags, _render_model_shadow_bit))
 								{
 									rasterizer_environment_shadow_model_draw(
@@ -495,6 +503,7 @@ static void render_model_parts(
 										NONE);
 									rasterizer_debug_model_vertices(object_index, skinning, part);
 								}
+								mod_meshes_part_end(); /* port */
 							}
 						}
 					}
@@ -1409,6 +1418,9 @@ void render_model(
 		{
 			rasterizer_model_begin(&model_parameters, FALSE);
 		}
+		/* port: display.prism_models: the nodes' matrices sent where a mod's
+		mesh replaces the model (port/linux/game/mod_meshes.c) */
+		mod_meshes_model_begin(model_index, &model_parameters.skinning, detail_level_pixels, flags, unique_identifier);
 		render_model_parts(
 			model,
 			region_permutation_indices,
@@ -1419,6 +1431,7 @@ void render_model(
 			detail_rules,
 			forced_shader_permutation_index,
 			flags);
+		mod_meshes_model_end(); /* port */
 		if (TEST_FLAG(flags, _render_model_shadow_bit))
 		{
 			rasterizer_environment_shadow_model_end();

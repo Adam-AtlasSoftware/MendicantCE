@@ -194,6 +194,11 @@ static struct
 	/* display.prism_material_overlay's, as last sent */
 	BOOL overlay_sent;
 	struct xgpu_stream_material_overlay overlay;
+	/* display.prism_textures: the store's hook (NULL none), and the stages'
+	store ids as the host's decoder has them (from 0; no INVALIDATE resets
+	them there) */
+	xgpu_texture_store_hook store_hook;
+	uint32_t store_ids[4];
 	/* the values of the inputs no stream feeds (set_vertices'), and of
 	the registers immediate mode's vertices do not write (each the host's
 	own) */
@@ -619,6 +624,8 @@ void xgpu_backend_initialize(void)
 		stream_free(stream.asides[--stream.aside_count].data);
 	memset(&stream.vertices, 0, sizeof(stream.vertices));
 	forget_sent();
+	/* (a new decoder's stages have no store ids) */
+	memset(stream.store_ids, 0, sizeof(stream.store_ids));
 	if (host_render_stream_open(STREAM_ADDRESS(ring)))
 	{
 		fprintf(stderr, "the renderer's command stream: the host has no renderer for it\n");
@@ -650,6 +657,9 @@ void xgpu_backend_initialize(void)
 	xgpu_backend_capabilities.lightmap_filter = stream.capabilities.lightmap_filter;
 	xgpu_backend_capabilities.bloom = stream.capabilities.bloom;
 	xgpu_backend_capabilities.prism_shadows = stream.capabilities.prism_shadows;
+	xgpu_backend_capabilities.texture_store = stream.capabilities.texture_store;
+	xgpu_backend_capabilities.mesh_store = stream.capabilities.mesh_store;
+	xgpu_backend_capabilities.materials = stream.capabilities.materials && stream.capabilities.texture_store;
 }
 
 /* (at exit) the frames submitted played, the render thread ended */
@@ -1114,7 +1124,7 @@ void xgpu_backend_texture_describe(DWORD resource, DWORD palette, struct xgpu_te
 }
 
 static void texture_stage_describe(const struct xgpu_texture_source *source, int stage_index,
-	struct xgpu_stream_texture_stage *stage, struct xgpu_stream_texture_level *levels)
+	struct xgpu_stream_texture_stage *stage, struct xgpu_stream_texture_level *levels, uint32_t *store_id)
 {
 	uint32_t index;
 
@@ -1122,6 +1132,7 @@ static void texture_stage_describe(const struct xgpu_texture_source *source, int
 	(void)stage_index;
 #endif
 	memset(stage, 0, sizeof(*stage));
+	*store_id = 0;
 	stage->source = source->source;
 	stage->sampler_type = source->sampler_type;
 	stage->sampled = source->sampled;
@@ -1180,6 +1191,10 @@ static void texture_stage_describe(const struct xgpu_texture_source *source, int
 			stage->target = (uint32_t)xgpu_texture_channels((unsigned long)PLATFORM_PHYSICAL_TO_VIRTUAL(header->Data),
 				stage_index);
 #endif
+			/* (display.prism_textures: the replacement the host draws in its
+			place once it has it, the stock texture until then) */
+			if (stream.store_hook)
+				*store_id = (uint32_t)stream.store_hook((unsigned long)source->resource);
 		}
 	}
 }
@@ -1189,6 +1204,7 @@ void xgpu_backend_set_textures(const struct xgpu_texture_source stages[4])
 	struct xgpu_stream_texture_stage described[4];
 	struct xgpu_stream_texture_level levels[4][XGPU_STREAM_MIP_LEVELS];
 	struct xgpu_stream_set_textures *record_body;
+	uint32_t store_ids[4];
 	uint32_t changed = 0;
 	uint32_t size = sizeof(*record_body);
 	unsigned char *place;
@@ -1200,13 +1216,20 @@ void xgpu_backend_set_textures(const struct xgpu_texture_source stages[4])
 	{
 		uint32_t level_bytes;
 
-		texture_stage_describe(&stages[stage], stage, &described[stage], levels[stage]);
+		texture_stage_describe(&stages[stage], stage, &described[stage], levels[stage], &store_ids[stage]);
 		level_bytes = described[stage].level_count * sizeof(levels[0][0]);
 		if (stream.stages_sent[stage] && !memcmp(&described[stage], &stream.stages[stage], sizeof(described[stage])) &&
 			!memcmp(levels[stage], stream.levels[stage], level_bytes))
 			continue;
 		changed |= 1u << stage;
 		size += sizeof(described[stage]) + level_bytes;
+	}
+	/* (the store ids, where they differ from the host's: never without a
+	store) */
+	if (memcmp(store_ids, stream.store_ids, sizeof(store_ids)))
+	{
+		changed |= XGPU_STREAM_TEXTURES_STORE;
+		size += sizeof(store_ids);
 	}
 	if (!changed)
 		return;
@@ -1227,6 +1250,269 @@ void xgpu_backend_set_textures(const struct xgpu_texture_source stages[4])
 		memcpy(stream.levels[stage], levels[stage], level_bytes);
 		stream.stages_sent[stage] = TRUE;
 	}
+	if (changed & XGPU_STREAM_TEXTURES_STORE)
+	{
+		memcpy(place, store_ids, sizeof(store_ids));
+		memcpy(stream.store_ids, store_ids, sizeof(store_ids));
+	}
+}
+
+/* ---------- display.prism_textures: PRISM's texture store */
+
+BOOL xgpu_backend_texture_store_available(void)
+{
+	return stream.open && stream.capabilities.texture_store;
+}
+
+void xgpu_backend_texture_store_hook(xgpu_texture_store_hook hook)
+{
+	stream.store_hook = stream.open && stream.capabilities.texture_store ? hook : NULL;
+}
+
+BOOL xgpu_backend_texture_store_map(unsigned long generation, unsigned long tier, unsigned long budget_megabytes,
+	BOOL loading, const struct xgpu_texture_store_query *queries, unsigned long count,
+	struct xgpu_texture_store_answer *answers)
+{
+	struct xgpu_stream_texture_store_map *record_body;
+	struct xgpu_stream_texture_store_query *wire;
+	struct xgpu_stream_texture_store_answer *replies;
+	unsigned char *buffer;
+	char *strings;
+	uint32_t strings_size = 0, query_bytes, answer_bytes, at = 0;
+	unsigned long index;
+
+	if (answers && count)
+		memset(answers, 0, count * sizeof(*answers));
+	if (!stream.open || !stream.capabilities.texture_store || count > XGPU_STREAM_TEXTURE_STORE_QUERIES ||
+		(count && (!queries || !answers)))
+		return FALSE;
+	for (index = 0; index < count; index++)
+	{
+		size_t length = queries[index].path ? strlen(queries[index].path) : 0;
+
+		if (length > 4096)
+			return FALSE;
+		strings_size += (uint32_t)length + 1;
+	}
+	query_bytes = (uint32_t)count * (uint32_t)sizeof(*wire);
+	answer_bytes = (uint32_t)count * (uint32_t)sizeof(*replies);
+	/* (the queries, the answers, then the paths: one buffer of the
+	guest's, freed once answered) */
+	buffer = stream_allocate(16, align_up(query_bytes + answer_bytes + strings_size + 1, 16));
+	if (!buffer)
+		return FALSE;
+	wire = (struct xgpu_stream_texture_store_query *)buffer;
+	replies = (struct xgpu_stream_texture_store_answer *)(buffer + query_bytes);
+	strings = (char *)(buffer + query_bytes + answer_bytes);
+	memset(buffer, 0, query_bytes + answer_bytes);
+	for (index = 0; index < count; index++)
+	{
+		const struct xgpu_texture_store_query *query = &queries[index];
+		uint32_t length = query->path ? (uint32_t)strlen(query->path) : 0;
+
+		wire[index].path = at;
+		wire[index].path_length = length;
+		if (length)
+			memcpy(strings + at, query->path, length);
+		strings[at + length] = 0;
+		at += length + 1;
+		wire[index].file_size = (uint32_t)query->file_size;
+		wire[index].stamp_seconds = (uint32_t)query->stamp_seconds;
+		wire[index].kind = query->kind == XGPU_STREAM_TEXTURE_STORE_KIND_MATERIAL ?
+			XGPU_STREAM_TEXTURE_STORE_KIND_MATERIAL : XGPU_STREAM_TEXTURE_STORE_KIND_BITMAP;
+		wire[index].stock_type = query->cube ? 1 : 0;
+		wire[index].stock_levels = (uint8_t)query->stock_levels;
+		wire[index].stock_width = (uint16_t)query->stock_width;
+		wire[index].stock_height = (uint16_t)query->stock_height;
+	}
+	record_body = record(XGPU_STREAM_TEXTURE_STORE_MAP, sizeof(*record_body));
+	record_body->reply = STREAM_ADDRESS(replies);
+	record_body->generation = (uint32_t)generation;
+	record_body->tier = (uint32_t)tier;
+	record_body->budget_megabytes = (uint32_t)budget_megabytes;
+	record_body->query_count = (uint32_t)count;
+	record_body->queries = count ? STREAM_ADDRESS(wire) : 0;
+	record_body->strings = count ? STREAM_ADDRESS(strings) : 0;
+	record_body->strings_size = count ? strings_size : 0;
+	record_body->flags = loading ? XGPU_STREAM_TEXTURE_STORE_LOADING : 0;
+	synchronous();
+	for (index = 0; index < count; index++)
+	{
+		answers[index].id = replies[index].id;
+		answers[index].width = replies[index].width;
+		answers[index].height = replies[index].height;
+		answers[index].levels = replies[index].levels;
+		answers[index].status = replies[index].status;
+		answers[index].format = replies[index].format;
+	}
+	stream_free(buffer);
+	return TRUE;
+}
+
+/* ---------- display.prism_models: PRISM's mesh store */
+
+BOOL xgpu_backend_mesh_store_available(void)
+{
+	return stream.open && stream.capabilities.mesh_store;
+}
+
+BOOL xgpu_backend_mesh_store_map(unsigned long generation, unsigned long tier, unsigned long budget_megabytes,
+	BOOL loading, const struct xgpu_mesh_store_query *queries, unsigned long count,
+	struct xgpu_mesh_store_answer *answers)
+{
+	struct xgpu_stream_mesh_store_map *record_body;
+	struct xgpu_stream_mesh_store_query *wire;
+	struct xgpu_stream_mesh_store_answer *replies;
+	unsigned char *buffer;
+	char *strings;
+	uint32_t strings_size = 0, query_bytes, answer_bytes, at = 0;
+	unsigned long index;
+
+	if (answers && count)
+		memset(answers, 0, count * sizeof(*answers));
+	if (!stream.open || !stream.capabilities.mesh_store || count > XGPU_STREAM_MESH_STORE_QUERIES ||
+		(count && (!queries || !answers)))
+		return FALSE;
+	/* (the strings: each path and its NUL, then its table, 4-byte aligned) */
+	for (index = 0; index < count; index++)
+	{
+		size_t length = queries[index].path ? strlen(queries[index].path) : 0;
+
+		if (length > 4096 || queries[index].table_count > XGPU_STREAM_MESH_STORE_TABLE_MAXIMUM ||
+			(queries[index].table_count && !queries[index].table) ||
+			queries[index].node_count > XGPU_STREAM_MESH_NODES_MAXIMUM)
+			return FALSE;
+		strings_size = align_up(strings_size + (uint32_t)length + 1, 4) + (uint32_t)queries[index].table_count * 4;
+	}
+	query_bytes = (uint32_t)count * (uint32_t)sizeof(*wire);
+	answer_bytes = (uint32_t)count * (uint32_t)sizeof(*replies);
+	buffer = stream_allocate(16, align_up(query_bytes + answer_bytes + strings_size + 1, 16));
+	if (!buffer)
+		return FALSE;
+	wire = (struct xgpu_stream_mesh_store_query *)buffer;
+	replies = (struct xgpu_stream_mesh_store_answer *)(buffer + query_bytes);
+	strings = (char *)(buffer + query_bytes + answer_bytes);
+	memset(buffer, 0, query_bytes + answer_bytes + strings_size + 1);
+	for (index = 0; index < count; index++)
+	{
+		const struct xgpu_mesh_store_query *query = &queries[index];
+		uint32_t length = query->path ? (uint32_t)strlen(query->path) : 0;
+
+		wire[index].path = at;
+		wire[index].path_length = length;
+		if (length)
+			memcpy(strings + at, query->path, length);
+		strings[at + length] = 0;
+		at = align_up(at + length + 1, 4);
+		wire[index].table = at;
+		wire[index].table_count = (uint32_t)query->table_count;
+		if (query->table_count)
+			memcpy(strings + at, query->table, query->table_count * 4);
+		at += (uint32_t)query->table_count * 4;
+		wire[index].file_size = (uint32_t)query->file_size;
+		wire[index].stamp_seconds = (uint32_t)query->stamp_seconds;
+		wire[index].node_count = (uint32_t)query->node_count;
+		wire[index].node_crc = (uint32_t)query->node_crc;
+		wire[index].base_map_scale[0] = query->base_map_scale[0];
+		wire[index].base_map_scale[1] = query->base_map_scale[1];
+	}
+	record_body = record(XGPU_STREAM_MESH_STORE_MAP, sizeof(*record_body));
+	record_body->reply = STREAM_ADDRESS(replies);
+	record_body->generation = (uint32_t)generation;
+	record_body->tier = (uint32_t)tier;
+	record_body->budget_megabytes = (uint32_t)budget_megabytes;
+	record_body->query_count = (uint32_t)count;
+	record_body->queries = count ? STREAM_ADDRESS(wire) : 0;
+	record_body->strings = count ? STREAM_ADDRESS(strings) : 0;
+	record_body->strings_size = count ? strings_size : 0;
+	record_body->flags = loading ? XGPU_STREAM_MESH_STORE_LOADING : 0;
+	synchronous();
+	for (index = 0; index < count; index++)
+	{
+		answers[index].id = replies[index].id;
+		answers[index].render_radius = replies[index].render_radius;
+		answers[index].bones = replies[index].bones;
+		answers[index].lods = replies[index].lods;
+		answers[index].status = replies[index].status;
+	}
+	stream_free(buffer);
+	return TRUE;
+}
+
+void xgpu_backend_mesh_instance(unsigned long instance, unsigned long mesh, unsigned long object, float lod_pixels,
+	unsigned long flags, const float (*matrices)[3][4], unsigned long node_count, unsigned long game_ticks,
+	float game_fraction, const float *functions)
+{
+	struct xgpu_stream_mesh_instance *record_body;
+
+	if (!stream.open || !stream.capabilities.mesh_store || !instance || node_count > XGPU_STREAM_MESH_NODES_MAXIMUM)
+		return;
+	record_body = record(XGPU_STREAM_MESH_INSTANCE,
+		(uint32_t)(sizeof(*record_body) + node_count * sizeof(matrices[0])));
+	record_body->instance = (uint32_t)instance;
+	record_body->mesh = (uint32_t)mesh;
+	record_body->object = (uint32_t)object;
+	record_body->lod_pixels = lod_pixels;
+	record_body->node_count = (uint16_t)node_count;
+	record_body->flags = (uint16_t)flags;
+	record_body->game_ticks = (uint32_t)game_ticks;
+	record_body->game_fraction = game_fraction;
+	if (functions)
+		memcpy(record_body->functions, functions, sizeof(record_body->functions));
+	else
+		memset(record_body->functions, 0, sizeof(record_body->functions));
+	if (node_count)
+		memcpy(record_body + 1, matrices, node_count * sizeof(matrices[0]));
+}
+
+void xgpu_backend_mesh_draw(unsigned long instance, int region, int permutation, int shader, unsigned long flags,
+	int geometry, int part)
+{
+	struct xgpu_stream_mesh_draw *record_body;
+
+	if (!stream.open || !stream.capabilities.mesh_store)
+		return;
+	record_body = record(XGPU_STREAM_MESH_DRAW, sizeof(*record_body));
+	record_body->instance = (uint32_t)instance;
+	record_body->region = (uint8_t)region;
+	record_body->permutation = (uint8_t)permutation;
+	record_body->shader = (uint8_t)shader;
+	record_body->flags = (uint8_t)flags;
+	record_body->geometry = (uint16_t)geometry;
+	record_body->part = (uint16_t)part;
+}
+
+/* ---------- display.prism_materials */
+
+BOOL xgpu_backend_materials_available(void)
+{
+	return stream.open && stream.capabilities.materials && stream.capabilities.texture_store;
+}
+
+void xgpu_backend_material_define(unsigned long id, unsigned int flags, const unsigned long *textures,
+	const float *uniforms)
+{
+	struct xgpu_stream_material_define *record_body;
+	int index;
+
+	if (!xgpu_backend_materials_available() || id > XGPU_STREAM_MATERIALS)
+		return;
+	record_body = record(XGPU_STREAM_MATERIAL_DEFINE, sizeof(*record_body));
+	record_body->id = (uint32_t)id;
+	record_body->flags = id ? (uint32_t)(flags & 0xffu) : 0;
+	for (index = 0; index < XGPU_STREAM_MATERIAL_IMAGES; index++)
+		record_body->textures[index] = id && textures ? (uint32_t)textures[index] : 0;
+	if (id && uniforms)
+		memcpy(record_body->uniforms, uniforms, sizeof(record_body->uniforms));
+	else
+		memset(record_body->uniforms, 0, sizeof(record_body->uniforms));
+}
+
+void xgpu_backend_material_bind(unsigned long id)
+{
+	if (!xgpu_backend_materials_available())
+		return;
+	record_value(XGPU_STREAM_MATERIAL_BIND, (uint32_t)id);
 }
 
 /* display.prism_material_overlay: the images as stages (the tiles repeating

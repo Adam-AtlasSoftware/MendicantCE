@@ -313,7 +313,7 @@ int main(int argc, char **argv)
 		struct xgpu_manifest_draw draw;
 
 		xgpu_manifest_derive(&manifest.draws[index], &manifest.contexts[index], &settings, 0, &draw);
-		printf("%016llx\n", (unsigned long long)xgpu_manifest_hash(&draw, sizeof(draw), XGPU_MANIFEST_HASH_START));
+		printf("%016llx\n", (unsigned long long)xgpu_manifest_draw_hash(&draw, XGPU_MANIFEST_HASH_START));
 	}
 	xgpu_manifest_free(&manifest);
 	return 0;

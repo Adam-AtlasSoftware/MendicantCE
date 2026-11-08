@@ -564,6 +564,50 @@ static const struct config_setting config_settings[] =
 		"out to which surfaces are drawn from the remodel's near level, as a\n"
 		"percentage of the remodel's own (25 to 400): lower draws more of the\n"
 		"level from the far level, and is cheaper. Read each frame." },
+	{ "display.prism_textures", _config_string, "\"stock\"", "HALO_PRISM_TEXTURES", _environment_value,
+		_platform_desktop,
+		"PRISM: the replacement textures mods ship (textures/<tier>/ in a mod:\n"
+		"KTX2 files the renderer reads straight into the graphics card's\n"
+		"memory, drawn in place of the map's once they are in): \"stock\" none,\n"
+		"the game's own; \"enhanced\" the mods' enhanced tier; \"max\" their max\n"
+		"tier, else enhanced. Read each frame (the console's prism_set\n"
+		"\"textures max\"). Vulkan only; the Mac's Metal renderer draws stock." },
+	{ "display.prism_texture_budget_mb", _config_integer, "0", "HALO_PRISM_TEXTURE_BUDGET_MB", _environment_value,
+		_platform_desktop,
+		"PRISM: the graphics card's memory the replacement textures may take,\n"
+		"in MB; past it those not drawn lately go back to the stock resolution,\n"
+		"then stock. 0 is six tenths of what the card has free." },
+	{ "display.prism_models", _config_string, "\"stock\"", "HALO_PRISM_MODELS", _environment_value,
+		_platform_desktop,
+		"PRISM: the replacement meshes mods ship (meshes/<tier>/ in a mod:\n"
+		".pmesh files the renderer reads straight into the graphics card's\n"
+		"memory and draws in place of a model's parts once they are in, with the\n"
+		"game's own nodes, so its animations, collision and markers are\n"
+		"unchanged): \"stock\" none, the game's own; \"enhanced\" the mods'\n"
+		"enhanced tier; \"max\" their max tier, else enhanced. Read each frame\n"
+		"(the console's prism_set \"models max\"). Vulkan only; the Mac's Metal\n"
+		"renderer draws stock." },
+	{ "display.prism_model_budget_mb", _config_integer, "0", "HALO_PRISM_MODEL_BUDGET_MB", _environment_value,
+		_platform_desktop,
+		"PRISM: the graphics card's memory the replacement meshes may take, in\n"
+		"MB; a mesh past it is drawn stock. 0 is a fifth of what the card has\n"
+		"free, at most 1024." },
+	{ "display.prism_secondary_motion", _config_boolean, "true", "HALO_PRISM_SECONDARY_MOTION", _environment_value,
+		_platform_desktop,
+		"PRISM: the springs and driven helper bones of the replacement meshes'\n"
+		"extended skeletons (a pouch's swing, a knee's volume: docs/prism_rigs.md);\n"
+		"false: those helpers follow their parents (twists, copies and aims\n"
+		"still turn). Only for replacement meshes (display.prism_models)." },
+	{ "display.prism_materials", _config_string, "\"stock\"", "HALO_PRISM_MATERIALS", _environment_value,
+		_platform_desktop,
+		"PRISM: the materials mods give model shaders (materials/<shader>.\n"
+		"material.json in a mod: albedo, normal, occlusion, roughness and metal,\n"
+		"emissive, clear coat and detail images the renderer reads straight into\n"
+		"the graphics card's memory): \"pbr\" lights those shaders' draws by them\n"
+		"(GGX, under the level's own lights and reflections; CE's change colour,\n"
+		"self-illumination and detail maps kept); \"stock\" none, as the Xbox\n"
+		"drew them. Read each frame (the console's prism_set \"materials pbr\").\n"
+		"Vulkan only; the Mac's Metal renderer draws stock." },
 	{ "display.structure_culling", _config_integer, STRUCTURE_CULLING_DEFAULT, "HALO_STRUCTURE_CULLING", _environment_value,
 		_platform_all,
 		"Which tests skip the level's triangles the camera cannot see, as bits\n"
@@ -2508,6 +2552,12 @@ static const struct config_setting config_settings[] =
 		"menu to the frame that shows it; a rumble's step to the motors' write\n"
 		"(port/linux/game/latency_log.c, tools/latency_summary.py); empty for\n"
 		"none." },
+	{ "debug.prism_mesh_dump", _config_string, "\"\"", "HALO_PRISM_MESH_DUMP", _environment_value, _platform_all,
+		"A model tag's name (or \"*\" for all) whose geometry, nodes, regions,\n"
+		"shaders and markers are written as the game draws them to the data\n"
+		"folder's prism_dump/<map>/ as a map loads: what tools/pmesh_from_dump.py\n"
+		"and the art pipeline's exporter make a .pmesh from (the map's data:\n"
+		"keep it to yourself); empty none." },
 	{ "debug.determinism_log", _config_string, "\"\"", "HALO_DETERMINISM_LOG", _environment_value, _platform_all,
 		"A file to write a line a tick to: a hash of the game state, the random\n"
 		"seeds and every taker of a seed by its call site, to compare two runs\n"

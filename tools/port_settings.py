@@ -553,6 +553,8 @@ CONTROL_BINDINGS_X, CONTROL_BINDING_WIDTH = (136, 240), 104
 STREAMER = ("interface_settings/streamer_mode", "streamer_mode_screen")
 # (PRISM's graphics: Mods' PRISM GRAPHICS)
 PRISM_PAGE = ("mods_settings/prism", "prism_settings_screen")
+# (and the assets mods ship for it: Mods' PRISM ASSETS)
+PRISM_ASSETS_PAGE = ("mods_settings/prism_assets", "prism_assets_settings_screen")
 # (Online's Discord account: port/linux/src/player_link.c)
 DISCORD_ACCOUNT = ("network_setup/discord_account", "discord_account_screen")
 # (the server browsers' Filters, which their FILTERS opens too: menu_functions.c's
@@ -936,6 +938,9 @@ PAGES = {
             ("PRISM GRAPHICS ›", None, _page_screen(*PRISM_PAGE),
              "Finer light, materials and level geometry, built on this computer from your own maps. Video's "
              "Quality PRISM turns on the faithful ones.", "desktop"),
+            ("PRISM ASSETS ›", None, _page_screen(*PRISM_ASSETS_PAGE),
+             "The sharper textures, remodelled characters and materials mods ship, and how much of the graphics "
+             "card they take.", "desktop"),
         ],
     },
     # ---- the pages the rows open
@@ -1387,15 +1392,7 @@ PAGES = {
     PRISM_PAGE[0]: {
         "screen": PRISM_PAGE[1], "title": "PRISM GRAPHICS",
         "rows": [
-            # (PRISM's material overlay: drawn by the Vulkan renderer alone,
-            # for the model shaders a mod's overlay.json names)
-            (SECTION, "MATERIALS"),
-            ("MATERIAL DETAIL", "display.prism_material_overlay", ON_OFF,
-             "Gives weapons and armour the fine grain of their surfaces (machining, weave, wear) from a mod's "
-             "material overlay. It changes only the light on them. Off draws them as the Xbox did.", "desktop"),
-            ("SURFACE DETAIL", "display.prism_surface_maps", ON_OFF,
-             "Lights characters, weapons and vehicles by the surface maps baked on this computer for a mod's "
-             "remodels: their dents, seams and creases. Off draws them as the Xbox did.", "desktop"),
+            (SECTION, "SHADING"),
             # (PRISM v2's model light: the Vulkan renderer's alone, xgpu.h's
             # "PRISM v2's model light"; each off as the Xbox drew)
             ("HIGHLIGHTS", "display.prism_specular", [("OFF", "off"), ("SUBTLE", "subtle"), ("FULL", "full")],
@@ -1450,6 +1447,48 @@ PAGES = {
             ("TONE", "display.prism_tone", [("OFF", "off"), ("PRISM", "prism"), ("VIVID", "vivid")],
              "Grades the picture by the light around each pixel: deeper local contrast, dark places lifted, richer "
              "colour. Off draws it as the game does; Vivid goes further.", "desktop"),
+        ],
+    },
+    PRISM_ASSETS_PAGE[0]: {
+        "screen": PRISM_ASSETS_PAGE[1], "title": "PRISM ASSETS",
+        "rows": [
+            (SECTION, "MATERIALS"),
+            # (PRISM's material overlay: drawn by the Vulkan renderer alone,
+            # for the model shaders a mod's overlay.json names)
+            ("MATERIAL DETAIL", "display.prism_material_overlay", ON_OFF,
+             "Gives weapons and armour the fine grain of their surfaces (machining, weave, wear) from a mod's "
+             "material overlay. It changes only the light on them. Off draws them as the Xbox did.", "desktop"),
+            ("SURFACE DETAIL", "display.prism_surface_maps", ON_OFF,
+             "Lights characters, weapons and vehicles by the surface maps baked on this computer for a mod's "
+             "remodels: their dents, seams and creases. Off draws them as the Xbox did.", "desktop"),
+            # (PRISM's texture store: the replacement textures mods ship,
+            # drawn by the Vulkan renderer from the graphics card's memory)
+            ("TEXTURE DETAIL", "display.prism_textures", [("STOCK", "stock"), ("ENHANCED", "enhanced"), ("MAX", "max")],
+             "Draws the sharper textures mods ship in place of the game's, once they are in the graphics card's "
+             "memory. Stock draws the game's own.", "desktop"),
+            ("TEXTURE MEMORY", "display.prism_texture_budget_mb",
+             [("AUTO", "0"), ("512 MB", "512"), ("1 GB", "1024"), ("2 GB", "2048"), ("4 GB", "4096")],
+             "How much of the graphics card's memory mods' textures may take. Auto takes six tenths of what is "
+             "free; past it, those not seen lately go back to the game's.", "desktop"),
+            # (PRISM's materials: the GGX path for the model shaders a mod
+            # gives a material, drawn by the Vulkan renderer alone)
+            ("PBR MATERIALS", "display.prism_materials", [("STOCK", "stock"), ("PBR", "pbr")],
+             "Lights armour and weapons with the materials mods give them: their colour, bumps, roughness, "
+             "metal and coats under the level's own lights. Stock draws them as the Xbox did.", "desktop"),
+            # (PRISM's mesh store and extended skeletons: the replacement
+            # meshes mods ship, drawn by the Vulkan renderer)
+            (SECTION, "MODELS"),
+            ("REMODELS", "display.prism_models", [("STOCK", "stock"), ("ENHANCED", "enhanced"), ("MAX", "max")],
+             "Draws the remodelled characters, weapons and vehicles mods ship in place of the game's, on the "
+             "game's own skeletons: animations, collision and aim are unchanged. Stock draws the game's own.",
+             "desktop"),
+            ("MODEL MEMORY", "display.prism_model_budget_mb",
+             [("AUTO", "0"), ("256 MB", "256"), ("512 MB", "512"), ("1 GB", "1024")],
+             "How much of the graphics card's memory mods' remodels may take. Auto takes a fifth of what is "
+             "free; a remodel past it is drawn as the game's.", "desktop"),
+            ("SECONDARY MOTION", "display.prism_secondary_motion", ON_OFF,
+             "A remodel's pouches swing and its joints keep their volume as it moves. Off: they follow the "
+             "bones they hang from.", "desktop"),
         ],
     },
     STREAMER[0]: {

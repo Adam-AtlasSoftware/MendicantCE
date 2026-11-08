@@ -47,11 +47,13 @@ struct host_render_vertex_input
 	float attributes[16][4];
 };
 
-/* a stage's texture source and its levels */
+/* a stage's texture source and its levels, and its texture store id
+(display.prism_textures: SET_TEXTURES' XGPU_STREAM_TEXTURES_STORE; 0 none) */
 struct host_render_texture_stage
 {
 	struct xgpu_stream_texture_stage stage;
 	struct xgpu_stream_texture_level levels[XGPU_STREAM_MIP_LEVELS];
+	uint32_t store;
 };
 
 struct host_render_backend
@@ -124,6 +126,35 @@ struct host_render_backend
 	whose pixel program has material_overlay (its stages' level counts
 	checked: none); none: drawn as stage 3's others are */
 	void (*material_overlay)(void *context, const struct xgpu_stream_material_overlay *record);
+	/* display.prism_textures: the map's replacement textures (the queries
+	and their paths checked: inside the guest's memory, each path ending in
+	its NUL), an answer each written (zeroed before; queries, strings and
+	answers NULL when query_count is 0, which closes the store). NULL: no
+	store (INITIALIZE's texture_store then 0, and every answer refused) */
+	void (*texture_store_map)(void *context, const struct xgpu_stream_texture_store_map *record,
+		const struct xgpu_stream_texture_store_query *queries, const char *strings,
+		struct xgpu_stream_texture_store_answer *answers);
+	/* display.prism_materials: a material defined (its id at most
+	XGPU_STREAM_MATERIALS, its flags a byte: checked), and the material of the
+	draws that follow (an id at most XGPU_STREAM_MATERIALS); NULL: none (the
+	capabilities' materials then 0) */
+	void (*material_define)(void *context, const struct xgpu_stream_material_define *record);
+	void (*material_bind)(void *context, uint32_t id);
+
+	/* display.prism_models: the map's replacement meshes (the queries, their
+	paths and tables checked: inside the guest's memory, each path ending in
+	its NUL), an answer each written (zeroed before; queries, strings and
+	answers NULL when query_count is 0, which closes the store); an object
+	drawn with a mesh, its node_count matrices (checked: no more than
+	XGPU_STREAM_MESH_NODES_MAXIMUM, inside the record); the model part the
+	draws that follow are of. NULL (any of them): no store (INITIALIZE's
+	mesh_store then 0, and every answer refused) */
+	void (*mesh_store_map)(void *context, const struct xgpu_stream_mesh_store_map *record,
+		const struct xgpu_stream_mesh_store_query *queries, const char *strings,
+		struct xgpu_stream_mesh_store_answer *answers);
+	void (*mesh_instance)(void *context, const struct xgpu_stream_mesh_instance *record,
+		const float (*matrices)[3][4]);
+	void (*mesh_draw)(void *context, const struct xgpu_stream_mesh_draw *record);
 
 	void (*set_constants)(void *context, const struct xgpu_stream_constants *record);
 	void (*vertex_program)(void *context, const struct xgpu_stream_vertex_program *record);
