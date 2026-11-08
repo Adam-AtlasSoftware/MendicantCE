@@ -434,10 +434,18 @@ void prism_rt_frame_begin(void)
 		to[5] = light->color[1];
 		to[6] = light->color[2];
 		to[7] = light->intensity;
-		to[8] = light->direction[0];
-		to[9] = light->direction[1];
-		to[10] = light->direction[2];
+		/* (a point light's direction and cone are not set: none) */
+		to[8] = light->type == 1 ? light->direction[0] : 0.0f;
+		to[9] = light->type == 1 ? light->direction[1] : 0.0f;
+		to[10] = light->type == 1 ? light->direction[2] : 0.0f;
 		to[11] = light->type == 1 ? light->cone_cosine : 2.0f;
+		{
+			int value;
+
+			for (value = 0; value < 12; value++)
+				if (!(to[value] == to[value]) || to[value] > 1.0e30f || to[value] < -1.0e30f)
+					to[value] = 0.0f;
+		}
 		frame.light_count++;
 	}
 	halo_prism_rt_frame(&frame);
