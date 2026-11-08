@@ -98,7 +98,7 @@ at each pixel: with everything in the scene, and as CE baked it (the sun through
 through the structure alone). Their ratio multiplies CE's own light (a lightmap pass's lightmap, a model's ambient and
 distant lights), so where nothing CE did not bake is in the way the factor is 1 and the frame is CE's, byte for byte in
 its colours; objects take away sun and sky as they should (contact shadows, the sky's occlusion under a Pelican),
-held within 0.25 to 1.5. No auto-exposure and no grade: the units cancel. The dynamic lights (the flashlight, plasma,
+held within 0.4 to 1.5 on the level and 0.6 to 1.25 on a model (CE lit a model's insides by one flat ambient). No auto-exposure and no grade: the units cancel. The dynamic lights (the flashlight, plasma,
 muzzle flashes; not the light fixtures, whose light is in the lightmap) are added by CE unshadowed; the path tracer adds
 their bounce and takes away the share of their light its shadow rays find blocked (0.6 of it, held within -0.35 to
 +0.35 of the slot's light), in CE's own units (its model point light's falloff). `display.prism_rt_mood` scales all of
