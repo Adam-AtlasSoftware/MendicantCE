@@ -542,6 +542,9 @@ static void render_window(
 		{
 #endif
 		rasterizer_lens_flares_submit_occlusion_tests();
+		/* port: (not the game's shadow under each object where the sun's
+		shadows are traced: display.prism_rt, port/linux/game/prism_rt.c) */
+		if (!prism_rt_sun_shadows())
 		render_object_shadows();
 		/* port: and every model's (port/linux/game/render_enumerate.c) */
 		render_enumerate_shadows();

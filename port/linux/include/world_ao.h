@@ -102,6 +102,9 @@ pre-pass as its G-buffer whatever display.ambient_occlusion says; whether
 the pre-pass's pass is found at every pixel (else a quarter) */
 int prism_rt_mode(void);
 int prism_rt_full_resolution(void);
+/* the sun's shadows traced this frame: the game's shadow under each object
+left out (render.c) */
+int prism_rt_sun_shadows(void);
 
 /* the map loaded (scenario_load: its scene found, its fields looked for in
 the cache; a missing one baked in the background, never here), a BSP

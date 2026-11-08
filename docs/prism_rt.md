@@ -24,6 +24,11 @@ Hardware ray tracing for the Vulkan renderer, off by default. It follows the des
     sphere, so its brightness stays CE's and only how the light falls across it changes, within 1/k to k
     (k = 1.25 at `display.prism_rt_mood` 100, 1 at 0); the level's light is untouched (its bounce is in the lightmap);
   - no auto-exposure, no grade.
+- **CE's own object shadows are left out while the sun's are traced** (any mode on, a sun found:
+  `prism_rt_sun_shadows`, render.c), as prism-world2's cascaded shadows leave them out. Drawn as well, CE's soft
+  shadow under each object and the traced one stacked: the sand under the b30 Pelican went to a tenth of its light
+  (the darkest tenth of that corner 24 in stock, 8 in `gi`, 29 with CE's shadow left out). Indoors with no sun, CE's
+  shadows stay.
 
 ## The frame
 
@@ -154,8 +159,8 @@ timestamps.
 | RTX 2060, 1440p (shared, 84% busy before) | 4.98 | +4.59 | +7.15 | +9.62 | +17.18 (14.90) | +18.63 (14.45) | +26.36 (23.16) | +45.07 (34.15) |
 
 Another process kept the 2060 busy throughout (30 to 84% before each run): its figures are upper bounds. On the
-3070 Ti, medium at 1080p is within the design's 9 ms for `pathtraced`; 1440p is not (14 ms target: medium 11.3, ultra
-13.7). Low's checkerboard saves little at 1440p: the fixed passes (the object BLAS, the probes, three a-trous passes
+3070 Ti, medium at 1080p is within the design's 9 ms for `pathtraced` and 1440p within its 14 ms (medium 11.3,
+ultra 13.7), though high at 1080p (9.6) and ultra at 1080p (14.4) are over. Low's checkerboard saves little at 1440p: the fixed passes (the object BLAS, the probes, three a-trous passes
 over full-resolution half-float images) dominate, the next thing to cut. Memory: ten full-resolution RGBA16F images and
 one RGBA32F (about 170 MB at 1080p, 300 MB at 1440p).
 
