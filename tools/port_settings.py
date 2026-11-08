@@ -1436,6 +1436,14 @@ PAGES = {
              "Remodel draws the level's rock, sand and Forerunner walls from a denser model built on this computer "
              "from your maps: rounded rock, bevelled edges, the same light. You still walk and collide on the "
              "original. Xbox draws the map's own.", "desktop"),
+            ("GEOMETRY DETAIL", "display.prism_world_geometry_detail", [("LOW", "50"), ("NORMAL", "100"),
+                                                                        ("HIGH", "200")],
+             "How far out the remodel is drawn in its full detail; beyond, its lighter far level. Low is cheaper "
+             "on the graphics card.", "desktop"),
+            ("GEOMETRY SHADOWS", "display.prism_world_geometry_shadows", [("XBOX", "stock"), ("FAR", "far"),
+                                                                          ("FULL", "remodel")],
+             "The shape the sun's shadows are cast from with the remodel: Far, its lighter level (the rock's "
+             "ledges still shade); Full, every detail; Xbox, the map's own (cheapest).", "desktop"),
             ("BLOOM", "display.prism_bloom", [("OFF", "off"), ("GLOW", "glow"), ("FULL", "full")],
              "A soft glow about light brighter than white: plasma, the sun, lights and blasts. The Xbox had none; "
              "Glow is faint, Full wider. Nothing lit only to white glows.", "desktop"),

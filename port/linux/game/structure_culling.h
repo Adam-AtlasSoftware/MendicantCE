@@ -103,6 +103,9 @@ void structure_culling_set_tests(long tests);
 camera's position, not that point alone: in VR, the eyes beside the head's
 centre, which the game culls once from (vr_render.c); 0, flat */
 void structure_culling_set_camera_radius(real radius);
+/* the radius set (PRISM's remodel tests its own surfaces' facing from it:
+prism_world_geometry.c) */
+real structure_culling_get_camera_radius(void);
 void structure_culling_debug(boolean enable);
 void structure_culling_render_debug(void);
 

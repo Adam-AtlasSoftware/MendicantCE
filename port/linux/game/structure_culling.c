@@ -1070,6 +1070,11 @@ void structure_culling_set_camera_radius(real radius)
 	structure_culling_camera_radius = radius > 0.0f ? radius : 0.0f;
 }
 
+real structure_culling_get_camera_radius(void)
+{
+	return structure_culling_camera_radius;
+}
+
 void structure_culling_set_tests(long tests)
 {
 	long changed = structure_culling_tests ^ tests;

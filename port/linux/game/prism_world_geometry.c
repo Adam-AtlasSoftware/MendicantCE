@@ -82,6 +82,26 @@ segments (MIRROR_SEGMENT_BYTES), so that the GPU draws them from its copy
 and nothing is streamed per draw. They are freed when the BSP changes and
 with the map.
 
+What it costs. The passes before the surfaces do not draw the remodel as
+the surfaces are drawn: the sun's shadow maps (render_prism_shadow_pass,
+three cascades, both faces) draw every surface's far level
+(display.prism_world_geometry_shadows "far"; "remodel" or "stock" the
+map's triangles), and the world occlusion's pre-pass
+(render_world_ao_prepass), whose level gives only where objects darken it
+and what hides them, the map's own triangles
+(display.prism_world_geometry_occlusion "stock"; "far", "remodel"). Each
+surface's near and far levels have a cone of facings (the bounds' sphere,
+the mean of the triangles' facings and the least cosine to it, made as the
+file loads): a level that faces away from the camera whole is skipped in
+the camera's passes (display.prism_world_geometry_facing), as
+structure_culling.c skips the stock triangles it cannot, or drawn through
+where it is a few triangles between two drawn (MAXIMUM_FILLED_TRIANGLES:
+the GPU culls them all). The choices of near or far and facing are found
+once a camera (a stamp), not once a pass. And a part's runs are drawn as
+one draw, their indices copied one after another
+(display.prism_world_geometry_batch). display.prism_world_geometry_detail
+scales the far distance.
+
 Off ("stock"), prism_world_geometry_frame reads the setting and returns,
 prism_world_geometry_chunk returns the material's own vertices and
 prism_world_geometry_draw returns FALSE: the game draws as before, byte for
@@ -101,6 +121,7 @@ byte.
 #include "shaders/shaders.h"
 #include "structures/structure_bsp_definitions.h"
 #include "render/render.h"
+#include "structure_culling.h"
 #include "prism_world_geometry.h"
 
 #include <math.h>
@@ -117,6 +138,8 @@ byte.
 char *tag_get_name(long tag_index);
 /* the platform's (port/linux/src) */
 char const *config_string(char const *name);
+int config_boolean(char const *name);
+long config_integer(char const *name);
 unsigned long config_changes(void);
 void platform_log(char const *format, ...);
 /* (rasterizer_xbox.h) */
@@ -151,6 +174,30 @@ mod_models.c's MIRROR_SEGMENT_BYTES */
 #define MIRROR_SEGMENT_BYTES 0x400000UL
 /* the frames between the log's lines of what was drawn */
 #define STATISTICS_FRAMES 1800
+/* the most triangles of surfaces skipped for facing away that a draw goes
+on through rather than end there and start again after them (the GPU culls
+every one of them: a draw fewer for some vertices more) */
+#define MAXIMUM_FILLED_TRIANGLES 384
+/* display.prism_world_geometry_detail's bounds (percent) */
+#define MINIMUM_DETAIL 25
+#define MAXIMUM_DETAIL 400
+
+/* the shape a pass before the surfaces draws the level from
+(display.prism_world_geometry_shadows and _occlusion) */
+enum
+{
+	_world_proxy_stock,
+	_world_proxy_far,
+	_world_proxy_remodel
+};
+
+/* a surface's choices for the camera (world_material's choices) */
+enum
+{
+	_surface_choice_far_bit,
+	_surface_choice_near_away_bit,
+	_surface_choice_far_away_bit
+};
 
 /* ---------- structures */
 
@@ -187,6 +234,12 @@ struct world_material
 	unsigned long *far_triangles;
 	float *bounds;
 	float far_distance;
+	/* each surface's cones of facings (its near triangles', then its far
+	ones'; NULL none: never skipped for facing away), and its choices for
+	the camera (_surface_choice_*) with the camera's stamp they are of */
+	struct structure_culling_cone *cones;
+	unsigned long *choice_stamps;
+	byte *choices;
 };
 
 struct world_run
@@ -223,9 +276,27 @@ struct prism_world_geometry_globals
 	long run_count;
 
 	/* the camera of the frame (structure_render_preprocess's), and the
-	zoom's scale of the far levels' distances */
+	zoom's scale of the far levels' distances (with the detail setting's);
+	the camera's radius (VR's eyes); the stamp of the surfaces' choices,
+	new whenever any of these changes */
 	real_point3d camera;
 	float distance_scale;
+	real camera_radius;
+	unsigned long stamp;
+
+	/* display.prism_world_geometry_shadows and _occlusion (_world_proxy_*),
+	_facing, and _detail as a scale */
+	short shadow_proxy;
+	short occlusion_proxy;
+	boolean facing;
+	boolean batch;
+	float detail;
+
+	/* display.prism_world_geometry_batch: a part's runs copied one after
+	another into this, and drawn as one (the front end streams it) */
+	word *batch_indices;
+	unsigned long batch_capacity;
+	struct world_resource batch_resource;
 
 	/* what was drawn (the log, every STATISTICS_FRAMES frames) */
 	unsigned long frames;
@@ -234,6 +305,9 @@ struct prism_world_geometry_globals
 	unsigned long stock_triangles;
 	unsigned long far_surfaces;
 	unsigned long surfaces;
+	unsigned long away_surfaces;
+	unsigned long filled_triangles;
+	unsigned long batched_runs;
 };
 
 /* ---------- globals */
@@ -294,11 +368,22 @@ static unsigned long segment_place(
 	return offset;
 }
 
+static short proxy_setting(
+	char const *name,
+	short fallback)
+{
+	char const *value = config_string(name);
+
+	return !value ? fallback : !strcmp(value, "stock") ? _world_proxy_stock : !strcmp(value, "far") ? _world_proxy_far :
+		!strcmp(value, "remodel") ? _world_proxy_remodel : fallback;
+}
+
 static void settings_read(
 	void)
 {
 	char const *value;
 	boolean enabled;
+	long detail;
 
 	if (world_geometry.settings_read == config_changes() + 1)
 	{
@@ -314,6 +399,13 @@ static void settings_read(
 		world_geometry.tried_bsp = NULL;
 	}
 	world_geometry.enabled = enabled;
+	world_geometry.shadow_proxy = proxy_setting("display.prism_world_geometry_shadows", _world_proxy_far);
+	world_geometry.occlusion_proxy = proxy_setting("display.prism_world_geometry_occlusion", _world_proxy_stock);
+	world_geometry.facing = config_boolean("display.prism_world_geometry_facing") != 0;
+	world_geometry.batch = config_boolean("display.prism_world_geometry_batch") != 0;
+	detail = config_integer("display.prism_world_geometry_detail");
+	detail = detail < MINIMUM_DETAIL ? MINIMUM_DETAIL : detail > MAXIMUM_DETAIL ? MAXIMUM_DETAIL : detail;
+	world_geometry.detail = (float)detail / 100.0f;
 
 	return;
 }
@@ -334,12 +426,18 @@ static void world_geometry_release(
 			free(world_geometry.materials[index].surface_first_triangle);
 			free(world_geometry.materials[index].far_triangles);
 			free(world_geometry.materials[index].bounds);
+			free(world_geometry.materials[index].cones);
+			free(world_geometry.materials[index].choice_stamps);
+			free(world_geometry.materials[index].choices);
 		}
 	}
 	free(world_geometry.materials);
 	free(world_geometry.lightmap_first);
 	free(world_geometry.lookup);
 	free(world_geometry.runs);
+	free(world_geometry.batch_indices);
+	world_geometry.batch_indices = NULL;
+	world_geometry.batch_capacity = 0;
 	world_geometry.geometry = NULL;
 	world_geometry.materials = NULL;
 	world_geometry.material_count = 0;
@@ -670,6 +768,226 @@ refused:
 	return FALSE;
 }
 
+/* the cone of facings of a run of a part's triangles (the file's vertices
+and triangles), as structure_culling_cone_build's: the bounds' sphere, the
+mean of the triangles' unit normals (structure_culling.c's sign: the
+stock surfaces' front) and the least cosine of any of them to it. A
+triangle of no area draws nothing and is left out; a run of none, or one
+whose facings span a hemisphere, gets a cutoff of -1 (never facing away).
+Doubles: the cutoff of a run of thousands of nearly flat triangles must
+not round past the truth */
+static void run_cone(
+	byte const *vertices,
+	byte const *triangles,
+	unsigned long first,
+	unsigned long count,
+	struct structure_culling_cone *cone)
+{
+	double low[3] = { 0.0, 0.0, 0.0 }, high[3] = { 0.0, 0.0, 0.0 }, sum[3] = { 0.0, 0.0, 0.0 };
+	double centre[3], radius = 0.0, length, cutoff = 1.0;
+	unsigned long triangle;
+	long normals = 0;
+	int axis, pass;
+
+	cone->center.x = cone->center.y = cone->center.z = 0.0f;
+	cone->axis.i = cone->axis.j = cone->axis.k = 0.0f;
+	cone->radius = 0.0f;
+	cone->cutoff = -1.0f;
+	if (!count)
+	{
+		return;
+	}
+	/* the bounds, then the sphere about their middle; then the normals'
+	mean (pass 0) and their least cosine to it (pass 1) */
+	for (triangle = first; triangle < first + count; triangle++)
+	{
+		int corner;
+
+		for (corner = 0; corner < 3; corner++)
+		{
+			unsigned long vertex = (unsigned long)triangles[6 * triangle + 2 * corner] |
+				((unsigned long)triangles[6 * triangle + 2 * corner + 1] << 8);
+			float point[3];
+
+			memcpy(point, vertices + vertex * ENVIRONMENT_VERTEX_UNCOMPRESSED_SIZE, sizeof(point));
+			for (axis = 0; axis < 3; axis++)
+			{
+				if ((triangle == first && corner == 0) || point[axis] < low[axis])
+				{
+					low[axis] = point[axis];
+				}
+				if ((triangle == first && corner == 0) || point[axis] > high[axis])
+				{
+					high[axis] = point[axis];
+				}
+			}
+		}
+	}
+	for (axis = 0; axis < 3; axis++)
+	{
+		centre[axis] = 0.5 * (low[axis] + high[axis]);
+	}
+	for (pass = 0; pass < 2; pass++)
+	{
+		for (triangle = first; triangle < first + count; triangle++)
+		{
+			double p[3][3], e0[3], e1[3], n[3], squared;
+			int corner;
+
+			for (corner = 0; corner < 3; corner++)
+			{
+				unsigned long vertex = (unsigned long)triangles[6 * triangle + 2 * corner] |
+					((unsigned long)triangles[6 * triangle + 2 * corner + 1] << 8);
+				float point[3];
+
+				memcpy(point, vertices + vertex * ENVIRONMENT_VERTEX_UNCOMPRESSED_SIZE, sizeof(point));
+				for (axis = 0; axis < 3; axis++)
+				{
+					p[corner][axis] = point[axis];
+				}
+				if (pass == 0)
+				{
+					double dx = p[corner][0] - centre[0], dy = p[corner][1] - centre[1], dz = p[corner][2] - centre[2];
+					double distance = sqrt(dx * dx + dy * dy + dz * dz);
+
+					radius = distance > radius ? distance : radius;
+				}
+			}
+			for (axis = 0; axis < 3; axis++)
+			{
+				e0[axis] = p[1][axis] - p[0][axis];
+				e1[axis] = p[2][axis] - p[0][axis];
+			}
+			n[0] = e0[1] * e1[2] - e0[2] * e1[1];
+			n[1] = e0[2] * e1[0] - e0[0] * e1[2];
+			n[2] = e0[0] * e1[1] - e0[1] * e1[0];
+			squared = n[0] * n[0] + n[1] * n[1] + n[2] * n[2];
+			if (!(squared > 1.0e-18))
+			{
+				continue;
+			}
+			length = -1.0 / sqrt(squared); /* (structure_culling.c's STRUCTURE_CULLING_FRONT_SIGN) */
+			if (pass == 0)
+			{
+				for (axis = 0; axis < 3; axis++)
+				{
+					sum[axis] += n[axis] * length;
+				}
+				normals++;
+			}
+			else
+			{
+				double cosine = (n[0] * sum[0] + n[1] * sum[1] + n[2] * sum[2]) * length;
+
+				cutoff = cosine < cutoff ? cosine : cutoff;
+			}
+		}
+		if (pass == 0)
+		{
+			length = sqrt(sum[0] * sum[0] + sum[1] * sum[1] + sum[2] * sum[2]);
+			if (!normals || !(length > 1.0e-9))
+			{
+				return;
+			}
+			for (axis = 0; axis < 3; axis++)
+			{
+				sum[axis] /= length;
+			}
+		}
+	}
+	cone->center.x = (float)centre[0];
+	cone->center.y = (float)centre[1];
+	cone->center.z = (float)centre[2];
+	/* (a little more than the truth: the vertices are compressed for
+	drawing, and the float sphere must hold every one) */
+	cone->radius = (float)(radius * 1.0001 + 1.0e-3);
+	cone->axis.i = (float)sum[0];
+	cone->axis.j = (float)sum[1];
+	cone->axis.k = (float)sum[2];
+	/* (a margin for the compression of the normals' positions, too) */
+	cone->cutoff = cutoff > 0.0 ? (float)(cutoff - 1.0e-3) : -1.0f;
+
+	return;
+}
+
+/* the part's surfaces' cones of facings: those of a surface whose mean
+facing is not its stock triangle's (some remodel written the other way
+about) are left at -1, never facing away; the count of those returned */
+static long part_cones(
+	struct structure_bsp *bsp,
+	struct pwg_material_view const *view,
+	struct world_material *made)
+{
+	long vertex_size = rasterizer_geometry_get_vertex_size(view->material->vertices.type);
+	byte const *stock_vertices = (byte const *)view->material->compressed_vertex_data.address;
+	long local, disagree = 0;
+
+	made->cones = malloc(made->surface_count * 2 * sizeof(*made->cones) + 1);
+	made->choice_stamps = calloc(made->surface_count + 1, sizeof(*made->choice_stamps));
+	made->choices = calloc(made->surface_count + 1, 1);
+	if (!made->cones || !made->choice_stamps || !made->choices)
+	{
+		free(made->cones);
+		made->cones = NULL;
+		return 0;
+	}
+	for (local = 0; local < made->surface_count; local++)
+	{
+		struct structure_culling_cone *near = &made->cones[2 * local];
+		struct structure_culling_cone *far = &made->cones[2 * local + 1];
+		struct structure_surface const *surface = TAG_BLOCK_GET_ELEMENT(&bsp->surfaces,
+			made->first_surface_index + made->part_first_surface + local, struct structure_surface);
+		real_vector3d stock = { 0.0f, 0.0f, 0.0f };
+		float p[3][3];
+		int corner;
+
+		run_cone(view->vertices, view->triangles, made->surface_first_triangle[local],
+			made->surface_first_triangle[local + 1] - made->surface_first_triangle[local], near);
+		if (made->far_triangles)
+		{
+			run_cone(view->vertices, view->triangles, made->far_triangles[2 * local], made->far_triangles[2 * local + 1],
+				far);
+		}
+		else
+		{
+			*far = *near;
+		}
+		/* the stock triangle's front (the checks have bounded its indices'
+		material: material_stock_checks) */
+		for (corner = 0; corner < 3; corner++)
+		{
+			unsigned long vertex = (unsigned short)surface->vertex_indices[corner];
+
+			if (vertex >= (unsigned long)view->material->vertices.count)
+			{
+				break;
+			}
+			memcpy(p[corner], stock_vertices + vertex * vertex_size, sizeof(p[corner]));
+		}
+		if (corner == 3)
+		{
+			float e0[3] = { p[1][0] - p[0][0], p[1][1] - p[0][1], p[1][2] - p[0][2] };
+			float e1[3] = { p[2][0] - p[0][0], p[2][1] - p[0][1], p[2][2] - p[0][2] };
+
+			stock.i = -(e0[1] * e1[2] - e0[2] * e1[1]);
+			stock.j = -(e0[2] * e1[0] - e0[0] * e1[2]);
+			stock.k = -(e0[0] * e1[1] - e0[1] * e1[0]);
+		}
+		if (near->cutoff > 0.0f && dot_product3d(&near->axis, &stock) <= 0.0f)
+		{
+			near->cutoff = -1.0f;
+			disagree++;
+		}
+		if (far->cutoff > 0.0f && dot_product3d(&far->axis, &stock) <= 0.0f)
+		{
+			far->cutoff = -1.0f;
+			disagree++;
+		}
+	}
+
+	return disagree;
+}
+
 /* the usable materials' vertices compressed into one block of contiguous
 memory, each array inside a mirror segment, and their buffers made */
 static boolean world_geometry_make(
@@ -682,7 +1000,7 @@ static boolean world_geometry_make(
 	long lightmap_vertex_size = rasterizer_geometry_get_vertex_size(_rasterizer_vertex_type_environment_lightmap_compressed);
 	unsigned long total = 0, alignment, offset;
 	unsigned long triangles = 0, stock_triangles = 0, vertices = 0;
-	long usable = 0, index, lightmap_index, entry_count = 0;
+	long usable = 0, index, lightmap_index, entry_count = 0, disagree = 0, coned = 0, facing = 0;
 	byte *scratch = NULL;
 	unsigned long scratch_size = 0;
 
@@ -815,6 +1133,20 @@ static boolean world_geometry_make(
 				memcpy(made->bounds, view->bounds, view->part_surface_count * 4 * sizeof(float));
 			}
 		}
+		made->cones = NULL;
+		made->choice_stamps = NULL;
+		made->choices = NULL;
+		disagree += part_cones(bsp, view, made);
+		if (made->cones)
+		{
+			long local;
+
+			for (local = 0; local < made->surface_count * 2; local++)
+			{
+				coned++;
+				facing += made->cones[local].cutoff > 0.0f;
+			}
+		}
 
 		/* the vertices, then the lightmap vertices (compressed from a copy:
 		the file's bytes need not be aligned) */
@@ -886,9 +1218,11 @@ static boolean world_geometry_make(
 	}
 	free(scratch);
 	platform_log("prism world geometry: %s: %ld of %ld material parts remodelled, %lu triangles for %lu (%.1fx), "
-		"%lu vertices, %lu KB of contiguous memory",
+		"%lu vertices, %lu KB of contiguous memory; %.1f%% of the surfaces' levels can face away whole "
+		"(%ld turned the other way about from their stock triangles)",
 		path, world_geometry.material_count, view_count, triangles, stock_triangles,
-		stock_triangles ? (double)triangles / (double)stock_triangles : 0.0, vertices, total / 1024);
+		stock_triangles ? (double)triangles / (double)stock_triangles : 0.0, vertices, total / 1024,
+		coned ? 100.0 * (double)facing / (double)coned : 0.0, disagree);
 
 	return TRUE;
 }
@@ -980,11 +1314,18 @@ static void statistics_frame(
 	if (world_geometry.frames >= STATISTICS_FRAMES)
 	{
 		platform_log("prism world geometry: %lu frames: %.1f draws, %.0f triangles a frame for %.0f stock, "
-			"%.1f%% of the surfaces drawn far",
+			"%.1f%% of the surfaces drawn far, %.1f%% skipped facing away (%.0f of their triangles a frame drawn "
+			"through), %.1f runs a frame drawn with another",
 			world_geometry.frames, (double)world_geometry.draws / world_geometry.frames,
 			(double)world_geometry.triangles / world_geometry.frames,
 			(double)world_geometry.stock_triangles / world_geometry.frames,
-			world_geometry.surfaces ? 100.0 * (double)world_geometry.far_surfaces / world_geometry.surfaces : 0.0);
+			world_geometry.surfaces ? 100.0 * (double)world_geometry.far_surfaces / world_geometry.surfaces : 0.0,
+			world_geometry.stock_triangles ? 100.0 * (double)world_geometry.away_surfaces / world_geometry.stock_triangles : 0.0,
+			(double)world_geometry.filled_triangles / world_geometry.frames,
+			(double)world_geometry.batched_runs / world_geometry.frames);
+		world_geometry.batched_runs = 0;
+		world_geometry.away_surfaces = 0;
+		world_geometry.filled_triangles = 0;
 		world_geometry.far_surfaces = 0;
 		world_geometry.surfaces = 0;
 		world_geometry.frames = 0;
@@ -994,6 +1335,51 @@ static void statistics_frame(
 	}
 
 	return;
+}
+
+/* a surface's choices for the frame's camera (_surface_choice_*: drawn
+far, its near and far levels facing away whole), found once for each
+camera (the passes of a frame, the frames of a still camera ask again) */
+static byte surface_choice(
+	struct world_material *of,
+	long local)
+{
+	byte choice = 0;
+
+	if (of->choice_stamps && of->choice_stamps[local] == world_geometry.stamp)
+	{
+		return of->choices[local];
+	}
+	if (of->far_triangles)
+	{
+		float const *sphere = of->bounds + 4 * local;
+		float dx = sphere[0] - world_geometry.camera.x;
+		float dy = sphere[1] - world_geometry.camera.y;
+		float dz = sphere[2] - world_geometry.camera.z;
+		float beyond = sqrtf(dx * dx + dy * dy + dz * dz) - sphere[3];
+
+		if (beyond > of->far_distance * world_geometry.distance_scale)
+		{
+			choice |= FLAG(_surface_choice_far_bit);
+		}
+	}
+	if (of->cones)
+	{
+		if (structure_culling_cone_facing(&of->cones[2 * local], &world_geometry.camera, world_geometry.camera_radius) ==
+			_structure_culling_facing_away)
+		{
+			choice |= FLAG(_surface_choice_near_away_bit);
+		}
+		if (structure_culling_cone_facing(&of->cones[2 * local + 1], &world_geometry.camera,
+			world_geometry.camera_radius) == _structure_culling_facing_away)
+		{
+			choice |= FLAG(_surface_choice_far_away_bit);
+		}
+		of->choice_stamps[local] = world_geometry.stamp;
+		of->choices[local] = choice;
+	}
+
+	return choice;
 }
 
 /* ---------- public code */
@@ -1023,12 +1409,27 @@ void prism_world_geometry_frame(
 	}
 	/* (the frame's camera, which every pass of the structure's draws this
 	frame shares; a narrower view, a zoom, draws near surfaces from further) */
-	world_geometry.camera = render.camera.position;
 	{
 		float fov = render.camera.vertical_field_of_view;
-
-		world_geometry.distance_scale = isfinite(fov) && fov > 0.01f && fov < 3.1f ?
+		float scale = isfinite(fov) && fov > 0.01f && fov < 3.1f ?
 			(float)(tan(0.5 * 70.0 * 3.14159265358979 / 180.0) / tan(0.5 * (double)fov)) : 1.0f;
+		real radius = structure_culling_get_camera_radius();
+
+		scale *= world_geometry.detail;
+		/* (the surfaces' choices are kept while the camera stays: every pass
+		of a frame, and the frames of a still camera) */
+		if (!world_geometry.stamp || memcmp(&world_geometry.camera, &render.camera.position, sizeof(real_point3d)) ||
+			world_geometry.distance_scale != scale || world_geometry.camera_radius != radius)
+		{
+			world_geometry.stamp++;
+			if (!world_geometry.stamp)
+			{
+				world_geometry.stamp = 1;
+			}
+		}
+		world_geometry.camera = render.camera.position;
+		world_geometry.distance_scale = scale;
+		world_geometry.camera_radius = radius;
 	}
 	statistics_frame();
 
@@ -1043,7 +1444,9 @@ struct vertex_buffer const *prism_world_geometry_chunk(
 	struct vertex_buffer const *stock)
 {
 	struct world_material *made;
-	long entry, index, part;
+	long entry, index, part, gap;
+	short proxy;
+	boolean facing;
 
 	world_geometry.current = NULL;
 	if (!world_geometry.enabled || !world_geometry.loaded_bsp || !world_geometry.lookup ||
@@ -1059,16 +1462,31 @@ struct vertex_buffer const *prism_world_geometry_chunk(
 		return stock;
 	}
 	made = &world_geometry.materials[world_geometry.lookup[entry]];
+	/* (the passes before the surfaces: the sun's shadow maps and the
+	occlusion's pre-pass draw the shape their settings choose) */
+	proxy = render_prism_shadow_pass ? world_geometry.shadow_proxy :
+		render_world_ao_prepass ? world_geometry.occlusion_proxy : _world_proxy_remodel;
+	if (proxy == _world_proxy_stock)
+	{
+		return stock;
+	}
+	/* (the sun's casters face it, not the camera: none is skipped there) */
+	facing = world_geometry.facing && !render_prism_shadow_pass;
 
 	/* each surface's triangles, in the part that has them, joined into runs
-	where they meet */
+	where they meet; a surface whose triangles all face away is left out,
+	or drawn through where it is few triangles between two of a run */
 	world_geometry.run_count = 0;
+	gap = MAXIMUM_FILLED_TRIANGLES + 1;
 	part = 0;
 	for (index = 0; index < surface_count; index++)
 	{
 		long surface = surface_indices[index] - made->first_surface_index;
-		struct world_material const *of;
-		long begin, end;
+		struct world_material *of;
+		struct world_run *last;
+		long begin, end, local;
+		byte choice;
+		boolean far;
 
 		while (part < made->part_count - 1 && surface >= made[part].part_first_surface + made[part].surface_count)
 		{
@@ -1079,35 +1497,48 @@ struct vertex_buffer const *prism_world_geometry_chunk(
 		{
 			continue;
 		}
-		begin = (long)of->surface_first_triangle[surface - of->part_first_surface];
-		end = (long)of->surface_first_triangle[surface - of->part_first_surface + 1];
+		local = surface - of->part_first_surface;
+		choice = surface_choice(of, local);
+		far = of->far_triangles && (proxy == _world_proxy_far || TEST_FLAG(choice, _surface_choice_far_bit));
+		if (far)
+		{
+			begin = (long)of->far_triangles[2 * local];
+			end = begin + (long)of->far_triangles[2 * local + 1];
+		}
+		else
+		{
+			begin = (long)of->surface_first_triangle[local];
+			end = (long)of->surface_first_triangle[local + 1];
+		}
 		if (of->far_triangles)
 		{
-			long local = surface - of->part_first_surface;
-			float const *sphere = of->bounds + 4 * local;
-			float dx = sphere[0] - world_geometry.camera.x;
-			float dy = sphere[1] - world_geometry.camera.y;
-			float dz = sphere[2] - world_geometry.camera.z;
-			float beyond = sqrtf(dx * dx + dy * dy + dz * dz) - sphere[3];
-
 			world_geometry.surfaces++;
-			if (beyond > of->far_distance * world_geometry.distance_scale)
-			{
-				begin = (long)of->far_triangles[2 * local];
-				end = begin + (long)of->far_triangles[2 * local + 1];
-				world_geometry.far_surfaces++;
-			}
+			world_geometry.far_surfaces += far;
 		}
 		if (end <= begin)
 		{
 			continue;
 		}
-		if (world_geometry.run_count &&
-			world_geometry.runs[world_geometry.run_count - 1].part == part &&
-			world_geometry.runs[world_geometry.run_count - 1].first_triangle +
-				world_geometry.runs[world_geometry.run_count - 1].triangle_count == begin)
+		last = world_geometry.run_count ? &world_geometry.runs[world_geometry.run_count - 1] : NULL;
+		if (facing && TEST_FLAG(choice, far ? _surface_choice_far_away_bit : _surface_choice_near_away_bit))
 		{
-			world_geometry.runs[world_geometry.run_count - 1].triangle_count += end - begin;
+			world_geometry.away_surfaces++;
+			/* (a run may go on through it, if the next surface drawn follows) */
+			if (last && last->part == part && last->first_triangle + last->triangle_count + gap == begin)
+			{
+				gap += end - begin;
+			}
+			else
+			{
+				gap = MAXIMUM_FILLED_TRIANGLES + 1;
+			}
+			continue;
+		}
+		if (last && last->part == part && gap <= MAXIMUM_FILLED_TRIANGLES &&
+			last->first_triangle + last->triangle_count + gap == begin)
+		{
+			world_geometry.filled_triangles += (unsigned long)gap;
+			last->triangle_count += gap + end - begin;
 		}
 		else
 		{
@@ -1116,6 +1547,7 @@ struct vertex_buffer const *prism_world_geometry_chunk(
 			world_geometry.runs[world_geometry.run_count].triangle_count = end - begin;
 			world_geometry.run_count++;
 		}
+		gap = 0;
 	}
 	world_geometry.current = made;
 	world_geometry.stock_triangles += (unsigned long)surface_count;
@@ -1128,7 +1560,7 @@ int prism_world_geometry_draw(
 	struct vertex_buffer const *vertex_buffer1)
 {
 	struct world_material *made = world_geometry.current;
-	long run;
+	long run, next;
 
 	if (!world_geometry.materials || !vertex_buffer0)
 	{
@@ -1141,29 +1573,77 @@ int prism_world_geometry_draw(
 		return (byte const *)vertex_buffer0 >= (byte const *)world_geometry.materials &&
 			(byte const *)vertex_buffer0 < (byte const *)(world_geometry.materials + world_geometry.material_count);
 	}
-	for (run = 0; run < world_geometry.run_count; run++)
+	for (run = 0; run < world_geometry.run_count; run = next)
 	{
 		struct world_material *part = &made[world_geometry.runs[run].part];
+		struct vertex_buffer const *second = vertex_buffer1 == vertex_buffer0 ? &part->buffers[0] : &part->buffers[1];
+		struct world_resource *indices = &part->index_resource;
 		long first = world_geometry.runs[run].first_triangle;
 		long count = world_geometry.runs[run].triangle_count;
+		long total = count;
 
-		if (!run || world_geometry.runs[run - 1].part != world_geometry.runs[run].part)
+		/* (the part's runs: drawn one by one from its own triangles, or
+		copied one after another and drawn as one) */
+		for (next = run + 1; next < world_geometry.run_count && world_geometry.runs[next].part == world_geometry.runs[run].part;
+			next++)
 		{
-			/* (the lightmap's vertices where the pass draws them: vertices + 1,
-			or the vertices again when the lightmap is missing) */
-			struct vertex_buffer const *second = vertex_buffer1 == vertex_buffer0 ? &part->buffers[0] : &part->buffers[1];
-
-			IDirect3DDevice8_SetStreamSource(global_d3d_device, 0,
-				(IDirect3DVertexBuffer8 *)part->buffers[0].hardware_format,
-				rasterizer_geometry_get_vertex_size(part->buffers[0].type));
-			if (vertex_buffer1)
-			{
-				IDirect3DDevice8_SetStreamSource(global_d3d_device, 1,
-					(IDirect3DVertexBuffer8 *)second->hardware_format,
-					rasterizer_geometry_get_vertex_size(second->type));
-			}
-			IDirect3DDevice8_SetIndices(global_d3d_device, (IDirect3DIndexBuffer8 *)&part->index_resource, 0);
+			total += world_geometry.runs[next].triangle_count;
 		}
+		if (world_geometry.batch && next - run > 1)
+		{
+			unsigned long wanted = (unsigned long)total * 3;
+
+			if (wanted > world_geometry.batch_capacity)
+			{
+				word *grown = realloc(world_geometry.batch_indices, (wanted + wanted / 2 + 3) * sizeof(word));
+
+				if (grown)
+				{
+					world_geometry.batch_indices = grown;
+					world_geometry.batch_capacity = wanted + wanted / 2 + 3;
+				}
+			}
+			if (wanted <= world_geometry.batch_capacity)
+			{
+				word const *from = (word const *)part->index_resource.data;
+				unsigned long at = 0;
+				long each;
+
+				for (each = run; each < next; each++)
+				{
+					memcpy(world_geometry.batch_indices + at, from + 3 * world_geometry.runs[each].first_triangle,
+						(size_t)world_geometry.runs[each].triangle_count * 3 * sizeof(word));
+					at += (unsigned long)world_geometry.runs[each].triangle_count * 3;
+				}
+				world_geometry.batch_resource.common = D3DCOMMON_TYPE_INDEXBUFFER | 1;
+				world_geometry.batch_resource.data = (unsigned long)world_geometry.batch_indices;
+				indices = &world_geometry.batch_resource;
+				first = 0;
+				count = total;
+				world_geometry.batched_runs += (unsigned long)(next - run - 1);
+			}
+			else
+			{
+				next = run + 1;
+			}
+		}
+		else
+		{
+			next = run + 1;
+		}
+
+		/* (the lightmap's vertices where the pass draws them: vertices + 1,
+		or the vertices again when the lightmap is missing) */
+		IDirect3DDevice8_SetStreamSource(global_d3d_device, 0,
+			(IDirect3DVertexBuffer8 *)part->buffers[0].hardware_format,
+			rasterizer_geometry_get_vertex_size(part->buffers[0].type));
+		if (vertex_buffer1)
+		{
+			IDirect3DDevice8_SetStreamSource(global_d3d_device, 1,
+				(IDirect3DVertexBuffer8 *)second->hardware_format,
+				rasterizer_geometry_get_vertex_size(second->type));
+		}
+		IDirect3DDevice8_SetIndices(global_d3d_device, (IDirect3DIndexBuffer8 *)indices, 0);
 		while (count > 0)
 		{
 			long local = MIN(count, MAXIMUM_TRIANGLES_PER_DRAW);
