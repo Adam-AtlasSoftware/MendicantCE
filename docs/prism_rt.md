@@ -97,6 +97,7 @@ high and noisy; the deltas are the better guide, and a clean run should be taken
 | RTX 3070 Ti, 1080p | 2.09 | +0.64 | +2.60 (passes 1.88) | +2.64 (1.85) | +1.59 (0.64) |
 | RTX 3070 Ti, 1440p | 3.7-4.7 | +0.98 | +3.85 (2.82) | +4.02 (3.03) | +2.25 (1.43) |
 | RTX 2060, 1080p | 8.6-9.0 (shared) | +0.34 | +3.75 (4.96) | +4.65 (5.56) | +2.51 (3.30) |
+| RTX 2060, 1440p | 8.2-10.6 (shared, 96% busy before) | +2.4 | +7.5 (6.25) | +9.6 (7.25) | +5.4 (3.68) |
 
 "passes" is the ray tracing's own GPU time (its structures' builds, the probes, the trace and the resolve), from its
 timestamps.
