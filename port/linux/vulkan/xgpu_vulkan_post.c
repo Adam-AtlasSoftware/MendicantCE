@@ -906,6 +906,175 @@ int xgpu_vulkan_post_bloom(struct xgpu_vulkan_image *target, const int32_t corne
 	return 1;
 }
 
+/* ---------- display.prism_tone (xgpu_backend.h's XGPU_PRISM_TONE_*)
+
+The window's 3D view, in half floats before its bloom and tone map, graded:
+the rectangle copied (FXAA's copy), halved by the bloom's 13-tap filter
+without its threshold into the bloom's images down to a sixteenth, brought
+back up through the 3 by 3 tent (no blend: each replacing the larger) to a
+quarter, the local mean; then each pixel of the rectangle by its ratio to
+the mean and the mean lifted (the PRISM_TONE program's: local contrast,
+lift, saturation and exposure by the mode). A multisampled view has none. */
+
+#define TONE_LEVELS 5
+#define TONE_LOCAL_LEVEL 1
+#define TONE_LIGHT_MOST 4.0f
+
+/* each mode's local contrast, lift (the local mean's power under white),
+saturation and exposure, and its exposure by the view's mean: the mean it
+aims at, the power and the most */
+static const struct
+{
+	float contrast, lift, saturation, exposure, aim, power, most;
+} tone_modes[3] = {
+	{ 0.0f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f },
+	{ 0.30f, 0.94f, 1.06f, 1.0f, 0.28f, 0.5f, 1.25f },
+	{ 0.45f, 0.90f, 1.12f, 1.04f, 0.32f, 0.5f, 1.4f },
+};
+
+static struct
+{
+	struct xgpu_vulkan_pipeline_description up, grade;
+	int failed, multisampled_logged;
+} tone;
+
+static int tone_prepare(void)
+{
+	if (tone.failed)
+		return 0;
+	if (tone.up.pixel_shader && tone.grade.pixel_shader)
+		return 1;
+	if (!bloom_prepare() || !shaders_make(XGPU_VULKAN_POST_PRISM_TONE))
+	{
+		host_logf(HOST_LOG_WARN, "vulkan: display.prism_tone's passes cannot be made: no grade");
+		tone.failed = 1;
+		return 0;
+	}
+	/* (the tent up replacing the larger, its colour alone) */
+	tone.up = bloom.up;
+	tone.up.blend = 0;
+	tone.up.blend_source = tone.up.blend_destination = 0;
+	tone.grade = bloom.down;
+	tone.grade.pixel_shader = post.pixel[XGPU_VULKAN_POST_PRISM_TONE];
+	tone.grade.color_mask = 7;
+	return 1;
+}
+
+/* the grade: the view's copy and the local mean (its rectangle) into the
+target's rectangle */
+static void tone_grade(struct xgpu_vulkan_image *target, const int32_t rectangle[4], struct xgpu_vulkan_image *local,
+	const int32_t local_rectangle[4], int mode)
+{
+	const struct xgpu_vulkan_image_description *to = xgpu_vulkan_image_description(target);
+	const struct xgpu_vulkan_image_description *from = xgpu_vulkan_image_description(local);
+	struct xgpu_vulkan_post_uniforms *uniforms;
+	struct xgpu_vulkan_dynamic_state dynamic;
+	struct xgpu_vulkan_draw draw;
+	int stage;
+
+	memset(&draw, 0, sizeof(draw));
+	draw.pipeline = xgpu_vulkan_pipeline(&tone.grade);
+	if (!draw.pipeline)
+		return;
+	for (stage = 0; stage < 4; stage++)
+	{
+		draw.textures[stage].image = stage == 0 ? post.color : stage == 1 ? local : NULL;
+		draw.textures[stage].kind = XGPU_VULKAN_IMAGE_2D;
+		draw.textures[stage].sampler = post.sampler;
+	}
+	uniforms = xgpu_vulkan_upload(UNIFORMS_RANGE, 256, &draw.uniforms);
+	if (!uniforms)
+		return;
+	memset(uniforms, 0, sizeof(*uniforms));
+	uniforms->metrics[0] = 1.0f / (float)to->width;
+	uniforms->metrics[1] = 1.0f / (float)to->height;
+	uniforms->metrics[2] = (float)to->width;
+	uniforms->metrics[3] = (float)to->height;
+	uniforms->bounds[0] = ((float)rectangle[0] + 0.5f) / (float)to->width;
+	uniforms->bounds[1] = ((float)rectangle[1] + 0.5f) / (float)to->height;
+	uniforms->bounds[2] = ((float)rectangle[2] - 0.5f) / (float)to->width;
+	uniforms->bounds[3] = ((float)rectangle[3] - 0.5f) / (float)to->height;
+	uniforms->hdr[0] = tone_modes[mode].contrast;
+	uniforms->hdr[1] = tone_modes[mode].lift;
+	uniforms->hdr[2] = tone_modes[mode].saturation;
+	uniforms->hdr[3] = tone_modes[mode].exposure;
+	uniforms->window[0] = ((float)local_rectangle[0] + 0.5f) / (float)from->width;
+	uniforms->window[1] = ((float)local_rectangle[1] + 0.5f) / (float)from->height;
+	uniforms->window[2] = ((float)local_rectangle[2] - 0.5f) / (float)from->width;
+	uniforms->window[3] = ((float)local_rectangle[3] - 0.5f) / (float)from->height;
+	uniforms->panini[0] = tone_modes[mode].aim;
+	uniforms->panini[1] = tone_modes[mode].power;
+	uniforms->panini[2] = tone_modes[mode].most;
+	draw.constants = draw.uniforms;
+	memset(&dynamic, 0, sizeof(dynamic));
+	dynamic.viewport[0] = dynamic.scissor[0] = rectangle[0];
+	dynamic.viewport[1] = dynamic.scissor[1] = rectangle[1];
+	dynamic.viewport[2] = dynamic.scissor[2] = rectangle[2] - rectangle[0];
+	dynamic.viewport[3] = dynamic.scissor[3] = rectangle[3] - rectangle[1];
+	dynamic.depth_range[1] = 1.0f;
+	draw.dynamic = &dynamic;
+	draw.topology = XGPU_VULKAN_TOPOLOGY_TRIANGLES;
+	draw.count = 3;
+	xgpu_vulkan_set_target_views(target, NULL, 0, 1);
+	xgpu_vulkan_draw(&draw);
+}
+
+int xgpu_vulkan_post_prism_tone(struct xgpu_vulkan_image *target, const int32_t corners[4], int mode)
+{
+	const struct xgpu_vulkan_image_description *description;
+	int32_t rectangles[TONE_LEVELS + 1][4];
+	int index, level;
+
+	if (!target || mode <= 0 || mode >= (int)(sizeof(tone_modes) / sizeof(tone_modes[0])))
+		return 0;
+	description = xgpu_vulkan_image_description(target);
+	if (description->format != XGPU_VULKAN_FORMAT_RGBA16F)
+		return 0;
+	if (description->samples > 1)
+	{
+		if (!tone.multisampled_logged)
+			host_logf(HOST_LOG_INFO, "vulkan: display.prism_tone: none over a multisampled view (MSAA)");
+		tone.multisampled_logged = 1;
+		return 0;
+	}
+	if (!tone_prepare())
+		return 0;
+	for (index = 0; index < 4; index++)
+	{
+		int32_t most = (int32_t)(index & 1 ? description->height : description->width);
+
+		rectangles[0][index] = corners[index] < 0 ? 0 : corners[index] > most ? most : corners[index];
+	}
+	if (rectangles[0][2] <= rectangles[0][0] || rectangles[0][3] <= rectangles[0][1])
+		return 1;
+	if (!images_fit(0, description->format, description->width, description->height) ||
+		!bloom_images_fit(description->width, description->height))
+		return 0;
+	for (level = 1; level <= TONE_LEVELS; level++)
+	{
+		for (index = 0; index < 4; index++)
+			rectangles[level][index] = index < 2 ? rectangles[level - 1][index] / 2 :
+				(rectangles[level - 1][index] + 1) / 2;
+		if (rectangles[level][2] <= rectangles[level][0])
+			rectangles[level][2] = rectangles[level][0] + 1;
+		if (rectangles[level][3] <= rectangles[level][1])
+			rectangles[level][3] = rectangles[level][1] + 1;
+	}
+	xgpu_vulkan_image_copy_rectangle(target, 0, post.color, rectangles[0]);
+	/* (down without the threshold: the whole light, each tap within 0 and
+	TONE_LIGHT_MOST, none where it is no number) */
+	bloom_draw(&bloom.down, bloom.levels[0], rectangles[1], post.color, rectangles[0], -TONE_LIGHT_MOST, 1.0f);
+	for (level = 1; level < TONE_LEVELS; level++)
+		bloom_draw(&bloom.down, bloom.levels[level], rectangles[level + 1], bloom.levels[level - 1], rectangles[level],
+			0.0f, 1.0f);
+	/* (up, each replacing the larger: the tent's mean, a strength of 1) */
+	for (level = TONE_LEVELS - 1; level > TONE_LOCAL_LEVEL; level--)
+		bloom_draw(&tone.up, bloom.levels[level - 1], rectangles[level], bloom.levels[level], rectangles[level + 1],
+			0.0f, 1.0f);
+	tone_grade(target, rectangles[0], bloom.levels[TONE_LOCAL_LEVEL], rectangles[TONE_LOCAL_LEVEL + 1], mode);
+	return 1;
+}
+
 /* the encoding's pipeline for a swapchain's format: the frame sampled,
 every channel written (the swapchain's alpha is opaque) */
 static void encode_description(uint8_t format, struct xgpu_vulkan_pipeline_description *description)

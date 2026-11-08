@@ -1412,6 +1412,10 @@ PAGES = {
             ("SHADOW DETAIL", "display.prism_shadow_resolution", [("LOW", "1024"), ("HIGH", "2048"),
                                                                   ("ULTRA", "4096")],
              "How sharp the sun's shadows are, and how much of the graphics card they take.", "desktop"),
+            ("SHADOW SOFTNESS", "display.prism_shadow_softness", [("SHARP", "0.5"), ("NATURAL", "1"),
+                                                                  ("SOFT", "2")],
+             "How fast the sun's shadows soften away from what casts them. A dim sun or moon softens them more.",
+             "desktop"),
             (SECTION, "LIGHTING"),
             # (PRISM's lighting: drawn by the Vulkan renderer alone,
             # port/linux/src/d3d8_device.c's prism_lighting_read)
@@ -1419,6 +1423,10 @@ PAGES = {
                                                        ("REBAKED", "rebaked")],
              "Smooth: the levels' own light without its bands and blocky edges. Rebaked: light baked again on this "
              "computer from the level's own lamps and sky, finer, bouncing, lighting bumps from its direction.",
+             "desktop"),
+            ("SHADE DEPTH", "display.ambient_occlusion_strength", [("LIGHT", "0.5"), ("NATURAL", "0.8"),
+                                                                    ("DEEP", "1")],
+             "How deep ambient occlusion World's shade is where characters, vehicles and scenery meet the level.",
              "desktop"),
             # (beyond CE: what the Xbox never drew, off in every preset)
             (SECTION, "BEYOND CE"),
@@ -1431,6 +1439,9 @@ PAGES = {
             ("BLOOM", "display.prism_bloom", [("OFF", "off"), ("GLOW", "glow"), ("FULL", "full")],
              "A soft glow about light brighter than white: plasma, the sun, lights and blasts. The Xbox had none; "
              "Glow is faint, Full wider. Nothing lit only to white glows.", "desktop"),
+            ("TONE", "display.prism_tone", [("OFF", "off"), ("PRISM", "prism"), ("VIVID", "vivid")],
+             "Grades the picture by the light around each pixel: deeper local contrast, dark places lifted, richer "
+             "colour. Off draws it as the game does; Vivid goes further.", "desktop"),
         ],
     },
     STREAMER[0]: {

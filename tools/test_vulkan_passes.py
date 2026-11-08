@@ -134,7 +134,7 @@ def test_post_shaders(tmp_path):
         assert struct.pack(f"<{len(words)}I", *words)[:size] == texels
     modules = sorted(name for name in arrays if name.endswith(("_vert", "_frag")))
     assert modules == ["bloom_down_frag", "bloom_up_frag", "clear_frag", "fxaa_frag", "gamma_frag", "hdr_encode_frag", "hdr_tone_map_frag", "hdr_tone_map_ms_frag",
-                       "panini_frag", "post_vert", "rotate_frag", "smaa_blend_frag", "smaa_edges_frag",
+                       "panini_frag", "post_vert", "prism_tone_frag", "rotate_frag", "smaa_blend_frag", "smaa_edges_frag",
                        "smaa_weights_frag"]
     validator = shutil.which("spirv-val")
     if not validator:

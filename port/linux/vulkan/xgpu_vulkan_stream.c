@@ -3510,9 +3510,12 @@ static void stream_tone_map(void *context, const struct xgpu_stream_tone_map *re
 	target->written++;
 	if (color_image == target->multisampled)
 		target->unresolved = 1;
-	/* (display.prism_bloom: its passes, then the view's pass again for the
-	tone map) */
-	if (record->bloom && xgpu_vulkan_post_bloom(color_image, record->corners, (int)record->bloom))
+	/* (display.prism_tone's grade, then display.prism_bloom: their passes,
+	then the view's pass again for the tone map) */
+	if ((record->bloom >> XGPU_PRISM_TONE_SHIFT) && xgpu_vulkan_post_prism_tone(color_image, record->corners,
+		(int)((record->bloom >> XGPU_PRISM_TONE_SHIFT) & 0xff)))
+		targets_bind();
+	if ((record->bloom & 0xff) && xgpu_vulkan_post_bloom(color_image, record->corners, (int)(record->bloom & 0xff)))
 		targets_bind();
 	xgpu_vulkan_post_tone_map(color_image, depth_image, record->corners, hdr);
 	/* (the stream's targets again: the same, so that the pass goes on) */
