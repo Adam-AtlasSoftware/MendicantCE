@@ -17,5 +17,11 @@ extern const uint32_t xgpu_vulkan_rt_resolve_words[];
 extern const size_t xgpu_vulkan_rt_resolve_count;
 extern const uint32_t xgpu_vulkan_rt_probes_words[];
 extern const size_t xgpu_vulkan_rt_probes_count;
+extern const uint32_t xgpu_vulkan_rt_path_words[];
+extern const size_t xgpu_vulkan_rt_path_count;
+extern const uint32_t xgpu_vulkan_rt_accumulate_words[];
+extern const size_t xgpu_vulkan_rt_accumulate_count;
+extern const uint32_t xgpu_vulkan_rt_atrous_words[];
+extern const size_t xgpu_vulkan_rt_atrous_count;
 
 #endif

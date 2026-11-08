@@ -456,7 +456,14 @@ pixels: world_ao.h's WORLD_AO_UPSAMPLE_*) */
 #define XGPU_WORLD_AO_UPSAMPLE_DEPTH 0.02f
 #define XGPU_WORLD_AO_UPSAMPLE_FACING 0.2f
 #define XGPU_WORLD_AO_UPSAMPLE_LEAST 1.0e-4f
-#define XGPU_AMBIENT_OCCLUSION_LIGHT_OF(value) ((value) & 0x0f)
+#define XGPU_AMBIENT_OCCLUSION_LIGHT_OF(value) ((value) & 0x07)
+/* display.prism_rt "pathtraced" (port/linux/game/prism_rt.c, docs/prism_rt.md),
+with XGPU_AMBIENT_OCCLUSION_WORLD_SAMPLED: the pixel's texel (found at every
+pixel) is the path tracer's, x the factor of the light the occlusion
+multiplies and yzw the light its paths add after it (their bounce, less the
+shadows of the dynamic lights CE adds unshadowed), not world AO's; never
+set with the setting anything else, so the other keys are as before */
+#define XGPU_AMBIENT_OCCLUSION_RT_LIGHT 0x08
 #define XGPU_WORLD_AO_K 1.6f
 #define XGPU_WORLD_AO_STEP 0.15f
 #define XGPU_WORLD_AO_TAPS 5

@@ -29,6 +29,9 @@ typedef int BOOL;
 #define XGPU_AMBIENT_OCCLUSION_WORLD_VIEW 0x20
 #define XGPU_AMBIENT_OCCLUSION_WORLD_SAMPLED 0x40
 #define HALO_HDR_KIND_SELF_ILLUMINATION 64
+#define HALO_HDR_KIND_SELF_ILLUMINATION_STAGES(stages) ((stages) << 8)
+#define XGPU_AMBIENT_OCCLUSION_RT_LIGHT 0x08
+int prism_rt_mode(void) { return 0; }
 enum { XGPU_WORLD_AO_PREPASS_NONE, XGPU_WORLD_AO_PREPASS_BEGIN, XGPU_WORLD_AO_PREPASS_END,
     XGPU_WORLD_AO_PREPASS_TWINS };
 static struct { BOOL active, view; int owner; float reference; BOOL failed, prepass, sampled; float scale; int span;

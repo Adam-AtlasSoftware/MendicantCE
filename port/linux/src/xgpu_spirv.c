@@ -1942,6 +1942,9 @@ struct pixel_state
 	/* (display.ambient_occlusion "world": the light apart of a model lit
 	for each vertex, and the occlusion at the pixel once read) */
 	unsigned int in_light_ambient, in_light_point, occlusion;
+	/* (display.prism_rt "pathtraced", XGPU_AMBIENT_OCCLUSION_RT_LIGHT: the
+	light the traces add after the occlusion multiplies, rgb; 0 none) */
+	unsigned int occlusion_add;
 	unsigned int textures[4];
 	unsigned int v0, v1, t[4], dots[4], r0, r1, fog;
 	unsigned int zero4;
@@ -3899,6 +3902,25 @@ static unsigned int world_ao_upsample(struct module *m, struct pixel_state *stat
 	return fselect(m, compare(m, OP_F_ORD_LESS_THAN_EQUAL, scale, constant_float(m, 1.0f)), own, result);
 }
 
+/* display.prism_rt "pathtraced" (XGPU_AMBIENT_OCCLUSION_RT_LIGHT): the
+pixel's own texel of the traced light (found at every pixel), x the factor
+of the light the occlusion multiplies, yzw the light the traces add */
+static unsigned int rt_light_fetch(struct module *m, struct pixel_state *state)
+{
+	unsigned int sampled = load(m, type_sampled_image(m, DIM_2D, FALSE, FALSE, TRUE), m->world_ao_pixels);
+	unsigned int image = op(m, OP_IMAGE, type_sampled_image(m, DIM_2D, FALSE, FALSE, FALSE), 1, &sampled);
+	unsigned int frag = load(m, m->t_v4, state->frag_coord);
+
+	return world_ao_pixels_fetch(m, image, op1(m, OP_CONVERT_F_TO_S, m->t_iv2, xy(m, frag)));
+}
+
+/* a light by the occlusion, and the traces' light added where they have it */
+static unsigned int occluded(struct module *m, struct pixel_state *state, unsigned int light)
+{
+	light = fscale(m, 3, light, state->occlusion);
+	return state->occlusion_add ? fadd(m, 3, light, state->occlusion_add) : light;
+}
+
 /* ---------- per-pixel model lighting */
 
 /* (lit by the normal given, display.prism_material_overlay's: else the
@@ -5643,6 +5665,13 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	multiplies the ambient light alone (xgpu.h) */
 	if (world_inline)
 		state.occlusion = world_ao_read(&m, &state, occlusion_light);
+	else if (world_sampled && (program->ambient_occlusion & XGPU_AMBIENT_OCCLUSION_RT_LIGHT))
+	{
+		unsigned int texel = rt_light_fetch(&m, &state);
+
+		state.occlusion = extract(&m, texel, 0);
+		state.occlusion_add = op(&m, OP_VECTOR_SHUFFLE, m.t_v3, 5, (unsigned int[]){ texel, texel, 1, 2, 3 });
+	}
 	else if (world_sampled)
 		state.occlusion = world_ao_upsample(&m, &state);
 	else if (world_inputs)
@@ -5665,14 +5694,19 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 		unsigned int sum = dynamic_light_sum(&m, &state, pixel_input(&m, &state, state.in_world_position, m.t_v3), n, n, FALSE);
 		static const unsigned int rgb[4] = { 4, 5, 6, 3 };
 
+		if (state.occlusion_add && occlusion_light == XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL)
+			lit = saturate(&m, 3, fadd(&m, 3, lit, state.occlusion_add));
 		state.v0 = shuffle(&m, 4, state.v0, dynamic_light_add(&m, lit, sum, FALSE), rgb);
 	}
 	else if (program->per_pixel_lighting)
 	{
 		static const unsigned int rgb[4] = { 4, 5, 6, 3 };
+		unsigned int lit = model_lighting(&m, &state, program->per_pixel_lighting == 2, FALSE,
+			occlusion_light == XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL ? state.occlusion : 0, 0);
 
-		state.v0 = shuffle(&m, 4, state.v0, model_lighting(&m, &state, program->per_pixel_lighting == 2, FALSE,
-			occlusion_light == XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL ? state.occlusion : 0, 0), rgb);
+		if (state.occlusion_add && occlusion_light == XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL)
+			lit = saturate(&m, 3, fadd(&m, 3, lit, state.occlusion_add));
+		state.v0 = shuffle(&m, 4, state.v0, lit, rgb);
 	}
 	else if (occlusion_light == XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX)
 	{
@@ -5680,7 +5714,7 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 		point lights' added, clamped as its program clamps the sum) */
 		static const unsigned int rgb[4] = { 4, 5, 6, 3 };
 		unsigned int lit = saturate(&m, 3, fadd(&m, 3,
-			fscale(&m, 3, pixel_input(&m, &state, state.in_light_ambient, m.t_v3), state.occlusion),
+			occluded(&m, &state, pixel_input(&m, &state, state.in_light_ambient, m.t_v3)),
 			pixel_input(&m, &state, state.in_light_point, m.t_v3)));
 
 		state.v0 = shuffle(&m, 4, state.v0, lit, rgb);
@@ -5760,7 +5794,7 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	{
 		static const unsigned int rgb[4] = { 4, 5, 6, 3 };
 
-		result = shuffle(&m, 4, result, fscale(&m, 3, xyz(&m, result), state.occlusion), rgb);
+		result = shuffle(&m, 4, result, occluded(&m, &state, xyz(&m, result)), rgb);
 	}
 
 	if (environment)

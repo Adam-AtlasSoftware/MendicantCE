@@ -3292,7 +3292,7 @@ passed over */
 static void prepass_rt_capture(const struct draw_input *input, const struct xgpu_stream_pipeline_define *twin)
 {
 	uint8_t occlusion = twin->pixel_program.ambient_occlusion;
-	int light = occlusion & 0x0f;
+	int light = XGPU_AMBIENT_OCCLUSION_LIGHT_OF(occlusion);
 	const struct xgpu_vulkan_attribute *position = &input->attributes[0];
 	struct vertex_source *source;
 	struct xgpu_vulkan_rt_draw draw;

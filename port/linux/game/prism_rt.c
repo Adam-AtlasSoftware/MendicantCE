@@ -349,6 +349,10 @@ int prism_rt_full_resolution(void)
 {
 	if (prism_rt_mode() == PRISM_RT_OFF)
 		return FALSE;
+	/* ("pathtraced": always, its surfaces reading their own pixel's
+	factor and added light: xgpu.h's XGPU_AMBIENT_OCCLUSION_RT_LIGHT) */
+	if (prism_rt_mode() == PRISM_RT_PATHTRACED)
+		return TRUE;
 	/* (auto: full but at low quality) */
 	return prism_rt.resolution == 2 || (prism_rt.resolution == 0 && prism_rt.quality != 1);
 }

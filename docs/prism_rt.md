@@ -72,9 +72,51 @@ triangles through buffer device addresses. A probe that sees the back of the lev
 its rays or more is inside it and not read. The probes hold no CE lightmap yet (the design's radiance pages): their
 light is the sky's and the sun's bounce, which the per-pixel ratio keeps from changing CE's brightness.
 
+## Path tracing (`pathtraced`)
+
+A prototype of the ultra mode. CE's frame is still drawn as CE draws it: what each pixel sees comes from the raster
+G-buffer (world AO's pre-pass, at every pixel in this mode), the textures and specular are CE's, and the transparent
+surfaces, effects, particles, decals, water, the first-person weapon and the HUD are drawn exactly as before (they are
+not lit through the traced slot). What the path tracer changes is the light those surfaces are given:
+
+```
+PREPASS_END ─► objects' BLAS ─► TLAS ─► gi's probes (a quarter a frame)
+            ─► path (compute, every pixel; half of them in a checkerboard at low quality or display.prism_rt_rate half)
+                 the sun through the structure alone and through everything
+                 1 to 3 bounces (low and medium 1, high 2, ultra 3; 1 to 4 paths a pixel) of a grey dielectric (diffuse + a GGX lobe, F0 0.04), next events to the sun and to one
+                 dynamic light, Russian roulette past the second, the last bounce ending in gi's probes, the sky past
+                 the level; the first ray traced again through the structure alone where an object took it
+                 ReSTIR DI over the dynamic lights: candidates, the last frame's reservoirs at the reprojected point and
+                 about it (reweighed here), the one kept traced for its shadow
+            ─► accumulate (temporal: blended into the reprojected history by 1 / its length, at most 32 frames)
+            ─► atrous x3 (spatial: edge-avoiding 5x5 a-trous, steps 1, 2, 4, weighed by distance, normal and ratio)
+            ─► the surfaces read it in world AO's place: x a factor, yzw a light added
+```
+
+**Keeping CE's look (the exposure).** The paths give two estimates of the static light (the sun and the sky, bounced)
+at each pixel: with everything in the scene, and as CE baked it (the sun through the structure alone, the first ray
+through the structure alone). Their ratio multiplies CE's own light (a lightmap pass's lightmap, a model's ambient and
+distant lights), so where nothing CE did not bake is in the way the factor is 1 and the frame is CE's, byte for byte in
+its colours; objects take away sun and sky as they should (contact shadows, the sky's occlusion under a Pelican),
+held within 0.25 to 1.5. No auto-exposure and no grade: the units cancel. The dynamic lights (the flashlight, plasma,
+muzzle flashes; not the light fixtures, whose light is in the lightmap) are added by CE unshadowed; the path tracer adds
+their bounce and takes away the share of their light its shadow rays find blocked (0.6 of it, held within -0.35 to
++0.35 of the slot's light), in CE's own units (its model point light's falloff). `display.prism_rt_mood` scales all of
+it (0 is CE's light).
+
+**The surfaces.** With `pathtraced` the opaque surfaces' keys have `XGPU_AMBIENT_OCCLUSION_RT_LIGHT` (xgpu.h, a bit of
+the occlusion's light nibble that was free): their pixel's texel is read as a factor and an added light
+(`light * x + yzw`) in the lightmap pass and in a model's ambient light (per pixel, per vertex). No other key changes,
+so with the setting anything else every shader is as before.
+
+**Not yet:** CE's materials at the hits (a grey 0.45; coloured bounce comes from the lights' colours alone), the
+lightmap's radiance at hits, emissive surfaces as lights (the self-illuminated maps), primary specular (CE's cube maps
+are kept), alpha-tested foliage in the structure, the probes' own update from the paths, the PBR and overlay
+materials' paths (they keep the factor alone), a traced primary (for a remodel that is not drawn).
+
 ## Settings
 
-`display.prism_rt` (`off` / `shadows` / `gi` / `pathtraced`; `pathtraced` draws as `gi` until built),
+`display.prism_rt` (`off` / `shadows` / `gi` / `pathtraced`),
 `display.prism_rt_quality` (rays a pixel), `display.prism_rt_resolution`, `display.prism_rt_denoiser`,
 `display.prism_rt_reflections`, `display.prism_rt_mood`, `display.prism_rt_objects`, `display.prism_rt_rate`,
 `debug.prism_rt_view`, `HALO_VULKAN_NO_RT=1`. Settings > Mods has Ray Tracing and its quality, greyed out where the
@@ -82,9 +124,9 @@ renderer cannot trace. `HALO_VULKAN_STATS=1` logs the passes' GPU time every 600
 
 ## Not yet
 
-Colour in GI and the dynamic lights' bounce on the level (both need the surfaces' shaders to add a traced colour, a new
-binding and key bit), CE's lightmap radiance at probe hits, local lights' shadows, reflections, path tracing,
-alpha-tested traces, remodel relief, the compaction of the structure's BLAS, Deck and RDNA tuning, Metal.
+Colour in `gi` (the traced colour path exists now, `pathtraced`'s; `gi` does not use it yet), CE's lightmap radiance
+at probe hits, local lights' shadows outside `pathtraced`, reflections, alpha-tested traces, remodel relief, the
+compaction of the structure's BLAS, Deck and RDNA tuning, Metal (and Metal's emitter of the traced light).
 
 ## Measured (b30, the game stopped at tick 1350, the game's camera; GPU ms a frame, `debug.gpu_stats`)
 
