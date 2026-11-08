@@ -435,7 +435,10 @@ static void world_geometry_release(
 	free(world_geometry.lightmap_first);
 	free(world_geometry.lookup);
 	free(world_geometry.runs);
-	free(world_geometry.batch_indices);
+	if (world_geometry.batch_indices)
+	{
+		XPhysicalFree(world_geometry.batch_indices);
+	}
 	world_geometry.batch_indices = NULL;
 	world_geometry.batch_capacity = 0;
 	world_geometry.geometry = NULL;
@@ -1217,6 +1220,25 @@ static boolean world_geometry_make(
 		vertices += view->vertex_count;
 	}
 	free(scratch);
+	/* (the batches' indices: a part's runs copied one after another, never
+	more than its triangles; in physical memory, as the parts' own indices
+	are, made once with the remodel and let go with it. A buffer of the
+	heap grown as the frames asked broke musl's heap in a10's remodel) */
+	{
+		long most = 0;
+
+		for (index = 0; index < world_geometry.material_count; index++)
+		{
+			most = MAX(most, world_geometry.materials[index].triangle_count);
+		}
+		world_geometry.batch_capacity = 0;
+		world_geometry.batch_indices = most > 0 ?
+			XPhysicalAlloc((unsigned long)most * 3 * sizeof(word) + 64, (unsigned long)-1, 0x1000, PAGE_READWRITE) : NULL;
+		if (world_geometry.batch_indices)
+		{
+			world_geometry.batch_capacity = (unsigned long)most * 3;
+		}
+	}
 	platform_log("prism world geometry: %s: %ld of %ld material parts remodelled, %lu triangles for %lu (%.1fx), "
 		"%lu vertices, %lu KB of contiguous memory; %.1f%% of the surfaces' levels can face away whole "
 		"(%ld turned the other way about from their stock triangles)",
@@ -1593,17 +1615,7 @@ int prism_world_geometry_draw(
 		{
 			unsigned long wanted = (unsigned long)total * 3;
 
-			if (wanted > world_geometry.batch_capacity)
-			{
-				word *grown = realloc(world_geometry.batch_indices, (wanted + wanted / 2 + 3) * sizeof(word));
-
-				if (grown)
-				{
-					world_geometry.batch_indices = grown;
-					world_geometry.batch_capacity = wanted + wanted / 2 + 3;
-				}
-			}
-			if (wanted <= world_geometry.batch_capacity)
+			if (world_geometry.batch_indices && wanted <= world_geometry.batch_capacity)
 			{
 				word const *from = (word const *)part->index_resource.data;
 				unsigned long at = 0;
