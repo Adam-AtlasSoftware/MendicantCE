@@ -22,7 +22,9 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/op_prism_lightmaps" x="28" y="252" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/section_9" x="28" y="279" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/op_prism_world_geometry" x="28" y="299" platform="desktop"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/op_prism_bloom" x="28" y="320" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/op_prism_world_geometry_detail" x="28" y="320" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/op_prism_world_geometry_shadows" x="28" y="341" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/op_prism_bloom" x="28" y="362" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/button_bar" y="414"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/button_bar" type="column_list" width="640" height="28" flags="pass_unhandled_to_focused_child left_right_tabs_items">
@@ -132,11 +134,29 @@
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/prism_world_geometry_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="XBOX|REMODEL" setting="display.prism_world_geometry" values="stock|remodel" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
 		<on event="created" run="port setting load"/>
 	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/op_prism_world_geometry_detail" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/prism_world_geometry_detail_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/prism_world_geometry_detail_spinner" x="188"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/prism_world_geometry_detail_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/labels" string_index="11" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/prism_world_geometry_detail_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="LOW|NORMAL|HIGH" setting="display.prism_world_geometry_detail" values="50|100|200" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+		<on event="created" run="port setting load"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/op_prism_world_geometry_shadows" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/prism_world_geometry_shadows_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/prism_world_geometry_shadows_spinner" x="188"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/prism_world_geometry_shadows_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/labels" string_index="12" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/prism_world_geometry_shadows_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="XBOX|FAR|FULL" setting="display.prism_world_geometry_shadows" values="stock|far|remodel" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+		<on event="created" run="port setting load"/>
+	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/op_prism_bloom" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 120">
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/prism_bloom_label"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/prism_bloom_spinner" x="188"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/prism_bloom_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/labels" string_index="11" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/prism_bloom_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/labels" string_index="13" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/prism_bloom_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="OFF|GLOW|FULL" setting="display.prism_bloom" values="off|glow|full" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
 		<on event="created" run="port setting load"/>
@@ -153,6 +173,8 @@
 		<string text="LIGHTMAPS"/>
 		<string text="BEYOND CE"/>
 		<string text="WORLD GEOMETRY"/>
+		<string text="GEOMETRY DETAIL"/>
+		<string text="GEOMETRY SHADOWS"/>
 		<string text="BLOOM"/>
 	</strings>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/help_strings">
@@ -168,6 +190,8 @@
 		<string text="Smooth: the levels' own light without its bands and blocky edges. Rebaked: light baked again on this computer from the level's own lamps and sky, finer, bouncing, lighting bumps from its direction."/>
 		<string text=""/>
 		<string text="Remodel draws the level's rock, sand and Forerunner walls from a denser model built on this computer from your maps: rounded rock, bevelled edges, the same light. You still walk and collide on the original. Xbox draws the map's own."/>
+		<string text="How far out the remodel is drawn in its full detail; beyond, its lighter far level. Low is cheaper on the graphics card."/>
+		<string text="The shape the sun's shadows are cast from with the remodel: Far, its lighter level (the rock's ledges still shade); Full, every detail; Xbox, the map's own (cheapest)."/>
 		<string text="A soft glow about light brighter than white: plasma, the sun, lights and blasts. The Xbox had none; Glow is faint, Full wider. Nothing lit only to white glows."/>
 	</strings>
 </menus>

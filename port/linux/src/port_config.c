@@ -504,6 +504,43 @@ static const struct config_setting config_settings[] =
 		"and visibility stay the map's. A level without a remodel is drawn\n"
 		"stock. \"stock\" draws the map's own. Read each frame\n"
 		"(prism_set \"world_geometry remodel\")." },
+	{ "display.prism_world_geometry_shadows", _config_string, "\"far\"", "HALO_PRISM_WORLD_GEOMETRY_SHADOWS",
+		_environment_value, _platform_desktop,
+		"PRISM v2, with display.prism_world_geometry \"remodel\" and\n"
+		"display.prism_shadows \"cascaded\": the level's shape the sun's shadow\n"
+		"maps are drawn from. \"far\": every surface's far level (the relief's\n"
+		"shadows at a fraction of the cost); \"remodel\": as the surfaces are\n"
+		"drawn, near and far; \"stock\": the map's own triangles (cheapest).\n"
+		"Read each frame (prism_set \"world_geometry_shadows stock\")." },
+	{ "display.prism_world_geometry_occlusion", _config_string, "\"stock\"", "HALO_PRISM_WORLD_GEOMETRY_OCCLUSION",
+		_environment_value, _platform_desktop,
+		"PRISM v2, with display.prism_world_geometry \"remodel\" and\n"
+		"display.ambient_occlusion \"world\": the level's shape the occlusion's\n"
+		"pre-pass is drawn from (where the objects darken the level, and what\n"
+		"hides them). \"stock\": the map's own triangles (cheapest; the\n"
+		"objects' contact shadows are as soft as the field); \"far\": every\n"
+		"surface's far level; \"remodel\": as the surfaces are drawn. Read each\n"
+		"frame (prism_set \"world_geometry_occlusion far\")." },
+	{ "display.prism_world_geometry_facing", _config_boolean, "true", "HALO_PRISM_WORLD_GEOMETRY_FACING",
+		_environment_value, _platform_desktop,
+		"PRISM v2, with display.prism_world_geometry \"remodel\": true skips a\n"
+		"remodelled surface every one of whose triangles faces away from the\n"
+		"camera (its triangles' cone of facings, found as the remodel loads),\n"
+		"as the game skips its own; false draws every surface the game chose\n"
+		"and leaves the facing to the GPU. The picture is the same. Read each\n"
+		"frame." },
+	{ "display.prism_world_geometry_batch", _config_boolean, "true", "HALO_PRISM_WORLD_GEOMETRY_BATCH",
+		_environment_value, _platform_desktop,
+		"PRISM v2, with display.prism_world_geometry \"remodel\": true draws a\n"
+		"material's runs of remodelled triangles as one draw (their indices\n"
+		"copied one after another each time); false draws each run from the\n"
+		"remodel's own triangles. The picture is the same. Read each frame." },
+	{ "display.prism_world_geometry_detail", _config_integer, "100", "HALO_PRISM_WORLD_GEOMETRY_DETAIL",
+		_environment_value, _platform_desktop,
+		"PRISM v2, with display.prism_world_geometry \"remodel\": the distance\n"
+		"out to which surfaces are drawn from the remodel's near level, as a\n"
+		"percentage of the remodel's own (25 to 400): lower draws more of the\n"
+		"level from the far level, and is cheaper. Read each frame." },
 	{ "display.structure_culling", _config_integer, STRUCTURE_CULLING_DEFAULT, "HALO_STRUCTURE_CULLING", _environment_value,
 		_platform_all,
 		"Which tests skip the level's triangles the camera cannot see, as bits\n"
