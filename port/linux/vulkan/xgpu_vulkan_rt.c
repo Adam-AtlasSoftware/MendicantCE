@@ -2667,13 +2667,13 @@ structure's and the objects' visibility of the sun as they are) */
 	if (pathtraced)
 	{
 		static const float bounces[4] = { 1.0f, 1.0f, 2.0f, 3.0f };
-		static const float paths[4] = { 1.0f, 1.0f, 2.0f, 4.0f };
+		static const float paths[4] = { 1.0f, 1.0f, 1.0f, 2.0f };
 		static const float candidates[4] = { 8.0f, 4.0f, 16.0f, 32.0f };
 		static const float neighbours[4] = { 2.0f, 1.0f, 3.0f, 4.0f };
 		uint32_t light, count = rt.frame.light_count < XGPU_STREAM_RT_LIGHTS ? rt.frame.light_count :
 			XGPU_STREAM_RT_LIGHTS;
 
-		static const float lamp_candidates[4] = { 4.0f, 2.0f, 8.0f, 16.0f };
+		static const float lamp_candidates[4] = { 4.0f, 2.0f, 6.0f, 8.0f };
 		float setting_bounces = rt.frame.rig[XGPU_RT_RIG_SETTINGS + XGPU_RT_SETTING_BOUNCES];
 
 		/* (display.prism_rt_bounces: 1 to 4, 0 by quality) */
@@ -2736,7 +2736,8 @@ structure's and the objects' visibility of the sun as they are) */
 		block.probe_count[3] = sides[quality][0] * sides[quality][1] * sides[quality][2];
 		probes_updated = (uint32_t)block.probe_count[3] / 4u;
 		block.probe_info[0] = (rt.probe_frame * probes_updated) % (uint32_t)block.probe_count[3];
-		block.probe_info[1] = probe_rays[quality];
+		/* (path traced: half the rays, each hit's light being the rig's) */
+		block.probe_info[1] = pathtraced ? probe_rays[quality] / 2 : probe_rays[quality];
 		block.probe_info[2] = rt.frame.mood;
 		block.probe_info[3] = gi ? 1u : 0u;
 		block.sky[0] = rt.frame.sky[0] * rt.frame.sky[3];
