@@ -1768,8 +1768,9 @@ static const struct config_setting config_settings[] =
 		"Each network game is recorded to the data folder's replays/, which\n"
 		"the Theater (Settings, MODS) plays (port/linux/REPLAY.md): a host's, all of\n"
 		"it (what a client that sees everything is sent); a client's, what its\n"
-		"host sends it (far players less often) and its own input. Read at a\n"
-		"game's start; RECORD GAMES and the Theater's RECORD turn it on and off." },
+		"host sends it (far players less often) and its own input. Voice chat\n"
+		"is not recorded. Read at a game's start; RECORD GAMES and the Theater's\n"
+		"RECORD turn it on and off." },
 	{ "network.replay_hints", _config_boolean, "true", "HALO_NET_REPLAY_HINTS", _environment_value,
 		_platform_all,
 		"Watching a replay with a controller: the bars of the buttons and of the\n"
