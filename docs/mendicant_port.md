@@ -667,17 +667,22 @@ app's Sparkle feed (`tools/macos_build.py`) still name OpenH1's releases.
 
 ### A release
 
-A release is built by `.github/workflows/mendicant.yml` from the branch `mendicant-prism`: the Linux
-x86-64 build in an `ubuntu:22.04` container (glibc 2.35) and the Windows build on the Windows runner,
-each with `tools/ci_build.py <platform> release`. The builds have no build number
-(`HALO_BUILD_NUMBER` is left unset; the commit names a build). Each package is checked before it is
-published:
+The downloads are built by `.github/workflows/mendicant.yml` from the branch `mendicant-prism`: the
+Linux x86-64 build in an `ubuntu:22.04` container (glibc 2.35) and the Windows build on the Windows
+runner, each with `tools/ci_build.py <platform> release`, each zipped by `tools/mendicant/package.py`
+(`MendicantCE-PRISM-linux-x86_64.zip`, `MendicantCE-PRISM-windows-x64.zip`, and their `SHA256SUMS`).
+The workflow keeps them as the run's artifacts and publishes nothing: a release is made by hand from
+a run's artifacts, with `.github/mendicant_release_notes.md` as its notes. The builds have no build
+number (`HALO_BUILD_NUMBER` is left unset; the commit names a build). Each package is checked before
+it is zipped:
 
 - `tools/fork_gate.py` refuses a package whose binaries hold an address or a file name of OpenH1's
   releases or crash reports, or that does not name the fork;
 - the Linux binaries may need no glibc newer than 2.35;
 - `SOURCE.txt` must name the run's commit, and `mendicant_models.aibw` must be the repository's
-  `port/assets/mendicant/models.aibw`.
+  `port/assets/mendicant/models.aibw`;
+- `tools/mendicant/package.py` refuses a folder that lacks one of the game's files, the README, the
+  licence or a third party's notice, or that holds game data, a PRISM pack or what a run leaves.
 
 The trained models are exported with
 

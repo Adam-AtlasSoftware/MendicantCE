@@ -1,4 +1,4 @@
-MendicantCE is a modified version of [OpenH1](https://github.com/OpenH1/OpenH1) (Halo: Combat Evolved for the Xbox, ported natively), changed by Adam Wiley. **It is not OpenH1's build**: OpenH1's developers did not make it and do not support it, so do not report its problems to OpenH1's tracker or Discord.
+MendicantCE is a modified version of [OpenH1](https://github.com/OpenH1/OpenH1) (Halo: Combat Evolved for the Xbox, ported natively), changed by Adam Wiley. **It is not OpenH1's build**: OpenH1's developers did not make it and do not support it, so do not report its problems to OpenH1's tracker or Discord: they go to [this repository's issues](https://github.com/Adam-AtlasSoftware/MendicantCE/issues).
 
 Source of this build: commit [`@SHORT@`](https://github.com/Adam-AtlasSoftware/MendicantCE/tree/@COMMIT@) of the branch `mendicant-prism` (`SOURCE.txt` in each zip says the same). Licence: AGPL-3.0-or-later. No game data is in the downloads: the game plays from your own copy of Halo: Combat Evolved for the Xbox.
 
@@ -6,8 +6,8 @@ Source of this build: commit [`@SHORT@`](https://github.com/Adam-AtlasSoftware/M
 
 | File | For | How |
 | --- | --- | --- |
-| `MendicantCE-Linux.zip` | Linux, x86-64, glibc 2.35 or later, Vulkan 1.3 | Unzip into a **new folder of its own** and start `bin/openh1`. There is no installer. Do not unzip it into `~/Applications/OpenH1` or over an OpenH1. |
-| `MendicantCE-Windows.zip` | Windows, x86-64, Vulkan 1.3 | Unzip into a **new folder of its own** and start `halo.exe`. Windows may say it protected your PC (the program is not signed): More info, then Run anyway. |
+| `MendicantCE-PRISM-linux-x86_64.zip` | Linux, x86-64, glibc 2.35 or later, Vulkan 1.3 | Unzip into a **new folder of its own** and start `bin/openh1`. There is no installer. Do not unzip it into `~/Applications/OpenH1` or over an OpenH1. |
+| `MendicantCE-PRISM-windows-x64.zip` | Windows, x86-64, Vulkan 1.3 | Unzip into a **new folder of its own** and start `halo.exe`. Windows may say it protected your PC (the program is not signed): More info, then Run anyway. |
 | `SHA256SUMS` | | `sha256sum -c SHA256SUMS` checks the two. |
 
 `README.md` in each zip says the rest; the main points are below.

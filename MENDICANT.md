@@ -7,9 +7,10 @@ OpenH1's commit `afa1611ce`; `SOURCE.txt`, which comes with every build, names
 the commit a build was made from and its date.
 
 **It is not OpenH1's build.** OpenH1's developers did not make it and do not
-support it. Do not report its problems to OpenH1's issue tracker or Discord,
-and do not expect OpenH1's downloads, installer, Scoop bucket or updates to
-give you this build: they give you OpenH1.
+support it. Do not report its problems to OpenH1's issue tracker or Discord
+("Reporting problems", below, says where they go), and do not expect OpenH1's
+downloads, installer, Scoop bucket or updates to give you this build: they
+give you OpenH1.
 
 - Source, releases and this file: <https://github.com/Adam-AtlasSoftware/MendicantCE>,
   branch `mendicant-prism`.
@@ -91,9 +92,19 @@ the extensions are then not asked for.
 
 ## Getting and starting it
 
-Builds are on <https://github.com/Adam-AtlasSoftware/MendicantCE/releases>,
-for Linux (x86-64) and Windows (x86-64). Each needs a graphics card and
-driver with Vulkan 1.3.
+Builds are on <https://github.com/Adam-AtlasSoftware/MendicantCE/releases>:
+`MendicantCE-PRISM-linux-x86_64.zip` for Linux and
+`MendicantCE-PRISM-windows-x64.zip` for Windows, both for 64-bit x86
+computers, and `SHA256SUMS`, which `sha256sum -c SHA256SUMS` checks the two
+against.
+
+What the computer needs:
+
+- a graphics card and driver with **Vulkan 1.3**;
+- for PRISM RAY TRACING, a graphics card and driver with **ray queries**
+  (`VK_KHR_ray_query` and acceleration structures: the cards sold as ray
+  tracing ones). Without them the game plays, and those rows are greyed out;
+- **your own copy of the game**, below.
 
 - **Linux:** unzip into a new folder of its own and start `bin/openh1`.
   There is no installer. Do **not** unzip it into `~/Applications/OpenH1` or
@@ -104,8 +115,25 @@ driver with Vulkan 1.3.
   Windows may say that it protected your PC, as it does of any program that
   is not signed: More info, then Run anyway.
 
-At its first start the game asks for your copy of the game's data, as OpenH1
-does.
+### The game's data: your own disc image
+
+No build holds the game. You need your own, legally obtained copy of Halo:
+Combat Evolved for the original Xbox as an Xbox disc image (`.xiso` or
+`.iso`) made from a disc you own; every version of the game works. Neither
+this fork nor OpenH1 supplies the game or says where to get it.
+
+At its first start the game asks for the disc image:
+
+- **Linux:** the game looks for it itself. Put the image in Downloads, on
+  the Desktop, in your home folder, on an SD card or USB drive, or next to
+  the game, and choose it on the game's own screen with a controller, the
+  keyboard or the mouse.
+- **Windows:** select it in the file picker the game opens. A disc image
+  next to `halo.exe` is taken without one.
+
+The game then extracts the disc's `maps/` folder (and its movies, when the
+image has them) and starts. "Game data" in OpenH1's README says the rest
+(`README.OpenH1.md` in a build).
 
 What this build does differently from an OpenH1 build, on purpose:
 
@@ -140,12 +168,23 @@ What it still shares with an OpenH1 on the same computer:
   players do, at 30 ticks; messages that say "Update OpenH1" then mean that
   the other game is newer than this build.
 
+## Reporting problems
+
+Report a problem with this build in this repository, and nowhere else:
+<https://github.com/Adam-AtlasSoftware/MendicantCE/issues>. Say which build
+it is (the commit in `SOURCE.txt`, or Settings › Profiles › About), your
+system and graphics card, and what you had turned on; `halo.log` and
+`debug.txt`, which the game leaves on your computer, usually say what
+happened. OpenH1's issue tracker and Discord are for OpenH1's own builds:
+its developers did not make this one and cannot help with it.
+
 ## Building it
 
 As OpenH1 ("Build the game" in [README.md](README.md)). The fork's own switch,
-`HALO_FORK_MENDICANT`, is in every build (`tools/build_common.py`); a release
-is built by `.github/workflows/mendicant.yml`, which also checks that a
-package cannot update itself or pass for OpenH1 (`tools/fork_gate.py`).
+`HALO_FORK_MENDICANT`, is in every build (`tools/build_common.py`). The
+downloads are built by `.github/workflows/mendicant.yml`, which also checks
+that a package cannot update itself or pass for OpenH1 (`tools/fork_gate.py`)
+and zips each (`tools/mendicant/package.py`).
 
 The design notes of MENDICANT AI are in
 [docs/mendicant_port.md](docs/mendicant_port.md), PRISM's ray tracing in

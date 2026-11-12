@@ -1,19 +1,25 @@
-# fork: MendicantCE's own builds and releases (OpenH1's workflow, build.yml,
-# runs only by hand here: it publishes OpenH1's releases, from a branch named
-# master, in a container image this fork cannot read).
+# fork: MendicantCE's own builds (OpenH1's workflow, build.yml, runs only by
+# hand here: it publishes OpenH1's releases, from a branch named master, in
+# a container image this fork cannot read).
 #
-# Every push to mendicant-prism, and a run started by hand, builds the Linux
-# x86-64 and the Windows release builds (tools/ci_build.py), checks each
-# package, and, on mendicant-prism, publishes the two as a release,
-# mendicant-prism-<run number>, marked latest.
+# A push to mendicant-prism that changes more than documents, and a run
+# started by hand, builds the Linux x86-64 and the Windows x64 release
+# builds (tools/ci_build.py), tests them as build.yml tests its own, checks
+# each package and zips it (tools/mendicant/package.py), and keeps the two
+# zips and their SHA256SUMS as the run's artifacts. It publishes nothing:
+# no job here makes a release or a tag, and none can write to the
+# repository. A release is made by hand from a run's artifacts
+# (.github/mendicant_release_notes.md has its notes).
 #
-# What a package is checked for before it can be published:
+# What a package is checked for before it is zipped:
 # - tools/fork_gate.py: its binaries hold none of OpenH1's release or crash
 #   report addresses and file names (a build with them would offer to install
 #   OpenH1 over itself), and name this fork;
 # - the Linux binaries need no glibc newer than Ubuntu 22.04's (2.35);
 # - SOURCE.txt names this run's commit;
-# - MENDICANT AI's trained models are in it, the repository's own file.
+# - MENDICANT AI's trained models are in it, the repository's own file;
+# - the player's README, the licence and the third parties' notices are in
+#   it, and nothing of the game's data or of a player's run is.
 #
 # The builds have no build number: HALO_BUILD_NUMBER is never set here, and
 # a build names itself by its commit (source/main/main.c). The PRISM asset
@@ -24,11 +30,14 @@ name: MendicantCE
 on:
   push:
     branches: [mendicant-prism]
+    paths-ignore:
+      - "**.md"
   workflow_dispatch:
 
+# (a newer commit's run takes the place of an older one's)
 concurrency:
   group: mendicant-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -45,9 +54,14 @@ jobs:
   linux:
     # Ubuntu 22.04, for its glibc (2.35): the plain image, with the packages
     # of .github/ci-image's lists (OpenH1's image is those on the same base)
+    # (two builds of the whole game, debug for the tests and release)
     runs-on: ubuntu-24.04
     container: ubuntu:22.04
-    timeout-minutes: 75
+    timeout-minutes: 100
+    # (bash, which the image has: a container's steps are sh's otherwise)
+    defaults:
+      run:
+        shell: bash
     steps:
       # (git before the checkout, so that it is a clone and not an archive)
       - name: Install git
@@ -88,10 +102,36 @@ jobs:
           path: .cache/llvm
           key: guest-llvm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/guest_toolchain.py') }}
 
+      - name: Debug
+        run: python3 tools/ci_build.py linux_x86_64 debug
+
+      # the tests that read the debug build, as build.yml's linux-x86_64 job
+      # runs them: the profiling build's checks and the screenshot key's
+      # files (the system's clang, for its sanitizers' runtimes); the light
+      # partitions' storage, with the guests' LLVM on the PATH; the Vulkan
+      # backend's core over a fake Vulkan, the VR host's OpenXR binding (its
+      # headers fetched here), the VR mode's seats and effects, the texture
+      # caches' idle time, display.hdr's and display.ambient_occlusion's
+      # contracts
+      - name: Test the build
+        run: |
+          python3 -c "import sys; sys.path.insert(0, '.'); from pathlib import Path; from tools.linux_guest_build import fetch_openxr_headers; fetch_openxr_headers(Path('build/linux_x86_64/third_party/openxr'))"
+          python3 -m pytest -q -rs tools/test_profile.py tools/test_host_units.py::test_host_screenshot
+          (PATH="$(python3 tools/guest_toolchain.py --cache "$CI_GUEST_LLVM_CACHE"):$PATH" python3 tools/test_light_storage.py)
+          python3 -m pytest -q -rs -n auto --dist loadfile tools/test_vulkan_passes.py tools/test_host_vr_vulkan.py tools/test_vr_vehicles.py \
+            tools/test_vr_effects.py tools/test_host_texture_idle.py tools/test_hdr.py tools/test_hdr_backends.py tools/test_screen_passes_samples.py \
+            tools/test_ambient_occlusion_light.py
+
+      # the 60/120 Hz scorecard on the debug build (tools/scorecard/ci.py):
+      # StageKit, the rates compared, the known bugs caught (the 30 Hz gate
+      # against a baseline is master's: there is none here)
+      - name: Scorecard
+        run: python3 tools/scorecard/ci.py
+
       - name: Release
         run: python3 tools/ci_build.py linux_x86_64 release
 
-      # the fork's identity and its package's contents: these stop a release
+      # the fork's identity and its package's contents
       - name: Test the fork's identity and package
         run: python3 -m pytest -q -rs tools/test_fork_identity.py tools/test_profile.py::test_configuration_defines tools/test_linux_package.py tools/test_install_layout.py
 
@@ -108,15 +148,13 @@ jobs:
           cmp "$MODELS" "$tree/share/openh1/mendicant_models.aibw"
           [ "$(head -c 4 "$tree/share/openh1/mendicant_models.aibw")" = AIBW ]
           [ ! -e "$tree/install.sh" ]
-          strings "$tree/bin/openh1" | grep -qx "Adam-AtlasSoftware/MendicantCE"
+          strings "$tree/bin/openh1" > "$RUNNER_TEMP/strings.txt"
+          grep -qx "Adam-AtlasSoftware/MendicantCE" "$RUNNER_TEMP/strings.txt"
 
-      # the build started, hidden: it runs through its start-up (settings, SDL,
-      # the files) until it finds no game data and quits, saying so
-      # (reported, and not what a release waits for: the container has no
-      # display, sound or graphics driver, which the Windows runner's start
-      # below does not need either, but which has not been seen to work here)
+      # the build started, hidden, with no display, sound or network: it runs
+      # through its start-up (settings, SDL, the files) until it finds no
+      # game data and quits, saying so, as the Windows build's start below
       - name: Start the game
-        continue-on-error: true
         run: |
           start="$RUNNER_TEMP/start"
           rm -rf "$start"
@@ -133,15 +171,21 @@ jobs:
           grep -q "update: not looked for: this fork's builds do not update themselves" start.log
           [ "$status" = 1 ]
 
-      # (zipped here, with its files' modes, which an artifact would lose)
-      - name: Zip
-        run: python3 tools/linux_package.py zip dist/halo-linux-x86_64-release dist/release/MendicantCE-Linux.zip
+      # (zipped here, with its files' modes, which an artifact would lose; the
+      # script refuses a tree that is not a whole package)
+      - name: Package
+        run: python3 tools/mendicant/package.py zip linux-x86_64 dist/halo-linux-x86_64-release dist/release
+
+      - name: Compile cache
+        run: ccache --show-stats
 
       - uses: actions/upload-artifact@v4
         with:
-          name: mendicantce-linux
-          path: dist/release/MendicantCE-Linux.zip
-          retention-days: 7
+          name: MendicantCE-PRISM-linux-x86_64
+          path: dist/release/MendicantCE-PRISM-linux-x86_64.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
 
   windows:
     # as build.yml's windows job: the runner has LLVM, Python and Visual
@@ -223,31 +267,43 @@ jobs:
           grep -q "is not the Xbox maps" start.log
           [ "$status" = 1 ]
 
-      - name: Zip
-        run: python -c "import shutil; shutil.make_archive('dist/release/MendicantCE-Windows', 'zip', 'dist/halo-windows-release')"
+      # (as build.yml's windows job: the light partitions' storage, with the
+      # runner's clang)
+      - name: Test light storage
+        run: python tools/test_light_storage.py
+
+      - name: Package
+        run: python tools/mendicant/package.py zip windows-x64 dist/halo-windows-release dist/release
+
+      - name: Compile cache
+        run: ccache --show-stats
 
       - uses: actions/upload-artifact@v4
         with:
-          name: mendicantce-windows
-          path: dist/release/MendicantCE-Windows.zip
-          retention-days: 7
+          name: MendicantCE-PRISM-windows-x64
+          path: dist/release/MendicantCE-PRISM-windows-x64.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
 
       # (the symbols of halo.exe and the guest image, for reading a crash's
-      # log lines with tools/symbolize_crash.py: kept with the run, not
-      # published)
+      # log lines with tools/symbolize_crash.py: kept with the run, no part
+      # of a download)
       - uses: actions/upload-artifact@v4
         with:
-          name: mendicantce-windows-symbols
+          name: MendicantCE-PRISM-windows-x64-symbols
           path: dist/halo-windows-release-symbols
-          retention-days: 30
+          retention-days: 14
 
   tests:
     # the tests that need no build, with the guests' pinned LLVM first on the
-    # PATH, as build.yml's tests job runs them: reported, and not what a
-    # release waits for (the checks that stop one are the build jobs')
+    # PATH, as build.yml's tests job runs them
     runs-on: ubuntu-24.04
     container: ubuntu:22.04
     timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Install git
         env:
@@ -280,42 +336,46 @@ jobs:
             tools/test_install_layout.py tools/test_port_settings.py tools/test_controller_remap_context.py \
             tools/test_loading_assets.py tools/test_mouse_sensitivity.py tools/harness
 
-  release:
-    # the two packages as a release, for mendicant-prism only, when both
-    # built and passed their checks
+  sums:
+    # the two zips' SHA256SUMS, when both built and passed their checks: the
+    # run's third artifact (nothing is published: see the top of this file)
     needs: [linux, windows]
-    if: ${{ github.ref == 'refs/heads/mendicant-prism' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    permissions:
-      contents: write
-    env:
-      GH_TOKEN: ${{ github.token }}
-      GH_REPO: ${{ github.repository }}
     steps:
-      # (the release's notes alone)
       - uses: actions/checkout@v4
-        with:
-          sparse-checkout: .github/mendicant_release_notes.md
-          sparse-checkout-cone-mode: false
 
       - uses: actions/download-artifact@v4
         with:
-          name: mendicantce-linux
-          path: artifacts
+          name: MendicantCE-PRISM-linux-x86_64
+          path: dist/release
 
       - uses: actions/download-artifact@v4
         with:
-          name: mendicantce-windows
-          path: artifacts
+          name: MendicantCE-PRISM-windows-x64
+          path: dist/release
 
-      - name: Publish
+      # (each zip read whole, and the sums checked as a player checks them)
+      - name: Sums
         run: |
-          tag="mendicant-prism-$GITHUB_RUN_NUMBER"
-          ls -l artifacts
-          [ -f artifacts/MendicantCE-Linux.zip ] && [ -f artifacts/MendicantCE-Windows.zip ]
-          (cd artifacts && sha256sum MendicantCE-Linux.zip MendicantCE-Windows.zip > SHA256SUMS)
-          sed -e "s/@COMMIT@/$GITHUB_SHA/g" -e "s/@SHORT@/${GITHUB_SHA:0:12}/g" .github/mendicant_release_notes.md > notes.md
-          gh release create "$tag" artifacts/MendicantCE-Linux.zip artifacts/MendicantCE-Windows.zip artifacts/SHA256SUMS \
-            --target "$GITHUB_SHA" --latest \
-            --title "MendicantCE $GITHUB_RUN_NUMBER (${GITHUB_SHA:0:7})" --notes-file notes.md
+          python3 tools/mendicant/package.py sums dist/release
+          cd dist/release
+          sha256sum -c SHA256SUMS
+          for archive in MendicantCE-PRISM-linux-x86_64.zip MendicantCE-PRISM-windows-x64.zip; do
+            unzip -tq "$archive"
+            unzip -l "$archive"
+          done
+          {
+            echo "Commit \`$GITHUB_SHA\`"
+            echo
+            echo '```'
+            cat SHA256SUMS
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SHA256SUMS
+          path: dist/release/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14

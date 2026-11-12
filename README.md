@@ -11,8 +11,13 @@
 > source of a MendicantCE build is not in OpenH1's repository under a
 > `build-<n>` tag but at
 > <https://github.com/Adam-AtlasSoftware/MendicantCE>, at the commit its
-> `SOURCE.txt` names. MendicantCE's builds are on
-> <https://github.com/Adam-AtlasSoftware/MendicantCE/releases>.
+> `SOURCE.txt` names.
+>
+> **Downloads:** MendicantCE's builds, for Linux (x86-64) and Windows (x64),
+> are on <https://github.com/Adam-AtlasSoftware/MendicantCE/releases>. They
+> hold no game data: the game plays from your own Halo: Combat Evolved Xbox
+> disc image. Problems with them go to
+> <https://github.com/Adam-AtlasSoftware/MendicantCE/issues>.
 
 <p align="center">
   <a href="https://openh1.com"><img src="website/public/media/og.jpg" alt="OpenH1: welcome back, soldier" width="100%"></a>
