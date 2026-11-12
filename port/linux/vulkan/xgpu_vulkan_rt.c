@@ -67,7 +67,7 @@ their pool) */
 #define RT_GARBAGE 256u
 /* the objects' triangles a window at most (past it: the draws drawn last
 are left out) */
-#define RT_OBJECT_TRIANGLES 1500000u
+#define RT_OBJECT_TRIANGLES 2250000u
 /* the objects' entries (each draw's acceleration structure kept from frame
 to frame), their hash's buckets, the frames an entry not traced is kept,
 the refits before it is built again, how far node 0 may jump and the entry
@@ -81,8 +81,8 @@ still be refitted (world units) */
 this many world units of the eye, and while the window's objects have not
 taken this share of RT_OBJECT_TRIANGLES; the game's own model past either
 (a far object's shape, at a pixel or two, the same; never left out) */
-#define RT_REPLACEMENT_REACH 30.0f
-#define RT_REPLACEMENT_SHARE 0.6f
+#define RT_REPLACEMENT_REACH 40.0f
+#define RT_REPLACEMENT_SHARE 0.75f
 /* the node rows an entry compares (c[60] to c[191]) */
 #define RT_NODE_ROWS 132u
 /* the entries' memory: chunks of device memory (a larger entry has one of
@@ -90,7 +90,7 @@ its own), their free ranges at most */
 #define RT_POOL_CHUNK (32ull << 20)
 /* the pool's size past which the entries not traced lately are let go of
 (and new ones wait) */
-#define RT_POOL_MOST (320ull << 20)
+#define RT_POOL_MOST (480ull << 20)
 #define RT_POOL_CHUNKS 96u
 #define RT_POOL_RANGES 1024u
 /* a window's jobs (draws skinned) and draws captured at most */
@@ -403,7 +403,7 @@ static struct
 	the replacement meshes traced within RT_REPLACEMENT_REACH of it) */
 	float eye[3];
 	int eye_known;
-	uint64_t stock_stand_ins;
+	uint64_t stock_stand_ins, far_left;
 } rt;
 
 /* the monotonic clock, in seconds (the exposure's adaptation) */
@@ -1813,6 +1813,25 @@ void xgpu_vulkan_rt_capture(const struct xgpu_vulkan_rt_draw *draw)
 	if ((draw->stride & 3) || (draw->position_offset & 3) || (draw->vertex_offset & 3) ||
 		((draw->index_buffer || draw->cpu_indices) && draw->index_size != 2 && draw->index_size != 4))
 		return;
+	/* (port: display.prism_rt_objects "auto": past RT_REPLACEMENT_SHARE of
+	the window's triangles, an object farther than RT_REPLACEMENT_REACH is
+	left out, so that the near ones, drawn later, still find room: the mods'
+	models, in 10,000-triangle runs, had filled the window two frames in
+	three, and which objects were left out changed from frame to frame) */
+	if (rt.frame.objects != 1 && rt.eye_known &&
+		(float)(capture->triangle_count + triangles) > RT_REPLACEMENT_SHARE * (float)RT_OBJECT_TRIANGLES)
+	{
+		float d[3];
+
+		d[0] = draw->origin[0] - rt.eye[0];
+		d[1] = draw->origin[1] - rt.eye[1];
+		d[2] = draw->origin[2] - rt.eye[2];
+		if (d[0] * d[0] + d[1] * d[1] + d[2] * d[2] > RT_REPLACEMENT_REACH * RT_REPLACEMENT_REACH)
+		{
+			rt.far_left++;
+			return;
+		}
+	}
 	if (capture->draw_count == RT_WINDOW_DRAWS || capture->job_count == RT_JOBS ||
 		capture->triangle_count + triangles > RT_OBJECT_TRIANGLES)
 	{
@@ -2089,14 +2108,14 @@ static void statistics_frame(void)
 			"structure %u triangles, objects %.0f triangles a frame (most %llu) of %.1f draws, %.1f draws passed over, "
 			"%llu frames' capture full; objects: %.1f skinned a frame (%.0f triangles), %.1f built, %.1f refitted, "
 			"%.1f kept, %.2f deferred, %llu evicted, %llu without an entry, %.1f a frame replacement meshes' pieces "
-			"(%.1f a frame the game's model in their place); %u entries, %.1f MB",
+			"(%.1f a frame the game's model in their place), %.1f far ones left out a frame; %u entries, %.1f MB",
 			rt.timed_frames ? rt.milliseconds / (double)rt.timed_frames : 0.0,
 			rt.milliseconds_most, (unsigned long long)rt.timed_frames, rt.static_triangles,
 			(double)rt.triangles / 600.0, (unsigned long long)rt.object_triangles_most, (double)rt.draws / 600.0,
 			(double)rt.skipped / 600.0, (unsigned long long)rt.full_frames, (double)rt.jobs / 600.0,
 			(double)rt.skinned_triangles / 600.0, (double)rt.builds / 600.0, (double)rt.updates / 600.0,
 			(double)rt.reused / 600.0, (double)rt.deferred / 600.0, (unsigned long long)rt.evicted,
-			(unsigned long long)rt.stale, (double)rt.pieces / 600.0, (double)rt.stock_stand_ins / 600.0, rt.entry_count, (double)rt.pool_bytes / 1048576.0);
+			(unsigned long long)rt.stale, (double)rt.pieces / 600.0, (double)rt.stock_stand_ins / 600.0, (double)rt.far_left / 600.0, rt.entry_count, (double)rt.pool_bytes / 1048576.0);
 	if (getenv("HALO_PRISM_RT_DEBUG"))
 	{
 		uint32_t index;
@@ -2124,7 +2143,7 @@ static void statistics_frame(void)
 	rt.frames = rt.draws = rt.skipped = rt.triangles = rt.object_triangles_most = rt.full_frames = 0;
 	rt.jobs = rt.skinned_triangles = rt.builds = rt.updates = rt.reused = rt.evicted = rt.stale = rt.deferred = 0;
 	rt.pieces = 0;
-	rt.stock_stand_ins = 0;
+	rt.stock_stand_ins = rt.far_left = 0;
 	rt.milliseconds = rt.milliseconds_most = 0.0;
 	rt.timed_frames = 0;
 }

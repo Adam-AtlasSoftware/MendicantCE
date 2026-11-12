@@ -701,10 +701,11 @@ static const struct config_setting config_settings[] =
 	{ "display.prism_rt_objects", _config_string, "\"auto\"", "HALO_PRISM_RT_OBJECTS", _environment_value,
 		_platform_desktop,
 		"PRISM ray tracing: the objects' shapes traced: \"auto\" as drawn\n"
-		"(display.prism_models' replacement meshes) within 30 world units of\n"
-		"the eye and while the window's objects are under 60% of the traced\n"
-		"triangles' most, the game's own models past either; \"view_lod\" as\n"
-		"drawn always; \"low_lod\" the game's own models (cheaper)." },
+		"(display.prism_models' replacement meshes) within 40 world units of\n"
+		"the eye and while the window's objects are under 75% of the traced\n"
+		"triangles' most, the game's own models past either, and past that\n"
+		"share an object beyond 40 units left out; \"view_lod\" as drawn\n"
+		"always; \"low_lod\" the game's own models (cheaper)." },
 	{ "display.prism_rt_world", _config_string, "\"auto\"", "HALO_PRISM_RT_WORLD", _environment_value,
 		_platform_desktop,
 		"PRISM ray tracing: the level's shape traced: \"auto\" the remodel's far\n"

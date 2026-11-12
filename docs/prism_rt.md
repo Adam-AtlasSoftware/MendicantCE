@@ -106,10 +106,12 @@ capture, passes), `xgpu_vulkan_rt_glsl.inc` (the compute shaders; `tools/vulkan_
   canopy, which CE lit whole), with `display.prism_rt_alpha`; a part the mesh store's
   replacement mesh draws (`display.prism_models`) is traced as that mesh: its pieces' skinned vertices (the mesh
   store's own skinning of the frame, shared with its draw) and 32-bit indices, copied into its entry's soup where its
-  bones moved (`display.prism_rt_objects` `low_lod`: the stock part instead; `auto`: the replacement within 30 wu of
-  the eye and while the window's objects are under 60% of `RT_OBJECT_TRIANGLES`, the stock part past either. With
-  every model of b30 replaced, the replacements' triangles had filled the window two frames in three, and the
-  objects drawn last were left out of the traced scene, their shadows and occlusion coming and going).
+  bones moved (`display.prism_rt_objects` `low_lod`: the stock part instead; `auto`: the replacement within 40 wu of
+  the eye and while the window's objects are under 75% of `RT_OBJECT_TRIANGLES` (2.25 million), the stock part past
+  either; past that share an object beyond 40 wu is left out, so that the near ones always find room. With every
+  model of b30 replaced and the mods' models (drawn in 10,000-triangle runs), 1.5 million triangles had filled the
+  window two frames in three, and the objects drawn last were left out of the traced scene, a different few each
+  frame: their shadows and occlusion came and went).
 - **The level's remodel** (`display.prism_world_geometry` `remodel`, `display.prism_rt_world`): the remodel's far
   level is traced where it is drawn (b30: 282 thousand triangles for the map's 33 thousand, 19 MB of structure; 592
   thousand with the sealed remodel of combined2's data, whose far levels keep every edge vertex), or its
