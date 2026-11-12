@@ -1476,7 +1476,10 @@ boolean mendicant_firing_position_owned(long encounter_index, short position)
 	{
 		struct actor_datum *actor = move_actor_at(index);
 
-		if (actor && actor->meta.encounter_index == encounter_index &&
+		/* (by the encounter's absolute index: a script's migrate stores it
+		bare, an actor's creation with the datum's salt, and actors of the
+		two kinds share the encounter's positions) */
+		if (actor && (short)actor->meta.encounter_index == (short)encounter_index &&
 			actor->firing_positions.current_position_index == position)
 			return TRUE;
 	}
@@ -1496,7 +1499,7 @@ static long move_position_owner(long encounter_index, short position, long actor
 		struct actor_datum *actor = move_actor_at(index);
 		long owner;
 
-		if (!actor || actor->meta.encounter_index != encounter_index ||
+		if (!actor || (short)actor->meta.encounter_index != (short)encounter_index ||
 			actor->firing_positions.current_position_index != position)
 			continue;
 		owner = move_actor_index(actor->identifier, index);
@@ -1521,7 +1524,7 @@ static boolean move_ordered_post_owner(long actor_index, short position, long *o
 	if (holder != NONE)
 	{
 		holder_slot = move_slot(holder);
-		if (holder_slot >= 0 && holder_slot < MENDICANT_MAX_ACTORS && order_actor[holder_slot] == holder &&
+		if (holder_slot >= 0 && holder_slot < MENDICANT_MAX_ACTORS && mendicant_order_stands(holder) &&
 			order_position[holder_slot] == position)
 			return FALSE;
 	}
@@ -1600,7 +1603,9 @@ short mendicant_select_position(long actor_index,
 	long owner = NONE;
 
 	/* (an ordered post held under the same order by another: the game's choice) */
-	if (index >= 0 && index < MENDICANT_MAX_ACTORS && order_actor[index] == actor_index &&
+	/* (an order of another encounter than the actor is in now, or past its
+	list, is dropped: mendicant_order_stands) */
+	if (index >= 0 && index < MENDICANT_MAX_ACTORS && mendicant_order_stands(actor_index) &&
 		(order_position[index] < 0 || move_ordered_post_owner(actor_index, order_position[index], &owner)))
 	{
 		/* (the hook library left the candidate unset; action_uncover reads it) */
@@ -1623,7 +1628,7 @@ void mendicant_guard_change(long actor_index, short *firing_position_index,
 	int slot = move_slot(actor_index);
 	long owner = NONE;
 
-	if (slot >= 0 && slot < MENDICANT_MAX_ACTORS && order_actor[slot] == actor_index && order_position[slot] >= 0 &&
+	if (slot >= 0 && slot < MENDICANT_MAX_ACTORS && mendicant_order_stands(actor_index) && order_position[slot] >= 0 &&
 		order_position[slot] != *firing_position_index &&
 		move_ordered_post_owner(actor_index, order_position[slot], &owner))
 	{
@@ -2167,6 +2172,7 @@ static void move_test_start(long actor_index, struct actor_datum *actor, long ti
 	/* (set and cleared directly, as the hook library did: no free-movement order is cancelled) */
 	order_actor[move_slot(actor_index)] = actor_index;
 	order_position[move_slot(actor_index)] = (short)best;
+	order_encounter[move_slot(actor_index)] = (short)encounter_index;
 	move_test_point = positions[best].position;
 	move_test_start_time = move_test_report_time = time;
 	result = actor_change_firing_position(actor_index, (short)best, NULL, NONE, NULL, FALSE);
