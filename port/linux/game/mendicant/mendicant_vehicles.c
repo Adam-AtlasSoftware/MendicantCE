@@ -31,6 +31,7 @@ vehicle_try) with the same behaviour.
 #include "objects/objects.h"
 #include "units/units.h"
 #include "tag_files/tag_files.h"
+#include "cutscene/cinematics.h"
 
 #include "mendicant_internal.h"
 
@@ -86,6 +87,14 @@ static long vehicle_test_time;
 static struct actor_datum *vehicles_actor_at(int index)
 {
 	return (struct actor_datum *)((char *)actor_data->data + index * actor_data->size);
+}
+
+/* an actor a script holds (a command list, a play fight), or one asleep:
+not one to be sent to a vehicle */
+static boolean vehicles_actor_held(struct actor_datum *actor)
+{
+	return actor->external_orders.playfighting || actor->state.action == _actor_action_obey ||
+		actor->state.action == _actor_action_sleep;
 }
 
 static struct object_header_datum *vehicles_header_at(int index)
@@ -463,7 +472,7 @@ void mendicant_vehicles_update(
 	long time, chief_vehicle, chief_unit;
 	int count, index;
 	struct unit_datum *chief, *chief_ride;
-	boolean chief_drives, convoy;
+	boolean chief_drives, convoy, boarding_held;
 
 	if (!mendicant_active)
 		return;
@@ -525,6 +534,7 @@ void mendicant_vehicles_update(
 	}
 	chief_vehicle_last = chief_drives ? chief_vehicle : NONE;
 
+	boarding_held = cinematic_in_progress();
 	for (index = 0; index < count && index < MENDICANT_MAX_ACTORS; index++)
 	{
 		struct actor_datum *actor = vehicles_actor_at(index);
@@ -535,6 +545,12 @@ void mendicant_vehicles_update(
 
 		if (!actor->identifier || actor->input.vehicle_index != NONE || actor->state.action == _actor_action_vehicle ||
 			time - vehicle_tried[index] < 300 || mendicant_team_mode(actor->meta.team_index) == MODE_GAME)
+			continue;
+		/* no one boards in a cinematic, and an actor a script holds (a command
+		list, a play fight) or one asleep is left where he is: the game's own
+		entry refuses an actor in a command list too (actions.c). (The rest
+		of this update, the autopilot and the convoy, goes on.) */
+		if (boarding_held || vehicles_actor_held(actor))
 			continue;
 		actor_index = ((long)actor->identifier << 16) | index;
 		unit = vehicles_unit(actor->meta.unit_index);
@@ -581,6 +597,11 @@ void mendicant_vehicles_update(
 			struct unit_datum *vehicle = NULL;
 			long vehicle_index;
 
+			/* (an enemy he knows of, by the game's own count: one unaware, a
+			sleeping Grunt by a Shade, takes no vehicle because a player is
+			within 70 world units, seen or not) */
+			if (actor->situation.known_enemies <= 0)
+				continue;
 			if (!vehicles_nearest_enemy_point(SIDE_COVENANT, at, &enemy))
 				continue;
 			ex = enemy.x - at->x;
@@ -610,7 +631,10 @@ void mendicant_vehicles_update(
 					{
 						struct actor_datum *other = vehicles_actor_at(index_other);
 
+						/* (he is put into the seat: not one a script holds, asleep,
+						or who knows of no enemy) */
 						if (index_other != index && other->identifier && ACTOR_IS_ELITE(other->meta.type) &&
+							!vehicles_actor_held(other) && other->situation.known_enemies > 0 &&
 							other->meta.team_index == actor->meta.team_index && other->input.vehicle_index == NONE &&
 							vehicles_actor_distance_squared(actor, other) < 10.0f * 10.0f)
 							gunner = other->meta.unit_index;

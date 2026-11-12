@@ -40,6 +40,7 @@ from source/.
 #include "physics/collision_usage.h"
 #include "scenario/scenario.h"
 #include "scenario/scenario_definitions.h"
+#include "cutscene/cinematics.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -759,6 +760,10 @@ static boolean go_yields(struct go_order *order, struct actor_datum *actor)
 	if (order->urgency >= 2)
 		return FALSE;
 	if (action == _actor_action_flee || action == _actor_action_avoid)
+		return TRUE;
+	/* (an actor a script holds: its command list's moves and a play fight's
+	are the script's, whoever's order this is and whenever it was given) */
+	if (action == _actor_action_obey || actor->external_orders.playfighting)
 		return TRUE;
 	return order->urgency == 0 &&
 		(action == _actor_action_fight || action == _actor_action_charge || action == _actor_action_vehicle);
@@ -2017,6 +2022,20 @@ void mendicant_follow_chief(long time)
 
 	if (player_count == 0 || !actor_data || !actor_data->valid)
 		return;
+	/* (a cinematic stages its actors itself: no one walks to the Chief in one,
+	and the orders standing are let go) */
+	if (cinematic_in_progress())
+	{
+		for (index = 0; index < actor_data->count && index < MENDICANT_MAX_ACTORS; index++)
+		{
+			struct actor_datum *actor = move_actor_at(index);
+
+			if (actor && follow_going[index] && follow_identifier[index] == actor->identifier)
+				actor_go_cancel(move_actor_index(actor->identifier, index));
+			follow_going[index] = 0;
+		}
+		return;
+	}
 	for (index = 0; index < actor_data->count && index < MENDICANT_MAX_ACTORS; index++)
 	{
 		struct actor_datum *actor = move_actor_at(index);
@@ -2048,6 +2067,20 @@ void mendicant_follow_chief(long time)
 			follow_going[index] = 0;
 		}
 		actor_index = move_actor_index(actor->identifier, index);
+		/* an actor a script holds (a command list, a play fight: the test the
+		convoy, the grenades, the spacing and the lanes make) is the script's:
+		he is not sent after the Chief, and an order given him before the
+		script took him is let go, which otherwise went on redirecting his
+		list's moves to its own goal and held his encounter active */
+		if (actor->external_orders.playfighting || actor->state.action == _actor_action_obey)
+		{
+			if (follow_going[index])
+			{
+				actor_go_cancel(actor_index);
+				follow_going[index] = 0;
+			}
+			continue;
+		}
 		from = &unit->object.position;
 		dx = at->x - from->x;
 		dy = at->y - from->y;
