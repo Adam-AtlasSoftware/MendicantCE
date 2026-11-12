@@ -17,6 +17,12 @@ builds the tag validator's program, <folder>/map_validate (default:
 build/map_validate), which tools/test_linux_port.py runs on the maps:
 
     build/map_validate/map_validate [--strict] map.map...
+
+fork: and with --map-extract, PRISM's pack tools' extractor,
+<folder>/map_extract (default: build/map_extract), which the fork's Linux
+package carries as bin/openh1-map-extract (tools/prism_packs/README.md):
+
+    python tools/x86_game_abi.py --map-extract [folder]
 """
 
 import argparse
@@ -184,52 +190,78 @@ def _compile(cc: str, source: Path, flags: Sequence[str], obj: Path) -> None:
         raise RuntimeError(f"{source} does not compile:\n{result.stderr[-4000:]}")
 
 
-def build_map_validate(folder: Path) -> Path:
-    """the tag validator alone on map files (tools/map_validate.c), with the
-    game's objects of it (port/linux/game/tag_validate.c, tag_schema*.c,
-    and the Custom Edition maps' loader, cache_file_formats.c) and zlib:
-    folder/map_validate, made again only when a source is newer"""
+def _build_validator_tool(folder: Path, name: str, tool: Path, tool_flags: Sequence[str],
+                          link_flags: Sequence[str]) -> Path:
+    """a program of the tag validator's (port/linux/game/tag_validate.c,
+    tag_schema*.c, and the Custom Edition maps' loader, cache_file_formats.c)
+    and zlib with tool, its own C file compiled with tool_flags:
+    folder/name, made again only when a source is newer"""
     cc = compiler()
     if not cc:
         raise RuntimeError("needs clang")
     folder = folder if folder.is_absolute() else ROOT / folder
-    program = folder / "map_validate"
+    program = folder / name
     game_units = [GAME_DIR / "tag_validate.c", GAME_DIR / "cache_file_formats.c",
                   *sorted(GAME_DIR.glob("tag_schema*.c"))]
-    zlib_units = [ZLIB_DIR / name for name in ZLIB_SOURCES]
-    tool = ROOT / "tools/map_validate.c"
-    inputs = [*game_units, *zlib_units, tool, *GAME_DIR.glob("*.h"), *GAME_DIR.glob("*.inc"),
-              Path(__file__), SEMANTICS_SCRIPT]
+    zlib_units = [ZLIB_DIR / unit for unit in ZLIB_SOURCES]
+    inputs = [*game_units, *zlib_units, tool, *tool.parent.glob("*.h"), *GAME_DIR.glob("*.h"),
+              *GAME_DIR.glob("*.inc"), Path(__file__), SEMANTICS_SCRIPT]
     if program.is_file() and all(program.stat().st_mtime >= (ROOT / path).stat().st_mtime for path in inputs):
         return program
     semantics = semantics_headers(folder / "generated")
     game = game_cflags(semantics)
     zlib = [*GAME_ABI_FLAGS, "-std=gnu11", *ZLIB_DEFINES, "-w"]
-    posix = [*POSIX_FLAGS, f"-I{ZLIB_DIR}", *ZLIB_DEFINES]
     jobs = ([(source, game) for source in game_units] + [(source, zlib) for source in zlib_units]
-            + [(tool, posix)])
+            + [(tool, [*tool_flags, f"-I{ZLIB_DIR}", *ZLIB_DEFINES])])
     objects = [folder / "obj" / (Path(source).name + ".o") for source, _ in jobs]
     with ThreadPoolExecutor(max_workers=os.cpu_count() or 4) as pool:
         for future in [pool.submit(_compile, cc, Path(source), flags, obj)
                        for (source, flags), obj in zip(jobs, objects)]:
             future.result()
-    result = subprocess.run([cc, *LINK_FLAGS, *map(str, objects), "-o", str(program)], capture_output=True,
-                            text=True)
+    result = subprocess.run([cc, *LINK_FLAGS, *link_flags, *map(str, objects), "-lm", "-o", str(program)],
+                            capture_output=True, text=True)
     if result.returncode:
-        raise RuntimeError(f"map_validate does not link:\n{result.stderr[-4000:]}")
+        raise RuntimeError(f"{name} does not link:\n{result.stderr[-4000:]}")
     return program
+
+
+def build_map_validate(folder: Path) -> Path:
+    """the tag validator alone on map files (tools/map_validate.c), with the
+    game's objects of it and zlib: folder/map_validate, made again only when
+    a source is newer"""
+    return _build_validator_tool(folder, "map_validate", ROOT / "tools/map_validate.c", POSIX_FLAGS, [])
+
+
+# fork: the asset extractor of PRISM's pack tools (tools/prism_packs/extract/map_extract_tool.c: a map's
+# bitmaps, models and structure bsps as PNG, glTF and JMS, and its light sources, read as the validator reads
+# them). The one 32-bit program
+# of the fork's packages: linked statically (it needs no 32-bit C library on the player's computer, only a
+# kernel that runs 32-bit programs, as every 64-bit x86 Linux does), with the baseline x86-64 instruction set
+# and no fused multiply-adds, so that every computer extracts the same numbers
+MAP_EXTRACT = ROOT / "tools/prism_packs/extract/map_extract_tool.c"
+
+
+def build_map_extract(folder: Path) -> Path:
+    """tools/prism_packs/extract/map_extract_tool.c (map_extract.c and its lights command) with the
+    validator's objects and zlib: folder/map_extract, static, made again only when a source is newer"""
+    return _build_validator_tool(folder, "map_extract", MAP_EXTRACT, [*POSIX_FLAGS, "-ffp-contract=off"],
+                                 ["-static"])
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("folder", type=Path, nargs="?", default=Path("build/map_validate"),
-                        help="where the program goes (default: build/map_validate)")
+    parser.add_argument("folder", type=Path, nargs="?", default=None,
+                        help="where the program goes (default: build/map_validate, or build/map_extract)")
+    parser.add_argument("--map-extract", action="store_true",
+                        help="build PRISM's pack tools' extractor (tools/prism_packs/extract) instead")
     args = parser.parse_args()
-    reason = can_build(args.folder if args.folder.is_absolute() else ROOT / args.folder)
+    name = "map_extract" if args.map_extract else "map_validate"
+    folder = args.folder or Path("build") / name
+    reason = can_build(folder if folder.is_absolute() else ROOT / folder)
     if reason:
-        print(f"cannot build map_validate: {reason}", file=sys.stderr)
+        print(f"cannot build {name}: {reason}", file=sys.stderr)
         return 1
-    print(build_map_validate(args.folder))
+    print((build_map_extract if args.map_extract else build_map_validate)(folder))
     return 0
 
 
