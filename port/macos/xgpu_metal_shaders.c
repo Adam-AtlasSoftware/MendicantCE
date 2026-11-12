@@ -124,6 +124,7 @@ static void pixel_program_convert(const struct xgpu_stream_pixel_program *wire, 
 	program->source_blend = wire->source_blend;
 	program->ambient_occlusion = wire->ambient_occlusion;
 	program->hdr = wire->hdr;
+	program->lightmap_filter = wire->lightmap_filter;
 }
 
 /* ---------- the shaders */

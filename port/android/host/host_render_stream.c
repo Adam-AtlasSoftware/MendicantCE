@@ -235,6 +235,7 @@ static const uint32_t record_minimum[XGPU_STREAM_RECORD_TYPES] =
 	[XGPU_STREAM_WORLD_AO_PREPASS] = sizeof(struct xgpu_stream_world_ao_prepass),
 	[XGPU_STREAM_WORLD_AO_CASCADES] = sizeof(struct xgpu_stream_world_ao_cascades),
 	[XGPU_STREAM_MATERIAL_OVERLAY] = sizeof(struct xgpu_stream_material_overlay),
+	[XGPU_STREAM_PRISM_SHADOWS] = sizeof(struct xgpu_stream_prism_shadows),
 	[XGPU_STREAM_TEXTURE_STORE_MAP] = sizeof(struct xgpu_stream_texture_store_map),
 	[XGPU_STREAM_MESH_STORE_MAP] = sizeof(struct xgpu_stream_mesh_store_map),
 	[XGPU_STREAM_MESH_INSTANCE] = sizeof(struct xgpu_stream_mesh_instance),
@@ -559,6 +560,18 @@ static int decode_record(struct host_render_decoder *decoder, const unsigned cha
 			return XGPU_STREAM_ERROR_BOUNDS;
 		CALL(world_ao_prepass, (const void *)start);
 		break;
+	case XGPU_STREAM_PRISM_SHADOWS:
+	{
+		const struct xgpu_stream_prism_shadows *shadows = (const void *)start;
+
+		if (shadows->phase > XGPU_PRISM_SHADOWS_END || shadows->cascades > XGPU_PRISM_SHADOWS_CASCADES_MOST ||
+			(shadows->phase == XGPU_PRISM_SHADOWS_BEGIN && (!shadows->cascades ||
+			shadows->resolution < XGPU_PRISM_SHADOWS_RESOLUTION_LEAST ||
+			shadows->resolution > XGPU_PRISM_SHADOWS_RESOLUTION_MOST)))
+			return XGPU_STREAM_ERROR_BOUNDS;
+		CALL(prism_shadows, shadows);
+		break;
+	}
 	case XGPU_STREAM_WORLD_AO_CASCADES:
 	{
 		const struct xgpu_stream_world_ao_cascades *box = (const void *)start;

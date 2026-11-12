@@ -209,6 +209,8 @@ static boolean object_is_first_person_camera(
 	long object_index);
 static void find_rendered_objects(
 	void);
+static void find_shadow_casters(
+	void);
 static real object_get_level_of_detail_pixels(
 	long object_index);
 static void render_object_list(
@@ -393,11 +395,17 @@ void render_objects(
 	profile_enter(render_objects_section);
 
 	rasterizer_models_begin(FALSE);
-	if (!rendered_objects_found_early)
+	/* port: display.prism_shadows "cascaded"'s pass finds its own casters
+	(off the screen too), and the window's own passes theirs after it */
+	if (render_prism_shadow_pass)
+	{
+		find_shadow_casters();
+	}
+	else if (!rendered_objects_found_early)
 	{
 		find_rendered_objects();
 	}
-	rendered_objects_found_early = render_world_ao_prepass;
+	rendered_objects_found_early = render_port_prepass && !render_prism_shadow_pass;
 
 	data.shadow = FALSE;
 
@@ -407,9 +415,14 @@ void render_objects(
 		{
 			/* port: display.ambient_occlusion "world" leaves the first-person
 			weapon as it is (port/linux/game/world_ao.c) */
+			/* port: (none in display.prism_shadows "cascaded"'s pass: the
+			first-person weapon casts no shadow of the sun) */
+			if (!render_prism_shadow_pass)
+			{
 			world_ao_first_person(TRUE);
 			first_person_weapon_draw();
 			world_ao_first_person(FALSE);
+			}
 		}
 		else
 		{
@@ -558,6 +571,60 @@ static void find_rendered_objects(
 		error(_error_silent, "MAXIMUM_RENDERED_OBJECTS exceeded.");
 		reported_rendered_object_overflow = TRUE;
 	}
+
+	return;
+}
+
+/* port: display.prism_shadows "cascaded"'s casters: the objects of the
+window's rendered clusters within the sun's shadows' reach of the camera,
+wherever they are about it (an object off the screen still casts its shadow
+into the view); each once, by a set of their own (the objects' markers,
+which the game's searches share, left as they are) */
+#define PRISM_SHADOW_CASTERS_REACH 60.0f
+#define PRISM_SHADOW_CASTERS_SEEN 4096
+
+static void find_shadow_casters(
+	void)
+{
+	static unsigned char seen[PRISM_SHADOW_CASTERS_SEEN / 8];
+	short count = 0, list;
+	long rendered_cluster_index;
+
+	csmemset(seen, 0, sizeof(seen));
+	for (list = 0; list < 2; list++)
+	{
+		for (rendered_cluster_index = 0; (short)rendered_cluster_index < render.rendered_cluster_count;
+			rendered_cluster_index++)
+		{
+			struct rendered_cluster *rendered_cluster = rendered_cluster_get(rendered_cluster_index);
+			long iterator, object_index;
+
+			for (object_index = list ? cluster_get_first_noncollideable_object(&iterator, rendered_cluster->cluster_index) :
+					cluster_get_first_collideable_object(&iterator, rendered_cluster->cluster_index);
+				object_index != NONE && count < MAXIMUM_RENDERED_OBJECTS;
+				object_index = list ? cluster_get_next_noncollideable_object(&iterator) :
+					cluster_get_next_collideable_object(&iterator))
+			{
+				long absolute = DATUM_INDEX_TO_ABSOLUTE_INDEX(object_index);
+				real_point3d center;
+				real radius, reach;
+
+				if (absolute >= PRISM_SHADOW_CASTERS_SEEN || (seen[absolute >> 3] & (1 << (absolute & 7))))
+				{
+					continue;
+				}
+				object_get_render_bounding_sphere(object_index, &center, &radius);
+				reach = PRISM_SHADOW_CASTERS_REACH + radius;
+				if (distance_squared3d(&center, &render.camera.position) > reach * reach)
+				{
+					continue;
+				}
+				seen[absolute >> 3] |= (unsigned char)(1 << (absolute & 7));
+				render_object_globals.rendered_object_indices[count++] = object_index;
+			}
+		}
+	}
+	render_object_globals.rendered_object_count = count;
 
 	return;
 }
@@ -836,7 +903,7 @@ static void render_object_list(
 			/* port: (not in display.ambient_occlusion "world"'s pre-pass: the
 			widgets draw as transparent geometry, queued for later) */
 			if (!data->shadow && !legs && object->object.first_widget_index != NONE &&
-				!render_world_ao_prepass)
+				!render_port_prepass)
 			{
 				struct render_animation animation;
 

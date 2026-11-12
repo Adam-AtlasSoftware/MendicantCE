@@ -34,6 +34,7 @@ renderer" in port/linux/README.md.
 /* (xgpu_stream.h) */
 struct xgpu_world_ao_block;
 struct xgpu_world_ao_pass;
+struct xgpu_prism_shadows_block;
 
 struct xgpu_vertex_program;
 
@@ -75,6 +76,15 @@ struct xgpu_backend_capabilities
 	/* display.prism_material_overlay (xgpu.h's "The material overlay"):
 	its shaders and xgpu_backend_material_overlay */
 	BOOL material_overlay;
+	/* display.prism_lightmaps (xgpu.h's "The lightmaps smoothed"): the
+	pixel key's lightmap_filter */
+	BOOL lightmap_filter;
+	/* display.prism_bloom: xgpu_backend_bloom's glow about the 3D view's
+	light past white, before its tone map (with the half floats: hdr) */
+	BOOL bloom;
+	/* display.prism_shadows "cascaded": xgpu_backend_prism_shadows's pass
+	and the receivers' XGPU_PRISM_SHADOWS_CASCADED */
+	BOOL prism_shadows;
 	/* display.prism_textures: the host opens and draws a mod's replacement
 	textures (xgpu_backend_texture_store_map) */
 	BOOL texture_store;
@@ -138,7 +148,22 @@ void xgpu_backend_gamma(float gamma);
 _rasterizer_profile_*, -1 none): what the backends' GPU timing sums by
 (HALO_METAL_PASS_TIMES) */
 void xgpu_backend_category(int category);
-void xgpu_backend_tone_map(xgpu_target target, const long corners[4]);
+/* display.prism_bloom (where xgpu_backend_capabilities' bloom): the view's
+light past paper white glows (XGPU_BLOOM_GLOW: small and faint; _FULL:
+wider and brighter) before the tone map: its share past 1 (the threshold),
+halved again and again (dual filtering, Marius Bjorge's: a 13-tap
+downsample, a 9-tap tent up, XGPU_BLOOM_LEVELS of each) and added back
+over the view by XGPU_BLOOM_STRENGTH; 0 none, the view as it is */
+#define XGPU_BLOOM_GLOW 1
+#define XGPU_BLOOM_FULL 2
+/* display.prism_tone (with the bloom's capability): the view graded before
+its bloom by its local mean (local contrast, its light lifted, a little
+more saturation: XGPU_PRISM_TONE_PRISM; more of each: _VIVID), handed to
+xgpu_backend_tone_map in bloom's bits XGPU_PRISM_TONE_SHIFT and up; 0 none */
+#define XGPU_PRISM_TONE_PRISM 1
+#define XGPU_PRISM_TONE_VIVID 2
+#define XGPU_PRISM_TONE_SHIFT 8
+void xgpu_backend_tone_map(xgpu_target target, const long corners[4], int bloom);
 /* display.ambient_occlusion "world" (xgpu_stream.h, docs/world-ao.md):
 the block the opaque surfaces' ambient light reads from here on (the
 field's place, the window's proxies; NULL none), and slices of the field
@@ -155,6 +180,12 @@ XGPU_WORLD_CASCADE*): its first texel, its size, two signed bytes a texel,
 x fastest (width 0: released) */
 void xgpu_backend_world_ao_cascades(unsigned long x, unsigned long y, unsigned long z, unsigned long width,
 	unsigned long height, unsigned long depth, const void *data);
+/* display.prism_shadows "cascaded" (xgpu_stream.h's PRISM_SHADOWS, xgpu.h's
+"PRISM's sun shadows"): the casters' pass begun (XGPU_PRISM_SHADOWS_BEGIN),
+the structure's casters from here on (_STRUCTURE), ended with the block the
+receivers read (_END), or no shadow (_NONE); the atlases' resolution and
+the cascades' count */
+void xgpu_backend_prism_shadows(int phase, int resolution, int cascades, const struct xgpu_prism_shadows_block *block);
 BOOL xgpu_backend_display_hdr(float *headroom);
 BOOL xgpu_backend_display_white(float *nits);
 

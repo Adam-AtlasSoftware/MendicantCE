@@ -181,9 +181,20 @@ struct nv2a_pixel_shader_key
 	weighted by a class mask and the multipurpose map's rule on top, plus
 	XGPU_OVERLAY_CLASS_MASK_WINS where the mask's own tiles A, C and D are
 	kept over the rule, plus XGPU_OVERLAY_SURFACE with a surface map,
-	plus XGPU_OVERLAY_SURFACE_ONLY with a surface map and no tiles (below:
-	"The material overlay") */
+	plus XGPU_OVERLAY_SURFACE_ONLY with no tiles (with a surface map, or
+	without one for PRISM v2's light alone: prism_lighting) (below: "The
+	material overlay") */
 	unsigned char material_overlay;
+	/* display.prism_lightmaps: a structure's lightmap pass whose stage 2 is
+	its lightmap (a 2D texture at projected coordinates) reads it smoothed
+	(XGPU_LIGHTMAP_FILTER_*, below: "The lightmaps smoothed"); 0 as the
+	Xbox read it */
+	unsigned char lightmap_filter;
+	/* PRISM v2's model light (display.prism_specular, prism_reflections,
+	prism_shadows), on a draw with a material overlay alone (its uniform
+	and images carry its parameters): XGPU_PRISM_* (below: "PRISM v2's
+	model light"); 0 none, as the game draws */
+	unsigned char prism_lighting;
 	/* display.prism_materials "pbr": a model draw lit for each pixel whose
 	shader a mod gives a material (port/linux/game/mod_pbr.c), shaded with
 	its albedo, normal, occlusion, roughness and metal, emissive, clear coat
@@ -191,6 +202,56 @@ struct nv2a_pixel_shader_key
 	XGPU_PBR_ON and the images it reads (XGPU_PBR_*) */
 	unsigned char material_pbr;
 };
+
+/* ---------- the lightmaps smoothed (display.prism_lightmaps)
+
+A lightmap pass's draw with lightmap_filter XGPU_LIGHTMAP_FILTER_SMOOTH
+reads texture stage 2 (the lightmap page, R5G6B5 as the game has it, or
+the finer copy rebuilt on this machine that replaces it: prism_lightmaps.c)
+in place of its one bilinear sample with:
+
+  c = the cubic B-spline of the 4 by 4 texels about the point, as four
+      bilinear samples (the weights' sums at each pair's place);
+  m, M = the least and most of each channel over the 2 by 2 texels the
+      bilinear sample reads (three gathers), c clamped to [m, M]: the
+      B-spline's wider reach never pulls light across a chart's edge or a
+      shadow's into the cell (no bleed of a gutter's black);
+  d = the mean of the four bilinear samples XGPU_LIGHTMAP_DEBAND_REACH
+      texels away along the diagonals, each weighed by how close it is to c
+      (1 within a quantum of the 16-bit format, R and B 1/31, G 1/63, 0 past
+      XGPU_LIGHTMAP_DEBAND_LIMIT of them): where the light is even (a band's
+      step of one quantum) c moves toward d by the weights' mean; where it
+      changes (an edge, a shadow) it stays c;
+  t2 = c + (n - 0.5) / 255, n interleaved gradient noise of the pixel
+       (Jimenez's), so that the steps left in the 8-bit target do not band.
+
+Its alpha is the bilinear sample's, as the combiners read it. Nothing else
+changes: the bump's response, the self-illumination, the dynamic lights. */
+#define XGPU_LIGHTMAP_FILTER_SMOOTH 1
+/* display.prism_lightmaps "rebaked": the lightmap pass's page is a page
+baked again on this machine (prism_lightmaps.c's .prl, the factor times
+CE's size) laid out as two halves side by side: on the left the light L,
+on the right its direction (RGB d * 0.5 + 0.5, a unit vector in the
+vertices' tangent frame, the frame CE's incident radiosity is in; A how
+much of the light comes from it, a). The draw (lightmap_filter
+XGPU_LIGHTMAP_FILTER_REBAKED, stage 2 the page, stage 3 the normalization
+cube of the vertices' incident radiosity) reads
+
+  t2   = the left half's bilinear sample at (u / 2, v), u clamped half a
+         texel inside it, dithered as above;
+  t3   = vec4(the right half's at (u / 2 + 1 / 2, v), 1): d in place of
+         the vertices' direction;
+  v0.a = the right half's alpha: a in place of the vertices' |R|;
+
+so the combiners' own sum, L x (1 - a + a max(0, n . d)) x the material's
+colour with n the bump map's normal at the pixel, lights each pixel's
+normal from the texel's own dominant direction, as CE lit it from the
+vertices'. Only the lightmap pass of a page that has its rebaked copy
+drawn is keyed so (d3d8_device.c asks prism_lightmaps.c, draw by draw);
+any other is XGPU_LIGHTMAP_FILTER_SMOOTH. */
+#define XGPU_LIGHTMAP_FILTER_REBAKED 2
+#define XGPU_LIGHTMAP_DEBAND_REACH 1.5f
+#define XGPU_LIGHTMAP_DEBAND_LIMIT 2.0f
 
 /* ---------- the material overlay (display.prism_material_overlay)
 
@@ -239,33 +300,124 @@ two BC5 images at the base map's coordinates, read once (not tiled), the
 images after the class mask (port/linux/game/mod_materials.c makes them
 from one RGBA PNG): the first's RG the tangent-space normal's x and y (y
 up the picture, 0.5 flat; its slope added to the tiles' in the same
-frame), the second's R the ambient occlusion (1 open), multiplying the
-cavity by mix(1, R, [10].y), its G the roughness (0 polished, 1 matte).
+frame), the second's R the ambient occlusion (1 open): mix(1, R, [10].y)
+multiplies the ambient and distant lights alone, as
+display.ambient_occlusion's occlusion does (the two multiplied: PRISM
+v2's model self-occlusion), and the reflection with the cavity and PRISM
+v2's highlights; its G the roughness (0 polished, 1 matte).
 With XGPU_OVERLAY_SURFACE_ONLY (a shader the overlay does not name, or
 the overlay off) there are no tiles: the slope is the surface map's alone,
-the cavity its occlusion, the roughness offset 0, and the uniform's [2],
+the cavity 1, the roughness offset 0, and the uniform's [2],
 [3].x and .y (the excluded channel, its threshold, the fade) and [6] (the
 reflection's bend and cavity) are mod_materials.c's defaults. [10]: x the
-normal's strength, y the occlusion's, z the specular's, w the specular's
-sharpest exponent. With z above 0 the reflection stage adds a specular
-highlight of the level's own dominant light (the model's first distant
-light, the lightmap's under the object: its direction and colour), Phong
-along the reflection the micro normal bends, its exponent from
-w * (1 - A)^2 (at least 4), times (1 - A) and z; added to texture stage
-3's reflection, so the shader's own reflection mask and tint (the
-multipurpose map's specular channel, CE's Fresnel) decide where it shows,
-as CE's cube map does. */
+normal's strength, y the occlusion's; z and w unused (the prototype's
+highlight, now PRISM v2's model light's: below). With
+XGPU_OVERLAY_SURFACE_ONLY and no surface map the overlay carries PRISM v2's
+model light alone (below). */
 #define XGPU_OVERLAY_BINDING 4
 #define XGPU_OVERLAY_TILE_COUNT 4
 #define XGPU_OVERLAY_SURFACE_IMAGE (XGPU_OVERLAY_TILE_COUNT + 1)
 #define XGPU_OVERLAY_SURFACE_IMAGES 2
-#define XGPU_OVERLAY_IMAGE_COUNT (XGPU_OVERLAY_TILE_COUNT + 1 + XGPU_OVERLAY_SURFACE_IMAGES)
-#define XGPU_OVERLAY_UNIFORM_COUNT 11
+/* (PRISM v2's local reflections' probes: below) */
+#define XGPU_OVERLAY_PROBE_IMAGE (XGPU_OVERLAY_SURFACE_IMAGE + XGPU_OVERLAY_SURFACE_IMAGES)
+#define XGPU_OVERLAY_IMAGE_COUNT (XGPU_OVERLAY_PROBE_IMAGE + 1)
+#define XGPU_OVERLAY_UNIFORM_COUNT 20
 #define XGPU_OVERLAY_CLASS_MASK 16
 #define XGPU_OVERLAY_CLASS_MASK_WINS 32
 #define XGPU_OVERLAY_SURFACE 64
 #define XGPU_OVERLAY_SURFACE_ONLY 128
 #define XGPU_OVERLAY_VIEW(material_overlay) (((material_overlay) >> 1) & 7)
+
+/* ---------- PRISM v2's model light (display.prism_specular,
+prism_reflections, prism_shadows; off unless set)
+
+A model draw lit for each pixel with a material overlay (the tiles, a
+surface map, or neither: XGPU_OVERLAY_SURFACE_ONLY without
+XGPU_OVERLAY_SURFACE, the overlay's frame and light with nothing added)
+whose key's prism_lighting is not 0. With all three settings at their
+first value nothing is armed and every draw is as the game draws it.
+
+- XGPU_PRISM_SPECULAR_SUBTLE or _FULL: texture stage 3's reflection
+  (a cube map: the shader's reflection, which its combiners mask by the
+  multipurpose map's specular channel and weigh by CE's Fresnel and tint)
+  gains the level's lights' highlights: GGX's distribution with Smith's
+  visibility (Schlick-GGX, k = a / 2), a = r^2,
+  r = max(the surface map's roughness, else [11].y, [11].z), along the
+  micro normal toward the eye (the reflection's own direction reflected
+  back), N.L-weighted, times the light's colour and [11].x, the sum
+  capped at [11].w before it is added (the clamp to 1 after is the
+  stage's). Subtle: the model's first distant light alone (ml[7], ml[8]:
+  the lightmap's dominant light under it); full: also the two point
+  lights (ml[1] to ml[6], as model_lighting weighs them). No Fresnel of
+  its own: the combiners' is CE's. The light's shadow (below) darkens it.
+- XGPU_PRISM_REFLECTIONS_LOCAL: the reflection read from the level's
+  probes in place of the cube (image XGPU_OVERLAY_PROBE_IMAGE: an atlas of
+  [17].y by [17].y octahedral cells of [17].z texels each, levels
+  prefiltered by the tools; cell s at (s mod [17].y, s / [17].y)): the
+  nearer of the probes [18] and [19] (xyz its place, w its cell; [17].x
+  of them, 0 to 2) by the pixel's world position, the two mixed by their
+  distances where both are given, at level log2([17].z) * r * [17].w
+  (the roughness's blur), the octahedral cell's border kept off by half
+  a texel of the level read.
+- XGPU_PRISM_SHADOWS_SOFT or _TRACED (where display.ambient_occlusion
+  "world" draws its window: the distance-field scene's cascades at
+  XGPU_SPIRV_BINDING_WORLD_CASCADES of its set, which the backend binds
+  for these draws whether or not they take the world's light, as a
+  self-illuminated shader does not; their block in [13] to [16]): the
+  first distant light's share of the light, and its highlight, by
+  mix(1, 1 - h, [12].x), h the share of rays from the pixel pushed [12].w
+  along its normal toward -ml[7] that world_trace (docs/world-ao.md) finds
+  hitting the objects (its channel 1: the characters' capsules, the
+  vehicles' wheels and boxes, its own among them) within [12].y, each hit
+  at t counting smoothstep(0.05, 0.25, t) (a model's own shapes about its
+  surface are not its shadow). Soft: four rays, the light's direction
+  tilted [12].z * 0.04 four ways, out to 2 world units; traced: one ray,
+  out to 6. Hardware ray queries (#602) take world_trace's place. */
+#define XGPU_PRISM_SPECULAR_SUBTLE 1
+#define XGPU_PRISM_SPECULAR_FULL 2
+#define XGPU_PRISM_SPECULAR_OF(value) ((value) & 3)
+#define XGPU_PRISM_REFLECTIONS_LOCAL 4
+#define XGPU_PRISM_SHADOWS_SOFT 8
+#define XGPU_PRISM_SHADOWS_TRACED 16
+#define XGPU_PRISM_SHADOWS_OF(value) ((value) & 24)
+/* (_SOFT or _TRACED: the distance-field scene's, not the sun's maps) */
+#define XGPU_PRISM_SHADOWS_TRACES(value) (XGPU_PRISM_SHADOWS_OF(value) == XGPU_PRISM_SHADOWS_SOFT || \
+	XGPU_PRISM_SHADOWS_OF(value) == XGPU_PRISM_SHADOWS_TRACED)
+/* ---------- PRISM's sun shadows (display.prism_shadows "cascaded")
+
+The level's sun (its sky's brightest light that lights the outside, a
+lens flare's direction) casts real shadows: the window's casters drawn
+from it into shadow maps (cascades fitted about the camera, out to a few
+dozen world units; xgpu_stream.h's PRISM_SHADOWS, its block) before the
+window's surfaces, the objects into one atlas and the structure into
+another. A draw whose key has XGPU_PRISM_SHADOWS_CASCADED reads them
+(XGPU_SPIRV_SET_SHADOWS) at its pixel's world position, pushed along its
+normal 1.5 texels (facing the sun) to 4 (edge on) of the cascade it falls
+in:
+
+  v_m = the moving casters' visibility (PCSS: the mean depth of the
+        blockers among 8 taps about the point, the penumbra by the distance
+        from them to it times light.y, then 12 compared taps over it, each a
+        2x2 bilinear test),
+  v_s = the structure's (4 compared taps, a texel apart),
+  both 1 past the last cascade (faded over its last fade.x of it);
+
+- a structure's lightmap pass (its light before the textures multiply it,
+  the enhanced dynamic lights added after): light times
+  1 - light.x * (1 - v_m) * v_s * smoothstep(0, 0.25, N.sun): the moving
+  casters take light.x of the light where the sun reached it (the
+  structure's own shadows, already in the lightmap, are never darkened
+  again, and a face turned away from the sun has none to lose);
+- a model whose lighting has its world position (lit for each pixel
+  then, with or without a material overlay): its first distant light's
+  share by
+  mix(1, v_m * mix(1, v_s, fade.y), fade.z) (its own limbs, other
+  characters, vehicles, scenery, and the structure where the lightmap
+  sample under it is sunlit: a Marine half under a ledge).
+
+Hardware filtering does the comparisons (a depth compare sampler); the
+draws without the key never read them. */
+#define XGPU_PRISM_SHADOWS_CASCADED 24
 
 /* ---------- PBR materials (display.prism_materials "pbr")
 
@@ -470,6 +622,10 @@ set with the setting anything else, so the other keys are as before */
 #define XGPU_WORLD_AO_REFERENCE_LEAST 0.25f
 #define XGPU_WORLD_AO_REACH_FADE 0.25f
 #define XGPU_WORLD_AO_FLOOR 0.2f
+/* (a static scenery placement's own draw, a negative reference: its floor
+in place of XGPU_WORLD_AO_FLOOR, so that the field's depth under a
+boulder resting on the ground does not take its underside to black) */
+#define XGPU_WORLD_AO_SCENERY_FLOOR 0.5f
 /* the field's (world_sdf.h's WORLD_SDF_*: d3d8_device.c checks they agree) */
 #define XGPU_WORLD_SDF_BRICK 8
 #define XGPU_WORLD_SDF_BRICK_SPAN 9

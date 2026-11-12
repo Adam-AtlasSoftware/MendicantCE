@@ -176,6 +176,13 @@ opaque surfaces is being drawn (port/linux/game/world_ao.c): their draws
 alone, not what they queue for later (the transparent parts, the widgets,
 the fog screen's models), nor a second search for the objects (render.c) */
 extern boolean render_world_ao_prepass;
+/* port: display.prism_shadows "cascaded"'s pass of the window's casters is
+being drawn (port/linux/game/prism_shadows.c): the objects' opaque parts
+alone, as render_world_ao_prepass draws them, and no first-person weapon */
+extern boolean render_prism_shadow_pass;
+/* port: (render_world_ao_prepass or render_prism_shadow_pass: a pass before
+the window's own, whose objects are found once for both) */
+#define render_port_prepass (render_world_ao_prepass || render_prism_shadow_pass)
 
 /* ---------- public code */
 

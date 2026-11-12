@@ -82,8 +82,8 @@ def test_the_hooks():
 
 
 def test_the_classic_preset_bypasses_it():
-    # Classic sets display.ambient_occlusion "off", which world_ao_mode reads as off
-    assert '{ "display.ambient_occlusion", "\\"off\\"" },' in read("port/linux/src/port_config.c")
+    # Classic sets display.ambient_occlusion "off", which world_ao_mode reads as off (and "prism" "world")
+    assert '{ "display.ambient_occlusion", "\\"off\\"", 0, "\\"world\\"" },' in read("port/linux/src/port_config.c")
     assert '#define GRAPHICS_AMBIENT_OCCLUSION "\\"off\\""' in read("port/linux/src/port_config.c")
 
 

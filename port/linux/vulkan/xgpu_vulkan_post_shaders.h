@@ -40,6 +40,13 @@ enum xgpu_vulkan_post_program_id
 	XGPU_VULKAN_POST_GAMMA,
 	/* display.panini's projection (xgpu_vulkan_post_panini) */
 	XGPU_VULKAN_POST_PANINI,
+	/* display.prism_bloom's halving and doubling (xgpu_vulkan_post_bloom):
+	its source at texture unit 0 */
+	XGPU_VULKAN_POST_BLOOM_DOWN,
+	XGPU_VULKAN_POST_BLOOM_UP,
+	/* display.prism_tone's grade (xgpu_vulkan_post_prism_tone): the view's
+	copy at texture unit 0, its local mean at 1 */
+	XGPU_VULKAN_POST_PRISM_TONE,
 	XGPU_VULKAN_POST_PROGRAM_COUNT
 };
 

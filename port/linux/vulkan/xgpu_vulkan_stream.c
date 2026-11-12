@@ -79,7 +79,8 @@ _Static_assert(XGPU_SPIRV_SET_OCCLUSION == XGPU_VULKAN_SET_OCCLUSION &&
 	XGPU_SPIRV_BINDING_WORLD_AO == XGPU_VULKAN_BINDING_WORLD_AO &&
 	XGPU_SPIRV_BINDING_WORLD_SDF_TABLE == XGPU_VULKAN_BINDING_WORLD_SDF_TABLE &&
 	XGPU_SPIRV_BINDING_WORLD_AO_SCENERY == XGPU_VULKAN_BINDING_WORLD_AO_SCENERY &&
-	XGPU_SPIRV_BINDING_WORLD_AO_OBJECTS == XGPU_VULKAN_BINDING_WORLD_AO_OBJECTS,
+	XGPU_SPIRV_BINDING_WORLD_AO_OBJECTS == XGPU_VULKAN_BINDING_WORLD_AO_OBJECTS &&
+	XGPU_SPIRV_BINDING_WORLD_CASCADES == XGPU_VULKAN_BINDING_WORLD_CASCADES,
 	"display.ambient_occlusion \"world\"'s bindings");
 
 /* the mirror's segments: 4 MB of the contiguous window each */
@@ -158,7 +159,8 @@ struct variant
 {
 	uint16_t integer_attributes;
 	uint8_t border[4];
-	uint8_t foveated, pad;
+	/* (display.prism_shadows "cascaded": a caster's shadow twin) */
+	uint8_t foveated, shadow;
 };
 
 /* the most world pipelines waiting for their shaders, and the most made a
@@ -387,6 +389,42 @@ static struct
 	VkSampler sampler;
 	struct xgpu_vulkan_pipeline_description pass;
 } prepass;
+
+/* display.prism_shadows "cascaded" (xgpu_stream.h's PRISM_SHADOWS): the
+pass is drawing (into the moving casters' atlas, or the structure's), each
+draw's shadow twin (xgpu_stream_prism_shadow_twin, its shaders made a few a
+frame, never while a map is prepared) drawn once a cascade into its tile;
+the atlases (resolution * cascades by resolution, the depth format), the
+pass's block (its cascades' matrices) and the camera's projection undone
+(the vertex constants' first four rows, inverted once as they change), the
+twin drawing and its cascade's matrix (its clip space from the camera's,
+column-major: the uniforms' eye_correction[0]) */
+#define SHADOW_TWINS_A_FRAME 8
+_Static_assert(XGPU_SPIRV_SHADOWS_CASCADES == XGPU_PRISM_SHADOWS_CASCADES_MOST &&
+	XGPU_SPIRV_SHADOWS_BLOCK_VECTORS * 16 == sizeof(struct xgpu_prism_shadows_block) &&
+	XGPU_VULKAN_SHADOWS_BLOCK_BYTES == sizeof(struct xgpu_prism_shadows_block) &&
+	XGPU_SPIRV_SET_SHADOWS == XGPU_VULKAN_SET_SHADOWS &&
+	XGPU_SPIRV_BINDING_SHADOWS_MOVING == XGPU_VULKAN_BINDING_SHADOWS_MOVING &&
+	XGPU_SPIRV_BINDING_SHADOWS_MOVING_DEPTH == XGPU_VULKAN_BINDING_SHADOWS_MOVING_DEPTH &&
+	XGPU_SPIRV_BINDING_SHADOWS_STRUCTURE == XGPU_VULKAN_BINDING_SHADOWS_STRUCTURE &&
+	XGPU_SPIRV_BINDING_SHADOWS_BLOCK == XGPU_VULKAN_BINDING_SHADOWS_BLOCK, "display.prism_shadows' set");
+static struct
+{
+	int active, structure, failed;
+	uint32_t resolution, cascades, twins_made;
+	struct xgpu_vulkan_image *atlases[2];
+	struct xgpu_prism_shadows_block block;
+	float camera[4][4];
+	double undo[4][4];
+	int undo_valid;
+	struct xgpu_stream_pipeline_define *definitions;
+	struct stream_pipeline *entries;
+	struct stream_pipeline *drawing;
+	float matrix[16];
+	/* (debug.gpu_stats: the twins drawn, those not made yet and the
+	receivers' draws, logged every 600 passes) */
+	uint32_t passes, twins_drawn, twins_waiting, receivers, refused;
+} shadow;
 
 static double preparation_start(void)
 {
@@ -660,6 +698,12 @@ static void targets_bind(void)
 		xgpu_vulkan_set_target_views(prepass.inputs, prepass.depth, 0, 1);
 		return;
 	}
+	/* (display.prism_shadows "cascaded"'s pass into its atlases) */
+	if (shadow.active)
+	{
+		xgpu_vulkan_set_target_views(NULL, shadow.atlases[shadow.structure], 0, 1);
+		return;
+	}
 
 	if (stream.samples)
 	{
@@ -718,8 +762,8 @@ static void stream_clear(void *context, const struct xgpu_stream_clear *record)
 	uint64_t before;
 
 	(void)context;
-	/* (none in the pre-pass) */
-	if (prepass.active)
+	/* (none in the pre-pass, nor the sun's shadows' pass) */
+	if (prepass.active || shadow.active)
 		return;
 	if (target_get(stream.color))
 		target_get(stream.color)->written++;
@@ -753,7 +797,7 @@ static void stream_clear_target(void *context, const struct xgpu_stream_clear_ta
 	int32_t whole[1][4];
 
 	(void)context;
-	if (!target || prepass.active)
+	if (!target || prepass.active || shadow.active)
 		return;
 	target->written++;
 	/* (not while preparing, as stream_clear) */
@@ -1410,6 +1454,8 @@ static void pixel_program_convert(const struct xgpu_stream_pixel_program *wire, 
 	program->ambient_occlusion = wire->ambient_occlusion;
 	program->hdr = wire->hdr;
 	program->material_overlay = wire->material_overlay;
+	program->lightmap_filter = wire->lightmap_filter;
+	program->prism_lighting = wire->prism_lighting;
 }
 
 /* debug.gpu_dump_shaders (HALO_VULKAN_SHADERS) writes each module into its
@@ -1523,6 +1569,7 @@ static int pipeline_shaders(struct stream_pipeline *entry, const struct xgpu_str
 	options.debug_flat = getenv("HALO_GPU_DEBUG_FLAT") != NULL;
 	options.reversed_depth = XGPU_VULKAN_REVERSED_DEPTH;
 	options.subgroups = stream.capabilities.subgroups;
+	options.shadow_caster = variant->shadow != 0;
 	program = malloc(sizeof(*program));
 	if (!program)
 		return 0;
@@ -1530,8 +1577,8 @@ static int pipeline_shaders(struct stream_pipeline *entry, const struct xgpu_str
 	entry->inputs = (uint16_t)xgpu_spirv_vertex_inputs(program, lighting);
 	if (xgpu_spirv_vertex_shader(program, packed, integers, lighting, &options, &module))
 	{
-		snprintf(name, sizeof(name), "vs%08x%08x_%lx_%lx_%u_view%u_fovea%u", (unsigned)(hash >> 32), (unsigned)hash,
-			packed, integers, key->lighting, key->views, variant->foveated);
+		snprintf(name, sizeof(name), "vs%08x%08x_%lx_%lx_%u_view%u_fovea%u%s", (unsigned)(hash >> 32), (unsigned)hash,
+			packed, integers, key->lighting, key->views, variant->foveated, variant->shadow ? "_shadow" : "");
 		shader_dump(name, &module);
 		entry->vertex_shader = xgpu_vulkan_shader(module.words, module.count);
 		free(module.words);
@@ -1810,6 +1857,10 @@ static int uniforms_update(int effect)
 			to->texture_border_linear[stage] = sampler->magnify >= _filter_linear || sampler->minify >= _filter_linear ?
 				1.0f : 0.0f;
 		}
+		/* (display.prism_shadows "cascaded": a shadow twin's cascade, its clip
+		space from the camera's) */
+		if (shadow.drawing)
+			memcpy(to->eye_correction[0], shadow.matrix, sizeof(shadow.matrix));
 		/* the per-pixel lighting's lights: vertex constants (xgpu_backend.h) */
 		for (light = 0; light < XGPU_MODEL_LIGHT_COUNT; light++)
 			memcpy(to->model_lights[light], stream.constants[XGPU_MODEL_LIGHT_REGISTER(light)], sizeof(to->model_lights[0]));
@@ -2222,9 +2273,10 @@ static int draw_pipeline(const struct draw_input *input, int apart)
 
 	if (!stream.pipeline_id || !stream.definition || !input->count)
 		return 1;
-	entry = prepass.drawing ? prepass.drawing : &stream.pipelines[stream.pipeline_id];
+	entry = prepass.drawing ? prepass.drawing : shadow.drawing ? shadow.drawing : &stream.pipelines[stream.pipeline_id];
 	variant_current(&stream.definition->key, &variant);
 	variant.integer_attributes = stream.definition->key.immediate ? 0 : input->integers;
+	variant.shadow = shadow.drawing != NULL;
 	if (apart && (entry->state != XGPU_STREAM_PIPELINE_MADE || memcmp(&entry->variant, &variant, sizeof(variant))))
 		return 0;
 	if (!pipeline_shaders(entry, stream.definition, &variant))
@@ -2279,6 +2331,25 @@ static int draw_pipeline(const struct draw_input *input, int apart)
 		pipeline.samples = 1;
 		pipeline.view_mask = 0;
 		pipeline.depth_format = XGPU_VULKAN_FORMAT_D24S8;
+	}
+	/* (a shadow twin: into an atlas's depth alone, one sample, both faces,
+	nearer the sun wins) */
+	if (shadow.drawing)
+	{
+		pipeline.color_format = XGPU_VULKAN_FORMAT_NONE;
+		pipeline.color_read = 0;
+		pipeline.blend = 0;
+		pipeline.color_mask = 0;
+		pipeline.samples = 1;
+		pipeline.view_mask = 0;
+		pipeline.depth_format = XGPU_VULKAN_FORMAT_D24S8;
+		pipeline.depth_test = 1;
+		pipeline.depth_write = 1;
+		pipeline.depth_function = XGPU_STREAM_COMPARE_LESS;
+		pipeline.stencil_test = 0;
+		pipeline.stencil_write_mask = 0;
+		pipeline.cull = 0;
+		pipeline.depth_bias = 0;
 	}
 #ifdef HALO_VR
 	pipeline.depth_clamp = host_vulkan_vr_sky() != 0;
@@ -2484,7 +2555,8 @@ static int draw_pipeline(const struct draw_input *input, int apart)
 	memcpy(draw.textures, stream.textures, sizeof(draw.textures));
 	/* (display.prism_material_overlay's images, where its shader reads
 	them) */
-	draw.material_overlay = stream.definition->pixel_program.material_overlay != 0 && !prepass.drawing;
+	draw.material_overlay = stream.definition->pixel_program.material_overlay != 0 && !prepass.drawing &&
+		!shadow.drawing;
 	if (draw.material_overlay)
 		overlay_bind(draw.overlay);
 	/* (display.prism_materials' images, where its shader reads them: the
@@ -2500,8 +2572,21 @@ static int draw_pipeline(const struct draw_input *input, int apart)
 	draw.uniforms = stream.uniforms_range;
 	draw.dynamic = &stream.dynamic;
 	draw.dynamic_lights = stream.definition->pixel_program.dynamic_lights != 0;
-	draw.ambient_occlusion = stream.definition->pixel_program.ambient_occlusion != 0;
+	/* (display.ambient_occlusion "world"'s set: its light, or PRISM v2's
+	shadows, which trace its cascades: xgpu.h) */
+	draw.ambient_occlusion = stream.definition->pixel_program.ambient_occlusion != 0 ||
+		(XGPU_PRISM_SHADOWS_TRACES(stream.definition->pixel_program.prism_lighting) && draw.material_overlay);
 	draw.reads_color = pipeline.color_read;
+	/* (display.prism_shadows "cascaded": the sun's shadows read, as
+	xgpu_spirv.c's pixel shader declares them: a model's with the overlay, a
+	lightmap pass's) */
+	{
+		const struct xgpu_stream_pixel_program *program = &stream.definition->pixel_program;
+
+		draw.prism_shadows = XGPU_PRISM_SHADOWS_OF(program->prism_lighting) == XGPU_PRISM_SHADOWS_CASCADED &&
+			!prepass.drawing && !shadow.drawing;
+		shadow.receivers += draw.prism_shadows;
+	}
 	{
 		const struct xgpu_stream_pipeline_key *key = &stream.definition->key;
 
@@ -2520,10 +2605,10 @@ static int draw_pipeline(const struct draw_input *input, int apart)
 		memcpy(draw.textures, effect_draw_textures, sizeof(draw.textures));
 	/* (a multisampled depth target written: resolved again for the
 	effects that sample it; none of the game's targets by the pre-pass) */
-	if (!prepass.drawing && draw.writes_depth && stream.samples && target_get(stream.depth) &&
+	if (!prepass.drawing && !shadow.drawing && draw.writes_depth && stream.samples && target_get(stream.depth) &&
 		target_get(stream.depth)->multisampled)
 		target_get(stream.depth)->unresolved = 1;
-	if (!prepass.drawing && target_get(stream.color))
+	if (!prepass.drawing && !shadow.drawing && target_get(stream.color))
 		target_get(stream.color)->written++;
 	traced = preparation_start();
 	if (mesh_verdict == XGPU_VULKAN_MESHES_SWAP)
@@ -2595,6 +2680,7 @@ static void world_make_some(void)
 is made, else the stand-in's (and the world's made after the load); every
 other with its own */
 static void prepass_draw(const struct draw_input *input);
+static void shadow_draw(const struct draw_input *input);
 
 /* (a map prepared, where its draws are the pre-pass's in play: the draw's
 twin made too) */
@@ -2615,6 +2701,12 @@ static void draw_input(const struct draw_input *input)
 	if (prepass.active)
 	{
 		prepass_draw(input);
+		return;
+	}
+	/* (display.prism_shadows "cascaded"'s pass: the casters' twins alone) */
+	if (shadow.active)
+	{
+		shadow_draw(input);
 		return;
 	}
 	if (!stand_in || !definition || !world_definition(definition) || !stream.definitions[stand_in])
@@ -3635,6 +3727,278 @@ static void stream_world_ao_prepass(void *context, const struct xgpu_stream_worl
 	xgpu_vulkan_world_ao_set_pixels(NULL);
 }
 
+/* ---------- display.prism_shadows "cascaded" (xgpu_stream.h's PRISM_SHADOWS)
+
+The window's casters drawn from the sun before its surfaces: each opaque
+draw of the pass as its shadow twin once a cascade, into its tile of the
+moving casters' atlas (the objects) or the structure's, its clip position
+taken to the cascade's (the camera's projection, the vertex constants'
+first four rows, undone: a cascade's matrix times its inverse, the
+uniforms' eye_correction[0]); then the block the surfaces read handed to
+the core (xgpu_vulkan_prism_shadows) with the atlases. A twin's shaders are
+made a few a frame as first drawn (never while a map is prepared): until
+they are, it casts no shadow. */
+
+/* the inverse of a 4x4 (rows), in doubles; 0 if it has none */
+static int shadow_invert(const double a[4][4], double inverse[4][4])
+{
+	double m[4][8];
+	int row, column, pivot, other;
+
+	for (row = 0; row < 4; row++)
+		for (column = 0; column < 8; column++)
+			m[row][column] = column < 4 ? a[row][column] : (column - 4 == row ? 1.0 : 0.0);
+	for (column = 0; column < 4; column++)
+	{
+		double best = 0.0, divide;
+
+		pivot = -1;
+		for (row = column; row < 4; row++)
+		{
+			double value = m[row][column] < 0.0 ? -m[row][column] : m[row][column];
+
+			if (value > best)
+			{
+				best = value;
+				pivot = row;
+			}
+		}
+		if (pivot < 0 || best < 1.0e-30)
+			return 0;
+		if (pivot != column)
+			for (other = 0; other < 8; other++)
+			{
+				double swap = m[column][other];
+
+				m[column][other] = m[pivot][other];
+				m[pivot][other] = swap;
+			}
+		divide = m[column][column];
+		for (other = 0; other < 8; other++)
+			m[column][other] /= divide;
+		for (row = 0; row < 4; row++)
+		{
+			double factor = m[row][column];
+
+			if (row == column || factor == 0.0)
+				continue;
+			for (other = 0; other < 8; other++)
+				m[row][other] -= factor * m[column][other];
+		}
+	}
+	for (row = 0; row < 4; row++)
+		for (column = 0; column < 4; column++)
+			inverse[row][column] = m[row][column + 4];
+	return 1;
+}
+
+/* the camera's projection's inverse, as the constants have it now */
+static int shadow_undo(void)
+{
+	double camera[4][4];
+	int row, column;
+
+	if (shadow.undo_valid && !memcmp(shadow.camera, stream.constants[0], sizeof(shadow.camera)))
+		return 1;
+	memcpy(shadow.camera, stream.constants[0], sizeof(shadow.camera));
+	for (row = 0; row < 4; row++)
+		for (column = 0; column < 4; column++)
+			camera[row][column] = shadow.camera[row][column];
+	shadow.undo_valid = shadow_invert((const double (*)[4])camera, shadow.undo);
+	return shadow.undo_valid;
+}
+
+/* cascade's matrix times the undoing, column-major (eye_correction's) */
+static void shadow_matrix(uint32_t cascade)
+{
+	int row, column, k;
+
+	for (row = 0; row < 4; row++)
+		for (column = 0; column < 4; column++)
+		{
+			double sum = 0.0;
+
+			for (k = 0; k < 4; k++)
+				sum += (double)shadow.block.cascades[cascade][row][k] * shadow.undo[k][column];
+			shadow.matrix[column * 4 + row] = (float)sum;
+		}
+}
+
+static int shadow_tables(void)
+{
+	if (shadow.definitions)
+		return 1;
+	shadow.definitions = calloc(XGPU_STREAM_PIPELINES, sizeof(*shadow.definitions));
+	shadow.entries = calloc(XGPU_STREAM_PIPELINES, sizeof(*shadow.entries));
+	if (shadow.definitions && shadow.entries)
+		return 1;
+	free(shadow.definitions);
+	free(shadow.entries);
+	shadow.definitions = NULL;
+	shadow.entries = NULL;
+	return 0;
+}
+
+static struct xgpu_vulkan_image *shadow_atlas(struct xgpu_vulkan_image *image, uint32_t width, uint32_t height)
+{
+	struct xgpu_vulkan_image_description description;
+
+	if (image && xgpu_vulkan_image_description(image)->width == width &&
+		xgpu_vulkan_image_description(image)->height == height)
+		return image;
+	xgpu_vulkan_image_destroy(image);
+	memset(&description, 0, sizeof(description));
+	description.type = XGPU_VULKAN_IMAGE_2D;
+	description.format = XGPU_VULKAN_FORMAT_D24S8;
+	description.usage = XGPU_VULKAN_USAGE_SAMPLED | XGPU_VULKAN_USAGE_TARGET;
+	description.width = width;
+	description.height = height;
+	description.depth_or_layers = 1;
+	description.levels = 1;
+	return xgpu_vulkan_image_create(&description);
+}
+
+static void shadow_draw(const struct draw_input *input)
+{
+	uint32_t id = stream.pipeline_id, cascade;
+	const struct xgpu_stream_pipeline_define *definition = stream.definition;
+	struct xgpu_stream_pipeline_define twin;
+	struct xgpu_vulkan_pipeline_description pipeline = stream.pipeline;
+	struct xgpu_vulkan_dynamic_state dynamic = stream.dynamic;
+	struct stream_pipeline *entry;
+	struct variant variant;
+
+	if (!id || id >= XGPU_STREAM_PIPELINES || !definition || !shadow_tables() || stream.preparing)
+		return;
+	twin = *definition;
+	if (!xgpu_stream_prism_shadow_twin(&twin) || !shadow_undo())
+	{
+		shadow.refused++;
+		return;
+	}
+	entry = &shadow.entries[id];
+	if (memcmp(&twin, &shadow.definitions[id], sizeof(twin)))
+	{
+		shadow.definitions[id] = twin;
+		memset(entry, 0, sizeof(*entry));
+	}
+	variant_current(&twin.key, &variant);
+	variant.integer_attributes = twin.key.immediate ? 0 : input->integers;
+	variant.shadow = 1;
+	if (entry->state != XGPU_STREAM_PIPELINE_MADE || memcmp(&entry->variant, &variant, sizeof(variant)))
+	{
+		if (entry->state == XGPU_STREAM_PIPELINE_FAILED || shadow.twins_made >= SHADOW_TWINS_A_FRAME)
+		{
+			shadow.twins_waiting++;
+			return;
+		}
+		shadow.twins_made++;
+		if (entry->state == XGPU_STREAM_PIPELINE_MADE)
+			entry->state = XGPU_STREAM_PIPELINE_UNKNOWN;
+		if (!pipeline_shaders(entry, &shadow.definitions[id], &variant))
+			return;
+	}
+	stream.definition = &shadow.definitions[id];
+	shadow.drawing = entry;
+	for (cascade = 0; cascade < shadow.cascades; cascade++)
+	{
+		/* (its tile: the whole depth range, the tile's rectangle) */
+		stream.dynamic.viewport[0] = stream.dynamic.scissor[0] = (int32_t)(cascade * shadow.resolution);
+		stream.dynamic.viewport[1] = stream.dynamic.scissor[1] = 0;
+		stream.dynamic.viewport[2] = stream.dynamic.scissor[2] = (int32_t)shadow.resolution;
+		stream.dynamic.viewport[3] = stream.dynamic.scissor[3] = (int32_t)shadow.resolution;
+		stream.dynamic.depth_range[0] = 0.0f;
+		stream.dynamic.depth_range[1] = 1.0f;
+		stream.dynamic.depth_bias[0] = stream.dynamic.depth_bias[1] = 0.0f;
+		shadow_matrix(cascade);
+		stream.uniforms_dirty = 1;
+		if (draw_pipeline(input, 1))
+			shadow.twins_drawn++;
+		else
+			shadow.twins_waiting++;
+	}
+	shadow.drawing = NULL;
+	stream.definition = definition;
+	stream.pipeline = pipeline;
+	stream.dynamic = dynamic;
+	stream.pipeline_id = id;
+	stream.uniforms_dirty = 1;
+}
+
+static void stream_prism_shadows(void *context, const struct xgpu_stream_prism_shadows *record)
+{
+	(void)context;
+	if (stream.preparing)
+		return;
+	if (record->phase == XGPU_PRISM_SHADOWS_BEGIN)
+	{
+		static const float zero[4];
+		uint32_t width = record->resolution * record->cascades, index;
+		int32_t whole[1][4];
+
+		shadow.active = 0;
+		if (shadow.failed || !xgpu_vulkan_prism_shadows_possible() || !shadow_tables())
+			return;
+		for (index = 0; index < 2; index++)
+		{
+			shadow.atlases[index] = shadow_atlas(shadow.atlases[index], width, record->resolution);
+			if (!shadow.atlases[index])
+			{
+				host_logf(HOST_LOG_WARN, "vulkan: display.prism_shadows' atlases (%ux%u) cannot be made: none",
+					width, record->resolution);
+				shadow.failed = 1;
+				return;
+			}
+		}
+		shadow.resolution = record->resolution;
+		shadow.cascades = record->cascades;
+		shadow.block = record->block;
+		shadow.structure = 0;
+		shadow.active = 1;
+		whole[0][0] = whole[0][1] = 0;
+		whole[0][2] = (int32_t)width;
+		whole[0][3] = (int32_t)record->resolution;
+		for (index = 0; index < 2; index++)
+		{
+			xgpu_vulkan_set_target_views(NULL, shadow.atlases[index], 0, 1);
+			xgpu_vulkan_clear((const int32_t (*)[4])whole, 1, XGPU_VULKAN_CLEAR_DEPTH | XGPU_VULKAN_CLEAR_STENCIL, zero,
+				1.0f, 0);
+		}
+		xgpu_vulkan_set_target_views(NULL, shadow.atlases[0], 0, 1);
+		return;
+	}
+	if (record->phase == XGPU_PRISM_SHADOWS_STRUCTURE)
+	{
+		if (!shadow.active)
+			return;
+		shadow.structure = 1;
+		xgpu_vulkan_set_target_views(NULL, shadow.atlases[1], 0, 1);
+		return;
+	}
+	if (record->phase == XGPU_PRISM_SHADOWS_END)
+	{
+		if (!shadow.active)
+			return;
+		shadow.active = 0;
+		shadow.structure = 0;
+		xgpu_vulkan_prism_shadows(shadow.atlases[0], shadow.atlases[1], &record->block, sizeof(record->block));
+		targets_bind();
+		if (stream.statistics && ++shadow.passes % 600 == 0)
+		{
+			host_logf(HOST_LOG_INFO, "vulkan: display.prism_shadows: 600 passes: %u twins drawn, %u not made yet, %u "
+				"refused; %u receivers' draws", shadow.twins_drawn, shadow.twins_waiting, shadow.refused,
+				shadow.receivers);
+			shadow.twins_drawn = shadow.twins_waiting = shadow.refused = shadow.receivers = 0;
+		}
+		return;
+	}
+	if (shadow.active)
+	{
+		shadow.active = 0;
+		targets_bind();
+	}
+}
+
 /* ---------- display.hdr (port/linux/src/xgpu_hdr.h)
 
 The front end's state, for the tone map and the core's encoding and
@@ -3703,6 +4067,13 @@ static void stream_tone_map(void *context, const struct xgpu_stream_tone_map *re
 	target->written++;
 	if (color_image == target->multisampled)
 		target->unresolved = 1;
+	/* (display.prism_tone's grade, then display.prism_bloom: their passes,
+	then the view's pass again for the tone map) */
+	if ((record->bloom >> XGPU_PRISM_TONE_SHIFT) && xgpu_vulkan_post_prism_tone(color_image, record->corners,
+		(int)((record->bloom >> XGPU_PRISM_TONE_SHIFT) & 0xff)))
+		targets_bind();
+	if ((record->bloom & 0xff) && xgpu_vulkan_post_bloom(color_image, record->corners, (int)(record->bloom & 0xff)))
+		targets_bind();
 	xgpu_vulkan_post_tone_map(color_image, depth_image, record->corners, hdr);
 	/* (the stream's targets again: the same, so that the pass goes on) */
 	targets_bind();
@@ -3747,6 +4118,7 @@ static void stream_frame_end(void *context)
 	(void)context;
 	world_make_some();
 	prepass.twins_made = 0;
+	shadow.twins_made = 0;
 	stream.material_frame++;
 	target_resolve(back_buffer);
 #ifdef HALO_VR
@@ -3795,7 +4167,7 @@ static void stream_frame_end(void *context)
 				"(%.1f ms), %u uploads ordered, %u early, %llu ring bytes; %u stores discarded (%u at frames' ends), "
 				"%u resolves in passes, %u skipped; %u passes continued, %u put aside, %u buffers renamed; "
 				"textures %u made, %u remade, %u images, %u effects' thicknesses baked (%.1f ms); "
-				"GPU %.3f ms a frame, %.3f ms between frames",
+				"GPU %.3f ms a frame, %.3f ms between frames; %u local reads",
 				statistics.frames, statistics.submissions, statistics.passes, statistics.draws, statistics.clears,
 				statistics.clears_as_draws, statistics.attachment_loads, statistics.attachment_clears,
 				statistics.texture_sets_written,
@@ -3806,7 +4178,8 @@ static void stream_frame_end(void *context)
 				statistics.passes_continued, statistics.passes_aside, statistics.buffers_renamed, textures.made, textures.remade,
 				textures.images, textures.thickness, textures.thickness_seconds * 1000.0,
 				statistics.gpu_frames ? statistics.gpu_milliseconds / statistics.gpu_frames : 0.0,
-				statistics.frames_timed ? statistics.frame_seconds * 1000.0 / statistics.frames_timed : 0.0);
+				statistics.frames_timed ? statistics.frame_seconds * 1000.0 / statistics.frames_timed : 0.0,
+				statistics.local_reads);
 			{
 				char text[1024];
 
@@ -3865,6 +4238,13 @@ static void stream_initialize(void *context, struct xgpu_stream_capabilities *ca
 	capabilities->hdr = stream.capabilities.color_read != 0;
 	/* (display.prism_material_overlay: its shaders, xgpu_spirv.c's) */
 	capabilities->material_overlay = 1;
+	/* (display.prism_lightmaps: xgpu_spirv.c's; display.prism_bloom:
+	xgpu_vulkan_post.c's passes, where the half floats are drawn) */
+	capabilities->lightmap_filter = 1;
+	capabilities->bloom = stream.capabilities.color_read != 0;
+	/* (display.prism_shadows "cascaded": its pass and set, where the device
+	binds five sets) */
+	capabilities->prism_shadows = xgpu_vulkan_prism_shadows_possible() != 0;
 	/* (display.prism_textures: PRISM's texture store, xgpu_vulkan_store.c) */
 	capabilities->texture_store = (uint8_t)xgpu_vulkan_store_available();
 	/* (display.prism_models: PRISM's mesh store, xgpu_vulkan_meshes.c) */
@@ -4023,6 +4403,7 @@ const struct host_render_backend *xgpu_vulkan_stream_backend(void)
 		/* display.prism_rt (docs/prism_rt.md, xgpu_vulkan_rt.c) */
 		backend.rt_static = stream_rt_static;
 		backend.rt_frame = stream_rt_frame;
+		backend.prism_shadows = stream_prism_shadows;
 #ifdef HALO_VR
 		host_vulkan_vr_backend(&backend);
 #endif

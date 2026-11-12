@@ -2,7 +2,7 @@
 pixel shaders of a model lit for each pixel with a material (tools/pbr_materials/check.c), for every
 material_pbr a key may have, lit by the point lights or the enhanced dynamic lights, with and without
 the material overlay and the reflection cube, pass spirv-val; each reads the material's images at
-bindings 11 to 16 of the textures' set exactly where its bits say, and its uniform's members; the
+bindings 12 to 17 of the textures' set (past the overlay's eight images) exactly where its bits say, and its uniform's members; the
 shaders without a material read none of it."""
 import re
 import shutil
@@ -69,17 +69,17 @@ def test_cases_made(modules):
 def test_material_images_where_the_bits_say(modules):
     for name, module in modules.items():
         bindings = texture_bindings(words_of(module))
-        material = [binding for binding in bindings if 11 <= binding <= 16]
+        material = [binding for binding in bindings if 12 <= binding <= 17]
         if name.startswith("base"):
             assert not material, name
             continue
         bits = int(name.split("-")[1])
-        wanted = [11 + image for image in range(6) if bits & (2 << image)]
+        wanted = [12 + image for image in range(6) if bits & (2 << image)]
         assert material == wanted, name
         # (the stages' and, with the overlay's surface map, its two images)
         overlay = name.split("-")[3] == "1"
-        assert [binding for binding in bindings if binding < 11] == ([0, 2, 3, 9, 10] if overlay else [0, 2, 3]) or \
-            [binding for binding in bindings if binding < 11] == ([0, 2, 9, 10] if overlay else [0, 2]), name
+        assert [binding for binding in bindings if binding < 12] == ([0, 2, 3, 9, 10] if overlay else [0, 2, 3]) or \
+            [binding for binding in bindings if binding < 12] == ([0, 2, 9, 10] if overlay else [0, 2]), name
 
 
 def test_none_without_a_material(modules):

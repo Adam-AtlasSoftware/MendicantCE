@@ -9,8 +9,8 @@ repeatable run of texture stages, targets, clears and constants, frames
 apart, into a ring whose host is this file: each submit's records are
 written as they are to the file argv[1], and released at once. INITIALIZE's
 answer has the texture store's capability set (a byte the base's
-capabilities left unused), so that only the hook decides; with BYTES_MESH,
-argv[2] "meshcap" sets the mesh store's capability too (the next byte) and
+capabilities have not), so that only the hook decides; with BYTES_MESH,
+argv[2] "meshcap" sets the mesh store's capability too and
 calls nothing of it (display.prism_models stock: the records must be the
 same), and "mesh" sends a model's instance and its parts' draws each frame
 (they differ).
@@ -118,11 +118,12 @@ void host_render_stream_submit(unsigned int flags)
 
 			memset(answer, 0, sizeof(*answer));
 			answer->largest_target = 16384;
-			/* (texture_store's place: the byte after material_overlay) */
-			((uint8_t *)&answer->material_overlay)[1] = 1;
+#ifdef BYTES_HOOK
+			/* (texture_store: a byte the base's capabilities have not) */
+			answer->texture_store = 1;
+#endif
 #ifdef BYTES_MESH
-			/* (mesh_store's: the byte after it) */
-			((uint8_t *)&answer->material_overlay)[2] = (uint8_t)mesh_capability;
+			answer->mesh_store = (uint8_t)mesh_capability;
 #endif
 		}
 		written += size;

@@ -2197,6 +2197,75 @@ static BOOL hdr_display_text(int kind, char *text, unsigned int size)
 	return TRUE;
 }
 
+/* display.prism_shadows "cascaded"'s pass drawing, and the window's surfaces
+reading it (halo_prism_shadows_pass) */
+static struct
+{
+	BOOL drawing, receiving;
+} prism_sun;
+
+/* ---------- PRISM's lighting (display.prism_lightmaps, display.prism_bloom)
+
+Read as the settings change: the lightmap pass's lightmap smoothed (the
+pixel key's lightmap_filter: xgpu.h's "The lightmaps smoothed"), where the
+backend draws it; and the bloom before the tone map (xgpu_backend.h), where
+the backend draws it, which draws the 3D view in half floats (hdr_read). */
+static struct
+{
+	unsigned long read_at;
+	BOOL read;
+	int filter, bloom, tone;
+} prism_lighting;
+
+static void prism_lighting_read(void)
+{
+	const char *lightmaps, *bloom, *tone;
+
+	if (prism_lighting.read && prism_lighting.read_at == config_changes())
+		return;
+	prism_lighting.read = TRUE;
+	prism_lighting.read_at = config_changes();
+	lightmaps = config_string("display.prism_lightmaps");
+	bloom = config_string("display.prism_bloom");
+	tone = config_string("display.prism_tone");
+	/* ("rebaked": the pages that have a rebaked copy are keyed so draw by
+	draw; the others are drawn as "smooth") */
+	prism_lighting.filter = xgpu_backend_capabilities.lightmap_filter && lightmaps &&
+		(!strcmp(lightmaps, "smooth") || !strcmp(lightmaps, "rebaked")) ? XGPU_LIGHTMAP_FILTER_SMOOTH : 0;
+	prism_lighting.bloom = !xgpu_backend_capabilities.bloom || !bloom ? 0 : !strcmp(bloom, "glow") ? XGPU_BLOOM_GLOW :
+		!strcmp(bloom, "full") ? XGPU_BLOOM_FULL : 0;
+	/* (display.prism_tone: the bloom's capability, its passes' kin) */
+	prism_lighting.tone = !xgpu_backend_capabilities.bloom || !tone ? 0 : !strcmp(tone, "prism") ? XGPU_PRISM_TONE_PRISM :
+		!strcmp(tone, "vivid") ? XGPU_PRISM_TONE_VIVID : 0;
+#ifdef HALO_VR
+	/* (not in the headset, whose eyes are drawn without the tone map) */
+	if (halo_vr_running())
+		prism_lighting.bloom = prism_lighting.tone = 0;
+#endif
+}
+
+/* (port/linux/game/prism_lightmaps.c) */
+int prism_lightmaps_rebaked_drawing(void);
+
+int prism_lightmaps_filter(void)
+{
+	prism_lighting_read();
+	return prism_lighting.filter;
+}
+
+int prism_bloom_mode(void)
+{
+	prism_lighting_read();
+	return prism_lighting.bloom;
+}
+
+/* display.prism_tone's mode (XGPU_PRISM_TONE_*; 0 none) */
+static int prism_tone_mode(void)
+{
+	prism_lighting_read();
+	return prism_lighting.tone;
+}
+
 /* (between frames: halo_screen_commit) the settings and the display as
 they are now; the back buffer made again if the frame is drawn otherwise */
 static void hdr_read(void)
@@ -2215,6 +2284,11 @@ static void hdr_read(void)
 	{
 		display = xgpu_backend_display_hdr(&headroom);
 		active = setting == XGPU_HDR_ON || (setting == XGPU_HDR_AUTO && display);
+		/* (display.prism_bloom: the half floats, whose light past white it
+		glows, on any display: the tone map rolls them off under SDR white;
+		display.prism_tone's grade, which lifts the light, as well) */
+		if (setting != XGPU_HDR_OFF && (prism_bloom_mode() || prism_tone_mode()))
+			active = TRUE;
 	}
 #ifdef HALO_VR
 	if (halo_vr_running())
@@ -3751,6 +3825,18 @@ void halo_dynamic_lights_set(const struct halo_dynamic_light *lights, int count,
 	dynamic_lights.count = count;
 }
 
+int halo_lightmap_pass_drawing(void)
+{
+	return dynamic_lights.environment;
+}
+
+/* the texture's header bound to the stage now (NULL none): the lightmap
+page the lightmap pass begins with (port/linux/game/prism_lightmaps.c) */
+void const *halo_texture_bound(int stage)
+{
+	return stage >= 0 && stage < D3DTSS_MAXSTAGES ? (void const *)device.textures[stage] : NULL;
+}
+
 /* the game draws the structure's lightmap pass (rasterizer_xbox_environment.c);
 as it begins, the world's projection is the 3D view's (the glows' then) */
 void halo_dynamic_lights_environment(int drawing)
@@ -3821,8 +3907,11 @@ to D, the last two only with a class mask; 0 none), its uniform
 (XGPU_OVERLAY_UNIFORM_COUNT vec4s), its debug view
 (display.prism_overlay_view) and whether the class mask's own classes win
 over the multipurpose channel's rule (mask_wins: XGPU_OVERLAY_CLASS_MASK_WINS,
-with a mask alone), and its surface map's two images (display.prism_surface_maps: NULL
-none) with or without the tiles (surface_only); NULL uniforms disarm it, as it is for every
+with a mask alone), its surface map's two images (display.prism_surface_maps: NULL
+none) with or without the tiles (surface_only: no tiles), and PRISM v2's
+model light (prism_lighting, xgpu.h's XGPU_PRISM_*, 0 none; with neither
+tiles nor a surface map the overlay carries it alone) with its probes'
+atlas (probes, 0 none); NULL uniforms disarm it, as it is for every
 other draw. A draw of a model lighting program whose lighting hands on its
 world position is lit for each pixel with it (xgpu_draw_derive); any other
 draw goes as it is. */
@@ -3830,7 +3919,7 @@ static struct
 {
 	BOOL armed;
 	struct xgpu_material_overlay overlay;
-	unsigned char key;
+	unsigned char key, prism_lighting;
 } material_overlay;
 
 /* whether the backend draws it (Vulkan's; not Metal's, until its shaders
@@ -3841,11 +3930,12 @@ int d3d8_material_overlay_drawn(void)
 }
 
 void d3d8_set_material_overlay(const float *uniforms, const unsigned int *tiles, unsigned int mask, int view,
-	int mask_wins, const unsigned int *surface, int surface_only)
+	int mask_wins, const unsigned int *surface, int surface_only, int prism_lighting, unsigned int probes)
 {
+	BOOL surfaced = surface && surface[0] && surface[1];
 	int tile;
 
-	if (!uniforms || !xgpu_backend_capabilities.material_overlay)
+	if (!uniforms || !xgpu_backend_capabilities.material_overlay || (surface_only && !surfaced && !prism_lighting))
 	{
 		material_overlay.armed = FALSE;
 		return;
@@ -3853,17 +3943,23 @@ void d3d8_set_material_overlay(const float *uniforms, const unsigned int *tiles,
 	material_overlay.armed = TRUE;
 	memcpy(material_overlay.overlay.uniforms, uniforms, sizeof(material_overlay.overlay.uniforms));
 	for (tile = 0; tile < XGPU_OVERLAY_TILE_COUNT; tile++)
-		material_overlay.overlay.images[tile] = tiles ? tiles[tile] : 0;
-	material_overlay.overlay.images[XGPU_OVERLAY_TILE_COUNT] = mask;
+		material_overlay.overlay.images[tile] = tiles && !surface_only ? tiles[tile] : 0;
+	material_overlay.overlay.images[XGPU_OVERLAY_TILE_COUNT] = surface_only ? 0 : mask;
 	for (tile = 0; tile < XGPU_OVERLAY_SURFACE_IMAGES; tile++)
-		material_overlay.overlay.images[XGPU_OVERLAY_SURFACE_IMAGE + tile] = surface ? surface[tile] : 0;
-	if (!surface || !surface[0] || !surface[1])
-		surface_only = 0;
+		material_overlay.overlay.images[XGPU_OVERLAY_SURFACE_IMAGE + tile] = surfaced ? surface[tile] : 0;
+	/* (the probes' atlas, read with XGPU_PRISM_REFLECTIONS_LOCAL alone) */
+	if (!probes)
+		prism_lighting &= ~XGPU_PRISM_REFLECTIONS_LOCAL;
+	material_overlay.overlay.images[XGPU_OVERLAY_PROBE_IMAGE] = (prism_lighting & XGPU_PRISM_REFLECTIONS_LOCAL) ?
+		probes : 0;
 	if (view < 0 || view > 4)
 		view = 0;
+	if (surface_only)
+		mask = 0;
 	material_overlay.key = (unsigned char)(1 + 2 * view + (mask ? XGPU_OVERLAY_CLASS_MASK : 0) +
 		(mask && mask_wins ? XGPU_OVERLAY_CLASS_MASK_WINS : 0) +
-		(surface && surface[0] && surface[1] ? XGPU_OVERLAY_SURFACE : 0) + (surface_only ? XGPU_OVERLAY_SURFACE_ONLY : 0));
+		(surfaced ? XGPU_OVERLAY_SURFACE : 0) + (surface_only ? XGPU_OVERLAY_SURFACE_ONLY : 0));
+	material_overlay.prism_lighting = (unsigned char)prism_lighting;
 }
 
 /* ---------- display.prism_materials
@@ -4113,6 +4209,8 @@ static void pipeline_derived(const struct xgpu_draw_derived *derived, struct xgp
 	key->pixel.dynamic_lights = derived->dynamic_lights;
 	key->pixel.ambient_occlusion = derived->ambient_occlusion;
 	key->pixel.material_overlay = derived->material_overlay;
+	key->pixel.lightmap_filter = derived->lightmap_filter;
+	key->pixel.prism_lighting = derived->prism_lighting;
 	key->pixel.material_pbr = derived->material_pbr;
 }
 
@@ -4178,6 +4276,7 @@ static BOOL pipeline_bind(struct vertex_shader_object *program, struct xgpu_draw
 	if (lit && !chosen && derived.material_overlay)
 	{
 		facts->material_overlay = 0;
+		facts->prism_lighting = 0;
 		lit = xgpu_draw_derive(facts, FALSE, &derived);
 		if (lit)
 		{
@@ -4384,6 +4483,16 @@ static BOOL prepare_draw(BOOL immediate, unsigned long primitive)
 	/* (display.prism_material_overlay: the overlay a mod armed for the
 	model shader's draws) */
 	facts.material_overlay = material_overlay.armed ? material_overlay.key : 0;
+	/* (display.prism_lightmaps: the lightmap pass's lightmap smoothed, or
+	read as its rebaked page's light and direction where that page is drawn:
+	prism_lightmaps.c) */
+	facts.lightmap_filter = prism_lightmaps_filter();
+	if (facts.lightmap_filter && halo_lightmap_pass_drawing() && prism_lightmaps_rebaked_drawing())
+		facts.lightmap_filter = XGPU_LIGHTMAP_FILTER_REBAKED;
+	facts.prism_lighting = material_overlay.armed ? material_overlay.prism_lighting : 0;
+	/* (display.prism_shadows "cascaded": the lightmap pass by the sun's
+	shadows, where the window drew their pass) */
+	facts.prism_sun = prism_sun.receiving && device.render_target == &device.back_buffer;
 	/* (display.prism_materials: the material a mod armed) */
 	facts.material_pbr = material_pbr.armed ? material_pbr.key : 0;
 	if (device.gl_ready)
@@ -5514,6 +5623,52 @@ void halo_screen_panini(short x0, short y0, short x1, short y1, const float proj
 	xgpu_backend_panini(target->target.number, corners, projection);
 }
 
+/* display.prism_shadows "cascaded" (port/linux/game/prism_shadows.c,
+xgpu_stream.h's PRISM_SHADOWS): the sun's shadow maps' pass of a window that
+draws into the back buffer with its depth buffer, where the backend draws
+it; FALSE where it does not (nothing sent: the window draws as without
+it). Its block is the floats of struct xgpu_prism_shadows_block. The
+window's surfaces read it from _END to _NONE (prism_sun.receiving) */
+int halo_prism_shadows_pass(int phase, int resolution, int cascades, const float *block)
+{
+	struct xgpu_prism_shadows_block copy;
+
+	if (phase == XGPU_PRISM_SHADOWS_BEGIN)
+	{
+		prism_sun.drawing = prism_sun.receiving = FALSE;
+		if (!device.gl_ready || !xgpu_backend_capabilities.prism_shadows || !block ||
+			device.render_target != &device.back_buffer || device.depth_stencil != &device.depth_buffer ||
+			cascades < 1 || cascades > XGPU_PRISM_SHADOWS_CASCADES_MOST ||
+			resolution < XGPU_PRISM_SHADOWS_RESOLUTION_LEAST || resolution > XGPU_PRISM_SHADOWS_RESOLUTION_MOST)
+			return FALSE;
+		memcpy(&copy, block, sizeof(copy));
+		xgpu_backend_prism_shadows(phase, resolution, cascades, &copy);
+		prism_sun.drawing = TRUE;
+		return TRUE;
+	}
+	if (phase == XGPU_PRISM_SHADOWS_STRUCTURE)
+	{
+		if (!prism_sun.drawing)
+			return FALSE;
+		xgpu_backend_prism_shadows(phase, resolution, cascades, NULL);
+		return TRUE;
+	}
+	if (phase == XGPU_PRISM_SHADOWS_END)
+	{
+		if (!prism_sun.drawing || !block)
+			return FALSE;
+		memcpy(&copy, block, sizeof(copy));
+		xgpu_backend_prism_shadows(phase, resolution, cascades, &copy);
+		prism_sun.drawing = FALSE;
+		prism_sun.receiving = TRUE;
+		return TRUE;
+	}
+	if (prism_sun.receiving || prism_sun.drawing)
+		xgpu_backend_prism_shadows(XGPU_PRISM_SHADOWS_NONE, resolution, cascades, NULL);
+	prism_sun.drawing = prism_sun.receiving = FALSE;
+	return FALSE;
+}
+
 /* display.hdr's tone map of a window's 3D view (source/render/render.c),
 before its anti-aliasing and the HUD: the draws from now on are the HUD's
 and the menus' (xgpu_hdr.h) */
@@ -5538,7 +5693,7 @@ void halo_screen_tone_map(short x0, short y0, short x1, short y1)
 	corners[1] = scaled_pixel(y0, target->target.scale[1]);
 	corners[2] = scaled_pixel(x1, target->target.scale[0]);
 	corners[3] = scaled_pixel(y1, target->target.scale[1]);
-	xgpu_backend_tone_map(target->target.number, corners);
+	xgpu_backend_tone_map(target->target.number, corners, prism_bloom_mode() | (prism_tone_mode() << XGPU_PRISM_TONE_SHIFT));
 }
 
 /* display.overshield_effect's rise (rasterizer_xbox_plasma_energy.c,

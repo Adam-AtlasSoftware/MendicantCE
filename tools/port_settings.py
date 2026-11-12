@@ -551,6 +551,14 @@ CONTROL_COMMAND_ROWS = {f"command_{n}" for n in range(1, CONTROL_ROWS + 1)}
 # (an action's row: its name, then its two bindings' columns, to the row's end)
 CONTROL_BINDINGS_X, CONTROL_BINDING_WIDTH = (136, 240), 104
 STREAMER = ("interface_settings/streamer_mode", "streamer_mode_screen")
+# (PRISM's graphics: Mods' PRISM GRAPHICS)
+PRISM_PAGE = ("mods_settings/prism", "prism_settings_screen")
+# (and the assets mods ship for it: Mods' PRISM ASSETS)
+PRISM_ASSETS_PAGE = ("mods_settings/prism_assets", "prism_assets_settings_screen")
+# (and its ray tracing: Mods' PRISM RAY TRACING, docs/prism_rt.md; its rows
+# greyed out where the renderer cannot trace rays, menu_functions.c's
+# prism_rt_rows_show)
+PRISM_RT_PAGE = ("mods_settings/prism_rt", "prism_rt_settings_screen")
 # (Online's Discord account: port/linux/src/player_link.c)
 DISCORD_ACCOUNT = ("network_setup/discord_account", "discord_account_screen")
 # (the server browsers' Filters, which their FILTERS opens too: menu_functions.c's
@@ -660,9 +668,11 @@ PAGES = {
             # (Classic or Enhanced, CUSTOM while any setting it chooses is
             # another value: menu_functions.c's graphics_preset_show; choosing
             # either sets them all again, as config_write does)
-            ("QUALITY", "display.graphics", [("ENHANCED", "enhanced"), ("CLASSIC", "classic"), ("CUSTOM", "custom")],
+            ("QUALITY", "display.graphics",
+             [("ENHANCED", "enhanced"), ("CLASSIC", "classic"), ("PRISM", "prism"), ("CUSTOM", "custom")],
              "Enhanced: smoother edges, sharper textures and shadows, smoother lighting. Classic looks as the "
-             "Xbox did.|Changing one shows CUSTOM.", None),
+             "Xbox did. PRISM: Enhanced with the levels' light smoothed and ambient occlusion.|Changing one "
+             "shows CUSTOM.", None),
             # (display.battery_saver: port/linux/src/battery_saver.c)
             ("BATTERY SAVER", "display.battery_saver", [("OFF", "off"), ("ON", "on"), ("AUTO", "auto")],
              "Up to 60 frames a second and Classic graphics, for a longer battery and a cooler device. Auto turns "
@@ -926,39 +936,18 @@ PAGES = {
             ("THEATER ›", None, f"{THEATER}/theater_screen",
              "The games recorded: watch one again from any player's view, or a free or cinematic camera.", None,
              "theater"),
-            # (PRISM's material overlay: drawn by the Vulkan renderer alone,
-            # for the model shaders a mod's overlay.json names)
-            (SECTION, "MATERIALS"),
-            ("MATERIAL DETAIL", "display.prism_material_overlay", ON_OFF,
-             "Gives weapons and armour the fine grain of their surfaces (machining, weave, wear) from a mod's "
-             "material overlay. It changes only the light on them. Off draws them as the Xbox did.", "desktop"),
-            # (PRISM's texture store: the replacement textures mods ship,
-            # drawn by the Vulkan renderer from the graphics card's memory)
-            ("TEXTURE DETAIL", "display.prism_textures", [("STOCK", "stock"), ("ENHANCED", "enhanced"), ("MAX", "max")],
-             "Draws the sharper textures mods ship in place of the game's, once they are in the graphics card's "
-             "memory. Stock draws the game's own.", "desktop"),
-            ("TEXTURE MEMORY", "display.prism_texture_budget_mb",
-             [("AUTO", "0"), ("512 MB", "512"), ("1 GB", "1024"), ("2 GB", "2048"), ("4 GB", "4096")],
-             "How much of the graphics card's memory mods' textures may take. Auto takes six tenths of what is "
-             "free; past it, those not seen lately go back to the game's.", "desktop"),
-            # (PRISM's materials: the GGX path for the model shaders a mod
-            # gives a material, drawn by the Vulkan renderer alone)
-            ("MATERIALS", "display.prism_materials", [("STOCK", "stock"), ("PBR", "pbr")],
-             "Lights armour and weapons with the materials mods give them: their colour, bumps, roughness, "
-             "metal and coats under the level's own lights. Stock draws them as the Xbox did.", "desktop"),
-            # (PRISM's ray tracing, docs/prism_rt.md: drawn by the Vulkan
-            # renderer where the graphics card traces rays; nothing sent
-            # otherwise)
-            ("RAY TRACING", "display.prism_rt",
-             [("OFF", "off"), ("SHADOWS", "shadows"), ("GI", "gi"), ("PATH TRACED", "pathtraced")],
-             "On graphics cards that trace rays: Shadows casts the sun's shadows of everything on screen and "
-             "traced ambient occlusion; GI also bounces the light of plasma, muzzle flashes and the sky about the "
-             "characters. The level keeps its own brightness and colours. Off draws the game's own light.",
-             "desktop"),
-            ("RAY TRACING QUALITY", "display.prism_rt_quality",
-             [("LOW", "low"), ("MEDIUM", "medium"), ("HIGH", "high"), ("ULTRA", "ultra")],
-             "More rays a pixel: softer, steadier shadows and more of the bounced light, at more of the graphics "
-             "card's time. Low suits the Steam Deck.", "desktop"),
+            # (PRISM: the graphics beyond the Xbox's, drawn by the Vulkan
+            # renderer, on a page of their own: PRISM's rows outgrew this one)
+            (SECTION, "PRISM"),
+            ("PRISM GRAPHICS ›", None, _page_screen(*PRISM_PAGE),
+             "Finer light, materials and level geometry, built on this computer from your own maps. Video's "
+             "Quality PRISM turns on the faithful ones.", "desktop"),
+            ("PRISM ASSETS ›", None, _page_screen(*PRISM_ASSETS_PAGE),
+             "The sharper textures, remodelled characters and materials mods ship, and how much of the graphics "
+             "card they take.", "desktop"),
+            ("PRISM RAY TRACING ›", None, _page_screen(*PRISM_RT_PAGE),
+             "Traced sun shadows, occlusion and bounced light on graphics cards that trace rays, and a path-"
+             "traced mode.", "desktop"),
         ],
     },
     # ---- the pages the rows open
@@ -1405,6 +1394,137 @@ PAGES = {
             ("PORTRAIT FRAME", "display.frame_style", [("PLAIN", "plain"), ("HALO", "halo"), ("XBOX", "xbox")],
              "The look of the screen around the picture when you play in portrait: plain black, Halo's blue lines "
              "and rings, or Xbox green. It is never drawn over the picture.", "android"),
+        ],
+    },
+    PRISM_PAGE[0]: {
+        "screen": PRISM_PAGE[1], "title": "PRISM GRAPHICS",
+        "rows": [
+            (SECTION, "SHADING"),
+            # (PRISM v2's model light: the Vulkan renderer's alone, xgpu.h's
+            # "PRISM v2's model light"; each off as the Xbox drew)
+            ("HIGHLIGHTS", "display.prism_specular", [("OFF", "off"), ("SUBTLE", "subtle"), ("FULL", "full")],
+             "Characters, weapons and vehicles catch the level's own lights as highlights, where their armour is "
+             "shiny. Off draws them as the Xbox did.", "desktop"),
+            ("REFLECTIONS", "display.prism_reflections", [("CLASSIC", "stock"), ("LOCAL", "local")],
+             "Local: shiny armour reflects the place it is in, captured on this computer from your maps. Classic "
+             "reflects the game's own painted reflections.", "desktop"),
+            ("SHADOWS", "display.prism_shadows", [("CLASSIC", "stock"), ("SOFT", "soft"),
+                                                   ("TRACED", "traced"), ("SUN", "cascaded")],
+             "Sun: the sky's sun casts real shadows of characters, vehicles and scenery onto the level and each "
+             "other. Soft and Traced: characters shade themselves from the main light (need ambient occlusion "
+             "World). Classic keeps the Xbox's shadows alone.", "desktop"),
+            ("SHADOW DETAIL", "display.prism_shadow_resolution", [("LOW", "1024"), ("HIGH", "2048"),
+                                                                  ("ULTRA", "4096")],
+             "How sharp the sun's shadows are, and how much of the graphics card they take.", "desktop"),
+            ("SHADOW SOFTNESS", "display.prism_shadow_softness", [("SHARP", "0.5"), ("NATURAL", "1"),
+                                                                  ("SOFT", "2")],
+             "How fast the sun's shadows soften away from what casts them. A dim sun or moon softens them more.",
+             "desktop"),
+            (SECTION, "LIGHTING"),
+            # (PRISM's lighting: drawn by the Vulkan renderer alone,
+            # port/linux/src/d3d8_device.c's prism_lighting_read)
+            ("LIGHTMAPS", "display.prism_lightmaps", [("STOCK", "stock"), ("SMOOTH", "smooth"),
+                                                       ("REBAKED", "rebaked")],
+             "Smooth: the levels' own light without its bands and blocky edges. Rebaked: light baked again on this "
+             "computer from the level's own lamps and sky, finer, bouncing, lighting bumps from its direction.",
+             "desktop"),
+            ("SHADE DEPTH", "display.ambient_occlusion_strength", [("LIGHT", "0.5"), ("NATURAL", "0.8"),
+                                                                    ("DEEP", "1")],
+             "How deep ambient occlusion World's shade is where characters, vehicles and scenery meet the level.",
+             "desktop"),
+            # (beyond CE: what the Xbox never drew, off in every preset)
+            (SECTION, "BEYOND CE"),
+            # (PRISM's remodelled level geometry, built on this machine:
+            # port/linux/game/prism_world_geometry.c)
+            ("WORLD GEOMETRY", "display.prism_world_geometry", [("XBOX", "stock"), ("REMODEL", "remodel")],
+             "Remodel draws the level's rock, sand and Forerunner walls from a denser model built on this computer "
+             "from your maps: rounded rock, bevelled edges, the same light. You still walk and collide on the "
+             "original. Xbox draws the map's own.", "desktop"),
+            ("GEOMETRY DETAIL", "display.prism_world_geometry_detail", [("LOW", "50"), ("NORMAL", "100"),
+                                                                        ("HIGH", "200")],
+             "How far out the remodel is drawn in its full detail; beyond, its lighter far level. Low is cheaper "
+             "on the graphics card.", "desktop"),
+            ("GEOMETRY SHADOWS", "display.prism_world_geometry_shadows", [("XBOX", "stock"), ("FAR", "far"),
+                                                                          ("FULL", "remodel")],
+             "The shape the sun's shadows are cast from with the remodel: Far, its lighter level (the rock's "
+             "ledges still shade); Full, every detail; Xbox, the map's own (cheapest).", "desktop"),
+            ("BLOOM", "display.prism_bloom", [("OFF", "off"), ("GLOW", "glow"), ("FULL", "full")],
+             "A soft glow about light brighter than white: plasma, the sun, lights and blasts. The Xbox had none; "
+             "Glow is faint, Full wider. Nothing lit only to white glows.", "desktop"),
+            ("TONE", "display.prism_tone", [("OFF", "off"), ("PRISM", "prism"), ("VIVID", "vivid")],
+             "Grades the picture by the light around each pixel: deeper local contrast, dark places lifted, richer "
+             "colour. Off draws it as the game does; Vivid goes further.", "desktop"),
+        ],
+    },
+    PRISM_ASSETS_PAGE[0]: {
+        "screen": PRISM_ASSETS_PAGE[1], "title": "PRISM ASSETS",
+        "rows": [
+            (SECTION, "MATERIALS"),
+            # (PRISM's material overlay: drawn by the Vulkan renderer alone,
+            # for the model shaders a mod's overlay.json names)
+            ("MATERIAL DETAIL", "display.prism_material_overlay", ON_OFF,
+             "Gives weapons and armour the fine grain of their surfaces (machining, weave, wear) from a mod's "
+             "material overlay. It changes only the light on them. Off draws them as the Xbox did.", "desktop"),
+            ("SURFACE DETAIL", "display.prism_surface_maps", ON_OFF,
+             "Lights characters, weapons and vehicles by the surface maps baked on this computer for a mod's "
+             "remodels: their dents, seams and creases. Off draws them as the Xbox did.", "desktop"),
+            # (PRISM's texture store: the replacement textures mods ship,
+            # drawn by the Vulkan renderer from the graphics card's memory)
+            ("TEXTURE DETAIL", "display.prism_textures", [("STOCK", "stock"), ("ENHANCED", "enhanced"), ("MAX", "max")],
+             "Draws the sharper textures mods ship in place of the game's, once they are in the graphics card's "
+             "memory. Stock draws the game's own.", "desktop"),
+            ("TEXTURE MEMORY", "display.prism_texture_budget_mb",
+             [("AUTO", "0"), ("512 MB", "512"), ("1 GB", "1024"), ("2 GB", "2048"), ("4 GB", "4096")],
+             "How much of the graphics card's memory mods' textures may take. Auto takes six tenths of what is "
+             "free; past it, those not seen lately go back to the game's.", "desktop"),
+            # (PRISM's materials: the GGX path for the model shaders a mod
+            # gives a material, drawn by the Vulkan renderer alone)
+            ("PBR MATERIALS", "display.prism_materials", [("STOCK", "stock"), ("PBR", "pbr")],
+             "Lights armour and weapons with the materials mods give them: their colour, bumps, roughness, "
+             "metal and coats under the level's own lights. Stock draws them as the Xbox did.", "desktop"),
+            # (PRISM's mesh store and extended skeletons: the replacement
+            # meshes mods ship, drawn by the Vulkan renderer)
+            (SECTION, "MODELS"),
+            ("REMODELS", "display.prism_models", [("STOCK", "stock"), ("ENHANCED", "enhanced"), ("MAX", "max")],
+             "Draws the remodelled characters, weapons and vehicles mods ship in place of the game's, on the "
+             "game's own skeletons: animations, collision and aim are unchanged. Stock draws the game's own.",
+             "desktop"),
+            ("MODEL MEMORY", "display.prism_model_budget_mb",
+             [("AUTO", "0"), ("256 MB", "256"), ("512 MB", "512"), ("1 GB", "1024")],
+             "How much of the graphics card's memory mods' remodels may take. Auto takes a fifth of what is "
+             "free; a remodel past it is drawn as the game's.", "desktop"),
+            ("SECONDARY MOTION", "display.prism_secondary_motion", ON_OFF,
+             "A remodel's pouches swing and its joints keep their volume as it moves. Off: they follow the "
+             "bones they hang from.", "desktop"),
+        ],
+    },
+    PRISM_RT_PAGE[0]: {
+        "screen": PRISM_RT_PAGE[1], "title": "PRISM RAY TRACING",
+        "rows": [
+            (SECTION, "RAY TRACING"),
+            # (PRISM's ray tracing, docs/prism_rt.md: drawn by the Vulkan
+            # renderer where the graphics card traces rays; nothing sent
+            # otherwise)
+            ("RAY TRACING", "display.prism_rt",
+             [("OFF", "off"), ("SHADOWS", "shadows"), ("GI", "gi"), ("PATH TRACED", "pathtraced")],
+             "On graphics cards that trace rays: Shadows casts the sun's shadows of everything on screen and "
+             "traced ambient occlusion; GI also bounces the light of plasma, muzzle flashes and the sky about the "
+             "characters; Path Traced traces bounced light at every pixel. The level keeps its own brightness and "
+             "colours. Off draws the game's own light.", "desktop"),
+            ("RAY TRACING QUALITY", "display.prism_rt_quality",
+             [("LOW", "low"), ("MEDIUM", "medium"), ("HIGH", "high"), ("ULTRA", "ultra")],
+             "More rays a pixel: softer, steadier shadows and more of the bounced light, at more of the graphics "
+             "card's time. Low suits the Steam Deck.", "desktop"),
+            ("RAY RESOLUTION", "display.prism_rt_resolution", [("AUTO", "auto"), ("HALF", "half"), ("FULL", "full")],
+             "Half traces a ray for each block of four pixels, cheaper on the graphics card; Full traces each "
+             "pixel. Auto: full, but at Low quality.", "desktop"),
+            ("DENOISER", "display.prism_rt_denoiser",
+             [("FULL", "spatiotemporal"), ("TEMPORAL", "temporal"), ("OFF", "off")],
+             "How the rays are smoothed: Full by their neighbours and the frames before, Temporal by the frames "
+             "before alone, Off as they are.", "desktop"),
+            ("LIGHT FREEDOM", "display.prism_rt_mood", [("CE", "0"), ("SOME", "50"), ("FULL", "100")],
+             "How far the bounced light may move a character's light from the game's own. CE keeps it; Full "
+             "lets it go up to a quarter brighter or darker.", "desktop"),
         ],
     },
     STREAMER[0]: {

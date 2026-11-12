@@ -1057,6 +1057,63 @@ static void sample(struct xgpu_text *text, const struct xgpu_pixel_program *prog
 	}
 }
 
+/* display.prism_lightmaps: whether the draw reads its stage 2, the
+lightmap, smoothed (xgpu.h's "The lightmaps smoothed"; xgpu_spirv.c's
+lightmap_smoothed). The Metal backend does not ask for it yet
+(xgpu_stream_capabilities' lightmap_filter): this is its twin, to be
+checked against Vulkan's on a Mac before it does */
+static BOOL lightmap_smoothed(const struct xgpu_pixel_program *program, const struct xgpu_msl_options *options)
+{
+	return program->lightmap_filter == XGPU_LIGHTMAP_FILTER_SMOOTH &&
+		program->stages[2].mode == XGPU_TEXTURE_PROJECT2D && program->stages[2].sampler == _xgpu_sampler_2d &&
+		!(options->border[2] & 3);
+}
+
+/* the lightmap smoothed (xgpu_spirv.c's lightmap_smooth, step for step):
+the B-spline of its 4 by 4 texels as four bilinear taps, clamped to its 2
+by 2's least and most, evened out with the diagonal taps within a quantum,
+dithered by the pixel's interleaved gradient noise */
+static void lightmap_smooth_function(struct xgpu_text *text)
+{
+	xgpu_text_append(text,
+		"static float4 lightmap_smooth(texture2d<float> lm, sampler s, float2 uv, float2 pixel)\n"
+		"{\n"
+		"\tfloat2 size = float2(float(lm.get_width()), float(lm.get_height()));\n"
+		"\tfloat2 texel = 1.0 / size;\n"
+		"\tfloat2 st = uv * size - 0.5;\n"
+		"\tfloat2 base = floor(st), f = st - base, f2 = f * f, f3 = f2 * f, one_f = 1.0 - f;\n"
+		"\tfloat2 w0 = one_f * one_f * one_f * (1.0 / 6.0);\n"
+		"\tfloat2 w1 = (3.0 * f3 - 6.0 * f2 + 4.0) * (1.0 / 6.0);\n"
+		"\tfloat2 w3 = f3 * (1.0 / 6.0);\n"
+		"\tfloat2 g0 = w0 + w1, g1 = 1.0 - g0;\n"
+		"\tfloat2 p0 = (base - 0.5 + w1 / max(g0, 1.0e-6)) * texel;\n"
+		"\tfloat2 p1 = (base + 1.5 + w3 / max(g1, 1.0e-6)) * texel;\n"
+		"\tfloat3 c = lm.sample(s, float2(p0.x, p0.y)).rgb * (g0.x * g0.y) + lm.sample(s, float2(p1.x, p0.y)).rgb * (g1.x * g0.y) +\n"
+		"\t\tlm.sample(s, float2(p0.x, p1.y)).rgb * (g0.x * g1.y) + lm.sample(s, float2(p1.x, p1.y)).rgb * (g1.x * g1.y);\n"
+		"\tfloat4 bilinear = lm.sample(s, uv);\n"
+		"\tfloat4 r = lm.gather(s, uv, int2(0), component::x), g = lm.gather(s, uv, int2(0), component::y),\n"
+		"\t\tb = lm.gather(s, uv, int2(0), component::z);\n"
+		"\tfloat3 low = float3(min(min(r.x, r.y), min(r.z, r.w)), min(min(g.x, g.y), min(g.z, g.w)), min(min(b.x, b.y), min(b.z, b.w)));\n"
+		"\tfloat3 high = float3(max(max(r.x, r.y), max(r.z, r.w)), max(max(g.x, g.y), max(g.z, g.w)), max(max(b.x, b.y), max(b.z, b.w)));\n"
+		"\tc = clamp(c, low, high);\n"
+		"\tfloat3 sum = c;\n"
+		"\tfloat weights = 1.0;\n"
+		"\tfor (int n = 0; n < 4; n++)\n"
+		"\t{\n"
+		"\t\tfloat2 offset = float2((n & 1) ? 1.0 : -1.0, (n & 2) ? 1.0 : -1.0) * %.9g;\n"
+		"\t\tfloat3 tap = lm.sample(s, uv + offset * texel).rgb;\n"
+		"\t\tfloat3 d = abs(tap - c) * float3(31.0, 63.0, 31.0);\n"
+		"\t\tfloat w = saturate((%.9g - max(max(d.x, d.y), d.z)) / %.9g);\n"
+		"\t\tsum += tap * w;\n"
+		"\t\tweights += w;\n"
+		"\t}\n"
+		"\tc = sum / weights;\n"
+		"\tfloat noise = fract(52.9829189 * fract(dot(pixel, float2(0.06711056, 0.00583715))));\n"
+		"\tc += (noise - 0.5) / 255.0;\n"
+		"\treturn float4(saturate(c), bilinear.a);\n"
+		"}\n", XGPU_LIGHTMAP_DEBAND_REACH, XGPU_LIGHTMAP_DEBAND_LIMIT, XGPU_LIGHTMAP_DEBAND_LIMIT - 1.0f);
+}
+
 static void texture_stage(struct xgpu_text *text, const struct xgpu_pixel_program *program, int stage,
 	const struct pixel_usage *usage, const struct xgpu_msl_options *options)
 {
@@ -1078,7 +1135,12 @@ static void texture_stage(struct xgpu_text *text, const struct xgpu_pixel_progra
 		snprintf(coordinates, sizeof(coordinates), "float4(fast::divide(in.xT%d.xyz, float3(in.xT%d.w != 0.0 ? in.xT%d.w : 1.0)), 1.0)",
 			stage, stage, stage);
 		xgpu_text_append(text, "\tt%d = ", stage);
-		sample(text, program, stage, coordinates, options);
+		/* (display.prism_lightmaps: the lightmap pass's lightmap smoothed) */
+		if (stage == 2 && lightmap_smoothed(program, options))
+			xgpu_text_append(text, "lightmap_smooth(tex2, tex2_sampler, (%s).xy * u.texture_scale[2].xy, "
+				"in.frag_position.xy)", coordinates);
+		else
+			sample(text, program, stage, coordinates, options);
 		xgpu_text_append(text, ";\n");
 		if (stage == 0 && program->point_threshold && decoded->sampler == _xgpu_sampler_2d)
 		{
@@ -2267,8 +2329,9 @@ static void world_ao_read(struct xgpu_text *text, const struct xgpu_pixel_progra
 			"\t\tfloat field = world_sdf_occlusion(world_ao, world_sdf, world_sdf_table, in.xWorldPosition, world_n,\n"
 			"\t\t\tbaked ? inside : 0.0);\n"
 			"\t\tfield = mix(field, saturate(field / max(baked ? 1.0 : u.world_ao.y, %.6f)), world_ao.parameters[1].x);\n"
-			"\t\tocclusion = mix(1.0, max(mix(1.0, field, world_ao.parameters[0].z) * proxies, %.6f), world_ao.parameters[0].x);\n",
-			XGPU_WORLD_AO_REFERENCE_LEAST, XGPU_WORLD_AO_FLOOR);
+			"\t\tocclusion = mix(1.0, max(mix(1.0, field, world_ao.parameters[0].z) * proxies, baked ? %.6f : %.6f),\n"
+			"\t\t\tworld_ao.parameters[0].x);\n",
+			XGPU_WORLD_AO_REFERENCE_LEAST, XGPU_WORLD_AO_SCENERY_FLOOR, XGPU_WORLD_AO_FLOOR);
 	xgpu_text_append(text, "\t}\n");
 }
 
@@ -2321,7 +2384,11 @@ XGPU_MSL_TEXTURE_OVERLAY on, through constexpr samplers (the tiles repeating
 and filtered between their levels, the mask clamped), the uniform the
 uniforms' material_overlay. The Metal backend does not draw it yet
 (xgpu_stream_capabilities' material_overlay: its pixel programs never have
-it) until these are checked against Vulkan's on a Mac. */
+it) until these are checked against Vulkan's on a Mac. Nor PRISM v2's
+surface maps and model light (xgpu.h's XGPU_OVERLAY_SURFACE and "PRISM v2's
+model light": prism_lighting, armed with the overlay alone): a program with
+them is not written here (xgpu_msl_pixel_shader refuses it, and the draw
+goes as the game draws it). */
 
 /* after texture stage 2: the micro normal, cavity and roughness, and v0's
 light by them (t2 the multipurpose map's texel, or none) */
@@ -2533,13 +2600,18 @@ char *xgpu_msl_pixel_shader(const struct xgpu_pixel_program *program, const stru
 	BOOL overlay = program->material_overlay && program->per_pixel_lighting && !environment;
 	int stage;
 
+	/* (PRISM v2's surface maps and model light: Vulkan's alone, above) */
+	if (program->prism_lighting || (program->material_overlay & (XGPU_OVERLAY_SURFACE | XGPU_OVERLAY_SURFACE_ONLY)))
+		return NULL;
 	pixel_usage(program, &usage);
 	world_position = (program->per_pixel_lighting && (program->per_pixel_lighting == 2 ||
 		program->dynamic_lights == XGPU_DYNAMIC_LIGHTS_MODEL)) || environment || world || overlay;
 	if (comparison && *comparison && program->alpha_test_samples && comparison[0] != '=' && comparison[0] != '!')
 		sample_mask = TRUE;
 	xgpu_text_append(&text, uniforms_declaration, XGPU_MODEL_LIGHT_COUNT, overlay ?
-		"\tfloat4 world_ao;\n\tfloat4 material_overlay[11];\n" : world ? "\tfloat4 world_ao;\n" : "");
+		"\tfloat4 world_ao;\n\tfloat4 material_overlay[20];\n" : world ? "\tfloat4 world_ao;\n" : "");
+	if (lightmap_smoothed(program, options))
+		lightmap_smooth_function(&text);
 	if (world_inline)
 		world_ao_functions(&text, occlusion_light);
 	else if (world_sampled || world_inputs)
@@ -2556,7 +2628,7 @@ char *xgpu_msl_pixel_shader(const struct xgpu_pixel_program *program, const stru
 		"\tfloat4 xT2 [[user(xT2)]];\n"
 		"\tfloat4 xT3 [[user(xT3)]];\n"
 		"\tfloat xFog [[user(xFog)]];\n");
-	if (replaces_depth || world_sampled)
+	if (replaces_depth || world_sampled || lightmap_smoothed(program, options))
 		xgpu_text_append(&text, "\tfloat4 frag_position [[position]];\n");
 	if (occlusion_light == XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX)
 		xgpu_text_append(&text, "\tfloat3 xLightAmbient [[user(xLightAmbient)]];\n\tfloat3 xLightPoint [[user(xLightPoint)]];\n");
@@ -3083,13 +3155,14 @@ char *xgpu_msl_world_ao_pass(BOOL pixel)
 		"\tfloat inside = min(world_sdf_distance(world_ao, world_sdf, world_sdf_table, p), 0.0);\n"
 		"\tfloat field = world_sdf_occlusion(world_ao, world_sdf, world_sdf_table, p, n, baked ? inside : 0.0);\n"
 		"\tfield = mix(field, saturate(field / max(baked ? 1.0 : value, %.6f)), world_ao.parameters[1].x);\n"
-		"\treturn mix(1.0, max(mix(1.0, field, world_ao.parameters[0].z) * proxies, %.6f), world_ao.parameters[0].x);\n"
+		"\treturn mix(1.0, max(mix(1.0, field, world_ao.parameters[0].z) * proxies, baked ? %.6f : %.6f),\n"
+		"\t\tworld_ao.parameters[0].x);\n"
 		"}\n",
 		XGPU_WORLD_AO_RAY_CASCADE, XGPU_WORLD_AO_RAY_REACH,
 		XGPU_WORLD_AO_RAYS, XGPU_WORLD_AO_RAYS, XGPU_WORLD_AO_RAY_BIAS, XGPU_WORLD_AO_RAY_REACH, XGPU_WORLD_TRACE_OBJECTS,
 		XGPU_WORLD_AO_RAY_REACH, XGPU_WORLD_AO_RAYS,
 		XGPU_WORLD_AO_INPUT_ALL_SHAPES, XGPU_WORLD_AO_SHAPES, XGPU_WORLD_AO_INPUT_LIGHTMAP, XGPU_WORLD_AO_FLOOR,
-		XGPU_WORLD_AO_REFERENCE_LEAST, XGPU_WORLD_AO_FLOOR);
+		XGPU_WORLD_AO_REFERENCE_LEAST, XGPU_WORLD_AO_SCENERY_FLOOR, XGPU_WORLD_AO_FLOOR);
 	xgpu_text_append(&text,
 		"fragment float4 xgpu_world_ao_pass(float4 position [[position]], constant xgpu_world_ao_pass &pass [[buffer(%d)]],\n"
 		"\tconstant xgpu_world_ao &world_ao [[buffer(%d)]], texture2d<uint> inputs [[texture(0)]],\n"

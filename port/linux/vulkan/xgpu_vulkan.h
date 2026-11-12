@@ -594,9 +594,10 @@ enum
 
 /* (xgpu.h's XGPU_OVERLAY_BINDING and XGPU_OVERLAY_IMAGE_COUNT) */
 #define XGPU_VULKAN_BINDING_OVERLAY 4
-#define XGPU_VULKAN_OVERLAY_IMAGES 7
-/* (xgpu.h's XGPU_MATERIAL_BINDING and XGPU_MATERIAL_IMAGE_COUNT) */
-#define XGPU_VULKAN_BINDING_MATERIAL 11
+#define XGPU_VULKAN_OVERLAY_IMAGES 8
+/* (xgpu.h's XGPU_MATERIAL_BINDING and XGPU_MATERIAL_IMAGE_COUNT: past the
+overlay's images) */
+#define XGPU_VULKAN_BINDING_MATERIAL 12
 #define XGPU_VULKAN_MATERIAL_IMAGES 6
 
 /* a draw: its pipeline, topology and dynamic state; its vertices' bindings
@@ -620,6 +621,9 @@ struct xgpu_vulkan_draw
 	attachment bound as its input, the draw ordered after the pass's
 	draws before it */
 	uint8_t reads_color;
+	/* its pixel shader reads display.prism_shadows "cascaded"'s atlases and
+	block (XGPU_VULKAN_SET_SHADOWS: xgpu_vulkan_prism_shadows) */
+	uint8_t prism_shadows;
 	/* HALO_VULKAN_DRAW_TIMES (measuring): the game's draw's kind, its
 	pixel key's ambient_occlusion, its pipeline key's lighting and its
 	per_pixel_lighting, and XGPU_VULKAN_DRAW_GAME; zeros the backend's own */
@@ -651,6 +655,25 @@ struct xgpu_vulkan_draw
 #define XGPU_VULKAN_DRAW_GAME 0x80
 void xgpu_vulkan_draw(const struct xgpu_vulkan_draw *draw);
 
+/* display.prism_shadows "cascaded" (xgpu_spirv.h's XGPU_SPIRV_SET_SHADOWS,
+xgpu.h's "PRISM's sun shadows"): the set the draws reading the sun's
+shadows bind (xgpu_vulkan_draw's prism_shadows), in the pipeline layout's
+set XGPU_VULKAN_SET_SHADOWS: the moving casters' atlas compared (a depth
+compare sampler, linear, clamped, greater or equal) and as it is (nearest),
+the structure's compared, and the block (bytes of it, a uniform buffer),
+from now on (the atlases: depth images; NULL none, no draw then reads
+them). The device must bind five sets (its maxBoundDescriptorSets) */
+#define XGPU_VULKAN_SET_SHADOWS 4
+#define XGPU_VULKAN_BINDING_SHADOWS_MOVING 0
+#define XGPU_VULKAN_BINDING_SHADOWS_MOVING_DEPTH 1
+#define XGPU_VULKAN_BINDING_SHADOWS_STRUCTURE 2
+#define XGPU_VULKAN_BINDING_SHADOWS_BLOCK 3
+#define XGPU_VULKAN_SHADOWS_BLOCK_BYTES 384
+void xgpu_vulkan_prism_shadows(struct xgpu_vulkan_image *moving, struct xgpu_vulkan_image *structure,
+	const void *block, uint32_t size);
+/* whether the device has the shadows' set (five sets bound) */
+int xgpu_vulkan_prism_shadows_possible(void);
+
 /* display.ambient_occlusion "world" (xgpu_vulkan_world_ao.c, xgpu_stream.h's
 struct xgpu_world_ao_block), which the draws lighting by it read
 (xgpu_vulkan_draw's ambient_occlusion) in the pipeline layout's set
@@ -674,6 +697,10 @@ linear, clamped, a texel of none where it has not all come) */
 read: a 2D image of four floats, read by texel, a 1x1 of 1 where none is
 found) */
 #define XGPU_VULKAN_BINDING_WORLD_AO_PIXELS 6
+/* (and the distance-field scene's cascades, which PRISM v2's shadows trace
+in the models' draws: xgpu.h's "PRISM v2's model light"; a 3D image of two
+signed bytes, linear, a far-outside texel where none has come) */
+#define XGPU_VULKAN_BINDING_WORLD_CASCADES 7
 struct xgpu_world_ao_block;
 /* the stand-ins and the sampler made (the core's start): 0 if they cannot be */
 int xgpu_vulkan_world_ao_create(void);

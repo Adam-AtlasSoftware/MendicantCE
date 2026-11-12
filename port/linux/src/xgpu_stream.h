@@ -38,7 +38,7 @@ port/linux/README.md.
 #include <stdint.h>
 
 #define XGPU_STREAM_MAGIC 0x53504758u /* "XGPS" */
-#define XGPU_STREAM_VERSION 26
+#define XGPU_STREAM_VERSION 27
 #define XGPU_STREAM_LOADING_ART_BYTES (640u * 480u * 4u)
 
 /* ---------- the ring
@@ -276,6 +276,9 @@ enum
 	/* display.prism_material_overlay: the overlay of the draws that follow
 	(xgpu_stream_material_overlay) */
 	XGPU_STREAM_MATERIAL_OVERLAY,
+	/* display.prism_shadows "cascaded": the sun's shadow maps' pass
+	(xgpu_backend_prism_shadows) */
+	XGPU_STREAM_PRISM_SHADOWS,
 	/* display.prism_textures: the map's replacement textures
 	(xgpu_stream_texture_store_map) */
 	XGPU_STREAM_TEXTURE_STORE_MAP,     /* synchronous */
@@ -338,17 +341,20 @@ struct xgpu_stream_capabilities
 	int32_t most_anisotropy;
 	uint8_t sample_counting, bgra_vertex_colors, base_vertex, sample_mask;
 	uint8_t mixed_constant_blend, dynamic_lights, dynamic_lights_preparable, hdr;
-	/* display.prism_material_overlay drawn (MATERIAL_OVERLAY); PRISM's
-	texture store (TEXTURE_STORE_MAP, SET_TEXTURES' store ids): its files
-	opened and drawn by the host (0: the guest never asks); PRISM's mesh
-	store (MESH_STORE_MAP, MESH_INSTANCE, MESH_DRAW: display.prism_models);
-	PRISM's materials (display.prism_materials: MATERIAL_DEFINE,
-	MATERIAL_BIND, the pixel key's material_pbr, the store's material files;
-	0: never sent) */
-	uint8_t material_overlay, texture_store, mesh_store, materials;
-	/* display.prism_rt: hardware ray queries and acceleration structures
-	(RT_STATIC, RT_FRAME; 0: never sent, the menu's row greyed out) */
-	uint8_t ray_tracing, pad[3];
+	/* display.prism_material_overlay drawn (MATERIAL_OVERLAY); the
+	lightmaps smoothed (display.prism_lightmaps: the pixel key's
+	lightmap_filter); display.prism_bloom drawn (BLOOM); display.prism_shadows
+	"cascaded" drawn (PRISM_SHADOWS) */
+	uint8_t material_overlay, lightmap_filter, bloom, prism_shadows;
+	/* PRISM's texture store (TEXTURE_STORE_MAP, SET_TEXTURES' store ids):
+	its files opened and drawn by the host (0: the guest never asks);
+	PRISM's mesh store (MESH_STORE_MAP, MESH_INSTANCE, MESH_DRAW:
+	display.prism_models); PRISM's materials (display.prism_materials:
+	MATERIAL_DEFINE, MATERIAL_BIND, the pixel key's material_pbr, the
+	store's material files; 0: never sent); display.prism_rt: hardware ray
+	queries and acceleration structures (RT_STATIC, RT_FRAME; 0: never
+	sent, the menu's row greyed out) */
+	uint8_t texture_store, mesh_store, materials, ray_tracing;
 };
 
 struct xgpu_stream_reply_record
@@ -394,6 +400,10 @@ struct xgpu_stream_tone_map
 	uint32_t header;
 	uint32_t target;
 	int32_t corners[4];
+	/* display.prism_bloom first (XGPU_BLOOM_*: xgpu_backend.h; 0 none) in
+	the low 8 bits, display.prism_tone's grade (XGPU_PRISM_TONE_*) from
+	XGPU_PRISM_TONE_SHIFT */
+	uint32_t bloom;
 };
 
 /* ---------- display.ambient_occlusion "world" (docs/world-ao.md, #578)
@@ -530,6 +540,65 @@ struct xgpu_stream_world_ao_prepass
 	uint32_t target;
 	uint32_t pad;
 	struct xgpu_world_ao_pass pass;
+};
+
+/* ---------- display.prism_shadows "cascaded" (xgpu.h's "PRISM's sun shadows")
+
+PRISM_SHADOWS: phase XGPU_PRISM_SHADOWS_BEGIN (the draws from here on are
+the casters' that move: each opaque one's shadow twin,
+xgpu_stream_prism_shadow_twin, drawn once a cascade into the moving
+casters' atlas, the others and the clears skipped), _STRUCTURE (the draws
+from here on are the structure's: into the structure's atlas), _END (the
+pass done: the block the receivers read from here on, until the next pass
+or _NONE), _NONE (no shadow: the receivers read a sun that is nowhere).
+The atlases are resolution * cascades by resolution texels of depth, cascade
+k's tile the k-th; a caster's twin reaches its tile's clip space by
+cascades[k] times the world position its vertex program's clip position
+is of (the backend undoes the camera's projection, the vertex constants'
+first four rows, for each draw), its depth reversed (1 nearest the sun). */
+enum
+{
+	XGPU_PRISM_SHADOWS_NONE,
+	XGPU_PRISM_SHADOWS_BEGIN,
+	XGPU_PRISM_SHADOWS_STRUCTURE,
+	XGPU_PRISM_SHADOWS_END,
+};
+#define XGPU_PRISM_SHADOWS_CASCADES_MOST 4
+#define XGPU_PRISM_SHADOWS_RESOLUTION_LEAST 512
+#define XGPU_PRISM_SHADOWS_RESOLUTION_MOST 4096
+/* the receivers' block (std140, a uniform buffer): cascades[k] the world
+to cascade k's clip (rows x, y, z, w: x and y -1 to 1 across its tile, z
+reversed); sun: xyz the unit direction toward the sun, w the cascades' count
+(0: no shadow); light: x the share of a lightmap's light the moving casters
+take away, y the penumbra's growth a world unit from blocker to receiver,
+z the atlas's width's reciprocal, w the cascades' tile's texels; texel: each
+cascade's texel in world units; depth: each cascade's depth range in world
+units; fade: x where the last cascade's shadow starts to fade (the share of
+its radius), y the structure's share for a model (1: as the moving
+casters'), z a model's share of its first distant light the casters take, w
+unused; tune: the bake's sun visibility (a lightmap texel's dominant
+incident direction's nearness to the sun from x to y, cosines, times its
+directional share times z, at most 1: the share of its light the casters
+may take) and w the cascades' blend's band (the share of a cascade's half
+width short of its edge where its pixels start to take the next) */
+struct xgpu_prism_shadows_block
+{
+	float cascades[XGPU_PRISM_SHADOWS_CASCADES_MOST][4][4];
+	float sun[4];
+	float light[4];
+	float texel[4];
+	float depth[4];
+	float fade[4];
+	float tune[4];
+	float spare[2][4];
+};
+struct xgpu_stream_prism_shadows
+{
+	uint32_t header;
+	uint32_t phase;
+	uint32_t resolution;
+	uint32_t cascades;
+	struct xgpu_prism_shadows_block block;
 };
 
 /* PIPELINE_STAND_IN: pipeline id (one with the world's light) has a stand-in
@@ -931,15 +1000,15 @@ XGPU_STREAM_IMAGE_RGBA_LEVELS: data holds every level, level 0 first, each
 half the one before, at least 1, right after it) or none (source 0): tiles A
 to D, then the class mask, then the surface map's two images (their
 format XGPU_STREAM_IMAGE_BC5_LEVELS: data holds every level's BC5 blocks,
-level 0 first, 16 bytes a block of 4 by 4), at the backend's
-XGPU_OVERLAY_BINDING on */
+level 0 first, 16 bytes a block of 4 by 4), then PRISM v2's probes' atlas
+(XGPU_STREAM_IMAGE_RGBA_LEVELS), at the backend's XGPU_OVERLAY_BINDING on */
 #define XGPU_STREAM_IMAGE_RGBA_LEVELS 2
 #define XGPU_STREAM_IMAGE_BC5_LEVELS 3
 struct xgpu_stream_material_overlay
 {
 	uint32_t header;
-	float uniforms[11][4];
-	struct xgpu_stream_texture_stage stages[7];
+	float uniforms[20][4];
+	struct xgpu_stream_texture_stage stages[8];
 };
 
 /* ---------- PRISM's materials (display.prism_materials; xgpu.h's "PBR
@@ -1022,11 +1091,24 @@ struct xgpu_stream_pixel_key
 	uint8_t source_blend, dynamic_lights, vr_effect, ambient_occlusion;
 	/* display.hdr's tag (xgpu_hdr.h) */
 	uint16_t hdr;
-	/* display.prism_material_overlay (xgpu.h; in what was padding: the
-	keys without it hash as they did), display.prism_materials (xgpu.h's
-	material_pbr: the byte that was unused; the pixel program's is this) */
-	uint8_t material_overlay, material_pbr;
+	/* display.prism_material_overlay (xgpu.h); PRISM's light, the native
+	key's prism_lighting and lightmap_filter in one byte (XGPU_STREAM_PRISM_*,
+	below). Both in what was padding: the keys without them hash as they did */
+	uint8_t material_overlay, prism;
+	/* display.prism_materials (xgpu.h's material_pbr; the pixel program's
+	is this), in a word of its own past the prism byte */
+	uint8_t material_pbr, unused[3];
 };
+
+/* the pixel key's prism byte: PRISM v2's model light (xgpu.h's
+XGPU_PRISM_*, below XGPU_STREAM_PRISM_LIGHTMAP_SHIFT) and display.prism_lightmaps'
+filter (XGPU_LIGHTMAP_FILTER_*, shifted by it); 0 as the game draws */
+#define XGPU_STREAM_PRISM_LIGHTMAP_SHIFT 6
+#define XGPU_STREAM_PRISM_LIGHTING_MASK ((1 << XGPU_STREAM_PRISM_LIGHTMAP_SHIFT) - 1)
+#define XGPU_STREAM_PRISM(prism_lighting, lightmap_filter) \
+	((uint8_t)(((prism_lighting) & XGPU_STREAM_PRISM_LIGHTING_MASK) | ((lightmap_filter) << XGPU_STREAM_PRISM_LIGHTMAP_SHIFT)))
+#define XGPU_STREAM_PRISM_LIGHTING(prism) ((prism) & XGPU_STREAM_PRISM_LIGHTING_MASK)
+#define XGPU_STREAM_PRISM_LIGHTMAP_FILTER(prism) ((prism) >> XGPU_STREAM_PRISM_LIGHTMAP_SHIFT)
 
 /* xgpu_backend.h's struct xgpu_pipeline_key */
 struct xgpu_stream_pipeline_key
@@ -1068,6 +1150,9 @@ struct xgpu_stream_pixel_program
 	uint8_t material_overlay;
 	/* display.hdr's tag (xgpu_hdr.h) */
 	uint16_t hdr;
+	/* display.prism_lightmaps, PRISM v2's model light (xgpu.h's
+	XGPU_LIGHTMAP_FILTER_*, XGPU_PRISM_*) */
+	uint8_t lightmap_filter, prism_lighting, unused[2];
 };
 
 /* a pipeline key the guest numbered (from 1, below XGPU_STREAM_PIPELINES),
@@ -1138,10 +1223,52 @@ static inline int xgpu_stream_world_ao_twin(struct xgpu_stream_pipeline_define *
 	definition->key.pixel.count_samples = definition->pixel_program.count_samples = 0;
 	definition->key.pixel.dynamic_lights = definition->pixel_program.dynamic_lights = 0;
 	definition->key.pixel.material_overlay = definition->pixel_program.material_overlay = 0;
+	definition->key.pixel.prism = 0;
+	definition->pixel_program.lightmap_filter = definition->pixel_program.prism_lighting = 0;
 	definition->key.pixel.material_pbr = 0;
 	return 1;
 }
 
+
+/* a pipeline's shadow twin in display.prism_shadows "cascaded"'s pass, made
+of its definition in place (nonzero; 0 none, the draw not drawn in the
+pass): of an opaque one that writes the depth where it is nearer or as near
+(its alpha test kept: a fence's, a tree's leaves), into the depth alone (no
+colour: XGPU_STREAM_FORMAT_NONE, nothing written, nothing blended), one
+sample, both faces, no stencil, no HDR tag, no lighting of its pixels, no
+enhanced dynamic lights, no material overlay, no world's light, no samples
+counted; its vertex program as it is (the backend draws its clip position
+into each cascade: XGPU_STREAM_PRISM_SHADOWS) */
+#define XGPU_STREAM_FORMAT_NONE 0u
+static inline int xgpu_stream_prism_shadow_twin(struct xgpu_stream_pipeline_define *definition)
+{
+	if (!definition->key.depth_test || !definition->key.depth_write || definition->key.blend ||
+		!definition->key.color_mask || definition->key.pixel.source_blend || definition->key.views > 1 ||
+		(definition->key.depth_function != XGPU_STREAM_COMPARE_LESS &&
+		definition->key.depth_function != XGPU_STREAM_COMPARE_LESS_EQUAL))
+		return 0;
+	definition->key.depth_function = (uint8_t)XGPU_STREAM_COMPARE_LESS;
+	definition->key.blend = definition->key.blend_source = definition->key.blend_destination = 0;
+	definition->key.blend_operation = 0;
+	definition->key.color_mask = 0;
+	definition->key.color_format = (uint8_t)XGPU_STREAM_FORMAT_NONE;
+	definition->key.samples = 0;
+	definition->key.stencil_test = 0;
+	definition->key.stencil_write_mask = 0;
+	definition->key.cull = 0;
+	definition->key.depth_bias = 0;
+	definition->key.pixel.alpha_test_samples = definition->pixel_program.alpha_test_samples = 0;
+	definition->key.pixel.hdr = definition->pixel_program.hdr = 0;
+	definition->key.pixel.source_blend = definition->pixel_program.source_blend = 0;
+	definition->key.pixel.count_samples = definition->pixel_program.count_samples = 0;
+	definition->key.pixel.dynamic_lights = definition->pixel_program.dynamic_lights = 0;
+	definition->key.pixel.material_overlay = definition->pixel_program.material_overlay = 0;
+	definition->key.pixel.ambient_occlusion = definition->pixel_program.ambient_occlusion = 0;
+	definition->key.pixel.prism = 0;
+	definition->key.pixel.per_pixel_lighting = definition->pixel_program.per_pixel_lighting = 0;
+	definition->pixel_program.lightmap_filter = definition->pixel_program.prism_lighting = 0;
+	return 1;
+}
 
 /* xgpu_backend.h's struct xgpu_dynamic_state */
 struct xgpu_stream_dynamic_state
@@ -1666,7 +1793,7 @@ XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_frame_end, 12);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_capabilities, 28);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_rt_static, 32);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_rt_frame, 4 + 32 * 4 + 16 * 4 + XGPU_STREAM_RT_LIGHTS * 48);
-XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_material_overlay, 4 + 176 + 7 * 72);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_material_overlay, 4 + 320 + 8 * 72);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_texture_store_map, 40);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_texture_store_query, 32);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_texture_store_answer, 12);
@@ -1677,13 +1804,15 @@ XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_mesh_instance, 48);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_mesh_draw, 16);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_material_define, 12 + 6 * 4 + 9 * 16);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_hdr, 24);
-XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_tone_map, 24);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_tone_map, 28);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_panini, 56);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_world_ao_window, 16 + 32 + 32 + XGPU_WORLD_AO_PROXIES_MAXIMUM * 48 + 32 +
 	XGPU_WORLD_AO_GRID_CELLS_MAXIMUM * 8);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_world_ao_field, 40);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_world_ao_prepass, 96 + 64 + 64 + 16 + 16);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_world_ao_cascades, 40);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_prism_shadows_block, 4 * 64 + 8 * 16);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_prism_shadows, 16 + 4 * 64 + 8 * 16);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_pipeline_stand_in, 12);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_set_targets, 16);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_clear, 36);
@@ -1691,10 +1820,10 @@ XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_read_target, 28);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_screenshot, 32);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_sampler, 24);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_texture_stage, 72);
-XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_pixel_key, 264);
-XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_pipeline_key, 308);
-XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_pixel_program, 436);
-XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_pipeline_define, 752);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_pixel_key, 268);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_pipeline_key, 312);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_pixel_program, 440);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_pipeline_define, 760);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_dynamic_state, 68);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_draw_uniforms, 580);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_vertex_element, 6);

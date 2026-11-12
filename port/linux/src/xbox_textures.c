@@ -423,6 +423,35 @@ static struct replacement_entry *replacement_get(const DWORD *resource, const st
 	return entry;
 }
 
+/* (port/linux/game/prism_lightmaps.c, d3d8_device.c) */
+unsigned int prism_lightmaps_replacement(unsigned long data, unsigned long *levels);
+int halo_lightmap_pass_drawing(void);
+
+unsigned long *xgpu_texture_565_argb(const void *resource, unsigned long *width, unsigned long *height)
+{
+	const DWORD *header = (const DWORD *)resource;
+	struct xgpu_texture_description description;
+	unsigned long address;
+	DWORD *argb;
+
+	if (!header)
+		return NULL;
+	xgpu_texture_describe(header[3], header[4], &description);
+	if (description.format != D3DFMT_R5G6B5 || description.cube_map || description.depth > 1 || description.linear ||
+		!xgpu_texture_size_supported(&description))
+		return NULL;
+	address = (unsigned long)PLATFORM_PHYSICAL_TO_VIRTUAL(header[1]);
+	argb = malloc(description.width * description.height * sizeof(DWORD));
+	if (!argb || !xgpu_texture_decode_level(&description, 0, (const unsigned char *)address, NULL, argb))
+	{
+		free(argb);
+		return NULL;
+	}
+	*width = description.width;
+	*height = description.height;
+	return (unsigned long *)argb;
+}
+
 unsigned int xgpu_texture_replacement(DWORD resource, struct xgpu_texture_description *description)
 {
 	const DWORD *header = (const DWORD *)resource;
@@ -431,6 +460,14 @@ unsigned int xgpu_texture_replacement(DWORD resource, struct xgpu_texture_descri
 	long override;
 	struct replacement_entry *entry;
 
+	/* (display.prism_lightmaps' finer copy of the lightmap page the
+	lightmap pass draws: prism_lightmaps.c) */
+	if (halo_lightmap_pass_drawing() && description->format == D3DFMT_R5G6B5 &&
+		(image = prism_lightmaps_replacement(header[1], &levels)) != 0)
+	{
+		description->levels = levels;
+		return image;
+	}
 	/* (the high-res text's atlas, for its placeholder bitmap: text_hires.h) */
 	if ((image = text_hires_atlas_texture(header[1])) != 0)
 	{

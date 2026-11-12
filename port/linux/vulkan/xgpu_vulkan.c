@@ -526,8 +526,9 @@ static struct
 		VkPrimitiveTopology topology;
 		VkDescriptorSet sets[2];
 		uint32_t offsets[2];
-		/* (display.hdr's input set; display.ambient_occlusion "world"'s set) */
-		VkDescriptorSet input, occlusion;
+		/* (display.hdr's input set; display.ambient_occlusion "world"'s set;
+		display.prism_shadows "cascaded"'s) */
+		VkDescriptorSet input, occlusion, shadows;
 		VkBuffer vertices[XGPU_VULKAN_BINDINGS];
 		VkDeviceSize vertex_offsets[XGPU_VULKAN_BINDINGS];
 		VkBuffer indices;
@@ -632,6 +633,19 @@ static struct
 	VkDescriptorSetLayout occlusion_layout, empty_layout;
 	VkDescriptorSet occlusion_set;
 	uint64_t occlusion_serial, occlusion_world_number;
+	/* (the cascades' image it names: PRISM v2's shadows) */
+	struct xgpu_vulkan_image *occlusion_cascades;
+	/* display.prism_shadows "cascaded": its set's layout (the fifth,
+	XGPU_VULKAN_SET_SHADOWS; none where the device binds four sets), its
+	samplers (compared, linear; as it is, nearest), the atlases and block
+	the draws read (xgpu_vulkan_prism_shadows, numbered as they change), and
+	the set written for the submission of that number */
+	VkDescriptorSetLayout shadows_layout;
+	VkSampler shadows_compare, shadows_nearest;
+	struct xgpu_vulkan_image *shadows_moving, *shadows_structure;
+	unsigned char shadows_block[XGPU_VULKAN_SHADOWS_BLOCK_BYTES];
+	uint64_t shadows_number, shadows_set_number, shadows_serial;
+	VkDescriptorSet shadows_set;
 	/* the window's display (any thread, atomic: HDR on, its SDR white's
 	and its headroom's bits, and whether they changed since the render
 	thread looked); the front end's state; the HDR outputs the surface
@@ -3172,6 +3186,10 @@ int xgpu_vulkan_read_pixels(struct xgpu_vulkan_image *image, uint32_t layer, voi
 	uint32_t width = image->description.width, height = image->description.height, row;
 	/* (display.hdr's half floats: 8 bytes a pixel, made BGRA8's) */
 	int halves = image->description.format == XGPU_VULKAN_FORMAT_RGBA16F;
+	/* (each half float's byte from a table made once: a frame's eight
+	million channels made by half_byte one by one took some 40 ms, a
+	screenshot stream's every frame) */
+	static unsigned char *half_bytes;
 	VkDeviceSize size = (VkDeviceSize)width * height * (halves ? 8 : 4);
 	VkCommandBuffer commands;
 	VkBufferImageCopy copy;
@@ -3207,6 +3225,13 @@ int xgpu_vulkan_read_pixels(struct xgpu_vulkan_image *image, uint32_t layer, voi
 	barrier(commands, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_HOST_BIT,
 		VK_ACCESS_HOST_READ_BIT);
 	xgpu_vulkan_wait(xgpu_vulkan_fence());
+	if (halves && !tone_map && !half_bytes && (half_bytes = malloc(65536)) != NULL)
+	{
+		uint32_t half;
+
+		for (half = 0; half < 65536; half++)
+			half_bytes[half] = half_byte((uint16_t)half);
+	}
 	for (row = 0; row < height; row++)
 	{
 		unsigned char *to = (unsigned char *)pixels + (size_t)row * bytes_per_row;
@@ -3225,6 +3250,14 @@ int xgpu_vulkan_read_pixels(struct xgpu_vulkan_image *image, uint32_t layer, voi
 						half_value(from[pixel * 4 + 2]), half_value(from[pixel * 4 + 3]) };
 
 					xgpu_hdr_sdr_pixel(rgba, to + pixel * 4);
+					continue;
+				}
+				if (half_bytes)
+				{
+					to[pixel * 4] = half_bytes[from[pixel * 4 + 2]];
+					to[pixel * 4 + 1] = half_bytes[from[pixel * 4 + 1]];
+					to[pixel * 4 + 2] = half_bytes[from[pixel * 4]];
+					to[pixel * 4 + 3] = half_bytes[from[pixel * 4 + 3]];
 					continue;
 				}
 				to[pixel * 4] = half_byte(from[pixel * 4 + 2]);
@@ -4683,19 +4716,21 @@ occlusion binds it: the last one, where it is of the same field and
 submission, else one written now */
 static VkDescriptorSet occlusion_set(void)
 {
-	VkDescriptorImageInfo field_image, table_image, scenery_image, objects_image, pixels_image;
+	VkDescriptorImageInfo field_image, table_image, scenery_image, objects_image, pixels_image, cascades_image;
 	VkDescriptorBufferInfo block;
-	VkWriteDescriptorSet writes[6];
+	VkWriteDescriptorSet writes[7];
 	struct xgpu_vulkan_image *field = xgpu_vulkan_world_ao_field_image();
 	struct xgpu_vulkan_image *table = xgpu_vulkan_world_ao_table_image();
 	struct xgpu_vulkan_image *scenery = xgpu_vulkan_world_ao_scenery_image();
 	struct xgpu_vulkan_image *objects = xgpu_vulkan_world_ao_objects_image();
 	struct xgpu_vulkan_image *pixels = xgpu_vulkan_world_ao_pixels_image();
+	struct xgpu_vulkan_image *cascades = xgpu_vulkan_world_ao_cascades_image();
 	uint64_t serial = vk.serial;
 	int index;
 
 	if (!field || !field->sampled || !table || !table->sampled || !scenery || !scenery->sampled ||
-		!objects || !objects->sampled || !pixels || !pixels->sampled || !vk.occlusion_layout)
+		!objects || !objects->sampled || !pixels || !pixels->sampled || !cascades || !cascades->sampled ||
+		!vk.occlusion_layout)
 		return VK_NULL_HANDLE;
 	/* (display.ambient_occlusion "world"'s block in this submission's ring) */
 	if (!xgpu_vulkan_world_ao_block(serial, &block))
@@ -4705,7 +4740,9 @@ static VkDescriptorSet occlusion_set(void)
 	scenery->used = vk.serial;
 	objects->used = vk.serial;
 	pixels->used = vk.serial;
-	if (vk.occlusion_set && vk.occlusion_serial == vk.serial && vk.occlusion_world_number == xgpu_vulkan_world_ao_number())
+	cascades->used = vk.serial;
+	if (vk.occlusion_set && vk.occlusion_serial == vk.serial && vk.occlusion_world_number == xgpu_vulkan_world_ao_number() &&
+		vk.occlusion_cascades == cascades)
 		return vk.occlusion_set;
 	vk.occlusion_set = set_allocate(vk.occlusion_layout);
 	if (!vk.occlusion_set)
@@ -4724,8 +4761,11 @@ static VkDescriptorSet occlusion_set(void)
 	objects_image.imageView = objects->sampled;
 	pixels_image = field_image;
 	pixels_image.imageView = pixels->sampled;
+	cascades_image = field_image;
+	cascades_image.imageView = cascades->sampled;
+	vk.occlusion_cascades = cascades;
 	memset(writes, 0, sizeof(writes));
-	for (index = 0; index < 6; index++)
+	for (index = 0; index < 7; index++)
 	{
 		writes[index].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 		writes[index].dstSet = vk.occlusion_set;
@@ -4745,8 +4785,83 @@ static VkDescriptorSet occlusion_set(void)
 	writes[4].pImageInfo = &objects_image;
 	writes[5].dstBinding = XGPU_VULKAN_BINDING_WORLD_AO_PIXELS;
 	writes[5].pImageInfo = &pixels_image;
-	vkUpdateDescriptorSets(vk.device, 6, writes, 0, NULL);
+	writes[6].dstBinding = XGPU_VULKAN_BINDING_WORLD_CASCADES;
+	writes[6].pImageInfo = &cascades_image;
+	vkUpdateDescriptorSets(vk.device, 7, writes, 0, NULL);
 	return vk.occlusion_set;
+}
+
+/* display.prism_shadows "cascaded"'s set, as a draw that reads the sun's
+shadows binds it: the last one, where it is of the same atlases and block
+and submission, else one written now (the block in this submission's ring) */
+static VkDescriptorSet shadows_set(void)
+{
+	VkDescriptorImageInfo images[3];
+	VkDescriptorBufferInfo block;
+	VkWriteDescriptorSet writes[4];
+	struct xgpu_vulkan_range range;
+	void *bytes;
+	int index;
+
+	if (!vk.shadows_layout || !vk.shadows_moving || !vk.shadows_structure || !vk.shadows_moving->sampled ||
+		!vk.shadows_structure->sampled)
+		return VK_NULL_HANDLE;
+	vk.shadows_moving->used = vk.serial;
+	vk.shadows_structure->used = vk.serial;
+	if (vk.shadows_set && vk.shadows_serial == vk.serial && vk.shadows_set_number == vk.shadows_number)
+		return vk.shadows_set;
+	bytes = xgpu_vulkan_upload(XGPU_VULKAN_SHADOWS_BLOCK_BYTES, 256, &range);
+	if (!bytes)
+		return VK_NULL_HANDLE;
+	memcpy(bytes, vk.shadows_block, XGPU_VULKAN_SHADOWS_BLOCK_BYTES);
+	vk.shadows_set = set_allocate(vk.shadows_layout);
+	if (!vk.shadows_set)
+		return VK_NULL_HANDLE;
+	vk.shadows_serial = vk.serial;
+	vk.shadows_set_number = vk.shadows_number;
+	memset(images, 0, sizeof(images));
+	images[0].sampler = vk.shadows_compare;
+	images[0].imageView = vk.shadows_moving->sampled;
+	images[0].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+	images[1] = images[0];
+	images[1].sampler = vk.shadows_nearest;
+	images[2] = images[0];
+	images[2].imageView = vk.shadows_structure->sampled;
+	memset(&block, 0, sizeof(block));
+	block.buffer = range.buffer;
+	block.offset = range.offset;
+	block.range = XGPU_VULKAN_SHADOWS_BLOCK_BYTES;
+	memset(writes, 0, sizeof(writes));
+	for (index = 0; index < 4; index++)
+	{
+		writes[index].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		writes[index].dstSet = vk.shadows_set;
+		writes[index].dstBinding = (uint32_t)index;
+		writes[index].descriptorCount = 1;
+		writes[index].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		if (index < 3)
+			writes[index].pImageInfo = &images[index];
+	}
+	writes[3].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	writes[3].pBufferInfo = &block;
+	vkUpdateDescriptorSets(vk.device, 4, writes, 0, NULL);
+	return vk.shadows_set;
+}
+
+void xgpu_vulkan_prism_shadows(struct xgpu_vulkan_image *moving, struct xgpu_vulkan_image *structure,
+	const void *block, uint32_t size)
+{
+	vk.shadows_moving = moving;
+	vk.shadows_structure = structure;
+	memset(vk.shadows_block, 0, sizeof(vk.shadows_block));
+	if (block)
+		memcpy(vk.shadows_block, block, size < sizeof(vk.shadows_block) ? size : sizeof(vk.shadows_block));
+	vk.shadows_number++;
+}
+
+int xgpu_vulkan_prism_shadows_possible(void)
+{
+	return vk.shadows_layout != VK_NULL_HANDLE;
 }
 
 /* a set written before from the slot's pools with these textures, or NULL */
@@ -4958,6 +5073,13 @@ void xgpu_vulkan_draw(const struct xgpu_vulkan_draw *draw)
 			image_use(xgpu_vulkan_world_ao_table_image());
 			image_use(xgpu_vulkan_world_ao_scenery_image());
 			image_use(xgpu_vulkan_world_ao_objects_image());
+			image_use(xgpu_vulkan_world_ao_cascades_image());
+		}
+		/* (and display.prism_shadows "cascaded"'s atlases) */
+		if (draw->prism_shadows)
+		{
+			image_use(vk.shadows_moving);
+			image_use(vk.shadows_structure);
 		}
 	}
 	commands = vk.pass_commands;
@@ -5080,6 +5202,21 @@ void xgpu_vulkan_draw(const struct xgpu_vulkan_draw *draw)
 			vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout,
 				XGPU_VULKAN_SET_OCCLUSION, 1, &occlusion, 0, NULL);
 			vk.bound.occlusion = occlusion;
+		}
+	}
+	/* (display.prism_shadows "cascaded": the sun's shadows' atlases and
+	block) */
+	if (draw->prism_shadows)
+	{
+		VkDescriptorSet shadows = shadows_set();
+
+		if (!shadows)
+			return;
+		if (vk.bound.shadows != shadows)
+		{
+			vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout,
+				XGPU_VULKAN_SET_SHADOWS, 1, &shadows, 0, NULL);
+			vk.bound.shadows = shadows;
 		}
 	}
 	/* (the lights written after this are written after it: in order) */
@@ -7522,7 +7659,7 @@ static int layouts_make(void)
 	VkDescriptorSetLayoutBinding draw[5], textures[TEXTURE_SET_BINDINGS];
 	VkDescriptorSetLayoutCreateInfo info;
 	VkPipelineLayoutCreateInfo layout;
-	VkDescriptorSetLayout sets[4];
+	VkDescriptorSetLayout sets[5];
 	int index;
 
 	memset(draw, 0, sizeof(draw));
@@ -7624,12 +7761,56 @@ static int layouts_make(void)
 	textures[5].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 	textures[5].descriptorCount = 1;
 	textures[5].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-	info.bindingCount = 6;
+	textures[6].binding = XGPU_VULKAN_BINDING_WORLD_CASCADES;
+	textures[6].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	textures[6].descriptorCount = 1;
+	textures[6].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+	info.bindingCount = 7;
 	info.pBindings = textures;
 	if (!check(vkCreateDescriptorSetLayout(vk.device, &info, NULL, &vk.occlusion_layout), "vkCreateDescriptorSetLayout"))
 		return 0;
 	sets[XGPU_VULKAN_SET_OCCLUSION] = vk.occlusion_layout;
 	layout.setLayoutCount = 4;
+	/* (display.prism_shadows "cascaded"'s: XGPU_VULKAN_SET_SHADOWS, where the
+	device binds five sets; the atlases' samplers) */
+	if (vk.properties.limits.maxBoundDescriptorSets >= 5)
+	{
+		VkSamplerCreateInfo sampler;
+
+		memset(textures, 0, 4 * sizeof(textures[0]));
+		for (index = 0; index < 4; index++)
+		{
+			textures[index].binding = (uint32_t)index;
+			textures[index].descriptorType = index < 3 ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER :
+				VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+			textures[index].descriptorCount = 1;
+			textures[index].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+		}
+		info.bindingCount = 4;
+		info.pBindings = textures;
+		memset(&sampler, 0, sizeof(sampler));
+		sampler.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+		sampler.magFilter = sampler.minFilter = VK_FILTER_LINEAR;
+		sampler.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+		sampler.addressModeU = sampler.addressModeV = sampler.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+		sampler.compareEnable = VK_TRUE;
+		sampler.compareOp = VK_COMPARE_OP_GREATER_OR_EQUAL;
+		sampler.maxAnisotropy = 1.0f;
+		if (check(vkCreateDescriptorSetLayout(vk.device, &info, NULL, &vk.shadows_layout), "vkCreateDescriptorSetLayout") &&
+			check(vkCreateSampler(vk.device, &sampler, NULL, &vk.shadows_compare), "vkCreateSampler"))
+		{
+			sampler.magFilter = sampler.minFilter = VK_FILTER_NEAREST;
+			sampler.compareEnable = VK_FALSE;
+			sampler.compareOp = VK_COMPARE_OP_ALWAYS;
+			if (check(vkCreateSampler(vk.device, &sampler, NULL, &vk.shadows_nearest), "vkCreateSampler"))
+			{
+				sets[XGPU_VULKAN_SET_SHADOWS] = vk.shadows_layout;
+				layout.setLayoutCount = 5;
+			}
+		}
+		if (layout.setLayoutCount != 5)
+			vk.shadows_layout = VK_NULL_HANDLE;
+	}
 	return check(vkCreatePipelineLayout(vk.device, &layout, NULL, &vk.pipeline_layout), "vkCreatePipelineLayout");
 }
 

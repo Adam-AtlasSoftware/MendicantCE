@@ -242,6 +242,7 @@ symbols in this file:
  */
 #include <xtl.h>
 #include "rasterizer_xbox.h"
+#include "prism_world_geometry.h" /* port: port/linux/game/prism_world_geometry.c */
 
 /* ---------- constants */
 
@@ -1273,6 +1274,12 @@ void rasterizer_draw_dynamic_triangles_static_vertices(
 		RASTERIZER_XBOX_DRAW_PRIMITIVES_FILE,
 		823,
 		global_d3d_device);
+	/* port: PRISM's remodel of the structure's surfaces drawn from its own
+	triangles (display.prism_world_geometry) */
+	if (prism_world_geometry_draw(vertex_buffer, NULL))
+	{
+		return;
+	}
 	/* port: a part of a model of many nodes, its own nodes' matrices (rasterizer_xbox.c) */
 	rasterizer_model_part_skinning(vertex_buffer);
 
@@ -1411,6 +1418,12 @@ void rasterizer_draw_dynamic_triangles_static_vertices2(
 		RASTERIZER_XBOX_DRAW_PRIMITIVES_FILE,
 		890,
 		global_d3d_device);
+	/* port: PRISM's remodel of the structure's surfaces drawn from its own
+	triangles (display.prism_world_geometry) */
+	if (prism_world_geometry_draw(vertex_buffer0, vertex_buffer1))
+	{
+		return;
+	}
 	/* port: a part of a model of many nodes, its own nodes' matrices (rasterizer_xbox.c) */
 	rasterizer_model_part_skinning(vertex_buffer0);
 

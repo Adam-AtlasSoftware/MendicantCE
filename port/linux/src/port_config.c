@@ -211,7 +211,11 @@ static const struct config_setting config_settings[] =
 		"port's improvements together (anti-aliasing, sharper textures and\n"
 		"shadows, models' detail and lighting for each pixel, the enhanced\n"
 		"dynamic lights), the same on every machine (a renderer that lacks one\n"
-		"draws without it). Each of those settings, set here, wins over it." },
+		"draws without it); \"prism\" is \"enhanced\" with PRISM's faithful light on\n"
+		"top (display.prism_lightmaps \"smooth\", display.ambient_occlusion\n"
+		"\"world\", display.prism_surface_maps true, display.prism_specular\n"
+		"\"subtle\", display.prism_shadows \"soft\"; never what is beyond CE).\n"
+		"Each of those settings, set here, wins over it." },
 	{ "display.anti_aliasing", _config_string, GRAPHICS_ANTI_ALIASING, "HALO_ANTI_ALIASING", _environment_value,
 		_platform_all,
 		"Smoothing of jagged edges, which the Xbox did not have: \"off\"; \"fxaa\"\n"
@@ -414,14 +418,152 @@ static const struct config_setting config_settings[] =
 		"PRISM v2: light the model shaders whose base map has a surface map\n"
 		"in a mod (tags\\<bitmap>.surface.png, baked on this machine from your\n"
 		"maps and a remodel; or one the material overlay names) by its normal,\n"
-		"ambient occlusion and roughness at the base map's coordinates, and add\n"
-		"the level's own sun or main light as a highlight where the shader's\n"
-		"reflection shows. Needs neither the material overlay nor an overlay.json\n"
-		"entry. Vulkan only; read each frame (prism_set \"surface_maps true\")." },
-	{ "display.prism_specular", _config_real, "1.0", "HALO_PRISM_SPECULAR", _environment_value,
+		"ambient occlusion and roughness at the base map's coordinates. Its\n"
+		"occlusion dims the model's ambient and level light alone (its own\n"
+		"creases), as display.ambient_occlusion's does, and the two multiply.\n"
+		"Needs neither the material overlay nor an overlay.json entry. Vulkan\n"
+		"only; read each frame (prism_set \"surface_maps true\")." GRAPHICS_CHOOSES },
+	{ "display.prism_specular", _config_string, "\"off\"", "HALO_PRISM_SPECULAR", _environment_value,
 		_platform_desktop,
-		"PRISM v2: how strong the surface maps' highlight is, 0 to\n"
-		"2 (0 none)." },
+		"PRISM v2: highlights on the models (characters, weapons, vehicles)\n"
+		"from the level's own lights about them (its sun or main light, and the\n"
+		"two nearest lights), as rough or as polished as their surface map says,\n"
+		"only where the shader's own reflection shows (the multipurpose map's\n"
+		"specular mask, CE's Fresnel and tint), capped so that a model is never\n"
+		"much brighter on average. \"off\": none, as the game draws; \"subtle\":\n"
+		"the main light alone, soft; \"full\": every light, sharper. Vulkan only;\n"
+		"read each frame (prism_set \"specular full\")." GRAPHICS_CHOOSES },
+	{ "display.prism_reflections", _config_string, "\"stock\"", "HALO_PRISM_REFLECTIONS", _environment_value,
+		_platform_desktop,
+		"PRISM v2: what the models' reflections show. \"stock\": the shader's\n"
+		"own cube map, as the game draws; \"local\": the place the model is in,\n"
+		"from the level's probes, captured on this machine by the game's own\n"
+		"renderer (tools/prism_probes.py; <data>/prism/probes/<map>.probes),\n"
+		"blurred by the surface's roughness and tinted as CE tints its cube.\n"
+		"Stylised cube maps (shields, glows) keep their own. A map with no\n"
+		"probes draws as stock. Vulkan only; read each frame." },
+	{ "display.prism_shadows", _config_string, "\"stock\"", "HALO_PRISM_SHADOWS", _environment_value,
+		_platform_desktop,
+		"PRISM v2: shadows on the models from the level's main light about\n"
+		"them, traced through the distance-field scene's objects\n"
+		"(display.ambient_occlusion \"world\"'s: without it, stock): their own\n"
+		"limbs and other characters and vehicles. \"stock\": none, as the game\n"
+		"draws (its own shadow under each object stays in every choice);\n"
+		"\"soft\": near ones, with wide soft edges; \"traced\": out to 8 world\n"
+		"units, crisper. \"cascaded\": the sky's sun casts real shadows (shadow\n"
+		"maps about the camera, out to about 150 metres, their edges as soft as\n"
+		"the distance from what casts them): characters, vehicles, weapons and\n"
+		"scenery onto the level and onto each other, and the level onto them;\n"
+		"never where the level's baked light already has the sun's shadow (the\n"
+		"lightmap's own sun, texel by texel), lighter and softer from a dim sun\n"
+		"or a moon, the cascades blended into each other; the game's shadow\n"
+		"under each object gives way to them. Where no sky is seen, none.\n"
+		"Vulkan only; read each frame." GRAPHICS_CHOOSES },
+	{ "display.prism_shadow_resolution", _config_integer, "2048", "HALO_PRISM_SHADOW_RESOLUTION", _environment_value,
+		_platform_desktop,
+		"PRISM, with display.prism_shadows \"cascaded\": each shadow map's texels\n"
+		"along a side (three maps): 1024, 2048 or 4096. Higher is crisper and\n"
+		"costs more of the GPU's memory and time. Read each frame." },
+	{ "display.prism_shadow_softness", _config_real, "1.0", "HALO_PRISM_SHADOW_SOFTNESS", _environment_value,
+		_platform_desktop,
+		"PRISM, with display.prism_shadows \"cascaded\": how fast the sun's\n"
+		"shadows soften with the distance from what casts them (the sun's\n"
+		"apparent size), 0.25 to 4: 1 about a degree and a half, more is softer.\n"
+		"Read each frame." },
+	{ "display.prism_shadow_strength", _config_real, "1.0", "HALO_PRISM_SHADOW_STRENGTH", _environment_value,
+		_platform_desktop,
+		"PRISM, with display.prism_shadows \"cascaded\": how much of the sun's\n"
+		"light a shadow takes, 0 to 1 (1: all of the sun's share the level's\n"
+		"baked light gave the spot; never what the bake already shadowed).\n"
+		"Read each frame." },
+	{ "display.prism_lightmaps", _config_string, "\"stock\"", "HALO_PRISM_LIGHTMAPS", _environment_value,
+		_platform_desktop,
+		"PRISM: the level's own baked light, drawn smoother: \"stock\" as the Xbox\n"
+		"drew it; \"smooth\" reads each lightmap with a cubic filter and evens out\n"
+		"the steps of its 16-bit colour (its bands) where the light is even, and\n"
+		"draws it from a finer copy rebuilt on this machine from your map, chart\n"
+		"by chart (display.prism_lightmap_upsample). The light stays where it\n"
+		"was, in its colours; models still take theirs from the stock lightmap.\n"
+		"\"rebaked\" draws each page that has one from a page baked again on this\n"
+		"machine from the level's own light sources (its sky's lights, its\n"
+		"emitting surfaces, bounce light), four times finer, matched area by\n"
+		"area to the stock page's exposure and colour, its dominant direction\n"
+		"and colour per texel lighting each pixel's bump (the data folder's\n"
+		"prism_lightmaps/rebaked, made by art_pipeline's relight tools; never\n"
+		"shipped); the other pages as \"smooth\". Models still take their light\n"
+		"from the stock lightmap. Vulkan; read each frame (prism_set\n"
+		"\"lightmaps smooth\")." GRAPHICS_CHOOSES },
+	{ "display.prism_lightmap_upsample", _config_integer, "2", "HALO_PRISM_LIGHTMAP_UPSAMPLE", _environment_value,
+		_platform_desktop,
+		"PRISM, with display.prism_lightmaps \"smooth\": how much finer the\n"
+		"lightmaps' copies are, 2 or 4 times along each side, built the first time\n"
+		"a level is played with it (in the background, cached in the data\n"
+		"folder's prism_lightmaps); 0 none: the cubic filter alone." },
+	{ "display.prism_bloom", _config_string, "\"off\"", "HALO_PRISM_BLOOM", _environment_value,
+		_platform_desktop,
+		"PRISM, beyond CE (the Xbox had no bloom): a soft glow about the light\n"
+		"past white alone (plasma, the sun, lights, muzzle flashes, explosions,\n"
+		"self-illuminated panels): \"off\"; \"glow\" small and faint; \"full\"\n"
+		"wider and brighter. Never a haze over the scene, never on what is lit\n"
+		"no brighter than white. Draws the 3D view in half floats on any\n"
+		"display, as display.hdr does. Vulkan; read each frame." },
+	{ "display.prism_tone", _config_string, "\"off\"", "HALO_PRISM_TONE", _environment_value,
+		_platform_desktop,
+		"PRISM, beyond CE: the 3D view graded by the light about each pixel:\n"
+		"its local contrast raised (rock, armour and corridors read with more\n"
+		"depth), the darker light lifted and the colour a little richer, the\n"
+		"picture as bright as CE's or brighter with PRISM's light on. \"off\":\n"
+		"none, as the game draws; \"prism\": a lift; \"vivid\": more of each.\n"
+		"Draws the 3D view in half floats, as display.hdr does. Vulkan; read\n"
+		"each frame (prism_set \"tone prism\")." },
+	{ "display.prism_world_geometry", _config_string, "\"stock\"", "HALO_PRISM_WORLD_GEOMETRY", _environment_value,
+		_platform_desktop,
+		"PRISM v2: \"remodel\" draws the level's walls, rock and ground from a\n"
+		"denser remodel built on this machine from your maps (prism_world\\,\n"
+		"art_pipeline/world_geo: cliff strata, overhangs and chipped rock, sand\n"
+		"ripples, deep bevels and panel grooves on the metal, after the level's\n"
+		"own textures), lit by the level's own lightmaps with the light the new\n"
+		"shape takes; far surfaces drawn from a coarser level. Collision, paths\n"
+		"and visibility stay the map's. A level without a remodel is drawn\n"
+		"stock. \"stock\" draws the map's own. Read each frame\n"
+		"(prism_set \"world_geometry remodel\")." },
+	{ "display.prism_world_geometry_shadows", _config_string, "\"far\"", "HALO_PRISM_WORLD_GEOMETRY_SHADOWS",
+		_environment_value, _platform_desktop,
+		"PRISM v2, with display.prism_world_geometry \"remodel\" and\n"
+		"display.prism_shadows \"cascaded\": the level's shape the sun's shadow\n"
+		"maps are drawn from. \"far\": every surface's far level (the relief's\n"
+		"shadows at a fraction of the cost); \"remodel\": as the surfaces are\n"
+		"drawn, near and far; \"stock\": the map's own triangles (cheapest).\n"
+		"Read each frame (prism_set \"world_geometry_shadows stock\")." },
+	{ "display.prism_world_geometry_occlusion", _config_string, "\"stock\"", "HALO_PRISM_WORLD_GEOMETRY_OCCLUSION",
+		_environment_value, _platform_desktop,
+		"PRISM v2, with display.prism_world_geometry \"remodel\" and\n"
+		"display.ambient_occlusion \"world\": the level's shape the occlusion's\n"
+		"pre-pass is drawn from (where the objects darken the level, and what\n"
+		"hides them). \"stock\": the map's own triangles (cheapest; the\n"
+		"objects' contact shadows are as soft as the field); \"far\": every\n"
+		"surface's far level; \"remodel\": as the surfaces are drawn. Read each\n"
+		"frame (prism_set \"world_geometry_occlusion far\")." },
+	{ "display.prism_world_geometry_facing", _config_boolean, "true", "HALO_PRISM_WORLD_GEOMETRY_FACING",
+		_environment_value, _platform_desktop,
+		"PRISM v2, with display.prism_world_geometry \"remodel\": true skips a\n"
+		"remodelled surface every one of whose triangles faces away from the\n"
+		"camera (its triangles' cone of facings, found as the remodel loads),\n"
+		"as the game skips its own; false draws every surface the game chose\n"
+		"and leaves the facing to the GPU. The picture is the same. Read each\n"
+		"frame." },
+	{ "display.prism_world_geometry_batch", _config_boolean, "true", "HALO_PRISM_WORLD_GEOMETRY_BATCH",
+		_environment_value, _platform_desktop,
+		"PRISM v2, with display.prism_world_geometry \"remodel\": true draws a\n"
+		"material's runs of remodelled triangles as one draw (their indices\n"
+		"copied one after another each time); false draws each run from the\n"
+		"remodel's own triangles. The picture is the same. Read each frame." },
+	{ "display.prism_world_geometry_detail", _config_integer, "100", "HALO_PRISM_WORLD_GEOMETRY_DETAIL",
+		_environment_value, _platform_desktop,
+		"PRISM v2, with display.prism_world_geometry \"remodel\": the distance\n"
+		"out to which surfaces are drawn from the remodel's near level, as a\n"
+		"percentage of the remodel's own (25 to 400): lower draws more of the\n"
+		"level from the far level, and is cheaper. Read each frame." },
 	{ "display.prism_textures", _config_string, "\"stock\"", "HALO_PRISM_TEXTURES", _environment_value,
 		_platform_desktop,
 		"PRISM: the replacement textures mods ship (textures/<tier>/ in a mod:\n"
@@ -1496,6 +1638,11 @@ static const struct config_setting config_settings[] =
 		"lights and your weapon keep theirs: \"off\" or \"world\". The older\n"
 		"\"subtle\" and \"strong\" are read as \"world\"."
 		GRAPHICS_CHOOSES },
+	{ "display.ambient_occlusion_strength", _config_real, "0.8", "HALO_AMBIENT_OCCLUSION_STRENGTH",
+		_environment_value, _platform_all,
+		"How deep display.ambient_occlusion \"world\"'s shade is, 0 to 1.5: 1 the\n"
+		"full depth found, 0.8 lighter (the default: the levels' and the\n"
+		"foliage's light kept), 0 none. Read each frame." },
 	{ "display.shield_color", _config_string, "\"default\"", "HALO_SHIELD_COLOR", _environment_value, _platform_all,
 		"Your energy shield's color, as this machine draws it: \"default\" (the\n"
 		"shield's own) or a multiplayer armor color: white, black, red, blue,\n"
@@ -3031,6 +3178,11 @@ static const struct
 	place) */
 	{ "display.ambient_occlusion", "subtle", "world" },
 	{ "display.ambient_occlusion", "strong", "world" },
+	/* (PRISM v2's prototype: display.prism_specular was a strength, 0 to 2) */
+	{ "display.prism_specular", "0", "off" },
+	{ "display.prism_specular", "0.0", "off" },
+	{ "display.prism_specular", "1", "full" },
+	{ "display.prism_specular", "1.0", "full" },
 	{ NULL, NULL, NULL },
 };
 
@@ -3828,6 +3980,8 @@ static const struct
 	/* (battery saver's: only the drawing's, so that it never changes how a
 	game plays in the middle of it) */
 	int simulation;
+	/* "prism"'s, as the table above writes it (NULL: "enhanced"'s) */
+	const char *prism;
 } config_graphics[] =
 {
 	{ "display.anti_aliasing", "\"off\"" },
@@ -3837,7 +3991,11 @@ static const struct
 	/* ("native" in VR, whose eyes' many lines the Xbox's 480 stand for) */
 	{ "display.model_detail", "\"auto\"" },
 	{ "display.dynamic_lights", "\"classic\"" },
-	{ "display.ambient_occlusion", "\"off\"" },
+	{ "display.ambient_occlusion", "\"off\"", 0, "\"world\"" },
+	{ "display.prism_lightmaps", "\"stock\"", 0, "\"smooth\"" },
+	{ "display.prism_surface_maps", "false", 0, "true" },
+	{ "display.prism_specular", "\"off\"", 0, "\"subtle\"" },
+	{ "display.prism_shadows", "\"stock\"", 0, "\"soft\"" },
 	{ "display.prism_rt", "\"off\"" },
 	{ "game.enhanced_animations", "false", 1 },
 	{ "display.menu_fade", "true", 1 },
@@ -3858,14 +4016,17 @@ static long config_graphics_entry(long setting)
 	return -1;
 }
 
-/* the value the preset (display.graphics's value: "classic", else
-"enhanced") gives the setting, as the table above writes it */
+/* the value the preset (display.graphics's value: "classic", "prism",
+else "enhanced") gives the setting, as the table above writes it */
 static const char *config_graphics_text(const char *graphics, long setting)
 {
 	long entry = config_graphics_entry(setting);
 
-	return entry >= 0 && graphics && !strcmp(graphics, "classic") ? config_graphics[entry].classic :
-		config_settings[setting].default_value;
+	if (entry >= 0 && graphics && !strcmp(graphics, "classic"))
+		return config_graphics[entry].classic;
+	if (entry >= 0 && graphics && !strcmp(graphics, "prism") && config_graphics[entry].prism)
+		return config_graphics[entry].prism;
+	return config_settings[setting].default_value;
 }
 
 static int config_values_equal(const struct config_value *a, const struct config_value *b, enum config_type type)
@@ -4193,6 +4354,10 @@ static const struct
 	{ "display.prism_rt_rate", { "full", "half", NULL }, "full" },
 	{ "debug.prism_rt_view", { "off", "visibility", "ao", "gi", "reflections", "albedo", "normals", "probes",
 		"heat", NULL }, "off" },
+	{ "display.prism_lightmaps", { "stock", "smooth", "rebaked", NULL }, "stock" },
+	{ "display.prism_bloom", { "off", "glow", "full", NULL }, "off" },
+	{ "display.prism_tone", { "off", "prism", "vivid", NULL }, "off" },
+	{ "display.prism_shadows", { "stock", "soft", "traced", "cascaded", NULL }, "stock" },
 	{ "display.astc_textures", { "auto", "always", "off", NULL }, NULL },
 	{ "display.picture_position", { "center", "top", "bottom", NULL }, NULL },
 	{ "display.orientation", { "landscape", "portrait", "auto", NULL }, NULL },
@@ -4657,7 +4822,7 @@ static void config_load(void)
 	{
 		const char *graphics = config_values[config_setting_index("display.graphics")].string;
 
-		if (strcmp(graphics, "classic") && strcmp(graphics, "enhanced"))
+		if (strcmp(graphics, "classic") && strcmp(graphics, "enhanced") && strcmp(graphics, "prism"))
 			platform_log("settings: display.graphics \"%s\" is unknown, so enhanced", graphics);
 		config_graphics_apply();
 	}

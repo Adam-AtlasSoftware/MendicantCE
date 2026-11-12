@@ -84,6 +84,10 @@ static const struct field pixel_fields[] = {
 	PIXEL_FIELD("ao", ambient_occlusion, 1, 1, 0),
 	/* (display.prism_material_overlay's: a mod's, never the game's own) */
 	{ "mo", offsetof(struct xgpu_stream_pixel_key, material_overlay), 1, 1, 0, 1 },
+	/* (PRISM's light, XGPU_STREAM_PRISM: display.prism_lightmaps' filter,
+	derived; PRISM v2's model light, the settings', with a mod's overlay
+	alone; never the game's own) */
+	{ "pp", offsetof(struct xgpu_stream_pixel_key, prism), 1, 1, 0, 1 },
 	/* (display.prism_materials': a mod's too) */
 	{ "mp", offsetof(struct xgpu_stream_pixel_key, material_pbr), 1, 1, 0, 1 },
 };
@@ -148,9 +152,35 @@ static uint64_t draw_vertex_program(const struct xgpu_manifest_draw *draw)
 }
 #endif
 
+/* (the key's bytes before material_pbr's word, then that word where it is
+not 0: a key without display.prism_materials hashes as it did before the
+word was added, so the names in manifests and prepared records stand) */
 static uint64_t pixel_hash(const struct xgpu_stream_pixel_key *pixel)
 {
-	return xgpu_manifest_hash(pixel, sizeof(*pixel), XGPU_MANIFEST_HASH_START);
+	size_t head = offsetof(struct xgpu_stream_pixel_key, material_pbr);
+	uint64_t hash = xgpu_manifest_hash(pixel, head, XGPU_MANIFEST_HASH_START);
+	static const uint8_t zero[sizeof(*pixel)];
+
+	if (memcmp((const uint8_t *)pixel + head, zero, sizeof(*pixel) - head))
+		hash = xgpu_manifest_hash((const uint8_t *)pixel + head, sizeof(*pixel) - head, hash);
+	return hash;
+}
+
+/* a draw's hash: its bytes, its pixel key's material_pbr word left out
+where it is 0 (pixel_hash's rule: the stock draws hash as they did before
+the word, so the shipped records' enumerations stand) */
+uint64_t xgpu_manifest_draw_hash(const struct xgpu_manifest_draw *draw, uint64_t hash)
+{
+	size_t word = offsetof(struct xgpu_manifest_draw, key) + offsetof(struct xgpu_stream_pipeline_key, pixel) +
+		offsetof(struct xgpu_stream_pixel_key, material_pbr);
+	size_t width = sizeof(draw->key.pixel) - offsetof(struct xgpu_stream_pixel_key, material_pbr);
+	static const uint8_t zero[sizeof(draw->key.pixel)];
+	const uint8_t *bytes = (const uint8_t *)draw;
+
+	hash = xgpu_manifest_hash(bytes, word, hash);
+	if (memcmp(bytes + word, zero, width))
+		hash = xgpu_manifest_hash(bytes + word, width, hash);
+	return xgpu_manifest_hash(bytes + word + width, sizeof(*draw) - word - width, hash);
 }
 
 #ifndef XGPU_MANIFEST_READER_ONLY
@@ -768,17 +798,31 @@ int xgpu_draw_derive(const struct xgpu_draw_facts *facts, int unlit, struct xgpu
 		derived->alpha_test_samples = (uint8_t)facts->samples;
 	derived->hdr = facts->hdr_target ? facts->hdr : 0;
 	derived->lighting = XGPU_LIGHTING_NONE;
+	/* (display.prism_lightmaps: a structure's lightmap pass, lit or not,
+	its lightmap smoothed: the emitters read stage 2 so where it is the
+	lightmap, xgpu.h) */
+	if (facts->lightmap_filter && facts->environment && !facts->immediate && (facts->packed_attributes & 0xe) == 0xe)
+		derived->lightmap_filter = (uint8_t)facts->lightmap_filter;
 	/* (display.prism_material_overlay: lit for each pixel, by the
 	position its lighting hands on) */
 	if (!unlit && facts->lights && !facts->lighting_failed && facts->material_overlay &&
 		(facts->lights == 2 || facts->world_found))
+	{
 		derived->material_overlay = (uint8_t)facts->material_overlay;
+		derived->prism_lighting = (uint8_t)facts->prism_lighting;
+	}
+	/* (display.prism_shadows "cascaded": a model whose lighting has its
+	world position lit for each pixel, its first distant light by the sun's
+	shadows) */
+	if (!unlit && facts->lights && !facts->lighting_failed && facts->prism_sun && !facts->blend &&
+		(facts->lights == 2 || facts->world_found) && !derived->material_overlay)
+		derived->prism_lighting = XGPU_PRISM_SHADOWS_CASCADED;
 	/* (display.prism_materials: alike) */
 	if (!unlit && facts->lights && !facts->lighting_failed && facts->material_pbr &&
 		(facts->lights == 2 || facts->world_found))
 		derived->material_pbr = (uint8_t)facts->material_pbr;
-	if (!unlit && facts->lights && !facts->lighting_failed &&
-		(facts->per_pixel || derived->material_overlay || derived->material_pbr))
+	if (!unlit && facts->lights && !facts->lighting_failed && (facts->per_pixel || derived->material_overlay ||
+		derived->prism_lighting || derived->material_pbr))
 	{
 		/* a model lighting program's draw lit for each pixel: the enhanced
 		dynamic lights in its two point lights' place, its ambient light by
@@ -815,17 +859,24 @@ int xgpu_draw_derive(const struct xgpu_draw_facts *facts, int unlit, struct xgpu
 			derived->hdr |= XGPU_HDR_LIGHTS;
 		if (facts->world && !facts->blend)
 			derived->ambient_occlusion = (uint8_t)(facts->world | XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP);
+		/* (display.prism_shadows "cascaded": its light by the sun's shadows) */
+		if (facts->prism_sun && !facts->blend)
+			derived->prism_lighting = XGPU_PRISM_SHADOWS_CASCADED;
 		derived->lighting = XGPU_LIGHTING_ENVIRONMENT;
 		return 1;
 	}
-	if (!unlit && facts->world && facts->environment && !facts->immediate && !facts->lighting_failed &&
-		!facts->blend && (facts->packed_attributes & 0xe) == 0xe)
+	if (!unlit && (facts->world || facts->prism_sun) && facts->environment && !facts->immediate &&
+		!facts->lighting_failed && !facts->blend && (facts->packed_attributes & 0xe) == 0xe)
 	{
 		/* the world's occlusion over a structure's lightmap pass without the
 		enhanced dynamic lights: lit as its program lights it, its vertex
 		shader handing on the world position and normal alone for its light
-		by the proxies' occlusion */
-		derived->ambient_occlusion = (uint8_t)(facts->world | XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP);
+		by the proxies' occlusion (or by the sun's shadows: display.prism_shadows
+		"cascaded") */
+		if (facts->world)
+			derived->ambient_occlusion = (uint8_t)(facts->world | XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP);
+		if (facts->prism_sun)
+			derived->prism_lighting = XGPU_PRISM_SHADOWS_CASCADED;
 		derived->lighting = XGPU_LIGHTING_ENVIRONMENT;
 		return 1;
 	}
@@ -901,6 +952,9 @@ int xgpu_manifest_derive(const struct xgpu_manifest_draw *draw, const struct xgp
 	facts.sample_mask = 1;
 	/* (a mod's material overlay, where a recording has one) */
 	facts.material_overlay = key->pixel.material_overlay;
+	/* (display.prism_lightmaps': as a recording has it) */
+	facts.lightmap_filter = XGPU_STREAM_PRISM_LIGHTMAP_FILTER(key->pixel.prism);
+	facts.prism_lighting = XGPU_STREAM_PRISM_LIGHTING(key->pixel.prism);
 	facts.material_pbr = key->pixel.material_pbr;
 	lit = xgpu_draw_derive(&facts, unlit, &parts);
 	/* (its bytes, padding too: a draw's hash is of them) */
@@ -914,6 +968,7 @@ int xgpu_manifest_derive(const struct xgpu_manifest_draw *draw, const struct xgp
 	derived->key.pixel.dynamic_lights = parts.dynamic_lights;
 	derived->key.pixel.ambient_occlusion = parts.ambient_occlusion;
 	derived->key.pixel.material_overlay = parts.material_overlay;
+	derived->key.pixel.prism = XGPU_STREAM_PRISM(parts.prism_lighting, parts.lightmap_filter);
 	derived->key.pixel.material_pbr = parts.material_pbr;
 	return lit;
 }
@@ -1281,7 +1336,7 @@ void xgpu_manifest_record_draw(int immediate, unsigned long written)
 		memcpy(draw.strides, recorder.strides, sizeof(draw.strides));
 	}
 	memcpy(draw.stages, recorder.stages, sizeof(draw.stages));
-	hash = xgpu_manifest_hash(&draw, sizeof(draw), XGPU_MANIFEST_HASH_START);
+	hash = xgpu_manifest_draw_hash(&draw, XGPU_MANIFEST_HASH_START);
 	if (recorder.enumerating)
 		enumeration_add(&draw, hash);
 	if (recorder.state <= 0)
@@ -1296,7 +1351,7 @@ void xgpu_manifest_record_draw(int immediate, unsigned long written)
 	{
 		draw.key = recorder.basis;
 		recorded = xgpu_manifest_hash(&recorder.context, sizeof(recorder.context),
-			xgpu_manifest_hash(&draw, sizeof(draw), XGPU_MANIFEST_HASH_START));
+			xgpu_manifest_draw_hash(&draw, XGPU_MANIFEST_HASH_START));
 	}
 	else
 	{

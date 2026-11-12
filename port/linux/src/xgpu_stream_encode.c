@@ -654,6 +654,9 @@ void xgpu_backend_initialize(void)
 	xgpu_backend_capabilities.dynamic_lights = stream.capabilities.dynamic_lights;
 	xgpu_backend_capabilities.hdr = stream.capabilities.hdr;
 	xgpu_backend_capabilities.material_overlay = stream.capabilities.material_overlay;
+	xgpu_backend_capabilities.lightmap_filter = stream.capabilities.lightmap_filter;
+	xgpu_backend_capabilities.bloom = stream.capabilities.bloom;
+	xgpu_backend_capabilities.prism_shadows = stream.capabilities.prism_shadows;
 	xgpu_backend_capabilities.texture_store = stream.capabilities.texture_store;
 	xgpu_backend_capabilities.mesh_store = stream.capabilities.mesh_store;
 	xgpu_backend_capabilities.materials = stream.capabilities.materials && stream.capabilities.texture_store;
@@ -772,7 +775,7 @@ void xgpu_backend_picture_top(int top)
 		record_value(XGPU_STREAM_PICTURE_POSITION, top < 0 ? 0 : (uint32_t)top + 1);
 }
 
-void xgpu_backend_tone_map(xgpu_target target, const long corners[4])
+void xgpu_backend_tone_map(xgpu_target target, const long corners[4], int bloom)
 {
 	struct xgpu_stream_tone_map *record_body;
 	int index;
@@ -783,6 +786,7 @@ void xgpu_backend_tone_map(xgpu_target target, const long corners[4])
 	record_body->target = target;
 	for (index = 0; index < 4; index++)
 		record_body->corners[index] = (int32_t)corners[index];
+	record_body->bloom = bloom > 0 ? (uint32_t)bloom : 0;
 }
 
 static void stream_finite(float *values, unsigned long count, const char *what, unsigned long first);
@@ -851,6 +855,28 @@ void xgpu_backend_world_ao_prepass(int phase, xgpu_target target, const struct x
 	else
 	{
 		memset(&record_body->pass, 0, sizeof(record_body->pass));
+	}
+}
+
+void xgpu_backend_prism_shadows(int phase, int resolution, int cascades, const struct xgpu_prism_shadows_block *block)
+{
+	struct xgpu_stream_prism_shadows *record_body;
+
+	if (!stream.open)
+		return;
+	record_body = record(XGPU_STREAM_PRISM_SHADOWS, sizeof(*record_body));
+	record_body->phase = (uint32_t)phase;
+	record_body->resolution = (uint32_t)resolution;
+	record_body->cascades = (uint32_t)cascades;
+	if (block)
+	{
+		record_body->block = *block;
+		stream_finite(&record_body->block.cascades[0][0][0], sizeof(*block) / sizeof(float), "the sun's shadows' block",
+			0);
+	}
+	else
+	{
+		memset(&record_body->block, 0, sizeof(record_body->block));
 	}
 }
 
@@ -1565,8 +1591,10 @@ void xgpu_backend_material_overlay(const struct xgpu_material_overlay *overlay)
 		stage->sampler.minify = XGPU_FILTER_LINEAR;
 		stage->sampler.mip = mask ? XGPU_FILTER_NONE : XGPU_FILTER_LINEAR;
 		stage->sampler.magnify = XGPU_FILTER_LINEAR;
+		/* (PRISM v2's probes' atlas: its cells' coordinates kept inside
+		them, clamped at the atlas's edges) */
 		for (axis = 0; axis < 3; axis++)
-			stage->sampler.address[axis] = XGPU_ADDRESS_WRAP;
+			stage->sampler.address[axis] = index == XGPU_OVERLAY_PROBE_IMAGE ? XGPU_ADDRESS_CLAMP : XGPU_ADDRESS_WRAP;
 #else
 		(void)stage;
 #endif

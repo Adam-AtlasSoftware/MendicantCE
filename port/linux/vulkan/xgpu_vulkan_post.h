@@ -53,6 +53,14 @@ drawing into it and its depth (bound after as they are, so that the pass
 goes on): a draw reading each pixel where it is drawn (the core's local
 reads), its colour alone written; hdr the mode and the peak. */
 int xgpu_vulkan_post_prepare_hdr(uint8_t depth_format, uint32_t samples, int preparing);
+/* display.prism_bloom (xgpu_backend.h's XGPU_BLOOM_*): the light past white
+of the target's rectangle (an RGBA16F target of one sample, the 3D view's
+before its tone map) glows, added into it; 0 if none was drawn */
+int xgpu_vulkan_post_bloom(struct xgpu_vulkan_image *target, const int32_t corners[4], int mode);
+/* display.prism_tone (xgpu_backend.h's XGPU_PRISM_TONE_*): the target's
+rectangle (as the bloom's) graded in place by its local mean: local
+contrast, lift, saturation and exposure; 0 if none was drawn */
+int xgpu_vulkan_post_prism_tone(struct xgpu_vulkan_image *target, const int32_t corners[4], int mode);
 void xgpu_vulkan_post_tone_map(struct xgpu_vulkan_image *target, struct xgpu_vulkan_image *depth,
 	const int32_t corners[4], const float hdr[4]);
 /* The encoding of a frame for an HDR swapchain (the core's options'

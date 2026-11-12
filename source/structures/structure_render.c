@@ -102,6 +102,7 @@ symbols in this file:
 #include "structures/structure_visibility.h"
 #include "tag_files/tag_groups.h"
 #include "render_enumerate.h" /* port: port/linux/game/render_enumerate.c */
+#include "prism_world_geometry.h" /* port: port/linux/game/prism_world_geometry.c */
 
 /* ---------- constants */
 
@@ -600,7 +601,14 @@ static void structure_render_pass(
 							dynamic_triangles_index,
 							first_triangle_index,
 							chunk_count,
-							&material->vertices);
+							/* port: or PRISM's remodel of these surfaces
+							(display.prism_world_geometry) */
+							prism_world_geometry_chunk(
+								lightmap_index,
+								material_index,
+								chunk_start,
+								chunk_count,
+								&material->vertices));
 					}
 				}
 				else if (draw_transparent_triangles)
@@ -649,6 +657,10 @@ void structure_render_preprocess(
 	void)
 {
 	struct structure_bsp *structure_bsp = global_structure_bsp_get();
+
+	/* port: PRISM's remodel of the BSP taken up, when it is on
+	(display.prism_world_geometry) */
+	prism_world_geometry_frame();
 
 	profile_enter(render_structure_build_triangle_arrays_section);
 

@@ -2178,7 +2178,7 @@ static void gyro_rows_show(struct widget_instance *list)
 		discord_text_set(value, halo_gyro_calibrating() ? "HOLD STILL" : gyro_calibrated ? "DONE" : "");
 }
 
-/* Advanced Graphics' Ray Tracing and its quality (display.prism_rt,
+/* Mods' PRISM Ray Tracing page's rows (display.prism_rt and its settings,
 docs/prism_rt.md): greyed out where the renderer cannot trace rays (the
 graphics card has no ray queries, Metal, the null renderer) */
 int halo_prism_rt_available(void);
@@ -2188,6 +2188,8 @@ static void prism_rt_rows_show(struct widget_instance *list)
 	static char const *const rows[][2] =
 	{
 		{ "op_prism_rt", "prism_rt_spinner" }, { "op_prism_rt_quality", "prism_rt_quality_spinner" },
+		{ "op_prism_rt_resolution", "prism_rt_resolution_spinner" },
+		{ "op_prism_rt_denoiser", "prism_rt_denoiser_spinner" }, { "op_prism_rt_mood", "prism_rt_mood_spinner" },
 	};
 	boolean locked = !halo_prism_rt_available();
 	short index;

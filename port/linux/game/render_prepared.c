@@ -317,8 +317,7 @@ static uint64_t *prepared_draws(unsigned long *count)
 	if (!hashes)
 		return NULL;
 	for (index = 0; index < enumeration->draw_count; index++)
-		hashes[index] = xgpu_manifest_hash(&enumeration->draws[index], sizeof(enumeration->draws[index]),
-			XGPU_MANIFEST_HASH_START);
+		hashes[index] = xgpu_manifest_draw_hash(&enumeration->draws[index], XGPU_MANIFEST_HASH_START);
 	qsort(hashes, enumeration->draw_count, sizeof(*hashes), prepared_compare);
 	*count = enumeration->draw_count;
 	return hashes;
@@ -469,7 +468,7 @@ static void prepared_log_new(uint64_t const *recorded, unsigned long recorded_co
 	for (index = 0; index < enumeration->draw_count && logged < 8; index++)
 	{
 		struct xgpu_manifest_draw const *draw = &enumeration->draws[index];
-		uint64_t hash = xgpu_manifest_hash(draw, sizeof(*draw), XGPU_MANIFEST_HASH_START);
+		uint64_t hash = xgpu_manifest_draw_hash(draw, XGPU_MANIFEST_HASH_START);
 
 		if (!render_prepared_draws_missing(&hash, 1, recorded, recorded_count))
 			continue;

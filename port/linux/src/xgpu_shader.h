@@ -333,6 +333,10 @@ struct xgpu_pixel_program
 	unsigned short hdr;
 	/* display.prism_material_overlay (nv2a_pixel_shader_key's: xgpu.h) */
 	unsigned char material_overlay;
+	/* display.prism_lightmaps (nv2a_pixel_shader_key's: xgpu.h) */
+	unsigned char lightmap_filter;
+	/* PRISM v2's model light (nv2a_pixel_shader_key's: xgpu.h) */
+	unsigned char prism_lighting;
 	/* display.prism_materials (nv2a_pixel_shader_key's: xgpu.h's "PBR
 	materials") */
 	unsigned char material_pbr;

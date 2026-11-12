@@ -160,6 +160,15 @@ extern short global_screenshot_count;
 
 /* port: display.ambient_occlusion "world"'s pre-pass is being drawn (render_window) */
 boolean render_world_ao_prepass = FALSE;
+/* port: display.prism_shadows "cascaded"'s pass is being drawn (render_window) */
+boolean render_prism_shadow_pass = FALSE;
+/* port: port/linux/game/prism_shadows.c */
+boolean prism_shadows_wanted(void);
+boolean prism_shadows_pass_begin(struct render_camera const *camera, struct render_frustum const *frustum);
+void prism_shadows_pass_structure(void);
+void prism_shadows_pass_end(void);
+void prism_shadows_window_end(void);
+int prism_shadows_receiving(void);
 boolean render_contrails_enabled = TRUE;
 boolean render_particles_enabled = TRUE;
 boolean render_particle_systems_enabled = TRUE;
@@ -471,6 +480,25 @@ static void render_window(
 		render_world_ao_prepass), the occlusion found from them at each
 		pixel, and the surfaces then drawn reading theirs (not in the VR
 		mode's eye or scope passes, nor a mirror's view) */
+		/* port: display.prism_shadows "cascaded": the window's casters drawn
+		from the sky's sun into its shadow maps first, the objects' opaque
+		parts and then the structure's (port/linux/game/prism_shadows.c), which
+		the surfaces below read (not in the VR mode's eye or scope passes, nor
+		a mirror's view) */
+		if (rasterizer_target == _render_target_primary && !rasterizer_camera->mirrored &&
+#ifdef HALO_VR
+			!render_vr_eye_pass && !render_vr_scope_pass &&
+#endif
+			prism_shadows_wanted() && prism_shadows_pass_begin(&parameters.camera, &parameters.frustum))
+		{
+			render_prism_shadow_pass = TRUE;
+			render_objects();
+			prism_shadows_pass_structure();
+			structure_render_preprocess();
+			structure_render_lightmaps();
+			render_prism_shadow_pass = FALSE;
+			prism_shadows_pass_end();
+		}
 		world_ao_prepassed = FALSE;
 		if (rasterizer_target == _render_target_primary && !rasterizer_camera->mirrored &&
 #ifdef HALO_VR
@@ -543,8 +571,9 @@ static void render_window(
 #endif
 		rasterizer_lens_flares_submit_occlusion_tests();
 		/* port: (not the game's shadow under each object where the sun's
-		shadows are traced: display.prism_rt, port/linux/game/prism_rt.c) */
-		if (!prism_rt_sun_shadows())
+		shadows are traced or drawn: display.prism_rt, port/linux/game/prism_rt.c;
+		display.prism_shadows "cascaded") */
+		if (!prism_shadows_receiving() && !prism_rt_sun_shadows())
 		render_object_shadows();
 		/* port: and every model's (port/linux/game/render_enumerate.c) */
 		render_enumerate_shadows();
@@ -632,6 +661,9 @@ static void render_window(
 		port/linux/src/d3d8_device.c) */
 		halo_dynamic_lights_halos_draw();
 		structure_render_fog_screen();
+		/* port: the window's surfaces drawn: none read its sun's shadows
+		from here on (port/linux/game/prism_shadows.c) */
+		prism_shadows_window_end();
 #ifdef HALO_VR
 		if (render_vr_scope_pass)
 		{

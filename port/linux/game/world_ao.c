@@ -29,11 +29,33 @@ the Classic preset's "off") draws exactly as before.
 
 const char *config_string(const char *name);
 int config_boolean(const char *name);
+double config_real(const char *name);
+unsigned long config_changes(void);
+
+/* display.ambient_occlusion_strength, read as the settings change: the
+objects' and the level's strengths by it (0 to 1.5) */
+static float world_ao_strength(void)
+{
+	static unsigned long read_at;
+	static float strength = 1.0f;
+	double value;
+
+	if (read_at != config_changes() + 1)
+	{
+		read_at = config_changes() + 1;
+		value = config_real("display.ambient_occlusion_strength");
+		strength = value < 0.0 ? 0.0f : value > 1.5 ? 1.5f : (float)value;
+	}
+	return strength;
+}
 unsigned long halo_gpu_settings_taken(void);
 /* prism_rt.c's (display.prism_rt: its G-buffer is the pre-pass's) */
 void prism_rt_frame_begin(void);
 void prism_rt_map_unloaded(void);
 unsigned long long SDL_GetTicksNS(void);
+/* (PRISM v2's model light: prism_light.c) */
+void prism_light_window_begin(float const camera[3]);
+void prism_light_object_begin(long object_index);
 /* (render_enumerate.c's: the window drawn is a map's first frame's, unseen,
 which prepares its pipelines) */
 extern unsigned char render_enumerating;
@@ -70,6 +92,11 @@ d3d8_device.c's halo_gpu_settings_taken, not as they are written: the map
 is prepared again under the change at the same frame, render_enumerate.c's
 enumerated_derivation_check, so that no frame draws the world's pipelines
 before they are made) */
+/* (prism_lightmaps.c) */
+void prism_lightmaps_begin(void const *lightmap_bitmap);
+void prism_lightmaps_bsp_switched(void);
+void prism_lightmaps_map_unloaded(void);
+
 int world_ao_mode(void)
 {
 	unsigned long changes = halo_gpu_settings_taken();
@@ -99,6 +126,7 @@ void world_ao_map_loaded(void)
 
 void world_ao_bsp_switched(short bsp_index)
 {
+	prism_lightmaps_bsp_switched();
 	if (!world_ao_mode())
 		return;
 	world_scene_bsp_switched(bsp_index);
@@ -110,6 +138,7 @@ static void world_ao_scene_release(void);
 void world_ao_map_unloaded(void)
 {
 	prism_rt_map_unloaded();
+	prism_lightmaps_map_unloaded();
 	world_ao_scene_release();
 	world_sdf_map_unloaded();
 	world_proxies_map_unloaded();
@@ -542,6 +571,9 @@ void world_ao_window_begin(short local_player_index, short rasterizer_target, fl
 	/* (its span, whatever the setting: halo_world_ao_span) */
 	world_ao.span = WORLD_AO_SPAN_OPEN;
 	halo_world_ao_span(WORLD_AO_SPAN_OPEN);
+	/* (PRISM v2's probes are chosen by the camera where no object is
+	drawn: prism_light.c) */
+	prism_light_window_begin(camera_position);
 	/* (none while a map's pipelines are prepared, nothing being seen then:
 	the front end gives its draws the keys they have in play from their span
 	alone, and makes the pre-pass's twins of them, d3d8_device.c's
@@ -584,8 +616,10 @@ void world_ao_window_begin(short local_player_index, short rasterizer_target, fl
 		world_ao.dynamic_count = world_ao.count;
 	world_ao_field_place(world_ao.volume ? &world_ao.volume->header : NULL, field);
 	memset(parameters, 0, sizeof(parameters));
-	parameters[0][0] = WORLD_AO_STRENGTH_OBJECTS;
-	parameters[0][1] = WORLD_AO_STRENGTH_LEVEL;
+	parameters[0][0] = WORLD_AO_STRENGTH_OBJECTS * world_ao_strength();
+	parameters[0][1] = WORLD_AO_STRENGTH_LEVEL * world_ao_strength();
+	if (parameters[0][0] > 1.0f)
+		parameters[0][0] = 1.0f;
 	parameters[0][2] = world_ao.fade;
 	parameters[0][3] = (float)world_ao.count;
 	parameters[1][0] = WORLD_AO_REFERENCE_WEIGHT;
@@ -647,6 +681,9 @@ void world_ao_object_begin(long object_index)
 	float reference = 1.0f;
 	long index;
 
+	/* (PRISM v2's probes nearest the object drawn, whatever the setting:
+	prism_light.c) */
+	prism_light_object_begin(object_index);
 	if (!world_ao.window)
 		return;
 	if (object_index != -1)
@@ -678,6 +715,8 @@ void world_ao_lightmap_begin(void const *lightmap_bitmap)
 {
 	int layer;
 
+	/* (display.prism_lightmaps' finer copies: prism_lightmaps.c) */
+	prism_lightmaps_begin(lightmap_bitmap);
 	/* (the structure's: none of the objects' shapes its own; its page's
 	layer where the lightmap draws take their reference, or none) */
 	if (!world_ao.window)
@@ -690,8 +729,25 @@ void world_ao_lightmap_begin(void const *lightmap_bitmap)
 	halo_world_ao_object(WORLD_AO_OWNER_NONE, (float)layer);
 }
 
+/* the distance-field scene's cascades as the window has them (PRISM v2's
+shadows, prism_light.c: xgpu.h's "PRISM v2's model light"); 0 outside a
+window of the world's light, or none ready */
+int world_ao_window_cascades(float cascades[WORLD_CASCADES][4])
+{
+	int cascade, ready = 0;
+
+	if (!world_ao.window)
+		return 0;
+	memcpy(cascades, world_ao.cascades, sizeof(world_ao.cascades));
+	for (cascade = 0; cascade < WORLD_CASCADES; cascade++)
+		ready |= world_ao.cascades[cascade][3] > 0.0f;
+	return ready;
+}
+
 void world_ao_first_person(int drawing)
 {
+	/* (PRISM v2's probes about the camera for the first-person weapon) */
+	prism_light_object_begin(-1);
 	/* (the window's own span again after it) */
 	halo_world_ao_span(!drawing ? world_ao.span : world_ao.span == WORLD_AO_SPAN_FOUND ?
 		WORLD_AO_SPAN_FOUND_FIRST_PERSON : WORLD_AO_SPAN_FIRST_PERSON);

@@ -374,6 +374,15 @@
 	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/interface_settings/streamer_mode/header_streamer_mode">
 		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/interface_settings/streamer_mode/header_streamer_mode.png" width="512" height="64"/>
 	</bitmap>
+	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/header_prism_settings">
+		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/header_prism_settings.png" width="512" height="64"/>
+	</bitmap>
+	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/header_prism_assets_settings">
+		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/header_prism_assets_settings.png" width="512" height="64"/>
+	</bitmap>
+	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/header_prism_rt_settings">
+		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/header_prism_rt_settings.png" width="512" height="64"/>
+	</bitmap>
 	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/network_setup/discord_account/header_discord_account">
 		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/network_setup/discord_account/header_discord_account.png" width="512" height="64"/>
 	</bitmap>
