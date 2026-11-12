@@ -2049,8 +2049,8 @@ void mod_materials_prism_set(
 	if (!space || space == text || (size_t)(space - text) >= sizeof(name) - 16)
 	{
 		console_warning("prism_set \"<setting> <value>\": material_overlay, overlay_strength, overlay_view, surface_maps, "
-			"specular, reflections, shadows, lightmaps, lightmap_upsample, bloom, world_geometry, tone, materials, "
-			"rt, rt_quality, rt_resolution, rt_denoiser, rt_mood, rt_view, or a whole display.<name>");
+			"specular, reflections, shadows, lightmaps, lightmap_upsample, baked_shadows, bloom, world_geometry, tone, "
+			"materials, rt, rt_quality, rt_resolution, rt_denoiser, rt_mood, rt_view, or a whole display.<name>");
 		return;
 	}
 	/* (display.prism_rt's debug view: debug.prism_rt_view; a whole name,

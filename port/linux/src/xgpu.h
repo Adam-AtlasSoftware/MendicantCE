@@ -250,6 +250,46 @@ vertices'. Only the lightmap pass of a page that has its rebaked copy
 drawn is keyed so (d3d8_device.c asks prism_lightmaps.c, draw by draw);
 any other is XGPU_LIGHTMAP_FILTER_SMOOTH. */
 #define XGPU_LIGHTMAP_FILTER_REBAKED 2
+/* (the filter of the two above, without XGPU_LIGHTMAP_FILTER_SUN) */
+#define XGPU_LIGHTMAP_FILTER_OF(filter) ((filter) & 3)
+/* display.prism_baked_shadows: with XGPU_LIGHTMAP_FILTER_SMOOTH,
+XGPU_LIGHTMAP_FILTER_REBAKED or neither (the page read with one bilinear
+sample, as the Xbox read it), the page's image holds below its light (the
+"content": as those filters read it, or the stock page's texels) the sun's
+visibility baked finely on this machine (prism_lightmaps.c's .psm,
+art_pipeline's sunmask tools), and the light is sharpened by it:
+
+  rows 0 to H_c - 1      the content, W_c wide (the rest of the row its last
+                         texel again), then down to row y0 its last row
+                         again (the filters' and the levels' reach);
+  from row y0            the entries, one texel each, row by row across
+                         the image: tile (tx, ty) of the page (4 by 4 of
+                         its texels) at index ty * tiles_x + tx: RG the tile
+                         stored's number + 1 (16 bits; 0 none), B the
+                         visibility of a tile not stored;
+  from row ya            the tiles stored, TS by TS texels each (4 times
+                         the factor), per_row of them across, row by row:
+                         R the light's factor against the stock page, G
+                         against the rebaked page, each as log2(f) * 127 / 3
+                         + 128 (prism_lightmaps.c has already scaled them
+                         by display.prism_baked_shadow_strength), B the
+                         sun's visibility;
+  the last row           texels 0 to 3, two 16-bit numbers each (R the low
+                         byte, G the high; B and A the second): W_c and H_c,
+                         y0 and ya, tiles_x and tiles_y, TS and per_row.
+
+y0, ya, TS, the image's width and its height are multiples of 64 or
+powers of 2 to 64, so that the host's levels never mix two tiles below
+level log2(TS). The draw reads the content at its coordinates times (W_c /
+width, H_c / height), and the stored tile's texel about it at the level of
+its footprint (at most log2(TS) - 1, clamped half a texel of that level
+inside the tile), and multiplies the light by f (1 in a tile not stored);
+PRISM's sun shadows (display.prism_shadows "cascaded") take the bake's sun
+visibility by the tile's too, so no caster darkens the structure's own
+shadow. Only the lightmap pass of a page whose image has it is keyed so
+(prism_lightmaps_sun_drawing, draw by draw). */
+#define XGPU_LIGHTMAP_FILTER_SUN 4
+#define XGPU_LIGHTMAP_SUN_LOG_RANGE 3.0f
 #define XGPU_LIGHTMAP_DEBAND_REACH 1.5f
 #define XGPU_LIGHTMAP_DEBAND_LIMIT 2.0f
 

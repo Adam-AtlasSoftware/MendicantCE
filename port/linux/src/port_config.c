@@ -506,6 +506,25 @@ static const struct config_setting config_settings[] =
 		"lightmaps' copies are, 2 or 4 times along each side, built the first time\n"
 		"a level is played with it (in the background, cached in the data\n"
 		"folder's prism_lightmaps); 0 none: the cubic filter alone." },
+	{ "display.prism_baked_shadows", _config_string, "\"off\"", "HALO_PRISM_BAKED_SHADOWS", _environment_value,
+		_platform_desktop,
+		"PRISM, beyond CE: the sun's shadows in the level's baked light made\n"
+		"sharp, as the ray tracing's are: \"off\", as the lightmaps draw them;\n"
+		"\"sharp\": each page that has one sharpened by the sun's visibility\n"
+		"baked on this machine from your map (8 or 16 times finer than the\n"
+		"page, from the remodel's shape where display.prism_world_geometry has\n"
+		"one, the sun's disc as wide as the ray tracing's: the data folder's\n"
+		"prism_lightmaps/sun, made by art_pipeline's sunmask tools; never\n"
+		"shipped). Only the light near a shadow's edge moves, from one side to\n"
+		"the other: each area keeps its brightness and colour. Over any\n"
+		"display.prism_lightmaps, and under display.prism_shadows \"cascaded\"\n"
+		"and display.prism_rt (the casters never darken the level's own shadow\n"
+		"again). Vulkan; read each frame (prism_set \"baked_shadows sharp\")." },
+	{ "display.prism_baked_shadow_strength", _config_real, "1.0", "HALO_PRISM_BAKED_SHADOW_STRENGTH",
+		_environment_value, _platform_desktop,
+		"PRISM, with display.prism_baked_shadows \"sharp\": how far the baked\n"
+		"light moves toward the sharp shadows, 0 to 2 (0 the lightmaps' own\n"
+		"edges, 1 the bake's, more deepens them). Read each frame." },
 	{ "display.prism_bloom", _config_string, "\"off\"", "HALO_PRISM_BLOOM", _environment_value,
 		_platform_desktop,
 		"PRISM, beyond CE (the Xbox had no bloom): a soft glow about the light\n"
@@ -4420,6 +4439,7 @@ static const struct
 	{ "debug.prism_rt_view", { "off", "visibility", "ao", "gi", "reflections", "albedo", "normals", "probes",
 		"heat", NULL }, "off" },
 	{ "display.prism_lightmaps", { "stock", "smooth", "rebaked", NULL }, "stock" },
+	{ "display.prism_baked_shadows", { "off", "sharp", NULL }, "off" },
 	{ "display.prism_bloom", { "off", "glow", "full", NULL }, "off" },
 	{ "display.prism_tone", { "off", "prism", "vivid", NULL }, "off" },
 	{ "display.prism_shadows", { "stock", "soft", "traced", "cascaded", NULL }, "stock" },

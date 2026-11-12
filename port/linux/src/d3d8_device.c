@@ -2246,11 +2246,20 @@ static void prism_lighting_read(void)
 
 /* (port/linux/game/prism_lightmaps.c) */
 int prism_lightmaps_rebaked_drawing(void);
+int prism_lightmaps_sun_drawing(void);
 
 int prism_lightmaps_filter(void)
 {
 	prism_lighting_read();
 	return prism_lighting.filter;
+}
+
+/* (display.prism_baked_shadows: whether the backend reads a lightmap page's
+image laid out by prism_lightmaps.c at all, whatever display.prism_lightmaps
+is) */
+int prism_lightmaps_capable(void)
+{
+	return xgpu_backend_capabilities.lightmap_filter != 0;
 }
 
 int prism_bloom_mode(void)
@@ -4489,6 +4498,10 @@ static BOOL prepare_draw(BOOL immediate, unsigned long primitive)
 	facts.lightmap_filter = prism_lightmaps_filter();
 	if (facts.lightmap_filter && halo_lightmap_pass_drawing() && prism_lightmaps_rebaked_drawing())
 		facts.lightmap_filter = XGPU_LIGHTMAP_FILTER_REBAKED;
+	/* (display.prism_baked_shadows: the page's image has its sun mask
+	below its light, xgpu.h's XGPU_LIGHTMAP_FILTER_SUN) */
+	if (prism_lightmaps_sun_drawing() && halo_lightmap_pass_drawing())
+		facts.lightmap_filter |= XGPU_LIGHTMAP_FILTER_SUN;
 	facts.prism_lighting = material_overlay.armed ? material_overlay.prism_lighting : 0;
 	/* (display.prism_shadows "cascaded": the lightmap pass by the sun's
 	shadows, where the window drew their pass) */

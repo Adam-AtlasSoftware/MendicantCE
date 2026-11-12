@@ -18,6 +18,8 @@ Hardware ray tracing for the Vulkan renderer, off by default. It follows the des
   - the sun's shadows take `0.65` of a sunlit lightmap's light (`0.55` of a model's) where an object blocks the sun
     and the structure does not (the structure's own shadows are in the lightmap: never darkened again), weighted by
     `smoothstep(0, 0.25, N·sun)` (a face turned away has no sun to lose): world2's cascaded-shadow combine;
+    the structure's own shadows are as sharp as the lightmap holds them, unless `display.prism_baked_shadows` is
+    `"sharp"` (`docs/prism_baked_shadows.md`: the sun's visibility baked finely, the same disc as the traced sun's);
   - the occlusion follows world AO's rules: the level is darkened only by objects (2 wu, 0.7 strength), objects by
     objects (their own creases among them, 1 wu) and by the structure close by (0.5 wu), at 0.6 strength;
   - `gi`: an object's light is shaded by the probes' indirect light along its normal against their mean over the

@@ -1989,6 +1989,9 @@ struct pixel_state
 	/* display.prism_lightmaps "rebaked": the page's direction half's
 	sample (texture stage 2's; 0 none) */
 	unsigned int rebaked_direction;
+	/* display.prism_baked_shadows (xgpu.h's XGPU_LIGHTMAP_FILTER_SUN): the
+	bake's sun visibility at the pixel (texture stage 2's; 0 none) */
+	unsigned int lightmap_sun_visibility;
 	/* (PRISM's sun shadows read: XGPU_PRISM_SHADOWS_CASCADED) */
 	BOOL prism_sun;
 	/* the overlay's frame (surface_frame), for display.prism_materials'
@@ -2157,7 +2160,7 @@ static unsigned int sample(struct module *m, struct pixel_state *state, int stag
 lightmap, smoothed (xgpu.h's "The lightmaps smoothed") */
 static BOOL lightmap_smoothed(const struct xgpu_pixel_program *program, const struct xgpu_spirv_options *options)
 {
-	return program->lightmap_filter == XGPU_LIGHTMAP_FILTER_SMOOTH &&
+	return XGPU_LIGHTMAP_FILTER_OF(program->lightmap_filter) == XGPU_LIGHTMAP_FILTER_SMOOTH &&
 		program->stages[2].mode == XGPU_TEXTURE_PROJECT2D && program->stages[2].sampler == _xgpu_sampler_2d &&
 		!(options->border[2] & 3);
 }
@@ -2166,9 +2169,19 @@ static BOOL lightmap_smoothed(const struct xgpu_pixel_program *program, const st
 as a rebaked page's two halves (xgpu.h's XGPU_LIGHTMAP_FILTER_REBAKED) */
 static BOOL lightmap_rebaked(const struct xgpu_pixel_program *program, const struct xgpu_spirv_options *options)
 {
-	return program->lightmap_filter == XGPU_LIGHTMAP_FILTER_REBAKED &&
+	return XGPU_LIGHTMAP_FILTER_OF(program->lightmap_filter) == XGPU_LIGHTMAP_FILTER_REBAKED &&
 		program->stages[2].mode == XGPU_TEXTURE_PROJECT2D && program->stages[2].sampler == _xgpu_sampler_2d &&
 		program->stages[3].mode == XGPU_TEXTURE_CUBEMAP && !(options->border[2] & 3);
+}
+
+/* display.prism_baked_shadows: whether the draw's stage 2 holds the bake's
+sun visibility below its light (xgpu.h's XGPU_LIGHTMAP_FILTER_SUN) */
+static BOOL lightmap_sun(const struct xgpu_pixel_program *program, const struct xgpu_spirv_options *options)
+{
+	return (program->lightmap_filter & XGPU_LIGHTMAP_FILTER_SUN) &&
+		program->stages[2].mode == XGPU_TEXTURE_PROJECT2D && program->stages[2].sampler == _xgpu_sampler_2d &&
+		!(options->border[2] & 3) && (XGPU_LIGHTMAP_FILTER_OF(program->lightmap_filter) != XGPU_LIGHTMAP_FILTER_REBAKED ||
+		program->stages[3].mode == XGPU_TEXTURE_CUBEMAP);
 }
 
 /* the lightmap's bilinear sample at uv (a vec2: the stage's scale applied) */
@@ -2291,6 +2304,142 @@ static unsigned int lightmap_rebaked_read(struct module *m, struct pixel_state *
 	return vec4_of(m, saturate(m, 3, c), extract(m, light, 3));
 }
 
+/* stage 2's texel at whole coordinates x, y (floats) */
+static unsigned int lightmap_sun_fetch(struct module *m, unsigned int image, unsigned int x, unsigned int y)
+{
+	unsigned int operands[4];
+
+	operands[0] = image;
+	operands[1] = op1(m, OP_CONVERT_F_TO_S, m->t_iv2, construct(m, 2, (unsigned int[]){ x, y }));
+	operands[2] = IMAGE_OPERANDS_LOD;
+	operands[3] = constant_int(m, 0);
+	return op(m, OP_IMAGE_FETCH, m->t_v4, 4, operands);
+}
+
+/* a texel's two 16-bit numbers (R the first's low byte, G its high; B and A
+the second's), as floats */
+static void lightmap_sun_numbers(struct module *m, unsigned int texel, unsigned int *first, unsigned int *second)
+{
+	unsigned int bytes = ext1(m, GLSL_FLOOR, m->t_v4, fadd(m, 4, fscale(m, 4, texel, constant_float(m, 255.0f)),
+		constant_splat(m, 4, 0.5f)));
+
+	*first = fadd(m, 1, extract(m, bytes, 0), fmul(m, 1, extract(m, bytes, 1), constant_float(m, 256.0f)));
+	*second = fadd(m, 1, extract(m, bytes, 2), fmul(m, 1, extract(m, bytes, 3), constant_float(m, 256.0f)));
+}
+
+/* display.prism_baked_shadows (xgpu.h's XGPU_LIGHTMAP_FILTER_SUN): the
+layout from the image's last row, the bake's light factor and sun
+visibility at the coordinates (factor returned, the visibility in
+state->lightmap_sun_visibility), and the coordinates the content is read at
+(*content: a vec4, x and y by W_c / width and H_c / height) */
+static unsigned int lightmap_sun_read(struct module *m, struct pixel_state *state, unsigned int coordinates,
+	unsigned int *content, unsigned int *scale)
+{
+	unsigned int uv = fmul(m, 2, xy(m, coordinates), xy(m, uniform(m, U_TEXTURE_SCALE, 2)));
+	unsigned int sampled = texture_load(m, state, 2);
+	unsigned int image = op(m, OP_IMAGE, type_sampled_image(m, DIM_2D, FALSE, FALSE, FALSE), 1,
+		(unsigned int[]){ sampled });
+	unsigned int size = op1(m, OP_CONVERT_S_TO_F, m->t_v2, image_size(m, image, m->t_iv2));
+	unsigned int width = extract(m, size, 0), last = fsub(m, 1, extract(m, size, 1), constant_float(m, 1.0f));
+	unsigned int one = constant_float(m, 1.0f), zero = constant_float(m, 0.0f), half = constant_float(m, 0.5f);
+	unsigned int content_width, content_height, y0, ya, tiles_x, tiles_y, tile_size, per_row;
+	unsigned int tiles, p, cell, index, row, entry, entry_bytes, number, footprint, lod, reach, local, stored;
+	unsigned int k, k_row, at, operands[4], texel, code, factor, rebaked;
+	static const unsigned int moved[4] = { 4, 5, 2, 3 };
+
+	lightmap_sun_numbers(m, lightmap_sun_fetch(m, image, zero, last), &content_width, &content_height);
+	lightmap_sun_numbers(m, lightmap_sun_fetch(m, image, one, last), &y0, &ya);
+	lightmap_sun_numbers(m, lightmap_sun_fetch(m, image, constant_float(m, 2.0f), last), &tiles_x, &tiles_y);
+	lightmap_sun_numbers(m, lightmap_sun_fetch(m, image, constant_float(m, 3.0f), last), &tile_size, &per_row);
+	*scale = fdiv(m, 2, construct(m, 2, (unsigned int[]){ content_width, content_height }), size);
+	*content = shuffle(m, 4, coordinates, fmul(m, 2, xy(m, coordinates), *scale), moved);
+	/* the page's tile at the point, and its entry */
+	tiles = construct(m, 2, (unsigned int[]){ tiles_x, tiles_y });
+	p = fmul(m, 2, uv, tiles);
+	cell = ext3(m, GLSL_F_CLAMP, m->t_v2, ext1(m, GLSL_FLOOR, m->t_v2, p), constant_splat(m, 2, 0.0f),
+		fsub(m, 2, tiles, constant_splat(m, 2, 1.0f)));
+	index = fadd(m, 1, fmul(m, 1, extract(m, cell, 1), tiles_x), extract(m, cell, 0));
+	row = ext1(m, GLSL_FLOOR, m->t_float, fdiv(m, 1, fadd(m, 1, index, half), width));
+	entry = lightmap_sun_fetch(m, image, fsub(m, 1, index, fmul(m, 1, row, width)), fadd(m, 1, y0, row));
+	entry_bytes = ext1(m, GLSL_FLOOR, m->t_v4, fadd(m, 4, fscale(m, 4, entry, constant_float(m, 255.0f)),
+		constant_splat(m, 4, 0.5f)));
+	number = fadd(m, 1, extract(m, entry_bytes, 0), fmul(m, 1, extract(m, entry_bytes, 1), constant_float(m, 256.0f)));
+	/* the stored tile's texel about the point, at the level of the pixel's
+	footprint in its texels (at most log2(TS) - 1), half a texel of it
+	inside the tile */
+	footprint = op1(m, OP_FWIDTH, m->t_v2, fscale(m, 2, p, tile_size));
+	lod = ext3(m, GLSL_F_CLAMP, m->t_float, ext1(m, GLSL_LOG2, m->t_float, fmax_scalar(m, 1,
+		ext2(m, GLSL_F_MAX, m->t_float, extract(m, footprint, 0), extract(m, footprint, 1)), 1.0e-6f)), zero,
+		fsub(m, 1, ext1(m, GLSL_LOG2, m->t_float, tile_size), one));
+	reach = fmul(m, 1, half, ext1(m, GLSL_EXP2, m->t_float, lod));
+	local = ext3(m, GLSL_F_CLAMP, m->t_v2, fscale(m, 2, fsub(m, 2, p, cell), tile_size), splat(m, 2, reach),
+		splat(m, 2, fsub(m, 1, tile_size, reach)));
+	k = fmax_scalar(m, 1, fsub(m, 1, number, one), 0.0f);
+	k_row = ext1(m, GLSL_FLOOR, m->t_float, fdiv(m, 1, fadd(m, 1, k, half), per_row));
+	at = construct(m, 2, (unsigned int[]){
+		fadd(m, 1, fmul(m, 1, fsub(m, 1, k, fmul(m, 1, k_row, per_row)), tile_size), extract(m, local, 0)),
+		fadd(m, 1, fadd(m, 1, ya, fmul(m, 1, k_row, tile_size)), extract(m, local, 1)) });
+	operands[0] = sampled;
+	operands[1] = fdiv(m, 2, at, size);
+	operands[2] = IMAGE_OPERANDS_LOD;
+	operands[3] = lod;
+	texel = op(m, OP_IMAGE_SAMPLE_EXPLICIT_LOD, m->t_v4, 4, operands);
+	stored = compare(m, OP_F_ORD_GREATER_THAN, number, half);
+	/* (R against the stock page and its smooth copies, G against the
+	rebaked page) */
+	rebaked = XGPU_LIGHTMAP_FILTER_OF(state->program->lightmap_filter) == XGPU_LIGHTMAP_FILTER_REBAKED ? 1 : 0;
+	code = op3(m, OP_SELECT, m->t_float, stored, extract(m, texel, rebaked), constant_float(m, 128.0f / 255.0f));
+	factor = ext1(m, GLSL_EXP2, m->t_float, fmul(m, 1, fsub(m, 1, fmul(m, 1, code, constant_float(m, 255.0f)),
+		constant_float(m, 128.0f)), constant_float(m, XGPU_LIGHTMAP_SUN_LOG_RANGE / 127.0f)));
+	state->lightmap_sun_visibility = op3(m, OP_SELECT, m->t_float, stored, extract(m, texel, 2), extract(m, entry, 2));
+	return factor;
+}
+
+/* a rebaked page's two halves read as lightmap_rebaked_read reads them,
+inside the content (xgpu.h's XGPU_LIGHTMAP_FILTER_SUN: its coordinates
+already by its share of the image, scale) */
+static unsigned int lightmap_rebaked_read_inside(struct module *m, struct pixel_state *state, unsigned int coordinates,
+	unsigned int scale)
+{
+	unsigned int uv = fmul(m, 2, xy(m, coordinates), xy(m, uniform(m, U_TEXTURE_SCALE, 2)));
+	unsigned int image = op(m, OP_IMAGE, type_sampled_image(m, DIM_2D, FALSE, FALSE, FALSE), 1,
+		(unsigned int[]){ texture_load(m, state, 2) });
+	unsigned int size = op1(m, OP_CONVERT_S_TO_F, m->t_v2, image_size(m, image, m->t_iv2));
+	unsigned int half_texel = fdiv(m, 2, constant_splat(m, 2, 0.5f), size);
+	unsigned int half_x = fmul(m, 1, extract(m, scale, 0), constant_float(m, 0.5f));
+	unsigned int u = fmul(m, 1, extract(m, uv, 0), constant_float(m, 0.5f));
+	unsigned int u_light = ext3(m, GLSL_F_CLAMP, m->t_float, u, extract(m, half_texel, 0),
+		fsub(m, 1, half_x, extract(m, half_texel, 0)));
+	unsigned int u_direction = fadd(m, 1, u_light, half_x);
+	unsigned int v = ext3(m, GLSL_F_CLAMP, m->t_float, extract(m, uv, 1), extract(m, half_texel, 1),
+		fsub(m, 1, extract(m, scale, 1), extract(m, half_texel, 1)));
+	unsigned int light = lightmap_tap(m, state, construct(m, 2, (unsigned int[]){ u_light, v }));
+	unsigned int frag, noise, c;
+
+	state->rebaked_direction = lightmap_tap(m, state, construct(m, 2, (unsigned int[]){ u_direction, v }));
+	frag = xy(m, load(m, m->t_v4, state->frag_coord));
+	noise = ext1(m, GLSL_FRACT, m->t_float, fmul(m, 1, constant_float(m, 52.9829189f), ext1(m, GLSL_FRACT, m->t_float,
+		fdot(m, frag, construct(m, 2, (unsigned int[]){ constant_float(m, 0.06711056f),
+		constant_float(m, 0.00583715f) })))));
+	c = fadd(m, 3, xyz(m, light), splat(m, 3, fdiv(m, 1, fsub(m, 1, noise, constant_float(m, 0.5f)),
+		constant_float(m, 255.0f))));
+	return vec4_of(m, saturate(m, 3, c), extract(m, light, 3));
+}
+
+/* the stock page's texels (the content) with one bilinear sample, as the
+Xbox read the page, kept half a texel inside them */
+static unsigned int lightmap_plain_inside(struct module *m, struct pixel_state *state, unsigned int coordinates,
+	unsigned int scale)
+{
+	unsigned int uv = fmul(m, 2, xy(m, coordinates), xy(m, uniform(m, U_TEXTURE_SCALE, 2)));
+	unsigned int image = op(m, OP_IMAGE, type_sampled_image(m, DIM_2D, FALSE, FALSE, FALSE), 1,
+		(unsigned int[]){ texture_load(m, state, 2) });
+	unsigned int size = op1(m, OP_CONVERT_S_TO_F, m->t_v2, image_size(m, image, m->t_iv2));
+	unsigned int half_texel = fdiv(m, 2, constant_splat(m, 2, 0.5f), size);
+
+	return lightmap_tap(m, state, ext3(m, GLSL_F_CLAMP, m->t_v2, uv, half_texel, fsub(m, 2, scale, half_texel)));
+}
+
 /* a vec4 of the parts (floats) */
 static unsigned int vec4_parts(struct module *m, unsigned int x, unsigned int y, unsigned int z, unsigned int w)
 {
@@ -2324,8 +2473,22 @@ static void texture_stage(struct module *m, struct pixel_state *state, int stage
 
 			coordinates = shuffle(m, 4, coordinates, fadd(m, 2, xy(m, coordinates), state->t0_offset), moved);
 		}
+		/* (display.prism_baked_shadows: the content read as the filter
+		reads it, its light by the bake's factor) */
+		if (stage == 2 && lightmap_sun(program, state->options))
+		{
+			unsigned int content, scale, factor = lightmap_sun_read(m, state, coordinates, &content, &scale), lit;
+
+			if (lightmap_smoothed(program, state->options))
+				lit = lightmap_smooth(m, state, content);
+			else if (lightmap_rebaked(program, state->options))
+				lit = lightmap_rebaked_read_inside(m, state, content, scale);
+			else
+				lit = lightmap_plain_inside(m, state, content, scale);
+			state->t[stage] = vec4_of(m, saturate(m, 3, fscale(m, 3, xyz(m, lit), factor)), extract(m, lit, 3));
+		}
 		/* (display.prism_lightmaps: the lightmap pass's lightmap smoothed) */
-		if (stage == 2 && lightmap_smoothed(program, state->options))
+		else if (stage == 2 && lightmap_smoothed(program, state->options))
 			state->t[stage] = lightmap_smooth(m, state, coordinates);
 		/* (display.prism_lightmaps "rebaked": its light and direction) */
 		else if (stage == 2 && lightmap_rebaked(program, state->options))
@@ -6499,6 +6662,10 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 		sun_baked = prism_sun_baked(&m, world_d, extract(&m, state.v0, 3));
 		sun_incident = world_d;
 	}
+	/* (display.prism_baked_shadows: the bake's sun visibility, finely, on
+	top: the structure's own shadow never darkened again) */
+	if (sun_lightmap && state.lightmap_sun_visibility)
+		sun_baked = sun_baked ? fmul(&m, 1, sun_baked, state.lightmap_sun_visibility) : state.lightmap_sun_visibility;
 	if (effect && replaces_depth && state.replaced_depth)
 		effect_fade_value = effect_zsprite_fade(&m, &state, &zsprite_hidden);
 	/* (the bump map's texel, which the combiners may overwrite: the enhanced

@@ -20,6 +20,9 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/op_prism_rt_world" x="28" y="205" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/op_prism_rt_objects" x="28" y="226" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/op_prism_rt_cache" x="28" y="247" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/section_9" x="28" y="274" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/op_prism_baked_shadows" x="28" y="294" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/op_prism_baked_shadow_strength" x="28" y="315" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/button_bar" y="414"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/button_bar" type="column_list" width="640" height="28" flags="pass_unhandled_to_focused_child left_right_tabs_items">
@@ -119,6 +122,29 @@
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/prism_rt_cache_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="ON|OFF" setting="display.prism_rt_cache" values="true|false" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
 		<on event="created" run="port setting load"/>
 	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/section_9" width="344" height="18" bitmap="main_menu/settings/section" platform="desktop" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/section_9_title"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/section_9_title" type="text" controller="1" width="344" height="18" wide="0 120" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/labels" string_index="9" color="#FF6F9CD0" text_x="2" text_y="1" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/op_prism_baked_shadows" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/prism_baked_shadows_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/prism_baked_shadows_spinner" x="188"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/prism_baked_shadows_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/labels" string_index="10" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/prism_baked_shadows_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="OFF|SHARP" setting="display.prism_baked_shadows" values="off|sharp" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+		<on event="created" run="port setting load"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/op_prism_baked_shadow_strength" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/prism_baked_shadow_strength_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/prism_baked_shadow_strength_spinner" x="188"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/prism_baked_shadow_strength_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/labels" string_index="11" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/prism_baked_shadow_strength_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="LIGHT|NATURAL|DEEP" setting="display.prism_baked_shadow_strength" values="0.5|1|1.5" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+		<on event="created" run="port setting load"/>
+	</widget>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/labels">
 		<string text="RAY TRACING"/>
 		<string text="RAY TRACING"/>
@@ -129,6 +155,9 @@
 		<string text="TRACED LEVEL"/>
 		<string text="TRACED MODELS"/>
 		<string text="KEEP SHAPES"/>
+		<string text="BAKED SHADOWS"/>
+		<string text="BAKED SHADOWS"/>
+		<string text="BAKED SHADOW DEPTH"/>
 	</strings>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/help_strings">
 		<string text=""/>
@@ -141,5 +170,8 @@
 		<string text="The level's shape the rays meet. Auto: the remodel's far level where it is drawn. Remodel: all of it, more memory. Game's: the map's own."/>
 		<string text="As Drawn: the replacement models' shapes where they are drawn. Game's: the game's own models, cheaper."/>
 		<string text="Keeps each object's traced shape from frame to frame, refitting only what moved: much less work. Off redoes them all each frame."/>
+		<string text=""/>
+		<string text="Sharp: the sun's shadows in the levels' own baked light drawn as crisp as ray tracing's, from a sun map baked on this computer from your maps. Each place keeps its brightness. Off draws the lightmaps' own soft edges."/>
+		<string text="How far Sharp baked shadows go: Light keeps some of the lightmaps' softness, Deep darkens the shaded side more."/>
 	</strings>
 </menus>

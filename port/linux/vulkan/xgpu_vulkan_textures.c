@@ -964,7 +964,18 @@ static struct xgpu_vulkan_image *image_get(const struct xgpu_stream_texture_stag
 		cache.statistics.bytes += levels_bytes(width, height, given_levels, bc5);
 		return entry->image;
 	}
-	xgpu_vulkan_image_upload(entry->image, 0, 0, 0, 0, 0, width, height, 1, pixels, width * texel, 0);
+	{
+		/* (in bands of at most 8 MB: an upload takes at most a quarter of the
+		ring, and a lightmap page laid out with its sun mask below it,
+		display.prism_baked_shadows, can be twice that) */
+		uint32_t band = (8u << 20) / (width * texel), row;
+
+		if (!band)
+			band = 1;
+		for (row = 0; row < height; row += band)
+			xgpu_vulkan_image_upload(entry->image, 0, 0, 0, row, 0, width, height - row < band ? height - row : band, 1,
+				(const unsigned char *)pixels + (size_t)row * width * texel, width * texel, 0);
+	}
 	if (stage->levels > 1)
 		xgpu_vulkan_image_make_levels(entry->image, 1);
 	cache.statistics.images++;
