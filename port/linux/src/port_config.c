@@ -526,8 +526,8 @@ static const struct config_setting config_settings[] =
 		"emitting surfaces, bounce light), four times finer, matched area by\n"
 		"area to the stock page's exposure and colour, its dominant direction\n"
 		"and colour per texel lighting each pixel's bump (the data folder's\n"
-		"prism_lightmaps/rebaked, made by art_pipeline's relight tools; never\n"
-		"shipped); the other pages as \"smooth\". Models still take their light\n"
+		"prism_lightmaps/rebaked; none comes with the game, and the tools that\n"
+		"bake them are not part of it); the other pages as \"smooth\". Models still take their light\n"
 		"from the stock lightmap. Vulkan; read each frame (prism_set\n"
 		"\"lightmaps smooth\")." GRAPHICS_CHOOSES },
 	{ "display.prism_lightmap_upsample", _config_integer, "2", "HALO_PRISM_LIGHTMAP_UPSAMPLE", _environment_value,
@@ -556,8 +556,9 @@ static const struct config_setting config_settings[] =
 	{ "display.prism_world_geometry", _config_string, "\"stock\"", "HALO_PRISM_WORLD_GEOMETRY", _environment_value,
 		_platform_desktop,
 		"PRISM v2: \"remodel\" draws the level's walls, rock and ground from a\n"
-		"denser remodel built on this machine from your maps (prism_world\\,\n"
-		"art_pipeline/world_geo: cliff strata, overhangs and chipped rock, sand\n"
+		"denser remodel in the data folder (prism_world\\; none comes with the\n"
+		"game, and a level without one is drawn stock: cliff strata,\n"
+		"overhangs and chipped rock, sand\n"
 		"ripples, deep bevels and panel grooves on the metal, after the level's\n"
 		"own textures), lit by the level's own lightmaps with the light the new\n"
 		"shape takes; far surfaces drawn from a coarser level. Collision, paths\n"

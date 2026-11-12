@@ -940,7 +940,7 @@ PAGES = {
             # renderer, on a page of their own: PRISM's rows outgrew this one)
             (SECTION, "PRISM"),
             ("PRISM GRAPHICS ›", None, _page_screen(*PRISM_PAGE),
-             "Finer light, materials and level geometry, built on this computer from your own maps. Video's "
+             "Finer light, shadows and tone, and the remodels and rebaked light a data folder has. Video's "
              "Quality PRISM turns on the faithful ones.", "desktop"),
             ("PRISM ASSETS ›", None, _page_screen(*PRISM_ASSETS_PAGE),
              "The sharper textures, remodelled characters and materials mods ship, and how much of the graphics "
@@ -1406,8 +1406,8 @@ PAGES = {
              "Characters, weapons and vehicles catch the level's own lights as highlights, where their armour is "
              "shiny. Off draws them as the Xbox did.", "desktop"),
             ("REFLECTIONS", "display.prism_reflections", [("CLASSIC", "stock"), ("LOCAL", "local")],
-             "Local: shiny armour reflects the place it is in, captured on this computer from your maps. Classic "
-             "reflects the game's own painted reflections.", "desktop"),
+             "Local: shiny armour reflects the place it is in, from probes in the data folder; none come with "
+             "the game. Without them, as Classic.", "desktop"),
             ("SHADOWS", "display.prism_shadows", [("CLASSIC", "stock"), ("SOFT", "soft"),
                                                    ("TRACED", "traced"), ("SUN", "cascaded")],
              "Sun: the sky's sun casts real shadows of characters, vehicles and scenery onto the level and each "
@@ -1425,8 +1425,8 @@ PAGES = {
             # port/linux/src/d3d8_device.c's prism_lighting_read)
             ("LIGHTMAPS", "display.prism_lightmaps", [("STOCK", "stock"), ("SMOOTH", "smooth"),
                                                        ("REBAKED", "rebaked")],
-             "Smooth: the levels' own light without its bands and blocky edges. Rebaked: light baked again on this "
-             "computer from the level's own lamps and sky, finer, bouncing, lighting bumps from its direction.",
+             "Smooth: the levels' own light without its bands and blocky edges. Rebaked: pages baked from the "
+             "level's lamps and sky where the data folder has them; none come with the game, otherwise Smooth.",
              "desktop"),
             ("SHADE DEPTH", "display.ambient_occlusion_strength", [("LIGHT", "0.5"), ("NATURAL", "0.8"),
                                                                     ("DEEP", "1")],
@@ -1437,9 +1437,9 @@ PAGES = {
             # (PRISM's remodelled level geometry, built on this machine:
             # port/linux/game/prism_world_geometry.c)
             ("WORLD GEOMETRY", "display.prism_world_geometry", [("XBOX", "stock"), ("REMODEL", "remodel")],
-             "Remodel draws the level's rock, sand and Forerunner walls from a denser model built on this computer "
-             "from your maps: rounded rock, bevelled edges, the same light. You still walk and collide on the "
-             "original. Xbox draws the map's own.", "desktop"),
+             "Remodel draws the level's rock, sand and Forerunner walls from a denser model in the data folder; "
+             "none comes with the game, and a level without one is drawn as Xbox. You still walk and collide on "
+             "the original.", "desktop"),
             ("GEOMETRY DETAIL", "display.prism_world_geometry_detail", [("LOW", "50"), ("NORMAL", "100"),
                                                                         ("HIGH", "200")],
              "How far out the remodel is drawn in its full detail; beyond, its lighter far level. Low is cheaper "
@@ -1466,8 +1466,8 @@ PAGES = {
              "Gives weapons and armour the fine grain of their surfaces (machining, weave, wear) from a mod's "
              "material overlay. It changes only the light on them. Off draws them as the Xbox did.", "desktop"),
             ("SURFACE DETAIL", "display.prism_surface_maps", ON_OFF,
-             "Lights characters, weapons and vehicles by the surface maps baked on this computer for a mod's "
-             "remodels: their dents, seams and creases. Off draws them as the Xbox did.", "desktop"),
+             "Lights characters, weapons and vehicles by the surface maps a mod carries for its remodels: "
+             "their dents, seams and creases. Off draws them as the Xbox did.", "desktop"),
             # (PRISM's texture store: the replacement textures mods ship,
             # drawn by the Vulkan renderer from the graphics card's memory)
             ("TEXTURE DETAIL", "display.prism_textures", [("STOCK", "stock"), ("ENHANCED", "enhanced"), ("MAX", "max")],

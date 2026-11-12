@@ -141,7 +141,7 @@
 		<string text=""/>
 		<string text=""/>
 		<string text="Gives weapons and armour the fine grain of their surfaces (machining, weave, wear) from a mod's material overlay. It changes only the light on them. Off draws them as the Xbox did."/>
-		<string text="Lights characters, weapons and vehicles by the surface maps baked on this computer for a mod's remodels: their dents, seams and creases. Off draws them as the Xbox did."/>
+		<string text="Lights characters, weapons and vehicles by the surface maps a mod carries for its remodels: their dents, seams and creases. Off draws them as the Xbox did."/>
 		<string text="Draws the sharper textures mods ship in place of the game's, once they are in the graphics card's memory. Stock draws the game's own."/>
 		<string text="How much of the graphics card's memory mods' textures may take. Auto takes six tenths of what is free; past it, those not seen lately go back to the game's."/>
 		<string text="Lights armour and weapons with the materials mods give them: their colour, bumps, roughness, metal and coats under the level's own lights. Stock draws them as the Xbox did."/>
