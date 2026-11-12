@@ -1420,7 +1420,8 @@ void render_model(
 		}
 		/* port: display.prism_models: the nodes' matrices sent where a mod's
 		mesh replaces the model (port/linux/game/mod_meshes.c) */
-		mod_meshes_model_begin(model_index, &model_parameters.skinning, detail_level_pixels, flags, unique_identifier);
+		mod_meshes_model_begin(model_index, &model_parameters.skinning, detail_level_pixels, flags, unique_identifier,
+			function_values);
 		render_model_parts(
 			model,
 			region_permutation_indices,

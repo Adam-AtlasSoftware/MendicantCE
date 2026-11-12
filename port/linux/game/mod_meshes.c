@@ -1087,11 +1087,13 @@ void mod_meshes_model_begin(
 	struct render_skinning const *skinning,
 	real level_of_detail_pixels,
 	unsigned long flags,
-	long object_index)
+	long unique_identifier,
+	real const *function_values)
 {
 	struct mesh_model const *mesh;
 	float matrices[MAXIMUM_NODES_PER_MODEL][3][4];
 	real const *functions;
+	long object_index;
 	long absolute, node_index, node_count;
 
 	mod_meshes_globals.drawing = NULL;
@@ -1119,9 +1121,16 @@ void mod_meshes_model_begin(
 		mod_meshes_globals.instances = 1;
 	}
 	mod_meshes_globals.instance = mod_meshes_globals.instances;
-	/* (an object's function values drive helper bones: render-side, the
-	interpolated values the renderer reads anyway) */
-	functions = object_index != NONE ? render_interpolation_object_function_values(object_index) : NULL;
+	/* (an object's function values drive helper bones: the draw's own, which
+	render_model was given (for an object, the interpolated values the
+	renderer reads anyway; for a ghost, those kept when its projectile was
+	deleted). The identifier is only the instance's name: it was looked up
+	as an object here, and a ghost's is a deleted projectile's, the sky's 0,
+	which read a freed datum, or slot 0's object. A draw that is no object's
+	(0) has no object and no functions: the sky's values are its regions'
+	scales.) */
+	object_index = unique_identifier ? unique_identifier : NONE;
+	functions = object_index != NONE ? function_values : NULL;
 	xgpu_backend_mesh_instance(mod_meshes_globals.instance, mesh->id, (unsigned long)object_index,
 		(float)level_of_detail_pixels,
 		(TEST_FLAG(flags, _render_model_shadow_bit) ? MESH_INSTANCE_SHADOW : 0) |

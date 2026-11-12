@@ -158,9 +158,13 @@ void mod_meshes_tags_unloaded(void);
 /* (main_game_render, once a frame) */
 void mod_meshes_frame(void);
 /* (models.c's render_model, around its parts) the model drawn, its nodes'
-matrices sent where a mod's mesh replaces it; and the drawing done */
+matrices sent where a mod's mesh replaces it; and the drawing done. The
+identifier is render_model's (an object's index, a deleted object's for a
+ghost, 0 for a draw that is no object's: the sky), which names the instance
+and is never looked up; the function values are render_model's own, the
+draw's (never NULL there) */
 void mod_meshes_model_begin(long model_index, struct render_skinning const *skinning, real level_of_detail_pixels,
-	unsigned long flags, long object_index);
+	unsigned long flags, long unique_identifier, real const *function_values);
 void mod_meshes_model_end(void);
 /* (models.c's render_model_parts, around an opaque, decal or shadow part's
 draws) the part the draws that follow are of; and none */
