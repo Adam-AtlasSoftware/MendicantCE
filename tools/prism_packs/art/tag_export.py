@@ -11,7 +11,7 @@ region (T,), nodes_names. Local only when the tag is derived from CE data.
 import argparse, struct, sys
 from pathlib import Path
 import numpy as np
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mod_model_check import TagModel, VERTEX_SIZE, u16, s16  # noqa: E402
 
 LODS = ["superhigh", "high", "medium", "low", "superlow"]

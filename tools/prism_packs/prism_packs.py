@@ -49,6 +49,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ART = HERE / "art"
+# (no bytecode beside the tools: in a download they are in the game's own folder)
+sys.dont_write_bytecode = True
 sys.path.insert(0, str(HERE))
 import packs_fetch  # noqa: E402
 import packs_game  # noqa: E402
@@ -1000,6 +1002,8 @@ def step_chief_r3(ctx):
                                         ART / "recipes" / "chief_3p_r2_pack.json", what="surface map"))
 
     def textures():
+        (w / "tex").mkdir(parents=True, exist_ok=True)
+        (w / "checks").mkdir(parents=True, exist_ok=True)
         ctx.python("prism_r3_albedo.py", tier / "cyborg.png", w / "height2", w / "tex" / "cyborg_albedo.png",
                    what="albedo (CE's painted shading reduced)")
         ctx.blender_run("prism_r3_panel_fill.py", w / "r3build" / "r3.blend", w / "tex" / "cyborg_albedo.png",

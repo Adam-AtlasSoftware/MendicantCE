@@ -163,7 +163,7 @@ jobs:
           status=0; "$extractor" > "$RUNNER_TEMP/extract.txt" 2>&1 || status=$?
           cat "$RUNNER_TEMP/extract.txt"
           grep -q "usage: map_extract" "$RUNNER_TEMP/extract.txt"
-          python3 "$tree/share/openh1/prism_packs/prism_packs.py" list
+          python3 -B "$tree/share/openh1/prism_packs/prism_packs.py" list
 
       # the build started, hidden, with no display, sound or network: it runs
       # through its start-up (settings, SDL, the files) until it finds no
@@ -268,7 +268,7 @@ jobs:
                       prism_packs/prism_packs.py prism_packs/GUIDE.md; do
             [ -f "$folder/$name" ] || { echo "$name is missing"; exit 1; }
           done
-          python "$folder/prism_packs/prism_packs.py" list
+          python -B "$folder/prism_packs/prism_packs.py" list
 
       # The build started: the 64-bit host reserves the guest's memory, loads
       # the guest image and runs it through its start-up until it finds no
