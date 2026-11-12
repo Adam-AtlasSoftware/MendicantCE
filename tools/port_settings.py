@@ -829,9 +829,8 @@ PAGES = {
              [(f"{kb} KB/S" if kb < 1024 else f"{kb // 1024} MB/S", str(kb)) for kb in SEED_UPLOADS],
              "The most of your upload that sending maps takes, so that the game keeps the rest.",
              "desktop android"),
-            (SECTION, "UPDATES"),
-            ("CHECK FOR UPDATES", "update.auto", ON_OFF,
-             "Looks for a new version when the game starts.", "desktop android"),
+            # fork: (no CHECK FOR UPDATES: this fork's builds do not update themselves,
+            # port/linux/src/updater.c, and a row that did nothing would say otherwise)
         ],
     },
     "interface_settings": {
@@ -908,9 +907,10 @@ PAGES = {
             (SECTION, "STORAGE"),
             ("MAP STORAGE", "game.map_cache_megabytes", MAP_STORAGE, MAP_STORAGE_HELP, None),
             (SECTION, "ABOUT"),
-            ("OPENH1", None, None,
-             "Halo: Combat Evolved, the Xbox game, on this computer, played from your own copy of its maps. OpenH1 "
-             "is a free fan project.", None, "about"),
+            # fork: (the build's own name, and that it is a modified OpenH1 with its source's address)
+            ("MENDICANTCE", None, None,
+             "Halo: Combat Evolved, the Xbox game, played from your own copy of its maps. MendicantCE is a free "
+             "fan project: OpenH1, modified. Source: github.com/Adam-AtlasSoftware/MendicantCE", None, "about"),
         ],
     },
     # (port/linux/game/mods.c: this machine's, every profile's; MANAGE MODS

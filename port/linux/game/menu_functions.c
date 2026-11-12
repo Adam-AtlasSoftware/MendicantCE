@@ -3053,6 +3053,12 @@ static boolean about_panel(struct widget_instance *row, wchar_t *value, wchar_t 
 	}
 	if (number > 0)
 		snprintf(text, sizeof(text), "BUILD %ld", number);
+#ifdef HALO_FORK_MENDICANT
+	/* fork: a release of this fork has no number: its commit, from the label
+	(main.c's "MendicantCE Linux, commit 0b28655c0e35 (release)") */
+	else if ((bar = strstr(version, ", commit ")) != NULL)
+		snprintf(text, sizeof(text), "COMMIT %.7s", bar + 9);
+#endif
 	else
 		snprintf(text, sizeof(text), "LOCAL BUILD");
 	discord_widen(text, value, ROW_TEXT_LENGTH);

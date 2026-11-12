@@ -136,11 +136,27 @@ def astc_encoder_sources() -> List[Path]:
     return sorted(source for source in ASTC_ENCODER_DIR.glob("astcenc_*.cpp"))
 
 
+# fork: this fork's identity, in one place. FORK_DEFINE is given to every unit
+# of every native build (configuration_defines, below): with it a build names
+# itself MendicantCE (source/main/main.c), never looks for or installs
+# releases (port/linux/src/updater.c: those are upstream OpenH1's, which would
+# replace this game), never sends crash reports (port/windows/host/
+# host_crash_win.c), does not use upstream's Discord application
+# (port/linux/src/p2p_discord.c) and does not take upstream's openh1:// links
+# (port/linux/src/p2p.c). tools/test_fork_identity.py holds it in.
+FORK_DEFINE = "-DHALO_FORK_MENDICANT"
+FORK_REPOSITORY = "Adam-AtlasSoftware/MendicantCE"
+UPSTREAM_REPOSITORY = "OpenH1/OpenH1"
+
+
 def build_repository() -> str:
     """the GitHub repository a build is made from, owner/name, which a client
     tells the servers it joins (network_distributed.c): CI's
     GITHUB_REPOSITORY, else the checkout's origin remote's (its credentials
-    left out: only the owner and the name are kept), else none"""
+    left out: only the owner and the name are kept), else none.
+    fork: a build of this tree is never upstream's: where that gives none or
+    upstream's own (a checkout whose origin is OpenH1), it is this fork's;
+    a fork of this fork keeps its own name"""
     repository = os.environ.get("GITHUB_REPOSITORY", "")
     if not repository:
         try:
@@ -150,7 +166,11 @@ def build_repository() -> str:
             url = ""
         found = re.search(r"github\.com[:/]+([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?/*$", url)
         repository = found.group(1) if found else ""
-    return repository if re.fullmatch(r"[A-Za-z0-9_.-]{1,39}/[A-Za-z0-9_.-]{1,100}", repository) else ""
+    if not re.fullmatch(r"[A-Za-z0-9_.-]{1,39}/[A-Za-z0-9_.-]{1,100}", repository):
+        repository = ""
+    if not repository or repository.lower() == UPSTREAM_REPOSITORY.lower():
+        repository = FORK_REPOSITORY
+    return repository
 
 
 def updater_defines(release: bool) -> str:
@@ -174,8 +194,9 @@ def updater_defines(release: bool) -> str:
 def configuration_defines(sln: Any) -> List[str]:
     """what configure.py's options define for every unit of a native build:
     --release (no assertions), --profile (the profiling build's recording,
-    port/linux/src/profile_trace.c)"""
-    defines = []
+    port/linux/src/profile_trace.c); and, always, this fork's switch
+    (FORK_DEFINE, above)"""
+    defines = [FORK_DEFINE]
     if getattr(sln, "port_release", False):
         defines.append("-DHALO_RELEASE")
     if getattr(sln, "port_profile", False):

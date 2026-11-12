@@ -25,6 +25,8 @@ from pathlib import Path
 
 import pytest
 
+from tools import build_common
+
 ROOT = Path(__file__).resolve().parent.parent
 # (OpenH1's: the 64-bit x86 build, its SDL beside it; HALO_TEST_GAME and
 # HALO_TEST_MAPS name others, and HALO_TEST_NET_PORT a system link port of
@@ -43,6 +45,14 @@ def _needs_game(*maps):
     for name in maps:
         if not (RETAIL_MAPS / f"{name}.map").is_file():
             pytest.skip(f"needs {name}.map in assets/maps")
+
+
+def _needs_updater():
+    # fork: this fork's builds have no updater (port/linux/src/updater.c under HALO_FORK_MENDICANT,
+    # tools/build_common.py's FORK_DEFINE): the tests that update a server from a release server have
+    # nothing to drive; test_fork_server_does_not_update below has the fork's answer
+    if build_common.FORK_DEFINE in build_common.configuration_defines(None):
+        pytest.skip("this fork's builds do not update themselves")
 
 
 def _free_port():
@@ -336,7 +346,7 @@ def test_rotation_moderation_and_shutdown(machines):
     # its machine's build, as the client told it (after its ready, reliably), and said once in the server's log
     _until(lambda: api.call("GET", "/api/players")[1]["players"][0].get("client"), 30, "the client's build", server)
     told = api.call("GET", "/api/players")[1]["players"][0]["client"]
-    assert told["version"].startswith("OpenH1 Linux | ") and isinstance(told["build"], int), told
+    assert told["version"].startswith("MendicantCE Linux | ") and isinstance(told["build"], int), told
     assert told["flavor"] and re.fullmatch(r"([\w.-]+/[\w.-]+)?", told["repository"]), told
     assert told["mods"] == ["testmod 1.2"], told
     assert server.text().count("plays " + told["version"]) == 1, "the client's build not logged once"
@@ -1326,6 +1336,7 @@ def test_update_of_the_same_network_version_once_empty(machines):
     """a newer release of the same network versions is found, its download refused once (the install tried again
     at the next check), installed while the server runs, and the server, empty, stops with exit code 5 (after 10
     minutes, on debug.update_time_scale's clock)"""
+    _needs_updater()
     _needs_game("bloodgulch")
     releases = FakeReleases(_release_zip())
     releases.build = 7
@@ -1354,6 +1365,7 @@ def test_update_of_a_new_network_version_after_the_game(machines):
     """a release of a new network version (the Standard games', the notes' second line) found during a game: the
     players are told the server updates after this game, the game is ended after server.update_game_minutes, and
     the server stops with exit code 5 after its postgame"""
+    _needs_updater()
     _needs_game("bloodgulch")
     releases = FakeReleases(_release_zip())
     releases.standard_version += 1
@@ -1383,6 +1395,7 @@ def test_update_of_a_new_network_version_after_the_game(machines):
 
 def test_a_build_outside_a_tree_does_not_update(machines):
     """a server that is not in a release's tree says once that it does not update itself, and plays on"""
+    _needs_updater()
     _needs_game("bloodgulch")
     releases = FakeReleases(_release_zip())
     releases.build = 9
@@ -1404,6 +1417,7 @@ def test_a_build_outside_a_tree_does_not_update(machines):
 def test_update_whose_checksum_does_not_match_is_refused(machines):
     """a release whose SHA256SUMS does not match its zip is refused before anything is unpacked: the server plays on,
     and the next check downloads it again, whose sums match, installs it, and stops with exit code 5 once empty"""
+    _needs_updater()
     _needs_game("bloodgulch")
     releases = FakeReleases(_release_zip())
     releases.build = 7
@@ -1432,6 +1446,7 @@ def test_update_whose_checksum_does_not_match_is_refused(machines):
 def test_unsigned_update_is_refused(machines):
     """a release with no SHA256SUMS.sig is refused before anything is unpacked (release_signature.h:
     RELEASE_SIGNATURE_REQUIRED), and the server plays on"""
+    _needs_updater()
     _needs_game("bloodgulch")
     releases = FakeReleases(_release_zip())
     releases.build = 7
@@ -1446,6 +1461,32 @@ def test_unsigned_update_is_refused(machines):
         assert server.process.poll() is None
         assert not (server.folder / "bin" / "halo.old").exists() and \
             not (server.folder / "share" / "openh1" / "new-build.txt").exists()
+        server.send("quit")
+        assert server.wait(15) == 0, server.text()[-3000:]
+    finally:
+        releases.close()
+
+
+def test_fork_server_does_not_update(machines):
+    """fork: a server of this fork's build asked to install updates, in a release's tree and with a release server
+    that has a newer build, says once that this fork's builds do not update themselves, asks the release server
+    for nothing, and plays on"""
+    _needs_game("bloodgulch")
+    if build_common.FORK_DEFINE not in build_common.configuration_defines(None):
+        pytest.skip("a build with an updater")
+    releases = FakeReleases(_release_zip())
+    releases.build = 9
+    try:
+        port = _free_port()
+        server = _tree(machines("server")).start(["--server"], **_server_settings(
+            port, HALO_SERVER_ROTATION="bloodgulch:slayer", **_update_settings(releases)))
+        _until(lambda: "does not update itself" in server.text(), 90, "the refusal", server)
+        time.sleep(5)
+        text = server.text()
+        assert text.count("does not update itself") == 1, text[-3000:]
+        assert "this fork's builds do not update themselves" in text, text[-3000:]
+        assert server.process.poll() is None and not releases.downloads
+        assert not (server.folder / "bin" / "halo.old").exists()
         server.send("quit")
         assert server.wait(15) == 0, server.text()[-3000:]
     finally:

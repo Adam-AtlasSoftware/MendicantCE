@@ -140,6 +140,43 @@ Steam Deck's Game Mode) on, with display.low_latency's pacing
 #else
 #define VSYNC_DEFAULT "true"
 #endif
+/* fork: this fork's builds (HALO_FORK_MENDICANT, tools/build_common.py's
+FORK_DEFINE) do not update themselves (port/linux/src/updater.c) and use no
+Discord application until the player names one of his own
+(port/linux/src/p2p_discord.c): their settings start, and say, what happens */
+#ifdef HALO_FORK_MENDICANT
+#define FORK_UPDATE_AUTO_DEFAULT "false"
+#define FORK_UPDATE_AUTO_NOTE \
+	"This build does not update itself: new builds are on its releases page,\n" \
+	"and this setting does nothing."
+#define FORK_SERVER_AUTO_UPDATE_DEFAULT "\"off\""
+#define FORK_SERVER_AUTO_UPDATE_NOTE \
+	"This build does not update itself, as a server either: every value is\n" \
+	"\"off\". (In a build that does: "
+#define FORK_SERVER_AUTO_UPDATE_NOTE_END ")"
+#define FORK_DISCORD_APPLICATION_DEFAULT "\"\""
+#define FORK_DISCORD_APPLICATION_NOTE \
+	"shows you playing). None by default: no status is shown and no one joins\n" \
+	"through Discord. Your own application's id (digits) turns them on; OpenH1's\n" \
+	"and OpenCE's applications are not used by this build."
+#define FORK_CRASH_REPORTS_NOTE \
+	"This build sends no crash reports anywhere: a crash's minidump and\n" \
+	"halo.log stay on this computer, and this setting does nothing."
+#else
+#define FORK_UPDATE_AUTO_DEFAULT "true"
+#define FORK_UPDATE_AUTO_NOTE \
+	"Look for a new version when the game starts, and offer to update to it;\n" \
+	"false never looks (the game's \"Do not ask again\" writes false here)."
+#define FORK_SERVER_AUTO_UPDATE_DEFAULT "\"install\""
+#define FORK_SERVER_AUTO_UPDATE_NOTE ""
+#define FORK_SERVER_AUTO_UPDATE_NOTE_END ""
+#define FORK_DISCORD_APPLICATION_DEFAULT "\"1561963518344036434\""
+#define FORK_DISCORD_APPLICATION_NOTE "shows you playing): OpenH1's; empty for none."
+#define FORK_CRASH_REPORTS_NOTE \
+	"Send a report of each crash (a minidump and halo.log) to the developers'\n" \
+	"Sentry project (port/windows/host/host_crash_win.c): \"yes\" sends them, \"no\"\n" \
+	"never does, \"ask\" asks at the next crash and writes the answer here."
+#endif
 /* (in the comment of each setting it chooses) */
 #define GRAPHICS_CHOOSES "\nCommented out, display.graphics chooses it."
 /* in input.mouse_sensitivity's comment: a file with it has the mouse's
@@ -1820,9 +1857,17 @@ static const struct config_setting config_settings[] =
 		"network.game_mode." },
 	{ "network.opence_welcome", _config_boolean, "true", "HALO_NET_OPENCE_WELCOME", _environment_value,
 		_platform_all,
+#ifdef HALO_FORK_MENDICANT
+		/* fork: (network_welcome.c) */
+		"Hosting: tell each player of another build, a few seconds after they\n"
+		"load into a game, that this server runs MendicantCE, a modified OpenH1,\n"
+		"and where its source is (two lines of the text chat, once a player).\n"
+		"Players of this build do not see them." },
+#else
 		"Hosting: tell each OpenCE player, a few seconds after they load into a\n"
 		"game, that this server runs OpenH1 and where to get it (two lines of\n"
 		"the text chat, once a player). OpenH1 players do not see them." },
+#endif
 	{ "network.voice_lobby", _config_boolean, "true", "HALO_NET_VOICE_LOBBY", _environment_value, _platform_all,
 		"Hosting: voice chat in the lobby, before and after a game, where every\n"
 		"player hears every other." },
@@ -2010,11 +2055,11 @@ static const struct config_setting config_settings[] =
 		"HALO_NET_STUN", _environment_value, _platform_all,
 		"Public STUN servers that tell this machine its internet address;\n"
 		"comma-separated host:port." },
-	{ "discord.application_id", _config_string, "\"1561963518344036434\"", "HALO_DISCORD_APPLICATION",
+	{ "discord.application_id", _config_string, FORK_DISCORD_APPLICATION_DEFAULT, "HALO_DISCORD_APPLICATION",
 		_environment_value, _platform_desktop,
 		"The Discord application your status, invites and asks to join go\n"
 		"through while the Discord desktop client runs (its name is what Discord\n"
-		"shows you playing): OpenH1's; empty for none." },
+		FORK_DISCORD_APPLICATION_NOTE },
 	{ "discord.rich_presence", _config_boolean, "true", "HALO_DISCORD_RICH_PRESENCE", _environment_value,
 		_platform_desktop,
 		"Show what you are doing in Discord: in the menus, in a party, the game\n"
@@ -2026,9 +2071,8 @@ static const struct config_setting config_settings[] =
 		"J lets them in, Esc does not), and invite them with Discord's Invite to\n"
 		"Join. false: no Join buttons; send your invite link instead." },
 
-	{ "update.auto", _config_boolean, "true", "HALO_UPDATE_AUTO", _environment_value, _platform_all,
-		"Look for a new version when the game starts, and offer to update to it;\n"
-		"false never looks (the game's \"Do not ask again\" writes false here)." },
+	{ "update.auto", _config_boolean, FORK_UPDATE_AUTO_DEFAULT, "HALO_UPDATE_AUTO", _environment_value, _platform_all,
+		FORK_UPDATE_AUTO_NOTE },
 	/* (a dedicated server's: halo --server, port/linux/src/server_mode.c;
 	written into the file only by one) */
 	{ "server.enabled", _config_boolean, "false", "HALO_SERVER", _environment_set_is_true, _platform_server,
@@ -2152,14 +2196,15 @@ static const struct config_setting config_settings[] =
 		_platform_server,
 		"A file the status (as /api/status) is written to every 2 seconds, for a\n"
 		"panel without HTTP; empty for none." },
-	{ "server.auto_update", _config_string, "\"install\"", "HALO_SERVER_AUTO_UPDATE", _environment_value,
-		_platform_server,
+	{ "server.auto_update", _config_string, FORK_SERVER_AUTO_UPDATE_DEFAULT, "HALO_SERVER_AUTO_UPDATE",
+		_environment_value, _platform_server,
+		FORK_SERVER_AUTO_UPDATE_NOTE
 		"\"install\" installs a newer release at once, on a thread of its own,\n"
 		"and stops (exit code 5) to be started again: once the server has been\n"
 		"empty for 10 minutes, or, for a new network version, once the game\n"
 		"being played is over (server.update_game_minutes at most). \"check\"\n"
 		"logs a newer release; \"off\" looks for none. A server whose files it\n"
-		"may not write (a container's image) is \"check\"." },
+		"may not write (a container's image) is \"check\"." FORK_SERVER_AUTO_UPDATE_NOTE_END },
 	{ "server.update_check_minutes", _config_integer, "30", "HALO_SERVER_UPDATE_CHECK_MINUTES", _environment_value,
 		_platform_server,
 		"Minutes between looks for a newer release, with server.auto_update\n"
@@ -2325,9 +2370,7 @@ static const struct config_setting config_settings[] =
 		"With streamer.enabled, the insults that are not slurs hidden: \"off\",\n"
 		"\"severe\", \"strong\" (and severe) or \"mild\" (all)." },
 	{ "crash_reports.upload", _config_string, "\"ask\"", "HALO_CRASH_REPORTS", _environment_value, _platform_windows,
-		"Send a report of each crash (a minidump and halo.log) to the developers'\n"
-		"Sentry project (port/windows/host/host_crash_win.c): \"yes\" sends them, \"no\"\n"
-		"never does, \"ask\" asks at the next crash and writes the answer here." },
+		FORK_CRASH_REPORTS_NOTE },
 
 	{ "debug.join_legacy", _config_boolean, "false", "HALO_DEBUG_JOIN_LEGACY", _environment_value, _platform_all,
 		"Join every game as an OpenCE build joins it: an OpenH1 game that OpenCE\n"

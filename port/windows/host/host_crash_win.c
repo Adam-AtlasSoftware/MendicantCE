@@ -26,7 +26,8 @@ network) goes the next time the game starts ("halo.exe --crash-upload", in
 the background).
 
 Reports are off but with the HALO_CRASH_REPORTS_ANY_BUILD environment
-variable (OpenH1 has no Sentry project of its own yet). abort() and the C runtime's invalid parameter checks, which end the
+variable (OpenH1 has no Sentry project of its own yet); in this fork's builds
+(HALO_FORK_MENDICANT) they are off whatever is set, and nothing is sent. abort() and the C runtime's invalid parameter checks, which end the
 process without an exception, raise one here, so they are reported too.
 */
 
@@ -55,8 +56,17 @@ process without an exception, raise one here, so they are reported too.
 /* the minidump endpoint of the project's DSN,
 https://e656c596e8f90402b0f47a2613b69e50@o4512207906603008.ingest.de.sentry.io/4512207917744208
 (a DSN is public: it only lets a client send events) */
+#ifdef HALO_FORK_MENDICANT
+/* fork: this fork has no Sentry project and sends nothing to OpenCE's or
+OpenH1's: its builds carry no endpoint, crash_post below answers "nothing
+sent", crash_reports_enabled is 0 and the reporter's options do nothing
+(tools/build_common.py's FORK_DEFINE) */
+#define SENTRY_HOST L""
+#define SENTRY_MINIDUMP_PATH L""
+#else
 #define SENTRY_HOST L"o4512207906603008.ingest.de.sentry.io"
 #define SENTRY_MINIDUMP_PATH L"/api/4512207917744208/minidump/?sentry_key=e656c596e8f90402b0f47a2613b69e50"
+#endif
 #define SENTRY_USER_AGENT L"halo-ce-universal-crash-reporter"
 
 #define CRASH_REPORT_OPTION L"--crash-report"
@@ -289,6 +299,10 @@ static DWORD crash_post(const struct crash_body *body, char *answer, DWORD answe
 	DWORD status = 0, status_size = sizeof(status), protocols, received = 0;
 
 	answer[0] = 0;
+#ifdef HALO_FORK_MENDICANT
+	/* fork: nothing is sent, whoever asks */
+	return 0;
+#endif
 	session = WinHttpOpen(SENTRY_USER_AGENT, WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME,
 		WINHTTP_NO_PROXY_BYPASS, 0);
 	if (!session)
@@ -878,7 +892,13 @@ static void crash_uploader(void)
 yet (give it one, then return HALO_BUILD_NUMBER > 0 again) */
 static int crash_reports_enabled(void)
 {
+#ifdef HALO_FORK_MENDICANT
+	/* fork: never, whatever the environment or the build's number: no dump
+	is written, nothing is asked and nothing is sent (a crash leaves halo.log) */
+	return 0;
+#else
 	return GetEnvironmentVariableW(L"HALO_CRASH_REPORTS_ANY_BUILD", NULL, 0) > 0;
+#endif
 }
 
 /* starts this executable again with the option and its arguments, with no
@@ -966,6 +986,10 @@ int host_crash_reporter(void)
 {
 	const wchar_t *arguments;
 
+	/* fork: the reporter's own command lines do nothing where reports are off
+	(halo.exe --crash-upload sent what waited in crashes\, enabled or not) */
+	if (!crash_reports_enabled())
+		return crash_option(CRASH_REPORT_OPTION) || crash_option(CRASH_UPLOAD_OPTION) ? 1 : 0;
 	if ((arguments = crash_option(CRASH_REPORT_OPTION)) != NULL)
 	{
 		unsigned long process_id = 0, thread_id = 0;

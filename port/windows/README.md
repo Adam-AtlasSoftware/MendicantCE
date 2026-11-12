@@ -199,8 +199,10 @@ Give the folder of the build that crashed: `halo.exe`, `halo.pdb` and
 `halo_guest.elf`. The tool needs `llvm-symbolizer` (LLVM).
 
 OpenH1 has no Sentry project yet: no build sends crash reports. To test the
-crash reports, set the `HALO_CRASH_REPORTS_ANY_BUILD` environment
-variable.
+crash reports in a build of OpenH1, set the `HALO_CRASH_REPORTS_ANY_BUILD`
+environment variable. A build of MendicantCE (this fork) sends no crash
+reports and writes no minidump, whatever is set: the variable and
+`crash_reports.upload` do nothing in it.
 
 The crash reports also include the crashes of `abort()` and of an invalid
 argument to a function of the C runtime.

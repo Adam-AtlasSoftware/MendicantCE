@@ -1805,12 +1805,43 @@ void main_crash(
 	return;
 }
 
+/* port: the name a build shows for itself (the halt screen, version, Profile's
+ABOUT, a replay's header, and what a client tells the hosts it joins). fork:
+this fork's builds (HALO_FORK_MENDICANT, tools/build_common.py's FORK_DEFINE)
+are MendicantCE's, never OpenH1's, and a build without a number names the
+commit it was made from where the build knows it (CI's GITHUB_SHA) */
+#ifdef HALO_FORK_MENDICANT
+#define HALO_BUILD_PRODUCT "MendicantCE"
+#else
+#define HALO_BUILD_PRODUCT "OpenH1"
+#endif
+#ifndef HALO_BUILD_COMMIT
+#define HALO_BUILD_COMMIT ""
+#endif
+
+/* port: an unnumbered build's words after the bar: "commit 0b28655c0e35" in a
+fork build that knows its commit, "local build" otherwise */
+static void main_build_unnumbered_words(char *words, size_t capacity)
+{
+#ifdef HALO_FORK_MENDICANT
+	if (HALO_BUILD_COMMIT[0])
+	{
+		_snprintf(words, capacity - 1, "commit %s", HALO_BUILD_COMMIT);
+		words[capacity - 1] = 0;
+		return;
+	}
+#endif
+	_snprintf(words, capacity - 1, "local build");
+	words[capacity - 1] = 0;
+}
+
 #ifdef HALO_NATIVE_BUILD_INFO
 /* The original Xbox version string describes the map format, not this port.
    Keep it on Xbox; native builds name the binary that is actually running. */
 static void main_native_build_label(char *label, size_t capacity)
 {
 	char const *platform;
+	char words[32];
 
 	#ifdef HALO_ANDROID
 	platform = "Android";
@@ -1822,11 +1853,14 @@ static void main_native_build_label(char *label, size_t capacity)
 	platform = "Linux";
 	#endif
 	if (HALO_BUILD_NUMBER > 0)
-		_snprintf(label, capacity - 1, "OpenH1 %s | build %d (%s)",
+		_snprintf(label, capacity - 1, HALO_BUILD_PRODUCT " %s | build %d (%s)",
 			platform, HALO_BUILD_NUMBER, HALO_BUILD_FLAVOR);
 	else
-		_snprintf(label, capacity - 1, "OpenH1 %s | local build (%s)",
-			platform, HALO_BUILD_FLAVOR);
+	{
+		main_build_unnumbered_words(words, sizeof(words));
+		_snprintf(label, capacity - 1, HALO_BUILD_PRODUCT " %s | %s (%s)",
+			platform, words, HALO_BUILD_FLAVOR);
+	}
 	label[capacity - 1] = 0;
 }
 
@@ -4198,9 +4232,15 @@ void main_build_identity(
 	main_native_build_label(version, version_size);
 #else
 	if (HALO_BUILD_NUMBER > 0)
-		_snprintf(version, version_size - 1, "OpenH1 | build %d (%s)", HALO_BUILD_NUMBER, HALO_BUILD_FLAVOR);
+		_snprintf(version, version_size - 1, HALO_BUILD_PRODUCT " | build %d (%s)", HALO_BUILD_NUMBER,
+			HALO_BUILD_FLAVOR);
 	else
-		_snprintf(version, version_size - 1, "OpenH1 | local build (%s)", HALO_BUILD_FLAVOR);
+	{
+		char words[32];
+
+		main_build_unnumbered_words(words, sizeof(words));
+		_snprintf(version, version_size - 1, HALO_BUILD_PRODUCT " | %s (%s)", words, HALO_BUILD_FLAVOR);
+	}
 	version[version_size - 1] = 0;
 #endif
 }

@@ -37,15 +37,21 @@ def native_build():
 # ---------- the build switch
 
 
+def _configuration_defines(sln):
+    # fork: the fork's own switch is in every build (tools/test_fork_identity.py
+    # holds it in); what the options add is compared without it
+    return [define for define in build_common.configuration_defines(sln) if define != build_common.FORK_DEFINE]
+
+
 def test_configuration_defines():
-    assert build_common.configuration_defines(SimpleNamespace()) == []
-    assert build_common.configuration_defines(SimpleNamespace(port_release=True)) == ["-DHALO_RELEASE"]
-    assert build_common.configuration_defines(SimpleNamespace(port_release=True, port_profile=True)) == [
+    assert _configuration_defines(SimpleNamespace()) == []
+    assert _configuration_defines(SimpleNamespace(port_release=True)) == ["-DHALO_RELEASE"]
+    assert _configuration_defines(SimpleNamespace(port_release=True, port_profile=True)) == [
         "-DHALO_RELEASE", "-DHALO_PROFILE"]
     # (--pgo=generate's, which every host takes too: its image's larger range)
-    assert build_common.configuration_defines(SimpleNamespace(port_release=True, port_pgo="generate")) == [
+    assert _configuration_defines(SimpleNamespace(port_release=True, port_pgo="generate")) == [
         "-DHALO_RELEASE", "-DHALO_PGO_GENERATE"]
-    assert build_common.configuration_defines(SimpleNamespace(port_pgo="use")) == []
+    assert _configuration_defines(SimpleNamespace(port_pgo="use")) == []
 
 
 def test_every_native_build_takes_the_configuration_defines():
