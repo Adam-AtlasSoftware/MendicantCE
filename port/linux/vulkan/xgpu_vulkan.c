@@ -246,6 +246,10 @@ struct xgpu_vulkan_buffer
 	last whose main commands wrote into it (which an early copy would
 	come before: not renamed in it) */
 	uint64_t renamed, ordered;
+	/* the last submission whose commands copy staged bytes into it
+	(xgpu_vulkan_buffer_write of bytes some work reads): its mapped bytes
+	lack them until the GPU has passed it (xgpu_vulkan_buffer_contents) */
+	uint64_t written;
 	/* a descriptor set made once names it (the draws' set: the enhanced
 	dynamic lights' block, the visibility counts): never renamed, which
 	would leave the set naming the buffer it took the place of, a spare
@@ -3308,9 +3312,18 @@ const void *xgpu_vulkan_buffer_contents(const struct xgpu_vulkan_buffer *buffer)
 	if (!buffer)
 		return NULL;
 	/* (a renamed buffer's bytes are the GPU's copy, made as the submission
-	that renamed it begins: waited for) */
-	if (buffer->renamed > completed_serial())
-		xgpu_vulkan_wait(vk.recording && buffer->renamed == vk.serial ? xgpu_vulkan_fence() : buffer->renamed);
+	that renamed it begins: waited for. And so are the bytes written into
+	it through the staging ring, which the GPU copies when their submission
+	runs: read before it, the mapped bytes were the pages' earlier ones, a
+	map's loaded before or a structure's switched from, which the ray
+	tracing's capture then kept as the segment's copy and skinned objects
+	from. The submission being recorded is submitted first.) */
+	{
+		uint64_t pending = buffer->renamed > buffer->written ? buffer->renamed : buffer->written;
+
+		if (pending > completed_serial())
+			xgpu_vulkan_wait(vk.recording && pending == vk.serial ? xgpu_vulkan_fence() : pending);
+	}
 	return buffer->mapped;
 }
 
@@ -3450,6 +3463,11 @@ void xgpu_vulkan_buffer_write(struct xgpu_vulkan_buffer *buffer, uint32_t offset
 	copy.size = size;
 	vkCmdCopyBuffer(commands, range.buffer, buffer->buffer, 1, &copy);
 	transfer_done(commands);
+	/* (taken once the command is recorded: the upload may have submitted the
+	recording before it, the ring full. Bytes no work reads are in the
+	mapped bytes already.) */
+	if (!unused)
+		buffer->written = vk.serial;
 }
 
 /* ---------- samplers */
