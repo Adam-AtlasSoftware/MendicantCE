@@ -1556,8 +1556,8 @@ PAGES = {
              "The level's shape the rays meet. Auto: the remodel's far level where it is drawn. Remodel: all "
              "of it, more memory. Game's: the map's own.", "desktop"),
             ("TRACED MODELS", "display.prism_rt_objects", [("AS DRAWN", "auto"), ("GAME'S", "low_lod")],
-             "As Drawn: the replacement models' shapes where they are drawn. Game's: the game's own models, "
-             "cheaper.", "desktop"),
+             "As Drawn: the replacement models' shapes where they are drawn, within 30 units (the game's own "
+             "past that, or when there are too many). Game's: the game's own models, cheaper.", "desktop"),
             ("KEEP SHAPES", "display.prism_rt_cache", ON_OFF,
              "Keeps each object's traced shape from frame to frame, refitting only what moved: much less work. "
              "Off redoes them all each frame.", "desktop"),

@@ -61,7 +61,10 @@ render_window ─► world AO's pre-pass (forced on while prism_rt is): each opa
                              ─► gi: a quarter of the probes updated (DDGI-like, L1 spherical harmonics a channel)
                              ─► trace (compute, ray queries): sun rays to objects and structure, occlusion rays,
                                  gi's probes read at an object's pixel
-                             ─► resolve (compute): 5x5 cross-bilateral, temporal blend by the last camera
+                             ─► resolve (compute): 3x3 cross-bilateral (a neighbour's distance off the pixel's
+                                 plane, never across an object's edge with the level), temporal blend by the
+                                 last camera (an object's history never taken for the level's: the history's
+                                 distance is negative where it was an object's)
                              ─► the surfaces read it in world AO's place (xgpu_vulkan_world_ao_set_pixels)
 ```
 
@@ -98,10 +101,15 @@ capture, passes), `xgpu_vulkan_rt_glsl.inc` (the compute shaders; `tools/vulkan_
   before the self-illumination is added), so it receives the traced shadows and occlusion; world AO alone still leaves
   it out. Draws whose base map is a cutout (a fifth of
   its texels under half alpha: foliage) are traced as solid by the share of their texels drawn (mask 8, not opaque:
-  each candidate kept by that chance), with `display.prism_rt_alpha`; a part the mesh store's
+  each candidate kept by three quarters of that chance, a leaf letting a quarter of the light through; a ray from
+  an object's pixel passes those within 5 wu of its start, a tree's crown, so its leaves are not darkened by their own
+  canopy, which CE lit whole), with `display.prism_rt_alpha`; a part the mesh store's
   replacement mesh draws (`display.prism_models`) is traced as that mesh: its pieces' skinned vertices (the mesh
   store's own skinning of the frame, shared with its draw) and 32-bit indices, copied into its entry's soup where its
-  bones moved (`display.prism_rt_objects` `low_lod`: the stock part instead).
+  bones moved (`display.prism_rt_objects` `low_lod`: the stock part instead; `auto`: the replacement within 30 wu of
+  the eye and while the window's objects are under 60% of `RT_OBJECT_TRIANGLES`, the stock part past either. With
+  every model of b30 replaced, the replacements' triangles had filled the window two frames in three, and the
+  objects drawn last were left out of the traced scene, their shadows and occlusion coming and going).
 - **The level's remodel** (`display.prism_world_geometry` `remodel`, `display.prism_rt_world`): the remodel's far
   level is traced where it is drawn (b30: 282 thousand triangles for the map's 33 thousand, 19 MB of structure; 592
   thousand with the sealed remodel of combined2's data, whose far levels keep every edge vertex), or its
@@ -161,18 +169,23 @@ PREPASS_END ─► objects' BLAS ─► TLAS (opaque structure 1, alpha-tested s
             ─► probes (a quarter a frame): their rays in the rig's light, each hit's albedo by the sun, a lamp,
                and the probes' last irradiance there (every bounce, kept from frame to frame)
             ─► path (every pixel; half in a checkerboard at low quality or display.prism_rt_rate half):
-                 the sun's visibility (its disc, through everything)
+                 the sun's visibility (its disc): through the structure, then the objects where it is clear,
+                 the structure's alone kept too (the anchor's measure); an object's pixel whichever way its
+                 normal leans, its back lit by half (a leaf lit through)
                  the domes (a direction of each cone) and the lamps (ReSTIR DI: candidates by power, the last
                  frame's reservoirs at the point and about it, the one kept traced for its shadow)
-                 the sky and the bounces: 1 to 4 (display.prism_rt_bounces; by quality), cosine rays, each hit
+                 the sky and the bounces: one path a pixel, 1 to 4 bounces (display.prism_rt_bounces; by quality), cosine rays, each hit
                  its material's albedo by the sun, a lamp and its glow, the last ending in the probes;
                  Russian roulette past the second
                  the dynamic lights (ReSTIR DI over them, as before)
             ─► accumulate (temporal: the light by 1 / its length, at most 32 frames; the sun's visibility at most 8,
-               held within its neighbours' reach this frame; a sample past 32 times its history held to it)
+               held within its neighbours' reach this frame; a sample past 32 times its history held to it;
+               an object's history never the level's)
             ─► tiles (8x8: CE's light and the traced light, summed; their histograms for the exposure)
             ─► exposure (display.prism_exposure)
-            ─► atrous x3 (5x5, steps 1, 2, 4: by distance and normal; the sun's visibility also by its nearness
+            ─► atrous x3 (5x5, steps 1, 2, 4: by the distance off the pixel's plane and the normal, never across an
+               object's edge with the level (far off, an object and the ground behind it are within a few
+               hundredths of each other's distance: a relative test let them blur into a ring); the sun's visibility also by its nearness
                over its spread), the last writing x and yzw: the rest + the rig's sun by the facing and the
                visibility, in CE's encoding, held to its region by the anchor, exposed
 the 3D view's end ─► display.prism_tone_curve (compute, over a copy of the view) ─► prism_tone, bloom, tone map
@@ -186,7 +199,7 @@ exposure's reference (`debug.prism_rt_view albedo`).
 
 | | `faithful` (default) | `remix` |
 | --- | --- | --- |
-| `display.prism_rt_anchor` | 100: each region (a tent 40 pixels wide) held to CE's light within 1/1.5 to 1.5, and the light CE's region has past that added evenly in CE's colour there | 0: the rig alone |
+| `display.prism_rt_anchor` | 100: each region (a tent 40 pixels wide) held to CE's light within 1/1.5 to 1.5, and the light CE's region has past that added evenly in CE's colour there, both measured with the sun through the structure alone (CE's lightmap has no object's shadow, which the hold must not undo); no level pixel under half its CE light, nor an object's under half the light CE's model lighting gave it (the model's pre-pass twin writes it, 254 in the fourth word's top byte), less what an object's shadow takes | 0: the rig alone |
 | `display.prism_exposure` | `fixed` (CE's) | `ce`: the traced light's median over the level's pixels pinned to CE's, within 1.5 EV, 2 EV a second |
 | `display.prism_tone_curve` | `ce` (clipped) | `local`: each region compressed past half white, its detail kept, rolled off |
 | `display.prism_rt_emissive` | `lights` | `all` (the glows too) |

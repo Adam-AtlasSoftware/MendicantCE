@@ -751,6 +751,11 @@ def port_pictures_only() -> None:
     for group, done in enumerate(placed):
         if not done:
             written += [art.port_picture(member, frames, keep=True) for member, frames in groups[group]]
+    # (a title of the port's own screens that bitmaps.xml has none of yet, a
+    # page port_settings.py added since the last whole run: set as main sets
+    # it, the PC version's tags not needed)
+    written += [art.title(name, text) for name, text in sorted(port_settings.TITLES.items())
+                if name not in old_names]
     text = (CE / "bitmaps.xml").read_text()
     head = text[:text.index("\t<bitmap ")]
     (CE / "bitmaps.xml").write_text(head + "\n".join(written) + "\n</menus>\n")
