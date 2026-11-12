@@ -156,6 +156,27 @@ static boolean command_actor_is_elite_leader(struct actor_datum *actor)
 		actor->meta.active && !actor->meta.swarm && actor->input.body_vitality > 0.0f;
 }
 
+/* an Elite who leads a unit goes on leading it while he lives, his encounter
+active or not: the player out of sight of the unit (its encounter then goes
+inactive) is no death in it. (Tested with command_actor_is_elite_leader, a
+living but inactive Elite lost his unit to the first living member, for
+good; where that member was himself, the unit was copied onto itself, which
+the assert build halts on, and stood down.) */
+static boolean command_actor_still_leads(struct actor_datum *actor)
+{
+	return actor->meta.team_index == TEAM_COVENANT && MENDICANT_ACTOR_IS_ELITE(actor->meta.type) &&
+		!actor->meta.swarm && actor->input.body_vitality > 0.0f;
+}
+
+/* whether a position index is one of the list of the encounter the actor is in */
+static boolean command_position_in_encounter(struct actor_datum *actor, int position)
+{
+	int count = 0;
+
+	return position >= 0 && actor->meta.encounter_index != NONE &&
+		mendicant_encounter_firing_positions(actor->meta.encounter_index, &count) && position < count;
+}
+
 static short command_change_firing_position(long actor_index, short position)
 {
 	/* (the firing position argument is unused: actor_firing_position.c) */
@@ -584,7 +605,7 @@ static void command_succession(int actor_count, long time)
 		if (key >= MENDICANT_MAX_ACTORS)
 			continue;
 		leader = command_actor_get(mendicant_units_leader(key));
-		if (leader && (command_actor_is_elite_leader(leader) ||
+		if (leader && (command_actor_still_leads(leader) ||
 			(mendicant_units_leaderless(key) && leader->input.body_vitality > 0.0f)))
 			continue;
 		for (other = 0; other < actor_count && heir < 0; other++)
@@ -623,7 +644,10 @@ static void command_succession(int actor_count, long time)
 						actor_disciplined[other] = 0;
 				}
 			}
-			mendicant_units_stand_down(key);
+			/* (the old key's unit is no more; an heir at the unit's own key
+			keeps the plan he has just been given) */
+			if (new_key != key)
+				mendicant_units_stand_down(key);
 			if (mendicant_drill_file)
 				fprintf(mendicant_drill_file, "%ld,new_leader,%d,from=%d\n", time, new_key, key);
 		}
