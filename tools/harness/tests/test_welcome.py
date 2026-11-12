@@ -32,7 +32,7 @@ NEGATIVE_CONTROLS = {
 }
 
 
-def generated(fault=None):
+def generated(fault=None, fork=False):
     source = read("port/linux/game/network_welcome.c")
     chat = read("port/linux/game/network_chat.c")
     config = f"#define CHAT_TEXT_SIZE {constant(chat, 'CHAT_TEXT_SIZE')}\n"
@@ -43,7 +43,21 @@ def generated(fault=None):
     text = source[source.index("/* ---------- constants */"):]
     if fault:
         text = mutated(text, *fault)
+    # fork: (the fork's switch, for its own case's unit alone: the other cases are upstream's welcome, kept)
+    if fork:
+        config = "#define HALO_FORK_MENDICANT 1\n" + config
     return (("config.inc", config), ("under_test.inc", text))
+
+
+def test_fork_says_what_it_runs():
+    """fork: a host of this fork's build tells every other build's player that it runs MendicantCE, a modified OpenH1,
+    and where its source is; its own players, and an OpenH1 host's welcome, show nothing"""
+    status, output = run(build("welcome", generated(fork=True)), "fork")
+    assert status == 0, output
+    # (without the fork's lines recognised, its own machine shows them)
+    fault = ("if (!csstrcmp(text, welcome_lines[line]))\n\t\t\treturn TRUE;", "")
+    status, output = run(build("welcome", generated(fault, fork=True)), "fork")
+    assert status == CHECK_FAILED, output
 
 
 @pytest.mark.parametrize("case", CASES)
