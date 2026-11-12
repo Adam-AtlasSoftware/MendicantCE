@@ -22,7 +22,7 @@ so.
 | The extractor | `bin/openh1-map-extract` in the Linux download. It reads the maps as the game reads them. On Windows it runs through WSL (below). |
 | Upscalers | Fetched by the tools when you ask, each with its licence shown (below). |
 | A graphics card | Recommended. Blender's Cycles renders the bakes on an NVIDIA (OptiX or CUDA), AMD (HIP), Intel (oneAPI) or Apple card, and on the processor without one, many times slower. The upscalers use a Vulkan card, and PyTorch's CUDA on an NVIDIA card or the processor otherwise. |
-| Disk space | About 15 GB for the work folder while it builds everything for one level, plus about 1.5 GB of packs; the five levels' packs come to about 4 GB. |
+| Disk space | About 16 GB for the work folder while it builds the character packs and one level, and about 1 GB of packs; the five levels' remodels and lightmaps add about 2 GB of packs and some GB of work folder. |
 | Memory | 16 GB at least; a level remodel takes up to 28 GB on the largest levels. |
 
 ## Setting up
@@ -92,7 +92,7 @@ more levels later without extracting again.
 
 These are long builds, all on your computer. Nothing runs on a server.
 
-- The **character packs** are many Blender sessions. Each remodel is a few minutes of processor time, but the
+- The **character packs** are many Blender sessions. Each remodel is quick, but the
   surface maps are 4096-pixel Cycles bakes. On a graphics card these are fast. On the processor alone they are
   the longest part of the build, and they keep every core busy.
 - The **texture packs** run five upscaling models over about forty maps, then a slow material pass per map. With
@@ -173,8 +173,12 @@ a map whose colours drift past the tools' checks is left out of its pack.
 
 ## What was and was not run
 
-The tools were run end to end on Linux (x86-64, with Blender 4.5.15, Invader 0.55 and Python 3.12) on the
-author's own maps, and the packs they built were loaded in a hidden run of the release build. **They have not
+The tools were run end to end on Linux (x86-64, Blender 4.5.15, Invader 0.55, Python 3.12) on the author's own
+maps: every character and texture pack, and b30's remodel and lightmaps (the lightmaps at
+`--lightmap-samples 256`), with Cycles and PyTorch on the processor and the Vulkan upscaler on the graphics card.
+The packs were loaded in a hidden run of the release build and drew as the author's
+own packs do. The other levels' remodels and lightmaps, the sun masks and the probes use the same steps and were
+not built in that run. **They have not
 been run on Windows**: the Windows paths (WSL for the extractor, junctions for the hidden game runs, the Windows
 upscaler) are written for it and not tried. macOS is not supported.
 
