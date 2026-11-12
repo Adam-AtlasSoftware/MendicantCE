@@ -192,11 +192,10 @@ The game leaves two logs on your computer, and sends neither anywhere:
 
 - `halo.log`: what the build says of itself as it runs: the folders it
   uses, the graphics card, the files PRISM and MENDICANT AI looked for and
-  took, and why it stopped when it does. It is made afresh at each start;
-  the start before is `halo.previous.log`.
+  took, and why it stopped when it does. It is made afresh at each start.
   - **Linux:** beside `config.toml`, which is the folder you unzipped the
-    build into. The same lines are printed in the terminal, when the game
-    is started from one.
+    build into; the start before's is kept as `halo.previous.log`. The same
+    lines are printed in the terminal, when the game is started from one.
   - **Windows:** next to `halo.exe`.
 - `debug.txt`: the game's own log, and a crash's report. It is in the
   folder that holds `maps/` (on Linux the game names that folder at the
