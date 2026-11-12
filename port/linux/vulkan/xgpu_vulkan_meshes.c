@@ -115,6 +115,11 @@ static struct
 		uint32_t object, mesh;
 		uint64_t frame;
 		float lod_pixels;
+		/* the level it was drawn at (lod_known: once drawn from the store),
+		and the frame of that (the hysteresis's level before; a switch
+		counted between frames in a row) */
+		uint32_t lod, lod_known;
+		uint64_t lod_frame;
 	} views[VIEW_LEVELS];
 	uint64_t frame;
 	float bones[XGPU_PMESH_BONES_MAXIMUM][3][4];
@@ -127,6 +132,8 @@ static struct
 		prepare_failures, shared_skins, shadows_at_view, wide_swaps;
 	uint64_t level_instances[XGPU_PMESH_LODS_MAXIMUM];
 	float largest_pixels;
+	/* an object's level switched from one frame to the next */
+	uint64_t level_switches;
 } meshes;
 
 /* ---------- the store's backend */
@@ -253,6 +260,9 @@ void xgpu_vulkan_meshes_map(void *context, const struct xgpu_stream_mesh_store_m
 		asked[index].base_map_scale[1] = queries[index].base_map_scale[1];
 	}
 	xgpu_mesh_store_map(meshes.store, record->generation, record->budget_megabytes, count, asked, answered);
+	xgpu_mesh_store_options(meshes.store, (record->flags & XGPU_STREAM_MESH_STORE_PREFETCH) != 0,
+		(record->flags >> XGPU_STREAM_MESH_STORE_HYSTERESIS_SHIFT) & XGPU_STREAM_MESH_STORE_HYSTERESIS_MASK);
+	memset(meshes.views, 0, sizeof(meshes.views));
 	for (index = 0; index < count; index++)
 	{
 		answers[index].id = answered[index].id;
@@ -280,16 +290,26 @@ void xgpu_vulkan_meshes_instance(void *context, const struct xgpu_stream_mesh_in
 {
 	struct instance *instance = &meshes.instances[record->instance % INSTANCES];
 	float lod_pixels = record->lod_pixels;
+	int previous_lod = -1;
+	uint32_t slot = 0;
+	int viewed = 0;
 
 	(void)context;
 	/* (an object's view's size kept; its shadow drawn at it, where the
 	view was drawn this frame or the last) */
 	if (record->object != 0xffffffffu)
 	{
-		uint32_t slot = (record->object ^ (record->mesh * 2654435761u)) % VIEW_LEVELS;
-
+		slot = (record->object ^ (record->mesh * 2654435761u)) % VIEW_LEVELS;
 		if (!(record->flags & XGPU_STREAM_MESH_INSTANCE_SHADOW))
 		{
+			/* (the level this object was drawn at the frame before, where
+			the slot is still its) */
+			if (meshes.views[slot].object == record->object && meshes.views[slot].mesh == record->mesh &&
+				meshes.views[slot].lod_known && meshes.views[slot].lod_frame + 1 >= meshes.frame)
+				previous_lod = (int)meshes.views[slot].lod;
+			else
+				meshes.views[slot].lod_known = 0;
+			viewed = 1;
 			meshes.views[slot].object = record->object;
 			meshes.views[slot].mesh = record->mesh;
 			meshes.views[slot].frame = meshes.frame + 1;
@@ -320,8 +340,20 @@ void xgpu_vulkan_meshes_instance(void *context, const struct xgpu_stream_mesh_in
 	instance->node_count = record->node_count;
 	memcpy(instance->matrices, matrices, record->node_count * sizeof(matrices[0]));
 	meshes.instances_seen++;
-	if (!meshes.store || !xgpu_mesh_store_use(meshes.store, record->mesh, lod_pixels, &instance->view))
+	if (!meshes.store || !xgpu_mesh_store_use_from(meshes.store, record->mesh, lod_pixels, previous_lod,
+		&instance->view))
 		return;
+	/* (the view's level kept for the next frame's hysteresis; a change
+	from the frame before counted) */
+	if (viewed)
+	{
+		if (previous_lod >= 0 && (uint32_t)previous_lod != instance->view.lod &&
+			meshes.views[slot].lod_frame != meshes.frame)
+			meshes.level_switches++;
+		meshes.views[slot].lod = instance->view.lod;
+		meshes.views[slot].lod_known = 1;
+		meshes.views[slot].lod_frame = meshes.frame;
+	}
 	if (instance->view.node_count > instance->node_count)
 		return;
 	instance->hash = bytes_hash(matrices, record->node_count * sizeof(matrices[0]), 2166136261u ^ instance->view.lod);
@@ -660,7 +692,7 @@ int xgpu_vulkan_meshes_statistics(char *text, unsigned long size)
 		"refused, %llu skinnings failed; %llu dispatches (%llu shared), %llu vertices skinned, %llu ring full; "
 		"instances by level %llu/%llu/%llu/%llu, largest %.0f px; last resident %.2f s after the map; rigs %llu "
 		"evaluated (%llu failed), %u spring states; %llu shadows at their view's level; %llu swaps wide, %llu "
-		"vertices skinned wide",
+		"vertices skinned wide; %u drawn stock then swapped, %u read before drawn, %llu levels switched",
 		statistics.entries, statistics.resident, statistics.reading, statistics.failed, statistics.refused_budget,
 		(double)statistics.resident_bytes / 1048576.0, (double)statistics.budget_bytes / 1048576.0,
 		(double)statistics.read_bytes / 1048576.0, statistics.evictions, (unsigned long long)statistics.uses,
@@ -676,6 +708,7 @@ int xgpu_vulkan_meshes_statistics(char *text, unsigned long size)
 		(unsigned long long)meshes.rig_evaluations, (unsigned long long)meshes.rig_failures,
 		meshes.rig_states ? xgpu_rig_states_count(meshes.rig_states) : 0u,
 		(unsigned long long)meshes.shadows_at_view, (unsigned long long)meshes.wide_swaps,
-		(unsigned long long)xgpu_vulkan_mesh_skin_wide_vertices());
+		(unsigned long long)xgpu_vulkan_mesh_skin_wide_vertices(), statistics.drawn_swaps, statistics.prefetched,
+		(unsigned long long)meshes.level_switches);
 	return 1;
 }

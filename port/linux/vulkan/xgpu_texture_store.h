@@ -152,6 +152,10 @@ struct xgpu_texture_store_view
 	uint32_t top, resident, scale, levels;
 	uint8_t format, cube;
 	struct xgpu_ktx2_stock stock;
+	/* the asset's level drawn as the most detailed (xgpu_texture_store_options'
+	fade: from the level before toward resident as it comes in; resident
+	without a fade), at least resident */
+	float shown;
 };
 
 struct xgpu_texture_store_statistics
@@ -169,6 +173,10 @@ struct xgpu_texture_store_statistics
 	/* seconds from the map's record to the last entry made usable and
 	full (of those drawn) */
 	double last_usable_seconds, last_full_seconds;
+	/* the switches an entry drawn in the last frames made: from the stock
+	bitmap to the replacement, and a level sharper (at once, or the fade
+	started); and the entries read before they were drawn (prefetched) */
+	uint32_t drawn_swaps, drawn_steps, prefetched;
 };
 
 struct xgpu_texture_store;
@@ -187,6 +195,12 @@ void xgpu_texture_store_map(struct xgpu_texture_store *store, uint32_t generatio
 	int loading, uint32_t count, const struct xgpu_store_query *queries,
 	struct xgpu_store_answer *answers);
 void xgpu_texture_store_budget(struct xgpu_texture_store *store, uint32_t budget_megabytes);
+/* (after a map's record) prefetch: the map's entries read before they are
+drawn, those drawn first, within the budget, never letting go of another
+for them (display.prism_prefetch); fade_milliseconds: the time the view's
+shown level takes to move a level toward resident as levels come in, while
+the entry is drawn (display.prism_texture_fade; 0 at once) */
+void xgpu_texture_store_options(struct xgpu_texture_store *store, int prefetch, uint32_t fade_milliseconds);
 void xgpu_texture_store_loading(struct xgpu_texture_store *store, int loading);
 /* an id drawn this frame: 1 and the view where its entry is usable, else
 0 (drawn stock); its levels are streamed where they are not resident */

@@ -359,6 +359,9 @@ struct xgpu_vulkan_sampler_description
 	float max_lod;
 };
 
+/* nonzero while the sampler cache has room for many more (half of it
+free): the texture store's fades take samplers of their own */
+int xgpu_vulkan_sampler_room(void);
 /* the sampler of a description, made the first time; VK_NULL_HANDLE if it
 cannot be */
 VkSampler xgpu_vulkan_sampler(const struct xgpu_vulkan_sampler_description *description);

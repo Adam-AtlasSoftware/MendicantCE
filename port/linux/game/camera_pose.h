@@ -26,4 +26,10 @@ last), and the scenery, vehicles, bipeds and machines placed ("object", its
 tag's name last), for seeds of a view where no one stands */
 void camera_pose_write_places(char const *path);
 
+/* debug.camera_path: the camera moved along the path's poses, a frame at a
+time (main_game_render, each frame); and whether this frame is one of the
+path's, saved as debug.screenshot_every saves one */
+void camera_path_frame(void);
+int camera_path_capturing(void);
+
 #endif

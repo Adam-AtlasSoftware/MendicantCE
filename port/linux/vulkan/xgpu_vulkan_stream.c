@@ -879,6 +879,25 @@ static VkSampler sampler_get(const struct xgpu_stream_sampler *from, uint8_t axe
 	return sampler_get_levels(from, axes, 0.0f, 0.0f);
 }
 
+/* the image's level a store view is drawn from as its most detailed: its
+shown level (the fade's, xgpu_texture_store.h) where that is above
+min_lod, no more than last; rounded up to a whole level once the device's
+samplers are many (each step of a fade is a sampler of its own) */
+static float store_shown(const struct xgpu_texture_store_view *view, float min_lod, uint32_t last)
+{
+	float shown = view->shown - (float)view->top;
+
+	if (shown > min_lod)
+	{
+		if (shown != (float)(uint32_t)shown && !xgpu_vulkan_sampler_room())
+			shown = (float)((uint32_t)shown + 1u);
+		min_lod = shown;
+	}
+	if (min_lod > (float)last)
+		min_lod = (float)last;
+	return min_lod;
+}
+
 /* display.prism_textures: a stage of an Xbox texture with a store id whose
 replacement is usable, and whose stage is the stock bitmap's it was made
 for (its size and kind: the texture cache may have put another bitmap at
@@ -913,6 +932,9 @@ static int store_bind(const struct host_render_texture_stage *source, struct xgp
 	if (last < first)
 		last = first;
 	min_lod = (float)first;
+	/* (display.prism_texture_fade: the level shown, blended toward the
+	resident one as it came in; whole levels where the samplers are many) */
+	min_lod = store_shown(&view, min_lod, last);
 	/* (max_lod 0 is none: a level's 0 is a thousandth past it) */
 	max_lod = (float)last + 0.001f;
 	if (stage->sampler.mip == _filter_none)
@@ -1188,6 +1210,7 @@ static void material_resolve(void)
 		{
 			struct xgpu_stream_sampler sampler;
 			uint32_t first = view.resident > view.top ? view.resident - view.top : 0;
+			float shown = store_shown(&view, (float)first, view.levels - view.top - 1);
 
 			memset(&sampler, 0, sizeof(sampler));
 			sampler.minify = _filter_anisotropic;
@@ -1196,7 +1219,7 @@ static void material_resolve(void)
 			sampler.address[0] = sampler.address[1] = sampler.address[2] = XGPU_VULKAN_ADDRESS_WRAP;
 			sampler.anisotropy = stream.capabilities.anisotropy > 16 ? 16 : stream.capabilities.anisotropy;
 			stream.material_images[index].image = view.image;
-			stream.material_images[index].sampler = sampler_get_levels(&sampler, 0, (float)first,
+			stream.material_images[index].sampler = sampler_get_levels(&sampler, 0, shown,
 				(float)(view.levels - view.top - 1) + 0.001f);
 			resident[index] = 1.0f;
 		}

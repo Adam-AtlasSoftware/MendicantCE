@@ -50,6 +50,9 @@ this wait */
 #define QUEUE_SHORT 4u
 /* the budget read again this often (frames) */
 #define BUDGET_FRAMES 60u
+/* the steps of a level the fade's shown level is drawn in (each a sampler
+of its own while it lasts) */
+#define SHOWN_STEPS 4u
 
 enum
 {
@@ -96,6 +99,13 @@ struct entry
 	uint32_t streak;
 	double evicted_at;
 	uint8_t logged_usable, logged_full, was_usable;
+	/* the level drawn as the most detailed (the fade's), and its
+	quantized step last made the view's */
+	float shown;
+	uint32_t shown_step;
+	/* the draws that looked it up in the frame before (the sharpening's
+	order: the most drawn first) */
+	uint32_t uses, uses_before;
 };
 
 struct xgpu_texture_store
@@ -113,6 +123,10 @@ struct xgpu_texture_store
 	double map_time;
 	struct xgpu_texture_store_statistics statistics;
 	int warned_memory, warned_srgb;
+	/* xgpu_texture_store_options, and the last frame's time (the fade's) */
+	int prefetch;
+	float fade_milliseconds;
+	double frame_time;
 
 	/* the workers' (store->lock) */
 	struct job *queue_first, *queue_last;
@@ -199,6 +213,7 @@ static void entry_release(struct xgpu_texture_store *store, struct entry *entry)
 	entry->image_bytes = 0;
 	entry->top = 0;
 	entry->resident = entry->file.levels;
+	entry->shown = (float)entry->file.levels;
 	entry->done = entry->queued = 0;
 	memset(entry->pending, 0, sizeof(entry->pending));
 	entry->ticket++;
@@ -251,6 +266,8 @@ static int entry_image_make(struct xgpu_texture_store *store, struct entry *entr
 	store->resident_bytes += bytes;
 	entry->top = top;
 	entry->resident = keep_from;
+	if (entry->shown < (float)keep_from)
+		entry->shown = (float)keep_from;
 	entry->done = 0;
 	for (level = keep_from; level < entry->file.levels; level++)
 		entry->done |= 1u << level;
@@ -629,7 +646,21 @@ static void level_done(struct xgpu_texture_store *store, struct entry *entry, ui
 	while (entry->resident > entry->top && (entry->done & (1u << (entry->resident - 1))))
 		entry->resident--;
 	if (entry->resident != before)
+	{
+		int drawn = entry->last_used && entry->last_used + WANTED_FRAMES >= store->frame;
+
 		epoch_bump(store);
+		/* (not usable before: drawn from its first usable level; not drawn
+		lately, or no fade: the level resident at once) */
+		if (!was_usable || !drawn || store->fade_milliseconds <= 0.0f)
+			entry->shown = (float)entry->resident;
+		if (drawn && was_usable && entry_usable(entry))
+			store->statistics.drawn_steps++;
+		if (!was_usable && entry_usable(entry) && !entry->last_used)
+			store->statistics.prefetched++;
+	}
+	if (!was_usable && entry_usable(entry) && entry->last_used && entry->last_used + WANTED_FRAMES >= store->frame)
+		store->statistics.drawn_swaps++;
 	if (!was_usable && entry_usable(entry))
 	{
 		store->statistics.last_usable_seconds = seconds_now() - store->map_time;
@@ -739,19 +770,56 @@ static void pieces_copy(struct xgpu_texture_store *store)
 		store->statistics.frame_bytes_most = copied;
 }
 
+/* (the sharpening's order: the entries drawn by the most draws the frame
+before first) */
+static int more_drawn_first(const void *a, const void *b)
+{
+	const struct entry *first = &sort_store->entries[*(const uint32_t *)a];
+	const struct entry *second = &sort_store->entries[*(const uint32_t *)b];
+
+	if (first->uses_before != second->uses_before)
+		return first->uses_before > second->uses_before ? -1 : 1;
+	return *(const uint32_t *)a < *(const uint32_t *)b ? -1 : *(const uint32_t *)a > *(const uint32_t *)b;
+}
+
+static uint32_t queued_now(struct xgpu_texture_store *store)
+{
+	uint32_t queued;
+
+	LOCK(store);
+	queued = store->queued_jobs;
+	UNLOCK(store);
+	return queued;
+}
+
+/* an entry's levels from its image's bottom up to the stock resolution
+queued, smallest first */
+static void stock_levels_queue(struct xgpu_texture_store *store, uint32_t index)
+{
+	struct entry *entry = &store->entries[index];
+	uint32_t level, bottom = entry->file.scale > entry->top ? entry->file.scale : entry->top;
+
+	for (level = entry->file.levels; level-- > bottom;)
+	{
+		if (!(entry->done & (1u << level)) && !(entry->queued & (1u << level)))
+			job_queue(store, index, level);
+	}
+}
+
 /* the work the entries drawn lately need queued: images made, the levels
 up to the stock resolution of those not usable, then one level above it
-at a time while the queue is short; images of entries drawn in a row made
-whole where the budget has room */
+at a time while the queue is short, those drawn by the most draws first;
+images of entries drawn in a row made whole where the budget has room.
+With prefetch, then the entries not drawn yet the same way while the queue
+is short, where the budget has room without letting go of any other */
 static void work_queue(struct xgpu_texture_store *store)
 {
-	uint32_t index;
+	uint32_t index, count = 0, *order;
 	double now = 0.0;
 
 	for (index = 0; index < store->entry_count; index++)
 	{
 		struct entry *entry = &store->entries[index];
-		uint32_t level, bottom;
 
 		if (entry->failed || !entry->last_used || entry->last_used + WANTED_FRAMES < store->frame || entry_usable(entry))
 			continue;
@@ -779,39 +847,81 @@ static void work_queue(struct xgpu_texture_store *store)
 				continue;
 			}
 		}
-		bottom = entry->file.scale > entry->top ? entry->file.scale : entry->top;
-		for (level = entry->file.levels; level-- > bottom;)
+		stock_levels_queue(store, index);
+	}
+	/* (prefetch: the entries not drawn yet made usable, smallest levels
+	first, behind those drawn) */
+	if (store->prefetch)
+	{
+		for (index = 0; index < store->entry_count && queued_now(store) < QUEUE_SHORT; index++)
 		{
-			if (!(entry->done & (1u << level)) && !(entry->queued & (1u << level)))
-				job_queue(store, index, level);
+			struct entry *entry = &store->entries[index];
+
+			if (entry->failed || entry->last_used || entry->evicted_at || entry_usable(entry))
+				continue;
+			if (!entry->image)
+			{
+				if (store->resident_bytes + levels_bytes(entry, 0) <= store->budget)
+				{
+					if (!entry_image_make(store, entry, 0))
+						continue;
+				}
+				else if (store->resident_bytes + levels_bytes(entry, entry->file.scale) <= store->budget)
+				{
+					if (!entry_image_make(store, entry, entry->file.scale))
+						continue;
+				}
+				else
+				{
+					continue;
+				}
+			}
+			stock_levels_queue(store, index);
 		}
 	}
+	order = store->entry_count ? malloc((size_t)store->entry_count * sizeof(*order)) : NULL;
+	if (!order)
+		return;
 	for (index = 0; index < store->entry_count; index++)
 	{
-		struct entry *entry = &store->entries[index];
+		const struct entry *entry = &store->entries[index];
+
+		if (!entry->failed && entry->image && entry_usable(entry) && entry->last_used &&
+			entry->last_used + WANTED_FRAMES >= store->frame)
+			order[count++] = index;
+	}
+	sort_store = store;
+	qsort(order, count, sizeof(*order), more_drawn_first);
+	/* (then, with prefetch, those not drawn yet) */
+	if (store->prefetch)
+	{
+		for (index = 0; index < store->entry_count; index++)
+		{
+			const struct entry *entry = &store->entries[index];
+
+			if (!entry->failed && entry->image && entry_usable(entry) && !entry->last_used)
+				order[count++] = index;
+		}
+	}
+	for (index = 0; index < count && queued_now(store) < QUEUE_SHORT; index++)
+	{
+		struct entry *entry = &store->entries[order[index]];
+		int drawn = entry->last_used != 0;
 		uint32_t level;
 
-		uint32_t queued;
-
-		LOCK(store);
-		queued = store->queued_jobs;
-		UNLOCK(store);
-		if (queued >= QUEUE_SHORT)
-			break;
-		if (entry->failed || !entry->image || !entry_usable(entry) ||
-			entry->last_used + WANTED_FRAMES < store->frame)
-			continue;
 		/* (made whole, where it was made from the stock resolution) */
 		if (entry->top && entry->resident == entry->top)
 		{
+			uint64_t more = levels_bytes(entry, 0) > entry->image_bytes ? levels_bytes(entry, 0) - entry->image_bytes : 0;
+
 			if (!now)
 				now = seconds_now();
 			if (entry->evicted_at && now - entry->evicted_at < XGPU_TEXTURE_STORE_THRASH_SECONDS &&
 				entry->streak < XGPU_TEXTURE_STORE_THRASH_FRAMES)
 				continue;
-			if (!room_make(store, levels_bytes(entry, 0) > entry->image_bytes ?
-				levels_bytes(entry, 0) - entry->image_bytes : 0, entry) ||
-				!entry_image_make(store, entry, 0))
+			if (drawn ? !room_make(store, more, entry) : store->resident_bytes + more > store->budget)
+				continue;
+			if (!entry_image_make(store, entry, 0))
 				continue;
 			store->statistics.promotions++;
 		}
@@ -819,9 +929,10 @@ static void work_queue(struct xgpu_texture_store *store)
 		{
 			level = entry->resident - 1;
 			if (!(entry->queued & (1u << level)) && !(entry->done & (1u << level)))
-				job_queue(store, index, level);
+				job_queue(store, order[index], level);
 		}
 	}
+	free(order);
 }
 
 /* (store->lock) the queue's jobs let go of */
@@ -957,6 +1068,45 @@ static int query_check(struct xgpu_texture_store *store, const struct xgpu_store
 #endif
 }
 
+/* each entry's shown level moved toward its resident one, a level each
+fade_milliseconds, in steps of 1/SHOWN_STEPS; the view's step made from it
+(epoch bumped where one changed: the draws bound look again) */
+static void shown_move(struct xgpu_texture_store *store)
+{
+	double now = seconds_now();
+	float levels = store->fade_milliseconds > 0.0f && store->frame_time > 0.0 ?
+		(float)((now - store->frame_time) * 1000.0 / store->fade_milliseconds) : 1000.0f;
+	uint32_t index;
+
+	store->frame_time = now;
+	/* (a frame's step no more than a level: a long frame does not skip the
+	fade) */
+	if (levels > 1.0f && store->fade_milliseconds > 0.0f)
+		levels = 1.0f;
+	for (index = 0; index < store->entry_count; index++)
+	{
+		struct entry *entry = &store->entries[index];
+		uint32_t step;
+
+		if (entry->shown < (float)entry->resident)
+			entry->shown = (float)entry->resident;
+		else if (entry->shown > (float)entry->resident)
+		{
+			entry->shown -= levels;
+			if (entry->shown < (float)entry->resident)
+				entry->shown = (float)entry->resident;
+		}
+		/* (the step at or above shown: never sharper than it) */
+		step = (uint32_t)(entry->shown * (float)SHOWN_STEPS + 0.999f);
+		if (step != entry->shown_step)
+		{
+			entry->shown_step = step;
+			if (entry_usable(entry))
+				epoch_bump(store);
+		}
+	}
+}
+
 /* ---------- public code */
 
 struct xgpu_texture_store *xgpu_texture_store_create(const struct xgpu_texture_store_backend *backend,
@@ -1073,6 +1223,7 @@ void xgpu_texture_store_map(struct xgpu_texture_store *store, uint32_t generatio
 			entry->file = file;
 			entry->stock = stock;
 			entry->resident = file.levels;
+			entry->shown = (float)file.levels;
 			answer->id = XGPU_TEXTURE_STORE_ID(generation, store->entry_count);
 			answer->width = file.width;
 			answer->height = file.height;
@@ -1096,6 +1247,12 @@ void xgpu_texture_store_budget(struct xgpu_texture_store *store, uint32_t budget
 	budget_read(store);
 }
 
+void xgpu_texture_store_options(struct xgpu_texture_store *store, int prefetch, uint32_t fade_milliseconds)
+{
+	store->prefetch = prefetch != 0;
+	store->fade_milliseconds = (float)(fade_milliseconds > 10000u ? 10000u : fade_milliseconds);
+}
+
 void xgpu_texture_store_loading(struct xgpu_texture_store *store, int loading)
 {
 	store->loading = loading;
@@ -1116,10 +1273,13 @@ int xgpu_texture_store_use(struct xgpu_texture_store *store, uint32_t id, struct
 	if (entry->last_used != store->frame)
 	{
 		entry->streak = entry->last_used + 1 == store->frame ? entry->streak + 1 : 1;
+		entry->uses_before = entry->last_used + 1 == store->frame ? entry->uses : 0;
+		entry->uses = 0;
 		if (!entry->first_used)
 			entry->first_used = store->frame;
 		entry->last_used = store->frame;
 	}
+	entry->uses++;
 	if (!entry_usable(entry))
 		return 0;
 	view->image = entry->image;
@@ -1130,6 +1290,9 @@ int xgpu_texture_store_use(struct xgpu_texture_store *store, uint32_t id, struct
 	view->format = entry->file.format;
 	view->cube = entry->file.faces == 6;
 	view->stock = entry->stock;
+	view->shown = (float)entry->shown_step / (float)SHOWN_STEPS;
+	if (view->shown < (float)entry->resident)
+		view->shown = (float)entry->resident;
 	return 1;
 }
 
@@ -1145,6 +1308,7 @@ void xgpu_texture_store_frame(struct xgpu_texture_store *store)
 	if (store->resident_bytes > store->budget)
 		room_make(store, 0, NULL);
 	work_queue(store);
+	shown_move(store);
 }
 
 uint32_t xgpu_texture_store_epoch(const struct xgpu_texture_store *store)

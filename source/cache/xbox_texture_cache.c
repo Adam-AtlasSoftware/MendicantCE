@@ -124,6 +124,7 @@ symbols in this file:
 #include <stddef.h>
 #include "custom_edition_cache.h" /* port: port/linux/game/custom_edition_cache.c */
 #include "render_enumerate.h" /* port: port/linux/game/render_enumerate.c */
+#include "prism_popin.h" /* port: port/linux/game/prism_popin.c */
 
 /* ---------- constants */
 
@@ -1304,6 +1305,18 @@ void *_texture_cache_bitmap_get_hardware_format(
 			lruv_block_touch(
 				xbox_texture_cache_globals.cache,
 				bitmap->cache_block_index);
+			/* port: display.prism_texture_wait: a texture a draw needs that is
+			still being read is waited for, up to the frame's share, not its
+			draw left out (port/linux/game/prism_popin.c); 0 as the Xbox */
+			if (!block && load && !texture->loaded && prism_popin_texture_wait_begin())
+			{
+				cache_file_promote_read(texture->read_request_handle);
+				while (!texture->loaded && prism_popin_texture_waiting())
+				{
+					SwitchToThread();
+				}
+				prism_popin_texture_waited(texture->loaded);
+			}
 			if (block && !texture->loaded)
 			{
 				if (debug_texture_cache)
@@ -1339,6 +1352,11 @@ void *_texture_cache_bitmap_get_hardware_format(
 	else
 	{
 		hardware_format = bitmap->hardware_format;
+	}
+	/* port: counted (port/linux/game/prism_popin.c) */
+	if (!block && load && !hardware_format)
+	{
+		prism_popin_texture_skipped();
 	}
 
 	if (block && !hardware_format)

@@ -85,8 +85,14 @@ struct xgpu_mesh_store_answer
 	int status;
 };
 int xgpu_backend_mesh_store_map(unsigned long generation, unsigned long tier, unsigned long budget_megabytes,
-	int loading, struct xgpu_mesh_store_query const *queries, unsigned long count,
+	unsigned long flags, struct xgpu_mesh_store_query const *queries, unsigned long count,
 	struct xgpu_mesh_store_answer *answers);
+/* the record's flags (xgpu_stream.h's XGPU_STREAM_MESH_STORE_*): a map
+loading, display.prism_prefetch, display.prism_lod_hysteresis's percent
+from bit 8 */
+#define STORE_LOADING 1ul
+#define STORE_PREFETCH 2ul
+#define STORE_HYSTERESIS_SHIFT 8
 int xgpu_backend_mesh_store_available(void);
 void xgpu_backend_mesh_instance(unsigned long instance, unsigned long mesh, unsigned long object, float lod_pixels,
 	unsigned long flags, float const (*matrices)[3][4], unsigned long node_count, unsigned long game_ticks,
@@ -200,6 +206,9 @@ static struct
 	unsigned long settings_read;
 	int tier, sent_tier;
 	long budget, sent_budget;
+	/* the record's options (STORE_PREFETCH, STORE_HYSTERESIS_SHIFT): sent
+	with the next record (a change alone sends none) */
+	unsigned long options;
 	/* display.prism_secondary_motion */
 	boolean secondary_motion;
 	char dump[256];
@@ -267,6 +276,13 @@ static void settings_read(
 		mod_meshes_globals.budget = 0;
 	}
 	mod_meshes_globals.secondary_motion = config_boolean("display.prism_secondary_motion") != 0;
+	{
+		long hysteresis = config_integer("display.prism_lod_hysteresis");
+
+		hysteresis = hysteresis < 0 ? 0 : hysteresis > 50 ? 50 : hysteresis;
+		mod_meshes_globals.options = (config_boolean("display.prism_prefetch") ? STORE_PREFETCH : 0) |
+			((unsigned long)hysteresis << STORE_HYSTERESIS_SHIFT);
+	}
 	dump = config_string("debug.prism_mesh_dump");
 	strncpy(mod_meshes_globals.dump, dump ? dump : "", sizeof(mod_meshes_globals.dump) - 1);
 	mod_meshes_globals.dump[sizeof(mod_meshes_globals.dump) - 1] = 0;
@@ -650,7 +666,8 @@ static void meshes_send(
 	}
 	answers = memory_zeroed((size_t)count * sizeof(*answers));
 	if (!answers || !xgpu_backend_mesh_store_map(++mod_meshes_globals.generation,
-		(unsigned long)mod_meshes_globals.tier, (unsigned long)mod_meshes_globals.budget, at_load, queries,
+		(unsigned long)mod_meshes_globals.tier, (unsigned long)mod_meshes_globals.budget,
+		(at_load ? STORE_LOADING : 0) | mod_meshes_globals.options, queries,
 		(unsigned long)count, answers))
 	{
 		memory_release(answers);

@@ -571,6 +571,37 @@ static const struct config_setting config_settings[] =
 		"out to which surfaces are drawn from the remodel's near level, as a\n"
 		"percentage of the remodel's own (25 to 400): lower draws more of the\n"
 		"level from the far level, and is cheaper. Read each frame." },
+	{ "display.prism_world_geometry_band", _config_integer, "0", "HALO_PRISM_WORLD_GEOMETRY_BAND", _environment_value,
+		_platform_desktop,
+		"PRISM v2, with display.prism_world_geometry \"remodel\": each surface\n"
+		"switches between its near and far levels at its own distance, in a band\n"
+		"this many percent of the remodel's distance past it (0 to 50), so that\n"
+		"the surfaces at one distance do not switch at once, a ring of them in\n"
+		"one frame; 0 all at the remodel's distance." },
+	{ "display.prism_lod_hysteresis", _config_integer, "0", "HALO_PRISM_LOD_HYSTERESIS", _environment_value,
+		_platform_desktop,
+		"PRISM: the levels of detail it chooses (the remodel's near and far\n"
+		"surfaces, the replacement meshes' levels) keep a more detailed level\n"
+		"this many percent past the distance or size it is made for (0 to 50)\n"
+		"before the lighter one is drawn, and take it back at the distance, so\n"
+		"that a camera near the distance does not switch them back and forth;\n"
+		"0 at the distance. The meshes' from the next map." },
+	{ "display.prism_texture_wait", _config_integer, "0", "HALO_PRISM_TEXTURE_WAIT", _environment_value,
+		_platform_desktop,
+		"A draw whose texture the game is still reading is left out of the frame\n"
+		"until it is in, as on the Xbox (a surface or an object appears a frame\n"
+		"or more late): this many milliseconds a frame (0 to 50) the draws wait\n"
+		"for theirs instead, before they are left out again; 0 as the Xbox." },
+	{ "display.prism_texture_fade", _config_integer, "0", "HALO_PRISM_TEXTURE_FADE", _environment_value,
+		_platform_desktop,
+		"PRISM: the milliseconds a replacement texture takes to sharpen by one\n"
+		"level as its levels come in (0 to 2000), blended between them; 0 at\n"
+		"once, a level at a time. From the next map." },
+	{ "display.prism_prefetch", _config_boolean, "false", "HALO_PRISM_PREFETCH", _environment_value,
+		_platform_desktop,
+		"PRISM: a map's replacement textures and meshes read as it loads, within\n"
+		"their budgets, those drawn first ahead of the rest; false each when it\n"
+		"is first drawn (drawn stock until it is in). From the next map." },
 	{ "display.prism_textures", _config_string, "\"stock\"", "HALO_PRISM_TEXTURES", _environment_value,
 		_platform_desktop,
 		"PRISM: the replacement textures mods ship (textures/<tier>/ in a mod:\n"
@@ -2945,6 +2976,11 @@ static const struct config_setting config_settings[] =
 	{ "debug.screenshot_until", _config_real, "0.0", "HALO_SCREENSHOT_UNTIL", _environment_value, _platform_all,
 		"With screenshot_every, save until this many seconds of the scenario's\n"
 		"simulation; 0 to the last frame." },
+	{ "debug.camera_path", _config_string, "\"\"", "HALO_CAMERA_PATH", _environment_value, _platform_all,
+		"A file of the camera's poses at frames (port/linux/game/camera_pose.c:\n"
+		"start, cmd and key lines) it is moved along once the map is in, the\n"
+		"same frames each run whatever the frame rate, each frame saved as\n"
+		"screenshot_every saves one; empty none." },
 	{ "debug.texture_dump_directory", _config_string, "\"\"", "HALO_TEXTURE_DUMP", _environment_value, _platform_all,
 		"A folder to write every texture to as it is uploaded; empty none." },
 	{ "debug.sample_seconds", _config_real, "0.0", "HALO_SAMPLE", _environment_value, _platform_android | _platform_guest,
@@ -4017,6 +4053,10 @@ static const struct
 	{ "display.prism_specular", "\"off\"", 0, "\"subtle\"" },
 	{ "display.prism_shadows", "\"stock\"", 0, "\"soft\"" },
 	{ "display.prism_rt", "\"off\"" },
+	{ "display.prism_texture_wait", "0", 0, "4" },
+	{ "display.prism_texture_fade", "0", 0, "250" },
+	{ "display.prism_prefetch", "false", 0, "true" },
+	{ "display.prism_lod_hysteresis", "0", 0, "15" },
 	{ "game.enhanced_animations", "false", 1 },
 	{ "display.menu_fade", "true", 1 },
 };

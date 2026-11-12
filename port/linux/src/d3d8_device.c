@@ -6182,6 +6182,9 @@ uint64_t d3d_frame_clock_now(void)
 scenario's start (negative before it starts) */
 extern double sim_trace_scenario_seconds(void);
 
+/* port/linux/game/camera_pose.c */
+extern int camera_path_capturing(void);
+
 /* debug.screenshot_every's frame, while the simulation's clock is between
 debug.screenshot_from and debug.screenshot_until (seconds; 0, no bound), so
 that a part of a run played again the same way is saved */
@@ -6197,6 +6200,9 @@ static BOOL screenshot_this_frame(void)
 		from = config_real("debug.screenshot_from");
 		until = config_real("debug.screenshot_until");
 	}
+	/* (each frame of debug.camera_path's, port/linux/game/camera_pose.c) */
+	if (camera_path_capturing())
+		return TRUE;
 	if (every <= 0 || device.frame % (unsigned long)every != 0)
 		return FALSE;
 	if (from <= 0.0 && until <= 0.0)

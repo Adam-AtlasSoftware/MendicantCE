@@ -1484,7 +1484,7 @@ PAGES = {
              "metal and coats under the level's own lights. Stock draws them as the Xbox did.", "desktop"),
             # (PRISM's mesh store and extended skeletons: the replacement
             # meshes mods ship, drawn by the Vulkan renderer)
-            (SECTION, "MODELS"),
+            (SECTION, "MODELS AND STREAMING"),
             ("REMODELS", "display.prism_models", [("STOCK", "stock"), ("ENHANCED", "enhanced"), ("MAX", "max")],
              "Draws the remodelled characters, weapons and vehicles mods ship in place of the game's, on the "
              "game's own skeletons: animations, collision and aim are unchanged. Stock draws the game's own.",
@@ -1496,6 +1496,27 @@ PAGES = {
             ("SECONDARY MOTION", "display.prism_secondary_motion", ON_OFF,
              "A remodel's pouches swing and its joints keep their volume as it moves. Off: they follow the "
              "bones they hang from.", "desktop"),
+            # (against pop-in: the stores' prefetch and the textures' fade,
+            # the host's; the texture cache's wait and the levels' hysteresis,
+            # port/linux/game/prism_popin.c)
+            ("PRELOAD", "display.prism_prefetch", ON_OFF,
+             "Reads a level's sharper textures and remodels while it loads, so they do not appear in front of "
+             "you. Off reads each when it is first seen, the game's drawn until then.", "desktop"),
+            ("TEXTURE FADE-IN", "display.prism_texture_fade",
+             [("OFF", "0"), ("QUICK", "120"), ("SMOOTH", "250"), ("SLOW", "500")],
+             "How gently a sharper texture blends in as it arrives. Off sharpens it in steps.", "desktop"),
+            ("TEXTURE WAIT", "display.prism_texture_wait", [("OFF", "0"), ("SHORT", "2"), ("NORMAL", "4"),
+                                                             ("LONG", "8")],
+             "Waits up to this long a frame for a texture the game is still reading, rather than leaving its "
+             "surface or character out until it arrives. Off as the Xbox.", "desktop"),
+            ("GEOMETRY BLEND", "display.prism_world_geometry_band", [("OFF", "0"), ("NARROW", "10"),
+                                                                     ("WIDE", "20"), ("WIDEST", "40")],
+             "Spreads where the remodel's surfaces change to their lighter far level over a band, one by one as "
+             "you move, rather than a ring of them at once.", "desktop"),
+            ("DETAIL STEADINESS", "display.prism_lod_hysteresis", [("OFF", "0"), ("SOME", "8"), ("STEADY", "15"),
+                                                                   ("STEADIEST", "30")],
+             "Keeps the remodel's and remodelled models' detail from flicking back and forth when you stand near "
+             "the distance it changes at.", "desktop"),
         ],
     },
     PRISM_RT_PAGE[0]: {

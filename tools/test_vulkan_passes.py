@@ -403,7 +403,7 @@ def test_texture_store_formats_and_levels(tmp_path):
     core = (ROOT / "port/linux/vulkan/xgpu_vulkan.c").read_text()
     formats = core[core.index("static VkFormat vulkan_format(uint8_t format)"):core.index("static VkComponentSwizzle swizzle_of(")]
     stream = (ROOT / "port/linux/vulkan/xgpu_vulkan_stream.c").read_text()
-    bind = stream[stream.index("static int store_bind("):stream.index("/* a stage of a palettized Xbox texture")]
+    bind = stream[stream.index("static float store_shown("):stream.index("/* a stage of a palettized Xbox texture")]
     source = tmp_path / "store_formats.c"
     source.write_text(r"""
 #include <assert.h>
@@ -437,6 +437,8 @@ static float got_min, got_max;
 static int got_mip;
 static VkSampler sampler_get_levels(const struct xgpu_stream_sampler *from, uint8_t axes, float min_lod, float max_lod)
 { (void)axes; got_min = min_lod; got_max = max_lod; got_mip = from->mip; return (VkSampler)(uintptr_t)1; }
+static int sampler_room = 1;
+int xgpu_vulkan_sampler_room(void) { return sampler_room; }
 """ + bind + r"""
 int main(void)
 {
@@ -514,6 +516,21 @@ int main(void)
     described.width = 256;
     described.cube_map = 1;
     assert(!store_bind(&source, &texture, 0));
+    described.cube_map = 0;
+    /* (display.prism_texture_fade: the shown level, between the level
+    before and the resident one, is the most detailed sampled; a whole
+    level once the samplers are many; never past the stock's last) */
+    current.resident = 2;
+    current.shown = 2.75f;
+    assert(store_bind(&source, &texture, 0) && got_min == 2.75f && got_max > 12.0f);
+    sampler_room = 0;
+    assert(store_bind(&source, &texture, 0) && got_min == 3.0f);
+    sampler_room = 1;
+    current.shown = 1.0f;
+    assert(store_bind(&source, &texture, 0) && got_min == 2.0f);
+    described.levels = 5;
+    current.shown = 11.5f;
+    assert(store_bind(&source, &texture, 0) && got_min == 8.0f && got_max > 8.0f);
     return 0;
 }
 """)

@@ -59,8 +59,14 @@ struct xgpu_texture_store_answer
 	int status, format;
 };
 int xgpu_backend_texture_store_map(unsigned long generation, unsigned long tier, unsigned long budget_megabytes,
-	int loading, struct xgpu_texture_store_query const *queries, unsigned long count,
+	unsigned long flags, struct xgpu_texture_store_query const *queries, unsigned long count,
 	struct xgpu_texture_store_answer *answers);
+/* the record's flags (xgpu_stream.h's XGPU_STREAM_TEXTURE_STORE_*): a map
+loading, display.prism_prefetch, display.prism_texture_fade's milliseconds
+a level from bit 16 */
+#define STORE_LOADING 1ul
+#define STORE_PREFETCH 2ul
+#define STORE_FADE_SHIFT 16
 void xgpu_backend_texture_store_hook(unsigned long (*hook)(unsigned long resource));
 int xgpu_backend_texture_store_available(void);
 
@@ -126,6 +132,10 @@ static struct
 	unsigned long settings_read;
 	int tier, sent_tier;
 	long budget, sent_budget;
+	/* the record's options (STORE_PREFETCH, STORE_FADE_SHIFT): sent with
+	the next record (a change alone sends none: the map's replacements are
+	not read again for it) */
+	unsigned long options;
 	/* a store is open on the host (a record with files sent) */
 	boolean open;
 	boolean map_loaded;
@@ -180,6 +190,13 @@ static void settings_read(
 	if (mod_textures_globals.budget < 0)
 	{
 		mod_textures_globals.budget = 0;
+	}
+	{
+		long fade = config_integer("display.prism_texture_fade");
+
+		fade = fade < 0 ? 0 : fade > 2000 ? 2000 : fade;
+		mod_textures_globals.options = (config_boolean("display.prism_prefetch") ? STORE_PREFETCH : 0) |
+			((unsigned long)fade << STORE_FADE_SHIFT);
 	}
 
 	return;
@@ -435,7 +452,8 @@ static void textures_send(
 	answers = malloc((size_t)count * sizeof(*answers));
 	mod_textures_globals.tags = tag_count > 0 ? memory_zeroed((size_t)tag_count * sizeof(*mod_textures_globals.tags)) : NULL;
 	if (!answers || (tag_count > 0 && !mod_textures_globals.tags) || !xgpu_backend_texture_store_map(++mod_textures_globals.generation,
-		(unsigned long)mod_textures_globals.tier, (unsigned long)mod_textures_globals.budget, at_load, queries,
+		(unsigned long)mod_textures_globals.tier, (unsigned long)mod_textures_globals.budget,
+		(at_load ? STORE_LOADING : 0) | mod_textures_globals.options, queries,
 		(unsigned long)count, answers))
 	{
 		memory_release(answers);
