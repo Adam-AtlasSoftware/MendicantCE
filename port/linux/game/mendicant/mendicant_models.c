@@ -9,7 +9,10 @@ through the mods folder: ai.mendicant.weights is its tag-file key, by
 default "mendicant\models.aibw", which is the file
 mods/<mod>/tags/mendicant/models.aibw of a mod with no `maps =` in its
 mod.toml. It is read when a map starts and again whenever its size or time
-changes between maps. A missing file, a damaged one, one of a newer format
+changes between maps. Where no mod carries it, the build's own copy is taken
+(mendicant_models.aibw beside the game: port/linux/src/mendicant_shipped.h),
+which every release has, so that a download with the mod switched on plays
+with the trained models. A missing file, a damaged one, one of a newer format
 or one made for another doctrine leaves the runtime off, and the drill
 decides, as it did without brain.py.
 
@@ -47,6 +50,10 @@ they were.
 
 void platform_log(char const *format, ...);
 unsigned long system_milliseconds(void);
+/* port/linux/src/mendicant_shipped.c's: the build's own models file */
+unsigned long mendicant_shipped_models_size(unsigned long maximum_size, char *path, int path_size);
+int mendicant_shipped_models_copy(void *into, unsigned long size);
+void mendicant_shipped_models_release(void);
 
 /* ---------- constants */
 
@@ -83,6 +90,8 @@ static struct
 	unsigned long size;
 	unsigned long stamp[2];
 	boolean stamp_valid;
+	/* ...which is the build's own (no mod has one) */
+	boolean shipped;
 	int status;
 	/* the doctrine the game runs, as the decision mask reads it */
 	unsigned char chain_covenant[MENDICANT_MODELS_MAXIMUM_CHAINS];
@@ -136,7 +145,8 @@ static void mendicant_models_status(int status, char const *path, char const *wh
 	switch (status)
 	{
 	case _mendicant_models_status_missing:
-		platform_log("mendicant: no models (%s is in no mod): the drill decides", mendicant_config.weights);
+		platform_log("mendicant: no models (%s is in no mod, and the build's own, %s, is missing): the drill "
+			"decides", mendicant_config.weights, path ? path : "mendicant_models.aibw");
 		break;
 	case _mendicant_models_status_unreadable:
 		platform_log("mendicant: models %s could not be read: the drill decides", path);
@@ -145,7 +155,8 @@ static void mendicant_models_status(int status, char const *path, char const *wh
 		platform_log("mendicant: models %s refused, %s: the drill decides", path, why);
 		break;
 	case _mendicant_models_status_loaded:
-		platform_log("mendicant: models %s: strategy %s/%s, per-enemy %s/%s, stance %s/%s (Covenant/Marines)", path,
+		platform_log("mendicant: models %s%s: strategy %s/%s, per-enemy %s/%s, stance %s/%s (Covenant/Marines)", path,
+			mendicant_models.shipped ? " (the build's own: no mod has any)" : "",
 			mendicant_models.weights.has_strategy[_mendicant_infer_covenant] ? "yes" : "no",
 			mendicant_models.weights.has_strategy[_mendicant_infer_marines] ? "yes" : "no",
 			mendicant_models.weights.has_squad[_mendicant_infer_covenant] ? "yes" : "no",
@@ -270,68 +281,12 @@ static void mendicant_models_squad(struct model_bridge *bridge, int side, int co
 
 /* ---------- public code */
 
-/* at each map while ai.mendicant.models is set: seeds the sampling, and
-reads the models when they are not loaded or their file changed. FALSE:
-there are no models, and the drill decides. */
-boolean mendicant_runtime_load(void)
+/* the file's bytes taken as the models: whether they are loaded (the bytes
+are the caller's still) */
+static boolean mendicant_models_take(unsigned char *data, unsigned long size, char const *path)
 {
-	long file;
-	char const *path;
-	unsigned long size = 0, stamp[2] = { 0, 0 };
-	unsigned char *data;
-	int error;
+	int error = mendicant_infer_load(&mendicant_models.weights, data, size, mendicant_doctrine_hash());
 
-	mendicant_models_seed();
-	if (!mendicant_config.models)
-	{
-		mendicant_runtime_dispose();
-		mendicant_models.status = _mendicant_models_status_off;
-		return FALSE;
-	}
-
-	file = port_mods_file_find(mendicant_config.weights, NULL);
-	if (file == NONE)
-	{
-		mendicant_runtime_dispose();
-		mendicant_models_status(_mendicant_models_status_missing, NULL, NULL);
-		return FALSE;
-	}
-	path = port_mods_file_path(file);
-	if (!path)
-		path = mendicant_config.weights;
-	if (!port_mods_file_stamp(file, &size, stamp) || !size || size > MENDICANT_MODELS_MAXIMUM_FILE_SIZE)
-	{
-		mendicant_runtime_dispose();
-		mendicant_models_status(_mendicant_models_status_unreadable, path, NULL);
-		return FALSE;
-	}
-
-	/* the same file as last time, loaded or refused: as it was */
-	if (mendicant_models.stamp_valid && size == mendicant_models.size && stamp[0] == mendicant_models.stamp[0] &&
-		stamp[1] == mendicant_models.stamp[1] && !strncmp(path, mendicant_models.path, sizeof(mendicant_models.path) - 1))
-	{
-		return mendicant_models.loaded;
-	}
-
-	mendicant_models_unload();
-	mendicant_models.stamp_valid = TRUE;
-	mendicant_models.size = size;
-	mendicant_models.stamp[0] = stamp[0];
-	mendicant_models.stamp[1] = stamp[1];
-	strncpy(mendicant_models.path, path, sizeof(mendicant_models.path) - 1);
-	mendicant_models.path[sizeof(mendicant_models.path) - 1] = 0;
-	/* (a new file is news, whatever came of the last) */
-	mendicant_models.status = _mendicant_models_status_none;
-
-	data = (unsigned char *)malloc(size);
-	if (!data || !port_mods_file_read(file, 0, data, size))
-	{
-		free(data);
-		mendicant_models_status(_mendicant_models_status_unreadable, path, NULL);
-		return FALSE;
-	}
-	error = mendicant_infer_load(&mendicant_models.weights, data, size, mendicant_doctrine_hash());
-	free(data);
 	if (error == _mendicant_infer_ok && (mendicant_models.weights.chains != (unsigned long)mendicant_doctrine_chains() ||
 		mendicant_models.weights.step_choices != (unsigned long)mendicant_doctrine_step_choices() ||
 		mendicant_models.weights.chains > MENDICANT_MODELS_MAXIMUM_CHAINS))
@@ -352,11 +307,116 @@ boolean mendicant_runtime_load(void)
 	return TRUE;
 }
 
+/* no mod has the models: the build's own file (mendicant_shipped.h), read
+once and kept as it came out (loaded or refused) until the runtime is
+disposed of */
+static boolean mendicant_models_load_shipped(void)
+{
+	char path[256];
+	unsigned long size;
+	unsigned char *data;
+	boolean loaded;
+
+	if (mendicant_models.stamp_valid && mendicant_models.shipped)
+		return mendicant_models.loaded;
+	mendicant_runtime_dispose();
+	size = mendicant_shipped_models_size(MENDICANT_MODELS_MAXIMUM_FILE_SIZE, path, (int)sizeof(path));
+	if (!size)
+	{
+		mendicant_models_status(_mendicant_models_status_missing, path, NULL);
+		return FALSE;
+	}
+	mendicant_models.stamp_valid = TRUE;
+	mendicant_models.shipped = TRUE;
+	mendicant_models.size = size;
+	mendicant_models.stamp[0] = mendicant_models.stamp[1] = 0;
+	strncpy(mendicant_models.path, path, sizeof(mendicant_models.path) - 1);
+	mendicant_models.path[sizeof(mendicant_models.path) - 1] = 0;
+	mendicant_models.status = _mendicant_models_status_none;
+
+	data = (unsigned char *)malloc(size);
+	if (!data || !mendicant_shipped_models_copy(data, size))
+	{
+		free(data);
+		mendicant_shipped_models_release();
+		mendicant_models_status(_mendicant_models_status_unreadable, path, NULL);
+		return FALSE;
+	}
+	mendicant_shipped_models_release();
+	loaded = mendicant_models_take(data, size, path);
+	free(data);
+	return loaded;
+}
+
+/* at each map while ai.mendicant.models is set: seeds the sampling, and
+reads the models when they are not loaded or their file changed. FALSE:
+there are no models, and the drill decides. */
+boolean mendicant_runtime_load(void)
+{
+	long file;
+	char const *path;
+	unsigned long size = 0, stamp[2] = { 0, 0 };
+	unsigned char *data;
+	boolean loaded;
+
+	mendicant_models_seed();
+	if (!mendicant_config.models)
+	{
+		mendicant_runtime_dispose();
+		mendicant_models.status = _mendicant_models_status_off;
+		return FALSE;
+	}
+
+	file = port_mods_file_find(mendicant_config.weights, NULL);
+	if (file == NONE)
+		return mendicant_models_load_shipped();
+	path = port_mods_file_path(file);
+	if (!path)
+		path = mendicant_config.weights;
+	if (!port_mods_file_stamp(file, &size, stamp) || !size || size > MENDICANT_MODELS_MAXIMUM_FILE_SIZE)
+	{
+		mendicant_runtime_dispose();
+		mendicant_models_status(_mendicant_models_status_unreadable, path, NULL);
+		return FALSE;
+	}
+
+	/* the same file as last time, loaded or refused: as it was */
+	if (mendicant_models.stamp_valid && !mendicant_models.shipped && size == mendicant_models.size &&
+		stamp[0] == mendicant_models.stamp[0] && stamp[1] == mendicant_models.stamp[1] &&
+		!strncmp(path, mendicant_models.path, sizeof(mendicant_models.path) - 1))
+	{
+		return mendicant_models.loaded;
+	}
+
+	mendicant_models_unload();
+	mendicant_models.stamp_valid = TRUE;
+	mendicant_models.shipped = FALSE;
+	mendicant_models.size = size;
+	mendicant_models.stamp[0] = stamp[0];
+	mendicant_models.stamp[1] = stamp[1];
+	strncpy(mendicant_models.path, path, sizeof(mendicant_models.path) - 1);
+	mendicant_models.path[sizeof(mendicant_models.path) - 1] = 0;
+	/* (a new file is news, whatever came of the last) */
+	mendicant_models.status = _mendicant_models_status_none;
+
+	data = (unsigned char *)malloc(size);
+	if (!data || !port_mods_file_read(file, 0, data, size))
+	{
+		free(data);
+		mendicant_models_status(_mendicant_models_status_unreadable, path, NULL);
+		return FALSE;
+	}
+	loaded = mendicant_models_take(data, size, path);
+	free(data);
+	return loaded;
+}
+
 /* the weights freed: the next load reads the file again */
 void mendicant_runtime_dispose(void)
 {
 	mendicant_models_unload();
 	mendicant_models.stamp_valid = FALSE;
+	mendicant_models.shipped = FALSE;
 	mendicant_models.path[0] = 0;
 }
 
