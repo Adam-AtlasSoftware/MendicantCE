@@ -16,8 +16,11 @@
 > **Downloads:** MendicantCE's builds, for Linux (x86-64) and Windows (x64),
 > are on <https://github.com/Adam-AtlasSoftware/MendicantCE/releases>. They
 > hold no game data: the game plays from your own Halo: Combat Evolved Xbox
-> disc image. Problems with them go to
-> <https://github.com/Adam-AtlasSoftware/MendicantCE/issues>.
+> disc image. Problems with them go to this repository's issue tracker,
+> <https://github.com/Adam-AtlasSoftware/MendicantCE/issues>, once its owner
+> has opened it (GitHub shows no Issues tab until then), and never to
+> OpenH1's. The Windows build is compiled and started by CI without game
+> data and has not been played yet ([MENDICANT.md](MENDICANT.md)).
 
 <p align="center">
   <a href="https://openh1.com"><img src="website/public/media/og.jpg" alt="OpenH1: welcome back, soldier" width="100%"></a>

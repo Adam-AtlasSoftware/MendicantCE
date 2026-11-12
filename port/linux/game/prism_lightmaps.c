@@ -191,6 +191,9 @@ static struct
 	unsigned long read_at;
 	int read, enabled, rebaked_mode;
 	unsigned long ready_count, built_count, cached_count;
+	/* display.prism_lightmaps "rebaked": the structure's pages made without
+	a rebaked file (the first is said in the log) */
+	unsigned long rebaked_missing;
 } plm;
 
 static pthread_mutex_t plm_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -811,6 +814,7 @@ static void plm_release(void)
 	plm.current = -1;
 	plm.current_data = 0;
 	plm.map[0] = 0;
+	plm.rebaked_missing = 0;
 	/* (results of jobs for these pages still on their way are dropped) */
 	plm.generation++;
 }
@@ -832,8 +836,8 @@ static int plm_settings(void)
 				!halo_server_mode();
 
 			if (enabled != plm.enabled || rebaked != plm.rebaked_mode)
-				platform_log("prism lightmaps: %s %s (finer copies x%ld)", rebaked ? "the rebaked pages" : "the finer copies",
-					enabled ? "on" : "off", factor);
+				platform_log("prism lightmaps: %s %s (finer copies x%ld)",
+					rebaked ? "rebaked pages, where a page has one," : "the finer copies", enabled ? "on" : "off", factor);
 			plm.enabled = enabled;
 		}
 		/* (the pages are let go whenever the kind they were made as
@@ -959,6 +963,13 @@ static void plm_collect(void)
 					plm.map, (int)plm.bsp, job->page, job->width, job->height, width, height, job->triangle_count,
 					job->rebaked ? "rebaked (light and direction)" : job->from_cache ? "from the cache" : "built and cached",
 					job->milliseconds);
+				/* (the setting asks for rebaked pages and this one has no
+				file, or one refused above: no download has any, and the
+				line above alone read as a rebaked page drawn) */
+				if (job->rebaked_path[0] && !job->rebaked && !plm.rebaked_missing++)
+					platform_log("prism lightmaps: display.prism_lightmaps \"rebaked\": no rebaked page of %s bsp %d "
+						"page %ld (%s/%s): drawn as smooth, as every page of it without one (said of the first)",
+						plm.map, (int)plm.bsp, job->page, platform_data_root(), job->rebaked_path);
 			}
 			else
 			{

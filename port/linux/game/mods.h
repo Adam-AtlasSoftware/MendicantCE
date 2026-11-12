@@ -141,6 +141,9 @@ struct shader;
 
 long mod_materials_update(boolean remove_all, boolean at_load);
 void mod_materials_tags_unloaded(void);
+/* (mods.c, as a map loads) whether a mod that is on has a surface map for
+the map */
+boolean mod_materials_surface_maps_any(void);
 
 /* ---------- prototypes/MOD_TEXTURES.C (display.prism_textures: the
 replacements the host draws, port/linux/vulkan/xgpu_texture_store.h) */

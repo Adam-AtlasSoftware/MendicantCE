@@ -1854,6 +1854,56 @@ void mod_materials_tags_unloaded(
 	return;
 }
 
+/* (mods.c, as a map loads) whether a mod that is on has a surface map for
+the map: one an overlay's shader names, or one next to a bitmap's tag
+(surface_of_bitmap's names) */
+boolean mod_materials_surface_maps_any(
+	void)
+{
+	struct tag_iterator iterator;
+	long tag_index;
+	short entry, picture;
+
+	for (entry = 0; entry < mod_materials_globals.shader_count; entry++)
+	{
+		struct overlay_shader const *shader = &mod_materials_globals.shaders[entry];
+
+		for (picture = 0; picture < shader->surface_count; picture++)
+		{
+			if (shader->surfaces[picture] != NONE)
+			{
+				return TRUE;
+			}
+		}
+	}
+	tag_iterator_new(&iterator, BITMAP_GROUP_TAG);
+	while ((tag_index = tag_iterator_next(&iterator)) != NONE)
+	{
+		struct bitmap_group const *group = bitmap_group_get(tag_index);
+		char const *name = tag_get_name(tag_index);
+
+		if (!group || !name)
+		{
+			continue;
+		}
+		for (picture = 0; picture < MAXIMUM_CLASS_MASKS && picture < group->bitmaps.count; picture++)
+		{
+			char path[MAXIMUM_NAME + 32];
+
+			if (picture)
+				snprintf(path, sizeof(path), "%s%s%d.png", name, SURFACE_FILE_EXTENSION, picture);
+			else
+				snprintf(path, sizeof(path), "%s%s.png", name, SURFACE_FILE_EXTENSION);
+			if (port_mods_file_find(path, mods_map_name()) != NONE)
+			{
+				return TRUE;
+			}
+		}
+	}
+
+	return FALSE;
+}
+
 void mod_materials_draw_begin(
 	struct shader const *shader,
 	real camera_distance,

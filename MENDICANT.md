@@ -76,10 +76,26 @@ No such pack is published. The formats are documented (`docs/mods.md`) and
 the tools that read and check them are in `tools/`; the tools that built the
 author's own packs from the game's data are not part of this repository.
 
+A setting of these that is on and finds no file changes nothing in the
+picture. The game's log (`halo.log`) then says so once for each map, in a
+line that begins `prism` and ends `drawn stock` (for LIGHTMAPS Rebaked,
+`drawn as smooth`), and names the folder or file it looked for.
+
 **On Windows**, TEXTURE DETAIL, TEXTURE MEMORY, PBR MATERIALS, REMODELS, MODEL
-MEMORY and SECONDARY MOTION are not available yet, with or without a pack:
-their rows are greyed out and the log says so. The rest of PRISM is the same
-as on Linux.
+MEMORY and SECONDARY MOTION are not in the build yet, with or without a
+pack: their rows are greyed out and the log says so.
+
+**What has been run, and what has not.** The Linux build was run on the
+author's computer, in the menus and in campaign levels, with PRISM's
+settings and with MENDICANT AI on; ray tracing was measured there on two
+NVIDIA cards and on no other maker's. **The Windows build has not been
+played.** It is compiled by GitHub's Windows runner,
+which also starts it without game data and without a graphics card, as far
+as the line that says no maps were found: that shows the program loads and
+writes its settings, and nothing about its window, Vulkan, sound, input,
+the disc image's file picker, MENDICANT AI or PRISM on Windows. What this
+file says of the Windows build beyond that is what its code is written to
+do.
 
 World ambient occlusion (an OpenH1 setting) is a little lighter here than in
 OpenH1: `display.ambient_occlusion_strength` (SHADE DEPTH) is new, and 0.8 by
@@ -129,7 +145,8 @@ At its first start the game asks for the disc image:
   the game, and choose it on the game's own screen with a controller, the
   keyboard or the mouse.
 - **Windows:** select it in the file picker the game opens. A disc image
-  next to `halo.exe` is taken without one.
+  next to `halo.exe` is taken without one. (As the code is written: the
+  Windows build's first start has not been run, "What has been run", above.)
 
 The game then extracts the disc's `maps/` folder (and its movies, when the
 image has them) and starts. "Game data" in OpenH1's README says the rest
@@ -170,13 +187,18 @@ What it still shares with an OpenH1 on the same computer:
 
 ## Reporting problems
 
-Report a problem with this build in this repository, and nowhere else:
-<https://github.com/Adam-AtlasSoftware/MendicantCE/issues>. Say which build
+A problem with this build is reported to this fork and nowhere else: its
+repository's issue tracker,
+<https://github.com/Adam-AtlasSoftware/MendicantCE/issues>. The tracker has
+to have been opened by the repository's owner for that: where GitHub shows
+no Issues tab on <https://github.com/Adam-AtlasSoftware/MendicantCE>, it has
+not been yet, and this build then has no place for reports. Say which build
 it is (the commit in `SOURCE.txt`, or Settings › Profiles › About), your
 system and graphics card, and what you had turned on; `halo.log` and
 `debug.txt`, which the game leaves on your computer, usually say what
-happened. OpenH1's issue tracker and Discord are for OpenH1's own builds:
-its developers did not make this one and cannot help with it.
+happened. OpenH1's issue tracker and Discord are for OpenH1's own builds,
+whether or not this fork's tracker is open: its developers did not make
+this build and cannot help with it.
 
 ## Building it
 

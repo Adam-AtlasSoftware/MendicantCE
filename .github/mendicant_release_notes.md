@@ -1,4 +1,4 @@
-MendicantCE is a modified version of [OpenH1](https://github.com/OpenH1/OpenH1) (Halo: Combat Evolved for the Xbox, ported natively), changed by Adam Wiley. **It is not OpenH1's build**: OpenH1's developers did not make it and do not support it, so do not report its problems to OpenH1's tracker or Discord: they go to [this repository's issues](https://github.com/Adam-AtlasSoftware/MendicantCE/issues).
+MendicantCE is a modified version of [OpenH1](https://github.com/OpenH1/OpenH1) (Halo: Combat Evolved for the Xbox, ported natively), changed by Adam Wiley. **It is not OpenH1's build**: OpenH1's developers did not make it and do not support it, so do not report its problems to OpenH1's tracker or Discord: they go to [this repository's issues](https://github.com/Adam-AtlasSoftware/MendicantCE/issues), which its owner has to have opened (GitHub shows no Issues tab until then).
 
 Source of this build: commit [`@SHORT@`](https://github.com/Adam-AtlasSoftware/MendicantCE/tree/@COMMIT@) of the branch `mendicant-prism` (`SOURCE.txt` in each zip says the same). Licence: AGPL-3.0-or-later. No game data is in the downloads: the game plays from your own copy of Halo: Combat Evolved for the Xbox.
 
@@ -31,6 +31,9 @@ Source of this build: commit [`@SHORT@`](https://github.com/Adam-AtlasSoftware/M
 
 ## Known limits
 
+- **The Windows build has not been played.** CI compiles it and starts it without game data or a graphics card, as far as "no maps found"; its window, Vulkan, sound, input, the disc image's file picker, MENDICANT AI and PRISM have not been run on Windows. The Linux build was run on the author's computer, in the menus and in campaign levels.
+- **Ray tracing** was measured on two NVIDIA cards on Linux, and on no other maker's cards.
+- A PRISM setting that needs a pack and finds none draws the stock game; `halo.log` says so once a map (`prism ...: drawn stock`).
 - **Windows:** TEXTURE DETAIL, TEXTURE MEMORY, PBR MATERIALS, REMODELS, MODEL MEMORY and SECONDARY MOTION are not available yet (greyed out), with or without a pack.
 - Linux shares the saved games' folder `~/.local/share/halo-linux` with an OpenH1 on the same computer (`paths.saves` moves it).
 - Internet games it hosts are public by default and use the same brokers and network version as OpenH1's, so OpenH1 and OpenCE players can join them, at 30 ticks.
