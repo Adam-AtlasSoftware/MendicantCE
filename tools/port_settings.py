@@ -1524,6 +1524,18 @@ PAGES = {
             ("LIGHT FREEDOM", "display.prism_rt_mood", [("CE", "0"), ("SOME", "50"), ("FULL", "100")],
              "How far the bounced light may move a character's light from the game's own. CE keeps it; Full "
              "lets it go up to a quarter brighter or darker.", "desktop"),
+            # (PRISM's baked shadows: the sun masks baked on this machine,
+            # port/linux/game/prism_lightmaps.c; with or without the rays, not
+            # greyed out where they cannot be traced)
+            (SECTION, "BAKED SHADOWS"),
+            ("BAKED SHADOWS", "display.prism_baked_shadows", [("OFF", "off"), ("SHARP", "sharp")],
+             "Sharp: the sun's shadows in the levels' own baked light drawn as crisp as ray tracing's, from a sun "
+             "map baked on this computer from your maps. Each place keeps its brightness. Off draws the lightmaps' "
+             "own soft edges.", "desktop"),
+            ("BAKED SHADOW DEPTH", "display.prism_baked_shadow_strength", [("LIGHT", "0.5"), ("NATURAL", "1"),
+                                                                           ("DEEP", "1.5")],
+             "How far Sharp baked shadows go: Light keeps some of the lightmaps' softness, Deep darkens the shaded "
+             "side more.", "desktop"),
         ],
     },
     STREAMER[0]: {

@@ -63,6 +63,29 @@ by the host; the draws of the pages that have one are keyed so, draw by
 draw (prism_lightmaps_rebaked_drawing). A page with no file, or a file
 that fails a check, is drawn as "smooth" draws it (its finer copy, with
 display.prism_lightmap_upsample 2 or 4; else the stock page filtered).
+
+display.prism_baked_shadows "sharp": the sun's shadows in the page's light
+sharpened by its visibility baked finely on this machine from the level's
+own geometry (the remodel's where it has one: art_pipeline's
+sunmask_bake.py and sunmask_encode.py; Cycles, the game's sun through a
+disc as wide as the ray tracing's, 8 or 16 times CE's density), read from
+<data>/prism_lightmaps/sun/<map>_<bsp>_<page>.psm (local, never shipped):
+"PSM1", the version (1), CE's page's width and height, the factor, the
+tile's size in its texels (4), the hash of CE's page's texels (as above),
+the flags (0), the tiles across and down, the tiles stored, the deflated
+size, the inflated size, a CRC-32 of the 52 bytes before it and the
+deflated bytes; then the deflated bytes: an entry of 4 bytes for each tile
+(the tile stored's number + 1, 16 bits, 0 none; the visibility; 0), then
+the tiles stored, each 4 x factor texels square of RGBA (the light's
+factor against the stock page and against the rebaked page, each log2(f) x
+127 / 3 + 128; the visibility; 255). The worker lays the page's image out
+with it below the light (xgpu.h's XGPU_LIGHTMAP_FILTER_SUN): the rebaked
+page's two halves, the finer copy, or (display.prism_lightmaps "stock")
+the stock page's texels, then the entries and the tiles, the factors
+scaled by display.prism_baked_shadow_strength, and the layout in the last
+row. A page whose file is missing or fails a check is drawn as before
+without it; so is every page with the setting "off" (the default): nothing
+is read and no draw is keyed differently.
 */
 
 #include "cseries.h"
@@ -109,6 +132,9 @@ unsigned long *xgpu_texture_565_argb(void const *header, unsigned long *width, u
 /* (d3d8_device.c) prism_lightmaps_filter's: the lightmaps smoothed; the
 texture bound to a stage */
 int prism_lightmaps_filter(void);
+/* (d3d8_device.c) whether the backend reads the lightmaps' filters at all */
+int prism_lightmaps_capable(void);
+double config_real(const char *name);
 void const *halo_texture_bound(int stage);
 
 void prism_lightmaps_begin(void const *lightmap_bitmap);
@@ -116,6 +142,7 @@ void prism_lightmaps_bsp_switched(void);
 void prism_lightmaps_map_unloaded(void);
 unsigned int prism_lightmaps_replacement(unsigned long data, unsigned long *levels);
 int prism_lightmaps_rebaked_drawing(void);
+int prism_lightmaps_sun_drawing(void);
 
 /* ---------- constants */
 
@@ -133,6 +160,17 @@ int prism_lightmaps_rebaked_drawing(void);
 #define PRL_VERSION 2
 #define PRL_HEADER 40
 #define PRL_FACTOR_MOST 8
+/* the sun masks' files, and the image they are laid out in (xgpu.h's
+XGPU_LIGHTMAP_FILTER_SUN: its rows and the tiles' places aligned to 64 so
+that the host's levels never mix two tiles) */
+#define PSM_MAGIC 0x314d5350UL /* "PSM1" */
+#define PSM_VERSION 1
+#define PSM_HEADER 56
+#define PSM_TILE 4
+#define PSM_FACTOR_MOST 16
+#define PSM_TILES_MOST 65535
+#define PSM_ALIGN 64
+#define PSM_SIDE_MOST 16384
 
 enum
 {
@@ -164,11 +202,18 @@ struct plm_job
 	file's) */
 	char rebaked_path[256];
 	int rebaked;
+	/* display.prism_baked_shadows: the sun mask's file's path (empty none),
+	the strength its factors are scaled by, whether rgba has it below the
+	light (and so the image's size: sun_width by sun_height) */
+	char sun_path[256];
+	float sun_strength;
+	int sun;
+	unsigned long sun_width, sun_height;
 };
 
 struct plm_page
 {
-	int state, rebaked;
+	int state, rebaked, sun;
 	unsigned int image;
 	unsigned long levels, data;
 };
@@ -189,7 +234,8 @@ static struct
 	unsigned long current_data;
 	/* the settings as config_changes() was */
 	unsigned long read_at;
-	int read, enabled, rebaked_mode;
+	int read, enabled, rebaked_mode, smooth_mode, sun_mode;
+	float sun_strength;
 	unsigned long ready_count, built_count, cached_count;
 } plm;
 
@@ -745,6 +791,186 @@ static int plm_rebaked_read(struct plm_job *job)
 	return good;
 }
 
+static unsigned long plm_align(unsigned long value, unsigned long to)
+{
+	return (value + to - 1) / to * to;
+}
+
+/* display.prism_baked_shadows: the page's sun mask, where its file holds
+this page's: the page's image laid out again with it below the light
+(xgpu.h's XGPU_LIGHTMAP_FILTER_SUN; job->rgba the light as the other steps
+made it, else the stock page's texels), job->sun 1 */
+static int plm_sun_read(struct plm_job *job)
+{
+	unsigned char *bytes = NULL, *payload = NULL, *image = NULL;
+	unsigned long size = 0, factor, tile, tiles_x, tiles_y, stored, deflated, inflated, entries_size, tile_bytes;
+	unsigned long content_width, content_height, width, y0, ya, per_row, end, height, row, column, index, entry_rows;
+	FILE *file;
+	int good = 0;
+
+	if (!job->sun_path[0] || !(file = fopen(job->sun_path, "rb")))
+		return 0;
+	if (fseek(file, 0, SEEK_END) == 0)
+		size = (unsigned long)ftell(file);
+	fseek(file, 0, SEEK_SET);
+	if (size > PSM_HEADER && size < 512UL * 1024 * 1024 && (bytes = malloc(size)) != NULL &&
+		fread(bytes, 1, size, file) == size)
+		good = 1;
+	fclose(file);
+	if (!good)
+	{
+		free(bytes);
+		return 0;
+	}
+	good = 0;
+	factor = plm_get32(bytes + 16);
+	tile = plm_get32(bytes + 20);
+	tiles_x = plm_get32(bytes + 32);
+	tiles_y = plm_get32(bytes + 36);
+	stored = plm_get32(bytes + 40);
+	deflated = plm_get32(bytes + 44);
+	inflated = plm_get32(bytes + 48);
+	entries_size = tiles_x * tiles_y * 4;
+	tile_bytes = (tile * factor) * (tile * factor) * 4;
+	if (plm_get32(bytes) != PSM_MAGIC || plm_get32(bytes + 4) != PSM_VERSION)
+		platform_log("prism lightmaps: %s: not a sun mask of this version", job->sun_path);
+	else if (plm_get32(bytes + 8) != job->width || plm_get32(bytes + 12) != job->height)
+		platform_log("prism lightmaps: %s: baked for a page of another size", job->sun_path);
+	else if (plm_get32(bytes + 24) != job->hash)
+		platform_log("prism lightmaps: %s: baked against another page (its hash %08lx, the page's %08lx)",
+			job->sun_path, plm_get32(bytes + 24), job->hash);
+	else if (factor < 1 || factor > PSM_FACTOR_MOST || (factor & (factor - 1)) || tile != PSM_TILE ||
+		tiles_x != (job->width + PSM_TILE - 1) / PSM_TILE || tiles_y != (job->height + PSM_TILE - 1) / PSM_TILE ||
+		stored > PSM_TILES_MOST || inflated != entries_size + stored * tile_bytes || PSM_HEADER + deflated != size)
+		platform_log("prism lightmaps: %s: damaged", job->sun_path);
+	else if (plm_crc32(plm_crc32(0, bytes, 52), bytes + PSM_HEADER, deflated) != plm_get32(bytes + 52))
+		platform_log("prism lightmaps: %s: damaged (its CRC)", job->sun_path);
+	else if ((payload = malloc(inflated)) != NULL &&
+		z_uncompress(payload, &inflated, bytes + PSM_HEADER, deflated) == 0 && inflated == entries_size + stored * tile_bytes)
+		good = 1;
+	free(bytes);
+	if (!good)
+	{
+		free(payload);
+		return 0;
+	}
+	/* (every entry names a tile stored, or none) */
+	for (index = 0; index < tiles_x * tiles_y; index++)
+	{
+		if (((unsigned long)payload[index * 4] | (unsigned long)payload[index * 4 + 1] << 8) > stored)
+		{
+			platform_log("prism lightmaps: %s: damaged (an entry)", job->sun_path);
+			free(payload);
+			return 0;
+		}
+	}
+	/* the content: the light as the other steps made it (the rebaked
+	page's two halves, the finer copy), else the stock page's texels */
+	if (job->rgba)
+	{
+		content_width = job->width * job->factor * (job->rebaked ? 2 : 1);
+		content_height = job->height * job->factor;
+	}
+	else
+	{
+		content_width = job->width;
+		content_height = job->height;
+	}
+	width = plm_align(content_width > tile * factor ? content_width : tile * factor, PSM_ALIGN);
+	y0 = plm_align(content_height, PSM_ALIGN);
+	entry_rows = (tiles_x * tiles_y + width - 1) / width;
+	ya = plm_align(y0 + entry_rows, PSM_ALIGN);
+	per_row = width / (tile * factor);
+	end = ya + (stored + per_row - 1) / per_row * (tile * factor);
+	height = plm_align(end + 1, PSM_ALIGN);
+	if (width > PSM_SIDE_MOST || height > PSM_SIDE_MOST || content_width > 65535 || content_height > 65535 ||
+		(image = calloc(width * height, 4)) == NULL)
+	{
+		platform_log("prism lightmaps: %s: %lux%lu is too large; drawn without it", job->sun_path, width, height);
+		free(payload);
+		return 0;
+	}
+	/* the content, its last texel and last row again to the regions' edges */
+	for (row = 0; row < y0; row++)
+	{
+		unsigned char *out = image + row * width * 4;
+		unsigned long from = row < content_height ? row : content_height - 1;
+
+		if (job->rgba)
+			memcpy(out, job->rgba + from * content_width * 4, content_width * 4);
+		else
+		{
+			for (column = 0; column < content_width; column++)
+			{
+				unsigned long argb = job->argb[from * content_width + column];
+
+				out[column * 4 + 0] = (unsigned char)(argb >> 16);
+				out[column * 4 + 1] = (unsigned char)(argb >> 8);
+				out[column * 4 + 2] = (unsigned char)argb;
+				out[column * 4 + 3] = 255;
+			}
+		}
+		for (column = content_width; column < width; column++)
+			memcpy(out + column * 4, out + (content_width - 1) * 4, 4);
+	}
+	/* the entries, then the tiles, their factors by the strength */
+	memcpy(image + y0 * width * 4, payload, entries_size);
+	for (index = 0; index < stored; index++)
+	{
+		unsigned char const *from = payload + entries_size + index * tile_bytes;
+		unsigned long x = (index % per_row) * tile * factor, y = ya + (index / per_row) * tile * factor, t;
+
+		for (row = 0; row < tile * factor; row++)
+		{
+			unsigned char *out = image + ((y + row) * width + x) * 4;
+
+			memcpy(out, from + row * tile * factor * 4, tile * factor * 4);
+			if (job->sun_strength != 1.0f)
+			{
+				for (t = 0; t < tile * factor; t++)
+				{
+					int channel;
+
+					for (channel = 0; channel < 2; channel++)
+					{
+						float code = 128.0f + ((float)out[t * 4 + channel] - 128.0f) * job->sun_strength;
+
+						out[t * 4 + channel] = (unsigned char)(code < 1.0f ? 1.0f : code > 255.0f ? 255.0f : code + 0.5f);
+					}
+				}
+			}
+		}
+	}
+	/* the layout, in the last row */
+	{
+		unsigned long numbers[8];
+		unsigned char *out = image + (height - 1) * width * 4;
+
+		numbers[0] = content_width;
+		numbers[1] = content_height;
+		numbers[2] = y0;
+		numbers[3] = ya;
+		numbers[4] = tiles_x;
+		numbers[5] = tiles_y;
+		numbers[6] = tile * factor;
+		numbers[7] = per_row;
+		for (index = 0; index < 8; index++)
+		{
+			out[index * 2] = (unsigned char)numbers[index];
+			out[index * 2 + 1] = (unsigned char)(numbers[index] >> 8);
+		}
+	}
+	free(payload);
+	free(job->rgba);
+	job->rgba = image;
+	job->sun = 1;
+	job->sun_width = width;
+	job->sun_height = height;
+	platform_log("prism lightmaps: page %ld's sun mask: x%lu, %lu of %lu tiles stored, %lux%lu", job->page, factor,
+		stored, tiles_x * tiles_y, width, height);
+	return 1;
+}
+
 static void *plm_worker(void *context)
 {
 	(void)context;
@@ -771,6 +997,8 @@ static void *plm_worker(void *context)
 			if (!job->from_cache && plm_build(job))
 				plm_cache_write(job);
 		}
+		/* (display.prism_baked_shadows: the sun mask below the light) */
+		plm_sun_read(job);
 		job->milliseconds = (unsigned long)((SDL_GetTicksNS() - started) / 1000000ULL);
 		pthread_mutex_lock(&plm_lock);
 		job->next = NULL;
@@ -825,27 +1053,40 @@ static int plm_settings(void)
 		plm.read_at = config_changes();
 		char const *mode = config_string("display.prism_lightmaps");
 		int rebaked = mode && !strcmp(mode, "rebaked");
+		/* (display.prism_baked_shadows: the sun masks, over whichever light
+		is drawn: the stock page's too) */
+		char const *baked = config_string("display.prism_baked_shadows");
+		int sun = baked && !strcmp(baked, "sharp") && prism_lightmaps_capable();
+		float strength = (float)config_real("display.prism_baked_shadow_strength");
 
+		strength = strength < 0.0f ? 0.0f : strength > 2.0f ? 2.0f : strength;
+		/* (the finer copies only where the lightmaps are drawn smooth, or
+		rebaked with smooth ones for the pages without) */
+		if (!prism_lightmaps_filter())
+			factor = 0;
 		factor = factor >= 4 ? 4 : factor >= 2 ? 2 : 0;
 		{
-			int enabled = (factor || rebaked) && prism_lightmaps_filter() && !config_boolean("debug.null_renderer") &&
-				!halo_server_mode();
+			int enabled = (((factor || rebaked) && prism_lightmaps_filter()) || sun) &&
+				!config_boolean("debug.null_renderer") && !halo_server_mode();
 
-			if (enabled != plm.enabled || rebaked != plm.rebaked_mode)
-				platform_log("prism lightmaps: %s %s (finer copies x%ld)", rebaked ? "the rebaked pages" : "the finer copies",
-					enabled ? "on" : "off", factor);
+			if (enabled != plm.enabled || rebaked != plm.rebaked_mode || sun != plm.sun_mode)
+				platform_log("prism lightmaps: %s %s (finer copies x%ld)%s", rebaked ? "the rebaked pages" :
+					"the finer copies", enabled ? "on" : "off", factor, sun ? ", the sun masks" : "");
 			plm.enabled = enabled;
 		}
 		/* (the pages are let go whenever the kind they were made as
 		changes, on or off: else turning "rebaked" off and "smooth" on
 		again found the rebaked pages, two halves side by side, still ready
 		and drew them as smooth pages) */
-		if ((unsigned long)factor != plm.factor || rebaked != plm.rebaked_mode)
+		if ((unsigned long)factor != plm.factor || rebaked != plm.rebaked_mode || sun != plm.sun_mode ||
+			(sun && strength != plm.sun_strength))
 		{
 			plm_release();
 			plm.factor = (unsigned long)factor;
 		}
 		plm.rebaked_mode = rebaked;
+		plm.sun_mode = sun;
+		plm.sun_strength = strength;
 	}
 	return plm.enabled;
 }
@@ -940,6 +1181,12 @@ static void plm_collect(void)
 			unsigned long width = job->width * job->factor * (job->rebaked ? 2 : 1), height = job->height * job->factor, side,
 				levels = 1;
 
+			if (job->sun)
+			{
+				width = job->sun_width;
+				height = job->sun_height;
+			}
+
 			for (side = width > height ? width : height; side > 1; side >>= 1)
 				levels++;
 			page->image = job->rgba ? xgpu_image_create(job->rgba, width, height, levels, PLM_IMAGE_RGBA, 1) : 0;
@@ -949,6 +1196,7 @@ static void plm_collect(void)
 				job->rgba = NULL;
 				page->levels = levels;
 				page->rebaked = job->rebaked;
+				page->sun = job->sun;
 				page->state = _plm_page_ready;
 				plm.ready_count++;
 				if (job->from_cache)
@@ -957,14 +1205,16 @@ static void plm_collect(void)
 					plm.built_count++;
 				platform_log("prism lightmaps: %s bsp %d page %ld: %lux%lu to %lux%lu, %ld triangles, %s in %lu ms",
 					plm.map, (int)plm.bsp, job->page, job->width, job->height, width, height, job->triangle_count,
-					job->rebaked ? "rebaked (light and direction)" : job->from_cache ? "from the cache" : "built and cached",
+					job->rebaked ? (job->sun ? "rebaked (light and direction), with its sun mask" :
+					"rebaked (light and direction)") : job->sun ? "with its sun mask" : job->from_cache ? "from the cache" :
+					"built and cached",
 					job->milliseconds);
 			}
 			else
 			{
 				page->state = _plm_page_failed;
 				platform_log("prism lightmaps: %s bsp %d page %ld: %s; drawn as it is", plm.map, (int)plm.bsp, job->page,
-					job->rgba ? "not built (memory)" : "no rebaked page and no finer copy");
+					job->rgba ? "not built (memory)" : "no rebaked page, no finer copy and no sun mask");
 			}
 		}
 		plm_job_free(job);
@@ -987,7 +1237,8 @@ static void plm_queue_page(void const *texture, long page_index, unsigned long d
 		return;
 	job->argb = xgpu_texture_565_argb(texture, &width, &height);
 	if (!job->argb || !width || !height || width * plm.factor > PLM_SIDE_MOST || height * plm.factor > PLM_SIDE_MOST ||
-		(!plm.triangle_counts[page_index] && !plm.rebaked_mode) || (!plm.factor && !plm.rebaked_mode))
+		(!plm.triangle_counts[page_index] && !plm.rebaked_mode && !plm.sun_mode) ||
+		(!plm.factor && !plm.rebaked_mode && !plm.sun_mode))
 	{
 		platform_log("prism lightmaps: %s bsp %d page %ld drawn as it is (%s, %lux%lu, %ld triangles)", plm.map,
 			(int)plm.bsp, page_index, job->argb ? "its size" : "not an R5G6B5 texture", width, height,
@@ -1038,6 +1289,10 @@ static void plm_queue_page(void const *texture, long page_index, unsigned long d
 	if (plm.rebaked_mode)
 		snprintf(job->rebaked_path, sizeof(job->rebaked_path), "prism_lightmaps/rebaked/%s_%d_%ld.prl", name, (int)plm.bsp,
 			page_index);
+	if (plm.sun_mode)
+		snprintf(job->sun_path, sizeof(job->sun_path), "prism_lightmaps/sun/%s_%d_%ld.psm", name, (int)plm.bsp,
+			page_index);
+	job->sun_strength = plm.sun_strength;
 	/* (no finer copy to fall back on without display.prism_lightmap_upsample,
 	or without the page's triangles) */
 	if (!plm.triangle_counts[page_index])
@@ -1122,8 +1377,10 @@ unsigned int prism_lightmaps_replacement(unsigned long data, unsigned long *leve
 	if (plm.current < 0 || !plm.enabled || data != plm.current_data)
 		return 0;
 	page = &plm.pages[plm.current];
-	/* (a rebaked page is drawn only as one: never read as a smooth page) */
-	if (page->state != _plm_page_ready || !page->image || (page->rebaked && !plm.rebaked_mode))
+	/* (a rebaked page is drawn only as one: never read as a smooth page;
+	a page with its sun mask only so keyed) */
+	if (page->state != _plm_page_ready || !page->image || (page->rebaked && !plm.rebaked_mode) ||
+		(page->sun && !plm.sun_mode))
 		return 0;
 	*levels = page->levels;
 	return page->image;
@@ -1138,6 +1395,21 @@ int prism_lightmaps_rebaked_drawing(void)
 
 	if (plm.current < 0 || !plm.enabled || !plm.rebaked_mode || plm.pages[plm.current].state != _plm_page_ready ||
 		!plm.pages[plm.current].rebaked || !plm.pages[plm.current].image)
+		return 0;
+	texture = halo_texture_bound(2);
+	return texture && ((unsigned long const *)texture)[1] == plm.current_data;
+}
+
+/* (d3d8_device.c, draw by draw) whether the draw is the lightmap pass of a
+page whose image has its sun mask below its light (xgpu.h's
+XGPU_LIGHTMAP_FILTER_SUN): the page last begun is ready with it and its
+texture is the one bound to stage 2 */
+int prism_lightmaps_sun_drawing(void)
+{
+	void const *texture;
+
+	if (plm.current < 0 || !plm.enabled || !plm.sun_mode || plm.pages[plm.current].state != _plm_page_ready ||
+		!plm.pages[plm.current].sun || !plm.pages[plm.current].image)
 		return 0;
 	texture = halo_texture_bound(2);
 	return texture && ((unsigned long const *)texture)[1] == plm.current_data;

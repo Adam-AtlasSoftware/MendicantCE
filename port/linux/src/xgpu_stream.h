@@ -1101,9 +1101,11 @@ struct xgpu_stream_pixel_key
 };
 
 /* the pixel key's prism byte: PRISM v2's model light (xgpu.h's
-XGPU_PRISM_*, below XGPU_STREAM_PRISM_LIGHTMAP_SHIFT) and display.prism_lightmaps'
-filter (XGPU_LIGHTMAP_FILTER_*, shifted by it); 0 as the game draws */
-#define XGPU_STREAM_PRISM_LIGHTMAP_SHIFT 6
+XGPU_PRISM_*, below XGPU_STREAM_PRISM_LIGHTMAP_SHIFT: five bits) and
+display.prism_lightmaps' filter (XGPU_LIGHTMAP_FILTER_*, with
+display.prism_baked_shadows' XGPU_LIGHTMAP_FILTER_SUN: three bits, shifted
+by it); 0 as the game draws */
+#define XGPU_STREAM_PRISM_LIGHTMAP_SHIFT 5
 #define XGPU_STREAM_PRISM_LIGHTING_MASK ((1 << XGPU_STREAM_PRISM_LIGHTMAP_SHIFT) - 1)
 #define XGPU_STREAM_PRISM(prism_lighting, lightmap_filter) \
 	((uint8_t)(((prism_lighting) & XGPU_STREAM_PRISM_LIGHTING_MASK) | ((lightmap_filter) << XGPU_STREAM_PRISM_LIGHTMAP_SHIFT)))
