@@ -57,8 +57,12 @@ surface is drawn far; after the triangles come, for each of the part's
 surfaces, the first and count of its far triangles (32 bits each: a range
 of the part's triangles, which may be its near ones) and its bounding
 sphere (centre and radius, 4 floats). A far surface keeps every vertex its
-near triangles have on the stock triangle's edges (art_pipeline/world_geo/
-wg2_lod.py), so near and far surfaces side by side meet without a crack.
+near triangles have on the stock triangle's edges, and every edge two
+surfaces share is the same vertices on both sides (art_pipeline/world_geo/
+wg2_seal.py, then wg2_far2.py), so near and far surfaces side by side meet
+without a crack whichever level each is drawn at: a T-junction, or a far
+level's chord against a neighbour's edge, leaves a line of the sky or the
+level behind showing through (debug.crack_view finds them).
 The camera's distance to the sphere, less its radius, scaled by the view's
 zoom (the vertical field of view against 70 degrees), chooses: the same for
 every pass of the frame, so the z-equal passes agree.
