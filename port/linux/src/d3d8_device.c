@@ -377,11 +377,11 @@ static unsigned char world_ao_key(int light)
 	{
 		return 0;
 	}
-	/* (display.prism_rt "pathtraced": the path tracer's light read in the
-	occlusion's place, its added light too: xgpu.h) */
+	/* (display.prism_rt "pathtraced", and the sun traced whole: the traced
+	light read in the occlusion's place, its added light too: xgpu.h) */
 	return (unsigned char)(light | XGPU_AMBIENT_OCCLUSION_WORLD | (view ? XGPU_AMBIENT_OCCLUSION_WORLD_VIEW : 0) |
 		(sampled ? XGPU_AMBIENT_OCCLUSION_WORLD_SAMPLED : 0) |
-		(sampled && !view && prism_rt_mode() == 3 ? XGPU_AMBIENT_OCCLUSION_RT_LIGHT : 0));
+		(sampled && !view && prism_rt_light() ? XGPU_AMBIENT_OCCLUSION_RT_LIGHT : 0));
 }
 
 /* ... and the pre-pass's twins of the window's draws made with them (each
@@ -461,9 +461,9 @@ int halo_prism_rt_available(void)
 }
 
 void halo_prism_rt_static(int phase, unsigned long generation, unsigned long first, unsigned long count,
-	unsigned long triangles, float const *positions)
+	unsigned long triangles, void const *data)
 {
-	xgpu_backend_rt_static(phase, generation, first, count, triangles, positions);
+	xgpu_backend_rt_static(phase, generation, first, count, triangles, data);
 }
 
 void halo_prism_rt_frame(void const *frame)

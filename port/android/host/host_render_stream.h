@@ -160,7 +160,7 @@ struct host_render_backend
 	XGPU_STREAM_RT_SLICE_TRIANGLES), each frame's lights and settings
 	(light_count at most XGPU_STREAM_RT_LIGHTS). NULL (either): no ray
 	tracing (INITIALIZE's ray_tracing then 0, and nothing sent) */
-	void (*rt_static)(void *context, const struct xgpu_stream_rt_static *record, const float *positions);
+	void (*rt_static)(void *context, const struct xgpu_stream_rt_static *record, const void *data);
 	void (*rt_frame)(void *context, const struct xgpu_stream_rt_frame *record);
 
 	void (*set_constants)(void *context, const struct xgpu_stream_constants *record);

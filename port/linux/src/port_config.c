@@ -719,6 +719,80 @@ static const struct config_setting config_settings[] =
 		_platform_desktop,
 		"PRISM ray tracing: \"half\" traces the bounced light every other frame\n"
 		"(shadows every frame); \"full\" every frame." },
+	{ "display.prism_rt_style", _config_string, "\"faithful\"", "HALO_PRISM_RT_STYLE", _environment_value,
+		_platform_desktop,
+		"PRISM ray tracing's look (docs/prism_rt.md, \"Styles\"): \"faithful\"\n"
+		"keeps each region of the level as bright as CE's lightmaps made it and\n"
+		"CE's exposure; \"remix\" lights the level by the traced rig alone (CE's\n"
+		"own lights at the scales fitted to its lightmaps), its exposure kept\n"
+		"about CE's, its highlights rolled off and every glowing surface a\n"
+		"light. Chooses the defaults of the look settings left \"style\" (or -1)." },
+	{ "display.prism_rt_anchor", _config_integer, "-1", "HALO_PRISM_RT_ANCHOR", _environment_value,
+		_platform_desktop,
+		"PRISM path tracing: how closely each region's traced light is held to\n"
+		"the light CE's lightmap gave it, 0 to 100 (100 within a half either\n"
+		"way, 0 not at all); -1 the style's (faithful 100, remix 0)." },
+	{ "display.prism_rt_sun", _config_string, "\"all\"", "HALO_PRISM_RT_SUN", _environment_value,
+		_platform_desktop,
+		"PRISM ray tracing's sun (\"shadows\" and \"gi\"): \"all\" traces the\n"
+		"sun's light whole, the level's own shadows as sharp as the objects'\n"
+		"and both as dark as the light rig says; \"objects\" only darkens\n"
+		"where an object blocks the sun (the level's shadows the lightmap's)." },
+	{ "display.prism_sun_size", _config_string, "\"auto\"", "HALO_PRISM_SUN_SIZE", _environment_value,
+		_platform_desktop,
+		"PRISM ray tracing: the sun's disc its shadows' edges soften by: \"ce\"\n"
+		"the sky's own (0.2 degrees on most maps), \"real\" the real sun's\n"
+		"(0.53 degrees), \"soft\" 2.3 degrees, \"auto\" the sky's or the real\n"
+		"sun's, the wider." },
+	{ "display.prism_rt_emissive", _config_string, "\"style\"", "HALO_PRISM_RT_EMISSIVE", _environment_value,
+		_platform_desktop,
+		"PRISM path tracing's lamps: \"lights\" the light panels and lamps CE's\n"
+		"lightmaps were lit by light the traced level; \"all\" the glowing parts\n"
+		"of surfaces (screens, panels) too; \"off\" none; \"style\" the style's\n"
+		"(faithful lights, remix all)." },
+	{ "display.prism_rt_emissive_scale", _config_real, "1.0", "HALO_PRISM_RT_EMISSIVE_SCALE", _environment_value,
+		_platform_desktop,
+		"PRISM path tracing: the lamps' and glows' brightness, 0 to 4 (1 the\n"
+		"brightness fitted to CE's lightmaps)." },
+	{ "display.prism_rt_materials", _config_string, "\"average\"", "HALO_PRISM_RT_MATERIALS", _environment_value,
+		_platform_desktop,
+		"PRISM ray tracing: the colour light takes from what it bounces off:\n"
+		"\"average\" each surface's own (its textures' mean), \"grey\" one grey\n"
+		"for everything (as before, for comparing)." },
+	{ "display.prism_rt_alpha", _config_boolean, "true", "HALO_PRISM_RT_ALPHA", _environment_value,
+		_platform_desktop,
+		"PRISM ray tracing: the level's see-through surfaces (grates, fences,\n"
+		"leaves drawn with holes) cast shadows through their holes; false\n"
+		"leaves them out (cheaper)." },
+	{ "display.prism_rt_bounces", _config_integer, "0", "HALO_PRISM_RT_BOUNCES", _environment_value,
+		_platform_desktop,
+		"PRISM path tracing: how many times light bounces before the cache\n"
+		"takes over, 1 to 4; 0 by display.prism_rt_quality (low and medium 1,\n"
+		"high 2, ultra 3)." },
+	{ "display.prism_exposure", _config_string, "\"style\"", "HALO_PRISM_EXPOSURE", _environment_value,
+		_platform_desktop,
+		"PRISM path tracing's exposure: \"fixed\" CE's; \"ce\" follows the\n"
+		"traced light so that the frame's middle stays as bright as CE's\n"
+		"(within display.prism_exposure_range); \"auto\" adapts freely, as an\n"
+		"eye does; \"style\" the style's (faithful fixed, remix ce)." },
+	{ "display.prism_exposure_range", _config_real, "1.5", "HALO_PRISM_EXPOSURE_RANGE", _environment_value,
+		_platform_desktop,
+		"PRISM path tracing, exposure \"ce\": how far it may move from CE's, in\n"
+		"stops (0 to 6)." },
+	{ "display.prism_exposure_speed", _config_real, "2.0", "HALO_PRISM_EXPOSURE_SPEED", _environment_value,
+		_platform_desktop,
+		"PRISM path tracing: how fast the exposure adapts, in stops a second." },
+	{ "display.prism_exposure_bias", _config_real, "0.0", "HALO_PRISM_EXPOSURE_BIAS", _environment_value,
+		_platform_desktop,
+		"PRISM path tracing: stops added to the adapted exposure (-4 to 4)." },
+	{ "display.prism_tone_curve", _config_string, "\"style\"", "HALO_PRISM_TONE_CURVE", _environment_value,
+		_platform_desktop,
+		"PRISM path tracing: how the light past white is drawn: \"ce\" clipped,\n"
+		"as CE did; \"filmic\" rolled off gently (CE's darker tones kept);\n"
+		"\"aces\" the film industry's curve; \"local\" each region's light\n"
+		"compressed about its own level, so that a dark room beside a sunlit\n"
+		"doorway stays readable; \"style\" the style's (faithful ce, remix\n"
+		"local)." },
 	{ "display.structure_culling", _config_integer, STRUCTURE_CULLING_DEFAULT, "HALO_STRUCTURE_CULLING", _environment_value,
 		_platform_all,
 		"Which tests skip the level's triangles the camera cannot see, as bits\n"
@@ -4436,6 +4510,13 @@ static const struct
 	{ "display.prism_rt_objects", { "auto", "view_lod", "low_lod", NULL }, "auto" },
 	{ "display.prism_rt_world", { "auto", "remodel", "far", "stock", NULL }, "auto" },
 	{ "display.prism_rt_rate", { "full", "half", NULL }, "full" },
+	{ "display.prism_rt_style", { "faithful", "remix", NULL }, "faithful" },
+	{ "display.prism_rt_sun", { "all", "objects", NULL }, "all" },
+	{ "display.prism_sun_size", { "auto", "ce", "real", "soft", NULL }, "auto" },
+	{ "display.prism_rt_emissive", { "style", "off", "lights", "all", NULL }, "style" },
+	{ "display.prism_rt_materials", { "average", "grey", NULL }, "average" },
+	{ "display.prism_exposure", { "style", "fixed", "ce", "auto", NULL }, "style" },
+	{ "display.prism_tone_curve", { "style", "ce", "filmic", "aces", "local", NULL }, "style" },
 	{ "debug.prism_rt_view", { "off", "visibility", "ao", "gi", "reflections", "albedo", "normals", "probes",
 		"heat", NULL }, "off" },
 	{ "display.prism_lightmaps", { "stock", "smooth", "rebaked", NULL }, "stock" },

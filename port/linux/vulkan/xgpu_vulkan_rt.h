@@ -24,7 +24,7 @@ are made: INITIALIZE's ray_tracing */
 int xgpu_vulkan_rt_available(void);
 
 /* RT_STATIC and RT_FRAME (xgpu_stream.h) */
-void xgpu_vulkan_rt_static(const struct xgpu_stream_rt_static *record, const float *positions);
+void xgpu_vulkan_rt_static(const struct xgpu_stream_rt_static *record, const void *data);
 void xgpu_vulkan_rt_frame(const struct xgpu_stream_rt_frame *record);
 
 /* this frame traces (an RT_FRAME with a mode since the last frame's end) */
@@ -94,8 +94,18 @@ struct xgpu_vulkan_rt_draw
 	int volatile_source;
 	/* the submission the constants' and vertices' ranges are of */
 	uint64_t serial;
+	/* its base map's mean colour (linear), the traced hits' albedo; 0
+	none known */
+	float albedo[3];
+	int has_albedo;
+	/* a cutout's (foliage's) share of its texels drawn, below 1: its rays
+	take it as that share solid (traced as the others, its hits kept by that
+	chance); 1 opaque */
+	float coverage;
 };
 void xgpu_vulkan_rt_capture(const struct xgpu_vulkan_rt_draw *draw);
+/* the frame traces the cutouts (display.prism_rt_alpha) */
+int xgpu_vulkan_rt_alpha_traced(void);
 /* a draw the capture passed over (its layout or alpha test), counted */
 void xgpu_vulkan_rt_skipped(void);
 
@@ -107,5 +117,12 @@ the image the surfaces read (world AO's pass's texels' layout, at the
 pass's scale), or NULL (world AO's pass then draws as before) */
 struct xgpu_vulkan_image *xgpu_vulkan_rt_window_end(struct xgpu_vulkan_image *inputs, uint32_t width,
 	uint32_t height, const struct xgpu_world_ao_pass *pass);
+
+/* display.prism_tone_curve (with display.prism_rt "pathtraced"): the 3D
+view's rectangle (corners: x0 y0 x1 y1) through the frame's tone curve, in
+compute, before PRISM's grade and the tone map; 0 where none was drawn (no
+curve, no ray tracing this frame, a view not of half floats or
+multisampled) */
+int xgpu_vulkan_rt_tone_curve(struct xgpu_vulkan_image *view, const int32_t corners[4]);
 
 #endif

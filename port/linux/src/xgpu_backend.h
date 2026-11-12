@@ -439,12 +439,12 @@ BOOL xgpu_backend_materials_available(void);
 
 /* ---------- display.prism_rt (docs/prism_rt.md; xgpu_stream.h's RT_STATIC
 and RT_FRAME, their fields): the structure's triangles for the acceleration
-structures, a slice at a time (phase XGPU_RT_STATIC_*; positions count * 9
-floats), and each frame's mode, settings, sun, sky and lights (frame: a
+structures, a slice at a time (phase XGPU_RT_STATIC_*; data count * 9
+floats, or the phase's attributes, materials or alpha maps), and each frame's mode, settings, sun, sky and lights (frame: a
 struct xgpu_stream_rt_frame's body, its header unused). Nothing is sent
 where the backend cannot trace (xgpu_backend_capabilities' ray_tracing). */
 void xgpu_backend_rt_static(int phase, unsigned long generation, unsigned long first, unsigned long count,
-	unsigned long triangles, const float *positions);
+	unsigned long triangles, const void *data);
 struct xgpu_stream_rt_frame;
 void xgpu_backend_rt_frame(const struct xgpu_stream_rt_frame *frame);
 

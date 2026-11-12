@@ -3323,10 +3323,10 @@ static void stream_world_ao_field(void *context, const struct xgpu_stream_world_
 
 /* display.prism_rt: the structure's triangles and each frame's settings
 (xgpu_vulkan_rt.c) */
-static void stream_rt_static(void *context, const struct xgpu_stream_rt_static *record, const float *positions)
+static void stream_rt_static(void *context, const struct xgpu_stream_rt_static *record, const void *data)
 {
 	(void)context;
-	xgpu_vulkan_rt_static(record, positions);
+	xgpu_vulkan_rt_static(record, data);
 }
 
 static void stream_rt_frame(void *context, const struct xgpu_stream_rt_frame *record)
@@ -3472,6 +3472,7 @@ static void prepass_rt_capture(const struct draw_input *input, const struct xgpu
 	struct xgpu_vulkan_rt_draw draw;
 	uint32_t index, alpha = twin->pixel_program.alpha_test;
 	int alpha_tested;
+	float coverage;
 
 	/* (the occluders too: an object lighting itself, the Elites' armour,
 	casts its shadow as any other; the first-person weapon among them is
@@ -3486,9 +3487,12 @@ then, drawn opaque) */
 	alpha_tested = alpha && alpha != 0x207u && !((alpha == 0x204u || alpha == 0x206u) &&
 		stream.uniforms.alpha_reference < 1.5f);
 	/* (CE's models are all alpha tested at 127, their base maps' alpha the
-	holes: only those whose base map has holes are left out, until the
-	traces test the alpha themselves) */
+	holes: those whose base map has holes (foliage) traced by the share of
+	their texels drawn, display.prism_rt_alpha; the rest opaque) */
 	if (alpha_tested && xgpu_vulkan_textures_cutout(&stream.stages[0].stage) == 0)
+		alpha_tested = 0;
+	coverage = alpha_tested ? xgpu_vulkan_textures_coverage(&stream.stages[0].stage) : 1.0f;
+	if (alpha_tested && xgpu_vulkan_rt_alpha_traced() && coverage < 1.0f)
 		alpha_tested = 0;
 
 	if (alpha_tested || position->format != VK_FORMAT_R32G32B32_SFLOAT ||
@@ -3518,6 +3522,10 @@ then, drawn opaque) */
 	memset(&draw, 0, sizeof(draw));
 	draw.occluder = occlusion == XGPU_STREAM_WORLD_AO_OCCLUDER;
 	draw.serial = xgpu_vulkan_serial();
+	/* (its base map's mean colour: the traced hits' albedo; a cutout's
+	share of texels drawn) */
+	draw.has_albedo = xgpu_vulkan_textures_mean(&stream.stages[0].stage, draw.albedo);
+	draw.coverage = coverage;
 	/* (a part a replacement mesh draws, display.prism_models: its pieces as
 	the mesh store skinned them, in the world; a part its carrier stands
 	for, nothing) */
@@ -4177,8 +4185,11 @@ static void stream_tone_map(void *context, const struct xgpu_stream_tone_map *re
 	target->written++;
 	if (color_image == target->multisampled)
 		target->unresolved = 1;
-	/* (display.prism_tone's grade, then display.prism_bloom: their passes,
-	then the view's pass again for the tone map) */
+	/* (display.prism_tone_curve's curve over the traced light, then
+	display.prism_tone's grade, then display.prism_bloom: their passes, then
+	the view's pass again for the tone map) */
+	if (xgpu_vulkan_rt_tone_curve(color_image, record->corners))
+		targets_bind();
 	if ((record->bloom >> XGPU_PRISM_TONE_SHIFT) && xgpu_vulkan_post_prism_tone(color_image, record->corners,
 		(int)((record->bloom >> XGPU_PRISM_TONE_SHIFT) & 0xff)))
 		targets_bind();

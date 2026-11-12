@@ -569,3 +569,102 @@ float xgpu_texture_alpha_coverage(unsigned int format_word, unsigned int size_wo
 	free(decoded);
 	return (float)drawn / (float)(width * height);
 }
+
+/* ---------- display.prism_rt's materials (xgpu_coverage.h) */
+
+/* a 2D texture's first level no larger than largest each way, decoded
+(ARGB words, its size in *width and *height; free it); NULL where it cannot
+be read */
+static DWORD *texture_level_decoded(unsigned int format_word, unsigned int size_word, const unsigned char *texels,
+	unsigned long largest, unsigned long *width, unsigned long *height)
+{
+	struct xgpu_texture_description description;
+	unsigned long level = 0;
+	DWORD *decoded;
+
+	xgpu_texture_describe((DWORD)format_word, (DWORD)size_word, &description);
+	if (!texels || description.cube_map || description.depth > 1 || !description.width || !description.height ||
+		format_information(description.format).kind == _texel_unknown)
+	{
+		return NULL;
+	}
+	while (level + 1 < description.levels && (xgpu_texture_level_dimension(description.width, level) > largest ||
+		xgpu_texture_level_dimension(description.height, level) > largest))
+	{
+		level++;
+	}
+	*width = xgpu_texture_level_dimension(description.width, level);
+	*height = xgpu_texture_level_dimension(description.height, level);
+	decoded = malloc(*width * *height * sizeof(*decoded));
+	if (!decoded)
+		return NULL;
+	if (description.compressed)
+		xgpu_texture_decode_dxt(&description, level, texels + xgpu_texture_level_offset(&description, level), decoded);
+	else if (!xgpu_texture_decode_level(&description, level, texels + xgpu_texture_level_offset(&description, level),
+		NULL, decoded))
+	{
+		free(decoded);
+		return NULL;
+	}
+	return decoded;
+}
+
+int xgpu_texture_mean_color(unsigned int format_word, unsigned int size_word, const unsigned char *texels,
+	unsigned long largest, float mean[4])
+{
+	/* (each byte's value made linear: (v / 255) to the power 2.2, by a
+	table of whole steps made once) */
+	static float linear[256];
+	unsigned long width, height, texel;
+	double sum[4] = { 0.0, 0.0, 0.0, 0.0 };
+	DWORD *decoded = texture_level_decoded(format_word, size_word, texels, largest, &width, &height);
+	int channel;
+
+	if (!decoded)
+		return 0;
+	if (linear[255] == 0.0f)
+	{
+		int value;
+
+		for (value = 0; value < 256; value++)
+		{
+			double x = value / 255.0, y = x * x;
+			int step;
+
+			/* (x^2.2 = x^2 * x^0.2, x^0.2 by Newton's steps from x: the
+			platform's maths functions are not called) */
+			double r = x > 0.0 ? 1.0 : 0.0;
+
+			for (step = 0; step < 60 && x > 0.0; step++)
+				r -= (r * r * r * r * r - x) / (5.0 * r * r * r * r);
+			linear[value] = (float)(y * r);
+		}
+	}
+	for (texel = 0; texel < width * height; texel++)
+	{
+		DWORD word = decoded[texel];
+
+		sum[0] += linear[(word >> 16) & 0xFFu];
+		sum[1] += linear[(word >> 8) & 0xFFu];
+		sum[2] += linear[word & 0xFFu];
+		sum[3] += (double)((word >> 24) & 0xFFu) / 255.0;
+	}
+	free(decoded);
+	for (channel = 0; channel < 4; channel++)
+		mean[channel] = (float)(sum[channel] / (double)(width * height));
+	return 1;
+}
+
+int xgpu_texture_alpha_map(unsigned int format_word, unsigned int size_word, const unsigned char *texels,
+	unsigned long largest, unsigned char *alpha, unsigned long *width, unsigned long *height)
+{
+	unsigned long texel;
+	DWORD *decoded = texture_level_decoded(format_word, size_word, texels, largest, width, height);
+
+	if (!decoded)
+		return 0;
+	for (texel = 0; texel < *width * *height; texel++)
+		alpha[texel] = (unsigned char)((decoded[texel] >> 24) & 0xFFu);
+	free(decoded);
+	return 1;
+}

@@ -1485,11 +1485,29 @@ void xgpu_backend_mesh_draw(unsigned long instance, int region, int permutation,
 
 /* ---------- display.prism_rt (docs/prism_rt.md) */
 
+/* a slice's bytes by its phase (xgpu_stream.h's RT_STATIC; 0 for none) */
+static uint32_t rt_static_bytes(int phase, unsigned long count)
+{
+	switch (phase)
+	{
+	case XGPU_RT_STATIC_TRIANGLES:
+		return (uint32_t)(count * 9 * sizeof(float));
+	case XGPU_RT_STATIC_ATTRIBUTES:
+		return (uint32_t)(count * XGPU_STREAM_RT_ATTRIBUTE_WORDS * 4);
+	case XGPU_RT_STATIC_MATERIALS:
+		return (uint32_t)(count * XGPU_STREAM_RT_MATERIAL_FLOATS * 4);
+	case XGPU_RT_STATIC_ALPHA:
+		return (uint32_t)(count * 4);
+	default:
+		return 0;
+	}
+}
+
 void xgpu_backend_rt_static(int phase, unsigned long generation, unsigned long first, unsigned long count,
-	unsigned long triangles, const float *positions)
+	unsigned long triangles, const void *data)
 {
 	struct xgpu_stream_rt_static *record_body;
-	uint32_t size = phase == XGPU_RT_STATIC_TRIANGLES && positions ? (uint32_t)(count * 9 * sizeof(float)) : 0;
+	uint32_t size = data ? rt_static_bytes(phase, count) : 0;
 	unsigned char *place;
 
 	if (!stream.open || !stream.capabilities.ray_tracing || count > XGPU_STREAM_RT_SLICE_TRIANGLES)
@@ -1501,7 +1519,7 @@ void xgpu_backend_rt_static(int phase, unsigned long generation, unsigned long f
 	record_body->count = size ? (uint32_t)count : 0;
 	record_body->triangles = (uint32_t)triangles;
 	record_body->size = size;
-	record_body->data = size ? carry_one(&place, positions, size) : 0;
+	record_body->data = size ? carry_one(&place, data, size) : 0;
 }
 
 void xgpu_backend_rt_frame(const struct xgpu_stream_rt_frame *frame)
@@ -1517,7 +1535,8 @@ void xgpu_backend_rt_frame(const struct xgpu_stream_rt_frame *frame)
 	record_body->header = header;
 	if (record_body->light_count > XGPU_STREAM_RT_LIGHTS)
 		record_body->light_count = XGPU_STREAM_RT_LIGHTS;
-	stream_finite(&record_body->settings[0], 16 + 16 + XGPU_STREAM_RT_LIGHTS * 12, "ray tracing's frame", 0);
+	stream_finite(&record_body->settings[0], 16 + 16 + XGPU_STREAM_RT_RIG_FLOATS + XGPU_STREAM_RT_LIGHTS * 12,
+		"ray tracing's frame", 0);
 }
 
 /* ---------- display.prism_materials */

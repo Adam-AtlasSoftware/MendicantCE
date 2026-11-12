@@ -38,7 +38,7 @@ port/linux/README.md.
 #include <stdint.h>
 
 #define XGPU_STREAM_MAGIC 0x53504758u /* "XGPS" */
-#define XGPU_STREAM_VERSION 28
+#define XGPU_STREAM_VERSION 29
 #define XGPU_STREAM_LOADING_ART_BYTES (640u * 480u * 4u)
 
 /* ---------- the ring
@@ -1239,7 +1239,11 @@ static inline int xgpu_stream_world_ao_twin(struct xgpu_stream_pipeline_define *
 	definition->key.pixel.dynamic_lights = definition->pixel_program.dynamic_lights = 0;
 	definition->key.pixel.material_overlay = definition->pixel_program.material_overlay = 0;
 	definition->key.pixel.prism = 0;
-	definition->pixel_program.lightmap_filter = definition->pixel_program.prism_lighting = 0;
+	/* (a twin of a draw that reads display.prism_rt's traced light keeps
+	its lightmap's filter: it writes the light its lightmap gives) */
+	if (!(occlusion & 0x08u))
+		definition->pixel_program.lightmap_filter = 0;
+	definition->pixel_program.prism_lighting = 0;
 	definition->key.pixel.material_pbr = 0;
 	return 1;
 }
@@ -1724,7 +1728,7 @@ struct xgpu_stream_vr_screen_corrections
 
 /* ---------- display.prism_rt (docs/prism_rt.md)
 
-RT_STATIC: the structure BSP's opaque triangles in world space, for the
+RT_STATIC: the structure BSP's triangles in world space, for the
 acceleration structures the backend traces (its own copy: the host never
 reads the game's tags). Phase XGPU_RT_STATIC_BEGIN (a BSP's set begins:
 generation names it, triangles is its total, the data none),
@@ -1732,13 +1736,59 @@ _TRIANGLES (count triangles from first: 9 floats each, three corners'
 x y z in world units, at data), _END (the set is whole: the backend builds
 it, then traces it in place of the last), or _RELEASE (none: the map is
 gone). The guest sends at most XGPU_STREAM_RT_SLICE_TRIANGLES a frame,
-never while a map loads. */
+never while a map loads. With them, for display.prism_rt's materials and
+light rig (docs/prism_rt.md, "The rig"), sent before _END:
+_ATTRIBUTES (count triangles' attributes from first,
+XGPU_STREAM_RT_ATTRIBUTE_WORDS words each: the material and the
+triangle's kind (XGPU_RT_TRIANGLE_*) in the first, the three corners' base
+map coordinates as six floats after it, a word unused); _MATERIALS (count
+materials from first, XGPU_STREAM_RT_MATERIAL_FLOATS floats each:
+XGPU_RT_MATERIAL_*; triangles is their total); _ALPHA (count words from
+first of the alpha-tested materials' alpha maps, a byte a texel, at most
+XGPU_STREAM_RT_ALPHA_WORDS; triangles is their total). */
 enum
 {
 	XGPU_RT_STATIC_BEGIN,
 	XGPU_RT_STATIC_TRIANGLES,
 	XGPU_RT_STATIC_END,
 	XGPU_RT_STATIC_RELEASE,
+	XGPU_RT_STATIC_ATTRIBUTES,
+	XGPU_RT_STATIC_MATERIALS,
+	XGPU_RT_STATIC_ALPHA,
+};
+/* a triangle's kind (its attributes' first word, bits 16 and 17): drawn
+opaque, alpha-tested (traced with its material's alpha map), or a light
+alone (a transparent light card CE's radiosity lit from: sampled as a
+light, never traced) */
+enum
+{
+	XGPU_RT_TRIANGLE_OPAQUE,
+	XGPU_RT_TRIANGLE_ALPHA_TESTED,
+	XGPU_RT_TRIANGLE_LIGHT,
+};
+#define XGPU_STREAM_RT_ATTRIBUTE_WORDS 8u
+#define XGPU_STREAM_RT_MATERIAL_FLOATS 16u
+#define XGPU_STREAM_RT_MATERIALS 4096u
+#define XGPU_STREAM_RT_ALPHA_WORDS (8u << 20)
+/* a material's floats: its albedo (linear rgb), its flags
+(XGPU_RT_MATERIAL_FLAG_*, a whole number), the light it gives as a lamp
+(its radiance, linear, in the rig's units), its alpha test's reference
+(0 to 1), its alpha map (the byte its texels start at, width, height),
+its glow (a self-illumination map's mean light, linear), one unused */
+enum
+{
+	XGPU_RT_MATERIAL_ALBEDO = 0,
+	XGPU_RT_MATERIAL_FLAGS = 3,
+	XGPU_RT_MATERIAL_EMISSION = 4,
+	XGPU_RT_MATERIAL_ALPHA_REFERENCE = 7,
+	XGPU_RT_MATERIAL_ALPHA_MAP = 8,
+	XGPU_RT_MATERIAL_GLOW = 11,
+};
+enum
+{
+	XGPU_RT_MATERIAL_FLAG_LIGHT = 1,
+	XGPU_RT_MATERIAL_FLAG_ALPHA_TESTED = 2,
+	XGPU_RT_MATERIAL_FLAG_GLOW = 4,
 };
 #define XGPU_STREAM_RT_SLICE_TRIANGLES 65536u
 struct xgpu_stream_rt_static
@@ -1756,13 +1806,66 @@ pass reads it): the mode (XGPU_RT_*: 0 none, the backend's passes
 skipped, the occlusion as world AO found it), quality, resolution,
 denoiser, reflections, objects and rate (display.prism_rt_*: 0 the first
 value each lists), the mood (0 to 100), the debug view
-(XGPU_RT_VIEW_*); then sun: the direction toward the sky's sun (x y z,
+(XGPU_RT_VIEW_*); settings: the sun's share of a sunlit lightmap's and of a
+model's light the objects take where no rig is fitted, and whether the
+level traced is a remodel (1, its faces wound either way); then sun: the direction toward the sky's sun (x y z,
 0 none) and its strength's share of a sunlit lightmap's light (w), its
 colour (linear) and power, the sky's outdoor ambient (radiosity colour and
 power); the game clock (ticks, fraction) and the frame's number; then the
 lights (light_count of XGPU_STREAM_RT_LIGHTS: position and radius, colour
 and intensity, direction and cone cosine (w 2 for none), id and type) */
 #define XGPU_STREAM_RT_LIGHTS 64u
+/* the light rig (docs/prism_rt.md, "The rig": CE's own lights at the
+relight fit's scales), linear, in the units the fit made CE's lightmaps
+of: the sun's light (colour by power, scale and colour gain over pi: its
+light on a surface facing it squarely, as the bake's sun lamp gives it) and
+its angular diameter (radians: the
+disc traced, display.prism_sun_size); the sky's radiance (its outdoor
+ambient by power, scale and gain) and the power the fit found CE's pages
+in (1, or 2.2: a lightmap's texel is the light to 1 / that); the domes (the
+sky's other lights, up to XGPU_RT_DOMES: the direction toward each and the
+cosine of its half angle, then its radiance as the sun's and a 0); the
+settings (XGPU_RT_SETTING_*) */
+#define XGPU_RT_DOMES 4
+#define XGPU_STREAM_RT_RIG_FLOATS 64u
+enum
+{
+	XGPU_RT_RIG_SUN = 0,
+	XGPU_RT_RIG_SKY = 4,
+	XGPU_RT_RIG_DOMES = 8,
+	XGPU_RT_RIG_SETTINGS = 8 + XGPU_RT_DOMES * 8,
+};
+/* the rig's settings (from rig + XGPU_RT_RIG_SETTINGS):
+display.prism_rt_style (0 faithful, 1 remix), _anchor (0 to 1), _sun (0
+objects, 1 all), _emissive (0 off, 1 lights, 2 all), _emissive_scale,
+_materials (0 grey, 1 average), _bounces (0 by quality),
+display.prism_exposure (0 fixed, 1 ce, 2 auto), _range, _speed, _bias
+(EV, EV a second, EV), display.prism_tone_curve (0 ce, 1 filmic, 2 aces,
+3 local), a lightmap texel's size (world units: the blur CE's own sun
+shadows have), whether alpha-tested surfaces are traced
+(display.prism_rt_alpha), whether the rig was fitted for the BSP (1) or is
+the defaults (0), the share of the dynamic lights' light their traced
+shadows take (0 to 1) */
+enum
+{
+	XGPU_RT_SETTING_STYLE,
+	XGPU_RT_SETTING_ANCHOR,
+	XGPU_RT_SETTING_SUN,
+	XGPU_RT_SETTING_EMISSIVE,
+	XGPU_RT_SETTING_EMISSIVE_SCALE,
+	XGPU_RT_SETTING_MATERIALS,
+	XGPU_RT_SETTING_BOUNCES,
+	XGPU_RT_SETTING_EXPOSURE,
+	XGPU_RT_SETTING_EXPOSURE_RANGE,
+	XGPU_RT_SETTING_EXPOSURE_SPEED,
+	XGPU_RT_SETTING_EXPOSURE_BIAS,
+	XGPU_RT_SETTING_TONE_CURVE,
+	XGPU_RT_SETTING_PAGE_TEXEL,
+	XGPU_RT_SETTING_ALPHA,
+	XGPU_RT_SETTING_FITTED,
+	XGPU_RT_SETTING_DYNAMIC_SHADOWS,
+	XGPU_RT_SETTING_COUNT
+};
 enum
 {
 	XGPU_RT_OFF,
@@ -1789,6 +1892,9 @@ enum
 {
 	XGPU_RT_FLAG_NO_CACHE = 1,
 	XGPU_RT_FLAG_STOCK_MODELS = 2,
+	/* the surfaces read the traced texel as a factor and a light added
+	(xgpu.h's XGPU_AMBIENT_OCCLUSION_RT_LIGHT) in "shadows" and "gi" too */
+	XGPU_RT_FLAG_LIGHT = 4,
 };
 struct xgpu_stream_rt_frame
 {
@@ -1805,6 +1911,8 @@ struct xgpu_stream_rt_frame
 	float sun_color[4];
 	float sky[4];
 	float spare[4];
+	/* the light rig (XGPU_RT_RIG_*) */
+	float rig[XGPU_STREAM_RT_RIG_FLOATS];
 	float lights[XGPU_STREAM_RT_LIGHTS][12];
 };
 
@@ -1816,7 +1924,8 @@ XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_ring, 104);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_frame_end, 12);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_capabilities, 28);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_rt_static, 32);
-XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_rt_frame, 4 + 32 * 4 + 16 * 4 + XGPU_STREAM_RT_LIGHTS * 48);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_rt_frame, 4 + 32 * 4 + 16 * 4 + XGPU_STREAM_RT_RIG_FLOATS * 4 +
+	XGPU_STREAM_RT_LIGHTS * 48);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_material_overlay, 4 + 320 + 8 * 72);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_texture_store_map, 40);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_texture_store_query, 32);

@@ -69,7 +69,7 @@ enum
 	GLSL_F_ABS = 4, GLSL_F_SIGN = 6, GLSL_ACOS = 17, GLSL_ATAN = 18, GLSL_ATAN2 = 25, GLSL_FLOOR = 8, GLSL_FRACT = 10, GLSL_SIN = 13, GLSL_COS = 14, GLSL_POW = 26, GLSL_EXP = 27, GLSL_EXP2 = 29,
 	GLSL_LOG2 = 30, GLSL_SQRT = 31, GLSL_INVERSE_SQRT = 32, GLSL_F_MIN = 37, GLSL_F_MAX = 40, GLSL_F_CLAMP = 43,
 	GLSL_U_MIN = 38, GLSL_S_CLAMP = 45, GLSL_F_MIX = 46, GLSL_SMOOTH_STEP = 49, GLSL_LENGTH = 66, GLSL_CROSS = 68, GLSL_NORMALIZE = 69, GLSL_FIND_I_LSB = 73,
-	GLSL_PACK_SNORM_2X16 = 56, GLSL_PACK_HALF_2X16 = 58, GLSL_UNPACK_SNORM_2X16 = 60, GLSL_UNPACK_HALF_2X16 = 62,
+	GLSL_PACK_UNORM_4X8 = 55, GLSL_PACK_SNORM_2X16 = 56, GLSL_PACK_HALF_2X16 = 58, GLSL_UNPACK_SNORM_2X16 = 60, GLSL_UNPACK_HALF_2X16 = 62,
 };
 
 enum
@@ -4671,6 +4671,12 @@ the colour attachment, read where it is drawn, VK_KHR_dynamic_rendering_
 local_read's), each sample's own where the target is multisampled, and
 blends with it here; the pipeline's blending is off. */
 
+/* a colour's luminance (Rec. 709's weights) */
+static unsigned int luminance(struct module *m, unsigned int rgb)
+{
+	return fdot(m, rgb, constant_vector(m, 3, (const float[]){ 0.2126f, 0.7152f, 0.0722f }));
+}
+
 static unsigned int brightest_of(struct module *m, unsigned int rgb)
 {
 	return ext2(m, GLSL_F_MAX, m->t_float, extract(m, rgb, 0), ext2(m, GLSL_F_MAX, m->t_float, extract(m, rgb, 1),
@@ -5911,6 +5917,10 @@ static void overlay_light(struct module *m, struct pixel_state *state, BOOL poin
 		state->prism_shadow = prism_sun_model(m, state, p, n);
 	lit = model_lighting(m, state, point_lights, dynamic_lights, occlusion, fscale(m, 3, nm, extract(m, world_normal, 3)),
 		state->prism_cascades || state->prism_sun ? state->prism_shadow : 0);
+	/* (display.prism_rt's traced light added, xgpu.h's
+	XGPU_AMBIENT_OCCLUSION_RT_LIGHT: by the surface map's occlusion) */
+	if (occlusion && state->occlusion_add)
+		lit = fadd(m, 3, lit, fscale(m, 3, state->occlusion_add, state->prism_ao));
 	if (dynamic_lights)
 		lit = dynamic_light_add(m, lit, dynamic_light_sum(m, state, p, nm, nm, FALSE), FALSE);
 	lit = saturate(m, 3, fscale(m, 3, lit, fmul(m, 1, cavity, fadd(m, 1, one, fmul(m, 1, constant_float(m, 0.5f), rough)))));
@@ -6248,7 +6258,20 @@ static BOOL pbr_light(struct module *m, struct pixel_state *state, BOOL overlay,
 	diffuse = fadd(m, 3, diffuse, fscale(m, 3, xyz(m, uniform(m, U_MODEL_LIGHTS, 11)), ao));
 	/* (display.ambient_occlusion: the level's light about the model by the
 	world's occlusion, not the point lights') */
-	if (occlusion)
+	if (occlusion && state->occlusion_add)
+	{
+		/* (display.prism_rt's traced light, xgpu.h's
+		XGPU_AMBIENT_OCCLUSION_RT_LIGHT: the diffuse light by the factor and
+		the traced light added by the material's occlusion; the distant
+		lights' highlights by the traced light's share of CE's, at most 1.5:
+		dimmed in the traced shadows) */
+		unsigned int share = ext3(m, GLSL_F_CLAMP, m->t_float, fdiv(m, 1, luminance(m, state->occlusion_add),
+			fmax_scalar(m, 1, luminance(m, diffuse), 1.0e-4f)), constant_float(m, 0.0f), constant_float(m, 1.5f));
+
+		specular = fscale(m, 3, specular, share);
+		diffuse = fadd(m, 3, fscale(m, 3, diffuse, occlusion), fscale(m, 3, state->occlusion_add, ao));
+	}
+	else if (occlusion)
 	{
 		diffuse = fscale(m, 3, diffuse, occlusion);
 		specular = fscale(m, 3, specular, occlusion);
@@ -6893,8 +6916,20 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	effect_zsprite_fade) */
 	if (zsprite_hidden)
 		discard_if(&m, zsprite_hidden);
-	/* (finite: finite4; the pre-pass's twin, its inputs) */
-	if (world_inputs)
+	/* (finite: finite4; the pre-pass's twin, its inputs: with
+	display.prism_rt's traced light keyed, a lightmap pass's own light in its
+	fourth word, its square root 8 bits a channel and 255 in the fourth, the
+	light CE's lightmap gave the pixel: the anchor's and the exposure's
+	reference) */
+	if (world_inputs && occlusion_light == XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP &&
+		(program->ambient_occlusion & XGPU_AMBIENT_OCCLUSION_RT_LIGHT))
+	{
+		unsigned int light = ext1(&m, GLSL_SQRT, m.t_v3, saturate(&m, 3, xyz(&m, result)));
+		unsigned int packed = ext1(&m, GLSL_PACK_UNORM_4X8, m.t_uint, vec4_of(&m, light, constant_float(&m, 1.0f)));
+
+		store(&m, color_out, op3(&m, OP_COMPOSITE_INSERT, m.t_uv4, packed, world_ao_words, 3));
+	}
+	else if (world_inputs)
 		store(&m, color_out, world_ao_words);
 	else if (occluder)
 		store(&m, color_out, op(&m, OP_COMPOSITE_CONSTRUCT, m.t_uv4, 4, (unsigned int[]){ constant_uint(&m, 0),

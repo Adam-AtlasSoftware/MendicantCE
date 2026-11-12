@@ -107,6 +107,10 @@ int prism_rt_full_resolution(void);
 /* the sun's shadows traced this frame: the game's shadow under each object
 left out (render.c) */
 int prism_rt_sun_shadows(void);
+/* the surfaces read the traced light as a factor and a light added
+(xgpu.h's XGPU_AMBIENT_OCCLUSION_RT_LIGHT): "pathtraced", and "shadows" and
+"gi" with display.prism_rt_sun "all" at every pixel */
+int prism_rt_light(void);
 
 /* the map loaded (scenario_load: its scene found, its fields looked for in
 the cache; a missing one baked in the background, never here), a BSP

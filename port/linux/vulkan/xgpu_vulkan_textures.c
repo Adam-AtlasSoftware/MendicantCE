@@ -61,6 +61,7 @@ texture with a thickness is not let go while the guest keeps its texels.
 #endif
 
 #include <stdio.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -124,6 +125,12 @@ struct entry
 	known */
 	uint8_t cutout;
 	uint32_t cutout_generation;
+	float coverage;
+	/* (display.prism_rt) its first level's mean colour, linear (a byte to
+	the power 2.2), as of that generation (0 not looked at); 0 none */
+	float mean[3];
+	uint32_t mean_generation;
+	uint8_t mean_known;
 };
 
 static struct
@@ -832,7 +839,77 @@ int xgpu_vulkan_textures_cutout(const struct xgpu_stream_texture_stage *stage)
 			clear++;
 	}
 	entry->cutout = (uint64_t)clear * 5 >= (uint64_t)width * height ? 2 : 1;
+	entry->coverage = 1.0f - (float)clear / (float)(width * height);
 	return entry->cutout == 2;
+}
+
+/* display.prism_rt: the share of a cutout's texels drawn (its first
+level's alpha at half or more), as xgpu_vulkan_textures_cutout found it; 1
+where it is not known */
+float xgpu_vulkan_textures_coverage(const struct xgpu_stream_texture_stage *stage)
+{
+	const D3DCOLOR *palette;
+	struct entry *entry;
+
+	if (xgpu_vulkan_textures_cutout(stage) != 1 || !(entry = xbox_entry_current(stage, &palette)))
+		return 1.0f;
+	return entry->coverage;
+}
+
+/* display.prism_rt: a stage's Xbox texture's mean colour (its first level
+no larger than 64 a side, linear), read once a generation: 1, or 0 where
+it cannot be read (an image, a cube, unreadable) */
+int xgpu_vulkan_textures_mean(const struct xgpu_stream_texture_stage *stage, float mean[3])
+{
+	static float linear[256];
+	const struct xgpu_texture_description *description;
+	const D3DCOLOR *palette;
+	const unsigned char *source;
+	struct entry *entry;
+	DWORD *texels;
+	uint32_t width, height, index, level = 0;
+	double sum[3] = { 0.0, 0.0, 0.0 };
+
+	if (stage->source != XGPU_SOURCE_TEXTURE || !stage->resource || !(entry = xbox_entry_current(stage, &palette)) ||
+		!entry->generation)
+		return 0;
+	if (entry->mean_generation == entry->generation)
+	{
+		memcpy(mean, entry->mean, sizeof(entry->mean));
+		return entry->mean_known;
+	}
+	entry->mean_generation = entry->generation;
+	entry->mean_known = 0;
+	description = &entry->description;
+	source = host_pointer(entry->address);
+	if (description->cube_map || description->depth > 1 || !source)
+		return 0;
+	while (level + 1 < description->levels && (xgpu_texture_level_dimension(description->width, level) > 64 ||
+		xgpu_texture_level_dimension(description->height, level) > 64))
+		level++;
+	width = xgpu_texture_level_dimension(description->width, level);
+	height = xgpu_texture_level_dimension(description->height, level);
+	if (!width || !height || !(texels = converted_get((size_t)width * height)))
+		return 0;
+	if (description->compressed)
+		xgpu_texture_decode_dxt(description, level, source + xgpu_texture_level_offset(description, level), texels);
+	else if (!xgpu_texture_decode_level(description, level, source + xgpu_texture_level_offset(description, level),
+		palette, texels))
+		return 0;
+	if (linear[255] == 0.0f)
+		for (index = 0; index < 256; index++)
+			linear[index] = powf((float)index / 255.0f, 2.2f);
+	for (index = 0; index < width * height; index++)
+	{
+		sum[0] += linear[(texels[index] >> 16) & 0xffu];
+		sum[1] += linear[(texels[index] >> 8) & 0xffu];
+		sum[2] += linear[texels[index] & 0xffu];
+	}
+	for (index = 0; index < 3; index++)
+		entry->mean[index] = (float)(sum[index] / (double)(width * height));
+	entry->mean_known = 1;
+	memcpy(mean, entry->mean, sizeof(entry->mean));
+	return 1;
 }
 
 uint32_t xgpu_vulkan_textures_thickness_epoch(void)

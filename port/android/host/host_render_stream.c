@@ -613,15 +613,19 @@ static int decode_record(struct host_render_decoder *decoder, const unsigned cha
 	case XGPU_STREAM_RT_STATIC:
 	{
 		const struct xgpu_stream_rt_static *rt = (const void *)start;
-		const float *positions = NULL;
+		const void *data = NULL;
+		uint64_t stride = rt->phase == XGPU_RT_STATIC_TRIANGLES ? 9 * sizeof(float) :
+			rt->phase == XGPU_RT_STATIC_ATTRIBUTES ? XGPU_STREAM_RT_ATTRIBUTE_WORDS * 4 :
+			rt->phase == XGPU_RT_STATIC_MATERIALS ? XGPU_STREAM_RT_MATERIAL_FLOATS * 4 :
+			rt->phase == XGPU_RT_STATIC_ALPHA ? 4 : 0;
 
-		if (rt->phase > XGPU_RT_STATIC_RELEASE || rt->count > XGPU_STREAM_RT_SLICE_TRIANGLES ||
-			(uint64_t)rt->count * 9 * sizeof(float) != rt->size ||
+		if (rt->phase > XGPU_RT_STATIC_ALPHA || rt->count > XGPU_STREAM_RT_SLICE_TRIANGLES ||
+			(uint64_t)rt->count * stride != rt->size ||
 			(rt->size && !data_inside(decoder, start, size, rt->data, rt->size)))
 			return XGPU_STREAM_ERROR_BOUNDS;
 		if (rt->size)
-			positions = (const float *)host_pointer(rt->data);
-		CALL(rt_static, rt, positions);
+			data = host_pointer(rt->data);
+		CALL(rt_static, rt, data);
 		break;
 	}
 	case XGPU_STREAM_RT_FRAME:
