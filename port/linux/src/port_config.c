@@ -700,9 +700,11 @@ static const struct config_setting config_settings[] =
 		"level had (0 to 100; 100 keeps CE's mood, 0 the traced light alone)." },
 	{ "display.prism_rt_objects", _config_string, "\"auto\"", "HALO_PRISM_RT_OBJECTS", _environment_value,
 		_platform_desktop,
-		"PRISM ray tracing: the objects' shapes traced: \"auto\" or \"view_lod\"\n"
-		"as drawn (display.prism_models' replacement meshes where they are\n"
-		"drawn), \"low_lod\" the game's own models (cheaper)." },
+		"PRISM ray tracing: the objects' shapes traced: \"auto\" as drawn\n"
+		"(display.prism_models' replacement meshes) within 30 world units of\n"
+		"the eye and while the window's objects are under 60% of the traced\n"
+		"triangles' most, the game's own models past either; \"view_lod\" as\n"
+		"drawn always; \"low_lod\" the game's own models (cheaper)." },
 	{ "display.prism_rt_world", _config_string, "\"auto\"", "HALO_PRISM_RT_WORLD", _environment_value,
 		_platform_desktop,
 		"PRISM ray tracing: the level's shape traced: \"auto\" the remodel's far\n"

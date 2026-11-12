@@ -32,6 +32,11 @@ int xgpu_vulkan_rt_active(void);
 /* the frame traces the stock models, not the mesh store's replacements
 (display.prism_rt_objects "low_lod") */
 int xgpu_vulkan_rt_stock_models(void);
+/* port: a replacement mesh's pieces (that many triangles, its node 0 at
+origin) traced: display.prism_rt_objects "auto" within a reach of the eye
+and a share of the window's triangles, "view_lod" always; else the game's
+own model in their place */
+int xgpu_vulkan_rt_replacement_traced(const float origin[3], uint32_t triangles);
 
 /* a pre-pass draw of an object, as it is drawn, by where its vertices,
 indices and constants are on the GPU (nothing of them is read here: a

@@ -6398,6 +6398,9 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	keeps it) */
 	BOOL occluder = !world && (program->ambient_occlusion & XGPU_AMBIENT_OCCLUSION_WORLD_INPUTS);
 	unsigned int world_ao_words = 0;
+	/* port: a model's twin's light as CE lit it (display.prism_rt's
+	traced light keyed: its fourth word, as a lightmap pass's) */
+	unsigned int model_light_ce = 0;
 	/* (display.prism_material_overlay: a model's lit for each pixel, by
 	its world position) */
 	BOOL overlay = program->material_overlay && program->per_pixel_lighting && !environment;
@@ -6636,6 +6639,10 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 		state.v0 = shuffle(&m, 4, state.v0, lit, rgb);
 	}
 
+	if (world_inputs && (program->ambient_occlusion & XGPU_AMBIENT_OCCLUSION_RT_LIGHT) &&
+		(occlusion_light == XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL || occlusion_light == XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX) &&
+		(program->per_pixel_lighting || occlusion_light == XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX))
+		model_light_ce = xyz(&m, state.v0);
 	if (effect)
 		effect_fade_value = effect_prelude(&m, &state);
 	for (stage = 0; stage < 4; stage++)
@@ -6926,6 +6933,16 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	{
 		unsigned int light = ext1(&m, GLSL_SQRT, m.t_v3, saturate(&m, 3, xyz(&m, result)));
 		unsigned int packed = ext1(&m, GLSL_PACK_UNORM_4X8, m.t_uint, vec4_of(&m, light, constant_float(&m, 1.0f)));
+
+		store(&m, color_out, op3(&m, OP_COMPOSITE_INSERT, m.t_uv4, packed, world_ao_words, 3));
+	}
+	/* (port: a model's, its light as CE lit it, 254 in the fourth: the
+	anchor's floor for an object) */
+	else if (world_inputs && model_light_ce)
+	{
+		unsigned int light = ext1(&m, GLSL_SQRT, m.t_v3, saturate(&m, 3, model_light_ce));
+		unsigned int packed = ext1(&m, GLSL_PACK_UNORM_4X8, m.t_uint, vec4_of(&m, light,
+			constant_float(&m, 254.0f / 255.0f)));
 
 		store(&m, color_out, op3(&m, OP_COMPOSITE_INSERT, m.t_uv4, packed, world_ao_words, 3));
 	}

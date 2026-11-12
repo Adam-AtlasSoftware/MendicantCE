@@ -77,6 +77,12 @@ still be refitted (world units) */
 #define RT_ENTRY_IDLE_FRAMES 300u
 #define RT_REBUILD_UPDATES 48u
 #define RT_REFIT_DISTANCE 3.0f
+/* port: display.prism_rt_objects "auto": a replacement mesh traced within
+this many world units of the eye, and while the window's objects have not
+taken this share of RT_OBJECT_TRIANGLES; the game's own model past either
+(a far object's shape, at a pixel or two, the same; never left out) */
+#define RT_REPLACEMENT_REACH 30.0f
+#define RT_REPLACEMENT_SHARE 0.6f
 /* the node rows an entry compares (c[60] to c[191]) */
 #define RT_NODE_ROWS 132u
 /* the entries' memory: chunks of device memory (a larger entry has one of
@@ -393,6 +399,11 @@ static struct
 	uint64_t timed_frames;
 	int statistics;
 	int logged_first, logged_gi;
+	/* port: the last traced window's eye (display.prism_rt_objects "auto":
+	the replacement meshes traced within RT_REPLACEMENT_REACH of it) */
+	float eye[3];
+	int eye_known;
+	uint64_t stock_stand_ins;
 } rt;
 
 /* the monotonic clock, in seconds (the exposure's adaptation) */
@@ -889,6 +900,35 @@ int xgpu_vulkan_rt_alpha_traced(void)
 int xgpu_vulkan_rt_stock_models(void)
 {
 	return (rt.frame.flags & XGPU_RT_FLAG_STOCK_MODELS) != 0;
+}
+
+/* port: whether a replacement mesh's pieces (triangles of them, its node 0
+at origin) are traced, or the game's own model in their place */
+int xgpu_vulkan_rt_replacement_traced(const float origin[3], uint32_t triangles)
+{
+	float d[3];
+
+	if (rt.frame.flags & XGPU_RT_FLAG_STOCK_MODELS)
+		return 0;
+	/* ("view_lod": as drawn, whatever it costs) */
+	if (rt.frame.objects == 1)
+		return 1;
+	if ((float)(rt.capture.triangle_count + triangles) > RT_REPLACEMENT_SHARE * (float)RT_OBJECT_TRIANGLES)
+	{
+		rt.stock_stand_ins++;
+		return 0;
+	}
+	if (!rt.eye_known)
+		return 1;
+	d[0] = origin[0] - rt.eye[0];
+	d[1] = origin[1] - rt.eye[1];
+	d[2] = origin[2] - rt.eye[2];
+	if (d[0] * d[0] + d[1] * d[1] + d[2] * d[2] > RT_REPLACEMENT_REACH * RT_REPLACEMENT_REACH)
+	{
+		rt.stock_stand_ins++;
+		return 0;
+	}
+	return 1;
 }
 
 /* a whole set built: one bottom-level structure, its triangles in a buffer
@@ -2048,15 +2088,15 @@ static void statistics_frame(void)
 		host_logf(HOST_LOG_INFO, "prism rt: 600 frames: its passes %.3f ms a frame on the GPU (most %.3f; %llu timed), "
 			"structure %u triangles, objects %.0f triangles a frame (most %llu) of %.1f draws, %.1f draws passed over, "
 			"%llu frames' capture full; objects: %.1f skinned a frame (%.0f triangles), %.1f built, %.1f refitted, "
-			"%.1f kept, %.2f deferred, %llu evicted, %llu without an entry, %.1f a frame replacement meshes' pieces; "
-			"%u entries, %.1f MB",
+			"%.1f kept, %.2f deferred, %llu evicted, %llu without an entry, %.1f a frame replacement meshes' pieces "
+			"(%.1f a frame the game's model in their place); %u entries, %.1f MB",
 			rt.timed_frames ? rt.milliseconds / (double)rt.timed_frames : 0.0,
 			rt.milliseconds_most, (unsigned long long)rt.timed_frames, rt.static_triangles,
 			(double)rt.triangles / 600.0, (unsigned long long)rt.object_triangles_most, (double)rt.draws / 600.0,
 			(double)rt.skipped / 600.0, (unsigned long long)rt.full_frames, (double)rt.jobs / 600.0,
 			(double)rt.skinned_triangles / 600.0, (double)rt.builds / 600.0, (double)rt.updates / 600.0,
 			(double)rt.reused / 600.0, (double)rt.deferred / 600.0, (unsigned long long)rt.evicted,
-			(unsigned long long)rt.stale, (double)rt.pieces / 600.0, rt.entry_count, (double)rt.pool_bytes / 1048576.0);
+			(unsigned long long)rt.stale, (double)rt.pieces / 600.0, (double)rt.stock_stand_ins / 600.0, rt.entry_count, (double)rt.pool_bytes / 1048576.0);
 	if (getenv("HALO_PRISM_RT_DEBUG"))
 	{
 		uint32_t index;
@@ -2084,6 +2124,7 @@ static void statistics_frame(void)
 	rt.frames = rt.draws = rt.skipped = rt.triangles = rt.object_triangles_most = rt.full_frames = 0;
 	rt.jobs = rt.skinned_triangles = rt.builds = rt.updates = rt.reused = rt.evicted = rt.stale = rt.deferred = 0;
 	rt.pieces = 0;
+	rt.stock_stand_ins = 0;
 	rt.milliseconds = rt.milliseconds_most = 0.0;
 	rt.timed_frames = 0;
 }
@@ -2667,7 +2708,7 @@ structure's and the objects' visibility of the sun as they are) */
 	if (pathtraced)
 	{
 		static const float bounces[4] = { 1.0f, 1.0f, 2.0f, 3.0f };
-		static const float paths[4] = { 1.0f, 1.0f, 1.0f, 2.0f };
+		static const float paths[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
 		static const float candidates[4] = { 8.0f, 4.0f, 16.0f, 32.0f };
 		static const float neighbours[4] = { 2.0f, 1.0f, 3.0f, 4.0f };
 		uint32_t light, count = rt.frame.light_count < XGPU_STREAM_RT_LIGHTS ? rt.frame.light_count :
@@ -2711,8 +2752,8 @@ structure's and the objects' visibility of the sun as they are) */
 		pre-pass gave it) */
 		block.info[3] = rt.frame.view == XGPU_RT_VIEW_VISIBILITY ? 1u : rt.frame.view == XGPU_RT_VIEW_GI ? 2u :
 			rt.frame.view == XGPU_RT_VIEW_AO ? 3u : rt.frame.view == XGPU_RT_VIEW_ALBEDO ? 5u : 0u;
-		/* (the sun's rays a pixel: one at medium, the paths' own) */
-		block.rays[0] = quality == 3 ? 2.0f : 1.0f;
+		/* (the sun's rays a pixel: one, its disc found over the frames) */
+		block.rays[0] = 1.0f;
 	}
 	/* gi's probes: a volume about the camera, its sides and spacing by
 	quality (medium 24 x 12 x 24 at 1.5 world units), a quarter of them
@@ -2855,6 +2896,10 @@ whether the surfaces read the traced light in "shadows" and "gi" */
 		VkDeviceAddress table;
 
 		count = objects_record(commands, slot, pass->camera[0], &table);
+		rt.eye[0] = pass->camera[0][0];
+		rt.eye[1] = pass->camera[0][1];
+		rt.eye[2] = pass->camera[0][2];
+		rt.eye_known = 1;
 		scene = scene_build(commands, slot, first, count);
 		if (!scene)
 			return NULL;

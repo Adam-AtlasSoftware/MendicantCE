@@ -3533,7 +3533,18 @@ then, drawn opaque) */
 	{
 		struct xgpu_vulkan_meshes_rt_piece pieces[XGPU_VULKAN_MESHES_RT_PIECES];
 		int count = xgpu_vulkan_meshes_rt_pieces(prepass.window, pieces, XGPU_VULKAN_MESHES_RT_PIECES), piece;
+		uint32_t triangles = 0;
+		float origin[3];
 
+		/* (port: past display.prism_rt_objects "auto"'s reach or share, the
+		game's own model traced in the replacement's place, as "low_lod") */
+		for (piece = 0; piece < count; piece++)
+			triangles += pieces[piece].index_count / 3u;
+		origin[0] = stream.constants[60][3];
+		origin[1] = stream.constants[61][3];
+		origin[2] = stream.constants[62][3];
+		if (count >= 0 && !xgpu_vulkan_rt_replacement_traced(count > 0 ? pieces[0].origin : origin, triangles))
+			count = -1;
 		if (count == 0)
 			return;
 		for (piece = 0; piece < count; piece++)
