@@ -1,0 +1,321 @@
+# fork: MendicantCE's own builds and releases (OpenH1's workflow, build.yml,
+# runs only by hand here: it publishes OpenH1's releases, from a branch named
+# master, in a container image this fork cannot read).
+#
+# Every push to mendicant-prism, and a run started by hand, builds the Linux
+# x86-64 and the Windows release builds (tools/ci_build.py), checks each
+# package, and, on mendicant-prism, publishes the two as a release,
+# mendicant-prism-<run number>, marked latest.
+#
+# What a package is checked for before it can be published:
+# - tools/fork_gate.py: its binaries hold none of OpenH1's release or crash
+#   report addresses and file names (a build with them would offer to install
+#   OpenH1 over itself), and name this fork;
+# - the Linux binaries need no glibc newer than Ubuntu 22.04's (2.35);
+# - SOURCE.txt names this run's commit;
+# - MENDICANT AI's trained models are in it, the repository's own file.
+#
+# The builds have no build number: HALO_BUILD_NUMBER is never set here, and
+# a build names itself by its commit (source/main/main.c). The PRISM asset
+# packs are made from the game's data: they are in no package, and no game
+# data is in this repository or its runs.
+name: MendicantCE
+
+on:
+  push:
+    branches: [mendicant-prism]
+  workflow_dispatch:
+
+concurrency:
+  group: mendicant-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CI_COMPILER_LAUNCHER: ccache
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_BASEDIR: ${{ github.workspace }}
+  CCACHE_MAXSIZE: 1G
+  CI_GUEST_LLVM_CACHE: .cache/llvm
+  MODELS: port/assets/mendicant/models.aibw
+
+jobs:
+  linux:
+    # Ubuntu 22.04, for its glibc (2.35): the plain image, with the packages
+    # of .github/ci-image's lists (OpenH1's image is those on the same base)
+    runs-on: ubuntu-24.04
+    container: ubuntu:22.04
+    timeout-minutes: 75
+    steps:
+      # (git before the checkout, so that it is a clone and not an archive)
+      - name: Install git
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get -o Acquire::Retries=5 update
+          apt-get -o Acquire::Retries=5 install -y --no-install-recommends git ca-certificates
+
+      - uses: actions/checkout@v4
+
+      # (the checkout is the runner's user's, the container's steps root's)
+      - name: Trust the checkout
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Install the toolchain
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          packages="$(cat .github/ci-image/packages.txt .github/ci-image/packages-x86_64.txt)"
+          apt-get -o Acquire::Retries=5 install -y --no-install-recommends $packages
+
+      - uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-mendicant-linux-x86_64-${{ github.sha }}
+          restore-keys: ccache-mendicant-linux-x86_64-
+
+      # musl, SDL, FFmpeg and the Vulkan headers, which configure.py fetches
+      - uses: actions/cache@v4
+        with:
+          path: build/linux_x86_64/third_party
+          key: mendicant-linux-x86_64-third-party-${{ hashFiles('tools/android_build.py', 'tools/ffmpeg_fetch.py', 'port/third_party/ffmpeg/sources.txt', 'tools/vulkan_build.py', 'tools/linux_guest_build.py', 'port/android/patches/**') }}
+
+      # the guests' LLVM, which configure.py fetches (tools/guest_toolchain.py)
+      - uses: actions/cache@v4
+        with:
+          path: .cache/llvm
+          key: guest-llvm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/guest_toolchain.py') }}
+
+      - name: Release
+        run: python3 tools/ci_build.py linux_x86_64 release
+
+      # the fork's identity and its package's contents: these stop a release
+      - name: Test the fork's identity and package
+        run: python3 -m pytest -q -rs tools/test_fork_identity.py tools/test_profile.py::test_configuration_defines tools/test_linux_package.py tools/test_install_layout.py
+
+      - name: Check the package
+        run: |
+          tree=dist/halo-linux-x86_64-release
+          python3 tools/fork_gate.py "$tree"
+          for file in "$tree/bin/openh1" "$tree/lib/openh1/libSDL3.so.0"; do
+            newest="$(readelf -V "$file" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)"
+            echo "$file needs $newest"
+            [ "$(printf '%s\n' GLIBC_2.35 "$newest" | sort -V | tail -1)" = GLIBC_2.35 ]
+          done
+          grep -q "commit      $GITHUB_SHA" "$tree/share/doc/openh1/SOURCE.txt"
+          cmp "$MODELS" "$tree/share/openh1/mendicant_models.aibw"
+          [ "$(head -c 4 "$tree/share/openh1/mendicant_models.aibw")" = AIBW ]
+          [ ! -e "$tree/install.sh" ]
+          strings "$tree/bin/openh1" | grep -qx "Adam-AtlasSoftware/MendicantCE"
+
+      # the build started, hidden: it runs through its start-up (settings, SDL,
+      # the files) until it finds no game data and quits, saying so
+      # (reported, and not what a release waits for: the container has no
+      # display, sound or graphics driver, which the Windows runner's start
+      # below does not need either, but which has not been seen to work here)
+      - name: Start the game
+        continue-on-error: true
+        run: |
+          start="$RUNNER_TEMP/start"
+          rm -rf "$start"
+          cp -r dist/halo-linux-x86_64-release "$start"
+          mkdir -p "$start/home"
+          cd "$start"
+          status=0
+          HOME="$start/home" HALO_HIDDEN_WINDOW=1 HALO_NO_AUDIO=1 SDL_AUDIODRIVER=dummy SDL_VIDEO_DRIVER=dummy \
+            HALO_NET_ONLINE=false timeout 120 bin/openh1 > start.log 2>&1 || status=$?
+          cat start.log
+          echo "bin/openh1 exited with $status"
+          grep -q "is not the Xbox maps" start.log
+          grep -q "build: MendicantCE, commit ${GITHUB_SHA:0:12}" start.log
+          grep -q "update: not looked for: this fork's builds do not update themselves" start.log
+          [ "$status" = 1 ]
+
+      # (zipped here, with its files' modes, which an artifact would lose)
+      - name: Zip
+        run: python3 tools/linux_package.py zip dist/halo-linux-x86_64-release dist/release/MendicantCE-Linux.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mendicantce-linux
+          path: dist/release/MendicantCE-Linux.zip
+          retention-days: 7
+
+  windows:
+    # as build.yml's windows job: the runner has LLVM, Python and Visual
+    # Studio's x64 libraries and Windows SDK; the guest's compiler is the
+    # pinned LLVM configure.py downloads
+    runs-on: windows-2025
+    timeout-minutes: 60
+    env:
+      ANDROID_HOME: ""
+      ANDROID_SDK_ROOT: ""
+      ANDROID_NDK_HOME: ""
+      ANDROID_NDK_ROOT: ""
+      ANDROID_NDK: ""
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Install the toolchain
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -MaximumRetryCount 5 -RetryIntervalSec 5 -OutFile ninja.zip https://github.com/ninja-build/ninja/releases/download/v1.12.1/ninja-win.zip
+          Invoke-WebRequest -MaximumRetryCount 5 -RetryIntervalSec 5 -OutFile ccache.zip https://github.com/ccache/ccache/releases/download/v4.10.2/ccache-4.10.2-windows-x86_64.zip
+          # (each download checked against the hash it had when it was pinned)
+          if ((Get-FileHash ninja.zip -Algorithm SHA256).Hash -ne "F550FEC705B6D6FF58F2DB3C374C2277A37691678D6ABA463ADCBB129108467A") { throw "ninja.zip: unexpected SHA-256" }
+          if ((Get-FileHash ccache.zip -Algorithm SHA256).Hash -ne "6252F081876A9A9F700FAE13A5AEC5D0D486B28261D7F1F72AC11C7AD9DF4DA9") { throw "ccache.zip: unexpected SHA-256" }
+          Expand-Archive ninja.zip -DestinationPath "$env:RUNNER_TEMP\tools"
+          Expand-Archive ccache.zip -DestinationPath $env:RUNNER_TEMP
+          Copy-Item "$env:RUNNER_TEMP\ccache-4.10.2-windows-x86_64\ccache.exe" "$env:RUNNER_TEMP\tools"
+          Remove-Item ninja.zip, ccache.zip
+          "$env:RUNNER_TEMP\tools" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-mendicant-windows-${{ github.sha }}
+          restore-keys: ccache-mendicant-windows-
+
+      # SDL's development package, and the guest's musl, SDL3, FFmpeg and
+      # headers, which configure.py fetches
+      - uses: actions/cache@v4
+        with:
+          path: build/windows/third_party
+          key: mendicant-windows-third-party-${{ hashFiles('tools/windows_build.py', 'tools/android_build.py', 'tools/ffmpeg_fetch.py', 'port/third_party/ffmpeg/sources.txt', 'port/android/patches/**') }}
+
+      - uses: actions/cache@v4
+        with:
+          path: .cache/llvm
+          key: guest-llvm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/guest_toolchain.py') }}
+
+      - name: Release
+        run: python tools/ci_build.py windows release
+
+      - name: Check the package
+        run: |
+          folder=dist/halo-windows-release
+          python tools/fork_gate.py "$folder"
+          grep -q "commit      $GITHUB_SHA" "$folder/SOURCE.txt"
+          cmp "$MODELS" "$folder/mendicant_models.aibw"
+          for name in halo.exe SDL3.dll openh1.assets prepared.records README.md LICENSE.txt CREDITS.md; do
+            [ -f "$folder/$name" ] || { echo "$name is missing"; exit 1; }
+          done
+
+      # The build started: the 64-bit host reserves the guest's memory, loads
+      # the guest image and runs it through its start-up until it finds no
+      # game data and quits, saying so (the runner has no game data and no
+      # GPU; HALO_HIDDEN_WINDOW keeps it from asking for the data)
+      - name: Start the game
+        run: |
+          start="$RUNNER_TEMP/start"
+          rm -rf "$start"
+          cp -r dist/halo-windows-release "$start"
+          cd "$start"
+          status=0
+          HALO_HIDDEN_WINDOW=1 HALO_NET_ONLINE=false timeout 120 ./halo.exe > start.log 2>&1 || status=$?
+          cat start.log
+          echo "halo.exe exited with $status"
+          grep -q "is not the Xbox maps" start.log
+          [ "$status" = 1 ]
+
+      - name: Zip
+        run: python -c "import shutil; shutil.make_archive('dist/release/MendicantCE-Windows', 'zip', 'dist/halo-windows-release')"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mendicantce-windows
+          path: dist/release/MendicantCE-Windows.zip
+          retention-days: 7
+
+      # (the symbols of halo.exe and the guest image, for reading a crash's
+      # log lines with tools/symbolize_crash.py: kept with the run, not
+      # published)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mendicantce-windows-symbols
+          path: dist/halo-windows-release-symbols
+          retention-days: 30
+
+  tests:
+    # the tests that need no build, with the guests' pinned LLVM first on the
+    # PATH, as build.yml's tests job runs them: reported, and not what a
+    # release waits for (the checks that stop one are the build jobs')
+    runs-on: ubuntu-24.04
+    container: ubuntu:22.04
+    timeout-minutes: 45
+    steps:
+      - name: Install git
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get -o Acquire::Retries=5 update
+          apt-get -o Acquire::Retries=5 install -y --no-install-recommends git ca-certificates
+
+      - uses: actions/checkout@v4
+
+      - name: Trust the checkout
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Install the toolchain
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          packages="$(cat .github/ci-image/packages.txt .github/ci-image/packages-x86_64.txt)"
+          apt-get -o Acquire::Retries=5 install -y --no-install-recommends $packages
+
+      - uses: actions/cache@v4
+        with:
+          path: .cache/llvm
+          key: guest-llvm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/guest_toolchain.py') }}
+
+      - name: Test
+        run: |
+          PATH="$(python3 tools/guest_toolchain.py --cache "$CI_GUEST_LLVM_CACHE"):$PATH" python3 -m pytest -q -rs -n auto --dist loadfile \
+            tools/test_fork_identity.py tools/test_profile.py tools/test_linux_port.py tools/test_linux_package.py \
+            tools/test_install_layout.py tools/test_port_settings.py tools/test_controller_remap_context.py \
+            tools/test_loading_assets.py tools/test_mouse_sensitivity.py tools/harness
+
+  release:
+    # the two packages as a release, for mendicant-prism only, when both
+    # built and passed their checks
+    needs: [linux, windows]
+    if: ${{ github.ref == 'refs/heads/mendicant-prism' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      # (the release's notes alone)
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/mendicant_release_notes.md
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: mendicantce-linux
+          path: artifacts
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: mendicantce-windows
+          path: artifacts
+
+      - name: Publish
+        run: |
+          tag="mendicant-prism-$GITHUB_RUN_NUMBER"
+          ls -l artifacts
+          [ -f artifacts/MendicantCE-Linux.zip ] && [ -f artifacts/MendicantCE-Windows.zip ]
+          (cd artifacts && sha256sum MendicantCE-Linux.zip MendicantCE-Windows.zip > SHA256SUMS)
+          sed -e "s/@COMMIT@/$GITHUB_SHA/g" -e "s/@SHORT@/${GITHUB_SHA:0:12}/g" .github/mendicant_release_notes.md > notes.md
+          gh release create "$tag" artifacts/MendicantCE-Linux.zip artifacts/MendicantCE-Windows.zip artifacts/SHA256SUMS \
+            --target "$GITHUB_SHA" --latest \
+            --title "MendicantCE $GITHUB_RUN_NUMBER (${GITHUB_SHA:0:7})" --notes-file notes.md
