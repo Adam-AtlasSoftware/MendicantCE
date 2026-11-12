@@ -85,7 +85,8 @@ capture, passes), `xgpu_vulkan_rt_glsl.inc` (the compute shaders; `tools/vulkan_
   store's own skinning of the frame, shared with its draw) and 32-bit indices, copied into its entry's soup where its
   bones moved (`display.prism_rt_objects` `low_lod`: the stock part instead).
 - **The level's remodel** (`display.prism_world_geometry` `remodel`, `display.prism_rt_world`): the remodel's far
-  level is traced where it is drawn (b30: 282 thousand triangles for the map's 33 thousand, 19 MB of structure), or its
+  level is traced where it is drawn (b30: 282 thousand triangles for the map's 33 thousand, 19 MB of structure; 592
+  thousand with the sealed remodel of combined2's data, whose far levels keep every edge vertex), or its
   near level whole (`remodel`, about 2 million), and world AO's pre-pass draws the same level, so that the rays leave
   the surface they trace (from the map's triangles, a ray started under the remodel's rock and was shadowed by it).
 - Off-screen objects are not in the structure (they are captured from the pre-pass), so a tree behind the camera casts
@@ -211,7 +212,9 @@ between frames).
   `auto`): on the 2060 at 1080p, measured in one run, shadows 19.2 ms against 18.3 with `stock`, path traced at ultra
   41.8 against 35.8 (its rays cross 282 thousand triangles where they crossed 33 thousand, and the pre-pass draws
   them). Traced Level: Game's gives that back, with the shadows of the map's flat shapes where the rocks are drawn
-  round.
+  round. With the sealed remodel (592 thousand far triangles at b30) the difference grows: on the 2060 at 1080p with
+  the kit's settings, path traced at ultra 59.6 and 59.8 ms against 38.1 and 38.9 with `stock` (b30 still, two
+  alternated runs), 70.3 against 50.2 in play.
 - Memory: the entries' pool is at most 320 MB (128 MB on b30 still, about 250 in play); a frame's slot is 64 MB
   where it was 136 (three slots: 216 MB less).
 - Vulkan validation (`HALO_VULKAN_VALIDATION=1`, shadows, gi, pathtraced, the cache off): no messages.
