@@ -68,6 +68,64 @@ def test_tree(build, tmp_path):
     assert {name.split("/")[0] for name in names} == {"bin", "lib", "share", "install.sh"}
 
 
+def test_fork_tree(build, tmp_path):
+    """fork: a tree of this fork's carries the trained models (the repository's file, of this tree's doctrine),
+    the fork's own README in the README's place with OpenH1's beside it under its name, the credits, and where
+    its source is; and tools/ci_build.py stages its release without OpenH1's installer"""
+    tree = tmp_path / "tree"
+    linux_package.stage_tree(tree, build / "halo", build / "libSDL3.so.0", notices(build), installer=False)
+    models = (tree / "share/openh1/mendicant_models.aibw").read_bytes()
+    assert models == (ROOT / "port/assets/mendicant/models.aibw").read_bytes()
+    assert (ROOT / "port/linux/src/mendicant_shipped.h").read_text().count('"mendicant_models.aibw"') == 1
+    # (the file is of this tree's doctrine: its hash, chains and step choices are mendicant_doctrine.h's, so a
+    # doctrine changed without the models exported again stops here, not as a refusal in a player's log)
+    doctrine = (ROOT / "port/linux/game/mendicant/mendicant_doctrine.h").read_text()
+
+    def names(array):
+        body = re.search(array + r"\[\w+\] = \{([^}]*)\}", doctrine).group(1)
+        return [name.strip().strip('"') for name in body.split(",")]
+
+    chains, steps, sides = names("chain_names"), names("step_names"), names("chain_side")
+    # (mendicant_units.c's mendicant_doctrine_hash: FNV-1a over "<chain>:<side>|...#<step>|...")
+    text = "|".join(f"{chain}:{'covenant' if side == 'SIDE_COVENANT' else 'marines'}"
+                    for chain, side in zip(chains, sides)) + "#" + "|".join(steps)
+    doctrine_hash = 0x811C9DC5
+    for byte in text.encode():
+        doctrine_hash = ((doctrine_hash ^ byte) * 0x01000193) & 0xFFFFFFFF
+    assert models[:4] == b"AIBW"
+    assert int.from_bytes(models[12:16], "little") == doctrine_hash
+    assert int.from_bytes(models[20:24], "little") == len(chains) == len(sides)
+    assert int.from_bytes(models[24:28], "little") == len(steps) + 1
+    docs = tree / "share/doc/openh1"
+    assert (docs / "README.md").read_bytes() == (ROOT / "MENDICANT.md").read_bytes()
+    assert (docs / "README.OpenH1.md").read_bytes() == (ROOT / "README.md").read_bytes()
+    for name in ("README.linux.md", "CREDITS.md", "AUTHORS.md", "HUD-NOTICE.md", "SOURCE.txt"):
+        assert (docs / name).is_file(), name
+    source = (docs / "SOURCE.txt").read_text()
+    assert "a modified version of OpenH1" in source and "Adam Wiley" in source and "afa1611ce" in source
+    assert "https://github.com/Adam-AtlasSoftware/MendicantCE" in source
+    assert not (tree / "install.sh").exists()
+    assert "installer=False, vr=args.vr)" in (ROOT / "tools/ci_build.py").read_text()
+    # (the tree's own desktop entry names the fork; install.sh's, which this tree has not, is OpenH1's)
+    entry = (tree / "share/applications/openh1.desktop").read_text()
+    assert "\nName=MendicantCE\n" in entry and "\nExec=openh1\n" in entry
+
+
+def test_source_notice_names_the_commit(monkeypatch):
+    """fork: SOURCE.txt names the commit a build was made from and how to get it; a tree with changes in no
+    commit says so in place of a commit that is not its source"""
+    commit = "0123456789abcdef0123456789abcdef01234567"
+    monkeypatch.setattr(linux_package, "source_revision", lambda: (commit, False, "2026-11-12"))
+    text = linux_package.source_notice()
+    assert f"commit      {commit}" in text and f"/tree/{commit}" in text and "2026-11-12" in text
+    assert "branch      mendicant-prism" in text and "in no commit" not in text
+    monkeypatch.setattr(linux_package, "source_revision", lambda: (commit, True, "2026-11-12"))
+    text = linux_package.source_notice()
+    assert "in no commit" in text and "not a\npublished release" in text and f"/tree/{commit}" not in text
+    monkeypatch.setattr(linux_package, "source_revision", lambda: ("", False, ""))
+    assert "in no commit" in linux_package.source_notice()
+
+
 def test_tree_without_sdl(build, tmp_path):
     tree = tmp_path / "tree"
     linux_package.stage_tree(tree, build / "halo", None, linux_package.notices("linux"))
@@ -841,7 +899,7 @@ def test_vr_tree_marker(build, tmp_path):
             (ROOT / f"port/assets/steam/{variant}/capsule.png").read_bytes()
     assert (ROOT / "port/assets/steam/openh1/capsule.png").read_bytes() != \
         (ROOT / "port/assets/steam/openh1-vr/capsule.png").read_bytes()
-    assert "linux_package.stage_tree(dist, executable, library, notices, vr=args.vr)" in \
+    assert "linux_package.stage_tree(dist, executable, library, notices, installer=False, vr=args.vr)" in \
         (ROOT / "tools/ci_build.py").read_text()
 
 

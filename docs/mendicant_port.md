@@ -640,50 +640,67 @@ frame, or, failing the notice roll, nobody moves. Here:
 
 ## Fork release settings
 
-The fork's own builds (the MENDICANT AI test builds) differ from upstream in three settings and
-nothing else. They hang on one define, `HALO_FORK_MENDICANT`, which `tools/linux_build.py`'s
-`configuration_defines` adds to every unit of every native build (Linux, Windows, Android, web);
-each place that reads it is marked `fork:`. The upstream pull request leaves out that line of
-`configuration_defines` (or the whole `#ifdef` blocks), and the builds are then upstream's.
+A build of this fork (MendicantCE) is told apart from OpenH1's by one define, `HALO_FORK_MENDICANT`
+(`FORK_DEFINE` in `tools/build_common.py`), which `configuration_defines` gives to every unit of every
+native build: the guests' (`tools/android_build.py`) and the Windows host's (`tools/windows_build.py`).
+Each place that reads it is marked `fork:`. `tools/test_fork_identity.py` checks that every
+configuration has it, and `tools/test_profile.py`'s `test_configuration_defines` leaves it out of what
+it compares.
 
-| Setting | Upstream | Fork build | Where |
+| What | OpenH1 | This fork's build | Where |
 | --- | --- | --- | --- |
-| Self-update | `update.auto` true; numbered builds ask GitHub for `OpenCommunityEdition/OpenCE`'s latest release and offer to install it | never looked for (`updater_start` and `updater_server_check` return at once and log `update: not looked for: the MENDICANT AI fork does not update itself`); `update.auto` defaults to false so the menu shows OFF | `port/linux/src/updater.c`, `port/linux/src/port_config.c` |
-| Crash reports (Windows) | numbered builds write a minidump and, with the player's yes, send it to upstream's Sentry | none: `crash_reports_enabled` is 0, so no minidump, no consent box, no upload; the backtrace still goes into `debug.txt` and `halo.log` | `port/windows/src/win32_crash.c` |
-| MENDICANT AI | `ai.mendicant.enabled` false | true | `port/linux/src/port_config.c` (`FORK_MENDICANT_ENABLED_DEFAULT`) |
+| Self-update | a numbered build asks GitHub for `OpenH1/OpenH1`'s latest release (`build-<n>`, `OpenH1-*.zip`, signed with `port/assets/release-key.pub`) and offers to install it; a dedicated server installs it unasked | none: the updater is compiled out, whatever the build's number, and the log says `update: not looked for: this fork's builds do not update themselves`; `update.auto` defaults to false and `server.auto_update` to `"off"`, and Check for Updates is not in the menu | `port/linux/src/updater.c`, `port/linux/src/port_config.c`, `tools/port_settings.py` |
+| Crash reports (Windows) | off unless `HALO_CRASH_REPORTS_ANY_BUILD` is set; the Sentry project compiled in is OpenCE's | none: `crash_reports_enabled` is 0, the reporter's command lines do nothing, no endpoint is in the build; a crash leaves `halo.log` and `debug.txt` | `port/windows/host/host_crash_win.c` |
+| Name and repository | `OpenH1 <platform> \| build <n> (<flavor>)`, `OpenH1/OpenH1` | `MendicantCE <platform> \| commit <sha> (<flavor>)` (`local build` where the build does not know its commit), and the repository CI or the checkout's origin gives, never `OpenH1/OpenH1` (then `Adam-AtlasSoftware/MendicantCE`) | `source/main/main.c`, `tools/build_common.py` (`build_repository`) |
+| Discord | OpenH1's application by default | none by default; OpenH1's and OpenCE's applications are not used, and a `discord-<id>://` handler an earlier build took for them is given back; a player's own application works | `port/linux/src/p2p_discord.c`, `port_config.c` |
+| `openh1://` links | registered to the executable at each start | never registered; a registration an earlier build of the fork made is dropped. The loopback hand-off between copies has a port and key of its own | `port/linux/src/p2p.c` |
+| A host's welcome | tells OpenCE players that the server runs OpenH1 | tells every other build's players that the server runs MendicantCE, a modified OpenH1, and where its source is | `port/linux/game/network_welcome.c` |
+| Packages | `install.sh`, OpenH1's README | no installer; `MENDICANT.md` as the README, `SOURCE.txt`, the credits, the trained models | `tools/linux_package.py`, `tools/ci_build.py` |
 
-The AI's code path is the same in both: only the default changes, and `ai.mendicant.enabled =
-false` (or `HALO_AI_MENDICANT=false`) gives the stock AI exactly as before.
-`tools/mendicant/ai_off_parity.py` sets `HALO_AI_MENDICANT=false` itself for that reason. `tools/test_profile.py`'s
-`test_configuration_defines` leaves the fork's define out of what it checks (marked `fork:`).
+`ai.mendicant.enabled` is **false** by default in every build, the fork's too (`port_config.c`): the
+older port on MendicantCE's `main` branch defaulted it on in its release builds, and this branch does
+not. `tools/mendicant/ai_off_parity.py` sets `HALO_AI_MENDICANT=false` itself all the same.
 
-### The test build's package
+Not covered by the switch, and to be done before any such build is numbered or published: the
+Android app's updater (`port/android/app/src/main/java/com/halo/decomp/Updater.java`) and the macOS
+app's Sparkle feed (`tools/macos_build.py`) still name OpenH1's releases.
+
+### A release
+
+A release is built by `.github/workflows/mendicant.yml` from the branch `mendicant-prism`: the Linux
+x86-64 build in an `ubuntu:22.04` container (glibc 2.35) and the Windows build on the Windows runner,
+each with `tools/ci_build.py <platform> release`. The builds have no build number
+(`HALO_BUILD_NUMBER` is left unset; the commit names a build). Each package is checked before it is
+published:
+
+- `tools/fork_gate.py` refuses a package whose binaries hold an address or a file name of OpenH1's
+  releases or crash reports, or that does not name the fork;
+- the Linux binaries may need no glibc newer than 2.35;
+- `SOURCE.txt` must name the run's commit, and `mendicant_models.aibw` must be the repository's
+  `port/assets/mendicant/models.aibw`.
+
+The trained models are exported with
 
 ```sh
 <mod>/.venv/bin/python -I tools/mendicant/export_models.py --mod <mod> \
     --covenant <mod>/data/frozen/covenant.pt --marines <mod>/data/frozen/marines.pt \
     --covenant-strategy <mod>/data/frozen/covenant_strategy_best.pt \
     --marines-strategy <mod>/data/frozen/marines_strategy_best.pt \
-    --out build/release/mods/mendicant_ai/tags/mendicant/models.aibw
-python3 tools/mendicant/package.py --game build/linux \
-    --models build/release/mods/mendicant_ai/tags/mendicant/models.aibw --out build/release
-python3 tools/mendicant/package.py --game build/linux_x86_64 \
-    --models build/release/mods/mendicant_ai/tags/mendicant/models.aibw --out build/release
-python3 tools/mendicant/package.py --game halo-windows-release.zip \
-    --models build/release/mods/mendicant_ai/tags/mendicant/models.aibw --out build/release
+    --out port/assets/mendicant/models.aibw
 ```
 
-`package.py` (fork-only) makes `mendicant-ai-<version>-<platform>.zip`, the platform `linux`
-(32-bit x86), `linux-x86_64` (the 64-bit build, `configure.py --x64` and `ninja linux_x86_64`: the
-game as an x32 guest built into the 64-bit `halo`, so its `halo_guest.elf` is not shipped) or
-`windows`, told apart by the executable: the files the platform's
-release zip has (from a build folder, as `tools/ci_build.py` collects them; from the workflow's
-release artifact, as they are), `mods/mendicant_ai/` (`mod.toml`, and the models where
-`ai.mendicant.weights` finds them: `tags/mendicant/models.aibw`), `README_MENDICANT.txt`,
-`LICENSE.txt` (the AGPL) and `SOURCE.txt` (the source offer, AGPL section 13). It leaves out maps,
-settings, saves and logs, strips debug information from ELF files (the full copies go to
-`<zip stem>-symbols/` beside the zip) and overwrites any path of the packaging machine left in a
-binary's strings with one of the same length.
+and are shipped as one of the build's own files, `mendicant_models.aibw` (beside `halo.exe`; the Linux
+tree's `share/openh1`; a build folder's own copy), which the game takes where no mod carries
+`tags/mendicant/models.aibw` (`port/linux/src/mendicant_shipped.h`,
+`port/linux/game/mendicant/mendicant_models.c`). `tools/test_linux_package.py` checks that the file is
+of this tree's doctrine. The PRISM asset packs are made from the game's data and are in no release.
+
+Never publish a build made on a developer's computer: it is linked against that computer's C library
+and carries its paths in its debug information.
+
+The sections below this one are the specification the port was written from, on the older base
+(OpenCE build-337): file names and build commands in them (`tools/linux_build.py`, `ninja linux`,
+`build/linux`) are that base's.
 
 ## The specification
 

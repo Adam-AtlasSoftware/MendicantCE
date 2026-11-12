@@ -250,7 +250,8 @@ def main() -> int:
         dist = ROOT / "dist" / dist_name(args.platform, args.config, args.vr)
         if dist.exists():
             shutil.rmtree(dist)
-        linux_package.stage_tree(dist, executable, library, notices, vr=args.vr)
+        # fork: without OpenH1's installer (linux_package.py: it would install this fork over an OpenH1)
+        linux_package.stage_tree(dist, executable, library, notices, installer=False, vr=args.vr)
         print(f"{', '.join(outputs)} -> {dist.relative_to(ROOT)}", flush=True)
         return 0
 
@@ -300,6 +301,12 @@ def main() -> int:
     shutil.copy2(ROOT / "port/assets/prepared/prepared.records", dist / "prepared.records")
     # ... and the textures', fonts' and menus' bytes (port/linux/src/embedded_assets.h)
     shutil.copy2(ROOT / "build/windows/openh1.assets", dist / "openh1.assets")
+    # fork: MENDICANT AI's trained models (port/linux/src/mendicant_shipped.h), and what the build says of
+    # itself: the fork's README, OpenH1's, the credits, and where this build's source is (linux_package.py)
+    shutil.copy2(linux_package.MENDICANT_MODELS, dist / linux_package.MENDICANT_MODELS_NAME)
+    for source, name in linux_package.fork_documents():
+        shutil.copy2(source, dist / name)
+    (dist / linux_package.SOURCE_NOTICE).write_text(linux_package.source_notice())
     return 0
 
 
