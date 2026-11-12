@@ -661,6 +661,19 @@ long mod_pbr_update(
 	mod_pbr_globals.read_enabled = mod_pbr_globals.enabled;
 	if (remove_all || !mod_pbr_globals.enabled || !d3d8_materials_drawn())
 	{
+		/* (said once a map where the setting asks for what the renderer
+		cannot draw: the Windows build's draws no materials yet, with its
+		texture store) */
+		if (!remove_all && mod_pbr_globals.enabled)
+		{
+#ifdef HALO_WINDOWS
+			error(_error_silent, "materials: display.prism_materials is set, but this build's renderer draws no "
+				"materials yet (the Windows build's): drawn stock");
+#else
+			error(_error_silent, "materials: display.prism_materials is set, but this renderer draws no materials: "
+				"drawn stock");
+#endif
+		}
 		return 0;
 	}
 

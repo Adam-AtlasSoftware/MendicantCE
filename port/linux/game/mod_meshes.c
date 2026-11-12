@@ -579,6 +579,18 @@ static void meshes_send(
 	mod_meshes_globals.sent_budget = mod_meshes_globals.budget;
 	if (mod_meshes_globals.tier == _tier_stock || !xgpu_backend_mesh_store_available())
 	{
+		/* (said once a map where the setting asks for what the renderer
+		cannot draw: the Windows build's has no mesh store yet) */
+		if (mod_meshes_globals.tier != _tier_stock)
+		{
+#ifdef HALO_WINDOWS
+			error(_error_silent, "meshstore: display.prism_models is set, but this build's renderer has no mesh "
+				"store yet (the Windows build's): drawn stock");
+#else
+			error(_error_silent, "meshstore: display.prism_models is set, but this renderer has no mesh store: "
+				"drawn stock");
+#endif
+		}
 		store_close();
 		return;
 	}

@@ -296,6 +296,15 @@ Check these on a Windows computer before a release.
 
 ## Limits
 
+- PRISM's texture store, mesh store and materials (TEXTURE DETAIL, TEXTURE
+  MEMORY, PBR MATERIALS, REMODELS, MODEL MEMORY and SECONDARY MOTION on
+  Settings > Mods > PRISM Assets; `display.prism_textures`,
+  `display.prism_models`, `display.prism_materials`) are not in the Windows
+  build yet: the host reads their files with calls it has only on the other
+  platforms (`port/linux/vulkan/xgpu_vulkan_store.c`,
+  `xgpu_vulkan_meshes.c`). The rows are greyed out, a setting that asks for
+  one is said in the game's log once a map, and everything is drawn stock.
+  The rest of PRISM is the same as on Linux.
 - The startup movies play only with `display.movies` on (off by default),
   from the Xbox's own movie files in the data root's `bink` folder, as on
   the other builds.

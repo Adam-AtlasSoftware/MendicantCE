@@ -387,7 +387,9 @@ between 128 MB and 6 GB) bounds the card's memory they take; past it, those
 not drawn in the last 10 frames go back to the stock resolution, then to the
 stock texture, the least recently drawn first. Both settings apply in a
 running game (`prism_set "textures max"`). Only the Vulkan renderer has the
-store; Metal's (macOS, iOS) draws the stock textures. Textures are drawn,
+store, and not yet in the Windows build; there, and with Metal's (macOS,
+iOS), the stock textures are drawn, the menu's row is greyed out and the
+game's log says so once a map. Textures are drawn,
 not simulated: a network game's machines need not have the same files.
 `tools/texstore_synth.py` makes placeholder files from an extract's PNGs
 (upscaled, BC7), for tests.
@@ -420,7 +422,8 @@ mods' geometry or the per-draw stream), and each frame skins the mesh by the
 nodes' matrices the game draws the model with, then draws it in place of the
 model's parts with their own shaders, passes, shadows and fog. The stock
 model is drawn until the mesh is in, at a region and permutation the mesh has
-nothing for, and on a renderer without the store (Metal's). The files are
+nothing for, and on a renderer without the store (Metal's, and for now the
+Windows build's: the menu's rows are greyed out and the log says so). The files are
 checked as the map loads (the host's log says which were refused and why:
 format, nodes, a piece no part of the model has, unreadable, changed, budget,
 device, path) and read as they are first drawn. A mesh is skinned once a
@@ -514,7 +517,8 @@ shader says. `specular` is the dielectric's reflectance (F0 0.08 times it),
 
 Materials are drawn, not simulated: a network game's machines need not
 have the same ones, and nothing is sent between them. Only the Vulkan
-renderer draws them (Metal's draws the shaders as the Xbox did); the
+renderer draws them, and not yet in the Windows build (it and Metal's draw
+the shaders as the Xbox did, with the menu's row greyed out); the
 setting applies in a running game (`prism_set "materials pbr"`).
 `tools/prism_material_pack.py` makes a material's images (BC7) from
 pictures, and the Chief's armour and visor materials from the player's own

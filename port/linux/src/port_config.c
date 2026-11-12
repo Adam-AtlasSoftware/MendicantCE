@@ -609,7 +609,8 @@ static const struct config_setting config_settings[] =
 		"memory, drawn in place of the map's once they are in): \"stock\" none,\n"
 		"the game's own; \"enhanced\" the mods' enhanced tier; \"max\" their max\n"
 		"tier, else enhanced. Read each frame (the console's prism_set\n"
-		"\"textures max\"). Vulkan only; the Mac's Metal renderer draws stock." },
+		"\"textures max\"). Vulkan only, and not in the Windows build yet; the\n"
+		"Mac's Metal renderer draws stock." },
 	{ "display.prism_texture_budget_mb", _config_integer, "0", "HALO_PRISM_TEXTURE_BUDGET_MB", _environment_value,
 		_platform_desktop,
 		"PRISM: the graphics card's memory the replacement textures may take,\n"
@@ -623,7 +624,8 @@ static const struct config_setting config_settings[] =
 		"game's own nodes, so its animations, collision and markers are\n"
 		"unchanged): \"stock\" none, the game's own; \"enhanced\" the mods'\n"
 		"enhanced tier; \"max\" their max tier, else enhanced. Read each frame\n"
-		"(the console's prism_set \"models max\"). Vulkan only; the Mac's Metal\n"
+		"(the console's prism_set \"models max\"). Vulkan only, and not in the\n"
+		"Windows build yet; the Mac's Metal\n"
 		"renderer draws stock." },
 	{ "display.prism_model_budget_mb", _config_integer, "0", "HALO_PRISM_MODEL_BUDGET_MB", _environment_value,
 		_platform_desktop,
@@ -645,7 +647,8 @@ static const struct config_setting config_settings[] =
 		"(GGX, under the level's own lights and reflections; CE's change colour,\n"
 		"self-illumination and detail maps kept); \"stock\" none, as the Xbox\n"
 		"drew them. Read each frame (the console's prism_set \"materials pbr\").\n"
-		"Vulkan only; the Mac's Metal renderer draws stock." },
+		"Vulkan only, and not in the Windows build yet; the Mac's Metal renderer\n"
+		"draws stock." },
 	{ "display.prism_rt", _config_string, "\"off\"", "HALO_PRISM_RT", _environment_value, _platform_desktop,
 		"PRISM: hardware ray tracing (docs/prism_rt.md), on graphics cards that\n"
 		"have it: \"shadows\" the sun's shadows of everything on screen traced\n"

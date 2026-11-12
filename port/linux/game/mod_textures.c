@@ -299,6 +299,19 @@ static void textures_send(
 	mod_textures_globals.sent_budget = mod_textures_globals.budget;
 	if ((mod_textures_globals.tier == _tier_stock && !material_count) || !xgpu_backend_texture_store_available())
 	{
+		/* (said once a map where the setting asks for what the renderer
+		cannot draw: the Windows build's has no texture store yet, and
+		nothing said why a pack did nothing) */
+		if (mod_textures_globals.tier != _tier_stock && !xgpu_backend_texture_store_available())
+		{
+#ifdef HALO_WINDOWS
+			error(_error_silent, "texstore: display.prism_textures is set, but this build's renderer has no texture "
+				"store yet (the Windows build's): drawn stock");
+#else
+			error(_error_silent, "texstore: display.prism_textures is set, but this renderer has no texture store: "
+				"drawn stock");
+#endif
+		}
 		store_close();
 		mod_pbr_textures_answered(NULL, 0);
 		return;
