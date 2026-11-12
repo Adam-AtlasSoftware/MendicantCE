@@ -45,6 +45,29 @@ static struct director {director_camera_update_proc camera_proc; int debug_contr
 static struct {float dtime;} director_globals = {1.0f/30};
 static struct director *director_get(short p){return &director_state;}
 static int director_camera_switch_fast;
+/* Forge's flying camera in director_update_controls (source/camera/director.c, port/linux/game/forge.c): its tools
+off, so the camera's controls are the stock ones */
+typedef struct {real i,j,k;} real_vector3d;
+typedef struct {real x,y,z;} real_point3d;
+struct flying_camera {real_point3d position; real_euler_angles2d facing;};
+struct halo_linux_forge_keys {int up,down,fast,move_forward,move_right,faster,slower;};
+#define FORGE_SPEED_SCALE 2.f
+#define FORGE_FAST_SCALE 4.f
+#define FORGE_VERTICAL_SPEED 0.8f
+#define FORGE_ZOOM_SPEED 2.f
+#define PIN(value,low,high) ((value)<(low)?(low):(value)>(high)?(high):(value))
+static int halo_linux_forge_read_keys(struct halo_linux_forge_keys *keys){memset(keys,0,sizeof(*keys));return 0;}
+static int forge_menu_is_open(void){return 0;}
+static int forge_busy(void){return 0;}
+static int forge_camera_turning(void){return 0;}
+static void forge_camera_turn_held(float yaw,float pitch){(void)yaw;(void)pitch;}
+static float forge_camera_orbit_distance(void){return 0;}
+static float forge_camera_zoom(float step){return step;}
+static int halo_linux_forge_touch_look(float *yaw,float *pitch){*yaw=*pitch=0;return 0;}
+int halo_linux_mouse_look(short gamepad_index,real *yaw,real *pitch){(void)gamepad_index;*yaw=*pitch=0;return 0;}
+static void vector3d_from_euler_angles2d(real_vector3d *vector,real_euler_angles2d const *angles){
+ (void)angles;vector->i=1;vector->j=vector->k=0;
+}
 #define TICKS_PER_SECOND 30
 enum {_gamepad_analog_button_black=4,_gamepad_analog_button_right_trigger=7,_gamepad_analog_button_left_trigger=6,
  _gamepad_binary_button_right_thumb=15,_gamepad_binary_button_dpad_up=8,_gamepad_binary_button_dpad_down=9};

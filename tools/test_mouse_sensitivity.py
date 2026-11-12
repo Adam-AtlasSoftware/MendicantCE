@@ -43,12 +43,12 @@ def test_mouse_alone_uses_it():
     scale_look = control[control.index("static void player_control_scale_look("):]
     scale_look = scale_look[:scale_look.index("\n}\n")]
     assert "1.f / unit_get_zoom_magnification(" in scale_look and "mouse" not in scale_look
-    mouse = control[control.index("if (halo_linux_mouse_look(gamepad_index, &mouse_yaw, &mouse_pitch))"):]
+    mouse = control[control.index("halo_linux_mouse_look(gamepad_index, &mouse_yaw, &mouse_pitch))"):]
     mouse = mouse[:mouse.index("input->facing_delta.pitch += mouse_pitch;")]
     assert "mouse_zoom_look_scale(" in mouse and "unit_get_zoom_magnification" not in mouse
     # (the mouse's turn is added after the sticks' and touch's is made, on its own)
     assert control.index("player_control_scale_look(player->unit_index, control->zoom_level, &look_delta);") < \
-        control.index("if (halo_linux_mouse_look(gamepad_index, &mouse_yaw, &mouse_pitch))")
+        control.index("halo_linux_mouse_look(gamepad_index, &mouse_yaw, &mouse_pitch))")
     fov = (ROOT / "port/linux/game/view_fov.c").read_text()
     assert 'strcmp(config_string("input.zoom_sensitivity"), "halo")' in fov
 

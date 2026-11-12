@@ -100,6 +100,10 @@ not under test) */
 void prism_lightmaps_begin(void const *lightmap_bitmap) { (void)lightmap_bitmap; }
 void prism_lightmaps_bsp_switched(void) { }
 void prism_lightmaps_map_unloaded(void) { }
+/* (display.prism_rt's hooks: port/linux/game/prism_rt.c, not under test: off) */
+int prism_rt_mode(void) { return 0; }
+void prism_rt_frame_begin(void) { }
+void prism_rt_map_unloaded(void) { }
 
 /* the field: a volume whose header world_sdf_current hands on, half faded in */
 static struct world_sdf_volume volume;
