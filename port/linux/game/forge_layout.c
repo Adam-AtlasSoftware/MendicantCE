@@ -76,6 +76,10 @@ main 173fc93ae), AGPL-3.0-or-later; ported to OpenH1 (CREDITS.md).
 
 #include "forge_mvar.h"
 #include "network_distributed.h"
+#include "networking/network_game_globals.h"
+#include "networking/network_game_manager.h"
+#include "networking/network_server_manager.h"
+#include "networking/network_server_manager_internal.h" /* network_game_server_get_game */
 
 #include <direct.h>
 #include <stdarg.h>
@@ -2930,6 +2934,17 @@ wchar_t const *forge_custom_map_description(
 	return map && map->description[0] ? map->description : NULL;
 }
 
+/* whether this machine hosts a network game on the map of this name (the
+game record's scenario, by its name alone, as the listing has it) */
+static boolean forge_layout_hosted_map_is(
+	char const *base_name)
+{
+	struct network_game_server *server = global_network_game_server_get();
+	struct network_game *game = server ? network_game_server_get_game(server) : NULL;
+
+	return game && base_name && _stricmp(tag_name_strip_path(game->map.name), base_name) == 0;
+}
+
 void forge_custom_map_select(
 	short index)
 {
@@ -2952,7 +2967,15 @@ every multiplayer game's, which marked them all */
 int forge_layout_hosting(
 	void)
 {
-	return forge_custom_map_selected() != NONE || forge_layout_globals.current_slot != 0;
+	short selected = forge_custom_map_selected();
+
+	if (forge_layout_globals.current_slot != 0)
+		return TRUE;
+	/* (a map chosen in the list marks the game hosted on its base map, from
+	the lobby on, and no other: the choice is kept between games, and marked
+	every game made afterwards, a co-op level's and another map's, which
+	builds without Forge then could not join) */
+	return selected != NONE && forge_layout_hosted_map_is(forge_custom_map_base_name(selected));
 }
 
 short forge_custom_map_selected(

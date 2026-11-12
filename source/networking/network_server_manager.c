@@ -4285,6 +4285,16 @@ void network_game_server_change_map_name(
 	match_assert(NETWORK_SERVER_MANAGER_FILE, 0x79C,
 		server->state == _network_game_server_state_pregame);
 
+	/* port: a game's map set by name is no Forge map: a Forge map chosen in
+	a map list earlier (port/linux/game/forge_layout.c keeps the choice
+	between games) is let go here, where every game made by name passes
+	(matchmaking, the host's next game and playlist, Basic Training, a co-op
+	level, a dedicated server's rotation): kept, it loaded its layout again
+	into a game on its base map that had asked for the stock map, and marked
+	every other game as Forge's. The map lists choose their Forge map after
+	this call. */
+	forge_custom_map_select(NONE);
+
 	for (client_machine_index = 0;
 		client_machine_index < MAXIMUM_NETWORK_MACHINE_COUNT;
 		client_machine_index++)
