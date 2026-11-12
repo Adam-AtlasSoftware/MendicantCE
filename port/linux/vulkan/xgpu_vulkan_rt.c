@@ -156,6 +156,16 @@ struct rt_capture
 		float bounds[6];
 	} occluders[RT_CAPTURED_DRAWS];
 	uint32_t occluder_count;
+	/* the captured vertices and triangles as the CPU writes them, in its own
+	memory (the slot's mapped geometry is slow for the CPU to read, and
+	moving the first-person weapon's triangles out read it back): copied
+	into the slot's geometry once, at the window's end */
+	float *vertices;
+	uint32_t *indices;
+	uint32_t vertices_allocated, indices_allocated;
+	/* a draw's vertices it names, each skinned once: the stamp of the draw
+	that last met each (of the 65536 a draw may span) and its place */
+	uint32_t *stamps, *places, stamp;
 };
 
 static struct
@@ -790,8 +800,16 @@ void xgpu_vulkan_rt_static(const struct xgpu_stream_rt_static *record, const flo
 void xgpu_vulkan_rt_window_begin(void)
 {
 	struct rt_slot *slot = &rt.slots[rt.slot];
+	struct rt_capture kept = rt.capture;
 
 	memset(&rt.capture, 0, sizeof(rt.capture));
+	rt.capture.vertices = kept.vertices;
+	rt.capture.indices = kept.indices;
+	rt.capture.vertices_allocated = kept.vertices_allocated;
+	rt.capture.indices_allocated = kept.indices_allocated;
+	rt.capture.stamps = kept.stamps;
+	rt.capture.places = kept.places;
+	rt.capture.stamp = kept.stamp;
 	if (!xgpu_vulkan_rt_active())
 		return;
 	/* (the slot's geometry left after the windows before: vertices in its
@@ -807,6 +825,36 @@ void xgpu_vulkan_rt_window_begin(void)
 		rt.capture.index_room = (uint32_t)((slot->geometry.size - rt.capture.index_offset) / 12);
 		if (rt.capture.index_room > RT_OBJECT_TRIANGLES)
 			rt.capture.index_room = RT_OBJECT_TRIANGLES;
+		if (rt.capture.vertex_room > rt.capture.vertices_allocated)
+		{
+			float *grown = realloc(rt.capture.vertices, (size_t)rt.capture.vertex_room * 12);
+
+			if (!grown)
+				return;
+			rt.capture.vertices = grown;
+			rt.capture.vertices_allocated = rt.capture.vertex_room;
+		}
+		if (rt.capture.index_room > rt.capture.indices_allocated)
+		{
+			uint32_t *grown = realloc(rt.capture.indices, (size_t)rt.capture.index_room * 12);
+
+			if (!grown)
+				return;
+			rt.capture.indices = grown;
+			rt.capture.indices_allocated = rt.capture.index_room;
+		}
+		if (!rt.capture.stamps)
+		{
+			rt.capture.stamps = calloc(65536, sizeof(uint32_t));
+			rt.capture.places = malloc(65536 * sizeof(uint32_t));
+			if (!rt.capture.stamps || !rt.capture.places)
+			{
+				free(rt.capture.stamps);
+				free(rt.capture.places);
+				rt.capture.stamps = rt.capture.places = NULL;
+				return;
+			}
+		}
 		rt.capture.open = 1;
 	}
 }
@@ -827,7 +875,6 @@ static inline float rt_read_float(const uint8_t *bytes)
 
 void xgpu_vulkan_rt_capture(const struct xgpu_vulkan_rt_draw *draw)
 {
-	struct rt_slot *slot = &rt.slots[rt.slot];
 	struct rt_capture *capture = &rt.capture;
 	uint32_t lowest = 0xffffffffu, highest = 0, index, vertices, triangles = 0, first;
 	float *to_vertices, bounds[6] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
@@ -855,75 +902,23 @@ void xgpu_vulkan_rt_capture(const struct xgpu_vulkan_rt_draw *draw)
 		lowest = 0;
 		highest = draw->count - 1;
 	}
-	vertices = highest - lowest + 1;
 	if (draw->occluder && capture->occluder_count == RT_CAPTURED_DRAWS)
 		return;
-	if ((uint64_t)(highest + 1) * draw->stride > draw->bytes || vertices > 65536)
+	if ((uint64_t)(highest + 1) * draw->stride > draw->bytes || highest - lowest >= 65536)
 		return;
-	if (capture->vertex_count + vertices > capture->vertex_room)
+	/* (a new stamp for the draw: the vertices it names skinned once each, as
+	they are first met, and only those: a draw names a few of a long run of
+	vertices more often than not) */
+	if (++capture->stamp == 0)
 	{
-		capture->full = 1;
-		rt.full_frames++;
-		return;
+		memset(capture->stamps, 0, 65536 * sizeof(uint32_t));
+		capture->stamp = 1;
 	}
 	first = capture->vertex_count;
-	to_vertices = (float *)((uint8_t *)slot->geometry.mapped + capture->vertex_offset) + (size_t)first * 3;
-	/* skinned as the stock vertex program skins it: two nodes' matrices
-	(three rows each from c[60]), the first's weight, the second's the rest */
-	for (index = 0; index < vertices; index++)
-	{
-		const uint8_t *vertex = draw->vertices + (size_t)(lowest + index) * draw->stride;
-		float p[3], w = 1.0f, out[3];
-		unsigned n0 = 0, n1 = 0;
-		int axis;
-
-		p[0] = rt_read_float(vertex + draw->position_offset);
-		p[1] = rt_read_float(vertex + draw->position_offset + 4);
-		p[2] = rt_read_float(vertex + draw->position_offset + 8);
-		if (draw->nodes_offset >= 0)
-		{
-			n0 = vertex[draw->nodes_offset];
-			n1 = vertex[draw->nodes_offset + 1];
-		}
-		if (draw->weight_offset >= 0)
-		{
-			int16_t weight;
-
-			memcpy(&weight, vertex + draw->weight_offset, sizeof(weight));
-			w = (float)weight / 32767.0f;
-		}
-		if (n0 > 189)
-			n0 = 0;
-		if (n1 > 189)
-			n1 = 0;
-		for (axis = 0; axis < 3; axis++)
-		{
-			const float *a = draw->constants[60 + n0 + axis], *b = draw->constants[60 + n1 + axis];
-			float pa = a[0] * p[0] + a[1] * p[1] + a[2] * p[2] + a[3];
-			float pb = b[0] * p[0] + b[1] * p[1] + b[2] * p[2] + b[3];
-
-			out[axis] = w * pa + (1.0f - w) * pb;
-		}
-		if (!isfinite(out[0]) || !isfinite(out[1]) || !isfinite(out[2]))
-			out[0] = out[1] = out[2] = 0.0f;
-		if (draw->occluder)
-		{
-			for (axis = 0; axis < 3; axis++)
-			{
-				if (!index || out[axis] < bounds[axis])
-					bounds[axis] = out[axis];
-				if (!index || out[axis] > bounds[axis + 3])
-					bounds[axis + 3] = out[axis];
-			}
-		}
-		to_vertices[index * 3] = out[0];
-		to_vertices[index * 3 + 1] = out[1];
-		to_vertices[index * 3 + 2] = out[2];
-	}
-	/* its triangles, a list (a strip's degenerate joins left out) */
-	to_indices = (uint32_t *)((uint8_t *)slot->geometry.mapped + capture->index_offset) +
-		(size_t)capture->triangle_count * 3;
-#define RT_VERTEX(i) (first + (uint32_t)((draw->indices ? (int32_t)draw->indices[i] - draw->index_base : (int32_t)(i)) - \
+	vertices = 0;
+	to_vertices = capture->vertices + (size_t)first * 3;
+	to_indices = capture->indices + (size_t)capture->triangle_count * 3;
+#define RT_VERTEX(i) ((uint32_t)((draw->indices ? (int32_t)draw->indices[i] - draw->index_base : (int32_t)(i)) - \
 	(int32_t)lowest))
 	{
 		uint32_t count = draw->count, room = capture->index_room - capture->triangle_count, t;
@@ -931,34 +926,104 @@ void xgpu_vulkan_rt_capture(const struct xgpu_vulkan_rt_draw *draw)
 
 		for (t = 0; t < total && triangles < room; t++)
 		{
-			uint32_t a, b, c;
+			uint32_t corner[3], corners;
 
 			if (draw->primitive == XGPU_VULKAN_RT_LIST)
 			{
-				a = RT_VERTEX(t * 3);
-				b = RT_VERTEX(t * 3 + 1);
-				c = RT_VERTEX(t * 3 + 2);
+				corner[0] = RT_VERTEX(t * 3);
+				corner[1] = RT_VERTEX(t * 3 + 1);
+				corner[2] = RT_VERTEX(t * 3 + 2);
 			}
 			else if (draw->primitive == XGPU_VULKAN_RT_STRIP)
 			{
-				a = RT_VERTEX(t);
-				b = RT_VERTEX(t + 1);
-				c = RT_VERTEX(t + 2);
+				corner[0] = RT_VERTEX(t);
+				corner[1] = RT_VERTEX(t + 1);
+				corner[2] = RT_VERTEX(t + 2);
 			}
 			else
 			{
-				a = RT_VERTEX(0);
-				b = RT_VERTEX(t + 1);
-				c = RT_VERTEX(t + 2);
+				corner[0] = RT_VERTEX(0);
+				corner[1] = RT_VERTEX(t + 1);
+				corner[2] = RT_VERTEX(t + 2);
 			}
-			if (a == b || b == c || a == c)
+			if (corner[0] == corner[1] || corner[1] == corner[2] || corner[0] == corner[2])
 				continue;
-			to_indices[triangles * 3] = a;
-			to_indices[triangles * 3 + 1] = b;
-			to_indices[triangles * 3 + 2] = c;
+			for (corners = 0; corners < 3; corners++)
+			{
+				uint32_t v = corner[corners];
+
+				if (capture->stamps[v] != capture->stamp)
+				{
+					const uint8_t *vertex = draw->vertices + (size_t)(lowest + v) * draw->stride;
+					float p[3], w = 1.0f, out[3];
+					unsigned n0 = 0, n1 = 0;
+					int axis;
+
+					if (first + vertices >= capture->vertex_room)
+						break;
+					/* skinned as the stock vertex program skins it: two nodes'
+					matrices (three rows each from c[60]), the first's weight,
+					the second's the rest */
+					p[0] = rt_read_float(vertex + draw->position_offset);
+					p[1] = rt_read_float(vertex + draw->position_offset + 4);
+					p[2] = rt_read_float(vertex + draw->position_offset + 8);
+					if (draw->nodes_offset >= 0)
+					{
+						n0 = vertex[draw->nodes_offset];
+						n1 = vertex[draw->nodes_offset + 1];
+					}
+					if (draw->weight_offset >= 0)
+					{
+						int16_t weight;
+
+						memcpy(&weight, vertex + draw->weight_offset, sizeof(weight));
+						w = (float)weight / 32767.0f;
+					}
+					if (n0 > 189)
+						n0 = 0;
+					if (n1 > 189)
+						n1 = 0;
+					for (axis = 0; axis < 3; axis++)
+					{
+						const float *a = draw->constants[60 + n0 + axis], *b = draw->constants[60 + n1 + axis];
+						float pa = a[0] * p[0] + a[1] * p[1] + a[2] * p[2] + a[3];
+						float pb = b[0] * p[0] + b[1] * p[1] + b[2] * p[2] + b[3];
+
+						out[axis] = w * pa + (1.0f - w) * pb;
+					}
+					if (!isfinite(out[0]) || !isfinite(out[1]) || !isfinite(out[2]))
+						out[0] = out[1] = out[2] = 0.0f;
+					if (draw->occluder)
+					{
+						for (axis = 0; axis < 3; axis++)
+						{
+							if (!vertices || out[axis] < bounds[axis])
+								bounds[axis] = out[axis];
+							if (!vertices || out[axis] > bounds[axis + 3])
+								bounds[axis + 3] = out[axis];
+						}
+					}
+					to_vertices[vertices * 3] = out[0];
+					to_vertices[vertices * 3 + 1] = out[1];
+					to_vertices[vertices * 3 + 2] = out[2];
+					capture->stamps[v] = capture->stamp;
+					capture->places[v] = first + vertices;
+					vertices++;
+				}
+				corner[corners] = capture->places[v];
+			}
+			if (corners < 3)
+			{
+				capture->full = 1;
+				rt.full_frames++;
+				break;
+			}
+			to_indices[triangles * 3] = corner[0];
+			to_indices[triangles * 3 + 1] = corner[1];
+			to_indices[triangles * 3 + 2] = corner[2];
 			triangles++;
 		}
-		if (t < total)
+		if (t < total && !capture->full)
 		{
 			capture->full = 1;
 			rt.full_frames++;
@@ -1034,8 +1099,10 @@ weapon and hands, which CE never let cast shadows) taken out of the
 window's triangles */
 static void first_person_drop(struct rt_slot *slot, const float eye[3])
 {
-	uint32_t *indices = (uint32_t *)((uint8_t *)slot->geometry.mapped + rt.capture.index_offset);
+	uint32_t *indices = rt.capture.indices;
 	uint32_t index, removed = 0;
+
+	(void)slot;
 
 	for (index = rt.capture.occluder_count; index-- > 0;)
 	{
@@ -1637,6 +1704,12 @@ structure's and the objects' visibility of the sun as they are) */
 	barrier_global(commands, VK_PIPELINE_STAGE_HOST_BIT, VK_ACCESS_HOST_WRITE_BIT,
 		VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, VK_ACCESS_SHADER_READ_BIT);
 	first_person_drop(slot, pass->camera[0]);
+	/* (the captured vertices and triangles into the slot's geometry, written
+	once, in order) */
+	memcpy((uint8_t *)slot->geometry.mapped + rt.capture.vertex_offset, rt.capture.vertices,
+		(size_t)rt.capture.vertex_count * 12);
+	memcpy((uint8_t *)slot->geometry.mapped + rt.capture.index_offset, rt.capture.indices,
+		(size_t)rt.capture.triangle_count * 12);
 	objects = objects_build(commands, slot);
 	if (objects)
 		barrier_global(commands, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
