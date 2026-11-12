@@ -153,22 +153,6 @@ The game then extracts the disc's `maps/` folder (and its movies, when the
 image has them) and starts. "Game data" in OpenH1's README says the rest
 (`README.OpenH1.md` in a build).
 
-### The game's logs
-
-The game leaves two logs on your computer, and sends neither anywhere:
-
-- `halo.log`: what the build says of itself as it runs: the folders it
-  uses, the graphics card, the files PRISM and MENDICANT AI looked for and
-  took, and why it stopped when it does. It is made afresh at each start;
-  the start before is `halo.previous.log`.
-  - **Linux:** beside `config.toml`, which is the folder you unzipped the
-    build into. The same lines are printed in the terminal, when the game
-    is started from one.
-  - **Windows:** next to `halo.exe`.
-- `debug.txt`: the game's own log, and a crash's report. It is in the
-  folder that holds `maps/` (on Linux the game names that folder at the
-  top of `halo.log`, as its data root).
-
 What this build does differently from an OpenH1 build, on purpose:
 
 - **It does not update itself.** New builds are on the releases page above.
@@ -201,6 +185,22 @@ What it still shares with an OpenH1 on the same computer:
   version of its Standard game, so they join a game of this build as OpenCE
   players do, at 30 ticks; messages that say "Update OpenH1" then mean that
   the other game is newer than this build.
+
+### The game's logs
+
+The game leaves two logs on your computer, and sends neither anywhere:
+
+- `halo.log`: what the build says of itself as it runs: the folders it
+  uses, the graphics card, the files PRISM and MENDICANT AI looked for and
+  took, and why it stopped when it does. It is made afresh at each start;
+  the start before is `halo.previous.log`.
+  - **Linux:** beside `config.toml`, which is the folder you unzipped the
+    build into. The same lines are printed in the terminal, when the game
+    is started from one.
+  - **Windows:** next to `halo.exe`.
+- `debug.txt`: the game's own log, and a crash's report. It is in the
+  folder that holds `maps/` (on Linux the game names that folder at the
+  top of `halo.log`, as its data root).
 
 ## Reporting problems
 
