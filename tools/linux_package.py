@@ -22,6 +22,9 @@ anywhere and starts with bin/openh1:
                                                (port/assets/steam, tools/steam_art.py; the VR build's OpenH1 VR's)
     share/applications/openh1.desktop          the desktop entry
     share/icons/hicolor/<n>x<n>/apps/openh1.png  its icon
+    share/openh1/prism_packs/                  fork: PRISM's pack tools (tools/prism_packs: stage_pack_tools)
+    bin/openh1-map-extract                     fork: their extractor (tools/x86_game_abi.py --map-extract), when
+                                               the build has it
     share/doc/openh1/                          the READMEs (the fork's own as README.md, OpenH1's as
                                                README.OpenH1.md and README.linux.md), the credits and SOURCE.txt
                                                (where this build's source is: source_notice)
@@ -92,6 +95,40 @@ UPSTREAM_NAME = "OpenH1"
 UPSTREAM_URL = "https://github.com/OpenH1/OpenH1"
 UPSTREAM_BASE = "afa1611ce"  # the commit of OpenH1 the fork's changes start from
 PROJECT_LICENSE = ROOT / "LICENSE"  # the AGPL (earlier releases were CC0: LICENSES/)
+# fork: PRISM's pack tools (tools/prism_packs), which build the packs from the player's own game data on the
+# player's computer: the code, recipes and texts (not the extractor's C sources: the extractor itself comes
+# built), the game's pack format tools beside them (formats/), and the player's guide as GUIDE.md
+PACK_TOOLS = ROOT / "tools/prism_packs"
+PACK_TOOLS_NAME = "prism_packs"
+PACK_TOOL_SUFFIXES = (".py", ".json", ".txt", ".md")
+PACK_FORMAT_TOOLS = [ROOT / "tools" / name for name in ("pmesh.py", "pmesh_from_dump.py", "prism_rig.py",
+                                                       "prism_material_pack.py", "texstore_synth.py",
+                                                       "prism_probes.py")]
+PACK_GUIDE = ROOT / "docs/prism_packs.md"
+MAP_EXTRACT_NAME = "openh1-map-extract"
+# (the extractor is linked statically with the GNU C Library, whose LGPL asks a copy to carry it and to say where
+# its source and the extractor's are: the extractor's own notice beside the licences)
+MAP_EXTRACT_LGPL = (ROOT / "port/third_party/ffmpeg/COPYING.LGPLv2.1", "glibc-COPYING.LGPLv2.1.txt")
+MAP_EXTRACT_NOTICE = "openh1-map-extract-NOTICE.txt"
+
+
+def map_extract_notice() -> str:
+    """the extractor's notice: what it is, its licence, and the sources of it and of the C library in it"""
+    return "\n".join([
+        f"bin/{MAP_EXTRACT_NAME}: PRISM's pack tools' extractor ({FORK_NAME}: tools/prism_packs/extract, built by",
+        "tools/x86_game_abi.py --map-extract). It reads the player's own maps and writes their bitmaps, models and",
+        "level geometry for the pack tools (share/openh1/prism_packs); nothing it writes may be shared.",
+        "",
+        "Its own code is under the GNU Affero General Public License, version 3 or later (LICENSE), with the",
+        "game's source (SOURCE.txt says where).",
+        "",
+        "It is linked statically with the GNU C Library (glibc), the version of Ubuntu 22.04's libc6-dev-i386",
+        "package, under the GNU Lesser General Public License, version 2.1 or later",
+        "(glibc-COPYING.LGPLv2.1.txt). The library's source: https://ftp.gnu.org/gnu/glibc/ and Ubuntu's glibc",
+        "source package (https://launchpad.net/ubuntu/+source/glibc). To link the extractor with another",
+        "version of the library, build it from the game's source with tools/x86_game_abi.py --map-extract:",
+        "its objects are made in build/map_extract/obj, and any C library of the 32-bit x86 ABI links them.",
+    ]) + "\n"
 
 
 def notices(platform: str) -> List[Tuple[Path, str]]:
@@ -225,8 +262,24 @@ def _copy(source: Path, destination: Path) -> None:
     shutil.copy2(source, destination)
 
 
+def pack_tool_files() -> List[Tuple[Path, str]]:
+    """fork: PRISM's pack tools as a package has them ((source, path in the tools' folder) pairs)"""
+    files = [(path, path.relative_to(PACK_TOOLS).as_posix()) for path in sorted(PACK_TOOLS.rglob("*"))
+             if path.is_file() and path.suffix in PACK_TOOL_SUFFIXES and "__pycache__" not in path.parts]
+    files += [(path, f"formats/{path.name}") for path in PACK_FORMAT_TOOLS]
+    files.append((PACK_GUIDE, "GUIDE.md"))
+    return files
+
+
+def stage_pack_tools(folder: Path) -> None:
+    """fork: PRISM's pack tools in folder (the Linux tree's share/openh1/prism_packs, the Windows folder's
+    prism_packs)"""
+    for source, name in pack_tool_files():
+        _copy(source, folder / name)
+
+
 def stage_tree(dist: Path, executable: Path, library: Optional[Path], notices: Iterable[Tuple[Path, str]],
-               installer: bool = True, vr: bool = False) -> None:
+               installer: bool = True, vr: bool = False, extractor: Optional[Path] = None) -> None:
     """The release's tree in dist: the executable as bin/openh1, SDL in
     lib/openh1 (none: the system's), and notices ((source, name) pairs: the
     licences of what the build carries) in share/licenses/openh1; and, for
@@ -234,7 +287,9 @@ def stage_tree(dist: Path, executable: Path, library: Optional[Path], notices: I
     top. The VR build's (vr) has share/openh1/vr, by which install.sh puts
     it beside the other build, not in its place. The release's has Steam's
     library artwork too (share/openh1/steam), which install.sh gives the
-    game's Steam shortcut: OpenH1 VR's in the VR build's."""
+    game's Steam shortcut: OpenH1 VR's in the VR build's. fork: a tree without the installer (this fork's
+    release) has PRISM's pack tools in share/openh1/prism_packs, and their extractor as
+    bin/openh1-map-extract when extractor names it."""
     if installer:
         _copy(INSTALLER, dist / "install.sh")
         for art in sorted((STEAM_ART / ("openh1-vr" if vr else "openh1")).glob("*.png")):
@@ -256,6 +311,12 @@ def stage_tree(dist: Path, executable: Path, library: Optional[Path], notices: I
             "The VR build (HALO_VR). install.sh installs it in ~/Applications/OpenH1-VR, beside the other build.\n")
     _copy(DESKTOP_ENTRY, dist / "share/applications" / f"{NAME}.desktop")
     if not installer:
+        # fork: PRISM's pack tools, and their extractor (a static program)
+        stage_pack_tools(dist / "share" / NAME / PACK_TOOLS_NAME)
+        if extractor:
+            _copy(extractor, dist / "bin" / MAP_EXTRACT_NAME)
+            _copy(MAP_EXTRACT_LGPL[0], dist / "share/licenses" / NAME / MAP_EXTRACT_LGPL[1])
+            (dist / "share/licenses" / NAME / MAP_EXTRACT_NOTICE).write_text(map_extract_notice())
         # fork: a tree without OpenH1's installer is this fork's release or a package of it: its menu entry
         # names the fork (the installer's own entry, where a tree has it, is written by install.sh)
         entry = dist / "share/applications" / f"{NAME}.desktop"

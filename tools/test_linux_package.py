@@ -105,7 +105,11 @@ def test_fork_tree(build, tmp_path):
     assert "a modified version of OpenH1" in source and "Adam Wiley" in source and "afa1611ce" in source
     assert "https://github.com/Adam-AtlasSoftware/MendicantCE" in source
     assert not (tree / "install.sh").exists()
-    assert "installer=False, vr=args.vr)" in (ROOT / "tools/ci_build.py").read_text()
+    assert "installer=False, vr=args.vr, extractor=extractor)" in (ROOT / "tools/ci_build.py").read_text()
+    # (fork: PRISM's pack tools, and the player's guide to them)
+    assert (tree / "share/openh1/prism_packs/prism_packs.py").read_bytes() == \
+        (ROOT / "tools/prism_packs/prism_packs.py").read_bytes()
+    assert (tree / "share/openh1/prism_packs/GUIDE.md").read_bytes() == (ROOT / "docs/prism_packs.md").read_bytes()
     # (the tree's own desktop entry names the fork; install.sh's, which this tree has not, is OpenH1's)
     entry = (tree / "share/applications/openh1.desktop").read_text()
     assert "\nName=MendicantCE\n" in entry and "\nExec=openh1\n" in entry
@@ -899,7 +903,8 @@ def test_vr_tree_marker(build, tmp_path):
             (ROOT / f"port/assets/steam/{variant}/capsule.png").read_bytes()
     assert (ROOT / "port/assets/steam/openh1/capsule.png").read_bytes() != \
         (ROOT / "port/assets/steam/openh1-vr/capsule.png").read_bytes()
-    assert "linux_package.stage_tree(dist, executable, library, notices, installer=False, vr=args.vr)" in \
+    assert ("linux_package.stage_tree(dist, executable, library, notices, installer=False, vr=args.vr, "
+            "extractor=extractor)") in \
         (ROOT / "tools/ci_build.py").read_text()
 
 

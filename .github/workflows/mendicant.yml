@@ -19,12 +19,16 @@
 # - SOURCE.txt names this run's commit;
 # - MENDICANT AI's trained models are in it, the repository's own file;
 # - the player's README, the licence and the third parties' notices are in
-#   it, and nothing of the game's data or of a player's run is.
+#   it, and nothing of the game's data or of a player's run is
+#   (tools/fork_gate.py reads every file's first bytes for them);
+# - PRISM's pack tools are in it (tools/prism_packs), and the Linux package's
+#   extractor, bin/openh1-map-extract, is a static program that starts.
 #
 # The builds have no build number: HALO_BUILD_NUMBER is never set here, and
 # a build names itself by its commit (source/main/main.c). The PRISM asset
 # packs are made from the game's data: they are in no package, and no game
-# data is in this repository or its runs.
+# data is in this repository or its runs. The tools that make them from a
+# player's own data are (docs/prism_packs.md).
 name: MendicantCE
 
 on:
@@ -153,6 +157,13 @@ jobs:
           # (the commit the build names itself by: updater.c's and main.c's label)
           grep -qF "${GITHUB_SHA:0:12}" "$RUNNER_TEMP/strings.txt"
           grep -qF "this fork's builds do not update themselves" "$RUNNER_TEMP/strings.txt"
+          # (the pack tools' extractor: static, 32-bit, and it starts: without a map it says how it is used)
+          extractor="$tree/bin/openh1-map-extract"
+          if readelf -d "$extractor" | grep -q NEEDED; then echo "$extractor is not static"; exit 1; fi
+          status=0; "$extractor" > "$RUNNER_TEMP/extract.txt" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/extract.txt"
+          grep -q "usage: map_extract" "$RUNNER_TEMP/extract.txt"
+          python3 "$tree/share/openh1/prism_packs/prism_packs.py" list
 
       # the build started, hidden, with no display, sound or network: it runs
       # through its start-up (settings, SDL, the files) until it finds no
@@ -253,9 +264,11 @@ jobs:
           python tools/fork_gate.py "$folder"
           grep -q "commit      $GITHUB_SHA" "$folder/SOURCE.txt"
           cmp "$MODELS" "$folder/mendicant_models.aibw"
-          for name in halo.exe SDL3.dll openh1.assets prepared.records README.md LICENSE.txt CREDITS.md; do
+          for name in halo.exe SDL3.dll openh1.assets prepared.records README.md LICENSE.txt CREDITS.md \
+                      prism_packs/prism_packs.py prism_packs/GUIDE.md; do
             [ -f "$folder/$name" ] || { echo "$name is missing"; exit 1; }
           done
+          python "$folder/prism_packs/prism_packs.py" list
 
       # The build started: the 64-bit host reserves the guest's memory, loads
       # the guest image and runs it through its start-up until it finds no
@@ -349,7 +362,8 @@ jobs:
             tools/test_guest_branch_relax.py tools/test_host_watch_hash.py tools/test_touch_menu.py tools/harness \
             tools/test_controller_remap.py tools/test_controller_remap_context.py tools/test_net_compare.py tools/test_loading_ring.py \
             tools/test_preparation.py tools/test_progress_ownership.py tools/test_ci_test_shards.py \
-            tools/test_fork_identity.py tools/test_port_settings.py tools/test_loading_assets.py tools/test_mouse_sensitivity.py
+            tools/test_fork_identity.py tools/test_port_settings.py tools/test_loading_assets.py tools/test_mouse_sensitivity.py \
+            tools/test_prism_packs.py
 
   sums:
     # the two zips' SHA256SUMS, when both built and passed their checks: the

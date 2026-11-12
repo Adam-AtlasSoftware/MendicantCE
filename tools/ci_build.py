@@ -250,8 +250,18 @@ def main() -> int:
         dist = ROOT / "dist" / dist_name(args.platform, args.config, args.vr)
         if dist.exists():
             shutil.rmtree(dist)
-        # fork: without OpenH1's installer (linux_package.py: it would install this fork over an OpenH1)
-        linux_package.stage_tree(dist, executable, library, notices, installer=False, vr=args.vr)
+        # fork: without OpenH1's installer (linux_package.py: it would install this fork over an OpenH1); with
+        # PRISM's pack tools, and their extractor where this computer builds it (the game's 32-bit x86 ABI:
+        # tools/x86_game_abi.py --map-extract, a static program)
+        extractor = None
+        if args.platform == "linux_x86_64" and not args.vr:
+            import x86_game_abi
+            reason = x86_game_abi.can_build(ROOT / "build" / "map_extract")
+            if reason:
+                print(f"the pack tools' extractor is not built: {reason}", flush=True)
+            else:
+                extractor = x86_game_abi.build_map_extract(ROOT / "build" / "map_extract")
+        linux_package.stage_tree(dist, executable, library, notices, installer=False, vr=args.vr, extractor=extractor)
         print(f"{', '.join(outputs)} -> {dist.relative_to(ROOT)}", flush=True)
         return 0
 
@@ -307,6 +317,10 @@ def main() -> int:
     for source, name in linux_package.fork_documents():
         shutil.copy2(source, dist / name)
     (dist / linux_package.SOURCE_NOTICE).write_text(linux_package.source_notice())
+    # fork: PRISM's pack tools (their extractor, a Linux program, is the Linux release's: on Windows it runs
+    # through WSL, docs/prism_packs.md)
+    if args.platform == "windows":
+        linux_package.stage_pack_tools(dist / linux_package.PACK_TOOLS_NAME)
     return 0
 
 

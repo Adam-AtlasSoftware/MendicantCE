@@ -19,8 +19,14 @@ not a whole package of the fork, and so is what stands between a build and a dow
   5 and 6), or names another commit than the workflow's (GITHUB_SHA);
 - that tools/fork_gate.py refuses (a build that could update itself to, or pass for, OpenH1);
 - that holds anything a player's run leaves or anything of the game's data: maps, saves, settings, logs, disc
-  images, mods, PRISM's asset packs. The packs are made from the game's data on their maker's computer and
-  are in no download; a download plays from the player's own game with none.
+  images, mods, PRISM's asset packs (fork_gate.py's check_game_data reads every file's first bytes for them).
+  The packs are made from the game's data on their maker's computer and are in no download; a download plays
+  from the player's own game with none;
+- that lacks PRISM's pack tools (tools/prism_packs, with the player's guide as GUIDE.md: they build the packs
+  from the player's own game data on the player's computer), or whose tools folder holds anything but code,
+  recipes and text (fork_gate.py: no recipe a table of numbers long enough to be a mesh or a picture). The
+  Linux package carries their extractor, bin/openh1-map-extract; the Windows package's tools run that one
+  through WSL.
 
 sums writes SHA256SUMS in the folder, of the downloads in it (sha256sum -c SHA256SUMS checks them).
 
@@ -56,10 +62,12 @@ PLATFORMS = {
         "licenses": "share/licenses/openh1",
         "license": "LICENSE",
         "models": "share/openh1/" + linux_package.MENDICANT_MODELS_NAME,
-        "notices": ["SDL3-LICENSE.txt"],
+        "notices": ["SDL3-LICENSE.txt", linux_package.MAP_EXTRACT_LGPL[1], linux_package.MAP_EXTRACT_NOTICE],
         "files": ["bin/openh1", "lib/openh1/libSDL3.so.0", "share/openh1/openh1.assets",
                   "share/openh1/prepared.records", "share/openh1/brokers.txt", "share/openh1/masters.txt",
-                  "share/openh1/relays.txt", "share/applications/openh1.desktop"],
+                  "share/openh1/relays.txt", "share/applications/openh1.desktop",
+                  "bin/" + linux_package.MAP_EXTRACT_NAME],
+        "tools": "share/openh1/" + linux_package.PACK_TOOLS_NAME,
         "top": {"bin", "lib", "share"},
     },
     "windows-x64": {
@@ -71,7 +79,8 @@ PLATFORMS = {
         "notices": [],
         "files": ["halo.exe", "SDL3.dll", "openh1.assets", "prepared.records", "brokers.txt", "masters.txt",
                   "relays.txt"],
-        "top": None,  # (every file is at the top: no folders)
+        "tools": linux_package.PACK_TOOLS_NAME,
+        "top": None,  # (every file is at the top: no folders but the pack tools')
     },
 }
 
@@ -81,7 +90,9 @@ FORBIDDEN_FOLDERS = {"maps", "custom_maps", "bink", "mods", "saves", "savegames"
                      "prism", "prism_lightmaps", "prism_world", "textures", "meshes", "materials", "cache",
                      "screenshots", "recordings", "training"}
 FORBIDDEN_SUFFIXES = {".map", ".iso", ".xiso", ".bik", ".sav", ".log", ".dmp", ".probes", ".prl", ".pwg", ".pth",
-                      ".pt", ".replay", ".bitmaps", ".sounds", ".pdb", ".zip"}
+                      ".pt", ".replay", ".bitmaps", ".sounds", ".pdb", ".zip", ".psm", ".plm", ".pmesh", ".ktx2",
+                      ".wsdf", ".gltf", ".glb", ".jms", ".jma", ".npz", ".npy", ".blend", ".bitmap", ".gbxmodel",
+                      ".model", ".safetensors", ".onnx"}
 FORBIDDEN_NAMES = {"config.toml", "debug.txt", "halo.log", "halo.previous.log"}
 
 
@@ -99,6 +110,8 @@ def problems_of(platform: str, tree: Path) -> List[str]:
     present = set(names)
 
     required = list(layout["files"]) + [layout["models"], join(layout["licenses"], layout["license"])]
+    # fork: PRISM's pack tools, as linux_package.stage_pack_tools lays them out
+    required += [join(layout["tools"], name) for _source, name in linux_package.pack_tool_files()]
     required += [join(layout["documents"], name) for name in DOCUMENT_NAMES]
     required += [join(layout["licenses"], name) for _source, name in linux_package.notices(layout["build"])]
     required += [join(layout["licenses"], name) for name in layout["notices"]]
@@ -112,6 +125,7 @@ def problems_of(platform: str, tree: Path) -> List[str]:
     # OpenH1's beside it), the licence and the notices
     same = [(linux_package.MENDICANT_MODELS, layout["models"]),
             (linux_package.PROJECT_LICENSE, join(layout["licenses"], layout["license"]))]
+    same += [(source, join(layout["tools"], name)) for source, name in linux_package.pack_tool_files()]
     same += [(source, join(layout["documents"], name)) for source, name in linux_package.DOCUMENTS]
     same += [(source, join(layout["licenses"], name)) for source, name in linux_package.notices(layout["build"])]
     for source, name in same:
@@ -148,10 +162,17 @@ def problems_of(platform: str, tree: Path) -> List[str]:
     tops = {name.split("/")[0] for name in names}
     if layout["top"] is not None and tops != layout["top"]:
         problems.append(f"the top of the tree is {sorted(tops)}, not {sorted(layout['top'])}")
-    if layout["top"] is None and any("/" in name for name in names):
-        problems.append("the folder has folders in it: " + ", ".join(sorted(name for name in names if "/" in name)))
+    if layout["top"] is None and any("/" in name and name.split("/")[0] != layout["tools"] for name in names):
+        problems.append("the folder has folders in it: " + ", ".join(
+            sorted(name for name in names if "/" in name and name.split("/")[0] != layout["tools"])))
+    # (and the pack tools' folder holds the repository's files and no other)
+    expected = {join(layout["tools"], name) for _source, name in linux_package.pack_tool_files()}
+    for name in names:
+        if name.startswith(layout["tools"] + "/") and name not in expected:
+            problems.append(f"{name} is not one of the pack tools' files")
 
     problems += fork_gate.check([tree])
+    problems += fork_gate.check_game_data([tree])
     return problems
 
 
