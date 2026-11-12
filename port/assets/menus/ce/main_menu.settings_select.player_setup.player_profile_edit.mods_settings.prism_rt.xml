@@ -100,7 +100,7 @@
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/help_strings">
 		<string text=""/>
 		<string text=""/>
-		<string text="On graphics cards that trace rays: Shadows casts the sun's shadows of everything on screen and traced ambient occlusion; GI also bounces the light of plasma, muzzle flashes and the sky about the characters; Path Traced traces bounced light at every pixel. The level keeps its own brightness and colours. Off draws the game's own light."/>
+		<string text="Shadows: the sun's traced shadows and occlusion. GI: also light bounced about the characters. Path Traced: bounced light at every pixel. The level keeps its brightness. Off: the game's light."/>
 		<string text="More rays a pixel: softer, steadier shadows and more of the bounced light, at more of the graphics card's time. Low suits the Steam Deck."/>
 		<string text="Half traces a ray for each block of four pixels, cheaper on the graphics card; Full traces each pixel. Auto: full, but at Low quality."/>
 		<string text="How the rays are smoothed: Full by their neighbours and the frames before, Temporal by the frames before alone, Off as they are."/>

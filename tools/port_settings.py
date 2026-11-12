@@ -1507,10 +1507,9 @@ PAGES = {
             # otherwise)
             ("RAY TRACING", "display.prism_rt",
              [("OFF", "off"), ("SHADOWS", "shadows"), ("GI", "gi"), ("PATH TRACED", "pathtraced")],
-             "On graphics cards that trace rays: Shadows casts the sun's shadows of everything on screen and "
-             "traced ambient occlusion; GI also bounces the light of plasma, muzzle flashes and the sky about the "
-             "characters; Path Traced traces bounced light at every pixel. The level keeps its own brightness and "
-             "colours. Off draws the game's own light.", "desktop"),
+             "Shadows: the sun's traced shadows and occlusion. GI: also light bounced about the characters. "
+             "Path Traced: bounced light at every pixel. The level keeps its brightness. Off: the game's light.",
+             "desktop"),
             ("RAY TRACING QUALITY", "display.prism_rt_quality",
              [("LOW", "low"), ("MEDIUM", "medium"), ("HIGH", "high"), ("ULTRA", "ultra")],
              "More rays a pixel: softer, steadier shadows and more of the bounced light, at more of the graphics "
