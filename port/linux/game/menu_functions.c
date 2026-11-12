@@ -2191,7 +2191,14 @@ static void prism_rt_rows_show(struct widget_instance *list)
 		{ "op_prism_rt_resolution", "prism_rt_resolution_spinner" },
 		{ "op_prism_rt_denoiser", "prism_rt_denoiser_spinner" }, { "op_prism_rt_mood", "prism_rt_mood_spinner" },
 		{ "op_prism_rt_world", "prism_rt_world_spinner" }, { "op_prism_rt_objects", "prism_rt_objects_spinner" },
-		{ "op_prism_rt_cache", "prism_rt_cache_spinner" },
+		{ "op_prism_rt_cache", "prism_rt_cache_spinner" }, { "op_prism_rt_sun", "prism_rt_sun_spinner" },
+		/* (PRISM PATH TRACING's page) */
+		{ "op_prism_rt_style", "prism_rt_style_spinner" }, { "op_prism_rt_anchor", "prism_rt_anchor_spinner" },
+		{ "op_prism_exposure", "prism_exposure_spinner" }, { "op_prism_tone_curve", "prism_tone_curve_spinner" },
+		{ "op_prism_rt_emissive", "prism_rt_emissive_spinner" },
+		{ "op_prism_rt_emissive_scale", "prism_rt_emissive_scale_spinner" },
+		{ "op_prism_sun_size", "prism_sun_size_spinner" }, { "op_prism_rt_materials", "prism_rt_materials_spinner" },
+		{ "op_prism_rt_alpha", "prism_rt_alpha_spinner" }, { "op_prism_rt_bounces", "prism_rt_bounces_spinner" },
 	};
 	boolean locked = !halo_prism_rt_available();
 	short index;

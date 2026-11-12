@@ -559,6 +559,9 @@ PRISM_ASSETS_PAGE = ("mods_settings/prism_assets", "prism_assets_settings_screen
 # greyed out where the renderer cannot trace rays, menu_functions.c's
 # prism_rt_rows_show)
 PRISM_RT_PAGE = ("mods_settings/prism_rt", "prism_rt_settings_screen")
+# (and its traced light's look: Mods' PRISM PATH TRACING, docs/prism_rt.md
+# "The rig" and "Styles"; greyed out alike)
+PRISM_PT_PAGE = ("mods_settings/prism_pt", "prism_pt_settings_screen")
 # (Online's Discord account: port/linux/src/player_link.c)
 DISCORD_ACCOUNT = ("network_setup/discord_account", "discord_account_screen")
 # (the server browsers' Filters, which their FILTERS opens too: menu_functions.c's
@@ -948,6 +951,9 @@ PAGES = {
             ("PRISM RAY TRACING ›", None, _page_screen(*PRISM_RT_PAGE),
              "Traced sun shadows, occlusion and bounced light on graphics cards that trace rays, and a path-"
              "traced mode.", "desktop"),
+            ("PRISM PATH TRACING ›", None, _page_screen(*PRISM_PT_PAGE),
+             "How the path-traced light looks: faithful to the game's lightmaps or lit by the traced lights "
+             "alone, its lamps, exposure and highlights.", "desktop"),
         ],
     },
     # ---- the pages the rows open
@@ -1555,6 +1561,9 @@ PAGES = {
             ("KEEP SHAPES", "display.prism_rt_cache", ON_OFF,
              "Keeps each object's traced shape from frame to frame, refitting only what moved: much less work. "
              "Off redoes them all each frame.", "desktop"),
+            ("TRACED SUN", "display.prism_rt_sun", [("ALL", "all"), ("OBJECTS", "objects")],
+             "All: the level's own sun shadows as sharp as the objects', every shadow as dark as the light rig "
+             "says. Objects: only the objects' shadows traced.", "desktop"),
             # (PRISM's baked shadows: the sun masks baked on this machine,
             # port/linux/game/prism_lightmaps.c; with or without the rays, not
             # greyed out where they cannot be traced)
@@ -1567,6 +1576,50 @@ PAGES = {
                                                                            ("DEEP", "1.5")],
              "How far Sharp baked shadows go: Light keeps some of the lightmaps' softness, Deep darkens the shaded "
              "side more.", "desktop"),
+        ],
+    },
+    PRISM_PT_PAGE[0]: {
+        "screen": PRISM_PT_PAGE[1], "title": "PRISM PATH TRACING",
+        "rows": [
+            # (the path tracer's light rig and look, docs/prism_rt.md: the
+            # style choosing the defaults of the rows left on it)
+            (SECTION, "LOOK"),
+            ("STYLE", "display.prism_rt_style", [("FAITHFUL", "faithful"), ("REMIX", "remix")],
+             "Faithful keeps each place as bright as the game's lightmaps made it. Remix lights it by the traced "
+             "lamps, sun and sky alone, with its own exposure and highlights.", "desktop"),
+            ("HOLD TO GAME'S LIGHT", "display.prism_rt_anchor",
+             [("STYLE'S", "-1"), ("NONE", "0"), ("SOME", "50"), ("FULL", "100")],
+             "How closely each region of the traced light is held to the game's lightmaps. Style's: Full for "
+             "Faithful, None for Remix.", "desktop"),
+            ("EXPOSURE", "display.prism_exposure",
+             [("STYLE'S", "style"), ("FIXED", "fixed"), ("GAME'S", "ce"), ("AUTO", "auto")],
+             "Fixed: the game's. Game's: follows the traced light, keeping the frame as bright as the game's. "
+             "Auto: adapts freely, as an eye does.", "desktop"),
+            ("HIGHLIGHTS", "display.prism_tone_curve",
+             [("STYLE'S", "style"), ("CLIPPED", "ce"), ("FILMIC", "filmic"), ("ACES", "aces"), ("LOCAL", "local")],
+             "How light past white is drawn. Filmic rolls it off; Local also keeps a dark room readable beside a "
+             "sunlit doorway. Needs HDR drawing.", "desktop"),
+            (SECTION, "LIGHTS"),
+            ("LAMPS", "display.prism_rt_emissive",
+             [("STYLE'S", "style"), ("OFF", "off"), ("LIGHTS", "lights"), ("ALL GLOWS", "all")],
+             "Lights: the panels and lamps the level was lit by light it again. All Glows: screens and glowing "
+             "parts too.", "desktop"),
+            ("LAMP BRIGHTNESS", "display.prism_rt_emissive_scale",
+             [("HALF", "0.5"), ("AS FITTED", "1.0"), ("DOUBLE", "2.0")],
+             "The lamps' brightness against the brightness fitted to the game's lightmaps.", "desktop"),
+            ("SUN SIZE", "display.prism_sun_size",
+             [("AUTO", "auto"), ("GAME'S", "ce"), ("REAL", "real"), ("SOFT", "soft")],
+             "The sun's disc its shadows' edges soften by: the sky's own, the real sun's, or a softer one.",
+             "desktop"),
+            ("BOUNCED COLOUR", "display.prism_rt_materials", [("SURFACES'", "average"), ("GREY", "grey")],
+             "Surfaces': bounced light takes the colour of what it bounces off. Grey: one grey for all.",
+             "desktop"),
+            ("SEE-THROUGH SHADOWS", "display.prism_rt_alpha", ON_OFF,
+             "Leaves, fences and grates cast shadows through their holes.", "desktop"),
+            ("BOUNCES", "display.prism_rt_bounces", [("BY QUALITY", "0"), ("1", "1"), ("2", "2"), ("3", "3"),
+                                                     ("4", "4")],
+             "How often light bounces before the cache takes over. By Quality: 1 at Low and Medium, 2 at High, "
+             "3 at Ultra.", "desktop"),
         ],
     },
     STREAMER[0]: {

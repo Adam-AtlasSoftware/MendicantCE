@@ -10,28 +10,40 @@ Hardware ray tracing for the Vulkan renderer, off by default. It follows the des
   frames, and again with the ray tracing extensions enabled against `HALO_VULKAN_NO_RT=1`). The device enables
   `VK_KHR_acceleration_structure`, `VK_KHR_ray_query` and `VK_KHR_deferred_host_operations` (with buffer device
   addresses) where present; its buffers and pipelines are made with the first frame that traces, never for a game
-  that does not.
-- **Client-side and render-only.** The game reads only the camera's sky, the structure's render geometry (read-only
-  once loaded) and the settings; nothing is simulated, saved or sent between machines.
-- **CE's light is the reference.** The traced terms only take light away, through world AO's occlusion slot (the
-  light the occlusion multiplies: a lightmap pass's lightmap, a model's ambient and distant lights), never add it:
-  - the sun's shadows take `0.65` of a sunlit lightmap's light (`0.55` of a model's) where an object blocks the sun
-    and the structure does not (the structure's own shadows are in the lightmap: never darkened again), weighted by
-    `smoothstep(0, 0.25, N·sun)` (a face turned away has no sun to lose): world2's cascaded-shadow combine;
-    the structure's own shadows are as sharp as the lightmap holds them, unless `display.prism_baked_shadows` is
-    `"sharp"` (`docs/prism_baked_shadows.md`: the sun's visibility baked finely, the same disc as the traced sun's);
+  that does not. Where the card has no ray queries, every mode is off and the menus' rows are greyed out.
+- **Client-side and render-only.** The game reads only the camera's sky, the structure's render geometry and its
+  shaders' tags and bitmaps (read-only once loaded) and the settings; nothing is simulated, saved or sent between
+  machines.
+- **One light rig.** The traced light is CE's own lights at the scales the relight fit found CE's lightmaps made of
+  (the bake and the trace share them: "The rig", below), so a converged trace reproduces CE's pages by calibration,
+  not by clamps. The sun is split as `light = A + S·v`: `S` the rig's sun by the facing, `v` its visibility, `A`
+  everything else. A shadow removes exactly `S·(1 − v)`, the same for a cliff's and a Marine's shadow.
+- **`shadows` and `gi` keep CE's lightmaps** and change only the sun's share of them (`display.prism_rt_sun`):
+  - `all` (the default): the surfaces read the traced texel as a factor and a light added
+    (`XGPU_AMBIENT_OCCLUSION_RT_LIGHT`, as `pathtraced`'s): the rig's sun as the rays see it (one ray through the
+    level, its alpha-tested surfaces and the objects) less as the lightmap's texel held it (through the structure,
+    from about the point over a texel's width: the page's soft edge), `S·(v − v')`, by the occlusion. The level's
+    own shadows come out as sharp and as dark as the objects', from the same rays; where the rays and the page agree
+    nothing changes. A level pixel never loses more than the sun's share of the light CE's lightmap gave it (the
+    rig's sky and domes over theirs and the sun's: the pre-pass gives the lightmap's own light, below). An object
+    only loses light (CE lit it by one sample under it). At half resolution the factor alone,
+    `(A + S·v) / (A + S·v')` with the rig's `A` and `S`, the bake's sharp mask's form;
+  - `objects`: the rig's sun taken only where an object blocks it and the structure does not (the structure's own
+    shadows are in the lightmap: never darkened again), as before; with no rig fitted, `0.65` of a sunlit
+    lightmap's light (`0.55` of a model's) by `smoothstep` facing terms, as before;
   - the occlusion follows world AO's rules: the level is darkened only by objects (2 wu, 0.7 strength), objects by
     objects (their own creases among them, 1 wu) and by the structure close by (0.5 wu), at 0.6 strength;
-  - `gi`: an object's light is shaded by the probes' indirect light along its normal against their mean over the
-    sphere, so its brightness stays CE's and only how the light falls across it changes, within 1/k to k
-    (k = 1.25 at `display.prism_rt_mood` 100, 1 at 0); the level's light is untouched (its bounce is in the lightmap);
-  - no auto-exposure, no grade.
-- **CE's own object shadows are left out while the sun's are traced** (any mode on, a sun above the horizon found:
-  `prism_rt_sun_shadows`, render.c), as prism-world2's cascaded shadows leave them out. Drawn as well, CE's soft
-  shadow under each object and the traced one stacked: the sand under the b30 Pelican went to a tenth of its light
-  (the darkest tenth of that corner 24 in stock, 8 in `gi`, 29 with CE's shadow left out). With no sun, or one under the
-  horizon (a10's ship), CE's shadows stay; in a sunlit level's rooms they are lost (the traced sun does not reach
-  there), as with world2's.
+  - `gi`: an object's light is shaded by the probes' light (now the rig's, off real albedo, every bounce) along its
+    normal against their mean over the sphere, within 1/k to k (k = 1.25 at `display.prism_rt_mood` 100).
+- **`pathtraced` replaces the lightmaps' light** with the rig's, traced (below), and then keeps CE's look as far as
+  `display.prism_rt_style` asks: `faithful` holds each region to CE's light, at CE's exposure; `remix` does not.
+- **CE's own object shadows are left out while the rays trace** (any mode on: `prism_rt_sun_shadows`, render.c),
+  and so are `display.prism_shadows = "cascaded"`'s (`prism_shadows_pass_begin`): drawn as well, two shadows of one
+  object stacked (the kit ran `pathtraced` with cascaded). With no sun, the traced occlusion stands for CE's shadow.
+- **The sun is the sky's narrowest light** (`render_sky_sun`): the narrowest under 0.1 rad across whose power times
+  its brightest channel is at least a quarter of the sky's strongest. a50's moon, not its brighter 50 degree dome
+  (whose shadows fell straight down from the zenith); c10 (a 20 degree dome alone) has none. The other sky lights
+  are the rig's domes.
 
 ## The frame
 
@@ -44,7 +56,8 @@ render_window ─► world AO's pre-pass (forced on while prism_rt is): each opa
                  where a replacement mesh draws the part), and finds its entry (its acceleration structure, kept)
                  PREPASS_END ─► the moved draws skinned (compute: skin) ─► their BLAS built or refitted (one call)
                              ─► the first-person weapon masked out (compute: mask)
-                             ─► TLAS (structure mask 1, each object draw an instance, mask 4)
+                             ─► TLAS (structure mask 1, its alpha-tested surfaces 2, each object draw an
+                                 instance, mask 4, the cutouts' 8)
                              ─► gi: a quarter of the probes updated (DDGI-like, L1 spherical harmonics a channel)
                              ─► trace (compute, ray queries): sun rays to objects and structure, occlusion rays,
                                  gi's probes read at an object's pixel
@@ -58,8 +71,12 @@ capture, passes), `xgpu_vulkan_rt_glsl.inc` (the compute shaders; `tools/vulkan_
 
 ## What is traced
 
-- **The structure:** its render geometry's opaque environment surfaces (not alpha-tested, transparent or water), in
-  world space, one bottom-level structure built once (`PREFER_FAST_TRACE`) when a BSP is first drawn.
+- **The structure:** its render geometry's environment surfaces, in world space, with each triangle's material and
+  base map coordinates: the opaque ones in one bottom-level structure (`PREFER_FAST_TRACE`, mask 1), the
+  alpha-tested ones (grates, fences, leaf cards; `display.prism_rt_alpha`) in another (mask 2, not opaque: each
+  candidate kept where its material's alpha map's texel is past half), built once when a BSP is first drawn; the
+  light cards (transparent shaders with radiosity power) only as lamps, never traced. Water and other transparent
+  surfaces are not traced.
 - **The objects:** every pre-pass draw with the world's light (characters, vehicles, weapons, scenery), and its
   occluders (models lighting themselves, the Elites' armour), as drawn: their
   permutations, levels of detail and pose. Nothing of them is read on the CPU: the capture names where the draw's
@@ -80,7 +97,8 @@ capture, passes), `xgpu_vulkan_rt_glsl.inc` (the compute shaders; `tools/vulkan_
   pass adds self-illumination (the Elites) takes the world's light too (its occlusion slot is its vertex light's,
   before the self-illumination is added), so it receives the traced shadows and occlusion; world AO alone still leaves
   it out. Draws whose base map is a cutout (a fifth of
-  its texels under half alpha: foliage) are left out until the traces test alpha; a part the mesh store's
+  its texels under half alpha: foliage) are traced as solid by the share of their texels drawn (mask 8, not opaque:
+  each candidate kept by that chance), with `display.prism_rt_alpha`; a part the mesh store's
   replacement mesh draws (`display.prism_models`) is traced as that mesh: its pieces' skinned vertices (the mesh
   store's own skinning of the frame, shared with its draw) and 32-bit indices, copied into its entry's soup where its
   bones moved (`display.prism_rt_objects` `low_lod`: the stock part instead).
@@ -103,64 +121,111 @@ triangles through buffer device addresses. A probe that sees the back of the lev
 its rays or more is inside it and not read. The probes hold no CE lightmap yet (the design's radiance pages): their
 light is the sky's and the sun's bounce, which the per-pixel ratio keeps from changing CE's brightness.
 
+## The rig
+
+The lights of the bake and the trace (art_pipeline's `relight_bake.py` and `relight_calib.py`), per BSP, in the
+units the relight fit made CE's pages of: a lightmap texel's light is the rig's light at that point, to `1 / gamma`
+(`gamma` 1, or 2.2 where the fit chose it). Read by the game from
+`<data>/prism_lightmaps/rebaked/<map>_<bsp>.scales.json` (the fit's `scales.json`: `sun`, `sky`, `gamma`, `emit`
+{shader: scale}, `rgb` gains; made on the player's machine, never shipped). Where a BSP has none, or the fit found a
+group gave none of its light (an indoor BSP's sun), the fits' typical scales stand in (sun 1.3, sky 3.6, lamps 0.5).
+
+| Light | From | Traced as |
+| --- | --- | --- |
+| Sun | The sky's narrowest light (`render_sky_sun`) | Its colour by power, `scale.sun` and `rgb.sun`, over pi (the bake's sun lamp of strength 1 lights a white surface to 1 / pi), by the facing, through a disc (`display.prism_sun_size`) |
+| Domes | The sky's other lights (b30's and a30's 50 degree zenith dome, a10's back light, a50's dome, c10's) | Cone lights at their diameter, by the sun's scale as the fit scaled them: a direction of the cone each (next events) at a pixel, their radiance where a path's ray leaves the level within one |
+| Sky | The sky tag's outdoor ambient by power, `scale.sky`, `rgb.sky` | The radiance of every ray that leaves the level |
+| Lamps | Every BSP shader with radiosity power: the light cards (transparent, not traced, never casting shadows) and the lamps' own surfaces | One-sided emitters along CE's normal (as the bake's): their emitted colour by power, `scale.emit[shader]`, `rgb.emit[shader]`, `display.prism_rt_emissive_scale`; ReSTIR DI at each pixel, one candidate at a path's hits |
+| Glows | Environment self-illumination maps (`display.prism_rt_emissive "all"`) | Their mean light by their on colours, at the surfaces the paths meet |
+| Dynamic lights | `world_scene`'s (flashlight, plasma, muzzle flashes) | Added by CE unshadowed; their bounce traced, and their traced shadows' share of their light taken (ReSTIR DI over them) |
+
+Light fixtures (`scenario->light_fixtures`) are not in the rig: the bake has none, so their scale is not known.
+`faithful`'s fill (below) puts back the light CE's pages show that the rig lacks.
+
+**Materials.** Each BSP shader traced has a material (`RT_STATIC`'s `_MATERIALS`): its albedo (its base map's mean,
+made linear, by its detail and micro detail maps' functions at their means, within 0.03 to 0.85, as the bake's), its
+alpha map (alpha-tested environment shaders: the base map's alpha at 256 a side at most), its lamp's light and its
+glow. The game reads the bitmaps as a draw loads them, once a BSP. An object's albedo is its base map's mean (the
+host's texture cache, once a texture's generation). `display.prism_rt_materials "grey"`: 0.45 for all.
+
 ## Path tracing (`pathtraced`)
 
-A prototype of the ultra mode. CE's frame is still drawn as CE draws it: what each pixel sees comes from the raster
-G-buffer (world AO's pre-pass, at every pixel in this mode), the textures and specular are CE's, and the transparent
-surfaces, effects, particles, decals, water, the first-person weapon and the HUD are drawn exactly as before (they are
-not lit through the traced slot). What the path tracer changes is the light those surfaces are given:
+CE's frame is still drawn as CE draws it: what each pixel sees comes from the raster G-buffer (world AO's pre-pass,
+at every pixel in this mode), the textures, specular and fog are CE's, and the transparent surfaces, effects,
+particles, decals, water, the first-person weapon and the HUD are drawn exactly as before. What changes is the light
+the opaque surfaces are given: the rig's, traced, in place of the lightmap's and of a model's ambient and distant
+lights (`light × x + yzw` with `x` = 1 − the mood, 0 at `display.prism_rt_mood` 100).
 
 ```
-PREPASS_END ─► objects' BLAS ─► TLAS ─► gi's probes (a quarter a frame)
-            ─► path (compute, every pixel; half of them in a checkerboard at low quality or display.prism_rt_rate half)
-                 the sun through the structure alone and through everything
-                 1 to 3 bounces (low and medium 1, high 2, ultra 3; 1 to 4 paths a pixel) of a grey dielectric (diffuse + a GGX lobe, F0 0.04), next events to the sun and to one
-                 dynamic light, Russian roulette past the second, the last bounce ending in gi's probes, the sky past
-                 the level; the first ray traced again through the structure alone where an object took it
-                 ReSTIR DI over the dynamic lights: candidates, the last frame's reservoirs at the reprojected point and
-                 about it (reweighed here), the one kept traced for its shadow
-            ─► accumulate (temporal: blended into the reprojected history by 1 / its length, at most 32 frames)
-            ─► atrous x3 (spatial: edge-avoiding 5x5 a-trous, steps 1, 2, 4, weighed by distance, normal and ratio)
-            ─► the surfaces read it in world AO's place: x a factor, yzw a light added
+PREPASS_END ─► objects' BLAS ─► TLAS (opaque structure 1, alpha-tested structure 2, objects 4, cutouts 8)
+            ─► probes (a quarter a frame): their rays in the rig's light, each hit's albedo by the sun, a lamp,
+               and the probes' last irradiance there (every bounce, kept from frame to frame)
+            ─► path (every pixel; half in a checkerboard at low quality or display.prism_rt_rate half):
+                 the sun's visibility (its disc, through everything)
+                 the domes (a direction of each cone) and the lamps (ReSTIR DI: candidates by power, the last
+                 frame's reservoirs at the point and about it, the one kept traced for its shadow)
+                 the sky and the bounces: 1 to 4 (display.prism_rt_bounces; by quality), cosine rays, each hit
+                 its material's albedo by the sun, a lamp and its glow, the last ending in the probes;
+                 Russian roulette past the second
+                 the dynamic lights (ReSTIR DI over them, as before)
+            ─► accumulate (temporal: the light by 1 / its length, at most 32 frames; the sun's visibility at most 8,
+               held within its neighbours' reach this frame; a sample past 32 times its history held to it)
+            ─► tiles (8x8: CE's light and the traced light, summed; their histograms for the exposure)
+            ─► exposure (display.prism_exposure)
+            ─► atrous x3 (5x5, steps 1, 2, 4: by distance and normal; the sun's visibility also by its nearness
+               over its spread), the last writing x and yzw: the rest + the rig's sun by the facing and the
+               visibility, in CE's encoding, held to its region by the anchor, exposed
+the 3D view's end ─► display.prism_tone_curve (compute, over a copy of the view) ─► prism_tone, bloom, tone map
 ```
 
-**Keeping CE's look (the exposure).** The paths give two estimates of the static light (the sun and the sky, bounced)
-at each pixel: with everything in the scene, and as CE baked it (the sun through the structure alone, the first ray
-through the structure alone). Their ratio multiplies CE's own light (a lightmap pass's lightmap, a model's ambient and
-distant lights), so where nothing CE did not bake is in the way the factor is 1 and the frame is CE's, byte for byte in
-its colours; objects take away sun and sky as they should (contact shadows, the sky's occlusion under a Pelican),
-held within 0.4 to 1.1 on the level and 0.6 to 1.25 on a model (CE lit a model's insides by one flat ambient). No auto-exposure and no grade: the units cancel. The dynamic lights (the flashlight, plasma,
-muzzle flashes; not the light fixtures, whose light is in the lightmap) are added by CE unshadowed; the path tracer adds
-their bounce and takes away the share of their light its shadow rays find blocked (0.6 of it, held within -0.35 to
-+0.35 of the slot's light), in CE's own units (its model point light's falloff). `display.prism_rt_mood` scales all of
-it (0 is CE's light).
+The pre-pass's lightmap twins (those of draws reading the traced light) write the light their lightmap gives in the
+inputs' fourth word (its square root, 8 bits a channel): CE's light at each level pixel, the anchor's and the
+exposure's reference (`debug.prism_rt_view albedo`).
 
-**The surfaces.** With `pathtraced` the opaque surfaces' keys have `XGPU_AMBIENT_OCCLUSION_RT_LIGHT` (xgpu.h, a bit of
-the occlusion's light nibble that was free): their pixel's texel is read as a factor and an added light
-(`light * x + yzw`) in the lightmap pass and in a model's ambient light (per pixel, per vertex). No other key changes,
-so with the setting anything else every shader is as before.
+**Styles** (`display.prism_rt_style`; any of their settings set explicitly wins):
 
-**Not yet:** CE's materials at the hits (a grey 0.45; coloured bounce comes from the lights' colours alone), the
-lightmap's radiance at hits, emissive surfaces as lights (the self-illuminated maps), primary specular (CE's cube maps
-are kept), alpha-tested foliage in the structure, the probes' own update from the paths, the PBR and overlay
-materials' paths (they keep the factor alone), a traced primary (for a remodel that is not drawn).
+| | `faithful` (default) | `remix` |
+| --- | --- | --- |
+| `display.prism_rt_anchor` | 100: each region (a tent 40 pixels wide) held to CE's light within 1/1.5 to 1.5, and the light CE's region has past that added evenly in CE's colour there | 0: the rig alone |
+| `display.prism_exposure` | `fixed` (CE's) | `ce`: the traced light's median over the level's pixels pinned to CE's, within 1.5 EV, 2 EV a second |
+| `display.prism_tone_curve` | `ce` (clipped) | `local`: each region compressed past half white, its detail kept, rolled off |
+| `display.prism_rt_emissive` | `lights` | `all` (the glows too) |
+| dynamic lights' traced shadows | 0.6 of their light | all of it |
+
+The exposure applies to the traced light alone, as it is given to the surfaces, so effects, transparent surfaces and
+the HUD stay in CE's encoding over it (pre-exposed). The keyed lightmap pass adds its light past the combiners'
+clamp, so the level's light goes past white in `display.hdr`'s half floats; a model's light is still clamped at
+CE's white. The tone curve needs the half floats (`display.hdr` on; none over 8 bits or a multisampled view).
+
+**Methods** written from their papers (no code taken): ReSTIR DI (Bitterli, Wyman, Pharr, Shirley, Lefohn,
+Jarosz, 2020) over the lamps and the dynamic lights, resampled importance sampling (Talbot, Cline, Egbert, 2005);
+the visibility's moments and variance-guided weights after SVGF (Schied et al., 2017); the edge-avoiding a-trous
+wavelet (Dammertz et al., 2010); Narkowicz's ACES fit (2016); the anchor after `raytracing_design.md` §8.5.
 
 ## Settings
 
 `display.prism_rt` (`off` / `shadows` / `gi` / `pathtraced`),
 `display.prism_rt_quality` (rays a pixel), `display.prism_rt_resolution`, `display.prism_rt_denoiser`,
 `display.prism_rt_reflections`, `display.prism_rt_mood`, `display.prism_rt_objects`, `display.prism_rt_rate`,
-`display.prism_rt_world`, `display.prism_rt_cache`, `debug.prism_rt_view`, `HALO_VULKAN_NO_RT=1`;
+`display.prism_rt_world`, `display.prism_rt_cache`, `display.prism_rt_sun`, `debug.prism_rt_view`,
+`HALO_VULKAN_NO_RT=1`; the path tracer's look: `display.prism_rt_style`, `display.prism_rt_anchor`,
+`display.prism_sun_size`, `display.prism_rt_emissive`, `display.prism_rt_emissive_scale`,
+`display.prism_rt_materials`, `display.prism_rt_alpha`, `display.prism_rt_bounces`, `display.prism_exposure`
+(`_range`, `_speed`, `_bias`), `display.prism_tone_curve` (port/linux/README.md has each);
 `display.vulkan_device` chooses the graphics card (auto, the loader's index, `0x` and a PCI device id, or a part of its
-name; the log lists them: `vulkan: device 0: ...`). Settings > Mods > PRISM Ray Tracing has Traced Level, Traced Models
-and Keep Shapes too. Settings > Mods has Ray Tracing and its quality, greyed out where the
-renderer cannot trace. `HALO_VULKAN_STATS=1` logs the passes' GPU time every 600 frames.
+name; the log lists them: `vulkan: device 0: ...`). Settings > Mods > PRISM Ray Tracing has Traced Level, Traced Models,
+Keep Shapes and Traced Sun too; Settings > Mods > PRISM Path Tracing the look's. Settings > Mods has Ray Tracing and
+its quality, greyed out where the renderer cannot trace. `HALO_VULKAN_STATS=1` logs the passes' GPU time every 600
+frames.
 
 ## Not yet
 
-Colour in `gi` (the traced colour path exists now, `pathtraced`'s; `gi` does not use it yet), CE's lightmap radiance
-at probe hits, local lights' shadows outside `pathtraced`, reflections, alpha-tested traces, remodel relief, the
-compaction of the structure's BLAS, Deck and RDNA tuning, Metal (and Metal's emitter of the traced light).
+RT reflections (`display.prism_rt_reflections` is read, not traced), motion vectors (the denoisers reproject by the
+camera alone: a moving object's light trails until its history is let go of), textured materials at hits (each
+material's mean), the painted sky as a light (the sky's ambient alone), light fixtures in the rig, a world radiance
+cache (the probes about the camera stand for it), the objects' cutouts' own alpha (their share of texels drawn
+stands for it: a canopy casts a solid, soft shadow), the in-engine visibility baker for RT off, Metal (and Metal's
+emitter of the traced light), Deck and RDNA tuning. Models' traced light is clamped at CE's white.
 
 ## Measured: the objects on the GPU, kept from frame to frame (b30 at tick 1350, the kit's settings, uncapped)
 

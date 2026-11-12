@@ -40,3 +40,14 @@ from its `director_forge.c` and `xinput_sdl_forge.c`), the `.mvar` format
 (`tools/harness/tests/*forge*`). Its own importer of the monitor's tags is
 replaced by Watanoge's tag packs (`forge_tag_import.c`); its sky tab
 (`sky.c`, `skyfx.c`, OpenGL) is not ported.
+
+## PRISM ray tracing's methods
+
+No code was taken for `display.prism_rt`'s path tracer and its denoiser
+(`port/linux/vulkan/xgpu_vulkan_rt_glsl.inc`): they are written from the
+published methods, which `docs/prism_rt.md` ("Path tracing") names: ReSTIR
+DI (Bitterli, Wyman, Pharr, Shirley, Lefohn and Jarosz, 2020), resampled
+importance sampling (Talbot, Cline and Egbert, 2005), SVGF's temporal
+moments and variance-guided weights (Schied et al., 2017), the
+edge-avoiding a-trous wavelet (Dammertz et al., 2010) and Krzysztof
+Narkowicz's fit of the ACES curve (2016).
