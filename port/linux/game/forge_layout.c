@@ -663,6 +663,10 @@ static long forge_layout_group_tag(
 		((unsigned long)(unsigned char)name[2] << 8) | (unsigned long)(unsigned char)name[3]);
 }
 
+static boolean forge_layout_unit_is_someones(
+	long object_index,
+	boolean or_dead);
+
 static struct forge_layout_map_object *forge_layout_map_object(
 	long object_index)
 {
@@ -1227,8 +1231,10 @@ static void forge_layout_collect_records(
 		struct object_datum *object = object_try_and_get(forge_layout_globals.spawned[index]);
 		struct forge_object_properties *properties = &forge_layout_globals.spawned_properties[index];
 
+		/* (nor a unit that has become someone's since it was listed) */
 		if (!object || object->object.parent_object_index != NONE ||
-			(for_client && forge_layout_host_brings(object->definition_index)))
+			(for_client && forge_layout_host_brings(object->definition_index)) ||
+			forge_layout_unit_is_someones(forge_layout_globals.spawned[index], FALSE))
 		{
 			continue;
 		}
@@ -2696,6 +2702,27 @@ boolean forge_layout_creating_object(
 	return forge_layout_creating;
 }
 
+/* a unit that is someone's: a player's, or an AI character's (forge_ai.c's,
+which its own part of the variant keeps as a member line); with or_dead, a
+dead one too. Such a unit is not one of the layout's objects: listed, it was
+saved as a plain object of the variant, which came back as a body with no
+AI beside the character (one more at each move and save), a player's as an
+inert copy of him, and a corpse standing; and a Load or Reset deleted it. */
+static boolean forge_layout_unit_is_someones(
+	long object_index,
+	boolean or_dead)
+{
+	struct object_datum *object = object_try_and_get(object_index);
+	struct unit_datum *unit;
+
+	if (!object || !TEST_FLAG(_object_mask_unit, object->object.type))
+		return FALSE;
+	unit = unit_get(object_index);
+
+	return unit->unit.player_index != NONE || unit->unit.actor_index != NONE ||
+		unit->unit.swarm_actor_index != NONE || (or_dead && TEST_FLAG(object->object.damage_flags, _object_dead_bit));
+}
+
 void forge_layout_note_spawned(
 	long object_index)
 {
@@ -2704,6 +2731,11 @@ void forge_layout_note_spawned(
 	short write = 0;
 
 	if (object_index == NONE || forge_layout_map_object(object_index))
+		return;
+	/* (every way an object comes to the layout passes here: the tools' put
+	down, the edit rows, a prefab, a client's request. An object just made
+	has no actor or player yet, so the tools' own bipeds are listed) */
+	if (forge_layout_unit_is_someones(object_index, TRUE))
 		return;
 
 	/* the ones still there, packed, without this one (which keeps its
