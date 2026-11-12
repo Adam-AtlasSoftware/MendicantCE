@@ -4,8 +4,9 @@ prism_sun_* and the backends' pass (xgpu.h's "PRISM's sun shadows",
 xgpu_stream.h's PRISM_SHADOWS).
 
 Each primary window whose clusters see the sky (render.visible_sky_model)
-draws its casters from the sky's sun (render_sky_sun: its brightest light,
-as its lens flare is aimed) before its surfaces: render.c calls
+draws its casters from the sky's sun (render_sky_sun: its narrowest light,
+as its lens flare is aimed; none for a sky lit by a dome alone) before its
+surfaces, unless display.prism_rt traces the sun: render.c calls
 prism_shadows_pass_begin, draws the objects again (render_objects, with
 render_prism_shadow_pass: their opaque parts alone, no first-person
 weapon, nothing queued), then prism_shadows_pass_structure and the
@@ -37,6 +38,8 @@ void platform_log(const char *format, ...);
 int halo_prism_shadows_pass(int phase, int resolution, int cascades, float const *block);
 /* render_sky.c's */
 boolean render_sky_sun(short sky_index, real_vector3d *direction, real_rgb_color *color, real *power);
+/* prism_rt.c's (display.prism_rt's mode: 0 off) */
+int prism_rt_mode(void);
 
 /* ---------- constants */
 
@@ -293,7 +296,9 @@ boolean prism_shadows_pass_begin(
 {
 	prism_shadows.receiving = FALSE;
 	settings_read();
-	if (!prism_shadows.wanted || camera->mirrored || !frustum->projection_valid || !sun_find())
+	/* (not with display.prism_rt on: its traced sun is the objects' shadows
+	then, and the two drawn together darkened them twice) */
+	if (!prism_shadows.wanted || prism_rt_mode() != 0 || camera->mirrored || !frustum->projection_valid || !sun_find())
 	{
 		return FALSE;
 	}
