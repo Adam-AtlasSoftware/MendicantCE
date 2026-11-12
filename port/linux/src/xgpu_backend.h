@@ -367,8 +367,9 @@ struct xgpu_texture_store_answer
 	unsigned long width, height, levels;
 	int status, format;
 };
+/* flags: the record's (XGPU_STREAM_TEXTURE_STORE_*: TRUE a map loading) */
 BOOL xgpu_backend_texture_store_map(unsigned long generation, unsigned long tier, unsigned long budget_megabytes,
-	BOOL loading, const struct xgpu_texture_store_query *queries, unsigned long count,
+	unsigned long flags, const struct xgpu_texture_store_query *queries, unsigned long count,
 	struct xgpu_texture_store_answer *answers);
 /* the store id of the texture whose header is at resource (0 none), asked
 as each stage of an Xbox texture is described for a draw; NULL: none asked,
@@ -403,8 +404,9 @@ struct xgpu_mesh_store_answer
 	unsigned long bones, lods;
 	int status;
 };
+/* flags: the record's (XGPU_STREAM_MESH_STORE_*: TRUE a map loading) */
 BOOL xgpu_backend_mesh_store_map(unsigned long generation, unsigned long tier, unsigned long budget_megabytes,
-	BOOL loading, const struct xgpu_mesh_store_query *queries, unsigned long count,
+	unsigned long flags, const struct xgpu_mesh_store_query *queries, unsigned long count,
 	struct xgpu_mesh_store_answer *answers);
 /* the backend has the store (xgpu_backend_capabilities' mesh_store) */
 BOOL xgpu_backend_mesh_store_available(void);

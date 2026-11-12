@@ -728,6 +728,8 @@ void vr_death_test_update(void);
 #include "load_zone.h" /* port: port/linux/game/load_zone.c */
 #include "mendicant/mendicant.h" /* port: port/linux/game/mendicant/mendicant_main.c */
 #include "mods.h" /* port: port/linux/game/mod_textures.c */
+#include "camera_pose.h" /* port: port/linux/game/camera_pose.c */
+#include "prism_popin.h" /* port: port/linux/game/prism_popin.c */
 
 /* ---------- prototypes */
 
@@ -3575,6 +3577,10 @@ static void main_game_render(
 	mod_textures_frame();
 	/* port: display.prism_models too (port/linux/game/mod_meshes.c) */
 	mod_meshes_frame();
+	/* port: debug.camera_path's pose for the frame (port/linux/game/camera_pose.c) */
+	camera_path_frame();
+	/* port: PRISM's pop-in settings and counts (port/linux/game/prism_popin.c) */
+	prism_popin_frame();
 	/* port: MENDICANT AI's training may run without sound (port/linux/game/mendicant) */
 	if (!mendicant_skip_sound_render())
 		sound_render();

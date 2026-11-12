@@ -252,6 +252,13 @@ Running the game without a person at it:
 - `halo --server` is a dedicated server (`docs/dedicated_server.md`), and
   `halo --probe [<invite>]` prints a game's advertisement as JSON and exits;
   `tools/test_dedicated_server.py` runs both with clients.
+- `debug.camera_path` moves the camera along a file of poses a frame at a
+  time (`port/linux/game/camera_pose.c`; `tools/popin_path.py` makes one
+  from a map's `debug_scenario_places`), each of its frames written to
+  `debug.screenshot_stream`; `tools/popin_measure.py` reads them from a
+  pipe and counts the switches drawn at once (pop-in), alone or against a
+  reference run of the same path (`--record`, `--reference`), and hashes
+  each frame (`--hashes`: two builds compared byte for byte).
 - `debug.exit_after`, `debug.hidden_window`, `debug.null_renderer`,
   `debug.menu_open` (start on one menu screen), `debug.telnet_console`.
 - `debug.no_clipboard` (`HALO_NO_CLIPBOARD=1`) keeps a run off the

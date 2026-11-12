@@ -61,7 +61,14 @@ near triangles have on the stock triangle's edges (art_pipeline/world_geo/
 wg2_lod.py), so near and far surfaces side by side meet without a crack.
 The camera's distance to the sphere, less its radius, scaled by the view's
 zoom (the vertical field of view against 70 degrees), chooses: the same for
-every pass of the frame, so the z-equal passes agree.
+every pass of the frame, so the z-equal passes agree. Against pop-in
+(prism_popin.c): display.prism_world_geometry_band gives each surface its
+own distance in a band past that one (by its number), so that the surfaces
+at one distance switch one by one as the camera moves, not as a ring in one
+frame; display.prism_lod_hysteresis keeps a surface drawn near so much
+further again before it goes far (each surface's level kept from the
+camera before), so that a camera at the distance does not switch it back
+and forth. Neither draws a surface far nearer than the file's distance.
 
 A material whose remodel has more than 65535 vertices (the 16-bit indices)
 comes in parts, records one after another, each of a run of its surfaces in
@@ -123,6 +130,7 @@ byte.
 #include "render/render.h"
 #include "structure_culling.h"
 #include "prism_world_geometry.h"
+#include "prism_popin.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -240,6 +248,9 @@ struct world_material
 	struct structure_culling_cone *cones;
 	unsigned long *choice_stamps;
 	byte *choices;
+	/* each surface's level drawn last (display.prism_lod_hysteresis: 0
+	near, 1 far, 2 none yet), with the far level */
+	byte *far_state;
 };
 
 struct world_run
@@ -291,6 +302,9 @@ struct prism_world_geometry_globals
 	boolean facing;
 	boolean batch;
 	float detail;
+	/* display.prism_lod_hysteresis and _world_geometry_band, as fractions */
+	float hysteresis;
+	float band;
 
 	/* display.prism_world_geometry_batch: a part's runs copied one after
 	another into this, and drawn as one (the front end streams it) */
@@ -406,6 +420,8 @@ static void settings_read(
 	detail = config_integer("display.prism_world_geometry_detail");
 	detail = detail < MINIMUM_DETAIL ? MINIMUM_DETAIL : detail > MAXIMUM_DETAIL ? MAXIMUM_DETAIL : detail;
 	world_geometry.detail = (float)detail / 100.0f;
+	world_geometry.hysteresis = prism_popin_hysteresis();
+	world_geometry.band = prism_popin_band();
 
 	return;
 }
@@ -429,6 +445,7 @@ static void world_geometry_release(
 			free(world_geometry.materials[index].cones);
 			free(world_geometry.materials[index].choice_stamps);
 			free(world_geometry.materials[index].choices);
+			free(world_geometry.materials[index].far_state);
 		}
 	}
 	free(world_geometry.materials);
@@ -1139,6 +1156,15 @@ static boolean world_geometry_make(
 		made->cones = NULL;
 		made->choice_stamps = NULL;
 		made->choices = NULL;
+		made->far_state = NULL;
+		if (made->far_triangles)
+		{
+			made->far_state = malloc(view->part_surface_count + 1);
+			if (made->far_state)
+			{
+				memset(made->far_state, 2, view->part_surface_count + 1);
+			}
+		}
 		disagree += part_cones(bsp, view, made);
 		if (made->cones)
 		{
@@ -1379,10 +1405,38 @@ static byte surface_choice(
 		float dy = sphere[1] - world_geometry.camera.y;
 		float dz = sphere[2] - world_geometry.camera.z;
 		float beyond = sqrtf(dx * dx + dy * dy + dz * dz) - sphere[3];
+		float distance = of->far_distance * world_geometry.distance_scale;
+		byte state = of->far_state ? of->far_state[local] : 2;
 
-		if (beyond > of->far_distance * world_geometry.distance_scale)
+		/* (display.prism_world_geometry_band: the surface's own distance in
+		the band past the file's, by its number; display.prism_lod_hysteresis:
+		a surface drawn near goes far only that much further again, and
+		comes back near at its distance: never drawn far nearer than the
+		file's distance) */
+		if (world_geometry.band > 0.0f)
+		{
+			unsigned long number = (unsigned long)(of->first_surface_index + of->part_first_surface + local);
+			float place = (float)(((number * 2654435761u) >> 8) & 0xffff) / 65536.0f;
+
+			distance *= 1.0f + world_geometry.band * place;
+		}
+		if (state == 0 && world_geometry.hysteresis > 0.0f)
+		{
+			distance *= 1.0f + world_geometry.hysteresis;
+		}
+		if (beyond > distance)
 		{
 			choice |= FLAG(_surface_choice_far_bit);
+		}
+		if (of->far_state)
+		{
+			byte now = beyond > distance;
+
+			if (state != 2 && state != now)
+			{
+				prism_popin_world_switched();
+			}
+			of->far_state[local] = now;
 		}
 	}
 	if (of->cones)

@@ -79,6 +79,8 @@ struct entry
 	uint64_t bytes;
 	uint64_t used_frame;
 	uint64_t retry_frame;
+	/* queued by xgpu_mesh_store_options' prefetch */
+	int prefetched;
 };
 
 struct xgpu_mesh_store
@@ -93,6 +95,8 @@ struct xgpu_mesh_store
 	uint64_t frame;
 	double map_time;
 	struct xgpu_mesh_store_statistics statistics;
+	/* xgpu_mesh_store_options' hysteresis, as a fraction */
+	float hysteresis;
 #if STORE_FILES
 	pthread_t thread;
 	int thread_made;
@@ -953,7 +957,39 @@ void xgpu_mesh_store_map(struct xgpu_mesh_store *store, uint32_t generation, uin
 		count, accepted, (double)store->budget_bytes / 1048576.0, (seconds_now() - started) * 1000.0);
 }
 
+void xgpu_mesh_store_options(struct xgpu_mesh_store *store, int prefetch, uint32_t hysteresis_percent)
+{
+	uint32_t index;
+
+	if (!store)
+		return;
+	store->hysteresis = (float)(hysteresis_percent > 50u ? 50u : hysteresis_percent) / 100.0f;
+	if (!prefetch)
+		return;
+	/* (each mesh of the map queued as a draw of it would, in the order of
+	the record) */
+	for (index = 0; index < store->entry_count; index++)
+	{
+		int state;
+
+		lock(store);
+		state = store->entries[index].state;
+		unlock(store);
+		if (state == _entry_indexed && entry_queue(store, index))
+		{
+			store->entries[index].prefetched = 1;
+			store->statistics.prefetched++;
+		}
+	}
+}
+
 int xgpu_mesh_store_use(struct xgpu_mesh_store *store, uint32_t id, float lod_pixels,
+	struct xgpu_mesh_store_view *view)
+{
+	return xgpu_mesh_store_use_from(store, id, lod_pixels, -1, view);
+}
+
+int xgpu_mesh_store_use_from(struct xgpu_mesh_store *store, uint32_t id, float lod_pixels, int previous_lod,
 	struct xgpu_mesh_store_view *view)
 {
 	struct entry *entry;
@@ -981,9 +1017,18 @@ int xgpu_mesh_store_use(struct xgpu_mesh_store *store, uint32_t id, float lod_pi
 		return 0;
 	}
 	/* (the most detailed level drawn from a size the draw has: else the
-	least) */
-	for (lod = 0; lod + 1 < entry->lod_count && lod_pixels < entry->lods[lod].cutoff; lod++)
-		;
+	least; with the hysteresis, the level drawn last and those less
+	detailed kept to their cutoffs less the hysteresis, a more detailed one
+	taken at its cutoff: never a level less detailed than the size's) */
+	for (lod = 0; lod + 1 < entry->lod_count; lod++)
+	{
+		float cutoff = entry->lods[lod].cutoff;
+
+		if (previous_lod >= 0 && (int)lod >= previous_lod && store->hysteresis > 0.0f)
+			cutoff *= 1.0f - store->hysteresis;
+		if (lod_pixels >= cutoff)
+			break;
+	}
 	memset(view, 0, sizeof(*view));
 	view->rest = entry->rest;
 	view->indices = entry->indices;
@@ -1033,6 +1078,9 @@ void xgpu_mesh_store_frame(struct xgpu_mesh_store *store)
 		entry->staging = NULL;
 		entry->staging_mapped = NULL;
 		entry->state = _entry_resident;
+		/* (drawn stock the last frames: the swap is seen) */
+		if (entry->used_frame && entry->used_frame + 2 >= store->frame)
+			store->statistics.drawn_swaps++;
 		store->statistics.read_bytes += entry->bytes;
 		store->statistics.last_resident_seconds = seconds_now() - store->map_time;
 		say(store, 0, "meshstore: %s in: %.1f MB, %u levels, %u pieces, %u bones, %.2f s after the map", entry->path,

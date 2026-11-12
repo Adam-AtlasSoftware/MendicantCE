@@ -24,35 +24,30 @@ script's camera; the HUD is show_hud's.
 #include "tag_files/tag_files.h"
 #include "scenario/scenario.h"
 #include "scenario/scenario_definitions.h"
+#include "hs/hs.h"
+#include "cutscene/cinematics.h"
+#include "prism_popin.h"
 
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+
+/* (the C library's allocator: config_file_read's buffer) */
+#undef free
 
 void scripted_camera_set_camera_point_absolute(real_point3d const *position, real_vector3d const *forward,
 	real_vector3d const *up, real field_of_view, word transition_time);
 
 #define DEGREES_TO_RADIANS (3.14159265358979f / 180.0f)
 
-void camera_pose_set(char const *pose)
+/* the script's camera at a pose: world units and degrees */
+static void camera_pose_put(float x, float y, float z, float yaw, float pitch, float roll, float field_of_view)
 {
-	float x, y, z, yaw, pitch, roll, field_of_view;
 	float cy, sy, cp, sp, cr, sr;
 	real_point3d position;
 	real_vector3d forward, level_up, right, up;
 
-	if (pose && strcmp(pose, "off") == 0)
-	{
-		director_script_camera(FALSE);
-		return;
-	}
-	if (!pose || sscanf(pose, "%f %f %f %f %f %f %f", &x, &y, &z, &yaw, &pitch, &roll, &field_of_view) != 7 ||
-		field_of_view <= 0.0f || field_of_view >= 90.0f)
-	{
-		/* (the script's camera halts the game past 90 degrees: camera_scripting.c) */
-		console_printf(FALSE, "debug_camera_set \"<x> <y> <z> <yaw> <pitch> <roll> <field of view under 90>\" (degrees), or \"off\"");
-		return;
-	}
 	cy = cosf(yaw * DEGREES_TO_RADIANS);
 	sy = sinf(yaw * DEGREES_TO_RADIANS);
 	cp = cosf(pitch * DEGREES_TO_RADIANS);
@@ -78,6 +73,251 @@ void camera_pose_set(char const *pose)
 	director_script_camera(TRUE);
 	observer_obsolete_position(0);
 	scripted_camera_set_camera_point_absolute(&position, &forward, &up, field_of_view * DEGREES_TO_RADIANS, 0);
+}
+
+void camera_pose_set(char const *pose)
+{
+	float x, y, z, yaw, pitch, roll, field_of_view;
+
+	if (pose && strcmp(pose, "off") == 0)
+	{
+		director_script_camera(FALSE);
+		return;
+	}
+	if (!pose || sscanf(pose, "%f %f %f %f %f %f %f", &x, &y, &z, &yaw, &pitch, &roll, &field_of_view) != 7 ||
+		field_of_view <= 0.0f || field_of_view >= 90.0f)
+	{
+		/* (the script's camera halts the game past 90 degrees: camera_scripting.c) */
+		console_printf(FALSE, "debug_camera_set \"<x> <y> <z> <yaw> <pitch> <roll> <field of view under 90>\" (degrees), or \"off\"");
+		return;
+	}
+	camera_pose_put(x, y, z, yaw, pitch, roll, field_of_view);
+}
+
+/* ---------- a path of poses (debug.camera_path)
+
+A file of the camera's poses at frames, for a test that drives the camera
+the same way each run: a frame-numbered path, not a timed one, so that two
+builds draw the same poses in the same frames whatever their frame rates.
+
+  start <frames>     the game's frames drawn after the map's first (and
+                     after a cinematic: debug.skip_cinematics skips them)
+                     before the path starts (default 0)
+  cmd <command>      a console command run as the path starts (show_hud 0),
+                     in order
+  at <frame> <command>
+                     one run at a frame of the path (game_speed 0 a few
+                     frames in: the director takes the script's camera in
+                     a step of the game's)
+  key <frame> <x> <y> <z> <yaw> <pitch> <roll> <field of view>
+                     a pose at a frame of the path (frames in order; world
+                     units, degrees)
+
+The poses between keys follow a Catmull-Rom spline through them (their
+angles too, the yaw's the shorter way round), so that the camera's speed
+changes smoothly. While the path runs, each frame is saved as
+debug.screenshot_every saves one (camera_path_capturing: to
+debug.screenshot_stream or _directory); at its end the camera stays, and
+the log says so. */
+
+#define MAXIMUM_PATH_KEYS 256
+#define MAXIMUM_PATH_COMMANDS 16
+
+struct camera_path_key
+{
+	long frame;
+	float pose[7];
+};
+
+static struct
+{
+	boolean read, running, done;
+	long start_frames, frames_seen, frame;
+	long key_count, command_count;
+	struct camera_path_key keys[MAXIMUM_PATH_KEYS];
+	long command_frames[MAXIMUM_PATH_COMMANDS];
+	char commands[MAXIMUM_PATH_COMMANDS][128];
+} camera_path;
+
+/* the platform's (port/linux/src/port_config.c) */
+char const *config_string(char const *name);
+char *config_file_read(char const *path, size_t *size);
+void platform_log(const char *format, ...);
+
+static void camera_path_read(void)
+{
+	char const *path = config_string("debug.camera_path");
+	char line[256];
+	char *text, *next;
+	size_t size = 0;
+
+	camera_path.read = TRUE;
+	if (!path || !*path)
+	{
+		return;
+	}
+	text = config_file_read(path, &size);
+	if (!text)
+	{
+		platform_log("camera path: cannot read %s", path);
+		return;
+	}
+	for (next = text; next < text + size && *next;)
+	{
+		struct camera_path_key key;
+		char *end = next;
+		size_t length;
+
+		while (end < text + size && *end && *end != '\n')
+		{
+			end++;
+		}
+		length = (size_t)(end - next);
+		if (length >= sizeof(line))
+		{
+			length = sizeof(line) - 1;
+		}
+		memcpy(line, next, length);
+		line[length] = 0;
+		next = end < text + size && *end ? end + 1 : end;
+		while (length && (line[length - 1] == '\n' || line[length - 1] == '\r'))
+		{
+			line[--length] = 0;
+		}
+		if (strncmp(line, "start ", 6) == 0)
+		{
+			camera_path.start_frames = atol(line + 6);
+		}
+		else if (strncmp(line, "cmd ", 4) == 0 && camera_path.command_count < MAXIMUM_PATH_COMMANDS &&
+			length - 4 < sizeof(camera_path.commands[0]))
+		{
+			camera_path.command_frames[camera_path.command_count] = 0;
+			strcpy(camera_path.commands[camera_path.command_count++], line + 4);
+		}
+		else if (strncmp(line, "at ", 3) == 0 && camera_path.command_count < MAXIMUM_PATH_COMMANDS)
+		{
+			char *command = strchr(line + 3, ' ');
+
+			if (command && strlen(command + 1) < sizeof(camera_path.commands[0]))
+			{
+				camera_path.command_frames[camera_path.command_count] = atol(line + 3);
+				strcpy(camera_path.commands[camera_path.command_count++], command + 1);
+			}
+		}
+		else if (sscanf(line, "key %ld %f %f %f %f %f %f %f", &key.frame, &key.pose[0], &key.pose[1], &key.pose[2],
+			&key.pose[3], &key.pose[4], &key.pose[5], &key.pose[6]) == 8 && camera_path.key_count < MAXIMUM_PATH_KEYS &&
+			key.pose[6] > 0.0f && key.pose[6] < 90.0f &&
+			(!camera_path.key_count || key.frame > camera_path.keys[camera_path.key_count - 1].frame))
+		{
+			if (camera_path.key_count)
+			{
+				/* (the yaw the shorter way round from the key before) */
+				float before = camera_path.keys[camera_path.key_count - 1].pose[3];
+
+				while (key.pose[3] - before > 180.0f)
+				{
+					key.pose[3] -= 360.0f;
+				}
+				while (key.pose[3] - before < -180.0f)
+				{
+					key.pose[3] += 360.0f;
+				}
+			}
+			camera_path.keys[camera_path.key_count++] = key;
+		}
+	}
+	free(text);
+	platform_log("camera path: %ld keys over %ld frames from %s, %ld frames after the map's first",
+		camera_path.key_count, camera_path.key_count ? camera_path.keys[camera_path.key_count - 1].frame : 0L, path,
+		camera_path.start_frames);
+}
+
+/* the pose at a frame of the path: a Catmull-Rom spline through the keys */
+static void camera_path_pose(long frame, float pose[7])
+{
+	long count = camera_path.key_count, k = 0;
+	struct camera_path_key const *p0, *p1, *p2, *p3;
+	float t, t2, t3;
+	short i;
+
+	while (k + 1 < count && camera_path.keys[k + 1].frame <= frame)
+	{
+		k++;
+	}
+	p1 = &camera_path.keys[k];
+	if (k + 1 >= count)
+	{
+		memcpy(pose, p1->pose, sizeof(p1->pose));
+		return;
+	}
+	p2 = &camera_path.keys[k + 1];
+	p0 = k > 0 ? &camera_path.keys[k - 1] : p1;
+	p3 = k + 2 < count ? &camera_path.keys[k + 2] : p2;
+	t = (float)(frame - p1->frame) / (float)(p2->frame - p1->frame);
+	t2 = t * t;
+	t3 = t2 * t;
+	for (i = 0; i < 7; i++)
+	{
+		pose[i] = 0.5f * (2.0f * p1->pose[i] + (p2->pose[i] - p0->pose[i]) * t +
+			(2.0f * p0->pose[i] - 5.0f * p1->pose[i] + 4.0f * p2->pose[i] - p3->pose[i]) * t2 +
+			(3.0f * p1->pose[i] - p0->pose[i] - 3.0f * p2->pose[i] + p3->pose[i]) * t3);
+	}
+}
+
+void camera_path_frame(void)
+{
+	float pose[7];
+	long i;
+
+	if (!camera_path.read)
+	{
+		camera_path_read();
+	}
+	if (!camera_path.key_count || camera_path.done)
+	{
+		return;
+	}
+	if (!global_scenario_try_and_get() || (!camera_path.running && cinematic_in_progress()))
+	{
+		camera_path.frames_seen = 0;
+		return;
+	}
+	if (camera_path.frames_seen++ < camera_path.start_frames)
+	{
+		return;
+	}
+	if (!camera_path.running)
+	{
+		camera_path.running = TRUE;
+		camera_path.frame = 0;
+		platform_log("camera path: started");
+	}
+	else if (++camera_path.frame > camera_path.keys[camera_path.key_count - 1].frame)
+	{
+		unsigned long skipped, waited, world_switches;
+		double waited_milliseconds;
+
+		camera_path.done = TRUE;
+		prism_popin_counts(&skipped, &waited, &world_switches, &waited_milliseconds);
+		platform_log("camera path: done after %ld frames; since the map: %lu draws left out for a texture not in, "
+			"%lu waited for (%.1f ms), %lu remodel surfaces switched near or far", camera_path.frame, skipped, waited,
+			waited_milliseconds, world_switches);
+		return;
+	}
+	for (i = 0; i < camera_path.command_count; i++)
+	{
+		if (camera_path.command_frames[i] == camera_path.frame)
+		{
+			hs_compile_and_evaluate(camera_path.commands[i]);
+		}
+	}
+	camera_path_pose(camera_path.frame, pose);
+	camera_pose_put(pose[0], pose[1], pose[2], pose[3], pose[4], pose[5], pose[6]);
+}
+
+int camera_path_capturing(void)
+{
+	return camera_path.running && !camera_path.done;
 }
 
 /* ---------- objects placed for the picture (debug_object_place) */

@@ -1271,7 +1271,7 @@ void xgpu_backend_texture_store_hook(xgpu_texture_store_hook hook)
 }
 
 BOOL xgpu_backend_texture_store_map(unsigned long generation, unsigned long tier, unsigned long budget_megabytes,
-	BOOL loading, const struct xgpu_texture_store_query *queries, unsigned long count,
+	unsigned long flags, const struct xgpu_texture_store_query *queries, unsigned long count,
 	struct xgpu_texture_store_answer *answers)
 {
 	struct xgpu_stream_texture_store_map *record_body;
@@ -1335,7 +1335,7 @@ BOOL xgpu_backend_texture_store_map(unsigned long generation, unsigned long tier
 	record_body->queries = count ? STREAM_ADDRESS(wire) : 0;
 	record_body->strings = count ? STREAM_ADDRESS(strings) : 0;
 	record_body->strings_size = count ? strings_size : 0;
-	record_body->flags = loading ? XGPU_STREAM_TEXTURE_STORE_LOADING : 0;
+	record_body->flags = (uint32_t)flags;
 	synchronous();
 	for (index = 0; index < count; index++)
 	{
@@ -1358,7 +1358,7 @@ BOOL xgpu_backend_mesh_store_available(void)
 }
 
 BOOL xgpu_backend_mesh_store_map(unsigned long generation, unsigned long tier, unsigned long budget_megabytes,
-	BOOL loading, const struct xgpu_mesh_store_query *queries, unsigned long count,
+	unsigned long flags, const struct xgpu_mesh_store_query *queries, unsigned long count,
 	struct xgpu_mesh_store_answer *answers)
 {
 	struct xgpu_stream_mesh_store_map *record_body;
@@ -1426,7 +1426,7 @@ BOOL xgpu_backend_mesh_store_map(unsigned long generation, unsigned long tier, u
 	record_body->queries = count ? STREAM_ADDRESS(wire) : 0;
 	record_body->strings = count ? STREAM_ADDRESS(strings) : 0;
 	record_body->strings_size = count ? strings_size : 0;
-	record_body->flags = loading ? XGPU_STREAM_MESH_STORE_LOADING : 0;
+	record_body->flags = (uint32_t)flags;
 	synchronous();
 	for (index = 0; index < count; index++)
 	{

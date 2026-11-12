@@ -3511,6 +3511,11 @@ static VkSamplerAddressMode address_mode(uint8_t mode)
 	}
 }
 
+int xgpu_vulkan_sampler_room(void)
+{
+	return vk.sampler_count < SAMPLER_CACHE / 2;
+}
+
 VkSampler xgpu_vulkan_sampler(const struct xgpu_vulkan_sampler_description *description)
 {
 	VkSamplerCreateInfo info;

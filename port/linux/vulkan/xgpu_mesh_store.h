@@ -197,6 +197,9 @@ struct xgpu_mesh_store_statistics
 	uint64_t uses, stale_uses, stock_uses;
 	/* seconds from the map's record to the last mesh made resident */
 	double last_resident_seconds;
+	/* meshes made resident while drawn stock (a swap seen), and read
+	before they were drawn (prefetched) */
+	uint32_t drawn_swaps, prefetched;
 };
 
 struct xgpu_mesh_store;
@@ -216,6 +219,17 @@ void xgpu_mesh_store_map(struct xgpu_mesh_store *store, uint32_t generation, uin
 mesh is in the GPU's memory, else 0 (drawn stock; its reading begun) */
 int xgpu_mesh_store_use(struct xgpu_mesh_store *store, uint32_t id, float lod_pixels,
 	struct xgpu_mesh_store_view *view);
+/* ...the level chosen with the hysteresis (xgpu_mesh_store_options) from
+the level the same object was drawn at last (previous_lod; -1 none): a
+more detailed level at its cutoff, the level drawn last and the less
+detailed ones down to their cutoffs less the hysteresis (a size near a
+cutoff keeps its level; never a level less detailed than the size's) */
+int xgpu_mesh_store_use_from(struct xgpu_mesh_store *store, uint32_t id, float lod_pixels, int previous_lod,
+	struct xgpu_mesh_store_view *view);
+/* (after a map's record) prefetch: every mesh of the map read now, within
+the budget, not when first drawn (display.prism_prefetch);
+hysteresis_percent: display.prism_lod_hysteresis */
+void xgpu_mesh_store_options(struct xgpu_mesh_store *store, int prefetch, uint32_t hysteresis_percent);
 /* the frame's start: meshes read copied into their buffers, the budget kept */
 void xgpu_mesh_store_frame(struct xgpu_mesh_store *store);
 void xgpu_mesh_store_statistics(const struct xgpu_mesh_store *store, struct xgpu_mesh_store_statistics *statistics);

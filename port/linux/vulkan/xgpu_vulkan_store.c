@@ -226,6 +226,8 @@ void xgpu_vulkan_store_map(void *context, const struct xgpu_stream_texture_store
 	}
 	xgpu_texture_store_map(store_glue.store, record->generation, record->budget_megabytes,
 		(record->flags & XGPU_STREAM_TEXTURE_STORE_LOADING) != 0, count, asked, answered);
+	xgpu_texture_store_options(store_glue.store, (record->flags & XGPU_STREAM_TEXTURE_STORE_PREFETCH) != 0,
+		record->flags >> XGPU_STREAM_TEXTURE_STORE_FADE_SHIFT);
 	store_glue.loading_frames = (record->flags & XGPU_STREAM_TEXTURE_STORE_LOADING) ? LOADING_FRAMES : 0;
 	for (index = 0; index < count; index++)
 	{
@@ -271,13 +273,15 @@ int xgpu_vulkan_store_statistics(char *text, unsigned long size)
 	snprintf(text, size, "texstore: %u indexed, %u drawn lately, %u usable, %u full, %u failed, %u streaming; %llu uses "
 		"(%llu stale); resident %.1f MB of %.1f MB; "
 		"uploaded %.1f MB in %llu pieces, at most %.1f MB a frame; %u evictions, %u demotions, %u promotions, "
-		"%u allocations failed; read %.1f MB; %u jobs queued; last usable %.2f s, last full %.2f s after the map",
+		"%u allocations failed; read %.1f MB; %u jobs queued; last usable %.2f s, last full %.2f s after the map; "
+		"%u drawn stock then swapped, %u drawn sharpened a level, %u read before drawn",
 		statistics.entries, statistics.drawn, statistics.usable, statistics.full, statistics.failed, statistics.streaming,
 		(unsigned long long)statistics.uses, (unsigned long long)statistics.stale_uses,
 		(double)statistics.resident_bytes / 1048576.0, (double)statistics.budget_bytes / 1048576.0,
 		(double)statistics.uploaded_bytes / 1048576.0, (unsigned long long)statistics.pieces,
 		(double)statistics.frame_bytes_most / 1048576.0, statistics.evictions, statistics.demotions,
 		statistics.promotions, statistics.allocation_failures, (double)statistics.read_bytes / 1048576.0,
-		statistics.queued_jobs, statistics.last_usable_seconds, statistics.last_full_seconds);
+		statistics.queued_jobs, statistics.last_usable_seconds, statistics.last_full_seconds, statistics.drawn_swaps,
+		statistics.drawn_steps, statistics.prefetched);
 	return 1;
 }

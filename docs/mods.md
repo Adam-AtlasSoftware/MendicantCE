@@ -380,7 +380,15 @@ level of its size (level j + k for the stock's j), so a texture far away
 looks as the stock does and only one near is sharper. The files are checked
 as the map loads (the host's log says which were refused and why: size,
 format, unreadable, changed, device, path), and read as they are first drawn,
-on worker threads, the smallest levels first.
+on worker threads, the smallest levels first: drawn stock until a texture
+holds the stock's resolution, then sharper a level at a time, the textures
+drawn by the most draws first. `display.prism_prefetch` (on in the PRISM
+preset) reads the map's files as it loads instead, those drawn first ahead
+of the rest, within the budget and never letting go of another for them,
+so that a replacement seldom appears in front of the player;
+`display.prism_texture_fade` (milliseconds a level, 250 in the preset)
+eases each level in on screen (the sampler's most detailed level moved in
+quarter levels) rather than sharpening it in a step.
 
 `display.prism_texture_budget_mb` (0: six tenths of what the card has free,
 between 128 MB and 6 GB) bounds the card's memory they take; past it, those
@@ -423,7 +431,11 @@ model is drawn until the mesh is in, at a region and permutation the mesh has
 nothing for, and on a renderer without the store (Metal's). The files are
 checked as the map loads (the host's log says which were refused and why:
 format, nodes, a piece no part of the model has, unreadable, changed, budget,
-device, path) and read as they are first drawn. A mesh is skinned once a
+device, path) and read as they are first drawn (with `display.prism_prefetch`,
+as the map loads, within the budget). An object's level of detail is kept
+`display.prism_lod_hysteresis` percent past its cutoff before the lighter
+level is drawn (from the level it was drawn at the frame before), so that a
+size near a cutoff does not switch back and forth. A mesh is skinned once a
 frame: an object's shadow is drawn at the level of detail its view was, so
 the two share the skinning. The stock part's vertex holds texture
 coordinates over the model's base map scale (16 bits each), so a uv0 past

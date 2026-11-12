@@ -420,6 +420,17 @@ int main(int argc, char **argv)
 	}
 	CHECK(xgpu_mesh_store_use(store, answers[0].id, 20.0f, &view));
 	CHECK(view.lod == 1 && view.vertex_first == 2 * TRIANGLES * 3 && view.vertex_count == 3 && view.piece_count == 1);
+	/* ---- display.prism_lod_hysteresis (20%): level 0 (its cutoff 100 px)
+	taken at its cutoff, kept down to 80 */
+	xgpu_mesh_store_options(store, 0, 20);
+	CHECK(xgpu_mesh_store_use_from(store, answers[0].id, 95.0f, 1, &view) && view.lod == 1);
+	CHECK(xgpu_mesh_store_use_from(store, answers[0].id, 105.0f, 1, &view) && view.lod == 0);
+	CHECK(xgpu_mesh_store_use_from(store, answers[0].id, 90.0f, 0, &view) && view.lod == 0);
+	CHECK(xgpu_mesh_store_use_from(store, answers[0].id, 75.0f, 0, &view) && view.lod == 1);
+	CHECK(xgpu_mesh_store_use_from(store, answers[0].id, 110.0f, -1, &view) && view.lod == 0);
+	CHECK(xgpu_mesh_store_use_from(store, answers[0].id, 90.0f, -1, &view) && view.lod == 1);
+	xgpu_mesh_store_options(store, 0, 0);
+	CHECK(xgpu_mesh_store_use_from(store, answers[0].id, 90.0f, 0, &view) && view.lod == 1);
 	/* ---- the read's checks: each drawn stock for good */
 	for (index = 10; index < 13; index++)
 	{

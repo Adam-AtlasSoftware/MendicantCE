@@ -832,6 +832,12 @@ struct xgpu_stream_texture_store_map
 	uint32_t flags;
 };
 #define XGPU_STREAM_TEXTURE_STORE_LOADING 1u
+/* display.prism_prefetch: the map's files read as it loads, within the
+budget, not each when first drawn */
+#define XGPU_STREAM_TEXTURE_STORE_PREFETCH 2u
+/* display.prism_texture_fade: the milliseconds a level takes to sharpen to
+the next as it comes in (bits 16 to 31; 0 at once) */
+#define XGPU_STREAM_TEXTURE_STORE_FADE_SHIFT 16
 /* a query: its file's path (offset into strings and length, NUL-terminated
 there; a host path, as the guest opens it), the size and modification
 time the guest found (a file changed since is refused), and the stock
@@ -901,6 +907,13 @@ struct xgpu_stream_mesh_store_map
 	uint32_t flags;
 };
 #define XGPU_STREAM_MESH_STORE_LOADING 1u
+/* display.prism_prefetch: the map's files read as it loads, within the
+budget, not each when first drawn */
+#define XGPU_STREAM_MESH_STORE_PREFETCH 2u
+/* display.prism_lod_hysteresis: the percent a level's size is passed by
+before it is switched to or from (bits 8 to 15; 0 at its cutoff) */
+#define XGPU_STREAM_MESH_STORE_HYSTERESIS_SHIFT 8
+#define XGPU_STREAM_MESH_STORE_HYSTERESIS_MASK 0xffu
 /* a query: its file's path (offset into strings and length, NUL-terminated
 there; a host path, as the guest opens it), the size and modification time
 the guest found, the model's node count and checksum (mod_meshes.c's CRC-32

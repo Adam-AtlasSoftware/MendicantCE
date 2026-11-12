@@ -934,6 +934,71 @@ static void test_material(void)
 	fake.quiet = 0;
 }
 
+/* display.prism_prefetch: an entry read before it is drawn, never drawn
+stock then; display.prism_texture_fade: a drawn entry's shown level moves
+toward its resident one in steps, never sharper than resident */
+static void test_prefetch_fade(void)
+{
+	struct xgpu_texture_store *store = store_make(256u << 10, 64u << 10, 128u << 10, 0);
+	struct xgpu_ktx2_stock stock = { 256, 256, 9, 0 };
+	struct xgpu_store_query query;
+	struct xgpu_store_answer answer;
+	struct xgpu_texture_store_view view;
+	struct xgpu_texture_store_statistics statistics;
+	struct made made = made_bc7(1024, 1024);
+	char path[4200];
+	unsigned char *bytes;
+	uint64_t size;
+	int frames, fractional = 0, sharper = 0, usable_first = 0;
+
+	made.salt = 5;
+	snprintf(path, sizeof(path), "%s/mods/test/textures/max/prefetch#0.ktx2", folder);
+	bytes = ktx2_make(&made, &size);
+	file_write(path, bytes, size);
+	free(bytes);
+	query_make(&query, path, &stock);
+	fake.gpu_follows = 1;
+	/* (prefetched: whole before it is first drawn) */
+	xgpu_texture_store_map(store, 1, 64, 0, 1, &query, &answer);
+	xgpu_texture_store_options(store, 1, 0);
+	for (frames = 0; frames < 400; frames++)
+	{
+		run_work(store, 0);
+		frame(store);
+	}
+	xgpu_texture_store_statistics(store, &statistics);
+	CHECK(statistics.full == 1 && statistics.prefetched == 1);
+	usable_first = xgpu_texture_store_use(store, answer.id, &view);
+	CHECK(usable_first && view.resident == 0 && view.shown == 0.0f);
+	xgpu_texture_store_statistics(store, &statistics);
+	CHECK(statistics.drawn_swaps == 0 && statistics.drawn_steps == 0);
+	/* (not prefetched, faded: drawn from its first usable level, each level
+	above eased in) */
+	xgpu_texture_store_map(store, 2, 64, 0, 1, &query, &answer);
+	xgpu_texture_store_options(store, 0, 5);
+	for (frames = 0; frames < 2000; frames++)
+	{
+		if (xgpu_texture_store_use(store, answer.id, &view))
+		{
+			CHECK(view.shown >= (float)view.resident);
+			if (view.shown != (float)(uint32_t)view.shown)
+				fractional = 1;
+			if (view.shown > (float)view.resident)
+				sharper = 1;
+			if (view.resident == 0 && view.shown == 0.0f)
+				break;
+		}
+		run_work(store, 0);
+		frame(store);
+		usleep(1000);
+	}
+	CHECK(fractional && sharper && view.resident == 0 && view.shown == 0.0f);
+	xgpu_texture_store_statistics(store, &statistics);
+	CHECK(statistics.drawn_swaps == 1 && statistics.drawn_steps >= 1 && statistics.prefetched == 0);
+	xgpu_texture_store_destroy(store);
+	CHECK(fake.live_images == 0);
+}
+
 int main(int argc, char **argv)
 {
 	char mods[4300];
@@ -962,6 +1027,7 @@ int main(int argc, char **argv)
 		test_budget();
 		test_read_failure();
 		test_budget_wobble();
+		test_prefetch_fade();
 	}
 	if (failures)
 	{

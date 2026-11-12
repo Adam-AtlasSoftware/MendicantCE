@@ -21,6 +21,11 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/op_prism_models" x="28" y="231" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/op_prism_model_budget_mb" x="28" y="252" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/op_prism_secondary_motion" x="28" y="273" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/op_prism_prefetch" x="28" y="294" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/op_prism_texture_fade" x="28" y="315" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/op_prism_texture_wait" x="28" y="336" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/op_prism_world_geometry_band" x="28" y="357" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/op_prism_lod_hysteresis" x="28" y="378" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/button_bar" y="414"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/button_bar" type="column_list" width="640" height="28" flags="pass_unhandled_to_focused_child left_right_tabs_items">
@@ -125,6 +130,51 @@
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/prism_secondary_motion_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="ON|OFF" setting="display.prism_secondary_motion" values="true|false" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
 		<on event="created" run="port setting load"/>
 	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/op_prism_prefetch" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/prism_prefetch_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/prism_prefetch_spinner" x="188"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/prism_prefetch_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/labels" string_index="10" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/prism_prefetch_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="ON|OFF" setting="display.prism_prefetch" values="true|false" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+		<on event="created" run="port setting load"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/op_prism_texture_fade" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/prism_texture_fade_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/prism_texture_fade_spinner" x="188"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/prism_texture_fade_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/labels" string_index="11" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/prism_texture_fade_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="OFF|QUICK|SMOOTH|SLOW" setting="display.prism_texture_fade" values="0|120|250|500" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+		<on event="created" run="port setting load"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/op_prism_texture_wait" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/prism_texture_wait_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/prism_texture_wait_spinner" x="188"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/prism_texture_wait_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/labels" string_index="12" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/prism_texture_wait_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="OFF|SHORT|NORMAL|LONG" setting="display.prism_texture_wait" values="0|2|4|8" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+		<on event="created" run="port setting load"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/op_prism_world_geometry_band" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/prism_world_geometry_band_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/prism_world_geometry_band_spinner" x="188"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/prism_world_geometry_band_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/labels" string_index="13" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/prism_world_geometry_band_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="OFF|NARROW|WIDE|WIDEST" setting="display.prism_world_geometry_band" values="0|10|20|40" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+		<on event="created" run="port setting load"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/op_prism_lod_hysteresis" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/prism_lod_hysteresis_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/prism_lod_hysteresis_spinner" x="188"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/prism_lod_hysteresis_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/labels" string_index="14" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/prism_lod_hysteresis_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="OFF|SOME|STEADY|STEADIEST" setting="display.prism_lod_hysteresis" values="0|8|15|30" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+		<on event="created" run="port setting load"/>
+	</widget>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/labels">
 		<string text="MATERIALS"/>
 		<string text="MATERIAL DETAIL"/>
@@ -132,10 +182,15 @@
 		<string text="TEXTURE DETAIL"/>
 		<string text="TEXTURE MEMORY"/>
 		<string text="PBR MATERIALS"/>
-		<string text="MODELS"/>
+		<string text="MODELS AND STREAMING"/>
 		<string text="REMODELS"/>
 		<string text="MODEL MEMORY"/>
 		<string text="SECONDARY MOTION"/>
+		<string text="PRELOAD"/>
+		<string text="TEXTURE FADE-IN"/>
+		<string text="TEXTURE WAIT"/>
+		<string text="GEOMETRY BLEND"/>
+		<string text="DETAIL STEADINESS"/>
 	</strings>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/help_strings">
 		<string text=""/>
@@ -149,5 +204,10 @@
 		<string text="Draws the remodelled characters, weapons and vehicles mods ship in place of the game's, on the game's own skeletons: animations, collision and aim are unchanged. Stock draws the game's own."/>
 		<string text="How much of the graphics card's memory mods' remodels may take. Auto takes a fifth of what is free; a remodel past it is drawn as the game's."/>
 		<string text="A remodel's pouches swing and its joints keep their volume as it moves. Off: they follow the bones they hang from."/>
+		<string text="Reads a level's sharper textures and remodels while it loads, so they do not appear in front of you. Off reads each when it is first seen, the game's drawn until then."/>
+		<string text="How gently a sharper texture blends in as it arrives. Off sharpens it in steps."/>
+		<string text="Waits up to this long a frame for a texture the game is still reading, rather than leaving its surface or character out until it arrives. Off as the Xbox."/>
+		<string text="Spreads where the remodel's surfaces change to their lighter far level over a band, one by one as you move, rather than a ring of them at once."/>
+		<string text="Keeps the remodel's and remodelled models' detail from flicking back and forth when you stand near the distance it changes at."/>
 	</strings>
 </menus>
