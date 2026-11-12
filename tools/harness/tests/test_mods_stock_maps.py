@@ -21,6 +21,8 @@ NEGATIVE_CONTROLS = {
                                    "if ((port_mods_played() ||"), "pictures-stock"),
     "pictures-loose-sounds": (("mods_globals.loose_sounds_enabled = mods_globals.enabled && ",
                                "mods_globals.loose_sounds_enabled = "), "pictures-stock"),
+    "pictures-said": (("if (mods_globals.enabled)\n\t{\n\t\tmods_say_absent();", "if (TRUE)\n\t{\n\t\tmods_say_absent();"),
+                      "pictures-stock"),
     "menu-stock": (("mods_globals.enabled = !menu_pictures_stock_maps();", "mods_globals.enabled = FALSE;"),
                    "others-modded"),
 }
