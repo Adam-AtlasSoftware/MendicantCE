@@ -15,15 +15,24 @@ OpenH1 issue #602 plans for its hardware world_trace.
   (RT_STATIC), one bottom-level structure, built once (PREFER_FAST_TRACE)
   as the set is whole; the last set traces until then.
 - The objects: each draw of world AO's pre-pass that has the world's light
-  and the stock vertex layout is captured as it is drawn (its vertices
-  skinned on the CPU by its own node matrices, the stock vertex program's
-  two-node blend), so their permutations, levels of detail and pose are
-  what is drawn; all of a window's in one bottom-level structure, built each
-  frame (PREFER_FAST_BUILD). The first-person weapon is the pre-pass's
-  occluder, never captured. Alpha-tested draws are passed over (counted).
-- The frame: one top-level structure a window (the structure, mask 1; the
-  objects, mask 4), built after the pre-pass, so the rays see the frame's
-  drawn pose. Then two compute passes (xgpu_vulkan_rt_glsl.inc): trace, at
+  and the stock vertex layout is captured as it is drawn, by where its
+  vertices, indices and constants already are on the GPU (the mirror's
+  segments, the ring; the mesh store's skinned vertices and indices for a
+  part a replacement mesh draws): nothing of them is read on the CPU. A
+  compute pass (skin) skins each draw's triangles by its own node matrices
+  (the stock vertex program's two-node blend) into a triangle soup of its
+  own, so their permutations, levels of detail and pose are what is drawn.
+  Each draw has its own bottom-level structure, kept from frame to frame
+  (an entry, display.prism_rt_cache): a draw whose vertices, indices and
+  matrices are as they were is neither skinned nor built again; one that
+  moved is skinned and its structure refitted (an update, the same
+  triangles), built again every RT_REBUILD_UPDATES refits or where it
+  jumped far. The first-person weapon (the pre-pass's occluders all within
+  a world unit of the eye: the mask pass, on the GPU) is left out.
+  Alpha-tested draws are passed over (counted).
+- The frame: one top-level structure a window (the structure, mask 1; each
+  object draw's instance, mask 4), built after the pre-pass, so the rays see
+  the frame's drawn pose. Then two compute passes (xgpu_vulkan_rt_glsl.inc): trace, at
   world AO's texels, and resolve (filtered, accumulated over frames, as world
   AO's pass writes its texels), whose image the surfaces read in world AO's
   place (xgpu_vulkan_world_ao_set_pixels).
@@ -46,14 +55,41 @@ more), each reused once its submission is done. GPU time: HALO_VULKAN_STATS
 /* ---------- constants */
 
 #define RT_SLOTS 3
-#define RT_GEOMETRY_BYTES (24u << 20)
-#define RT_STORAGE_BYTES (64u << 20)
+/* a slot's: the windows' jobs and tables (host-visible), the top levels,
+the builds' scratch (the objects' structures are the entries', kept in
+their pool) */
+#define RT_GEOMETRY_BYTES (8u << 20)
+#define RT_STORAGE_BYTES (8u << 20)
 #define RT_SCRATCH_BYTES (48u << 20)
-#define RT_INSTANCES 16u
+/* a slot's instances (its windows' together) */
+#define RT_INSTANCES 8192u
 #define RT_GARBAGE 256u
-/* the objects' triangles a window at most (past it: the farthest drawn
-last are left out) */
-#define RT_OBJECT_TRIANGLES 600000u
+/* the objects' triangles a window at most (past it: the draws drawn last
+are left out) */
+#define RT_OBJECT_TRIANGLES 1500000u
+/* the objects' entries (each draw's acceleration structure kept from frame
+to frame), their hash's buckets, the frames an entry not traced is kept,
+the refits before it is built again, how far node 0 may jump and the entry
+still be refitted (world units) */
+#define RT_ENTRIES 4096u
+#define RT_ENTRY_BUCKETS 8192u
+#define RT_ENTRY_IDLE_FRAMES 300u
+#define RT_REBUILD_UPDATES 48u
+#define RT_REFIT_DISTANCE 3.0f
+/* the node rows an entry compares (c[60] to c[191]) */
+#define RT_NODE_ROWS 132u
+/* the entries' memory: chunks of device memory (a larger entry has one of
+its own), their free ranges at most */
+#define RT_POOL_CHUNK (32ull << 20)
+/* the pool's size past which the entries not traced lately are let go of
+(and new ones wait) */
+#define RT_POOL_MOST (320ull << 20)
+#define RT_POOL_CHUNKS 96u
+#define RT_POOL_RANGES 1024u
+/* a window's jobs (draws skinned) and draws captured at most */
+#define RT_JOBS 4096u
+#define RT_JOB_WORDS 24u
+#define RT_WINDOW_DRAWS 4096u
 /* gi's probes at most (32 x 16 x 32) */
 #define RT_PROBES_MOST (32u * 16u * 32u)
 
@@ -102,7 +138,7 @@ struct rt_pass
 	F(vkCmdResetQueryPool) F(vkCmdWriteTimestamp) F(vkCmdFillBuffer) F(vkGetQueryPoolResults) F(vkGetBufferDeviceAddress) \
 	F(vkCreateAccelerationStructureKHR) F(vkDestroyAccelerationStructureKHR) \
 	F(vkGetAccelerationStructureBuildSizesKHR) F(vkCmdBuildAccelerationStructuresKHR) \
-	F(vkGetAccelerationStructureDeviceAddressKHR)
+	F(vkGetAccelerationStructureDeviceAddressKHR) F(vkCmdCopyBuffer)
 
 #define DECLARE(name) static PFN_##name name;
 RT_FUNCTIONS(DECLARE)
@@ -137,35 +173,81 @@ struct rt_slot
 	VkDescriptorPool pool;
 	/* the GPU time of its frame's passes: queries 0 and 1, written */
 	int timed;
+	/* the entries' info as its frame left it (the nodes their vertices
+	name, read once the frame is done: entry_rows_learn), and whether it
+	was copied */
+	struct rt_buffer readback;
+	int read_back;
 };
 
-/* a window's captured objects: their world-space vertices and triangles,
-in the slot's geometry buffer */
-#define RT_CAPTURED_DRAWS 4096u
+/* an object draw's acceleration structure, kept from frame to frame: what
+the draw is (its key: identity, primitive, counts, occurrence), its
+triangle soup and structure in a range of a pool chunk, how it was last
+skinned (its node rows, the rows its vertices name once known, its pose,
+its bytes' generations, node 0's place) */
+struct rt_entry
+{
+	int used;
+	uint64_t key[8];
+	uint32_t next;
+	uint32_t triangles;
+	uint32_t chunk;
+	VkDeviceSize offset, size, structure_offset, structure_size, build_scratch, update_scratch;
+	VkAccelerationStructureKHR structure;
+	VkDeviceAddress structure_address, soup_address;
+	int built, skinned, occluder;
+	uint32_t updates;
+	float rows[RT_NODE_ROWS][4];
+	uint32_t rows_known;
+	uint64_t pose;
+	uint32_t generation[2];
+	float origin[3];
+	uint64_t frame, skinned_serial;
+	/* this window's: its job (or none), its mode (build, update, none) */
+	int job, mode;
+};
+
+struct rt_pool_range
+{
+	VkDeviceSize offset, size;
+};
+
+struct rt_pool_chunk
+{
+	struct rt_buffer buffer;
+	struct rt_pool_range free[RT_POOL_RANGES];
+	uint32_t free_count;
+};
+
+/* an entry's range and structure let go of once the GPU has passed serial */
+struct rt_pool_garbage
+{
+	uint64_t serial;
+	uint32_t chunk;
+	VkDeviceSize offset, size;
+	VkAccelerationStructureKHR structure;
+};
+#define RT_POOL_GARBAGE 4096u
+
+/* a window's capture: its draws' entries (the occluders' marked), its
+jobs (the slot's geometry: RT_JOB_WORDS words each, then the workgroups'
+table), the occurrences of each draw's identity so far */
 struct rt_capture
 {
-	VkDeviceSize vertex_offset, index_offset;
-	uint32_t vertex_count, triangle_count;
-	uint32_t vertex_room, index_room;
 	int open, full;
-	/* the occluders' draws: their triangles and bounds (the first-person
-	weapon's left out at the window's end) */
+	uint64_t serial;
+	uint32_t draws[RT_WINDOW_DRAWS];
+	uint32_t draw_count;
+	uint32_t triangle_count;
+	VkDeviceSize jobs_offset;
+	uint32_t *jobs;
+	uint32_t job_count, job_groups, job_triangles;
 	struct
 	{
-		uint32_t first, count;
-		float bounds[6];
-	} occluders[RT_CAPTURED_DRAWS];
-	uint32_t occluder_count;
-	/* the captured vertices and triangles as the CPU writes them, in its own
-	memory (the slot's mapped geometry is slow for the CPU to read, and
-	moving the first-person weapon's triangles out read it back): copied
-	into the slot's geometry once, at the window's end */
-	float *vertices;
-	uint32_t *indices;
-	uint32_t vertices_allocated, indices_allocated;
-	/* a draw's vertices it names, each skinned once: the stamp of the draw
-	that last met each (of the 65536 a draw may span) and its place */
-	uint32_t *stamps, *places, stamp;
+		uint64_t hash;
+		uint32_t count, stamp;
+	} occurrences[RT_WINDOW_DRAWS * 2];
+	uint32_t stamp;
 };
 
 static struct
@@ -180,6 +262,33 @@ static struct
 	VkDescriptorSetLayout path_layout, accumulate_layout, atrous_layout;
 	VkPipelineLayout path_pipeline_layout, accumulate_pipeline_layout, atrous_pipeline_layout;
 	VkPipeline path, accumulate, atrous;
+	/* the objects' passes (no descriptors: buffers by their addresses) */
+	VkDescriptorSetLayout skin_layout, reset_layout, mask_layout;
+	VkPipelineLayout skin_pipeline_layout, reset_pipeline_layout, mask_pipeline_layout;
+	VkPipeline skin, reset, mask;
+	/* the objects' entries, their hash's buckets (index + 1, 0 none), their
+	info on the GPU (eight words each: skin's), the pool their soups and
+	structures are of, its garbage */
+	struct rt_entry *entries;
+	uint32_t buckets[RT_ENTRY_BUCKETS];
+	uint32_t entry_count, entry_cursor;
+	struct rt_buffer info;
+	int info_zeroed;
+	struct rt_pool_chunk *chunks[RT_POOL_CHUNKS];
+	struct rt_pool_garbage pool_garbage[RT_POOL_GARBAGE];
+	uint32_t pool_garbage_count;
+	VkDeviceSize pool_bytes;
+	int pool_full;
+	uint64_t object_frame;
+	/* the top level's sizes for RT_INSTANCES instances */
+	VkAccelerationStructureBuildSizesInfoKHR tlas_sizes;
+	/* the buffers' device addresses lately asked for */
+	struct
+	{
+		VkBuffer buffer;
+		VkDeviceAddress address;
+	} addresses[16];
+	uint32_t address_next;
 	/* gi's probes (RT_PROBES_MOST of them, four vec4s each: their
 	irradiance's spherical harmonics, a channel each, then the place they
 	were found at and whether they are valid), zeroed once; the frames whose
@@ -219,6 +328,7 @@ static struct
 	int pt_history_valid, logged_pt;
 	/* statistics (600 frames) */
 	uint64_t frames, draws, skipped, triangles, object_triangles_most, full_frames;
+	uint64_t jobs, skinned_triangles, builds, updates, reused, evicted, stale, deferred, pieces;
 	double milliseconds, milliseconds_most;
 	uint64_t timed_frames;
 	int statistics;
@@ -497,6 +607,15 @@ static int make(void)
 		&rt.accumulate_layout, &rt.accumulate_pipeline_layout, &rt.accumulate) ||
 		!pipeline_make_pushed(atrous_types, 7, xgpu_vulkan_rt_atrous_words, xgpu_vulkan_rt_atrous_count, 8,
 		&rt.atrous_layout, &rt.atrous_pipeline_layout, &rt.atrous) ||
+		!pipeline_make_pushed(NULL, 0, xgpu_vulkan_rt_skin_words, xgpu_vulkan_rt_skin_count, 32, &rt.skin_layout,
+		&rt.skin_pipeline_layout, &rt.skin) ||
+		!pipeline_make_pushed(NULL, 0, xgpu_vulkan_rt_reset_words, xgpu_vulkan_rt_reset_count, 32, &rt.reset_layout,
+		&rt.reset_pipeline_layout, &rt.reset) ||
+		!pipeline_make_pushed(NULL, 0, xgpu_vulkan_rt_mask_words, xgpu_vulkan_rt_mask_count, 48, &rt.mask_layout,
+		&rt.mask_pipeline_layout, &rt.mask) ||
+		!buffer_make((VkDeviceSize)RT_ENTRIES * 32, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+		VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, 0, &rt.info) ||
+		!(rt.entries = calloc(RT_ENTRIES, sizeof(*rt.entries))) ||
 		!buffer_make((VkDeviceSize)RT_PROBES_MOST * 64, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
 		VK_BUFFER_USAGE_TRANSFER_DST_BIT, 0, &rt.probe_buffer))
 	{
@@ -523,7 +642,9 @@ static int make(void)
 		if (!buffer_make(RT_GEOMETRY_BYTES, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
 			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, 1, &slot->geometry) ||
 			!buffer_make(RT_INSTANCES * sizeof(VkAccelerationStructureInstanceKHR),
-			VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR, 1, &slot->instances) ||
+			VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, 1,
+			&slot->instances) ||
+			!buffer_make((VkDeviceSize)RT_ENTRIES * 32, VK_BUFFER_USAGE_TRANSFER_DST_BIT, 1, &slot->readback) ||
 			!buffer_make(RT_STORAGE_BYTES, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR, 0, &slot->storage) ||
 			!buffer_make(RT_SCRATCH_BYTES, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, 0, &slot->scratch))
 		{
@@ -581,6 +702,11 @@ int xgpu_vulkan_rt_available(void)
 
 /* ---------- the frame's slot */
 
+static void entry_rows_learn(struct rt_slot *slot);
+static void pool_collect(int all);
+static void entries_age(void);
+static void entries_clear(void);
+
 static void slot_timing_read(struct rt_slot *slot, uint32_t index)
 {
 	uint64_t times[2];
@@ -614,6 +740,7 @@ static struct rt_slot *slot_take(void)
 	if (slot->serial >= xgpu_vulkan_serial() && slot->serial)
 		return NULL;
 	slot_timing_read(slot, rt.slot);
+	entry_rows_learn(slot);
 	for (index = 0; index < slot->made_count; index++)
 		vkDestroyAccelerationStructureKHR(rt.device.device, slot->made[index], NULL);
 	slot->made_count = 0;
@@ -635,6 +762,9 @@ void xgpu_vulkan_rt_frame(const struct xgpu_stream_rt_frame *record)
 	if (!make())
 		return;
 	garbage_collect();
+	pool_collect(0);
+	rt.object_frame++;
+	entries_age();
 	rt.frame = *record;
 	rt.frame_active = record->mode != XGPU_RT_OFF;
 	rt.slot_ready = 0;
@@ -647,6 +777,11 @@ void xgpu_vulkan_rt_frame(const struct xgpu_stream_rt_frame *record)
 int xgpu_vulkan_rt_active(void)
 {
 	return rt.made && rt.frame_active && rt.slot_ready;
+}
+
+int xgpu_vulkan_rt_stock_models(void)
+{
+	return (rt.frame.flags & XGPU_RT_FLAG_STOCK_MODELS) != 0;
 }
 
 /* a whole set built: one bottom-level structure, its triangles in a buffer
@@ -791,72 +926,429 @@ void xgpu_vulkan_rt_static(const struct xgpu_stream_rt_static *record, const flo
 		rt.static_address = 0;
 		rt.static_triangles = 0;
 		rt.history_valid = 0;
+		/* (the map's objects with it) */
+		entries_clear();
 		break;
 	}
 }
 
+/* ---------- the objects' entries */
+
+/* a buffer's device address (the last few asked for kept) */
+static VkDeviceAddress buffer_address(VkBuffer buffer)
+{
+	VkBufferDeviceAddressInfo info;
+	uint32_t index;
+
+	if (!buffer)
+		return 0;
+	for (index = 0; index < 16; index++)
+		if (rt.addresses[index].buffer == buffer)
+			return rt.addresses[index].address;
+	memset(&info, 0, sizeof(info));
+	info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+	info.buffer = buffer;
+	index = rt.address_next++ % 16;
+	rt.addresses[index].buffer = buffer;
+	rt.addresses[index].address = vkGetBufferDeviceAddress(rt.device.device, &info);
+	return rt.addresses[index].address;
+}
+
+/* bytes of the pool (256-aligned): a chunk's free range, first fit, or a
+new chunk (one of its own for a range past RT_POOL_CHUNK); 0 if none */
+static int pool_take(VkDeviceSize size, uint32_t *chunk_index, VkDeviceSize *offset)
+{
+	uint32_t index, range;
+
+	size = align_up(size, 256);
+	for (index = 0; index < RT_POOL_CHUNKS; index++)
+	{
+		struct rt_pool_chunk *chunk = rt.chunks[index];
+
+		if (!chunk)
+			continue;
+		for (range = 0; range < chunk->free_count; range++)
+		{
+			if (chunk->free[range].size < size)
+				continue;
+			*chunk_index = index;
+			*offset = chunk->free[range].offset;
+			chunk->free[range].offset += size;
+			chunk->free[range].size -= size;
+			if (!chunk->free[range].size)
+				chunk->free[range] = chunk->free[--chunk->free_count];
+			return 1;
+		}
+	}
+	for (index = 0; index < RT_POOL_CHUNKS && rt.chunks[index]; index++)
+	{
+	}
+	if (index == RT_POOL_CHUNKS || rt.pool_bytes >= RT_POOL_MOST)
+		return 0;
+	{
+		struct rt_pool_chunk *chunk = calloc(1, sizeof(*chunk));
+		VkDeviceSize bytes = size > RT_POOL_CHUNK ? size : RT_POOL_CHUNK;
+
+		if (!chunk || !buffer_make(bytes, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
+			VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, 0,
+			&chunk->buffer))
+		{
+			free(chunk);
+			return 0;
+		}
+		rt.chunks[index] = chunk;
+		rt.pool_bytes += bytes;
+		chunk->free[0].offset = size;
+		chunk->free[0].size = bytes - size;
+		chunk->free_count = chunk->free[0].size ? 1 : 0;
+		*chunk_index = index;
+		*offset = 0;
+		return 1;
+	}
+}
+
+/* a range given back to its chunk (merged with its neighbours) */
+static void pool_give(uint32_t chunk_index, VkDeviceSize offset, VkDeviceSize size)
+{
+	struct rt_pool_chunk *chunk = chunk_index < RT_POOL_CHUNKS ? rt.chunks[chunk_index] : NULL;
+	uint32_t range;
+
+	if (!chunk || !size)
+		return;
+	size = align_up(size, 256);
+	for (range = 0; range < chunk->free_count; range++)
+	{
+		if (chunk->free[range].offset + chunk->free[range].size == offset)
+		{
+			chunk->free[range].size += size;
+			offset = chunk->free[range].offset;
+			size = chunk->free[range].size;
+			chunk->free[range] = chunk->free[--chunk->free_count];
+			range = (uint32_t)-1;
+			continue;
+		}
+		if (offset + size == chunk->free[range].offset)
+		{
+			size += chunk->free[range].size;
+			chunk->free[range] = chunk->free[--chunk->free_count];
+			range = (uint32_t)-1;
+			continue;
+		}
+	}
+	if (chunk->free_count < RT_POOL_RANGES)
+	{
+		chunk->free[chunk->free_count].offset = offset;
+		chunk->free[chunk->free_count].size = size;
+		chunk->free_count++;
+	}
+}
+
+/* the entries' ranges and structures the GPU has passed, let go of (all:
+the device idle) */
+static void pool_collect(int all)
+{
+	uint64_t done = xgpu_vulkan_completed();
+	uint32_t index = 0;
+
+	while (index < rt.pool_garbage_count)
+	{
+		struct rt_pool_garbage *item = &rt.pool_garbage[index];
+
+		if (all || item->serial <= done)
+		{
+			if (item->structure)
+				vkDestroyAccelerationStructureKHR(rt.device.device, item->structure, NULL);
+			pool_give(item->chunk, item->offset, item->size);
+			*item = rt.pool_garbage[--rt.pool_garbage_count];
+			continue;
+		}
+		index++;
+	}
+	/* (a chunk all free let go of: the pool shrinks as the entries go) */
+	for (index = 0; index < RT_POOL_CHUNKS; index++)
+	{
+		struct rt_pool_chunk *chunk = rt.chunks[index];
+		uint32_t pending;
+
+		if (!chunk || chunk->free_count != 1 || chunk->free[0].offset != 0 ||
+			chunk->free[0].size != chunk->buffer.size)
+			continue;
+		for (pending = 0; pending < rt.pool_garbage_count && rt.pool_garbage[pending].chunk != index; pending++)
+		{
+		}
+		if (pending < rt.pool_garbage_count)
+			continue;
+		rt.pool_bytes -= chunk->buffer.size;
+		garbage_add(&chunk->buffer, VK_NULL_HANDLE);
+		free(chunk);
+		rt.chunks[index] = NULL;
+	}
+}
+
+static uint64_t key_hash(const uint64_t key[8])
+{
+	uint64_t hash = 1469598103934665603ull;
+	int word;
+
+	for (word = 0; word < 8; word++)
+		hash = (hash ^ key[word]) * 1099511628211ull;
+	return hash ^ (hash >> 29);
+}
+
+static void entry_unlink(uint32_t index)
+{
+	struct rt_entry *entry = &rt.entries[index];
+	uint32_t *link = &rt.buckets[key_hash(entry->key) % RT_ENTRY_BUCKETS];
+
+	while (*link && *link != index + 1)
+		link = &rt.entries[*link - 1].next;
+	if (*link)
+		*link = entry->next;
+}
+
+/* an entry let go of (its range and structure once the work recorded so
+far is done) */
+static void entry_free(uint32_t index)
+{
+	struct rt_entry *entry = &rt.entries[index];
+
+	if (!entry->used)
+		return;
+	entry_unlink(index);
+	if (rt.pool_garbage_count == RT_POOL_GARBAGE)
+	{
+		xgpu_vulkan_wait(rt.pool_garbage[0].serial);
+		pool_collect(0);
+	}
+	if (rt.pool_garbage_count < RT_POOL_GARBAGE)
+	{
+		struct rt_pool_garbage *item = &rt.pool_garbage[rt.pool_garbage_count++];
+
+		item->serial = xgpu_vulkan_serial();
+		item->chunk = entry->chunk;
+		item->offset = entry->offset;
+		item->size = entry->size;
+		item->structure = entry->structure;
+	}
+	memset(entry, 0, sizeof(*entry));
+	rt.entry_count--;
+}
+
+/* the entries not traced for RT_ENTRY_IDLE_FRAMES let go of, a few a frame */
+static void entries_age(void)
+{
+	uint32_t look;
+
+	if (!rt.entries)
+		return;
+	for (look = 0; look < 64; look++)
+	{
+		uint32_t index = rt.entry_cursor++ % RT_ENTRIES;
+		struct rt_entry *entry = &rt.entries[index];
+
+		if (entry->used && entry->frame + RT_ENTRY_IDLE_FRAMES < rt.object_frame)
+		{
+			entry_free(index);
+			rt.evicted++;
+		}
+	}
+	/* (the pool at its most and an entry refused room: every entry not
+	traced in the last frames) */
+	if (rt.pool_full)
+	{
+		rt.pool_full = 0;
+		uint32_t index;
+
+		for (index = 0; index < RT_ENTRIES; index++)
+		{
+			struct rt_entry *entry = &rt.entries[index];
+
+			if (entry->used && entry->frame + 2 < rt.object_frame)
+			{
+				entry_free(index);
+				rt.evicted++;
+			}
+		}
+	}
+}
+
+/* every entry let go of (the map's structure released: its objects with it) */
+static void entries_clear(void)
+{
+	uint32_t index;
+
+	if (!rt.entries)
+		return;
+	for (index = 0; index < RT_ENTRIES; index++)
+		entry_free(index);
+	memset(rt.buckets, 0, sizeof(rt.buckets));
+}
+
+/* the rows each entry's vertices name, learnt from a frame's info once it
+is done (the slot taken again): until then every node row is compared */
+static void entry_rows_learn(struct rt_slot *slot)
+{
+	const uint32_t *info = slot->readback.mapped;
+	uint32_t index;
+
+	if (!slot->read_back || !info)
+		return;
+	slot->read_back = 0;
+	for (index = 0; index < RT_ENTRIES; index++)
+	{
+		struct rt_entry *entry = &rt.entries[index];
+		uint32_t most;
+
+		if (!entry->used || entry->rows_known || !entry->skinned || entry->skinned_serial > slot->serial)
+			continue;
+		most = info[index * 8 + 6];
+		if (most)
+			entry->rows_known = most - 1 + 3 < RT_NODE_ROWS ? most - 1 + 3 : RT_NODE_ROWS;
+	}
+}
+
+/* the entry of a key, made (its range taken, its structure made, its build
+sizes found) if it has none; NULL if it cannot be */
+static struct rt_entry *entry_get(const uint64_t key[8], uint32_t triangles, uint32_t *made_index)
+{
+	uint64_t hash = key_hash(key);
+	uint32_t index = rt.buckets[hash % RT_ENTRY_BUCKETS], look;
+	VkAccelerationStructureGeometryKHR geometry;
+	VkAccelerationStructureBuildGeometryInfoKHR info;
+	VkAccelerationStructureBuildSizesInfoKHR sizes;
+	VkAccelerationStructureCreateInfoKHR create;
+	VkAccelerationStructureDeviceAddressInfoKHR address;
+	struct rt_entry *entry;
+
+	while (index)
+	{
+		entry = &rt.entries[index - 1];
+		if (!memcmp(entry->key, key, sizeof(entry->key)))
+		{
+			*made_index = index - 1;
+			return entry;
+		}
+		index = entry->next;
+	}
+	/* (a free entry; none: the one idle longest let go of) */
+	if (rt.entry_count == RT_ENTRIES)
+	{
+		uint32_t oldest = 0;
+
+		for (look = 1; look < RT_ENTRIES; look++)
+			if (rt.entries[look].frame < rt.entries[oldest].frame)
+				oldest = look;
+		if (rt.entries[oldest].frame >= rt.object_frame)
+			return NULL;
+		entry_free(oldest);
+		rt.evicted++;
+	}
+	for (look = 0; look < RT_ENTRIES && rt.entries[look].used; look++)
+	{
+	}
+	if (look == RT_ENTRIES)
+		return NULL;
+	entry = &rt.entries[look];
+	memset(entry, 0, sizeof(*entry));
+	memcpy(entry->key, key, sizeof(entry->key));
+	entry->triangles = triangles;
+	memset(&geometry, 0, sizeof(geometry));
+	geometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+	geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+	geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+	geometry.geometry.triangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
+	geometry.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+	geometry.geometry.triangles.vertexStride = 12;
+	geometry.geometry.triangles.maxVertex = triangles * 3 - 1;
+	geometry.geometry.triangles.indexType = VK_INDEX_TYPE_NONE_KHR;
+	memset(&info, 0, sizeof(info));
+	info.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+	info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+	info.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
+		VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+	info.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+	info.geometryCount = 1;
+	info.pGeometries = &geometry;
+	memset(&sizes, 0, sizeof(sizes));
+	sizes.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
+	vkGetAccelerationStructureBuildSizesKHR(rt.device.device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &info,
+		&triangles, &sizes);
+	entry->structure_offset = align_up((VkDeviceSize)entry->triangles * 36, 256);
+	entry->structure_size = sizes.accelerationStructureSize;
+	entry->build_scratch = sizes.buildScratchSize;
+	entry->update_scratch = sizes.updateScratchSize;
+	entry->size = entry->structure_offset + align_up(entry->structure_size, 256);
+	if (!pool_take(entry->size, &entry->chunk, &entry->offset))
+	{
+		rt.pool_full = 1;
+		memset(entry, 0, sizeof(*entry));
+		return NULL;
+	}
+	memset(&create, 0, sizeof(create));
+	create.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
+	create.buffer = rt.chunks[entry->chunk]->buffer.buffer;
+	create.offset = entry->offset + entry->structure_offset;
+	create.size = entry->structure_size;
+	create.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+	if (vkCreateAccelerationStructureKHR(rt.device.device, &create, NULL, &entry->structure) != VK_SUCCESS)
+	{
+		pool_give(entry->chunk, entry->offset, entry->size);
+		memset(entry, 0, sizeof(*entry));
+		return NULL;
+	}
+	memset(&address, 0, sizeof(address));
+	address.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
+	address.accelerationStructure = entry->structure;
+	entry->structure_address = vkGetAccelerationStructureDeviceAddressKHR(rt.device.device, &address);
+	entry->soup_address = rt.chunks[entry->chunk]->buffer.address + entry->offset;
+	entry->used = 1;
+	entry->job = -1;
+	entry->next = rt.buckets[hash % RT_ENTRY_BUCKETS];
+	rt.buckets[hash % RT_ENTRY_BUCKETS] = look + 1;
+	rt.entry_count++;
+	*made_index = look;
+	return entry;
+}
+
 /* ---------- the objects' capture */
+
+/* a window's places in the slot's geometry from its jobs': the workgroups'
+table, the instances' table (each object instance's soup), the entries the
+mask pass reads; returns the end */
+static VkDeviceSize capture_offsets(VkDeviceSize jobs, VkDeviceSize *groups, VkDeviceSize *table, VkDeviceSize *map)
+{
+	*groups = jobs + (VkDeviceSize)RT_JOBS * RT_JOB_WORDS * 4;
+	*table = align_up(*groups + ((VkDeviceSize)RT_OBJECT_TRIANGLES / 64 + RT_JOBS) * 8, 256);
+	*map = align_up(*table + (VkDeviceSize)RT_WINDOW_DRAWS * 8, 256);
+	return *map + (VkDeviceSize)RT_WINDOW_DRAWS * 4;
+}
 
 void xgpu_vulkan_rt_window_begin(void)
 {
 	struct rt_slot *slot = &rt.slots[rt.slot];
-	struct rt_capture kept = rt.capture;
+	struct rt_capture *capture = &rt.capture;
+	VkDeviceSize groups, table, map;
 
-	memset(&rt.capture, 0, sizeof(rt.capture));
-	rt.capture.vertices = kept.vertices;
-	rt.capture.indices = kept.indices;
-	rt.capture.vertices_allocated = kept.vertices_allocated;
-	rt.capture.indices_allocated = kept.indices_allocated;
-	rt.capture.stamps = kept.stamps;
-	rt.capture.places = kept.places;
-	rt.capture.stamp = kept.stamp;
-	if (!xgpu_vulkan_rt_active())
+	capture->open = capture->full = 0;
+	capture->draw_count = capture->triangle_count = 0;
+	capture->job_count = capture->job_groups = capture->job_triangles = 0;
+	capture->jobs = NULL;
+	if (!xgpu_vulkan_rt_active() || !rt.entries)
 		return;
-	/* (the slot's geometry left after the windows before: vertices in its
-	first two thirds, triangles' indices in the rest) */
+	/* (the slot's geometry left after the windows before: the jobs, then
+	the workgroups' table, then the instances' table and the entries the
+	mask pass reads) */
+	capture->jobs_offset = align_up(slot->geometry_used, 256);
+	if (capture_offsets(capture->jobs_offset, &groups, &table, &map) > slot->geometry.size)
+		return;
+	capture->jobs = (uint32_t *)((uint8_t *)slot->geometry.mapped + capture->jobs_offset);
+	if (++capture->stamp == 0)
 	{
-		VkDeviceSize left = slot->geometry.size - slot->geometry_used;
-
-		rt.capture.vertex_offset = align_up(slot->geometry_used, 256);
-		rt.capture.vertex_room = (uint32_t)((left * 5 / 9) / 12);
-		rt.capture.index_offset = align_up(rt.capture.vertex_offset + (VkDeviceSize)rt.capture.vertex_room * 12, 256);
-		if (rt.capture.index_offset >= slot->geometry.size)
-			return;
-		rt.capture.index_room = (uint32_t)((slot->geometry.size - rt.capture.index_offset) / 12);
-		if (rt.capture.index_room > RT_OBJECT_TRIANGLES)
-			rt.capture.index_room = RT_OBJECT_TRIANGLES;
-		if (rt.capture.vertex_room > rt.capture.vertices_allocated)
-		{
-			float *grown = realloc(rt.capture.vertices, (size_t)rt.capture.vertex_room * 12);
-
-			if (!grown)
-				return;
-			rt.capture.vertices = grown;
-			rt.capture.vertices_allocated = rt.capture.vertex_room;
-		}
-		if (rt.capture.index_room > rt.capture.indices_allocated)
-		{
-			uint32_t *grown = realloc(rt.capture.indices, (size_t)rt.capture.index_room * 12);
-
-			if (!grown)
-				return;
-			rt.capture.indices = grown;
-			rt.capture.indices_allocated = rt.capture.index_room;
-		}
-		if (!rt.capture.stamps)
-		{
-			rt.capture.stamps = calloc(65536, sizeof(uint32_t));
-			rt.capture.places = malloc(65536 * sizeof(uint32_t));
-			if (!rt.capture.stamps || !rt.capture.places)
-			{
-				free(rt.capture.stamps);
-				free(rt.capture.places);
-				rt.capture.stamps = rt.capture.places = NULL;
-				return;
-			}
-		}
-		rt.capture.open = 1;
+		memset(capture->occurrences, 0, sizeof(capture->occurrences));
+		capture->stamp = 1;
 	}
+	capture->serial = xgpu_vulkan_serial();
+	capture->open = 1;
 }
 
 void xgpu_vulkan_rt_skipped(void)
@@ -865,179 +1357,154 @@ void xgpu_vulkan_rt_skipped(void)
 		rt.skipped++;
 }
 
-static inline float rt_read_float(const uint8_t *bytes)
+/* the draw's occurrence in the window so far (another object of the same
+model, drawn from the same vertices) */
+static uint32_t occurrence(uint64_t hash)
 {
-	float value;
+	struct rt_capture *capture = &rt.capture;
+	uint32_t size = sizeof(capture->occurrences) / sizeof(capture->occurrences[0]);
+	uint32_t at = (uint32_t)(hash % size), look;
 
-	memcpy(&value, bytes, sizeof(value));
-	return value;
+	for (look = 0; look < size; look++, at = (at + 1) % size)
+	{
+		if (capture->occurrences[at].stamp != capture->stamp)
+		{
+			capture->occurrences[at].stamp = capture->stamp;
+			capture->occurrences[at].hash = hash;
+			capture->occurrences[at].count = 1;
+			return 0;
+		}
+		if (capture->occurrences[at].hash == hash)
+			return capture->occurrences[at].count++;
+	}
+	return 0;
 }
 
 void xgpu_vulkan_rt_capture(const struct xgpu_vulkan_rt_draw *draw)
 {
 	struct rt_capture *capture = &rt.capture;
-	uint32_t lowest = 0xffffffffu, highest = 0, index, vertices, triangles = 0, first;
-	float *to_vertices, bounds[6] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
-	uint32_t *to_indices;
+	uint64_t key[8];
+	uint32_t triangles, index, rows;
+	VkDeviceAddress vertices, indices = 0, constants = 0;
+	struct rt_entry *entry;
+	int changed, cache = !(rt.frame.flags & XGPU_RT_FLAG_NO_CACHE);
 
-	if (!capture->open || capture->full || !draw->vertices || !draw->count || !draw->stride || !draw->constants)
+	if (!capture->open || capture->full || !draw->vertex_buffer || !draw->count || !draw->stride ||
+		draw->serial != capture->serial || (!draw->index_buffer && draw->cpu_indices && draw->index_size != 2))
 		return;
-	/* the vertices it names */
-	if (draw->indices)
+	triangles = draw->primitive == XGPU_VULKAN_RT_LIST ? draw->count / 3 : draw->count >= 3 ? draw->count - 2 : 0;
+	if (!triangles)
+		return;
+	/* (the position read as words: the vertices' place and layout 4-aligned) */
+	if ((draw->stride & 3) || (draw->position_offset & 3) || (draw->vertex_offset & 3) ||
+		((draw->index_buffer || draw->cpu_indices) && draw->index_size != 2 && draw->index_size != 4))
+		return;
+	if (capture->draw_count == RT_WINDOW_DRAWS || capture->job_count == RT_JOBS ||
+		capture->triangle_count + triangles > RT_OBJECT_TRIANGLES)
 	{
-		for (index = 0; index < draw->count; index++)
-		{
-			int32_t vertex = (int32_t)draw->indices[index] - draw->index_base;
+		capture->full = 1;
+		rt.full_frames++;
+		return;
+	}
+	vertices = buffer_address(draw->vertex_buffer);
+	if (draw->index_buffer)
+		indices = buffer_address(draw->index_buffer);
+	if (draw->constants_buffer)
+		constants = buffer_address(draw->constants_buffer);
+	if (!vertices || (draw->index_buffer && !indices) || (draw->constants_buffer && !constants))
+		return;
+	/* the entry: the draw's identity, layout and counts, and its occurrence */
+	key[0] = draw->identity[0];
+	key[1] = draw->identity[1];
+	key[2] = draw->identity[2];
+	key[3] = draw->identity[3];
+	key[4] = ((uint64_t)draw->count << 32) | ((uint64_t)draw->primitive << 24) | ((uint64_t)draw->index_size << 16) |
+		draw->stride;
+	key[5] = ((uint64_t)(uint32_t)draw->position_offset << 40) ^ ((uint64_t)(uint32_t)draw->nodes_offset << 20) ^
+		(uint64_t)(uint32_t)draw->weight_offset ^ ((uint64_t)(draw->constants_buffer != VK_NULL_HANDLE) << 63);
+	key[6] = (uint64_t)(uint32_t)draw->index_add | ((uint64_t)draw->vertex_count << 32);
+	key[7] = 0;
+	key[7] = occurrence(key_hash(key));
+	entry = entry_get(key, triangles, &index);
+	if (!entry)
+	{
+		rt.stale++;
+		return;
+	}
+	entry->occluder = draw->occluder;
+	/* whether it moved: its bytes, its pose, its node rows (those its
+	vertices name, once known) */
+	rows = entry->rows_known ? entry->rows_known : RT_NODE_ROWS;
+	changed = !cache || !entry->skinned || draw->volatile_source || entry->generation[0] != draw->generation[0] ||
+		entry->generation[1] != draw->generation[1] || entry->pose != draw->pose ||
+		(draw->constants && memcmp(entry->rows, draw->constants[60], rows * sizeof(entry->rows[0])));
+	entry->frame = rt.object_frame;
+	entry->mode = 0;
+	entry->job = -1;
+	if (changed)
+	{
+		uint32_t *job = capture->jobs + (size_t)capture->job_count * RT_JOB_WORDS;
+		VkDeviceAddress vertex0 = vertices + draw->vertex_offset;
+		uint64_t index_first = draw->index_first, index0;
+		float dx = draw->origin[0] - entry->origin[0], dy = draw->origin[1] - entry->origin[1],
+			dz = draw->origin[2] - entry->origin[2];
 
-			if (vertex < 0)
+		/* (the CPU's indices, copied into the ring now: only where skinned) */
+		if (!draw->index_buffer && draw->cpu_indices)
+		{
+			struct xgpu_vulkan_range range;
+			void *to = xgpu_vulkan_upload(draw->count * 2, 16, &range);
+
+			if (!to || xgpu_vulkan_serial() != capture->serial || !(indices = buffer_address(range.buffer)))
+			{
+				entry->skinned = 0;
 				return;
-			if ((uint32_t)vertex < lowest)
-				lowest = (uint32_t)vertex;
-			if ((uint32_t)vertex > highest)
-				highest = (uint32_t)vertex;
+			}
+			memcpy(to, draw->cpu_indices, (size_t)draw->count * 2);
+			index_first = range.offset / 2;
 		}
+		index0 = indices + index_first * draw->index_size;
+		job[0] = (uint32_t)vertex0;
+		job[1] = (uint32_t)(vertex0 >> 32);
+		job[2] = (uint32_t)(index0 & ~(uint64_t)3);
+		job[3] = (uint32_t)(index0 >> 32);
+		job[4] = (uint32_t)(constants + draw->constants_offset);
+		job[5] = constants ? (uint32_t)((constants + draw->constants_offset) >> 32) : 0;
+		if (!constants)
+			job[4] = 0;
+		job[6] = (uint32_t)entry->soup_address;
+		job[7] = (uint32_t)(entry->soup_address >> 32);
+		job[8] = draw->stride;
+		job[9] = (uint32_t)draw->position_offset;
+		job[10] = draw->nodes_offset >= 0 ? (uint32_t)draw->nodes_offset : 0xffffffffu;
+		job[11] = draw->weight_offset >= 0 ? (uint32_t)draw->weight_offset : 0xffffffffu;
+		job[12] = indices ? draw->index_size : 0;
+		job[13] = draw->primitive == XGPU_VULKAN_RT_LIST ? 0 : draw->primitive == XGPU_VULKAN_RT_STRIP ? 1 : 2;
+		job[14] = triangles;
+		job[15] = indices ? (uint32_t)((index0 & 3) / draw->index_size) : 0;
+		job[16] = (uint32_t)draw->index_add;
+		job[17] = draw->vertex_count;
+		job[18] = index;
+		job[19] = 0;
+		entry->job = (int)capture->job_count++;
+		capture->job_groups += (triangles + 63) / 64;
+		capture->job_triangles += triangles;
+		/* (refitted where it was built, did not jump far and has not been
+		refitted too often; else built again) */
+		entry->mode = entry->built && entry->updates < RT_REBUILD_UPDATES &&
+			dx * dx + dy * dy + dz * dz < RT_REFIT_DISTANCE * RT_REFIT_DISTANCE && !draw->volatile_source ? 2 : 1;
+		entry->generation[0] = draw->generation[0];
+		entry->generation[1] = draw->generation[1];
+		entry->pose = draw->pose;
+		memcpy(entry->origin, draw->origin, sizeof(entry->origin));
+		if (draw->constants)
+			memcpy(entry->rows, draw->constants[60], sizeof(entry->rows));
+		entry->skinned = 1;
+		entry->skinned_serial = capture->serial;
 	}
-	else
-	{
-		lowest = 0;
-		highest = draw->count - 1;
-	}
-	if (draw->occluder && capture->occluder_count == RT_CAPTURED_DRAWS)
-		return;
-	if ((uint64_t)(highest + 1) * draw->stride > draw->bytes || highest - lowest >= 65536)
-		return;
-	/* (a new stamp for the draw: the vertices it names skinned once each, as
-	they are first met, and only those: a draw names a few of a long run of
-	vertices more often than not) */
-	if (++capture->stamp == 0)
-	{
-		memset(capture->stamps, 0, 65536 * sizeof(uint32_t));
-		capture->stamp = 1;
-	}
-	first = capture->vertex_count;
-	vertices = 0;
-	to_vertices = capture->vertices + (size_t)first * 3;
-	to_indices = capture->indices + (size_t)capture->triangle_count * 3;
-#define RT_VERTEX(i) ((uint32_t)((draw->indices ? (int32_t)draw->indices[i] - draw->index_base : (int32_t)(i)) - \
-	(int32_t)lowest))
-	{
-		uint32_t count = draw->count, room = capture->index_room - capture->triangle_count, t;
-		uint32_t total = draw->primitive == XGPU_VULKAN_RT_LIST ? count / 3 : count >= 3 ? count - 2 : 0;
-
-		for (t = 0; t < total && triangles < room; t++)
-		{
-			uint32_t corner[3], corners;
-
-			if (draw->primitive == XGPU_VULKAN_RT_LIST)
-			{
-				corner[0] = RT_VERTEX(t * 3);
-				corner[1] = RT_VERTEX(t * 3 + 1);
-				corner[2] = RT_VERTEX(t * 3 + 2);
-			}
-			else if (draw->primitive == XGPU_VULKAN_RT_STRIP)
-			{
-				corner[0] = RT_VERTEX(t);
-				corner[1] = RT_VERTEX(t + 1);
-				corner[2] = RT_VERTEX(t + 2);
-			}
-			else
-			{
-				corner[0] = RT_VERTEX(0);
-				corner[1] = RT_VERTEX(t + 1);
-				corner[2] = RT_VERTEX(t + 2);
-			}
-			if (corner[0] == corner[1] || corner[1] == corner[2] || corner[0] == corner[2])
-				continue;
-			for (corners = 0; corners < 3; corners++)
-			{
-				uint32_t v = corner[corners];
-
-				if (capture->stamps[v] != capture->stamp)
-				{
-					const uint8_t *vertex = draw->vertices + (size_t)(lowest + v) * draw->stride;
-					float p[3], w = 1.0f, out[3];
-					unsigned n0 = 0, n1 = 0;
-					int axis;
-
-					if (first + vertices >= capture->vertex_room)
-						break;
-					/* skinned as the stock vertex program skins it: two nodes'
-					matrices (three rows each from c[60]), the first's weight,
-					the second's the rest */
-					p[0] = rt_read_float(vertex + draw->position_offset);
-					p[1] = rt_read_float(vertex + draw->position_offset + 4);
-					p[2] = rt_read_float(vertex + draw->position_offset + 8);
-					if (draw->nodes_offset >= 0)
-					{
-						n0 = vertex[draw->nodes_offset];
-						n1 = vertex[draw->nodes_offset + 1];
-					}
-					if (draw->weight_offset >= 0)
-					{
-						int16_t weight;
-
-						memcpy(&weight, vertex + draw->weight_offset, sizeof(weight));
-						w = (float)weight / 32767.0f;
-					}
-					if (n0 > 189)
-						n0 = 0;
-					if (n1 > 189)
-						n1 = 0;
-					for (axis = 0; axis < 3; axis++)
-					{
-						const float *a = draw->constants[60 + n0 + axis], *b = draw->constants[60 + n1 + axis];
-						float pa = a[0] * p[0] + a[1] * p[1] + a[2] * p[2] + a[3];
-						float pb = b[0] * p[0] + b[1] * p[1] + b[2] * p[2] + b[3];
-
-						out[axis] = w * pa + (1.0f - w) * pb;
-					}
-					if (!isfinite(out[0]) || !isfinite(out[1]) || !isfinite(out[2]))
-						out[0] = out[1] = out[2] = 0.0f;
-					if (draw->occluder)
-					{
-						for (axis = 0; axis < 3; axis++)
-						{
-							if (!vertices || out[axis] < bounds[axis])
-								bounds[axis] = out[axis];
-							if (!vertices || out[axis] > bounds[axis + 3])
-								bounds[axis + 3] = out[axis];
-						}
-					}
-					to_vertices[vertices * 3] = out[0];
-					to_vertices[vertices * 3 + 1] = out[1];
-					to_vertices[vertices * 3 + 2] = out[2];
-					capture->stamps[v] = capture->stamp;
-					capture->places[v] = first + vertices;
-					vertices++;
-				}
-				corner[corners] = capture->places[v];
-			}
-			if (corners < 3)
-			{
-				capture->full = 1;
-				rt.full_frames++;
-				break;
-			}
-			to_indices[triangles * 3] = corner[0];
-			to_indices[triangles * 3 + 1] = corner[1];
-			to_indices[triangles * 3 + 2] = corner[2];
-			triangles++;
-		}
-		if (t < total && !capture->full)
-		{
-			capture->full = 1;
-			rt.full_frames++;
-		}
-	}
-#undef RT_VERTEX
-	if (draw->occluder && triangles)
-	{
-		capture->occluders[capture->occluder_count].first = capture->triangle_count;
-		capture->occluders[capture->occluder_count].count = triangles;
-		memcpy(capture->occluders[capture->occluder_count].bounds, bounds, sizeof(bounds));
-		capture->occluder_count++;
-	}
-	capture->vertex_count += vertices;
+	capture->draws[capture->draw_count++] = index | (draw->occluder ? 0x80000000u : 0);
+	if (!draw->constants_buffer)
+		rt.pieces++;
 	capture->triangle_count += triangles;
 	rt.draws++;
 }
@@ -1094,126 +1561,18 @@ static VkDeviceAddress slot_scratch(struct rt_slot *slot, VkDeviceSize size)
 	return align_up(slot->scratch.address + offset, rt.scratch_alignment);
 }
 
-/* the occluders all within 1 world unit of the eye (the first-person
-weapon and hands, which CE never let cast shadows) taken out of the
-window's triangles */
-static void first_person_drop(struct rt_slot *slot, const float eye[3])
+/* the window's top-level structure: of the count instances objects_record
+wrote from the slot's first unused (identity: all are in the world) */
+static VkAccelerationStructureKHR scene_build(VkCommandBuffer commands, struct rt_slot *slot, uint32_t first,
+	uint32_t count)
 {
-	uint32_t *indices = rt.capture.indices;
-	uint32_t index, removed = 0;
-
-	(void)slot;
-
-	for (index = rt.capture.occluder_count; index-- > 0;)
-	{
-		const float *bounds = rt.capture.occluders[index].bounds;
-		uint32_t first = rt.capture.occluders[index].first, count = rt.capture.occluders[index].count;
-		float far = 0.0f;
-		int axis;
-
-		for (axis = 0; axis < 3; axis++)
-		{
-			float a = fabsf(bounds[axis] - eye[axis]), b = fabsf(bounds[axis + 3] - eye[axis]);
-
-			far += (a > b ? a : b) * (a > b ? a : b);
-		}
-		if (far > 1.0f)
-			continue;
-		memmove(indices + (size_t)first * 3, indices + (size_t)(first + count) * 3,
-			(size_t)(rt.capture.triangle_count - first - count) * 12);
-		rt.capture.triangle_count -= count;
-		removed += count;
-	}
-	(void)removed;
-}
-
-/* the objects' bottom-level structure (0: none) */
-static VkDeviceAddress objects_build(VkCommandBuffer commands, struct rt_slot *slot)
-{
-	VkAccelerationStructureGeometryKHR geometry;
-	VkAccelerationStructureBuildGeometryInfoKHR info;
-	VkAccelerationStructureBuildSizesInfoKHR sizes;
-	VkAccelerationStructureBuildRangeInfoKHR range;
-	const VkAccelerationStructureBuildRangeInfoKHR *ranges = &range;
-	VkDeviceAddress address = 0, scratch;
-	uint32_t count = rt.capture.triangle_count;
-
-	if (!count)
-		return 0;
-	memset(&geometry, 0, sizeof(geometry));
-	geometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
-	geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
-	geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
-	geometry.geometry.triangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
-	geometry.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
-	geometry.geometry.triangles.vertexData.deviceAddress = slot->geometry.address + rt.capture.vertex_offset;
-	geometry.geometry.triangles.vertexStride = 12;
-	geometry.geometry.triangles.maxVertex = rt.capture.vertex_count ? rt.capture.vertex_count - 1 : 0;
-	geometry.geometry.triangles.indexType = VK_INDEX_TYPE_UINT32;
-	geometry.geometry.triangles.indexData.deviceAddress = slot->geometry.address + rt.capture.index_offset;
-	memset(&info, 0, sizeof(info));
-	info.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
-	info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-	info.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR;
-	info.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
-	info.geometryCount = 1;
-	info.pGeometries = &geometry;
-	memset(&sizes, 0, sizeof(sizes));
-	sizes.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
-	vkGetAccelerationStructureBuildSizesKHR(rt.device.device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &info,
-		&count, &sizes);
-	info.dstAccelerationStructure = slot_structure(slot, VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR,
-		sizes.accelerationStructureSize, &address);
-	scratch = slot_scratch(slot, sizes.buildScratchSize);
-	if (!info.dstAccelerationStructure || !scratch)
-		return 0;
-	info.scratchData.deviceAddress = scratch;
-	memset(&range, 0, sizeof(range));
-	range.primitiveCount = count;
-	vkCmdBuildAccelerationStructuresKHR(commands, 1, &info, &ranges);
-	return address;
-}
-
-/* the window's top-level structure: the structure's and the objects'
-instances (identity: both are in world space) */
-static VkAccelerationStructureKHR scene_build(VkCommandBuffer commands, struct rt_slot *slot,
-	VkDeviceAddress objects)
-{
-	VkAccelerationStructureInstanceKHR *instances =
-		(VkAccelerationStructureInstanceKHR *)slot->instances.mapped + slot->instances_used;
 	VkAccelerationStructureGeometryKHR geometry;
 	VkAccelerationStructureBuildGeometryInfoKHR info;
 	VkAccelerationStructureBuildSizesInfoKHR sizes;
 	VkAccelerationStructureBuildRangeInfoKHR range;
 	const VkAccelerationStructureBuildRangeInfoKHR *ranges = &range;
 	VkDeviceAddress address, scratch;
-	uint32_t count = 0, first = slot->instances_used;
 
-	if (first + 2 > RT_INSTANCES)
-		return VK_NULL_HANDLE;
-	if (rt.static_structure)
-	{
-		memset(&instances[count], 0, sizeof(instances[count]));
-		instances[count].transform.matrix[0][0] = instances[count].transform.matrix[1][1] =
-			instances[count].transform.matrix[2][2] = 1.0f;
-		instances[count].mask = 0x01;
-		instances[count].instanceCustomIndex = 0;
-		instances[count].flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
-		instances[count].accelerationStructureReference = rt.static_address;
-		count++;
-	}
-	if (objects)
-	{
-		memset(&instances[count], 0, sizeof(instances[count]));
-		instances[count].transform.matrix[0][0] = instances[count].transform.matrix[1][1] =
-			instances[count].transform.matrix[2][2] = 1.0f;
-		instances[count].mask = 0x04;
-		instances[count].instanceCustomIndex = 1;
-		instances[count].flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
-		instances[count].accelerationStructureReference = objects;
-		count++;
-	}
-	slot->instances_used += count;
 	memset(&geometry, 0, sizeof(geometry));
 	geometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
 	geometry.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
@@ -1227,10 +1586,18 @@ static VkAccelerationStructureKHR scene_build(VkCommandBuffer commands, struct r
 	info.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
 	info.geometryCount = 1;
 	info.pGeometries = &geometry;
-	memset(&sizes, 0, sizeof(sizes));
-	sizes.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
-	vkGetAccelerationStructureBuildSizesKHR(rt.device.device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &info,
-		&count, &sizes);
+	/* (the sizes of the most instances a slot has, found once: the driver's
+	answer took a share of the render thread's frame) */
+	if (!rt.tlas_sizes.accelerationStructureSize)
+	{
+		uint32_t most = RT_INSTANCES;
+
+		memset(&rt.tlas_sizes, 0, sizeof(rt.tlas_sizes));
+		rt.tlas_sizes.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
+		vkGetAccelerationStructureBuildSizesKHR(rt.device.device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &info,
+			&most, &rt.tlas_sizes);
+	}
+	sizes = rt.tlas_sizes;
 	info.dstAccelerationStructure = slot_structure(slot, VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR,
 		sizes.accelerationStructureSize, &address);
 	scratch = slot_scratch(slot, sizes.buildScratchSize);
@@ -1292,11 +1659,43 @@ static void statistics_frame(void)
 	if (rt.statistics)
 		host_logf(HOST_LOG_INFO, "prism rt: 600 frames: its passes %.3f ms a frame on the GPU (most %.3f; %llu timed), "
 			"structure %u triangles, objects %.0f triangles a frame (most %llu) of %.1f draws, %.1f draws passed over, "
-			"%llu frames' capture full", rt.timed_frames ? rt.milliseconds / (double)rt.timed_frames : 0.0,
+			"%llu frames' capture full; objects: %.1f skinned a frame (%.0f triangles), %.1f built, %.1f refitted, "
+			"%.1f kept, %.2f deferred, %llu evicted, %llu without an entry, %.1f a frame replacement meshes' pieces; "
+			"%u entries, %.1f MB",
+			rt.timed_frames ? rt.milliseconds / (double)rt.timed_frames : 0.0,
 			rt.milliseconds_most, (unsigned long long)rt.timed_frames, rt.static_triangles,
 			(double)rt.triangles / 600.0, (unsigned long long)rt.object_triangles_most, (double)rt.draws / 600.0,
-			(double)rt.skipped / 600.0, (unsigned long long)rt.full_frames);
+			(double)rt.skipped / 600.0, (unsigned long long)rt.full_frames, (double)rt.jobs / 600.0,
+			(double)rt.skinned_triangles / 600.0, (double)rt.builds / 600.0, (double)rt.updates / 600.0,
+			(double)rt.reused / 600.0, (double)rt.deferred / 600.0, (unsigned long long)rt.evicted,
+			(unsigned long long)rt.stale, (double)rt.pieces / 600.0, rt.entry_count, (double)rt.pool_bytes / 1048576.0);
+	if (getenv("HALO_PRISM_RT_DEBUG"))
+	{
+		uint32_t index;
+
+		for (index = 0; index < RT_ENTRIES; index++)
+		{
+			const struct rt_entry *entry = &rt.entries[index];
+
+			const uint32_t *info = rt.slots[0].readback.mapped;
+
+			if (entry->used && info)
+				host_logf(HOST_LOG_INFO, "prism rt: entry %u info: %08x %08x %08x %08x %08x %08x most %u", index,
+					info[index * 8], info[index * 8 + 1], info[index * 8 + 2], info[index * 8 + 3], info[index * 8 + 4],
+					info[index * 8 + 5], info[index * 8 + 6]);
+			if (entry->used)
+				host_logf(HOST_LOG_INFO, "prism rt: entry %u: %u triangles, %llu bytes (structure %llu), key %016llx %016llx "
+					"%016llx %016llx %016llx %016llx %016llx %llu, built %d, updates %u, rows %u, frame %llu, chunk %u", index,
+					entry->triangles, (unsigned long long)entry->size, (unsigned long long)entry->structure_size,
+					(unsigned long long)entry->key[0], (unsigned long long)entry->key[1], (unsigned long long)entry->key[2],
+					(unsigned long long)entry->key[3], (unsigned long long)entry->key[4], (unsigned long long)entry->key[5],
+					(unsigned long long)entry->key[6], (unsigned long long)entry->key[7], entry->built, entry->updates,
+					entry->rows_known, (unsigned long long)entry->frame, entry->chunk);
+		}
+	}
 	rt.frames = rt.draws = rt.skipped = rt.triangles = rt.object_triangles_most = rt.full_frames = 0;
+	rt.jobs = rt.skinned_triangles = rt.builds = rt.updates = rt.reused = rt.evicted = rt.stale = rt.deferred = 0;
+	rt.pieces = 0;
 	rt.milliseconds = rt.milliseconds_most = 0.0;
 	rt.timed_frames = 0;
 }
@@ -1335,6 +1734,239 @@ static void compute_barrier(VkCommandBuffer commands)
 {
 	barrier_global(commands, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT,
 		VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+}
+
+/* the window's objects recorded (the scene's top level built after): the
+jobs' entries' info emptied, their triangles skinned, their structures
+built or refitted (one call), the instances written (the structure's first,
+where it has one, then each captured draw's whose entry has a structure:
+custom index its place in the table, the table its soup's address), the
+occluders near the eye masked out (on the GPU), the entries' info copied
+for the CPU (entry_rows_learn); the instances' count, the table's address */
+static uint32_t objects_record(VkCommandBuffer commands, struct rt_slot *slot, const float eye[3],
+	VkDeviceAddress *table_address)
+{
+	static VkAccelerationStructureBuildGeometryInfoKHR infos[RT_JOBS];
+	static VkAccelerationStructureGeometryKHR geometries[RT_JOBS];
+	static VkAccelerationStructureBuildRangeInfoKHR ranges[RT_JOBS];
+	static const VkAccelerationStructureBuildRangeInfoKHR *range_pointers[RT_JOBS];
+	struct rt_capture *capture = &rt.capture;
+	VkAccelerationStructureInstanceKHR *instances;
+	VkDeviceSize groups_offset, table_offset, map_offset;
+	uint32_t *groups, *map, first = slot->instances_used, count = 0, objects = 0, built = 0, job, draw;
+	uint64_t *table;
+	struct
+	{
+		VkDeviceAddress jobs, groups, info;
+		uint32_t count, pad;
+	} push;
+	struct
+	{
+		VkDeviceAddress instances, entries, info;
+		uint32_t count, pad;
+		float eye[4];
+	} mask;
+
+	*table_address = 0;
+	if (!capture->jobs || first + 1 > RT_INSTANCES)
+		return 0;
+	/* (a submission begun since the draws were captured: their ranges are
+	another's; skinned again next frame) */
+	if (xgpu_vulkan_serial() != capture->serial)
+	{
+		for (job = 0; job < capture->job_count; job++)
+		{
+			struct rt_entry *entry = &rt.entries[capture->jobs[job * RT_JOB_WORDS + 18]];
+
+			entry->skinned = 0;
+			entry->mode = 0;
+		}
+		capture->job_count = capture->job_groups = 0;
+	}
+	slot->geometry_used = capture_offsets(capture->jobs_offset, &groups_offset, &table_offset, &map_offset);
+	groups = (uint32_t *)((uint8_t *)slot->geometry.mapped + groups_offset);
+	table = (uint64_t *)((uint8_t *)slot->geometry.mapped + table_offset);
+	map = (uint32_t *)((uint8_t *)slot->geometry.mapped + map_offset);
+	/* the workgroups' table: each a job's and its place in it */
+	{
+		uint32_t at = 0, group;
+
+		for (job = 0; job < capture->job_count; job++)
+		{
+			uint32_t triangles = capture->jobs[job * RT_JOB_WORDS + 14];
+
+			for (group = 0; group < (triangles + 63) / 64; group++)
+			{
+				groups[at * 2] = job;
+				groups[at * 2 + 1] = group;
+				at++;
+			}
+		}
+	}
+	/* the builds and refits: each with its scratch (none left: it waits for
+	the next frame, its last structure traced meanwhile) */
+	for (job = 0; job < capture->job_count; job++)
+	{
+		uint32_t index = capture->jobs[job * RT_JOB_WORDS + 18];
+		struct rt_entry *entry = &rt.entries[index];
+		VkDeviceAddress scratch;
+
+		if (entry->mode == 0)
+			continue;
+		scratch = slot_scratch(slot, entry->mode == 1 ? entry->build_scratch : entry->update_scratch);
+		if (!scratch)
+		{
+			entry->skinned = 0;
+			entry->mode = 0;
+			rt.deferred++;
+			continue;
+		}
+		memset(&geometries[built], 0, sizeof(geometries[built]));
+		geometries[built].sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+		geometries[built].geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+		geometries[built].flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+		geometries[built].geometry.triangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
+		geometries[built].geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+		geometries[built].geometry.triangles.vertexData.deviceAddress = entry->soup_address;
+		geometries[built].geometry.triangles.vertexStride = 12;
+		geometries[built].geometry.triangles.maxVertex = entry->triangles * 3 - 1;
+		geometries[built].geometry.triangles.indexType = VK_INDEX_TYPE_NONE_KHR;
+		memset(&infos[built], 0, sizeof(infos[built]));
+		infos[built].sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+		infos[built].type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+		infos[built].flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
+			VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+		infos[built].mode = entry->mode == 1 ? VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR :
+			VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR;
+		infos[built].srcAccelerationStructure = entry->mode == 2 ? entry->structure : VK_NULL_HANDLE;
+		infos[built].dstAccelerationStructure = entry->structure;
+		infos[built].geometryCount = 1;
+		infos[built].pGeometries = &geometries[built];
+		infos[built].scratchData.deviceAddress = scratch;
+		memset(&ranges[built], 0, sizeof(ranges[built]));
+		ranges[built].primitiveCount = entry->triangles;
+		range_pointers[built] = &ranges[built];
+		if (entry->mode == 1)
+		{
+			entry->built = 1;
+			entry->updates = 0;
+			rt.builds++;
+		}
+		else
+		{
+			entry->updates++;
+			rt.updates++;
+		}
+		built++;
+	}
+	/* the instances: the structure's, then the objects' with a structure */
+	instances = (VkAccelerationStructureInstanceKHR *)slot->instances.mapped + first;
+	if (rt.static_structure)
+	{
+		memset(&instances[count], 0, sizeof(instances[count]));
+		instances[count].transform.matrix[0][0] = instances[count].transform.matrix[1][1] =
+			instances[count].transform.matrix[2][2] = 1.0f;
+		instances[count].mask = 0x01;
+		instances[count].instanceCustomIndex = 0;
+		instances[count].flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
+		instances[count].accelerationStructureReference = rt.static_address;
+		count++;
+	}
+	for (draw = 0; draw < capture->draw_count && first + count < RT_INSTANCES; draw++)
+	{
+		uint32_t index = capture->draws[draw] & 0x7fffffffu;
+		struct rt_entry *entry = &rt.entries[index];
+		VkAccelerationStructureInstanceKHR *instance = &instances[count];
+
+		if (!entry->used || !entry->built)
+			continue;
+		if (entry->mode == 0 && entry->job < 0)
+			rt.reused++;
+		memset(instance, 0, sizeof(*instance));
+		instance->transform.matrix[0][0] = instance->transform.matrix[1][1] = instance->transform.matrix[2][2] = 1.0f;
+		instance->mask = 0x04;
+		instance->instanceCustomIndex = objects + 1;
+		instance->flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR |
+			VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_KHR;
+		instance->accelerationStructureReference = entry->structure_address;
+		table[objects] = entry->soup_address;
+		map[objects] = capture->draws[draw];
+		objects++;
+		count++;
+	}
+	slot->instances_used += count;
+	*table_address = slot->geometry.address + table_offset;
+	/* (the entries' info zeroed once) */
+	if (!rt.info_zeroed)
+	{
+		vkCmdFillBuffer(commands, rt.info.buffer, 0, VK_WHOLE_SIZE, 0);
+		rt.info_zeroed = 1;
+	}
+	/* the last frames' traces and builds done with what this one writes; the
+	early commands' skinnings (the mesh store's) and copies seen */
+	barrier_global(commands, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR |
+		VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT |
+		VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+		VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT |
+		VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR | VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR);
+	if (capture->job_count)
+	{
+		push.jobs = slot->geometry.address + capture->jobs_offset;
+		push.groups = slot->geometry.address + groups_offset;
+		push.info = rt.info.address;
+		push.count = capture->job_count;
+		push.pad = 0;
+		vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.reset);
+		vkCmdPushConstants(commands, rt.reset_pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
+		vkCmdDispatch(commands, (capture->job_count + 63) / 64, 1, 1);
+		compute_barrier(commands);
+		vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.skin);
+		vkCmdPushConstants(commands, rt.skin_pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
+		vkCmdDispatch(commands, capture->job_groups, 1, 1);
+		barrier_global(commands, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT,
+			VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+			VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_TRANSFER_READ_BIT);
+		rt.jobs += capture->job_count;
+		rt.skinned_triangles += capture->job_triangles;
+	}
+	if (built)
+	{
+		vkCmdBuildAccelerationStructuresKHR(commands, built, infos, range_pointers);
+		barrier_global(commands, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+			VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR |
+			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR);
+	}
+	if (objects)
+	{
+		mask.instances = slot->instances.address + (VkDeviceSize)(first + (rt.static_structure ? 1 : 0)) *
+			sizeof(VkAccelerationStructureInstanceKHR);
+		mask.entries = slot->geometry.address + map_offset;
+		mask.info = rt.info.address;
+		mask.count = objects;
+		mask.pad = 0;
+		mask.eye[0] = eye[0];
+		mask.eye[1] = eye[1];
+		mask.eye[2] = eye[2];
+		mask.eye[3] = 0.0f;
+		vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.mask);
+		vkCmdPushConstants(commands, rt.mask_pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(mask), &mask);
+		vkCmdDispatch(commands, (objects + 63) / 64, 1, 1);
+		barrier_global(commands, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT,
+			VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, VK_ACCESS_SHADER_READ_BIT);
+	}
+	/* (the info for the CPU: the nodes the entries' vertices name) */
+	if (capture->job_count && !slot->read_back)
+	{
+		VkBufferCopy copy;
+
+		memset(&copy, 0, sizeof(copy));
+		copy.size = rt.info.size;
+		vkCmdCopyBuffer(commands, rt.info.buffer, slot->readback.buffer, 1, &copy);
+		barrier_global(commands, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
+			VK_PIPELINE_STAGE_HOST_BIT, VK_ACCESS_HOST_READ_BIT);
+		slot->read_back = 1;
+	}
+	return count;
 }
 
 /* the path tracer's images made (or kept) at the window's size; 0 if they
@@ -1500,7 +2132,6 @@ struct xgpu_vulkan_image *xgpu_vulkan_rt_window_end(struct xgpu_vulkan_image *in
 	VkWriteDescriptorSetAccelerationStructureKHR scene_write;
 	VkAccelerationStructureKHR scene;
 	VkCommandBuffer commands;
-	VkDeviceAddress objects;
 	struct xgpu_vulkan_image *history, *state;
 	uint32_t scale, out_width, out_height, quality, probes_updated = 0;
 	int gi, pathtraced;
@@ -1644,10 +2275,14 @@ structure's and the objects' visibility of the sun as they are) */
 		block.sun_radiance[2] = rt.frame.sun_color[2] * rt.frame.sun_color[3];
 		block.addresses[0] = (uint32_t)rt.static_vertices.address;
 		block.addresses[1] = (uint32_t)(rt.static_vertices.address >> 32);
-		block.addresses[2] = (uint32_t)(slot->geometry.address + rt.capture.vertex_offset);
-		block.addresses[3] = (uint32_t)((slot->geometry.address + rt.capture.vertex_offset) >> 32);
-		block.addresses2[0] = (uint32_t)(slot->geometry.address + rt.capture.index_offset);
-		block.addresses2[1] = (uint32_t)((slot->geometry.address + rt.capture.index_offset) >> 32);
+		/* (the objects' instances' table: each one's triangle soup) */
+		{
+			VkDeviceSize groups, table, map;
+
+			(void)capture_offsets(rt.capture.jobs_offset, &groups, &table, &map);
+			block.addresses[2] = (uint32_t)(slot->geometry.address + table);
+			block.addresses[3] = (uint32_t)((slot->geometry.address + table) >> 32);
+		}
 	}
 	if (gi && !rt.logged_gi)
 	{
@@ -1700,25 +2335,16 @@ structure's and the objects' visibility of the sun as they are) */
 			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
 		rt.probes_zeroed = 1;
 	}
-	/* the vertices written by the CPU, read by the builds */
-	barrier_global(commands, VK_PIPELINE_STAGE_HOST_BIT, VK_ACCESS_HOST_WRITE_BIT,
-		VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, VK_ACCESS_SHADER_READ_BIT);
-	first_person_drop(slot, pass->camera[0]);
-	/* (the captured vertices and triangles into the slot's geometry, written
-	once, in order) */
-	memcpy((uint8_t *)slot->geometry.mapped + rt.capture.vertex_offset, rt.capture.vertices,
-		(size_t)rt.capture.vertex_count * 12);
-	memcpy((uint8_t *)slot->geometry.mapped + rt.capture.index_offset, rt.capture.indices,
-		(size_t)rt.capture.triangle_count * 12);
-	objects = objects_build(commands, slot);
-	if (objects)
-		barrier_global(commands, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-			VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-			VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR);
-	slot->geometry_used = rt.capture.index_offset + (VkDeviceSize)rt.capture.triangle_count * 12;
-	scene = scene_build(commands, slot, objects);
-	if (!scene)
-		return NULL;
+	/* the objects' structures, then the scene's */
+	{
+		uint32_t first = slot->instances_used, count;
+		VkDeviceAddress table;
+
+		count = objects_record(commands, slot, pass->camera[0], &table);
+		scene = scene_build(commands, slot, first, count);
+		if (!scene)
+			return NULL;
+	}
 	/* the scene, and the pre-pass's inputs (its pass's end barrier made
 	them visible), read by the trace */
 	barrier_global(commands, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,

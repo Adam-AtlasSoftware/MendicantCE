@@ -34,6 +34,17 @@ int prism_world_geometry_draw(
 	struct vertex_buffer const *vertex_buffer0,
 	struct vertex_buffer const *vertex_buffer1);
 
+/* display.prism_rt (prism_rt.c): the remodel's triangles of a BSP
+material (all its parts'), in the world, nine floats each, for the ray
+tracer's structure: its near level's (far_level 0) or its far level's,
+written to `to` (at most `most`; NULL: counted). -1 where the material has
+no remodel (or none is loaded) */
+long prism_world_geometry_triangles(
+	short lightmap_index,
+	short material_index,
+	int far_level,
+	float *to,
+	long most);
 /* the map's tags are about to go: everything made of them freed */
 void prism_world_geometry_map_unloaded(void);
 

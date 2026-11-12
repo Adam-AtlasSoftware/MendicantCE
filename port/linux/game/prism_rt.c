@@ -42,6 +42,7 @@ the settings. Nothing crosses the network.
 #include "shaders/shader_definitions.h"
 #include "structures/structure_bsp_definitions.h"
 #include "world_scene.h"
+#include "prism_world_geometry.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -49,6 +50,7 @@ the settings. Nothing crosses the network.
 
 /* port/linux/src */
 char const *config_string(char const *name);
+int config_boolean(char const *name);
 long config_integer(char const *name);
 unsigned long config_changes(void);
 void platform_log(const char *format, ...);
@@ -84,6 +86,14 @@ enum
 	their alpha test (their flags' bit 0) */
 	PRISM_RT_SHADER_ENVIRONMENT = 3,
 	PRISM_RT_ENVIRONMENT_ALPHA_TESTED = 1,
+	/* RT_FRAME's flags (xgpu_stream.h's XGPU_RT_FLAG_*) */
+	PRISM_RT_FLAG_NO_CACHE = 1,
+	PRISM_RT_FLAG_STOCK_MODELS = 2,
+	/* display.prism_rt_world: the level's shape traced (prism_world_geometry.c's
+	_world_proxy_*: the map's, the remodel's far level, its near level) */
+	PRISM_RT_WORLD_STOCK = 0,
+	PRISM_RT_WORLD_FAR,
+	PRISM_RT_WORLD_REMODEL,
 };
 
 /* the share of a sunlit lightmap's light the moving casters take away (the
@@ -105,7 +115,7 @@ struct prism_rt_frame
 	unsigned int view, light_count, frame, ticks;
 	float fraction;
 	unsigned int generation;
-	unsigned int pad[2];
+	unsigned int flags, pad;
 	float settings[16];
 	float sun[4];
 	float sun_color[4];
@@ -120,6 +130,12 @@ static struct
 {
 	unsigned long settings_read;
 	int mode, quality, resolution, denoiser, reflections, objects, rate, mood, view;
+	/* display.prism_rt_world (PRISM_RT_WORLD_*, auto the far level),
+	display.prism_rt_cache */
+	int world, cache;
+	/* the level's shape the structure's triangles are of: PRISM_RT_WORLD_*
+	where the remodel was drawn as they were copied */
+	int copied_world;
 	/* the structure's triangles: the BSP they are of (-1 none), their
 	generation, the copy (9 floats each), how many, how many sent */
 	short bsp_index;
@@ -135,7 +151,7 @@ static struct
 	real sun_power;
 	unsigned long frame;
 	int logged;
-} prism_rt = { 0, 0, 0, 0, 0, 0, 0, 0, 100, 0, -1, 0, NULL, 0, 0, 0, NONE };
+} prism_rt = { 0, 0, 0, 0, 0, 0, 0, 0, 100, 0, 0, 1, 0, -1, 0, NULL, 0, 0, 0, NONE };
 
 /* ---------- private code */
 
@@ -162,6 +178,7 @@ static void settings_read(void)
 	static char const *const rates[] = { "full", "half", NULL };
 	static char const *const views[] = { "off", "visibility", "ao", "gi", "reflections", "albedo", "normals",
 		"probes", "heat", NULL };
+	static char const *const worlds[] = { "stock", "far", "remodel", "auto", NULL };
 	long mood;
 
 	if (prism_rt.settings_read == config_changes() + 1)
@@ -175,6 +192,10 @@ static void settings_read(void)
 	prism_rt.objects = word_index(config_string("display.prism_rt_objects"), objects, 0);
 	prism_rt.rate = word_index(config_string("display.prism_rt_rate"), rates, 0);
 	prism_rt.view = word_index(config_string("debug.prism_rt_view"), views, 0);
+	prism_rt.world = word_index(config_string("display.prism_rt_world"), worlds, 3);
+	if (prism_rt.world == 3)
+		prism_rt.world = PRISM_RT_WORLD_FAR;
+	prism_rt.cache = config_boolean("display.prism_rt_cache") != 0;
 	mood = config_integer("display.prism_rt_mood");
 	prism_rt.mood = mood < 0 ? 0 : mood > 100 ? 100 : (int)mood;
 }
@@ -205,8 +226,10 @@ static int material_opaque(struct structure_material const *material)
 	return !(*(unsigned short const *)(shader + 1) & PRISM_RT_ENVIRONMENT_ALPHA_TESTED);
 }
 
-/* the BSP's opaque render triangles, copied in world space (FALSE: none) */
-static int static_copy(struct structure_bsp *bsp)
+/* the BSP's opaque render triangles, copied in world space (FALSE: none):
+the map's, or the remodel's level (world, PRISM_RT_WORLD_*) of each
+material it remodels */
+static int static_copy(struct structure_bsp *bsp, int world)
 {
 	long lightmap_index, total = 0, written = 0, pass;
 
@@ -233,6 +256,23 @@ static int static_copy(struct structure_bsp *bsp)
 					(unsigned long)material->vertices.count * (unsigned long)vertex_size || !material_opaque(material))
 				{
 					continue;
+				}
+				/* (the remodel's level where it is drawn and display.prism_rt_world
+				traces it: prism_world_geometry.c's triangles of the material) */
+				if (world != PRISM_RT_WORLD_STOCK)
+				{
+					long remodelled = prism_world_geometry_triangles((short)lightmap_index, (short)material_index,
+						world == PRISM_RT_WORLD_FAR, NULL, 0);
+
+					if (remodelled >= 0)
+					{
+						if (!pass)
+							total += remodelled;
+						else
+							written += prism_world_geometry_triangles((short)lightmap_index, (short)material_index,
+								world == PRISM_RT_WORLD_FAR, prism_rt.positions + written * 9, total - written);
+						continue;
+					}
 				}
 				if (!pass)
 				{
@@ -275,26 +315,38 @@ static int static_copy(struct structure_bsp *bsp)
 	return written > 0;
 }
 
-/* the BSP drawn: its triangles copied once, then sent a slice a frame */
+/* the shape of the level traced now: display.prism_rt_world's where the
+remodel is drawn for the BSP, else the map's */
+static int world_level(void)
+{
+	return prism_world_geometry_drawn() ? prism_rt.world : PRISM_RT_WORLD_STOCK;
+}
+
+/* the BSP drawn: its triangles copied once (again when the shape traced
+changes: the remodel loaded, display.prism_rt_world set), then sent a
+slice a frame */
 static void static_frame(void)
 {
 	short bsp_index = global_structure_bsp_index_get();
+	int world = world_level();
 	struct structure_bsp *bsp;
 
-	if (bsp_index != prism_rt.bsp_index)
+	if (bsp_index != prism_rt.bsp_index || world != prism_rt.copied_world)
 	{
 		static_release();
 		prism_rt.bsp_index = bsp_index;
+		prism_rt.copied_world = world;
 		prism_rt.generation++;
 		bsp = bsp_index != NONE ? global_structure_bsp_get() : NULL;
-		if (!bsp || !static_copy(bsp))
+		if (!bsp || !static_copy(bsp, world))
 		{
 			halo_prism_rt_static(PRISM_RT_STATIC_RELEASE, prism_rt.generation, 0, 0, 0, NULL);
 			prism_rt.ended = 1;
 			return;
 		}
-		platform_log("prism rt: bsp %d: %ld opaque triangles for the acceleration structure", (int)bsp_index,
-			prism_rt.count);
+		platform_log("prism rt: bsp %d: %ld opaque triangles for the acceleration structure (%s)", (int)bsp_index,
+			prism_rt.count, world == PRISM_RT_WORLD_FAR ? "the remodel's far level" :
+			world == PRISM_RT_WORLD_REMODEL ? "the remodel" : "the map's");
 		halo_prism_rt_static(PRISM_RT_STATIC_BEGIN, prism_rt.generation, 0, 0, (unsigned long)prism_rt.count, NULL);
 	}
 	if (prism_rt.ended)
@@ -342,6 +394,16 @@ int prism_rt_mode(void)
 	if (prism_rt.mode == PRISM_RT_OFF || !halo_prism_rt_available())
 		return PRISM_RT_OFF;
 	return prism_rt.mode;
+}
+
+/* the shape of the level the pre-pass draws for the rays to start from
+(prism_world_geometry.c's _world_proxy_*): the one traced, the map's where
+nothing is */
+short prism_rt_world_proxy(void)
+{
+	if (prism_rt_mode() == PRISM_RT_OFF)
+		return PRISM_RT_WORLD_STOCK;
+	return (short)prism_rt.world;
 }
 
 /* the pre-pass's pass found at every pixel (world AO's scale 1) */
@@ -403,6 +465,7 @@ void prism_rt_frame_begin(void)
 	frame.ticks = (unsigned int)game_time_get();
 	frame.fraction = render_interpolation_fraction();
 	frame.generation = (unsigned int)prism_rt.generation;
+	frame.flags = (prism_rt.cache ? 0 : PRISM_RT_FLAG_NO_CACHE) | (prism_rt.objects == 2 ? PRISM_RT_FLAG_STOCK_MODELS : 0);
 	frame.settings[0] = PRISM_RT_SUN_STRENGTH;
 	frame.settings[1] = PRISM_RT_MODEL_STRENGTH;
 	/* (the sky's outdoor ambient radiosity: its colour at 0x48 and power at

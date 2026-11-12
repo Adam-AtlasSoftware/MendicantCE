@@ -136,6 +136,9 @@ byte.
 
 /* the game's (port) */
 char *tag_get_name(long tag_index);
+/* prism_rt.c's: the shape of the level display.prism_rt traces (_world_proxy_*:
+stock where it traces none, or the map's) */
+short prism_rt_world_proxy(void);
 /* the platform's (port/linux/src) */
 char const *config_string(char const *name);
 int config_boolean(char const *name);
@@ -401,6 +404,17 @@ static void settings_read(
 	world_geometry.enabled = enabled;
 	world_geometry.shadow_proxy = proxy_setting("display.prism_world_geometry_shadows", _world_proxy_far);
 	world_geometry.occlusion_proxy = proxy_setting("display.prism_world_geometry_occlusion", _world_proxy_stock);
+	/* (port: display.prism_rt traces the remodel's level, prism_rt.c's
+	world_level: the pre-pass its rays start from draws the same, so that
+	they leave the surface they trace, not one inside or above it) */
+	{
+		short traced = prism_rt_world_proxy();
+
+		if (traced > world_geometry.occlusion_proxy)
+		{
+			world_geometry.occlusion_proxy = traced;
+		}
+	}
 	world_geometry.facing = config_boolean("display.prism_world_geometry_facing") != 0;
 	world_geometry.batch = config_boolean("display.prism_world_geometry_batch") != 0;
 	detail = config_integer("display.prism_world_geometry_detail");
@@ -1670,6 +1684,87 @@ int prism_world_geometry_draw(
 	}
 
 	return TRUE;
+}
+
+long prism_world_geometry_triangles(
+	short lightmap_index,
+	short material_index,
+	int far_level,
+	float *to,
+	long most)
+{
+	long entry, part, written = 0;
+	struct world_material *first_part;
+
+	if (!world_geometry.materials || !world_geometry.lookup || lightmap_index < 0 ||
+		lightmap_index >= world_geometry.lightmap_count)
+	{
+		return -1;
+	}
+	entry = world_geometry.lightmap_first[lightmap_index] + material_index;
+	if (material_index < 0 || entry >= world_geometry.lightmap_first[lightmap_index + 1] ||
+		world_geometry.lookup[entry] == NONE)
+	{
+		return -1;
+	}
+	first_part = &world_geometry.materials[world_geometry.lookup[entry]];
+	for (part = 0; part < first_part->part_count; part++)
+	{
+		struct world_material const *made = first_part + part;
+		long vertex_size = rasterizer_geometry_get_vertex_size(made->buffers[0].type);
+		byte const *vertices = (byte const *)made->buffers[0].base_address;
+		word const *indices = (word const *)made->index_resource.data;
+		long surface;
+
+		if (!vertices || !indices || vertex_size < 12)
+		{
+			continue;
+		}
+		for (surface = 0; surface < made->surface_count; surface++)
+		{
+			unsigned long first, count, triangle;
+
+			if (far_level && made->far_triangles)
+			{
+				first = made->far_triangles[surface * 2];
+				count = made->far_triangles[surface * 2 + 1];
+			}
+			else
+			{
+				first = made->surface_first_triangle[surface];
+				count = made->surface_first_triangle[surface + 1] - first;
+			}
+			if (first > (unsigned long)made->triangle_count || count > (unsigned long)made->triangle_count - first)
+			{
+				continue;
+			}
+			for (triangle = first; triangle < first + count; triangle++)
+			{
+				int corner;
+
+				if (to && written >= most)
+				{
+					return written;
+				}
+				if (to)
+				{
+					for (corner = 0; corner < 3; corner++)
+					{
+						unsigned long vertex = indices[triangle * 3 + corner];
+
+						if (vertex >= (unsigned long)made->buffers[0].count)
+						{
+							vertex = 0;
+						}
+						memcpy(to + written * 9 + corner * 3, vertices + vertex * vertex_size, 3 * sizeof(float));
+					}
+				}
+				written++;
+			}
+		}
+	}
+
+	return written;
 }
 
 int prism_world_geometry_drawn(

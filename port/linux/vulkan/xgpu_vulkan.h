@@ -100,6 +100,12 @@ struct xgpu_vulkan_options
 	struct xgpu_vulkan_image *(*rotate)(struct xgpu_vulkan_image *image, int quarter_turns);
 	/* the pipeline cache's file (NULL: none) */
 	const char *cache_path;
+	/* display.vulkan_device: the graphics card drawn with ("auto" or empty
+	the best: a discrete card, else integrated, the first found of a kind;
+	a number under 16, the loader's index of it; 0x and four hex digits, its PCI
+	device id; any other text, a part of its name, in any case), where the
+	desktop chooses (not VR's runtime); one not found is auto's, logged */
+	const char *device;
 	/* the validation layers (VK_LAYER_KHRONOS_validation) and their
 	messages logged */
 	int validation;

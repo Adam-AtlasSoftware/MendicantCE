@@ -1493,6 +1493,10 @@ is on (battery_saver.c, frame_pacing.h's frame_pacing_divisor at the host's
 display's rate): asked again, either changed; nonzero on success */
 int host_vulkan_window_open(unsigned int window, unsigned int debug, const char *shader_folder,
 	const char *texture_folder, int interval, int battery_saver);
+/* (host_vulkan.c's) display.vulkan_device, the graphics card the window is
+drawn with, before it opens: "auto", the loader's index, 0x and a PCI
+device id, or a part of its name */
+int host_vulkan_device_choose(const char *device);
 /* (host_vulkan.c's) debug.gpu_stats, debug.gpu_validation (or debug.gl_debug) */
 #define HOST_VULKAN_DEBUG_STATISTICS 1
 #define HOST_VULKAN_DEBUG_VALIDATION 2
@@ -1725,6 +1729,7 @@ BOOL platform_video_initialize(unsigned long width, unsigned long height)
 	opens paced by the display, and the Vulkan host takes them as it opens) */
 	platform_frame_rate_apply();
 #else
+	host_vulkan_device_choose(config_string("display.vulkan_device"));
 	if (!host_vulkan_window_open((unsigned int)(uintptr_t)platform_window,
 		(config_boolean("debug.gpu_stats") ? HOST_VULKAN_DEBUG_STATISTICS : 0) |
 		(config_boolean("debug.gpu_validation") || config_boolean("debug.gl_debug") ? HOST_VULKAN_DEBUG_VALIDATION : 0) |

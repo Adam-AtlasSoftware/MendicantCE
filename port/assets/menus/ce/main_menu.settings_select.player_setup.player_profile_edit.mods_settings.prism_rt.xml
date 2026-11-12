@@ -17,6 +17,9 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/op_prism_rt_resolution" x="28" y="142" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/op_prism_rt_denoiser" x="28" y="163" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/op_prism_rt_mood" x="28" y="184" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/op_prism_rt_world" x="28" y="205" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/op_prism_rt_objects" x="28" y="226" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/op_prism_rt_cache" x="28" y="247" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/button_bar" y="414"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/button_bar" type="column_list" width="640" height="28" flags="pass_unhandled_to_focused_child left_right_tabs_items">
@@ -89,6 +92,33 @@
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/prism_rt_mood_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="CE|SOME|FULL" setting="display.prism_rt_mood" values="0|50|100" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
 		<on event="created" run="port setting load"/>
 	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/op_prism_rt_world" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/prism_rt_world_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/prism_rt_world_spinner" x="188"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/prism_rt_world_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/labels" string_index="6" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/prism_rt_world_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="AUTO|REMODEL|FAR|GAME'S" setting="display.prism_rt_world" values="auto|remodel|far|stock" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+		<on event="created" run="port setting load"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/op_prism_rt_objects" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/prism_rt_objects_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/prism_rt_objects_spinner" x="188"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/prism_rt_objects_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/labels" string_index="7" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/prism_rt_objects_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="AS DRAWN|GAME'S" setting="display.prism_rt_objects" values="auto|low_lod" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+		<on event="created" run="port setting load"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/op_prism_rt_cache" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/prism_rt_cache_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/prism_rt_cache_spinner" x="188"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/prism_rt_cache_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/labels" string_index="8" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/prism_rt_cache_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="ON|OFF" setting="display.prism_rt_cache" values="true|false" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+		<on event="created" run="port setting load"/>
+	</widget>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/labels">
 		<string text="RAY TRACING"/>
 		<string text="RAY TRACING"/>
@@ -96,6 +126,9 @@
 		<string text="RAY RESOLUTION"/>
 		<string text="DENOISER"/>
 		<string text="LIGHT FREEDOM"/>
+		<string text="TRACED LEVEL"/>
+		<string text="TRACED MODELS"/>
+		<string text="KEEP SHAPES"/>
 	</strings>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/help_strings">
 		<string text=""/>
@@ -105,5 +138,8 @@
 		<string text="Half traces a ray for each block of four pixels, cheaper on the graphics card; Full traces each pixel. Auto: full, but at Low quality."/>
 		<string text="How the rays are smoothed: Full by their neighbours and the frames before, Temporal by the frames before alone, Off as they are."/>
 		<string text="How far the bounced light may move a character's light from the game's own. CE keeps it; Full lets it go up to a quarter brighter or darker."/>
+		<string text="The level's shape the rays meet. Auto: the remodel's far level where it is drawn. Remodel: all of it, more memory. Game's: the map's own."/>
+		<string text="As Drawn: the replacement models' shapes where they are drawn. Game's: the game's own models, cheaper."/>
+		<string text="Keeps each object's traced shape from frame to frame, refitting only what moved: much less work. Off redoes them all each frame."/>
 	</strings>
 </menus>

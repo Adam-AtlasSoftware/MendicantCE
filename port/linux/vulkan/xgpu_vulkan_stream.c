@@ -233,12 +233,10 @@ static struct
 	struct stream_target **targets;
 	uint32_t target_count;
 	struct xgpu_vulkan_buffer *segments[MIRROR_SEGMENT_MAXIMUM];
-	/* (display.prism_rt's capture: each mirror segment's bytes in the host's
-	cached memory, made the first time a traced frame reads the segment and
-	written with it from then on; the segment's own memory is write-combined,
-	which the CPU reads a few hundred MB a second at most: read from it, a
-	frame's objects took the render thread about 30 ms) */
-	uint8_t *segment_copies[MIRROR_SEGMENT_MAXIMUM];
+	/* (display.prism_rt's capture: each mirror segment's writes counted, so
+	that an object's acceleration structure, kept from frame to frame, is
+	made again when its vertices or indices are written: xgpu_vulkan_rt.c) */
+	uint32_t segment_writes[MIRROR_SEGMENT_MAXIMUM];
 	struct program_entry *programs[PROGRAM_BUCKETS], *lightings[PROGRAM_BUCKETS];
 	struct stream_pipeline pipelines[XGPU_STREAM_PIPELINES];
 
@@ -375,6 +373,9 @@ static struct
 {
 	int active, failed, twins;
 	uint32_t width, height, twins_made;
+	/* (display.prism_rt: the windows' pre-passes counted, a mesh's pieces
+	captured once in each) */
+	uint32_t window;
 	struct xgpu_vulkan_image *inputs, *depth, *pixels;
 	/* the previous pass's occlusion (the history the next reprojects:
 	the two in turn), and the cascades' linear sampler */
@@ -1924,32 +1925,55 @@ static void stream_mirror_write(void *context, const struct xgpu_stream_mirror_w
 		return;
 	xgpu_vulkan_buffer_write(segment_buffer((int32_t)record->segment), record->offset, host_pointer(record->data),
 		record->size, record->unused != 0);
-	if (record->segment < MIRROR_SEGMENT_MAXIMUM && stream.segment_copies[record->segment] && host_pointer(record->data))
-		memcpy(stream.segment_copies[record->segment] + record->offset, host_pointer(record->data), record->size);
+	if (record->segment < MIRROR_SEGMENT_MAXIMUM)
+		stream.segment_writes[record->segment]++;
 }
 
-/* a mirror segment's bytes as the CPU reads them quickly (display.prism_rt's
-capture): its copy, made now from the segment's memory if it has none */
-static const uint8_t *segment_copy(const struct xgpu_vulkan_buffer *buffer)
+/* a hash of a sample of bytes the host has (display.prism_rt's capture: the
+identity of a draw's vertices or indices that are not in the mirror, which
+the stream copies each frame to another place, and which are a model's
+own, as a rule, and so the same from frame to frame):
+their first and last 64 and 256 words between */
+static uint32_t sample_hash(const void *data, uint32_t bytes)
+{
+	const uint8_t *from = data;
+	uint32_t hash = 2166136261u ^ bytes, word, at, count, index;
+
+	if (!from || !bytes)
+		return hash;
+	count = bytes / 4;
+	for (index = 0; index < 16 && index < count; index++)
+	{
+		memcpy(&word, from + index * 4, 4);
+		hash = (hash ^ word) * 16777619u;
+		memcpy(&word, from + (count - 1 - index) * 4, 4);
+		hash = (hash ^ word) * 16777619u;
+	}
+	for (index = 0; count > 32 && index < 256; index++)
+	{
+		at = 16 + (uint32_t)((uint64_t)(count - 32) * index / 256);
+		memcpy(&word, from + at * 4, 4);
+		hash = (hash ^ word) * 16777619u;
+	}
+	return hash;
+}
+
+/* a mirror segment's writes so far (display.prism_rt's capture), and its
+number (-1: not a segment) */
+static int32_t segment_number(const struct xgpu_vulkan_buffer *buffer, uint32_t *writes)
 {
 	int32_t segment;
 
+	*writes = 0;
+	if (!buffer)
+		return -1;
 	for (segment = 0; segment < MIRROR_SEGMENT_MAXIMUM; segment++)
 		if (stream.segments[segment] == buffer)
-			break;
-	if (segment == MIRROR_SEGMENT_MAXIMUM || !buffer)
-		return NULL;
-	if (!stream.segment_copies[segment])
-	{
-		const void *contents = xgpu_vulkan_buffer_contents(stream.segments[segment]);
-		uint8_t *copy;
-
-		if (!contents || !(copy = malloc(MIRROR_SEGMENT_SIZE)))
-			return NULL;
-		memcpy(copy, contents, MIRROR_SEGMENT_SIZE);
-		stream.segment_copies[segment] = copy;
-	}
-	return stream.segment_copies[segment];
+		{
+			*writes = stream.segment_writes[segment];
+			return segment;
+		}
+	return -1;
 }
 
 /* an element's vertex format; the unnormalized shorts read as integers where
@@ -3469,20 +3493,71 @@ then, drawn opaque) */
 		return;
 	}
 	memset(&draw, 0, sizeof(draw));
-	source = &input->sources[position->binding];
-	if (source->segment)
+	draw.occluder = occlusion == XGPU_STREAM_WORLD_AO_OCCLUDER;
+	draw.serial = xgpu_vulkan_serial();
+	/* (a part a replacement mesh draws, display.prism_models: its pieces as
+	the mesh store skinned them, in the world; a part its carrier stands
+	for, nothing) */
+	if (!xgpu_vulkan_rt_stock_models())
 	{
-		const uint8_t *contents = segment_copy(source->segment);
+		struct xgpu_vulkan_meshes_rt_piece pieces[XGPU_VULKAN_MESHES_RT_PIECES];
+		int count = xgpu_vulkan_meshes_rt_pieces(prepass.window, pieces, XGPU_VULKAN_MESHES_RT_PIECES), piece;
 
-		if (!contents || source->offset >= MIRROR_SEGMENT_SIZE)
+		if (count == 0)
 			return;
-		draw.vertices = contents + source->offset;
-		draw.bytes = MIRROR_SEGMENT_SIZE - source->offset;
+		for (piece = 0; piece < count; piece++)
+		{
+			draw.vertex_buffer = pieces[piece].vertices;
+			draw.vertex_offset = pieces[piece].vertex_offset;
+			draw.vertex_count = pieces[piece].vertex_count;
+			draw.stride = 32;
+			draw.position_offset = 0;
+			draw.nodes_offset = draw.weight_offset = -1;
+			draw.index_buffer = pieces[piece].indices;
+			draw.index_size = 4;
+			draw.index_first = pieces[piece].index_first;
+			draw.count = pieces[piece].index_count;
+			draw.index_add = pieces[piece].index_add;
+			draw.primitive = XGPU_VULKAN_RT_LIST;
+			draw.constants_buffer = VK_NULL_HANDLE;
+			draw.constants = NULL;
+			draw.identity[0] = pieces[piece].identity[0];
+			draw.identity[1] = pieces[piece].identity[1];
+			draw.identity[2] = 0x6d657368ull;
+			draw.identity[3] = 0;
+			draw.pose = pieces[piece].pose;
+			memcpy(draw.origin, pieces[piece].origin, sizeof(draw.origin));
+			xgpu_vulkan_rt_capture(&draw);
+		}
+		if (count > 0)
+			return;
 	}
-	else
+	/* (the constants the draw was drawn with, in the ring) */
+	if (stream.constants_uploaded != draw.serial || !stream.constants_range.buffer)
+		return;
+	source = &input->sources[position->binding];
 	{
-		draw.vertices = (const uint8_t *)source->data;
-		draw.bytes = source->bytes;
+		struct xgpu_vulkan_range range;
+
+		if (!source_range(source, &range))
+			return;
+		draw.vertex_buffer = range.buffer;
+		draw.vertex_offset = range.offset;
+		if (source->segment)
+		{
+			if (source->offset >= MIRROR_SEGMENT_SIZE)
+				return;
+			draw.vertex_count = (MIRROR_SEGMENT_SIZE - source->offset) / input->strides[position->binding];
+			draw.identity[0] = (uint64_t)(uintptr_t)source->segment ^ ((uint64_t)source->offset << 32);
+			(void)segment_number(source->segment, &draw.generation[0]);
+		}
+		else
+		{
+			draw.vertex_count = source->bytes / input->strides[position->binding];
+			/* (by what they are: the stream copies them each frame, to
+			another place) */
+			draw.identity[0] = sample_hash(source->data, source->bytes) ^ ((uint64_t)source->bytes << 32);
+		}
 	}
 	draw.stride = input->strides[position->binding];
 	draw.position_offset = position->offset;
@@ -3498,23 +3573,34 @@ then, drawn opaque) */
 		else if (attribute->offset == position->offset + 30u && attribute->offset + 2u <= draw.stride)
 			draw.weight_offset = attribute->offset;
 	}
-	draw.indices = input->cpu_indices;
 	if (input->index_segment)
 	{
-		const uint8_t *contents = segment_copy(input->index_segment);
-
-		if (!contents)
-			return;
-		draw.indices = (const uint16_t *)(contents + input->index_segment_offset);
+		draw.index_buffer = input->index_range.buffer;
+		draw.index_size = 2;
+		draw.index_first = input->index_segment_offset / 2;
+		draw.identity[1] = (uint64_t)(uintptr_t)input->index_segment ^ ((uint64_t)input->index_segment_offset << 32);
+		(void)segment_number(input->index_segment, &draw.generation[1]);
 	}
+	else if (input->cpu_indices)
+	{
+		/* (the indices the CPU has: copied into the ring where the draw is
+		skinned, xgpu_vulkan_rt.c) */
+		draw.cpu_indices = input->cpu_indices;
+		draw.index_size = 2;
+		draw.identity[1] = sample_hash(input->cpu_indices, input->count * 2) ^ ((uint64_t)input->count << 32);
+	}
+	else if (input->indices)
+		return;
 	draw.count = input->count;
-	draw.index_base = -input->vertex_offset;
+	draw.index_add = input->vertex_offset;
 	draw.primitive = input->primitive == _primitive_triangle_strip ? XGPU_VULKAN_RT_STRIP :
 		input->primitive == _primitive_triangle_fan ? XGPU_VULKAN_RT_FAN : XGPU_VULKAN_RT_LIST;
+	draw.constants_buffer = stream.constants_range.buffer;
+	draw.constants_offset = stream.constants_range.offset;
 	draw.constants = (const float (*)[4])stream.constants;
-	draw.occluder = occlusion == XGPU_STREAM_WORLD_AO_OCCLUDER;
-	if (input->indices && !draw.indices)
-		return;
+	draw.origin[0] = stream.constants[60][3];
+	draw.origin[1] = stream.constants[61][3];
+	draw.origin[2] = stream.constants[62][3];
 	xgpu_vulkan_rt_capture(&draw);
 }
 
@@ -3653,6 +3739,7 @@ static void stream_world_ao_prepass(void *context, const struct xgpu_stream_worl
 		prepass.width = target->width;
 		prepass.height = target->height;
 		prepass.active = 1;
+		prepass.window++;
 		xgpu_vulkan_rt_window_begin();
 		xgpu_vulkan_set_target_views(prepass.inputs, prepass.depth, 0, 1);
 		whole[0][0] = whole[0][1] = 0;

@@ -188,6 +188,13 @@ static const struct config_setting config_settings[] =
 		"(up to display.max_fps). Commented out under gamescope (the Steam Deck's\n"
 		"Game Mode), true: each frame shown at a refresh, started just in time\n"
 		"for it (display.low_latency), the smoothest and least latency there." },
+	{ "display.vulkan_device", _config_string, "\"auto\"", "HALO_VULKAN_DEVICE", _environment_value,
+		_platform_desktop,
+		"The graphics card drawn with (Vulkan: Linux, Windows): \"auto\" the\n"
+		"best (a discrete card before an integrated one); a number under 16, the\n"
+		"card's place in the log's list (\"vulkan: device 0: ...\"); \"0x\" and its PCI\n"
+		"device id (\"0x2482\"); or a part of its name (\"2060\", \"radeon\").\n"
+		"Read when the game starts; one not found is auto's." },
 	{ "display.low_latency", _config_string, "\"auto\"", "HALO_LOW_LATENCY", _environment_value, _platform_all,
 		"With vsync on (Vulkan: Linux, the Steam Deck, Windows, Android), start\n"
 		"each frame just in time for the refresh it is shown at, its input read\n"
@@ -643,8 +650,21 @@ static const struct config_setting config_settings[] =
 		"level had (0 to 100; 100 keeps CE's mood, 0 the traced light alone)." },
 	{ "display.prism_rt_objects", _config_string, "\"auto\"", "HALO_PRISM_RT_OBJECTS", _environment_value,
 		_platform_desktop,
-		"PRISM ray tracing: the objects' shapes traced: \"auto\", \"view_lod\"\n"
-		"(as drawn) or \"low_lod\" (a coarser level of detail, cheaper)." },
+		"PRISM ray tracing: the objects' shapes traced: \"auto\" or \"view_lod\"\n"
+		"as drawn (display.prism_models' replacement meshes where they are\n"
+		"drawn), \"low_lod\" the game's own models (cheaper)." },
+	{ "display.prism_rt_world", _config_string, "\"auto\"", "HALO_PRISM_RT_WORLD", _environment_value,
+		_platform_desktop,
+		"PRISM ray tracing: the level's shape traced: \"auto\" the remodel's far\n"
+		"level where display.prism_world_geometry draws a remodel (its shadows\n"
+		"and rays then match what is drawn), else the map's; \"remodel\" the\n"
+		"remodel's near level whole (the most memory), \"far\" its far level,\n"
+		"\"stock\" the map's own triangles. The rays start from the same shape." },
+	{ "display.prism_rt_cache", _config_boolean, "true", "HALO_PRISM_RT_CACHE", _environment_value, _platform_desktop,
+		"PRISM ray tracing: each object's shape kept on the graphics card from\n"
+		"frame to frame, refitted where it moved and not rebuilt where it did\n"
+		"not (the cheapest); false skins and refits every object each frame\n"
+		"(for checking)." },
 	{ "display.prism_rt_rate", _config_string, "\"full\"", "HALO_PRISM_RT_RATE", _environment_value,
 		_platform_desktop,
 		"PRISM ray tracing: \"half\" traces the bounced light every other frame\n"
@@ -4351,6 +4371,7 @@ static const struct
 	{ "display.prism_rt_denoiser", { "spatiotemporal", "temporal", "off", NULL }, "spatiotemporal" },
 	{ "display.prism_rt_reflections", { "off", "visor", "all", NULL }, "off" },
 	{ "display.prism_rt_objects", { "auto", "view_lod", "low_lod", NULL }, "auto" },
+	{ "display.prism_rt_world", { "auto", "remodel", "far", "stock", NULL }, "auto" },
 	{ "display.prism_rt_rate", { "full", "half", NULL }, "full" },
 	{ "debug.prism_rt_view", { "off", "visibility", "ao", "gi", "reflections", "albedo", "normals", "probes",
 		"heat", NULL }, "off" },

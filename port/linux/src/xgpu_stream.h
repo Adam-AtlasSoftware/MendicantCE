@@ -1767,6 +1767,14 @@ enum
 	XGPU_RT_VIEW_PROBES,
 	XGPU_RT_VIEW_HEAT,
 };
+/* the frame's flags: display.prism_rt_cache false (every object skinned and
+its acceleration structure built again each frame), display.prism_rt_objects
+"low_lod" (the stock models traced, not the mesh store's replacements) */
+enum
+{
+	XGPU_RT_FLAG_NO_CACHE = 1,
+	XGPU_RT_FLAG_STOCK_MODELS = 2,
+};
 struct xgpu_stream_rt_frame
 {
 	uint32_t header;
@@ -1775,7 +1783,8 @@ struct xgpu_stream_rt_frame
 	uint32_t view, light_count, frame, ticks;
 	float fraction;
 	uint32_t generation;
-	uint32_t pad[2];
+	/* XGPU_RT_FLAG_* */
+	uint32_t flags, pad;
 	float settings[16];
 	float sun[4];
 	float sun_color[4];

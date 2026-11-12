@@ -283,6 +283,22 @@ static const char *debug_folder(uint32_t address, const char *variable, char *fo
 	return folder;
 }
 
+/* display.vulkan_device (xgpu_vulkan_options.device), from the guest
+before the window opens; HALO_VULKAN_DEVICE wins */
+static char vulkan_device[256];
+
+/* (a host import: the guest's sdl_platform.c, on its main thread; device
+a guest address of a string) */
+int host_vulkan_device_choose(uint32_t device)
+{
+	const char *chosen = getenv("HALO_VULKAN_DEVICE");
+
+	if (!chosen)
+		chosen = host_pointer(device);
+	snprintf(vulkan_device, sizeof(vulkan_device), "%s", chosen ? chosen : "");
+	return 1;
+}
+
 /* (a host import: the guest's sdl_platform.c, on its main thread; the
 folders are guest addresses of strings; again with the same window when
 display.vsync or battery saver changes, for its swap interval and
@@ -393,6 +409,7 @@ int host_vulkan_window_open(uint32_t window, uint32_t debug, uint32_t shader_fol
 	}
 #endif
 	options.cache_path = cache_path(path, sizeof(path));
+	options.device = vulkan_device;
 	options.validation = (debug & DEBUG_VALIDATION) != 0;
 	options.statistics = (debug & DEBUG_STATISTICS) != 0;
 	if (!xgpu_vulkan_initialize(&options))

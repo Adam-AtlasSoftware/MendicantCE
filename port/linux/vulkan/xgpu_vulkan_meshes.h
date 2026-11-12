@@ -62,4 +62,31 @@ void xgpu_vulkan_meshes_frame(void);
 /* a line of the store's statistics (debug.gpu_stats), into text */
 int xgpu_vulkan_meshes_statistics(char *text, unsigned long size);
 
+/* display.prism_rt: the pieces of the part being drawn, for a pre-pass
+twin's capture (xgpu_vulkan_stream.c's prepass_rt_capture), where a
+replacement mesh draws it: its instance's level skinned in the submission
+being recorded (shared with the frame's own draw of it), each piece's
+skinned vertices (the stock layout's 32 bytes, in the world) and its 32-bit
+indices, a triangle list, each index plus index_add the vertex; identity
+names the piece from one frame to the next (the instance, the mesh's level
+and the piece), pose changes as its bones move, origin is the instance's
+node 0. Returns the pieces (at most most), 0 where the part is a carrier's
+(the carrier's pieces stand for it) or its pieces were captured already in
+the window (window: the pre-passes' count), -1 where the part is drawn
+stock (captured as drawn) */
+#define XGPU_VULKAN_MESHES_RT_PIECES 16
+struct xgpu_vulkan_meshes_rt_piece
+{
+	VkBuffer vertices;
+	uint64_t vertex_offset;
+	uint32_t vertex_count;
+	VkBuffer indices;
+	uint32_t index_first, index_count;
+	int32_t index_add;
+	uint64_t identity[2];
+	uint64_t pose;
+	float origin[3];
+};
+int xgpu_vulkan_meshes_rt_pieces(uint32_t window, struct xgpu_vulkan_meshes_rt_piece *pieces, int most);
+
 #endif

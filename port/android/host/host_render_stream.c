@@ -1442,6 +1442,11 @@ static void *render_thread(void *argument)
 	pool = autorelease_push();
 #endif
 
+#if defined(__linux__) && !defined(_WIN32)
+	/* (named, so that a thread list or a profiler shows the render thread:
+	its CPU time is display.prism_rt's measure, docs/prism_rt.md) */
+	pthread_setname_np(pthread_self(), "openh1 render");
+#endif
 	(void)argument;
 	pthread_mutex_lock(&render.lock);
 	for (;;)

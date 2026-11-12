@@ -38,8 +38,11 @@ render_frame ─► world_ao_frame_begin ─► prism_rt_frame_begin: the BSP's 
                                         the sun, sky, lights and settings (RT_FRAME)
 render_window ─► world AO's pre-pass (forced on while prism_rt is): each opaque draw's twin writes its pixel's
                  normal, distance and flags; the backend captures each object draw as drawn (xgpu_vulkan_rt_capture:
-                 the stock vertex layout skinned on the CPU by the draw's own node matrices)
-                 PREPASS_END ─► objects' BLAS (fast build) ─► TLAS (structure mask 1, objects mask 4)
+                 where its vertices, indices and node matrices are on the GPU; the mesh store's skinned pieces
+                 where a replacement mesh draws the part), and finds its entry (its acceleration structure, kept)
+                 PREPASS_END ─► the moved draws skinned (compute: skin) ─► their BLAS built or refitted (one call)
+                             ─► the first-person weapon masked out (compute: mask)
+                             ─► TLAS (structure mask 1, each object draw an instance, mask 4)
                              ─► gi: a quarter of the probes updated (DDGI-like, L1 spherical harmonics a channel)
                              ─► trace (compute, ray queries): sun rays to objects and structure, occlusion rays,
                                  gi's probes read at an object's pixel
@@ -57,13 +60,32 @@ capture, passes), `xgpu_vulkan_rt_glsl.inc` (the compute shaders; `tools/vulkan_
   world space, one bottom-level structure built once (`PREFER_FAST_TRACE`) when a BSP is first drawn.
 - **The objects:** every pre-pass draw with the world's light (characters, vehicles, weapons, scenery), and its
   occluders (models lighting themselves, the Elites' armour), as drawn: their
-  permutations, levels of detail and pose. All of a window's go in one bottom-level structure built each frame. The
-  first-person weapon (an occluder all within 1 wu of the eye) is left out. With `display.prism_rt` on, a model whose
+  permutations, levels of detail and pose. Nothing of them is read on the CPU: the capture names where the draw's
+  vertices (a mirror segment, the ring), indices (a segment; the CPU's, copied into the ring where they are needed)
+  and constants (the ring's copy the draw used) already are on the GPU, which has device addresses for every storage
+  buffer where it traces rays (xgpu_vulkan.c's `buffer_make`). Each draw has an **entry** (`display.prism_rt_cache`):
+  its own triangle soup and bottom-level structure (`PREFER_FAST_TRACE | ALLOW_UPDATE`) in a pool of device memory,
+  named from frame to frame by its vertices' and indices' places, layout, counts and occurrence in the window (another
+  object of the same model is the next occurrence). A draw whose bytes (the segments' writes counted; for the host's
+  bytes, a hash of a sample of them), node matrices (the rows its vertices name, learnt from the GPU a few frames on)
+  and pose are as they were is neither skinned nor built: its structure is traced again. One that moved is skinned on
+  the GPU (`skin`: a triangle an invocation, the stock vertex program's two-node blend, the draw's own vertices and
+  rows) and its structure refitted (an update), built again every 48 refits or where node 0 jumped 3 wu; entries
+  untraced for 300 frames are let go of. The top level has an instance a draw (identity transforms: the soups are in
+  the world), whose custom index names its soup in a table the hits' normals are read from. The first-person weapon
+  (an occluder whose skinned bounds lie all within 1 wu of the eye: `mask`, on the GPU, from the bounds `skin` gathers)
+  is left out. With `display.prism_rt` on, a model whose
   pass adds self-illumination (the Elites) takes the world's light too (its occlusion slot is its vertex light's,
   before the self-illumination is added), so it receives the traced shadows and occlusion; world AO alone still leaves
   it out. Draws whose base map is a cutout (a fifth of
-  its texels under half alpha: foliage) are left out until the traces test alpha; a mesh-store mesh is traced as its
-  stock part (the pre-pass draws the stock twin).
+  its texels under half alpha: foliage) are left out until the traces test alpha; a part the mesh store's
+  replacement mesh draws (`display.prism_models`) is traced as that mesh: its pieces' skinned vertices (the mesh
+  store's own skinning of the frame, shared with its draw) and 32-bit indices, copied into its entry's soup where its
+  bones moved (`display.prism_rt_objects` `low_lod`: the stock part instead).
+- **The level's remodel** (`display.prism_world_geometry` `remodel`, `display.prism_rt_world`): the remodel's far
+  level is traced where it is drawn (b30: 282 thousand triangles for the map's 33 thousand, 19 MB of structure), or its
+  near level whole (`remodel`, about 2 million), and world AO's pre-pass draws the same level, so that the rays leave
+  the surface they trace (from the map's triangles, a ray started under the remodel's rock and was shadowed by it).
 - Off-screen objects are not in the structure (they are captured from the pre-pass), so a tree behind the camera casts
   no traced shadow; off-screen structure does.
 
@@ -125,7 +147,10 @@ materials' paths (they keep the factor alone), a traced primary (for a remodel t
 `display.prism_rt` (`off` / `shadows` / `gi` / `pathtraced`),
 `display.prism_rt_quality` (rays a pixel), `display.prism_rt_resolution`, `display.prism_rt_denoiser`,
 `display.prism_rt_reflections`, `display.prism_rt_mood`, `display.prism_rt_objects`, `display.prism_rt_rate`,
-`debug.prism_rt_view`, `HALO_VULKAN_NO_RT=1`. Settings > Mods has Ray Tracing and its quality, greyed out where the
+`display.prism_rt_world`, `display.prism_rt_cache`, `debug.prism_rt_view`, `HALO_VULKAN_NO_RT=1`;
+`display.vulkan_device` chooses the graphics card (auto, the loader's index, `0x` and a PCI device id, or a part of its
+name; the log lists them: `vulkan: device 0: ...`). Settings > Mods > PRISM Ray Tracing has Traced Level, Traced Models
+and Keep Shapes too. Settings > Mods has Ray Tracing and its quality, greyed out where the
 renderer cannot trace. `HALO_VULKAN_STATS=1` logs the passes' GPU time every 600 frames.
 
 ## Not yet
@@ -134,7 +159,62 @@ Colour in `gi` (the traced colour path exists now, `pathtraced`'s; `gi` does not
 at probe hits, local lights' shadows outside `pathtraced`, reflections, alpha-tested traces, remodel relief, the
 compaction of the structure's BLAS, Deck and RDNA tuning, Metal (and Metal's emitter of the traced light).
 
-## Measured, uncapped (b30 at tick 1350, the game's camera; idle GPUs at full clocks)
+## Measured: the objects on the GPU, kept from frame to frame (b30 at tick 1350, the kit's settings, uncapped)
+
+The owner's kit's config.toml (every PRISM setting on: remodelled level, rebaked lightmaps, cascaded shadows,
+replacement models and materials, world AO; the 3D view drawn larger than the window for its Panini projection),
+`HALO_MAX_FPS=-1 HALO_NO_VSYNC=1 HALO_INTERPOLATION=true`, the base build (e33939f45) and this one run one after the
+other, each state measured over 1200 frames (`debug.gpu_stats`; the render thread's CPU from /proc over the same
+frames, now named "openh1 render"). "Still": the game stopped (AI erased, the game's camera); "live": the game
+playing on from tick 1350 (the beach fight, the Pelican), so its states are not the same frames from one build to
+the other. Other work shared both GPUs and the CPU throughout (other games and a Blender bake; the load average near
+35 on 32 threads): the GPU milliseconds of one run against another move by a millisecond or two, the render thread's
+share of the frame is the steadier measure. Render ms is the render thread's CPU a frame (its share times the time
+between frames).
+
+| GPU, size, scene | state | GPU ms base → new | ms between frames base → new | render thread base → new (ms a frame) |
+| --- | --- | --- | --- | --- |
+| 3070 Ti 1080p still | off | 5.51 → 5.76 | 8.42 → 8.03 | 64% → 61% (5.4 → 4.9) |
+| | shadows | 5.57 → 7.57 | 10.31 → 8.98 | 81% → 57% (8.4 → 5.1) |
+| | gi | 5.80 → 7.74 | 11.71 → 9.49 | 82% → 59% (9.6 → 5.6) |
+| | pathtraced medium | 10.61 → 11.14 | 13.52 → 11.21 | 66% → 45% (8.9 → 5.0) |
+| | pathtraced ultra | 16.90 → 14.94 | 16.99 → 14.95 | 55% → 27% (9.4 → 4.0) |
+| 3070 Ti 1440p still | shadows | 8.42 → 9.21 | 11.30 → 13.31 | 69% → 61% (7.8 → 8.1) |
+| | pathtraced medium | 14.60 → 15.85 | 14.73 → 15.89 | 60% → 31% (8.9 → 4.9) |
+| | pathtraced ultra | 23.01 → 26.23 | 23.09 → 26.25 | 47% → 19% (10.8 → 5.0) |
+| 2060 1080p still | off | 13.75 → 13.90 | 13.92 → 13.91 | 41% → 20% (5.7 → 2.8) |
+| | shadows | 15.67 → 16.21 | 19.60 → 16.22 | 65% → 18% (12.6 → 2.9) |
+| | gi | 15.85 → 16.71 | 19.94 → 16.73 | 64% → 17% (12.8 → 2.9) |
+| | pathtraced medium | 22.98 → 24.53 | 23.17 → 24.55 | 44% → 12% (10.2 → 3.0) |
+| | pathtraced ultra | 34.31 → 38.89 | 34.33 → 38.91 | 21% → 8% (7.1 → 3.0) |
+| 2060 1440p still | shadows | 19.99 → 20.45 | 20.01 → 20.47 | 39% → 15% (7.8 → 3.0) |
+| | pathtraced ultra | 54.46 → 61.23 | 54.48 → 61.25 | 12% → 6% (6.4 → 3.4) |
+| 3070 Ti 1080p live | shadows | 19.33 → 18.38 | 23.52 → 18.40 | 83% → 34% (19.5 → 6.2) |
+| | pathtraced medium | 37.90 → 24.97 | 37.93 → 24.98 | 50% → 24% (19.0 → 6.0) |
+| | pathtraced ultra | 48.20 → 38.60 | 48.21 → 38.61 | 40% → 16% (19.0 → 6.3) |
+| 2060 1080p live | shadows | 55.36 → 30.17 | 55.39 → 30.27 | 36% → 21% (19.8 → 6.2) |
+| | pathtraced medium | 61.79 → 37.41 | 61.83 → 37.64 | 31% → 16% (19.0 → 6.0) |
+| | pathtraced ultra | 73.80 → 48.81 | 73.82 → 49.12 | 26% → 12% (19.0 → 6.0) |
+
+- **The render thread:** ray tracing no longer costs it anything to speak of. With the base build each mode added 3 to
+  7 ms of the render thread a frame on a still scene and 13 ms in play (render ms 19 against 6 with RT off); now the
+  render ms with any mode is RT off's (2.8 to 3.4 on the 2060's runs, 5 to 6.3 on the 3070 Ti's). The frames that
+  waited on the render thread (shadows and gi: 19.6 ms apart for 15.7 ms of GPU work on the 2060) now follow the GPU.
+- **In play** (characters moving, the Pelican), the objects were 300 thousand triangles a frame skinned on the CPU and
+  built into one structure each frame; now 160 to 210 draws a frame are skinned on the GPU and refitted, 6 to 9 built
+  again, 150 to 170 kept: the 2060's GPU frame at 1080p went from 55 to 30 ms with shadows and from 74 to 49 ms
+  path traced at ultra.
+- **Still**, every object's structure is kept (0 skinned, 140 to 150 kept a frame). The GPU's frame is a little
+  longer than the base build's where the remodelled level is traced in the map's place (`display.prism_rt_world`
+  `auto`): on the 2060 at 1080p, measured in one run, shadows 19.2 ms against 18.3 with `stock`, path traced at ultra
+  41.8 against 35.8 (its rays cross 282 thousand triangles where they crossed 33 thousand, and the pre-pass draws
+  them). Traced Level: Game's gives that back, with the shadows of the map's flat shapes where the rocks are drawn
+  round.
+- Memory: the entries' pool is at most 320 MB (128 MB on b30 still, about 250 in play); a frame's slot is 64 MB
+  where it was 136 (three slots: 216 MB less).
+- Vulkan validation (`HALO_VULKAN_VALIDATION=1`, shadows, gi, pathtraced, the cache off): no messages.
+
+## Measured, uncapped, before the objects moved to the GPU (b30 at tick 1350, the game's camera; idle GPUs at full clocks)
 
 The tables further down were taken with the game rendering at its 30 Hz tick (interpolation off, a fixed frame
 time). That leaves the GPUs so lightly loaded that the drivers hold them near 900 MHz (P3 on the 2060, logged), so
@@ -152,15 +232,14 @@ better, higher fps is better.
 | RTX 2060, 1440p | 4.35 (212) | +1.26 (165) | +3.49 (89) | +3.71 (88) | +12.73 (56) | +14.63 (50) | +20.26 (39) | +29.12 (29) |
 
 Against the design's targets: the 3070 Ti is inside every one (GI 3 / 4.5 ms; `pathtraced` 9 / 14 ms, even at
-ultra), the 2060 inside its GI targets (3.5 / 5.5 ms). Any RT mode holds the game near 100 frames a second on this
-machine's CPU however light the GPU's share: the objects are still skinned on the CPU each frame (the design's
-compute pass is the next step). Before the cached copy the capture read the mirror's write-combined memory, and
+ultra), the 2060 inside its GI targets (3.5 / 5.5 ms). Any RT mode held the game near 100 frames a second on this
+machine's CPU however light the GPU's share: the objects were still skinned on the CPU each frame (now on the GPU and
+kept: the section above). Before the cached copy the capture read the mirror's write-combined memory, and
 RT frames came 45-47 ms apart at the 30 Hz tick (about 21 frames a second) against stock's 33.3 ms; the earlier
 tables' "between" column showed it.
 
-**The capture's reads.** A captured draw's vertices and indices are read from a copy of the mirror's segment in the
-host's cached memory (`segment_copy`, xgpu_vulkan_stream.c: made the first time a traced frame reads that segment,
-4 MB each, then written alongside it); RT off makes none, and indexed draws no longer touch the segment's contents.
+**The capture's reads** (then): a captured draw's vertices and indices were read from a copy of the mirror's segment
+in the host's cached memory. Now nothing is read: the segments' writes are counted instead.
 
 ## Measured at the 30 Hz tick (b30, the game stopped at tick 1350, the game's camera; GPU ms a frame, `debug.gpu_stats`)
 

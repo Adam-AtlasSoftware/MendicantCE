@@ -153,6 +153,7 @@ four multiview views and fragment storage-buffer atomics.
 | Variable | What it does |
 | --- | --- |
 | `HALO_VULKAN_VALIDATION=1` | The validation layers on, their messages logged (the layers must be installed, or found through `VK_ADD_LAYER_PATH`); as `debug.gpu_validation` |
+| `HALO_VULKAN_DEVICE=<device>` | `display.vulkan_device`: the graphics card drawn with (`auto`, the loader's index, `0x` and its PCI device id, or a part of its name); the log lists the devices as `vulkan: device <n>: <name> (PCI 0x<id>, <kind>, Vulkan <version>)`. Where it is set, it wins over config.toml's (the host reads it too). `VK_LOADER_DEVICE_ID_FILTER` (the Vulkan loader's) hides the others altogether |
 | `HALO_VULKAN_PIPELINE_CACHE=<file>` | The pipeline cache's file (by default `$XDG_CACHE_HOME/openh1/vulkan_pipelines.bin`); empty: none |
 | `HALO_VULKAN_SHADERS=<dir>` | Each shader module written there as it is made (`.spv`); as `debug.gpu_dump_shaders`, over which it wins |
 | `HALO_VULKAN_STATS=1` | Every 600 frames, submissions, passes, attachment loads/clears, clears drawn, draws, pipeline creation count/time, upload ring bytes, stores discarded, resolves in passes, passes continued and put aside and buffers renamed (`HALO_VULKAN_DISCARDS`), textures made, and the frames' GPU time (from each frame's first work to its last) and time between frames (not in the VR mode, which times its own); as `debug.gpu_stats` |

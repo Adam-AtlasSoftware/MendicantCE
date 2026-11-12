@@ -59,6 +59,7 @@ options' gamma) first, where the setting is not 1.
 #else
 #include <dlfcn.h>
 #endif
+#include <ctype.h>
 #include <math.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -785,19 +786,34 @@ static int memory_type(uint32_t bits, VkMemoryPropertyFlags wanted, VkMemoryProp
 	return -1;
 }
 
-static int memory_dedicated(VkDeviceSize size, uint32_t type, struct allocation *allocation)
+/* (addressed: for a buffer of VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+buffer_make's where the device traces rays) */
+static int memory_dedicated_addressed(VkDeviceSize size, uint32_t type, struct allocation *allocation, int addressed)
 {
 	VkMemoryAllocateInfo info;
+	VkMemoryAllocateFlagsInfo flags;
 
 	memset(&info, 0, sizeof(info));
 	info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
 	info.allocationSize = size;
 	info.memoryTypeIndex = type;
+	if (addressed)
+	{
+		memset(&flags, 0, sizeof(flags));
+		flags.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
+		flags.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
+		info.pNext = &flags;
+	}
 	memset(allocation, 0, sizeof(*allocation));
 	if (!check(vkAllocateMemory(vk.device, &info, NULL, &allocation->memory), "vkAllocateMemory"))
 		return 0;
 	allocation->size = size;
 	return 1;
+}
+
+static int memory_dedicated(VkDeviceSize size, uint32_t type, struct allocation *allocation)
+{
+	return memory_dedicated_addressed(size, type, allocation, 0);
 }
 
 static void block_free_insert(struct block *block, VkDeviceSize offset, VkDeviceSize size)
@@ -934,11 +950,18 @@ static int buffer_make(VkDeviceSize size, VkBufferUsageFlags usage, int host, Vk
 	VkBufferCreateInfo info;
 	VkMemoryRequirements requirements;
 	int type;
+	/* (display.prism_rt, where the device traces rays: a storage buffer has
+	a device address and may be an acceleration structure's build input, so
+	that the ray tracing's compute passes and builds read the draws' own
+	vertices and indices, the mirror's segments, the ring's constants and the
+	mesh store's skinned vertices, where they are: xgpu_vulkan_rt.c) */
+	int addressed = vk.ray_tracing && (usage & VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
 
 	memset(&info, 0, sizeof(info));
 	info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
 	info.size = size;
-	info.usage = usage;
+	info.usage = usage | (addressed ? VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+		VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR : 0);
 	info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 	if (!check(vkCreateBuffer(vk.device, &info, NULL, buffer), "vkCreateBuffer"))
 		return 0;
@@ -954,7 +977,7 @@ static int buffer_make(VkDeviceSize size, VkBufferUsageFlags usage, int host, Vk
 		type = host ? memory_type(requirements.memoryTypeBits,
 			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 0) :
 			memory_type(requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 0);
-	if (type < 0 || !memory_dedicated(requirements.size, (uint32_t)type, memory))
+	if (type < 0 || !memory_dedicated_addressed(requirements.size, (uint32_t)type, memory, addressed))
 	{
 		vkDestroyBuffer(vk.device, *buffer, NULL);
 		*buffer = VK_NULL_HANDLE;
@@ -5417,7 +5440,8 @@ struct xgpu_vulkan_mesh_buffer *xgpu_vulkan_mesh_buffer_create(uint64_t size, in
 {
 	struct xgpu_vulkan_mesh_buffer *made;
 	VkBufferUsageFlags usage = kind == XGPU_VULKAN_MESH_BUFFER_STAGING ? VK_BUFFER_USAGE_TRANSFER_SRC_BIT :
-		kind == XGPU_VULKAN_MESH_BUFFER_INDICES ? VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT :
+		kind == XGPU_VULKAN_MESH_BUFFER_INDICES ? VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+		(vk.ray_tracing ? VK_BUFFER_USAGE_STORAGE_BUFFER_BIT : 0) :
 		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 
 	if (mapped)
@@ -7233,9 +7257,41 @@ static int required_features(const VkPhysicalDeviceFeatures2 *features,
 	return 1;
 }
 
+/* whether display.vulkan_device names the loader's device index (its
+xgpu_vulkan_options.device) */
+static int device_asked(const char *asked, uint32_t index, const VkPhysicalDeviceProperties *properties)
+{
+	char wanted[256], name[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE];
+	char *end;
+	size_t at;
+	unsigned long number;
+
+	if (!asked || !*asked || !strcmp(asked, "auto"))
+		return 0;
+	if ((asked[0] == '0' && (asked[1] == 'x' || asked[1] == 'X')) && asked[2])
+	{
+		number = strtoul(asked + 2, &end, 16);
+		if (!*end)
+			return number == properties->deviceID;
+	}
+	/* (a small number, the loader's index; a larger one is a part of a name:
+	"2060") */
+	number = strtoul(asked, &end, 10);
+	if (!*end && number < 16)
+		return number == index;
+	for (at = 0; asked[at] && at + 1 < sizeof(wanted); at++)
+		wanted[at] = (char)tolower((unsigned char)asked[at]);
+	wanted[at] = 0;
+	for (at = 0; properties->deviceName[at] && at + 1 < sizeof(name); at++)
+		name[at] = (char)tolower((unsigned char)properties->deviceName[at]);
+	name[at] = 0;
+	return strstr(name, wanted) != NULL;
+}
+
 /* a physical device of Vulkan 1.3 with a graphics queue (that can present to
 the surface, with one; VR's runtime's device may have none that can, and
-then draws only the headset's frames) */
+then draws only the headset's frames); display.vulkan_device's where it
+names one that can */
 static int physical_choose(const struct xgpu_vulkan_options *options)
 {
 	VkPhysicalDevice devices[16];
@@ -7268,6 +7324,12 @@ static int physical_choose(const struct xgpu_vulkan_options *options)
 		uint32_t family_count = 16, family, score;
 
 		vkGetPhysicalDeviceProperties(devices[index], &properties);
+		if (!options->choose_physical)
+			host_logf(HOST_LOG_INFO, "vulkan: device %u: %s (PCI 0x%04x, %s, Vulkan %u.%u)", index,
+				properties.deviceName, properties.deviceID,
+				properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ? "discrete" :
+				properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ? "integrated" : "other",
+				VK_API_VERSION_MAJOR(properties.apiVersion), VK_API_VERSION_MINOR(properties.apiVersion));
 		if (properties.apiVersion < VK_API_VERSION_1_3)
 			continue;
 		vkGetPhysicalDeviceQueueFamilyProperties(devices[index], &family_count, families);
@@ -7292,6 +7354,9 @@ static int physical_choose(const struct xgpu_vulkan_options *options)
 		family = (uint32_t)graphics;
 		score = properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ? 3 :
 			properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ? 2 : 1;
+		/* (display.vulkan_device: the one asked for above any other) */
+		if (!options->choose_physical && device_asked(options->device, index, &properties))
+			score = 100;
 		if (score > best_score)
 		{
 			best_score = score;
@@ -7306,6 +7371,10 @@ static int physical_choose(const struct xgpu_vulkan_options *options)
 			" that presents to the window" : "");
 		return 0;
 	}
+	if (!options->choose_physical && options->device && *options->device && strcmp(options->device, "auto") &&
+		best_score < 100)
+		host_logf(HOST_LOG_WARN, "vulkan: display.vulkan_device \"%s\" names no device that can draw: the best "
+			"one drawn with", options->device);
 	vk.physical = devices[chosen];
 	vkGetPhysicalDeviceProperties(vk.physical, &vk.properties);
 	vkGetPhysicalDeviceMemoryProperties(vk.physical, &vk.memory_properties);
