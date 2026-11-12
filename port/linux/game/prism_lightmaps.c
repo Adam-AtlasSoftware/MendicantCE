@@ -44,7 +44,7 @@ decoded ARGB), the deflated size; then the deflated RGBA texels and a
 CRC-32 of the header and them. A file that fails a check is built again.
 
 display.prism_lightmaps "rebaked": each page drawn from the page baked
-again offline on this machine from CE's own light sources (art_pipeline's
+again offline on this machine from CE's own light sources (tools/prism_packs'
 relight_bake.py, relight_calib.py and relight_encode.py: Cycles, the BSP's
 sky lights and emitting shaders, bounce light, the factor times CE's size;
 each light's strength and colour fitted to the pools of light CE's page

@@ -1,0 +1,156 @@
+{
+ "class": "marine_paint",
+ "description": "Marine helmet and armour paint (helmet shell, vest plates, shoulder, elbow, knee and shin pads): painted steel and composite, a coarser orange peel than the Chief's, a bead-blast tooth, scratches at three scales, scuffs and small paint chips.",
+ "group": "marines",
+ "first_person": false,
+ "suggested_shaders": [
+  "characters\\marine_armored\\shaders\\marine_helmet (multipurpose R)",
+  "characters\\marine_armored\\shaders\\marine_arms (multipurpose R)",
+  "characters\\marine_armored\\shaders\\marine_arms_johnson (multipurpose R)",
+  "characters\\marine_armored\\shaders\\marine_legs (multipurpose R)",
+  "characters\\marine_armored\\shaders\\marine_torso (multipurpose R)"
+ ],
+ "tile_mm": 80.0,
+ "author_px": 2048,
+ "ship_px": 1024,
+ "seed": 310,
+ "tile_rule": "base texel 2.9-3.9 mm: the tile spans 21-28 base texels",
+ "feature_band_mm": [
+  0.4,
+  6.0
+ ],
+ "target_slope_rms": 0.13,
+ "height_layers": [
+  {
+   "gen": "orange_peel",
+   "rms_mm": 0.005,
+   "wavelength_mm": [
+    0.6,
+    2.5
+   ],
+   "cell_mix": 0.35
+  },
+  {
+   "gen": "orange_peel",
+   "rms_mm": 0.006,
+   "wavelength_mm": [
+    2.5,
+    6.0
+   ],
+   "cell_mix": 0.3,
+   "note": "coat undulation"
+  },
+  {
+   "gen": "bead_blast",
+   "rms_mm": 0.0008,
+   "crater_mm": [
+    0.32,
+    0.6
+   ],
+   "coverage": 1.2
+  },
+  {
+   "gen": "scratches",
+   "scales": [
+    {
+     "count": 150,
+     "length_mm": [
+      3,
+      12
+     ],
+     "width_mm": 0.12,
+     "depth_mm": 0.002,
+     "lip": 0.3,
+     "angle_deg": null,
+     "curvature_per_mm": 0.03
+    },
+    {
+     "count": 60,
+     "length_mm": [
+      8,
+      30
+     ],
+     "width_mm": 0.2,
+     "depth_mm": 0.004,
+     "lip": 0.3,
+     "angle_deg": null,
+     "curvature_per_mm": 0.015
+    },
+    {
+     "count": 16,
+     "length_mm": [
+      15,
+      45
+     ],
+     "width_mm": 0.32,
+     "depth_mm": 0.008,
+     "lip": 0.35,
+     "angle_deg": null,
+     "curvature_per_mm": 0.008
+    },
+    {
+     "count": 18,
+     "length_mm": [
+      15,
+      50
+     ],
+     "width_mm": 1.8,
+     "depth_mm": 0.003,
+     "lip": 0.05,
+     "angle_deg": null,
+     "curvature_per_mm": 0.01,
+     "note": "broad shallow scuffs"
+    }
+   ]
+  },
+  {
+   "gen": "chips",
+   "count": 30,
+   "radius_mm": [
+    0.5,
+    1.6
+   ],
+   "depth_mm": 0.025,
+   "wall_mm": 0.15,
+   "irregular": 0.15
+  }
+ ],
+ "cavity": {
+  "radius_mm": 0.5,
+  "strength": 0.4
+ },
+ "rough_layers": [
+  {
+   "src": "mask:scratch",
+   "k": 0.45
+  },
+  {
+   "src": "mask:chip",
+   "k": 0.25
+  },
+  {
+   "src": "cavity",
+   "k": 0.04
+  },
+  {
+   "src": "noise",
+   "k": 0.04,
+   "wavelength_mm": [
+    2.0,
+    8.0
+   ],
+   "note": "satin mottle"
+  }
+ ],
+ "export_masks": [],
+ "fade_m": [
+  4.0,
+  12.0
+ ],
+ "preview": {
+  "base_grey": 0.25,
+  "metallic": 0.0,
+  "roughness": 0.4
+ },
+ "base_roughness_ref": 0.4
+}

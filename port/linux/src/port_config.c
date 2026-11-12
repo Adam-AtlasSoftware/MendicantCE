@@ -526,8 +526,8 @@ static const struct config_setting config_settings[] =
 		"emitting surfaces, bounce light), four times finer, matched area by\n"
 		"area to the stock page's exposure and colour, its dominant direction\n"
 		"and colour per texel lighting each pixel's bump (the data folder's\n"
-		"prism_lightmaps/rebaked; none comes with the game, and the tools that\n"
-		"bake them are not part of it); the other pages as \"smooth\". Models still take their light\n"
+		"prism_lightmaps/rebaked; none comes with the game: its pack tools,\n"
+		"prism_packs, bake them from your map); the other pages as \"smooth\". Models still take their light\n"
 		"from the stock lightmap. Vulkan; read each frame (prism_set\n"
 		"\"lightmaps smooth\")." GRAPHICS_CHOOSES },
 	{ "display.prism_lightmap_upsample", _config_integer, "2", "HALO_PRISM_LIGHTMAP_UPSAMPLE", _environment_value,

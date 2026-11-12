@@ -1,0 +1,8 @@
+{
+ "class": "cov_emissive",
+ "description": "Covenant glowing / translucent parts (plasma rifle amber, self-illuminated vents and coils). Excluded: no micro layer, no tile.",
+ "group": "weapons",
+ "excluded": true,
+ "suggested_shaders": ["weapons\\plasma rifle\\fp\\shaders\\amber"],
+ "rule": "no overlay on these shaders; on other Covenant shaders, texels with multipurpose G (self-illum) > 0.1 are excluded by the overlay's exclude mask"
+}

@@ -1,0 +1,128 @@
+{
+ "class": "cov_armour",
+ "description": "Elite armour alloy (minor, major, commander, spec ops, stealth): smooth cast alloy with a soft fine grain, faint polish lines, sparse casting pits and fine light scratches that read through roughness, a satin mottle; clean, as the Elites keep it. No colour: CE's change colour tints it.",
+ "group": "covenant",
+ "first_person": false,
+ "suggested_shaders": [
+  "characters\\elite\\shaders\\elite torso (multipurpose B)",
+  "characters\\elite\\shaders\\elite arms (multipurpose B)",
+  "characters\\elite\\shaders\\elite legs (multipurpose B)",
+  "characters\\elite\\shaders\\elite legsa (multipurpose B)",
+  "characters\\elite\\shaders\\elite head (multipurpose B)",
+  "characters\\elite\\shaders\\elite heada (multipurpose B)",
+  "characters\\elite\\elite_special\\shaders\\elite special body (multipurpose B)"
+ ],
+ "tile_mm": 80.0,
+ "author_px": 2048,
+ "ship_px": 1024,
+ "seed": 301,
+ "tile_rule": "base texel 2.0-2.8 mm (elite parts), 5.2 mm (special body): the tile spans 29-40 base texels on the parts, 15 on the special body",
+ "feature_band_mm": [
+  0.3,
+  6.0
+ ],
+ "target_slope_rms": 0.08,
+ "height_layers": [
+  {
+   "gen": "anodised_grain",
+   "rms_mm": 0.0012,
+   "grain_mm": [
+    0.5,
+    1.2
+   ],
+   "cell_mix": 0.5
+  },
+  {
+   "gen": "brushed",
+   "rms_mm": 0.0005,
+   "across_mm": [
+    0.5,
+    1.0
+   ],
+   "streak_mm": 25.0,
+   "angle_deg": 0.0,
+   "note": "faint polish lines"
+  },
+  {
+   "gen": "bead_blast",
+   "rms_mm": 0.0008,
+   "crater_mm": [
+    0.45,
+    0.9
+   ],
+   "coverage": 0.3,
+   "note": "sparse casting pits"
+  },
+  {
+   "gen": "scratches",
+   "scales": [
+    {
+     "count": 70,
+     "length_mm": [
+      3,
+      12
+     ],
+     "width_mm": 0.14,
+     "depth_mm": 0.0015,
+     "lip": 0.3,
+     "angle_deg": null,
+     "curvature_per_mm": 0.03
+    },
+    {
+     "count": 14,
+     "length_mm": [
+      10,
+      35
+     ],
+     "width_mm": 0.28,
+     "depth_mm": 0.003,
+     "lip": 0.3,
+     "angle_deg": null,
+     "curvature_per_mm": 0.012
+    }
+   ]
+  }
+ ],
+ "cavity": {
+  "radius_mm": 0.5,
+  "strength": 0.3
+ },
+ "rough_layers": [
+  {
+   "src": "mask:scratch",
+   "k": 0.35
+  },
+  {
+   "src": "noise",
+   "k": 0.05,
+   "wavelength_mm": [
+    3.0,
+    12.0
+   ],
+   "note": "satin mottle"
+  },
+  {
+   "src": "noise",
+   "k": 0.02,
+   "wavelength_mm": [
+    0.5,
+    1.5
+   ]
+  },
+  {
+   "src": "cavity",
+   "k": 0.03
+  }
+ ],
+ "export_masks": [],
+ "fade_m": [
+  4.0,
+  12.0
+ ],
+ "preview": {
+  "base_grey": 0.5,
+  "metallic": 1.0,
+  "roughness": 0.26
+ },
+ "base_roughness_ref": 0.26
+}

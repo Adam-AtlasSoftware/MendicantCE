@@ -1,0 +1,237 @@
+{
+ "plates_map": {
+  "channel": "b",
+  "lo": 0.35,
+  "hi": 0.65,
+  "exclude_channel": "g",
+  "exclude_above": 0.1,
+  "blur_texels": 1.6
+ },
+ "relief": {
+  "plates": {
+   "name": "plates",
+   "field": "plates",
+   "iso": 0.5,
+   "height_pct": 0.55,
+   "recess_rest": 0.5,
+   "bevel_frac": 0.42,
+   "bevel_profile": 0.55,
+   "smooth_iters": 3,
+   "relax_iters": 5,
+   "relax_lambda": 0.5,
+   "min_island_pct": 0.6
+  },
+  "grooves": {
+   "name": "grooves",
+   "field": "grooves",
+   "kind": "dark",
+   "on": "plates",
+   "sigma": 1.4,
+   "broad_sigma": 5.0,
+   "broad_k": 0.5,
+   "blur": 0.6,
+   "iso": 0.45,
+   "height_pct": -0.12,
+   "smooth_iters": 1,
+   "relax_iters": 3,
+   "relax_lambda": 0.5,
+   "min_island_pct": 0.3
+  },
+  "ridges": {
+   "name": "ridges",
+   "field": "ridges",
+   "kind": "bright",
+   "on": "skin",
+   "sigma": 1.4,
+   "broad_sigma": 5.0,
+   "broad_k": 0.5,
+   "blur": 0.6,
+   "iso": 0.5,
+   "height_pct": 0.1,
+   "bevel_segments": 1,
+   "bevel_frac": 0.5,
+   "smooth_iters": 1,
+   "relax_iters": 3,
+   "relax_lambda": 0.5,
+   "min_island_pct": 0.3,
+   "shaders": [
+    "elite head",
+    "elite heada",
+    "elite special body"
+   ]
+  }
+ },
+ "lods": {
+  "superhigh": {
+   "level": 2,
+   "solid_teeth": true,
+   "steps": [
+    {
+     "use": "plates",
+     "bevel_segments": 2,
+     "mark": "plate_top"
+    },
+    {
+     "use": "grooves",
+     "restrict": "plate_top"
+    },
+    {
+     "use": "ridges"
+    }
+   ]
+  },
+  "high": {
+   "level": 1,
+   "solid_teeth": true,
+   "steps": [
+    {
+     "use": "plates",
+     "bevel_segments": 1,
+     "smooth_iters": 2,
+     "relax_iters": 4
+    }
+   ]
+  },
+  "medium": {
+   "level": 0,
+   "steps": [
+    {
+     "use": "plates",
+     "bevel_segments": 0,
+     "smooth_iters": 1,
+     "relax_iters": 2,
+     "min_island_pct": 0.9
+    }
+   ],
+   "sharp_angle_deg": 60.0
+  },
+  "low": {
+   "level": 0,
+   "steps": [],
+   "decimate_ce_ratio": 1.5,
+   "sharp_angle_deg": 80.0
+  },
+  "superlow": {
+   "level": 0,
+   "decimate_ce_ratio": 1.1,
+   "sharp_angle_deg": 80.0
+  }
+ },
+ "crease_sharp_deg": 30.0,
+ "crease_soft_deg": 10.0,
+ "crease_sharp": 0.3,
+ "crease_soft": 0.12,
+ "crease_plate": 1.0,
+ "crease_plate_soft": 0.5,
+ "plate_face_share": 0.5,
+ "quad_face_deg": 25.0,
+ "quad_shape_deg": 50.0,
+ "interp_iterations": 4,
+ "interp_damping": 0.6,
+ "cap_out_pct": 0.3,
+ "cap_in_pct": 0.6,
+ "clamp_smooth": 3,
+ "clamp_gain": 1.1,
+ "sharp_angle_deg": 50.0,
+ "weight_smooth": 2,
+ "weight_min": 0.02,
+ "follow_lift_pct": 0.06,
+ "follow_reach_pct": 1.2,
+ "teeth_bitmap": "{extract}/b30/bitmaps/characters/elite/bitmaps/elite teeth.png",
+ "teeth_cuts": 7,
+ "teeth_alpha": 0.5,
+ "teeth_thickness_ratio": 0.55,
+ "keep_shaders": [
+  "elite teeth"
+ ],
+ "_about": "PRISM v2 r2 Elite remodel recipe (elite_build_r2.py). Inputs: the player's own extracted b30 data; outputs local only.",
+ "gltf": "{extract}/b30/models/characters/elite/elite.gltf",
+ "jms_dir": "{extract}/b30/models/characters/elite/elite",
+ "out_dir": "{work}/elite_r2/build/elite",
+ "bitmap_dir": "{extract}/b30/bitmaps/characters/elite/bitmaps",
+ "parts": [
+  {
+   "object": "arms/base00/superhigh",
+   "perm": "base00",
+   "region": "arms"
+  },
+  {
+   "object": "head/base00/superhigh",
+   "perm": "base00",
+   "region": "head",
+   "cfg": {
+    "cap_out_pct": 0.12
+   },
+   "relief": {
+    "plates": {
+     "recess_rest": 0.0,
+     "height_pct": 0.4
+    }
+   }
+  },
+  {
+   "object": "legs/base00/superhigh",
+   "perm": "base00",
+   "region": "legs"
+  },
+  {
+   "object": "torso/base00/superhigh",
+   "perm": "base00",
+   "region": "torso"
+  },
+  {
+   "object": "arms/blunt_armored_arms/superhigh",
+   "perm": "blunt_armored_arms",
+   "region": "arms"
+  },
+  {
+   "object": "head/crescent_masked_head/superhigh",
+   "perm": "crescent_masked_head",
+   "region": "head",
+   "cfg": {
+    "cap_out_pct": 0.12
+   },
+   "relief": {
+    "plates": {
+     "recess_rest": 0.0,
+     "height_pct": 0.4
+    }
+   }
+  },
+  {
+   "object": "legs/double_pointed_armored_legs/superhigh",
+   "perm": "double_pointed_armored_legs",
+   "region": "legs"
+  }
+ ],
+ "shader_maps": {
+  "elite arms": {
+   "base": "elite arms",
+   "multi": "elite arms multi"
+  },
+  "elite head": {
+   "base": "elite head",
+   "multi": "elite head multi"
+  },
+  "elite heada": {
+   "base": "elite head1",
+   "multi": "elite head1 multi"
+  },
+  "elite legs": {
+   "base": "elite legs",
+   "multi": "elite legs multi"
+  },
+  "elite legsa": {
+   "base": "elite legs1",
+   "multi": "elite legs1 multi"
+  },
+  "elite torso": {
+   "base": "elite torso",
+   "multi": "elite torso multi"
+  }
+ },
+ "follow_shaders": [
+  "elite inset lights"
+ ],
+ "extent_wu": 0.7874314795481041
+}

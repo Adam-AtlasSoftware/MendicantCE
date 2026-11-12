@@ -1,0 +1,159 @@
+{
+ "note": "M1 tuning from in-game frozen-frame comparisons. fade_m in metres; footprint in screen pixels a tile (fade from the first to the second). Review r1: gunmetal normal 0.6 rough 0.6 (pixel sparkle on the AR top rail), painted metal normal 0.5 (wet blotching on the Pistol black), alloy normal 0.35 (ripple on the Plasma Rifle). r2: undersuit footprint 192->64 px a tile (its 46 ribs a tile stay at least ~3 px wide before they fade, against the moire at 1.5 m). r3: painted metal re-authored (finer 0.35-1.2 mm peel at gain 1.8, was 0.6-3 mm at 7.6) so normal 0.5->0.9; undersuit re-authored as an irregular 4 mm knit rib, footprint 64->32 px a tile (3.2->1.6 px a rib); plate scratches by roughness (k 0.15->0.42). cov_alloy re-authored without the flow striation (the ripple), with sparse pits and a roughness mottle: normal 0.35->0.7. r3 sweep: Plasma Rifle sparkled at grazing angles in the yaw sweep (1.32 on/s0): alloy normal 0.7->0.55, the plasma shaders' reflection bend 0.5->0.3. Plate scuffs widened to 1.8 mm (they must span 1-2 px at 1.5 m to read), scratch roughness k 0.42->0.55. Plate rough 1.0->1.3 (1.8 read barely better at 1.5 m, where 1.5 mm pixels cannot resolve the scuffs, and lifted the plate's lightness by 0.4-0.5 L*: the Toksvig roughness of the smaller levels scatters too). Final: plate satin mottle k 0.06->0.035 at 2-8 mm (at 0.8 m it read as a 1.2-1.3 dE76 mottle in the 8 and 16 px colour check). Plate normal 1.0->0.75: at 0.8 m the micro scratches' normals read as a hairy fuzz (dE76 1.29); the scuffs carry the wear through roughness instead. r4 (cast_compare.py, b30 cast at 1.5 m): cov_armour normal 1.0->0.55 (the Elite major's glossy plate broke into a glitter grain, dE76 1.08, p95 4.7); cov_armour_worn normal 1.0->0.7 (the Grunt's pitted casting sparkled in the highlights). r4 second pass: mjolnir_plate normal 0.75->0.55 (the Chief at 0.8 m from the debug camera: a hairy fuzz, dE76 1.18); grunt_tank normal 1.0->0.5, cavity 1.0->0.6 (the methane tank read as coarse stucco, dE76 1.75 at 1.5 m, p95 4.9); marine_paint normal 1.0->0.8 (Marine at 0.8 m dE76 1.02); cov_cloth normal 1.0->1.3 (the Jackal's weave barely read in its shade). r4 third pass: skin_grunt normal 1.0->0.45, cavity 1.0->0.6 (the Grunt's head and back at 0.8 m: a bold brain-coral crease, dE76 1.96, p95 7.0; the half alias on torso and limbs follows); cov_armour footprint [16,6]->[48,24] px a tile (the Elites at 3 m: shimmer 1.24-1.39 on/s0 with the 0.9 mm grain under a pixel; it now fades out between about 1.9 and 4 m). r4 fourth pass: cov_armour_worn normal 0.7->0.55 (the Grunt's orange armour at 0.8 m, dE76 1.21); cov_armour footprint [48,24]->[64,32] (the Elite minor at 3 m still 1.26 on/s0: its grain is gone by 3 m now, full to about 1.5 m). r4 fifth pass: grunt_tank rough 1.0->0.5, cov_armour_worn rough 1.0->0.7 (a Grunt's shaded methane tank lit up with a speckled sheen, dE76 1.46 at 1.5 m: the roughness scatter, not the normals). r4 sixth pass: cov_armour normal 0.55->0.35, rough 1.0->0.7 (the Elite major's plate at 0.8 m in a broad highlight broke into a grain, dE76 1.54, p95 5.2). r4 seventh pass: skin_grunt normal 0.45->0.25, cavity 0.6->0.35 (a Grunt's head skin at 0.8 m still a bold crease network, dE76 2.06: the tile wants re-authoring with finer, shallower creases). r4 eighth pass: grunt_tank normal 0.5->0.3, cavity 0.6->0.35, footprint [16,6]->[32,16] (another Grunt's tank: dE76 1.14 at 1.5 m and shimmer 1.28 at 3 m; its 5 mm casting is about 2 px at 1.5 m and under a pixel at 3 m, so it now fades out by about 3 m). r5 (OpenH1, h1_cast.py, b30 placed cast): the Elite suit read as cobblestone scales (skin_elite) at 0.8 m: the suit's slot is now cov_bodysuit, a smooth fine membrane (skin_elite stays on the heads' skin). skin_grunt re-authored finer and shallower (0.8-2.2 mm creases): normal 0.25->0.6, cavity 0.35->0.5. mjolnir_plate re-authored as a hard coat with directional micro scratches and sparse deep ones (no 2-5 mm undulation, no bead blast): normal 0.55->0.7, rough 1.3->1.0. r5 review (owner_caps on the b30 beach, h1_cast three runs a distance): no change to the values; the Grunt methane tank (grunt_tank) at 0.8 m reads as a rippled, hammered sheen and the Grunt breather mask (cov_armour_worn) as a fine stucco, both under the colour and shimmer limits; candidates for the next tile pass.",
+ "classes": {
+  "cov_alloy": {
+   "normal": 0.55
+  },
+  "unsc_painted_metal": {
+   "normal": 0.9
+  },
+  "mjolnir_plate": {
+   "fade_m": [
+    4.0,
+    12.0
+   ],
+   "footprint": [
+    12,
+    4
+   ],
+   "rough": 1.0,
+   "normal": 0.7
+  },
+  "mjolnir_undersuit": {
+   "fade_m": [
+    3.0,
+    8.0
+   ],
+   "footprint": [
+    64,
+    32
+   ]
+  },
+  "unsc_gunmetal": {
+   "normal": 0.6,
+   "rough": 0.6
+  },
+  "cov_armour": {
+   "footprint": [
+    64,
+    32
+   ],
+   "normal": 0.35,
+   "rough": 0.7
+  },
+  "cov_armour_worn": {
+   "footprint": [
+    16,
+    6
+   ],
+   "normal": 0.55,
+   "rough": 0.7
+  },
+  "grunt_tank": {
+   "footprint": [
+    32,
+    16
+   ],
+   "normal": 0.3,
+   "cavity": 0.35,
+   "rough": 0.5
+  },
+  "marine_paint": {
+   "footprint": [
+    16,
+    6
+   ],
+   "normal": 0.8
+  },
+  "marine_metal": {
+   "footprint": [
+    24,
+    8
+   ]
+  },
+  "skin_elite": {
+   "footprint": [
+    48,
+    24
+   ]
+  },
+  "skin_grunt": {
+   "footprint": [
+    40,
+    20
+   ],
+   "normal": 0.6,
+   "cavity": 0.5
+  },
+  "skin_jackal": {
+   "footprint": [
+    64,
+    32
+   ]
+  },
+  "human_skin": {
+   "footprint": [
+    48,
+    24
+   ]
+  },
+  "human_hair": {
+   "footprint": [
+    48,
+    24
+   ]
+  },
+  "cov_cloth": {
+   "footprint": [
+    88,
+    58
+   ],
+   "normal": 1.3
+  },
+  "marine_bdu": {
+   "footprint": [
+    112,
+    76
+   ]
+  },
+  "marine_webbing": {
+   "footprint": [
+    144,
+    96
+   ]
+  },
+  "cov_bodysuit": {
+   "footprint": [
+    48,
+    24
+   ]
+  }
+ },
+ "shaders": {
+  "weapons\\plasma rifle\\fp\\shaders\\gun": {
+   "reflection": {
+    "bend": 0.3,
+    "cavity": 0.5
+   }
+  },
+  "weapons\\plasma rifle\\fp\\shaders\\dull": {
+   "reflection": {
+    "bend": 0.3,
+    "cavity": 0.5
+   }
+  },
+  "weapons\\plasma pistol\\shaders\\pp dull": {
+   "reflection": {
+    "bend": 0.3,
+    "cavity": 0.5
+   }
+  },
+  "weapons\\plasma pistol\\shaders\\pp shiney": {
+   "reflection": {
+    "bend": 0.3,
+    "cavity": 0.5
+   }
+  }
+ },
+ "note_m3": "M3 (Covenant and Marines), not yet tuned in game: footprints only, by the M1 lesson (r2/r3: a regular pattern fades out before its period drops to about 1.6 px; the undersuit's 20 ribs a tile end at 32 px). Weaves: threads a tile x 1.6 at the far end (marine_bdu 48 -> 76 px, cov_cloth 36 -> 58, marine_webbing 60 warps -> 96), the near end 1.5x that. Irregular cells (scales, pebbles, creases, pores, strands) about a cell a pixel at the far end (skin_elite 28 cells -> 24, skin_jackal 45 -> 32, skin_grunt ~20 creases -> 20). Armour finishes have no period and carry their wear in roughness, which the Toksvig mips keep: 16 -> 6 (the Chief's plate is 12 -> 4). Strengths 1.0 until a review."
+}

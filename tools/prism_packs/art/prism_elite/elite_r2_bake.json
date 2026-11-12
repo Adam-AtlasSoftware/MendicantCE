@@ -1,0 +1,117 @@
+{
+ "height": {
+  "seam_sigma": 1.2,
+  "seam_broad_sigma": 6.0,
+  "seam_lo": 0.45,
+  "seam_hi": 0.9,
+  "seam_depth": 1.0,
+  "pebble_fine": 0.5,
+  "pebble_coarse": 2.2,
+  "pebble_amp": 0.6,
+  "skin_amp": 0.35,
+    "seam_min_len": 10,
+    "seam_line_lo": 0.3,
+    "seam_line_hi": 0.6
+ },
+ "height_factor": 4,
+ "high_levels": 1,
+ "bump_mm": 2.5,
+ "bevel_mm": 2.0,
+ "bevel_samples": 8,
+ "size": 2048,
+ "cage_mm": 16,
+ "ray_mm": 32,
+ "ao_mm": 60,
+ "samples": 128,
+ "gpu": "",
+ "pack": {
+  "rough": {},
+  "rough_default": 0.62,
+  "spec_polish": 0.2,
+  "mp_class": {
+   "channel": 2,
+   "lo": 0.35,
+   "hi": 0.65,
+   "on": 0.38,
+   "off": 0.78
+  },
+  "mp_glow": {
+   "channel": 1,
+   "above": 0.1
+  }
+ },
+ "occluders": [
+  "arms/base00/superhigh",
+  "head/base00/superhigh",
+  "legs/base00/superhigh",
+  "torso/base00/superhigh"
+ ],
+ "bitmaps": {
+  "elite arms": {
+   "shaders": [
+    "elite arms"
+   ],
+   "passes": [
+    [
+     "arms/base00/superhigh"
+    ],
+    [
+     "arms/blunt_armored_arms/superhigh"
+    ]
+   ]
+  },
+  "elite head": {
+   "shaders": [
+    "elite head"
+   ],
+   "skin": true,
+   "passes": [
+    [
+     "head/base00/superhigh"
+    ]
+   ]
+  },
+  "elite head1": {
+   "shaders": [
+    "elite heada"
+   ],
+   "skin": true,
+   "passes": [
+    [
+     "head/crescent_masked_head/superhigh"
+    ]
+   ]
+  },
+  "elite legs": {
+   "shaders": [
+    "elite legs"
+   ],
+   "passes": [
+    [
+     "legs/base00/superhigh"
+    ]
+   ]
+  },
+  "elite legs1": {
+   "shaders": [
+    "elite legsa"
+   ],
+   "passes": [
+    [
+     "legs/double_pointed_armored_legs/superhigh"
+    ]
+   ]
+  },
+  "elite torso": {
+   "shaders": [
+    "elite torso"
+   ],
+   "passes": [
+    [
+     "torso/base00/superhigh"
+    ]
+   ]
+  }
+ },
+ "tag_dir": "characters/elite/bitmaps"
+}

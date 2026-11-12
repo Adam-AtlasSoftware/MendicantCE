@@ -1,0 +1,25 @@
+{
+ "class": "hard_polymer",
+ "description": "Chief black hardware (vents, joints, soles, backpack): matte bead-blast/pebble grain with a faint mould flow.",
+ "group": "chief",
+ "first_person": false,
+ "suggested_shaders": ["characters\\cyborg\\shaders\\armor (dark non-plate texels)", "characters\\cyborg\\fp\\shaders\\armor hands (edge texels)"],
+ "tile_mm": 40.0, "author_px": 1024, "ship_px": 512, "seed": 204,
+ "feature_band_mm": [0.3, 1.5],
+ "target_slope_rms": 0.18,
+ "height_layers": [
+  {"gen": "pebble", "cell_mm": 0.45, "rms_mm": 0.005, "mode": "dome"},
+  {"gen": "bead_blast", "rms_mm": 0.003, "crater_mm": [0.32, 0.5], "coverage": 1.5},
+  {"gen": "brushed", "rms_mm": 0.002, "across_mm": [2.0, 6.0], "streak_mm": 20.0, "angle_deg": 60.0,
+   "note": "mould flow"}
+ ],
+ "cavity": {"radius_mm": 0.4, "strength": 0.5},
+ "rough_layers": [
+  {"src": "cavity", "k": 0.05},
+  {"src": "noise", "k": 0.03, "wavelength_mm": [1.0, 8.0]}
+ ],
+ "export_masks": [],
+ "fade_m": [1.5, 3.0],
+ "preview": {"base_grey": 0.035, "metallic": 0.0, "roughness": 0.5},
+ "base_roughness_ref": 0.5
+}

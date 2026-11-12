@@ -1,0 +1,111 @@
+{
+ "note": "PRISM M4: the colour (base) maps upscaled locally from the player's own maps (never shipped: the outputs hold CE pixels). Only tags whose every non-resource use is a model shader's base map (soso.base_map) or the same image as a transparent shader's map are listed; multipurpose, detail, cube, normal and bump maps never are. scale: 'auto' = 4x when the larger side is 256 or less, else 2x. Rebuilt by art_pipeline/build_base_local.py.",
+ "model": "realesrgan-x4plus",
+ "backproject": 6,
+ "groups": {
+  "chief": [
+   "characters\\cyborg\\bitmaps\\cyborg",
+   "characters\\cyborg\\fp\\bitmaps\\cyborg hands"
+  ],
+  "elite": [
+   "characters\\elite\\bitmaps\\elite arms",
+   "characters\\elite\\bitmaps\\elite head",
+   "characters\\elite\\bitmaps\\elite head1",
+   "characters\\elite\\bitmaps\\elite legs",
+   "characters\\elite\\bitmaps\\elite legs1",
+   "characters\\elite\\bitmaps\\elite teeth",
+   "characters\\elite\\bitmaps\\elite torso",
+   "characters\\elite\\elite_special\\bitmaps\\elite special",
+   "characters\\elite\\elite_corpse\\bitmaps\\gutted elite torso"
+  ],
+  "grunt": [
+   "characters\\grunt\\bitmaps\\grunt arms and legs",
+   "characters\\grunt\\bitmaps\\grunt head and back",
+   "characters\\grunt\\bitmaps\\grunt torso"
+  ],
+  "jackal": [
+   "characters\\jackal\\bitmaps\\jackal arms",
+   "characters\\jackal\\bitmaps\\jackal head",
+   "characters\\jackal\\bitmaps\\jackal legs",
+   "characters\\jackal\\bitmaps\\jackal torso"
+  ],
+  "marine": [
+   "characters\\marine\\bitmaps\\face_charles",
+   "characters\\marine\\bitmaps\\face_chris",
+   "characters\\marine\\bitmaps\\face_fred",
+   "characters\\marine\\bitmaps\\face_marcus",
+   "characters\\marine\\bitmaps\\face_matt",
+   "characters\\marine\\bitmaps\\face_paul",
+   "characters\\marine\\bitmaps\\face_rob",
+   "characters\\marine\\bitmaps\\face_shiek",
+   "characters\\marine\\bitmaps\\marine_body",
+   "characters\\marine\\bitmaps\\marine_body johnson",
+   "characters\\marine\\bitmaps\\marine_hats",
+   "characters\\marine_armored\\bitmaps\\face_johnson_sarge",
+   "characters\\marine_armored\\bitmaps\\gutted torso",
+   "characters\\marine_armored\\bitmaps\\marine_arms",
+   "characters\\marine_armored\\bitmaps\\marine_arms_johnson",
+   "characters\\marine_armored\\bitmaps\\marine_helmet",
+   "characters\\marine_armored\\bitmaps\\marine_helmet_hires",
+   "characters\\marine_armored\\bitmaps\\marine_legs",
+   "characters\\marine_armored\\bitmaps\\marine_torso"
+  ],
+  "fp_weapons": [
+   "weapons\\assault rifle\\fp\\bitmaps\\assault rifle_fp",
+   "weapons\\assault rifle\\fp\\bitmaps\\display_fp",
+   "weapons\\pistol\\fp\\bitmaps\\pistol",
+   "weapons\\pistol\\fp\\bitmaps\\bullet",
+   "weapons\\plasma rifle\\fp\\bitmaps\\plasma rifle_fp",
+   "weapons\\plasma pistol\\bitmaps\\plasma pistol"
+  ]
+ },
+ "excluded": {
+  "weapons\\*\\bitmaps\\*_card": "third-person LOD pictures, not the first-person weapons",
+  "characters\\marine_armored\\bitmaps\\marine_helmet_hud_hires": "HUD graphics on a visor (text-like marks the model would redraw)",
+  "characters\\jackal\\bitmaps\\jackal shield": "the energy shield, not a body colour map",
+  "*multipurpose*, *multi*, *detail*, *reflection*, cube maps": "never upscaled (masks, detail and cube maps)"
+ },
+ "rejected": {},
+ "overrides": {
+  "characters\\marine\\bitmaps\\face_charles": {
+   "model_weight": 0.0,
+   "reason": "x4plus draws letter-like glyphs into the ribbed shirt collar (and Johnson's teeth patch) at 2x and 4x, still readable at weight 0.3: Lanczos 4x, back-projected onto CE"
+  },
+  "characters\\marine\\bitmaps\\face_chris": {
+   "model_weight": 0.0,
+   "reason": "x4plus draws letter-like glyphs into the ribbed shirt collar (and Johnson's teeth patch) at 2x and 4x, still readable at weight 0.3: Lanczos 4x, back-projected onto CE"
+  },
+  "characters\\marine\\bitmaps\\face_fred": {
+   "model_weight": 0.0,
+   "reason": "x4plus draws letter-like glyphs into the ribbed shirt collar (and Johnson's teeth patch) at 2x and 4x, still readable at weight 0.3: Lanczos 4x, back-projected onto CE"
+  },
+  "characters\\marine\\bitmaps\\face_marcus": {
+   "model_weight": 0.0,
+   "reason": "x4plus draws letter-like glyphs into the ribbed shirt collar (and Johnson's teeth patch) at 2x and 4x, still readable at weight 0.3: Lanczos 4x, back-projected onto CE"
+  },
+  "characters\\marine\\bitmaps\\face_matt": {
+   "model_weight": 0.0,
+   "reason": "x4plus draws letter-like glyphs into the ribbed shirt collar (and Johnson's teeth patch) at 2x and 4x, still readable at weight 0.3: Lanczos 4x, back-projected onto CE"
+  },
+  "characters\\marine\\bitmaps\\face_paul": {
+   "model_weight": 0.0,
+   "reason": "x4plus draws letter-like glyphs into the ribbed shirt collar (and Johnson's teeth patch) at 2x and 4x, still readable at weight 0.3: Lanczos 4x, back-projected onto CE"
+  },
+  "characters\\marine\\bitmaps\\face_rob": {
+   "model_weight": 0.0,
+   "reason": "x4plus draws letter-like glyphs into the ribbed shirt collar (and Johnson's teeth patch) at 2x and 4x, still readable at weight 0.3: Lanczos 4x, back-projected onto CE"
+  },
+  "characters\\marine\\bitmaps\\face_shiek": {
+   "model_weight": 0.0,
+   "reason": "x4plus draws letter-like glyphs into the ribbed shirt collar (and Johnson's teeth patch) at 2x and 4x, still readable at weight 0.3: Lanczos 4x, back-projected onto CE"
+  },
+  "characters\\marine_armored\\bitmaps\\face_johnson_sarge": {
+   "model_weight": 0.0,
+   "reason": "x4plus draws letter-like glyphs into the ribbed shirt collar (and Johnson's teeth patch) at 2x and 4x, still readable at weight 0.3: Lanczos 4x, back-projected onto CE"
+  },
+  "characters\\jackal\\bitmaps\\jackal arms": {
+   "model_weight": 0.5,
+   "reason": "x4plus inks CE's soft brown scale-cell rings as hard black outlines; half the model's detail keeps them CE's soft brown"
+  }
+ }
+}

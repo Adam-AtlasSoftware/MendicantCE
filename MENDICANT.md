@@ -63,18 +63,39 @@ SOFTNESS, LIGHTMAPS Smooth, SHADE DEPTH, BLOOM, TONE, and PRISM RAY TRACING
 (greyed out where the graphics card or its driver has no ray queries).
 
 Needs files that are made from the game's data, and so are in no download
-and not in the repository:
+and not in the repository. **You can build them yourself**, from your own
+copy of the game, with the pack tools that come with this download (below):
 
 | Setting | Needs |
 | --- | --- |
-| REFLECTIONS Local | `<data>/prism/probes/<map>.probes`, made by `tools/prism_probes.py` from a source checkout on Linux |
-| LIGHTMAPS Rebaked | `<data>/prism_lightmaps/rebaked/*.prl`; without them it draws as Smooth |
-| WORLD GEOMETRY Remodel, GEOMETRY DETAIL, GEOMETRY SHADOWS | `<data>/prism_world/<bsp>.pwg`; a level without one is drawn as the Xbox's |
-| Every row of PRISM ASSETS (material and surface detail, texture detail, PBR materials, remodels) | a mod with `textures/`, `meshes/`, `materials/`, a material overlay or surface maps ([docs/mods.md](docs/mods.md)) |
+| REFLECTIONS Local | `<data>/prism/probes/<map>.probes` (the pack tools' `probes`) |
+| LIGHTMAPS Rebaked | `<data>/prism_lightmaps/rebaked/*.prl` (`lightmaps`); without them it draws as Smooth |
+| WORLD GEOMETRY Remodel, GEOMETRY DETAIL, GEOMETRY SHADOWS | `<data>/prism_world/levels/<level>/<bsp>.pwg` (`world`); a level without one is drawn as the Xbox's |
+| Every row of PRISM ASSETS (material and surface detail, texture detail, PBR materials, remodels) | a mod with `textures/`, `meshes/`, `materials/`, a material overlay or surface maps ([docs/mods.md](docs/mods.md); the character packs) |
 
-No such pack is published. The formats are documented (`docs/mods.md`) and
-the tools that read and check them are in `tools/`; the tools that built the
-author's own packs from the game's data are not part of this repository.
+No such pack is published, and none may be: each is made of the game's data.
+
+### PRISM's pack tools: building the packs on your computer
+
+The download carries the tools that make every pack above from your own
+game: `share/openh1/prism_packs/` on Linux (with their extractor,
+`bin/openh1-map-extract`), `prism_packs\` on Windows. They read the maps the
+game extracted from your disc image, and write the packs into its data
+folder, ready to turn on. They need Python 3.10 or newer with a few packages,
+Blender 4.5 and Invader, and a graphics card makes them much faster; the
+texture packs' upscalers are fetched only when you ask, each with its licence
+shown. Building everything is a long job on your own computer (the lightmaps
+most of all) that can be stopped and started again.
+
+```
+python3 share/openh1/prism_packs/prism_packs.py check --data <data folder>
+python3 share/openh1/prism_packs/prism_packs.py build --data <data folder> --blender <blender> --invader <invader>
+```
+
+`GUIDE.md` in that folder ([docs/prism_packs.md](docs/prism_packs.md) in the
+source) says what each pack needs and gives, how to set the tools up on Linux
+and Windows (where the extractor runs through WSL), and how to turn the packs
+on. What they build is yours alone: do not share it.
 
 A setting of these that is on and finds no file changes nothing in the
 picture. The game's log (`halo.log`, "The game's logs" below) then says so

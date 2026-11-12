@@ -1,0 +1,111 @@
+{
+ "class": "unsc_painted_metal",
+ "description": "Painted metal: fine, low satin orange peel (0.35-1.2 mm), sparse fine paint chips (step-down to the substrate, no rim), fine scuffs and a few longer scratches; the chips and scratches read through roughness.",
+ "group": "weapons",
+ "first_person": true,
+ "suggested_shaders": [
+  "weapons\\assault rifle\\fp\\shaders\\gun (painted texels)",
+  "weapons\\pistol\\fp\\shaders\\black"
+ ],
+ "tile_mm": 60.0,
+ "author_px": 2048,
+ "ship_px": 1024,
+ "seed": 102,
+ "feature_band_mm": [
+  0.3,
+  3.0
+ ],
+ "target_slope_rms": 0.06,
+ "height_layers": [
+  {
+   "gen": "orange_peel",
+   "rms_mm": 0.0025,
+   "wavelength_mm": [
+    0.35,
+    1.2
+   ],
+   "cell_mix": 0.4
+  },
+  {
+   "gen": "chips",
+   "count": 110,
+   "radius_mm": [
+    0.3,
+    1.0
+   ],
+   "depth_mm": 0.02,
+   "wall_mm": 0.25,
+   "irregular": 0.22
+  },
+  {
+   "gen": "scratches",
+   "scales": [
+    {
+     "count": 90,
+     "length_mm": [
+      2,
+      10
+     ],
+     "width_mm": 0.12,
+     "depth_mm": 0.004,
+     "lip": 0.3,
+     "angle_deg": null,
+     "curvature_per_mm": 0.03
+    },
+    {
+     "count": 14,
+     "length_mm": [
+      8,
+      25
+     ],
+     "width_mm": 0.2,
+     "depth_mm": 0.008,
+     "lip": 0.35,
+     "angle_deg": null,
+     "curvature_per_mm": 0.01
+    }
+   ]
+  }
+ ],
+ "cavity": {
+  "radius_mm": 0.4,
+  "strength": 0.55
+ },
+ "rough_layers": [
+  {
+   "src": "mask:chip",
+   "k": -0.15,
+   "note": "exposed substrate is smoother than the satin paint"
+  },
+  {
+   "src": "mask:scratch",
+   "k": 0.22
+  },
+  {
+   "src": "cavity",
+   "k": 0.04
+  },
+  {
+   "src": "noise",
+   "k": 0.04,
+   "wavelength_mm": [
+    2.0,
+    12.0
+   ]
+  }
+ ],
+ "export_masks": [
+  "chip"
+ ],
+ "fade_m": [
+  1.0,
+  4.0
+ ],
+ "preview": {
+  "base_grey": 0.07,
+  "metallic": 0.0,
+  "roughness": 0.45
+ },
+ "base_roughness_ref": 0.45,
+ "max_gain": 2.5
+}

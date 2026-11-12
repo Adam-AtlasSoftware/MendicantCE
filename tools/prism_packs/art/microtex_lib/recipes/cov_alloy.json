@@ -1,0 +1,80 @@
+{
+ "class": "cov_alloy",
+ "description": "Covenant alloy: smooth cast metal with a soft fine grain, sparse shallow pits and a satin mottle in its roughness; no streaks (the flow striation rippled) and no scratches (clean variant).",
+ "group": "weapons",
+ "first_person": true,
+ "suggested_shaders": [
+  "weapons\\plasma rifle\\fp\\shaders\\gun",
+  "weapons\\plasma rifle\\fp\\shaders\\dull",
+  "weapons\\plasma pistol\\shaders\\pp dull",
+  "weapons\\plasma pistol\\shaders\\pp shiney"
+ ],
+ "tile_mm": 80.0,
+ "author_px": 2048,
+ "ship_px": 1024,
+ "seed": 104,
+ "feature_band_mm": [
+  0.3,
+  6.0
+ ],
+ "target_slope_rms": 0.07,
+ "height_layers": [
+  {
+   "gen": "anodised_grain",
+   "rms_mm": 0.0012,
+   "grain_mm": [
+    0.5,
+    1.2
+   ],
+   "cell_mix": 0.5
+  },
+  {
+   "gen": "bead_blast",
+   "rms_mm": 0.0008,
+   "crater_mm": [
+    0.45,
+    0.9
+   ],
+   "coverage": 0.35,
+   "note": "sparse shallow casting pits"
+  }
+ ],
+ "cavity": {
+  "radius_mm": 0.5,
+  "strength": 0.25
+ },
+ "rough_layers": [
+  {
+   "src": "noise",
+   "k": 0.05,
+   "wavelength_mm": [
+    3.0,
+    12.0
+   ],
+   "note": "satin mottle"
+  },
+  {
+   "src": "noise",
+   "k": 0.02,
+   "wavelength_mm": [
+    0.5,
+    1.5
+   ]
+  },
+  {
+   "src": "cavity",
+   "k": 0.03
+  }
+ ],
+ "export_masks": [],
+ "fade_m": [
+  1.5,
+  4.0
+ ],
+ "preview": {
+  "base_grey": 0.55,
+  "metallic": 1.0,
+  "roughness": 0.24
+ },
+ "base_roughness_ref": 0.24
+}

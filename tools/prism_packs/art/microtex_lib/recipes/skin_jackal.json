@@ -1,0 +1,88 @@
+{
+ "class": "skin_jackal",
+ "description": "Jackal skin and feathers: avian pebbled skin (round tubercles about 1.1 mm with crevices), faint folds and fine feather barbs running one way; covers the crest and quills too (multipurpose B is skin and feathers on the Jackal).",
+ "group": "covenant",
+ "first_person": false,
+ "suggested_shaders": [
+  "characters\\jackal\\shaders\\jackal head (multipurpose B)",
+  "characters\\jackal\\shaders\\jackal arms (multipurpose B)"
+ ],
+ "tile_mm": 50.0,
+ "author_px": 1024,
+ "ship_px": 512,
+ "seed": 306,
+ "tile_rule": "base texel 2.3-2.6 mm: the tile spans 19-21 base texels",
+ "feature_band_mm": [
+  0.6,
+  4.0
+ ],
+ "target_slope_rms": 0.22,
+ "height_layers": [
+  {
+   "gen": "scales",
+   "cell_mm": 1.1,
+   "rms_mm": 0.02,
+   "angle_deg": 90.0,
+   "angle_var_deg": 60.0,
+   "lean": 0.15,
+   "crevice": 0.3,
+   "height_var": 0.35,
+   "note": "round tubercles"
+  },
+  {
+   "gen": "fibres",
+   "rms_mm": 0.006,
+   "count_per_cm2": 20,
+   "length_mm": [
+    2.0,
+    5.0
+   ],
+   "width_mm": 0.25,
+   "angle_deg": 90.0,
+   "spread_deg": 30.0,
+   "note": "feather barbs"
+  },
+  {
+   "gen": "wrinkles",
+   "rms_mm": 0.008,
+   "wavelength_mm": [
+    3.0,
+    8.0
+   ],
+   "width": 0.3
+  }
+ ],
+ "cavity": {
+  "radius_mm": 0.6,
+  "strength": 0.5
+ },
+ "rough_layers": [
+  {
+   "src": "mask:crevice",
+   "k": 0.05
+  },
+  {
+   "src": "cavity",
+   "k": 0.04
+  },
+  {
+   "src": "noise",
+   "k": 0.04,
+   "wavelength_mm": [
+    2.0,
+    8.0
+   ]
+  }
+ ],
+ "export_masks": [],
+ "fade_m": [
+  3.0,
+  8.0
+ ],
+ "preview": {
+  "base_grey": 0.35,
+  "metallic": 0.0,
+  "roughness": 0.55
+ },
+ "base_roughness_ref": 0.55
+}

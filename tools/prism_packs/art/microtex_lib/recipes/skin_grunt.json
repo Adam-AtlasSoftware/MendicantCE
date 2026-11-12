@@ -1,0 +1,91 @@
+{
+ "class": "skin_grunt",
+ "description": "Grunt skin: leathery, a fine and shallow crease network (0.8-2.2 mm, narrow valleys) over a faint leather grain with sparse small pores, like CE's own grunt detail map at a finer scale; at half strength where CE's detail map is already on (grunt torso, arms and legs: skin_grunt_half).",
+ "group": "covenant",
+ "first_person": false,
+ "suggested_shaders": [
+  "characters\\grunt\\shaders\\grunt head and back (not multipurpose B)",
+  "characters\\grunt\\shaders\\grunt diffuse (not multipurpose B)",
+  "characters\\grunt\\shaders\\grunt torso and arms and legs as skin_grunt_half"
+ ],
+ "tile_mm": 50.0,
+ "author_px": 1024,
+ "ship_px": 512,
+ "seed": 306,
+ "tile_rule": "base texel 2.9-3.5 mm: the tile spans 14-17 base texels",
+ "feature_band_mm": [
+  0.6,
+  4.0
+ ],
+ "target_slope_rms": 0.14,
+ "height_layers": [
+  {
+   "gen": "wrinkles",
+   "rms_mm": 0.012,
+   "wavelength_mm": [
+    0.8,
+    2.2
+   ],
+   "width": 0.18,
+   "note": "fine crease network"
+  },
+  {
+   "gen": "wrinkles",
+   "rms_mm": 0.004,
+   "wavelength_mm": [
+    2.5,
+    6.0
+   ],
+   "width": 0.25,
+   "note": "faint larger folds"
+  },
+  {
+   "gen": "pebble",
+   "cell_mm": 0.6,
+   "rms_mm": 0.003,
+   "mode": "leather"
+  },
+  {
+   "gen": "pores",
+   "per_cm2": 12,
+   "radius_mm": [
+    0.15,
+    0.25
+   ],
+   "depth_mm": 0.004
+  }
+ ],
+ "cavity": {
+  "radius_mm": 0.6,
+  "strength": 0.4
+ },
+ "rough_layers": [
+  {
+   "src": "mask:crease",
+   "k": 0.03
+  },
+  {
+   "src": "cavity",
+   "k": 0.03
+  },
+  {
+   "src": "noise",
+   "k": 0.025,
+   "wavelength_mm": [
+    2.0,
+    10.0
+   ]
+  }
+ ],
+ "export_masks": [],
+ "fade_m": [
+  3.0,
+  8.0
+ ],
+ "preview": {
+  "base_grey": 0.3,
+  "metallic": 0.0,
+  "roughness": 0.55
+ },
+ "base_roughness_ref": 0.55
+}

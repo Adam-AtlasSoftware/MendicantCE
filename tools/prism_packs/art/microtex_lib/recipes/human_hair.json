@@ -1,0 +1,65 @@
+{
+ "class": "human_hair",
+ "description": "Human hair, stubble and brows on the face maps (multipurpose B low): short fine strands at random angles, low amplitude, matte.",
+ "group": "marines",
+ "first_person": false,
+ "suggested_shaders": [
+  "characters\\marine\\shaders\\face_* (not multipurpose B)"
+ ],
+ "tile_mm": 40.0,
+ "author_px": 1024,
+ "ship_px": 512,
+ "seed": 313,
+ "tile_rule": "base texel 2.8-3.1 mm: the tile spans 13-14 base texels",
+ "feature_band_mm": [
+  0.3,
+  2.5
+ ],
+ "target_slope_rms": 0.2,
+ "height_layers": [
+  {
+   "gen": "fibres",
+   "rms_mm": 0.01,
+   "count_per_cm2": 160,
+   "length_mm": [
+    1.5,
+    4.0
+   ],
+   "width_mm": 0.3,
+   "angle_deg": null
+  }
+ ],
+ "cavity": {
+  "radius_mm": 0.4,
+  "strength": 0.4
+ },
+ "rough_layers": [
+  {
+   "src": "mask:fibre",
+   "k": -0.04
+  },
+  {
+   "src": "cavity",
+   "k": 0.04
+  },
+  {
+   "src": "noise",
+   "k": 0.03,
+   "wavelength_mm": [
+    1.0,
+    6.0
+   ]
+  }
+ ],
+ "export_masks": [],
+ "fade_m": [
+  1.5,
+  4.0
+ ],
+ "preview": {
+  "base_grey": 0.1,
+  "metallic": 0.0,
+  "roughness": 0.6
+ },
+ "base_roughness_ref": 0.6
+}

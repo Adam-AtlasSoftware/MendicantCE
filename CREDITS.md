@@ -40,3 +40,25 @@ from its `director_forge.c` and `xinput_sdl_forge.c`), the `.mvar` format
 (`tools/harness/tests/*forge*`). Its own importer of the monitor's tags is
 replaced by Watanoge's tag packs (`forge_tag_import.c`); its sky tab
 (`sky.c`, `skyfx.c`, OpenGL) is not ported.
+
+## PRISM's pack tools
+
+`tools/prism_packs` (the pack tools, `docs/prism_packs.md`) is this fork's own code, AGPL-3.0-or-later,
+like the rest: the art scripts, recipes and entry point by Adam Wiley, and the extractor
+(`tools/prism_packs/extract`: `map_extract.c` and its lights command, written for an OpenCE checkout and
+moved here; its texture decoder is OpenCE's, split out of `xbox_textures.c`). It contains no game data and no
+code of other projects. The Linux package's `bin/openh1-map-extract` is that extractor, linked statically
+with the GNU C Library (LGPL-2.1-or-later; its notice and licence are in the package's licences).
+
+What the tools use and do not carry. Each is installed or fetched by the player, from its own authors:
+
+| What | Licence | How the tools use it |
+| --- | --- | --- |
+| [Blender](https://www.blender.org) 4.5 LTS | GPL-2.0-or-later (GPL-3.0 as built) | runs the remodel and bake scripts headless; the player installs it |
+| [Invader](https://github.com/SnowyMouse/invader) (Snowy Mouse) | GPL-3.0 | its programs compile and extract tags; the player installs it |
+| Python packages: NumPy, SciPy, scikit-image (BSD-3-Clause), Pillow (MIT-CMU), opencv-python-headless (Apache-2.0, MIT), PyTorch and torchvision (BSD-3-Clause), [spandrel](https://github.com/chaiNNer-org/spandrel) (MIT) | as named | imported; the player installs them (`requirements.txt`) |
+| [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) (Xintao Wang, Liangbin Xie, Chao Dong, Ying Shan; Tencent ARC Lab): realesrgan-ncnn-vulkan 20220424 and the models x4plus, x4plus-anime, animevideov3, realesr-general-x4v3, realesr-general-wdn-x4v3 | program MIT, code and models BSD-3-Clause | fetched from the project's release v0.2.5.0 when the player says yes, its licence shown first (`prism_packs.py models`) |
+| 4xNomos8kSC, by Philip Hofmann ([Phhofm/models](https://github.com/Phhofm/models)) | CC-BY-4.0 (credit required) | fetched from its author's page when the player says yes, its licence and credit shown first |
+
+The methods the scripts follow are named in their comments: the guided filter (He, Sun and Tang), CIEDE2000
+colour difference, MikkTSpace tangents (Blender's), and Lanczos and box resampling.

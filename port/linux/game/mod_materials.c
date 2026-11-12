@@ -64,7 +64,7 @@ has tile A everywhere. null leaves a shader out. Unknown keys are ignored.
 A shader may name up to four classes (A to D) and a class mask for each of
 its base map's bitmaps (class_mask: one PNG, or an array by the bitmap's
 index): an RGBA PNG at the base map's coordinates whose R G B A are the
-weights of slots A B C D (art_pipeline/class_masks.py builds them on the
+weights of slots A B C D (tools/prism_packs/art/class_masks.py builds them on the
 player's machine from the player's own maps, so a mod names them but does
 not carry them: they are found in whichever mod has them). With its mask,
 the channel rule (mask) decides slot A, as above, and the mask's other
@@ -83,7 +83,7 @@ PRISM v2 surface maps (display.prism_surface_maps, off unless set): an
 RGBA PNG at a base map's coordinates (RG the normal's x and y, y up the
 picture; B the ambient occlusion; A the roughness, 1 matte and without a
 highlight), baked from a remodel's high-poly onto its game mesh at CE's own
-UVs (art_pipeline/prism_bake_ce.py, prism_surface_pack.py: built on the
+UVs (tools/prism_packs/art/prism_bake_ce.py, prism_surface_pack.py: built on the
 player's machine from the player's maps). A mod gives one for a bitmap by
 putting it next to the bitmap's tag: tags\<bitmap>.surface.png for the
 bitmap's first picture, tags\<bitmap>.surface<n>.png for its picture n.

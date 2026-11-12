@@ -1,0 +1,133 @@
+{
+ "class": "cov_armour_worn",
+ "description": "Grunt and Jackal armour alloy: the same cast alloy as the Elites' but rougher and worn: a casting tooth, scratches at three scales and scuffs (CE's base maps paint them scuffed and speckled; this adds the fine wear the maps cannot hold).",
+ "group": "covenant",
+ "first_person": false,
+ "suggested_shaders": [
+  "characters\\grunt\\shaders\\grunt torso (multipurpose B)",
+  "characters\\grunt\\shaders\\grunt arms and legs (multipurpose B)",
+  "characters\\grunt\\shaders\\grunt diffuse (multipurpose B)",
+  "characters\\jackal\\shaders\\jackal torso (multipurpose R)",
+  "characters\\jackal\\shaders\\jackal legs (multipurpose R)",
+  "characters\\jackal\\shaders\\jackal head (not multipurpose B)",
+  "characters\\jackal\\shaders\\jackal arms (not multipurpose B)"
+ ],
+ "tile_mm": 80.0,
+ "author_px": 2048,
+ "ship_px": 1024,
+ "seed": 302,
+ "tile_rule": "base texel 2.3-3.6 mm: the tile spans 22-34 base texels",
+ "feature_band_mm": [
+  0.3,
+  6.0
+ ],
+ "target_slope_rms": 0.12,
+ "height_layers": [
+  {
+   "gen": "anodised_grain",
+   "rms_mm": 0.0012,
+   "grain_mm": [
+    0.5,
+    1.2
+   ],
+   "cell_mix": 0.4
+  },
+  {
+   "gen": "bead_blast",
+   "rms_mm": 0.0012,
+   "crater_mm": [
+    0.4,
+    0.8
+   ],
+   "coverage": 1.0,
+   "note": "casting tooth"
+  },
+  {
+   "gen": "scratches",
+   "scales": [
+    {
+     "count": 180,
+     "length_mm": [
+      3,
+      12
+     ],
+     "width_mm": 0.12,
+     "depth_mm": 0.002,
+     "lip": 0.3,
+     "angle_deg": null,
+     "curvature_per_mm": 0.03
+    },
+    {
+     "count": 60,
+     "length_mm": [
+      8,
+      30
+     ],
+     "width_mm": 0.2,
+     "depth_mm": 0.004,
+     "lip": 0.3,
+     "angle_deg": null,
+     "curvature_per_mm": 0.015
+    },
+    {
+     "count": 16,
+     "length_mm": [
+      15,
+      45
+     ],
+     "width_mm": 0.32,
+     "depth_mm": 0.008,
+     "lip": 0.35,
+     "angle_deg": null,
+     "curvature_per_mm": 0.008
+    },
+    {
+     "count": 18,
+     "length_mm": [
+      15,
+      50
+     ],
+     "width_mm": 1.8,
+     "depth_mm": 0.003,
+     "lip": 0.05,
+     "angle_deg": null,
+     "curvature_per_mm": 0.01,
+     "note": "broad shallow scuffs"
+    }
+   ]
+  }
+ ],
+ "cavity": {
+  "radius_mm": 0.5,
+  "strength": 0.4
+ },
+ "rough_layers": [
+  {
+   "src": "mask:scratch",
+   "k": 0.45
+  },
+  {
+   "src": "noise",
+   "k": 0.05,
+   "wavelength_mm": [
+    3.0,
+    12.0
+   ]
+  },
+  {
+   "src": "cavity",
+   "k": 0.04
+  }
+ ],
+ "export_masks": [],
+ "fade_m": [
+  4.0,
+  12.0
+ ],
+ "preview": {
+  "base_grey": 0.5,
+  "metallic": 1.0,
+  "roughness": 0.32
+ },
+ "base_roughness_ref": 0.32
+}

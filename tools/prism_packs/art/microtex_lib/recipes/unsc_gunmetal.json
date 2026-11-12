@@ -1,0 +1,28 @@
+{
+ "class": "unsc_gunmetal",
+ "description": "Machined, bead-blasted gunmetal: fine isotropic blast dimples over faint machining lines, a few handling scuffs.",
+ "group": "weapons",
+ "first_person": true,
+ "suggested_shaders": ["weapons\\pistol\\fp\\shaders\\silver", "weapons\\assault rifle\\fp\\shaders\\gun (bare-metal texels, spec mask)"],
+ "tile_mm": 50.0, "author_px": 2048, "ship_px": 1024, "seed": 101,
+ "feature_band_mm": [0.15, 1.5],
+ "target_slope_rms": 0.2,
+ "height_layers": [
+  {"gen": "bead_blast", "rms_mm": 0.004, "crater_mm": [0.2, 0.45], "coverage": 1.8},
+  {"gen": "brushed", "rms_mm": 0.0015, "across_mm": [0.2, 0.4], "streak_mm": 30.0, "angle_deg": 0.0,
+   "note": "machining lines; the overlay's tangent frame follows UV, so lines run along U"},
+  {"gen": "scratches", "scales": [
+    {"count": 25, "length_mm": [3, 15], "width_mm": 0.12, "depth_mm": 0.004, "lip": 0.3, "angle_deg": null, "curvature_per_mm": 0.02}
+  ]}
+ ],
+ "cavity": {"radius_mm": 0.3, "strength": 0.5},
+ "rough_layers": [
+  {"src": "cavity", "k": 0.10},
+  {"src": "noise", "k": 0.03, "wavelength_mm": [1.0, 6.0]},
+  {"src": "mask:scratch", "k": 0.10}
+ ],
+ "export_masks": [],
+ "fade_m": [1.0, 3.0],
+ "preview": {"base_grey": 0.42, "metallic": 1.0, "roughness": 0.36},
+ "base_roughness_ref": 0.36
+}
