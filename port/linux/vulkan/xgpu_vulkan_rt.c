@@ -979,9 +979,11 @@ void xgpu_vulkan_rt_capture(const struct xgpu_vulkan_rt_draw *draw)
 						memcpy(&weight, vertex + draw->weight_offset, sizeof(weight));
 						w = (float)weight / 32767.0f;
 					}
-					if (n0 > 189)
+					/* (the constants hold 44 nodes of three rows each from c[60]:
+					a node byte past 129 read beyond them) */
+					if (n0 > 129)
 						n0 = 0;
-					if (n1 > 189)
+					if (n1 > 129)
 						n1 = 0;
 					for (axis = 0; axis < 3; axis++)
 					{

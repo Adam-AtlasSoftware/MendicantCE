@@ -76,6 +76,11 @@ float mendicant_infer_expf(float x)
 	float fx, z, y;
 	int n;
 
+	/* (not a number: as it is. Converted to an integer below it is the
+	smallest one on x86, which the scaling then counted up from: some ten
+	milliseconds a call, a hundred calls a strategic decision) */
+	if (!(x == x))
+		return x;
 	if (x > 88.72f)
 		return 3.4028235e38f;
 	if (x < -103.0f)
