@@ -420,6 +420,9 @@ symbols in this file:
 #include "rasterizer_xbox_internal.h"
 #include "rasterizer_xbox_vertex_shaders.h"
 
+/* port: the settings (port/linux/src/port_config.c) */
+int config_boolean(char const *name);
+
 /* ---------- constants */
 
 enum
@@ -1798,6 +1801,10 @@ void _rasterizer_window_begin(
 	else
 		clear_color = real_rgb_color_to_pixel32(
 			&global_window_parameters.fog.atmospheric_color);
+	/* port: debug.crack_view, the window cleared to magenta (and no sky drawn:
+	render_sky), so that wherever a surface leaves a hole it shows */
+	if (config_boolean("debug.crack_view"))
+		clear_color = 0xFFFF00FF;
 	if (parameters->rasterizer_target == _rasterizer_target_render_primary ||
 		parameters->rasterizer_target == _rasterizer_target_render_secondary)
 	{

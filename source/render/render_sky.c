@@ -30,6 +30,9 @@ symbols in this file:
 #include "rasterizer/rasterizer.h"
 #include "scenario/scenario.h"
 
+/* port: the settings (port/linux/src/port_config.c) */
+int config_boolean(char const *name);
+
 /* ---------- constants */
 
 /* ---------- macros */
@@ -98,6 +101,13 @@ void render_sky(
 	struct model *model;
 	struct animation_graph *animation_graph;
 	short i;
+
+	/* port: debug.crack_view, no sky: where no surface is drawn the window's
+	clear shows (magenta: rasterizer_window_begin) */
+	if (config_boolean("debug.crack_view"))
+	{
+		return;
+	}
 
 	if (render.visible_sky_model)
 	{

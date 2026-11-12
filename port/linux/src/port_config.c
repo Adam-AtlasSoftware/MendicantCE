@@ -2649,6 +2649,10 @@ static const struct config_setting config_settings[] =
 		"\"visibility\" the sun's (white lit, black in a shadow), \"ao\" the\n"
 		"traced ambient occlusion, \"gi\" the bounced light, \"normals\", \"heat\"\n"
 		"(the rays' cost); \"off\" the game. For checking." },
+	{ "debug.crack_view", _config_boolean, "false", "HALO_CRACK_VIEW", _environment_value, _platform_all,
+		"true draws no sky and clears the window to magenta, so that a hole\n"
+		"or crack between surfaces (or in a model) shows as magenta pixels: for\n"
+		"finding them (art_pipeline's crack checks). false draws as the game." },
 	{ "debug.prism_mesh_dump", _config_string, "\"\"", "HALO_PRISM_MESH_DUMP", _environment_value, _platform_all,
 		"A model tag's name (or \"*\" for all) whose geometry, nodes, regions,\n"
 		"shaders and markers are written as the game draws them to the data\n"
