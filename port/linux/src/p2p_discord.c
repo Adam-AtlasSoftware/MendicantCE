@@ -86,6 +86,18 @@ enum
 
 /* OpenCE's application, the default, whose art is "logo" alone */
 #define OPENCE_APPLICATION "1553978809840050229"
+/* fork: OpenH1's application, upstream's default. This fork's builds
+(HALO_FORK_MENDICANT, tools/build_common.py's FORK_DEFINE) use neither: a
+player's status would say OpenH1 or OpenCE is being played, with their art,
+and its Join would bring their players into this build. The fork has no
+application of its own: none by default (discord.application_id is empty,
+port_config.c), and a player's own application's id turns Discord on. */
+#define OPENH1_APPLICATION "1561963518344036434"
+#ifdef HALO_FORK_MENDICANT
+#define DISCORD_GAME_NAME "MendicantCE"
+#else
+#define DISCORD_GAME_NAME "OpenH1"
+#endif
 
 /* an activity, as sent */
 struct activity
@@ -554,7 +566,7 @@ static void send_activity(const struct activity *activity, int shown)
 		}
 		/* (the images uploaded under these names in the application's Rich
 		Presence art assets) */
-		put(&writer, ",\"assets\":{\"large_image\":\"logo\",\"large_text\":\"OpenH1\"");
+		put(&writer, ",\"assets\":{\"large_image\":\"logo\",\"large_text\":\"" DISCORD_GAME_NAME "\"");
 		if (activity->small_image[0])
 		{
 			put(&writer, ",\"small_image\":");
@@ -809,6 +821,21 @@ void p2p_discord_update(void)
 		const char *application = config_string("discord.application_id");
 
 		discord.checked = 1;
+#ifdef HALO_FORK_MENDICANT
+		/* fork: upstream's applications (a config.toml carried over from
+		OpenH1 or OpenCE, or the environment's) are none here, said once; a
+		discord-<id>:// handler an earlier build of this fork took for this
+		executable is given back */
+		if (!strcmp(application, OPENH1_APPLICATION) || !strcmp(application, OPENCE_APPLICATION))
+		{
+			platform_log("Internet play: discord.application_id is %s's Discord application, which this build "
+				"does not use: no Discord status or joining (set your own application's id for them)",
+				strcmp(application, OPENH1_APPLICATION) ? "OpenCE" : "OpenH1");
+			application = "";
+		}
+		p2p_forget_url_scheme("discord-" OPENH1_APPLICATION);
+		p2p_forget_url_scheme("discord-" OPENCE_APPLICATION);
+#endif
 		/* (an application's id is digits: it goes into a file's path and
 		the handshake's JSON) */
 		if (*application && strlen(application) < sizeof(discord.application) &&
@@ -823,7 +850,7 @@ void p2p_discord_update(void)
 			running; the game then receives the invite once connected */
 			snprintf(scheme, sizeof(scheme), "discord-%s", application);
 			/* (it lets go of the p2p lock while it may wait) */
-			p2p_register_url_scheme(scheme, "OpenH1");
+			p2p_register_url_scheme(scheme, DISCORD_GAME_NAME);
 		}
 	}
 	if (!discord.enabled)

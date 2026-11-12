@@ -15,10 +15,13 @@ CASES = ["handshake", "states", "art", "join", "accept", "decline", "timeout", "
          "reconnect"]
 
 
-def generated(fault=None):
+def generated(fault=None, fork=False):
     code = read("port/linux/src/p2p_discord.c")
     if fault:
         code = mutated(code, *fault)
+    # fork: (the fork's switch, for its own case's unit alone: the other cases are upstream's behaviour, kept)
+    if fork:
+        code = "#define HALO_FORK_MENDICANT 1\n" + code
     # (platform.h's platform_log alone is used: discord_rpc.c declares it; the other headers are the sources')
     code = code.replace('#include "platform.h"\n', "")
     code = re.sub(r'#include "(posix|port_config|p2p_internal)\.h"',
@@ -32,6 +35,18 @@ def generated(fault=None):
 def test_case(case):
     status, output = run(build("discord_rpc", generated()), case)
     assert status == 0, output
+
+
+def test_fork_uses_no_upstream_application():
+    """fork: a build of this fork does not connect to Discord as OpenH1's or OpenCE's application, registers no
+    discord-<id>:// handler for them (and gives back one it had), and says so once; a player's own application
+    works, under the fork's name"""
+    status, output = run(build("discord_rpc", generated(fork=True)), "fork")
+    assert status == 0, output
+    # (the guard is what does it: without it upstream's application connects)
+    guard = ('\t\t\tapplication = "";\n', "")
+    status, output = run(build("discord_rpc", generated(guard, fork=True)), "fork")
+    assert status == 1, output
 
 
 # a fault in p2p_discord.c, and the case that must catch it
