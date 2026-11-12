@@ -37,6 +37,8 @@ executable (host_loader.c).
 #include "install_layout.h"
 
 #include <SDL3/SDL.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -67,7 +69,37 @@ void host_app_start(void);
 const char *host_app_settings_folder(void);
 #endif
 
-/* ---------- the log: the standard error stream */
+/* ---------- the log: the standard error stream, and on Linux halo.log */
+
+#ifndef __APPLE__
+/* halo.log, in the folder of config.toml (the game's folder, or
+~/.config/halo-linux when the game is installed: install_layout.c): every
+line of the log, the host's and the game's (which adds its own to the
+file's end, port/linux/src/xbox_kernel.c: platform_log), for the player who
+started the game from a desktop and has no terminal to read. The start
+before this one's is halo.previous.log. (The Mac app keeps its error output
+in a file itself, port/macos/host_app.m.) */
+static int log_file = -1;
+static char log_file_path[1024];
+
+static void log_file_open(void)
+{
+	char previous[1024 + 16];
+	int length = snprintf(log_file_path, sizeof(log_file_path), "%shalo.log", install_config_folder());
+
+	if (length < 0 || length >= (int)sizeof(log_file_path) || log_file_path[0] != '/')
+	{
+		log_file_path[0] = '\0';
+		return;
+	}
+	snprintf(previous, sizeof(previous), "%shalo.previous.log", install_config_folder());
+	if (rename(log_file_path, previous) != 0 && errno != ENOENT)
+		unlink(log_file_path);
+	log_file = open(log_file_path, O_WRONLY | O_CREAT | O_TRUNC | O_APPEND | O_CLOEXEC, 0644);
+	if (log_file < 0)
+		log_file_path[0] = '\0';
+}
+#endif
 
 /* one writev, so that the lines of threads do not mix (host_common.c: no
 stdio, as signal handlers log through it too) */
@@ -85,6 +117,11 @@ static void log_to_stderr(int priority, const char *line)
 	parts[2].iov_len = strlen(line);
 	parts[3].iov_base = (void *)"\n";
 	parts[3].iov_len = 1;
+#ifndef __APPLE__
+	/* (a file that can no longer be written is let go) */
+	if (log_file >= 0 && writev(log_file, parts, 4) < 0)
+		log_file = -1;
+#endif
 	if (writev(2, parts, 4) < 0)
 		return;
 }
@@ -154,6 +191,10 @@ static void *game_main(void *unused)
 	}
 	host_time_zone(zone, sizeof(zone));
 	host_environment_set(&environment, "TZ", zone);
+#ifndef __APPLE__
+	if (log_file_path[0])
+		host_environment_set(&environment, "OPENH1_HOST_LOG", log_file_path);
+#endif
 
 	if (getenv("HALO_GUEST_IMAGE") && *getenv("HALO_GUEST_IMAGE"))
 		load_other_image(getenv("HALO_GUEST_IMAGE"));
@@ -221,6 +262,9 @@ int main(int argc, char *argv[])
 	return SDL_RunApp(argc, argv, apple_main, NULL);
 #elif defined(__APPLE__)
 	return apple_main(argc, argv);
+#endif
+#ifndef __APPLE__
+	log_file_open();
 #endif
 	host_log_set_sink(log_to_stderr);
 	/* (start-up's measurement: debug.load_trace) */

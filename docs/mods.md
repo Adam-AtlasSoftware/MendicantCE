@@ -66,8 +66,10 @@ logs anything else wrong in `mod.toml` (an unknown key, a value of the
 wrong type) and uses the rest; a `mod.toml` that is not TOML at all is
 logged, and the mod played without what it says.
 
-The game's log is its output: the terminal on Linux, `halo.log` beside
-`halo.exe` on Windows, logcat on Android, and the page's log on the web.
+The game's log is its output: the terminal on Linux, and `halo.log` beside
+`config.toml` there (the game's folder, or `~/.config/halo-linux` when the
+game is installed), `halo.log` beside `halo.exe` on Windows, logcat on
+Android, and the page's log on the web.
 
 Limits: 256 mods, folder names of 63 bytes at most, 262144 files in all, 24
 folders deep under `tags`, and 64 maps in a mod's `maps`.

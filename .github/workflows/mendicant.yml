@@ -173,6 +173,10 @@ jobs:
           echo "bin/openh1 exited with $status"
           grep -q "is not the Xbox maps" start.log
           [ "$status" = 1 ]
+          # (halo.log, beside config.toml: the same lines, for a player with
+          # no terminal)
+          grep -q "is not the Xbox maps" halo.log
+          grep -q "^halo-host: the game exited (1)" halo.log
 
       # (zipped here, with its files' modes, which an artifact would lose; the
       # script refuses a tree that is not a whole package)

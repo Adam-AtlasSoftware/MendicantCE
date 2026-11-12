@@ -1531,7 +1531,8 @@ static const struct config_setting config_settings[] =
 	{ "ai.mendicant.command_radius", _config_real, "35.0", "HALO_AI_MENDICANT_COMMAND_RADIUS", _environment_value, _platform_all,
 		"How far (world units) from its leader a soldier is still in its unit." },
 	{ "ai.mendicant.status", _config_boolean, "false", "HALO_AI_MENDICANT_STATUS", _environment_value, _platform_all,
-		"Log a line a minute of a map, and at its end, to debug.txt: the ticks\n"
+		"Log a line a minute of a map, and at its end, to the log (the standard\n"
+		"error; halo.log on Linux and in a Windows release build): the ticks\n"
 		"the AI ran, the units it led, the models' decisions and the orders\n"
 		"given (tests)." },
 	{ "ai.mendicant.character", _config_boolean, "true", "HALO_AI_MENDICANT_CHARACTER", _environment_value, _platform_all,

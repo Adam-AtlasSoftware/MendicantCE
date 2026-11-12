@@ -50,9 +50,9 @@ Who wrote the Theater, Forge and the tag importer, and under which licences:
   had it on, and had the setting under Player Profile › Video Setup.
 - The trained models come with the build (`mendicant_models.aibw`, beside the
   game's other files), so TRAINED MODELS on plays with them. A mod's
-  `tags/mendicant/models.aibw` takes their place. The game's log says which
-  file was taken, or that none was found (then the scripted drill decides,
-  and only the Covenant are led).
+  `tags/mendicant/models.aibw` takes their place. The game's log (`halo.log`,
+  "The game's logs" below) says which file was taken, or that none was found
+  (then the scripted drill decides, and only the Covenant are led).
 - A checkpoint saved mid-fight with it on should not be loaded in OpenH1.
 
 ### PRISM: what works in a download, and what needs files no download has
@@ -77,9 +77,10 @@ the tools that read and check them are in `tools/`; the tools that built the
 author's own packs from the game's data are not part of this repository.
 
 A setting of these that is on and finds no file changes nothing in the
-picture. The game's log (`halo.log`) then says so once for each map, in a
-line that begins `prism` and ends `drawn stock` (for LIGHTMAPS Rebaked,
-`drawn as smooth`), and names the folder or file it looked for.
+picture. The game's log (`halo.log`, "The game's logs" below) then says so
+once for each map, in a line that begins `prism` and ends `drawn stock` (for
+LIGHTMAPS Rebaked, `drawn as smooth`), and names the folder or file it
+looked for.
 
 **On Windows**, TEXTURE DETAIL, TEXTURE MEMORY, PBR MATERIALS, REMODELS, MODEL
 MEMORY and SECONDARY MOTION are not in the build yet, with or without a
@@ -151,6 +152,22 @@ At its first start the game asks for the disc image:
 The game then extracts the disc's `maps/` folder (and its movies, when the
 image has them) and starts. "Game data" in OpenH1's README says the rest
 (`README.OpenH1.md` in a build).
+
+### The game's logs
+
+The game leaves two logs on your computer, and sends neither anywhere:
+
+- `halo.log`: what the build says of itself as it runs: the folders it
+  uses, the graphics card, the files PRISM and MENDICANT AI looked for and
+  took, and why it stopped when it does. It is made afresh at each start;
+  the start before is `halo.previous.log`.
+  - **Linux:** beside `config.toml`, which is the folder you unzipped the
+    build into. The same lines are printed in the terminal, when the game
+    is started from one.
+  - **Windows:** next to `halo.exe`.
+- `debug.txt`: the game's own log, and a crash's report. It is in the
+  folder that holds `maps/` (on Linux the game names that folder at the
+  top of `halo.log`, as its data root).
 
 What this build does differently from an OpenH1 build, on purpose:
 

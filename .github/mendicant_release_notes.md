@@ -33,7 +33,7 @@ Source of this build: commit [`@SHORT@`](https://github.com/Adam-AtlasSoftware/M
 
 - **The Windows build has not been played.** CI compiles it and starts it without game data or a graphics card, as far as "no maps found"; its window, Vulkan, sound, input, the disc image's file picker, MENDICANT AI and PRISM have not been run on Windows. The Linux build was run on the author's computer, in the menus and in campaign levels.
 - **Ray tracing** was measured on two NVIDIA cards on Linux, and on no other maker's cards.
-- A PRISM setting that needs a pack and finds none draws the stock game; `halo.log` says so once a map (`prism ...: drawn stock`).
+- A PRISM setting that needs a pack and finds none draws the stock game; `halo.log` says so once a map (`prism ...: drawn stock`). `halo.log` is next to `halo.exe` on Windows and in the folder the build was unzipped into on Linux.
 - **Windows:** TEXTURE DETAIL, TEXTURE MEMORY, PBR MATERIALS, REMODELS, MODEL MEMORY and SECONDARY MOTION are not available yet (greyed out), with or without a pack.
 - Linux shares the saved games' folder `~/.local/share/halo-linux` with an OpenH1 on the same computer (`paths.saves` moves it).
 - Internet games it hosts are public by default and use the same brokers and network version as OpenH1's, so OpenH1 and OpenCE players can join them, at 30 ticks.

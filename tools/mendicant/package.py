@@ -82,7 +82,7 @@ FORBIDDEN_FOLDERS = {"maps", "custom_maps", "bink", "mods", "saves", "savegames"
                      "screenshots", "recordings", "training"}
 FORBIDDEN_SUFFIXES = {".map", ".iso", ".xiso", ".bik", ".sav", ".log", ".dmp", ".probes", ".prl", ".pwg", ".pth",
                       ".pt", ".replay", ".bitmaps", ".sounds", ".pdb", ".zip"}
-FORBIDDEN_NAMES = {"config.toml", "debug.txt", "halo.log"}
+FORBIDDEN_NAMES = {"config.toml", "debug.txt", "halo.log", "halo.previous.log"}
 
 
 def join(folder: str, name: str) -> str:
