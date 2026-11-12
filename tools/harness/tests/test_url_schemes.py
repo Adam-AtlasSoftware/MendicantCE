@@ -13,9 +13,11 @@ from tools.harness import ROOT, build, function, mutated, read, run
 CASES = ["schemes", "register", "forget"]
 
 
-def generated(fault=None):
+def generated(fault=None, fork=False):
     posix = read("port/linux/src/posix_net.c")
-    code = f'#include "{ROOT}/port/linux/src/p2p.h"\n\n'
+    # fork: (the fork's switch, for its own case's unit alone: the others are upstream's behaviour, kept)
+    code = "#define HALO_FORK_MENDICANT 1\n" if fork else ""
+    code += f'#include "{ROOT}/port/linux/src/p2p.h"\n\n'
     code += "\n\n".join(function(posix, name) for name in (
         "desktop_entries", "posix_register_url_scheme", "posix_forget_url_scheme"))
     code += "\n\n" + function(read("port/linux/src/p2p.c"), "register_link_schemes")
@@ -28,6 +30,16 @@ def generated(fault=None):
 def test_case(case):
     status, output = run(build("url_schemes", generated()), case)
     assert status == 0, output
+
+
+def test_fork_takes_no_links():
+    """fork: a build of this fork registers no scheme, and drops openh1:// and halo:// where this executable had
+    them: an installed OpenH1's or OpenCE's entry is left"""
+    status, output = run(build("url_schemes", generated(fork=True)), "fork")
+    assert status == 0, output
+    # (the same case fails without the switch: the game's scheme is registered)
+    status, output = run(build("url_schemes", generated()), "fork")
+    assert status == 1, output
 
 
 # a fault, and the case that must catch it

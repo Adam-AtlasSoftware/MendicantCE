@@ -186,7 +186,14 @@ enum
 
 	/* where a running copy of the game takes invites from another one
 	started to open a link (127.0.0.1), sealed with a key of the user's */
+#ifdef HALO_FORK_MENDICANT
+	/* fork: a port (and handoff_key's label) of its own, so that an OpenH1
+	started by a link never passes it to a running build of this fork, nor
+	this build its link to a running OpenH1 */
+	HANDOFF_PORT = 47316,
+#else
 	HANDOFF_PORT = 47315,
+#endif
 };
 
 typedef char tunnel_magic_assert[TUNNEL_MAGIC == P2P_TUNNEL_MAGIC &&
@@ -708,8 +715,16 @@ void p2p_forget_url_scheme(const char *scheme)
 	/* (as p2p_register_url_scheme) */
 	pthread_mutex_unlock(&p2p_lock);
 	if (posix_forget_url_scheme(scheme))
+	{
+#ifdef HALO_FORK_MENDICANT
+		/* fork: (openh1:// and upstream's discord-<id>:// are dropped too) */
+		p2p_log("Internet play: this game no longer opens %s:// links, which an earlier build of it had taken: "
+			"they are another game's", scheme);
+#else
 		p2p_log("Internet play: this game no longer opens %s:// links (OpenCE's): its own are %s://", scheme,
 			P2P_LINK_SCHEME);
+#endif
+	}
 	pthread_mutex_lock(&p2p_lock);
 }
 
@@ -4955,7 +4970,11 @@ static int handoff_key(unsigned char *key)
 
 	if (!posix_user_secret(secret, sizeof(secret)))
 		return 0;
+#ifdef HALO_FORK_MENDICANT
+	p2p_hmac_sha256(secret, sizeof(secret), "mendicant handoff", 17, key); /* fork: */
+#else
 	p2p_hmac_sha256(secret, sizeof(secret), "halo handoff", 12, key);
+#endif
 	return 1;
 }
 
@@ -5091,7 +5110,17 @@ is dropped, so that OpenCE's copies have their links, and the game's are
 never opened by OpenCE (the game still takes a halo:// link it is given) */
 static void register_link_schemes(void)
 {
+#ifdef HALO_FORK_MENDICANT
+	/* fork: openh1:// is OpenH1's on the player's computer: this fork's builds
+	(tools/build_common.py's FORK_DEFINE) never take it, and give back a
+	registration an earlier build of the fork made for this executable (an
+	installed OpenH1's is left: posix_forget_url_scheme drops only this
+	executable's). An invite is joined by copying its link
+	(network.join_from_clipboard) or with JOIN BY LINK. */
+	p2p_forget_url_scheme(P2P_LINK_SCHEME);
+#else
 	p2p_register_url_scheme(P2P_LINK_SCHEME, "OpenH1 invite");
+#endif
 	p2p_forget_url_scheme(P2P_OLD_LINK_SCHEME);
 }
 #endif
