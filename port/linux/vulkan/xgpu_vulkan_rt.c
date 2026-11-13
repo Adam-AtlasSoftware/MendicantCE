@@ -155,6 +155,9 @@ struct rt_pass
 	uint32_t counts[4];
 	float pt3[4];
 	float rig[16][4];
+	/* port: each world-occlusion owner's motion since the last frame (its
+	first draw's node 0), the denoisers' reprojection of an object's pixel */
+	float motion[64][4];
 };
 
 /* ---------- the functions */
@@ -406,6 +409,9 @@ static struct
 	the replacement meshes traced within RT_REPLACEMENT_REACH of it) */
 	float eye[3];
 	int eye_known;
+	/* the owners' first draws' node 0, this window's and the last's */
+	float owner_now[64][3], owner_last[64][3];
+	uint8_t owner_now_seen[64], owner_last_seen[64];
 	uint64_t stock_stand_ins, far_left;
 } rt;
 
@@ -1748,6 +1754,9 @@ void xgpu_vulkan_rt_window_begin(void)
 
 	capture->open = capture->full = 0;
 	capture->draw_count = capture->triangle_count = 0;
+	memcpy(rt.owner_last, rt.owner_now, sizeof(rt.owner_last));
+	memcpy(rt.owner_last_seen, rt.owner_now_seen, sizeof(rt.owner_last_seen));
+	memset(rt.owner_now_seen, 0, sizeof(rt.owner_now_seen));
 	capture->job_count = capture->job_groups = capture->job_triangles = 0;
 	capture->jobs = NULL;
 	if (!xgpu_vulkan_rt_active() || !rt.entries)
@@ -1868,6 +1877,11 @@ void xgpu_vulkan_rt_capture(const struct xgpu_vulkan_rt_draw *draw)
 		return;
 	}
 	entry->occluder = draw->occluder;
+	if (draw->owner >= 0 && draw->owner < 64 && !rt.owner_now_seen[draw->owner])
+	{
+		rt.owner_now_seen[draw->owner] = 1;
+		memcpy(rt.owner_now[draw->owner], draw->origin, sizeof(rt.owner_now[0]));
+	}
 	entry->coverage = draw->coverage > 0.0f && draw->coverage < 1.0f ? draw->coverage : 1.0f;
 	if (draw->has_albedo)
 	{
@@ -2844,6 +2858,26 @@ whether the surfaces read the traced light in "shadows" and "gi" */
 	/* (the level traced is a remodel: its faces two-sided) */
 	block.pt3[3] = rt.frame.settings[2] > 0.5f ? 1.0f : 0.0f;
 	memcpy(block.rig, rt.frame.rig, sizeof(block.rig));
+	{
+		uint32_t owner;
+
+		for (owner = 0; owner < 64; owner++)
+		{
+			float d[3];
+			int axis;
+
+			block.motion[owner][0] = block.motion[owner][1] = block.motion[owner][2] = block.motion[owner][3] = 0.0f;
+			if (!rt.owner_now_seen[owner] || !rt.owner_last_seen[owner])
+				continue;
+			for (axis = 0; axis < 3; axis++)
+				d[axis] = rt.owner_now[owner][axis] - rt.owner_last[owner][axis];
+			/* (a jump past a few world units: a slot taken by another
+			object, not a motion) */
+			if (d[0] * d[0] + d[1] * d[1] + d[2] * d[2] < 9.0f)
+				for (axis = 0; axis < 3; axis++)
+					block.motion[owner][axis] = d[axis];
+		}
+	}
 	{
 		double seconds = monotonic_seconds(), since = rt.last_frame_seconds > 0.0 ? seconds - rt.last_frame_seconds : 0.0;
 

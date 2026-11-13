@@ -107,6 +107,10 @@ struct xgpu_vulkan_rt_draw
 	take it as that share solid (traced as the others, its hits kept by that
 	chance); 1 opaque */
 	float coverage;
+	/* port: its object's slot among the window's world-occlusion owners
+	(0 to 63; else none): the object's motion from the last frame, by which
+	the denoisers find its point there */
+	int owner;
 };
 void xgpu_vulkan_rt_capture(const struct xgpu_vulkan_rt_draw *draw);
 /* the frame traces the cutouts (display.prism_rt_alpha) */

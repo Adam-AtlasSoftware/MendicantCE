@@ -181,7 +181,8 @@ PREPASS_END ─► objects' BLAS ─► TLAS (opaque structure 1, alpha-tested s
                  its material's albedo by the sun, a lamp and its glow, the last ending in the probes;
                  Russian roulette past the second
                  the dynamic lights (ReSTIR DI over them, as before)
-            ─► accumulate (temporal: the light by 1 / its length, at most 32 frames; the sun's visibility at most 8,
+            ─► accumulate (temporal, an object's pixel reprojected by its owner's motion too: the light by
+               1 / its length, at most 32 frames, the dynamic lights' change at most 3; the sun's visibility at most 8,
                held within its neighbours' reach this frame; a sample past 32 times its history held to it;
                an object's history never the level's)
             ─► tiles (8x8: CE's light and the traced light, summed over the pixels whose history has settled (4
@@ -240,8 +241,9 @@ frames.
 
 ## Not yet
 
-RT reflections (`display.prism_rt_reflections` is read, not traced), motion vectors (the denoisers reproject by the
-camera alone: a moving object's light trails until its history is let go of), textured materials at hits (each
+RT reflections (`display.prism_rt_reflections` is read, not traced), full motion vectors (the denoisers reproject by
+the camera and, for an object's pixel, by its world-occlusion owner's motion since the last frame (its first draw's
+node 0, `motion[64]` in the pass): a turning or animating object's own parts still lag), textured materials at hits (each
 material's mean), the painted sky as a light (the sky's ambient alone), light fixtures in the rig, a world radiance
 cache (the probes about the camera stand for it), the objects' cutouts' own alpha (their share of texels drawn
 stands for it: a canopy casts a solid, soft shadow), the in-engine visibility baker for RT off, Metal (and Metal's

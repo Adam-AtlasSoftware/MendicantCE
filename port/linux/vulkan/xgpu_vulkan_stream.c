@@ -3526,6 +3526,7 @@ then, drawn opaque) */
 	share of texels drawn) */
 	draw.has_albedo = xgpu_vulkan_textures_mean(&stream.stages[0].stage, draw.albedo);
 	draw.coverage = coverage;
+	draw.owner = (int)floorf(stream.uniforms.world_ao[0] + 0.5f);
 	/* (a part a replacement mesh draws, display.prism_models: its pieces as
 	the mesh store skinned them, in the world; a part its carrier stands
 	for, nothing) */
