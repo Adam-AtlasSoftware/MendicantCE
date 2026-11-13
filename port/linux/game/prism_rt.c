@@ -300,7 +300,7 @@ static void settings_read(void)
 	static char const *const denoisers[] = { "spatiotemporal", "temporal", "off", NULL };
 	static char const *const reflections[] = { "off", "visor", "all", NULL };
 	static char const *const objects[] = { "auto", "view_lod", "low_lod", NULL };
-	static char const *const rates[] = { "full", "half", NULL };
+	static char const *const rates[] = { "full", "half", "quarter", NULL };
 	static char const *const views[] = { "off", "visibility", "ao", "gi", "reflections", "albedo", "normals",
 		"probes", "heat", NULL };
 	static char const *const worlds[] = { "stock", "far", "remodel", "auto", NULL };

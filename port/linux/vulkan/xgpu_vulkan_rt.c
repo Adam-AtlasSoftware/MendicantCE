@@ -2979,9 +2979,10 @@ structure's and the objects' visibility of the sun as they are) */
 		the style's; the lamps' candidates by quality) */
 		block.pt2[1] = rt.frame.rig[XGPU_RT_RIG_SETTINGS + XGPU_RT_SETTING_DYNAMIC_SHADOWS];
 		block.pt2[2] = lamp_candidates[quality];
-		/* (display.prism_rt_rate "half", or quality low: half the pixels a
-		frame, a checkerboard: the sign) */
-		block.pt2[3] = rt.frame.rate == 1 || quality == 1 ? -neighbours[quality] : neighbours[quality];
+		/* (quality low, or display.prism_rt_rate "half" with the radiance
+		cache off: half the pixels a frame, a checkerboard: the sign) */
+		block.pt2[3] = (rt.frame.rate == 1 && getenv("HALO_PRISM_RT_NO_CACHE") != NULL) || quality == 1 ?
+			-neighbours[quality] : neighbours[quality];
 		block.info[2] = rt.pt_history_valid && pass->history[0] != 0.0f ? 1u : 0u;
 		/* (debug.prism_rt_view: visibility the sun's, gi the light less the
 		sun's, ao the anchor's ratio, albedo CE's lightmap's light as the
@@ -3055,10 +3056,22 @@ whether the surfaces read the traced light in "shadows" and "gi" */
 	{
 		/* (HALO_PRISM_RT_NO_CACHE: the radiance cache's use off, measuring) */
 		static int cache_off = -1;
+		/* (display.prism_rt_rate: half (1) the pixels' paths traced a frame,
+		a quarter (2), the rest lit by the radiance cache at their own place;
+		HALO_PRISM_RT_TRACE_RATE (0 to 2) over it, measuring) */
+		static int trace_rate = -1;
+		int rate;
 
 		if (cache_off < 0)
 			cache_off = getenv("HALO_PRISM_RT_NO_CACHE") != NULL;
-		block.grid_size[3] = cache_off ? 0 : 1;
+		if (trace_rate < 0)
+		{
+			const char *value = getenv("HALO_PRISM_RT_TRACE_RATE");
+
+			trace_rate = value ? atoi(value) % 3 : 3;
+		}
+		rate = trace_rate < 3 ? trace_rate : rt.frame.rate <= 2 ? (int)rt.frame.rate : 0;
+		block.grid_size[3] = cache_off ? 0 : 1 | (rate << 1);
 	}
 	block.addresses5[2] = (uint32_t)rt.cache_buffer.address;
 	block.addresses5[3] = (uint32_t)(rt.cache_buffer.address >> 32);

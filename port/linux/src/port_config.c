@@ -721,7 +721,9 @@ static const struct config_setting config_settings[] =
 	{ "display.prism_rt_rate", _config_string, "\"full\"", "HALO_PRISM_RT_RATE", _environment_value,
 		_platform_desktop,
 		"PRISM ray tracing: \"half\" traces the bounced light every other frame\n"
-		"(shadows every frame); \"full\" every frame." },
+		"(shadows every frame); path traced traces half the pixels' paths a\n"
+		"frame (\"quarter\" a quarter), the others lit by the radiance cache;\n"
+		"\"full\" every pixel, every frame." },
 	{ "display.prism_rt_style", _config_string, "\"faithful\"", "HALO_PRISM_RT_STYLE", _environment_value,
 		_platform_desktop,
 		"PRISM ray tracing's look (docs/prism_rt.md, \"Styles\"): \"faithful\"\n"
@@ -4512,7 +4514,7 @@ static const struct
 	{ "display.prism_rt_reflections", { "off", "visor", "all", NULL }, "off" },
 	{ "display.prism_rt_objects", { "auto", "view_lod", "low_lod", NULL }, "auto" },
 	{ "display.prism_rt_world", { "auto", "remodel", "far", "stock", NULL }, "auto" },
-	{ "display.prism_rt_rate", { "full", "half", NULL }, "full" },
+	{ "display.prism_rt_rate", { "full", "half", "quarter", NULL }, "full" },
 	{ "display.prism_rt_style", { "faithful", "remix", NULL }, "faithful" },
 	{ "display.prism_rt_sun", { "all", "objects", NULL }, "all" },
 	{ "display.prism_sun_size", { "auto", "ce", "real", "soft", NULL }, "auto" },
