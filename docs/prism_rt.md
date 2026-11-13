@@ -242,6 +242,61 @@ cache (the probes about the camera stand for it), the objects' cutouts' own alph
 stands for it: a canopy casts a solid, soft shadow), the in-engine visibility baker for RT off, Metal (and Metal's
 emitter of the traced light), Deck and RDNA tuning. Models' traced light is clamped at CE's white.
 
+## Measured: the light rig (e10f739de against combined2 c86480c53; GPU ms a frame, uncapped, 1080p, the kit's settings, the game stopped, the game's camera; b30 at tick 1350, the others at 300)
+
+Each traced level in a run of its own (a card's memory never holds both); the new build's run and combined2's
+alternated a map at a time. The machine was shared with another job's capture runs and Blender bakes
+(`pt_runs/perf/*/perf.json` records each run's GPU load before it); read single values as within a few ms.
+"combined2" is its own `pathtraced` (no styles) and its own shadows and gi.
+
+RTX 3070 Ti:
+
+| | b30 new | b30 combined2 | a10 new | a10 combined2 | a50 new | a50 combined2 | c10 new | c10 combined2 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| off | 7.2 | 8.1 | 5.4 | 6.7 | 5.9 | 6.5 | 5.9 | 6.9 |
+| shadows, GAME'S, ultra | 9.8 | 10.0 | 11.2 | 10.1 | 11.2 | 10.5 | 11.9 | 11.9 |
+| shadows, GAME'S, medium | 7.4 |  | 6.9 |  | 6.5 |  | 7.6 |  |
+| shadows, REMODEL, ultra | 12.0 | 10.6 | 10.8 | 8.7 | 10.6 | 10.7 | 13.5 | 11.4 |
+| shadows, REMODEL, medium | 7.7 |  | 8.2 |  | 7.0 |  | 8.2 |  |
+| gi, GAME'S, ultra | 10.3 | 11.4 | 9.9 | 9.4 | 11.1 | 11.1 | 11.9 | 12.2 |
+| gi, GAME'S, medium | 7.7 |  | 6.8 |  | 5.6 |  | 7.8 |  |
+| gi, REMODEL, ultra | 14.4 | 11.8 | 11.3 | 10.2 | 16.7 | 14.2 | 17.4 | 14.3 |
+| gi, REMODEL, medium | 9.2 |  | 8.4 |  | 6.6 |  | 9.6 |  |
+| pathtraced faithful, GAME'S, ultra | 16.0 | 17.6 | 19.0 | 18.2 | 16.8 | 18.3 | 23.1 | 22.7 |
+| pathtraced faithful, GAME'S, medium | 14.5 |  | 18.7 |  | 15.4 |  | 18.6 |  |
+| pathtraced faithful, REMODEL, ultra | 22.9 | 22.7 | 40.4 | 20.3 | 38.8 | 31.0 | 32.0 | 35.7 |
+| pathtraced faithful, REMODEL, medium | 19.3 |  | 27.6 |  | 23.2 |  | 21.3 |  |
+| pathtraced remix, GAME'S, ultra | 16.9 |  | 20.3 |  | 18.5 |  | 22.6 |  |
+| pathtraced remix, GAME'S, medium | 15.1 |  | 18.8 |  | 14.3 |  | 20.9 |  |
+| pathtraced remix, REMODEL, ultra | 25.4 |  | 39.0 |  | 39.5 |  | 36.5 |  |
+| pathtraced remix, REMODEL, medium | 20.9 |  | 26.5 |  | 23.4 |  | 24.5 |  |
+
+RTX 2060 (a50 and c10 with the remodel traced not measured: a50's remodel at ultra ran past 400 ms a frame, the
+card's 6 GB full, and the owner's game started before c10's; GAME'S runs shared the card's memory with nothing):
+
+| | b30 new | b30 combined2 | a10 new | a10 combined2 | a50 new | a50 combined2 | c10 new | c10 combined2 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| off | 33.2 | 19.1 | 13.5 | 13.5 | 14.2 | 14.4 | 23.0 | 16.2 |
+| shadows, GAME'S, ultra | 35.3 | 23.2 | 19.7 | 17.8 | 21.3 | 20.3 | 42.5 | 30.6 |
+| shadows, GAME'S, medium | 20.8 |  | 15.3 |  | 13.9 |  | 36.8 |  |
+| shadows, REMODEL, ultra | 27.5 | 29.1 | 21.5 | 19.5 |  |  |  |  |
+| shadows, REMODEL, medium | 22.4 |  | 17.1 |  |  |  |  |  |
+| gi, GAME'S, ultra | 25.2 | 23.7 | 20.8 | 18.4 | 22.4 | 20.9 | 45.1 | 40.6 |
+| gi, GAME'S, medium | 19.6 |  | 15.8 |  | 14.4 |  | 34.4 |  |
+| gi, REMODEL, ultra | 48.9 | 38.7 | 26.8 | 21.5 |  |  |  |  |
+| gi, REMODEL, medium | 27.5 |  | 18.5 |  |  |  |  |  |
+| pathtraced faithful, GAME'S, ultra | 37.8 | 38.8 | 49.0 | 34.0 | 37.9 | 36.0 | 58.9 | 77.2 |
+| pathtraced faithful, GAME'S, medium | 33.1 |  | 41.7 |  | 32.2 |  | 48.1 |  |
+| pathtraced faithful, REMODEL, ultra | 94.7 | 111.3 | 174.0 | 82.2 |  |  |  |  |
+| pathtraced faithful, REMODEL, medium | 63.6 |  | 90.5 |  |  |  |  |  |
+| pathtraced remix, GAME'S, ultra | 38.3 |  | 49.0 |  | 38.1 |  | 138.3 |  |
+| pathtraced remix, GAME'S, medium | 33.4 |  | 41.7 |  | 32.3 |  | 77.9 |  |
+| pathtraced remix, REMODEL, ultra | 94.8 |  | 173.5 |  |  |  |  |  |
+| pathtraced remix, REMODEL, medium | 64.3 |  | 89.8 |  |  |  |  |  |
+
+On the 2060, path traced with the remodel traced is 64 to 90 ms at medium and 95 to 174 ms at ultra: Traced Level
+GAME'S (33 to 49 ms at medium, 38 to 59 ms at ultra) is the setting for it.
+
 ## Measured: the objects on the GPU, kept from frame to frame (b30 at tick 1350, the kit's settings, uncapped)
 
 The owner's kit's config.toml (every PRISM setting on: remodelled level, rebaked lightmaps, cascaded shadows,
