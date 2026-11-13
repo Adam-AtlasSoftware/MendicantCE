@@ -19,6 +19,7 @@ script's camera; the HUD is show_hud's.
 #include "objects/objects.h"
 #include "tag_files/tag_groups.h"
 #include "units/units.h"
+#include "game/players.h"
 #include "ai/ai_scenario_definitions.h"
 #include "cache/cache_files.h"
 #include "tag_files/tag_files.h"
@@ -112,16 +113,22 @@ builds draw the same poses in the same frames whatever their frame rates.
   key <frame> <x> <y> <z> <yaw> <pitch> <roll> <field of view>
                      a pose at a frame of the path (frames in order; world
                      units, degrees)
+  save <frame>       a frame of the path saved (frames in order); with none,
+                     every frame is
 
 The poses between keys follow a Catmull-Rom spline through them (their
 angles too, the yaw's the shorter way round), so that the camera's speed
-changes smoothly. While the path runs, each frame is saved as
+changes smoothly. While the path runs, each frame (or each named by a save
+line) is saved as
 debug.screenshot_every saves one (camera_path_capturing: to
 debug.screenshot_stream or _directory); at its end the camera stays, and
 the log says so. */
 
-#define MAXIMUM_PATH_KEYS 256
-#define MAXIMUM_PATH_COMMANDS 16
+/* (enough for a key every frame of a long capture's moves, and for the
+commands of the quality gates' captures: tools/prism_gate) */
+#define MAXIMUM_PATH_KEYS 8192
+#define MAXIMUM_PATH_COMMANDS 128
+#define MAXIMUM_PATH_SAVES 8192
 
 struct camera_path_key
 {
@@ -137,6 +144,9 @@ static struct
 	struct camera_path_key keys[MAXIMUM_PATH_KEYS];
 	long command_frames[MAXIMUM_PATH_COMMANDS];
 	char commands[MAXIMUM_PATH_COMMANDS][128];
+	/* the frames saved (none: every one), in order, and the next to come */
+	long save_count, save_next;
+	long saves[MAXIMUM_PATH_SAVES];
 } camera_path;
 
 /* the platform's (port/linux/src/port_config.c) */
@@ -203,6 +213,11 @@ static void camera_path_read(void)
 				camera_path.command_frames[camera_path.command_count] = atol(line + 3);
 				strcpy(camera_path.commands[camera_path.command_count++], command + 1);
 			}
+		}
+		else if (strncmp(line, "save ", 5) == 0 && camera_path.save_count < MAXIMUM_PATH_SAVES &&
+			(!camera_path.save_count || atol(line + 5) > camera_path.saves[camera_path.save_count - 1]))
+		{
+			camera_path.saves[camera_path.save_count++] = atol(line + 5);
 		}
 		else if (sscanf(line, "key %ld %f %f %f %f %f %f %f", &key.frame, &key.pose[0], &key.pose[1], &key.pose[2],
 			&key.pose[3], &key.pose[4], &key.pose[5], &key.pose[6]) == 8 && camera_path.key_count < MAXIMUM_PATH_KEYS &&
@@ -317,7 +332,15 @@ void camera_path_frame(void)
 
 int camera_path_capturing(void)
 {
-	return camera_path.running && !camera_path.done;
+	if (!camera_path.running || camera_path.done)
+		return 0;
+	if (!camera_path.save_count)
+		return 1;
+	while (camera_path.save_next < camera_path.save_count &&
+		camera_path.saves[camera_path.save_next] < camera_path.frame)
+		camera_path.save_next++;
+	return camera_path.save_next < camera_path.save_count &&
+		camera_path.saves[camera_path.save_next] == camera_path.frame;
 }
 
 /* ---------- objects placed for the picture (debug_object_place) */
@@ -393,7 +416,25 @@ void camera_pose_place_object(char const *line)
 		(sscanf(line, " seat %63s", seat) != 1 &&
 		 sscanf(line, "%f %f %f %f %f %f", &x, &y, &z, &yaw, &pitch, &roll) < 4))
 	{
-		console_printf(FALSE, "debug_object_place \"<tag> <x> <y> <z> <yaw> [<pitch> <roll>] [color <r> <g> <b>]\", \"<tag> seat <label>\", or \"clear\"");
+		console_printf(FALSE, "debug_object_place \"<tag> <x> <y> <z> <yaw> [<pitch> <roll>] [color <r> <g> <b>]\", \"<tag> seat <label>\", "
+			"\"player seat <label>\", or \"clear\"");
+		return;
+	}
+	/* ("player seat <label>": the first player's own unit put in the last
+	placed vehicle's seat, so that a scripted input (debug.test_input) drives
+	it: the quality gates' moving vehicle) */
+	if (!strcmp(name, "player") && seat[0])
+	{
+		long player_index = data_next_index(player_data, NONE);
+		struct player_datum *player = player_index != NONE ? player_get(player_index) : NULL;
+
+		if (!player || player->unit_index == NONE || placed_object_count == 0 ||
+			!object_header_try_and_get(placed_objects[placed_object_count - 1]))
+		{
+			console_printf(FALSE, "debug_object_place: no player's unit, or no vehicle placed for the seat");
+			return;
+		}
+		unit_scripting_enter_vehicle(player->unit_index, placed_objects[placed_object_count - 1], seat);
 		return;
 	}
 	tag_index = camera_pose_object_tag(name);
