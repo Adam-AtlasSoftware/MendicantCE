@@ -657,7 +657,8 @@ static void test_cache(char const *folder)
 	struct prism_bake_record const *record;
 	char path[1024], new_path[1100], why[256];
 	unsigned char payload[1000], back[1000];
-	uint32_t job;
+	uint64_t job, plan3[3] = { 1, 2, 3 }, plan_one[1] = { 1 };
+	uint32_t value;
 	long size;
 	FILE *file;
 
@@ -674,7 +675,7 @@ static void test_cache(char const *folder)
 	/* a plan and three jobs, the third checkpointed and unfinished */
 	check(!prism_bake_cache_create(&writer, path, &key, 0), "cache_create", "it cannot be made");
 	memset(payload, 0xAB, sizeof(payload));
-	prism_bake_cache_append(&writer, PRISM_BAKE_RECORD_PLAN, 0, "jobs 1 2 3", 10);
+	prism_bake_cache_append_plan(&writer, plan3, 3);
 	for (job = 1; job <= 2; job++)
 	{
 		payload[0] = (unsigned char)job;
@@ -766,7 +767,7 @@ static void test_cache(char const *folder)
 
 	/* a record that claims a huge payload */
 	prism_bake_cache_create(&writer, path, &key, 0);
-	prism_bake_cache_append(&writer, PRISM_BAKE_RECORD_PLAN, 0, "x", 1);
+	prism_bake_cache_append_plan(&writer, plan_one, 1);
 	prism_bake_cache_writer_close(&writer);
 	file = fopen(path, "r+b");
 	{
@@ -775,10 +776,10 @@ static void test_cache(char const *folder)
 
 		fseek(file, PRISM_BAKE_CACHE_HEADER_SIZE, SEEK_SET);
 		fread(h, sizeof(h), 1, file);
-		h[16] = 0xFF;
-		h[17] = 0xFF;
-		h[18] = 0xFF;
-		h[19] = 0x7F;
+		h[20] = 0xFF;
+		h[21] = 0xFF;
+		h[22] = 0xFF;
+		h[23] = 0x7F;
 		crc = prism_bake_crc32(0, h, sizeof(h) - 4);
 		h[36] = (unsigned char)crc;
 		h[37] = (unsigned char)(crc >> 8);
@@ -804,14 +805,222 @@ static void test_cache(char const *folder)
 	/* many jobs: the index */
 	prism_bake_cache_create(&writer, path, &key, 0);
 	for (job = 0; job < 5000; job++)
-		prism_bake_cache_append(&writer, PRISM_BAKE_RECORD_VOLUME_BRICK, job, &job, 4);
+	{
+		value = (uint32_t)job;
+		prism_bake_cache_append(&writer, PRISM_BAKE_RECORD_VOLUME_BRICK, job, &value, 4);
+	}
 	prism_bake_cache_writer_close(&writer);
 	prism_bake_cache_open(&cache, path, &key, 1);
 	record = prism_bake_cache_find(&cache, PRISM_BAKE_RECORD_VOLUME_BRICK, 4321);
-	job = 0;
-	check(record && !prism_bake_cache_read(&cache, record, &job, 4) && job == 4321 &&
+	value = 0;
+	check(record && !prism_bake_cache_read(&cache, record, &value, 4) && value == 4321 &&
 		!prism_bake_cache_find(&cache, PRISM_BAKE_RECORD_VOLUME_BRICK, 5000), "cache_index",
 		"the index does not find the job");
+	prism_bake_cache_close(&cache);
+}
+
+static int job_compare(void const *a, void const *b)
+{
+	uint64_t x = *(uint64_t const *)a, y = *(uint64_t const *)b;
+
+	return x < y ? -1 : x > y;
+}
+
+static void test_cache_jobs(char const *folder)
+{
+	struct prism_bake_cache_key key;
+	struct prism_bake_cache_writer writer;
+	struct prism_bake_cache cache;
+	struct prism_bake_record const *record;
+	uint64_t *ids, plan[8];
+	size_t count = 0, capacity = 220000, k, duplicates = 0, wrong_type = 0;
+	uint32_t a, b, c, d;
+	unsigned char data[8], header[PRISM_BAKE_CACHE_HEADER_SIZE];
+	char path[1024], why[256];
+	FILE *file;
+	uint64_t tile_a, tile_b, tile_c, child[4];
+	uint32_t crc;
+
+	/* a large synthetic plan of every type: no two ids meet, each id says its type */
+	ids = (uint64_t *)malloc(capacity * sizeof(*ids));
+	check(ids != NULL, "cache_ids_memory", "out of memory");
+	if (!ids)
+		return;
+	for (a = 0; a < 400; a++)
+		for (b = 0; b < 4; b++)
+			for (c = 0; c < 8; c++)
+				for (d = 0; d < 8; d++)
+					ids[count++] = prism_bake_job_lightmap_tile(a, b, c, d);
+	for (a = 0; a < 50; a++)
+		for (b = 0; b < 4; b++)
+			for (c = 0; c < 8; c++)
+				for (d = 0; d < 8; d++)
+					ids[count++] = prism_bake_job_sun_mask_tile(a, b, c, d);
+	for (a = 0; a < 4; a++)
+		for (b = 0; b < 16; b++)
+			for (c = 0; c < 16; c++)
+				for (d = 0; d < 16; d++)
+				{
+					ids[count++] = prism_bake_job_volume_brick(a, b, c, d);
+					ids[count++] = prism_bake_job_importance_cell(a, b, c, d);
+				}
+	for (a = 0; a < 3; a++)
+		for (k = 0; k < 20000; k++)
+			ids[count++] = prism_bake_job_probe(a, k);
+	for (k = 0; k < count; k++)
+	{
+		uint32_t type = prism_bake_job_type_of(ids[k]);
+
+		if (type == PRISM_BAKE_JOB_TYPE_NONE || type >= NUMBER_OF_PRISM_BAKE_JOB_TYPES)
+			wrong_type++;
+	}
+	qsort(ids, count, sizeof(*ids), job_compare);
+	for (k = 1; k < count; k++)
+		duplicates += ids[k] == ids[k - 1];
+	/* (the bricks and the importance cells share every key: only the type tells them apart) */
+	sprintf(why, "%lu ids, %lu duplicates, %lu with no type", (unsigned long)count, (unsigned long)duplicates,
+		(unsigned long)wrong_type);
+	check(count > 200000 && !duplicates && !wrong_type, "cache_ids_unique", why);
+	free(ids);
+	check(prism_bake_job_type_of(prism_bake_job_lightmap_tile(7, 2, 3, 4)) == PRISM_BAKE_JOB_TYPE_LIGHTMAP_TILE &&
+		prism_bake_job_type_of(prism_bake_job_sun_mask_tile(7, 2, 3, 4)) == PRISM_BAKE_JOB_TYPE_SUN_MASK_TILE &&
+		prism_bake_job_type_of(prism_bake_job_volume_brick(7, 2, 3, 4)) == PRISM_BAKE_JOB_TYPE_VOLUME_BRICK &&
+		prism_bake_job_type_of(prism_bake_job_probe(7, 2)) == PRISM_BAKE_JOB_TYPE_PROBE &&
+		prism_bake_job_type_of(prism_bake_job_importance_cell(7, 2, 3, 4)) == PRISM_BAKE_JOB_TYPE_IMPORTANCE_CELL &&
+		prism_bake_job_volume_brick(7, 2, 3, 4) != prism_bake_job_importance_cell(7, 2, 3, 4),
+		"cache_ids_types", "an id's type is not its own");
+	/* (the documented bits, and the largest keys of each field) */
+	check(prism_bake_job_lightmap_tile(5, 3, 7, 9) == ((1ULL << 56) | (5ULL << 32) | (3ULL << 28) | (9ULL << 14) | 7) &&
+		prism_bake_job_lightmap_tile((1u << 24) - 1, 15, (1u << 14) - 1, (1u << 14) - 1) ==
+		((1ULL << 56) | 0x00FFFFFFFFFFFFFFULL) &&
+		prism_bake_job_lightmap_tile(1u << 24, 0, 0, 0) == PRISM_BAKE_JOB_NONE &&
+		prism_bake_job_lightmap_tile(0, 16, 0, 0) == PRISM_BAKE_JOB_NONE &&
+		prism_bake_job_lightmap_tile(0, 0, 1u << 14, 0) == PRISM_BAKE_JOB_NONE &&
+		prism_bake_job_sun_mask_tile(1u << 16, 0, 0, 0) == PRISM_BAKE_JOB_NONE &&
+		prism_bake_job_volume_brick(256, 0, 0, 0) == PRISM_BAKE_JOB_NONE &&
+		prism_bake_job_probe(0, 1ULL << 48) == PRISM_BAKE_JOB_NONE, "cache_ids_bits",
+		"the id's bits are not as documented, or a key out of range wraps");
+	check(prism_bake_job_parent(prism_bake_job_lightmap_tile(5, 2, 7, 9)) == prism_bake_job_lightmap_tile(5, 1, 3, 4) &&
+		prism_bake_job_parent(prism_bake_job_lightmap_tile(5, 0, 7, 9)) == PRISM_BAKE_JOB_NONE &&
+		prism_bake_job_parent(prism_bake_job_sun_mask_tile(9, 1, 5, 6)) == prism_bake_job_sun_mask_tile(9, 0, 2, 3) &&
+		prism_bake_job_parent(prism_bake_job_volume_brick(1, 2, 3, 4)) == PRISM_BAKE_JOB_NONE, "cache_ids_parent",
+		"a tile's parent is not the tile it was refined from");
+
+	/* a plan of generation 1: chart 1's two tiles and chart 2's, all done */
+	sprintf(path, "%s/jobs.pbk", folder);
+	key_make(&key);
+	tile_a = prism_bake_job_lightmap_tile(1, 0, 0, 0);
+	tile_b = prism_bake_job_lightmap_tile(1, 0, 1, 0);
+	tile_c = prism_bake_job_lightmap_tile(2, 0, 0, 0);
+	memset(data, 0x5A, sizeof(data));
+	check(!prism_bake_cache_create(&writer, path, &key, 0), "cache_jobs_create", "it cannot be made");
+	plan[0] = tile_a;
+	plan[1] = tile_b;
+	plan[2] = tile_c;
+	check(!prism_bake_cache_append_plan(&writer, plan, 3) &&
+		prism_bake_cache_append(&writer, PRISM_BAKE_RECORD_PLAN, 0, NULL, 0) != 0, "cache_plan_write",
+		"a plan is written, or a plan is appended without a generation");
+	data[0] = 1;
+	prism_bake_cache_append(&writer, PRISM_BAKE_RECORD_ATLAS_TILE, tile_a, data, 8);
+	data[0] = 2;
+	prism_bake_cache_append(&writer, PRISM_BAKE_RECORD_ATLAS_TILE, tile_b, data, 8);
+	data[0] = 3;
+	prism_bake_cache_append(&writer, PRISM_BAKE_RECORD_ATLAS_TILE, tile_c, data, 8);
+	prism_bake_cache_writer_close(&writer);
+	prism_bake_cache_open(&cache, path, &key, 1);
+	check(cache.plan_generation == 1 && cache.plan_count == 3 && prism_bake_cache_job_done(&cache,
+		PRISM_BAKE_RECORD_ATLAS_TILE, tile_a) && prism_bake_cache_job_done(&cache, PRISM_BAKE_RECORD_ATLAS_TILE, tile_c) &&
+		!prism_bake_cache_job_done(&cache, PRISM_BAKE_RECORD_ATLAS_TILE, prism_bake_job_lightmap_tile(3, 0, 0, 0)),
+		"cache_plan_read", "the first plan's jobs are not done");
+	prism_bake_cache_close(&cache);
+
+	/* chart 1 refined: its tiles split, chart 2's stays; a result for a job
+	nobody planned does not count */
+	check(!prism_bake_cache_resume(&writer, &cache, path, &key, 0) && writer.generation == 1, "cache_jobs_resume",
+		"the bake does not resume at its plan's generation");
+	prism_bake_cache_close(&cache);
+	child[0] = prism_bake_job_lightmap_tile(1, 1, 0, 0);
+	child[1] = prism_bake_job_lightmap_tile(1, 1, 1, 0);
+	child[2] = prism_bake_job_lightmap_tile(1, 1, 0, 1);
+	child[3] = prism_bake_job_lightmap_tile(1, 1, 1, 1);
+	for (k = 0; k < 4; k++)
+		plan[k] = child[k];
+	plan[4] = prism_bake_job_lightmap_tile(1, 1, 2, 0); /* the second tile's first child */
+	plan[5] = tile_c;
+	check(!prism_bake_cache_append_plan(&writer, plan, 6) && writer.generation == 2, "cache_refine_plan",
+		"the refined plan is not generation 2");
+	prism_bake_cache_append(&writer, PRISM_BAKE_RECORD_ATLAS_TILE, prism_bake_job_lightmap_tile(9, 0, 0, 0), data, 8);
+	prism_bake_cache_writer_close(&writer);
+	prism_bake_cache_open(&cache, path, &key, 1);
+	check(cache.plan_generation == 2 && cache.plan_count == 6 && prism_bake_cache_job_done(&cache,
+		PRISM_BAKE_RECORD_ATLAS_TILE, tile_c), "cache_refine_keeps", "an unrelated chart's result is lost");
+	sprintf(why, "the superseded tiles: %d %d, in plan %d, stray %d",
+		prism_bake_cache_job_done(&cache, PRISM_BAKE_RECORD_ATLAS_TILE, tile_a),
+		prism_bake_cache_job_done(&cache, PRISM_BAKE_RECORD_ATLAS_TILE, tile_b),
+		prism_bake_cache_in_plan(&cache, tile_a),
+		prism_bake_cache_job_done(&cache, PRISM_BAKE_RECORD_ATLAS_TILE, prism_bake_job_lightmap_tile(9, 0, 0, 0)));
+	check(!prism_bake_cache_job_done(&cache, PRISM_BAKE_RECORD_ATLAS_TILE, tile_a) &&
+		!prism_bake_cache_job_done(&cache, PRISM_BAKE_RECORD_ATLAS_TILE, tile_b) &&
+		!prism_bake_cache_in_plan(&cache, tile_a) && prism_bake_cache_find(&cache, PRISM_BAKE_RECORD_ATLAS_TILE, tile_a) &&
+		!prism_bake_cache_job_done(&cache, PRISM_BAKE_RECORD_ATLAS_TILE, prism_bake_job_lightmap_tile(9, 0, 0, 0)),
+		"cache_superseded", why);
+
+	/* the parent's result is the fallback of each unfinished child, until
+	the child is done */
+	record = prism_bake_cache_fallback(&cache, PRISM_BAKE_RECORD_ATLAS_TILE, child[3]);
+	check(record && record->job == tile_a && !prism_bake_cache_read(&cache, record, data, 8) && data[0] == 1 &&
+		prism_bake_cache_fallback(&cache, PRISM_BAKE_RECORD_ATLAS_TILE, plan[4]) != NULL &&
+		prism_bake_cache_fallback(&cache, PRISM_BAKE_RECORD_ATLAS_TILE, plan[4])->job == tile_b,
+		"cache_fallback", "an unfinished child does not read its parent's texels");
+	check(!prism_bake_cache_fallback(&cache, PRISM_BAKE_RECORD_ATLAS_TILE, tile_c) &&
+		!prism_bake_cache_fallback(&cache, PRISM_BAKE_RECORD_ATLAS_TILE, prism_bake_job_lightmap_tile(7, 1, 0, 0)),
+		"cache_fallback_none", "a finished tile, or a tile with no parent result, has a fallback");
+	prism_bake_cache_close(&cache);
+	prism_bake_cache_resume(&writer, &cache, path, &key, 0);
+	prism_bake_cache_close(&cache);
+	data[0] = 11;
+	prism_bake_cache_append(&writer, PRISM_BAKE_RECORD_ATLAS_TILE, child[3], data, 8);
+	/* (a refinement of a refinement: the grandparent's result serves) */
+	prism_bake_cache_writer_close(&writer);
+	prism_bake_cache_open(&cache, path, &key, 1);
+	check(prism_bake_cache_job_done(&cache, PRISM_BAKE_RECORD_ATLAS_TILE, child[3]) &&
+		!prism_bake_cache_fallback(&cache, PRISM_BAKE_RECORD_ATLAS_TILE, child[3]) &&
+		prism_bake_cache_fallback(&cache, PRISM_BAKE_RECORD_ATLAS_TILE, child[0]) != NULL &&
+		prism_bake_cache_fallback(&cache, PRISM_BAKE_RECORD_ATLAS_TILE, prism_bake_job_lightmap_tile(1, 2, 3, 3)) != NULL &&
+		prism_bake_cache_fallback(&cache, PRISM_BAKE_RECORD_ATLAS_TILE, prism_bake_job_lightmap_tile(1, 2, 3, 3))->job ==
+		child[3], "cache_fallback_done", "a finished child still falls back, or its own result is not the nearest");
+	prism_bake_cache_close(&cache);
+
+	/* a plan that does not follow the one before (a generation that is not the
+	next) ends the log there, as a torn record does */
+	check(!prism_bake_cache_resume(&writer, &cache, path, &key, 0), "cache_jobs_resume_again", "it does not resume");
+	prism_bake_cache_close(&cache);
+	writer.generation = 5;
+	prism_bake_cache_append_plan(&writer, plan, 1);
+	prism_bake_cache_writer_close(&writer);
+	prism_bake_cache_open(&cache, path, &key, 1);
+	check(cache.torn && cache.plan_generation == 2 && cache.plan_count == 6, "cache_plan_order",
+		"a plan out of order is taken");
+	prism_bake_cache_close(&cache);
+
+	/* a file of the previous format (version 1) is not read, not resumed, and left as it was */
+	file = fopen(path, "r+b");
+	fread(header, sizeof(header), 1, file);
+	header[8] = 1;
+	crc = prism_bake_crc32(0, header, PRISM_BAKE_CACHE_HEADER_SIZE - 4);
+	header[PRISM_BAKE_CACHE_HEADER_SIZE - 4] = (unsigned char)crc;
+	header[PRISM_BAKE_CACHE_HEADER_SIZE - 3] = (unsigned char)(crc >> 8);
+	header[PRISM_BAKE_CACHE_HEADER_SIZE - 2] = (unsigned char)(crc >> 16);
+	header[PRISM_BAKE_CACHE_HEADER_SIZE - 1] = (unsigned char)(crc >> 24);
+	fseek(file, 0, SEEK_SET);
+	fwrite(header, sizeof(header), 1, file);
+	fclose(file);
+	a = (uint32_t)file_size(path);
+	check(prism_bake_cache_open(&cache, path, &key, 1) == PRISM_BAKE_CACHE_INVALID && !cache.record_count &&
+		!cache.plan_count, "cache_old_version", "a version 1 file is read");
+	prism_bake_cache_close(&cache);
+	check(prism_bake_cache_resume(&writer, &cache, path, &key, 0) != 0 && file_size(path) == (long)a,
+		"cache_old_version_resume", "a version 1 file is resumed or changed");
 	prism_bake_cache_close(&cache);
 }
 
@@ -1013,6 +1222,7 @@ int main(int argc, char **argv)
 	test_atlas();
 	test_atlas_tiles();
 	test_cache(argv[1]);
+	test_cache_jobs(argv[1]);
 	test_converge();
 	printf("%s: %d failed\n", failures ? "FAILED" : "PASSED", failures);
 	return failures != 0;

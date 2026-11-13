@@ -19,17 +19,55 @@ resumes at the next unfinished job.
 		the convergence threshold)
 		the header's checksum
 	records, each:
-		magic "PBKR", its type, its job (the job's index in the plan,
-		unique across types), its sequence number (0, 1, 2... in the
-		file's order), its payload's size, the payload's checksum, the
-		record header's checksum
+		magic "PBKR", its type, its job (the 64-bit job id below), its
+		sequence number (0, 1, 2... in the file's order), its payload's
+		size, the payload's checksum, its generation (a plan's own; a
+		result's, the newest plan's when it was written), the record
+		header's checksum
 		the payload, padded to 8 bytes
 
+Job ids. A job's id is a 64-bit value that names the job for as long as
+the bake's plan names it, however the plan is refined:
+
+	bits 63..56	the job type (prism_bake_job_type; 0 is no job)
+	bits 55..0	the type's stable key:
+	lightmap tile	chart (24: bits 55..32), level (4: 31..28), tile y
+			(14: 27..14), tile x (14: 13..0)
+	sun mask tile	page (16: 55..40), level (4: 39..36), tile y (18: 35..18),
+			tile x (18: 17..0)
+	volume brick	cascade (8: 55..48), z (16: 47..32), y (16: 31..16),
+			x (16: 15..0)
+	probe		set (8: 55..48), index (48: 47..0)
+	importance cell	level (8: 55..48), z, y, x (16 each, as a brick's)
+
+A lightmap or sun mask tile's level is the chart's (or page's) refinement
+level: its scale is the base scale doubled that many times. Its tile x and
+y count tiles from the box's corner (a chart's box with its gutter, floored
+to a CE texel; a page's own corner) in the tiles of that level, whose side
+is half the CE texels of the level before: tile (x, y) of level L is
+divided into tiles (2x, 2y), (2x + 1, 2y), (2x, 2y + 1), (2x + 1, 2y + 1) of
+level L + 1, so a refined tile's id names the tile it came from
+(prism_bake_job_parent). The keys do not depend on the plan's order or on
+what else is planned, so an id means the same job in every plan, and ids of
+different types never meet (the type is in the id). A key out of its
+field's range has no id (prism_bake_job_* give PRISM_BAKE_JOB_NONE), never
+a wrapped one.
+
 Records:
-- PLAN: the bake's job list (written first; a later PLAN replaces it,
-  as when the atlas is refined);
+- PLAN: the bake's job list: the ids of every job the bake now needs, as
+  64-bit little-endian values (the first plan is generation 1; a later PLAN,
+  as when the atlas is refined, is the next generation and replaces the
+  one before it);
 - a job's result (atlas tile, sun mask tile, volume brick, probe, the
   importance grid, the reachable set, footprints): the job's final data;
+  a result is valid only while its job id is in the newest PLAN: a job the
+  newest plan no longer names is superseded, and is not done, though its
+  record stays in the file (a new plan keeps the finished jobs it still
+  names: refinement leaves the other charts' results as they were). A superseded
+  tile's result stays readable as a fallback (prism_bake_cache_fallback)
+  for the tiles refined from it, each until its own result is in: a refined
+  tile is drawn from its parent's (or grandparent's) texels while it is
+  unfinished;
 - CHECKPOINT: a job's state part-way (its accumulators and convergence
   state, so a long job resumes where it stopped); a later record of the
   same job replaces it;
@@ -60,7 +98,7 @@ extern "C" {
 
 enum
 {
-	PRISM_BAKE_CACHE_VERSION = 1,
+	PRISM_BAKE_CACHE_VERSION = 2, /* (1: 32-bit job indices, no plan generations: not read) */
 	PRISM_BAKE_CACHE_HEADER_SIZE = 256,
 	PRISM_BAKE_CACHE_RECORD_HEADER_SIZE = 40,
 	/* a record's payload at most (a 1024 x 1024 tile of 64-byte texels) */
@@ -123,6 +161,34 @@ uint64_t prism_bake_hash64(uint64_t hash, void const *data, size_t size);
 /* CRC-32 (IEEE): the file's checksums */
 uint32_t prism_bake_crc32(uint32_t crc, void const *data, size_t size);
 
+/* ---------- job ids */
+
+#define PRISM_BAKE_JOB_NONE 0ULL
+
+enum prism_bake_job_type
+{
+	PRISM_BAKE_JOB_TYPE_NONE = 0,
+	PRISM_BAKE_JOB_TYPE_LIGHTMAP_TILE,
+	PRISM_BAKE_JOB_TYPE_SUN_MASK_TILE,
+	PRISM_BAKE_JOB_TYPE_VOLUME_BRICK,
+	PRISM_BAKE_JOB_TYPE_PROBE,
+	PRISM_BAKE_JOB_TYPE_IMPORTANCE_CELL,
+	NUMBER_OF_PRISM_BAKE_JOB_TYPES
+};
+
+/* each: the id, or PRISM_BAKE_JOB_NONE when a field does not fit its bits */
+uint64_t prism_bake_job_lightmap_tile(uint32_t chart, uint32_t level, uint32_t x, uint32_t y);
+uint64_t prism_bake_job_sun_mask_tile(uint32_t page, uint32_t level, uint32_t x, uint32_t y);
+uint64_t prism_bake_job_volume_brick(uint32_t cascade, uint32_t x, uint32_t y, uint32_t z);
+uint64_t prism_bake_job_probe(uint32_t set, uint64_t index);
+uint64_t prism_bake_job_importance_cell(uint32_t level, uint32_t x, uint32_t y, uint32_t z);
+
+/* a job's type (prism_bake_job_type) */
+uint32_t prism_bake_job_type_of(uint64_t job);
+/* the tile a lightmap or sun mask tile was refined from (a level up, x and y
+halved), or PRISM_BAKE_JOB_NONE for a tile of level 0 or another type */
+uint64_t prism_bake_job_parent(uint64_t job);
+
 /* ---------- reading */
 
 enum prism_bake_cache_status
@@ -135,7 +201,9 @@ enum prism_bake_cache_status
 
 struct prism_bake_record
 {
-	uint32_t type, job;
+	uint32_t type;
+	uint64_t job;
+	uint32_t generation;
 	uint32_t sequence;
 	uint64_t offset; /* the payload's, in the file */
 	uint32_t size;
@@ -156,6 +224,10 @@ struct prism_bake_cache
 	int torn; /* the log ended in a record that does not check out */
 	int done; /* a DONE record was read */
 	uint32_t next_sequence;
+	/* the newest plan: its generation (0: no plan yet) and its job ids, sorted */
+	uint32_t plan_generation;
+	uint64_t *plan_jobs;
+	size_t plan_count;
 	/* (the last record of each type and job: an open-addressed table of
 	record indices plus one) */
 	size_t *index;
@@ -170,10 +242,18 @@ void prism_bake_cache_close(struct prism_bake_cache *cache);
 
 /* the last record of a type and job (the one that counts), or NULL */
 struct prism_bake_record const *prism_bake_cache_find(struct prism_bake_cache const *cache, uint32_t type,
-	uint32_t job);
-/* whether the job is finished: a record of its result type after any of its
-checkpoints */
-int prism_bake_cache_job_done(struct prism_bake_cache const *cache, uint32_t type, uint32_t job);
+	uint64_t job);
+/* whether the newest plan names the job */
+int prism_bake_cache_in_plan(struct prism_bake_cache const *cache, uint64_t job);
+/* whether the job is finished: the newest plan names it, and a record of its
+result type came after any of its checkpoints (a superseded job is not) */
+int prism_bake_cache_job_done(struct prism_bake_cache const *cache, uint32_t type, uint64_t job);
+/* the result to draw an unfinished tile from: when the job is not done, the
+record of its nearest ancestor (prism_bake_job_parent) of the result type
+that has a finished result, whether or not the newest plan still names it;
+NULL when the job is done (its own result counts) or no ancestor has one */
+struct prism_bake_record const *prism_bake_cache_fallback(struct prism_bake_cache const *cache, uint32_t type,
+	uint64_t job);
 /* a record's payload, checked against its checksum: 0, or -1 */
 int prism_bake_cache_read(struct prism_bake_cache const *cache, struct prism_bake_record const *record, void *buffer,
 	size_t size);
@@ -185,6 +265,7 @@ struct prism_bake_cache_writer
 	FILE *file;
 	uint64_t end;
 	uint32_t sequence;
+	uint32_t generation; /* the newest plan's */
 	int sync; /* flush (and fsync) after each record */
 };
 
@@ -198,8 +279,12 @@ bake is rebaked into a new file, not resumed) */
 int prism_bake_cache_resume(struct prism_bake_cache_writer *writer, struct prism_bake_cache *cache, char const *path,
 	struct prism_bake_cache_key const *key, int sync);
 /* a record appended: 0, or -1 */
-int prism_bake_cache_append(struct prism_bake_cache_writer *writer, uint32_t type, uint32_t job, void const *payload,
+int prism_bake_cache_append(struct prism_bake_cache_writer *writer, uint32_t type, uint64_t job, void const *payload,
 	size_t size);
+/* the next plan (generation 1, then each one more): the ids of the jobs it
+names; a plan is written whole, and holds at most the payload limit's worth
+of ids: 0, or -1 */
+int prism_bake_cache_append_plan(struct prism_bake_cache_writer *writer, uint64_t const *jobs, size_t count);
 int prism_bake_cache_writer_close(struct prism_bake_cache_writer *writer);
 
 /* the finished new bake (path.new) renamed over the old (path): 0, or -1 */
