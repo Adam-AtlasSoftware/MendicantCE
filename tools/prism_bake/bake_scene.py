@@ -184,7 +184,8 @@ def run_bsp(probe, out, game_map, index, densities, flight_mode, transfers=()):
     seeds = game_map.seeds() + [("bsp_transfer", x, y, z) for x, y, z in transfers]
     palette = game_map.vehicle_palette()
     flying = [name for name, kind in palette if kind in ce_map.FLYING_VEHICLE_TYPES]
-    flight = bool(flying) if flight_mode == "auto" else flight_mode == "on"
+    placed_flying = game_map.placed_flying_vehicles()
+    flight = bool(placed_flying) if flight_mode == "auto" else flight_mode == "on"
     triangles = write_scene(folder / "scene.bin", bsp, seeds, flight)
     command = [str(probe), str(folder / "scene.bin"), str(folder), "--flight", "1" if flight else "0"]
     for density in densities:
@@ -195,6 +196,9 @@ def run_bsp(probe, out, game_map, index, densities, flight_mode, transfers=()):
     summary["bsp"] = index
     summary["bsp_name"] = bsp.name
     summary["flying_vehicles"] = flying
+    summary["placed_flying_vehicles"] = [
+        {"name": name, "position": [round(x, 2), round(y, 2), round(z, 2)]}
+        for name, _, (x, y, z) in placed_flying]
     summary["seed_kinds"] = {kind: sum(1 for s in seeds if s[0] == kind) for kind in sorted({s[0] for s in seeds})}
 
     # the pictures

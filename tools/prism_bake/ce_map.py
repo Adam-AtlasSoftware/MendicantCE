@@ -13,8 +13,9 @@ source/structures/structure_bsp_definitions.h, source/physics/collision_bsp_defi
 port/linux/game/tag_schema_scenario.c):
 - the scenario's seeds for the reachable space (design section 3.3): player starting locations, netgame flags and
   equipment, vehicles, bipeds, weapons and equipment placed, the AI's starting locations and firing positions,
-  the encounters' player starting locations, the cutscene flags and camera points; and whether its vehicle
-  palette has a flying vehicle (a vehicle tag's type: human plane or alien fighter);
+  the encounters' player starting locations, the cutscene flags and camera points; its vehicle palette and its
+  placed vehicles (each one the vehicle in its palette it places), and which of those are flying (a vehicle tag's
+  type: human plane or alien fighter);
 - per structure bsp: the collision bsp's bsp3d (nodes, planes) and leaves, the structure leaves' clusters and
   surface references, the clusters' PVS, the world bounds, and the render triangles with their positions,
   lightmap UVs and lightmap page (each lightmap's bitmap index, its page's size from the lightmap bitmap tag), and
@@ -226,6 +227,28 @@ class Map:
 
     def has_flying_vehicle(self):
         return any(kind in FLYING_VEHICLE_TYPES for _, kind in self.vehicle_palette())
+
+    def placed_vehicles(self):
+        """[(tag name, vehicle type, (x, y, z))] of the scenario's placed vehicles (the SCNR_VEHICLES block),
+        each one's palette index (the entry's first 16 bits) resolved to the vehicle in its palette"""
+        palette = self.cache.block(self.scenario + SCNR_VEHICLE_PALETTE, 0x30)
+        out = []
+        for entry in self.cache.block(self.scenario + SCNR_VEHICLES, 0x78):
+            palette_index = struct.unpack("<h", self.cache.read(entry, 2))[0]
+            if palette_index < 0 or palette_index >= len(palette):
+                continue
+            group, _, _, tag_id = struct.unpack("<IIii", self.cache.read(palette[palette_index], 16))
+            if tag_id == NONE or group != VEHI:
+                continue
+            base = self.tag_base(tag_id, VEHI)
+            out.append((self.tag_name(tag_id),
+                        struct.unpack("<h", self.cache.read(base + VEHI_TYPE, 2))[0],
+                        struct.unpack("<fff", self.cache.read(entry + 0x08, 12))))
+        return out
+
+    def placed_flying_vehicles(self):
+        """placed_vehicles() of only the scenario's placed flying vehicles"""
+        return [vehicle for vehicle in self.placed_vehicles() if vehicle[1] in FLYING_VEHICLE_TYPES]
 
     def bsp_count(self):
         return len(self.cache.block(self.scenario + SCNR_STRUCTURE_BSPS, 0x20, 32))

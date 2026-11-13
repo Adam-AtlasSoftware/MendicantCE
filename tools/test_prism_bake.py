@@ -80,3 +80,16 @@ def test_ratrace_reachable(tmp_path):
         assert not below or z - max(below) > 0.5, item
     atlas = summary["atlas"][0]
     assert atlas["tiles"] > 0 and atlas["texels_allocated"] >= atlas["texels_covered"]
+
+
+@pytest.mark.skipif(not os.environ.get("HALO_DATA_ROOT"), reason="no HALO_DATA_ROOT")
+def test_placed_flying_vehicles():
+    # (the palette alone turns flight on for whole shells: only the scenario's placed flying vehicles count)
+    maps = Path(os.environ["HALO_DATA_ROOT"]) / "maps"
+    for name in ("ratrace", "bloodgulch", "b30"):
+        assert (maps / (name + ".map")).exists(), name
+    sys.path.insert(0, str(TOOL))
+    import ce_map
+    for name in ("ratrace", "bloodgulch"):
+        assert ce_map.Map(str(maps / (name + ".map"))).placed_flying_vehicles() == [], name
+    print("b30's placed flying vehicles:", ce_map.Map(str(maps / "b30.map")).placed_flying_vehicles())
