@@ -419,7 +419,7 @@ static struct
 	/* "pathtraced"'s images (every pixel's): the paths' samples (raw), their
 	history (two in turn), the spatial passes' other pair, ReSTIR's
 	reservoirs (two in turn); whether their history is valid */
-	struct xgpu_vulkan_image *pt_raw[2], *pt_state[2][3], *pt_temporary[3], *pt_reservoirs[2], *pt_extra[2];
+	struct xgpu_vulkan_image *pt_raw[2], *pt_state[2][4], *pt_temporary[3], *pt_reservoirs[2], *pt_extra[2];
 	/* the lamps' reservoirs (two in turn) */
 	struct xgpu_vulkan_image *pt_lamps[2];
 	/* the anchor's tiles (8x8 pixels each) */
@@ -679,6 +679,9 @@ static int make(void)
 		VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
 		VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
 		VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+		/* (port: the fast history and the light's luminance moment: its last
+		frame's and this one's) */
+		VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
 	};
 	static const VkDescriptorType atrous_types[] =
 	{
@@ -687,6 +690,8 @@ static int make(void)
 		VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
 		VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
 		VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		/* (port: the fast history and moment, this frame's) */
+		VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
 	};
 	static const VkDescriptorType tiles_types[] =
 	{
@@ -743,9 +748,9 @@ static int make(void)
 		&rt.probes_layout, &rt.probes_pipeline_layout, &rt.probes) ||
 		!pipeline_make(path_types, 10, xgpu_vulkan_rt_path_words, xgpu_vulkan_rt_path_count,
 		&rt.path_layout, &rt.path_pipeline_layout, &rt.path) ||
-		!pipeline_make(accumulate_types, 10, xgpu_vulkan_rt_accumulate_words, xgpu_vulkan_rt_accumulate_count,
+		!pipeline_make(accumulate_types, 12, xgpu_vulkan_rt_accumulate_words, xgpu_vulkan_rt_accumulate_count,
 		&rt.accumulate_layout, &rt.accumulate_pipeline_layout, &rt.accumulate) ||
-		!pipeline_make_pushed(atrous_types, 11, xgpu_vulkan_rt_atrous_words, xgpu_vulkan_rt_atrous_count, 8,
+		!pipeline_make_pushed(atrous_types, 12, xgpu_vulkan_rt_atrous_words, xgpu_vulkan_rt_atrous_count, 8,
 		&rt.atrous_layout, &rt.atrous_pipeline_layout, &rt.atrous) ||
 		!pipeline_make(tiles_types, 6, xgpu_vulkan_rt_tiles_words, xgpu_vulkan_rt_tiles_count, &rt.tiles_layout,
 		&rt.tiles_pipeline_layout, &rt.tiles) ||
@@ -2634,12 +2639,12 @@ static int pathtraced_images(uint32_t width, uint32_t height)
 		rt.pt_extra[index] = image_storage(rt.pt_extra[index], XGPU_VULKAN_FORMAT_RGBA16F, width, height);
 		rt.pt_reservoirs[index] = image_storage(rt.pt_reservoirs[index], XGPU_VULKAN_FORMAT_RGBA16F, width, height);
 		rt.pt_lamps[index] = image_storage(rt.pt_lamps[index], XGPU_VULKAN_FORMAT_RGBA32F, width, height);
-		for (pair = 0; pair < 3; pair++)
+		for (pair = 0; pair < 4; pair++)
 			rt.pt_state[index][pair] = image_storage(rt.pt_state[index][pair], XGPU_VULKAN_FORMAT_RGBA16F, width,
 				height);
 		if (!rt.pt_raw[index] || !rt.pt_extra[index] || !rt.pt_reservoirs[index] || !rt.pt_lamps[index] ||
 			!rt.pt_state[index][0] ||
-			!rt.pt_state[index][1] || !rt.pt_state[index][2])
+			!rt.pt_state[index][1] || !rt.pt_state[index][2] || !rt.pt_state[index][3])
 			return 0;
 	}
 	for (pair = 0; pair < 3; pair++)
@@ -2735,6 +2740,8 @@ static int pathtraced_record(VkCommandBuffer commands, struct rt_slot *slot, VkA
 	IMAGE(2, 7, rt.pt_state[now][1], VK_NULL_HANDLE, STORAGE);
 	IMAGE(2, 8, rt.pt_state[last][2], rt.nearest, SAMPLED);
 	IMAGE(2, 9, rt.pt_state[now][2], VK_NULL_HANDLE, STORAGE);
+	IMAGE(2, 10, rt.pt_state[last][3], rt.nearest, SAMPLED);
+	IMAGE(2, 11, rt.pt_state[now][3], VK_NULL_HANDLE, STORAGE);
 	/* the anchor's tiles and the exposure's meter */
 	IMAGE(3, 0, inputs, rt.nearest, SAMPLED);
 	IMAGE(3, 1, rt.pt_state[now][0], rt.nearest, SAMPLED);
@@ -2777,6 +2784,7 @@ static int pathtraced_record(VkCommandBuffer commands, struct rt_slot *slot, VkA
 		IMAGE(5 + step, 8, to[step][2], VK_NULL_HANDLE, STORAGE);
 		IMAGE(5 + step, 9, rt.pt_tiles, rt.nearest, SAMPLED);
 		write_buffer(&writes[count++], sets[5 + step], 10, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, &exposure_buffer);
+		IMAGE(5 + step, 11, rt.pt_state[now][3], rt.nearest, SAMPLED);
 	}
 #undef IMAGE
 #undef SAMPLED
@@ -3123,6 +3131,7 @@ whether the surfaces read the traced light in "shadows" and "gi" */
 			xgpu_vulkan_image_compute_use(rt.pt_state[index][0], 1);
 			xgpu_vulkan_image_compute_use(rt.pt_state[index][1], 1);
 			xgpu_vulkan_image_compute_use(rt.pt_state[index][2], 1);
+			xgpu_vulkan_image_compute_use(rt.pt_state[index][3], 1);
 		}
 		for (index = 0; index < 3; index++)
 			xgpu_vulkan_image_compute_use(rt.pt_temporary[index], 1);
