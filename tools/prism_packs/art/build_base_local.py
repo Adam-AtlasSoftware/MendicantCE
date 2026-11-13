@@ -197,7 +197,7 @@ def main():
             mw = float(recipe.get("overrides", {}).get(t, {}).get("model_weight", 1.0))
             if not (a.reuse and os.path.isfile(rep_path) and os.path.isfile(raw)
                     and json.load(open(rep_path)).get("model_weight", 1.0) == mw):
-                run([PY, "-I", os.path.join(HERE, "upscale_base.py"), "--in", p, "--out", out,
+                run([PY, "-B", "-I", os.path.join(HERE, "upscale_base.py"), "--in", p, "--out", out,
                      "--raw-out", raw, "--model", recipe["model"], "--backproject", str(recipe["backproject"]), "--model-weight", str(mw),
                      "--gpu", a.gpu])
             rep = json.load(open(rep_path))
@@ -230,7 +230,7 @@ def main():
                 os.makedirs(ref_root, exist_ok=True)
                 run([E.invader("invader-extract"), "-m", a.maps, "-t", ref_root, "-s", rel + ".bitmap",
                      os.path.join(a.maps, m + ".map")])
-            r = subprocess.run([PY, "-I", os.path.join(HERE, "mod_bitmap_check.py"),
+            r = subprocess.run([PY, "-B", "-I", os.path.join(HERE, "mod_bitmap_check.py"),
                                 os.path.join(tags_dir, rel + ".bitmap"), ref], capture_output=True, text=True)
             e["checks"][m] = "pass" if r.returncode == 0 else "FAIL " + r.stdout[-300:]
         bad = [m for m, v in e["checks"].items() if v != "pass"]

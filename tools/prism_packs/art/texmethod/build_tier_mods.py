@@ -165,7 +165,7 @@ def checks(tier, fmts):
                     open(miss, "w").close()
             if not os.path.exists(ref):
                 continue
-            r = subprocess.run([PY, "-I", CHECK, os.path.join(t, tag + ".bitmap"), ref], capture_output=True, text=True)
+            r = subprocess.run([PY, "-B", "-I", CHECK, os.path.join(t, tag + ".bitmap"), ref], capture_output=True, text=True)
             ok = r.returncode == 0
             errs = [] if ok else json.loads(r.stdout).get("errors", [r.stderr[-300:]])
             log.append({"tag": tag, "map": n, "pass": ok, "errors": errs, "pixels_md5": pixels_md5(ref)})

@@ -208,11 +208,13 @@ class Context:
         return result.stdout.strip()
 
     def python(self, script, *args, what="", check=True):
-        return self.run([PYTHON, "-I", ART / script, *args], what=what, check=check)
+        return self.run([PYTHON, "-B", "-I", ART / script, *args], what=what, check=check)
 
     def blender_run(self, script, *args, what=""):
-        return self.run([self.blender, "-b", "--factory-startup", "--python-exit-code", "1", "--python",
-                         ART / script, "--", *args], what=what)
+        # (no bytecode beside the art scripts: Blender's Python reads no PYTHON* variable)
+        return self.run([self.blender, "-b", "--factory-startup", "--python-exit-code", "1", "--python-expr",
+                         "import sys; sys.dont_write_bytecode = True", "--python", ART / script, "--", *args],
+                        what=what)
 
     def inv(self, program):
         return str(Path(self.invader) / (program + EXE))
@@ -408,7 +410,8 @@ def blender_version(blender):
 
 def cycles_cards(ctx):
     probe = "\n".join([
-        "import bpy, sys", f"sys.path.insert(0, {str(ART)!r})", "import packs_env as E",
+        "import bpy, sys", "sys.dont_write_bytecode = True", f"sys.path.insert(0, {str(ART)!r})",
+        "import packs_env as E",
         "prefs = bpy.context.preferences.addons['cycles'].preferences",
         "backend, cards = E.cycles_gpu(prefs)", "print('CARDS', backend, '|'.join(cards))"])
     script = ctx.w("tmp", "cycles_probe.py")
@@ -660,7 +663,7 @@ def step_class_masks(ctx):
             out = stats / (Path(spec["model"]).stem + ".txt")
             if not out.is_file():
                 with open(out, "w") as f:
-                    subprocess.run([PYTHON, "-I", ART / "island_stats.py", model, ctx.w("extract", m)], check=True,
+                    subprocess.run([PYTHON, "-B", "-I", ART / "island_stats.py", model, ctx.w("extract", m)], check=True,
                                    stdout=f, env=ctx.env())
     mod = ctx.mod("prism_class_masks")
     shutil.rmtree(mod, ignore_errors=True)
@@ -948,7 +951,7 @@ def elite_mod(ctx, w, mod, names):
         tag = w / "tags" / f"{model}.gbxmodel"
         tris = w / f"tris_{name}.json"
         with open(tris, "w") as f:
-            subprocess.run([PYTHON, "-I", ART / "prism_review_tris.py", tag, src / f"{model}.model"], stdout=f,
+            subprocess.run([PYTHON, "-B", "-I", ART / "prism_review_tris.py", tag, src / f"{model}.model"], stdout=f,
                            env=ctx.env())
         try:
             only_mod = json.load(open(tris)).get("only_mod")
@@ -1016,7 +1019,7 @@ def step_chief_r3(ctx):
     mat = ctx.mod("prism_r3_chief_materials")
     shutil.rmtree(mat, ignore_errors=True)
     t = mat / "textures" / "materials"
-    pack = [PYTHON, "-I", ctx.tools / "prism_material_pack.py"]
+    pack = [PYTHON, "-B", "-I", ctx.tools / "prism_material_pack.py"]
     ctx.run([*pack, "albedo", "--in", w / "tex" / "cyborg_albedo.png", "--out", t / "cyborg" / "armor_albedo.ktx2",
              "--size", 4096], what="PBR images (BC7)")
     ctx.run([*pack, "albedo", "--in", w / "tex" / "cyborg_emissive.png", "--out",
@@ -1079,7 +1082,7 @@ def step_cast(ctx):
         out = mod / "meshes" / "max" / "characters" / c / f"{c}.pmesh"
         ctx.python("prism_cast/jms_to_pmesh.py", dump / f"characters_{c}_{c}.json", w / c / "stitched",
                    models / c / c, out, what=f"{c}: the mesh store's file")
-        ctx.run([PYTHON, "-I", ctx.tools / "pmesh.py", "check", out, "--dump", dump / f"characters_{c}_{c}.json"])
+        ctx.run([PYTHON, "-B", "-I", ctx.tools / "pmesh.py", "check", out, "--dump", dump / f"characters_{c}_{c}.json"])
     write_mod(mod, "prism_v3_cast", "PRISM v3: Marines, Grunts and Jackals (meshes, local)", "0.3.0",
               "The armoured Marine, the Grunt and the Jackal remodelled from CE's own meshes in the round-2 style "
               "(CE's proportions; armour plates cut along CE's painted plate lines with real thickness, crisp "
@@ -1129,7 +1132,7 @@ def step_rocks(ctx):
             folder = name[:half] if name[:half] == name[half + 1:] else name
             out = mod / "meshes" / "max" / "scenery" / "rocks" / folder / f"{folder}.pmesh"
             if folder in done:
-                ctx.run([PYTHON, "-I", ctx.tools / "pmesh.py", "check", out, "--dump", j], check=False)
+                ctx.run([PYTHON, "-B", "-I", ctx.tools / "pmesh.py", "check", out, "--dump", j], check=False)
                 continue
             done[folder] = True
             base = "-"
@@ -1251,7 +1254,7 @@ def step_probes(ctx):
         run = ctx.w("probes", level)
         data = packs_game.prepare(run, ctx.maps_dir())
         ctx.once(level, lambda level=level, run=run, data=data: ctx.run(
-            [PYTHON, "-I", probes, "--exe", ctx.game, "--data", data, "--map", level, "--port", 26491, "--work", run],
+            [PYTHON, "-B", "-I", probes, "--exe", ctx.game, "--data", data, "--map", level, "--port", 26491, "--work", run],
             what=f"{level}: probes (the game, hidden and silent)"))
         src = data / "prism" / "probes" / f"{level}.probes"
         dst = ctx.out / "prism" / "probes" / f"{level}.probes"
