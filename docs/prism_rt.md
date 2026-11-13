@@ -175,7 +175,8 @@ PREPASS_END ─► objects' BLAS ─► TLAS (opaque structure 1, alpha-tested s
                  the structure's alone kept too (the anchor's measure); an object's pixel whichever way its
                  normal leans, its back lit by half (a leaf lit through)
                  the domes (a direction of each cone) and the lamps (ReSTIR DI: candidates by power, the last
-                 frame's reservoirs at the point and about it, the one kept traced for its shadow)
+                 frame's reservoirs at the point and about it, their weight at most four frames' candidates; the one
+                 kept traced for its shadow)
                  the sky and the bounces: one path a pixel, 1 to 4 bounces (display.prism_rt_bounces; by quality), cosine rays, each hit
                  its material's albedo by the sun, a lamp and its glow, the last ending in the probes;
                  Russian roulette past the second
@@ -183,9 +184,13 @@ PREPASS_END ─► objects' BLAS ─► TLAS (opaque structure 1, alpha-tested s
             ─► accumulate (temporal: the light by 1 / its length, at most 32 frames; the sun's visibility at most 8,
                held within its neighbours' reach this frame; a sample past 32 times its history held to it;
                an object's history never the level's)
-            ─► tiles (8x8: CE's light and the traced light, summed; their histograms for the exposure)
+            ─► tiles (8x8: CE's light and the traced light, summed over the pixels whose history has settled (4
+               frames or more); their histograms for the exposure)
             ─► exposure (display.prism_exposure)
-            ─► atrous x3 (5x5, steps 1, 2, 4: by the distance off the pixel's plane and the normal, never across an
+            ─► atrous x5 (5x5, steps 1 to 16: the light by the distance off the pixel's plane, the normal and its
+               luminance against its variance (SVGF's edge-stopping: the variance over the 9x9 about the pixel in the
+               first pass, more for a short history, carried and filtered in the others), the sun's visibility over
+               steps 1 to 4 alone; never across an
                object's edge with the level (far off, an object and the ground behind it are within a few
                hundredths of each other's distance: a relative test let them blur into a ring); the sun's visibility also by its nearness
                over its spread), the last writing x and yzw: the rest + the rig's sun by the facing and the

@@ -77,6 +77,9 @@ still be refitted (world units) */
 #define RT_ENTRY_IDLE_FRAMES 300u
 #define RT_REBUILD_UPDATES 48u
 #define RT_REFIT_DISTANCE 3.0f
+/* port: the path tracer's spatial passes (steps 1 to 16: a 1-sample
+pixel's noise filtered over 65 pixels where its variance says) */
+#define RT_ATROUS_STEPS 5u
 /* port: display.prism_rt_objects "auto": a replacement mesh traced within
 this many world units of the eye, and while the window's objects have not
 taken this share of RT_OBJECT_TRIANGLES; the game's own model past either
@@ -765,18 +768,18 @@ static int make(void)
 			return 0;
 		}
 		sizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-		sizes[0].descriptorCount = 96;
+		sizes[0].descriptorCount = 128;
 		sizes[1].type = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
 		sizes[1].descriptorCount = 24;
 		sizes[2].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-		sizes[2].descriptorCount = 72;
+		sizes[2].descriptorCount = 96;
 		sizes[3].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		sizes[3].descriptorCount = 48;
+		sizes[3].descriptorCount = 64;
 		sizes[4].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		sizes[4].descriptorCount = 48;
+		sizes[4].descriptorCount = 64;
 		memset(&pool, 0, sizeof(pool));
 		pool.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-		pool.maxSets = 64;
+		pool.maxSets = 80;
 		pool.poolSizeCount = 5;
 		pool.pPoolSizes = sizes;
 		if (vkCreateDescriptorPool(rt.device.device, &pool, NULL, &slot->pool) != VK_SUCCESS)
@@ -2484,15 +2487,15 @@ static int pathtraced_record(VkCommandBuffer commands, struct rt_slot *slot, VkA
 	struct xgpu_vulkan_image *inputs, const struct xgpu_vulkan_range *uniforms, uint32_t uniform_bytes, int gi,
 	uint32_t probes_updated, uint32_t width, uint32_t height)
 {
-	VkDescriptorSetLayout layouts[8];
-	VkDescriptorSet sets[8];
+	VkDescriptorSetLayout layouts[RT_ATROUS_STEPS + 5];
+	VkDescriptorSet sets[RT_ATROUS_STEPS + 5];
 	VkDescriptorSetAllocateInfo allocate;
-	VkWriteDescriptorSet writes[72];
-	VkDescriptorImageInfo images[56];
+	VkWriteDescriptorSet writes[128];
+	VkDescriptorImageInfo images[104];
 	VkWriteDescriptorSetAccelerationStructureKHR scene_writes[2];
 	VkDescriptorBufferInfo buffer, probe_buffer, exposure_buffer;
 	uint32_t now = rt.pt_index, last = rt.pt_index ^ 1u, count = 0, image = 0, step;
-	struct xgpu_vulkan_image *from[3][3], *to[3][3];
+	struct xgpu_vulkan_image *from[RT_ATROUS_STEPS][3], *to[RT_ATROUS_STEPS][3];
 	int32_t push[2];
 
 	layouts[0] = rt.probes_layout;
@@ -2500,11 +2503,12 @@ static int pathtraced_record(VkCommandBuffer commands, struct rt_slot *slot, VkA
 	layouts[2] = rt.accumulate_layout;
 	layouts[3] = rt.tiles_layout;
 	layouts[4] = rt.exposure_layout;
-	layouts[5] = layouts[6] = layouts[7] = rt.atrous_layout;
+	for (step = 0; step < RT_ATROUS_STEPS; step++)
+		layouts[5 + step] = rt.atrous_layout;
 	memset(&allocate, 0, sizeof(allocate));
 	allocate.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
 	allocate.descriptorPool = slot->pool;
-	allocate.descriptorSetCount = 8;
+	allocate.descriptorSetCount = RT_ATROUS_STEPS + 5;
 	allocate.pSetLayouts = layouts;
 	if (vkAllocateDescriptorSets(rt.device.device, &allocate, sets) != VK_SUCCESS)
 		return 0;
@@ -2557,26 +2561,27 @@ static int pathtraced_record(VkCommandBuffer commands, struct rt_slot *slot, VkA
 	write_buffer(&writes[count++], sets[3], 5, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, &exposure_buffer);
 	write_buffer(&writes[count++], sets[4], 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, &exposure_buffer);
 	write_buffer(&writes[count++], sets[4], 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, &buffer);
-	/* the spatial passes: the state into the temporary three, they into the
-	raw pair and the extra image (read by now), they into the temporary
-	three and the surfaces' image */
-	for (step = 0; step < 3; step++)
+	/* the spatial passes: the state into the temporary three, then back and
+	forth between them and the raw pair with the extra image (read by now),
+	the last into the temporary three and the surfaces' image */
+	for (step = 0; step < RT_ATROUS_STEPS; step++)
 	{
-		from[0][step] = rt.pt_state[now][step];
-		to[0][step] = rt.pt_temporary[step];
-		from[1][step] = rt.pt_temporary[step];
-		from[2][step] = to[0][step];
+		struct xgpu_vulkan_image *temporary[3], *raw[3];
+		uint32_t channel;
+
+		temporary[0] = rt.pt_temporary[0];
+		temporary[1] = rt.pt_temporary[1];
+		temporary[2] = rt.pt_temporary[2];
+		raw[0] = rt.pt_raw[0];
+		raw[1] = rt.pt_raw[1];
+		raw[2] = rt.pt_extra[0];
+		for (channel = 0; channel < 3; channel++)
+		{
+			from[step][channel] = step == 0 ? rt.pt_state[now][channel] : (step & 1) ? temporary[channel] : raw[channel];
+			to[step][channel] = (step & 1) ? raw[channel] : temporary[channel];
+		}
 	}
-	to[1][0] = rt.pt_raw[0];
-	to[1][1] = rt.pt_raw[1];
-	to[1][2] = rt.pt_extra[0];
-	from[2][0] = rt.pt_raw[0];
-	from[2][1] = rt.pt_raw[1];
-	from[2][2] = rt.pt_extra[0];
-	to[2][0] = rt.pt_temporary[0];
-	to[2][1] = rt.pt_temporary[1];
-	to[2][2] = rt.pt_temporary[2];
-	for (step = 0; step < 3; step++)
+	for (step = 0; step < RT_ATROUS_STEPS; step++)
 	{
 		IMAGE(5 + step, 0, inputs, rt.nearest, SAMPLED);
 		IMAGE(5 + step, 1, from[step][0], rt.nearest, SAMPLED);
@@ -2623,10 +2628,10 @@ static int pathtraced_record(VkCommandBuffer commands, struct rt_slot *slot, VkA
 	vkCmdDispatch(commands, 1, 1, 1);
 	compute_barrier(commands);
 	vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.atrous);
-	for (step = 0; step < 3; step++)
+	for (step = 0; step < RT_ATROUS_STEPS; step++)
 	{
 		push[0] = 1 << step;
-		push[1] = step == 2;
+		push[1] = step == RT_ATROUS_STEPS - 1;
 		vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.atrous_pipeline_layout, 0, 1,
 			&sets[5 + step], 0, NULL);
 		vkCmdPushConstants(commands, rt.atrous_pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), push);
