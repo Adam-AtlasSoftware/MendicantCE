@@ -1,0 +1,73 @@
+{
+ "class": "mjolnir_undersuit",
+ "description": "Chief undersuit: knit rib, 4 mm rows (20 a tile) of V stitches (2.5 mm), rows wandering and varying so the knit has no long-range period (no moire), a faint fibre grain, matte. Rib direction follows CE's texture (no hex).",
+ "group": "chief",
+ "first_person": true,
+ "suggested_shaders": [
+  "characters\\cyborg\\shaders\\armor (undersuit islands)",
+  "characters\\cyborg\\fp\\shaders\\rubber hands (sleeve islands)"
+ ],
+ "tile_mm": 80.0,
+ "author_px": 2048,
+ "ship_px": 1024,
+ "seed": 202,
+ "feature_band_mm": [
+  0.8,
+  5.0
+ ],
+ "target_slope_rms": 0.3,
+ "height_layers": [
+  {
+   "gen": "knit_rib",
+   "ribs": 20,
+   "stitches": 32,
+   "amp_mm": 0.35,
+   "power": 0.8,
+   "axis": "y",
+   "wander_mm": 0.3,
+   "wander_wl_mm": [
+    8.0,
+    20.0
+   ],
+   "amp_var": 0.3,
+   "stitch_depth": 0.4,
+   "slant": 0.7,
+   "stitch_jitter": 0.6
+  },
+  {
+   "gen": "pebble",
+   "cell_mm": 0.6,
+   "rms_mm": 0.004,
+   "mode": "dome"
+  }
+ ],
+ "cavity": {
+  "radius_mm": 1.2,
+  "strength": 0.6
+ },
+ "rough_layers": [
+  {
+   "src": "mask:rib_groove",
+   "k": 0.06
+  },
+  {
+   "src": "noise",
+   "k": 0.03,
+   "wavelength_mm": [
+    2.0,
+    15.0
+   ]
+  }
+ ],
+ "export_masks": [],
+ "fade_m": [
+  1.5,
+  3.0
+ ],
+ "preview": {
+  "base_grey": 0.05,
+  "metallic": 0.0,
+  "roughness": 0.8
+ },
+ "base_roughness_ref": 0.8
+}

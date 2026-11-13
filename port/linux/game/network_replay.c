@@ -47,6 +47,7 @@ as a recording starts).
 #include "network_distributed.h"
 #include "network_replay.h"
 #include "network_standard.h"
+#include "network_voice.h" /* network_voice_handles_message: voice chat is not recorded */
 #include "../src/posix.h" /* port: port/linux/src/posix.c */
 
 #include <stdio.h>
@@ -89,6 +90,8 @@ game's own */
 #define REPLAY_MESSAGE_TYPE_PACKET 3
 /* a record's header: its kind, a byte left 0, its size and the tick */
 #define REPLAY_RECORD_HEADER_SIZE 8
+/* the largest header a replay may say it has (network_replay_playback.c's) */
+#define REPLAY_MAXIMUM_HEADER_SIZE (64 * 1024)
 /* a recording shorter than this (ticks) is deleted as it ends */
 #define REPLAY_MINIMUM_TICKS (15 * TICKS_PER_SECOND)
 /* the file written out this often (ticks): what a crash loses */
@@ -669,6 +672,14 @@ boolean network_replay_info(
 	format = replay_get_long(header + 8);
 	network_version = replay_get_long(header + 12);
 	header_size = replay_get_long(header + 28);
+	/* (a header's size the file cannot hold: not a replay, as playing it says) */
+	if (header_size > REPLAY_MAXIMUM_HEADER_SIZE ||
+		(info->bytes && (unsigned long long)header_size + REPLAY_RECORD_HEADER_SIZE > info->bytes))
+	{
+		info->valid = FALSE;
+		snprintf(info->why, sizeof(info->why), "Not a replay.");
+		return FALSE;
+	}
 	csmemcpy(map, header + 40, sizeof(map));
 	map[sizeof(map) - 1] = 0;
 	base_name = strrchr(map, '\\');
@@ -829,6 +840,12 @@ void network_replay_record_received(
 	switch (GET_MESSAGE_TYPE(header))
 	{
 	case REPLAY_MESSAGE_TYPE_DATA:
+		/* (voice chat is not recorded: the host's voice frames and its
+		voice settings come as data messages too, network_voice.c, and a
+		replay is a file players pass on: it held everyone's voices, with
+		the speaker's machine and player, and a playback played them) */
+		if (size <= 0xFFFF && network_voice_handles_message((word const *)message, (word)size))
+			break;
 		network_replay_record(unreliable ? _network_replay_datagram : _network_replay_reliable, message, size);
 		break;
 	case REPLAY_MESSAGE_TYPE_PACKET:
@@ -875,7 +892,9 @@ void network_replay_record(
 {
 	byte header[REPLAY_RECORD_HEADER_SIZE];
 
-	if (!replay.file || size < 0 || size > 0xFFFF || kind <= 0 || kind >= NUMBER_OF_NETWORK_REPLAY_RECORDS)
+	/* (never a record of no bytes: nothing reads one, and a playback's walk
+	takes each record by its size) */
+	if (!replay.file || size <= 0 || size > 0xFFFF || kind <= 0 || kind >= NUMBER_OF_NETWORK_REPLAY_RECORDS)
 		return;
 	header[0] = kind;
 	header[1] = 0;

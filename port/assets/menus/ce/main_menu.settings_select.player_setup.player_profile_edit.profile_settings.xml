@@ -177,7 +177,7 @@
 		<string text="STORAGE"/>
 		<string text="MAP STORAGE"/>
 		<string text="ABOUT"/>
-		<string text="OPENH1"/>
+		<string text="MENDICANTCE"/>
 	</strings>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/help_strings">
 		<string text="Your player profiles, your name and color, the campaign's AI and the disk space the maps take."/>
@@ -191,6 +191,6 @@
 		<string text=""/>
 		<string text="Instant Loading keeps every map unpacked, about 3.0 GB, so loads never wait. Disk Space Saver keeps at most 730 MB, saving 2.3 GB or more, little on most drives. A map it has not kept loads a second or more slower.|Switching back unpacks them in the background."/>
 		<string text=""/>
-		<string text="Halo: Combat Evolved, the Xbox game, on this computer, played from your own copy of its maps. OpenH1 is a free fan project."/>
+		<string text="Halo: Combat Evolved, the Xbox game, played from your own copy of its maps. MendicantCE is a free fan project: OpenH1, modified. Source: github.com/Adam-AtlasSoftware/MendicantCE"/>
 	</strings>
 </menus>

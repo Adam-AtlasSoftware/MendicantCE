@@ -5761,6 +5761,7 @@ static boolean multiplayer_level_select(
 	struct widget_instance *level_list;
 	struct ui_widget_definition *definition;
 	long level_index;
+	short forge_level; /* port: the Forge map chosen, or NONE */
 
 	definition = ui_widget_definition_get(widget->definition_tag_index);
 	match_vassert("c:\\halo\\SOURCE\\interface\\ui_widget_event_handler_functions.c", 1280,
@@ -5791,8 +5792,9 @@ static boolean multiplayer_level_select(
 		return FALSE;
 	}
 	map_name = ((char **)level_list->generated_list)[level_list->data3C.selected_index];
-	/* port: a Forge map is its base map played with its layout */
-	forge_custom_map_select(ui_widget_port_forge_level(level_list->data3C.selected_index));
+	/* port: a Forge map is its base map played with its layout (chosen below,
+	after the server's map is set, which lets an earlier choice go) */
+	forge_level = ui_widget_port_forge_level(level_list->data3C.selected_index);
 	file = fopen("d:\\map_automation.txt", "r");
 	if (file)
 	{
@@ -5821,6 +5823,7 @@ static boolean multiplayer_level_select(
 		if (server)
 			network_game_server_change_map_name(server, map_name);
 	}
+	forge_custom_map_select(forge_level); /* port: (see above) */
 	for (level_index = 0; level_index < level_list->generated_count; level_index++)
 	{
 		if (!_stricmp(map_name, ((char **)level_list->generated_list)[level_index]))

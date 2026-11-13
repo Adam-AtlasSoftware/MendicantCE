@@ -54,6 +54,7 @@ target, within reach */
 /* the position each actor under orders keeps, by absolute actor index */
 long order_actor[MENDICANT_MAX_ACTORS];
 short order_position[MENDICANT_MAX_ACTORS];
+short order_encounter[MENDICANT_MAX_ACTORS];
 /* each actor's part in its unit's drill (ROLE_*), which sets how it moves and fires */
 char actor_role[MENDICANT_MAX_ACTORS];
 /* going in: a grenade first */
@@ -85,6 +86,10 @@ boolean bridge_lost_last;
 static unsigned char actor_disciplined[MENDICANT_MAX_ACTORS];
 static long bridge_request_time;
 static long pending_members[MENDICANT_MAX_SQUAD];
+/* ...and the encounter (absolute) each was in when asked: the candidates are
+its positions, and an answer for a member who has changed encounter since is
+not applied */
+static short pending_encounters[MENDICANT_MAX_SQUAD];
 static short pending_positions[MENDICANT_MAX_SQUAD][BRIDGE_CANDIDATES];
 /* the drill's random numbers (xorshift32). Training starts them from the
 hook library's constant and moves them on by each episode's seed; in play
@@ -154,6 +159,27 @@ static boolean command_actor_is_elite_leader(struct actor_datum *actor)
 {
 	return actor->meta.team_index == TEAM_COVENANT && MENDICANT_ACTOR_IS_ELITE(actor->meta.type) &&
 		actor->meta.active && !actor->meta.swarm && actor->input.body_vitality > 0.0f;
+}
+
+/* an Elite who leads a unit goes on leading it while he lives, his encounter
+active or not: the player out of sight of the unit (its encounter then goes
+inactive) is no death in it. (Tested with command_actor_is_elite_leader, a
+living but inactive Elite lost his unit to the first living member, for
+good; where that member was himself, the unit was copied onto itself, which
+the assert build halts on, and stood down.) */
+static boolean command_actor_still_leads(struct actor_datum *actor)
+{
+	return actor->meta.team_index == TEAM_COVENANT && MENDICANT_ACTOR_IS_ELITE(actor->meta.type) &&
+		!actor->meta.swarm && actor->input.body_vitality > 0.0f;
+}
+
+/* whether a position index is one of the list of the encounter the actor is in */
+static boolean command_position_in_encounter(struct actor_datum *actor, int position)
+{
+	int count = 0;
+
+	return position >= 0 && actor->meta.encounter_index != NONE &&
+		mendicant_encounter_firing_positions(actor->meta.encounter_index, &count) && position < count;
 }
 
 static short command_change_firing_position(long actor_index, short position)
@@ -255,6 +281,37 @@ void mendicant_order(long actor_index, short position)
 	mendicant_status.orders++;
 	order_actor[(short)actor_index] = actor_index;
 	order_position[(short)actor_index] = position;
+	/* (the encounter the position is of: the actor's now, by its absolute
+	index, which a script's migrate and the actor's creation store alike) */
+	if (slot >= 0 && slot < MENDICANT_MAX_ACTORS)
+	{
+		struct actor_datum *actor = command_actor_get(actor_index);
+
+		order_encounter[slot] = actor ? (short)actor->meta.encounter_index : NONE;
+	}
+}
+
+boolean mendicant_order_stands(long actor_index)
+{
+	int slot = (short)actor_index;
+	struct actor_datum *actor;
+	int count = 0;
+
+	if (slot < 0 || slot >= MENDICANT_MAX_ACTORS || order_actor[slot] != actor_index)
+		return FALSE;
+	/* (an order with no position keeps the actor's own choice: nothing to go stale) */
+	if (order_position[slot] < 0)
+		return TRUE;
+	actor = command_actor_get(actor_index);
+	if (actor && actor->meta.encounter_index != NONE && order_encounter[slot] == (short)actor->meta.encounter_index &&
+		mendicant_encounter_firing_positions(actor->meta.encounter_index, &count) && order_position[slot] < count)
+	{
+		return TRUE;
+	}
+	/* dropped, not passed over: the tests of "under orders" elsewhere agree,
+	and the unit's next step orders him again */
+	order_actor[slot] = NONE;
+	return FALSE;
 }
 
 unsigned long mendicant_drill_rand(void)
@@ -416,6 +473,7 @@ void mendicant_bridge_request(long key, struct mendicant_member *members, int co
 		struct actor_datum *actor = members[index].actor;
 
 		pending_members[index] = members[index].actor_index;
+		pending_encounters[index] = (short)actor->meta.encounter_index;
 		body += actor->input.body_vitality;
 		shield += actor->input.shield_vitality;
 		visible += actor->situation.visible_reachable_enemies > 0;
@@ -501,7 +559,9 @@ static void bridge_apply(long time)
 			/* candidate 0: no order, the game's own AI decides for this one */
 			held++;
 		}
-		else if (!mendicant_firing_position_owned(actor->meta.encounter_index, (short)position) &&
+		else if (pending_encounters[index] == (short)actor->meta.encounter_index &&
+			command_position_in_encounter(actor, position) &&
+			!mendicant_firing_position_owned(actor->meta.encounter_index, (short)position) &&
 			(actor->state.action == _actor_action_fight || actor->state.action == _actor_action_uncover) &&
 			command_change_firing_position(actor_index, (short)position) == position)
 		{
@@ -584,7 +644,7 @@ static void command_succession(int actor_count, long time)
 		if (key >= MENDICANT_MAX_ACTORS)
 			continue;
 		leader = command_actor_get(mendicant_units_leader(key));
-		if (leader && (command_actor_is_elite_leader(leader) ||
+		if (leader && (command_actor_still_leads(leader) ||
 			(mendicant_units_leaderless(key) && leader->input.body_vitality > 0.0f)))
 			continue;
 		for (other = 0; other < actor_count && heir < 0; other++)
@@ -623,7 +683,10 @@ static void command_succession(int actor_count, long time)
 						actor_disciplined[other] = 0;
 				}
 			}
-			mendicant_units_stand_down(key);
+			/* (the old key's unit is no more; an heir at the unit's own key
+			keeps the plan he has just been given) */
+			if (new_key != key)
+				mendicant_units_stand_down(key);
 			if (mendicant_drill_file)
 				fprintf(mendicant_drill_file, "%ld,new_leader,%d,from=%d\n", time, new_key, key);
 		}
@@ -1020,6 +1083,7 @@ void mendicant_command_reset(void)
 	csmemset(actor_disciplined, 0, sizeof(actor_disciplined));
 	bridge_request_time = 0;
 	csmemset(pending_members, 0, sizeof(pending_members));
+	csmemset(pending_encounters, 0, sizeof(pending_encounters));
 	csmemset(pending_positions, 0, sizeof(pending_positions));
 	drill_update_time = 0;
 	csmemset(discipline_declined, 0, sizeof(discipline_declined));

@@ -46,6 +46,15 @@ int config_boolean(char const *key);
 void xgpu_backend_consume(void);
 /* (port/linux/game/menu_pictures_render.c) */
 int menu_pictures_stock_maps(void);
+/* (what PRISM ASSETS' settings ask for and found none of, said in the log:
+mods_say_absent) */
+char const *config_string(char const *key);
+void platform_log(char const *format, ...);
+int halo_server_mode(void);
+int xgpu_backend_texture_store_available(void);
+int xgpu_backend_mesh_store_available(void);
+int d3d8_materials_drawn(void);
+int d3d8_material_overlay_drawn(void);
 
 /* ---------- constants */
 
@@ -113,6 +122,72 @@ static void mods_update(
 	loads, mods_tags_loaded) */
 	if (!at_load)
 		texture_cache_size_for_map();
+
+	return;
+}
+
+/* PRISM ASSETS' settings that ask for files no mod that is on has for the
+map, each said once a map in the log, and those the renderer cannot draw (a
+download has no pack: with a setting on and nothing changed, nothing said
+why; and with no mod on, the groups' updates, which say what the Windows
+build's renderer has not yet, do not run) */
+static void mods_say_absent(
+	void)
+{
+#ifdef HALO_WINDOWS
+	static char const none[] = "this build's renderer has not that yet (the Windows build's)";
+#else
+	static char const none[] = "this renderer has not that";
+#endif
+	char const *map = mods_globals.map_name;
+	char const *textures = config_string("display.prism_textures");
+	char const *models = config_string("display.prism_models");
+	char const *materials = config_string("display.prism_materials");
+
+	if (config_boolean("debug.null_renderer") || halo_server_mode())
+	{
+		return;
+	}
+	if (textures && (!strcmp(textures, "enhanced") || !strcmp(textures, "max")) && !mods_globals.texture_count)
+	{
+		if (!xgpu_backend_texture_store_available())
+			platform_log("prism textures: display.prism_textures \"%s\": %s: drawn stock", textures, none);
+		else
+			platform_log("prism textures: display.prism_textures \"%s\": no mod that is on replaces a texture of %s "
+				"(its textures/): drawn stock", textures, map);
+	}
+	if (models && (!strcmp(models, "enhanced") || !strcmp(models, "max")) && !mods_globals.mesh_count)
+	{
+		if (!xgpu_backend_mesh_store_available())
+			platform_log("prism models: display.prism_models \"%s\": %s: drawn stock", models, none);
+		else
+			platform_log("prism models: display.prism_models \"%s\": no mod that is on replaces a model of %s "
+				"(its meshes/): drawn stock", models, map);
+	}
+	if (materials && !strcmp(materials, "pbr") && !mods_globals.pbr_count)
+	{
+		if (!d3d8_materials_drawn())
+			platform_log("prism materials: display.prism_materials \"pbr\": %s: drawn stock", none);
+		else
+			platform_log("prism materials: display.prism_materials \"pbr\": no mod that is on has a material of a "
+				"shader of %s (its materials/): drawn stock", map);
+	}
+	if (config_boolean("display.prism_material_overlay") && !mods_globals.material_count)
+	{
+		if (!d3d8_material_overlay_drawn())
+			platform_log("prism material overlay: display.prism_material_overlay: %s: drawn stock", none);
+		else
+			platform_log("prism material overlay: display.prism_material_overlay: no mod that is on has an overlay "
+				"that names a model shader of %s (its materials/overlay.json): drawn stock", map);
+	}
+	if (config_boolean("display.prism_surface_maps") && !mod_materials_surface_maps_any())
+	{
+		if (!d3d8_material_overlay_drawn())
+			platform_log("prism surface maps: display.prism_surface_maps: %s: drawn stock", none);
+		else
+			platform_log("prism surface maps: display.prism_surface_maps: no mod that is on has a surface map of %s "
+				"(a .surface.png beside a bitmap's tag, or an overlay's): drawn stock", map);
+	}
 
 	return;
 }
@@ -296,6 +371,10 @@ void mods_tags_loaded(
 	if (mods_globals.enabled && (port_mods_played() || mods_globals.loose_sounds_enabled))
 	{
 		mods_update(FALSE, TRUE);
+	}
+	if (mods_globals.enabled)
+	{
+		mods_say_absent();
 	}
 	/* (the map's textures and the mods' bitmaps known, the texture cache
 	takes the map's size: xbox_texture_cache.c) */

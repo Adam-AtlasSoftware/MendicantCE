@@ -125,6 +125,21 @@ build */
 #define UPDATE_NAME "OpenH1-Linux"
 #endif
 
+/* fork: this fork's builds do not update themselves, whatever their number.
+The releases this file looks for are upstream OpenH1's (UPDATE_REPOSITORY and
+the names above), which upstream's release key (port/assets/release-key.pub)
+signs: found, one would be installed over this game and leave the player with
+upstream's. The fork has no release key of its own to follow its own releases
+by, so the whole updater is left out of the build, as it is of the platforms
+that are updated otherwise: none of its addresses or file names is in a fork
+build (the release workflow refuses a package that has them). The switch is
+tools/build_common.py's FORK_DEFINE. */
+#ifdef HALO_FORK_MENDICANT
+#undef UPDATE_PLATFORM
+#undef UPDATE_NAME
+#undef UPDATER_PACKAGE
+#endif
+
 /* (given for this file by the build: tools/android_build.py's
 generate_guest_image, windows_build.py; the commit, CI's) */
 #ifndef HALO_BUILD_NUMBER
@@ -144,9 +159,17 @@ static void updater_log_build(void)
 	if (HALO_BUILD_NUMBER > 0)
 		platform_log("build: build-%d (%s%s%s)", HALO_BUILD_NUMBER, HALO_BUILD_FLAVOR,
 			HALO_BUILD_COMMIT[0] ? ", commit " : "", HALO_BUILD_COMMIT);
+#ifdef HALO_FORK_MENDICANT
+	/* fork: this fork's releases have no number: a build is named by its commit */
+	else if (HALO_BUILD_COMMIT[0])
+		platform_log("build: MendicantCE, commit %s (%s)", HALO_BUILD_COMMIT, HALO_BUILD_FLAVOR);
+	else
+		platform_log("build: MendicantCE, a local build, not a release (%s)", HALO_BUILD_FLAVOR);
+#else
 	else
 		platform_log("build: a local build, not a release (%s%s%s)", HALO_BUILD_FLAVOR,
 			HALO_BUILD_COMMIT[0] ? ", commit " : "", HALO_BUILD_COMMIT);
+#endif
 }
 
 #ifdef UPDATE_PLATFORM
@@ -1827,6 +1850,10 @@ int updater_server_install_poll(char *error, int size)
 void updater_start(void)
 {
 	updater_log_build();
+#ifdef HALO_FORK_MENDICANT
+	/* fork: said once, so that a log shows why no update was looked for */
+	platform_log("update: not looked for: this fork's builds do not update themselves");
+#endif
 }
 
 /* (the Frame's alone: menu_functions.c's "port update now") */
@@ -1911,7 +1938,12 @@ int updater_server_install_poll(char *error, int size)
 {
 	if (error && size > 0)
 	{
+#ifdef HALO_FORK_MENDICANT
+		/* fork: */
+		const char *why = "this fork's builds do not update themselves";
+#else
 		const char *why = "this build does not update itself as a server";
+#endif
 		int index;
 
 		for (index = 0; why[index] && index < size - 1; index++)
@@ -1926,7 +1958,10 @@ int updater_server_install_poll(char *error, int size)
 updater_server_check has said it does not */
 const char *updater_server_unable(void)
 {
-#if defined(UPDATER_PACKAGE)
+#if defined(HALO_FORK_MENDICANT)
+	/* fork: */
+	return "this fork's builds do not update themselves";
+#elif defined(UPDATER_PACKAGE)
 	return "the Steam Frame's package is updated by its launcher, halo-vr.sh";
 #elif defined(UPDATE_PLATFORM)
 	return updater_server_reason[0] ? updater_server_reason : "it has not looked yet";

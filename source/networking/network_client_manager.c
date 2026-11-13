@@ -2394,6 +2394,69 @@ void network_game_client_reset(
 	return;
 }
 
+/* port: whether a replay's game record can be played here, before anything
+of this machine's own game is let go (port/linux/game/
+network_replay_playback.c's network_replay_watch). A game joined has its
+record checked as it arrives (network_game_client_game_settings_updated); a
+replay's comes from a file, which may be damaged, made by hand, or of a map
+this machine has not: unchecked, such a record went on to precache its map,
+and a map that is not there ends in the damaged disc error, which stops the
+game. The record's fields as a joined game's; the map on this machine, in
+the version recorded for a Custom Edition map, with no download asked for
+and no menu error queued (cache_files_map_present does both); and a build of
+the map that plays network games. `why` says what is wrong, for the player. */
+boolean network_game_client_port_replay_game_playable(
+	struct network_game *game,
+	char *why,
+	long why_size)
+{
+	char build[0x20];
+	char const *name;
+
+	if (why && why_size > 0)
+		why[0] = 0;
+	if (!game || !why || why_size <= 0)
+		return FALSE;
+	if (game->machine_count < 0 || game->machine_count > MAXIMUM_NETWORK_MACHINE_COUNT ||
+		game->player_count < 0 || game->player_count > MAXIMUM_NUMBER_OF_PLAYERS ||
+		game->maximum_players <= 0 || game->maximum_players > MAXIMUM_NUMBER_OF_PLAYERS ||
+		!network_game_client_map_name_is_valid(game->map.name, sizeof(game->map.name)) ||
+		!VALID_INDEX(game->difficulty, NUMBER_OF_GAME_DIFFICULTY_LEVELS) ||
+		!network_game_client_game_record_is_valid(game))
+	{
+		snprintf(why, (size_t)why_size, "This replay's game record is damaged.");
+		return FALSE;
+	}
+	name = tag_name_strip_path(game->map.name);
+	if (custom_edition_level_name(game->map.name))
+	{
+		char message[512];
+
+		if (!custom_edition_cache_present(game->map.name, (unsigned long)game->map.version, message,
+			sizeof(message)))
+		{
+			error(_error_silent, "replay: its map %s cannot be played here: %s", game->map.name, message);
+			snprintf(why, (size_t)why_size, "This replay's map, %.64s, is not here in the version it was recorded "
+				"on, or cannot run. If you have it, copy it into custom_maps.", name);
+			return FALSE;
+		}
+	}
+	else if (!cache_files_precache_map_loaded(game->map.name) && !cache_files_map_copyable_checksum(game->map.name))
+	{
+		snprintf(why, (size_t)why_size, "You don't have this replay's map, %.64s.map. If you have it, copy it into "
+			"maps.", name);
+		return FALSE;
+	}
+	if (!cache_files_map_plays_multiplayer(game->map.name, build))
+	{
+		build[sizeof(build) - 1] = 0;
+		snprintf(why, (size_t)why_size, "This replay's map, %.64s, is of a build this version plays no network "
+			"games on.", name);
+		return FALSE;
+	}
+	return TRUE;
+}
+
 /* port: a replay's playback (port/linux/game/network_replay_playback.c):
 the global client made one joined to the game the replay recorded, with no
 player of its own (no machine), in the pregame, which starts the game at
@@ -2405,6 +2468,16 @@ boolean network_game_client_port_replay_begin(
 
 	if (!client || !game)
 		return FALSE;
+	/* (the record checked before it is this client's game: the playback
+	checks it first, with the map, network_game_client_port_replay_game_playable) */
+	if (game->machine_count < 0 || game->machine_count > MAXIMUM_NETWORK_MACHINE_COUNT ||
+		game->player_count < 0 || game->player_count > MAXIMUM_NUMBER_OF_PLAYERS ||
+		game->maximum_players <= 0 || game->maximum_players > MAXIMUM_NUMBER_OF_PLAYERS ||
+		!network_game_client_map_name_is_valid(game->map.name, sizeof(game->map.name)) ||
+		!VALID_INDEX(game->difficulty, NUMBER_OF_GAME_DIFFICULTY_LEVELS))
+	{
+		return FALSE;
+	}
 	network_game_client_reset(client, FALSE);
 	csmemcpy(&client->game, game, sizeof(client->game));
 	client->game.local_data.game_objects_loaded = FALSE;

@@ -1,0 +1,87 @@
+{
+ "class": "skin_elite",
+ "description": "Elite skin: small overlapping reptile scales (about 1.8 mm) with crevices between them, a fine grain on each and soft folds; on the teal suit, which CE paints with a scale pattern, it reads as the suit's fine scaling (the class masks split skin from suit later).",
+ "group": "covenant",
+ "first_person": false,
+ "suggested_shaders": [
+  "characters\\elite\\shaders\\elite torso (not multipurpose B)",
+  "characters\\elite\\shaders\\elite arms (not multipurpose B)",
+  "characters\\elite\\shaders\\elite legs (not multipurpose B)",
+  "characters\\elite\\shaders\\elite legsa (not multipurpose B)",
+  "characters\\elite\\shaders\\elite head (not multipurpose B)",
+  "characters\\elite\\shaders\\elite heada (not multipurpose B)",
+  "characters\\elite\\elite_special\\shaders\\elite special body (not multipurpose B)"
+ ],
+ "tile_mm": 50.0,
+ "author_px": 1024,
+ "ship_px": 512,
+ "seed": 314,
+ "tile_rule": "base texel 2.0-2.8 mm: the tile spans 18-25 base texels, a scale is 0.7-0.9 of a base texel",
+ "feature_band_mm": [
+  0.8,
+  5.0
+ ],
+ "target_slope_rms": 0.25,
+ "height_layers": [
+  {
+   "gen": "scales",
+   "cell_mm": 1.8,
+   "rms_mm": 0.03,
+   "angle_deg": 90.0,
+   "angle_var_deg": 25.0,
+   "lean": 0.6,
+   "crevice": 0.14,
+   "floor": 0.45
+  },
+  {
+   "gen": "pebble",
+   "cell_mm": 0.6,
+   "rms_mm": 0.003,
+   "mode": "dome",
+   "note": "grain on each scale"
+  },
+  {
+   "gen": "wrinkles",
+   "rms_mm": 0.012,
+   "wavelength_mm": [
+    3.0,
+    9.0
+   ],
+   "width": 0.25,
+   "note": "soft folds"
+  }
+ ],
+ "cavity": {
+  "radius_mm": 0.8,
+  "strength": 0.5
+ },
+ "rough_layers": [
+  {
+   "src": "mask:crevice",
+   "k": 0.06
+  },
+  {
+   "src": "cavity",
+   "k": 0.04
+  },
+  {
+   "src": "noise",
+   "k": 0.04,
+   "wavelength_mm": [
+    2.0,
+    8.0
+   ]
+  }
+ ],
+ "export_masks": [],
+ "fade_m": [
+  3.0,
+  8.0
+ ],
+ "preview": {
+  "base_grey": 0.3,
+  "metallic": 0.0,
+  "roughness": 0.5
+ },
+ "base_roughness_ref": 0.5
+}

@@ -536,6 +536,12 @@ sent (`distributed_host_plan_players`, `distributed_event_goes_to`), so a
 client's replay of its game holds all of the players; an upstream host, or
 this one with it off, sends the usual.
 
+Voice chat is not recorded: the host's voice frames and voice settings reach
+a client as data messages too, and the recorder leaves them out
+(`network_voice_handles_message`). A playback hands no message to the voice
+player either (`network_voice_handle_message`), so a recording made before
+this, or a file made by hand, plays no voice.
+
 **Taking them off the console, and putting others on.** Android's
 EXPORT REPLAYS copies them through the system's folder picker, and IMPORT
 copies the files chosen in the system's file picker into the folder, as the

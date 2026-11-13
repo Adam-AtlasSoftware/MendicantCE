@@ -1,0 +1,454 @@
+{
+ "format": 1,
+ "note": "PRISM M3 class masks of the Covenant and the Marines: recipes only (Tier 0), in class_mask_recipes.json's format (class_masks.py --recipes; P-auto bone groups, T tiebreaks, P-paint polygons, expect gates). The overlay ships the two-class channel rules of overlay_characters.json now; when a shader's mask is built and the overlay names it (class_mask), its slots become these. 'extract': the map the model is in when it is not b30. 'status' and 'pending' are notes for what the class masks or the classes cannot do yet; class_masks.py ignores them. 'mask_wins' (with the overlay entry's class_mask_wins): the mask's slots A, C and D are kept over the rule, which decides A against B over the mask's B alone; 'keep_plate' tags the rule's plate, closed, as slot A; 'plate_tiebreak' gives a class inside the plate by colour.",
+ "shaders": {
+  "characters\\elite\\shaders\\elite torso": {
+   "model": "models/characters/elite/elite.gltf",
+   "slots": [
+    "cov_armour",
+    "skin_elite",
+    "cov_bodysuit"
+   ],
+   "rule": {
+    "channel": "b",
+    "lo": 0.35,
+    "hi": 0.65
+   },
+   "exclude": {
+    "channel": "g",
+    "above": 0.1
+   },
+   "bones": {
+    "neck": "cov_bodysuit",
+    "hand": "cov_bodysuit",
+    "*": "skin_elite"
+   },
+   "tiebreak": [
+    {
+     "note": "the teal hex-scaled suit (neck, lower spine1, the upper arms and thighs) and the navy cloth of the hands are blue (b - r >= 8) against the orange skin (r > b): suit; the hand and neck islands too",
+     "from": "skin_elite",
+     "to": "cov_bodysuit",
+     "b_minus_r_at_least": 8,
+     "blur_px": 3
+    }
+   ],
+   "expect": {
+    "source": "island_stats/elite.txt; CM 3.3",
+    "cov_armour": "island_b"
+   },
+   "status": "needs the class cov_bodysuit (Elite hex suit, its cell matched to CE's painted one by an FFT peak, CM 3.3): not authored in M3; until then the overlay keeps skin_elite on the suit"
+  },
+  "characters\\elite\\shaders\\elite arms": {
+   "model": "models/characters/elite/elite.gltf",
+   "slots": [
+    "cov_armour",
+    "skin_elite",
+    "cov_bodysuit"
+   ],
+   "rule": {
+    "channel": "b",
+    "lo": 0.35,
+    "hi": 0.65
+   },
+   "exclude": {
+    "channel": "g",
+    "above": 0.1
+   },
+   "bones": {
+    "neck": "cov_bodysuit",
+    "hand": "cov_bodysuit",
+    "*": "skin_elite"
+   },
+   "tiebreak": [
+    {
+     "note": "the teal hex-scaled suit (neck, lower spine1, the upper arms and thighs) and the navy cloth of the hands are blue (b - r >= 8) against the orange skin (r > b): suit; the hand and neck islands too",
+     "from": "skin_elite",
+     "to": "cov_bodysuit",
+     "b_minus_r_at_least": 8,
+     "blur_px": 3
+    }
+   ],
+   "expect": {
+    "source": "island_stats/elite.txt; CM 3.3",
+    "cov_armour": "island_b"
+   },
+   "status": "needs the class cov_bodysuit (Elite hex suit, its cell matched to CE's painted one by an FFT peak, CM 3.3): not authored in M3; until then the overlay keeps skin_elite on the suit"
+  },
+  "characters\\elite\\shaders\\elite legs": {
+   "model": "models/characters/elite/elite.gltf",
+   "slots": [
+    "cov_armour",
+    "skin_elite",
+    "cov_bodysuit"
+   ],
+   "rule": {
+    "channel": "b",
+    "lo": 0.35,
+    "hi": 0.65
+   },
+   "exclude": {
+    "channel": "g",
+    "above": 0.1
+   },
+   "bones": {
+    "neck": "cov_bodysuit",
+    "hand": "cov_bodysuit",
+    "*": "skin_elite"
+   },
+   "tiebreak": [
+    {
+     "note": "the teal hex-scaled suit (neck, lower spine1, the upper arms and thighs) and the navy cloth of the hands are blue (b - r >= 8) against the orange skin (r > b): suit; the hand and neck islands too",
+     "from": "skin_elite",
+     "to": "cov_bodysuit",
+     "b_minus_r_at_least": 8,
+     "blur_px": 3
+    }
+   ],
+   "expect": {
+    "source": "island_stats/elite.txt; CM 3.3",
+    "cov_armour": "island_b"
+   },
+   "status": "needs the class cov_bodysuit (Elite hex suit, its cell matched to CE's painted one by an FFT peak, CM 3.3): not authored in M3; until then the overlay keeps skin_elite on the suit"
+  },
+  "characters\\elite\\shaders\\elite legsa": {
+   "model": "models/characters/elite/elite.gltf",
+   "slots": [
+    "cov_armour",
+    "skin_elite",
+    "cov_bodysuit"
+   ],
+   "rule": {
+    "channel": "b",
+    "lo": 0.35,
+    "hi": 0.65
+   },
+   "exclude": {
+    "channel": "g",
+    "above": 0.1
+   },
+   "bones": {
+    "neck": "cov_bodysuit",
+    "hand": "cov_bodysuit",
+    "*": "skin_elite"
+   },
+   "tiebreak": [
+    {
+     "note": "the teal hex-scaled suit (neck, lower spine1, the upper arms and thighs) and the navy cloth of the hands are blue (b - r >= 8) against the orange skin (r > b): suit; the hand and neck islands too",
+     "from": "skin_elite",
+     "to": "cov_bodysuit",
+     "b_minus_r_at_least": 8,
+     "blur_px": 3
+    }
+   ],
+   "expect": {
+    "source": "island_stats/elite.txt; CM 3.3",
+    "cov_armour": "island_b"
+   },
+   "status": "needs the class cov_bodysuit (Elite hex suit, its cell matched to CE's painted one by an FFT peak, CM 3.3): not authored in M3; until then the overlay keeps skin_elite on the suit"
+  },
+  "characters\\elite\\shaders\\elite head": {
+   "model": "models/characters/elite/elite.gltf",
+   "slots": [
+    "cov_armour",
+    "skin_elite",
+    "cov_bodysuit"
+   ],
+   "rule": {
+    "channel": "b",
+    "lo": 0.35,
+    "hi": 0.65
+   },
+   "exclude": {
+    "channel": "g",
+    "above": 0.1
+   },
+   "bones": {
+    "neck": "cov_bodysuit",
+    "hand": "cov_bodysuit",
+    "*": "skin_elite"
+   },
+   "tiebreak": [
+    {
+     "note": "the teal hex-scaled suit (neck, lower spine1, the upper arms and thighs) and the navy cloth of the hands are blue (b - r >= 8) against the orange skin (r > b): suit; the hand and neck islands too",
+     "from": "skin_elite",
+     "to": "cov_bodysuit",
+     "b_minus_r_at_least": 8,
+     "blur_px": 3
+    }
+   ],
+   "expect": {
+    "source": "island_stats/elite.txt; CM 3.3",
+    "cov_armour": "island_b"
+   },
+   "status": "needs the class cov_bodysuit (Elite hex suit, its cell matched to CE's painted one by an FFT peak, CM 3.3): not authored in M3; until then the overlay keeps skin_elite on the suit"
+  },
+  "characters\\elite\\shaders\\elite heada": {
+   "model": "models/characters/elite/elite.gltf",
+   "slots": [
+    "cov_armour",
+    "skin_elite",
+    "cov_bodysuit"
+   ],
+   "rule": {
+    "channel": "b",
+    "lo": 0.35,
+    "hi": 0.65
+   },
+   "exclude": {
+    "channel": "g",
+    "above": 0.1
+   },
+   "bones": {
+    "neck": "cov_bodysuit",
+    "hand": "cov_bodysuit",
+    "*": "skin_elite"
+   },
+   "tiebreak": [
+    {
+     "note": "the teal hex-scaled suit (neck, lower spine1, the upper arms and thighs) and the navy cloth of the hands are blue (b - r >= 8) against the orange skin (r > b): suit; the hand and neck islands too",
+     "from": "skin_elite",
+     "to": "cov_bodysuit",
+     "b_minus_r_at_least": 8,
+     "blur_px": 3
+    }
+   ],
+   "expect": {
+    "source": "island_stats/elite.txt; CM 3.3",
+    "cov_armour": "island_b"
+   },
+   "status": "needs the class cov_bodysuit (Elite hex suit, its cell matched to CE's painted one by an FFT peak, CM 3.3): not authored in M3; until then the overlay keeps skin_elite on the suit"
+  },
+  "characters\\elite\\elite_special\\shaders\\elite special body": {
+   "model": "models/characters/elite/elite_special/elite_special.gltf",
+   "slots": [
+    "cov_armour",
+    "skin_elite",
+    "cov_bodysuit"
+   ],
+   "rule": {
+    "channel": "b",
+    "lo": 0.35,
+    "hi": 0.65
+   },
+   "exclude": {
+    "channel": "g",
+    "above": 0.1
+   },
+   "bones": {
+    "neck": "cov_bodysuit",
+    "hand": "cov_bodysuit",
+    "*": "skin_elite"
+   },
+   "tiebreak": [
+    {
+     "note": "the teal hex-scaled suit (neck, lower spine1, the upper arms and thighs) and the navy cloth of the hands are blue (b - r >= 8) against the orange skin (r > b): suit; the hand and neck islands too",
+     "from": "skin_elite",
+     "to": "cov_bodysuit",
+     "b_minus_r_at_least": 8,
+     "blur_px": 3
+    }
+   ],
+   "expect": {
+    "source": "island_stats/elite_special.txt; CM 3.3",
+    "cov_armour": "island_b"
+   },
+   "status": "needs the class cov_bodysuit (Elite hex suit, its cell matched to CE's painted one by an FFT peak, CM 3.3): not authored in M3; until then the overlay keeps skin_elite on the suit"
+  },
+  "characters\\jackal\\shaders\\jackal torso": {
+   "model": "models/characters/jackal/jackal.gltf",
+   "slots": [
+    "cov_armour_worn",
+    "cov_cloth"
+   ],
+   "rule": {
+    "channel": "r",
+    "lo": 0.05,
+    "hi": 0.15
+   },
+   "exclude": {
+    "channel": "g",
+    "above": 0.1
+   },
+   "bones": {
+    "*": "cov_cloth"
+   },
+   "expect": {
+    "source": "island_stats/jackal.txt; CM 3.5"
+   },
+   "status": "the channel rule alone (r) already splits plate from cloth; the brown fur keeps cov_cloth until a fur class"
+  },
+  "characters\\jackal\\shaders\\jackal legs": {
+   "model": "models/characters/jackal/jackal.gltf",
+   "slots": [
+    "cov_armour_worn",
+    "cov_cloth",
+    "skin_jackal"
+   ],
+   "rule": {
+    "channel": "r",
+    "lo": 0.05,
+    "hi": 0.15
+   },
+   "exclude": {
+    "channel": "g",
+    "above": 0.1
+   },
+   "bones": {
+    "foot": "skin_jackal",
+    "*": "cov_cloth"
+   },
+   "expect": {
+    "source": "island_stats/jackal.txt; CM 3.5",
+    "skin_jackal": "island_bone:foot"
+   }
+  },
+  "characters\\marine_armored\\shaders\\marine_arms": {
+   "model": "models/characters/marine_armored/marine_armored.gltf",
+   "slots": [
+    "marine_paint",
+    "marine_bdu",
+    "human_skin"
+   ],
+   "rule": {
+    "channel": "r",
+    "lo": 0.05,
+    "hi": 0.15
+   },
+   "bones": {
+    "hand": "human_skin",
+    "*": "marine_bdu"
+   },
+   "expect": {
+    "source": "island_stats/marine_armored.txt; CM 3.2",
+    "human_skin": "island_bone:hand"
+   },
+   "mask_wins": true,
+   "keep_plate": {
+    "close_px": 3,
+    "note": "the scratches CE paints into the plate's specular channel (thin dips under lo) stay plate: the rule's plate closed by 3 texels over the BDU/webbing default"
+   }
+  },
+  "characters\\marine_armored\\shaders\\marine_arms_johnson": {
+   "model": "models/characters/marine_armored/marine_armored.gltf",
+   "slots": [
+    "marine_paint",
+    "marine_bdu",
+    "human_skin"
+   ],
+   "rule": {
+    "channel": "r",
+    "lo": 0.05,
+    "hi": 0.15
+   },
+   "bones": {
+    "hand": "human_skin",
+    "*": "marine_bdu"
+   },
+   "expect": {
+    "source": "island_stats/marine_armored.txt; CM 3.2",
+    "human_skin": "island_bone:hand"
+   },
+   "mask_wins": true,
+   "keep_plate": {
+    "close_px": 3,
+    "note": "the scratches CE paints into the plate's specular channel (thin dips under lo) stay plate: the rule's plate closed by 3 texels over the BDU/webbing default"
+   }
+  },
+  "characters\\marine_armored\\shaders\\marine_legs": {
+   "model": "models/characters/marine_armored/marine_armored.gltf",
+   "slots": [
+    "marine_paint",
+    "marine_bdu",
+    "hard_polymer"
+   ],
+   "rule": {
+    "channel": "r",
+    "lo": 0.05,
+    "hi": 0.15
+   },
+   "bones": {
+    "foot": "hard_polymer",
+    "*": "marine_bdu"
+   },
+   "expect": {
+    "source": "island_stats/marine_armored.txt; CM 3.2",
+    "hard_polymer": "island_bone:foot"
+   },
+   "mask_wins": true,
+   "keep_plate": {
+    "close_px": 3,
+    "note": "the scratches CE paints into the plate's specular channel (thin dips under lo) stay plate: the rule's plate closed by 3 texels over the BDU/webbing default"
+   }
+  },
+  "characters\\marine_armored\\shaders\\marine_torso": {
+   "model": "models/characters/marine_armored/marine_armored.gltf",
+   "slots": [
+    "marine_paint",
+    "marine_webbing",
+    "marine_metal"
+   ],
+   "rule": {
+    "channel": "r",
+    "lo": 0.05,
+    "hi": 0.15
+   },
+   "bones": {
+    "*": "marine_webbing"
+   },
+   "expect": {
+    "source": "island_stats/marine_armored.txt; CM 3.2"
+   },
+   "mask_wins": true,
+   "keep_plate": {
+    "close_px": 3,
+    "note": "the scratches CE paints into the plate's specular channel (thin dips under lo) stay plate: the rule's plate closed by 3 texels over the BDU/webbing default"
+   },
+   "plate_tiebreak": [
+    {
+     "to": "marine_metal",
+     "note": "buckles and fittings: bright, unsaturated texels inside the rule's plate (max(rgb) > 110, saturation < 0.18, specular r > 0.5; 5% of the torso, measured)",
+     "max_rgb_above": 110,
+     "saturation_below": 0.18,
+     "channel_r_above": 0.5,
+     "blur_px": 1
+    }
+   ]
+  },
+  "characters\\marine\\shaders\\marine_body": {
+   "model": "models/characters/marine/marine.gltf",
+   "slots": [
+    "marine_bdu",
+    "human_skin",
+    "hard_polymer"
+   ],
+   "bones": {
+    "hand": "human_skin",
+    "foot": "hard_polymer",
+    "*": "marine_bdu"
+   },
+   "expect": {
+    "source": "island_stats/marine.txt; CM 3.2 (unarmoured Marine: a30, a50, c10)",
+    "human_skin": "island_bone:hand",
+    "hard_polymer": "island_bone:foot"
+   },
+   "extract": "a50"
+  },
+  "characters\\marine\\shaders\\marine_body johnson": {
+   "model": "models/characters/marine/marine.gltf",
+   "slots": [
+    "marine_bdu",
+    "human_skin"
+   ],
+   "bones": {
+    "hand": "human_skin",
+    "*": "marine_bdu"
+   },
+   "expect": {
+    "source": "island_stats/marine.txt",
+    "human_skin": "island_bone:hand"
+   },
+   "extract": "a50"
+  }
+ },
+ "tolerance_points": 3.0
+}

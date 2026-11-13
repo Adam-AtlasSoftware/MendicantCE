@@ -489,6 +489,15 @@ struct mendicant_geometry { real_point3d const *target; real axis_x, axis_y; };
 /* ---- M2 command (mendicant_command.c): what the other modules use */
 extern long order_actor[MENDICANT_MAX_ACTORS];
 extern short order_position[MENDICANT_MAX_ACTORS];
+/* ...and the encounter (its absolute index) whose firing position the order
+names: an order is of that encounter's list alone */
+extern short order_encounter[MENDICANT_MAX_ACTORS];
+/* whether the actor's order to a position still stands: it is his, and where
+it names a position, he is still in the encounter it was given in and the
+position is one of that encounter's list. An order that does not is dropped
+here (a script's ai_migrate, or a vehicle's encounter, moved him: the old
+index named an unrelated post of the new encounter, or none at all) */
+boolean mendicant_order_stands(long actor_index);
 extern char actor_role[MENDICANT_MAX_ACTORS];
 extern unsigned char actor_grenade_due[MENDICANT_MAX_ACTORS];
 extern real actor_leash[MENDICANT_MAX_ACTORS][4];

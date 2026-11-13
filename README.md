@@ -1,3 +1,27 @@
+> **This repository is MendicantCE, a modified version of OpenH1** (changed by
+> Adam Wiley from OpenH1's commit `afa1611ce` on, November 2026). It adds
+> MENDICANT AI, PRISM graphics, the Theater, Forge and tag packs:
+> **[MENDICANT.md](MENDICANT.md)** says what it is, what a download holds and
+> how it differs from OpenH1.
+>
+> Everything below this box is **OpenH1's README, kept as it is**. Its badges,
+> its download table, its Scoop bucket and its installer fetch **OpenH1's**
+> builds, not this one; this build **does not update itself**; OpenH1's issue
+> tracker and Discord are **not** the place for this build's problems; and the
+> source of a MendicantCE build is not in OpenH1's repository under a
+> `build-<n>` tag but at
+> <https://github.com/Adam-AtlasSoftware/MendicantCE>, at the commit its
+> `SOURCE.txt` names.
+>
+> **Downloads:** MendicantCE's builds, for Linux (x86-64) and Windows (x64),
+> are on <https://github.com/Adam-AtlasSoftware/MendicantCE/releases>. They
+> hold no game data: the game plays from your own Halo: Combat Evolved Xbox
+> disc image. Problems with them go to this repository's issue tracker,
+> <https://github.com/Adam-AtlasSoftware/MendicantCE/issues>, once its owner
+> has opened it (GitHub shows no Issues tab until then), and never to
+> OpenH1's. The Windows build is compiled and started by CI without game
+> data and has not been played yet ([MENDICANT.md](MENDICANT.md)).
+
 <p align="center">
   <a href="https://openh1.com"><img src="website/public/media/og.jpg" alt="OpenH1: welcome back, soldier" width="100%"></a>
 </p>

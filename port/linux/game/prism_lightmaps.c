@@ -44,7 +44,7 @@ decoded ARGB), the deflated size; then the deflated RGBA texels and a
 CRC-32 of the header and them. A file that fails a check is built again.
 
 display.prism_lightmaps "rebaked": each page drawn from the page baked
-again offline on this machine from CE's own light sources (art_pipeline's
+again offline on this machine from CE's own light sources (tools/prism_packs'
 relight_bake.py, relight_calib.py and relight_encode.py: Cycles, the BSP's
 sky lights and emitting shaders, bounce light, the factor times CE's size;
 each light's strength and colour fitted to the pools of light CE's page
@@ -237,6 +237,9 @@ static struct
 	int read, enabled, rebaked_mode, smooth_mode, sun_mode;
 	float sun_strength;
 	unsigned long ready_count, built_count, cached_count;
+	/* display.prism_lightmaps "rebaked": the structure's pages made without
+	a rebaked file (the first is said in the log) */
+	unsigned long rebaked_missing;
 } plm;
 
 static pthread_mutex_t plm_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -1039,6 +1042,7 @@ static void plm_release(void)
 	plm.current = -1;
 	plm.current_data = 0;
 	plm.map[0] = 0;
+	plm.rebaked_missing = 0;
 	/* (results of jobs for these pages still on their way are dropped) */
 	plm.generation++;
 }
@@ -1070,8 +1074,9 @@ static int plm_settings(void)
 				!config_boolean("debug.null_renderer") && !halo_server_mode();
 
 			if (enabled != plm.enabled || rebaked != plm.rebaked_mode || sun != plm.sun_mode)
-				platform_log("prism lightmaps: %s %s (finer copies x%ld)%s", rebaked ? "the rebaked pages" :
-					"the finer copies", enabled ? "on" : "off", factor, sun ? ", the sun masks" : "");
+				platform_log("prism lightmaps: %s %s (finer copies x%ld)%s",
+					rebaked ? "rebaked pages, where a page has one," : "the finer copies", enabled ? "on" : "off", factor,
+					sun ? ", the sun masks" : "");
 			plm.enabled = enabled;
 		}
 		/* (the pages are let go whenever the kind they were made as
@@ -1209,6 +1214,13 @@ static void plm_collect(void)
 					"rebaked (light and direction)") : job->sun ? "with its sun mask" : job->from_cache ? "from the cache" :
 					"built and cached",
 					job->milliseconds);
+				/* (the setting asks for rebaked pages and this one has no
+				file, or one refused above: no download has any, and the
+				line above alone read as a rebaked page drawn) */
+				if (job->rebaked_path[0] && !job->rebaked && !plm.rebaked_missing++)
+					platform_log("prism lightmaps: display.prism_lightmaps \"rebaked\": no rebaked page of %s bsp %d "
+						"page %ld (%s/%s): drawn as smooth, as every page of it without one (said of the first)",
+						plm.map, (int)plm.bsp, job->page, platform_data_root(), job->rebaked_path);
 			}
 			else
 			{

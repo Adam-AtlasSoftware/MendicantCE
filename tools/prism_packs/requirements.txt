@@ -1,0 +1,11 @@
+# PRISM's pack tools: the Python packages (pip install -r requirements.txt, in a virtual environment).
+# PyTorch: for an NVIDIA card, install its CUDA build first as pytorch.org says (for example
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128, torch and torchvision
+# from the same index); without one it runs on the processor.
+numpy>=1.26
+pillow>=10.0
+scipy>=1.11
+scikit-image>=0.22
+opencv-python-headless>=4.8
+torch>=2.2
+spandrel>=0.4

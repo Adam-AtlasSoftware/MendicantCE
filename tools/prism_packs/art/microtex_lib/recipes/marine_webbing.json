@@ -1,0 +1,72 @@
+{
+ "class": "marine_webbing",
+ "description": "Marine webbing, straps and pouches (the torso's non-plate texels, the helmet's chin strap): heavy nylon webbing, a dense twill of fine warp ribs over coarse picks, firmer and more regular than the BDU twill.",
+ "group": "marines",
+ "first_person": false,
+ "suggested_shaders": [
+  "characters\\marine_armored\\shaders\\marine_torso (not multipurpose R)",
+  "characters\\marine_armored\\shaders\\marine_helmet (not multipurpose R)"
+ ],
+ "tile_mm": 50.0,
+ "author_px": 1024,
+ "ship_px": 512,
+ "seed": 309,
+ "tile_rule": "base texel 3.2-3.5 mm: the tile spans 14-16 base texels",
+ "feature_band_mm": [
+  0.4,
+  3.5
+ ],
+ "target_slope_rms": 0.32,
+ "height_layers": [
+  {
+   "gen": "woven",
+   "warp": 60,
+   "weft": 30,
+   "amp_mm": 0.15,
+   "pattern": "twill",
+   "float_over": 2,
+   "wander_mm": 0.04,
+   "wander_wl_mm": [
+    4.0,
+    15.0
+   ],
+   "slub": 0.08,
+   "fibre": 0.1,
+   "fibre_mm": [
+    0.4,
+    0.7
+   ],
+   "lift": 0.9,
+   "thread_power": 0.5
+  }
+ ],
+ "cavity": {
+  "radius_mm": 0.6,
+  "strength": 0.55
+ },
+ "rough_layers": [
+  {
+   "src": "mask:weave_gap",
+   "k": 0.06
+  },
+  {
+   "src": "noise",
+   "k": 0.03,
+   "wavelength_mm": [
+    2.0,
+    10.0
+   ]
+  }
+ ],
+ "export_masks": [],
+ "fade_m": [
+  2.0,
+  6.0
+ ],
+ "preview": {
+  "base_grey": 0.2,
+  "metallic": 0.0,
+  "roughness": 0.7
+ },
+ "base_roughness_ref": 0.7
+}

@@ -199,8 +199,10 @@ Give the folder of the build that crashed: `halo.exe`, `halo.pdb` and
 `halo_guest.elf`. The tool needs `llvm-symbolizer` (LLVM).
 
 OpenH1 has no Sentry project yet: no build sends crash reports. To test the
-crash reports, set the `HALO_CRASH_REPORTS_ANY_BUILD` environment
-variable.
+crash reports in a build of OpenH1, set the `HALO_CRASH_REPORTS_ANY_BUILD`
+environment variable. A build of MendicantCE (this fork) sends no crash
+reports and writes no minidump, whatever is set: the variable and
+`crash_reports.upload` do nothing in it.
 
 The crash reports also include the crashes of `abort()` and of an invalid
 argument to a function of the C runtime.
@@ -294,6 +296,15 @@ Check these on a Windows computer before a release.
 
 ## Limits
 
+- PRISM's texture store, mesh store and materials (TEXTURE DETAIL, TEXTURE
+  MEMORY, PBR MATERIALS, REMODELS, MODEL MEMORY and SECONDARY MOTION on
+  Settings > Mods > PRISM Assets; `display.prism_textures`,
+  `display.prism_models`, `display.prism_materials`) are not in the Windows
+  build yet: the host reads their files with calls it has only on the other
+  platforms (`port/linux/vulkan/xgpu_vulkan_store.c`,
+  `xgpu_vulkan_meshes.c`). The rows are greyed out, a setting that asks for
+  one is said in the game's log once a map, and everything is drawn stock.
+  The rest of PRISM is the same as on Linux.
 - The startup movies play only with `display.movies` on (off by default),
   from the Xbox's own movie files in the data root's `bink` folder, as on
   the other builds.

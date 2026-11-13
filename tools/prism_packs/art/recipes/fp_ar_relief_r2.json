@@ -1,0 +1,558 @@
+{
+ "_comment": "PRISM v2 round 2, first-person Assault Rifle: CE's painted detail as crisp, deeper relief (about 2.5x round 1) plus authored secondary forms (panel breaks, ejection port, vents, rail teeth, screw heads) placed where CE paints the part they belong to. rect/items = CE base map texels [x0,y0,x1,y1] (512 x 512, y down the picture); depths, bevels, widths in mm. Inputs are the player's own extracted maps; outputs stay local.",
+ "jms": "{extract}/b30/models/weapons/assault rifle/fp/fp/assault rifle fp superhigh.jms",
+ "texture": "{extract}/b30/bitmaps/weapons/assault rifle/fp/bitmaps/assault rifle_fp.png",
+ "out": "{work}/fp_arms/ar/relief",
+ "size": 4096,
+ "margin": 0.8,
+ "game_blur_texels": 1.0,
+ "features": [
+  {
+   "op": "groove",
+   "cite": "stock and grip side: the dark panel seams CE paints (the long seam at y 290, the vertical seam at x 25)",
+   "rect": [
+    0,
+    256,
+    228,
+    452
+   ],
+   "shaders": [
+    "grip"
+   ],
+   "line_radius": 2.0,
+   "threshold": 0.045,
+   "min_length": 10,
+   "shape": "box",
+   "width": 1.3,
+   "chamfer": 0.3,
+   "depth": 2.2,
+   "game": true,
+   "game_depth": 0.6
+  },
+  {
+   "op": "groove",
+   "cite": "lower receiver side: the vertical seams at x 305 and x 448 and the seam under the green light",
+   "rect": [
+    290,
+    366,
+    512,
+    482
+   ],
+   "shaders": [
+    "grip"
+   ],
+   "line_radius": 2.0,
+   "threshold": 0.045,
+   "min_length": 10,
+   "shape": "box",
+   "width": 1.3,
+   "chamfer": 0.3,
+   "depth": 2.2,
+   "game": true,
+   "game_depth": 0.6
+  },
+  {
+   "op": "groove",
+   "cite": "upper receiver and shroud: the seams CE paints across the shroud side (x 210, y 110-215) and along its top edge",
+   "rect": [
+    96,
+    0,
+    512,
+    300
+   ],
+   "shaders": [
+    "gun"
+   ],
+   "line_radius": 2.0,
+   "threshold": 0.045,
+   "min_length": 10,
+   "shape": "box",
+   "width": 1.3,
+   "chamfer": 0.3,
+   "depth": 2.2,
+   "game": true,
+   "game_depth": 0.6
+  },
+  {
+   "op": "shape",
+   "cite": "receiver panel breaks: the vertical seams CE paints at x 210 (rear cover, y 112-216), x 356 (shroud, y 182-226), x 325 and x 452 (lower receiver, y 376-478), as cut panel breaks",
+   "rect": [
+    96,
+    100,
+    512,
+    482
+   ],
+   "shaders": [
+    "gun",
+    "grip"
+   ],
+   "game": true,
+   "items": [
+    {
+     "rect": [
+      209.2,
+      112,
+      211.4,
+      216
+     ],
+     "radius": 0.6,
+     "depth": -2.4,
+     "bevel": 0.35
+    },
+    {
+     "rect": [
+      355.0,
+      182,
+      357.2,
+      226
+     ],
+     "radius": 0.6,
+     "depth": -2.4,
+     "bevel": 0.35
+    },
+    {
+     "rect": [
+      451.0,
+      423,
+      453.2,
+      478
+     ],
+     "radius": 0.6,
+     "depth": -2.0,
+     "bevel": 0.35
+    }
+   ],
+   "game_depth": 0.45
+  },
+  {
+   "op": "shape",
+   "cite": "the ammunition window on the receiver side (CE texels 106-166 x 194-212): a deep cut window, its tick marks raised inside",
+   "rect": [
+    100,
+    188,
+    172,
+    218
+   ],
+   "shaders": [
+    "gun"
+   ],
+   "game": true,
+   "items": [
+    {
+     "rect": [
+      106,
+      194.5,
+      166,
+      211.5
+     ],
+     "radius": 6,
+     "depth": -3.2,
+     "bevel": 0.45
+    },
+    {
+     "rect": [
+      121,
+      198,
+      122.6,
+      208
+     ],
+     "depth": 1.4,
+     "bevel": 0.2,
+     "array": [
+      7,
+      6.0,
+      0
+     ]
+    }
+   ],
+   "game_depth": 0.45
+  },
+  {
+   "op": "shape",
+   "cite": "the shroud's side slots CE paints dark (x 190-300 and 305-382, y 239-251): vents cut through, with a floor and crisp lips",
+   "rect": [
+    180,
+    232,
+    392,
+    258
+   ],
+   "shaders": [
+    "gun",
+    "grip"
+   ],
+   "game": true,
+   "items": [
+    {
+     "rect": [
+      192,
+      240,
+      298,
+      250
+     ],
+     "radius": 4.5,
+     "depth": -3.4,
+     "bevel": 0.4
+    },
+    {
+     "rect": [
+      306,
+      240,
+      381,
+      250
+     ],
+     "radius": 4.5,
+     "depth": -3.4,
+     "bevel": 0.4
+    }
+   ],
+   "game_depth": 0.45
+  },
+  {
+   "op": "shape",
+   "cite": "the dark port CE paints on the receiver's side block (462-508 x 142-172): an ejection port, cut in, the bolt face standing inside",
+   "rect": [
+    456,
+    136,
+    512,
+    178
+   ],
+   "shaders": [
+    "gun"
+   ],
+   "game": true,
+   "items": [
+    {
+     "rect": [
+      463,
+      143,
+      507,
+      171
+     ],
+     "radius": 2.0,
+     "depth": -3.6,
+     "bevel": 0.4
+    },
+    {
+     "rect": [
+      468,
+      149,
+      500,
+      165
+     ],
+     "radius": 1.0,
+     "depth": 1.8,
+     "bevel": 0.3
+    },
+    {
+     "rect": [
+      472,
+      155,
+      496,
+      159
+     ],
+     "radius": 1.0,
+     "depth": -0.8,
+     "bevel": 0.2
+    }
+   ],
+   "game_depth": 0.45
+  },
+  {
+   "op": "shape",
+   "cite": "the rail along the top strip CE paints light (the flattest facets, y 13-37) behind the shroud step (x 300-500): a raised rail with crosswise teeth, laid out straight across the barrel in 3D (CE's UVs there are skewed)",
+   "rect": [
+    296,
+    10,
+    504,
+    40
+   ],
+   "shaders": [
+    "gun"
+   ],
+   "game": true,
+   "items": [
+    {
+     "rect": [
+      302,
+      15,
+      500,
+      35
+     ],
+     "radius": 1.5,
+     "depth": 1.3,
+     "bevel": 0.35
+    },
+    {
+     "slabs": [
+      0,
+      9.5,
+      4.6
+     ],
+     "rect": [
+      302,
+      14,
+      500,
+      36
+     ],
+     "depth": -0.9,
+     "bevel": 0.2,
+     "end_mm": 4.0
+    }
+   ],
+   "game_depth": 0.45
+  },
+  {
+   "op": "shape",
+   "cite": "the round vented disc beside the grip (240-275 x 371-406): five slots cut across it",
+   "rect": [
+    236,
+    366,
+    280,
+    410
+   ],
+   "shaders": [
+    "grip",
+    "gun"
+   ],
+   "game": true,
+   "items": [
+    {
+     "rect": [
+      244,
+      376,
+      271,
+      378.6
+     ],
+     "radius": 1.2,
+     "depth": -2.6,
+     "bevel": 0.3,
+     "array": [
+      5,
+      0,
+      6.0
+     ]
+    }
+   ],
+   "game_depth": 0.45
+  },
+  {
+   "op": "shape",
+   "cite": "the stock: the inset panel outline (46-141 x 311-327), the square hole (182-195 x 331-344) and the slot behind the grip (135-160 x 338-396)",
+   "rect": [
+    40,
+    305,
+    200,
+    400
+   ],
+   "shaders": [
+    "grip"
+   ],
+   "game": true,
+   "items": [
+    {
+     "outline": [
+      46,
+      311,
+      141,
+      327
+     ],
+     "radius": 2,
+     "width": 1.3,
+     "depth": -2.2,
+     "bevel": 0.3
+    },
+    {
+     "rect": [
+      47.5,
+      312.5,
+      139.5,
+      325.5
+     ],
+     "radius": 1.5,
+     "depth": -0.9,
+     "bevel": 0.3
+    },
+    {
+     "rect": [
+      182,
+      331,
+      195,
+      344
+     ],
+     "radius": 1.5,
+     "depth": -3.2,
+     "bevel": 0.35
+    },
+    {
+     "rect": [
+      136,
+      339,
+      159,
+      395
+     ],
+     "radius": 4,
+     "depth": -2.6,
+     "bevel": 0.4
+    }
+   ],
+   "game_depth": 0.45
+  },
+  {
+   "op": "shape",
+   "cite": "the screw heads CE paints as bright dots (496,126; 416,170; 279,202; 306,220; 362,220; 409,293; 276,61): hex socket heads in countersinks",
+   "rect": [
+    0,
+    0,
+    512,
+    512
+   ],
+   "shaders": [
+    "gun",
+    "grip"
+   ],
+   "game": true,
+   "items": [
+    {
+     "screw": [
+      496,
+      126
+     ],
+     "r_mm": 2.6,
+     "depth": 1.0,
+     "head": "hex"
+    },
+    {
+     "screw": [
+      416,
+      170
+     ],
+     "r_mm": 2.6,
+     "depth": 1.0,
+     "head": "hex"
+    },
+    {
+     "screw": [
+      279,
+      202
+     ],
+     "r_mm": 2.6,
+     "depth": 1.0,
+     "head": "hex"
+    },
+    {
+     "screw": [
+      306,
+      220
+     ],
+     "r_mm": 2.4,
+     "depth": 1.0,
+     "head": "hex"
+    },
+    {
+     "screw": [
+      362,
+      220
+     ],
+     "r_mm": 2.4,
+     "depth": 1.0,
+     "head": "hex"
+    },
+    {
+     "screw": [
+      409,
+      293
+     ],
+     "r_mm": 2.4,
+     "depth": 1.0,
+     "head": "slot"
+    },
+    {
+     "screw": [
+      276,
+      61
+     ],
+     "r_mm": 2.2,
+     "depth": 0.9,
+     "head": "slot"
+    }
+   ],
+   "game_depth": 0.45
+  },
+  {
+   "op": "relief",
+   "cite": "the knurled hatch on the grip (150-215 x 355-455)",
+   "rect": [
+    148,
+    352,
+    218,
+    456
+   ],
+   "shaders": [
+    "grip"
+   ],
+   "sigma_lo": 0.3,
+   "sigma_hi": 1.5,
+   "gain": 16.0,
+   "max": 0.9,
+   "game": false
+  },
+  {
+   "op": "shape",
+   "cite": "the green indicator lens on the receiver (CE paints it at 440-460 x 398-420): a domed lens in a crisp seat",
+   "rect": [
+    436,
+    394,
+    464,
+    424
+   ],
+   "shaders": [
+    "grip"
+   ],
+   "game": true,
+   "items": [
+    {
+     "circle": [
+      450.5,
+      409
+     ],
+     "r_mm": 11.0,
+     "depth": -0.8,
+     "bevel": 0.3
+    },
+    {
+     "circle": [
+      450.5,
+      409
+     ],
+     "r_mm": 9.5,
+     "depth": 3.0,
+     "bevel": 0.4,
+     "top": "dome"
+    }
+   ],
+   "game_depth": 0.45
+  },
+  {
+   "op": "recess",
+   "cite": "the rear sight ring (430-458 x 138-170)",
+   "rect": [
+    428,
+    134,
+    460,
+    172
+   ],
+   "shaders": [
+    "gun"
+   ],
+   "polarity": -1,
+   "threshold": 0.05,
+   "bg_sigma": 4,
+   "min_area": 8,
+   "bevel": 0.35,
+   "edge": "chamfer",
+   "depth": 2.0,
+   "game": true,
+   "smooth": 0.6
+  }
+ ]
+}

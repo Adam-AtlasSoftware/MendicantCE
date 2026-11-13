@@ -3,7 +3,7 @@ PRISM_WORLD_GEOMETRY.C
 
 PRISM v2's remodelled level geometry (display.prism_world_geometry,
 "stock" unless set): the structure BSP's surfaces drawn from a denser mesh
-built on this machine from the player's own map (art_pipeline/world_geo:
+built on this machine from the player's own map (tools/prism_packs/art/world_geo:
 bevelled edges, rounded rock, relief from the level's own textures), in the
 BSP's place on screen and nowhere else.
 
@@ -31,7 +31,7 @@ and incident radiosity of the point of its surface it lies over, so the
 baked light lands where the stock light was.
 
 The file: <data root>/prism_world/<the BSP tag's path, / for \>.pwg, little
-endian, written by art_pipeline/world_geo (wg_common.py's write_pwg):
+endian, written by tools/prism_packs/art/world_geo (wg_common.py's write_pwg):
 
   header, 64 bytes: "PWG1", version (1), material count, flags (0), the
     BSP tag's path (48 bytes, informational)
@@ -58,11 +58,11 @@ surfaces, the first and count of its far triangles (32 bits each: a range
 of the part's triangles, which may be its near ones) and its bounding
 sphere (centre and radius, 4 floats). A far surface keeps every vertex its
 near triangles have on the stock triangle's edges, and every edge two
-surfaces share is the same vertices on both sides (art_pipeline/world_geo/
-wg2_seal.py, then wg2_far2.py), so near and far surfaces side by side meet
-without a crack whichever level each is drawn at: a T-junction, or a far
-level's chord against a neighbour's edge, leaves a line of the sky or the
-level behind showing through (debug.crack_view finds them).
+surfaces share is the same vertices on both sides (tools/prism_packs/art/
+world_geo/wg2_seal.py, then wg2_far2.py), so near and far surfaces side by
+side meet without a crack whichever level each is drawn at: a T-junction, or
+a far level's chord against a neighbour's edge, leaves a line of the sky or
+the level behind showing through (debug.crack_view finds them).
 The camera's distance to the sphere, less its radius, scaled by the view's
 zoom (the vertical field of view against 70 degrees), chooses: the same for
 every pass of the frame, so the z-equal passes agree. Against pop-in

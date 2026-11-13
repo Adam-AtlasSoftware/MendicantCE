@@ -1,0 +1,77 @@
+{
+ "class": "cov_bodysuit",
+ "description": "Elite bodysuit: a smooth, fine, slightly rubbery membrane (a soft sub-millimetre grain and faint shallow stretch creases, no cells or scales: CE paints the suit's scale pattern in its base map, and the overlay adds only the membrane's fine surface); its sheen varies a little, as a rubbery skin's does.",
+ "group": "covenant",
+ "first_person": false,
+ "suggested_shaders": [
+  "characters\\elite\\shaders\\elite torso (not multipurpose B)",
+  "characters\\elite\\shaders\\elite arms (not multipurpose B)",
+  "characters\\elite\\shaders\\elite legs (not multipurpose B)",
+  "characters\\elite\\shaders\\elite legsa (not multipurpose B)",
+  "characters\\elite\\elite_special\\shaders\\elite special body (not multipurpose B)"
+ ],
+ "tile_mm": 40.0,
+ "author_px": 1024,
+ "ship_px": 512,
+ "seed": 331,
+ "tile_rule": "base texel 2.0-2.8 mm: the tile spans 14-20 base texels",
+ "feature_band_mm": [
+  0.4,
+  4.0
+ ],
+ "target_slope_rms": 0.09,
+ "height_layers": [
+  {
+   "gen": "orange_peel",
+   "rms_mm": 0.003,
+   "wavelength_mm": [
+    0.4,
+    1.2
+   ],
+   "cell_mix": 0.15,
+   "note": "soft membrane grain"
+  },
+  {
+   "gen": "wrinkles",
+   "rms_mm": 0.0012,
+   "wavelength_mm": [
+    2.0,
+    6.0
+   ],
+   "width": 0.3,
+   "angle_deg": 90.0,
+   "stretch_mm": 12.0,
+   "note": "faint stretch creases running one way"
+  }
+ ],
+ "cavity": {
+  "radius_mm": 0.6,
+  "strength": 0.25
+ },
+ "rough_layers": [
+  {
+   "src": "cavity",
+   "k": 0.02
+  },
+  {
+   "src": "noise",
+   "k": 0.03,
+   "wavelength_mm": [
+    1.5,
+    6.0
+   ],
+   "note": "rubbery sheen variation"
+  }
+ ],
+ "export_masks": [],
+ "fade_m": [
+  3.0,
+  8.0
+ ],
+ "preview": {
+  "base_grey": 0.25,
+  "metallic": 0.0,
+  "roughness": 0.45
+ },
+ "base_roughness_ref": 0.45
+}

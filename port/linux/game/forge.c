@@ -711,6 +711,24 @@ static long forge_pickable_object_index(
 	{
 		result = NONE;
 	}
+	/* (nor any other player's unit, or what he rides: the host's tools moved
+	and removed other players' bodies, which a client's are refused,
+	forge_layout_handle_edit) */
+	if (result != NONE && player_data)
+	{
+		struct data_iterator iterator;
+		struct player_datum *player;
+
+		data_iterator_new(&iterator, player_data);
+		while (result != NONE && (player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
+		{
+			if (player->unit_index != NONE && object_try_and_get(player->unit_index) &&
+				result == object_get_ultimate_parent(player->unit_index))
+			{
+				result = NONE;
+			}
+		}
+	}
 
 	return result;
 }

@@ -1,0 +1,126 @@
+{
+ "class": "grunt_tank",
+ "description": "Grunt methane tank shell: a heavy cast canister, its skin a coarse casting texture with pits, a few shallow dents and knocks, scratches and scuffs from being carried through fights.",
+ "group": "covenant",
+ "first_person": false,
+ "suggested_shaders": [
+  "characters\\grunt\\shaders\\grunt head and back (multipurpose B: the tank)"
+ ],
+ "tile_mm": 100.0,
+ "author_px": 2048,
+ "ship_px": 1024,
+ "seed": 303,
+ "tile_rule": "base texel 3.2 mm: the tile spans 31 base texels",
+ "feature_band_mm": [
+  0.5,
+  12.0
+ ],
+ "target_slope_rms": 0.12,
+ "height_layers": [
+  {
+   "gen": "orange_peel",
+   "rms_mm": 0.008,
+   "wavelength_mm": [
+    1.5,
+    4.0
+   ],
+   "cell_mix": 0.5,
+   "note": "casting skin"
+  },
+  {
+   "gen": "orange_peel",
+   "rms_mm": 0.009,
+   "wavelength_mm": [
+    8.0,
+    20.0
+   ],
+   "cell_mix": 0.7,
+   "note": "shallow dents and knocks"
+  },
+  {
+   "gen": "bead_blast",
+   "rms_mm": 0.0015,
+   "crater_mm": [
+    0.5,
+    1.2
+   ],
+   "coverage": 0.6,
+   "note": "casting pits"
+  },
+  {
+   "gen": "scratches",
+   "scales": [
+    {
+     "count": 120,
+     "length_mm": [
+      4,
+      15
+     ],
+     "width_mm": 0.15,
+     "depth_mm": 0.003,
+     "lip": 0.3,
+     "angle_deg": null,
+     "curvature_per_mm": 0.02
+    },
+    {
+     "count": 30,
+     "length_mm": [
+      10,
+      40
+     ],
+     "width_mm": 0.3,
+     "depth_mm": 0.007,
+     "lip": 0.3,
+     "angle_deg": null,
+     "curvature_per_mm": 0.01
+    },
+    {
+     "count": 16,
+     "length_mm": [
+      20,
+      60
+     ],
+     "width_mm": 2.0,
+     "depth_mm": 0.004,
+     "lip": 0.05,
+     "angle_deg": null,
+     "curvature_per_mm": 0.008,
+     "note": "scuffs"
+    }
+   ]
+  }
+ ],
+ "cavity": {
+  "radius_mm": 0.8,
+  "strength": 0.45
+ },
+ "rough_layers": [
+  {
+   "src": "mask:scratch",
+   "k": 0.4
+  },
+  {
+   "src": "noise",
+   "k": 0.05,
+   "wavelength_mm": [
+    4.0,
+    15.0
+   ]
+  },
+  {
+   "src": "cavity",
+   "k": 0.05
+  }
+ ],
+ "export_masks": [],
+ "fade_m": [
+  4.0,
+  12.0
+ ],
+ "preview": {
+  "base_grey": 0.6,
+  "metallic": 0.6,
+  "roughness": 0.4
+ },
+ "base_roughness_ref": 0.4
+}

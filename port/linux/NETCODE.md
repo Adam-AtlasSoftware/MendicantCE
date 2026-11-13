@@ -384,10 +384,11 @@ With no new version, each client then tells the
 host its build (distributed message 92, `_distributed_message_client_build`,
 reliably once a game after its ready, over its connection alone): its
 number, configuration, the label it shows ("OpenH1 Linux | build 120
-(release)", OpenCE's "OpenCE Linux | build 282 (release)"), the GitHub
+(release)", OpenCE's "OpenCE Linux | build 282 (release)", this fork's
+"MendicantCE Linux | commit 0b28655c0e35 (release)"), the GitHub
 repository it is made from (owner/name, which the build scripts take from
 CI's `GITHUB_REPOSITORY` or the checkout's origin remote: OpenH1's builds
-say `OpenH1/OpenH1`) and the mods it plays, a line each ("folder version",
+say `OpenH1/OpenH1`, this fork's `Adam-AtlasSoftware/MendicantCE`) and the mods it plays, a line each ("folder version",
 in the load order); the host keeps it printable and logs it once, and a
 dedicated server shows it in `/api/players` (`client`). A host without the
 message drops it as a kind it does not know. It is below 120, so an OpenH1
@@ -689,6 +690,13 @@ OpenH1 machines, so the host cannot tell them apart: it welcomes every
 client machine, in any kind of game, and an OpenH1 machine does not show
 the two lines. An OpenCE client in a public game it joined from the server
 browser shows no chat at all, so it does not see them either.
+
+A host of this fork's build (MendicantCE) sends two other lines, "This
+server runs MendicantCE, a modified OpenH1." and "Source:
+github.com/Adam-AtlasSoftware/MendicantCE", to every client machine, an
+OpenH1 game's OpenH1 machines too: OpenH1's and OpenCE's builds show them,
+since they are not their welcome's, and a MendicantCE machine shows neither
+them nor an OpenH1 host's two.
 
 ### Sub-step inputs
 

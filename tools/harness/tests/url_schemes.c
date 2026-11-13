@@ -149,6 +149,39 @@ static void case_schemes(void)
 		forgotten[0]);
 }
 
+/* fork: a build of the fork (HALO_FORK_MENDICANT, which the test defines for
+this case's unit alone) registers nothing, and drops openh1 and halo: those
+are other games' */
+static void case_fork(void)
+{
+	char text[2048];
+
+	register_link_schemes();
+	CHECK(registered_count == 0, "nothing registered: %d, %s", registered_count, registered[0]);
+	CHECK(forgotten_count == 2 && !strcmp(forgotten[0], "openh1") && !strcmp(forgotten[1], "halo"),
+		"OpenH1's and OpenCE's schemes dropped: %d, %s, %s", forgotten_count, forgotten[0], forgotten[1]);
+	/* (and dropped only where the entry runs this executable: an installed
+	OpenH1's is left) */
+	make_folder();
+	CHECK(posix_register_url_scheme("openh1", "OpenH1 invite"), "an earlier build's registration");
+	CHECK(posix_forget_url_scheme("openh1"), "this executable's entry dropped");
+	CHECK(!read_entry("openh1", text, sizeof(text)), "and gone");
+	{
+		char path[400];
+		FILE *file;
+
+		entry_path("openh1", path, sizeof(path));
+		file = fopen(path, "w");
+		CHECK(file != NULL, "%s", path);
+		fprintf(file, "[Desktop Entry]\nType=Application\nName=OpenH1 invite\nExec=\"%s\" %%u\n"
+			"NoDisplay=true\nMimeType=x-scheme-handler/openh1;\n", OPENCE);
+		fclose(file);
+	}
+	CHECK(!posix_forget_url_scheme("openh1"), "another game's entry left");
+	CHECK(read_entry("openh1", text, sizeof(text)) && strstr(text, OPENCE), "and kept:\n%s", text);
+	remove_folder();
+}
+
 static void case_register(void)
 {
 	char text[2048];
@@ -195,6 +228,8 @@ int main(int argc, char **argv)
 		case_register();
 	else if (argc > 1 && !strcmp(argv[1], "forget"))
 		case_forget();
+	else if (argc > 1 && !strcmp(argv[1], "fork"))
+		case_fork();
 	else
 		return 2;
 	return 0;

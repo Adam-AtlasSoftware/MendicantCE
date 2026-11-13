@@ -1,0 +1,259 @@
+{
+ "plates_map": {
+  "channel": "r",
+  "lo": 0.03,
+  "hi": 0.1,
+  "exclude_channel": "g",
+  "exclude_above": 0.1,
+  "blur_texels": 1.2
+ },
+ "relief": {
+  "plates": {
+   "name": "plates",
+   "field": "plates",
+   "iso": 0.5,
+   "height_pct": 0.85,
+   "recess_rest": 0.5,
+   "bevel_frac": 0.35,
+   "bevel_profile": 0.55,
+   "smooth_iters": 3,
+   "relax_iters": 5,
+   "relax_lambda": 0.5,
+   "min_island_pct": 0.6
+  },
+  "grooves": {
+   "name": "grooves",
+   "field": "grooves",
+   "kind": "dark",
+   "on": "plates",
+   "sigma": 1.4,
+   "broad_sigma": 5.0,
+   "broad_k": 0.5,
+   "blur": 0.6,
+   "iso": 0.45,
+   "height_pct": -0.2,
+   "smooth_iters": 1,
+   "relax_iters": 3,
+   "relax_lambda": 0.5,
+   "min_island_pct": 0.3
+  }
+ },
+ "lods": {
+  "superhigh": {
+   "level": 2,
+   "steps": [
+    {
+     "use": "plates",
+     "bevel_segments": 2,
+     "mark": "plate_top"
+    },
+    {
+     "use": "grooves",
+     "restrict": "plate_top"
+    }
+   ]
+  },
+  "high": {
+   "level": 1,
+   "steps": [
+    {
+     "use": "plates",
+     "bevel_segments": 1,
+     "smooth_iters": 2,
+     "relax_iters": 4
+    }
+   ]
+  },
+  "medium": {
+   "level": 0,
+   "steps": [
+    {
+     "use": "plates",
+     "bevel_segments": 0,
+     "smooth_iters": 1,
+     "relax_iters": 2,
+     "min_island_pct": 0.9
+    }
+   ],
+   "sharp_angle_deg": 60.0
+  },
+  "low": {
+   "level": 0,
+   "steps": [],
+   "decimate_ce_ratio": 1.5,
+   "sharp_angle_deg": 80.0
+  },
+  "superlow": {
+   "level": 0,
+   "decimate_ce_ratio": 1.1,
+   "sharp_angle_deg": 80.0
+  }
+ },
+ "crease_sharp_deg": 22.0,
+ "crease_soft_deg": 8.0,
+ "crease_sharp": 0.3,
+ "crease_soft": 0.12,
+ "crease_plate": 1.0,
+ "crease_plate_soft": 0.5,
+ "plate_face_share": 0.5,
+ "quad_face_deg": 25.0,
+ "quad_shape_deg": 50.0,
+ "interp_iterations": 4,
+ "interp_damping": 0.6,
+ "cap_out_pct": 0.22,
+ "cap_in_pct": 0.6,
+ "clamp_smooth": 3,
+ "clamp_gain": 1.1,
+ "sharp_angle_deg": 50.0,
+ "weight_smooth": 2,
+ "weight_min": 0.02,
+ "follow_lift_pct": 0.06,
+ "follow_reach_pct": 1.2,
+ "teeth_cuts": 7,
+ "teeth_alpha": 0.5,
+ "teeth_thickness_ratio": 0.55,
+ "_about": "PRISM v3 cast: the armoured Marine (elite_build_r2.py's construction; the armour CE's multipurpose red marks, its fabric recessed; faces, eyes, caps and the helmet's HUD kept CE's). Local only.",
+ "gltf": "{extract}/b30/models/characters/marine_armored/marine_armored.gltf",
+ "jms_dir": "{extract}/b30/models/characters/marine_armored/marine_armored",
+ "bitmap_dir": "{extract}/b30/bitmaps/characters/marine_armored/bitmaps",
+ "out_dir": "{work}/cast/marine_armored/build",
+ "parts": [
+  {
+   "object": "arms/__base/superhigh",
+   "perm": "__base",
+   "region": "arms"
+  },
+  {
+   "object": "legs/__base/superhigh",
+   "perm": "__base",
+   "region": "legs"
+  },
+  {
+   "object": "torso/__base/superhigh",
+   "perm": "__base",
+   "region": "torso"
+  },
+  {
+   "object": "head/__base/superhigh",
+   "perm": "__base",
+   "region": "head",
+   "cfg": {
+    "cap_out_pct": 0.15
+   },
+   "relief": {
+    "plates": {
+     "recess_rest": 0.0,
+     "height_pct": 0.55
+    }
+   }
+  },
+  {
+   "object": "head/head_charles_helmet-10/superhigh",
+   "perm": "head_charles_helmet-10",
+   "region": "head",
+   "cfg": {
+    "cap_out_pct": 0.15
+   },
+   "relief": {
+    "plates": {
+     "recess_rest": 0.0,
+     "height_pct": 0.55
+    }
+   }
+  },
+  {
+   "object": "head/head_chris_helmet-11/superhigh",
+   "perm": "head_chris_helmet-11",
+   "region": "head",
+   "cfg": {
+    "cap_out_pct": 0.15
+   },
+   "relief": {
+    "plates": {
+     "recess_rest": 0.0,
+     "height_pct": 0.55
+    }
+   }
+  },
+  {
+   "object": "head/head_matt_helmet-12/superhigh",
+   "perm": "head_matt_helmet-12",
+   "region": "head",
+   "cfg": {
+    "cap_out_pct": 0.15
+   },
+   "relief": {
+    "plates": {
+     "recess_rest": 0.0,
+     "height_pct": 0.55
+    }
+   }
+  },
+  {
+   "object": "head/head_rob_helmet-13/superhigh",
+   "perm": "head_rob_helmet-13",
+   "region": "head",
+   "cfg": {
+    "cap_out_pct": 0.15
+   },
+   "relief": {
+    "plates": {
+     "recess_rest": 0.0,
+     "height_pct": 0.55
+    }
+   }
+  },
+  {
+   "object": "head/head_shiek_helmet-14/superhigh",
+   "perm": "head_shiek_helmet-14",
+   "region": "head",
+   "cfg": {
+    "cap_out_pct": 0.15
+   },
+   "relief": {
+    "plates": {
+     "recess_rest": 0.0,
+     "height_pct": 0.55
+    }
+   }
+  }
+ ],
+ "shader_maps": {
+  "marine_helmet": {
+   "base": "marine_helmet",
+   "multi": "marine_helmet_multipurpose"
+  },
+  "marine_arms": {
+   "base": "marine_arms",
+   "multi": "marine_arms_multipurpose"
+  },
+  "marine_legs": {
+   "base": "marine_legs",
+   "multi": "marine_legs_multipurpose"
+  },
+  "marine_torso": {
+   "base": "marine_torso",
+   "multi": "marine_torso_multipurpose"
+  }
+ },
+ "keep_shaders": [
+  "face_marcus",
+  "eyes_marcus",
+  "face_charles",
+  "eyes_charles",
+  "face_chris",
+  "eyes_chris",
+  "face_matt",
+  "eyes_matt",
+  "face_rob",
+  "eyes_rob",
+  "face_shiek",
+  "eyes_shiek",
+  "marine_hats",
+  "face_johnson sarge",
+  "eyes_johnson sarge"
+ ],
+ "follow_shaders": [
+  "marine_hud"
+ ]
+}

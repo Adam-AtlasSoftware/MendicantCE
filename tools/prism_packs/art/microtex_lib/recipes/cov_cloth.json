@@ -1,0 +1,69 @@
+{
+ "class": "cov_cloth",
+ "description": "Jackal vest and leg cloth: a coarse plain weave of rough-spun thread (1.4 mm), slubby and uneven, matte.",
+ "group": "covenant",
+ "first_person": false,
+ "suggested_shaders": [
+  "characters\\jackal\\shaders\\jackal torso (not multipurpose R)",
+  "characters\\jackal\\shaders\\jackal legs (not multipurpose R)"
+ ],
+ "tile_mm": 50.0,
+ "author_px": 1024,
+ "ship_px": 512,
+ "seed": 307,
+ "tile_rule": "base texel 2.9-3.6 mm: the tile spans 14-17 base texels, a thread is half a base texel",
+ "feature_band_mm": [
+  0.6,
+  4.0
+ ],
+ "target_slope_rms": 0.3,
+ "height_layers": [
+  {
+   "gen": "woven",
+   "warp": 36,
+   "weft": 36,
+   "amp_mm": 0.12,
+   "pattern": "plain",
+   "wander_mm": 0.08,
+   "wander_wl_mm": [
+    3.0,
+    12.0
+   ],
+   "slub": 0.3,
+   "fibre": 0.15,
+   "fibre_mm": [
+    0.4,
+    0.8
+   ]
+  }
+ ],
+ "cavity": {
+  "radius_mm": 0.8,
+  "strength": 0.6
+ },
+ "rough_layers": [
+  {
+   "src": "mask:weave_gap",
+   "k": 0.08
+  },
+  {
+   "src": "noise",
+   "k": 0.03,
+   "wavelength_mm": [
+    2.0,
+    10.0
+   ]
+  }
+ ],
+ "export_masks": [],
+ "fade_m": [
+  3.0,
+  8.0
+ ],
+ "preview": {
+  "base_grey": 0.15,
+  "metallic": 0.0,
+  "roughness": 0.8
+ },
+ "base_roughness_ref": 0.8
+}

@@ -374,6 +374,9 @@ def _generate(n: Writer, sln: Any, target: LinuxGuest, config_path: Path, third_
     # ... and the textures', fonts' and menus' bytes (port/linux/src/embedded_assets.h)
     assets = build / "openh1.assets"
     n.build(outputs=assets, rule=f"{prefix}_copy", inputs=guest["assets"])
+    # ... and MENDICANT AI's trained models (port/linux/src/mendicant_shipped.h)
+    models = build / "mendicant_models.aibw"
+    n.build(outputs=models, rule=f"{prefix}_copy", inputs=Path("port/assets/mendicant/models.aibw"))
     n.build(outputs=target.name, rule="phony", inputs=[output, staged_sdl, sdl_license, brokers, masters, relays,
-                                                         records, assets])
+                                                         records, assets, models])
     n.newline()

@@ -785,27 +785,12 @@ static struct xgpu_vulkan_image *thickness_bake(struct entry *entry, const D3DCO
 	return entry->thickness;
 }
 
-struct xgpu_vulkan_image *xgpu_vulkan_textures_thickness(const struct xgpu_stream_texture_stage *stage)
-{
-	const D3DCOLOR *palette;
-	struct entry *entry;
-
-	if (stage->source != XGPU_SOURCE_TEXTURE || !stage->resource || !(entry = xbox_entry_current(stage, &palette)))
-		return NULL;
-	/* (texels never read, their pages not readable: nothing to bake from,
-	and not to be read here either) */
-	if (!entry->generation)
-		return NULL;
-	if (entry->thickness && entry->thickness_generation == entry->generation)
-		return entry->thickness;
-	if (entry->thickness_failed && entry->thickness_failed == entry->generation)
-		return NULL;
-	return thickness_bake(entry, palette);
-}
-
 /* display.prism_rt: whether a stage's Xbox texture is a cutout (its first
 level's alpha read once a generation, as the thickness reads its texels):
-1 yes, 0 no, -1 not known (an image, a cube, too large, unreadable) */
+1 yes, 0 no, -1 not known (an image, a cube, too large, unreadable). (Kept
+above xgpu_vulkan_textures_thickness: tools/test_vr_effects.py compiles the
+text from that function to the images' section with its own stand-ins, which
+have none of what this one reads.) */
 int xgpu_vulkan_textures_cutout(const struct xgpu_stream_texture_stage *stage)
 {
 	const struct xgpu_texture_description *description;
@@ -910,6 +895,24 @@ int xgpu_vulkan_textures_mean(const struct xgpu_stream_texture_stage *stage, flo
 	entry->mean_known = 1;
 	memcpy(mean, entry->mean, sizeof(entry->mean));
 	return 1;
+}
+
+struct xgpu_vulkan_image *xgpu_vulkan_textures_thickness(const struct xgpu_stream_texture_stage *stage)
+{
+	const D3DCOLOR *palette;
+	struct entry *entry;
+
+	if (stage->source != XGPU_SOURCE_TEXTURE || !stage->resource || !(entry = xbox_entry_current(stage, &palette)))
+		return NULL;
+	/* (texels never read, their pages not readable: nothing to bake from,
+	and not to be read here either) */
+	if (!entry->generation)
+		return NULL;
+	if (entry->thickness && entry->thickness_generation == entry->generation)
+		return entry->thickness;
+	if (entry->thickness_failed && entry->thickness_failed == entry->generation)
+		return NULL;
+	return thickness_bake(entry, palette);
 }
 
 uint32_t xgpu_vulkan_textures_thickness_epoch(void)

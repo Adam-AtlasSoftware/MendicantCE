@@ -159,6 +159,7 @@ int config_write_boolean(const char *name, int value);
 void network_distributed_handle_message(long machine_index, word const *message, word size);
 void network_connection_port_set_last_read_unreliable(boolean unreliable);
 boolean network_game_client_port_replay_begin(struct network_game const *game);
+boolean network_game_client_port_replay_game_playable(struct network_game *game, char *why, long why_size);
 boolean network_game_client_port_in_postgame(struct network_game_client *client);
 void network_game_abort(void);
 void render_interpolation_object_point(long object_index, real_point3d *point);
@@ -224,6 +225,9 @@ static struct
 /* the largest replay file read, and the most of its records kept (inflated,
 in memory in chunks: network_replay_store.c) */
 #define REPLAY_MAXIMUM_FILE_SIZE (256 * 1024 * 1024)
+/* the largest header a replay may say it has (the recorder's is 384 bytes,
+network_replay.c's REPLAY_HEADER_SIZE; room for a later format's) */
+#define REPLAY_MAXIMUM_HEADER_SIZE (64 * 1024)
 #define REPLAY_MAXIMUM_RECORDS_SIZE (1024 * 1024 * 1024)
 /* the window of the records the guest reads them through (larger than the
 largest record, a header and 64 KB); as the file is read, its first half takes
@@ -681,6 +685,9 @@ static byte const *playback_record(
 	word *size)
 {
 	long length;
+	/* (whether the record's size has been read: a record of no bytes is its
+	header alone, and was read for ever as a header not yet sized) */
+	boolean sized = FALSE;
 
 	if (offset < 0 || offset + REPLAY_RECORD_HEADER_SIZE > playback.size)
 		return NULL;
@@ -695,7 +702,7 @@ static byte const *playback_record(
 			if (length > playback.window_length)
 				return NULL;
 		}
-		if (length > REPLAY_RECORD_HEADER_SIZE)
+		if (sized)
 			return playback.window + (offset - playback.window_start);
 		{
 			byte const *header = playback.window + (offset - playback.window_start);
@@ -705,6 +712,7 @@ static byte const *playback_record(
 		length = REPLAY_RECORD_HEADER_SIZE + *size;
 		if (offset + length > playback.size)
 			return NULL;
+		sized = TRUE;
 	}
 }
 
@@ -1077,8 +1085,12 @@ boolean network_replay_watch(
 	format = size >= 32 ? replay_get_long(start + 8) : 0;
 	network_version = size >= 32 ? replay_get_long(start + 12) : 0;
 	header_size = size >= 32 ? replay_get_long(start + 28) : 0;
+	/* (the header's size bounded before anything is added to it: a size of
+	0xFFFFFFF8 or more wrapped past the file's in 32 bits, and was then
+	allocated and filled) */
 	if (size < 32 || memcmp(start, REPLAY_MAGIC, 8) || header_size < 32 ||
-		header_size + REPLAY_RECORD_HEADER_SIZE > (unsigned long)size)
+		header_size > REPLAY_MAXIMUM_HEADER_SIZE ||
+		header_size > (unsigned long)size - REPLAY_RECORD_HEADER_SIZE)
 	{
 		fclose(file);
 		snprintf(why, (size_t)why_size, "This is not a replay.");
@@ -1161,6 +1173,16 @@ boolean network_replay_watch(
 		return FALSE;
 	}
 	csmemcpy(&game, record + REPLAY_RECORD_HEADER_SIZE, sizeof(game));
+	/* (the record a game's, and its map on this machine, before the main
+	menu's own game is let go: a replay of a map this machine has not, or a
+	damaged record, went on to the damaged disc error, which stops the game) */
+	if (!network_game_client_port_replay_game_playable(&game, why, why_size))
+	{
+		error(_error_log, "replay: %s cannot be played: %s", path, why);
+		free(header);
+		playback_free();
+		return FALSE;
+	}
 	playback.start_tick = (long)replay_get_long(header + 24);
 	playback.next = (long)(header_size + REPLAY_RECORD_HEADER_SIZE + sizeof(game));
 	playback_find_recorders(format, header, header_size);

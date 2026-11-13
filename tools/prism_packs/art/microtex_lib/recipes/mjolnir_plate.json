@@ -1,0 +1,119 @@
+{
+ "class": "mjolnir_plate",
+ "description": "Chief armour plate: a hard, smooth coat (only a faint sub-millimetre orange peel, no undulation) carrying fine directional micro scratches (most within 15 degrees of one direction, as handling and wiping leave them) and a few sparse, deeper scratches at any angle; the wear reads through roughness (paler, duller lines). Edge wear stays the base map's own (CE paints it).",
+ "group": "chief",
+ "first_person": true,
+ "suggested_shaders": [
+  "characters\\cyborg\\shaders\\armor (plate, multipurpose B)",
+  "characters\\cyborg\\fp\\shaders\\armor hands"
+ ],
+ "tile_mm": 80.0,
+ "author_px": 2048,
+ "ship_px": 1024,
+ "seed": 211,
+ "feature_band_mm": [
+  0.4,
+  5.0
+ ],
+ "target_slope_rms": 0.1,
+ "height_layers": [
+  {
+   "gen": "orange_peel",
+   "rms_mm": 0.001,
+   "wavelength_mm": [
+    0.5,
+    1.4
+   ],
+   "cell_mix": 0.25,
+   "note": "faint coat peel, hard and smooth"
+  },
+  {
+   "gen": "scratches",
+   "scales": [
+    {
+     "count": 280,
+     "length_mm": [
+      3,
+      14
+     ],
+     "width_mm": 0.1,
+     "depth_mm": 0.0014,
+     "lip": 0.25,
+     "angle_deg": 32.0,
+     "spread_deg": 9.0,
+     "curvature_per_mm": 0.01,
+     "note": "fine directional micro scratches"
+    },
+    {
+     "count": 90,
+     "length_mm": [
+      6,
+      24
+     ],
+     "width_mm": 0.12,
+     "depth_mm": 0.0026,
+     "lip": 0.25,
+     "angle_deg": -58.0,
+     "spread_deg": 12.0,
+     "curvature_per_mm": 0.008,
+     "note": "a second, sparser direction"
+    },
+    {
+     "count": 9,
+     "length_mm": [
+      14,
+      40
+     ],
+     "width_mm": 0.26,
+     "depth_mm": 0.009,
+     "lip": 0.35,
+     "angle_deg": null,
+     "curvature_per_mm": 0.006,
+     "note": "sparse deeper scratches"
+    }
+   ]
+  }
+ ],
+ "cavity": {
+  "radius_mm": 0.4,
+  "strength": 0.35
+ },
+ "rough_layers": [
+  {
+   "src": "mask:scratch",
+   "k": 0.5
+  },
+  {
+   "src": "cavity",
+   "k": 0.03
+  },
+  {
+   "src": "noise",
+   "k": 0.012,
+   "wavelength_mm": [
+    2.0,
+    8.0
+   ],
+   "note": "faint coat mottle"
+  }
+ ],
+ "export_masks": [
+  "scratch"
+ ],
+ "fade_m": {
+  "peel": [
+   1.5,
+   3.0
+  ],
+  "scratches": [
+   4.0,
+   8.0
+  ]
+ },
+ "preview": {
+  "base_grey": 0.22,
+  "metallic": 0.0,
+  "roughness": 0.32
+ },
+ "base_roughness_ref": 0.32
+}

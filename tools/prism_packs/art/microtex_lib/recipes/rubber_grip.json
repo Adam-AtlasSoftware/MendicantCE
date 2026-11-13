@@ -1,0 +1,25 @@
+{
+ "class": "rubber_grip",
+ "description": "Glove grip rubber: domed grip dots on a hex lattice (1.82 mm pitch, 1.0 mm dots, 0.25 mm high) over a leathery crevice grain; dot tops smoother.",
+ "group": "chief",
+ "first_person": true,
+ "suggested_shaders": ["characters\\cyborg\\fp\\shaders\\rubber hands (glove islands)", "characters\\cyborg\\shaders\\armor (hand islands)"],
+ "tile_mm": 60.0, "author_px": 2048, "ship_px": 1024, "seed": 203,
+ "feature_band_mm": [0.4, 2.5],
+ "target_slope_rms": 0.3,
+ "height_layers": [
+  {"gen": "hex_dots", "cols": 33, "rows": 38, "dot_diam_mm": 1.0, "height_mm": 0.25, "profile": 1.5, "jitter_mm": 0.03,
+   "note": "33 x 38 hex lattice: row spacing 1.579 mm vs ideal 1.576 mm (0.2% stretch) so it tiles"},
+  {"gen": "pebble", "cell_mm": 0.5, "rms_mm": 0.006, "mode": "leather"}
+ ],
+ "cavity": {"radius_mm": 0.6, "strength": 0.6},
+ "rough_layers": [
+  {"src": "mask:dot", "k": -0.06},
+  {"src": "cavity", "k": 0.05},
+  {"src": "noise", "k": 0.025, "wavelength_mm": [1.0, 8.0]}
+ ],
+ "export_masks": [],
+ "fade_m": [0.7, 2.5],
+ "preview": {"base_grey": 0.045, "metallic": 0.0, "roughness": 0.65},
+ "base_roughness_ref": 0.65
+}

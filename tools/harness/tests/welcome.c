@@ -269,6 +269,49 @@ int main(int argc, char **argv)
 		return 0;
 	}
 
+#ifdef HALO_FORK_MENDICANT
+	/* fork: a host of the fork's build tells every machine that it runs a
+	modified OpenH1 and where its source is: an OpenCE machine and an OpenH1
+	machine that joined with a token both show the two lines (upstream's
+	builds do not know them), a machine of the fork's build leaves them out,
+	and OpenH1's own lines from an OpenH1 host are still left out */
+	CASE("fork")
+	{
+		short line;
+
+		join(1, 0x0A000001, "aa11", FALSE);
+		join(2, 0x0A000002, "bb22", FALSE);
+		machines[2].openh1_token = TRUE;
+		join(3, 0x0A000003, "cc33", TRUE);
+		machines[3].openh1_token = TRUE;
+		new_game();
+		play(10000);
+		for (line = 1; line <= 2; line++)
+		{
+			CHECK(machines[line].shown_count == 2 &&
+				!strcmp(machines[line].shown[0], "This server runs MendicantCE, a modified OpenH1.") &&
+				!strcmp(machines[line].shown[1], "Source: github.com/Adam-AtlasSoftware/MendicantCE"),
+				"machine %d showed %d lines: '%s'", line, machines[line].shown_count, machines[line].shown[0]);
+		}
+		CHECK(machines[3].shown_count == 0, "the fork's own machine showed %d lines", machines[3].shown_count);
+		CHECK(notices_sent == 6, "%d notices sent, not 6", notices_sent);
+		CHECK(network_welcome_line("This server runs OpenH1.") &&
+			network_welcome_line("Get it free at openh1.com for smoother 60 and 120 tick games."),
+			"OpenH1's own welcome is no longer left out");
+		CHECK(!network_welcome_line("Bob muted for 20 minutes"), "another notice taken for the welcome");
+		for (line = 0; line < (short)NUMBEROF(welcome_lines); line++)
+		{
+			char cleaned[CHAT_TEXT_SIZE];
+
+			CHECK(strlen(welcome_lines[line]) <= CHAT_TEXT_SIZE - 1 && !strchr(welcome_lines[line], '|'),
+				"line %d does not fit the chat's", line);
+			chat_text_clean(cleaned, welcome_lines[line], CHAT_TEXT_SIZE);
+			CHECK(!strcmp(cleaned, welcome_lines[line]), "line %d cleaned to '%s'", line, cleaned);
+		}
+		return 0;
+	}
+#endif
+
 	/* a few seconds after loading, not as the machine loads */
 	CASE("delay")
 	{

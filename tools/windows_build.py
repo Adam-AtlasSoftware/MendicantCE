@@ -29,6 +29,7 @@ Windows executable (port/windows/host; port/windows/README.md):
   (a delay-loaded DLL);
 - build/windows/brokers.txt, internet play's brokers.
 - build/windows/prepared.records, the stock maps' preparations' records.
+- build/windows/mendicant_models.aibw, MENDICANT AI's trained models.
 - build/windows/openh1.assets, the textures', fonts' and menus' bytes.
 """
 
@@ -375,5 +376,9 @@ def _generate_host(n: Writer, sln: Any, guest: Dict[str, Path]) -> None:
     # ... and the textures', fonts' and menus' bytes (port/linux/src/embedded_assets.h)
     assets = BUILD / "openh1.assets"
     n.build(outputs=assets, rule="windows_copy", inputs=guest["assets"])
-    n.build(outputs="windows", rule="phony", inputs=[output, sdl_dll, brokers, masters, relays, records, assets])
+    # ... and MENDICANT AI's trained models (port/linux/src/mendicant_shipped.h)
+    models = BUILD / "mendicant_models.aibw"
+    n.build(outputs=models, rule="windows_copy", inputs=Path("port/assets/mendicant/models.aibw"))
+    n.build(outputs="windows", rule="phony", inputs=[output, sdl_dll, brokers, masters, relays, records, assets,
+                                                     models])
     n.newline()

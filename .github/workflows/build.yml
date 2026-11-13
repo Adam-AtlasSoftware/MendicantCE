@@ -38,8 +38,9 @@ name: Build
 # kept. (openh1.com is the landing page, website/.)
 # (every push starts the run, documentation's too, so that the platforms'
 # checks are always reported: the changes job decides whether they build)
+# fork: OpenH1's own workflow, by hand only in this fork (it publishes OpenH1's releases
+# with OpenH1's signing key and notifications; our own CI is to come)
 on:
-  push:
   workflow_dispatch:
     inputs:
       profile:

@@ -1,0 +1,454 @@
+{
+ "format": 1,
+ "note": "PRISM M3: the Covenant's and the Marines' overlay assignments (Tier 0: shader names, class names and channel rules only). overlay_pack.py merges them into overlay.json (shaders as overlay.json's, uv_wu filled in from measure_uv_density.py). Two classes a shader (the renderer's v1 rule: slot A above the multipurpose channel's hi, slot B below lo); the finer splits (Elite suit vs skin, Marine hands, boots, metal) are in class_mask_recipes_m3.json for the class masks. Thresholds measured on the extracted maps (material_masks.py): Covenant b is the change-colour plate (clean), Jackal and Marine r is 0 on cloth and 0.1-0.7 noisy on plates (a narrow step at 0.05-0.15, not a weight), face b is graded skin vs hair on a 32x32 map (a soft step 0.2-0.55). g above 0.1 is self-illumination: left alone. null: no overlay (lights, eyes, emblems, shields, teeth). uv_wu: measured on the player's own maps (measure_uv_density.py, b30 then a50: overlay_pack.py's --uv JSONs). r4: where class_mask_recipes_m3.json's classes all exist (the Marines' hands to human_skin and boots to hard_polymer, the Jackal's feet to skin_jackal) the shader names its class mask (class_masks.py, built locally into prism_class_masks) and the recipe's slots; without the mask the renderer falls back to the two-class channel rule (slot B below lo), as before. The Elite's cov_bodysuit and the Marine torso's marine_metal still have no mask.",
+ "aliases": {
+  "skin_grunt_half": {
+   "of": "skin_grunt",
+   "normal": 0.5,
+   "cavity": 0.5,
+   "rough": 0.5,
+   "note": "CE's grunt detail map (x12, mask 5 = 1 - change colour) already lies on the skin of grunt torso and grunt arms and legs: our skin at half strength there"
+  }
+ },
+ "shaders": {
+  "characters\\elite\\shaders\\elite torso": {
+   "slots": [
+    "cov_armour",
+    "cov_bodysuit"
+   ],
+   "mask": {
+    "channel": "b",
+    "lo": 0.35,
+    "hi": 0.65
+   },
+   "exclude": {
+    "channel": "g",
+    "above": 0.1
+   }
+  },
+  "characters\\elite\\shaders\\elite arms": {
+   "slots": [
+    "cov_armour",
+    "cov_bodysuit"
+   ],
+   "mask": {
+    "channel": "b",
+    "lo": 0.35,
+    "hi": 0.65
+   },
+   "exclude": {
+    "channel": "g",
+    "above": 0.1
+   }
+  },
+  "characters\\elite\\shaders\\elite legs": {
+   "slots": [
+    "cov_armour",
+    "cov_bodysuit"
+   ],
+   "mask": {
+    "channel": "b",
+    "lo": 0.35,
+    "hi": 0.65
+   },
+   "exclude": {
+    "channel": "g",
+    "above": 0.1
+   }
+  },
+  "characters\\elite\\shaders\\elite legsa": {
+   "slots": [
+    "cov_armour",
+    "cov_bodysuit"
+   ],
+   "mask": {
+    "channel": "b",
+    "lo": 0.35,
+    "hi": 0.65
+   },
+   "exclude": {
+    "channel": "g",
+    "above": 0.1
+   }
+  },
+  "characters\\elite\\shaders\\elite head": {
+   "slots": [
+    "cov_armour",
+    "skin_elite"
+   ],
+   "mask": {
+    "channel": "b",
+    "lo": 0.35,
+    "hi": 0.65
+   },
+   "exclude": {
+    "channel": "g",
+    "above": 0.1
+   }
+  },
+  "characters\\elite\\shaders\\elite heada": {
+   "slots": [
+    "cov_armour",
+    "skin_elite"
+   ],
+   "mask": {
+    "channel": "b",
+    "lo": 0.35,
+    "hi": 0.65
+   },
+   "exclude": {
+    "channel": "g",
+    "above": 0.1
+   }
+  },
+  "characters\\elite\\elite_special\\shaders\\elite special body": {
+   "slots": [
+    "cov_armour",
+    "cov_bodysuit"
+   ],
+   "mask": {
+    "channel": "b",
+    "lo": 0.35,
+    "hi": 0.65
+   },
+   "exclude": {
+    "channel": "g",
+    "above": 0.1
+   }
+  },
+  "characters\\elite\\shaders\\elite teeth": null,
+  "characters\\elite\\shaders\\elite inset lights": null,
+  "characters\\elite\\elite_special\\shaders\\elite special inset lights": null,
+  "characters\\elite\\elite_special\\shaders\\elite special emblem": null,
+  "characters\\grunt\\shaders\\grunt torso": {
+   "slots": [
+    "cov_armour_worn",
+    "skin_grunt_half"
+   ],
+   "mask": {
+    "channel": "b",
+    "lo": 0.35,
+    "hi": 0.65
+   },
+   "exclude": {
+    "channel": "g",
+    "above": 0.1
+   }
+  },
+  "characters\\grunt\\shaders\\grunt arms and legs": {
+   "slots": [
+    "cov_armour_worn",
+    "skin_grunt_half"
+   ],
+   "mask": {
+    "channel": "b",
+    "lo": 0.35,
+    "hi": 0.65
+   },
+   "exclude": {
+    "channel": "g",
+    "above": 0.1
+   }
+  },
+  "characters\\grunt\\shaders\\grunt head and back": {
+   "slots": [
+    "grunt_tank",
+    "skin_grunt"
+   ],
+   "mask": {
+    "channel": "b",
+    "lo": 0.35,
+    "hi": 0.65
+   },
+   "exclude": {
+    "channel": "g",
+    "above": 0.1
+   }
+  },
+  "characters\\grunt\\shaders\\grunt diffuse": {
+   "slots": [
+    "cov_armour_worn",
+    "skin_grunt"
+   ],
+   "mask": {
+    "channel": "b",
+    "lo": 0.35,
+    "hi": 0.65
+   },
+   "exclude": {
+    "channel": "g",
+    "above": 0.1
+   }
+  },
+  "characters\\grunt\\shaders\\grunt inset lights": null,
+  "characters\\jackal\\shaders\\jackal head": {
+   "slots": [
+    "skin_jackal",
+    "cov_armour_worn"
+   ],
+   "mask": {
+    "channel": "b",
+    "lo": 0.35,
+    "hi": 0.65
+   },
+   "exclude": {
+    "channel": "g",
+    "above": 0.1
+   }
+  },
+  "characters\\jackal\\shaders\\jackal arms": {
+   "slots": [
+    "skin_jackal",
+    "cov_armour_worn"
+   ],
+   "mask": {
+    "channel": "b",
+    "lo": 0.35,
+    "hi": 0.65
+   },
+   "exclude": {
+    "channel": "g",
+    "above": 0.1
+   }
+  },
+  "characters\\jackal\\shaders\\jackal torso": {
+   "slots": [
+    "cov_armour_worn",
+    "cov_cloth"
+   ],
+   "mask": {
+    "channel": "r",
+    "lo": 0.05,
+    "hi": 0.15
+   },
+   "exclude": {
+    "channel": "g",
+    "above": 0.1
+   }
+  },
+  "characters\\jackal\\shaders\\jackal legs": {
+   "slots": [
+    "cov_armour_worn",
+    "cov_cloth",
+    "skin_jackal"
+   ],
+   "mask": {
+    "channel": "r",
+    "lo": 0.05,
+    "hi": 0.15
+   },
+   "exclude": {
+    "channel": "g",
+    "above": 0.1
+   },
+   "class_mask": [
+    "masks/characters_jackal_shaders_jackal_legs_0.png"
+   ]
+  },
+  "characters\\jackal\\shaders\\jackal eyes": null,
+  "characters\\jackal\\shaders\\jackal shield": null,
+  "characters\\jackal\\shaders\\jackal teeth and spikes": null,
+  "characters\\marine_armored\\shaders\\marine_helmet": {
+   "slots": [
+    "marine_paint",
+    "marine_webbing"
+   ],
+   "mask": {
+    "channel": "r",
+    "lo": 0.05,
+    "hi": 0.15
+   }
+  },
+  "characters\\marine_armored\\shaders\\marine_torso": {
+   "slots": [
+    "marine_paint",
+    "marine_webbing",
+    "marine_metal"
+   ],
+   "mask": {
+    "channel": "r",
+    "lo": 0.05,
+    "hi": 0.15
+   },
+   "class_mask": [
+    "masks/characters_marine_armored_shaders_marine_torso_0.png"
+   ],
+   "class_mask_wins": true
+  },
+  "characters\\marine_armored\\shaders\\marine_arms": {
+   "slots": [
+    "marine_paint",
+    "marine_bdu",
+    "human_skin"
+   ],
+   "mask": {
+    "channel": "r",
+    "lo": 0.05,
+    "hi": 0.15
+   },
+   "class_mask": [
+    "masks/characters_marine_armored_shaders_marine_arms_0.png"
+   ],
+   "class_mask_wins": true
+  },
+  "characters\\marine_armored\\shaders\\marine_arms_johnson": {
+   "slots": [
+    "marine_paint",
+    "marine_bdu",
+    "human_skin"
+   ],
+   "mask": {
+    "channel": "r",
+    "lo": 0.05,
+    "hi": 0.15
+   },
+   "class_mask": [
+    "masks/characters_marine_armored_shaders_marine_arms_johnson_0.png"
+   ],
+   "class_mask_wins": true
+  },
+  "characters\\marine_armored\\shaders\\marine_legs": {
+   "slots": [
+    "marine_paint",
+    "marine_bdu",
+    "hard_polymer"
+   ],
+   "mask": {
+    "channel": "r",
+    "lo": 0.05,
+    "hi": 0.15
+   },
+   "class_mask": [
+    "masks/characters_marine_armored_shaders_marine_legs_0.png"
+   ],
+   "class_mask_wins": true
+  },
+  "characters\\marine\\shaders\\face_charles": {
+   "slots": [
+    "human_skin",
+    "human_hair"
+   ],
+   "mask": {
+    "channel": "b",
+    "lo": 0.2,
+    "hi": 0.55
+   }
+  },
+  "characters\\marine\\shaders\\face_chris": {
+   "slots": [
+    "human_skin",
+    "human_hair"
+   ],
+   "mask": {
+    "channel": "b",
+    "lo": 0.2,
+    "hi": 0.55
+   }
+  },
+  "characters\\marine\\shaders\\face_fred": {
+   "slots": [
+    "human_skin",
+    "human_hair"
+   ],
+   "mask": {
+    "channel": "b",
+    "lo": 0.2,
+    "hi": 0.55
+   }
+  },
+  "characters\\marine\\shaders\\face_marcus": {
+   "slots": [
+    "human_skin",
+    "human_hair"
+   ],
+   "mask": {
+    "channel": "b",
+    "lo": 0.2,
+    "hi": 0.55
+   }
+  },
+  "characters\\marine\\shaders\\face_matt": {
+   "slots": [
+    "human_skin",
+    "human_hair"
+   ],
+   "mask": {
+    "channel": "b",
+    "lo": 0.2,
+    "hi": 0.55
+   }
+  },
+  "characters\\marine\\shaders\\face_paul": {
+   "slots": [
+    "human_skin",
+    "human_hair"
+   ],
+   "mask": {
+    "channel": "b",
+    "lo": 0.2,
+    "hi": 0.55
+   }
+  },
+  "characters\\marine\\shaders\\face_rob": {
+   "slots": [
+    "human_skin",
+    "human_hair"
+   ],
+   "mask": {
+    "channel": "b",
+    "lo": 0.2,
+    "hi": 0.55
+   }
+  },
+  "characters\\marine\\shaders\\face_shiek": {
+   "slots": [
+    "human_skin",
+    "human_hair"
+   ],
+   "mask": {
+    "channel": "b",
+    "lo": 0.2,
+    "hi": 0.55
+   }
+  },
+  "characters\\marine_armored\\shaders\\face_johnson sarge": {
+   "slots": [
+    "human_skin"
+   ]
+  },
+  "characters\\marine\\shaders\\marine_body": {
+   "slots": [
+    "marine_bdu",
+    "human_skin",
+    "hard_polymer"
+   ],
+   "class_mask": [
+    "masks/characters_marine_shaders_marine_body_0.png"
+   ]
+  },
+  "characters\\marine\\shaders\\marine_body johnson": {
+   "slots": [
+    "marine_bdu",
+    "human_skin"
+   ],
+   "class_mask": [
+    "masks/characters_marine_shaders_marine_body_johnson_0.png"
+   ]
+  },
+  "characters\\marine\\shaders\\marine_hats": {
+   "slots": [
+    "marine_bdu"
+   ]
+  },
+  "characters\\marine\\shaders\\eyes_charles": null,
+  "characters\\marine\\shaders\\eyes_chris": null,
+  "characters\\marine\\shaders\\eyes_fred": null,
+  "characters\\marine\\shaders\\eyes_marcus": null,
+  "characters\\marine\\shaders\\eyes_matt": null,
+  "characters\\marine\\shaders\\eyes_paul": null,
+  "characters\\marine\\shaders\\eyes_rob": null,
+  "characters\\marine\\shaders\\eyes_shiek": null,
+  "characters\\marine_armored\\shaders\\eyes_johnson sarge": null,
+  "characters\\marine_armored\\shaders\\marine_hud": null
+ }
+}

@@ -1,0 +1,54 @@
+{
+ "format": 1,
+ "note": "PRISM M2 class masks: recipes only (Tier 0). class_masks.py turns each into an RGBA8 texture of 4 slot weights per base-map texel, built locally from the player's own extracted maps (Tier 2, never shipped). Order of sources (plan.md 4.1): P-auto (each UV island's dominant bone group -> class), T (colour tiebreak on the base map, inside non-plate texels), P-paint (polygons in normalised UV, v down, applied last). The live channel rule C (the shader's 'mask' in overlay.json) is applied on top in the renderer: slot A (index 0) is its class where the channel is above hi, and the mask's other slots share the rest. Bone groups are the skeleton's names without 'bip01 '/'frame ' and the 'l '/'r ' side. expect: the class fractions the gate holds the mask to, from island_stats/*.txt (CM 3.1), within tolerance_points.",
+ "shaders": {
+  "characters\\cyborg\\shaders\\armor": {
+   "model": "models/characters/cyborg/cyborg.gltf",
+   "slots": ["mjolnir_plate", "mjolnir_undersuit", "hard_polymer", "rubber_grip"],
+   "rule": {"channel": "b", "lo": 0.35, "hi": 0.65},
+   "exclude": {"channel": "g", "above": 0.1},
+   "bones": {
+    "spine": "mjolnir_undersuit",
+    "hand": "rubber_grip",
+    "*": "hard_polymer"
+   },
+   "tiebreak": [
+    {"note": "the purple-navy suit fabric (elbow band, forearm under the bracer, chest lining, thigh and knee fabric) against the neutral grey-black hardware (helmet, boot sole, vents): blue a quarter above red and green (CM 3.1 colour check, relative because the fabric is painted at 15-35 of 255), the near-black vent slots left hard",
+     "from": "hard_polymer", "to": "mjolnir_undersuit", "b_ratio_at_least": 1.25, "b_over_rg_at_least": 4, "b_at_least": 12, "blur_px": 2,
+     "not_bones": ["foot"]}
+   ],
+   "polygons": [
+    {"note": "elbow flex band below the pauldron (forearm/upperarm blend), the suit's cloth even where it is dark",
+     "class": "mjolnir_undersuit", "uv": [[0.02, 0.205], [0.40, 0.205], [0.40, 0.245], [0.02, 0.245]]},
+    {"note": "wrist band strip under the forearm bracer",
+     "class": "mjolnir_undersuit", "uv": [[0.06, 0.425], [0.38, 0.425], [0.38, 0.455], [0.06, 0.455]]},
+    {"note": "chest front: the lining in the left swirl opening, inside its grey frame",
+     "class": "mjolnir_undersuit", "ellipse": [0.676, 0.79, 0.055, 0.065]},
+    {"note": "chest front: the lining in the upper swirl opening, inside its grey frame",
+     "class": "mjolnir_undersuit", "ellipse": [0.862, 0.665, 0.045, 0.08]}
+   ],
+   "expect": {"source": "island_stats/cyborg.txt; CM 3.1",
+              "mjolnir_plate": "island_b",
+              "rubber_grip": "island_bone_nonplate:hand"}
+  },
+  "characters\\cyborg\\fp\\shaders\\rubber hands": {
+   "model": "models/characters/cyborg/fp/fp.gltf",
+   "slots": ["rubber_grip", "mjolnir_undersuit", "hard_polymer"],
+   "bones": {
+    "wriste": "rubber_grip",
+    "thumb tip": "rubber_grip",
+    "hand": "rubber_grip",
+    "finger": "rubber_grip",
+    "*": "mjolnir_undersuit"
+   },
+   "tiebreak": [
+    {"note": "the sleeve's hardware: the grey wrist disc and the black slotted plate on the forearm islands are neutral, the navy sleeve cloth is blue (fp hands: cloth b/max(r,g) 1.36-1.57, disc and plate 1.0)",
+     "from": "mjolnir_undersuit", "to": "hard_polymer", "invert": true, "b_ratio_at_least": 1.2, "b_over_rg_at_least": 4, "blur_px": 2}
+   ],
+   "expect": {"source": "island_stats/fp.txt; CM 3.1 (hand and wrist islands -> grip; forearm and upper-arm islands -> undersuit)",
+              "rubber_grip": "island_bone:wriste,thumb tip",
+              "mjolnir_undersuit+hard_polymer": "island_bone:upperarm,forearm"}
+  }
+ },
+ "tolerance_points": 3.0
+}

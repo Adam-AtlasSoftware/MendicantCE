@@ -9,6 +9,7 @@ threads, asynchronous procedure calls, time, memory and debug output.
 #include "port_config.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <sched.h>
 #include <signal.h>
 #include <stdarg.h>
@@ -23,15 +24,61 @@ threads, asynchronous procedure calls, time, memory and debug output.
 
 /* ---------- logging */
 
+/* the host's log file, which the Linux host names in the environment it
+gives the game (port/linux/host/host_main.c: halo.log beside config.toml,
+for the player who started the game from a desktop and has no terminal to
+read): -1 on the other systems, whose hosts keep the error output
+themselves, and when the file cannot be written */
+static int platform_log_file(void)
+{
+	static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+	static int looked = 0;
+	static int file = -1;
+
+	pthread_mutex_lock(&lock);
+	if (!looked)
+	{
+		const char *path = getenv("OPENH1_HOST_LOG");
+
+		looked = 1;
+		if (path && path[0])
+			file = open(path, O_WRONLY | O_APPEND | O_CLOEXEC);
+	}
+	pthread_mutex_unlock(&lock);
+	return file;
+}
+
 void platform_log(const char *format, ...)
 {
 	va_list arguments;
+	int file = platform_log_file();
 
 	fputs("halo-linux: ", stderr);
 	va_start(arguments, format);
 	vfprintf(stderr, format, arguments);
 	va_end(arguments);
 	fputc('\n', stderr);
+	if (file >= 0)
+	{
+		/* (one write for each line, at the file's end: the host writes
+		its lines there too) */
+		char text[2048];
+		int length;
+
+		memcpy(text, "halo-linux: ", 12);
+		va_start(arguments, format);
+		length = vsnprintf(text + 12, sizeof(text) - 13, format, arguments);
+		va_end(arguments);
+		if (length < 0)
+			return;
+		/* (a line longer than this is cut) */
+		if (length > (int)sizeof(text) - 14)
+			length = (int)sizeof(text) - 14;
+		length += 12;
+		text[length++] = '\n';
+		if (write(file, text, (size_t)length) < 0)
+			return;
+	}
 }
 
 void platform_unimplemented(const char *name)

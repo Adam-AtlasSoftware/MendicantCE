@@ -23,6 +23,11 @@ game starts), WELCOME_DELAY_MILLISECONDS later, so that its player sees
 the lines in the game. Each player is welcomed once while this host runs,
 by their machine's real address and hardware id: not again in the next
 game, nor joining again. network.opence_welcome turns it off.
+
+fork: in this fork's builds (HALO_FORK_MENDICANT) the two lines say that the
+server runs MendicantCE, a modified OpenH1, and where its source is, and go
+to every client machine, an OpenH1 game's OpenH1 machines too: upstream's
+builds show them, this fork's leave them out, with OpenH1's own.
 */
 
 #include "cseries.h"
@@ -55,9 +60,30 @@ enum
 (network_chat.c's CHAT_TEXT_SIZE, 63 characters) */
 static char const *const welcome_lines[] =
 {
+#ifdef HALO_FORK_MENDICANT
+	/* fork: a host of this fork's build (tools/build_common.py's FORK_DEFINE)
+	runs a modified OpenH1, and says so, and where its source is, to every
+	player who joins it over the network (the licence's section 13): not that
+	it runs OpenH1, nor to get OpenH1 at openh1.com, where this host's source
+	is not */
+	"This server runs MendicantCE, a modified OpenH1.",
+	"Source: github.com/Adam-AtlasSoftware/MendicantCE",
+#else
+	"This server runs OpenH1.",
+	"Get it free at openh1.com for smoother 60 and 120 tick games.",
+#endif
+};
+
+#ifdef HALO_FORK_MENDICANT
+/* fork: OpenH1's own lines, which a client of this fork leaves out as an
+OpenH1 client does when an OpenH1 host sends them (network_welcome_line):
+recognised, never sent */
+static char const *const welcome_upstream_lines[] =
+{
 	"This server runs OpenH1.",
 	"Get it free at openh1.com for smoother 60 and 120 tick games.",
 };
+#endif
 
 /* ---------- structures */
 
@@ -168,7 +194,17 @@ void network_welcome_machine_loaded(
 		machine_index < 0 || machine_index >= MAXIMUM_WELCOME_MACHINES ||
 		network_standard_machine_is_openh1(machine_index))
 	{
+#ifdef HALO_FORK_MENDICANT
+		/* fork: an OpenH1 machine is told too: OpenH1's own builds show the
+		fork's lines (they are not its welcome's), this fork's leave them out */
+		if (machine_index < 0 || machine_index >= MAXIMUM_WELCOME_MACHINES ||
+			game_connection() != _game_connection_network_server)
+		{
+			return;
+		}
+#else
 		return;
+#endif
 	}
 	welcome.pending[machine_index] = TRUE;
 	welcome_machine_player(machine_index, &welcome.pending_players[machine_index]);
@@ -222,5 +258,13 @@ boolean network_welcome_line(
 		if (!csstrcmp(text, welcome_lines[line]))
 			return TRUE;
 	}
+#ifdef HALO_FORK_MENDICANT
+	/* fork: (an OpenH1 host's) */
+	for (line = 0; line < NUMBEROF(welcome_upstream_lines); line++)
+	{
+		if (csstrcmp(text, welcome_upstream_lines[line]) == 0)
+			return TRUE;
+	}
+#endif
 	return FALSE;
 }

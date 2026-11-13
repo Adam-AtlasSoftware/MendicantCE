@@ -2706,12 +2706,17 @@ void mendicant_units_found(int key, long leader, boolean leaderless)
 /* the plan goes on under the next leader, at his key */
 void mendicant_units_inherit(int new_key, int key, long leader, boolean leaderless)
 {
-	cmd[new_key] = cmd[key];
-	unit_last_drill[new_key] = unit_last_drill[key];
-	memcpy(plan_enemies[new_key], plan_enemies[key], sizeof(plan_enemies[key]));
-	plan_enemy_count[new_key] = plan_enemy_count[key];
-	plan_open[new_key] = plan_open[key];
-	plan_start_count[new_key] = plan_start_count[key];
+	/* (an heir at the unit's own key has the plan already: memcpy is the
+	game's csmemcpy, which asserts that its two ranges do not overlap) */
+	if (new_key != key)
+	{
+		cmd[new_key] = cmd[key];
+		unit_last_drill[new_key] = unit_last_drill[key];
+		memcpy(plan_enemies[new_key], plan_enemies[key], sizeof(plan_enemies[key]));
+		plan_enemy_count[new_key] = plan_enemy_count[key];
+		plan_open[new_key] = plan_open[key];
+		plan_start_count[new_key] = plan_start_count[key];
+	}
 	cmd_leader[new_key] = leader;
 	cmd[new_key].leaderless = (unsigned char)leaderless;
 }

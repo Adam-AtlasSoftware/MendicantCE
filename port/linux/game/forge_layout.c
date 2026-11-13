@@ -76,6 +76,10 @@ main 173fc93ae), AGPL-3.0-or-later; ported to OpenH1 (CREDITS.md).
 
 #include "forge_mvar.h"
 #include "network_distributed.h"
+#include "networking/network_game_globals.h"
+#include "networking/network_game_manager.h"
+#include "networking/network_server_manager.h"
+#include "networking/network_server_manager_internal.h" /* network_game_server_get_game */
 
 #include <direct.h>
 #include <stdarg.h>
@@ -659,6 +663,10 @@ static long forge_layout_group_tag(
 		((unsigned long)(unsigned char)name[2] << 8) | (unsigned long)(unsigned char)name[3]);
 }
 
+static boolean forge_layout_unit_is_someones(
+	long object_index,
+	boolean or_dead);
+
 static struct forge_layout_map_object *forge_layout_map_object(
 	long object_index)
 {
@@ -1223,8 +1231,10 @@ static void forge_layout_collect_records(
 		struct object_datum *object = object_try_and_get(forge_layout_globals.spawned[index]);
 		struct forge_object_properties *properties = &forge_layout_globals.spawned_properties[index];
 
+		/* (nor a unit that has become someone's since it was listed) */
 		if (!object || object->object.parent_object_index != NONE ||
-			(for_client && forge_layout_host_brings(object->definition_index)))
+			(for_client && forge_layout_host_brings(object->definition_index)) ||
+			forge_layout_unit_is_someones(forge_layout_globals.spawned[index], FALSE))
 		{
 			continue;
 		}
@@ -2692,6 +2702,27 @@ boolean forge_layout_creating_object(
 	return forge_layout_creating;
 }
 
+/* a unit that is someone's: a player's, or an AI character's (forge_ai.c's,
+which its own part of the variant keeps as a member line); with or_dead, a
+dead one too. Such a unit is not one of the layout's objects: listed, it was
+saved as a plain object of the variant, which came back as a body with no
+AI beside the character (one more at each move and save), a player's as an
+inert copy of him, and a corpse standing; and a Load or Reset deleted it. */
+static boolean forge_layout_unit_is_someones(
+	long object_index,
+	boolean or_dead)
+{
+	struct object_datum *object = object_try_and_get(object_index);
+	struct unit_datum *unit;
+
+	if (!object || !TEST_FLAG(_object_mask_unit, object->object.type))
+		return FALSE;
+	unit = unit_get(object_index);
+
+	return unit->unit.player_index != NONE || unit->unit.actor_index != NONE ||
+		unit->unit.swarm_actor_index != NONE || (or_dead && TEST_FLAG(object->object.damage_flags, _object_dead_bit));
+}
+
 void forge_layout_note_spawned(
 	long object_index)
 {
@@ -2700,6 +2731,11 @@ void forge_layout_note_spawned(
 	short write = 0;
 
 	if (object_index == NONE || forge_layout_map_object(object_index))
+		return;
+	/* (every way an object comes to the layout passes here: the tools' put
+	down, the edit rows, a prefab, a client's request. An object just made
+	has no actor or player yet, so the tools' own bipeds are listed) */
+	if (forge_layout_unit_is_someones(object_index, TRUE))
 		return;
 
 	/* the ones still there, packed, without this one (which keeps its
@@ -2930,6 +2966,17 @@ wchar_t const *forge_custom_map_description(
 	return map && map->description[0] ? map->description : NULL;
 }
 
+/* whether this machine hosts a network game on the map of this name (the
+game record's scenario, by its name alone, as the listing has it) */
+static boolean forge_layout_hosted_map_is(
+	char const *base_name)
+{
+	struct network_game_server *server = global_network_game_server_get();
+	struct network_game *game = server ? network_game_server_get_game(server) : NULL;
+
+	return game && base_name && _stricmp(tag_name_strip_path(game->map.name), base_name) == 0;
+}
+
 void forge_custom_map_select(
 	short index)
 {
@@ -2952,7 +2999,15 @@ every multiplayer game's, which marked them all */
 int forge_layout_hosting(
 	void)
 {
-	return forge_custom_map_selected() != NONE || forge_layout_globals.current_slot != 0;
+	short selected = forge_custom_map_selected();
+
+	if (forge_layout_globals.current_slot != 0)
+		return TRUE;
+	/* (a map chosen in the list marks the game hosted on its base map, from
+	the lobby on, and no other: the choice is kept between games, and marked
+	every game made afterwards, a co-op level's and another map's, which
+	builds without Forge then could not join) */
+	return selected != NONE && forge_layout_hosted_map_is(forge_custom_map_base_name(selected));
 }
 
 short forge_custom_map_selected(

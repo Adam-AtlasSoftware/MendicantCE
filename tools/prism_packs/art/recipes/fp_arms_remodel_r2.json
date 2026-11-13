@@ -1,0 +1,70 @@
+{
+ "_comment": "First-person cyborg arms remodel, PRISM v2 round 2 (fp_remodel.py): crisp bevels, rounding only off the creases, hard-surface shading, 30-50k triangles, an adaptive high-poly carrying the detail for the normal maps. Inputs: the player's own extracted maps; outputs local only.",
+ "ref_gltf": "{extract}/b30/models/characters/cyborg/fp/fp.gltf",
+ "ref_jms": "{extract}/b30/models/characters/cyborg/fp/fp/__base superhigh.jms",
+ "keep_lod": "superhigh",
+ "out_dir": "{work}/fp_arms/arms/build",
+ "jms_name": "__base.jms",
+ "kind": "skinned",
+ "relief": "{work}/fp_arms/arms/relief/relief.npz",
+ "plate": {
+  "shaders": [
+   "armor hands"
+  ],
+  "thickness_mm": 2.6
+ },
+ "hard": {
+  "shaders": [
+   "armor hands"
+  ],
+  "split_deg": 5.0,
+  "min_deg": 25.0,
+  "always_deg": 75.0,
+  "box_radius_mm": 25.0
+ },
+ "bevel": {
+  "width_mm": 1.0,
+  "segments": 2,
+  "profile": 0.5,
+  "soft_width_mm": 0.0,
+  "soft_segments": 3,
+  "room": 2.5
+ },
+ "alpha": 1.0,
+ "refine": {
+  "tol_mm": 0.14,
+  "normal_deg": 10.0,
+  "max_edge_mm": 40.0,
+  "min_edge_mm": 0.35,
+  "max_tris": 42000,
+  "iterations": 40,
+  "max_tris_per_shader": 23000
+ },
+ "split_deg": 60.0,
+ "max_bulge_mm": 3.0,
+ "normal_trust_deg": 30.0,
+ "crease": {
+  "mode": "ce",
+  "alpha": 0.0
+ },
+ "untangle_strict": true,
+ "hard_split_deg": 40.0,
+ "alpha_by_shader": {
+  "armor hands": 0.6,
+  "rubber hands": 1.0
+ },
+ "hard_shading": [
+  "armor hands"
+ ],
+ "high_refine": {
+  "max_tris": 4000000,
+  "tol_mm": 0.02,
+  "normal_deg": 6.0,
+  "min_edge_mm": 0.07,
+  "max_edge_mm": 3.0,
+  "iterations": 60
+ },
+ "high_untangle_strict": false,
+ "high_fold": 0.3,
+ "high_untangle_iters": 0
+}

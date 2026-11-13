@@ -13,7 +13,7 @@ menu's, a game's) plays them. test_mods_stock_maps.py takes the globals
 typedef long int32;
 #define csstrncpy strncpy
 
-static int stock_maps, loose_sounds, mods_played = 1, updates, let_go, sized;
+static int stock_maps, loose_sounds, mods_played = 1, updates, let_go, sized, said;
 static unsigned long scans = 1;
 
 static int menu_pictures_stock_maps(void) { return stock_maps; }
@@ -27,6 +27,8 @@ static void texture_cache_size_for_map(void) { sized++; }
 
 static void mods_let_go(boolean give_back) { (void)give_back; let_go++; mods_globals.map_loaded = FALSE; }
 static void mods_update(boolean remove_all, boolean at_load) { (void)at_load; if (!remove_all) updates++; }
+/* (what PRISM ASSETS' settings found no file for, said in the log: on the maps that play mods) */
+static void mods_say_absent(void) { said++; }
 
 #include "under_test.inc"
 
@@ -45,6 +47,7 @@ int main(int argc, char **argv)
 		CHECK(!mods_globals.loose_sounds_enabled, "the loose sounds are on for a map of the menus' pictures");
 		CHECK(mods_globals.map_loaded, "the map is not noted loaded");
 		CHECK(sized == 1, "the texture cache was not sized for the map");
+		CHECK(said == 0, "the settings without files were said for a map of the menus' pictures (%d)", said);
 	}
 
 	/* any other map (the main menu's after the pass, a game's) plays them */
@@ -66,6 +69,8 @@ int main(int argc, char **argv)
 		mods_played = 0;
 		mods_tags_loaded("b30");
 		CHECK(updates == 3 && mods_globals.loose_sounds_enabled, "the loose sounds were not played after the pass");
+		/* (once for each map that plays mods, with a mod on or none: not for the pass's) */
+		CHECK(said == 3, "the settings without files were not said once a map that plays mods (%d)", said);
 	}
 	return 0;
 }

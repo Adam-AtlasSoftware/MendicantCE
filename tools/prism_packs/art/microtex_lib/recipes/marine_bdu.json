@@ -1,0 +1,74 @@
+{
+ "class": "marine_bdu",
+ "description": "Marine BDU fabric (sleeves, trousers, the unarmoured Marine, hats): a 2/1 cotton twill of about 1 mm threads, the diagonal wale visible up close, threads wandering and slubbing a little so the weave has no moire. CE's camouflage and folds stay as they are.",
+ "group": "marines",
+ "first_person": false,
+ "suggested_shaders": [
+  "characters\\marine_armored\\shaders\\marine_arms (not multipurpose R)",
+  "characters\\marine_armored\\shaders\\marine_arms_johnson (not multipurpose R)",
+  "characters\\marine_armored\\shaders\\marine_legs (not multipurpose R)",
+  "characters\\marine\\shaders\\marine_body",
+  "characters\\marine\\shaders\\marine_body johnson",
+  "characters\\marine\\shaders\\marine_hats"
+ ],
+ "tile_mm": 50.0,
+ "author_px": 1024,
+ "ship_px": 512,
+ "seed": 308,
+ "tile_rule": "base texel 2.2-4.9 mm: the tile spans 10-22 base texels, a thread a third to a quarter of one",
+ "feature_band_mm": [
+  0.4,
+  3.0
+ ],
+ "target_slope_rms": 0.28,
+ "height_layers": [
+  {
+   "gen": "woven",
+   "warp": 48,
+   "weft": 48,
+   "amp_mm": 0.08,
+   "pattern": "twill",
+   "float_over": 2,
+   "wander_mm": 0.06,
+   "wander_wl_mm": [
+    3.0,
+    12.0
+   ],
+   "slub": 0.15,
+   "fibre": 0.12,
+   "fibre_mm": [
+    0.4,
+    0.7
+   ]
+  }
+ ],
+ "cavity": {
+  "radius_mm": 0.6,
+  "strength": 0.5
+ },
+ "rough_layers": [
+  {
+   "src": "mask:weave_gap",
+   "k": 0.06
+  },
+  {
+   "src": "noise",
+   "k": 0.03,
+   "wavelength_mm": [
+    2.0,
+    10.0
+   ]
+  }
+ ],
+ "export_masks": [],
+ "fade_m": [
+  2.0,
+  6.0
+ ],
+ "preview": {
+  "base_grey": 0.3,
+  "metallic": 0.0,
+  "roughness": 0.8
+ },
+ "base_roughness_ref": 0.8
+}

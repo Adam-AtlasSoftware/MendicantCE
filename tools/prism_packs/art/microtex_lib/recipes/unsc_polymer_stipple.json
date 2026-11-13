@@ -1,0 +1,24 @@
+{
+ "class": "unsc_polymer_stipple",
+ "description": "Rubberised polymer grip: random domed stipple about 0.9 mm with a fine moulded grain; stipple tops hand-polished slightly smoother.",
+ "group": "weapons",
+ "first_person": true,
+ "suggested_shaders": ["weapons\\assault rifle\\fp\\shaders\\grip"],
+ "tile_mm": 50.0, "author_px": 2048, "ship_px": 1024, "seed": 103,
+ "feature_band_mm": [0.4, 1.6],
+ "target_slope_rms": 0.25,
+ "height_layers": [
+  {"gen": "stipple", "cell_mm": 0.9, "dome_frac": 0.78, "height_mm": 0.07, "size_var": 0.3, "jitter": 0.8},
+  {"gen": "bead_blast", "rms_mm": 0.0025, "crater_mm": [0.2, 0.35], "coverage": 1.5}
+ ],
+ "cavity": {"radius_mm": 0.35, "strength": 0.6},
+ "rough_layers": [
+  {"src": "mask:dot", "k": -0.06},
+  {"src": "cavity", "k": 0.06},
+  {"src": "noise", "k": 0.025, "wavelength_mm": [1.5, 8.0]}
+ ],
+ "export_masks": [],
+ "fade_m": [0.7, 2.5],
+ "preview": {"base_grey": 0.05, "metallic": 0.0, "roughness": 0.62},
+ "base_roughness_ref": 0.62
+}

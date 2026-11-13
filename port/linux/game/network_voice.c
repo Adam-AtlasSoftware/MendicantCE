@@ -55,6 +55,7 @@ player's voice.
 #include "objects/objects.h"
 #include "network_distributed.h"
 #include "network_voice.h"
+#include "network_replay.h" /* network_replay_playing: no voice from a replay */
 #include "network_chat.h"
 #include "../src/voice_audio.h"
 
@@ -756,6 +757,12 @@ void network_voice_handle_message(
 	long length = (long)size - (long)sizeof(header);
 
 	if (!network_voice_handles_message(message, size))
+		return;
+	/* (a replay's records are not voice chat's: older recordings of a client
+	hold the host's voice frames and its settings, and a file made by hand
+	could: neither is played, nor sets this machine's voice key, whether
+	the message is a record's own or one inside a batch) */
+	if (network_replay_playing())
 		return;
 	csmemcpy(&header, message, sizeof(header));
 	switch (header.type)

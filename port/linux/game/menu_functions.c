@@ -2216,6 +2216,57 @@ static void prism_rt_rows_show(struct widget_instance *list)
 	}
 }
 
+/* PRISM ASSETS' rows that the renderer's stores draw (the texture store, the
+mesh store, the materials: mod_textures.c, mod_meshes.c, mod_pbr.c): greyed
+out where the renderer has not the store, as ray tracing's rows are. The
+Windows build's renderer has neither store yet (port/linux/vulkan/
+xgpu_vulkan_store.c), nor has Metal's, a card without BC textures or the
+null renderer: the rows did nothing there, and nothing said so. (MATERIAL
+DETAIL and SURFACE DETAIL are read by the game itself, everywhere.) */
+int xgpu_backend_texture_store_available(void);
+int xgpu_backend_mesh_store_available(void);
+int d3d8_materials_drawn(void);
+
+static void prism_assets_rows_show(struct widget_instance *list)
+{
+	/* (each row, its spinner, and the store it needs: 0 textures, 1 meshes,
+	2 materials) */
+	static struct
+	{
+		char const *row;
+		char const *spinner;
+		short store;
+	} const rows[] =
+	{
+		{ "op_prism_textures", "prism_textures_spinner", 0 },
+		{ "op_prism_texture_budget_mb", "prism_texture_budget_mb_spinner", 0 },
+		{ "op_prism_materials", "prism_materials_spinner", 2 },
+		{ "op_prism_models", "prism_models_spinner", 1 },
+		{ "op_prism_model_budget_mb", "prism_model_budget_mb_spinner", 1 },
+		{ "op_prism_secondary_motion", "prism_secondary_motion_spinner", 1 },
+	};
+	boolean available[3];
+	short index;
+
+	if (!named(list, rows[0].row, 0))
+		return;
+	available[0] = xgpu_backend_texture_store_available() != 0;
+	available[1] = xgpu_backend_mesh_store_available() != 0;
+	available[2] = d3d8_materials_drawn() != 0;
+	for (index = 0; index < (short)NUMBEROF(rows); index++)
+	{
+		struct widget_instance *row = named(list, rows[index].row, 0);
+		struct widget_instance *spinner = named(list, rows[index].spinner, 0);
+		boolean locked = !available[rows[index].store];
+
+		if (!row || !spinner || spinner->disabled == locked)
+			continue;
+		row->disabled = locked;
+		spinner->disabled = locked;
+		row->alpha_modifier = locked ? 0.4f : 1.0f;
+	}
+}
+
 static void sim_rate_row_show(struct widget_instance *list)
 {
 	struct widget_instance *row = named(list, "op_sim_rate", 0);
@@ -3062,6 +3113,12 @@ static boolean about_panel(struct widget_instance *row, wchar_t *value, wchar_t 
 	}
 	if (number > 0)
 		snprintf(text, sizeof(text), "BUILD %ld", number);
+#ifdef HALO_FORK_MENDICANT
+	/* fork: a release of this fork has no number: its commit, from the label
+	(main.c's "MendicantCE Linux, commit 0b28655c0e35 (release)") */
+	else if ((bar = strstr(version, ", commit ")) != NULL)
+		snprintf(text, sizeof(text), "COMMIT %.7s", bar + 9);
+#endif
 	else
 		snprintf(text, sizeof(text), "LOCAL BUILD");
 	discord_widen(text, value, ROW_TEXT_LENGTH);
@@ -3447,6 +3504,7 @@ static void settings_page_update(struct widget_instance *list)
 	graphics_preset_show(list);
 	sim_rate_row_show(list);
 	prism_rt_rows_show(list);
+	prism_assets_rows_show(list);
 	viewmodel_weapon_rows_show(list);
 	gyro_rows_show(list);
 	settings_each(screen, setting_stash);

@@ -5,11 +5,8 @@ name: CI image
 # and published from master to ghcr.io/openh1/ci-linux, which
 # .github/workflows/build.yml's Linux jobs run in. Publishing takes the
 # run's GITHUB_TOKEN alone, with packages: write in master's job only.
+# fork: OpenH1's CI image, by hand only in this fork
 on:
-  push:
-    paths:
-      - ".github/ci-image/**"
-      - ".github/workflows/ci-image.yml"
   workflow_dispatch:
 
 concurrency:

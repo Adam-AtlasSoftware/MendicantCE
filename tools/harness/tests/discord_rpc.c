@@ -108,10 +108,21 @@ posix_ulong posix_process_id(void)
 	return 4242;
 }
 
+/* the schemes registered and dropped, and the last one's description */
+static char registered_scheme[64], registered_description[64], forgotten_schemes[4][64];
+static int registered_count, forgotten_count;
+
 void p2p_register_url_scheme(const char *scheme, const char *description)
 {
-	(void)scheme;
-	(void)description;
+	snprintf(registered_scheme, sizeof(registered_scheme), "%s", scheme);
+	snprintf(registered_description, sizeof(registered_description), "%s", description);
+	registered_count++;
+}
+
+void p2p_forget_url_scheme(const char *scheme)
+{
+	if (forgotten_count < 4)
+		snprintf(forgotten_schemes[forgotten_count++], sizeof(forgotten_schemes[0]), "%s", scheme);
 }
 
 void p2p_invite_received(const char *text)
@@ -454,6 +465,49 @@ static void case_art(void)
 	CHECK(has(last_activity(), "\"small_image\":\"host\",\"small_text\":\"Hosting\""), "hosting: %s", last_activity());
 }
 
+/* fork: a build of the fork (HALO_FORK_MENDICANT, which the test defines for
+this case's unit alone): OpenH1's and OpenCE's applications are none, with a
+line in the log and their discord-<id>:// handlers given back; a player's own
+application connects, under the fork's name */
+#define OPENH1 "1561963518344036434"
+static void case_fork(void)
+{
+	static const char *const upstream[] = { OPENH1, OPENCE };
+	int index;
+
+	for (index = 0; index < 2; index++)
+	{
+		discord.checked = 0;
+		discord.enabled = 0;
+		last_log[0] = 0;
+		forgotten_count = 0;
+		snprintf(application, sizeof(application), "%s", upstream[index]);
+		run(30000);
+		CHECK(connects == 0 && frame_count == 0, "%s: no connection: %d, %d frames", upstream[index], connects,
+			frame_count);
+		CHECK(registered_count == 0, "%s: no scheme registered: %s", upstream[index], registered_scheme);
+		CHECK(strstr(last_log, "does not use"), "%s: said in the log: %s", upstream[index], last_log);
+		CHECK(forgotten_count == 2 && !strcmp(forgotten_schemes[0], "discord-" OPENH1) &&
+			!strcmp(forgotten_schemes[1], "discord-" OPENCE), "%s: upstream's handlers given back", upstream[index]);
+	}
+	/* (none, the default: nothing, and nothing said) */
+	discord.checked = 0;
+	last_log[0] = 0;
+	application[0] = 0;
+	run(30000);
+	CHECK(connects == 0 && registered_count == 0 && !last_log[0], "no application: nothing: %s", last_log);
+	/* (the player's own) */
+	discord.checked = 0;
+	snprintf(application, sizeof(application), "%s", "1700000000000000001");
+	ready();
+	CHECK(has(frames[0].json, "\"client_id\":\"1700000000000000001\""), "the player's own application connects");
+	CHECK(registered_count == 1 && !strcmp(registered_scheme, "discord-1700000000000000001") &&
+		!strcmp(registered_description, "MendicantCE"), "its scheme, under the fork's name: %s, %s",
+		registered_scheme, registered_description);
+	CHECK(has(last_activity(), "\"large_text\":\"MendicantCE\"") && !has(last_activity(), "OpenH1\""),
+		"the status names the fork: %s", last_activity());
+}
+
 static void case_join(void)
 {
 	ready();
@@ -643,6 +697,7 @@ static const struct
 	{ "off", case_off },
 	{ "nojoins", case_nojoins },
 	{ "reconnect", case_reconnect },
+	{ "fork", case_fork },
 };
 
 int main(int argc, char **argv)

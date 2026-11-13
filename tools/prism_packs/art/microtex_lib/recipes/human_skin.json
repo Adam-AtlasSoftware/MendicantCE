@@ -1,0 +1,94 @@
+{
+ "class": "human_skin",
+ "description": "Human skin (Marine faces, Johnson, later hands): pores, fine lines crossing one another and a faint grain, at low amplitude so faces stay CE's faces; skin-class texels on the face maps by a soft threshold on multipurpose B.",
+ "group": "marines",
+ "first_person": false,
+ "suggested_shaders": [
+  "characters\\marine\\shaders\\face_* (multipurpose B, soft)",
+  "characters\\marine_armored\\shaders\\face_johnson sarge"
+ ],
+ "tile_mm": 40.0,
+ "author_px": 1024,
+ "ship_px": 512,
+ "seed": 312,
+ "tile_rule": "base texel 2.8-3.1 mm: the tile spans 13-14 base texels",
+ "feature_band_mm": [
+  0.3,
+  2.5
+ ],
+ "target_slope_rms": 0.12,
+ "height_layers": [
+  {
+   "gen": "pores",
+   "per_cm2": 140,
+   "radius_mm": [
+    0.16,
+    0.26
+   ],
+   "depth_mm": 0.016
+  },
+  {
+   "gen": "wrinkles",
+   "rms_mm": 0.004,
+   "wavelength_mm": [
+    0.7,
+    1.6
+   ],
+   "width": 0.22,
+   "angle_deg": 0.0,
+   "stretch_mm": 5.0,
+   "note": "fine lines"
+  },
+  {
+   "gen": "wrinkles",
+   "rms_mm": 0.003,
+   "wavelength_mm": [
+    0.7,
+    1.6
+   ],
+   "width": 0.22,
+   "angle_deg": 65.0,
+   "stretch_mm": 5.0,
+   "note": "crossing fine lines"
+  },
+  {
+   "gen": "pebble",
+   "cell_mm": 0.45,
+   "rms_mm": 0.002,
+   "mode": "dome"
+  }
+ ],
+ "cavity": {
+  "radius_mm": 0.4,
+  "strength": 0.4
+ },
+ "rough_layers": [
+  {
+   "src": "mask:pore",
+   "k": 0.05
+  },
+  {
+   "src": "cavity",
+   "k": 0.03
+  },
+  {
+   "src": "noise",
+   "k": 0.03,
+   "wavelength_mm": [
+    1.0,
+    6.0
+   ]
+  }
+ ],
+ "export_masks": [],
+ "fade_m": [
+  1.5,
+  4.0
+ ],
+ "preview": {
+  "base_grey": 0.45,
+  "metallic": 0.0,
+  "roughness": 0.45
+ },
+ "base_roughness_ref": 0.45
+}

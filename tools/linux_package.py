@@ -14,6 +14,7 @@ anywhere and starts with bin/openh1:
     share/openh1/brokers.txt                   internet play's brokers (network.brokers_file)
     share/openh1/masters.txt                   the master servers (network.masters_file)
     share/openh1/prepared.records              the stock maps' preparations' records (prepared_shipped.h)
+    share/openh1/mendicant_models.aibw         MENDICANT AI's trained models (mendicant_shipped.h)
     share/openh1/openh1.assets                 the textures', fonts' and menus' bytes (embedded_assets.h)
     share/openh1/relays.txt                    the relays offered (network.relays_file: none in it)
     share/openh1/vr                            only in the VR build's (--vr): install.sh's sign of it
@@ -21,13 +22,25 @@ anywhere and starts with bin/openh1:
                                                (port/assets/steam, tools/steam_art.py; the VR build's OpenH1 VR's)
     share/applications/openh1.desktop          the desktop entry
     share/icons/hicolor/<n>x<n>/apps/openh1.png  its icon
-    share/doc/openh1/                          the READMEs
+    share/openh1/prism_packs/                  fork: PRISM's pack tools (tools/prism_packs: stage_pack_tools)
+    bin/openh1-map-extract                     fork: their extractor (tools/x86_game_abi.py --map-extract), when
+                                               the build has it
+    share/doc/openh1/                          the READMEs (the fork's own as README.md, OpenH1's as
+                                               README.OpenH1.md and README.linux.md), the credits and SOURCE.txt
+                                               (where this build's source is: source_notice)
     share/licenses/openh1/                     the project's licence and those of what it carries
 
 The game finds its files from where it is (port/linux/src/install_layout.c).
 install.sh, opened in the unpacked tree, copies it to ~/Applications/OpenH1
-and gives it a menu entry and a Steam shortcut: the release's zips have it,
-the tree for a package (tree, below) has not.
+and gives it a menu entry and a Steam shortcut: OpenH1's release zips have
+it, the tree for a package (tree, below) has not.
+
+fork: this fork's releases (tools/ci_build.py) have no install.sh either.
+The installer is OpenH1's, under OpenH1's name: it would update an OpenH1
+installed in ~/Applications/OpenH1 in place with this fork's files, and take
+its menu entry and Steam shortcut. A fork release is the tree alone, which
+is unzipped into a folder of its own and started with bin/openh1, and keeps
+its settings and saves in that folder.
 
 tree lays out a Linux build (build/linux_x86_64, or build/linux_arm64: the
 one of this computer's architecture unless --build names another) in a
@@ -39,9 +52,12 @@ artifacts lose the modes), for unzip and the self-updater.
 """
 
 import argparse
+import os
 import platform
+import re
 import shutil
 import stat
+import subprocess
 import sys
 import zipfile
 from pathlib import Path
@@ -60,8 +76,59 @@ PREPARED_RECORDS = ROOT / "port/assets/prepared/prepared.records"
 ASSETS = "openh1.assets"
 INSTALLER = ROOT / "tools/linux_install.sh"  # the tree's install.sh (and the Steam Frame package's)
 STEAM_ART = ROOT / "port/assets/steam"  # <variant>/<kind>.png (tools/steam_art.py)
-DOCUMENTS = [(ROOT / "README.md", "README.md"), (ROOT / "port/linux/README.md", "README.linux.md")]
+# fork: the build's own trained models (port/linux/src/mendicant_shipped.h), beside the records
+MENDICANT_MODELS = ROOT / "port/assets/mendicant/models.aibw"
+MENDICANT_MODELS_NAME = "mendicant_models.aibw"
+# fork: what a package of this fork says of itself. Its own README first (MENDICANT.md: what the build is,
+# that it is not OpenH1's, how it is unpacked and where its help is), OpenH1's two after it under names that
+# say whose they are, and the credits (CREDITS.md, AUTHORS.md; the HUD art's, which is used on condition of
+# credit: port/assets/hud/NOTICE.md). SOURCE.txt (source_notice, below) is written beside them.
+DOCUMENTS = [(ROOT / "MENDICANT.md", "README.md"), (ROOT / "README.md", "README.OpenH1.md"),
+             (ROOT / "port/linux/README.md", "README.linux.md"), (ROOT / "CREDITS.md", "CREDITS.md"),
+             (ROOT / "AUTHORS.md", "AUTHORS.md"), (ROOT / "port/assets/hud/NOTICE.md", "HUD-NOTICE.md")]
+SOURCE_NOTICE = "SOURCE.txt"
+FORK_NAME = "MendicantCE"
+FORK_URL = "https://github.com/Adam-AtlasSoftware/MendicantCE"
+FORK_BRANCH = "mendicant-prism"
+FORK_AUTHOR = "Adam Wiley"
+UPSTREAM_NAME = "OpenH1"
+UPSTREAM_URL = "https://github.com/OpenH1/OpenH1"
+UPSTREAM_BASE = "afa1611ce"  # the commit of OpenH1 the fork's changes start from
 PROJECT_LICENSE = ROOT / "LICENSE"  # the AGPL (earlier releases were CC0: LICENSES/)
+# fork: PRISM's pack tools (tools/prism_packs), which build the packs from the player's own game data on the
+# player's computer: the code, recipes and texts (not the extractor's C sources: the extractor itself comes
+# built), the game's pack format tools beside them (formats/), and the player's guide as GUIDE.md
+PACK_TOOLS = ROOT / "tools/prism_packs"
+PACK_TOOLS_NAME = "prism_packs"
+PACK_TOOL_SUFFIXES = (".py", ".json", ".txt", ".md")
+PACK_FORMAT_TOOLS = [ROOT / "tools" / name for name in ("pmesh.py", "pmesh_from_dump.py", "prism_rig.py",
+                                                       "prism_material_pack.py", "texstore_synth.py",
+                                                       "prism_probes.py")]
+PACK_GUIDE = ROOT / "docs/prism_packs.md"
+MAP_EXTRACT_NAME = "openh1-map-extract"
+# (the extractor is linked statically with the GNU C Library, whose LGPL asks a copy to carry it and to say where
+# its source and the extractor's are: the extractor's own notice beside the licences)
+MAP_EXTRACT_LGPL = (ROOT / "port/third_party/ffmpeg/COPYING.LGPLv2.1", "glibc-COPYING.LGPLv2.1.txt")
+MAP_EXTRACT_NOTICE = "openh1-map-extract-NOTICE.txt"
+
+
+def map_extract_notice() -> str:
+    """the extractor's notice: what it is, its licence, and the sources of it and of the C library in it"""
+    return "\n".join([
+        f"bin/{MAP_EXTRACT_NAME}: PRISM's pack tools' extractor ({FORK_NAME}: tools/prism_packs/extract, built by",
+        "tools/x86_game_abi.py --map-extract). It reads the player's own maps and writes their bitmaps, models and",
+        "level geometry for the pack tools (share/openh1/prism_packs); nothing it writes may be shared.",
+        "",
+        "Its own code is under the GNU Affero General Public License, version 3 or later (LICENSE), with the",
+        "game's source (SOURCE.txt says where).",
+        "",
+        "It is linked statically with the GNU C Library (glibc), the version of Ubuntu 22.04's libc6-dev-i386",
+        "package, under the GNU Lesser General Public License, version 2.1 or later",
+        "(glibc-COPYING.LGPLv2.1.txt). The library's source: https://ftp.gnu.org/gnu/glibc/ and Ubuntu's glibc",
+        "source package (https://launchpad.net/ubuntu/+source/glibc). To link the extractor with another",
+        "version of the library, build it from the game's source with tools/x86_game_abi.py --map-extract:",
+        "its objects are made in build/map_extract/obj, and any C library of the 32-bit x86 ABI links them.",
+    ]) + "\n"
 
 
 def notices(platform: str) -> List[Tuple[Path, str]]:
@@ -113,13 +180,106 @@ def notices(platform: str) -> List[Tuple[Path, str]]:
     return pairs
 
 
+def _git(*arguments: str) -> str:
+    """git's answer in this checkout, or none (no git, or no checkout: a source archive). safe.directory is
+    given by name: in a workflow's container the checkout is another user's, which git otherwise refuses"""
+    try:
+        result = subprocess.run(["git", "-c", f"safe.directory={ROOT}", "-C", str(ROOT), *arguments],
+                                capture_output=True, text=True, timeout=30, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def source_revision() -> Tuple[str, bool, str]:
+    """the commit a package is built from (CI's GITHUB_SHA, else the checkout's HEAD; none if neither is known),
+    whether the tree has changes that are in no commit, and the commit's date (YYYY-MM-DD; none if not known)"""
+    commit = os.environ.get("GITHUB_SHA", "")
+    # (a workflow's checkout is its commit, whatever git makes of its line endings on Windows)
+    changed = False
+    if not commit:
+        commit = _git("rev-parse", "HEAD")
+        changed = bool(_git("status", "--porcelain", "--untracked-files=no"))
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        commit = ""
+    date = _git("show", "-s", "--format=%cs", commit) if commit else ""
+    return commit, changed, date if re.fullmatch(r"\d{4}-\d{2}-\d{2}", date) else ""
+
+
+def source_notice() -> str:
+    """SOURCE.txt, which every package of the fork carries (the Linux tree's share/doc/openh1, beside halo.exe on
+    Windows): that the build is a modified version of OpenH1, by whom and when it was last changed, and where
+    the source of exactly this build is (the AGPL's sections 5 and 6: its repository, branch and commit). A build
+    of a tree with changes in no commit says so in place of naming a commit that is not its source: the release
+    workflow publishes no such package (it checks the notice for its own commit)."""
+    commit, changed, date = source_revision()
+    lines = [
+        f"{FORK_NAME}: where this build's source is",
+        "",
+        f"This is {FORK_NAME}, a modified version of {UPSTREAM_NAME} ({UPSTREAM_URL}).",
+        f"It was changed by {FORK_AUTHOR}, starting from {UPSTREAM_NAME}'s commit {UPSTREAM_BASE}"
+        + (f"; the last change in this build is of {date}." if date else "."),
+        f"It is not {UPSTREAM_NAME}'s build: {UPSTREAM_NAME}'s developers did not make it and do not support it.",
+        "",
+        f"What it adds to {UPSTREAM_NAME}: MENDICANT AI (the campaign's AI), PRISM (graphics), the Theater and its",
+        "replays, Forge and tag packs. README.md and CREDITS.md, beside this file, say what each is and who wrote",
+        "it.",
+        "",
+        "Licence: the GNU Affero General Public License, version 3 or (at your option) any later version, as",
+        f"{UPSTREAM_NAME}'s (the LICENSE file that comes with this build). It comes with no warranty.",
+        "",
+    ]
+    if commit and not changed:
+        lines += [
+            "The complete source of this build:",
+            "",
+            f"  repository  {FORK_URL}",
+            f"  branch      {FORK_BRANCH}",
+            f"  commit      {commit}",
+            f"  to read     {FORK_URL}/tree/{commit}",
+            f"  to download {FORK_URL}/archive/{commit}.zip",
+            "",
+            "The game's maps and other data are not part of it, nor of this build: the game plays from your own copy.",
+        ]
+    else:
+        based = f" (its last commit is {commit})" if commit else ""
+        lines += [
+            f"This copy was built from a working tree with changes that are in no commit{based}: it is not a",
+            f"published release of {FORK_NAME}. Whoever gave it to you has its source, and the licence asks them",
+            f"to give it to you. The published releases, each with its source's commit, are at {FORK_URL}/releases",
+        ]
+    return "\n".join(lines) + "\n"
+
+
+def fork_documents() -> List[Tuple[Path, str]]:
+    """the documents a package of the fork carries beside the game where it has no share/doc (the Windows
+    build's folder: tools/ci_build.py), under the names stage_tree gives them; SOURCE.txt is source_notice's"""
+    return list(DOCUMENTS)
+
+
 def _copy(source: Path, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, destination)
 
 
+def pack_tool_files() -> List[Tuple[Path, str]]:
+    """fork: PRISM's pack tools as a package has them ((source, path in the tools' folder) pairs)"""
+    files = [(path, path.relative_to(PACK_TOOLS).as_posix()) for path in sorted(PACK_TOOLS.rglob("*"))
+             if path.is_file() and path.suffix in PACK_TOOL_SUFFIXES and "__pycache__" not in path.parts]
+    files += [(path, f"formats/{path.name}") for path in PACK_FORMAT_TOOLS]
+    files.append((PACK_GUIDE, "GUIDE.md"))
+    return files
+
+
+def stage_pack_tools(folder: Path) -> None:
+    """fork: PRISM's pack tools in folder (the Linux tree's share/openh1/prism_packs, the Windows folder's
+    prism_packs)"""
+    for source, name in pack_tool_files():
+        _copy(source, folder / name)
+
+
 def stage_tree(dist: Path, executable: Path, library: Optional[Path], notices: Iterable[Tuple[Path, str]],
-               installer: bool = True, vr: bool = False) -> None:
+               installer: bool = True, vr: bool = False, extractor: Optional[Path] = None) -> None:
     """The release's tree in dist: the executable as bin/openh1, SDL in
     lib/openh1 (none: the system's), and notices ((source, name) pairs: the
     licences of what the build carries) in share/licenses/openh1; and, for
@@ -127,7 +287,9 @@ def stage_tree(dist: Path, executable: Path, library: Optional[Path], notices: I
     top. The VR build's (vr) has share/openh1/vr, by which install.sh puts
     it beside the other build, not in its place. The release's has Steam's
     library artwork too (share/openh1/steam), which install.sh gives the
-    game's Steam shortcut: OpenH1 VR's in the VR build's."""
+    game's Steam shortcut: OpenH1 VR's in the VR build's. fork: a tree without the installer (this fork's
+    release) has PRISM's pack tools in share/openh1/prism_packs, and their extractor as
+    bin/openh1-map-extract when extractor names it."""
     if installer:
         _copy(INSTALLER, dist / "install.sh")
         for art in sorted((STEAM_ART / ("openh1-vr" if vr else "openh1")).glob("*.png")):
@@ -139,6 +301,8 @@ def stage_tree(dist: Path, executable: Path, library: Optional[Path], notices: I
     _copy(MASTERS, dist / "share" / NAME / MASTERS.name)
     _copy(RELAYS, dist / "share" / NAME / RELAYS.name)
     _copy(PREPARED_RECORDS, dist / "share" / NAME / PREPARED_RECORDS.name)
+    # fork: (MENDICANT AI's trained models: port/linux/src/mendicant_shipped.h)
+    _copy(MENDICANT_MODELS, dist / "share" / NAME / MENDICANT_MODELS_NAME)
     # (the textures', fonts' and menus' bytes, beside the build's executable:
     # port/linux/src/embedded_assets.h)
     _copy(executable.parent / ASSETS, dist / "share" / NAME / ASSETS)
@@ -146,11 +310,24 @@ def stage_tree(dist: Path, executable: Path, library: Optional[Path], notices: I
         (dist / "share" / NAME / "vr").write_text(
             "The VR build (HALO_VR). install.sh installs it in ~/Applications/OpenH1-VR, beside the other build.\n")
     _copy(DESKTOP_ENTRY, dist / "share/applications" / f"{NAME}.desktop")
+    if not installer:
+        # fork: PRISM's pack tools, and their extractor (a static program)
+        stage_pack_tools(dist / "share" / NAME / PACK_TOOLS_NAME)
+        if extractor:
+            _copy(extractor, dist / "bin" / MAP_EXTRACT_NAME)
+            _copy(MAP_EXTRACT_LGPL[0], dist / "share/licenses" / NAME / MAP_EXTRACT_LGPL[1])
+            (dist / "share/licenses" / NAME / MAP_EXTRACT_NOTICE).write_text(map_extract_notice())
+        # fork: a tree without OpenH1's installer is this fork's release or a package of it: its menu entry
+        # names the fork (the installer's own entry, where a tree has it, is written by install.sh)
+        entry = dist / "share/applications" / f"{NAME}.desktop"
+        entry.write_text(entry.read_text().replace("\nName=OpenH1\n", f"\nName={FORK_NAME}\n", 1))
     for icon in sorted(ICONS.glob(f"{NAME}-*.png")):
         size = icon.stem.rsplit("-", 1)[1]
         _copy(icon, dist / "share/icons/hicolor" / f"{size}x{size}" / "apps" / f"{NAME}.png")
     for source, name in DOCUMENTS:
         _copy(source, dist / "share/doc" / NAME / name)
+    # fork: (where this build's source is)
+    (dist / "share/doc" / NAME / SOURCE_NOTICE).write_text(source_notice())
     _copy(PROJECT_LICENSE, dist / "share/licenses" / NAME / PROJECT_LICENSE.name)
     for source, name in notices:
         _copy(source, dist / "share/licenses" / NAME / name)
