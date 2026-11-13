@@ -23,9 +23,15 @@ keys (`x y z yaw pitch roll field-of-view`, world units and degrees) and what it
 | G5 | a10 | Door windows, specular trim, disocclusion |
 | G6 | c40 (exterior) | Night sky energy |
 | G7 | c40 (interior) | Lamp strips, hologram ring |
+| S1 | a30 (the canyon at night) | Cliffs and rocks of the remodel, the canyon's fog |
+| S2a | b30 (the shore) | Water |
+| S2b | a10 (the cryo bay) | Glass (the cryo tubes) |
+| S3 | a50, BSP 2 (the hangar) | The hangar's lamps (the flashlight: not yet) |
 
 G1 to G7 are the path tracer's gate scenes, their keys as `prism-pt`'s gate checked them (inside the level, every
-probe pose seeing surfaces). The design's S1 to S4 and V1 and V2 are listed in "Not yet frozen" below.
+probe pose seeing surfaces). S1 to S3 are the design's stills, their poses from earlier PRISM captures, checked in
+play for out-of-level and sky-only frames; the design's S2 is two scenes (b30's water, a10's glass). S4 and V1 and
+V2 are listed in "Not yet frozen" below.
 
 A scene is changed only with a note here saying why: every milestone's figures are measured on these.
 
@@ -39,16 +45,21 @@ same build draws the same frames.
   `SDL_AUDIODRIVER=dummy`), no controllers (`SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT=0x0000/0x0000`,
   `SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS=0`, `SDL_JOYSTICK_HIDAPI=0`), nothing online (the run's own empty brokers,
   relays and masters files), its own data, save and config folders, the clock fixed (`HALO_FIXED_STEP=1`: a tick a
-  frame) and interpolation off (`HALO_INTERPOLATION=false`). The data folder links the maps and PRISM's folders
+  frame) at the game's own 30 ticks a second (`HALO_SIM_RATE=30`) and interpolation off (`HALO_INTERPOLATION=false`),
+  MENDICANT AI's models off (`HALO_AI_MENDICANT=false`: their decisions differ from run to run). The data folder links the maps and PRISM's folders
   read only; the mods are linked one by one beside a copy of their load order. Every run takes the same
   `config.toml` (the kit's, with `display.prism_rt` off: the path turns it on).
 - **The kit.** Before every run the harness looks for a process whose executable is in the kit (the game the person
   this works for plays) and stops if one runs.
-- **The harness's rules.** At the path's first frame: the console's lines and the HUD off, the player deathless
-  (`cheat_deathless_player 1`), the weather off (`weather 0`) and the AI erased (`ai_erase_all`). The game then
-  runs 900 frames with the camera at the first key and is stopped (`game_speed 0`). The frames let a level's opening
-  play out (b30's insertion: the director takes the path's camera only once it has, and only in a tick),
-  projectiles land and a hit's flash fade.
+- **The harness's rules.** The path starts at the game's tick 600 (`start_tick`). At its first frame: the
+  console's lines and the HUD off, the player deathless (`cheat_deathless_player 1`), the weather off (`weather 0`),
+  no particles, particle systems, weather systems or contrails drawn (they move frame by frame at a stopped clock,
+  and are not the light's) and the AI erased (`ai_erase_all`), again every 60 ticks (a level's script places its AI
+  as its opening ends). The game is stopped (`game_speed 0`) by its clock, 420 ticks into the path, the same tick in
+  every run (a tick line: a path's frame need not take a step of the clock), and the camera is held at the first
+  key for 900 frames in all. These let a level's opening play out (b30's insertion: the director takes the path's
+  camera only once it has, and only in a tick), projectiles land and a hit's flash fade. As the path starts, the
+  frames' own randomness (particles, a light's flicker) is set to a constant.
 - **The frames.** Only the frames the path names (its `save` lines) are written to the stream
   (`debug.screenshot_stream`), each at the end of a hold of its pose (a pose set in a frame is drawn by the next).
   They are saved as PNG with the SHA-256 of their pixels in `manifest.json`.
@@ -136,15 +147,18 @@ black without a million samples).
 
 `tools/prism_gate/identity.py` checks the milestone's tree against the tree it started from:
 
-- **frames**: each tree run twice on b30 and a10, the clock fixed and interpolation off, every frame from the
-  simulation's 40th second to its 41.5th saved, with the game's defaults (Classic) and again with the kit's
-  settings and RT off (`display.lighting` `ce`): each tree alike with itself, and the new alike with the base,
-  byte for byte.
+- **frames**: each tree run twice on b30 and a10 with the game's defaults (Classic), the clock fixed and
+  interpolation off, every frame from the simulation's 40th second to its 41.5th saved: each tree alike with
+  itself, and the new alike with the base, byte for byte.
+- **stills**: each tree run twice on G2, G4, G5 and G7 with the kit's settings and RT off (`display.lighting`
+  `ce`), by the capture harness (a path an older build also reads), the last 30 frames of a hold at each scene's
+  first probe pose: alike byte for byte, as `frames`.
 - **determinism**: each tree twice on a10 with the determinism log, the frames' time fixed and a scripted player;
   `tools/determinism_compare.py --simulation`: each tree with itself and the new with the base.
 
 ```sh
-python3 tools/prism_gate/identity.py frames <base tree> <new tree> --data <data> --out <dir> [--config <toml>]
+python3 tools/prism_gate/identity.py frames <base tree> <new tree> --data <data> --out <dir>
+python3 tools/prism_gate/identity.py stills <base tree> <new tree> --data <data> --out <dir> --config <toml>
 python3 tools/prism_gate/identity.py determinism <base tree> <new tree> --data <data> --out <dir>
 ```
 
@@ -152,10 +166,10 @@ and the design's others: no change to `HALO_PORT_NETWORK_VERSION`, Vulkan valida
 
 ## Not yet frozen
 
-The design's S1 to S4 (a30's cliffs under a fog plane with the remodel, b30's water and a10's cryo glass, a50's
-hangar with the flashlight, c10's swamp) and V1 and V2 (a Warthog driven across b30's beach before a still camera,
-a50's firefight with the AI kept) need their poses found in play and checked for sky-only and out-of-level frames
-before they join `scenes.json`. The harness has what they need: a live scene (`"live": true`: the AI kept, the
+S4 (c10's swamp: the pose tried is an interior), S3's flashlight (the player's light is where the player is, not
+the scene's camera), V1 (a Warthog driven across b30's beach before a still camera: the Warthog placed by name was
+not made) and V2 (a50's firefight with the AI kept: the poses tried show no fight) need their poses or setup found
+in play before they join `scenes.json`. The harness has what they need: a live scene (`"live": true`: the AI kept, the
 clock running during its moves, each state its own run so that every state sees the same world; its references
 made by replaying the run to the probe's step and stopping there), a scene's own setup commands and scripted
 input (`"setup"`, `"input"`: `debug_object_place "player seat W-driver"` puts the player's own unit in a placed
