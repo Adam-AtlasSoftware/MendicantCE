@@ -81,6 +81,7 @@ boolean render_sky_light(short sky_index, short light_index, real_vector3d *dire
 short render_sky_light_count(short sky_index);
 /* game.h's; render_interpolation.c's (the drawn frame's place between ticks) */
 long game_time_get(void);
+char const *platform_data_root(void);
 float render_interpolation_fraction(void);
 
 /* ---------- constants */
@@ -145,6 +146,11 @@ enum
 	PRISM_RT_FLAG_NO_CACHE = 1,
 	PRISM_RT_FLAG_STOCK_MODELS = 2,
 	PRISM_RT_FLAG_LIGHT = 4,
+	PRISM_RT_FLAG_REFERENCE = 8,
+	/* debug.pt_reference: its frames at most, its path's bytes
+	(XGPU_RT_REFERENCE_PATH) */
+	PRISM_RT_REFERENCE_FRAMES_MOST = 1 << 20,
+	PRISM_RT_REFERENCE_PATH = 512,
 	/* display.prism_rt_world: the level's shape traced (prism_world_geometry.c's
 	_world_proxy_*: the map's, the remodel's far level, its near level) */
 	PRISM_RT_WORLD_STOCK = 0,
@@ -194,7 +200,7 @@ struct prism_rt_frame
 	unsigned int view, light_count, frame, ticks;
 	float fraction;
 	unsigned int generation;
-	unsigned int flags, pad;
+	unsigned int flags, reference_file;
 	float settings[16];
 	float sun[4];
 	float sun_color[4];
@@ -273,6 +279,19 @@ static struct
 	unsigned long frame;
 	int logged;
 	int initialized;
+	/* debug.pt_reference: the frames summed (0 none), the file (the
+	setting's, or the data folder's pt_reference/<map>_<generation>.exr),
+	two copies in turn (the host reads the one a frame named while the guest
+	may write the other), the one sent; the request's generation (a new
+	setting, file or game time starts the sum again) and the game's time it
+	began at; whether the mode's need was logged */
+	long reference_frames;
+	char reference_setting[PRISM_RT_REFERENCE_PATH];
+	char reference_files[2][PRISM_RT_REFERENCE_PATH];
+	int reference_file_index;
+	unsigned long reference_generation;
+	long reference_ticks;
+	int reference_logged;
 } prism_rt;
 
 int prism_rt_mode(void);
@@ -312,6 +331,7 @@ static void settings_read(void)
 	static char const *const exposures[] = { "fixed", "ce", "auto", NULL };
 	static char const *const curves[] = { "ce", "filmic", "aces", "local", NULL };
 	char const *lightmaps;
+	char const *reference_file;
 	long mood, value;
 
 	if (!prism_rt.initialized)
@@ -368,6 +388,21 @@ static void settings_read(void)
 	prism_rt.tone_curve = word_index(config_string("display.prism_tone_curve"), curves, -1);
 	lightmaps = config_string("display.prism_lightmaps");
 	prism_rt.rebaked = lightmaps && !strcmp(lightmaps, "rebaked");
+	value = config_integer("debug.pt_reference");
+	value = value < 0 ? 0 : value > PRISM_RT_REFERENCE_FRAMES_MOST ? PRISM_RT_REFERENCE_FRAMES_MOST : value;
+	reference_file = config_string("debug.pt_reference_file");
+	if (!reference_file)
+		reference_file = "";
+	/* (a new request, its frames or its file: summed again) */
+	if (value != prism_rt.reference_frames || strncmp(reference_file, prism_rt.reference_setting,
+		sizeof(prism_rt.reference_setting)))
+	{
+		prism_rt.reference_frames = value;
+		snprintf(prism_rt.reference_setting, sizeof(prism_rt.reference_setting), "%s", reference_file);
+		prism_rt.reference_generation++;
+		prism_rt.reference_ticks = game_time_get();
+		prism_rt.reference_logged = FALSE;
+	}
 }
 
 /* ---------- the rig: a BSP's fitted scales (relight_calib.py's
@@ -1346,6 +1381,47 @@ int prism_rt_light(void)
 	return light_keyed();
 }
 
+/* debug.pt_reference: the request in the frame (path traced only), its file
+named; started again if the game's time moved (the sum is of one stopped
+moment: the game is stopped with game_speed 0 first) */
+static void reference_frame(struct prism_rt_frame *frame)
+{
+	char *file;
+	long ticks;
+
+	if (prism_rt.reference_frames <= 0)
+		return;
+	if (prism_rt.mode != PRISM_RT_PATHTRACED)
+	{
+		if (!prism_rt.reference_logged)
+			platform_log("prism rt: debug.pt_reference needs display.prism_rt \"pathtraced\"");
+		prism_rt.reference_logged = TRUE;
+		return;
+	}
+	ticks = game_time_get();
+	if (ticks != prism_rt.reference_ticks)
+	{
+		prism_rt.reference_ticks = ticks;
+		prism_rt.reference_generation++;
+		if (!prism_rt.reference_logged)
+			platform_log("prism rt: debug.pt_reference: the game's time moves, so the sum starts again each tick (stop "
+				"it with game_speed 0)");
+		prism_rt.reference_logged = TRUE;
+	}
+	/* (the copy the last frame did not name: that frame may still be read) */
+	prism_rt.reference_file_index ^= 1;
+	file = prism_rt.reference_files[prism_rt.reference_file_index];
+	if (prism_rt.reference_setting[0])
+		snprintf(file, PRISM_RT_REFERENCE_PATH, "%s", prism_rt.reference_setting);
+	else
+		snprintf(file, PRISM_RT_REFERENCE_PATH, "%s/pt_reference/%s_%lu.exr", platform_data_root(),
+			prism_rt.rig_map[0] ? prism_rt.rig_map : "map", prism_rt.reference_generation);
+	frame->flags |= PRISM_RT_FLAG_REFERENCE;
+	frame->spare[0] = (float)prism_rt.reference_frames;
+	frame->spare[1] = (float)(prism_rt.reference_generation & 0xffffffUL);
+	frame->reference_file = (unsigned int)(unsigned long)file;
+}
+
 void prism_rt_map_unloaded(void)
 {
 	if (prism_rt.bsp_index != -1 || prism_rt.positions)
@@ -1385,6 +1461,7 @@ void prism_rt_frame_begin(void)
 	frame.generation = (unsigned int)prism_rt.generation;
 	frame.flags = (prism_rt.cache ? 0 : PRISM_RT_FLAG_NO_CACHE) | (prism_rt.objects == 2 ? PRISM_RT_FLAG_STOCK_MODELS : 0) |
 		(light_keyed() ? PRISM_RT_FLAG_LIGHT : 0);
+	reference_frame(&frame);
 	frame.settings[0] = PRISM_RT_SUN_STRENGTH;
 	frame.settings[1] = PRISM_RT_MODEL_STRENGTH;
 	/* (the level traced is a remodel: its faces wound either way) */

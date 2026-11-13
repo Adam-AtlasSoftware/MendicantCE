@@ -45,6 +45,7 @@ PASS = """layout(set = 0, binding = @B@, std140) uniform Pass
     uvec4 addresses5;
     vec4 grid;
     ivec4 grid_size;
+    vec4 reference;
 } pass;
 """
 
@@ -1549,9 +1550,12 @@ void main()
             path += throughput * ls;
             path_dynamic += throughput * ld;
             /* (the last bounce ends in the probes' irradiance: every bounce
-            past it) */
+            past it; debug.pt_reference's paths end there, unbiased up to
+            their bounces, no cache and no probes) */
             if (bounce == bounces - 1)
             {
+                if (pass.reference.x > 0.5)
+                    break;
                 /* (the radiance cache's cell at the hit first, where a pixel
                 has seen it: in world space, settled; else the probes about
                 the camera, whose grid moves with it and holds another
@@ -1909,6 +1913,83 @@ void main()
     imageStore(state1, texel, vec4(add, length_));
     imageStore(state2, texel, vec4(v, max(v2, v * v), v_length, vs));
     imageStore(state3, texel, vec4(fast, max(m2, luma(light) * luma(light))));
+}
+"""
+
+
+# ---------------------------------------------------------------- debug.pt_reference
+REFERENCE_HEAD = """#version 460
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform usampler2D inputs;
+layout(set = 0, binding = 1) uniform sampler2D raw0;
+layout(set = 0, binding = 2) uniform sampler2D raw1;
+layout(set = 0, binding = 4, std430) buffer Sums { vec4 sums[]; };
+layout(set = 0, binding = 5, rgba16f) uniform writeonly image2D state0;
+layout(set = 0, binding = 6, rgba16f) uniform writeonly image2D state1;
+layout(set = 0, binding = 7, rgba16f) uniform writeonly image2D state2;
+layout(set = 0, binding = 8, rgba16f) uniform writeonly image2D state3;
+"""
+
+REFERENCE_BODY = """
+/* debug.pt_reference, in the temporal pass's place: each texel's samples
+summed over the frames in 32-bit floats (sums: three vec4s a texel: the
+light less the sun's and the sun's visibility; the dynamic lights' change
+and the structure's visibility; the visibility's square, the distance, the
+samples) with no clamp, no reprojection and no history but its own (the
+camera does not move: xgpu_vulkan_rt.c starts again where it does), and
+their mean written as the temporal pass writes its state, for the spatial
+passes (the denoiser off: they pass it through) and the anchor's tiles.
+pass.reference: x 1, y this frame's number in the sum (1 the first: the
+sums started again), z the frames, w 1 where this frame's samples are added
+(0: the sum is whole, held) */
+void main()
+{
+    ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 full = pass.size.xy;
+    if (texel.x >= full.x || texel.y >= full.y)
+        return;
+    uint at = uint(texel.y * full.x + texel.x) * 3u;
+    uvec4 w = texelFetch(inputs, texel, 0);
+    float distance = uintBitsToFloat(w.z);
+    vec4 s0 = vec4(0.0), s1 = vec4(0.0), s2 = vec4(0.0);
+    if (pass.reference.y > 1.5 || pass.reference.w < 0.5)
+    {
+        s0 = sums[at];
+        s1 = sums[at + 1u];
+        s2 = sums[at + 2u];
+    }
+    bool present = (w.y & 0x400u) != 0u && distance > 0.0;
+    if (present && pass.reference.w > 0.5)
+    {
+        vec4 a = texelFetch(raw0, texel, 0), b = texelFetch(raw1, texel, 0);
+        if (b.w > 0.5 && !any(isnan(a)) && !any(isinf(a)) && !any(isnan(b)) && !any(isinf(b)))
+        {
+            s0 += a;
+            s1 += vec4(b.rgb, b.w - 1.0);
+            s2 += vec4(a.w * a.w, distance, 1.0, 0.0);
+        }
+    }
+    if (pass.reference.w > 0.5)
+    {
+        sums[at] = s0;
+        sums[at + 1u] = s1;
+        sums[at + 2u] = s2;
+    }
+    if (!present || s2.z < 0.5)
+    {
+        imageStore(state0, texel, vec4(0.0));
+        imageStore(state1, texel, vec4(0.0));
+        imageStore(state2, texel, vec4(0.0));
+        imageStore(state3, texel, vec4(0.0));
+        return;
+    }
+    float n = s2.z;
+    vec3 light = s0.rgb / n;
+    float v = s0.w / n;
+    imageStore(state0, texel, vec4(light, (w.y & 0x100u) != 0u ? distance : -distance));
+    imageStore(state1, texel, vec4(s1.rgb / n, 32.0));
+    imageStore(state2, texel, vec4(v, max(s2.x / n, v * v), 8.0, s1.w / n));
+    imageStore(state3, texel, vec4(light, luma(light) * luma(light)));
 }
 """
 
@@ -2510,6 +2591,9 @@ parts = [HEADER,
          source("path", PATH_HEAD, BASIC + TRACE + PATH_BODY, 3),
          "\n",
          source("accumulate", ACCUMULATE_HEAD, BASIC + ACCUMULATE_BODY, 3),
+         "\n",
+         "/* debug.pt_reference's sums (xgpu_vulkan_rt.c's reference pass), in the temporal pass's place */\n\n",
+         source("reference", REFERENCE_HEAD, BASIC + REFERENCE_BODY, 3),
          "\n",
          source("tiles", TILES_HEAD, BASIC + TILES_BODY, 3),
          "\n",

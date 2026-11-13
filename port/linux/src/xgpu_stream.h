@@ -1895,7 +1895,18 @@ enum
 	/* the surfaces read the traced texel as a factor and a light added
 	(xgpu.h's XGPU_AMBIENT_OCCLUSION_RT_LIGHT) in "shadows" and "gi" too */
 	XGPU_RT_FLAG_LIGHT = 4,
+	/* debug.pt_reference ("pathtraced" only): the path tracer unbiased (no
+	reuse, no cache, no probes, no denoiser, up to XGPU_RT_REFERENCE_BOUNCES
+	bounces), its samples summed over spare[0] frames at the camera and
+	game time it began with, then written once as a linear OpenEXR file
+	(xgpu_vulkan_rt.c) to the path at reference_file and held; spare[1] the
+	request's generation (a new one starts the sum again) */
+	XGPU_RT_FLAG_REFERENCE = 8,
 };
+#define XGPU_RT_REFERENCE_BOUNCES 8
+/* the reference file's path: a NUL-terminated UTF-8 string of at most this
+many bytes, its NUL included, in guest memory the guest keeps */
+#define XGPU_RT_REFERENCE_PATH 512u
 struct xgpu_stream_rt_frame
 {
 	uint32_t header;
@@ -1904,8 +1915,9 @@ struct xgpu_stream_rt_frame
 	uint32_t view, light_count, frame, ticks;
 	float fraction;
 	uint32_t generation;
-	/* XGPU_RT_FLAG_* */
-	uint32_t flags, pad;
+	/* XGPU_RT_FLAG_*; with XGPU_RT_FLAG_REFERENCE, the guest address of
+	the reference file's path (XGPU_RT_REFERENCE_PATH), else 0 */
+	uint32_t flags, reference_file;
 	float settings[16];
 	float sun[4];
 	float sun_color[4];

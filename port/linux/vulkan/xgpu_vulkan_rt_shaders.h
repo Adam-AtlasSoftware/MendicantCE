@@ -21,6 +21,9 @@ extern const uint32_t xgpu_vulkan_rt_path_words[];
 extern const size_t xgpu_vulkan_rt_path_count;
 extern const uint32_t xgpu_vulkan_rt_accumulate_words[];
 extern const size_t xgpu_vulkan_rt_accumulate_count;
+/* port: debug.pt_reference's sums, in the temporal pass's place */
+extern const uint32_t xgpu_vulkan_rt_reference_words[];
+extern const size_t xgpu_vulkan_rt_reference_count;
 extern const uint32_t xgpu_vulkan_rt_tiles_words[];
 extern const size_t xgpu_vulkan_rt_tiles_count;
 extern const uint32_t xgpu_vulkan_rt_exposure_words[];

@@ -46,6 +46,7 @@ more), each reused once its submission is done. GPU time: HALO_VULKAN_STATS
 #include "xgpu_vulkan_rt.h"
 #include "xgpu_vulkan_rt_shaders.h"
 #include "host.h"
+#include "xgpu_exr.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -174,6 +175,10 @@ struct rt_pass
 	uint32_t addresses5[4];
 	float grid[4];
 	int32_t grid_size[4];
+	/* port: debug.pt_reference (the reference pass): x 1, y this frame's
+	number in the sum (1: started again), z the frames, w 1 where this
+	frame's samples are added (0: the sum is whole, held) */
+	float reference[4];
 };
 
 /* ---------- the functions */
@@ -426,6 +431,21 @@ static struct
 	struct xgpu_vulkan_image *pt_tiles;
 	uint32_t pt_width, pt_height, pt_index;
 	int pt_history_valid, logged_pt;
+	/* port: debug.pt_reference: its pass (in the temporal pass's place); its
+	sums (three vec4s a texel, at the size they were made for) and their
+	copy for the CPU; the request's generation and whether one was seen, the
+	frames summed and how many make the sum, the camera they were summed
+	at; the copy's serial (0: none waiting) and the file it goes to */
+	VkDescriptorSetLayout reference_layout;
+	VkPipelineLayout reference_pipeline_layout;
+	VkPipeline reference;
+	struct rt_buffer reference_sums, reference_readback;
+	uint32_t reference_width, reference_height;
+	uint32_t reference_generation, reference_count, reference_frames, reference_static;
+	int reference_seen, reference_adding;
+	float reference_camera[4][4];
+	uint64_t reference_serial;
+	char reference_path[XGPU_RT_REFERENCE_PATH];
 	/* statistics (600 frames) */
 	uint64_t frames, draws, skipped, triangles, object_triangles_most, full_frames;
 	uint64_t jobs, skinned_triangles, builds, updates, reused, evicted, stale, deferred, pieces;
@@ -683,6 +703,14 @@ static int make(void)
 		frame's and this one's) */
 		VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
 	};
+	/* (port: debug.pt_reference's sums) */
+	static const VkDescriptorType reference_types[] =
+	{
+		VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+		VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+		VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+	};
 	static const VkDescriptorType atrous_types[] =
 	{
 		VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -750,6 +778,8 @@ static int make(void)
 		&rt.path_layout, &rt.path_pipeline_layout, &rt.path) ||
 		!pipeline_make(accumulate_types, 12, xgpu_vulkan_rt_accumulate_words, xgpu_vulkan_rt_accumulate_count,
 		&rt.accumulate_layout, &rt.accumulate_pipeline_layout, &rt.accumulate) ||
+		!pipeline_make(reference_types, 9, xgpu_vulkan_rt_reference_words, xgpu_vulkan_rt_reference_count,
+		&rt.reference_layout, &rt.reference_pipeline_layout, &rt.reference) ||
 		!pipeline_make_pushed(atrous_types, 12, xgpu_vulkan_rt_atrous_words, xgpu_vulkan_rt_atrous_count, 8,
 		&rt.atrous_layout, &rt.atrous_pipeline_layout, &rt.atrous) ||
 		!pipeline_make(tiles_types, 6, xgpu_vulkan_rt_tiles_words, xgpu_vulkan_rt_tiles_count, &rt.tiles_layout,
@@ -862,6 +892,7 @@ int xgpu_vulkan_rt_available(void)
 /* ---------- the frame's slot */
 
 static void entry_rows_learn(struct rt_slot *slot);
+static void reference_collect(void);
 static void pool_collect(int all);
 static void entries_age(void);
 static void entries_clear(void);
@@ -920,6 +951,7 @@ void xgpu_vulkan_rt_frame(const struct xgpu_stream_rt_frame *record)
 {
 	if (!make())
 		return;
+	reference_collect();
 	garbage_collect();
 	pool_collect(0);
 	rt.object_frame++;
@@ -2625,6 +2657,171 @@ static uint32_t objects_record(VkCommandBuffer commands, struct rt_slot *slot, c
 	return count;
 }
 
+/* ---------- debug.pt_reference
+
+The path tracer unbiased and summed over frames at a stopped camera and
+game (xgpu_stream.h's XGPU_RT_FLAG_REFERENCE): this frame's request taken
+(a new generation, size or camera starts the sum again); the sum's copy,
+once whole, written as an OpenEXR file when the GPU is done with it. */
+
+/* whether this frame is a reference's (and its sums can be had: made at the
+size, zeroed by the pass's first frame); rt.reference_count is then this
+frame's number in the sum, held at the frames once it is whole */
+static int reference_take(const struct xgpu_world_ao_pass *pass, uint32_t width, uint32_t height)
+{
+	uint32_t generation, frames;
+	int restart = 0;
+
+	if (!(rt.frame.flags & XGPU_RT_FLAG_REFERENCE) || !(rt.frame.spare[0] >= 1.0f))
+	{
+		rt.reference_seen = 0;
+		return 0;
+	}
+	frames = rt.frame.spare[0] > 1048576.0f ? 1048576u : (uint32_t)rt.frame.spare[0];
+	generation = rt.frame.spare[1] >= 0.0f && rt.frame.spare[1] < 16777216.0f ? (uint32_t)rt.frame.spare[1] : 0u;
+	/* (a new request, or the level's triangles built again: summed again) */
+	if (!rt.reference_seen || generation != rt.reference_generation || frames != rt.reference_frames ||
+		rt.static_generation != rt.reference_static)
+		restart = 1;
+	if (width != rt.reference_width || height != rt.reference_height || !rt.reference_sums.buffer)
+	{
+		if (rt.reference_sums.buffer)
+			garbage_add(&rt.reference_sums, VK_NULL_HANDLE);
+		if (!buffer_make((VkDeviceSize)width * height * 48, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+			VK_BUFFER_USAGE_TRANSFER_SRC_BIT, 0, &rt.reference_sums))
+		{
+			host_logf(HOST_LOG_WARN, "prism rt: debug.pt_reference: no memory for its sums");
+			rt.reference_seen = 0;
+			return 0;
+		}
+		rt.reference_width = width;
+		rt.reference_height = height;
+		restart = 1;
+	}
+	if (rt.reference_seen && !restart)
+	{
+		int row, column;
+
+		for (row = 0; row < 4 && !restart; row++)
+			for (column = 0; column < 4 && !restart; column++)
+				/* (a stopped camera's place and axes move in their last bits from
+				frame to frame, as the observer works them out again: a move is
+				past a ten-thousandth of their size) */
+				if (fabsf(rt.reference_camera[row][column] - pass->camera[row][column]) >
+					1.0e-4f * fmaxf(1.0f, fabsf(rt.reference_camera[row][column])))
+				{
+					host_logf(HOST_LOG_INFO, "prism rt: debug.pt_reference: the camera moved after %u frames (its "
+						"[%d][%d] %g to %g): summed again", rt.reference_count, row, column,
+						(double)rt.reference_camera[row][column], (double)pass->camera[row][column]);
+					restart = 1;
+				}
+	}
+	if (restart)
+	{
+		const char *path = rt.frame.reference_file ? host_pointer(rt.frame.reference_file) : NULL;
+
+		rt.reference_generation = generation;
+		rt.reference_frames = frames;
+		rt.reference_static = rt.static_generation;
+		rt.reference_count = 0;
+		memcpy(rt.reference_camera, pass->camera, sizeof(rt.reference_camera));
+		rt.reference_path[0] = 0;
+		if (path && memchr(path, 0, XGPU_RT_REFERENCE_PATH))
+			snprintf(rt.reference_path, sizeof(rt.reference_path), "%s", path);
+		/* (a copy still waiting is of the sum let go) */
+		rt.reference_serial = 0;
+	}
+	rt.reference_seen = 1;
+	rt.reference_adding = rt.reference_count < rt.reference_frames;
+	if (rt.reference_adding)
+		rt.reference_count++;
+	return 1;
+}
+
+/* the sum's copy written, once the GPU has made it */
+static void reference_collect(void)
+{
+	static const char *const names[] =
+	{
+		"light.R", "light.G", "light.B", "sun.V", "dynamic.R", "dynamic.G", "dynamic.B", "structure.V", "Z",
+		"samples",
+	};
+	struct xgpu_exr_attribute attributes[3];
+	const float *sums = rt.reference_readback.mapped;
+	float *pixels;
+	uint64_t texel, count;
+	char error[256];
+
+	if (!rt.reference_serial || xgpu_vulkan_completed() < rt.reference_serial)
+		return;
+	rt.reference_serial = 0;
+	count = (uint64_t)rt.reference_width * rt.reference_height;
+	if (!sums || !rt.reference_path[0] || !(pixels = malloc((size_t)count * 10 * sizeof(float))))
+	{
+		host_logf(HOST_LOG_WARN, "prism rt: debug.pt_reference: the sum cannot be written%s",
+			rt.reference_path[0] ? "" : " (no file named)");
+		return;
+	}
+	/* (each texel's means: the light less the sun's, the sun's visibility,
+	the dynamic lights' change, the structure's visibility of the sun, the
+	distance, and the samples they are of; 0 where none was summed, the
+	sky's) */
+	for (texel = 0; texel < count; texel++)
+	{
+		const float *s = sums + texel * 12;
+		float *to = pixels + texel * 10, n = s[10];
+		int channel;
+
+		for (channel = 0; channel < 4; channel++)
+		{
+			to[channel] = n > 0.0f ? s[channel] / n : 0.0f;
+			to[4 + channel] = n > 0.0f ? s[4 + channel] / n : 0.0f;
+		}
+		to[8] = n > 0.0f ? s[9] / n : 0.0f;
+		to[9] = n;
+	}
+	attributes[0].name = "prismReferenceFrames";
+	attributes[0].value = (int32_t)rt.reference_frames;
+	attributes[1].name = "prismReferenceBounces";
+	attributes[1].value = XGPU_RT_REFERENCE_BOUNCES;
+	attributes[2].name = "prismReferenceGeneration";
+	attributes[2].value = (int32_t)rt.reference_generation;
+	if (xgpu_exr_write(rt.reference_path, rt.reference_width, rt.reference_height, 10, names, pixels, attributes, 3,
+		error, sizeof(error)))
+		host_logf(HOST_LOG_INFO, "prism rt: debug.pt_reference: %u frames summed, written to %s", rt.reference_frames,
+			rt.reference_path);
+	else
+		host_logf(HOST_LOG_WARN, "prism rt: debug.pt_reference: %s", error);
+	free(pixels);
+}
+
+/* (pathtraced_record, after its passes, on the frame the sum is whole) the
+sums copied for the CPU */
+static void reference_copy(VkCommandBuffer commands)
+{
+	VkDeviceSize bytes = (VkDeviceSize)rt.reference_width * rt.reference_height * 48;
+	VkBufferCopy copy;
+
+	if (!rt.reference_readback.buffer || rt.reference_readback.size < bytes)
+	{
+		if (rt.reference_readback.buffer)
+			garbage_add(&rt.reference_readback, VK_NULL_HANDLE);
+		if (!buffer_make(bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, 1, &rt.reference_readback))
+		{
+			host_logf(HOST_LOG_WARN, "prism rt: debug.pt_reference: no memory to read its sums");
+			return;
+		}
+	}
+	barrier_global(commands, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT,
+		VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+	memset(&copy, 0, sizeof(copy));
+	copy.size = bytes;
+	vkCmdCopyBuffer(commands, rt.reference_sums.buffer, rt.reference_readback.buffer, 1, &copy);
+	barrier_global(commands, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_HOST_BIT,
+		VK_ACCESS_HOST_READ_BIT);
+	rt.reference_serial = xgpu_vulkan_serial();
+}
+
 /* the path tracer's images made (or kept) at the window's size; 0 if they
 cannot be */
 static int pathtraced_images(uint32_t width, uint32_t height)
@@ -2668,15 +2865,15 @@ spatial ones, the last into the image the surfaces read; 0 if the sets
 cannot be had */
 static int pathtraced_record(VkCommandBuffer commands, struct rt_slot *slot, VkAccelerationStructureKHR scene,
 	struct xgpu_vulkan_image *inputs, const struct xgpu_vulkan_range *uniforms, uint32_t uniform_bytes, int gi,
-	uint32_t probes_updated, uint32_t width, uint32_t height)
+	uint32_t probes_updated, uint32_t width, uint32_t height, int reference)
 {
 	/* (the spatial passes by quality: steps 1 to 16 at high and ultra, to 8
 	at medium, to 4 at low; the last writes the surfaces' image, which the
 	pass whose output it is ends in the temporary three either way) */
 	static const uint32_t quality_steps[4] = { 4u, 3u, 5u, 5u };
 	uint32_t steps = quality_steps[rt.frame.quality < 4u ? rt.frame.quality : 0u];
-	VkDescriptorSetLayout layouts[RT_ATROUS_STEPS + 5];
-	VkDescriptorSet sets[RT_ATROUS_STEPS + 5];
+	VkDescriptorSetLayout layouts[RT_ATROUS_STEPS + 6];
+	VkDescriptorSet sets[RT_ATROUS_STEPS + 6];
 	VkDescriptorSetAllocateInfo allocate;
 	VkWriteDescriptorSet writes[128];
 	VkDescriptorImageInfo images[104];
@@ -2693,10 +2890,12 @@ static int pathtraced_record(VkCommandBuffer commands, struct rt_slot *slot, VkA
 	layouts[4] = rt.exposure_layout;
 	for (step = 0; step < RT_ATROUS_STEPS; step++)
 		layouts[5 + step] = rt.atrous_layout;
+	/* (port: debug.pt_reference's sums, its frames alone) */
+	layouts[RT_ATROUS_STEPS + 5] = rt.reference_layout;
 	memset(&allocate, 0, sizeof(allocate));
 	allocate.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
 	allocate.descriptorPool = slot->pool;
-	allocate.descriptorSetCount = RT_ATROUS_STEPS + 5;
+	allocate.descriptorSetCount = RT_ATROUS_STEPS + (reference ? 6 : 5);
 	allocate.pSetLayouts = layouts;
 	if (vkAllocateDescriptorSets(rt.device.device, &allocate, sets) != VK_SUCCESS)
 		return 0;
@@ -2786,11 +2985,29 @@ static int pathtraced_record(VkCommandBuffer commands, struct rt_slot *slot, VkA
 		write_buffer(&writes[count++], sets[5 + step], 10, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, &exposure_buffer);
 		IMAGE(5 + step, 11, rt.pt_state[now][3], rt.nearest, SAMPLED);
 	}
+	if (reference)
+	{
+		VkDescriptorBufferInfo sums;
+		uint32_t set = RT_ATROUS_STEPS + 5;
+
+		memset(&sums, 0, sizeof(sums));
+		sums.buffer = rt.reference_sums.buffer;
+		sums.range = VK_WHOLE_SIZE;
+		IMAGE(set, 0, inputs, rt.nearest, SAMPLED);
+		IMAGE(set, 1, rt.pt_raw[0], rt.nearest, SAMPLED);
+		IMAGE(set, 2, rt.pt_raw[1], rt.nearest, SAMPLED);
+		write_buffer(&writes[count++], sets[set], 3, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, &buffer);
+		write_buffer(&writes[count++], sets[set], 4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, &sums);
+		IMAGE(set, 5, rt.pt_state[now][0], VK_NULL_HANDLE, STORAGE);
+		IMAGE(set, 6, rt.pt_state[now][1], VK_NULL_HANDLE, STORAGE);
+		IMAGE(set, 7, rt.pt_state[now][2], VK_NULL_HANDLE, STORAGE);
+		IMAGE(set, 8, rt.pt_state[now][3], VK_NULL_HANDLE, STORAGE);
+	}
 #undef IMAGE
 #undef SAMPLED
 #undef STORAGE
 	vkUpdateDescriptorSets(rt.device.device, count, writes, 0, NULL);
-	if (gi && probes_updated)
+	if (gi && probes_updated && !reference)
 	{
 		vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.probes);
 		vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.probes_pipeline_layout, 0, 1, &sets[0], 0,
@@ -2799,36 +3016,58 @@ static int pathtraced_record(VkCommandBuffer commands, struct rt_slot *slot, VkA
 		compute_barrier(commands);
 		rt.probe_frame++;
 	}
-	if (!rt.cache_zeroed)
+	/* (debug.pt_reference: the paths while the sum is not whole, its pass in
+	the temporal pass's place; no radiance cache) */
+	if (reference)
 	{
-		vkCmdFillBuffer(commands, rt.cache_buffer.buffer, 0, VK_WHOLE_SIZE, 0);
-		barrier_global(commands, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
-			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
-		rt.cache_zeroed = 1;
-	}
-	vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.path);
-	vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.path_pipeline_layout, 0, 1, &sets[1], 0, NULL);
-	vkCmdDispatch(commands, (width + 7) / 8, (height + 7) / 8, 1);
-	compute_barrier(commands);
-	/* the radiance cache's resolve: this frame's sums into its cells' light */
-	{
-		uint32_t cache_push[4];
-
-		cache_push[0] = (uint32_t)rt.cache_buffer.address;
-		cache_push[1] = (uint32_t)(rt.cache_buffer.address >> 32);
-		cache_push[2] = rt.frame.frame;
-		cache_push[3] = RT_CACHE_ENTRIES;
-		vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.cache_resolve);
-		vkCmdPushConstants(commands, rt.cache_resolve_layout_pipeline, VK_SHADER_STAGE_COMPUTE_BIT, 0,
-			sizeof(cache_push), cache_push);
-		vkCmdDispatch(commands, RT_CACHE_ENTRIES / 64u, 1, 1);
+		if (rt.reference_adding)
+		{
+			vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.path);
+			vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.path_pipeline_layout, 0, 1, &sets[1],
+				0, NULL);
+			vkCmdDispatch(commands, (width + 7) / 8, (height + 7) / 8, 1);
+			compute_barrier(commands);
+		}
+		vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.reference);
+		vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.reference_pipeline_layout, 0, 1,
+			&sets[RT_ATROUS_STEPS + 5], 0, NULL);
+		vkCmdDispatch(commands, (width + 7) / 8, (height + 7) / 8, 1);
 		compute_barrier(commands);
 	}
-	vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.accumulate);
-	vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.accumulate_pipeline_layout, 0, 1, &sets[2], 0,
-		NULL);
-	vkCmdDispatch(commands, (width + 7) / 8, (height + 7) / 8, 1);
-	compute_barrier(commands);
+	else
+	{
+		if (!rt.cache_zeroed)
+		{
+			vkCmdFillBuffer(commands, rt.cache_buffer.buffer, 0, VK_WHOLE_SIZE, 0);
+			barrier_global(commands, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
+				VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+			rt.cache_zeroed = 1;
+		}
+		vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.path);
+		vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.path_pipeline_layout, 0, 1, &sets[1], 0,
+			NULL);
+		vkCmdDispatch(commands, (width + 7) / 8, (height + 7) / 8, 1);
+		compute_barrier(commands);
+		/* the radiance cache's resolve: this frame's sums into its cells' light */
+		{
+			uint32_t cache_push[4];
+
+			cache_push[0] = (uint32_t)rt.cache_buffer.address;
+			cache_push[1] = (uint32_t)(rt.cache_buffer.address >> 32);
+			cache_push[2] = rt.frame.frame;
+			cache_push[3] = RT_CACHE_ENTRIES;
+			vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.cache_resolve);
+			vkCmdPushConstants(commands, rt.cache_resolve_layout_pipeline, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+				sizeof(cache_push), cache_push);
+			vkCmdDispatch(commands, RT_CACHE_ENTRIES / 64u, 1, 1);
+			compute_barrier(commands);
+		}
+		vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.accumulate);
+		vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.accumulate_pipeline_layout, 0, 1,
+			&sets[2], 0, NULL);
+		vkCmdDispatch(commands, (width + 7) / 8, (height + 7) / 8, 1);
+		compute_barrier(commands);
+	}
 	vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.tiles);
 	vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.tiles_pipeline_layout, 0, 1, &sets[3], 0,
 		NULL);
@@ -2850,6 +3089,8 @@ static int pathtraced_record(VkCommandBuffer commands, struct rt_slot *slot, VkA
 		vkCmdDispatch(commands, (width + 7) / 8, (height + 7) / 8, 1);
 		compute_barrier(commands);
 	}
+	if (reference && rt.reference_adding && rt.reference_count == rt.reference_frames)
+		reference_copy(commands);
 	return 1;
 }
 
@@ -2874,7 +3115,7 @@ struct xgpu_vulkan_image *xgpu_vulkan_rt_window_end(struct xgpu_vulkan_image *in
 	VkCommandBuffer commands;
 	struct xgpu_vulkan_image *history, *state;
 	uint32_t scale, out_width, out_height, quality, probes_updated = 0;
-	int gi, pathtraced;
+	int gi, pathtraced, reference = 0;
 	void *bytes;
 
 	if (!rt.capture.open || !xgpu_vulkan_rt_active() || !inputs)
@@ -2893,6 +3134,7 @@ struct xgpu_vulkan_image *xgpu_vulkan_rt_window_end(struct xgpu_vulkan_image *in
 	{
 		if (!pathtraced_images(out_width, out_height))
 			return NULL;
+		reference = reference_take(pass, out_width, out_height);
 	}
 	else
 	{
@@ -3123,6 +3365,27 @@ whether the surfaces read the traced light in "shadows" and "gi" */
 			(double)block.sky[2], (double)block.sun_radiance[0], (double)block.sun_radiance[1],
 			(double)block.sun_radiance[2]);
 	}
+	/* (debug.pt_reference: the paths unbiased, XGPU_RT_REFERENCE_BOUNCES
+	bounces of one path a pixel ending in nothing (no radiance cache, no
+	probes, every pixel traced, no reservoir reused, no denoiser), seeded by
+	the frame's number in the sum and the exposure's clock a 60th of a second
+	a frame, so that every run sums the same) */
+	if (reference)
+	{
+		block.info[0] = rt.reference_count;
+		block.info[1] = 2u;
+		block.info[2] = 0u;
+		block.pt[0] = (float)XGPU_RT_REFERENCE_BOUNCES;
+		block.pt[1] = 1.0f;
+		block.pt2[3] = fabsf(block.pt2[3]);
+		block.grid_size[3] = 0;
+		block.rig[14][0] = 1.0f / 60.0f;
+		block.reference[0] = 1.0f;
+		block.reference[1] = (float)rt.reference_count;
+		block.reference[2] = (float)rt.reference_frames;
+		block.reference[3] = rt.reference_adding ? 1.0f : 0.0f;
+		probes_updated = 0;
+	}
 	bytes = xgpu_vulkan_upload(sizeof(block), 256, &uniforms);
 	if (!bytes)
 		return NULL;
@@ -3201,7 +3464,7 @@ whether the surfaces read the traced light in "shadows" and "gi" */
 	if (pathtraced)
 	{
 		if (!pathtraced_record(commands, slot, scene, inputs, &uniforms, sizeof(block), gi, probes_updated, out_width,
-			out_height))
+			out_height, reference))
 			return NULL;
 		barrier_global(commands, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT,
 			VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT);

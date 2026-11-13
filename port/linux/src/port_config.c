@@ -2796,6 +2796,17 @@ static const struct config_setting config_settings[] =
 		"\"visibility\" the sun's (white lit, black in a shadow), \"ao\" the\n"
 		"traced ambient occlusion, \"gi\" the bounced light, \"normals\", \"heat\"\n"
 		"(the rays' cost); \"off\" the game. For checking." },
+	{ "debug.pt_reference", _config_integer, "0", "HALO_PT_REFERENCE", _environment_value, _platform_desktop,
+		"With display.prism_rt \"pathtraced\", a converged reference for the\n"
+		"quality gates (docs/prism_v4.md): the path tracer unbiased (no reuse,\n"
+		"no cache, no denoiser, up to 8 bounces), its samples summed over this\n"
+		"many frames with the camera and the game stopped (game_speed 0; the sum\n"
+		"starts again where either moves), then written once as a linear\n"
+		"OpenEXR file (debug.pt_reference_file) and held on screen; 0 none." },
+	{ "debug.pt_reference_file", _config_string, "\"\"", "HALO_PT_REFERENCE_FILE", _environment_value,
+		_platform_desktop,
+		"The file debug.pt_reference writes (its folder made if missing);\n"
+		"empty: the data folder's pt_reference/<map>_<n>.exr." },
 	{ "debug.crack_view", _config_boolean, "false", "HALO_CRACK_VIEW", _environment_value, _platform_all,
 		"true draws no sky and clears the window to magenta, so that a hole\n"
 		"or crack between surfaces (or in a model) shows as magenta pixels: for\n"

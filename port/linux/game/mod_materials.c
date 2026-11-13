@@ -2100,7 +2100,8 @@ void mod_materials_prism_set(
 	{
 		console_warning("prism_set \"<setting> <value>\": material_overlay, overlay_strength, overlay_view, surface_maps, "
 			"specular, reflections, shadows, lightmaps, lightmap_upsample, baked_shadows, bloom, world_geometry, tone, "
-			"materials, rt, rt_quality, rt_resolution, rt_denoiser, rt_mood, rt_view, or a whole display.<name>");
+			"materials, rt, rt_quality, rt_resolution, rt_denoiser, rt_mood, rt_view, pt_reference, pt_reference_file, "
+			"or a whole display.<name>");
 		return;
 	}
 	/* (display.prism_rt's debug view: debug.prism_rt_view; a whole name,
@@ -2108,6 +2109,11 @@ void mod_materials_prism_set(
 	them together on one stopped frame): as it is) */
 	if (space - text == 7 && !strncmp(text, "rt_view", 7))
 		snprintf(name, sizeof(name), "debug.prism_rt_view");
+	/* (debug.pt_reference and its file: the path tracer's reference) */
+	else if (space - text == 12 && !strncmp(text, "pt_reference", 12))
+		snprintf(name, sizeof(name), "debug.pt_reference");
+	else if (space - text == 17 && !strncmp(text, "pt_reference_file", 17))
+		snprintf(name, sizeof(name), "debug.pt_reference_file");
 	else if (memchr(text, '.', (size_t)(space - text)))
 		snprintf(name, sizeof(name), "%.*s", (int)(space - text), text);
 	else
