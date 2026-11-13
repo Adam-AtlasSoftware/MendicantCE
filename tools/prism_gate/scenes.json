@@ -3,6 +3,7 @@
  "about": "PRISM's frozen capture set (docs/prism_gates.md; PRISM v4 design 9.0). Poses: x y z yaw pitch roll field of view (world units, degrees). G1-G7 are the path tracer's gate scenes (pt_runs/scripts/gate2.py), their keys as they were checked there. Change a scene only with a note in docs/prism_gates.md: every milestone's figures are measured on these.",
  "defaults": {
   "start": 0,
+  "start_tick": 600,
   "bsp": null,
   "live": false,
   "steps": 40,

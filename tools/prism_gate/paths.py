@@ -43,6 +43,7 @@ class Timeline:
         self.frame = 0
         self.keys = {}
         self.commands = []
+        self.tick_commands = []
         self.saves = {}
 
     def at(self, *commands):
@@ -51,6 +52,15 @@ class Timeline:
             if len(command) >= 128 or "\n" in command:
                 raise ValueError(f"a path's command is one line under 128 bytes: {command!r}")
             self.commands.append((self.frame, command))
+
+    def at_tick(self, ticks, *commands):
+        """console commands run once the game's clock has run `ticks` ticks since the path started (camera_pose.c's
+        tick lines): a command that changes the game (game_speed 0, ai_erase_all) falls in the same tick every run,
+        though a frame need not take a step of the clock"""
+        for command in commands:
+            if len(command) >= 128 or "\n" in command:
+                raise ValueError(f"a path's command is one line under 128 bytes: {command!r}")
+            self.tick_commands.append((ticks, command))
 
     def hold(self, pose, frames, save=None):
         """the camera at a pose for `frames` frames from the current one; the last of them saved as `save`"""
@@ -72,14 +82,18 @@ class Timeline:
             raise ValueError("a wait before any pose")
         self.hold(self.keys[max(self.keys)], frames)
 
-    def text(self, start_frames=0):
-        """the path file: its start, its commands (in order) and its keys"""
+    def text(self, start_frames=0, save_lines=True, start_tick=0):
+        """the path file: its start, its commands (in order), its keys and (save_lines) the frames it saves; without
+        them every frame of the path is saved, as a build before save lines saves them; start_tick: the path starts
+        once the game's clock has run that many ticks"""
         if not self.keys:
             raise ValueError("a path with no pose")
-        lines = [f"start {start_frames}"]
+        lines = [f"start {start_frames}"] + ([f"start_tick {start_tick}"] if start_tick else [])
         lines += [f"at {frame} {command}" for frame, command in self.commands]
+        lines += [f"tick {ticks} {command}" for ticks, command in self.tick_commands]
         lines += [f"key {frame} {pose_text(pose)}" for frame, pose in sorted(self.keys.items())]
-        lines += [f"save {frame}" for frame in sorted(self.saves)]
+        if save_lines:
+            lines += [f"save {frame}" for frame in sorted(self.saves)]
         return "\n".join(lines) + "\n"
 
     @property

@@ -39,7 +39,8 @@ def measure_scene(scene, folder, limits):
     for index, step in enumerate(capture.probe_steps(scene)):
         ref = metrics.load(refs / f"p{index}_ref.png")
         moving = metrics.load(moves / f"m_pathtraced_{step:03d}.png")
-        keep = metrics.keep_mask(metrics.load(moves / f"m_off_{step:03d}.png"), metrics.load(refs / f"p{index}_off.png"))
+        keep = metrics.keep_mask(metrics.load(moves / f"m_off_{step:03d}.png"),
+                                 metrics.load(refs / f"p{index}_off.png"))
         errors.append(metrics.rel_mse(moving, ref, keep))
         blotches.append(metrics.blotch(moving, ref, keep))
         flip_map = flip.flip_map(ref, moving)

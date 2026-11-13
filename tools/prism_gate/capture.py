@@ -14,10 +14,11 @@ the path tracer's converged reference (debug.pt_reference, `reference_frames` fr
 it holds).
 
 The harness's rules come first, at the path's frame 0: the console's lines and the HUD off, the player deathless,
-the weather off, the AI erased (not in a live scene); then the game runs `settle` frames with the camera at the
-first key (a level's opening plays out: the director takes the path's camera only once it has, and only in a tick;
-projectiles land, a hit's flash fades) and is stopped (game_speed 0; a live scene's runs on). Every capture writes manifest.json: each frame's SHA-256 (of its
-pixels) and the files' list, which `gate.py repro` compares between two runs.
+the weather off, the particles not drawn, the AI erased (not in a live scene, and again every 60 ticks); then the
+game runs with the camera at the first key (a level's opening plays out: the director takes the path's camera only
+once it has, and only in a tick; projectiles land, a hit's flash fades) and is stopped by its clock, at the same tick
+every run (game_speed 0; a live scene's runs on), `settle` frames in all. Every capture writes
+manifest.json: each frame's SHA-256 (of its pixels), which `gate.py repro` compares between two runs.
 """
 import argparse
 import json
@@ -30,7 +31,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from prism_gate import game, paths  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
-RULES = ("terminal_render 0", "show_hud 0", "show_hud_help_text 0", "cinematic_show_letterbox 0", "cheat_deathless_player 1", "weather 0")
+# (the particles, their systems, the weather's and the contrails not drawn: they move frame by frame while the game
+# is stopped, by the frames' own randomness, which differs from run to run; and they are not the light's)
+RULES = ("terminal_render 0", "show_hud 0", "show_hud_help_text 0", "cinematic_show_letterbox 0",
+         "cheat_deathless_player 1", "weather 0", "render_particles 0", "render_psystems 0", "render_wsystems 0",
+         "render_contrails 0")
 STATES = {
     "off": ('prism_set "rt off"',),
     "pathtraced": ('prism_set "rt pathtraced"', 'prism_set "rt_style faithful"',
@@ -56,7 +61,9 @@ def probe_steps(scene):
     return [max(1, int(total * q)) for q in scene["probes"]]
 
 
-def begin(scene):
+def begin(scene, by_tick=True):
+    """the path's start: the harness's rules, the settle and the stop (by_tick False: by the path's frames, for a
+    build before the path's tick lines: identity.py's stills)"""
     t = paths.Timeline()
     t.at(*RULES)
     if not scene.get("live"):
@@ -64,9 +71,21 @@ def begin(scene):
     if scene.get("bsp") is not None:
         t.at(f"switch_bsp {scene['bsp']}")
     t.at(*scene.get("setup", []))
+    if scene.get("live"):
+        t.hold(scene["keys"][0], scene["settle"])
+        return t
+    # (by the game's clock, not the path's frames, which need not each take a step of it: the AI erased again
+    # every 60 ticks (a level's script places its AI as its opening ends; AI left to play parts from run to run),
+    # and the game stopped at the same tick every run, a second (60 frames at most) before the settle ends)
+    stop = (scene["settle"] - 60) // 2
+    if not by_tick:
+        t.hold(scene["keys"][0], scene["settle"])
+        t.at("ai_erase_all", "game_speed 0")
+        return t
+    for ticks in range(60, stop, 60):
+        t.at_tick(ticks, "ai_erase_all")
+    t.at_tick(stop, "ai_erase_all", "game_speed 0")
     t.hold(scene["keys"][0], scene["settle"])
-    if not scene.get("live"):
-        t.at("game_speed 0")
     return t
 
 
@@ -110,10 +129,11 @@ def run(scene, timeline, out, kind, args):
     for folder in ("moves", "refs"):
         (out / folder).mkdir(exist_ok=True)
     started = time.time()
-    env = {}
+    env = dict(kv.split("=", 1) for kv in args.env)
     if scene.get("input"):
         env["HALO_TEST_INPUT"] = scene["input"]
-    r = game.Run(args.stage, args.data, out / f"run_{kind}", scene["map"], timeline.text(scene["start"]),
+    r = game.Run(args.stage, args.data, out / f"run_{kind}", scene["map"],
+                 timeline.text(scene["start"], start_tick=scene["start_tick"]),
                  timeline.saves, config=args.config, env=env, device=args.device)
     hashes = r.wait(args.timeout)
     work = out / f"run_{kind}"
@@ -136,10 +156,10 @@ def capture(scene, what, args):
     out = Path(args.out) / scene["id"]
     if what in ("moves", "all"):
         if scene.get("live"):
-            for state in STATES:
+            for state in args.states:
                 run(scene, moves_timeline(scene, [state]), out, f"moves_{state}", args)
         else:
-            run(scene, moves_timeline(scene, list(STATES)), out, "moves", args)
+            run(scene, moves_timeline(scene, args.states), out, "moves", args)
     if what in ("refs", "all"):
         run(scene, refs_timeline(scene, args.reference_frames or scene["reference_frames"]), out, "refs", args)
 
@@ -158,6 +178,8 @@ def main():
                         "scene's)")
     parser.add_argument("--timeout", type=float, default=7200)
     parser.add_argument("--keep", action="store_true", help="keep each run's folder")
+    parser.add_argument("--states", nargs="+", default=list(STATES), choices=list(STATES), help="moves' states")
+    parser.add_argument("--env", action="append", default=[], help="K=V given to the game (diagnostics)")
     args = parser.parse_args()
     scenes = load_scenes()
     for scene_id in args.scenes or list(scenes):

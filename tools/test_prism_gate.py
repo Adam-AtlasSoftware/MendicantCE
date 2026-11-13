@@ -124,7 +124,8 @@ def test_flip_colour_shift_counts():
 # ---------- OpenEXR
 
 def test_exr_round_trip(work):
-    channels = {"light.R": np.random.default_rng(10).random((7, 5)).astype(np.float32), "Z": np.arange(35.0).reshape(7, 5)}
+    channels = {"light.R": np.random.default_rng(10).random((7, 5)).astype(np.float32),
+                "Z": np.arange(35.0).reshape(7, 5)}
     exr.write(work / "a.exr", channels, {"prismReferenceFrames": 64})
     read, attributes = exr.read(work / "a.exr")
     assert attributes["prismReferenceFrames"] == 64
@@ -223,11 +224,13 @@ def test_every_capture_fits_the_game_and_holds_its_poses(scene_id):
     refs = capture.refs_timeline(scene, scene["reference_frames"])
     poses = paths.move_poses(scene["keys"], scene["steps"])
     for t in (moves, refs):
-        text = t.text(scene["start"])
-        assert len(t.commands) <= path_capacity("MAXIMUM_PATH_COMMANDS")
+        text = t.text(scene["start"], start_tick=scene["start_tick"])
+        assert f"start_tick {scene['start_tick']}" in text
+        assert len(t.commands) + len(t.tick_commands) <= path_capacity("MAXIMUM_PATH_COMMANDS")
         assert len(t.keys) <= path_capacity("MAXIMUM_PATH_KEYS")
         assert len(t.saves) <= path_capacity("MAXIMUM_PATH_SAVES")
-        assert all(len(c) < 128 for _, c in t.commands)
+        assert all(len(c) < 128 for _, c in t.commands + t.tick_commands)
+        assert "game_speed 0" in [c for _, c in t.tick_commands]
         keys = paths.read_keys(text)
         for frame, name in t.saves.items():
             if name.startswith("moves/"):
@@ -242,6 +245,15 @@ def test_every_capture_fits_the_game_and_holds_its_poses(scene_id):
                 assert got == pytest.approx(expected, abs=2e-3), (name, f)
     assert len([n for n in moves.saves.values() if n.startswith("moves/")]) == len(capture.STATES) * len(poses)
     assert sorted(refs.saves.values()) == sorted(f"refs/p{i}_{k}.png" for i in range(3) for k in ("off", "ref"))
+
+
+def test_the_stills_path_reads_in_an_older_build():
+    scene = capture.load_scenes()["G2"]
+    t = capture.begin(scene, by_tick=False)
+    t.hold(scene["keys"][1], 30, save="x")
+    text = t.text(scene["start"], save_lines=False)
+    assert "tick" not in text and "save" not in text and "game_speed 0" in text
+    assert len(t.commands) <= 16 and len(t.keys) <= 256
 
 
 def test_the_capture_set_is_frozen_as_the_design_names_it():

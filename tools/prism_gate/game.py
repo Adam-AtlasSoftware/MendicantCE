@@ -7,8 +7,8 @@ debug.fixed_step) and interpolation off, so that a path's frames are the same in
     run = Run(stage, data, work, "b30", timeline.text(), timeline.saves, config=..., env={...})
     run.wait(timeout)   # the frames saved (by the path's frame) written as PNG; raises if the game failed
 
-A game that exits before the path's saved frames have all come, or a pipe that gives fewer, is a failure. Before every run the kit's game is checked for (kit_running): a run never starts
-while the person this works for is playing.
+A game that exits before the path's saved frames have all come, or a pipe that gives fewer, is a failure. Before every
+run the kit's game is checked for (kit_running): a run never starts while the person this works for is playing.
 """
 import ctypes
 import hashlib
@@ -61,8 +61,10 @@ def isolated_environment(work, data):
         "HALO_NET_BROKERS_FILE": str(data / "brokers.txt"), "HALO_NET_RELAYS_FILE": str(data / "relays.txt"),
         "HALO_NET_MASTERS_FILE": str(data / "masters.txt"), "HALO_NET_BROADCAST": "127.255.255.255",
         "HALO_NET_ADDRESS": "127.0.0.77", "HALO_DISCORD_APPLICATION": "", "HALO_CRASH_REPORTS": "no",
-        "HALO_SKIP_CINEMATICS": "1", "HALO_FIXED_STEP": "1", "HALO_INTERPOLATION": "false", "HALO_MAX_FPS": "-1",
-        "HALO_MAP_CACHE_MEGABYTES": "730", "HALO_PRISM_OVERLAY_VIEW": "0", "HALO_PANINI": "0",
+        # (the clock a tick a frame at the game's own 30 a second, interpolation off; MENDICANT AI's models off,
+        # whose decisions part from run to run)
+        "HALO_SKIP_CINEMATICS": "1", "HALO_FIXED_STEP": "1", "HALO_INTERPOLATION": "false", "HALO_SIM_RATE": "30",
+        "HALO_AI_MENDICANT": "false", "HALO_MAX_FPS": "-1", "HALO_MAP_CACHE_MEGABYTES": "730", "HALO_PRISM_OVERLAY_VIEW": "0", "HALO_PANINI": "0",
     }
 
 
@@ -92,7 +94,7 @@ class Run:
     started on a map with a camera path; the wanted frames of the stream saved as they come"""
 
     def __init__(self, stage, data_source, work, game_map, path_text, wanted, config=None, env=None, width=1920,
-                 height=1080, device=None, keep_every=None):
+                 height=1080, device=None, every_frame=False):
         pid = kit_running()
         if pid:
             raise SystemExit(f"stopped: the kit's game is running (pid {pid}); no game is run while it is")
@@ -110,8 +112,10 @@ class Run:
         (self.data / "init.txt").write_text(f"map_name {game_map}\n")
         (self.work / "path.txt").write_text(path_text)
         self.width, self.height = width, height
-        # (the stream has the path's saved frames alone, in order: its n-th is the n-th of them)
-        self.wanted = {index: wanted[frame] for index, frame in enumerate(sorted(wanted))}
+        # (the stream has the path's saved frames alone, in order: its n-th is the n-th of them; or, every_frame (a
+        # path without save lines), every frame of the path: its n-th is the path's n-th)
+        self.wanted = dict(wanted) if every_frame else {index: wanted[frame] for index, frame in
+                                                         enumerate(sorted(wanted))}
         self.saved = {}
         self.hashes = {}
         self.count = 0
@@ -161,7 +165,7 @@ class Run:
     def wait(self, timeout):
         """the run waited for until the path's saved frames have come (then the game is stopped) or it exits; the
         saved frames' hashes by name"""
-        frames = len(self.wanted)
+        frames = max(self.wanted) + 1 if self.wanted else 0
         end = time.time() + timeout
         try:
             while self.count < frames:

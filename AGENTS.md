@@ -215,6 +215,10 @@ python -m pytest -q tools/test_host_pages.py tools/test_android_elf_alignment.py
 python -m pytest -q tools/test_guest_branch_relax.py       # the guests' conditional branches relaxed once the base register puts them out of reach
 python -m pytest -q tools/test_macos_metal.py               # the Metal backend (ninja macos_metal_test first)
 python -m pytest -q tools/test_metal_post_shaders.py        # the Metal backend's anti-aliasing passes (tools/metal_post_shaders.py)
+python -m pytest -q tools/test_prism_gate.py tools/test_prism_plugin.py tools/test_scene_records.py tools/test_prism_rt_glsl.py
+                                                            # PRISM's gates' metrics and captures' paths, the plugin ABI, the scene records, the RT GLSL generated
+python3 tools/prism_gate/capture.py all --stage <tree> --data <game data> --config <toml> --out <dir>
+                                                            # PRISM's frozen capture set and its references (docs/prism_gates.md; local only)
 python -m pytest -q tools/test_hdr.py                       # display.hdr's contract: the draws' classification, the reference curves (docs/hdr.md)
 python -m pytest -q tools/test_hdr_backends.py              # display.hdr across the backends: Vulkan's shaders (via SPIRV-Cross) on a Mac's GPU against the reference and Metal's
 python -m pytest -q tools/test_macos_app.py                 # the macOS app's Info.plist, entitlements, signature
@@ -428,3 +432,6 @@ The decompilation's upstream, punpckhdq/halo, is AGPL 3.0 from 17 October
 | [CREDITS.md](CREDITS.md) | Code taken from community projects: where from, by whom, under what licence |
 | [docs/forge_mvar.md](docs/forge_mvar.md) | Forge's map variant files (`.mvar`) |
 | [docs/prism_rigs.md](docs/prism_rigs.md) | PRISM's extended skeletons: helper bones, rigs, springs on the game's clock, the Blender export |
+| [docs/prism_gates.md](docs/prism_gates.md) | PRISM's quality gates: the frozen capture set, the harness, `debug.pt_reference`, the metrics and thresholds, the checks every milestone passes |
+| [docs/prism_plugin.md](docs/prism_plugin.md) | PRISM's renderer plugin interface (`prism_plugin.h`, MIT or AGPL), the passthrough plugin, the loader |
+| [docs/prism_scene_records.md](docs/prism_scene_records.md) | PRISM v4's scene records in the command stream (specified, not yet sent) |
