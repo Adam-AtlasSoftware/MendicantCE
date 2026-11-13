@@ -2501,6 +2501,11 @@ static int pathtraced_record(VkCommandBuffer commands, struct rt_slot *slot, VkA
 	struct xgpu_vulkan_image *inputs, const struct xgpu_vulkan_range *uniforms, uint32_t uniform_bytes, int gi,
 	uint32_t probes_updated, uint32_t width, uint32_t height)
 {
+	/* (the spatial passes by quality: steps 1 to 16 at high and ultra, to 8
+	at medium, to 4 at low; the last writes the surfaces' image, which the
+	pass whose output it is ends in the temporary three either way) */
+	static const uint32_t quality_steps[4] = { 4u, 3u, 5u, 5u };
+	uint32_t steps = quality_steps[rt.frame.quality < 4u ? rt.frame.quality : 0u];
 	VkDescriptorSetLayout layouts[RT_ATROUS_STEPS + 5];
 	VkDescriptorSet sets[RT_ATROUS_STEPS + 5];
 	VkDescriptorSetAllocateInfo allocate;
@@ -2642,10 +2647,10 @@ static int pathtraced_record(VkCommandBuffer commands, struct rt_slot *slot, VkA
 	vkCmdDispatch(commands, 1, 1, 1);
 	compute_barrier(commands);
 	vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.atrous);
-	for (step = 0; step < RT_ATROUS_STEPS; step++)
+	for (step = 0; step < steps; step++)
 	{
 		push[0] = 1 << step;
-		push[1] = step == RT_ATROUS_STEPS - 1;
+		push[1] = step == steps - 1;
 		vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.atrous_pipeline_layout, 0, 1,
 			&sets[5 + step], 0, NULL);
 		vkCmdPushConstants(commands, rt.atrous_pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), push);
@@ -2752,7 +2757,7 @@ structure's and the objects' visibility of the sun as they are) */
 		uint32_t light, count = rt.frame.light_count < XGPU_STREAM_RT_LIGHTS ? rt.frame.light_count :
 			XGPU_STREAM_RT_LIGHTS;
 
-		static const float lamp_candidates[4] = { 4.0f, 2.0f, 6.0f, 8.0f };
+		static const float lamp_candidates[4] = { 8.0f, 4.0f, 12.0f, 16.0f };
 		float setting_bounces = rt.frame.rig[XGPU_RT_RIG_SETTINGS + XGPU_RT_SETTING_BOUNCES];
 
 		/* (display.prism_rt_bounces: 1 to 4, 0 by quality) */
