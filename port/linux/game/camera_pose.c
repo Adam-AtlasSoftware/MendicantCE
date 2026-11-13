@@ -19,6 +19,7 @@ script's camera; the HUD is show_hud's.
 #include "objects/objects.h"
 #include "tag_files/tag_groups.h"
 #include "units/units.h"
+#include "game/game.h"
 #include "game/players.h"
 #include "ai/ai_scenario_definitions.h"
 #include "cache/cache_files.h"
@@ -101,15 +102,26 @@ A file of the camera's poses at frames, for a test that drives the camera
 the same way each run: a frame-numbered path, not a timed one, so that two
 builds draw the same poses in the same frames whatever their frame rates.
 
-  start <frames>     the game's frames drawn after the map's first (and
-                     after a cinematic: debug.skip_cinematics skips them)
-                     before the path starts (default 0)
+  start <frames>     the game's frames drawn after its clock's first tick
+                     on the map (and after a cinematic:
+                     debug.skip_cinematics skips them) before the path
+                     starts (default 0)
+  start_tick <ticks> the path starts at the first frame once the game's
+                     clock has run that many ticks on the map (and no
+                     cinematic plays): the same tick every run, which a
+                     count of frames is not where a frame need not take a
+                     step of the clock
   cmd <command>      a console command run as the path starts (show_hud 0),
                      in order
   at <frame> <command>
                      one run at a frame of the path (game_speed 0 a few
                      frames in: the director takes the script's camera in
                      a step of the game's)
+  tick <ticks> <command>
+                     one run at the first frame once the game's clock has
+                     run that many ticks since the path started (a frame
+                     need not take a step of the clock: game_speed 0 by
+                     the clock stops the game at the same tick every run)
   key <frame> <x> <y> <z> <yaw> <pitch> <roll> <field of view>
                      a pose at a frame of the path (frames in order; world
                      units, degrees)
@@ -139,10 +151,13 @@ struct camera_path_key
 static struct
 {
 	boolean read, running, done;
-	long start_frames, frames_seen, frame;
+	long start_frames, frames_seen, frame, start_ticks;
 	long key_count, command_count;
 	struct camera_path_key keys[MAXIMUM_PATH_KEYS];
 	long command_frames[MAXIMUM_PATH_COMMANDS];
+	/* (a tick line's: its ticks, run once; the clock as the path started) */
+	boolean command_by_tick[MAXIMUM_PATH_COMMANDS], command_run[MAXIMUM_PATH_COMMANDS];
+	long start_tick;
 	char commands[MAXIMUM_PATH_COMMANDS][128];
 	/* the frames saved (none: every one), in order, and the next to come */
 	long save_count, save_next;
@@ -198,19 +213,25 @@ static void camera_path_read(void)
 		{
 			camera_path.start_frames = atol(line + 6);
 		}
+		else if (strncmp(line, "start_tick ", 11) == 0)
+		{
+			camera_path.start_ticks = atol(line + 11);
+		}
 		else if (strncmp(line, "cmd ", 4) == 0 && camera_path.command_count < MAXIMUM_PATH_COMMANDS &&
 			length - 4 < sizeof(camera_path.commands[0]))
 		{
 			camera_path.command_frames[camera_path.command_count] = 0;
 			strcpy(camera_path.commands[camera_path.command_count++], line + 4);
 		}
-		else if (strncmp(line, "at ", 3) == 0 && camera_path.command_count < MAXIMUM_PATH_COMMANDS)
+		else if ((strncmp(line, "at ", 3) == 0 || strncmp(line, "tick ", 5) == 0) &&
+			camera_path.command_count < MAXIMUM_PATH_COMMANDS)
 		{
-			char *command = strchr(line + 3, ' ');
+			char *command = strchr(line + (line[0] == 't' ? 5 : 3), ' ');
 
 			if (command && strlen(command + 1) < sizeof(camera_path.commands[0]))
 			{
-				camera_path.command_frames[camera_path.command_count] = atol(line + 3);
+				camera_path.command_by_tick[camera_path.command_count] = line[0] == 't';
+				camera_path.command_frames[camera_path.command_count] = atol(line + (line[0] == 't' ? 5 : 3));
 				strcpy(camera_path.commands[camera_path.command_count++], command + 1);
 			}
 		}
@@ -292,12 +313,17 @@ void camera_path_frame(void)
 	{
 		return;
 	}
-	if (!global_scenario_try_and_get() || (!camera_path.running && cinematic_in_progress()))
+	/* (counted from the game's first tick, not its first frame with the map:
+	the frames drawn before its clock starts are as many as the loading
+	takes, and a command at a frame of the path would fall in another tick
+	in each run) */
+	if (!global_scenario_try_and_get() || (!camera_path.running && (cinematic_in_progress() || game_time_get() <= 0)))
 	{
 		camera_path.frames_seen = 0;
 		return;
 	}
-	if (camera_path.frames_seen++ < camera_path.start_frames)
+	if (camera_path.frames_seen++ < camera_path.start_frames ||
+		(!camera_path.running && game_time_get() < camera_path.start_ticks))
 	{
 		return;
 	}
@@ -305,6 +331,10 @@ void camera_path_frame(void)
 	{
 		camera_path.running = TRUE;
 		camera_path.frame = 0;
+		/* (the frames' randomness from here the same in every run: the
+		loading's frames took it as many times as the loading took) */
+		random_math_port_set_frame_seed(0x70617468UL);
+		camera_path.start_tick = game_time_get();
 		platform_log("camera path: started");
 	}
 	else if (++camera_path.frame > camera_path.keys[camera_path.key_count - 1].frame)
@@ -321,8 +351,11 @@ void camera_path_frame(void)
 	}
 	for (i = 0; i < camera_path.command_count; i++)
 	{
-		if (camera_path.command_frames[i] == camera_path.frame)
+		if (camera_path.command_by_tick[i] ? !camera_path.command_run[i] &&
+			game_time_get() - camera_path.start_tick >= camera_path.command_frames[i] :
+			camera_path.command_frames[i] == camera_path.frame)
 		{
+			camera_path.command_run[i] = TRUE;
 			hs_compile_and_evaluate(camera_path.commands[i]);
 		}
 	}

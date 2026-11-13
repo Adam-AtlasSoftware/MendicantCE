@@ -181,6 +181,16 @@ void random_math_port_set_local_seeds(
 	frame_local_random_seed= ~seed;
 }
 
+/* port: the frames' local seed alone set (debug.camera_path, as its path
+starts: the frames drawn before it, the loading's, take it as many times as
+the loading takes, and what is drawn by it (particles, a light's flicker)
+would differ from run to run; the game's own seeds are left as they are) */
+void random_math_port_set_frame_seed(
+	unsigned long seed)
+{
+	frame_local_random_seed= seed;
+}
+
 /* port: randomness that is only seen (the contrails) takes the frames' local
 seed even in a tick: how many points a contrail adds in a tick depends on
 where the frames moved it, so the game's local seed would move with the
