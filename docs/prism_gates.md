@@ -125,23 +125,37 @@ All on frames brought to 960 by 540 (`metrics.py`), at the three probe poses, th
 
 ## Thresholds
 
-`tools/prism_gate/thresholds.json`, fixed on M0's first measurements (below):
+`tools/prism_gate/thresholds.json`, fixed on M0's first measurements (the RTX 3070 Ti, `capture.py all`, the
+references at 4096 frames; "Measurements" below):
 
-| Measure | Threshold |
-| --- | --- |
-| error | ≤ 0.01 |
-| blotch | ≤ 0.015 |
-| flicker | ≤ 1.30 |
-| flip, still camera | ≤ 0.10 |
-| flip, V1 and V2 | ≤ 0.15 |
-| trail | ≤ 4 frames |
-| harness fault (sky) | > 0.8 of a reference's pixels |
-| the bake's noise (D4) | 0.01 |
+| Measure | Threshold | Basis |
+| --- | --- | --- |
+| error | ≤ 0.01 | `prism-pt`'s, kept: G2 (sunlit) measures 0.0006, the scenes the path tracer fails today 0.02 to 0.07 |
+| blotch | ≤ 0.015 | as error: G2 0.007, the failing scenes 0.03 to 0.06 |
+| flicker | ≤ 1.30 | `prism-pt`'s, kept: every scene measures 0.95 to 1.10 |
+| flip, still camera | ≤ 0.10 | G2 0.04; the failing scenes 0.05 to 0.19: FLIP passes some scenes error fails, so both gate |
+| flip, V1 and V2 | ≤ 0.15 | *initial*: V1 and V2 are not frozen yet |
+| trail | ≤ 4 frames | *initial*: V1 is not frozen yet |
+| harness fault (sky) | > 0.8 of a reference's pixels | the frozen poses' references show no surface at 0 to 0.3 of their pixels |
+| a reference's own noise | its frame's estimated relMSE ≤ 0.001 | a tenth of the error threshold (below) |
+| the bake's noise (D4) | a texel's relative standard error ≤ 0.01 | below |
 
-The bake's noise threshold (design 10.1, D4: a texel's samples are added until it converges, never cut by a
-budget) is the relative standard error of a texel's mean luminance: a texel stops once its standard error is under
-1% of its mean, over at least 64 samples, or once its mean is under 1/1000 of the frame's middle grey (black stays
-black without a million samples).
+**A reference's own noise.** R is the gate's truth only where its own noise is well under what the gate measures.
+Measured by summing the same reference over 1024 and over 4096 frames (`debug.pt_reference`'s first 1024 frames are
+the same in both: the difference is the last 3072 frames' noise): at G2 (sunlit) R at 4096 frames has a median
+relative standard error of 0.3% in its light (95th percentile 3%), its frame an estimated relMSE of 1e-5 to 4e-5;
+at G4 (b30's interior, 700 lamps) a median of 27 to 38% (95th percentile 73 to 107%), its frame an estimated relMSE
+of 0.005 to 0.012, as large as the error threshold. So 4096 frames are not a converged reference wherever lamps light
+the scene: a reference sums until its estimated relMSE is under 0.001 (at G4, of the order of 50,000 frames with
+today's lamp sampling), and today's G1, G4, G5 and G7 verdicts against R at 4096 frames are within R's own noise.
+
+**The bake's noise (D4).** A texel's samples are added until the relative standard error of its mean luminance is
+under 1% (at least 64 samples; a texel whose mean is under 1/1000 of the frame's middle grey stops there: black
+stays black). No texel stops on a sample budget. At 1% a bake's noise adds an relMSE of about 1e-4 to a frame, a
+hundredth of the gate's error threshold. Measured with today's tracer (one path a pixel, ReSTIR's candidates, no
+reuse): a sunlit texel needs a median of about 400 samples (95th percentile 20,000 to 50,000), a lamp-lit interior's
+millions. The baker therefore needs far better lamp sampling than today's (the design's light-importance grid with
+baked visibility) for the `max` bake to finish.
 
 ## Every milestone also passes
 

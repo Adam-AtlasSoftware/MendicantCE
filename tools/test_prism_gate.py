@@ -267,7 +267,7 @@ def test_the_capture_set_is_frozen_as_the_design_names_it():
 def test_the_thresholds():
     limits = json.loads((ROOT / "tools/prism_gate/thresholds.json").read_text())
     assert set(limits["gate"]) == {"error", "blotch", "flicker", "flip_still", "flip_moving", "ghost_frames",
-                                   "sky_most"}
+                                   "sky_most", "reference_noise"}
     assert 0 < limits["bake"]["noise"] < 0.1
 
 
