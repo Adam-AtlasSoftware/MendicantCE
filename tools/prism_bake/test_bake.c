@@ -453,6 +453,170 @@ static void test_atlas(void)
 	prism_bake_atlas_free(&atlas);
 }
 
+/* texels a triangle's gutter reaches (sampled over the triangle, a square of
+the gutter's half-side around each sample) that lie in a tile left
+unallocated: 0 when no texel is missed */
+static long atlas_missed(struct prism_bake_atlas const *atlas)
+{
+	long missed = 0;
+	size_t index;
+
+	for (index = 0; index < atlas->triangle_count; index++)
+	{
+		int32_t c = atlas->triangle_charts[index], scale, a, b, x, y, x0, x1, y0, y1;
+		struct prism_bake_virtual_page const *vp;
+		float const *t = atlas->triangle_texels + index * 6;
+		double d;
+
+		if (c < 0)
+			continue;
+		scale = atlas->charts[c].scale;
+		vp = &atlas->virtual_pages[atlas->charts[c].virtual_page];
+		d = (double)atlas->parameters.gutter * scale;
+		for (a = 0; a <= 40; a++)
+		{
+			for (b = 0; a + b <= 40; b++)
+			{
+				double w1 = a / 40.0, w2 = b / 40.0, w0 = 1.0 - w1 - w2;
+				double sx = (w0 * t[0] + w1 * t[2] + w2 * t[4]) * scale;
+				double sy = (w0 * t[1] + w1 * t[3] + w2 * t[5]) * scale;
+
+				x0 = (int32_t)floor(sx - d);
+				y0 = (int32_t)floor(sy - d);
+				x1 = (int32_t)ceil(sx + d);
+				y1 = (int32_t)ceil(sy + d);
+				x0 = x0 < 0 ? 0 : x0;
+				y0 = y0 < 0 ? 0 : y0;
+				x1 = x1 > vp->width ? vp->width : x1;
+				y1 = y1 > vp->height ? vp->height : y1;
+				for (y = y0; y < y1; y++)
+				{
+					for (x = x0; x < x1; x++)
+					{
+						if (!vp->tiles[(size_t)(y / atlas->parameters.tile) * vp->tiles_x +
+							x / atlas->parameters.tile])
+						{
+							missed++;
+						}
+					}
+				}
+			}
+		}
+	}
+	return missed;
+}
+
+/* a triangle from corners in CE texels of a page, its world size the texels
+times metres per texel (so its density is the inverse) */
+static void texel_triangle(struct prism_bake_atlas_triangle *t, struct prism_bake_atlas_page const *page,
+	float const *texels, float wu_per_texel, uint8_t tier)
+{
+	int k;
+
+	t->page = 0;
+	for (k = 0; k < 3; k++)
+	{
+		t->uv[k * 2] = texels[k * 2] / (float)page->width;
+		t->uv[k * 2 + 1] = texels[k * 2 + 1] / (float)page->height;
+		t->position[k * 3] = texels[k * 2] * wu_per_texel;
+		t->position[k * 3 + 1] = texels[k * 2 + 1] * wu_per_texel;
+		t->position[k * 3 + 2] = 0.0f;
+	}
+	t->tier = tier;
+}
+
+static void test_atlas_tiles(void)
+{
+	static int32_t const tiles[2] = { 16, 32 };
+	struct prism_bake_atlas_page pages[1] = { { 100, 70 } };
+	struct prism_bake_atlas_triangle triangles[64];
+	struct prism_bake_atlas_parameters parameters;
+	struct prism_bake_atlas atlas;
+	double allocated[2] = { 0, 0 }, covered[2] = { 0, 0 };
+	size_t tile_count[2] = { 0, 0 };
+	char why[256];
+	int n, i, k;
+
+	/* a thin diagonal, tier 2 at CE's own density (scale 1) on a 128 square
+	page: only the tiles along it */
+	{
+		static float const diagonal[6] = { 2, 2, 124, 120, 124, 123 };
+		struct prism_bake_atlas_page big[1] = { { 128, 128 } };
+		struct prism_bake_virtual_page const *vp;
+		int32_t x, y, diagonal_off = 0;
+		size_t along = 0;
+
+		texel_triangle(triangles, big, diagonal, 1.0f, 2);
+		prism_bake_atlas_defaults(&parameters, PRISM_BAKE_QUALITY_MAX);
+		parameters.tile = 16;
+		check(!prism_bake_atlas_build(&atlas, big, 1, triangles, 1, &parameters) && atlas.charts[0].scale == 1,
+			"atlas_thin_build", "the thin triangle's chart is not at scale 1");
+		vp = &atlas.virtual_pages[0];
+		for (y = 0; y < vp->tiles_y; y++)
+		{
+			for (x = 0; x < vp->tiles_x; x++)
+			{
+				int on = vp->tiles[y * vp->tiles_x + x];
+
+				/* (a tile more than one off the line y = x is no neighbour of it) */
+				if (on && (x - y > 1 || y - x > 1))
+					diagonal_off++;
+				if (!on && x == y)
+					along++;
+			}
+		}
+		sprintf(why, "%lu tiles of %d, %d off the diagonal, %lu diagonal tiles missed", (unsigned long)vp->tile_count,
+			vp->tiles_x * vp->tiles_y, diagonal_off, (unsigned long)along);
+		check(vp->tile_count >= 8 && vp->tile_count <= 24 && !diagonal_off && !along, "atlas_thin_diagonal", why);
+		sprintf(why, "%ld texels missed", atlas_missed(&atlas));
+		check(atlas_missed(&atlas) == 0, "atlas_thin_missed", why);
+		prism_bake_atlas_free(&atlas);
+	}
+
+	/* random triangles on a page that is not a whole number of tiles, at
+	every tier and several scales, tiles of 16 and of 32: no texel a
+	triangle's gutter reaches lies in an unallocated tile */
+	n = 48;
+	for (i = 0; i < n; i++)
+	{
+		float c[6], origin_x = (float)(uniform() * 90.0), origin_y = (float)(uniform() * 60.0);
+		float size = 1.0f + (float)(uniform() * (i % 3 == 0 ? 40.0 : 8.0));
+
+		for (k = 0; k < 3; k++)
+		{
+			/* (every third one is a sliver) */
+			c[k * 2] = origin_x + (float)(uniform() * size);
+			c[k * 2 + 1] = origin_y + (float)(uniform() * (i % 3 == 1 ? 0.5 : size));
+		}
+		texel_triangle(&triangles[i], pages, c, 0.25f + (float)(uniform() * 0.5), (uint8_t)(i % 3));
+	}
+	for (k = 0; k < 2; k++)
+	{
+		long missed;
+
+		prism_bake_atlas_defaults(&parameters, PRISM_BAKE_QUALITY_MAX);
+		parameters.tile = tiles[k];
+		check(!prism_bake_atlas_build(&atlas, pages, 1, triangles, (size_t)n, &parameters), "atlas_random_build",
+			"out of memory");
+		missed = atlas_missed(&atlas);
+		sprintf(why, "tile %d: %ld texels in unallocated tiles", tiles[k], missed);
+		check(missed == 0, "atlas_no_texel_missed", why);
+		allocated[k] = atlas.totals.texels_allocated;
+		covered[k] = atlas.totals.texels_covered;
+		tile_count[k] = atlas.totals.tiles;
+		/* (a refined chart's tiles are marked the same way) */
+		prism_bake_atlas_refine(&atlas, 0, 1);
+		prism_bake_atlas_layout(&atlas);
+		sprintf(why, "tile %d refined: %ld texels missed", tiles[k], atlas_missed(&atlas));
+		check(atlas_missed(&atlas) == 0, "atlas_refined_no_texel_missed", why);
+		prism_bake_atlas_free(&atlas);
+	}
+	sprintf(why, "16: %lu tiles, %g texels; 32: %lu tiles, %g texels; covered %g and %g", (unsigned long)tile_count[0],
+		allocated[0], (unsigned long)tile_count[1], allocated[1], covered[0], covered[1]);
+	check(allocated[0] <= allocated[1] && tile_count[0] >= tile_count[1] && covered[0] == covered[1] &&
+		allocated[0] >= covered[0], "atlas_tile_sizes", why);
+}
+
 /* ---------- the cache file */
 
 static void key_make(struct prism_bake_cache_key *key)
@@ -847,6 +1011,7 @@ int main(int argc, char **argv)
 	}
 	test_reach();
 	test_atlas();
+	test_atlas_tiles();
 	test_cache(argv[1]);
 	test_converge();
 	printf("%s: %d failed\n", failures ? "FAILED" : "PASSED", failures);

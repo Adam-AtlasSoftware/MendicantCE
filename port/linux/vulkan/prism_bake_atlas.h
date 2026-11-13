@@ -16,8 +16,14 @@ The baker's lightmap atlas (PRISM v4's design, sections 3.5 and 3.6, and
   gutter never shrinks below CE's).
 - The charts of a page that share a scale form a virtual page: the page
   at that scale. Only the tiles a chart's triangles (each with the
-  gutter around it) touch are allocated, so a page's tier 2 charts at scale 1 and its tier 0 charts
-  at scale 8 cost only what they cover. Sampling reads a virtual page
+  gutter around it) touch are allocated, so a page's tier 2 charts at
+  scale 1 and its tier 0 charts at scale 8 cost only what they cover. A
+  tile is marked by rasterising each triangle conservatively in the scaled
+  page: the triangle grown by the gutter (a square of half-side gutter x
+  scale texels) is tested against each tile of its box, and a tile it
+  overlaps is allocated, so no texel it touches lies in an unallocated
+  tile. A thin diagonal triangle therefore costs the tiles along it, not
+  its box. Sampling reads a virtual page
   through its tiles' table (or Vulkan's sparse residency).
 - Refinement: a chart's level doubles its scale per level. The bake asks
   for it where a converged comparison against the reference still shows
@@ -63,7 +69,7 @@ struct prism_bake_atlas_triangle
 struct prism_bake_atlas_parameters
 {
 	float density[3]; /* texels per world unit at each tier */
-	int32_t tile; /* the sparse tiles' side, in texels */
+	int32_t tile; /* the sparse tiles' side, in texels (16 by default; 32 is the other choice) */
 	float gutter; /* CE texels kept around each chart */
 	int32_t maximum_scale; /* a chart's scale before refinement */
 	int32_t maximum_refine; /* refinement levels */
@@ -118,7 +124,7 @@ struct prism_bake_atlas
 	struct prism_bake_chart *charts;
 	int32_t chart_count;
 	int32_t *triangle_charts; /* each triangle's chart, or -1 */
-	float *triangle_boxes; /* each triangle's box in CE texels: x0 y0 x1 y1 */
+	float *triangle_texels; /* each triangle's corners in CE texels: x0 y0 x1 y1 x2 y2 */
 	size_t triangle_count;
 	struct prism_bake_virtual_page *virtual_pages;
 	int32_t virtual_page_count;
