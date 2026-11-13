@@ -228,6 +228,7 @@ python tools/test_touch_layout.py                           # the Android touch 
 python -m pytest -q tools/test_ios_touch_layout.py          # the iOS touch layout clear of the HUD and the safe areas
 python tools/touch_assets.py --check                        # the touch controls' pictures as their SVGs draw them
 python tools/test_light_storage.py
+python -m pytest -q tools/test_prism_bake.py                 # PRISM v4's baker groundwork: reachable space, atlas, bake file, convergence (with HALO_DATA_ROOT, Rat Race's reachable space)
 python tools/test_death_timing.py
 python -m pytest -q tools/test_join_page.py                 # the website's join page: the links it reads (Node), nothing loaded from elsewhere
 python -m pytest -q tools/test_net_compare.py               # net_compare.py's judging of logs, its copies and their processes
