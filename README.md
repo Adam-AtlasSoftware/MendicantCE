@@ -499,6 +499,11 @@ version (`AGPL-3.0-or-later`). It comes with no warranty. The full text is in
   game, or on a web site), the AGPL asks you to offer them the source of
   your version (section 13). The game as released has its source here, and
   each release's source is its tag (`build-<n>`).
+- **The renderer's plugin interface.** `port/linux/vulkan/prism_plugin.h`
+  alone is offered under the [MIT licence](LICENSES/MIT.txt) or
+  `AGPL-3.0-or-later`, as the reader chooses, so that a plugin built against
+  it need not be AGPL (`docs/prism_plugin.md`). No vendor's code is in the
+  tree.
 - **Third-party code, fonts and art** keep their own licences, which are
   next to them (`port/third_party`, `port/assets/fonts`,
   `port/assets/icons`, `port/assets/text_filter`). The release downloads and
