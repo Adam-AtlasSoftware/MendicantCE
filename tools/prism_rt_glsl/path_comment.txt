@@ -1,0 +1,25 @@
+/* ---------- display.prism_rt "pathtraced" (docs/prism_rt.md, "Path tracing")
+
+probes (gi's, and the path tracer's cache): each probe's rays in the rig's
+light, every bounce kept from frame to frame.
+
+path: at every pixel of the pre-pass, from its raster G-buffer, the rig's
+light reaching it (docs/prism_rt.md, "The rig"): the sun's visibility
+apart, the domes and the lamps sampled as lights, the sky and the bounces
+by paths of the hits' materials ending in the probes; the dynamic lights'
+bounce and their traced shadows' share of the light CE adds unshadowed
+(ReSTIR DI over them).
+
+accumulate: the temporal half of the denoiser (each texel blended into its
+reprojected history by 1 / its length; the sun's visibility on a short
+history held within its neighbours' reach).
+
+tiles: the anchor's regions (8x8 tiles' sums of CE's light and the traced
+light) and the exposure's meter (their histograms).
+
+exposure: display.prism_exposure's exposure for the frame, from the meter.
+
+atrous: the spatial half (three edge-avoiding a-trous passes), the last
+writing what the surfaces read (xgpu.h's XGPU_AMBIENT_OCCLUSION_RT_LIGHT):
+x the factor of CE's light, yzw the light added. */
+

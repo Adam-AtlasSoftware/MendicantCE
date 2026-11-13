@@ -69,8 +69,9 @@ render_window ─► world AO's pre-pass (forced on while prism_rt is): each opa
 ```
 
 Files: `port/linux/game/prism_rt.c` (the game's half), `port/linux/vulkan/xgpu_vulkan_rt.c` (acceleration structures,
-capture, passes), `xgpu_vulkan_rt_glsl.inc` (the compute shaders; `tools/vulkan_rt_shaders.py` compiles them to
-`xgpu_vulkan_rt_shaders.c`), records `RT_STATIC` and `RT_FRAME` in `xgpu_stream.h`.
+capture, passes), `xgpu_vulkan_rt_glsl.inc` (the compute shaders, written by `tools/prism_rt_glsl/generate.py`:
+edit it, not the `.inc`; `tools/vulkan_rt_shaders.py` compiles them to `xgpu_vulkan_rt_shaders.c`), records
+`RT_STATIC` and `RT_FRAME` in `xgpu_stream.h`.
 
 ## What is traced
 

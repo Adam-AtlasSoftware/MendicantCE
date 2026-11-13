@@ -1,0 +1,42 @@
+/* display.prism_rt's compute passes (xgpu_vulkan_rt.c; docs/prism_rt.md),
+in Vulkan's GLSL: tools/vulkan_rt_shaders.py makes xgpu_vulkan_rt_shaders.c
+of them. Not compiled into the game.
+
+Each reads world AO's pre-pass inputs (xgpu.h's XGPU_AMBIENT_OCCLUSION_WORLD_
+INPUTS: each pixel's octahedral normal, its flags with the lightmap pass's
+bit, its distance from the eye; with the traced light keyed, the lightmap
+pass's own light) and the pass block (struct rt_pass in xgpu_vulkan_rt.c,
+field for field: the camera, the sun, the probes, the dynamic lights, the
+structure's attributes, materials, alpha maps and lamps by their device
+addresses, and the light rig, pass.rig: the sun's radiance and disc
+(rig[0]), the sky's radiance and the pages' power (rig[1]), four domes
+(rig[2] to rig[9]), the settings (rig[10] to rig[13]: xgpu_stream.h's
+XGPU_RT_SETTING_*), the frame's seconds (rig[14].x)). A texel of the output
+is a pixel's, or at scale 2 its 2x2 block's nearest drawn pixel's, as world
+AO's pass finds it (world_ao_shading.c's world_ao_pass_position).
+
+The rays go through the frame's acceleration structure (ray queries, no
+pipeline): the structure's opaque triangles (mask 1, custom index 0), its
+alpha-tested ones (mask 2, ALPHA_CUSTOM: their candidates kept where their
+material's alpha map says so) and the objects (mask 4, custom index 1 on).
+
+trace ("shadows", "gi"): at each texel, rays toward the sun and about the
+normal for the ambient occlusion (the level's pixels: the objects alone, it
+never darkens itself; the objects': the objects, their own creases among
+them, and the structure close by). display.prism_rt_sun "all": the sun
+through everything in one ray, and through the structure from about the
+point over a lightmap texel's width (the sun's shadow as CE's texel held
+it); "objects": through the objects where the structure lets it through,
+and through the structure. Written raw: x and y those, z the occlusion, w
+the pixel's distance (0 none).
+
+resolve: the raw texels filtered (a 3x3 cross-bilateral by distance and
+normal, display.prism_rt_denoiser "spatiotemporal"; none otherwise),
+blended into the last frame's (reprojected by its camera, kept where the
+distance is within 5%, held within the neighbourhood's reach: "temporal"
+and "spatiotemporal"), and written as the surfaces read it: with the traced
+light keyed (xgpu.h's XGPU_AMBIENT_OCCLUSION_RT_LIGHT) the occlusion as a
+factor and the rig's sun's light the traces change added; else as world
+AO's pass writes its texels (x the light's factor, y the distance, zw the
+octahedral normal). */
+
