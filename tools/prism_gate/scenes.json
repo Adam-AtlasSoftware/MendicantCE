@@ -1,0 +1,38 @@
+{
+ "format": 1,
+ "about": "PRISM's frozen capture set (docs/prism_gates.md; PRISM v4 design 9.0). Poses: x y z yaw pitch roll field of view (world units, degrees). G1-G7 are the path tracer's gate scenes (pt_runs/scripts/gate2.py), their keys as they were checked there. Change a scene only with a note in docs/prism_gates.md: every milestone's figures are measured on these.",
+ "defaults": {
+  "start": 0,
+  "bsp": null,
+  "live": false,
+  "steps": 40,
+  "step_frames": 3,
+  "settle": 900,
+  "state_settle": 150,
+  "pt_settle": 300,
+  "reference_frames": 4096,
+  "reference_margin": 32,
+  "probes": [0.25, 0.5, 0.75]
+ },
+ "scenes": [
+  {"id": "G1", "name": "ratrace", "map": "ratrace", "tests": "Lamp spots, many lamps",
+   "keys": ["4.1 -20.0 -3.0 0 0 0 70", "16.0 -23.6 -3.0 0 0 0 70", "16.0 -23.6 -3.0 120 0 0 70",
+            "9.0 -18.0 -3.0 160 0 0 70"]},
+  {"id": "G2", "name": "b30_sunny", "map": "b30", "tests": "Sun, sand, objects' shadows",
+   "keys": ["-81.56 50.14 5.50 -67.7 -5.0 0 70", "-70.19 22.38 3.70 -67.7 -8.0 0 70", "-66.4 13.13 3.10 -20 -10 0 70",
+            "-66.4 13.13 3.10 -150 -5 0 70"]},
+  {"id": "G3", "name": "b30_shade", "map": "b30", "tests": "Sky and dome light, occlusion",
+   "keys": ["-24.0 56.0 5.9 -37 12 0 70", "-16.27 50.04 7.64 -37 17 0 70", "-16.27 50.04 7.64 10 15 0 70",
+            "-14.0 46.0 6.0 -60 12 0 70"]},
+  {"id": "G4", "name": "b30_interior", "map": "b30", "bsp": 1, "tests": "Many lamps",
+   "keys": ["1.14 -19.95 2.2 -67.7 0 0 70", "4.5 -24.0 2.2 -67.7 -5 0 70", "4.5 -24.0 2.2 40 0 0 70"]},
+  {"id": "G5", "name": "a10", "map": "a10", "tests": "Door windows, specular trim, disocclusion",
+   "keys": ["-54.5 -0.5 0.7 -60 0 0 70", "-50.5 -5.0 0.8 -80 0 0 70", "-50.5 -5.0 0.8 30 0 0 70"]},
+  {"id": "G6", "name": "c40_exterior", "map": "c40", "tests": "Night sky energy",
+   "keys": ["280.5 -676.6 55.5 0 3 0 70", "282.0 -670.0 56.0 0 3 0 70", "282.0 -670.0 56.0 80 3 0 70",
+            "279.0 -672.0 56.0 140 3 0 70"]},
+  {"id": "G7", "name": "c40_interior", "map": "c40", "tests": "Lamp strips, hologram ring",
+   "keys": ["362.0 -716.0 75.0 -90 -5 0 70", "362.0 -708.0 75.0 -90 -5 0 70", "362.0 -708.0 75.0 0 -5 0 70",
+            "360.0 -712.0 75.0 150 -3 0 70"]}
+ ]
+}

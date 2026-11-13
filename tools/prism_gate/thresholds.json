@@ -1,0 +1,15 @@
+{
+ "about": "The quality gates' thresholds (docs/prism_gates.md, 'Thresholds'), fixed in M0 from its first measurements; a change needs its reason in that document.",
+ "gate": {
+  "error": 0.01,
+  "blotch": 0.015,
+  "flicker": 1.30,
+  "flip_still": 0.10,
+  "flip_moving": 0.15,
+  "ghost_frames": 4,
+  "sky_most": 0.8
+ },
+ "bake": {
+  "noise": 0.01
+ }
+}

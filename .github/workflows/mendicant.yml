@@ -346,6 +346,8 @@ jobs:
         run: |
           packages="$(cat .github/ci-image/packages.txt .github/ci-image/packages-x86_64.txt)"
           apt-get -o Acquire::Retries=5 install -y --no-install-recommends $packages
+          # (PRISM's gates' metrics and its plugins' test: NumPy, Pillow, Vulkan's headers)
+          apt-get -o Acquire::Retries=5 install -y --no-install-recommends python3-numpy python3-pil libvulkan-dev
 
       - uses: actions/cache@v4
         with:
@@ -363,7 +365,8 @@ jobs:
             tools/test_controller_remap.py tools/test_controller_remap_context.py tools/test_net_compare.py tools/test_loading_ring.py \
             tools/test_preparation.py tools/test_progress_ownership.py tools/test_ci_test_shards.py \
             tools/test_fork_identity.py tools/test_port_settings.py tools/test_loading_assets.py tools/test_mouse_sensitivity.py \
-            tools/test_prism_packs.py
+            tools/test_prism_packs.py tools/test_prism_gate.py tools/test_prism_plugin.py tools/test_scene_records.py \
+            tools/test_prism_rt_glsl.py
 
   sums:
     # the two zips' SHA256SUMS, when both built and passed their checks: the

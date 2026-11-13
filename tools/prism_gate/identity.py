@@ -1,0 +1,141 @@
+#!/usr/bin/env python3
+"""The checks every PRISM milestone passes against the build it started from (docs/prism_gates.md, "Every milestone"):
+
+    python3 tools/prism_gate/identity.py frames <base tree> <new tree> --data <data> --out <dir> [--config <toml>]
+    python3 tools/prism_gate/identity.py determinism <base tree> <new tree> --data <data> --out <dir>
+
+frames: each tree run twice (hidden, silent, isolated: game.py's rules), on each map given, with the clock fixed (a
+tick a frame) and interpolation off, every frame from the simulation's second `--from` to `--until` saved; the
+frames compared byte for byte: each tree with itself (the floor: a tree that differs from itself proves nothing)
+and the new with the base. With no --config, the game's defaults (Classic); with one, its settings (the kit's, RT
+off: display.lighting "ce").
+
+determinism: each tree run twice on a10 with the determinism log (debug.determinism_log), the frames' time fixed and
+a scripted player (debug.test_input "bot:3"); tools/determinism_compare.py --simulation compares the runs, each
+tree with itself and the new with the base: the gameplay untouched.
+"""
+import argparse
+import hashlib
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from prism_gate import game  # noqa: E402
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def run_tree(tree, data_source, work, game_map, env, config=None, timeout=900):
+    pid = game.kit_running()
+    if pid:
+        raise SystemExit(f"stopped: the kit's game is running (pid {pid})")
+    work = Path(work).resolve()
+    if work.exists():
+        shutil.rmtree(work)
+    work.mkdir(parents=True)
+    (work / "shots").mkdir()
+    stage = work / "stage"
+    shutil.copytree(tree, stage, symlinks=True)
+    if config:
+        shutil.copy(config, stage / "config.toml")
+    data = work / "data"
+    game.stage_data(data_source, data)
+    (work / "saves").mkdir()
+    (data / "init.txt").write_text(f"map_name {game_map}\n")
+    e = game.isolated_environment(work, data)
+    e.update({"HALO_WINDOW_SIZE": "1280x720"})
+    e.update(env)
+    with open(work / "stdout.txt", "w") as out:
+        process = subprocess.Popen([str(stage / "bin" / "openh1")], cwd=data, env=e, stdout=out,
+                                   stderr=subprocess.STDOUT, preexec_fn=game._die_with_parent)
+        try:
+            process.wait(timeout)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+    shutil.rmtree(stage, ignore_errors=True)
+    return work, process.returncode
+
+
+def frame_hashes(folder):
+    return [hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(Path(folder).glob("*.bmp"))]
+
+
+def compare(a, b):
+    n = min(len(a), len(b))
+    return sum(x == y for x, y in zip(a, b)), n, len(a), len(b)
+
+
+def frames(args):
+    failed = False
+    for game_map in args.maps:
+        hashes = {}
+        for tree_name, tree in (("base", args.base), ("new", args.new)):
+            for run in (1, 2):
+                work = Path(args.out) / f"{game_map}_{tree_name}{run}"
+                shots = work / "shots"
+                env = {"HALO_SCREENSHOT_DIR": str(shots), "HALO_SCREENSHOT_EVERY": "1",
+                       "HALO_SCREENSHOT_FROM": str(args.from_), "HALO_SCREENSHOT_UNTIL": str(args.until),
+                       "HALO_EXIT_AFTER": str(args.exit_after), "VK_LOADER_DEVICE_ID_FILTER": args.device}
+                started = time.time()
+                work, code = run_tree(tree, args.data, work, game_map, env, args.config)
+                (work / "shots").mkdir(exist_ok=True)
+                hashes[f"{tree_name}{run}"] = frame_hashes(work / "shots")
+                print(f"{game_map} {tree_name}{run}: {len(hashes[tree_name + str(run)])} frames, exit {code}, "
+                      f"{time.time() - started:.0f} s", flush=True)
+                if not args.keep:
+                    for bmp in (work / "shots").glob("*.bmp"):
+                        bmp.unlink()
+        for a, b in (("base1", "base2"), ("new1", "new2"), ("base1", "new1"), ("base2", "new2")):
+            same, n, na, nb = compare(hashes[a], hashes[b])
+            ok = n > 0 and same == n and na == nb
+            failed |= not ok
+            print(f"{game_map}: {a} vs {b}: {same}/{n} frames byte-identical (of {na}/{nb}) {'OK' if ok else 'DIFFER'}")
+    return 1 if failed else 0
+
+
+def determinism(args):
+    failed = False
+    logs = {}
+    for tree_name, tree in (("base", args.base), ("new", args.new)):
+        for run in (1, 2):
+            work = Path(args.out) / f"determinism_{tree_name}{run}"
+            log = work / "determinism.txt"
+            env = {"HALO_DETERMINISM_LOG": str(log), "HALO_FRAME_TIME": "0.0166667", "HALO_TEST_INPUT": "bot:3",
+                   "HALO_EXIT_AFTER": str(args.exit_after), "HALO_FIXED_STEP": "0",
+                   "VK_LOADER_DEVICE_ID_FILTER": args.device}
+            work, code = run_tree(tree, args.data, work, args.map, env)
+            logs[f"{tree_name}{run}"] = work / "determinism.txt"
+            print(f"determinism {tree_name}{run}: exit {code}", flush=True)
+    for a, b in (("base1", "base2"), ("new1", "new2"), ("base1", "new1")):
+        result = subprocess.run([sys.executable, str(ROOT / "tools/determinism_compare.py"), str(logs[a]),
+                                 str(logs[b]), "--simulation"], capture_output=True, text=True)
+        failed |= result.returncode != 0
+        print(f"{a} vs {b}: exit {result.returncode}: {result.stdout.strip().splitlines()[-1:]}")
+    return 1 if failed else 0
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("check", choices=("frames", "determinism"))
+    parser.add_argument("base")
+    parser.add_argument("new")
+    parser.add_argument("--data", required=True)
+    parser.add_argument("--out", required=True)
+    parser.add_argument("--config", help="frames: a config.toml (none: the game's defaults)")
+    parser.add_argument("--maps", nargs="*", default=["b30", "a10"])
+    parser.add_argument("--map", default="a10", help="determinism's map")
+    parser.add_argument("--from", dest="from_", type=float, default=40.0)
+    parser.add_argument("--until", type=float, default=41.5)
+    parser.add_argument("--exit-after", type=int, default=100)
+    parser.add_argument("--device", default="0x10de:0x2482")
+    parser.add_argument("--keep", action="store_true")
+    args = parser.parse_args()
+    return frames(args) if args.check == "frames" else determinism(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
