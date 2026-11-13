@@ -174,7 +174,10 @@ PREPASS_END ─► objects' BLAS ─► TLAS (opaque structure 1, alpha-tested s
                  the sun's visibility (its disc): through the structure, then the objects where it is clear,
                  the structure's alone kept too (the anchor's measure); an object's pixel whichever way its
                  normal leans, its back lit by half (a leaf lit through)
-                 the domes (a direction of each cone) and the lamps (ReSTIR DI: candidates by power, the last
+                 the domes (a direction of each cone) and the lamps (ReSTIR DI: candidates mostly (85%) from the
+                 lamps' grid cell about the point (a grid over the lamps, made with the structure's acceleration
+                 structures, each cell listing the 16 lamps whose power over the squared distance to its middle is
+                 most, picked by that weight), the rest by power over the level, the last
                  frame's reservoirs at the point and about it, their weight at most four frames' candidates; the one
                  kept traced for its shadow)
                  the sky and the bounces: one path a pixel, 1 to 4 bounces (display.prism_rt_bounces; by quality), cosine rays, each hit

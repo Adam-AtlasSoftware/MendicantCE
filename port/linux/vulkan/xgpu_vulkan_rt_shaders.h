@@ -25,6 +25,9 @@ extern const uint32_t xgpu_vulkan_rt_tiles_words[];
 extern const size_t xgpu_vulkan_rt_tiles_count;
 extern const uint32_t xgpu_vulkan_rt_exposure_words[];
 extern const size_t xgpu_vulkan_rt_exposure_count;
+/* port: the path tracer's radiance cache's resolve */
+extern const uint32_t xgpu_vulkan_rt_cache_resolve_words[];
+extern const size_t xgpu_vulkan_rt_cache_resolve_count;
 extern const uint32_t xgpu_vulkan_rt_atrous_words[];
 extern const size_t xgpu_vulkan_rt_atrous_count;
 extern const uint32_t xgpu_vulkan_rt_curve_mean_words[];

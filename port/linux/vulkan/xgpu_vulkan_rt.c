@@ -110,6 +110,17 @@ summed with every lamp's before it (its share of the lamps', for picking
 one by power), unused (2) */
 #define RT_EMITTER_FLOATS 16u
 #define RT_EMITTERS_MOST 262144u
+/* port: the lamps' grid (lamp_grid_build): its cells at most a side and in
+all, the lamps a cell lists (by their light at its middle), a cell's words
+(its count, then a lamp and the cumulative weight to it for each) */
+#define RT_LAMP_GRID_SIDE 32
+#define RT_LAMP_GRID_CELLS 16384
+#define RT_LAMP_GRID_LIST 16
+#define RT_LAMP_GRID_WORDS (1 + 2 * RT_LAMP_GRID_LIST)
+/* port: the path tracer's radiance cache (xgpu_vulkan_rt_glsl.inc's
+cache_entry): its entries (a power of two) and words each */
+#define RT_CACHE_ENTRIES 524288u
+#define RT_CACHE_WORDS 10u
 
 /* the pass block (the GLSL's Pass, std140) */
 struct rt_pass
@@ -158,6 +169,11 @@ struct rt_pass
 	/* port: each world-occlusion owner's motion since the last frame (its
 	first draw's node 0), the denoisers' reprojection of an object's pixel */
 	float motion[64][4];
+	/* port: the lamps' grid (lamp_grid_build): its address, its corner and
+	cell, its cells a side (0: none) */
+	uint32_t addresses5[4];
+	float grid[4];
+	int32_t grid_size[4];
 };
 
 /* ---------- the functions */
@@ -302,6 +318,13 @@ static struct
 	VkPipelineLayout path_pipeline_layout, accumulate_pipeline_layout, atrous_pipeline_layout, tiles_pipeline_layout,
 		exposure_pipeline_layout;
 	VkPipeline path, accumulate, atrous, tiles, exposure;
+	/* port: the radiance cache's resolve (push constants alone) and its
+	entries, zeroed once */
+	VkPipelineLayout cache_resolve_layout_pipeline;
+	VkDescriptorSetLayout cache_resolve_layout;
+	VkPipeline cache_resolve;
+	struct rt_buffer cache_buffer;
+	int cache_zeroed;
 	/* display.prism_tone_curve's passes and images (the view's copy, its
 	blocks' means, the curve's output) */
 	VkDescriptorSetLayout curve_mean_layout, curve_layout;
@@ -378,6 +401,11 @@ static struct
 	VkDeviceAddress static_address;
 	uint32_t static_triangles, static_generation;
 	struct rt_buffer alpha_storage, static_attributes, static_materials, static_alpha, static_emitters;
+	/* port: the lamps' grid (lamp_grid_build), its corner, cell and cells
+	a side; none where its cells are 0 */
+	struct rt_buffer static_lamp_grid;
+	float lamp_grid_origin[3], lamp_grid_cell;
+	int32_t lamp_grid_cells[3];
 	VkAccelerationStructureKHR alpha_structure;
 	VkDeviceAddress alpha_address;
 	uint32_t opaque_triangles, alpha_triangles, emitter_count, material_count;
@@ -723,6 +751,10 @@ static int make(void)
 		&rt.tiles_pipeline_layout, &rt.tiles) ||
 		!pipeline_make(exposure_types, 2, xgpu_vulkan_rt_exposure_words, xgpu_vulkan_rt_exposure_count,
 		&rt.exposure_layout, &rt.exposure_pipeline_layout, &rt.exposure) ||
+		!pipeline_make_pushed(NULL, 0, xgpu_vulkan_rt_cache_resolve_words, xgpu_vulkan_rt_cache_resolve_count, 16,
+		&rt.cache_resolve_layout, &rt.cache_resolve_layout_pipeline, &rt.cache_resolve) ||
+		!buffer_make((VkDeviceSize)RT_CACHE_ENTRIES * RT_CACHE_WORDS * 4, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+		VK_BUFFER_USAGE_TRANSFER_DST_BIT, 0, &rt.cache_buffer) ||
 		!buffer_make(1024, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, 0,
 		&rt.exposure_buffer) ||
 		!pipeline_make_pushed(curve_mean_types, 2, xgpu_vulkan_rt_curve_mean_words, xgpu_vulkan_rt_curve_mean_count, 32,
@@ -1045,6 +1077,10 @@ static void static_release(void)
 		garbage_add(&rt.static_alpha, VK_NULL_HANDLE);
 	if (rt.static_emitters.buffer)
 		garbage_add(&rt.static_emitters, VK_NULL_HANDLE);
+	if (rt.static_lamp_grid.buffer)
+		garbage_add(&rt.static_lamp_grid, VK_NULL_HANDLE);
+	memset(&rt.static_lamp_grid, 0, sizeof(rt.static_lamp_grid));
+	rt.lamp_grid_cells[0] = rt.lamp_grid_cells[1] = rt.lamp_grid_cells[2] = 0;
 	memset(&rt.static_storage, 0, sizeof(rt.static_storage));
 	memset(&rt.alpha_storage, 0, sizeof(rt.alpha_storage));
 	memset(&rt.static_vertices, 0, sizeof(rt.static_vertices));
@@ -1076,6 +1112,128 @@ static const float *received_material(uint32_t triangle)
 	material = rt.receiving_attributes[(size_t)triangle * XGPU_STREAM_RT_ATTRIBUTE_WORDS] & 0xffffu;
 	return material < rt.receiving_material_count ? rt.receiving_materials +
 		(size_t)material * XGPU_STREAM_RT_MATERIAL_FLOATS : NULL;
+}
+
+/* port: the lamps' grid: the lamps' middles' bounds (and a margin) cut
+into cells, each listing the RT_LAMP_GRID_LIST lamps whose light at its
+middle is most (power over the squared distance, a cell's width added so
+that a lamp within it is not taken for infinite), with the cumulative
+weights the path tracer picks from (xgpu_vulkan_rt_glsl.inc's
+lamp_pick_at); a pixel's candidates mostly from its cell's lamps, the
+level's nearby ones, in place of the whole level's by power. 0 where none
+is made (no lamps, no memory) */
+static int lamp_grid_build(const float *lamps, uint32_t count, struct rt_buffer *made, float origin[3], float *cell,
+	int32_t cells[3])
+{
+	float least[3], most[3], extent, margin = 8.0f;
+	uint32_t lamp, *words;
+	int32_t axis, x, y, z, total;
+
+	if (!count)
+		return 0;
+	for (axis = 0; axis < 3; axis++)
+	{
+		least[axis] = 1.0e30f;
+		most[axis] = -1.0e30f;
+	}
+	for (lamp = 0; lamp < count; lamp++)
+	{
+		const float *l = lamps + (size_t)lamp * RT_EMITTER_FLOATS;
+
+		for (axis = 0; axis < 3; axis++)
+		{
+			float middle = (l[axis] + l[3 + axis] + l[6 + axis]) / 3.0f;
+
+			if (middle < least[axis])
+				least[axis] = middle;
+			if (middle > most[axis])
+				most[axis] = middle;
+		}
+	}
+	extent = 0.0f;
+	for (axis = 0; axis < 3; axis++)
+	{
+		least[axis] -= margin;
+		most[axis] += margin;
+		if (most[axis] - least[axis] > extent)
+			extent = most[axis] - least[axis];
+	}
+	*cell = extent / (float)RT_LAMP_GRID_SIDE;
+	if (*cell < 2.0f)
+		*cell = 2.0f;
+	for (;;)
+	{
+		total = 1;
+		for (axis = 0; axis < 3; axis++)
+		{
+			cells[axis] = (int32_t)ceilf((most[axis] - least[axis]) / *cell);
+			if (cells[axis] < 1)
+				cells[axis] = 1;
+			total *= cells[axis];
+		}
+		if (total <= RT_LAMP_GRID_CELLS)
+			break;
+		*cell *= 1.25f;
+	}
+	/* (a level of very many lamps keeps the pick by power alone: the grid's
+	making, every cell by every lamp, would stall the map's load) */
+	if ((double)total * (double)count > 4.0e8 ||
+		!static_buffer(NULL, (VkDeviceSize)total * RT_LAMP_GRID_WORDS * 4, made))
+		return 0;
+	words = (uint32_t *)made->mapped;
+	for (axis = 0; axis < 3; axis++)
+		origin[axis] = least[axis];
+	for (z = 0; z < cells[2]; z++)
+		for (y = 0; y < cells[1]; y++)
+			for (x = 0; x < cells[0]; x++)
+			{
+				uint32_t *to = words + (size_t)((z * cells[1] + y) * cells[0] + x) * RT_LAMP_GRID_WORDS;
+				float middle[3], weight[RT_LAMP_GRID_LIST], sum = 0.0f, soft = (*cell) * (*cell);
+				uint32_t index[RT_LAMP_GRID_LIST], kept = 0, k;
+
+				middle[0] = origin[0] + ((float)x + 0.5f) * *cell;
+				middle[1] = origin[1] + ((float)y + 0.5f) * *cell;
+				middle[2] = origin[2] + ((float)z + 0.5f) * *cell;
+				for (lamp = 0; lamp < count; lamp++)
+				{
+					const float *l = lamps + (size_t)lamp * RT_EMITTER_FLOATS;
+					float d[3], d2, power, w;
+
+					for (axis = 0; axis < 3; axis++)
+						d[axis] = (l[axis] + l[3 + axis] + l[6 + axis]) / 3.0f - middle[axis];
+					d2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+					power = (0.2126f * l[9] + 0.7152f * l[10] + 0.0722f * l[11]) * l[12];
+					w = power / (d2 + soft);
+					if (!(w > 0.0f))
+						continue;
+					if (kept < RT_LAMP_GRID_LIST)
+					{
+						index[kept] = lamp;
+						weight[kept++] = w;
+					}
+					else
+					{
+						uint32_t smallest = 0;
+
+						for (k = 1; k < kept; k++)
+							if (weight[k] < weight[smallest])
+								smallest = k;
+						if (w > weight[smallest])
+						{
+							index[smallest] = lamp;
+							weight[smallest] = w;
+						}
+					}
+				}
+				to[0] = kept;
+				for (k = 0; k < kept; k++)
+				{
+					sum += weight[k];
+					to[1 + 2 * k] = index[k];
+					memcpy(&to[2 + 2 * k], &sum, 4);
+				}
+			}
+	return 1;
 }
 
 /* the set received built: the triangles traced (the opaque, then the
@@ -1225,6 +1383,12 @@ static void static_build(void)
 	rt.static_materials = materials;
 	rt.static_alpha = alpha;
 	rt.static_emitters = emitters;
+	if (!lamp_grid_build((const float *)emitters.mapped, lamps, &rt.static_lamp_grid, rt.lamp_grid_origin,
+		&rt.lamp_grid_cell, rt.lamp_grid_cells))
+	{
+		memset(&rt.static_lamp_grid, 0, sizeof(rt.static_lamp_grid));
+		rt.lamp_grid_cells[0] = rt.lamp_grid_cells[1] = rt.lamp_grid_cells[2] = 0;
+	}
 	rt.static_triangles = traced;
 	rt.opaque_triangles = opaque;
 	rt.alpha_triangles = tested;
@@ -2627,10 +2791,31 @@ static int pathtraced_record(VkCommandBuffer commands, struct rt_slot *slot, VkA
 		compute_barrier(commands);
 		rt.probe_frame++;
 	}
+	if (!rt.cache_zeroed)
+	{
+		vkCmdFillBuffer(commands, rt.cache_buffer.buffer, 0, VK_WHOLE_SIZE, 0);
+		barrier_global(commands, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
+			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+		rt.cache_zeroed = 1;
+	}
 	vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.path);
 	vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.path_pipeline_layout, 0, 1, &sets[1], 0, NULL);
 	vkCmdDispatch(commands, (width + 7) / 8, (height + 7) / 8, 1);
 	compute_barrier(commands);
+	/* the radiance cache's resolve: this frame's sums into its cells' light */
+	{
+		uint32_t cache_push[4];
+
+		cache_push[0] = (uint32_t)rt.cache_buffer.address;
+		cache_push[1] = (uint32_t)(rt.cache_buffer.address >> 32);
+		cache_push[2] = rt.frame.frame;
+		cache_push[3] = RT_CACHE_ENTRIES;
+		vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.cache_resolve);
+		vkCmdPushConstants(commands, rt.cache_resolve_layout_pipeline, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+			sizeof(cache_push), cache_push);
+		vkCmdDispatch(commands, RT_CACHE_ENTRIES / 64u, 1, 1);
+		compute_barrier(commands);
+	}
 	vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.accumulate);
 	vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.accumulate_pipeline_layout, 0, 1, &sets[2], 0,
 		NULL);
@@ -2850,6 +3035,25 @@ whether the surfaces read the traced light in "shadows" and "gi" */
 	block.addresses3[3] = (uint32_t)(rt.static_materials.address >> 32);
 	block.addresses4[0] = (uint32_t)rt.static_alpha.address;
 	block.addresses4[1] = (uint32_t)(rt.static_alpha.address >> 32);
+	block.addresses5[0] = (uint32_t)rt.static_lamp_grid.address;
+	block.addresses5[1] = (uint32_t)(rt.static_lamp_grid.address >> 32);
+	block.grid[0] = rt.lamp_grid_origin[0];
+	block.grid[1] = rt.lamp_grid_origin[1];
+	block.grid[2] = rt.lamp_grid_origin[2];
+	block.grid[3] = rt.lamp_grid_cell;
+	block.grid_size[0] = rt.static_lamp_grid.address ? rt.lamp_grid_cells[0] : 0;
+	block.grid_size[1] = rt.lamp_grid_cells[1];
+	block.grid_size[2] = rt.lamp_grid_cells[2];
+	{
+		/* (HALO_PRISM_RT_NO_CACHE: the radiance cache's use off, measuring) */
+		static int cache_off = -1;
+
+		if (cache_off < 0)
+			cache_off = getenv("HALO_PRISM_RT_NO_CACHE") != NULL;
+		block.grid_size[3] = cache_off ? 0 : 1;
+	}
+	block.addresses5[2] = (uint32_t)rt.cache_buffer.address;
+	block.addresses5[3] = (uint32_t)(rt.cache_buffer.address >> 32);
 	block.addresses4[2] = (uint32_t)rt.static_emitters.address;
 	block.addresses4[3] = (uint32_t)(rt.static_emitters.address >> 32);
 	block.counts[0] = rt.opaque_triangles;
