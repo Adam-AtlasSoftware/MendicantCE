@@ -1916,6 +1916,368 @@ struct xgpu_stream_rt_frame
 	float lights[XGPU_STREAM_RT_LIGHTS][12];
 };
 
+/* ---------- PRISM v4's scene records (docs/prism_scene_records.md)
+
+The scene as the host's deferred renderer, its path tracer and its baker
+read it (overhaul_research/prism_v4_renderer/design.md, section 1.2): the
+materials, the objects drawn, the opaque draws of the G-buffer, the level's
+geometry once for every consumer, the lights, the decals and the fog. They
+are sent only with display.lighting "raster" or "pathtraced"; with "ce" (the
+default, Classic and Enhanced) none is ever written, so those frames stay
+byte for byte as they were. Specified ahead of any backend: no build writes
+them yet, the host's decoder does not take them (their types are past
+XGPU_STREAM_RECORD_TYPES, so a stream that had one would stop at it as an
+unknown record), and XGPU_STREAM_VERSION is raised by the milestone that
+first sends them (M1), when their types join the list above.
+port/linux/src/xgpu_scene_encode.c fills each from typed values
+(tools/test_scene_records.py checks the layouts and the encoders).
+
+Every record is fixed-width 4-byte fields, as the rest of the stream.
+SCENE_INSTANCE's nodes, SCENE_LIGHTS' lights and SCENE_FOG's planes are
+arrays at a record's end of which only the first count are sent: the
+record's size is the fixed part and those, never the whole capacity. */
+
+enum
+{
+	XGPU_STREAM_SCENE_MATERIAL = XGPU_STREAM_RECORD_TYPES,
+	XGPU_STREAM_SCENE_MATERIAL_ANIMATE,
+	XGPU_STREAM_SCENE_INSTANCE,
+	XGPU_STREAM_GBUFFER_DRAW,
+	XGPU_STREAM_SCENE_STATIC,
+	XGPU_STREAM_SCENE_LIGHTS,
+	XGPU_STREAM_SCENE_DECAL,
+	XGPU_STREAM_SCENE_FOG,
+	XGPU_STREAM_SCENE_RECORD_TYPES,
+};
+
+/* a shader's CE family (its tag group): environment, model, glass, water,
+chicago, generic, meter, plasma */
+enum
+{
+	XGPU_SCENE_FAMILY_SENV,
+	XGPU_SCENE_FAMILY_SOSO,
+	XGPU_SCENE_FAMILY_SGLA,
+	XGPU_SCENE_FAMILY_SWAT,
+	XGPU_SCENE_FAMILY_SCHI,
+	XGPU_SCENE_FAMILY_SOTR,
+	XGPU_SCENE_FAMILY_SMET,
+	XGPU_SCENE_FAMILY_SPLA,
+	XGPU_SCENE_FAMILIES,
+};
+
+/* SCENE_MATERIAL: a shader's material, once per shader per map as it loads
+(and again when a mod changes it): its id (1 on, stable for the map; 0
+none), the 64-bit FNV-1a hash of its tag's path (low word first; the host
+resolves the PRISM material, mod, pack or auto, from it), its family
+(XGPU_SCENE_FAMILY_*), CE's material type (the 33 classes), the shader's
+own flags word as the tag has it, its detail functions (XGPU_SCENE_DETAIL_*:
+8 bits each, CE's numbering), the flags the guest derives
+(XGPU_SCENE_MATERIAL_FLAG_*), its bitmaps' texture ids by slot
+(XGPU_SCENE_BITMAP_*; 0 none; bitmap_count the highest slot used plus one)
+and its scalars by XGPU_SCENE_SCALAR_* (linear colours). Eight bitmap slots
+are every bitmap a family's tag names that the material model reads;
+thirty-two scalars are CE's numbers for them with room for the families'
+odd ones. */
+#define XGPU_SCENE_MATERIAL_BITMAPS 8u
+#define XGPU_SCENE_MATERIAL_SCALARS 32u
+enum
+{
+	XGPU_SCENE_BITMAP_BASE,
+	XGPU_SCENE_BITMAP_PRIMARY_DETAIL,
+	XGPU_SCENE_BITMAP_SECONDARY_DETAIL,
+	XGPU_SCENE_BITMAP_MICRO_DETAIL,
+	XGPU_SCENE_BITMAP_BUMP,
+	/* senv's self-illumination map, soso's multipurpose map */
+	XGPU_SCENE_BITMAP_MULTIPURPOSE,
+	XGPU_SCENE_BITMAP_REFLECTION,
+	/* sgla's tint map, swat's ripples */
+	XGPU_SCENE_BITMAP_EXTRA,
+};
+/* the detail functions' word: primary (bits 0 to 7), secondary (8 to 15),
+micro (16 to 23), each CE's (double-biased multiply, multiply,
+double-biased add) */
+#define XGPU_SCENE_DETAIL_PRIMARY_SHIFT 0
+#define XGPU_SCENE_DETAIL_SECONDARY_SHIFT 8
+#define XGPU_SCENE_DETAIL_MICRO_SHIFT 16
+enum
+{
+	XGPU_SCENE_MATERIAL_FLAG_ALPHA_TESTED = 1,
+	XGPU_SCENE_MATERIAL_FLAG_TWO_SIDED = 2,
+	/* the specular mask is the bump map's alpha, not the base map's */
+	XGPU_SCENE_MATERIAL_FLAG_BUMP_ALPHA_SPECULAR = 4,
+	/* self-illumination animated (SCENE_MATERIAL_ANIMATE follows each frame) */
+	XGPU_SCENE_MATERIAL_FLAG_ANIMATED = 8,
+	/* a light card or lamp surface: radiosity power past zero */
+	XGPU_SCENE_MATERIAL_FLAG_EMITTER = 16,
+	/* the transparent layer's (water and glass) */
+	XGPU_SCENE_MATERIAL_FLAG_TRANSPARENT_LAYER = 32,
+	/* never an occluder of rays (shields, meters, plasma) */
+	XGPU_SCENE_MATERIAL_FLAG_NO_OCCLUSION = 64,
+};
+enum
+{
+	XGPU_SCENE_SCALAR_BUMP_SCALE = 0,
+	XGPU_SCENE_SCALAR_MAP_SCALE = 1,
+	XGPU_SCENE_SCALAR_PRIMARY_DETAIL_SCALE = 2,
+	XGPU_SCENE_SCALAR_SECONDARY_DETAIL_SCALE = 3,
+	XGPU_SCENE_SCALAR_MICRO_DETAIL_SCALE = 4,
+	XGPU_SCENE_SCALAR_SPECULAR_BRIGHTNESS = 5,
+	XGPU_SCENE_SCALAR_PERPENDICULAR_COLOR = 6,     /* rgb */
+	XGPU_SCENE_SCALAR_PARALLEL_COLOR = 9,          /* rgb */
+	XGPU_SCENE_SCALAR_REFLECTION_PERPENDICULAR = 12,
+	XGPU_SCENE_SCALAR_REFLECTION_PARALLEL = 13,
+	XGPU_SCENE_SCALAR_SELF_ILLUMINATION_ON = 14,   /* rgb */
+	XGPU_SCENE_SCALAR_SELF_ILLUMINATION_OFF = 17,  /* rgb */
+	XGPU_SCENE_SCALAR_RADIOSITY_POWER = 20,
+	XGPU_SCENE_SCALAR_RADIOSITY_COLOR = 21,        /* rgb */
+	XGPU_SCENE_SCALAR_TRANSLUCENCY = 24,
+	XGPU_SCENE_SCALAR_TINT = 25,                   /* rgb */
+	XGPU_SCENE_SCALAR_ALPHA_REFERENCE = 28,
+	/* 29 to 31 unused, 0 */
+};
+struct xgpu_stream_scene_material
+{
+	uint32_t header;
+	uint32_t material;
+	uint32_t path_hash[2];
+	uint32_t family, material_type, shader_flags, detail_functions;
+	uint32_t flags, bitmap_count;
+	uint32_t bitmaps[XGPU_SCENE_MATERIAL_BITMAPS];
+	float scalars[XGPU_SCENE_MATERIAL_SCALARS];
+};
+
+/* SCENE_MATERIAL_ANIMATE: each frame, for each animated material drawn
+(its FLAG_ANIMATED), the values CE computes for its draw: the
+self-illumination's three channels' animation (primary, secondary, plasma;
+0 to 1) and a 0; each bitmap slot's texture coordinates' transform this
+frame (two rows of an affine map, u' = row 0 . (u, v, 0, 1), v' = row 1 .
+(u, v, 0, 1); the identity where it does not move); the change colours not
+tied to an object (linear rgb and a 0) */
+#define XGPU_SCENE_CHANGE_COLORS 4u
+struct xgpu_stream_scene_material_animate
+{
+	uint32_t header;
+	uint32_t material;
+	float self_illumination[4];
+	float transforms[XGPU_SCENE_MATERIAL_BITMAPS][2][4];
+	float change_colors[XGPU_SCENE_CHANGE_COLORS][4];
+};
+
+/* SCENE_INSTANCE: each frame, each object drawn: its id (stable across
+frames: the object's datum index; never 0, the level's), its flags
+(XGPU_SCENE_INSTANCE_*), the level of detail the game chose (CE's, 0 super
+low to 4 super high), the mesh store's mesh where one replaces the model (0
+none), its change colours (linear rgb and a 0), and node_count nodes' world
+matrices (three rows of four), this frame's then last frame's (with
+NO_HISTORY, the same twice). CE's models have at most 64 nodes
+(model_definitions.h's MAXIMUM_NODES_PER_MODEL); only node_count are sent. */
+#define XGPU_SCENE_INSTANCE_NODES 64u
+enum
+{
+	XGPU_SCENE_INSTANCE_FIRST_PERSON = 1,
+	XGPU_SCENE_INSTANCE_CINEMATIC = 2,
+	XGPU_SCENE_INSTANCE_SHIELD = 4,
+	XGPU_SCENE_INSTANCE_CAMOUFLAGE = 8,
+	XGPU_SCENE_INSTANCE_CASTS_SHADOW = 16,
+	XGPU_SCENE_INSTANCE_IN_TLAS = 32,
+	/* first seen this frame: no last frame's matrices, no motion */
+	XGPU_SCENE_INSTANCE_NO_HISTORY = 64,
+};
+struct xgpu_stream_scene_node
+{
+	float now[3][4];
+	float last[3][4];
+};
+struct xgpu_stream_scene_instance
+{
+	uint32_t header;
+	uint32_t instance, flags, lod, mesh, node_count;
+	float change_colors[XGPU_SCENE_CHANGE_COLORS][4];
+	struct xgpu_stream_scene_node nodes[XGPU_SCENE_INSTANCE_NODES];
+};
+
+/* GBUFFER_DRAW: before each opaque draw of walk 1, in place of CE's pass
+state for it: the draw that follows (its vertices and indices bound as
+today: mirror segments, the ring, the mesh store, the remodel's buffers;
+CE's vertex program for skinning and texture coordinates) goes into the
+G-buffer with this material and instance (0: the level). surface: the
+level's surface index (SCENE_STATIC's) or, for an object, its geometry (high
+16 bits) and part (low 16); vertex_program: the CE vertex program's id as
+the pipelines name it; flags XGPU_SCENE_DRAW_* */
+enum
+{
+	XGPU_SCENE_DRAW_ALPHA_TESTED = 1,
+	XGPU_SCENE_DRAW_TWO_SIDED = 2,
+	XGPU_SCENE_DRAW_FIRST_PERSON = 4,
+	/* the remodel's geometry, not the stock BSP's */
+	XGPU_SCENE_DRAW_REMODEL = 8,
+};
+struct xgpu_stream_gbuffer_draw
+{
+	uint32_t header;
+	uint32_t material, instance, surface;
+	uint32_t vertex_program, flags, lod, pad;
+};
+
+/* SCENE_STATIC: the level's geometry as drawn (stock or remodel), once
+for every consumer (the G-buffer's shadows, the acceleration structures,
+the baker), a slice at a time as RT_STATIC's: phase XGPU_SCENE_STATIC_BEGIN
+(a BSP's set begins: generation names it, total its triangles), _TRIANGLES
+(count triangles from first, 9 floats each: three corners' x y z in world
+units, at data, size bytes), _ATTRIBUTES (count triangles' attributes from
+first, XGPU_SCENE_STATIC_ATTRIBUTE_WORDS words each:
+XGPU_SCENE_ATTRIBUTE_*), _END (the set is whole), _RELEASE (the map is
+gone). At most XGPU_SCENE_STATIC_SLICE triangles a frame, never while a map
+loads. */
+enum
+{
+	XGPU_SCENE_STATIC_BEGIN,
+	XGPU_SCENE_STATIC_TRIANGLES,
+	XGPU_SCENE_STATIC_ATTRIBUTES,
+	XGPU_SCENE_STATIC_END,
+	XGPU_SCENE_STATIC_RELEASE,
+	XGPU_SCENE_STATIC_PHASES,
+};
+#define XGPU_SCENE_STATIC_SLICE 65536u
+#define XGPU_SCENE_STATIC_ATTRIBUTE_WORDS 16u
+/* a triangle's attributes: its material (SCENE_MATERIAL's id), its surface
+index, its kind (XGPU_RT_TRIANGLE_*) in bits 0 to 7 and its lightmap page
+in 16 to 31, its three corners' lightmap-atlas coordinates (six floats),
+their base map coordinates (six floats), a word unused */
+enum
+{
+	XGPU_SCENE_ATTRIBUTE_MATERIAL = 0,
+	XGPU_SCENE_ATTRIBUTE_SURFACE = 1,
+	XGPU_SCENE_ATTRIBUTE_KIND_PAGE = 2,
+	XGPU_SCENE_ATTRIBUTE_ATLAS = 3,
+	XGPU_SCENE_ATTRIBUTE_BASE = 9,
+};
+struct xgpu_stream_scene_static
+{
+	uint32_t header;
+	uint32_t phase, generation;
+	uint32_t first, count, total;
+	uint32_t data, size;
+};
+
+/* SCENE_LIGHTS: each frame, the light table (design section 1.6): the
+sun, the domes and the sky (from the sky's lights and tag), the fixtures
+and the dynamic lights; the emitters are triangles of SCENE_STATIC by their
+materials. Lights first to first + count of the frame's total (a frame of
+more than XGPU_SCENE_LIGHTS sends several records). A light: its id
+(stable across frames), its type (XGPU_SCENE_LIGHT_*), its class
+(XGPU_SCENE_LIGHT_CLASS_*), its flags (XGPU_SCENE_LIGHT_FLAG_*); position
+(x y z and its radius; a sun's or dome's: the direction toward it and 0),
+direction (a spot's axis and its cone's cosine, else 0 0 0 and 2), radiance
+(linear rgb and its power, CE's colour by power), shape (a sun's angular
+diameter in radians, a dome's half angle's cosine, a spot's inner cone's
+cosine; then 0s). 256 a record holds every fixture and dynamic light a CE
+map has drawn at once with room to spare. */
+#define XGPU_SCENE_LIGHTS 256u
+enum
+{
+	XGPU_SCENE_LIGHT_SUN,
+	XGPU_SCENE_LIGHT_DOME,
+	XGPU_SCENE_LIGHT_SKY,
+	XGPU_SCENE_LIGHT_POINT,
+	XGPU_SCENE_LIGHT_SPOT,
+	XGPU_SCENE_LIGHT_TYPES,
+};
+enum
+{
+	XGPU_SCENE_LIGHT_CLASS_STATIC,
+	XGPU_SCENE_LIGHT_CLASS_ANIMATED,
+	XGPU_SCENE_LIGHT_CLASS_SWITCHABLE,
+	XGPU_SCENE_LIGHT_CLASS_DYNAMIC,
+	XGPU_SCENE_LIGHT_CLASSES,
+};
+enum
+{
+	XGPU_SCENE_LIGHT_FLAG_ON = 1,
+	XGPU_SCENE_LIGHT_FLAG_CASTS_SHADOWS = 2,
+	XGPU_SCENE_LIGHT_FLAG_FIRST_PERSON = 4,
+};
+struct xgpu_stream_scene_light
+{
+	uint32_t id, type, light_class, flags;
+	float position[4];
+	float direction[4];
+	float radiance[4];
+	float shape[4];
+};
+struct xgpu_stream_scene_lights
+{
+	uint32_t header;
+	uint32_t first, count, total;
+	struct xgpu_stream_scene_light lights[XGPU_SCENE_LIGHTS];
+};
+
+/* SCENE_DECAL: each live decal, projected into the G-buffer (design
+section 1.7): its id (stable while it lives), its bitmap's texture id and
+the bitmap's sequence frame, its blend (XGPU_SCENE_DECAL_BLEND_*, CE's
+framebuffer blend functions in their order), its flags
+(XGPU_SCENE_DECAL_FLAG_*), its box (the centre and three axes, each
+scaled by its half extent: across, up, and out of the surface), its colour
+(linear rgb and alpha) and its texture coordinates' rectangle in the bitmap
+(u0 v0 u1 v1) */
+enum
+{
+	XGPU_SCENE_DECAL_BLEND_ALPHA,
+	XGPU_SCENE_DECAL_BLEND_MULTIPLY,
+	XGPU_SCENE_DECAL_BLEND_DOUBLE_MULTIPLY,
+	XGPU_SCENE_DECAL_BLEND_ADD,
+	XGPU_SCENE_DECAL_BLEND_SUBTRACT,
+	XGPU_SCENE_DECAL_BLEND_MIN,
+	XGPU_SCENE_DECAL_BLEND_MAX,
+	XGPU_SCENE_DECAL_BLEND_ALPHA_MULTIPLY_ADD,
+	XGPU_SCENE_DECAL_BLENDS,
+};
+enum
+{
+	XGPU_SCENE_DECAL_FLAG_EMISSIVE = 1,
+	XGPU_SCENE_DECAL_FLAG_NORMAL = 2,
+};
+struct xgpu_stream_scene_decal
+{
+	uint32_t header;
+	uint32_t decal, bitmap, frame, blend, flags;
+	float centre[4];
+	float axes[3][4];
+	float color[4];
+	float rectangle[4];
+};
+
+/* SCENE_FOG: each frame, the fog as a screen pass over the G-buffer's
+depth (design section 1.7): the camera's cluster's atmospheric fog (its
+colour, linear, and maximum density; its start and opaque distances, then
+0s), and the fog planes seen (count of XGPU_SCENE_FOG_PLANES): each its id
+(the BSP's fog plane index), flags (XGPU_SCENE_FOG_FLAG_*), the plane (a
+unit normal out of the fog and its distance: n . p = d), its colour and
+maximum density, and its shape (opaque distance, opaque depth, then 0s).
+Eight is more than any CE cluster sees at once. */
+#define XGPU_SCENE_FOG_PLANES 8u
+enum
+{
+	XGPU_SCENE_FOG_FLAG_ATMOSPHERE = 1,
+	/* the camera is under the plane */
+	XGPU_SCENE_FOG_FLAG_INSIDE = 2,
+};
+struct xgpu_stream_scene_fog_plane
+{
+	uint32_t id, flags, pad[2];
+	float plane[4];
+	float color[4];
+	float shape[4];
+};
+struct xgpu_stream_scene_fog
+{
+	uint32_t header;
+	uint32_t flags, plane_count, pad;
+	float atmosphere_color[4];
+	float atmosphere_range[4];
+	struct xgpu_stream_scene_fog_plane planes[XGPU_SCENE_FOG_PLANES];
+};
+
 /* ---------- the layouts' sizes, alike on both sides */
 
 #define XGPU_STREAM_ASSERT_SIZE(type, size) _Static_assert(sizeof(type) == (size), #type "'s size")
@@ -1974,5 +2336,22 @@ XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_vr_screen_corrections, 4 + 4 * 14);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_vr_frame_record, 44);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_vr_submit, 44 + 8 + 4 * (116 + 8));
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_vr_state, 4 * (2 + 4 + 32 + 3 + 3 + 3 + 1 + 34 + 19 + 1 + 8 + 50 + 80 + 71 + 3 + 39));
+
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_scene_material, 40 + 4 * XGPU_SCENE_MATERIAL_BITMAPS +
+	4 * XGPU_SCENE_MATERIAL_SCALARS);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_scene_material_animate, 24 + XGPU_SCENE_MATERIAL_BITMAPS * 32 +
+	XGPU_SCENE_CHANGE_COLORS * 16);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_scene_node, 96);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_scene_instance, 24 + XGPU_SCENE_CHANGE_COLORS * 16 +
+	XGPU_SCENE_INSTANCE_NODES * 96);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_gbuffer_draw, 32);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_scene_static, 32);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_scene_light, 80);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_scene_lights, 16 + XGPU_SCENE_LIGHTS * 80);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_scene_decal, 120);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_scene_fog_plane, 64);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_scene_fog, 48 + XGPU_SCENE_FOG_PLANES * 64);
+/* (the scene records' types still fit the header's 8 bits) */
+_Static_assert(XGPU_STREAM_SCENE_RECORD_TYPES <= 256, "the scene records' types fit a header");
 
 #endif
