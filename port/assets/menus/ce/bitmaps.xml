@@ -947,4 +947,7 @@
 	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_pt/header_prism_pt_settings">
 		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_pt/header_prism_pt_settings.png" width="512" height="64"/>
 	</bitmap>
+	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/header_prism_lighting_settings">
+		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/header_prism_lighting_settings.png" width="512" height="64"/>
+	</bitmap>
 </menus>
