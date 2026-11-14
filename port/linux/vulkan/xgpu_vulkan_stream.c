@@ -63,6 +63,7 @@ its swapchain.
 #include "xgpu_vulkan_store.h"
 #include "xgpu_vulkan_meshes.h"
 #include "xgpu_vulkan_rt.h"
+#include "xgpu_vulkan_bake.h"
 #include "xgpu_vulkan_scene.h"
 #ifdef HALO_VR
 #include "host_vulkan_vr.h"
@@ -485,9 +486,10 @@ static struct
 	/* the twin drawn now (draw_pipeline's), and its kind */
 	struct stream_pipeline *drawing;
 	uint8_t kind;
-	/* GBUFFER_DRAW's, and the uniforms' last made of them */
-	uint32_t material, instance, flags;
-	uint32_t uniform_key[2];
+	/* GBUFFER_DRAW's (with the level's draw's lightmap page + 1), and the
+	uniforms' last made of them */
+	uint32_t material, instance, flags, lightmap;
+	uint32_t uniform_key[3];
 	struct gbuffer_material materials[GBUFFER_MATERIALS];
 	uint32_t material_count, twins, refused;
 	/* the second target (motion, emissive light, distance: xgpu_stream.h's
@@ -2012,6 +2014,7 @@ static void stream_gbuffer_draw(void *context, const struct xgpu_stream_gbuffer_
 	gbuffer.material = record->material;
 	gbuffer.instance = record->instance;
 	gbuffer.flags = record->flags;
+	gbuffer.lightmap = record->instance ? 0 : record->lightmap;
 }
 
 /* SCENE_INSTANCE: an object's nodes this frame and last, kept by its id for
@@ -2210,7 +2213,7 @@ static int gbuffer_motion(float motion[XGPU_SPIRV_GBUFFER_UNIFORMS - 2][4])
 
 /* the G-buffer twin's uniforms' fourth word, low and high halves: the
 material, its tier and present, and the instance */
-static void gbuffer_key(uint32_t key[2], const struct gbuffer_material **material)
+static void gbuffer_key(uint32_t key[3], const struct gbuffer_material **material)
 {
 	const struct gbuffer_material *found = gbuffer.material && gbuffer.material < GBUFFER_MATERIALS &&
 		gbuffer.materials[gbuffer.material].known ? &gbuffer.materials[gbuffer.material] : NULL;
@@ -2219,6 +2222,7 @@ static void gbuffer_key(uint32_t key[2], const struct gbuffer_material **materia
 
 	key[0] = (gbuffer.material & 0xfffu) | (tier << 12) | XGPU_GBUFFER_PRESENT;
 	key[1] = gbuffer.instance & 0xffffu;
+	key[2] = gbuffer.kind == XGPU_SPIRV_GBUFFER_LEVEL ? gbuffer.lightmap & 0x7fffu : 0;
 	if (material)
 		*material = found;
 }
@@ -2226,7 +2230,7 @@ static void gbuffer_key(uint32_t key[2], const struct gbuffer_material **materia
 static void gbuffer_uniforms(float uniforms[XGPU_SPIRV_GBUFFER_UNIFORMS][4])
 {
 	const struct gbuffer_material *material;
-	uint32_t key[2], flags;
+	uint32_t key[3], flags;
 
 	gbuffer_key(key, &material);
 	flags = (gbuffer.kind == XGPU_SPIRV_GBUFFER_LEVEL ? XGPU_GBUFFER_FLAG_LEVEL : 0) |
@@ -2239,7 +2243,9 @@ static void gbuffer_uniforms(float uniforms[XGPU_SPIRV_GBUFFER_UNIFORMS][4])
 	uniforms[1][0] = (float)key[0];
 	uniforms[1][1] = (float)key[1];
 	uniforms[1][2] = (float)gbuffer_motion(gbuffer.motion);
-	uniforms[1][3] = 0.0f;
+	/* (the level's draw's lightmap page + 1, which its twin writes beside its
+	lightmap coordinates: xgpu_spirv.c's gbuffer_extras) */
+	uniforms[1][3] = (float)key[2];
 	memcpy(uniforms + 2, gbuffer.motion, sizeof(gbuffer.motion));
 }
 
@@ -4182,7 +4188,7 @@ now, every one the frame needs: the G-buffer is whole from its first frame),
 an object's or the level's by the instance GBUFFER_DRAW gave; else none */
 static void gbuffer_draw(const struct draw_input *input)
 {
-	uint32_t id = stream.pipeline_id, key[2];
+	uint32_t id = stream.pipeline_id, key[3];
 	const struct xgpu_stream_pipeline_define *definition = stream.definition;
 	struct xgpu_stream_pipeline_define twin;
 	struct xgpu_vulkan_pipeline_description pipeline = stream.pipeline;
@@ -4843,6 +4849,28 @@ static int gbuffer_images(const struct stream_target *color)
 	return gbuffer.words && gbuffer.depth && gbuffer.extras;
 }
 
+/* display.lighting "raster": the resolve's light lit from the bake
+(xgpu_vulkan_bake.c), the G-buffer's targets and cameras its */
+struct raster_context
+{
+	struct xgpu_vulkan_image *words, *extras;
+	const struct xgpu_stream_scene_view *view;
+	uint32_t bake_view;
+};
+
+static struct xgpu_vulkan_image *raster_relight(struct xgpu_vulkan_image *light, void *context)
+{
+	struct raster_context *raster = (struct raster_context *)context;
+
+	return xgpu_vulkan_bake_raster(light, raster->words, raster->extras, raster->view, raster->bake_view);
+}
+
+static void stream_prism_bake(void *context, const struct xgpu_stream_prism_bake *record, const void *data)
+{
+	(void)context;
+	xgpu_vulkan_bake_record(record, data);
+}
+
 static void stream_gbuffer_phase(void *context, uint32_t value)
 {
 	struct stream_target *color = target_get(stream.color);
@@ -4931,14 +4959,28 @@ static void stream_gbuffer_phase(void *context, uint32_t value)
 		/* (the statistics' split: the opaque surfaces' passes before it) */
 		xgpu_vulkan_gpu_time_split();
 		{
-			int view = (int)(value >> XGPU_GBUFFER_PHASE_VIEW_SHIFT);
+			int view = (int)((value & XGPU_GBUFFER_PHASE_VIEW_MASK) >> XGPU_GBUFFER_PHASE_VIEW_SHIFT);
+			int raster = (value & XGPU_GBUFFER_PHASE_RASTER) != 0;
 			struct stream_target *depth = target_get(stream.depth);
 			/* (the G-buffer's, where it was drawn for this window) */
 			struct xgpu_vulkan_image *words = gbuffer.drawn && gbuffer.color == stream.color &&
 				gbuffer.width == color->width && gbuffer.height == color->height ? gbuffer.words : NULL;
+			struct raster_context context;
 
+			/* (display.lighting "raster": the light lit from the bake first,
+			xgpu_vulkan_bake.c; its views shown in the light's place) */
+			context.words = words;
+			context.extras = words ? gbuffer.extras : NULL;
+			context.view = gbuffer.view_known ? &gbuffer.view : NULL;
+			context.bake_view = raster && view >= (int)XGPU_GBUFFER_VIEW_BAKE_LIGHT &&
+				view <= (int)XGPU_GBUFFER_VIEW_BAKE_VOLUME ? (uint32_t)view : 0;
+			if (context.bake_view)
+				view = 2;
+			else if (view >= (int)XGPU_GBUFFER_VIEW_BAKE_LIGHT)
+				view = 0;
 			xgpu_vulkan_post_deferred_resolve(color->image, deferred.base, deferred.additions, words,
-				words ? gbuffer.extras : NULL, depth && depth->depth && !depth->multisampled ? depth->image : NULL, view);
+				words ? gbuffer.extras : NULL, depth && depth->depth && !depth->multisampled ? depth->image : NULL, view,
+				raster && words ? raster_relight : NULL, &context);
 			/* (a view: nothing more over it this frame) */
 			deferred.hold = view != 0;
 		}
@@ -5242,6 +5284,7 @@ const struct host_render_backend *xgpu_vulkan_stream_backend(void)
 		backend.gbuffer_draw = stream_gbuffer_draw;
 		backend.scene_instance = stream_scene_instance;
 		backend.scene_view = stream_scene_view;
+		backend.prism_bake = stream_prism_bake;
 		backend.panini = stream_panini;
 		/* display.ambient_occlusion "world" (#578, docs/world-ao.md): the
 		field's 3D image (XGPU_SPIRV_BINDING_WORLD_SDF) and the window's block

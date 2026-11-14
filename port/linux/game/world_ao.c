@@ -29,6 +29,7 @@ the Classic preset's "off") draws exactly as before.
 
 /* display.lighting "ce_deferred"'s G-buffer pass (prism_deferred.c) */
 void prism_deferred_object(long object_index);
+void prism_deferred_lightmap(void const *lightmap_bitmap);
 void prism_deferred_first_person(int drawing);
 
 const char *config_string(const char *name);
@@ -58,8 +59,10 @@ void prism_rt_frame_begin(void);
 void prism_scene_static_frame(void);
 void prism_scene_static_map_unloaded(void);
 void prism_scene_lights_frame(void);
+void prism_bake_frame(void);
 void prism_scene_lights_map_unloaded(void);
 void prism_rt_map_unloaded(void);
+void prism_bake_map_unloaded(void);
 unsigned long long SDL_GetTicksNS(void);
 /* (PRISM v2's model light: prism_light.c) */
 void prism_light_window_begin(float const camera[3]);
@@ -146,6 +149,7 @@ static void world_ao_scene_release(void);
 void world_ao_map_unloaded(void)
 {
 	prism_rt_map_unloaded();
+	prism_bake_map_unloaded();
 	prism_scene_static_map_unloaded();
 	prism_scene_lights_map_unloaded();
 	prism_lightmaps_map_unloaded();
@@ -340,12 +344,17 @@ void world_ao_frame_begin(void)
 	if (!world_ao_mode())
 	{
 		prism_scene_lights_frame();
+		/* (display.lighting "raster": the baker's scene and rig, and its
+		control, prism_bake.c) */
+		prism_rt_frame_begin();
+		prism_bake_frame();
 		return;
 	}
 	world_scene_frame_begin();
 	/* (SCENE_LIGHTS: the dynamic lights world_scene has just listed) */
 	prism_scene_lights_frame();
 	prism_rt_frame_begin();
+	prism_bake_frame();
 	/* (not with debug.world_ao_test's made-up field, which the level's
 	would overwrite in the backend's one texture) */
 	test = config_string("debug.world_ao_test");
@@ -737,8 +746,10 @@ void world_ao_lightmap_begin(void const *lightmap_bitmap)
 
 	/* (display.prism_lightmaps' finer copies: prism_lightmaps.c) */
 	prism_lightmaps_begin(lightmap_bitmap);
-	/* (display.lighting "ce_deferred": the level's, in the G-buffer) */
+	/* (display.lighting "ce_deferred": the level's, in the G-buffer, and the
+	page its draws that follow are lit from) */
 	prism_deferred_object(-1);
+	prism_deferred_lightmap(lightmap_bitmap);
 	/* (the structure's: none of the objects' shapes its own; its page's
 	layer where the lightmap draws take their reference, or none) */
 	if (!world_ao.window)

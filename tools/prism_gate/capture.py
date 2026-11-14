@@ -153,9 +153,38 @@ def equivalence_timeline(scene):
     return t
 
 
+# M2's bake (docs/prism_gates.md, docs/prism_bake.md): display.lighting "raster" read from a bake made before
+# (the run's HALO_BAKE_FOLDER; display.bake "off": nothing baked in the run), held while the bake loads, then at each
+# probe pose PRISM Raster's frame and the views the gate puts the bake's light together from (the light less the
+# sun's, the sun's visibility, the base colour, the normal, the instances: gate.py bake), and Classic's frame
+BAKE_VIEWS = (("raster", ('prism_set "debug.gbuffer_view off"',)),
+              ("light", ('prism_set "debug.gbuffer_view bake_light"',)),
+              ("sun", ('prism_set "debug.gbuffer_view bake_sun"',)),
+              ("base", ('prism_set "debug.gbuffer_view base"',)),
+              ("normal", ('prism_set "debug.gbuffer_view normal"',)),
+              ("instance", ('prism_set "debug.gbuffer_view instance"',)))
+BAKE_LOAD_FRAMES = 600
+
+
+def bake_timeline(scene):
+    t = begin(scene)
+    poses = paths.move_poses(scene["keys"], scene["steps"])
+    t.at('prism_set "display.lighting raster"')
+    t.hold(scene["keys"][0], BAKE_LOAD_FRAMES)
+    for index, step in enumerate(probe_steps(scene)):
+        for name, commands in BAKE_VIEWS:
+            t.at(*commands)
+            t.hold(poses[step - 1], scene["state_settle"] // 2, save=f"bake/p{index}_{name}.png")
+    # (Classic last: leaving raster lets the level's scene go, which raster's next frame would build again)
+    t.at('prism_set "debug.gbuffer_view off"', 'prism_set "display.lighting ce"')
+    for index, step in enumerate(probe_steps(scene)):
+        t.hold(poses[step - 1], scene["state_settle"] // 2, save=f"bake/p{index}_ce.png")
+    return t
+
+
 def run(scene, timeline, out, kind, args):
     out.mkdir(parents=True, exist_ok=True)
-    for folder in ("moves", "refs", "equivalence"):
+    for folder in ("moves", "refs", "equivalence", "bake"):
         (out / folder).mkdir(exist_ok=True)
     started = time.time()
     env = dict(kv.split("=", 1) for kv in args.env)
@@ -186,6 +215,9 @@ def capture(scene, what, args):
     if what == "equivalence":
         run(scene, equivalence_timeline(scene), out, "equivalence", args)
         return
+    if what == "bake":
+        run(scene, bake_timeline(scene), out, "bake", args)
+        return
     if what in ("moves", "all"):
         if scene.get("live"):
             for state in args.states:
@@ -198,7 +230,7 @@ def capture(scene, what, args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("what", choices=("moves", "refs", "all", "equivalence"))
+    parser.add_argument("what", choices=("moves", "refs", "all", "equivalence", "bake"))
     parser.add_argument("scenes", nargs="*", help="scene ids (default: every scene)")
     parser.add_argument("--stage", required=True, help="a Linux release tree (tools/linux_package.py tree)")
     parser.add_argument("--data", required=True, help="a data folder: maps, mods, prism_world, prism_lightmaps, "

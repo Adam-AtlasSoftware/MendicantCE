@@ -390,7 +390,7 @@ static struct
 	uint32_t garbage_count;
 	/* the frame's settings (RT_FRAME) and whether one came this frame */
 	struct xgpu_stream_rt_frame frame;
-	int frame_active;
+	int frame_active, frame_received;
 	/* the structure: the set being received (its triangles, their
 	attributes, the materials, the alpha maps) and the one traced: its
 	opaque triangles' structure and its alpha-tested ones' (traced with
@@ -972,12 +972,25 @@ void xgpu_vulkan_rt_frame(const struct xgpu_stream_rt_frame *record)
 	rt.object_frame++;
 	entries_age();
 	rt.frame = *record;
+	rt.frame_received = 1;
 	rt.frame_active = record->mode != XGPU_RT_OFF;
 	rt.slot_ready = 0;
 	if (rt.frame_active && slot_take())
 		rt.slot_ready = 1;
 	if (!rt.slot_ready)
 		rt.frame_active = 0;
+}
+
+int xgpu_vulkan_rt_scene(uint32_t *generation, const float **materials, uint32_t *material_count,
+	const uint32_t **alpha, uint32_t *alpha_words, const struct xgpu_stream_rt_frame **frame)
+{
+	*generation = rt.static_generation;
+	*materials = rt.static_materials.mapped ? (const float *)rt.static_materials.mapped : NULL;
+	*material_count = rt.material_count;
+	*alpha = rt.static_alpha.mapped ? (const uint32_t *)rt.static_alpha.mapped : NULL;
+	*alpha_words = rt.static_alpha.mapped ? (uint32_t)(rt.static_alpha.size / 4) : 0;
+	*frame = rt.frame_received ? &rt.frame : NULL;
+	return rt.made && rt.static_triangles > 0;
 }
 
 int xgpu_vulkan_rt_active(void)

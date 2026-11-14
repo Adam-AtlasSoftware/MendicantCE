@@ -805,7 +805,8 @@ void xgpu_backend_scene_material(unsigned long material, const unsigned long has
 	}
 }
 
-void xgpu_backend_gbuffer_draw(unsigned long material, unsigned long instance, unsigned long flags)
+void xgpu_backend_gbuffer_draw(unsigned long material, unsigned long instance, unsigned long flags,
+	unsigned long lightmap)
 {
 	struct xgpu_stream_gbuffer_draw *record_body;
 
@@ -817,6 +818,25 @@ void xgpu_backend_gbuffer_draw(unsigned long material, unsigned long instance, u
 	record_body->material = (uint32_t)material;
 	record_body->instance = (uint32_t)instance;
 	record_body->flags = (uint32_t)flags;
+	record_body->lightmap = (uint32_t)lightmap;
+}
+
+void xgpu_backend_prism_bake(const struct xgpu_stream_prism_bake *bake, const void *data, unsigned long size)
+{
+	struct xgpu_stream_prism_bake *record_body;
+	unsigned char *place;
+	uint32_t bytes = data ? (uint32_t)size : 0, header;
+
+	if (!stream.open || stream.preparing || !bake || bake->phase >= XGPU_BAKE_PHASES || size > 16u * XGPU_BAKE_SLICE)
+		return;
+	record_body = record_data(XGPU_STREAM_PRISM_BAKE, sizeof(*record_body), bytes ? carried_one(bytes) : 0, &place);
+	/* (the header record_data wrote: its size the data's too) */
+	header = record_body->header;
+	*record_body = *bake;
+	record_body->header = header;
+	record_body->map_name[XGPU_BAKE_NAME - 1] = 0;
+	record_body->size = bytes;
+	record_body->data = bytes ? carry_one(&place, data, bytes) : 0;
 }
 
 /* a SCENE_STATIC slice's bytes by its phase (0 for none) */

@@ -58,6 +58,8 @@ nothing changes.
 #include "tag_files/tag_files.h"
 #include "tag_files/tag_groups.h"
 #include "objects/objects.h"
+#include "bitmaps/bitmap_group.h"
+#include "structures/structure_bsp_definitions.h"
 #include "render/render_cameras.h"
 #include "render_cameras_internal.h"
 
@@ -72,7 +74,8 @@ void xgpu_backend_gbuffer_phase(unsigned long phase);
 void xgpu_backend_scene_material(unsigned long material, const unsigned long hash[2], int family, int material_type,
 	unsigned long shader_flags, unsigned long detail_functions, unsigned long flags, const float *scalars,
 	int scalar_count);
-void xgpu_backend_gbuffer_draw(unsigned long material, unsigned long instance, unsigned long flags);
+void xgpu_backend_gbuffer_draw(unsigned long material, unsigned long instance, unsigned long flags,
+	unsigned long lightmap);
 void xgpu_backend_scene_instance(unsigned long instance, unsigned long flags, unsigned long lod, const float *now,
 	const float *last, unsigned long node_count);
 /* d3d8_device.c's (the window's view's pixels are the device's) */
@@ -85,6 +88,7 @@ void halo_scene_view(short x0, short y0, short x1, short y1, float const camera[
 #define PHASE_GBUFFER_BEGIN 4ul
 #define PHASE_GBUFFER_END 5ul
 #define PHASE_VIEW_SHIFT 8
+#define PHASE_RASTER 0x10000ul
 
 /* xgpu_stream.h's SCENE_MATERIAL's families, flags and scalars, and
 GBUFFER_DRAW's flags */
@@ -146,7 +150,7 @@ the nodes an instance sends (xgpu_stream.h's XGPU_SCENE_INSTANCE_NODES) */
 static struct
 {
 	unsigned long settings_read;
-	boolean wanted;
+	boolean wanted, raster;
 	unsigned long view;
 	/* the window's phase sent last (0 none: the light) */
 	unsigned long phase;
@@ -160,8 +164,8 @@ static struct
 	unsigned short slot_materials[MATERIAL_SLOTS];
 	/* the G-buffer pass's draws' instance and flags now, and the record sent
 	last (its material, instance and flags; none at the pass's start) */
-	unsigned long instance, draw_flags;
-	unsigned long sent_material, sent_instance, sent_flags;
+	unsigned long instance, draw_flags, lightmap;
+	unsigned long sent_material, sent_instance, sent_flags, sent_lightmap;
 	boolean sent;
 	/* SCENE_INSTANCE: the G-buffer passes counted; each object's (by its
 	absolute index) nodes as last sent, their count, the pass they were
@@ -185,12 +189,20 @@ static void settings_read(
 	}
 	prism_deferred.settings_read = config_changes() + 1;
 	value = config_string("display.lighting");
-	prism_deferred.wanted = value && !strcmp(value, "ce_deferred");
+	prism_deferred.raster = value && !strcmp(value, "raster");
+	prism_deferred.wanted = value && (!strcmp(value, "ce_deferred") || prism_deferred.raster);
 	value = config_string("debug.gbuffer_view");
 	prism_deferred.view = !value ? 0 : !strcmp(value, "base") ? 1 : !strcmp(value, "light") ? 2 :
 		!strcmp(value, "additions") ? 3 : !strcmp(value, "albedo") ? 4 : !strcmp(value, "normal") ? 5 :
 		!strcmp(value, "roughness") ? 6 : !strcmp(value, "metal") ? 7 : !strcmp(value, "material_source") ? 8 :
-		!strcmp(value, "instance") ? 9 : !strcmp(value, "motion") ? 10 : !strcmp(value, "emissive") ? 11 : 0;
+		!strcmp(value, "instance") ? 9 : !strcmp(value, "motion") ? 10 : !strcmp(value, "emissive") ? 11 :
+		!strcmp(value, "bake_light") ? 12 : !strcmp(value, "bake_sun") ? 13 : !strcmp(value, "bake_texels") ? 14 :
+		!strcmp(value, "bake_volume") ? 15 : 0;
+	/* (the bake's views: Raster's alone) */
+	if (prism_deferred.view >= 12 && !prism_deferred.raster)
+	{
+		prism_deferred.view = 0;
+	}
 
 	return;
 }
@@ -555,6 +567,7 @@ void prism_deferred_object(
 	absolute = object_index == -1 ? 0 : (unsigned long)DATUM_INDEX_TO_ABSOLUTE_INDEX(object_index) + 1;
 	prism_deferred.instance = absolute >= INSTANCE_FIRST_PERSON ? INSTANCE_FIRST_PERSON - 1 : absolute;
 	prism_deferred.draw_flags = 0;
+	prism_deferred.lightmap = 0;
 	/* (SCENE_INSTANCE: the object's nodes, before its draws) */
 	if (absolute)
 	{
@@ -573,6 +586,7 @@ void prism_deferred_first_person(
 	}
 	prism_deferred.instance = drawing ? INSTANCE_FIRST_PERSON : 0;
 	prism_deferred.draw_flags = drawing ? DRAW_FIRST_PERSON : 0;
+	prism_deferred.lightmap = 0;
 
 	return;
 }
@@ -588,7 +602,8 @@ void prism_deferred_shader(
 	}
 	material = material_of(shader);
 	if (prism_deferred.sent && material == prism_deferred.sent_material &&
-		prism_deferred.instance == prism_deferred.sent_instance && prism_deferred.draw_flags == prism_deferred.sent_flags)
+		prism_deferred.instance == prism_deferred.sent_instance && prism_deferred.draw_flags == prism_deferred.sent_flags &&
+		prism_deferred.lightmap == prism_deferred.sent_lightmap)
 	{
 		return;
 	}
@@ -596,7 +611,8 @@ void prism_deferred_shader(
 	prism_deferred.sent_material = material;
 	prism_deferred.sent_instance = prism_deferred.instance;
 	prism_deferred.sent_flags = prism_deferred.draw_flags;
-	xgpu_backend_gbuffer_draw(material, prism_deferred.instance, prism_deferred.draw_flags);
+	prism_deferred.sent_lightmap = prism_deferred.lightmap;
+	xgpu_backend_gbuffer_draw(material, prism_deferred.instance, prism_deferred.draw_flags, prism_deferred.lightmap);
 
 	return;
 }
@@ -607,6 +623,45 @@ boolean prism_deferred_wanted(
 	settings_read();
 
 	return prism_deferred.wanted;
+}
+
+boolean prism_deferred_raster(
+	void)
+{
+	settings_read();
+
+	return prism_deferred.raster;
+}
+
+void prism_deferred_lightmap(
+	void const *lightmap_bitmap)
+{
+	struct structure_bsp *bsp;
+	struct bitmap_group *group;
+	char const *first;
+
+	if (!render_gbuffer_pass)
+	{
+		return;
+	}
+	/* (its page: its index among the BSP's lightmap bitmaps, + 1) */
+	prism_deferred.lightmap = 0;
+	bsp = global_structure_bsp_index_get() != NONE ? global_structure_bsp_get() : NULL;
+	if (!lightmap_bitmap || !bsp || bsp->lightmap_group.index == NONE ||
+		!(group = (struct bitmap_group *)tag_get('bitm', bsp->lightmap_group.index)) || !group->bitmaps.address)
+	{
+		return;
+	}
+	first = (char const *)group->bitmaps.address;
+	if ((char const *)lightmap_bitmap >= first &&
+		(char const *)lightmap_bitmap < first + group->bitmaps.count * (long)sizeof(struct bitmap_data) &&
+		((char const *)lightmap_bitmap - first) % (long)sizeof(struct bitmap_data) == 0)
+	{
+		prism_deferred.lightmap = (unsigned long)(((char const *)lightmap_bitmap - first) /
+			(long)sizeof(struct bitmap_data)) + 1;
+	}
+
+	return;
 }
 
 void prism_deferred_phase(
@@ -623,7 +678,7 @@ void prism_deferred_phase(
 		value = PHASE_ADDS;
 		break;
 	default:
-		value = PHASE_RESOLVE | (prism_deferred.view << PHASE_VIEW_SHIFT);
+		value = PHASE_RESOLVE | (prism_deferred.view << PHASE_VIEW_SHIFT) | (prism_deferred.raster ? PHASE_RASTER : 0);
 		break;
 	}
 	prism_deferred.phase = value;

@@ -162,7 +162,8 @@ XGPU_SCENE_SCALAR_*), and the material, instance and flags
 void xgpu_backend_scene_material(unsigned long material, const unsigned long hash[2], int family, int material_type,
 	unsigned long shader_flags, unsigned long detail_functions, unsigned long flags, const float *scalars,
 	int scalar_count);
-void xgpu_backend_gbuffer_draw(unsigned long material, unsigned long instance, unsigned long flags);
+void xgpu_backend_gbuffer_draw(unsigned long material, unsigned long instance, unsigned long flags,
+	unsigned long lightmap);
 /* SCENE_STATIC (xgpu_stream.h): the level's geometry as drawn, a slice at
 a time (port/linux/game/prism_scene_static.c): phase XGPU_SCENE_STATIC_*,
 count items from first of total (triangles, attributes, pages or levels'
@@ -178,6 +179,12 @@ void xgpu_backend_scene_lights(unsigned long first, unsigned long total, const v
 this frame's and last (the record whole, its header written here) */
 struct xgpu_stream_scene_view;
 void xgpu_backend_scene_view(const struct xgpu_stream_scene_view *view);
+/* PRISM_BAKE (xgpu_stream.h; port/linux/game/prism_bake.c): the record
+whole but its data (its phase, counts and fields as the guest filled them;
+header, data and size written here), and size bytes of data carried with it
+(NULL none) */
+struct xgpu_stream_prism_bake;
+void xgpu_backend_prism_bake(const struct xgpu_stream_prism_bake *bake, const void *data, unsigned long size);
 /* SCENE_INSTANCE: an object drawn (its id, flags XGPU_SCENE_INSTANCE_*, CE's
 level of detail), node_count of its nodes' matrices this frame and last
 (three rows of four each: now, then last; last NULL: none, NO_HISTORY) */

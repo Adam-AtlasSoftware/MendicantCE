@@ -240,6 +240,7 @@ static const uint32_t record_minimum[XGPU_STREAM_RECORD_TYPES] =
 	[XGPU_STREAM_SCENE_DECAL] = sizeof(struct xgpu_stream_scene_decal),
 	[XGPU_STREAM_SCENE_FOG] = offsetof(struct xgpu_stream_scene_fog, planes),
 	[XGPU_STREAM_SCENE_VIEW] = sizeof(struct xgpu_stream_scene_view),
+	[XGPU_STREAM_PRISM_BAKE] = sizeof(struct xgpu_stream_prism_bake),
 	[XGPU_STREAM_GAMMA] = sizeof(struct xgpu_stream_value),
 	[XGPU_STREAM_PANINI] = sizeof(struct xgpu_stream_panini),
 	[XGPU_STREAM_WORLD_AO_WINDOW] = sizeof(struct xgpu_stream_world_ao_window),
@@ -579,6 +580,21 @@ static int decode_record(struct host_render_decoder *decoder, const unsigned cha
 	case XGPU_STREAM_SCENE_VIEW:
 		CALL(scene_view, (const struct xgpu_stream_scene_view *)start);
 		break;
+	case XGPU_STREAM_PRISM_BAKE:
+	{
+		const struct xgpu_stream_prism_bake *bake = (const void *)start;
+		const void *data = NULL;
+		uint64_t stride = bake->phase == XGPU_BAKE_REACH_INPUT ? 4 : 0;
+
+		if (bake->phase >= XGPU_BAKE_PHASES || bake->count > XGPU_BAKE_SLICE ||
+			(bake->size && (uint64_t)bake->count * stride != bake->size) ||
+			(bake->size && !data_inside(decoder, start, size, bake->data, bake->size)))
+			return XGPU_STREAM_ERROR_BOUNDS;
+		if (bake->size)
+			data = host_pointer(bake->data);
+		CALL(prism_bake, bake, data);
+		break;
+	}
 	case XGPU_STREAM_SCENE_MATERIAL_ANIMATE:
 	case XGPU_STREAM_SCENE_DECAL:
 	case XGPU_STREAM_SCENE_FOG:

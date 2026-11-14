@@ -55,7 +55,7 @@ static void layout(void)
 	FIELD(xgpu_stream_gbuffer_draw, vertex_program);
 	FIELD(xgpu_stream_gbuffer_draw, flags);
 	FIELD(xgpu_stream_gbuffer_draw, lod);
-	FIELD(xgpu_stream_gbuffer_draw, pad);
+	FIELD(xgpu_stream_gbuffer_draw, lightmap);
 	SIZE(xgpu_stream_scene_static);
 	FIELD(xgpu_stream_scene_static, header);
 	FIELD(xgpu_stream_scene_static, phase);
@@ -114,6 +114,27 @@ static void layout(void)
 	FIELD(xgpu_stream_scene_view, last);
 	FIELD(xgpu_stream_scene_view, corners);
 	FIELD(xgpu_stream_scene_view, last_corners);
+	SIZE(xgpu_stream_prism_bake);
+	FIELD(xgpu_stream_prism_bake, header);
+	FIELD(xgpu_stream_prism_bake, phase);
+	FIELD(xgpu_stream_prism_bake, generation);
+	FIELD(xgpu_stream_prism_bake, first);
+	FIELD(xgpu_stream_prism_bake, count);
+	FIELD(xgpu_stream_prism_bake, total);
+	FIELD(xgpu_stream_prism_bake, data);
+	FIELD(xgpu_stream_prism_bake, size);
+	FIELD(xgpu_stream_prism_bake, mode);
+	FIELD(xgpu_stream_prism_bake, quality);
+	FIELD(xgpu_stream_prism_bake, request);
+	FIELD(xgpu_stream_prism_bake, flags);
+	FIELD(xgpu_stream_prism_bake, map_checksum);
+	FIELD(xgpu_stream_prism_bake, bsp_index);
+	FIELD(xgpu_stream_prism_bake, folder);
+	FIELD(xgpu_stream_prism_bake, status);
+	FIELD(xgpu_stream_prism_bake, budget_milliseconds);
+	FIELD(xgpu_stream_prism_bake, threshold);
+	FIELD(xgpu_stream_prism_bake, pad);
+	FIELD(xgpu_stream_prism_bake, map_name);
 }
 
 /* (the bytes, 4-byte aligned) */
@@ -274,6 +295,7 @@ static void constants(void)
 	printf("scene_decal %u\n", (unsigned)XGPU_STREAM_SCENE_DECAL);
 	printf("scene_fog %u\n", (unsigned)XGPU_STREAM_SCENE_FOG);
 	printf("scene_view %u\n", (unsigned)XGPU_STREAM_SCENE_VIEW);
+	printf("prism_bake %u\n", (unsigned)XGPU_STREAM_PRISM_BAKE);
 	printf("scene_record_types %u\n", (unsigned)XGPU_STREAM_SCENE_RECORD_TYPES);
 }
 

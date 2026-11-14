@@ -10,7 +10,9 @@
   "material_source_coverage": 1.0,
   "ghost_frames": 4,
   "sky_most": 0.8,
-  "reference_noise": 0.001
+  "reference_noise": 0.001,
+  "bake_flip": 0.05,
+  "raster_flip": 0.15
  },
  "bake": {
   "noise": 0.01,

@@ -301,7 +301,7 @@ DEFERRED_RESOLVE_SOURCE = (
     "\t\telse if (view == 10 && bounds.z > 0.5)\n"
     "\t\t{\n"
     "\t\t\tvec2 motion = unpackHalf2x16(words.x);\n"
-    "\t\t\tbool history = unpackHalf2x16(words.z).y > 0.5;\n"
+    "\t\t\tbool history = (words.z & 0x10000u) != 0u;\n"
     "\t\t\tcolor = history ? vec3(clamp(motion / 16.0 + 0.5, 0.0, 1.0), 0.5) : vec3(0.0, 0.0, 1.0);\n"
     "\t\t\tif (words.w == 0u)\n"
     "\t\t\t\tcolor = vec3(0.0);\n"

@@ -721,8 +721,47 @@ static const struct config_setting config_settings[] =
 		"targets of their own (the light, the base colour, the specular and\n"
 		"reflection additions) and the frame put together from them before\n"
 		"the transparent geometry, to prove they carry every surface (the\n"
-		"picture is Classic's up to rounding and the decals). Read each frame.\n"
-		"Vulkan only; no anti-aliasing by multisampling." },
+		"picture is Classic's up to rounding and the decals). \"raster\" PRISM\n"
+		"Raster: the same deferred core lit from this machine's own bake of\n"
+		"the level (docs/prism_bake.md: the baked light at each pixel's\n"
+		"normal, the sun's sharp shadows from the baked sun mask, the objects\n"
+		"from the irradiance volume; CE's light where the bake has nothing\n"
+		"yet), no ray tracing while playing; the bake (display.bake) needs a\n"
+		"graphics card with ray tracing. Read each frame. Vulkan only; no\n"
+		"anti-aliasing by multisampling." },
+	{ "display.bake", _config_string, "\"auto\"", "HALO_BAKE", _environment_value, _platform_desktop,
+		"PRISM's in-game baker (docs/prism_bake.md), with display.lighting\n"
+		"\"raster\": \"auto\" bakes each level's light in the background while\n"
+		"you play (a draft first, then refined, resumed where it stopped);\n"
+		"\"ask\" only when Settings' Rebake lightmaps asks (display.bake_rebake);\n"
+		"\"off\" never (a bake made before is still drawn)." },
+	{ "display.bake_quality", _config_string, "\"max\"", "HALO_BAKE_QUALITY", _environment_value,
+		_platform_desktop,
+		"The bake's quality: \"max\" the finest (16 texels a world unit where the\n"
+		"player can be and finer where the light needs it, every texel's samples\n"
+		"until its noise is under 1%, the sun's shadows at 4 times the texels;\n"
+		"slow and large), \"ultra\", \"high\" or \"draft\" quicker and smaller.\n"
+		"A change bakes again." },
+	{ "display.bake_folder", _config_string, "\"\"", "HALO_BAKE_FOLDER", _environment_value, _platform_desktop,
+		"Where the bakes are kept (a folder of each map's, a file of each\n"
+		"BSP's; made on this machine, never shared); empty: the data folder's\n"
+		"prism_bake." },
+	{ "display.bake_budget", _config_real, "2.0", "HALO_BAKE_BUDGET", _environment_value, _platform_desktop,
+		"The milliseconds of each frame's graphics time a background bake may\n"
+		"take while you play (0.25 to 200; in the menus it takes 30)." },
+	{ "display.bake_rebake", _config_integer, "0", "HALO_BAKE_REBAKE", _environment_value, _platform_desktop,
+		"Raised by Settings' Rebake lightmaps (and the console's prism_set\n"
+		"\"bake_rebake <n>\"): each change bakes the level drawn again from\n"
+		"nothing." },
+	{ "display.bake_indicator", _config_boolean, "true", "HALO_BAKE_INDICATOR", _environment_value,
+		_platform_desktop,
+		"While a level's light is baked in the background, \"Baking lightmaps 37%\"\n"
+		"at the screen's top left (and \"Lightmaps baked\" once it is done);\n"
+		"false hides it." },
+	{ "debug.bake_exit", _config_boolean, "false", "HALO_BAKE_EXIT", _environment_value, _platform_desktop,
+		"With display.lighting \"raster\": bake the level drawn in the\n"
+		"foreground (60 ms of each frame) and quit once its bake is done, for\n"
+		"measuring a bake's time and size." },
 	{ "display.prism_rt", _config_string, "\"off\"", "HALO_PRISM_RT", _environment_value, _platform_desktop,
 		"PRISM: hardware ray tracing (docs/prism_rt.md), on graphics cards that\n"
 		"have it: \"shadows\" the sun's shadows of everything on screen traced\n"
@@ -2824,7 +2863,11 @@ static const struct config_setting config_settings[] =
 		"yellow the class default, orange none, magenta a pixel the G-buffer\n"
 		"missed, red one it has that the frame did not draw), \"instance\",\n"
 		"\"motion\" (each pixel's screen motion: red right, green down, blue\n"
-		"no history) or \"emissive\"; \"off\" the frame. Read each frame." },
+		"no history) or \"emissive\"; with \"raster\", the bake's\n"
+		"\"bake_light\" (the light taken from it), \"bake_sun\" (the sun's\n"
+		"visibility), \"bake_texels\" (its texels as a checker, red where it\n"
+		"has none) or \"bake_volume\" (the irradiance volume's light alone);\n"
+		"\"off\" the frame. Read each frame." },
 	{ "debug.pt_reference", _config_integer, "0", "HALO_PT_REFERENCE", _environment_value, _platform_desktop,
 		"With display.prism_rt \"pathtraced\", a converged reference for the\n"
 		"quality gates (docs/prism_v4.md): the path tracer unbiased (no reuse,\n"
@@ -4603,9 +4646,12 @@ static const struct
 	{ "display.resolution_scaling", { "native", "original", NULL }, NULL },
 	{ "display.anti_aliasing", { "off", "fxaa", "smaa", "ssaa2x", "msaa2x", "msaa4x", "msaa8x", NULL }, NULL },
 	{ "display.ambient_occlusion", { "off", "world", NULL }, "off" },
-	{ "display.lighting", { "ce", "ce_deferred", NULL }, "ce" },
+	{ "display.lighting", { "ce", "ce_deferred", "raster", NULL }, "ce" },
 	{ "debug.gbuffer_view", { "off", "base", "light", "additions", "albedo", "normal", "roughness", "metal",
-		"material_source", "instance", "motion", "emissive", NULL }, "off" },
+		"material_source", "instance", "motion", "emissive", "bake_light", "bake_sun", "bake_texels",
+		"bake_volume", NULL }, "off" },
+	{ "display.bake", { "auto", "ask", "off", NULL }, "auto" },
+	{ "display.bake_quality", { "max", "ultra", "high", "draft", NULL }, "max" },
 	{ "display.prism_rt", { "off", "shadows", "gi", "pathtraced", NULL }, "off" },
 	{ "display.prism_rt_quality", { "medium", "low", "high", "ultra", NULL }, "medium" },
 	{ "display.prism_rt_resolution", { "auto", "half", "full", NULL }, "auto" },

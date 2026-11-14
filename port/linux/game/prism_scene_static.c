@@ -219,6 +219,8 @@ static boolean stock_triangle(
 		(unsigned long)material->vertices.count * (unsigned long)(vertex_size + lightmap_size);
 	int corner;
 
+	float normal[3] = { 0.0f, 0.0f, 0.0f };
+
 	for (corner = 0; corner < 3; corner++)
 	{
 		long index = (unsigned short)surface->vertex_indices[corner];
@@ -230,6 +232,24 @@ static boolean stock_triangle(
 		}
 		vertex = vertices + index * vertex_size;
 		memcpy(positions + corner * 3, vertex, 3 * sizeof(float));
+		/* (its vertices' normals summed: the compressed vertex's at 12, packed
+		11:11:10; the uncompressed's at 12, floats) */
+		if (vertex_size == 32)
+		{
+			real_vector3d unpacked = uncompress_int32_to_real_vector3d(*(unsigned long const *)(vertex + 12));
+
+			normal[0] += unpacked.i;
+			normal[1] += unpacked.j;
+			normal[2] += unpacked.k;
+		}
+		else if (vertex_size >= 24)
+		{
+			float const *n = (float const *)(vertex + 12);
+
+			normal[0] += n[0];
+			normal[1] += n[1];
+			normal[2] += n[2];
+		}
 		if (vertex_size == 32 || vertex_size >= 56)
 		{
 			memcpy(base + corner * 2, vertex + (vertex_size == 32 ? 24 : 48), 2 * sizeof(float));
@@ -254,6 +274,39 @@ static boolean stock_triangle(
 			{
 				memcpy(lightmap + corner * 2, at + 12, 2 * sizeof(float));
 			}
+		}
+	}
+	/* port: (PRISM v4 M2) the corners turned where they are wound against
+	their vertices' normals, as the map's own triangles all are (D3D's
+	clockwise faces: their corners' cross product points into the level), so
+	that every consumer's face normal, the corners' cross product, points
+	out of the level: the ray tracer's one-sided faces, the baker's texels,
+	a lamp's emission */
+	{
+		float e1[3], e2[3], face[3], swap[2];
+		int axis;
+
+		for (axis = 0; axis < 3; axis++)
+		{
+			e1[axis] = positions[3 + axis] - positions[axis];
+			e2[axis] = positions[6 + axis] - positions[axis];
+		}
+		face[0] = e1[1] * e2[2] - e1[2] * e2[1];
+		face[1] = e1[2] * e2[0] - e1[0] * e2[2];
+		face[2] = e1[0] * e2[1] - e1[1] * e2[0];
+		if (face[0] * normal[0] + face[1] * normal[1] + face[2] * normal[2] < 0.0f)
+		{
+			float corner_swap[3];
+
+			memcpy(corner_swap, positions + 3, sizeof(corner_swap));
+			memcpy(positions + 3, positions + 6, sizeof(corner_swap));
+			memcpy(positions + 6, corner_swap, sizeof(corner_swap));
+			memcpy(swap, base + 2, sizeof(swap));
+			memcpy(base + 2, base + 4, sizeof(swap));
+			memcpy(base + 4, swap, sizeof(swap));
+			memcpy(swap, lightmap + 2, sizeof(swap));
+			memcpy(lightmap + 2, lightmap + 4, sizeof(swap));
+			memcpy(lightmap + 4, swap, sizeof(swap));
 		}
 	}
 

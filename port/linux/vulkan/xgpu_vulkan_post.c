@@ -451,8 +451,10 @@ only (the stream draws a multisampled one as "ce"). */
 
 int xgpu_vulkan_post_deferred_resolve(struct xgpu_vulkan_image *target, struct xgpu_vulkan_image *base,
 	struct xgpu_vulkan_image *additions, struct xgpu_vulkan_image *gbuffer, struct xgpu_vulkan_image *extras,
-	struct xgpu_vulkan_image *depth, int view)
+	struct xgpu_vulkan_image *depth, int view,
+	struct xgpu_vulkan_image *(*relight)(struct xgpu_vulkan_image *light, void *context), void *context)
 {
+	struct xgpu_vulkan_image *light = NULL;
 	const struct xgpu_vulkan_image_description *description;
 	struct xgpu_vulkan_pipeline_description *pipeline;
 	int32_t rectangle[4];
@@ -513,7 +515,10 @@ int xgpu_vulkan_post_deferred_resolve(struct xgpu_vulkan_image *target, struct x
 		post.gbuffer = extras ? extras : post.gbuffer_stand_in;
 		bounds[2] = extras ? 1.0f : 0.0f;
 	}
-	pass_draw(XGPU_VULKAN_POST_DEFERRED_RESOLVE, target, 0, rectangle, post.color, base,
+	/* (display.lighting "raster": the light made of the copy by the bake) */
+	if (relight)
+		light = relight(post.color, context);
+	pass_draw(XGPU_VULKAN_POST_DEFERRED_RESOLVE, target, 0, rectangle, light ? light : post.color, base,
 		view == 8 && depth ? depth : additions, bounds);
 	post.gbuffer = NULL;
 	return 1;

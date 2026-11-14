@@ -217,8 +217,11 @@ python -m pytest -q tools/test_macos_metal.py               # the Metal backend 
 python -m pytest -q tools/test_metal_post_shaders.py        # the Metal backend's anti-aliasing passes (tools/metal_post_shaders.py)
 python -m pytest -q tools/test_prism_gate.py tools/test_prism_plugin.py tools/test_scene_records.py tools/test_prism_rt_glsl.py
                                                             # PRISM's gates' metrics and captures' paths, the plugin ABI, the scene records, the RT GLSL generated
+python3 tools/vulkan_bake_shaders.py --check               # PRISM v4's baker's and Raster's SPIR-V still its GLSL's (glslangValidator)
 python3 tools/prism_gate/capture.py all --stage <tree> --data <game data> --config <toml> --out <dir>
                                                             # PRISM's frozen capture set and its references (docs/prism_gates.md; local only)
+python3 tools/prism_gate/capture.py bake G2 --stage <tree> --data <game data> --config <toml> --out <dir> --env HALO_BAKE_FOLDER=<bakes>
+python3 tools/prism_gate/gate.py bake <dir> <refs dir>     # M2's bake against R (docs/prism_bake.md; local only)
 python -m pytest -q tools/test_hdr.py                       # display.hdr's contract: the draws' classification, the reference curves (docs/hdr.md)
 python -m pytest -q tools/test_hdr_backends.py              # display.hdr across the backends: Vulkan's shaders (via SPIRV-Cross) on a Mac's GPU against the reference and Metal's
 python -m pytest -q tools/test_macos_app.py                 # the macOS app's Info.plist, entitlements, signature
@@ -436,3 +439,4 @@ The decompilation's upstream, punpckhdq/halo, is AGPL 3.0 from 17 October
 | [docs/prism_gates.md](docs/prism_gates.md) | PRISM's quality gates: the frozen capture set, the harness, `debug.pt_reference`, the metrics and thresholds, the checks every milestone passes |
 | [docs/prism_plugin.md](docs/prism_plugin.md) | PRISM's renderer plugin interface (`prism_plugin.h`, MIT or AGPL), the passthrough plugin, the loader |
 | [docs/prism_scene_records.md](docs/prism_scene_records.md) | PRISM v4's scene records in the command stream: what is sent (the materials, the G-buffer's draws, the level's geometry, the lights) and what is specified |
+| [docs/prism_bake.md](docs/prism_bake.md) | PRISM v4's in-game baker (the reach, the light-importance grid, the lightmap, the sun mask, the irradiance volume, the bake file) and PRISM Raster (`display.lighting` `"raster"`) |

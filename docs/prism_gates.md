@@ -361,6 +361,31 @@ c1 is M1's G-buffer build's to the rounding (SCENE_STATIC and SCENE_LIGHTS cost 
 second target (16 bytes a pixel more written, the motion's arithmetic) adds 0.15 to 0.2 ms to the G-buffer pass on
 the 3070 Ti and 0.5 ms on the 2060, the worst on the stock world 0.37 ms of 2.5 and 1.44 ms of 4.0: within budget.
 
+## M2: the bake and PRISM Raster
+
+M2 (`docs/prism_bake.md`) is judged on bakes made in the game by its own baker (`debug.bake_exit`, the measurements'
+runs) and on the frozen scenes captured with `capture.py bake`:
+
+```sh
+python3 tools/prism_gate/capture.py refs G2 G3 --stage <tree> --data <data> --config <classic toml> --out <refs>
+python3 tools/prism_gate/capture.py bake G2 G3 --stage <tree> --data <data> --config <classic toml> --out <dir> \
+    --env HALO_BAKE_FOLDER=<bakes> --env HALO_BAKE_QUALITY=max
+python3 tools/prism_gate/gate.py bake <dir> <refs>
+```
+
+`capture.py bake` holds the camera at each probe pose with `display.lighting` `"raster"` reading a bake made before
+(`display.bake` `"off"`: nothing is baked in the run) and saves PRISM Raster's frame, the bake's light less the sun's
+(`debug.gbuffer_view` `bake_light`), the sun's visibility (`bake_sun`), the base colour, the normal and the instances,
+then Classic's frame. `gate.py bake` puts the bake's static frame together the way Raster's resolve does (the base
+colour by the light in CE's encoding, the sun's light by the pixel's normal and the visibility; CE's additions left
+out) and the reference's the same way from R's linear file (`light.R/G/B`, `structure.V`: the static light, the
+objects' shadows left out), over the level's pixels with a surface (the objects left out: static-only frames), and
+takes the mean FLIP of one against the other, the worst pose a scene's, against `bake_flip` (0.05); the light alone and
+the visibility alone are reported beside it.
+
+PRISM Raster's frame against R's (`refs/p<n>_ref.png`, the path tracer's converged frame) is the design's other bound,
+`raster_flip` (0.15): Raster is an approximation (the objects lit from the volume, CE's specular and reflections).
+
 ## Every milestone also passes
 
 `tools/prism_gate/identity.py` checks the milestone's tree against the tree it started from:

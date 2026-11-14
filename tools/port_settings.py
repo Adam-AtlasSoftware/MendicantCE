@@ -562,6 +562,9 @@ PRISM_RT_PAGE = ("mods_settings/prism_rt", "prism_rt_settings_screen")
 # (and its traced light's look: Mods' PRISM PATH TRACING, docs/prism_rt.md
 # "The rig" and "Styles"; greyed out alike)
 PRISM_PT_PAGE = ("mods_settings/prism_pt", "prism_pt_settings_screen")
+# (and PRISM v4's lighting: Mods' PRISM LIGHTING, docs/prism_bake.md: PRISM
+# Raster and the in-game baker's Rebake lightmaps)
+PRISM_LIGHTING_PAGE = ("mods_settings/prism_lighting", "prism_lighting_settings_screen")
 # (Online's Discord account: port/linux/src/player_link.c)
 DISCORD_ACCOUNT = ("network_setup/discord_account", "discord_account_screen")
 # (the server browsers' Filters, which their FILTERS opens too: menu_functions.c's
@@ -954,6 +957,9 @@ PAGES = {
             ("PRISM PATH TRACING ›", None, _page_screen(*PRISM_PT_PAGE),
              "How the path-traced light looks: faithful to the game's lightmaps or lit by the traced lights "
              "alone, its lamps, exposure and highlights.", "desktop"),
+            ("PRISM LIGHTING ›", None, _page_screen(*PRISM_LIGHTING_PAGE),
+             "PRISM Raster: each level lit by its own light baked on this computer, with sharp sun shadows. "
+             "Rebake lightmaps, and how finely they are baked.", "desktop"),
         ],
     },
     # ---- the pages the rows open
@@ -1576,6 +1582,31 @@ PAGES = {
                                                                            ("DEEP", "1.5")],
              "How far Sharp baked shadows go: Light keeps some of the lightmaps' softness, Deep darkens the shaded "
              "side more.", "desktop"),
+        ],
+    },
+    PRISM_LIGHTING_PAGE[0]: {
+        "screen": PRISM_LIGHTING_PAGE[1], "title": "PRISM LIGHTING",
+        "rows": [
+            # (PRISM v4's lighting modes, docs/prism_bake.md: Raster drawn by the
+            # Vulkan renderer; its bake made where the graphics card traces rays)
+            (SECTION, "LIGHTING"),
+            ("LIGHTING", "display.lighting", [("CLASSIC", "ce"), ("PRISM RASTER", "raster")],
+             "Classic: the game's own light. PRISM Raster: each level lit by its light baked on this computer "
+             "(bounced light, lamps and the sky, the sun's shadows sharp), with no ray tracing while you play.",
+             "desktop"),
+            (SECTION, "BAKE"),
+            ("BAKE", "display.bake", [("WHILE PLAYING", "auto"), ("WHEN ASKED", "ask"), ("NEVER", "off")],
+             "While Playing: a level's light is baked in the background as you play it, a quick draft first, "
+             "then finished, picking up where it stopped. When Asked: only after Rebake Lightmaps.", "desktop"),
+            ("BAKE QUALITY", "display.bake_quality",
+             [("MAX", "max"), ("ULTRA", "ultra"), ("HIGH", "high"), ("DRAFT", "draft")],
+             "Max: the finest light and sharpest shadows, each texel baked until its noise is gone; slow, and "
+             "large on disk. The others are quicker and smaller.", "desktop"),
+            ("REBAKE LIGHTMAPS", "display.bake_rebake", [("—", "0"), ("ASKED", "1")],
+             "Change this to bake the level you are playing again from nothing (needed after its geometry, "
+             "materials or lights change; a finished bake is otherwise kept).", "desktop"),
+            ("PROGRESS ON SCREEN", "display.bake_indicator", ON_OFF,
+             "Shows \"Baking lightmaps 37%\" at the top left while a level is baked.", "desktop"),
         ],
     },
     PRISM_PT_PAGE[0]: {

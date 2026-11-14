@@ -38,7 +38,7 @@ port/linux/README.md.
 #include <stdint.h>
 
 #define XGPU_STREAM_MAGIC 0x53504758u /* "XGPS" */
-#define XGPU_STREAM_VERSION 33
+#define XGPU_STREAM_VERSION 34
 #define XGPU_STREAM_LOADING_ART_BYTES (640u * 480u * 4u)
 
 /* ---------- the ring
@@ -322,6 +322,9 @@ enum
 	XGPU_STREAM_SCENE_FOG,
 	/* (the cameras the G-buffer's motion is found by: SCENE_VIEW, below) */
 	XGPU_STREAM_SCENE_VIEW,
+	/* (PRISM v4 M2: the in-game baker's control and inputs, PRISM_BAKE,
+	below; docs/prism_bake.md) */
+	XGPU_STREAM_PRISM_BAKE,
 	XGPU_STREAM_RECORD_TYPES,
 };
 /* (the scene records' own count: they run from SCENE_MATERIAL to the end) */
@@ -349,8 +352,10 @@ again). The G-buffer target is four 32-bit words a pixel
 (XGPU_FORMAT_GBUFFER: RGBA32Uint):
   [0] the base colour, RGBA8 (unorm, the base map's colour space): an
       object's, its combiners with white diffuse light, no specular light
-      and no self-illumination; 0 on the level's surfaces, whose base colour
-      is the base phase's target (CE's diffuse texture pass);
+      and no self-illumination; on the level's surfaces, whose base colour
+      is the base phase's target (CE's diffuse texture pass), the lightmap
+      coordinates where the draw has a page (GBUFFER_DRAW's lightmap; the
+      second target's word 2 says which page), 2x16 unorm, else 0;
   [1] the shading normal in the world, octahedral, 2x16 snorm (where word 2
       has XGPU_GBUFFER_FLAG_NORMAL; else none);
   [2] roughness, metalness, specular (F0's scale, 0.5 the dielectric 4%),
@@ -367,9 +372,12 @@ Beside it, the G-buffer's second target, four 32-bit words a pixel too
       right, y down): the camera's move (SCENE_VIEW's last and this frame's
       cameras) and the object's (SCENE_INSTANCE's node the draw's part hangs
       from, last frame's and this frame's), 0 where there is no history;
-  [1] [2] the emissive light, 3 half floats (red and green, blue and 0): an
-      object's combiners with no light (its self-illumination), the level's
-      lightmap pass's with no lightmap; CE's values;
+  [1] [2] the emissive light, 3 half floats (red and green, then blue in
+      word 2's low 16 bits): an object's combiners with no light (its
+      self-illumination), the level's lightmap pass's with no lightmap; CE's
+      values; word 2's bit 16 set where the motion has history, its bits 17
+      to 31 the level's lightmap page + 1 (0 none: an object's, or a draw
+      without a page);
   [3] the distance along the view's axis (a float's bits).
 The resolve's views (bit 8 on, debug.gbuffer_view) 4 to 11 show the G-buffer
 in the frame's place: 4 the base colour (the level's from the base phase's
@@ -377,8 +385,23 @@ target), 5 the normal, 6 the roughness, 7 the metalness, 8 the material
 source (each opaque pixel coloured by its tier: XGPU_GBUFFER_SOURCE_*; a
 pixel the window drew opaque that the G-buffer has not, magenta), 9 the
 instances, 10 the motion (red right, green down, 8 pixels full; blue where
-there is no history), 11 the emissive light. With a view (1 to 11) nothing more is drawn into the window's
-colour target after the resolve, so the view is what the frame shows. */
+there is no history), 11 the emissive light; with the baker's light (M2, display.lighting "raster":
+XGPU_GBUFFER_PHASE_RASTER) 12 the baked light (the light the level and the
+objects take from the bake, the sun's with it), 13 the sun's visibility (the
+level's from the baked sun mask, an object's from the volume), 14 the bake's
+texels (each baked texel a cell of a checker, red where no bake covers the
+pixel), 15 the irradiance volume alone. With a view (1 to 15) nothing more is
+drawn into the window's colour target after the resolve, so the view is what
+the frame shows.
+
+XGPU_GBUFFER_PHASE_RASTER, or'd into the resolve's value: display.lighting
+"raster" (PRISM Raster, design section 1.8): before the resolve, the light
+target's pixels are lit from the bake where the bake has them (docs/
+prism_bake.md): the level's from its baked lightmap (the light less the
+sun's at the pixel's normal) and the sun's light by the baked sun mask, an
+object's from the irradiance volume; the resolve then puts the frame
+together as before (light x base + additions). Where the bake has nothing
+yet, CE's light stays. */
 #define XGPU_GBUFFER_PHASE_GBUFFER_BEGIN 4u
 #define XGPU_GBUFFER_PHASE_GBUFFER_END 5u
 #define XGPU_GBUFFER_VIEW_ALBEDO 4u
@@ -389,6 +412,16 @@ colour target after the resolve, so the view is what the frame shows. */
 #define XGPU_GBUFFER_VIEW_INSTANCE 9u
 #define XGPU_GBUFFER_VIEW_MOTION 10u
 #define XGPU_GBUFFER_VIEW_EMISSIVE 11u
+#define XGPU_GBUFFER_VIEW_BAKE_LIGHT 12u
+#define XGPU_GBUFFER_VIEW_BAKE_SUN 13u
+#define XGPU_GBUFFER_VIEW_BAKE_TEXELS 14u
+#define XGPU_GBUFFER_VIEW_BAKE_VOLUME 15u
+#define XGPU_GBUFFER_PHASE_RASTER 0x10000u
+#define XGPU_GBUFFER_PHASE_VIEW_MASK 0xff00u
+/* the second target's word 2: the motion's history bit and the page's
+shift (GBUFFER_BEGIN) */
+#define XGPU_GBUFFER_EXTRA_HISTORY 0x10000u
+#define XGPU_GBUFFER_EXTRA_PAGE_SHIFT 17
 /* the source tiers (design section 5.3): none (no material: a fault), the
 class default, the automatic tier (the host's, from CE's shader at load),
 the pack tier, a mod's */
@@ -2087,7 +2120,7 @@ geometry once for every consumer, the lights, the decals and the fog. They
 are sent only in the v4 modes (display.lighting "ce_deferred" now; "raster"
 and "pathtraced" to come); with "ce" (the default, Classic and Enhanced)
 none is ever written, so those frames stay byte for byte as they were. Their
-types are in the list above (XGPU_STREAM_VERSION 33) and the host's decoder
+types are in the list above (XGPU_STREAM_VERSION 34) and the host's decoder
 takes every one; M1 sends SCENE_MATERIAL and GBUFFER_DRAW (the guest's
 xgpu_backend_scene_material and _gbuffer_draw) and SCENE_STATIC (also with
 display.prism_rt on: the traced level is its), the others are specified and
@@ -2268,7 +2301,11 @@ struct xgpu_stream_gbuffer_draw
 {
 	uint32_t header;
 	uint32_t material, instance, surface;
-	uint32_t vertex_program, flags, lod, pad;
+	uint32_t vertex_program, flags, lod;
+	/* (M2) the level's draws: their lightmap page + 1 (the BSP's lightmap
+	bitmap's index, SCENE_STATIC's page; 0 none, an object's), which the
+	level's twins write with their lightmap coordinates (GBUFFER_BEGIN) */
+	uint32_t lightmap;
 };
 
 /* SCENE_STATIC: the level's geometry as drawn (stock or remodel, the
@@ -2493,6 +2530,122 @@ struct xgpu_stream_scene_view
 	int32_t last_corners[4];
 };
 
+/* PRISM_BAKE (M2, docs/prism_bake.md): the in-game baker's control and the
+inputs only the game has, sent in the v4 modes that read a bake
+(display.lighting "raster"; never with "ce"). Phase XGPU_BAKE_CONTROL each
+frame: the map (its name and cache checksum) and the structure BSP drawn,
+the SCENE_STATIC generation the bake is of, display.bake (mode), _quality,
+the count of rebakes asked for (request: each change starts the BSP's bake
+again from nothing), XGPU_BAKE_FLAG_*, the GPU time a frame may give the
+bake (milliseconds), the bake folder's path (folder: a guest address of a
+NUL-terminated UTF-8 string of at most XGPU_BAKE_PATH bytes, the guest's to
+keep) and the status block the host writes (status: a guest address of
+XGPU_BAKE_STATUS_WORDS uint32_t, XGPU_BAKE_STATUS_*, which the guest reads).
+_REACH_INPUT (count words from first of total, data their bytes): what the
+BSP's reachable space is found from, serialised (port/linux/game/
+prism_bake.c's reach_serialise: the collision BSP, the clusters and PVS,
+the water, the render triangles, the scenario's places and fighters), once
+a generation after SCENE_STATIC's end; _REACH_END once it is whole. The host
+finds the reach from it (prism_bake_reach.c, on a thread of its own: a large
+BSP's walk is millions of cells, more than the guest's memory holds). */
+enum
+{
+	XGPU_BAKE_CONTROL,
+	XGPU_BAKE_REACH_INPUT,
+	XGPU_BAKE_REACH_END,
+	XGPU_BAKE_PHASES,
+};
+enum
+{
+	XGPU_BAKE_MODE_OFF,
+	XGPU_BAKE_MODE_ASK,
+	XGPU_BAKE_MODE_AUTO,
+};
+enum
+{
+	/* the menus are up (the game is not played): the bake may take the
+	frame's GPU time whole (the control's budget) */
+	XGPU_BAKE_FLAG_MENU = 1,
+	/* debug.bake_exit: bake in the foreground (the budget's time a frame),
+	the game quits once the BSP's bake is done */
+	XGPU_BAKE_FLAG_FOREGROUND = 2,
+	/* the reach's inputs were all sent */
+	XGPU_BAKE_FLAG_REACH = 4,
+};
+#define XGPU_BAKE_PATH 512u
+#define XGPU_BAKE_SLICE 65536u
+#define XGPU_BAKE_NAME 64u
+/* the status block (the host's, written as the bake goes; uint32_t each,
+floats as their bits): the state (XGPU_BAKE_STATE_*), the BSP and the
+generation it is of, the quality, progress (a float, 0 to 1, of the whole
+bake), the step (XGPU_BAKE_STEP_*) and its progress (a float), texels done
+and planned (millions, floats), rays a second (millions, a float), seconds
+taken and seconds left (floats, the latter -1 unknown), the bake file's
+bytes (MB, a float), whether the light drawn is the bake's
+(XGPU_BAKE_SHOWN_*), a number that moves with each write */
+enum
+{
+	XGPU_BAKE_STATUS_STATE,
+	XGPU_BAKE_STATUS_BSP,
+	XGPU_BAKE_STATUS_GENERATION,
+	XGPU_BAKE_STATUS_QUALITY,
+	XGPU_BAKE_STATUS_PROGRESS,
+	XGPU_BAKE_STATUS_STEP,
+	XGPU_BAKE_STATUS_STEP_PROGRESS,
+	XGPU_BAKE_STATUS_TEXELS_DONE,
+	XGPU_BAKE_STATUS_TEXELS,
+	XGPU_BAKE_STATUS_RAYS,
+	XGPU_BAKE_STATUS_SECONDS,
+	XGPU_BAKE_STATUS_SECONDS_LEFT,
+	XGPU_BAKE_STATUS_MEGABYTES,
+	XGPU_BAKE_STATUS_SHOWN,
+	XGPU_BAKE_STATUS_SERIAL,
+	XGPU_BAKE_STATUS_WORDS = 16,
+};
+enum
+{
+	XGPU_BAKE_STATE_NONE, /* no bake (off, no ray queries, nothing sent) */
+	XGPU_BAKE_STATE_WAITING, /* for the level's geometry, the reach or ray tracing's scene */
+	XGPU_BAKE_STATE_BAKING,
+	XGPU_BAKE_STATE_PAUSED, /* display.bake "ask" and not asked, or "off" with a bake part done */
+	XGPU_BAKE_STATE_DONE,
+	XGPU_BAKE_STATE_FAILED, /* (the log says why) */
+};
+enum
+{
+	XGPU_BAKE_STEP_PLAN,
+	XGPU_BAKE_STEP_IMPORTANCE,
+	XGPU_BAKE_STEP_DRAFT,
+	XGPU_BAKE_STEP_LIGHTMAP,
+	XGPU_BAKE_STEP_SUN_MASK,
+	XGPU_BAKE_STEP_VOLUME,
+	XGPU_BAKE_STEP_PROBES,
+	XGPU_BAKE_STEP_FOOTPRINTS,
+	XGPU_BAKE_STEP_DONE,
+};
+enum
+{
+	XGPU_BAKE_SHOWN_NONE, /* CE's light */
+	XGPU_BAKE_SHOWN_DRAFT,
+	XGPU_BAKE_SHOWN_PARTIAL, /* the finished tiles, the draft elsewhere */
+	XGPU_BAKE_SHOWN_FINAL,
+	XGPU_BAKE_SHOWN_STALE, /* a bake of something else (its key differs), until the new one is done */
+};
+struct xgpu_stream_prism_bake
+{
+	uint32_t header;
+	uint32_t phase, generation;
+	uint32_t first, count, total;
+	uint32_t data, size;
+	uint32_t mode, quality, request, flags;
+	uint32_t map_checksum;
+	int32_t bsp_index;
+	uint32_t folder, status;
+	float budget_milliseconds, threshold;
+	uint32_t pad[2];
+	char map_name[XGPU_BAKE_NAME];
+};
+
 /* ---------- the layouts' sizes, alike on both sides */
 
 #define XGPU_STREAM_ASSERT_SIZE(type, size) _Static_assert(sizeof(type) == (size), #type "'s size")
@@ -2567,6 +2720,7 @@ XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_scene_decal, 120);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_scene_fog_plane, 64);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_scene_fog, 48 + XGPU_SCENE_FOG_PLANES * 64);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_scene_view, 16 + 128 + 32);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_prism_bake, 80 + XGPU_BAKE_NAME);
 /* (the scene records' types still fit the header's 8 bits) */
 _Static_assert(XGPU_STREAM_SCENE_RECORD_TYPES <= 256, "the scene records' types fit a header");
 

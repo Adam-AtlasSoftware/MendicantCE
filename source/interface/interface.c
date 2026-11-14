@@ -107,6 +107,7 @@ symbols in this file:
 #include "units/units.h"
 #include "map_share.h" /* port: port/linux/game/map_share.c */
 #include "latency_meter.h" /* port: port/linux/game/latency_meter.c */
+void prism_bake_indicator_draw(void); /* port: port/linux/game/prism_bake_indicator.c */
 #include "network_host_controls.h" /* port: port/linux/game/network_host_controls.c */
 #include "network_replay.h" /* port: port/linux/game/network_replay_playback.c */
 
@@ -394,6 +395,8 @@ void interface_draw_fullscreen_overlays(
 	map_share_render();
 	/* port: a network game's round trip to the host (display.latency_meter) */
 	latency_meter_draw();
+	/* port: PRISM's in-game baker's progress (port/linux/game/prism_bake_indicator.c) */
+	prism_bake_indicator_draw();
 	/* port: a replay's playback: who is watched */
 	network_replay_playback_draw();
 	terminal_draw();

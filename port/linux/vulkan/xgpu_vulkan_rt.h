@@ -27,6 +27,14 @@ int xgpu_vulkan_rt_available(void);
 void xgpu_vulkan_rt_static(const struct xgpu_stream_rt_static *record, const void *data);
 void xgpu_vulkan_rt_frame(const struct xgpu_stream_rt_frame *record);
 
+/* the baker's (xgpu_vulkan_bake.c): the last whole set built (its
+generation: SCENE_STATIC's where the level traced is its), its materials
+(material_count of XGPU_STREAM_RT_MATERIAL_FLOATS floats) and alpha maps
+(words), in host memory the set keeps until the next; and the last RT_FRAME
+(its rig and sun, NULL none); 0 where no set is built */
+int xgpu_vulkan_rt_scene(uint32_t *generation, const float **materials, uint32_t *material_count,
+	const uint32_t **alpha, uint32_t *alpha_words, const struct xgpu_stream_rt_frame **frame);
+
 /* this frame traces (an RT_FRAME with a mode since the last frame's end) */
 int xgpu_vulkan_rt_active(void);
 /* the frame traces the stock models, not the mesh store's replacements

@@ -93,3 +93,36 @@ def test_placed_flying_vehicles():
     for name in ("ratrace", "bloodgulch"):
         assert ce_map.Map(str(maps / (name + ".map"))).placed_flying_vehicles() == [], name
     print("b30's placed flying vehicles:", ce_map.Map(str(maps / "b30.map")).placed_flying_vehicles())
+
+
+@pytest.mark.skipif(not (shutil.which("glslangValidator") and shutil.which("spirv-val") and CC),
+                    reason="no glslangValidator, spirv-val or C preprocessor")
+def test_bake_shaders_generated():
+    """the baker's and PRISM Raster's SPIR-V (xgpu_vulkan_bake_shaders.c) is its GLSL's (xgpu_vulkan_bake_glsl.inc)"""
+    result = subprocess.run([sys.executable, str(ROOT / "tools/vulkan_bake_shaders.py"), "--check"], capture_output=True,
+                            text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_reach_serialised_layout():
+    """the game's reach inputs (prism_bake.c's reach_serialise) and the renderer's reader (xgpu_vulkan_bake.c's
+    reach_thread) agree on the fields' order: the writer's comment lists what the reader takes, in turn"""
+    writer = (ROOT / "port/linux/game/prism_bake.c").read_text()
+    reader = (VULKAN / "xgpu_vulkan_bake.c").read_text()
+    order = ["bounds = (const float *)reach_take(&r, 6)", "fighter_count = reach_count(&r, 3)",
+             "water_count = reach_count(&r, 4)", "bsp.node_count = reach_count", "bsp.plane_count = reach_count",
+             "bsp.leaf_count = reach_count", "clusters.leaf_count = reach_count", "clusters.reference_count = reach_count",
+             "clusters.cluster_count = reach_count", "clusters.pvs_words = (size_t)reach_count",
+             "seed_count = reach_count", "surface_count = reach_count", "triangle_count = (size_t)reach_count"]
+    body = reader[reader.index("static void *reach_thread"):reader.index("prism_bake_reach_defaults(&parameters);")]
+    at = [body.index(name) for name in order]
+    written = ["blob_put(&blob, input->bounds", "blob_word(&blob, input->fighter_count)",
+               "blob_word(&blob, input->water_count)", "blob_word(&blob, input->bsp.node_count)",
+               "blob_word(&blob, input->bsp.plane_count)", "blob_word(&blob, input->bsp.leaf_count)",
+               "blob_word(&blob, input->clusters.leaf_count)", "blob_word(&blob, input->clusters.reference_count)",
+               "blob_word(&blob, input->clusters.cluster_count)", "input->clusters.pvs_words : 0",
+               "blob_word(&blob, (long)input->seed_count)", "blob_word(&blob, input->surface_count)",
+               "blob_word(&blob, (long)input->triangle_count)"]
+    assert [writer.index(name) for name in written] == sorted(writer.index(name) for name in written)
+    assert at == sorted(at)
+    assert '"PBSC", 4' in writer and 'blob_word(&blob, 3);' in writer and 'head[1] != 3' in reader

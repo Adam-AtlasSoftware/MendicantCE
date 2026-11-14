@@ -179,6 +179,115 @@ def repro(args):
     return 0 if differ == 0 and same else 1
 
 
+def bake_rig(log_text):
+    """the rig the bake was made with, from the capture's log (xgpu_vulkan_bake.c's "the rig" line): the sun's
+    radiance (its light on a surface facing it squarely), the direction toward it, whether there is one, the gamma of
+    CE's encoding"""
+    import re
+    match = re.search(r"the rig: sun ([-\d.e]+) ([-\d.e]+) ([-\d.e]+) toward ([-\d.e]+) ([-\d.e]+) ([-\d.e]+) "
+                      r"\((present|none), disc [-\d.e]+\), sky [-\d.e]+ [-\d.e]+ [-\d.e]+, gamma ([-\d.e]+)",
+                      log_text)
+    if not match:
+        raise SystemExit("no rig in the capture's log")
+    values = [float(v) for v in match.groups()[:6]]
+    return np.array(values[:3]), np.array(values[3:6]), match.group(7) == "present", float(match.group(8))
+
+
+def bake_frames(folder, refs, index, sun, toward, present, gamma):
+    """the bake's frame and the reference's at a probe, put together alike (as PRISM Raster's resolve does, without
+    CE's additions): the base colour by the light in CE's encoding, the light the light less the sun's and the sun's
+    light by the pixel's normal and visibility; the level's pixels with a surface (the objects left out: the bake's
+    static light against the reference's static frame); and the light alone and the visibility alone"""
+    channels, _ = exr.read(refs / f"p{index}.exr")
+
+    def small(a):
+        # (the reference's channels at the metrics' size: each 2x2 block's mean, as the frames are brought there)
+        a = np.asarray(a, np.float64)
+        h, w = metrics.SIZE[1], metrics.SIZE[0]
+        if a.shape[:2] == (h, w):
+            return a
+        return a[:h * (a.shape[0] // h), :w * (a.shape[1] // w)].reshape(h, a.shape[0] // h, w, a.shape[1] // w,
+                                                                           *a.shape[2:]).mean((1, 3))
+
+    def load01(name):
+        return metrics.load(folder / name).astype(np.float64) / 255.0
+    ref_light = small(np.stack([channels["light.R"], channels["light.G"], channels["light.B"]], -1))
+    ref_v = small(channels["structure.V"] if "structure.V" in channels else channels["sun.V"])
+    z = small(channels["Z"])
+    base = load01(f"p{index}_base.png")
+    normal = load01(f"p{index}_normal.png") * 2.0 - 1.0
+    instance = load01(f"p{index}_instance.png")
+    light = np.clip(load01(f"p{index}_light.png"), 0.0, 1.0) ** gamma
+    vis = load01(f"p{index}_sun.png")[..., 0]
+    level = (np.abs(instance - 0.25).max(2) < 0.02) & (z > 0.0)
+    facing = np.clip((normal * toward).sum(2), 0.0, None)[..., None]
+    bake_vis = np.where(facing[..., 0] > 0.0, vis, 0.0)
+
+    def encode(x):
+        return np.clip(x, 0.0, None) ** (1.0 / gamma) if gamma > 1.001 else np.clip(x, 0.0, None)
+
+    def quantised(x):
+        return np.round(np.clip(x, 0.0, 1.0) * 255.0) / 255.0
+
+    sun_b = sun * facing * bake_vis[..., None] if present else 0.0
+    sun_r = sun * facing * ref_v[..., None] if present else 0.0
+    frame_b = np.clip(base * encode(light + sun_b), 0.0, 1.0)
+    frame_r = np.clip(base * quantised(encode(ref_light + sun_r)), 0.0, 1.0)
+    frame_b = np.where(level[..., None], frame_b, 0.0)
+    frame_r = np.where(level[..., None], frame_r, 0.0)
+    light_b = np.where(level[..., None], quantised(encode(light)), 0.0)
+    light_r = np.where(level[..., None], quantised(encode(ref_light)), 0.0)
+    return frame_b, frame_r, light_b, light_r, np.where(level, bake_vis, 0.0), np.where(level, ref_v, 0.0), level
+
+
+def bake(args):
+    """M2's bake gate (docs/prism_gates.md): at each probe pose of a scene captured by capture.py bake, the bake's
+    static light against the reference's (capture.py refs of the same tree: R, debug.pt_reference): mean FLIP over the
+    level's pixels of the two put together alike, and of the light alone and the sun's visibility alone; the worst pose
+    a scene's, against bake_flip"""
+    root, refs_root = Path(args.captures), Path(args.refs)
+    scenes = capture.load_scenes()
+    limit = thresholds()["bake_flip"]
+    results = {}
+    for scene_id in args.scenes or sorted(p.name for p in root.iterdir() if p.name in scenes):
+        folder = root / scene_id / "bake"
+        sun, toward, present, gamma = bake_rig((root / scene_id / "log_bake.txt").read_text(errors="replace"))
+        flips, light_flips, sun_flips, shares, raster_flips = [], [], [], [], []
+        for index in range(len(scenes[scene_id]["probes"])):
+            frame_b, frame_r, light_b, light_r, vis_b, vis_r, level = bake_frames(
+                folder, refs_root / scene_id / "refs", index, sun, toward, present, gamma)
+            share = float(level.mean())
+            if share < 0.05:
+                continue
+
+            def masked(a, b):
+                return float(flip.flip_map(a * 255.0, b * 255.0)[level].mean())
+            flips.append(masked(frame_r, frame_b))
+            light_flips.append(masked(light_r, light_b))
+            sun_flips.append(masked(np.repeat(vis_r[..., None], 3, 2), np.repeat(vis_b[..., None], 3, 2)))
+            shares.append(share)
+            # (PRISM Raster's frame against R's converged frame: the design's looser bound)
+            ref_frame = refs_root / scene_id / "refs" / f"p{index}_ref.png"
+            if ref_frame.exists() and (folder / f"p{index}_raster.png").exists():
+                raster_flips.append(float(flip.mean_flip(metrics.load(ref_frame), metrics.load(folder / f"p{index}_raster.png"))))
+        if not flips:
+            continue
+        raster_limit = thresholds()["raster_flip"]
+        results[scene_id] = {"flip": max(flips), "flips": flips, "light_flips": light_flips, "sun_flips": sun_flips,
+                             "level_share": shares, "pass": max(flips) <= limit, "raster_flips": raster_flips,
+                             "raster_pass": bool(raster_flips) and max(raster_flips) <= raster_limit}
+        print("%-4s %-14s bake flip %.4f (poses %s; light alone %s; sun visibility %s)  %s" % (
+            scene_id, scenes[scene_id]["name"], max(flips), " ".join("%.4f" % f for f in flips),
+            " ".join("%.4f" % f for f in light_flips), " ".join("%.4f" % f for f in sun_flips),
+            "PASS" if results[scene_id]["pass"] else "FAIL"), flush=True)
+        if raster_flips:
+            print("%-4s %-14s raster flip %.4f against R's frame (poses %s)  %s" % (
+                scene_id, scenes[scene_id]["name"], max(raster_flips), " ".join("%.4f" % f for f in raster_flips),
+                "PASS" if results[scene_id]["raster_pass"] else "FAIL"), flush=True)
+    (root / "bake.json").write_text(json.dumps({"threshold": limit, "results": results}, indent=1))
+    return 0 if results and all(r["pass"] for r in results.values()) else 1
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -194,9 +303,13 @@ def main():
     s = sub.add_parser("material_source")
     s.add_argument("captures")
     s.add_argument("scenes", nargs="*")
+    b = sub.add_parser("bake")
+    b.add_argument("captures")
+    b.add_argument("refs")
+    b.add_argument("scenes", nargs="*")
     args = parser.parse_args()
     return {"measure": measure, "repro": repro, "equivalence": equivalence,
-            "material_source": material_source}[args.command](args)
+            "material_source": material_source, "bake": bake}[args.command](args)
 
 
 if __name__ == "__main__":

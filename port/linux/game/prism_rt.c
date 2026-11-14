@@ -74,6 +74,8 @@ void halo_prism_rt_static(int phase, unsigned long generation, unsigned long fir
 void halo_prism_rt_frame(void const *frame);
 /* render_enumerate.c's (the window drawn is a map's first frame's, unseen) */
 extern unsigned char render_enumerating;
+/* prism_deferred.c's: display.lighting "raster" */
+boolean prism_deferred_raster(void);
 /* render_sky.c's (the sky's sun, as PRISM's cascaded shadows find it, and
 each of its lights) */
 boolean render_sky_sun(short sky_index, real_vector3d *direction, real_rgb_color *color, real *power);
@@ -363,6 +365,10 @@ static void settings_read(void)
 	prism_rt.view = word_index(config_string("debug.prism_rt_view"), views, 0);
 	prism_rt.world = word_index(config_string("display.prism_rt_world"), worlds, 4);
 	if (prism_rt.world == 4)
+		prism_rt.world = PRISM_RT_WORLD_DRAWN;
+	/* (display.lighting "raster" with ray tracing off: the level as drawn
+	is the scene the baker traces, whatever the setting) */
+	if (prism_rt.mode == PRISM_RT_OFF && prism_deferred_raster())
 		prism_rt.world = PRISM_RT_WORLD_DRAWN;
 	prism_rt.cache = config_boolean("display.prism_rt_cache") != 0;
 	mood = config_integer("display.prism_rt_mood");
@@ -1402,6 +1408,23 @@ static int light_keyed(void)
 
 /* ---------- public code */
 
+/* the mode drawn (PRISM_RT_*: off where the renderer cannot trace) */
+int prism_rt_mode(void)
+{
+	settings_read();
+	if (prism_rt.mode == PRISM_RT_OFF || !halo_prism_rt_available())
+		return PRISM_RT_OFF;
+	return prism_rt.mode;
+}
+
+/* port: display.lighting "raster" (PRISM v4 M2) with ray tracing off: the
+level as drawn, its materials and the rig still sent, for the baker
+(prism_bake.c), nothing traced in the frame (RT_FRAME's mode off) */
+static int raster_scene(void)
+{
+	return prism_rt_mode() == PRISM_RT_OFF && halo_prism_rt_available() && prism_deferred_raster();
+}
+
 /* port: SCENE_STATIC's traced material of a shader (prism_scene_static.c):
 its index in the set's materials (made once a set), NONE where the level
 traced is not SCENE_STATIC's or the shader is not traced (an alpha-tested
@@ -1411,7 +1434,7 @@ long prism_rt_traced_material(long shader_tag, int *kind)
 	long index;
 
 	*kind = PRISM_RT_TRIANGLE_OPAQUE;
-	if (prism_rt_mode() == PRISM_RT_OFF || prism_rt.world != PRISM_RT_WORLD_DRAWN)
+	if ((prism_rt_mode() == PRISM_RT_OFF && !raster_scene()) || prism_rt.world != PRISM_RT_WORLD_DRAWN)
 		return NONE;
 	index = material_of(shader_tag, kind);
 	if (index != NONE && *kind == PRISM_RT_TRIANGLE_ALPHA_TESTED && !prism_rt.alpha_traced)
@@ -1424,19 +1447,12 @@ off, or its level copied here), 1 the level as drawn, 2 with its
 alpha-tested surfaces */
 int prism_rt_scene_traced(void)
 {
-	if (prism_rt_mode() == PRISM_RT_OFF || prism_rt.world != PRISM_RT_WORLD_DRAWN)
+	if ((prism_rt_mode() == PRISM_RT_OFF && !raster_scene()) || prism_rt.world != PRISM_RT_WORLD_DRAWN)
 		return 0;
 	return prism_rt.alpha_traced ? 2 : 1;
 }
 
-/* the mode drawn (PRISM_RT_*: off where the renderer cannot trace) */
-int prism_rt_mode(void)
-{
-	settings_read();
-	if (prism_rt.mode == PRISM_RT_OFF || !halo_prism_rt_available())
-		return PRISM_RT_OFF;
-	return prism_rt.mode;
-}
+
 
 /* the shape of the level the pre-pass draws for the rays to start from
 (prism_world_geometry.c's _world_proxy_*): the one traced, the map's where
@@ -1540,13 +1556,14 @@ void prism_rt_frame_begin(void)
 	struct world_scene_light const *lights;
 	long light_count, index;
 
-	if (prism_rt_mode() == PRISM_RT_OFF || render_enumerating)
+	if ((prism_rt_mode() == PRISM_RT_OFF && !raster_scene()) || render_enumerating)
 		return;
 	prism_rt.frame++;
 	static_frame();
 	sun_find();
 	memset(&frame, 0, sizeof(frame));
-	frame.mode = (unsigned int)prism_rt.mode;
+	/* (display.lighting "raster" alone: the scene and the rig, nothing traced) */
+	frame.mode = (unsigned int)prism_rt_mode();
 	frame.quality = (unsigned int)prism_rt.quality;
 	frame.resolution = (unsigned int)prism_rt.resolution;
 	frame.denoiser = (unsigned int)prism_rt.denoiser;

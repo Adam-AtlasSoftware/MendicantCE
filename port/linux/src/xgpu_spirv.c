@@ -69,7 +69,7 @@ enum
 	GLSL_F_ABS = 4, GLSL_F_SIGN = 6, GLSL_ACOS = 17, GLSL_ATAN = 18, GLSL_ATAN2 = 25, GLSL_FLOOR = 8, GLSL_FRACT = 10, GLSL_SIN = 13, GLSL_COS = 14, GLSL_POW = 26, GLSL_EXP = 27, GLSL_EXP2 = 29,
 	GLSL_LOG2 = 30, GLSL_SQRT = 31, GLSL_INVERSE_SQRT = 32, GLSL_F_MIN = 37, GLSL_F_MAX = 40, GLSL_F_CLAMP = 43,
 	GLSL_U_MIN = 38, GLSL_S_CLAMP = 45, GLSL_F_MIX = 46, GLSL_SMOOTH_STEP = 49, GLSL_LENGTH = 66, GLSL_CROSS = 68, GLSL_NORMALIZE = 69, GLSL_FIND_I_LSB = 73,
-	GLSL_PACK_UNORM_4X8 = 55, GLSL_PACK_SNORM_2X16 = 56, GLSL_PACK_HALF_2X16 = 58, GLSL_UNPACK_SNORM_2X16 = 60, GLSL_UNPACK_HALF_2X16 = 62,
+	GLSL_PACK_UNORM_4X8 = 55, GLSL_PACK_SNORM_2X16 = 56, GLSL_PACK_UNORM_2X16 = 57, GLSL_PACK_HALF_2X16 = 58, GLSL_UNPACK_SNORM_2X16 = 60, GLSL_UNPACK_HALF_2X16 = 62,
 };
 
 enum
@@ -4080,14 +4080,29 @@ static unsigned int gbuffer_octahedral(struct module *m, unsigned int n)
 }
 
 /* the G-buffer twin's four words (xgpu_stream.h's GBUFFER_BEGIN): the base
-colour (0 none: the level's), the normal (0 none), the uniforms' material
-parameters and its fourth word */
-static unsigned int gbuffer_words(struct module *m, struct pixel_state *state, unsigned int base)
+colour (an object's; the level's lightmap coordinates where its lightmap
+pass has them, 2x16 unorm; else 0), the normal (0 none), the uniforms'
+material parameters and its fourth word */
+static unsigned int gbuffer_words(struct module *m, struct pixel_state *state, unsigned int base, int level)
 {
 	unsigned int words[4], parameters = uniform(m, U_GBUFFER, 0), ids = uniform(m, U_GBUFFER, 1), has_normal = 0;
 
-	words[0] = base ? ext1(m, GLSL_PACK_UNORM_4X8, m->t_uint, vec4_of(m, base, constant_float(m, 1.0f))) :
-		constant_uint(m, 0);
+	if (base)
+		words[0] = ext1(m, GLSL_PACK_UNORM_4X8, m->t_uint, vec4_of(m, base, constant_float(m, 1.0f)));
+	else if (level && state->in_t[2] && state->program->stages[2].mode == XGPU_TEXTURE_PROJECT2D)
+	{
+		/* (the lightmap's coordinates as its pass samples them, projected and
+		scaled: world_ao_inputs' paged read's; M2's baked light finds its
+		texel by them) */
+		unsigned int xt = pixel_input(m, state, state->in_t[2], m->t_v4), w = extract(m, xt, 3), uv;
+
+		w = op3(m, OP_SELECT, m->t_float, compare(m, OP_F_UNORD_NOT_EQUAL, w, constant_float(m, 0.0f)), w,
+			constant_float(m, 1.0f));
+		uv = fmul(m, 2, fdiv(m, 2, xy(m, xt), splat(m, 2, w)), xy(m, uniform(m, U_TEXTURE_SCALE, 2)));
+		words[0] = ext1(m, GLSL_PACK_UNORM_2X16, m->t_uint, fclamp(m, 2, uv, 0.0f, 1.0f));
+	}
+	else
+		words[0] = constant_uint(m, 0);
 	if (state->in_world_normal)
 	{
 		unsigned int normal = xyz(m, pixel_input(m, state, state->in_world_normal, m->t_v4));
@@ -4123,7 +4138,8 @@ pixel's distance d along the view's axis and its place in the target's
 pixels as h = (d x, d y, d, 1); q = rows . h, last frame's place q.x / q.z
 and q.y / q.z: this frame's camera, the draw's move and last frame's
 camera together, the backend's gbuffer_motion) */
-static unsigned int gbuffer_extras(struct module *m, struct pixel_state *state, unsigned int emissive)
+static unsigned int gbuffer_extras(struct module *m, struct pixel_state *state, unsigned int emissive,
+	unsigned int light)
 {
 	unsigned int words[4], frag = load(m, m->t_v4, state->frag_coord);
 	unsigned int fx = extract(m, frag, 0), fy = extract(m, frag, 1);
@@ -4145,8 +4161,28 @@ static unsigned int gbuffer_extras(struct module *m, struct pixel_state *state, 
 	flag = op3(m, OP_SELECT, m->t_float, valid, constant_float(m, 1.0f), constant_float(m, 0.0f));
 	words[0] = ext1(m, GLSL_PACK_HALF_2X16, m->t_uint, motion);
 	words[1] = ext1(m, GLSL_PACK_HALF_2X16, m->t_uint, xy(m, emissive));
-	words[2] = ext1(m, GLSL_PACK_HALF_2X16, m->t_uint, construct(m, 2, (unsigned int[]){ extract(m, emissive, 2),
-		flag }));
+	/* (word 2: the emissive light's blue, a half float; bit 16 the motion's
+	history (XGPU_GBUFFER_EXTRA_HISTORY); bits 17 on the level's lightmap
+	page + 1, the uniforms' [1].w (0 none: an object's)) */
+	words[2] = op2(m, OP_BITWISE_AND, m->t_uint, ext1(m, GLSL_PACK_HALF_2X16, m->t_uint,
+		construct(m, 2, (unsigned int[]){ extract(m, emissive, 2), constant_float(m, 0.0f) })), constant_uint(m, 0xffffu));
+	words[2] = op2(m, OP_BITWISE_OR, m->t_uint, words[2], op3(m, OP_SELECT, m->t_uint, compare(m, OP_F_ORD_GREATER_THAN,
+		flag, constant_float(m, 0.5f)), constant_uint(m, 0x10000u), constant_uint(m, 0)));
+	words[2] = op2(m, OP_BITWISE_OR, m->t_uint, words[2], op2(m, OP_SHIFT_LEFT_LOGICAL, m->t_uint,
+		op2(m, OP_BITWISE_AND, m->t_uint, op1(m, OP_CONVERT_F_TO_U, m->t_uint, fmax_scalar(m, 1,
+		extract(m, uniform(m, U_GBUFFER, 1), 3), 0.0f)), constant_uint(m, 0x7fu)),
+		constant_uint(m, 17u)));
+	/* (bits 24 on: the level's lightmap pass's light whole, its luminance's
+	square root, 8 bits; 0 none) */
+	if (light)
+	{
+		unsigned int luminance = fdot(m, light, constant_vector(m, 3, (const float[]){ 0.2126f, 0.7152f, 0.0722f }));
+		unsigned int code = op1(m, OP_CONVERT_F_TO_U, m->t_uint, fadd(m, 1, fmul(m, 1, ext1(m, GLSL_SQRT, m->t_float,
+			fclamp(m, 1, luminance, 0.0f, 1.0f)), constant_float(m, 255.0f)), constant_float(m, 0.5f)));
+
+		words[2] = op2(m, OP_BITWISE_OR, m->t_uint, words[2], op2(m, OP_SHIFT_LEFT_LOGICAL, m->t_uint, code,
+			constant_uint(m, 24u)));
+	}
 	words[3] = op1(m, OP_BITCAST, m->t_uint, distance);
 	return op(m, OP_COMPOSITE_CONSTRUCT, m->t_uv4, 4, words);
 }
@@ -6502,7 +6538,7 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	/* (display.lighting "ce_deferred": a G-buffer twin's words in the
 	colour's place, an object's base colour among them) */
 	BOOL gbuffer = options->gbuffer != 0;
-	unsigned int gbuffer_base = 0, gbuffer_emissive = 0, gbuffer_extras_out = 0;
+	unsigned int gbuffer_base = 0, gbuffer_emissive = 0, gbuffer_extras_out = 0, gbuffer_light = 0;
 	/* port: a model's twin's light as CE lit it (display.prism_rt's
 	traced light keyed: its fourth word, as a lightmap pass's) */
 	unsigned int model_light_ce = 0;
@@ -6864,6 +6900,12 @@ stage 2, what its self-illumination adds) */
 		state.t[2] = t2;
 		state.r0 = r0;
 		state.r1 = r1;
+		/* (and its light whole, the lightmap's with it: M2's PRISM Raster
+		finds what CE drew over it after, the objects' shadows and the
+		dynamic lights, by the light target's pixel against it) */
+		gbuffer_light = saturate(&m, 3, xyz(&m, combiners(&m, &state)));
+		state.r0 = r0;
+		state.r1 = r1;
 	}
 	/* (display.hdr: a self-illuminated surface's pixel without its
 	self-illumination, the registers as they were after) */
@@ -7090,9 +7132,9 @@ stage 2, what its self-illumination adds) */
 	reference) */
 	if (gbuffer)
 	{
-		store(&m, color_out, gbuffer_words(&m, &state, gbuffer_base));
+		store(&m, color_out, gbuffer_words(&m, &state, gbuffer_base, options->gbuffer == XGPU_SPIRV_GBUFFER_LEVEL));
 		store(&m, gbuffer_extras_out, gbuffer_extras(&m, &state, gbuffer_emissive ? gbuffer_emissive :
-			constant_splat(&m, 3, 0.0f)));
+			constant_splat(&m, 3, 0.0f), gbuffer_light));
 	}
 	else if (world_inputs && occlusion_light == XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP &&
 		(program->ambient_occlusion & XGPU_AMBIENT_OCCLUSION_RT_LIGHT))
