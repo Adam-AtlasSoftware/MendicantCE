@@ -2,8 +2,8 @@
 (paths.py) and read through a pipe of its frames (debug.screenshot_stream): no window (SDL's dummy video driver,
 debug.hidden_window), no sound (HALO_NO_AUDIO, SDL's dummy audio), no controllers, nothing online (the run's own
 empty brokers, relays and masters files), its own data, save and config folders, the clock fixed (a tick a frame,
-debug.fixed_step) and interpolation off, and each saved frame held until the asset streams are done with what it
-draws (debug.camera_path_settle), so that a path's frames are the same in every run.
+debug.fixed_step) and interpolation off (and, with PRISM_GATE_SETTLE, each saved frame held until the asset streams
+are done with what it draws: debug.camera_path_settle), so that a path's frames are the same in every run.
 
     run = Run(stage, data, work, "b30", timeline.text(), timeline.saves, config=..., env={...})
     run.wait(timeout)   # the frames saved (by the path's frame) written as PNG; raises if the game failed
@@ -26,9 +26,13 @@ from PIL import Image
 
 # the kit (the game the person this works for plays): never run while it runs, never touched
 KIT = Path(os.environ.get("PRISM_GATE_KIT", "/home/adam/Dev/repos/ce-reimagined/testkit/openh1-prism-v2"))
-# the most frames a saved frame of a path is held for the streams (debug.camera_path_settle): each is drawn with
-# every texture the stock cache has to read, and held until the host's texture and mesh stores have nothing to come
-SETTLE_FRAMES = 300
+# the most frames a saved frame of a path is held for the streams (debug.camera_path_settle; PRISM_GATE_SETTLE): each
+# is then drawn with every texture the stock cache has to read, and held until the host's texture and mesh stores have
+# nothing to come. 0 (none) by default: measured on RT off's moves (G5 and G7, two runs of each tree on the RTX 2060)
+# it did not make the captures more alike (44 of 80 and 59 of 120 frames alike, the tree before it 41 and 54), and
+# the frames it holds move what counts frames drawn (the kit's temporal passes), so that its frames are no longer
+# byte for byte a build's before it
+SETTLE_FRAMES = int(os.environ.get("PRISM_GATE_SETTLE", "0"))
 
 
 def kit_running():

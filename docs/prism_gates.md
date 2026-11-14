@@ -188,21 +188,28 @@ What still differs, and why:
   GPU runs, and a transient as the mode turns on decays through the temporal history: without the cache (G1, Rat Race,
   on the RTX 2060), the moves part only in their first 24 steps.
 
-Two fixes for the first of those are in, implemented and not yet measured (the table above is from before them):
+Two fixes for the first of those are in (M1's determinism work):
 
-- **The streams settled before a save.** The captures turn on `debug.camera_path_settle` (`game.py`'s
-  `SETTLE_FRAMES`, 300): each frame a path saves is drawn with every texture the stock texture cache has to read (as
-  while a map's shaders are made), and held, its pose drawn again and nothing saved, until the host's texture and
-  mesh stores have said on frames in flight + 1 frames after its first that nothing they drew is still to come (the
-  ring's `streams_pending`, written at each frame's end), or for 300 frames (logged). Each held frame is drawn with
-  the frames' seed its first had, and runs no `at` line again; with the game stopped (`game_speed 0`) the held frames
-  are the same picture. What the renderer keeps from frame to frame by its own count (a temporal history, a jitter)
-  still moves on with each held frame.
+- **The streams settled before a save** (`debug.camera_path_settle`; the captures' `PRISM_GATE_SETTLE`, 0 by
+  default): each frame a path saves is drawn with every texture the stock texture cache has to read (as while a
+  map's shaders are made), and held, its pose drawn again and nothing saved, until the host's texture and mesh stores
+  have said on frames in flight + 1 frames after its first that nothing they drew is still to come (the ring's
+  `streams_pending`, written at each frame's end), or for that many frames (logged). Each held frame is drawn with the
+  frames' seed its first had, and runs no `at` line again. What the renderer keeps from frame to frame by its own
+  count (a temporal history, a jitter) still moves on with each held frame, so a held capture is no longer byte for
+  byte a build's before it (the stills of G2, G4 and G5 with the kit's settings then differ in their noise; with no
+  hold they are alike). Measured (RT off's moves, G5 and G7, two runs of each tree, the RTX 2060, with a hold of up to
+  300 frames): 44 of 80 and 59 of 120 frames alike, against 41 and 54 for the tree before. So the harness holds
+  none by default.
 - **The rendering's animations by the game's clock.** The frame's time the glows, the skies' animations and weather
   advance by is scaled by the game's speed, so they stand still while the game is stopped, as its shaders'
-  animations already did (c40's hologram ring is most likely a glow); a glow's trailing particles are aged and made
-  by the ticks since its last update, not the game's whole time on each draw, at any speed but 1; the skies'
-  animations begin again with each map. At speed 1 (as games are played) nothing of it changes but that last.
+  animations already did; a glow's trailing particles are aged and made by the ticks since its last update, not the
+  game's whole time on each draw, at any speed but 1; the skies' animations begin again with each map. At speed 1 (as
+  games are played) nothing of it changes but that last.
+
+What still parts G7's RT-off moves after both: the lamps' glows on the floor (a light's flare, its brightness by a
+visibility test whose answer comes a frame or two later, by the GPU's timing, most likely), not the hologram ring. G7's still
+(identity.py stills) differs from run to run the same way, in this tree and the one before it.
 
 So the byte-for-byte check covers RT off and the references of the scenes above; the live path-traced frames are
 judged by the metrics only, until M1's deferred core replaces the tracer's inputs with records it can make
@@ -310,6 +317,50 @@ kit's settings, BSP 0, at `-68.54 -81.83 39.30 120 -15 0 70`, `-88.11 -63.71 39.
 frame's pixels differ) and M1's does not. The design's fog as a screen pass (no geometry drawn for fog at all) is
 still to come.
 
+### The scene records: SCENE_STATIC, SCENE_LIGHTS, SCENE_INSTANCE and the motion
+
+M1's scene plumbing (`docs/prism_scene_records.md`) was measured after each step: c1, SCENE_STATIC and SCENE_LIGHTS
+(the ray tracer's level as drawn); c2, with SCENE_INSTANCE, SCENE_VIEW and the G-buffer's second target, and the
+determinism work merged.
+
+- **Equivalence** (Classic preset, RTX 3070 Ti, all eleven frozen scenes): the worst pose's mean FLIP is the same as
+  before at every scene, c1 and c2: G1 0.0025, G2 0.0035, G3 0.0024, G4 0.0018, G5 0.0020, G6 0.0027, G7 0.0026, S1
+  0.0026, S2a 0.0010, S2b 0.0028, S3 0.0029. With the kit's settings (RTX 2060): G2 0.0046, G4 0.0011, G5 0.0087 (c2
+  0.0082), S1 0.0040 (c2 0.0039), S3 0.0021.
+- **Material source**: 1.000000 at every pose of every scene, both settings, c1 and c2.
+- **Classic byte identity** against M1's G-buffer build: `frames` (a10, b30) 46 of 46 alike each; `stills` (the kit's
+  settings, RT off) G2, G4 and G5 30 of 30 alike (c2's with the harness holding no frame: see above), G7 alike in no
+  run of either tree (its floor lamps' glows). **Determinism** (`--simulation`): all alike, each tree with itself and
+  the new with the base.
+- **Vulkan validation** with synchronisation validation (G2's probes; `ce`, `ce_deferred`, path traced with the kit's
+  settings and the level as drawn): c2 0 hazards, 0 VUIDs. c1 had 10 of one VUID (`vkCmdDraw-magFilter-04553`) in
+  `ce_deferred` and path traced: the resolve sampled the G-buffer's integer words with a linear sampler since the
+  G-buffer pass came in; c2 fetches them with a nearest one.
+- **The ray tracer's level as drawn** (b30 with the sealed remodel, path traced, the kit's settings, at G2's probes):
+  2.07 million triangles (125 MB of structure) against 1.68 million for the near level whole (112 MB); the frame's
+  GPU time 16.7 ms against 17.8 on the RTX 3070 Ti at 1080p, 40.0 against 44.5 on the RTX 2060 at 720p (the levels
+  not drawn are folded to points and cost the rays little; the structure is refitted only as surfaces change level).
+  With the far level traced (the old default), b30's Forerunner structure showed blotches of shadow where a near
+  surface's rays started under the far level; as drawn they are gone.
+- **The motion** (a10, the camera panned 0.08 degrees a frame, RTX 2060): each frame warped back by its motion view
+  against the frame before, a mean absolute error of 0.35 of 255, against 1.63 unwarped, least at the motion's own
+  scale.
+
+The frame times (medians of 600-frame blocks, `ce` against `ce_deferred`, the G-buffer pass alone; ms):
+
+| Scene | Settings | 3070 Ti 1080p c1: frame / G-buffer pass | c2 | 2060 720p c1 | c2 |
+| --- | --- | --- | --- | --- | --- |
+| G2 | classic | 0.38 / 0.85, 0.22 | 0.38 / 1.04, 0.37 | 1.13 / 3.02, 0.94 | 1.13 / 3.51, 1.44 |
+| G2 | kit | 5.55 / 6.60, 0.52 | 5.83 / 7.03, 0.75 | 11.13 / 12.58, 1.62 | 11.23 / 12.57, 1.71 |
+| G4 | classic | 0.30 / 0.70, 0.17 | 0.30 / 0.89, 0.35 | 0.57 / 1.70, 0.33 | 0.57 / 2.21, 0.88 |
+| G4 | kit | 1.92 / 2.53, 0.17 | 1.92 / 2.71, 0.36 | 7.17 / 9.31, 0.39 | 7.18 / 9.82, 0.91 |
+| G5 | classic | 0.27 / 0.69, 0.17 | 0.27 / 0.86, 0.34 | 0.73 / 1.91, 0.49 | 0.73 / 2.39, 0.95 |
+| G5 | kit | 2.64 / 3.38, 0.24 | 2.64 / 3.56, 0.42 | 8.69 / 10.47, 0.81 | 8.69 / 11.01, 1.22 |
+
+c1 is M1's G-buffer build's to the rounding (SCENE_STATIC and SCENE_LIGHTS cost the frame nothing measurable). c2's
+second target (16 bytes a pixel more written, the motion's arithmetic) adds 0.15 to 0.2 ms to the G-buffer pass on
+the 3070 Ti and 0.5 ms on the 2060, the worst on the stock world 0.37 ms of 2.5 and 1.44 ms of 4.0: within budget.
+
 ## Every milestone also passes
 
 `tools/prism_gate/identity.py` checks the milestone's tree against the tree it started from:
@@ -334,7 +385,9 @@ and the design's others: no change to `HALO_PORT_NETWORK_VERSION`, Vulkan valida
 ## Not yet frozen
 
 S4 (c10's swamp: the pose tried is an interior), S3's flashlight (the player's light is where the player is, not
-the scene's camera), V1 (a Warthog driven across b30's beach before a still camera: the Warthog placed by name was
+the scene's camera; `debug_object_place "player at <x> <y> <z> <yaw>"` now stands the player there, and
+`units_set_desired_flashlight_state (players) true` turns the light on, but in a first try at S3's pose the light was
+not seen and a hint of the HUD was drawn over the frame), V1 (a Warthog driven across b30's beach before a still camera: the Warthog placed by name was
 not made) and V2 (a50's firefight with the AI kept: the poses tried show no fight) need their poses or setup found
 in play before they join `scenes.json`. The harness has what they need: a live scene (`"live": true`: the AI kept, the
 clock running during its moves, each state its own run so that every state sees the same world; its references
