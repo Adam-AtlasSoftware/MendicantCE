@@ -106,6 +106,9 @@ struct host_render_backend
 	void (*scene_static)(void *context, const struct xgpu_stream_scene_static *record, const void *data);
 	/* SCENE_LIGHTS: count lights, checked to lie in the record */
 	void (*scene_lights)(void *context, const struct xgpu_stream_scene_lights *record);
+	/* SCENE_INSTANCE (its nodes checked to lie in the record) and SCENE_VIEW */
+	void (*scene_instance)(void *context, const struct xgpu_stream_scene_instance *record);
+	void (*scene_view)(void *context, const struct xgpu_stream_scene_view *record);
 	/* display.panini: a 3D view drawn again through the Panini projection
 	(none: not drawn) */
 	void (*panini)(void *context, const struct xgpu_stream_panini *record);

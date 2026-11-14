@@ -518,6 +518,8 @@ static void render_window(
 		if (prism_deferred)
 		{
 			prism_deferred_gbuffer_begin();
+			/* port: the window's camera, for the G-buffer's motion (SCENE_VIEW) */
+			prism_deferred_gbuffer_view(&parameters.camera, &parameters.frustum);
 			render_gbuffer_pass = TRUE;
 			render_objects();
 			render_enumerate_models();

@@ -25,6 +25,9 @@ void prism_deferred_phase(short phase);
 /* the G-buffer pass (render_window's walk 1, render_gbuffer_pass): begun
 (the map's materials sent first, once) and ended */
 void prism_deferred_gbuffer_begin(void);
+/* ... and its window's camera (render_window's struct render_camera and
+render_frustum): SCENE_VIEW, which the G-buffer's motion is found by */
+void prism_deferred_gbuffer_view(void const *camera, void const *frustum);
 void prism_deferred_gbuffer_end(void);
 /* in the G-buffer pass: the object drawn from now on (NONE the level's:
 world_ao.c's hooks), the first-person weapon's draws begun or ended, and a

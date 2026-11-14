@@ -9,10 +9,11 @@ lights, the decals and the fog. These are new records of the renderer's command 
 ## What is there now
 
 `XGPU_STREAM_VERSION` is 32. The records' types are in the stream's own list, after M1's first record,
-`GBUFFER_PHASE` (82): `SCENE_MATERIAL` is 83 and so on to `SCENE_FOG`, 90, and `XGPU_STREAM_RECORD_TYPES` is 91. The
+`GBUFFER_PHASE` (82): `SCENE_MATERIAL` is 83 and so on to `SCENE_FOG`, 90, then `SCENE_VIEW`, 91, and
+`XGPU_STREAM_RECORD_TYPES` is 92. The
 host's decoder takes every one, with its fixed part's size as its minimum.
 
-M1 sends four of them. With `display.lighting` `ce_deferred` (`port/linux/game/prism_deferred.c`), in its G-buffer pass
+M1 sends six of them, and `SCENE_VIEW`. With `display.lighting` `ce_deferred` (`port/linux/game/prism_deferred.c`), in its G-buffer pass
 (walk 1: the window's opaque surfaces drawn first into the G-buffer, `GBUFFER_PHASE`'s `GBUFFER_BEGIN` and
 `GBUFFER_END`):
 
@@ -48,8 +49,24 @@ And with `ce_deferred` or `display.prism_rt` on, each frame before its windows (
   b30: 31 lights (the sun, a dome, the sky, 6 emitters, 10 fixtures, 12 dynamic). The backend keeps the last whole
   table.
 
-The other four are specified and taken, not sent: `SCENE_MATERIAL_ANIMATE`, `SCENE_INSTANCE`, `SCENE_DECAL`,
-`SCENE_FOG`. `xgpu_scene_encode.c` still fills all eight from typed values for the tests; the stream writes its own
+And in the G-buffer pass, for its motion:
+
+- `SCENE_VIEW` (91, after `SCENE_FOG`): as the pass begins, the window's camera this frame and last (as world AO's
+  pass has it: the eye, the axis at the screen's middle, its change a unit of the screen's x and y) and the view's
+  corners in the target's pixels; history where the last frame's was the same window's.
+- `SCENE_INSTANCE`: each object the pass draws, once, before its draws: its id (1 + its datum index, as
+  `GBUFFER_DRAW`'s instance), its nodes' matrices as drawn (the pose between the ticks) and as last sent where that
+  was the pass before and the same object (else `NO_HISTORY`).
+
+The Vulkan backend draws each G-buffer twin into a second target too (`xgpu_stream.h`'s `GBUFFER_BEGIN`: four words a
+pixel): the screen motion (in pixels, from where the surface was last frame: the cameras and, for an object, the
+move of the `SCENE_INSTANCE` node its draw's part hangs from, the one whose matrix is the draw's first node's in the
+vertex constants; the first-person weapon none on the screen), the emissive light (an object's combiners with no
+light, the level's lightmap pass's with no lightmap) and the distance along the view's axis. The motion is the
+part's rigid motion: a skinned part's vertices take its first node's. `debug.gbuffer_view` `motion` and `emissive`
+show them.
+
+The other three are specified and taken, not sent: `SCENE_MATERIAL_ANIMATE`, `SCENE_DECAL`, `SCENE_FOG`. `xgpu_scene_encode.c` still fills all eight from typed values for the tests; the stream writes its own
 from `xgpu_stream_encode.c`.
 
 ## The byte-identity rule
@@ -68,12 +85,13 @@ entries are sent; the record's size is its fixed part and those entries.
 | --- | --- | --- | --- |
 | `SCENE_MATERIAL` | Once per shader per map, at load (again when a mod changes it) | Material id (1 on; 0 refused); the 64-bit FNV-1a hash of the shader tag's path; CE family (`senv`, `soso`, `sgla`, `swat`, `schi`, `sotr`, `smet`, `spla`); CE's material type; the shader's own flags word; the detail functions (primary, secondary, micro, a byte each); derived flags (alpha tested, two-sided, bump-alpha specular, animated, emitter, transparent layer, never an occluder); 8 bitmap slots' texture ids; 32 scalars (bump and detail scales, specular brightness and colours, reflection brightnesses, self-illumination colours, radiosity power and colour, translucency, tint, alpha reference) | 200 |
 | `SCENE_MATERIAL_ANIMATE` | Each frame, for animated materials drawn | The three self-illumination channels' animation values; each bitmap slot's texture coordinate transform (two affine rows; the identity where it does not move); 4 change colours not tied to an object | 344 |
-| `SCENE_INSTANCE` | Each frame, per object drawn | Instance id (the object's datum index, stable; 0 refused); flags (first person, cinematic, shield, camouflage, casts shadow, in the TLAS, no history); CE's LOD; the mesh store's mesh; 4 change colours; up to 64 nodes' 3×4 matrices, this frame's and last frame's | 88 + 96 per node (at most 6232) |
+| `SCENE_INSTANCE` | Each frame, per object drawn | Instance id (1 + the object's datum index, stable; 0 refused); flags (first person, cinematic, shield, camouflage, casts shadow, in the TLAS, no history); CE's LOD; the mesh store's mesh; 4 change colours; up to 64 nodes' 3×4 matrices, this frame's and last frame's | 88 + 96 per node (at most 6232) |
 | `GBUFFER_DRAW` | Before each opaque draw of walk 1 | Material id (0 refused), instance id (0 the level), the level's surface index or an object's geometry and part, the CE vertex program's id, flags (alpha tested, two-sided, first person, remodel), LOD. The draw's vertices and indices are bound as today | 32 |
 | `SCENE_STATIC` | Per BSP, a slice at a time, as `RT_STATIC`; its levels as they change | Phase (begin, triangles, attributes, end, release, pages, levels), generation, first, count (at most 65536 a slice), total, the data's address and size. A triangle is 9 floats; its attributes are 16 words: material, surface, kind, level and lightmap page, three corners' lightmap coordinates, three corners' base map coordinates, the ray tracer's material. A page is its width and height; the levels a bit set over the surfaces (set: drawn far) | 32 |
 | `SCENE_LIGHTS` | Each frame | First, count and total of the frame's lights; up to 256 lights, each its stable id, type (sun, dome, sky, point, spot, emitter), class (static, animated, switchable, dynamic), flags (on, casts shadows, first person), position and radius (or direction toward it), spot axis and cone, radiance and power, shape (sun disc, dome half angle, inner cone). Emitters are SCENE_STATIC triangles by their materials | 16 + 80 per light (at most 20496) |
 | `SCENE_DECAL` | Per live decal | Decal id, bitmap and sequence frame, CE's framebuffer blend function (alpha, multiply, double multiply, add, subtract, min, max, alpha multiply add), flags (emissive, normal), the box (centre and three half-extent axes), colour, texture rectangle | 120 |
 | `SCENE_FOG` | Each frame | Flags; the camera cluster's atmospheric fog (colour, maximum density, start and opaque distances); up to 8 fog planes seen, each its index, flags (inside), plane, colour and maximum density, opaque distance and depth | 48 + 64 per plane (at most 560) |
+| `SCENE_VIEW` | At each G-buffer pass's begin | Flags (history); the camera this frame and last (eye and near plane, the axis at the screen's middle and the far plane, its change a unit of the screen's x and y); the view's corners in the target's pixels, this frame's and last | 176 |
 
 ### The capacities
 

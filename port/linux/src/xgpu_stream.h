@@ -315,6 +315,8 @@ enum
 	XGPU_STREAM_SCENE_LIGHTS,
 	XGPU_STREAM_SCENE_DECAL,
 	XGPU_STREAM_SCENE_FOG,
+	/* (the cameras the G-buffer's motion is found by: SCENE_VIEW, below) */
+	XGPU_STREAM_SCENE_VIEW,
 	XGPU_STREAM_RECORD_TYPES,
 };
 /* (the scene records' own count: they run from SCENE_MATERIAL to the end) */
@@ -353,12 +355,24 @@ again). The G-buffer target is four 32-bit words a pixel
       tier (12 to 14: XGPU_GBUFFER_TIER_*), present (15, every pixel the
       pass drew), the instance (16 to 31: 0 the level, 1 + an object's datum
       index, XGPU_GBUFFER_INSTANCE_FIRST_PERSON the first-person weapon).
-The resolve's views (bit 8 on, debug.gbuffer_view) 4 to 9 show the G-buffer
+Beside it, the G-buffer's second target, four 32-bit words a pixel too
+(RGBA32Uint, written by the same twins):
+  [0] the screen motion, 2x16 half floats: where the pixel's surface was
+      the frame before, in the target's pixels, less where it is now (x
+      right, y down): the camera's move (SCENE_VIEW's last and this frame's
+      cameras) and the object's (SCENE_INSTANCE's node the draw's part hangs
+      from, last frame's and this frame's), 0 where there is no history;
+  [1] [2] the emissive light, 3 half floats (red and green, blue and 0): an
+      object's combiners with no light (its self-illumination), the level's
+      lightmap pass's with no lightmap; CE's values;
+  [3] the distance along the view's axis (a float's bits).
+The resolve's views (bit 8 on, debug.gbuffer_view) 4 to 11 show the G-buffer
 in the frame's place: 4 the base colour (the level's from the base phase's
 target), 5 the normal, 6 the roughness, 7 the metalness, 8 the material
 source (each opaque pixel coloured by its tier: XGPU_GBUFFER_SOURCE_*; a
 pixel the window drew opaque that the G-buffer has not, magenta), 9 the
-instances. With a view (1 to 9) nothing more is drawn into the window's
+instances, 10 the motion (red right, green down, 8 pixels full; blue where
+there is no history), 11 the emissive light. With a view (1 to 11) nothing more is drawn into the window's
 colour target after the resolve, so the view is what the frame shows. */
 #define XGPU_GBUFFER_PHASE_GBUFFER_BEGIN 4u
 #define XGPU_GBUFFER_PHASE_GBUFFER_END 5u
@@ -368,6 +382,8 @@ colour target after the resolve, so the view is what the frame shows. */
 #define XGPU_GBUFFER_VIEW_METAL 7u
 #define XGPU_GBUFFER_VIEW_MATERIAL_SOURCE 8u
 #define XGPU_GBUFFER_VIEW_INSTANCE 9u
+#define XGPU_GBUFFER_VIEW_MOTION 10u
+#define XGPU_GBUFFER_VIEW_EMISSIVE 11u
 /* the source tiers (design section 5.3): none (no material: a fault), the
 class default, the automatic tier (the host's, from CE's shader at load),
 the pack tier, a mod's */
@@ -2194,7 +2210,8 @@ struct xgpu_stream_scene_material_animate
 };
 
 /* SCENE_INSTANCE: each frame, each object drawn: its id (stable across
-frames: the object's datum index; never 0, the level's), its flags
+frames: 1 + the object's datum index, as GBUFFER_DRAW's; never 0, the
+level's), its flags
 (XGPU_SCENE_INSTANCE_*), the level of detail the game chose (CE's, 0 super
 low to 4 super high), the mesh store's mesh where one replaces the model (0
 none), its change colours (linear rgb and a 0), and node_count nodes' world
@@ -2449,6 +2466,28 @@ struct xgpu_stream_scene_fog
 	struct xgpu_stream_scene_fog_plane planes[XGPU_SCENE_FOG_PLANES];
 };
 
+/* SCENE_VIEW: at each G-buffer pass's begin, the window's camera this frame
+and last frame (as world AO's pass has it, xgpu_world_ao_pass's camera):
+[0] the eye and the near plane, [1] the direction one unit along the view's
+axis at the screen's middle and the far plane, [2] and [3] its change a
+unit of the screen's x (-1 the view's left edge, 1 its right) and y (-1 its
+top, 1 its bottom); the view's corners in the colour target's pixels (left,
+top, right, bottom), this frame's and last's; flags XGPU_SCENE_VIEW_* */
+enum
+{
+	/* last frame's camera given (the same window, a frame before) */
+	XGPU_SCENE_VIEW_HISTORY = 1,
+};
+struct xgpu_stream_scene_view
+{
+	uint32_t header;
+	uint32_t flags, pad[2];
+	float now[4][4];
+	float last[4][4];
+	int32_t corners[4];
+	int32_t last_corners[4];
+};
+
 /* ---------- the layouts' sizes, alike on both sides */
 
 #define XGPU_STREAM_ASSERT_SIZE(type, size) _Static_assert(sizeof(type) == (size), #type "'s size")
@@ -2522,6 +2561,7 @@ XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_scene_lights, 16 + XGPU_SCENE_LIGHTS 
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_scene_decal, 120);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_scene_fog_plane, 64);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_scene_fog, 48 + XGPU_SCENE_FOG_PLANES * 64);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_scene_view, 16 + 128 + 32);
 /* (the scene records' types still fit the header's 8 bits) */
 _Static_assert(XGPU_STREAM_SCENE_RECORD_TYPES <= 256, "the scene records' types fit a header");
 

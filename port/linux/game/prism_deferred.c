@@ -57,6 +57,11 @@ nothing changes.
 #include "shaders/shader_definitions.h"
 #include "tag_files/tag_files.h"
 #include "tag_files/tag_groups.h"
+#include "objects/objects.h"
+#include "render/render_cameras.h"
+#include "render_cameras_internal.h"
+
+#include <stdlib.h>
 
 #include <string.h>
 
@@ -68,6 +73,10 @@ void xgpu_backend_scene_material(unsigned long material, const unsigned long has
 	unsigned long shader_flags, unsigned long detail_functions, unsigned long flags, const float *scalars,
 	int scalar_count);
 void xgpu_backend_gbuffer_draw(unsigned long material, unsigned long instance, unsigned long flags);
+void xgpu_backend_scene_instance(unsigned long instance, unsigned long flags, unsigned long lod, const float *now,
+	const float *last, unsigned long node_count);
+/* d3d8_device.c's (the window's view's pixels are the device's) */
+void halo_scene_view(short x0, short y0, short x1, short y1, float const camera[4][4]);
 
 /* xgpu_stream.h's GBUFFER_PHASE values */
 #define PHASE_BASE 1ul
@@ -128,6 +137,10 @@ offsets for the rest) */
 /* the map's shaders by their tags' addresses: an open table of a power of
 two (half full at most), the material id each (1 on, in the tags' order) */
 #define MATERIALS_MOST 4096
+/* SCENE_INSTANCE: the objects whose nodes are kept (MAXIMUM_OBJECTS_PER_MAP),
+the nodes an instance sends (xgpu_stream.h's XGPU_SCENE_INSTANCE_NODES) */
+#define INSTANCES_MOST 2048
+#define INSTANCE_NODES 64
 #define MATERIAL_SLOTS (MATERIALS_MOST * 2)
 
 static struct
@@ -150,6 +163,15 @@ static struct
 	unsigned long instance, draw_flags;
 	unsigned long sent_material, sent_instance, sent_flags;
 	boolean sent;
+	/* SCENE_INSTANCE: the G-buffer passes counted; each object's (by its
+	absolute index) nodes as last sent, their count, the pass they were
+	sent in and the object's datum handle (another object in the slot: no
+	history) */
+	unsigned long pass_number;
+	float *instance_nodes[INSTANCES_MOST];
+	short instance_node_counts[INSTANCES_MOST];
+	unsigned long instance_passes[INSTANCES_MOST];
+	long instance_handles[INSTANCES_MOST];
 } prism_deferred;
 
 static void settings_read(
@@ -168,7 +190,7 @@ static void settings_read(
 	prism_deferred.view = !value ? 0 : !strcmp(value, "base") ? 1 : !strcmp(value, "light") ? 2 :
 		!strcmp(value, "additions") ? 3 : !strcmp(value, "albedo") ? 4 : !strcmp(value, "normal") ? 5 :
 		!strcmp(value, "roughness") ? 6 : !strcmp(value, "metal") ? 7 : !strcmp(value, "material_source") ? 8 :
-		!strcmp(value, "instance") ? 9 : 0;
+		!strcmp(value, "instance") ? 9 : !strcmp(value, "motion") ? 10 : !strcmp(value, "emissive") ? 11 : 0;
 
 	return;
 }
@@ -383,10 +405,128 @@ unsigned long prism_deferred_material_id(
 	return material_of(shader);
 }
 
+/* a node's matrix as three rows of four (scaled forward, left and up as
+columns, then its position: rows . (x y z 1) is a point of the node's space
+in the world), as the renderer's constants and SCENE_INSTANCE have it */
+static void node_rows(
+	real_matrix4x3 const *matrix,
+	float *rows)
+{
+	float scale = matrix->scale;
+
+	rows[0] = matrix->forward.i * scale;
+	rows[1] = matrix->left.i * scale;
+	rows[2] = matrix->up.i * scale;
+	rows[3] = matrix->position.x;
+	rows[4] = matrix->forward.j * scale;
+	rows[5] = matrix->left.j * scale;
+	rows[6] = matrix->up.j * scale;
+	rows[7] = matrix->position.y;
+	rows[8] = matrix->forward.k * scale;
+	rows[9] = matrix->left.k * scale;
+	rows[10] = matrix->up.k * scale;
+	rows[11] = matrix->position.z;
+}
+
+/* SCENE_INSTANCE for an object the G-buffer pass draws, once a pass: its
+nodes as drawn (object_get_node_matrices: the pose between the ticks) and
+as last sent, where that was the pass before and the same object */
+static void instance_send(
+	long object_index,
+	unsigned long absolute)
+{
+	struct object_datum *object = object_try_and_get_and_verify_type(object_index, _object_mask_all);
+	real_matrix4x3 const *nodes;
+	float now[INSTANCE_NODES * 12];
+	float *kept;
+	short node_count, node;
+	boolean history;
+
+	if (!object || absolute >= INSTANCES_MOST || prism_deferred.instance_passes[absolute] == prism_deferred.pass_number)
+	{
+		return;
+	}
+	nodes = object_get_node_matrices(object_index);
+	node_count = (short)(object->object.node_matrices.size / (short)sizeof(real_matrix4x3));
+	if (!nodes || node_count <= 0)
+	{
+		return;
+	}
+	if (node_count > INSTANCE_NODES)
+	{
+		node_count = INSTANCE_NODES;
+	}
+	for (node = 0; node < node_count; node++)
+	{
+		node_rows(&nodes[node], now + node * 12);
+	}
+	kept = prism_deferred.instance_nodes[absolute];
+	history = kept && prism_deferred.instance_passes[absolute] + 1 == prism_deferred.pass_number &&
+		prism_deferred.instance_handles[absolute] == object_index &&
+		prism_deferred.instance_node_counts[absolute] == node_count;
+	xgpu_backend_scene_instance(absolute + 1, 0, 0, now, history ? kept : NULL, (unsigned long)node_count);
+	if (!kept)
+	{
+		kept = malloc(INSTANCE_NODES * 12 * sizeof(float));
+		prism_deferred.instance_nodes[absolute] = kept;
+	}
+	if (kept)
+	{
+		memcpy(kept, now, node_count * 12 * sizeof(float));
+	}
+	prism_deferred.instance_node_counts[absolute] = node_count;
+	prism_deferred.instance_passes[absolute] = prism_deferred.pass_number;
+	prism_deferred.instance_handles[absolute] = object_index;
+}
+
+void prism_deferred_gbuffer_view(
+	void const *camera_pointer,
+	void const *frustum_pointer)
+{
+	struct render_camera const *camera = camera_pointer;
+	struct render_frustum const *frustum = frustum_pointer;
+	float view[4][4];
+	real_point2d screen_point;
+	real_vector3d view_vector, middle, step;
+	short axis;
+
+	if (!frustum->projection_valid)
+	{
+		return;
+	}
+	/* (as render_window finds world AO's pass's camera) */
+	view[0][0] = camera->position.x;
+	view[0][1] = camera->position.y;
+	view[0][2] = camera->position.z;
+	view[0][3] = frustum->z_near;
+	screen_point.x = 0.0f;
+	screen_point.y = 0.0f;
+	render_camera_screen_to_view(camera, frustum, &screen_point, &view_vector);
+	matrix4x3_transform_vector(&frustum->view_to_world, &view_vector, &middle);
+	view[1][0] = middle.i;
+	view[1][1] = middle.j;
+	view[1][2] = middle.k;
+	view[1][3] = frustum->z_far;
+	for (axis = 0; axis < 2; axis++)
+	{
+		screen_point.x = axis == 0 ? 1.0f : 0.0f;
+		screen_point.y = axis == 1 ? 1.0f : 0.0f;
+		render_camera_screen_to_view(camera, frustum, &screen_point, &view_vector);
+		matrix4x3_transform_vector(&frustum->view_to_world, &view_vector, &step);
+		view[2 + axis][0] = step.i - middle.i;
+		view[2 + axis][1] = step.j - middle.j;
+		view[2 + axis][2] = step.k - middle.k;
+		view[2 + axis][3] = 0.0f;
+	}
+	halo_scene_view(camera->viewport_bounds.x0, camera->viewport_bounds.y0, camera->viewport_bounds.x1,
+		camera->viewport_bounds.y1, (float const (*)[4])view);
+}
+
 void prism_deferred_gbuffer_begin(
 	void)
 {
 	materials_make();
+	prism_deferred.pass_number++;
 	prism_deferred.instance = 0;
 	prism_deferred.draw_flags = 0;
 	prism_deferred.sent = FALSE;
@@ -415,6 +555,11 @@ void prism_deferred_object(
 	absolute = object_index == -1 ? 0 : (unsigned long)DATUM_INDEX_TO_ABSOLUTE_INDEX(object_index) + 1;
 	prism_deferred.instance = absolute >= INSTANCE_FIRST_PERSON ? INSTANCE_FIRST_PERSON - 1 : absolute;
 	prism_deferred.draw_flags = 0;
+	/* (SCENE_INSTANCE: the object's nodes, before its draws) */
+	if (absolute)
+	{
+		instance_send(object_index, absolute - 1);
+	}
 
 	return;
 }

@@ -46,7 +46,8 @@ int xgpu_vulkan_post_panini_prepare(uint8_t format, uint32_t samples, int prepar
 (its own pixels) x base + additions, or one of them alone (view: 0 the
 frame, 1 the base, 2 the light, 3 the additions); 1 if it was drawn */
 int xgpu_vulkan_post_deferred_resolve(struct xgpu_vulkan_image *target, struct xgpu_vulkan_image *base,
-	struct xgpu_vulkan_image *additions, struct xgpu_vulkan_image *gbuffer, struct xgpu_vulkan_image *depth, int view);
+	struct xgpu_vulkan_image *additions, struct xgpu_vulkan_image *gbuffer, struct xgpu_vulkan_image *extras,
+	struct xgpu_vulkan_image *depth, int view);
 int xgpu_vulkan_post_panini(struct xgpu_vulkan_image *source, struct xgpu_vulkan_image *into, uint32_t layer,
 	const int32_t corners[4], const float projection[8]);
 

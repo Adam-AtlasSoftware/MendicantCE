@@ -119,6 +119,9 @@ enum
 	XGPU_SPIRV_LOCATION_LIGHT_AMBIENT, XGPU_SPIRV_LOCATION_LIGHT_POINT,
 };
 
+/* the G-buffer twins' uniforms (xgpu_spirv_uniforms' gbuffer), vec4s */
+#define XGPU_SPIRV_GBUFFER_UNIFORMS 5
+
 /* the draw's values both stages read, laid out alike in C and in the
 shaders' uniform block (std140: vec4s, and floats in fours): the backend's
 draw uniforms, the per-pixel lighting's model lights, the blend color the
@@ -181,9 +184,11 @@ struct xgpu_spirv_uniforms
 	gbuffer): [0] the draw's material's roughness, metalness, specular (F0's
 	scale) and model and flags byte (/255), [1] the G-buffer's fourth word's
 	low 16 bits (material, tier, present) and high 16 bits (the instance),
-	each a float, then two spare; declared in those pixel shaders alone,
+	each a float, then 1 where the motion has history and a spare; [2] to
+	[4] the map from this frame's pixel to last frame's (xgpu_spirv.c's
+	gbuffer_extras); declared in those pixel shaders alone,
 	after the material's */
-	float gbuffer[2][4];
+	float gbuffer[XGPU_SPIRV_GBUFFER_UNIFORMS][4];
 };
 
 /* what the SPIR-V is written for (xgpu_spirv.c):

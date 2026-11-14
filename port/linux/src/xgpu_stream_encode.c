@@ -893,6 +893,51 @@ void xgpu_backend_scene_lights(unsigned long first, unsigned long total, const v
 	}
 }
 
+static void stream_finite(float *values, unsigned long count, const char *what, unsigned long first);
+
+void xgpu_backend_scene_view(const struct xgpu_stream_scene_view *view)
+{
+	struct xgpu_stream_scene_view *record_body;
+	uint32_t header;
+
+	if (!stream.open || stream.preparing || !view)
+		return;
+	record_body = record(XGPU_STREAM_SCENE_VIEW, sizeof(*record_body));
+	header = record_body->header;
+	*record_body = *view;
+	record_body->header = header;
+	stream_finite(&record_body->now[0][0], 32, "the scene's view", 0);
+}
+
+void xgpu_backend_scene_instance(unsigned long instance, unsigned long flags, unsigned long lod, const float *now,
+	const float *last, unsigned long node_count)
+{
+	struct xgpu_stream_scene_instance *record_body;
+	unsigned long node;
+	uint32_t size;
+
+	if (!stream.open || stream.preparing || !instance || !now)
+		return;
+	if (node_count > XGPU_SCENE_INSTANCE_NODES)
+		node_count = XGPU_SCENE_INSTANCE_NODES;
+	size = (uint32_t)(offsetof(struct xgpu_stream_scene_instance, nodes) + node_count *
+		sizeof(struct xgpu_stream_scene_node));
+	record_body = record(XGPU_STREAM_SCENE_INSTANCE, size);
+	record_body->instance = (uint32_t)instance;
+	record_body->flags = (uint32_t)(flags | (last ? 0 : XGPU_SCENE_INSTANCE_NO_HISTORY));
+	record_body->lod = (uint32_t)lod;
+	record_body->mesh = 0;
+	record_body->node_count = (uint32_t)node_count;
+	memset(record_body->change_colors, 0, sizeof(record_body->change_colors));
+	for (node = 0; node < node_count; node++)
+	{
+		memcpy(record_body->nodes[node].now, now + node * 12, 12 * sizeof(float));
+		memcpy(record_body->nodes[node].last, (last ? last : now) + node * 12, 12 * sizeof(float));
+	}
+	if (node_count)
+		stream_finite(&record_body->nodes[0].now[0][0], node_count * 24, "an instance's nodes", 0);
+}
+
 void xgpu_backend_picture_top(int top)
 {
 	/* (0 centered, n + 1 at n pixels from the top) */

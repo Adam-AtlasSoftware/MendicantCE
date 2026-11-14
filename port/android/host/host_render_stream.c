@@ -239,6 +239,7 @@ static const uint32_t record_minimum[XGPU_STREAM_RECORD_TYPES] =
 	[XGPU_STREAM_SCENE_LIGHTS] = offsetof(struct xgpu_stream_scene_lights, lights),
 	[XGPU_STREAM_SCENE_DECAL] = sizeof(struct xgpu_stream_scene_decal),
 	[XGPU_STREAM_SCENE_FOG] = offsetof(struct xgpu_stream_scene_fog, planes),
+	[XGPU_STREAM_SCENE_VIEW] = sizeof(struct xgpu_stream_scene_view),
 	[XGPU_STREAM_GAMMA] = sizeof(struct xgpu_stream_value),
 	[XGPU_STREAM_PANINI] = sizeof(struct xgpu_stream_panini),
 	[XGPU_STREAM_WORLD_AO_WINDOW] = sizeof(struct xgpu_stream_world_ao_window),
@@ -565,8 +566,20 @@ static int decode_record(struct host_render_decoder *decoder, const unsigned cha
 		CALL(scene_lights, lights);
 		break;
 	}
-	case XGPU_STREAM_SCENE_MATERIAL_ANIMATE:
 	case XGPU_STREAM_SCENE_INSTANCE:
+	{
+		const struct xgpu_stream_scene_instance *instance = (const void *)start;
+
+		if (instance->node_count > XGPU_SCENE_INSTANCE_NODES || !instance->instance ||
+			size < offsetof(struct xgpu_stream_scene_instance, nodes) + instance->node_count * sizeof(instance->nodes[0]))
+			return XGPU_STREAM_ERROR_RECORD;
+		CALL(scene_instance, instance);
+		break;
+	}
+	case XGPU_STREAM_SCENE_VIEW:
+		CALL(scene_view, (const struct xgpu_stream_scene_view *)start);
+		break;
+	case XGPU_STREAM_SCENE_MATERIAL_ANIMATE:
 	case XGPU_STREAM_SCENE_DECAL:
 	case XGPU_STREAM_SCENE_FOG:
 		break;

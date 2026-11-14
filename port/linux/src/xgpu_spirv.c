@@ -894,7 +894,7 @@ static void declare_uniforms_members(struct module *m, int count)
 		case U_MODEL_LIGHTS: members[member] = block_array(m, XGPU_MODEL_LIGHT_COUNT); break;
 		case U_MATERIAL_OVERLAY: members[member] = block_array(m, XGPU_OVERLAY_UNIFORM_COUNT); break;
 		case U_MATERIAL: members[member] = block_array(m, XGPU_MATERIAL_UNIFORM_COUNT); break;
-		case U_GBUFFER: members[member] = block_array(m, 2); break;
+		case U_GBUFFER: members[member] = block_array(m, XGPU_SPIRV_GBUFFER_UNIFORMS); break;
 		default: members[member] = m->t_v4; break;
 		}
 	}
@@ -4114,6 +4114,43 @@ static unsigned int gbuffer_words(struct module *m, struct pixel_state *state, u
 	return op(m, OP_COMPOSITE_CONSTRUCT, m->t_uv4, 4, words);
 }
 
+/* the G-buffer twin's second target's four words (xgpu_stream.h's
+GBUFFER_BEGIN): the screen motion, the emissive light (its blue with the
+history flag), the distance along the view's axis. The uniforms
+(xgpu_spirv_uniforms' gbuffer): [1].z 1 where the motion has history; [2]
+to [4] the map from this frame's pixel to last frame's (three rows: the
+pixel's distance d along the view's axis and its place in the target's
+pixels as h = (d x, d y, d, 1); q = rows . h, last frame's place q.x / q.z
+and q.y / q.z: this frame's camera, the draw's move and last frame's
+camera together, the backend's gbuffer_motion) */
+static unsigned int gbuffer_extras(struct module *m, struct pixel_state *state, unsigned int emissive)
+{
+	unsigned int words[4], frag = load(m, m->t_v4, state->frag_coord);
+	unsigned int fx = extract(m, frag, 0), fy = extract(m, frag, 1);
+	unsigned int distance = fdiv(m, 1, constant_float(m, 1.0f), fmax_scalar(m, 1, extract(m, frag, 3), 1.0e-20f));
+	unsigned int h, q[3], depth, history, valid, motion, flag;
+	int row;
+
+	h = construct4(m, fmul(m, 1, distance, fx), fmul(m, 1, distance, fy), distance, constant_float(m, 1.0f));
+	for (row = 0; row < 3; row++)
+		q[row] = fdot(m, uniform(m, U_GBUFFER, 2 + row), h);
+	valid = compare(m, OP_F_ORD_GREATER_THAN, q[2], constant_float(m, 1.0e-6f));
+	depth = op3(m, OP_SELECT, m->t_float, valid, q[2], constant_float(m, 1.0f));
+	history = compare(m, OP_F_ORD_GREATER_THAN, extract(m, uniform(m, U_GBUFFER, 1), 2), constant_float(m, 0.5f));
+	valid = op2(m, OP_LOGICAL_AND, m->t_bool, history, valid);
+	motion = construct(m, 2, (unsigned int[]){ fsub(m, 1, fdiv(m, 1, q[0], depth), fx),
+		fsub(m, 1, fdiv(m, 1, q[1], depth), fy) });
+	motion = fclamp(m, 2, motion, -60000.0f, 60000.0f);
+	motion = select_n(m, 2, valid, motion, constant_splat(m, 2, 0.0f));
+	flag = op3(m, OP_SELECT, m->t_float, valid, constant_float(m, 1.0f), constant_float(m, 0.0f));
+	words[0] = ext1(m, GLSL_PACK_HALF_2X16, m->t_uint, motion);
+	words[1] = ext1(m, GLSL_PACK_HALF_2X16, m->t_uint, xy(m, emissive));
+	words[2] = ext1(m, GLSL_PACK_HALF_2X16, m->t_uint, construct(m, 2, (unsigned int[]){ extract(m, emissive, 2),
+		flag }));
+	words[3] = op1(m, OP_BITCAST, m->t_uint, distance);
+	return op(m, OP_COMPOSITE_CONSTRUCT, m->t_uv4, 4, words);
+}
+
 /* found once a pixel: a pre-pass draw's inputs to its pixel's occlusion
 (xgpu.h's XGPU_AMBIENT_OCCLUSION_WORLD_INPUTS; xgpu_msl.c's
 world_ao_inputs, world_ao_shading.c's world_ao_inputs_pack), two words */
@@ -6465,7 +6502,7 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	/* (display.lighting "ce_deferred": a G-buffer twin's words in the
 	colour's place, an object's base colour among them) */
 	BOOL gbuffer = options->gbuffer != 0;
-	unsigned int gbuffer_base = 0;
+	unsigned int gbuffer_base = 0, gbuffer_emissive = 0, gbuffer_extras_out = 0;
 	/* port: a model's twin's light as CE lit it (display.prism_rt's
 	traced light keyed: its fourth word, as a lightmap pass's) */
 	unsigned int model_light_ce = 0;
@@ -6617,6 +6654,17 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	}
 	color_out = interface_variable(&m, world_inputs || occluder || gbuffer ? m.t_uv4 : m.t_v4, STORAGE_OUTPUT, 0,
 		"fragment_color");
+	/* (a G-buffer twin's second target: its motion, emissive light and
+	distance, from the pixel's place) */
+	if (gbuffer)
+	{
+		gbuffer_extras_out = interface_variable(&m, m.t_uv4, STORAGE_OUTPUT, 1, "gbuffer_extras");
+		if (!state.frag_coord)
+		{
+			state.frag_coord = variable(&m, m.t_v4, STORAGE_INPUT, "gl_FragCoord");
+			decorate1(&m, state.frag_coord, DECORATION_BUILT_IN, BUILT_IN_FRAG_COORD);
+		}
+	}
 	if (sample_mask)
 	{
 		unsigned int operands[3], array = id_new(&m);
@@ -6789,9 +6837,31 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 		if (pbr)
 			state.t[3] = state.zero4;
 		gbuffer_base = saturate(&m, 3, xyz(&m, combiners(&m, &state)));
+		/* (its emissive light: the combiners with no light at all, what its
+		self-illumination adds) */
+		state.v0 = vec4_of(&m, constant_splat(&m, 3, 0.0f), extract(&m, v0, 3));
+		state.v1 = state.zero4;
+		memcpy(state.t, t, sizeof(t));
+		if (pbr)
+			state.t[3] = state.zero4;
+		state.r0 = r0;
+		state.r1 = r1;
+		gbuffer_emissive = saturate(&m, 3, xyz(&m, combiners(&m, &state)));
 		state.v0 = v0;
 		state.v1 = v1;
 		memcpy(state.t, t, sizeof(t));
+		state.r0 = r0;
+		state.r1 = r1;
+	}
+	/* (... and the level's lightmap pass's: its combiners with no lightmap,
+stage 2, what its self-illumination adds) */
+	if (gbuffer && options->gbuffer == XGPU_SPIRV_GBUFFER_LEVEL && program->stages[2].mode == XGPU_TEXTURE_PROJECT2D)
+	{
+		unsigned int t2 = state.t[2], r0 = state.r0, r1 = state.r1;
+
+		state.t[2] = state.zero4;
+		gbuffer_emissive = saturate(&m, 3, xyz(&m, combiners(&m, &state)));
+		state.t[2] = t2;
 		state.r0 = r0;
 		state.r1 = r1;
 	}
@@ -7019,7 +7089,11 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	light CE's lightmap gave the pixel: the anchor's and the exposure's
 	reference) */
 	if (gbuffer)
+	{
 		store(&m, color_out, gbuffer_words(&m, &state, gbuffer_base));
+		store(&m, gbuffer_extras_out, gbuffer_extras(&m, &state, gbuffer_emissive ? gbuffer_emissive :
+			constant_splat(&m, 3, 0.0f)));
+	}
 	else if (world_inputs && occlusion_light == XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP &&
 		(program->ambient_occlusion & XGPU_AMBIENT_OCCLUSION_RT_LIGHT))
 	{

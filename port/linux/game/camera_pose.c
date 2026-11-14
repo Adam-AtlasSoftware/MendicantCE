@@ -447,6 +447,35 @@ void camera_pose_place_object(char const *line)
 			atan2f(forward.j, forward.i) * 57.29578f);
 		return;
 	}
+	/* ("player at <x> <y> <z> <yaw>": the first player's unit stood there,
+facing so: the quality gates' scenes of the player's own light, its
+flashlight where the camera is) */
+	if (line && !strncmp(line, "player at ", 10))
+	{
+		long player_index = data_next_index(player_data, NONE);
+		struct player_datum *player = player_index != NONE ? player_get(player_index) : NULL;
+		real_point3d position;
+		real_vector3d forward, up;
+		float px, py, pz, pyaw;
+
+		if (!player || player->unit_index == NONE || !object_header_try_and_get(player->unit_index) ||
+			sscanf(line + 10, "%f %f %f %f", &px, &py, &pz, &pyaw) != 4)
+		{
+			console_printf(FALSE, "debug_object_place: \"player at <x> <y> <z> <yaw>\", with a player's unit");
+			return;
+		}
+		position.x = px;
+		position.y = py;
+		position.z = pz;
+		forward.i = cosf(pyaw * DEGREES_TO_RADIANS);
+		forward.j = sinf(pyaw * DEGREES_TO_RADIANS);
+		forward.k = 0.0f;
+		up.i = up.j = 0.0f;
+		up.k = 1.0f;
+		object_set_position(player->unit_index, &position, &forward, &up);
+		platform_log("player at: %.3f %.3f %.3f %.2f", px, py, pz, pyaw);
+		return;
+	}
 	/* ("list <words>": every object whose tag's name has those words in it,
 	its place and bounding radius, written to the log: the quality gates'
 	poses about a map's scenery) */
@@ -490,7 +519,7 @@ void camera_pose_place_object(char const *line)
 		 sscanf(line, "%f %f %f %f %f %f", &x, &y, &z, &yaw, &pitch, &roll) < 4))
 	{
 		console_printf(FALSE, "debug_object_place \"<tag> <x> <y> <z> <yaw> [<pitch> <roll>] [color <r> <g> <b>]\", \"<tag> seat <label>\", "
-			"\"player seat <label>\", or \"clear\"");
+			"\"player seat <label>\", \"player at <x> <y> <z> <yaw>\", or \"clear\"");
 		return;
 	}
 	/* ("player seat <label>": the first player's own unit put in the last

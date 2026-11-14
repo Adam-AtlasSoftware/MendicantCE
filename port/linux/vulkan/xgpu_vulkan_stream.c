@@ -459,6 +459,13 @@ skipped; the material table (SCENE_MATERIAL, each material resolved at its
 automatic tier as it arrives) and the draws' material and instance
 (GBUFFER_DRAW), which their uniforms carry */
 #define GBUFFER_MATERIALS 4096
+/* SCENE_INSTANCE's ids at most (1 + MAXIMUM_OBJECTS_PER_MAP's datum index) */
+#define GBUFFER_INSTANCES 2048
+struct gbuffer_instance
+{
+	uint32_t pass, flags, node_count;
+	struct xgpu_stream_scene_node nodes[XGPU_SCENE_INSTANCE_NODES];
+};
 struct gbuffer_material
 {
 	uint8_t known, family, model, flags;
@@ -483,6 +490,18 @@ static struct
 	uint32_t uniform_key[2];
 	struct gbuffer_material materials[GBUFFER_MATERIALS];
 	uint32_t material_count, twins, refused;
+	/* the second target (motion, emissive light, distance: xgpu_stream.h's
+	GBUFFER_BEGIN); SCENE_VIEW's cameras; SCENE_INSTANCE's instances, by
+	their ids (1 to GBUFFER_INSTANCES), each with the frame it came in (the
+	G-buffer passes counted); the motion's uniforms last made (a change
+	makes the draw's uniforms again) */
+	struct xgpu_vulkan_image *extras;
+	struct xgpu_stream_scene_view view;
+	int view_known;
+	struct gbuffer_instance *instances;
+	uint32_t pass_number;
+	float motion[XGPU_SPIRV_GBUFFER_UNIFORMS - 2][4];
+	int motion_history;
 } gbuffer;
 
 static double preparation_start(void)
@@ -767,6 +786,7 @@ static void targets_bind(void)
 	if (gbuffer.active && gbuffer.ready)
 	{
 		xgpu_vulkan_set_target_views(gbuffer.words, gbuffer.depth, 0, 1);
+		xgpu_vulkan_set_second_target(gbuffer.extras);
 		return;
 	}
 	/* (display.lighting "ce_deferred"'s phases: the base or the additions in
@@ -1994,6 +2014,200 @@ static void stream_gbuffer_draw(void *context, const struct xgpu_stream_gbuffer_
 	gbuffer.flags = record->flags;
 }
 
+/* SCENE_INSTANCE: an object's nodes this frame and last, kept by its id for
+the G-buffer pass's draws of it (the motion's move) */
+static void stream_scene_instance(void *context, const struct xgpu_stream_scene_instance *record)
+{
+	struct gbuffer_instance *instance;
+
+	(void)context;
+	if (record->instance > GBUFFER_INSTANCES)
+		return;
+	if (!gbuffer.instances)
+	{
+		gbuffer.instances = calloc(GBUFFER_INSTANCES + 1, sizeof(*gbuffer.instances));
+		if (!gbuffer.instances)
+			return;
+	}
+	instance = &gbuffer.instances[record->instance];
+	instance->pass = gbuffer.pass_number;
+	instance->flags = record->flags;
+	instance->node_count = record->node_count;
+	memcpy(instance->nodes, record->nodes, (size_t)record->node_count * sizeof(record->nodes[0]));
+}
+
+/* SCENE_VIEW: the G-buffer pass's window's cameras */
+static void stream_scene_view(void *context, const struct xgpu_stream_scene_view *record)
+{
+	(void)context;
+	gbuffer.view = *record;
+	gbuffer.view_known = 1;
+}
+
+/* a 3x4 affine map's inverse (FALSE: none) */
+static int affine_inverse(const float m[3][4], float inverse[3][4])
+{
+	double a = m[0][0], b = m[0][1], c = m[0][2], d = m[1][0], e = m[1][1], f = m[1][2], g = m[2][0], h = m[2][1],
+		i = m[2][2];
+	double ca = e * i - f * h, cb = -(d * i - f * g), cc = d * h - e * g, det = a * ca + b * cb + c * cc;
+	double r[3][3];
+	int row;
+
+	if (!(fabs(det) > 1.0e-12))
+		return 0;
+	r[0][0] = ca / det;
+	r[0][1] = -(b * i - c * h) / det;
+	r[0][2] = (b * f - c * e) / det;
+	r[1][0] = cb / det;
+	r[1][1] = (a * i - c * g) / det;
+	r[1][2] = -(a * f - c * d) / det;
+	r[2][0] = cc / det;
+	r[2][1] = -(a * h - b * g) / det;
+	r[2][2] = (a * e - b * d) / det;
+	for (row = 0; row < 3; row++)
+	{
+		inverse[row][0] = (float)r[row][0];
+		inverse[row][1] = (float)r[row][1];
+		inverse[row][2] = (float)r[row][2];
+		inverse[row][3] = (float)-(r[row][0] * m[0][3] + r[row][1] * m[1][3] + r[row][2] * m[2][3]);
+	}
+	return 1;
+}
+
+/* the G-buffer twin's motion's uniforms (xgpu_spirv.c's gbuffer_extras:
+the uniforms' [2] to [5]) and whether it has history: the map from this
+frame's pixel to last frame's, of the cameras and the draw's move: the
+level's none; an object's, its SCENE_INSTANCE node the draw's part hangs
+from (the one whose matrix this frame is the draw's first node's, the
+vertex constants' c[60] to c[62]: the part's rigid node; node 0 where none
+is), last frame's matrix by this frame's inverse; the first-person weapon
+none on the screen (it is drawn where the camera is) */
+static int gbuffer_motion(float motion[XGPU_SPIRV_GBUFFER_UNIFORMS - 2][4])
+{
+	double move[3][4], now[3][4], last[3][3], k[3][4];
+	int history = gbuffer.view_known && (gbuffer.view.flags & XGPU_SCENE_VIEW_HISTORY);
+	int row, column, axis;
+
+	memset(motion, 0, (XGPU_SPIRV_GBUFFER_UNIFORMS - 2) * sizeof(motion[0]));
+	if (!gbuffer.view_known)
+		return 0;
+	/* (the first-person weapon: where it was on the screen, it is) */
+	if (gbuffer.instance == XGPU_GBUFFER_INSTANCE_FIRST_PERSON)
+	{
+		motion[0][0] = motion[1][1] = motion[2][2] = 1.0f;
+		return history;
+	}
+	memset(move, 0, sizeof(move));
+	for (row = 0; row < 3; row++)
+		move[row][row] = 1.0;
+	if (gbuffer.instance && gbuffer.instance != XGPU_GBUFFER_INSTANCE_FIRST_PERSON)
+	{
+		const struct gbuffer_instance *instance = gbuffer.instances && gbuffer.instance <= GBUFFER_INSTANCES ?
+			&gbuffer.instances[gbuffer.instance] : NULL;
+		float inverse[3][4];
+		uint32_t node, best = 0;
+		float best_error = 1.0e30f;
+
+		if (!instance || instance->pass != gbuffer.pass_number || !instance->node_count ||
+			(instance->flags & XGPU_SCENE_INSTANCE_NO_HISTORY))
+			history = 0;
+		else
+		{
+			for (node = 0; node < instance->node_count; node++)
+			{
+				float error = 0.0f;
+
+				for (row = 0; row < 3; row++)
+					for (column = 0; column < 4; column++)
+						error += fabsf(instance->nodes[node].now[row][column] - stream.constants[60 + row][column]);
+				if (error < best_error)
+				{
+					best_error = error;
+					best = node;
+				}
+			}
+			/* (no node's matrix the draw's: its root's) */
+			if (best_error > 1.0e-2f)
+				best = 0;
+			if (affine_inverse(instance->nodes[best].now, inverse))
+			{
+				const float (*was)[4] = instance->nodes[best].last;
+
+				for (row = 0; row < 3; row++)
+					for (column = 0; column < 4; column++)
+						move[row][column] = (double)was[row][0] * inverse[0][column] +
+							(double)was[row][1] * inverse[1][column] + (double)was[row][2] * inverse[2][column] +
+							(column == 3 ? (double)was[row][3] : 0.0);
+			}
+		}
+	}
+	/* this frame's camera as a map of h = (d x, d y, d, 1) to the world: its
+	columns the screen's x and y steps, the axis, the eye */
+	for (axis = 0; axis < 3; axis++)
+	{
+		now[axis][0] = gbuffer.view.now[2][axis];
+		now[axis][1] = gbuffer.view.now[3][axis];
+		now[axis][2] = gbuffer.view.now[1][axis];
+		now[axis][3] = gbuffer.view.now[0][axis];
+	}
+	/* last frame's camera as the map from a point less its eye to (d x, d y,
+	d): each step over its own length squared (the steps and the axis are
+	square to each other) */
+	for (row = 0; row < 3; row++)
+	{
+		const float *v = gbuffer.view.last[row == 2 ? 1 : row + 2];
+		double length2 = (double)v[0] * v[0] + (double)v[1] * v[1] + (double)v[2] * v[2];
+
+		for (axis = 0; axis < 3; axis++)
+			last[row][axis] = length2 > 1.0e-20 ? v[axis] / length2 : 0.0;
+	}
+	/* k = last . (move . now - the last eye) */
+	for (row = 0; row < 3; row++)
+		for (column = 0; column < 4; column++)
+		{
+			double sum = 0.0;
+
+			for (axis = 0; axis < 3; axis++)
+			{
+				double moved = move[axis][0] * now[0][column] + move[axis][1] * now[1][column] +
+					move[axis][2] * now[2][column] + (column == 3 ? move[axis][3] - gbuffer.view.last[0][axis] : 0.0);
+
+				sum += last[row][axis] * moved;
+			}
+			k[row][column] = sum;
+		}
+	/* in the target's pixels: this frame's place (x, y) is the screen's
+	-1 + 2 (x - left) / width, last frame's the screen's at left + width
+	(s + 1) / 2 (its view's corners) */
+	{
+		double left = gbuffer.view.corners[0], top = gbuffer.view.corners[1];
+		double width = gbuffer.view.corners[2] - left, height = gbuffer.view.corners[3] - top;
+		double last_left = gbuffer.view.last_corners[0], last_top = gbuffer.view.last_corners[1];
+		double last_width = gbuffer.view.last_corners[2] - last_left;
+		double last_height = gbuffer.view.last_corners[3] - last_top;
+		double pixel[3][4];
+
+		if (!(width > 0.0) || !(height > 0.0) || !(last_width > 0.0) || !(last_height > 0.0))
+			return 0;
+		for (row = 0; row < 3; row++)
+		{
+			pixel[row][0] = k[row][0] * 2.0 / width;
+			pixel[row][1] = k[row][1] * 2.0 / height;
+			pixel[row][2] = k[row][2] - k[row][0] * (2.0 * left / width + 1.0) - k[row][1] * (2.0 * top / height + 1.0);
+			pixel[row][3] = k[row][3];
+		}
+		for (column = 0; column < 4; column++)
+		{
+			motion[0][column] = (float)(pixel[0][column] * last_width * 0.5 + pixel[2][column] * (last_left +
+				last_width * 0.5));
+			motion[1][column] = (float)(pixel[1][column] * last_height * 0.5 + pixel[2][column] * (last_top +
+				last_height * 0.5));
+			motion[2][column] = (float)pixel[2][column];
+		}
+	}
+	return history;
+}
+
 /* the G-buffer twin's uniforms' fourth word, low and high halves: the
 material, its tier and present, and the instance */
 static void gbuffer_key(uint32_t key[2], const struct gbuffer_material **material)
@@ -2009,7 +2223,7 @@ static void gbuffer_key(uint32_t key[2], const struct gbuffer_material **materia
 		*material = found;
 }
 
-static void gbuffer_uniforms(float uniforms[2][4])
+static void gbuffer_uniforms(float uniforms[XGPU_SPIRV_GBUFFER_UNIFORMS][4])
 {
 	const struct gbuffer_material *material;
 	uint32_t key[2], flags;
@@ -2024,7 +2238,9 @@ static void gbuffer_uniforms(float uniforms[2][4])
 	uniforms[0][3] = (float)((material ? material->model : 0) | (flags << 4)) / 255.0f;
 	uniforms[1][0] = (float)key[0];
 	uniforms[1][1] = (float)key[1];
-	uniforms[1][2] = uniforms[1][3] = 0.0f;
+	uniforms[1][2] = (float)gbuffer_motion(gbuffer.motion);
+	uniforms[1][3] = 0.0f;
+	memcpy(uniforms + 2, gbuffer.motion, sizeof(gbuffer.motion));
 }
 
 /* the uniforms both stages read and the vertex constants, in the ring for
@@ -2600,6 +2816,7 @@ static int draw_pipeline(const struct draw_input *input, int apart)
 	if (gbuffer.drawing)
 	{
 		pipeline.color_format = XGPU_VULKAN_FORMAT_RGBA32_UINT;
+		pipeline.color2_format = XGPU_VULKAN_FORMAT_RGBA32_UINT;
 		pipeline.color_read = 0;
 		pipeline.blend = 0;
 		pipeline.color_mask = 15;
@@ -4002,12 +4219,23 @@ static void gbuffer_draw(const struct draw_input *input)
 		return;
 	stream.definition = &gbuffer.definitions[id];
 	/* (the uniforms made again where the material, its tier or the
-	instance changed) */
+	instance changed, or the motion's move or cameras) */
 	gbuffer_key(key, NULL);
 	if (memcmp(key, gbuffer.uniform_key, sizeof(key)))
 	{
 		memcpy(gbuffer.uniform_key, key, sizeof(key));
 		stream.uniforms_dirty = 1;
+	}
+	{
+		float motion[XGPU_SPIRV_GBUFFER_UNIFORMS - 2][4];
+		int history = gbuffer_motion(motion);
+
+		if (memcmp(motion, gbuffer.motion, sizeof(motion)) || history != gbuffer.motion_history)
+		{
+			memcpy(gbuffer.motion, motion, sizeof(motion));
+			gbuffer.motion_history = history;
+			stream.uniforms_dirty = 1;
+		}
 	}
 	gbuffer.drawing = entry;
 	gbuffer.twins++;
@@ -4609,9 +4837,10 @@ static int gbuffer_images(const struct stream_target *color)
 {
 	gbuffer.words = prepass_image(gbuffer.words, XGPU_VULKAN_FORMAT_RGBA32_UINT, color->width, color->height);
 	gbuffer.depth = prepass_image(gbuffer.depth, XGPU_VULKAN_FORMAT_D24S8, color->width, color->height);
+	gbuffer.extras = prepass_image(gbuffer.extras, XGPU_VULKAN_FORMAT_RGBA32_UINT, color->width, color->height);
 	gbuffer.width = color->width;
 	gbuffer.height = color->height;
-	return gbuffer.words && gbuffer.depth;
+	return gbuffer.words && gbuffer.depth && gbuffer.extras;
 }
 
 static void stream_gbuffer_phase(void *context, uint32_t value)
@@ -4630,13 +4859,17 @@ static void stream_gbuffer_phase(void *context, uint32_t value)
 				xgpu_vulkan_gpu_time_mark(1);
 			gbuffer.active = gbuffer.ready = 0;
 			stream.uniforms_dirty = 1;
+			xgpu_vulkan_set_second_target(NULL);
 			targets_bind();
 		}
 		return;
 	}
 	/* (begun: its draws skipped whatever else is so, drawn where it can be) */
 	if (phase == XGPU_GBUFFER_PHASE_GBUFFER_BEGIN)
+	{
 		gbuffer.active = 1;
+		gbuffer.pass_number++;
+	}
 	if (prepass.active || shadow.active || stream.preparing || !color || color->depth || color->layers > 1)
 		return;
 	if (phase == XGPU_GBUFFER_PHASE_GBUFFER_BEGIN)
@@ -4654,6 +4887,7 @@ static void stream_gbuffer_phase(void *context, uint32_t value)
 		stream.uniforms_dirty = 1;
 		xgpu_vulkan_gpu_time_mark(0);
 		xgpu_vulkan_set_target_views(gbuffer.words, gbuffer.depth, 0, 1);
+		xgpu_vulkan_set_second_target(gbuffer.extras);
 		whole[0][0] = whole[0][1] = 0;
 		whole[0][2] = (int32_t)color->width;
 		whole[0][3] = (int32_t)color->height;
@@ -4704,7 +4938,7 @@ static void stream_gbuffer_phase(void *context, uint32_t value)
 				gbuffer.width == color->width && gbuffer.height == color->height ? gbuffer.words : NULL;
 
 			xgpu_vulkan_post_deferred_resolve(color->image, deferred.base, deferred.additions, words,
-				depth && depth->depth && !depth->multisampled ? depth->image : NULL, view);
+				words ? gbuffer.extras : NULL, depth && depth->depth && !depth->multisampled ? depth->image : NULL, view);
 			/* (a view: nothing more over it this frame) */
 			deferred.hold = view != 0;
 		}
@@ -5003,6 +5237,8 @@ const struct host_render_backend *xgpu_vulkan_stream_backend(void)
 		backend.gbuffer_phase = stream_gbuffer_phase;
 		backend.scene_material = stream_scene_material;
 		backend.gbuffer_draw = stream_gbuffer_draw;
+		backend.scene_instance = stream_scene_instance;
+		backend.scene_view = stream_scene_view;
 		backend.panini = stream_panini;
 		/* display.ambient_occlusion "world" (#578, docs/world-ao.md): the
 		field's 3D image (XGPU_SPIRV_BINDING_WORLD_SDF) and the window's block

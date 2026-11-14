@@ -133,31 +133,33 @@ def test_sizes_multiples_of_four(driver64):
         "xgpu_stream_scene_decal": 120,
         "xgpu_stream_scene_fog_plane": 64,
         "xgpu_stream_scene_fog": 48 + 8 * 64,
+        "xgpu_stream_scene_view": 16 + 128 + 32,
     }
 
 
 def test_stream_types(constants):
-    # (32: SCENE_STATIC's pages, levels and attributes as sent, SCENE_LIGHTS' emitters; 31: M1 sends SCENE_MATERIAL
+    # (32: SCENE_STATIC's pages, levels and attributes as sent, SCENE_LIGHTS' emitters, SCENE_VIEW; 31: M1 sends SCENE_MATERIAL
     # and GBUFFER_DRAW, display.lighting "ce_deferred"'s G-buffer pass; 30 was GBUFFER_PHASE, its first record)
     assert constants["version"] == 32
     text = (SOURCE / "xgpu_stream.h").read_text()
     assert re.search(r"#define XGPU_STREAM_VERSION 32\b", text)
     # (the scene's types joined the stream's own list after GBUFFER_PHASE, the numbers they were specified with:
     # the decoder takes every one of them)
-    assert constants["rt_frame"] == constants["record_types"] - 10
+    assert constants["rt_frame"] == constants["record_types"] - 11
     scene = [constants[name] for name in ("scene_material", "scene_material_animate", "scene_instance",
                                           "gbuffer_draw", "scene_static", "scene_lights", "scene_decal",
-                                          "scene_fog")]
-    assert scene == list(range(constants["rt_frame"] + 2, constants["rt_frame"] + 10))
+                                          "scene_fog", "scene_view")]
+    assert scene == list(range(constants["rt_frame"] + 2, constants["rt_frame"] + 11))
     assert scene[-1] == constants["record_types"] - 1
     assert constants["scene_record_types"] == constants["record_types"] <= 256
-    # (the guest's stream writes SCENE_MATERIAL, GBUFFER_DRAW, SCENE_STATIC and SCENE_LIGHTS)
+    # (the guest's stream writes SCENE_MATERIAL, GBUFFER_DRAW, SCENE_STATIC, SCENE_LIGHTS, SCENE_INSTANCE and
+    # SCENE_VIEW)
     body = (SOURCE / "xgpu_stream_encode.c").read_text()
-    for name in ("SCENE_MATERIAL", "GBUFFER_DRAW", "SCENE_STATIC", "SCENE_LIGHTS"):
+    for name in ("SCENE_MATERIAL", "GBUFFER_DRAW", "SCENE_STATIC", "SCENE_LIGHTS", "SCENE_INSTANCE", "SCENE_VIEW"):
         assert f"XGPU_STREAM_{name}" in body, name
     decoder = (ROOT / "port/android/host/host_render_stream.c").read_text()
     for name in ("SCENE_MATERIAL", "SCENE_MATERIAL_ANIMATE", "SCENE_INSTANCE", "GBUFFER_DRAW", "SCENE_STATIC",
-                 "SCENE_LIGHTS", "SCENE_DECAL", "SCENE_FOG"):
+                 "SCENE_LIGHTS", "SCENE_DECAL", "SCENE_FOG", "SCENE_VIEW"):
         assert f"[XGPU_STREAM_{name}] =" in decoder, name
 
 

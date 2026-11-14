@@ -5533,6 +5533,45 @@ int halo_world_ao_prepass_found(void)
 	return device.render_target == &device.back_buffer && device.depth_stencil == &device.depth_buffer;
 }
 
+/* PRISM v4's SCENE_VIEW (port/linux/game/prism_deferred.c): the G-buffer
+pass's window's camera (as world AO's pass has it) and its view's bounds in
+the game's units of the screen, sent with the last frame's (the window's
+the frame before, where its view's bounds are alike) */
+void halo_scene_view(short x0, short y0, short x1, short y1, float const camera[4][4])
+{
+	static struct xgpu_stream_scene_view last;
+	static unsigned long last_frame;
+	static int last_made;
+	struct render_target_entry *target = render_target_get(&device.back_buffer);
+	struct xgpu_stream_scene_view view;
+	long corners[4];
+	int index;
+
+	if (!target)
+		return;
+	memset(&view, 0, sizeof(view));
+	view_corners(target, x0, y0, x1, y1, corners);
+	memcpy(view.now, camera, sizeof(view.now));
+	for (index = 0; index < 4; index++)
+		view.corners[index] = (int32_t)corners[index];
+	if (last_made && last_frame + 1 == device.frame &&
+		!memcmp(last.corners, view.corners, sizeof(view.corners)))
+	{
+		memcpy(view.last, last.now, sizeof(view.last));
+		memcpy(view.last_corners, last.corners, sizeof(view.last_corners));
+		view.flags = XGPU_SCENE_VIEW_HISTORY;
+	}
+	else
+	{
+		memcpy(view.last, view.now, sizeof(view.last));
+		memcpy(view.last_corners, view.corners, sizeof(view.last_corners));
+	}
+	last = view;
+	last_frame = device.frame;
+	last_made = 1;
+	xgpu_backend_scene_view(&view);
+}
+
 int halo_world_ao_prepass_begin(void)
 {
 	struct render_target_entry *target;

@@ -106,6 +106,14 @@ static void layout(void)
 	FIELD(xgpu_stream_scene_fog, atmosphere_color);
 	FIELD(xgpu_stream_scene_fog, atmosphere_range);
 	FIELD(xgpu_stream_scene_fog, planes);
+	SIZE(xgpu_stream_scene_view);
+	FIELD(xgpu_stream_scene_view, header);
+	FIELD(xgpu_stream_scene_view, flags);
+	FIELD(xgpu_stream_scene_view, pad);
+	FIELD(xgpu_stream_scene_view, now);
+	FIELD(xgpu_stream_scene_view, last);
+	FIELD(xgpu_stream_scene_view, corners);
+	FIELD(xgpu_stream_scene_view, last_corners);
 }
 
 /* (the bytes, 4-byte aligned) */
@@ -265,6 +273,7 @@ static void constants(void)
 	printf("scene_lights %u\n", (unsigned)XGPU_STREAM_SCENE_LIGHTS);
 	printf("scene_decal %u\n", (unsigned)XGPU_STREAM_SCENE_DECAL);
 	printf("scene_fog %u\n", (unsigned)XGPU_STREAM_SCENE_FOG);
+	printf("scene_view %u\n", (unsigned)XGPU_STREAM_SCENE_VIEW);
 	printf("scene_record_types %u\n", (unsigned)XGPU_STREAM_SCENE_RECORD_TYPES);
 }
 

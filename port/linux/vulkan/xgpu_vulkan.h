@@ -489,6 +489,9 @@ struct xgpu_vulkan_pipeline_description
 	itself (display.hdr: capabilities color_read): the blend's fields are
 	not the pipeline's */
 	uint8_t color_read;
+	/* a second colour target's format (XGPU_VULKAN_FORMAT_NONE: none; the
+	G-buffer's, xgpu_vulkan_set_second_target), written whole, unblended */
+	uint8_t color2_format;
 };
 
 /* the pipeline of a description, made the first time; VK_NULL_HANDLE if it
@@ -540,6 +543,11 @@ void xgpu_vulkan_buffer_write(struct xgpu_vulkan_buffer *buffer, uint32_t offset
 /* draws go to a colour image and a depth image (NULL for none) from now
 on; their layer (a layered target's) */
 void xgpu_vulkan_set_targets(struct xgpu_vulkan_image *color, struct xgpu_vulkan_image *depth, uint32_t layer);
+/* a second colour target beside the first (NULL none): the passes begun
+from now on draw into both, its own layer 0 and one view, cleared to zero
+with the first; only pipelines made with its format (color2_format) draw
+there */
+void xgpu_vulkan_set_second_target(struct xgpu_vulkan_image *color2);
 /* views is 1, 2 or 4, relative to the image view's first layer. */
 void xgpu_vulkan_set_target_views(struct xgpu_vulkan_image *color, struct xgpu_vulkan_image *depth,
 	uint32_t layer, uint32_t views);

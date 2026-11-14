@@ -81,8 +81,9 @@ static struct
 	struct xgpu_vulkan_image *color, *edges, *weights;
 	/* SMAA's lookup textures */
 	struct xgpu_vulkan_image *area, *search;
-	/* linear and clamped, as FXAA and SMAA sample */
-	VkSampler sampler;
+	/* linear and clamped, as FXAA and SMAA sample; nearest, for the G-buffer's
+	words (integers: fetched, never filtered) */
+	VkSampler sampler, nearest;
 	/* the present step's turn: its pipeline (made at the start, never
 	while a map is prepared), whether it cannot be, and the turned frame */
 	VkPipeline rotate;
@@ -192,7 +193,9 @@ static int sampler_make(void)
 	sampler.address[0] = sampler.address[1] = sampler.address[2] = XGPU_VULKAN_ADDRESS_CLAMP;
 	sampler.anisotropy = 1;
 	post.sampler = xgpu_vulkan_sampler(&sampler);
-	return post.sampler != VK_NULL_HANDLE;
+	sampler.minify = sampler.magnify = XGPU_VULKAN_FILTER_POINT;
+	post.nearest = xgpu_vulkan_sampler(&sampler);
+	return post.sampler != VK_NULL_HANDLE && post.nearest != VK_NULL_HANDLE;
 }
 
 static int prepare_failed(int smaa, const char *what)
@@ -328,7 +331,7 @@ static void pass_draw_with(int program, struct xgpu_vulkan_image *into, uint32_t
 		/* (the fourth: the deferred resolve's G-buffer alone) */
 		draw.textures[stage].image = stage < 3 ? images[stage] : post.gbuffer;
 		draw.textures[stage].kind = XGPU_VULKAN_IMAGE_2D;
-		draw.textures[stage].sampler = post.sampler;
+		draw.textures[stage].sampler = stage < 3 ? post.sampler : post.nearest;
 	}
 	uniforms = xgpu_vulkan_upload(UNIFORMS_RANGE, 256, &draw.uniforms);
 	if (!uniforms)
@@ -447,7 +450,8 @@ alpha is CE's destination alpha after its passes. A target of one sample
 only (the stream draws a multisampled one as "ce"). */
 
 int xgpu_vulkan_post_deferred_resolve(struct xgpu_vulkan_image *target, struct xgpu_vulkan_image *base,
-	struct xgpu_vulkan_image *additions, struct xgpu_vulkan_image *gbuffer, struct xgpu_vulkan_image *depth, int view)
+	struct xgpu_vulkan_image *additions, struct xgpu_vulkan_image *gbuffer, struct xgpu_vulkan_image *extras,
+	struct xgpu_vulkan_image *depth, int view)
 {
 	const struct xgpu_vulkan_image_description *description;
 	struct xgpu_vulkan_pipeline_description *pipeline;
@@ -502,6 +506,13 @@ int xgpu_vulkan_post_deferred_resolve(struct xgpu_vulkan_image *target, struct x
 		post.gbuffer_stand_in = xgpu_vulkan_image_create(&stand_in);
 	}
 	post.gbuffer = gbuffer ? gbuffer : post.gbuffer_stand_in;
+	/* (the motion's and the emissive light's views read the second target's
+	words in the G-buffer's place) */
+	if ((view == XGPU_GBUFFER_VIEW_MOTION || view == XGPU_GBUFFER_VIEW_EMISSIVE) && gbuffer)
+	{
+		post.gbuffer = extras ? extras : post.gbuffer_stand_in;
+		bounds[2] = extras ? 1.0f : 0.0f;
+	}
 	pass_draw(XGPU_VULKAN_POST_DEFERRED_RESOLVE, target, 0, rectangle, post.color, base,
 		view == 8 && depth ? depth : additions, bounds);
 	post.gbuffer = NULL;

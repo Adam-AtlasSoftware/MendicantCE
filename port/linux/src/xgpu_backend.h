@@ -174,6 +174,15 @@ of total, each XGPU_SCENE_LIGHT words of 20 (struct
 xgpu_stream_scene_light's layout: port/linux/game/prism_scene_lights.c);
 count at most XGPU_SCENE_LIGHTS, every type and class known */
 void xgpu_backend_scene_lights(unsigned long first, unsigned long total, const void *lights, unsigned long count);
+/* SCENE_VIEW (xgpu_stream.h): the cameras of the G-buffer pass's window,
+this frame's and last (the record whole, its header written here) */
+struct xgpu_stream_scene_view;
+void xgpu_backend_scene_view(const struct xgpu_stream_scene_view *view);
+/* SCENE_INSTANCE: an object drawn (its id, flags XGPU_SCENE_INSTANCE_*, CE's
+level of detail), node_count of its nodes' matrices this frame and last
+(three rows of four each: now, then last; last NULL: none, NO_HISTORY) */
+void xgpu_backend_scene_instance(unsigned long instance, unsigned long flags, unsigned long lod, const float *now,
+	const float *last, unsigned long node_count);
 /* display.prism_bloom (where xgpu_backend_capabilities' bloom): the view's
 light past paper white glows (XGPU_BLOOM_GLOW: small and faint; _FULL:
 wider and brighter) before the tone map: its share past 1 (the threshold),
