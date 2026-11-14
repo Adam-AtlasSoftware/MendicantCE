@@ -38,7 +38,7 @@ port/linux/README.md.
 #include <stdint.h>
 
 #define XGPU_STREAM_MAGIC 0x53504758u /* "XGPS" */
-#define XGPU_STREAM_VERSION 32
+#define XGPU_STREAM_VERSION 33
 #define XGPU_STREAM_LOADING_ART_BYTES (640u * 480u * 4u)
 
 /* ---------- the ring
@@ -2087,7 +2087,7 @@ geometry once for every consumer, the lights, the decals and the fog. They
 are sent only in the v4 modes (display.lighting "ce_deferred" now; "raster"
 and "pathtraced" to come); with "ce" (the default, Classic and Enhanced)
 none is ever written, so those frames stay byte for byte as they were. Their
-types are in the list above (XGPU_STREAM_VERSION 32) and the host's decoder
+types are in the list above (XGPU_STREAM_VERSION 33) and the host's decoder
 takes every one; M1 sends SCENE_MATERIAL and GBUFFER_DRAW (the guest's
 xgpu_backend_scene_material and _gbuffer_draw) and SCENE_STATIC (also with
 display.prism_rt on: the traced level is its), the others are specified and

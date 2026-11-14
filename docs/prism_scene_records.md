@@ -8,7 +8,7 @@ lights, the decals and the fog. These are new records of the renderer's command 
 
 ## What is there now
 
-`XGPU_STREAM_VERSION` is 32. The records' types are in the stream's own list, after M1's first record,
+`XGPU_STREAM_VERSION` is 33. The records' types are in the stream's own list, after M1's first record,
 `GBUFFER_PHASE` (82): `SCENE_MATERIAL` is 83 and so on to `SCENE_FOG`, 90, then `SCENE_VIEW`, 91, and
 `XGPU_STREAM_RECORD_TYPES` is 92. The
 host's decoder takes every one, with its fixed part's size as its minimum.
