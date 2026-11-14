@@ -226,6 +226,8 @@ static struct
 	unsigned long instance;
 	unsigned long instances;
 	boolean part_named;
+	/* the part named: its MESH_DRAW's values (mod_meshes_part_key) */
+	unsigned long part_key[MOD_MESHES_PART_KEY];
 } mod_meshes_globals;
 
 /* ---------- private code */
@@ -1197,6 +1199,13 @@ void mod_meshes_part(
 	xgpu_backend_mesh_draw(mod_meshes_globals.instance, region_index, permutation_index, shader_index,
 		(flags & PART_CARRIER) ? MESH_DRAW_CARRIER : 0, geometry_index, part_index);
 	mod_meshes_globals.part_named = TRUE;
+	mod_meshes_globals.part_key[0] = mod_meshes_globals.instance;
+	mod_meshes_globals.part_key[1] = (unsigned long)region_index;
+	mod_meshes_globals.part_key[2] = (unsigned long)permutation_index;
+	mod_meshes_globals.part_key[3] = (unsigned long)shader_index;
+	mod_meshes_globals.part_key[4] = (flags & PART_CARRIER) ? MESH_DRAW_CARRIER : 0;
+	mod_meshes_globals.part_key[5] = (unsigned long)geometry_index;
+	mod_meshes_globals.part_key[6] = (unsigned long)part_index;
 
 	return;
 }
@@ -1209,6 +1218,44 @@ void mod_meshes_part_end(
 	{
 		xgpu_backend_mesh_draw(0, 0, 0, 0, 0, 0, 0);
 		mod_meshes_globals.part_named = FALSE;
+	}
+
+	return;
+}
+
+/* (a pass that keeps a part's stock draw to draw it again later in the
+frame: the fog screen's queued models, rasterizer_xbox_environment_fog.c)
+the part named now, as its MESH_DRAW had it; FALSE (the key zero) none */
+boolean mod_meshes_part_key(
+	unsigned long key[MOD_MESHES_PART_KEY])
+{
+	short i;
+
+	for (i = 0; i < MOD_MESHES_PART_KEY; i++)
+	{
+		key[i] = mod_meshes_globals.part_named ? mod_meshes_globals.part_key[i] : 0;
+	}
+
+	return mod_meshes_globals.part_named;
+}
+
+/* (that pass, around its later draw of the part) the part named again, so
+that the host draws its mesh there as it did in the part's own draw (the
+instance's nodes are still the host's this frame: it keeps them by their
+number); NULL, after it, none. A key of no part (zero) names nothing */
+void mod_meshes_part_name_again(
+	unsigned long const *key)
+{
+	if (key && key[0])
+	{
+		xgpu_backend_mesh_draw(key[0], (int)key[1], (int)key[2], (int)key[3], key[4], (int)key[5],
+			(int)key[6]);
+		mod_meshes_globals.part_named = TRUE;
+		memcpy(mod_meshes_globals.part_key, key, sizeof(mod_meshes_globals.part_key));
+	}
+	else if (!key)
+	{
+		mod_meshes_part_end();
 	}
 
 	return;

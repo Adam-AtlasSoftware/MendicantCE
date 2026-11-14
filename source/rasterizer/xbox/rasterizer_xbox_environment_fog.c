@@ -139,6 +139,7 @@ symbols in this file:
 #include "rasterizer/rasterizer_transparent_geometry.h"
 #include "render/render.h"
 #include "view_fov.h" /* port: port/linux/game/view_fov.c */
+#include "mods.h" /* port: port/linux/game/mod_meshes.c */
 #include "shaders/shader_definitions.h"
 #include "shaders/shaders.h"
 #include <stddef.h>
@@ -392,6 +393,13 @@ static boolean model_parameters_cached = FALSE;
 static struct render_lighting const *cached_lighting = NULL;
 static struct render_animation const *cached_animation = NULL;
 static boolean reported_too_many_opaque_models = FALSE;
+/* port: each queued model group's replacement mesh part (display.prism_models:
+the part its draw named, mod_meshes_part_key; zero none), named again when
+the group is drawn at the window's end, so that the fog screen's layer is
+drawn on the mesh the part's own draw showed, never on the stock part under
+it (the a30 rocks' "shell": a fog-coloured layer in CE's rock shape, with
+holes where the remodel sits inside it) */
+static unsigned long opaque_model_mesh_parts[MAXIMUM_ENVIRONMENT_FOG_SCREEN_OPAQUE_MODELS][MOD_MESHES_PART_KEY];
 static boolean local_fog_screen_first_time = TRUE;
 
 static boolean rasterizer_environment_fog_screen_is_active(
@@ -519,6 +527,7 @@ void rasterizer_environment_fog_screen_model_submit(
 				&opaque_model_submit_parameters[
 					opaque_model_count++];
 
+			mod_meshes_part_key(opaque_model_mesh_parts[opaque_model_count - 1]); /* port */
 			group->shader = shader;
 			group->shader_permutation_index = shader_permutation_index;
 			group->dynamic_triangle_buffer_index = dynamic_triangle_buffer_index;
@@ -1527,7 +1536,10 @@ void _rasterizer_environment_fog_screen_begin(
 					rasterizer_set_model_skinning(&skinning);
 					if (success)
 					{
+						/* port: (its replacement mesh named again: above) */
+						mod_meshes_part_name_again(opaque_model_mesh_parts[group_index]);
 						rasterizer_transparent_geometry_group_draw__internal(group, FALSE);
+						mod_meshes_part_name_again(NULL); /* port */
 						if (rasterizer_debug_options.statistics_mode ==
 							_rasterizer_statistics_mode_enabled)
 						{

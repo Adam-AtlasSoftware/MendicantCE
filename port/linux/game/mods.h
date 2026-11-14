@@ -174,6 +174,14 @@ draws) the part the draws that follow are of; and none */
 void mod_meshes_part(short region_index, short permutation_index, short geometry_index, short part_index,
 	short shader_index);
 void mod_meshes_part_end(void);
+/* (a pass that draws a part's stock buffers again later in the frame: the
+fog screen's queued models) the part named now, as its MESH_DRAW had it
+(FALSE, the key zero: none); and that part named again around the later
+draw (NULL after it: none), so that the host draws the part's mesh there
+too, never the stock part under it */
+#define MOD_MESHES_PART_KEY 7
+boolean mod_meshes_part_key(unsigned long key[MOD_MESHES_PART_KEY]);
+void mod_meshes_part_name_again(unsigned long const *key);
 /* (rasterizer_xbox_models.c, around a model shader's draws) the shader's
 material overlay armed for the draws that follow, if a mod has one and
 display.prism_material_overlay is on (its base map and the draw's
