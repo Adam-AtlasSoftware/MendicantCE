@@ -41,9 +41,16 @@ few milliseconds while playing, most of the frame in the menus or with
 debug.bake_exit), measured by its own timestamps.
 
 PRISM Raster reads the bake from the GPU: the virtual pages' tile tables,
-the tiles' texels, the sun's table and masks, the volume's bricks, each
-level pixel finding its texel through its CE lightmap coordinates and page
-(the G-buffer's), each object pixel its probes about its point.
+the tiles' texels, the sun's table and masks, the volume's two cascades'
+bricks, the reflection probes, each level pixel finding its texel through
+its CE lightmap coordinates and page (the G-buffer's), each object pixel
+its probes about its point, and makes the opaque frame whole: diffuse
+light by CE's base colour, the material table's specular by the probes.
+
+Besides the level the bake traces the static scenery (the reach's inputs:
+the scenario's unmoving placements' drawn triangles, with their albedo and
+coverage) and lights the scenario's light fixtures (also the reach's
+inputs); the rig is in the light's units (prism_rt.c's PRISM_RT_UNITS_*).
 */
 
 #include "xgpu_vulkan.h"
@@ -70,7 +77,7 @@ level pixel finding its texel through its CE lightmap coordinates and page
 /* ---------- constants */
 
 /* the bake file's maker (a change makes every bake stale) */
-#define BAKE_VERSION 4u
+#define BAKE_VERSION 8u
 /* a tile's texels, a mask's */
 #define TILE 16u
 #define TILE_TEXELS (TILE * TILE)
@@ -105,6 +112,38 @@ level pixel finding its texel through its CE lightmap coordinates and page
 #define STAGING_SLOTS 4u
 #define STAGING_BYTES (24u << 20)
 #define READBACK_SLOTS 4u
+/* the static scenery's triangle: its corners, albedo and coverage (the
+game's reach inputs': prism_bake.c's SCENERY_FLOATS) */
+#define SCENERY_FLOATS 13
+#define FIXTURE_FLOATS 12
+/* the static scenery's materials at most (each albedo and coverage alike
+shares one) */
+#define SCENERY_MATERIALS 4096u
+/* PRISM Raster's dynamic lights a frame at most, and where they are in
+the raster's job buffer; the volume's coarse cascade's probe spacing (its
+bricks 4 probes a side: 8 world units) */
+#define RASTER_LIGHTS 64u
+#define RASTER_LIGHTS_OFFSET 1024u
+#define COARSE_SPACING 2.0f
+/* the reflection probes: a cell's side (world units) each has one, their
+height above the floor, the most, their cubes' side and levels (the texels
+of all six faces of every level), the probes a frame's batch and the grid's
+probes a cell lists */
+#define REFLECTION_CELL 8.0f
+#define REFLECTION_HEIGHT 1.0f
+#define REFLECTIONS_MOST 4096u
+#define REFLECTION_SIDE 32u
+#define REFLECTION_LEVELS 4u
+#define REFLECTION_TEXELS (6u * (32u * 32u + 16u * 16u + 8u * 8u + 4u * 4u))
+#define REFLECTION_BATCH 8u
+#define REFLECTION_LIST 8u
+#define COARSE_HEIGHT 12
+/* the spread of a texel's samples: the most invocations a texel, and the
+invocations the running texels are spread to fill */
+#define SPREAD_MOST 16u
+#define SPREAD_INVOCATIONS 65536u
+/* the fixtures the bake takes at most */
+#define FIXTURES_MOST 4096u
 /* the bounces (the reference's: XGPU_RT_REFERENCE_BOUNCES) */
 #define BOUNCES 8
 /* the black floor: 1/1000 of middle grey (D4, docs/prism_gates.md) */
@@ -173,6 +212,7 @@ enum
 	PIPELINE_VOLUME,
 	PIPELINE_RASTER,
 	PIPELINE_COMPACT,
+	PIPELINE_REFLECTION,
 	PIPELINES
 };
 
@@ -237,6 +277,7 @@ enum
 	STEP_LIGHTMAP,
 	STEP_MASK,
 	STEP_VOLUME,
+	STEP_REFLECTIONS,
 	STEP_FOOTPRINTS,
 	STEP_COMMIT,
 	STEP_DONE,
@@ -276,9 +317,15 @@ struct bake_plan
 	int32_t *cell_keys; /* x y z */
 	float *cell_points;
 	uint32_t *cell_candidates;
-	/* the probes */
-	uint32_t probe_count;
+	/* the probes: the fine cascade's (fine_count, 0.25 world units apart),
+	then the coarse one's (COARSE_SPACING apart, over the air the fine
+	cascade does not reach: tree tops, the far side of a canyon) */
+	uint32_t probe_count, fine_count;
 	float *probes;
+	/* the reflection probes: one each REFLECTION_CELL cell of the walk's
+	floors, above them (4 floats each) */
+	uint32_t reflection_count;
+	float *reflections;
 	int failed;
 	double seconds;
 };
@@ -305,14 +352,24 @@ struct bake_state
 	int thread_running, plan_ready;
 	/* the scene on the GPU */
 	struct bake_buffer vertices, info, materials, alpha, lamps, grid, scene;
-	struct bake_buffer blas_storage[2], tlas_storage, instances;
-	VkAccelerationStructureKHR blas[2], tlas;
+	struct bake_buffer blas_storage[4], tlas_storage, instances;
+	VkAccelerationStructureKHR blas[4], tlas;
 	uint32_t opaque_count, alpha_count, material_count, lamp_count, grid_entries;
+	/* the static scenery's triangles (the reach's, copied: SCENERY_FLOATS
+	each), and its opaque and cutout counts as uploaded */
+	float *scenery;
+	uint32_t scenery_count, scenery_opaque, scenery_cutout;
+	/* the fixtures (16 floats each: xgpu_vulkan_bake_glsl.inc's
+	fixture_light) and their buffer */
+	float *fixtures;
+	uint32_t fixture_count, fixtures_seen;
+	struct bake_buffer fixtures_buffer;
 	float lamp_power;
 	struct bake_scene_block block;
 	/* the raster lookup's */
 	struct bake_buffer pages, charts, vpages, table, pool, sun, masks, bricks, probes, raster_job;
-	uint32_t mask_capacity, mask_count, physical_count, brick_entries;
+	uint32_t mask_capacity, mask_count, physical_count, brick_entries, coarse_entries;
+	struct bake_buffer bricks_coarse;
 	uint32_t *table_host, *sun_host;
 	/* the batch's working buffers */
 	struct bake_buffer ranges, triangles, texels, accumulators, states, running, tile_origins, job;
@@ -338,6 +395,11 @@ struct bake_state
 	/* the volume */
 	uint32_t probes_done, probes_batched;
 	int volume_waiting, volume_loaded;
+	/* the reflection probes: their places, info, texels and hashed grid on
+	the GPU, the grid's entries, those done and in the batch running */
+	struct bake_buffer reflection_points, reflection_info, reflection_data, reflection_table;
+	uint32_t reflection_entries, reflections_done, reflections_batched;
+	int reflections_made, reflections_loaded;
 	struct bake_buffer probe_points, probe_accumulators, probe_states, probe_statistics;
 	float *probe_host;
 	/* how the light drawn stands (XGPU_BAKE_SHOWN_*) */
@@ -393,12 +455,22 @@ static struct
 	int16_t *bricks;
 	uint32_t brick_count, brick_total;
 	int reach_whole;
+	/* the static scenery's triangles (SCENERY_FLOATS each: corners, albedo,
+	coverage), the reach's inputs' */
+	float *scenery;
+	uint32_t scenery_count;
+	/* the scenario's light fixtures in the BSP (FIXTURE_FLOATS each), the
+	reach's inputs' */
+	float *fixtures_input;
+	uint32_t fixtures_input_count;
 	/* the bake */
 	struct bake_state *bake;
 	/* the samples a batch's dispatch takes, as the budget allows */
 	uint32_t samples;
 	double gpu_milliseconds;
 	struct xgpu_vulkan_image *raster_light;
+	uint32_t raster_frames;
+
 	uint32_t status_serial;
 	double last_status;
 } bake;
@@ -707,6 +779,7 @@ static int make(void)
 	{
 		VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
 		VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+		VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
 	};
 	VkPhysicalDeviceAccelerationStructurePropertiesKHR structure_properties;
 	VkPhysicalDeviceProperties2 properties;
@@ -748,15 +821,17 @@ static int make(void)
 		!pipeline_make(PIPELINE_IMPORTANCE, NULL, 0, xgpu_vulkan_bake_importance_words,
 		xgpu_vulkan_bake_importance_count) ||
 		!pipeline_make(PIPELINE_VOLUME, NULL, 0, xgpu_vulkan_bake_volume_words, xgpu_vulkan_bake_volume_count) ||
-		!pipeline_make(PIPELINE_RASTER, raster_types, 4, xgpu_vulkan_bake_raster_words, xgpu_vulkan_bake_raster_count) ||
-		!pipeline_make(PIPELINE_COMPACT, NULL, 0, xgpu_vulkan_bake_compact_words, xgpu_vulkan_bake_compact_count))
+		!pipeline_make(PIPELINE_RASTER, raster_types, 6, xgpu_vulkan_bake_raster_words, xgpu_vulkan_bake_raster_count) ||
+		!pipeline_make(PIPELINE_COMPACT, NULL, 0, xgpu_vulkan_bake_compact_words, xgpu_vulkan_bake_compact_count) ||
+		!pipeline_make(PIPELINE_REFLECTION, NULL, 0, xgpu_vulkan_bake_reflection_words,
+		xgpu_vulkan_bake_reflection_count))
 	{
 		host_logf(HOST_LOG_WARN, "prism bake: its passes cannot be made: no bake");
 		return 0;
 	}
 	memset(sizes, 0, sizeof(sizes));
 	sizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-	sizes[0].descriptorCount = 12;
+	sizes[0].descriptorCount = 20;
 	sizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
 	sizes[1].descriptorCount = 4;
 	memset(&pool_info, 0, sizeof(pool_info));
@@ -1349,7 +1424,7 @@ static void *plan_thread(void *context)
 	air is lit by the bake's lightmap where it meets the level, and the
 	objects in it by CE's light, until the volume's coarser level */
 	{
-		uint32_t b, kept_bricks = 0, walk_capacity = 1024, *walk;
+		uint32_t b, k, kept_bricks = 0, walk_capacity = 1024, *walk;
 
 		while (walk_capacity < plan->brick_count * 2u + 2u)
 			walk_capacity <<= 1;
@@ -1374,7 +1449,7 @@ static void *plan_thread(void *context)
 		for (b = 0; b < plan->brick_count; b++)
 		{
 			int16_t const *brick = plan->bricks + b * 4;
-			uint32_t k, below;
+			uint32_t below;
 			int near = (brick[3] & XGPU_BAKE_BRICK_WALK) != 0;
 
 			for (below = 1; below <= 2 && !near && (brick[3] & XGPU_BAKE_BRICK_CAMERA); below++)
@@ -1400,7 +1475,105 @@ static void *plan_thread(void *context)
 			kept_bricks++;
 		}
 		free(walk);
-		plan->probe_count = kept_bricks * BRICK_PROBES;
+		plan->probe_count = plan->fine_count = kept_bricks * BRICK_PROBES;
+		/* (the coarse cascade: its bricks of COARSE_SPACING x 4 world units,
+		each over the reach's bricks and the air COARSE_HEIGHT above its
+		floors) */
+		{
+			uint32_t capacity = 1024, *seen;
+			float *grown;
+
+			while (capacity < plan->brick_count * 4u + 4u)
+				capacity <<= 1;
+			seen = (uint32_t *)calloc(capacity, sizeof(uint32_t));
+			for (b = 0; seen && b < plan->brick_count; b++)
+			{
+				int16_t const *brick = plan->bricks + b * 4;
+				int32_t span = (int32_t)(COARSE_SPACING * 4.0f), z;
+				int32_t top = (brick[3] & XGPU_BAKE_BRICK_WALK) ? brick[2] + COARSE_HEIGHT : brick[2];
+
+				for (z = brick[2]; z <= top; z += span / 2)
+				{
+					int32_t cx = (int32_t)floorf((float)brick[0] / (float)span), cy = (int32_t)floorf((float)brick[1] /
+						(float)span), cz = (int32_t)floorf((float)z / (float)span);
+					uint32_t key = brick_key(cx, cy, cz) + 1u, h = hash32(key) & (capacity - 1);
+
+					while (seen[h] && seen[h] != key)
+						h = (h + 1) & (capacity - 1);
+					if (seen[h])
+						continue;
+					seen[h] = key;
+					grown = (float *)realloc(plan->probes, ((size_t)plan->probe_count + BRICK_PROBES + 1) * 4 *
+						sizeof(float));
+					if (!grown)
+						break;
+					plan->probes = grown;
+					for (k = 0; k < BRICK_PROBES; k++)
+					{
+						float *to = plan->probes + ((size_t)plan->probe_count + k) * 4;
+
+						to[0] = (float)(cx * span) + ((float)(k & 3) + 0.5f) * COARSE_SPACING;
+						to[1] = (float)(cy * span) + ((float)((k >> 2) & 3) + 0.5f) * COARSE_SPACING;
+						to[2] = (float)(cz * span) + ((float)(k >> 4) + 0.5f) * COARSE_SPACING;
+						memcpy(&to[3], &b, 4);
+					}
+					plan->probe_count += BRICK_PROBES;
+				}
+			}
+			free(seen);
+		}
+		/* (the reflection probes: each REFLECTION_CELL cell of the walk's
+		floors one, at its floors' middle, REFLECTION_HEIGHT above them) */
+		{
+			uint32_t capacity = 1024, *keys, *slots;
+			double *sums;
+
+			while (capacity < plan->brick_count * 2u + 2u)
+				capacity <<= 1;
+			keys = (uint32_t *)calloc(capacity, sizeof(uint32_t));
+			slots = (uint32_t *)calloc(capacity, sizeof(uint32_t));
+			sums = (double *)calloc((size_t)REFLECTIONS_MOST * 4, sizeof(double));
+			plan->reflections = (float *)calloc((size_t)REFLECTIONS_MOST * 4 + 4, sizeof(float));
+			for (b = 0; keys && slots && sums && plan->reflections && b < plan->brick_count; b++)
+			{
+				int16_t const *brick = plan->bricks + b * 4;
+				int32_t c[3];
+				uint32_t key, h;
+				int axis;
+
+				if (!(brick[3] & XGPU_BAKE_BRICK_WALK))
+					continue;
+				for (axis = 0; axis < 3; axis++)
+					c[axis] = (int32_t)floorf(((float)brick[axis] + 0.5f) / REFLECTION_CELL);
+				key = brick_key(c[0], c[1], c[2]) + 1u;
+				h = hash32(key) & (capacity - 1);
+				while (keys[h] && keys[h] != key)
+					h = (h + 1) & (capacity - 1);
+				if (!keys[h])
+				{
+					if (plan->reflection_count >= REFLECTIONS_MOST)
+						continue;
+					keys[h] = key;
+					slots[h] = plan->reflection_count++;
+				}
+				for (axis = 0; axis < 3; axis++)
+					sums[slots[h] * 4 + axis] += (double)brick[axis] + 0.5;
+				sums[slots[h] * 4 + 3] += 1.0;
+			}
+			for (b = 0; sums && plan->reflections && b < plan->reflection_count; b++)
+			{
+				int axis;
+
+				for (axis = 0; axis < 3; axis++)
+					plan->reflections[b * 4 + axis] = (float)(sums[b * 4 + axis] / sums[b * 4 + 3]);
+				plan->reflections[b * 4 + 2] += REFLECTION_HEIGHT - 0.5f;
+			}
+			if (!plan->reflections)
+				plan->reflection_count = 0;
+			free(keys);
+			free(slots);
+			free(sums);
+		}
 	}
 	plan->failed = 0;
 	/* (HALO_BAKE_DUMP: each page's chart map and its triangles' UVs as
@@ -1465,6 +1638,7 @@ static void plan_free(struct bake_plan *plan)
 	free(plan->cell_points);
 	free(plan->cell_candidates);
 	free(plan->probes);
+	free(plan->reflections);
 	memset(plan, 0, sizeof(*plan));
 }
 
@@ -1514,8 +1688,9 @@ static void bake_free(struct bake_state *b)
 	struct bake_buffer *buffers[] =
 	{
 		&b->vertices, &b->info, &b->materials, &b->alpha, &b->lamps, &b->grid, &b->scene, &b->blas_storage[0],
-		&b->blas_storage[1], &b->tlas_storage, &b->instances, &b->pages, &b->charts, &b->vpages, &b->table, &b->pool,
-		&b->sun, &b->masks, &b->bricks, &b->probes, &b->raster_job, &b->ranges, &b->triangles, &b->texels,
+		&b->blas_storage[1], &b->blas_storage[2], &b->blas_storage[3], &b->fixtures_buffer, &b->tlas_storage, &b->instances, &b->pages, &b->charts, &b->vpages, &b->table, &b->pool,
+		&b->sun, &b->masks, &b->bricks, &b->bricks_coarse, &b->reflection_points, &b->reflection_info,
+		&b->reflection_data, &b->reflection_table, &b->probes, &b->raster_job, &b->ranges, &b->triangles, &b->texels,
 		&b->accumulators, &b->states, &b->running, &b->tile_origins, &b->job, &b->cell_points, &b->cell_candidates,
 		&b->cell_weights, &b->mask_ranges, &b->mask_out, &b->probe_points, &b->probe_accumulators, &b->probe_states,
 		&b->probe_statistics, &b->compact_list, &b->compact_args,
@@ -1528,9 +1703,11 @@ static void bake_free(struct bake_state *b)
 	for (index = 0; index < sizeof(buffers) / sizeof(buffers[0]); index++)
 		if (buffers[index]->buffer)
 			garbage_add(buffers[index], VK_NULL_HANDLE);
-	for (index = 0; index < 2; index++)
+	for (index = 0; index < 4; index++)
 		if (b->blas[index])
 			garbage_add(NULL, b->blas[index]);
+	free(b->scenery);
+	free(b->fixtures);
 	if (b->tlas)
 		garbage_add(NULL, b->tlas);
 	if (b->writing)
@@ -1589,6 +1766,42 @@ static struct bake_state *bake_begin(void)
 		const char *folder = bake.control.folder ? (const char *)host_pointer(bake.control.folder) : NULL;
 
 		snprintf(b->folder, sizeof(b->folder), "%s", folder && *folder ? folder : "prism_bake");
+	}
+	/* the fixtures: the scenario's light fixtures in the BSP as placed (CE's
+	radiosity's point and spot lights, every one whether its device has
+	power or not), by the rig's fixtures' scale (0: the rig's not in units,
+	the fixtures CE's lightmap's alone); one of no light left out */
+	if (frame->rig[60] > 0.0f && bake.fixtures_input_count)
+	{
+		uint32_t k;
+
+		b->fixtures = (float *)calloc((size_t)bake.fixtures_input_count + 1, 16 * sizeof(float));
+		for (k = 0; b->fixtures && k < bake.fixtures_input_count && b->fixture_count < FIXTURES_MOST; k++)
+		{
+			const float *f = bake.fixtures_input + (size_t)k * FIXTURE_FLOATS;
+			float *to = b->fixtures + (size_t)b->fixture_count * 16, cutoff = f[11], falloff = f[10];
+			int channel;
+
+			b->fixtures_seen++;
+			if (!(f[9] > 0.0f) || !(f[9] < 1.0e6f))
+				continue;
+			memset(to, 0, 64);
+			memcpy(to, f, 3 * sizeof(float));
+			for (channel = 0; channel < 3; channel++)
+				to[4 + channel] = (f[6 + channel] < 0.0f ? 0.0f : f[6 + channel] > 1.0f ? 1.0f : f[6 + channel]) * f[9] *
+					frame->rig[60];
+			/* (a spot where its cutoff is a cone's: its axis and cones' cosines) */
+			if (cutoff > 0.0f && cutoff < 3.14159265f)
+			{
+				memcpy(to + 8, f + 3, 3 * sizeof(float));
+				to[11] = cosf(cutoff);
+				to[12] = falloff > 0.0f && falloff < cutoff ? cosf(falloff) : to[11];
+			}
+			else
+				to[11] = to[12] = 2.0f;
+			if (to[4] + to[5] + to[6] > 0.0f)
+				b->fixture_count++;
+		}
 	}
 	alpha_traced = alpha && alpha_words > 4;
 	/* the triangles kept: the opaque and alpha-tested, of the near level */
@@ -1685,6 +1898,15 @@ static struct bake_state *bake_begin(void)
 	hash = prism_bake_hash64(hash, b->plan.attributes, (size_t)kept * XGPU_SCENE_STATIC_ATTRIBUTE_WORDS * 4);
 	b->key.bsp_hash = hash;
 	b->key.geometry_hash = prism_bake_hash64(PRISM_BAKE_HASH64_SEED, b->plan.tiers, kept);
+	/* (the static scenery the bake traces with the level: its triangles,
+	albedo and coverage in the geometry's hash) */
+	if (bake.scenery_count && (b->scenery = (float *)malloc((size_t)bake.scenery_count * SCENERY_FLOATS * 4)) != NULL)
+	{
+		memcpy(b->scenery, bake.scenery, (size_t)bake.scenery_count * SCENERY_FLOATS * 4);
+		b->scenery_count = bake.scenery_count;
+		b->key.geometry_hash = prism_bake_hash64(b->key.geometry_hash, b->scenery,
+			(size_t)b->scenery_count * SCENERY_FLOATS * 4);
+	}
 	hash = prism_bake_hash64(PRISM_BAKE_HASH64_SEED, materials, (size_t)material_count *
 		XGPU_STREAM_RT_MATERIAL_FLOATS * 4);
 	if (alpha_traced)
@@ -1694,6 +1916,8 @@ static struct bake_state *bake_begin(void)
 	hash = prism_bake_hash64(hash, &frame->rig[XGPU_RT_RIG_SETTINGS + XGPU_RT_SETTING_EMISSIVE], 3 * sizeof(float));
 	hash = prism_bake_hash64(hash, frame->sun, sizeof(frame->sun));
 	hash = prism_bake_hash64(hash, b->plan.lamps, (size_t)lamps * 16 * sizeof(float));
+	if (b->fixture_count)
+		hash = prism_bake_hash64(hash, b->fixtures, (size_t)b->fixture_count * 16 * sizeof(float));
 	b->key.light_hash = hash;
 	b->key.settings_hash = prism_bake_hash64(PRISM_BAKE_HASH64_SEED, bake.bricks, (size_t)bake.brick_count * 8);
 	b->key.baker_version = BAKE_VERSION;
@@ -1730,7 +1954,9 @@ static struct bake_state *bake_begin(void)
 	else
 		plan_thread(&b->plan);
 	host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: begun (quality %u): %u triangles, %u lamps (power %.2f), %u "
-		"bricks; %s", b->map, (int)b->bsp, b->quality, kept, lamps, (double)power, bake.brick_count, b->path);
+		"fixtures (of %u: those of no light left out), %u triangles of static scenery, %u bricks; %s", b->map,
+		(int)b->bsp, b->quality, kept, lamps, (double)power, b->fixture_count, b->fixtures_seen, b->scenery_count,
+		bake.brick_count, b->path);
 	host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the rig: sun %.5f %.5f %.5f toward %.5f %.5f %.5f (%s, disc %.4f), sky "
 		"%.4f %.4f %.4f, gamma %.2f, emissive scale %.3f", b->map, (int)b->bsp, (double)b->block.rig[0][0],
 		(double)b->block.rig[0][1], (double)b->block.rig[0][2], (double)b->block.sun[0], (double)b->block.sun[1],
@@ -1807,12 +2033,12 @@ static int structure_build(VkCommandBuffer commands, VkDeviceAddress vertices, u
 	return 1;
 }
 
-/* the top-level structure of the two (opaque: mask 1, custom index 0;
-alpha-tested: mask 2, custom index 1) */
-static int scene_structure(VkCommandBuffer commands, struct bake_state *b, VkDeviceAddress opaque,
-	VkDeviceAddress tested)
+/* the top-level structure of the four (the level's opaque: mask 1, custom
+index 0; its alpha-tested: mask 2, custom index 1; the static scenery's
+opaque: mask 4, custom index 2; its cutouts: mask 8, custom index 3) */
+static int scene_structure(VkCommandBuffer commands, struct bake_state *b, const VkDeviceAddress addresses[4])
 {
-	VkAccelerationStructureInstanceKHR instances[2];
+	VkAccelerationStructureInstanceKHR instances[4];
 	VkAccelerationStructureGeometryKHR geometry;
 	VkAccelerationStructureBuildGeometryInfoKHR info;
 	VkAccelerationStructureBuildSizesInfoKHR sizes;
@@ -1824,18 +2050,18 @@ static int scene_structure(VkCommandBuffer commands, struct bake_state *b, VkDev
 	uint32_t count = 0, index;
 
 	memset(instances, 0, sizeof(instances));
-	for (index = 0; index < 2; index++)
+	for (index = 0; index < 4; index++)
 	{
-		VkDeviceAddress address = index ? tested : opaque;
+		VkDeviceAddress address = addresses[index];
 
 		if (!address)
 			continue;
 		instances[count].transform.matrix[0][0] = instances[count].transform.matrix[1][1] =
 			instances[count].transform.matrix[2][2] = 1.0f;
 		instances[count].instanceCustomIndex = index;
-		instances[count].mask = index ? 2u : 1u;
+		instances[count].mask = 1u << index;
 		instances[count].flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR |
-			(index ? 0u : VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_KHR);
+			(index == 0 || index == 2 ? VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_KHR : VK_GEOMETRY_INSTANCE_FORCE_NO_OPAQUE_BIT_KHR);
 		instances[count].accelerationStructureReference = address;
 		count++;
 	}
@@ -1895,8 +2121,9 @@ static int bake_upload(struct bake_state *b)
 	struct bake_plan *plan = &b->plan;
 	const float *materials = (const float *)b->materials.mapped;
 	float *vertices = NULL, *tridata = NULL;
-	uint32_t *info = NULL, *pages = NULL, *vpages = NULL, index, opaque = 0, tested = 0, at[2];
-	VkDeviceAddress opaque_address = 0, tested_address = 0;
+	uint32_t *info = NULL, *pages = NULL, *vpages = NULL, index, opaque = 0, tested = 0, at[4];
+	uint32_t triangles, scenery_materials = 0;
+	VkDeviceAddress opaque_address = 0, tested_address = 0, addresses[4] = { 0, 0, 0, 0 };
 	void *host_materials = b->materials.mapped, *host_alpha = b->alpha.mapped;
 	VkDeviceSize alpha_bytes = b->alpha.size;
 	int ok = 0;
@@ -1918,10 +2145,67 @@ static int bake_upload(struct bake_state *b)
 	}
 	b->opaque_count = opaque;
 	b->alpha_count = tested;
-	vertices = (float *)malloc(((size_t)plan->triangle_count + 1) * 36);
-	info = (uint32_t *)malloc(((size_t)plan->triangle_count + 1) * 32);
+	/* (the static scenery's after the level's: its opaque, then its cutouts,
+	each its own material: its albedo, and its coverage in the alpha test's
+	place; the cutouts two-sided, cards) */
+	scenery_materials = 0;
+	for (index = 0; index < b->scenery_count; index++)
+	{
+		if (b->scenery[(size_t)index * SCENERY_FLOATS + 12] < 0.999f)
+			b->scenery_cutout++;
+		else
+			b->scenery_opaque++;
+	}
+	triangles = plan->triangle_count + b->scenery_count;
+	vertices = (float *)malloc(((size_t)triangles + 1) * 36);
+	info = (uint32_t *)malloc(((size_t)triangles + 1) * 32);
 	if (!vertices || !info)
 		goto done;
+	if (b->scenery_count)
+	{
+		float *grown = (float *)realloc(host_materials, ((size_t)b->material_count + SCENERY_MATERIALS + 1) *
+			XGPU_STREAM_RT_MATERIAL_FLOATS * 4);
+
+		if (!grown)
+			goto done;
+		host_materials = grown;
+		materials = grown;
+		at[2] = opaque + tested;
+		at[3] = opaque + tested + b->scenery_opaque;
+		for (index = 0; index < b->scenery_count; index++)
+		{
+			const float *t = b->scenery + (size_t)index * SCENERY_FLOATS;
+			int cutout = t[12] < 0.999f;
+			uint32_t slot = at[cutout ? 3 : 2]++, m;
+			uint32_t *to = info + (size_t)slot * 8;
+
+			/* (its material: one alike already made, else a new one) */
+			for (m = 0; m < scenery_materials; m++)
+			{
+				const float *had = grown + ((size_t)b->material_count + m) * XGPU_STREAM_RT_MATERIAL_FLOATS;
+
+				if (had[0] == t[9] && had[1] == t[10] && had[2] == t[11] && had[7] == t[12])
+					break;
+			}
+			if (m == scenery_materials && scenery_materials < SCENERY_MATERIALS)
+			{
+				float *made = grown + ((size_t)b->material_count + m) * XGPU_STREAM_RT_MATERIAL_FLOATS;
+
+				memset(made, 0, XGPU_STREAM_RT_MATERIAL_FLOATS * 4);
+				made[0] = t[9];
+				made[1] = t[10];
+				made[2] = t[11];
+				made[7] = t[12];
+				scenery_materials++;
+			}
+			if (m >= scenery_materials)
+				m = 0;
+			memcpy(vertices + (size_t)slot * 9, t, 36);
+			memset(to, 0, 32);
+			to[0] = (b->material_count + m) | (cutout ? 0x10000u : 0u);
+			to[7] = 0xffffffffu;
+		}
+	}
 	at[0] = 0;
 	at[1] = opaque;
 	for (index = 0; index < plan->triangle_count; index++)
@@ -1940,13 +2224,14 @@ static int bake_upload(struct bake_state *b)
 		memcpy(to + 1, a + XGPU_SCENE_ATTRIBUTE_BASE, 6 * sizeof(float));
 		to[7] = index;
 	}
-	if (!buffer_filled(commands, vertices, (VkDeviceSize)plan->triangle_count * 36, &b->vertices,
+	if (!buffer_filled(commands, vertices, (VkDeviceSize)triangles * 36, &b->vertices,
 		VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR) ||
-		!buffer_filled(commands, info, (VkDeviceSize)plan->triangle_count * 32, &b->info, 0) ||
-		!buffer_filled(commands, host_materials, (VkDeviceSize)b->material_count * XGPU_STREAM_RT_MATERIAL_FLOATS * 4 + 16,
-		&b->materials, 0) ||
+		!buffer_filled(commands, info, (VkDeviceSize)triangles * 32, &b->info, 0) ||
+		!buffer_filled(commands, host_materials, ((VkDeviceSize)b->material_count + scenery_materials) *
+		XGPU_STREAM_RT_MATERIAL_FLOATS * 4 + 16, &b->materials, 0) ||
 		!buffer_filled(commands, alpha_bytes ? host_alpha : NULL, alpha_bytes + 16, &b->alpha, 0) ||
-		!buffer_filled(commands, plan->lamps, (VkDeviceSize)plan->lamp_count * 64 + 64, &b->lamps, 0))
+		!buffer_filled(commands, plan->lamps, (VkDeviceSize)plan->lamp_count * 64 + 64, &b->lamps, 0) ||
+		!buffer_filled(commands, b->fixtures, (VkDeviceSize)b->fixture_count * 64 + 64, &b->fixtures_buffer, 0))
 		goto done;
 	barrier(commands);
 	if (opaque && !structure_build(commands, b->vertices.address, opaque, 1, &b->blas_storage[0], &b->blas[0],
@@ -1955,8 +2240,16 @@ static int bake_upload(struct bake_state *b)
 	if (tested && !structure_build(commands, b->vertices.address + (VkDeviceSize)opaque * 36, tested, 0,
 		&b->blas_storage[1], &b->blas[1], &tested_address))
 		goto done;
+	if (b->scenery_opaque && !structure_build(commands, b->vertices.address + (VkDeviceSize)(opaque + tested) * 36,
+		b->scenery_opaque, 1, &b->blas_storage[2], &b->blas[2], &addresses[2]))
+		goto done;
+	if (b->scenery_cutout && !structure_build(commands, b->vertices.address + (VkDeviceSize)(opaque + tested +
+		b->scenery_opaque) * 36, b->scenery_cutout, 0, &b->blas_storage[3], &b->blas[3], &addresses[3]))
+		goto done;
 	barrier(commands);
-	if (!scene_structure(commands, b, opaque_address, tested_address))
+	addresses[0] = opaque_address;
+	addresses[1] = tested_address;
+	if (!scene_structure(commands, b, addresses))
 		goto done;
 	barrier(commands);
 	/* the scene's block (the grid's address and entries once it is made) */
@@ -1968,9 +2261,12 @@ static int bake_upload(struct bake_state *b)
 	b->block.counts[0] = opaque;
 	b->block.counts[1] = tested;
 	b->block.counts[2] = b->lamp_count;
-	b->block.counts[3] = b->material_count;
+	b->block.counts[3] = b->material_count + scenery_materials;
+	b->block.settings[3] = b->scenery_opaque;
 	b->block.lamp[0] = b->lamp_power;
 	b->block.lamp[1] = GRID_CELL;
+	b->block.lamp[2] = (float)b->fixture_count;
+	b->block.unused = b->fixtures_buffer.address;
 	b->block.lamp[3] = GRID_SHARE;
 	b->block.settings[0] = BOUNCES;
 	/* (HALO_BAKE_TERMS: terms left out, for diagnosis: xgpu_vulkan_bake_glsl.inc's term_off) */
@@ -2042,7 +2338,7 @@ static int bake_upload(struct bake_state *b)
 		!buffer_make(64, VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, 0, &b->compact_args) ||
 		!buffer_make((VkDeviceSize)MASK_BATCH * MASK_TEXELS * 32, 0, 0, &b->mask_ranges) ||
 		!buffer_make((VkDeviceSize)MASK_BATCH * MASK_TEXELS, 0, 0, &b->mask_out) ||
-		!buffer_make(1024, 0, 0, &b->raster_job))
+		!buffer_make(RASTER_LIGHTS_OFFSET + RASTER_LIGHTS * 12 * 4, 0, 0, &b->raster_job))
 		goto done;
 	vkCmdFillBuffer(commands, b->states.buffer, 0, VK_WHOLE_SIZE, 4u);
 	vkCmdFillBuffer(commands, b->running.buffer, 0, VK_WHOLE_SIZE, 0u);
@@ -2493,7 +2789,7 @@ arguments. A batch whose texels are mostly done no longer runs a group for
 each of its few running ones' 64 slots: its running ones fill whole groups */
 static void run_compacted(VkCommandBuffer commands, int pipeline, struct bake_state *b, VkDeviceAddress states,
 	uint32_t count, VkDeviceAddress *addresses, uint32_t at, uint32_t slot, uint32_t p1, uint32_t p2, uint32_t p3, float v0,
-	float v1, float v2, float v3)
+	float v1, float v2, float v3, uint32_t lanes)
 {
 	static const uint32_t reset[4] = { 0u, 1u, 1u, 0u };
 	VkDeviceAddress compact[3];
@@ -2513,14 +2809,14 @@ static void run_compacted(VkCommandBuffer commands, int pipeline, struct bake_st
 		return;
 	vkCmdUpdateBuffer(commands, b->compact_args.buffer, 0, sizeof(reset), reset);
 	barrier(commands);
-	run(commands, PIPELINE_COMPACT, b, cjob, count, 0, 0, 0, 0, 0, 0, 0, (count + 255) / 256);
+	run(commands, PIPELINE_COMPACT, b, cjob, count, lanes, 0, 0, 0, 0, 0, 0, (count + 255) / 256);
 	barrier(commands);
 	memset(&push, 0, sizeof(push));
 	push.scene = b->scene.address;
 	push.job = job;
 	push.parameters[0] = count;
 	push.parameters[1] = p1;
-	push.parameters[2] = p2;
+	push.parameters[2] = p2 | (lanes > 1 ? lanes << 16 : 0u);
 	push.parameters[3] = p3;
 	push.values[0] = v0;
 	push.values[1] = v1;
@@ -2552,6 +2848,22 @@ static float cap_of(struct bake_state *b)
 	static const float caps[NUMBER_OF_PRISM_BAKE_QUALITIES] = { 64.0f, 512.0f, 2048.0f, 0.0f };
 
 	return b->quality < NUMBER_OF_PRISM_BAKE_QUALITIES ? caps[b->quality] : 0.0f;
+}
+
+/* the invocations a running texel's samples are spread over: one while
+the texels running fill the GPU, then more as they become few (the
+tail: the darkest texels, lit through narrow openings, whose samples a
+single invocation each would take far longer to finish), a power of 2
+up to SPREAD_MOST */
+static uint32_t lanes_of(struct bake_state *b)
+{
+	uint32_t lanes = 1;
+
+	if (b->drafting || !b->running_texels || getenv("HALO_BAKE_NO_SPREAD"))
+		return 1;
+	while (lanes < SPREAD_MOST && b->running_texels * lanes * 2u <= SPREAD_INVOCATIONS)
+		lanes <<= 1;
+	return lanes;
 }
 
 static float threshold_of(struct bake_state *b)
@@ -2787,7 +3099,8 @@ static void lightmap_frame(VkCommandBuffer commands, struct bake_state *b)
 	addresses[2] = b->states.address;
 	addresses[3] = b->running.address;
 	run_compacted(commands, PIPELINE_LIGHTMAP, b, b->states.address, BATCH_TILES * TILE_TEXELS, addresses, 4, 2,
-		bake.samples, 64, b->frame, threshold_of(b), BLACK_FLOOR, b->drafting ? 64.0f : cap_of(b), (float)BOUNCES);
+		bake.samples, 64, b->frame, threshold_of(b), BLACK_FLOOR, b->drafting ? 64.0f : cap_of(b), (float)BOUNCES,
+		lanes_of(b));
 	b->frame++;
 	barrier(commands);
 	/* the readback: the running counts, and the asked slots' results */
@@ -2947,6 +3260,30 @@ static void mask_collect(VkCommandBuffer commands, struct bake_state *b, struct 
 	}
 }
 
+/* the volume's brick of the plan's probes from index (BRICK_PROBES of
+them): its cascade (0 fine, 1 coarse) and its place (in its bricks: world
+units for the fine, COARSE_SPACING x 4 for the coarse) */
+static void brick_of(const struct bake_plan *plan, uint32_t index, uint32_t *cascade, int32_t xyz[3])
+{
+	const float *p = plan->probes + (size_t)index * 4;
+	float span = index >= plan->fine_count ? COARSE_SPACING * 4.0f : 1.0f;
+	int axis;
+
+	*cascade = index >= plan->fine_count ? 1u : 0u;
+	for (axis = 0; axis < 3; axis++)
+		xyz[axis] = (int32_t)floorf(p[axis] / span);
+}
+
+static uint64_t brick_job(const struct bake_plan *plan, uint32_t index)
+{
+	uint32_t cascade;
+	int32_t xyz[3];
+
+	brick_of(plan, index, &cascade, xyz);
+	return prism_bake_job_volume_brick(cascade, (uint32_t)(xyz[0] + 32768), (uint32_t)(xyz[1] + 32768),
+		(uint32_t)(xyz[2] + 32768));
+}
+
 /* ---------- the irradiance volume */
 
 static float half_to_float(uint16_t h)
@@ -2993,11 +3330,9 @@ static void volume_frame(VkCommandBuffer commands, struct bake_state *b)
 		return;
 	if (!b->probe_points.buffer)
 	{
-		uint32_t entries = 1024, *table, index, brick_index;
+		uint32_t entries = 1024, *table, index, brick_index, cascade;
 
-		while (entries < plan->probe_count / BRICK_PROBES * 2u)
-			entries <<= 1;
-		table = (uint32_t *)calloc((size_t)entries * 2, 4);
+		table = (uint32_t *)calloc(2, 4);
 		b->probe_host = (float *)calloc((size_t)plan->probe_count, PROBE_WORDS * 4);
 		if (!table || !b->probe_host ||
 			!buffer_filled(commands, plan->probes, (VkDeviceSize)plan->probe_count * 16, &b->probe_points, 0) ||
@@ -3010,32 +3345,52 @@ static void volume_frame(VkCommandBuffer commands, struct bake_state *b)
 			bake_fail(b, "no memory for the irradiance volume");
 			return;
 		}
-		/* (the bricks' table: each brick's key + 1 and its first probe) */
-		for (brick_index = 0; brick_index < plan->probe_count / BRICK_PROBES; brick_index++)
+		/* (each cascade's bricks' table: each brick's key + 1 and its first
+		probe) */
+		for (cascade = 0; cascade < 2; cascade++)
 		{
-			const float *first = plan->probes + (size_t)brick_index * BRICK_PROBES * 4;
-			int32_t x = (int32_t)floorf(first[0]), y = (int32_t)floorf(first[1]), z = (int32_t)floorf(first[2]);
-			uint32_t key = brick_key(x, y, z), h = hash32(key ^ 0x68e31da4u) & (entries - 1), probe;
+			uint32_t from = cascade ? plan->fine_count : 0, to = cascade ? plan->probe_count : plan->fine_count;
 
-			for (probe = 0; probe < 16; probe++)
+			entries = 1024;
+			while (entries < (to - from) / BRICK_PROBES * 2u)
+				entries <<= 1;
+			free(table);
+			table = (uint32_t *)calloc((size_t)entries * 2, 4);
+			if (!table)
+				break;
+			for (brick_index = from / BRICK_PROBES; brick_index < to / BRICK_PROBES; brick_index++)
 			{
-				index = ((h + probe) & (entries - 1)) * 2;
-				if (!table[index])
+				uint32_t which, key, h, probe;
+				int32_t xyz[3];
+
+				brick_of(plan, brick_index * BRICK_PROBES, &which, xyz);
+				key = brick_key(xyz[0], xyz[1], xyz[2]);
+				h = hash32(key ^ 0x68e31da4u) & (entries - 1);
+				for (probe = 0; probe < 16; probe++)
 				{
-					table[index] = key + 1;
-					table[index + 1] = brick_index * BRICK_PROBES;
-					break;
+					index = ((h + probe) & (entries - 1)) * 2;
+					if (!table[index])
+					{
+						table[index] = key + 1;
+						table[index + 1] = brick_index * BRICK_PROBES;
+						break;
+					}
 				}
 			}
+			if (!buffer_filled(commands, table, (VkDeviceSize)entries * 8, cascade ? &b->bricks_coarse : &b->bricks, 0))
+				break;
+			if (cascade)
+				b->coarse_entries = to > from ? entries : 0;
+			else
+				b->brick_entries = entries;
 		}
-		if (!buffer_filled(commands, table, (VkDeviceSize)entries * 8, &b->bricks, 0))
+		if (cascade < 2)
 		{
 			free(table);
 			bake_fail(b, "no memory for the irradiance volume");
 			return;
 		}
 		free(table);
-		b->brick_entries = entries;
 		barrier(commands);
 		return;
 	}
@@ -3054,7 +3409,7 @@ static void volume_frame(VkCommandBuffer commands, struct bake_state *b)
 		addresses[4] = b->probe_states.address + (VkDeviceSize)VOLUME_BATCH * 4;
 		count = b->probes_batched - b->probes_done;
 		run_compacted(commands, PIPELINE_VOLUME, b, b->probe_states.address, count, addresses, 5, 5, bake.samples, 64,
-			b->frame++, threshold_of(b), BLACK_FLOOR, cap_of(b), (float)BOUNCES);
+			b->frame++, threshold_of(b), BLACK_FLOOR, cap_of(b), (float)BOUNCES, 1u);
 		barrier(commands);
 		copy_region(commands, &b->probe_states, (VkDeviceSize)VOLUME_BATCH * 4, &r->buffer, 0, 4);
 		r->finished = 0;
@@ -3130,15 +3485,197 @@ static void volume_collect(VkCommandBuffer commands, struct bake_state *b, struc
 			const float *p = plan->probes + (size_t)(first + index) * 4;
 
 			memcpy(words, b->probe_host + (size_t)(first + index) * PROBE_WORDS, sizeof(words));
-			file_append(b, PRISM_BAKE_RECORD_VOLUME_BRICK, prism_bake_job_volume_brick(0,
-				(uint32_t)((int32_t)floorf(p[0]) + 32768), (uint32_t)((int32_t)floorf(p[1]) + 32768),
-				(uint32_t)((int32_t)floorf(p[2]) + 32768)), words, sizeof(words));
+			(void)p;
+			file_append(b, PRISM_BAKE_RECORD_VOLUME_BRICK, brick_job(plan, first + index), words, sizeof(words));
 		}
 		b->probes_done += r->finished;
 		b->probes_batched = b->probes_done;
 		b->volume_waiting = 0;
 		(void)half_to_float;
 	}
+}
+
+/* ---------- the reflection probes */
+
+/* the samples a reflection probe's texel takes (by the quality) */
+static uint32_t reflection_samples(struct bake_state *b)
+{
+	return b->quality == PRISM_BAKE_QUALITY_DRAFT ? 16u : b->quality == PRISM_BAKE_QUALITY_HIGH ? 64u : 256u;
+}
+
+/* the probes' buffers and hashed grid made (each REFLECTION_CELL cell
+within a cell of a probe's: its key + 1, 0, its nearest REFLECTION_LIST
+probes, none 0xffffffff); FALSE if no memory */
+static int reflections_make(VkCommandBuffer commands, struct bake_state *b)
+{
+	struct bake_plan *plan = &b->plan;
+	uint32_t entries = 1024, *table, index, cells = plan->reflection_count * 27u;
+	int ok;
+
+	while (entries < cells * 2u)
+		entries <<= 1;
+	table = (uint32_t *)calloc((size_t)entries * 10, 4);
+	if (!table)
+		return 0;
+	for (index = 0; index < plan->reflection_count; index++)
+	{
+		const float *p = plan->reflections + (size_t)index * 4;
+		int32_t c0[3], dx, dy, dz;
+		int axis;
+
+		for (axis = 0; axis < 3; axis++)
+			c0[axis] = (int32_t)floorf(p[axis] / REFLECTION_CELL);
+		for (dz = -1; dz <= 1; dz++)
+			for (dy = -1; dy <= 1; dy++)
+				for (dx = -1; dx <= 1; dx++)
+				{
+					int32_t c[3] = { c0[0] + dx, c0[1] + dy, c0[2] + dz };
+					uint32_t key = brick_key(c[0], c[1], c[2]), h = hash32(key ^ 0x2c1b3c6du) & (entries - 1);
+					uint32_t *at = NULL, k, probe;
+					float middle[3], d, worst = -1.0f;
+					int replace = -1;
+
+					for (probe = 0; probe < 32; probe++)
+					{
+						uint32_t *e = table + (size_t)((h + probe) & (entries - 1)) * 10;
+
+						if (!e[0] || e[0] == key + 1u)
+						{
+							at = e;
+							break;
+						}
+					}
+					if (!at)
+						continue;
+					if (!at[0])
+					{
+						at[0] = key + 1u;
+						for (k = 0; k < REFLECTION_LIST; k++)
+							at[2 + k] = 0xffffffffu;
+					}
+					for (axis = 0; axis < 3; axis++)
+						middle[axis] = ((float)c[axis] + 0.5f) * REFLECTION_CELL;
+					d = (p[0] - middle[0]) * (p[0] - middle[0]) + (p[1] - middle[1]) * (p[1] - middle[1]) +
+						(p[2] - middle[2]) * (p[2] - middle[2]);
+					/* (the nearest kept: a free place, else the farthest replaced) */
+					for (k = 0; k < REFLECTION_LIST; k++)
+					{
+						float dk;
+						const float *q;
+
+						if (at[2 + k] == 0xffffffffu)
+						{
+							replace = (int)k;
+							worst = 1e30f;
+							break;
+						}
+						q = plan->reflections + (size_t)at[2 + k] * 4;
+						dk = (q[0] - middle[0]) * (q[0] - middle[0]) + (q[1] - middle[1]) * (q[1] - middle[1]) +
+							(q[2] - middle[2]) * (q[2] - middle[2]);
+						if (dk > worst)
+						{
+							worst = dk;
+							replace = (int)k;
+						}
+					}
+					if (replace >= 0 && d < worst)
+						at[2 + replace] = index;
+				}
+	}
+	ok = buffer_filled(commands, plan->reflections, (VkDeviceSize)plan->reflection_count * 16 + 16, &b->reflection_points,
+		0) && buffer_filled(commands, NULL, (VkDeviceSize)plan->reflection_count * 48 + 48, &b->reflection_info, 0) &&
+		buffer_filled(commands, NULL, (VkDeviceSize)plan->reflection_count * REFLECTION_TEXELS * 4 + 16,
+		&b->reflection_data, 0) && buffer_filled(commands, table, (VkDeviceSize)entries * 40, &b->reflection_table, 0);
+	free(table);
+	b->reflection_entries = entries;
+	barrier(commands);
+	return ok;
+}
+
+/* the probes the file has, drawn (a frame's staging's worth at a time):
+how many more */
+static uint32_t reflections_load(VkCommandBuffer commands, struct bake_state *b)
+{
+	uint32_t loaded = 0, words = 12 + REFLECTION_TEXELS;
+	uint32_t *payload = (uint32_t *)malloc((size_t)words * 4);
+
+	while (payload && b->cache.record_count && b->reflections_done < b->plan.reflection_count && loaded < 256)
+	{
+		uint64_t job = prism_bake_job_probe(1, b->reflections_done);
+		struct prism_bake_record const *record;
+
+		if (!prism_bake_cache_job_done(&b->cache, PRISM_BAKE_RECORD_PROBE, job))
+			break;
+		record = prism_bake_cache_find(&b->cache, PRISM_BAKE_RECORD_PROBE, job);
+		if (!record || record->size != (size_t)words * 4 || prism_bake_cache_read(&b->cache, record, payload, (size_t)words * 4))
+			break;
+		if (!upload(commands, &b->reflection_info, (VkDeviceSize)b->reflections_done * 48, payload, 48) ||
+			!upload(commands, &b->reflection_data, (VkDeviceSize)b->reflections_done * REFLECTION_TEXELS * 4, payload + 12,
+			REFLECTION_TEXELS * 4))
+			break;
+		b->reflections_done++;
+		b->reflections_batched = b->reflections_done;
+		loaded++;
+	}
+	free(payload);
+	return loaded;
+}
+
+/* a batch of probes baked: their boxes, then their texels, then read back */
+static void reflections_frame(VkCommandBuffer commands, struct bake_state *b)
+{
+	uint32_t first = b->reflections_done, count = b->plan.reflection_count - first, index;
+	VkDeviceAddress addresses[3], job;
+	struct bake_readback *r;
+
+	if (b->reflections_batched > b->reflections_done || !count)
+		return;
+	if (count > REFLECTION_BATCH)
+		count = REFLECTION_BATCH;
+	r = readback_take((VkDeviceSize)count * (48 + REFLECTION_TEXELS * 4), STEP_REFLECTIONS);
+	if (!r)
+		return;
+	addresses[0] = b->reflection_points.address;
+	addresses[1] = b->reflection_info.address;
+	addresses[2] = b->reflection_data.address;
+	job = job_block(commands, b, 6, addresses, 3);
+	if (!job)
+	{
+		r->busy = 0;
+		return;
+	}
+	run(commands, PIPELINE_REFLECTION, b, job, first, count, 0, b->frame, 0.0f, (float)REFLECTION_SIDE,
+		(float)REFLECTION_LEVELS, (float)BOUNCES, (count + 63) / 64);
+	barrier(commands);
+	run(commands, PIPELINE_REFLECTION, b, job, first, count, reflection_samples(b), b->frame++, 1.0f,
+		(float)REFLECTION_SIDE, (float)REFLECTION_LEVELS, (float)BOUNCES, (count * REFLECTION_TEXELS + 63) / 64);
+	barrier(commands);
+	for (index = 0; index < count; index++)
+	{
+		copy_region(commands, &b->reflection_info, (VkDeviceSize)(first + index) * 48, &r->buffer,
+			(VkDeviceSize)index * (48 + REFLECTION_TEXELS * 4), 48);
+		copy_region(commands, &b->reflection_data, (VkDeviceSize)(first + index) * REFLECTION_TEXELS * 4, &r->buffer,
+			(VkDeviceSize)index * (48 + REFLECTION_TEXELS * 4) + 48, REFLECTION_TEXELS * 4);
+		r->tiles[index] = first + index;
+	}
+	r->finished = count;
+	b->reflections_batched = first + count;
+}
+
+static void reflections_collect(VkCommandBuffer commands, struct bake_state *b, struct bake_readback *r)
+{
+	uint32_t index;
+
+	(void)commands;
+	for (index = 0; index < r->finished; index++)
+	{
+		const uint8_t *payload = (const uint8_t *)r->buffer.mapped + (size_t)index * (48 + REFLECTION_TEXELS * 4);
+
+		file_append(b, PRISM_BAKE_RECORD_PROBE, prism_bake_job_probe(1, r->tiles[index]), payload,
+			48 + REFLECTION_TEXELS * 4);
+		b->rays += (uint64_t)REFLECTION_TEXELS * reflection_samples(b);
+	}
+	b->reflections_done = b->reflections_batched;
 }
 
 /* ---------- the footprints: each switchable light's tiles in its reach
@@ -3227,7 +3764,7 @@ footprints; with masks: their tiles too) */
 static int plan_write(struct bake_state *b, int with_masks)
 {
 	struct bake_plan *plan = &b->plan;
-	size_t count = (size_t)plan->tile_count + 2 + plan->probe_count / BRICK_PROBES +
+	size_t count = (size_t)plan->tile_count + 2 + plan->probe_count / BRICK_PROBES + plan->reflection_count +
 		(with_masks ? plan->tile_count : 0), at = 0, index;
 	uint64_t *jobs = (uint64_t *)malloc((count + 1) * sizeof(uint64_t));
 	int result;
@@ -3239,12 +3776,9 @@ static int plan_write(struct bake_state *b, int with_masks)
 	jobs[at++] = prism_bake_job_importance_cell(255, 0, 0, 0);
 	jobs[at++] = prism_bake_job_probe(255, 0);
 	for (index = 0; index + BRICK_PROBES <= plan->probe_count; index += BRICK_PROBES)
-	{
-		const float *p = plan->probes + index * 4;
-
-		jobs[at++] = prism_bake_job_volume_brick(0, (uint32_t)((int32_t)floorf(p[0]) + 32768),
-			(uint32_t)((int32_t)floorf(p[1]) + 32768), (uint32_t)((int32_t)floorf(p[2]) + 32768));
-	}
+		jobs[at++] = brick_job(plan, (uint32_t)index);
+	for (index = 0; index < plan->reflection_count; index++)
+		jobs[at++] = prism_bake_job_probe(1, index);
 	for (index = 0; with_masks && index < plan->tile_count && at < count; index++)
 	{
 		struct bake_tile const *tile = &plan->tiles[index];
@@ -3493,9 +4027,7 @@ static void volume_load(VkCommandBuffer commands, struct bake_state *b)
 		return;
 	for (index = first; index + BRICK_PROBES <= plan->probe_count && index < first + 65536; index += BRICK_PROBES)
 	{
-		const float *p = plan->probes + (size_t)index * 4;
-		uint64_t job = prism_bake_job_volume_brick(0, (uint32_t)((int32_t)floorf(p[0]) + 32768),
-			(uint32_t)((int32_t)floorf(p[1]) + 32768), (uint32_t)((int32_t)floorf(p[2]) + 32768));
+		uint64_t job = brick_job(plan, index);
 		struct prism_bake_record const *record;
 
 		if (!prism_bake_cache_job_done(&b->cache, PRISM_BAKE_RECORD_VOLUME_BRICK, job))
@@ -3603,6 +4135,10 @@ static void readbacks_collect(VkCommandBuffer commands, struct bake_state *b)
 			case STEP_VOLUME:
 				if (b->step == STEP_VOLUME)
 					volume_collect(commands, b, r);
+				break;
+			case STEP_REFLECTIONS:
+				if (b->step == STEP_REFLECTIONS)
+					reflections_collect(commands, b, r);
 				break;
 			}
 		}
@@ -3838,6 +4374,29 @@ static void bake_frame(void)
 		else
 			volume_frame(commands, b);
 		if (b->probes_done >= b->plan.probe_count)
+			b->step = STEP_REFLECTIONS;
+		break;
+	case STEP_REFLECTIONS:
+		if (!b->reflections_made)
+		{
+			if (b->plan.reflection_count && !reflections_make(commands, b))
+			{
+				bake_fail(b, "no memory for the reflection probes");
+				break;
+			}
+			b->reflections_made = 1;
+			host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: %u reflection probes", b->map, (int)b->bsp,
+				b->plan.reflection_count);
+			break;
+		}
+		if (!b->reflections_loaded)
+		{
+			if (!reflections_load(commands, b))
+				b->reflections_loaded = 1;
+		}
+		else
+			reflections_frame(commands, b);
+		if (b->reflections_done >= b->plan.reflection_count)
 			b->step = STEP_FOOTPRINTS;
 		break;
 	case STEP_FOOTPRINTS:
@@ -3968,7 +4527,7 @@ static void *reach_thread(void *unused)
 	{
 		const uint32_t *head = (const uint32_t *)reach_take(&r, 2);
 
-		if (!head || memcmp(head, "PBSC", 4) || head[1] != 3)
+		if (!head || memcmp(head, "PBSC", 4) || head[1] != 4)
 			r.failed = 1;
 	}
 	bounds = (const float *)reach_take(&r, 6);
@@ -4030,6 +4589,29 @@ static void *reach_thread(void *unused)
 			break;
 		surfaces[t] = (int32_t)triangle[0];
 		memcpy(positions + t * 9, triangle + 1, 36);
+	}
+	{
+		int32_t count = reach_count(&r, SCENERY_FLOATS);
+		const float *scenery = (const float *)reach_take(&r, (size_t)count * SCENERY_FLOATS);
+
+		free(bake.scenery);
+		bake.scenery = NULL;
+		bake.scenery_count = 0;
+		if (scenery && count > 0 && (bake.scenery = (float *)malloc((size_t)count * SCENERY_FLOATS * 4)) != NULL)
+		{
+			memcpy(bake.scenery, scenery, (size_t)count * SCENERY_FLOATS * 4);
+			bake.scenery_count = (uint32_t)count;
+		}
+		count = reach_count(&r, FIXTURE_FLOATS);
+		scenery = (const float *)reach_take(&r, (size_t)count * FIXTURE_FLOATS);
+		free(bake.fixtures_input);
+		bake.fixtures_input = NULL;
+		bake.fixtures_input_count = 0;
+		if (scenery && count > 0 && (bake.fixtures_input = (float *)malloc((size_t)count * FIXTURE_FLOATS * 4)) != NULL)
+		{
+			memcpy(bake.fixtures_input, scenery, (size_t)count * FIXTURE_FLOATS * 4);
+			bake.fixtures_input_count = (uint32_t)count;
+		}
 	}
 	if (r.failed || !leaf_clusters || !leaf_counts || !leaf_first || !seeds || !positions || !surfaces)
 	{
@@ -4224,27 +4806,35 @@ void xgpu_vulkan_bake_record(const struct xgpu_stream_prism_bake *record, const 
 struct bake_raster_job
 {
 	VkDeviceAddress pages, charts, vpages, table, tiles, sun, masks, bricks;
-	VkDeviceAddress probes, unused[3];
+	VkDeviceAddress probes, coarse, objects, object_table;
 	float camera[4][4];
 	int32_t corners[4];
 	float volume[4];
 	uint32_t counts[4];
+	VkDeviceAddress lights, reflections, reflection_table, reflection_data;
+	uint32_t more[4];
 };
 
-struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy, struct xgpu_vulkan_image *words,
-	struct xgpu_vulkan_image *extras, const struct xgpu_stream_scene_view *view, uint32_t bake_view)
+struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy, struct xgpu_vulkan_image *base,
+	struct xgpu_vulkan_image *additions, struct xgpu_vulkan_image *words, struct xgpu_vulkan_image *extras,
+	const struct xgpu_stream_scene_view *view, uint32_t bake_view, int *whole)
 {
 	struct bake_state *b = bake.bake;
 	const struct xgpu_vulkan_image_description *description;
 	struct xgpu_vulkan_image_description wanted;
 	struct bake_raster_job job;
-	VkDescriptorImageInfo images[4];
-	VkWriteDescriptorSet writes[4];
+	VkDescriptorImageInfo images[6];
+	VkWriteDescriptorSet writes[6];
 	VkDescriptorSet set;
 	VkCommandBuffer commands;
-	uint32_t index, flags = 0;
+	uint32_t index, flags = 0, light_count = 0, serial = 0, dynamic = 0;
+	const struct xgpu_stream_scene_light *lights;
+	float dynamic_lights[RASTER_LIGHTS * 12];
 
-	if (!bake.made || !b || !copy || !words || !extras || !view || !b->scene.address || b->step <= STEP_UPLOAD ||
+	if (whole)
+		*whole = 0;
+	if (!bake.made || !b || !copy || !base || !additions || !words || !extras || !view || !b->scene.address ||
+		b->step <= STEP_UPLOAD ||
 		(!b->physical_count && !b->probes_done))
 		return NULL;
 	if (b->step == STEP_FAILED)
@@ -4282,37 +4872,80 @@ struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy
 	memcpy(job.camera, view->now, sizeof(job.camera));
 	memcpy(job.corners, view->corners, sizeof(job.corners));
 	job.volume[0] = PROBE_SPACING;
+	job.volume[1] = COARSE_SPACING;
 	job.counts[0] = b->probes.buffer && b->probes_done ? b->brick_entries : 0;
 	job.counts[1] = description->width;
 	job.counts[2] = description->height;
-	if (!upload(commands, &b->raster_job, 0, &job, sizeof(job)))
+	job.coarse = b->bricks_coarse.address;
+	job.counts[3] = b->probes.buffer && b->probes_done ? b->coarse_entries : 0;
+	/* (this frame's dynamic lights: SCENE_LIGHTS' dynamic class, those on) */
+	lights = xgpu_vulkan_scene_light_table(&light_count, &serial);
+	for (index = 0; lights && index < light_count && dynamic < RASTER_LIGHTS; index++)
+	{
+		const struct xgpu_stream_scene_light *l = &lights[index];
+		float *to = dynamic_lights + dynamic * 12;
+
+		if (l->light_class != XGPU_SCENE_LIGHT_CLASS_DYNAMIC || !(l->flags & XGPU_SCENE_LIGHT_FLAG_ON) ||
+			(l->type != XGPU_SCENE_LIGHT_POINT && l->type != XGPU_SCENE_LIGHT_SPOT) || !(l->position[3] > 0.0f))
+			continue;
+		memcpy(to, l->position, 4 * sizeof(float));
+		to[4] = l->radiance[0] * l->radiance[3];
+		to[5] = l->radiance[1] * l->radiance[3];
+		to[6] = l->radiance[2] * l->radiance[3];
+		to[7] = 0.0f;
+		memcpy(to + 8, l->direction, 3 * sizeof(float));
+		to[11] = l->type == XGPU_SCENE_LIGHT_SPOT ? l->direction[3] : 2.0f;
+		dynamic++;
+	}
+	job.volume[2] = (float)dynamic;
+	/* (the reflection probes, once their buffers are: each used once baked,
+	its box empty before) */
+	if (b->reflections_made && b->plan.reflection_count && b->reflections_done && !getenv("HALO_RASTER_NO_PROBES"))
+	{
+		job.reflections = b->reflection_info.address;
+		job.reflection_table = b->reflection_table.address;
+		job.reflection_data = b->reflection_data.address;
+		job.more[0] = b->reflections_done;
+		job.more[1] = b->reflection_entries;
+		job.more[2] = REFLECTION_LEVELS;
+		job.more[3] = REFLECTION_SIDE;
+	}
+	job.lights = dynamic ? b->raster_job.address + RASTER_LIGHTS_OFFSET : 0;
+	if (!upload(commands, &b->raster_job, 0, &job, sizeof(job)) ||
+		(dynamic && !upload(commands, &b->raster_job, RASTER_LIGHTS_OFFSET, dynamic_lights, dynamic * 12 * sizeof(float))))
 		return NULL;
 	xgpu_vulkan_image_compute_use(copy, 0);
 	xgpu_vulkan_image_compute_use(words, 0);
 	xgpu_vulkan_image_compute_use(extras, 0);
+	xgpu_vulkan_image_compute_use(base, 0);
+	xgpu_vulkan_image_compute_use(additions, 0);
 	xgpu_vulkan_image_compute_use(bake.raster_light, 1);
 	set = bake.raster_sets[bake.raster_set_next];
 	bake.raster_set_next = (bake.raster_set_next + 1) & 3;
 	memset(images, 0, sizeof(images));
 	memset(writes, 0, sizeof(writes));
-	for (index = 0; index < 4; index++)
+	for (index = 0; index < 6; index++)
 	{
-		struct xgpu_vulkan_image *image = index == 0 ? words : index == 1 ? extras : index == 2 ? copy : bake.raster_light;
+		struct xgpu_vulkan_image *image = index == 0 ? words : index == 1 ? extras : index == 2 ? copy : index == 3 ?
+			bake.raster_light : index == 4 ? base : additions;
 
-		images[index].sampler = index < 3 ? bake.sampler : VK_NULL_HANDLE;
+		images[index].sampler = index != 3 ? bake.sampler : VK_NULL_HANDLE;
 		images[index].imageView = xgpu_vulkan_image_view(image);
 		images[index].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 		writes[index].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 		writes[index].dstSet = set;
 		writes[index].dstBinding = index;
 		writes[index].descriptorCount = 1;
-		writes[index].descriptorType = index < 3 ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER :
+		writes[index].descriptorType = index != 3 ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER :
 			VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
 		writes[index].pImageInfo = &images[index];
 	}
-	vkUpdateDescriptorSets(bake.device.device, 4, writes, 0, NULL);
+	vkUpdateDescriptorSets(bake.device.device, 6, writes, 0, NULL);
 	if (b->block.rig[1][3] > 1.001f)
 		flags |= 1u;
+	/* (the frame whole, but for the bake's views) */
+	if (!bake_view || bake_view >= XGPU_GBUFFER_VIEW_RASTER_ALBEDO)
+		flags |= 2u;
 	barrier(commands);
 	vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, bake.pipelines[PIPELINE_RASTER]);
 	vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, bake.pipeline_layouts[PIPELINE_RASTER], 0, 1, &set, 0,
@@ -4325,12 +4958,15 @@ struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy
 		push.job = b->raster_job.address;
 		push.parameters[0] = bake_view;
 		push.parameters[1] = b->plan.page_count;
+		push.parameters[2] = bake.raster_frames++;
 		push.parameters[3] = flags;
 		vkCmdPushConstants(commands, bake.pipeline_layouts[PIPELINE_RASTER], VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push),
 			&push);
 	}
 	vkCmdDispatch(commands, (description->width + 7) / 8, (description->height + 7) / 8, 1);
 	barrier(commands);
+	if (whole)
+		*whole = !bake_view;
 	return bake.raster_light;
 }
 

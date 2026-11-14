@@ -39,7 +39,19 @@ the settings. Nothing crosses the network.
 #include "physics/bsp3d.h"
 #include "physics/collision_bsp_definitions.h"
 #include "tag_files/tag_files.h"
+#include "bitmaps/bitmap_group.h"
+#include "cache/texture_cache.h"
+#include "models/model_animation_definitions.h"
+#include "models/model_definitions.h"
+#include "objects/object_definitions.h"
+#include "physics/collision_model_definitions.h"
+#include "rasterizer/rasterizer_model_types.h"
+#include "shaders/shader_definitions.h"
+#include "shaders/shaders.h"
 #include "prism_deferred.h"
+#include "../src/xgpu_coverage.h"
+
+#include <xtl.h>
 #include "../vulkan/prism_bake_reach.h"
 #include "../src/xgpu_stream.h"
 
@@ -94,6 +106,18 @@ fighter, the Banshee: a Pelican, a plane, is flown only by the game) */
 #define VEHI_TYPE 0x2F4
 #define VEHICLE_FIGHTER 5
 #define SEEDS_MOST 65536
+/* the static scenery's triangles: the floats each (corners, albedo,
+coverage), the most sent (past it the rest are left out), a model's detail
+levels (super low to super high) and its parts' most; the albedo's bounds
+(display.prism_rt's: prism_rt.c's PRISM_RT_ALBEDO_*) */
+#define SCENERY_FLOATS 13
+#define FIXTURE_FLOATS 12
+/* a light fixture placement's bytes (tag_schema_scenario.c's) */
+#define SCNR_LIGHT_FIXTURE 0x58
+#define SCENERY_MOST 3000000
+#define SCENERY_DETAIL_LEVELS 5
+#define SCENERY_ALBEDO_LEAST 0.03f
+#define SCENERY_ALBEDO_MOST 0.85f
 #define STATUS_WORDS XGPU_BAKE_STATUS_WORDS
 
 /* what the reach's thread works from: copies of the tags' arrays */
@@ -121,6 +145,15 @@ struct reach_input
 	int32_t *surfaces;
 	size_t triangle_count;
 	long surface_count;
+	/* the static scenery's triangles (SCENERY_FLOATS each: its corners, its
+	albedo, its coverage) */
+	float *scenery;
+	long scenery_count, scenery_room, scenery_placements;
+	/* the scenario's light fixtures in this BSP (FIXTURE_FLOATS each: the
+	place, the forward axis, the colour, the intensity, the falloff and
+	cutoff angles) */
+	float *fixtures;
+	long fixture_count;
 };
 
 /* ---------- globals */
@@ -351,6 +384,8 @@ static void input_free(
 	free(input->positions);
 	free(input->surfaces);
 	free(input->fighters);
+	free(input->scenery);
+	free(input->fixtures);
 	memset(input, 0, sizeof(*input));
 }
 
@@ -483,6 +518,455 @@ static boolean triangles_copy(
 	return TRUE;
 }
 
+/* ---------- the static scenery (the bake traces it as the reference's
+path tracer traces the objects it draws: docs/prism_bake.md)
+
+A placement is static as world_sdf.c's sdf_scenery_static has it: no script
+can name it, it is made on every difficulty, in this BSP, and nothing moves
+or destroys it (no animations, no body to damage). Its model's most detailed
+geometry (each region's first permutation) is sent in the world, each
+triangle wound to face its vertices' normals, with its shader's albedo (the
+base map's mean colour, linear) and coverage (an alpha-tested model shader's
+share of its base map's texels drawn: its leaves' cards; 1 opaque; a
+transparent shader's triangles left out). */
+
+/* this build's model geometry, part and shader reference (models.c's, as
+world_sdf.c and object_mesh.c read them) */
+struct scenery_geometry
+{
+	byte reserved[0x24];
+	struct tag_block parts;
+};
+
+struct scenery_part
+{
+	unsigned long flags;
+	short shader_index;
+	char previous_part_index;
+	char next_part_index;
+	short centroid_primary_node_index;
+	short centroid_secondary_node_index;
+	real centroid_primary_node_weight;
+	real centroid_secondary_node_weight;
+	real_point3d centroid;
+	struct tag_block uncompressed_vertices;
+	struct tag_block compressed_vertices;
+	struct tag_block triangles;
+	struct triangle_buffer triangle_buffer;
+	struct vertex_buffer vertex_buffer;
+};
+
+struct scenery_model_shader
+{
+	struct tag_reference shader;
+	short permutation_index;
+	word pad;
+	long unused[3];
+};
+
+/* a model shader's flags and base map (rasterizer_xbox_models.c's) */
+struct scenery_shader_model
+{
+	struct shader shader;
+	word flags;
+	byte reserved[0x7A];
+	struct tag_reference base_map;
+};
+
+typedef char verify_scenery_part_size[sizeof(struct scenery_part) == 0x68 ? 1 : -1];
+typedef char verify_scenery_model_shader_size[sizeof(struct scenery_model_shader) == 0x20 ? 1 : -1];
+typedef char verify_scenery_shader_model_base_map[offsetof(struct scenery_shader_model, base_map) == 0xA4 ? 1 : -1];
+
+enum
+{
+	_scenery_part_stripped_bit = 0,
+	_scenery_shader_type_model = 4,
+	_scenery_shader_model_not_alpha_tested_bit = 2,
+};
+
+/* a shader's albedo (its base map's mean colour, linear; a grey where it
+cannot be read) and coverage (0 transparent: left out) */
+static void scenery_shader(
+	long shader_tag,
+	float albedo[3],
+	float *coverage)
+{
+	struct shader *shader = shader_tag != NONE ? shader_definition_get(shader_tag) : NULL;
+	long base_map = NONE;
+	int channel;
+
+	albedo[0] = albedo[1] = albedo[2] = 0.35f;
+	*coverage = 1.0f;
+	if (!shader || !shader_type_is_valid_for_model(shader->base.type) || shader_type_is_transparent(shader->base.type))
+	{
+		*coverage = 0.0f;
+		return;
+	}
+	if (shader->base.type == _scenery_shader_type_model)
+	{
+		struct scenery_shader_model const *model = (struct scenery_shader_model const *)shader;
+
+		base_map = model->base_map.index;
+		if (base_map != NONE && !TEST_FLAG(model->flags, _scenery_shader_model_not_alpha_tested_bit))
+		{
+			struct bitmap_group *group = bitmap_group_get(base_map);
+			unsigned long const *header = group && group->bitmaps.address && group->bitmaps.count > 0 ?
+				(unsigned long const *)texture_cache_port_load((unsigned long)base_map, 0) : NULL;
+			struct bitmap_data const *bitmap = header ? TAG_BLOCK_GET_ELEMENT(&group->bitmaps, 0, struct bitmap_data) : NULL;
+
+			if (bitmap && bitmap->base_address)
+			{
+				*coverage = xgpu_texture_alpha_coverage((unsigned int)header[3], (unsigned int)header[4],
+					(unsigned char const *)bitmap->base_address, 0x7F, 512);
+			}
+		}
+	}
+	if (base_map != NONE)
+	{
+		struct bitmap_group *group = bitmap_group_get(base_map);
+		unsigned long const *header = group && group->bitmaps.address && group->bitmaps.count > 0 ?
+			(unsigned long const *)texture_cache_port_load((unsigned long)base_map, 0) : NULL;
+		struct bitmap_data const *bitmap = header ? TAG_BLOCK_GET_ELEMENT(&group->bitmaps, 0, struct bitmap_data) : NULL;
+		float mean[4];
+
+		if (bitmap && bitmap->base_address && xgpu_texture_mean_color((unsigned int)header[3], (unsigned int)header[4],
+			(unsigned char const *)bitmap->base_address, 64, mean))
+		{
+			for (channel = 0; channel < 3; channel++)
+			{
+				albedo[channel] = PIN(mean[channel], SCENERY_ALBEDO_LEAST, SCENERY_ALBEDO_MOST);
+			}
+		}
+	}
+}
+
+/* a placement's definition if it is static and in this BSP (NONE if not) */
+static long scenery_static(
+	struct tag_block const *palette,
+	struct scenario_object_datum const *placement)
+{
+	struct scenario_object_palette_entry const *entry;
+	struct object_definition const *definition;
+	real_matrix4x3 matrix;
+	real_point3d offset;
+	long index;
+
+	if (placement->name_index != NONE ||
+		(placement->placement_flags & ((1 << NUMBER_OF_SCENARIO_OBJECT_LOCATION_PLACEMENT_FLAGS) - 1)) ||
+		placement->palette_entry_index < 0 || placement->palette_entry_index >= palette->count || !palette->address)
+	{
+		return NONE;
+	}
+	entry = TAG_BLOCK_GET_ELEMENT(palette, placement->palette_entry_index, struct scenario_object_palette_entry);
+	index = entry->reference.index;
+	if (index == NONE || !(definition = object_definition_get(index)) || definition->object.model.index == NONE)
+	{
+		return NONE;
+	}
+	if (definition->object.animation_graph.index != NONE)
+	{
+		struct animation_graph const *graph = animation_graph_definition_get(definition->object.animation_graph.index);
+
+		if (graph && graph->animations.count > 0)
+		{
+			return NONE;
+		}
+	}
+	if (definition->object.collision_model.index != NONE)
+	{
+		struct collision_model const *collision = collision_model_definition_get(definition->object.collision_model.index);
+
+		if (collision && collision->resistance.maximum_body_vitality > 0.0f)
+		{
+			return NONE;
+		}
+	}
+	if (scenario_leaf_index_from_point(&placement->position) != NONE)
+	{
+		return index;
+	}
+	matrix4x3_rotation_from_angles(&matrix, placement->rotation.yaw, placement->rotation.pitch, placement->rotation.roll);
+	matrix.position = placement->position;
+	matrix4x3_transform_point(&matrix, &definition->object.bounding_offset, &offset);
+	return scenario_leaf_index_from_point(&offset) != NONE ? index : NONE;
+}
+
+/* a part's drawn triangles into the input, in the world (by matrix);
+FALSE if no memory */
+static boolean scenery_part_copy(
+	struct reach_input *input,
+	struct model const *model,
+	struct scenery_part const *part,
+	real_matrix4x3 const *matrix)
+{
+	struct vertex_buffer const *vertex_buffer = &part->vertex_buffer;
+	struct triangle_buffer const *triangle_buffer = &part->triangle_buffer;
+	byte *vertices = NULL;
+	BYTE *indices = NULL;
+	long stride, index_count, index;
+	float albedo[3], coverage;
+	boolean good = TRUE;
+
+	if (TEST_FLAG(part->flags, _scenery_part_stripped_bit) || part->shader_index < 0 ||
+		part->shader_index >= model->shaders.count || !model->shaders.address)
+	{
+		return TRUE;
+	}
+	scenery_shader(TAG_BLOCK_GET_ELEMENT(&model->shaders, part->shader_index, struct scenery_model_shader)->shader.index,
+		albedo, &coverage);
+	if (coverage <= 0.0f || !vertex_buffer->hardware_format || vertex_buffer->count <= 0 ||
+		!triangle_buffer->hardware_format || triangle_buffer->count <= 0)
+	{
+		return TRUE;
+	}
+	if (vertex_buffer->type == _rasterizer_vertex_type_model_compressed)
+	{
+		stride = sizeof(struct model_vertex_compressed);
+	}
+	else if (vertex_buffer->type == _rasterizer_vertex_type_model_uncompressed)
+	{
+		stride = sizeof(struct model_vertex_uncompressed);
+	}
+	else
+	{
+		return TRUE;
+	}
+	if (triangle_buffer->type == _triangle_buffer_type_precompiled_strip)
+	{
+		index_count = triangle_buffer->count + 2;
+	}
+	else if (triangle_buffer->type == _triangle_buffer_type_triangles)
+	{
+		index_count = triangle_buffer->count * 3;
+	}
+	else
+	{
+		return TRUE;
+	}
+	IDirect3DVertexBuffer8_Lock((IDirect3DVertexBuffer8 *)vertex_buffer->hardware_format, 0, 0, &vertices,
+		D3DLOCK_READONLY);
+	IDirect3DIndexBuffer8_Lock((IDirect3DIndexBuffer8 *)triangle_buffer->hardware_format, 0, 0, &indices,
+		D3DLOCK_READONLY);
+	if (vertices && indices)
+	{
+		unsigned short const *list = (unsigned short const *)indices;
+		long step = triangle_buffer->type == _triangle_buffer_type_precompiled_strip ? 1 : 3;
+
+		for (index = 0; index + 2 < index_count && input->scenery_count < SCENERY_MOST; index += step)
+		{
+			unsigned short corners[3];
+			float *out, normal[3] = { 0.0f, 0.0f, 0.0f }, e1[3], e2[3], c[3];
+			int corner, axis, finite = TRUE;
+
+			corners[0] = list[index];
+			corners[1] = list[index + 1];
+			corners[2] = list[index + 2];
+			/* (a strip's turns: its degenerate triangles) */
+			if (corners[0] == corners[1] || corners[1] == corners[2] || corners[0] == corners[2] ||
+				corners[0] >= vertex_buffer->count || corners[1] >= vertex_buffer->count ||
+				corners[2] >= vertex_buffer->count)
+			{
+				continue;
+			}
+			if (input->scenery_count >= input->scenery_room)
+			{
+				long room = input->scenery_room ? input->scenery_room * 2 : 65536;
+				float *grown = (float *)realloc(input->scenery, (size_t)room * SCENERY_FLOATS * sizeof(float));
+
+				if (!grown)
+				{
+					good = FALSE;
+					break;
+				}
+				input->scenery = grown;
+				input->scenery_room = room;
+			}
+			out = input->scenery + input->scenery_count * SCENERY_FLOATS;
+			for (corner = 0; corner < 3; corner++)
+			{
+				byte const *vertex = vertices + corners[corner] * stride;
+				real_point3d point;
+				real_vector3d n, world_n;
+
+				matrix4x3_transform_point(matrix, (real_point3d const *)vertex, &point);
+				out[corner * 3] = point.x;
+				out[corner * 3 + 1] = point.y;
+				out[corner * 3 + 2] = point.z;
+				if (stride == sizeof(struct model_vertex_compressed))
+				{
+					float u[3];
+
+					normal_uncompress(*(unsigned long const *)(vertex + 12), u);
+					n.i = u[0];
+					n.j = u[1];
+					n.k = u[2];
+				}
+				else
+				{
+					memcpy(&n, vertex + 12, sizeof(n));
+				}
+				matrix4x3_transform_vector(matrix, &n, &world_n);
+				normal[0] += world_n.i;
+				normal[1] += world_n.j;
+				normal[2] += world_n.k;
+				for (axis = 0; axis < 3; axis++)
+				{
+					float v = out[corner * 3 + axis];
+
+					finite = finite && v == v && fabsf(v) < 1.0e6f;
+				}
+			}
+			if (!finite)
+			{
+				continue;
+			}
+			for (axis = 0; axis < 3; axis++)
+			{
+				e1[axis] = out[3 + axis] - out[axis];
+				e2[axis] = out[6 + axis] - out[axis];
+			}
+			c[0] = e1[1] * e2[2] - e1[2] * e2[1];
+			c[1] = e1[2] * e2[0] - e1[0] * e2[2];
+			c[2] = e1[0] * e2[1] - e1[1] * e2[0];
+			if (c[0] * normal[0] + c[1] * normal[1] + c[2] * normal[2] < 0.0f)
+			{
+				float swap[3];
+
+				memcpy(swap, out + 3, sizeof(swap));
+				memcpy(out + 3, out + 6, sizeof(swap));
+				memcpy(out + 6, swap, sizeof(swap));
+			}
+			memcpy(out + 9, albedo, sizeof(albedo));
+			out[12] = coverage;
+			input->scenery_count++;
+		}
+	}
+	if (vertices)
+	{
+		IDirect3DVertexBuffer8_Unlock((IDirect3DVertexBuffer8 *)vertex_buffer->hardware_format);
+	}
+	if (indices)
+	{
+		IDirect3DIndexBuffer8_Unlock((IDirect3DIndexBuffer8 *)triangle_buffer->hardware_format);
+	}
+	return good;
+}
+
+/* the static scenery's triangles (the scenery's, the machines', the
+controls' and the light fixtures' placements); FALSE if no memory */
+static boolean scenery_copy(
+	struct reach_input *input,
+	struct scenario *scenario)
+{
+	struct tag_block const *placements[4], *palettes[4];
+	long sizes[4] = { 0x48, 0x40, 0x40, 0x58 }, index;
+	int kind;
+
+	placements[0] = &scenario->scenery;
+	palettes[0] = &scenario->scenery_palette;
+	placements[1] = &scenario->machines;
+	palettes[1] = &scenario->machine_palette;
+	placements[2] = &scenario->controls;
+	palettes[2] = &scenario->control_palette;
+	placements[3] = &scenario->light_fixtures;
+	palettes[3] = &scenario->light_fixtures_palette;
+	for (kind = 0; kind < 4; kind++)
+	{
+		for (index = 0; placements[kind]->address && index < placements[kind]->count; index++)
+		{
+			struct scenario_object_datum const *placement = (struct scenario_object_datum const *)
+				((byte const *)placements[kind]->address + index * sizes[kind]);
+			long definition_index = scenery_static(palettes[kind], placement);
+			struct model const *model;
+			real_matrix4x3 matrix;
+			short region_index, part_index;
+
+			if (definition_index == NONE ||
+				!(model = model_definition_get(object_definition_get(definition_index)->object.model.index)) ||
+				!model->regions.address || !model->geometries.address)
+			{
+				continue;
+			}
+			matrix4x3_rotation_from_angles(&matrix, placement->rotation.yaw, placement->rotation.pitch,
+				placement->rotation.roll);
+			matrix.position = placement->position;
+			input->scenery_placements++;
+			for (region_index = 0; region_index < model->regions.count; region_index++)
+			{
+				struct model_region const *region = TAG_BLOCK_GET_ELEMENT(&model->regions, region_index,
+					struct model_region);
+				struct model_region_permutation const *permutation;
+				struct scenery_geometry const *geometry;
+				short level, geometry_index = NONE;
+
+				if (!region->permutations.address || region->permutations.count <= 0)
+				{
+					continue;
+				}
+				permutation = TAG_BLOCK_GET_ELEMENT(&region->permutations, 0, struct model_region_permutation);
+				for (level = SCENERY_DETAIL_LEVELS - 1; level >= 0 && geometry_index == NONE; level--)
+				{
+					short g = permutation->geometry_indices[level];
+
+					geometry_index = g >= 0 && g < model->geometries.count ? g : NONE;
+				}
+				if (geometry_index == NONE)
+				{
+					continue;
+				}
+				geometry = TAG_BLOCK_GET_ELEMENT(&model->geometries, geometry_index, struct scenery_geometry);
+				for (part_index = 0; geometry->parts.address && part_index < geometry->parts.count &&
+					part_index < MAXIMUM_PARTS_PER_MODEL_GEOMETRY; part_index++)
+				{
+					if (!scenery_part_copy(input, model, TAG_BLOCK_GET_ELEMENT(&geometry->parts, part_index,
+						struct scenery_part), &matrix))
+					{
+						return FALSE;
+					}
+				}
+			}
+		}
+	}
+	return TRUE;
+}
+
+/* the scenario's light fixtures in this BSP, as placed (CE's radiosity's
+point and spot lights: the bake's, whatever the game has made live) */
+static void fixtures_copy(
+	struct reach_input *input,
+	struct scenario *scenario)
+{
+	long index;
+
+	input->fixtures = (float *)malloc((size_t)(scenario->light_fixtures.count + 1) * FIXTURE_FLOATS * sizeof(float));
+	for (index = 0; input->fixtures && scenario->light_fixtures.address && index < scenario->light_fixtures.count; index++)
+	{
+		/* (a placement's bytes: its object's (the place at 0x08, the angles
+		at 0x14), its device's, then the colour at 0x30, the intensity, the
+		falloff and cutoff angles: device_light_fixtures.h's struct
+		scenario_light_fixture_datum, SCNR_LIGHT_FIXTURE bytes) */
+		byte const *placement = (byte const *)scenario->light_fixtures.address + index * SCNR_LIGHT_FIXTURE;
+		struct scenario_object_datum const *object = (struct scenario_object_datum const *)placement;
+		float const *light = (float const *)(placement + 0x30);
+		float *to = input->fixtures + input->fixture_count * FIXTURE_FLOATS;
+		real_matrix4x3 matrix;
+
+		if (scenario_leaf_index_from_point(&object->position) == NONE)
+		{
+			continue;
+		}
+		matrix4x3_rotation_from_angles(&matrix, object->rotation.yaw, object->rotation.pitch, object->rotation.roll);
+		to[0] = object->position.x;
+		to[1] = object->position.y;
+		to[2] = object->position.z;
+		to[3] = matrix.forward.i;
+		to[4] = matrix.forward.j;
+		to[5] = matrix.forward.k;
+		memcpy(to + 6, light, 6 * sizeof(float));
+		input->fixture_count++;
+	}
+}
+
 /* the reach's inputs copied from the BSP and the scenario (the game's
 thread) */
 static boolean input_copy(
@@ -586,6 +1070,11 @@ static boolean input_copy(
 	seeds_find(input, scenario);
 	fighters_find(input, scenario);
 	input->surface_count = bsp->surfaces.count;
+	if (!scenery_copy(input, scenario))
+	{
+		return FALSE;
+	}
+	fixtures_copy(input, scenario);
 
 	return triangles_copy(input, bsp);
 }
@@ -605,7 +1094,11 @@ host's reach_read in xgpu_vulkan_bake.c reads them):
 	seeds: count, then (kind int32, position 3 floats)
 	surfaces: count
 	triangles: count, then (surface int32, positions 9 floats); oriented to
-		their vertices' normals */
+		their vertices' normals
+	(version 4) the static scenery: count, then (positions 9 floats, albedo 3
+		floats, coverage float); oriented to their vertices' normals
+	the light fixtures in this BSP: count, then (place 3 floats, forward 3,
+		colour 3, intensity, falloff and cutoff angles) */
 
 struct blob
 {
@@ -663,7 +1156,7 @@ static unsigned char *reach_serialise(
 
 	memset(&blob, 0, sizeof(blob));
 	blob_put(&blob, "PBSC", 4);
-	blob_word(&blob, 3);
+	blob_word(&blob, 4);
 	blob_put(&blob, input->bounds, 24);
 	blob_word(&blob, input->fighter_count);
 	blob_put(&blob, input->fighters, (unsigned long)input->fighter_count * 12);
@@ -702,6 +1195,10 @@ static unsigned char *reach_serialise(
 		blob_word(&blob, input->surfaces[index]);
 		blob_put(&blob, input->positions + index * 9, 36);
 	}
+	blob_word(&blob, input->scenery_count);
+	blob_put(&blob, input->scenery, (unsigned long)input->scenery_count * SCENERY_FLOATS * 4);
+	blob_word(&blob, input->fixture_count);
+	blob_put(&blob, input->fixtures, (unsigned long)input->fixture_count * FIXTURE_FLOATS * 4);
 	/* (a whole number of words) */
 	while (blob.size & 3)
 	{
@@ -807,9 +1304,10 @@ static void reach_frame(
 		}
 		else
 		{
-			platform_log("prism bake: bsp %d: the reach's inputs (%lu seeds, %lu triangles, %d nodes, %ld fighters): %lu "
-				"KB", (int)bsp_index, (unsigned long)input.seed_count, (unsigned long)input.triangle_count,
-				(int)input.bsp.node_count, input.fighter_count, prism_bake.reach_bytes / 1024);
+			platform_log("prism bake: bsp %d: the reach's inputs (%lu seeds, %lu triangles, %d nodes, %ld fighters; the static "
+				"scenery's %ld placements, %ld triangles): %lu KB", (int)bsp_index, (unsigned long)input.seed_count,
+				(unsigned long)input.triangle_count, (int)input.bsp.node_count, input.fighter_count,
+				input.scenery_placements, input.scenery_count, prism_bake.reach_bytes / 1024);
 		}
 		input_free(&input);
 		return;

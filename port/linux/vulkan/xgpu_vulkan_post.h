@@ -46,11 +46,14 @@ int xgpu_vulkan_post_panini_prepare(uint8_t format, uint32_t samples, int prepar
 (its own pixels) x base + additions, or one of them alone (view: 0 the
 frame, 1 the base, 2 the light, 3 the additions); relight (NULL none):
 display.lighting "raster", which makes the light the resolve reads of the
-light's sampled copy (NULL: the copy's own); 1 if it was drawn */
+light's sampled copy, the base and the additions (NULL: the copy's own),
+and says (whole) where what it made is the frame itself, not a light the
+base multiplies; 1 if it was drawn */
 int xgpu_vulkan_post_deferred_resolve(struct xgpu_vulkan_image *target, struct xgpu_vulkan_image *base,
 	struct xgpu_vulkan_image *additions, struct xgpu_vulkan_image *gbuffer, struct xgpu_vulkan_image *extras,
 	struct xgpu_vulkan_image *depth, int view,
-	struct xgpu_vulkan_image *(*relight)(struct xgpu_vulkan_image *light, void *context), void *context);
+	struct xgpu_vulkan_image *(*relight)(struct xgpu_vulkan_image *light, struct xgpu_vulkan_image *base,
+	struct xgpu_vulkan_image *additions, int *whole, void *context), void *context);
 int xgpu_vulkan_post_panini(struct xgpu_vulkan_image *source, struct xgpu_vulkan_image *into, uint32_t layer,
 	const int32_t corners[4], const float projection[8]);
 

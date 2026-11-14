@@ -452,8 +452,10 @@ only (the stream draws a multisampled one as "ce"). */
 int xgpu_vulkan_post_deferred_resolve(struct xgpu_vulkan_image *target, struct xgpu_vulkan_image *base,
 	struct xgpu_vulkan_image *additions, struct xgpu_vulkan_image *gbuffer, struct xgpu_vulkan_image *extras,
 	struct xgpu_vulkan_image *depth, int view,
-	struct xgpu_vulkan_image *(*relight)(struct xgpu_vulkan_image *light, void *context), void *context)
+	struct xgpu_vulkan_image *(*relight)(struct xgpu_vulkan_image *light, struct xgpu_vulkan_image *base,
+	struct xgpu_vulkan_image *additions, int *whole, void *context), void *context)
 {
+	int whole = 0;
 	struct xgpu_vulkan_image *light = NULL;
 	const struct xgpu_vulkan_image_description *description;
 	struct xgpu_vulkan_pipeline_description *pipeline;
@@ -517,7 +519,11 @@ int xgpu_vulkan_post_deferred_resolve(struct xgpu_vulkan_image *target, struct x
 	}
 	/* (display.lighting "raster": the light made of the copy by the bake) */
 	if (relight)
-		light = relight(post.color, context);
+		light = relight(post.color, base, additions, &whole, context);
+	/* (PRISM Raster's frame whole: the resolve draws it as it is, with the
+	additions' alpha, CE's destination alpha) */
+	if (light && whole && view == 0)
+		bounds[0] = 2.0f;
 	pass_draw(XGPU_VULKAN_POST_DEFERRED_RESOLVE, target, 0, rectangle, light ? light : post.color, base,
 		view == 8 && depth ? depth : additions, bounds);
 	post.gbuffer = NULL;

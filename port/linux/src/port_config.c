@@ -842,6 +842,16 @@ static const struct config_setting config_settings[] =
 		"sun's light whole, the level's own shadows as sharp as the objects'\n"
 		"and both as dark as the light rig says; \"objects\" only darkens\n"
 		"where an object blocks the sun (the level's shadows the lightmap's)." },
+	{ "display.prism_rig", _config_string, "\"auto\"", "HALO_PRISM_RIG", _environment_value, _platform_desktop,
+		"PRISM's light rig: \"units\" every light by its tag's power in the\n"
+		"light's units, the same for every map (PRISM v4's); \"fitted\" by a\n"
+		"map's relight fit (prism_lightmaps/rebaked/*.scales.json) where one\n"
+		"is, else the defaults; \"auto\" the units with display.lighting\n"
+		"\"raster\", else fitted." },
+	{ "debug.prism_rig_scales", _config_string, "\"\"", "HALO_PRISM_RIG_SCALES", _environment_value, _platform_desktop,
+		"With the light's units: four factors on them, the sun's (and the\n"
+		"domes'), the sky's, the light cards' and the fixtures' (\"1 1 1 1\"\n"
+		"none), for calibrating them and for diagnosis." },
 	{ "display.prism_sun_size", _config_string, "\"auto\"", "HALO_PRISM_SUN_SIZE", _environment_value,
 		_platform_desktop,
 		"PRISM ray tracing: the sun's disc its shadows' edges soften by: \"ce\"\n"
@@ -2866,7 +2876,9 @@ static const struct config_setting config_settings[] =
 		"no history) or \"emissive\"; with \"raster\", the bake's\n"
 		"\"bake_light\" (the light taken from it), \"bake_sun\" (the sun's\n"
 		"visibility), \"bake_texels\" (its texels as a checker, red where it\n"
-		"has none) or \"bake_volume\" (the irradiance volume's light alone);\n"
+		"has none), \"bake_volume\" (the irradiance volume's light alone) or\n"
+		"\"bake_total\" (the bake's whole light, the sun's with it), or the\n"
+		"frame's parts: \"raster_albedo\", \"raster_specular\", \"raster_diffuse\";\n"
 		"\"off\" the frame. Read each frame." },
 	{ "debug.pt_reference", _config_integer, "0", "HALO_PT_REFERENCE", _environment_value, _platform_desktop,
 		"With display.prism_rt \"pathtraced\", a converged reference for the\n"
@@ -4649,7 +4661,7 @@ static const struct
 	{ "display.lighting", { "ce", "ce_deferred", "raster", NULL }, "ce" },
 	{ "debug.gbuffer_view", { "off", "base", "light", "additions", "albedo", "normal", "roughness", "metal",
 		"material_source", "instance", "motion", "emissive", "bake_light", "bake_sun", "bake_texels",
-		"bake_volume", NULL }, "off" },
+		"bake_volume", "bake_total", "raster_albedo", "raster_specular", "raster_diffuse", NULL }, "off" },
 	{ "display.bake", { "auto", "ask", "off", NULL }, "auto" },
 	{ "display.bake_quality", { "max", "ultra", "high", "draft", NULL }, "max" },
 	{ "display.prism_rt", { "off", "shadows", "gi", "pathtraced", NULL }, "off" },
@@ -4663,6 +4675,7 @@ static const struct
 	{ "display.prism_rt_style", { "faithful", "remix", NULL }, "faithful" },
 	{ "display.prism_rt_sun", { "all", "objects", NULL }, "all" },
 	{ "display.prism_sun_size", { "auto", "ce", "real", "soft", NULL }, "auto" },
+	{ "display.prism_rig", { "auto", "units", "fitted", NULL }, "auto" },
 	{ "display.prism_rt_emissive", { "style", "off", "lights", "all", NULL }, "style" },
 	{ "display.prism_rt_materials", { "average", "grey", NULL }, "average" },
 	{ "display.prism_exposure", { "style", "fixed", "ce", "auto", NULL }, "style" },

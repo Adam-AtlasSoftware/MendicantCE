@@ -417,7 +417,9 @@ void prism_scene_lights_frame(
 			light->radiance[0] = fixture->light_fixture.color.red;
 			light->radiance[1] = fixture->light_fixture.color.green;
 			light->radiance[2] = fixture->light_fixture.color.blue;
-			light->radiance[3] = fixture->light_fixture.intensity * PIN(device_power, 0.0f, 1.0f);
+			/* (its intensity whatever its device's power: on or off is its flag;
+			the bake takes every fixture, as CE's radiosity did) */
+			light->radiance[3] = fixture->light_fixture.intensity;
 			light_finite(light);
 		}
 	}

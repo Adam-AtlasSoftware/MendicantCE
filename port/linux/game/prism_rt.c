@@ -185,6 +185,26 @@ lamps' 0.3 to 0.6) */
 #define PRISM_RT_DEFAULT_SUN 1.3f
 #define PRISM_RT_DEFAULT_SKY 3.6f
 #define PRISM_RT_DEFAULT_EMIT 0.5f
+/* port: the rig in light units (display.prism_rig "units", PRISM v4's: no
+map's fit, the same numbers for every map, custom ones included; docs/
+prism_bake.md, "The light's units"). CE's lightmap holds the light its
+radiosity found as is (linear, 1.0 the 8-bit page's white: Tool's
+radiosity stops on a residual in 1/255 steps), and each light's tag gives
+a colour by a power; these turn each kind of light's power into the bake's
+unit (a white surface's radiance: its irradiance over pi). The sun's power
+is the irradiance it gives a surface facing it (1); the sky's outdoor
+ambient power a radiance from every open direction, 2 pi of it; a light
+card's power, 2 of its radiance; a fixture's intensity the irradiance it
+gives a surface facing it a world unit away, inverse square (1). The sky's
+and the cards' were measured against CE's own pages, the bake's light of
+each kind alone at the gates' poses fitted to CE's light (b30's sun 0.84
+to 0.92 and sky 5.9 to 7.9; the cards' exposure on a10 and c40, 1.4 to
+2.3: docs/prism_gates.md, "The light's units"); no fixture lit a measured
+pose, so theirs is the unit as defined */
+#define PRISM_RT_UNITS_SUN 1.0f
+#define PRISM_RT_UNITS_SKY 3.14159265f
+#define PRISM_RT_UNITS_EMIT 2.0f
+#define PRISM_RT_UNITS_FIXTURE 1.0f
 /* the real sun's angular diameter (display.prism_sun_size "real", and
 "auto"'s least), "soft"'s (the bake's mask, the traces' before) */
 #define PRISM_RT_SUN_REAL 0.0093f
@@ -219,7 +239,9 @@ struct prism_rt_frame
 /* a BSP's fitted scales (relight_calib.py's scales.json) */
 struct prism_rt_rig
 {
-	int fitted;
+	int fitted, units;
+	/* (units: the fixtures' scale) */
+	float fixture;
 	float sun, sky, gamma;
 	float sun_rgb[3], sky_rgb[3];
 	long emitter_count;
@@ -275,6 +297,11 @@ static struct
 	struct prism_rt_rig rig;
 	char rig_map[64];
 	short rig_bsp;
+	/* port: display.prism_rig (0 auto, 1 units, 2 fitted) as the rig was
+	read, and debug.prism_rig_scales' (the sun's, sky's, lamps' and
+	fixtures' factors on the units: the calibration's) */
+	int rig_mode, rig_read_units;
+	float rig_scales[4];
 	/* the map's sun, from its sky as a window last saw it; its angular
 	diameter; the sky's other lights (domes): direction and cosine of the
 	half angle, radiance by colour and power */
@@ -388,6 +415,22 @@ static void settings_read(void)
 	value = config_integer("display.prism_rt_bounces");
 	prism_rt.bounces = value < 0 ? 0 : value > 4 ? 4 : (int)value;
 	prism_rt.sun_size = word_index(config_string("display.prism_sun_size"), sizes, 0);
+	{
+		static char const *const rigs[] = { "auto", "units", "fitted", NULL };
+		char const *scales = config_string("debug.prism_rig_scales");
+		float read[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+		int k;
+
+		prism_rt.rig_mode = word_index(config_string("display.prism_rig"), rigs, 0);
+		if (scales && *scales)
+		{
+			sscanf(scales, "%f %f %f %f", &read[0], &read[1], &read[2], &read[3]);
+		}
+		for (k = 0; k < 4; k++)
+		{
+			prism_rt.rig_scales[k] = read[k] >= 0.0f && read[k] < 1000.0f ? read[k] : 1.0f;
+		}
+	}
 	prism_rt.exposure = word_index(config_string("display.prism_exposure"), exposures, -1);
 	prism_rt.exposure_range = (float)config_real("display.prism_exposure_range");
 	prism_rt.exposure_range = !(prism_rt.exposure_range >= 0.0f) ? 1.5f : prism_rt.exposure_range > 6.0f ? 6.0f :
@@ -624,6 +667,7 @@ static void rig_read(void)
 	struct prism_rt_rig *rig = &prism_rt.rig;
 	FILE *file;
 	long index;
+	int units;
 
 	if (!map)
 		map = "";
@@ -632,8 +676,10 @@ static void rig_read(void)
 		if (*part == '\\' || *part == '/')
 			map = part + 1;
 	}
-	if (prism_rt.rig_bsp == bsp_index && !strcmp(prism_rt.rig_map, map))
+	units = prism_rt.rig_mode == 1 || (prism_rt.rig_mode == 0 && prism_deferred_raster());
+	if (prism_rt.rig_bsp == bsp_index && !strcmp(prism_rt.rig_map, map) && prism_rt.rig_read_units == units)
 		return;
+	prism_rt.rig_read_units = units;
 	prism_rt.rig_bsp = bsp_index;
 	strncpy(prism_rt.rig_map, map, sizeof(prism_rt.rig_map) - 1);
 	prism_rt.rig_map[sizeof(prism_rt.rig_map) - 1] = 0;
@@ -651,6 +697,31 @@ static void rig_read(void)
 			(letter >= '0' && letter <= '9') || letter == '-' ? letter : '_';
 	}
 	name[index] = 0;
+	/* (port: the units' rig: no file, the same for every map) */
+	if (units)
+	{
+		rig->units = TRUE;
+		rig->sun = PRISM_RT_UNITS_SUN * prism_rt.rig_scales[0];
+		rig->sky = PRISM_RT_UNITS_SKY * prism_rt.rig_scales[1];
+		rig->fixture = PRISM_RT_UNITS_FIXTURE * prism_rt.rig_scales[3];
+		platform_log("prism rt: bsp %d's rig: the light's units (sun %.3f, sky %.3f, lamps %.3f, fixtures %.3f)",
+			(int)bsp_index, rig->sun, rig->sky, PRISM_RT_UNITS_EMIT * prism_rt.rig_scales[2], rig->fixture);
+		{
+			struct scenario *scenario = global_scenario_get();
+			short sky;
+
+			for (sky = 0; scenario && sky < scenario->sky_references.count; sky++)
+			{
+				byte const *tag = (byte const *)scenario_get_sky(sky);
+				float const *f = tag ? (float const *)(tag + 0x38) : NULL;
+
+				if (f)
+					platform_log("prism rt: sky %d: indoor ambient %.3f %.3f %.3f x %.3f, outdoor %.3f %.3f %.3f x %.3f",
+						(int)sky, f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7]);
+			}
+		}
+		return;
+	}
 	/* (from the data root, as the game's fopen finds files) */
 	snprintf(path, sizeof(path), "prism_lightmaps/rebaked/%s_%d.scales.json", name, (int)bsp_index);
 	file = name[0] && bsp_index != NONE ? fopen(path, "rb") : NULL;
@@ -694,6 +765,10 @@ static float rig_emitter_scale(long shader_tag, float rgb[3])
 	long index;
 
 	rgb[0] = rgb[1] = rgb[2] = 1.0f;
+	if (prism_rt.rig.units)
+	{
+		return PRISM_RT_UNITS_EMIT * prism_rt.rig_scales[2];
+	}
 	for (index = 0; name && index < prism_rt.rig.emitter_count; index++)
 	{
 		if (!strcmp(prism_rt.rig.emitters[index].name, name))
@@ -1274,6 +1349,29 @@ static void sun_find(void)
 	short sky_index = render.visible_sky_model ? render.visible_sky_index : NONE;
 	short count, index;
 
+	/* (port: the rig in the light's units: the BSP's own sky, the one most
+	of its clusters have, whatever the window sees, so that the bake's rig
+	is the same wherever the camera is; an indoor BSP's, the scenario's
+	first) */
+	if (prism_rt.rig.units)
+	{
+		struct structure_bsp *bsp = global_structure_bsp_get();
+		struct scenario *scenario = global_scenario_get();
+		short most = NONE, votes[16];
+
+		memset(votes, 0, sizeof(votes));
+		for (index = 0; bsp && bsp->clusters.address && index < bsp->clusters.count; index++)
+		{
+			short sky = TAG_BLOCK_GET_ELEMENT(&bsp->clusters, index, struct structure_cluster)->sky_index;
+
+			if (sky >= 0 && sky < 16 && ++votes[sky] > (most == NONE ? 0 : votes[most]))
+				most = sky;
+		}
+		if (most == NONE && scenario && scenario->sky_references.count > 0)
+			most = 0;
+		if (most != NONE)
+			sky_index = most;
+	}
 	if (sky_index == NONE || (prism_rt.sky_index == sky_index))
 		return;
 	prism_rt.sky_index = sky_index;
@@ -1392,6 +1490,11 @@ they are) */
 	settings[PRISM_RT_SETTING_PAGE_TEXEL] = prism_rt.rebaked ? 0.12f : 0.4f;
 	settings[PRISM_RT_SETTING_ALPHA] = prism_rt.alpha_traced ? 1.0f : 0.0f;
 	settings[PRISM_RT_SETTING_FITTED] = scales->fitted ? 1.0f : 0.0f;
+	/* (port: rig[15]: the fixtures' scale where the rig is in units (0: the
+	fixtures are CE's lightmap's, not lights), and 1 there) */
+	rig[60] = scales->units ? scales->fixture : 0.0f;
+	rig[61] = scales->units ? 1.0f : 0.0f;
+	rig[62] = rig[63] = 0.0f;
 	settings[PRISM_RT_SETTING_DYNAMIC_SHADOWS] = remix ? 1.0f : 0.6f;
 }
 

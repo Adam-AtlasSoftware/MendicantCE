@@ -395,13 +395,14 @@ drawn into the window's colour target after the resolve, so the view is what
 the frame shows.
 
 XGPU_GBUFFER_PHASE_RASTER, or'd into the resolve's value: display.lighting
-"raster" (PRISM Raster, design section 1.8): before the resolve, the light
-target's pixels are lit from the bake where the bake has them (docs/
-prism_bake.md): the level's from its baked lightmap (the light less the
-sun's at the pixel's normal) and the sun's light by the baked sun mask, an
-object's from the irradiance volume; the resolve then puts the frame
-together as before (light x base + additions). Where the bake has nothing
-yet, CE's light stays. */
+"raster" (PRISM Raster, design section 1.8): before the resolve, the opaque
+pixels are made whole from the bake where the bake has them (docs/
+prism_bake.md): the diffuse light the level's from its baked lightmap and
+the sun's light by the baked sun mask, an object's from the irradiance
+volume and its traced sun; the material table's specular by the
+reflection probes; the resolve draws that frame as it is. Where the bake
+has nothing yet, CE's own frame (light x base + additions) stays. 17 to 19
+show the frame's albedo, specular and diffuse parts. */
 #define XGPU_GBUFFER_PHASE_GBUFFER_BEGIN 4u
 #define XGPU_GBUFFER_PHASE_GBUFFER_END 5u
 #define XGPU_GBUFFER_VIEW_ALBEDO 4u
@@ -416,6 +417,14 @@ yet, CE's light stays. */
 #define XGPU_GBUFFER_VIEW_BAKE_SUN 13u
 #define XGPU_GBUFFER_VIEW_BAKE_TEXELS 14u
 #define XGPU_GBUFFER_VIEW_BAKE_VOLUME 15u
+/* (the bake's whole light: the light less the sun's and the sun's, at the
+pixel's normal, in CE's encoding: the light's units' calibration) */
+#define XGPU_GBUFFER_VIEW_BAKE_TOTAL 16u
+/* (PRISM Raster's frame's parts: its albedo, its specular light, its
+diffuse light by the albedo) */
+#define XGPU_GBUFFER_VIEW_RASTER_ALBEDO 17u
+#define XGPU_GBUFFER_VIEW_RASTER_SPECULAR 18u
+#define XGPU_GBUFFER_VIEW_RASTER_DIFFUSE 19u
 #define XGPU_GBUFFER_PHASE_RASTER 0x10000u
 #define XGPU_GBUFFER_PHASE_VIEW_MASK 0xff00u
 /* the second target's word 2: the motion's history bit and the page's

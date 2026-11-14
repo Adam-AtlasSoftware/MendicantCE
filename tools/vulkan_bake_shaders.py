@@ -23,7 +23,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "port/linux/vulkan/xgpu_vulkan_bake_glsl.inc"
 OUTPUT = ROOT / "port/linux/vulkan/xgpu_vulkan_bake_shaders.c"
-NAMES = ("setup", "lightmap", "mask", "importance", "volume", "raster", "compact")
+NAMES = ("setup", "lightmap", "mask", "importance", "volume", "raster", "compact", "reflection")
 DECLARATION = re.compile(r"static const char (\w+)_source\[\]\s*=\s*((?:\s|\"(?:\\.|[^\"\\])*\")+);", re.S)
 STRINGS = re.compile(r'"(?:\\.|[^"\\])*"')
 

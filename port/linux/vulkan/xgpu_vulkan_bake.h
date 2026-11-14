@@ -23,15 +23,18 @@ struct xgpu_vulkan_image;
 (NULL none). The control's frame runs the bake's slice of GPU work */
 void xgpu_vulkan_bake_record(const struct xgpu_stream_prism_bake *record, const void *data);
 
-/* PRISM Raster's light: the window's light target's pixels (copy: a
-sampled copy of them, CE's light) lit from the bake where it has them,
-into an image of its own (RGBA16F, the copy's size), read by the resolve in
-the copy's place; words and extras the G-buffer's targets, view SCENE_VIEW's
-cameras of the pass, which the bake's view (XGPU_GBUFFER_VIEW_BAKE_*, 0
-none) shows in the light's place. NULL where the bake has nothing to give
-(CE's light stays) */
-struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy, struct xgpu_vulkan_image *words,
-	struct xgpu_vulkan_image *extras, const struct xgpu_stream_scene_view *view, uint32_t bake_view);
+/* PRISM Raster's frame: the window's opaque pixels (copy: a sampled copy of
+the light target, CE's light; base and additions CE's other targets) lit
+from the bake where it has them, each by its material's diffuse and
+specular light (*whole set: the frame itself, CE's own where the bake has
+nothing), into an image of its own (RGBA16F, the copy's size), read by the
+resolve in the copy's place; words and extras the G-buffer's targets, view
+SCENE_VIEW's cameras of the pass; the bake's view (XGPU_GBUFFER_VIEW_BAKE_*,
+0 none) shown in the light's place instead. NULL where the bake has nothing
+to give (CE's frame stays) */
+struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy, struct xgpu_vulkan_image *base,
+	struct xgpu_vulkan_image *additions, struct xgpu_vulkan_image *words, struct xgpu_vulkan_image *extras,
+	const struct xgpu_stream_scene_view *view, uint32_t bake_view, int *whole);
 
 /* the device going away: everything let go of */
 void xgpu_vulkan_bake_shutdown(void);

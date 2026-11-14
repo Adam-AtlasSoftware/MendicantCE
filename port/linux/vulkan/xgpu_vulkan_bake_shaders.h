@@ -26,5 +26,7 @@ extern const uint32_t xgpu_vulkan_bake_raster_words[];
 extern const size_t xgpu_vulkan_bake_raster_count;
 extern const uint32_t xgpu_vulkan_bake_compact_words[];
 extern const size_t xgpu_vulkan_bake_compact_count;
+extern const uint32_t xgpu_vulkan_bake_reflection_words[];
+extern const size_t xgpu_vulkan_bake_reflection_count;
 
 #endif

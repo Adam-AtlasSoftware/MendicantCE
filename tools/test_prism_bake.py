@@ -113,7 +113,8 @@ def test_reach_serialised_layout():
              "water_count = reach_count(&r, 4)", "bsp.node_count = reach_count", "bsp.plane_count = reach_count",
              "bsp.leaf_count = reach_count", "clusters.leaf_count = reach_count", "clusters.reference_count = reach_count",
              "clusters.cluster_count = reach_count", "clusters.pvs_words = (size_t)reach_count",
-             "seed_count = reach_count", "surface_count = reach_count", "triangle_count = (size_t)reach_count"]
+             "seed_count = reach_count", "surface_count = reach_count", "triangle_count = (size_t)reach_count",
+             "int32_t count = reach_count(&r, SCENERY_FLOATS)", "count = reach_count(&r, FIXTURE_FLOATS)"]
     body = reader[reader.index("static void *reach_thread"):reader.index("prism_bake_reach_defaults(&parameters);")]
     at = [body.index(name) for name in order]
     written = ["blob_put(&blob, input->bounds", "blob_word(&blob, input->fighter_count)",
@@ -122,7 +123,11 @@ def test_reach_serialised_layout():
                "blob_word(&blob, input->clusters.leaf_count)", "blob_word(&blob, input->clusters.reference_count)",
                "blob_word(&blob, input->clusters.cluster_count)", "input->clusters.pvs_words : 0",
                "blob_word(&blob, (long)input->seed_count)", "blob_word(&blob, input->surface_count)",
-               "blob_word(&blob, (long)input->triangle_count)"]
+               "blob_word(&blob, (long)input->triangle_count)", "blob_word(&blob, input->scenery_count)",
+               "blob_word(&blob, input->fixture_count)"]
     assert [writer.index(name) for name in written] == sorted(writer.index(name) for name in written)
     assert at == sorted(at)
-    assert '"PBSC", 4' in writer and 'blob_word(&blob, 3);' in writer and 'head[1] != 3' in reader
+    assert '"PBSC", 4' in writer and 'blob_word(&blob, 4);' in writer and 'head[1] != 4' in reader
+    # (the static scenery's triangle: the same floats on both sides)
+    assert "#define SCENERY_FLOATS 13" in writer and "#define SCENERY_FLOATS 13" in reader
+    assert "#define FIXTURE_FLOATS 12" in writer and "#define FIXTURE_FLOATS 12" in reader

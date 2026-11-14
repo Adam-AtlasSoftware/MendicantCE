@@ -4858,11 +4858,13 @@ struct raster_context
 	uint32_t bake_view;
 };
 
-static struct xgpu_vulkan_image *raster_relight(struct xgpu_vulkan_image *light, void *context)
+static struct xgpu_vulkan_image *raster_relight(struct xgpu_vulkan_image *light, struct xgpu_vulkan_image *base,
+	struct xgpu_vulkan_image *additions, int *whole, void *context)
 {
 	struct raster_context *raster = (struct raster_context *)context;
 
-	return xgpu_vulkan_bake_raster(light, raster->words, raster->extras, raster->view, raster->bake_view);
+	return xgpu_vulkan_bake_raster(light, base, additions, raster->words, raster->extras, raster->view, raster->bake_view,
+		whole);
 }
 
 static void stream_prism_bake(void *context, const struct xgpu_stream_prism_bake *record, const void *data)
@@ -4973,7 +4975,7 @@ static void stream_gbuffer_phase(void *context, uint32_t value)
 			context.extras = words ? gbuffer.extras : NULL;
 			context.view = gbuffer.view_known ? &gbuffer.view : NULL;
 			context.bake_view = raster && view >= (int)XGPU_GBUFFER_VIEW_BAKE_LIGHT &&
-				view <= (int)XGPU_GBUFFER_VIEW_BAKE_VOLUME ? (uint32_t)view : 0;
+				view <= (int)XGPU_GBUFFER_VIEW_RASTER_DIFFUSE ? (uint32_t)view : 0;
 			if (context.bake_view)
 				view = 2;
 			else if (view >= (int)XGPU_GBUFFER_VIEW_BAKE_LIGHT)

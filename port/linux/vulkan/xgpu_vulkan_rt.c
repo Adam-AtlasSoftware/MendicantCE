@@ -407,6 +407,10 @@ static struct
 	uint32_t *receiving_alpha;
 	uint32_t receiving_alpha_words;
 	struct rt_buffer static_storage, static_vertices;
+	/* port: the light fixtures (fixtures_update) */
+	struct rt_buffer fixtures;
+	uint32_t fixture_count, fixtures_serial;
+	float fixtures_scale;
 	VkAccelerationStructureKHR static_structure;
 	VkDeviceAddress static_address;
 	uint32_t static_triangles, static_generation;
@@ -958,6 +962,61 @@ static struct rt_slot *slot_take(void)
 static VkDeviceSize align_up(VkDeviceSize value, VkDeviceSize alignment)
 {
 	return (value + alignment - 1) & ~(alignment - 1);
+}
+
+/* ---------- port: the light fixtures (PRISM v4's light's units) */
+
+/* the fixtures' buffer made again where the light table or the rig's
+fixtures' scale changed: every point and spot fixture, on or off (CE's
+radiosity took them all), its colour by intensity by the scale */
+static void fixtures_update(void)
+{
+	uint32_t count = 0, serial = 0, index, made = 0;
+	const struct xgpu_stream_scene_light *lights = xgpu_vulkan_scene_light_table(&count, &serial);
+	float scale = rt.frame.rig[60], *to;
+
+	if (!(scale > 0.0f) || !lights)
+	{
+		rt.fixture_count = 0;
+		return;
+	}
+	if (rt.fixtures.buffer && serial == rt.fixtures_serial && scale == rt.fixtures_scale)
+		return;
+	if (rt.fixtures.buffer)
+		garbage_add(&rt.fixtures, VK_NULL_HANDLE);
+	memset(&rt.fixtures, 0, sizeof(rt.fixtures));
+	rt.fixture_count = 0;
+	rt.fixtures_serial = serial;
+	rt.fixtures_scale = scale;
+	if (!buffer_make((VkDeviceSize)(count + 1) * 64, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, 1, &rt.fixtures))
+		return;
+	to = (float *)rt.fixtures.mapped;
+	for (index = 0; index < count; index++)
+	{
+		const struct xgpu_stream_scene_light *l = &lights[index];
+		float *f = to + (size_t)made * 16;
+		int channel;
+
+		if ((l->type != XGPU_SCENE_LIGHT_POINT && l->type != XGPU_SCENE_LIGHT_SPOT) ||
+			(l->light_class != XGPU_SCENE_LIGHT_CLASS_STATIC && l->light_class != XGPU_SCENE_LIGHT_CLASS_SWITCHABLE) ||
+			!(l->radiance[3] > 0.0f))
+			continue;
+		memset(f, 0, 64);
+		memcpy(f, l->position, 3 * sizeof(float));
+		for (channel = 0; channel < 3; channel++)
+			f[4 + channel] = (l->radiance[channel] < 0.0f ? 0.0f : l->radiance[channel] > 1.0f ? 1.0f :
+				l->radiance[channel]) * l->radiance[3] * scale;
+		if (l->type == XGPU_SCENE_LIGHT_SPOT)
+		{
+			memcpy(f + 8, l->direction, 4 * sizeof(float));
+			f[12] = l->shape[0];
+		}
+		else
+			f[11] = f[12] = 2.0f;
+		if (f[4] + f[5] + f[6] > 0.0f)
+			made++;
+	}
+	rt.fixture_count = made;
 }
 
 /* ---------- RT_FRAME and RT_STATIC */
@@ -3555,6 +3614,16 @@ whether the surfaces read the traced light in "shadows" and "gi" */
 	/* (the level traced is a remodel: its faces two-sided) */
 	block.pt3[3] = rt.frame.settings[2] > 0.5f ? 1.0f : 0.0f;
 	memcpy(block.rig, rt.frame.rig, sizeof(block.rig));
+	/* (port: the light fixtures as lights where the rig is in the light's
+	units, as the bake takes them: xgpu_vulkan_bake.c's bake_begin, 16 floats
+	each, addresses2 their buffer and count) */
+	fixtures_update();
+	if (rt.fixtures.buffer && rt.fixture_count)
+	{
+		block.addresses2[0] = (uint32_t)rt.fixtures.address;
+		block.addresses2[1] = (uint32_t)(rt.fixtures.address >> 32);
+		block.addresses2[2] = rt.fixture_count;
+	}
 	{
 		uint32_t owner;
 

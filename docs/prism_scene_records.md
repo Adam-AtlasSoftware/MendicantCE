@@ -76,7 +76,7 @@ M2 adds `PRISM_BAKE` (92), sent with `display.lighting` `"raster"` (`port/linux/
 in-game baker's control (the map and BSP, `display.bake`, `display.bake_quality`, the rebakes asked for, the bake
 folder's and the status block's guest addresses, the GPU time a frame may give the bake), and once a BSP the reach's
 inputs a slice a frame (`_REACH_INPUT`, words of the serialised collision BSP, clusters, PVS, water, triangles, places
-and fighters; `_REACH_END`). The host writes the bake's state, progress, time and size into the status block
+and fighters, the static scenery's triangles and the light fixtures' placements; `_REACH_END`). The host writes the bake's state, progress, time and size into the status block
 (`XGPU_BAKE_STATUS_*`). `docs/prism_bake.md` describes the bake.
 
 The other three are specified and taken, not sent: `SCENE_MATERIAL_ANIMATE`, `SCENE_DECAL`, `SCENE_FOG`. `xgpu_scene_encode.c` still fills all eight from typed values for the tests; the stream writes its own

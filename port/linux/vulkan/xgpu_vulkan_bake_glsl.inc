@@ -36,6 +36,7 @@ over 2 pi, a0 = 1 - k . n0. */
 	"#extension GL_EXT_ray_query : require\n" \
 	"#extension GL_EXT_buffer_reference : require\n" \
 	"#extension GL_EXT_buffer_reference_uvec2 : require\n" \
+	"#extension GL_KHR_shader_subgroup_shuffle : require\n" \
 	"layout(buffer_reference, std430, buffer_reference_align = 4) buffer Floats { float v[]; };\n" \
 	"layout(buffer_reference, std430, buffer_reference_align = 4) buffer Uints { uint v[]; };\n" \
 	"layout(buffer_reference, std430, buffer_reference_align = 16) readonly buffer Scene\n" \
@@ -77,7 +78,11 @@ over 2 pi, a0 = 1 - k . n0. */
 	"(instance 1); each's info: its material (display.prism_rt's, the\n" \
 	"materials' count where none) and flags (bit 16 two-sided: a remodel's),\n" \
 	"its corners' base map coordinates */\n" \
-	"uint scene_triangle(uint custom, uint primitive) { return custom == 0u ? primitive : primitive + s.counts.x; }\n" \
+	"uint scene_triangle(uint custom, uint primitive)\n" \
+	"{\n" \
+	"    return custom == 0u ? primitive : custom == 1u ? primitive + s.counts.x : custom == 2u ?\n" \
+	"        primitive + s.counts.x + s.counts.y : primitive + s.counts.x + s.counts.y + s.settings.w;\n" \
+	"}\n" \
 	"vec3 corner(uint t, uint k)\n" \
 	"{\n" \
 	"    Floats f = Floats(s.vertices);\n" \
@@ -88,8 +93,12 @@ over 2 pi, a0 = 1 - k . n0. */
 	"bool two_sided(uint t) { return (Uints(s.info).v[t * 8u] & 0x10000u) != 0u; }\n" \
 	"float material_value(uint m, uint k) { return Floats(s.materials).v[m * 16u + k]; }\n" \
 	"\n" \
-	"bool alpha_kept(uint primitive, vec2 b)\n" \
+	"bool alpha_kept(uint custom, uint primitive, vec2 b)\n" \
 	"{\n" \
+	"    /* (the static scenery's cutouts: a hit kept by its share of texels\n" \
+	"    drawn, as the reference's objects' are) */\n" \
+	"    if (custom == 3u)\n" \
+	"        return rnd() < 0.75 * material_value(material_of(scene_triangle(3u, primitive)), 7u);\n" \
 	"    uint t = primitive + s.counts.x;\n" \
 	"    uint m = material_of(t);\n" \
 	"    if (m >= s.counts.w || (uint(material_value(m, 3u)) & 2u) == 0u)\n" \
@@ -108,14 +117,15 @@ over 2 pi, a0 = 1 - k . n0. */
 	"\n" \
 	"#define ALPHA_PROCEED(q) while (rayQueryProceedEXT(q)) { \\\n" \
 	"        if (rayQueryGetIntersectionTypeEXT(q, false) == gl_RayQueryCandidateIntersectionTriangleEXT && \\\n" \
-	"            alpha_kept(uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, false)), \\\n" \
+	"            alpha_kept(rayQueryGetIntersectionInstanceCustomIndexEXT(q, false), \\\n" \
+	"            uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, false)), \\\n" \
 	"            rayQueryGetIntersectionBarycentricsEXT(q, false))) \\\n" \
 	"            rayQueryConfirmIntersectionEXT(q); }\n" \
 	"\n" \
 	"bool blocked(vec3 o, vec3 d, float t_max)\n" \
 	"{\n" \
 	"    rayQueryEXT q;\n" \
-	"    rayQueryInitializeEXT(q, accelerationStructureEXT(s.tlas), gl_RayFlagsTerminateOnFirstHitEXT, 3u, o, 0.0, d,\n" \
+	"    rayQueryInitializeEXT(q, accelerationStructureEXT(s.tlas), gl_RayFlagsTerminateOnFirstHitEXT, 15u, o, 0.0, d,\n" \
 	"        t_max);\n" \
 	"    ALPHA_PROCEED(q)\n" \
 	"    return rayQueryGetIntersectionTypeEXT(q, true) != gl_RayQueryCommittedIntersectionNoneEXT;\n" \
@@ -126,7 +136,7 @@ over 2 pi, a0 = 1 - k . n0. */
 	"float hit(vec3 o, vec3 d, float t_max, out vec3 nh, out uint t, out vec2 bary)\n" \
 	"{\n" \
 	"    rayQueryEXT q;\n" \
-	"    rayQueryInitializeEXT(q, accelerationStructureEXT(s.tlas), 0u, 3u, o, 0.0, d, t_max);\n" \
+	"    rayQueryInitializeEXT(q, accelerationStructureEXT(s.tlas), 0u, 15u, o, 0.0, d, t_max);\n" \
 	"    ALPHA_PROCEED(q)\n" \
 	"    nh = vec3(0.0);\n" \
 	"    t = 0u;\n" \
@@ -155,7 +165,8 @@ over 2 pi, a0 = 1 - k . n0. */
 	"    return vec3(material_value(m, 0u), material_value(m, 1u), material_value(m, 2u));\n" \
 	"}\n" \
 	"/* (the terms a diagnostic leaves out: s.settings.y's bits, 1 the domes, 2\n" \
-	"the lamps, 4 the glows, 8 the paths past the first hit; 0 none) */\n" \
+	"the lamps, 4 the glows, 8 the paths past the first hit, 16 the fixtures;\n" \
+	"0 none) */\n" \
 	"bool term_off(uint bit) { return (s.settings.y & bit) != 0u; }\n" \
 	"vec3 glow_of(uint t)\n" \
 	"{\n" \
@@ -230,9 +241,14 @@ over 2 pi, a0 = 1 - k . n0. */
 	"    }\n" \
 	"    return sum;\n" \
 	"}\n" \
+	"/* the rig in the light's units (s.rig[15].y): the sky's ambient is CE's\n" \
+	"floor of light, unoccluded, at every texel and probe (ambient()), not a\n" \
+	"radiance from the open sky, and not passed on by the bounces */\n" \
+	"bool units_rig() { return s.rig[15].y > 0.5; }\n" \
+	"vec3 ambient() { return units_rig() ? s.rig[1].rgb : vec3(0.0); }\n" \
 	"vec3 sky_along(vec3 d, bool domes)\n" \
 	"{\n" \
-	"    vec3 l = s.rig[1].rgb;\n" \
+	"    vec3 l = units_rig() ? vec3(0.0) : s.rig[1].rgb;\n" \
 	"    if (!domes)\n" \
 	"        return l;\n" \
 	"    for (int i = 0; i < 4; i++)\n" \
@@ -494,12 +510,72 @@ over 2 pi, a0 = 1 - k . n0. */
 	"        return vec3(0.0);\n" \
 	"    return kept / kept_target * (sum / float(candidates));\n" \
 	"}\n" \
+	"/* the fixtures (the level's light fixtures, CE's radiosity's point and\n" \
+	"spot lights: s.unused's 4 vec4 each, s.lamp.z of them: the place, the\n" \
+	"intensity's colour in the bake's unit at a world unit (the irradiance a\n" \
+	"surface facing it takes, over pi folded in where n is a texel's), the\n" \
+	"spot's axis and outer cone's cosine (2: a point light), the inner cone's\n" \
+	"cosine): one picked by its unshadowed light at p among all (16 or fewer)\n" \
+	"or 16 candidates, its shadow traced; n 0: a probe's (the irradiance a\n" \
+	"surface facing it would take, no cosine) */\n" \
+	"vec3 fixture_light(uint i, vec3 p, vec3 n, out vec3 l, out float d)\n" \
+	"{\n" \
+	"    Floats f = Floats(s.unused);\n" \
+	"    uint at = i * 16u;\n" \
+	"    vec3 to = vec3(f.v[at], f.v[at + 1u], f.v[at + 2u]) - p;\n" \
+	"    float d2 = dot(to, to);\n" \
+	"    d = sqrt(d2);\n" \
+	"    l = to / max(d, 1.0e-6);\n" \
+	"    float c = dot(n, n) < 0.5 ? 1.0 : dot(n, l) / 3.14159265;\n" \
+	"    if (c <= 0.0 || d < 1.0e-4)\n" \
+	"        return vec3(0.0);\n" \
+	"    vec4 axis = vec4(f.v[at + 8u], f.v[at + 9u], f.v[at + 10u], f.v[at + 11u]);\n" \
+	"    float cone = 1.0;\n" \
+	"    if (axis.w < 1.5)\n" \
+	"        cone = smoothstep(axis.w, max(f.v[at + 12u], axis.w + 1.0e-4), dot(-l, axis.xyz));\n" \
+	"    /* (a world unit's tenth softens the inverse square at the light) */\n" \
+	"    return vec3(f.v[at + 4u], f.v[at + 5u], f.v[at + 6u]) * (c * cone / (d2 + 0.01));\n" \
+	"}\n" \
+	"vec3 fixtures_ris(vec3 p, vec3 n, vec3 o, out vec3 kept_l)\n" \
+	"{\n" \
+	"    kept_l = vec3(0.0, 0.0, 1.0);\n" \
+	"    uint count = uint(s.lamp.z);\n" \
+	"    if (count == 0u || term_off(16u))\n" \
+	"        return vec3(0.0);\n" \
+	"    uint candidates = min(count, 16u);\n" \
+	"    float sum = 0.0, kept_w = 0.0, kept_d = 0.0;\n" \
+	"    vec3 kept = vec3(0.0);\n" \
+	"    for (uint c = 0u; c < candidates; c++)\n" \
+	"    {\n" \
+	"        uint i = count <= 16u ? c : min(uint(rnd() * float(count)), count - 1u);\n" \
+	"        vec3 l;\n" \
+	"        float d;\n" \
+	"        vec3 e = fixture_light(i, p, n, l, d);\n" \
+	"        float w = luma(e);\n" \
+	"        if (!(w > 0.0) || isinf(w))\n" \
+	"            continue;\n" \
+	"        sum += w;\n" \
+	"        if (rnd() * sum <= w)\n" \
+	"        {\n" \
+	"            kept = e;\n" \
+	"            kept_w = w;\n" \
+	"            kept_l = l;\n" \
+	"            kept_d = d;\n" \
+	"        }\n" \
+	"    }\n" \
+	"    if (kept_w <= 0.0 || blocked(o, kept_l, max(kept_d - 0.05, 0.0)))\n" \
+	"        return vec3(0.0);\n" \
+	"    return kept / kept_w * sum * (float(count) / float(candidates));\n" \
+	"}\n" \
 	"vec3 lamps_at(vec3 p, vec3 n, vec3 o, inout vec3 moment)\n" \
 	"{\n" \
 	"    vec3 l;\n" \
 	"    vec3 e = lamps_ris(p, n, o, 8, l);\n" \
 	"    moment += luma(e) * 3.14159265 / max(dot(n, l), 0.1) * l;\n" \
-	"    return e;\n" \
+	"    vec3 fl;\n" \
+	"    vec3 fe = fixtures_ris(p, n, o, fl);\n" \
+	"    moment += luma(fe) * 3.14159265 / max(dot(n, fl), 0.1) * fl;\n" \
+	"    return e + fe;\n" \
 	"}\n" \
 	"\n" \
 	"/* a path from o along d (its first ray), the light it brings: the sky\n" \
@@ -528,7 +604,7 @@ over 2 pi, a0 = 1 - k . n0. */
 	"        light += throughput * glow_of(t);\n" \
 	"        vec3 oh = h + nh * 0.03;\n" \
 	"        vec3 lh;\n" \
-	"        vec3 ls = sun_at(oh, nh) + lamps_ris(h, nh, oh, 4, lh);\n" \
+	"        vec3 ls = sun_at(oh, nh) + lamps_ris(h, nh, oh, 4, lh) + fixtures_ris(h, nh, oh, lh);\n" \
 	"        throughput *= albedo_of(t);\n" \
 	"        light += throughput * ls;\n" \
 	"        if (bounce == bounces - 1 || term_off(8u))\n" \
@@ -611,7 +687,7 @@ over 2 pi, a0 = 1 - k . n0. */
 	"        }\n" \
 	"    }\n" \
 	"    float threshold = push.values.x, floor_ = push.values.y;\n" \
-	"    uint minimum = push.parameters.z;\n" \
+	"    uint minimum = push.parameters.z & 0xffffu;\n" \
 	"    if (count < minimum)\n" \
 	"        return 0u;\n" \
 	"    if (push.values.z > 0.0 && float(count) >= push.values.z)\n" \
@@ -763,14 +839,31 @@ static const char lightmap_source[] =
 	BAKE_COMMON
 	"layout(local_size_x = 64) in;\n"
 	"layout(buffer_reference, std430, buffer_reference_align = 8) readonly buffer Job { uvec2 texels, accumulators, states, running, list, args, unused[2]; };\n"
+	"/* two sets' count, mean and sum of squared deviations made one (Chan's) */\n"
+	"void merge(inout float n, inout float mean, inout float m2, float n2, float mean2, float m22)\n"
+	"{\n"
+	"    float t = n + n2;\n"
+	"    if (t <= 0.0)\n"
+	"        return;\n"
+	"    float d = mean2 - mean;\n"
+	"    m2 = m2 + m22 + d * d * n * n2 / t;\n"
+	"    mean += d * n2 / t;\n"
+	"    n = t;\n"
+	"}\n"
 	"void main()\n"
 	"{\n"
 	"    s = Scene(push.scene);\n"
 	"    Job j = Job(push.job);\n"
-	"    /* (the running texels alone: the compaction's list) */\n"
-	"    if (gl_GlobalInvocationID.x >= Uints(j.args).v[3])\n"
+	"    /* (the running texels alone: the compaction's list; each texel's samples\n"
+	"    spread over `lanes` invocations side by side in a subgroup, each its own\n"
+	"    whole batches of them, their sums and statistics put together before\n"
+	"    the texel's are written: the same samples, the same rule, sooner) */\n"
+	"    uint lanes = max(push.parameters.z >> 16u, 1u);\n"
+	"    uint lane = gl_GlobalInvocationID.x % lanes;\n"
+	"    uint slot = gl_GlobalInvocationID.x / lanes;\n"
+	"    if (slot >= Uints(j.args).v[3])\n"
 	"        return;\n"
-	"    uint index = Uints(j.list).v[gl_GlobalInvocationID.x];\n"
+	"    uint index = Uints(j.list).v[slot];\n"
 	"    if (index >= push.parameters.x)\n"
 	"        return;\n"
 	"    Uints st = Uints(j.states);\n"
@@ -785,11 +878,11 @@ static const char lightmap_source[] =
 	"    uint count = floatBitsToUint(ac.v[base + 11u]);\n"
 	"    float batch_sum = ac.v[base + 16u], batch_mean = ac.v[base + 18u], batch_m2 = ac.v[base + 19u];\n"
 	"    uint batches = floatBitsToUint(ac.v[base + 17u]);\n"
-	"    seed = hash_u(index ^ hash_u(push.parameters.w * 2654435761u ^ hash_u(count + 0x9e3779b9u)));\n"
+	"    seed = hash_u(index ^ hash_u(push.parameters.w * 2654435761u ^ hash_u(count + 0x9e3779b9u + lane * 0x632be5abu)));\n"
 	"    int bounces = int(push.values.w);\n"
 	"    /* (a remodel's face, two-sided, its normal turned toward its open side\n"
 	"    once: the side whose rays travel further before they meet the level) */\n"
-	"    if (count == 0u && (flags & 4u) != 0u)\n"
+	"    if (count == 0u && (flags & 4u) != 0u && lane == 0u)\n"
 	"    {\n"
 	"        float reach[2] = float[2](0.0, 0.0);\n"
 	"        for (int side = 0; side < 2; side++)\n"
@@ -817,14 +910,30 @@ static const char lightmap_source[] =
 	"    float sun = 0.0, back = 0.0;\n"
 	"    uint bc = 0u, bh = 0u;\n"
 	"    float bmean = 0.0, bm2 = 0.0, bmost = 0.0;\n"
-	"    uint samples = push.parameters.y;\n"
-	"    /* (a remodel's face, two-sided: its normal toward the open side, the\n"
-	"    side more of whose first rays leave or meet a face's front) */\n"
+	"    /* (the lane's samples: alone, the dispatch's; spread, lane 0 the rest of\n"
+	"    the texel's batch begun and its share, each other lane its share of\n"
+	"    whole batches after; none for a texel not begun, whose first lane turns\n"
+	"    its face) */\n"
+	"    uint samples = push.parameters.y, first = count;\n"
+	"    if (lanes > 1u)\n"
+	"    {\n"
+	"        uint share = max((samples + 63u) & ~63u, 64u);\n"
+	"        uint aligned = (count + 63u) & ~63u;\n"
+	"        samples = count == 0u ? (lane == 0u ? push.parameters.y : 0u) : lane == 0u ? aligned - count + share : share;\n"
+	"        first = lane == 0u ? count : aligned + lane * share;\n"
+	"        if (lane != 0u)\n"
+	"        {\n"
+	"            batch_sum = 0.0;\n"
+	"            batches = 0u;\n"
+	"            batch_mean = 0.0;\n"
+	"            batch_m2 = 0.0;\n"
+	"        }\n"
+	"    }\n"
 	"    for (uint k = 0u; k < samples; k++)\n"
 	"    {\n"
 	"        vec3 m = vec3(0.0);\n"
-	"        vec3 dl = domes_at(o, n, m) + lamps_at(p, n, o, m);\n"
-	"        vec3 d = cosine_dir_at(n, stratum(count + k));\n"
+	"        vec3 dl = domes_at(o, n, m) + lamps_at(p, n, o, m) + ambient();\n"
+	"        vec3 d = cosine_dir_at(n, stratum(first + k));\n"
 	"        bool backface;\n"
 	"        vec3 il = path(o, d, bounces, backface);\n"
 	"        float c = max(dot(d, n), 0.1);\n"
@@ -842,13 +951,41 @@ static const char lightmap_source[] =
 	"        sun += v;\n"
 	"        back += backface ? 1.0 : 0.0;\n"
 	"        float x = luma(dl + il);\n"
-	"        batch_add(batch_sum, count + k, batches, batch_mean, batch_m2, x);\n"
+	"        batch_add(batch_sum, first + k, batches, batch_mean, batch_m2, x);\n"
 	"        bc++;\n"
 	"        bh += x != 0.0 ? 1u : 0u;\n"
 	"        float delta = x - bmean;\n"
 	"        bmean += delta / float(bc);\n"
 	"        bm2 += delta * (x - bmean);\n"
 	"        bmost = max(bmost, x);\n"
+	"    }\n"
+	"    if (lanes > 1u)\n"
+	"    {\n"
+	"        float fbc = float(bc), fb = float(batches);\n"
+	"        for (uint off = 1u; off < lanes; off <<= 1u)\n"
+	"        {\n"
+	"            direct += subgroupShuffleXor(direct, off);\n"
+	"            indirect += subgroupShuffleXor(indirect, off);\n"
+	"            moment += subgroupShuffleXor(moment, off);\n"
+	"            sun += subgroupShuffleXor(sun, off);\n"
+	"            back += subgroupShuffleXor(back, off);\n"
+	"            bh += subgroupShuffleXor(bh, off);\n"
+	"            bmost = max(bmost, subgroupShuffleXor(bmost, off));\n"
+	"            float n2 = subgroupShuffleXor(fbc, off), mean2 = subgroupShuffleXor(bmean, off);\n"
+	"            float m22 = subgroupShuffleXor(bm2, off);\n"
+	"            merge(fbc, bmean, bm2, n2, mean2, m22);\n"
+	"            n2 = subgroupShuffleXor(fb, off);\n"
+	"            mean2 = subgroupShuffleXor(batch_mean, off);\n"
+	"            m22 = subgroupShuffleXor(batch_m2, off);\n"
+	"            merge(fb, batch_mean, batch_m2, n2, mean2, m22);\n"
+	"        }\n"
+	"        bc = uint(fbc + 0.5);\n"
+	"        batches = uint(fb + 0.5);\n"
+	"        batch_sum = 0.0;\n"
+	"        if (lane != 0u)\n"
+	"            return;\n"
+	"        if (bc == 0u)\n"
+	"            return;\n"
 	"    }\n"
 	"    float total = float(count) + float(bc);\n"
 	"    float wb = float(bc) / max(total, 1.0);\n"
@@ -1050,7 +1187,7 @@ static const char volume_source[] =
 	"    {\n"
 	"        vec3 d = sphere_dir_at(stratum(count + k));\n"
 	"        bool backface;\n"
-	"        vec3 l = path(p, d, bounces, backface) * 12.566371;\n"
+	"        vec3 l = (path(p, d, bounces, backface) + ambient()) * 12.566371;\n"
 	"        if (any(isnan(l)) || any(isinf(l))) l = vec3(0.0);\n"
 	"        vec4 y = sh(d);\n"
 	"        vec3 shc0 = l * y.x;\n"
@@ -1059,6 +1196,13 @@ static const char volume_source[] =
 	"        {\n"
 	"            vec3 ld;\n"
 	"            vec3 e = lamps_ris(p, vec3(0.0), p, 8, ld);\n"
+	"            if (!(any(isnan(e)) || any(isinf(e))))\n"
+	"            {\n"
+	"                vec4 yl = sh(ld);\n"
+	"                shr += e.r * yl; shg += e.g * yl; shb += e.b * yl;\n"
+	"                shc0 += e * yl.x;\n"
+	"            }\n"
+	"            e = fixtures_ris(p, vec3(0.0), p, ld);\n"
 	"            if (!(any(isnan(e)) || any(isinf(e))))\n"
 	"            {\n"
 	"                vec4 yl = sh(ld);\n"
@@ -1126,6 +1270,158 @@ static const char volume_source[] =
 	"    }\n"
 	"}\n";
 
+/* the reflection probes (design section 3.2: GGX-prefiltered cube maps in
+reachable space): values.x 0, each probe's box (its six axes' reach) and
+place; 1, each texel of each level of each probe's cube (levels' sides
+side >> level; a level's roughness (level / (levels - 1))^2) the light seen
+along its direction (the bake's estimator's: path(), the sky and the domes
+where a ray leaves), the GGX lobe's directions about it weighed by their
+cosines, RGB9E5. The job block: [0] the probes' places (4 floats each), [1]
+their info (12 floats: place, first texel, box's low corner, its high one),
+[2] the texels; parameters x the batch's first probe, y its probes, z the
+samples a texel, w the frame; values y the side, z the levels, w the
+bounces */
+static const char reflection_source[] =
+	BAKE_COMMON
+	"layout(local_size_x = 64) in;\n"
+	"layout(buffer_reference, std430, buffer_reference_align = 8) readonly buffer Job { uvec2 positions, info, data, unused[5]; };\n"
+	"uint pack_rgb9e5(vec3 c)\n"
+	"{\n"
+	"    c = clamp(c, vec3(0.0), vec3(65408.0));\n"
+	"    float m = max(c.r, max(c.g, c.b));\n"
+	"    int e = max(-16, int(floor(log2(max(m, 1.0e-30))))) + 1;\n"
+	"    float scale = exp2(float(9 - e));\n"
+	"    if (floor(m * scale + 0.5) >= 512.0)\n"
+	"    {\n"
+	"        e++;\n"
+	"        scale *= 0.5;\n"
+	"    }\n"
+	"    uvec3 q = uvec3(floor(c * scale + 0.5));\n"
+	"    return min(q.r, 511u) | (min(q.g, 511u) << 9u) | (min(q.b, 511u) << 18u) | (uint(clamp(e + 15, 0, 31)) << 27u);\n"
+	"}\n"
+	"/* a cube's face (0 +x, 1 -x, 2 +y, 3 -y, 4 +z, 5 -z) and its coordinates\n"
+	"(-1 to 1): the direction (raster_source's reflection_at's mapping) */\n"
+	"vec3 cube_dir(uint face, vec2 uv)\n"
+	"{\n"
+	"    vec3 d = face == 0u ? vec3(1.0, -uv.y, -uv.x) : face == 1u ? vec3(-1.0, -uv.y, uv.x) : face == 2u ?\n"
+	"        vec3(uv.x, 1.0, uv.y) : face == 3u ? vec3(uv.x, -1.0, -uv.y) : face == 4u ? vec3(uv.x, -uv.y, 1.0) :\n"
+	"        vec3(-uv.x, -uv.y, -1.0);\n"
+	"    return normalize(d);\n"
+	"}\n"
+	"/* the light seen along d from o: the level's (the bake's estimator) where\n"
+	"the ray meets it, the sky and the domes where it leaves */\n"
+	"vec3 seen(vec3 o, vec3 d, int bounces)\n"
+	"{\n"
+	"    vec3 nh;\n"
+	"    uint t;\n"
+	"    vec2 b;\n"
+	"    if (hit(o, d, 300.0, nh, t, b) < 0.0)\n"
+	"        return sky_along(d, true) + ambient();\n"
+	"    bool backface;\n"
+	"    return path(o, d, bounces, backface);\n"
+	"}\n"
+	"void main()\n"
+	"{\n"
+	"    s = Scene(push.scene);\n"
+	"    Job j = Job(push.job);\n"
+	"    uint first = push.parameters.x, count = push.parameters.y, samples = push.parameters.z;\n"
+	"    uint side = uint(push.values.y), levels = uint(push.values.z);\n"
+	"    int bounces = int(push.values.w);\n"
+	"    uint g = gl_GlobalInvocationID.x;\n"
+	"    Floats pos = Floats(j.positions);\n"
+	"    if (push.values.x < 0.5)\n"
+	"    {\n"
+	"        /* (each probe's box: how far its six axes reach, a world unit at\n"
+	"        least, 64 at most; its place and first texel) */\n"
+	"        if (g >= count)\n"
+	"            return;\n"
+	"        uint probe = first + g;\n"
+	"        vec3 p = vec3(pos.v[probe * 4u], pos.v[probe * 4u + 1u], pos.v[probe * 4u + 2u]);\n"
+	"        vec3 lo, hi;\n"
+	"        for (int axis = 0; axis < 3; axis++)\n"
+	"        {\n"
+	"            for (int sign = 0; sign < 2; sign++)\n"
+	"            {\n"
+	"                vec3 d = vec3(0.0);\n"
+	"                d[axis] = sign == 0 ? 1.0 : -1.0;\n"
+	"                vec3 nh;\n"
+	"                uint t;\n"
+	"                vec2 b;\n"
+	"                float th = hit(p, d, 64.0, nh, t, b);\n"
+	"                float reach = clamp(th < 0.0 ? 64.0 : th, 1.0, 64.0);\n"
+	"                if (sign == 0)\n"
+	"                    hi[axis] = p[axis] + reach;\n"
+	"                else\n"
+	"                    lo[axis] = p[axis] - reach;\n"
+	"            }\n"
+	"        }\n"
+	"        Floats inf = Floats(j.info);\n"
+	"        uint texels = uint(push.values.y) * uint(push.values.y) * 6u;\n"
+	"        uint total = 0u;\n"
+	"        for (uint q = 0u; q < levels; q++)\n"
+	"            total += 6u * max(side >> q, 1u) * max(side >> q, 1u);\n"
+	"        inf.v[probe * 12u] = p.x;\n"
+	"        inf.v[probe * 12u + 1u] = p.y;\n"
+	"        inf.v[probe * 12u + 2u] = p.z;\n"
+	"        inf.v[probe * 12u + 3u] = uintBitsToFloat(probe * total);\n"
+	"        inf.v[probe * 12u + 4u] = lo.x;\n"
+	"        inf.v[probe * 12u + 5u] = lo.y;\n"
+	"        inf.v[probe * 12u + 6u] = lo.z;\n"
+	"        inf.v[probe * 12u + 8u] = hi.x;\n"
+	"        inf.v[probe * 12u + 9u] = hi.y;\n"
+	"        inf.v[probe * 12u + 10u] = hi.z;\n"
+	"        return;\n"
+	"    }\n"
+	"    uint total = 0u;\n"
+	"    for (uint q = 0u; q < levels; q++)\n"
+	"        total += 6u * max(side >> q, 1u) * max(side >> q, 1u);\n"
+	"    if (g >= count * total)\n"
+	"        return;\n"
+	"    uint probe = first + g / total, texel = g % total, level = 0u, sz = side;\n"
+	"    while (level + 1u < levels && texel >= 6u * sz * sz)\n"
+	"    {\n"
+	"        texel -= 6u * sz * sz;\n"
+	"        level++;\n"
+	"        sz = max(side >> level, 1u);\n"
+	"    }\n"
+	"    uint face = texel / (sz * sz), within = texel % (sz * sz);\n"
+	"    uvec2 xy = uvec2(within % sz, within / sz);\n"
+	"    seed = hash_u(g ^ hash_u(push.parameters.w * 2654435761u + probe));\n"
+	"    vec3 p = vec3(pos.v[probe * 4u], pos.v[probe * 4u + 1u], pos.v[probe * 4u + 2u]);\n"
+	"    float roughness = levels > 1u ? float(level) / float(levels - 1u) : 0.0;\n"
+	"    roughness *= roughness;\n"
+	"    float a = max(roughness * roughness, 1.0e-4);\n"
+	"    vec3 sum = vec3(0.0);\n"
+	"    float weights = 0.0;\n"
+	"    for (uint k = 0u; k < samples; k++)\n"
+	"    {\n"
+	"        vec2 uv = (vec2(xy) + vec2(rnd(), rnd())) / float(sz) * 2.0 - 1.0;\n"
+	"        vec3 n = cube_dir(face, uv);\n"
+	"        vec3 l = n;\n"
+	"        float w = 1.0;\n"
+	"        if (level > 0u)\n"
+	"        {\n"
+	"            /* (GGX's half vectors about n, the view along n: the light's\n"
+	"            direction by each, weighed by its cosine) */\n"
+	"            float u1 = rnd(), u2 = rnd() * 6.2831853;\n"
+	"            float ct = sqrt((1.0 - u1) / (1.0 + (a * a - 1.0) * u1)), st = sqrt(max(1.0 - ct * ct, 0.0));\n"
+	"            vec3 t, b;\n"
+	"            basis(n, t, b);\n"
+	"            vec3 h = normalize(st * cos(u2) * t + st * sin(u2) * b + ct * n);\n"
+	"            l = 2.0 * dot(n, h) * h - n;\n"
+	"            w = dot(n, l);\n"
+	"            if (w <= 0.0)\n"
+	"                continue;\n"
+	"        }\n"
+	"        vec3 c = seen(p, normalize(l), bounces);\n"
+	"        if (any(isnan(c)) || any(isinf(c)))\n"
+	"            continue;\n"
+	"        sum += c * w;\n"
+	"        weights += w;\n"
+	"    }\n"
+	"    Uints(j.data).v[probe * total + (g % total)] = pack_rgb9e5(weights > 0.0 ? sum / weights : vec3(0.0));\n"
+	"}\n";
+
 /* PRISM Raster's light (display.lighting "raster", design section 1.8):
 each pixel of the window's colour target (the light target: CE's light
 until here) lit from the bake where the bake has it. A level's pixel (its
@@ -1170,7 +1466,7 @@ static const char compact_source[] =
 	"    Uints a = Uints(j.args);\n"
 	"    uint at = atomicAdd(a.v[3], 1u);\n"
 	"    Uints(j.list).v[at] = index;\n"
-	"    atomicMax(a.v[0], at / 64u + 1u);\n"
+	"    atomicMax(a.v[0], (at * max(push.parameters.y, 1u)) / 64u + 1u);\n"
 	"}\n";
 
 static const char raster_source[] =
@@ -1180,14 +1476,18 @@ static const char raster_source[] =
 	"layout(set = 0, binding = 1) uniform usampler2D extras;\n"
 	"layout(set = 0, binding = 2) uniform sampler2D light_in;\n"
 	"layout(set = 0, binding = 3, rgba16f) uniform writeonly image2D light;\n"
+	"layout(set = 0, binding = 4) uniform sampler2D base_in;\n"
+	"layout(set = 0, binding = 5) uniform sampler2D additions_in;\n"
 	"layout(buffer_reference, std430, buffer_reference_align = 16) readonly buffer Job\n"
 	"{\n"
 	"    uvec2 pages, charts, vpages, table, tiles, sun, masks, bricks;\n"
-	"    uvec2 probes, unused[3];\n"
+	"    uvec2 probes, coarse, objects, object_table;\n"
 	"    vec4 camera[4];\n"
 	"    ivec4 corners;\n"
 	"    vec4 volume;\n"
 	"    uvec4 counts;\n"
+	"    uvec2 lights, reflections, reflection_table, reflection_data;\n"
+	"    uvec4 more;\n"
 	"};\n"
 	"vec3 unfold(vec2 f)\n"
 	"{\n"
@@ -1251,21 +1551,27 @@ static const char raster_source[] =
 	"    float v11 = float((mk.v[i11 >> 2u] >> ((i11 & 3u) * 8u)) & 255u);\n"
 	"    return mix(mix(v00, v10, f.x), mix(v01, v11, f.x), f.y) / 255.0;\n"
 	"}\n"
-	"/* the irradiance volume at p (normal n): the light over pi; and the sun's\n"
+	"/* a cascade of the irradiance volume at p: its bricks' table (entries, a\n"
+	"power of 2), its probes' spacing (a brick 4 of them a side); at the normal\n"
+	"n and at the direction r: the light over pi at each (rgb), the sun's\n"
 	"visibility (w); -1 none */\n"
-	"vec4 volume_at(vec3 p, vec3 n)\n"
+	"bool cascade_at(uvec2 table, uint entries, float spacing, vec3 p, vec3 n, vec3 r, out vec4 at_n, out vec3 at_r)\n"
 	"{\n"
-	"    uint entries = job.counts.x;\n"
-	"    if (entries == 0u)\n"
-	"        return vec4(-1.0);\n"
-	"    float spacing = job.volume.x;\n"
+	"    at_n = vec4(-1.0);\n"
+	"    at_r = vec3(0.0);\n"
+	"    if (entries == 0u || table == uvec2(0u))\n"
+	"        return false;\n"
 	"    vec3 f = p / spacing - 0.5;\n"
 	"    ivec3 g0 = ivec3(floor(f));\n"
 	"    vec3 t = f - vec3(g0);\n"
-	"    vec3 sum = vec3(0.0);\n"
+	"    vec3 sum = vec3(0.0), sum_r = vec3(0.0);\n"
 	"    float sun = 0.0, weights = 0.0;\n"
-	"    Uints bt = Uints(job.bricks);\n"
+	"    Uints bt = Uints(table);\n"
 	"    Floats pr = Floats(job.probes);\n"
+	"    vec4 yn = vec4(0.282095 * 3.14159265, 0.488603 * 2.0943951 * n.y, 0.488603 * 2.0943951 * n.z,\n"
+	"        0.488603 * 2.0943951 * n.x);\n"
+	"    vec4 yr = vec4(0.282095 * 3.14159265, 0.488603 * 2.0943951 * r.y, 0.488603 * 2.0943951 * r.z,\n"
+	"        0.488603 * 2.0943951 * r.x);\n"
 	"    for (int c = 0; c < 8; c++)\n"
 	"    {\n"
 	"        ivec3 g = g0 + ivec3(c & 1, (c >> 1) & 1, (c >> 2) & 1);\n"
@@ -1296,33 +1602,209 @@ static const char raster_source[] =
 	"            continue;\n"
 	"        vec3 w3 = mix(1.0 - t, t, vec3(c & 1, (c >> 1) & 1, (c >> 2) & 1));\n"
 	"        float w = w3.x * w3.y * w3.z;\n"
-	"        vec2 r0 = unpackHalf2x16(floatBitsToUint(pr.v[b])), r1 = unpackHalf2x16(floatBitsToUint(pr.v[b + 1u]));\n"
-	"        vec2 g0_ = unpackHalf2x16(floatBitsToUint(pr.v[b + 2u])), g1 = unpackHalf2x16(floatBitsToUint(pr.v[b + 3u]));\n"
-	"        vec2 b0 = unpackHalf2x16(floatBitsToUint(pr.v[b + 4u])), b1 = unpackHalf2x16(floatBitsToUint(pr.v[b + 5u]));\n"
-	"        vec4 y = vec4(0.282095 * 3.14159265, 0.488603 * 2.0943951 * n.y, 0.488603 * 2.0943951 * n.z,\n"
-	"            0.488603 * 2.0943951 * n.x);\n"
-	"        vec3 e = vec3(dot(vec4(r0, r1), y), dot(vec4(g0_, g1), y), dot(vec4(b0, b1), y)) / 3.14159265;\n"
-	"        sum += w * max(e, vec3(0.0));\n"
+	"        vec4 cr = vec4(unpackHalf2x16(floatBitsToUint(pr.v[b])), unpackHalf2x16(floatBitsToUint(pr.v[b + 1u])));\n"
+	"        vec4 cg = vec4(unpackHalf2x16(floatBitsToUint(pr.v[b + 2u])), unpackHalf2x16(floatBitsToUint(pr.v[b + 3u])));\n"
+	"        vec4 cb = vec4(unpackHalf2x16(floatBitsToUint(pr.v[b + 4u])), unpackHalf2x16(floatBitsToUint(pr.v[b + 5u])));\n"
+	"        sum += w * max(vec3(dot(cr, yn), dot(cg, yn), dot(cb, yn)) / 3.14159265, vec3(0.0));\n"
+	"        sum_r += w * max(vec3(dot(cr, yr), dot(cg, yr), dot(cb, yr)) / 3.14159265, vec3(0.0));\n"
 	"        sun += w * pr.v[b + 6u];\n"
 	"        weights += w;\n"
 	"    }\n"
-	"    return weights > 1.0e-3 ? vec4(sum / weights, sun / weights) : vec4(-1.0);\n"
+	"    if (weights <= 1.0e-3)\n"
+	"        return false;\n"
+	"    at_n = vec4(sum / weights, sun / weights);\n"
+	"    at_r = sum_r / weights;\n"
+	"    return true;\n"
+	"}\n"
+	"/* the volume at p: its fine cascade, else its coarse one */\n"
+	"bool volume_at(vec3 p, vec3 n, vec3 r, out vec4 at_n, out vec3 at_r)\n"
+	"{\n"
+	"    if (cascade_at(job.bricks, job.counts.x, job.volume.x, p, n, r, at_n, at_r))\n"
+	"        return true;\n"
+	"    return cascade_at(job.coarse, job.counts.w, job.volume.y, p, n, r, at_n, at_r);\n"
+	"}\n"
+	"/* whether a moving object (this frame's, display.prism_rt's structure of\n"
+	"the objects drawn: its cutouts kept by their share of texels drawn) blocks\n"
+	"the ray */\n"
+	"bool objects_blocked(vec3 o, vec3 d, float t_max)\n"
+	"{\n"
+	"    if (job.objects == uvec2(0u))\n"
+	"        return false;\n"
+	"    rayQueryEXT q;\n"
+	"    rayQueryInitializeEXT(q, accelerationStructureEXT(job.objects), gl_RayFlagsTerminateOnFirstHitEXT, 12u, o, 0.02, d,\n"
+	"        t_max);\n"
+	"    while (rayQueryProceedEXT(q))\n"
+	"    {\n"
+	"        if (rayQueryGetIntersectionTypeEXT(q, false) != gl_RayQueryCandidateIntersectionTriangleEXT)\n"
+	"            continue;\n"
+	"        uint custom = rayQueryGetIntersectionInstanceCustomIndexEXT(q, false);\n"
+	"        float coverage = custom >= 1u ? uintBitsToFloat(Uints(job.object_table).v[(custom - 1u) * 4u + 3u]) : 1.0;\n"
+	"        if (rnd() < 0.75 * coverage)\n"
+	"            rayQueryConfirmIntersectionEXT(q);\n"
+	"    }\n"
+	"    return rayQueryGetIntersectionTypeEXT(q, true) != gl_RayQueryCommittedIntersectionNoneEXT;\n"
+	"}\n"
+	"/* the reflection probes (the bake's, in reachable space): the nearest few\n"
+	"to p whose boxes hold it, parallax-corrected along r, at the roughness's\n"
+	"level; -1 none */\n"
+	"vec3 reflection_at(vec3 p, vec3 r, float roughness, out float found)\n"
+	"{\n"
+	"    found = 0.0;\n"
+	"    uint count = job.more.x;\n"
+	"    if (count == 0u || job.reflections == uvec2(0u))\n"
+	"        return vec3(0.0);\n"
+	"    Floats pr = Floats(job.reflections);\n"
+	"    /* (a hashed grid of the probes, 8 world units a cell: each cell's 8\n"
+	"    nearest probes) */\n"
+	"    ivec3 cell = ivec3(floor(p / 8.0));\n"
+	"    uint entries = job.more.y;\n"
+	"    uint key = (uint(cell.x + 32768) & 2047u) | ((uint(cell.y + 32768) & 2047u) << 11u) |\n"
+	"        ((uint(cell.z + 32768) & 1023u) << 22u);\n"
+	"    uint h = hash_u(key ^ 0x2c1b3c6du) & (entries - 1u);\n"
+	"    Uints rt = Uints(job.reflection_table);\n"
+	"    int list = -1;\n"
+	"    for (uint probe = 0u; probe < 32u; probe++)\n"
+	"    {\n"
+	"        uint at = ((h + probe) & (entries - 1u)) * 10u;\n"
+	"        uint k = rt.v[at];\n"
+	"        if (k == 0u)\n"
+	"            break;\n"
+	"        if (k == key + 1u)\n"
+	"        {\n"
+	"            list = int(at);\n"
+	"            break;\n"
+	"        }\n"
+	"    }\n"
+	"    if (list < 0)\n"
+	"        return vec3(0.0);\n"
+	"    vec3 sum = vec3(0.0);\n"
+	"    float weights = 0.0;\n"
+	"    uint levels = job.more.z, side = job.more.w;\n"
+	"    float level = clamp(sqrt(roughness) * float(levels - 1u), 0.0, float(levels - 1u));\n"
+	"    for (uint k = 0u; k < 8u; k++)\n"
+	"    {\n"
+	"        uint i = rt.v[uint(list) + 2u + k];\n"
+	"        if (i == 0xffffffffu)\n"
+	"            break;\n"
+	"        /* (a probe: its place, its box's corners, its first texel) */\n"
+	"        uint at = i * 12u;\n"
+	"        vec3 c = vec3(pr.v[at], pr.v[at + 1u], pr.v[at + 2u]);\n"
+	"        vec3 lo = vec3(pr.v[at + 4u], pr.v[at + 5u], pr.v[at + 6u]);\n"
+	"        vec3 hi = vec3(pr.v[at + 8u], pr.v[at + 9u], pr.v[at + 10u]);\n"
+	"        if (any(lessThan(p, lo - 0.5)) || any(greaterThan(p, hi + 0.5)))\n"
+	"            continue;\n"
+	"        /* (parallax: the box's wall along r from p, seen from the probe) */\n"
+	"        vec3 rr = mix(r, vec3(1.0e-5), lessThan(abs(r), vec3(1.0e-5)));\n"
+	"        vec3 t1 = (hi - p) / rr, t2 = (lo - p) / rr;\n"
+	"        float tw = max(min(min(max(t1.x, t2.x), max(t1.y, t2.y)), max(t1.z, t2.z)), 0.0);\n"
+	"        vec3 d = normalize(p + r * tw - c);\n"
+	"        /* (the cube's face and texel) */\n"
+	"        vec3 a = abs(d);\n"
+	"        uint face;\n"
+	"        vec2 uv;\n"
+	"        if (a.x >= a.y && a.x >= a.z)\n"
+	"        {\n"
+	"            face = d.x > 0.0 ? 0u : 1u;\n"
+	"            uv = vec2(d.x > 0.0 ? -d.z : d.z, -d.y) / a.x;\n"
+	"        }\n"
+	"        else if (a.y >= a.z)\n"
+	"        {\n"
+	"            face = d.y > 0.0 ? 2u : 3u;\n"
+	"            uv = vec2(d.x, d.y > 0.0 ? d.z : -d.z) / a.y;\n"
+	"        }\n"
+	"        else\n"
+	"        {\n"
+	"            face = d.z > 0.0 ? 4u : 5u;\n"
+	"            uv = vec2(d.z > 0.0 ? d.x : -d.x, -d.y) / a.z;\n"
+	"        }\n"
+	"        vec3 l2 = vec3(0.0);\n"
+	"        for (int lv = 0; lv < 2; lv++)\n"
+	"        {\n"
+	"            uint li = min(uint(level) + uint(lv), levels - 1u);\n"
+	"            uint s_ = max(side >> li, 1u);\n"
+	"            uint first = floatBitsToUint(pr.v[at + 3u]);\n"
+	"            /* (the levels before li: 6 faces each) */\n"
+	"            uint offset = 0u;\n"
+	"            for (uint q = 0u; q < li; q++)\n"
+	"                offset += 6u * max(side >> q, 1u) * max(side >> q, 1u);\n"
+	"            /* (bilinear within the face, its edges clamped) */\n"
+	"            vec2 fx = clamp((uv * 0.5 + 0.5) * float(s_) - 0.5, vec2(0.0), vec2(float(s_) - 1.0));\n"
+	"            ivec2 t0 = ivec2(floor(fx)), t1 = min(t0 + 1, ivec2(int(s_) - 1));\n"
+	"            vec2 ff = fx - vec2(t0);\n"
+	"            uint fb = first + offset + face * s_ * s_;\n"
+	"            Uints rd = Uints(job.reflection_data);\n"
+	"            vec3 value = mix(mix(rgb9e5(rd.v[fb + uint(t0.y) * s_ + uint(t0.x)]), rgb9e5(rd.v[fb + uint(t0.y) * s_ + uint(t1.x)]), ff.x),\n"
+	"                mix(rgb9e5(rd.v[fb + uint(t1.y) * s_ + uint(t0.x)]), rgb9e5(rd.v[fb + uint(t1.y) * s_ + uint(t1.x)]), ff.x), ff.y);\n"
+	"            l2 += (lv == 0 ? 1.0 - fract(level) : fract(level)) * value;\n"
+	"        }\n"
+	"        float w = 1.0 / (0.25 + dot(p - c, p - c));\n"
+	"        sum += w * l2;\n"
+	"        weights += w;\n"
+	"    }\n"
+	"    if (weights <= 0.0)\n"
+	"        return vec3(0.0);\n"
+	"    found = 1.0;\n"
+	"    return sum / weights;\n"
+	"}\n"
+	"/* the analytic split sum of GGX's (Karis's fit): F0's scale and bias */\n"
+	"vec2 environment_brdf(float roughness, float nv)\n"
+	"{\n"
+	"    vec4 c0 = vec4(-1.0, -0.0275, -0.572, 0.022), c1 = vec4(1.0, 0.0425, 1.04, -0.04);\n"
+	"    vec4 r = roughness * c0 + c1;\n"
+	"    float a = min(r.x * r.x, exp2(-9.28 * nv)) * r.x + r.y;\n"
+	"    return vec2(-1.04, 1.04) * a + r.zw;\n"
+	"}\n"
+	"/* the dynamic lights (CE's: world_scene's, SCENE_LIGHTS' dynamic class): 4\n"
+	"vec4 each (3 used: the place and reach, the colour by intensity, the spot's\n"
+	"axis and cone's cosine, 2 a point), volume.z of them; CE's falloff,\n"
+	"1 - d^2/r^2 */\n"
+	"vec3 dynamic_at(vec3 p, vec3 n)\n"
+	"{\n"
+	"    uint count = uint(job.volume.z);\n"
+	"    vec3 sum = vec3(0.0);\n"
+	"    if (count == 0u || job.lights == uvec2(0u))\n"
+	"        return sum;\n"
+	"    Floats f = Floats(job.lights);\n"
+	"    for (uint i = 0u; i < count; i++)\n"
+	"    {\n"
+	"        uint at = i * 12u;\n"
+	"        vec3 to = vec3(f.v[at], f.v[at + 1u], f.v[at + 2u]) - p;\n"
+	"        float r = f.v[at + 3u], d2 = dot(to, to);\n"
+	"        if (r <= 0.0 || d2 >= r * r)\n"
+	"            continue;\n"
+	"        vec3 l = to * inversesqrt(max(d2, 1.0e-8));\n"
+	"        float c = dot(n, n) > 0.5 ? max(dot(n, l), 0.0) : 1.0;\n"
+	"        float cone = 1.0;\n"
+	"        vec4 axis = vec4(f.v[at + 8u], f.v[at + 9u], f.v[at + 10u], f.v[at + 11u]);\n"
+	"        if (axis.w < 1.5)\n"
+	"            cone = smoothstep(axis.w, mix(axis.w, 1.0, 0.2), dot(-l, axis.xyz));\n"
+	"        sum += vec3(f.v[at + 4u], f.v[at + 5u], f.v[at + 6u]) * (c * cone * (1.0 - d2 / (r * r)));\n"
+	"    }\n"
+	"    return sum;\n"
 	"}\n"
 	"void main()\n"
 	"{\n"
 	"    s = Scene(push.scene);\n"
 	"    job = Job(push.job);\n"
 	"    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);\n"
-	"    if (pixel.x >= int(job.counts.y) || pixel.y >= int(job.counts.z))\n"
+	"    uint width = job.counts.y, height = job.counts.z;\n"
+	"    if (pixel.x >= int(width) || pixel.y >= int(height))\n"
 	"        return;\n"
+	"    /* (the cutouts' stochastic shadows the same each frame: no flicker) */\n"
+	"    seed = hash_u(uint(pixel.x) * 1973u + uint(pixel.y) * 9277u);\n"
 	"    vec4 old = texelFetch(light_in, pixel, 0);\n"
+	"    vec4 base = texelFetch(base_in, pixel, 0);\n"
+	"    vec4 additions = texelFetch(additions_in, pixel, 0);\n"
 	"    uvec4 w = texelFetch(words, pixel, 0);\n"
 	"    uvec4 x = texelFetch(extras, pixel, 0);\n"
 	"    uint view = push.parameters.x;\n"
+	"    bool whole = (push.parameters.w & 2u) != 0u;\n"
+
+	"    /* (CE's own frame at the pixel: what the resolve would have made) */\n"
+	"    vec3 classic = old.rgb * base.rgb + additions.rgb;\n"
 	"    bool present = (w.w & 0x8000u) != 0u;\n"
 	"    uint instance = w.w >> 16;\n"
 	"    uint page = (x.z >> 17u) & 0x7fu;\n"
-	"    float ce_code = float(x.z >> 24u) / 255.0;\n"
 	"    bool has_normal = ((w.z >> 28u) & 8u) != 0u;\n"
 	"    vec3 n = has_normal ? unfold(unpackSnorm2x16(w.y)) : vec3(0.0);\n"
 	"    float distance = uintBitsToFloat(x.w);\n"
@@ -1331,11 +1813,13 @@ static const char raster_source[] =
 	"        2.0 * (float(pixel.y) + 0.5 - c.y) / max(c.w - c.y, 1.0) - 1.0);\n"
 	"    vec3 ray = job.camera[1].xyz + sxy.x * job.camera[2].xyz + sxy.y * job.camera[3].xyz;\n"
 	"    vec3 point = job.camera[0].xyz + distance * ray;\n"
-	"    vec3 facing_normal = has_normal ? n : -normalize(ray);\n"
+	"    vec3 eye_dir = -normalize(ray);\n"
+	"    vec3 facing_normal = has_normal ? n : eye_dir;\n"
 	"    if (dot(facing_normal, ray) > 0.0 && instance == 0u)\n"
 	"        facing_normal = -facing_normal;\n"
+	"    vec3 refl = reflect(-eye_dir, facing_normal);\n"
 	"    float gamma = (push.parameters.w & 1u) != 0u ? 2.2 : 1.0;\n"
-	"    vec3 lit = vec3(-1.0);\n"
+	"    vec3 lit = vec3(-1.0), lit_r = vec3(0.0);\n"
 	"    float sunv = -1.0, checker = -1.0;\n"
 	"    bool level = false;\n"
 	"    /* (the texels' view's reasons where no texel is found: no page, no\n"
@@ -1358,7 +1842,7 @@ static const char raster_source[] =
 	"            vec2 tx = ce * scale - 0.5;\n"
 	"            ivec2 a = ivec2(floor(tx));\n"
 	"            vec2 f = tx - vec2(a);\n"
-	"            vec3 sum = vec3(0.0);\n"
+	"            vec3 sum = vec3(0.0), sum_r = vec3(0.0);\n"
 	"            float weights = 0.0;\n"
 	"            for (int k = 0; k < 4; k++)\n"
 	"            {\n"
@@ -1372,13 +1856,17 @@ static const char raster_source[] =
 	"                vec3 kk = (dir.xyz - 0.5) * 4.0;\n"
 	"                float a0 = dir.w * 4.0 - 1.0;\n"
 	"                float factor = has_normal ? clamp(a0 + dot(kk, facing_normal), 0.0, 4.0) : 1.0;\n"
+	"                float factor_r = clamp(a0 + dot(kk, refl), 0.0, 4.0);\n"
 	"                float wk = (o.x == 1 ? f.x : 1.0 - f.x) * (o.y == 1 ? f.y : 1.0 - f.y);\n"
-	"                sum += wk * rgb9e5(tw.x) * factor;\n"
+	"                vec3 e = rgb9e5(tw.x);\n"
+	"                sum += wk * e * factor;\n"
+	"                sum_r += wk * e * factor_r;\n"
 	"                weights += wk;\n"
 	"            }\n"
 	"            if (weights > 1.0e-4)\n"
 	"            {\n"
 	"                lit = sum / weights;\n"
+	"                lit_r = sum_r / weights;\n"
 	"                sunv = sun_of(vp, ce * scale);\n"
 	"                checker = float((a.x + a.y) & 1);\n"
 	"                level = true;\n"
@@ -1387,80 +1875,128 @@ static const char raster_source[] =
 	"    }\n"
 	"    if (present && distance > 0.0 && ((!level && instance != 0u) || view == 15u))\n"
 	"    {\n"
-	"        vec4 v = volume_at(point + facing_normal * 0.05, facing_normal);\n"
-	"        if (v.x >= 0.0)\n"
+	"        vec4 v;\n"
+	"        vec3 vr;\n"
+	"        if (volume_at(point + facing_normal * 0.05, facing_normal, refl, v, vr))\n"
 	"        {\n"
 	"            if (view == 15u || !level)\n"
 	"            {\n"
 	"                lit = v.rgb;\n"
+	"                lit_r = vr;\n"
 	"                sunv = v.w;\n"
+	"                /* (an object's sun: its shadow traced against the level and\n"
+	"                the static scenery, the volume's visibility being coarse) */\n"
+	"                if (!level && s.sun.w > 0.0 && dot(facing_normal, s.sun.xyz) > 0.0)\n"
+	"                    sunv = blocked(point + facing_normal * 0.04, s.sun.xyz, 2000.0) ? 0.0 : 1.0;\n"
 	"            }\n"
 	"        }\n"
 	"        else if (view == 15u)\n"
 	"            lit = vec3(-1.0);\n"
 	"    }\n"
-	"    vec3 result = old.rgb;\n"
+	"    vec3 result = whole ? classic : old.rgb;\n"
+	"    vec3 raster_parts[3] = vec3[3](vec3(0.0), vec3(0.0), vec3(0.0));\n"
 	"    if (lit.x >= 0.0)\n"
 	"    {\n"
 	"        float facing = max(dot(facing_normal, s.sun.xyz), 0.0);\n"
-	"        vec3 sunlight = s.sun.w > 0.0 && sunv > 0.0 ? s.rig[0].rgb * facing * sunv : vec3(0.0);\n"
-	"        vec3 emissive = vec3(unpackHalf2x16(x.y), unpackHalf2x16(x.z & 0xffffu).x);\n"
-	"        vec3 total = lit + sunlight;\n"
-	"        vec3 encoded = gamma > 1.001 ? pow(max(total, vec3(0.0)), vec3(1.0 / gamma)) : max(total, vec3(0.0));\n"
-	"        result = encoded + (instance == 0u ? emissive : vec3(0.0));\n"
-	"        /* (an object's pixel: CE draws it whole into the light target, its\n"
-	"        base target white, so its light goes in by its own base colour,\n"
-	"        the G-buffer's) */\n"
-	"        if (instance != 0u)\n"
-	"            result = encoded * unpackUnorm4x8(w.x).rgb;\n"
-	"        /* (a level's pixel: what CE drew over its lightmap pass's light, the\n"
-	"        light target's pixel against that light whole (the G-buffer's), kept:\n"
-	"        the objects' shadows darken the baked light by their share, the\n"
-	"        dynamic lights add theirs) */\n"
-	"        if (instance == 0u && ce_code > 0.0)\n"
+	"        /* (the moving objects' sun shadows: traced where the frame has their\n"
+	"        structure) */\n"
+	"        if (s.sun.w > 0.0 && sunv > 0.0 && facing > 0.0 && view == 0u &&\n"
+	"            objects_blocked(point + facing_normal * 0.04, s.sun.xyz, 2000.0))\n"
+	"            sunv = 0.0;\n"
+	"        /* (a level's pixel: the moving objects' shadows CE drew over its\n"
+	"        lightmap pass (its projected shadow maps), their share of the\n"
+	"        light the G-buffer says that pass gave, taken from the sun's) */\n"
+	"        float ce_code = float(x.z >> 24u) / 255.0;\n"
+	"        if (instance == 0u && level && ce_code > 0.0 && view == 0u)\n"
 	"        {\n"
-	"            float ce_light = ce_code * ce_code - luma(emissive);\n"
-	"            vec3 drawn = max(old.rgb - emissive, vec3(0.0));\n"
-	"            float drawn_l = luma(drawn);\n"
-	"            if (ce_light > 0.01)\n"
+	"            vec3 em = vec3(unpackHalf2x16(x.y), unpackHalf2x16(x.z & 0xffffu).x);\n"
+	"            float ce_light = ce_code * ce_code - luma(em);\n"
+	"            float drawn = luma(max(old.rgb - em, vec3(0.0)));\n"
+	"            if (ce_light > 0.02 && drawn < 0.97 * ce_light)\n"
+	"                sunv *= clamp(drawn / ce_light, 0.0, 1.0);\n"
+	"        }\n"
+	"        float v = s.sun.w > 0.0 ? max(sunv, 0.0) : 0.0;\n"
+	"        vec3 sunlight = s.rig[0].rgb * facing * v;\n"
+	"        vec3 emissive = vec3(unpackHalf2x16(x.y), unpackHalf2x16(x.z & 0xffffu).x);\n"
+	"        vec3 dynamic = dynamic_at(point + facing_normal * 0.02, facing_normal);\n"
+	"        vec3 diffuse = max(lit + sunlight, vec3(0.0));\n"
+	"        vec3 encoded = gamma > 1.001 ? pow(diffuse, vec3(1.0 / gamma)) : diffuse;\n"
+	"        if (whole)\n"
+	"        {\n"
+	"            /* (the pixel's material: CE's base colour (the level's from its\n"
+	"            texture pass, an object's the G-buffer's), the table's roughness,\n"
+	"            metalness and specular; its light diffuse and specular, energy\n"
+	"            conserving: Fresnel's share of the light reflected, the rest\n"
+	"            diffuse) */\n"
+	"            vec3 albedo = instance == 0u ? base.rgb : unpackUnorm4x8(w.x).rgb;\n"
+	"            vec4 m = unpackUnorm4x8(w.z);\n"
+	"            float roughness = clamp(m.x, 0.04, 1.0), metal = m.y;\n"
+	"            /* (CE's base maps are diffuse colours, metal or not: metalness\n"
+	"            tints the reflection half way to the base colour, and the\n"
+	"            diffuse keeps what the reflection does not take) */\n"
+	"            vec3 f0 = mix(vec3(0.08 * m.z), albedo, 0.5 * metal);\n"
+	"            float nv = clamp(dot(facing_normal, eye_dir), 1.0e-3, 1.0);\n"
+	"            vec2 ab = environment_brdf(roughness, nv);\n"
+	"            vec3 spec_share = f0 * ab.x + ab.y;\n"
+	"            /* (the light the reflection sees: the probes', else the bake's\n"
+	"            light from the reflection's side) */\n"
+	"            float found;\n"
+	"            vec3 reflected = reflection_at(point + facing_normal * 0.05, refl, roughness, found);\n"
+	"            /* (no probe: the volume's light from the reflection's side, its\n"
+	"            SH converged and smooth; else the pixel's own light) */\n"
+	"            if (found <= 0.0 && level)\n"
 	"            {\n"
-	"                float share = clamp(drawn_l / ce_light, 0.0, 1.0);\n"
-	"                vec3 added = drawn_l > ce_light ? drawn * (1.0 - ce_light / drawn_l) : vec3(0.0);\n"
-	"                result = encoded * share + added + emissive;\n"
+	"                vec4 vn;\n"
+	"                vec3 vr;\n"
+	"                lit_r = volume_at(point + facing_normal * 0.05, facing_normal, refl, vn, vr) ? vr : lit;\n"
 	"            }\n"
+	"            if (found <= 0.0)\n"
+	"                reflected = gamma > 1.001 ? pow(max(lit_r, vec3(0.0)), vec3(1.0 / gamma)) : max(lit_r, vec3(0.0));\n"
+	"            vec3 specular = reflected * spec_share;\n"
+	"            /* (the sun's highlight: GGX, Smith's visibility, Schlick's\n"
+	"            Fresnel; the sun's irradiance pi times the rig's) */\n"
+	"            if (v > 0.0 && facing > 0.0)\n"
+	"            {\n"
+	"                vec3 hv = normalize(s.sun.xyz + eye_dir);\n"
+	"                float nh = max(dot(facing_normal, hv), 0.0), vh = max(dot(eye_dir, hv), 0.0);\n"
+	"                float a = roughness * roughness, a2 = a * a;\n"
+	"                float dd = nh * nh * (a2 - 1.0) + 1.0;\n"
+	"                float distribution = a2 / (3.14159265 * dd * dd);\n"
+	"                float visibility = 0.5 / max(facing * (nv * (1.0 - a) + a) + nv * (facing * (1.0 - a) + a), 1.0e-4);\n"
+	"                vec3 fresnel = f0 + (1.0 - f0) * pow(1.0 - vh, 5.0);\n"
+	"                specular += min(distribution * visibility, 64.0) * fresnel * facing * v * 3.14159265 * s.rig[0].rgb;\n"
+	"            }\n"
+	"            vec3 kd = albedo * (1.0 - spec_share);\n"
+	"            result = kd * (encoded + dynamic) + specular + (instance == 0u ? emissive * base.rgb : emissive);\n"
+	"            raster_parts[0] = albedo;\n"
+	"            raster_parts[1] = specular;\n"
+	"            raster_parts[2] = kd * (encoded + dynamic);\n"
+	"        }\n"
+	"        else\n"
+	"        {\n"
+	"            result = encoded + dynamic + (instance == 0u ? emissive : vec3(0.0));\n"
+	"            if (instance != 0u)\n"
+	"                result = (encoded + dynamic) * unpackUnorm4x8(w.x).rgb + emissive;\n"
 	"        }\n"
 	"        /* (the views: the light less the sun's, in CE's encoding: the gates\n"
 	"        put the sun's back by the pixel's normal and the visibility view) */\n"
 	"        if (view == 12u || view == 15u)\n"
 	"            result = gamma > 1.001 ? pow(max(lit, vec3(0.0)), vec3(1.0 / gamma)) : max(lit, vec3(0.0));\n"
+	"        else if (view == 16u)\n"
+	"            result = encoded;\n"
 	"        else if (view == 13u)\n"
 	"            result = vec3(max(sunv, 0.0) * (facing > 0.0 ? 1.0 : 0.25));\n"
 	"    }\n"
-	"    else if (view >= 12u && view <= 15u)\n"
+	"    else if (view >= 12u && view <= 19u)\n"
 	"        result = present ? vec3(0.5, 0.0, 0.0) : vec3(0.0);\n"
-	"    if (view == 14u && reason == 2)\n"
-	"    {\n"
-	"        /* (debug: the first page whose chart map has the coordinates) */\n"
-	"        Uints pg = Uints(job.pages);\n"
-	"        Uints cm = Uints(job.charts);\n"
-	"        vec2 uv = unpackUnorm2x16(w.x);\n"
-	"        int found = -1;\n"
-	"        for (uint q = 0u; q < push.parameters.y && found < 0; q++)\n"
-	"        {\n"
-	"            uint offset = pg.v[q * 4u], pw = pg.v[q * 4u + 1u], ph = pg.v[q * 4u + 2u];\n"
-	"            ivec2 cell = clamp(ivec2(floor(uv * vec2(pw, ph))), ivec2(0), ivec2(pw, ph) - 1);\n"
-	"            uint ci = offset + uint(cell.y) * pw + uint(cell.x);\n"
-	"            if (((cm.v[ci >> 1u] >> ((ci & 1u) * 16u)) & 0xffffu) != 0u)\n"
-	"                found = int(q);\n"
-	"        }\n"
-	"        imageStore(light, pixel, vec4(float(page) / 32.0, found >= 0 ? float(found + 1) / 32.0 : 0.0, uv.x, old.a));\n"
-	"        return;\n"
-	"    }\n"
+	"    /* (the frame's parts: its albedo, its specular light, its diffuse) */\n"
+	"    if (view >= 17u && view <= 19u && lit.x >= 0.0)\n"
+	"        result = raster_parts[view - 17u];\n"
 	"    if (view == 14u)\n"
 	"        result = checker >= 0.0 ? vec3(0.2 + 0.6 * checker) : !present ? vec3(0.0) : reason == 1 ?\n"
 	"            vec3(0.8, 0.0, 0.0) : reason == 2 ? vec3(0.8, 0.0, 0.8) : reason == 3 ? vec3(0.8, 0.8, 0.0) :\n"
 	"            vec3(0.0, 0.3, 0.8);\n"
 	"    if (any(isnan(result)) || any(isinf(result)))\n"
-	"        result = old.rgb;\n"
-	"    imageStore(light, pixel, vec4(result, old.a));\n"
+	"        result = whole ? classic : old.rgb;\n"
+	"    imageStore(light, pixel, vec4(result, whole ? additions.a : old.a));\n"
 	"}\n";

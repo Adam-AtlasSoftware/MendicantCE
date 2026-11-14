@@ -197,7 +197,9 @@ static void settings_read(
 		!strcmp(value, "roughness") ? 6 : !strcmp(value, "metal") ? 7 : !strcmp(value, "material_source") ? 8 :
 		!strcmp(value, "instance") ? 9 : !strcmp(value, "motion") ? 10 : !strcmp(value, "emissive") ? 11 :
 		!strcmp(value, "bake_light") ? 12 : !strcmp(value, "bake_sun") ? 13 : !strcmp(value, "bake_texels") ? 14 :
-		!strcmp(value, "bake_volume") ? 15 : 0;
+		!strcmp(value, "bake_volume") ? 15 : !strcmp(value, "bake_total") ? 16 :
+		!strcmp(value, "raster_albedo") ? 17 : !strcmp(value, "raster_specular") ? 18 :
+		!strcmp(value, "raster_diffuse") ? 19 : 0;
 	/* (the bake's views: Raster's alone) */
 	if (prism_deferred.view >= 12 && !prism_deferred.raster)
 	{
