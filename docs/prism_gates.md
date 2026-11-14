@@ -157,6 +157,41 @@ reuse): a sunlit texel needs a median of about 400 samples (95th percentile 20,0
 millions. The baker therefore needs far better lamp sampling than today's (the design's light-importance grid with
 baked visibility) for the `max` bake to finish.
 
+## Reproducibility, as measured
+
+Two full captures by the same tree (M0's; `gate.py repro`), G1 to G7 on the RTX 3070 Ti and S1 to S3 on the RTX
+2060, each saved frame and reference file compared byte for byte:
+
+| What | G1 to G7 alike | S1 to S3 alike |
+| --- | --- | --- |
+| RT off, the moves | 683 of 760 frames (G1, G2, G3, G4 and G6 all; G5 63 of 80; G7 60 of 120) | 240 of 240 |
+| RT off, the still at each probe | 18 of 21 | 11 of 12 |
+| The references' linear files (`p<n>.exr`) | 18 of 21 (all but G3's three) | 9 of 12 (all but S1's three) |
+| The references' frames (`p<n>_ref.png`) | 15 of 21 | 7 of 12 |
+| Path traced, the moves (live, denoised) | 90 of 760 | 61 of 240 |
+| Raw, the moves (live, the denoiser off) | 106 of 760 | 80 of 240 |
+
+What the harness fixed (each found by a capture differing from its twin, and checked by the determinism log):
+commands at path frames, which fall in different ticks from run to run (now by the clock: the path's `start_tick`
+and tick lines); particles and the frames' randomness; MENDICANT AI's models; c40's opening played with its AI.
+
+What still differs, and why:
+
+- **The PRISM asset streams.** Where a move uncovers a room, a10's (G5) RT-off frames show the stock texture cache's
+  or the remodel's not-yet-read data for a few frames (blocks of a texture through a door window); c40's hologram
+  ring (G7) animates by a clock of the frames drawn since the map loaded. `display.prism_prefetch`, no texture fade
+  and the longest texture wait do not change it (a10: 45 to 48 of 80 frames alike).
+- **The traced objects.** G3's and S1's references differ in the sun's visibility over regions of the ground: the
+  objects in the acceleration structure differ (the replacement meshes are traced while resident and under the budget, both a
+  matter of timing).
+- **The live path tracer.** The radiance cache claims its cells with atomic compare-and-swap, in whatever order the
+  GPU runs, and a transient as the mode turns on decays through the temporal history: without the cache (G1, Rat Race,
+  on the RTX 2060), the moves part only in their first 24 steps.
+
+So the byte-for-byte check covers RT off and the references of the scenes above; the live path-traced frames are
+judged by the metrics only, until M1's deferred core replaces the tracer's inputs with records it can make
+deterministic (the materials resolved at load, the instances by their ids, the cache claimed in a fixed order).
+
 ## M1: the deferred core's equivalence
 
 `display.lighting` `ce_deferred` is the design's "CE light, deferred" diagnostic (`port/linux/game/prism_deferred.c`):
