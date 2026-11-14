@@ -167,6 +167,7 @@ symbols in this file:
 #include "rasterizer/xbox/rasterizer_xbox_pixel_shader.h"
 #include "rasterizer_xbox_draw_primitives.h"
 #include "rasterizer_xbox_internal.h"
+#include "prism_deferred.h" /* port: port/linux/game/prism_deferred.c */
 
 /* ---------- constants */
 
@@ -519,6 +520,9 @@ void _rasterizer_environment_lightmap_draw(
 		"c:\\halo\\SOURCE\\rasterizer\\xbox\\rasterizer_xbox_environment.c",
 		135,
 		global_d3d_device);
+	/* port: display.lighting "ce_deferred"'s G-buffer pass: the draw's
+	material (port/linux/game/prism_deferred.c) */
+	prism_deferred_shader(shader);
 
 	if (rasterizer_debug_options.drawing_mode == _rasterizer_drawing_mode_vectors)
 	{

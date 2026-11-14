@@ -162,6 +162,8 @@ extern short global_screenshot_count;
 boolean render_world_ao_prepass = FALSE;
 /* port: display.prism_shadows "cascaded"'s pass is being drawn (render_window) */
 boolean render_prism_shadow_pass = FALSE;
+/* port: display.lighting "ce_deferred"'s G-buffer pass (render.h) */
+boolean render_gbuffer_pass = FALSE;
 /* port: port/linux/game/prism_shadows.c */
 boolean prism_shadows_wanted(void);
 #include "prism_deferred.h" /* port: port/linux/game/prism_deferred.c */
@@ -415,6 +417,7 @@ static void render_window(
 	boolean prism_deferred; /* port: (below) */
 
 	profile_render_window_start(TRUE);
+	prism_deferred = FALSE; /* port: (below) */
 	render.scene_index++;
 	memset(&parameters, 0, sizeof(parameters));
 
@@ -501,6 +504,28 @@ static void render_window(
 			render_prism_shadow_pass = FALSE;
 			prism_shadows_pass_end();
 		}
+		/* port: display.lighting "ce_deferred": the G-buffer pass (walk 1),
+		the window's opaque surfaces drawn first into the G-buffer alone, each
+		draw with its material and instance (port/linux/game/prism_deferred.c),
+		as display.ambient_occlusion "world"'s pre-pass draws them (their
+		transparent parts, widgets and fog left for below; not in the VR mode's
+		eye or scope passes, nor a mirror's view) */
+		prism_deferred = rasterizer_target == _render_target_primary && !rasterizer_camera->mirrored &&
+#ifdef HALO_VR
+			!render_vr_eye_pass && !render_vr_scope_pass &&
+#endif
+			prism_deferred_wanted();
+		if (prism_deferred)
+		{
+			prism_deferred_gbuffer_begin();
+			render_gbuffer_pass = TRUE;
+			render_objects();
+			render_enumerate_models();
+			structure_render_preprocess();
+			structure_render_lightmaps();
+			render_gbuffer_pass = FALSE;
+			prism_deferred_gbuffer_end();
+		}
 		world_ao_prepassed = FALSE;
 		if (rasterizer_target == _render_target_primary && !rasterizer_camera->mirrored &&
 #ifdef HALO_VR
@@ -544,7 +569,10 @@ static void render_window(
 				render_world_ao_prepass = TRUE;
 				render_objects();
 				render_enumerate_models();
-				structure_render_preprocess();
+				if (!prism_deferred) /* port: (once: the G-buffer pass's, above) */
+				{
+					structure_render_preprocess();
+				}
 				structure_render_lightmaps();
 				render_world_ao_prepass = FALSE;
 				world_ao_prepass_end(
@@ -558,7 +586,7 @@ static void render_window(
 		render_objects();
 		/* port: and through every model's parts */
 		render_enumerate_models();
-		if (!world_ao_prepassed)
+		if (!world_ao_prepassed && !prism_deferred) /* port: (or the G-buffer pass's, above) */
 		{
 			structure_render_preprocess();
 		}
@@ -609,11 +637,6 @@ static void render_window(
 		passes into the additions', and the frame put together from them
 		before the transparent geometry (port/linux/game/prism_deferred.c; not
 		in the VR mode's eye or scope passes, nor a mirror's view) */
-		prism_deferred = rasterizer_target == _render_target_primary && !rasterizer_camera->mirrored &&
-#ifdef HALO_VR
-			!render_vr_eye_pass && !render_vr_scope_pass &&
-#endif
-			prism_deferred_wanted();
 		if (prism_deferred)
 		{
 			prism_deferred_phase(_prism_deferred_base);

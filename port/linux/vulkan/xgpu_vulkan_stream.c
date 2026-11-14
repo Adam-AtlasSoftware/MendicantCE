@@ -161,6 +161,9 @@ struct variant
 	uint8_t border[4];
 	/* (display.prism_shadows "cascaded": a caster's shadow twin) */
 	uint8_t foveated, shadow;
+	/* (display.lighting "ce_deferred": a G-buffer twin, an object's or the
+	level's: XGPU_SPIRV_GBUFFER_*, 0 none) */
+	uint8_t gbuffer, unused[3];
 };
 
 /* the most world pipelines waiting for their shaders, and the most made a
@@ -442,7 +445,44 @@ static struct
 	uint32_t width, height;
 	uint8_t format;
 	int refused;
+	/* after a resolve with a view (debug.gbuffer_view): nothing more drawn
+	into the colour target this frame */
+	int hold;
 } deferred;
+
+/* display.lighting "ce_deferred"'s G-buffer pass (xgpu_stream.h's
+GBUFFER_BEGIN): between its begin and end, each opaque draw's G-buffer
+twin (xgpu_stream_gbuffer_twin) drawn into the G-buffer's words and a depth
+target of their own, the colour target's size, every other draw and clear
+skipped; the material table (SCENE_MATERIAL, each material resolved at its
+automatic tier as it arrives) and the draws' material and instance
+(GBUFFER_DRAW), which their uniforms carry */
+#define GBUFFER_MATERIALS 4096
+struct gbuffer_material
+{
+	uint8_t known, family, model, flags;
+	float roughness, metal, specular;
+};
+static struct
+{
+	/* in the pass (its draws skipped, or drawn where ready: its targets
+	made), and drawn for the frame */
+	int active, ready, drawn;
+	/* the colour target it was drawn for (the window's) */
+	uint32_t color;
+	struct xgpu_vulkan_image *words, *depth;
+	uint32_t width, height;
+	struct xgpu_stream_pipeline_define *definitions;
+	struct stream_pipeline *entries;
+	/* the twin drawn now (draw_pipeline's), and its kind */
+	struct stream_pipeline *drawing;
+	uint8_t kind;
+	/* GBUFFER_DRAW's, and the uniforms' last made of them */
+	uint32_t material, instance, flags;
+	uint32_t uniform_key[2];
+	struct gbuffer_material materials[GBUFFER_MATERIALS];
+	uint32_t material_count, twins, refused;
+} gbuffer;
 
 static double preparation_start(void)
 {
@@ -722,6 +762,12 @@ static void targets_bind(void)
 		xgpu_vulkan_set_target_views(NULL, shadow.atlases[shadow.structure], 0, 1);
 		return;
 	}
+	/* (display.lighting "ce_deferred"'s G-buffer pass: its words and depth) */
+	if (gbuffer.active && gbuffer.ready)
+	{
+		xgpu_vulkan_set_target_views(gbuffer.words, gbuffer.depth, 0, 1);
+		return;
+	}
 	/* (display.lighting "ce_deferred"'s phases: the base or the additions in
 	the colour target's place) */
 	if (deferred.phase && stream.color == deferred.color && !stream.samples)
@@ -788,8 +834,10 @@ static void stream_clear(void *context, const struct xgpu_stream_clear *record)
 	uint64_t before;
 
 	(void)context;
-	/* (none in the pre-pass, nor the sun's shadows' pass) */
-	if (prepass.active || shadow.active)
+	/* (none in the pre-pass, nor the sun's shadows' pass, nor
+	display.lighting "ce_deferred"'s G-buffer pass; none into the window
+	after the resolve drew a view) */
+	if (prepass.active || shadow.active || gbuffer.active || (deferred.hold && stream.color == deferred.color))
 		return;
 	if (target_get(stream.color))
 		target_get(stream.color)->written++;
@@ -823,7 +871,7 @@ static void stream_clear_target(void *context, const struct xgpu_stream_clear_ta
 	int32_t whole[1][4];
 
 	(void)context;
-	if (!target || prepass.active || shadow.active)
+	if (!target || prepass.active || shadow.active || gbuffer.active)
 		return;
 	target->written++;
 	/* (not while preparing, as stream_clear) */
@@ -1606,7 +1654,19 @@ static int pipeline_shaders(struct stream_pipeline *entry, const struct xgpu_str
 	light handed on apart) */
 	model.split = key->lighting == _lighting_model_split;
 	lighting = key->lighting == _lighting_none ? NULL : key->lighting == _lighting_environment ? &environment : &model;
+	/* (display.lighting "ce_deferred"'s G-buffer twin: lit where it is not,
+	for the world normal alone: the level's lightmap pass by its packed
+	normal, as XGPU_LIGHTING_ENVIRONMENT; a model by its program's lighting) */
+	if (variant->gbuffer && !lighting)
+	{
+		if (variant->gbuffer == XGPU_SPIRV_GBUFFER_LEVEL && !key->immediate && (key->packed_attributes & 0xe) == 0xe)
+			lighting = &environment;
+		else if (variant->gbuffer == XGPU_SPIRV_GBUFFER_OBJECT && lighting_record)
+			lighting = &model;
+	}
 	memset(&options, 0, sizeof(options));
+	options.gbuffer = variant->gbuffer;
+	options.gbuffer_normal = variant->gbuffer && lighting != NULL;
 	memcpy(options.border, variant->border, sizeof(options.border));
 	options.multiview = key->views;
 	options.foveated = variant->foveated;
@@ -1626,8 +1686,9 @@ static int pipeline_shaders(struct stream_pipeline *entry, const struct xgpu_str
 	entry->inputs = (uint16_t)xgpu_spirv_vertex_inputs(program, lighting);
 	if (xgpu_spirv_vertex_shader(program, packed, integers, lighting, &options, &module))
 	{
-		snprintf(name, sizeof(name), "vs%08x%08x_%lx_%lx_%u_view%u_fovea%u%s", (unsigned)(hash >> 32), (unsigned)hash,
-			packed, integers, key->lighting, key->views, variant->foveated, variant->shadow ? "_shadow" : "");
+		snprintf(name, sizeof(name), "vs%08x%08x_%lx_%lx_%u_view%u_fovea%u%s%s", (unsigned)(hash >> 32), (unsigned)hash,
+			packed, integers, key->lighting, key->views, variant->foveated, variant->shadow ? "_shadow" : "",
+			variant->gbuffer ? "_gbuffer" : "");
 		shader_dump(name, &module);
 		entry->vertex_shader = xgpu_vulkan_shader(module.words, module.count);
 		free(module.words);
@@ -1648,9 +1709,9 @@ static int pipeline_shaders(struct stream_pipeline *entry, const struct xgpu_str
 
 	if (xgpu_spirv_pixel_shader(&pixel, &options, &module))
 	{
-		snprintf(name, sizeof(name), "ps_%08x_%02x%02x%02x%02x_fovea%u_effect%u%u", bytes_hash(&definition->pixel_program,
+		snprintf(name, sizeof(name), "ps_%08x_%02x%02x%02x%02x_fovea%u_effect%u%u_g%u", bytes_hash(&definition->pixel_program,
 			sizeof(definition->pixel_program)), options.border[0], options.border[1], options.border[2], options.border[3],
-			variant->foveated, (unsigned)options.effect, (unsigned)options.effect_fade);
+			variant->foveated, (unsigned)options.effect, (unsigned)options.effect_fade, (unsigned)variant->gbuffer);
 		shader_dump(name, &module);
 		entry->pixel_shader = xgpu_vulkan_shader(module.words, module.count);
 		free(module.words);
@@ -1842,6 +1903,129 @@ static int effect_views(const struct xgpu_spirv_uniforms *to, const float projec
 #endif
 }
 
+/* display.lighting "ce_deferred": the automatic tier's priors (design
+section 5.5) by CE's material type (game_globals.h's 33, in order): the
+roughness, and metal (1) or a dielectric (0) */
+static const struct
+{
+	float roughness;
+	uint8_t metal;
+} gbuffer_priors[] =
+{
+	{ 0.90f, 0 } /* dirt */, { 0.85f, 0 } /* sand */, { 0.75f, 0 } /* stone */, { 0.60f, 0 } /* snow */,
+	{ 0.70f, 0 } /* wood */, { 0.45f, 1 } /* hollow metal */, { 0.40f, 1 } /* thin metal */,
+	{ 0.50f, 1 } /* thick metal */, { 0.80f, 0 } /* rubber */, { 0.10f, 0 } /* glass */,
+	{ 0.30f, 0 } /* force field */, { 0.70f, 0 } /* grunt */, { 0.45f, 1 } /* hunter armor */,
+	{ 0.70f, 0 } /* hunter skin */, { 0.50f, 0 } /* elite */, { 0.70f, 0 } /* jackal */,
+	{ 0.30f, 0 } /* jackal energy shield */, { 0.70f, 0 } /* engineer */, { 0.30f, 0 } /* engineer force field */,
+	{ 0.65f, 0 } /* flood combat form */, { 0.60f, 0 } /* flood carrier form */, { 0.40f, 1 } /* cyborg */,
+	{ 0.30f, 0 } /* cyborg energy shield */, { 0.50f, 0 } /* armored human */, { 0.60f, 0 } /* human */,
+	{ 0.40f, 1 } /* sentinel */, { 0.35f, 1 } /* monitor */, { 0.50f, 0 } /* plastic */, { 0.05f, 0 } /* water */,
+	{ 0.70f, 0 } /* leaves */, { 0.30f, 0 } /* elite energy shield */, { 0.25f, 0 } /* ice */,
+	{ 0.30f, 0 } /* hunter shield */,
+};
+
+/* a material resolved at its automatic tier as it arrives: the material
+type's prior, smoother where CE's specular is brighter (senv's specular
+brightness, its reflection's), metal only where the type is metal and CE
+reflected it; the model by the family and flags (foliage where alpha tested
+and two-sided or leaves, subsurface where soso's translucency is set,
+emissive where it is a light card: radiosity power past 0) */
+static void stream_scene_material(void *context, const struct xgpu_stream_scene_material *record)
+{
+	struct gbuffer_material *material;
+	float roughness = 0.6f, specular = 0.5f, reflection;
+	uint8_t metal = 0;
+
+	(void)context;
+	if (!record->material || record->material >= GBUFFER_MATERIALS)
+		return;
+	/* (a map's set starts again at 1) */
+	if (record->material == 1)
+	{
+		memset(gbuffer.materials, 0, sizeof(gbuffer.materials));
+		gbuffer.material_count = 0;
+	}
+	material = &gbuffer.materials[record->material];
+	memset(material, 0, sizeof(*material));
+	if (record->material_type < sizeof(gbuffer_priors) / sizeof(gbuffer_priors[0]))
+	{
+		roughness = gbuffer_priors[record->material_type].roughness;
+		metal = gbuffer_priors[record->material_type].metal;
+	}
+	reflection = record->scalars[XGPU_SCENE_SCALAR_REFLECTION_PERPENDICULAR] >
+		record->scalars[XGPU_SCENE_SCALAR_REFLECTION_PARALLEL] ?
+		record->scalars[XGPU_SCENE_SCALAR_REFLECTION_PERPENDICULAR] :
+		record->scalars[XGPU_SCENE_SCALAR_REFLECTION_PARALLEL];
+	if (record->family == XGPU_SCENE_FAMILY_SENV)
+	{
+		float brightness = record->scalars[XGPU_SCENE_SCALAR_SPECULAR_BRIGHTNESS];
+
+		brightness = brightness < 0.0f ? 0.0f : brightness > 1.0f ? 1.0f : brightness;
+		roughness *= 1.0f - 0.3f * brightness;
+		specular = 0.5f + 0.25f * brightness;
+		if (reflection <= 0.0f)
+			metal = 0;
+	}
+	material->roughness = roughness;
+	material->metal = metal ? 1.0f : 0.0f;
+	material->specular = specular;
+	material->family = (uint8_t)record->family;
+	material->model = XGPU_GBUFFER_MODEL_OPAQUE;
+	if (record->scalars[XGPU_SCENE_SCALAR_RADIOSITY_POWER] > 0.0f)
+		material->model = XGPU_GBUFFER_MODEL_EMISSIVE;
+	else if ((record->flags & XGPU_SCENE_MATERIAL_FLAG_ALPHA_TESTED) &&
+		((record->flags & XGPU_SCENE_MATERIAL_FLAG_TWO_SIDED) || record->material_type == 29))
+		material->model = XGPU_GBUFFER_MODEL_FOLIAGE;
+	else if (record->family == XGPU_SCENE_FAMILY_SOSO && record->scalars[XGPU_SCENE_SCALAR_TRANSLUCENCY] > 0.0f)
+		material->model = XGPU_GBUFFER_MODEL_SUBSURFACE;
+	material->flags = (record->flags & XGPU_SCENE_MATERIAL_FLAG_ALPHA_TESTED) ? XGPU_GBUFFER_FLAG_ALPHA_TESTED : 0;
+	material->known = 1;
+	if (record->material > gbuffer.material_count)
+		gbuffer.material_count = record->material;
+}
+
+static void stream_gbuffer_draw(void *context, const struct xgpu_stream_gbuffer_draw *record)
+{
+	(void)context;
+	gbuffer.material = record->material;
+	gbuffer.instance = record->instance;
+	gbuffer.flags = record->flags;
+}
+
+/* the G-buffer twin's uniforms' fourth word, low and high halves: the
+material, its tier and present, and the instance */
+static void gbuffer_key(uint32_t key[2], const struct gbuffer_material **material)
+{
+	const struct gbuffer_material *found = gbuffer.material && gbuffer.material < GBUFFER_MATERIALS &&
+		gbuffer.materials[gbuffer.material].known ? &gbuffer.materials[gbuffer.material] : NULL;
+	uint32_t tier = !found ? XGPU_GBUFFER_TIER_NONE : stream.definition && stream.definition->key.pixel.material_pbr ?
+		XGPU_GBUFFER_TIER_MOD : XGPU_GBUFFER_TIER_AUTO;
+
+	key[0] = (gbuffer.material & 0xfffu) | (tier << 12) | XGPU_GBUFFER_PRESENT;
+	key[1] = gbuffer.instance & 0xffffu;
+	if (material)
+		*material = found;
+}
+
+static void gbuffer_uniforms(float uniforms[2][4])
+{
+	const struct gbuffer_material *material;
+	uint32_t key[2], flags;
+
+	gbuffer_key(key, &material);
+	flags = (gbuffer.kind == XGPU_SPIRV_GBUFFER_LEVEL ? XGPU_GBUFFER_FLAG_LEVEL : 0) |
+		(gbuffer.instance == XGPU_GBUFFER_INSTANCE_FIRST_PERSON ? XGPU_GBUFFER_FLAG_FIRST_PERSON : 0) |
+		(material ? material->flags : 0);
+	uniforms[0][0] = material ? material->roughness : 1.0f;
+	uniforms[0][1] = material ? material->metal : 0.0f;
+	uniforms[0][2] = material ? material->specular : 0.5f;
+	uniforms[0][3] = (float)((material ? material->model : 0) | (flags << 4)) / 255.0f;
+	uniforms[1][0] = (float)key[0];
+	uniforms[1][1] = (float)key[1];
+	uniforms[1][2] = uniforms[1][3] = 0.0f;
+}
+
 /* the uniforms both stages read and the vertex constants, in the ring for
 this submission (with the VR effects' views, for a VR effect's draw) */
 static int uniforms_update(int effect)
@@ -1897,6 +2081,10 @@ static int uniforms_update(int effect)
 		no material is defined) */
 		if (stream.materials)
 			material_uniforms(to->material);
+		/* (display.lighting "ce_deferred"'s G-buffer twins': the draw's
+		material and instance) */
+		if (gbuffer.drawing)
+			gbuffer_uniforms(to->gbuffer);
 		memcpy(to->blend_constant, stream.dynamic.blend_color, sizeof(to->blend_constant));
 		for (stage = 0; stage < 4; stage++)
 		{
@@ -2345,10 +2533,12 @@ static int draw_pipeline(const struct draw_input *input, int apart)
 
 	if (!stream.pipeline_id || !stream.definition || !input->count)
 		return 1;
-	entry = prepass.drawing ? prepass.drawing : shadow.drawing ? shadow.drawing : &stream.pipelines[stream.pipeline_id];
+	entry = prepass.drawing ? prepass.drawing : shadow.drawing ? shadow.drawing : gbuffer.drawing ? gbuffer.drawing :
+		&stream.pipelines[stream.pipeline_id];
 	variant_current(&stream.definition->key, &variant);
 	variant.integer_attributes = stream.definition->key.immediate ? 0 : input->integers;
 	variant.shadow = shadow.drawing != NULL;
+	variant.gbuffer = gbuffer.drawing ? gbuffer.kind : 0;
 	if (apart && (entry->state != XGPU_STREAM_PIPELINE_MADE || memcmp(&entry->variant, &variant, sizeof(variant))))
 		return 0;
 	if (!pipeline_shaders(entry, stream.definition, &variant))
@@ -2404,6 +2594,18 @@ static int draw_pipeline(const struct draw_input *input, int apart)
 		pipeline.view_mask = 0;
 		pipeline.depth_format = XGPU_VULKAN_FORMAT_D24S8;
 	}
+	/* (a G-buffer twin: into the G-buffer's words, one sample, nothing
+	blended, its own depth) */
+	if (gbuffer.drawing)
+	{
+		pipeline.color_format = XGPU_VULKAN_FORMAT_RGBA32_UINT;
+		pipeline.color_read = 0;
+		pipeline.blend = 0;
+		pipeline.color_mask = 15;
+		pipeline.samples = 1;
+		pipeline.view_mask = 0;
+		pipeline.depth_format = XGPU_VULKAN_FORMAT_D24S8;
+	}
 	/* (a shadow twin: into an atlas's depth alone, one sample, both faces,
 	nearer the sun wins) */
 	if (shadow.drawing)
@@ -2435,7 +2637,9 @@ static int draw_pipeline(const struct draw_input *input, int apart)
 			(void)xgpu_vulkan_pipeline_prepare(&pipeline);
 		else if (apart)
 			draw.pipeline = xgpu_vulkan_pipeline_ready(&pipeline);
-		else if (stream.prepared)
+		/* (a G-buffer twin made as it is first drawn, waited for: the
+		G-buffer has every surface from its first frame, run after run) */
+		else if (stream.prepared && !gbuffer.drawing)
 			draw.pipeline = xgpu_vulkan_pipeline_ready(&pipeline);
 		else
 			draw.pipeline = xgpu_vulkan_pipeline(&pipeline);
@@ -2443,7 +2647,7 @@ static int draw_pipeline(const struct draw_input *input, int apart)
 			pipeline_description_trace(&pipeline, vertex_program, &variant);
 		/* (a world pipeline or a twin made apart too: its stand-in drawn,
 		or nothing, until it is made, but missed all the same) */
-		if (!stream.preparing && stream.prepared && xgpu_vulkan_pipeline_count() != before)
+		if (!stream.preparing && stream.prepared && xgpu_vulkan_pipeline_count() != before && !gbuffer.drawing)
 			pipeline_missed(&pipeline, vertex_program);
 		if (apart && !stream.preparing && !draw.pipeline)
 			return 0;
@@ -2680,7 +2884,7 @@ static int draw_pipeline(const struct draw_input *input, int apart)
 	if (!prepass.drawing && !shadow.drawing && draw.writes_depth && stream.samples && target_get(stream.depth) &&
 		target_get(stream.depth)->multisampled)
 		target_get(stream.depth)->unresolved = 1;
-	if (!prepass.drawing && !shadow.drawing && target_get(stream.color))
+	if (!prepass.drawing && !shadow.drawing && !gbuffer.drawing && target_get(stream.color))
 		target_get(stream.color)->written++;
 	traced = preparation_start();
 	if (mesh_verdict == XGPU_VULKAN_MESHES_SWAP)
@@ -2753,6 +2957,7 @@ is made, else the stand-in's (and the world's made after the load); every
 other with its own */
 static void prepass_draw(const struct draw_input *input);
 static void shadow_draw(const struct draw_input *input);
+static void gbuffer_draw(const struct draw_input *input);
 
 /* (a map prepared, where its draws are the pre-pass's in play: the draw's
 twin made too) */
@@ -2781,6 +2986,15 @@ static void draw_input(const struct draw_input *input)
 		shadow_draw(input);
 		return;
 	}
+	/* (display.lighting "ce_deferred"'s G-buffer pass: the opaque draws'
+	twins alone; nothing into the window after a view's resolve) */
+	if (gbuffer.active)
+	{
+		gbuffer_draw(input);
+		return;
+	}
+	if (deferred.hold && stream.color == deferred.color)
+		return;
 	if (!stand_in || !definition || !world_definition(definition) || !stream.definitions[stand_in])
 	{
 		draw_pipeline(input, 0);
@@ -3729,6 +3943,66 @@ static void prepass_draw(const struct draw_input *input)
 	stream.pipeline_id = id;
 }
 
+/* a draw of display.lighting "ce_deferred"'s G-buffer pass: its pipeline's
+G-buffer twin's (xgpu_stream_gbuffer_twin: an opaque draw; its shaders made
+now, every one the frame needs: the G-buffer is whole from its first frame),
+an object's or the level's by the instance GBUFFER_DRAW gave; else none */
+static void gbuffer_draw(const struct draw_input *input)
+{
+	uint32_t id = stream.pipeline_id, key[2];
+	const struct xgpu_stream_pipeline_define *definition = stream.definition;
+	struct xgpu_stream_pipeline_define twin;
+	struct xgpu_vulkan_pipeline_description pipeline = stream.pipeline;
+	struct stream_pipeline *entry;
+
+	if (!gbuffer.ready || !id || id >= XGPU_STREAM_PIPELINES || !definition || stream.preparing)
+		return;
+	if (!gbuffer.definitions)
+	{
+		gbuffer.definitions = calloc(XGPU_STREAM_PIPELINES, sizeof(*gbuffer.definitions));
+		gbuffer.entries = calloc(XGPU_STREAM_PIPELINES * 2, sizeof(*gbuffer.entries));
+		if (!gbuffer.definitions || !gbuffer.entries)
+		{
+			free(gbuffer.definitions);
+			free(gbuffer.entries);
+			gbuffer.definitions = NULL;
+			gbuffer.entries = NULL;
+			return;
+		}
+	}
+	twin = *definition;
+	if (!xgpu_stream_gbuffer_twin(&twin))
+		return;
+	gbuffer.kind = gbuffer.instance ? XGPU_SPIRV_GBUFFER_OBJECT : XGPU_SPIRV_GBUFFER_LEVEL;
+	/* (each pipeline's two twins, an object's and the level's, entries of
+	their own: neither makes the other's shaders again) */
+	entry = &gbuffer.entries[id * 2 + (gbuffer.kind == XGPU_SPIRV_GBUFFER_LEVEL)];
+	if (memcmp(&twin, &gbuffer.definitions[id], sizeof(twin)))
+	{
+		gbuffer.definitions[id] = twin;
+		memset(&gbuffer.entries[id * 2], 0, 2 * sizeof(*gbuffer.entries));
+	}
+	if (entry->state == XGPU_STREAM_PIPELINE_FAILED)
+		return;
+	stream.definition = &gbuffer.definitions[id];
+	/* (the uniforms made again where the material, its tier or the
+	instance changed) */
+	gbuffer_key(key, NULL);
+	if (memcmp(key, gbuffer.uniform_key, sizeof(key)))
+	{
+		memcpy(gbuffer.uniform_key, key, sizeof(key));
+		stream.uniforms_dirty = 1;
+	}
+	gbuffer.drawing = entry;
+	gbuffer.twins++;
+	(void)draw_pipeline(input, 0);
+	gbuffer.drawing = NULL;
+	gbuffer.drawn = 1;
+	stream.definition = definition;
+	stream.pipeline = pipeline;
+	stream.pipeline_id = id;
+}
+
 /* the pass's triangle over a rectangle of the occlusion's image, reading
 the inputs and the occlusion's set */
 static void prepass_pass_draw(struct xgpu_vulkan_image *into, const int32_t rectangle[4],
@@ -4314,14 +4588,63 @@ static void deferred_start(struct xgpu_vulkan_image *from, struct xgpu_vulkan_im
 		0);
 }
 
+/* the G-buffer's words and depth, the colour target's size: 1 if they are */
+static int gbuffer_images(const struct stream_target *color)
+{
+	gbuffer.words = prepass_image(gbuffer.words, XGPU_VULKAN_FORMAT_RGBA32_UINT, color->width, color->height);
+	gbuffer.depth = prepass_image(gbuffer.depth, XGPU_VULKAN_FORMAT_D24S8, color->width, color->height);
+	gbuffer.width = color->width;
+	gbuffer.height = color->height;
+	return gbuffer.words && gbuffer.depth;
+}
+
 static void stream_gbuffer_phase(void *context, uint32_t value)
 {
 	struct stream_target *color = target_get(stream.color);
 	uint32_t phase = value & 0xffu;
 
 	(void)context;
+	/* (the G-buffer pass ended, whatever else is so: its draws go to their
+	targets again) */
+	if (phase == XGPU_GBUFFER_PHASE_GBUFFER_END)
+	{
+		if (gbuffer.active)
+		{
+			if (gbuffer.ready)
+				xgpu_vulkan_gpu_time_mark(1);
+			gbuffer.active = gbuffer.ready = 0;
+			stream.uniforms_dirty = 1;
+			targets_bind();
+		}
+		return;
+	}
+	/* (begun: its draws skipped whatever else is so, drawn where it can be) */
+	if (phase == XGPU_GBUFFER_PHASE_GBUFFER_BEGIN)
+		gbuffer.active = 1;
 	if (prepass.active || shadow.active || stream.preparing || !color || color->depth || color->layers > 1)
 		return;
+	if (phase == XGPU_GBUFFER_PHASE_GBUFFER_BEGIN)
+	{
+		static const float zero[4];
+		int32_t whole[1][4];
+
+		if ((stream.samples && color->multisampled) || !gbuffer_images(color))
+			return;
+		gbuffer.color = stream.color;
+		gbuffer.ready = 1;
+		gbuffer.drawn = 0;
+		gbuffer.material = gbuffer.instance = gbuffer.flags = 0;
+		memset(gbuffer.uniform_key, 0, sizeof(gbuffer.uniform_key));
+		stream.uniforms_dirty = 1;
+		xgpu_vulkan_gpu_time_mark(0);
+		xgpu_vulkan_set_target_views(gbuffer.words, gbuffer.depth, 0, 1);
+		whole[0][0] = whole[0][1] = 0;
+		whole[0][2] = (int32_t)color->width;
+		whole[0][3] = (int32_t)color->height;
+		xgpu_vulkan_clear((const int32_t (*)[4])whole, 1, XGPU_VULKAN_CLEAR_COLOR | XGPU_VULKAN_CLEAR_CHANNELS |
+			XGPU_VULKAN_CLEAR_DEPTH | XGPU_VULKAN_CLEAR_STENCIL, zero, 1.0f, 0);
+		return;
+	}
 	if (stream.samples && color->multisampled)
 	{
 		if (!deferred.refused)
@@ -4357,8 +4680,18 @@ static void stream_gbuffer_phase(void *context, uint32_t value)
 		deferred.phase = 0;
 		/* (the statistics' split: the opaque surfaces' passes before it) */
 		xgpu_vulkan_gpu_time_split();
-		xgpu_vulkan_post_deferred_resolve(color->image, deferred.base, deferred.additions,
-			(int)(value >> XGPU_GBUFFER_PHASE_VIEW_SHIFT));
+		{
+			int view = (int)(value >> XGPU_GBUFFER_PHASE_VIEW_SHIFT);
+			struct stream_target *depth = target_get(stream.depth);
+			/* (the G-buffer's, where it was drawn for this window) */
+			struct xgpu_vulkan_image *words = gbuffer.drawn && gbuffer.color == stream.color &&
+				gbuffer.width == color->width && gbuffer.height == color->height ? gbuffer.words : NULL;
+
+			xgpu_vulkan_post_deferred_resolve(color->image, deferred.base, deferred.additions, words,
+				depth && depth->depth && !depth->multisampled ? depth->image : NULL, view);
+			/* (a view: nothing more over it this frame) */
+			deferred.hold = view != 0;
+		}
 		color->written++;
 		targets_bind();
 	}
@@ -4372,6 +4705,9 @@ static void stream_frame_end(void *context)
 	(void)context;
 	/* (a window's phases never past its frame) */
 	deferred.phase = 0;
+	deferred.hold = 0;
+	gbuffer.active = gbuffer.ready = 0;
+	gbuffer.drawn = 0;
 	world_make_some();
 	prepass.twins_made = 0;
 	shadow.twins_made = 0;
@@ -4649,6 +4985,8 @@ const struct host_render_backend *xgpu_vulkan_stream_backend(void)
 		backend.picture_top = stream_picture_top;
 		backend.gamma = stream_gamma;
 		backend.gbuffer_phase = stream_gbuffer_phase;
+		backend.scene_material = stream_scene_material;
+		backend.gbuffer_draw = stream_gbuffer_draw;
 		backend.panini = stream_panini;
 		/* display.ambient_occlusion "world" (#578, docs/world-ao.md): the
 		field's 3D image (XGPU_SPIRV_BINDING_WORLD_SDF) and the window's block

@@ -44,6 +44,7 @@ frame on screen.
 
 #include <errno.h>
 #include <pthread.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdatomic.h>
 #include <stdlib.h>
@@ -229,6 +230,15 @@ static const uint32_t record_minimum[XGPU_STREAM_RECORD_TYPES] =
 	[XGPU_STREAM_PICTURE_POSITION] = sizeof(struct xgpu_stream_value),
 	[XGPU_STREAM_CATEGORY] = sizeof(struct xgpu_stream_value),
 	[XGPU_STREAM_GBUFFER_PHASE] = sizeof(struct xgpu_stream_value),
+	/* (PRISM v4's scene records: their fixed parts) */
+	[XGPU_STREAM_SCENE_MATERIAL] = sizeof(struct xgpu_stream_scene_material),
+	[XGPU_STREAM_SCENE_MATERIAL_ANIMATE] = sizeof(struct xgpu_stream_scene_material_animate),
+	[XGPU_STREAM_SCENE_INSTANCE] = offsetof(struct xgpu_stream_scene_instance, nodes),
+	[XGPU_STREAM_GBUFFER_DRAW] = sizeof(struct xgpu_stream_gbuffer_draw),
+	[XGPU_STREAM_SCENE_STATIC] = sizeof(struct xgpu_stream_scene_static),
+	[XGPU_STREAM_SCENE_LIGHTS] = offsetof(struct xgpu_stream_scene_lights, lights),
+	[XGPU_STREAM_SCENE_DECAL] = sizeof(struct xgpu_stream_scene_decal),
+	[XGPU_STREAM_SCENE_FOG] = offsetof(struct xgpu_stream_scene_fog, planes),
 	[XGPU_STREAM_GAMMA] = sizeof(struct xgpu_stream_value),
 	[XGPU_STREAM_PANINI] = sizeof(struct xgpu_stream_panini),
 	[XGPU_STREAM_WORLD_AO_WINDOW] = sizeof(struct xgpu_stream_world_ao_window),
@@ -536,6 +546,20 @@ static int decode_record(struct host_render_decoder *decoder, const unsigned cha
 		break;
 	case XGPU_STREAM_GBUFFER_PHASE:
 		CALL(gbuffer_phase, value->value);
+		break;
+	case XGPU_STREAM_SCENE_MATERIAL:
+		CALL(scene_material, (const struct xgpu_stream_scene_material *)start);
+		break;
+	case XGPU_STREAM_GBUFFER_DRAW:
+		CALL(gbuffer_draw, (const struct xgpu_stream_gbuffer_draw *)start);
+		break;
+	/* (the others: taken, nothing done with them yet) */
+	case XGPU_STREAM_SCENE_MATERIAL_ANIMATE:
+	case XGPU_STREAM_SCENE_INSTANCE:
+	case XGPU_STREAM_SCENE_STATIC:
+	case XGPU_STREAM_SCENE_LIGHTS:
+	case XGPU_STREAM_SCENE_DECAL:
+	case XGPU_STREAM_SCENE_FOG:
 		break;
 	case XGPU_STREAM_CATEGORY:
 		CALL(category, value->value);

@@ -97,6 +97,11 @@ struct host_render_backend
 	/* display.lighting "ce_deferred": the draws' target from now on, or the
 	frame put together (XGPU_STREAM_GBUFFER_PHASE's value) */
 	void (*gbuffer_phase)(void *context, uint32_t phase);
+	/* PRISM v4's scene records: a shader's material (once per shader per
+	map), and the material and instance of the G-buffer pass's draws that
+	follow */
+	void (*scene_material)(void *context, const struct xgpu_stream_scene_material *record);
+	void (*gbuffer_draw)(void *context, const struct xgpu_stream_gbuffer_draw *record);
 	/* display.panini: a 3D view drawn again through the Panini projection
 	(none: not drawn) */
 	void (*panini)(void *context, const struct xgpu_stream_panini *record);

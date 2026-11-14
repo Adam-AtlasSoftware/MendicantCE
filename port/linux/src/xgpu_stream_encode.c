@@ -776,6 +776,49 @@ void xgpu_backend_gbuffer_phase(unsigned long phase)
 	record_value(XGPU_STREAM_GBUFFER_PHASE, (uint32_t)phase);
 }
 
+void xgpu_backend_scene_material(unsigned long material, const unsigned long hash[2], int family, int material_type,
+	unsigned long shader_flags, unsigned long detail_functions, unsigned long flags, const float *scalars,
+	int scalar_count)
+{
+	struct xgpu_stream_scene_material *record_body;
+	int index;
+
+	if (!stream.open || stream.preparing || !material || family < 0 || family >= XGPU_SCENE_FAMILIES)
+		return;
+	/* (as xgpu_scene_encode_material fills it: no bitmaps yet, the scalars
+	finite or 0) */
+	record_body = record(XGPU_STREAM_SCENE_MATERIAL, sizeof(*record_body));
+	record_body->material = (uint32_t)material;
+	record_body->path_hash[0] = (uint32_t)hash[0];
+	record_body->path_hash[1] = (uint32_t)hash[1];
+	record_body->family = (uint32_t)family;
+	record_body->material_type = (uint32_t)material_type;
+	record_body->shader_flags = (uint32_t)shader_flags;
+	record_body->detail_functions = (uint32_t)detail_functions;
+	record_body->flags = (uint32_t)flags;
+	for (index = 0; index < scalar_count && index < (int)XGPU_SCENE_MATERIAL_SCALARS; index++)
+	{
+		uint32_t bits;
+
+		memcpy(&bits, &scalars[index], sizeof(bits));
+		record_body->scalars[index] = (bits & 0x7f800000u) == 0x7f800000u ? 0.0f : scalars[index];
+	}
+}
+
+void xgpu_backend_gbuffer_draw(unsigned long material, unsigned long instance, unsigned long flags)
+{
+	struct xgpu_stream_gbuffer_draw *record_body;
+
+	if (!stream.open || stream.preparing)
+		return;
+	record_body = record(XGPU_STREAM_GBUFFER_DRAW, sizeof(*record_body));
+	memset(record_body, 0, sizeof(*record_body));
+	record_body->header = XGPU_STREAM_HEADER(XGPU_STREAM_GBUFFER_DRAW, sizeof(*record_body));
+	record_body->material = (uint32_t)material;
+	record_body->instance = (uint32_t)instance;
+	record_body->flags = (uint32_t)flags;
+}
+
 void xgpu_backend_picture_top(int top)
 {
 	/* (0 centered, n + 1 at n pixels from the top) */

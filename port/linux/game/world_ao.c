@@ -27,6 +27,10 @@ the Classic preset's "off") draws exactly as before.
 #include <stdlib.h>
 #include <string.h>
 
+/* display.lighting "ce_deferred"'s G-buffer pass (prism_deferred.c) */
+void prism_deferred_object(long object_index);
+void prism_deferred_first_person(int drawing);
+
 const char *config_string(const char *name);
 int config_boolean(const char *name);
 double config_real(const char *name);
@@ -684,6 +688,8 @@ void world_ao_object_begin(long object_index)
 	/* (PRISM v2's probes nearest the object drawn, whatever the setting:
 	prism_light.c) */
 	prism_light_object_begin(object_index);
+	/* (display.lighting "ce_deferred": the G-buffer pass's instance) */
+	prism_deferred_object(object_index);
 	if (!world_ao.window)
 		return;
 	if (object_index != -1)
@@ -717,6 +723,8 @@ void world_ao_lightmap_begin(void const *lightmap_bitmap)
 
 	/* (display.prism_lightmaps' finer copies: prism_lightmaps.c) */
 	prism_lightmaps_begin(lightmap_bitmap);
+	/* (display.lighting "ce_deferred": the level's, in the G-buffer) */
+	prism_deferred_object(-1);
 	/* (the structure's: none of the objects' shapes its own; its page's
 	layer where the lightmap draws take their reference, or none) */
 	if (!world_ao.window)
@@ -748,6 +756,8 @@ void world_ao_first_person(int drawing)
 {
 	/* (PRISM v2's probes about the camera for the first-person weapon) */
 	prism_light_object_begin(-1);
+	/* (display.lighting "ce_deferred": the first-person weapon's instance) */
+	prism_deferred_first_person(drawing);
 	/* (the window's own span again after it) */
 	halo_world_ao_span(!drawing ? world_ao.span : world_ao.span == WORLD_AO_SPAN_FOUND ?
 		WORLD_AO_SPAN_FOUND_FIRST_PERSON : WORLD_AO_SPAN_FIRST_PERSON);

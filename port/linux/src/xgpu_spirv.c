@@ -47,7 +47,7 @@ enum
 	OP_VECTOR_EXTRACT_DYNAMIC = 77, OP_VECTOR_SHUFFLE = 79, OP_COMPOSITE_CONSTRUCT = 80, OP_COMPOSITE_EXTRACT = 81,
 	OP_COMPOSITE_INSERT = 82,
 	OP_IMAGE_SAMPLE_IMPLICIT_LOD = 87, OP_IMAGE_SAMPLE_EXPLICIT_LOD = 88, OP_IMAGE_SAMPLE_DREF_EXPLICIT_LOD = 90, OP_IMAGE_FETCH = 95, OP_IMAGE_GATHER = 96, OP_IMAGE_READ = 98, OP_IMAGE = 100, OP_IMAGE_QUERY_SIZE_LOD = 103,
-	OP_CONVERT_F_TO_S = 110, OP_CONVERT_S_TO_F = 111, OP_BITCAST = 124,
+	OP_CONVERT_F_TO_U = 109, OP_CONVERT_F_TO_S = 110, OP_CONVERT_S_TO_F = 111, OP_BITCAST = 124,
 	OP_F_NEGATE = 127, OP_I_ADD = 128, OP_F_ADD = 129, OP_I_SUB = 130, OP_F_SUB = 131, OP_I_MUL = 132, OP_F_MUL = 133,
 	OP_F_DIV = 136, OP_VECTOR_TIMES_SCALAR = 142, OP_DOT = 148,
 	OP_LOGICAL_OR = 166, OP_LOGICAL_AND = 167, OP_LOGICAL_NOT = 168, OP_SELECT = 169,
@@ -847,11 +847,14 @@ enum
 	/* (display.prism_materials: after that, declared by its pixel shaders
 	alone: declare_uniforms_material) */
 	U_MATERIAL,
+	/* (display.lighting "ce_deferred"'s G-buffer twins: after that,
+	declare_uniforms_gbuffer) */
+	U_GBUFFER,
 };
 
 static void declare_uniforms_members(struct module *m, int count)
 {
-	static const unsigned long offsets[U_COUNT + 3] =
+	static const unsigned long offsets[U_COUNT + 4] =
 	{
 		offsetof(struct xgpu_spirv_uniforms, viewport_scale), offsetof(struct xgpu_spirv_uniforms, viewport_offset),
 		offsetof(struct xgpu_spirv_uniforms, point_size), offsetof(struct xgpu_spirv_uniforms, screen_offset),
@@ -868,9 +871,9 @@ static void declare_uniforms_members(struct module *m, int count)
 		offsetof(struct xgpu_spirv_uniforms, visibility_counter), offsetof(struct xgpu_spirv_uniforms, depth_bias),
 		offsetof(struct xgpu_spirv_uniforms, effect_unproject), offsetof(struct xgpu_spirv_uniforms, effect_eye),
 		offsetof(struct xgpu_spirv_uniforms, world_ao), offsetof(struct xgpu_spirv_uniforms, material_overlay),
-		offsetof(struct xgpu_spirv_uniforms, material),
+		offsetof(struct xgpu_spirv_uniforms, material), offsetof(struct xgpu_spirv_uniforms, gbuffer),
 	};
-	unsigned int members[U_COUNT + 3], block;
+	unsigned int members[U_COUNT + 4], block;
 	int member;
 
 	for (member = 0; member < count; member++)
@@ -891,6 +894,7 @@ static void declare_uniforms_members(struct module *m, int count)
 		case U_MODEL_LIGHTS: members[member] = block_array(m, XGPU_MODEL_LIGHT_COUNT); break;
 		case U_MATERIAL_OVERLAY: members[member] = block_array(m, XGPU_OVERLAY_UNIFORM_COUNT); break;
 		case U_MATERIAL: members[member] = block_array(m, XGPU_MATERIAL_UNIFORM_COUNT); break;
+		case U_GBUFFER: members[member] = block_array(m, 2); break;
 		default: members[member] = m->t_v4; break;
 		}
 	}
@@ -926,6 +930,12 @@ static void declare_uniforms_overlay(struct module *m)
 static void declare_uniforms_material(struct module *m)
 {
 	declare_uniforms_members(m, U_COUNT + 3);
+}
+
+/* (and the G-buffer twins', U_GBUFFER, after the material's) */
+static void declare_uniforms_gbuffer(struct module *m)
+{
+	declare_uniforms_members(m, U_COUNT + 4);
 }
 
 /* a member of the uniforms (an element of an array member): a float or a
@@ -4050,6 +4060,60 @@ static unsigned int world_ao_read(struct module *m, struct pixel_state *state, i
 		extract(m, parameters0, 0));
 }
 
+/* a unit normal, octahedral (n.xy / (|x| + |y| + |z|), the lower half
+folded over the diagonals), packed as two 16-bit snorms: the G-buffer's
+second word (xgpu_stream.h's GBUFFER_BEGIN), as world_ao_inputs packs its
+own */
+static unsigned int gbuffer_octahedral(struct module *m, unsigned int n)
+{
+	unsigned int absolute = ext1(m, GLSL_F_ABS, m->t_v3, n), folded, positive, flipped, negative;
+
+	folded = fdiv(m, 2, xy(m, n), splat(m, 2, fmax_scalar(m, 1, fadd(m, 1, fadd(m, 1, extract(m, absolute, 0),
+		extract(m, absolute, 1)), extract(m, absolute, 2)), 1.0e-24f)));
+	positive = op2(m, OP_F_ORD_GREATER_THAN_EQUAL, m->t_bv2, folded, constant_splat(m, 2, 0.0f));
+	flipped = fmul(m, 2, fsub(m, 2, constant_splat(m, 2, 1.0f), ext1(m, GLSL_F_ABS, m->t_v2,
+		op(m, OP_VECTOR_SHUFFLE, m->t_v2, 4, (unsigned int[]){ folded, folded, 1, 0 }))),
+		op3(m, OP_SELECT, m->t_v2, positive, constant_splat(m, 2, 1.0f), constant_splat(m, 2, -1.0f)));
+	negative = compare(m, OP_F_ORD_LESS_THAN, extract(m, n, 2), constant_float(m, 0.0f));
+	folded = select_n(m, 2, negative, flipped, folded);
+	return ext1(m, GLSL_PACK_SNORM_2X16, m->t_uint, folded);
+}
+
+/* the G-buffer twin's four words (xgpu_stream.h's GBUFFER_BEGIN): the base
+colour (0 none: the level's), the normal (0 none), the uniforms' material
+parameters and its fourth word */
+static unsigned int gbuffer_words(struct module *m, struct pixel_state *state, unsigned int base)
+{
+	unsigned int words[4], parameters = uniform(m, U_GBUFFER, 0), ids = uniform(m, U_GBUFFER, 1), has_normal = 0;
+
+	words[0] = base ? ext1(m, GLSL_PACK_UNORM_4X8, m->t_uint, vec4_of(m, base, constant_float(m, 1.0f))) :
+		constant_uint(m, 0);
+	if (state->in_world_normal)
+	{
+		unsigned int normal = xyz(m, pixel_input(m, state, state->in_world_normal, m->t_v4));
+		unsigned int length2 = fdot(m, normal, normal);
+		unsigned int n = fscale(m, 3, normal, ext1(m, GLSL_INVERSE_SQRT, m->t_float, fmax_scalar(m, 1, length2,
+			1.0e-24f)));
+
+		/* (none where the vertices gave none: word 2's XGPU_GBUFFER_FLAG_NORMAL
+		says which) */
+		has_normal = compare(m, OP_F_ORD_GREATER_THAN, length2, constant_float(m, 1.0e-12f));
+		words[1] = op3(m, OP_SELECT, m->t_uint, has_normal, gbuffer_octahedral(m, n), constant_uint(m, 0));
+	}
+	else
+		words[1] = constant_uint(m, 0);
+	words[2] = ext1(m, GLSL_PACK_UNORM_4X8, m->t_uint, saturate(m, 4, parameters));
+	/* (xgpu_stream.h's XGPU_GBUFFER_FLAG_NORMAL, 8, in the fourth byte's high
+	bits) */
+	if (has_normal)
+		words[2] = op2(m, OP_BITWISE_OR, m->t_uint, words[2], op3(m, OP_SELECT, m->t_uint, has_normal,
+			constant_uint(m, 8u << 28), constant_uint(m, 0)));
+	words[3] = op2(m, OP_BITWISE_OR, m->t_uint, op1(m, OP_CONVERT_F_TO_U, m->t_uint, extract(m, ids, 0)),
+		op2(m, OP_SHIFT_LEFT_LOGICAL, m->t_uint, op1(m, OP_CONVERT_F_TO_U, m->t_uint, extract(m, ids, 1)),
+		constant_uint(m, 16)));
+	return op(m, OP_COMPOSITE_CONSTRUCT, m->t_uv4, 4, words);
+}
+
 /* found once a pixel: a pre-pass draw's inputs to its pixel's occlusion
 (xgpu.h's XGPU_AMBIENT_OCCLUSION_WORLD_INPUTS; xgpu_msl.c's
 world_ao_inputs, world_ao_shading.c's world_ao_inputs_pack), two words */
@@ -6398,6 +6462,10 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	keeps it) */
 	BOOL occluder = !world && (program->ambient_occlusion & XGPU_AMBIENT_OCCLUSION_WORLD_INPUTS);
 	unsigned int world_ao_words = 0;
+	/* (display.lighting "ce_deferred": a G-buffer twin's words in the
+	colour's place, an object's base colour among them) */
+	BOOL gbuffer = options->gbuffer != 0;
+	unsigned int gbuffer_base = 0;
 	/* port: a model's twin's light as CE lit it (display.prism_rt's
 	traced light keyed: its fourth word, as a lightmap pass's) */
 	unsigned int model_light_ce = 0;
@@ -6435,7 +6503,9 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	state.program = program;
 	state.options = options;
 	module_begin(&m, EXECUTION_MODEL_FRAGMENT);
-	if (pbr)
+	if (gbuffer)
+		declare_uniforms_gbuffer(&m);
+	else if (pbr)
 		declare_uniforms_material(&m);
 	else if (overlay)
 		declare_uniforms_overlay(&m);
@@ -6536,7 +6606,7 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 		state.in_light_point = interface_variable(&m, m.t_v3, STORAGE_INPUT, XGPU_SPIRV_LOCATION_LIGHT_POINT,
 			"xLightPoint");
 	}
-	if (program->per_pixel_lighting || environment || world || sun_lightmap)
+	if (program->per_pixel_lighting || environment || world || sun_lightmap || (gbuffer && options->gbuffer_normal))
 		state.in_world_normal = interface_variable(&m, m.t_v4, STORAGE_INPUT, XGPU_SPIRV_LOCATION_WORLD_NORMAL, "xWorldNormal");
 	if (world_position)
 		state.in_world_position = interface_variable(&m, m.t_v3, STORAGE_INPUT, XGPU_SPIRV_LOCATION_WORLD_POSITION, "xWorldPosition");
@@ -6545,7 +6615,8 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 		state.in_world_binormal = interface_variable(&m, m.t_v3, STORAGE_INPUT, XGPU_SPIRV_LOCATION_WORLD_BINORMAL, "xWorldBinormal");
 		state.in_world_tangent = interface_variable(&m, m.t_v3, STORAGE_INPUT, XGPU_SPIRV_LOCATION_WORLD_TANGENT, "xWorldTangent");
 	}
-	color_out = interface_variable(&m, world_inputs || occluder ? m.t_uv4 : m.t_v4, STORAGE_OUTPUT, 0, "fragment_color");
+	color_out = interface_variable(&m, world_inputs || occluder || gbuffer ? m.t_uv4 : m.t_v4, STORAGE_OUTPUT, 0,
+		"fragment_color");
 	if (sample_mask)
 	{
 		unsigned int operands[3], array = id_new(&m);
@@ -6705,6 +6776,25 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 
 	state.r0 = vec4_of(&m, constant_splat(&m, 3, 0.0f), extract(&m, state.t[0], 3));
 	state.r1 = state.zero4;
+	/* (display.lighting "ce_deferred": an object's G-buffer twin's base
+	colour, its combiners with white diffuse light, no specular light and no
+	self-illumination, the registers as they were after) */
+	if (gbuffer && options->gbuffer == XGPU_SPIRV_GBUFFER_OBJECT)
+	{
+		unsigned int v0 = state.v0, v1 = state.v1, t[4], r0 = state.r0, r1 = state.r1;
+
+		memcpy(t, state.t, sizeof(t));
+		state.v0 = vec4_of(&m, constant_splat(&m, 3, 1.0f), extract(&m, v0, 3));
+		state.v1 = state.zero4;
+		if (pbr)
+			state.t[3] = state.zero4;
+		gbuffer_base = saturate(&m, 3, xyz(&m, combiners(&m, &state)));
+		state.v0 = v0;
+		state.v1 = v1;
+		memcpy(state.t, t, sizeof(t));
+		state.r0 = r0;
+		state.r1 = r1;
+	}
 	/* (display.hdr: a self-illuminated surface's pixel without its
 	self-illumination, the registers as they were after) */
 	if (self_illuminated)
@@ -6928,7 +7018,9 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	fourth word, its square root 8 bits a channel and 255 in the fourth, the
 	light CE's lightmap gave the pixel: the anchor's and the exposure's
 	reference) */
-	if (world_inputs && occlusion_light == XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP &&
+	if (gbuffer)
+		store(&m, color_out, gbuffer_words(&m, &state, gbuffer_base));
+	else if (world_inputs && occlusion_light == XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP &&
 		(program->ambient_occlusion & XGPU_AMBIENT_OCCLUSION_RT_LIGHT))
 	{
 		unsigned int light = ext1(&m, GLSL_SQRT, m.t_v3, saturate(&m, 3, xyz(&m, result)));

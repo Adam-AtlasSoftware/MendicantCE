@@ -180,9 +180,14 @@ extern boolean render_world_ao_prepass;
 being drawn (port/linux/game/prism_shadows.c): the objects' opaque parts
 alone, as render_world_ao_prepass draws them, and no first-person weapon */
 extern boolean render_prism_shadow_pass;
-/* port: (render_world_ao_prepass or render_prism_shadow_pass: a pass before
-the window's own, whose objects are found once for both) */
-#define render_port_prepass (render_world_ao_prepass || render_prism_shadow_pass)
+/* port: display.lighting "ce_deferred"'s G-buffer pass of the window's
+opaque surfaces is being drawn (port/linux/game/prism_deferred.c): their
+draws alone, as render_world_ao_prepass draws them */
+extern boolean render_gbuffer_pass;
+/* port: (render_world_ao_prepass, render_prism_shadow_pass or
+render_gbuffer_pass: a pass before the window's own, whose objects are found
+once for all) */
+#define render_port_prepass (render_world_ao_prepass || render_prism_shadow_pass || render_gbuffer_pass)
 
 /* ---------- public code */
 

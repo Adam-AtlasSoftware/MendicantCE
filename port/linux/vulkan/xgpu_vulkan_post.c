@@ -98,6 +98,12 @@ static struct
 	struct xgpu_vulkan_image *curved;
 	/* display.panini's pipelines could not be made (logged once) */
 	int panini_failed;
+	/* (display.lighting "ce_deferred"'s resolve: the G-buffer's words, its
+	fourth texture; NULL otherwise) */
+	struct xgpu_vulkan_image *gbuffer;
+	/* (its stand-in where there is none: a texel of words, never read, but
+	of the type the shader declares) */
+	struct xgpu_vulkan_image *gbuffer_stand_in;
 } post;
 
 /* ---------- images */
@@ -319,7 +325,8 @@ static void pass_draw_with(int program, struct xgpu_vulkan_image *into, uint32_t
 	images[2] = image2;
 	for (stage = 0; stage < 4; stage++)
 	{
-		draw.textures[stage].image = stage < 3 ? images[stage] : NULL;
+		/* (the fourth: the deferred resolve's G-buffer alone) */
+		draw.textures[stage].image = stage < 3 ? images[stage] : post.gbuffer;
 		draw.textures[stage].kind = XGPU_VULKAN_IMAGE_2D;
 		draw.textures[stage].sampler = post.sampler;
 	}
@@ -440,7 +447,7 @@ alpha is CE's destination alpha after its passes. A target of one sample
 only (the stream draws a multisampled one as "ce"). */
 
 int xgpu_vulkan_post_deferred_resolve(struct xgpu_vulkan_image *target, struct xgpu_vulkan_image *base,
-	struct xgpu_vulkan_image *additions, int view)
+	struct xgpu_vulkan_image *additions, struct xgpu_vulkan_image *gbuffer, struct xgpu_vulkan_image *depth, int view)
 {
 	const struct xgpu_vulkan_image_description *description;
 	struct xgpu_vulkan_pipeline_description *pipeline;
@@ -477,7 +484,27 @@ int xgpu_vulkan_post_deferred_resolve(struct xgpu_vulkan_image *target, struct x
 	xgpu_vulkan_image_copy_rectangle(target, 0, post.color, rectangle);
 	memset(bounds, 0, sizeof(bounds));
 	bounds[0] = (float)view;
-	pass_draw(XGPU_VULKAN_POST_DEFERRED_RESOLVE, target, 0, rectangle, post.color, base, additions, bounds);
+	/* (the cleared depth, the farthest: reversed, 0) */
+	bounds[1] = XGPU_VULKAN_REVERSED_DEPTH ? 0.0f : 1.0f;
+	bounds[2] = gbuffer ? 1.0f : 0.0f;
+	/* (a stand-in where there is none: its texels are never read) */
+	if (!gbuffer && !post.gbuffer_stand_in)
+	{
+		struct xgpu_vulkan_image_description stand_in;
+
+		memset(&stand_in, 0, sizeof(stand_in));
+		stand_in.type = XGPU_VULKAN_IMAGE_2D;
+		stand_in.format = XGPU_VULKAN_FORMAT_RGBA32_UINT;
+		stand_in.usage = XGPU_VULKAN_USAGE_SAMPLED | XGPU_VULKAN_USAGE_TARGET;
+		stand_in.width = stand_in.height = 1;
+		stand_in.depth_or_layers = 1;
+		stand_in.levels = 1;
+		post.gbuffer_stand_in = xgpu_vulkan_image_create(&stand_in);
+	}
+	post.gbuffer = gbuffer ? gbuffer : post.gbuffer_stand_in;
+	pass_draw(XGPU_VULKAN_POST_DEFERRED_RESOLVE, target, 0, rectangle, post.color, base,
+		view == 8 && depth ? depth : additions, bounds);
+	post.gbuffer = NULL;
 	return 1;
 }
 

@@ -125,6 +125,7 @@ symbols in this file:
 #include "rasterizer/xbox/rasterizer_xbox_models.h"
 #include "view_fov.h" /* port: port/linux/game/view_fov.c */
 #include "mods.h" /* port: port/linux/game/mod_materials.c */
+#include "prism_deferred.h" /* port: port/linux/game/prism_deferred.c */
 
 /* ---------- constants */
 
@@ -1663,6 +1664,9 @@ void _rasterizer_model_draw(
 			"c:\\halo\\SOURCE\\rasterizer\\xbox\\rasterizer_xbox_models.c",
 			676,
 			shader);
+		/* port: display.lighting "ce_deferred"'s G-buffer pass: the draw's
+		material (port/linux/game/prism_deferred.c) */
+		prism_deferred_shader(shader);
 
 		if (local_parameters->effect.modifier_shader)
 		{

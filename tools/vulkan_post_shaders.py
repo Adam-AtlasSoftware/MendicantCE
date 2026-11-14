@@ -63,7 +63,7 @@ OUTPUT = ROOT / "port/linux/vulkan/xgpu_vulkan_post_shaders.c"
 STRINGS = re.compile(r'"(?:\\.|[^"\\])*"')
 COMMENTS = re.compile(r"/\*.*?\*/", re.S)
 UNIFORM = re.compile(r"^uniform vec4 (\w+);\n", re.M)
-SAMPLER = re.compile(r"^uniform sampler2D (\w+);\n", re.M)
+SAMPLER = re.compile(r"^uniform (u?sampler2D) (\w+);\n", re.M)
 # the uniforms' block: each pass's vec4s, in this order (std140), as far as
 # the last its program uses (hdr in display.hdr's passes, window, panini
 # and tangents in display.panini's)
@@ -223,20 +223,36 @@ SMAA_PREFIX = (
 )
 # each sampler's texture unit, which becomes its binding
 UNITS = {"color_texture": 0, "edges_texture": 0, "area_texture": 1, "search_texture": 2, "weights_texture": 1,
-         "local_texture": 1, "base_texture": 1, "additions_texture": 2}
+         "local_texture": 1, "base_texture": 1, "additions_texture": 2, "gbuffer_texture": 3}
 # display.lighting "ce_deferred"'s resolve (Vulkan's: xgpu_vulkan_post_
 # deferred_resolve): each pixel the copy of the light (the colour target's
 # pixels) times the base plus the additions, the additions' alpha (CE's
 # destination alpha after the specular and reflection passes); or, by
 # bounds.x, one of them alone (debug.gbuffer_view: 1 the base, 2 the light,
-# 3 the additions). The images are the target's size: texels by gl_FragCoord.
+# 3 the additions), or the G-buffer's (xgpu_stream.h's GBUFFER_BEGIN: its
+# words at gbuffer_texture, texelFetch): 4 the base colour (the level's the
+# base's), 5 the normal, 6 the roughness, 7 the metalness, 8 the material
+# source (the window's depth in additions_texture's place: a pixel drawn,
+# its depth not bounds.y, the cleared depth, that the G-buffer has not is
+# magenta; one the G-buffer has that the window did not draw, red), 9 the
+# instances. bounds.z 1 where the G-buffer was drawn. The
+# images are the target's size: texels by gl_FragCoord.
 DEFERRED_RESOLVE_SOURCE = (
     "uniform sampler2D color_texture;\n"
     "uniform sampler2D base_texture;\n"
     "uniform sampler2D additions_texture;\n"
+    "uniform usampler2D gbuffer_texture;\n"
     "uniform vec4 metrics;\n"
     "uniform vec4 bounds;\n"
     "out vec4 result;\n"
+    "\n"
+    "vec3 unfold(vec2 e)\n"
+    "{\n"
+    "\tvec3 n = vec3(e, 1.0 - abs(e.x) - abs(e.y));\n"
+    "\tfloat t = max(-n.z, 0.0);\n"
+    "\tn.xy += vec2(n.x >= 0.0 ? -t : t, n.y >= 0.0 ? -t : t);\n"
+    "\treturn normalize(n);\n"
+    "}\n"
     "\n"
     "void main()\n"
     "{\n"
@@ -246,13 +262,50 @@ DEFERRED_RESOLVE_SOURCE = (
     "\tvec4 additions = texelFetch(additions_texture, texel, 0);\n"
     "\tint view = int(bounds.x + 0.5);\n"
     "\tvec3 color = light.rgb * base.rgb + additions.rgb;\n"
+    "\tfloat alpha = additions.a;\n"
     "\tif (view == 1)\n"
     "\t\tcolor = base.rgb;\n"
     "\telse if (view == 2)\n"
     "\t\tcolor = light.rgb;\n"
     "\telse if (view == 3)\n"
     "\t\tcolor = additions.rgb;\n"
-    "\tresult = vec4(color, additions.a);\n"
+    "\telse if (view >= 4)\n"
+    "\t{\n"
+    "\t\tuvec4 words = bounds.z > 0.5 ? texelFetch(gbuffer_texture, texel, 0) : uvec4(0u);\n"
+    "\t\tbool present = (words.w & 0x8000u) != 0u;\n"
+    "\t\tvec4 parameters = unpackUnorm4x8(words.z);\n"
+    "\t\tuint flags = uint(parameters.w * 255.0 + 0.5) >> 4;\n"
+    "\t\tuint tier = (words.w >> 12) & 7u;\n"
+    "\t\tuint instance = words.w >> 16;\n"
+    "\t\tcolor = vec3(0.0);\n"
+    "\t\talpha = 1.0;\n"
+    "\t\tif (view == 4 && present)\n"
+    "\t\t\tcolor = (flags & 1u) != 0u ? base.rgb : unpackUnorm4x8(words.x).rgb;\n"
+    "\t\telse if (view == 5 && present && (flags & 8u) != 0u)\n"
+    "\t\t\tcolor = unfold(unpackSnorm2x16(words.y)) * 0.5 + 0.5;\n"
+    "\t\telse if (view == 6 && present)\n"
+    "\t\t\tcolor = vec3(parameters.x);\n"
+    "\t\telse if (view == 7 && present)\n"
+    "\t\t\tcolor = vec3(parameters.y);\n"
+    "\t\telse if (view == 8)\n"
+    "\t\t{\n"
+    "\t\t\tbool drawn = abs(additions.r - bounds.y) > 1.0e-7;\n"
+    "\t\t\tif (present && !drawn)\n"
+    "\t\t\t\tcolor = vec3(1.0, 0.0, 0.0);\n"
+    "\t\t\telse if (present)\n"
+    "\t\t\t\tcolor = tier == 4u ? vec3(0.0, 1.0, 1.0) : tier == 3u ? vec3(0.0, 0.0, 1.0) : tier == 2u ?\n"
+    "\t\t\t\t\tvec3(0.0, 1.0, 0.0) : tier == 1u ? vec3(1.0, 1.0, 0.0) : vec3(1.0, 0.5, 0.0);\n"
+    "\t\t\telse if (drawn)\n"
+    "\t\t\t\tcolor = vec3(1.0, 0.0, 1.0);\n"
+    "\t\t}\n"
+    "\t\telse if (view == 9 && present)\n"
+    "\t\t{\n"
+    "\t\t\tuint h = instance * 2654435761u;\n"
+    "\t\t\tcolor = instance == 0u ? vec3(0.25) : instance == 0xffffu ? vec3(1.0) :\n"
+    "\t\t\t\tvec3(float((h >> 8) & 255u), float((h >> 16) & 255u), float(h >> 24)) / 255.0 * 0.8 + 0.2;\n"
+    "\t\t}\n"
+    "\t}\n"
+    "\tresult = vec4(color, alpha);\n"
     "}\n"
 )
 # Vulkan's own program: the frame turned for a swapchain the display turns
@@ -542,7 +595,7 @@ def translate(stage: str, code: str, bindings: dict[str, int]) -> str:
     used = max([1] + [UNIFORMS.index(name) for name in found])
 
     def sampler(match):
-        return f"layout(set = 1, binding = {bindings[match[1]]}) uniform sampler2D {match[1]};\n"
+        return f"layout(set = 1, binding = {bindings[match[2]]}) uniform {match[1]} {match[2]};\n"
 
     code = SAMPLER.sub(sampler, code)
     code = code.replace("out vec4 result;\n", "layout(location = 0) out vec4 result;\n")

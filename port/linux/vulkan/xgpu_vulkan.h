@@ -798,6 +798,10 @@ far (once a frame; display.lighting "ce_deferred"'s resolve: the opaque
 surfaces' passes before it), which the statistics time from the frame's
 start */
 void xgpu_vulkan_gpu_time_split(void);
+/* within the frame's timed interval, its marked interval's begin (0) and
+end (1), once a frame each (display.lighting "ce_deferred"'s G-buffer pass),
+which HALO_VULKAN_GPU_TIMES_FILE writes as each frame's third figure */
+void xgpu_vulkan_gpu_time_mark(int which);
 
 uint64_t xgpu_vulkan_fence(void);
 /* returns once the GPU has done the submission of that number and those

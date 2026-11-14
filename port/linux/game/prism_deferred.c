@@ -31,6 +31,18 @@ resolve's place. The objects' opaque parts are drawn lit in one pass by CE
 (their light is in their combiners), so they stay in the light target: their
 base colour and light apart are the next step (the uber-shaders per family).
 
+Before CE's passes the window's opaque surfaces are drawn once more, first
+and alone: the G-buffer pass (walk 1, render_gbuffer_pass, as display.
+ambient_occlusion "world"'s pre-pass draws them), each draw's twin into the
+G-buffer (xgpu_stream.h's GBUFFER_BEGIN: an object's base colour, its
+combiners with white light; the normal; roughness, metalness and specular;
+the material, its source tier and the instance), with the material of the
+shader it draws (GBUFFER_DRAW) from the map's material table: every shader
+of the map, once, before its first G-buffer pass (SCENE_MATERIAL, the
+material ids the shaders' order in the tags: alike in every run), resolved
+by the host at its automatic tier (or a mod's, where display.prism_materials
+gives the shader one). The level's base colour is the base target's.
+
 Only the primary window's view, not a mirror's nor the VR mode's eyes, and
 only where the host draws it (the Vulkan backend; the others ignore the
 records and draw as Classic). With "ce" (the default) no record is sent and
@@ -39,6 +51,12 @@ nothing changes.
 
 #include "cseries.h"
 #include "prism_deferred.h"
+#include "cache/cache_files.h"
+#include "render/render.h"
+#include "scenario/scenario.h"
+#include "shaders/shader_definitions.h"
+#include "tag_files/tag_files.h"
+#include "tag_files/tag_groups.h"
 
 #include <string.h>
 
@@ -46,12 +64,71 @@ nothing changes.
 char const *config_string(char const *name);
 unsigned long config_changes(void);
 void xgpu_backend_gbuffer_phase(unsigned long phase);
+void xgpu_backend_scene_material(unsigned long material, const unsigned long hash[2], int family, int material_type,
+	unsigned long shader_flags, unsigned long detail_functions, unsigned long flags, const float *scalars,
+	int scalar_count);
+void xgpu_backend_gbuffer_draw(unsigned long material, unsigned long instance, unsigned long flags);
 
 /* xgpu_stream.h's GBUFFER_PHASE values */
 #define PHASE_BASE 1ul
 #define PHASE_ADDS 2ul
 #define PHASE_RESOLVE 3ul
+#define PHASE_GBUFFER_BEGIN 4ul
+#define PHASE_GBUFFER_END 5ul
 #define PHASE_VIEW_SHIFT 8
+
+/* xgpu_stream.h's SCENE_MATERIAL's families, flags and scalars, and
+GBUFFER_DRAW's flags */
+enum
+{
+	FAMILY_SENV, FAMILY_SOSO, FAMILY_SGLA, FAMILY_SWAT, FAMILY_SCHI, FAMILY_SOTR, FAMILY_SMET, FAMILY_SPLA,
+};
+#define MATERIAL_ALPHA_TESTED 1ul
+#define MATERIAL_TWO_SIDED 2ul
+#define MATERIAL_BUMP_ALPHA_SPECULAR 4ul
+#define MATERIAL_EMITTER 16ul
+#define MATERIAL_TRANSPARENT_LAYER 32ul
+#define MATERIAL_NO_OCCLUSION 64ul
+#define SCALAR_BUMP_SCALE 0
+#define SCALAR_SPECULAR_BRIGHTNESS 5
+#define SCALAR_PERPENDICULAR_COLOR 6
+#define SCALAR_PARALLEL_COLOR 9
+#define SCALAR_REFLECTION_PERPENDICULAR 12
+#define SCALAR_REFLECTION_PARALLEL 13
+#define SCALAR_RADIOSITY_POWER 20
+#define SCALAR_RADIOSITY_COLOR 21
+#define SCALAR_TRANSLUCENCY 24
+#define SCALAR_TINT 25
+#define SCALARS 32
+#define DRAW_FIRST_PERSON 4ul
+/* GBUFFER_DRAW's instance of the first-person weapon (xgpu_stream.h's
+XGPU_GBUFFER_INSTANCE_FIRST_PERSON) */
+#define INSTANCE_FIRST_PERSON 0xffffUL
+
+/* the shader tags' fields the material reads, by their offsets in the tag
+(struct shader: radiosity power at 0x04, its colour at 0x08, its tint at
+0x14, the physics' material type at 0x22, the family's own flags at 0x28;
+rasterizer_xbox_models.c's and rasterizer_xbox_environment.c's checked
+offsets for the rest) */
+#define SHADER_RADIOSITY_POWER 0x04
+#define SHADER_RADIOSITY_COLOR 0x08
+#define SHADER_TINT 0x14
+#define SHADER_MATERIAL_TYPE 0x22
+#define SHADER_FLAGS 0x28
+#define SENV_DETAIL_FUNCTION 0xB0
+#define SENV_BUMP_SCALE 0x124
+#define SENV_SPECULAR_BRIGHTNESS 0x290
+#define SENV_PERPENDICULAR_COLOR 0x2A8
+#define SENV_PARALLEL_COLOR 0x2B4
+#define SENV_REFLECTION_PERPENDICULAR 0x2F4
+#define SENV_REFLECTION_PARALLEL 0x2F8
+#define SOSO_TRANSLUCENCY 0x38
+#define SOSO_DETAIL_FUNCTION 0xD4
+
+/* the map's shaders by their tags' addresses: an open table of a power of
+two (half full at most), the material id each (1 on, in the tags' order) */
+#define MATERIALS_MOST 4096
+#define MATERIAL_SLOTS (MATERIALS_MOST * 2)
 
 static struct
 {
@@ -60,6 +137,19 @@ static struct
 	unsigned long view;
 	/* the window's phase sent last (0 none: the light) */
 	unsigned long phase;
+	/* the map the table is of (its scenario's tag and address), and the
+	table */
+	long scenario_index;
+	void const *scenario;
+	boolean table_made;
+	long material_count;
+	void const *slot_shaders[MATERIAL_SLOTS];
+	unsigned short slot_materials[MATERIAL_SLOTS];
+	/* the G-buffer pass's draws' instance and flags now, and the record sent
+	last (its material, instance and flags; none at the pass's start) */
+	unsigned long instance, draw_flags;
+	unsigned long sent_material, sent_instance, sent_flags;
+	boolean sent;
 } prism_deferred;
 
 static void settings_read(
@@ -76,7 +166,284 @@ static void settings_read(
 	prism_deferred.wanted = value && !strcmp(value, "ce_deferred");
 	value = config_string("debug.gbuffer_view");
 	prism_deferred.view = !value ? 0 : !strcmp(value, "base") ? 1 : !strcmp(value, "light") ? 2 :
-		!strcmp(value, "additions") ? 3 : 0;
+		!strcmp(value, "additions") ? 3 : !strcmp(value, "albedo") ? 4 : !strcmp(value, "normal") ? 5 :
+		!strcmp(value, "roughness") ? 6 : !strcmp(value, "metal") ? 7 : !strcmp(value, "material_source") ? 8 :
+		!strcmp(value, "instance") ? 9 : 0;
+
+	return;
+}
+
+static unsigned long slot_of(
+	void const *shader)
+{
+	unsigned long value = (unsigned long)shader;
+
+	value ^= value >> 15;
+	value *= 0x2c1b3c6dUL;
+	value ^= value >> 12;
+	return value & (MATERIAL_SLOTS - 1);
+}
+
+static float field_real(
+	void const *shader,
+	long offset)
+{
+	float value;
+
+	memcpy(&value, (char const *)shader + offset, sizeof(value));
+	return value;
+}
+
+static short field_short(
+	void const *shader,
+	long offset)
+{
+	short value;
+
+	memcpy(&value, (char const *)shader + offset, sizeof(value));
+	return value;
+}
+
+static void field_rgb(
+	void const *shader,
+	long offset,
+	float *rgb)
+{
+	memcpy(rgb, (char const *)shader + offset, 3 * sizeof(float));
+}
+
+/* a shader numbered and sent (its family's group, its tag) */
+static void material_add(
+	long group_tag,
+	long tag_index)
+{
+	void const *shader = tag_get(group_tag, tag_index);
+	unsigned long slot, hash[2], flags = 0, detail_functions = 0, shader_flags;
+	unsigned long long value = 0xcbf29ce484222325ULL;
+	char const *path;
+	float scalars[SCALARS];
+	int family;
+
+	if (!shader || prism_deferred.material_count >= MATERIALS_MOST - 1)
+	{
+		return;
+	}
+	for (slot = slot_of(shader); prism_deferred.slot_shaders[slot]; slot = (slot + 1) & (MATERIAL_SLOTS - 1))
+	{
+		if (prism_deferred.slot_shaders[slot] == shader)
+		{
+			return;
+		}
+	}
+	prism_deferred.slot_shaders[slot] = shader;
+	prism_deferred.slot_materials[slot] = (unsigned short)++prism_deferred.material_count;
+
+	switch (group_tag)
+	{
+	case 'senv': family = FAMILY_SENV; break;
+	case 'soso': family = FAMILY_SOSO; break;
+	case 'sgla': family = FAMILY_SGLA; break;
+	case 'swat': family = FAMILY_SWAT; break;
+	case 'sotr': family = FAMILY_SOTR; break;
+	case 'smet': family = FAMILY_SMET; break;
+	case 'spla': family = FAMILY_SPLA; break;
+	default: family = FAMILY_SCHI; break;
+	}
+	/* the tag path's 64-bit FNV-1a hash (xgpu_scene_path_hash's) */
+	path = tag_get_name(tag_index);
+	while (path && *path)
+	{
+		value ^= (unsigned char)*path++;
+		value *= 0x100000001b3ULL;
+	}
+	hash[0] = (unsigned long)(value & 0xffffffffUL);
+	hash[1] = (unsigned long)(value >> 32);
+	memset(scalars, 0, sizeof(scalars));
+	scalars[SCALAR_RADIOSITY_POWER] = field_real(shader, SHADER_RADIOSITY_POWER);
+	field_rgb(shader, SHADER_RADIOSITY_COLOR, scalars + SCALAR_RADIOSITY_COLOR);
+	field_rgb(shader, SHADER_TINT, scalars + SCALAR_TINT);
+	shader_flags = (unsigned short)field_short(shader, SHADER_FLAGS);
+	if (scalars[SCALAR_RADIOSITY_POWER] > 0.0f)
+	{
+		flags |= MATERIAL_EMITTER;
+	}
+	if (family == FAMILY_SENV)
+	{
+		/* (senv's flags: alpha tested, the bump map the specular mask) */
+		if (shader_flags & 1)
+		{
+			flags |= MATERIAL_ALPHA_TESTED;
+		}
+		if (shader_flags & 2)
+		{
+			flags |= MATERIAL_BUMP_ALPHA_SPECULAR;
+		}
+		detail_functions = (unsigned short)field_short(shader, SENV_DETAIL_FUNCTION);
+		scalars[SCALAR_BUMP_SCALE] = field_real(shader, SENV_BUMP_SCALE);
+		scalars[SCALAR_SPECULAR_BRIGHTNESS] = field_real(shader, SENV_SPECULAR_BRIGHTNESS);
+		field_rgb(shader, SENV_PERPENDICULAR_COLOR, scalars + SCALAR_PERPENDICULAR_COLOR);
+		field_rgb(shader, SENV_PARALLEL_COLOR, scalars + SCALAR_PARALLEL_COLOR);
+		scalars[SCALAR_REFLECTION_PERPENDICULAR] = field_real(shader, SENV_REFLECTION_PERPENDICULAR);
+		scalars[SCALAR_REFLECTION_PARALLEL] = field_real(shader, SENV_REFLECTION_PARALLEL);
+	}
+	else if (family == FAMILY_SOSO)
+	{
+		/* (soso's flags: two-sided, not alpha tested) */
+		if (shader_flags & 2)
+		{
+			flags |= MATERIAL_TWO_SIDED;
+		}
+		if (!(shader_flags & 4))
+		{
+			flags |= MATERIAL_ALPHA_TESTED;
+		}
+		detail_functions = (unsigned short)field_short(shader, SOSO_DETAIL_FUNCTION);
+		scalars[SCALAR_TRANSLUCENCY] = field_real(shader, SOSO_TRANSLUCENCY);
+	}
+	else if (family == FAMILY_SGLA || family == FAMILY_SWAT)
+	{
+		flags |= MATERIAL_TRANSPARENT_LAYER;
+	}
+	else if (family == FAMILY_SMET || family == FAMILY_SPLA)
+	{
+		flags |= MATERIAL_NO_OCCLUSION;
+	}
+	xgpu_backend_scene_material((unsigned long)prism_deferred.material_count, hash, family,
+		field_short(shader, SHADER_MATERIAL_TYPE), shader_flags, detail_functions & 0xff, flags, scalars, SCALARS);
+
+	return;
+}
+
+/* the map's materials, numbered and sent once (again for another map) */
+static void materials_make(
+	void)
+{
+	static long const groups[] =
+	{
+		'senv', 'soso', 'sotr', 'schi', 'scex', 'swat', 'sgla', 'smet', 'spla',
+	};
+	void const *scenario = global_scenario_index != NONE ? global_scenario_get() : NULL;
+	struct tag_iterator iterator;
+	long tag_index;
+	int group;
+
+	if (prism_deferred.table_made && prism_deferred.scenario_index == global_scenario_index &&
+		prism_deferred.scenario == scenario)
+	{
+		return;
+	}
+	memset(prism_deferred.slot_shaders, 0, sizeof(prism_deferred.slot_shaders));
+	memset(prism_deferred.slot_materials, 0, sizeof(prism_deferred.slot_materials));
+	prism_deferred.material_count = 0;
+	prism_deferred.scenario_index = global_scenario_index;
+	prism_deferred.scenario = scenario;
+	prism_deferred.table_made = TRUE;
+	if (!scenario)
+	{
+		return;
+	}
+	for (group = 0; group < (int)(sizeof(groups) / sizeof(groups[0])); group++)
+	{
+		tag_iterator_new(&iterator, groups[group]);
+		while ((tag_index = tag_iterator_next(&iterator)) != NONE)
+		{
+			material_add(groups[group], tag_index);
+		}
+	}
+
+	return;
+}
+
+/* a shader's material id (0 none) */
+static unsigned long material_of(
+	void const *shader)
+{
+	unsigned long slot;
+
+	if (!shader)
+	{
+		return 0;
+	}
+	for (slot = slot_of(shader); prism_deferred.slot_shaders[slot]; slot = (slot + 1) & (MATERIAL_SLOTS - 1))
+	{
+		if (prism_deferred.slot_shaders[slot] == shader)
+		{
+			return prism_deferred.slot_materials[slot];
+		}
+	}
+
+	return 0;
+}
+
+void prism_deferred_gbuffer_begin(
+	void)
+{
+	materials_make();
+	prism_deferred.instance = 0;
+	prism_deferred.draw_flags = 0;
+	prism_deferred.sent = FALSE;
+	xgpu_backend_gbuffer_phase(PHASE_GBUFFER_BEGIN);
+
+	return;
+}
+
+void prism_deferred_gbuffer_end(
+	void)
+{
+	xgpu_backend_gbuffer_phase(PHASE_GBUFFER_END);
+
+	return;
+}
+
+void prism_deferred_object(
+	long object_index)
+{
+	unsigned long absolute;
+
+	if (!render_gbuffer_pass)
+	{
+		return;
+	}
+	absolute = object_index == -1 ? 0 : (unsigned long)DATUM_INDEX_TO_ABSOLUTE_INDEX(object_index) + 1;
+	prism_deferred.instance = absolute >= INSTANCE_FIRST_PERSON ? INSTANCE_FIRST_PERSON - 1 : absolute;
+	prism_deferred.draw_flags = 0;
+
+	return;
+}
+
+void prism_deferred_first_person(
+	int drawing)
+{
+	if (!render_gbuffer_pass)
+	{
+		return;
+	}
+	prism_deferred.instance = drawing ? INSTANCE_FIRST_PERSON : 0;
+	prism_deferred.draw_flags = drawing ? DRAW_FIRST_PERSON : 0;
+
+	return;
+}
+
+void prism_deferred_shader(
+	void const *shader)
+{
+	unsigned long material;
+
+	if (!render_gbuffer_pass)
+	{
+		return;
+	}
+	material = material_of(shader);
+	if (prism_deferred.sent && material == prism_deferred.sent_material &&
+		prism_deferred.instance == prism_deferred.sent_instance && prism_deferred.draw_flags == prism_deferred.sent_flags)
+	{
+		return;
+	}
+	prism_deferred.sent = TRUE;
+	prism_deferred.sent_material = material;
+	prism_deferred.sent_instance = prism_deferred.instance;
+	prism_deferred.sent_flags = prism_deferred.draw_flags;
+	xgpu_backend_gbuffer_draw(material, prism_deferred.instance, prism_deferred.draw_flags);
 
 	return;
 }

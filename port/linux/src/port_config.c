@@ -2815,8 +2815,13 @@ static const struct config_setting config_settings[] =
 		"(the rays' cost); \"off\" the game. For checking." },
 	{ "debug.gbuffer_view", _config_string, "\"off\"", "HALO_GBUFFER_VIEW", _environment_value, _platform_desktop,
 		"With display.lighting \"ce_deferred\": one of its targets shown alone\n"
-		"in the frame's place, \"base\", \"light\" or \"additions\"; \"off\" the\n"
-		"frame. Read each frame." },
+		"in the frame's place, \"base\", \"light\" or \"additions\"; or the\n"
+		"G-buffer's \"albedo\" (the base colour), \"normal\", \"roughness\",\n"
+		"\"metal\", \"material_source\" (each opaque pixel by where its material\n"
+		"comes from: green the automatic tier, blue a pack's, cyan a mod's,\n"
+		"yellow the class default, orange none, magenta a pixel the G-buffer\n"
+		"missed, red one it has that the frame did not draw) or \"instance\";\n"
+		"\"off\" the frame. Read each frame." },
 	{ "debug.pt_reference", _config_integer, "0", "HALO_PT_REFERENCE", _environment_value, _platform_desktop,
 		"With display.prism_rt \"pathtraced\", a converged reference for the\n"
 		"quality gates (docs/prism_v4.md): the path tracer unbiased (no reuse,\n"
@@ -4589,7 +4594,8 @@ static const struct
 	{ "display.anti_aliasing", { "off", "fxaa", "smaa", "ssaa2x", "msaa2x", "msaa4x", "msaa8x", NULL }, NULL },
 	{ "display.ambient_occlusion", { "off", "world", NULL }, "off" },
 	{ "display.lighting", { "ce", "ce_deferred", NULL }, "ce" },
-	{ "debug.gbuffer_view", { "off", "base", "light", "additions", NULL }, "off" },
+	{ "debug.gbuffer_view", { "off", "base", "light", "additions", "albedo", "normal", "roughness", "metal",
+		"material_source", "instance", NULL }, "off" },
 	{ "display.prism_rt", { "off", "shadows", "gi", "pathtraced", NULL }, "off" },
 	{ "display.prism_rt_quality", { "medium", "low", "high", "ultra", NULL }, "medium" },
 	{ "display.prism_rt_resolution", { "auto", "half", "full", NULL }, "auto" },

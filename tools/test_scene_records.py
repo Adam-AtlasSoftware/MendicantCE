@@ -136,26 +136,28 @@ def test_sizes_multiples_of_four(driver64):
     }
 
 
-def test_stream_unchanged(constants):
-    # (30: GBUFFER_PHASE, display.lighting "ce_deferred", PRISM v4 M1's first record)
-    assert constants["version"] == 30
+def test_stream_types(constants):
+    # (31: M1 sends SCENE_MATERIAL and GBUFFER_DRAW, display.lighting "ce_deferred"'s G-buffer pass; 30 was
+    # GBUFFER_PHASE, its first record)
+    assert constants["version"] == 31
     text = (SOURCE / "xgpu_stream.h").read_text()
-    assert re.search(r"#define XGPU_STREAM_VERSION 30\b", text)
-    # (the stream's own types end at GBUFFER_PHASE, after RT_FRAME; the scene's start past the count the decoder
-    # takes)
-    assert constants["rt_frame"] == constants["record_types"] - 2
+    assert re.search(r"#define XGPU_STREAM_VERSION 31\b", text)
+    # (the scene's types joined the stream's own list after GBUFFER_PHASE, the numbers they were specified with:
+    # the decoder takes every one of them)
+    assert constants["rt_frame"] == constants["record_types"] - 10
     scene = [constants[name] for name in ("scene_material", "scene_material_animate", "scene_instance",
                                           "gbuffer_draw", "scene_static", "scene_lights", "scene_decal",
                                           "scene_fog")]
-    assert scene == list(range(constants["record_types"], constants["record_types"] + 8))
-    assert constants["scene_record_types"] <= 256
-    # (no build compiles the encoder yet, and nothing calls it)
-    for path in list((ROOT / "port").rglob("*.c")) + list((ROOT / "tools").glob("*build*.py")) + \
-            [ROOT / "configure.py"]:
-        if path.name in ("xgpu_scene_encode.c",):
-            continue
-        body = path.read_text(errors="replace")
-        assert "xgpu_scene_encode" not in body, path
+    assert scene == list(range(constants["rt_frame"] + 2, constants["rt_frame"] + 10))
+    assert scene[-1] == constants["record_types"] - 1
+    assert constants["scene_record_types"] == constants["record_types"] <= 256
+    # (the guest's stream writes SCENE_MATERIAL and GBUFFER_DRAW)
+    body = (SOURCE / "xgpu_stream_encode.c").read_text()
+    assert "XGPU_STREAM_SCENE_MATERIAL" in body and "XGPU_STREAM_GBUFFER_DRAW" in body
+    decoder = (ROOT / "port/android/host/host_render_stream.c").read_text()
+    for name in ("SCENE_MATERIAL", "SCENE_MATERIAL_ANIMATE", "SCENE_INSTANCE", "GBUFFER_DRAW", "SCENE_STATIC",
+                 "SCENE_LIGHTS", "SCENE_DECAL", "SCENE_FOG"):
+        assert f"[XGPU_STREAM_{name}] =" in decoder, name
 
 
 def test_path_hash(encoded):

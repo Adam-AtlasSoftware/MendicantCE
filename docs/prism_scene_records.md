@@ -8,23 +8,32 @@ lights, the decals and the fog. These are new records of the renderer's command 
 
 ## What is there now
 
-The layouts and the encoders, and nothing else:
+`XGPU_STREAM_VERSION` is 31. The records' types are in the stream's own list, after M1's first record,
+`GBUFFER_PHASE` (82): `SCENE_MATERIAL` is 83 and so on to `SCENE_FOG`, 90, and `XGPU_STREAM_RECORD_TYPES` is 91. The
+host's decoder takes every one, with its fixed part's size as its minimum.
 
-- no build compiles the encoders, and nothing calls them;
-- no backend reads the records. Their types follow the stream's own (`XGPU_STREAM_SCENE_MATERIAL` is
-  `XGPU_STREAM_RECORD_TYPES`, 83, and so on to 90) and are not counted in `XGPU_STREAM_RECORD_TYPES`, so the host's
-  decoder would stop at one as an unknown record;
-- `XGPU_STREAM_VERSION` is 30: M1's first record, `GBUFFER_PHASE` (82, in the stream's own list), sends
-  `display.lighting` `ce_deferred`'s phases (`port/linux/game/prism_deferred.c`), the "CE light, deferred" diagnostic
-  drawn from CE's own passes put in targets of their own. It is sent only in that mode.
+M1 sends two of them, with `display.lighting` `ce_deferred` (`port/linux/game/prism_deferred.c`), in its G-buffer pass
+(walk 1: the window's opaque surfaces drawn first into the G-buffer, `GBUFFER_PHASE`'s `GBUFFER_BEGIN` and
+`GBUFFER_END`):
 
-The milestone that first sends them (M1, the deferred core) moves their types into the stream's list, gives the
-decoder their minimum sizes and raises `XGPU_STREAM_VERSION`.
+- `SCENE_MATERIAL`: every shader of the map (the `senv`, `soso`, `sotr`, `schi`, `scex`, `swat`, `sgla`, `smet` and `spla`
+  tags, in that order and the tags' own order within each: the same ids in every run), once, as the map's first
+  G-buffer pass begins: its family, CE's material type, its flags and detail function, its radiosity, tint, bump
+  scale, specular and reflection numbers (no bitmaps yet). The Vulkan backend resolves each at the automatic tier as
+  it arrives (the design's section 5.5: the material type's roughness and metal prior, smoother where CE's specular is
+  brighter, metal only where CE reflected; the model from the family and flags) into its material table.
+- `GBUFFER_DRAW`: before the G-buffer pass's draws, where the material, the instance or the flags change: the shader's
+  material (`_rasterizer_model_draw`'s and `_rasterizer_environment_lightmap_draw`'s shader), the instance (1 + the
+  object's datum index, 0 the level, 0xffff the first-person weapon) and the first-person flag.
+
+The other six are specified and taken, not sent: `SCENE_MATERIAL_ANIMATE`, `SCENE_INSTANCE`, `SCENE_STATIC`,
+`SCENE_LIGHTS`, `SCENE_DECAL`, `SCENE_FOG`. `xgpu_scene_encode.c` still fills all eight from typed values for the
+tests; the stream writes its two from `xgpu_stream_encode.c`.
 
 ## The byte-identity rule
 
-The records are sent only with `display.lighting` `raster` or `pathtraced`. With `ce`, the default of Classic and
-Enhanced, none is ever written, and those frames stay byte for byte as the build before them drew them. Every
+The records are sent only in the v4 modes (`display.lighting` `ce_deferred` now, `raster` and `pathtraced` to come).
+With `ce`, the default of Classic and Enhanced, none is ever written, and those frames stay byte for byte as the build before them drew them. Every
 milestone checks this.
 
 ## The records
@@ -69,5 +78,6 @@ Each encoder writes into a buffer the caller gives and returns the bytes written
 `python3 -m pytest -q tools/test_scene_records.py` builds `tools/fixtures/scene_records_test.c` with the encoder as a
 64-bit and a 32-bit program (the 32-bit build is skipped, with the reason, where the compiler cannot make one). It
 checks that every field has the same offset in both, that every size is a multiple of 4 and as above, that the
-encoders' bytes equal the layouts packed in Python, the refusals and cuts, that the stream's version and types are
-unchanged, and that no build compiles the encoder. It needs a C compiler and no game data or GPU.
+encoders' bytes equal the layouts packed in Python, the refusals and cuts, the stream's version and that the
+records' types are in its list, the decoder takes each, and the guest's stream writes `SCENE_MATERIAL` and
+`GBUFFER_DRAW`. It needs a C compiler and no game data or GPU.

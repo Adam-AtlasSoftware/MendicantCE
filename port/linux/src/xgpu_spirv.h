@@ -177,6 +177,13 @@ struct xgpu_spirv_uniforms
 	XGPU_MATERIAL_UNIFORM_COUNT vec4s), declared in the pixel shaders that
 	read it alone, after the overlay's */
 	float material[XGPU_MATERIAL_UNIFORM_COUNT][4];
+	/* display.lighting "ce_deferred"'s G-buffer twins (xgpu_spirv_options
+	gbuffer): [0] the draw's material's roughness, metalness, specular (F0's
+	scale) and model and flags byte (/255), [1] the G-buffer's fourth word's
+	low 16 bits (material, tier, present) and high 16 bits (the instance),
+	each a float, then two spare; declared in those pixel shaders alone,
+	after the material's */
+	float gbuffer[2][4];
 };
 
 /* what the SPIR-V is written for (xgpu_spirv.c):
@@ -225,7 +232,18 @@ struct xgpu_spirv_options
 	program's clip position times the uniforms' eye_correction[0] (the
 	cascade's, the backend's: its clip space from the camera's), as it is */
 	BOOL shadow_caster;
+	/* display.lighting "ce_deferred": a G-buffer twin
+	(xgpu_stream_gbuffer_twin), XGPU_SPIRV_GBUFFER_OBJECT or _LEVEL (0 none):
+	its pixel shader writes the G-buffer's four words (xgpu_stream.h's
+	GBUFFER_BEGIN) in the colour's place, an object's base colour its
+	combiners with white diffuse light (v0), no specular light (v1; the PBR
+	path's texture 3) and no self-illumination; gbuffer_normal: its vertex
+	shader hands on the world normal (lit), which word 1 is of (else 0) */
+	int gbuffer;
+	BOOL gbuffer_normal;
 };
+#define XGPU_SPIRV_GBUFFER_OBJECT 1
+#define XGPU_SPIRV_GBUFFER_LEVEL 2
 
 /* ---------- the VR mode's effects
 

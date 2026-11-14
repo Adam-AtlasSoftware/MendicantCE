@@ -38,7 +38,7 @@ port/linux/README.md.
 #include <stdint.h>
 
 #define XGPU_STREAM_MAGIC 0x53504758u /* "XGPS" */
-#define XGPU_STREAM_VERSION 30
+#define XGPU_STREAM_VERSION 31
 #define XGPU_STREAM_LOADING_ART_BYTES (640u * 480u * 4u)
 
 /* ---------- the ring
@@ -302,8 +302,24 @@ enum
 	together from them (xgpu_backend_gbuffer_phase; value:
 	XGPU_GBUFFER_PHASE_*) */
 	XGPU_STREAM_GBUFFER_PHASE,
+	/* PRISM v4's scene records (below; docs/prism_scene_records.md): sent
+	only in the v4 modes. M1 sends SCENE_MATERIAL (each shader of the map,
+	once, before its first G-buffer pass) and GBUFFER_DRAW (the material and
+	instance of the G-buffer pass's draws that follow); the host takes the
+	others' sizes and nothing more yet */
+	XGPU_STREAM_SCENE_MATERIAL,
+	XGPU_STREAM_SCENE_MATERIAL_ANIMATE,
+	XGPU_STREAM_SCENE_INSTANCE,
+	XGPU_STREAM_GBUFFER_DRAW,
+	XGPU_STREAM_SCENE_STATIC,
+	XGPU_STREAM_SCENE_LIGHTS,
+	XGPU_STREAM_SCENE_DECAL,
+	XGPU_STREAM_SCENE_FOG,
 	XGPU_STREAM_RECORD_TYPES,
 };
+/* (the scene records' own count: they run from SCENE_MATERIAL to the end) */
+#define XGPU_STREAM_SCENE_RECORD_FIRST XGPU_STREAM_SCENE_MATERIAL
+#define XGPU_STREAM_SCENE_RECORD_TYPES XGPU_STREAM_RECORD_TYPES
 
 /* GBUFFER_PHASE's value: the diffuse texture pass's base (an image that
 starts white, with the window's colour target's alpha), the specular and
@@ -316,6 +332,64 @@ debug.gbuffer_view) */
 #define XGPU_GBUFFER_PHASE_ADDITIONS 2u
 #define XGPU_GBUFFER_PHASE_RESOLVE 3u
 #define XGPU_GBUFFER_PHASE_VIEW_SHIFT 8
+/* the G-buffer pass (walk 1: the window's opaque surfaces drawn first,
+alone, as display.ambient_occlusion "world"'s pre-pass draws them, before
+CE's passes): GBUFFER_BEGIN (the draws from here on are the G-buffer's:
+each opaque one's G-buffer twin, xgpu_stream_gbuffer_twin, into the G-buffer
+target of the colour target's size and a depth target of its own, every
+other draw and clear skipped) and GBUFFER_END (the draws go to their targets
+again). The G-buffer target is four 32-bit words a pixel
+(XGPU_FORMAT_GBUFFER: RGBA32Uint):
+  [0] the base colour, RGBA8 (unorm, the base map's colour space): an
+      object's, its combiners with white diffuse light, no specular light
+      and no self-illumination; 0 on the level's surfaces, whose base colour
+      is the base phase's target (CE's diffuse texture pass);
+  [1] the shading normal in the world, octahedral, 2x16 snorm (where word 2
+      has XGPU_GBUFFER_FLAG_NORMAL; else none);
+  [2] roughness, metalness, specular (F0's scale, 0.5 the dielectric 4%),
+      the material model and flags (XGPU_GBUFFER_MODEL_*: 4 bits each),
+      RGBA8 unorm;
+  [3] the material (bits 0 to 11: SCENE_MATERIAL's id, 0 none), its source
+      tier (12 to 14: XGPU_GBUFFER_TIER_*), present (15, every pixel the
+      pass drew), the instance (16 to 31: 0 the level, 1 + an object's datum
+      index, XGPU_GBUFFER_INSTANCE_FIRST_PERSON the first-person weapon).
+The resolve's views (bit 8 on, debug.gbuffer_view) 4 to 9 show the G-buffer
+in the frame's place: 4 the base colour (the level's from the base phase's
+target), 5 the normal, 6 the roughness, 7 the metalness, 8 the material
+source (each opaque pixel coloured by its tier: XGPU_GBUFFER_SOURCE_*; a
+pixel the window drew opaque that the G-buffer has not, magenta), 9 the
+instances. With a view (1 to 9) nothing more is drawn into the window's
+colour target after the resolve, so the view is what the frame shows. */
+#define XGPU_GBUFFER_PHASE_GBUFFER_BEGIN 4u
+#define XGPU_GBUFFER_PHASE_GBUFFER_END 5u
+#define XGPU_GBUFFER_VIEW_ALBEDO 4u
+#define XGPU_GBUFFER_VIEW_NORMAL 5u
+#define XGPU_GBUFFER_VIEW_ROUGHNESS 6u
+#define XGPU_GBUFFER_VIEW_METAL 7u
+#define XGPU_GBUFFER_VIEW_MATERIAL_SOURCE 8u
+#define XGPU_GBUFFER_VIEW_INSTANCE 9u
+/* the source tiers (design section 5.3): none (no material: a fault), the
+class default, the automatic tier (the host's, from CE's shader at load),
+the pack tier, a mod's */
+#define XGPU_GBUFFER_TIER_NONE 0u
+#define XGPU_GBUFFER_TIER_CLASS 1u
+#define XGPU_GBUFFER_TIER_AUTO 2u
+#define XGPU_GBUFFER_TIER_PACK 3u
+#define XGPU_GBUFFER_TIER_MOD 4u
+#define XGPU_GBUFFER_PRESENT 0x8000u
+#define XGPU_GBUFFER_INSTANCE_FIRST_PERSON 0xffffu
+/* the material models (design section 1.3), word 2's fourth byte's low 4
+bits; its high 4 bits the flags */
+#define XGPU_GBUFFER_MODEL_OPAQUE 0u
+#define XGPU_GBUFFER_MODEL_FOLIAGE 1u
+#define XGPU_GBUFFER_MODEL_CLEARCOAT 2u
+#define XGPU_GBUFFER_MODEL_SUBSURFACE 3u
+#define XGPU_GBUFFER_MODEL_EMISSIVE 4u
+#define XGPU_GBUFFER_FLAG_LEVEL 1u
+#define XGPU_GBUFFER_FLAG_ALPHA_TESTED 2u
+#define XGPU_GBUFFER_FLAG_FIRST_PERSON 4u
+/* (word 1 holds a normal: the vertices gave one) */
+#define XGPU_GBUFFER_FLAG_NORMAL 8u
 
 /* a record of no more than its header: SKIP, INVALIDATE, FLUSH,
 VISIBILITY_BEGIN, VISIBILITY_FRAME, DYNAMIC_LIGHTS_PREPARE,
@@ -1266,6 +1340,44 @@ static inline int xgpu_stream_world_ao_twin(struct xgpu_stream_pipeline_define *
 }
 
 
+/* a pipeline's G-buffer twin in display.lighting "ce_deferred"'s G-buffer
+pass (GBUFFER_BEGIN), made of its definition in place (nonzero; 0 none, the
+draw not drawn in the pass): of an opaque one that writes the depth where it
+is nearer or as near (its alpha test kept), into the G-buffer target
+(RGBA32Uint: XGPU_STREAM_FORMAT_GBUFFER, its format's number for the
+backends), one sample, nothing blended, every channel written; its depth,
+stencil, raster, vertex program, alpha test, lighting and display.
+prism_materials' material kept (an object's base colour is its combiners'
+with its material's albedo); no HDR tag, no enhanced dynamic lights, no
+world's light, no material overlay, no sun's shadows, no lightmap filter, no
+samples counted (their sets and images are the colour passes'). The backend
+makes its shaders with the G-buffer's outputs (xgpu_spirv_options gbuffer) */
+#define XGPU_STREAM_FORMAT_GBUFFER 5u
+static inline int xgpu_stream_gbuffer_twin(struct xgpu_stream_pipeline_define *definition)
+{
+	if (!definition->key.depth_test || !definition->key.depth_write || definition->key.blend ||
+		!definition->key.color_mask || definition->key.pixel.source_blend ||
+		(definition->key.depth_function != XGPU_STREAM_COMPARE_LESS &&
+		definition->key.depth_function != XGPU_STREAM_COMPARE_LESS_EQUAL))
+		return 0;
+	definition->key.blend = definition->key.blend_source = definition->key.blend_destination = 0;
+	definition->key.blend_operation = 0;
+	definition->key.color_mask = 0x0f;
+	definition->key.color_format = (uint8_t)XGPU_STREAM_FORMAT_GBUFFER;
+	definition->key.samples = 0;
+	definition->key.pixel.alpha_test_samples = definition->pixel_program.alpha_test_samples = 0;
+	definition->key.pixel.hdr = definition->pixel_program.hdr = 0;
+	definition->key.pixel.source_blend = definition->pixel_program.source_blend = 0;
+	definition->key.pixel.count_samples = definition->pixel_program.count_samples = 0;
+	definition->key.pixel.dynamic_lights = definition->pixel_program.dynamic_lights = 0;
+	definition->key.pixel.ambient_occlusion = definition->pixel_program.ambient_occlusion = 0;
+	definition->key.pixel.material_overlay = definition->pixel_program.material_overlay = 0;
+	definition->key.pixel.prism = 0;
+	definition->pixel_program.lightmap_filter = 0;
+	definition->pixel_program.prism_lighting = 0;
+	return 1;
+}
+
 /* a pipeline's shadow twin in display.prism_shadows "cascaded"'s pass, made
 of its definition in place (nonzero; 0 none, the draw not drawn in the
 pass): of an opaque one that writes the depth where it is nearer or as near
@@ -1951,33 +2063,21 @@ The scene as the host's deferred renderer, its path tracer and its baker
 read it (overhaul_research/prism_v4_renderer/design.md, section 1.2): the
 materials, the objects drawn, the opaque draws of the G-buffer, the level's
 geometry once for every consumer, the lights, the decals and the fog. They
-are sent only with display.lighting "raster" or "pathtraced"; with "ce" (the
-default, Classic and Enhanced) none is ever written, so those frames stay
-byte for byte as they were. Specified ahead of any backend: no build writes
-them yet, the host's decoder does not take them (their types are past
-XGPU_STREAM_RECORD_TYPES, so a stream that had one would stop at it as an
-unknown record), and XGPU_STREAM_VERSION is raised by the milestone that
-first sends them (M1), when their types join the list above.
-port/linux/src/xgpu_scene_encode.c fills each from typed values
-(tools/test_scene_records.py checks the layouts and the encoders).
+are sent only in the v4 modes (display.lighting "ce_deferred" now; "raster"
+and "pathtraced" to come); with "ce" (the default, Classic and Enhanced)
+none is ever written, so those frames stay byte for byte as they were. Their
+types are in the list above (XGPU_STREAM_VERSION 31) and the host's decoder
+takes every one; M1 sends SCENE_MATERIAL and GBUFFER_DRAW (the guest's
+xgpu_backend_scene_material and _gbuffer_draw), the others are specified and
+taken, not sent yet. port/linux/src/xgpu_scene_encode.c fills each from
+typed values (tools/test_scene_records.py checks the layouts and the
+encoders).
 
 Every record is fixed-width 4-byte fields, as the rest of the stream.
 SCENE_INSTANCE's nodes, SCENE_LIGHTS' lights and SCENE_FOG's planes are
 arrays at a record's end of which only the first count are sent: the
 record's size is the fixed part and those, never the whole capacity. */
 
-enum
-{
-	XGPU_STREAM_SCENE_MATERIAL = XGPU_STREAM_RECORD_TYPES,
-	XGPU_STREAM_SCENE_MATERIAL_ANIMATE,
-	XGPU_STREAM_SCENE_INSTANCE,
-	XGPU_STREAM_GBUFFER_DRAW,
-	XGPU_STREAM_SCENE_STATIC,
-	XGPU_STREAM_SCENE_LIGHTS,
-	XGPU_STREAM_SCENE_DECAL,
-	XGPU_STREAM_SCENE_FOG,
-	XGPU_STREAM_SCENE_RECORD_TYPES,
-};
 
 /* a shader's CE family (its tag group): environment, model, glass, water,
 chicago, generic, meter, plasma */

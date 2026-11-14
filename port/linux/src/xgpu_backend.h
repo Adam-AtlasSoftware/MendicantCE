@@ -152,6 +152,17 @@ void xgpu_backend_category(int category);
 phase's target, or the frame put together from them (xgpu_stream.h's
 XGPU_GBUFFER_PHASE_*; port/linux/game/prism_deferred.c) */
 void xgpu_backend_gbuffer_phase(unsigned long phase);
+/* PRISM v4's scene records (xgpu_stream.h; display.lighting "ce_deferred"):
+a shader's material, once per shader per map (SCENE_MATERIAL: its id, its
+tag path's hash, its family, CE's material type, the shader's flags, the
+detail functions, the derived flags and scalar_count of its scalars by
+XGPU_SCENE_SCALAR_*), and the material, instance and flags
+(XGPU_SCENE_DRAW_*) of the G-buffer pass's draws that follow
+(GBUFFER_DRAW) */
+void xgpu_backend_scene_material(unsigned long material, const unsigned long hash[2], int family, int material_type,
+	unsigned long shader_flags, unsigned long detail_functions, unsigned long flags, const float *scalars,
+	int scalar_count);
+void xgpu_backend_gbuffer_draw(unsigned long material, unsigned long instance, unsigned long flags);
 /* display.prism_bloom (where xgpu_backend_capabilities' bloom): the view's
 light past paper white glows (XGPU_BLOOM_GLOW: small and faint; _FULL:
 wider and brighter) before the tone map: its share past 1 (the threshold),

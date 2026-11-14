@@ -160,6 +160,8 @@ has (a test can be several, one for each pass it spans) */
 /* Timestamp intervals may span several submissions; never reuse an
 in-flight pair, and skip samples rather than wait if all pairs are busy. */
 #define GPU_TIME_FRAMES 32
+/* each frame's timestamps: its start and end, the split, the marked interval's two */
+#define GPU_TIME_QUERIES 5
 #define QUERIES_A_FRAME 8192
 /* texture descriptor sets a submission's pool has, before another pool */
 #define SETS_A_POOL 1024
@@ -567,11 +569,11 @@ static struct
 	struct
 	{
 		uint64_t serial;
-		int used, split;
+		int used, split, marks;
 	} gpu_times[GPU_TIME_FRAMES];
 	/* the split of the interval last read (milliseconds from its start; < 0
 	none), and HALO_VULKAN_GPU_TIMES_FILE's file */
-	double gpu_time_split_read;
+	double gpu_time_split_read, gpu_time_marks_read;
 	FILE *gpu_times_file;
 	int gpu_times_file_tried;
 	uint32_t gpu_time_current;
@@ -1734,7 +1736,7 @@ static void gpu_time_start(void)
 		memset(&create, 0, sizeof(create));
 		create.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
 		create.queryType = VK_QUERY_TYPE_TIMESTAMP;
-		create.queryCount = GPU_TIME_FRAMES * 3;
+		create.queryCount = GPU_TIME_FRAMES * GPU_TIME_QUERIES;
 		if (!check(vkCreateQueryPool(vk.device, &create, NULL, &vk.gpu_time_pool), "vkCreateQueryPool (GPU time)"))
 		{
 			vk.gpu_time_failed = 1;
@@ -1746,10 +1748,11 @@ static void gpu_time_start(void)
 	if (index == GPU_TIME_FRAMES)
 		return;
 	commands = early_commands();
-	vkResetQueryPool(vk.device, vk.gpu_time_pool, index * 3, 3);
-	vkCmdWriteTimestamp(commands, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, vk.gpu_time_pool, index * 3);
+	vkResetQueryPool(vk.device, vk.gpu_time_pool, index * GPU_TIME_QUERIES, GPU_TIME_QUERIES);
+	vkCmdWriteTimestamp(commands, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, vk.gpu_time_pool, index * GPU_TIME_QUERIES);
 	vk.gpu_times[index].used = 1;
 	vk.gpu_times[index].split = 0;
+	vk.gpu_times[index].marks = 0;
 	vk.gpu_times[index].serial = 0;
 	vk.gpu_time_current = index;
 	vk.gpu_time_active = 1;
@@ -1766,7 +1769,7 @@ void xgpu_vulkan_gpu_time_end(void)
 	commands = main_commands();
 	index = vk.gpu_time_current;
 	/* Outside the multiview rendering scope: one query, not one per view. */
-	vkCmdWriteTimestamp(commands, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, vk.gpu_time_pool, index * 3 + 1);
+	vkCmdWriteTimestamp(commands, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, vk.gpu_time_pool, index * GPU_TIME_QUERIES + 1);
 	vk.gpu_times[index].serial = vk.serial;
 	vk.gpu_time_active = 0;
 }
@@ -1779,8 +1782,22 @@ void xgpu_vulkan_gpu_time_split(void)
 		return;
 	/* (in the main buffer, after the passes recorded so far: outside any
 	rendering, as a copy is) */
-	vkCmdWriteTimestamp(main_commands(), VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, vk.gpu_time_pool, index * 3 + 2);
+	vkCmdWriteTimestamp(main_commands(), VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, vk.gpu_time_pool,
+		index * GPU_TIME_QUERIES + 2);
 	vk.gpu_times[index].split = 1;
+}
+
+void xgpu_vulkan_gpu_time_mark(int which)
+{
+	uint32_t index = vk.gpu_time_current;
+
+	if (!vk.gpu_time_active || which < 0 || which > 1 || (vk.gpu_times[index].marks & (1 << which)))
+		return;
+	/* (the begin's after the work before it, the end's after the pass's:
+	outside any rendering, as the split) */
+	vkCmdWriteTimestamp(main_commands(), VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, vk.gpu_time_pool,
+		index * GPU_TIME_QUERIES + 3 + (uint32_t)which);
+	vk.gpu_times[index].marks |= 1 << which;
 }
 
 int xgpu_vulkan_gpu_time_read(double *milliseconds)
@@ -1804,7 +1821,7 @@ int xgpu_vulkan_gpu_time_read(double *milliseconds)
 	}
 	if (found == GPU_TIME_FRAMES)
 		return 0;
-	result = vkGetQueryPoolResults(vk.device, vk.gpu_time_pool, found * 3, 2, sizeof(results), results,
+	result = vkGetQueryPoolResults(vk.device, vk.gpu_time_pool, found * GPU_TIME_QUERIES, 2, sizeof(results), results,
 		sizeof(results[0]), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT);
 	if (result == VK_NOT_READY)
 		return 0;
@@ -1823,9 +1840,21 @@ int xgpu_vulkan_gpu_time_read(double *milliseconds)
 	{
 		uint64_t split[2];
 
-		if (vkGetQueryPoolResults(vk.device, vk.gpu_time_pool, found * 3 + 2, 1, sizeof(split), split, sizeof(split),
-			VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT) == VK_SUCCESS && split[1])
+		if (vkGetQueryPoolResults(vk.device, vk.gpu_time_pool, found * GPU_TIME_QUERIES + 2, 1, sizeof(split), split,
+			sizeof(split), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT) == VK_SUCCESS && split[1])
 			vk.gpu_time_split_read = (double)((split[0] - results[0][0]) & mask) *
+				(double)vk.properties.limits.timestampPeriod * 1e-6;
+	}
+	/* (the marked interval: display.lighting "ce_deferred"'s G-buffer pass) */
+	vk.gpu_time_marks_read = -1.0;
+	if (vk.gpu_times[found].marks == 3)
+	{
+		uint64_t marks[2][2];
+
+		if (vkGetQueryPoolResults(vk.device, vk.gpu_time_pool, found * GPU_TIME_QUERIES + 3, 2, sizeof(marks), marks,
+			sizeof(marks[0]), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT) == VK_SUCCESS &&
+			marks[0][1] && marks[1][1])
+			vk.gpu_time_marks_read = (double)((marks[1][0] - marks[0][0]) & mask) *
 				(double)vk.properties.limits.timestampPeriod * 1e-6;
 	}
 	vk.gpu_times[found].used = 0;
@@ -7092,7 +7121,8 @@ void xgpu_vulkan_frame_end(struct xgpu_vulkan_image *image, int present_window)
 			}
 			if (vk.gpu_times_file)
 			{
-				fprintf(vk.gpu_times_file, "%.4f %.4f\n", milliseconds, vk.gpu_time_split_read);
+				fprintf(vk.gpu_times_file, "%.4f %.4f %.4f\n", milliseconds, vk.gpu_time_split_read,
+					vk.gpu_time_marks_read);
 				fflush(vk.gpu_times_file);
 			}
 		}
