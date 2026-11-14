@@ -148,6 +148,10 @@ void xgpu_backend_gamma(float gamma);
 _rasterizer_profile_*, -1 none): what the backends' GPU timing sums by
 (HALO_METAL_PASS_TIMES) */
 void xgpu_backend_category(int category);
+/* display.lighting "ce_deferred": the window's draws from now on to a
+phase's target, or the frame put together from them (xgpu_stream.h's
+XGPU_GBUFFER_PHASE_*; port/linux/game/prism_deferred.c) */
+void xgpu_backend_gbuffer_phase(unsigned long phase);
 /* display.prism_bloom (where xgpu_backend_capabilities' bloom): the view's
 light past paper white glows (XGPU_BLOOM_GLOW: small and faint; _FULL:
 wider and brighter) before the tone map: its share past 1 (the threshold),

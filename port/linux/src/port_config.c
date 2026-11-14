@@ -714,6 +714,15 @@ static const struct config_setting config_settings[] =
 		"drew them. Read each frame (the console's prism_set \"materials pbr\").\n"
 		"Vulkan only, and not in the Windows build yet; the Mac's Metal renderer\n"
 		"draws stock." },
+	{ "display.lighting", _config_string, "\"ce\"", "HALO_LIGHTING", _environment_value, _platform_desktop,
+		"PRISM v4: how the 3D view is lit. \"ce\" the game's own renderer (and\n"
+		"PRISM's forward extras, as set). \"ce_deferred\" a diagnostic of the\n"
+		"deferred renderer's first step: CE's environment passes drawn into\n"
+		"targets of their own (the light, the base colour, the specular and\n"
+		"reflection additions) and the frame put together from them before\n"
+		"the transparent geometry, to prove they carry every surface (the\n"
+		"picture is Classic's up to rounding and the decals). Read each frame.\n"
+		"Vulkan only; no anti-aliasing by multisampling." },
 	{ "display.prism_rt", _config_string, "\"off\"", "HALO_PRISM_RT", _environment_value, _platform_desktop,
 		"PRISM: hardware ray tracing (docs/prism_rt.md), on graphics cards that\n"
 		"have it: \"shadows\" the sun's shadows of everything on screen traced\n"
@@ -2804,6 +2813,10 @@ static const struct config_setting config_settings[] =
 		"\"visibility\" the sun's (white lit, black in a shadow), \"ao\" the\n"
 		"traced ambient occlusion, \"gi\" the bounced light, \"normals\", \"heat\"\n"
 		"(the rays' cost); \"off\" the game. For checking." },
+	{ "debug.gbuffer_view", _config_string, "\"off\"", "HALO_GBUFFER_VIEW", _environment_value, _platform_desktop,
+		"With display.lighting \"ce_deferred\": one of its targets shown alone\n"
+		"in the frame's place, \"base\", \"light\" or \"additions\"; \"off\" the\n"
+		"frame. Read each frame." },
 	{ "debug.pt_reference", _config_integer, "0", "HALO_PT_REFERENCE", _environment_value, _platform_desktop,
 		"With display.prism_rt \"pathtraced\", a converged reference for the\n"
 		"quality gates (docs/prism_v4.md): the path tracer unbiased (no reuse,\n"
@@ -4575,6 +4588,8 @@ static const struct
 	{ "display.resolution_scaling", { "native", "original", NULL }, NULL },
 	{ "display.anti_aliasing", { "off", "fxaa", "smaa", "ssaa2x", "msaa2x", "msaa4x", "msaa8x", NULL }, NULL },
 	{ "display.ambient_occlusion", { "off", "world", NULL }, "off" },
+	{ "display.lighting", { "ce", "ce_deferred", NULL }, "ce" },
+	{ "debug.gbuffer_view", { "off", "base", "light", "additions", NULL }, "off" },
 	{ "display.prism_rt", { "off", "shadows", "gi", "pathtraced", NULL }, "off" },
 	{ "display.prism_rt_quality", { "medium", "low", "high", "ultra", NULL }, "medium" },
 	{ "display.prism_rt_resolution", { "auto", "half", "full", NULL }, "auto" },

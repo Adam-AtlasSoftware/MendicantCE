@@ -94,6 +94,9 @@ struct host_render_backend
 	/* the game's renderer's category of the draws from now on
 	(XGPU_STREAM_CATEGORY's value), for the GPU's timing */
 	void (*category)(void *context, uint32_t category);
+	/* display.lighting "ce_deferred": the draws' target from now on, or the
+	frame put together (XGPU_STREAM_GBUFFER_PHASE's value) */
+	void (*gbuffer_phase)(void *context, uint32_t phase);
 	/* display.panini: a 3D view drawn again through the Panini projection
 	(none: not drawn) */
 	void (*panini)(void *context, const struct xgpu_stream_panini *record);

@@ -768,6 +768,14 @@ void xgpu_backend_category(int category)
 	record_value(XGPU_STREAM_CATEGORY, value);
 }
 
+void xgpu_backend_gbuffer_phase(unsigned long phase)
+{
+	/* (not into a map's preparation: its draws are not drawn) */
+	if (!stream.open || stream.preparing)
+		return;
+	record_value(XGPU_STREAM_GBUFFER_PHASE, (uint32_t)phase);
+}
+
 void xgpu_backend_picture_top(int top)
 {
 	/* (0 centered, n + 1 at n pixels from the top) */

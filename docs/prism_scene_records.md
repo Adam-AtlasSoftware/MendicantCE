@@ -12,9 +12,11 @@ The layouts and the encoders, and nothing else:
 
 - no build compiles the encoders, and nothing calls them;
 - no backend reads the records. Their types follow the stream's own (`XGPU_STREAM_SCENE_MATERIAL` is
-  `XGPU_STREAM_RECORD_TYPES`, 82, and so on to 89) and are not counted in `XGPU_STREAM_RECORD_TYPES`, so the host's
+  `XGPU_STREAM_RECORD_TYPES`, 83, and so on to 90) and are not counted in `XGPU_STREAM_RECORD_TYPES`, so the host's
   decoder would stop at one as an unknown record;
-- `XGPU_STREAM_VERSION` stays 29.
+- `XGPU_STREAM_VERSION` is 30: M1's first record, `GBUFFER_PHASE` (82, in the stream's own list), sends
+  `display.lighting` `ce_deferred`'s phases (`port/linux/game/prism_deferred.c`), the "CE light, deferred" diagnostic
+  drawn from CE's own passes put in targets of their own. It is sent only in that mode.
 
 The milestone that first sends them (M1, the deferred core) moves their types into the stream's list, gives the
 decoder their minimum sizes and raises `XGPU_STREAM_VERSION`.

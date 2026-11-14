@@ -567,8 +567,13 @@ static struct
 	struct
 	{
 		uint64_t serial;
-		int used;
+		int used, split;
 	} gpu_times[GPU_TIME_FRAMES];
+	/* the split of the interval last read (milliseconds from its start; < 0
+	none), and HALO_VULKAN_GPU_TIMES_FILE's file */
+	double gpu_time_split_read;
+	FILE *gpu_times_file;
+	int gpu_times_file_tried;
 	uint32_t gpu_time_current;
 	int gpu_time_active, gpu_time_armed, gpu_time_failed;
 
@@ -1729,7 +1734,7 @@ static void gpu_time_start(void)
 		memset(&create, 0, sizeof(create));
 		create.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
 		create.queryType = VK_QUERY_TYPE_TIMESTAMP;
-		create.queryCount = GPU_TIME_FRAMES * 2;
+		create.queryCount = GPU_TIME_FRAMES * 3;
 		if (!check(vkCreateQueryPool(vk.device, &create, NULL, &vk.gpu_time_pool), "vkCreateQueryPool (GPU time)"))
 		{
 			vk.gpu_time_failed = 1;
@@ -1741,9 +1746,10 @@ static void gpu_time_start(void)
 	if (index == GPU_TIME_FRAMES)
 		return;
 	commands = early_commands();
-	vkResetQueryPool(vk.device, vk.gpu_time_pool, index * 2, 2);
-	vkCmdWriteTimestamp(commands, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, vk.gpu_time_pool, index * 2);
+	vkResetQueryPool(vk.device, vk.gpu_time_pool, index * 3, 3);
+	vkCmdWriteTimestamp(commands, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, vk.gpu_time_pool, index * 3);
 	vk.gpu_times[index].used = 1;
+	vk.gpu_times[index].split = 0;
 	vk.gpu_times[index].serial = 0;
 	vk.gpu_time_current = index;
 	vk.gpu_time_active = 1;
@@ -1760,9 +1766,21 @@ void xgpu_vulkan_gpu_time_end(void)
 	commands = main_commands();
 	index = vk.gpu_time_current;
 	/* Outside the multiview rendering scope: one query, not one per view. */
-	vkCmdWriteTimestamp(commands, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, vk.gpu_time_pool, index * 2 + 1);
+	vkCmdWriteTimestamp(commands, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, vk.gpu_time_pool, index * 3 + 1);
 	vk.gpu_times[index].serial = vk.serial;
 	vk.gpu_time_active = 0;
+}
+
+void xgpu_vulkan_gpu_time_split(void)
+{
+	uint32_t index = vk.gpu_time_current;
+
+	if (!vk.gpu_time_active || vk.gpu_times[index].split)
+		return;
+	/* (in the main buffer, after the passes recorded so far: outside any
+	rendering, as a copy is) */
+	vkCmdWriteTimestamp(main_commands(), VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, vk.gpu_time_pool, index * 3 + 2);
+	vk.gpu_times[index].split = 1;
 }
 
 int xgpu_vulkan_gpu_time_read(double *milliseconds)
@@ -1786,7 +1804,7 @@ int xgpu_vulkan_gpu_time_read(double *milliseconds)
 	}
 	if (found == GPU_TIME_FRAMES)
 		return 0;
-	result = vkGetQueryPoolResults(vk.device, vk.gpu_time_pool, found * 2, 2, sizeof(results), results,
+	result = vkGetQueryPoolResults(vk.device, vk.gpu_time_pool, found * 3, 2, sizeof(results), results,
 		sizeof(results[0]), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT);
 	if (result == VK_NOT_READY)
 		return 0;
@@ -1800,6 +1818,16 @@ int xgpu_vulkan_gpu_time_read(double *milliseconds)
 	mask = vk.timestamp_bits >= 64 ? UINT64_MAX : (UINT64_C(1) << vk.timestamp_bits) - 1;
 	elapsed = (results[1][0] - results[0][0]) & mask;
 	*milliseconds = (double)elapsed * (double)vk.properties.limits.timestampPeriod * 1e-6;
+	vk.gpu_time_split_read = -1.0;
+	if (vk.gpu_times[found].split)
+	{
+		uint64_t split[2];
+
+		if (vkGetQueryPoolResults(vk.device, vk.gpu_time_pool, found * 3 + 2, 1, sizeof(split), split, sizeof(split),
+			VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT) == VK_SUCCESS && split[1])
+			vk.gpu_time_split_read = (double)((split[0] - results[0][0]) & mask) *
+				(double)vk.properties.limits.timestampPeriod * 1e-6;
+	}
 	vk.gpu_times[found].used = 0;
 	return 1;
 }
@@ -7048,6 +7076,25 @@ void xgpu_vulkan_frame_end(struct xgpu_vulkan_image *image, int present_window)
 		{
 			vk.statistics.gpu_milliseconds += milliseconds;
 			vk.statistics.gpu_frames++;
+			if (vk.gpu_time_split_read >= 0.0)
+			{
+				vk.statistics.gpu_split_milliseconds += vk.gpu_time_split_read;
+				vk.statistics.gpu_split_frames++;
+			}
+			/* (HALO_VULKAN_GPU_TIMES_FILE: each frame's GPU time and its
+			split, one a line, for the gates' medians and percentiles) */
+			if (!vk.gpu_times_file_tried)
+			{
+				const char *path = getenv("HALO_VULKAN_GPU_TIMES_FILE");
+
+				vk.gpu_times_file_tried = 1;
+				vk.gpu_times_file = path && *path ? fopen(path, "w") : NULL;
+			}
+			if (vk.gpu_times_file)
+			{
+				fprintf(vk.gpu_times_file, "%.4f %.4f\n", milliseconds, vk.gpu_time_split_read);
+				fflush(vk.gpu_times_file);
+			}
 		}
 		if (vk.frame_ended > 0.0)
 		{

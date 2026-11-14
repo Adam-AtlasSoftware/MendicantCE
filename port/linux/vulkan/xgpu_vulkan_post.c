@@ -203,7 +203,8 @@ own 8-bit images */
 static struct xgpu_vulkan_pipeline_description *pipeline_of(int program, uint8_t format)
 {
 	return format == XGPU_VULKAN_FORMAT_RGBA16F && (program == XGPU_VULKAN_POST_FXAA ||
-		program == XGPU_VULKAN_POST_SMAA_BLEND || program == XGPU_VULKAN_POST_PANINI) ?
+		program == XGPU_VULKAN_POST_SMAA_BLEND || program == XGPU_VULKAN_POST_PANINI ||
+		program == XGPU_VULKAN_POST_DEFERRED_RESOLVE) ?
 		&post.half_float[program] : &post.pipelines[program];
 }
 
@@ -426,6 +427,57 @@ int xgpu_vulkan_post_anti_alias(int smaa, struct xgpu_vulkan_image *target, uint
 
 		pass_draw(XGPU_VULKAN_POST_SMAA_BLEND, target, layer, rectangle, post.color, post.weights, NULL, NULL);
 	}
+	return 1;
+}
+
+/* ---------- display.lighting "ce_deferred" (xgpu_vulkan_stream.c)
+
+The resolve of CE's passes drawn apart: the colour target's pixels (the
+light) copied, as FXAA's are, then each pixel drawn from the copy, the base
+and the additions (DEFERRED_RESOLVE: light x base + additions, the
+additions' alpha; or one of them alone: view). All four channels: the
+alpha is CE's destination alpha after its passes. A target of one sample
+only (the stream draws a multisampled one as "ce"). */
+
+int xgpu_vulkan_post_deferred_resolve(struct xgpu_vulkan_image *target, struct xgpu_vulkan_image *base,
+	struct xgpu_vulkan_image *additions, int view)
+{
+	const struct xgpu_vulkan_image_description *description;
+	struct xgpu_vulkan_pipeline_description *pipeline;
+	int32_t rectangle[4];
+	float bounds[4];
+
+	if (!target || !base || !additions)
+		return 0;
+	description = xgpu_vulkan_image_description(target);
+	if ((description->format != XGPU_VULKAN_FORMAT_BGRA8 && description->format != XGPU_VULKAN_FORMAT_RGBA16F) ||
+		description->samples > 1)
+		return 0;
+	if (!post.vertex)
+		post.vertex = xgpu_vulkan_shader(xgpu_vulkan_post_vertex.words, xgpu_vulkan_post_vertex.count);
+	if (!post.pixel[XGPU_VULKAN_POST_DEFERRED_RESOLVE])
+		post.pixel[XGPU_VULKAN_POST_DEFERRED_RESOLVE] = xgpu_vulkan_shader(
+			xgpu_vulkan_post_programs[XGPU_VULKAN_POST_DEFERRED_RESOLVE].words,
+			xgpu_vulkan_post_programs[XGPU_VULKAN_POST_DEFERRED_RESOLVE].count);
+	if (!post.vertex || !post.pixel[XGPU_VULKAN_POST_DEFERRED_RESOLVE] || !sampler_make())
+		return 0;
+	pipeline = pipeline_of(XGPU_VULKAN_POST_DEFERRED_RESOLVE, description->format);
+	memset(pipeline, 0, sizeof(*pipeline));
+	pipeline->vertex_shader = post.vertex;
+	pipeline->pixel_shader = post.pixel[XGPU_VULKAN_POST_DEFERRED_RESOLVE];
+	pipeline->primitive_class = XGPU_VULKAN_CLASS_TRIANGLES;
+	pipeline->color_mask = 15;
+	pipeline->color_format = description->format;
+	pipeline->samples = 1;
+	if (!images_fit(0, description->format, description->width, description->height))
+		return 0;
+	rectangle[0] = rectangle[1] = 0;
+	rectangle[2] = (int32_t)description->width;
+	rectangle[3] = (int32_t)description->height;
+	xgpu_vulkan_image_copy_rectangle(target, 0, post.color, rectangle);
+	memset(bounds, 0, sizeof(bounds));
+	bounds[0] = (float)view;
+	pass_draw(XGPU_VULKAN_POST_DEFERRED_RESOLVE, target, 0, rectangle, post.color, base, additions, bounds);
 	return 1;
 }
 

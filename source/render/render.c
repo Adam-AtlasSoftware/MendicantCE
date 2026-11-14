@@ -164,6 +164,7 @@ boolean render_world_ao_prepass = FALSE;
 boolean render_prism_shadow_pass = FALSE;
 /* port: port/linux/game/prism_shadows.c */
 boolean prism_shadows_wanted(void);
+#include "prism_deferred.h" /* port: port/linux/game/prism_deferred.c */
 boolean prism_shadows_pass_begin(struct render_camera const *camera, struct render_frustum const *frustum);
 void prism_shadows_pass_structure(void);
 void prism_shadows_pass_end(void);
@@ -411,6 +412,7 @@ static void render_window(
 	struct rasterizer_window_begin_parameters parameters;
 	short rendered_cluster_index;
 	boolean world_ao_prepassed; /* port: (below) */
+	boolean prism_deferred; /* port: (below) */
 
 	profile_render_window_start(TRUE);
 	render.scene_index++;
@@ -602,6 +604,20 @@ static void render_window(
 		}
 		rasterizer_decals_end();
 
+		/* port: display.lighting "ce_deferred": the texture pass and the
+		decals over it into the base target, the specular and reflection
+		passes into the additions', and the frame put together from them
+		before the transparent geometry (port/linux/game/prism_deferred.c; not
+		in the VR mode's eye or scope passes, nor a mirror's view) */
+		prism_deferred = rasterizer_target == _render_target_primary && !rasterizer_camera->mirrored &&
+#ifdef HALO_VR
+			!render_vr_eye_pass && !render_vr_scope_pass &&
+#endif
+			prism_deferred_wanted();
+		if (prism_deferred)
+		{
+			prism_deferred_phase(_prism_deferred_base);
+		}
 		structure_render_diffuse_texture();
 
 		rasterizer_decals_begin(_decal_layer_primary);
@@ -624,12 +640,20 @@ static void render_window(
 		/* port: and every decal's (port/linux/game/render_enumerate.c) */
 		render_enumerate_decals();
 
+		if (prism_deferred) /* port: (above) */
+		{
+			prism_deferred_phase(_prism_deferred_additions);
+		}
 		lights_render_specular();
 		render_enumerate_lights(TRUE);	/* port: (render_enumerate.c) */
 		structure_render_specular_lightmaps();
 		structure_render_reflection_lightmap_masks();
 		structure_render_reflection_mirrors();
 		structure_render_reflections();
+		if (prism_deferred) /* port: (above) */
+		{
+			prism_deferred_phase(_prism_deferred_resolve);
+		}
 		structure_render_transparent_geometry();
 		structure_render_fog();
 		game_engine_post_rasterize_objects();

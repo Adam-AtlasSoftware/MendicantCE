@@ -137,11 +137,13 @@ def test_sizes_multiples_of_four(driver64):
 
 
 def test_stream_unchanged(constants):
-    assert constants["version"] == 29
+    # (30: GBUFFER_PHASE, display.lighting "ce_deferred", PRISM v4 M1's first record)
+    assert constants["version"] == 30
     text = (SOURCE / "xgpu_stream.h").read_text()
-    assert re.search(r"#define XGPU_STREAM_VERSION 29\b", text)
-    # (the stream's own types end at RT_FRAME; the scene's start past the count the decoder takes)
-    assert constants["rt_frame"] == constants["record_types"] - 1
+    assert re.search(r"#define XGPU_STREAM_VERSION 30\b", text)
+    # (the stream's own types end at GBUFFER_PHASE, after RT_FRAME; the scene's start past the count the decoder
+    # takes)
+    assert constants["rt_frame"] == constants["record_types"] - 2
     scene = [constants[name] for name in ("scene_material", "scene_material_animate", "scene_instance",
                                           "gbuffer_draw", "scene_static", "scene_lights", "scene_decal",
                                           "scene_fog")]

@@ -38,7 +38,7 @@ port/linux/README.md.
 #include <stdint.h>
 
 #define XGPU_STREAM_MAGIC 0x53504758u /* "XGPS" */
-#define XGPU_STREAM_VERSION 29
+#define XGPU_STREAM_VERSION 30
 #define XGPU_STREAM_LOADING_ART_BYTES (640u * 480u * 4u)
 
 /* ---------- the ring
@@ -297,8 +297,25 @@ enum
 	(xgpu_stream_rt_static, xgpu_stream_rt_frame; docs/prism_rt.md) */
 	XGPU_STREAM_RT_STATIC,
 	XGPU_STREAM_RT_FRAME,
+	/* display.lighting "ce_deferred" (PRISM v4 M1's "CE light, deferred"):
+	the window's draws from now on to a phase's target, or the frame put
+	together from them (xgpu_backend_gbuffer_phase; value:
+	XGPU_GBUFFER_PHASE_*) */
+	XGPU_STREAM_GBUFFER_PHASE,
 	XGPU_STREAM_RECORD_TYPES,
 };
+
+/* GBUFFER_PHASE's value: the diffuse texture pass's base (an image that
+starts white, with the window's colour target's alpha), the specular and
+reflection passes' additions (one that starts black, with the base's
+alpha), or the resolve (the colour target becomes light x base + additions,
+the additions' alpha, and the draws go to it again); the resolve's view from
+bit 8 (0 the frame; 1 the base, 2 the light, 3 the additions, alone:
+debug.gbuffer_view) */
+#define XGPU_GBUFFER_PHASE_BASE 1u
+#define XGPU_GBUFFER_PHASE_ADDITIONS 2u
+#define XGPU_GBUFFER_PHASE_RESOLVE 3u
+#define XGPU_GBUFFER_PHASE_VIEW_SHIFT 8
 
 /* a record of no more than its header: SKIP, INVALIDATE, FLUSH,
 VISIBILITY_BEGIN, VISIBILITY_FRAME, DYNAMIC_LIGHTS_PREPARE,

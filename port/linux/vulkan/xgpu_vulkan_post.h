@@ -42,6 +42,11 @@ the middle, 0, and the rectilinear view's tangents at the corners' left,
 right, top and bottom. In the stream's order; the targets bound before are
 not bound after. 0 if it was not drawn */
 int xgpu_vulkan_post_panini_prepare(uint8_t format, uint32_t samples, int preparing);
+/* display.lighting "ce_deferred": the colour target (one sample) made light
+(its own pixels) x base + additions, or one of them alone (view: 0 the
+frame, 1 the base, 2 the light, 3 the additions); 1 if it was drawn */
+int xgpu_vulkan_post_deferred_resolve(struct xgpu_vulkan_image *target, struct xgpu_vulkan_image *base,
+	struct xgpu_vulkan_image *additions, int view);
 int xgpu_vulkan_post_panini(struct xgpu_vulkan_image *source, struct xgpu_vulkan_image *into, uint32_t layer,
 	const int32_t corners[4], const float projection[8]);
 

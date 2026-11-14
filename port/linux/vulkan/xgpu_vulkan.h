@@ -793,6 +793,11 @@ run on the renderer's thread, with end before the frame's fence. */
 void xgpu_vulkan_gpu_time_begin(void);
 void xgpu_vulkan_gpu_time_end(void);
 int xgpu_vulkan_gpu_time_read(double *milliseconds);
+/* within the frame's timed interval, a timestamp after the work recorded so
+far (once a frame; display.lighting "ce_deferred"'s resolve: the opaque
+surfaces' passes before it), which the statistics time from the frame's
+start */
+void xgpu_vulkan_gpu_time_split(void);
 
 uint64_t xgpu_vulkan_fence(void);
 /* returns once the GPU has done the submission of that number and those
@@ -894,6 +899,10 @@ struct xgpu_vulkan_statistics
 	the frames it is of */
 	double gpu_milliseconds, frame_seconds;
 	uint32_t gpu_frames, frames_timed;
+	/* of the frames timed with a split (xgpu_vulkan_gpu_time_split: display.
+	lighting "ce_deferred"'s resolve), the time from their start to it */
+	double gpu_split_milliseconds;
+	uint32_t gpu_split_frames;
 	uint64_t ring_bytes;
 	double pipeline_seconds;
 	uint64_t waits;

@@ -427,6 +427,23 @@ static struct
 	uint32_t passes, twins_drawn, twins_waiting, receivers, refused;
 } shadow;
 
+/* display.lighting "ce_deferred" (PRISM v4 M1's "CE light, deferred";
+port/linux/game/prism_deferred.c): between GBUFFER_PHASE's base and its
+resolve, the draws to the colour target it began on go to the base image
+(the diffuse texture pass and the decals over it) or the additions' (the
+specular and reflection passes); the resolve makes the colour target light x
+base + additions (xgpu_vulkan_post_deferred_resolve). The images are the
+colour target's size and format; a multisampled target is drawn as before */
+static struct
+{
+	/* XGPU_GBUFFER_PHASE_BASE or _ADDITIONS, 0 none; the target begun on */
+	uint32_t phase, color;
+	struct xgpu_vulkan_image *base, *additions;
+	uint32_t width, height;
+	uint8_t format;
+	int refused;
+} deferred;
+
 static double preparation_start(void)
 {
 	return stream.trace_preparing ? host_load_trace_clock(CLOCK_MONOTONIC) : -1.0;
@@ -703,6 +720,14 @@ static void targets_bind(void)
 	if (shadow.active)
 	{
 		xgpu_vulkan_set_target_views(NULL, shadow.atlases[shadow.structure], 0, 1);
+		return;
+	}
+	/* (display.lighting "ce_deferred"'s phases: the base or the additions in
+	the colour target's place) */
+	if (deferred.phase && stream.color == deferred.color && !stream.samples)
+	{
+		xgpu_vulkan_set_target_views(deferred.phase == XGPU_GBUFFER_PHASE_BASE ? deferred.base : deferred.additions,
+			depth_image, stream.base, stream.views);
 		return;
 	}
 
@@ -4243,12 +4268,110 @@ static void stream_present(void *context, uint32_t back_buffer)
 	stream.back_buffer = host_render_stream_loading_holds() ? 0 : back_buffer;
 }
 
+/* the base and additions images, the colour target's size and format: 1
+if they are */
+static int deferred_images(const struct stream_target *color)
+{
+	struct xgpu_vulkan_image_description description;
+
+	if (deferred.base && deferred.additions && deferred.width == color->width && deferred.height == color->height &&
+		deferred.format == color->format)
+		return 1;
+	xgpu_vulkan_image_destroy(deferred.base);
+	xgpu_vulkan_image_destroy(deferred.additions);
+	memset(&description, 0, sizeof(description));
+	description.type = XGPU_VULKAN_IMAGE_2D;
+	description.format = color->format;
+	description.usage = XGPU_VULKAN_USAGE_SAMPLED | XGPU_VULKAN_USAGE_TARGET;
+	if (description.format == XGPU_VULKAN_FORMAT_RGBA16F)
+		description.usage |= XGPU_VULKAN_USAGE_INPUT;
+	description.width = color->width;
+	description.height = color->height;
+	description.depth_or_layers = 1;
+	description.levels = 1;
+	deferred.base = xgpu_vulkan_image_create(&description);
+	deferred.additions = xgpu_vulkan_image_create(&description);
+	deferred.width = color->width;
+	deferred.height = color->height;
+	deferred.format = color->format;
+	return deferred.base && deferred.additions;
+}
+
+/* one of the phase images started: the colour of from copied (its alpha is
+the one the passes read), its red, green and blue cleared to value */
+static void deferred_start(struct xgpu_vulkan_image *from, struct xgpu_vulkan_image *image, float value)
+{
+	const float color[4] = { value, value, value, 1.0f };
+	int32_t whole[1][4];
+
+	whole[0][0] = whole[0][1] = 0;
+	whole[0][2] = (int32_t)deferred.width;
+	whole[0][3] = (int32_t)deferred.height;
+	xgpu_vulkan_image_copy_rectangle(from, 0, image, whole[0]);
+	xgpu_vulkan_set_targets(image, NULL, 0);
+	xgpu_vulkan_clear((const int32_t (*)[4])whole, 1,
+		XGPU_VULKAN_CLEAR_COLOR | XGPU_VULKAN_CLEAR_RED | XGPU_VULKAN_CLEAR_GREEN | XGPU_VULKAN_CLEAR_BLUE, color, 1.0f,
+		0);
+}
+
+static void stream_gbuffer_phase(void *context, uint32_t value)
+{
+	struct stream_target *color = target_get(stream.color);
+	uint32_t phase = value & 0xffu;
+
+	(void)context;
+	if (prepass.active || shadow.active || stream.preparing || !color || color->depth || color->layers > 1)
+		return;
+	if (stream.samples && color->multisampled)
+	{
+		if (!deferred.refused)
+			host_logf(HOST_LOG_WARN, "vulkan: display.lighting \"ce_deferred\" is not drawn with multisampling; "
+				"the frame is drawn as \"ce\"");
+		deferred.refused = 1;
+		deferred.phase = 0;
+		return;
+	}
+	if (phase == XGPU_GBUFFER_PHASE_BASE)
+	{
+		if (!deferred_images(color))
+		{
+			deferred.phase = 0;
+			return;
+		}
+		deferred.color = stream.color;
+		deferred_start(color->image, deferred.base, 1.0f);
+		deferred.phase = XGPU_GBUFFER_PHASE_BASE;
+		targets_bind();
+	}
+	else if (phase == XGPU_GBUFFER_PHASE_ADDITIONS && deferred.phase == XGPU_GBUFFER_PHASE_BASE &&
+		stream.color == deferred.color)
+	{
+		deferred_start(deferred.base, deferred.additions, 0.0f);
+		deferred.phase = XGPU_GBUFFER_PHASE_ADDITIONS;
+		targets_bind();
+	}
+	else if (phase == XGPU_GBUFFER_PHASE_RESOLVE && deferred.phase && stream.color == deferred.color)
+	{
+		if (deferred.phase == XGPU_GBUFFER_PHASE_BASE)
+			deferred_start(deferred.base, deferred.additions, 0.0f);
+		deferred.phase = 0;
+		/* (the statistics' split: the opaque surfaces' passes before it) */
+		xgpu_vulkan_gpu_time_split();
+		xgpu_vulkan_post_deferred_resolve(color->image, deferred.base, deferred.additions,
+			(int)(value >> XGPU_GBUFFER_PHASE_VIEW_SHIFT));
+		color->written++;
+		targets_bind();
+	}
+}
+
 static void stream_frame_end(void *context)
 {
 	struct stream_target *back_buffer = target_get(stream.back_buffer);
 	int present_window = !host_render_stream_loading_holds();
 
 	(void)context;
+	/* (a window's phases never past its frame) */
+	deferred.phase = 0;
 	world_make_some();
 	prepass.twins_made = 0;
 	shadow.twins_made = 0;
@@ -4525,6 +4648,7 @@ const struct host_render_backend *xgpu_vulkan_stream_backend(void)
 		backend.tone_map = stream_tone_map;
 		backend.picture_top = stream_picture_top;
 		backend.gamma = stream_gamma;
+		backend.gbuffer_phase = stream_gbuffer_phase;
 		backend.panini = stream_panini;
 		/* display.ambient_occlusion "world" (#578, docs/world-ao.md): the
 		field's 3D image (XGPU_SPIRV_BINDING_WORLD_SDF) and the window's block
