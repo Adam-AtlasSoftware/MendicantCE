@@ -426,6 +426,46 @@ void camera_pose_place_object(char const *line)
 	}
 	seat[0] = 0;
 	name[0] = 0;
+	/* ("player pose": the first player's unit's place and facing written to
+	the log as a camera path's pose, its eye 0.6 world units above its
+	origin: the quality gates' poses on a map with no scene of its own) */
+	if (line && !strcmp(line, "player pose"))
+	{
+		long player_index = data_next_index(player_data, NONE);
+		struct player_datum *player = player_index != NONE ? player_get(player_index) : NULL;
+		real_point3d position;
+		real_vector3d forward, up;
+
+		if (!player || player->unit_index == NONE || !object_header_try_and_get(player->unit_index))
+		{
+			platform_log("player pose: none");
+			return;
+		}
+		object_get_origin(player->unit_index, &position);
+		object_get_orientation(player->unit_index, &forward, &up);
+		platform_log("player pose: %.3f %.3f %.3f %.2f 0 0 70", position.x, position.y, position.z + 0.6f,
+			atan2f(forward.j, forward.i) * 57.29578f);
+		return;
+	}
+	/* ("list <words>": every object whose tag's name has those words in it,
+	its place and bounding radius, written to the log: the quality gates'
+	poses about a map's scenery) */
+	if (line && !strncmp(line, "list ", 5))
+	{
+		struct object_iterator iterator;
+		struct object_datum *object;
+
+		object_iterator_new(&iterator, _object_mask_all, 0);
+		while ((object = (struct object_datum *)object_iterator_next(&iterator)) != NULL)
+		{
+			char const *tag_name = tag_get_name(object->definition_index);
+
+			if (tag_name && strstr(tag_name, line + 5))
+				platform_log("object list: %s at %.3f %.3f %.3f radius %.3f", tag_name, object->object.position.x,
+					object->object.position.y, object->object.position.z, object->object.bounding_sphere_radius);
+		}
+		return;
+	}
 	if (line)
 	{
 		/* (the tag's name, which may have spaces in it ("scenery\plants\plant
