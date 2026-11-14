@@ -45,6 +45,35 @@ long prism_world_geometry_triangles(
 	int far_level,
 	float *to,
 	long most);
+/* PRISM v4's SCENE_STATIC (prism_scene_static.c): a remodelled surface's
+triangles of a level (PRISM_WORLD_GEOMETRY_LEVEL_*; `surface` its index
+among its material's), at most `most`, each three corners' places (9
+floats), base map coordinates and lightmap coordinates (6 floats each;
+positions NULL: only counted);
+how many (0: the far level is none apart from the near), -1 where the
+material has no remodel */
+enum
+{
+	PRISM_WORLD_GEOMETRY_LEVEL_NEAR,
+	PRISM_WORLD_GEOMETRY_LEVEL_FAR
+};
+long prism_world_geometry_surface_triangles(
+	short lightmap_index,
+	short material_index,
+	long surface,
+	int level,
+	float *positions,
+	float *base,
+	float *lightmap,
+	long most);
+/* ... the level the surface is drawn at for this frame's camera (1 far, 0
+near: the rule the drawn surfaces follow, off screen too), -1 where it has
+no far level */
+int prism_world_geometry_surface_level(
+	short lightmap_index,
+	short material_index,
+	long surface);
+
 /* the map's tags are about to go: everything made of them freed */
 void prism_world_geometry_map_unloaded(void);
 

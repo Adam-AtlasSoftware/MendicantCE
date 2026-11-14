@@ -53,6 +53,7 @@ the settings. Nothing crosses the network.
 #include "tag_files/tag_files.h"
 #include "world_scene.h"
 #include "prism_world_geometry.h"
+#include "prism_scene_static.h"
 #include "../src/xgpu_coverage.h"
 
 #include <math.h>
@@ -156,6 +157,9 @@ enum
 	PRISM_RT_WORLD_STOCK = 0,
 	PRISM_RT_WORLD_FAR,
 	PRISM_RT_WORLD_REMODEL,
+	/* (port: PRISM v4's SCENE_STATIC, the level as the window draws it:
+	the remodel's near and far levels each where drawn; "auto") */
+	PRISM_RT_WORLD_DRAWN,
 	/* display.prism_rt_style */
 	PRISM_RT_STYLE_FAITHFUL = 0,
 	PRISM_RT_STYLE_REMIX,
@@ -262,6 +266,9 @@ static struct
 	unsigned char *alpha;
 	long alpha_bytes, alpha_room, alpha_sent;
 	int ended;
+	/* port: the set is SCENE_STATIC's (prism_scene_static.c: its
+	generation), not copied here */
+	int scene_set;
 	/* the BSP's rig, the map and BSP it is of */
 	struct prism_rt_rig rig;
 	char rig_map[64];
@@ -322,7 +329,7 @@ static void settings_read(void)
 	static char const *const rates[] = { "full", "half", "quarter", NULL };
 	static char const *const views[] = { "off", "visibility", "ao", "gi", "reflections", "albedo", "normals",
 		"probes", "heat", NULL };
-	static char const *const worlds[] = { "stock", "far", "remodel", "auto", NULL };
+	static char const *const worlds[] = { "stock", "far", "remodel", "drawn", "auto", NULL };
 	static char const *const styles[] = { "faithful", "remix", NULL };
 	static char const *const suns[] = { "objects", "all", NULL };
 	static char const *const emissives[] = { "off", "lights", "all", NULL };
@@ -354,9 +361,9 @@ static void settings_read(void)
 	prism_rt.objects = word_index(config_string("display.prism_rt_objects"), objects, 0);
 	prism_rt.rate = word_index(config_string("display.prism_rt_rate"), rates, 0);
 	prism_rt.view = word_index(config_string("debug.prism_rt_view"), views, 0);
-	prism_rt.world = word_index(config_string("display.prism_rt_world"), worlds, 3);
-	if (prism_rt.world == 3)
-		prism_rt.world = PRISM_RT_WORLD_FAR;
+	prism_rt.world = word_index(config_string("display.prism_rt_world"), worlds, 4);
+	if (prism_rt.world == 4)
+		prism_rt.world = PRISM_RT_WORLD_DRAWN;
 	prism_rt.cache = config_boolean("display.prism_rt_cache") != 0;
 	mood = config_integer("display.prism_rt_mood");
 	prism_rt.mood = mood < 0 ? 0 : mood > 100 ? 100 : (int)mood;
@@ -1106,6 +1113,68 @@ static int world_level(void)
 	return prism_world_geometry_drawn() ? prism_rt.world : PRISM_RT_WORLD_STOCK;
 }
 
+/* port: "drawn" (and "auto"): the level traced is SCENE_STATIC's, the level
+as drawn (prism_scene_static.c sends its triangles and their attributes,
+each with its traced material: prism_rt_traced_material), and the set here
+is begun with it, its materials and alpha maps sent once it is whole, then
+its end. FALSE where the level is copied here (the other shapes) */
+static int static_scene_frame(void)
+{
+	unsigned long generation;
+
+	if (prism_rt.world != PRISM_RT_WORLD_DRAWN)
+	{
+		if (prism_rt.scene_set)
+		{
+			static_release();
+			prism_rt.scene_set = 0;
+		}
+		return FALSE;
+	}
+	rig_read();
+	generation = prism_scene_static_generation();
+	if (!prism_rt.scene_set || generation != prism_rt.generation)
+	{
+		static_release();
+		prism_rt.scene_set = 1;
+		prism_rt.generation = generation;
+		prism_rt.bsp_index = global_structure_bsp_index_get();
+		prism_rt.copied_world = world_level();
+		if (!generation)
+		{
+			prism_rt.ended = 1;
+			return TRUE;
+		}
+		halo_prism_rt_static(PRISM_RT_STATIC_BEGIN, prism_rt.generation, 0, 0, 0, NULL);
+	}
+	if (prism_rt.ended || !prism_scene_static_ended())
+		return TRUE;
+	if (prism_rt.materials_sent < prism_rt.material_count)
+	{
+		halo_prism_rt_static(PRISM_RT_STATIC_MATERIALS, prism_rt.generation, 0, (unsigned long)prism_rt.material_count,
+			(unsigned long)prism_rt.material_count, prism_rt.materials);
+		prism_rt.materials_sent = prism_rt.material_count;
+		return TRUE;
+	}
+	if (prism_rt.alpha_sent * 4 < prism_rt.alpha_bytes)
+	{
+		long words = (prism_rt.alpha_bytes + 3) / 4, count = MIN(words - prism_rt.alpha_sent, PRISM_RT_SLICE);
+
+		halo_prism_rt_static(PRISM_RT_STATIC_ALPHA, prism_rt.generation, (unsigned long)prism_rt.alpha_sent,
+			(unsigned long)count, (unsigned long)words, prism_rt.alpha + prism_rt.alpha_sent * 4);
+		prism_rt.alpha_sent += count;
+		return TRUE;
+	}
+	halo_prism_rt_static(PRISM_RT_STATIC_END, prism_rt.generation, 0, 0, 0, NULL);
+	prism_rt.ended = 1;
+	platform_log("prism rt: bsp %d: the level as drawn (scene set %lu), %ld materials, %ld KB of alpha maps",
+		(int)prism_rt.bsp_index, prism_rt.generation, prism_rt.material_count, prism_rt.alpha_bytes / 1024);
+	if (prism_rt.alpha)
+		free(prism_rt.alpha);
+	prism_rt.alpha = NULL;
+	return TRUE;
+}
+
 /* the BSP drawn: its triangles copied once (again when the shape traced
 or the traced kinds change: the remodel loaded, display.prism_rt_world or
 _alpha set), then sent a slice a frame: the triangles, their attributes,
@@ -1117,6 +1186,8 @@ static void static_frame(void)
 	int world = world_level();
 	struct structure_bsp *bsp;
 
+	if (static_scene_frame())
+		return;
 	rig_read();
 	if (bsp_index != prism_rt.bsp_index || world != prism_rt.copied_world || prism_rt.alpha_traced != copied_alpha)
 	{
@@ -1331,6 +1402,33 @@ static int light_keyed(void)
 
 /* ---------- public code */
 
+/* port: SCENE_STATIC's traced material of a shader (prism_scene_static.c):
+its index in the set's materials (made once a set), NONE where the level
+traced is not SCENE_STATIC's or the shader is not traced (an alpha-tested
+one without display.prism_rt_alpha) */
+long prism_rt_traced_material(long shader_tag, int *kind)
+{
+	long index;
+
+	*kind = PRISM_RT_TRIANGLE_OPAQUE;
+	if (prism_rt_mode() == PRISM_RT_OFF || prism_rt.world != PRISM_RT_WORLD_DRAWN)
+		return NONE;
+	index = material_of(shader_tag, kind);
+	if (index != NONE && *kind == PRISM_RT_TRIANGLE_ALPHA_TESTED && !prism_rt.alpha_traced)
+		return NONE;
+	return index;
+}
+
+/* port: what SCENE_STATIC's traced materials are of: 0 none (ray tracing
+off, or its level copied here), 1 the level as drawn, 2 with its
+alpha-tested surfaces */
+int prism_rt_scene_traced(void)
+{
+	if (prism_rt_mode() == PRISM_RT_OFF || prism_rt.world != PRISM_RT_WORLD_DRAWN)
+		return 0;
+	return prism_rt.alpha_traced ? 2 : 1;
+}
+
 /* the mode drawn (PRISM_RT_*: off where the renderer cannot trace) */
 int prism_rt_mode(void)
 {
@@ -1347,7 +1445,9 @@ short prism_rt_world_proxy(void)
 {
 	if (prism_rt_mode() == PRISM_RT_OFF)
 		return PRISM_RT_WORLD_STOCK;
-	return (short)prism_rt.world;
+	/* ("drawn": the remodel as the window draws it, near and far, which is
+	the remodel's proxy) */
+	return (short)(prism_rt.world == PRISM_RT_WORLD_DRAWN ? PRISM_RT_WORLD_REMODEL : prism_rt.world);
 }
 
 /* the pre-pass's pass found at every pixel (world AO's scale 1) */

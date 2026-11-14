@@ -434,4 +434,4 @@ The decompilation's upstream, punpckhdq/halo, is AGPL 3.0 from 17 October
 | [docs/prism_rigs.md](docs/prism_rigs.md) | PRISM's extended skeletons: helper bones, rigs, springs on the game's clock, the Blender export |
 | [docs/prism_gates.md](docs/prism_gates.md) | PRISM's quality gates: the frozen capture set, the harness, `debug.pt_reference`, the metrics and thresholds, the checks every milestone passes |
 | [docs/prism_plugin.md](docs/prism_plugin.md) | PRISM's renderer plugin interface (`prism_plugin.h`, MIT or AGPL), the passthrough plugin, the loader |
-| [docs/prism_scene_records.md](docs/prism_scene_records.md) | PRISM v4's scene records in the command stream (specified, not yet sent) |
+| [docs/prism_scene_records.md](docs/prism_scene_records.md) | PRISM v4's scene records in the command stream: what is sent (the materials, the G-buffer's draws, the level's geometry, the lights) and what is specified |

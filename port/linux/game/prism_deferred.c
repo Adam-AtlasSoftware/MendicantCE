@@ -375,6 +375,14 @@ static unsigned long material_of(
 	return 0;
 }
 
+unsigned long prism_deferred_material_id(
+	void const *shader)
+{
+	materials_make();
+
+	return material_of(shader);
+}
+
 void prism_deferred_gbuffer_begin(
 	void)
 {

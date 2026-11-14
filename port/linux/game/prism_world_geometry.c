@@ -135,6 +135,7 @@ byte.
 #include "structure_culling.h"
 #include "prism_world_geometry.h"
 #include "prism_popin.h"
+#include "prism_scene_static.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -2261,6 +2262,9 @@ void prism_world_geometry_frame(
 		world_geometry.camera_radius = radius;
 	}
 	statistics_frame();
+	/* (PRISM v4's SCENE_STATIC: each surface's level for this camera, for the
+	ray tracer's structure to follow) */
+	prism_scene_static_levels();
 
 	return;
 }
@@ -2558,6 +2562,184 @@ long prism_world_geometry_triangles(
 	}
 
 	return written;
+}
+
+/* the remodel's part of a material that has a surface (its index among the
+material's), and the surface's index in the part; NULL where none */
+static struct world_material *surface_part(
+	short lightmap_index,
+	short material_index,
+	long surface,
+	long *local)
+{
+	long entry, part;
+	struct world_material *first_part;
+
+	if (!world_geometry.materials || !world_geometry.lookup || lightmap_index < 0 ||
+		lightmap_index >= world_geometry.lightmap_count || surface < 0)
+	{
+		return NULL;
+	}
+	entry = world_geometry.lightmap_first[lightmap_index] + material_index;
+	if (material_index < 0 || entry >= world_geometry.lightmap_first[lightmap_index + 1] ||
+		world_geometry.lookup[entry] == NONE)
+	{
+		return NULL;
+	}
+	first_part = &world_geometry.materials[world_geometry.lookup[entry]];
+	for (part = 0; part < first_part->part_count; part++)
+	{
+		struct world_material *made = first_part + part;
+
+		if (surface >= made->part_first_surface && surface < made->part_first_surface + made->surface_count)
+		{
+			*local = surface - made->part_first_surface;
+			return made;
+		}
+	}
+
+	return NULL;
+}
+
+/* a remodelled surface's triangles of a level: [*first, *first + *count)
+of its part's; FALSE where out of the part's */
+static boolean surface_range(
+	struct world_material const *made,
+	long local,
+	int far_level,
+	unsigned long *first,
+	unsigned long *count)
+{
+	if (far_level && made->far_triangles)
+	{
+		*first = made->far_triangles[local * 2];
+		*count = made->far_triangles[local * 2 + 1];
+	}
+	else
+	{
+		*first = made->surface_first_triangle[local];
+		*count = made->surface_first_triangle[local + 1] - *first;
+	}
+
+	return *first <= (unsigned long)made->triangle_count && *count <= (unsigned long)made->triangle_count - *first;
+}
+
+long prism_world_geometry_surface_triangles(
+	short lightmap_index,
+	short material_index,
+	long surface,
+	int level,
+	float *positions,
+	float *base,
+	float *lightmap,
+	long most)
+{
+	long local, vertex_size, lightmap_size, written = 0;
+	struct world_material const *made = surface_part(lightmap_index, material_index, surface, &local);
+	unsigned long first, count, near_first, near_count, triangle;
+	byte const *vertices, *lightmap_vertices;
+	word const *indices;
+
+	if (!made)
+	{
+		return -1;
+	}
+	vertex_size = rasterizer_geometry_get_vertex_size(made->buffers[0].type);
+	lightmap_size = rasterizer_geometry_get_vertex_size(made->buffers[1].type);
+	vertices = (byte const *)made->buffers[0].base_address;
+	lightmap_vertices = (byte const *)made->buffers[1].base_address;
+	indices = (word const *)made->index_resource.data;
+	if (!vertices || !indices || vertex_size < 12 || !surface_range(made, local, FALSE, &near_first, &near_count))
+	{
+		return -1;
+	}
+	if (level == PRISM_WORLD_GEOMETRY_LEVEL_FAR)
+	{
+		/* (none apart: no far level, or its far level its near one) */
+		if (!made->far_triangles || !surface_range(made, local, TRUE, &first, &count) ||
+			(first == near_first && count == near_count))
+		{
+			return 0;
+		}
+	}
+	else
+	{
+		first = near_first;
+		count = near_count;
+	}
+	/* (NULL: counted) */
+	if (!positions)
+	{
+		return (long)count;
+	}
+	for (triangle = first; triangle < first + count; triangle++)
+	{
+		int corner;
+
+		if (written >= most)
+		{
+			break;
+		}
+		for (corner = 0; corner < 3; corner++)
+		{
+			unsigned long vertex = indices[triangle * 3 + corner];
+			byte const *at;
+
+			if (vertex >= (unsigned long)made->buffers[0].count)
+			{
+				vertex = 0;
+			}
+			at = vertices + vertex * vertex_size;
+			memcpy(positions + written * 9 + corner * 3, at, 3 * sizeof(float));
+			/* (the base map's coordinates: the compressed vertex's at 24, the
+			uncompressed's at 48) */
+			if (vertex_size == 32 || vertex_size >= 56)
+			{
+				memcpy(base + written * 6 + corner * 2, at + (vertex_size == 32 ? 24 : 48), 2 * sizeof(float));
+			}
+			else
+			{
+				base[written * 6 + corner * 2] = base[written * 6 + corner * 2 + 1] = 0.0f;
+			}
+			lightmap[written * 6 + corner * 2] = lightmap[written * 6 + corner * 2 + 1] = 0.0f;
+			if (lightmap_vertices && vertex < (unsigned long)made->buffers[1].count)
+			{
+				at = lightmap_vertices + vertex * lightmap_size;
+				if (lightmap_size == 8)
+				{
+					/* (the compressed lightmap vertex's coordinates: two shorts at 4,
+					as environment_lightmap_vertex_compressed_get_texcoord reads them) */
+					short const *uv = (short const *)(at + 4);
+
+					lightmap[written * 6 + corner * 2] = ((float)uv[0] * 2.0f + 1.0f) * (1.0f / 65535.0f);
+					lightmap[written * 6 + corner * 2 + 1] = ((float)uv[1] * 2.0f + 1.0f) * (1.0f / 65535.0f);
+				}
+				else if (lightmap_size >= 20)
+				{
+					memcpy(lightmap + written * 6 + corner * 2, at + 12, 2 * sizeof(float));
+				}
+			}
+		}
+		written++;
+	}
+
+	return written;
+}
+
+int prism_world_geometry_surface_level(
+	short lightmap_index,
+	short material_index,
+	long surface)
+{
+	long local;
+	struct world_material *made = surface_part(lightmap_index, material_index, surface, &local);
+
+	if (!made || !made->far_triangles || !world_geometry.enabled || !world_geometry.stamp)
+	{
+		return -1;
+	}
+
+	return TEST_FLAG(surface_choice(made, local), _surface_choice_far_bit) ? 1 : 0;
 }
 
 int prism_world_geometry_drawn(

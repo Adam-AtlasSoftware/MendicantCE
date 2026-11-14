@@ -178,7 +178,7 @@
 		<string text="Half traces a ray for each block of four pixels, cheaper on the graphics card; Full traces each pixel. Auto: full, but at Low quality."/>
 		<string text="How the rays are smoothed: Full by their neighbours and the frames before, Temporal by the frames before alone, Off as they are."/>
 		<string text="How far the bounced light may move a character's light from the game's own. CE keeps it; Full lets it go up to a quarter brighter or darker."/>
-		<string text="The level's shape the rays meet. Auto: the remodel's far level where it is drawn. Remodel: all of it, more memory. Game's: the map's own."/>
+		<string text="The level's shape the rays meet. Auto: the level as it is drawn, near and far. Far: the remodel's far level. Remodel: its near level, all of it. Game's: the map's own."/>
 		<string text="As Drawn: the replacement models' shapes where they are drawn, within 40 units (the game's own past that, and far objects left out when there are too many). Game's: the game's own models, cheaper."/>
 		<string text="Keeps each object's traced shape from frame to frame, refitting only what moved: much less work. Off redoes them all each frame."/>
 		<string text="All: the level's own sun shadows as sharp as the objects', every shadow as dark as the light rig says. Objects: only the objects' shadows traced."/>

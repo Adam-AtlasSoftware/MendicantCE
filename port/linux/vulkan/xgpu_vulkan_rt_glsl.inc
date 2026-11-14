@@ -4549,3 +4549,33 @@ static const char mask_source[] =
 	"        instances.v[i * 16u + 12u] &= 0x00ffffffu;\n"
 	"    }\n"
 	"}\n";
+
+/* port: the structure's levels of detail (SCENE_STATIC's): the opaque
+triangles' build input, each triangle as it is (V) where its level is the
+one its surface is drawn at (or both), else folded to its first corner (no
+area: never hit, its box a point inside the surface), before the structure
+is refitted. Attributes' word 7: surface | level << 30 (XGPU_SCENE_LEVEL_*),
+levels: a bit a surface, set where drawn far */
+static const char levels_source[] =
+	"#version 460\n"
+	"#extension GL_EXT_buffer_reference : require\n"
+	"#extension GL_EXT_buffer_reference_uvec2 : require\n"
+	"layout(local_size_x = 64) in;\n"
+	"layout(buffer_reference, std430, buffer_reference_align = 4) buffer Words { uint v[]; };\n"
+	"layout(push_constant) uniform Push { uvec2 source; uvec2 target; uvec2 attributes; uvec2 levels; uint count;\n"
+	"    uint words; } push;\n"
+	"\n"
+	"void main()\n"
+	"{\n"
+	"    uint t = gl_GlobalInvocationID.x;\n"
+	"    if (t >= push.count)\n"
+	"        return;\n"
+	"    Words source = Words(push.source);\n"
+	"    Words target = Words(push.target);\n"
+	"    uint tag = Words(push.attributes).v[t * 8u + 7u];\n"
+	"    uint level = tag >> 30u, surface = tag & 0x3fffffffu;\n"
+	"    bool far = (surface >> 5u) < push.words && (Words(push.levels).v[surface >> 5u] & (1u << (surface & 31u))) != 0u;\n"
+	"    bool drawn = level == 0u || (level == 1u && !far) || (level == 2u && far);\n"
+	"    for (uint k = 0u; k < 9u; k++)\n"
+	"        target.v[t * 9u + k] = source.v[t * 9u + (drawn ? k : k % 3u)];\n"
+	"}\n";

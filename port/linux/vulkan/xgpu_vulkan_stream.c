@@ -63,6 +63,7 @@ its swapchain.
 #include "xgpu_vulkan_store.h"
 #include "xgpu_vulkan_meshes.h"
 #include "xgpu_vulkan_rt.h"
+#include "xgpu_vulkan_scene.h"
 #ifdef HALO_VR
 #include "host_vulkan_vr.h"
 #endif
@@ -3568,6 +3569,21 @@ static void stream_rt_static(void *context, const struct xgpu_stream_rt_static *
 	xgpu_vulkan_rt_static(record, data);
 }
 
+/* PRISM v4's SCENE_STATIC: the level's geometry, kept for every consumer
+(xgpu_vulkan_scene.c) */
+static void stream_scene_static(void *context, const struct xgpu_stream_scene_static *record, const void *data)
+{
+	(void)context;
+	xgpu_vulkan_scene_static(record, data);
+}
+
+/* PRISM v4's SCENE_LIGHTS: the frame's light table, kept (xgpu_vulkan_scene.c) */
+static void stream_scene_lights(void *context, const struct xgpu_stream_scene_lights *record)
+{
+	(void)context;
+	xgpu_vulkan_scene_lights(record);
+}
+
 static void stream_rt_frame(void *context, const struct xgpu_stream_rt_frame *record)
 {
 	(void)context;
@@ -4997,6 +5013,8 @@ const struct host_render_backend *xgpu_vulkan_stream_backend(void)
 		backend.world_ao_prepass = stream_world_ao_prepass;
 		/* display.prism_rt (docs/prism_rt.md, xgpu_vulkan_rt.c) */
 		backend.rt_static = stream_rt_static;
+		backend.scene_static = stream_scene_static;
+		backend.scene_lights = stream_scene_lights;
 		backend.rt_frame = stream_rt_frame;
 		backend.prism_shadows = stream_prism_shadows;
 #ifdef HALO_VR

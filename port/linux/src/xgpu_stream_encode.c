@@ -819,6 +819,80 @@ void xgpu_backend_gbuffer_draw(unsigned long material, unsigned long instance, u
 	record_body->flags = (uint32_t)flags;
 }
 
+/* a SCENE_STATIC slice's bytes by its phase (0 for none) */
+static uint32_t scene_static_bytes(unsigned long phase, unsigned long count)
+{
+	switch (phase)
+	{
+	case XGPU_SCENE_STATIC_TRIANGLES:
+		return (uint32_t)(count * 9 * sizeof(float));
+	case XGPU_SCENE_STATIC_ATTRIBUTES:
+		return (uint32_t)(count * XGPU_SCENE_STATIC_ATTRIBUTE_WORDS * 4);
+	case XGPU_SCENE_STATIC_PAGES:
+		return (uint32_t)(count * 8);
+	case XGPU_SCENE_STATIC_LEVELS:
+		return (uint32_t)(count * 4);
+	default:
+		return 0;
+	}
+}
+
+void xgpu_backend_scene_static(unsigned long phase, unsigned long generation, unsigned long first,
+	unsigned long count, unsigned long total, const void *data)
+{
+	struct xgpu_stream_scene_static *record_body;
+	uint32_t size = data ? scene_static_bytes(phase, count) : 0;
+	unsigned char *place;
+
+	if (!stream.open || stream.preparing || phase >= XGPU_SCENE_STATIC_PHASES || count > XGPU_SCENE_STATIC_SLICE)
+		return;
+	record_body = record_data(XGPU_STREAM_SCENE_STATIC, sizeof(*record_body), size ? carried_one(size) : 0, &place);
+	record_body->phase = (uint32_t)phase;
+	record_body->generation = (uint32_t)generation;
+	record_body->first = (uint32_t)first;
+	record_body->count = (uint32_t)count;
+	record_body->total = (uint32_t)total;
+	record_body->size = size;
+	record_body->data = size ? carry_one(&place, data, size) : 0;
+}
+
+void xgpu_backend_scene_lights(unsigned long first, unsigned long total, const void *lights, unsigned long count)
+{
+	const struct xgpu_stream_scene_light *light = lights;
+	struct xgpu_stream_scene_lights *record_body;
+	unsigned long index;
+	uint32_t size;
+
+	if (!stream.open || stream.preparing || count > XGPU_SCENE_LIGHTS || (count && !lights))
+		return;
+	/* (every light kept: the record's size is reserved before it is filled) */
+	for (index = 0; index < count; index++)
+		if (light[index].type >= XGPU_SCENE_LIGHT_TYPES || light[index].light_class >= XGPU_SCENE_LIGHT_CLASSES)
+			return;
+	size = (uint32_t)(offsetof(struct xgpu_stream_scene_lights, lights) + count * sizeof(struct xgpu_stream_scene_light));
+	record_body = record(XGPU_STREAM_SCENE_LIGHTS, size);
+	record_body->first = (uint32_t)first;
+	record_body->count = (uint32_t)count;
+	record_body->total = (uint32_t)total;
+	/* (the floats finite or 0, as xgpu_scene_encode_lights writes them) */
+	for (index = 0; index < count; index++)
+	{
+		struct xgpu_stream_scene_light *to = &record_body->lights[index];
+		uint32_t value;
+
+		*to = light[index];
+		for (value = 0; value < 16; value++)
+		{
+			float *f = &to->position[value];
+			uint32_t bits;
+
+			memcpy(&bits, f, sizeof(bits));
+			if ((bits & 0x7f800000u) == 0x7f800000u)
+				*f = 0.0f;
+		}
+	}
+}
+
 void xgpu_backend_picture_top(int top)
 {
 	/* (0 centered, n + 1 at n pixels from the top) */

@@ -8,11 +8,11 @@ lights, the decals and the fog. These are new records of the renderer's command 
 
 ## What is there now
 
-`XGPU_STREAM_VERSION` is 31. The records' types are in the stream's own list, after M1's first record,
+`XGPU_STREAM_VERSION` is 32. The records' types are in the stream's own list, after M1's first record,
 `GBUFFER_PHASE` (82): `SCENE_MATERIAL` is 83 and so on to `SCENE_FOG`, 90, and `XGPU_STREAM_RECORD_TYPES` is 91. The
 host's decoder takes every one, with its fixed part's size as its minimum.
 
-M1 sends two of them, with `display.lighting` `ce_deferred` (`port/linux/game/prism_deferred.c`), in its G-buffer pass
+M1 sends four of them. With `display.lighting` `ce_deferred` (`port/linux/game/prism_deferred.c`), in its G-buffer pass
 (walk 1: the window's opaque surfaces drawn first into the G-buffer, `GBUFFER_PHASE`'s `GBUFFER_BEGIN` and
 `GBUFFER_END`):
 
@@ -26,9 +26,31 @@ M1 sends two of them, with `display.lighting` `ce_deferred` (`port/linux/game/pr
   material (`_rasterizer_model_draw`'s and `_rasterizer_environment_lightmap_draw`'s shader), the instance (1 + the
   object's datum index, 0 the level, 0xffff the first-person weapon) and the first-person flag.
 
-The other six are specified and taken, not sent: `SCENE_MATERIAL_ANIMATE`, `SCENE_INSTANCE`, `SCENE_STATIC`,
-`SCENE_LIGHTS`, `SCENE_DECAL`, `SCENE_FOG`. `xgpu_scene_encode.c` still fills all eight from typed values for the
-tests; the stream writes its two from `xgpu_stream_encode.c`.
+And with `ce_deferred` or `display.prism_rt` on, each frame before its windows (`world_ao_frame_begin`):
+
+- `SCENE_STATIC` (`port/linux/game/prism_scene_static.c`): the level's geometry as drawn, once a BSP, for every
+  consumer: every surface of the BSP's opaque, alpha-tested and light-card materials in the BSP's order (lightmap,
+  material, surface); a surface the remodel draws is its remodel's near triangles, then its far ones where they
+  differ, each marked with its level; any other is the map's own triangle. Each triangle carries its material
+  (`SCENE_MATERIAL`'s id), surface, kind, level, lightmap page, its corners' lightmap coordinates (0 to 1 on the page:
+  the baker's atlas scales CE's pages, `prism_bake_atlas.h`) and base map coordinates, and `display.prism_rt`'s own
+  material. `_PAGES` gives the pages' sizes. A slice a frame, whole surfaces, at most 65536 triangles (b30 with the
+  sealed remodel: 2.07 million triangles, 35105 surfaces, 26 pages, in 64 frames). `_LEVELS`, each window where it
+  changed: the level every surface is drawn at, by the remodel's own rule for the camera, for the surfaces off
+  screen too. The Vulkan backend keeps the last whole set (`xgpu_vulkan_scene.c`): `display.prism_rt` builds its
+  structure from it (`display.prism_rt_world` `auto`), both levels in, the level not drawn folded to points and the
+  structure refitted as the levels change, so that the rays meet the surfaces the window draws, near and far.
+- `SCENE_LIGHTS` (`port/linux/game/prism_scene_lights.c`): the light table: the sky's sun (static, casts shadows), its
+  other lights as domes and its ambient light; each emitting material's triangles together (its middle and reach, CE's
+  radiosity colour by power, its area: `XGPU_SCENE_LIGHT_EMITTER`); the level's light fixtures, live, switchable, on
+  where their devices have power; and the dynamic lights the rasterizer drew (world_scene's: flashlight, plasma,
+  muzzle flashes, projectiles), dynamic. Ids are stable (`XGPU_SCENE_LIGHT_*_ID`, a datum handle for the live ones).
+  b30: 31 lights (the sun, a dome, the sky, 6 emitters, 10 fixtures, 12 dynamic). The backend keeps the last whole
+  table.
+
+The other four are specified and taken, not sent: `SCENE_MATERIAL_ANIMATE`, `SCENE_INSTANCE`, `SCENE_DECAL`,
+`SCENE_FOG`. `xgpu_scene_encode.c` still fills all eight from typed values for the tests; the stream writes its own
+from `xgpu_stream_encode.c`.
 
 ## The byte-identity rule
 
@@ -48,8 +70,8 @@ entries are sent; the record's size is its fixed part and those entries.
 | `SCENE_MATERIAL_ANIMATE` | Each frame, for animated materials drawn | The three self-illumination channels' animation values; each bitmap slot's texture coordinate transform (two affine rows; the identity where it does not move); 4 change colours not tied to an object | 344 |
 | `SCENE_INSTANCE` | Each frame, per object drawn | Instance id (the object's datum index, stable; 0 refused); flags (first person, cinematic, shield, camouflage, casts shadow, in the TLAS, no history); CE's LOD; the mesh store's mesh; 4 change colours; up to 64 nodes' 3×4 matrices, this frame's and last frame's | 88 + 96 per node (at most 6232) |
 | `GBUFFER_DRAW` | Before each opaque draw of walk 1 | Material id (0 refused), instance id (0 the level), the level's surface index or an object's geometry and part, the CE vertex program's id, flags (alpha tested, two-sided, first person, remodel), LOD. The draw's vertices and indices are bound as today | 32 |
-| `SCENE_STATIC` | Per BSP, a slice at a time, as `RT_STATIC` | Phase (begin, triangles, attributes, end, release), generation, first, count (at most 65536 a slice), total, the data's address and size. A triangle is 9 floats; its attributes are 16 words: material, surface, kind and lightmap page, three corners' atlas coordinates, three corners' base map coordinates | 32 |
-| `SCENE_LIGHTS` | Each frame | First, count and total of the frame's lights; up to 256 lights, each its stable id, type (sun, dome, sky, point, spot), class (static, animated, switchable, dynamic), flags (on, casts shadows, first person), position and radius (or direction toward it), spot axis and cone, radiance and power, shape (sun disc, dome half angle, inner cone). Emitters are SCENE_STATIC triangles by their materials | 16 + 80 per light (at most 20496) |
+| `SCENE_STATIC` | Per BSP, a slice at a time, as `RT_STATIC`; its levels as they change | Phase (begin, triangles, attributes, end, release, pages, levels), generation, first, count (at most 65536 a slice), total, the data's address and size. A triangle is 9 floats; its attributes are 16 words: material, surface, kind, level and lightmap page, three corners' lightmap coordinates, three corners' base map coordinates, the ray tracer's material. A page is its width and height; the levels a bit set over the surfaces (set: drawn far) | 32 |
+| `SCENE_LIGHTS` | Each frame | First, count and total of the frame's lights; up to 256 lights, each its stable id, type (sun, dome, sky, point, spot, emitter), class (static, animated, switchable, dynamic), flags (on, casts shadows, first person), position and radius (or direction toward it), spot axis and cone, radiance and power, shape (sun disc, dome half angle, inner cone). Emitters are SCENE_STATIC triangles by their materials | 16 + 80 per light (at most 20496) |
 | `SCENE_DECAL` | Per live decal | Decal id, bitmap and sequence frame, CE's framebuffer blend function (alpha, multiply, double multiply, add, subtract, min, max, alpha multiply add), flags (emissive, normal), the box (centre and three half-extent axes), colour, texture rectangle | 120 |
 | `SCENE_FOG` | Each frame | Flags; the camera cluster's atmospheric fog (colour, maximum density, start and opaque distances); up to 8 fog planes seen, each its index, flags (inside), plane, colour and maximum density, opaque distance and depth | 48 + 64 per plane (at most 560) |
 

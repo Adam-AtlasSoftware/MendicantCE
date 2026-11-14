@@ -38,7 +38,7 @@ port/linux/README.md.
 #include <stdint.h>
 
 #define XGPU_STREAM_MAGIC 0x53504758u /* "XGPS" */
-#define XGPU_STREAM_VERSION 31
+#define XGPU_STREAM_VERSION 32
 #define XGPU_STREAM_LOADING_ART_BYTES (640u * 480u * 4u)
 
 /* ---------- the ring
@@ -2066,9 +2066,10 @@ geometry once for every consumer, the lights, the decals and the fog. They
 are sent only in the v4 modes (display.lighting "ce_deferred" now; "raster"
 and "pathtraced" to come); with "ce" (the default, Classic and Enhanced)
 none is ever written, so those frames stay byte for byte as they were. Their
-types are in the list above (XGPU_STREAM_VERSION 31) and the host's decoder
+types are in the list above (XGPU_STREAM_VERSION 32) and the host's decoder
 takes every one; M1 sends SCENE_MATERIAL and GBUFFER_DRAW (the guest's
-xgpu_backend_scene_material and _gbuffer_draw), the others are specified and
+xgpu_backend_scene_material and _gbuffer_draw) and SCENE_STATIC (also with
+display.prism_rt on: the traced level is its), the others are specified and
 taken, not sent yet. port/linux/src/xgpu_scene_encode.c fills each from
 typed values (tools/test_scene_records.py checks the layouts and the
 encoders).
@@ -2248,16 +2249,23 @@ struct xgpu_stream_gbuffer_draw
 	uint32_t vertex_program, flags, lod, pad;
 };
 
-/* SCENE_STATIC: the level's geometry as drawn (stock or remodel), once
-for every consumer (the G-buffer's shadows, the acceleration structures,
-the baker), a slice at a time as RT_STATIC's: phase XGPU_SCENE_STATIC_BEGIN
-(a BSP's set begins: generation names it, total its triangles), _TRIANGLES
-(count triangles from first, 9 floats each: three corners' x y z in world
-units, at data, size bytes), _ATTRIBUTES (count triangles' attributes from
-first, XGPU_SCENE_STATIC_ATTRIBUTE_WORDS words each:
-XGPU_SCENE_ATTRIBUTE_*), _END (the set is whole), _RELEASE (the map is
-gone). At most XGPU_SCENE_STATIC_SLICE triangles a frame, never while a map
-loads. */
+/* SCENE_STATIC: the level's geometry as drawn (stock or remodel, the
+remodel's near and far levels both), once for every consumer (the
+acceleration structures, the baker, the G-buffer's shadows), a slice at a
+time as RT_STATIC's: phase XGPU_SCENE_STATIC_BEGIN (a BSP's set begins:
+generation names it, total its triangles, count its surfaces), _PAGES
+(the BSP's lightmap pages: count pages from first, two words each, the
+page's width and height in texels; total the pages), _TRIANGLES (count
+triangles from first, 9 floats each: three corners' x y z in world units,
+at data, size bytes), _ATTRIBUTES (count triangles' attributes from first,
+XGPU_SCENE_STATIC_ATTRIBUTE_WORDS words each: XGPU_SCENE_ATTRIBUTE_*), _END
+(the set is whole), _RELEASE (the map is gone, or no v4 mode or ray tracing
+wants it), _LEVELS (the level of detail each surface is drawn at now: count
+words from first of a bit set over the BSP's surfaces, total its words, a
+bit set where the surface is drawn far; sent when it changes, after _END
+and as the camera moves: the surfaces off screen by the same rule as the
+drawn). At most XGPU_SCENE_STATIC_SLICE triangles (or pages, or words) a
+record, never while a map loads. */
 enum
 {
 	XGPU_SCENE_STATIC_BEGIN,
@@ -2265,14 +2273,21 @@ enum
 	XGPU_SCENE_STATIC_ATTRIBUTES,
 	XGPU_SCENE_STATIC_END,
 	XGPU_SCENE_STATIC_RELEASE,
+	XGPU_SCENE_STATIC_PAGES,
+	XGPU_SCENE_STATIC_LEVELS,
 	XGPU_SCENE_STATIC_PHASES,
 };
 #define XGPU_SCENE_STATIC_SLICE 65536u
 #define XGPU_SCENE_STATIC_ATTRIBUTE_WORDS 16u
-/* a triangle's attributes: its material (SCENE_MATERIAL's id), its surface
-index, its kind (XGPU_RT_TRIANGLE_*) in bits 0 to 7 and its lightmap page
-in 16 to 31, its three corners' lightmap-atlas coordinates (six floats),
-their base map coordinates (six floats), a word unused */
+/* a triangle's attributes: its material (SCENE_MATERIAL's id; 0 none),
+its surface (the BSP's surface index), its kind (XGPU_RT_TRIANGLE_*) in
+bits 0 to 7, its level (XGPU_SCENE_LEVEL_*) in bits 8 and 9 and its
+lightmap page in 16 to 31 (XGPU_SCENE_PAGE_NONE: no lightmap), its three
+corners' lightmap coordinates (six floats, 0 to 1 across the page: the
+baker's atlas is CE's pages scaled), their base map coordinates (six
+floats), and display.prism_rt's own material (RT_STATIC's _MATERIALS index;
+XGPU_SCENE_TRACED_NONE: not traced). A surface's triangles are consecutive,
+its near level's before its far level's. */
 enum
 {
 	XGPU_SCENE_ATTRIBUTE_MATERIAL = 0,
@@ -2280,7 +2295,21 @@ enum
 	XGPU_SCENE_ATTRIBUTE_KIND_PAGE = 2,
 	XGPU_SCENE_ATTRIBUTE_ATLAS = 3,
 	XGPU_SCENE_ATTRIBUTE_BASE = 9,
+	XGPU_SCENE_ATTRIBUTE_TRACED = 15,
 };
+/* a triangle's level: drawn whichever level its surface is drawn at (the
+map's own triangles, or a remodel whose far level is its near one), its
+near level's, or its far level's */
+enum
+{
+	XGPU_SCENE_LEVEL_BOTH,
+	XGPU_SCENE_LEVEL_NEAR,
+	XGPU_SCENE_LEVEL_FAR,
+};
+#define XGPU_SCENE_LEVEL_SHIFT 8
+#define XGPU_SCENE_PAGE_SHIFT 16
+#define XGPU_SCENE_PAGE_NONE 0xffffu
+#define XGPU_SCENE_TRACED_NONE 0xffffffffu
 struct xgpu_stream_scene_static
 {
 	uint32_t header;
@@ -2310,6 +2339,11 @@ enum
 	XGPU_SCENE_LIGHT_SKY,
 	XGPU_SCENE_LIGHT_POINT,
 	XGPU_SCENE_LIGHT_SPOT,
+	/* a material's emitting triangles of SCENE_STATIC together (its id
+	XGPU_SCENE_LIGHT_EMITTER_ID + its SCENE_MATERIAL id): position their
+	middle and the radius about it that holds them, radiance CE's
+	radiosity colour by power, shape their area */
+	XGPU_SCENE_LIGHT_EMITTER,
 	XGPU_SCENE_LIGHT_TYPES,
 };
 enum
@@ -2326,6 +2360,14 @@ enum
 	XGPU_SCENE_LIGHT_FLAG_CASTS_SHADOWS = 2,
 	XGPU_SCENE_LIGHT_FLAG_FIRST_PERSON = 4,
 };
+/* the lights' ids by their source: the sun, the sky, the sky's other
+lights (domes: + the sky light's index), the emitters (+ the material's
+id); a fixture's or a dynamic light's is its object's or light's datum
+handle (never below 0x80000000: a handle's salt has its high bit) */
+#define XGPU_SCENE_LIGHT_SUN_ID 1u
+#define XGPU_SCENE_LIGHT_SKY_ID 2u
+#define XGPU_SCENE_LIGHT_DOME_ID 16u
+#define XGPU_SCENE_LIGHT_EMITTER_ID 0x10000u
 struct xgpu_stream_scene_light
 {
 	uint32_t id, type, light_class, flags;

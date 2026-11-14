@@ -766,11 +766,13 @@ static const struct config_setting config_settings[] =
 		"always; \"low_lod\" the game's own models (cheaper)." },
 	{ "display.prism_rt_world", _config_string, "\"auto\"", "HALO_PRISM_RT_WORLD", _environment_value,
 		_platform_desktop,
-		"PRISM ray tracing: the level's shape traced: \"auto\" the remodel's far\n"
-		"level where display.prism_world_geometry draws a remodel (its shadows\n"
-		"and rays then match what is drawn), else the map's; \"remodel\" the\n"
-		"remodel's near level whole (the most memory), \"far\" its far level,\n"
-		"\"stock\" the map's own triangles. The rays start from the same shape." },
+		"PRISM ray tracing: the level's shape traced: \"auto\" (or \"drawn\")\n"
+		"the level as it is drawn (PRISM v4's SCENE_STATIC: where\n"
+		"display.prism_world_geometry draws a remodel, each surface's near or\n"
+		"far level as the view draws it, followed as the camera moves; else the\n"
+		"map's); \"remodel\" the remodel's near level whole, \"far\" its far\n"
+		"level, \"stock\" the map's own triangles. The rays start from the same\n"
+		"shape." },
 	{ "display.prism_rt_cache", _config_boolean, "true", "HALO_PRISM_RT_CACHE", _environment_value, _platform_desktop,
 		"PRISM ray tracing: each object's shape kept on the graphics card from\n"
 		"frame to frame, refitted where it moved and not rebuilt where it did\n"
@@ -4602,7 +4604,7 @@ static const struct
 	{ "display.prism_rt_denoiser", { "spatiotemporal", "temporal", "off", NULL }, "spatiotemporal" },
 	{ "display.prism_rt_reflections", { "off", "visor", "all", NULL }, "off" },
 	{ "display.prism_rt_objects", { "auto", "view_lod", "low_lod", NULL }, "auto" },
-	{ "display.prism_rt_world", { "auto", "remodel", "far", "stock", NULL }, "auto" },
+	{ "display.prism_rt_world", { "auto", "drawn", "remodel", "far", "stock", NULL }, "auto" },
 	{ "display.prism_rt_rate", { "full", "half", "quarter", NULL }, "full" },
 	{ "display.prism_rt_style", { "faithful", "remix", NULL }, "faithful" },
 	{ "display.prism_rt_sun", { "all", "objects", NULL }, "all" },

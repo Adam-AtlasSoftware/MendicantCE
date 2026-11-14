@@ -1553,8 +1553,8 @@ PAGES = {
              "lets it go up to a quarter brighter or darker.", "desktop"),
             ("TRACED LEVEL", "display.prism_rt_world",
              [("AUTO", "auto"), ("REMODEL", "remodel"), ("FAR", "far"), ("GAME'S", "stock")],
-             "The level's shape the rays meet. Auto: the remodel's far level where it is drawn. Remodel: all "
-             "of it, more memory. Game's: the map's own.", "desktop"),
+             "The level's shape the rays meet. Auto: the level as it is drawn, near and far. Far: the remodel's "
+             "far level. Remodel: its near level, all of it. Game's: the map's own.", "desktop"),
             ("TRACED MODELS", "display.prism_rt_objects", [("AS DRAWN", "auto"), ("GAME'S", "low_lod")],
              "As Drawn: the replacement models' shapes where they are drawn, within 40 units (the game's own "
              "past that, and far objects left out when there are too many). Game's: the game's own models, cheaper.", "desktop"),

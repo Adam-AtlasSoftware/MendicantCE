@@ -554,10 +554,19 @@ static int decode_record(struct host_render_decoder *decoder, const unsigned cha
 		CALL(gbuffer_draw, (const struct xgpu_stream_gbuffer_draw *)start);
 		break;
 	/* (the others: taken, nothing done with them yet) */
+	case XGPU_STREAM_SCENE_LIGHTS:
+	{
+		const struct xgpu_stream_scene_lights *lights = (const void *)start;
+
+		if (lights->count > XGPU_SCENE_LIGHTS || lights->first > lights->total ||
+			lights->count > lights->total - lights->first ||
+			size < offsetof(struct xgpu_stream_scene_lights, lights) + lights->count * sizeof(lights->lights[0]))
+			return XGPU_STREAM_ERROR_RECORD;
+		CALL(scene_lights, lights);
+		break;
+	}
 	case XGPU_STREAM_SCENE_MATERIAL_ANIMATE:
 	case XGPU_STREAM_SCENE_INSTANCE:
-	case XGPU_STREAM_SCENE_STATIC:
-	case XGPU_STREAM_SCENE_LIGHTS:
 	case XGPU_STREAM_SCENE_DECAL:
 	case XGPU_STREAM_SCENE_FOG:
 		break;
@@ -654,6 +663,23 @@ static int decode_record(struct host_render_decoder *decoder, const unsigned cha
 		if (rt->size)
 			data = host_pointer(rt->data);
 		CALL(rt_static, rt, data);
+		break;
+	}
+	case XGPU_STREAM_SCENE_STATIC:
+	{
+		const struct xgpu_stream_scene_static *scene = (const void *)start;
+		const void *data = NULL;
+		uint64_t stride = scene->phase == XGPU_SCENE_STATIC_TRIANGLES ? 9 * sizeof(float) :
+			scene->phase == XGPU_SCENE_STATIC_ATTRIBUTES ? XGPU_SCENE_STATIC_ATTRIBUTE_WORDS * 4 :
+			scene->phase == XGPU_SCENE_STATIC_PAGES ? 8 : scene->phase == XGPU_SCENE_STATIC_LEVELS ? 4 : 0;
+
+		if (scene->phase >= XGPU_SCENE_STATIC_PHASES || scene->count > XGPU_SCENE_STATIC_SLICE ||
+			(scene->size && (uint64_t)scene->count * stride != scene->size) ||
+			(scene->size && !data_inside(decoder, start, size, scene->data, scene->size)))
+			return XGPU_STREAM_ERROR_BOUNDS;
+		if (scene->size)
+			data = host_pointer(scene->data);
+		CALL(scene_static, scene, data);
 		break;
 	}
 	case XGPU_STREAM_RT_FRAME:

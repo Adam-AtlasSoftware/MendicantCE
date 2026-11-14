@@ -55,6 +55,10 @@ static float world_ao_strength(void)
 unsigned long halo_gpu_settings_taken(void);
 /* prism_rt.c's (display.prism_rt: its G-buffer is the pre-pass's) */
 void prism_rt_frame_begin(void);
+void prism_scene_static_frame(void);
+void prism_scene_static_map_unloaded(void);
+void prism_scene_lights_frame(void);
+void prism_scene_lights_map_unloaded(void);
 void prism_rt_map_unloaded(void);
 unsigned long long SDL_GetTicksNS(void);
 /* (PRISM v2's model light: prism_light.c) */
@@ -142,6 +146,8 @@ static void world_ao_scene_release(void);
 void world_ao_map_unloaded(void)
 {
 	prism_rt_map_unloaded();
+	prism_scene_static_map_unloaded();
+	prism_scene_lights_map_unloaded();
 	prism_lightmaps_map_unloaded();
 	world_ao_scene_release();
 	world_sdf_map_unloaded();
@@ -328,9 +334,17 @@ void world_ao_frame_begin(void)
 	const char *test;
 
 	world_ao_scene.frame++;
+	/* (PRISM v4's SCENE_STATIC: before the ray tracer's frame, whose level is
+	it; nothing where no v4 mode or ray tracing wants it) */
+	prism_scene_static_frame();
 	if (!world_ao_mode())
+	{
+		prism_scene_lights_frame();
 		return;
+	}
 	world_scene_frame_begin();
+	/* (SCENE_LIGHTS: the dynamic lights world_scene has just listed) */
+	prism_scene_lights_frame();
 	prism_rt_frame_begin();
 	/* (not with debug.world_ao_test's made-up field, which the level's
 	would overwrite in the backend's one texture) */

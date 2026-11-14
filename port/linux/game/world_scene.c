@@ -794,6 +794,15 @@ struct world_scene_instance const *world_scene_instance_find(long id)
 		&world_scene.instances[slot] : NULL;
 }
 
+/* port: PRISM v4's SCENE_LIGHTS (prism_scene_lights.c) where world AO is
+off (world_scene_frame_begin not run): the dynamic lights the rasterizer
+drew listed alone */
+void world_scene_lights_refresh(void)
+{
+	world_scene.light_count = 0;
+	world_scene_dynamic_lights();
+}
+
 long world_scene_light_count(void)
 {
 	return world_scene.light_count;

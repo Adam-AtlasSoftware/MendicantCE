@@ -163,6 +163,17 @@ void xgpu_backend_scene_material(unsigned long material, const unsigned long has
 	unsigned long shader_flags, unsigned long detail_functions, unsigned long flags, const float *scalars,
 	int scalar_count);
 void xgpu_backend_gbuffer_draw(unsigned long material, unsigned long instance, unsigned long flags);
+/* SCENE_STATIC (xgpu_stream.h): the level's geometry as drawn, a slice at
+a time (port/linux/game/prism_scene_static.c): phase XGPU_SCENE_STATIC_*,
+count items from first of total (triangles, attributes, pages or levels'
+words: their bytes by the phase), the set's generation; data NULL none */
+void xgpu_backend_scene_static(unsigned long phase, unsigned long generation, unsigned long first,
+	unsigned long count, unsigned long total, const void *data);
+/* SCENE_LIGHTS (xgpu_stream.h): the frame's lights first to first + count
+of total, each XGPU_SCENE_LIGHT words of 20 (struct
+xgpu_stream_scene_light's layout: port/linux/game/prism_scene_lights.c);
+count at most XGPU_SCENE_LIGHTS, every type and class known */
+void xgpu_backend_scene_lights(unsigned long first, unsigned long total, const void *lights, unsigned long count);
 /* display.prism_bloom (where xgpu_backend_capabilities' bloom): the view's
 light past paper white glows (XGPU_BLOOM_GLOW: small and faint; _FULL:
 wider and brighter) before the tone map: its share past 1 (the threshold),

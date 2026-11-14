@@ -113,8 +113,15 @@ edit it, not the `.inc`; `tools/vulkan_rt_shaders.py` compiles them to `xgpu_vul
   model of b30 replaced and the mods' models (drawn in 10,000-triangle runs), 1.5 million triangles had filled the
   window two frames in three, and the objects drawn last were left out of the traced scene, a different few each
   frame: their shadows and occlusion came and went).
-- **The level's remodel** (`display.prism_world_geometry` `remodel`, `display.prism_rt_world`): the remodel's far
-  level is traced where it is drawn (b30: 282 thousand triangles for the map's 33 thousand, 19 MB of structure; 592
+- **The level's remodel** (`display.prism_world_geometry` `remodel`, `display.prism_rt_world`): by default (`auto`,
+  `drawn`) the level traced is PRISM v4's SCENE_STATIC (`docs/prism_scene_records.md`), the level as the window draws
+  it: every remodelled surface's near and far levels are in the structure, and the level each surface is drawn at
+  (SCENE_STATIC's _LEVELS, the remodel's own rule for the camera, off screen too) folds the other level's triangles
+  to points, the structure refitted as levels change (`xgpu_vulkan_rt.c`'s levels pass), so that the rays meet the
+  surface drawn, near and far (b30: 2.07 million triangles, 125 MB of structure). With the far level traced (the
+  default before), a near surface's rays started under the far level's rock and were shadowed by it: blotches of
+  shadow over b30's Forerunner structure. Otherwise the remodel's far
+  level is traced where it is drawn (`far`) (b30: 282 thousand triangles for the map's 33 thousand, 19 MB of structure; 592
   thousand with the sealed remodel of combined2's data, whose far levels keep every edge vertex), or its
   near level whole (`remodel`, about 2 million), and world AO's pre-pass draws the same level, so that the rays leave
   the surface they trace (from the map's triangles, a ray started under the remodel's rock and was shadowed by it).

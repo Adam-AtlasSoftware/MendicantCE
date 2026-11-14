@@ -33,5 +33,8 @@ material the draws that follow take */
 void prism_deferred_object(long object_index);
 void prism_deferred_first_person(int drawing);
 void prism_deferred_shader(void const *shader);
+/* a shader's material id in the map's table (0 none; the table made
+where it is not: SCENE_STATIC's, prism_scene_static.c) */
+unsigned long prism_deferred_material_id(void const *shader);
 
 #endif

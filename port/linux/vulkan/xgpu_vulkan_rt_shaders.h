@@ -43,5 +43,7 @@ extern const uint32_t xgpu_vulkan_rt_reset_words[];
 extern const size_t xgpu_vulkan_rt_reset_count;
 extern const uint32_t xgpu_vulkan_rt_mask_words[];
 extern const size_t xgpu_vulkan_rt_mask_count;
+extern const uint32_t xgpu_vulkan_rt_levels_words[];
+extern const size_t xgpu_vulkan_rt_levels_count;
 
 #endif
