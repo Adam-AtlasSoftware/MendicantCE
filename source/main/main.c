@@ -4141,7 +4141,13 @@ void main_loop(
 						load_trace_first_frame = 2;
 					}
 					LATENCY_LOG(latency_log_frame_begin()); /* port: debug.latency_log */
-					main_game_render((double)main_globals.seconds_elapsed);
+					/* port: the frame's time as the game's clock passes it,
+					scaled by game_speed, so that what animates by it (the glows,
+					the sky's animations, weather) stands still while the game is
+					stopped (game_speed 0) as the game's own animations do, not on
+					by the frames drawn; at speed 1 (as games are played) the
+					same time as before */
+					main_game_render((double)(main_globals.seconds_elapsed*game_time_get_speed()));
 					LATENCY_LOG(latency_log_frame_rendered()); /* port: debug.latency_log */
 					halo_loading_ready(); /* port: a picture with no player window has no enumeration handoff */
 					loading_game_frame = TRUE; /* port: preparation is complete for this picture */
