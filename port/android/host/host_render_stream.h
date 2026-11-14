@@ -342,6 +342,10 @@ guest to read between frames (the ring's display_hdr, display_headroom,
 display_white and display_white_reported: any thread, at any time, before
 or while a stream is open) */
 void host_render_stream_display_hdr(int hdr, float headroom, float white_nits, int white_reported);
+/* (render thread, at a frame's end) the replacement textures and meshes
+drawn lately that are still to come (the ring's streams_pending, for the
+guest's debug.camera_path_settle) */
+void host_render_stream_streams_pending(uint32_t pending);
 uint64_t host_render_stream_frame_input(void);
 void host_render_stream_frame_taken(void);
 /* the display has latched a refresh's frame (taken one or not) at latch;

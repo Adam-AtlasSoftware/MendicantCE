@@ -59,6 +59,8 @@ draw; 0 once there are no more */
 int xgpu_vulkan_meshes_piece(uint32_t index, struct xgpu_vulkan_draw *draw);
 /* the frame's start: the store's copies and budget */
 void xgpu_vulkan_meshes_frame(void);
+/* (after it) the meshes drawn lately still to come (xgpu_mesh_store_pending) */
+uint32_t xgpu_vulkan_meshes_pending(void);
 /* a line of the store's statistics (debug.gpu_stats), into text */
 int xgpu_vulkan_meshes_statistics(char *text, unsigned long size);
 

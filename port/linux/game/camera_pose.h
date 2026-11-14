@@ -31,5 +31,9 @@ time (main_game_render, each frame); and whether this frame is one of the
 path's, saved as debug.screenshot_every saves one */
 void camera_path_frame(void);
 int camera_path_capturing(void);
+/* debug.camera_path_settle: this frame is one the path saves, or holds
+until the host's streams are done (the stock texture cache then waits for
+every texture drawn) */
+int camera_path_settling(void);
 
 #endif

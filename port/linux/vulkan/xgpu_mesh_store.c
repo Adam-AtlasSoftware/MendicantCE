@@ -1112,6 +1112,26 @@ void xgpu_mesh_store_statistics(const struct xgpu_mesh_store *store, struct xgpu
 	statistics->budget_bytes = store->budget_bytes;
 }
 
+uint32_t xgpu_mesh_store_pending(const struct xgpu_mesh_store *store)
+{
+	uint32_t index, pending = 0;
+
+	if (!store)
+		return 0;
+	lock((struct xgpu_mesh_store *)store);
+	for (index = 0; index < store->entry_count; index++)
+	{
+		const struct entry *entry = &store->entries[index];
+
+		/* (used_frame 0 too: a store's first frame's) */
+		if (entry->used_frame + 2 >= store->frame &&
+			(entry->state == _entry_queued || entry->state == _entry_reading || entry->state == _entry_read))
+			pending++;
+	}
+	unlock((struct xgpu_mesh_store *)store);
+	return pending;
+}
+
 int xgpu_mesh_store_work(struct xgpu_mesh_store *store)
 {
 	struct entry *entry;

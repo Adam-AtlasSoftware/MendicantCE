@@ -197,6 +197,9 @@ struct glow_datum
 	struct glow_particle *head_particle;
 	struct glow_particle *tail_particle;
 	short accumulated_trailing_particle_generation_ticks;
+	/* port: the game's time (its low 16 bits) at the last update, in what
+	was the structure's padding (glow_update_ticks) */
+	short last_update_game_time;
 };
 
 struct glow_definition
@@ -323,6 +326,8 @@ static struct glow_particle *glow_trailing_particle_new(
 static void glow_update(
 	struct glow_datum *glow,
 	long object_index);
+static short glow_update_ticks(
+	struct glow_datum *glow);
 
 /* ---------- globals */
 
@@ -1288,6 +1293,7 @@ static void glow_update(
 	real rotation_per_unit_t;
 	real effect_rotational_velocity;
 	real effect_translational_velocity;
+	short update_ticks; /* port: glow_update_ticks */
 
 	if (!definition)
 		return;
@@ -1370,6 +1376,7 @@ static void glow_update(
 
 		glow_particles_initialize(glow);
 		glow->accumulated_trailing_particle_generation_ticks = 0;
+		glow->last_update_game_time = (short)game_time_get(); /* port: glow_update_ticks */
 		glow->initialized = TRUE;
 		return;
 	}
@@ -1425,7 +1432,9 @@ static void glow_update(
 		rotation_per_unit_t = effect_rotational_velocity / effect_translational_velocity;
 	}
 
-	glow->accumulated_trailing_particle_generation_ticks += (short)game_time_get();
+	/* port: glow_update_ticks */
+	update_ticks = glow_update_ticks(glow);
+	glow->accumulated_trailing_particle_generation_ticks += update_ticks;
 
 	if (glow->number_of_markers > 1)
 	{
@@ -1449,7 +1458,7 @@ static void glow_update(
 	{
 		if (TEST_FLAG(particle->flags, _glow_particle_trailing_bit))
 		{
-			particle->ticks_in_existence += (short)game_time_get();
+			particle->ticks_in_existence += update_ticks; /* port: glow_update_ticks */
 			glow_trailing_particle_update_color(glow, particle);
 			glow_trailing_particle_update_size(glow, particle);
 			glow_trailing_particle_update_velocity(glow, particle);
@@ -1489,6 +1498,27 @@ static void glow_update(
 	}
 
 	return;
+}
+
+/* port: the ticks a glow's trailing particles are aged and made by in one
+update. At game speed 1 the game's time as the game has always added it, on
+each update (each draw); at another speed (game_speed 0 stops the game while
+its frames are drawn) the ticks the game's time has passed since the glow's
+last update (none if it went back), so that the glow follows the game's clock,
+not the frames drawn */
+static short glow_update_ticks(
+	struct glow_datum *glow)
+{
+	short game_time = (short)game_time_get();
+	short ticks;
+
+	if (game_time_get_speed() == 1.0f)
+		ticks = game_time;
+	else
+		ticks = (short)MAX(0, (short)(game_time - glow->last_update_game_time));
+	glow->last_update_game_time = game_time;
+
+	return ticks;
 }
 
 void glow_submit(

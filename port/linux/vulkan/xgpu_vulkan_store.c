@@ -251,6 +251,11 @@ void xgpu_vulkan_store_frame(void)
 	xgpu_texture_store_frame(store_glue.store);
 }
 
+uint32_t xgpu_vulkan_store_pending(void)
+{
+	return store_glue.store ? xgpu_texture_store_pending(store_glue.store) : 0;
+}
+
 int xgpu_vulkan_store_use(uint32_t id, struct xgpu_texture_store_view *view)
 {
 	return id && store_glue.store && xgpu_texture_store_use(store_glue.store, id, view);

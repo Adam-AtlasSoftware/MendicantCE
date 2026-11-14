@@ -188,6 +188,22 @@ What still differs, and why:
   GPU runs, and a transient as the mode turns on decays through the temporal history: without the cache (G1, Rat Race,
   on the RTX 2060), the moves part only in their first 24 steps.
 
+Two fixes for the first of those are in, implemented and not yet measured (the table above is from before them):
+
+- **The streams settled before a save.** The captures turn on `debug.camera_path_settle` (`game.py`'s
+  `SETTLE_FRAMES`, 300): each frame a path saves is drawn with every texture the stock texture cache has to read (as
+  while a map's shaders are made), and held, its pose drawn again and nothing saved, until the host's texture and
+  mesh stores have said on frames in flight + 1 frames after its first that nothing they drew is still to come (the
+  ring's `streams_pending`, written at each frame's end), or for 300 frames (logged). Each held frame is drawn with
+  the frames' seed its first had, and runs no `at` line again; with the game stopped (`game_speed 0`) the held frames
+  are the same picture. What the renderer keeps from frame to frame by its own count (a temporal history, a jitter)
+  still moves on with each held frame.
+- **The rendering's animations by the game's clock.** The frame's time the glows, the skies' animations and weather
+  advance by is scaled by the game's speed, so they stand still while the game is stopped, as its shaders'
+  animations already did (c40's hologram ring is most likely a glow); a glow's trailing particles are aged and made
+  by the ticks since its last update, not the game's whole time on each draw, at any speed but 1; the skies'
+  animations begin again with each map. At speed 1 (as games are played) nothing of it changes but that last.
+
 So the byte-for-byte check covers RT off and the references of the scenes above; the live path-traced frames are
 judged by the metrics only, until M1's deferred core replaces the tracer's inputs with records it can make
 deterministic (the materials resolved at load, the instances by their ids, the cache claimed in a fixed order).

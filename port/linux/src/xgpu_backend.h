@@ -917,6 +917,11 @@ that frame so much earlier, so that it is on screen at its refresh all the
 same. */
 #define XGPU_FRAME_EXTRA_FRAMES 4
 void xgpu_backend_frame_extra(unsigned long microseconds);
+/* The replacement textures and meshes the host's last frames drew that are
+still to come (the ring's streams_pending: 0 with no stream or no store),
+and the frames that may be in flight, so that what is read describes a
+frame drawn so many frames ago (debug.camera_path_settle) */
+unsigned long xgpu_backend_streams_pending(unsigned long *frames_in_flight);
 /* Acknowledged loading ownership change, before map storage is reused. */
 void xgpu_backend_loading(int active);
 int xgpu_backend_loading_owned(void);

@@ -561,7 +561,7 @@ static void test_residency(int threads)
 	char path[4200];
 	unsigned char *bytes;
 	uint64_t size, most = 0;
-	int frames, usable_frame = -1, full_frame = -1, usable_at_scale = 0, stalled = 0;
+	int frames, usable_frame = -1, full_frame = -1, usable_at_scale = 0, stalled = 0, pending_wrong = 0;
 	uint32_t seen_resident = 99;
 
 	made.salt = 3;
@@ -609,9 +609,25 @@ static void test_residency(int threads)
 		frame(store);
 		if (fake.frame_copied > most)
 			most = fake.frame_copied;
+		/* (debug.camera_path_settle: something to come of the entry drawn
+		until it is whole) */
+		{
+			struct xgpu_texture_store_view described;
+			uint32_t state = 0;
+
+			xgpu_texture_store_describe(store, answer.id, &described, &state);
+			if ((xgpu_texture_store_pending(store) == 0) != (state == XGPU_TEXTURE_STORE_FULL))
+				pending_wrong++;
+		}
 	}
 	CHECK(usable_frame >= 0 && usable_at_scale);
 	CHECK(full_frame > usable_frame);
+	CHECK(!pending_wrong);
+	/* (and nothing of an entry not drawn in the last frames) */
+	frame(store);
+	frame(store);
+	frame(store);
+	CHECK(xgpu_texture_store_pending(store) == 0);
 	/* (the frame's bytes: 128 KB, pieces of 64 KB) */
 	CHECK(most <= 128u << 10);
 	if (!threads)

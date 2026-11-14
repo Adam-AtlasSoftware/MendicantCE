@@ -134,7 +134,19 @@ changes smoothly. While the path runs, each frame (or each named by a save
 line) is saved as
 debug.screenshot_every saves one (camera_path_capturing: to
 debug.screenshot_stream or _directory); at its end the camera stays, and
-the log says so. */
+the log says so.
+
+With debug.camera_path_settle, a frame to be saved is drawn with every
+texture the stock cache has to read (camera_path_settling) and held: its pose
+drawn again, the path not moved on and nothing saved, until the host has
+said on frames in flight + 1 frames after its first that its PRISM texture
+and mesh stores have nothing to come of what they drew (the ring's
+streams_pending, read here as each frame begins: the frames in flight
+before it may not have reached the host), or for at most the setting's
+frames. A held frame runs no "at" line again; "tick" lines go by the game's
+clock, which a stopped game (game_speed 0) does not move, nor then the
+picture: the rendering's animations follow that clock (main.c), and each
+held frame is drawn with the frames' seed its first had. */
 
 /* (enough for a key every frame of a long capture's moves, and for the
 commands of the quality gates' captures: tools/prism_gate) */
@@ -162,12 +174,23 @@ static struct
 	/* the frames saved (none: every one), in order, and the next to come */
 	long save_count, save_next;
 	long saves[MAXIMUM_PATH_SAVES];
+	/* debug.camera_path_settle (camera_path_read's): this frame saved, or held
+	(drawn again next frame); the frames it has been held, those of them
+	whose answer had nothing to come, in a row, the frames' seed as it was
+	first drawn, and the frames held in all */
+	long settle_most;
+	boolean settle_save, settle_hold;
+	long held, settled, held_total;
+	unsigned long held_seed;
 } camera_path;
 
 /* the platform's (port/linux/src/port_config.c) */
 char const *config_string(char const *name);
+long config_integer(char const *name);
 char *config_file_read(char const *path, size_t *size);
 void platform_log(const char *format, ...);
+/* the host's (port/linux/src/xgpu_stream_encode.c) */
+unsigned long xgpu_backend_streams_pending(unsigned long *frames_in_flight);
 
 static void camera_path_read(void)
 {
@@ -177,6 +200,7 @@ static void camera_path_read(void)
 	size_t size = 0;
 
 	camera_path.read = TRUE;
+	camera_path.settle_most = config_integer("debug.camera_path_settle");
 	if (!path || !*path)
 	{
 		return;
@@ -300,10 +324,65 @@ static void camera_path_pose(long frame, float pose[7])
 	}
 }
 
+/* the frame of the path is one it saves */
+static int camera_path_saves_frame(void)
+{
+	if (!camera_path.save_count)
+		return 1;
+	while (camera_path.save_next < camera_path.save_count &&
+		camera_path.saves[camera_path.save_next] < camera_path.frame)
+		camera_path.save_next++;
+	return camera_path.save_next < camera_path.save_count &&
+		camera_path.saves[camera_path.save_next] == camera_path.frame;
+}
+
+/* debug.camera_path_settle: this frame, one to be saved, saved or held
+(the path's comment above) */
+static void camera_path_settle(void)
+{
+	unsigned long pending, frames_in_flight;
+
+	camera_path.settle_save = camera_path.settle_hold = FALSE;
+	if (camera_path.settle_most <= 0 || !camera_path_saves_frame())
+	{
+		camera_path.held = 0;
+		return;
+	}
+	pending = xgpu_backend_streams_pending(&frames_in_flight);
+	/* (the first frame of the pose: the answer is of the frames before it) */
+	if (!camera_path.held)
+	{
+		camera_path.settled = 0;
+		camera_path.held_seed = random_math_port_get_frame_seed();
+	}
+	else
+	{
+		camera_path.settled = pending ? 0 : camera_path.settled + 1;
+		random_math_port_set_frame_seed(camera_path.held_seed);
+	}
+	if (camera_path.settled > (long)frames_in_flight || camera_path.held >= camera_path.settle_most)
+	{
+		if (camera_path.settled <= (long)frames_in_flight)
+			platform_log("camera path: frame %ld saved after %ld frames held, the most (debug.camera_path_settle), "
+				"%lu textures and meshes still to come", camera_path.frame, camera_path.held, pending);
+		else if (camera_path.held > (long)frames_in_flight + 1)
+			platform_log("camera path: frame %ld saved after %ld frames held for the streams", camera_path.frame,
+				camera_path.held);
+		camera_path.settle_save = TRUE;
+		camera_path.held = 0;
+		return;
+	}
+	camera_path.settle_hold = TRUE;
+	camera_path.held++;
+	camera_path.held_total++;
+}
+
 void camera_path_frame(void)
 {
 	float pose[7];
 	long i;
+	/* (the frame held the frame before: drawn again) */
+	boolean held = camera_path.settle_hold;
 
 	if (!camera_path.read)
 	{
@@ -337,23 +416,23 @@ void camera_path_frame(void)
 		camera_path.start_tick = game_time_get();
 		platform_log("camera path: started");
 	}
-	else if (++camera_path.frame > camera_path.keys[camera_path.key_count - 1].frame)
+	else if (!held && ++camera_path.frame > camera_path.keys[camera_path.key_count - 1].frame)
 	{
 		unsigned long skipped, waited, world_switches;
 		double waited_milliseconds;
 
 		camera_path.done = TRUE;
 		prism_popin_counts(&skipped, &waited, &world_switches, &waited_milliseconds);
-		platform_log("camera path: done after %ld frames; since the map: %lu draws left out for a texture not in, "
-			"%lu waited for (%.1f ms), %lu remodel surfaces switched near or far", camera_path.frame, skipped, waited,
-			waited_milliseconds, world_switches);
+		platform_log("camera path: done after %ld frames (%ld more held for the streams); since the map: %lu draws "
+			"left out for a texture not in, %lu waited for (%.1f ms), %lu remodel surfaces switched near or far",
+			camera_path.frame, camera_path.held_total, skipped, waited, waited_milliseconds, world_switches);
 		return;
 	}
 	for (i = 0; i < camera_path.command_count; i++)
 	{
 		if (camera_path.command_by_tick[i] ? !camera_path.command_run[i] &&
 			game_time_get() - camera_path.start_tick >= camera_path.command_frames[i] :
-			camera_path.command_frames[i] == camera_path.frame)
+			camera_path.command_frames[i] == camera_path.frame && !held)
 		{
 			camera_path.command_run[i] = TRUE;
 			hs_compile_and_evaluate(camera_path.commands[i]);
@@ -361,19 +440,21 @@ void camera_path_frame(void)
 	}
 	camera_path_pose(camera_path.frame, pose);
 	camera_pose_put(pose[0], pose[1], pose[2], pose[3], pose[4], pose[5], pose[6]);
+	camera_path_settle();
 }
 
 int camera_path_capturing(void)
 {
 	if (!camera_path.running || camera_path.done)
 		return 0;
-	if (!camera_path.save_count)
-		return 1;
-	while (camera_path.save_next < camera_path.save_count &&
-		camera_path.saves[camera_path.save_next] < camera_path.frame)
-		camera_path.save_next++;
-	return camera_path.save_next < camera_path.save_count &&
-		camera_path.saves[camera_path.save_next] == camera_path.frame;
+	if (camera_path.settle_most > 0)
+		return camera_path.settle_save;
+	return camera_path_saves_frame();
+}
+
+int camera_path_settling(void)
+{
+	return camera_path.running && !camera_path.done && (camera_path.settle_save || camera_path.settle_hold);
 }
 
 /* ---------- objects placed for the picture (debug_object_place) */

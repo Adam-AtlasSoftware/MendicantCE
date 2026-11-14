@@ -2567,6 +2567,14 @@ void xgpu_backend_frame_extra(unsigned long microseconds)
 	frame_extra_frames = microseconds ? XGPU_FRAME_EXTRA_FRAMES : 0;
 }
 
+unsigned long xgpu_backend_streams_pending(unsigned long *frames_in_flight)
+{
+	*frames_in_flight = stream.frames_in_flight;
+	if (!stream.open)
+		return 0;
+	return load_acquire(&stream.ring->streams_pending);
+}
+
 void xgpu_backend_loading_art(const unsigned char *rgba)
 {
 	struct xgpu_stream_value *body;

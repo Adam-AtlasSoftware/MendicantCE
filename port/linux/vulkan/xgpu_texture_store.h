@@ -213,6 +213,10 @@ image changes: what a draw bound may be looked up again */
 uint32_t xgpu_texture_store_epoch(const struct xgpu_texture_store *store);
 void xgpu_texture_store_statistics(const struct xgpu_texture_store *store,
 	struct xgpu_texture_store_statistics *statistics);
+/* (after xgpu_texture_store_frame) the entries drawn in the last frames
+whose replacement is not yet drawn as it will be: not usable, a level of its
+image still to come, or its fade not ended (debug.camera_path_settle) */
+uint32_t xgpu_texture_store_pending(const struct xgpu_texture_store *store);
 /* the entry of an id: its path and, if it is usable, its view (the
 console's list); NULL if there is none */
 const char *xgpu_texture_store_describe(const struct xgpu_texture_store *store, uint32_t id,

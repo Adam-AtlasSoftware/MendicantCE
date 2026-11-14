@@ -399,10 +399,15 @@ int main(int argc, char **argv)
 	CHECK(live_buffers == 0);
 
 	/* ---- residency: stock until read, then a level by its pixels */
+	CHECK(xgpu_mesh_store_pending(store) == 0);
 	CHECK(!xgpu_mesh_store_use(store, answers[0].id, 500.0f, &view));
 	CHECK(live_buffers == 3);
+	/* (debug.camera_path_settle: the mesh drawn stock is to come until
+	copied in) */
+	CHECK(xgpu_mesh_store_pending(store) == 1);
 	settle(store, threads);
 	CHECK(live_buffers == 2 && copies == 2);
+	CHECK(xgpu_mesh_store_pending(store) == 0);
 	CHECK(xgpu_mesh_store_use(store, answers[0].id, 500.0f, &view));
 	CHECK(view.lod == 0 && view.vertex_first == 0 && view.vertex_count == 2 * TRIANGLES * 3 && view.piece_count == 2 &&
 		view.pieces[1].shader == 2 && view.bone_count == NODES + HELPERS && view.node_count == NODES);

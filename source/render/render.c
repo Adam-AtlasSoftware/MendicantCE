@@ -148,6 +148,9 @@ static void render_player_frame(
 
 void render_sky(
 	void);
+/* port: (render_sky.c) */
+void render_sky_initialize_for_new_map(
+	void);
 
 /* ---------- globals */
 
@@ -255,6 +258,8 @@ void render_initialize_for_new_map(
 	/* port: preserve retail's energy-then-two-sided-glass compositing. */
 	models_fix_transparent_part_links();
 	render_objects_initialize_for_new_map();
+	/* port: the skies' animations from their start */
+	render_sky_initialize_for_new_map();
 	/* port: the new map's shaders and pipelines made at its first frame
 	(port/linux/game/render_enumerate.c) */
 	render_enumerate_new_map();

@@ -125,6 +125,7 @@ symbols in this file:
 #include "custom_edition_cache.h" /* port: port/linux/game/custom_edition_cache.c */
 #include "render_enumerate.h" /* port: port/linux/game/render_enumerate.c */
 #include "prism_popin.h" /* port: port/linux/game/prism_popin.c */
+#include "camera_pose.h" /* port: port/linux/game/camera_pose.c */
 
 /* ---------- constants */
 
@@ -1268,7 +1269,9 @@ void *_texture_cache_bitmap_get_hardware_format(
 	texture it draws with: drawn without it, a draw is skipped or made
 	without its sampler (port/linux/game/render_enumerate.c) */
 	/* port: and a menu picture's frame (port/linux/game/menu_pictures_render.c) */
-	if ((render_enumerating || menu_pictures_textures_wait()) && load)
+	/* port: and a camera path's frame saved with debug.camera_path_settle
+	(port/linux/game/camera_pose.c) */
+	if ((render_enumerating || menu_pictures_textures_wait() || camera_path_settling()) && load)
 	{
 		block = TRUE;
 	}

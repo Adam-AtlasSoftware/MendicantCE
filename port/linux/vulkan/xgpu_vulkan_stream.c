@@ -4978,6 +4978,9 @@ static void stream_frame_end(void *context)
 	xgpu_vulkan_store_frame();
 	/* (display.prism_models: the meshes read since copied too) */
 	xgpu_vulkan_meshes_frame();
+	/* (and what of the replacements the frames drew lately is still to
+	come, for the guest's debug.camera_path_settle) */
+	host_render_stream_streams_pending(xgpu_vulkan_store_pending() + xgpu_vulkan_meshes_pending());
 	/* (debug.load_trace: each frame's end on the render thread, whose
 	spacing tools/load_benchmark.py reads as the frames' times after a load) */
 	if (stream.trace_frames)

@@ -88,6 +88,14 @@ static real render_sky_globals[MAXIMUM_SKIES_PER_SCENARIO] = {0.f};
 
 /* ---------- public code */
 
+/* port: the skies' animations begun again with each map, not where the map
+before left them (render_initialize_for_new_map) */
+void render_sky_initialize_for_new_map(
+	void)
+{
+	memset(render_sky_globals, 0, sizeof(render_sky_globals));
+}
+
 void render_sky(
 	void)
 {

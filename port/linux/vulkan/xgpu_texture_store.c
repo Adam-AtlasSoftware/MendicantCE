@@ -1342,6 +1342,24 @@ void xgpu_texture_store_statistics(const struct xgpu_texture_store *store,
 	}
 }
 
+uint32_t xgpu_texture_store_pending(const struct xgpu_texture_store *store)
+{
+	uint32_t index, pending = 0;
+
+	for (index = 0; index < store->entry_count; index++)
+	{
+		const struct entry *entry = &store->entries[index];
+
+		/* (last_used 0 too: a store's first frame's) */
+		if (entry->failed || entry->last_used + WANTED_FRAMES < store->frame)
+			continue;
+		if (!entry_usable(entry) || entry->queued || entry->resident > entry->top ||
+			entry->shown > (float)entry->resident)
+			pending++;
+	}
+	return pending;
+}
+
 const char *xgpu_texture_store_describe(const struct xgpu_texture_store *store, uint32_t id,
 	struct xgpu_texture_store_view *view, uint32_t *state)
 {

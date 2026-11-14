@@ -1752,6 +1752,12 @@ void host_render_stream_display_hdr(int hdr, float headroom, float white_nits, i
 	}
 }
 
+void host_render_stream_streams_pending(uint32_t pending)
+{
+	if (render.ring)
+		__atomic_store_n(&render.ring->streams_pending, pending, __ATOMIC_RELEASE);
+}
+
 /* ---------- pacing by the display (frame_pacing.h) */
 
 static struct frame_pacing_latency latency;

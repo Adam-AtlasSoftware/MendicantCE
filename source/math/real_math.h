@@ -846,6 +846,7 @@ unsigned long *get_global_local_random_seed_address(void);
 void random_math_port_set_ticking(boolean ticking);
 void random_math_port_set_local_seeds(unsigned long seed);
 void random_math_port_set_frame_seed(unsigned long seed);
+unsigned long random_math_port_get_frame_seed(void);
 boolean random_math_port_begin_cosmetic(void);
 void random_math_port_end_cosmetic(boolean ticking);
 void random_seed_debug_log(
