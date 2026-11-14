@@ -825,10 +825,11 @@ neighbour's edge along it is not the stock edge (a T-junction where the
 neighbour's edge has vertices between the stock corners, a gap where it
 left the edge). So such surfaces fall back in seal groups, never alone: the
 group grows across each stock edge to every remodelled neighbour whose
-vertices on that edge are not just its two corners (a T-junction there: the
-crack check, on the CPU over the loaded file; the remodel's boundaries lie
-on the stock edges, wg2_seal.py), until no edge of the group's border would
-crack. A group past SEAL_GROUP_MOST surfaces is not let fall back (the
+edge there is not the stock edge: a vertex between the stock corners (a
+T-junction), a corner it does not reach, or vertices beside the edge (its
+boundary moved off it, as a bevel's: a gap). That is the crack check, on
+the CPU over the loaded file; the group grows until no edge of its border
+would crack. A group past SEAL_GROUP_MOST surfaces is not let fall back (the
 remodel is drawn as the file has it, and the log says so): a crack across a
 level is worse than a facet. Neighbours of other materials are found by the
 stock edges' corners, which the BSP's surfaces share exactly.
@@ -843,6 +844,9 @@ tolerance), this near a corner at it (world units): the remodel's
 boundaries lie on the stock edges (wg2_seal.py) */
 #define SEAL_NEAR 2.0e-3
 #define SEAL_CORNER 1.0e-3
+/* (a neighbour's vertex this near a stock edge but off it: its boundary
+moved, as a bevel's inset) */
+#define SEAL_NEAR_BAND 0.1
 #define SEAL_GROUP_MOST 256
 
 struct shape_edge
@@ -1086,8 +1090,10 @@ static struct pwg_material_view *shape_surface(
 	return &check->views[low];
 }
 
-/* whether a neighbour's edge along the stock edge u-v is that edge (no
-vertex of its triangles near the edge but at its corners) */
+/* whether a neighbour's edge along the stock edge u-v is that edge: a
+vertex of its triangles at each corner, and none on the edge between them
+(a T-junction) nor beside it (within SEAL_NEAR_BAND: a boundary moved off
+the edge, a bevel's, which a stock triangle beside it leaves a gap against) */
 static boolean shape_edge_sealed(
 	struct shape_check const *check,
 	long neighbour,
@@ -1100,6 +1106,7 @@ static boolean shape_edge_sealed(
 	double e[3] = { v[0] - u[0], v[1] - u[1], v[2] - u[2] };
 	double length2 = e[0] * e[0] + e[1] * e[1] + e[2] * e[2];
 	int range;
+	boolean at_u = FALSE, at_v = FALSE;
 
 	if (length2 < 1.0e-12)
 	{
@@ -1126,25 +1133,32 @@ static boolean shape_edge_sealed(
 				d[axis] = p[axis] - (u[axis] + t * e[axis]);
 			}
 			distance2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
-			if (distance2 > SEAL_NEAR * SEAL_NEAR)
+			if (distance2 > SEAL_NEAR_BAND * SEAL_NEAR_BAND)
 			{
 				continue;
 			}
 			corner2 = (p[0] - u[0]) * (p[0] - u[0]) + (p[1] - u[1]) * (p[1] - u[1]) + (p[2] - u[2]) * (p[2] - u[2]);
 			if (corner2 <= SEAL_CORNER * SEAL_CORNER)
 			{
+				at_u = TRUE;
 				continue;
 			}
 			corner2 = (p[0] - v[0]) * (p[0] - v[0]) + (p[1] - v[1]) * (p[1] - v[1]) + (p[2] - v[2]) * (p[2] - v[2]);
 			if (corner2 <= SEAL_CORNER * SEAL_CORNER)
 			{
+				at_v = TRUE;
 				continue;
 			}
-			return FALSE;
+			/* (on the edge between its corners, or beside it within the band
+			and so a boundary moved off it: either cracks against it) */
+			if (distance2 <= SEAL_NEAR * SEAL_NEAR || (t > 0.0 && t < 1.0))
+			{
+				return FALSE;
+			}
 		}
 	}
 
-	return TRUE;
+	return at_u && at_v;
 }
 
 /* the remodel's shape checked (above): each usable view's fallback list
