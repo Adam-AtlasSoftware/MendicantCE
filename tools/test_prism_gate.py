@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -267,8 +268,35 @@ def test_the_capture_set_is_frozen_as_the_design_names_it():
 def test_the_thresholds():
     limits = json.loads((ROOT / "tools/prism_gate/thresholds.json").read_text())
     assert set(limits["gate"]) == {"error", "blotch", "flicker", "flip_still", "flip_moving", "ghost_frames",
-                                   "sky_most", "reference_noise"}
+                                   "sky_most", "reference_noise", "equivalence_flip"}
     assert 0 < limits["bake"]["noise"] < 0.1
+    # (M1: the design's "CE light, deferred" against Classic)
+    assert limits["gate"]["equivalence_flip"] == 0.05
+
+
+def test_equivalence_timeline_and_gate(tmp_path):
+    """capture.py equivalence saves Classic's and the deferred diagnostic's frames at each probe pose, the same
+    hold each; gate.py equivalence passes alike frames and fails a deferred frame missing a surface"""
+    scenes = capture.load_scenes()
+    scene = scenes["G2"]
+    t = capture.equivalence_timeline(scene)
+    saves = sorted(t.saves.values())
+    assert len(saves) == 3 * len(capture.EQUIVALENCE)
+    assert "equivalence/p0_ce.png" in saves and "equivalence/p2_deferred.png" in saves
+    folder = tmp_path / "G2" / "equivalence"
+    folder.mkdir(parents=True)
+    rng = np.random.default_rng(1)
+    ground = (rng.random((540, 960, 3)) * 200 + 20).astype(np.uint8)
+    for index in range(3):
+        Image.fromarray(ground).save(folder / f"p{index}_ce.png")
+        missing = ground.copy()
+        if index == 1:
+            missing[100:400, 200:700] = 255
+        Image.fromarray(missing).save(folder / f"p{index}_deferred.png")
+    args = SimpleNamespace(captures=str(tmp_path), scenes=["G2"])
+    assert gate.equivalence(args) == 1
+    result = json.loads((tmp_path / "equivalence.json").read_text())["results"]["G2"]
+    assert result["flips"][0] == 0.0 and result["flips"][1] > 0.05 and not result["pass"]
 
 
 # ---------- the gate's judging

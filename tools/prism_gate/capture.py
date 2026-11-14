@@ -6,6 +6,7 @@ every run.
     python3 tools/prism_gate/capture.py moves G2 --stage <tree> --data <data> --config <config.toml> --out <dir>
     python3 tools/prism_gate/capture.py refs G2 ...      # the references at the probe poses
     python3 tools/prism_gate/capture.py all ...          # every scene, moves and references
+    python3 tools/prism_gate/capture.py equivalence G2 ... # M1's: "ce" and "ce_deferred" at the probe poses
 
 moves: the camera moved along the scene's keys a step at a time (`steps` a leg, each step held `step_frames`
 frames, its last saved) in each state: RT off, path traced (faithful, denoised) and raw (the denoiser off).
@@ -124,9 +125,29 @@ def refs_timeline(scene, frames):
     return t
 
 
+# M1's equivalence (docs/prism_gates.md): at each probe pose, the camera still, Classic's frame ("ce") and the
+# deferred diagnostic's ("ce_deferred"), then its targets alone (debug.gbuffer_view), each after the same hold
+EQUIVALENCE = (("ce", ('prism_set "display.lighting ce"',)),
+               ("deferred", ('prism_set "display.lighting ce_deferred"', 'prism_set "debug.gbuffer_view off"')),
+               ("base", ('prism_set "debug.gbuffer_view base"',)),
+               ("light", ('prism_set "debug.gbuffer_view light"',)),
+               ("additions", ('prism_set "debug.gbuffer_view additions"',)))
+
+
+def equivalence_timeline(scene):
+    t = begin(scene)
+    poses = paths.move_poses(scene["keys"], scene["steps"])
+    for index, step in enumerate(probe_steps(scene)):
+        for name, commands in EQUIVALENCE:
+            t.at(*commands)
+            t.hold(poses[step - 1], scene["state_settle"] // 2, save=f"equivalence/p{index}_{name}.png")
+        t.at('prism_set "display.lighting ce"', 'prism_set "debug.gbuffer_view off"')
+    return t
+
+
 def run(scene, timeline, out, kind, args):
     out.mkdir(parents=True, exist_ok=True)
-    for folder in ("moves", "refs"):
+    for folder in ("moves", "refs", "equivalence"):
         (out / folder).mkdir(exist_ok=True)
     started = time.time()
     env = dict(kv.split("=", 1) for kv in args.env)
@@ -154,6 +175,9 @@ def run(scene, timeline, out, kind, args):
 
 def capture(scene, what, args):
     out = Path(args.out) / scene["id"]
+    if what == "equivalence":
+        run(scene, equivalence_timeline(scene), out, "equivalence", args)
+        return
     if what in ("moves", "all"):
         if scene.get("live"):
             for state in args.states:
@@ -166,7 +190,7 @@ def capture(scene, what, args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("what", choices=("moves", "refs", "all"))
+    parser.add_argument("what", choices=("moves", "refs", "all", "equivalence"))
     parser.add_argument("scenes", nargs="*", help="scene ids (default: every scene)")
     parser.add_argument("--stage", required=True, help="a Linux release tree (tools/linux_package.py tree)")
     parser.add_argument("--data", required=True, help="a data folder: maps, mods, prism_world, prism_lightmaps, "

@@ -3,6 +3,7 @@
 
     python3 tools/prism_gate/gate.py measure <captures> [scene ...]   # results.json and a table
     python3 tools/prism_gate/gate.py repro <captures a> <captures b>  # every frame of both byte for byte alike?
+    python3 tools/prism_gate/gate.py equivalence <captures> [scene ...]  # M1: "ce_deferred" against "ce"
 
 measure, for each scene, at the three probe poses (the worst of them):
   error    relative MSE of the path traced moving frame at the pose against its reference (R)
@@ -77,6 +78,29 @@ def measure(args):
     return 0 if all(r["pass"] for r in results.values()) else 1
 
 
+def equivalence(args):
+    """M1's equivalence gate (docs/prism_gates.md): at each probe pose, mean FLIP of the deferred diagnostic's frame
+    against Classic's ("ce"), the worst pose a scene's; and the share of the opaque pixels its base target covers
+    (not white: the objects' opaque parts, lit in one pass, are not in it yet)"""
+    root = Path(args.captures)
+    scenes = capture.load_scenes()
+    limit = thresholds()["equivalence_flip"]
+    results = {}
+    for scene_id in args.scenes or sorted(p.name for p in root.iterdir() if p.name in scenes):
+        folder = root / scene_id / "equivalence"
+        flips, over = [], []
+        for index in range(len(scenes[scene_id]["probes"])):
+            ce = metrics.load(folder / f"p{index}_ce.png")
+            deferred = metrics.load(folder / f"p{index}_deferred.png")
+            flips.append(float(flip.mean_flip(ce, deferred)))
+            over.append(float((np.abs(ce - deferred).max(2) > 8).mean()))
+        results[scene_id] = {"flip": max(flips), "flips": flips, "over_8": over, "pass": max(flips) <= limit}
+        print("%-4s %-14s flip %.4f (poses %s)  %s" % (scene_id, scenes[scene_id]["name"], max(flips),
+              " ".join("%.4f" % f for f in flips), "PASS" if results[scene_id]["pass"] else "FAIL"), flush=True)
+    (root / "equivalence.json").write_text(json.dumps({"threshold": limit, "results": results}, indent=1))
+    return 0 if all(r["pass"] for r in results.values()) else 1
+
+
 def digest(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
@@ -110,8 +134,11 @@ def main():
     r = sub.add_parser("repro")
     r.add_argument("a")
     r.add_argument("b")
+    e = sub.add_parser("equivalence")
+    e.add_argument("captures")
+    e.add_argument("scenes", nargs="*")
     args = parser.parse_args()
-    return measure(args) if args.command == "measure" else repro(args)
+    return {"measure": measure, "repro": repro, "equivalence": equivalence}[args.command](args)
 
 
 if __name__ == "__main__":
