@@ -558,6 +558,10 @@ struct pwg_material_view
 	byte const *bounds;
 	struct structure_material *material;
 	boolean usable;
+	/* the part's surfaces drawn as their stock triangles (the shape's
+	checks: shape_check), by their numbers in the part, and how many */
+	unsigned long *fallback;
+	unsigned long fallback_count;
 };
 
 /* the file's materials read and checked against its size, the map's BSP
@@ -806,6 +810,580 @@ refused:
 	return FALSE;
 }
 
+/* ---------- the shape's checks (PRISM v4, M1)
+
+A remodel's triangles stand for its stock triangle's surface: each must lie
+within the surface's offset prism, the stock triangle's plane and a relief
+off it (SHAPE_RELIEF) and its edges and a margin past them in its plane
+(SHAPE_MARGIN), or it is a floating facet (a spike or sheet the pack tools'
+decimation or far level left: a10f's steel and a10g's panel strips have
+them, metres out of slivers of stock triangles). A surface with one, at
+either level, is drawn as its stock triangle instead.
+
+A surface drawn stock among remodelled neighbours leaves a crack wherever a
+neighbour's edge along it is not the stock edge (a T-junction where the
+neighbour's edge has vertices between the stock corners, a gap where it
+left the edge). So such surfaces fall back in seal groups, never alone: the
+group grows across each stock edge to every remodelled neighbour whose
+vertices on that edge are not just its two corners (a T-junction there: the
+crack check, on the CPU over the loaded file; the remodel's boundaries lie
+on the stock edges, wg2_seal.py), until no edge of the group's border would
+crack. A group past SEAL_GROUP_MOST surfaces is not let fall back (the
+remodel is drawn as the file has it, and the log says so): a crack across a
+level is worse than a facet. Neighbours of other materials are found by the
+stock edges' corners, which the BSP's surfaces share exactly.
+
+display.prism_world_geometry_check false skips the checks (read as a BSP's
+remodel loads). */
+
+#define SHAPE_RELIEF 1.0
+#define SHAPE_MARGIN 1.0
+/* a neighbour's vertex this near a stock edge is on it (wg2_cracks.py's
+tolerance), this near a corner at it (world units): the remodel's
+boundaries lie on the stock edges (wg2_seal.py) */
+#define SEAL_NEAR 2.0e-3
+#define SEAL_CORNER 1.0e-3
+#define SEAL_GROUP_MOST 256
+
+struct shape_edge
+{
+	long q[6];
+	long surface;
+};
+
+struct shape_check
+{
+	struct structure_bsp *bsp;
+	struct pwg_material_view *views;
+	long view_count;
+	/* the remodelled surfaces, all views' in order: the first of each view
+	(view_count + 1 entries) */
+	long *view_first;
+	long surface_count;
+	/* each surface's stock corners (9 floats), its state, its group */
+	float *corners;
+	byte *state;
+	long *queue;
+	struct shape_edge *edges;
+};
+
+enum
+{
+	_shape_kept = 0,
+	_shape_facets,
+	_shape_grouped,
+	_shape_fallback,
+	_shape_kept_whole
+};
+
+static void shape_vertex(
+	struct pwg_material_view const *view,
+	unsigned long vertex,
+	double p[3])
+{
+	float f[3];
+
+	memcpy(f, view->vertices + vertex * ENVIRONMENT_VERTEX_UNCOMPRESSED_SIZE, sizeof(f));
+	p[0] = f[0];
+	p[1] = f[1];
+	p[2] = f[2];
+
+	return;
+}
+
+static unsigned long shape_index(
+	struct pwg_material_view const *view,
+	unsigned long element)
+{
+	return (unsigned long)view->triangles[2 * element] | ((unsigned long)view->triangles[2 * element + 1] << 8);
+}
+
+/* a part's surface's stock corners (FALSE: an index past the material's) */
+static boolean shape_stock_corners(
+	struct structure_bsp *bsp,
+	struct pwg_material_view const *view,
+	long local,
+	float corners[9])
+{
+	long vertex_size = rasterizer_geometry_get_vertex_size(view->material->vertices.type);
+	byte const *stock = (byte const *)view->material->compressed_vertex_data.address;
+	struct structure_surface const *surface = TAG_BLOCK_GET_ELEMENT(&bsp->surfaces,
+		view->material->first_surface_index + (long)view->part_first_surface + local, struct structure_surface);
+	int corner;
+
+	for (corner = 0; corner < 3; corner++)
+	{
+		unsigned long vertex = (unsigned short)surface->vertex_indices[corner];
+
+		if (vertex >= (unsigned long)view->material->vertices.count)
+		{
+			return FALSE;
+		}
+		memcpy(corners + 3 * corner, stock + vertex * vertex_size, 3 * sizeof(float));
+	}
+
+	return TRUE;
+}
+
+/* whether a run of a part's triangles has one outside its surface's offset
+prism (their centroids against the stock triangle) */
+static boolean shape_run_facets(
+	struct pwg_material_view const *view,
+	float const corners[9],
+	unsigned long first,
+	unsigned long count,
+	unsigned long *facets)
+{
+	double a[3], b[3], c[3], n[3], inward[3][3], length;
+	unsigned long triangle;
+	boolean found = FALSE;
+	int axis, edge;
+
+	for (axis = 0; axis < 3; axis++)
+	{
+		a[axis] = corners[axis];
+		b[axis] = corners[3 + axis];
+		c[axis] = corners[6 + axis];
+	}
+	n[0] = (b[1] - a[1]) * (c[2] - a[2]) - (b[2] - a[2]) * (c[1] - a[1]);
+	n[1] = (b[2] - a[2]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[2] - a[2]);
+	n[2] = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+	length = sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+	if (length < 1.0e-12)
+	{
+		/* (a stock triangle of no area: nothing to stand within) */
+		return FALSE;
+	}
+	for (axis = 0; axis < 3; axis++)
+	{
+		n[axis] /= length;
+	}
+	/* each edge's inward direction in the plane (n x edge, the corners
+	about n as they come) */
+	for (edge = 0; edge < 3; edge++)
+	{
+		float const *u = corners + 3 * edge;
+		float const *v = corners + 3 * ((edge + 1) % 3);
+		double e[3] = { v[0] - u[0], v[1] - u[1], v[2] - u[2] };
+
+		inward[edge][0] = n[1] * e[2] - n[2] * e[1];
+		inward[edge][1] = n[2] * e[0] - n[0] * e[2];
+		inward[edge][2] = n[0] * e[1] - n[1] * e[0];
+		length = sqrt(inward[edge][0] * inward[edge][0] + inward[edge][1] * inward[edge][1] +
+			inward[edge][2] * inward[edge][2]);
+		for (axis = 0; axis < 3; axis++)
+		{
+			inward[edge][axis] = length > 1.0e-12 ? inward[edge][axis] / length : 0.0;
+		}
+	}
+	for (triangle = first; triangle < first + count; triangle++)
+	{
+		double centroid[3] = { 0.0, 0.0, 0.0 }, p[3], height, outside = 0.0;
+		int corner;
+
+		for (corner = 0; corner < 3; corner++)
+		{
+			shape_vertex(view, shape_index(view, triangle * 3 + corner), p);
+			for (axis = 0; axis < 3; axis++)
+			{
+				centroid[axis] += p[axis] / 3.0;
+			}
+		}
+		height = (centroid[0] - a[0]) * n[0] + (centroid[1] - a[1]) * n[1] + (centroid[2] - a[2]) * n[2];
+		for (edge = 0; edge < 3; edge++)
+		{
+			float const *u = corners + 3 * edge;
+			double in = (centroid[0] - u[0]) * inward[edge][0] + (centroid[1] - u[1]) * inward[edge][1] +
+				(centroid[2] - u[2]) * inward[edge][2];
+
+			if (-in > outside)
+			{
+				outside = -in;
+			}
+		}
+		if (fabs(height) > SHAPE_RELIEF || outside > SHAPE_MARGIN)
+		{
+			(*facets)++;
+			found = TRUE;
+		}
+	}
+
+	return found;
+}
+
+static void shape_edge_key(
+	float const *u,
+	float const *v,
+	struct shape_edge *edge)
+{
+	long a[3], b[3];
+	int axis, swap = 0;
+
+	for (axis = 0; axis < 3; axis++)
+	{
+		a[axis] = (long)floor(u[axis] / SEAL_CORNER + 0.5);
+		b[axis] = (long)floor(v[axis] / SEAL_CORNER + 0.5);
+	}
+	for (axis = 0; axis < 3; axis++)
+	{
+		if (a[axis] != b[axis])
+		{
+			swap = a[axis] > b[axis];
+			break;
+		}
+	}
+	for (axis = 0; axis < 3; axis++)
+	{
+		edge->q[axis] = swap ? b[axis] : a[axis];
+		edge->q[3 + axis] = swap ? a[axis] : b[axis];
+	}
+
+	return;
+}
+
+static int shape_edge_compare(
+	void const *x,
+	void const *y)
+{
+	struct shape_edge const *a = (struct shape_edge const *)x;
+	struct shape_edge const *b = (struct shape_edge const *)y;
+	int i;
+
+	for (i = 0; i < 6; i++)
+	{
+		if (a->q[i] != b->q[i])
+		{
+			return a->q[i] < b->q[i] ? -1 : 1;
+		}
+	}
+
+	return a->surface < b->surface ? -1 : a->surface > b->surface;
+}
+
+/* the view and part's surface of a remodelled surface's number */
+static struct pwg_material_view *shape_surface(
+	struct shape_check const *check,
+	long surface,
+	long *local)
+{
+	long low = 0, high = check->view_count - 1;
+
+	while (low < high)
+	{
+		long middle = (low + high + 1) / 2;
+
+		if (check->view_first[middle] <= surface)
+		{
+			low = middle;
+		}
+		else
+		{
+			high = middle - 1;
+		}
+	}
+	*local = surface - check->view_first[low];
+
+	return &check->views[low];
+}
+
+/* whether a neighbour's edge along the stock edge u-v is that edge (no
+vertex of its triangles near the edge but at its corners) */
+static boolean shape_edge_sealed(
+	struct shape_check const *check,
+	long neighbour,
+	float const *u,
+	float const *v)
+{
+	long local;
+	struct pwg_material_view const *view = shape_surface(check, neighbour, &local);
+	unsigned long ranges[2][2];
+	double e[3] = { v[0] - u[0], v[1] - u[1], v[2] - u[2] };
+	double length2 = e[0] * e[0] + e[1] * e[1] + e[2] * e[2];
+	int range;
+
+	if (length2 < 1.0e-12)
+	{
+		return TRUE;
+	}
+	ranges[0][0] = read_u32(view->surface_first_triangle + 4 * local);
+	ranges[0][1] = read_u32(view->surface_first_triangle + 4 * (local + 1)) - ranges[0][0];
+	ranges[1][0] = view->far_triangles ? read_u32(view->far_triangles + 8 * local) : 0;
+	ranges[1][1] = view->far_triangles ? read_u32(view->far_triangles + 8 * local + 4) : 0;
+	for (range = 0; range < 2; range++)
+	{
+		unsigned long element;
+
+		for (element = ranges[range][0] * 3; element < (ranges[range][0] + ranges[range][1]) * 3; element++)
+		{
+			double p[3], t, d[3], distance2, corner2;
+			int axis;
+
+			shape_vertex(view, shape_index(view, element), p);
+			t = ((p[0] - u[0]) * e[0] + (p[1] - u[1]) * e[1] + (p[2] - u[2]) * e[2]) / length2;
+			t = t < 0.0 ? 0.0 : t > 1.0 ? 1.0 : t;
+			for (axis = 0; axis < 3; axis++)
+			{
+				d[axis] = p[axis] - (u[axis] + t * e[axis]);
+			}
+			distance2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+			if (distance2 > SEAL_NEAR * SEAL_NEAR)
+			{
+				continue;
+			}
+			corner2 = (p[0] - u[0]) * (p[0] - u[0]) + (p[1] - u[1]) * (p[1] - u[1]) + (p[2] - u[2]) * (p[2] - u[2]);
+			if (corner2 <= SEAL_CORNER * SEAL_CORNER)
+			{
+				continue;
+			}
+			corner2 = (p[0] - v[0]) * (p[0] - v[0]) + (p[1] - v[1]) * (p[1] - v[1]) + (p[2] - v[2]) * (p[2] - v[2]);
+			if (corner2 <= SEAL_CORNER * SEAL_CORNER)
+			{
+				continue;
+			}
+			return FALSE;
+		}
+	}
+
+	return TRUE;
+}
+
+/* the remodel's shape checked (above): each usable view's fallback list
+made; a view whose fallbacks would take it past 16-bit indices stays stock */
+static void shape_check(
+	struct structure_bsp *bsp,
+	struct pwg_material_view *views,
+	long view_count,
+	char const *path)
+{
+	struct shape_check check;
+	long index, surface, edge_count = 0;
+	unsigned long facets = 0, facet_surfaces = 0, groups = 0, kept_groups = 0, fallbacks = 0, largest = 0;
+
+	memset(&check, 0, sizeof(check));
+	if (!config_boolean("display.prism_world_geometry_check"))
+	{
+		return;
+	}
+	check.bsp = bsp;
+	check.views = views;
+	check.view_count = view_count;
+	check.view_first = malloc((view_count + 1) * sizeof(long));
+	if (!check.view_first)
+	{
+		return;
+	}
+	for (index = 0; index < view_count; index++)
+	{
+		check.view_first[index] = check.surface_count;
+		if (views[index].usable)
+		{
+			check.surface_count += (long)views[index].part_surface_count;
+		}
+	}
+	check.view_first[view_count] = check.surface_count;
+	check.corners = malloc(check.surface_count * 9 * sizeof(float) + 1);
+	check.state = calloc(check.surface_count + 1, 1);
+	check.queue = malloc(check.surface_count * sizeof(long) + 1);
+	check.edges = malloc(check.surface_count * 3 * sizeof(struct shape_edge) + 1);
+	if (!check.corners || !check.state || !check.queue || !check.edges)
+	{
+		goto done;
+	}
+
+	/* the facets */
+	for (index = 0; index < view_count; index++)
+	{
+		struct pwg_material_view *view = &views[index];
+		long local;
+
+		if (!view->usable)
+		{
+			continue;
+		}
+		for (local = 0; local < (long)view->part_surface_count; local++)
+		{
+			float *corners = check.corners + 9 * (check.view_first[index] + local);
+			unsigned long first = read_u32(view->surface_first_triangle + 4 * local);
+			unsigned long count = read_u32(view->surface_first_triangle + 4 * (local + 1)) - first;
+			boolean found;
+			int corner;
+
+			if (!shape_stock_corners(bsp, view, local, corners))
+			{
+				memset(corners, 0, 9 * sizeof(float));
+				continue;
+			}
+			found = shape_run_facets(view, corners, first, count, &facets);
+			if (view->far_triangles &&
+				shape_run_facets(view, corners, read_u32(view->far_triangles + 8 * local),
+					read_u32(view->far_triangles + 8 * local + 4), &facets))
+			{
+				found = TRUE;
+			}
+			if (found)
+			{
+				check.state[check.view_first[index] + local] = _shape_facets;
+				facet_surfaces++;
+			}
+			for (corner = 0; corner < 3; corner++)
+			{
+				struct shape_edge *edge = &check.edges[edge_count++];
+
+				shape_edge_key(corners + 3 * corner, corners + 3 * ((corner + 1) % 3), edge);
+				edge->surface = check.view_first[index] + local;
+			}
+		}
+	}
+	if (!facet_surfaces)
+	{
+		goto done;
+	}
+	qsort(check.edges, edge_count, sizeof(*check.edges), shape_edge_compare);
+
+	/* the seal groups, one from each surface with facets not yet in one */
+	for (surface = 0; surface < check.surface_count; surface++)
+	{
+		long head = 0, tail = 0, member;
+		boolean too_large = FALSE;
+
+		if (check.state[surface] != _shape_facets)
+		{
+			continue;
+		}
+		groups++;
+		check.state[surface] = _shape_grouped;
+		check.queue[tail++] = surface;
+		while (head < tail && !too_large)
+		{
+			long g = check.queue[head++];
+			float const *corners = check.corners + 9 * g;
+			int corner;
+
+			for (corner = 0; corner < 3 && !too_large; corner++)
+			{
+				float const *u = corners + 3 * corner;
+				float const *v = corners + 3 * ((corner + 1) % 3);
+				struct shape_edge key;
+				long low = 0, high = edge_count;
+
+				shape_edge_key(u, v, &key);
+				key.surface = -1;
+				while (low < high)
+				{
+					long middle = (low + high) / 2;
+
+					if (shape_edge_compare(&check.edges[middle], &key) < 0)
+					{
+						low = middle + 1;
+					}
+					else
+					{
+						high = middle;
+					}
+				}
+				for (; low < edge_count && !memcmp(check.edges[low].q, key.q, sizeof(key.q)); low++)
+				{
+					long n = check.edges[low].surface;
+
+					if (n == g || check.state[n] == _shape_grouped || check.state[n] == _shape_fallback)
+					{
+						continue;
+					}
+					if (check.state[n] == _shape_facets || !shape_edge_sealed(&check, n, u, v))
+					{
+						if (tail >= SEAL_GROUP_MOST)
+						{
+							too_large = TRUE;
+							break;
+						}
+						check.state[n] = _shape_grouped;
+						check.queue[tail++] = n;
+					}
+				}
+			}
+		}
+		if ((unsigned long)tail > largest)
+		{
+			largest = (unsigned long)tail;
+		}
+		for (member = 0; member < tail; member++)
+		{
+			/* (a group too large keeps its remodel: its members are marked
+			apart from facets so that no other group takes them up) */
+			check.state[check.queue[member]] = too_large ? _shape_kept_whole : _shape_fallback;
+		}
+		if (too_large)
+		{
+			kept_groups++;
+		}
+		else
+		{
+			fallbacks += (unsigned long)tail;
+		}
+	}
+
+	/* each view's fallbacks */
+	for (index = 0; index < view_count; index++)
+	{
+		struct pwg_material_view *view = &views[index];
+		long local;
+		unsigned long count = 0;
+
+		if (!view->usable)
+		{
+			continue;
+		}
+		for (local = 0; local < (long)view->part_surface_count; local++)
+		{
+			count += check.state[check.view_first[index] + local] == _shape_fallback;
+		}
+		if (!count)
+		{
+			continue;
+		}
+		if (view->vertex_count + 3 * count > 0xFFFF)
+		{
+			platform_log("prism world geometry: %s lightmap %d material %d: %lu surfaces to draw stock would "
+				"take it past 65535 vertices; it stays stock", path, (int)view->lightmap_index,
+				(int)view->material_index, count);
+			view->usable = FALSE;
+			continue;
+		}
+		view->fallback = malloc(count * sizeof(unsigned long));
+		if (!view->fallback)
+		{
+			view->usable = FALSE;
+			continue;
+		}
+		for (local = 0; local < (long)view->part_surface_count; local++)
+		{
+			if (check.state[check.view_first[index] + local] == _shape_fallback)
+			{
+				view->fallback[view->fallback_count++] = (unsigned long)local;
+			}
+		}
+	}
+
+done:
+	if (facet_surfaces)
+	{
+		platform_log("prism world geometry: %s: %lu floating facets on %lu surfaces; %lu seal groups (the largest "
+			"%lu surfaces), %lu surfaces drawn as their stock triangles, %lu groups kept whole (over %d surfaces)",
+			path, facets, facet_surfaces, groups, largest, fallbacks, kept_groups, SEAL_GROUP_MOST);
+	}
+	else if (check.state)
+	{
+		platform_log("prism world geometry: %s: no floating facet (%ld surfaces checked)", path, check.surface_count);
+	}
+	free(check.view_first);
+	free(check.corners);
+	free(check.state);
+	free(check.queue);
+	free(check.edges);
+
+	return;
+}
+
 /* the cone of facings of a run of a part's triangles (the file's vertices
 and triangles), as structure_culling_cone_build's: the bounds' sphere, the
 mean of the triangles' unit normals (structure_culling.c's sign: the
@@ -1026,6 +1604,110 @@ static long part_cones(
 	return disagree;
 }
 
+/* a part's fallback surfaces' stock corners as vertices after the file's
+(stride bytes each, in the file's uncompressed layout, into to): each a copy
+of the surface's own vertex nearest that corner (its base map and lightmap
+coordinates, normal and incident radiosity are those of the point of the
+surface it lies over), put at the corner. The vertices' pass finds the
+copied vertices (sources); the lightmap vertices' pass, after it, reuses
+them */
+static void fallback_vertices(
+	struct structure_bsp *bsp,
+	struct pwg_material_view const *view,
+	byte *to,
+	unsigned long stride,
+	byte const *from,
+	unsigned long *sources)
+{
+	unsigned long element;
+
+	for (element = 0; element < view->fallback_count; element++)
+	{
+		long local = (long)view->fallback[element];
+		float corners[9];
+		int corner;
+
+		if (!shape_stock_corners(bsp, view, local, corners))
+		{
+			memset(corners, 0, sizeof(corners));
+		}
+		for (corner = 0; corner < 3; corner++)
+		{
+			unsigned long target = view->vertex_count + 3 * element + corner;
+
+			if (stride == ENVIRONMENT_VERTEX_UNCOMPRESSED_SIZE)
+			{
+				unsigned long first = read_u32(view->surface_first_triangle + 4 * local);
+				unsigned long last = read_u32(view->surface_first_triangle + 4 * (local + 1));
+				unsigned long best = 0, item;
+				double best_distance = -1.0;
+
+				for (item = first * 3; item < last * 3; item++)
+				{
+					unsigned long vertex = shape_index(view, item);
+					double p[3], d;
+
+					shape_vertex(view, vertex, p);
+					d = (p[0] - corners[3 * corner]) * (p[0] - corners[3 * corner]) +
+						(p[1] - corners[3 * corner + 1]) * (p[1] - corners[3 * corner + 1]) +
+						(p[2] - corners[3 * corner + 2]) * (p[2] - corners[3 * corner + 2]);
+					if (best_distance < 0.0 || d < best_distance)
+					{
+						best_distance = d;
+						best = vertex;
+					}
+				}
+				sources[3 * element + corner] = best;
+			}
+			memcpy(to + target * stride, from + sources[3 * element + corner] * stride, stride);
+			if (stride == ENVIRONMENT_VERTEX_UNCOMPRESSED_SIZE)
+			{
+				memcpy(to + target * stride, corners + 3 * corner, 3 * sizeof(float));
+			}
+		}
+	}
+
+	return;
+}
+
+/* a part's fallback surfaces' triangles: the first of each one's near run
+its stock triangle (the stock surface's corners in their order: its front),
+the rest of no area (the GPU draws nothing of them), and its far level that
+same run (its own far triangles, if any, are left undrawn) */
+static void fallback_triangles(
+	struct pwg_material_view const *view,
+	struct world_material *made,
+	word *indices)
+{
+	unsigned long element;
+
+	for (element = 0; element < view->fallback_count; element++)
+	{
+		long local = (long)view->fallback[element];
+		word first_vertex = (word)(view->vertex_count + 3 * element);
+		unsigned long first = made->surface_first_triangle[local];
+		unsigned long count = made->surface_first_triangle[local + 1] - first;
+		unsigned long triangle;
+
+		for (triangle = first; triangle < first + count; triangle++)
+		{
+			int corner;
+
+			for (corner = 0; corner < 3; corner++)
+			{
+				indices[3 * triangle + corner] = triangle == first ? (word)(first_vertex + corner) : first_vertex;
+			}
+		}
+		if (made->far_triangles)
+		{
+			made->far_triangles[2 * local] = first;
+			made->far_triangles[2 * local + 1] = count;
+		}
+	}
+
+	return;
+}
+
 /* the usable materials' vertices compressed into one block of contiguous
 memory, each array inside a mirror segment, and their buffers made */
 static boolean world_geometry_make(
@@ -1041,22 +1723,29 @@ static boolean world_geometry_make(
 	long usable = 0, index, lightmap_index, entry_count = 0, disagree = 0, coned = 0, facing = 0;
 	byte *scratch = NULL;
 	unsigned long scratch_size = 0;
+	/* (a fallback surface's corners' vertices of the file: fallback_vertices) */
+	unsigned long *corner_sources = NULL;
+	unsigned long most_fallbacks = 0;
+	long fallen = 0;
 
 	for (index = 0; index < view_count; index++)
 	{
 		struct pwg_material_view const *view = &views[index];
+		unsigned long count;
 
 		if (!view->usable)
 		{
 			continue;
 		}
+		/* (with a fallback surface's three corners each: shape_check) */
+		count = view->vertex_count + 3 * view->fallback_count;
 		usable++;
-		total = segment_place(total, view->vertex_count * vertex_size) + view->vertex_count * vertex_size;
-		total = segment_place(total, view->vertex_count * lightmap_vertex_size) + view->vertex_count * lightmap_vertex_size;
+		total = segment_place(total, count * vertex_size) + count * vertex_size;
+		total = segment_place(total, count * lightmap_vertex_size) + count * lightmap_vertex_size;
 		total = segment_place(total, view->triangle_count * 6) + view->triangle_count * 6;
-		if (view->vertex_count * ENVIRONMENT_VERTEX_UNCOMPRESSED_SIZE > scratch_size)
+		if (count * ENVIRONMENT_VERTEX_UNCOMPRESSED_SIZE > scratch_size)
 		{
-			scratch_size = view->vertex_count * ENVIRONMENT_VERTEX_UNCOMPRESSED_SIZE;
+			scratch_size = count * ENVIRONMENT_VERTEX_UNCOMPRESSED_SIZE;
 		}
 	}
 	if (!usable)
@@ -1078,6 +1767,14 @@ static boolean world_geometry_make(
 	world_geometry.lightmap_first = calloc(bsp->lightmaps.count + 1, sizeof(*world_geometry.lightmap_first));
 	world_geometry.runs = malloc(MAXIMUM_CHUNK_SURFACES * sizeof(*world_geometry.runs));
 	scratch = malloc(scratch_size + 1);
+	for (index = 0; index < view_count; index++)
+	{
+		if (views[index].usable && views[index].fallback_count > most_fallbacks)
+		{
+			most_fallbacks = views[index].fallback_count;
+		}
+	}
+	corner_sources = malloc(most_fallbacks * 3 * sizeof(unsigned long) + 1);
 	for (lightmap_index = 0; lightmap_index < bsp->lightmaps.count && world_geometry.lightmap_first; lightmap_index++)
 	{
 		world_geometry.lightmap_first[lightmap_index] = entry_count;
@@ -1089,10 +1786,11 @@ static boolean world_geometry_make(
 	}
 	world_geometry.lookup = malloc((entry_count + 1) * sizeof(*world_geometry.lookup));
 	if (!world_geometry.geometry || !world_geometry.materials || !world_geometry.lightmap_first ||
-		!world_geometry.runs || !scratch || !world_geometry.lookup)
+		!world_geometry.runs || !scratch || !world_geometry.lookup || !corner_sources)
 	{
 		platform_log("prism world geometry: %s: out of memory (%lu KB of contiguous memory)", path, total / 1024);
 		free(scratch);
+		free(corner_sources);
 		return FALSE;
 	}
 	world_geometry.lightmap_count = bsp->lightmaps.count;
@@ -1109,7 +1807,7 @@ static boolean world_geometry_make(
 		long entry;
 		byte *compressed;
 		word *indices;
-		unsigned long element;
+		unsigned long element, vertex_count;
 
 		if (!view->usable)
 		{
@@ -1142,6 +1840,7 @@ static boolean world_geometry_make(
 		if (!made->surface_first_triangle)
 		{
 			free(scratch);
+			free(corner_sources);
 			return FALSE;
 		}
 		for (element = 0; element <= view->part_surface_count; element++)
@@ -1186,6 +1885,16 @@ static boolean world_geometry_make(
 		disagree += part_cones(bsp, view, made);
 		if (made->cones)
 		{
+			/* (a surface drawn as its stock triangle: its cones are the
+			file's triangles', never skipped for them) */
+			for (element = 0; element < view->fallback_count; element++)
+			{
+				made->cones[2 * view->fallback[element]].cutoff = -1.0f;
+				made->cones[2 * view->fallback[element] + 1].cutoff = -1.0f;
+			}
+		}
+		if (made->cones)
+		{
 			long local;
 
 			for (local = 0; local < made->surface_count * 2; local++)
@@ -1197,45 +1906,49 @@ static boolean world_geometry_make(
 
 		/* the vertices, then the lightmap vertices (compressed from a copy:
 		the file's bytes need not be aligned) */
-		offset = segment_place(offset, view->vertex_count * vertex_size);
+		vertex_count = view->vertex_count + 3 * view->fallback_count;
+		offset = segment_place(offset, vertex_count * vertex_size);
 		compressed = world_geometry.geometry + offset;
 		memcpy(scratch, view->vertices, view->vertex_count * ENVIRONMENT_VERTEX_UNCOMPRESSED_SIZE);
+		fallback_vertices(bsp, view, scratch, ENVIRONMENT_VERTEX_UNCOMPRESSED_SIZE, view->vertices, corner_sources);
 		rasterizer_geometry_compress_vertices(
 			_rasterizer_vertex_type_environment_uncompressed,
-			(long)view->vertex_count,
+			(long)vertex_count,
 			compressed,
-			(long)view->vertex_count * vertex_size,
+			(long)vertex_count * vertex_size,
 			scratch,
-			(long)view->vertex_count * ENVIRONMENT_VERTEX_UNCOMPRESSED_SIZE);
+			(long)vertex_count * ENVIRONMENT_VERTEX_UNCOMPRESSED_SIZE);
 		made->vertex_resources[0].common = D3DCOMMON_TYPE_VERTEXBUFFER | 1;
 		made->vertex_resources[0].data = 0;
 		D3DResource_Register((D3DResource *)&made->vertex_resources[0], compressed);
 		made->buffers[0].type = _rasterizer_vertex_type_environment_compressed;
-		made->buffers[0].count = (long)view->vertex_count;
+		made->buffers[0].count = (long)vertex_count;
 		made->buffers[0].offset = 0;
 		made->buffers[0].base_address = compressed;
 		made->buffers[0].hardware_format = &made->vertex_resources[0];
-		offset += view->vertex_count * vertex_size;
+		offset += vertex_count * vertex_size;
 
-		offset = segment_place(offset, view->vertex_count * lightmap_vertex_size);
+		offset = segment_place(offset, vertex_count * lightmap_vertex_size);
 		compressed = world_geometry.geometry + offset;
 		memcpy(scratch, view->lightmap_vertices, view->vertex_count * ENVIRONMENT_LIGHTMAP_VERTEX_UNCOMPRESSED_SIZE);
+		fallback_vertices(bsp, view, scratch, ENVIRONMENT_LIGHTMAP_VERTEX_UNCOMPRESSED_SIZE, view->lightmap_vertices,
+			corner_sources);
 		rasterizer_geometry_compress_vertices(
 			_rasterizer_vertex_type_environment_lightmap_uncompressed,
-			(long)view->vertex_count,
+			(long)vertex_count,
 			compressed,
-			(long)view->vertex_count * lightmap_vertex_size,
+			(long)vertex_count * lightmap_vertex_size,
 			scratch,
-			(long)view->vertex_count * ENVIRONMENT_LIGHTMAP_VERTEX_UNCOMPRESSED_SIZE);
+			(long)vertex_count * ENVIRONMENT_LIGHTMAP_VERTEX_UNCOMPRESSED_SIZE);
 		made->vertex_resources[1].common = D3DCOMMON_TYPE_VERTEXBUFFER | 1;
 		made->vertex_resources[1].data = 0;
 		D3DResource_Register((D3DResource *)&made->vertex_resources[1], compressed);
 		made->buffers[1].type = _rasterizer_vertex_type_environment_lightmap_compressed;
-		made->buffers[1].count = (long)view->vertex_count;
+		made->buffers[1].count = (long)vertex_count;
 		made->buffers[1].offset = 0;
 		made->buffers[1].base_address = compressed;
 		made->buffers[1].hardware_format = &made->vertex_resources[1];
-		offset += view->vertex_count * lightmap_vertex_size;
+		offset += vertex_count * lightmap_vertex_size;
 
 		/* the triangles: an index buffer's data is ordinary (virtual)
 		memory at its Data address (xdk_d3d8.h) */
@@ -1246,6 +1959,7 @@ static boolean world_geometry_make(
 			indices[element] = (word)((unsigned long)view->triangles[2 * element] |
 				((unsigned long)view->triangles[2 * element + 1] << 8));
 		}
+		fallback_triangles(view, made, indices);
 		made->index_resource.common = D3DCOMMON_TYPE_INDEXBUFFER | 1;
 		made->index_resource.data = (unsigned long)indices;
 		offset += view->triangle_count * 6;
@@ -1261,9 +1975,11 @@ static boolean world_geometry_make(
 		world_geometry.material_count++;
 		triangles += view->triangle_count;
 		stock_triangles += view->part_surface_count;
-		vertices += view->vertex_count;
+		vertices += vertex_count;
+		fallen += (long)view->fallback_count;
 	}
 	free(scratch);
+	free(corner_sources);
 	/* (the batches' indices: a part's runs copied one after another, never
 	more than its triangles; in physical memory, as the parts' own indices
 	are, made once with the remodel and let go with it. A buffer of the
@@ -1285,10 +2001,10 @@ static boolean world_geometry_make(
 	}
 	platform_log("prism world geometry: %s: %ld of %ld material parts remodelled, %lu triangles for %lu (%.1fx), "
 		"%lu vertices, %lu KB of contiguous memory; %.1f%% of the surfaces' levels can face away whole "
-		"(%ld turned the other way about from their stock triangles)",
+		"(%ld turned the other way about from their stock triangles); %ld surfaces drawn as their stock triangles",
 		path, world_geometry.material_count, view_count, triangles, stock_triangles,
 		stock_triangles ? (double)triangles / (double)stock_triangles : 0.0, vertices, total / 1024,
-		coned ? 100.0 * (double)facing / (double)coned : 0.0, disagree);
+		coned ? 100.0 * (double)facing / (double)coned : 0.0, disagree, fallen);
 
 	return TRUE;
 }
@@ -1353,6 +2069,7 @@ static void world_geometry_load(
 		{
 			pwg_material_check(bsp, &views[index], path);
 		}
+		shape_check(bsp, views, view_count, path);
 		if (world_geometry_make(bsp, views, view_count, path))
 		{
 			world_geometry.loaded_tag_index = tag_index;
@@ -1362,6 +2079,10 @@ static void world_geometry_load(
 		{
 			world_geometry_release();
 		}
+	}
+	for (index = 0; views && index < view_count; index++)
+	{
+		free(views[index].fallback);
 	}
 	free(views);
 	free(bytes);
