@@ -7,6 +7,7 @@
   "flip_still": 0.10,
   "flip_moving": 0.15,
   "equivalence_flip": 0.05,
+  "material_source_coverage": 1.0,
   "ghost_frames": 4,
   "sky_most": 0.8,
   "reference_noise": 0.001

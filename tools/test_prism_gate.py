@@ -268,10 +268,35 @@ def test_the_capture_set_is_frozen_as_the_design_names_it():
 def test_the_thresholds():
     limits = json.loads((ROOT / "tools/prism_gate/thresholds.json").read_text())
     assert set(limits["gate"]) == {"error", "blotch", "flicker", "flip_still", "flip_moving", "ghost_frames",
-                                   "sky_most", "reference_noise", "equivalence_flip"}
+                                   "sky_most", "reference_noise", "equivalence_flip", "material_source_coverage"}
     assert 0 < limits["bake"]["noise"] < 0.1
-    # (M1: the design's "CE light, deferred" against Classic)
+    # (M1: the design's "CE light, deferred" against Classic, and every opaque pixel's material)
     assert limits["gate"]["equivalence_flip"] == 0.05
+    assert limits["gate"]["material_source_coverage"] == 1.0
+
+
+def test_material_source_gate(tmp_path):
+    """gate.py material_source counts the material-source view's pixels by its colours: every opaque pixel at the
+    automatic tier passes, a pixel the G-buffer missed (magenta) or with no material (orange) fails; the sky (black)
+    is not counted"""
+    for scene, bad in (("G2", None), ("G5", gate.SOURCE_COLOURS["missed"]), ("G7", gate.SOURCE_COLOURS["none"])):
+        folder = tmp_path / scene / "equivalence"
+        folder.mkdir(parents=True)
+        for index in range(3):
+            frame = np.zeros((540, 960, 3), np.uint8)
+            frame[200:] = gate.SOURCE_COLOURS["auto"]
+            frame[300:320, 0:100] = gate.SOURCE_COLOURS["mod"]
+            if bad and index == 2:
+                frame[400:410, 400:410] = bad
+            Image.fromarray(frame).save(folder / f"p{index}_source.png")
+    args = SimpleNamespace(captures=str(tmp_path), scenes=[])
+    assert gate.material_source(args) == 1
+    results = json.loads((tmp_path / "material_source.json").read_text())["results"]
+    assert results["G2"]["pass"] and results["G2"]["coverage"] == 1.0
+    assert not results["G5"]["pass"] and results["G5"]["pixels"]["missed"] == 100
+    assert not results["G7"]["pass"] and results["G7"]["pixels"]["none"] == 100
+    args = SimpleNamespace(captures=str(tmp_path), scenes=["G2"])
+    assert gate.material_source(args) == 0
 
 
 def test_equivalence_timeline_and_gate(tmp_path):

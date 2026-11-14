@@ -6,7 +6,8 @@ every run.
     python3 tools/prism_gate/capture.py moves G2 --stage <tree> --data <data> --config <config.toml> --out <dir>
     python3 tools/prism_gate/capture.py refs G2 ...      # the references at the probe poses
     python3 tools/prism_gate/capture.py all ...          # every scene, moves and references
-    python3 tools/prism_gate/capture.py equivalence G2 ... # M1's: "ce" and "ce_deferred" at the probe poses
+    python3 tools/prism_gate/capture.py equivalence G2 ... # M1's: "ce" and "ce_deferred" at the probe poses, and
+                                                           # the G-buffer's views (gate.py material_source)
 
 moves: the camera moved along the scene's keys a step at a time (`steps` a leg, each step held `step_frames`
 frames, its last saved) in each state: RT off, path traced (faithful, denoised) and raw (the denoiser off).
@@ -131,7 +132,14 @@ EQUIVALENCE = (("ce", ('prism_set "display.lighting ce"',)),
                ("deferred", ('prism_set "display.lighting ce_deferred"', 'prism_set "debug.gbuffer_view off"')),
                ("base", ('prism_set "debug.gbuffer_view base"',)),
                ("light", ('prism_set "debug.gbuffer_view light"',)),
-               ("additions", ('prism_set "debug.gbuffer_view additions"',)))
+               ("additions", ('prism_set "debug.gbuffer_view additions"',)),
+               # (the G-buffer's own views: the base colour, the normal, the roughness, the material source, which
+               # gate.py material_source reads, and the instances)
+               ("albedo", ('prism_set "debug.gbuffer_view albedo"',)),
+               ("normal", ('prism_set "debug.gbuffer_view normal"',)),
+               ("roughness", ('prism_set "debug.gbuffer_view roughness"',)),
+               ("source", ('prism_set "debug.gbuffer_view material_source"',)),
+               ("instance", ('prism_set "debug.gbuffer_view instance"',)))
 
 
 def equivalence_timeline(scene):
