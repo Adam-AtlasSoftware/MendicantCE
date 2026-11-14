@@ -228,6 +228,72 @@ Measured on the RTX 3070 Ti (2026-11-13, M1's build, every frozen scene; the wor
 With the Classic preset no pixel differs by more than 2 of 255 except at G2 (up to 55, on 0.015% of the pixels: the
 decals, drawn over the base rather than the lit colour). Every scene is within 0.05.
 
+### The G-buffer pass
+
+Before CE's passes, `ce_deferred` draws the window's opaque surfaces once more, first and alone, into the G-buffer (the
+design's walk 1; `xgpu_stream.h`'s `GBUFFER_BEGIN`): an object's base colour (its combiners with white light, in the
+same draw as its geometry), the shading normal, roughness, metalness and specular, the material and its source tier,
+and the instance. The level's base colour is the base target's (CE's diffuse texture pass). The map's materials are
+resolved at the automatic tier as its first G-buffer pass begins (`SCENE_MATERIAL`, `docs/prism_scene_records.md`).
+`debug.gbuffer_view` shows each (`albedo`, `normal`, `roughness`, `metal`, `material_source`, `instance`), and
+`capture.py equivalence` saves them at each probe pose with Classic's and the deferred frame.
+
+The equivalence above holds with the G-buffer pass in: the frame is drawn by the same passes, which the G-buffer pass
+does not touch. Measured again on the RTX 3070 Ti (2026-11-13, M1's G-buffer build, the Classic preset), the worst pose's
+mean FLIP is the same at every scene: G1 0.0025, G2 0.0035, G3 0.0024, G4 0.0018, G5 0.0020, G6 0.0027, G7 0.0026, S1
+0.0026, S2a 0.0010, S2b 0.0028, S3 0.0029. With the kit's settings on the RTX 2060: G2 0.0046, G4 0.0011, G5 0.0087, S1
+0.0039, S3 0.0021. With `ce`, the frames stay byte for byte M0's (`identity.py frames`, b30 and a10, 46 of 46 frames
+each), and the simulation alike (`identity.py determinism`, a10).
+
+### The material-source gate
+
+`gate.py material_source` reads the `material_source` view at each pose: each opaque pixel (one the window drew: its
+depth is not the cleared depth) coloured by its material's tier, green the automatic tier, blue a pack's, cyan a mod's,
+yellow the class default, orange none, magenta a pixel the window drew that the G-buffer missed, red one the
+G-buffer has that the window did not draw (the design's per-pixel comparison of the surfaces). The coverage is the
+share of the opaque pixels at the automatic tier or better; the gate is 1.0 (`material_source_coverage`), every one.
+
+```sh
+python3 tools/prism_gate/gate.py material_source <dir>
+```
+
+Measured (2026-11-13, M1's G-buffer build): every frozen scene's three probe poses (G1 to G7, S1 to S3: ratrace,
+b30, a10, c40, a30 and a50) and, for the other campaign maps, four headings at the player's start
+(`debug_object_place "player pose"`: b40, c10, c20, d20 and d40): every one 1.000000, no pixel missed, extra or
+without a material. That is the ten campaign maps and Rat Race. Every material there is at the automatic tier (none of
+the shaders seen has a mod's material with the Classic preset).
+
+### The G-buffer pass's time
+
+The G-buffer pass is timed apart (`HALO_VULKAN_GPU_TIMES_FILE`'s third figure: the GPU's time from its begin to its
+end), against the design's budget for it on the stock world: 2.5 ms on the RTX 3070 Ti at 1080p, 4.0 ms on the RTX 2060
+at 720p. The medians of 600-frame blocks (the first 60 of each dropped) at the three probe poses, `ce` and `ce_deferred`
+alternated three times in one run; the frame's GPU time beside it (`ce` against `ce_deferred`, which adds the G-buffer
+pass, the base and additions targets and the resolve). "Classic" is the Classic preset (the stock world); "kit" the
+kit's settings (the remodel, the replacement meshes and PRISM's forward extras), recorded, gated at M7.
+
+| Scene | Settings | 3070 Ti 1080p: G-buffer pass median (p99), ms | frame `ce` / `ce_deferred`, ms | 2060 720p: G-buffer pass median (p99), ms | frame `ce` / `ce_deferred`, ms |
+| --- | --- | --- | --- | --- | --- |
+| G2 | classic | 0.222 (0.233) | 0.38 / 0.86 | 0.915 (0.961) | 1.12 / 2.99 |
+| G2 | kit | 0.525 (1.427) | 5.84 / 6.84 | 1.620 (2.185) | 10.46 / 12.30 |
+| G4 | classic | 0.165 (0.179) | 0.30 / 0.71 | 0.336 (0.340) | 0.57 / 1.70 |
+| G4 | kit | 0.168 (0.189) | 1.92 / 2.53 | 0.364 (0.372) | 6.80 / 9.25 |
+| G5 | classic | 0.170 (0.176) | 0.28 / 0.69 | 0.485 (0.492) | 0.73 / 1.91 |
+| G5 | kit | 0.244 (0.251) | 2.64 / 3.38 | 0.814 (0.942) | 8.66 / 10.49 |
+
+Every figure is well within its budget (the stock world's worst: 0.22 ms of 2.5 on the 3070 Ti, 0.92 ms of 4.0 on the 2060; with the remodel 0.53 and 1.62 ms). The 2060's figures are of the build before the normal's flag (`XGPU_GBUFFER_FLAG_NORMAL`), which adds one instruction to the twins' pixel shaders.
+
+### The a30 rock fog shell (S1's bug class)
+
+Inside a30's planar fog the game drew the fog screen's layer over each object in fog with its stock parts, so
+a replacement mesh (the v3 rocks) showed a fog-coloured shell in the stock rock's shape. M1 draws that layer with the
+part each queued group's own draw named (`rasterizer_xbox_environment_fog.c`, `mod_meshes_part_name_again`). Found again
+by listing a30's rocks (`debug_object_place "list rock"`) and holding the camera inside the fog by each: with the
+kit's settings, BSP 0, at `-68.54 -81.83 39.30 120 -15 0 70`, `-88.11 -63.71 39.53 120 -15 0 70`,
+`-85.38 -50.75 39.96 240 -15 0 70` and `-45.47 -63.22 41.32 240 -15 0 70`, M0's tree draws the shell (2 to 3% of the
+frame's pixels differ) and M1's does not. The design's fog as a screen pass (no geometry drawn for fog at all) is
+still to come.
+
 ## Every milestone also passes
 
 `tools/prism_gate/identity.py` checks the milestone's tree against the tree it started from:
