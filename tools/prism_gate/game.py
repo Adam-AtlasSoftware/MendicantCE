@@ -47,9 +47,11 @@ def _die_with_parent():
 
 
 def isolated_environment(work, data):
-    """the variables every gate run is given (and only these, with HOME, PATH and XDG_RUNTIME_DIR)"""
+    """the variables every gate run is given (and only these, with HOME, PATH and XDG_RUNTIME_DIR); its caches (the
+    pipelines') the run's own, or PRISM_GATE_CACHE's folder, shared by a set of runs, never the player's"""
     return {
         "HOME": os.environ["HOME"], "PATH": "/usr/bin:/bin", "XDG_RUNTIME_DIR": os.environ.get("XDG_RUNTIME_DIR", ""),
+        "XDG_CACHE_HOME": os.environ.get("PRISM_GATE_CACHE") or str(Path(work) / "cache"),
         "HALO_DATA_ROOT": str(data), "HALO_SAVE_ROOT": str(work / "saves"),
         "HALO_HIDDEN_WINDOW": "1", "HALO_FULLSCREEN": "0", "HALO_DISPLAY_MODE": "windowed",
         "SDL_VIDEO_DRIVER": "dummy", "HALO_NO_AUDIO": "1", "SDL_AUDIODRIVER": "dummy", "SDL_AUDIO_DRIVER": "dummy",
