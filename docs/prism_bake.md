@@ -63,7 +63,10 @@ converged against the same estimator converged:
 - **The sun's visibility** apart: a direction of the sun's disc (`display.prism_sun_size`'s, as R's).
 
 **When a texel stops (D4).** Each texel's samples are added until the relative standard error of its mean luminance is
-at most 1% (`docs/prism_gates.md`: the standard error itself, not a confidence interval), with at least 64 samples;
+at most 1% (`docs/prism_gates.md`: the standard error itself, not a confidence interval), with at least 64 samples.
+The samples come in batches of 64 whose first directions are stratified (8 × 8 strata of the hemisphere, or of the
+sphere for a probe), and the error is the batches' means' (8 batches at least): the samples' own variance would
+overstate a stratified estimate's noise;
 a texel whose mean is under 1/1000 of middle grey after 4096 samples is black; and no single sample may move the mean by
 more than 1% (`prism_bake_converge.h`'s rule: a texel that has just met its first firefly is not stopped by a variance
 that has not yet seen the tail). At `max` there is no sample budget. The quicker tiers stop at 64 (`draft`), 512
@@ -80,7 +83,7 @@ Each a list of jobs (`prism_bake_cache.h`'s ids), in this order:
 | --- | --- | --- |
 | The plan | On a thread: the atlas (`prism_bake_atlas.h`: CE's pages scaled chart by chart by the quality's density at each tier: `max` 16 texels a world unit at tier 0, 8 at tier 1, 0.5 at tier 2), its tiles of 16 × 16 texels, each tile's triangles, the chart maps (each CE texel's virtual page), the grid's cells and candidates, the probes | — |
 | The importance grid | One job: every cell's candidates weighed (4 points of each lamp from each of the cell's 8 points, shadows traced) | A hashed table of cells, 64 lamps and cumulative weights each |
-| The lightmap | A tile each: a batch of 4096 tiles on the GPU at a time, each texel's samples added between frames until it stops; a finished tile written, drawn and replaced in the batch by the next | Per texel: the light less the sun's (RGB9E5), the direction (`k`, `a0`: RGBA8), the indirect light alone (RGB9E5, for M3's path tracer), the sun's visibility, the state and samples |
+| The lightmap | A tile each: a batch of 4096 tiles on the GPU at a time, each texel's samples added between frames until it stops (the running texels packed into whole groups each frame, so that a batch whose texels are mostly done still fills the GPU); a finished tile written, drawn and replaced in the batch by the next | Per texel: the light less the sun's (RGB9E5), the direction (`k`, `a0`: RGBA8), the indirect light alone (RGB9E5, for M3's path tracer), the sun's visibility, the state and samples |
 | The sun mask | A tile each where the tile's texels facing the sun are neither all lit nor all dark: its 64 × 64 points (4 times the texels' density) found on its triangles again, each traced to the sun's disc (16 directions, stratified, up to 256 while they disagree) | A byte a point; a uniform tile is a state alone (dark, lit) |
 | The irradiance volume | 64 probes a brick (a world unit, 0.25 apart), the bricks where the player stands (the walk's floors and the two world units of air above them); a batch of 262144 probes at a time | Per probe: SH L1 of the light from every direction (RGB, half floats), the sun's visibility, whether it is inside the level |
 | The footprints | One job: each switchable fixture's tiles within its reach (section 2.4's relight) | The light's id, its tiles |
@@ -127,12 +130,22 @@ compute pass (`raster_source`) lights the light target:
   objects' shadows, the dynamic lights: the light target's pixel against that light) is kept, the shadows as a share of
   the baked light and the lights added.
 - **An object pixel:** the volume's eight probes about its point (those inside the level left out), SH at its normal,
-  and the sun's light by the probes' visibility.
+  and the sun's light by the probes' visibility, by the pixel's base colour (CE draws an object whole into the light
+  target, its base target white).
 - Where the bake has nothing (a tile not baked yet, a pixel outside the volume), CE's light stays.
 
 The resolve then puts the frame together as `ce_deferred` does: light × base + CE's specular and reflection additions.
 
 ## Measurements
 
-See `docs/prism_gates.md`, "M2: the bake and PRISM Raster": the bake against R, Raster against R, the frame times, the
-bake's time and size per map at `max`, and Classic's byte identity.
+See `docs/prism_gates.md`, "M2 as measured": the bake against R, Raster against R, the frame times, the bake's time
+and size per map, and Classic's byte identity. In short: `ultra` bakes a BSP in one to thirty minutes (b30's first in
+161 seconds on an RTX 3070 Ti, 1 GB); `max` as D4 defines it does not finish (b30's first BSP 99.6% done after 5.7
+hours), its time going to the darkest texels; Raster costs 2.3 ms a frame at 1440p on the RTX 3070 Ti.
+
+## What remains
+
+- `max`: path guiding or a light cache between texels, or an error floor nearer the eye's (Adam's decision).
+- The static scenery (trees, rocks) traced by the bake as R traces it, and their sun shadows drawn by Raster.
+- The rig's lamps calibrated where no fitted scales exist (a10, c40: Raster darker than Classic there, as R would be).
+- The reflection probes (not baked yet), the indirect layer's use by M3's path tracer, the remodel's atlas, BC6H.

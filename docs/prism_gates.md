@@ -386,6 +386,59 @@ the visibility alone are reported beside it.
 PRISM Raster's frame against R's (`refs/p<n>_ref.png`, the path tracer's converged frame) is the design's other bound,
 `raster_flip` (0.15): Raster is an approximation (the objects lit from the volume, CE's specular and reflections).
 
+### M2 as measured
+
+On the stock world (`config.classic.toml`'s settings), the bakes made by the game itself (`debug.bake_exit`), the
+captures by `capture.py bake` against R captured by the same tree (`capture.py refs`, its reference frames), November
+2026.
+
+**The bake's time and size per map.** `ultra` (2048 samples a texel or probe at most, else D4's rule):
+
+| Map, BSP | GPU | Time | Lightmap texels | Sun masks | Probes | Samples | File |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| b30, 0 | RTX 3070 Ti | 161 s | 48.4 M | 2,750 | 8.0 M | 35.0 G | 1,008 MB |
+| b30, 1 | RTX 3070 Ti | 104 s | 21.4 M | 11 | 0.4 M | 14.1 G | 353 MB |
+| a10, 0 | RTX 2060 | 83 s | 8.9 M | 237 | 0.08 M | 2.6 G | 141 MB |
+| a30, 0 | RTX 2060 | 1,717 s | 80.9 M | 6,125 | 17.4 M | 78.6 G | 1,818 MB |
+| c40, 2 | RTX 3070 Ti | 480 s | 40.7 M | 0 | 1.8 M | 37.3 G | 719 MB |
+
+`max` (D4: no sample budget) did not finish. b30's first BSP on the RTX 3070 Ti: 5.7 hours of lightmap work reached
+188,210 of its 188,934 tiles (99.6%), the masks and the volume not begun, the file 815 MB; the tiles left held texels
+past 14 million samples each. a10 on the RTX 2060: 6,489 of 34,631 tiles in 2.4 hours. Where the samples went, from
+b30's finished tiles: 69% of all samples to the 9% of texels whose light is under 0.01 (a nineteenth of middle grey),
+35% to the 3% under 0.002; a sunlit texel stops in a few thousand. Those texels are lit through narrow openings (the
+light reaching them a rare path's), which a path tracer without guiding meets once in hundreds of samples; their 1%
+is of a light the eye barely sees. So `max` as D4 defines it needs either far better sampling of those paths (path
+guiding, or the light cached between texels) or an error measured against a floor nearer the eye's (1% of the
+texel's light or of a tenth of middle grey, whichever is more): Adam's decision. The deliverables below are `ultra`'s.
+
+**The bake against R** (`bake_flip` 0.05; `ultra`):
+
+| Scene | Worst pose | Poses | The light alone | The sun's visibility alone | |
+| --- | --- | --- | --- | --- | --- |
+| G2 b30 sunny | 0.0416 | 0.0328, 0.0416, 0.0350 | 0.058 to 0.077 | 0.015 to 0.025 | pass |
+| G3 b30 shade | 0.1016 | 0.1016, 0.0397, 0.0431 | 0.085 to 0.175 | 0.018 to 0.032 | fail |
+
+G3's first pose fails on the ground under trees: R's paths meet the objects (the trees, the rocks: mask 4 and 8 of
+its scene), the bake's only the level, so the bake's light there is the open sky's (1.85 times R's on that ground).
+The bake should trace the level's static scenery too (M3).
+
+**PRISM Raster against R** (`raster_flip` 0.15): G2 0.235 (poses 0.177, 0.235, 0.230), G3 0.299 (0.299, 0.191,
+0.181): fail. Classic against the same frames: G2 0.069 to 0.090, G3 0.049 to 0.077. Raster's frame is lit from the
+bake as the gate composes it (which passes on G2), and differs from R by what the composition leaves out: the objects'
+sun shadows (R's are traced, Raster keeps CE's, which the scenery does not cast), the objects lit from the volume, and
+CE's additions on the bake's light (11% brighter than R's frame on G2's level).
+
+**The frame time** (`m2time`'s three poses of G2, 600 frames each, the GPU's time, the bake loaded): PRISM Raster at
+2560 × 1440 on the RTX 3070 Ti 2.26 ms median (99th percentile 2.34); at 1920 × 1080 on the RTX 2060 10.4 ms (99th
+percentile 10.5), Classic there 1.68 ms: both within 16.7 ms.
+
+**Classic's identity.** `identity.py frames` against M1's tree (031cd33a1): b30's and a10's 46 frames each
+byte-identical (and each tree's two runs alike); `determinism`: the simulation alike tick for tick (1,475 ticks).
+
+**The Cycles cross-check** was not run: the scene's export to Blender (the materials, the rig) is not written yet, and
+R is the gate's truth.
+
 ## Every milestone also passes
 
 `tools/prism_gate/identity.py` checks the milestone's tree against the tree it started from:

@@ -762,12 +762,15 @@ stops whatever its error (0: none; the draft's), w the bounces */
 static const char lightmap_source[] =
 	BAKE_COMMON
 	"layout(local_size_x = 64) in;\n"
-	"layout(buffer_reference, std430, buffer_reference_align = 8) readonly buffer Job { uvec2 texels, accumulators, states, running, unused[4]; };\n"
+	"layout(buffer_reference, std430, buffer_reference_align = 8) readonly buffer Job { uvec2 texels, accumulators, states, running, list, args, unused[2]; };\n"
 	"void main()\n"
 	"{\n"
 	"    s = Scene(push.scene);\n"
 	"    Job j = Job(push.job);\n"
-	"    uint index = gl_GlobalInvocationID.x;\n"
+	"    /* (the running texels alone: the compaction's list) */\n"
+	"    if (gl_GlobalInvocationID.x >= Uints(j.args).v[3])\n"
+	"        return;\n"
+	"    uint index = Uints(j.list).v[gl_GlobalInvocationID.x];\n"
 	"    if (index >= push.parameters.x)\n"
 	"        return;\n"
 	"    Uints st = Uints(j.states);\n"
@@ -1016,13 +1019,15 @@ the batch's count of running probes; parameters as the lightmap's */
 static const char volume_source[] =
 	BAKE_COMMON
 	"layout(local_size_x = 64) in;\n"
-	"layout(buffer_reference, std430, buffer_reference_align = 8) readonly buffer Job { uvec2 probes, accumulators, states, statistics, running, unused[3]; };\n"
+	"layout(buffer_reference, std430, buffer_reference_align = 8) readonly buffer Job { uvec2 probes, accumulators, states, statistics, running, list, args, unused; };\n"
 	"vec4 sh(vec3 d) { return vec4(0.282095, 0.488603 * d.y, 0.488603 * d.z, 0.488603 * d.x); }\n"
 	"void main()\n"
 	"{\n"
 	"    s = Scene(push.scene);\n"
 	"    Job j = Job(push.job);\n"
-	"    uint index = gl_GlobalInvocationID.x;\n"
+	"    if (gl_GlobalInvocationID.x >= Uints(j.args).v[3])\n"
+	"        return;\n"
+	"    uint index = Uints(j.list).v[gl_GlobalInvocationID.x];\n"
 	"    if (index >= push.parameters.x)\n"
 	"        return;\n"
 	"    Uints st = Uints(j.states);\n"
@@ -1148,6 +1153,26 @@ brick table (a hashed table: key x, y, z packed, its first probe; 4 words),
 then values: the camera (eye, the axis, its x and y: 4 vec4 in the block's
 extra words); parameters: x the view, y the pages, z the volume's brick
 table's entries, w the flags (1 gamma 2.2) */
+/* the running ones (state 0) of parameters.x states packed: each one's
+index appended to the list, the dispatch's groups (64 a group) and the
+count kept in the arguments (x, 1, 1, count; reset to 0, 1, 1, 0 before).
+The job block: [0] the states, [1] the list, [2] the arguments */
+static const char compact_source[] =
+	BAKE_COMMON
+	"layout(local_size_x = 256) in;\n"
+	"layout(buffer_reference, std430, buffer_reference_align = 8) readonly buffer Job { uvec2 states, list, args, unused[5]; };\n"
+	"void main()\n"
+	"{\n"
+	"    Job j = Job(push.job);\n"
+	"    uint index = gl_GlobalInvocationID.x;\n"
+	"    if (index >= push.parameters.x || Uints(j.states).v[index] != 0u)\n"
+	"        return;\n"
+	"    Uints a = Uints(j.args);\n"
+	"    uint at = atomicAdd(a.v[3], 1u);\n"
+	"    Uints(j.list).v[at] = index;\n"
+	"    atomicMax(a.v[0], at / 64u + 1u);\n"
+	"}\n";
+
 static const char raster_source[] =
 	BAKE_COMMON
 	"layout(local_size_x = 8, local_size_y = 8) in;\n"
@@ -1383,6 +1408,11 @@ static const char raster_source[] =
 	"        vec3 total = lit + sunlight;\n"
 	"        vec3 encoded = gamma > 1.001 ? pow(max(total, vec3(0.0)), vec3(1.0 / gamma)) : max(total, vec3(0.0));\n"
 	"        result = encoded + (instance == 0u ? emissive : vec3(0.0));\n"
+	"        /* (an object's pixel: CE draws it whole into the light target, its\n"
+	"        base target white, so its light goes in by its own base colour,\n"
+	"        the G-buffer's) */\n"
+	"        if (instance != 0u)\n"
+	"            result = encoded * unpackUnorm4x8(w.x).rgb;\n"
 	"        /* (a level's pixel: what CE drew over its lightmap pass's light, the\n"
 	"        light target's pixel against that light whole (the G-buffer's), kept:\n"
 	"        the objects' shadows darken the baked light by their share, the\n"

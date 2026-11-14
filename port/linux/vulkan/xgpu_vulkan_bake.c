@@ -70,7 +70,7 @@ level pixel finding its texel through its CE lightmap coordinates and page
 /* ---------- constants */
 
 /* the bake file's maker (a change makes every bake stale) */
-#define BAKE_VERSION 3u
+#define BAKE_VERSION 4u
 /* a tile's texels, a mask's */
 #define TILE 16u
 #define TILE_TEXELS (TILE * TILE)
@@ -116,7 +116,7 @@ level pixel finding its texel through its CE lightmap coordinates and page
 	F(vkCreatePipelineLayout) F(vkDestroyPipelineLayout) F(vkCreateShaderModule) F(vkDestroyShaderModule) \
 	F(vkCreateComputePipelines) F(vkDestroyPipeline) F(vkCreateDescriptorPool) F(vkDestroyDescriptorPool) \
 	F(vkAllocateDescriptorSets) F(vkUpdateDescriptorSets) F(vkCmdBindPipeline) F(vkCmdBindDescriptorSets) \
-	F(vkCmdDispatch) F(vkCmdPushConstants) F(vkCmdPipelineBarrier) F(vkCreateSampler) F(vkDestroySampler) \
+	F(vkCmdDispatch) F(vkCmdDispatchIndirect) F(vkCmdUpdateBuffer) F(vkCmdPushConstants) F(vkCmdPipelineBarrier) F(vkCreateSampler) F(vkDestroySampler) \
 	F(vkCreateQueryPool) F(vkDestroyQueryPool) F(vkCmdResetQueryPool) F(vkCmdWriteTimestamp) F(vkCmdFillBuffer) \
 	F(vkGetQueryPoolResults) F(vkGetBufferDeviceAddress) F(vkCreateAccelerationStructureKHR) \
 	F(vkDestroyAccelerationStructureKHR) F(vkGetAccelerationStructureBuildSizesKHR) \
@@ -172,6 +172,7 @@ enum
 	PIPELINE_IMPORTANCE,
 	PIPELINE_VOLUME,
 	PIPELINE_RASTER,
+	PIPELINE_COMPACT,
 	PIPELINES
 };
 
@@ -315,6 +316,9 @@ struct bake_state
 	uint32_t *table_host, *sun_host;
 	/* the batch's working buffers */
 	struct bake_buffer ranges, triangles, texels, accumulators, states, running, tile_origins, job;
+	/* the running texels' or probes' indices, packed, and their dispatch's
+	groups (x, 1, 1, then their count) */
+	struct bake_buffer compact_list, compact_args;
 	struct bake_batch batch;
 	uint32_t tiles_done, tiles_planned, frame;
 	double texels_done, texels_planned, texels_baked;
@@ -539,7 +543,8 @@ static void barrier(VkCommandBuffer commands)
 	memory.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT |
 		VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 	memory.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_READ_BIT |
-		VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR | VK_ACCESS_HOST_READ_BIT;
+		VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR | VK_ACCESS_HOST_READ_BIT |
+		VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
 	vkCmdPipelineBarrier(commands, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 1,
 		&memory, 0, NULL, 0, NULL);
 }
@@ -743,7 +748,8 @@ static int make(void)
 		!pipeline_make(PIPELINE_IMPORTANCE, NULL, 0, xgpu_vulkan_bake_importance_words,
 		xgpu_vulkan_bake_importance_count) ||
 		!pipeline_make(PIPELINE_VOLUME, NULL, 0, xgpu_vulkan_bake_volume_words, xgpu_vulkan_bake_volume_count) ||
-		!pipeline_make(PIPELINE_RASTER, raster_types, 4, xgpu_vulkan_bake_raster_words, xgpu_vulkan_bake_raster_count))
+		!pipeline_make(PIPELINE_RASTER, raster_types, 4, xgpu_vulkan_bake_raster_words, xgpu_vulkan_bake_raster_count) ||
+		!pipeline_make(PIPELINE_COMPACT, NULL, 0, xgpu_vulkan_bake_compact_words, xgpu_vulkan_bake_compact_count))
 	{
 		host_logf(HOST_LOG_WARN, "prism bake: its passes cannot be made: no bake");
 		return 0;
@@ -905,6 +911,15 @@ struct cell_table
 	uint32_t *cells;
 	uint32_t capacity, count;
 };
+
+/* the importance grid's points on a triangle of an area: 8 a cell's area
+(every cell the triangle crosses met), 65536 at most */
+static uint32_t grid_points_of(float area)
+{
+	float points = area / (GRID_CELL * GRID_CELL * 0.125f) + 1.0f;
+
+	return points > 65536.0f ? 65536u : (uint32_t)points;
+}
 
 static uint64_t cell_key(int32_t x, int32_t y, int32_t z)
 {
@@ -1119,9 +1134,23 @@ static void *plan_thread(void *context)
 	}
 	/* the importance grid's cells: points on the level's surfaces (by area,
 	at most GRID_POINTS a cell, chosen alike in every run) */
-	table.capacity = 1u << 16;
-	while (table.capacity < plan->triangle_count * 2u && table.capacity < (1u << 26))
-		table.capacity <<= 1;
+	/* (the table twice the points at most: every cell a point lands in kept,
+	a large triangle's as much as a small one's) */
+	{
+		uint64_t total = 0;
+
+		for (index = 0; index < plan->triangle_count && plan->lamp_count; index++)
+		{
+			float n[3], area;
+
+			face_normal(plan->positions + (size_t)index * 9, n, &area);
+			if (area >= 1.0e-6f)
+				total += grid_points_of(area);
+		}
+		table.capacity = 1u << 16;
+		while (table.capacity < total * 2u && table.capacity < (1u << 24))
+			table.capacity <<= 1;
+	}
 	table.keys = (uint64_t *)calloc(table.capacity, sizeof(uint64_t));
 	table.cells = (uint32_t *)calloc(table.capacity, sizeof(uint32_t));
 	plan->cell_keys = (int32_t *)malloc((size_t)table.capacity / 2 * 3 * sizeof(int32_t));
@@ -1143,9 +1172,7 @@ static void *plan_thread(void *context)
 			if (area < 1.0e-6f)
 				continue;
 			packed = octahedral(n);
-			points = (uint32_t)(area / (GRID_CELL * GRID_CELL * 0.125f)) + 1u;
-			if (points > 256u)
-				points = 256u;
+			points = grid_points_of(area);
 			for (k = 0; k < points; k++)
 			{
 				float r1 = sqrtf(plan_random(&rng)), r2 = plan_random(&rng), q[3];
@@ -1491,7 +1518,7 @@ static void bake_free(struct bake_state *b)
 		&b->sun, &b->masks, &b->bricks, &b->probes, &b->raster_job, &b->ranges, &b->triangles, &b->texels,
 		&b->accumulators, &b->states, &b->running, &b->tile_origins, &b->job, &b->cell_points, &b->cell_candidates,
 		&b->cell_weights, &b->mask_ranges, &b->mask_out, &b->probe_points, &b->probe_accumulators, &b->probe_states,
-		&b->probe_statistics,
+		&b->probe_statistics, &b->compact_list, &b->compact_args,
 	};
 
 	if (!b)
@@ -2010,6 +2037,9 @@ static int bake_upload(struct bake_state *b)
 		!buffer_make((VkDeviceSize)BATCH_TILES * 4, 0, 0, &b->running) ||
 		!buffer_make((VkDeviceSize)BATCH_TILES * 32, 0, 0, &b->tile_origins) ||
 		!buffer_make(4096, 0, 0, &b->job) ||
+		!buffer_make((VkDeviceSize)(BATCH_TILES * TILE_TEXELS > VOLUME_BATCH ? BATCH_TILES * TILE_TEXELS : VOLUME_BATCH) * 4, 0, 0,
+		&b->compact_list) ||
+		!buffer_make(64, VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, 0, &b->compact_args) ||
 		!buffer_make((VkDeviceSize)MASK_BATCH * MASK_TEXELS * 32, 0, 0, &b->mask_ranges) ||
 		!buffer_make((VkDeviceSize)MASK_BATCH * MASK_TEXELS, 0, 0, &b->mask_out) ||
 		!buffer_make(1024, 0, 0, &b->raster_job))
@@ -2453,6 +2483,54 @@ static void run(VkCommandBuffer commands, int pipeline, struct bake_state *b, Vk
 	vkCmdDispatch(commands, groups, 1, 1);
 }
 
+static VkDeviceAddress job_block(VkCommandBuffer commands, struct bake_state *b, uint32_t slot,
+	const VkDeviceAddress *addresses, uint32_t count);
+
+/* the running ones of count states (0 running) packed into compact_list,
+and compact_args made their dispatch's groups (64 a group): then pipeline
+run over them alone, its job block's slot `at` the list and the next the
+arguments. A batch whose texels are mostly done no longer runs a group for
+each of its few running ones' 64 slots: its running ones fill whole groups */
+static void run_compacted(VkCommandBuffer commands, int pipeline, struct bake_state *b, VkDeviceAddress states,
+	uint32_t count, VkDeviceAddress *addresses, uint32_t at, uint32_t slot, uint32_t p1, uint32_t p2, uint32_t p3, float v0,
+	float v1, float v2, float v3)
+{
+	static const uint32_t reset[4] = { 0u, 1u, 1u, 0u };
+	VkDeviceAddress compact[3];
+	VkDeviceAddress job, cjob;
+	struct bake_push push;
+
+	if (!count)
+		return;
+	compact[0] = states;
+	compact[1] = b->compact_list.address;
+	compact[2] = b->compact_args.address;
+	cjob = job_block(commands, b, 7, compact, 3);
+	addresses[at] = b->compact_list.address;
+	addresses[at + 1] = b->compact_args.address;
+	job = job_block(commands, b, slot, addresses, at + 2);
+	if (!cjob || !job)
+		return;
+	vkCmdUpdateBuffer(commands, b->compact_args.buffer, 0, sizeof(reset), reset);
+	barrier(commands);
+	run(commands, PIPELINE_COMPACT, b, cjob, count, 0, 0, 0, 0, 0, 0, 0, (count + 255) / 256);
+	barrier(commands);
+	memset(&push, 0, sizeof(push));
+	push.scene = b->scene.address;
+	push.job = job;
+	push.parameters[0] = count;
+	push.parameters[1] = p1;
+	push.parameters[2] = p2;
+	push.parameters[3] = p3;
+	push.values[0] = v0;
+	push.values[1] = v1;
+	push.values[2] = v2;
+	push.values[3] = v3;
+	vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, bake.pipelines[pipeline]);
+	vkCmdPushConstants(commands, bake.pipeline_layouts[pipeline], VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
+	vkCmdDispatchIndirect(commands, b->compact_args.buffer, 0);
+}
+
 /* a job block (addresses, 8 of them) written for this frame's passes, at
 a slot of the job buffer: its address (0 no room) */
 static VkDeviceAddress job_block(VkCommandBuffer commands, struct bake_state *b, uint32_t slot,
@@ -2708,13 +2786,9 @@ static void lightmap_frame(VkCommandBuffer commands, struct bake_state *b)
 	addresses[1] = b->accumulators.address;
 	addresses[2] = b->states.address;
 	addresses[3] = b->running.address;
-	job = job_block(commands, b, 2, addresses, 4);
-	if (job)
-	{
-		run(commands, PIPELINE_LIGHTMAP, b, job, BATCH_TILES * TILE_TEXELS, bake.samples, 64, b->frame,
-			threshold_of(b), BLACK_FLOOR, b->drafting ? 64.0f : cap_of(b), (float)BOUNCES, BATCH_TILES * TILE_TEXELS / 64);
-		b->frame++;
-	}
+	run_compacted(commands, PIPELINE_LIGHTMAP, b, b->states.address, BATCH_TILES * TILE_TEXELS, addresses, 4, 2,
+		bake.samples, 64, b->frame, threshold_of(b), BLACK_FLOOR, b->drafting ? 64.0f : cap_of(b), (float)BOUNCES);
+	b->frame++;
 	barrier(commands);
 	/* the readback: the running counts, and the asked slots' results */
 	for (slot = 0; slot < BATCH_TILES; slot++)
@@ -2912,7 +2986,7 @@ static void volume_frame(VkCommandBuffer commands, struct bake_state *b)
 {
 	struct bake_plan *plan = &b->plan;
 	uint32_t count;
-	VkDeviceAddress job, addresses[8];
+	VkDeviceAddress addresses[8];
 	struct bake_readback *r;
 
 	if (!plan->probe_count)
@@ -2978,15 +3052,9 @@ static void volume_frame(VkCommandBuffer commands, struct bake_state *b)
 		addresses[2] = b->probe_states.address;
 		addresses[3] = b->probe_statistics.address;
 		addresses[4] = b->probe_states.address + (VkDeviceSize)VOLUME_BATCH * 4;
-		job = job_block(commands, b, 5, addresses, 5);
 		count = b->probes_batched - b->probes_done;
-		if (!job)
-		{
-			r->busy = 0;
-			return;
-		}
-		run(commands, PIPELINE_VOLUME, b, job, count, bake.samples, 64, b->frame++, threshold_of(b), BLACK_FLOOR, cap_of(b),
-			(float)BOUNCES, (count + 63) / 64);
+		run_compacted(commands, PIPELINE_VOLUME, b, b->probe_states.address, count, addresses, 5, 5, bake.samples, 64,
+			b->frame++, threshold_of(b), BLACK_FLOOR, cap_of(b), (float)BOUNCES);
 		barrier(commands);
 		copy_region(commands, &b->probe_states, (VkDeviceSize)VOLUME_BATCH * 4, &r->buffer, 0, 4);
 		r->finished = 0;
