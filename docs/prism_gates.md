@@ -157,6 +157,42 @@ reuse): a sunlit texel needs a median of about 400 samples (95th percentile 20,0
 millions. The baker therefore needs far better lamp sampling than today's (the design's light-importance grid with
 baked visibility) for the `max` bake to finish.
 
+## M1: the deferred core's equivalence
+
+`display.lighting` `ce_deferred` is the design's "CE light, deferred" diagnostic (`port/linux/game/prism_deferred.c`):
+CE's environment passes drawn into targets of their own (the light, the base colour, the specular and reflection
+additions) and the frame resolved from them before the transparent geometry. `capture.py equivalence` holds the camera at each probe pose and saves Classic's
+frame (`display.lighting` `ce`), the diagnostic's, and its targets alone (`debug.gbuffer_view`); `gate.py
+equivalence` takes the mean FLIP of the diagnostic's frame against Classic's at each pose, the worst a scene's,
+against `equivalence_flip` (0.05, the design's).
+
+```sh
+python3 tools/prism_gate/capture.py equivalence G2 --stage <tree> --data <data> --config <toml> --out <dir>
+python3 tools/prism_gate/gate.py equivalence <dir>
+```
+
+The equivalence is taken with the Classic preset (`display.graphics` `classic`): it is what the resolve reproduces.
+With the kit's settings (PRISM's forward extras) the same holds, as those extras draw inside CE's passes.
+
+Measured on the RTX 3070 Ti (2026-11-13, M1's build, every frozen scene; the worst pose's mean FLIP):
+
+| Scene | Classic preset | Kit's settings |
+| --- | --- | --- |
+| G1 ratrace | 0.0025 | |
+| G2 b30 sunny | 0.0035 | 0.0046 |
+| G3 b30 shade | 0.0024 | |
+| G4 b30 interior | 0.0018 | 0.0011 |
+| G5 a10 | 0.0020 | 0.0109 |
+| G6 c40 exterior | 0.0027 | |
+| G7 c40 interior | 0.0026 | |
+| S1 a30 canyon | 0.0026 | 0.0033 |
+| S2a b30 water | 0.0010 | |
+| S2b a10 cryo glass | 0.0028 | |
+| S3 a50 hangar | 0.0029 | 0.0021 |
+
+With the Classic preset no pixel differs by more than 2 of 255 except at G2 (up to 55, on 0.015% of the pixels: the
+decals, drawn over the base rather than the lit colour). Every scene is within 0.05.
+
 ## Every milestone also passes
 
 `tools/prism_gate/identity.py` checks the milestone's tree against the tree it started from:
