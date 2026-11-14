@@ -233,6 +233,9 @@ void xgpu_mesh_store_options(struct xgpu_mesh_store *store, int prefetch, uint32
 /* the frame's start: meshes read copied into their buffers, the budget kept */
 void xgpu_mesh_store_frame(struct xgpu_mesh_store *store);
 void xgpu_mesh_store_statistics(const struct xgpu_mesh_store *store, struct xgpu_mesh_store_statistics *statistics);
+/* (after xgpu_mesh_store_frame) the meshes drawn in the last frames still
+being read or copied in, drawn stock meanwhile (debug.camera_path_settle) */
+uint32_t xgpu_mesh_store_pending(const struct xgpu_mesh_store *store);
 /* (tests, with no worker) one queued read done on the calling thread: 0 if
 none was queued */
 int xgpu_mesh_store_work(struct xgpu_mesh_store *store);

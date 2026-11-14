@@ -191,6 +191,15 @@ void random_math_port_set_frame_seed(
 	frame_local_random_seed= seed;
 }
 
+/* port: and read (debug.camera_path_settle: each frame a save is held drawn
+with the seed its first frame had, so that the frame saved is as it would
+have been unheld) */
+unsigned long random_math_port_get_frame_seed(
+	void)
+{
+	return frame_local_random_seed;
+}
+
 /* port: randomness that is only seen (the contrails) takes the frames' local
 seed even in a tick: how many points a contrail adds in a tick depends on
 where the frames moved it, so the game's local seed would move with the

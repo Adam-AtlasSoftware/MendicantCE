@@ -116,6 +116,11 @@ struct xgpu_stream_ring
 	that the next frame will (a load zone's switch in it): the host starts
 	that frame so much earlier (display_wait) */
 	uint32_t frame_extra_microseconds;
+	/* the host's, at each frame's end: the replacement textures and meshes
+	(display.prism_textures, display.prism_models) drawn in its last frames
+	that are still to come, read, copied in or sharpened, drawn stock or
+	less sharp meanwhile (debug.camera_path_settle); 0 with no store */
+	uint32_t streams_pending;
 };
 
 enum
@@ -2411,7 +2416,7 @@ struct xgpu_stream_scene_fog
 
 #define XGPU_STREAM_ASSERT_SIZE(type, size) _Static_assert(sizeof(type) == (size), #type "'s size")
 
-XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_ring, 104);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_ring, 108);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_frame_end, 12);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_capabilities, 28);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_rt_static, 32);

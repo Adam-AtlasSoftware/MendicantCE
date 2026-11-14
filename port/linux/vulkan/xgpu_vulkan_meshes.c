@@ -675,6 +675,11 @@ void xgpu_vulkan_meshes_frame(void)
 		xgpu_rig_states_age(meshes.rig_states, meshes.game_seconds);
 }
 
+uint32_t xgpu_vulkan_meshes_pending(void)
+{
+	return meshes.store ? xgpu_mesh_store_pending(meshes.store) : 0;
+}
+
 int xgpu_vulkan_meshes_statistics(char *text, unsigned long size)
 {
 	struct xgpu_mesh_store_statistics statistics;

@@ -3169,6 +3169,13 @@ static const struct config_setting config_settings[] =
 		"start, cmd and key lines) it is moved along once the map is in, the\n"
 		"same frames each run whatever the frame rate, each frame saved as\n"
 		"screenshot_every saves one; empty none." },
+	{ "debug.camera_path_settle", _config_integer, "0", "HALO_CAMERA_PATH_SETTLE", _environment_value, _platform_all,
+		"With camera_path, each frame it saves drawn with every texture the\n"
+		"stock cache has to read (as while the map's shaders are made), and held\n"
+		"(the pose drawn again, not saved, the path not moved on) until the\n"
+		"host's PRISM texture and mesh stores have nothing to come of what it\n"
+		"drew, at most this many frames; 0 none (the quality gates' captures:\n"
+		"tools/prism_gate)." },
 	{ "debug.texture_dump_directory", _config_string, "\"\"", "HALO_TEXTURE_DUMP", _environment_value, _platform_all,
 		"A folder to write every texture to as it is uploaded; empty none." },
 	{ "debug.sample_seconds", _config_real, "0.0", "HALO_SAMPLE", _environment_value, _platform_android | _platform_guest,

@@ -2,7 +2,8 @@
 (paths.py) and read through a pipe of its frames (debug.screenshot_stream): no window (SDL's dummy video driver,
 debug.hidden_window), no sound (HALO_NO_AUDIO, SDL's dummy audio), no controllers, nothing online (the run's own
 empty brokers, relays and masters files), its own data, save and config folders, the clock fixed (a tick a frame,
-debug.fixed_step) and interpolation off, so that a path's frames are the same in every run.
+debug.fixed_step) and interpolation off, and each saved frame held until the asset streams are done with what it
+draws (debug.camera_path_settle), so that a path's frames are the same in every run.
 
     run = Run(stage, data, work, "b30", timeline.text(), timeline.saves, config=..., env={...})
     run.wait(timeout)   # the frames saved (by the path's frame) written as PNG; raises if the game failed
@@ -25,6 +26,9 @@ from PIL import Image
 
 # the kit (the game the person this works for plays): never run while it runs, never touched
 KIT = Path(os.environ.get("PRISM_GATE_KIT", "/home/adam/Dev/repos/ce-reimagined/testkit/openh1-prism-v2"))
+# the most frames a saved frame of a path is held for the streams (debug.camera_path_settle): each is drawn with
+# every texture the stock cache has to read, and held until the host's texture and mesh stores have nothing to come
+SETTLE_FRAMES = 300
 
 
 def kit_running():
@@ -126,9 +130,11 @@ class Run:
         os.mkfifo(self.fifo)
         e = isolated_environment(self.work, self.data)
         # (the path's frames alone go to the stream: debug.camera_path saves each of its own, and
-        # screenshot_every 0 none other, so that the stream's n-th frame is the path's)
+        # screenshot_every 0 none other, so that the stream's n-th frame is the path's; its frames held for the
+        # streams are not saved)
         e.update({"HALO_WINDOW_SIZE": f"{width}x{height}", "HALO_CAMERA_PATH": str(self.work / "path.txt"),
-                  "HALO_SCREENSHOT_EVERY": "0", "HALO_SCREENSHOT_STREAM": str(self.fifo)})
+                  "HALO_CAMERA_PATH_SETTLE": str(SETTLE_FRAMES), "HALO_SCREENSHOT_EVERY": "0",
+                  "HALO_SCREENSHOT_STREAM": str(self.fifo)})
         if device:
             e["VK_LOADER_DEVICE_ID_FILTER"] = device
         e.update(env or {})
