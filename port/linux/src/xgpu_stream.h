@@ -422,7 +422,9 @@ struct xgpu_stream_capabilities
 	/* display.ambient_occlusion "ray_traced": the backend traces the
 	occlusion's rays by the GPU's ray queries (xgpu_backend_world_ao_mesh,
 	_instances: Vulkan's VK_KHR_ray_query) */
-	uint8_t ray_queries, pad[3];
+	/* (and xgpu_backend_capabilities' clear_alone and draw_bounds, and in
+	cutout_prepass its alpha_test_drop, 1, and cutout_prepass, 2) */
+	uint8_t ray_queries, cutout_prepass, clear_alone, draw_bounds;
 	/* the GPU, its API and driver, in a few words (a report's:
 	port/linux/src/report.c), NUL terminated */
 	char device[96];
