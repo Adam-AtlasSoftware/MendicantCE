@@ -176,6 +176,21 @@ struct xgpu_vulkan_capabilities
 	/* pixel shaders can write storage buffers (the visibility tests' counts
 	in the shader) */
 	int fragment_stores;
+	/* the visibility tests' counts are better made in the shader than by
+	occlusion queries, outside VR too (a driver whose queries are costly) */
+	int shader_visibility;
+	/* a pixel shader that may discard gets no early depth test: the front
+	end makes no alpha test that cannot fail, and draws a cut-out's depth
+	first (xgpu_backend.h) */
+	int alpha_test_drop, cutout_prepass;
+	/* a pass is kept to the part of its target it clears and draws
+	(xgpu_backend.h) */
+	int clear_alone;
+	/* the render thread is told when the GPU has done a frame rather than
+	waiting for it (xgpu_vulkan_completion_notify) */
+	int completion_told;
+	/* the front end scissors the draws the game bounds (xgpu_backend.h) */
+	int draw_bounds;
 	uint32_t multiview_views;
 	int depth_clamp;
 	/* Timestamp queries on the selected graphics queue. */
@@ -267,6 +282,10 @@ enum
 	/* and read where it is drawn (an input attachment: display.hdr's back
 	buffer) */
 	XGPU_VULKAN_USAGE_INPUT = 4,
+	/* copied into while the frames are drawn (the levels of a texture the
+	game renders): with a target's, its memory is its own ("memory of its
+	own", xgpu_vulkan.c) */
+	XGPU_VULKAN_USAGE_COPIED = 8,
 };
 
 struct xgpu_vulkan_image_description
@@ -291,6 +310,11 @@ struct xgpu_vulkan_image *xgpu_vulkan_image_create(const struct xgpu_vulkan_imag
 /* (after the work recorded so far that uses it) */
 void xgpu_vulkan_image_destroy(struct xgpu_vulkan_image *image);
 const struct xgpu_vulkan_image_description *xgpu_vulkan_image_description(const struct xgpu_vulkan_image *image);
+/* marks an image (NULL: none) as one a vertex stage samples, before
+anything is written to it, and returns it: what is written to it is then
+ordered before the draws' vertex stages too, as a buffer's is, not before
+their fragment stages alone (xgpu_vulkan.c's AFTER_IMAGE_STAGES) */
+struct xgpu_vulkan_image *xgpu_vulkan_image_vertex_read(struct xgpu_vulkan_image *image);
 /* writes a region of a level and layer (a cube's face, a 3D image's slices
 z to z + depth); bytes_per_row is a compressed format's row of blocks. In
 the stream's order: draws recorded before it see the old texels, draws after
@@ -493,6 +517,7 @@ enum
 {
 	XGPU_VULKAN_CLEAR_RED = 1, XGPU_VULKAN_CLEAR_GREEN = 2, XGPU_VULKAN_CLEAR_BLUE = 4, XGPU_VULKAN_CLEAR_ALPHA = 8,
 	XGPU_VULKAN_CLEAR_COLOR = 16, XGPU_VULKAN_CLEAR_DEPTH = 32, XGPU_VULKAN_CLEAR_STENCIL = 64,
+	XGPU_VULKAN_CLEAR_ALONE = 128,
 	XGPU_VULKAN_CLEAR_CHANNELS = 15,
 };
 
@@ -738,6 +763,13 @@ uint64_t xgpu_vulkan_fence(void);
 /* returns once the GPU has done the submission of that number and those
 before (the visibility tests' counts of the frames they end are written) */
 void xgpu_vulkan_wait(uint64_t fence);
+/* whether the GPU has done that submission, without waiting; and a
+function called (from a thread of the backend's) after each submission of
+xgpu_vulkan_fence's the GPU has done, from then on: nonzero if it will be
+(the render thread plays the next frame while the GPU draws this one:
+host_render_stream.h's fence_ready) */
+int xgpu_vulkan_fence_ready(uint64_t fence);
+int xgpu_vulkan_completion_notify(void (*completed)(void));
 
 /* the window's size in pixels changed (any thread): the swapchain is made
 again */
