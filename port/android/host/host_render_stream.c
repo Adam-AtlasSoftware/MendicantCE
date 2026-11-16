@@ -1621,29 +1621,32 @@ void host_render_stream_frame_displayed(uint64_t input, uint64_t finished, uint6
 	if (latched)
 	{
 		/* (taken a refresh or more after the one it was started for: a
-		miss. The margin is widened for a frame that started at its time and
-		whose work was done by the margin before that refresh (or not
-		known): the display wants its frames sooner than the margin gives.
-		A frame whose work ran past it took longer than any of the last
-		ones, which its cost, now counted, gives the frames after it) */
+		miss. The margin is widened for a frame that started at its time:
+		one whose work was done by the margin before that refresh (or not
+		known), as the display wants its frames sooner than the margin gives;
+		and one whose work ran past it, which took longer than any of the
+		last ones. Its cost, now counted, gives the frames after it that
+		much, and no more: where the frames' costs keep rising past the last
+		ones' by a little (a firefight growing), each new longest frame would
+		miss its refresh without the wider margin, one in two hundred of a
+		Raspberry Pi 5's) */
 		if (render.targets[frame % 8].frame == frame && render.targets[frame % 8].target && period &&
 			latched < render.targets[frame % 8].target + 4 * period)
 		{
 			if (latched > render.targets[frame % 8].target + period / 2)
 			{
 				render.pacing_statistics.missed++;
-				if (render.targets[frame % 8].waited && (!finished || finished + render.targets[frame % 8].margin <=
+				if (!render.targets[frame % 8].waited || (finished && finished + render.targets[frame % 8].margin >
 					render.targets[frame % 8].target + FRAME_PACING_MARGIN_STEP_NS / 4))
 				{
-					/* (once for the margin it started with: the frames started
-					before a miss widened it, already on their way, miss too) */
-					if (!render.margin_fixed && render.targets[frame % 8].margin >=
-						(render.costs.margin ? render.costs.margin : FRAME_PACING_MARGIN_NS))
-						frame_pacing_margin_missed(&render.costs, period);
-				}
-				else
-				{
 					render.pacing_statistics.overran++;
+				}
+				/* (once for the margin it started with: the frames started
+				before a miss widened it, already on their way, miss too) */
+				if (render.targets[frame % 8].waited && !render.margin_fixed && render.targets[frame % 8].margin >=
+					(render.costs.margin ? render.costs.margin : FRAME_PACING_MARGIN_NS))
+				{
+					frame_pacing_margin_missed(&render.costs, period);
 				}
 			}
 			else
