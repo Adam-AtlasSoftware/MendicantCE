@@ -123,7 +123,8 @@ def source_counts(image):
 def material_source(args):
     """M1's material-source gate (docs/prism_gates.md): at each probe pose of the equivalence capture, the share of
     the opaque pixels (every pixel the window drew opaque: not empty) whose material is at the automatic tier or
-    better, the worst pose a scene's, against material_source_coverage (1.0: every one)"""
+    better, the worst pose a scene's, against material_source_coverage (1.0: every one); and (M4) the pack tier's and
+    the mod tier's shares of them, reported"""
     from PIL import Image
 
     root = Path(args.captures)
@@ -137,19 +138,22 @@ def material_source(args):
         poses = sorted((folder / "equivalence").glob("p*_source.png"))
         if not poses:
             continue
-        coverage, totals = [], {name: 0 for name in SOURCE_COLOURS}
+        coverage, totals, pack, mod = [], {name: 0 for name in SOURCE_COLOURS}, [], []
         for path in poses:
             counts = source_counts(Image.open(path).convert("RGB"))
             opaque = sum(counts[n] for n in SOURCE_COLOURS if n != "empty")
             good = sum(counts[n] for n in SOURCE_GOOD)
             coverage.append(good / opaque if opaque else 1.0)
+            pack.append(counts["pack"] / opaque if opaque else 0.0)
+            mod.append(counts["mod"] / opaque if opaque else 0.0)
             for name in counts:
                 totals[name] += counts[name]
         name = scenes[folder.name]["name"] if folder.name in scenes else folder.name
         results[folder.name] = {"coverage": min(coverage), "coverages": coverage, "pixels": totals,
-                                "pass": min(coverage) >= limit}
-        print("%-4s %-14s coverage %.6f (poses %s; missed %d, extra %d, none %d)  %s" % (folder.name, name,
-              min(coverage), " ".join("%.6f" % c for c in coverage), totals["missed"], totals["extra"], totals["none"],
+                                "pack_shares": pack, "mod_shares": mod, "pass": min(coverage) >= limit}
+        print("%-4s %-14s coverage %.6f (poses %s; missed %d, extra %d, none %d; pack %s, mod %s)  %s" % (folder.name,
+              name, min(coverage), " ".join("%.6f" % c for c in coverage), totals["missed"], totals["extra"],
+              totals["none"], " ".join("%.3f" % c for c in pack), " ".join("%.3f" % c for c in mod),
               "PASS" if results[folder.name]["pass"] else "FAIL"), flush=True)
     (root / "material_source.json").write_text(json.dumps({"threshold": limit, "results": results}, indent=1))
     return 0 if results and all(r["pass"] for r in results.values()) else 1
