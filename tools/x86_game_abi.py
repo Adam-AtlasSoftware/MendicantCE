@@ -204,8 +204,9 @@ def _build_validator_tool(folder: Path, name: str, tool: Path, tool_flags: Seque
     game_units = [GAME_DIR / "tag_validate.c", GAME_DIR / "cache_file_formats.c",
                   *sorted(GAME_DIR.glob("tag_schema*.c"))]
     zlib_units = [ZLIB_DIR / unit for unit in ZLIB_SOURCES]
-    inputs = [*game_units, *zlib_units, tool, *tool.parent.glob("*.h"), *GAME_DIR.glob("*.h"),
-              *GAME_DIR.glob("*.inc"), Path(__file__), SEMANTICS_SCRIPT]
+    # (the C files beside the tool too: map_extract_tool.c includes map_extract.c and its lights')
+    inputs = [*game_units, *zlib_units, tool, *tool.parent.glob("*.c"), *tool.parent.glob("*.h"),
+              *GAME_DIR.glob("*.h"), *GAME_DIR.glob("*.inc"), Path(__file__), SEMANTICS_SCRIPT]
     if program.is_file() and all(program.stat().st_mtime >= (ROOT / path).stat().st_mtime for path in inputs):
         return program
     semantics = semantics_headers(folder / "generated")

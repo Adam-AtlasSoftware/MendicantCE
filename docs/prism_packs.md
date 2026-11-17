@@ -127,6 +127,7 @@ write `mods/load_order.toml` with the packs in the order they were made for (Bol
 | `world` | `prism_world/levels/<level>/<bsp>.pwg` | each level's remodelled geometry (a10, a30, a50, b30, c10) | WORLD GEOMETRY Remodel (`display.prism_world_geometry = "remodel"`) |
 | `lightmaps` | `prism_lightmaps/rebaked/*.prl` | each level's lightmaps baked again from its own lamps and sky | LIGHTMAPS Rebaked (`display.prism_lightmaps = "rebaked"`) |
 | `probes` | `prism/probes/<level>.probes` | local reflections (not in `all`: name it) | REFLECTIONS Local (`display.prism_reflections = "local"`) |
+| `v4_materials` | `mods/prism_v4_materials` | each level's environment shaders and the characters' model shaders as PRISM v4's materials: their colour with CE's painted light taken out, normal, roughness and metal maps (`docs/prism_materials.md`); best built after the texture packs, whose characters it starts from | `display.lighting` `"ce_deferred"` or `"raster"`, with `display.material_packs` (the default) |
 | `sun` | `prism_lightmaps/sun/*.psm` | sharp baked sun shadows (not in `all`) | not read by this build: its setting comes in a later one |
 
 The QUALITY preset PRISM (`display.graphics = "prism"`) turns on surface maps, the smooth lightmaps and the

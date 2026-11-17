@@ -126,16 +126,19 @@ PACKS = [
          needs=["lightmaps", "world"], uses={"blender", "cycles"}, level=True, off=True),
     Pack("probes", "local reflections: each level's reflection probes (prism/probes/<level>.probes)",
          uses={"game"}, level=True, off=True),
+    Pack("v4_materials", "PRISM v4's materials (docs/prism_materials.md): each level's environment shaders and the "
+                         "characters' model shaders, their colour with CE's painted light taken out, normal, "
+                         "roughness and metal maps", needs=["extract"], level=True, mods=["prism_v4_materials"]),
 ]
 BY_NAME = {p.name: p for p in PACKS}
 CHARACTERS = ["class_masks", "materials", "base_maps", "chief_r2", "chief_maps", "ar_textures", "fp_arms",
               "elite_r2", "bold", "chief_r3", "cast", "rocks"]
-LEVEL_PACKS = ["world", "lightmaps"]
+LEVEL_PACKS = ["world", "lightmaps", "v4_materials"]
 # the load order the packs play in (each over those before it), as the author's kit has it
 LOAD_ORDER = ["prism_base_local", "prism_class_masks", "prism_materials", "prism_v2r2_ar_textures",
               "prism_v2r2_chief_3p_maps", "prism_v2r2_fp_hands_ar", "prism_v2r2_chief_3p_model",
               "prism_r3_chief_meshes", "prism_r3_chief_materials", "prism_v2_elite_r2", "prism_v3_elite_meshes",
-              "prism_v3_cast", "prism_v3_rocks", "prism_v2_tex_bold"]
+              "prism_v3_cast", "prism_v3_rocks", "prism_v2_tex_bold", "prism_v4_materials"]
 OFF_BY_DEFAULT = ["prism_v3_elite_meshes"]
 LOCAL_ONLY = "Built on this computer from the player's own Halo maps. Never commit, share, upload or ship it.\n"
 
@@ -1247,6 +1250,31 @@ def step_sun(ctx):
             shutil.copyfile(psm, dst / Path(psm).name)
 
 
+def step_v4_materials(ctx):
+    """each level's materials of PRISM v4's pack tier (art/prism_v4_materials.py), from its extract's bitmaps and
+    shaders and the texture packs built before it (Bold's and base_local's characters, the overlay's classes)"""
+    out = ctx.mod("prism_v4_materials")
+    for level in ctx.levels:
+        shaders = ctx.w("extract", level)
+        # (an extract made before the extractor wrote shaders: theirs alone, beside it)
+        if not shaders.joinpath("shaders").is_dir():
+            ensure_extractor(ctx)
+            ctx.extract_run("--data", ctx.data, "--out", ctx.w("extract_v4"), "--only", "shaders", level,
+                            what=f"{level}: its shaders' fields")
+            shaders = ctx.w("extract_v4", level)
+
+        def build(level=level, shaders=shaders):
+            ctx.python("prism_v4_materials.py", "build", "--extract", ctx.w("extract", level), "--shaders", shaders,
+                       "--out", out, "--packs", ctx.out / "mods", "--workers", min(4, os.cpu_count() or 1),
+                       what=f"{level}: the materials (de-lit colour, normal, roughness and metal; the gate)")
+        ctx.once(level, build)
+    write_mod(out, "prism_v4_materials", "PRISM v4 materials (local)", "1",
+              "PRISM v4's material pack: each level's environment shaders and the characters' model shaders, their "
+              "colour with CE's painted light taken out, their normal, roughness and metal maps, for "
+              "display.lighting ce_deferred and raster (display.material_packs). Built on this machine from your "
+              "own maps: never shared or shipped.")
+
+
 def step_probes(ctx):
     probes = HERE.parent / "prism_probes.py" if (HERE.parent / "prism_probes.py").is_file() \
         else HERE / "formats" / "prism_probes.py"
@@ -1267,7 +1295,7 @@ STEPS = {"extract": step_extract, "dumps": step_dumps, "class_masks": step_class
          "chief_maps": step_chief_maps, "ar_textures": step_ar_textures, "tiers": step_tiers,
          "fp_arms": step_fp_arms, "elite_r2": step_elite_r2, "bold": step_bold, "chief_r3": step_chief_r3,
          "cast": step_cast, "rocks": step_rocks, "world": step_world, "lightmaps": step_lightmaps,
-         "sun": step_sun, "probes": step_probes}
+         "sun": step_sun, "probes": step_probes, "v4_materials": step_v4_materials}
 
 
 # ---------------------------------------------------------------- the command line

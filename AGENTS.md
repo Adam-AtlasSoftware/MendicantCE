@@ -236,6 +236,7 @@ python -m pytest -q tools/test_ios_touch_layout.py          # the iOS touch layo
 python tools/touch_assets.py --check                        # the touch controls' pictures as their SVGs draw them
 python tools/test_light_storage.py
 python -m pytest -q tools/test_prism_bake.py                 # PRISM v4's baker groundwork: reachable space, atlas, bake file, convergence (with HALO_DATA_ROOT, Rat Race's reachable space)
+python -m pytest -q tools/test_prism_v4_materials.py         # PRISM v4's material pack on made-up pictures: its encoders, the gate's CIEDE2000, a pack's files
 python -m pytest -q tools/test_gbuffer_pack.py               # PRISM v4's G-buffer uber-shaders' SPIR-V (spirv-val): the maps' images, the albedo target, the base map's coordinates
 python tools/test_death_timing.py
 python -m pytest -q tools/test_join_page.py                 # the website's join page: the links it reads (Node), nothing loaded from elsewhere
