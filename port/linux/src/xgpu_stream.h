@@ -300,6 +300,10 @@ enum
 	(xgpu_backend_dynamic_lights_upload; DYNAMIC_LIGHTS_UPLOAD's records,
 	of the whole, are the stream's version 22's) */
 	XGPU_STREAM_DYNAMIC_LIGHTS_CHANGE,
+	/* display.render_scale: a frame smaller than the window scaled up
+	sharply (value 1: the render scale's) or smoothly (0: "original"
+	resolution scaling's 640x480, as it always was) */
+	XGPU_STREAM_SHARP_UPSCALE,
 	XGPU_STREAM_RECORD_TYPES,
 };
 
@@ -321,7 +325,7 @@ struct xgpu_stream_frame_end
 };
 
 /* a record of one value: ANTI_ALIASING_PREPARE (smaa), TARGET_DELETE,
-TARGET_RESOLVE, PRESENT (the back buffer's target), PICTURE_POSITION, GAMMA, VR_PASS, VR_TIMING
+TARGET_RESOLVE, PRESENT (the back buffer's target), PICTURE_POSITION, GAMMA, SHARP_UPSCALE, VR_PASS, VR_TIMING
 (mark), PIPELINE (the id, XGPU_STREAM_PIPELINE_DEFINE's), VR_SKY (sky) */
 struct xgpu_stream_value
 {

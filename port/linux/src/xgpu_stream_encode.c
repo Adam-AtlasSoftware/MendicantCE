@@ -938,6 +938,12 @@ static void marks_draw(void)
 	marks.owner_sent = TRUE;
 }
 
+void xgpu_backend_sharp_upscale(int sharp)
+{
+	if (stream.open)
+		record_value(XGPU_STREAM_SHARP_UPSCALE, sharp ? 1u : 0u);
+}
+
 void xgpu_backend_picture_top(int top)
 {
 	/* (0 centered, n + 1 at n pixels from the top) */

@@ -74,7 +74,8 @@ def test_menu_sliders_match_their_rows():
               port_settings.Slider(*(float(row.get(name)) for name in ("least", "most", "step", "typed_least",
                                                                        "typed_most")),
                                    whole=row.get("whole") == "true",
-                                   stops=tuple((stop.get("shown"), stop.get("value")) for stop in row.findall("stop"))))
+                                   stops=tuple((stop.get("shown"), stop.get("value")) for stop in row.findall("stop")),
+                                   curve=row.get("curve") or ""))
              for row in model.iter("row") if row.get("kind") == "slider"}
     assert found == rows
     for name in ("SLIDER_TRACK_WIDTH", "SLIDER_THUMB_WIDTH"):

@@ -110,7 +110,6 @@ symbols in this file:
 #include "latency_meter.h" /* port: port/linux/game/latency_meter.c */
 #include "network_host_controls.h" /* port: port/linux/game/network_host_controls.c */
 #include "stats_log.h" /* port: port/linux/game/stats_log.c */
-#include "frame_rate_display.h" /* port: port/linux/game/frame_rate_display.c */
 #include "touch_cinematic.h" /* port: port/linux/game/touch_cinematic.c */
 
 /* ---------- constants */
@@ -402,9 +401,6 @@ void interface_draw_fullscreen_overlays(
 	latency_meter_draw();
 	/* port: display.stats_log, a line a second in the log (stats_log.c) */
 	stats_log_tick();
-	/* port: the frame rate counter as display.show_fps says
-	(port/linux/game/frame_rate_display.c) */
-	frame_rate_display_update();
 	terminal_draw();
 	main_framerate_render();
 	render_debug_profile();

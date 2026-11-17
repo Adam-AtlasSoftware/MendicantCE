@@ -460,6 +460,17 @@ int main(int argc, char **argv)
         global_structure_bsp_index=0; calls=fixture_malloc_calls; structure_culling_structure_bsp_loaded();
         CHECK(structure_culling.allocation==first && fixture_malloc_calls==calls && !structure_culling_kept[0].allocation &&
             structure_culling_kept[1].allocation==second,"a switch back takes its buckets back, built nothing");
+        {
+            /* an MCC map's bsp is given new vertices each time it loads (mcc_geometry.c) */
+            static struct fixture_vertex moved[3];
+            memcpy(moved,fixture_vertices,sizeof(moved));
+            global_structure_bsp_index=1; structure_culling_structure_bsp_loaded(); second=structure_culling.allocation;
+            fixture_materials[0].compressed_vertex_data.address=moved;
+            global_structure_bsp_index=0; calls=fixture_malloc_calls; structure_culling_structure_bsp_loaded();
+            CHECK(fixture_malloc_calls>calls && !structure_culling_kept[0].allocation &&
+                structure_culling.materials[0].vertices==(byte const *)moved,"kept buckets of a bsp given new vertices are built again");
+            fixture_materials[0].compressed_vertex_data.address=fixture_vertices;
+        }
         calls=fixture_malloc_calls; structure_culling_structure_bsp_loaded();
         CHECK(structure_culling.allocation && fixture_malloc_calls>calls && !structure_culling_kept[0].allocation,"the same bsp loaded again is built again");
         ++fixture_bsp.surfaces.count; global_structure_bsp_index=1; calls=fixture_malloc_calls; structure_culling_structure_bsp_loaded();

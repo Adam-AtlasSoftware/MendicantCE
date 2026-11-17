@@ -160,7 +160,7 @@
  "tools/harness/tests/test_server_teardown.py": 0.9,
  "tools/harness/tests/test_server_toml.py": 14.09,
  "tools/harness/tests/test_shield_effects.py": 0.93,
- "tools/harness/tests/test_show_frame_rate.py": 0.18,
+ "tools/harness/tests/test_perf_overlay.py": 0.18,
  "tools/harness/tests/test_sim_rate.py": 3.21,
  "tools/harness/tests/test_sim_rate_menu.py": 1.11,
  "tools/harness/tests/test_sound_lifecycle.py": 3.16,

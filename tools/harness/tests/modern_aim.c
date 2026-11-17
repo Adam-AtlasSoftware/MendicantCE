@@ -214,14 +214,14 @@ static void case_round_dead_zone(void)
 	point2d out;
 	double length;
 
-	fix_round_dead_zone(6000, 6000, range, &out);
+	fix_round_dead_zone(6000, 6000, range, SHORT_MAX, &out);
 	CHECK(out.x == 0 && out.y == 0, "inside the dead zone on a diagonal read %d, %d", out.x, out.y);
-	fix_round_dead_zone(23170, 23170, range, &out);
+	fix_round_dead_zone(23170, 23170, range, SHORT_MAX, &out);
 	length = sqrt((double)out.x * out.x + (double)out.y * out.y);
 	CHECK(fabs(length - 32767) < 3 && abs(out.x - out.y) <= 1, "a full diagonal read %d, %d", out.x, out.y);
-	fix_round_dead_zone(32767, 0, range, &out);
+	fix_round_dead_zone(32767, 0, range, SHORT_MAX, &out);
 	CHECK(out.x == 32767 && out.y == 0, "a full push straight across read %d, %d", out.x, out.y);
-	fix_round_dead_zone(-16000, 12000, range, &out);
+	fix_round_dead_zone(-16000, 12000, range, SHORT_MAX, &out);
 	CHECK(out.x < 0 && out.y > 0 && abs(out.x * 3 + out.y * 4) < 8, "the direction turned: %d, %d", out.x, out.y);
 }
 

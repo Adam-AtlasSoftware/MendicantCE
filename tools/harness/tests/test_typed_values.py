@@ -20,7 +20,8 @@ CASES = ["word-empty", "replace", "backspace-clears", "names-append", "enter-is-
 NEGATIVE_CONTROLS = {
     # the word shown typed into, as before (DEFAULT left to delete)
     "word-kept": ("menus", ("\tif (settings_slider_word(slider, value) != NONE)\n\t\ttext[0] = 0;\n\telse\n"
-                            "\t\tsettings_slider_number(slider, value, text, size);",
+                            "\t\tsettings_slider_number(slider, slider->volume ? settings_volume_shown(value) : value, "
+                            "text, size);",
                             "\tsettings_slider_text(slider, value, text, size);"), "word-empty"),
     # typing appended to the number shown
     "number-appended": ("menus", ("\tif (text_field.chosen)\n\t\ttext_field.text[0] = 0;\n\ttext_field.chosen = FALSE;"

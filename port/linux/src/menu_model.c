@@ -313,7 +313,7 @@ static void model_row(struct model_reader *reader, char const *element, XML_Char
 		{ "named", NULL, NULL, NULL, &row.named }, { "status", NULL, NULL, NULL, &row.status },
 		{ "least", NULL, NULL, &row.least }, { "most", NULL, NULL, &row.most }, { "step", NULL, NULL, &row.step },
 		{ "typed_least", NULL, NULL, &row.typed_least }, { "typed_most", NULL, NULL, &row.typed_most },
-		{ "whole", NULL, NULL, NULL, &row.whole },
+		{ "whole", NULL, NULL, NULL, &row.whole }, { "curve", &row.curve },
 		{ "name", &row.key }, { "parent", &row.parent },
 		{ "focusable", NULL, NULL, NULL, &row.focusable }, { "initial", NULL, NULL, NULL, &row.initial },
 		{ "help_index", NULL, &row.help_index }, { "help_choices", NULL, NULL, NULL, &row.help_choices },

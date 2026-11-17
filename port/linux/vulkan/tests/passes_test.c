@@ -1534,6 +1534,7 @@ static unsigned int window_presents, window_capability_queries, window_turns, wi
 static int window_gone;
 static VkImage window_blit_source;
 static VkImageBlit window_blit_region;
+static VkFilter window_blit_filter;
 static struct xgpu_vulkan_image window_frame, window_turned;
 
 static VkResult VKAPI_CALL window_get_capabilities(VkPhysicalDevice physical, VkSurfaceKHR surface,
@@ -1678,9 +1679,10 @@ static void VKAPI_CALL window_blit(VkCommandBuffer commands, VkImage source, VkI
 	VkImage destination, VkImageLayout destination_layout, uint32_t count, const VkImageBlit *regions,
 	VkFilter filter)
 {
-	(void)commands; (void)source_layout; (void)destination; (void)destination_layout; (void)count; (void)filter;
+	(void)commands; (void)source_layout; (void)destination; (void)destination_layout; (void)count;
 	window_blit_source = source;
 	window_blit_region = regions[0];
+	window_blit_filter = filter;
 }
 
 static struct xgpu_vulkan_image *window_rotate(struct xgpu_vulkan_image *image, int quarter_turns)
@@ -2106,6 +2108,8 @@ static VkFormat hdr_color_format, hdr_depth_format;
 static VkSampleCountFlagBits hdr_samples;
 static int hdr_told[8][2];
 static float hdr_told_headroom[8];
+static float hdr_told_white[8];
+static int hdr_told_reported[8];
 static unsigned int hdr_tells, hdr_encodes;
 static uint8_t hdr_encoded_format;
 static struct xgpu_hdr_frame hdr_encoded_frame;
@@ -2366,9 +2370,9 @@ static VkResult VKAPI_CALL hdr_formats(VkPhysicalDevice physical, VkSurfaceKHR s
 
 static void hdr_display(int hdr, float headroom, float white_nits, int white_reported)
 {
-	(void)white_nits;
-	(void)white_reported;
 	assert(hdr_tells < 8);
+	hdr_told_white[hdr_tells] = white_nits;
+	hdr_told_reported[hdr_tells] = white_reported;
 	hdr_told[hdr_tells][0] = hdr;
 	hdr_told_headroom[hdr_tells] = headroom;
 	hdr_tells++;
@@ -2510,6 +2514,123 @@ static void hdr_window_test(void)
 	xgpu_vulkan_hdr_state(1, XGPU_HDR_MODE_FAITHFUL, 0, 100, 0);
 	assert(window_present_frame() && window_made.imageFormat == VK_FORMAT_B8G8R8A8_UNORM && !hdr_encodes);
 	assert(hdr_tells == 1 && !hdr_told[0][0]);
+	reset();
+}
+
+/* the HDR metadata set (VK_EXT_hdr_metadata's): its peak and average */
+static unsigned int hdr_metadata_sets;
+static float hdr_metadata_peak_set, hdr_metadata_average_set;
+
+static void VKAPI_CALL hdr_metadata_record(VkDevice device, uint32_t count, const VkSwapchainKHR *swapchains,
+	const VkHdrMetadataEXT *metadata)
+{
+	(void)device; (void)swapchains;
+	assert(count == 1);
+	hdr_metadata_sets++;
+	hdr_metadata_peak_set = metadata->maxContentLightLevel;
+	hdr_metadata_average_set = metadata->maxFrameAverageLightLevel;
+}
+
+/* the system's SDR white (#1119): any value it reports is its white, 1.0
+too (Windows' least SDR brightness, 80 nits); only none reported (0) is
+BT.2408's 203 nits. And the HDR metadata set again when paper white or the
+display's values move it, not only when the swapchain is made. */
+static void hdr_white_test(void)
+{
+	struct xgpu_hdr_frame frame;
+	unsigned int made, sets;
+
+	/* 1.0 reported: 80 nits, so paper white of 300 nits is 3.75 of it,
+	the peak (a headroom of 4) about 1.07 paper whites, and the host told
+	the white was reported */
+	hdr_window_reset();
+	vkSetHdrMetadataEXT = hdr_metadata_record;
+	hdr_metadata_sets = 0;
+	xgpu_vulkan_window_hdr(1, 1.0f, 4.0f);
+	xgpu_vulkan_hdr_state(1, XGPU_HDR_MODE_FAITHFUL, 300, 100, 0);
+	assert(window_present_frame() && hdr_told_white[hdr_tells - 1] == 80.0f && hdr_told_reported[hdr_tells - 1]);
+	xgpu_vulkan_hdr_frame(&frame);
+	assert(fabsf(frame.peak - 4.0f / 3.75f) < 1e-5f);
+	/* (the metadata with the swapchain: the peak 4 of PQ's 203 nits) */
+	assert(hdr_metadata_sets >= 1 && fabsf(hdr_metadata_peak_set - 812.0f) < 1e-3f);
+	made = window_swapchains;
+	sets = hdr_metadata_sets;
+	assert(fabsf(hdr_metadata_average_set - 203.0f * 3.75f) < 1e-3f);
+
+	/* (the negative control) none reported: BT.2408's 203 nits, so the
+	same paper white is about 1.48 of it, and the host told none was */
+	xgpu_vulkan_window_hdr(1, 0.0f, 4.0f);
+	assert(window_present_frame() && hdr_told_white[hdr_tells - 1] == 203.0f && !hdr_told_reported[hdr_tells - 1]);
+	xgpu_vulkan_hdr_frame(&frame);
+	assert(fabsf(frame.peak - 4.0f / (300.0f / 203.0f)) < 1e-5f);
+
+	/* the swapchain kept (its output the same), yet the metadata set
+	again for the new white: and again for a new paper white and a new
+	headroom; not again where nothing moved */
+	assert(window_swapchains == made && hdr_metadata_sets == sets + 1);
+	assert(fabsf(hdr_metadata_average_set - 300.0f) < 1e-3f);
+	xgpu_vulkan_hdr_state(1, XGPU_HDR_MODE_FAITHFUL, 400, 100, 0);
+	assert(hdr_metadata_sets == sets + 2 && fabsf(hdr_metadata_average_set - 400.0f) < 1e-3f);
+	xgpu_vulkan_hdr_state(1, XGPU_HDR_MODE_FAITHFUL, 400, 100, 0);
+	assert(hdr_metadata_sets == sets + 2);
+	xgpu_vulkan_window_hdr(1, 0.0f, 5.0f);
+	assert(window_present_frame() && hdr_metadata_sets == sets + 3 && fabsf(hdr_metadata_peak_set - 1015.0f) < 1e-3f);
+	assert(window_present_frame() && hdr_metadata_sets == sets + 3 && window_swapchains == made);
+	vkSetHdrMetadataEXT = NULL;
+	reset();
+}
+
+/* the sharp upscale of a frame smaller than the window (display.render_scale,
+#1118): nearest where it is shown at whole multiples of its pixels; else
+nearest by the least whole factors that reach them, then linear; linear
+alone where it is shown at no more than its pixels */
+static void sharp_test(void)
+{
+	uint32_t factors[2];
+
+	/* half of 1080p: twice each way, nearest */
+	assert(sharp_plan(960, 540, 1920, 1080, factors) == SHARP_NEAREST && factors[0] == 2 && factors[1] == 2);
+	/* a quarter of 4K: four times */
+	assert(sharp_plan(960, 540, 3840, 2160, factors) == SHARP_NEAREST && factors[0] == 4 && factors[1] == 4);
+	/* its own size: a copy */
+	assert(sharp_plan(1920, 1080, 1920, 1080, factors) == SHARP_NEAREST && factors[0] == 1 && factors[1] == 1);
+	/* 480 rows at 2160 (4.5 times): nearest 5 times (2400), then linear */
+	assert(sharp_plan(640, 480, 2880, 2160, factors) == SHARP_PRESCALED && factors[0] == 5 && factors[1] == 5);
+	/* 0.75 of 1440p: 1.33 times, nearest twice, then linear */
+	assert(sharp_plan(1920, 1080, 2560, 1440, factors) == SHARP_PRESCALED && factors[0] == 2 && factors[1] == 2);
+	/* each axis its own: twice across exactly, 1.5 down */
+	assert(sharp_plan(1280, 720, 2560, 1080, factors) == SHARP_PRESCALED && factors[0] == 2 && factors[1] == 2);
+	/* (the negative control) larger than shown (supersampling): linear,
+	as before */
+	assert(sharp_plan(3840, 2160, 1920, 1080, factors) == SHARP_LINEAR && factors[0] == 1 && factors[1] == 1);
+	assert(sharp_plan(2000, 1000, 1920, 1080, factors) == SHARP_PRESCALED && factors[0] == 1 && factors[1] == 2);
+
+	/* presented: half the window's pixels each way blitted by nearest
+	where the options allow it and the front end asks for it (the render
+	scale's), by linear where the options do not (Android's) */
+	window_reset();
+	window_frame.description.width = 640;
+	window_frame.description.height = 360;
+	xgpu_vulkan_sharp_upscale(1);
+	assert(window_present_frame() && window_blit_source == window_frame.image && window_blit_filter == VK_FILTER_LINEAR);
+	vk.sharp_upscale = 1;
+	assert(window_present_frame() && window_blit_source == window_frame.image && window_blit_filter == VK_FILTER_NEAREST);
+	assert(window_blit_region.dstOffsets[1].x - window_blit_region.dstOffsets[0].x == 1280);
+	assert(window_blit_region.srcOffsets[1].x == 640 && window_blit_region.srcOffsets[1].y == 360);
+	/* "original" resolution scaling (the front end asks for no sharp
+	upscale): its 640x480 in a 1280x720 window (shown 960x720, 1.5 times)
+	by linear, from the frame itself, as it always was */
+	xgpu_vulkan_sharp_upscale(0);
+	window_frame.description.width = 640;
+	window_frame.description.height = 480;
+	assert(window_present_frame() && window_blit_source == window_frame.image && window_blit_filter == VK_FILTER_LINEAR);
+	assert(window_blit_region.dstOffsets[1].x - window_blit_region.dstOffsets[0].x == 960);
+	/* (the negative control) the same frame asked sharp: nearest, as the
+	render scale's 2 times is */
+	window_frame.description.height = 360;
+	xgpu_vulkan_sharp_upscale(1);
+	assert(window_present_frame() && window_blit_filter == VK_FILTER_NEAREST);
+	xgpu_vulkan_sharp_upscale(0);
 	reset();
 }
 
@@ -3929,6 +4050,8 @@ int main(void)
 	local_read_test();
 	hdr_pipeline_test();
 	hdr_window_test();
+	hdr_white_test();
+	sharp_test();
 	hdr_post_test();
 	half_test();
 	discards_test();

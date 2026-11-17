@@ -17,6 +17,9 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/op_voice_chat" x="28" y="100"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/op_input_device" x="28" y="121" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/op_voice_volume" x="28" y="142"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/section_4" x="28" y="169"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/op_hit_sounds" x="28" y="189"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/op_allow_hit_sounds" x="28" y="210"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/button_bar" y="414"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/button_bar" type="column_list" width="640" height="28" flags="pass_unhandled_to_focused_child left_right_tabs_items" source="tools/port_settings.py settings_files/_settings_page">
@@ -73,19 +76,71 @@
 		<on event="created" run="port setting load"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/op_voice_volume" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<on event="left" run="port slider left"/>
+		<on event="right" run="port slider right"/>
+		<on event="a" run="port slider edit"/>
+		<on event="start" run="port slider edit"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/voice_volume_label"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/voice_volume_spinner" x="188"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/voice_volume_track" x="188" y="3"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/voice_volume_value" x="252" y="0"/>
+		<on event="stick_left" run="port slider left"/>
+		<on event="stick_right" run="port slider right"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/voice_volume_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/labels" string_index="3" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/voice_volume_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="0|1|2|3|4|5|6|7|8|9|10" setting="audio.voice_volume" values="0|0.1|0.2|0.3|0.4|0.5|0.6|0.7|0.8|0.9|1" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/voice_volume_track" controller="1" width="62" height="14" bitmap="main_menu/settings/slider_track" wide="20 224" source="tools/port_settings.py settings_files/_settings_page">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/voice_volume_thumb"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/voice_volume_thumb" controller="1" width="8" height="14" bitmap="main_menu/settings/slider_thumb" source="tools/port_settings.py settings_files/_settings_page">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/voice_volume_value" type="text" controller="1" width="76" height="20" bitmap="main_menu/settings/slider_field" color="#FF2896FF" align="center" text_y="1" text_flags="no_focus_test" wide="244 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/section_4" width="344" height="18" bitmap="main_menu/settings/section" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/section_4_title"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/section_4_title" type="text" controller="1" width="344" height="18" wide="0 244" string_list="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/labels" string_index="4" color="#FF6F9CD0" text_x="2" text_y="1" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/op_hit_sounds" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/hit_sounds_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/hit_sounds_spinner" x="188"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/hit_sounds_seg0" x="188" y="1"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/hit_sounds_seg1" x="240" y="1"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/hit_sounds_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/labels" string_index="5" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/hit_sounds_seg0" type="text" controller="1" width="48" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="ON" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/hit_sounds_seg1" type="text" controller="1" width="48" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="OFF" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/hit_sounds_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="ON|OFF" setting="audio.hit_sounds" values="true|false" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
 		<on event="created" run="port setting load"/>
+		<on event="a" run="port setting segment"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/op_allow_hit_sounds" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/allow_hit_sounds_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/allow_hit_sounds_spinner" x="188"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/allow_hit_sounds_seg0" x="188" y="1"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/allow_hit_sounds_seg1" x="240" y="1"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/allow_hit_sounds_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/labels" string_index="6" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/allow_hit_sounds_seg0" type="text" controller="1" width="48" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="YES" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/allow_hit_sounds_seg1" type="text" controller="1" width="48" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="NO" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/allow_hit_sounds_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="YES|NO" setting="network.allow_hit_sounds" values="true|false" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
+		<on event="created" run="port setting load"/>
+		<on event="a" run="port setting segment"/>
 	</widget>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/labels">
 		<string text="VOICE CHAT"/>
 		<string text="VOICE CHAT"/>
 		<string text="INPUT DEVICE"/>
 		<string text="VOICE VOLUME"/>
+		<string text="HIT SOUNDS"/>
+		<string text="HIT SOUNDS"/>
+		<string text="ALLOW HIT SOUNDS"/>
 	</strings>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/help_strings">
 		<string text=""/>
@@ -93,5 +148,8 @@
 		<string text="Talk to the other players in network games: while Push to Talk is held (Key Bindings sets its key), whenever you speak, or never."/>
 		<string text="The microphone voice chat listens to."/>
 		<string text="How loud the other players' voices are."/>
+		<string text=""/>
+		<string text="A short beep each time you damage another player, as the host dealt it. A host may forbid them in its games.|The beep is a placeholder for now."/>
+		<string text="In the games you host, whether the players may hear their hit sounds. A Legacy game's players cannot be told."/>
 	</strings>
 </menus>

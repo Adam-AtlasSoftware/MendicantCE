@@ -25,11 +25,16 @@ symbols in this file:
 
 /* ---------- globals */
 
+/* port: the native builds' channels of each type, well past the Xbox's
+hardware voices (halo_port_capacity.h: what they cost the software mixer).
+A sound mod may make any class stereo (the Uncompressed Audio mod's weapons,
+reloads and engines are stereo 44 kHz), which then shared the music's 9
+channels and took them (#1125). */
 static struct sound_preferences default_sound_preferences =
 {
 	0,
-	{ 10, 51, 10, 10 },
-	{ 9, 46, 9, 9 },
+	HALO_PORT_SOUND_ACTUAL_CHANNELS,
+	HALO_PORT_SOUND_VIRTUAL_CHANNELS,
 	0,
 };
 

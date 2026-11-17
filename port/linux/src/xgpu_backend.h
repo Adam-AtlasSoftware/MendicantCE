@@ -153,6 +153,9 @@ void xgpu_backend_hdr(BOOL active, int mode, int paper_white_nits, int paper_whi
 pixels from the top of a window taller than it (no lower than its bottom),
 or centered (-1), from the next present on */
 void xgpu_backend_picture_top(int top);
+/* display.render_scale: a frame smaller than the window scaled up sharply
+(1) or smoothly (0, "original" resolution scaling's), from the next present */
+void xgpu_backend_sharp_upscale(int sharp);
 /* display.gamma: an SDR frame curved by one over this as it is presented
 (each channel raised to that power: past 1 brighter), from the next present
 on; 1 none, which costs nothing. An HDR swapchain's frame never is. */

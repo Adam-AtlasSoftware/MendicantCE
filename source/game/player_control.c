@@ -1509,9 +1509,33 @@ static boolean player_control_stick_look(
 		constants->look_function.address, constants->look_pegging_threshold, input_state->yaw,
 		input_state->pitch, &curved_yaw, &curved_pitch, clamped_yaw, clamped_pitch);
 	look_delta->yaw = curved_yaw * yaw_spin_scale * look_yaw_rate;
-	look_delta->pitch = curved_pitch * pitch_spin_scale * look_pitch_rate;
+	/* port: up and down times the player's own vertical sensitivity
+	(input.look_vertical_sensitivity), 1 the original's */
+	look_delta->pitch = curved_pitch * pitch_spin_scale * look_pitch_rate *
+		halo_look_vertical_sensitivity(gamepad_index);
 
 	return accelerating;
+}
+
+/* port: the look stick's turn zoomed in times its player's stick zoom
+sensitivity (input.stick_zoom_sensitivity), on top of the zoom's own slowing
+(player_control_scale_look); 1, the default, the original's. The touch
+controls' swipe and the gyroscope are not changed */
+static void player_control_stick_zoom_look(
+	short gamepad_index,
+	long unit_index,
+	short zoom_level,
+	real_euler_angles2d *look_delta)
+{
+	if (unit_index != NONE && zoom_level != NONE)
+	{
+		real scale = halo_stick_zoom_sensitivity(gamepad_index);
+
+		look_delta->yaw *= scale;
+		look_delta->pitch *= scale;
+	}
+
+	return;
 }
 
 /* port: a turn slowed by the zoom and by the unit's stun
@@ -1675,6 +1699,9 @@ static void get_local_player_input_blob(
 					aim (player_control_stick_aim) */
 					boolean accelerating = player_control_stick_look(constants, gamepad_index, input_state,
 						look_yaw_rate, look_pitch_rate, &look_delta, &clamped_yaw, &clamped_pitch);
+
+					player_control_stick_zoom_look(gamepad_index, player->unit_index, control->zoom_level,
+						&look_delta);
 
 					{
 						/* port: the touch controls' swipe (port/linux/src/xinput_sdl.c),
@@ -2833,6 +2860,8 @@ static void player_control_substep_read(
 		player_control_look_rates(local_player_index, player->unit_index, &look_yaw_rate, &look_pitch_rate);
 		accelerating = player_control_stick_look(constants, player->local_player_index, input_state,
 			look_yaw_rate, look_pitch_rate, &reading->look, &clamped_yaw, &clamped_pitch);
+		player_control_stick_zoom_look(player->local_player_index, player->unit_index, control->zoom_level,
+			&reading->look);
 		player_control_scale_look(player->unit_index, control->zoom_level, &reading->look);
 		if (accelerating && constants->look_acceleration_time > 0.f)
 		{

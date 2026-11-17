@@ -912,6 +912,33 @@ map's: its bsps' vertices, which the buckets point into, are made again
 each time one loads: custom_edition_geometry.c) */
 static void structure_culling_job_wait(short structure_bsp_index);
 
+/* the kept buckets' materials point at the bsp's vertices where they are
+now: an MCC map's bsp (mcc_geometry.c) is given new vertices each time it
+loads, at the same place, and its old ones let go of */
+static boolean structure_culling_vertices_match(struct structure_culling_data const *data,
+	struct structure_bsp *structure)
+{
+	long l;
+	long m;
+	long material_index = 0;
+
+	for (l = 0; l < structure->lightmaps.count; ++l)
+	{
+		struct tag_block *materials =
+			&TAG_BLOCK_GET_ELEMENT(&structure->lightmaps, l, struct structure_lightmap)->materials;
+		for (m = 0; m < materials->count; ++m, ++material_index)
+		{
+			struct structure_material *material = TAG_BLOCK_GET_ELEMENT(materials, m, struct structure_material);
+			if (material_index >= data->material_count ||
+				data->materials[material_index].vertices != material->compressed_vertex_data.address)
+			{
+				return FALSE;
+			}
+		}
+	}
+	return material_index == data->material_count;
+}
+
 static boolean structure_culling_switch(struct structure_bsp *structure, short structure_bsp_index)
 {
 	struct structure_culling_data *kept;
@@ -941,7 +968,7 @@ static boolean structure_culling_switch(struct structure_bsp *structure, short s
 		return FALSE;
 	}
 	if (kept->structure == structure && kept->surface_address == structure->surfaces.address &&
-		kept->surface_count == structure->surfaces.count)
+		kept->surface_count == structure->surfaces.count && structure_culling_vertices_match(kept, structure))
 	{
 		structure_culling = *kept;
 		memset(kept, 0, sizeof(*kept));

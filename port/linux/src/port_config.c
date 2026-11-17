@@ -181,6 +181,14 @@ Steam Deck's Game Mode) on, with display.low_latency's pacing
 #else
 #define VSYNC_DEFAULT "true"
 #endif
+/* display.render_scale's: the device's on the phones and tablets
+(port/android/host/host_main.c, port/ios/host_app.m), all the display's
+pixels on a computer */
+#if defined(HALO_ANDROID) || defined(HALO_IOS)
+#define RENDER_SCALE_DEFAULT "0.0"
+#else
+#define RENDER_SCALE_DEFAULT "1.0"
+#endif
 /* (in the comment of each setting it chooses) */
 #define GRAPHICS_CHOOSES "\nCommented out, display.graphics chooses it."
 /* in input.mouse_sensitivity's comment: a file with it has the mouse's
@@ -213,14 +221,17 @@ static const struct config_setting config_settings[] =
 		"\"native\" draws at the window's resolution (fullscreen, the display's or\n"
 		"display.resolution); \"original\" draws the Xbox's 640x480 and scales it\n"
 		"up." },
-	{ "display.render_scale", _config_real, "0.0", "HALO_RENDER_SCALE", _environment_value,
-		_platform_ios | _platform_android,
+	{ "display.render_scale", _config_real, RENDER_SCALE_DEFAULT, "HALO_RENDER_SCALE", _environment_value,
+		_platform_all,
 		"The fraction of the screen's pixels the game draws, each way (0.25 to\n"
 		"1.0), which the display scales up: 0.67 draws less than half the\n"
 		"pixels, for a cooler phone and a steadier frame rate. 0: the device's:\n"
 		"0.67 on an iPhone of 3x pixels, 0.8 on another iPhone, 1.0 on an iPad;\n"
 		"on Android 0.8, or about 1080 rows where 0.8 would draw more. Read at\n"
-		"start." },
+		"start on a phone or tablet. On a computer 1.0 (or 0) draws all the\n"
+		"display's pixels, and the HUD is drawn at the scale too; Vulkan scales\n"
+		"up sharply (whole multiples of the pixels, then smoothed), and it\n"
+		"multiplies display.supersampling." },
 	{ "display.window_size", _config_string, "\"\"", "HALO_WINDOW_SIZE", _environment_value, _platform_desktop,
 		"The window's size, \"<width>x<height>\" (\"1920x1080\"), 640x480 or more (it\n"
 		"can be resized). Empty: display.window_scale's." },
@@ -260,9 +271,6 @@ static const struct config_setting config_settings[] =
 		"refresh rate, -1 for no limit (which can hang some Intel graphics). On\n"
 		"Linux, the display's refresh rate or a whole fraction of it (60 at\n"
 		"60 Hz, 30) shows the frames in step with the display, as vsync does." },
-	{ "display.show_fps", _config_boolean, "false", "HALO_SHOW_FPS", _environment_set_is_true, _platform_all,
-		"Draw the frame rate at the bottom right of a game, counted over half a\n"
-		"second: green from 30 frames a second, red below." },
 	{ "display.stats_log", _config_boolean, "false", "HALO_STATS_LOG", _environment_value, _platform_all,
 		"A line a second in the log with the frame rate, the mode, the map, the\n"
 		"renderer and the size of the 3D view, so a graphics bug's report or two\n"
@@ -460,11 +468,15 @@ static const struct config_setting config_settings[] =
 		"from the game's first tick, which the items' respawn periods count from\n"
 		"too: a weapon is back on the map at every multiple of its period on the\n"
 		"clock." },
-	{ "display.show_frame_rate", _config_boolean, "false", "HALO_SHOW_FRAME_RATE", _environment_value,
-		_platform_all,
-		"Draw the frame rate at the bottom right: the frames drawn a second,\n"
-		"averaged over half a second, green at 30 and over (the console's\n"
-		"display_framerate draws it too)." },
+	{ "display.perf_overlay", _config_string, "\"off\"", "HALO_PERF_OVERLAY", _environment_value, _platform_all,
+		"The performance overlay at the bottom right: \"off\"; \"simple\", the\n"
+		"frame rate averaged over half a second, green at 30 and over (the\n"
+		"console's display_framerate draws it too); or \"detailed\", with the\n"
+		"frame's time, the 1% low over the last 10 seconds, and a frame's\n"
+		"milliseconds on the GPU (as the backend measures it), the renderer's\n"
+		"thread, waiting for the display and on the game's thread. An older\n"
+		"version's display.show_fps or display.show_frame_rate = true reads as\n"
+		"\"simple\"." },
 	{ "display.movies", _config_boolean, "false", "HALO_MOVIES", _environment_value, _platform_all,
 		"Play the Xbox's Bink movies from the game data's bink folder: the intro\n"
 		"as the game starts, the attract movies on an idle main menu and the\n"
@@ -597,9 +609,11 @@ static const struct config_setting config_settings[] =
 		"2.0 is louder (2.0 as loud as before the Xbox's level was matched)." },
 	{ "audio.music_volume", _config_real, "1.0", "HALO_MUSIC_VOLUME", _environment_value, _platform_all,
 		"The music's volume, 0.0 to 1.0 (of audio.volume)." },
+	{ "audio.dialogue_volume", _config_real, "1.0", "HALO_DIALOGUE_VOLUME", _environment_value, _platform_all,
+		"The characters' speech's volume (the units' lines and the scripts'\n"
+		"dialogue), 0.0 to 1.0 (of audio.volume)." },
 	{ "audio.effects_volume", _config_real, "1.0", "HALO_EFFECTS_VOLUME", _environment_value, _platform_all,
-		"The volume of every other sound (effects and speech), 0.0 to 1.0 (of\n"
-		"audio.volume)." },
+		"The volume of every other sound, 0.0 to 1.0 (of audio.volume)." },
 	{ "audio.buffer_frames", _config_integer, "0", "HALO_AUDIO_BUFFER_FRAMES", _environment_value,
 		_platform_desktop,
 		"The frames the sound device asks for at a time, at 48 kHz (64 to 8192):\n"
@@ -1125,11 +1139,39 @@ static const struct config_setting config_settings[] =
 	{ "input.right_stick_dead_zone", _config_integer, "-1", "HALO_RIGHT_STICK_DEAD_ZONE", _environment_value, _platform_all,
 		"How far the controller's right stick moves before it turns the view, in\n"
 		"percent of its travel (0 to 50); -1 for the game's own (27%).", _scope_player },
+	{ "input.left_stick_outer_dead_zone", _config_integer, "0", "HALO_LEFT_STICK_OUTER_DEAD_ZONE", _environment_value,
+		_platform_all,
+		"How much of the controller's left stick's travel at its rim reads as a\n"
+		"full push, in percent (0 to 30): raise it for a worn stick that never\n"
+		"reaches its rim; 0, the game's own, full only at the rim.", _scope_player },
+	{ "input.right_stick_outer_dead_zone", _config_integer, "0", "HALO_RIGHT_STICK_OUTER_DEAD_ZONE",
+		_environment_value, _platform_all,
+		"The same for the right stick, which turns the view.", _scope_player },
+	{ "input.look_dead_zone_shape", _config_string, "\"auto\"", "HALO_LOOK_DEAD_ZONE_SHAPE", _environment_value,
+		_platform_all,
+		"The shape of the look stick's dead zone: \"auto\", the aim style's\n"
+		"(input.aim_style: Classic's each direction's own, a square in the\n"
+		"middle; Modern's round); \"axial\", each direction's own; \"round\", none\n"
+		"within the dead zone whichever way the stick points.", _scope_player },
+	{ "input.stick_zoom_sensitivity", _config_real, "1.0", "HALO_STICK_ZOOM_SENSITIVITY", _environment_value,
+		_platform_all,
+		"How fast a controller's look stick turns the view zoomed in, times the\n"
+		"original's (which the zoom's magnification divides): 1 the original's,\n"
+		"2 twice as fast. The mouse's is input.zoom_sensitivity.", _scope_player },
+	{ "input.look_vertical_sensitivity", _config_real, "1.0", "HALO_LOOK_VERTICAL_SENSITIVITY", _environment_value,
+		_platform_all,
+		"How fast a controller's look stick turns the view up and down, times\n"
+		"what the profile's LOOK SENSITIVITY gives (half its side to side): 1\n"
+		"the original's, 2 twice as fast. The mouse and the gyroscope have\n"
+		"their own.", _scope_player },
 	{ "input.invert_look_horizontal", _config_boolean, "false", "HALO_INVERT_LOOK_HORIZONTAL", _environment_value,
 		_platform_all,
 		"A controller's look turns the other way: pushing the stick that looks to\n"
 		"the right turns the view left. The profile's INVERT LOOK is the up and\n"
 		"down; this is the side to side, for every controller.", _scope_player },
+	{ "input.rumble_strength", _config_integer, "100", "HALO_RUMBLE_STRENGTH", _environment_value, _platform_all,
+		"How strongly the controller rumbles, in percent (0 to 100): 100 the\n"
+		"game's own. The profile's VIBRATION still turns it off.", _scope_player },
 	{ "input.aim_style", _config_string, "\"classic\"", "HALO_AIM_STYLE", _environment_value, _platform_all,
 		"How a controller's look stick aims: \"classic\", the original's (each\n"
 		"direction curved on its own, so a diagonal turns faster, and pushed far\n"
@@ -3274,6 +3316,10 @@ static const char *const config_retired_settings[] =
 	/* (online co-op's PUBLIC or PRIVATE, which most never saw change from
 	PRIVATE: who can join it, network.coop_join) */
 	"network.coop_public",
+	/* (the frame rate counter's two settings: display.perf_overlay's
+	"simple", config_migrate_frame_rate) */
+	"display.show_fps",
+	"display.show_frame_rate",
 	NULL,
 };
 
@@ -3852,6 +3898,38 @@ static char *config_migrate_supersampling(const char *text, toml_datum_t table)
 		platform_log("settings: display.anti_aliasing = \"%s\" is an older version's, which drew none here: now "
 			"\"off\"", datum.u.s);
 #endif
+	return result;
+}
+
+/* a file of an older version with display.show_fps or
+display.show_frame_rate true (the frame rate counter's two settings, which
+config_retired_settings then takes out): display.perf_overlay "simple", if
+the file has not a word for it of its own. Returns the new text, or NULL */
+static char *config_migrate_frame_rate(const char *text, toml_datum_t table)
+{
+	static const char *const old_names[] = { "display.show_fps", "display.show_frame_rate" };
+	long overlay = config_setting_index("display.perf_overlay");
+	toml_datum_t set = toml_seek(table, "display.perf_overlay");
+	char *completed = NULL, *result;
+	size_t index;
+	int on = 0;
+
+	for (index = 0; index < sizeof(old_names) / sizeof(old_names[0]); index++)
+	{
+		toml_datum_t datum = toml_seek(table, old_names[index]);
+
+		on |= datum.type == TOML_BOOLEAN && datum.u.boolean;
+	}
+	if (overlay < 0 || !on || set.type != TOML_UNKNOWN)
+		return NULL;
+	/* (its block, in a file older than it, as config_add_missing would add
+	it after) */
+	completed = config_add_missing(text, table);
+	result = config_replace_setting(completed ? completed : text, &config_settings[overlay], "\"simple\"");
+	free(completed);
+	if (result)
+		platform_log("settings: the frame rate counter's setting is an older version's: now display.perf_overlay = "
+			"\"simple\"");
 	return result;
 }
 
@@ -5024,6 +5102,21 @@ static void config_load(void)
 				toml_free(result);
 				free(text);
 				text = supersampling;
+				result = toml_parse(text, (int)strlen(text));
+				migrated = text;
+			}
+		}
+		/* (the frame rate counter's older settings, display.perf_overlay's
+		now) */
+		if (result.ok && !skipped)
+		{
+			char *frame_rate = config_migrate_frame_rate(text, result.toptab);
+
+			if (frame_rate)
+			{
+				toml_free(result);
+				free(text);
+				text = frame_rate;
 				result = toml_parse(text, (int)strlen(text));
 				migrated = text;
 			}
