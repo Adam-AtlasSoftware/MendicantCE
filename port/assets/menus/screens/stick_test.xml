@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Stick Test (docs/menu_screens.md, "Stick Test"), as Advanced Stick Settings' STICK TEST › opens it; B goes
+back to it. Each stick of the player whose profile Settings edits, its controller's alone: its reading in percent
+of its travel, side to side then up and down, raw | after the dead zones and shape Advanced Stick Settings shows
+(its changes not yet saved among them); its drift at rest since the screen opened; and its circle, which the
+engine draws: its dead zones (round, or square for each direction's own), the stick a white dot, what the game
+takes a blue one. -->
+<screen name="stick_test">
+	<header title="STICK TEST"/>
+	<stick id="left" label="LEFT STICK" value="{stick.left}" detail="DRIFT AT REST {stick.left.drift}" x="176" y="92" radius="88" hint="White: the stick. Blue: the game's."/>
+	<stick id="right" label="RIGHT STICK" value="{stick.right}" detail="DRIFT AT REST {stick.right.drift}" x="464" y="92" radius="88" hint="Set dead zones just past the drift."/>
+	<space/>
+	<buttons>
+		<button key="back" label="BACK"/>
+	</buttons>
+</screen>

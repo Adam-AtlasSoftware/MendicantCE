@@ -2,7 +2,7 @@
 #include <math.h>
 #include <stdlib.h>
 
-/* Stick Test's readings and view (#1140: port/linux/game/menu_functions.c's stick_test_read, _text, _rest and
+/* Stick Test's readings and view (#1140: port/linux/game/stick_test_menu.inc's stick_test_read, _text, _rest and
 _view_of): each stick as its controller read it, then after the dead zones and the look stick's shape Settings shows,
 its changes not yet saved among them, by the game's own code for both (input_xbox.c's input_port_fix_stick,
 xinput_sdl.c's halo_stick_ranges); the circle's rings and dots; the largest drift seen at rest. */

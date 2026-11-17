@@ -1,7 +1,10 @@
-"""Advanced Stick Settings' readings (#1140: stick_test.c): each stick as the game read it, then after the dead zones
-and the look stick's shape the page shows, unsaved changes among them, by the game's own code (menu_functions.c's
-stick_test_text, input_xbox.c's input_port_fix_stick, xinput_sdl.c's halo_stick_ranges); and the longest reading fits
-its row's value at 4:3, 16:9 and 21:9."""
+"""Stick Test's readings (#1140: stick_test.c), a hand-written screen's (port/assets/menus/screens/stick_test.xml,
+port/linux/game/stick_test_menu.inc): each stick as the game read it, then after the dead zones and the look stick's
+shape Advanced Stick Settings shows, unsaved changes among them, by the game's own code (stick_test_text,
+input_xbox.c's input_port_fix_stick, xinput_sdl.c's halo_stick_ranges); the circle's rings and dots; the drift at
+rest. The screen's circles and words fit their columns and the room between the band and the button bar (a
+hand-written screen keeps the menus' 640 by 480 at every aspect, so 4:3, 16:9 and 21:9 are the same); and the
+generated page's classic-path drawing (its circles drawn from a hook on its last row's text) is gone."""
 
 import re
 import sys
@@ -15,6 +18,9 @@ from harness import CHECK_FAILED, ROOT, build, function, mutated, read, run  # n
 
 sys.path.insert(0, str(ROOT / "tools"))
 import port_settings  # noqa: E402
+
+PAGE = "port/linux/game/stick_test_menu.inc"
+SCREEN = ROOT / "port/assets/menus/screens/stick_test.xml"
 
 CASES = ["drift", "live", "shape", "view", "rest"]
 
@@ -34,16 +40,16 @@ LONGEST = "-100,-100 | -100,-100"
 def generated(fault=None):
     xbox = read("source/input/input_xbox.c")
     sdl = read("port/linux/src/xinput_sdl.c")
-    menus = read("port/linux/game/menu_functions.c")
+    page = read(PAGE)
     defines = "\n".join(re.search(rf"^#define {name} [^\n]+", sdl, re.M).group(0)
                         for name in ("STICK_DEAD_RANGE", "STICK_DEAD_ZONE_MAXIMUM", "STICK_OUTER_DEAD_ZONE_MAXIMUM"))
-    start = menus.index("/* the circles: their radius")
-    page = menus[start:menus.index("static int stick_test_percent", start)]
+    start = page.index("/* still: moved less")
+    state = page[start:page.index("static int stick_test_percent", start)]
     code = "\n".join([defines, function(sdl, "halo_stick_ranges"), function(xbox, "fix_dead_zone"),
                       function(xbox, "fix_dead_zones"), function(xbox, "fix_round_dead_zone"),
-                      function(xbox, "input_port_fix_stick"), page] +
-                      [function(menus, name) for name in ("stick_test_percent", "stick_test_read", "stick_test_text",
-                                                          "stick_test_rest", "stick_test_view_of")]) + "\n"
+                      function(xbox, "input_port_fix_stick"), state] +
+                     [function(page, name) for name in ("stick_test_percent", "stick_test_read", "stick_test_text",
+                                                        "stick_test_rest", "stick_test_view_of")]) + "\n"
     if fault:
         code = mutated(code, *fault)
     return (("under_test.inc", code),)
@@ -66,10 +72,10 @@ WHOLE_READING = ("\thalo_controller_stick(gamepad, stick, &reading->raw.x, &read
                  "\treading->raw = input_get_gamepad_state(gamepad)->sticks[stick];")
 
 
-def _controller_only(menus, sdl):
-    """the readings' raw stick is the controller's own: the page reads halo_controller_stick, which xinput_sdl.c's
+def _controller_only(page, sdl):
+    """the readings' raw stick is the controller's own: the screen reads halo_controller_stick, which xinput_sdl.c's
     XInputGetState records from the port's controller before the keyboard, mouse, touch and script are merged"""
-    text = function(menus, "stick_test_read")
+    text = function(page, "stick_test_read")
     state = function(sdl, "XInputGetState")
     recorded = state.find("controller_sticks_read(port, port_gamepad(gamepads, count, port));")
     merged = min(state.find(mark) for mark in ("keyboard_gamepad(", "keyboard_controls(", "touch_input_gamepad("))
@@ -78,88 +84,118 @@ def _controller_only(menus, sdl):
 
 
 def test_reading_is_the_controllers_alone():
-    assert _controller_only(read("port/linux/game/menu_functions.c"), read("port/linux/src/xinput_sdl.c"))
+    assert _controller_only(read(PAGE), read("port/linux/src/xinput_sdl.c"))
 
 
 def test_reading_check_sees_the_whole_reading():
-    """negative control: the page reading the port's merged reading fails the check"""
-    menus = mutated(read("port/linux/game/menu_functions.c"), *WHOLE_READING)
-    assert not _controller_only(menus, read("port/linux/src/xinput_sdl.c"))
+    """negative control: the screen reading the port's merged reading fails the check"""
+    page = mutated(read(PAGE), *WHOLE_READING)
+    assert not _controller_only(page, read("port/linux/src/xinput_sdl.c"))
 
 
-def _look(name):
-    root = ElementTree.parse(ROOT / "port/assets/menus/model/look" /
-                             "main_menu.settings_select.player_setup.player_profile_edit.gamepad_setup.stick_test.xml")
-    found = [look for look in root.iter("look") if look.get("name", "").endswith("/" + name)]
-    assert len(found) == 1, name
-    return found[0]
+# ---------- the old page gone
 
 
-def test_circles_constants_are_the_generators():
-    menus = read("port/linux/game/menu_functions.c")
-    for name in ("STICK_TEST_RADIUS", "STICK_TEST_GAP"):
-        assert int(re.search(rf"^#define {name} (\d+)", menus, re.M).group(1)) == getattr(port_settings, name)
+def _old_page_left(menus, settings):
+    """what is left of the generated page and its hook: menu_functions.c's text-box hook drawing anything of the
+    sticks, the generated page's rows' names or its reading code there, the generator's page, its menu files"""
+    left = []
+    hook = function(menus, "menu_functions_text_box_drawn")
+    if re.search(r"stick", hook, re.I):
+        left.append("menu_functions_text_box_drawn draws a stick")
+    for name in ("stick_test_drawn", "stick_test_rows_show", "stick_test_draw(", "stick_drift", "STICK_TEST_GAP",
+                 "STICK_TEST_RADIUS"):
+        if name in menus:
+            left.append(f"menu_functions.c has {name}")
+    if "gamepad_setup/stick_test" in settings or "STICK_TEST_RADIUS" in settings or "stick_test_left" in settings:
+        left.append("tools/port_settings.py still writes the page")
+    for folder in ("ce", "model/look", "model/behaviour"):
+        if list((ROOT / "port/assets/menus" / folder).glob("*stick_test*")):
+            left.append(f"menus/{folder} has the page")
+    return left
 
 
-@pytest.mark.parametrize("aspect", ["4:3", "16:9", "21:9"])
-def test_circles_fit_under_the_rows(aspect):
-    """each circle under its column (the left under DRIFT AT REST's label, the right under its value), as wide as
-    it at least, apart from each other, and above the footer's band in both layouts"""
-    sys.path.insert(0, str(ROOT))
-    from tools import test_port_settings as settings_test
-    extra = port_settings.wide_extra_of(port_settings.WIDE_SCREENS[aspect])
-    diameter = 2 * port_settings.STICK_TEST_RADIUS
-    middles = []
-    for name, x in (("stick_drift_label", 0), ("stick_drift_value", None)):
-        look = _look(name)
-        width = int(look.get("box").split()[2]) + port_settings.wide_scale(int(look.get("wide", "0 0").split()[1]),
-                                                                           extra)
-        if x is None:
-            row = _look("op_stick_drift")
-            x = int(next(at.get("x") for at in row.iter("at") if at.get("widget").endswith("stick_drift_value")))
-            x += port_settings.wide_scale(int(look.get("wide", "0 0").split()[0]), extra)
-        assert diameter <= width, f"{name} at {aspect}: a circle {diameter} wide in {width}"
-        middles.append(x + width / 2)
-    assert middles[1] - middles[0] >= diameter + 8, f"at {aspect} the circles {middles} overlap"
-    page = settings_test.PAGES[port_settings.STICK_TEST[0]]
-    for layout, geometry in settings_test.LAYOUTS.items():
-        bottom = settings_test._rows_bottom(page, settings_test.BUILDS["desktop"], True, geometry)
-        assert bottom + port_settings.STICK_TEST_GAP + diameter <= geometry.rows_bottom, layout
+def test_old_hook_and_page_gone():
+    assert _old_page_left(read("port/linux/game/menu_functions.c"), read("tools/port_settings.py")) == []
 
 
-def test_circles_check_sees_too_big_a_circle(monkeypatch):
-    """negative control: a circle wider than the value's column fails"""
-    monkeypatch.setattr(port_settings, "STICK_TEST_RADIUS", 80)
-    with pytest.raises(AssertionError):
-        test_circles_fit_under_the_rows("4:3")
+def test_old_hook_check_sees_the_hook():
+    """negative control: the circles drawn again from the text-box hook fail the check"""
+    menus = mutated(read("port/linux/game/menu_functions.c"), "\tshort row;\n\n\t/* (as the lobby",
+                    "\tshort row;\n\n\tif (stick_test_drawn(widget, bounds))\n\t\treturn;\n\t/* (as the lobby")
+    assert _old_page_left(menus, read("tools/port_settings.py"))
 
 
-def _value_looks():
-    """the readings' value boxes in the page's model (the tall layout's look)"""
-    name = "main_menu.settings_select.player_setup.player_profile_edit.gamepad_setup.stick_test.xml"
-    root = ElementTree.parse(ROOT / "port/assets/menus/model/look" / name).getroot()
-    looks = [look for look in root.iter("look") if re.search(r"/stick_test_(left|right)_value$", look.get("name", ""))]
-    assert len(looks) == 2, [look.get("name") for look in looks]
-    return looks
+def test_stick_test_opens_the_screen():
+    """Advanced Stick Settings' STICK TEST › opens the hand-written screen, which takes its place in menu_screen.c"""
+    dead_zones = (ROOT / "port/assets/menus/ce" /
+                  "main_menu.settings_select.player_setup.player_profile_edit.gamepad_setup.dead_zones.xml").read_text()
+    assert re.search(r'op_stick_test"[^>]*>\s*<on event="a" open="screens/stick_test"/>', dead_zones)
+    assert '{ "stick_test", "screens\\\\stick_test", pc_menu_stick_test_frame, NULL }' in \
+        read("port/linux/game/menu_screen.c")
+    assert "screens/stick_test.xml" in read("port/assets/menus/menus.json")
 
 
-@pytest.mark.parametrize("aspect", ["4:3", "16:9", "21:9"])
-def test_longest_reading_fits(aspect):
-    """at 4:3 the box as the 640 have it, at its words' least scale; at 16:9 grown by its wide; at 21:9 by its past
-    too, at the most scale"""
-    extra = port_settings.wide_extra_of(port_settings.WIDE_SCREENS[aspect])
-    for look in _value_looks():
-        width = int(look.get("box").split()[2]) + port_settings.wide_scale(int(look.get("wide", "0 0").split()[1]),
-                                                                           extra)
-        if aspect == "21:9":
-            width += int(look.get("past", "0 0").split()[1])
-        least, most = (float(value) for value in (look.find("text").get("scale") or "1 1").split())
-        scale = least + (most - least) * extra / port_settings.WIDE_EXTRA
-        words = port_settings.small_ui_width(LONGEST) * scale
-        assert words <= width, f"{look.get('name')} at {aspect}: {LONGEST!r} {words:.0f} wide in {width}"
+# ---------- the screen's layout
 
 
-def test_fit_check_sees_a_reading_too_long():
-    """the check's own negative control: the reading with the arrow the links use, and spaces, is too long at 4:3"""
-    look = _value_looks()[0]
-    assert port_settings.small_ui_width(LONGEST.replace(" | ", "  ›  ")) > int(look.get("box").split()[2])
+def _layout(screen_text):
+    """each <stick>'s column and lines (menu_screen.c's STICK_* and the blocks' sizes): its x, radius and its foot,
+    and the room between the band and the bar"""
+    source = read("port/linux/game/menu_screen.c")
+    constant = {name: int(re.search(rf"^#define {name} (\d+)", source, re.M).group(1))
+                for name in ("STICK_COLUMN_WIDTH", "STICK_CIRCLE_TOP", "STICK_VALUE_GAP", "STICK_DETAIL_STEP",
+                             "STICK_HINT_STEP", "HEADER_ROOM_TALL", "BUTTONS_ROOM", "SCREEN_HEIGHT")}
+    blocks = ElementTree.parse(ROOT / "port/assets/menus/screens/blocks.xml").getroot()
+    sizes = {widget.get("name"): (int(widget.get("width")), int(widget.get("height")))
+             for widget in blocks.iter("widget") if widget.get("name", "").startswith("screens/stick")}
+    sticks = []
+    for stick in ElementTree.fromstring(screen_text).iter("stick"):
+        x, y, radius = int(stick.get("x")), int(stick.get("y")), int(stick.get("radius", "88"))
+        foot = y + constant["STICK_CIRCLE_TOP"] + 2 * radius + constant["STICK_VALUE_GAP"] + \
+            constant["STICK_DETAIL_STEP"] + constant["STICK_HINT_STEP"] + sizes["screens/stick_hint"][1]
+        sticks.append((x, y, radius, foot))
+    return constant, sizes, sticks
+
+
+def _layout_problems(screen_text):
+    constant, sizes, sticks = _layout(screen_text)
+    width = constant["STICK_COLUMN_WIDTH"]
+    problems = []
+    if any(sizes[name][0] != width for name in ("screens/stick_label", "screens/stick_value", "screens/stick_note",
+                                                 "screens/stick_hint")):
+        problems.append(f"the blocks are not {width} wide: {sizes}")
+    if len(sticks) != 2:
+        problems.append(f"{len(sticks)} sticks")
+    for x, y, radius, foot in sticks:
+        if 2 * radius > width:
+            problems.append(f"a circle {2 * radius} wide in its column of {width}")
+        if x - width // 2 < 0 or x + width // 2 > 640:
+            problems.append(f"the column at {x} leaves the 640")
+        if y < constant["HEADER_ROOM_TALL"]:
+            problems.append(f"the stick at {y} under the band")
+        if foot > constant["SCREEN_HEIGHT"] - constant["BUTTONS_ROOM"]:
+            problems.append(f"the stick's foot {foot} in the bar")
+    if len(sticks) == 2:
+        (x0, _, r0, _), (x1, _, r1, _) = sticks
+        if abs(x1 - x0) < max(width, r0 + r1 + 8):
+            problems.append(f"the columns at {x0} and {x1} meet")
+    # (the longest reading in its value's box, at the small font's size: the screen draws it unscaled)
+    if port_settings.small_ui_width(LONGEST) > sizes["screens/stick_value"][0]:
+        problems.append(f"{LONGEST!r} does not fit")
+    # (and each hint on its one line: its box is not wrapped)
+    for stick in ElementTree.fromstring(screen_text).iter("stick"):
+        hint = stick.get("hint", "")
+        if port_settings.small_ui_width(hint) > sizes["screens/stick_hint"][0]:
+            problems.append(f"the hint {hint!r} does not fit its line")
+    return problems
+
+
+def test_screen_fits():
+    assert _layout_problems(SCREEN.read_text()) == []
+
+
+def test_fit_check_sees_too_big_a_circle():
+    """negative control: a circle wider than its column fails"""
+    text = SCREEN.read_text().replace('radius="88"', 'radius="130"', 1)
+    assert _layout_problems(text)

@@ -376,4 +376,18 @@ picture, the line, the words for no rows) -->
 		<on event="start" run="port screen do"/>
 		<on event="left_mouse" run="mouse emit accept event"/>
 	</widget>
+	<!-- Stick Test's (screens/stick_test.xml, as Advanced Stick Settings' STICK TEST › opens it; its sticks read
+	each frame: menu_functions.c's stick_test_menu.inc), pausing the game as Settings' pages do; B and Back go back
+	to the page it was opened from -->
+	<widget name="screens/stick_test" width="640" height="480" flags="pass_unhandled_to_focused_child pause_game" bitmap="main_menu/parts/background_tall">
+		<on event="b" back="true"/>
+		<on event="back" back="true"/>
+	</widget>
+	<!-- a <stick>'s (Stick Test's): its label, its circle's anchor (the engine draws the circle there, as large as
+	its radius: menu_screen.c), its reading, its detail and its hint, each about its middle -->
+	<widget name="screens/stick_label" type="text" width="240" height="24" font="ui\large_ui" color="#FF8DB6E6" align="center" text_flags="no_focus_test"/>
+	<widget name="screens/stick" width="16" height="16"/>
+	<widget name="screens/stick_value" type="text" width="240" height="16" font="ui\small_ui" color="#FFFFFFFF" align="center" text_flags="no_focus_test"/>
+	<widget name="screens/stick_note" type="text" width="240" height="16" font="ui\small_ui" color="#FF2896FF" align="center" text_flags="no_focus_test"/>
+	<widget name="screens/stick_hint" type="text" width="240" height="16" font="ui\small_ui" color="#FF6F9CD0" align="center" text_flags="no_focus_test"/>
 </menus>

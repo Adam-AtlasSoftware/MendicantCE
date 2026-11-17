@@ -441,9 +441,9 @@ static void fix_round_dead_zone(
 
 /* port: one stick's reading after its dead zones (dead_range read as none,
 live_range as full): round (fix_round_dead_zone), or each direction's own
-(fix_dead_zones); input_port_fix_stick_dead_zones' for the game, and Advanced
-Stick Settings' reading of the stick by the page's values (menu_functions.c's
-stick_test_rows_show) */
+(fix_dead_zones); input_port_fix_stick_dead_zones' for the game, and Stick
+Test's reading of the stick by Advanced Stick Settings' values
+(port/linux/game/stick_test_menu.inc's stick_test_read) */
 void input_port_fix_stick(
 	short x,
 	short y,

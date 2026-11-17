@@ -1021,6 +1021,33 @@ int main(int argc, char **argv)
 		CHECK(!strcmp(done->action, "add player done") && !strcmp(done->condition, "add.done"), "DONE");
 		menu_screen_free(&screen);
 	}
+	else if (!strcmp(name, "stick"))
+	{
+		struct menu_screen_block const *left, *right;
+
+		/* (Stick Test: a <stick> of each id, its words' bindings the game's,
+		its radius 88 unless it says; one of an id it has not, two of one
+		id, one with no place or too large a radius refused) */
+		CHECK(read_text(stick_test_xml, &screen, problem), "Stick Test's file is refused: %s", problem);
+		left = block_of(&screen, "left");
+		right = block_of(&screen, "right");
+		CHECK(left && right && left->kind == MENU_SCREEN_STICK && right->kind == MENU_SCREEN_STICK &&
+			kind_total(&screen, MENU_SCREEN_STICK, -1) == 2, "Stick Test's two sticks");
+		CHECK(!strcmp(left->text, "{stick.left}") && !strcmp(right->detail, "DRIFT AT REST {stick.right.drift}") &&
+			left->box_width == 88 && left->box_x < right->box_x, "Stick Test's sticks' words and places");
+		menu_screen_free(&screen);
+		CHECK(read_text("<screen name=\"s\"><stick id=\"left\" label=\"L\" x=\"100\" y=\"60\"/></screen>", &screen,
+			problem) && screen.blocks[0].box_width == 88 && screen.blocks[0].text == NULL, "a bare stick: %s", problem);
+		menu_screen_free(&screen);
+		refused("<screen name=\"s\"><stick id=\"middle\" label=\"L\" x=\"1\" y=\"1\"/></screen>", "left or right");
+		refused("<screen name=\"s\"><stick id=\"left\" label=\"L\" x=\"1\" y=\"1\"/>"
+			"<stick id=\"left\" label=\"R\" x=\"1\" y=\"1\"/></screen>", "one <stick> of each id");
+		refused("<screen name=\"s\"><stick id=\"left\" label=\"L\" x=\"1\"/></screen>", "its x and y");
+		refused("<screen name=\"s\"><stick id=\"left\" label=\"L\" x=\"1\" y=\"1\" radius=\"200\"/></screen>",
+			"radius");
+		refused("<screen name=\"s\"><stick id=\"left\" label=\"L\" x=\"1\" y=\"1\" value=\"{nothing}\"/></screen>",
+			"nothing");
+	}
 	else
 	{
 		fprintf(stderr, "no case %s\n", name);
