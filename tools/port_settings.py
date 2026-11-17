@@ -680,6 +680,10 @@ LOOK_ACCELERATION_STRENGTHS = [("OFF", "0")] + [(f"{value:g}X", f"{value:g}") fo
                                                 (0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2)]
 LOOK_ACCELERATION_TIMES = [(f"{value:g}X", f"{value:g}") for value in (0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2)]
 MODERN_AIM_THRESHOLDS = [("DEFAULT", "-1")] + [(f"{percent}%", str(percent)) for percent in range(50, 101, 5)]
+# input.keyboard_layout's: the on-screen keyboard's layouts (port/linux/game/keyboard_core.c's keyboard_layouts)
+KEYBOARD_LAYOUTS = [("AUTO", "auto"), ("QWERTY", "qwerty"), ("AZERTY", "azerty"), ("QWERTZ", "qwertz"),
+                    ("SWEDISH/FINNISH", "swedish"), ("NORWEGIAN", "norwegian"), ("DANISH", "danish"),
+                    ("SPANISH", "spanish"), ("PORTUGUESE", "portuguese")]
 # input.rumble_strength's: the motors' strength, in percent
 RUMBLE_STRENGTHS = [(f"{percent}%", str(percent)) for percent in range(0, 101, 10)]
 STICK_DEAD_ZONES = [("DEFAULT (27%)", "-1")] + [(f"{percent}%", str(percent)) for percent in range(0, 51, 5)]
@@ -1179,6 +1183,10 @@ PAGES = {
             ("MANAGE PROFILES ›", None, PROFILE_MANAGER,
              "Switch to another player profile, make a new one or delete one. Your changes so far are kept.", None,
              "profiles", "port settings profiles"),
+            # (input.keyboard_layout: the on-screen keyboard's letters, keyboard_core.c's layouts)
+            ("ON-SCREEN KEYBOARD", "input.keyboard_layout", KEYBOARD_LAYOUTS,
+             "The letters of the on-screen keyboard that names and chat are typed with. Auto follows your system's "
+             "language.|Where a text can't take a letter with a mark (the chat), it types the plain letter.", None),
             # (game.map_cache_megabytes: 0 keeps every stock map unpacked, 730
             # the Xbox's room, the least it takes; another number shows the
             # nearer: port/linux/src/map_cache.c, port/linux/game/map_cache_prefill.c)

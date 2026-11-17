@@ -97,6 +97,63 @@ bool SDL_OpenURL(const char *url)
 	return host_sdl_open_url(url) != 0;
 }
 
+/* ---------- the system's languages (the on-screen keyboard's automatic
+layout: xinput_sdl.c's platform_locales) */
+
+/* (one block, SDL's: the pointers, NULL ended, then the locales, then
+their words; SDL_free frees it) */
+SDL_Locale **SDL_GetPreferredLocales(int *count)
+{
+	char words[256];
+	int found = 0, index;
+	char *each, *copy;
+	SDL_Locale **locales, *locale;
+	size_t length;
+
+	host_sdl_preferred_locales(words, sizeof(words));
+	words[sizeof(words) - 1] = 0;
+	for (each = words; *each;)
+	{
+		while (*each == ' ')
+			each++;
+		if (*each)
+			found++;
+		while (*each && *each != ' ')
+			each++;
+	}
+	length = strlen(words) + 1;
+	locales = malloc((size_t)(found + 1) * sizeof(*locales) + (size_t)found * sizeof(*locale) + length);
+	if (count)
+		*count = locales ? found : 0;
+	if (!locales)
+		return NULL;
+	locale = (SDL_Locale *)(locales + found + 1);
+	copy = (char *)(locale + found);
+	memcpy(copy, words, length);
+	for (index = 0, each = copy; index < found; index++)
+	{
+		char *place;
+
+		while (*each == ' ')
+			*each++ = 0;
+		locale[index].language = each;
+		locale[index].country = NULL;
+		while (*each && *each != ' ')
+			each++;
+		if (*each)
+			*each++ = 0;
+		place = strchr(locale[index].language, '_');
+		if (place)
+		{
+			*place = 0;
+			locale[index].country = place + 1;
+		}
+		locales[index] = &locale[index];
+	}
+	locales[found] = NULL;
+	return locales;
+}
+
 bool SDL_ShowAndroidToast(const char *message, int duration, int gravity, int xoffset, int yoffset)
 {
 	return host_sdl_show_toast(message, duration, gravity, xoffset, yoffset) != 0;

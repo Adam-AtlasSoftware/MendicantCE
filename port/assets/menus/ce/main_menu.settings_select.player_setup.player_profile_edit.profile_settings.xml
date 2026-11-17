@@ -20,13 +20,14 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/op_color" x="28" y="145"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/op_create_profile" x="28" y="166"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/op_profiles" x="28" y="187"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/section_5" x="28" y="214"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/op_map_cache_megabytes" x="28" y="234"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/op_clear_caches" x="28" y="255"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/section_8" x="28" y="282"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/op_report" x="28" y="302"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/section_10" x="28" y="329"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/op_about" x="28" y="349"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/op_keyboard_layout" x="28" y="208"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/section_6" x="28" y="235"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/op_map_cache_megabytes" x="28" y="255"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/op_clear_caches" x="28" y="276"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/section_9" x="28" y="303"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/op_report" x="28" y="323"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/section_11" x="28" y="350"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/op_about" x="28" y="370"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/button_bar" y="414"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/tabs" y="76"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/tabs_search" y="76"/>
@@ -178,10 +179,19 @@
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/profiles_label" type="text" controller="1" width="332" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/labels" string_index="4" color="#FF2896FF" text_x="10" text_y="1" wide="0 244" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/section_5" width="344" height="18" bitmap="main_menu/settings/section" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/section_5_title"/>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/op_keyboard_layout" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/keyboard_layout_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/keyboard_layout_spinner" x="188"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/section_5_title" type="text" controller="1" width="344" height="18" wide="0 244" string_list="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/labels" string_index="5" color="#FF6F9CD0" text_x="2" text_y="1" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/keyboard_layout_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/labels" string_index="5" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/keyboard_layout_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="AUTO|QWERTY|AZERTY|QWERTZ|SWEDISH/FINNISH|NORWEGIAN|DANISH|SPANISH|PORTUGUESE" setting="input.keyboard_layout" values="auto|qwerty|azerty|qwertz|swedish|norwegian|danish|spanish|portuguese" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
+		<on event="created" run="port setting load"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/section_6" width="344" height="18" bitmap="main_menu/settings/section" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/section_6_title"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/section_6_title" type="text" controller="1" width="344" height="18" wide="0 244" string_list="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/labels" string_index="6" color="#FF6F9CD0" text_x="2" text_y="1" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/op_map_cache_megabytes" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/map_cache_megabytes_label"/>
@@ -189,7 +199,7 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/map_cache_megabytes_seg0" x="188" y="1"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/map_cache_megabytes_seg1" x="339" y="1"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/map_cache_megabytes_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/labels" string_index="6" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/map_cache_megabytes_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/labels" string_index="7" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/map_cache_megabytes_seg0" type="text" controller="1" width="147" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="INSTANT LOADING" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
@@ -206,14 +216,14 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/clear_caches_label"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/clear_caches_value" x="188" y="2"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/clear_caches_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/labels" string_index="7" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/clear_caches_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/labels" string_index="8" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/clear_caches_value" type="text" controller="1" width="140" height="16" color="#FF2896FF" align="center" text_y="-1" text_flags="no_focus_test" wide="20 120" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/section_8" width="344" height="18" bitmap="main_menu/settings/section" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/section_8_title"/>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/section_9" width="344" height="18" bitmap="main_menu/settings/section" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/section_9_title"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/section_8_title" type="text" controller="1" width="344" height="18" wide="0 244" string_list="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/labels" string_index="8" color="#FF6F9CD0" text_x="2" text_y="1" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/section_9_title" type="text" controller="1" width="344" height="18" wide="0 244" string_list="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/labels" string_index="9" color="#FF6F9CD0" text_x="2" text_y="1" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/op_report" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
 		<on event="a" run="port settings report"/>
@@ -221,17 +231,17 @@
 		<on event="left_mouse" run="mouse emit accept event"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/report_label"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/report_label" type="text" controller="1" width="332" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/labels" string_index="9" color="#FF2896FF" text_x="10" text_y="1" wide="0 244" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/report_label" type="text" controller="1" width="332" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/labels" string_index="10" color="#FF2896FF" text_x="10" text_y="1" wide="0 244" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/section_10" width="344" height="18" bitmap="main_menu/settings/section" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/section_10_title"/>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/section_11" width="344" height="18" bitmap="main_menu/settings/section" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/section_11_title"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/section_10_title" type="text" controller="1" width="344" height="18" wide="0 244" string_list="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/labels" string_index="10" color="#FF6F9CD0" text_x="2" text_y="1" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/section_11_title" type="text" controller="1" width="344" height="18" wide="0 244" string_list="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/labels" string_index="11" color="#FF6F9CD0" text_x="2" text_y="1" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/op_about" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/about_label"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/about_label" type="text" controller="1" width="332" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/labels" string_index="11" color="#FF2896FF" text_x="10" text_y="1" wide="0 244" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/about_label" type="text" controller="1" width="332" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/labels" string_index="12" color="#FF2896FF" text_x="10" text_y="1" wide="0 244" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/labels">
 		<string text="PLAYER"/>
@@ -239,6 +249,7 @@
 		<string text="COLOR ›"/>
 		<string text="CREATE PROFILE ›"/>
 		<string text="MANAGE PROFILES ›"/>
+		<string text="ON-SCREEN KEYBOARD"/>
 		<string text="STORAGE"/>
 		<string text="MAP STORAGE"/>
 		<string text="CLEAR CACHES"/>
@@ -254,6 +265,7 @@
 		<string text="Your armor's color in free-for-all multiplayer games, kept in your player profile."/>
 		<string text="Your name, color and controller layout are kept in a player profile. Make one to set them; the rest of Settings works without one."/>
 		<string text="Switch to another player profile, make a new one or delete one. Your changes so far are kept."/>
+		<string text="The letters of the on-screen keyboard that names and chat are typed with. Auto follows your system's language.|Where a text can't take a letter with a mark (the chat), it types the plain letter."/>
 		<string text=""/>
 		<string text="Instant Loading keeps every map unpacked, about 3.0 GB, so loads never wait. Disk Space Saver keeps at most 730 MB, saving 2.3 GB or more, little on most drives. A map it has not kept loads a second or more slower.|Switching back unpacks them in the background."/>
 		<string text="Deletes what the game keeps only to start and load faster: the unpacked maps, their prepared draws, the menus' pictures, the ambient occlusion's volumes and the GPU's pipelines, made again as you play.|Select it twice: the first asks, the second clears."/>

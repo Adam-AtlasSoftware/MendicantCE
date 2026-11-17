@@ -42,6 +42,8 @@ static int new_opened, old_opened;
 static int sounds;
 /* (the font draws all but this) */
 static unsigned short font_lacks;
+/* (the layout a keyboard opens with: input.keyboard_layout's) */
+static char const *layout_name = "qwerty";
 
 static unsigned long ui_widget_port_milliseconds(void) { return now_ms; }
 static void ui_play_audio_feedback_sound(short sound) { sounds++; }
@@ -86,7 +88,7 @@ static boolean keyboard_open(struct keyboard_request const *request)
 		length++;
 	}
 	text[length] = 0;
-	keyboard_begin(&keyboard.state, keyboard_layout_named("qwerty"), text, request->maximum,
+	keyboard_begin(&keyboard.state, keyboard_layout_named(layout_name), text, request->maximum,
 		request->kind == KEYBOARD_NAME, keyboard_offered_character, NULL);
 	keyboard_geometry_get(FALSE, &keyboard.geometry);
 	keyboard.up = TRUE;
@@ -457,24 +459,52 @@ int main(int argc, char **argv)
 			keyboard_geometry_get(large, &keyboard.geometry);
 			CHECK(geometry.prompts_y + 22 <= geometry.top + geometry.height && geometry.text_y > geometry.caption_y,
 				"the prompts in the block");
-			for (keyboard.state.page = 0; keyboard.state.page < KEYBOARD_PAGES; keyboard.state.page++)
+			/* (every layout's keys, the widest's too: QWERTZ's and the Nordic ones'
+			eleven; and the accents of each one's last letter of its first row,
+			at the block's right) */
+			for (index = 0; index < keyboard_layout_count; index++)
 			{
-				for (row = 0; row < KEYBOARD_ROWS; row++)
-				{
-					for (column = 0; keyboard_key_at(&keyboard.state, row, column); column++)
-					{
-						struct keyboard_box box;
-						short found_row, found_column;
+				short last;
 
-						CHECK(keyboard_key_box(&keyboard.state, &geometry, row, column, &box), "a key's box");
-						CHECK(box.x0 >= geometry.left && box.x1 <= geometry.left + geometry.width &&
-							box.y0 >= geometry.keys_y && box.y1 < geometry.prompts_y, "a key off the block");
-						CHECK(keyboard_key_find(&keyboard.state, &geometry, (short)((box.x0 + box.x1) / 2),
-							(short)((box.y0 + box.y1) / 2), &found_row, &found_column) && found_row == row &&
-							found_column == column, "a key's middle finds another");
+				keyboard.state.layout = &keyboard_layouts[index];
+				for (keyboard.state.page = 0; keyboard.state.page < KEYBOARD_PAGES; keyboard.state.page++)
+				{
+					for (row = 0; row < KEYBOARD_ROWS; row++)
+					{
+						for (column = 0; keyboard_key_at(&keyboard.state, row, column); column++)
+						{
+							struct keyboard_box box;
+							short found_row, found_column;
+
+							CHECK(keyboard_key_box(&keyboard.state, &geometry, row, column, &box), "a key's box");
+							CHECK(box.x0 >= geometry.left && box.x1 <= geometry.left + geometry.width &&
+								box.y0 >= geometry.keys_y && box.y1 < geometry.prompts_y, "%s: a key off the block",
+								keyboard.state.layout->name);
+							CHECK(keyboard_key_find(&keyboard.state, &geometry, (short)((box.x0 + box.x1) / 2),
+								(short)((box.y0 + box.y1) / 2), &found_row, &found_column) && found_row == row &&
+								found_column == column, "%s: a key's middle finds another", keyboard.state.layout->name);
+						}
 					}
 				}
+				keyboard.state.page = 0;
+				keyboard.state.shift = FALSE;
+				last = (short)(keyboard.state.layout->pages[0].rows[1].count - 1);
+				if (keyboard_accents_open(&keyboard.state, 1, last))
+				{
+					short accent;
+
+					for (accent = 0; accent < keyboard.state.accent_count; accent++)
+					{
+						struct keyboard_box box;
+
+						CHECK(keyboard_accent_box(&keyboard.state, &geometry, accent, &box) &&
+							box.x0 >= geometry.left && box.x1 <= geometry.left + geometry.width &&
+							box.y0 >= geometry.top, "%s: an accent off the block", keyboard.state.layout->name);
+					}
+					keyboard_accents_close(&keyboard.state);
+				}
 			}
+			keyboard.state.layout = &keyboard_layouts[0];
 			keyboard.state.page = 0;
 			/* (the most accents, at the row's right end: on the block) */
 			keyboard.state.row = 1;
@@ -488,6 +518,248 @@ int main(int argc, char **argv)
 				CHECK(keyboard_accent_box(&keyboard.state, &geometry, (short)index, &box) &&
 					box.x0 >= geometry.left && box.x1 <= geometry.left + geometry.width && box.y0 >= geometry.top,
 					"an accent off the block");
+			}
+		}
+		return 0;
+	}
+	CASE("layouts")
+	{
+		/* (#1136: each layout's letters' rows, in order, each letter with its
+		capital; the number row, the letters' last row and the signs' page
+		QWERTY's; each row within its width, a key at least 8 tenths; a to z
+		each on one key) */
+		static struct { char const *name; wchar_t const *rows[3]; } const expected[] =
+		{
+			{ "qwerty", { L"qwertyuiop", L"asdfghjkl", L"zxcvbnm" } },
+			{ "azerty", { L"azertyuiop", L"qsdfghjklm", L"wxcvbn" } },
+			{ "qwertz", { L"qwertzuiopü", L"asdfghjklöä", L"yxcvbnm" } },
+			{ "swedish", { L"qwertyuiopå", L"asdfghjklöä", L"zxcvbnm" } },
+			{ "norwegian", { L"qwertyuiopå", L"asdfghjkløæ", L"zxcvbnm" } },
+			{ "danish", { L"qwertyuiopå", L"asdfghjklæø", L"zxcvbnm" } },
+			{ "spanish", { L"qwertyuiop", L"asdfghjklñ", L"zxcvbnm" } },
+			{ "portuguese", { L"qwertyuiop", L"asdfghjklç", L"zxcvbnm" } },
+		};
+		struct keyboard_layout const *qwerty = &keyboard_layouts[0];
+		long index;
+
+		CHECK(keyboard_layout_count == NUMBEROF(expected), "%ld layouts", keyboard_layout_count);
+		for (index = 0; index < NUMBEROF(expected); index++)
+		{
+			struct keyboard_layout const *layout = keyboard_layout_named(expected[index].name);
+			int seen[26] = { 0 };
+			short page, row, column;
+
+			CHECK(!strcmp(layout->name, expected[index].name) && layout == &keyboard_layouts[index], "%s by name",
+				expected[index].name);
+			for (row = 1; row <= 3; row++)
+			{
+				struct keyboard_row const *keys = &layout->pages[0].rows[row];
+				wchar_t const *letters = expected[index].rows[row - 1];
+				short letter = 0, others = 0;
+
+				for (column = 0; column < keys->count; column++)
+				{
+					struct keyboard_key const *key = &keys->keys[column];
+					unsigned short capital;
+
+					if (key->kind != KEYBOARD_KEY_CHARACTER)
+					{
+						others++;
+						continue;
+					}
+					CHECK(letters[letter] && key->character == (unsigned short)letters[letter], "%s row %d key %d: %04X",
+						layout->name, row, column, key->character);
+					/* (a capital: ASCII's and Latin-1's 0x20 below, Latin Extended-A's
+					1 below; Turkish's i's each other's) */
+					capital = key->character == 0x131 ? 'I' : key->character == 'i' && !strcmp(layout->name, "turkish") ?
+						0x130 : key->character < 0x100 ? (unsigned short)(key->character - 0x20) :
+						(unsigned short)(key->character - 1);
+					CHECK(key->shifted == capital, "%s: %04X's capital %04X", layout->name, key->character, key->shifted);
+					if (key->character >= 'a' && key->character <= 'z')
+						seen[key->character - 'a']++;
+					letter++;
+				}
+				CHECK(!letters[letter], "%s row %d: %d letters", layout->name, row, letter);
+				/* (the third row's shift and delete; no other key among the letters) */
+				CHECK(others == (row == 3 ? 2 : 0) && (row != 3 || (keys->keys[0].kind == KEYBOARD_KEY_SHIFT &&
+					keys->keys[keys->count - 1].kind == KEYBOARD_KEY_BACKSPACE)), "%s row %d's keys", layout->name, row);
+			}
+			for (column = 0; column < 26; column++)
+				CHECK(seen[column] == 1, "%s: '%c' on %d keys", layout->name, 'a' + column, seen[column]);
+			for (page = 0; page < KEYBOARD_PAGES; page++)
+			{
+				for (row = 0; row < KEYBOARD_ROWS; row++)
+				{
+					struct keyboard_row const *keys = &layout->pages[page].rows[row];
+					struct keyboard_row const *theirs = &qwerty->pages[page].rows[row];
+					int width = keys->indent;
+
+					for (column = 0; column < keys->count; column++)
+					{
+						width += keys->keys[column].width;
+						CHECK(keys->keys[column].width >= 8, "%s: a key %d tenths", layout->name,
+							keys->keys[column].width);
+					}
+					CHECK(width <= KEYBOARD_ROW_WIDTH, "%s page %d row %d is %d wide", layout->name, page, row, width);
+					/* (QWERTY's own rows: the digits, the letters' last, the signs) */
+					if (page == 1 || row == 0 || row == 4)
+					{
+						CHECK(keys->indent == theirs->indent && keys->count == theirs->count, "%s page %d row %d",
+							layout->name, page, row);
+						for (column = 0; column < keys->count; column++)
+						{
+							CHECK(keys->keys[column].kind == theirs->keys[column].kind &&
+								keys->keys[column].width == theirs->keys[column].width &&
+								keys->keys[column].character == theirs->keys[column].character &&
+								keys->keys[column].shifted == theirs->keys[column].shifted &&
+								keys->keys[column].page == theirs->keys[column].page, "%s page %d row %d key %d",
+								layout->name, page, row, column);
+						}
+					}
+				}
+			}
+		}
+		/* (a letter with a mark's plain letter: each one's alone) */
+		CHECK(keyboard_accent_plain(0xF1) == 'n' && keyboard_accent_plain(0xC5) == 'A' &&
+			keyboard_accent_plain(0x131) == 'i' && keyboard_accent_plain(0x130) == 'I' && !keyboard_accent_plain('n') &&
+			!keyboard_accent_plain('!'), "the plain letters");
+		return 0;
+	}
+	CASE("auto")
+	{
+		/* (the system's languages: the first a layout is the one of, a place's
+		before its language's; else game.language's; else QWERTY) */
+		static struct { char const *locales, *language, *layout; } const choices[] =
+		{
+			{ "fr_FR", "", "azerty" },
+			{ "fr-FR", NULL, "azerty" },
+			{ "fr_FR.UTF-8", "", "azerty" },
+			{ "fr_CA", "", "qwerty" },
+			{ "fr_CH", "", "qwertz" },
+			{ "fr_BE", "", "azerty" },
+			{ "nl_BE", "", "azerty" },
+			{ "nl_NL", "", "qwerty" },
+			{ "de_AT", "", "qwertz" },
+			{ "DE", "", "qwertz" },
+			{ "sv_SE", "", "swedish" },
+			{ "fi", "", "swedish" },
+			{ "nb_NO", "", "norwegian" },
+			{ "da_DK", "", "danish" },
+			{ "es_MX", "", "spanish" },
+			{ "pt_BR", "", "portuguese" },
+			{ "cs_CZ", "", "qwerty" },
+			{ "hu_HU", "", "qwerty" },
+			{ "tr_TR", "", "qwerty" },
+			{ "en_US", "fr", "qwerty" },
+			{ "zz_ZZ, de_DE en_US", "", "qwertz" },
+			{ "en_GB sv_SE", "", "qwerty" },
+			{ "zz", "de", "qwertz" },
+			{ "", "es", "spanish" },
+			{ NULL, "fr", "azerty" },
+			{ "", "ja", "qwerty" },
+			{ "", "", "qwerty" },
+			{ "zz_ZZ", "zz", "qwerty" },
+			{ NULL, NULL, "qwerty" },
+		};
+		long index;
+
+		for (index = 0; index < NUMBEROF(choices); index++)
+		{
+			struct keyboard_layout const *layout = keyboard_layout_auto(choices[index].locales, choices[index].language);
+
+			CHECK(!strcmp(layout->name, choices[index].layout), "\"%s\" and \"%s\": %s, not %s",
+				choices[index].locales ? choices[index].locales : "(none)",
+				choices[index].language ? choices[index].language : "(none)", layout->name, choices[index].layout);
+		}
+		return 0;
+	}
+	CASE("filtered")
+	{
+		/* (a layout's own letters with a mark, typed only where the text
+		takes them and the font draws them; else their plain letter, shown
+		on the key too) */
+		wchar_t name[12] = { 0 }, field[32] = { 0 }, chat[64] = { 0 };
+		long index;
+
+		layout_name = "spanish";
+		open_kind(KEYBOARD_FIELD, field, 31);
+		focus_on(0xF1);
+		CHECK(keyboard_key_character(&keyboard.state, keyboard_key_at(&keyboard.state, keyboard.state.row,
+			keyboard.state.column)) == 0xF1 && keyboard_press(&keyboard.state, 0) == KEYBOARD_TYPED &&
+			keyboard.state.text[0] == 0xF1, "a field's ñ: %04X", keyboard.state.text[0]);
+		/* (held: ñ's accents, its own first, then n and n's) */
+		CHECK(keyboard_hold(&keyboard.state, 1000) && keyboard.state.accents[0] == 0xF1 &&
+			keyboard.state.accents[1] == 'n', "ñ held: %d", keyboard.state.accent_count);
+		keyboard_accents_close(&keyboard.state);
+		/* (the font without ñ: n) */
+		open_kind(KEYBOARD_FIELD, field, 31);
+		font_lacks = 0xF1;
+		focus_on(0xF1);
+		CHECK(keyboard_key_character(&keyboard.state, keyboard_key_at(&keyboard.state, keyboard.state.row,
+			keyboard.state.column)) == 'n' && keyboard_press(&keyboard.state, 0) == KEYBOARD_TYPED && text_is("n"),
+			"ñ without its glyph");
+		font_lacks = 0;
+		/* (a chat line, ASCII: n; held, n has no accents the chat takes) */
+		open_kind(KEYBOARD_CHAT, chat, 63);
+		focus_on(0xF1);
+		CHECK(keyboard_press(&keyboard.state, 0) == KEYBOARD_TYPED && text_is("n") &&
+			!keyboard_hold(&keyboard.state, 1000), "a chat line's ñ");
+		/* (a capital held on its own key, Ö: its accents, shift kept on while they are open) */
+		layout_name = "swedish";
+		open_kind(KEYBOARD_NAME, name, 11);
+		focus_on(0xF6);
+		CHECK(keyboard_press(&keyboard.state, 0) == KEYBOARD_TYPED && keyboard_hold(&keyboard.state, 1000) &&
+			keyboard.state.accents[0] == 0xD6 && keyboard.state.accents[1] == 'O' && keyboard.state.shift &&
+			keyboard.state.length == 0, "Ö held");
+		keyboard_accents_close(&keyboard.state);
+		/* (hold-for-accent on every layout: e's, é among them) */
+		for (index = 0; index < keyboard_layout_count; index++)
+		{
+			int accent, acute = 0;
+
+			layout_name = keyboard_layouts[index].name;
+			open_kind(KEYBOARD_FIELD, field, 31);
+			focus_on('e');
+			CHECK(keyboard_press(&keyboard.state, 0) == KEYBOARD_TYPED && keyboard_hold(&keyboard.state, 1000),
+				"%s: e held", layout_name);
+			for (accent = 0; accent < keyboard.state.accent_count; accent++)
+				acute |= keyboard.state.accents[accent] == 0xE9;
+			CHECK(keyboard.state.accents[0] == 'e' && acute, "%s: e's accents", layout_name);
+			keyboard_accents_close(&keyboard.state);
+		}
+		layout_name = "qwerty";
+		return 0;
+	}
+	CASE("drawable")
+	{
+		/* (no layout has a letter the menus' font, ui\large_ui, does not
+		draw: it has Windows-1252's, Latin-1's and these few past it) */
+		long index;
+
+		for (index = 0; index < keyboard_layout_count; index++)
+		{
+			short row, column;
+
+			for (row = 0; row < KEYBOARD_ROWS; row++)
+			{
+				struct keyboard_row const *keys = &keyboard_layouts[index].pages[0].rows[row];
+
+				for (column = 0; column < keys->count; column++)
+				{
+					unsigned short both[2];
+					int each;
+
+					both[0] = keys->keys[column].character;
+					both[1] = keys->keys[column].shifted;
+					for (each = 0; each < 2; each++)
+					{
+						unsigned short character = both[each];
+
+						CHECK(character <= 0xFF || character == 0x152 || character == 0x153 || character == 0x160 ||
+							character == 0x161 || character == 0x178 || character == 0x17D || character == 0x17E,
+							"%s: %04X, which the font does not draw", keyboard_layouts[index].name, character);
+					}
+				}
 			}
 		}
 		return 0;

@@ -658,11 +658,19 @@ screen it is typed for, which waits under it as it was, or over a game's view
 (the chat's, the player's view in split screen), and draws its `<keyboard/>`
 block and reads its input itself; its rules are `keyboard_core.c`'s.
 
-- Its keys are a table (`keyboard_core.c`'s `keyboard_layouts`): QWERTY with
-  its number row, and a page of signs (every one of ASCII's but `|`), each row
-  its keys' kinds, widths and characters, so that another layout (AZERTY,
-  QWERTZ: #1136) is data alone. A name's first letter is a capital; shift,
-  twice quickly caps lock.
+- Its keys are a table (`keyboard_core.c`'s `keyboard_layouts`), each row
+  its keys' kinds, widths and characters: the player's letters
+  (`input.keyboard_layout`, Settings > Profiles: ON-SCREEN KEYBOARD; #1136):
+  QWERTY, AZERTY, QWERTZ, Swedish/Finnish, Norwegian, Danish, Spanish and
+  Portuguese (only layouts whose own letters `ui\large_ui` draws: no Czech,
+  Hungarian or Turkish), each with the same number row
+  (digits plain) and page of signs (every one of ASCII's but `|`). Auto is the
+  system's languages' layout (SDL's preferred locales: a place's, `fr_CA`,
+  before its language's, `fr`), else `game.language`'s, else QWERTY. A
+  layout's own letters with a mark (ñ, ö, å) are filtered as the accents
+  are: where the text does not take one or the font does not draw it, its
+  key shows and types its plain letter (n, o, a). A name's first letter is a
+  capital; shift, twice quickly caps lock.
 - Holding A on a letter (or the pointer's button, or a finger), or a right
   click, offers its accents (Latin-1's and Latin Extended-A's,
   `keyboard_accent_table`), only those the text takes (a name: both; a
@@ -686,7 +694,8 @@ original-faithful modes (`display.menu_engine = "classic"`, `display.menus =
 "xbox"`) keep the game's own (`source/interface/virtual_keyboard.c`) and the
 chat's (`network_chat.c`). Every caller asks it (`keyboard_name_launch`,
 `keyboard_field_launch`, `keyboard_active`, `keyboard_last_kept`).
-`tools/harness/tests/test_keyboard.py` tests the table, the accents, the
+`tools/harness/tests/test_keyboard.py` tests the table, every layout's
+letters, the automatic layout, a layout's letters filtered, the accents, the
 shortcuts, a name, a field and a chat line typed, the fit and each mode's
 keyboard; `debug.menu_open`'s `open keyboard` opens it on a name, over the
 screen (its picture).

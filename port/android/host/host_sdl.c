@@ -1118,6 +1118,33 @@ int host_sdl_open_url(const char *url)
 	return SDL_OpenURL(url) ? 1 : 0;
 }
 
+/* ---------- the system's languages (the on-screen keyboard's automatic
+layout: port/linux/game/keyboard.c) */
+
+void host_sdl_preferred_locales(char *buffer, uint32_t size)
+{
+	int count = 0, index;
+	SDL_Locale **locales = SDL_GetPreferredLocales(&count);
+
+	if (!size)
+		return;
+	buffer[0] = 0;
+	for (index = 0; locales && index < count; index++)
+	{
+		char each[64];
+
+		if (!locales[index]->language)
+			continue;
+		SDL_snprintf(each, sizeof(each), "%s%s%s%s", buffer[0] ? " " : "", locales[index]->language,
+			locales[index]->country ? "_" : "", locales[index]->country ? locales[index]->country : "");
+		if (SDL_strlen(buffer) + SDL_strlen(each) >= size)
+			break;
+		SDL_strlcat(buffer, each, size);
+	}
+	if (locales)
+		SDL_free(locales);
+}
+
 int host_sdl_show_toast(const char *message, int duration, int gravity, int x, int y)
 {
 #ifdef __ANDROID__

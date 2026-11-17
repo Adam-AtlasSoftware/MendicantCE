@@ -70,10 +70,15 @@ struct keyboard_page
 	struct keyboard_row rows[KEYBOARD_ROWS];
 };
 
-/* a layout (QWERTY's; the others, AZERTY, QWERTZ, as data alike: #1136) */
+/* a layout (#1136: QWERTY, AZERTY, QWERTZ, the Nordic ones and the others,
+each its letters' rows; the number row and the signs' page are every one's):
+its name (input.keyboard_layout's value), the languages and places it is
+the one of ("fr", "fr_CH": an automatic choice's, keyboard_layout_auto), and
+its pages */
 struct keyboard_layout
 {
 	char const *name;
+	char const *locales;
 	struct keyboard_page pages[KEYBOARD_PAGES];
 };
 
@@ -124,11 +129,12 @@ struct keyboard_state
 	short accent_row;
 	short accent_column;
 	unsigned short accents[KEYBOARD_MAXIMUM_ACCENTS];
-	/* the key held: since when, and the character it typed (taken back if
-	its accents open) */
+	/* the key held: since when, the character it typed (taken back if its
+	accents open), and whether shift was on for it */
 	int holding;
 	unsigned long held_since;
 	unsigned short held_typed;
+	int held_shifted;
 };
 
 /* where the keyboard is drawn, on the menus' 640 by 480 (each screen
@@ -159,11 +165,16 @@ struct keyboard_box
 	short x0, y0, x1, y1;
 };
 
-/* the layouts (QWERTY), and one by name (the first, for none or one not
-there) */
+/* the layouts (QWERTY first), and one by name (the first, for none or one
+not there) */
 extern struct keyboard_layout const keyboard_layouts[];
 extern long const keyboard_layout_count;
 struct keyboard_layout const *keyboard_layout_named(char const *name);
+/* the layout of the system's languages (locales: theirs, the first the most
+wanted, each "fr_FR", "fr-FR" or "fr", apart by spaces or commas): the first
+of them a layout is the one of, its place's before its language's; else the
+game's language's (game.language: "de", "fr"...); else QWERTY */
+struct keyboard_layout const *keyboard_layout_auto(char const *locales, char const *language);
 
 /* the keyboard begun on a text (its maximum characters, at most
 KEYBOARD_MAXIMUM_TEXT), the cursor at its end, the letters' page, the first
@@ -173,7 +184,9 @@ void keyboard_begin(struct keyboard_state *state, struct keyboard_layout const *
 /* a key of the page shown (NULL for none) */
 struct keyboard_key const *keyboard_key_at(struct keyboard_state const *state, short row, short column);
 /* the character a character's key types now (shift, caps lock: a letter's
-capital; a sign keeps its own) */
+capital; a sign keeps its own); a layout's own letter with a mark (ñ, ö, å)
+that the text does not take or the font does not draw types its plain
+letter (n, o, a) and shows it */
 unsigned short keyboard_key_character(struct keyboard_state const *state, struct keyboard_key const *key);
 /* whether a character is offered: the text takes it and its font draws it */
 int keyboard_offered(struct keyboard_state const *state, unsigned short character);
@@ -225,6 +238,9 @@ void keyboard_accents_close(struct keyboard_state *state);
 /* a character's accents, as the table has them (none: 0); for tests and the
 key's mark that it has some */
 int keyboard_accents_of(unsigned short character, unsigned short *variants, int maximum);
+/* the plain letter of a letter with a mark (n of ñ, A of Å, a of æ: the
+accents' table's letter it is among), 0 for one that is none's */
+unsigned short keyboard_accent_plain(unsigned short character);
 
 /* a held button's repeats: 1 as it is pressed, then after the first delay
 and at each repeat while held, else 0 */
