@@ -12,6 +12,7 @@ CAP_SYS_PTRACE.
 """
 
 import argparse
+import errno
 import os
 import struct
 import sys
@@ -107,7 +108,7 @@ def main():
             try:
                 address = find_block(pid)
             except OSError as error:
-                if not os.path.exists(f"/proc/{pid}"):
+                if error.errno in (errno.ESRCH, errno.ENOENT):
                     print("game exited", flush=True)
                     return
                 sys.exit(f"cannot read process {pid}: {error}")
