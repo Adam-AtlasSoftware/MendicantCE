@@ -15,7 +15,7 @@ sorted, do, empty, lanes, left, right) holding <lane>s, <column>s (each a <searc
 <button>, <search>, <panel>s (each its if) holding <heading>, <text>, <pills> of <pill>s,
 <pair>, <choice>, <picture>, <spartan> and <button>s, <chat> (source, lines, do, if), <space/>, <box> (x, y, width, align) holding a
 <list> and a <legend> (x), <objectives> (title), <dialog> (title, text) holding a <list> of its
-choices, and <buttons> holding
+choices, <stick> (id, label, value, detail, hint, x, y, radius), and <buttons> holding
 <button>s (key, label, do, width, if). Texts may hold bindings, {name}, filled from C; a do and the
 screen's back are actions, a table's source a row source, an if, a current,
 a sorted and a search's value bindings: names the game knows. All are
@@ -96,7 +96,13 @@ enum menu_screen_block_kind
 	/* (a pop-up's box in the middle of the screen, the Quit question's: its
 	title (label) in its band, its words (text) under it, and its <list>'s
 	items its choices, side by side at its foot) */
-	MENU_SCREEN_DIALOG
+	MENU_SCREEN_DIALOG,
+	/* (a stick's reading, Stick Test's: its label, its words (text), its
+	detail and hint under them, and its circle, which the engine draws
+	(menu_screen.c); its id the stick, left or right, its box_x the middle of
+	it, box_y its top, box_width the circle's radius, in the menus' 640 by
+	480; it takes no room in the layout) */
+	MENU_SCREEN_STICK
 };
 
 /* a <dialog>'s choices, at most */
@@ -198,8 +204,10 @@ struct menu_screen_block
 	char const *left_action;
 	char const *right_action;
 	char const *dim;
-	/* (a <dialog>'s words, under its title) */
+	/* (a <dialog>'s words, under its title; a <stick>'s reading) */
 	char const *text;
+	/* (a <stick>'s line under its reading) */
+	char const *detail;
 	long line;
 };
 

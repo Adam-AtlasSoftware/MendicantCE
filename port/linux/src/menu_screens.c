@@ -76,7 +76,8 @@ enum reader_element
 	_element_legend,
 	_element_objectives,
 	_element_picture,
-	_element_dialog
+	_element_dialog,
+	_element_stick
 };
 
 struct reader
@@ -1115,6 +1116,50 @@ static void XMLCALL element_start(void *data, XML_Char const *name, XML_Char con
 	{
 		element = _element_spartan;
 		block = spartan_read(reader, attributes, -1);
+	}
+	else if (parent_element == _element_screen && !strcmp(name, "stick"))
+	{
+		static char const *const names[] = { "id", "label", "value", "detail", "hint", "x", "y", "radius", "when",
+			NULL };
+		int index;
+
+		element = _element_stick;
+		attributes_read(reader, name, attributes, names, values);
+		if (!reader->failed && (!values[0] || (strcmp(values[0], "left") && strcmp(values[0], "right"))))
+			reader_problem(reader, "a <stick>'s id is left or right", NULL);
+		else if (!reader->failed && (!values[1] || !values[1][0]))
+			reader_problem(reader, "<stick> has no label", NULL);
+		else if (!reader->failed && (!values[5] || !values[6]))
+			reader_problem(reader, "a <stick> has its x and y", NULL);
+		for (index = 0; index < screen->block_count && !reader->failed; index++)
+		{
+			if (screen->blocks[index].kind == MENU_SCREEN_STICK && !strcmp(screen->blocks[index].id, values[0]))
+				reader_problem(reader, "a screen has one <stick> of each id: \"%s\"", values[0]);
+		}
+		text_attribute_check(reader, values[1]);
+		text_attribute_check(reader, values[2]);
+		text_attribute_check(reader, values[3]);
+		text_attribute_check(reader, values[4]);
+		shown_check(reader, NULL, values[8]);
+		block = block_add(reader, MENU_SCREEN_STICK, -1);
+		if (block >= 0 && !reader->failed)
+		{
+			struct menu_screen_block *stick = &screen->blocks[block];
+
+			stick->id = values[0];
+			stick->label = values[1];
+			stick->text = values[2];
+			stick->detail = values[3];
+			if (values[4])
+				stick->hints[stick->hint_count++] = values[4];
+			stick->when = values[8];
+			stick->box_x = number_read(reader, values[5], "a <stick>'s x", 0, 640);
+			if (!reader->failed)
+				stick->box_y = number_read(reader, values[6], "a <stick>'s y", 0, 480);
+			stick->box_width = 88;
+			if (!reader->failed && values[7])
+				stick->box_width = number_read(reader, values[7], "a <stick>'s radius", 16, 120);
+		}
 	}
 	else if (parent_element == _element_screen && !strcmp(name, "box"))
 	{

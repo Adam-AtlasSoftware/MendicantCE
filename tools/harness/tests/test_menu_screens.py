@@ -96,6 +96,9 @@ NEGATIVE_CONTROLS = {
     "box-align-unchecked": ("values[3] && strcmp(values[3], \"top\") && strcmp(values[3], \"middle\")", "0", "box"),
     # a dialog's choices not counted: a fifth taken (#901)
     "dialog-choices-uncounted": ("else if (choices > MENU_SCREEN_MAXIMUM_CHOICES)", "else if (choices > 99)", "dialog"),
+    # a <stick> of an id no stick has taken
+    "stick-id-unchecked": ("(!values[0] || (strcmp(values[0], \"left\") && strcmp(values[0], \"right\")))",
+                           "(!values[0])", "stick"),
     # a dialog taken with no list of its choices
     "dialog-no-list": ("\t\tif (list < 0)\n\t\t\treader_problem(reader, \"a <dialog> has a <list> of its choices\", NULL);\n"
                        "\t\telse if", "\t\tif", "dialog"),
@@ -185,7 +188,7 @@ def built(fault=None):
                                        c_string((ROOT / "port/assets/menus/screens/quit.xml").read_bytes()) + ";\n" + "".join(
                                            f"static char const {name}_xml[] =\n" +
                                            c_string((ROOT / f"port/assets/menus/screens/{name}.xml").read_bytes()) +
-                                           ";\n" for name in ("coop", "coop_who", "coop_join", "add_player")))
+                                           ";\n" for name in ("coop", "coop_who", "coop_join", "add_player", "stick_test")))
     (work / "menu_screens.h").write_text(read("port/linux/include/menu_screens.h"))
     executable = work / "menu_screens"
     command = ["clang", *ABI_FLAGS, "-std=gnu99", "-O1", "-Wall", "-Werror", "-Wno-unused-function",
@@ -199,7 +202,7 @@ def built(fault=None):
 
 CASES = ["main", "hints", "good", "syntax", "elements", "spartan", "items", "actions", "bindings", "when",
          "kept", "browser", "profile_select", "profile_color", "tabs", "table", "panel", "buttons", "lanes", "choice", "lobby", "chat",
-         "box", "picture", "panels", "dialog", "coop", "add_player"]
+         "box", "picture", "panels", "dialog", "coop", "add_player", "stick"]
 
 
 @pytest.mark.parametrize("case", CASES)
@@ -258,6 +261,11 @@ def test_actions_registered():
             assert '"coop."' in value, binding
             assert f'"{binding}"' in re.search(r"\nint pc_menu_coop_value\(.*?\n\}\n",
                                                 read("port/linux/game/coop_menu.inc"), re.S).group(0), binding
+        elif binding.startswith("stick."):
+            # (Stick Test's, stick_test_menu.inc's pc_menu_stick_value)
+            assert '"stick."' in value, binding
+            assert f'"{binding}"' in re.search(r"\nint pc_menu_stick_value\(.*?\n\}\n",
+                                                read("port/linux/game/stick_test_menu.inc"), re.S).group(0), binding
         else:
             assert f'"{binding}"' in value, binding
     sources = re.findall(r'"([^"]+)"', re.search(r"screen_source_names\[\] =\n\{\n(.*?)\n\};", source,
