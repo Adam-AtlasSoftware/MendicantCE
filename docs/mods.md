@@ -220,6 +220,35 @@ plays), and `debug.txt` and the console say why.
   map's redrawn so (Halo PC's HUD bitmaps lay their sprites out to other
   sizes) is left out. The HUD's digits can be the map's size or twice it.
 - The menus draw a bitmap in their widgets' bounds, whatever its size.
+- A lightmap (a structure BSP's bitmap, its usage *light map*) is drawn
+  only on the BSP layout it was baked for: each of the BSP's lightmaps
+  lays its surfaces' corners out at coordinates in a page, and another
+  build of the level (Halo PC's Blood Gulch, say) lays them out anew. Until
+  the BSP is read (as the map loads, or at the latest as it is switched to)
+  the map's lightmap is drawn; then the mod's is taken or left out, once:
+  - With a layout file beside it, `tags/<name>.lightmap_layout` of the same
+    mod, the fingerprint it holds must be the BSP's. The file is text:
+    lines starting with `#`, then the fingerprint, `lm1-` and 16
+    hexadecimal digits. `python3 tools/lightmap_fingerprint.py
+    maps/bloodgulch.map` prints each BSP's of an Xbox map (`--write
+    mods/<mod>` writes the files); the game's log has every BSP's it checks
+    a lightmap for, a Custom Edition map's too. The fingerprint hashes, for
+    each page, the surfaces and their corners' lightmap coordinates
+    (`port/linux/game/mod_lightmaps.c`), so it holds at any size and
+    encoding of the pages.
+  - With none, it must have the map's pages, each the map's at one scale
+    (twice the size, say), and each page's picture must be the map's: the
+    mod's page is reduced to the map's size and both pages' luminance,
+    blurred by a pixel, must correlate at least 0.9. (On Blood Gulch, the
+    map's pages re-encoded or at twice the size correlate 0.97 or more,
+    another layout's pages of the same sizes 0.78 or less.)
+
+  `debug.txt` has a line for each mod's lightmap, saying which check took
+  it or left it out, and why:
+
+  ```
+  mods: lightmap levels\test\bloodgulch\bloodgulch.bitmap of hd_lightmaps, BSP 0 (layout lm1-d5bf8b6495091587): accepted by the fingerprint check
+  ```
 - Halo PC keeps the channels of a model shader's multipurpose maps and of
   the HUD's meters in another order than the Xbox. The game finds those
   bitmaps among the mod's and draws them in the Xbox's order, as it does for

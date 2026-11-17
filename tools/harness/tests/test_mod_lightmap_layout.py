@@ -1,6 +1,6 @@
-"""A mod's lightmap is taken only laid out as the map's (OpenH1 issue 1172): the real mod_bitmaps.c
-(map_requirements_differ) takes Blood Gulch's Xbox lightmap at 1x and 2x, leaves Halo PC's out (5 of its 15 pages
-other sizes), naming the page, and checks a bitmap of another usage as before."""
+"""A mod's lightmap with no layout file is taken only laid out as the map's (OpenH1 issue 1172): the real
+mod_bitmaps.c (lightmap_layout_differs) takes Blood Gulch's Xbox lightmap at 1x and 2x, leaves Halo PC's out (5 of
+its 15 pages other sizes), naming the page, and map_requirements_differ checks any bitmap as before."""
 import sys
 from pathlib import Path
 
@@ -12,8 +12,7 @@ from harness import CHECK_FAILED, build, function, mutated, read, run, structure
 CASES = ["xbox-layout", "pc-layout", "not-lightmap"]
 NEGATIVE_CONTROLS = {
     # the old check, counts and types only: Halo PC's lightmap was taken
-    "count-only": (("\treturn lightmap_layout_differs(map_group, bitmap, bitmap_count);", "\treturn NULL;"),
-                   "pc-layout"),
+    "count-only": (("\tif (!bitmaps_scale_find(map_group, bitmap, &page))", "\tif (0)"), "pc-layout"),
 }
 
 

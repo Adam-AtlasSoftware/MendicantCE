@@ -1,12 +1,13 @@
 /*
 MOD_LIGHTMAP_LAYOUT.C (test)
 
-The real mod_bitmaps.c's check of what the map's other tags ask of a mod's
-bitmap (map_requirements_differ, OpenH1 issue 1172): a lightmap is tied
-page for page to the BSP's lightmaps, so a mod's is taken only with the
-map's pages, each the map's at one scale. Blood Gulch's 15 pages, the Xbox
-map's, are taken at 1x and 2x; Halo PC's, 5 of them at other sizes, are left
-out, naming the page; a bitmap of another usage is checked as before.
+The real mod_bitmaps.c's size check of a mod's lightmap with no layout file
+(lightmap_layout_differs, OpenH1 issue 1172): a lightmap is tied page for
+page to the BSP's lightmaps, so a mod's is taken only with the map's pages,
+each the map's at one scale. Blood Gulch's 15 pages, the Xbox map's, are
+taken at 1x and 2x; Halo PC's, 5 of them at other sizes, are left out,
+naming the page; what the map's other tags ask of any bitmap
+(map_requirements_differ) takes other sizes, as before.
 test_mod_lightmap_layout.py takes the code (under_test.inc).
 */
 
@@ -20,6 +21,8 @@ typedef struct { real x, y; } real_point2d;
 union point2d { short n[2]; };
 
 #include "under_test.inc"
+
+static char const *mod_made(short const (*pages)[2], long count, short scale);
 
 #define PAGES 15
 /* levels\test\bloodgulch\bloodgulch.bitmap's pages: the Xbox map's, and Halo PC's (5 of them other sizes) */
@@ -51,6 +54,14 @@ static void map_made(short usage, long count)
 
 /* the mod's bitmap of `count` bitmaps, the pages `pages` scaled by `scale`, checked */
 static char const *mod_checked(short const (*pages)[2], long count, short scale)
+{
+	char const *reason = mod_made(pages, count, scale);
+
+	return reason ? reason : lightmap_layout_differs(&map_group, &mod, (unsigned long)count);
+}
+
+/* the same, checked only for what the map's other tags ask of it */
+static char const *mod_made(short const (*pages)[2], long count, short scale)
 {
 	long index;
 
@@ -91,11 +102,11 @@ int main(int argc, char **argv)
 	}
 	CASE("not-lightmap") {
 		map_made(1, PAGES);
-		reason = mod_checked(pc_pages, PAGES, 1);
+		reason = mod_made(pc_pages, PAGES, 1);
 		CHECK(!reason, "a default-usage bitmap of other sizes, as before: %s", reason);
-		reason = mod_checked(xbox_pages, PAGES + 1, 3);
+		reason = mod_made(xbox_pages, PAGES + 1, 3);
 		CHECK(!reason, "with a bitmap more, at 3x: %s", reason);
-		reason = mod_checked(xbox_pages, PAGES - 1, 1);
+		reason = mod_made(xbox_pages, PAGES - 1, 1);
 		CHECK(reason && strstr(reason, "fewer bitmaps"), "fewer bitmaps are still left out: %s",
 			reason ? reason : "taken");
 	}
