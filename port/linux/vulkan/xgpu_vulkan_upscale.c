@@ -385,8 +385,9 @@ void xgpu_vulkan_upscale_plugins_create(void)
 			continue;
 		}
 		up.plugins[which].created = 1;
-		host_logf(HOST_LOG_INFO, "prism plugin %s: ready (%s, %s; %s)", up.plugins[which].name, table->info.vendor,
-			table->info.version, table->info.licence_notice);
+		host_logf(HOST_LOG_INFO, "prism plugin %s: ready (%s, %s; %s)%s%s", up.plugins[which].name,
+			table->info.vendor, table->info.version, table->info.licence_notice, table->info.credits_text[0] ?
+			"; credits: " : "", table->info.credits_text);
 		if (table->info.credits_text[0] && used + strlen(table->info.credits_text) + 2 < sizeof(up.credits))
 		{
 			used += (size_t)snprintf(up.credits + used, sizeof(up.credits) - used, "%s%s", used ? "\n" : "",
@@ -1094,6 +1095,17 @@ static int plugin_upscale(int which, VkCommandBuffer commands, const struct xgpu
 	return 1;
 }
 
+/* the view stretched into the window as it is (linear), where no upscaler
+can run: the window is never left without its view */
+static void stretch(const struct xgpu_stream_upscale *record, struct xgpu_vulkan_image *view,
+	struct xgpu_vulkan_image *output)
+{
+	if (view != output && record->view_corners[2] > record->view_corners[0] &&
+		record->view_corners[3] > record->view_corners[1] && record->output_corners[2] > record->output_corners[0] &&
+		record->output_corners[3] > record->output_corners[1])
+		xgpu_vulkan_image_blit(view, record->view_corners, output, record->output_corners, 1);
+}
+
 void xgpu_vulkan_upscale_end(const struct xgpu_stream_upscale *record, struct xgpu_vulkan_image *view,
 	struct xgpu_vulkan_image *view_depth, struct xgpu_vulkan_image *output, struct xgpu_vulkan_image *output_depth,
 	struct xgpu_vulkan_image *gbuffer_extras, struct xgpu_vulkan_image *gbuffer_words,
@@ -1119,7 +1131,10 @@ void xgpu_vulkan_upscale_end(const struct xgpu_stream_upscale *record, struct xg
 	if (record->view_corners[2] <= record->view_corners[0] || record->view_corners[3] <= record->view_corners[1] ||
 		record->output_corners[2] <= record->output_corners[0] ||
 		record->output_corners[3] <= record->output_corners[1] || !make())
+	{
+		stretch(record, view, output);
 		return;
+	}
 	width = (uint32_t)(record->view_corners[2] - record->view_corners[0]);
 	height = (uint32_t)(record->view_corners[3] - record->view_corners[1]);
 	output_width = (uint32_t)(record->output_corners[2] - record->output_corners[0]);
@@ -1163,12 +1178,18 @@ void xgpu_vulkan_upscale_end(const struct xgpu_stream_upscale *record, struct xg
 	commands = xgpu_vulkan_compute_commands();
 	if (!images_fit(commands, width, height, output_width, output_height) ||
 		!guides_fit(commands, width, height, denoise_upscale))
+	{
+		stretch(record, view, output);
 		return;
+	}
 	xgpu_vulkan_image_compute_use(up.output, 1);
 	xgpu_vulkan_image_compute_use(up.extras_stand_in, 0);
 	if (!inputs_record(commands, record, view, view_depth, gbuffer_extras, denoise_upscale ? gbuffer_words : NULL,
 		denoise_upscale ? gbuffer_base : NULL, width, height))
+	{
+		stretch(record, view, output);
 		return;
+	}
 	if (denoise_upscale)
 		done = plugin_upscale(PLUGIN_DENOISER, commands, record, reset, 1, width, height, output_width, output_height);
 	else if (upscaler == XGPU_UPSCALE_UPSCALER_PLUGIN)
@@ -1201,7 +1222,10 @@ void xgpu_vulkan_upscale_end(const struct xgpu_stream_upscale *record, struct xg
 		frame.reset = reset || upscaler != XGPU_UPSCALE_UPSCALER_FSR3;
 		frame.meters_per_unit = METERS_PER_UNIT;
 		if (!xgpu_vulkan_fsr3_dispatch(&frame))
+		{
+			stretch(record, view, output);
 			return;
+		}
 	}
 	/* (the output written before it is read) */
 	commands = xgpu_vulkan_compute_commands();
@@ -1220,6 +1244,7 @@ void xgpu_vulkan_upscale_end(const struct xgpu_stream_upscale *record, struct xg
 	if (!xgpu_vulkan_image_blit(up.output, from, output, to, 0))
 	{
 		failed("its output cannot be copied into the window");
+		stretch(record, view, output);
 		return;
 	}
 	if (output_depth && output_depth != view_depth && !xgpu_vulkan_image_blit(view_depth, record->view_corners,
