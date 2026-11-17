@@ -56,7 +56,8 @@ def hosts():
     return table
 
 
-DEFAULT_TARGETS = ["build/linux_x86_64/halo", "build/linux_x86_64/openh1.assets"]
+DEFAULT_TARGETS = ["build/linux_x86_64/halo", "build/linux_x86_64/openh1.assets",
+                   "build/linux_x86_64/prepared.records"]
 BUILD_SLOTS = 2
 # the multiplayer maps' scenario names (--map bloodgulch)
 STOCK_MAPS = {name: f"levels\\test\\{name}\\{name}" for name in (
