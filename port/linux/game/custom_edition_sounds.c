@@ -4,17 +4,29 @@ CUSTOM_EDITION_SOUNDS.C
 The sounds of Halo Custom Edition maps this build would not play
 (custom_edition_cache.h).
 
-This build plays Xbox ADPCM only, mono at 22 kHz or stereo at 22 or 44 kHz
-(sound_manager.c), and refuses any other sound each time it is played.
-Halo PC also has Ogg Vorbis (music, dialogue, the announcer), uncompressed
-samples and mono sounds at 44 kHz. When a map is loaded, each such
-permutation is decoded here (Ogg Vorbis with port/third_party/stb_vorbis),
-brought to the sound's channel count at a rate this build plays, and
-encoded again as Xbox ADPCM into one buffer kept for as long as the map is
-loaded. The permutation is then an Xbox ADPCM one whose samples lie in a
-region of the combined offset space of its own (custom_edition_cache_read
-serves it from the buffer), so the sound cache and the mixer see nothing
-new.
+The sound manager plays sounds of the Xbox's formats only, Xbox ADPCM mono at
+22 kHz or stereo at 22 or 44 kHz (sound_manager.c), and refuses any other
+each time it is played. Halo PC also has Ogg Vorbis (music, dialogue, the
+announcer), uncompressed samples and mono sounds at 44 kHz. When a map is
+loaded, each such permutation is decoded here (Ogg Vorbis with
+port/third_party/stb_vorbis) and brought to the sound's channel count, into
+one buffer kept for as long as the map is loaded, its samples in a region of
+the combined offset space of its own (custom_edition_cache_read serves it
+from the buffer).
+
+It is kept as 16-bit PCM at its own rate (OpenH1 issues 1110 and 1111), so
+nothing is lost: sound_definitions.h's sound_permutation_pcm_rate marks it,
+and the channel that plays it switches its stream to that format
+(sound_dsound_xbox.c). A rate over the mixer's 48 kHz (which nothing past it
+is heard at) is brought down to it. A permutation longer than a sound cache
+block holds as PCM (NATIVE_MAXIMUM_BYTES), or past the PCM budget of all of
+them (NATIVE_TOTAL_BYTES), is encoded as Xbox ADPCM in a format the
+channels play, as before. Wherever the rate changes, the samples are
+resampled with a windowed sinc low pass (frames_resample), not by the
+nearest frame, which folded what lies above the new rate's band back into it
+as tones that were never there (a 16 kHz tone came out at 6 kHz).
+The sound itself stays one of the Xbox's formats, so the sound manager and
+its channels see nothing new.
 
 Xbox ADPCM is IMA ADPCM in blocks of 64 samples per channel: a 4-byte
 header per channel (the predictor and step index the block starts from),
@@ -34,6 +46,7 @@ the channels (port/linux/src/dsound_sdl.c decodes it).
 #define STB_VORBIS_HEADER_ONLY
 #include "../../third_party/stb_vorbis/stb_vorbis.c"
 
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -69,7 +82,31 @@ uncompressed samples they hold, and no stream has more than two channels). */
 it, and the resampler scales by it) */
 #define MAXIMUM_SAMPLE_RATE 192000
 
+/* The most bytes of 16-bit PCM a permutation is kept in: what one sound
+cache block takes, and no more than a quarter of the sound cache (a
+quarter of the phones' 4 MB, 12 seconds of mono at 44 kHz; the desktop's
+4 MB, 47 seconds of mono at 44 kHz or 23 of stereo). A longer one is Xbox
+ADPCM, 3.6 times smaller. */
+#define NATIVE_MAXIMUM_BYTES MIN((long)MAXIMUM_SOUND_DATA_SIZE, (long)(HALO_PORT_SOUND_CACHE_SIZE / 4))
+/* the most bytes of PCM a map's permutations are kept in, together (128 MB
+on the desktop, 32 MB on the phones); those past it are Xbox ADPCM */
+#define NATIVE_TOTAL_BYTES ((unsigned long)HALO_PORT_SOUND_CACHE_SIZE * 8)
+
+/* The resampler (frames_resample): a Kaiser windowed sinc of
+RESAMPLE_ZERO_CROSSINGS zero crossings each side at the lower of the two
+rates, its pass band to RESAMPLE_CUTOFF of that rate's half, tabulated in
+RESAMPLE_TABLE_STEPS steps per zero crossing. Its stop band is about 90 dB
+down: what lies above the lower rate's band is gone, not folded back. */
+#define RESAMPLE_ZERO_CROSSINGS 32
+#define RESAMPLE_TABLE_STEPS 512
+#define RESAMPLE_CUTOFF 0.9
+#define RESAMPLE_KAISER_BETA 9.0
+#define RESAMPLE_PI 3.14159265358979323846
+
 /* ---------- globals */
+
+static float resample_table[RESAMPLE_ZERO_CROSSINGS * RESAMPLE_TABLE_STEPS + 2];
+static boolean resample_table_made;
 
 static int const adpcm_step_table[ADPCM_STEP_INDEX_MAXIMUM + 1] =
 {
@@ -91,6 +128,8 @@ static struct
 	unsigned long decoded_capacity;
 	/* the most the region of the combined offset space for them holds */
 	unsigned long decoded_limit;
+	/* the bytes of them that are PCM (NATIVE_TOTAL_BYTES) */
+	unsigned long native_bytes;
 } custom_edition_sounds_globals;
 
 /* ---------- private code */
@@ -420,52 +459,183 @@ static boolean samples_decode(
 	return FALSE;
 }
 
-/* `frames` at `channels` and `rate` (a mono stream fills both channels, a
-stereo one is averaged for mono, and another rate is resampled by the
-nearest frame); FALSE when it comes to nothing */
-static boolean frames_conform(
+static double bessel_i0(
+	double x)
+{
+	double sum = 1.0;
+	double term = 1.0;
+	long k;
+
+	for (k = 1; k < 64; k++)
+	{
+		term *= (x / (2.0 * k)) * (x / (2.0 * k));
+		sum += term;
+		if (term < sum * 1e-17)
+			break;
+	}
+
+	return sum;
+}
+
+/* the windowed sinc, from its middle out to RESAMPLE_ZERO_CROSSINGS, made once */
+static void resample_table_make(
+	void)
+{
+	long index;
+	double window_scale = 1.0 / bessel_i0(RESAMPLE_KAISER_BETA);
+
+	if (resample_table_made)
+		return;
+	for (index = 0; index <= RESAMPLE_ZERO_CROSSINGS * RESAMPLE_TABLE_STEPS; index++)
+	{
+		double x = (double)index / RESAMPLE_TABLE_STEPS;
+		double ratio = x / RESAMPLE_ZERO_CROSSINGS;
+		double sinc = index ? sin(RESAMPLE_PI * x) / (RESAMPLE_PI * x) : 1.0;
+		double window = bessel_i0(RESAMPLE_KAISER_BETA * sqrt(MAX(0.0, 1.0 - ratio * ratio))) * window_scale;
+
+		resample_table[index] = (float)(sinc * window);
+	}
+	resample_table[RESAMPLE_ZERO_CROSSINGS * RESAMPLE_TABLE_STEPS + 1] = 0.0f;
+	resample_table_made = TRUE;
+}
+
+/* the windowed sinc `distance` zero crossings from its middle */
+static double resample_weight(
+	double distance)
+{
+	double at;
+	long index;
+
+	if (distance < 0.0)
+		distance = -distance;
+	if (distance >= RESAMPLE_ZERO_CROSSINGS)
+		return 0.0;
+	at = distance * RESAMPLE_TABLE_STEPS;
+	index = (long)at;
+
+	return resample_table[index] + (resample_table[index + 1] - resample_table[index]) * (at - index);
+}
+
+/* `frames` resampled to `rate` with the windowed sinc low pass at the lower
+of the two rates' bands (band limited: nothing above the new rate's band is
+folded into it); FALSE when it comes to nothing */
+static boolean frames_resample(
 	struct frames *frames,
-	long channels,
 	long rate)
 {
-	double scaled_count = (double)frames->count * rate / frames->rate;
+	/* (the count at the new rate, refused before it is a long when it is
+	more than any sound has: a stream's own rate can be anything) */
+	double scaled_count = frames->rate > 0 ? (double)frames->count * rate / frames->rate : -1.0;
+	double cutoff;
+	double reach;
+	long channels = frames->channels;
 	long count;
 	short *samples;
 	long frame;
 
-	if (frames->channels == channels && frames->rate == rate)
-	{
-		return frames->count > 0;
-	}
-	/* (the count at the new rate, refused before it is a long when it is
-	more than any sound has: a stream's own rate can be anything) */
-	if (frames->rate <= 0 || !(scaled_count >= 0.0) || scaled_count > (double)MAXIMUM_FRAMES)
+	if (frames->rate <= 0 || rate <= 0 || !(scaled_count >= 0.0) || scaled_count > (double)MAXIMUM_FRAMES)
 	{
 		frames_free(frames);
 		return FALSE;
 	}
+	resample_table_make();
+	/* (the pass band, as a fraction of the source's, and the source frames
+	each side the low pass reaches) */
+	cutoff = RESAMPLE_CUTOFF * MIN(1.0, (double)rate / frames->rate);
+	reach = RESAMPLE_ZERO_CROSSINGS / cutoff;
 	count = (long)scaled_count;
 	samples = frames_allocate(count, channels);
 	for (frame = 0; samples && frame < count; frame++)
 	{
-		long source = MIN((long)((double)frame * frames->rate / rate), frames->count - 1);
-		short const *in = frames->samples + source * frames->channels;
+		double at = (double)frame * frames->rate / rate;
+		long first = MAX((long)ceil(at - reach), 0);
+		long last = MIN((long)floor(at + reach), frames->count - 1);
+		double sums[2] = { 0.0, 0.0 };
+		long source;
+		long channel;
+
+		for (source = first; source <= last; source++)
+		{
+			double weight = resample_weight((at - source) * cutoff);
+
+			for (channel = 0; channel < channels; channel++)
+			{
+				sums[channel] += frames->samples[source * channels + channel] * weight;
+			}
+		}
+		for (channel = 0; channel < channels; channel++)
+		{
+			long value = lround(sums[channel] * cutoff);
+
+			samples[frame * channels + channel] = (short)PIN(value, -32768, 32767);
+		}
+	}
+	frames_free(frames);
+	frames->samples = samples;
+	frames->count = count;
+	frames->rate = rate;
+
+	return samples != NULL;
+}
+
+/* `frames` at `channels` (a mono stream fills both channels, a stereo one
+is averaged for mono); FALSE when it comes to nothing */
+static boolean frames_channels(
+	struct frames *frames,
+	long channels)
+{
+	short *samples;
+	long frame;
+
+	if (frames->channels == channels)
+	{
+		return frames->count > 0;
+	}
+	samples = frames_allocate(frames->count, channels);
+	for (frame = 0; samples && frame < frames->count; frame++)
+	{
+		short const *in = frames->samples + frame * frames->channels;
 		short *out = samples + frame * channels;
 
-		if (channels == frames->channels)
-			memcpy(out, in, channels * sizeof(*out));
-		else if (channels == 2)
+		if (channels == 2)
 			out[0] = out[1] = in[0];
 		else
 			out[0] = (short)((in[0] + in[1]) / 2);
 	}
 	frames_free(frames);
 	frames->samples = samples;
-	frames->count = count;
 	frames->channels = channels;
-	frames->rate = rate;
 
 	return samples != NULL;
+}
+
+/* `frames` at `channels` and `rate` (frames_channels, then frames_resample
+when the rate is another); FALSE when it comes to nothing. At their own
+rate they are not touched. */
+static boolean frames_conform(
+	struct frames *frames,
+	long channels,
+	long rate)
+{
+	if (!frames_channels(frames, channels))
+	{
+		frames_free(frames);
+		return FALSE;
+	}
+	if (frames->rate == rate)
+	{
+		return frames->count > 0;
+	}
+
+	return frames_resample(frames, rate) && frames->count > 0;
+}
+
+/* the rate a permutation decoded at `rate` is kept at: its own, up to the
+mixer's (no more is heard) */
+static long native_rate(
+	long rate)
+{
+	return MIN(rate, (long)SOUND_PERMUTATION_PCM_MAXIMUM_RATE);
 }
 
 /* Room for `bytes` more in the decoded buffer: its offset, or NONE when the
@@ -514,9 +684,38 @@ static boolean permutation_needs_conversion(
 		(sound->encoding == 0 && sound->sample_rate != 0);
 }
 
-/* Makes the permutation `permutation` of `sound` an Xbox ADPCM one in the
-format this build plays it, whose samples are in the decoded buffer; FALSE
-when it cannot be. */
+/* Whether `frames` (at the sound's channel count) are kept as 16-bit PCM
+at their own rate, up to the mixer's: not when that is longer than a sound
+cache block holds (NATIVE_MAXIMUM_BYTES) or past the budget of all of them
+(NATIVE_TOTAL_BYTES); *rate is that rate and *bytes their bytes. */
+static boolean frames_kept_native(
+	struct frames const *frames,
+	unsigned long native_bytes,
+	long *rate,
+	unsigned long *bytes)
+{
+	double kept_bytes;
+
+	*rate = native_rate(frames->rate);
+	*bytes = 0;
+	if (frames->rate <= 0 || *rate < SOUND_PERMUTATION_PCM_MINIMUM_RATE || frames->count <= 0)
+	{
+		return FALSE;
+	}
+	kept_bytes = (double)frames->count * *rate / frames->rate * frames->channels * (double)sizeof(short);
+	if (kept_bytes > (double)NATIVE_MAXIMUM_BYTES || kept_bytes > (double)(NATIVE_TOTAL_BYTES - native_bytes))
+	{
+		return FALSE;
+	}
+	*bytes = (unsigned long)kept_bytes;
+
+	return TRUE;
+}
+
+/* Makes the permutation `permutation` of `sound` one this build plays, its
+samples in the decoded buffer: 16-bit PCM at its own rate (up to the
+mixer's) where it fits (frames_kept_native), else Xbox ADPCM in the format
+the sound's channels play; FALSE when it cannot be either. */
 static boolean permutation_convert(
 	struct sound_definition const *sound,
 	struct sound_permutation *permutation,
@@ -527,6 +726,8 @@ static boolean permutation_convert(
 	struct frames frames = { 0 };
 	boolean decoded = FALSE;
 	unsigned long encoded_bytes;
+	unsigned long native_bytes;
+	long kept_rate;
 	byte *data;
 	long offset = NONE;
 
@@ -540,6 +741,30 @@ static boolean permutation_convert(
 	decoded = samples_decode(data, permutation->samples.size, permutation->compression, FALSE,
 		channels, rate, &frames);
 	free(data);
+
+	decoded = decoded && frames_channels(&frames, channels);
+	if (decoded && frames_kept_native(&frames, custom_edition_sounds_globals.native_bytes, &kept_rate, &native_bytes))
+	{
+		/* (only a rate over the mixer's is resampled) */
+		if (frames.rate == kept_rate || frames_resample(&frames, kept_rate))
+		{
+			native_bytes = (unsigned long)frames.count * channels * sizeof(short);
+			offset = decoded_reserve(native_bytes);
+		}
+		if (offset != NONE)
+		{
+			memcpy(custom_edition_sounds_globals.decoded + offset, frames.samples, native_bytes);
+			custom_edition_sounds_globals.decoded_bytes += native_bytes;
+			custom_edition_sounds_globals.native_bytes += native_bytes;
+			permutation->compression = SOUND_COMPRESSION_NONE;
+			permutation->samples.file_offset = decoded_offset + offset;
+			permutation->samples.size = (long)native_bytes;
+			permutation->sample_buffer_size = (unsigned long)kept_rate;
+			frames_free(&frames);
+			return TRUE;
+		}
+		decoded = frames.samples != NULL;
+	}
 
 	if (decoded && frames_conform(&frames, channels, playable_rate(sound)))
 	{
@@ -623,8 +848,8 @@ boolean custom_edition_sounds_decode(
 	}
 	if (converted_count || failed_count)
 	{
-		error(_error_silent, "custom edition: %ld sound permutations converted to %lu bytes of Xbox ADPCM%s",
-			converted_count, custom_edition_sounds_globals.decoded_bytes,
+		error(_error_silent, "custom edition: %ld sound permutations converted to %lu bytes (%lu of them 16-bit PCM at their own rates)%s",
+			converted_count, custom_edition_sounds_globals.decoded_bytes, custom_edition_sounds_globals.native_bytes,
 			failed_count ? " (some sounds could not be converted)" : "");
 	}
 
@@ -639,23 +864,45 @@ byte *custom_edition_sounds_encode(
 	long channels,
 	long rate,
 	long encoded_rate,
-	unsigned long *encoded_bytes)
+	unsigned long *encoded_bytes,
+	long *kept_rate)
 {
 	struct frames frames = { 0 };
 	byte *encoded = NULL;
+	unsigned long native_bytes;
 
+	*kept_rate = 0;
 	if (data_bytes > 0 && channels >= 1 && channels <= 2 &&
 		samples_decode(data, data_bytes, compression, big_endian, channels, rate, &frames) &&
-		frames_conform(&frames, channels, encoded_rate))
+		frames_channels(&frames, channels))
 	{
-		*encoded_bytes = adpcm_encoded_bytes(frames.count, channels);
-		encoded = malloc(*encoded_bytes);
-		if (encoded)
+		/* (16-bit PCM at its own rate, as a map's: permutation_convert) */
+		if (frames_kept_native(&frames, 0, kept_rate, &native_bytes) &&
+			(frames.rate == *kept_rate || frames_resample(&frames, *kept_rate)))
 		{
-			adpcm_encode(frames.samples, frames.count, channels, encoded);
+			*encoded_bytes = (unsigned long)frames.count * channels * sizeof(short);
+			encoded = malloc(*encoded_bytes);
+			if (encoded)
+			{
+				memcpy(encoded, frames.samples, *encoded_bytes);
+			}
+		}
+		else if (frames.samples && frames_conform(&frames, channels, encoded_rate))
+		{
+			*kept_rate = 0;
+			*encoded_bytes = adpcm_encoded_bytes(frames.count, channels);
+			encoded = malloc(*encoded_bytes);
+			if (encoded)
+			{
+				adpcm_encode(frames.samples, frames.count, channels, encoded);
+			}
 		}
 	}
 	frames_free(&frames);
+	if (!encoded)
+	{
+		*kept_rate = 0;
+	}
 
 	return encoded;
 }

@@ -244,9 +244,10 @@ boolean custom_edition_bitmap_drawable(
 	struct bitmap_data *bitmap);
 /* Decodes every sound permutation of a tag cache custom_edition_cache_load
 filled (its resource offsets combined) that this build would not play: Ogg
-Vorbis, uncompressed, or mono at 44 kHz. Each is encoded again in memory as
-Xbox ADPCM in a format this build plays, its samples at decoded_offset and
-on in the combined offset space, where custom_edition_sounds_read serves
+Vorbis, uncompressed, or mono at 44 kHz. Each is kept in memory as 16-bit
+PCM at its own rate (sound_permutation_pcm_rate), or where that is too long,
+encoded again as Xbox ADPCM in a format this build plays, its samples at
+decoded_offset and on in the combined offset space, where custom_edition_sounds_read serves
 them, up to decoded_limit bytes of them. A sound that cannot be converted,
 or would go past the limit, is silenced. custom_edition_sounds_dispose lets
 the samples go. */
@@ -257,9 +258,10 @@ boolean custom_edition_sounds_decode(
 	unsigned long decoded_limit);
 /* The samples `data` (`data_bytes` of them) of a sound permutation of
 `compression` (16-bit PCM, little-endian or `big_endian`; Xbox ADPCM; Ogg
-Vorbis), `channels` channels at `rate`, encoded as Xbox ADPCM at
-`encoded_rate`: a buffer of the game's allocator of *encoded_bytes; NULL
-when they cannot be (mod_sounds.c) */
+Vorbis), `channels` channels at `rate`, as a map's are kept: 16-bit PCM at
+their own rate, *kept_rate (sound_permutation_pcm_rate), or where that is too
+long, Xbox ADPCM at `encoded_rate` (*kept_rate 0). A buffer of the game's
+allocator of *encoded_bytes; NULL when they cannot be (mod_sounds.c) */
 byte *custom_edition_sounds_encode(
 	byte const *data,
 	long data_bytes,
@@ -268,7 +270,8 @@ byte *custom_edition_sounds_encode(
 	long channels,
 	long rate,
 	long encoded_rate,
-	unsigned long *encoded_bytes);
+	unsigned long *encoded_bytes,
+	long *kept_rate);
 /* the bytes of the samples custom_edition_sounds_decode made */
 unsigned long custom_edition_sounds_decoded_bytes(
 	void);

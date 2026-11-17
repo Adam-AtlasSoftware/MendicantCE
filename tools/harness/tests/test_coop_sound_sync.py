@@ -7,6 +7,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, constant, enum_with, mutated, read, run, structure
+from harness.audio import pcm_permutation_rate
 
 CASES = ['pcm', 'chain', 'stereo-blocks', 'pitch', 'start-skipped', 'start-playing', 'fade-in-at-start', 'finished',
          'repeat', 'late', 'just-started', 'ended', 'placed', 'other-instance', 'unknown-compression', 'taken-once',
@@ -43,6 +44,7 @@ def generated(fault=None):
                          'looping_sound_definition'])]:
         for name in names:
             types += structure(read(path), name) + '\n'
+    types += pcm_permutation_rate()
     # The module's own header: its parts, placements and functions.
     types += header + '\n'
     # The module itself, from its constants on (its includes are the fixture's).
