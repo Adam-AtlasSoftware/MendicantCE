@@ -58,6 +58,9 @@ static struct
 	unsigned long still_since[2];
 	short drift[2];
 	unsigned long seen[2];
+	/* (when the screen last read the dead zones, with or without a
+	controller) */
+	unsigned long read_at;
 } stick_test;
 
 static int stick_test_percent(short value)
@@ -141,8 +144,9 @@ static void stick_test_view_of(struct stick_test_reading const *reading, real ra
 	view->adjusted_y = PIN(-reading->adjusted.y * scale, -radius, radius);
 }
 
-/* (menu_screen.c's place's frame for screens/stick_test.xml) both sticks
-read, and their rests, each frame the screen is drawn */
+/* (menu_screen.c's place's frame for screens/stick_test.xml) both sticks'
+dead zones and readings read, and their rests, each frame the screen is
+drawn (without a controller, its dead zones alone: the readings none) */
 void pc_menu_stick_test_frame(struct widget_instance *screen)
 {
 	struct controller_device device;
@@ -153,10 +157,12 @@ void pc_menu_stick_test_frame(struct widget_instance *screen)
 	(void)screen;
 	controller_device_get(gamepad, &device);
 	stick_test.connected = device.name[0] != 0;
-	for (stick = 0; stick < 2 && stick_test.connected; stick++)
+	stick_test.read_at = now;
+	for (stick = 0; stick < 2; stick++)
 	{
 		stick_test_read(gamepad, stick, &stick_test.readings[stick]);
-		stick_test_rest(stick, stick_test.readings[stick].raw, now);
+		if (stick_test.connected)
+			stick_test_rest(stick, stick_test.readings[stick].raw, now);
 	}
 }
 
@@ -191,14 +197,14 @@ int pc_menu_stick_value(char const *name, char *value, unsigned long size)
 /* (menu_screen.c's <stick>, as the engine draws it) a stick's circle, its
 middle at x, y: its travel, its outer dead zone (where a push reads as
 full) and inner one (where none), the raw reading white, the reading after
-them blue; FALSE (nothing drawn) without a controller, or a reading of the
-screen's this second */
+them blue (without a controller, the circle and its dead zones alone);
+FALSE (nothing drawn) without a reading of the screen's this second */
 boolean pc_menu_stick_test_draw(short stick, real x, real y, real radius)
 {
 	struct stick_test_view view;
 
-	if (stick < 0 || stick > 1 || !stick_test.connected ||
-		system_milliseconds() - stick_test.seen[stick] > STICK_TEST_REOPEN_MILLISECONDS)
+	if (stick < 0 || stick > 1 || !stick_test.read_at ||
+		system_milliseconds() - stick_test.read_at > STICK_TEST_REOPEN_MILLISECONDS)
 	{
 		return FALSE;
 	}
@@ -215,6 +221,8 @@ boolean pc_menu_stick_test_draw(short stick, real x, real y, real radius)
 		menu_shape_rounded_box(x - view.inner, y - view.inner, x + view.inner, y + view.inner,
 			view.round ? view.inner : 0.0f, 1.0f, 0x40FFB000UL, 0xFFFFB000UL);
 	}
+	if (!stick_test.connected)
+		return TRUE;
 	menu_shape_rounded_box(x + view.raw_x - 3.0f, y + view.raw_y - 3.0f, x + view.raw_x + 3.0f,
 		y + view.raw_y + 3.0f, 3.0f, 0.0f, 0xFFFFFFFFUL, 0);
 	menu_shape_rounded_box(x + view.adjusted_x - 4.0f, y + view.adjusted_y - 4.0f, x + view.adjusted_x + 4.0f,
