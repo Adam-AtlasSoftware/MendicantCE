@@ -1061,6 +1061,35 @@ void platform_text_field(int typing, int password)
 	platform_screen_keyboard(text_typing_field, typing && password);
 }
 
+/* the system's languages, the most wanted first, as SDL has them ("fr_FR
+de_CH en": a language, and its place where it has one), for the on-screen
+keyboard's automatic layout (keyboard.c); their count */
+int platform_locales(char *locales, int size)
+{
+	int count = 0, index, used = 0;
+	SDL_Locale **each = SDL_GetPreferredLocales(&count);
+
+	if (size > 0)
+		locales[0] = 0;
+	for (index = 0; each && index < count && size > 0; index++)
+	{
+		int written = snprintf(locales + used, (size_t)(size - used), "%s%s%s%s", used ? " " : "",
+			each[index]->language ? each[index]->language : "", each[index]->country ? "_" : "",
+			each[index]->country ? each[index]->country : "");
+
+		if (written < 0 || used + written >= size)
+		{
+			locales[used] = 0;
+			break;
+		}
+		used += written;
+	}
+	if (!each)
+		return 0;
+	SDL_free(each);
+	return count;
+}
+
 static void typing_gamepad(const struct platform_input_state *input, XINPUT_GAMEPAD *pad)
 {
 	const unsigned char *k = input->keys;

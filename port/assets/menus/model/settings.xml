@@ -422,7 +422,23 @@
 		<row key="profiles" kind="link" label="MANAGE PROFILES ›" crumb="PROFILES › PLAYER" when="profile+!in_game" open="main_menu/profile_manager/player_profile_manager" run="port settings profiles">
 			<help>Switch to another player profile, make a new one or delete one. Your changes so far are kept.</help>
 		</row>
-		<section key="section_5" title="STORAGE"/>
+		<row key="keyboard_layout" kind="choice" setting="input.keyboard_layout" label="ON-SCREEN KEYBOARD" crumb="PROFILES › PLAYER" search_choices="qwerty azerty qwertz swedish finnish norwegian danish spanish portuguese czech hungarian turkish">
+			<help>The letters of the on-screen keyboard that names and chat are typed with. Auto follows your system's language.</help>
+			<note>Where a text can't take a letter with a mark (the chat), it types the plain letter.</note>
+			<choice shown="AUTO" value="auto"/>
+			<choice shown="QWERTY" value="qwerty"/>
+			<choice shown="AZERTY" value="azerty"/>
+			<choice shown="QWERTZ" value="qwertz"/>
+			<choice shown="SWEDISH/FINNISH" value="swedish"/>
+			<choice shown="NORWEGIAN" value="norwegian"/>
+			<choice shown="DANISH" value="danish"/>
+			<choice shown="SPANISH" value="spanish"/>
+			<choice shown="PORTUGUESE" value="portuguese"/>
+			<choice shown="CZECH" value="czech"/>
+			<choice shown="HUNGARIAN" value="hungarian"/>
+			<choice shown="TURKISH" value="turkish"/>
+		</row>
+		<section key="section_6" title="STORAGE"/>
 		<row key="map_cache_megabytes" kind="choice" setting="game.map_cache_megabytes" label="MAP STORAGE" crumb="PROFILES › STORAGE" search="cache disk" search_choices="instant loading disk space saver">
 			<help>Instant Loading keeps every map unpacked, about 3.0 GB, so loads never wait. Disk Space Saver keeps at most 730 MB, saving 2.3 GB or more, little on most drives. A map it has not kept loads a second or more slower.</help>
 			<note>Switching back unpacks them in the background.</note>
@@ -433,11 +449,11 @@
 			<help>Deletes what the game keeps only to start and load faster: the unpacked maps, their prepared draws, the menus' pictures, the ambient occlusion's volumes and the GPU's pipelines, made again as you play.</help>
 			<note>Select it twice: the first asks, the second clears.</note>
 		</row>
-		<section key="section_8" title="HELP"/>
+		<section key="section_9" title="HELP"/>
 		<row key="report" kind="link" label="REPORT A PROBLEM" crumb="PROFILES › HELP" search="bug crash" run="port settings report">
 			<help>Saves a report (the log, your settings and GPU, the frame rate and a screenshot) and opens a GitHub issue filled in with it: say what happened, drag in the report's file, submit. F8 does the same in a game, its screenshot that moment.</help>
 		</row>
-		<section key="section_10" title="ABOUT"/>
+		<section key="section_11" title="ABOUT"/>
 		<row key="about" kind="link" label="GOAT H1" crumb="PROFILES › ABOUT">
 			<help>Halo: Combat Evolved, the Xbox game, on this computer, played from your own copy of its maps. GOAT H1 is a free fan project.</help>
 		</row>

@@ -7,8 +7,13 @@ input it reads, over the screen it is typed for (which waits under it, as it
 was: ui_widget.c's pop-ups) or over a game's view (the chat); its rules are
 keyboard_core.c's.
 
-- Layout: QWERTY with its number row, and a page of signs (keyboard_core.c's
-  table). A name's first letter is a capital. Shift, and caps lock (shift
+- Layout: the player's letters (input.keyboard_layout: QWERTY, AZERTY,
+  QWERTZ, the Nordic ones, Spanish and the others of keyboard_core.c's table;
+  "auto" the system's languages' layout, else game.language's, else
+  QWERTY), each with the number row and a page of signs. A layout's own
+  letters with a mark (ñ, ö, å) type their plain letter where the text does
+  not take them or the font does not draw them, as the accents are filtered.
+  A name's first letter is a capital. Shift, and caps lock (shift
   twice, quickly).
 - A controller: the D-pad and the left stick move the focus, A presses the
   key, held it offers the key's accents (move left and right, let go to type
@@ -55,6 +60,7 @@ the functions here.
 #include "keyboard.h"
 #include "keyboard_core.h"
 #include "menu_widget.h"
+#include "../src/port_config.h" /* port: port/linux/src/port_config.c */
 
 #include <string.h>
 
@@ -65,6 +71,9 @@ int menu_screen_open_ready(char const *name);
 /* port/linux/src/xinput_sdl.c's */
 void platform_text_typing(int typing);
 void platform_text_field(int typing, int password);
+/* ... the system's languages, the most wanted first ("fr_FR de_CH"), and
+their count */
+int platform_locales(char *locales, int size);
 /* menu_shapes.c's */
 void menu_shape_rounded_box(real x0, real y0, real x1, real y1, real radius, real edge, pixel32 fill,
 	pixel32 color);
@@ -240,6 +249,19 @@ static boolean keyboard_large(short controller)
 
 static unsigned long keyboard_pad_read(void);
 
+/* the player's layout (input.keyboard_layout): one by name, or "auto", the
+system's languages' (SDL's), else game.language's, else QWERTY */
+static struct keyboard_layout const *keyboard_layout_chosen(void)
+{
+	char const *setting = config_string("input.keyboard_layout");
+	char locales[256];
+
+	if (setting[0] && strcmp(setting, "auto") != 0)
+		return keyboard_layout_named(setting);
+	platform_locales(locales, (int)sizeof(locales));
+	return keyboard_layout_auto(locales, config_string("game.language"));
+}
+
 boolean keyboard_open(struct keyboard_request const *request)
 {
 	unsigned short text[KEYBOARD_MAXIMUM_TEXT + 1];
@@ -262,7 +284,7 @@ boolean keyboard_open(struct keyboard_request const *request)
 		length++;
 	}
 	text[length] = 0;
-	keyboard_begin(&keyboard.state, keyboard_layout_named("qwerty"), text, keyboard.request.maximum,
+	keyboard_begin(&keyboard.state, keyboard_layout_chosen(), text, keyboard.request.maximum,
 		request->kind == KEYBOARD_NAME, keyboard_offered_character, NULL);
 #if defined(HALO_ANDROID) || defined(HALO_IOS)
 	keyboard.system = TRUE;
