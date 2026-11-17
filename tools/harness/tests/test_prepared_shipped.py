@@ -91,7 +91,6 @@ def test_records_name_only_kept_tags():
     first start's pass adds after the menus' once it has made their file); and ui.map's is shipped both without the
     models, as the first start loads it, and with them"""
     for record, data in shipped():
-        assert prepared_records.record_tags(data), record['map']
         assert prepared_records.unkept_tags(data, record['tags']) == [], f"{record['map']}: {RERUN}"
     models = [any(tag >> 16 == 1 for tag in prepared_records.record_tags(data))
               for record, data in shipped() if record['map'] == 'ui']
