@@ -171,6 +171,10 @@ playback is. Backspace switches the camera as it does in a game: the
 player's eyes, a flying camera (hold Tab or the right mouse button and fly
 with W, A, S, D, R, F), and one following the player.
 
+With `display.input_display` on, each view shows its player's recorded input as the playback takes it (`A`):
+the move and look, the fire trigger and the actions held (`port/linux/game/input_display.c`). A demo holds no
+device, so the move is drawn as a stick, never as the W, A, S and D keys.
+
 The playback checks its hash against the recording's three times a second. If they
 differ, it says where in the log ("parted from the recording by tick 1680:
 effect"), names the allocations that differ, and plays on as its own game:

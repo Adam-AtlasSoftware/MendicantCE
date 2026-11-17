@@ -118,6 +118,7 @@ symbols in this file:
 #include "network_votekick.h" /* port: port/linux/game/network_votekick.c */
 #include "basic_training.h" /* port: port/linux/game/basic_training.c */
 #include "halo_keyboard.h" /* port: port/linux/src/xinput_sdl.c */
+#include "input_display.h" /* port: port/linux/game/input_display.c */
 #include "text/font_group.h"
 #include "text/text_group.h"
 #include "units/unit_definitions.h"
@@ -1704,6 +1705,11 @@ void hud_draw_screen(
 		/* port: the match clock, in multiplayer; the mission's timer in the
 		campaign and co-op */
 		hud_draw_match_timer();
+		/* port: the player's input (display.input_display), hidden with the
+		HUD and in a cinematic */
+		if (hud_shown() && !cinematic_in_progress())
+			input_display_draw(render.local_player_index, player_index,
+				interface_get_tag_index(_interface_font_terminal));
 
 		if (!game_time_get_paused() &&
 			render.local_player_index == local_player_get_next(NONE))

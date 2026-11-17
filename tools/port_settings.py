@@ -1143,7 +1143,7 @@ PAGES = {
             # display, the match timer, the practice keys; MATCH TIMER moved
             # there to make room for the row)
             ("STREAMING & SPEEDRUN ›", None, _page_screen(*STREAMING),
-             "A state file for stream overlays, and the match timer.", None),
+             "A state file for stream overlays, an on-screen input display, and the match timer.", None),
             (SECTION, "MULTIPLAYER"),
             ("PLAYER NAMES", "display.player_names",
              [("ALL", "all"), ("ALLIES", "allies"), ("ENEMIES", "enemies"), ("NONE", "none")],
@@ -1814,6 +1814,9 @@ PAGES = {
             ("STATE FILE", "display.state_file", ON_OFF,
              "Writes the game's state (map, mode, score, kills, deaths, loading, cutscene, pause) to "
              "game_state.json in the game's folder, for stream overlays and scene switchers.", None),
+            ("INPUT DISPLAY", "display.input_display", ON_OFF,
+             "Draws each player's sticks, trigger and buttons (or keys and mouse) at the bottom right, in demos "
+             "too. Hide HUD hides it.", None),
             (SECTION, "SPEEDRUN"),
             # (source/interface/hud.c: the mission's timer in the campaign and co-op)
             ("MATCH TIMER", "display.match_timer", ON_OFF,

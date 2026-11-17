@@ -484,6 +484,11 @@ static const struct config_setting config_settings[] =
 		"playing), map, mode, clock (seconds), and the first player's score,\n"
 		"kills and deaths. Written only when it changes, at most four times a\n"
 		"second, and replaced whole (never half written)." },
+	{ "display.input_display", _config_boolean, "false", "HALO_INPUT_DISPLAY", _environment_value, _platform_all,
+		"Draw each player's input at the bottom right of their view: the move\n"
+		"stick (or W, A, S, D), the look, the fire trigger and the actions held\n"
+		"(grenade, melee, jump, crouch, reload, action, swap, flashlight). In a\n"
+		"demo's playback, the recorded input. Hide HUD hides it." },
 	{ "display.perf_overlay", _config_string, "\"off\"", "HALO_PERF_OVERLAY", _environment_value, _platform_all,
 		"The performance overlay at the bottom right: \"off\"; \"simple\", the\n"
 		"frame rate averaged over half a second, green at 30 and over (the\n"

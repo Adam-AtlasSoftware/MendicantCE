@@ -329,7 +329,7 @@
 		<string text="Draws the HUD from sharp high-resolution redraws. Off draws the game's own pictures."/>
 		<string text="The buttons the HUD draws. Classic: plain Xbox buttons. Gems: shaded Xbox buttons. Dark Gems: the menus' button artwork."/>
 		<string text="Your living teammates' views in the HUD's top line, with their names, shields and distances, in co-op and team games: the SPARTAN LINK key (or D-pad Down) shows and hides them. Off: the key does nothing."/>
-		<string text="A state file for stream overlays, and the match timer."/>
+		<string text="A state file for stream overlays, an on-screen input display, and the match timer."/>
 		<string text=""/>
 		<string text="In multiplayer, whose names are drawn above their heads."/>
 		<string text="How large the players' names are drawn."/>
