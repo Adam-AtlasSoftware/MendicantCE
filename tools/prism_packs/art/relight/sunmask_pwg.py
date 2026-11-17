@@ -1,5 +1,5 @@
-"""PRISM baked shadows: the remodel's geometry read from a .pwg (prism_world_geometry.c's format,
-art/world_geo/wg_common.py's write_pwg), for the sun mask's bake (sunmask_bake.py).
+"""PRISM baked shadows: the remodel's geometry read from a .pwg (prism_world_geometry.c's format, versions 1 to 3:
+art/world_geo/wg_common.py's write_pwg, wg3_pwg.py's write_v3), for the sun mask's bake (sunmask_bake.py).
 
 read_pwg(path) -> {(lightmap_index, material_index): [part, ...]}, each part a dict of
   pos (n x 3), nrm (n x 3), uv1 (n x 2: the lightmap coordinates, as the map has them),
@@ -20,7 +20,9 @@ def read_pwg(path):
         raise ValueError(f"{path}: not a .pwg")
     version, count, flags = struct.unpack_from("<III", data, 4)
     lod = bool(flags & 1)
-    at = 64
+    # (version 3: a 64-byte extension after the header, and each record's seal groups, deviations and atlas after its
+    # far levels)
+    at = 128 if version >= 3 else 64
     out = {}
     for _ in range(count):
         lmi, mi, s_count, v_count, n_vert, n_tri, topo = struct.unpack_from("<hhIIIII", data, at)
@@ -36,6 +38,8 @@ def read_pwg(path):
         at += _pad4(n_tri * 6)
         if lod:
             at += scount * 8 + scount * 16
+        if version >= 3:
+            at += scount * 4 + scount * 16 + near_count * 16
         near = near_count if lod and near_count else n_tri
         out.setdefault((lmi, mi), []).append({
             "pos": verts[:, 0:3].astype(np.float64), "nrm": verts[:, 3:6].astype(np.float64),
