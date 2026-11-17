@@ -33,6 +33,7 @@ original's did.
 
 #include <ctype.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* port_config.c's */
@@ -47,6 +48,8 @@ extern struct data_array *object_header_data;
 extern struct data_array *effect_data;
 extern struct data_array *particle_data;
 unsigned long xgpu_backend_pipelines_defined(void);
+/* the host's last lines (port/android/guest/runtime/guest_host.h) */
+unsigned int host_log_recent(char *buffer, unsigned int size);
 
 /* the averages' frames, the 1% low's, and how often they are read again */
 #define PERF_OVERLAY_AVERAGE_MILLISECONDS 500
@@ -96,8 +99,61 @@ static long perf_overlay_alive(
 	return array && array->valid ? array->actual_count : 0;
 }
 
-/* (debug.timings) the busiest CPU sections, a line each, and the counts:
-the lines written from line on; the next line */
+/* (debug.timings) the GPU's passes by the graphics setting that owns them,
+from the last of the Vulkan backend's summaries in the host's lines
+("vulkan: pass groups: draws N; SMAA 0.093; OTHER 2.100", the most first:
+xgpu_vulkan.c's pass_times_groups_log): at most most of them, their labels
+and milliseconds a frame, and the draws a frame; how many (0: none found,
+as the Metal backend logs none) */
+static short perf_overlay_pass_groups(
+	char const *log,
+	char labels[][PERF_OVERLAY_LINE_SIZE],
+	real *milliseconds,
+	short most,
+	long *draws)
+{
+	static char const prefix[] = "vulkan: pass groups: draws ";
+	char const *found = NULL, *at = log;
+	short count = 0;
+
+	while ((at = strstr(at, prefix)) != NULL)
+		found = at++;
+	if (!found)
+		return 0;
+	at = found + sizeof(prefix) - 1;
+	*draws = strtol(at, NULL, 10);
+	while (count < most && (at = strstr(at, "; ")) != NULL)
+	{
+		char const *end = at + 2;
+		char const *space = NULL;
+		size_t length;
+
+		/* (a label of words, then its milliseconds, to the next ; or the
+		line's end) */
+		while (*end && *end != ';' && *end != '\n')
+		{
+			if (*end == ' ')
+				space = end;
+			end++;
+		}
+		if (!space)
+			break;
+		length = (size_t)(space - (at + 2));
+		if (length >= PERF_OVERLAY_LINE_SIZE)
+			length = PERF_OVERLAY_LINE_SIZE - 1;
+		memcpy(labels[count], at + 2, length);
+		labels[count][length] = 0;
+		milliseconds[count] = (real)strtod(space + 1, NULL);
+		count++;
+		if (*end != ';')
+			break;
+		at = end;
+	}
+	return count;
+}
+
+/* (debug.timings) the busiest CPU sections, a line each, the GPU's passes
+by owner, and the counts: the lines written from line on; the next line */
 static short perf_overlay_timing_lines(
 	char lines[PERF_OVERLAY_LINES][PERF_OVERLAY_LINE_SIZE],
 	short line)
@@ -121,8 +177,26 @@ static short perf_overlay_timing_lines(
 	if (line < PERF_OVERLAY_LINES)
 		snprintf(lines[line++], PERF_OVERLAY_LINE_SIZE, "OBJ %ld FX %ld PRT %ld", perf_overlay_alive(object_header_data),
 			perf_overlay_alive(effect_data), perf_overlay_alive(particle_data));
-	if (line < PERF_OVERLAY_LINES)
-		snprintf(lines[line++], PERF_OVERLAY_LINE_SIZE, "PIPELINES %lu", xgpu_backend_pipelines_defined());
+	{
+		static char log[16 * 1024];
+		char labels[PERF_OVERLAY_GPU_GROUPS][PERF_OVERLAY_LINE_SIZE];
+		real pass_milliseconds[PERF_OVERLAY_GPU_GROUPS];
+		long draws = -1;
+		short groups;
+
+		host_log_recent(log, sizeof(log));
+		groups = perf_overlay_pass_groups(log, labels, pass_milliseconds, PERF_OVERLAY_GPU_GROUPS, &draws);
+		for (index = 0; index < groups && line < PERF_OVERLAY_LINES; index++)
+			snprintf(lines[line++], PERF_OVERLAY_LINE_SIZE, "GPU %.18s %.2f ms", labels[index], pass_milliseconds[index]);
+		/* (the Metal backend's, or none timed yet) */
+		if (!groups && line < PERF_OVERLAY_LINES)
+			snprintf(lines[line++], PERF_OVERLAY_LINE_SIZE, "GPU PASSES --");
+		if (line < PERF_OVERLAY_LINES && draws >= 0)
+			snprintf(lines[line++], PERF_OVERLAY_LINE_SIZE, "PIPELINES %lu DRAWS %ld", xgpu_backend_pipelines_defined(),
+				draws);
+		else if (line < PERF_OVERLAY_LINES)
+			snprintf(lines[line++], PERF_OVERLAY_LINE_SIZE, "PIPELINES %lu", xgpu_backend_pipelines_defined());
+	}
 	return line;
 }
 

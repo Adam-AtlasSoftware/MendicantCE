@@ -23,7 +23,8 @@ enum
 	the GPU's passes and the counts too */
 	PERF_OVERLAY_LINES = 16,
 	PERF_OVERLAY_LINE_SIZE = 32,
-	PERF_OVERLAY_CPU_SECTIONS = 4
+	PERF_OVERLAY_CPU_SECTIONS = 4,
+	PERF_OVERLAY_GPU_GROUPS = 4
 };
 
 /* the setting's mode (_perf_overlay_*), read again when it changes */

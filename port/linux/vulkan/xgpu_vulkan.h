@@ -779,6 +779,12 @@ int xgpu_vulkan_gpu_time_read(double *milliseconds);
 /* the frames' GPU time so far (nanoseconds, a running total), and whether
 it is measured (the frames timed: not the VR mode's, which reads them) */
 uint64_t xgpu_vulkan_gpu_nanoseconds(int *measured);
+/* (debug.pass_times) the passes begun and the work outside passes recorded
+from now on belong to a graphics setting's work (its label, capitals, a
+string that lives as long as the backend: "SMAA", "PANINI"...; NULL none),
+as debug.pass_times sums and logs them; nothing kept while the passes are
+not timed */
+void xgpu_vulkan_pass_owner(const char *owner);
 
 uint64_t xgpu_vulkan_fence(void);
 /* returns once the GPU has done the submission of that number and those
