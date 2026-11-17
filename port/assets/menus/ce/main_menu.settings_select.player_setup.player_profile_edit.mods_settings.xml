@@ -18,8 +18,10 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_0" x="28" y="104"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_mods" x="28" y="124"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_mods_folder" x="28" y="145"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_3" x="28" y="172"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_mcc_packages" x="28" y="192"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_3" x="28" y="172" platform="computer"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_add_maps" x="28" y="192" platform="computer"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_5" x="28" y="219"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_mcc_packages" x="28" y="239"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/button_bar" y="414"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/tabs" y="76"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/tabs_search" y="76"/>
@@ -151,10 +153,26 @@
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/mods_folder_label" type="text" controller="1" width="332" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" string_index="2" color="#FF2896FF" text_x="10" text_y="1" wide="0 244" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_3" width="344" height="18" bitmap="main_menu/settings/section" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_3" width="344" height="18" bitmap="main_menu/settings/section" platform="computer" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_3_title"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_3_title" type="text" controller="1" width="344" height="18" wide="0 244" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" string_index="3" color="#FF6F9CD0" text_x="2" text_y="1" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_add_maps" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="computer" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<on event="a" run="port settings add maps"/>
+		<on event="start" run="port settings add maps"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/add_maps_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/add_maps_value" x="188" y="2"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/add_maps_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" string_index="4" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/add_maps_value" type="text" controller="1" width="140" height="16" color="#FF2896FF" align="center" text_y="-1" text_flags="no_focus_test" wide="20 120" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_5" width="344" height="18" bitmap="main_menu/settings/section" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_5_title"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_5_title" type="text" controller="1" width="344" height="18" wide="0 244" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" string_index="5" color="#FF6F9CD0" text_x="2" text_y="1" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_mcc_packages" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
 		<on event="a" open="main_menu/settings_select/player_setup/player_profile_edit/network_setup/mcc_packages/mcc_packages_screen"/>
@@ -162,12 +180,14 @@
 		<on event="left_mouse" run="mouse emit accept event"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/mcc_packages_label"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/mcc_packages_label" type="text" controller="1" width="332" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" string_index="4" color="#FF2896FF" text_x="10" text_y="1" wide="0 244" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/mcc_packages_label" type="text" controller="1" width="332" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" string_index="6" color="#FF2896FF" text_x="10" text_y="1" wide="0 244" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels">
 		<string text="MODS"/>
 		<string text="MANAGE MODS ›"/>
 		<string text="MODS FOLDER"/>
+		<string text="GAME MAPS"/>
+		<string text="ADD MAPS"/>
 		<string text="MASTER CHIEF COLLECTION"/>
 		<string text="MCC PACKAGES ›"/>
 	</strings>
@@ -176,6 +196,8 @@
 		<string text=""/>
 		<string text="Texture, sound, text and model packs from the mods folder: turn each on or off, and choose which plays over which. They are this computer's, for every profile."/>
 		<string text="Each mod is a folder in the mods folder, beside the maps folder, with its mod.toml and its tags. Mods are turned on and off from the main menu's Settings, not in a game."/>
+		<string text=""/>
+		<string text="Your maps come from your Xbox disc image, which the game needs, and from Custom Edition's installer (halocesetup_en_1.00.exe), whose multiplayer maps are optional.|Select it twice: the maps screen opens the next time the game starts, to add either."/>
 		<string text=""/>
 		<string text="The Master Chief Collection's maps: finding them, their campaign missions and collections, and the copies downloaded from hosts."/>
 	</strings>

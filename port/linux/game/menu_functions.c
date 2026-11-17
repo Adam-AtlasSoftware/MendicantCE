@@ -141,6 +141,7 @@ their handlers open opens.
 #include "../src/server_master.h"
 #include "../src/report.h"
 #include "../src/game_caches.h" /* port: port/linux/src/game_caches.c */
+#include "../src/map_sources.h" /* port: port/linux/src/map_sources.c */
 #include "text_filter.h"
 /* (the party: party_menu.inc) */
 #include "party.h"
@@ -2856,6 +2857,7 @@ static boolean settings_profile_new(struct widget_instance *widget, struct event
 
 static void settings_weapon_reset(struct widget_instance *screen);
 static void clear_caches_press(void);
+static void add_maps_press(void);
 /* Settings' search, the menu engine's (settings_search_menu.inc) */
 static boolean settings_search_open(struct widget_instance *widget, boolean *widget_deleted);
 static void settings_search_edit(struct widget_instance *widget);
@@ -2973,6 +2975,12 @@ static boolean settings_function(char const *name, struct widget_instance *widge
 		/* (CLEAR CACHES: asked, then asked for at the next start,
 		port/linux/src/game_caches.c) */
 		clear_caches_press();
+	}
+	else if (!strcmp(name, "add maps"))
+	{
+		/* (ADD MAPS: asked, then the maps screen asked for at the next
+		start, port/linux/src/map_sources.c) */
+		add_maps_press();
 	}
 	else if (!strcmp(name, "report"))
 	{
@@ -3966,6 +3974,99 @@ static void clear_caches_press(void)
 	ui_play_audio_feedback_sound(SOUND_FORWARD);
 }
 
+/* ---------- Mods' ADD MAPS: its value the sources of maps the game has
+(port/linux/src/map_sources.c, which first_start.c's screen asks too); the
+first press asks, the second asks for that screen at the next start, as
+CLEAR CACHES does */
+
+static struct
+{
+	/* the first press, 0: none */
+	unsigned long asked;
+	/* whether the sources were read since the page showed, and which the
+	game has; whether the screen is asked for */
+	boolean measured;
+	struct map_sources sources;
+	boolean requested;
+} add_maps;
+
+static boolean add_maps_asked(void)
+{
+	return add_maps.asked && system_milliseconds() - add_maps.asked < CLEAR_CACHES_ASK_MILLISECONDS;
+}
+
+static void add_maps_measure(void)
+{
+	map_sources_read_game(&add_maps.sources);
+	add_maps.requested = map_sources_requested() != 0;
+	add_maps.measured = TRUE;
+}
+
+static void add_maps_show(struct widget_instance *list)
+{
+	char text[ROW_TEXT_LENGTH];
+
+	if (!settings_model_row(list, "add_maps"))
+	{
+		add_maps.measured = FALSE;
+		add_maps.asked = 0;
+		return;
+	}
+	if (!add_maps.measured)
+		add_maps_measure();
+	if (add_maps.requested)
+		snprintf(text, sizeof(text), "AT NEXT START");
+	else if (add_maps_asked())
+		snprintf(text, sizeof(text), "SELECT AGAIN");
+	else
+		map_sources_summary(&add_maps.sources, text, sizeof(text));
+	settings_status_set(list, "add_maps", text);
+}
+
+/* the panel's value (the sources) and words for ADD MAPS (the others':
+FALSE) */
+static boolean add_maps_panel(struct widget_instance *row, wchar_t *value, wchar_t const **help)
+{
+	static wchar_t words[SETTINGS_PANEL_TEXT_LENGTH];
+	char summary[32], text[SETTINGS_PANEL_TEXT_LENGTH];
+	boolean custom_edition;
+
+	if (!settings_row_is(row, "add_maps"))
+		return FALSE;
+	map_sources_summary(&add_maps.sources, summary, sizeof(summary));
+	discord_widen(summary, value, ROW_TEXT_LENGTH);
+	custom_edition = add_maps.sources.present[_map_source_custom_edition] != 0;
+	if (add_maps.requested)
+		snprintf(text, sizeof(text), "The maps screen opens the next time the game starts: quit, then start it "
+			"again.|Select ADD MAPS again to keep it closed.");
+	else if (add_maps_asked())
+		snprintf(text, sizeof(text), "Select ADD MAPS again to open the maps screen the next time the game "
+			"starts.");
+	else
+		snprintf(text, sizeof(text), "Xbox maps: installed. Custom Edition's maps: %s.|Select it twice: the "
+			"maps screen opens at the next start, to %s.", custom_edition ? "added" : "not added",
+			custom_edition ? "copy either again" : "add Custom Edition's from its installer");
+	discord_widen(text, words, SETTINGS_PANEL_TEXT_LENGTH);
+	*help = words;
+	return TRUE;
+}
+
+/* "port settings add maps": the first press asks, the second asks for the
+maps screen at the next start; once asked for, a press takes it back */
+static void add_maps_press(void)
+{
+	if (!add_maps.requested && !add_maps_asked())
+	{
+		add_maps.asked = system_milliseconds() | 1;
+		ui_play_audio_feedback_sound(SOUND_CURSOR);
+		return;
+	}
+	map_sources_request(!add_maps.requested);
+	add_maps.asked = 0;
+	add_maps_measure();
+	ui_play_audio_feedback_sound(SOUND_FORWARD);
+}
+
 /* the panel's name, value and words for a row of the page (the others':
 FALSE) */
 static boolean discord_account_panel(struct widget_instance *row, wchar_t *name, wchar_t *value,
@@ -4483,6 +4584,8 @@ static void settings_panel_show(struct widget_instance *list, short tab)
 		about_panel(row, value, &help);
 		/* (Profile's CLEAR CACHES: their size, and what a press does) */
 		clear_caches_panel(row, value, &help);
+		/* (Mods' ADD MAPS: the maps' sources, and what a press does) */
+		add_maps_panel(row, value, &help);
 		/* (Button Remapping's: a button being taken, a replacement asked) */
 		if (pad_editor_page(screen_of(list)))
 			pad_editor_panel(row, name, value, &help);
@@ -4807,6 +4910,7 @@ static void settings_page_update(struct widget_instance *list)
 	settings_rows_conditions(list);
 	discord_account_show(list);
 	clear_caches_show(list);
+	add_maps_show(list);
 	hdr_display_show(list);
 	pad_editor_update(list);
 	controls_page_update(list);

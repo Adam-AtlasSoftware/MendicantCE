@@ -449,7 +449,12 @@
 		<row key="mods_folder" kind="link" label="MODS FOLDER" crumb="MODS › MODS">
 			<help>Each mod is a folder in the mods folder, beside the maps folder, with its mod.toml and its tags. Mods are turned on and off from the main menu's Settings, not in a game.</help>
 		</row>
-		<section key="section_3" title="MASTER CHIEF COLLECTION"/>
+		<section key="section_3" title="GAME MAPS" when="computer"/>
+		<row key="add_maps" kind="status" label="ADD MAPS" crumb="MODS › GAME MAPS" search="iso ce installer extract" when="computer" run="port settings add maps">
+			<help>Your maps come from your Xbox disc image, which the game needs, and from Custom Edition's installer (halocesetup_en_1.00.exe), whose multiplayer maps are optional.</help>
+			<note>Select it twice: the maps screen opens the next time the game starts, to add either.</note>
+		</row>
+		<section key="section_5" title="MASTER CHIEF COLLECTION"/>
 		<row key="mcc_packages" kind="link" label="MCC PACKAGES ›" crumb="MODS › MASTER CHIEF COLLECTION" open="main_menu/settings_select/player_setup/player_profile_edit/network_setup/mcc_packages/mcc_packages_screen">
 			<help>The Master Chief Collection's maps: finding them, their campaign missions and collections, and the copies downloaded from hosts.</help>
 		</row>

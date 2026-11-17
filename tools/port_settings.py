@@ -827,7 +827,7 @@ REMAP_HANDLERS = ['<on event="x" run="port controller clear"/>',
 # hdr_display_show's, the display's peak
 SETTINGS_STATUS_ROWS = {"discord_account", "link_status", "link_unlink",
                         *(f"link_master_{n}" for n in range(1, 5)), "hdr_display",
-                        "viewmodel_weapon_reset", "gyro_found", "gyro_calibrate", "clear_caches",
+                        "viewmodel_weapon_reset", "gyro_found", "gyro_calibrate", "clear_caches", "add_maps",
                         "remap_player", "remap_group", *(f"pad_{n}" for n in range(1, REMAP_ROWS + 1))}
 # the rows whose labels menu_functions.c writes (a master server's host): the
 # label's text its own, not its list's; their values the narrower column at
@@ -1198,6 +1198,15 @@ PAGES = {
             ("MODS FOLDER", None, None,
              "Each mod is a folder in the mods folder, beside the maps folder, with its mod.toml and its tags. "
              "Mods are turned on and off from the main menu's Settings, not in a game.", None, "mods_folder"),
+            # (its value the maps' sources the game has, and the screen asked
+            # for at the next start: menu_functions.c's add_maps_show,
+            # port/linux/src/map_sources.c; first_start.c's screen)
+            (SECTION, "GAME MAPS"),
+            ("ADD MAPS", None, None,
+             "Your maps come from your Xbox disc image, which the game needs, and from Custom Edition's installer "
+             "(halocesetup_en_1.00.exe), whose multiplayer maps are optional.|Select it twice: the maps screen "
+             "opens the next time the game starts, to add either.",
+             "computer", "add_maps", "port settings add maps"),
             # (Online's MAP SHARING has no room for it: MCC_PACKAGES)
             (SECTION, "MASTER CHIEF COLLECTION"),
             ("MCC PACKAGES ›", None, _page_screen(*MCC_PACKAGES),
@@ -1914,6 +1923,7 @@ SETTINGS_SEARCH_WORDS = {
     "colour": ["color", "shield_color", "overshield_layer_color"],
     "gamertag": ["name"], "nickname": ["name"],
     "cache": ["map_cache_megabytes", "clear_caches"], "disk": ["map_cache_megabytes"],
+    "iso": ["add_maps"], "ce": ["add_maps"], "installer": ["add_maps"], "extract": ["add_maps"],
     "bug": ["report"], "crash": ["report"],
     "intro": ["movies"],
     "lag": ["low_latency"],

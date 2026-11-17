@@ -32,6 +32,7 @@ and the debug keyboard that the game's console reads.
 #include "xiso.h"
 #include "map_unpack.h"
 #include "map_import.h"
+#include "map_sources.h"
 #ifdef HALO_VR
 #include "vr.h"
 #include "vr_host.h"
@@ -906,6 +907,7 @@ static void data_import_custom_edition(const char *destination)
 	char message[1600];
 	unsigned long long written = 0;
 	BOOL failed = FALSE;
+	struct map_sources sources;
 	int kind;
 
 	if (!data_choose_image(installer, sizeof(installer), TRUE, &failed, error, sizeof(error)))
@@ -932,9 +934,11 @@ static void data_import_custom_edition(const char *destination)
 		SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Halo", error, NULL);
 		return;
 	}
-	snprintf(message, sizeof(message), "%s %s. They show in the map lists' CUSTOM MULTIPLAYER.\n\n"
-		"Halo still needs the maps of your Xbox disc to start: choose Xbox disc image next.",
-		written ? "Custom Edition's maps are in" : "Custom Edition's maps were already in", folder);
+	map_sources_read(destination, &sources);
+	snprintf(message, sizeof(message), "%s %s. They show in the map lists' CUSTOM MULTIPLAYER.%s",
+		written ? "Custom Edition's maps are in" : "Custom Edition's maps were already in", folder,
+		sources.present[_map_source_xbox] ? "" :
+		"\n\nHalo still needs the maps of your Xbox disc to start: choose Xbox disc image next.");
 	SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, "Halo", message, NULL);
 }
 
@@ -952,9 +956,18 @@ BOOL platform_offer_game_data(const char *destination, const char *missing)
 		{ 0, _choice_custom_edition, "Custom Edition maps" },
 		{ SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, _choice_quit, "Quit" },
 	};
+	/* (Settings' ADD MAPS, with the Xbox maps there: Start in Quit's place,
+	map_sources.c) */
+	static const SDL_MessageBoxButtonData start_buttons[] =
+	{
+		{ 0, _choice_xbox, "Xbox disc image" },
+		{ 0, _choice_custom_edition, "Custom Edition maps" },
+		{ SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT | SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, _choice_quit, "Start" },
+	};
 	char message[2600];
 	char found[1024];
 	BOOL image_found;
+	struct map_sources sources;
 
 	/* not for runs nobody is watching */
 	if (config_boolean("debug.hidden_window") || config_real("debug.exit_after") > 0.0 ||
@@ -995,8 +1008,21 @@ BOOL platform_offer_game_data(const char *destination, const char *missing)
 		int answer = _choice_quit;
 		BOOL failed = FALSE;
 
+		map_sources_read(destination, &sources);
+		if (sources.present[_map_source_xbox])
+		{
+			snprintf(message, sizeof(message),
+				"Halo's maps: the Xbox maps are installed; Custom Edition's maps are %s.\n\n"
+				"Xbox disc image: copy the Xbox maps from a disc image to %s/maps again.\n\n"
+				"Custom Edition maps: add the multiplayer maps of Custom Edition's installer "
+				"(halocesetup_en_1.00.exe) to custom_maps; only those missing are written.",
+				sources.present[_map_source_custom_edition] ? "added" : "not added", destination);
+			question.buttons = start_buttons;
+		}
 		if (!SDL_ShowMessageBox(&question, &answer) || answer == _choice_quit)
 		{
+			if (sources.present[_map_source_xbox])
+				return TRUE;
 			platform_log("no game data: quitting");
 			exit(EXIT_SUCCESS);
 		}
