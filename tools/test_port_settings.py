@@ -534,3 +534,53 @@ def test_modern_aim_rows_negative_control():
     assert len(_modern_aim_rows_problems(pages, FUNCTIONS)) == 4
     classic = FUNCTIONS.replace('!strcmp(style, "modern")', '!strcmp(style, "classic")')
     assert _modern_aim_rows_problems(PAGES, classic) == ["aim_modern does not read the Aim Style as Modern"]
+
+
+MODEL = (Path(__file__).resolve().parent.parent / "port/assets/menus/model/settings.xml").read_text()
+
+
+def _output_depth_row_problems(pages, functions, model, enabled=None):
+    """what is wrong with Color Depth (display.output_depth, #1152): on Brightness (Advanced Graphics is full), a computer's (not a phone's
+    or a tablet's), hidden in the VR build, dimmed while the frame is drawn in HDR (settings_condition_term's
+    hdr_drawn: the front end's hdr.active), AUTO first, then 8-BIT and 10-BIT"""
+    enabled = port_settings.SETTINGS_ROW_ENABLED if enabled is None else enabled
+    rows = {entry[1]: entry for entry in pages[port_settings.BRIGHTNESS_PAGE[0]]["rows"] if entry[0] != SECTION}
+    entry = rows.get("display.output_depth")
+    if not entry:
+        return ["no Color Depth row on Brightness"]
+    problems = []
+    if entry[4] != "computer":
+        problems.append(f"shown on {entry[4]}, not a computer's alone")
+    if [value for _, value in entry[2]] != ["auto", "8", "10"]:
+        problems.append("its choices are not AUTO, 8-BIT, 10-BIT")
+    if port_settings.SETTINGS_ROW_WHEN.get("output_depth") != "!vr_build":
+        problems.append("not hidden in the VR build")
+    if enabled.get("output_depth") != "!hdr_drawn":
+        problems.append("not dimmed while HDR draws")
+    if not re.search(r'!strcmp\(name, "hdr_drawn"\)\)\s*return halo_hdr_drawn\(\) != 0;',
+                     function_body(functions, "settings_condition_term")):
+        problems.append("hdr_drawn does not read whether the frame is drawn in HDR")
+    if not re.search(r'<row key="output_depth"[^>]* when="computer\+!vr_build" enabled="!hdr_drawn"', model):
+        problems.append("the model's row lacks its conditions")
+    return problems
+
+
+def test_output_depth_row():
+    """Color Depth is on Brightness beside Gamma, hidden and dimmed where it does not apply"""
+    assert _output_depth_row_problems(PAGES, FUNCTIONS, MODEL) == []
+
+
+def test_output_depth_row_negative_control():
+    """the check sees the row shown on a phone, left lit under HDR, and a term that reads the opposite"""
+    advanced = port_settings.BRIGHTNESS_PAGE[0]
+    pages = {folder: dict(page, rows=list(page["rows"])) for folder, page in PAGES.items()}
+    pages[advanced]["rows"] = [entry[:4] + (None,) + entry[5:] if entry[0] != SECTION and
+                               entry[1] == "display.output_depth" else entry for entry in pages[advanced]["rows"]]
+    assert _output_depth_row_problems(pages, FUNCTIONS, MODEL) == ["shown on None, not a computer's alone"]
+    wrong = FUNCTIONS.replace("return halo_hdr_drawn() != 0;", "return halo_hdr_drawn() == 0;")
+    assert _output_depth_row_problems(PAGES, wrong, MODEL) == [
+        "hdr_drawn does not read whether the frame is drawn in HDR"]
+    lit = {key: value for key, value in port_settings.SETTINGS_ROW_ENABLED.items() if key != "output_depth"}
+    assert _output_depth_row_problems(PAGES, FUNCTIONS, MODEL, lit) == ["not dimmed while HDR draws"]
+    assert _output_depth_row_problems(PAGES, FUNCTIONS, MODEL.replace('enabled="!hdr_drawn"', "")) == [
+        "the model's row lacks its conditions"]

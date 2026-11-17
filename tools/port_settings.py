@@ -1307,6 +1307,14 @@ PAGES = {
              "parts; lower darkens them. 1.0 shows the game as it is drawn. With HDR on an HDR display, Paper "
              "White sets the brightness instead.|Click the number (or press A) to type any from 0.5 to 2.0.",
              None),
+            # (display.output_depth, #1152: a computer's, not the VR build's,
+            # dimmed while the frame is drawn in HDR: SETTINGS_ROW_WHEN,
+            # SETTINGS_ROW_ENABLED)
+            ("COLOR DEPTH", "display.output_depth", [("AUTO", "auto"), ("8-BIT", "8"), ("10-BIT", "10")],
+             "10-Bit draws finer shades, so fog and skies show no bands: a 10-bit display shows them all, others "
+             "a fine grain. 8-Bit draws as before, lighter on the graphics card. Auto picks for you: 10-Bit, or "
+             "8-Bit with battery saver.|HDR has its own depth: this applies with HDR off.",
+             "computer"),
             (SECTION, "HDR"),
             ("HDR", "display.hdr", [("AUTO", "auto"), ("ON", "on"), ("OFF", "off")],
              "Brighter highlights on an HDR display. Auto turns it on while the display shows HDR; a display "
@@ -2465,6 +2473,8 @@ SETTINGS_ROW_WHEN = {
     # (the headset's menus have no desktop pointer; the VR build never curves
     # its frames, nor draws through the Panini projection)
     "menu_cursor": "!vr", "gamma": "!vr_build", "panini": "!vr_build", "panini_vertical": "!vr_build",
+    # (the VR build draws its eyes in 8 bits)
+    "output_depth": "!vr_build",
     # (the Mac's display paces its frames already)
     "low_latency": "!vrr_system",
     # (in a game: not those that would drop it or are the main menu's, nor
@@ -2489,6 +2499,10 @@ SETTINGS_ROW_ENABLED = {
     # Gyro & Flick Stick page: menu_functions.c's aim_modern)
     "modern_aim_acceleration_angle": "aim_modern",
     "modern_aim_acceleration_threshold": "aim_modern",
+    # (display.output_depth: the SDR frame's; dimmed while the frame is drawn
+    # in HDR, whose half floats are its own: settings_condition_term's
+    # hdr_drawn)
+    "output_depth": "!hdr_drawn",
 }
 
 

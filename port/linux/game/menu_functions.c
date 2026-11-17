@@ -3288,6 +3288,9 @@ static boolean settings_condition_term(struct widget_instance *list, char const 
 		return platform_vrr_detected() == 1 /* PLATFORM_VRR_FOUND */;
 	if (!strcmp(name, "vrr_system"))
 		return platform_vrr_detected() == 3 /* PLATFORM_VRR_SYSTEM */;
+	/* (the frame drawn in HDR now: display.output_depth's row dimmed) */
+	if (!strcmp(name, "hdr_drawn"))
+		return halo_hdr_drawn() != 0;
 	if (!strcmp(name, "gyro"))
 		return halo_gyro_found() == 2;
 	/* (the player's Aim Style Modern, on another page than the rows it

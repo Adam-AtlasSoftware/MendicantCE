@@ -339,6 +339,9 @@ inspector's replay (port/linux/game/render_marks.c) */
 (Video Setup's DISPLAY PEAK row: its value, "800 NITS"; words, its panel's
 words); 0 where no renderer draws HDR (port/linux/src/d3d8_device.c) */
 int halo_hdr_display_text(int words, char *text, unsigned int size);
+/* the frame is drawn in HDR now (display.hdr and the display: Settings'
+COLOR DEPTH dimmed; port/linux/src/d3d8_device.c) */
+int halo_hdr_drawn(void);
 #ifndef HALO_HDR_KIND_NONE
 #define HALO_HDR_KIND_NONE 0
 #define HALO_HDR_KIND_FIRST_PERSON 1
