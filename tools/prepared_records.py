@@ -83,7 +83,8 @@ def run_game(halo: Path, maps: Path, work: Path, seconds: int, name: str = "run"
                        HALO_FIXED_STEP="1", HALO_PREPARED_RECORDS="1", HALO_SHIPPED_RECORDS="0",
                        HALO_MAP_CACHE_MEGABYTES="3500",
                        HALO_RENDER_MANIFEST=str(run / "manifest.txt"),
-                       SDL_VIDEO_DRIVER="offscreen", SDL_AUDIO_DRIVER="dummy", **(settings or {}))
+                       SDL_VIDEO_DRIVER="offscreen", SDL_AUDIO_DRIVER="dummy")
+    environment.update(settings or {})
     # (a setting given as None: unset)
     environment = {name: value for name, value in environment.items() if value is not None}
     log = run / "stdout.txt"
