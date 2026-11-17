@@ -22,7 +22,7 @@ int main(int argc,char **argv) {
   }
   return 0;
  }
- /* shown as Erin's old steps read: past 100% the amplitude's percentage
+ /* shown as the old steps read: past 100% the amplitude's percentage
  (1.5 is 150%, 2.0 the master's 200%), and a percentage typed is that
  place */
  CASE("shown") {
