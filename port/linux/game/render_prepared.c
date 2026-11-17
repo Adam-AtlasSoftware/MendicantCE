@@ -117,6 +117,8 @@ records, what every value of it would:
   whatever the setting (d3d8_device.c, world_span); the draws' pipelines
   lit by the world's occlusion as the setting is now (world_ao_key);
 - anisotropic_filtering: the samplers', made as the record plays;
+- battery_saver, output_depth: the back buffer's format (RGBA16 or BGRA8),
+  made as the record plays;
 - anti_aliasing: its pass journaled whatever the setting, the targets'
   samples and the pass made as the record plays;
 - astc_textures: the textures' upload, as the record loads them;
@@ -124,8 +126,9 @@ records, what every value of it would:
   records, whatever the setting (halo_dynamic_lights_walked); the draws'
   pipelines lit as the setting is now;
 - graphics: a preset, nothing but the other settings' values;
-- hdr, hdr_mode: the targets' formats and the tone map, made as the record
-  plays; the draws' HDR tags are journaled whatever they are;
+- hdr, hdr_mode, hdr_highlight_boost: the targets' formats and the tone
+  map, made as the record plays; the draws' HDR tags are journaled whatever
+  they are, and the boost's taken as they are made;
 - high_res_hud, high_res_text: the bitmaps' pixels, as the record loads them
   (the game draws a bitmap as its tag says either way);
 - model_detail: the walk draws each level of each model as the Xbox chose it
@@ -137,6 +140,9 @@ records, what every value of it would:
 - per_pixel_lighting: the model lighting's pipelines, made as the record
   plays;
 - shadow_resolution: the shadow maps' size, which the journal does not hold;
+- soft_particles: the effect's group that can be soft is journaled whatever
+  the setting (d3d8_device.c, soft_effect_key), each draw of it soft as the
+  setting is now;
 - structure_culling: none in the walk (structure_culling.c), the game's own
   visibility's frame;
 - first_person_legs, viewmodel_visible: the walk draws every first-person and
@@ -146,10 +152,11 @@ enumeration is checked under. */
 static char const *const prepared_settings[] =
 {
 	"display.ambient_occlusion", "display.anisotropic_filtering", "display.anti_aliasing", "display.astc_textures",
-	"display.dynamic_lights", "display.graphics", "display.hdr", "display.hdr_mode", "display.high_res_hud",
-	"display.high_res_text", "display.model_detail", "display.overshield_effect", "display.panini",
-	"display.panini_vertical", "display.per_pixel_lighting", "display.shadow_resolution", "display.shield_glow", "display.structure_culling",
-	"display.first_person_legs", "display.viewmodel_shield", "display.viewmodel_visible",
+	"display.battery_saver", "display.dynamic_lights", "display.graphics", "display.hdr", "display.hdr_highlight_boost",
+	"display.hdr_mode", "display.high_res_hud", "display.high_res_text", "display.model_detail",
+	"display.output_depth", "display.overshield_effect", "display.panini", "display.panini_vertical",
+	"display.per_pixel_lighting", "display.shadow_resolution", "display.shield_glow", "display.soft_particles",
+	"display.structure_culling", "display.first_person_legs", "display.viewmodel_shield", "display.viewmodel_visible",
 };
 
 static struct

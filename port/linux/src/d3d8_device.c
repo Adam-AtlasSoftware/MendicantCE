@@ -49,6 +49,7 @@ Conventions carried over from the Xbox:
 #include "world_proxies.h"
 #include "world_rt.h"
 #include "world_sdf.h"
+#include "text_hires.h"
 #include "main/console.h"
 
 #include <SDL3/SDL.h>
@@ -7528,6 +7529,8 @@ so that a record made on one plays back on every other: played back, a run
 uploads the pages that hold it, whole (journal_read). */
 
 typedef char journal_words_are_dwords[sizeof(DWORD) == sizeof(uint32_t) ? 1 : -1];
+/* (a stage's texture region's floats journaled as their bits) */
+typedef char journal_regions_are_words[sizeof(float) == sizeof(uint32_t) ? 1 : -1];
 /* (the window's 4 KB pages, the contiguous allocator's on every platform:
 xbox_memory.c) */
 #define JOURNAL_PAGE_UNIT 0x1000
@@ -7541,7 +7544,8 @@ enum
 	_journal_object_bitmap,
 	/* (value: its number, d3d8_resource_created) */
 	_journal_object_created,
-	/* (value: 0 the back buffer, 1 its depth buffer) */
+	/* (value: 0 the back buffer, 1 its depth buffer, 2 the high-res text's
+	atlas's placeholder: text_hires_atlas_object) */
 	_journal_object_device,
 	/* (value: its address, in the contiguous memory) */
 	_journal_object_memory,
@@ -7569,6 +7573,10 @@ struct journal_state
 	uint32_t streams[16][2];
 	uint32_t hdr_category, hdr_kind, hdr_view;
 	uint32_t lights_environment, lights_count, halos_count, sky, visibility, world_span;
+	/* (display.soft_particles: the effect's group can be soft, halo_effect_soft;
+	each stage's region of its texture, d3d8_texture_region, its floats' bits) */
+	uint32_t soft_effect;
+	uint32_t texture_regions[D3DTSS_MAXSTAGES][4];
 	uint32_t render_state[D3DRS_MAX];
 	uint32_t texture_state[D3DTSS_MAXSTAGES][D3DTSS_MAX];
 };
@@ -7716,6 +7724,8 @@ struct journal_saved
 	BOOL lights_environment, visibility;
 	int lights_count, halos_count, world_span;
 	unsigned long sky;
+	BOOL soft_effect;
+	float texture_regions[D3DTSS_MAXSTAGES][4];
 };
 
 static struct journal_saved saved;
@@ -7863,6 +7873,15 @@ static void journal_identify(const void *object, struct journal_object *to)
 		to->value = object == &device.back_buffer ? 0 : 1;
 		return;
 	}
+	/* (the high-res text's atlas's placeholder, which the texture binds
+	choose the atlas's distance fields for: as itself, not as the texture
+	made in its order, another run's another texture) */
+	if (object == text_hires_atlas_object())
+	{
+		to->kind = _journal_object_device;
+		to->value = 2;
+		return;
+	}
 	if (journal.bitmaps && journal.bitmaps->identify(object, &tag_index, &bitmap_index))
 	{
 		to->kind = _journal_object_bitmap;
@@ -7920,7 +7939,7 @@ static void *journal_resolve(const struct journal_object *object)
 		return NULL;
 	case _journal_object_device:
 		found = object->value == 0 ? (void *)&device.back_buffer : object->value == 1 ? (void *)&device.depth_buffer :
-			NULL;
+			object->value == 2 ? (void *)text_hires_atlas_object() : NULL;
 		break;
 	case _journal_object_bitmap:
 		found = journal.bitmaps ? journal.bitmaps->load(object->value, object->check) : NULL;
@@ -8004,6 +8023,9 @@ static void journal_capture(struct journal_state *state)
 	/* (display.ambient_occlusion "world"'s window, whatever the setting: a
 	draw's context in a recording of the manifest, prepare_draw) */
 	state->world_span = (uint32_t)world_ao.span;
+	/* (display.soft_particles' group, whatever the setting: soft_effect_key) */
+	state->soft_effect = (uint32_t)(soft_effects.group != 0);
+	memcpy(state->texture_regions, device.texture_regions, sizeof(state->texture_regions));
 	memcpy(state->render_state, D3D__RenderState, sizeof(state->render_state));
 	memcpy(state->texture_state, D3D__TextureState, sizeof(state->texture_state));
 }
@@ -8094,17 +8116,19 @@ static void journal_operation(unsigned long op, const void *arguments, unsigned 
 /* the front end's state that a draw's pipeline is derived from under some
 settings and not under others (the HDR's tags, with display.hdr; the
 enhanced lights', with display.dynamic_lights "enhanced"; the window's
-span, with display.ambient_occlusion "world": world_ao_key), as three words: recording a map's preparation, a draw is
+span, with display.ambient_occlusion "world": world_ao_key; the effect's
+group, soft with display.soft_particles: soft_effect_key), as three words: recording a map's preparation, a draw is
 journaled where it is new in these or in its pipeline (preparation_seen),
 so that its record holds every draw a load under other settings tells
 apart; 0 otherwise */
 static void journal_settings_blind_of(unsigned long words[3], int hdr_category, int hdr_kind, BOOL hdr_view,
-	int lights, BOOL environment, int world_span)
+	int lights, BOOL environment, int world_span, BOOL soft)
 {
 	words[0] = (unsigned long)hdr_category;
 	words[1] = (unsigned long)hdr_kind;
 	words[2] = (unsigned long)(hdr_view != 0) | (unsigned long)(lights > 0) << 1 |
 		(unsigned long)(environment != 0) << 2 | (unsigned long)world_span << 3;
+	words[2] |= (unsigned long)(soft != 0) << 16;
 }
 
 static void journal_settings_blind(unsigned long words[3])
@@ -8112,7 +8136,7 @@ static void journal_settings_blind(unsigned long words[3])
 	words[0] = words[1] = words[2] = 0;
 	if (journal_recording)
 		journal_settings_blind_of(words, hdr.category, hdr.kind, hdr.view, dynamic_lights.count,
-			dynamic_lights.environment, world_ao.span);
+			dynamic_lights.environment, world_ao.span, soft_effects.group);
 }
 
 static void journal_page(unsigned long page)
@@ -8196,8 +8220,9 @@ makes it 2, 3 and so on; its state's size is in it as well (5: the pages'
 runs in JOURNAL_PAGE_UNIT's units, not the platform's pages; 6: the world's
 window's span, world_span; 7: without the screen's ambient occlusion, its
 pre-pass, its flags and its operations; 8: world_span's
-WORLD_AO_SPAN_FOUND, the window found once a pixel) */
-#define JOURNAL_FORM 8
+WORLD_AO_SPAN_FOUND, the window found once a pixel; 9: the effect's soft
+group, the stages' texture regions and the high-res text's atlas as itself) */
+#define JOURNAL_FORM 9
 
 unsigned int halo_gpu_journal_form(void)
 {
@@ -8266,6 +8291,8 @@ static void journal_restore(const struct journal_state *state)
 	preparation.sky = state->sky;
 	device.visibility_test_active = state->visibility != 0;
 	world_ao.span = (int)state->world_span;
+	soft_effects.group = state->soft_effect != 0;
+	memcpy(device.texture_regions, state->texture_regions, sizeof(device.texture_regions));
 }
 
 static void journal_play(unsigned long op, const struct journal_state *state)
@@ -8463,6 +8490,8 @@ int halo_gpu_journal_replay(const unsigned int *words, unsigned int count, const
 	saved.sky = preparation.sky;
 	saved.visibility = device.visibility_test_active;
 	saved.world_span = world_ao.span;
+	saved.soft_effect = soft_effects.group;
+	memcpy(saved.texture_regions, device.texture_regions, sizeof(saved.texture_regions));
 
 	journal_recording = FALSE;
 	journal.bitmaps = bitmaps;
@@ -8505,6 +8534,8 @@ int halo_gpu_journal_replay(const unsigned int *words, unsigned int count, const
 	preparation.sky = saved.sky;
 	device.visibility_test_active = saved.visibility;
 	world_ao.span = saved.world_span;
+	soft_effects.group = saved.soft_effect;
+	memcpy(device.texture_regions, saved.texture_regions, sizeof(device.texture_regions));
 	journal.bitmaps = NULL;
 	xgpu_backend_invalidate();
 	*unknown = (unsigned int)journal.unknown;

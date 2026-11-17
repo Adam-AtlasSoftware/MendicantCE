@@ -817,7 +817,7 @@ static const int settings_samples[] = { 1, 2, 4, 8 };
 
 int xgpu_manifest_settings(int index, struct xgpu_manifest_settings *settings)
 {
-	if (index < 0 || index >= SETTINGS_SAMPLES * 8 * XGPU_MANIFEST_OCCLUSIONS)
+	if (index < 0 || index >= SETTINGS_SAMPLES * 16 * XGPU_MANIFEST_OCCLUSIONS)
 		return 0;
 	memset(settings, 0, sizeof(*settings));
 	settings->samples = settings_samples[index % SETTINGS_SAMPLES];
@@ -825,7 +825,8 @@ int xgpu_manifest_settings(int index, struct xgpu_manifest_settings *settings)
 	settings->hdr = index & 1;
 	settings->per_pixel_lighting = (index >> 1) & 1;
 	settings->enhanced_lights = (index >> 2) & 1;
-	settings->ambient_occlusion = index >> 3;
+	settings->deep = (index >> 3) & 1;
+	settings->ambient_occlusion = index >> 4;
 	return 1;
 }
 
@@ -849,6 +850,9 @@ int xgpu_manifest_derive(const struct xgpu_manifest_draw *draw, const struct xgp
 	is; a screen buffer's colour in half floats with display.hdr) */
 	facts.samples = context->multisampled ? settings->samples : 1;
 	facts.hdr_target = settings->hdr && context->screen_colour && facts.color;
+	/* (d3d8_device.c's hdr_back_buffer_format: display.output_depth's 16-bit
+	SDR frame, a screen buffer's colour in RGBA16 where it is not HDR's) */
+	facts.deep_target = settings->deep && !facts.hdr_target && context->screen_colour && facts.color;
 	if (facts.hdr_target)
 	{
 		/* (d3d8_device.c's hdr_tag) */

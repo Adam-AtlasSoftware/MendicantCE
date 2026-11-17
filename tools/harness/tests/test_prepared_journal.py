@@ -59,6 +59,9 @@ def generated(fault=None):
         checks = mutated(checks, 'header->key == key &&', '')
     if fault == 'blind':
         code = mutated(code, '\twords[2] = (unsigned long)(hdr_view != 0) | (unsigned long)(lights > 0) << 1 |\n\t\t(unsigned long)(environment != 0) << 2 | (unsigned long)world_span << 3;\n', '\twords[2] = 0;\n')
+    if fault == 'soft':
+        # (a record made with display.soft_particles off: an effect's soft group and its other draws merged)
+        code = mutated(code, '\twords[2] |= (unsigned long)(soft != 0) << 16;\n', '')
     if fault == 'span':
         # (a record made with the setting off: a found window's draw and a mirror's merged)
         code = mutated(code, ' | (unsigned long)world_span << 3;', ';')
@@ -81,9 +84,46 @@ def test_prepared_journal(case):
 
 @pytest.mark.parametrize('fault,case', [('repeats', 'roundtrip'), ('delta', 'roundtrip'), ('type', 'malformed'),
                                         ('missing', 'missing'), ('key', 'stale'), ('blind', 'settings'),
-                                        ('tags', 'settings'), ('span', 'settings'), ('derivation', 'key'),
+                                        ('tags', 'settings'), ('span', 'settings'), ('soft', 'settings'),
+                                        ('derivation', 'key'),
                                         ('scenario', 'key'), ('numbers', 'pages'), ('own_pages', 'pages'),
                                         ('floor', 'pages'), ('shared', 'pages')])
 def test_negative(fault, case):
     status, output = run(build('prepared_journal', generated(fault)), case)
     assert status == CHECK_FAILED, output
+
+
+# The front end's own state that a draw's pipeline or its shaders' variant are derived from, past the render and
+# texture states (prepare_draw, bind_textures): each must be journaled as the draw is (journal_capture), set again
+# as it plays (journal_restore) and given back after (halo_gpu_journal_replay), or a played record makes other
+# pipelines than the walk did and play makes the walk's, missed (an effect's soft group, display.soft_particles; the
+# shadows' atlas regions; the high-res text's atlas, whose distance fields a stand-in for it has not).
+CARRIED = {
+    'soft group': ('journal_capture', 'state->soft_effect = (uint32_t)(soft_effects.group != 0);'),
+    'soft group set': ('journal_restore', 'soft_effects.group = state->soft_effect != 0;'),
+    'regions': ('journal_capture',
+                'memcpy(state->texture_regions, device.texture_regions, sizeof(state->texture_regions));'),
+    'regions set': ('journal_restore',
+                    'memcpy(device.texture_regions, state->texture_regions, sizeof(device.texture_regions));'),
+    'soft group given back': ('halo_gpu_journal_replay', 'soft_effects.group = saved.soft_effect;'),
+    'regions given back': ('halo_gpu_journal_replay',
+                           'memcpy(device.texture_regions, saved.texture_regions, sizeof(device.texture_regions));'),
+    'text atlas named': ('journal_identify', 'if (object == text_hires_atlas_object())'),
+    'text atlas found': ('journal_resolve', 'object->value == 2 ? (void *)text_hires_atlas_object() : NULL;'),
+}
+
+
+def uncarried(device):
+    """the draws' inputs (CARRIED) a record would not carry"""
+    return [name for name, (where, line) in CARRIED.items() if line not in function(device, where)]
+
+
+def test_draw_inputs_journaled():
+    assert uncarried(read(DEVICE)) == []
+
+
+@pytest.mark.parametrize('name', ['soft group', 'regions', 'text atlas named'])
+def test_draw_inputs_negative(name):
+    device = read(DEVICE)
+    line = CARRIED[name][1]
+    assert uncarried(mutated(device, line, '')) == [name]

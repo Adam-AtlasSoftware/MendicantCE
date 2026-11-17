@@ -210,11 +210,13 @@ int xgpu_draw_derive(const struct xgpu_draw_facts *facts, int unlit, struct xgpu
 /* the settings a manifest's draw is derived under: the targets' samples (1,
 or display.anti_aliasing's multisampling's), display.hdr on, each pixel lit
 (display.per_pixel_lighting), the enhanced dynamic lights, the ambient
-occlusion (XGPU_MANIFEST_OCCLUSION_*); with the stream's backends' sample
-mask and dynamic lights (Metal's and Vulkan's) */
+occlusion (XGPU_MANIFEST_OCCLUSION_*), the SDR back buffer in RGBA16
+(display.output_depth's 16-bit frame: deep, where display.hdr is off); with
+the stream's backends' sample mask and dynamic lights (Metal's and
+Vulkan's) */
 struct xgpu_manifest_settings
 {
-	int samples, hdr, per_pixel_lighting, enhanced_lights, ambient_occlusion;
+	int samples, hdr, per_pixel_lighting, enhanced_lights, ambient_occlusion, deep;
 };
 
 /* display.ambient_occlusion: off, or found in the world ("world"; without
