@@ -84,6 +84,8 @@ void platform_log(char const *format, ...);
 unsigned long long halo_gpu_journal_derivation(unsigned long long hash);
 /* (panini.c's) */
 boolean panini_replay_projection(float projection[8]);
+/* (d3d8_device.c's: the screen's width in the game's units, its shape) */
+long halo_screen_width(void);
 /* (cache_files.c's: the tag table as it is now, the menus' tags in it) */
 void *cache_files_tag_instances(long *count);
 
@@ -151,7 +153,9 @@ records, what every value of it would:
 - first_person_legs, viewmodel_visible: the walk draws every first-person and
   every unit's model whatever the setting.
 They are the record's derivation (prepared_derivation), that its
-enumeration is checked under. */
+enumeration is checked under, with the backend, the GPU and the screen's
+shape (its width in the game's units: the menus and the screen's passes
+draw other draws on a display of another). */
 static char const *const prepared_settings[] =
 {
 	"display.ambient_occlusion", "display.anisotropic_filtering", "display.anti_aliasing", "display.astc_textures",
@@ -306,8 +310,12 @@ unsigned long long render_prepared_derivation(void)
 static uint64_t prepared_derivation(void)
 {
 	uint64_t hash = halo_gpu_journal_derivation(XGPU_MANIFEST_HASH_START);
+	/* (the screen's shape, which the menus' and the screen's passes are drawn
+	to: a record made on a display of another plays as under other settings) */
+	int32_t screen = (int32_t)halo_screen_width();
 	short index;
 
+	hash = xgpu_manifest_hash(&screen, sizeof(screen), hash);
 	for (index = 0; index < (short)NUMBEROF(prepared_settings); index++)
 	{
 		/* (as text, whatever its type: a boolean's, a number's) */
