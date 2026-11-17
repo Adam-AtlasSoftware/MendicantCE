@@ -124,6 +124,48 @@ int main(int argc, char **argv)
 		CHECK(!strcmp(text, "No frames yet.\n"), "no frames");
 		return 0;
 	}
+	if (!strcmp(test, "recent"))
+	{
+		struct perf_times times;
+		unsigned long index;
+
+		/* (a ring of 1024: 1500 frames of 10 ms kept, the oldest 476 written
+		over; the GPU 4 ms a frame, the last 50 frames 6 ms, every other one
+		of them not measured) */
+		for (index = 0; index < 1500; index++)
+		{
+			unsigned long slot = index & 1023;
+
+			micros[slot] = 10000;
+			at_ms[slot] = (uint32_t)(index * 10);
+			work[slot].gpu = index >= 1450 ? (index % 2 ? 6000 : REPORT_GPU_UNKNOWN) : 4000;
+			work[slot].render = 2000;
+			work[slot].waited = 3000;
+		}
+		/* (the last half second: 50 frames, the newest's end and 49 before) */
+		report_recent_frames(micros, at_ms, work, 1024, 1500, 0xFFFFFFFFu, 500, &times);
+		printf("%lu frames, %.3f ms, GPU %.3f ms\n", times.frames, times.frame_ms, times.gpu_ms);
+		CHECK(times.frames == 50, "the frames of the last half second");
+		CHECK(times.frame_ms > 9.999f && times.frame_ms < 10.001f, "the frame's time");
+		CHECK(times.gpu_ms > 5.999f && times.gpu_ms < 6.001f, "the GPU's, of the frames it was measured on");
+		CHECK(times.render_ms > 1.999f && times.render_ms < 2.001f, "the renderer's thread's");
+		CHECK(times.waited_ms > 2.999f && times.waited_ms < 3.001f, "the waits");
+		/* (the last 100 frames: 50 of 4 ms, 25 of 6) */
+		report_recent_frames(micros, at_ms, work, 1024, 1500, 100, 0xFFFFFFFFu, &times);
+		CHECK(times.frames == 100, "at most 100 frames");
+		CHECK(times.gpu_ms > 4.666f && times.gpu_ms < 4.667f, "the GPU's over 100 frames");
+		/* (no further back than the ring) */
+		report_recent_frames(micros, at_ms, work, 1024, 1500, 0xFFFFFFFFu, 0xFFFFFFFFu, &times);
+		CHECK(times.frames == 1024, "the ring's frames alone");
+		/* (none measured) */
+		for (index = 0; index < 1024; index++)
+			work[index].gpu = REPORT_GPU_UNKNOWN;
+		report_recent_frames(micros, at_ms, work, 1024, 1500, 0xFFFFFFFFu, 500, &times);
+		CHECK(times.gpu_ms < 0.0f, "the GPU's not measured");
+		report_recent_frames(micros, at_ms, work, 1024, 0, 0xFFFFFFFFu, 500, &times);
+		CHECK(times.frames == 0 && times.frame_ms == 0.0f, "no frames");
+		return 0;
+	}
 	if (!strcmp(test, "gpu"))
 	{
 		unsigned long index;
