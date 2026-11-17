@@ -447,6 +447,11 @@ percentages (input.left_stick_dead_zone and input.left_stick_outer_dead_zone,
 or the right's): halo_stick_dead_range's and halo_stick_live_range's
 (port/linux/src/xinput_sdl.c) */
 void halo_stick_ranges(long percent, long outer, short *dead_range, short *live_range);
+/* a port's controller's own stick (0 the left, 1 the right) as last read, as
+XInput has it (up positive): never the keyboard's, the touch controls' or the
+scripted player's, which its reading merges in; none without a controller
+(port/linux/src/xinput_sdl.c) */
+void halo_controller_stick(short port, short which, short *x, short *y);
 /* the shape of a gamepad's look stick's dead zone: its player's
 input.look_dead_zone_shape, Auto (the aim style's: round under Modern, each
 direction's own under Classic), Axial or Round (port/linux/src/xinput_sdl.c) */

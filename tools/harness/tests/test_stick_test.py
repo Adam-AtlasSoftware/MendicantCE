@@ -54,6 +54,32 @@ def test_stick_test_negative_control(before, after, case):
     assert status == CHECK_FAILED, output
 
 
+# the reading taken where the keyboard is merged in: the port's whole reading, not its controller's
+WHOLE_READING = ("\thalo_controller_stick(gamepad, stick, &raw.x, &raw.y);",
+                 "\traw = input_get_gamepad_state(gamepad)->sticks[stick];")
+
+
+def _controller_only(menus, sdl):
+    """the readings' raw stick is the controller's own: the page reads halo_controller_stick, which xinput_sdl.c's
+    XInputGetState records from the port's controller before the keyboard, mouse, touch and script are merged"""
+    text = function(menus, "stick_test_text")
+    state = function(sdl, "XInputGetState")
+    recorded = state.find("controller_sticks_read(port, port_gamepad(gamepads, count, port));")
+    merged = min(state.find(mark) for mark in ("keyboard_gamepad(", "keyboard_controls(", "touch_input_gamepad("))
+    return "halo_controller_stick(" in text and "input_get_gamepad_state" not in text and \
+        "raw_gamepad_states" not in text and 0 <= recorded < merged
+
+
+def test_reading_is_the_controllers_alone():
+    assert _controller_only(read("port/linux/game/menu_functions.c"), read("port/linux/src/xinput_sdl.c"))
+
+
+def test_reading_check_sees_the_whole_reading():
+    """negative control: the page reading the port's merged reading fails the check"""
+    menus = mutated(read("port/linux/game/menu_functions.c"), *WHOLE_READING)
+    assert not _controller_only(menus, read("port/linux/src/xinput_sdl.c"))
+
+
 def _value_looks():
     """the readings' value boxes in the page's model (the tall layout's look)"""
     name = "main_menu.settings_select.player_setup.player_profile_edit.gamepad_setup.dead_zones.xml"

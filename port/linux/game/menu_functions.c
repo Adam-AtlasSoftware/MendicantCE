@@ -2562,8 +2562,9 @@ static void gyro_rows_show(struct widget_instance *list)
 }
 
 /* Advanced Stick Settings' readings (#1140): each stick of the player whose
-profile Settings edits, as the game read it last (input_port_raw_stick:
-left to right, then down to up, in percent of its travel), then after the
+profile Settings edits, as their controller read it last, the controller's
+alone, never the keyboard's (halo_controller_stick: left to right, then down
+to up, in percent of its travel), then after the
 dead zones and the look stick's shape the page shows, its changes kept
 before OK among them (settings_value), as input_xbox.c's
 input_port_fix_stick_dead_zones would take it with them; only on the page,
@@ -2599,7 +2600,7 @@ static void stick_test_text(short gamepad, short stick, char *text, unsigned int
 		else if (strcmp(value, "axial") && settings_value("input.aim_style", value, sizeof(value)))
 			round = !strcmp(value, "modern");
 	}
-	input_port_raw_stick(gamepad, stick, &raw);
+	halo_controller_stick(gamepad, stick, &raw.x, &raw.y);
 	input_port_fix_stick(raw.x, raw.y, dead_range, live_range, round, &adjusted);
 	snprintf(text, size, "%d,%d | %d,%d", stick_test_percent(raw.x), stick_test_percent(raw.y),
 		stick_test_percent(adjusted.x), stick_test_percent(adjusted.y));

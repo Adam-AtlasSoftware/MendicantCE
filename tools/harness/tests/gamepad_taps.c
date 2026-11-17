@@ -177,6 +177,39 @@ static void case_extras(void)
 	CHECK(extras == 1u << 6, "a Steam Deck's trackpad click only, not its Quick Access or stick touch: %x", extras);
 }
 
+/* a port's controller's own sticks (halo_controller_stick, Advanced Stick
+Settings' readings): the pad's, as XInput has them (up positive), while the
+port's reading has the keyboard's push merged in; none once it is gone */
+static void case_sticks(void)
+{
+	SDL_Gamepad gamepad;
+	XINPUT_GAMEPAD pad;
+	struct gamepad_taps taps = { 0, 0 };
+	short x, y;
+
+	memset(&gamepad, 0, sizeof(gamepad));
+	gamepad.axes[SDL_GAMEPAD_AXIS_LEFTX] = 1000;
+	gamepad.axes[SDL_GAMEPAD_AXIS_LEFTY] = 2000;
+	gamepad.axes[SDL_GAMEPAD_AXIS_RIGHTX] = -3000;
+	/* (the keyboard's W and D, merged into the port's reading as keyboard_controls does) */
+	memset(&pad, 0, sizeof(pad));
+	pad.sThumbLX = 32767;
+	pad.sThumbLY = 32767;
+	sdl_gamepad_state(&gamepad, &taps, &pad);
+	controller_sticks_read(0, &gamepad);
+	CHECK(pad.sThumbLX == 32767 && pad.sThumbLY == 32767, "the port's reading has the keyboard's push");
+	halo_controller_stick(0, 0, &x, &y);
+	CHECK(x == 1000 && y == -2001, "the controller's left stick its own: %d, %d", x, y);
+	halo_controller_stick(0, 1, &x, &y);
+	CHECK(x == -3000 && y == -1, "the controller's right stick its own: %d, %d", x, y);
+	/* (another port's its own; the controller gone: none) */
+	halo_controller_stick(1, 0, &x, &y);
+	CHECK(x == 0 && y == 0, "another port's: %d, %d", x, y);
+	controller_sticks_read(0, NULL);
+	halo_controller_stick(0, 0, &x, &y);
+	CHECK(x == 0 && y == 0, "a controller gone reads none: %d, %d", x, y);
+}
+
 /* two gamepads (split screen): each reading takes its own taps */
 static void case_ports(void)
 {
@@ -219,6 +252,7 @@ int main(int argc, char **argv)
 	else if (!strcmp(name, "trigger")) case_trigger();
 	else if (!strcmp(name, "paddles")) case_paddles();
 	else if (!strcmp(name, "extras")) case_extras();
+	else if (!strcmp(name, "sticks")) case_sticks();
 	else if (!strcmp(name, "ports")) case_ports();
 	else if (!strcmp(name, "dropped")) case_dropped();
 	else

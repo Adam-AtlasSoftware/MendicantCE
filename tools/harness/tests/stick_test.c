@@ -39,7 +39,12 @@ static boolean settings_value(char const *name, char *text, unsigned int size)
 }
 
 static short input_abstraction_port_look_stick(short gamepad) { (void)gamepad; return _gamepad_stick_right; }
-static void input_port_raw_stick(short gamepad, short stick, point2d *raw) { (void)gamepad; *raw = world_raw[stick]; }
+static void halo_controller_stick(short gamepad, short stick, short *x, short *y)
+{
+	(void)gamepad;
+	*x = world_raw[stick].x;
+	*y = world_raw[stick].y;
+}
 
 #include "under_test.inc"
 
