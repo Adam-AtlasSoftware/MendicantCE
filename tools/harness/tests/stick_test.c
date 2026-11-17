@@ -2,9 +2,10 @@
 #include <math.h>
 #include <stdlib.h>
 
-/* Advanced Stick Settings' readings (#1140: port/linux/game/menu_functions.c's stick_test_text): each stick as the
-game read it, then after the dead zones and the look stick's shape the page shows, its changes not yet saved among
-them, by the game's own code for both (input_xbox.c's input_port_fix_stick, xinput_sdl.c's halo_stick_ranges). */
+/* Stick Test's readings and view (#1140: port/linux/game/menu_functions.c's stick_test_read, _text, _rest and
+_view_of): each stick as its controller read it, then after the dead zones and the look stick's shape Settings shows,
+its changes not yet saved among them, by the game's own code for both (input_xbox.c's input_port_fix_stick,
+xinput_sdl.c's halo_stick_ranges); the circle's rings and dots; the largest drift seen at rest. */
 
 typedef struct { short x, y; } point2d;
 #define SHORT_MAX 32767
@@ -46,14 +47,23 @@ static void halo_controller_stick(short gamepad, short stick, short *x, short *y
 	*y = world_raw[stick].y;
 }
 
+typedef unsigned long pixel32;
+
 #include "under_test.inc"
 
 static char const *reading(short stick)
 {
 	static char text[40];
+	struct stick_test_reading got;
 
-	stick_test_text(0, stick, text, sizeof(text));
+	stick_test_read(0, stick, &got);
+	stick_test_text(&got, text, sizeof(text));
 	return text;
+}
+
+static int near(real a, real b)
+{
+	return fabsf(a - b) < 0.01f;
 }
 
 int main(int argc, char **argv)
@@ -109,6 +119,68 @@ int main(int argc, char **argv)
 		page_aim = "classic";
 		CHECK(!strcmp(reading(_gamepad_stick_right), "27,27 | 13,13"), "Round whatever the aim: %s",
 			reading(_gamepad_stick_right));
+		return 0;
+	}
+	/* the circle: its rings the dead zones' (of a radius of 44), its dots the readings, up drawn up */
+	CASE("view")
+	{
+		struct stick_test_reading got;
+		struct stick_test_view view;
+
+		page_inner[1] = "25";
+		page_outer[1] = "20";
+		page_shape = "round";
+		world_raw[_gamepad_stick_right].x = 16384;
+		world_raw[_gamepad_stick_right].y = 16384;
+		stick_test_read(0, _gamepad_stick_right, &got);
+		stick_test_view_of(&got, 44.0f, &view);
+		CHECK(near(view.inner, 44.0f * 8191 / 32767) && near(view.outer, 44.0f * 26214 / 32767), "rings %f %f",
+			view.inner, view.outer);
+		CHECK(view.round, "the look stick's round shape");
+		CHECK(near(view.raw_x, 44.0f * 16384 / 32767) && near(view.raw_y, -44.0f * 16384 / 32767),
+			"the raw dot up and right: %f, %f", view.raw_x, view.raw_y);
+		CHECK(near(view.adjusted_x, 44.0f * got.adjusted.x / 32767) && view.adjusted_y < 0.0f,
+			"the dot after the dead zones: %f, %f", view.adjusted_x, view.adjusted_y);
+		stick_test_read(0, _gamepad_stick_left, &got);
+		stick_test_view_of(&got, 44.0f, &view);
+		CHECK(!view.round, "the move stick each direction's own");
+		return 0;
+	}
+	/* drift at rest: the largest push held still near the middle; a push moving through, or held far, is none */
+	CASE("rest")
+	{
+		point2d at = { 0, 0 };
+		unsigned long now = 1000;
+
+		/* (a push passing through the middle's 30%, never still) */
+		for (at.x = 0; at.x < 9000; at.x += 1000, now += 100)
+			stick_test_rest(0, at, now);
+		CHECK(stick_test.drift[0] == 0, "a moving push is no drift: %d", stick_test.drift[0]);
+		/* (paused at 24% for a moment, under half a second) */
+		at.x = 8000;
+		for (at.y = 0; at.y < 4; at.y++, now += 100)
+			stick_test_rest(0, at, now);
+		at.y = 0;
+		CHECK(stick_test.drift[0] == 0, "a moment's pause is no drift: %d", stick_test.drift[0]);
+		/* (held at 60%: far from the middle) */
+		at.x = 20000;
+		for (; now < 3000; now += 100)
+			stick_test_rest(0, at, now);
+		CHECK(stick_test.drift[0] == 0, "a push held far is no drift: %d", stick_test.drift[0]);
+		/* (let go of, its drift 3000 by 4000: 5000 long, wobbling under 1%) */
+		for (; now < 4000; now += 100)
+		{
+			at.x = (short)(3000 + (now / 100 % 2) * 100);
+			at.y = 4000;
+			stick_test_rest(0, at, now);
+		}
+		CHECK(stick_test.drift[0] >= 5000 && stick_test.drift[0] <= 5100, "the drift at rest: %d",
+			stick_test.drift[0]);
+		CHECK(stick_test.drift[1] == 0, "the other stick its own");
+		/* (the page opened again: begun again) */
+		at.x = at.y = 0;
+		stick_test_rest(0, at, now + 5000);
+		CHECK(stick_test.drift[0] == 0, "begun again: %d", stick_test.drift[0]);
 		return 0;
 	}
 	fprintf(stderr, "no case %s\n", case_name);

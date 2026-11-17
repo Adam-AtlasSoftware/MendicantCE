@@ -764,6 +764,12 @@ DEAD_ZONES = ("gamepad_setup/dead_zones", "dead_zones_screen")
 # (aiming with a controller's gyroscope, and the flick stick: port/linux/src/xinput_sdl.c;
 # menu_functions.c's gyro_rows_show)
 GYRO = ("gamepad_setup/gyro", "gyro_screen")
+# (opened from Advanced Stick Settings: each stick's reading, and its circle
+# under the rows, STICK_TEST_RADIUS units round, STICK_TEST_GAP below the
+# last row's value: menu_functions.c's stick_test_draw)
+STICK_TEST = ("gamepad_setup/stick_test", "stick_test_screen")
+STICK_TEST_RADIUS = 44
+STICK_TEST_GAP = 14
 # input.gyro_sensitivity's: the view's degrees for each degree the controller turns
 GYRO_SENSITIVITY = Slider(0.25, 8.0, 0.05, 0.05, 20.0)
 GYRO_BUTTONS = [("TOUCHPAD", "touchpad"), ("LEFT PADDLE", "left_paddle"), ("RIGHT PADDLE", "right_paddle"),
@@ -828,7 +834,7 @@ REMAP_HANDLERS = ['<on event="x" run="port controller clear"/>',
 SETTINGS_STATUS_ROWS = {"discord_account", "link_status", "link_unlink",
                         *(f"link_master_{n}" for n in range(1, 5)), "hdr_display",
                         "viewmodel_weapon_reset", "gyro_found", "gyro_calibrate", "clear_caches",
-                        "stick_test_left", "stick_test_right",
+                        "stick_test_left", "stick_test_right", "stick_drift",
                         "remap_player", "remap_group", *(f"pad_{n}" for n in range(1, REMAP_ROWS + 1))}
 # the rows whose labels menu_functions.c writes (a master server's host): the
 # label's text its own, not its list's; their values the narrower column at
@@ -1632,16 +1638,9 @@ PAGES = {
             ("RIGHT STICK", "input.right_stick_dead_zone", STICK_DEAD_ZONES,
              "How far the right stick moves before the view turns. Raise it for a stick that drifts; lower it for "
              "finer aim. Default is the game's own, 27%.", None),
-            # (the sticks' readings, live: menu_functions.c's
-            # stick_test_rows_show, by the values on this page)
-            ("LEFT READING", None, None,
-             "The left stick now: side to side, then up and down, in percent of its travel; after the bar, as "
-             "you move with the dead zones on this page. Let go of it: what is left is its drift. Set the dead "
-             "zone above it.", None, "stick_test_left"),
-            ("RIGHT READING", None, None,
-             "The right stick now: side to side, then up and down, in percent of its travel; after the bar, as "
-             "the view turns with the dead zones and shape on this page. Let go of it: what is left is its "
-             "drift. Set the dead zone above it.", None, "stick_test_right"),
+            ("STICK TEST ›", None, _page_screen(*STICK_TEST),
+             "See what each stick reads, and what the game takes from it with the dead zones and shape set here: "
+             "find a stick's drift, then set its dead zone just past it.", None),
             (SECTION, "OUTER DEAD ZONES"),
             ("LEFT STICK", "input.left_stick_outer_dead_zone", STICK_OUTER_DEAD_ZONES,
              "How much of the left stick's travel at its edge counts as a full push. Raise it for a worn stick "
@@ -1666,6 +1665,25 @@ PAGES = {
             ("ACCELERATION START", "input.modern_aim_acceleration_threshold", MODERN_AIM_THRESHOLDS,
              "Modern aim: how far you push the stick before the turn speeds up. Default is the game's own, as "
              "Classic's.", None),
+        ],
+    },
+    STICK_TEST[0]: {
+        "screen": STICK_TEST[1], "title": "STICK TEST",
+        "rows": [
+            # (menu_functions.c's stick_test_rows_show: the readings, live,
+            # by the dead zones and shape Advanced Stick Settings shows)
+            (SECTION, "READINGS"),
+            ("LEFT STICK", None, None,
+             "The left stick now: side to side, then up and down, in percent of its travel; after the bar, as "
+             "you move with the dead zones set. Below, the left circle: its dead zones, the stick white, what "
+             "the game takes blue.", None, "stick_test_left"),
+            ("RIGHT STICK", None, None,
+             "The right stick now: side to side, then up and down, in percent of its travel; after the bar, as "
+             "the view turns with the dead zones and shape set. Below, the right circle.", None,
+             "stick_test_right"),
+            ("DRIFT AT REST", None, None,
+             "The most each stick has read while let go of, since this page opened. Set its dead zone a little "
+             "past this, on Advanced Stick Settings.", None, "stick_drift"),
         ],
     },
     SCREEN_LAYOUT[0]: {
@@ -1915,7 +1933,8 @@ SETTINGS_SEARCH_WORDS = {
             "look_dead_zone_shape"],
     "acceleration": ["aim_style", "modern_aim_acceleration_angle", "modern_aim_acceleration_threshold"],
     "deadzone": ["stick_settings", "left_stick_dead_zone", "right_stick_dead_zone", "left_stick_outer_dead_zone",
-                 "right_stick_outer_dead_zone", "look_dead_zone_shape"],
+                 "right_stick_outer_dead_zone", "look_dead_zone_shape", "stick_test"],
+    "drift": ["stick_test", "left_stick_dead_zone", "right_stick_dead_zone"],
     "rumble": ["vibration", "rumble_strength"], "haptics": ["rumble_strength"],
     "keybinds": ["key_bindings"], "keys": ["key_bindings"],
     "mic": ["input_device", "voice_chat"], "microphone": ["input_device", "voice_chat"],
