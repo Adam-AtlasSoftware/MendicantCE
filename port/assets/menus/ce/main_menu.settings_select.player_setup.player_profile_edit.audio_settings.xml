@@ -238,40 +238,88 @@
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/section_7_title" type="text" controller="1" width="344" height="18" wide="0 244" string_list="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/labels" string_index="7" color="#FF6F9CD0" text_x="2" text_y="1" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/op_volume" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<on event="left" run="port slider left"/>
+		<on event="right" run="port slider right"/>
+		<on event="a" run="port slider edit"/>
+		<on event="start" run="port slider edit"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/volume_label"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/volume_spinner" x="188"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/volume_track" x="188" y="3"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/volume_value" x="252" y="0"/>
+		<on event="stick_left" run="port slider left"/>
+		<on event="stick_right" run="port slider right"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/volume_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/labels" string_index="8" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/volume_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="0|1|2|3|4|5|6|7|8|9|10|11|12|13|14|15|16|17|18|19|20" setting="audio.volume" values="0|0.1|0.2|0.3|0.4|0.5|0.6|0.7|0.8|0.9|1|1.1|1.2|1.3|1.4|1.5|1.6|1.7|1.8|1.9|2" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
-		<on event="created" run="port setting load"/>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/volume_track" controller="1" width="62" height="14" bitmap="main_menu/settings/slider_track" wide="20 224" source="tools/port_settings.py settings_files/_settings_page">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/volume_thumb"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/volume_thumb" controller="1" width="8" height="14" bitmap="main_menu/settings/slider_thumb" source="tools/port_settings.py settings_files/_settings_page">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/volume_value" type="text" controller="1" width="76" height="20" bitmap="main_menu/settings/slider_field" color="#FF2896FF" align="center" text_y="1" text_flags="no_focus_test" wide="244 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/op_music_volume" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<on event="left" run="port slider left"/>
+		<on event="right" run="port slider right"/>
+		<on event="a" run="port slider edit"/>
+		<on event="start" run="port slider edit"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/music_volume_label"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/music_volume_spinner" x="188"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/music_volume_track" x="188" y="3"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/music_volume_value" x="252" y="0"/>
+		<on event="stick_left" run="port slider left"/>
+		<on event="stick_right" run="port slider right"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/music_volume_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/labels" string_index="9" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/music_volume_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="0|1|2|3|4|5|6|7|8|9|10" setting="audio.music_volume" values="0|0.1|0.2|0.3|0.4|0.5|0.6|0.7|0.8|0.9|1" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
-		<on event="created" run="port setting load"/>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/music_volume_track" controller="1" width="62" height="14" bitmap="main_menu/settings/slider_track" wide="20 224" source="tools/port_settings.py settings_files/_settings_page">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/music_volume_thumb"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/music_volume_thumb" controller="1" width="8" height="14" bitmap="main_menu/settings/slider_thumb" source="tools/port_settings.py settings_files/_settings_page">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/music_volume_value" type="text" controller="1" width="76" height="20" bitmap="main_menu/settings/slider_field" color="#FF2896FF" align="center" text_y="1" text_flags="no_focus_test" wide="244 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/op_dialogue_volume" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<on event="left" run="port slider left"/>
+		<on event="right" run="port slider right"/>
+		<on event="a" run="port slider edit"/>
+		<on event="start" run="port slider edit"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/dialogue_volume_label"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/dialogue_volume_spinner" x="188"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/dialogue_volume_track" x="188" y="3"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/dialogue_volume_value" x="252" y="0"/>
+		<on event="stick_left" run="port slider left"/>
+		<on event="stick_right" run="port slider right"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/dialogue_volume_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/labels" string_index="10" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/dialogue_volume_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="0|1|2|3|4|5|6|7|8|9|10" setting="audio.dialogue_volume" values="0|0.1|0.2|0.3|0.4|0.5|0.6|0.7|0.8|0.9|1" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
-		<on event="created" run="port setting load"/>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/dialogue_volume_track" controller="1" width="62" height="14" bitmap="main_menu/settings/slider_track" wide="20 224" source="tools/port_settings.py settings_files/_settings_page">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/dialogue_volume_thumb"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/dialogue_volume_thumb" controller="1" width="8" height="14" bitmap="main_menu/settings/slider_thumb" source="tools/port_settings.py settings_files/_settings_page">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/dialogue_volume_value" type="text" controller="1" width="76" height="20" bitmap="main_menu/settings/slider_field" color="#FF2896FF" align="center" text_y="1" text_flags="no_focus_test" wide="244 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/op_effects_volume" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<on event="left" run="port slider left"/>
+		<on event="right" run="port slider right"/>
+		<on event="a" run="port slider edit"/>
+		<on event="start" run="port slider edit"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/effects_volume_label"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/effects_volume_spinner" x="188"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/effects_volume_track" x="188" y="3"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/effects_volume_value" x="252" y="0"/>
+		<on event="stick_left" run="port slider left"/>
+		<on event="stick_right" run="port slider right"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/effects_volume_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/labels" string_index="11" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/effects_volume_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="0|1|2|3|4|5|6|7|8|9|10" setting="audio.effects_volume" values="0|0.1|0.2|0.3|0.4|0.5|0.6|0.7|0.8|0.9|1" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
-		<on event="created" run="port setting load"/>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/effects_volume_track" controller="1" width="62" height="14" bitmap="main_menu/settings/slider_track" wide="20 224" source="tools/port_settings.py settings_files/_settings_page">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/effects_volume_thumb"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/effects_volume_thumb" controller="1" width="8" height="14" bitmap="main_menu/settings/slider_thumb" source="tools/port_settings.py settings_files/_settings_page">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/effects_volume_value" type="text" controller="1" width="76" height="20" bitmap="main_menu/settings/slider_field" color="#FF2896FF" align="center" text_y="1" text_flags="no_focus_test" wide="244 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/labels">
 		<string text="SOUND"/>
@@ -297,7 +345,7 @@
 		<string text="Turns all sound off or on, at once."/>
 		<string text="Voice chat in network games (your microphone and the other players' voices' volume) and hit sounds."/>
 		<string text=""/>
-		<string text="The volume of everything the game plays. 10 is the Xbox's level; up to 20 is louder."/>
+		<string text="The volume of everything the game plays. 100% is the Xbox's level; up to 110% is louder."/>
 		<string text="The music's volume."/>
 		<string text="The characters' speech: Cortana, the Marines and the cutscenes' lines."/>
 		<string text="Every other sound: weapons, vehicles and the world."/>

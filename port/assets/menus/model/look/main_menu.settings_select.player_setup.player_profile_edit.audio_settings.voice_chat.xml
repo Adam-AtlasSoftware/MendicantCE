@@ -76,13 +76,18 @@
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/op_voice_volume" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
 		<text color="#FF2896FF"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/voice_volume_label" x="0" y="0"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/voice_volume_spinner" x="188" y="0"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/voice_volume_track" x="188" y="5"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/voice_volume_value" x="252" y="2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/voice_volume_label" type="text" box="0 0 184 24" wide="0 40" past="0 60">
 		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/labels" index="3" scale="1 1.2"/>
 	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/voice_volume_spinner" type="spinner" box="0 1 140 23" wide="40 120" past="60 60" header="bitmaps/arrow_sm_left" header_box="-6 6 0 18" footer="bitmaps/arrow_sm_right" footer_box="140 6 146 18">
-		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 0" items="0|1|2|3|4|5|6|7|8|9|10" scale="1 1.2"/>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/voice_volume_track" box="0 0 62 14" wide="40 204" past="60 133" picture="main_menu/settings/slider_track">
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/voice_volume_thumb" x="0" y="0"/>
+	</look>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/voice_volume_thumb" box="0 0 8 14" picture="main_menu/settings/slider_thumb"/>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/voice_volume_value" type="text" box="0 0 76 20" wide="244 0" past="193 0" picture="main_menu/settings/slider_field">
+		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 1" flags="no_focus_test"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/section_4" box="0 0 344 20" wide="-106 244" past="-143 193" picture="main_menu/settings/section_tall">
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/section_4_title" x="0" y="0"/>

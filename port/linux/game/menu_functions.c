@@ -152,6 +152,7 @@ their handlers open opens.
 #include "bungie_net/network/transport.h"
 
 #include <ctype.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 #include <xtl.h>
@@ -6603,7 +6604,9 @@ port/assets/menus/model): its setting, its track's range and step, the
 values it may be typed, whether they are whole numbers, and its stops. A
 stop whose value is a word of the setting's (display.vehicle_fov's
 "default" and "match") is placed below the numbers, at -1 for the last
-such, -2 for the one before */
+such, -2 for the one before. A volume's slider (curve "volume") shows and
+takes a percentage, while its setting keeps the amplitude
+(settings_volume_amplitude) */
 struct settings_slider
 {
 	struct halo_menu_model_row const *row;
@@ -6611,9 +6614,44 @@ struct settings_slider
 	double least, most, step;
 	double typed_least, typed_most;
 	boolean whole;
+	boolean volume;
 	struct settings_slider_stop stops[SETTINGS_SLIDER_MAXIMUM_STOPS];
 	short stop_count;
 };
+
+/* A volume slider's percentage as the amplitude its setting keeps (#1106):
+the ear hears loudness as the logarithm of the amplitude, so the slider
+spans 60 dB evenly, 1/1000 at 0% to 1 at 100% (an exponential; above 100%,
+on as far: 110%, 2.0, is 6 dB louder), and falls straight to 0, an exact
+mute, below 10%. A linear slider gave 20 dB at its first step above mute
+and 6 dB over its whole top half.
+(dr-lex.be/info-stuff/implement-a-volume-control.html) */
+#define SETTINGS_VOLUME_RANGE 1000.0
+#define SETTINGS_VOLUME_KNEE 10.0
+
+static double settings_volume_amplitude(double percent)
+{
+	double knee = exp(log(SETTINGS_VOLUME_RANGE) * (SETTINGS_VOLUME_KNEE / 100.0 - 1.0));
+
+	if (percent <= 0.0)
+		return 0.0;
+	if (percent < SETTINGS_VOLUME_KNEE)
+		return knee * percent / SETTINGS_VOLUME_KNEE;
+	return exp(log(SETTINGS_VOLUME_RANGE) * (percent / 100.0 - 1.0));
+}
+
+/* (and the percentage of an amplitude a setting keeps: a value saved from
+the old 0 to 10 spinners shows where it plays) */
+static double settings_volume_percent(double amplitude)
+{
+	double knee = settings_volume_amplitude(SETTINGS_VOLUME_KNEE);
+
+	if (amplitude <= 0.0)
+		return 0.0;
+	if (amplitude < knee)
+		return SETTINGS_VOLUME_KNEE * amplitude / knee;
+	return 100.0 * (1.0 + log(amplitude) / log(SETTINGS_VOLUME_RANGE));
+}
 
 static struct
 {
@@ -6675,6 +6713,7 @@ static struct settings_slider const *settings_slider_made(struct halo_menu_model
 	slider->typed_least = row->typed_least;
 	slider->typed_most = row->typed_most;
 	slider->whole = row->whole != 0;
+	slider->volume = row->curve && !strcmp(row->curve, "volume");
 	for (index = 0; index < row->choice_count; index++)
 	{
 		double value;
@@ -6741,7 +6780,13 @@ static boolean settings_slider_text_value(struct settings_slider const *slider, 
 			return TRUE;
 		}
 	}
-	return text_is_number(text, value);
+	if (!text_is_number(text, value))
+		return FALSE;
+	/* (a volume's amplitude as its percentage, in the slider's range: a
+	master volume saved past it plays at the slider's most) */
+	if (slider->volume)
+		*value = PIN(settings_volume_percent(*value), slider->typed_least, slider->typed_most);
+	return TRUE;
 }
 
 /* whether the slider takes the value: one it may be typed, or a word's */
@@ -6796,6 +6841,9 @@ static void settings_slider_text(struct settings_slider const *slider, double va
 		snprintf(text, size, "%s", slider->stops[word].word);
 	else
 		settings_slider_number(slider, value, text, size);
+	/* (a volume's, a percentage) */
+	if (slider->volume && strlen(text) + 1 < size)
+		strcat(text, "%");
 }
 
 /* a value as the slider's field starts to be typed into: its number, or
@@ -6818,6 +6866,17 @@ static void settings_slider_set(struct settings_slider const *slider, double val
 		value = PIN(value, slider->typed_least, slider->typed_most);
 	if (word != NONE && slider->stops[word].text)
 		snprintf(text, sizeof(text), "%s", slider->stops[word].text);
+	else if (slider->volume)
+	{
+		/* (a volume's percentage written as its amplitude, to six decimals:
+		1%'s is 0.0002) */
+		size_t length;
+
+		snprintf(text, sizeof(text), "%.6f", settings_volume_amplitude(value));
+		length = strlen(text);
+		while (length > 3 && text[length - 1] == '0' && text[length - 2] != '.')
+			text[--length] = 0;
+	}
 	else
 		settings_slider_number(slider, value, text, sizeof(text));
 	if (setting_text(slider->setting, current, sizeof(current), FALSE) &&

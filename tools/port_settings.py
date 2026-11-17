@@ -68,10 +68,6 @@ SHIELD_COLORS = ["white", "black", "red", "blue", "gray", "yellow", "green", "pi
 # input.mouse_vertical_sensitivity's: a multiplier of the horizontal
 VERTICAL_SENSITIVITIES = [(f"{value:g}X", f"{value:g}") for value in (0.25, 0.5, 0.6, 0.7, 0.75, 0.8, 0.9, 1, 1.1, 1.25,
                                                                        1.5, 2)]
-VOLUMES = [(str(step), f"{step / 10:g}") for step in range(11)]
-# audio.volume's: past 10 (the Xbox's level) to 20, as loud as before the
-# Xbox's level was matched (dsound_sdl.c's limiter keeps it under full scale)
-MASTER_VOLUMES = [(str(step), f"{step / 10:g}") for step in range(21)]
 # the platforms a menu element's platform attribute names (menu_files.c's
 # MENU_PLATFORM, "vr": the VR build, playing in the headset, and "hdr": a
 # renderer that draws display.hdr)
@@ -322,6 +318,9 @@ class Slider(NamedTuple):
     typed_most: float
     whole: bool = False
     stops: tuple = ()
+    # "volume": the slider is a percentage, its setting the amplitude
+    # (menu_functions.c's settings_volume_amplitude)
+    curve: str = ""
 
 
 # a slider's track, its thumb and its number, in the value's column
@@ -329,6 +328,13 @@ SLIDER_TRACK_WIDTH, SLIDER_THUMB_WIDTH, SLIDER_TRACK_HEIGHT = 62, 8, 14
 SLIDER_VALUE_X, SLIDER_VALUE_WIDTH, SLIDER_VALUE_HEIGHT = 64, 76, 20
 # input.mouse_sensitivity's: CS2's sensitivity (port/linux/include/mouse_sensitivity.h)
 MOUSE_SENSITIVITY = Slider(0.1, 10.0, 0.05, 0.01, 100.0)
+# the volumes' (audio.*volume): 0 to 100%, evenly loud along the track, each
+# setting keeping the amplitude (an old 0 to 1 value shows where it plays)
+VOLUMES = Slider(0, 100, 1, 0, 100, whole=True, curve="volume")
+# audio.volume's: past 100% (the Xbox's level) to 110%, an amplitude of about
+# 2.0, as loud as before the Xbox's level was matched (dsound_sdl.c's limiter
+# keeps it under full scale)
+MASTER_VOLUMES = Slider(0, 110, 1, 0, 110, whole=True, curve="volume")
 # the geometry, in the 640x480 menu units (menu_functions.c's SETTINGS_*
 # have the same): the rows' column and the panel beside it
 SETTINGS_ROW_X, SETTINGS_ROW_WIDTH, SETTINGS_ROW_HEIGHT, SETTINGS_ROW_STEP = 28, 344, 20, 21
@@ -937,7 +943,7 @@ PAGES = {
              "sounds.", None, "voice_chat_settings"),
             (SECTION, "VOLUME"),
             ("MASTER VOLUME", "audio.volume", MASTER_VOLUMES,
-             "The volume of everything the game plays. 10 is the Xbox's level; up to 20 is louder.", None),
+             "The volume of everything the game plays. 100% is the Xbox's level; up to 110% is louder.", None),
             ("MUSIC VOLUME", "audio.music_volume", VOLUMES, "The music's volume.", None),
             ("DIALOGUE VOLUME", "audio.dialogue_volume", VOLUMES,
              "The characters' speech: Cortana, the Marines and the cutscenes' lines.", None),
@@ -9079,7 +9085,7 @@ def _model_slider(choices) -> list:
         return []
     return [("least", f"{choices.least:g}"), ("most", f"{choices.most:g}"), ("step", f"{choices.step:g}"),
             ("typed_least", f"{choices.typed_least:g}"), ("typed_most", f"{choices.typed_most:g}"),
-            ("whole", "true" if choices.whole else None)]
+            ("whole", "true" if choices.whole else None), ("curve", choices.curve or None)]
 
 
 def _model_page(folder: str, page: dict) -> list:

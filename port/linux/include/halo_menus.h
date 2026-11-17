@@ -189,9 +189,11 @@ struct halo_menu_model_row
 	the headset; a label the game writes; a status row's value beside it) */
 	long same_place, not_in_vr, named, status;
 	/* a slider's track, step and the values it may be typed (whole: in whole
-	numbers); its stops, or a spinner's choices, from first_choice */
+	numbers; curve "volume": a percentage of a volume's amplitude, NULL: the
+	value itself); its stops, or a spinner's choices, from first_choice */
 	double least, most, step, typed_least, typed_most;
 	long whole;
+	char const *curve;
 	long first_choice, choice_count;
 	char const *file;
 	long line;

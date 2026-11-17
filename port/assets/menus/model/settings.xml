@@ -129,71 +129,17 @@
 			<help>Voice chat in network games (your microphone and the other players' voices' volume) and hit sounds.</help>
 		</row>
 		<section key="section_7" title="VOLUME"/>
-		<row key="volume" kind="choice" setting="audio.volume" label="MASTER VOLUME" crumb="AUDIO › VOLUME">
-			<help>The volume of everything the game plays. 10 is the Xbox's level; up to 20 is louder.</help>
-			<choice shown="0" value="0"/>
-			<choice shown="1" value="0.1"/>
-			<choice shown="2" value="0.2"/>
-			<choice shown="3" value="0.3"/>
-			<choice shown="4" value="0.4"/>
-			<choice shown="5" value="0.5"/>
-			<choice shown="6" value="0.6"/>
-			<choice shown="7" value="0.7"/>
-			<choice shown="8" value="0.8"/>
-			<choice shown="9" value="0.9"/>
-			<choice shown="10" value="1"/>
-			<choice shown="11" value="1.1"/>
-			<choice shown="12" value="1.2"/>
-			<choice shown="13" value="1.3"/>
-			<choice shown="14" value="1.4"/>
-			<choice shown="15" value="1.5"/>
-			<choice shown="16" value="1.6"/>
-			<choice shown="17" value="1.7"/>
-			<choice shown="18" value="1.8"/>
-			<choice shown="19" value="1.9"/>
-			<choice shown="20" value="2"/>
+		<row key="volume" kind="slider" setting="audio.volume" label="MASTER VOLUME" crumb="AUDIO › VOLUME" least="0" most="110" step="1" typed_least="0" typed_most="110" whole="true" curve="volume">
+			<help>The volume of everything the game plays. 100% is the Xbox's level; up to 110% is louder.</help>
 		</row>
-		<row key="music_volume" kind="choice" setting="audio.music_volume" label="MUSIC VOLUME" crumb="AUDIO › VOLUME">
+		<row key="music_volume" kind="slider" setting="audio.music_volume" label="MUSIC VOLUME" crumb="AUDIO › VOLUME" least="0" most="100" step="1" typed_least="0" typed_most="100" whole="true" curve="volume">
 			<help>The music's volume.</help>
-			<choice shown="0" value="0"/>
-			<choice shown="1" value="0.1"/>
-			<choice shown="2" value="0.2"/>
-			<choice shown="3" value="0.3"/>
-			<choice shown="4" value="0.4"/>
-			<choice shown="5" value="0.5"/>
-			<choice shown="6" value="0.6"/>
-			<choice shown="7" value="0.7"/>
-			<choice shown="8" value="0.8"/>
-			<choice shown="9" value="0.9"/>
-			<choice shown="10" value="1"/>
 		</row>
-		<row key="dialogue_volume" kind="choice" setting="audio.dialogue_volume" label="DIALOGUE VOLUME" crumb="AUDIO › VOLUME">
+		<row key="dialogue_volume" kind="slider" setting="audio.dialogue_volume" label="DIALOGUE VOLUME" crumb="AUDIO › VOLUME" least="0" most="100" step="1" typed_least="0" typed_most="100" whole="true" curve="volume">
 			<help>The characters' speech: Cortana, the Marines and the cutscenes' lines.</help>
-			<choice shown="0" value="0"/>
-			<choice shown="1" value="0.1"/>
-			<choice shown="2" value="0.2"/>
-			<choice shown="3" value="0.3"/>
-			<choice shown="4" value="0.4"/>
-			<choice shown="5" value="0.5"/>
-			<choice shown="6" value="0.6"/>
-			<choice shown="7" value="0.7"/>
-			<choice shown="8" value="0.8"/>
-			<choice shown="9" value="0.9"/>
-			<choice shown="10" value="1"/>
 		</row>
-		<row key="effects_volume" kind="choice" setting="audio.effects_volume" label="EFFECTS VOLUME" crumb="AUDIO › VOLUME">
+		<row key="effects_volume" kind="slider" setting="audio.effects_volume" label="EFFECTS VOLUME" crumb="AUDIO › VOLUME" least="0" most="100" step="1" typed_least="0" typed_most="100" whole="true" curve="volume">
 			<help>Every other sound: weapons, vehicles and the world.</help>
-			<choice shown="0" value="0"/>
-			<choice shown="1" value="0.1"/>
-			<choice shown="2" value="0.2"/>
-			<choice shown="3" value="0.3"/>
-			<choice shown="4" value="0.4"/>
-			<choice shown="5" value="0.5"/>
-			<choice shown="6" value="0.6"/>
-			<choice shown="7" value="0.7"/>
-			<choice shown="8" value="0.8"/>
-			<choice shown="9" value="0.9"/>
-			<choice shown="10" value="1"/>
 		</row>
 		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this tab's settings back to their defaults. Nothing changes until OK."/>
 		<button key="button_ok" kind="ok" run="port settings ok" help="Keeps your changes, on every tab, and applies them."/>
@@ -211,19 +157,8 @@
 			<help>The microphone voice chat listens to.</help>
 			<choice shown="SYSTEM DEFAULT" value="default"/>
 		</row>
-		<row key="voice_volume" kind="choice" setting="audio.voice_volume" label="VOICE VOLUME" crumb="AUDIO › MULTIPLAYER">
+		<row key="voice_volume" kind="slider" setting="audio.voice_volume" label="VOICE VOLUME" crumb="AUDIO › MULTIPLAYER" least="0" most="100" step="1" typed_least="0" typed_most="100" whole="true" curve="volume">
 			<help>How loud the other players' voices are.</help>
-			<choice shown="0" value="0"/>
-			<choice shown="1" value="0.1"/>
-			<choice shown="2" value="0.2"/>
-			<choice shown="3" value="0.3"/>
-			<choice shown="4" value="0.4"/>
-			<choice shown="5" value="0.5"/>
-			<choice shown="6" value="0.6"/>
-			<choice shown="7" value="0.7"/>
-			<choice shown="8" value="0.8"/>
-			<choice shown="9" value="0.9"/>
-			<choice shown="10" value="1"/>
 		</row>
 		<section key="section_4" title="HIT SOUNDS"/>
 		<row key="hit_sounds" kind="choice" setting="audio.hit_sounds" label="HIT SOUNDS" crumb="AUDIO › MULTIPLAYER">
