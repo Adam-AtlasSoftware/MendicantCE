@@ -403,6 +403,55 @@ static void case_touch(void)
 	}
 }
 
+/* the first sample's turn of a steady rate (yaw, radians a second) from rest, at a smoothing strength, as a share
+of the turn it came with: 1 direct, less smoothed */
+static float first_share(float smoothing, float rate)
+{
+	struct gyro_aim_settings s = settings(0, 0);
+	float smoothed[2] = { 0.0f, 0.0f }, look[2] = { rate, 0.0f }, turn[2];
+
+	s.smoothing = smoothing;
+	gyro_aim_rate(look, smoothed, STEP, &s, turn);
+	return turn[0] / (rate * STEP * s.sensitivity);
+}
+
+/* the smoothing's strengths: medium is the smoothing as it was (on), sample for sample; low and high scale its
+thresholds (a motion medium smooths, just slower than its slowest, low turns direct; one medium turns direct, high smooths); off smooths
+nothing; the words name them */
+static void case_strength(void)
+{
+	struct gyro_aim_settings medium = settings(0, 1);
+	float smoothed[2] = { 0.0f, 0.0f }, was[2] = { 0.0f, 0.0f };
+	int index;
+
+	CHECK(gyro_aim_smoothing("off", -1.0f) == 0.0f && gyro_aim_smoothing("low", -1.0f) == 0.5f &&
+		gyro_aim_smoothing("medium", -1.0f) == 1.0f && gyro_aim_smoothing("high", -1.0f) == 2.0f &&
+		gyro_aim_smoothing("on", -1.0f) == -1.0f && gyro_aim_smoothing(NULL, -1.0f) == -1.0f,
+		"the strengths' words read wrong");
+	medium.smoothing = gyro_aim_smoothing("medium", 0.0f);
+	for (index = 0; index < RATE; index++)
+	{
+		/* (a tremor, then a turn, by turns) */
+		float rate = (index / 40) % 2 ? 0.3f * sinf(index * 0.05f) : 0.02f * sinf(index * 0.7f);
+		float look[2] = { rate, -0.5f * rate }, old[2] = { rate, -0.5f * rate }, turn[2];
+
+		gyro_aim_rate(look, smoothed, STEP, &medium, turn);
+		/* (the smoothing on, as it was before its strengths) */
+		smooth_tiered(old, was, 2, SMOOTH_SLOWEST, SMOOTH_FASTEST, SMOOTH_SECONDS, STEP);
+		CHECK(turn[0] == old[0] * STEP * medium.sensitivity &&
+			turn[1] == old[1] * STEP * medium.sensitivity * medium.vertical_sensitivity,
+			"sample %d: medium turned %g, %g, and the smoothing on %g, %g", index, turn[0], turn[1],
+			old[0] * STEP * medium.sensitivity, old[1] * STEP * medium.sensitivity);
+	}
+	CHECK(first_share(1.0f, 0.995f * SMOOTH_SLOWEST) < 0.5f && first_share(0.5f, 0.995f * SMOOTH_SLOWEST) > 0.999f,
+		"a slow motion: medium turned %g of it at once, low %g", first_share(1.0f, 0.995f * SMOOTH_SLOWEST),
+		first_share(0.5f, 0.995f * SMOOTH_SLOWEST));
+	CHECK(first_share(1.0f, 1.5f * SMOOTH_FASTEST) > 0.999f && first_share(2.0f, 1.5f * SMOOTH_FASTEST) < 0.9f,
+		"a faster motion: medium turned %g of it at once, high %g", first_share(1.0f, 1.5f * SMOOTH_FASTEST),
+		first_share(2.0f, 1.5f * SMOOTH_FASTEST));
+	CHECK(first_share(0.0f, 0.1f * SMOOTH_SLOWEST) > 0.999f, "off, a tremor was smoothed");
+}
+
 int main(int argc, char **argv)
 {
 	const char *name = argc > 1 ? argv[1] : "";
@@ -423,6 +472,8 @@ int main(int argc, char **argv)
 		case_modes();
 	else if (!strcmp(name, "touch"))
 		case_touch();
+	else if (!strcmp(name, "strength"))
+		case_strength();
 	else
 	{
 		fprintf(stderr, "no case %s\n", name);

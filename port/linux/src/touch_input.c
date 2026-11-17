@@ -492,7 +492,7 @@ static void touch_gyro_turn(float turn[2])
 			settings.vertical_sensitivity = 1.0f;
 		/* (the overlay turns the device's axes to the screen's itself) */
 		settings.player_space = 0;
-		settings.smoothing = 0;
+		settings.smoothing = gyro_aim_smoothing(config_string("input.touch_gyro_smoothing"), 0.0f);
 	}
 	turned[0] = turn[0];
 	turned[1] = turn[1];

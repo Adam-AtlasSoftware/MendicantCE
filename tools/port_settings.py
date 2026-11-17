@@ -772,6 +772,8 @@ STICK_TEST_RADIUS = 44
 STICK_TEST_GAP = 14
 # input.gyro_sensitivity's: the view's degrees for each degree the controller turns
 GYRO_SENSITIVITY = Slider(0.25, 8.0, 0.05, 0.05, 20.0)
+# input.gyro_smoothing's strengths (gyro_aim.c's gyro_aim_smoothing)
+GYRO_SMOOTHING = [("OFF", "off"), ("LOW", "low"), ("MEDIUM", "medium"), ("HIGH", "high")]
 GYRO_BUTTONS = [("TOUCHPAD", "touchpad"), ("LEFT PADDLE", "left_paddle"), ("RIGHT PADDLE", "right_paddle"),
                 ("CAPTURE / SHARE", "misc"), ("LEFT BUMPER", "left_bumper"), ("RIGHT BUMPER", "right_bumper"),
                 ("LEFT TRIGGER", "left_trigger"), ("RIGHT TRIGGER", "right_trigger"), ("LEFT STICK", "left_stick"),
@@ -1630,9 +1632,12 @@ PAGES = {
              "Player Space turns you as you turn the controller about the up direction, however you hold it: "
              "flat, upright or between. Local Space turns you about the controller's own axis, as if held flat.",
              None),
-            ("SMOOTHING", "input.gyro_smoothing", ON_OFF,
-             "Steadies the smallest motions, your hand's tremor, but never a real turn. Off: every motion as it "
-             "comes.", None),
+            ("SMOOTHING", "input.gyro_smoothing", GYRO_SMOOTHING,
+             "Steadies the smallest motions, your hand's tremor, but never a real turn. Higher steadies faster "
+             "motions, over a little longer. Off: every motion as it comes.", None),
+            ("SMOOTHING", "input.touch_gyro_smoothing", GYRO_SMOOTHING,
+             "Steadies this device's smallest motions, your hand's tremor, but never a real turn. Higher steadies "
+             "faster motions, over a little longer. Off: every motion as it comes.", "touch"),
             ("CALIBRATE", None, None,
              "Put the controller down on something still, then select this: it measures the gyroscope at rest "
              "for a second and a half.|It also does so whenever it is held still.", None,
@@ -2450,7 +2455,7 @@ def _settings_platform(rows: list, start: int):
 # them at most, or the model's conditions showing one (SETTINGS_ROW_WHEN):
 # Window Size in Resolution's, Android's anti-aliasing in the desktop's
 SETTINGS_SAME_PLACE = {"window_size", "anti_aliasing_android", "touch_gyro_sensitivity",
-                       "touch_gyro_vertical_sensitivity"}
+                       "touch_gyro_vertical_sensitivity", "touch_gyro_smoothing"}
 # the rows hidden while VR Setup's row is shown (the game in the headset),
 # which takes their room: Mouse's Menu Cursor; and Brightness's Gamma, which
 # the VR build hides always (their conditions: SETTINGS_ROW_WHEN)
@@ -2488,7 +2493,7 @@ SETTINGS_ROW_WHEN = {
                                "gyro_smoothing", "gyro_calibrate")},
     "gyro_button": "gyro+gyro_aim=hold gyro+gyro_aim=pause",
     # (the touch controls' gyroscope's, in the controller's rows' place)
-    **{key: "!gyro" for key in ("touch_gyro_sensitivity", "touch_gyro_vertical_sensitivity")},
+    **{key: "!gyro" for key in ("touch_gyro_sensitivity", "touch_gyro_vertical_sensitivity", "touch_gyro_smoothing")},
     **{f"viewmodel_weapon_{name}": "weapon_held" for name in ("x", "y", "z", "pitch", "yaw", "roll", "reset")},
     # (Discord's UNLINK an account linked, or waiting for its code)
     "link_unlink": "discord_linked",

@@ -1166,16 +1166,25 @@
 			<choice shown="PLAYER SPACE" value="player"/>
 			<choice shown="LOCAL SPACE" value="local"/>
 		</row>
-		<row key="gyro_smoothing" kind="choice" setting="input.gyro_smoothing" label="SMOOTHING" crumb="CONTROLS › CONTROLLER › GYRO &amp; FLICK STICK" when="gyro">
-			<help>Steadies the smallest motions, your hand's tremor, but never a real turn. Off: every motion as it comes.</help>
-			<choice shown="ON" value="true"/>
-			<choice shown="OFF" value="false"/>
+		<row key="gyro_smoothing" kind="choice" setting="input.gyro_smoothing" label="SMOOTHING" crumb="CONTROLS › CONTROLLER › GYRO &amp; FLICK STICK" search_choices="low medium high" when="gyro">
+			<help>Steadies the smallest motions, your hand's tremor, but never a real turn. Higher steadies faster motions, over a little longer. Off: every motion as it comes.</help>
+			<choice shown="OFF" value="off"/>
+			<choice shown="LOW" value="low"/>
+			<choice shown="MEDIUM" value="medium"/>
+			<choice shown="HIGH" value="high"/>
+		</row>
+		<row key="touch_gyro_smoothing" kind="choice" setting="input.touch_gyro_smoothing" label="SMOOTHING" crumb="CONTROLS › CONTROLLER › GYRO &amp; FLICK STICK" search_choices="low medium high" when="touch+!gyro" same_place="true">
+			<help>Steadies this device's smallest motions, your hand's tremor, but never a real turn. Higher steadies faster motions, over a little longer. Off: every motion as it comes.</help>
+			<choice shown="OFF" value="off"/>
+			<choice shown="LOW" value="low"/>
+			<choice shown="MEDIUM" value="medium"/>
+			<choice shown="HIGH" value="high"/>
 		</row>
 		<row key="gyro_calibrate" kind="status" label="CALIBRATE" crumb="CONTROLS › CONTROLLER › GYRO &amp; FLICK STICK" when="gyro" run="port settings gyro calibrate">
 			<help>Put the controller down on something still, then select this: it measures the gyroscope at rest for a second and a half.</help>
 			<note>It also does so whenever it is held still.</note>
 		</row>
-		<section key="section_11" title="RIGHT STICK"/>
+		<section key="section_12" title="RIGHT STICK"/>
 		<row key="invert_look_horizontal" kind="choice" setting="input.invert_look_horizontal" label="INVERT TURNING" crumb="CONTROLS › CONTROLLER › GYRO &amp; FLICK STICK">
 			<help>Pushing the right stick right turns the view left. For every controller on this device.</help>
 			<choice shown="YES" value="true"/>

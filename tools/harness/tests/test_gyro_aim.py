@@ -45,6 +45,9 @@ AIM_CONTROLS = [
     # the touch controls' gyroscope as the phone turned, its settings not applied (the old path)
     ("\tgyro_aim_rate(rate, smoothed, seconds, settings, turn);", "\tturn[0] = turned[0];\n\tturn[1] = turned[1];",
      "touch"),
+    # the smoothing's strength not applied: low and high smooth as medium does
+    ("SMOOTH_SLOWEST * settings->smoothing, SMOOTH_FASTEST * settings->smoothing,", "SMOOTH_SLOWEST, SMOOTH_FASTEST,",
+     "strength"),
 ]
 
 
@@ -57,7 +60,7 @@ def aim_generated(fault=None):
 
 
 @pytest.mark.parametrize("case", ["bias", "calibrate", "player_space", "tilt_followed", "smoothing", "flick", "modes",
-                                  "touch"])
+                                  "touch", "strength"])
 def test_gyro_aim(case):
     status, output = run(build("gyro_aim", aim_generated()), case)
     assert status == 0, output

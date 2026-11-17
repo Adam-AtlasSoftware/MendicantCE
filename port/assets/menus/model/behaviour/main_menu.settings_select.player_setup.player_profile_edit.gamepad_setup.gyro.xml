@@ -66,7 +66,10 @@
 	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/gyro/op_gyro_smoothing" flags="pass_unhandled_to_focused_child"/>
 	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/gyro/gyro_smoothing_spinner" flags="pass_unhandled_to_focused_child left_right_tabs_items">
 		<on event="created" run="port setting load"/>
-		<on event="a" run="port setting segment"/>
+	</behaviour>
+	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/gyro/op_touch_gyro_smoothing" flags="pass_unhandled_to_focused_child"/>
+	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/gyro/touch_gyro_smoothing_spinner" flags="pass_unhandled_to_focused_child left_right_tabs_items">
+		<on event="created" run="port setting load"/>
 	</behaviour>
 	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/gyro/op_gyro_calibrate" flags="pass_unhandled_to_focused_child">
 		<on event="a" run="port settings gyro calibrate"/>

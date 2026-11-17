@@ -45,7 +45,8 @@ A turn slower than SMOOTH_SLOWEST (radians a second) is all smoothed, a
 turn faster than SMOOTH_FASTEST not at all, one between in part: the
 hand's tremor steadied, never a real motion's lag. The smoothed part is
 averaged over SMOOTH_SECONDS, and none of it is lost: it turns the view
-as far, a little later. */
+as far, a little later. A strength (gyro_aim_smoothing) scales all three:
+a stronger smoothing steadies faster motions, over a longer time. */
 #define SMOOTH_SLOWEST 0.044f
 #define SMOOTH_FASTEST 0.087f
 #define SMOOTH_SECONDS 0.06f
@@ -94,6 +95,26 @@ static void smooth_tiered(float *rate, float *smoothed, int count, float slowest
 		smoothed[index] += (rate[index] * (1.0f - direct) - smoothed[index]) * k;
 		rate[index] = rate[index] * direct + smoothed[index];
 	}
+}
+
+float gyro_aim_smoothing(const char *word, float otherwise)
+{
+	static const struct
+	{
+		const char *word;
+		float strength;
+	} strengths[] =
+	{
+		{ "off", 0.0f }, { "low", 0.5f }, { "medium", 1.0f }, { "high", 2.0f },
+	};
+	unsigned int index;
+
+	for (index = 0; word && index < sizeof(strengths) / sizeof(strengths[0]); index++)
+	{
+		if (!strcmp(word, strengths[index].word))
+			return strengths[index].strength;
+	}
+	return otherwise;
 }
 
 void gyro_aim_reset(struct gyro_aim *aim)
@@ -253,8 +274,11 @@ void gyro_aim_rate(const float rate[2], float smoothed[2], float seconds, const 
 
 	look[0] = rate[0];
 	look[1] = rate[1];
-	if (settings->smoothing)
-		smooth_tiered(look, smoothed, 2, SMOOTH_SLOWEST, SMOOTH_FASTEST, SMOOTH_SECONDS, seconds);
+	if (settings->smoothing > 0.0f)
+	{
+		smooth_tiered(look, smoothed, 2, SMOOTH_SLOWEST * settings->smoothing, SMOOTH_FASTEST * settings->smoothing,
+			SMOOTH_SECONDS * settings->smoothing, seconds);
+	}
 	turn[0] = look[0] * seconds * settings->sensitivity;
 	turn[1] = look[1] * seconds * settings->sensitivity * settings->vertical_sensitivity;
 }

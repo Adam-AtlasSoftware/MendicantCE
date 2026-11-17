@@ -25,14 +25,21 @@ A turn is radians of the game's yaw (positive to the left) and pitch
 /* the settings (input.gyro_*): the game's degrees for each degree the
 controller turns, side to side, and up and down of that; the turn's axis
 from the gravity's direction (player space, held any way) or the
-controller's own (local space); the smoothing of the smallest motions */
+controller's own (local space); the smoothing of the smallest motions, its
+strength (0 none; 1 the soft tiered smoothing's own thresholds and time,
+which a strength scales: gyro_aim_smoothing) */
 struct gyro_aim_settings
 {
 	float sensitivity;
 	float vertical_sensitivity;
 	int player_space;
-	int smoothing;
+	float smoothing;
 };
+
+/* the smoothing's strength of a setting's word (input.gyro_smoothing,
+input.touch_gyro_smoothing): "off" none, "low" half, "medium" the
+thresholds and time as they are, "high" twice; `otherwise` for another */
+float gyro_aim_smoothing(const char *word, float otherwise);
 
 struct gyro_aim
 {

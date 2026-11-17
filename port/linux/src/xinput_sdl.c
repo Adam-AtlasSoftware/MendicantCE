@@ -3265,7 +3265,7 @@ static void gyro_settings_read(void)
 	if (!(gyro_settings.aim.vertical_sensitivity > 0.0f))
 		gyro_settings.aim.vertical_sensitivity = 1.0f;
 	gyro_settings.aim.player_space = strcmp(config_string("input.gyro_space"), "local") != 0;
-	gyro_settings.aim.smoothing = config_boolean("input.gyro_smoothing");
+	gyro_settings.aim.smoothing = gyro_aim_smoothing(config_string("input.gyro_smoothing"), 1.0f);
 	gyro_settings.flick_stick = config_boolean("input.flick_stick");
 }
 
