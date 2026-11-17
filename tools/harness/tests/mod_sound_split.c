@@ -504,6 +504,43 @@ int main(int argc, char **argv)
 			(long)permutation->samples.size);
 		CHECK(sound->definition.sample_rate == 0 && sound->adpcm_count == 1, "not the old fallback, or not said");
 	}
+	else if (!strcmp(name, "forty-variations"))
+	{
+		/* a mod's sound of 40 short permutations, not linked (OpenH1 issue 1170): kept, all 40 picked from, and
+		each played once before any repeats, round after round (sound_definitions.c's played bits past 32) */
+		struct source sources[40];
+		short *samples = sweep_make(2205, 1);
+		struct mod_sound *sound;
+		unsigned long seed = 3;
+		short index, round, last = NONE;
+
+		for (index = 0; index < 40; index++)
+		{
+			struct source source = { samples, 2205, 1, 22050, NONE };
+
+			sources[index] = source;
+		}
+		file_make(MONO, RATE_22, PCM, FALSE, 40, sources, 40);
+		sound = sound_load();
+		CHECK(the_range(sound)->actual_permutation_count == 40, "%d picked from",
+			the_range(sound)->actual_permutation_count);
+		sound_definitions_played_beyond_clear();
+		for (round = 0; round < 4; round++)
+		{
+			boolean seen[40] = { 0 };
+			short count = round ? 39 : 40;
+
+			for (index = 0; index < count; index++)
+			{
+				short pick = sound_definition_next_permutation_from_seed(&sound->definition, 0, NONE, &seed, FALSE);
+
+				CHECK(VALID_INDEX(pick, 40) && !seen[pick] && pick != last,
+					"round %d, pick %d: permutation %d again", round, index, pick);
+				seen[pick] = TRUE;
+				last = pick;
+			}
+		}
+	}
 	else
 	{
 		fprintf(stderr, "no case '%s'\n", name);
