@@ -383,19 +383,12 @@ over 2 pi, a0 = 1 - k . n0. */
 	"}\n" \
 	"\n" \
 	"/* whether a lamp's point at distance d along l is seen from o: nothing\n" \
-	"before it, or first another lamp's surface */\n" \
+	"before it, another lamp's surface included (whose own light its pick\n" \
+	"counts; let through, it was counted twice: the bake's lamp-lit rooms then\n" \
+	"brighter than R's, whose bounces never let it through) */\n" \
 	"bool lamp_visible(vec3 o, vec3 l, float d)\n" \
 	"{\n" \
-	"    float most = max(d * 0.995 - 0.03, 0.0);\n" \
-	"    if (!blocked(o, l, most))\n" \
-	"        return true;\n" \
-	"    vec3 nh;\n" \
-	"    uint t;\n" \
-	"    vec2 b;\n" \
-	"    if (hit(o, l, most, nh, t, b) < 0.0)\n" \
-	"        return true;\n" \
-	"    uint m = material_of(t);\n" \
-	"    return m < s.counts.w && (uint(material_value(m, 3u)) & 1u) != 0u;\n" \
+	"    return !blocked(o, l, max(d * 0.995 - 0.03, 0.0));\n" \
 	"}\n" \
 	"\n" \
 	"/* a direction from p toward a point of a lamp's triangle (its corners a0\n" \
