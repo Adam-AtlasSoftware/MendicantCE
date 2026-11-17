@@ -1191,3 +1191,11 @@ boolean mod_sounds_read(
 
 	return FALSE;
 }
+
+boolean mod_sounds_replaced(
+	long tag_index)
+{
+	struct mod_sound_override const *override = override_get(tag_index);
+
+	return override && override->sound != NULL;
+}

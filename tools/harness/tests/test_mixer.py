@@ -3,13 +3,13 @@ double precision, sines through it as the ear hears them, voices out of earshot,
 resampler, the Xbox ADPCM decoder against reference vectors, the Doppler shift, the limiter, audio.channels' choice
 and 5.1, the LFE's low pass, and 3D audio: audio.spatial's choice, the HRTF's cues against the pan's, its
 distance, occlusion, reverb and Doppler, the crossfade when the choice changes, stereo voices placed in the world heard
-as mono 3D voices, and 2D voices left as they are; the master
+as mono 3D voices or spread (audio.stereo_spread), and 2D voices left as they are; the master
 volume on every kind of voice; and the
 hand-off of the game's side of the voices to the mixer, which never waits for a game thread.
 
     python tools/harness/tests/test_mixer.py metrics   the figures
-    python tools/harness/tests/test_mixer.py bench [voices] [out of earshot] [indoor|outdoor] [hrtf]   a game's worth of
-        voices, timed (through the HRTF: hrtf)
+    python tools/harness/tests/test_mixer.py bench [voices] [out of earshot] [indoor|outdoor] [hrtf] [spread|mixed]
+        a game's worth of voices, timed (through the HRTF: hrtf; the 3D voices placed stereo ones, spread or mixed)
     python tools/harness/tests/test_mixer.py circle out.wav hrtf|pan   a sound going round the listener, to listen to
     python tools/harness/tests/test_mixer.py render > out.raw   noise through the mixer, to compare with another's
 (MIXER_SOURCE=path: of another dsound_sdl.c; MIXER_SCALAR=1: its resampler adding tap by tap)
@@ -28,6 +28,7 @@ SOURCE = "port/linux/src/dsound_sdl.c"
 CASES = ["reference", "impulse", "sines", "aliases", "silent-voice", "mono", "linear", "cut", "cuts", "adpcm", "doppler", "doppler-step",
          "parameter-ramp", "block-size",
          "limiter", "night", "obstruction", "room-send", "room-send-images", "quiet-levels", "quiet-levels-3d", "resampler-xbox", "resampler-xbox-images", "channels", "surround", "lfe", "spatial-choice", "hrtf-cues", "hrtf-paths", "hrtf-switch", "stereo-in-world",
+         "stereo-spread",
          "dry-2d",
          "master-volume", "buffers", "sound-off",
          "hand-off-never-waits", "hand-off-settings"]
@@ -202,6 +203,14 @@ NEGATIVE_CONTROLS = {
     "stereo-pan-only": (("\t*hrtf_on = hrtf_enabled || stream->hrtf_mix > 0.0f;",
                          "\t*hrtf_on = stream->channels == 1 && (hrtf_enabled || stream->hrtf_mix > 0.0f);"),
                         "stereo-in-world"),
+    # the stereo spread: no narrowing with distance (as wide 16 units off as at one); its channels on the wrong
+    # sides; spread on a stereo voice not placed (the game's own stereo sounds)
+    "spread-not-narrowing": (("angle = atanf(stereo_spread * stream->minimum_distance / (2.0f * distance));",
+                              "angle = atanf(stereo_spread * stream->minimum_distance / 2.0f);"), "stereo-spread"),
+    "spread-sides-swapped": (("stereo_spread_place(-1.0f, angle", "stereo_spread_place(1.0f, angle"),
+                             "stereo-spread"),
+    "spread-not-placed": (("\tspread = second.on;", "\tspread = second.on || stream->channels == 2;"),
+                          "stereo-spread"),
     # the HRTF's gain without the master volume and the voice's own (every 3D sound at full volume on headphones)
     "hrtf-no-volume": (("\t\tif (*hrtf_on)\n\t\t\thrtf_out->gain *= scale;\n", ""), "master-volume"),
     # the hand-off: the device's mix waiting for the game's thread to take its side over, or to say what it
@@ -292,6 +301,36 @@ def test_listening_mode_default_is_the_mix_as_it_was():
     assert len(without) > 0
     assert _render(None).tobytes() == without.tobytes(), "the default mix is not the mix without the compressor"
     assert _render(NIGHT_FORCED_ON).tobytes() != without.tobytes(), "night forced on changes nothing: the test is blind"
+
+
+# the stereo spread left out (every placed stereo voice mixed to one, as before audio.stereo_spread)
+SPREAD_LEFT_OUT = ("return stream->channels == 2 && stream->stereo_positioned && stereo_spread > 0.0f;",
+                   "return FALSE;")
+
+
+def _render_stereo(spread, left_out=False):
+    """mixer.c's render-stereo at spread; left_out: of the mixer without the spread (compiled as the tests' own
+    builds are, not as a negative control's: the same optimisation, so the same rounding)"""
+    import array
+    import subprocess
+
+    text = read(SOURCE)
+    if left_out:
+        assert text.count(SPREAD_LEFT_OUT[0]) == 1, "the spread's choice is not found in dsound_sdl.c"
+        text = text.replace(*SPREAD_LEFT_OUT)
+    result = subprocess.run([str(build("mixer", generated(text))), "render-stereo", spread], capture_output=True,
+                            timeout=120, check=True)
+    return array.array("f", result.stdout)
+
+
+def test_stereo_spread_zero_is_the_mono_mix():
+    """audio.stereo_spread 0: placed stereo voices (panned, through the HRTF, on 5.1, moving, muffled, at the
+    listener) the same to the bit as the mixer without the spread, which mixes them to one; at the default they are
+    not (the control: the comparison sees it)"""
+    without = _render_stereo("0.5", left_out=True)
+    assert len(without) > 0
+    assert _render_stereo("0").tobytes() == without.tobytes(), "a spread of 0 is not the mono mix"
+    assert _render_stereo("0.5").tobytes() != without.tobytes(), "the default spread changes nothing: the test is blind"
 
 
 @pytest.mark.parametrize("control", NEGATIVE_CONTROLS)
