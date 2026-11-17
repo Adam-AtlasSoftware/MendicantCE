@@ -13,10 +13,10 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, enum_with, function, mutated, read, run, structure  # noqa: E402
 
-CASES = ["parse", "entry", "speed", "schedule", "lines"]
+CASES = ["parse", "entry", "speed", "initial", "step", "schedule", "lines"]
 SOURCE = "port/linux/game/bots_match.c"
 FUNCTIONS = ("bots_match_parse_start", "bots_match_entry_text", "bots_match_speed_allowed", "bots_match_speed_kept",
-             "bots_match_due", "bots_match_note_line")
+             "bots_match_speed_step", "bots_match_due", "bots_match_note_line")
 TICK_FUNCTIONS = ("bots_match_due", "bots_match_note_line", "bots_match_note_kill")
 NONDETERMINISTIC = re.compile(r"\b(rand|random|srand|time|clock|system_milliseconds|SDL_GetTicks\w*|"
                               r"posix_random_bytes)\s*\(")
@@ -30,6 +30,11 @@ NEGATIVE_CONTROLS = {
     "line-early": ("bots_match_due", ("if (next->tick > tick)", "if (next->tick > tick + 1)"), "schedule"),
     "lines-unbounded": ("bots_match_note_line", ("if (bots_match.line_count >= BOTS_MATCH_LINES)",
                                                  "if (bots_match.line_count > BOTS_MATCH_LINES)"), "lines"),
+    # (the initializer by position, which a field added above speed shifted: every game a host played alone stood
+    # still)
+    # (the speed given every frame, asked for or not: a script's or the console's game_speed undone)
+    "speed-always": ("bots_match_speed_step", ("if (*applied != 0.0f)", "if (TRUE)"), "step"),
+    "speed-by-position": ("globals", ("\t.speed = 1.0f,\n", ""), "initial"),
 }
 
 
@@ -52,7 +57,7 @@ def generated(fault=None):
         structure(source, "bots_match_player"),
         structure(source, "bots_match_line"),
         structure(source, "bots_match_kill"),
-        globals_structure(source),
+        mutated(globals_structure(source), *fault[1]) if fault and fault[0] == "globals" else globals_structure(source),
         "",
     ])
     code = ""
