@@ -345,6 +345,21 @@ static short sound_definition_next_permutation_from_seed(
 
 		return permutation->next_permutation_index;
 	}
+	/* port: or the next piece of a long permutation split at load, in a
+	sound whose permutations are not linked; after the last, a pick as
+	before (sound_permutation_next_piece) */
+	if (VALID_INDEX(permutation_index, range->permutations.count))
+	{
+		short piece = sound_permutation_next_piece(range, TAG_BLOCK_GET_ELEMENT(
+			&range->permutations,
+			permutation_index,
+			struct sound_permutation));
+
+		if (piece != NONE)
+		{
+			return piece;
+		}
+	}
 
 	/* port: the seed given (the sounds', or the game's speakers'), here and
 	below */

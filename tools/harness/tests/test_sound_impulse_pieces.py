@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, function, mutated, read, run  # noqa: E402
 from harness.audio import manager_types, pcm_permutation_rate  # noqa: E402
 
-CASES = ["pieces", "cache-miss", "stock-adpcm", "unlinked"]
+CASES = ["pieces", "cache-miss", "stock-adpcm", "unlinked", "unlinked-actual"]
 NEGATIVE_CONTROLS = {
     # the pieces not followed: an impulse sound plays its first piece only
     "not-followed": (("\tupdate_channel_for_impulse_sound_piece(channel_index);\n", ""), "pieces"),

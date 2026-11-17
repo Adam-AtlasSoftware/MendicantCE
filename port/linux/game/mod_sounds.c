@@ -518,7 +518,6 @@ static struct mod_sound *mod_sound_new(
 	long permutation_total = 0;
 	long permutation_capacity;
 	long range_first[MAXIMUM_PITCH_RANGES_PER_SOUND];
-	boolean split = FALSE;
 	boolean linked;
 	long rate;
 	long encoded_rate;
@@ -875,7 +874,6 @@ static struct mod_sound *mod_sound_new(
 			/* the permutations too long for one, in pieces after the range's */
 			if (range_pieces)
 			{
-				split = TRUE;
 				if (!range_split(sound, range, range_first[range_index], count, &permutation_capacity))
 				{
 					*reason = "out of memory";
@@ -889,15 +887,12 @@ static struct mod_sound *mod_sound_new(
 	{
 		goto refused;
 	}
-	/* (the pieces may have moved the permutations; a chain of them is a
-	linked sound's, game_sound.c and sound_manager.c following it) */
+	/* (the pieces may have moved the permutations. The sound stays linked or
+	not as its file says, so that it plays as it did, one that repeated
+	repeating all of its pieces: sound_permutation_next_piece) */
 	for (range_index = 0; range_index < range_count; range_index++)
 	{
 		sound->ranges[range_index].permutations.address = sound->permutations + range_first[range_index];
-	}
-	if (split)
-	{
-		SET_FLAG(definition->flags, _sound_definition_linked_permutations_bit, TRUE);
 	}
 
 	definition->longest_permutation_length = (long)longest;

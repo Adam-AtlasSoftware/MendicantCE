@@ -341,8 +341,8 @@ int main(int argc, char **argv)
 		source.samples = sweep_make(source.frames, source.channels);
 		file_make(mono ? MONO : STEREO, RATE_44, mono ? PCM : OGG, FALSE, 1, &source, 1);
 		sound = sound_load();
-		CHECK(TEST_FLAG(sound->definition.flags, _sound_definition_linked_permutations_bit),
-			"the sound's permutations are not linked");
+		CHECK(!TEST_FLAG(sound->definition.flags, _sound_definition_linked_permutations_bit),
+			"the sound was made a linked one: it would no longer play as it did");
 		CHECK(sound->definition.compression == 1, "the sound is not one of the Xbox's formats");
 		CHECK(the_range(sound)->actual_permutation_count == 1, "%d permutations picked from",
 			the_range(sound)->actual_permutation_count);
@@ -399,7 +399,7 @@ int main(int argc, char **argv)
 	else if (!strcmp(name, "loop-wrap"))
 	{
 		/* two 30 s permutations picked from: from each, the next permutation (as a looping sound's track takes it)
-		is its pieces, then none, and the pick after that is always one of the two again, never a piece */
+		is its pieces in turn, and after the last a pick of one of the two again, never a piece nor none */
 		struct source sources[2] = { { NULL, 30L * 44100, 1, 44100, NONE }, { NULL, 30L * 44100, 1, 44100, NONE } };
 		struct mod_sound *sound;
 		unsigned long seed;
@@ -417,12 +417,16 @@ int main(int argc, char **argv)
 
 			CHECK(chain_check(sound, first, NONE, &sources[first], 44100) == 6, "permutation %d's chain", first);
 			seed = 1;
-			while (index != NONE)
+			for (steps = 1; steps < 6; steps++)
 			{
-				CHECK(++steps <= 6, "the chain from %d did not end", first);
-				index = sound_definition_next_permutation_from_seed(&sound->definition, 0, index, &seed, FALSE);
+				short next = sound_definition_next_permutation_from_seed(&sound->definition, 0, index, &seed, FALSE);
+
+				CHECK(next == permutation_get(sound, index)->next_permutation_index && next >= 2,
+					"piece %ld of %d's chain is %d", steps, first, next);
+				index = next;
 			}
-			CHECK(steps == 6, "the chain from %d took %ld steps", first, steps);
+			index = sound_definition_next_permutation_from_seed(&sound->definition, 0, index, &seed, FALSE);
+			CHECK(index == 0 || index == 1, "after %d's last piece came %d, not a pick", first, index);
 		}
 		for (seed = 1; seed < 400; seed += 3)
 		{
@@ -430,6 +434,30 @@ int main(int argc, char **argv)
 			short pick = sound_definition_next_permutation_from_seed(&sound->definition, 0, NONE, &state, FALSE);
 
 			CHECK(pick == 0 || pick == 1, "the loop wrapped to permutation %d, a piece", pick);
+		}
+	}
+	else if (!strcmp(name, "fake-impulse-repeats"))
+	{
+		/* a looping sound's one 30 s permutation, not linked, which the sound manager played over and over (a
+		fake impulse one stops only at a linked chain's end, NONE: update_channel_for_looping_sound): split, its
+		track takes its pieces in turn and back to its first, round after round, never NONE */
+		struct source source = { NULL, 30L * 44100, 1, 44100, NONE };
+		struct mod_sound *sound;
+		unsigned long seed = 7;
+		short index, expected = 0;
+		long step;
+
+		source.samples = sweep_make(source.frames, 1);
+		file_make(MONO, RATE_44, PCM, FALSE, 1, &source, 1);
+		sound = sound_load();
+		CHECK(chain_check(sound, 0, NONE, &source, 44100) == 6, "not six pieces");
+		index = sound_definition_next_permutation_from_seed(&sound->definition, 0, NONE, &seed, FALSE);
+		for (step = 0; step < 4 * 6; step++)
+		{
+			CHECK(index == expected, "step %ld played %d, not %d", step, index, expected);
+			index = sound_definition_next_permutation_from_seed(&sound->definition, 0, index, &seed, FALSE);
+			CHECK(index != NONE, "the sound stopped after round %ld (a fake impulse loop plays once)", step / 6 + 1);
+			expected = expected == 0 ? 1 : expected == 5 ? 0 : (short)(expected + 1);
 		}
 	}
 	else if (!strcmp(name, "too-many-pieces"))

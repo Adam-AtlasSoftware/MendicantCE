@@ -118,10 +118,19 @@ int main(int argc,char **argv) {
   return 0;
  }
  CASE("unlinked") {
-  /* a sound whose permutations are not linked: nothing follows its permutation */
+  /* a sound whose permutations are not linked (as its file says, kept so: mod_sounds.c) plays a split one's pieces
+  all the same, the next past its actual ones */
   setup(TRUE,FALSE);
   update_channel_for_impulse_sound(0,1.f);
-  CHECK(hardware_queues==1,"an unlinked sound's next was queued");
+  CHECK(hardware_queues==2&&queued_to_hardware[1]==&permutations[2],"an unlinked sound's pieces were not followed");
+  return 0;
+ }
+ CASE("unlinked-actual") {
+  /* nor is one of its actual permutations, which follows nothing in a sound not linked */
+  setup(TRUE,FALSE);
+  permutations[0].next_permutation_index=1;
+  update_channel_for_impulse_sound(0,1.f);
+  CHECK(hardware_queues==1,"an unlinked sound's actual permutation was queued after another");
   return 0;
  }
  CHECK(FALSE,"unknown case");

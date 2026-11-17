@@ -9,13 +9,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, constant, enum_with, mutated, read, run, structure
 from harness.audio import pcm_permutation_rate
 
-CASES = ['pcm', 'chain', 'split-chain', 'stereo-blocks', 'pitch', 'start-skipped', 'start-playing', 'fade-in-at-start', 'finished',
+CASES = ['pcm', 'chain', 'split-chain', 'split-repeat', 'stereo-blocks', 'pitch', 'start-skipped', 'start-playing', 'fade-in-at-start', 'finished',
          'repeat', 'late', 'just-started', 'ended', 'placed', 'other-instance', 'unknown-compression', 'taken-once',
          'hostile', 'length', 'length-hostile']
 NEGATIVE_CONTROLS = {
     'no-start-time': ('\t\tinto -= sync->start_milliseconds[track_index];\n', '', 'start-skipped'),
     'start-always-before': ('COOP_SOUND_TRACK_FADE_IN_AT_START_BIT))', '31))', 'fade-in-at-start'),
-    'no-wrap': ('into % length', 'into', 'repeat'),
+    'no-wrap': ('into %= played;', '', 'repeat'),
+    # a split loop not linked taken as its first piece alone: 43 s round it is not 13 s in
+    'pieces-not-repeated': ('\t\tnext_index = sound_permutation_next(definition, range, permutation);',
+                            '\t\tnext_index = linked ? permutation->next_permutation_index : NONE;', 'split-repeat'),
     'stereo-as-mono': ('COOP_SOUND_ADPCM_BLOCK_BYTES * channels;\n\t}', 'COOP_SOUND_ADPCM_BLOCK_BYTES;\n\t}',
                        'stereo-blocks'),
     'placed-again': ('if (sync->placed || (', 'if ((', 'placed'),
@@ -26,7 +29,7 @@ NEGATIVE_CONTROLS = {
     'stop-after-finish': ('return sync->finished ? _coop_sound_sync_skip : _coop_sound_sync_play;',
                           'return _coop_sound_sync_play;', 'finished'),
     'no-wait': ('return elapsed + (long)since;', 'return elapsed;', 'late'),
-    'one-permutation': ('\t\t\t\tindex = permutation->next_permutation_index;\n', '\t\t\t\tbreak;\n', 'length'),
+    'one-permutation': ('\t\t\t\tindex = sound_permutation_next(definition, range, permutation);\n', '\t\t\t\tbreak;\n', 'length'),
     'nominal-pitch': ('coop_sound_pitch_or_one(definition->random_pitch_bounds.lower) *', '', 'length'),
     # a split piece timed at its tag's rate, not its own (#1167): 13 s lands in another piece
     'piece-at-tag-rate': ('return (real)pcm_rate * played_pitch;', 'return (real)22050 * played_pitch;', 'split-chain'),

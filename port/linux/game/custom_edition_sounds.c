@@ -1013,6 +1013,11 @@ boolean custom_edition_sounds_decode(
 					continue;
 				}
 				any = TRUE;
+				/* (a sound whose permutations are not linked follows none, and
+				one kept as 16-bit PCM only the pieces of a long one, which a
+				map's never is: sound_permutation_next_piece) */
+				if (!TEST_FLAG(sound->flags, _sound_definition_linked_permutations_bit))
+					permutation->next_permutation_index = NONE;
 				if (permutation_convert(sound, permutation, decoded_offset))
 				{
 					converted_count++;

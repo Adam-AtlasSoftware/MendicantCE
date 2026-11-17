@@ -110,10 +110,11 @@ def hand_off_state():
 
 def pcm_permutation_rate():
     """sound_definitions.h's sound_permutation_pcm_rate (a permutation imported and kept as 16-bit PCM at its own
-    rate) and its bounds"""
+    rate) and its bounds, and sound_permutation_next_piece and sound_permutation_next (the pieces a long one is split
+    into, OpenH1 issue 1167)"""
     text = read("source/sound/sound_definitions.h")
     start = text.index("#define SOUND_PERMUTATION_PCM_MINIMUM_RATE")
-    end = text.index(": 0L)", start) + len(": 0L)")
+    end = text.index("/* ---------- structures */", start)
     return text[start:end] + "\n"
 
 

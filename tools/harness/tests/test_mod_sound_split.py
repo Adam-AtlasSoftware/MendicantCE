@@ -16,13 +16,19 @@ from harness.audio import pcm_permutation_rate  # noqa: E402
 # the tag file's sound, pitch ranges and permutations are read at the game's 32-bit offsets (offsetof)
 pytestmark = needs_32_bit_abi("a sound tag file is read at the offsets of the game's 32-bit structures")
 
-CASES = ["mono-30s", "stereo-15s-48k", "linked-chain", "under-cap", "loop-wrap", "too-many-pieces", "over-budget"]
+CASES = ["mono-30s", "stereo-15s-48k", "linked-chain", "under-cap", "loop-wrap", "fake-impulse-repeats",
+         "too-many-pieces", "over-budget"]
 NEGATIVE_CONTROLS = {
     # the old fallback (#1111): a permutation longer than the cap is Xbox ADPCM at 22.05 kHz
     "old-fallback": (("native_budget, FALSE, kept_rate", "native_budget, TRUE, kept_rate"), "mono-30s"),
     # a one-sample gap at each join: the next piece starts a sample on
     "gap-at-join": (("memcpy(piece->samples.address, samples + offset, size);",
                      "memcpy(piece->samples.address, samples + offset + 2, size - 2);"), "mono-30s"),
+    # the split sound made a linked one (the first version): a looping sound that repeated forever plays once
+    "play-once": (("\tdefinition->longest_permutation_length = (long)longest;",
+                   "\tif (sound->permutation_count > permutation_total)\n"
+                   "\t\tSET_FLAG(definition->flags, _sound_definition_linked_permutations_bit, TRUE);\n"
+                   "\tdefinition->longest_permutation_length = (long)longest;"), "fake-impulse-repeats"),
     # the chain's last piece not followed by what followed the permutation
     "chain-cut": (("\t\t\tpiece->next_permutation_index = next;\n", "\t\t\tpiece->next_permutation_index = NONE;\n"),
                   "linked-chain"),

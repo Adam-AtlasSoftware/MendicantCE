@@ -2549,7 +2549,6 @@ static void update_channel_for_impulse_sound_piece(
 
 	if (!channel->playing_permutation ||
 		channel->queued_permutation ||
-		!TEST_FLAG(definition->flags, _sound_definition_linked_permutations_bit) ||
 		!sound_permutation_pcm_rate(channel->playing_permutation) ||
 		!VALID_INDEX(sound->pitch_range_index, definition->pitch_ranges.count))
 	{
@@ -2559,7 +2558,7 @@ static void update_channel_for_impulse_sound_piece(
 		&definition->pitch_ranges,
 		sound->pitch_range_index,
 		struct sound_pitch_range);
-	next_index = channel->playing_permutation->next_permutation_index;
+	next_index = sound_permutation_next(definition, pitch_range, channel->playing_permutation);
 	if (!VALID_INDEX(next_index, pitch_range->permutations.count))
 	{
 		return;
