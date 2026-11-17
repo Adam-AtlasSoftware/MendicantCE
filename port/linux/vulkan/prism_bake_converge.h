@@ -13,7 +13,8 @@ a texel stops when all of these hold:
 
 - it has at least minimum_samples;
 - its relative error is below the threshold: confidence x the standard
-  error of the mean <= threshold x max(mean, absolute_floor). The standard
+  error of the mean <= threshold x max(mean, absolute_floor, error_floor)
+  (error_floor: D4 amended, the `max` tier's noise floor). The standard
   error is the samples' (sqrt(variance / n)), or with use_batch_means the
   batch means' (for correlated samples within a batch: reused paths,
   shared light samples), whichever is larger once there are enough
@@ -70,6 +71,10 @@ struct prism_bake_converge_parameters
 	float threshold; /* the relative error at which a texel stops (M0 fixes it) */
 	float confidence; /* z: 1.96 for 95% */
 	float absolute_floor; /* radiance below which a texel is black: the error's floor */
+	/* D4 amended (2026-11-17), the `max` tier's noise floor: the error is
+	measured against max(mean, error_floor) where this is above
+	absolute_floor (0.1 of middle grey, 0.018); 0 the literal rule */
+	float error_floor;
 	uint32_t minimum_samples;
 	uint32_t minimum_hits;
 	uint32_t zero_samples;

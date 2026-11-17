@@ -164,7 +164,7 @@ static struct
 	boolean active;
 	int mode, quality, foreground;
 	long request;
-	float budget, threshold;
+	float budget, threshold, noise_floor;
 	char folder[XGPU_BAKE_PATH];
 	/* the host's answers */
 	uint32_t status[STATUS_WORDS];
@@ -212,6 +212,13 @@ static void settings_read(
 		prism_bake.budget = 2.0f;
 	}
 	prism_bake.threshold = 0.01f;
+	/* (D4 amended: the `max` tier's error against 0.1 of middle grey where a
+	texel's own light is less) */
+	prism_bake.noise_floor = (float)config_real("debug.bake_noise_floor");
+	if (!(prism_bake.noise_floor >= 0.0f && prism_bake.noise_floor <= 10.0f))
+	{
+		prism_bake.noise_floor = 0.1f;
+	}
 	prism_bake.foreground = config_boolean("debug.bake_exit");
 	value = config_string("display.bake_folder");
 	if (value && *value)
@@ -1246,6 +1253,7 @@ static void control_fill(
 	bake->status = (uint32_t)(unsigned long)prism_bake.status;
 	bake->budget_milliseconds = prism_bake.foreground ? 60.0f : prism_bake_menus_up() ? 30.0f : prism_bake.budget;
 	bake->threshold = prism_bake.threshold;
+	bake->noise_floor = prism_bake.noise_floor;
 	if (!map)
 	{
 		map = "";

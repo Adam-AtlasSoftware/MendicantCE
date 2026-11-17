@@ -81,9 +81,10 @@ float prism_bake_texel_variance(struct prism_bake_texel_stats const *stats)
 
 static float scale_of(struct prism_bake_texel_stats const *stats, struct prism_bake_converge_parameters const *p)
 {
-	float mean = (float)fabs(stats->mean);
+	float mean = (float)fabs(stats->mean), floor_ = p->absolute_floor > p->error_floor ? p->absolute_floor :
+		p->error_floor;
 
-	return mean > p->absolute_floor ? mean : p->absolute_floor;
+	return mean > floor_ ? mean : floor_;
 }
 
 float prism_bake_texel_relative_error(struct prism_bake_texel_stats const *stats,

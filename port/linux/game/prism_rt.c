@@ -192,18 +192,15 @@ radiosity found as is (linear, 1.0 the 8-bit page's white: Tool's
 radiosity stops on a residual in 1/255 steps), and each light's tag gives
 a colour by a power; these turn each kind of light's power into the bake's
 unit (a white surface's radiance: its irradiance over pi). The sun's power
-is the irradiance it gives a surface facing it (1); the sky's outdoor
-ambient power a radiance from every open direction, 2 pi of it; a light
-card's power, 2 of its radiance; a fixture's intensity the irradiance it
-gives a surface facing it a world unit away, inverse square (1). The sky's
-and the cards' were measured against CE's own pages, the bake's light of
-each kind alone at the gates' poses fitted to CE's light (b30's sun 0.84
-to 0.92 and sky 5.9 to 7.9; the cards' exposure on a10 and c40, 1.4 to
-2.3: docs/prism_gates.md, "The light's units"); no fixture lit a measured
-pose, so theirs is the unit as defined */
+is the irradiance it gives a surface facing it (1); a light card's power
+its radiance (1); a fixture's intensity the irradiance it gives a surface
+facing it a world unit away, inverse square (1); the sky's outdoor ambient
+CE's floor of light, unoccluded, colour by power by pi (measured against
+CE's pages on b30, where it fits 3.1 to 4.1: docs/prism_gates.md, "The
+light's units") */
 #define PRISM_RT_UNITS_SUN 1.0f
 #define PRISM_RT_UNITS_SKY 3.14159265f
-#define PRISM_RT_UNITS_EMIT 2.0f
+#define PRISM_RT_UNITS_EMIT 1.0f
 #define PRISM_RT_UNITS_FIXTURE 1.0f
 /* the real sun's angular diameter (display.prism_sun_size "real", and
 "auto"'s least), "soft"'s (the bake's mask, the traces' before) */

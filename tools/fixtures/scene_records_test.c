@@ -133,6 +133,7 @@ static void layout(void)
 	FIELD(xgpu_stream_prism_bake, status);
 	FIELD(xgpu_stream_prism_bake, budget_milliseconds);
 	FIELD(xgpu_stream_prism_bake, threshold);
+	FIELD(xgpu_stream_prism_bake, noise_floor);
 	FIELD(xgpu_stream_prism_bake, pad);
 	FIELD(xgpu_stream_prism_bake, map_name);
 }

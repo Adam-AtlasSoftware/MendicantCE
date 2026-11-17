@@ -749,6 +749,10 @@ static const struct config_setting config_settings[] =
 	{ "display.bake_budget", _config_real, "2.0", "HALO_BAKE_BUDGET", _environment_value, _platform_desktop,
 		"The milliseconds of each frame's graphics time a background bake may\n"
 		"take while you play (0.25 to 200; in the menus it takes 30)." },
+	{ "debug.bake_noise_floor", _config_real, "0.1", "HALO_BAKE_NOISE_FLOOR", _environment_value, _platform_desktop,
+		"The `max` bake's noise floor (D4 amended): a texel stops once its\n"
+		"standard error is at most 1% of its light or of this share of middle\n"
+		"grey, the more (0 to 10; 0: of its light alone, the literal rule)." },
 	{ "display.bake_rebake", _config_integer, "0", "HALO_BAKE_REBAKE", _environment_value, _platform_desktop,
 		"Raised by Settings' Rebake lightmaps (and the console's prism_set\n"
 		"\"bake_rebake <n>\"): each change bakes the level drawn again from\n"

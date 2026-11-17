@@ -19,9 +19,10 @@ inc), into one bake file a BSP (prism_bake_cache.h). It is a list of jobs:
     each cell's lamps to weigh; the irradiance volume's probes (the reach's
     bricks, 4 x 4 x 4 probes a world unit);
   the importance grid: each cell's candidate lamps weighed on the GPU by
-    the light each gives the cell's points with its shadow traced, the 16
-    most kept (the lamps the bake's and the live path tracer's light
-    samples are picked from);
+    the light each gives the cell's points with its shadow traced, the 64
+    most kept (its seen), beside the 64 strongest unshadowed at its middle
+    (its near): a lamp is picked from the seen, the near or by power over
+    the level, a mixture in which every lamp can be picked (unbiased);
   the lightmap's tiles: a batch of tiles at a time, each texel's samples
     added until its noise is under the threshold (prism_bake_converge.h's
     rule: D4's 1%, at least 64 samples, black below a floor; no budget at
@@ -77,7 +78,7 @@ inputs); the rig is in the light's units (prism_rt.c's PRISM_RT_UNITS_*).
 /* ---------- constants */
 
 /* the bake file's maker (a change makes every bake stale) */
-#define BAKE_VERSION 8u
+#define BAKE_VERSION 9u
 /* a tile's texels, a mask's */
 #define TILE 16u
 #define TILE_TEXELS (TILE * TILE)
@@ -101,8 +102,8 @@ inputs); the rig is in the light's units (prism_rt.c's PRISM_RT_UNITS_*).
 #define GRID_CANDIDATES 128u
 #define GRID_POINTS 8u
 #define GRID_LIST 64u
-#define GRID_WORDS 131u
-#define GRID_SHARE 1.0f
+#define GRID_WORDS 3u
+#define GRID_NEAR 64u
 #define GRID_REACH 48.0f
 /* the volume's probes: a brick's (a world unit), their spacing */
 #define BRICK_PROBES 64u
@@ -383,6 +384,12 @@ struct bake_state
 	/* (the finished texels whose last samples the firefly rule asked for:
 	their largest sample over their mean wanted more than their noise did) */
 	double texels_firefly_bound;
+	/* the `max` tier's noise floor (radiance; 0 none) and the texels it
+	stopped (converged with their light below it) */
+	float noise_floor;
+	double texels_floor, texels_converged;
+	/* the GPU time this run gave the bake (its timestamps') */
+	double gpu_seconds;
 	/* the importance step: the cells weighed so far */
 	uint32_t cells_done;
 	struct bake_buffer cell_points, cell_candidates, cell_weights;
@@ -615,10 +622,14 @@ static void barrier(VkCommandBuffer commands)
 	memory.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT |
 		VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 	memory.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_READ_BIT |
-		VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR | VK_ACCESS_HOST_READ_BIT |
-		VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
+		VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR | VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
 	vkCmdPipelineBarrier(commands, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 1,
 		&memory, 0, NULL, 0, NULL);
+	/* (the readbacks' host reads: their own stage, which ALL_COMMANDS does
+	not take) */
+	memory.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+	vkCmdPipelineBarrier(commands, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &memory, 0, NULL,
+		0, NULL);
 }
 
 /* bytes of the staging ring for this frame's copies: their place (host)
@@ -1886,6 +1897,11 @@ static struct bake_state *bake_begin(void)
 	b->plan.quality = (int)b->quality;
 	/* the rig (the frame's: the sun, the sky, the domes, the lamps' scale) */
 	memcpy(b->block.rig, frame->rig, sizeof(b->block.rig));
+	/* (D4 amended: the `max` tier's noise floor, a share of middle grey; the
+	converge rule's error floor, rig[15].z) */
+	b->noise_floor = b->quality == PRISM_BAKE_QUALITY_MAX && bake.control.noise_floor > 0.0f &&
+		bake.control.noise_floor <= 10.0f ? bake.control.noise_floor * 0.18f : 0.0f;
+	b->block.rig[15][2] = b->noise_floor;
 	memcpy(b->block.sun, frame->sun, sizeof(b->block.sun));
 	b->material_count = material_count;
 	/* the key */
@@ -1920,6 +1936,7 @@ static struct bake_state *bake_begin(void)
 		hash = prism_bake_hash64(hash, b->fixtures, (size_t)b->fixture_count * 16 * sizeof(float));
 	b->key.light_hash = hash;
 	b->key.settings_hash = prism_bake_hash64(PRISM_BAKE_HASH64_SEED, bake.bricks, (size_t)bake.brick_count * 8);
+	b->key.settings_hash = prism_bake_hash64(b->key.settings_hash, &b->noise_floor, sizeof(b->noise_floor));
 	b->key.baker_version = BAKE_VERSION;
 	b->key.quality = b->quality;
 	b->key.convergence_threshold = bake.control.threshold > 0.0f ? bake.control.threshold : 0.01f;
@@ -2267,7 +2284,7 @@ static int bake_upload(struct bake_state *b)
 	b->block.lamp[1] = GRID_CELL;
 	b->block.lamp[2] = (float)b->fixture_count;
 	b->block.unused = b->fixtures_buffer.address;
-	b->block.lamp[3] = GRID_SHARE;
+	b->block.lamp[3] = 0.0f;
 	b->block.settings[0] = BOUNCES;
 	/* (HALO_BAKE_TERMS: terms left out, for diagnosis: xgpu_vulkan_bake_glsl.inc's term_off) */
 	b->block.settings[1] = getenv("HALO_BAKE_TERMS") ? (uint32_t)strtoul(getenv("HALO_BAKE_TERMS"), NULL, 0) : 0u;
@@ -2595,7 +2612,7 @@ static int tile_words(struct texel_result *texels, uint32_t *raster, uint32_t *f
 table entry; its sun's state (and a mask's coarse first content from the
 texels' visibility) */
 static int tile_draw(VkCommandBuffer commands, struct bake_state *b, uint32_t tile_index, const uint32_t *raster,
-	int sun_state, const uint8_t *sun_texels)
+	int sun_state, const uint8_t *sun_texels, const uint8_t *fine_mask)
 {
 	struct bake_tile *tile = &b->plan.tiles[tile_index];
 	struct bake_vpage const *vp = &b->plan.vpages[tile->vpage];
@@ -2630,7 +2647,12 @@ static int tile_draw(VkCommandBuffer commands, struct bake_state *b, uint32_t ti
 			}
 			tile->sun = 3 + b->mask_count++;
 		}
-		/* (the texels' visibility, bilinear, at the mask's density) */
+		/* (the texels' visibility, bilinear, at the mask's density; or the
+		fine mask itself where the caller has it, so that the slot is written
+		once: two copies to it would race) */
+		if (fine_mask)
+			memcpy(mask, fine_mask, MASK_TEXELS);
+		else
 		for (y = 0; y < MASK_SIDE; y++)
 			for (x = 0; x < MASK_SIDE; x++)
 			{
@@ -2693,6 +2715,12 @@ static void tile_finish(VkCommandBuffer commands, struct bake_state *b, uint32_t
 			if (firefly_samples > rse_samples)
 				b->texels_firefly_bound += 1.0;
 		}
+		if (flags && states[index] == 1)
+		{
+			b->texels_converged += 1.0;
+			if (b->noise_floor > 0.0f && a[13] < b->noise_floor)
+				b->texels_floor += 1.0;
+		}
 		if (!flags || (states[index] != 1 && states[index] != 2))
 			continue;
 		for (axis = 0; axis < 3; axis++)
@@ -2732,14 +2760,14 @@ static void tile_finish(VkCommandBuffer commands, struct bake_state *b, uint32_t
 		memcpy(draft + sizeof(raster), sun_texels, TILE_TEXELS);
 		memcpy(draft + sizeof(raster) + TILE_TEXELS, &sun_state, 4);
 		file_append(b, PRISM_BAKE_RECORD_CHECKPOINT, b->plan.tiles[tile_index].job, draft, sizeof(draft));
-		if (!tile_draw(commands, b, tile_index, raster, sun_state < 3 ? sun_state : 3, sun_texels))
+		if (!tile_draw(commands, b, tile_index, raster, sun_state < 3 ? sun_state : 3, sun_texels, NULL))
 			return;
 		b->plan.tiles[tile_index].state = TILE_PENDING;
 		b->drafted++;
 		return;
 	}
 	file_append(b, PRISM_BAKE_RECORD_ATLAS_TILE, b->plan.tiles[tile_index].job, file, sizeof(file));
-	if (!tile_draw(commands, b, tile_index, raster, sun_state, sun_texels))
+	if (!tile_draw(commands, b, tile_index, raster, sun_state, sun_texels, NULL))
 		return;
 	b->plan.tiles[tile_index].state = TILE_DONE;
 	b->plan.tiles[tile_index].mask_state = sun_state >= 3 ? 1 : 0;
@@ -2933,22 +2961,32 @@ weights), the grid's table made and put on the GPU */
 static void importance_finish(VkCommandBuffer commands, struct bake_state *b, const float *weights)
 {
 	struct bake_plan *plan = &b->plan;
-	uint32_t entries = 1024, index, *table, kept_cells = 0;
+	uint32_t entries = 1024, index, *table, kept_cells = 0, used, room;
+	size_t table_words;
 
 	while (entries < plan->cell_count * 2u)
 		entries <<= 1;
-	table = (uint32_t *)calloc((size_t)entries * GRID_WORDS, 4);
+	/* (the table, GRID_WORDS a cell: its key and its lists' first word; the
+	lists after it, each cell's as long as its lamps: one word for the
+	entries' count first, for the file) */
+	table_words = (size_t)entries * GRID_WORDS;
+	room = (uint32_t)(table_words + 1 + (size_t)plan->cell_count * 64 + 1024);
+	table = (uint32_t *)calloc(room, 4);
 	if (!table)
 	{
 		bake_fail(b, "no memory for the importance grid");
 		return;
 	}
+	table[0] = entries;
+	used = (uint32_t)(table_words + 1);
 	for (index = 0; index < plan->cell_count; index++)
 	{
 		const float *w = weights + (size_t)index * GRID_CANDIDATES;
 		const uint32_t *c = plan->cell_candidates + (size_t)index * GRID_CANDIDATES;
-		uint32_t order[GRID_CANDIDATES], count = 0, k, j, key0, key1, h, at, cx, cy, cz;
-		float sum = 0.0f;
+		uint32_t order[GRID_CANDIDATES], near_order[GRID_CANDIDATES], count = 0, near_count = 0, k, j, key0, key1, h, at;
+		uint32_t cx, cy, cz, *list;
+		float sum = 0.0f, near_w[GRID_CANDIDATES], middle[3];
+		int axis;
 
 		for (k = 0; k < GRID_CANDIDATES; k++)
 			if (c[k] != 0xffffffffu && w[k] > 0.0f)
@@ -2964,9 +3002,39 @@ static void importance_finish(VkCommandBuffer commands, struct bake_state *b, co
 			}
 		if (count > GRID_LIST)
 			count = GRID_LIST;
-		/* (a cell none of whose candidates' light reaches its points is kept,
-		with no lamps: its points sample none, the far and hidden lamps' light
-		they would have found the less for it) */
+		/* (the near: the candidates by their unshadowed light at the cell's
+		middle, the most first: the lamps the cell's few points did not see
+		that its other points may, the defensive part of the picks, so that
+		every lamp near the cell can be picked whatever its points saw) */
+		for (axis = 0; axis < 3; axis++)
+			middle[axis] = ((float)plan->cell_keys[index * 3 + axis] + 0.5f) * GRID_CELL;
+		for (k = 0; k < GRID_CANDIDATES; k++)
+		{
+			const float *lp;
+			float d2 = 0.0f, centre;
+
+			if (c[k] == 0xffffffffu || c[k] >= plan->lamp_count)
+				continue;
+			lp = plan->lamps + (size_t)c[k] * 16;
+			for (axis = 0; axis < 3; axis++)
+			{
+				centre = (lp[axis] + lp[3 + axis] + lp[6 + axis]) / 3.0f;
+				d2 += (middle[axis] - centre) * (middle[axis] - centre);
+			}
+			near_w[k] = (0.2126f * lp[9] + 0.7152f * lp[10] + 0.0722f * lp[11]) * lp[12] / (d2 + GRID_CELL * GRID_CELL);
+			if (near_w[k] > 0.0f)
+				near_order[near_count++] = k;
+		}
+		for (k = 1; k < near_count; k++)
+			for (j = k; j > 0 && near_w[near_order[j]] > near_w[near_order[j - 1]]; j--)
+			{
+				uint32_t swap = near_order[j];
+
+				near_order[j] = near_order[j - 1];
+				near_order[j - 1] = swap;
+			}
+		if (near_count > GRID_NEAR)
+			near_count = GRID_NEAR;
 		cx = (uint32_t)(plan->cell_keys[index * 3] + (1 << 20));
 		cy = (uint32_t)(plan->cell_keys[index * 3 + 1] + (1 << 20));
 		cz = (uint32_t)(plan->cell_keys[index * 3 + 2] + (1 << 20));
@@ -2975,31 +3043,61 @@ static void importance_finish(VkCommandBuffer commands, struct bake_state *b, co
 		h = hash32(key0 ^ hash32(key1)) & (entries - 1);
 		for (j = 0; j < 32; j++)
 		{
-			at = ((h + j) & (entries - 1)) * GRID_WORDS;
+			at = 1 + ((h + j) & (entries - 1)) * GRID_WORDS;
 			if (!table[at + 1])
 				break;
 		}
 		if (j == 32)
 			continue;
+		if (used + 2 + 2 * (count + near_count) > room)
+		{
+			uint32_t *grown;
+
+			room = room * 2 + 2 + 2 * (count + near_count);
+			grown = (uint32_t *)realloc(table, (size_t)room * 4);
+			if (!grown)
+			{
+				free(table);
+				bake_fail(b, "no memory for the importance grid");
+				return;
+			}
+			table = grown;
+		}
+		/* (the lists' first word: the buffer's, which starts at the file's
+		second) */
 		table[at] = key0;
 		table[at + 1] = key1;
-		table[at + 2] = count;
+		table[at + 2] = used - 1;
+		list = table + used;
+		/* (a cell none of whose candidates' light reaches its points is kept
+		with no lamps seen: its points pick from its near list and by power) */
+		list[0] = count;
 		for (k = 0; k < count; k++)
 		{
 			sum += w[order[k]];
-			table[at + 3 + 2 * k] = c[order[k]];
-			memcpy(&table[at + 4 + 2 * k], &sum, 4);
+			list[1 + 2 * k] = c[order[k]];
+			memcpy(&list[2 + 2 * k], &sum, 4);
 		}
-		kept_cells++;
+		list += 1 + 2 * count;
+		sum = 0.0f;
+		list[0] = near_count;
+		for (k = 0; k < near_count; k++)
+		{
+			sum += near_w[near_order[k]];
+			list[1 + 2 * k] = c[near_order[k]];
+			memcpy(&list[2 + 2 * k], &sum, 4);
+		}
+		used += 2 + 2 * (count + near_count);
+		kept_cells += count > 0;
 	}
-	if (!buffer_filled(commands, table, (VkDeviceSize)entries * GRID_WORDS * 4, &b->grid, 0))
+	if (!buffer_filled(commands, table + 1, (VkDeviceSize)(used - 1) * 4, &b->grid, 0))
 	{
 		free(table);
 		bake_fail(b, "no memory for the importance grid");
 		return;
 	}
 	file_append(b, PRISM_BAKE_RECORD_IMPORTANCE_GRID, prism_bake_job_importance_cell(255, 0, 0, 0), table,
-		(size_t)entries * GRID_WORDS * 4 > PRISM_BAKE_CACHE_MAXIMUM_PAYLOAD ? 0 : (size_t)entries * GRID_WORDS * 4);
+		(size_t)used * 4 > PRISM_BAKE_CACHE_MAXIMUM_PAYLOAD ? 0 : (size_t)used * 4);
 	free(table);
 	b->block.grid = b->grid.address;
 	b->block.settings[2] = entries;
@@ -3008,8 +3106,8 @@ static void importance_finish(VkCommandBuffer commands, struct bake_state *b, co
 	upload(commands, &b->scene, 0, &b->block, sizeof(b->block));
 	barrier(commands);
 	b->grid_ready = 1;
-	host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the light-importance grid: %u of %u cells with lamps seen (%u lamps)",
-		b->map, (int)b->bsp, kept_cells, plan->cell_count, b->lamp_count);
+	host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the light-importance grid: %u of %u cells with lamps seen (%u lamps; "
+		"%.1f MB)", b->map, (int)b->bsp, kept_cells, plan->cell_count, b->lamp_count, (double)used * 4.0 / 1048576.0);
 }
 
 /* ---------- the lightmap's batches */
@@ -3918,15 +4016,17 @@ static int file_load(VkCommandBuffer commands, struct bake_state *b)
 		struct prism_bake_record const *record = prism_bake_cache_find(&b->cache, PRISM_BAKE_RECORD_IMPORTANCE_GRID,
 			prism_bake_job_importance_cell(255, 0, 0, 0));
 
-		if (record && record->size >= GRID_WORDS * 4)
+		if (record && record->size >= (1 + GRID_WORDS) * 4)
 		{
-			void *table = malloc(record->size);
+			uint32_t *table = (uint32_t *)malloc(record->size);
 
-			if (table && prism_bake_cache_read(&b->cache, record, table, record->size) == 0 &&
-				buffer_filled(commands, table, record->size, &b->grid, 0))
+			/* (its first word the table's entries, the buffer after it) */
+			if (table && prism_bake_cache_read(&b->cache, record, table, record->size) == 0 && table[0] >= 1024 &&
+				!(table[0] & (table[0] - 1)) && (size_t)table[0] * GRID_WORDS * 4 + 4 <= record->size &&
+				buffer_filled(commands, table + 1, record->size - 4, &b->grid, 0))
 			{
 				b->block.grid = b->grid.address;
-				b->block.settings[2] = (uint32_t)(record->size / (GRID_WORDS * 4));
+				b->block.settings[2] = table[0];
 				b->grid_entries = b->block.settings[2];
 				barrier(commands);
 				upload(commands, &b->scene, 0, &b->block, sizeof(b->block));
@@ -3960,7 +4060,7 @@ static int file_load(VkCommandBuffer commands, struct bake_state *b)
 				memcpy(raster, payload, sizeof(raster));
 				memcpy(&draft_sun, payload + sizeof(raster) + TILE_TEXELS, 4);
 				if (!tile_draw(commands, b, cursor, raster, draft_sun >= 1 && draft_sun <= 3 ? draft_sun : 2,
-					payload + sizeof(raster)))
+					payload + sizeof(raster), NULL))
 					return 0;
 				b->drafted++;
 				loaded++;
@@ -3993,22 +4093,16 @@ static int file_load(VkCommandBuffer commands, struct bake_state *b)
 			struct prism_bake_record const *mask_record = prism_bake_cache_find(&b->cache, PRISM_BAKE_RECORD_SUN_MASK_TILE,
 				prism_bake_job_sun_mask_tile(tile->vpage, 0, tile->x, tile->y));
 
-			if (!tile_draw(commands, b, cursor, raster, sun_state, sun_texels))
-				return 0;
-			tile->mask_state = 1;
-			if (mask_record && mask_record->size == MASK_TEXELS)
-			{
-				uint8_t mask[MASK_TEXELS];
+			uint8_t mask[MASK_TEXELS];
+			int fine = mask_record && mask_record->size == MASK_TEXELS &&
+				prism_bake_cache_read(&b->cache, mask_record, mask, MASK_TEXELS) == 0;
 
-				if (prism_bake_cache_read(&b->cache, mask_record, mask, MASK_TEXELS) == 0 &&
-					upload(commands, &b->masks, (VkDeviceSize)(tile->sun - 3) * MASK_TEXELS, mask, MASK_TEXELS))
-				{
-					tile->mask_state = 2;
-					b->masks_done++;
-				}
-			}
+			if (!tile_draw(commands, b, cursor, raster, sun_state, sun_texels, fine ? mask : NULL))
+				return 0;
+			tile->mask_state = fine ? 2 : 1;
+			b->masks_done += fine;
 		}
-		else if (!tile_draw(commands, b, cursor, raster, sun_state, sun_texels))
+		else if (!tile_draw(commands, b, cursor, raster, sun_state, sun_texels, NULL))
 			return 0;
 		tile->state = TILE_DONE;
 		b->tiles_done++;
@@ -4067,6 +4161,8 @@ static void timing_collect(void)
 			continue;
 		milliseconds = (double)(times[1] - times[0]) * bake.timestamp_period * 1.0e-6;
 		bake.gpu_milliseconds = milliseconds;
+		if (bake.bake)
+			bake.bake->gpu_seconds += milliseconds * 1.0e-3;
 		budget = bake.control.budget_milliseconds > 0.1f ? bake.control.budget_milliseconds : 2.0;
 		if (milliseconds <= 0.01)
 			continue;
@@ -4206,11 +4302,13 @@ static void bake_log_progress(struct bake_state *b)
 	bake.last_status = t;
 	host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: step %d, tiles %u of %u, masks %u of %u, probes %u of %u, "
 		"%.0f s, %u samples a dispatch (%.1f ms of GPU), %u texels running, %.0f MB written; %.0f samples a texel (the "
-		"most %u; %.0f%% by the firefly rule), %.1f M samples a second", b->map, (int)b->bsp, b->step, b->tiles_done, b->plan.tile_count, b->masks_done,
+		"most %u; %.0f%% by the firefly rule; %.0f%% of those converged by the noise floor), %.1f M samples a second, "
+		"%.1f s of GPU", b->map, (int)b->bsp, b->step, b->tiles_done, b->plan.tile_count, b->masks_done,
 		b->mask_tile_count, b->probes_done, b->plan.probe_count, t - b->started, bake.samples, bake.gpu_milliseconds,
 		b->running_texels, (double)b->file_bytes / 1048576.0, b->texels_baked > 0.0 ? (double)b->rays / b->texels_baked : 0.0,
 		b->samples_most, b->texels_baked > 0.0 ? 100.0 * b->texels_firefly_bound / b->texels_baked : 0.0,
-		(double)b->rays / (t - b->started + 1.0e-3) / 1.0e6);
+		b->texels_converged > 0.0 ? 100.0 * b->texels_floor / b->texels_converged : 0.0,
+		(double)b->rays / (t - b->started + 1.0e-3) / 1.0e6, b->gpu_seconds);
 }
 
 static void bake_frame(void)
@@ -4420,9 +4518,10 @@ static void bake_frame(void)
 				b->file_bytes = (uint64_t)info.st_size;
 		}
 		host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: done in %.1f s: %u tiles (%.1f M texels), %u masks, %u probes, "
-			"%.1f G samples, %.1f MB (%s)", b->map, (int)b->bsp, b->seconds, b->plan.tile_count,
-			(double)b->plan.tile_count * TILE_TEXELS / 1.0e6, b->mask_tile_count, b->plan.probe_count, (double)b->rays / 1.0e9,
-			(double)b->file_bytes / 1048576.0, b->path);
+			"%.1f G samples, %.1f MB (%s); this run %.1f s of GPU, %.0f texels converged, %.0f of them by the noise floor",
+			b->map, (int)b->bsp, b->seconds, b->plan.tile_count, (double)b->plan.tile_count * TILE_TEXELS / 1.0e6,
+			b->mask_tile_count, b->plan.probe_count, (double)b->rays / 1.0e9, (double)b->file_bytes / 1048576.0, b->path,
+			b->gpu_seconds, b->texels_converged, b->texels_floor);
 		b->step = STEP_DONE;
 		break;
 	default:

@@ -2651,7 +2651,11 @@ struct xgpu_stream_prism_bake
 	int32_t bsp_index;
 	uint32_t folder, status;
 	float budget_milliseconds, threshold;
-	uint32_t pad[2];
+	/* (the `max` tier's noise floor: the share of middle grey (0.18) below
+	which a texel's error is measured against it, not its own light; 0 the
+	literal rule) */
+	float noise_floor;
+	uint32_t pad;
 	char map_name[XGPU_BAKE_NAME];
 };
 

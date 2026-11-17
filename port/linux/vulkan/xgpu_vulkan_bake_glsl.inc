@@ -166,7 +166,7 @@ over 2 pi, a0 = 1 - k . n0. */
 	"}\n" \
 	"/* (the terms a diagnostic leaves out: s.settings.y's bits, 1 the domes, 2\n" \
 	"the lamps, 4 the glows, 8 the paths past the first hit, 16 the fixtures;\n" \
-	"0 none) */\n" \
+	"32 the grid (every lamp picked by power); 0 none) */\n" \
 	"bool term_off(uint bit) { return (s.settings.y & bit) != 0u; }\n" \
 	"vec3 glow_of(uint t)\n" \
 	"{\n" \
@@ -262,12 +262,17 @@ over 2 pi, a0 = 1 - k . n0. */
 	"\n" \
 	"/* the light-importance grid (xgpu_vulkan_bake.c's importance step): a\n" \
 	"hashed table of cells (s.lamp.y world units a side) about the level's\n" \
-	"surfaces, each its key (x y z + 1 << 20 each, packed; 0 empty) and up to 64\n" \
-	"lamps with their cumulative weights, by the light each gives the cell's\n" \
-	"points with its shadow traced (BAKE_GRID_WORDS words a cell); a lamp is\n" \
-	"picked from the cell about the point by s.lamp.w of the picks, else by\n" \
-	"power over the level, so that every lamp can be picked */\n" \
-	"const uint BAKE_GRID_WORDS = 131u;\n" \
+	"surfaces, each its key (x y z + 1 << 20 each, packed; 0 empty) and where\n" \
+	"its lists are in the same buffer (3 words a cell), after the table: two\n" \
+	"lists of up to 64 lamps (a count, then each lamp and the cumulative weight\n" \
+	"to it): the seen, by the light each gives the cell's points with its\n" \
+	"shadow traced, and the near, by its unshadowed light at the cell's middle\n" \
+	"(the lamps the cell's few points did not see that its other points may).\n" \
+	"A lamp is picked from the seen by GRID_SEEN of the picks, the near by\n" \
+	"GRID_NEAR (all but GRID_POWER where the cell saw none), else by power over\n" \
+	"the level: every lamp can be picked, so the bake's lamps are R's, unbiased */\n" \
+	"const uint BAKE_GRID_WORDS = 3u;\n" \
+	"const float GRID_SEEN = 0.70, GRID_NEAR = 0.25;\n" \
 	"int grid_cell(vec3 p)\n" \
 	"{\n" \
 	"    uint entries = s.settings.z;\n" \
@@ -286,7 +291,7 @@ over 2 pi, a0 = 1 - k . n0. */
 	"        if (k1 == 0u)\n" \
 	"            return -1;\n" \
 	"        if (g.v[at] == key.x && k1 == key.y)\n" \
-	"            return int(at);\n" \
+	"            return int(g.v[at + 2u]);\n" \
 	"    }\n" \
 	"    return -1;\n" \
 	"}\n" \
@@ -312,44 +317,55 @@ over 2 pi, a0 = 1 - k . n0. */
 	"    Floats f = Floats(s.lamps);\n" \
 	"    return luma(vec3(f.v[l * 16u + 9u], f.v[l * 16u + 10u], f.v[l * 16u + 11u])) * f.v[l * 16u + 12u];\n" \
 	"}\n" \
-	"/* a lamp picked at p (the cell's by its weights, else by power) and the\n" \
-	"probability of its pick */\n" \
+	"/* a lamp from a cell's list (its first word the count, then lamp and\n" \
+	"cumulative weight pairs) by its weights; its probability there */\n" \
+	"uint list_pick(uint at, uint count)\n" \
+	"{\n" \
+	"    Uints g = Uints(s.grid);\n" \
+	"    float total = uintBitsToFloat(g.v[at + 2u * (count - 1u) + 2u]);\n" \
+	"    float u = rnd() * total;\n" \
+	"    uint k = 0u;\n" \
+	"    while (k + 1u < count && uintBitsToFloat(g.v[at + 2u * k + 2u]) < u)\n" \
+	"        k++;\n" \
+	"    return g.v[at + 2u * k + 1u];\n" \
+	"}\n" \
+	"float list_probability(uint at, uint count, uint l)\n" \
+	"{\n" \
+	"    Uints g = Uints(s.grid);\n" \
+	"    float total = uintBitsToFloat(g.v[at + 2u * (count - 1u) + 2u]), below = 0.0, p = 0.0;\n" \
+	"    for (uint k = 0u; k < count; k++)\n" \
+	"    {\n" \
+	"        float c = uintBitsToFloat(g.v[at + 2u * k + 2u]);\n" \
+	"        if (g.v[at + 2u * k + 1u] == l)\n" \
+	"            p += (c - below) / max(total, 1.0e-20);\n" \
+	"        below = c;\n" \
+	"    }\n" \
+	"    return p;\n" \
+	"}\n" \
+	"/* a lamp picked at p (the cell's seen, its near, else by power) and the\n" \
+	"probability of its pick, the three densities' mixture */\n" \
 	"uint lamp_pick(vec3 p, out float probability)\n" \
 	"{\n" \
 	"    int cell = grid_cell(p);\n" \
 	"    Uints g = Uints(s.grid);\n" \
-	"    uint count = cell >= 0 ? min(g.v[cell + 2], 64u) : 0u;\n" \
-	"    /* (a cell whose points no lamp's light reaches: none) */\n" \
-	"    if (cell >= 0 && count == 0u)\n" \
-	"    {\n" \
-	"        probability = 0.0;\n" \
-	"        return 0u;\n" \
-	"    }\n" \
-	"    float share = count > 0u ? s.lamp.w : 0.0;\n" \
+	"    uint seen_at = uint(max(cell, 0)), seen = cell >= 0 ? min(g.v[seen_at], 64u) : 0u;\n" \
+	"    uint near_at = seen_at + 1u + 2u * seen, near = cell >= 0 ? min(g.v[near_at], 64u) : 0u;\n" \
+	"    /* (HALO_BAKE_TERMS' 32: every pick by power, the grid unused) */\n" \
+	"    float share_seen = seen > 0u && !term_off(32u) ? GRID_SEEN : 0.0;\n" \
+	"    float share_near = near > 0u && !term_off(32u) ? (seen > 0u ? GRID_NEAR : GRID_SEEN + GRID_NEAR) : 0.0;\n" \
+	"    float u = rnd();\n" \
 	"    uint l;\n" \
-	"    if (count > 0u && rnd() < share)\n" \
-	"    {\n" \
-	"        float total = uintBitsToFloat(g.v[cell + 3 + 2 * int(count - 1u) + 1]);\n" \
-	"        float u = rnd() * total;\n" \
-	"        uint k = 0u;\n" \
-	"        while (k + 1u < count && uintBitsToFloat(g.v[cell + 3 + 2 * int(k) + 1]) < u)\n" \
-	"            k++;\n" \
-	"        l = g.v[cell + 3 + 2 * int(k)];\n" \
-	"    }\n" \
+	"    if (u < share_seen)\n" \
+	"        l = list_pick(seen_at, seen);\n" \
+	"    else if (u < share_seen + share_near)\n" \
+	"        l = list_pick(near_at, near);\n" \
 	"    else\n" \
 	"        l = lamp_by_power();\n" \
-	"    probability = (1.0 - share) * lamp_power(l) / max(s.lamp.x, 1.0e-20);\n" \
-	"    if (count > 0u)\n" \
-	"    {\n" \
-	"        float total = uintBitsToFloat(g.v[cell + 3 + 2 * int(count - 1u) + 1]), below = 0.0;\n" \
-	"        for (uint k = 0u; k < count; k++)\n" \
-	"        {\n" \
-	"            float c = uintBitsToFloat(g.v[cell + 3 + 2 * int(k) + 1]);\n" \
-	"            if (g.v[cell + 3 + 2 * int(k)] == l)\n" \
-	"                probability += share * (c - below) / max(total, 1.0e-20);\n" \
-	"            below = c;\n" \
-	"        }\n" \
-	"    }\n" \
+	"    probability = (1.0 - share_seen - share_near) * lamp_power(l) / max(s.lamp.x, 1.0e-20);\n" \
+	"    if (seen > 0u)\n" \
+	"        probability += share_seen * list_probability(seen_at, seen, l);\n" \
+	"    if (near > 0u)\n" \
+	"        probability += share_near * list_probability(near_at, near, l);\n" \
 	"    return l;\n" \
 	"}\n" \
 	"\n" \
@@ -686,7 +702,10 @@ over 2 pi, a0 = 1 - k . n0. */
 	"            most = max(most, bmost);\n" \
 	"        }\n" \
 	"    }\n" \
-	"    float threshold = push.values.x, floor_ = push.values.y;\n" \
+	"    /* (the error measured against the light, or the noise floor where the\n" \
+	"    light is less: s.rig[15].z, D4 amended's 0.1 of middle grey at `max`;\n" \
+	"    0 the literal rule; black below floor_ after 4096 samples) */\n" \
+	"    float threshold = push.values.x, floor_ = push.values.y, error_floor = max(floor_, s.rig[15].z);\n" \
 	"    uint minimum = push.parameters.z & 0xffffu;\n" \
 	"    if (count < minimum)\n" \
 	"        return 0u;\n" \
@@ -696,7 +715,7 @@ over 2 pi, a0 = 1 - k . n0. */
 	"        return count >= 4096u ? 2u : 0u;\n" \
 	"    if (hits < 16u)\n" \
 	"        return 0u;\n" \
-	"    float scale = max(abs(mean), floor_);\n" \
+	"    float scale = max(abs(mean), error_floor);\n" \
 	"    if (abs(mean) < floor_ && count >= 4096u)\n" \
 	"        return 2u;\n" \
 	"    if (most > threshold * scale * float(count))\n" \
