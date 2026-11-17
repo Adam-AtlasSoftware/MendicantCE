@@ -7,11 +7,11 @@ can check them without a GPU:
   welford_frame      the reference pass's running means and squared deviations (one frame's paths as one sample)
   reference_noise    reference_stats' estimated relative MSE of the frame, and the C side's stopping rule
   temporal_step      the temporal pass's slow and fast histories, the moments, the fast one's hold
-  atrous_step        an a-trous step's weights: the B3 spline, the plane, the normal, the instance, the luminance
+  atrous_step        an a-trous step's weights: the 3 x 3 kernel, the plane, the normal, the instance, the luminance
 """
 import numpy as np
 
-KERNEL = (3.0 / 8.0, 1.0 / 4.0, 1.0 / 16.0)
+KERNEL = (1.0 / 2.0, 1.0 / 4.0)
 REFERENCE_NOISE = 0.001
 REFERENCE_LEAST = 64
 
@@ -119,7 +119,7 @@ def temporal_step(history, sample, most=32.0, most_fast=4.0, gamma=2.0):
 
 
 def atrous_weight(dx, dy, plane, plane_scale, normal_dot, same_instance, luminance_delta, sigma):
-    """an a-trous tap's weight (the diffuse's): the B3 spline's, the plane's exp(-|d . n| / scale), the normal's
+    """an a-trous tap's weight (the diffuse's): the 3 x 3 kernel's (1/4 1/2 1/4), the plane's exp(-|d . n| / scale), the normal's
     cosine to the 64th, nothing across an instance's edge, the luminance's exp(-|dL| / sigma)"""
     if not same_instance:
         return 0.0
@@ -140,8 +140,8 @@ def atrous_step(values, instances, variance, stride, sigma_scale=4.0):
         for x in range(w):
             sigma = sigma_scale * np.sqrt(max(variance[y, x], 0.0)) + 1.0e-4
             total = wsum = var = 0.0
-            for dy in range(-2, 3):
-                for dx in range(-2, 3):
+            for dy in range(-1, 2):
+                for dx in range(-1, 2):
                     qy, qx = y + dy * stride, x + dx * stride
                     if not (0 <= qy < h and 0 <= qx < w):
                         continue

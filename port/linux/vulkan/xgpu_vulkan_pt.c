@@ -1062,8 +1062,9 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 			dispatch(commands, PASS_FIX, scene, slot_buffer->address, 0, 0, 0, 0, groups_x, groups_y);
 			stamp(commands, time_slot, 3);
 			barrier(commands);
-			/* (the fix wrote b: the steps from b to a and back) */
-			steps = 4;
+			/* (the fix wrote b: the steps from b to a and back; the specular's
+			the first three, its reach narrowed by its roughness) */
+			steps = 5;
 			for (step = 0; step < steps; step++)
 			{
 				dispatch(commands, PASS_ATROUS, scene, slot_buffer->address, (uint32_t)step, (step & 1) == 0 ? 1u : 0u,
@@ -1071,7 +1072,7 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 				barrier(commands);
 			}
 			stamp(commands, time_slot, 4);
-			/* (an even count of steps ends in b) */
+			/* (an even count of steps ends in b, an odd one in a) */
 			source = (steps & 1) == 0 ? 1u : 0u;
 		}
 		else

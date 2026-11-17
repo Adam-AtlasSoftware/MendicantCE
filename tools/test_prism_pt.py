@@ -173,7 +173,7 @@ def test_the_temporal_history_converges_and_follows_a_change():
 
 
 def test_the_atrous_weights():
-    assert sum(model.KERNEL[abs(d)] for d in range(-2, 3)) == pytest.approx(1.0)
+    assert sum(model.KERNEL[abs(d)] for d in range(-1, 2)) == pytest.approx(1.0)
     assert model.atrous_weight(0, 0, 0.0, 1.0, 1.0, False, 0.0, 1.0) == 0.0
     assert model.atrous_weight(1, 1, 0.0, 1.0, 0.0, True, 0.0, 1.0) == 0.0
     assert model.atrous_weight(0, 0, 5.0, 1.0, 1.0, True, 0.0, 1.0) < model.atrous_weight(0, 0, 0.0, 1.0, 1.0, True, 0.0,
@@ -190,7 +190,7 @@ def test_the_atrous_step_keeps_an_instance_edge_and_smooths_noise():
     variance = np.full((h, w), 0.05 ** 2)
     out = values
     var = variance
-    for step in range(3):
+    for step in range(5):
         out, var = model.atrous_step(out, instances, var, 1 << step)
     # (no light across the edge: each side's mean its own)
     assert abs(out[:, :8].mean() - 0.2) < 0.02

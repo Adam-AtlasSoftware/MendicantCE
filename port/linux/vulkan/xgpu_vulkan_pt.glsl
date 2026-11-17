@@ -1645,7 +1645,9 @@ void main()
 //@pass atrous
 layout(local_size_x = 8, local_size_y = 8) in;
 /* one step of the a-trous filter (Dammertz et al.; SVGF's and ReLAX's edge
-stops): a 5 x 5 B3-spline kernel at a stride of 2^step, each tap weighed by
+stops): a 3 x 3 kernel (1/4, 1/2, 1/4 each way) at a stride of 2^step, five
+steps (strides 1 to 16: the reach of SVGF's five 5 x 5 steps with a third of
+their taps), each tap weighed by
 its plane's distance, its normal, the same instance (never across an
 object's or the level's edge) and its luminance against the pixel's by the
 variance (the diffuse's and the specular's), the specular's kernel narrowed
@@ -1705,12 +1707,12 @@ void main()
     float penumbra = vc.z * s.rig[0].w / max(footprint, 1.0e-4);
     bool sun_on = (signals & 4u) != 0u && vc.w > 0.5 && float(stride) <= max(penumbra, 2.0) &&
         vc.y > 1.0e-4;
-    const float kernel[3] = float[3](3.0 / 8.0, 1.0 / 4.0, 1.0 / 16.0);
+    const float kernel[2] = float[2](1.0 / 2.0, 1.0 / 4.0);
     vec3 sum_d = vec3(0.0), sum_s = vec3(0.0);
     float wsum_d = 0.0, wsum_s = 0.0, var_d = 0.0, var_s = 0.0, sum_v = 0.0, wsum_v = 0.0, var_v = 0.0;
     float blocker_most = vc.z;
-    for (int y = -2; y <= 2; y++)
-        for (int x = -2; x <= 2; x++)
+    for (int y = -1; y <= 1; y++)
+        for (int x = -1; x <= 1; x++)
         {
             ivec2 q = pixel + ivec2(x, y) * stride;
             if (!inside(q))

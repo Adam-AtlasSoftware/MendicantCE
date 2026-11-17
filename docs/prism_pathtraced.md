@@ -102,7 +102,8 @@ published methods (ReLAX's and SVGF's; no NVIDIA SDK code):
 - **fix**: where the history is shorter than 4 frames (a disocclusion, the first frames), the light gathered wide from
   the neighbours on the same surface (instance, normal, plane), weighed by their history's length, and written into
   the history; the variance from the neighbourhood where the moments do not have it yet.
-- **atrous**: four steps of the a-trous filter (5 × 5 B3 spline at strides 1, 2, 4, 8), each tap weighed by its
+- **atrous**: five steps of the a-trous filter (a 3 × 3 kernel, 1/4 1/2 1/4 each way, at strides 1 to 16: the reach
+  of SVGF's five 5 × 5 steps with a third of their taps), each tap weighed by its
   plane's distance, its normal, the same instance (never across an object's or the level's edge) and its luminance
   against the pixel's by the variance; the specular's kernel narrowed by the roughness and stopped after three steps
   (none on a mirror).
