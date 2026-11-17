@@ -439,6 +439,29 @@ byte-identical (and each tree's two runs alike); `determinism`: the simulation a
 **The Cycles cross-check** was not run: the scene's export to Blender (the materials, the rig) is not written yet, and
 R is the gate's truth.
 
+## M5, part 1: the plugins and the frame upscaling
+
+M5's first part (`docs/prism_plugin.md`) is judged by these:
+
+- **FSR 3.1 against native**: the frozen scenes' probe poses captured in one run each, the camera held 300 frames at
+  each pose in each state (native: `display.upscaler` `"off"`; FSR 3.1 at 67% and 50%; DLSS Super Resolution at
+  67% and 50%, where the plugin is built), Classic (`display.lighting` `"ce"`) and `"ce_deferred"`, at 1920 by 1080:
+  the mean FLIP of each upscaled frame against the native frame at the same pose (the metrics' 960 by 540, as the
+  other gates take FLIP, and the full size beside it), against M5's 0.06; and the GPU's time of each frame
+  (`HALO_VULKAN_GPU_TIMES_FILE`), the median of each pose's last 240 frames.
+- **The passthrough plugin's identity**: with `display.upscaler` `"plugin:passthrough"` at a render scale of 1 and
+  the jitter off (`HALO_UPSCALE_JITTER=0`), every frame byte-identical to the upscaler off; with
+  `display.denoiser` `"plugin:passthrough"`, the path tracer's frames byte-identical to its own filter off.
+- **Nothing opened without a plugin**: a run with no plugin named, the dynamic loader's log (`LD_DEBUG=files`)
+  names nothing in a plugins folder.
+- **Vulkan validation** with synchronisation validation on, with FSR 3.1 on (Classic and `"ce_deferred"`), and with
+  DLSS (Super Resolution and Ray Reconstruction).
+- **Classic's and Enhanced's identity** against M2's tree (`1e95379ef`), as every milestone's below, with nothing
+  of M5's on.
+
+The tools: `tools/prism_gate`'s harness, driven as M1's and M2's measurements were (their scripts kept with the
+runs, not in the tree).
+
 ## Every milestone also passes
 
 `tools/prism_gate/identity.py` checks the milestone's tree against the tree it started from:

@@ -386,6 +386,10 @@ static void settings_read(void)
 	prism_rt.quality = word_index(config_string("display.prism_rt_quality"), qualities, 0);
 	prism_rt.resolution = word_index(config_string("display.prism_rt_resolution"), resolutions, 0);
 	prism_rt.denoiser = word_index(config_string("display.prism_rt_denoiser"), denoisers, 0);
+	/* (display.denoiser "off", PRISM v4's: the light as it is traced,
+	whatever the tracer's own filter is set to; docs/prism_plugin.md) */
+	if (!strcmp(config_string("display.denoiser"), "off"))
+		prism_rt.denoiser = 2;
 	prism_rt.reflections = word_index(config_string("display.prism_rt_reflections"), reflections, 0);
 	prism_rt.objects = word_index(config_string("display.prism_rt_objects"), objects, 0);
 	prism_rt.rate = word_index(config_string("display.prism_rt_rate"), rates, 0);
