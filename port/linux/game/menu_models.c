@@ -871,6 +871,34 @@ void menu_models_tags_release(
 	memset(&menu_models, 0, sizeof(menu_models));
 }
 
+long menu_models_tag_place(
+	long tag_index)
+{
+	long index;
+
+	for (index = 0; menu_models.added && tag_index != NONE && index < menu_models.tag_count; index++)
+	{
+		if (menu_models.tag_indices[index] == tag_index)
+			return index;
+	}
+	return NONE;
+}
+
+long menu_models_tag_at(
+	long place)
+{
+	return menu_models.added && place >= 0 && place < menu_models.tag_count ? menu_models.tag_indices[place] : NONE;
+}
+
+unsigned long menu_models_identity(
+	void)
+{
+	if (!menu_models.added)
+		return 0;
+	return (unsigned long)MENU_MODELS_VERSION << 24 ^ (unsigned long)menu_models.tag_count << 16 ^
+		(unsigned long)menu_models.file_size * 2654435761UL;
+}
+
 long menu_models_tag(
 	unsigned long group_tag,
 	char const *name)

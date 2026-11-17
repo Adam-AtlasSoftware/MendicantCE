@@ -123,6 +123,12 @@ struct xgpu_manifest_context
 	uint8_t lights_present, environment, hdr_category, hdr_view;
 	uint16_t hdr_kind;
 	uint8_t world, found;
+	/* the effect's group can be soft (display.soft_particles: d3d8_device.c's
+	soft_effect_key, on a flat screen), and its alpha test passes every pixel
+	(its texture's least alpha: d3d8_device.c's alpha_test_always_passes),
+	the draw kept with the test (where a backend drops it:
+	xgpu_backend_capabilities.alpha_test_drop) */
+	uint8_t soft, alpha_passes;
 };
 
 struct xgpu_manifest
@@ -210,11 +216,15 @@ int xgpu_draw_derive(const struct xgpu_draw_facts *facts, int unlit, struct xgpu
 /* the settings a manifest's draw is derived under: the targets' samples (1,
 or display.anti_aliasing's multisampling's), display.hdr on, each pixel lit
 (display.per_pixel_lighting), the enhanced dynamic lights, the ambient
-occlusion (XGPU_MANIFEST_OCCLUSION_*); with the stream's backends' sample
-mask and dynamic lights (Metal's and Vulkan's) */
+occlusion (XGPU_MANIFEST_OCCLUSION_*), the SDR back buffer in RGBA16
+(display.output_depth's 16-bit frame: deep, where display.hdr is off), the
+effects soft (display.soft_particles), display.hdr_highlight_boost's level
+(0 to XGPU_HDR_BOOST_MOST) and an alpha test that cannot fail dropped (the
+backend's alpha_test_drop); with the stream's backends' sample mask and
+dynamic lights (Metal's and Vulkan's) */
 struct xgpu_manifest_settings
 {
-	int samples, hdr, per_pixel_lighting, enhanced_lights, ambient_occlusion;
+	int samples, hdr, per_pixel_lighting, enhanced_lights, ambient_occlusion, deep, soft, boost, alpha_drop;
 };
 
 /* display.ambient_occlusion: off, or found in the world ("world"; without
@@ -280,6 +290,14 @@ void xgpu_manifest_enumerating(int enumerating, int new_map);
 stages, as the stream describes them), and the vertex programs recorded
 (debug.render_manifest; else none: the backend has made them all) */
 const struct xgpu_manifest *xgpu_manifest_enumeration(void);
+/* HALO_RENDER_COVERAGE=<file> (with debug.render_manifest): each map's
+enumeration's draws, as no setting changes them with their contexts (d
+records), written there after a comment line "# coverage <label>" as it
+ends, the label the enumeration's (its map, walked or played back from its
+record, the screen's width: render_enumerate.c, render_prepared.c), so that
+tools/test_preparation_coverage.py compares a map's walk with its record's
+playback under every setting (tools/prepared_records.py records them) */
+void xgpu_manifest_coverage_label(const char *label);
 
 #endif
 

@@ -255,6 +255,15 @@ void menu_models_tags_add(void *instances, long const *tag_indices);
 void menu_models_tags_release(void);
 /* the tag index of the file's tag of group and name (NONE if none) */
 long menu_models_tag(unsigned long group_tag, char const *name);
+/* (a map's preparation's record, render_prepared.c) the file's tags added
+to the table now: the place among them of the tag at tag_index (NONE: not
+one of them), the tag index of the one at a place (NONE: none), and what
+they are (0: none added; else their file's version, count and size), which
+a record that names them is made for: their indices follow the map's and
+the menus' own tags, and are there only once the file is made */
+long menu_models_tag_place(long tag_index);
+long menu_models_tag_at(long place);
+unsigned long menu_models_identity(void);
 /* the texture cache: a bitmap of the file's has its pixels read from it
 into buffer (FALSE: not one of the file's) */
 int menu_models_bitmap_read(void *bitmap, void *buffer);

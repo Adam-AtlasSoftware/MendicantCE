@@ -89,6 +89,8 @@ static struct
 static long font_count;
 
 static unsigned long placeholder_data, placeholder_width, placeholder_height;
+/* (the placeholder's D3D texture itself: text_hires_atlas_object) */
+static const unsigned long *placeholder_object;
 
 /* tag names compared as the game does, ignoring case (and without the POSIX
 strcasecmp, which the Windows build has not) */
@@ -703,10 +705,16 @@ float text_hires_kerning(long font, unsigned long first, unsigned long second)
 
 void text_hires_register_atlas(const unsigned long *texture, unsigned long width, unsigned long height)
 {
+	placeholder_object = texture;
 	placeholder_data = texture ? texture[1] : 0;
 	placeholder_width = width;
 	placeholder_height = height;
 	xgpu_texture_replacements_changed();
+}
+
+const void *text_hires_atlas_object(void)
+{
+	return placeholder_object;
 }
 
 int text_hires_atlas_placeholder(unsigned long data)
@@ -718,6 +726,11 @@ unsigned int text_hires_atlas_texture(unsigned long data)
 {
 	if (!data || data != placeholder_data)
 		return 0;
+	/* (the baked atlas read where no text has been drawn yet: a map's
+	preparation played back at the first start binds the placeholder before
+	any string is drawn, and a draw of it is the atlas's, MSDF, as in play) */
+	if (!msdf.pixels)
+		(void)msdf_read();
 	/* (the fields' atlas, which its image owns once it is made: a new one
 	each time the glyphs made at run time are let go, msdf_made_reset) */
 	if (!msdf.image && msdf.pixels)

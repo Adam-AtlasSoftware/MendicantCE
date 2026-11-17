@@ -149,6 +149,24 @@ BOOL platform_is_contiguous(const void *address)
 	return value >= PLATFORM_CONTIGUOUS_BASE && value - PLATFORM_CONTIGUOUS_BASE < PLATFORM_CONTIGUOUS_SIZE;
 }
 
+BOOL platform_contiguous_readable(const void *address, unsigned long size)
+{
+	unsigned long value = (unsigned long)address, first, last, page;
+	BOOL readable = TRUE;
+
+	if (!size)
+		size = 1;
+	if (!platform_is_contiguous(address) || size > PLATFORM_CONTIGUOUS_SIZE - (value - PLATFORM_CONTIGUOUS_BASE))
+		return FALSE;
+	first = (value - PLATFORM_CONTIGUOUS_BASE) / PAGE_SIZE_BYTES;
+	last = (value - PLATFORM_CONTIGUOUS_BASE + size - 1) / PAGE_SIZE_BYTES;
+	pthread_mutex_lock(&arena_lock);
+	for (page = first; page <= last && readable; page++)
+		readable = page_protection[page] && (protection_to_host(page_protection[page]) & PROT_READ);
+	pthread_mutex_unlock(&arena_lock);
+	return readable;
+}
+
 static BOOL pages_free(unsigned long first, unsigned long count)
 {
 	unsigned long page;

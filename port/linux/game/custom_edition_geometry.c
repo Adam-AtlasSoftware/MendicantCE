@@ -37,6 +37,7 @@ Edition vertices (docs/custom_edition_caches.md).
 
 #include <math.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <xtl.h>
 
 /* ---------- constants */
@@ -723,6 +724,10 @@ static void structure_bsp_buffers_release(
 	return;
 }
 
+/* (d3d8_device.c's: geometry a map's preparation's record names, #1169) */
+void d3d8_geometry_named(const void *base, unsigned long size, const char *name);
+void d3d8_geometry_unnamed(const void *base);
+
 /* Gives `material` compressed vertices at `vertices` and buffers made from
 them. Its uncompressed vertices (cache_file_formats.c checked their size and
 place) stay where they are. */
@@ -861,6 +866,8 @@ boolean custom_edition_models_convert(
 	/* (totals.geometry_bytes is the vertices' and strips' room, at most
 	MAXIMUM_GEOMETRY_BYTES) */
 	globals->model_geometry = geometry_allocate(totals.geometry_bytes + 1, &globals->model_geometry_contiguous);
+	/* (a record names its streams by it, wherever it is: #1169) */
+	d3d8_geometry_named(globals->model_geometry, totals.geometry_bytes + 1, "custom edition models");
 	scratch = malloc(totals.largest_part_vertex_count * sizeof(*scratch) + 1);
 	if (!globals->model_parts || !globals->model_geometry || !globals->palettes || !scratch)
 	{
@@ -940,6 +947,7 @@ void custom_edition_models_dispose(
 	}
 	if (globals->model_geometry)
 	{
+		d3d8_geometry_unnamed(globals->model_geometry);
 		geometry_free(globals->model_geometry, globals->model_geometry_contiguous);
 	}
 	if (globals->palettes)
@@ -1016,6 +1024,14 @@ boolean custom_edition_structure_bsp_load(
 	/* (in Xbox memory either way: the material points at them by Xbox address) */
 	globals->structure_bsp_vertices = geometry_allocate(vertices_size + 1,
 		&globals->structure_bsp_vertices_contiguous);
+	/* (a record names its streams by it, wherever it is: the structure's, one
+	at a time, told apart by their vertices' size, #1169) */
+	{
+		char name[64];
+
+		snprintf(name, sizeof(name), "custom edition structure %lu", vertices_size);
+		d3d8_geometry_named(globals->structure_bsp_vertices, vertices_size + 1, name);
+	}
 	if (!globals->structure_bsp_vertices)
 	{
 		error(_error_silent, "custom edition: out of memory for 0x%lX bytes of structure BSP vertices", vertices_size);
@@ -1068,7 +1084,10 @@ void custom_edition_structure_bsp_unload(
 		structure_bsp_buffers_release(globals->structure_bsp);
 		/* (none when the load failed before they were made) */
 		if (globals->structure_bsp_vertices)
+		{
+			d3d8_geometry_unnamed(globals->structure_bsp_vertices);
 			geometry_free(globals->structure_bsp_vertices, globals->structure_bsp_vertices_contiguous);
+		}
 		globals->structure_bsp = NULL;
 		globals->structure_bsp_vertices = NULL;
 	}

@@ -49,6 +49,7 @@ Conventions carried over from the Xbox:
 #include "world_proxies.h"
 #include "world_rt.h"
 #include "world_sdf.h"
+#include "text_hires.h"
 #include "main/console.h"
 
 #include <SDL3/SDL.h>
@@ -287,6 +288,50 @@ static float render_scale_wanted(void)
 #endif
 }
 
+/* ---------- the draws' inputs
+
+The front end's own state, beside the device's render and texture states,
+textures, targets, viewport, shaders and streams, that a draw's pipeline is
+built from (prepare_draw, bind_textures, pipeline_bind): what the game's
+code tells it of the draws (the halo_* and d3d8_* calls below) and keeps
+until it says otherwise. All of it is here, in one place, read from here
+alone, so that a map's preparation's record (the journal: journal_state)
+keeps it whole and plays it back whole: a field added here is recorded
+with the rest, and the journal's form (its words' count) changes with it.
+Nothing that a draw's key is built from may be kept anywhere else:
+tools/harness/tests/test_prepared_journal.py's test_draw_inputs_kept
+fails on a call of the game's that keeps state outside it. Each field is
+32 bits (the journal's words). */
+struct draw_inputs
+{
+	/* display.hdr: the game's renderer's category (-1 outside one), what its
+	code says of the draws (HALO_HDR_KIND_*: halo_hdr_category,
+	halo_hdr_draw_kind), and a window's 3D view drawn (its categories), until
+	it is tone mapped: the draws after are the HUD's and the menus' */
+	int32_t hdr_category, hdr_kind, hdr_view;
+	/* the enhanced dynamic lights: the game's lightmap pass is being drawn
+	(halo_dynamic_lights_environment), and the lights this frame (0 none:
+	drawn as classic) */
+	int32_t lights_environment, lights_count;
+	/* the sky being drawn (halo_gpu_preparation_sky), and a visibility test
+	(an occlusion query) around the draws */
+	uint32_t sky, visibility;
+	/* display.ambient_occlusion "world": the window's span as the game draws
+	it (WORLD_AO_SPAN_*: halo_world_ao_span), whatever the setting */
+	int32_t world_span;
+	/* display.soft_particles: the effect's group drawn can be soft
+	(halo_effect_soft), whatever the setting */
+	uint32_t soft_group;
+	/* the region of its texture each stage samples, as a texture of its own
+	with its border beyond it (d3d8_texture_region: its size and origin, in
+	the texture's coordinates; size 0: the whole texture) */
+	float texture_regions[4][4];
+};
+typedef char draw_inputs_are_words[sizeof(struct draw_inputs) % sizeof(uint32_t) == 0 &&
+	sizeof(float) == sizeof(uint32_t) ? 1 : -1];
+
+static struct draw_inputs inputs;
+
 /* ---------- display.hdr (xgpu_hdr.h)
 
 The frame is drawn in HDR where the backend can (Vulkan and Metal: not the
@@ -305,15 +350,9 @@ static struct
 	display.hdr_ui_nits as last sent to the backend (sent: once at least) */
 	BOOL active, sent;
 	int mode, paper_white_nits, paper_white, ui_nits;
-	/* the game's renderer's category, and what its code says of the draws
-	(halo_hdr_category, halo_hdr_draw_kind) */
-	int category, kind;
 	/* display.hdr_highlight_boost's level (0 none: XGPU_HDR_BOOST_MOST at
 	most; #1123) */
 	int boost;
-	/* a window's 3D view is drawn (its categories), until it is tone
-	mapped: the draws after are the HUD's and the menus' */
-	BOOL view;
 	/* the draws' target is the HDR back buffer (bind_targets) */
 	BOOL target;
 	/* the display's state, last logged; its peak and SDR white, last
@@ -322,7 +361,7 @@ static struct
 	int display_logged;
 	char display_text[160];
 	int display_text_frames;
-} hdr = { FALSE, FALSE, 0, 0, -1, 0, 0, 0, FALSE, FALSE, -1 };
+} hdr = { .paper_white = -1, .target = -1 };
 
 /* ---------- display.output_depth (#1152)
 
@@ -365,15 +404,15 @@ void halo_hdr_category(int category)
 {
 	/* (and to the backend, which times the GPU's work by it) */
 	category_send(category);
-	hdr.category = category;
+	inputs.hdr_category = category;
 	/* (the 3D view's categories: past the clear, before the HUD's) */
 	if (category > 0 && category < 26)
-		hdr.view = TRUE;
+		inputs.hdr_view = TRUE;
 }
 
 void halo_hdr_draw_kind(int kind)
 {
-	hdr.kind = kind;
+	inputs.hdr_kind = kind;
 }
 
 /* the game's renderer's category, for the backend's timing
@@ -449,11 +488,6 @@ static struct
 	/* (the pixels a side of the blocks it is found once for: 2, a quarter
 	of the pixels; 1 with debug.world_ao_full_resolution) */
 	float scale;
-	/* the window's span as the game draws it (WORLD_AO_SPAN_*:
-	halo_world_ao_span), whatever the setting and while a map's pipelines
-	are prepared; a record's draw's as it notes it, played back
-	(journal_restore) */
-	int span;
 	/* a map's pipelines are prepared (halo_gpu_prepare until
 	halo_gpu_prepared); the backend told to make the draws' twins too
 	(world_ao_twins) */
@@ -463,8 +497,7 @@ static struct
 	unsigned long rays_owner;
 	/* the draws are a two-sided model shader's cards (halo_world_ao_cards) */
 	BOOL cards;
-} world_ao = { FALSE, FALSE, WORLD_AO_OWNER_NONE, 1.0f, FALSE, FALSE, FALSE, 2.0f, WORLD_AO_SPAN_NONE, FALSE, FALSE, 0,
-	FALSE };
+} world_ao = { FALSE, FALSE, WORLD_AO_OWNER_NONE, 1.0f, FALSE, FALSE, FALSE, 2.0f, FALSE, FALSE, 0, FALSE };
 
 /* the draw takes the world's light where its window is given: one of the
 window's opaque surfaces, not the first-person weapon, not lighting itself
@@ -472,8 +505,8 @@ window's opaque surfaces, not the first-person weapon, not lighting itself
 the setting off and in a map's preparation: manifest_note_basis) */
 static BOOL world_ao_applies(void)
 {
-	return (world_ao.span == WORLD_AO_SPAN_OPEN || world_ao.span == WORLD_AO_SPAN_FOUND) &&
-		!(hdr.kind & HALO_HDR_KIND_SELF_ILLUMINATION);
+	return (inputs.world_span == WORLD_AO_SPAN_OPEN || inputs.world_span == WORLD_AO_SPAN_FOUND) &&
+		!(inputs.hdr_kind & HALO_HDR_KIND_SELF_ILLUMINATION);
 }
 
 /* while a map's pipelines are prepared, the world's light as the window's
@@ -490,7 +523,7 @@ static BOOL world_ao_preparing(void)
 weapon's too), whatever the setting */
 static BOOL world_ao_span_found(void)
 {
-	return world_ao.span == WORLD_AO_SPAN_FOUND || world_ao.span == WORLD_AO_SPAN_FOUND_FIRST_PERSON;
+	return inputs.world_span == WORLD_AO_SPAN_FOUND || inputs.world_span == WORLD_AO_SPAN_FOUND_FIRST_PERSON;
 }
 
 static BOOL world_ao_found(void)
@@ -550,7 +583,7 @@ static void world_ao_fail(void)
 
 void halo_world_ao_span(int span)
 {
-	world_ao.span = span;
+	inputs.world_span = span;
 }
 
 void halo_world_ao_window(float const field[2][4], float const parameters[2][4], float const (*proxies)[3][4],
@@ -688,9 +721,9 @@ static unsigned short hdr_tag(const struct xgpu_pipeline_key *key)
 	draw.blend_destination = key->blend_destination;
 	draw.blend_operation = key->blend_operation;
 	draw.color_mask = key->color_mask;
-	draw.category = hdr.category;
-	draw.interface = !hdr.view;
-	draw.kind = hdr.kind;
+	draw.category = inputs.hdr_category;
+	draw.interface = !inputs.hdr_view;
+	draw.kind = inputs.hdr_kind;
 	draw.mode = hdr.mode;
 	draw.boost = hdr.boost;
 	return xgpu_hdr_classify(&draw);
@@ -1229,10 +1262,6 @@ struct d3d8_device
 	D3DMATRIX transforms[D3DTS_MAX];
 	D3DBaseTexture *textures[D3DTSS_MAXSTAGES];
 	D3DPalette *palettes[D3DTSS_MAXSTAGES];
-	/* the region of its texture each stage samples, as a texture of its own
-	with its border beyond it (d3d8_texture_region: its size and origin, in
-	the texture's coordinates; size 0: the whole texture) */
-	float texture_regions[D3DTSS_MAXSTAGES][4];
 	D3DSHADERCONSTANTMODE shader_constant_mode;
 
 	struct vertex_shader_object *vertex_shader;
@@ -1263,7 +1292,6 @@ struct d3d8_device
 	unsigned long immediate_capacity;
 
 	/* inside a visibility test (D3DDevice_BeginVisibilityTest) */
-	BOOL visibility_test_active;
 	/* the number of the last test ended (0: none; never 0 after) */
 	unsigned long visibility_test_number;
 
@@ -1332,7 +1360,6 @@ static struct
 	struct preparation_key *entries[PREPARATION_BUCKETS];
 	uint32_t hashes[PREPARATION_BUCKETS];
 	unsigned long draws, duplicates;
-	unsigned long sky;
 	unsigned long loaded_bytes, budget;
 	unsigned long preserved;
 	BOOL trace, sample;
@@ -1397,7 +1424,7 @@ static void preparation_draw_complete(void)
 
 void halo_gpu_preparation_sky(int sky)
 {
-	preparation.sky = sky != 0;
+	inputs.sky = sky != 0;
 }
 
 static void preparation_clear(void)
@@ -1456,7 +1483,7 @@ static BOOL preparation_seen(unsigned long pipeline, const struct xgpu_dynamic_s
 	key->pipeline = pipeline;
 	key->dynamic = *dynamic;
 	key->primitive = primitive;
-	key->sky = preparation.sky;
+	key->sky = inputs.sky;
 	if (device.render_target)
 	{
 		key->color_data = device.render_target->Data;
@@ -2950,9 +2977,9 @@ void d3d8_texture_region(unsigned long stage, const float *region)
 	if (stage >= D3DTSS_MAXSTAGES)
 		return;
 	if (region && region[0] > 0.0f && region[1] > 0.0f)
-		memcpy(device.texture_regions[stage], region, sizeof(device.texture_regions[stage]));
+		memcpy(inputs.texture_regions[stage], region, sizeof(inputs.texture_regions[stage]));
 	else
-		memset(device.texture_regions[stage], 0, sizeof(device.texture_regions[stage]));
+		memset(inputs.texture_regions[stage], 0, sizeof(inputs.texture_regions[stage]));
 }
 
 void WINAPI D3DDevice_SetTransform(D3DTRANSFORMSTATETYPE state, CONST D3DMATRIX *matrix)
@@ -3004,9 +3031,9 @@ the test is drawn into and the samples a pixel. */
 
 void WINAPI D3DDevice_BeginVisibilityTest(void)
 {
-	if (!device.gl_ready || device.visibility_test_active)
+	if (!device.gl_ready || inputs.visibility)
 		return;
-	device.visibility_test_active = TRUE;
+	inputs.visibility = TRUE;
 #ifdef HALO_VR
 	vr_gl.visibility_test = vr_gl.pass == HALO_VR_PASS_EYES && !SAMPLE_COUNTING;
 	if (vr_gl.visibility_test)
@@ -3025,9 +3052,9 @@ HRESULT WINAPI D3DDevice_EndVisibilityTest(DWORD index)
 {
 	int views = 1;
 
-	if (!device.gl_ready || !device.visibility_test_active)
+	if (!device.gl_ready || !inputs.visibility)
 		return S_OK;
-	device.visibility_test_active = FALSE;
+	inputs.visibility = FALSE;
 #ifdef HALO_VR
 	vr_gl.visibility_test = FALSE;
 	/* (drawn into both eyes, the test counts each pixel twice) */
@@ -3550,7 +3577,7 @@ static void sampler_describe(int stage, BOOL mipmapped, BOOL hires, BOOL rendere
 	sampler->magnify = sampler_filter(hires ? D3DTEXF_LINEAR : state[D3DTSS_MAGFILTER]);
 	sampler->address[0] = sampler_address(state[D3DTSS_ADDRESSU]);
 	sampler->address[1] = sampler_address(state[D3DTSS_ADDRESSV]);
-	if (device.texture_regions[stage][0] > 0.0f)
+	if (inputs.texture_regions[stage][0] > 0.0f)
 		sampler->address[0] = sampler->address[1] = XGPU_ADDRESS_REGION;
 	sampler->address[2] = sampler_address(state[D3DTSS_ADDRESSW]);
 	sampler->lod_bias = hires ? 0.0f : dword_to_float(state[D3DTSS_MIPMAPLODBIAS]);
@@ -3919,7 +3946,7 @@ static int cutout_stage(void)
 	int stage, other;
 
 	if (!xgpu_backend_capabilities.cutout_prepass || !state[D3DRS_ALPHATESTENABLE] || state[D3DRS_ALPHABLENDENABLE] ||
-		!state[D3DRS_ZENABLE] || !state[D3DRS_ZWRITEENABLE] || device.visibility_test_active || sampled_view ||
+		!state[D3DRS_ZENABLE] || !state[D3DRS_ZWRITEENABLE] || inputs.visibility || sampled_view ||
 		state[D3DRS_ZFUNC] != D3DCMP_LESSEQUAL ||
 		(state[D3DRS_ALPHAFUNC] != D3DCMP_GREATER && state[D3DRS_ALPHAFUNC] != D3DCMP_GREATEREQUAL) ||
 		!(state[D3DRS_COLORWRITEENABLE] & D3DCOLORWRITEENABLE_ALL) || !cutout_stencil_repeatable())
@@ -4077,8 +4104,8 @@ static void bind_textures(struct nv2a_pixel_shader_key *key, float texture_scale
 			!description.hires && source->sampler.address[0] < XGPU_ADDRESS_BORDER &&
 			source->sampler.address[1] < XGPU_ADDRESS_BORDER)
 			stage_alpha_minimum[stage] = texture_alpha_minimum(texture, stage);
-		if (device.texture_regions[stage][0] > 0.0f)
-			memcpy(texture_scale[stage], device.texture_regions[stage], sizeof(texture_scale[stage]));
+		if (inputs.texture_regions[stage][0] > 0.0f)
+			memcpy(texture_scale[stage], inputs.texture_regions[stage], sizeof(texture_scale[stage]));
 		/* (the high-res text's distance fields: text_hires.c) */
 		if (description.hires_msdf)
 		{
@@ -4431,10 +4458,6 @@ static struct
 	light's radius), brightness, softness against what it meets (world
 	units), its least size (debug.dynamic_lights_look; xgpu_spirv.c) */
 	float look[2][4];
-	/* the lights this frame (0: none: drawn as classic) */
-	int count;
-	/* the game's lightmap pass is being drawn (halo_dynamic_lights_environment) */
-	BOOL environment;
 	BOOL failed;
 	struct xgpu_dynamic_lights_block data;
 	/* the lights that light the structure: each one's middle and its reach
@@ -4571,7 +4594,7 @@ void halo_dynamic_lights_set(const struct halo_dynamic_light *lights, int count,
 	float scales[3];
 	int index, axis;
 
-	dynamic_lights.count = 0;
+	inputs.lights_count = 0;
 	dynamic_lights.reach_count = 0;
 	dynamic_lights.model_reach_count = 0;
 	dynamic_lights.model_unreached = FALSE;
@@ -4683,7 +4706,7 @@ void halo_dynamic_lights_set(const struct halo_dynamic_light *lights, int count,
 	if (!count)
 		return;
 	xgpu_backend_dynamic_lights_upload(&dynamic_lights.data, dynamic_lights.mask);
-	dynamic_lights.count = count;
+	inputs.lights_count = count;
 }
 
 /* the game draws the structure's lightmap pass (rasterizer_xbox_environment.c);
@@ -4692,7 +4715,7 @@ void halo_dynamic_lights_environment(int drawing)
 {
 	struct xgpu_dynamic_lights_halos *halos = &dynamic_lights.halos;
 
-	dynamic_lights.environment = drawing != 0;
+	inputs.lights_environment = drawing != 0;
 	if (drawing)
 	{
 		memcpy(halos->projection[0], device.constants[0], 4 * sizeof(halos->projection[0]));
@@ -4778,7 +4801,7 @@ static BOOL dynamic_lights_active(void)
 	/* (the setting as it is now: a map's preparation played back from its
 	record before anything else read it) */
 	dynamic_lights_read_settings();
-	return dynamic_lights.count > 0 && dynamic_lights.enhanced;
+	return inputs.lights_count > 0 && dynamic_lights.enhanced;
 }
 
 /* the glows of the frame's bolts' lights, into the 3D view, after its
@@ -4842,8 +4865,6 @@ off, the key is as it was. Read again as the front end takes a change up
 between frames. */
 static struct
 {
-	/* the group drawn can be soft (halo_effect_soft) */
-	BOOL group;
 	BOOL read;
 	unsigned long read_at;
 	BOOL enabled;
@@ -4851,7 +4872,7 @@ static struct
 
 void halo_effect_soft(int soft)
 {
-	soft_effects.group = soft != 0;
+	inputs.soft_group = soft != 0;
 }
 
 int halo_soft_effects_drawn(void)
@@ -4863,7 +4884,7 @@ int halo_soft_effects_drawn(void)
 on a flat screen: 1 soft, 0 none */
 static unsigned char soft_effect_key(int multiview)
 {
-	if (!soft_effects.group || multiview != XGPU_MULTIVIEW_NONE || !xgpu_backend_capabilities.soft_effects)
+	if (!inputs.soft_group || multiview != XGPU_MULTIVIEW_NONE || !xgpu_backend_capabilities.soft_effects)
 		return 0;
 	if (!soft_effects.read || soft_effects.read_at != halo_gpu_settings_taken())
 	{
@@ -5095,22 +5116,32 @@ static void pipeline_derived(const struct xgpu_draw_derived *derived, struct xgp
 /* a draw as no setting changes it (key: before xgpu_draw_derive) to the
 manifest's recording, with what the settings derive it from, whatever they
 are now (xgpu_manifest_context) */
-static void manifest_note_basis(const struct vertex_shader_object *program, const struct xgpu_pipeline_key *key)
+static void manifest_note_basis(const struct vertex_shader_object *program, const struct xgpu_pipeline_key *drawn,
+	unsigned long alpha_test, BOOL alpha_passes, BOOL soft)
 {
 	struct xgpu_manifest_context context;
+	struct xgpu_pipeline_key basis = *drawn;
+	const struct xgpu_pipeline_key *key = &basis;
 
 	memset(&context, 0, sizeof(context));
+	/* (as no setting changes it: its alpha test kept, the effect not soft,
+	with what decides them: xgpu_manifest_derive) */
+	basis.pixel.alpha_test_function = alpha_test;
+	context.alpha_passes = alpha_passes ? 1 : 0;
+	if (soft)
+		basis.pixel.vr_effect = 0;
+	context.soft = soft ? 1 : 0;
 	context.lights = (uint8_t)program->lighting.lights;
 	context.world_found = program->lighting.world_found ? 1 : 0;
 	context.multisampled = target_multisampled ? 1 : 0;
 	context.screen_colour = target_screen_colour ? 1 : 0;
 	/* (the lights given to the front end whatever the setting where the
 	map's preparation is recorded: halo_dynamic_lights_walked) */
-	context.lights_present = dynamic_lights.count > 0 && !lights_unreached_drawing && !dynamic_lights.model_unreached;
-	context.environment = dynamic_lights.environment ? 1 : 0;
-	context.hdr_category = (uint8_t)hdr.category;
-	context.hdr_view = hdr.view ? 1 : 0;
-	context.hdr_kind = (uint16_t)hdr.kind;
+	context.lights_present = inputs.lights_count > 0 && !lights_unreached_drawing && !dynamic_lights.model_unreached;
+	context.environment = inputs.lights_environment ? 1 : 0;
+	context.hdr_category = (uint8_t)inputs.hdr_category;
+	context.hdr_view = inputs.hdr_view ? 1 : 0;
+	context.hdr_kind = (uint16_t)inputs.hdr_kind;
 	/* (display.ambient_occlusion "world"'s, as with it on: its window's
 	span as the game draws it, whatever the setting, as the journal notes
 	it) */
@@ -5218,6 +5249,9 @@ static BOOL prepare_draw(BOOL immediate, unsigned long primitive)
 	struct xgpu_draw_facts facts;
 	float texture_scale[4][4];
 	BOOL has_depth = FALSE, ready;
+	/* (the draw as no setting changes it: manifest_note_basis) */
+	unsigned long alpha_test_kept;
+	BOOL alpha_passes, soft_basis;
 	int stage;
 	double traced;
 
@@ -5274,16 +5308,18 @@ static BOOL prepare_draw(BOOL immediate, unsigned long primitive)
 	key.point_threshold = key.point_threshold && key.coverage_alpha;
 	key.alpha_test_function = D3D__RenderState[D3DRS_ALPHATESTENABLE] ? D3D__RenderState[D3DRS_ALPHAFUNC] : 0;
 	/* (a test no pixel of the draw fails is not made: above, "an alpha test
-	that cannot fail") */
-	if (key.alpha_test_function && !key.coverage_alpha && xgpu_backend_capabilities.alpha_test_drop &&
-		alpha_test_always_passes())
+	that cannot fail"; the manifest's recording notes it whatever the backend
+	does: manifest_note_basis) */
+	alpha_test_kept = key.alpha_test_function;
+	alpha_passes = key.alpha_test_function && !key.coverage_alpha && alpha_test_always_passes();
+	if (alpha_passes && xgpu_backend_capabilities.alpha_test_drop)
 	{
 		key.alpha_test_function = 0;
 	}
 	key.fog_enable = D3D__RenderState[D3DRS_FOGENABLE] != 0;
 	key.source_blend = source_blend_in_shader();
 	key.fog_table_mode = (unsigned char)D3D__RenderState[D3DRS_FOGTABLEMODE];
-	key.count_samples = device.visibility_test_active && SAMPLE_COUNTING;
+	key.count_samples = inputs.visibility && SAMPLE_COUNTING;
 #ifdef HALO_VR
 	key.multiview = vr_gl.multiview ? XGPU_MULTIVIEW_EYES : vr_gl.left_eye ? XGPU_MULTIVIEW_LEFT_EYE :
 		vr_gl.right_eye ? XGPU_MULTIVIEW_RIGHT_EYE : XGPU_MULTIVIEW_NONE;
@@ -5291,6 +5327,7 @@ static BOOL prepare_draw(BOOL immediate, unsigned long primitive)
 	key.vr_effect = key.multiview == XGPU_MULTIVIEW_EYES ? (unsigned char)vr_gl.effect_depth : 0;
 #endif
 	/* (display.soft_particles: an effect on a flat screen, soft) */
+	soft_basis = !key.vr_effect && inputs.soft_group && key.multiview == XGPU_MULTIVIEW_NONE;
 	if (!key.vr_effect)
 		key.vr_effect = soft_effect_key(key.multiview);
 	/* the pipeline: the shaders, the fixed-function state, the targets */
@@ -5308,7 +5345,7 @@ static BOOL prepare_draw(BOOL immediate, unsigned long primitive)
 	/* the draw as no setting changes it, recorded with what the settings
 	make of it from (debug.render_manifest) */
 	if (xgpu_manifest_recording())
-		manifest_note_basis(program, &pipeline_key);
+		manifest_note_basis(program, &pipeline_key, alpha_test_kept, alpha_passes, soft_basis);
 	/* ...and what the settings make of it as they are now: its targets'
 	samples and format, its alpha test (a sample mask, where the backend
 	has one), its tag (display.hdr: from its blend), and its lighting
@@ -5341,7 +5378,7 @@ static BOOL prepare_draw(BOOL immediate, unsigned long primitive)
 	facts.per_pixel = !cutout_depth_drawing && per_pixel_lighting();
 	facts.lights_active = !cutout_depth_drawing && !lights_unreached_drawing && !dynamic_lights.model_unreached &&
 		dynamic_lights_active();
-	facts.environment = dynamic_lights.environment;
+	facts.environment = inputs.lights_environment;
 	facts.sample_mask = xgpu_backend_capabilities.sample_mask;
 	/* (display.ambient_occlusion "world": its light, where its window is
 	given and the draw takes it: world_ao_key) */
@@ -6175,7 +6212,7 @@ void WINAPI D3DDevice_DrawIndexedVertices(D3DPRIMITIVETYPE primitive_type, UINT 
 	WORD *reached, *unreached;
 	unsigned long reached_count, unreached_count;
 
-	if (!dynamic_lights.environment || !vertex_count || !index_data || dynamic_lights.reach_count < 0 ||
+	if (!inputs.lights_environment || !vertex_count || !index_data || dynamic_lights.reach_count < 0 ||
 		!lights_reach_parted())
 	{
 		draw_indexed_cutout(primitive_type, vertex_count, index_data);
@@ -6680,7 +6717,7 @@ a view of the world's drawn among them (the menus' Spartan's own view:
 port/linux/game/menu_spartan.c), whose models' draws were the 3D view's */
 void halo_hdr_interface(void)
 {
-	hdr.view = FALSE;
+	inputs.hdr_view = FALSE;
 }
 
 /* display.hdr's tone map of a window's 3D view (source/render/render.c),
@@ -6697,7 +6734,7 @@ void halo_screen_tone_map(short x0, short y0, short x1, short y1)
 
 		journal_operation(JOURNAL_TONE_MAP, arguments, sizeof(arguments));
 	}
-	hdr.view = FALSE;
+	inputs.hdr_view = FALSE;
 	if (!device.gl_ready || !hdr.active)
 		return;
 	target = render_target_get(&device.back_buffer);
@@ -7445,11 +7482,11 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 	draw_bounds_state_frame_end(&draw_bounds);
 	report_frame_presented();
 	/* (display.hdr: a frame begins with no 3D view drawn) */
-	hdr.view = FALSE;
-	hdr.category = -1;
-	hdr.kind = 0;
+	inputs.hdr_view = FALSE;
+	inputs.hdr_category = -1;
+	inputs.hdr_kind = 0;
 	/* (display.soft_particles: a group cut short leaves the next frame hard) */
-	soft_effects.group = FALSE;
+	inputs.soft_group = FALSE;
 	if (debug_settings.statistics && device.frame % 60 == 0)
 	{
 		platform_log("frame %lu: %lu draws, %lu immediate, %lu clears, %lu target changes; skipped %lu no program, %lu no target, %lu link; "
@@ -7541,15 +7578,23 @@ enum
 	_journal_object_bitmap,
 	/* (value: its number, d3d8_resource_created) */
 	_journal_object_created,
-	/* (value: 0 the back buffer, 1 its depth buffer) */
+	/* (value: 0 the back buffer, 1 its depth buffer, 2 the high-res text's
+	atlas's placeholder: text_hires_atlas_object) */
 	_journal_object_device,
 	/* (value: its address, in the contiguous memory) */
 	_journal_object_memory,
 	/* (value: the device's target, as _device's, whose memory it is: a
 	texture or surface the game made over it, in memory of its own; its
-	words, format and size) */
+	words, format and size; and JOURNAL_VIEW_SCREEN where it was the
+	screen's size) */
 	_journal_object_view,
 };
+
+/* a view the screen's size as it was recorded (its game units: the screen's
+width, halo_screen_width, and SCREEN_HEIGHT), played back at the screen's
+size now: a screen's target (render_target_get), whatever the shape of the
+display either was on, as the game's own over that memory is in play */
+#define JOURNAL_VIEW_SCREEN 0x100u
 
 struct journal_object
 {
@@ -7566,9 +7611,14 @@ struct journal_state
 	struct journal_object textures[D3DTSS_MAXSTAGES], palettes[D3DTSS_MAXSTAGES], render_target, depth_stencil;
 	uint32_t viewport[6];
 	uint32_t vertex_shader, program, program_address, shader_constant_mode;
-	uint32_t streams[16][2];
-	uint32_t hdr_category, hdr_kind, hdr_view;
-	uint32_t lights_environment, lights_count, halos_count, sky, visibility, world_span;
+	/* each vertex stream: its memory by name and offset, or its address
+	where no geometry by name holds it (journal_stream_keep), and its
+	stride */
+	uint32_t streams[16][3];
+	/* the front end's own inputs to the draw's pipeline, whole (draw_inputs:
+	a field added there is journaled with it), and the glows' count */
+	struct draw_inputs inputs;
+	uint32_t halos_count;
 	uint32_t render_state[D3DRS_MAX];
 	uint32_t texture_state[D3DTSS_MAXSTAGES][D3DTSS_MAX];
 };
@@ -7594,6 +7644,147 @@ static struct
 	const struct halo_gpu_journal_bitmaps *bitmaps;
 	unsigned char pages[MIRROR_PAGE_SLOTS / 8];
 } journal;
+
+/* ---------- geometry by name (#1169)
+
+A vertex buffer's memory is kept by a record as the geometry that holds it,
+named (d3d8_geometry_named: a Custom Edition map's models' and structure's,
+a mod's model's, all made with XPhysicalAlloc top-down, where what else is
+loaded decides the address), and its offset in it, found again by that
+name as the record plays (journal_stream_place), wherever the geometry is
+now; else (the stock maps' own, at the places their caches load to) by its
+address. Either way a draw played back reads only memory that is there and
+readable now (journal_streams_usable: platform_contiguous_readable): one
+that is not is skipped and counted unknown, the record then passed over and
+the map walked, never a read of a page let go. */
+
+#define GEOMETRY_NAMES 256
+
+static struct
+{
+	uint32_t name;
+	unsigned long base, size;
+} geometry_names[GEOMETRY_NAMES];
+
+/* the streams of the entry played whose geometry was not found by its name
+(journal_restore), a bit each */
+static uint32_t journal_lost_streams;
+
+static uint32_t geometry_name_hash(const char *name)
+{
+	uint32_t hash = 2166136261u;
+
+	while (*name)
+		hash = (hash ^ (unsigned char)*name++) * 16777619u;
+	return hash ? hash : 1;
+}
+
+void d3d8_geometry_named(const void *base, unsigned long size, const char *name)
+{
+	uint32_t hash;
+	int index, free_slot = -1;
+
+	if (!base || !size || !name)
+		return;
+	hash = geometry_name_hash(name);
+	for (index = 0; index < GEOMETRY_NAMES; index++)
+	{
+		if (geometry_names[index].base == (unsigned long)base || geometry_names[index].name == hash)
+		{
+			free_slot = index;
+			break;
+		}
+		if (free_slot < 0 && !geometry_names[index].name)
+			free_slot = index;
+	}
+	if (free_slot < 0)
+		return;
+	geometry_names[free_slot].name = hash;
+	geometry_names[free_slot].base = (unsigned long)base;
+	geometry_names[free_slot].size = size;
+}
+
+void d3d8_geometry_unnamed(const void *base)
+{
+	int index;
+
+	for (index = 0; index < GEOMETRY_NAMES; index++)
+	{
+		if (geometry_names[index].base == (unsigned long)base)
+			memset(&geometry_names[index], 0, sizeof(geometry_names[index]));
+	}
+}
+
+/* a stream's memory (its Data, physical) as a record keeps it: the name of
+the geometry that holds it and its offset there, or 0 and its address */
+static void journal_stream_keep(uint32_t data, uint32_t kept[2])
+{
+	unsigned long address = (unsigned long)PLATFORM_PHYSICAL_TO_VIRTUAL(data);
+	int index;
+
+	kept[0] = 0;
+	kept[1] = data;
+	if (!data)
+		return;
+	for (index = 0; index < GEOMETRY_NAMES; index++)
+	{
+		if (geometry_names[index].name && address >= geometry_names[index].base &&
+			address - geometry_names[index].base < geometry_names[index].size)
+		{
+			kept[0] = geometry_names[index].name;
+			kept[1] = (uint32_t)(address - geometry_names[index].base);
+			return;
+		}
+	}
+}
+
+/* ...and its Data now: the geometry of that name, where it is now, at the
+offset; 0 and *lost where none has that name (or is smaller) */
+static uint32_t journal_stream_place(const uint32_t kept[2], BOOL *lost)
+{
+	int index;
+
+	*lost = FALSE;
+	if (!kept[0])
+		return kept[1];
+	for (index = 0; index < GEOMETRY_NAMES; index++)
+	{
+		if (geometry_names[index].name == kept[0] && kept[1] < geometry_names[index].size)
+			return (uint32_t)PLATFORM_VIRTUAL_TO_PHYSICAL(geometry_names[index].base + kept[1]);
+	}
+	*lost = TRUE;
+	return 0;
+}
+
+/* whether the vertices a played back draw reads, first and count of them
+(as setup_streams reads them: each stream the declaration takes), are in
+memory that is there and readable now, and their geometry found by name */
+static BOOL journal_streams_usable(unsigned long first, unsigned long count)
+{
+	const struct vertex_shader_object *declaration = device.vertex_shader;
+	unsigned long index;
+
+	if (!declaration)
+		return TRUE;
+	for (index = 0; index < declaration->element_count; index++)
+	{
+		const struct xgpu_vertex_element *element = &declaration->elements[index];
+		unsigned long stream = element->stream, stride, bytes;
+
+		if (stream >= 16 || element->format == XGPU_VERTEX_NONE_FORMAT)
+			continue;
+		if (journal_lost_streams & (1u << stream))
+			return FALSE;
+		if (!device.streams[stream].data)
+			continue;
+		stride = device.streams[stream].stride;
+		bytes = stride ? stride * count : 64;
+		if (!platform_contiguous_readable((const char *)PLATFORM_PHYSICAL_TO_VIRTUAL(device.streams[stream].data) +
+			first * stride, bytes))
+			return FALSE;
+	}
+	return TRUE;
+}
 
 /* the textures, surfaces and palettes made, in order, and the vertex shaders
 by id */
@@ -7711,11 +7902,8 @@ struct journal_saved
 	DWORD stream_data[16];
 	UINT stream_stride[16], base_vertex_index;
 	float attributes[XGPU_VERTEX_ATTRIBUTE_COUNT][4];
-	int hdr_category, hdr_kind;
-	BOOL hdr_view;
-	BOOL lights_environment, visibility;
-	int lights_count, halos_count, world_span;
-	unsigned long sky;
+	struct draw_inputs inputs;
+	int halos_count;
 };
 
 static struct journal_saved saved;
@@ -7828,8 +8016,8 @@ static struct
 
 static void *journal_view(const struct journal_object *object)
 {
-	const D3DSurface *target = object->value == 0 ? &device.back_buffer : object->value == 1 ? &device.depth_buffer :
-		NULL;
+	uint32_t which = object->value & ~JOURNAL_VIEW_SCREEN;
+	const D3DSurface *target = which == 0 ? &device.back_buffer : which == 1 ? &device.depth_buffer : NULL;
 	int index;
 
 	if (!target || !target->Data)
@@ -7847,6 +8035,10 @@ static void *journal_view(const struct journal_object *object)
 	journal_views[index].header.Data = target->Data;
 	journal_views[index].header.Format = object->format;
 	journal_views[index].header.Size = object->size;
+	if (object->value & JOURNAL_VIEW_SCREEN)
+		d3d8_surface_resize(&journal_views[index].header,
+			(D3DFORMAT)((object->format & D3DFORMAT_FORMAT_MASK) >> D3DFORMAT_FORMAT_SHIFT),
+			(unsigned long)halo_screen_width(), SCREEN_HEIGHT);
 	return &journal_views[index].header;
 }
 
@@ -7863,8 +8055,19 @@ static void journal_identify(const void *object, struct journal_object *to)
 		to->value = object == &device.back_buffer ? 0 : 1;
 		return;
 	}
+	/* (the high-res text's atlas's placeholder, which the texture binds
+	choose the atlas's distance fields for: as itself, not as the texture
+	made in its order, another run's another texture) */
+	if (object == text_hires_atlas_object())
+	{
+		to->kind = _journal_object_device;
+		to->value = 2;
+		return;
+	}
 	if (journal.bitmaps && journal.bitmaps->identify(object, &tag_index, &bitmap_index))
 	{
+		if (journal.bitmaps->keep)
+			tag_index = journal.bitmaps->keep(tag_index);
 		to->kind = _journal_object_bitmap;
 		to->value = (uint32_t)tag_index;
 		to->check = (uint32_t)bitmap_index;
@@ -7896,10 +8099,16 @@ static void journal_identify(const void *object, struct journal_object *to)
 		if ((type == D3DCOMMON_TYPE_TEXTURE || type == D3DCOMMON_TYPE_SURFACE) && fields[1] &&
 			(fields[1] == device.back_buffer.Data || fields[1] == device.depth_buffer.Data))
 		{
+			unsigned long width, height;
+			BOOL depth;
+
 			to->kind = _journal_object_view;
 			to->value = fields[1] == device.back_buffer.Data ? 0 : 1;
 			to->check = journal_object_check(object);
 			journal_object_shape(object, to);
+			surface_dimensions((const D3DSurface *)object, &width, &height, &depth);
+			if (width == (unsigned long)halo_screen_width() && height == SCREEN_HEIGHT)
+				to->value |= JOURNAL_VIEW_SCREEN;
 			return;
 		}
 	}
@@ -7920,7 +8129,7 @@ static void *journal_resolve(const struct journal_object *object)
 		return NULL;
 	case _journal_object_device:
 		found = object->value == 0 ? (void *)&device.back_buffer : object->value == 1 ? (void *)&device.depth_buffer :
-			NULL;
+			object->value == 2 ? (void *)text_hires_atlas_object() : NULL;
 		break;
 	case _journal_object_bitmap:
 		found = journal.bitmaps ? journal.bitmaps->load(object->value, object->check) : NULL;
@@ -7941,7 +8150,8 @@ static void *journal_resolve(const struct journal_object *object)
 		found = journal_view(object);
 		break;
 	case _journal_object_memory:
-		if (platform_is_contiguous((const void *)(unsigned long)object->value) &&
+		/* (its header there and readable now before it is read: #1169) */
+		if (platform_contiguous_readable((const void *)(unsigned long)object->value, sizeof(D3DSurface)) &&
 			journal_object_check((const void *)(unsigned long)object->value) == object->check)
 			found = (void *)(unsigned long)object->value;
 		if (!found)
@@ -7990,20 +8200,12 @@ static void journal_capture(struct journal_state *state)
 	state->shader_constant_mode = (uint32_t)device.shader_constant_mode;
 	for (index = 0; index < 16; index++)
 	{
-		state->streams[index][0] = (uint32_t)device.streams[index].data;
-		state->streams[index][1] = (uint32_t)device.streams[index].stride;
+		journal_stream_keep((uint32_t)device.streams[index].data, state->streams[index]);
+		state->streams[index][2] = (uint32_t)device.streams[index].stride;
 	}
-	state->hdr_category = (uint32_t)hdr.category;
-	state->hdr_kind = (uint32_t)hdr.kind;
-	state->hdr_view = (uint32_t)hdr.view;
-	state->lights_environment = (uint32_t)dynamic_lights.environment;
-	state->lights_count = (uint32_t)dynamic_lights.count;
+	/* (the front end's own inputs, whole, whatever the settings: draw_inputs) */
+	state->inputs = inputs;
 	state->halos_count = (uint32_t)dynamic_lights.halos.count;
-	state->sky = (uint32_t)preparation.sky;
-	state->visibility = (uint32_t)device.visibility_test_active;
-	/* (display.ambient_occlusion "world"'s window, whatever the setting: a
-	draw's context in a recording of the manifest, prepare_draw) */
-	state->world_span = (uint32_t)world_ao.span;
 	memcpy(state->render_state, D3D__RenderState, sizeof(state->render_state));
 	memcpy(state->texture_state, D3D__TextureState, sizeof(state->texture_state));
 }
@@ -8094,25 +8296,25 @@ static void journal_operation(unsigned long op, const void *arguments, unsigned 
 /* the front end's state that a draw's pipeline is derived from under some
 settings and not under others (the HDR's tags, with display.hdr; the
 enhanced lights', with display.dynamic_lights "enhanced"; the window's
-span, with display.ambient_occlusion "world": world_ao_key), as three words: recording a map's preparation, a draw is
+span, with display.ambient_occlusion "world": world_ao_key; the effect's
+group, soft with display.soft_particles: soft_effect_key), as three words: recording a map's preparation, a draw is
 journaled where it is new in these or in its pipeline (preparation_seen),
 so that its record holds every draw a load under other settings tells
 apart; 0 otherwise */
-static void journal_settings_blind_of(unsigned long words[3], int hdr_category, int hdr_kind, BOOL hdr_view,
-	int lights, BOOL environment, int world_span)
+static void journal_settings_blind_of(unsigned long words[3], const struct draw_inputs *of)
 {
-	words[0] = (unsigned long)hdr_category;
-	words[1] = (unsigned long)hdr_kind;
-	words[2] = (unsigned long)(hdr_view != 0) | (unsigned long)(lights > 0) << 1 |
-		(unsigned long)(environment != 0) << 2 | (unsigned long)world_span << 3;
+	words[0] = (unsigned long)of->hdr_category;
+	words[1] = (unsigned long)of->hdr_kind;
+	words[2] = (unsigned long)(of->hdr_view != 0) | (unsigned long)(of->lights_count > 0) << 1 |
+		(unsigned long)(of->lights_environment != 0) << 2 | (unsigned long)of->world_span << 3;
+	words[2] |= (unsigned long)(of->soft_group != 0) << 16;
 }
 
 static void journal_settings_blind(unsigned long words[3])
 {
 	words[0] = words[1] = words[2] = 0;
 	if (journal_recording)
-		journal_settings_blind_of(words, hdr.category, hdr.kind, hdr.view, dynamic_lights.count,
-			dynamic_lights.environment, world_ao.span);
+		journal_settings_blind_of(words, &inputs);
 }
 
 static void journal_page(unsigned long page)
@@ -8134,7 +8336,8 @@ void halo_gpu_journal_texture(unsigned int tag_index, unsigned int bitmap_index)
 	if (!journal_recording || !journal_reserve(3))
 		return;
 	journal.words[journal.count++] = JOURNAL_TEXTURE;
-	journal.words[journal.count++] = tag_index;
+	journal.words[journal.count++] = journal.bitmaps && journal.bitmaps->keep ?
+		(uint32_t)journal.bitmaps->keep(tag_index) : tag_index;
 	journal.words[journal.count++] = bitmap_index;
 }
 
@@ -8196,8 +8399,13 @@ makes it 2, 3 and so on; its state's size is in it as well (5: the pages'
 runs in JOURNAL_PAGE_UNIT's units, not the platform's pages; 6: the world's
 window's span, world_span; 7: without the screen's ambient occlusion, its
 pre-pass, its flags and its operations; 8: world_span's
-WORLD_AO_SPAN_FOUND, the window found once a pixel) */
-#define JOURNAL_FORM 8
+WORLD_AO_SPAN_FOUND, the window found once a pixel; 9: the effect's soft
+group, the stages' texture regions and the high-res text's atlas as itself;
+10: a bitmap's tag as the record keeps it, halo_gpu_journal_bitmaps' keep;
+11: a view the screen's size played back at the screen's size now,
+JOURNAL_VIEW_SCREEN; 12: the front end's inputs whole, struct draw_inputs;
+13: a stream's memory by its geometry's name and offset, #1169) */
+#define JOURNAL_FORM 13
 
 unsigned int halo_gpu_journal_form(void)
 {
@@ -8249,23 +8457,21 @@ static void journal_restore(const struct journal_state *state)
 	device.program_address = state->program_address < VERTEX_PROGRAM_SLOTS ? state->program_address : 0;
 	device.program_slots[device.program_address] = program;
 	device.shader_constant_mode = (D3DSHADERCONSTANTMODE)state->shader_constant_mode;
+	journal_lost_streams = 0;
 	for (index = 0; index < 16; index++)
 	{
-		device.streams[index].data = state->streams[index][0];
-		device.streams[index].stride = state->streams[index][1];
+		BOOL lost;
+
+		device.streams[index].data = journal_stream_place(state->streams[index], &lost);
+		device.streams[index].stride = state->streams[index][2];
+		if (lost)
+			journal_lost_streams |= 1u << index;
 	}
-	hdr.category = (int)state->hdr_category;
-	hdr.kind = (int)state->hdr_kind;
-	hdr.view = state->hdr_view != 0;
-	dynamic_lights.environment = state->lights_environment != 0;
-	dynamic_lights.count = (int)state->lights_count;
+	inputs = state->inputs;
 	dynamic_lights.reach_count = -1;
 	dynamic_lights.model_reach_count = -1;
 	dynamic_lights.model_unreached = FALSE;
 	dynamic_lights.halos.count = (int)state->halos_count;
-	preparation.sky = state->sky;
-	device.visibility_test_active = state->visibility != 0;
-	world_ao.span = (int)state->world_span;
 }
 
 static void journal_play(unsigned long op, const struct journal_state *state)
@@ -8277,12 +8483,24 @@ static void journal_play(unsigned long op, const struct journal_state *state)
 	journal_restore(state);
 	switch (op)
 	{
+	/* (a draw whose vertices are not there now: skipped, unknown, #1169) */
 	case JOURNAL_DRAW:
+		if (!journal_streams_usable(state->start, journal_vertices(state->primitive, state->count)))
+		{
+			journal.unknown++;
+			break;
+		}
 		D3DDevice_DrawVertices((D3DPRIMITIVETYPE)state->primitive, state->start,
 			journal_vertices(state->primitive, state->count));
 		break;
 	case JOURNAL_DRAW_INDEXED:
 		device.base_vertex_index = state->base_vertex + state->minimum;
+		/* (its indices all 0: the one vertex at its base) */
+		if (!journal_streams_usable(device.base_vertex_index, 1))
+		{
+			journal.unknown++;
+			break;
+		}
 		D3DDevice_DrawIndexedVertices((D3DPRIMITIVETYPE)state->primitive,
 			journal_vertices(state->primitive, state->count), indices);
 		break;
@@ -8415,6 +8633,25 @@ static void journal_replay_texture(uint32_t tag_index, uint32_t bitmap_index)
 /* a run a segment at a time, as mirror_range uploads them */
 static void journal_replay_pages(unsigned long first, unsigned long end)
 {
+	/* (only the pages there and readable now: one let go since the record
+	was made is passed over, its draws, if any, skipped as they play) */
+	while (first < end && !platform_contiguous_readable((const void *)(PLATFORM_CONTIGUOUS_BASE +
+		first * MIRROR_PAGE_SIZE), MIRROR_PAGE_SIZE))
+		first++;
+	if (first < end)
+	{
+		unsigned long readable = first + 1;
+
+		while (readable < end && platform_contiguous_readable((const void *)(PLATFORM_CONTIGUOUS_BASE +
+			readable * MIRROR_PAGE_SIZE), MIRROR_PAGE_SIZE))
+			readable++;
+		if (readable < end)
+		{
+			journal_replay_pages(first, readable);
+			journal_replay_pages(readable, end);
+			return;
+		}
+	}
 	while (first < end)
 	{
 		unsigned long segment_end = (first * MIRROR_PAGE_SIZE / MIRROR_SEGMENT_SIZE + 1) *
@@ -8454,15 +8691,8 @@ int halo_gpu_journal_replay(const unsigned int *words, unsigned int count, const
 	}
 	saved.base_vertex_index = device.base_vertex_index;
 	memcpy(saved.attributes, device.attributes, sizeof(saved.attributes));
-	saved.hdr_category = hdr.category;
-	saved.hdr_kind = hdr.kind;
-	saved.hdr_view = hdr.view;
-	saved.lights_environment = dynamic_lights.environment;
-	saved.lights_count = dynamic_lights.count;
+	saved.inputs = inputs;
 	saved.halos_count = dynamic_lights.halos.count;
-	saved.sky = preparation.sky;
-	saved.visibility = device.visibility_test_active;
-	saved.world_span = world_ao.span;
 
 	journal_recording = FALSE;
 	journal.bitmaps = bitmaps;
@@ -8493,18 +8723,11 @@ int halo_gpu_journal_replay(const unsigned int *words, unsigned int count, const
 	device.immediate_active = FALSE;
 	device.immediate_count = 0;
 	device.immediate_written = 0;
-	hdr.category = saved.hdr_category;
-	hdr.kind = saved.hdr_kind;
-	hdr.view = saved.hdr_view;
-	dynamic_lights.environment = saved.lights_environment;
-	dynamic_lights.count = saved.lights_count;
+	inputs = saved.inputs;
 	dynamic_lights.reach_count = -1;
 	dynamic_lights.model_reach_count = -1;
 	dynamic_lights.model_unreached = FALSE;
 	dynamic_lights.halos.count = saved.halos_count;
-	preparation.sky = saved.sky;
-	device.visibility_test_active = saved.visibility;
-	world_ao.span = saved.world_span;
 	journal.bitmaps = NULL;
 	xgpu_backend_invalidate();
 	*unknown = (unsigned int)journal.unknown;

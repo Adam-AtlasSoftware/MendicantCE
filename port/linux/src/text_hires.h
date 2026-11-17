@@ -86,6 +86,11 @@ void text_hires_register_atlas(const unsigned long *texture, unsigned long width
 placeholder's, its glyphs' fields uploaded, to be sampled as
 XGPU_ADDRESS_MSDF; 0 otherwise */
 unsigned int text_hires_atlas_texture(unsigned long data);
+/* the atlas's placeholder's D3D texture (text_hires_register_atlas's), NULL
+none: a map's preparation's record names it as itself (d3d8_device.c's
+journal), not as the texture made in its order, which another run's making
+of textures does not keep */
+const void *text_hires_atlas_object(void);
 /* whether a texture's Data is the atlas's placeholder's (its image is made
 and changed as the text is drawn: chosen at every bind, xbox_textures.c) */
 int text_hires_atlas_placeholder(unsigned long data);

@@ -17,7 +17,7 @@ def generated(fault=None):
     mirror = re.search(r'^#define MIRROR_SEGMENT_SIZE .*?^\} mirror;\n', device, re.M | re.S).group(0)
     mirror += function(device, 'mirror_page_size_set') + '\n'
     types = '\n'.join((enum_with(device, 'JOURNAL_DRAW = 1'), structure(device, 'journal_object'),
-                       structure(device, 'journal_state'), structure(device, 'journal_reader')))
+                       structure(device, 'draw_inputs'), structure(device, 'journal_state'), structure(device, 'journal_reader')))
     types += '\n#define JOURNAL_STATE_WORDS (sizeof(struct journal_state) / sizeof(uint32_t))\n'
     types += '#define JOURNAL_PAGE_UNIT %#x\n' % constant(device, 'JOURNAL_PAGE_UNIT')
     journal = ('static struct { uint32_t *words; unsigned long count, capacity; BOOL failed; '
