@@ -199,6 +199,9 @@ static float mouse_sensitivity(void)
 #define LOOK_VERTICAL_SENSITIVITY_MAXIMUM 4.0f
 /* the most a stick's dead zone setting takes, in percent */
 #define STICK_DEAD_ZONE_MAXIMUM 50
+/* the most a stick's outer dead zone setting takes, in percent: with the
+inner's most (STICK_DEAD_ZONE_MAXIMUM), a fifth of the travel still between */
+#define STICK_OUTER_DEAD_ZONE_MAXIMUM 30
 
 /* each gamepad's player's settings: the local player of the gamepad's
 index (as controller_remap.c's ports are), their profile's; another
@@ -206,16 +209,20 @@ gamepad's config.toml's */
 #define PAD_PLAYERS 4
 #define PAD_PLAYER_SLOT(gamepad) ((gamepad) >= 0 && (gamepad) < PAD_PLAYERS ? (gamepad) : PAD_PLAYERS)
 
-/* the deflection a stick reads as none, of 32767, for the game's sticks
-(stick 0 the left, 1 the right) of a gamepad: its player's
-input.left_stick_dead_zone and input.right_stick_dead_zone as a
-percentage, else the game's own */
-short halo_stick_dead_range(short gamepad, short stick)
+/* a gamepad's sticks' dead zones (stick 0 the left, 1 the right), of 32767:
+the deflection read as none, its player's input.left_stick_dead_zone and
+input.right_stick_dead_zone as a percentage, else the game's own; and the one
+read as full, 32767 less input.left_stick_outer_dead_zone and
+input.right_stick_outer_dead_zone (none: the original's, full only at the rim) */
+static void stick_dead_zones(short gamepad, short ranges[2], short live_ranges[2])
 {
 	static const char *const settings[2] = { "input.left_stick_dead_zone", "input.right_stick_dead_zone" };
+	static const char *const outer_settings[2] =
+		{ "input.left_stick_outer_dead_zone", "input.right_stick_outer_dead_zone" };
 	static struct
 	{
 		short ranges[2];
+		short live_ranges[2];
 		unsigned long read_at;
 		int read;
 	} pads[PAD_PLAYERS + 1];
@@ -229,12 +236,37 @@ short halo_stick_dead_range(short gamepad, short stick)
 		for (index = 0; index < 2; index++)
 		{
 			long percent = config_player_integer(slot < PAD_PLAYERS ? slot : -1, settings[index]);
+			long outer = config_player_integer(slot < PAD_PLAYERS ? slot : -1, outer_settings[index]);
 
 			pads[slot].ranges[index] = percent < 0 || percent > STICK_DEAD_ZONE_MAXIMUM
 				? STICK_DEAD_RANGE : (short)(percent * 32767 / 100);
+			pads[slot].live_ranges[index] = outer <= 0 || outer > STICK_OUTER_DEAD_ZONE_MAXIMUM
+				? 32767 : (short)(32767 - outer * 32767 / 100);
 		}
 	}
-	return pads[slot].ranges[stick ? 1 : 0];
+	ranges[0] = pads[slot].ranges[0];
+	ranges[1] = pads[slot].ranges[1];
+	live_ranges[0] = pads[slot].live_ranges[0];
+	live_ranges[1] = pads[slot].live_ranges[1];
+}
+
+/* the deflection a gamepad's stick reads as none, of 32767 (stick_dead_zones) */
+short halo_stick_dead_range(short gamepad, short stick)
+{
+	short ranges[2], live_ranges[2];
+
+	stick_dead_zones(gamepad, ranges, live_ranges);
+	return ranges[stick ? 1 : 0];
+}
+
+/* the deflection from which a gamepad's stick reads as full, of 32767:
+32767, the rim, with no outer dead zone (stick_dead_zones) */
+short halo_stick_live_range(short gamepad, short stick)
+{
+	short ranges[2], live_ranges[2];
+
+	stick_dead_zones(gamepad, ranges, live_ranges);
+	return live_ranges[stick ? 1 : 0];
 }
 
 /* whether a gamepad's look turns the other way side to side (its player's

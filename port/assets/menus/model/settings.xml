@@ -1040,7 +1040,7 @@
 			<help>Put any action on any button, each player their own layout, the D-pad and Back too: chat, push to talk, the scoreboard, a screenshot.</help>
 		</row>
 		<row key="stick_dead_zones" kind="link" label="STICK DEAD ZONES ›" crumb="CONTROLS › CONTROLLER" search="deadzone" open="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/dead_zones_screen">
-			<help>How far each stick moves before it does anything: more for a worn stick that drifts, less for finer aim.</help>
+			<help>How far each stick moves before it does anything, and how far it must go to count as fully pushed: more for a worn stick, less for finer aim.</help>
 		</row>
 		<section key="section_12" title="FEEDBACK"/>
 		<row key="vibration" kind="choice" setting="profile.vibration" label="VIBRATION" crumb="CONTROLS › CONTROLLER" search="rumble" when="profile">
@@ -1268,6 +1268,27 @@
 			<choice shown="40%" value="40"/>
 			<choice shown="45%" value="45"/>
 			<choice shown="50%" value="50"/>
+		</row>
+		<section key="section_3" title="OUTER DEAD ZONES"/>
+		<row key="left_stick_outer_dead_zone" kind="choice" setting="input.left_stick_outer_dead_zone" label="LEFT STICK" crumb="CONTROLS › CONTROLLER › STICK DEAD ZONES" search="deadzone">
+			<help>How much of the left stick's travel at its edge counts as a full push. Raise it for a worn stick that stops short of its edge and never reaches full speed. None is the game's own.</help>
+			<choice shown="NONE" value="0"/>
+			<choice shown="5%" value="5"/>
+			<choice shown="10%" value="10"/>
+			<choice shown="15%" value="15"/>
+			<choice shown="20%" value="20"/>
+			<choice shown="25%" value="25"/>
+			<choice shown="30%" value="30"/>
+		</row>
+		<row key="right_stick_outer_dead_zone" kind="choice" setting="input.right_stick_outer_dead_zone" label="RIGHT STICK" crumb="CONTROLS › CONTROLLER › STICK DEAD ZONES" search="deadzone">
+			<help>How much of the right stick's travel at its edge counts as a full push, so a worn stick still turns at full speed and speeds up the turn. None is the game's own.</help>
+			<choice shown="NONE" value="0"/>
+			<choice shown="5%" value="5"/>
+			<choice shown="10%" value="10"/>
+			<choice shown="15%" value="15"/>
+			<choice shown="20%" value="20"/>
+			<choice shown="25%" value="25"/>
+			<choice shown="30%" value="30"/>
 		</row>
 		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
 		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>

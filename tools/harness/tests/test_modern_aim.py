@@ -28,7 +28,7 @@ CONTROLS = [
     # Classic touched: its diagonal no longer stretched to the square
     ("\tif (absolute_pitch > 0.1f && absolute_yaw > 0.1f)", "\tif (0)", "classic"),
     # the round dead zone's push not taken from its edge
-    ("(MIN(length, (real)SHORT_MAX) - dead_range)", "(MIN(length, (real)SHORT_MAX))", "round_dead_zone"),
+    ("(MIN(length, (real)live_range) - dead_range)", "(MIN(length, (real)live_range))", "round_dead_zone"),
 ]
 
 

@@ -665,6 +665,9 @@ DISPLAY_MODES = [("FULLSCREEN", "fullscreen"), ("BORDERLESS", "borderless"), ("W
 MODERN_AIM_ANGLES = [(str(degrees), str(degrees)) for degrees in range(0, 46, 5)]
 MODERN_AIM_THRESHOLDS = [("DEFAULT", "-1")] + [(f"{percent}%", str(percent)) for percent in range(50, 101, 5)]
 STICK_DEAD_ZONES = [("DEFAULT (27%)", "-1")] + [(f"{percent}%", str(percent)) for percent in range(0, 51, 5)]
+# input.left_stick_outer_dead_zone's and right's: the part of the travel at
+# the rim read as full (none, the game's own: full only at the rim)
+STICK_OUTER_DEAD_ZONES = [("NONE", "0")] + [(f"{percent}%", str(percent)) for percent in range(5, 31, 5)]
 # display.fov's stops: the game's own (0), or degrees; any of 20 to 160
 # typed, above 150 drawn only with Panini Projection on (panini_projection.h's
 # PANINI_FIELD_OF_VIEW_MOST: why 160)
@@ -1493,8 +1496,8 @@ PAGES = {
              "Put any action on any button, each player their own layout, the D-pad and Back too: chat, push to "
              "talk, the scoreboard, a screenshot.", None),
             ("STICK DEAD ZONES ›", None, _page_screen(*DEAD_ZONES),
-             "How far each stick moves before it does anything: more for a worn stick that drifts, less for "
-             "finer aim.", None),
+             "How far each stick moves before it does anything, and how far it must go to count as fully "
+             "pushed: more for a worn stick, less for finer aim.", None),
             (SECTION, "FEEDBACK"),
             ("VIBRATION", "profile.vibration", ON_OFF, "Rumbles the controller.", None),
             ("IN-GAME HELP", "profile.ingame_help", ON_OFF, "Shows the game's hints about its controls.", None),
@@ -1617,6 +1620,13 @@ PAGES = {
             ("RIGHT STICK", "input.right_stick_dead_zone", STICK_DEAD_ZONES,
              "How far the right stick moves before the view turns. Raise it for a stick that drifts; lower it for "
              "finer aim. Default is the game's own, 27%.", None),
+            (SECTION, "OUTER DEAD ZONES"),
+            ("LEFT STICK", "input.left_stick_outer_dead_zone", STICK_OUTER_DEAD_ZONES,
+             "How much of the left stick's travel at its edge counts as a full push. Raise it for a worn stick "
+             "that stops short of its edge and never reaches full speed. None is the game's own.", None),
+            ("RIGHT STICK", "input.right_stick_outer_dead_zone", STICK_OUTER_DEAD_ZONES,
+             "How much of the right stick's travel at its edge counts as a full push, so a worn stick still turns "
+             "at full speed and speeds up the turn. None is the game's own.", None),
         ],
     },
     SCREEN_LAYOUT[0]: {
@@ -1846,7 +1856,8 @@ SETTINGS_SEARCH_WORDS = {
     "gun": ["viewmodel_visible", "viewmodel_fov", "weapon_position"],
     "aim": ["aim_style", "modern_aim_acceleration_angle", "modern_aim_acceleration_threshold"],
     "acceleration": ["aim_style", "modern_aim_acceleration_angle", "modern_aim_acceleration_threshold"],
-    "deadzone": ["stick_dead_zones", "left_stick_dead_zone", "right_stick_dead_zone"],
+    "deadzone": ["stick_dead_zones", "left_stick_dead_zone", "right_stick_dead_zone", "left_stick_outer_dead_zone",
+                 "right_stick_outer_dead_zone"],
     "rumble": ["vibration"],
     "keybinds": ["key_bindings"], "keys": ["key_bindings"],
     "mic": ["input_device", "voice_chat"], "microphone": ["input_device", "voice_chat"],

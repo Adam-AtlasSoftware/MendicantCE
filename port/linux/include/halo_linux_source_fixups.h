@@ -438,6 +438,10 @@ int menu_pictures_preparing(void);
 none, of 32767: its player's input.left_stick_dead_zone and
 input.right_stick_dead_zone, else the game's own (port/linux/src/xinput_sdl.c) */
 short halo_stick_dead_range(short gamepad, short stick);
+/* the deflection of a gamepad's stick read as full, of 32767: 32767 (the
+rim, the original's) less its player's input.left_stick_outer_dead_zone or
+input.right_stick_outer_dead_zone (port/linux/src/xinput_sdl.c) */
+short halo_stick_live_range(short gamepad, short stick);
 /* whether a gamepad's look turns the other way side to side: its player's
 input.invert_look_horizontal (port/linux/src/xinput_sdl.c) */
 int halo_look_horizontal_inverted(short gamepad);

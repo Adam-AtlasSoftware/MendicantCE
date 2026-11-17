@@ -253,7 +253,7 @@
 		<string text="Which of the controller's buttons does what. Button Remapping sets them one by one; the keyboard's keys are Key Bindings'."/>
 		<string text="Which stick moves and which looks. Southpaw swaps them."/>
 		<string text="Put any action on any button, each player their own layout, the D-pad and Back too: chat, push to talk, the scoreboard, a screenshot."/>
-		<string text="How far each stick moves before it does anything: more for a worn stick that drifts, less for finer aim."/>
+		<string text="How far each stick moves before it does anything, and how far it must go to count as fully pushed: more for a worn stick, less for finer aim."/>
 		<string text=""/>
 		<string text="Rumbles the controller."/>
 		<string text="Shows the game's hints about its controls."/>

@@ -1125,6 +1125,14 @@ static const struct config_setting config_settings[] =
 	{ "input.right_stick_dead_zone", _config_integer, "-1", "HALO_RIGHT_STICK_DEAD_ZONE", _environment_value, _platform_all,
 		"How far the controller's right stick moves before it turns the view, in\n"
 		"percent of its travel (0 to 50); -1 for the game's own (27%).", _scope_player },
+	{ "input.left_stick_outer_dead_zone", _config_integer, "0", "HALO_LEFT_STICK_OUTER_DEAD_ZONE", _environment_value,
+		_platform_all,
+		"How much of the controller's left stick's travel at its rim reads as a\n"
+		"full push, in percent (0 to 30): raise it for a worn stick that never\n"
+		"reaches its rim; 0, the game's own, full only at the rim.", _scope_player },
+	{ "input.right_stick_outer_dead_zone", _config_integer, "0", "HALO_RIGHT_STICK_OUTER_DEAD_ZONE",
+		_environment_value, _platform_all,
+		"The same for the right stick, which turns the view.", _scope_player },
 	{ "input.look_vertical_sensitivity", _config_real, "1.0", "HALO_LOOK_VERTICAL_SENSITIVITY", _environment_value,
 		_platform_all,
 		"How fast a controller's look stick turns the view up and down, times\n"

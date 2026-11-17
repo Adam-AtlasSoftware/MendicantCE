@@ -31,4 +31,12 @@
 	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/right_stick_dead_zone_spinner" flags="pass_unhandled_to_focused_child left_right_tabs_items">
 		<on event="created" run="port setting load"/>
 	</behaviour>
+	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/op_left_stick_outer_dead_zone" flags="pass_unhandled_to_focused_child"/>
+	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/left_stick_outer_dead_zone_spinner" flags="pass_unhandled_to_focused_child left_right_tabs_items">
+		<on event="created" run="port setting load"/>
+	</behaviour>
+	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/op_right_stick_outer_dead_zone" flags="pass_unhandled_to_focused_child"/>
+	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/right_stick_outer_dead_zone_spinner" flags="pass_unhandled_to_focused_child left_right_tabs_items">
+		<on event="created" run="port setting load"/>
+	</behaviour>
 </model>
