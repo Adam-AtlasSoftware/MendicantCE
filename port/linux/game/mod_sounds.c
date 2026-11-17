@@ -23,9 +23,9 @@ their own rate, or past the memory the mods may keep, Xbox ADPCM, mono at
 kept as it is), so they play through the map's channels as its sounds do.
 A permutation of PCM longer than the sound cache takes one in is split
 into a chain of linked pieces (range_split, OpenH1 issue 1167), which plays
-as one. The values a map's
-build (tool.exe, Invader) fills in are filled in as it does: the defaults
-of the sound's class, the pitch ranges' playback rates, the per-tick bend.
+as one. The values a map's build (tool.exe, Invader) fills in are filled
+in as it does: the defaults of the sound's class, the pitch ranges'
+playback rates, the per-tick bend.
 The longest permutation length is Tool's measure of a permutation, a split
 (linked) sound's chain of them summed: the whole chain plays, and the
 scripts and AI speech that wait for a sound wait for it (on the host, the

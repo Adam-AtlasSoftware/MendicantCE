@@ -2526,8 +2526,9 @@ static short sound_find_like_channel(
 }
 
 /* port: an impulse sound plays on through its permutation's linked pieces
-of 16-bit PCM at its own rate, those a mod's or a map's long permutation is
-kept in (mod_sounds.c's range_split, OpenH1 issue 1167): the channel's
+of 16-bit PCM at its own rate: those a mod's long permutation is split into
+(mod_sounds.c's range_split, OpenH1 issue 1167), or a Halo PC map's chain
+kept as PCM (custom_edition_sounds.c). The channel's
 playing permutation with none queued after it is given the next of its
 chain, from the sound cache, as a looping sound's track is
 (update_channel_for_looping_sound), so that its packets follow the last of

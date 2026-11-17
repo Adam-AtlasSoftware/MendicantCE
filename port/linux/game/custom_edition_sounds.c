@@ -24,8 +24,8 @@ mod_sounds.c splits it into a chain of linked pieces of NATIVE_PIECE_BYTES
 (OpenH1 issue 1167). A map's cannot be split (its permutations are in the
 map's tag cache, which has no room for more), so it, and any permutation
 past the PCM budget of all of them (NATIVE_TOTAL_BYTES), is encoded as Xbox
-ADPCM in a format the channels play, as before, and said once. Wherever the rate changes, the samples are
-resampled with a windowed sinc low pass (frames_resample), not by the
+ADPCM in a format the channels play, as before, and said once. Wherever the
+rate changes, the samples are resampled with a windowed sinc low pass (frames_resample), not by the
 nearest frame, which folded what lies above the new rate's band back into it
 as tones that were never there (a 16 kHz tone came out at 6 kHz).
 The sound itself stays one of the Xbox's formats, so the sound manager and
@@ -89,8 +89,8 @@ it, and the resampler scales by it) */
 /* The most bytes of 16-bit PCM a permutation is kept in: what one sound
 cache block takes, and no more than a quarter of the sound cache (a
 quarter of the phones' 4 MB, 12 seconds of mono at 44 kHz; the desktop's
-4 MB, 47 seconds of mono at 44 kHz or 23 of stereo). A longer one is Xbox
-ADPCM, 3.6 times smaller. */
+4 MB, 47 seconds of mono at 44 kHz or 23 of stereo). A longer one of a
+map's is Xbox ADPCM, 3.6 times smaller; a mod's is split into pieces. */
 #define NATIVE_MAXIMUM_BYTES MIN((long)MAXIMUM_SOUND_DATA_SIZE, (long)(HALO_PORT_SOUND_CACHE_SIZE / 4))
 /* The bytes of each piece a longer one is split into (mod_sounds.c): half
 of that, in whole 4 KB pages (whole frames, mono or stereo), so that the
