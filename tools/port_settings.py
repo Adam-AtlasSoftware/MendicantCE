@@ -927,8 +927,8 @@ PAGES = {
             # (display.gamma's page, and display.hdr's rows on the renderers
             # that draw it: menu_files.c's "hdr")
             ("BRIGHTNESS ›", None, _page_screen(*BRIGHTNESS_PAGE),
-             "How bright the picture is: its gamma, and on an HDR display, HDR's look, how bright white and the "
-             "HUD are, and the display's peak.", None, "brightness_settings"),
+             "How bright the picture is: its gamma, soft particles, and on an HDR display, HDR's look, how bright "
+             "white and the HUD are, and the display's peak.", None, "brightness_settings"),
             ("ADVANCED GRAPHICS ›", None, _page_screen(*ADVANCED),
              "Render resolution, anti-aliasing, texture filtering, model detail, shadows, the lighting and the "
              "shields' glow, smooth motion and the tick rate.", None),
@@ -1259,12 +1259,6 @@ PAGES = {
              [("AUTO", "auto"), ("XBOX", "stock"), ("FULL", "native"), ("HIGHEST", "highest")],
              "How detailed characters and vehicles stay in the distance. Xbox simplifies them as on a TV; Full keeps "
              "their detail for your screen; Highest always draws the most. Auto is Full in VR.", None),
-            # (display.soft_particles: shown where the renderer draws it,
-            # not in the headset, whose eyes draw them soft already:
-            # SETTINGS_ROW_WHEN)
-            ("SOFT PARTICLES", "display.soft_particles", ON_OFF,
-             "Smoke, dust, steam and weather fade softly where they meet walls and floors, at a small cost. Off "
-             "draws them as the Xbox did: a hard line where they cut in.", "desktop"),
             ("SMOOTH MOTION", "display.interpolation", ON_OFF,
              "Draws movement smoothly between the game's 30 updates a second, so that it looks fluid at any frame "
              "rate. Off shows each update as it is.", None),
@@ -1326,6 +1320,13 @@ PAGES = {
              "a fine grain. 8-Bit draws as before, lighter on the graphics card. Auto picks for you: 10-Bit, or "
              "8-Bit with battery saver.|HDR has its own depth: this applies with HDR off.",
              "computer"),
+            # (display.soft_particles: shown where the renderer draws it,
+            # not in the headset, whose eyes draw them soft already:
+            # SETTINGS_ROW_WHEN; Advanced
+            # Graphics and Video have no room)
+            ("SOFT PARTICLES", "display.soft_particles", ON_OFF,
+             "Smoke, dust, steam and weather fade softly where they meet walls and floors, at a small cost. Off "
+             "draws them as the Xbox did: a hard line where they cut in.", "desktop"),
             (SECTION, "HDR"),
             ("HDR", "display.hdr", [("AUTO", "auto"), ("ON", "on"), ("OFF", "off")],
              "Brighter highlights on an HDR display. Auto turns it on while the display shows HDR; a display "
