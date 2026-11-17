@@ -156,7 +156,7 @@ def atrous_step(values, instances, variance, stride, sigma_scale=4.0):
 
 
 def list_pick_linear(cumulative, u):
-    """the bake's list_pick (xgpu_vulkan_bake_glsl.inc): the first entry whose cumulative weight reaches u x total"""
+    """a list's linear pick: the first entry whose cumulative weight reaches u x total"""
     x = u * cumulative[-1]
     k = 0
     while k + 1 < len(cumulative) and cumulative[k] < x:
@@ -165,7 +165,7 @@ def list_pick_linear(cumulative, u):
 
 
 def list_search(cumulative, u):
-    """the path tracer's list_search: the same entry found by halves, and its share"""
+    """the bake's list_pick (xgpu_vulkan_bake_glsl.inc, by halves) and the entry's share"""
     x = u * cumulative[-1]
     lo, hi = 0, len(cumulative) - 1
     while lo < hi:

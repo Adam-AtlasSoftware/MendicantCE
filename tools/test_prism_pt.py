@@ -29,12 +29,11 @@ def test_the_glsl_has_every_pass_and_shares_the_bakes_scene():
     for name in ("light", "temporal", "fix", "atrous", "composite", "reference", "reference_stats"):
         assert f"//@pass {name}\n" in text
     # (the bake's own functions, not copies: the scene traced and the bake made by one estimator)
-    for used in ("grid_cell(", "lamp_by_power(", "lamp_power(", "GRID_SEEN", "GRID_NEAR", "lamp_direction(",
-                 "lamp_visible(", "domes_at(", "fixture_light(", "fixtures_ris(", "sky_along(", "ambient()", "glow_of(",
-                 "albedo_of(", "sun_at("):
+    for used in ("lamp_pick(", "lamp_direction(", "lamp_visible(", "domes_at(", "fixture_light(", "fixtures_ris(",
+                 "sky_along(", "ambient()", "glow_of(", "albedo_of(", "sun_at("):
         assert used in text
-    for copied in ("uint grid_cell(", "uint lamp_by_power(", "bool lamp_direction(", "vec3 domes_at(",
-                   "vec3 sky_along(", "const float GRID_SEEN"):
+    for copied in ("uint lamp_pick(", "uint list_pick(", "bool lamp_visible(", "bool lamp_direction(",
+                   "vec3 domes_at(", "vec3 sky_along("):
         assert copied not in text
 
 
@@ -217,9 +216,9 @@ def test_the_atrous_step_keeps_an_instance_edge_and_smooths_noise():
     assert (out - clean)[:, 2:6].std() < 0.5 * (values - clean)[:, 2:6].std()
 
 
-def test_the_fast_lamp_pick_is_the_bakes():
-    """lamp_pick_fast's search by halves picks the entry the bake's linear pick picks, and its share is the
-    entry's weight over the list's"""
+def test_the_grids_search_by_halves_is_the_linear_pick():
+    """the grid's list pick by halves (the bake's list_pick since 0ec8b7e48) picks the entry a linear pick picks,
+    and its share is the entry's weight over the list's"""
     rng = np.random.default_rng(23)
     for _ in range(200):
         n = int(rng.integers(1, 65))
