@@ -33,6 +33,7 @@ MB; a bitmap's pixels are read as they are drawn) */
 struct sound_permutation;
 struct bitmap_data;
 struct vertex_buffer;
+struct structure_bsp;
 
 /* ---------- prototypes/PORT_MODS.C (the platform layer's: port_mods.h) */
 
@@ -56,6 +57,10 @@ int port_mods_report(char *text, unsigned long size, char const *map_name, int m
 /* the game's (cache_files.c, scenario_tags_load and scenario_tags_unload) */
 void mods_tags_loaded(char const *map_name);
 void mods_tags_unloaded(void);
+/* the game's (cache_files.c, scenario_structure_bsps_read_ahead, and
+scenario.c, scenario_switch_structure_bsp): a structure bsp of the map read
+where it loads, its lightmap layout known (mod_bitmaps_structure_bsp_read) */
+void mods_structure_bsp_read(short structure_bsp_index, struct structure_bsp const *structure_bsp);
 /* the console's (hs.c) */
 void mods_reload(void);
 void mods_enable(boolean enabled);
@@ -126,6 +131,37 @@ pixels read at once into buffer and made the hardware's */
 boolean mod_bitmaps_read(struct bitmap_data *bitmap, void *buffer);
 /* whether a bitmap is a mod's (whose linear rows are padded as they load) */
 boolean mod_bitmaps_contain(struct bitmap_data const *bitmap);
+/* a structure bsp of the map read (as the map loads, or switched to): its
+lightmap layout known, the mods' lightmaps for it are taken or left out.
+How many of the map's bitmaps the mods play then */
+long mod_bitmaps_structure_bsp_read(short structure_bsp_index, struct structure_bsp const *structure_bsp);
+/* the mods' lightmaps waiting for their bsp to be read (they are the
+map's until then) */
+long mod_bitmaps_waiting_count(void);
+
+/* ---------- prototypes/MOD_LIGHTMAPS.C */
+
+/* "lm1-" and 16 hexadecimal digits */
+#define MOD_LIGHTMAP_FINGERPRINT_TEXT_SIZE 21
+/* (the picture check's: docs/mods.md) */
+#define MOD_LIGHTMAP_MINIMUM_CORRELATION 0.9f
+
+/* the structure bsp's lightmap layout fingerprint, and as text */
+unsigned long long mod_lightmap_fingerprint(struct structure_bsp const *structure_bsp);
+void mod_lightmap_fingerprint_text(unsigned long long fingerprint, char text[MOD_LIGHTMAP_FINGERPRINT_TEXT_SIZE]);
+/* the fingerprint a lightmap's layout file holds, lower case: FALSE if it
+holds none */
+boolean mod_lightmap_sidecar_parse(char const *bytes, unsigned long size, char text[MOD_LIGHTMAP_FINGERPRINT_TEXT_SIZE]);
+/* the bytes of a page's first level, 0 for a format the picture check
+cannot read */
+unsigned long mod_lightmap_page_size(struct bitmap_data const *bitmap);
+/* the luminance of a page's first level (0 to 255, width x height of them),
+from its pixels: FALSE for a format it cannot read */
+boolean mod_lightmap_page_luminance(struct bitmap_data const *bitmap, byte const *pixels, real *luminance);
+/* the correlation of the map's page with the mod's of the same layout (1:
+the same picture), each reduced to the map's size and blurred */
+real mod_lightmap_page_correlation(real const *map_luminance, long map_width, long map_height,
+	real const *mod_luminance, long mod_width, long mod_height);
 
 /* ---------- prototypes/MOD_STRINGS.C */
 

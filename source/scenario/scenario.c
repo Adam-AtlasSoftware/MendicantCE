@@ -201,6 +201,7 @@ symbols in this file:
 #include "structure_bsp_cache.h" /* port: port/linux/game/structure_bsp_cache.c */
 #include "load_zone.h" /* port: port/linux/game/load_zone.c */
 #include "world_ao.h" /* port: port/linux/game/world_ao.c */
+#include "mods.h" /* port: port/linux/game/mods.c */
 
 /* ---------- constants */
 
@@ -1190,6 +1191,10 @@ boolean scenario_switch_structure_bsp(
 				struct collision_bsp);
 			scenario_globals->structure_bsp_index = structure_bsp_index;
 			global_structure_bsp_index = structure_bsp_index;
+			/* port: the mods' lightmaps for it taken or left out by its
+			lightmaps' layout, if not as it was read ahead
+			(port/linux/game/mod_bitmaps.c) */
+			mods_structure_bsp_read(structure_bsp_index, global_structure_bsp);
 			/* port: cache buckets while the newly current bsp's tags are loaded */
 			structure_culling_structure_bsp_loaded();
 			halo_load_trace("bsp.culling.end", NULL); /* port: loading measurement */

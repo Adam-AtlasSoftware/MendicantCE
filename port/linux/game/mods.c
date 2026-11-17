@@ -249,11 +249,26 @@ boolean mods_map_loaded(
 	return mods_globals.map_loaded;
 }
 
-/* how many of the map's bitmaps the mods play (texture_cache_size_for_map) */
+/* how many of the map's bitmaps the mods play (texture_cache_size_for_map):
+and their lightmaps waiting for their bsp, which the cache is sized for as
+the map loads */
 long mods_bitmap_count(
 	void)
 {
-	return mods_globals.bitmap_count;
+	return mods_globals.bitmap_count + mod_bitmaps_waiting_count();
+}
+
+void mods_structure_bsp_read(
+	short structure_bsp_index,
+	struct structure_bsp const *structure_bsp)
+{
+	if (!mods_globals.map_loaded || !structure_bsp)
+	{
+		return;
+	}
+	mods_globals.bitmap_count = mod_bitmaps_structure_bsp_read(structure_bsp_index, structure_bsp);
+
+	return;
 }
 
 boolean mods_played_on_map(
