@@ -1102,13 +1102,12 @@ def test_config_has_each_section_once(tmp_path):
 # ---------- system link's stand-in machines (tools/system_link_bots.py)
 
 
-def test_system_link_bots_messages_are_the_games():
+def test_system_link_bots_messages_are_the_games(monkeypatch):
     """the stand-in machines number their messages as network_messages.h does,
     and send each at the size network_messages.c's fields decode (pad 0,
     bytes 1, shorts 2, longs 4; an array a count byte and one element)"""
     import struct
     import time
-    import types
     from tools import system_link_bots as bots
 
     root = Path(__file__).resolve().parents[1]
@@ -1127,10 +1126,28 @@ def test_system_link_bots_messages_are_the_games():
     from tools import network_format
     assert bots.NETWORK_VERSION == network_format.version()
     sent = []
+
+    class Socket:
+        """(no real socket: macOS has no 127.0.0.2, and the port may be a running game's)"""
+
+        def __init__(self, *args):
+            pass
+
+        def setsockopt(self, *args):
+            pass
+
+        def bind(self, address):
+            pass
+
+        def setblocking(self, flag):
+            pass
+
+        def sendto(self, data, address):
+            sent.append(data)
+
+    monkeypatch.setattr(bots.socket, "socket", Socket)
     machine = bots.Machine(1, "127.0.0.2", "127.0.0.1", print)
-    machine.udp.close()
     machine.send = sent.append
-    machine.udp = types.SimpleNamespace(sendto=lambda data, address: sent.append(data))
     machine.joined()
     machine.handle(bots.SERVER_MACHINE_ACCEPTED, struct.pack(">ih", 0, 1))
     settings = bytes(0x24) + b"levels\\test\\bloodgulch\\bloodgulch".ljust(0x80, b"\0")
