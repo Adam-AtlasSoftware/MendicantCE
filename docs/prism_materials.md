@@ -159,7 +159,7 @@ environment shader of the level and every model shader of its characters (`chara
    skipped and why). A shader whose texture moves (CE's texture animation) or that has no base map is left to the
    automatic tier.
 
-It runs on the processor (about a minute and a half a level with four workers). Everything it writes is made from the
+It runs on the processor (b30's 73 shaders in 90 s, a10's 89 in 79 s, four workers, as measured). Everything it writes is made from the
 player's maps: it stays on the player's machine (`LOCAL_ONLY.txt`).
 
 `prism_v4_materials.py check` tests its encoders and the gate's maths on made-up pictures (`tools/test_prism_v4_materials.py`).
