@@ -930,29 +930,23 @@ PAGES = {
              "Classic is brighter but harsher. Xbox and Classic cost a little less.", None),
             ("SOUND", "audio.enabled", ON_OFF,
              "Turns all sound off or on, at once.", None),
+            # (voice chat: this machine's own, port/linux/game/network_voice.c;
+            # its page has the hit sounds' rows too, leaving the volumes room)
+            ("MULTIPLAYER ›", None, _page_screen(*VOICE_CHAT),
+             "Voice chat in network games (your microphone and the other players' voices' volume) and hit "
+             "sounds.", None, "voice_chat_settings"),
             (SECTION, "VOLUME"),
             ("MASTER VOLUME", "audio.volume", MASTER_VOLUMES,
              "The volume of everything the game plays. 10 is the Xbox's level; up to 20 is louder.", None),
             ("MUSIC VOLUME", "audio.music_volume", VOLUMES, "The music's volume.", None),
+            ("DIALOGUE VOLUME", "audio.dialogue_volume", VOLUMES,
+             "The characters' speech: Cortana, the Marines and the cutscenes' lines.", None),
             ("EFFECTS VOLUME", "audio.effects_volume", VOLUMES,
-             "Every other sound: weapons, vehicles, the world and the characters' speech.", None),
-            (SECTION, "MULTIPLAYER"),
-            # (voice chat: this machine's own, port/linux/game/network_voice.c)
-            ("VOICE CHAT ›", None, _page_screen(*VOICE_CHAT),
-             "Talking to the other players in network games, your microphone and their voices' volume.", None,
-             "voice_chat_settings"),
-            # (port/linux/game/hit_sounds.c, and the host's rule for its
-            # games: network_standard.c's network_standard_hit_sounds_allowed)
-            ("HIT SOUNDS", "audio.hit_sounds", ON_OFF,
-             "A short beep each time you damage another player, as the host dealt it. A host may forbid them in "
-             "its games.|The beep is a placeholder for now.", None),
-            ("ALLOW HIT SOUNDS", "network.allow_hit_sounds", YES_NO,
-             "In the games you host, whether the players may hear their hit sounds. A Legacy game's players "
-             "cannot be told.", None),
+             "Every other sound: weapons, vehicles and the world.", None),
         ],
     },
     VOICE_CHAT[0]: {
-        "screen": VOICE_CHAT[1], "title": "VOICE CHAT",
+        "screen": VOICE_CHAT[1], "title": "MULTIPLAYER AUDIO",
         "rows": [
             # voice chat: this machine's own (port/linux/game/network_voice.c)
             (SECTION, "VOICE CHAT"),
@@ -963,6 +957,15 @@ PAGES = {
             ("INPUT DEVICE", "audio.input_device", [("SYSTEM DEFAULT", "default")],
              "The microphone voice chat listens to.", "desktop"),
             ("VOICE VOLUME", "audio.voice_volume", VOLUMES, "How loud the other players' voices are.", None),
+            # (port/linux/game/hit_sounds.c, and the host's rule for its
+            # games: network_standard.c's network_standard_hit_sounds_allowed)
+            (SECTION, "HIT SOUNDS"),
+            ("HIT SOUNDS", "audio.hit_sounds", ON_OFF,
+             "A short beep each time you damage another player, as the host dealt it. A host may forbid them in "
+             "its games.|The beep is a placeholder for now.", None),
+            ("ALLOW HIT SOUNDS", "network.allow_hit_sounds", YES_NO,
+             "In the games you host, whether the players may hear their hit sounds. A Legacy game's players "
+             "cannot be told.", None),
         ],
     },
     # (CONTROLS: the mouse's rows, in Mouse Setup's place)

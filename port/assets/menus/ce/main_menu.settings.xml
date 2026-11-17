@@ -149,7 +149,7 @@
 	</widget>
 	<strings name="main_menu/settings/tall_titles">
 		<string text="SETTINGS"/>
-		<string text="VOICE CHAT"/>
+		<string text="MULTIPLAYER AUDIO"/>
 		<string text="ADVANCED GRAPHICS"/>
 		<string text="BRIGHTNESS"/>
 		<string text="FRAME RATE &amp; SYNC"/>

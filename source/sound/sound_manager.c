@@ -1207,8 +1207,10 @@ static short sound_definition_promote(
 	return result;
 }
 
-/* port: config.toml's audio.music_volume and audio.effects_volume, read
-again when Settings changes them */
+/* port: config.toml's audio.music_volume, audio.dialogue_volume (the classes
+marked speech: the units' and the scripts' dialogue, #1107) and
+audio.effects_volume (every other class), read again when Settings changes
+them */
 double config_real(const char *name);
 unsigned long config_changes(void);
 
@@ -1217,15 +1219,21 @@ static real sound_manager_port_volume(
 {
 	static unsigned long read_at = (unsigned long)-1;
 	static real music_volume = 1.f;
+	static real dialogue_volume = 1.f;
 	static real effects_volume = 1.f;
 
 	if (read_at != config_changes())
 	{
 		read_at = config_changes();
 		music_volume = PIN((real)config_real("audio.music_volume"), 0.f, 1.f);
+		dialogue_volume = PIN((real)config_real("audio.dialogue_volume"), 0.f, 1.f);
 		effects_volume = PIN((real)config_real("audio.effects_volume"), 0.f, 1.f);
 	}
-	return class_index == _sound_class_music ? music_volume : effects_volume;
+	if (class_index == _sound_class_music)
+	{
+		return music_volume;
+	}
+	return sound_class_get(class_index)->speech ? dialogue_volume : effects_volume;
 }
 
 static real sound_manager_master_gain(

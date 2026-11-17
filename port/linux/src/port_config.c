@@ -597,9 +597,11 @@ static const struct config_setting config_settings[] =
 		"2.0 is louder (2.0 as loud as before the Xbox's level was matched)." },
 	{ "audio.music_volume", _config_real, "1.0", "HALO_MUSIC_VOLUME", _environment_value, _platform_all,
 		"The music's volume, 0.0 to 1.0 (of audio.volume)." },
+	{ "audio.dialogue_volume", _config_real, "1.0", "HALO_DIALOGUE_VOLUME", _environment_value, _platform_all,
+		"The characters' speech's volume (the units' lines and the scripts'\n"
+		"dialogue), 0.0 to 1.0 (of audio.volume)." },
 	{ "audio.effects_volume", _config_real, "1.0", "HALO_EFFECTS_VOLUME", _environment_value, _platform_all,
-		"The volume of every other sound (effects and speech), 0.0 to 1.0 (of\n"
-		"audio.volume)." },
+		"The volume of every other sound, 0.0 to 1.0 (of audio.volume)." },
 	{ "audio.buffer_frames", _config_integer, "0", "HALO_AUDIO_BUFFER_FRAMES", _environment_value,
 		_platform_desktop,
 		"The frames the sound device asks for at a time, at 48 kHz (64 to 8192):\n"
