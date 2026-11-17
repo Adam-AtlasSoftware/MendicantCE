@@ -13,6 +13,7 @@ closes the menus and drops the change). test_typed_values.py takes the code.
 
 #include "harness.h"
 
+#include <math.h>
 #include <wchar.h>
 
 typedef int BOOL;

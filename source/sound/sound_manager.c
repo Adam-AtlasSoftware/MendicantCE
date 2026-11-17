@@ -1207,8 +1207,10 @@ static short sound_definition_promote(
 	return result;
 }
 
-/* port: config.toml's audio.music_volume and audio.effects_volume, read
-again when Settings changes them */
+/* port: config.toml's audio.music_volume, audio.dialogue_volume (the classes
+marked speech: the units' and the scripts' dialogue, #1107) and
+audio.effects_volume (every other class), read again when Settings changes
+them */
 double config_real(const char *name);
 unsigned long config_changes(void);
 
@@ -1217,15 +1219,21 @@ static real sound_manager_port_volume(
 {
 	static unsigned long read_at = (unsigned long)-1;
 	static real music_volume = 1.f;
+	static real dialogue_volume = 1.f;
 	static real effects_volume = 1.f;
 
 	if (read_at != config_changes())
 	{
 		read_at = config_changes();
 		music_volume = PIN((real)config_real("audio.music_volume"), 0.f, 1.f);
+		dialogue_volume = PIN((real)config_real("audio.dialogue_volume"), 0.f, 1.f);
 		effects_volume = PIN((real)config_real("audio.effects_volume"), 0.f, 1.f);
 	}
-	return class_index == _sound_class_music ? music_volume : effects_volume;
+	if (class_index == _sound_class_music)
+	{
+		return music_volume;
+	}
+	return sound_class_get(class_index)->speech ? dialogue_volume : effects_volume;
 }
 
 static real sound_manager_master_gain(
@@ -2303,6 +2311,14 @@ static real source_distance_squared(
 	return distance_squared;
 }
 
+/* port: music and speech (the classes marked speech: the units' and the
+scripts' dialogue) */
+static boolean sound_class_is_music_or_speech(
+	short class_index)
+{
+	return class_index == _sound_class_music || sound_class_get(class_index)->speech;
+}
+
 static boolean sound_preempts_sound(
 	long challenger_sound_index,
 	long champion_sound_index,
@@ -2314,11 +2330,24 @@ static boolean sound_preempts_sound(
 	struct sound_datum *champion_sound = sound_get(champion_sound_index);
 	struct sound_definition *champion_definition =
 		sound_definition_get(champion_sound->definition_index);
+	boolean challenger_kept = sound_class_is_music_or_speech(challenger_definition->sound_class);
 
 	match_assert(
 		"c:\\halo\\SOURCE\\sound\\sound_manager.c",
 		0x763,
 		challenger_sound_index!=champion_sound_index);
+
+	/* port: music and speech outrank every other class, whatever its
+	priority. Music's is 2 and the units' speech 3, under the weapons' 4 and
+	the engines' 3, so when a channel type was full (a sound mod's stereo 44 kHz
+	weapons and engines, in the 9 channels the music plays in) an effect took
+	the music's or a line's channel and cut it off (#1125). Between two of
+	music or speech, or two others, the priorities and distances decide as
+	before. */
+	if (challenger_kept != sound_class_is_music_or_speech(champion_definition->sound_class))
+	{
+		return challenger_kept;
+	}
 
 	return
 		sound_class_get(challenger_definition->sound_class)->priority >

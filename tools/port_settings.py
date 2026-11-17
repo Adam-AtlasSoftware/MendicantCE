@@ -68,10 +68,6 @@ SHIELD_COLORS = ["white", "black", "red", "blue", "gray", "yellow", "green", "pi
 # input.mouse_vertical_sensitivity's: a multiplier of the horizontal
 VERTICAL_SENSITIVITIES = [(f"{value:g}X", f"{value:g}") for value in (0.25, 0.5, 0.6, 0.7, 0.75, 0.8, 0.9, 1, 1.1, 1.25,
                                                                        1.5, 2)]
-VOLUMES = [(str(step), f"{step / 10:g}") for step in range(11)]
-# audio.volume's: past 10 (the Xbox's level) to 20, as loud as before the
-# Xbox's level was matched (dsound_sdl.c's limiter keeps it under full scale)
-MASTER_VOLUMES = [(str(step), f"{step / 10:g}") for step in range(21)]
 # the platforms a menu element's platform attribute names (menu_files.c's
 # MENU_PLATFORM, "vr": the VR build, playing in the headset, and "hdr": a
 # renderer that draws display.hdr)
@@ -322,6 +318,9 @@ class Slider(NamedTuple):
     typed_most: float
     whole: bool = False
     stops: tuple = ()
+    # "volume": the slider is a percentage, its setting the amplitude
+    # (menu_functions.c's settings_volume_amplitude)
+    curve: str = ""
 
 
 # a slider's track, its thumb and its number, in the value's column
@@ -329,6 +328,15 @@ SLIDER_TRACK_WIDTH, SLIDER_THUMB_WIDTH, SLIDER_TRACK_HEIGHT = 62, 8, 14
 SLIDER_VALUE_X, SLIDER_VALUE_WIDTH, SLIDER_VALUE_HEIGHT = 64, 76, 20
 # input.mouse_sensitivity's: CS2's sensitivity (port/linux/include/mouse_sensitivity.h)
 MOUSE_SENSITIVITY = Slider(0.1, 10.0, 0.05, 0.01, 100.0)
+# the volumes' (audio.*volume): 0 to 100%, evenly loud along the track, each
+# setting keeping the amplitude (an old 0 to 1 value shows where it plays)
+VOLUMES = Slider(0, 100, 1, 0, 100, whole=True, curve="volume")
+# audio.volume's: past 100% (the Xbox's level) to 200%, an amplitude of 2.0, as
+# loud as before the Xbox's level was matched (dsound_sdl.c's limiter keeps it
+# under full scale). Its places, 0 to 110, are the track's: past 100 each step
+# is as loud a step as below, its percentage shown the amplitude's
+# (menu_functions.c's settings_volume_shown: 105 is 141%, 110 is 200%)
+MASTER_VOLUMES = Slider(0, 110, 1, 0, 110, whole=True, curve="volume")
 # the geometry, in the 640x480 menu units (menu_functions.c's SETTINGS_*
 # have the same): the rows' column and the panel beside it
 SETTINGS_ROW_X, SETTINGS_ROW_WIDTH, SETTINGS_ROW_HEIGHT, SETTINGS_ROW_STEP = 28, 344, 20, 21
@@ -770,6 +778,9 @@ CONTROL_COMMAND_ROWS = {f"command_{n}" for n in range(1, CONTROL_ROWS + 1)}
 # (an action's row: its name, then its two bindings' columns, to the row's end)
 CONTROL_BINDINGS_X, CONTROL_BINDING_WIDTH = (136, 240), 104
 STREAMER = ("interface_settings/streamer_mode", "streamer_mode_screen")
+# (Online's multiplayer rules, the host's choice in a network game, a page of
+# their own once Online had no room for VEHICLE HIJACKING)
+GAMEPLAY = ("network_setup/gameplay", "gameplay_screen")
 # (Audio's voice chat, a page of its own)
 VOICE_CHAT = ("audio_settings/voice_chat", "voice_chat_screen")
 # (Online's Discord account: port/linux/src/player_link.c)
@@ -935,29 +946,23 @@ PAGES = {
              "Classic is brighter but harsher. Xbox and Classic cost a little less.", None),
             ("SOUND", "audio.enabled", ON_OFF,
              "Turns all sound off or on, at once.", None),
+            # (voice chat: this machine's own, port/linux/game/network_voice.c;
+            # its page has the hit sounds' rows too, leaving the volumes room)
+            ("MULTIPLAYER ›", None, _page_screen(*VOICE_CHAT),
+             "Voice chat in network games (your microphone and the other players' voices' volume) and hit "
+             "sounds.", None, "voice_chat_settings"),
             (SECTION, "VOLUME"),
             ("MASTER VOLUME", "audio.volume", MASTER_VOLUMES,
-             "The volume of everything the game plays. 10 is the Xbox's level; up to 20 is louder.", None),
+             "The volume of everything the game plays. 100% is the Xbox's level; up to 200% is louder.", None),
             ("MUSIC VOLUME", "audio.music_volume", VOLUMES, "The music's volume.", None),
+            ("DIALOGUE VOLUME", "audio.dialogue_volume", VOLUMES,
+             "The characters' speech: Cortana, the Marines and the cutscenes' lines.", None),
             ("EFFECTS VOLUME", "audio.effects_volume", VOLUMES,
-             "Every other sound: weapons, vehicles, the world and the characters' speech.", None),
-            (SECTION, "MULTIPLAYER"),
-            # (voice chat: this machine's own, port/linux/game/network_voice.c)
-            ("VOICE CHAT ›", None, _page_screen(*VOICE_CHAT),
-             "Talking to the other players in network games, your microphone and their voices' volume.", None,
-             "voice_chat_settings"),
-            # (port/linux/game/hit_sounds.c, and the host's rule for its
-            # games: network_standard.c's network_standard_hit_sounds_allowed)
-            ("HIT SOUNDS", "audio.hit_sounds", ON_OFF,
-             "A short beep each time you damage another player, as the host dealt it. A host may forbid them in "
-             "its games.|The beep is a placeholder for now.", None),
-            ("ALLOW HIT SOUNDS", "network.allow_hit_sounds", YES_NO,
-             "In the games you host, whether the players may hear their hit sounds. A Legacy game's players "
-             "cannot be told.", None),
+             "Every other sound: weapons, vehicles and the world.", None),
         ],
     },
     VOICE_CHAT[0]: {
-        "screen": VOICE_CHAT[1], "title": "VOICE CHAT",
+        "screen": VOICE_CHAT[1], "title": "MULTIPLAYER AUDIO",
         "rows": [
             # voice chat: this machine's own (port/linux/game/network_voice.c)
             (SECTION, "VOICE CHAT"),
@@ -968,6 +973,15 @@ PAGES = {
             ("INPUT DEVICE", "audio.input_device", [("SYSTEM DEFAULT", "default")],
              "The microphone voice chat listens to.", "desktop"),
             ("VOICE VOLUME", "audio.voice_volume", VOLUMES, "How loud the other players' voices are.", None),
+            # (port/linux/game/hit_sounds.c, and the host's rule for its
+            # games: network_standard.c's network_standard_hit_sounds_allowed)
+            (SECTION, "HIT SOUNDS"),
+            ("HIT SOUNDS", "audio.hit_sounds", ON_OFF,
+             "A short beep each time you damage another player, as the host dealt it. A host may forbid them in "
+             "its games.|The beep is a placeholder for now.", None),
+            ("ALLOW HIT SOUNDS", "network.allow_hit_sounds", YES_NO,
+             "In the games you host, whether the players may hear their hit sounds. A Legacy game's players "
+             "cannot be told.", None),
         ],
     },
     # (CONTROLS: the mouse's rows, in Mouse Setup's place)
@@ -1058,16 +1072,9 @@ PAGES = {
             # other players send, so Online's; its files keep their names)
             ("STREAMER MODE ›", None, _page_screen(*STREAMER),
              "Hides offensive words in names and text from other players, maps and mods, as stars.", None),
-            # (players.c's unit_should_autopick_weapon: a network game's
-            # host's, network_standard.c's network_standard_walk_over_pickup)
-            ("WEAPON PICKUP", "game.auto_pickup", [("HOLD (XBOX)", "false"), ("WALK OVER (CE)", "true")],
-             "Multiplayer, with a weapon slot empty: Hold picks up a weapon as you hold the action button, as on "
-             "the Xbox; Walk Over as you walk over it, as in Custom Edition. Online: the host's choice.", None),
-            # (port/linux/game/vehicle_hijack.c: a network game's host's,
-            # network_standard.c's network_standard_vehicle_hijack)
-            ("VEHICLE HIJACKING", "game.vehicle_hijack", ON_OFF,
-             "Hold the action button beside an enemy's Ghost, Warthog or landed Banshee to throw the rider out "
-             "and take it. Online: the host's choice.", None),
+            ("GAMEPLAY ›", None, _page_screen(*GAMEPLAY),
+             "Multiplayer's rules: how weapons are picked up, and vehicle hijacking. Online: the host's choice.",
+             None),
             # (port/linux/game/map_share.c: this machine's part in another's
             # game)
             (SECTION, "MAP SHARING"),
@@ -1666,6 +1673,22 @@ PAGES = {
             ("PORTRAIT FRAME", "display.frame_style", [("PLAIN", "plain"), ("HALO", "halo"), ("XBOX", "xbox")],
              "The look of the screen around the picture when you play in portrait: plain black, Halo's blue lines "
              "and rings, or Xbox green. It is never drawn over the picture.", "android"),
+        ],
+    },
+    GAMEPLAY[0]: {
+        "screen": GAMEPLAY[1], "title": "GAMEPLAY",
+        "rows": [
+            (SECTION, "MULTIPLAYER"),
+            # (players.c's unit_should_autopick_weapon: a network game's
+            # host's, network_standard.c's network_standard_walk_over_pickup)
+            ("WEAPON PICKUP", "game.auto_pickup", [("HOLD (XBOX)", "false"), ("WALK OVER (CE)", "true")],
+             "Multiplayer, with a weapon slot empty: Hold picks up a weapon as you hold the action button, as on "
+             "the Xbox; Walk Over as you walk over it, as in Custom Edition. Online: the host's choice.", None),
+            # (port/linux/game/vehicle_hijack.c: a network game's host's,
+            # network_standard.c's network_standard_vehicle_hijack)
+            ("VEHICLE HIJACKING", "game.vehicle_hijack", ON_OFF,
+             "Hold the action button beside an enemy's Ghost, Warthog or landed Banshee to throw the rider out "
+             "and take it. Online: the host's choice.", None),
         ],
     },
     STREAMER[0]: {
@@ -9111,7 +9134,7 @@ def _model_slider(choices) -> list:
         return []
     return [("least", f"{choices.least:g}"), ("most", f"{choices.most:g}"), ("step", f"{choices.step:g}"),
             ("typed_least", f"{choices.typed_least:g}"), ("typed_most", f"{choices.typed_most:g}"),
-            ("whole", "true" if choices.whole else None)]
+            ("whole", "true" if choices.whole else None), ("curve", choices.curve or None)]
 
 
 def _model_page(folder: str, page: dict) -> list:
