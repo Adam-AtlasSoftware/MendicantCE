@@ -11,6 +11,7 @@ that demo_record_start tells it the demo's name and first tick.
 #include "harness.h"
 
 typedef void (*demo_recording_listener)(int started, const char *name, long tick);
+#define DEMO_RECORDING_LISTENERS 4
 
 struct demo_buffer { unsigned long size; boolean failed; };
 
@@ -51,9 +52,45 @@ static void listener(int started, const char *name, long tick)
 	snprintf(told_name, sizeof(told_name), "%s", name ? name : "(null)");
 }
 
+/* a second listener, which notes its calls' order with the first's */
+static int order[8], calls;
+
+static void first(int started, const char *name, long tick)
+{
+	(void)started; (void)name; (void)tick;
+	order[calls++ & 7] = 1;
+}
+
+static void second(int started, const char *name, long tick)
+{
+	(void)started; (void)name; (void)tick;
+	order[calls++ & 7] = 2;
+}
+
+static void third(int started, const char *name, long tick) { (void)started; (void)name; (void)tick; }
+static void fourth(int started, const char *name, long tick) { (void)started; (void)name; (void)tick; }
+
 int main(int argc, char **argv)
 {
 	char const *case_name = argc > 1 ? argv[1] : "";
+
+	/* two listeners, each told in the order added; one added twice told
+	once; one removed told no more; a full list refuses a fifth */
+	if (!strcmp(case_name, "two"))
+	{
+		demo_set_recording_listener(first);
+		demo_add_recording_listener(second);
+		demo_set_recording_listener(first);
+		demo_recording_tell(1, "x.demo", 1);
+		CHECK(calls == 2 && order[0] == 1 && order[1] == 2, "%d calls: %d %d", calls, order[0], order[1]);
+		demo_remove_recording_listener(first);
+		demo_recording_tell(0, NULL, 2);
+		CHECK(calls == 3 && order[2] == 2, "after removing the first: %d calls, %d", calls, order[2]);
+		CHECK(demo_add_recording_listener(listener) && demo_add_recording_listener(first) &&
+			demo_add_recording_listener(third), "added");
+		CHECK(!demo_add_recording_listener(fourth), "a fifth listener added");
+		return 0;
+	}
 
 	/* set: a start told with its name and tick (as demo_record_start
 	tells it), then the stop with the recording's last tick */
@@ -74,13 +111,14 @@ int main(int argc, char **argv)
 		CHECK(told == 2, "a second stop told: %d", told);
 		return 0;
 	}
-	/* unset (never, or set and taken away): nothing told */
+	/* unset (never, or added and removed): nothing told */
 	if (!strcmp(case_name, "unset"))
 	{
 		demo_recorder.recording = TRUE;
 		demo_record_stop("a test");
 		demo_set_recording_listener(listener);
 		demo_set_recording_listener(NULL);
+		demo_remove_recording_listener(listener);
 		demo_recorder.recording = TRUE;
 		demo_recording_tell(1, "x.demo", 1);
 		demo_record_stop("a test");

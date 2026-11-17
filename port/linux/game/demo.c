@@ -370,8 +370,9 @@ static struct
 	unsigned long long work_microseconds;
 } demo_recorder;
 
-/* told as a recording starts and stops (demo_set_recording_listener) */
-static demo_recording_listener demo_listener;
+/* told as a recording starts and stops, in the order added
+(demo_add_recording_listener); NULL past the last */
+static demo_recording_listener demo_listeners[DEMO_RECORDING_LISTENERS];
 
 static struct
 {
@@ -1427,8 +1428,10 @@ static void demo_recording_tell(
 	char const *name,
 	long tick)
 {
-	if (demo_listener)
-		demo_listener(started, name, tick);
+	short index;
+
+	for (index = 0; index < DEMO_RECORDING_LISTENERS && demo_listeners[index]; index++)
+		demo_listeners[index](started, name, tick);
 }
 
 static void demo_record_stop(
@@ -3490,8 +3493,42 @@ void demo_substep_end(
 		demo_record_substep_end(substep_index, substep_count);
 }
 
+boolean demo_add_recording_listener(
+	demo_recording_listener listener)
+{
+	short index;
+
+	if (!listener)
+		return TRUE;
+	for (index = 0; index < DEMO_RECORDING_LISTENERS; index++)
+	{
+		if (demo_listeners[index] == listener)
+			return TRUE;
+		if (!demo_listeners[index])
+		{
+			demo_listeners[index] = listener;
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+
+void demo_remove_recording_listener(
+	demo_recording_listener listener)
+{
+	short index, kept = 0;
+
+	for (index = 0; index < DEMO_RECORDING_LISTENERS; index++)
+	{
+		if (demo_listeners[index] != listener)
+			demo_listeners[kept++] = demo_listeners[index];
+	}
+	for (; kept < DEMO_RECORDING_LISTENERS; kept++)
+		demo_listeners[kept] = NULL;
+}
+
 void demo_set_recording_listener(
 	demo_recording_listener listener)
 {
-	demo_listener = listener;
+	demo_add_recording_listener(listener);
 }

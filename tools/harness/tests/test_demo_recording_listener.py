@@ -11,8 +11,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, function, mutated, read, run  # noqa: E402
 
 SOURCE = "port/linux/game/demo.c"
-CASES = ["start_stop", "unset"]
-FUNCTIONS = ("demo_set_recording_listener", "demo_recording_tell", "demo_record_stop")
+CASES = ["start_stop", "unset", "two"]
+FUNCTIONS = ("demo_add_recording_listener", "demo_remove_recording_listener", "demo_set_recording_listener",
+             "demo_recording_tell", "demo_record_stop")
 
 # a fault in demo.c, the function it is in, and the case that must catch it
 NEGATIVE_CONTROLS = {
@@ -20,15 +21,19 @@ NEGATIVE_CONTROLS = {
                       "start_stop"),
     "stop-told-the-wrong-tick": (("demo_recording_tell(0, NULL, demo_recorder.last_tick)",
                                   "demo_recording_tell(0, NULL, 0)"), "demo_record_stop", "start_stop"),
-    "unset-kept": (("\tdemo_listener = listener;", "\tif (listener)\n\t\tdemo_listener = listener;"),
-                   "demo_set_recording_listener", "unset"),
+    "removed-kept": (("\t\tif (demo_listeners[index] != listener)\n", "\t\tif (TRUE)\n"),
+                     "demo_remove_recording_listener", "unset"),
+    "a-second-replaces-the-first": (("\t\tif (!demo_listeners[index])\n", "\t\tif (TRUE)\n"),
+                                    "demo_add_recording_listener", "two"),
+    "added-twice-told-twice": (("\t\tif (demo_listeners[index] == listener)\n\t\t\treturn TRUE;\n", ""),
+                               "demo_add_recording_listener", "two"),
 }
 
 
 def generated(fault=None, faulty_function=None):
     source = read(SOURCE)
-    match = re.search(r"^static demo_recording_listener demo_listener;\n", source, re.M)
-    assert match, "demo_listener not found"
+    match = re.search(r"^static demo_recording_listener demo_listeners\[DEMO_RECORDING_LISTENERS\];\n", source, re.M)
+    assert match, "demo_listeners not found"
     text = match.group(0)
     for name in FUNCTIONS:
         code = function(source, name)
