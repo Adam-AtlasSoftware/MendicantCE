@@ -145,6 +145,9 @@ enum
 	/* two signed bytes (display.ambient_occlusion "world"'s distance-field
 	scene's cascades) */
 	XGPU_METAL_FORMAT_RG8_SNORM,
+	/* four 16-bit unsigned normalized channels (display.output_depth's SDR
+	back buffer: clamped and blended as BGRA8, 65535 levels) */
+	XGPU_METAL_FORMAT_RGBA16,
 	XGPU_METAL_FORMAT_COUNT
 };
 

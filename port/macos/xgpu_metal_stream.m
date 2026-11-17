@@ -286,7 +286,8 @@ static void stream_target_create(void *context, const struct xgpu_stream_target_
 	memset(&description, 0, sizeof(description));
 	description.type = record->layers > 1 ? XGPU_METAL_TEXTURE_2D_ARRAY : XGPU_METAL_TEXTURE_2D;
 	description.format = record->depth ? XGPU_METAL_FORMAT_D24S8 :
-		record->format == 3 /* XGPU_FORMAT_RGBA16F */ ? XGPU_METAL_FORMAT_RGBA16F : XGPU_METAL_FORMAT_BGRA8;
+		record->format == 3 /* XGPU_FORMAT_RGBA16F */ ? XGPU_METAL_FORMAT_RGBA16F :
+		record->format == 5 /* XGPU_FORMAT_RGBA16 */ ? XGPU_METAL_FORMAT_RGBA16 : XGPU_METAL_FORMAT_BGRA8;
 	description.usage = XGPU_METAL_USAGE_SAMPLED | XGPU_METAL_USAGE_TARGET;
 	description.width = (uint16_t)record->width;
 	description.height = (uint16_t)record->height;
@@ -421,6 +422,30 @@ static int read_half_floats(struct stream_target *entry, uint32_t layer, unsigne
 	return read;
 }
 
+/* display.output_depth's 16-bit channels as BGRA8's, each rounded */
+static int read_deep(struct stream_target *entry, uint32_t layer, unsigned char *bgra)
+{
+	uint32_t width = entry->description.width, height = entry->description.height;
+	uint16_t *channels = malloc((size_t)width * height * 8);
+	size_t pixel;
+	int read;
+
+	if (!channels)
+		return 0;
+	read = xgpu_metal_read_pixels(entry->texture, 0, layer, 0, 0, width, height, channels, width * 8);
+	for (pixel = 0; read && pixel < (size_t)width * height; pixel++)
+	{
+		int channel;
+
+		/* (BGRA: blue, green, red, alpha) */
+		for (channel = 0; channel < 4; channel++)
+			bgra[pixel * 4 + (channel == 3 ? 3 : 2 - channel)] =
+				(unsigned char)((channels[pixel * 4 + channel] * 255u + 32767u) / 65535u);
+	}
+	free(channels);
+	return read;
+}
+
 static int stream_read_target(void *context, const struct xgpu_stream_read_target *record)
 {
 	struct stream_target *entry = target_get(record->target);
@@ -436,6 +461,8 @@ static int stream_read_target(void *context, const struct xgpu_stream_read_targe
 	if (entry->description.format == XGPU_METAL_FORMAT_RGBA16F)
 		return read_half_floats(entry, record->layer > 0 ? (uint32_t)record->layer : 0, host_pointer(record->pixels),
 			record->tone_map != 0);
+	if (entry->description.format == XGPU_METAL_FORMAT_RGBA16)
+		return read_deep(entry, record->layer > 0 ? (uint32_t)record->layer : 0, host_pointer(record->pixels));
 	return xgpu_metal_read_pixels(entry->texture, 0, record->layer > 0 ? (uint32_t)record->layer : 0, 0, 0, width, height,
 		host_pointer(record->pixels), width * 4);
 }
@@ -508,12 +535,13 @@ unsigned char *xgpu_metal_stream_read(uint32_t target, uint32_t *width, uint32_t
 	unsigned char *pixels;
 
 	if (!entry || (entry->description.format != XGPU_METAL_FORMAT_BGRA8 &&
-		entry->description.format != XGPU_METAL_FORMAT_RGBA16F))
+		entry->description.format != XGPU_METAL_FORMAT_RGBA16F && entry->description.format != XGPU_METAL_FORMAT_RGBA16))
 		return NULL;
 	*width = entry->description.width;
 	*height = entry->description.height;
 	pixels = malloc((size_t)*width * *height * 4);
 	if (pixels && !(entry->description.format == XGPU_METAL_FORMAT_RGBA16F ? read_half_floats(entry, 0, pixels, 0) :
+		entry->description.format == XGPU_METAL_FORMAT_RGBA16 ? read_deep(entry, 0, pixels) :
 		xgpu_metal_read_pixels(entry->texture, 0, 0, 0, 0, *width, *height, pixels, *width * 4)))
 	{
 		free(pixels);
@@ -597,7 +625,8 @@ sample an attachment of the pass): copied again once the target has been
 drawn into since */
 static uint32_t feedback_copy(struct stream_target *target)
 {
-	if (target->description.format != XGPU_METAL_FORMAT_BGRA8 && target->description.format != XGPU_METAL_FORMAT_RGBA16F)
+	if (target->description.format != XGPU_METAL_FORMAT_BGRA8 && target->description.format != XGPU_METAL_FORMAT_RGBA16F &&
+		target->description.format != XGPU_METAL_FORMAT_RGBA16)
 		return target->texture;
 	if (!stream.feedback || stream.feedback_description.width != target->description.width ||
 		stream.feedback_description.height != target->description.height ||
@@ -1333,7 +1362,8 @@ static void stream_dynamic_lights_halos(void *context, const struct xgpu_stream_
 
 	(void)context;
 	if (!color || !depth || (color->description.format != XGPU_METAL_FORMAT_BGRA8 &&
-		color->description.format != XGPU_METAL_FORMAT_RGBA16F) || depth->description.format != XGPU_METAL_FORMAT_D24S8 || record->count <= 0 || record->layers > 1 ||
+		color->description.format != XGPU_METAL_FORMAT_RGBA16F && color->description.format != XGPU_METAL_FORMAT_RGBA16) ||
+		depth->description.format != XGPU_METAL_FORMAT_D24S8 || record->count <= 0 || record->layers > 1 ||
 		color->description.depth_or_layers > 1 || !halo_shaders())
 		return;
 	multisampled = stream.samples != 0 && color->description.samples > 1;
@@ -1435,7 +1465,8 @@ static void stream_anti_alias(void *context, const struct xgpu_stream_anti_alias
 
 	(void)context;
 	if (!target || (target->description.format != XGPU_METAL_FORMAT_BGRA8 &&
-		target->description.format != XGPU_METAL_FORMAT_RGBA16F) || target->description.samples > 1 ||
+		target->description.format != XGPU_METAL_FORMAT_RGBA16F && target->description.format != XGPU_METAL_FORMAT_RGBA16) ||
+		target->description.samples > 1 ||
 		target->description.depth_or_layers > 1)
 		return;
 	if (stream.preparing)
@@ -1465,7 +1496,8 @@ static void stream_panini(void *context, const struct xgpu_stream_panini *record
 
 	(void)context;
 	if (!target || (target->description.format != XGPU_METAL_FORMAT_BGRA8 &&
-		target->description.format != XGPU_METAL_FORMAT_RGBA16F) || target->description.depth_or_layers > 1)
+		target->description.format != XGPU_METAL_FORMAT_RGBA16F && target->description.format != XGPU_METAL_FORMAT_RGBA16) ||
+		target->description.depth_or_layers > 1)
 		return;
 	if (stream.preparing)
 	{
@@ -1984,6 +2016,9 @@ static void stream_initialize(void *context, struct xgpu_stream_capabilities *ca
 	/* (display.hdr: the half floats, the draws' tags blended in their
 	shaders, reading the pixels they draw over, the tone map in place) */
 	capabilities->hdr = 1;
+	/* (display.output_depth: RGBA16Unorm, which every Apple GPU draws into,
+	blends and filters; dithered to the 8-bit layer by the presentation) */
+	capabilities->deep_sdr = 1;
 	snprintf(capabilities->device, sizeof(capabilities->device), "%s", metal.device);
 }
 

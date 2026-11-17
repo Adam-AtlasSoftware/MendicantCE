@@ -567,6 +567,12 @@ static const struct config_setting config_settings[] =
 		"darker), \"srgb\" (a Mac's), or \"auto\": sRGB on macOS and iOS, 2.2\n"
 		"elsewhere. Only the shadows differ: colors from code 51 up are the\n"
 		"same in both." },
+	{ "display.output_depth", _config_string, "\"auto\"", "HALO_OUTPUT_DEPTH", _environment_value, _platform_all,
+		"The SDR picture's depth: \"10\" draws it in 16 bits a channel and shows it\n"
+		"on a 10-bit display at 10 bits, else at 8 with a fine dither, so fog\n"
+		"and dusk skies show no steps; \"8\" draws it in 8 bits, as before (half\n"
+		"the memory and bandwidth); \"auto\" is 10 on a computer and 8 on a phone\n"
+		"or tablet, or with battery saver on." },
 	{ "display.gamma", _config_real, "1.0", "HALO_GAMMA", _environment_value, _platform_all,
 		"The picture's gamma, 0.5 to 2.0, as Halo PC's: above 1 brighter (the\n"
 		"dark parts lifted most), below 1 darker; white and black stay. The\n"

@@ -879,11 +879,13 @@ static void present_draw(id<MTLRenderCommandEncoder> encoder, id<CAMetalDrawable
 		[encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
 	}
 	else if (drawable.texture.pixelFormat == MTLPixelFormatBGRA8Unorm && presentation.sdr_pipeline &&
-		(gamma_power() > 0.0f || picture.pixelFormat == MTLPixelFormatRGBA16Float))
+		(gamma_power() > 0.0f || picture.pixelFormat == MTLPixelFormatRGBA16Float ||
+		picture.pixelFormat == MTLPixelFormatRGBA16Unorm))
 	{
-		/* display.gamma, or a half-float frame: the frame curved and
-		dithered to 8 bits as it is drawn into the SDR layer (no pass of its
-		own: this is the frame's last, #1108) */
+		/* display.gamma, or a half-float or 16-bit frame (display.hdr "on"
+		over SDR, display.output_depth): the frame curved and dithered to 8
+		bits as it is drawn into the SDR layer (no pass of its own: this is
+		the frame's last, #1108) */
 		struct xgpu_metal_post_uniforms uniforms;
 		float power = gamma_power();
 

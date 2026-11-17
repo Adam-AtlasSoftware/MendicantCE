@@ -69,8 +69,10 @@ static struct
 {
 	VkShaderModule vertex, pixel[XGPU_VULKAN_POST_PROGRAM_COUNT];
 	struct xgpu_vulkan_pipeline_description pipelines[XGPU_VULKAN_POST_PROGRAM_COUNT];
-	/* FXAA's and SMAA's blend into display.hdr's half floats */
+	/* FXAA's and SMAA's blend into display.hdr's half floats, and into
+	display.output_depth's 16-bit channels */
 	struct xgpu_vulkan_pipeline_description half_float[XGPU_VULKAN_POST_PROGRAM_COUNT];
+	struct xgpu_vulkan_pipeline_description deep[XGPU_VULKAN_POST_PROGRAM_COUNT];
 	/* FXAA's, and SMAA's, pipelines or textures could not be made */
 	int failed[2];
 	/* the size and format of the images below */
@@ -195,13 +197,28 @@ static int prepare_failed(int smaa, const char *what)
 }
 
 /* a pass's pipeline for a target of a format: FXAA's and SMAA's blend into
-the target's (display.hdr's half floats, or 8 bits), the rest into their
-own 8-bit images */
+the target's (display.hdr's half floats, display.output_depth's 16 bits, or
+8 bits), the rest into their own 8-bit images */
 static struct xgpu_vulkan_pipeline_description *pipeline_of(int program, uint8_t format)
 {
-	return format == XGPU_VULKAN_FORMAT_RGBA16F && (program == XGPU_VULKAN_POST_FXAA ||
-		program == XGPU_VULKAN_POST_SMAA_BLEND || program == XGPU_VULKAN_POST_PANINI) ?
-		&post.half_float[program] : &post.pipelines[program];
+	int into_target = program == XGPU_VULKAN_POST_FXAA || program == XGPU_VULKAN_POST_SMAA_BLEND ||
+		program == XGPU_VULKAN_POST_PANINI;
+
+	return into_target && format == XGPU_VULKAN_FORMAT_RGBA16F ? &post.half_float[program] :
+		into_target && format == XGPU_VULKAN_FORMAT_RGBA16 ? &post.deep[program] : &post.pipelines[program];
+}
+
+/* a target's format the passes draw into: its own, BGRA8 for any other */
+static uint8_t target_format(uint8_t format)
+{
+	return format == XGPU_VULKAN_FORMAT_RGBA16F || format == XGPU_VULKAN_FORMAT_RGBA16 ? format :
+		XGPU_VULKAN_FORMAT_BGRA8;
+}
+
+static int target_format_drawn(uint8_t format)
+{
+	return format == XGPU_VULKAN_FORMAT_BGRA8 || format == XGPU_VULKAN_FORMAT_RGBA16F ||
+		format == XGPU_VULKAN_FORMAT_RGBA16;
 }
 
 int xgpu_vulkan_post_prepare(int smaa, uint8_t format, int preparing)
@@ -211,8 +228,7 @@ int xgpu_vulkan_post_prepare(int smaa, uint8_t format, int preparing)
 	int program;
 
 	smaa = smaa != 0;
-	if (format != XGPU_VULKAN_FORMAT_RGBA16F)
-		format = XGPU_VULKAN_FORMAT_BGRA8;
+	format = target_format(format);
 	if (post.failed[smaa])
 		return 0;
 	if (!post.vertex)
@@ -382,8 +398,7 @@ int xgpu_vulkan_post_anti_alias(int smaa, struct xgpu_vulkan_image *target, uint
 	if (!target)
 		return 0;
 	description = xgpu_vulkan_image_description(target);
-	if ((description->format != XGPU_VULKAN_FORMAT_BGRA8 && description->format != XGPU_VULKAN_FORMAT_RGBA16F) ||
-		description->samples > 1)
+	if (!target_format_drawn(description->format) || description->samples > 1)
 		return 0;
 	/* (made already, as the setting was chosen) */
 	if (!xgpu_vulkan_post_prepare(smaa, description->format, 0))
@@ -442,8 +457,7 @@ int xgpu_vulkan_post_panini_prepare(uint8_t format, uint32_t samples, int prepar
 {
 	struct xgpu_vulkan_pipeline_description *description, multisampled;
 
-	if (format != XGPU_VULKAN_FORMAT_RGBA16F)
-		format = XGPU_VULKAN_FORMAT_BGRA8;
+	format = target_format(format);
 	if (post.panini_failed)
 		return 0;
 	description = pipeline_of(XGPU_VULKAN_POST_PANINI, format);
@@ -485,7 +499,7 @@ int xgpu_vulkan_post_panini(struct xgpu_vulkan_image *source, struct xgpu_vulkan
 		return 0;
 	description = xgpu_vulkan_image_description(source);
 	into_description = xgpu_vulkan_image_description(into);
-	if ((description->format != XGPU_VULKAN_FORMAT_BGRA8 && description->format != XGPU_VULKAN_FORMAT_RGBA16F) ||
+	if (!target_format_drawn(description->format) ||
 		description->samples > 1 || into_description->format != description->format ||
 		into_description->width != description->width || into_description->height != description->height)
 		return 0;

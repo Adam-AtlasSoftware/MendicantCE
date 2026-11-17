@@ -2509,6 +2509,62 @@ static void hdr_window_test(void)
 	reset();
 }
 
+/* a surface with a 10-bit SDR format besides the formats above (an X
+screen of depth 30, a Wayland compositor's, Windows' drivers') */
+static VkResult VKAPI_CALL deep_formats(VkPhysicalDevice physical, VkSurfaceKHR surface, uint32_t *count,
+	VkSurfaceFormatKHR *formats)
+{
+	uint32_t four = 4;
+
+	assert(*count >= 5);
+	hdr_formats(physical, surface, &four, formats);
+	*count = 5;
+	formats[4].format = VK_FORMAT_A2R10G10B10_UNORM_PACK32;
+	formats[4].colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+	return VK_SUCCESS;
+}
+
+/* display.output_depth (#1152): the front end's RGBA16 SDR frame is
+always drawn by the last pass and dithered to the swapchain's levels: 8
+bits where the surface has no 10-bit SDR format, 10 where it has (the
+swapchain made again for it, at the next frame), and an 8-bit frame (the
+negative control) on an 8-bit swapchain again, blitted as it is */
+static void deep_window_test(void)
+{
+	/* a surface without 10-bit SDR: 8 bits, dithered to 255 */
+	hdr_window_reset();
+	window_frame.description.format = XGPU_VULKAN_FORMAT_RGBA16;
+	assert(window_present_frame() && window_swapchains == 1);
+	assert(window_made.imageFormat == VK_FORMAT_B8G8R8A8_UNORM);
+	assert(window_made.imageColorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR);
+	assert(hdr_encodes == 1 && hdr_encoded_format == XGPU_VULKAN_FORMAT_BGRA8);
+	assert(hdr_encoded_frame.output == XGPU_HDR_OUTPUT_SDR && hdr_encoded_output.levels == 255.0f &&
+		hdr_encoded_output.power == 1.0f && window_blit_source == hdr_encoded.image);
+
+	/* with one: 10 bits in sRGB's colour space (not HDR10's), dithered to
+	1023, the last pass's image copied 1:1 */
+	hdr_window_reset();
+	vkGetPhysicalDeviceSurfaceFormatsKHR = deep_formats;
+	window_frame.description.format = XGPU_VULKAN_FORMAT_RGBA16;
+	assert(window_present_frame() && window_swapchains == 1);
+	assert(window_made.imageFormat == VK_FORMAT_A2R10G10B10_UNORM_PACK32);
+	assert(window_made.imageColorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR);
+	assert(hdr_encodes == 1 && hdr_encoded_format == XGPU_VULKAN_FORMAT_RGB10A2);
+	assert(hdr_encoded_output.levels == 1023.0f && window_blit_source == hdr_encoded.image);
+	assert(window_blit_filter == VK_FILTER_NEAREST);
+	assert(window_present_frame() && window_swapchains == 1);
+
+	/* (the negative control) display.output_depth "8": the 8-bit frame;
+	the swapchain made 8-bit again, the frame blitted byte for byte, no
+	pass */
+	window_frame.description.format = XGPU_VULKAN_FORMAT_BGRA8;
+	hdr_encodes = 0;
+	assert(window_present_frame() && window_swapchains == 2);
+	assert(window_made.imageFormat == VK_FORMAT_B8G8R8A8_UNORM && !hdr_encodes);
+	assert(window_blit_source == window_frame.image);
+	reset();
+}
+
 /* the HDR metadata set (VK_EXT_hdr_metadata's): its peak and average */
 static unsigned int hdr_metadata_sets;
 static float hdr_metadata_peak_set, hdr_metadata_average_set;
@@ -3945,6 +4001,7 @@ int main(void)
 	local_read_test();
 	hdr_pipeline_test();
 	hdr_window_test();
+	deep_window_test();
 	hdr_white_test();
 	sharp_test();
 	hdr_post_test();
