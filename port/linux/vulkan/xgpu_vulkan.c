@@ -9890,44 +9890,46 @@ static int device_make(const struct xgpu_vulkan_options *options)
 		vk.capabilities.shader_visibility = vk.capabilities.fragment_stores &&
 			(visibility && *visibility ? !strcmp(visibility, "shader") : vk.properties.vendorID == 0x14e4);
 	}
-	/* (a GPU that shades the hidden pixels of an alpha-tested draw: Broadcom's
-	V3D, whose early depth test is not made for a shader that may discard
-	and learns nothing from one. The front end makes no alpha test that no
-	texel fails, the same pixels: a campaign view cost a Raspberry Pi 5 a
-	third more with the tests. An alpha-tested model's depth drawn first is
-	for who asks: a few of its pixels can differ, d3d8_device.c's "a
-	cut-out's depth first". HALO_VULKAN_ALPHA_TEST_DROP=0 or 1: whatever the
-	GPU; HALO_VULKAN_CUTOUT_PREPASS=1) */
+	/* (the front end makes no alpha test that no texel fails, the same
+	pixels by a shader that cannot discard: a GPU whose early depth test is
+	not made for a shader that may, Broadcom's V3D, shaded a campaign view a
+	third longer with the tests. An alpha-tested model's depth drawn first
+	is for who asks: a few of its pixels can differ, d3d8_device.c's "a
+	cut-out's depth first". HALO_VULKAN_ALPHA_TEST_DROP=0: the game's tests;
+	HALO_VULKAN_CUTOUT_PREPASS=1) */
 	{
 		const char *drop = getenv("HALO_VULKAN_ALPHA_TEST_DROP"), *prepass = getenv("HALO_VULKAN_CUTOUT_PREPASS");
 
-		vk.capabilities.alpha_test_drop = drop && *drop ? atoi(drop) != 0 : vk.properties.vendorID == 0x14e4;
+		vk.capabilities.alpha_test_drop = !(drop && *drop) || atoi(drop) != 0;
 		vk.capabilities.cutout_prepass = prepass && *prepass && atoi(prepass) != 0;
 	}
-	/* (a pass kept to the part of its target it covers, pass_clear_end; a
-	dynamic light's and a shadow's draws over the level scissored to where
-	they can change pixels, d3d8_device.c's "the draws' bounds"; a barrier
-	that names the vertex stages only after a write they can read,
-	AFTER_IMAGE_STAGES; "the transfers a pass waits for"; "memory of its
-	own"; the render thread told of a frame's completion,
-	xgpu_vulkan_completion_notify. Each is on where it was measured and its
-	pictures compared, Broadcom's V3D, and off elsewhere, where the renderer
-	does as it did. HALO_VULKAN_CLEAR_ALONE, HALO_VULKAN_DRAW_BOUNDS,
-	HALO_VULKAN_NARROW_BARRIERS, HALO_VULKAN_PASS_TRANSFERS,
+	/* (what draws the same pixels with less work on any GPU, on unless
+	switched off: a dynamic light's and a shadow's draws over the level
+	scissored to where they can change pixels, d3d8_device.c's "the draws'
+	bounds"; a barrier that names the vertex stages only after a write they
+	can read, AFTER_IMAGE_STAGES; "the transfers a pass waits for".
+	HALO_VULKAN_DRAW_BOUNDS, HALO_VULKAN_NARROW_BARRIERS,
+	HALO_VULKAN_PASS_TRANSFERS =0.
+	And what answers Broadcom's V3D and its drivers, on there alone: a pass
+	kept to the part of its target it covers, pass_clear_end (a tile-based
+	GPU's cost; rectangles cleared in place of the pass's one clear
+	elsewhere); "memory of its own" (the kernel's driver's jobs waiting by
+	the block of memory); the render thread told of a frame's completion,
+	xgpu_vulkan_completion_notify. HALO_VULKAN_CLEAR_ALONE,
 	HALO_VULKAN_OWN_MEMORY =0 or =1, HALO_VULKAN_FENCE_WAIT=1 or =0:
 	whatever the GPU) */
 	{
 		const char *alone = getenv("HALO_VULKAN_CLEAR_ALONE"), *bounds = getenv("HALO_VULKAN_DRAW_BOUNDS");
 		const char *narrow = getenv("HALO_VULKAN_NARROW_BARRIERS"), *pass_transfers = getenv("HALO_VULKAN_PASS_TRANSFERS");
 		const char *own_memory = getenv("HALO_VULKAN_OWN_MEMORY"), *fence_wait = getenv("HALO_VULKAN_FENCE_WAIT");
-		int measured = vk.properties.vendorID == 0x14e4;
+		int v3d = vk.properties.vendorID == 0x14e4;
 
-		vk.capabilities.clear_alone = alone && *alone ? atoi(alone) != 0 : measured;
-		vk.capabilities.draw_bounds = bounds && *bounds ? atoi(bounds) != 0 : measured;
-		vk.narrow_barriers = narrow && *narrow ? atoi(narrow) != 0 : measured;
-		vk.pass_transfers = pass_transfers && *pass_transfers ? atoi(pass_transfers) != 0 : measured;
-		vk.own_memory = own_memory && *own_memory ? atoi(own_memory) != 0 : measured;
-		vk.capabilities.completion_told = fence_wait && *fence_wait ? atoi(fence_wait) == 0 : measured;
+		vk.capabilities.clear_alone = alone && *alone ? atoi(alone) != 0 : v3d;
+		vk.capabilities.draw_bounds = !(bounds && *bounds) || atoi(bounds) != 0;
+		vk.narrow_barriers = !(narrow && *narrow) || atoi(narrow) != 0;
+		vk.pass_transfers = !(pass_transfers && *pass_transfers) || atoi(pass_transfers) != 0;
+		vk.own_memory = own_memory && *own_memory ? atoi(own_memory) != 0 : v3d;
+		vk.capabilities.completion_told = fence_wait && *fence_wait ? atoi(fence_wait) == 0 : v3d;
 	}
 	vk.capabilities.scaled_shorts = format_has(VK_FORMAT_R16G16_SSCALED, 1, VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT) &&
 		format_has(VK_FORMAT_R16G16B16_SSCALED, 1, VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT) &&

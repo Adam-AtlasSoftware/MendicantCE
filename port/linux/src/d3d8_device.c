@@ -3428,9 +3428,9 @@ it shades them, and from recording the depth of the ones it draws until
 after: Broadcom's V3D shaded a campaign view a third longer for it. So
 where the draw's alpha is a texture's alone and the least alpha of that
 texture's texels passes the test, the draw's key has no alpha test
-(prepare_draw): what is drawn is the same. Only for such a GPU
-(xgpu_backend_capabilities.alpha_test_drop): elsewhere the keys are the
-game's, as the renderers' manifests have them. A texture's least alpha is
+(prepare_draw): what is drawn is the same. Where the backend asks
+(xgpu_backend_capabilities.alpha_test_drop: Vulkan's, on any GPU);
+elsewhere the keys are the game's, as the renderers' manifests have them. A texture's least alpha is
 kept while its texels are unchanged (memory_watch.c). */
 
 #define ALPHA_TEXTURES 1024
