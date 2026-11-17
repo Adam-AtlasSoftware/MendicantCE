@@ -1180,7 +1180,7 @@
 	</screen>
 	<screen name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/dead_zones_screen" kind="settings" layout="page" geometry="tall" title="ADVANCED STICK SETTINGS">
 		<section key="section_0" title="DEAD ZONES"/>
-		<row key="left_stick_dead_zone" kind="choice" setting="input.left_stick_dead_zone" label="LEFT STICK" crumb="CONTROLS › CONTROLLER › STICK SETTINGS" search="deadzone">
+		<row key="left_stick_dead_zone" kind="choice" setting="input.left_stick_dead_zone" label="LEFT STICK" crumb="CONTROLS › CONTROLLER › STICK SETTINGS" search="deadzone drift">
 			<help>How far the left stick moves before you move. Raise it for a stick that drifts; lower it to start walking sooner. Default is the game's own, 27%.</help>
 			<note>The touch controls' stick too.</note>
 			<choice shown="DEFAULT (27%)" value="-1"/>
@@ -1196,7 +1196,7 @@
 			<choice shown="45%" value="45"/>
 			<choice shown="50%" value="50"/>
 		</row>
-		<row key="right_stick_dead_zone" kind="choice" setting="input.right_stick_dead_zone" label="RIGHT STICK" crumb="CONTROLS › CONTROLLER › STICK SETTINGS" search="deadzone">
+		<row key="right_stick_dead_zone" kind="choice" setting="input.right_stick_dead_zone" label="RIGHT STICK" crumb="CONTROLS › CONTROLLER › STICK SETTINGS" search="deadzone drift">
 			<help>How far the right stick moves before the view turns. Raise it for a stick that drifts; lower it for finer aim. Default is the game's own, 27%.</help>
 			<choice shown="DEFAULT (27%)" value="-1"/>
 			<choice shown="0%" value="0"/>
@@ -1211,13 +1211,10 @@
 			<choice shown="45%" value="45"/>
 			<choice shown="50%" value="50"/>
 		</row>
-		<row key="stick_test_left" kind="status" label="LEFT READING" crumb="CONTROLS › CONTROLLER › STICK SETTINGS">
-			<help>The left stick now: side to side, then up and down, in percent of its travel; after the bar, as you move with the dead zones on this page. Let go of it: what is left is its drift. Set the dead zone above it.</help>
+		<row key="stick_test" kind="link" label="STICK TEST ›" crumb="CONTROLS › CONTROLLER › STICK SETTINGS" search="deadzone drift" open="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/stick_test/stick_test_screen">
+			<help>See what each stick reads, and what the game takes from it with the dead zones and shape set here: find a stick's drift, then set its dead zone just past it.</help>
 		</row>
-		<row key="stick_test_right" kind="status" label="RIGHT READING" crumb="CONTROLS › CONTROLLER › STICK SETTINGS">
-			<help>The right stick now: side to side, then up and down, in percent of its travel; after the bar, as the view turns with the dead zones and shape on this page. Let go of it: what is left is its drift. Set the dead zone above it.</help>
-		</row>
-		<section key="section_5" title="OUTER DEAD ZONES"/>
+		<section key="section_4" title="OUTER DEAD ZONES"/>
 		<row key="left_stick_outer_dead_zone" kind="choice" setting="input.left_stick_outer_dead_zone" label="LEFT STICK" crumb="CONTROLS › CONTROLLER › STICK SETTINGS" search="deadzone">
 			<help>How much of the left stick's travel at its edge counts as a full push. Raise it for a worn stick that stops short of its edge and never reaches full speed. None is the game's own.</help>
 			<choice shown="NONE" value="0"/>
@@ -1238,7 +1235,7 @@
 			<choice shown="25%" value="25"/>
 			<choice shown="30%" value="30"/>
 		</row>
-		<section key="section_8" title="LOOK STICK"/>
+		<section key="section_7" title="LOOK STICK"/>
 		<row key="look_dead_zone_shape" kind="choice" setting="input.look_dead_zone_shape" label="SHAPE" crumb="CONTROLS › CONTROLLER › STICK SETTINGS" search="aim deadzone" search_choices="axial round">
 			<help>The shape of the look stick's dead zone. Axial: each direction its own, a square in the middle, as Classic aim. Round: the same whichever way you push, as Modern aim. Auto follows your Aim Style.</help>
 			<choice shown="AUTO" value="auto"/>
@@ -1260,7 +1257,7 @@
 			<choice shown="1.5X" value="1.5"/>
 			<choice shown="2X" value="2"/>
 		</row>
-		<section key="section_11" title="MODERN AIM"/>
+		<section key="section_10" title="MODERN AIM"/>
 		<row key="modern_aim_acceleration_angle" kind="choice" setting="input.modern_aim_acceleration_angle" label="ACCELERATION ANGLE" crumb="CONTROLS › CONTROLLER › STICK SETTINGS" search="aim acceleration" enabled="aim_modern">
 			<help>Modern aim: how far from straight to the side, in degrees, a full push still speeds up the turn. Lower keeps more diagonals from speeding it up.</help>
 			<choice shown="0" value="0"/>
@@ -1288,6 +1285,21 @@
 			<choice shown="90%" value="90"/>
 			<choice shown="95%" value="95"/>
 			<choice shown="100%" value="100"/>
+		</row>
+		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
+		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>
+		<button key="button_cancel" kind="cancel" run="port settings page cancel" help="Goes back without these changes."/>
+	</screen>
+	<screen name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/stick_test/stick_test_screen" kind="settings" layout="page" geometry="tall" title="STICK TEST">
+		<section key="section_0" title="READINGS"/>
+		<row key="stick_test_left" kind="status" label="LEFT STICK" crumb="CONTROLS › … › STICK TEST">
+			<help>The left stick now: side to side, then up and down, in percent of its travel; after the bar, as you move with the dead zones set. Below, the left circle: its dead zones, the stick white, what the game takes blue.</help>
+		</row>
+		<row key="stick_test_right" kind="status" label="RIGHT STICK" crumb="CONTROLS › … › STICK TEST">
+			<help>The right stick now: side to side, then up and down, in percent of its travel; after the bar, as the view turns with the dead zones and shape set. Below, the right circle.</help>
+		</row>
+		<row key="stick_drift" kind="status" label="DRIFT AT REST" crumb="CONTROLS › … › STICK TEST">
+			<help>The most each stick has read while let go of, since this page opened. Set its dead zone a little past this, on Advanced Stick Settings.</help>
 		</row>
 		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
 		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>

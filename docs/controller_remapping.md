@@ -92,10 +92,12 @@ continue") stay the stock buttons, as the menus do.
   (`input.invert_look_horizontal`) inverts side to side for every controller.
   STICK SETTINGS (`input.left_stick_dead_zone`, `input.right_stick_dead_zone`,
   OpenCE#526) sets each stick's dead zone, at the frame's reading and at every
-  sub-step's. Its LEFT READING and RIGHT READING rows show each stick as last
-  read and then after the dead zones and shape the page shows, unsaved changes
-  among them, in percent of its travel (`stick_test_rows_show`): a stick let go
-  of shows its drift.
+  sub-step's. Its STICK TEST page shows each stick as its controller last read
+  it (never the keyboard) and then after the dead zones and shape set, unsaved
+  changes among them, in percent of its travel; a circle per stick draws the
+  dead zones (round or square) and both readings as dots; DRIFT AT REST is the
+  largest push held still near the middle since the page opened
+  (`stick_test_rows_show`, `stick_test_draw`).
 
 ## Reading route and integration
 

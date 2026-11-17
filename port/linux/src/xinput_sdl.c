@@ -3153,6 +3153,35 @@ static unsigned int sdl_gamepad_paddles(SDL_Gamepad *gamepad, const struct gamep
 	return held;
 }
 
+/* each port's controller's own sticks as last read (halo_controller_stick):
+the left's x and y, the right's, as XInput has them (up positive), before
+the keyboard, the mouse, the touch controls, the scripted player and VR are
+merged into the port's reading; none without a controller */
+static SHORT controller_sticks[PORT_COUNT][4];
+
+static void controller_sticks_read(int port, SDL_Gamepad *gamepad)
+{
+	static const SDL_GamepadAxis axes[4] =
+	{
+		SDL_GAMEPAD_AXIS_LEFTX, SDL_GAMEPAD_AXIS_LEFTY, SDL_GAMEPAD_AXIS_RIGHTX, SDL_GAMEPAD_AXIS_RIGHTY,
+	};
+	int index;
+
+	if (port < 0 || port >= PORT_COUNT)
+		return;
+	for (index = 0; index < 4; index++)
+		controller_sticks[port][index] = gamepad ? stick(SDL_GetGamepadAxis(gamepad, axes[index]), index & 1) : 0;
+}
+
+void halo_controller_stick(short port, short which, short *x, short *y)
+{
+	*x = *y = 0;
+	if (port < 0 || port >= PORT_COUNT || which < 0 || which > 1)
+		return;
+	*x = controller_sticks[port][which * 2];
+	*y = controller_sticks[port][which * 2 + 1];
+}
+
 /* ---------- gyro aiming and the flick stick (gyro_aim.h)
 
 A controller with a gyroscope (SDL's gamepad sensors: a DualSense, a
@@ -3963,6 +3992,7 @@ DWORD WINAPI XInputGetState(HANDLE device, PXINPUT_STATE state)
 	split_players = pc_menu_split_players() != 0;
 	count = sdl_gamepads(gamepads);
 	controller_device_update((short)port, port_gamepad(gamepads, count, port));
+	controller_sticks_read(port, port_gamepad(gamepads, count, port));
 	/* Keep physical remapping separate from the keyboard and touch controls. */
 	memset(&physical, 0, sizeof(physical));
 	/* (what was pressed and let go of since the last reading counts once,

@@ -31,8 +31,11 @@
 	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/right_stick_dead_zone_spinner" flags="pass_unhandled_to_focused_child left_right_tabs_items">
 		<on event="created" run="port setting load"/>
 	</behaviour>
-	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/op_stick_test_left" flags="pass_unhandled_to_focused_child"/>
-	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/op_stick_test_right" flags="pass_unhandled_to_focused_child"/>
+	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/op_stick_test" flags="pass_unhandled_to_focused_child">
+		<on event="a" open="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/stick_test/stick_test_screen"/>
+		<on event="start" open="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/stick_test/stick_test_screen"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
+	</behaviour>
 	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/op_left_stick_outer_dead_zone" flags="pass_unhandled_to_focused_child"/>
 	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/left_stick_outer_dead_zone_spinner" flags="pass_unhandled_to_focused_child left_right_tabs_items">
 		<on event="created" run="port setting load"/>

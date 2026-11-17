@@ -464,22 +464,6 @@ void input_port_fix_stick(
 	return;
 }
 
-/* port: a gamepad's stick (_gamepad_stick_left or _right) as input_update
-read it last, before its dead zones; none for one out of range */
-void input_port_raw_stick(
-	short gamepad_index,
-	short stick,
-	point2d *raw)
-{
-	raw->x = 0;
-	raw->y = 0;
-	if (gamepad_index >= 0 && gamepad_index < MAXIMUM_GAMEPADS && stick >= 0 && stick < NUMBER_OF_GAMEPAD_STICKS)
-	{
-		*raw = input_globals.raw_gamepad_states[gamepad_index].sticks[stick];
-	}
-	return;
-}
-
 /* port: a gamepad's sticks' dead zones from its reading (input_update's, and
 a sub-step's: input_abstraction.c), each its player's own dead range
 (halo_stick_dead_range) and outer dead range (halo_stick_live_range),
