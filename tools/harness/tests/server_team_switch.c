@@ -380,7 +380,8 @@ int main(int argc, char **argv)
 		options.auto_team_balance = FALSE;
 		slot = teams_of(2, 2);
 		people[slot].unit_index = NONE;
-		now_ms = 0xFFFFF000UL;
+		/* (4096 ms before the clock's unsigned long wraps: 0xFFFFF000 in the game's 32-bit ABI) */
+		now_ms = (unsigned long)-1 - 0xFFFUL;
 		CHECK(ask(slot), "the first switch");
 		now_ms = 0x00001000UL;
 		CHECK(!ask(slot), "8 seconds later, across the clock's wrap");
