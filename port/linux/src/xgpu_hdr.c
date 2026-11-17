@@ -202,7 +202,10 @@ unsigned short xgpu_hdr_classify(const struct xgpu_hdr_draw *draw)
 The functions both shaders share: the frame's values made linear and
 encoded again (sRGB's curve, extended past 1), the shoulder, the tone map
 (hdr: the mode, the peak) and the encoding (hdr: paper white, the peak, the
-output: xgpu_hdr.h's XGPU_HDR_OUTPUT_*), as xgpu_hdr.h's reference has them. */
+output: xgpu_hdr.h's XGPU_HDR_OUTPUT_*; curve: the SDR curve, its toe
+XGPU_HDR_SDR_TOE_START to _END), and the final write's dither (its static
+triangular noise of a pixel, and a code dithered to levels), as
+xgpu_hdr.h's reference has them. */
 const char xgpu_hdr_functions_source[] =
 	"const vec3 HDR_LUMA = vec3(0.2126, 0.7152, 0.0722);\n"
 	"\n"
@@ -251,11 +254,35 @@ const char xgpu_hdr_functions_source[] =
 	"\treturn hdr_encoded(mix(light * hue, sdr * brightened, clipped));\n"
 	"}\n"
 	"\n"
-	"vec3 hdr_encode(vec3 value, vec4 hdr)\n"
+	"vec3 hdr_sdr_light(vec3 value, float curve)\n"
+	"{\n"
+	"\tvec3 srgb = hdr_linear(value);\n"
+	"\tif (curve < 0.5)\n"
+	"\t\treturn srgb;\n"
+	"\tvec3 v = max(value, vec3(0.0));\n"
+	"\treturn mix(pow(v, vec3(2.2)), srgb, smoothstep(vec3(0.1), vec3(0.2), v));\n"
+	"}\n"
+	"\n"
+	"float hdr_noise(vec2 pixel)\n"
+	"{\n"
+	"\tfloat u = fract(52.9829189 * fract(dot(floor(pixel), vec2(0.06711056, 0.00583715))));\n"
+	"\treturn u < 0.5 ? sqrt(2.0 * u) - 1.0 : 1.0 - sqrt(2.0 - 2.0 * u);\n"
+	"}\n"
+	"\n"
+	"vec3 hdr_dither(vec3 code, vec2 pixel, float levels)\n"
+	"{\n"
+	"\tif (levels <= 0.0)\n"
+	"\t\treturn code;\n"
+	"\tvec3 room = clamp(min(code, 1.0 - code) * levels + 0.49, 0.0, 1.0);\n"
+	"\troom *= vec3(greaterThan(code, vec3(0.0))) * vec3(lessThan(code, vec3(1.0)));\n"
+	"\treturn code + hdr_noise(pixel) * room / levels;\n"
+	"}\n"
+	"\n"
+	"vec3 hdr_encode(vec3 value, vec4 hdr, float curve)\n"
 	"{\n"
 	"\tif (hdr.z < 0.5)\n"
 	"\t\treturn clamp(value, 0.0, 1.0);\n"
-	"\tvec3 light = min(hdr_linear(value) * (hdr.w > 0.0 ? hdr.w : 1.0), vec3(hdr.y)) * hdr.x;\n"
+	"\tvec3 light = min(hdr_sdr_light(value, curve) * (hdr.w > 0.0 ? hdr.w : 1.0), vec3(hdr.y)) * hdr.x;\n"
 	"\tif (hdr.z < 2.5)\n"
 	"\t\treturn light;\n"
 	"\tvec3 wide = mat3(0.627404, 0.069097, 0.016391, 0.329283, 0.919540, 0.088013, 0.043313, 0.011362, 0.895595) * light;\n"
@@ -289,21 +316,47 @@ static const char tone_map_source[] =
 	"\tresult = vec4(mapped, 1.0);\n"
 	"}\n";
 
-/* the encoding of the frame for the display, as it is drawn into the
-display's image: metrics the viewport's rectangle (x, y, 1 / width, 1 /
-height), the frame scaled over it */
+/* the frame's last pass, as it is drawn into the display's image (#1108):
+the frame scaled over the viewport, encoded for the display (an SDR
+output's values curved by display.gamma's power), then dithered to the
+output's levels. metrics: the viewport's rectangle (x, y, 1 / width, 1 /
+height); bounds: the frame's width and height and the sharp upscale's
+whole factors across and down (xgpu_vulkan.c's present_sharp, in one tap:
+the frame scaled up by them by nearest, then linearly to the viewport; 1, 1
+linearly alone); window: the SDR curve (XGPU_HDR_SDR_CURVE_*), the levels
+a channel is dithered to (255, 1023; 0 none), the power (1 none) */
 static const char encode_source[] =
 	"uniform sampler2D color_texture;\n"
 	"/* the viewport: x, y, 1 / width, 1 / height */\n"
 	"uniform vec4 metrics;\n"
+	"/* the frame's width and height, the sharp upscale's factors */\n"
+	"uniform vec4 bounds;\n"
 	"/* paper white, the peak, the output, the UI's white */\n"
 	"uniform vec4 hdr;\n"
+	"/* the SDR curve, the levels dithered to, display.gamma's power */\n"
+	"uniform vec4 window;\n"
 	"out vec4 result;\n"
+	"\n"
+	"/* the texture coordinates of a point of the viewport (its pixels from\n"
+	"its corner): where it falls in the frame scaled up by the factors\n"
+	"(between the scaled texels' centres), the two texels of the frame\n"
+	"those are, blended only where they differ */\n"
+	"vec2 present_position(vec2 at)\n"
+	"{\n"
+	"\tvec2 t = at * bounds.xy * bounds.zw * metrics.zw - 0.5;\n"
+	"\tvec2 j = floor(t);\n"
+	"\tvec2 a = floor(j / bounds.zw);\n"
+	"\tvec2 b = floor((j + 1.0) / bounds.zw);\n"
+	"\treturn (a + 0.5 + (t - j) * vec2(notEqual(a, b))) / bounds.xy;\n"
+	"}\n"
 	"\n"
 	"void main()\n"
 	"{\n"
-	"\tvec2 position = (gl_FragCoord.xy - metrics.xy) * metrics.zw;\n"
-	"\tresult = vec4(hdr_encode(textureLod(color_texture, position, 0.0).rgb, hdr), 1.0);\n"
+	"\tvec3 frame = textureLod(color_texture, present_position(gl_FragCoord.xy - metrics.xy), 0.0).rgb;\n"
+	"\tvec3 code = hdr_encode(frame, hdr, window.x);\n"
+	"\tif (hdr.z < 0.5 && window.z > 0.0 && window.z != 1.0)\n"
+	"\t\tcode = pow(code, vec3(window.z));\n"
+	"\tresult = vec4(hdr_dither(code, gl_FragCoord.xy, window.y), 1.0);\n"
 	"}\n";
 
 /* ---------- the display */

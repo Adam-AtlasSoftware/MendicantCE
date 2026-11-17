@@ -636,7 +636,13 @@
 			<choice shown="480 NITS" value="480"/>
 			<choice shown="500 NITS" value="500"/>
 		</row>
-		<section key="section_7" title="DISPLAY" when="hdr"/>
+		<row key="hdr_sdr_curve" kind="choice" setting="display.hdr_sdr_curve" label="SDR CURVE" crumb="VIDEO › BRIGHTNESS" search_choices="srgb" when="hdr">
+			<help>With HDR, how dark the darkest shadows are: the curve an SDR display shows them by. 2.2 is most PC monitors' and TVs', darker; sRGB is a Mac's. Auto picks sRGB on a Mac, 2.2 elsewhere.</help>
+			<choice shown="AUTO" value="auto"/>
+			<choice shown="SRGB" value="srgb"/>
+			<choice shown="2.2" value="2.2"/>
+		</row>
+		<section key="section_8" title="DISPLAY" when="hdr"/>
 		<row key="hdr_display" kind="status" label="DISPLAY PEAK" crumb="VIDEO › BRIGHTNESS" when="hdr">
 			<help>The brightest the display shows, and its SDR white, as the system reports them.</help>
 		</row>

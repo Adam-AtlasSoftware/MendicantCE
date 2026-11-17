@@ -12,8 +12,8 @@ Metal backend's own and the reference (port/linux/src/xgpu_hdr.h).
     Metal's test holds its own to (port/macos/tests/xgpu_metal_test.m,
     test_stream_hdr): the tone map in place, reading each pixel where it is
     drawn, at peaks 1, 4 and 16 in both modes; the encoding for scRGB, for
-    HDR10's PQ and for SDR; each against the reference to half floats'
-    precision.
+    HDR10's PQ and for SDR, by sRGB's SDR curve and by gamma 2.2's; each
+    against the reference to half floats' precision.
   harness draws <dir>
     Each draw of tools/hdr_backends/shaders.c's index, both backends'
     fragment functions (<name>.vk.metal from the SPIR-V, <name>.metal the
@@ -128,6 +128,7 @@ struct post_uniforms
 	float metrics[4];
 	float bounds[4];
 	float hdr[4];
+	float window[4];
 };
 
 static void post_draw(id<MTLRenderPipelineState> pipeline, id<MTLTexture> target, id<MTLTexture> source,
@@ -174,11 +175,106 @@ static id<MTLRenderPipelineState> post_pipeline(id<MTLFunction> vertex, id<MTLFu
 	return pipeline;
 }
 
+/* The last pass's dither (#1108), into a real 8-bit target (the GPU's own
+rounding): a half-float frame of DITHER_SIZE columns, each its own value
+(column 0 black, the last white, the rest between codes), down
+DITHER_SIZE rows, drawn for an SDR output dithered to 255 levels, and,
+the negative control, not dithered. Dithered: each pixel within 1.5 codes
+of the value (one level of noise either way, then rounding), black and
+white exact, and each column's mean the value's within DITHER_MEAN codes
+(the first column's a fraction of a code above black too); not dithered: each
+pixel the value rounded, the columns' means up to half a code off. */
+#define DITHER_SIZE 256
+#define DITHER_MEAN 0.075f
+
+static void dither_test(id<MTLFunction> vertex, id<MTLFunction> encode)
+{
+	id<MTLRenderPipelineState> pipeline = post_pipeline(vertex, encode, MTLPixelFormatBGRA8Unorm, MTLColorWriteMaskAll);
+	MTLTextureDescriptor *description;
+	id<MTLTexture> source, target;
+	__fp16 *halves = malloc(DITHER_SIZE * DITHER_SIZE * 8);
+	unsigned char *bgra = malloc(DITHER_SIZE * DITHER_SIZE * 4);
+	float values[DITHER_SIZE], worst[2] = { 0.0f, 0.0f };
+	int x, y, levels, channel;
+
+	if (!pipeline || !halves || !bgra)
+		return;
+	description = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA16Float width:DITHER_SIZE
+		height:DITHER_SIZE mipmapped:NO];
+	description.usage = MTLTextureUsageShaderRead;
+	description.storageMode = MTLStorageModeShared;
+	source = [device newTextureWithDescriptor:description];
+	description = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm width:DITHER_SIZE
+		height:DITHER_SIZE mipmapped:NO];
+	description.usage = MTLTextureUsageRenderTarget;
+	description.storageMode = MTLStorageModeShared;
+	target = [device newTextureWithDescriptor:description];
+	for (x = 0; x < DITHER_SIZE; x++)
+	{
+		float value = x == 0 ? 0.0f : x == DITHER_SIZE - 1 ? 1.0f :
+			((float)x - 0.75f + 0.5f * (float)((x * 7) % 4) / 4.0f) / 255.0f;
+
+		values[x] = (float)(__fp16)value * 255.0f;
+		for (y = 0; y < DITHER_SIZE; y++)
+		{
+			for (channel = 0; channel < 4; channel++)
+				halves[(y * DITHER_SIZE + x) * 4 + channel] = (__fp16)(channel == 3 ? 1.0f : value);
+		}
+	}
+	[source replaceRegion:MTLRegionMake2D(0, 0, DITHER_SIZE, DITHER_SIZE) mipmapLevel:0 withBytes:halves
+		bytesPerRow:DITHER_SIZE * 8];
+	for (levels = 0; levels < 2; levels++)
+	{
+		struct post_uniforms uniforms;
+		int bad = 0;
+
+		memset(&uniforms, 0, sizeof(uniforms));
+		uniforms.metrics[2] = uniforms.metrics[3] = 1.0f / DITHER_SIZE;
+		uniforms.bounds[0] = uniforms.bounds[1] = DITHER_SIZE;
+		uniforms.bounds[2] = uniforms.bounds[3] = 1.0f;
+		uniforms.hdr[0] = uniforms.hdr[1] = uniforms.hdr[3] = 1.0f;
+		uniforms.hdr[2] = (float)XGPU_HDR_OUTPUT_SDR;
+		uniforms.window[1] = levels ? 255.0f : 0.0f;
+		uniforms.window[2] = 1.0f;
+		post_draw(pipeline, target, source, &uniforms);
+		[target getBytes:bgra bytesPerRow:DITHER_SIZE * 4 fromRegion:MTLRegionMake2D(0, 0, DITHER_SIZE, DITHER_SIZE)
+			mipmapLevel:0];
+		for (x = 0; x < DITHER_SIZE; x++)
+		{
+			float sum = 0.0f, mean;
+
+			for (y = 0; y < DITHER_SIZE; y++)
+			{
+				float code = (float)bgra[(y * DITHER_SIZE + x) * 4 + 1];
+
+				sum += code;
+				if (levels ? fabsf(code - values[x]) >= 1.5f : code != roundf(values[x]))
+					bad++;
+				if ((x == 0 && code != 0.0f) || (x == DITHER_SIZE - 1 && code != 255.0f))
+					bad++;
+			}
+			mean = sum / DITHER_SIZE;
+			if (x && x < DITHER_SIZE - 1 && fabsf(mean - values[x]) > worst[levels])
+				worst[levels] = fabsf(mean - values[x]);
+		}
+		if (bad)
+			FAIL("dither (%s): %d pixels out of bounds, or black or white not exact", levels ? "on" : "off", bad);
+	}
+	if (worst[1] > DITHER_MEAN)
+		FAIL("dither: a column's mean %.3f codes off its value", (double)worst[1]);
+	if (worst[0] < 0.25f)
+		FAIL("dither (off): the columns' means only %.3f codes off: the values are not between codes", (double)worst[0]);
+	printf("dither: means within %.3f codes dithered, %.3f not\n", (double)worst[1], (double)worst[0]);
+	free(halves);
+	free(bgra);
+}
+
 static void post_test(NSString *dir)
 {
 	static const float peaks[3] = { 1.0f, 4.0f, 16.0f };
-	/* (the last two with the UI's white past and under paper white's) */
-	static const struct xgpu_hdr_frame encodings[6] =
+	/* (the fifth and sixth with the UI's white past and under paper
+	white's; the last two by gamma 2.2's SDR curve, display.hdr_sdr_curve's) */
+	static const struct xgpu_hdr_frame encodings[8] =
 	{
 		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_SCRGB, 2.5f, 4.0f },
 		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_PQ, 0.02f, 4.0f },
@@ -186,6 +282,8 @@ static void post_test(NSString *dir)
 		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_SDR, 1.0f, 1.0f },
 		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_SCRGB, 2.5f, 4.0f, 1.8f },
 		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_PQ, 0.0203f, 10.0f, 0.6f },
+		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_SCRGB, 2.5f, 4.0f, 1.0f, XGPU_HDR_SDR_CURVE_GAMMA_2_2 },
+		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_PQ, 0.0203f, 10.0f, 1.0f, XGPU_HDR_SDR_CURVE_GAMMA_2_2 },
 	};
 	/* the tone map's UI white: none given (paper white's), and the UI's
 	white under and past paper white's */
@@ -303,7 +401,7 @@ static void post_test(NSString *dir)
 		}
 		printf("post: %d values not a number or infinite tone mapped finite\n", finite);
 	}
-	for (which = 0; which < 6; which++)
+	for (which = 0; which < 8; which++)
 	{
 		id<MTLTexture> source = texture_make(MTLPixelFormatRGBA16Float, VECTORS, MTLTextureUsageShaderRead);
 		id<MTLTexture> target = texture_make(MTLPixelFormatRGBA32Float, VECTORS, MTLTextureUsageRenderTarget);
@@ -313,10 +411,14 @@ static void post_test(NSString *dir)
 		memset(&uniforms, 0, sizeof(uniforms));
 		uniforms.metrics[2] = 1.0f / VECTORS;
 		uniforms.metrics[3] = 1.0f;
+		uniforms.bounds[0] = VECTORS;
+		uniforms.bounds[1] = uniforms.bounds[2] = uniforms.bounds[3] = 1.0f;
+		uniforms.window[2] = 1.0f;
 		uniforms.hdr[0] = encodings[which].paper_white;
 		uniforms.hdr[1] = encodings[which].peak;
 		uniforms.hdr[2] = (float)encodings[which].output;
 		uniforms.hdr[3] = encodings[which].ui;
+		uniforms.window[0] = (float)encodings[which].sdr_curve;
 		post_draw(encode_pipeline, target, source, &uniforms);
 		[target getBytes:got bytesPerRow:VECTORS * 16 fromRegion:MTLRegionMake2D(0, 0, VECTORS, 1) mipmapLevel:0];
 		for (vector = 0; vector < VECTORS; vector++)
@@ -341,6 +443,7 @@ static void post_test(NSString *dir)
 		}
 	}
 	printf("post: %d values checked against the reference\n", checked);
+	dither_test(vertex, encode);
 }
 
 /* ---------- the draws */

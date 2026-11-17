@@ -32,12 +32,11 @@ enum xgpu_vulkan_post_program_id
 	/* (Vulkan's own: the frame turned for the swapchain, xgpu_vulkan_post_rotate) */
 	XGPU_VULKAN_POST_ROTATE,
 	/* display.hdr's (xgpu_hdr.c): the tone map in place, of a target of one
-	sample and of more, and the encoding for the display */
+	sample and of more, and the frame's last pass (the encoding for the
+	display, display.gamma's curve over an SDR frame, the dither) */
 	XGPU_VULKAN_POST_HDR_TONE_MAP,
 	XGPU_VULKAN_POST_HDR_TONE_MAP_MS,
 	XGPU_VULKAN_POST_HDR_ENCODE,
-	/* display.gamma's curve over an SDR frame (xgpu_vulkan_post_gamma) */
-	XGPU_VULKAN_POST_GAMMA,
 	/* display.panini's projection (xgpu_vulkan_post_panini) */
 	XGPU_VULKAN_POST_PANINI,
 	XGPU_VULKAN_POST_PROGRAM_COUNT

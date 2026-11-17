@@ -1314,6 +1314,9 @@ PAGES = {
             ("UI BRIGHTNESS", "display.hdr_ui_nits", UI_WHITES,
              "With HDR, how bright the HUD and the menus are, in nits, apart from the picture. Paper White keeps "
              "them where paper white is. The HUD's glows stay as far above it.", "hdr"),
+            ("SDR CURVE", "display.hdr_sdr_curve", [("AUTO", "auto"), ("SRGB", "srgb"), ("2.2", "2.2")],
+             "With HDR, how dark the darkest shadows are: the curve an SDR display shows them by. 2.2 is most PC "
+             "monitors' and TVs', darker; sRGB is a Mac's. Auto picks sRGB on a Mac, 2.2 elsewhere.", "hdr"),
             (SECTION, "DISPLAY"),
             # (the display's peak and SDR white as the system reports them:
             # menu_functions.c's hdr_display_show)

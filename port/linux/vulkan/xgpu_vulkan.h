@@ -75,6 +75,21 @@ work recorded so far and returns its number, xgpu_vulkan_wait waits for it.
 struct xgpu_hdr_frame;
 struct xgpu_vulkan_image;
 
+/* the frame's last pass before the swapchain (the options' encode,
+xgpu_vulkan_post.c's; xgpu_hdr.c's encoding program): its size, the
+picture's rectangle in the swapchain (which the core then copies 1:1); the
+sharp upscale's whole factors across and down (present_sharp's, in the
+pass: 1, 1 linear alone); display.gamma's power over an SDR output (1:
+none); the levels a channel is dithered to (255, 1023: the output's; 0:
+none) */
+struct xgpu_vulkan_output
+{
+	uint32_t width, height;
+	uint32_t factors[2];
+	float power;
+	float levels;
+};
+
 struct xgpu_vulkan_options
 {
 	/* the instance extensions the window's surface needs (SDL's), count of
@@ -124,23 +139,18 @@ swapchain takes where the surface has it (0: the swap interval's choice) */
 	thread, as it changes): whether it shows HDR (the window's display
 	does, and the surface has an HDR colour space), its headroom over
 	SDR white, that white in nits and whether the system gave it
-	(host_render_stream_display_hdr). And the encoding of a
-	frame for an HDR swapchain (xgpu_vulkan_post.c's): encode_prepare
-	makes its pipelines at the start (1 if it can), encode draws the frame
-	into an image of its own of the swapchain's format
-	(XGPU_VULKAN_FORMAT_*) and returns it, NULL if it cannot. NULL: no HDR
-	swapchain. */
+	(host_render_stream_display_hdr); NULL: no HDR swapchain. And the
+	frame's last pass (xgpu_vulkan_post.c's): encode_prepare makes its
+	pipelines at the start (1 if it can), encode draws the frame scaled to
+	the output's size, encoded for the swapchain (HDR's encoding, or
+	display.gamma's curve over SDR) and dithered, into an image of its own
+	of the swapchain's format (XGPU_VULKAN_FORMAT_*), and returns it, NULL if
+	it cannot. NULL: none (no HDR swapchain, no curve, no dither: the VR
+	build's). */
 	void (*display_hdr)(int hdr, float headroom, float white_nits, int white_reported);
 	int (*encode_prepare)(void);
 	struct xgpu_vulkan_image *(*encode)(struct xgpu_vulkan_image *image, const struct xgpu_hdr_frame *frame,
-		uint8_t format);
-	/* display.gamma: its curve over an SDR frame before the swapchain
-	(xgpu_vulkan_post.c's): gamma_prepare makes its pipeline at the start
-	(1 if it can), gamma draws the frame curved (each channel raised to a
-	power) into an image of its own and returns it, NULL if it cannot.
-	NULL: no curve (the VR build's). */
-	int (*gamma_prepare)(void);
-	struct xgpu_vulkan_image *(*gamma)(struct xgpu_vulkan_image *image, float power);
+		uint8_t format, const struct xgpu_vulkan_output *output);
 	/* a frame smaller than the window (display.render_scale on a computer,
 	"original" resolution scaling) scaled up sharply: nearest by whole
 	multiples, then linear for the rest (present_sharp). 0: linear alone
@@ -789,6 +799,9 @@ void xgpu_vulkan_picture_top(int top);
 (where the options allow it: sharp_upscale), else smoothly, as
 "original" resolution scaling's 640x480 always was (any thread) */
 void xgpu_vulkan_sharp_upscale(int sharp);
+/* display.hdr_sdr_curve (XGPU_HDR_SDR_CURVE_*; AUTO: sRGB's on Apple's
+platforms, gamma 2.2 elsewhere), for the encoding (any thread) */
+void xgpu_vulkan_hdr_sdr_curve(int curve);
 /* display.gamma (the stream's record, render thread): the setting, 1 for
 none, from the next present on; an SDR frame is curved by one over it
 (present), an HDR swapchain's never */

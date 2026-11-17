@@ -136,6 +136,10 @@ void xgpu_backend_picture_top(int top);
 /* display.render_scale: a frame smaller than the window scaled up sharply
 (1) or smoothly (0, "original" resolution scaling's), from the next present */
 void xgpu_backend_sharp_upscale(int sharp);
+/* display.hdr_sdr_curve: the curve the HDR encoding takes the frame's
+values to light by (xgpu_hdr.h's XGPU_HDR_SDR_CURVE_*; AUTO: the
+platform's), from the next present on */
+void xgpu_backend_hdr_sdr_curve(int curve);
 /* display.gamma: an SDR frame curved by one over this as it is presented
 (each channel raised to that power: past 1 brighter), from the next present
 on; 1 none, which costs nothing. An HDR swapchain's frame never is. */

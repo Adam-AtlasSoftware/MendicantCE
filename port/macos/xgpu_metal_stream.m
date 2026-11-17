@@ -1498,6 +1498,13 @@ static void stream_hdr(void *context, const struct xgpu_stream_hdr *record)
 		(void)xgpu_metal_post_prepare_hdr(XGPU_METAL_FORMAT_D24S8, 0);
 }
 
+/* display.hdr_sdr_curve: the encoding's SDR curve */
+static void stream_hdr_sdr_curve(void *context, uint32_t curve)
+{
+	(void)context;
+	host_metal_hdr_sdr_curve((int)curve);
+}
+
 /* display.gamma: the presentation curves an SDR frame by it */
 static void stream_gamma(void *context, uint32_t gamma)
 {
@@ -2038,6 +2045,7 @@ const struct host_render_backend *xgpu_metal_stream_backend(void)
 		backend.hdr = stream_hdr;
 		backend.tone_map = stream_tone_map;
 		backend.gamma = stream_gamma;
+		backend.hdr_sdr_curve = stream_hdr_sdr_curve;
 		backend.category = stream_category;
 		backend.panini = stream_panini;
 		/* display.ambient_occlusion "world" (#578, docs/world-ao.md): the
