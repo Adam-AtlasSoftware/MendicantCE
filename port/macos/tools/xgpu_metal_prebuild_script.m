@@ -60,6 +60,8 @@ static const char *pixel_format_name(MTLPixelFormat format)
 	case MTLPixelFormatBGRA8Unorm: return "BGRA8Unorm";
 	/* (display.hdr's targets) */
 	case MTLPixelFormatRGBA16Float: return "RGBA16Float";
+	/* (display.output_depth's 16-bit SDR frame) */
+	case MTLPixelFormatRGBA16Unorm: return "RGBA16Unorm";
 	/* (display.ambient_occlusion "world"'s pre-pass's inputs, and its pass's) */
 	case MTLPixelFormatRGBA32Uint: return "RGBA32Uint";
 	case MTLPixelFormatRGBA32Float: return "RGBA32Float";
