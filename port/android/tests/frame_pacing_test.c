@@ -74,13 +74,6 @@ static void margin_check(void)
 	/* (and the budget is the costs' most and the margin) */
 	costs.nanoseconds[3] = 4000000ull;
 	margin_expect("the budget", frame_pacing_budget(&costs, period), 4000000ull + period / 2);
-	/* (a frame that took more than a refresh, the game's work and the
-	renderer's overlapping, is given its time: up to the refreshes a frame
-	can be started before its own; one that took longer than those is not) */
-	costs.nanoseconds[4] = period * 7 / 4;
-	margin_expect("a frame of more than a refresh", frame_pacing_budget(&costs, period), period * 7 / 4 + period / 2);
-	costs.nanoseconds[5] = period * (FRAME_PACING_QUEUED + 1) + 1;
-	margin_expect("a frame too long to pace", frame_pacing_budget(&costs, period), period * 7 / 4 + period / 2);
 }
 
 int main(void)

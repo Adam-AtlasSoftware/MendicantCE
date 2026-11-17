@@ -2235,12 +2235,9 @@ Windows and Android) paces the game by the display instead (`vulkan/xgpu_vulkan_
   waiting, one drawn into.
 - And not before the time it takes ahead of the refresh it is for: the
   most a frame took of the last 128, from its input read to its work done
-  on the GPU, and a margin. A frame may take up to two refreshes so (the
-  game writes it while the renderer draws the one before, and it starts
-  that much before its own refresh); one that took longer is not counted.
-  A frame that started at its time but still missed its refresh widens the
-  margin by 1 ms (a display that takes its frames sooner than the margin
-  gives, or a frame that took a little longer than any of the last); 120
+  on the GPU, and a margin. A frame that started at its time and was done
+  that margin early, but still missed its refresh, widens the margin by
+  1 ms (a display that takes its frames sooner than the margin gives); 120
   frames in time narrow it by 0.1 ms, down to 0.25 ms over the margin
   that last missed, which itself comes down 0.1 ms a minute. The margin
   starts at 1.5 ms.

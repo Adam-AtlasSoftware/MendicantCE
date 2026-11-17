@@ -27,11 +27,7 @@ more between the player's hand and the picture.
   already wait for. The budget is the most a frame took from its start to
   ready for the display (its renderer done) of the last FRAME_PACING_COSTS,
   and FRAME_PACING_MARGIN_NS more: frame_pacing_cost_add,
-  frame_pacing_budget. A frame may take longer than a refresh and still be
-  one of a frame each refresh: the game writes it while the renderer draws
-  the one before (a Raspberry Pi 5 in a firefight: 9 ms of the game, then
-  17 of the renderer, 70 frames a second unpaced), started up to
-  FRAME_PACING_QUEUED + 1 refreshes before its own.
+  frame_pacing_budget.
 - A display that says when each frame reached the screen (Vulkan's,
   xgpu_vulkan_pacing.c) has the margin learned: a frame shown a refresh or
   more after the one it was started for, though it started at its time,
@@ -136,15 +132,9 @@ static FRAME_PACING_UNUSED void frame_pacing_cost_add(struct frame_pacing_costs 
 }
 
 /* the time to give a frame: the most of the last FRAME_PACING_COSTS, and
-the margin; but not more than the refreshes (period) a frame can be started
-before its own, FRAME_PACING_QUEUED + 1 (frame_pacing_may_start: no sooner
-than the latch that leaves one frame waiting): a frame that took longer
-missed its refresh whenever it started, and an earlier start for every
-frame after it would only add to their latency. A frame that takes between
-a refresh and a half and two (the game's and the renderer's work
-overlapping) is within it: given less, each such frame starts too late for
-its refresh and is shown at the next, half the frames a second for as long
-as the scene stays so. */
+the margin; but not more than a refresh and a half (period): a frame that
+took longer missed its refresh whenever it started, and an earlier start
+for every frame after it would only add to their latency */
 static FRAME_PACING_UNUSED uint64_t frame_pacing_budget(const struct frame_pacing_costs *costs, uint64_t period)
 {
 	uint64_t most = 0;
@@ -152,8 +142,7 @@ static FRAME_PACING_UNUSED uint64_t frame_pacing_budget(const struct frame_pacin
 
 	for (index = 0; index < FRAME_PACING_COSTS; index++)
 	{
-		if (costs->nanoseconds[index] > most &&
-			(!period || costs->nanoseconds[index] <= period * (FRAME_PACING_QUEUED + 1)))
+		if (costs->nanoseconds[index] > most && (!period || costs->nanoseconds[index] <= period * 3 / 2))
 			most = costs->nanoseconds[index];
 	}
 	return most + (costs->margin ? costs->margin : FRAME_PACING_MARGIN_NS);
