@@ -355,10 +355,8 @@
 			<choice shown="LARGE" value="large"/>
 			<choice shown="OFF" value="off"/>
 		</row>
-		<row key="match_timer" kind="choice" setting="display.match_timer" label="MATCH TIMER" crumb="INTERFACE › HUD">
-			<help>Draws a clock at the bottom right: in multiplayer the game's, counting up from its start; in the campaign and co-op the mission's, which stops while the game is paused.</help>
-			<choice shown="ON" value="true"/>
-			<choice shown="OFF" value="false"/>
+		<row key="streaming_speedrun" kind="link" label="STREAMING &amp; SPEEDRUN ›" crumb="INTERFACE › HUD" open="main_menu/settings_select/player_setup/player_profile_edit/interface_settings/streaming/streaming_screen">
+			<help>A state file for stream overlays, and the match timer.</help>
 		</row>
 		<section key="section_5" title="MULTIPLAYER"/>
 		<row key="player_names" kind="choice" setting="display.player_names" label="PLAYER NAMES" crumb="INTERFACE › MULTIPLAYER" search_choices="all allies enemies">
@@ -1456,6 +1454,23 @@
 		</row>
 		<row key="vehicle_hijack" kind="choice" setting="game.vehicle_hijack" label="VEHICLE HIJACKING" crumb="ONLINE › GAMEPLAY">
 			<help>Hold the action button beside an enemy's Ghost, Warthog or landed Banshee to throw the rider out and take it. Online: the host's choice.</help>
+			<choice shown="ON" value="true"/>
+			<choice shown="OFF" value="false"/>
+		</row>
+		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
+		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>
+		<button key="button_cancel" kind="cancel" run="port settings page cancel" help="Goes back without these changes."/>
+	</screen>
+	<screen name="main_menu/settings_select/player_setup/player_profile_edit/interface_settings/streaming/streaming_screen" kind="settings" layout="page" geometry="tall" title="STREAMING &amp; SPEEDRUN">
+		<section key="section_0" title="STREAMING"/>
+		<row key="state_file" kind="choice" setting="display.state_file" label="STATE FILE" crumb="INTERFACE › STREAMING &amp; SPEEDRUN">
+			<help>Writes the game's state (map, mode, score, kills, deaths, loading, cutscene, pause) to game_state.json in the game's folder, for stream overlays and scene switchers.</help>
+			<choice shown="ON" value="true"/>
+			<choice shown="OFF" value="false"/>
+		</row>
+		<section key="section_2" title="SPEEDRUN"/>
+		<row key="match_timer" kind="choice" setting="display.match_timer" label="MATCH TIMER" crumb="INTERFACE › STREAMING &amp; SPEEDRUN">
+			<help>Draws a clock at the bottom right: in multiplayer the game's, counting up from its start; in the campaign and co-op the mission's, which stops while the game is paused.</help>
 			<choice shown="ON" value="true"/>
 			<choice shown="OFF" value="false"/>
 		</row>

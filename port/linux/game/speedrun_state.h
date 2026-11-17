@@ -115,5 +115,8 @@ void speedrun_state_loading(void);
 void speedrun_state_map_load(void);
 /* a level won (main_won_map_private) */
 void speedrun_state_level_won(void);
+/* the block as the last frame left it, for the game's own readers of its
+fields (stream_state.c), which only read it */
+struct speedrun_state const *speedrun_state_get(void);
 
 #endif

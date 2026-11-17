@@ -478,6 +478,12 @@ static const struct config_setting config_settings[] =
 		"too: a weapon is back on the map at every multiple of its period on the\n"
 		"clock. In the campaign and co-op it is the mission's timer: the level's\n"
 		"game time, which stops while the game is paused." },
+	{ "display.state_file", _config_boolean, "false", "HALO_STATE_FILE", _environment_value, _platform_all,
+		"Write the game's state to game_state.json in the data root, for stream\n"
+		"overlays and scene switchers: state (loading, menu, cutscene, paused,\n"
+		"playing), map, mode, clock (seconds), and the first player's score,\n"
+		"kills and deaths. Written only when it changes, at most four times a\n"
+		"second, and replaced whole (never half written)." },
 	{ "display.perf_overlay", _config_string, "\"off\"", "HALO_PERF_OVERLAY", _environment_value, _platform_all,
 		"The performance overlay at the bottom right: \"off\"; \"simple\", the\n"
 		"frame rate averaged over half a second, green at 30 and over (the\n"

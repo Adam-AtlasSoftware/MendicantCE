@@ -86,3 +86,17 @@ process.
 - **reset**: when `run` changes (a new run began).
 
 To time by the game's ticks instead, uncomment its `gameTime`, which turns `run_ticks` into time.
+
+## The state file, for stream overlays
+
+With `display.state_file` on (off by default; Settings > Interface > Streaming & Speedrun), the game also writes
+what this block says, and the first player's score, kills and deaths, to `game_state.json` in the data root
+(`port/linux/game/stream_state.c`), for OBS text sources and scene switchers:
+
+```json
+{"state":"playing","map":"levels\\a10\\a10","mode":"campaign","clock":95,"score":0,"kills":3,"deaths":1}
+```
+
+`state` is `loading`, `menu`, `cutscene`, `paused` or `playing`; `clock` is the level's clock in seconds. The
+file is written only when it changes, at most four times a second, to `game_state.json.tmp` and then renamed
+over the file, so a reader never sees half of it. Nothing is sent over the network.

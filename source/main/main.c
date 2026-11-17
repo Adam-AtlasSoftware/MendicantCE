@@ -738,6 +738,7 @@ void vr_death_test_update(void);
 #include "server_director.h" /* port: port/linux/game/server_director.c */
 #include "load_zone.h" /* port: port/linux/game/load_zone.c */
 #include "speedrun_state.h" /* port: port/linux/game/speedrun_state.c */
+#include "stream_state.h" /* port: port/linux/game/stream_state.c */
 
 /* ---------- prototypes */
 
@@ -4420,6 +4421,9 @@ void main_loop(
 		(port/linux/game/speedrun_state.c) */
 		speedrun_state_frame(frame_ticks, loading_game_frame, frames_undrawn || debug_no_drawing,
 			main_globals.main_menu_scenario_loaded || menu_pictures_preparing());
+		/* port: the game's state for stream overlays (display.state_file,
+		port/linux/game/stream_state.c) */
+		stream_state_frame();
 		profile_frame_end();
 		main_frame_rate_debug();
 		halo_load_trace_frame(); /* port: debug.load_trace's long frames */

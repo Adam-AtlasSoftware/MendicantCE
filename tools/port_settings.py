@@ -797,6 +797,10 @@ CONTROL_COMMAND_ROWS = {f"command_{n}" for n in range(1, CONTROL_ROWS + 1)}
 # (an action's row: its name, then its two bindings' columns, to the row's end)
 CONTROL_BINDINGS_X, CONTROL_BINDING_WIDTH = (136, 240), 104
 STREAMER = ("interface_settings/streamer_mode", "streamer_mode_screen")
+# (Interface's STREAMING & SPEEDRUN: display.state_file (port/linux/game/
+# stream_state.c), display.input_display (input_display.c) and
+# game.practice_keys (practice.c))
+STREAMING = ("interface_settings/streaming", "streaming_screen")
 # (Online's multiplayer rules, the host's choice in a network game, a page of
 # their own once Online had no room for VEHICLE HIJACKING)
 GAMEPLAY = ("network_setup/gameplay", "gameplay_screen")
@@ -1135,10 +1139,11 @@ PAGES = {
              "Your living teammates' views in the HUD's top line, with their names, shields and distances, in "
              "co-op and team games: the SPARTAN LINK key (or D-pad Down) shows and hides them. Off: the key does "
              "nothing.", None),
-            # (source/interface/hud.c: the mission's timer in the campaign and co-op)
-            ("MATCH TIMER", "display.match_timer", ON_OFF,
-             "Draws a clock at the bottom right: in multiplayer the game's, counting up from its start; in the "
-             "campaign and co-op the mission's, which stops while the game is paused.", None),
+            # (the streamers' and runners' tools: a state file, the input
+            # display, the match timer, the practice keys; MATCH TIMER moved
+            # there to make room for the row)
+            ("STREAMING & SPEEDRUN ›", None, _page_screen(*STREAMING),
+             "A state file for stream overlays, and the match timer.", None),
             (SECTION, "MULTIPLAYER"),
             ("PLAYER NAMES", "display.player_names",
              [("ALL", "all"), ("ALLIES", "allies"), ("ENEMIES", "enemies"), ("NONE", "none")],
@@ -1800,6 +1805,20 @@ PAGES = {
             ("VEHICLE HIJACKING", "game.vehicle_hijack", ON_OFF,
              "Hold the action button beside an enemy's Ghost, Warthog or landed Banshee to throw the rider out "
              "and take it. Online: the host's choice.", None),
+        ],
+    },
+    STREAMING[0]: {
+        "screen": STREAMING[1], "title": "STREAMING & SPEEDRUN",
+        "rows": [
+            (SECTION, "STREAMING"),
+            ("STATE FILE", "display.state_file", ON_OFF,
+             "Writes the game's state (map, mode, score, kills, deaths, loading, cutscene, pause) to "
+             "game_state.json in the game's folder, for stream overlays and scene switchers.", None),
+            (SECTION, "SPEEDRUN"),
+            # (source/interface/hud.c: the mission's timer in the campaign and co-op)
+            ("MATCH TIMER", "display.match_timer", ON_OFF,
+             "Draws a clock at the bottom right: in multiplayer the game's, counting up from its start; in the "
+             "campaign and co-op the mission's, which stops while the game is paused.", None),
         ],
     },
     STREAMER[0]: {

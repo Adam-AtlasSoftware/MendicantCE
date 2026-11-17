@@ -7,7 +7,8 @@ timer's autosplitter needs, in one static block it finds by its magic.
 - The game writes it from the main loop alone (main_loop, at each frame's
   end; and the loading flag, the map's load and a level won as they happen,
   on the same thread): plain stores, no thread, file or socket. Nothing of
-  the game reads it, and it is not in the game state, so a saved game, a
+  the game's simulation reads it (only the state file's writer,
+  stream_state.c, does), and it is not in the game state, so a saved game, a
   checkpoint's revert, a core's load and a demo neither keep nor change it,
   and the game plays the same with it as without (determinism).
 - It lives in the game's own memory, the guest's: on Linux and Windows the
@@ -259,4 +260,10 @@ void speedrun_state_level_won(
 	void)
 {
 	speedrun_state_block.levels_completed++;
+}
+
+struct speedrun_state const *speedrun_state_get(
+	void)
+{
+	return (struct speedrun_state const *)&speedrun_state_block;
 }
