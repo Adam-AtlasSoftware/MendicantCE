@@ -69,11 +69,11 @@ def find_block(pid):
 
 
 def read(memory, address):
-    """the block's fields; OSError once the game has ended"""
+    """the block's fields; OSError once the game has exited"""
     memory.seek(address)
     data = memory.read(LAYOUT.size)
     if len(data) != LAYOUT.size:
-        raise OSError("the game ended")
+        raise OSError("the game exited")
     values = dict(zip(FIELDS, LAYOUT.unpack(data)))
     for name in ("build", "map"):
         values[name] = values[name].split(b"\0")[0].decode("latin-1")
@@ -107,17 +107,26 @@ def main():
             try:
                 address = find_block(pid)
             except OSError as error:
+                if not os.path.exists(f"/proc/{pid}"):
+                    print("game exited", flush=True)
+                    return
                 sys.exit(f"cannot read process {pid}: {error}")
         if address is None:
             time.sleep(0.2)
     print(f"block of process {pid} at 0x{address:x}", flush=True)
     last_key, last_line = None, 0.0
-    with open(f"/proc/{pid}/mem", "rb", buffering=0) as memory:
+    try:
+        memory = open(f"/proc/{pid}/mem", "rb", buffering=0)
+    except OSError:
+        print("game exited", flush=True)
+        return
+    with memory:
         while not args.seconds or time.monotonic() - started < args.seconds:
             try:
                 values = read(memory, address)
-            except OSError:
-                break
+            except (OSError, struct.error):
+                print("game exited", flush=True)
+                return
             if values["sequence"] % 2:
                 continue
             key = (values["flags"], values["run"], values["levels_completed"], values["map"])
@@ -126,8 +135,7 @@ def main():
                 print(describe(values, started), flush=True)
                 last_key, last_line = key, now
             time.sleep(0.01)
-    print("game ended", flush=True)
-
+    print("stopped after --seconds", flush=True)
 
 if __name__ == "__main__":
     main()
