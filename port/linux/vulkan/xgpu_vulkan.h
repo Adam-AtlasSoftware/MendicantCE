@@ -785,6 +785,10 @@ void xgpu_vulkan_hdr_state(int active, int mode, int paper_white_nits, int paper
 this many pixels from its top (no lower than its bottom) or centered (-1)
 (present), from the next present on */
 void xgpu_vulkan_picture_top(int top);
+/* display.render_scale: a frame smaller than the window scaled up sharply
+(where the options allow it: sharp_upscale), else smoothly, as
+"original" resolution scaling's 640x480 always was (any thread) */
+void xgpu_vulkan_sharp_upscale(int sharp);
 /* display.gamma (the stream's record, render thread): the setting, 1 for
 none, from the next present on; an SDR frame is curved by one over it
 (present), an HDR swapchain's never */

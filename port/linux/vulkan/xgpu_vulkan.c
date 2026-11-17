@@ -868,9 +868,11 @@ static struct
 	int colorspaces, hdr_metadata;
 	/* (the HDR metadata's peak and average last set: hdr_metadata_set) */
 	float hdr_metadata_peak, hdr_metadata_average;
-	/* a smaller frame scaled up sharply (the options'), and the image
-	nearest scales it into (present_sharp) */
-	int sharp_upscale;
+	/* a smaller frame scaled up sharply: the options allow it, and the
+	front end asks for it (xgpu_vulkan_sharp_upscale, any thread:
+	display.render_scale below 1); and the image nearest scales it into
+	(present_sharp) */
+	int sharp_upscale, sharp_wanted;
 	struct xgpu_vulkan_image *sharp_image;
 	void (*display_hdr)(int hdr, float headroom, float white_nits, int white_reported);
 	struct xgpu_vulkan_image *(*encode)(struct xgpu_vulkan_image *image, const struct xgpu_hdr_frame *frame,
@@ -6813,6 +6815,11 @@ void xgpu_vulkan_window_hdr(int enabled, float sdr_white, float headroom)
 	__atomic_store_n(&vk.window_hdr_changed, 1u, __ATOMIC_RELEASE);
 }
 
+void xgpu_vulkan_sharp_upscale(int sharp)
+{
+	__atomic_store_n(&vk.sharp_wanted, sharp != 0, __ATOMIC_RELEASE);
+}
+
 void xgpu_vulkan_picture_top(int top)
 {
 	__atomic_store_n(&vk.picture_top, top < 0 ? 0 : top + 1, __ATOMIC_RELEASE);
@@ -7413,7 +7420,9 @@ static VkFilter present_sharp(VkCommandBuffer commands, struct xgpu_vulkan_image
 	VkImageBlit nearest;
 	int plan;
 
-	if (!vk.sharp_upscale)
+	/* (only for the render scale: "original" resolution scaling's 640x480
+	stays as soft as it always was) */
+	if (!vk.sharp_upscale || !__atomic_load_n(&vk.sharp_wanted, __ATOMIC_ACQUIRE))
 		return VK_FILTER_LINEAR;
 	plan = sharp_plan(frame->description.width, frame->description.height,
 		(uint32_t)(blit->dstOffsets[1].x - blit->dstOffsets[0].x), (uint32_t)(blit->dstOffsets[1].y - blit->dstOffsets[0].y),

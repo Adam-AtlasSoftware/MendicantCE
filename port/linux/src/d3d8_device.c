@@ -2391,6 +2391,21 @@ static void gamma_send(void)
 #endif
 }
 
+/* display.render_scale: the backend told to scale a smaller frame up
+sharply while the render scale draws below the display's pixels, and
+smoothly otherwise ("original" resolution scaling's 640x480 as it always
+was), as it changes */
+static void sharp_upscale_send(void)
+{
+	static int sent = -1;
+	int sharp = screen_supersampling < 1.0f;
+
+	if (!device.gl_ready || sharp == sent)
+		return;
+	xgpu_backend_sharp_upscale(sharp);
+	sent = sharp;
+}
+
 /* a point in the window, as SDL reports it, in the menus' coordinates: the
 inverse of the letterboxed display blit at presentation, the screen's
 width and the menus' centering (halo_screen_ui_offset); or, not centered,
@@ -2660,7 +2675,11 @@ long halo_screen_commit(void)
 		render_targets_evict();
 	}
 	if (!screen_width)
-		return halo_screen_width();
+	{
+		halo_screen_width();
+		sharp_upscale_send();
+		return screen_width;
+	}
 	screen_mode_choose(&width, scale);
 	if (width != screen_width || scale[0] != screen_scale[0] || scale[1] != screen_scale[1])
 	{
@@ -2677,6 +2696,7 @@ long halo_screen_commit(void)
 		/* (the entries of the old size and scale, which nothing finds now) */
 		render_targets_evict();
 	}
+	sharp_upscale_send();
 	return screen_width;
 }
 

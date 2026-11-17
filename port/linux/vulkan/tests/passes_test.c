@@ -2560,15 +2560,31 @@ static void sharp_test(void)
 	assert(sharp_plan(2000, 1000, 1920, 1080, factors) == SHARP_PRESCALED && factors[0] == 1 && factors[1] == 2);
 
 	/* presented: half the window's pixels each way blitted by nearest
-	where the options ask for it, by linear where not (Android's) */
+	where the options allow it and the front end asks for it (the render
+	scale's), by linear where the options do not (Android's) */
 	window_reset();
 	window_frame.description.width = 640;
 	window_frame.description.height = 360;
+	xgpu_vulkan_sharp_upscale(1);
 	assert(window_present_frame() && window_blit_source == window_frame.image && window_blit_filter == VK_FILTER_LINEAR);
 	vk.sharp_upscale = 1;
 	assert(window_present_frame() && window_blit_source == window_frame.image && window_blit_filter == VK_FILTER_NEAREST);
 	assert(window_blit_region.dstOffsets[1].x - window_blit_region.dstOffsets[0].x == 1280);
 	assert(window_blit_region.srcOffsets[1].x == 640 && window_blit_region.srcOffsets[1].y == 360);
+	/* "original" resolution scaling (the front end asks for no sharp
+	upscale): its 640x480 in a 1280x720 window (shown 960x720, 1.5 times)
+	by linear, from the frame itself, as it always was */
+	xgpu_vulkan_sharp_upscale(0);
+	window_frame.description.width = 640;
+	window_frame.description.height = 480;
+	assert(window_present_frame() && window_blit_source == window_frame.image && window_blit_filter == VK_FILTER_LINEAR);
+	assert(window_blit_region.dstOffsets[1].x - window_blit_region.dstOffsets[0].x == 960);
+	/* (the negative control) the same frame asked sharp: nearest, as the
+	render scale's 2 times is */
+	window_frame.description.height = 360;
+	xgpu_vulkan_sharp_upscale(1);
+	assert(window_present_frame() && window_blit_filter == VK_FILTER_NEAREST);
+	xgpu_vulkan_sharp_upscale(0);
 	reset();
 }
 
