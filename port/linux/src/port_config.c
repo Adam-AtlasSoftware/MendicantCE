@@ -581,6 +581,23 @@ static const struct config_setting config_settings[] =
 		"and dusk skies show no steps; \"8\" draws it in 8 bits, as before (half\n"
 		"the memory and bandwidth); \"auto\" is 10 on a computer and 8 on a phone\n"
 		"or tablet, or with battery saver on." },
+	{ "display.hdr_peak_nits", _config_integer, "0", "HALO_HDR_PEAK_NITS", _environment_value, _platform_all,
+		"With HDR, the display's peak in nits, 200 to 10000, for a display that\n"
+		"reports a wrong one; 0 is the system's. Only the highlights change.\n"
+		"With a peak of your own, the display's full-frame peak and black,\n"
+		"where Windows reports them, shape the highlights and the shadows too." },
+	{ "display.hdr_gamut", _config_string, "\"srgb\"", "HALO_HDR_GAMUT", _environment_value, _platform_all,
+		"With HDR, \"expanded\" lets the brightest colors (plasma, needler\n"
+		"shards) grow more vivid than sRGB, toward the display's own gamut (P3\n"
+		"where it says none, never past BT.2020), keeping their hue; \"srgb\"\n"
+		"keeps the picture as it is. Colors at or under paper white never change." },
+	{ "display.hdr_highlight_boost", _config_integer, "0", "HALO_HDR_HIGHLIGHT_BOOST", _environment_value,
+		_platform_all,
+		"With HDR, how much brighter the game's own lights are, 0 to 4: the\n"
+		"sun's lens flares and glow, glows, self-illuminated particles and\n"
+		"surfaces (vehicle lights, panels). 0 keeps the picture as it is. Never\n"
+		"past the ceilings the lights already have; the HUD, the menus, fog and\n"
+		"screen flashes stay at paper white." },
 	{ "display.gamma", _config_real, "1.0", "HALO_GAMMA", _environment_value, _platform_all,
 		"The picture's gamma, 0.5 to 2.0, as Halo PC's: above 1 brighter (the\n"
 		"dark parts lifted most), below 1 darker; white and black stay. The\n"

@@ -486,9 +486,15 @@ void render_particles(
 							render_particles_part_ends[part_index] - order_index,
 							definition->bitmap.index,
 							&definition->shader,
-							rendered_particle->attached_to_first_person_weapon
+							(rendered_particle->attached_to_first_person_weapon
 								? FLAG(_build_sprites_first_person_bit)
-								: 0);
+								: 0) |
+							/* port: a self-illuminated particle is light
+							(particles.c's _particle_definition_self_illuminated_bit,
+							9): display.hdr_highlight_boost's */
+							(TEST_FLAG(definition->flags, 9)
+								? FLAG(_build_sprites_emitter_bit)
+								: 0));
 
 						for (; order_index < render_particles_part_ends[part_index]; order_index++)
 						{

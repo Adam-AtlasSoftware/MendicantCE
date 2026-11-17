@@ -804,7 +804,8 @@ struct xgpu_vulkan_image *xgpu_vulkan_post_encode(struct xgpu_vulkan_image *imag
 		return NULL;
 	/* (the viewport's corner, and its size's reciprocals: the frame over
 	all of it; the frame's size and the sharp factors; the encoding; the
-	SDR curve, the dither's levels, display.gamma's power) */
+	SDR curve, the dither's levels, display.gamma's power, the display's
+	black) */
 	memset(uniforms, 0, sizeof(*uniforms));
 	uniforms->metrics[2] = 1.0f / (float)output->width;
 	uniforms->metrics[3] = 1.0f / (float)output->height;
@@ -819,6 +820,9 @@ struct xgpu_vulkan_image *xgpu_vulkan_post_encode(struct xgpu_vulkan_image *imag
 	uniforms->window[0] = (float)frame->sdr_curve;
 	uniforms->window[1] = output->levels;
 	uniforms->window[2] = output->power > 0.0f ? output->power : 1.0f;
+	uniforms->window[3] = frame->black;
+	uniforms->gamut[0] = frame->gamut ? 1.0f : 0.0f;
+	uniforms->gamut[1] = frame->gamut_target;
 	draw.constants = draw.uniforms;
 	memset(&dynamic, 0, sizeof(dynamic));
 	dynamic.viewport[2] = dynamic.scissor[2] = (int32_t)output->width;

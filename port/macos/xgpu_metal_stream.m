@@ -1530,6 +1530,20 @@ static void stream_hdr(void *context, const struct xgpu_stream_hdr *record)
 		(void)xgpu_metal_post_prepare_hdr(XGPU_METAL_FORMAT_D24S8, 0);
 }
 
+/* display.hdr_gamut: the encoding's gamut */
+static void stream_hdr_gamut(void *context, uint32_t value)
+{
+	(void)context;
+	host_metal_hdr_gamut((int)value);
+}
+
+/* display.hdr_peak_nits: the encoding's peak */
+static void stream_hdr_peak_nits(void *context, uint32_t value)
+{
+	(void)context;
+	host_metal_hdr_peak_nits((int)value);
+}
+
 /* display.hdr_sdr_curve: the encoding's SDR curve */
 static void stream_hdr_sdr_curve(void *context, uint32_t curve)
 {
@@ -1571,9 +1585,10 @@ static void stream_tone_map(void *context, const struct xgpu_stream_tone_map *re
 	host_metal_hdr_frame(&frame);
 	hdr[0] = (float)frame.mode;
 	hdr[1] = frame.peak;
-	/* (the view's light over the UI's white) */
+	/* (the view's light over the UI's white; the display's full-frame
+	peak, 0 none) */
 	hdr[2] = frame.ui;
-	hdr[3] = 0.0f;
+	hdr[3] = frame.full_frame;
 	target->written++;
 	kind = xgpu_metal_pass_kind(XGPU_METAL_PASS_TONE_MAP);
 	xgpu_metal_post_tone_map(target->texture, target->description.width, target->description.height,
@@ -2081,6 +2096,8 @@ const struct host_render_backend *xgpu_metal_stream_backend(void)
 		backend.tone_map = stream_tone_map;
 		backend.gamma = stream_gamma;
 		backend.hdr_sdr_curve = stream_hdr_sdr_curve;
+		backend.hdr_peak_nits = stream_hdr_peak_nits;
+		backend.hdr_gamut = stream_hdr_gamut;
 		backend.category = stream_category;
 		backend.panini = stream_panini;
 		/* display.ambient_occlusion "world" (#578, docs/world-ao.md): the

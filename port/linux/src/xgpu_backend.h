@@ -143,6 +143,12 @@ void xgpu_backend_sharp_upscale(int sharp);
 values to light by (xgpu_hdr.h's XGPU_HDR_SDR_CURVE_*; AUTO: the
 platform's), from the next present on */
 void xgpu_backend_hdr_sdr_curve(int curve);
+/* display.hdr_peak_nits (#1122): the display's peak in nits the encoding
+takes (0: the system's), from the next frame on */
+void xgpu_backend_hdr_peak_nits(int value);
+/* display.hdr_gamut (#1124): the encoding expands the highlights' colours
+past sRGB's (1) or not (0), from the next frame on */
+void xgpu_backend_hdr_gamut(int value);
 /* display.gamma: an SDR frame curved by one over this as it is presented
 (each channel raised to that power: past 1 brighter), from the next present
 on; 1 none, which costs nothing. An HDR swapchain's frame never is. */

@@ -2416,6 +2416,21 @@ static void hdr_window_test(void)
 	xgpu_vulkan_hdr_sdr_curve(XGPU_HDR_SDR_CURVE_AUTO);
 	assert(fabsf(hdr_encoded_frame.paper_white - 0.0203f) < 1e-6f && hdr_encoded_frame.peak == 4.0f);
 	assert(hdr_tells == 2);
+	/* #1122: a peak of the player's (1000 nits over the 200-nit SDR white:
+	5 paper whites), and the display's full-frame peak and black (400 and
+	0.1 nits) taken with it alone: with the System peak, none */
+	xgpu_vulkan_window_luminance(0.1f, 400.0f);
+	xgpu_vulkan_hdr_frame(&frame);
+	assert(frame.peak == 4.0f && frame.full_frame == 0.0f && frame.black == 0.0f);
+	xgpu_vulkan_hdr_peak_nits(1000);
+	xgpu_vulkan_hdr_frame(&frame);
+	assert(fabsf(frame.peak - 5.0f) < 1e-5f && fabsf(frame.full_frame - 2.0f) < 1e-5f);
+	assert(fabsf(frame.black - 0.1f * 203.0f / 200.0f / 10000.0f) < 1e-9f);
+	xgpu_vulkan_hdr_peak_nits(0);
+	xgpu_vulkan_window_luminance(0.0f, 0.0f);
+	__atomic_store_n(&vk.window_hdr_changed, 0u, __ATOMIC_RELEASE);
+	xgpu_vulkan_hdr_frame(&frame);
+	assert(frame.peak == 4.0f && frame.full_frame == 0.0f && frame.black == 0.0f);
 
 	/* paper white twice the system's: the peak in paper whites halved;
 	past the headroom, no brighter than it */
@@ -2768,6 +2783,7 @@ static void hdr_post_test(void)
 	encoding.paper_white = 0.02f;
 	encoding.peak = 4.0f;
 	encoding.sdr_curve = XGPU_HDR_SDR_CURVE_GAMMA_2_2;
+	encoding.black = 0.0001f;
 	/* (the 64x48 frame shown at 128x96, twice each way sharply, dithered
 	to 10 bits) */
 	memset(&output, 0, sizeof(output));
@@ -2787,7 +2803,7 @@ static void hdr_post_test(void)
 	assert(uniforms->bounds[0] == 64.0f && uniforms->bounds[1] == 48.0f && uniforms->bounds[2] == 2.0f &&
 		uniforms->bounds[3] == 2.0f);
 	assert(uniforms->window[0] == (float)XGPU_HDR_SDR_CURVE_GAMMA_2_2 && uniforms->window[1] == 1023.0f &&
-		uniforms->window[2] == 1.0f);
+		uniforms->window[2] == 1.0f && uniforms->window[3] == 0.0001f);
 	assert(vk.bound.viewport.width == 128.0f && vk.bound.viewport.height == 96.0f);
 
 	free(target.attachments);

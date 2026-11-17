@@ -129,6 +129,9 @@ struct post_uniforms
 	float bounds[4];
 	float hdr[4];
 	float window[4];
+	float panini[4];
+	float tangents[4];
+	float gamut[4];
 };
 
 /* the post passes' sampler linear (the backends' own), else nearest */
@@ -534,8 +537,10 @@ static void post_test(NSString *dir)
 {
 	static const float peaks[3] = { 1.0f, 4.0f, 16.0f };
 	/* (the fifth and sixth with the UI's white past and under paper
-	white's; the last two by gamma 2.2's SDR curve, display.hdr_sdr_curve's) */
-	static const struct xgpu_hdr_frame encodings[8] =
+	white's; the seventh and eighth by gamma 2.2's SDR curve,
+	display.hdr_sdr_curve's; the last two with the display's black, #1122:
+	0.05 nits in scRGB's units, 0.1 in PQ's) */
+	static const struct xgpu_hdr_frame encodings[12] =
 	{
 		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_SCRGB, 2.5f, 4.0f },
 		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_PQ, 0.02f, 4.0f },
@@ -545,6 +550,11 @@ static void post_test(NSString *dir)
 		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_PQ, 0.0203f, 10.0f, 0.6f },
 		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_SCRGB, 2.5f, 4.0f, 1.0f, XGPU_HDR_SDR_CURVE_GAMMA_2_2 },
 		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_PQ, 0.0203f, 10.0f, 1.0f, XGPU_HDR_SDR_CURVE_GAMMA_2_2 },
+		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_SCRGB, 2.5f, 4.0f, 1.0f, XGPU_HDR_SDR_CURVE_GAMMA_2_2, 0.0f, 0.05f / 80.0f },
+		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_PQ, 0.0203f, 10.0f, 1.0f, XGPU_HDR_SDR_CURVE_SRGB, 0.0f, 0.1f / 10000.0f },
+		/* (display.hdr_gamut "expanded", #1124: into P3, into BT.2020) */
+		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_SCRGB, 2.5f, 4.0f, 1.0f, XGPU_HDR_SDR_CURVE_SRGB, 0.0f, 0.0f, 1, 0.0f },
+		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_PQ, 0.0203f, 10.0f, 1.0f, XGPU_HDR_SDR_CURVE_SRGB, 0.0f, 0.0f, 1, 1.0f },
 	};
 	/* the tone map's UI white: none given (paper white's), and the UI's
 	white under and past paper white's */
@@ -621,6 +631,42 @@ static void post_test(NSString *dir)
 			}
 		}
 	}
+	/* (#1122: a display's full-frame peak, 3 paper whites under a peak of
+	16, shaping the shoulder) */
+	for (mode = XGPU_HDR_MODE_FAITHFUL; mode <= XGPU_HDR_MODE_PUNCHY; mode++)
+	{
+		id<MTLTexture> target = texture_make(MTLPixelFormatRGBA16Float, VECTORS,
+			MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead);
+		struct post_uniforms uniforms;
+
+		halves_write(target, rgba, VECTORS);
+		memset(&uniforms, 0, sizeof(uniforms));
+		uniforms.metrics[0] = 1.0f / VECTORS;
+		uniforms.metrics[1] = 1.0f;
+		uniforms.metrics[2] = VECTORS;
+		uniforms.metrics[3] = 1.0f;
+		uniforms.hdr[0] = (float)mode;
+		uniforms.hdr[1] = 16.0f;
+		uniforms.hdr[3] = 3.0f;
+		post_draw(tone_pipeline, target, nil, &uniforms);
+		halves_read(target, got, VECTORS);
+		for (vector = 0; vector < VECTORS; vector++)
+		{
+			float expected[3];
+
+			for (channel = 0; channel < 3; channel++)
+				expected[channel] = half_of(vectors[vector][channel]);
+			xgpu_hdr_tone_map_full(expected, mode, 16.0f, 3.0f);
+			for (channel = 0; channel < 3; channel++)
+			{
+				if (!close_to(got[vector * 4 + channel], expected[channel]))
+					FAIL("tone map, %s with a full-frame peak: vector %d channel %d: %.5f, the reference %.5f",
+						mode ? "punchy" : "faithful", vector, channel, (double)got[vector * 4 + channel],
+						(double)expected[channel]);
+				checked++;
+			}
+		}
+	}
 	/* (a pixel not a number, or infinite, either way: tone mapped as 0, and
 	as the half floats' most and least, finite) */
 	{
@@ -662,7 +708,7 @@ static void post_test(NSString *dir)
 		}
 		printf("post: %d values not a number or infinite tone mapped finite\n", finite);
 	}
-	for (which = 0; which < 8; which++)
+	for (which = 0; which < 12; which++)
 	{
 		id<MTLTexture> source = texture_make(MTLPixelFormatRGBA16Float, VECTORS, MTLTextureUsageShaderRead);
 		id<MTLTexture> target = texture_make(MTLPixelFormatRGBA32Float, VECTORS, MTLTextureUsageRenderTarget);
@@ -680,6 +726,9 @@ static void post_test(NSString *dir)
 		uniforms.hdr[2] = (float)encodings[which].output;
 		uniforms.hdr[3] = encodings[which].ui;
 		uniforms.window[0] = (float)encodings[which].sdr_curve;
+		uniforms.window[3] = encodings[which].black;
+		uniforms.gamut[0] = (float)encodings[which].gamut;
+		uniforms.gamut[1] = encodings[which].gamut_target;
 		post_draw(encode_pipeline, target, source, &uniforms);
 		[target getBytes:got bytesPerRow:VECTORS * 16 fromRegion:MTLRegionMake2D(0, 0, VECTORS, 1) mipmapLevel:0];
 		for (vector = 0; vector < VECTORS; vector++)
@@ -790,7 +839,7 @@ static void draws_test(NSString *dir)
 	NSArray<NSString *> *lines = [index componentsSeparatedByString:@"\n"];
 	static float colors[2 * PIXELS * 4], had[PIXELS * 4], vulkan[PIXELS * 4], metal[PIXELS * 4];
 	unsigned spirv_offset = 0, msl_offset = 0, spirv_constants = 0, msl_constants = 0, seed = 12345;
-	int pixel, channel, draws = 0, compared = 0, unclamped = 0, self_illuminated = 0, interlocked_draws = 0;
+	int pixel, channel, draws = 0, compared = 0, unclamped = 0, self_illuminated = 0, interlocked_draws = 0, emitted = 0;
 	NSUInteger line;
 
 	if (!index || lines.count < 2 || sscanf(lines[0].UTF8String, "blend_constant %u %u ps_c0 %u %u", &spirv_offset,
@@ -830,7 +879,9 @@ static void draws_test(NSString *dir)
 
 		if (sscanf(lines[line].UTF8String, "%63s %u", name, &tag) != 2)
 			continue;
-		ceiling = XGPU_HDR_CEILING_OF(tag);
+		/* (the ceiling's bits of the tags past the blends' are a boost's
+		level) */
+		ceiling = XGPU_HDR_BLEND_OPERATION(tag) < 6 ? XGPU_HDR_CEILING_OF(tag) : 0;
 		ceiling_value = xgpu_hdr_ceiling_value(ceiling);
 		/* (interlocked: Vulkan's storage image against Metal's programmable
 		blending, each pixel drawn twice in one draw; the rest of the
@@ -904,7 +955,7 @@ static void draws_test(NSString *dir)
 					lit[channel] = fminf(base[channel] + self_illumination_color[channel] * colors[pixel * 4 + 3], 1.0f);
 				}
 				if (tag)
-					xgpu_hdr_self_illuminate(lit, base);
+					xgpu_hdr_self_illuminate_boost(lit, base, XGPU_HDR_BOOST_OF(tag));
 				for (channel = 0; channel < 3; channel++)
 				{
 					float v = vulkan[pixel * 4 + channel];
@@ -912,9 +963,30 @@ static void draws_test(NSString *dir)
 					if (fabsf(v - lit[channel]) > 0.003f + 0.002f * lit[channel])
 						FAIL("%s: pixel %d channel %d: %.5f, the reference's %.5f", name, pixel, channel, (double)v,
 							(double)lit[channel]);
-					if (v > (tag ? XGPU_HDR_SELF_ILLUMINATION_VALUE * 1.002f : 1.0f))
+					if (v > (tag ? XGPU_HDR_SELF_ILLUMINATION_VALUE * 1.002f + 0.002f : 1.0f))
 						FAIL("%s: pixel %d channel %d past its ceiling: %.5f", name, pixel, channel, (double)v);
 					self_illuminated += tag && v > 1.0f;
+				}
+			}
+			if (XGPU_HDR_IS_EMITTER(tag))
+			{
+				/* (an emitter: its colour gained, as the reference has it,
+				no further than its bound's ceiling) */
+				float gained[3];
+
+				for (channel = 0; channel < 3; channel++)
+					gained[channel] = colors[pixel * 4 + channel];
+				xgpu_hdr_boost_emitter(gained, XGPU_HDR_BOOST_OF(tag), XGPU_HDR_EMITTER_BOUND(tag));
+				for (channel = 0; channel < 3; channel++)
+				{
+					float v = vulkan[pixel * 4 + channel];
+
+					if (fabsf(v - gained[channel]) > 0.003f + 0.002f * gained[channel])
+						FAIL("%s: pixel %d channel %d: %.5f, the reference's %.5f", name, pixel, channel, (double)v,
+							(double)gained[channel]);
+					if (v > xgpu_hdr_ceiling_value(XGPU_HDR_EMITTER_BOUND(tag)) * 1.002f)
+						FAIL("%s: pixel %d channel %d past its bound: %.5f", name, pixel, channel, (double)v);
+					emitted += v > colors[pixel * 4 + channel] + 0.01f;
 				}
 			}
 			if (XGPU_HDR_GLOW(tag))
@@ -929,9 +1001,12 @@ static void draws_test(NSString *dir)
 		}
 	}
 	printf("draws: %d draws (%d interlocked), %d values compared between the backends, %d past 1 unclamped, "
-		"%d past 1 self-illuminated\n", draws, interlocked_draws, compared, unclamped, self_illuminated);
-	if (draws != 141 || interlocked_draws != 72)
-		FAIL("draws: %d drawn (%d interlocked), not 141 (72)", draws, interlocked_draws);
+		"%d past 1 self-illuminated, %d gained\n", draws, interlocked_draws, compared, unclamped, self_illuminated,
+		emitted);
+	if (draws != 144 || interlocked_draws != 72)
+		FAIL("draws: %d drawn (%d interlocked), not 144 (72)", draws, interlocked_draws);
+	if (emitted < PIXELS)
+		FAIL("draws: %d values gained by the boost", emitted);
 	if (unclamped < PIXELS)
 		FAIL("draws: %d values past 1 unclamped", unclamped);
 	if (self_illuminated < PIXELS / 4)

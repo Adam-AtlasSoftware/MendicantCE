@@ -808,6 +808,21 @@ void xgpu_vulkan_sharp_upscale(int sharp);
 /* display.hdr_sdr_curve (XGPU_HDR_SDR_CURVE_*; AUTO: sRGB's on Apple's
 platforms, gamma 2.2 elsewhere), for the encoding (any thread) */
 void xgpu_vulkan_hdr_sdr_curve(int curve);
+/* display.hdr_peak_nits (#1122): the display's peak in nits, of the
+player's (0: the window's, the system's), for the encoding (any thread) */
+void xgpu_vulkan_hdr_peak_nits(int nits);
+/* the window's display's black and full-frame peak in nits, where the
+system reports them (Windows' DXGI; 0 none), which the tone map and the
+encoding take with a peak of the player's (any thread) */
+void xgpu_vulkan_window_luminance(float black_nits, float full_frame_nits);
+/* display.hdr_gamut (#1124): the highlights' colours expanded past sRGB's
+(any thread) */
+void xgpu_vulkan_hdr_gamut(int expanded);
+/* the gamut the window's display's primaries make (xgpu_hdr_gamut_target:
+0, P3's, where the system says none; any thread) */
+void xgpu_vulkan_window_gamut(float target);
+/* the device's LUID (Windows' adapter's), 0 where it has none */
+int xgpu_vulkan_device_luid(unsigned char luid[8]);
 /* display.gamma (the stream's record, render thread): the setting, 1 for
 none, from the next present on; an SDR frame is curved by one over it
 (present), an HDR swapchain's never */

@@ -306,6 +306,9 @@ static struct
 	/* the game's renderer's category, and what its code says of the draws
 	(halo_hdr_category, halo_hdr_draw_kind) */
 	int category, kind;
+	/* display.hdr_highlight_boost's level (0 none: XGPU_HDR_BOOST_MOST at
+	most; #1123) */
+	int boost;
 	/* a window's 3D view is drawn (its categories), until it is tone
 	mapped: the draws after are the HUD's and the menus' */
 	BOOL view;
@@ -317,7 +320,7 @@ static struct
 	int display_logged;
 	char display_text[160];
 	int display_text_frames;
-} hdr = { FALSE, FALSE, 0, 0, -1, 0, 0, FALSE, FALSE, -1 };
+} hdr = { FALSE, FALSE, 0, 0, -1, 0, 0, 0, FALSE, FALSE, -1 };
 
 /* ---------- display.output_depth (#1152)
 
@@ -687,6 +690,7 @@ static unsigned short hdr_tag(const struct xgpu_pipeline_key *key)
 	draw.interface = !hdr.view;
 	draw.kind = hdr.kind;
 	draw.mode = hdr.mode;
+	draw.boost = hdr.boost;
 	return xgpu_hdr_classify(&draw);
 }
 
@@ -2453,6 +2457,53 @@ static void hdr_sdr_curve_send(void)
 	sent = curve;
 }
 
+/* display.hdr_peak_nits (#1122): the display's peak the backend's HDR
+encoding takes (0 the system's; else at least
+XGPU_HDR_PEAK_NITS_LEAST, at most _MOST), as it changes */
+static void hdr_peak_nits_send(void)
+{
+	static int sent = -1;
+	/* (read again as the settings change: config_changes) */
+	static unsigned long read_at = (unsigned long)-1;
+	int nits;
+
+	if (!device.gl_ready || read_at == config_changes())
+		return;
+	read_at = config_changes();
+	nits = (int)config_integer("display.hdr_peak_nits");
+	nits = nits <= 0 ? 0 : nits < XGPU_HDR_PEAK_NITS_LEAST ? XGPU_HDR_PEAK_NITS_LEAST :
+		nits > XGPU_HDR_PEAK_NITS_MOST ? XGPU_HDR_PEAK_NITS_MOST : nits;
+	if (nits == sent)
+		return;
+	if (sent >= 0 || nits)
+		platform_log(nits ? "hdr: display peak set to %d nits" : "hdr: display peak the system's", nits);
+	xgpu_backend_hdr_peak_nits(nits);
+	sent = nits;
+}
+
+/* display.hdr_gamut (#1124): the backend's HDR encoding expands the
+highlights' colours ("expanded") or not ("srgb"), as it changes */
+static void hdr_gamut_send(void)
+{
+	static int sent = -1;
+	/* (read again as the settings change: config_changes) */
+	static unsigned long read_at = (unsigned long)-1;
+	const char *setting;
+	int expanded;
+
+	if (!device.gl_ready || read_at == config_changes())
+		return;
+	read_at = config_changes();
+	setting = config_string("display.hdr_gamut");
+	expanded = setting && !strcmp(setting, "expanded");
+	if (expanded == sent)
+		return;
+	if (sent >= 0 || expanded)
+		platform_log("hdr: gamut %s", expanded ? "expanded" : "srgb");
+	xgpu_backend_hdr_gamut(expanded);
+	sent = expanded;
+}
+
 /* a point in the window, as SDL reports it, in the menus' coordinates: the
 inverse of the letterboxed display blit at presentation, the screen's
 width and the menus' centering (halo_screen_ui_offset); or, not centered,
@@ -2588,6 +2639,10 @@ static void hdr_read(void)
 		ui_nits_read = (int)config_integer("display.hdr_ui_nits");
 		mode_read = config_string("display.hdr_mode") && !strcmp(config_string("display.hdr_mode"), "punchy") ?
 			XGPU_HDR_MODE_PUNCHY : XGPU_HDR_MODE_FAITHFUL;
+		/* (display.hdr_highlight_boost: the draws' tags take it as they are
+		made, #1123) */
+		hdr.boost = (int)config_integer("display.hdr_highlight_boost");
+		hdr.boost = hdr.boost < 0 ? 0 : hdr.boost > XGPU_HDR_BOOST_MOST ? XGPU_HDR_BOOST_MOST : hdr.boost;
 	}
 	setting = setting_read;
 	paper_white = paper_white_read;
@@ -2744,6 +2799,10 @@ long halo_screen_commit(void)
 	gamma_send();
 	/* (display.hdr_sdr_curve) */
 	hdr_sdr_curve_send();
+	/* (display.hdr_peak_nits) */
+	hdr_peak_nits_send();
+	/* (display.hdr_gamut) */
+	hdr_gamut_send();
 	/* display.shadow_resolution, if it has changed: the maps' entries at
 	the old scale are freed (render_targets_evict), new ones made at the new */
 	if (shadow_scale && shadow_scale_read_at != config_changes())

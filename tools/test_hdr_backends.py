@@ -124,7 +124,7 @@ def test_post_shaders_on_the_gpu(harness):
         spv.write_bytes(struct.pack(f"<{len(arrays[name])}I", *arrays[name]))
         _cross(spv, post / (name.replace("_frag", "") + ".metal"), stage, entry, fetch)
     output = _run(binary, "post", str(post))
-    assert "post: 1248 values checked" in output, output
+    assert "post: 1536 values checked" in output, output
     assert "post: 9 values not a number or infinite tone mapped finite" in output, output
     assert "dither: means within" in output, output
     assert "depth: 16-bit frame" in output, output
@@ -148,7 +148,7 @@ def test_draws_agree_on_the_gpu(harness):
     out = folder / "draws"
     subprocess.run([str(tool), str(out)], check=True)
     names = [line.split()[0] for line in (out / "index.txt").read_text().splitlines()[1:]]
-    assert len(names) == 141
+    assert len(names) == 144
     validator = shutil.which("spirv-val")
     for name in names:
         # (the interlocked draws: valid for Vulkan 1.3, their target a storage image under a raster order group)
@@ -160,4 +160,4 @@ def test_draws_agree_on_the_gpu(harness):
         for stem in (f"{name}.vk", name):
             (out / f"{stem}.vertex.metal").write_text(_vertex((out / f"{stem}.metal").read_text()))
     output = _run(binary, "draws", str(out))
-    assert "draws: 141 draws (72 interlocked), 288768 values compared" in output, output
+    assert "draws: 144 draws (72 interlocked), 294912 values compared" in output, output

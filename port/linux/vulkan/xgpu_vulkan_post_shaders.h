@@ -64,6 +64,9 @@ struct xgpu_vulkan_post_uniforms
 	float window[4];
 	float panini[4];
 	float tangents[4];
+	/* display.hdr_gamut's (#1124): the encoding's expansion (1, 0 none)
+	and its target (xgpu_hdr_frame.gamut_target) */
+	float gamut[4];
 };
 
 struct xgpu_vulkan_post_module

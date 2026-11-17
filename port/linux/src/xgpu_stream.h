@@ -308,6 +308,12 @@ enum
 	values to light by (value: xgpu_hdr.h's XGPU_HDR_SDR_CURVE_*, AUTO the
 	backend's platform's) */
 	XGPU_STREAM_HDR_SDR_CURVE,
+	/* display.hdr_peak_nits (#1122): the display's peak in nits, of the
+	player's (value; 0 the system's) */
+	XGPU_STREAM_HDR_PEAK_NITS,
+	/* display.hdr_gamut (#1124): the highlights' colours expanded past
+	sRGB's (value 1; 0 sRGB's) */
+	XGPU_STREAM_HDR_GAMUT,
 	XGPU_STREAM_RECORD_TYPES,
 };
 
@@ -329,7 +335,7 @@ struct xgpu_stream_frame_end
 };
 
 /* a record of one value: ANTI_ALIASING_PREPARE (smaa), TARGET_DELETE,
-TARGET_RESOLVE, PRESENT (the back buffer's target), PICTURE_POSITION, GAMMA, SHARP_UPSCALE, HDR_SDR_CURVE, VR_PASS, VR_TIMING
+TARGET_RESOLVE, PRESENT (the back buffer's target), PICTURE_POSITION, GAMMA, SHARP_UPSCALE, HDR_SDR_CURVE, HDR_PEAK_NITS, HDR_GAMUT, VR_PASS, VR_TIMING
 (mark), PIPELINE (the id, XGPU_STREAM_PIPELINE_DEFINE's), VR_SKY (sky) */
 struct xgpu_stream_value
 {
