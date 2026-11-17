@@ -1607,6 +1607,25 @@ PAGES = {
              "materials or lights change; a finished bake is otherwise kept).", "desktop"),
             ("PROGRESS ON SCREEN", "display.bake_indicator", ON_OFF,
              "Shows \"Baking lightmaps 37%\" at the top left while a level is baked.", "desktop"),
+            # (PRISM v4 M5, docs/prism_plugin.md: the 3D view drawn smaller and
+            # upscaled before the HUD; DLSS a plugin the player builds)
+            (SECTION, "UPSCALING"),
+            ("UPSCALER", "display.upscaler", [("OFF", "off"), ("FSR 3.1", "fsr3"), ("DLSS", "plugin:dlss")],
+             "Draws the 3D view smaller and brings it to the screen's resolution, sharp and anti-aliased. "
+             "FSR 3.1 is built in; DLSS is a plugin you build (docs/prism_plugin.md), used from the next start.",
+             "desktop"),
+            ("RENDER SCALE", "display.render_scale",
+             [("QUALITY", "0"), ("100%", "1"), ("77%", "0.77"), ("67%", "0.67"), ("58%", "0.58"), ("50%", "0.5"),
+              ("33%", "0.33")],
+             "How much of the screen's resolution the 3D view is drawn at, each way, under an upscaler. "
+             "Quality is 67%; less is faster and softer.", "desktop"),
+            ("SHARPNESS", "display.upscaler_sharpness",
+             [("OFF", "0"), ("LOW", "0.25"), ("MEDIUM", "0.5"), ("HIGH", "0.8")],
+             "How much the upscaled view is sharpened.", "desktop"),
+            ("DENOISER", "display.denoiser",
+             [("PRISM", "prism"), ("DLSS RAY RECON.", "plugin:dlss"), ("OFF", "off")],
+             "What smooths the path tracer's light: PRISM's own filter, or DLSS Ray Reconstruction, a plugin "
+             "you build (used from the next start).", "desktop"),
         ],
     },
     PRISM_PT_PAGE[0]: {
