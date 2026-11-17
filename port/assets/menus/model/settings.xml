@@ -125,63 +125,42 @@
 			<choice shown="ON" value="true"/>
 			<choice shown="OFF" value="false"/>
 		</row>
-		<section key="section_6" title="VOLUME"/>
-		<row key="volume" kind="choice" setting="audio.volume" label="MASTER VOLUME" crumb="AUDIO › VOLUME">
-			<help>The volume of everything the game plays. 10 is the Xbox's level; up to 20 is louder.</help>
-			<choice shown="0" value="0"/>
-			<choice shown="1" value="0.1"/>
-			<choice shown="2" value="0.2"/>
-			<choice shown="3" value="0.3"/>
-			<choice shown="4" value="0.4"/>
-			<choice shown="5" value="0.5"/>
-			<choice shown="6" value="0.6"/>
-			<choice shown="7" value="0.7"/>
-			<choice shown="8" value="0.8"/>
-			<choice shown="9" value="0.9"/>
-			<choice shown="10" value="1"/>
-			<choice shown="11" value="1.1"/>
-			<choice shown="12" value="1.2"/>
-			<choice shown="13" value="1.3"/>
-			<choice shown="14" value="1.4"/>
-			<choice shown="15" value="1.5"/>
-			<choice shown="16" value="1.6"/>
-			<choice shown="17" value="1.7"/>
-			<choice shown="18" value="1.8"/>
-			<choice shown="19" value="1.9"/>
-			<choice shown="20" value="2"/>
+		<row key="voice_chat_settings" kind="link" label="MULTIPLAYER ›" crumb="AUDIO › SOUND" open="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/voice_chat_screen">
+			<help>Voice chat in network games (your microphone and the other players' voices' volume) and hit sounds.</help>
 		</row>
-		<row key="music_volume" kind="choice" setting="audio.music_volume" label="MUSIC VOLUME" crumb="AUDIO › VOLUME">
+		<section key="section_7" title="VOLUME"/>
+		<row key="volume" kind="slider" setting="audio.volume" label="MASTER VOLUME" crumb="AUDIO › VOLUME" least="0" most="110" step="1" typed_least="0" typed_most="110" whole="true" curve="volume">
+			<help>The volume of everything the game plays. 100% is the Xbox's level; up to 200% is louder.</help>
+		</row>
+		<row key="music_volume" kind="slider" setting="audio.music_volume" label="MUSIC VOLUME" crumb="AUDIO › VOLUME" least="0" most="100" step="1" typed_least="0" typed_most="100" whole="true" curve="volume">
 			<help>The music's volume.</help>
-			<choice shown="0" value="0"/>
-			<choice shown="1" value="0.1"/>
-			<choice shown="2" value="0.2"/>
-			<choice shown="3" value="0.3"/>
-			<choice shown="4" value="0.4"/>
-			<choice shown="5" value="0.5"/>
-			<choice shown="6" value="0.6"/>
-			<choice shown="7" value="0.7"/>
-			<choice shown="8" value="0.8"/>
-			<choice shown="9" value="0.9"/>
-			<choice shown="10" value="1"/>
 		</row>
-		<row key="effects_volume" kind="choice" setting="audio.effects_volume" label="EFFECTS VOLUME" crumb="AUDIO › VOLUME">
-			<help>Every other sound: weapons, vehicles, the world and the characters' speech.</help>
-			<choice shown="0" value="0"/>
-			<choice shown="1" value="0.1"/>
-			<choice shown="2" value="0.2"/>
-			<choice shown="3" value="0.3"/>
-			<choice shown="4" value="0.4"/>
-			<choice shown="5" value="0.5"/>
-			<choice shown="6" value="0.6"/>
-			<choice shown="7" value="0.7"/>
-			<choice shown="8" value="0.8"/>
-			<choice shown="9" value="0.9"/>
-			<choice shown="10" value="1"/>
+		<row key="dialogue_volume" kind="slider" setting="audio.dialogue_volume" label="DIALOGUE VOLUME" crumb="AUDIO › VOLUME" least="0" most="100" step="1" typed_least="0" typed_most="100" whole="true" curve="volume">
+			<help>The characters' speech: Cortana, the Marines and the cutscenes' lines.</help>
 		</row>
-		<section key="section_10" title="MULTIPLAYER"/>
-		<row key="voice_chat_settings" kind="link" label="VOICE CHAT ›" crumb="AUDIO › MULTIPLAYER" open="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/voice_chat_screen">
-			<help>Talking to the other players in network games, your microphone and their voices' volume.</help>
+		<row key="effects_volume" kind="slider" setting="audio.effects_volume" label="EFFECTS VOLUME" crumb="AUDIO › VOLUME" least="0" most="100" step="1" typed_least="0" typed_most="100" whole="true" curve="volume">
+			<help>Every other sound: weapons, vehicles and the world.</help>
 		</row>
+		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this tab's settings back to their defaults. Nothing changes until OK."/>
+		<button key="button_ok" kind="ok" run="port settings ok" help="Keeps your changes, on every tab, and applies them."/>
+		<button key="button_cancel" kind="cancel" run="port settings cancel" help="Leaves Settings without keeping any change."/>
+	</screen>
+	<screen name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/voice_chat_screen" kind="settings" layout="page" geometry="tall" title="MULTIPLAYER AUDIO">
+		<section key="section_0" title="VOICE CHAT"/>
+		<row key="voice_chat" kind="choice" setting="audio.voice_chat" label="VOICE CHAT" crumb="AUDIO › MULTIPLAYER" search="mic microphone" search_choices="push talk open mic">
+			<help>Talk to the other players in network games: while Push to Talk is held (Key Bindings sets its key), whenever you speak, or never.</help>
+			<choice shown="PUSH TO TALK" value="push_to_talk"/>
+			<choice shown="OPEN MIC" value="open_mic"/>
+			<choice shown="OFF" value="off"/>
+		</row>
+		<row key="input_device" kind="choice" setting="audio.input_device" label="INPUT DEVICE" crumb="AUDIO › MULTIPLAYER" search="mic microphone" when="desktop">
+			<help>The microphone voice chat listens to.</help>
+			<choice shown="SYSTEM DEFAULT" value="default"/>
+		</row>
+		<row key="voice_volume" kind="slider" setting="audio.voice_volume" label="VOICE VOLUME" crumb="AUDIO › MULTIPLAYER" least="0" most="100" step="1" typed_least="0" typed_most="100" whole="true" curve="volume">
+			<help>How loud the other players' voices are.</help>
+		</row>
+		<section key="section_4" title="HIT SOUNDS"/>
 		<row key="hit_sounds" kind="choice" setting="audio.hit_sounds" label="HIT SOUNDS" crumb="AUDIO › MULTIPLAYER">
 			<help>A short beep each time you damage another player, as the host dealt it. A host may forbid them in its games.</help>
 			<note>The beep is a placeholder for now.</note>
@@ -192,36 +171,6 @@
 			<help>In the games you host, whether the players may hear their hit sounds. A Legacy game's players cannot be told.</help>
 			<choice shown="YES" value="true"/>
 			<choice shown="NO" value="false"/>
-		</row>
-		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this tab's settings back to their defaults. Nothing changes until OK."/>
-		<button key="button_ok" kind="ok" run="port settings ok" help="Keeps your changes, on every tab, and applies them."/>
-		<button key="button_cancel" kind="cancel" run="port settings cancel" help="Leaves Settings without keeping any change."/>
-	</screen>
-	<screen name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/voice_chat_screen" kind="settings" layout="page" geometry="tall" title="VOICE CHAT">
-		<section key="section_0" title="VOICE CHAT"/>
-		<row key="voice_chat" kind="choice" setting="audio.voice_chat" label="VOICE CHAT" crumb="AUDIO › VOICE CHAT" search="mic microphone" search_choices="push talk open mic">
-			<help>Talk to the other players in network games: while Push to Talk is held (Key Bindings sets its key), whenever you speak, or never.</help>
-			<choice shown="PUSH TO TALK" value="push_to_talk"/>
-			<choice shown="OPEN MIC" value="open_mic"/>
-			<choice shown="OFF" value="off"/>
-		</row>
-		<row key="input_device" kind="choice" setting="audio.input_device" label="INPUT DEVICE" crumb="AUDIO › VOICE CHAT" search="mic microphone" when="desktop">
-			<help>The microphone voice chat listens to.</help>
-			<choice shown="SYSTEM DEFAULT" value="default"/>
-		</row>
-		<row key="voice_volume" kind="choice" setting="audio.voice_volume" label="VOICE VOLUME" crumb="AUDIO › VOICE CHAT">
-			<help>How loud the other players' voices are.</help>
-			<choice shown="0" value="0"/>
-			<choice shown="1" value="0.1"/>
-			<choice shown="2" value="0.2"/>
-			<choice shown="3" value="0.3"/>
-			<choice shown="4" value="0.4"/>
-			<choice shown="5" value="0.5"/>
-			<choice shown="6" value="0.6"/>
-			<choice shown="7" value="0.7"/>
-			<choice shown="8" value="0.8"/>
-			<choice shown="9" value="0.9"/>
-			<choice shown="10" value="1"/>
 		</row>
 		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
 		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>
@@ -344,17 +293,10 @@
 		<row key="streamer_mode" kind="link" label="STREAMER MODE ›" crumb="ONLINE › INTERNET" search="censor profanity" open="main_menu/settings_select/player_setup/player_profile_edit/interface_settings/streamer_mode/streamer_mode_screen">
 			<help>Hides offensive words in names and text from other players, maps and mods, as stars.</help>
 		</row>
-		<row key="auto_pickup" kind="choice" setting="game.auto_pickup" label="WEAPON PICKUP" crumb="ONLINE › INTERNET" search_choices="hold xbox walk over ce">
-			<help>Multiplayer, with a weapon slot empty: Hold picks up a weapon as you hold the action button, as on the Xbox; Walk Over as you walk over it, as in Custom Edition. Online: the host's choice.</help>
-			<choice shown="HOLD (XBOX)" value="false"/>
-			<choice shown="WALK OVER (CE)" value="true"/>
+		<row key="gameplay" kind="link" label="GAMEPLAY ›" crumb="ONLINE › INTERNET" open="main_menu/settings_select/player_setup/player_profile_edit/network_setup/gameplay/gameplay_screen">
+			<help>Multiplayer's rules: how weapons are picked up, and vehicle hijacking. Online: the host's choice.</help>
 		</row>
-		<row key="vehicle_hijack" kind="choice" setting="game.vehicle_hijack" label="VEHICLE HIJACKING" crumb="ONLINE › INTERNET">
-			<help>Hold the action button beside an enemy's Ghost, Warthog or landed Banshee to throw the rider out and take it. Online: the host's choice.</help>
-			<choice shown="ON" value="true"/>
-			<choice shown="OFF" value="false"/>
-		</row>
-		<section key="section_9" title="MAP SHARING" when="desktop android"/>
+		<section key="section_8" title="MAP SHARING" when="desktop android"/>
 		<row key="map_download" kind="choice" setting="network.map_download" label="DOWNLOAD MAPS" crumb="ONLINE › MAP SHARING" when="desktop android">
 			<help>Joining a game on a map you do not have downloads it, if it is shared: a Custom Edition map from the players, an MCC map from the host, after asking.</help>
 			<choice shown="ON" value="true"/>
@@ -377,7 +319,7 @@
 			<choice shown="8 MB/S" value="8192"/>
 			<choice shown="10 MB/S" value="10240"/>
 		</row>
-		<section key="section_13" title="UPDATES" when="desktop android"/>
+		<section key="section_12" title="UPDATES" when="desktop android"/>
 		<row key="auto" kind="choice" setting="update.auto" label="CHECK FOR UPDATES" crumb="ONLINE › UPDATES" when="desktop+!in_game android+!in_game">
 			<help>Looks for a new version when the game starts.</help>
 			<choice shown="ON" value="true"/>
@@ -517,8 +459,11 @@
 	</screen>
 	<screen name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/advanced_graphics_screen" kind="settings" layout="page" geometry="tall" title="ADVANCED GRAPHICS">
 		<row key="render_resolution" kind="choice" setting="display.render_resolution" label="RENDER RESOLUTION" crumb="VIDEO › ADVANCED GRAPHICS" search_choices="xbox 640x480 full" when="computer">
-			<help>Full draws the game at your screen's resolution. Above 100% draws it larger and scales it down: finer and smoother, for over twice the graphics card's work at 150%, four times at 200%. Xbox draws 640x480, scaled up: softer, and very light.</help>
+			<help>Full draws at your screen's resolution. Below 100% draws fewer pixels, scaled up sharply: a steadier frame rate. Above 100% draws more, scaled down: smoother, for over twice the work at 150%. Xbox draws 640x480.</help>
 			<choice shown="XBOX 640X480" value="original"/>
+			<choice shown="25%" value="0.25"/>
+			<choice shown="50%" value="0.5"/>
+			<choice shown="75%" value="0.75"/>
 			<choice shown="FULL" value="1"/>
 			<choice shown="125%" value="1.25"/>
 			<choice shown="150%" value="1.5"/>
@@ -746,10 +691,11 @@
 			<choice shown="ON" value="on"/>
 			<choice shown="OFF" value="off"/>
 		</row>
-		<row key="show_frame_rate" kind="choice" setting="display.show_frame_rate" label="SHOW FRAME RATE" crumb="VIDEO › FRAME RATE &amp; SYNC" search="fps framerate">
-			<help>Draws the frame rate at the bottom right of the screen, to see how the game runs: the frames drawn each second, averaged over half a second. Green is 30 or more, red under 30.</help>
-			<choice shown="ON" value="true"/>
-			<choice shown="OFF" value="false"/>
+		<row key="perf_overlay" kind="choice" setting="display.perf_overlay" label="PERFORMANCE OVERLAY" crumb="VIDEO › FRAME RATE &amp; SYNC" search="fps framerate frametime gpu stats" search_choices="simple detailed">
+			<help>Shows how the game runs, at the bottom right. Simple is the frame rate: green is 30 or more, red under 30. Detailed adds the frame time, the 1% low, and the milliseconds spent on the GPU, the render thread, the game and waiting for the display.</help>
+			<choice shown="OFF" value="off"/>
+			<choice shown="SIMPLE" value="simple"/>
+			<choice shown="DETAILED" value="detailed"/>
 		</row>
 		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
 		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>
@@ -984,18 +930,28 @@
 			<choice shown="9" value="9"/>
 			<choice shown="10" value="10"/>
 		</row>
+		<row key="look_vertical_sensitivity" kind="choice" setting="input.look_vertical_sensitivity" label="VERTICAL SENSITIVITY" crumb="CONTROLS › CONTROLLER" search="sens">
+			<help>How fast the right stick looks up and down, times LOOK SENSITIVITY's. 1X is the game's own, half as fast as it turns side to side.</help>
+			<choice shown="0.25X" value="0.25"/>
+			<choice shown="0.5X" value="0.5"/>
+			<choice shown="0.6X" value="0.6"/>
+			<choice shown="0.7X" value="0.7"/>
+			<choice shown="0.75X" value="0.75"/>
+			<choice shown="0.8X" value="0.8"/>
+			<choice shown="0.9X" value="0.9"/>
+			<choice shown="1X" value="1"/>
+			<choice shown="1.1X" value="1.1"/>
+			<choice shown="1.25X" value="1.25"/>
+			<choice shown="1.5X" value="1.5"/>
+			<choice shown="2X" value="2"/>
+		</row>
 		<row key="invert_look" kind="choice" setting="profile.invert_look" label="INVERT LOOK" crumb="CONTROLS › CONTROLLER" when="profile">
 			<help>Pushing the right stick up looks down.</help>
 			<choice shown="YES" value="true"/>
 			<choice shown="NO" value="false"/>
 		</row>
-		<row key="invert_look_horizontal" kind="choice" setting="input.invert_look_horizontal" label="INVERT TURNING" crumb="CONTROLS › CONTROLLER">
-			<help>Pushing the right stick right turns the view left. For every controller on this device.</help>
-			<choice shown="YES" value="true"/>
-			<choice shown="NO" value="false"/>
-		</row>
 		<row key="gyro_flick_stick" kind="link" label="GYRO &amp; FLICK STICK ›" crumb="CONTROLS › CONTROLLER" open="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/gyro/gyro_screen">
-			<help>Aim by turning a controller that has a gyroscope; the right stick's aim style (Classic or Modern), and the right stick as a flick stick.</help>
+			<help>Aim by turning a controller that has a gyroscope; the right stick's aim style (Classic or Modern) and turning direction, and the right stick as a flick stick.</help>
 		</row>
 		<row key="flight_inversion" kind="choice" setting="profile.flight_inversion" label="INVERT FLIGHT" crumb="CONTROLS › CONTROLLER" when="profile">
 			<help>Flying vehicles pitch as aircraft do: pushing up flies down.</help>
@@ -1007,7 +963,7 @@
 			<choice shown="YES" value="true"/>
 			<choice shown="NO" value="false"/>
 		</row>
-		<section key="section_7" title="LAYOUT"/>
+		<section key="section_7" title="LAYOUT &amp; FEEDBACK"/>
 		<row key="button_preset" kind="choice" setting="profile.button_preset" label="BUTTON LAYOUT" crumb="CONTROLS › CONTROLLER" search_choices="swap triggers a l trigger b r stick bumper jumper fishsticks recon" when="profile">
 			<help>Which of the controller's buttons does what. Button Remapping sets them one by one; the keyboard's keys are Key Bindings'.</help>
 			<choice shown="DEFAULT" value="0"/>
@@ -1029,14 +985,27 @@
 		<row key="button_remapping" kind="link" label="BUTTON REMAPPING ›" crumb="CONTROLS › CONTROLLER" open="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/button_remapping_screen">
 			<help>Put any action on any button, each player their own layout, the D-pad and Back too: chat, push to talk, the scoreboard, a screenshot.</help>
 		</row>
-		<row key="stick_dead_zones" kind="link" label="STICK DEAD ZONES ›" crumb="CONTROLS › CONTROLLER" search="deadzone" open="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/dead_zones_screen">
-			<help>How far each stick moves before it does anything: more for a worn stick that drifts, less for finer aim.</help>
+		<row key="stick_settings" kind="link" label="STICK SETTINGS ›" crumb="CONTROLS › CONTROLLER" search="deadzone" open="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/dead_zones_screen">
+			<help>Each stick's dead zones, the look stick's shape and zoomed speed, and Modern aim's acceleration: for a worn stick, or finer aim.</help>
 		</row>
-		<section key="section_12" title="FEEDBACK"/>
 		<row key="vibration" kind="choice" setting="profile.vibration" label="VIBRATION" crumb="CONTROLS › CONTROLLER" search="rumble" when="profile">
 			<help>Rumbles the controller.</help>
 			<choice shown="ON" value="true"/>
 			<choice shown="OFF" value="false"/>
+		</row>
+		<row key="rumble_strength" kind="choice" setting="input.rumble_strength" label="RUMBLE STRENGTH" crumb="CONTROLS › CONTROLLER" search="rumble haptics">
+			<help>How strongly the controller rumbles. 100% is the game's own; Vibration Off turns it off.</help>
+			<choice shown="0%" value="0"/>
+			<choice shown="10%" value="10"/>
+			<choice shown="20%" value="20"/>
+			<choice shown="30%" value="30"/>
+			<choice shown="40%" value="40"/>
+			<choice shown="50%" value="50"/>
+			<choice shown="60%" value="60"/>
+			<choice shown="70%" value="70"/>
+			<choice shown="80%" value="80"/>
+			<choice shown="90%" value="90"/>
+			<choice shown="100%" value="100"/>
 		</row>
 		<row key="ingame_help" kind="choice" setting="profile.ingame_help" label="IN-GAME HELP" crumb="CONTROLS › CONTROLLER" when="profile">
 			<help>Shows the game's hints about its controls.</help>
@@ -1177,39 +1146,16 @@
 			<note>It also does so whenever it is held still.</note>
 		</row>
 		<section key="section_9" title="RIGHT STICK"/>
+		<row key="invert_look_horizontal" kind="choice" setting="input.invert_look_horizontal" label="INVERT TURNING" crumb="CONTROLS › CONTROLLER › GYRO &amp; FLICK STICK">
+			<help>Pushing the right stick right turns the view left. For every controller on this device.</help>
+			<choice shown="YES" value="true"/>
+			<choice shown="NO" value="false"/>
+		</row>
 		<row key="aim_style" kind="choice" setting="input.aim_style" label="AIM STYLE" crumb="CONTROLS › CONTROLLER › GYRO &amp; FLICK STICK" search="aim acceleration" search_choices="modern">
 			<help>Classic aims as the original: a diagonal turns faster, and can speed up the turn as a full push does. Modern aims as MCC's: the same speed whichever way you push, and only a push straight to the side speeds up the turn.</help>
 			<note>The mouse and touch controls are not changed.</note>
 			<choice shown="CLASSIC" value="classic"/>
 			<choice shown="MODERN" value="modern"/>
-		</row>
-		<row key="modern_aim_acceleration_angle" kind="choice" setting="input.modern_aim_acceleration_angle" label="ACCELERATION ANGLE" crumb="CONTROLS › CONTROLLER › GYRO &amp; FLICK STICK" search="aim acceleration" enabled="aim_style=modern">
-			<help>Modern aim: how far from straight to the side, in degrees, a full push still speeds up the turn. Lower keeps more diagonals from speeding it up.</help>
-			<choice shown="0" value="0"/>
-			<choice shown="5" value="5"/>
-			<choice shown="10" value="10"/>
-			<choice shown="15" value="15"/>
-			<choice shown="20" value="20"/>
-			<choice shown="25" value="25"/>
-			<choice shown="30" value="30"/>
-			<choice shown="35" value="35"/>
-			<choice shown="40" value="40"/>
-			<choice shown="45" value="45"/>
-		</row>
-		<row key="modern_aim_acceleration_threshold" kind="choice" setting="input.modern_aim_acceleration_threshold" label="ACCELERATION START" crumb="CONTROLS › CONTROLLER › GYRO &amp; FLICK STICK" search="aim acceleration" enabled="aim_style=modern">
-			<help>Modern aim: how far you push the stick before the turn speeds up. Default is the game's own, as Classic's.</help>
-			<choice shown="DEFAULT" value="-1"/>
-			<choice shown="50%" value="50"/>
-			<choice shown="55%" value="55"/>
-			<choice shown="60%" value="60"/>
-			<choice shown="65%" value="65"/>
-			<choice shown="70%" value="70"/>
-			<choice shown="75%" value="75"/>
-			<choice shown="80%" value="80"/>
-			<choice shown="85%" value="85"/>
-			<choice shown="90%" value="90"/>
-			<choice shown="95%" value="95"/>
-			<choice shown="100%" value="100"/>
 		</row>
 		<row key="flick_stick" kind="choice" setting="input.flick_stick" label="FLICK STICK" crumb="CONTROLS › CONTROLLER › GYRO &amp; FLICK STICK">
 			<help>Point the right stick and you turn at once to face that way: right, a quarter turn; down, about face. Turn it round its rim and you turn with it. Aim up and down with the gyro.</help>
@@ -1221,9 +1167,9 @@
 		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>
 		<button key="button_cancel" kind="cancel" run="port settings page cancel" help="Goes back without these changes."/>
 	</screen>
-	<screen name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/dead_zones_screen" kind="settings" layout="page" geometry="tall" title="STICK DEAD ZONES">
+	<screen name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/dead_zones_screen" kind="settings" layout="page" geometry="tall" title="ADVANCED STICK SETTINGS">
 		<section key="section_0" title="DEAD ZONES"/>
-		<row key="left_stick_dead_zone" kind="choice" setting="input.left_stick_dead_zone" label="LEFT STICK" crumb="CONTROLS › CONTROLLER › STICK DEAD ZONES" search="deadzone">
+		<row key="left_stick_dead_zone" kind="choice" setting="input.left_stick_dead_zone" label="LEFT STICK" crumb="CONTROLS › CONTROLLER › STICK SETTINGS" search="deadzone">
 			<help>How far the left stick moves before you move. Raise it for a stick that drifts; lower it to start walking sooner. Default is the game's own, 27%.</help>
 			<note>The touch controls' stick too.</note>
 			<choice shown="DEFAULT (27%)" value="-1"/>
@@ -1239,7 +1185,7 @@
 			<choice shown="45%" value="45"/>
 			<choice shown="50%" value="50"/>
 		</row>
-		<row key="right_stick_dead_zone" kind="choice" setting="input.right_stick_dead_zone" label="RIGHT STICK" crumb="CONTROLS › CONTROLLER › STICK DEAD ZONES" search="deadzone">
+		<row key="right_stick_dead_zone" kind="choice" setting="input.right_stick_dead_zone" label="RIGHT STICK" crumb="CONTROLS › CONTROLLER › STICK SETTINGS" search="deadzone">
 			<help>How far the right stick moves before the view turns. Raise it for a stick that drifts; lower it for finer aim. Default is the game's own, 27%.</help>
 			<choice shown="DEFAULT (27%)" value="-1"/>
 			<choice shown="0%" value="0"/>
@@ -1253,6 +1199,78 @@
 			<choice shown="40%" value="40"/>
 			<choice shown="45%" value="45"/>
 			<choice shown="50%" value="50"/>
+		</row>
+		<section key="section_3" title="OUTER DEAD ZONES"/>
+		<row key="left_stick_outer_dead_zone" kind="choice" setting="input.left_stick_outer_dead_zone" label="LEFT STICK" crumb="CONTROLS › CONTROLLER › STICK SETTINGS" search="deadzone">
+			<help>How much of the left stick's travel at its edge counts as a full push. Raise it for a worn stick that stops short of its edge and never reaches full speed. None is the game's own.</help>
+			<choice shown="NONE" value="0"/>
+			<choice shown="5%" value="5"/>
+			<choice shown="10%" value="10"/>
+			<choice shown="15%" value="15"/>
+			<choice shown="20%" value="20"/>
+			<choice shown="25%" value="25"/>
+			<choice shown="30%" value="30"/>
+		</row>
+		<row key="right_stick_outer_dead_zone" kind="choice" setting="input.right_stick_outer_dead_zone" label="RIGHT STICK" crumb="CONTROLS › CONTROLLER › STICK SETTINGS" search="deadzone">
+			<help>How much of the right stick's travel at its edge counts as a full push, so a worn stick still turns at full speed and speeds up the turn. None is the game's own.</help>
+			<choice shown="NONE" value="0"/>
+			<choice shown="5%" value="5"/>
+			<choice shown="10%" value="10"/>
+			<choice shown="15%" value="15"/>
+			<choice shown="20%" value="20"/>
+			<choice shown="25%" value="25"/>
+			<choice shown="30%" value="30"/>
+		</row>
+		<section key="section_6" title="LOOK STICK"/>
+		<row key="look_dead_zone_shape" kind="choice" setting="input.look_dead_zone_shape" label="SHAPE" crumb="CONTROLS › CONTROLLER › STICK SETTINGS" search="aim deadzone" search_choices="axial round">
+			<help>The shape of the look stick's dead zone. Axial: each direction its own, a square in the middle, as Classic aim. Round: the same whichever way you push, as Modern aim. Auto follows your Aim Style.</help>
+			<choice shown="AUTO" value="auto"/>
+			<choice shown="AXIAL" value="axial"/>
+			<choice shown="ROUND" value="round"/>
+		</row>
+		<row key="stick_zoom_sensitivity" kind="choice" setting="input.stick_zoom_sensitivity" label="ZOOM SENSITIVITY" crumb="CONTROLS › CONTROLLER › STICK SETTINGS" search="sens">
+			<help>How fast the right stick turns the view while zoomed in, as with a sniper rifle's scope. 1X is the game's own.</help>
+			<choice shown="0.25X" value="0.25"/>
+			<choice shown="0.5X" value="0.5"/>
+			<choice shown="0.6X" value="0.6"/>
+			<choice shown="0.7X" value="0.7"/>
+			<choice shown="0.75X" value="0.75"/>
+			<choice shown="0.8X" value="0.8"/>
+			<choice shown="0.9X" value="0.9"/>
+			<choice shown="1X" value="1"/>
+			<choice shown="1.1X" value="1.1"/>
+			<choice shown="1.25X" value="1.25"/>
+			<choice shown="1.5X" value="1.5"/>
+			<choice shown="2X" value="2"/>
+		</row>
+		<section key="section_9" title="MODERN AIM"/>
+		<row key="modern_aim_acceleration_angle" kind="choice" setting="input.modern_aim_acceleration_angle" label="ACCELERATION ANGLE" crumb="CONTROLS › CONTROLLER › STICK SETTINGS" search="aim acceleration" enabled="aim_modern">
+			<help>Modern aim: how far from straight to the side, in degrees, a full push still speeds up the turn. Lower keeps more diagonals from speeding it up.</help>
+			<choice shown="0" value="0"/>
+			<choice shown="5" value="5"/>
+			<choice shown="10" value="10"/>
+			<choice shown="15" value="15"/>
+			<choice shown="20" value="20"/>
+			<choice shown="25" value="25"/>
+			<choice shown="30" value="30"/>
+			<choice shown="35" value="35"/>
+			<choice shown="40" value="40"/>
+			<choice shown="45" value="45"/>
+		</row>
+		<row key="modern_aim_acceleration_threshold" kind="choice" setting="input.modern_aim_acceleration_threshold" label="ACCELERATION START" crumb="CONTROLS › CONTROLLER › STICK SETTINGS" search="aim acceleration" enabled="aim_modern">
+			<help>Modern aim: how far you push the stick before the turn speeds up. Default is the game's own, as Classic's.</help>
+			<choice shown="DEFAULT" value="-1"/>
+			<choice shown="50%" value="50"/>
+			<choice shown="55%" value="55"/>
+			<choice shown="60%" value="60"/>
+			<choice shown="65%" value="65"/>
+			<choice shown="70%" value="70"/>
+			<choice shown="75%" value="75"/>
+			<choice shown="80%" value="80"/>
+			<choice shown="85%" value="85"/>
+			<choice shown="90%" value="90"/>
+			<choice shown="95%" value="95"/>
+			<choice shown="100%" value="100"/>
 		</row>
 		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
 		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>
@@ -1277,6 +1295,22 @@
 			<choice shown="PLAIN" value="plain"/>
 			<choice shown="HALO" value="halo"/>
 			<choice shown="XBOX" value="xbox"/>
+		</row>
+		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
+		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>
+		<button key="button_cancel" kind="cancel" run="port settings page cancel" help="Goes back without these changes."/>
+	</screen>
+	<screen name="main_menu/settings_select/player_setup/player_profile_edit/network_setup/gameplay/gameplay_screen" kind="settings" layout="page" geometry="tall" title="GAMEPLAY">
+		<section key="section_0" title="MULTIPLAYER"/>
+		<row key="auto_pickup" kind="choice" setting="game.auto_pickup" label="WEAPON PICKUP" crumb="ONLINE › GAMEPLAY" search_choices="hold xbox walk over ce">
+			<help>Multiplayer, with a weapon slot empty: Hold picks up a weapon as you hold the action button, as on the Xbox; Walk Over as you walk over it, as in Custom Edition. Online: the host's choice.</help>
+			<choice shown="HOLD (XBOX)" value="false"/>
+			<choice shown="WALK OVER (CE)" value="true"/>
+		</row>
+		<row key="vehicle_hijack" kind="choice" setting="game.vehicle_hijack" label="VEHICLE HIJACKING" crumb="ONLINE › GAMEPLAY">
+			<help>Hold the action button beside an enemy's Ghost, Warthog or landed Banshee to throw the rider out and take it. Online: the host's choice.</help>
+			<choice shown="ON" value="true"/>
+			<choice shown="OFF" value="false"/>
 		</row>
 		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
 		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>

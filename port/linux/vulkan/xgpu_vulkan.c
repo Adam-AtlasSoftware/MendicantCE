@@ -866,6 +866,14 @@ static struct
 	unsigned int display_surface_told;
 	float display_headroom_told, display_white_told;
 	int colorspaces, hdr_metadata;
+	/* (the HDR metadata's peak and average last set: hdr_metadata_set) */
+	float hdr_metadata_peak, hdr_metadata_average;
+	/* a smaller frame scaled up sharply: the options allow it, and the
+	front end asks for it (xgpu_vulkan_sharp_upscale, any thread:
+	display.render_scale below 1); and the image nearest scales it into
+	(present_sharp) */
+	int sharp_upscale, sharp_wanted;
+	struct xgpu_vulkan_image *sharp_image;
 	void (*display_hdr)(int hdr, float headroom, float white_nits, int white_reported);
 	struct xgpu_vulkan_image *(*encode)(struct xgpu_vulkan_image *image, const struct xgpu_hdr_frame *frame,
 		uint8_t format);
@@ -6691,13 +6699,21 @@ static float float_of(uint32_t bits)
 	return value;
 }
 
+/* the window's SDR white as the system reports it, in 80-nit units (0:
+none reported). Any reported value counts, 1.0 too: Windows' least SDR
+brightness is 80 nits, exactly 1.0. */
+static float sdr_white_reported(void)
+{
+	return float_of(__atomic_load_n(&vk.window_sdr_white, __ATOMIC_ACQUIRE));
+}
+
 /* the window's SDR white in nits: the system's, else BT.2408's reference
-white (where the system says nothing: 1.0, 80 nits) */
+white (where the system says nothing) */
 static float sdr_white_nits(void)
 {
-	float sdr_white = float_of(__atomic_load_n(&vk.window_sdr_white, __ATOMIC_ACQUIRE));
+	float sdr_white = sdr_white_reported();
 
-	return sdr_white > 1.0f ? sdr_white * 80.0f : XGPU_HDR_REFERENCE_WHITE_NITS;
+	return sdr_white > 0.0f ? sdr_white * 80.0f : XGPU_HDR_REFERENCE_WHITE_NITS;
 }
 
 /* the window's display shows HDR, and the swapchain can (the surface has
@@ -6767,8 +6783,7 @@ static void display_hdr_tell(void)
 	if (hdr)
 		host_logf(HOST_LOG_INFO, "vulkan: the display shows HDR (headroom %.2f over an SDR white of %.0f nits%s, "
 			"a peak of %.0f nits; swapchain outputs: %s)", (double)headroom, (double)sdr_white_nits(),
-			float_of(__atomic_load_n(&vk.window_sdr_white, __ATOMIC_ACQUIRE)) > 1.0f ? "" :
-			" (none given: BT.2408's)", (double)(headroom * sdr_white_nits()), outputs);
+			sdr_white_reported() > 0.0f ? "" : " (none given: BT.2408's)", (double)(headroom * sdr_white_nits()), outputs);
 	else if (window)
 		host_logf(HOST_LOG_INFO, "vulkan: the display shows HDR (headroom %.2f), but the surface has no HDR "
 			"output (the driver's colour management): SDR", (double)headroom);
@@ -6780,16 +6795,16 @@ static void display_hdr_tell(void)
 		host_logf(HOST_LOG_INFO, "vulkan: the display does not show HDR (no HDR state from the window system, "
 			"no HDR output on the surface)");
 	if (told && vk.display_hdr)
-		vk.display_hdr(hdr, headroom, sdr_white_nits(),
-			float_of(__atomic_load_n(&vk.window_sdr_white, __ATOMIC_ACQUIRE)) > 1.0f);
+		vk.display_hdr(hdr, headroom, sdr_white_nits(), sdr_white_reported() > 0.0f);
 }
 
 void xgpu_vulkan_window_hdr(int enabled, float sdr_white, float headroom)
 {
 	uint32_t white_bits, headroom_bits;
 
+	/* (0 or less: none reported) */
 	if (!(sdr_white > 0.0f))
-		sdr_white = 1.0f;
+		sdr_white = 0.0f;
 	if (!(headroom >= 1.0f))
 		headroom = 1.0f;
 	memcpy(&white_bits, &sdr_white, sizeof(white_bits));
@@ -6798,6 +6813,11 @@ void xgpu_vulkan_window_hdr(int enabled, float sdr_white, float headroom)
 	__atomic_store_n(&vk.window_headroom, headroom_bits, __ATOMIC_RELEASE);
 	__atomic_store_n(&vk.window_hdr, enabled ? 1u : 0u, __ATOMIC_RELEASE);
 	__atomic_store_n(&vk.window_hdr_changed, 1u, __ATOMIC_RELEASE);
+}
+
+void xgpu_vulkan_sharp_upscale(int sharp)
+{
+	__atomic_store_n(&vk.sharp_wanted, sharp != 0, __ATOMIC_RELEASE);
 }
 
 void xgpu_vulkan_picture_top(int top)
@@ -6841,6 +6861,8 @@ static void rectangle_turned(int quarter_turns, uint32_t window_width, uint32_t 
 	}
 }
 
+static void hdr_metadata_set(int made);
+
 void xgpu_vulkan_hdr_state(int active, int mode, int paper_white_nits, int paper_white, int ui_nits)
 {
 	vk.hdr_active = active != 0;
@@ -6848,9 +6870,12 @@ void xgpu_vulkan_hdr_state(int active, int mode, int paper_white_nits, int paper
 	vk.hdr_paper_white_nits = paper_white_nits > 0 ? paper_white_nits : 0;
 	vk.hdr_paper_white = paper_white > 0 ? paper_white : 100;
 	vk.hdr_ui_nits = ui_nits > 0 ? ui_nits : 0;
-	/* (the swapchain made again where its output changes) */
+	/* (the swapchain made again where its output changes; else its
+	metadata set again where paper white moved it) */
 	if (vk.swapchain && hdr_output_choose() != vk.hdr_output)
 		vk.swapchain_stale = 1;
+	else
+		hdr_metadata_set(0);
 }
 
 /* paper white in nits, as the front end's state says */
@@ -6921,15 +6946,22 @@ void xgpu_vulkan_hdr_frame(struct xgpu_hdr_frame *frame)
 /* the swapchain's HDR metadata (VK_EXT_hdr_metadata, where the device has
 it), in the encoding's nits: the content's gamut sRGB's (the frame's
 primaries), its light at most the display's peak, on average about paper
-white */
-static void hdr_metadata_set(void)
+white. Set with each swapchain (made: 1), and again whenever paper white,
+the display's SDR white or its headroom moves those values: a display that
+takes static metadata keeps the last it was given. */
+static void hdr_metadata_set(int made)
 {
 	VkHdrMetadataEXT metadata;
 	float headroom = window_headroom();
 	float peak = encoding_white_nits() * headroom;
+	float average = encoding_white_nits() * paper_white_setting(headroom);
 
-	if (!vkSetHdrMetadataEXT || vk.hdr_output == XGPU_HDR_OUTPUT_SDR)
+	if (!vkSetHdrMetadataEXT || !vk.swapchain || vk.hdr_output == XGPU_HDR_OUTPUT_SDR)
 		return;
+	if (!made && peak == vk.hdr_metadata_peak && average == vk.hdr_metadata_average)
+		return;
+	vk.hdr_metadata_peak = peak;
+	vk.hdr_metadata_average = average;
 	memset(&metadata, 0, sizeof(metadata));
 	metadata.sType = VK_STRUCTURE_TYPE_HDR_METADATA_EXT;
 	metadata.displayPrimaryRed.x = 0.640f;
@@ -6943,7 +6975,7 @@ static void hdr_metadata_set(void)
 	metadata.maxLuminance = peak;
 	metadata.minLuminance = 0.0f;
 	metadata.maxContentLightLevel = peak;
-	metadata.maxFrameAverageLightLevel = encoding_white_nits() * paper_white_setting(headroom);
+	metadata.maxFrameAverageLightLevel = average;
 	vkSetHdrMetadataEXT(vk.device, 1, &vk.swapchain, &metadata);
 }
 
@@ -6974,6 +7006,8 @@ static void window_changes(void)
 		display_hdr_tell();
 		if (hdr_output_choose() != vk.hdr_output)
 			vk.swapchain_stale = 1;
+		else
+			hdr_metadata_set(0);
 	}
 }
 
@@ -7185,7 +7219,7 @@ static int swapchain_make(void)
 		vk.resize_checks = 0;
 	vk.surface_transform = capabilities.currentTransform;
 	vk.suboptimal_presents = 0;
-	hdr_metadata_set();
+	hdr_metadata_set(1);
 	host_logf(HOST_LOG_INFO, "vulkan: swapchain %ux%u, %u images, present mode %s, turned %d%s", vk.swapchain_extent.width,
 		vk.swapchain_extent.height, vk.swapchain_image_count, present_mode_name(vk.present_mode), turns * 90,
 		vk.hdr_output == XGPU_HDR_OUTPUT_SCRGB ? ", HDR (scRGB)" : vk.hdr_output == XGPU_HDR_OUTPUT_PQ ? ", HDR (HDR10)" : "");
@@ -7341,6 +7375,103 @@ static struct xgpu_vulkan_image *present_curved(struct xgpu_vulkan_image *image)
 	return curved ? curved : image;
 }
 
+/* the sharp upscale (display.render_scale's, "sharp bilinear"), on one
+axis: the whole factor nearest scales the frame's pixels up by first, the
+least that reaches the pixels it is shown at; 1 where it is shown at no
+more than its own (linear alone, as a larger frame is scaled down) */
+static uint32_t sharp_factor(uint32_t frame, uint32_t shown)
+{
+	return frame && shown > frame ? (shown + frame - 1) / frame : 1;
+}
+
+enum
+{
+	/* one linear blit (the frame shown at no more than its pixels) */
+	SHARP_LINEAR,
+	/* one nearest blit: each way a whole multiple of the frame (or its
+	size) */
+	SHARP_NEAREST,
+	/* nearest by the factors into an image of their size, then linear
+	from it: 480 rows shown at 2160 are 5 times 480, 2400, then 2160 */
+	SHARP_PRESCALED,
+};
+
+/* how a frame of a size is shown at another (its factors each way) */
+static int sharp_plan(uint32_t frame_width, uint32_t frame_height, uint32_t shown_width, uint32_t shown_height,
+	uint32_t factors[2])
+{
+	factors[0] = sharp_factor(frame_width, shown_width);
+	factors[1] = sharp_factor(frame_height, shown_height);
+	if (frame_width * factors[0] == shown_width && frame_height * factors[1] == shown_height)
+		return SHARP_NEAREST;
+	return factors[0] == 1 && factors[1] == 1 ? SHARP_LINEAR : SHARP_PRESCALED;
+}
+
+/* the blit's source made ready for a sharp upscale to the blit's
+destination: the filter it is blitted with, and for SHARP_PRESCALED the
+frame scaled up by nearest into vk.sharp_image (kept, made larger only as
+it must be), which is then the source; linear as before where that image
+cannot be made */
+static VkFilter present_sharp(VkCommandBuffer commands, struct xgpu_vulkan_image **image, VkImageBlit *blit)
+{
+	struct xgpu_vulkan_image_description description;
+	const struct xgpu_vulkan_image *frame = *image;
+	uint32_t factors[2], width, height;
+	VkImageBlit nearest;
+	int plan;
+
+	/* (only for the render scale: "original" resolution scaling's 640x480
+	stays as soft as it always was) */
+	if (!vk.sharp_upscale || !__atomic_load_n(&vk.sharp_wanted, __ATOMIC_ACQUIRE))
+		return VK_FILTER_LINEAR;
+	plan = sharp_plan(frame->description.width, frame->description.height,
+		(uint32_t)(blit->dstOffsets[1].x - blit->dstOffsets[0].x), (uint32_t)(blit->dstOffsets[1].y - blit->dstOffsets[0].y),
+		factors);
+	if (plan != SHARP_PRESCALED)
+		return plan == SHARP_NEAREST ? VK_FILTER_NEAREST : VK_FILTER_LINEAR;
+	width = frame->description.width * factors[0];
+	height = frame->description.height * factors[1];
+	if (vk.sharp_image && (vk.sharp_image->description.format != frame->description.format ||
+		vk.sharp_image->description.width < width || vk.sharp_image->description.height < height))
+	{
+		xgpu_vulkan_image_destroy(vk.sharp_image);
+		vk.sharp_image = NULL;
+	}
+	if (!vk.sharp_image)
+	{
+		memset(&description, 0, sizeof(description));
+		description.type = XGPU_VULKAN_IMAGE_2D;
+		description.format = frame->description.format;
+		description.width = width;
+		description.height = height;
+		description.depth_or_layers = 1;
+		description.levels = 1;
+		vk.sharp_image = xgpu_vulkan_image_create(&description);
+		if (!vk.sharp_image)
+		{
+			vk.sharp_upscale = 0;
+			host_logf(HOST_LOG_WARN, "vulkan: no %ux%u image to scale the frame up sharply in: scaled up smoothly",
+				width, height);
+			return VK_FILTER_LINEAR;
+		}
+	}
+	nearest = *blit;
+	nearest.dstOffsets[0].x = nearest.dstOffsets[0].y = 0;
+	nearest.dstOffsets[1].x = (int32_t)width;
+	nearest.dstOffsets[1].y = (int32_t)height;
+	vk.sharp_image->used = vk.serial;
+	image_use(vk.sharp_image);
+	image_written(vk.sharp_image);
+	vkCmdBlitImage(commands, frame->image, VK_IMAGE_LAYOUT_GENERAL, vk.sharp_image->image, VK_IMAGE_LAYOUT_GENERAL, 1,
+		&nearest, VK_FILTER_NEAREST);
+	barrier(commands, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+		VK_ACCESS_TRANSFER_READ_BIT);
+	blit->srcOffsets[1].x = (int32_t)width;
+	blit->srcOffsets[1].y = (int32_t)height;
+	*image = vk.sharp_image;
+	return VK_FILTER_LINEAR;
+}
+
 /* the image shown in the window: letterboxed into a swapchain image
 (cleared black), then presented. 0 if nothing is presented: no surface (the
 app in the background, the window not back yet), a swapchain that cannot
@@ -7354,6 +7485,7 @@ static uint64_t present(struct xgpu_vulkan_image *image, int frame)
 	VkClearColorValue black;
 	VkImageSubresourceRange whole;
 	VkImageBlit blit;
+	VkFilter filter;
 	VkPresentInfoKHR info;
 	VkResult result;
 	uint32_t index, width, height, x, y, window_width, window_height, image_width, image_height;
@@ -7492,8 +7624,11 @@ static uint64_t present(struct xgpu_vulkan_image *image, int frame)
 		blit.dstOffsets[1].z = 1;
 		image->used = vk.serial;
 		image_use(image);
+		/* (smaller than it is shown: scaled up sharply, from an image of
+		its own where it is not by whole multiples) */
+		filter = present_sharp(commands, &image, &blit);
 		vkCmdBlitImage(commands, image->image, VK_IMAGE_LAYOUT_GENERAL, vk.swapchain_images[index],
-			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
+			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, filter);
 	}
 	transition.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
 	transition.dstAccessMask = 0;
@@ -9188,6 +9323,7 @@ int xgpu_vulkan_initialize(const struct xgpu_vulkan_options *options)
 	vk.surface_create = options->surface_create;
 	vk.surface_context = options->surface_context;
 	vk.display_hdr = options->display_hdr;
+	vk.sharp_upscale = options->sharp_upscale;
 	vk.encode = options->encode;
 	vk.gamma = options->gamma;
 	vk.display_hdr_told = -1;
@@ -9332,6 +9468,8 @@ void xgpu_vulkan_shutdown(void)
 		return;
 	xgpu_vulkan_image_destroy(vk.loading_image);
 	vk.loading_image = NULL;
+	xgpu_vulkan_image_destroy(vk.sharp_image);
+	vk.sharp_image = NULL;
 	xgpu_vulkan_image_destroy(vk.loading_art_image);
 	vk.loading_art_image = NULL;
 	xgpu_vulkan_image_destroy(vk.loading_caption_image);

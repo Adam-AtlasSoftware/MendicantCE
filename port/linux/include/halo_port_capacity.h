@@ -106,6 +106,33 @@ go of a sound, and its size is the same for every map. */
 #define HALO_PORT_SOUND_CACHE_SIZE 0x1000000 /* (0x400000) */
 #endif
 
+/* The sound channels of each type (sound_preferences.c: mono 2D, mono 3D,
+stereo 22 kHz, stereo 44 kHz), past which a new sound takes a playing one's
+channel (sound_find_best_channel). The Xbox's 9, 46, 9 and 9 were its
+hardware's voices; the port mixes in software (dsound_sdl.c), with no voice
+limit but the processor, and a sound mod may make any class stereo 44 kHz
+(#1125). A channel no sound plays in costs nothing; one playing costs, on a
+Ryzen 9 5900X (tools/harness/tests/test_mixer.py bench), about 40 ns a frame
+through the HRTF (a mono 3D sound) and 18 ns otherwise: 0.2% and 0.09% of a
+core at 48 kHz. Each definition plays at most 4 at once (sound_classes.c), so
+a heavy fight's 16 players and their vehicles come to about 64 effects, with
+the music and a few lines: the desktop's pools hold that, stock or modded to
+stereo 44 kHz, with no channel taken, and all of them playing at once
+(never seen) would take about a third of the 5900X's core. The phones'
+(AArch64 guests: Android and iOS, the same mixer at about a third of the
+speed) hold a stock heavy fight within about half a core, all playing; a
+modded one takes effects' channels past 40 stereo, never the music's or the
+speech's. The actual channels (the dsound streams) are a few more than the
+virtual, as the Xbox's were, for those still fading out; the actual ones of
+every type come to at most the 256 of MAXIMUM_SOUND_CHANNELS. */
+#if defined(HALO_GUEST) && defined(__aarch64__) && !(defined(HALO_MACOS) && !defined(HALO_IOS))
+#define HALO_PORT_SOUND_VIRTUAL_CHANNELS { 16, 72, 24, 40 } /* ({ 9, 46, 9, 9 }) */
+#define HALO_PORT_SOUND_ACTUAL_CHANNELS { 18, 78, 27, 44 } /* ({ 10, 51, 10, 10 }) */
+#else
+#define HALO_PORT_SOUND_VIRTUAL_CHANNELS { 24, 96, 32, 80 } /* ({ 9, 46, 9, 9 }) */
+#define HALO_PORT_SOUND_ACTUAL_CHANNELS { 26, 104, 36, 86 } /* ({ 10, 51, 10, 10 }) */
+#endif
+
 /* ---------- the cache files of decompressed maps
 
 The Xbox copied a map from the disc to one of six cache files on its hard

@@ -163,7 +163,7 @@ long menu_search_score(struct halo_menu_model_row const *row, char const *typed)
 		score += found;
 	}
 	/* (a label that starts with the first word typed: FRAME RATE & SYNC
-	before SHOW FRAME RATE for "frame") */
+	before VRR FRAME CAP for "frame") */
 	at = row->label;
 	if (count && search_next_word(&at, first, 0) > 0 && !strncmp(first, words[0], strlen(words[0])))
 		score += MENU_SEARCH_LABEL_FIRST;

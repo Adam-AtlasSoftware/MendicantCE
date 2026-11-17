@@ -462,22 +462,29 @@ static float edr_value(id<CAMetalDrawable> drawable, float value)
 	return xgpu_hdr_linear(value) * (frame.output == XGPU_HDR_OUTPUT_SDR ? 1.0f : frame.paper_white * frame.ui);
 }
 
+/* the layer's colour space: extended linear sRGB for EDR, else sRGB. Never
+none: a layer without one is not colour matched, so a wide-gamut (P3)
+display would show the frame's sRGB in its own, wider gamut, oversaturated */
+static void layer_space_set(BOOL edr)
+{
+	CGColorSpaceRef space = CGColorSpaceCreateWithName(edr ? kCGColorSpaceExtendedLinearSRGB : kCGColorSpaceSRGB);
+
+	presentation.layer.colorspace = space;
+	CGColorSpaceRelease(space);
+}
+
 /* (the presentation thread, before it draws into the drawable) the layer
 made EDR's or SDR's as the frame wants: the next drawables are */
 static void layer_hdr_choose(void)
 {
 	BOOL wanted = edr_wanted();
-	CGColorSpaceRef space;
 
 	if (wanted == presentation.layer_edr)
 		return;
 	presentation.layer_edr = wanted;
-	space = wanted ? CGColorSpaceCreateWithName(kCGColorSpaceExtendedLinearSRGB) : NULL;
 	presentation.layer.wantsExtendedDynamicRangeContent = wanted;
 	presentation.layer.pixelFormat = wanted ? MTLPixelFormatRGBA16Float : MTLPixelFormatBGRA8Unorm;
-	presentation.layer.colorspace = space;
-	if (space)
-		CGColorSpaceRelease(space);
+	layer_space_set(wanted);
 	host_logf(HOST_LOG_INFO, "metal: the window's layer: %s", wanted ? "EDR (half floats, extended linear sRGB)" : "SDR");
 }
 
@@ -2321,6 +2328,7 @@ int host_metal_window_open(uint32_t window)
 	presentation.layer = (__bridge CAMetalLayer *)SDL_Metal_GetLayer(presentation.view);
 	presentation.layer.device = xgpu_metal_device();
 	presentation.layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
+	layer_space_set(NO);
 	/* (read back for HALO_LOADING_CAPTURE_DIR's pictures of the screen:
 	loading_screen_capture) */
 	presentation.layer.framebufferOnly = !getenv("HALO_LOADING_CAPTURE_DIR");

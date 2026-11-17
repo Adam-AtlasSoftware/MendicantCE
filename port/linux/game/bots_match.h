@@ -50,6 +50,8 @@ boolean bots_match_parse_start(char **words, long count, struct bots_match_optio
 void bots_match_entry_text(struct bots_match_options const *options, char *text, long size);
 boolean bots_match_speed_allowed(boolean server_mode, long remote_machines);
 real bots_match_speed_kept(real asked);
+/* the speed a frame gives the game, only for a match speed asked for */
+boolean bots_match_speed_step(real asked, boolean allowed, real *applied, real *set);
 
 /* "match <...>" (bots_command.c's line, its words after "match"): its
 answer into reply (its lines), TRUE if it did what it said, else FALSE and

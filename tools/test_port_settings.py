@@ -499,3 +499,38 @@ def test_the_tall_footer_is_raised_on_a_touchscreen():
     # (the computer's footer as it was: the classic widgets have no such flag)
     ce = "\n".join(path.read_text() for path in Path("port/assets/menus/ce").glob("*.xml"))
     assert not re.search(r'flags="[^"]*\b(above_)?foot\b', ce)
+
+
+def _modern_aim_rows_problems(pages, functions):
+    """what is wrong with Modern aim's tuning rows: on the stick page (Advanced Stick Settings), off Gyro & Flick
+    Stick, dimmed unless the player's Aim Style is Modern, read as Settings shows it (the change kept on the other
+    page, else config.toml's: settings_condition_term's aim_modern)"""
+    tuning = ("input.modern_aim_acceleration_angle", "input.modern_aim_acceleration_threshold")
+    settings = {folder: [entry[1] for entry in page["rows"] if entry[0] != SECTION] for folder, page in pages.items()}
+    problems = [f"{name} not on the stick page" for name in tuning if name not in settings[port_settings.DEAD_ZONES[0]]]
+    problems += [f"{name} still on the gyro page" for name in tuning if name in settings[port_settings.GYRO[0]]]
+    problems += [f"{name} not dimmed by aim_modern" for name in tuning
+                 if port_settings.SETTINGS_ROW_ENABLED.get(name.split(".", 1)[1]) != "aim_modern"]
+    term = function_body(functions, "settings_condition_term")
+    if not re.search(r'!strcmp\(name, "aim_modern"\)\)\s*\{\s*char style\[16\];\s*return settings_value\('
+                     r'"input\.aim_style", style, sizeof\(style\)\) && !strcmp\(style, "modern"\);', term):
+        problems.append("aim_modern does not read the Aim Style as Modern")
+    return problems
+
+
+def test_modern_aim_rows_on_the_stick_page():
+    """Modern aim's acceleration rows are with the sticks' other tuning, still lit only under Modern aim"""
+    assert _modern_aim_rows_problems(PAGES, FUNCTIONS) == []
+
+
+def test_modern_aim_rows_negative_control():
+    """the check sees the rows left on the gyro page, and a term that reads Classic as Modern"""
+    stick, gyro = port_settings.DEAD_ZONES[0], port_settings.GYRO[0]
+    pages = {folder: dict(page, rows=list(page["rows"])) for folder, page in PAGES.items()}
+    moved = [entry for entry in pages[stick]["rows"]
+             if entry[0] != SECTION and entry[1] and entry[1].startswith("input.modern_aim_")]
+    pages[stick]["rows"] = [entry for entry in pages[stick]["rows"] if entry not in moved]
+    pages[gyro]["rows"] += moved
+    assert len(_modern_aim_rows_problems(pages, FUNCTIONS)) == 4
+    classic = FUNCTIONS.replace('!strcmp(style, "modern")', '!strcmp(style, "classic")')
+    assert _modern_aim_rows_problems(PAGES, classic) == ["aim_modern does not read the Aim Style as Modern"]

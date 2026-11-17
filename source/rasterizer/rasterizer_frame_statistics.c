@@ -148,6 +148,8 @@ symbols in this file:
 #include "rasterizer/xbox/rasterizer_xbox.h"
 #include "text/draw_string.h"
 
+#include "perf_times.h" /* port: port/linux/src/report.c */
+
 /* ---------- constants */
 
 enum
@@ -733,7 +735,13 @@ void rasterizer_frame_statistics_draw(
 			tab_stops[2] = left + 300;
 			tab_stops[3] = 600;
 
-			sprintf(frame_statistics_string, "|tGPU profile|ttime (msecs)|tdata (bytes)");
+			/* port: the categories' times are the CPU's. Their brackets
+			(rasterizer_xbox_profile.c's D3DDevice_InsertCallback) ran when the
+			Xbox's GPU reached them; the port runs them as they are issued
+			(port/linux/src/d3d8_device.c), so each times the game's thread
+			issuing that category's draws. The GPU's is the backend's, a frame
+			at a time (the last row) */
+			sprintf(frame_statistics_string, "|tCPU profile|ttime (msecs)|tdata (bytes)");
 			draw_string_set_tab_stops(tab_stops, 4);
 			draw_string_set_color(&statistics_color_bold);
 			cursor.y -= 30;
@@ -762,13 +770,26 @@ void rasterizer_frame_statistics_draw(
 				bounds.y0 = cursor.y + line_advance;
 			}
 
-			sprintf(frame_statistics_string, "|ttotal|t%.2f|t%d|n",
+			sprintf(frame_statistics_string, "|tCPU total|t%.2f|t%d|n",
 				rasterizer_profile_query(NUMBER_OF_RASTERIZER_PROFILES) * 1000.0f,
 				rasterizer_profile_query_pushbuffer(NUMBER_OF_RASTERIZER_PROFILES));
 			draw_string_set_color(global_real_argb_yellow);
 			bounds.y0 += 4;
 			rasterizer_draw_string(&bounds, NULL, &cursor, height_adjust, frame_statistics_string);
 			bounds.y0 = cursor.y + line_advance;
+			/* port: the GPU's time a frame, the backend's timestamps over the
+			last half second (debug.gpu_stats's, Save Report's) */
+			{
+				struct perf_times times;
+
+				perf_times_recent(0xFFFFFFFFu, 500, &times);
+				if (times.gpu_ms >= 0.0f)
+					sprintf(frame_statistics_string, "|tGPU frame|t%.2f", times.gpu_ms);
+				else
+					sprintf(frame_statistics_string, "|tGPU frame|tnot measured");
+				rasterizer_draw_string(&bounds, NULL, &cursor, height_adjust, frame_statistics_string);
+				bounds.y0 = cursor.y + line_advance;
+			}
 		}
 		else if (rasterizer_debug_options.statistics_mode == _rasterizer_statistics_mode_memory)
 		{
@@ -923,11 +944,31 @@ void rasterizer_frame_statistics_draw(
 					fprintf(rasterizer_frame_statistics_private_globals.profile_log_file, "\n");
 				}
 
+				/* port: the categories' times the CPU's, the GPU's the
+				backend's over the same frames (as the table's) */
 				fprintf(
 					rasterizer_frame_statistics_private_globals.profile_log_file,
-					"average total frame time= %.2f msecs\n",
+					"average total CPU time= %.2f msecs\n",
 					profile_accumulated_time /
 						MAXIMUM_PROFILE_ACCUMULATION_COUNT);
+				{
+					struct perf_times times;
+
+					perf_times_recent(MAXIMUM_PROFILE_ACCUMULATION_COUNT, 0xFFFFFFFFu, &times);
+					if (times.gpu_ms >= 0.0f)
+					{
+						fprintf(
+							rasterizer_frame_statistics_private_globals.profile_log_file,
+							"average GPU frame time= %.2f msecs\n",
+							times.gpu_ms);
+					}
+					else
+					{
+						fprintf(
+							rasterizer_frame_statistics_private_globals.profile_log_file,
+							"average GPU frame time= not measured\n");
+					}
+				}
 				fprintf(
 					rasterizer_frame_statistics_private_globals.profile_log_file,
 					"average total pushbuffer= %d bytes\n",

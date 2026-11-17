@@ -150,6 +150,9 @@ static struct
 	/* match speed: asked, run, and the frames' measure of it (ticks a
 	second over real seconds, a second at a time) */
 	real speed;
+	/* (the speed a frame last gave the game for a match speed; 0: none, the
+	game's own, a script's or the console's game_speed, left alone) */
+	real speed_applied;
 	real measured;
 	unsigned long measure_wall;
 	long measure_tick;
@@ -174,8 +177,14 @@ static struct
 	/* the last kills */
 	struct bots_match_kill kills[BOTS_MATCH_KILLS];
 	long kill_count;
-} bots_match = { 0, 0, { "", "", NONE, 0, NONE, NONE }, { "", "", NONE, 0, NONE, NONE }, FALSE, FALSE, FALSE, FALSE, 0,
-	"", "", 0, 0, 0, 1.0f };
+} bots_match = {
+	/* (by name: a field added above speed once left it 0, and every game a
+	host played alone stood still, game_time_set_speed(0) each frame) */
+	.stage = _bots_match_none,
+	.asked = { "", "", NONE, 0, NONE, NONE },
+	.last = { "", "", NONE, 0, NONE, NONE },
+	.speed = 1.0f,
+};
 
 /* ---------- the pure parts */
 
@@ -268,6 +277,29 @@ real bots_match_speed_kept(real asked)
 	if (!(asked > 0.0f))
 		return 1.0f;
 	return asked > (real)BOTS_MATCH_SPEED_MAXIMUM ? (real)BOTS_MATCH_SPEED_MAXIMUM : asked;
+}
+
+/* the speed a frame gives the game (*set, TRUE): the match speed asked for,
+where it may run, else real time once to take back one it gave; FALSE
+(nothing asked for, nothing given) leaves the game's own speed alone, a
+script's or the console's game_speed */
+boolean bots_match_speed_step(real asked, boolean allowed, real *applied, real *set)
+{
+	real wanted = allowed ? asked : 1.0f;
+
+	if (wanted != 1.0f)
+	{
+		*applied = wanted;
+		*set = wanted;
+		return TRUE;
+	}
+	if (*applied != 0.0f)
+	{
+		*applied = 0.0f;
+		*set = 1.0f;
+		return TRUE;
+	}
+	return FALSE;
 }
 
 /* ---------- the game */
@@ -475,7 +507,7 @@ void bots_match_frame(void)
 	if (playing && !over)
 	{
 		boolean allowed = bots_match_speed_allowed(halo_server_mode() != 0, bots_match_remote_machines());
-		real wanted = allowed ? bots_match.speed : 1.0f;
+		real set;
 
 		if (!allowed && bots_match.speed != 1.0f)
 		{
@@ -487,8 +519,11 @@ void bots_match_frame(void)
 			server_json_string(&json, "reason", "another machine is in the game");
 			bots_command_event_close(&json, 3);
 		}
-		if (game_time_get_speed() != wanted)
-			game_time_set_speed(wanted);
+		if (bots_match_speed_step(bots_match.speed, allowed, &bots_match.speed_applied, &set) &&
+			game_time_get_speed() != set)
+		{
+			game_time_set_speed(set);
+		}
 		if (now - bots_match.measure_wall >= 1000)
 		{
 			bots_match.measured = (real)((game_time_get() - bots_match.measure_tick) /

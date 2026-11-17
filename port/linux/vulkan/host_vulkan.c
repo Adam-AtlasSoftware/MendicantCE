@@ -159,7 +159,18 @@ static void window_hdr_read(void)
 		return;
 	}
 	enabled = properties && SDL_GetBooleanProperty(properties, SDL_PROP_WINDOW_HDR_ENABLED_BOOLEAN, false);
-	sdr_white = properties ? SDL_GetFloatProperty(properties, SDL_PROP_WINDOW_SDR_WHITE_LEVEL_FLOAT, 1.0f) : 1.0f;
+	/* (the SDR white in 80-nit units, 0 where none is reported. Windows'
+	is its SDRWhiteLevel over 1000: its least SDR brightness, 80 nits, is
+	1.0, a value like any other, so any it has counts. Elsewhere SDL's 1.0
+	is its default, in no nits: none) */
+#ifdef _WIN32
+	sdr_white = properties && SDL_HasProperty(properties, SDL_PROP_WINDOW_SDR_WHITE_LEVEL_FLOAT) ?
+		SDL_GetFloatProperty(properties, SDL_PROP_WINDOW_SDR_WHITE_LEVEL_FLOAT, 0.0f) : 0.0f;
+#else
+	sdr_white = properties ? SDL_GetFloatProperty(properties, SDL_PROP_WINDOW_SDR_WHITE_LEVEL_FLOAT, 0.0f) : 0.0f;
+	if (!(sdr_white > 1.0f))
+		sdr_white = 0.0f;
+#endif
 	/* (on Wayland SDL's SDR white is 1.0, the compositor's reference white,
 	in no nits: its nits are the patched SDL's property,
 	port/android/patches/sdl-wayland-reference-luminance.patch) */
@@ -685,6 +696,8 @@ int host_vulkan_window_open(uint32_t window, uint32_t debug, uint32_t shader_fol
 			/* (display.hdr: an HDR swapchain, and the display told the front
 			end) */
 			options.display_hdr = host_render_stream_display_hdr;
+			/* (display.render_scale's frame scaled up sharply) */
+			options.sharp_upscale = 1;
 			options.encode_prepare = xgpu_vulkan_post_encode_prepare;
 			options.encode = xgpu_vulkan_post_encode;
 #endif

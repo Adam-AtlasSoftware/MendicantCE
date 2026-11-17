@@ -389,6 +389,7 @@ symbols in this file:
 #include "network_host_controls.h" /* port: port/linux/game/network_host_controls.c */
 #include "party.h" /* port: port/linux/game/party_menu.inc */
 #include "matchmaking.h" /* port: port/linux/game/matchmaking.c */
+#include "perf_overlay.h" /* port: port/linux/game/perf_overlay.c */
 #include "network_aim_assist.h" /* port: port/linux/game/network_aim_assist.c */
 #include "network_shield_effects.h" /* port: port/linux/game/network_shield_effects.c */
 #include "network_riding_map.h" /* port: port/linux/game/network_riding_map.c */
@@ -3506,31 +3507,15 @@ static void screenshot_render(
 	return;
 }
 
-/* port: Settings > Video's SHOW FRAME RATE (display.show_frame_rate, off by
-default), read again when it changes, which draws the frame rate as the
-console's display_framerate does */
-int config_boolean(const char *name);
-unsigned long config_changes(void);
-
-static boolean main_show_frame_rate_setting(
-	void)
-{
-	static boolean setting = FALSE;
-	static unsigned long read_at = (unsigned long)-1;
-
-	if (read_at != config_changes())
-	{
-		read_at = config_changes();
-		setting = config_boolean("display.show_frame_rate") != 0;
-	}
-
-	return setting;
-}
-
 void main_framerate_render(
 	void)
 {
-	if (display_framerate || main_show_frame_rate_setting()) /* port: or the setting */
+	/* port: Settings > Video's PERFORMANCE OVERLAY (display.perf_overlay,
+	port/linux/game/perf_overlay.c): "simple" draws the frame rate as the
+	console's display_framerate does, "detailed" the frame's times above it */
+	short perf_overlay = perf_overlay_mode();
+
+	if (display_framerate || perf_overlay != _perf_overlay_off) /* port: or the setting */
 	{
 		long font_tag_index;
 
@@ -3586,6 +3571,29 @@ void main_framerate_render(
 				(short)frame_rate >= 30 ? global_real_argb_green : global_real_argb_red);
 			draw_string_set_font(font_tag_index);
 			rasterizer_draw_string(&bounds, NULL, NULL, 0, frame_rate_string);
+
+			/* port: "detailed": the frame's times, a line each above the
+			counter (as the vblank deltas' lines are spaced), their right
+			edges the counter's three digits' */
+			if (perf_overlay == _perf_overlay_detailed)
+			{
+				char lines[PERF_OVERLAY_LINES][PERF_OVERLAY_LINE_SIZE];
+				short count = perf_overlay_lines(lines);
+				short line;
+
+				bounds = render.camera.window_bounds;
+				bounds.x0 = (short)(bounds.x1 - 240);
+				bounds.x1 = (short)(bounds.x1 - 14);
+				bounds.y0 = (short)(bounds.y1 - 50 - 20 * count);
+				draw_string_set_format(NONE, _text_justification_right, 0);
+				draw_string_set_color(global_real_argb_white);
+				for (line = 0; line < count; line++)
+				{
+					rasterizer_draw_string(&bounds, NULL, NULL, 0, lines[line]);
+					bounds.y0 += 20;
+				}
+				draw_string_set_format(NONE, _text_justification_left, 0);
+			}
 		}
 	}
 

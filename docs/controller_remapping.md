@@ -86,7 +86,7 @@ continue") stay the stock buttons, as the menus do.
 - **Sticks**: the profile's STICK LAYOUT swaps the sticks (Southpaw). INVERT LOOK
   (the profile's) inverts up and down; INVERT TURNING
   (`input.invert_look_horizontal`) inverts side to side for every controller.
-  STICK DEAD ZONES (`input.left_stick_dead_zone`, `input.right_stick_dead_zone`,
+  STICK SETTINGS (`input.left_stick_dead_zone`, `input.right_stick_dead_zone`,
   OpenCE#526) sets each stick's dead zone, at the frame's reading and at every
   sub-step's.
 

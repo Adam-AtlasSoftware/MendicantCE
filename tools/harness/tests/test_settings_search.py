@@ -136,7 +136,7 @@ def check(name, fault=None):
         assert found.index("hdr_mode") < found.index("model_detail"), found
     elif name == "every-word":
         found = keys(search("frame rate", fault))
-        assert found[:2] == ["frame_rate_sync", "show_frame_rate"], found
+        assert found[0] == "frame_rate_sync" and "perf_overlay" in found, found
         assert search("frame rate xyzzy", fault) == ([], 0)
     elif name == "of":
         # (a word of two letters finds labels' and choices' words alone, no help's: FIELD OF VIEW's, KING OF THE

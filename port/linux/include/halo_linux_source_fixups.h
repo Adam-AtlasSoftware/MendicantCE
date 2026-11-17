@@ -438,9 +438,28 @@ int menu_pictures_preparing(void);
 none, of 32767: its player's input.left_stick_dead_zone and
 input.right_stick_dead_zone, else the game's own (port/linux/src/xinput_sdl.c) */
 short halo_stick_dead_range(short gamepad, short stick);
+/* the deflection of a gamepad's stick read as full, of 32767: 32767 (the
+rim, the original's) less its player's input.left_stick_outer_dead_zone or
+input.right_stick_outer_dead_zone (port/linux/src/xinput_sdl.c) */
+short halo_stick_live_range(short gamepad, short stick);
+/* the shape of a gamepad's look stick's dead zone: its player's
+input.look_dead_zone_shape, Auto (the aim style's: round under Modern, each
+direction's own under Classic), Axial or Round (port/linux/src/xinput_sdl.c) */
+enum { HALO_LOOK_DEAD_ZONE_AUTO, HALO_LOOK_DEAD_ZONE_AXIAL, HALO_LOOK_DEAD_ZONE_ROUND };
+int halo_look_dead_zone_shape(short gamepad);
 /* whether a gamepad's look turns the other way side to side: its player's
 input.invert_look_horizontal (port/linux/src/xinput_sdl.c) */
 int halo_look_horizontal_inverted(short gamepad);
+/* a gamepad's look stick's turn up and down times this: its player's
+input.look_vertical_sensitivity, 1 the original's (port/linux/src/xinput_sdl.c) */
+float halo_look_vertical_sensitivity(short gamepad);
+/* a gamepad's look stick's turn zoomed in times this, on top of the zoom's
+own slowing: its player's input.stick_zoom_sensitivity, 1 the original's
+(port/linux/src/xinput_sdl.c) */
+float halo_stick_zoom_sensitivity(short gamepad);
+/* a gamepad's motors' strength, in percent (0 to 100): its player's
+input.rumble_strength, 100 the game's own (port/linux/src/xinput_sdl.c) */
+unsigned long halo_rumble_strength(short gamepad);
 /* whether a local player's controller aims as Modern does (input.aim_style,
 the player's own), and Modern's acceleration angle, as its tangent, and the
 push that accelerates, or -1 for the game's own (source/game/player_control.c) */

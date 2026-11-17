@@ -385,14 +385,40 @@ short fix_dead_zone(
 	return 0;
 }
 
+/* port: a direction of a stick's dead zones (fix_dead_zone's), with an
+outer one (input.left_stick_outer_dead_zone, input.right_stick_outer_dead_zone):
+read as full from live_range on, its push from dead_range to there made the
+whole travel; with none (live_range the rim) the original's */
+static short fix_dead_zones(
+	short value,
+	short dead_range,
+	short live_range)
+{
+	if (live_range >= SHORT_MAX)
+	{
+		return fix_dead_zone(value, dead_range);
+	}
+	if (value > dead_range)
+	{
+		return (short)((MIN(value, live_range) - dead_range) * SHORT_MAX / (live_range - dead_range));
+	}
+	if (value < -dead_range)
+	{
+		return (short)((MAX(value, -live_range) + dead_range) * SHORT_MAX / (live_range - dead_range));
+	}
+
+	return 0;
+}
+
 /* port: a stick's dead zone made round (Modern aim's look stick:
 input.aim_style): read as none within dead_range of the middle, whichever
-way it points, then its push from there to the rim made the whole travel,
-its direction kept */
+way it points, then its push from there to live_range (the rim, or short of
+it by its outer dead zone) made the whole travel, its direction kept */
 static void fix_round_dead_zone(
 	short x,
 	short y,
 	short dead_range,
+	short live_range,
 	point2d *stick)
 {
 	real length = square_root((real)x * (real)x + (real)y * (real)y);
@@ -404,7 +430,7 @@ static void fix_round_dead_zone(
 	}
 	else
 	{
-		real push = (MIN(length, (real)SHORT_MAX) - dead_range) / (real)(SHORT_MAX - dead_range);
+		real push = (MIN(length, (real)live_range) - dead_range) / (real)(live_range - dead_range);
 		real scale = push * SHORT_MAX / length;
 
 		stick->x = (short)PIN(x * scale, -SHORT_MAX, SHORT_MAX);
@@ -415,9 +441,11 @@ static void fix_round_dead_zone(
 
 /* port: a gamepad's sticks' dead zones from its reading (input_update's, and
 a sub-step's: input_abstraction.c), each its player's own dead range
-(halo_stick_dead_range), each direction's own, as the original's; the stick
+(halo_stick_dead_range) and outer dead range (halo_stick_live_range),
+each direction's own, as the original's; the stick
 that alone looks round instead under that player's Modern aim
-(input.aim_style), which takes it as a push and a direction (player_control.c) */
+(input.aim_style), which takes it as a push and a direction (player_control.c),
+or as the player's look dead zone shape sets (input.look_dead_zone_shape) */
 void input_port_fix_stick_dead_zones(
 	short gamepad_index,
 	short left_x,
@@ -429,30 +457,37 @@ void input_port_fix_stick_dead_zones(
 	short look_stick = NONE;
 	short left_range = halo_stick_dead_range(gamepad_index, _gamepad_stick_left);
 	short right_range = halo_stick_dead_range(gamepad_index, _gamepad_stick_right);
+	short left_live = halo_stick_live_range(gamepad_index, _gamepad_stick_left);
+	short right_live = halo_stick_live_range(gamepad_index, _gamepad_stick_right);
 	float acceleration_tangent;
 	float acceleration_threshold;
+	/* (the look stick's shape, input.look_dead_zone_shape: Auto the aim
+	style's, round under Modern, each direction's own under Classic) */
+	int shape = halo_look_dead_zone_shape(gamepad_index);
 
-	if (player_control_aim_modern(gamepad_index, &acceleration_tangent, &acceleration_threshold))
+	if (shape == HALO_LOOK_DEAD_ZONE_ROUND ||
+		(shape == HALO_LOOK_DEAD_ZONE_AUTO &&
+			player_control_aim_modern(gamepad_index, &acceleration_tangent, &acceleration_threshold)))
 	{
 		look_stick = input_abstraction_port_look_stick(gamepad_index);
 	}
 	if (look_stick == _gamepad_stick_left)
 	{
-		fix_round_dead_zone(left_x, left_y, left_range, &sticks[_gamepad_stick_left]);
+		fix_round_dead_zone(left_x, left_y, left_range, left_live, &sticks[_gamepad_stick_left]);
 	}
 	else
 	{
-		sticks[_gamepad_stick_left].x = fix_dead_zone(left_x, left_range);
-		sticks[_gamepad_stick_left].y = fix_dead_zone(left_y, left_range);
+		sticks[_gamepad_stick_left].x = fix_dead_zones(left_x, left_range, left_live);
+		sticks[_gamepad_stick_left].y = fix_dead_zones(left_y, left_range, left_live);
 	}
 	if (look_stick == _gamepad_stick_right)
 	{
-		fix_round_dead_zone(right_x, right_y, right_range, &sticks[_gamepad_stick_right]);
+		fix_round_dead_zone(right_x, right_y, right_range, right_live, &sticks[_gamepad_stick_right]);
 	}
 	else
 	{
-		sticks[_gamepad_stick_right].x = fix_dead_zone(right_x, right_range);
-		sticks[_gamepad_stick_right].y = fix_dead_zone(right_y, right_range);
+		sticks[_gamepad_stick_right].x = fix_dead_zones(right_x, right_range, right_live);
+		sticks[_gamepad_stick_right].y = fix_dead_zones(right_y, right_range, right_live);
 	}
 	return;
 }
@@ -1227,7 +1262,8 @@ static void input_flush_rumble(
 
 /* port: a gamepad's motors written (XInputSetState) when they change, and,
 to refresh them, once INPUT_PORT_RUMBLE_REFRESH_MILLISECONDS have passed
-while they run; nothing while paused, in the console or out of a game */
+while they run, at its player's rumble strength; nothing while paused, in
+the console or out of a game */
 static void input_port_write_rumble(
 	short gamepad_index,
 	boolean refresh)
@@ -1238,8 +1274,13 @@ static void input_port_write_rumble(
 		game_time_get_paused() ||
 		!game_in_progress();
 	XINPUT_FEEDBACK *feedback = &input_globals.gamepad_feedbacks[gamepad_index];
-	word left = suppress_rumble ? 0 : input_globals.gamepad_rumbler_states[gamepad_index].left_frequency;
-	word right = suppress_rumble ? 0 : input_globals.gamepad_rumbler_states[gamepad_index].right_frequency;
+	/* (each motor times its player's rumble strength, input.rumble_strength:
+	100%, the default, the game's own) */
+	unsigned long strength = halo_rumble_strength(gamepad_index);
+	word left = suppress_rumble ? 0 :
+		(word)(input_globals.gamepad_rumbler_states[gamepad_index].left_frequency * strength / 100);
+	word right = suppress_rumble ? 0 :
+		(word)(input_globals.gamepad_rumbler_states[gamepad_index].right_frequency * strength / 100);
 	unsigned long now;
 
 	if (input_globals.gamepad_handles[gamepad_index] == NULL)
