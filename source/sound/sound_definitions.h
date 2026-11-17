@@ -81,6 +81,25 @@ other permutation. */
 		(permutation)->sample_buffer_size >= SOUND_PERMUTATION_PCM_MINIMUM_RATE && \
 		(permutation)->sample_buffer_size <= SOUND_PERMUTATION_PCM_MAXIMUM_RATE ? \
 		(long)(permutation)->sample_buffer_size : 0L)
+/* port: the next of the pieces of 16-bit PCM at its own rate a long
+permutation (`permutation`, of the pitch range `range`) is split into
+(port/linux/game/mod_sounds.c's range_split, OpenH1 issue 1167), or NONE: a
+permutation after the range's actual ones, at the same rate. A sound whose
+permutations are not linked plays a split one's pieces in turn and goes on
+as it did, its next pick one of the actual ones; one that repeated forever
+still does. */
+#define sound_permutation_next_piece(range, permutation) \
+	(sound_permutation_pcm_rate(permutation) && \
+		(permutation)->next_permutation_index >= (range)->actual_permutation_count && \
+		(permutation)->next_permutation_index < (range)->permutations.count && \
+		sound_permutation_pcm_rate(&((struct sound_permutation const *)(range)->permutations.address)[ \
+			(permutation)->next_permutation_index]) == sound_permutation_pcm_rate(permutation) ? \
+		(short)(permutation)->next_permutation_index : (short)NONE)
+/* port: the permutation that plays after `permutation` of `range`: a
+linked sound's next, or the next piece (sound_permutation_next_piece) */
+#define sound_permutation_next(definition, range, permutation) \
+	(TEST_FLAG((definition)->flags, _sound_definition_linked_permutations_bit) ? \
+		(short)(permutation)->next_permutation_index : sound_permutation_next_piece(range, permutation))
 
 /* ---------- structures */
 

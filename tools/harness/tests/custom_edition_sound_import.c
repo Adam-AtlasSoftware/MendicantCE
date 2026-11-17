@@ -271,6 +271,8 @@ int main(int argc, char **argv)
 		for (frame = 0; frame < long_frames; frame++)
 			((short *)map_samples)[frame] = (short)lround(16384.0 * sin(2.0 * PI * 16000.0 * frame / 44100.0));
 		map_make(0, 1, 0, long_frames * (long)sizeof(short));
+		CHECK(custom_edition_sounds_globals.adpcm_count == 1, "%ld permutations said kept as Xbox ADPCM",
+			custom_edition_sounds_globals.adpcm_count);
 		count = kept_adpcm_decoded(decoded, FRAMES);
 		CHECK(count == FRAMES, "%ld frames", count);
 		CHECK(level_db(decoded + 1024, FRAMES - 2048, 6050.0, 22050.0) < -60.0,
@@ -282,6 +284,25 @@ int main(int argc, char **argv)
 		count = kept_adpcm_decoded(decoded, FRAMES);
 		CHECK(fabs(level_db(decoded + 1024, FRAMES - 2048, 3000.0, 22050.0)) < 0.5,
 			"the 3 kHz tone is at %.2f dB", level_db(decoded + 1024, FRAMES - 2048, 3000.0, 22050.0));
+	}
+	else if (!strcmp(name, "over-total"))
+	{
+		/* a short permutation (16 KB of PCM) when the map's permutations already keep all but 8 KB of the PCM they
+		may (NATIVE_TOTAL_BYTES): Xbox ADPCM, as before (OpenH1 issue 1167 splits only a mod's), and said */
+		tone_make(3000.0, 44100.0, 1, FRAMES);
+		memcpy(map_samples, tone, FRAMES * sizeof(short));
+		map_make(0, 1, 0, FRAMES * (long)sizeof(short));
+		CHECK(sound_permutation_pcm_rate(&the_permutation) == 44100, "under the total it is not PCM");
+		the_permutation.compression = 0;
+		the_permutation.sample_buffer_size = 0;
+		the_permutation.samples.size = FRAMES * (long)sizeof(short);
+		the_permutation.samples.file_offset = 0;
+		custom_edition_sounds_dispose();
+		custom_edition_sounds_globals.native_bytes = NATIVE_TOTAL_BYTES - 0x2000;
+		CHECK(custom_edition_sounds_decode(NULL, 0, 0, 0x10000000), "the sounds were not decoded");
+		CHECK(the_permutation.compression == 1 && !sound_permutation_pcm_rate(&the_permutation),
+			"past the map's total it is not Xbox ADPCM");
+		CHECK(custom_edition_sounds_globals.adpcm_count == 1, "it was not said");
 	}
 	else if (!strcmp(name, "resource-entry"))
 	{

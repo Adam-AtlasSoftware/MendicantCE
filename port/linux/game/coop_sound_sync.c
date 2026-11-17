@@ -361,9 +361,8 @@ long coop_sound_sync_sound_milliseconds(
 				if (part <= 0)
 					part = PIN(definition->longest_permutation_length, 0, MAXIMUM_COOP_SOUND_PERMUTATION_MILLISECONDS);
 				length = MIN(length + part, MAXIMUM_COOP_SOUND_PERMUTATION_MILLISECONDS);
-				if (!TEST_FLAG(definition->flags, _sound_definition_linked_permutations_bit))
-					break;
-				index = permutation->next_permutation_index;
+				/* (and a long one's pieces: sound_permutation_next) */
+				index = sound_permutation_next(definition, range, permutation);
 			}
 			longest = MAX(longest, length);
 		}
@@ -406,6 +405,7 @@ short coop_sound_sync_place(
 	long into;
 	long played = 0;
 	short index;
+	short first;
 	short count;
 
 	if (!sync || !VALID_INDEX(track_index, MAXIMUM_TRACKS_PER_LOOPING_SOUND) || definition_index == NONE ||
@@ -433,7 +433,8 @@ short coop_sound_sync_place(
 	its next, till NONE; at most each of the range's once, against a chain
 	that comes back on itself) */
 	linked = TEST_FLAG(definition->flags, _sound_definition_linked_permutations_bit);
-	index = *permutation_index;
+	first = *permutation_index;
+	index = first;
 	for (count = 0; count < range->permutations.count; count++)
 	{
 		long length;
@@ -456,7 +457,8 @@ short coop_sound_sync_place(
 		}
 		into -= length;
 		played += length;
-		next_index = linked ? permutation->next_permutation_index : NONE;
+		/* (and a long one's pieces: sound_permutation_next) */
+		next_index = sound_permutation_next(definition, range, permutation);
 		if (!VALID_INDEX(next_index, range->permutations.count))
 		{
 			if (part == _coop_sound_sync_start_part)
@@ -477,9 +479,21 @@ short coop_sound_sync_place(
 			}
 			if (!linked)
 			{
-				/* (a loop of one permutation repeats it) */
-				byte_offset = coop_sound_permutation_byte_offset(definition, permutation, played_pitch,
-					into % length);
+				/* (a loop of one permutation repeats it, all of its pieces
+				when it was split: from its first, round them again) */
+				into %= played;
+				index = first;
+				for (count = 0; count < range->permutations.count; count++)
+				{
+					permutation = TAG_BLOCK_GET_ELEMENT(&range->permutations, index, struct sound_permutation);
+					length = coop_sound_permutation_milliseconds(definition, permutation, played_pitch);
+					next_index = sound_permutation_next_piece(range, permutation);
+					if (into < length || length <= 0 || !VALID_INDEX(next_index, range->permutations.count))
+						break;
+					into -= length;
+					index = next_index;
+				}
+				byte_offset = coop_sound_permutation_byte_offset(definition, permutation, played_pitch, into);
 				*permutation_index = index;
 				if (byte_offset > 0)
 					coop_sound_offset_note(sound_index, permutation, byte_offset);

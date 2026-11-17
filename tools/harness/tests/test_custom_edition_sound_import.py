@@ -8,11 +8,11 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from harness import CHECK_FAILED, build, constant, mutated, read, run, structure  # noqa: E402
+from harness import CHECK_FAILED, build, constant, enum_with, mutated, read, run, structure  # noqa: E402
 from harness.audio import pcm_permutation_rate  # noqa: E402
 
 MODULE = "port/linux/game/custom_edition_sounds.c"
-CASES = ["high-tone", "48k-pcm", "too-long", "resource-entry"]
+CASES = ["high-tone", "48k-pcm", "too-long", "over-total", "resource-entry"]
 NEGATIVE_CONTROLS = {
     # the old conversion path (#1111): every permutation re-encoded as Xbox ADPCM at a rate the channels play
     "always-adpcm": (("if (decoded && frames_kept_native(", "if (decoded && FALSE && frames_kept_native("),
@@ -31,6 +31,7 @@ def generated(fault=None):
     types = "".join(structure(tags, name) + "\n" for name in ["tag_block", "tag_reference", "tag_data"])
     types += "".join(structure(definitions, name) + "\n" for name in
                      ["real_bounds", "sound_permutation", "sound_pitch_range", "sound_definition"])
+    types += enum_with(definitions, "_sound_definition_linked_permutations_bit") + "\n"
     types += f"#define MAXIMUM_SOUND_DATA_SIZE {constant(definitions, 'MAXIMUM_SOUND_DATA_SIZE')}\n"
     types += "#define SOUND_DEFINITION_TAG 0x736E6421\n"
     # a small sound cache (a quarter of it, 64 KB, is the most PCM a permutation is kept in), so that the case of

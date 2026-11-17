@@ -63,10 +63,13 @@ struct fake_stream
 	int i3dl2_given, stereo_positioned;
 	float stereo_position[3];
 	int packets;
-	unsigned long packet_bytes[64];
-	void *packet_contexts[64];
+	unsigned long packet_bytes[256];
+	void *packet_contexts[256];
 	int packet_count;
 };
+/* the bytes every packet sent to any stream held, in the order sent (the "chained" case) */
+static byte captured[1 << 18];
+static unsigned long captured_bytes;
 static struct fake_stream fake_streams[2048];
 static int fake_stream_count, alive_streams, most_alive_streams;
 static struct fake_stream *fake(IDirectSoundStream *stream) { return (struct fake_stream *)(void *)stream; }
@@ -127,7 +130,10 @@ static HRESULT IDirectSoundStream_Process(IDirectSoundStream *s, XMEDIAPACKET co
 {
 	(void)out;
 	CHECK(fake(s)->alive, "a packet sent to a stream released");
-	CHECK(fake(s)->packet_count < 64, "too many packets");
+	CHECK(fake(s)->packet_count < 256, "too many packets");
+	CHECK(captured_bytes + packet->dwMaxSize <= sizeof(captured), "too many bytes sent");
+	memcpy(captured + captured_bytes, packet->pvBuffer, packet->dwMaxSize);
+	captured_bytes += packet->dwMaxSize;
 	fake(s)->packet_bytes[fake(s)->packet_count] = packet->dwMaxSize;
 	fake(s)->packet_contexts[fake(s)->packet_count++] = packet->pContext;
 	fake(s)->packets++;
@@ -296,6 +302,59 @@ int main(int argc, char **argv)
 			fake(record->stream)->frequency);
 		CHECK(fake(record->stream)->packet_bytes[0] % 2 == 0, "a PCM packet of %lu bytes",
 			fake(record->stream)->packet_bytes[0]);
+	}
+	else if (!strcmp(name, "chained"))
+	{
+		/* a permutation split into three linked pieces of 16-bit PCM at 44.1 kHz (mod_sounds.c's range_split), each
+		queued while the one before plays, as the sound manager queues them: the channel's one PCM stream takes
+		every piece's packets, no switch and no stream more, the stream never without a packet until the last has
+		played, and the bytes it is given are the pieces' joined, none left out or repeated (each piece longer than
+		the packets queued ahead, as a split one's 512 KB is) */
+		static struct sound_permutation pieces[3];
+		static long const sizes[3] = { 100000, 100000, 60002 };
+		struct sound_channel *record = channel_get(0);
+		IDirectSoundStream *pcm_stream;
+		long at = 0, byte_index;
+		int piece, queued = 1, rounds, streams;
+
+		for (piece = 0; piece < 3; piece++)
+		{
+			pieces[piece] = pcm_sound;
+			pieces[piece].samples.size = sizes[piece];
+			pieces[piece].unknown1 = (unsigned long)(void *)(sound_cache + at);
+			at += sizes[piece];
+		}
+		for (byte_index = 0; byte_index < at; byte_index++)
+			sound_cache[byte_index] = (byte)(byte_index * 7 + byte_index / 251);
+		record->pitch = 1.f;
+		captured_bytes = 0;
+		dsound_channel_queue_sound(0, &pieces[0]);
+		pcm_stream = record->stream;
+		streams = alive_streams;
+		CHECK(fake(pcm_stream)->pcm && fake(pcm_stream)->rate == 44100, "the channel is not playing PCM at 44.1 kHz");
+		dsound_channel_queue_sound(0, &pieces[1]);
+		for (rounds = 0; rounds < 200 && fake(pcm_stream)->packets > 0; rounds++)
+		{
+			complete_one(0);
+			CHECK(!dsound_port_formats.switch_pending[0] && record->stream == pcm_stream,
+				"the stream switched between pieces of one format");
+			if (!record->queued_permutation && queued < 2 && record->playing_permutation == &pieces[queued])
+			{
+				queued++;
+				dsound_channel_queue_sound(0, &pieces[queued]);
+			}
+			CHECK(fake(pcm_stream)->packets > 0 || (queued == 2 && !record->playing_permutation),
+				"the stream ran out of packets at a join (piece %d)", queued);
+		}
+		CHECK(queued == 2 && fake(pcm_stream)->packets == 0 && record->state == _sound_channel_idle,
+			"the chain did not play out");
+		CHECK(alive_streams == streams && alive_streams <= MAXIMUM_SOUND_CHANNELS, "%d streams, %d before",
+			alive_streams, streams);
+		CHECK(captured_bytes == (unsigned long)at, "%lu bytes sent of the pieces' %ld", captured_bytes, at);
+		for (byte_index = 0; byte_index < at && captured[byte_index] == sound_cache[byte_index]; byte_index++)
+			;
+		CHECK(byte_index == at, "byte %ld sent is not the pieces' (a gap or a repeat at a join)", byte_index);
+		CHECK(locks == 0, "%d of the pieces' sound cache locks were not let go", locks);
 	}
 	else
 	{
