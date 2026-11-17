@@ -144,6 +144,7 @@ symbols in this file:
 #include "scenario/scenario.h" /* port: global_scenario_get */
 #include "structure_culling.h" /* port: port/linux/game/structure_culling.c */
 #include "mcc_share.h" /* port: port/linux/game/mcc_share.c */
+#include "mods.h" /* port: port/linux/game/mods.c */
 
 /* ---------- constants */
 
@@ -1663,9 +1664,14 @@ void scenario_structure_bsps_read_ahead(
 		if (structure_bsp_reference_valid(reference) && structure_bsp_read(reference) &&
 			!custom_edition_cache_tags_loaded())
 		{
+			/* (and the mods' lightmaps for it taken or left out by its
+			lightmaps' layout: port/linux/game/mod_bitmaps.c; a Custom Edition
+			bsp's, whose lightmap vertices are made as it loads, as it loads) */
 			structure_culling_structure_bsp_read(
 				((struct cache_file_structure_bsp_header *)reference->base_address)->base_address,
 				index, structure_bsp_cache_copy_offset(reference));
+			mods_structure_bsp_read(index,
+				((struct cache_file_structure_bsp_header *)reference->base_address)->base_address);
 		}
 	}
 	halo_load_trace("bsp.read_ahead.end", NULL); /* port: loading measurement */

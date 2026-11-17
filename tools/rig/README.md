@@ -81,6 +81,14 @@ goat-rig run mcc --mcc host --seconds 70 --shots at:25 -- \
   'HALO_NETWORK_TEST=host:mcc_maps\3021510694\mp_plains:slayer' HALO_NETWORK_TEST_START=10
 ```
 
+**9. menu: the main menu as a player sees it** (its 3D scene, the ring and the sky, drawn; nothing pressed):
+```sh
+goat-rig run menu --build my-branch --menu 20 --shots at:12
+```
+`--menu [SECONDS]` (20 by default) is one game with no network test, which every other recipe jumps past the
+menu with, so the menu's own scene is drawn and prepared. The summary then says whether only the ui map loaded
+and stayed up. Any renderer or menu change gets one `--menu` run as part of its proof.
+
 ## What it does for you
 
 - **build** `<branch|sha|pr/N|local branch>` fetches `~/goat-rig/repo.git` (a bare clone of GitHub's
@@ -101,7 +109,10 @@ goat-rig run mcc --mcc host --seconds 70 --shots at:25 -- \
   (`~/goat-rig/locks/gpu.lock`; older scripts link their lock to it). It never starts while the machine owner's
   own game (`~/Applications/OpenH1/bin/openh1`) runs, and stops if that game starts. Afterwards it keeps `halo.log`, `debug.txt`, the pictures (as PNG),
   `video.mp4` and `summary.txt` (exit codes, failed asserts, peak RSS) and deletes the rest unless you pass
-  `--keep`.
+  `--keep`. The summary (printed too) also gives the known failure signs from each game's log: `FAIL menus: not
+  added` (the port's menus refused), the count of `pipeline missed map preparation` and of `a pipeline the map's
+  preparation did not make`, each map's preparation (`shipped record`, `own record` or `walked`), and stalls over
+  100 ms that are not loads.
 - **Settings after `--`:** `VAR=value`; `-VAR` unsets; `@data/<file>=<text>` writes a file into the data folder
   (`@data/init.txt=…`); `@link/<path>=<target>` and `@copy/<path>=<source>` link or copy into it.
 - **exec** `<branch> -- <command>` runs a tree's own tool in its worktree, niced, inside a private network.
