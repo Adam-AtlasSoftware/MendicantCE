@@ -2,10 +2,14 @@
 display.match_timer): the match's in multiplayer, the mission's in the
 campaign and co-op (the level's game time), none in a cinematic, with the
 setting off or with the scripts' show_hud off. Its time is drawn through a
-fake text drawer, which keeps the last string. */
+fake text drawer, which keeps the last string. The player's Hide HUD
+(controls.hide_hud's key, display.hide_hud) hides it with the rest of the
+HUD, over map loads, which reset the scripts' show_hud and not it. */
 #include "harness.h"
 
 #include <wchar.h>
+
+#include "config.inc"
 
 typedef struct { short x0, y0, x1, y1; } rectangle2d;
 typedef struct { real alpha, red, green, blue; } real_argb_color;
@@ -42,9 +46,16 @@ static long game_time_get(void) { return game_time; }
 static struct { boolean show_hud; } scripted = { TRUE }, *hud_scripted_globals = &scripted;
 
 /* the settings */
-static boolean match_timer;
+static boolean match_timer, hide_hud;
 static unsigned long changes = 1;
-static int config_boolean(const char *name) { return !strcmp(name, "display.match_timer") ? match_timer : 0; }
+static int config_boolean(const char *name)
+{
+	return !strcmp(name, "display.match_timer") ? match_timer : !strcmp(name, "display.hide_hud") ? hide_hud : 0;
+}
+
+/* the keyboard's actions held (halo_keyboard_actions) */
+static unsigned long keys_held;
+static unsigned long halo_keyboard_actions(short controller_index) { (void)controller_index; return keys_held; }
 static unsigned long config_changes(void) { return changes; }
 
 /* the view and the text */
@@ -119,6 +130,46 @@ int main(int argc, char **argv)
 		match_timer = TRUE;
 		changes++;
 		CHECK(!wcscmp(frame(), L"1:05"), "the setting turned on not read: \"%ls\"", drawn);
+		return 0;
+	}
+	CASE("hide")
+	{
+		engine_running = FALSE;
+		CHECK(!wcscmp(frame(), L"1:05"), "hidden before the key: \"%ls\"", drawn);
+		/* (pressed and held over frames: one toggle) */
+		keys_held = FLAG(HALO_KEYBOARD_HIDE_HUD);
+		CHECK(!*frame() && !*frame(), "the key did not hide the clock");
+		CHECK(!hud_shown(), "the key did not hide the HUD");
+		keys_held = 0;
+		CHECK(!*frame(), "let go, shown again");
+		/* (a map load: the scripts' show_hud reset to TRUE) */
+		scripted.show_hud = TRUE;
+		CHECK(!*frame() && !hud_shown(), "a map load showed the HUD");
+		/* (another setting changed in Settings: not this one's) */
+		changes++;
+		CHECK(!hud_shown(), "another setting's change showed the HUD");
+		keys_held = FLAG(HALO_KEYBOARD_HIDE_HUD);
+		CHECK(!wcscmp(frame(), L"1:05") && hud_shown(), "pressed again, not shown");
+		keys_held = 0;
+		/* (with it off, the scripts still hide the HUD) */
+		scripted.show_hud = FALSE;
+		CHECK(!hud_shown(), "the scripts' show_hud ignored");
+		return 0;
+	}
+	CASE("hide_setting")
+	{
+		/* (display.hide_hud: the state as the game starts, and as Settings sets it) */
+		hide_hud = TRUE;
+		CHECK(!hud_shown(), "the setting did not hide the HUD");
+		keys_held = FLAG(HALO_KEYBOARD_HIDE_HUD);
+		CHECK(hud_shown(), "the key did not show it");
+		keys_held = 0;
+		hide_hud = FALSE;
+		changes++;
+		CHECK(hud_shown(), "the setting turned off left it hidden");
+		hide_hud = TRUE;
+		changes++;
+		CHECK(!hud_shown(), "the setting turned on not read");
 		return 0;
 	}
 	fprintf(stderr, "unknown case: %s\n", case_name);

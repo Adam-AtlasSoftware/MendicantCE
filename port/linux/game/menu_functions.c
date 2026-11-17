@@ -5284,6 +5284,9 @@ static struct
 	/* (COMMUNICATION's last row, after PING: the HUD's Spartan link,
 	spartan_link.c) */
 	{ "controls.spartan_link", L"SPARTAN LINK", 3, FALSE },
+	/* (ACTIONS' last row, after CLIP: the HUD hidden, source/interface/
+	hud.c) */
+	{ "controls.hide_hud", L"HIDE HUD", 2, FALSE },
 };
 
 static struct

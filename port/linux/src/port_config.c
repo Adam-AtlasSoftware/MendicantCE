@@ -463,6 +463,12 @@ static const struct config_setting config_settings[] =
 	{ "display.player_name_scale", _config_real, "0.75", "HALO_PLAYER_NAME_SCALE", _environment_value, _platform_all,
 		"How large the players' names are drawn: 1.0 three quarters of the size of\n"
 		"the HUD's text, 0.25 to 4." },
+	{ "display.hide_hud", _config_boolean, "false", "HALO_HIDE_HUD", _environment_value, _platform_all,
+		"Hide the HUD, the reticle, the clock, the teammates' marks and the names\n"
+		"over the players, for clean footage and screenshots. The Hide HUD key\n"
+		"(controls.hide_hud) shows and hides them in a game, over map loads; this\n"
+		"is their state as the game starts. Scripts still hide the HUD in\n"
+		"cutscenes." },
 	{ "display.match_timer", _config_boolean, "false", "HALO_MATCH_TIMER", _environment_value, _platform_all,
 		"Draw the match clock at the bottom right in multiplayer. It counts up\n"
 		"from the game's first tick, which the items' respawn periods count from\n"
@@ -1305,6 +1311,9 @@ static const struct config_setting config_settings[] =
 	{ "controls.spartan_link", _config_string, "\"B\"", "HALO_KEY_SPARTAN_LINK", _environment_value, _platform_all,
 		"The Spartan link: your teammates' feeds in the HUD shown or hidden\n"
 		"(display.spartan_link).", _scope_keyboard },
+	{ "controls.hide_hud", _config_string, "\"\"", "HALO_KEY_HIDE_HUD", _environment_value, _platform_all,
+		"Hide HUD: the HUD, the reticle and the clock hidden or shown again, for\n"
+		"clean footage and screenshots (display.hide_hud). Unbound by default.", _scope_keyboard },
 
 	{ "game.console_log", _config_string, "\"important\"", "HALO_CONSOLE_LOG", _environment_value, _platform_all,
 		"What the game's console shows on screen of what it logs: \"important\"\n"
