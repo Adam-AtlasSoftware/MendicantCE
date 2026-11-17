@@ -255,7 +255,9 @@ halo_vr_effect_depth):
 
 The pixel program must sample texture 0 in 2D (the effect's bitmap) and
 not textures 2 and 3, whose bindings the depth and thickness take
-(xgpu_spirv_effect_possible), drawn into both eyes. The fade is drawn as
+(xgpu_spirv_effect_possible), drawn into both eyes, or on a flat screen
+into no views (display.soft_particles: soft alone; the depth then one
+layer, a 2D image, and the uniforms' first view). The fade is drawn as
 the blend's own nothing (XGPU_SPIRV_FADE_*): alpha to 0 over an alpha
 blend, colour to 0 when added, to white when multiplied, to grey when
 multiplied twice. */

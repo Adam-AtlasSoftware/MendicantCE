@@ -441,7 +441,10 @@ struct xgpu_stream_capabilities
 	uint8_t ray_queries, cutout_prepass, clear_alone, draw_bounds;
 	/* display.output_depth: the SDR back buffer can be RGBA16
 	(xgpu_backend.h's XGPU_FORMAT_RGBA16) */
-	uint8_t deep_sdr, pad[3];
+	uint8_t deep_sdr;
+	/* display.soft_particles: an effect drawn with no views can be soft
+	(the pixel key's vr_effect: xgpu_backend_capabilities' soft_effects) */
+	uint8_t soft_effects, pad[2];
 	/* the GPU, its API and driver, in a few words (a report's:
 	port/linux/src/report.c), NUL terminated */
 	char device[96];

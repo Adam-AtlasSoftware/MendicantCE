@@ -98,6 +98,10 @@ struct xgpu_backend_capabilities
 	/* display.ambient_occlusion "ray_traced": the occlusion's rays traced
 	by the GPU's ray queries (xgpu_backend_world_ao_mesh, _instances) */
 	BOOL ray_queries;
+	/* display.soft_particles: an effect drawn on a flat screen (no views)
+	soft against the scene's depth, as the VR mode's eyes draw it (the pixel
+	key's vr_effect at 1: d3d8_device.c's soft_effect_key) */
+	BOOL soft_effects;
 };
 
 extern struct xgpu_backend_capabilities xgpu_backend_capabilities;

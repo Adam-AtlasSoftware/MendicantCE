@@ -87,7 +87,7 @@
 			<choice shown="AUTO" value="auto"/>
 		</row>
 		<row key="brightness_settings" kind="link" label="BRIGHTNESS ›" crumb="VIDEO › GRAPHICS" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness/brightness_screen">
-			<help>How bright the picture is: its gamma, and on an HDR display, HDR's look, how bright white and the HUD are, and the display's peak.</help>
+			<help>How bright the picture is: its gamma, soft particles, and on an HDR display, HDR's look, how bright white and the HUD are, and the display's peak.</help>
 		</row>
 		<row key="advanced_graphics" kind="link" label="ADVANCED GRAPHICS ›" crumb="VIDEO › GRAPHICS" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/advanced_graphics_screen">
 			<help>Render resolution, anti-aliasing, texture filtering, model detail, shadows, the lighting and the shields' glow, smooth motion and the tick rate.</help>
@@ -583,7 +583,12 @@
 			<choice shown="8-BIT" value="8"/>
 			<choice shown="10-BIT" value="10"/>
 		</row>
-		<section key="section_3" title="HDR" when="hdr"/>
+		<row key="soft_particles" kind="choice" setting="display.soft_particles" label="SOFT PARTICLES" crumb="VIDEO › BRIGHTNESS" when="desktop+soft_effects+!vr">
+			<help>Smoke, dust, steam and weather fade softly where they meet walls and floors, at a small cost. Off draws them as the Xbox did: a hard line where they cut in.</help>
+			<choice shown="ON" value="true"/>
+			<choice shown="OFF" value="false"/>
+		</row>
+		<section key="section_4" title="HDR" when="hdr"/>
 		<row key="hdr" kind="choice" setting="display.hdr" label="HDR" crumb="VIDEO › BRIGHTNESS" when="hdr">
 			<help>Brighter highlights on an HDR display. Auto turns it on while the display shows HDR; a display without HDR shows the game as it was.</help>
 			<choice shown="AUTO" value="auto"/>
@@ -687,7 +692,7 @@
 			<choice shown="HIGH" value="3"/>
 			<choice shown="MAX" value="4"/>
 		</row>
-		<section key="section_12" title="DISPLAY" when="hdr"/>
+		<section key="section_13" title="DISPLAY" when="hdr"/>
 		<row key="hdr_display" kind="status" label="DISPLAY PEAK" crumb="VIDEO › BRIGHTNESS" when="hdr">
 			<help>The brightest the display shows, and its SDR white, as the system reports them.</help>
 		</row>

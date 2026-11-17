@@ -4831,6 +4831,49 @@ static BOOL per_pixel_lighting(void)
 	return enabled || halo_dynamic_lights_enhanced();
 }
 
+/* display.soft_particles (#1116): on a flat screen, an effect shader's group
+the game says can be (halo_effect_soft: rasterizer_xbox_transparent_geometry.c,
+the groups the VR mode's eyes draw soft) is drawn soft against the scene's
+depth, as the VR mode's eyes draw it: the pixel key's vr_effect at
+XGPU_SPIRV_EFFECT_SOFT (1) in a draw of no views (the backend samples the
+depth target the draw tests against, in a pass that writes none of it: no
+copy). Only where the backend draws it (xgpu_backend_capabilities.soft_effects);
+off, the key is as it was. Read again as the front end takes a change up
+between frames. */
+static struct
+{
+	/* the group drawn can be soft (halo_effect_soft) */
+	BOOL group;
+	BOOL read;
+	unsigned long read_at;
+	BOOL enabled;
+} soft_effects;
+
+void halo_effect_soft(int soft)
+{
+	soft_effects.group = soft != 0;
+}
+
+int halo_soft_effects_drawn(void)
+{
+	return xgpu_backend_capabilities.soft_effects != 0;
+}
+
+/* the pixel key's vr_effect for a draw of these views (XGPU_MULTIVIEW_*)
+on a flat screen: 1 soft, 0 none */
+static unsigned char soft_effect_key(int multiview)
+{
+	if (!soft_effects.group || multiview != XGPU_MULTIVIEW_NONE || !xgpu_backend_capabilities.soft_effects)
+		return 0;
+	if (!soft_effects.read || soft_effects.read_at != halo_gpu_settings_taken())
+	{
+		soft_effects.read = TRUE;
+		soft_effects.read_at = halo_gpu_settings_taken();
+		soft_effects.enabled = config_boolean("display.soft_particles") != 0;
+	}
+	return soft_effects.enabled ? 1 : 0;
+}
+
 /* the combiner portions whose results nothing after reads cleared (what
 an earlier draw left in a portion the draw's code did not set, which no
 later stage nor the final combiner reads): one program, one key. A
@@ -5247,6 +5290,9 @@ static BOOL prepare_draw(BOOL immediate, unsigned long primitive)
 	/* (the VR mode's effects, drawn into both eyes: halo_vr_effect_depth) */
 	key.vr_effect = key.multiview == XGPU_MULTIVIEW_EYES ? (unsigned char)vr_gl.effect_depth : 0;
 #endif
+	/* (display.soft_particles: an effect on a flat screen, soft) */
+	if (!key.vr_effect)
+		key.vr_effect = soft_effect_key(key.multiview);
 	/* the pipeline: the shaders, the fixed-function state, the targets */
 	memset(&pipeline_key, 0, sizeof(pipeline_key));
 	memset(&dynamic, 0, sizeof(dynamic));
@@ -7402,6 +7448,8 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 	hdr.view = FALSE;
 	hdr.category = -1;
 	hdr.kind = 0;
+	/* (display.soft_particles: a group cut short leaves the next frame hard) */
+	soft_effects.group = FALSE;
 	if (debug_settings.statistics && device.frame % 60 == 0)
 	{
 		platform_log("frame %lu: %lu draws, %lu immediate, %lu clears, %lu target changes; skipped %lu no program, %lu no target, %lu link; "

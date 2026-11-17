@@ -435,6 +435,25 @@ static void effect_programs(void)
 			}
 		}
 	}
+	/* a flat screen's (display.soft_particles): soft alone, no views, with
+	each fade, one map and two */
+	for (second = 0; second < 2; second++)
+	{
+		synthetic_base(&program);
+		synthetic_stage(&program, 0, XGPU_TEXTURE_PROJECT2D, _xgpu_sampler_2d);
+		if (second)
+			synthetic_stage(&program, 1, XGPU_TEXTURE_PROJECT2D, _xgpu_sampler_2d);
+		program.multiview = XGPU_MULTIVIEW_NONE;
+		for (fade = XGPU_SPIRV_FADE_NONE; fade <= XGPU_SPIRV_FADE_TO_GREY; fade++)
+		{
+			memset(&options, 0, sizeof(options));
+			options.effect = XGPU_SPIRV_EFFECT_SOFT;
+			options.effect_fade = fade;
+			snprintf(name, sizeof(name), "screen-effect-soft-maps%d-fade%d", second + 1, fade);
+			made = xgpu_spirv_pixel_shader(&program, &options, &module);
+			emit(name, "a flat screen's soft effects", made, &module);
+		}
+	}
 	/* a z-sprite (xgpu_shader.h, xgpu_pixel_program_depth_stage: the game's
 	effect program with its second map's puff, stages 2 and 3 its dot
 	products of it): its depth written, flat and in both eyes, or as an
