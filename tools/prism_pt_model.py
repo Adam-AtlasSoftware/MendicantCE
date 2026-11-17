@@ -21,8 +21,11 @@ def luma(c):
     return c[..., 0] * 0.2126 + c[..., 1] * 0.7152 + c[..., 2] * 0.0722
 
 
-def ris_lights(rng, lamp_count, lamp_pick, lamp_sample, fixtures, fixture_count, dynamics, dynamic_count, visible):
-    """one estimate of the lights' light at a point, as lights_ris: lamp_pick(rng) -> (lamp, probability);
+def ris_lights(rng, lamp_count, lamp_pick, lamp_sample, fixtures, fixture_count, dynamics, dynamic_count, visible,
+               seen=False):
+    """one estimate of the lights' light at a point, as the light pass's initial reservoir (lights_initial, its kept
+    sample's shadow traced after) or, seen, as the reference's lights_ris_seen (each candidate's shadow traced, its
+    visibility in its target): lamp_pick(rng) -> (lamp, probability);
     lamp_sample(rng, lamp) -> (integrand rgb, inverse pdf over directions, sample id) or None; fixtures and dynamics:
     lists of integrand rgb (0 where none reaches); visible(kind, id) -> bool, the kept one's shadow ray. Returns the
     rgb estimate"""
@@ -36,6 +39,8 @@ def ris_lights(rng, lamp_count, lamp_pick, lamp_sample, fixtures, fixture_count,
         if sample is None:
             continue
         integrand, inverse_pdf, sample_id = sample
+        if seen and not visible("lamp", sample_id):
+            continue
         target = float(luma(integrand))
         w = target * inverse_pdf / probability / float(lamp_count)
         if not w > 0.0:
@@ -50,6 +55,8 @@ def ris_lights(rng, lamp_count, lamp_pick, lamp_sample, fixtures, fixture_count,
         candidates = min(n, count)
         for c in range(candidates):
             i = c if n <= count else min(int(rng.random() * n), n - 1)
+            if seen and not visible(kind, i):
+                continue
             e = np.asarray(lights[i], float)
             target = float(luma(e))
             w = target * (float(n) / float(candidates))

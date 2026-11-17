@@ -544,137 +544,6 @@ void parts(Surface g, vec3 l, vec3 radiance_cos, bool diffuse_only, out vec3 dif
 }
 
 
-/* the lamps, the fixtures and the dynamic lights at the surface: resampled
-importance over candidates (lamp_count from the grid's lamp_pick, the
-fixtures' and the dynamic lights' by count), each its unshadowed diffuse and
-specular light's luminance the target, one kept, its shadow traced from o:
-the diffuse and the specular light, unbiased for any count of candidates
-(each kind its own domain, its candidates' weight over its count) */
-void lights_ris(Surface g, vec3 o, int lamp_count, int fixture_count, int dynamic_count, bool diffuse_only,
-    out vec3 diffuse, out vec3 specular)
-{
-    diffuse = vec3(0.0);
-    specular = vec3(0.0);
-    vec3 kept_d = vec3(0.0), kept_s = vec3(0.0), kept_l = vec3(0.0);
-    float kept_t = 0.0, kept_dist = 0.0, sum = 0.0;
-    int kept_kind = -1;
-    vec3 p = g.point;
-    bool lamps_on = s.counts.z > 0u && s.lamp.x > 0.0 && s.rig[10].w >= 0.5 && !term_off(2u);
-    if (lamps_on)
-    {
-        Floats f = Floats(s.lamps);
-        for (int c = 0; c < lamp_count; c++)
-        {
-            float probability;
-            uint lamp = lamp_pick(p, probability);
-            if (probability <= 0.0)
-                continue;
-            uint at = lamp * 16u;
-            vec3 a0 = vec3(f.v[at], f.v[at + 1u], f.v[at + 2u]);
-            vec3 a1 = vec3(f.v[at + 3u], f.v[at + 4u], f.v[at + 5u]);
-            vec3 a2 = vec3(f.v[at + 6u], f.v[at + 7u], f.v[at + 8u]);
-            vec3 radiance = vec3(f.v[at + 9u], f.v[at + 10u], f.v[at + 11u]) * s.rig[11].x;
-            vec3 ne = normalize(cross(a1 - a0, a2 - a0));
-            vec3 l;
-            float d, inverse_pdf;
-            if (!lamp_direction(p, a0, a1, a2, ne, l, d, inverse_pdf))
-                continue;
-            if (dot(g.normal, l) <= 0.0)
-                continue;
-            vec3 dif, spe;
-            parts(g, l, radiance * dot(g.normal, l), diffuse_only, dif, spe);
-            float target = luma(dif) + luma(spe);
-            float w = target * inverse_pdf / probability / float(lamp_count);
-            if (!(w > 0.0) || isinf(w))
-                continue;
-            sum += w;
-            if (rnd() * sum <= w)
-            {
-                kept_d = dif;
-                kept_s = spe;
-                kept_t = target;
-                kept_l = l;
-                kept_dist = d;
-                kept_kind = 0;
-            }
-        }
-    }
-    uint fixtures = uint(s.lamp.z);
-    if (fixtures > 0u && !term_off(16u) && fixture_count > 0)
-    {
-        uint candidates = min(fixtures, uint(fixture_count));
-        for (uint c = 0u; c < candidates; c++)
-        {
-            uint i = fixtures <= uint(fixture_count) ? c : min(uint(rnd() * float(fixtures)), fixtures - 1u);
-            vec3 l;
-            float d;
-            /* (fixture_light: the irradiance's colour by the cosine over pi;
-            n 0 gives the irradiance a surface facing it takes) */
-            vec3 e = fixture_light(i, p, vec3(0.0), l, d);
-            if (dot(g.normal, l) <= 0.0 || dot(e, e) <= 0.0)
-                continue;
-            vec3 dif, spe;
-            parts(g, l, e * dot(g.normal, l), diffuse_only, dif, spe);
-            float target = luma(dif) + luma(spe);
-            float w = target * (float(fixtures) / float(candidates));
-            if (!(w > 0.0) || isinf(w))
-                continue;
-            sum += w;
-            if (rnd() * sum <= w)
-            {
-                kept_d = dif;
-                kept_s = spe;
-                kept_t = target;
-                kept_l = l;
-                kept_dist = d;
-                kept_kind = 1;
-            }
-        }
-    }
-    uint dynamics = uint(job.volume.z);
-    if (dynamics > 0u && dynamic_count > 0 && job.lights != uvec2(0u))
-    {
-        uint candidates = min(dynamics, uint(dynamic_count));
-        for (uint c = 0u; c < candidates; c++)
-        {
-            uint i = dynamics <= uint(dynamic_count) ? c : min(uint(rnd() * float(dynamics)), dynamics - 1u);
-            vec3 l;
-            float d;
-            vec3 e = dynamic_light(i, p, l, d);
-            float nl = dot(g.normal, l);
-            if (nl <= 0.0 || dot(e, e) <= 0.0)
-                continue;
-            /* (CE's dynamic light: its colour by the cosine is the diffuse
-            light in the bake's unit, as Raster adds it; pi of it the
-            irradiance its specular takes) */
-            vec3 dif = e * nl;
-            vec3 spe = diffuse_only ? vec3(0.0) : ggx(g, l) * e * PI;
-            float target = luma(dif) + luma(spe);
-            float w = target * (float(dynamics) / float(candidates));
-            if (!(w > 0.0) || isinf(w))
-                continue;
-            sum += w;
-            if (rnd() * sum <= w)
-            {
-                kept_d = dif;
-                kept_s = spe;
-                kept_t = target;
-                kept_l = l;
-                kept_dist = d;
-                kept_kind = 2;
-            }
-        }
-    }
-    if (kept_kind < 0 || kept_t <= 0.0 || sum <= 0.0)
-        return;
-    bool seen = kept_kind == 0 ? lamp_visible(o, kept_l, kept_dist) :
-        !blocked(o, kept_l, max(kept_dist - 0.05, 0.0));
-    if (!seen)
-        return;
-    diffuse = kept_d / kept_t * sum;
-    specular = kept_s / kept_t * sum;
-}
-
 /* ---------- ReSTIR DI (Bitterli et al. 2020): a reservoir a pixel
 
 A light sample: its kind (0 a lamp's point, 1 a fixture, 2 a dynamic light,
@@ -860,10 +729,14 @@ frame's at its surface's place there (the motion's pixel, its guide this
 surface's: no reuse across an edge or an opening), its sample's target
 evaluated again here, its confidence capped at denoise_m frames (a dynamic
 light's sample is not reused: their order changes from frame to frame), one
-kept by its weight; its shadow traced; the reservoir kept for the next frame,
-its weight 0 where its sample was hidden but its confidence counted (a
-reused reservoir whose lamp was hidden still counts its candidates, so the
-light does not brighten as it is reused) */
+kept by its weight; its shadow traced for the light it gives; the reservoir
+kept for the next frame as it is, its weight and confidence whatever its
+sample's shadow. The target is unshadowed, the same for every reservoir
+combined, so their confidences weigh like estimates: had a hidden sample's
+weight been set to 0 with its confidence kept, a pixel that sees a lamp in
+few frames would take a ninth of that light (its frames held still: G5 in
+round 1); had its confidence been dropped, the light would brighten as it is
+reused (prism-pt's) */
 void lights_restir(ivec2 pixel, Surface g, vec3 o, bool reuse, out vec3 diffuse, out vec3 specular)
 {
     diffuse = vec3(0.0);
@@ -936,8 +809,119 @@ void lights_restir(ivec2 pixel, Surface g, vec3 o, bool reuse, out vec3 diffuse,
             specular = spe * big_w;
         }
     }
-    imageStore(reservoir_point_now, pixel, vec4(y, seen ? big_w : 0.0));
+    imageStore(reservoir_point_now, pixel, vec4(y, big_w));
     imageStore(reservoir_info_now, pixel, uvec4(uint(kind) | (index << 2), floatBitsToUint(m_total), 0u, 0u));
+}
+
+/* the reference's lights at the pixel: resampled importance as lights_ris,
+but each candidate's shadow traced and its visibility in its target, so the
+kept sample is a seen one and a pixel that sees a lamp through a gap is not
+lit by one sample in many: unbiased (the target is the integrand's own where
+the light is seen), its noise the candidates' alone */
+void lights_ris_seen(Surface g, vec3 o, int lamp_count, int fixture_count, int dynamic_count, out vec3 diffuse,
+    out vec3 specular)
+{
+    diffuse = vec3(0.0);
+    specular = vec3(0.0);
+    vec3 kept_d = vec3(0.0), kept_s = vec3(0.0);
+    float kept_t = 0.0, sum = 0.0;
+    vec3 p = g.point;
+    bool lamps_on = s.counts.z > 0u && s.lamp.x > 0.0 && s.rig[10].w >= 0.5 && !term_off(2u);
+    if (lamps_on)
+    {
+        Floats f = Floats(s.lamps);
+        for (int c = 0; c < lamp_count; c++)
+        {
+            float probability;
+            uint lamp = lamp_pick(p, probability);
+            if (probability <= 0.0)
+                continue;
+            uint at = lamp * 16u;
+            vec3 a0 = vec3(f.v[at], f.v[at + 1u], f.v[at + 2u]);
+            vec3 a1 = vec3(f.v[at + 3u], f.v[at + 4u], f.v[at + 5u]);
+            vec3 a2 = vec3(f.v[at + 6u], f.v[at + 7u], f.v[at + 8u]);
+            vec3 radiance = vec3(f.v[at + 9u], f.v[at + 10u], f.v[at + 11u]) * s.rig[11].x;
+            vec3 ne = normalize(cross(a1 - a0, a2 - a0));
+            vec3 l;
+            float d, inverse_pdf;
+            if (!lamp_direction(p, a0, a1, a2, ne, l, d, inverse_pdf))
+                continue;
+            if (dot(g.normal, l) <= 0.0 || !lamp_visible(o, l, d))
+                continue;
+            vec3 dif, spe;
+            parts(g, l, radiance * dot(g.normal, l), false, dif, spe);
+            float target = luma(dif) + luma(spe);
+            float w = target * inverse_pdf / probability / float(lamp_count);
+            if (!(w > 0.0) || isinf(w))
+                continue;
+            sum += w;
+            if (rnd() * sum <= w)
+            {
+                kept_d = dif;
+                kept_s = spe;
+                kept_t = target;
+            }
+        }
+    }
+    uint fixtures = uint(s.lamp.z);
+    if (fixtures > 0u && !term_off(16u) && fixture_count > 0)
+    {
+        uint candidates = min(fixtures, uint(fixture_count));
+        for (uint c = 0u; c < candidates; c++)
+        {
+            uint i = fixtures <= uint(fixture_count) ? c : min(uint(rnd() * float(fixtures)), fixtures - 1u);
+            vec3 l;
+            float d;
+            vec3 e = fixture_light(i, p, vec3(0.0), l, d);
+            if (dot(g.normal, l) <= 0.0 || dot(e, e) <= 0.0 || blocked(o, l, max(d - 0.05, 0.0)))
+                continue;
+            vec3 dif, spe;
+            parts(g, l, e * dot(g.normal, l), false, dif, spe);
+            float target = luma(dif) + luma(spe);
+            float w = target * (float(fixtures) / float(candidates));
+            if (!(w > 0.0) || isinf(w))
+                continue;
+            sum += w;
+            if (rnd() * sum <= w)
+            {
+                kept_d = dif;
+                kept_s = spe;
+                kept_t = target;
+            }
+        }
+    }
+    uint dynamics = uint(job.volume.z);
+    if (dynamics > 0u && dynamic_count > 0 && job.lights != uvec2(0u))
+    {
+        uint candidates = min(dynamics, uint(dynamic_count));
+        for (uint c = 0u; c < candidates; c++)
+        {
+            uint i = dynamics <= uint(dynamic_count) ? c : min(uint(rnd() * float(dynamics)), dynamics - 1u);
+            vec3 l;
+            float d;
+            vec3 e = dynamic_light(i, p, l, d);
+            float nl = dot(g.normal, l);
+            if (nl <= 0.0 || dot(e, e) <= 0.0 || blocked(o, l, max(d - 0.05, 0.0)))
+                continue;
+            vec3 dif = e * nl;
+            vec3 spe = ggx(g, l) * e * PI;
+            float target = luma(dif) + luma(spe);
+            float w = target * (float(dynamics) / float(candidates));
+            if (!(w > 0.0) || isinf(w))
+                continue;
+            sum += w;
+            if (rnd() * sum <= w)
+            {
+                kept_d = dif;
+                kept_s = spe;
+                kept_t = target;
+            }
+        }
+    }
+    if (kept_t <= 0.0 || sum <= 0.0)
+        return;
+    diffuse = kept_d / kept_t * sum;
+    specular = kept_s / kept_t * sum;
 }
 
 /* a point's sun: its visibility from o (a direction of the disc), its
@@ -1948,7 +1932,7 @@ void main()
         ld += domes_at(o, g.normal, m);
         vec3 dl, sl;
         seed_for(pixel, frame, 3u);
-        lights_ris(g, o, 8, 16, 16, false, dl, sl);
+        lights_ris_seen(g, o, 8, 16, 16, dl, sl);
         ld += dl;
         ls += sl;
         /* (one path a sample: the diffuse lobe's or the specular's, chosen by

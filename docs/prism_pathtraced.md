@@ -35,7 +35,7 @@ base colour multiplies it) and its specular light `S`:
 | --- | --- | --- | --- | --- |
 | Sun | The sky's sun, direct | A ray to a point of its disc within 60 world units of the eye and on every object pixel; past 60 the baked sun mask (the level's pixels). `D` += sun × cos × v, `S` += GGX × the sun × v | The same | A ray to its disc at every pixel |
 | Domes | The sky's other lights, direct | One direction of each one's cone, its shadow traced (`domes_at`): `D` | The same | The same |
-| Lamps | The emitting triangles (light cards, lamp surfaces), direct | ReSTIR DI: a reservoir a pixel, its initial candidates 8 lamp points from the light-importance grid (`lamp_pick`: the cell's seen and near lists, the rest by power: every lamp can be picked), each by its unshadowed diffuse and specular light; the last frame's reservoir at the surface's place reused (below); the kept sample's shadow traced (`lamp_visible`: any surface before the lamp's point blocks it, another lamp's too, since `prism-v4-m2` b2e459b8b): `D` and `S` | The same | Resampled importance over the same 8 candidates, no reservoir reused |
+| Lamps | The emitting triangles (light cards, lamp surfaces), direct | ReSTIR DI: a reservoir a pixel, its initial candidates 8 lamp points from the light-importance grid (`lamp_pick`: the cell's seen and near lists, the rest by power: every lamp can be picked), each by its unshadowed diffuse and specular light; the last frame's reservoir at the surface's place reused (below); the kept sample's shadow traced (`lamp_visible`: any surface before the lamp's point blocks it, another lamp's too, since `prism-v4-m2` b2e459b8b): `D` and `S` | The same | Resampled importance over the same 8 candidates, each one's shadow traced and its visibility in its target (`lights_ris_seen`), no reservoir reused |
 | Fixtures | The scenario's light fixtures, direct | In the same reservoir (all of them, or 8 by count) | The same | The same (16) |
 | Dynamic lights | SCENE_LIGHTS' dynamic class (flashlight, plasma, muzzle flashes), direct | In the same reservoir (4), CE's falloff, its shadow traced; never reused from the last frame | The same | The same (16) |
 | The sky's floor | The units' rig's ambient: CE's outdoor ambient, unoccluded | A constant, `D` | The same | The same |
@@ -77,9 +77,12 @@ found safe:
   crosses an edge or an opening), its sample's target evaluated again at this pixel, its confidence capped at 8
   frames. A dynamic light's sample is not reused (their order changes from frame to frame). There is no spatial
   reuse: in `prism-pt` it spread a pick's choice over patches.
-- **A hidden sample still counts.** The kept sample's shadow is traced; where it is hidden, the reservoir kept for the
-  next frame has weight 0 but keeps its confidence, so a reused reservoir whose lamp was hidden still counts its
-  candidates and the light does not brighten as it is reused.
+- **The reservoir is kept as it is.** The kept sample's shadow is traced for the light it gives, and the reservoir is
+  kept for the next frame with its weight and confidence whatever that shadow: the target is unshadowed and the same
+  for every reservoir combined, so their confidences weigh like estimates. Round 1 first kept a hidden sample's
+  reservoir at weight 0 with its confidence counted: a pixel that sees a lamp in few frames then took about a ninth
+  of that light while its camera was still (G5's first pose: a pillar lit in R, dark in the held frame, lit in the
+  moves). Dropping its confidence instead brightens the light as it is reused (`prism-pt`'s finding).
 - `HALO_PT_RESTIR=0` turns the reuse off (each pixel's own candidates alone), for comparison.
 
 ## The denoiser

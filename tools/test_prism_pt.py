@@ -85,15 +85,16 @@ def _scene(rng):
     return exact, lamp_pick, lamp_sample, fixtures, dynamics, visible
 
 
+@pytest.mark.parametrize("seen", [False, True])
 @pytest.mark.parametrize("lamp_count,fixture_count,dynamic_count", [(8, 8, 4), (2, 1, 1), (16, 2, 2)])
-def test_the_lights_resampling_is_unbiased(lamp_count, fixture_count, dynamic_count):
+def test_the_lights_resampling_is_unbiased(lamp_count, fixture_count, dynamic_count, seen):
     rng = np.random.default_rng(7)
     exact, lamp_pick, lamp_sample, fixtures, dynamics, visible = _scene(rng)
     trials = 40000
     total = np.zeros(3)
     for _ in range(trials):
         total += model.ris_lights(rng, lamp_count, lamp_pick, lamp_sample, fixtures, fixture_count, dynamics,
-                                  dynamic_count, visible)
+                                  dynamic_count, visible, seen=seen)
     mean = total / trials
     assert np.allclose(mean, exact, rtol=0.03), (mean, exact)
 
