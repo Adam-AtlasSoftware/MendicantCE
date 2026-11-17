@@ -1,7 +1,7 @@
 """PRISM's level remodel files (port/linux/game/prism_world_geometry.c, docs/prism_packs.md): the reader of versions 2 and
 3 on hand-made files, version 3's tables checked against the file's figures, the shape's checks (a needle along a
 sliver, the declared deviations), the exact stock edge, and version 3's seal groups falling back whole only where their
-border is the stock edges."""
+border is the stock edges, and a material's parts drawn stock together."""
 import re
 import sys
 from pathlib import Path
@@ -12,11 +12,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, enum_with, function, mutated, read, run, structure  # noqa: E402
 
 GAME = "port/linux/game/prism_world_geometry.c"
-CASES = ["parse", "refused", "facets", "plain", "groups", "groups_kept", "groups_stock", "groups_together"]
+CASES = ["parse", "refused", "facets", "plain", "groups", "groups_kept", "groups_stock", "groups_together", "parts"]
 FUNCTIONS = ["read_u32", "read_s16", "read_f64", "pad4", "pwg_tables_check", "pwg_parse", "shape_vertex", "shape_index",
              "shape_triangle_distance", "shape_run_facets", "shape_edge_key", "shape_edge_compare", "shape_surface",
              "shape_edge_find", "shape_same_edge", "shape_runs", "shape_at", "shape_edge_plain", "shape_group_of",
-             "shape_group_sealed", "shape_groups_named"]
+             "shape_group_sealed", "shape_groups_named", "material_parts_stock"]
 CONTROLS = [
     # the needle test left out: only the prism's relief and margin (the old test's blind spot along a sliver)
     ("(beyond > 0.0 ? shape_triangle_distance(p, a, b, c) : fabs(height)) > needle",
@@ -42,6 +42,12 @@ CONTROLS = [
     # a surface of a material drawn stock not bringing its group down
     ("(check->state[surface] == _shape_facets || check->state[surface] == _shape_stock)",
      "(check->state[surface] == _shape_facets)", "groups_stock"),
+    # a part drawn stock alone: the material's other parts keep it in the draw, which leaves its surfaces out
+    ("if (views[other].usable && views[other].lightmap_index == views[index].lightmap_index &&",
+     "if (0 && views[other].lightmap_index == views[index].lightmap_index &&", "parts"),
+    # every material's parts taken
+    ("\t\t\tviews[other].material_index == views[index].material_index)",
+     "\t\t\t1)", "parts"),
 ]
 
 

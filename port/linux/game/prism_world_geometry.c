@@ -1031,7 +1031,8 @@ in seal groups, never alone:
   stock edge on both sides, at both levels (its two corners joined by one
   edge of each side's triangles). A group with a facet, or with a surface of
   a material that is drawn stock (the map's own: not this map's, or past its
-  vertices), falls back whole; before it does, its border is checked here
+  vertices; all of a material's parts together, material_parts_stock), falls
+  back whole; before it does, its border is checked here
   (each neighbour outside it that stays remodelled has the stock edge as
   one boundary edge of its triangles at each level), and a group whose
   border is not is kept as the file has it, and logged.
@@ -1825,6 +1826,32 @@ static void shape_groups_named(
 	return;
 }
 
+/* a material's parts drawn stock together: the draw finds a material's
+remodel by the first of its parts made (world_geometry_make) and leaves out
+the surfaces that no part made has, so a part drawn stock would leave a hole
+where its surfaces are, unless the material's other parts go stock with it.
+The number of other parts taken */
+static long material_parts_stock(
+	struct pwg_material_view *views,
+	long view_count,
+	long index)
+{
+	long other, taken = 0;
+
+	views[index].usable = FALSE;
+	for (other = 0; other < view_count; other++)
+	{
+		if (views[other].usable && views[other].lightmap_index == views[index].lightmap_index &&
+			views[other].material_index == views[index].material_index)
+		{
+			views[other].usable = FALSE;
+			taken++;
+		}
+	}
+
+	return taken;
+}
+
 /* the remodel's shape checked (above): each usable view's fallback list
 made; a view whose fallbacks would take it past 16-bit indices stays stock
 (and with version 3's groups, the groups of its surfaces then fall back in
@@ -1994,13 +2021,22 @@ static void shape_check(
 			}
 			if (view->vertex_count + 3 * count > 0xFFFF)
 			{
+				long other, taken = material_parts_stock(views, view_count, index);
+
 				platform_log("prism world geometry: %s lightmap %d material %d: %lu surfaces to draw stock would "
-					"take it past 65535 vertices; it stays stock", path, (int)view->lightmap_index,
-					(int)view->material_index, count);
-				view->usable = FALSE;
-				for (local = 0; local < (long)view->part_surface_count; local++)
+					"take it past 65535 vertices; it stays stock (and the material's other %ld parts with it)",
+					path, (int)view->lightmap_index, (int)view->material_index, count, taken);
+				for (other = 0; other < view_count; other++)
 				{
-					check.state[check.view_first[index] + local] = _shape_stock;
+					if (views[other].lightmap_index != view->lightmap_index ||
+						views[other].material_index != view->material_index)
+					{
+						continue;
+					}
+					for (surface = check.view_first[other]; surface < check.view_first[other + 1]; surface++)
+					{
+						check.state[surface] = _shape_stock;
+					}
 				}
 				again = named;
 				continue;
@@ -2032,7 +2068,7 @@ static void shape_check(
 		view->fallback = malloc(count * sizeof(unsigned long));
 		if (!view->fallback)
 		{
-			view->usable = FALSE;
+			material_parts_stock(views, view_count, index);
 			continue;
 		}
 		for (local = 0; local < (long)view->part_surface_count; local++)
@@ -2042,6 +2078,18 @@ static void shape_check(
 				view->fallback[view->fallback_count++] = (unsigned long)local;
 			}
 		}
+	}
+	/* (the figures as drawn: a part gone stock above took its fallbacks with
+	it) */
+	fallbacks = 0;
+	stocked = 0;
+	for (index = 0; index < view_count; index++)
+	{
+		fallbacks += views[index].usable ? views[index].fallback_count : 0;
+	}
+	for (surface = 0; surface < check.surface_count; surface++)
+	{
+		stocked += check.state[surface] == _shape_stock;
 	}
 
 done:
@@ -2757,9 +2805,20 @@ static void world_geometry_load(
 
 	if (pwg_parse(bytes, size, bsp, &views, &view_count, &file_figures, path))
 	{
+		long taken;
+
 		for (index = 0; index < view_count; index++)
 		{
 			pwg_material_check(bsp, &views[index], path);
+		}
+		for (index = 0; index < view_count; index++)
+		{
+			if (!views[index].usable && (taken = material_parts_stock(views, view_count, index)) > 0)
+			{
+				platform_log("prism world geometry: %s lightmap %d material %d: a part of it is drawn stock, and "
+					"its other %ld parts with it", path, (int)views[index].lightmap_index,
+					(int)views[index].material_index, taken);
+			}
 		}
 		shape_check(bsp, views, view_count, &file_figures, path);
 		if (world_geometry_make(bsp, views, view_count, path))

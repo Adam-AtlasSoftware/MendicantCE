@@ -1,7 +1,7 @@
 /* PRISM's level remodel files, version 3 (port/linux/game/prism_world_geometry.c, test_prism_world_v3.py): the reader
 of versions 2 and 3 on hand-made files (the tables' bounds, refusals), the shape's checks (a needle along a sliver that
 the old centroid prism let pass, the declared deviations), the exact stock edge of version 3's seal groups, and a group
-falling back whole only where its border is the stock edges. */
+falling back whole only where its border is the stock edges; a material's parts drawn stock together. */
 
 #include "harness.h"
 
@@ -456,6 +456,30 @@ static void case_groups(int mode)
 	}
 }
 
+/* a material's parts drawn stock together: the draw leaves out the surfaces of a part not made, so one part gone stock
+takes the material's other parts, and no other material's */
+static void case_parts(void)
+{
+	struct pwg_material_view views[4];
+	long taken;
+
+	memset(views, 0, sizeof(views));
+	views[0].lightmap_index = 0, views[0].material_index = 1;
+	views[1].lightmap_index = 0, views[1].material_index = 1;
+	views[2].lightmap_index = 0, views[2].material_index = 2;
+	views[3].lightmap_index = 1, views[3].material_index = 1;
+	views[0].usable = views[1].usable = views[2].usable = views[3].usable = TRUE;
+	taken = material_parts_stock(views, 4, 1);
+	CHECK(!views[0].usable && !views[1].usable, "the part and the other part of its material drawn stock (%d %d)",
+		views[0].usable, views[1].usable);
+	CHECK(views[2].usable && views[3].usable, "the other materials keep their remodel (%d %d)", views[2].usable,
+		views[3].usable);
+	CHECK(taken == 1, "one other part taken (%ld)", taken);
+	views[2].usable = FALSE;
+	taken = material_parts_stock(views, 4, 2);
+	CHECK(taken == 0 && views[3].usable, "a material of one part takes nothing else (%ld)", taken);
+}
+
 int main(int argc, char **argv)
 {
 	const char *name = argc > 1 ? argv[1] : "";
@@ -476,6 +500,8 @@ int main(int argc, char **argv)
 		case_groups(2);
 	else if (!strcmp(name, "groups_together"))
 		case_groups(3);
+	else if (!strcmp(name, "parts"))
+		case_parts();
 	else
 	{
 		fprintf(stderr, "no case %s\n", name);
