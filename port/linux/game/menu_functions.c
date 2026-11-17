@@ -6348,6 +6348,7 @@ boolean playlist_profile_get(long index, struct game_variant *variant);
 boolean playlist_profile_get_display_name(long index, wchar_t *name);
 boolean playlist_profile_get_options(long index, struct game_variant_options *options);
 boolean input_get_key(struct key_stroke *key);
+wchar_t input_key_character(void);
 boolean game_engine_running(void);
 void game_engine_end_game(void);
 /* the platform layer's */
@@ -6501,7 +6502,23 @@ static void text_field_end(boolean keep)
 		done(text_field.text);
 }
 
-static void text_field_insert(char const *text)
+/* whether a character typed is put in the field, whose text is Latin-1
+(shown widened, game_name_done's too): ASCII's visible ones, and Latin-1's
+letters with a mark, U+00C0 to U+00FF but for the signs x and / (#1134: a
+layout's é, ñ, ü; a password's too). Latin Extended-A's (ł), beyond a
+byte, are the on-screen keyboard's alone (virtual_keyboard.c) */
+static boolean text_field_character_kept(wchar_t character)
+{
+	unsigned long code = (unsigned long)character;
+
+	return (code >= ' ' && code <= '~') || (code >= 0xC0 && code <= 0xFF && code != 0xD7 && code != 0xF7);
+}
+
+/* text put in, after what is there: ASCII's visible characters; and, for
+a character typed (letters: text_field_insert_character), Latin-1's letters
+with a mark, where text pasted (the clipboard's, UTF-8) keeps its ASCII
+alone */
+static void text_field_insert(char const *text, boolean letters)
 {
 	size_t length;
 
@@ -6513,10 +6530,18 @@ static void text_field_insert(char const *text)
 
 	for (; *text && length < (size_t)text_field.maximum; text++)
 	{
-		if (*text >= ' ' && *text <= '~')
+		if ((*text >= ' ' && *text <= '~') || (letters && text_field_character_kept((unsigned char)*text)))
 			text_field.text[length++] = *text;
 	}
 	text_field.text[length] = 0;
+}
+
+/* a character typed put in (text_field_character_kept's) */
+static void text_field_insert_character(char character)
+{
+	char text[2] = { character, 0 };
+
+	text_field_insert(text, TRUE);
 }
 
 /* (ui_widget.c) a text box's caret, lit this frame or not: a bar after its
@@ -6566,14 +6591,10 @@ static void text_field_show(struct widget_instance *value, char const *text, boo
 				char clipboard[TEXT_FIELD_LENGTH];
 
 				if (platform_clipboard_get(clipboard, sizeof(clipboard)))
-					text_field_insert(clipboard);
+					text_field_insert(clipboard, FALSE);
 			}
-			else if ((unsigned char)key.ascii_code >= ' ' && (unsigned char)key.ascii_code <= '~')
-			{
-				char character[2] = { key.ascii_code, 0 };
-
-				text_field_insert(character);
-			}
+			else if (text_field_character_kept(input_key_character()))
+				text_field_insert_character((char)input_key_character());
 		}
 		text = text_field.text;
 	}
@@ -8064,7 +8085,7 @@ static void wide_to_text(wchar_t const *wide, char *text, short size)
 	short index;
 
 	for (index = 0; wide[index] && index < size - 1; index++)
-		text[index] = wide[index] < 0x80 ? (char)wide[index] : '?';
+		text[index] = wide[index] < 0x80 || text_field_character_kept(wide[index]) ? (char)wide[index] : '?';
 	text[index] = 0;
 }
 

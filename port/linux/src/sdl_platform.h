@@ -78,6 +78,9 @@ struct platform_keystroke
 	BYTE virtual_key;
 	CHAR ascii;
 	BYTE flags;
+	/* the character typed, Unicode to U+017F, 0 for none: its ASCII, or a
+	letter with a mark (keystroke_character, #1134) */
+	unsigned short character;
 };
 
 BOOL platform_sdl_initialize(void);

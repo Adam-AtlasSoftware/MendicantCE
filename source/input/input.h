@@ -216,6 +216,9 @@ void input_deactivate(void);
 void input_flush(void);
 boolean input_key_is_down(short key_code);
 boolean input_get_key(struct key_stroke *key);
+/* port: the character the key input_get_key gave last types (Unicode to
+U+017F: a letter with a mark too), 0 for none (#1134) */
+wchar_t input_key_character(void);
 const struct mouse_state *input_get_mouse_state(void);
 void input_suppress(void);
 boolean input_mouse_button_is_down(short button_index);
