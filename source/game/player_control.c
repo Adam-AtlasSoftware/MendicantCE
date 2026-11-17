@@ -1438,16 +1438,78 @@ int player_control_aim_modern(
 	return TRUE;
 }
 
+/* port: the most of input.look_acceleration_strength, and the least and the
+most of input.look_acceleration_time */
+#define LOOK_ACCELERATION_STRENGTH_MAXIMUM 2.f
+#define LOOK_ACCELERATION_TIME_MINIMUM 0.25f
+#define LOOK_ACCELERATION_TIME_MAXIMUM 2.f
+
+/* port: a local player's look acceleration, for either aim style: its
+strength, times the globals' extra speed (input.look_acceleration_strength,
+0 none, 1 the map's own), and its time, times the globals' ramp time
+(input.look_acceleration_time, 1 the map's own). Each the player's own,
+read again as the settings change, as player_control_aim_modern's */
+static void player_control_look_acceleration_tuning(
+	short local_player_index,
+	real *strength,
+	real *time)
+{
+	extern unsigned long config_changes(void);
+	extern double config_player_real(int local_player, const char *name);
+	static struct
+	{
+		real strength;
+		real time;
+	} tunings[MAXIMUM_NUMBER_OF_LOCAL_PLAYERS];
+	static unsigned long read_at = (unsigned long)-1;
+
+	if (read_at != config_changes())
+	{
+		short player;
+
+		read_at = config_changes();
+		for (player = 0; player < MAXIMUM_NUMBER_OF_LOCAL_PLAYERS; player++)
+		{
+			double read_strength = config_player_real(player, "input.look_acceleration_strength");
+			double read_time = config_player_real(player, "input.look_acceleration_time");
+
+			/* (anything out of range, or not a number, the map's own) */
+			tunings[player].strength = read_strength >= 0.0 && read_strength <= LOOK_ACCELERATION_STRENGTH_MAXIMUM ?
+				(real)read_strength : 1.f;
+			tunings[player].time = read_time >= LOOK_ACCELERATION_TIME_MINIMUM &&
+				read_time <= LOOK_ACCELERATION_TIME_MAXIMUM ? (real)read_time : 1.f;
+		}
+	}
+	if (local_player_index < 0 || local_player_index >= MAXIMUM_NUMBER_OF_LOCAL_PLAYERS)
+	{
+		*strength = 1.f;
+		*time = 1.f;
+		return;
+	}
+	*strength = tunings[local_player_index].strength;
+	*time = tunings[local_player_index].time;
+}
+
 /* port: how much the look's acceleration has turned the side to side up,
 by the globals' ramp: its scale reached over its time
-(get_local_player_input_blob's, and a sub-step's) */
+(get_local_player_input_blob's, and a sub-step's). The player's strength
+times the ramp's extra speed, and their time times its time
+(player_control_look_acceleration_tuning): at 1 and 1, the defaults, each is
+multiplied by exactly 1, so the turn is the original's to the bit, on any
+map's globals */
 static real player_control_look_acceleration(
 	struct game_globals_player_control const *constants,
-	struct player_control const *control)
+	struct player_control const *control,
+	short gamepad_index)
 {
-	real acceleration = PIN(control->look_acceleration_time / constants->look_acceleration_time, 0.f, 1.f);
+	real strength;
+	real time;
+	real acceleration;
 
-	return (constants->look_acceleration_scale - 1.f) * acceleration + 1.f;
+	player_control_look_acceleration_tuning(gamepad_index, &strength, &time);
+	acceleration = PIN(control->look_acceleration_time / (constants->look_acceleration_time * time), 0.f, 1.f);
+
+	return (constants->look_acceleration_scale - 1.f) * strength * acceleration + 1.f;
 }
 
 /* port: the look stick's turn a tick, before the zoom, the stun, the
@@ -1508,6 +1570,19 @@ static boolean player_control_stick_look(
 	accelerating = player_control_stick_aim(&aim, constants->look_function.count,
 		constants->look_function.address, constants->look_pegging_threshold, input_state->yaw,
 		input_state->pitch, &curved_yaw, &curved_pitch, clamped_yaw, clamped_pitch);
+	/* port: a player's look acceleration at strength 0
+	(input.look_acceleration_strength) never accelerates: its ramp's clock
+	stays at 0, as with the stick short of its edge */
+	{
+		real strength;
+		real time;
+
+		player_control_look_acceleration_tuning(gamepad_index, &strength, &time);
+		if (!(strength > 0.f))
+		{
+			accelerating = FALSE;
+		}
+	}
 	look_delta->yaw = curved_yaw * yaw_spin_scale * look_yaw_rate;
 	/* port: up and down times the player's own vertical sensitivity
 	(input.look_vertical_sensitivity), 1 the original's */
@@ -1739,7 +1814,7 @@ static void get_local_player_input_blob(
 						constants->look_acceleration_time>0.0f);
 					if (accelerating)
 					{
-						look_delta.yaw *= player_control_look_acceleration(constants, control);
+						look_delta.yaw *= player_control_look_acceleration(constants, control, gamepad_index);
 						control->look_acceleration_time += time_delta_sec;
 					}
 					else
@@ -2865,7 +2940,8 @@ static void player_control_substep_read(
 		player_control_scale_look(player->unit_index, control->zoom_level, &reading->look);
 		if (accelerating && constants->look_acceleration_time > 0.f)
 		{
-			reading->look.yaw *= player_control_look_acceleration(constants, control);
+			reading->look.yaw *= player_control_look_acceleration(constants, control,
+				player->local_player_index);
 		}
 		if (player_magnetism_flag && control->magnetism_level > 0.f)
 		{
