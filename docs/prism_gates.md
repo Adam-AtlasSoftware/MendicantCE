@@ -468,7 +468,23 @@ the composite). V1 and V2 are being frozen on another branch: their gates are no
 
 ### M3 as measured
 
-(round 1: in progress)
+Round 1 (November 2026). The bakes are `ultra` (2048 samples a texel at most), made by the game itself.
+
+**The frame time on the RTX 3070 Ti** (`quality`, native 1920 × 1080, the stock world (the Classic preset), a10's
+three probe poses (G5), 600 frames each, three times: nine blocks, each block's first 60 frames dropped; the GPU's
+time, `HALO_VULKAN_GPU_TIMES_FILE`; the path tracer's passes, `HALO_PT_TIMES_FILE`; a10's `ultra` bake loaded):
+
+| Tree | Frame median | Frame 99th percentile (median of the blocks') | The blocks' 99th percentiles | The path tracer's passes (median, ms) |
+| --- | --- | --- | --- | --- |
+| d8bd5f053 (four 5 × 5 a-trous steps) | 13.84 ms | 19.18 ms | 17.6 to 24.7 | 13.35: light 6.85, temporal 0.76, fix 0.32, atrous 4.77, composite 0.30 |
+| a32e190a4 (five 3 × 3 steps, the fast lamp pick) | 11.68 ms | 15.58 ms | 14.3 to 20.7 | 11.04: light 7.03, temporal 0.76, fix 0.32, atrous 2.43, composite 0.30 |
+
+Within the gate (median at most 16.7 ms, 99th percentile at most 20 ms) on G5's poses: one block of nine has its 99th
+percentile at 20.7 ms. The light pass is two thirds of the path tracer's time.
+
+**Classic's stills** (`identity.py stills`, the kit's settings, RT off, against the base 0950596f5): G2, G4 and G5 30 of
+30 frames alike (each tree with itself, and the new with the base); G7 alike in no pair, the base with itself
+included: its floor lamps' glows, as M0 and M2 found.
 
 ## Every milestone also passes
 
