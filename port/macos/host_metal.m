@@ -192,6 +192,8 @@ static struct
 	_Atomic int hdr_active, hdr_mode, hdr_paper_white_nits, hdr_paper_white, hdr_ui_nits;
 	/* display.hdr_sdr_curve's setting (XGPU_HDR_SDR_CURVE_*) */
 	_Atomic int hdr_sdr_curve;
+	/* display.hdr_peak_nits's (#1122; 0 the system's) */
+	_Atomic int hdr_peak_nits;
 	_Atomic uint32_t edr_potential, edr_current;
 	BOOL layer_edr;
 	uint32_t edr_ticks;
@@ -406,6 +408,11 @@ void host_metal_hdr_sdr_curve(int curve)
 	atomic_store(&presentation.hdr_sdr_curve, curve);
 }
 
+void host_metal_hdr_peak_nits(int nits)
+{
+	atomic_store(&presentation.hdr_peak_nits, nits > 0 ? nits : 0);
+}
+
 /* the layer is EDR's while the frame is drawn in HDR and the display has
 headroom at all (an SDR panel's dimmed white has some: display.hdr "on") */
 static BOOL edr_wanted(void)
@@ -422,6 +429,15 @@ void host_metal_hdr_frame(struct xgpu_hdr_frame *frame)
 
 	if (presentation.edr_override > 0.0f && !presentation.window)
 		current = presentation.edr_override;
+	/* (a peak of the player's, over EDR's white: no more than the layer
+	shows, which clips past its headroom) */
+	if (atomic_load(&presentation.hdr_peak_nits) > 0)
+	{
+		float peak = xgpu_hdr_peak_headroom(atomic_load(&presentation.hdr_peak_nits), current, XGPU_HDR_EDR_WHITE_NITS);
+
+		if (peak < current)
+			current = peak;
+	}
 	memset(frame, 0, sizeof(*frame));
 	frame->mode = atomic_load(&presentation.hdr_mode);
 	frame->output = XGPU_HDR_OUTPUT_SDR;
@@ -874,6 +890,7 @@ static void present_draw(id<MTLRenderCommandEncoder> encoder, id<CAMetalDrawable
 		uniforms.hdr[2] = (float)XGPU_HDR_OUTPUT_EXTENDED_LINEAR;
 		uniforms.hdr[3] = frame.output == XGPU_HDR_OUTPUT_SDR ? 1.0f : frame.ui;
 		uniforms.window[0] = (float)frame.sdr_curve;
+		uniforms.window[3] = frame.output == XGPU_HDR_OUTPUT_SDR ? 0.0f : frame.black;
 		[encoder setRenderPipelineState:presentation.edr_pipeline];
 		[encoder setFragmentBytes:&uniforms length:sizeof(uniforms) atIndex:XGPU_METAL_BUFFER_DRAW_UNIFORMS];
 		[encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];

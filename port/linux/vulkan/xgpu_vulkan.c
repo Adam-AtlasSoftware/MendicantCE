@@ -875,6 +875,11 @@ static struct
 	int sharp_upscale, sharp_wanted;
 	/* display.hdr_sdr_curve's setting (XGPU_HDR_SDR_CURVE_*; any thread) */
 	int hdr_sdr_curve;
+	/* display.hdr_peak_nits (#1122; 0 the system's; any thread), and the
+	display's black and full-frame peak in nits where the system reports
+	them (Windows' DXGI: xgpu_vulkan_window_luminance; float bits, 0 none) */
+	int hdr_peak_nits;
+	uint32_t window_black, window_full_frame;
 	struct xgpu_vulkan_image *sharp_image;
 	void (*display_hdr)(int hdr, float headroom, float white_nits, int white_reported);
 	/* the frame's last pass (the options' encode: HDR's encoding,
@@ -6828,6 +6833,46 @@ void xgpu_vulkan_hdr_sdr_curve(int curve)
 	__atomic_store_n(&vk.hdr_sdr_curve, curve, __ATOMIC_RELEASE);
 }
 
+void xgpu_vulkan_hdr_peak_nits(int nits)
+{
+	__atomic_store_n(&vk.hdr_peak_nits, nits > 0 ? nits : 0, __ATOMIC_RELEASE);
+	/* (the swapchain's metadata again: its peak moved) */
+	__atomic_store_n(&vk.window_hdr_changed, 1u, __ATOMIC_RELEASE);
+}
+
+void xgpu_vulkan_window_luminance(float black_nits, float full_frame_nits)
+{
+	uint32_t black_bits, full_bits;
+
+	if (!(black_nits > 0.0f))
+		black_nits = 0.0f;
+	if (!(full_frame_nits > 0.0f))
+		full_frame_nits = 0.0f;
+	memcpy(&black_bits, &black_nits, sizeof(black_bits));
+	memcpy(&full_bits, &full_frame_nits, sizeof(full_bits));
+	__atomic_store_n(&vk.window_black, black_bits, __ATOMIC_RELEASE);
+	__atomic_store_n(&vk.window_full_frame, full_bits, __ATOMIC_RELEASE);
+}
+
+int xgpu_vulkan_device_luid(unsigned char luid[8])
+{
+	VkPhysicalDeviceIDProperties id;
+	VkPhysicalDeviceProperties2 properties;
+
+	if (!vk.physical)
+		return 0;
+	memset(&id, 0, sizeof(id));
+	memset(&properties, 0, sizeof(properties));
+	id.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES;
+	properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+	properties.pNext = &id;
+	vkGetPhysicalDeviceProperties2(vk.physical, &properties);
+	if (!id.deviceLUIDValid)
+		return 0;
+	memcpy(luid, id.deviceLUID, 8);
+	return 1;
+}
+
 void xgpu_vulkan_picture_top(int top)
 {
 	__atomic_store_n(&vk.picture_top, top < 0 ? 0 : top + 1, __ATOMIC_RELEASE);
@@ -6928,9 +6973,17 @@ static float window_headroom(void)
 	return headroom >= 1.0f ? headroom : 1.0f;
 }
 
+/* the headroom the encoding takes: the window's, or the player's peak
+(display.hdr_peak_nits) over the system's SDR white */
+static float peak_headroom(void)
+{
+	return xgpu_hdr_peak_headroom(__atomic_load_n(&vk.hdr_peak_nits, __ATOMIC_ACQUIRE), window_headroom(),
+		sdr_white_nits());
+}
+
 void xgpu_vulkan_hdr_frame(struct xgpu_hdr_frame *frame)
 {
-	float headroom = window_headroom(), setting, nits;
+	float headroom = peak_headroom(), setting, nits;
 
 	memset(frame, 0, sizeof(*frame));
 	frame->mode = vk.hdr_mode;
@@ -6954,6 +7007,19 @@ void xgpu_vulkan_hdr_frame(struct xgpu_hdr_frame *frame)
 	/* (the UI's white over the system's SDR white as paper white's is: on
 	Linux relative to the compositor's, no brighter than the display) */
 	frame->ui = xgpu_hdr_ui_white((float)vk.hdr_ui_nits / sdr_white_nits(), setting, headroom);
+	/* (#1122: with a peak of the player's, the display's full-frame peak
+	in paper whites and its black in the output's units, where the system
+	reports them; the System peak's picture as it was) */
+	if (__atomic_load_n(&vk.hdr_peak_nits, __ATOMIC_ACQUIRE) > 0)
+	{
+		float full = float_of(__atomic_load_n(&vk.window_full_frame, __ATOMIC_ACQUIRE));
+		float black = float_of(__atomic_load_n(&vk.window_black, __ATOMIC_ACQUIRE));
+		float scale = encoding_white_nits() / sdr_white_nits();
+
+		frame->full_frame = full > 0.0f ? full / (sdr_white_nits() * setting) : 0.0f;
+		frame->black = black > 0.0f ? black * scale / (vk.hdr_output == XGPU_HDR_OUTPUT_SCRGB ? 80.0f : 10000.0f) :
+			0.0f;
+	}
 }
 
 /* the swapchain's HDR metadata (VK_EXT_hdr_metadata, where the device has
@@ -6965,7 +7031,7 @@ takes static metadata keeps the last it was given. */
 static void hdr_metadata_set(int made)
 {
 	VkHdrMetadataEXT metadata;
-	float headroom = window_headroom();
+	float headroom = peak_headroom();
 	float peak = encoding_white_nits() * headroom;
 	float average = encoding_white_nits() * paper_white_setting(headroom);
 

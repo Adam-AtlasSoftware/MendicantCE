@@ -200,8 +200,9 @@ unsigned short xgpu_hdr_classify(const struct xgpu_hdr_draw *draw)
 /* ---------- the shaders' GLSL
 
 The functions both shaders share: the frame's values made linear and
-encoded again (sRGB's curve, extended past 1), the shoulder, the tone map
-(hdr: the mode, the peak) and the encoding (hdr: paper white, the peak, the
+encoded again (sRGB's curve, extended past 1), the shoulder and the
+highlights' curve, the tone map (the mode, the peak, the full-frame peak)
+and the black lift, the encoding (hdr: paper white, the peak, the
 output: xgpu_hdr.h's XGPU_HDR_OUTPUT_*; curve: the SDR curve, its toe
 XGPU_HDR_SDR_TOE_START to _END), and the final write's dither (its static
 triangular noise of a pixel, and a code dithered to levels), as
@@ -232,7 +233,18 @@ const char xgpu_hdr_functions_source[] =
 	"\treturn knee + range * t / (1.0 + t);\n"
 	"}\n"
 	"\n"
-	"vec3 hdr_tone_map(vec3 value, float mode, float peak)\n"
+	"float hdr_highlight(float x, float knee, float peak, float full)\n"
+	"{\n"
+	"\tif (!(full > knee && full < peak))\n"
+	"\t\treturn hdr_shoulder(x, knee, peak);\n"
+	"\tif (x <= knee)\n"
+	"\t\treturn x;\n"
+	"\tfloat body = full - knee, rest = peak - full;\n"
+	"\tfloat u = (x - knee) / body, v = (x - knee) / rest;\n"
+	"\treturn knee + body * u / (1.0 + u) + rest * v * v / (1.0 + v * v);\n"
+	"}\n"
+	"\n"
+	"vec3 hdr_tone_map(vec3 value, float mode, float peak, float full)\n"
 	"{\n"
 	"\tvec3 v = max(value, vec3(0.0));\n"
 	"\tvec3 sdr = hdr_linear(min(v, vec3(1.0)));\n"
@@ -249,8 +261,8 @@ const char xgpu_hdr_functions_source[] =
 	"\t\treturn v;\n"
 	"\tfloat clipped = smoothstep(1.0, 2.0, max(v.r, max(v.g, v.b)));\n"
 	"\tfloat most = max(light.r, max(light.g, light.b)) * gain;\n"
-	"\tfloat hue = most > 0.0 ? gain * hdr_shoulder(most, knee, peak) / most : 0.0;\n"
-	"\tfloat brightened = sdr_luminance > 0.0 ? hdr_shoulder(gain * luminance / sdr_luminance, knee, peak) : 0.0;\n"
+	"\tfloat hue = most > 0.0 ? gain * hdr_highlight(most, knee, peak, full) / most : 0.0;\n"
+	"\tfloat brightened = sdr_luminance > 0.0 ? hdr_highlight(gain * luminance / sdr_luminance, knee, peak, full) : 0.0;\n"
 	"\treturn hdr_encoded(mix(light * hue, sdr * brightened, clipped));\n"
 	"}\n"
 	"\n"
@@ -278,11 +290,20 @@ const char xgpu_hdr_functions_source[] =
 	"\treturn code + hdr_noise(pixel) * room / levels;\n"
 	"}\n"
 	"\n"
-	"vec3 hdr_encode(vec3 value, vec4 hdr, float curve)\n"
+	"vec3 hdr_black(vec3 light, float black)\n"
+	"{\n"
+	"\tif (!(black > 0.0))\n"
+	"\t\treturn light;\n"
+	"\tvec3 l = max(light, vec3(0.0));\n"
+	"\tvec3 t = 1.0 - l / (4.0 * black);\n"
+	"\treturn mix(light, l + black * t * t, lessThan(light, vec3(4.0 * black)));\n"
+	"}\n"
+	"\n"
+	"vec3 hdr_encode(vec3 value, vec4 hdr, float curve, float black)\n"
 	"{\n"
 	"\tif (hdr.z < 0.5)\n"
 	"\t\treturn clamp(value, 0.0, 1.0);\n"
-	"\tvec3 light = min(hdr_sdr_light(value, curve) * (hdr.w > 0.0 ? hdr.w : 1.0), vec3(hdr.y)) * hdr.x;\n"
+	"\tvec3 light = hdr_black(min(hdr_sdr_light(value, curve) * (hdr.w > 0.0 ? hdr.w : 1.0), vec3(hdr.y)) * hdr.x, black);\n"
 	"\tif (hdr.z < 2.5)\n"
 	"\t\treturn light;\n"
 	"\tvec3 wide = mat3(0.627404, 0.069097, 0.016391, 0.329283, 0.919540, 0.088013, 0.043313, 0.011362, 0.895595) * light;\n"
@@ -296,7 +317,7 @@ written (the game's destination alpha kept), its light over the UI's
 white (over paper white's: xgpu_hdr_to_ui) */
 static const char tone_map_source[] =
 	"layout(input_attachment_index = 0, set = 2, binding = 0) uniform subpassInput frame_input;\n"
-	"/* the mode, the peak, the UI's white */\n"
+	"/* the mode, the peak, the UI's white, the full-frame peak */\n"
 	"uniform vec4 hdr;\n"
 	"out vec4 result;\n"
 	"\n"
@@ -310,7 +331,7 @@ static const char tone_map_source[] =
 	"\tbvec3 not_number = notEqual(bits & uvec3(0x007fffffu), uvec3(0u));\n"
 	"\tbvec3 negative = notEqual(bits & uvec3(0x80000000u), uvec3(0u));\n"
 	"\tframe = mix(frame, mix(mix(vec3(65504.0), vec3(-65504.0), negative), vec3(0.0), not_number), special);\n"
-	"\tvec3 mapped = hdr_tone_map(frame, hdr.x, hdr.y);\n"
+	"\tvec3 mapped = hdr_tone_map(frame, hdr.x, hdr.y, hdr.w);\n"
 	"\tif (hdr.z > 0.0 && hdr.z != 1.0)\n"
 	"\t\tmapped = hdr_encoded(hdr_linear(mapped) / hdr.z);\n"
 	"\tresult = vec4(mapped, 1.0);\n"
@@ -324,7 +345,8 @@ height); bounds: the frame's width and height and the sharp upscale's
 whole factors across and down (xgpu_vulkan.c's present_sharp, in one tap:
 the frame scaled up by them by nearest, then linearly to the viewport; 1, 1
 linearly alone); window: the SDR curve (XGPU_HDR_SDR_CURVE_*), the levels
-a channel is dithered to (255, 1023; 0 none), the power (1 none) */
+a channel is dithered to (255, 1023; 0 none), the power (1 none), the
+display's black (xgpu_hdr_frame.black: 0 none) */
 static const char encode_source[] =
 	"uniform sampler2D color_texture;\n"
 	"/* the viewport: x, y, 1 / width, 1 / height */\n"
@@ -333,7 +355,8 @@ static const char encode_source[] =
 	"uniform vec4 bounds;\n"
 	"/* paper white, the peak, the output, the UI's white */\n"
 	"uniform vec4 hdr;\n"
-	"/* the SDR curve, the levels dithered to, display.gamma's power */\n"
+	"/* the SDR curve, the levels dithered to, display.gamma's power, the\n"
+	"display's black */\n"
 	"uniform vec4 window;\n"
 	"out vec4 result;\n"
 	"\n"
@@ -353,7 +376,7 @@ static const char encode_source[] =
 	"void main()\n"
 	"{\n"
 	"\tvec3 frame = textureLod(color_texture, present_position(gl_FragCoord.xy - metrics.xy), 0.0).rgb;\n"
-	"\tvec3 code = hdr_encode(frame, hdr, window.x);\n"
+	"\tvec3 code = hdr_encode(frame, hdr, window.x, window.w);\n"
 	"\tif (hdr.z < 0.5 && window.z > 0.0 && window.z != 1.0)\n"
 	"\t\tcode = pow(code, vec3(window.z));\n"
 	"\tresult = vec4(hdr_dither(code, gl_FragCoord.xy, window.y), 1.0);\n"

@@ -285,7 +285,15 @@ white: 1 for SDR). ui is the UI's white over paper white
 1.0 is the UI's white, the tone map leaves the 3D view in it (its light
 over ui), and the encoding takes the frame's light times it. sdr_curve is
 the curve the encoding takes the frame's values to light by
-(XGPU_HDR_SDR_CURVE_SRGB or _GAMMA_2_2: display.hdr_sdr_curve's). */
+(XGPU_HDR_SDR_CURVE_SRGB or _GAMMA_2_2: display.hdr_sdr_curve's).
+full_frame and black are the display's own (#1122: Windows' DXGI reports
+them), given only with a peak of the player's (display.hdr_peak_nits), 0
+otherwise, so that the System peak's picture is as it always was:
+full_frame the most the display holds over the whole screen, in paper
+whites as the peak is (the tone map's shoulder holds the bright parts
+near it, xgpu_hdr_highlight); black the least it shows, in the output's
+units as paper white is (the encoding lifts what is darker into its
+range, xgpu_hdr_black). */
 struct xgpu_hdr_frame
 {
 	int mode;
@@ -294,7 +302,30 @@ struct xgpu_hdr_frame
 	float peak;
 	float ui;
 	int sdr_curve;
+	float full_frame;
+	float black;
 };
+
+/* display.hdr_peak_nits (#1122): the display's peak in nits, of the
+player's, these at most and least (0: the system's) */
+#define XGPU_HDR_PEAK_NITS_LEAST 200
+#define XGPU_HDR_PEAK_NITS_MOST 10000
+
+/* the display's headroom over its SDR white (system_white, in nits) as the
+encoding takes it: the system's (system_headroom), or the player's peak in
+nits over that white (display.hdr_peak_nits; 0 the system's), at least 1 */
+static inline float xgpu_hdr_peak_headroom(int peak_nits, float system_headroom, float system_white)
+{
+	float headroom = system_headroom;
+
+	if (peak_nits > 0 && system_white > 0.0f)
+		headroom = (float)peak_nits / system_white;
+	return headroom >= 1.0f ? headroom : 1.0f;
+}
+
+/* the black lift's reach (xgpu_hdr_black): light under this many times
+the display's black is lifted into its range, the rest is as it was */
+#define XGPU_HDR_BLACK_REACH 4.0f
 
 
 /* ---------- the reference (host code and tests: the system's maths) */
@@ -402,12 +433,36 @@ static inline float xgpu_hdr_shoulder(float x, float knee, float peak)
 	return knee + range * t / (1.0f + t);
 }
 
+/* the highlights' curve (#1122): the shoulder toward the peak, or, with
+a full-frame peak between the knee and the peak (a display that cannot
+hold its peak over the whole screen), two shoulders summed: one toward the
+full-frame peak, at the knee's slope (bright surfaces, the sky, held near
+what the display holds over the screen), and one toward the rest of the
+peak that rises from the knee flat (a small core of light still reaching
+for the peak). Identity to the knee either way, rising, never reaching the
+peak; without a full-frame peak (0, or at the peak) the shoulder itself. */
+static inline float xgpu_hdr_highlight(float x, float knee, float peak, float full_frame)
+{
+	float body, rest, u, v;
+
+	if (!(full_frame > knee && full_frame < peak))
+		return xgpu_hdr_shoulder(x, knee, peak);
+	if (x <= knee)
+		return x;
+	body = full_frame - knee;
+	rest = peak - full_frame;
+	u = (x - knee) / body;
+	v = (x - knee) / rest;
+	return knee + body * u / (1.0f + u) + rest * v * v / (1.0f + v * v);
+}
+
 /* the tone map of one pixel's colour, in place: the light (made linear,
 lifted in Punchy) keeps its hue under the shoulder, and toward the SDR
 frame's colour, white-hot, brightened by the light the SDR frame clipped,
 as it is further past white. Faithful leaves a pixel no channel of which is
-past white as it is. */
-static inline void xgpu_hdr_tone_map(float rgb[3], int mode, float peak)
+past white as it is. full_frame: the display's full-frame peak in paper
+whites (xgpu_hdr_frame's, 0 none: xgpu_hdr_highlight) */
+static inline void xgpu_hdr_tone_map_full(float rgb[3], int mode, float peak, float full_frame)
 {
 	static const float luma[3] = { 0.2126f, 0.7152f, 0.0722f };
 	float sdr[3], light[3], sdr_luminance = 0.0f, luminance = 0.0f, most, gain = 1.0f, knee = 1.0f, clipped, hue,
@@ -438,10 +493,33 @@ static inline void xgpu_hdr_tone_map(float rgb[3], int mode, float peak)
 	value_most = fmaxf(rgb[0], fmaxf(rgb[1], rgb[2]));
 	clipped = xgpu_hdr_smoothstep(1.0f, XGPU_HDR_FAITHFUL_CLIPPED, value_most);
 	most = fmaxf(light[0], fmaxf(light[1], light[2])) * gain;
-	hue = most > 0.0f ? gain * xgpu_hdr_shoulder(most, knee, peak) / most : 0.0f;
-	brightened = sdr_luminance > 0.0f ? xgpu_hdr_shoulder(gain * luminance / sdr_luminance, knee, peak) : 0.0f;
+	hue = most > 0.0f ? gain * xgpu_hdr_highlight(most, knee, peak, full_frame) / most : 0.0f;
+	brightened = sdr_luminance > 0.0f ?
+		xgpu_hdr_highlight(gain * luminance / sdr_luminance, knee, peak, full_frame) : 0.0f;
 	for (channel = 0; channel < 3; channel++)
 		rgb[channel] = xgpu_hdr_encoded(light[channel] * hue * (1.0f - clipped) + sdr[channel] * brightened * clipped);
+}
+
+/* (no full-frame peak: the shoulder toward the peak alone) */
+static inline void xgpu_hdr_tone_map(float rgb[3], int mode, float peak)
+{
+	xgpu_hdr_tone_map_full(rgb, mode, peak, 0.0f);
+}
+
+/* the display's black (#1122; xgpu_hdr_frame.black, the output's units):
+light under XGPU_HDR_BLACK_REACH times it lifted smoothly into its range
+(0 to the black, the reach to itself, rising at half the slope or more,
+meeting the line at its slope), so that a display that cannot show less
+than its black shows the shadows' detail rather than one black; the rest,
+and all of it without a black (0), as it was */
+static inline float xgpu_hdr_black(float light, float black)
+{
+	float reach = XGPU_HDR_BLACK_REACH * black, t;
+
+	if (!(black > 0.0f) || light >= reach)
+		return light;
+	t = 1.0f - (light > 0.0f ? light : 0.0f) / reach;
+	return (light > 0.0f ? light : 0.0f) + black * t * t;
 }
 
 /* the 3D view's tone mapped colour (xgpu_hdr_tone_map's) in the frame's
@@ -472,8 +550,8 @@ static inline void xgpu_hdr_encode(float rgb[3], const struct xgpu_hdr_frame *fr
 			rgb[channel] = rgb[channel] < 0.0f ? 0.0f : rgb[channel] > 1.0f ? 1.0f : rgb[channel];
 			continue;
 		}
-		light[channel] = fminf(xgpu_hdr_sdr_light(rgb[channel], frame->sdr_curve) * ui, frame->peak) *
-			frame->paper_white;
+		light[channel] = xgpu_hdr_black(fminf(xgpu_hdr_sdr_light(rgb[channel], frame->sdr_curve) * ui, frame->peak) *
+			frame->paper_white, frame->black);
 	}
 	if (frame->output == XGPU_HDR_OUTPUT_SDR)
 		return;

@@ -239,6 +239,7 @@ static const uint32_t record_minimum[XGPU_STREAM_RECORD_TYPES] =
 	[XGPU_STREAM_GAMMA] = sizeof(struct xgpu_stream_value),
 	[XGPU_STREAM_SHARP_UPSCALE] = sizeof(struct xgpu_stream_value),
 	[XGPU_STREAM_HDR_SDR_CURVE] = sizeof(struct xgpu_stream_value),
+	[XGPU_STREAM_HDR_PEAK_NITS] = sizeof(struct xgpu_stream_value),
 	[XGPU_STREAM_PANINI] = sizeof(struct xgpu_stream_panini),
 	[XGPU_STREAM_WORLD_AO_WINDOW] = sizeof(struct xgpu_stream_world_ao_window),
 	[XGPU_STREAM_WORLD_AO_FIELD] = sizeof(struct xgpu_stream_world_ao_field),
@@ -528,6 +529,9 @@ static int decode_record(struct host_render_decoder *decoder, const unsigned cha
 		break;
 	case XGPU_STREAM_HDR_SDR_CURVE:
 		CALL(hdr_sdr_curve, value->value);
+		break;
+	case XGPU_STREAM_HDR_PEAK_NITS:
+		CALL(hdr_peak_nits, value->value);
 		break;
 	/* (debug.render_marks: the replay's, which reads them from its
 	recording; nothing to play) */

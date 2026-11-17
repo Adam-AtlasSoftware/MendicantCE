@@ -2431,6 +2431,30 @@ static void hdr_sdr_curve_send(void)
 	sent = curve;
 }
 
+/* display.hdr_peak_nits (#1122): the display's peak the backend's HDR
+encoding takes (0 the system's; else at least
+XGPU_HDR_PEAK_NITS_LEAST, at most _MOST), as it changes */
+static void hdr_peak_nits_send(void)
+{
+	static int sent = -1;
+	/* (read again as the settings change: config_changes) */
+	static unsigned long read_at = (unsigned long)-1;
+	int nits;
+
+	if (!device.gl_ready || read_at == config_changes())
+		return;
+	read_at = config_changes();
+	nits = (int)config_integer("display.hdr_peak_nits");
+	nits = nits <= 0 ? 0 : nits < XGPU_HDR_PEAK_NITS_LEAST ? XGPU_HDR_PEAK_NITS_LEAST :
+		nits > XGPU_HDR_PEAK_NITS_MOST ? XGPU_HDR_PEAK_NITS_MOST : nits;
+	if (nits == sent)
+		return;
+	if (sent >= 0 || nits)
+		platform_log(nits ? "hdr: display peak set to %d nits" : "hdr: display peak the system's", nits);
+	xgpu_backend_hdr_peak_nits(nits);
+	sent = nits;
+}
+
 /* a point in the window, as SDL reports it, in the menus' coordinates: the
 inverse of the letterboxed display blit at presentation, the screen's
 width and the menus' centering (halo_screen_ui_offset); or, not centered,
@@ -2681,6 +2705,8 @@ long halo_screen_commit(void)
 	gamma_send();
 	/* (display.hdr_sdr_curve) */
 	hdr_sdr_curve_send();
+	/* (display.hdr_peak_nits) */
+	hdr_peak_nits_send();
 	/* display.shadow_resolution, if it has changed: the maps' entries at
 	the old scale are freed (render_targets_evict), new ones made at the new */
 	if (shadow_scale && shadow_scale_read_at != config_changes())

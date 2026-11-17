@@ -41,7 +41,7 @@ highlights it cannot show.
   `display.hdr_paper_white`, in percent of the system's SDR white, is still
   read while it is 0), `display.hdr_ui_nits` (the UI's brightness, below),
   `display.hdr_sdr_curve` (`auto`, `srgb`, `2.2`: the shadows' curve, under
-  "Choices").
+  "Choices"), `display.hdr_peak_nits` (the display's peak, below).
   On a renderer that draws HDR (the menus' `platform="hdr"`), Video
   Setup's Brightness page has a row for each under its HDR section, and a
   DISPLAY PEAK row that shows the display's peak and SDR white as the
@@ -54,6 +54,18 @@ highlights it cannot show.
   ratio above it; the first-person weapon's displays and the
   self-illumination are the 3D view's and stay with paper white. It is
   never brighter than the display's peak.
+- **Peak brightness** (`display.hdr_peak_nits`, #1122): the display's peak
+  in nits, 200 to 10000, for a display that reports a wrong one, or 0, the
+  default: the system's (the picture as before). Only what is past paper
+  white changes. With a peak of the player's, the curve also takes what
+  Windows' DXGI reports of the display (`IDXGIOutput6::GetDesc1`, the HDR
+  Calibration app's values where it has run; logged as `hdr: DXGI: ...`):
+  its full-frame peak, toward which the shoulder holds the bright parts (a
+  shoulder toward it summed with one that rises flat from paper white
+  toward the rest of the peak, so a small core still reaches the peak:
+  `xgpu_hdr_highlight`), and its black, under 4 times which the encoding
+  lifts the light into the display's range (`xgpu_hdr_black`). Without
+  them (0: other systems, or System's peak) both are the curve as before.
 - **Fallback**: `auto` turns HDR on only on an HDR display; off, and on an
   SDR display, the frame is the 8-bit one, byte for byte. Highlights roll
   off under a soft shoulder to the display's peak (its EDR headroom, which

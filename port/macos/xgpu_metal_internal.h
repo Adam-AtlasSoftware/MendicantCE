@@ -82,6 +82,9 @@ void host_metal_hdr_state(int active, int mode, int paper_white_nits, int paper_
 /* display.hdr_sdr_curve (XGPU_HDR_SDR_CURVE_*: AUTO is sRGB's here, as
 macOS and iOS show SDR) */
 void host_metal_hdr_sdr_curve(int curve);
+/* display.hdr_peak_nits (#1122): the display's peak in nits, of the
+player's (0: EDR's own headroom), at most EDR's headroom */
+void host_metal_hdr_peak_nits(int nits);
 /* the display's headroom stood in for (HALO_METAL_EDR_HEADROOM's: the tests,
 the replay) */
 void host_metal_hdr_override(float headroom);

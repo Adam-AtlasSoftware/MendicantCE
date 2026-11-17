@@ -273,8 +273,10 @@ static void post_test(NSString *dir)
 {
 	static const float peaks[3] = { 1.0f, 4.0f, 16.0f };
 	/* (the fifth and sixth with the UI's white past and under paper
-	white's; the last two by gamma 2.2's SDR curve, display.hdr_sdr_curve's) */
-	static const struct xgpu_hdr_frame encodings[8] =
+	white's; the seventh and eighth by gamma 2.2's SDR curve,
+	display.hdr_sdr_curve's; the last two with the display's black, #1122:
+	0.05 nits in scRGB's units, 0.1 in PQ's) */
+	static const struct xgpu_hdr_frame encodings[10] =
 	{
 		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_SCRGB, 2.5f, 4.0f },
 		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_PQ, 0.02f, 4.0f },
@@ -284,6 +286,8 @@ static void post_test(NSString *dir)
 		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_PQ, 0.0203f, 10.0f, 0.6f },
 		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_SCRGB, 2.5f, 4.0f, 1.0f, XGPU_HDR_SDR_CURVE_GAMMA_2_2 },
 		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_PQ, 0.0203f, 10.0f, 1.0f, XGPU_HDR_SDR_CURVE_GAMMA_2_2 },
+		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_SCRGB, 2.5f, 4.0f, 1.0f, XGPU_HDR_SDR_CURVE_GAMMA_2_2, 0.0f, 0.05f / 80.0f },
+		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_PQ, 0.0203f, 10.0f, 1.0f, XGPU_HDR_SDR_CURVE_SRGB, 0.0f, 0.1f / 10000.0f },
 	};
 	/* the tone map's UI white: none given (paper white's), and the UI's
 	white under and past paper white's */
@@ -360,6 +364,42 @@ static void post_test(NSString *dir)
 			}
 		}
 	}
+	/* (#1122: a display's full-frame peak, 3 paper whites under a peak of
+	16, shaping the shoulder) */
+	for (mode = XGPU_HDR_MODE_FAITHFUL; mode <= XGPU_HDR_MODE_PUNCHY; mode++)
+	{
+		id<MTLTexture> target = texture_make(MTLPixelFormatRGBA16Float, VECTORS,
+			MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead);
+		struct post_uniforms uniforms;
+
+		halves_write(target, rgba, VECTORS);
+		memset(&uniforms, 0, sizeof(uniforms));
+		uniforms.metrics[0] = 1.0f / VECTORS;
+		uniforms.metrics[1] = 1.0f;
+		uniforms.metrics[2] = VECTORS;
+		uniforms.metrics[3] = 1.0f;
+		uniforms.hdr[0] = (float)mode;
+		uniforms.hdr[1] = 16.0f;
+		uniforms.hdr[3] = 3.0f;
+		post_draw(tone_pipeline, target, nil, &uniforms);
+		halves_read(target, got, VECTORS);
+		for (vector = 0; vector < VECTORS; vector++)
+		{
+			float expected[3];
+
+			for (channel = 0; channel < 3; channel++)
+				expected[channel] = half_of(vectors[vector][channel]);
+			xgpu_hdr_tone_map_full(expected, mode, 16.0f, 3.0f);
+			for (channel = 0; channel < 3; channel++)
+			{
+				if (!close_to(got[vector * 4 + channel], expected[channel]))
+					FAIL("tone map, %s with a full-frame peak: vector %d channel %d: %.5f, the reference %.5f",
+						mode ? "punchy" : "faithful", vector, channel, (double)got[vector * 4 + channel],
+						(double)expected[channel]);
+				checked++;
+			}
+		}
+	}
 	/* (a pixel not a number, or infinite, either way: tone mapped as 0, and
 	as the half floats' most and least, finite) */
 	{
@@ -401,7 +441,7 @@ static void post_test(NSString *dir)
 		}
 		printf("post: %d values not a number or infinite tone mapped finite\n", finite);
 	}
-	for (which = 0; which < 8; which++)
+	for (which = 0; which < 10; which++)
 	{
 		id<MTLTexture> source = texture_make(MTLPixelFormatRGBA16Float, VECTORS, MTLTextureUsageShaderRead);
 		id<MTLTexture> target = texture_make(MTLPixelFormatRGBA32Float, VECTORS, MTLTextureUsageRenderTarget);
@@ -419,6 +459,7 @@ static void post_test(NSString *dir)
 		uniforms.hdr[2] = (float)encodings[which].output;
 		uniforms.hdr[3] = encodings[which].ui;
 		uniforms.window[0] = (float)encodings[which].sdr_curve;
+		uniforms.window[3] = encodings[which].black;
 		post_draw(encode_pipeline, target, source, &uniforms);
 		[target getBytes:got bytesPerRow:VECTORS * 16 fromRegion:MTLRegionMake2D(0, 0, VECTORS, 1) mipmapLevel:0];
 		for (vector = 0; vector < VECTORS; vector++)

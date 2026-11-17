@@ -567,6 +567,11 @@ static const struct config_setting config_settings[] =
 		"darker), \"srgb\" (a Mac's), or \"auto\": sRGB on macOS and iOS, 2.2\n"
 		"elsewhere. Only the shadows differ: colors from code 51 up are the\n"
 		"same in both." },
+	{ "display.hdr_peak_nits", _config_integer, "0", "HALO_HDR_PEAK_NITS", _environment_value, _platform_all,
+		"With HDR, the display's peak in nits, 200 to 10000, for a display that\n"
+		"reports a wrong one; 0 is the system's. Only the highlights change.\n"
+		"With a peak of your own, the display's full-frame peak and black,\n"
+		"where Windows reports them, shape the highlights and the shadows too." },
 	{ "display.gamma", _config_real, "1.0", "HALO_GAMMA", _environment_value, _platform_all,
 		"The picture's gamma, 0.5 to 2.0, as Halo PC's: above 1 brighter (the\n"
 		"dark parts lifted most), below 1 darker; white and black stay. The\n"

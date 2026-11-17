@@ -77,6 +77,9 @@ PAPER_WHITES = [("SYSTEM", "0")] + [(f"{nits} NITS", str(nits)) for nits in rang
 # display.hdr_ui_nits's: paper white's, or nits
 # (0's name the shortest that fits the spinner: "same as paper white" is too wide)
 UI_WHITES = [("PAPER WHITE", "0")] + [(f"{nits} NITS", str(nits)) for nits in range(80, 501, 20)]
+# display.hdr_peak_nits's: the system's, or nits (#1122)
+PEAKS = [("SYSTEM", "0")] + [(f"{nits} NITS", str(nits)) for nits in
+                             [*range(200, 1001, 100), 1250, 1500, 1750, 2000, 2500, 3000, 4000]]
 
 # the old settings screens' layout (rows of a label and a spinner over their
 # row backgrounds, a line of help for the row chosen, Defaults, OK and Cancel),
@@ -1323,6 +1326,9 @@ PAGES = {
             ("SDR CURVE", "display.hdr_sdr_curve", [("AUTO", "auto"), ("SRGB", "srgb"), ("2.2", "2.2")],
              "With HDR, how dark the darkest shadows are: the curve an SDR display shows them by. 2.2 is most PC "
              "monitors' and TVs', darker; sRGB is a Mac's. Auto picks sRGB on a Mac, 2.2 elsewhere.", "hdr"),
+            ("PEAK BRIGHTNESS", "display.hdr_peak_nits", PEAKS,
+             "With HDR, the brightest your display shows, in nits, for a display that reports a wrong peak. "
+             "System uses the one it reports. Only the highlights change.", "hdr"),
             (SECTION, "DISPLAY"),
             # (the display's peak and SDR white as the system reports them:
             # menu_functions.c's hdr_display_show)

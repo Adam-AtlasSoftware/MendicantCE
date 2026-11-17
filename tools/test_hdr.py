@@ -343,6 +343,171 @@ int main(void)
 			"auto: sRGB on Apple's platforms, 2.2 elsewhere; a choice kept");
 	}
 	{
+		/* #1122: the default (no full-frame peak, no black, the System
+		peak) is today's picture bit for bit: the tone map with a full-frame
+		peak of 0, or one at or past the peak, the shoulder exactly, and the
+		encoding with a black of 0 as it was. A peak of the player's changes
+		only what is past paper white. */
+		static const float probes[6][3] = { { 0.0f, 0.0f, 0.0f }, { 0.1f, 0.2f, 0.3f }, { 0.9f, 0.6f, 0.3f },
+			{ 1.0f, 1.0f, 1.0f }, { 1.4f, 1.1f, 0.6f }, { 3.0f, 2.5f, 1.5f } };
+		struct xgpu_hdr_frame was = { F, XGPU_HDR_OUTPUT_PQ, 203.0f / 10000.0f, 4.0f, 1.0f, XGPU_HDR_SDR_CURVE_GAMMA_2_2 };
+		struct xgpu_hdr_frame now = was;
+		int index, channel, mode_index;
+		float x;
+
+		now.full_frame = 0.0f;
+		now.black = 0.0f;
+		for (mode_index = F; mode_index <= P; mode_index++)
+		{
+			for (index = 0; index < 6; index++)
+			{
+				float a[3], b[3], c[3], e[3], f[3];
+
+				for (channel = 0; channel < 3; channel++)
+					a[channel] = b[channel] = c[channel] = e[channel] = f[channel] = probes[index][channel];
+				xgpu_hdr_tone_map(a, mode_index, 4.0f);
+				xgpu_hdr_tone_map_full(b, mode_index, 4.0f, 0.0f);
+				xgpu_hdr_tone_map_full(c, mode_index, 4.0f, 4.0f);
+				CHECK(!memcmp(a, b, sizeof(a)) && !memcmp(a, c, sizeof(a)),
+					"no full-frame peak (0, or the peak): the tone map bit for bit (probe %d)", index);
+				xgpu_hdr_encode(e, &was);
+				xgpu_hdr_encode(f, &now);
+				CHECK(!memcmp(e, f, sizeof(e)), "no black: the encoding bit for bit (probe %d)", index);
+			}
+		}
+		for (x = 0.0f; x <= 50.0f; x += 0.01f)
+			CHECK(xgpu_hdr_highlight(x, 1.0f, 8.0f, 0.0f) == xgpu_hdr_shoulder(x, 1.0f, 8.0f) &&
+				xgpu_hdr_highlight(x, 1.0f, 8.0f, 9.0f) == xgpu_hdr_shoulder(x, 1.0f, 8.0f) &&
+				xgpu_hdr_highlight(x, 1.0f, 8.0f, 0.5f) == xgpu_hdr_shoulder(x, 1.0f, 8.0f),
+				"a full-frame peak outside (knee, peak) is the shoulder itself: %.2f", x);
+		/* (a peak of the player's: the System peak's headroom, or the
+		player's nits over the SDR white; never under 1) */
+		CHECK(xgpu_hdr_peak_headroom(0, 3.5f, 240.0f) == 3.5f, "0: the system's headroom");
+		CHECK(xgpu_hdr_peak_headroom(1000, 3.5f, 250.0f) == 4.0f, "1000 nits over a 250-nit white: 4");
+		CHECK(xgpu_hdr_peak_headroom(200, 3.5f, 300.0f) == 1.0f, "a peak under the white: 1");
+		/* a manual peak (1000 nits for the system's 600, at 203-nit paper
+		white) changes only highlights: every value at or under paper white
+		the same in the frame and the encoding, the highlights brighter */
+		{
+			float system_peak = 600.0f / 203.0f, player_peak = 1000.0f / 203.0f;
+			struct xgpu_hdr_frame low = { F, XGPU_HDR_OUTPUT_PQ, 203.0f / 10000.0f, 0.0f, 1.0f, XGPU_HDR_SDR_CURVE_GAMMA_2_2 };
+			struct xgpu_hdr_frame high = low;
+			int step;
+
+			low.peak = system_peak;
+			high.peak = player_peak;
+			for (mode_index = F; mode_index <= P; mode_index++)
+			{
+				for (step = 0; step <= 400; step++)
+				{
+					float value = (float)step / 100.0f;
+					float a[3] = { value, value * 0.7f, value * 0.4f }, b[3] = { value, value * 0.7f, value * 0.4f };
+					float most_a, most_b;
+
+					xgpu_hdr_tone_map(a, mode_index, system_peak);
+					xgpu_hdr_tone_map(b, mode_index, player_peak);
+					most_a = fmaxf(a[0], fmaxf(a[1], a[2]));
+					most_b = fmaxf(b[0], fmaxf(b[1], b[2]));
+					if (mode_index == F && value <= 1.0f)
+						CHECK(!memcmp(a, b, sizeof(a)), "faithful: %.2f under paper white moved with the peak", value);
+					if (most_a <= 1.0f && most_b <= 1.0f)
+					{
+						xgpu_hdr_encode(a, &low);
+						xgpu_hdr_encode(b, &high);
+						CHECK(!memcmp(a, b, sizeof(a)), "%s: %.2f, under paper white, encoded otherwise",
+							mode_index == F ? "faithful" : "punchy", value);
+					}
+					else
+						CHECK(most_b >= most_a - 1.0e-6f, "%s: %.2f's highlight dimmer with the higher peak: %.4f, %.4f",
+							mode_index == F ? "faithful" : "punchy", value, most_b, most_a);
+				}
+			}
+			{
+				float a[3] = { 3.0f, 3.0f, 3.0f }, b[3] = { 3.0f, 3.0f, 3.0f };
+
+				xgpu_hdr_tone_map(a, F, system_peak);
+				xgpu_hdr_tone_map(b, F, player_peak);
+				CHECK(xgpu_hdr_linear(b[0]) > 1.05f * xgpu_hdr_linear(a[0]), "a core brighter with the higher peak: "
+					"%.3f, %.3f", xgpu_hdr_linear(b[0]), xgpu_hdr_linear(a[0]));
+			}
+		}
+		/* the full-frame peak shapes the shoulder as meant: the same to the
+		knee at its slope, rising, under the peak; the bright parts (2 to 4
+		times paper white) held under the shoulder, to 3 under the
+		full-frame peak, a core far past it still reaching for the
+		peak; a lower full-frame peak holds them lower */
+		{
+			float last = 0.0f, core;
+
+			for (x = 0.0f; x <= 400.0f; x += 0.05f)
+			{
+				float y = xgpu_hdr_highlight(x, 1.0f, 10.0f, 2.5f);
+
+				CHECK(y >= last - 1.0e-5f && y < 10.0f, "the curve at %.2f: %.4f after %.4f", x, y, last);
+				if (x <= 1.0f)
+					CHECK(y == x, "identity to the knee: %.2f", x);
+				last = y;
+			}
+			CHECK(fabsf((xgpu_hdr_highlight(1.001f, 1.0f, 10.0f, 2.5f) - 1.0f) / 0.001f - 1.0f) < 0.01f,
+				"the knee's slope 1");
+			for (x = 2.0f; x <= 4.0f; x += 0.5f)
+			{
+				float held = xgpu_hdr_highlight(x, 1.0f, 10.0f, 2.5f), lower = xgpu_hdr_highlight(x, 1.0f, 10.0f, 1.8f);
+
+				CHECK(held < xgpu_hdr_shoulder(x, 1.0f, 10.0f) && (x > 3.0f || held < 2.5f), "%.1f held under the "
+					"shoulder (to 3, under the full-frame peak): %.3f (the shoulder's %.3f)", x, held,
+					xgpu_hdr_shoulder(x, 1.0f, 10.0f));
+				CHECK(lower < held, "a lower full-frame peak holds %.1f lower: %.3f, %.3f", x, lower, held);
+			}
+			core = xgpu_hdr_highlight(1000.0f, 1.0f, 10.0f, 2.5f);
+			CHECK(core > 9.0f, "a core far past white still near the peak: %.3f", core);
+			/* (the tone map with it: under paper white as it was, a highlight
+			held) */
+			{
+				float under[3] = { 0.9f, 0.5f, 0.2f }, bright[3] = { 1.5f, 1.4f, 1.3f }, plain[3] = { 1.5f, 1.4f, 1.3f };
+
+				xgpu_hdr_tone_map_full(under, F, 10.0f, 2.5f);
+				xgpu_hdr_tone_map_full(bright, F, 10.0f, 2.5f);
+				xgpu_hdr_tone_map(plain, F, 10.0f);
+				CHECK(under[0] == 0.9f && under[1] == 0.5f && under[2] == 0.2f, "faithful under white as it is");
+				CHECK(bright[0] < plain[0] && bright[0] > 1.0f, "a highlight held by the full-frame peak: %.4f, %.4f",
+					bright[0], plain[0]);
+			}
+		}
+		/* the black lifts only what is under XGPU_HDR_BLACK_REACH times it:
+		0 to the black, rising, meeting the line at the reach; and in the
+		encoding (scRGB, 0.05 nits), code 0 at the black, paper white as it
+		was. The negative control: no black, nothing lifted. */
+		{
+			float black = 0.05f / 80.0f, last = -1.0f, l;
+			struct xgpu_hdr_frame lifted = { F, XGPU_HDR_OUTPUT_SCRGB, 203.0f / 80.0f, 4.0f, 1.0f,
+				XGPU_HDR_SDR_CURVE_GAMMA_2_2, 0.0f, 0.05f / 80.0f };
+			struct xgpu_hdr_frame plain = lifted;
+			float zero[3] = { 0.0f, 0.0f, 0.0f }, zero_plain[3] = { 0.0f, 0.0f, 0.0f }, white[3] = { 1.0f, 1.0f, 1.0f },
+				white_plain[3] = { 1.0f, 1.0f, 1.0f };
+
+			plain.black = 0.0f;
+			CHECK(xgpu_hdr_black(0.0f, black) == black, "black's light at the display's black");
+			for (l = 0.0f; l <= 8.0f * black; l += black / 64.0f)
+			{
+				float y = xgpu_hdr_black(l, black);
+
+				CHECK(y >= last && y >= l, "the lift at %.6f: %.6f after %.6f", l, y, last);
+				if (l >= XGPU_HDR_BLACK_REACH * black)
+					CHECK(y == l, "past the reach as it was: %.6f", l);
+				CHECK(xgpu_hdr_black(l, 0.0f) == l, "no black: %.6f lifted", l);
+				last = y;
+			}
+			xgpu_hdr_encode(zero, &lifted);
+			xgpu_hdr_encode(zero_plain, &plain);
+			xgpu_hdr_encode(white, &lifted);
+			xgpu_hdr_encode(white_plain, &plain);
+			CHECK(fabsf(zero[0] * 80.0f - 0.05f) < 1e-6f && zero_plain[0] == 0.0f, "code 0 at 0.05 nits: %.6f",
+				zero[0] * 80.0f);
+			CHECK(!memcmp(white, white_plain, sizeof(white)), "paper white as it was");
+		}
+	}
+	{
 		/* the final write's dither (#1108): its noise within [-1, 1],
 		about 0 on average and triangular (variance 1/6) over a screen's
 		pixels; a code moved by at most a level, black and white exact; no
@@ -552,3 +717,5 @@ def test_glsl_constants():
     # (the dither's noise: the same interleaved gradient noise)
     for constant in ("52.9829189", "0.06711056", "0.00583715"):
         assert constant in glsl and constant in header, constant
+    # (#1122: the black lift's reach)
+    assert f"{macro('XGPU_HDR_BLACK_REACH'):.1f} * black" in glsl

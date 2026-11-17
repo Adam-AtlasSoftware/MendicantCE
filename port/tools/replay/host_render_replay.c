@@ -3513,6 +3513,7 @@ static const char *const record_type_names[XGPU_STREAM_RECORD_TYPES] =
 	[XGPU_STREAM_HDR] = "hdr", [XGPU_STREAM_TONE_MAP] = "tone_map", [XGPU_STREAM_SCREENSHOT] = "screenshot",
 	[XGPU_STREAM_PICTURE_POSITION] = "picture_position", [XGPU_STREAM_GAMMA] = "gamma", [XGPU_STREAM_PANINI] = "panini",
 	[XGPU_STREAM_SHARP_UPSCALE] = "sharp_upscale", [XGPU_STREAM_HDR_SDR_CURVE] = "hdr_sdr_curve",
+	[XGPU_STREAM_HDR_PEAK_NITS] = "hdr_peak_nits",
 	[XGPU_STREAM_WORLD_AO_WINDOW] = "world_ao_window", [XGPU_STREAM_WORLD_AO_FIELD] = "world_ao_field",
 	[XGPU_STREAM_PIPELINE_STAND_IN] = "pipeline_stand_in", [XGPU_STREAM_CATEGORY] = "category",
 	[XGPU_STREAM_DYNAMIC_LIGHTS_WORLD] = "dynamic_lights_world", [XGPU_STREAM_WORLD_AO_PREPASS] = "world_ao_prepass",

@@ -21,8 +21,9 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness/op_hdr_paper_white_nits" x="28" y="189" platform="hdr"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness/op_hdr_ui_nits" x="28" y="210" platform="hdr"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness/op_hdr_sdr_curve" x="28" y="231" platform="hdr"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness/section_8" x="28" y="258" platform="hdr"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness/op_hdr_display" x="28" y="278" platform="hdr"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness/op_hdr_peak_nits" x="28" y="252" platform="hdr"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness/section_9" x="28" y="279" platform="hdr"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness/op_hdr_display" x="28" y="299" platform="hdr"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness/button_bar" y="414"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness/button_bar" type="column_list" width="640" height="28" flags="pass_unhandled_to_focused_child left_right_tabs_items" source="tools/port_settings.py settings_files/_settings_page">
@@ -148,16 +149,25 @@
 		<on event="created" run="port setting load"/>
 		<on event="a" run="port setting segment"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness/section_8" width="344" height="18" bitmap="main_menu/settings/section" platform="hdr" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness/section_8_title"/>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness/op_hdr_peak_nits" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="hdr" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness/hdr_peak_nits_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness/hdr_peak_nits_spinner" x="188"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness/section_8_title" type="text" controller="1" width="344" height="18" wide="0 244" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness/labels" string_index="8" color="#FF6F9CD0" text_x="2" text_y="1" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness/hdr_peak_nits_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness/labels" string_index="8" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness/hdr_peak_nits_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="SYSTEM|200 NITS|300 NITS|400 NITS|500 NITS|600 NITS|700 NITS|800 NITS|900 NITS|1000 NITS|1250 NITS|1500 NITS|1750 NITS|2000 NITS|2500 NITS|3000 NITS|4000 NITS" setting="display.hdr_peak_nits" values="0|200|300|400|500|600|700|800|900|1000|1250|1500|1750|2000|2500|3000|4000" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
+		<on event="created" run="port setting load"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness/section_9" width="344" height="18" bitmap="main_menu/settings/section" platform="hdr" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness/section_9_title"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness/section_9_title" type="text" controller="1" width="344" height="18" wide="0 244" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness/labels" string_index="9" color="#FF6F9CD0" text_x="2" text_y="1" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness/op_hdr_display" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="hdr" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness/hdr_display_label"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness/hdr_display_value" x="188" y="2"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness/hdr_display_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness/labels" string_index="9" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness/hdr_display_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness/labels" string_index="10" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness/hdr_display_value" type="text" controller="1" width="140" height="16" color="#FF2896FF" align="center" text_y="-1" text_flags="no_focus_test" wide="20 120" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
@@ -170,6 +180,7 @@
 		<string text="PAPER WHITE"/>
 		<string text="UI BRIGHTNESS"/>
 		<string text="SDR CURVE"/>
+		<string text="PEAK BRIGHTNESS"/>
 		<string text="DISPLAY"/>
 		<string text="DISPLAY PEAK"/>
 	</strings>
@@ -183,6 +194,7 @@
 		<string text="With HDR, how bright white surfaces and the HUD are, in nits. System matches your system's SDR brightness. Raise it in a bright room."/>
 		<string text="With HDR, how bright the HUD and the menus are, in nits, apart from the picture. Paper White keeps them where paper white is. The HUD's glows stay as far above it."/>
 		<string text="With HDR, how dark the darkest shadows are: the curve an SDR display shows them by. 2.2 is most PC monitors' and TVs', darker; sRGB is a Mac's. Auto picks sRGB on a Mac, 2.2 elsewhere."/>
+		<string text="With HDR, the brightest your display shows, in nits, for a display that reports a wrong peak. System uses the one it reports. Only the highlights change."/>
 		<string text=""/>
 		<string text="The brightest the display shows, and its SDR white, as the system reports them."/>
 	</strings>
