@@ -139,3 +139,28 @@ def test_old_keyboards_gone_control():
     problems = old_keyboard_problems(sources)
     assert any("player_ui.c" in problem for problem in problems), problems
     assert any("chat_lobby_input_begin" in problem for problem in problems), problems
+
+
+def help_fit_problems(glue):
+    """The prompts' help line made to fit its room: each list of its forms ends with none, and the first that fits
+    the room left of CANCEL is shown; the footer's CANCEL and DONE the prompts' buttons, B and Start."""
+    prompts = function(glue, "keyboard_draw_prompts")
+    problems = []
+    for name in ("system_help", "keys_help", "pad_help"):
+        forms = re.search(name + r"\[\] =\s*\{(.*?)\};", prompts, re.S)
+        if not forms or not forms.group(1).strip().rstrip(",").endswith('L""'):
+            problems.append(f"{name} has no empty last form")
+    if "keyboard_width(keyboard.small_font, help) > room" not in prompts:
+        problems.append("the help is not measured against its room")
+    if 'L"%b-button CANCEL"' not in prompts or 'L"%start-button DONE"' not in prompts:
+        problems.append("CANCEL and DONE are not B's and Start's")
+    return problems
+
+
+def test_help_fits():
+    assert help_fit_problems(read(GLUE)) == []
+
+
+def test_help_fits_control():
+    glue = read(GLUE).replace("keyboard_width(keyboard.small_font, help) > room", "0", 1)
+    assert help_fit_problems(glue)

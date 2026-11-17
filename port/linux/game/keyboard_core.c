@@ -50,8 +50,7 @@ struct keyboard_layout const keyboard_layouts[] =
 					LETTER('k'), LETTER('l') } },
 				{ 0, 9, { WIDE(KEYBOARD_KEY_SHIFT, 15, "SHIFT"), LETTER('z'), LETTER('x'), LETTER('c'), LETTER('v'),
 					LETTER('b'), LETTER('n'), LETTER('m'), WIDE(KEYBOARD_KEY_BACKSPACE, 15, "DEL") } },
-				{ 0, 5, { PAGE(15, 1, "?123"), SIGN(','), WIDE(KEYBOARD_KEY_SPACE, 50, "SPACE"), SIGN('.'),
-					WIDE(KEYBOARD_KEY_DONE, 15, "DONE") } },
+				{ 0, 4, { PAGE(15, 1, "?123"), SIGN(','), WIDE(KEYBOARD_KEY_SPACE, 65, "SPACE"), SIGN('.') } },
 			} },
 			/* the signs: every one of ASCII's but "|", the game's text's own mark */
 			{ {
@@ -62,8 +61,7 @@ struct keyboard_layout const keyboard_layouts[] =
 					SIGN(';'), SIGN(':') } },
 				{ 0, 9, { SIGN('\''), SIGN('"'), SIGN('<'), SIGN('>'), SIGN('/'), SIGN('\\'), SIGN('`'), SIGN('~'),
 					WIDE(KEYBOARD_KEY_BACKSPACE, 20, "DEL") } },
-				{ 0, 6, { PAGE(15, 0, "ABC"), SIGN(','), WIDE(KEYBOARD_KEY_SPACE, 40, "SPACE"), SIGN('.'), SIGN('?'),
-					WIDE(KEYBOARD_KEY_DONE, 15, "DONE") } },
+				{ 0, 5, { PAGE(15, 0, "ABC"), SIGN(','), WIDE(KEYBOARD_KEY_SPACE, 55, "SPACE"), SIGN('.'), SIGN('?') } },
 			} },
 		},
 	},

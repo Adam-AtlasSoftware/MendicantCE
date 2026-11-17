@@ -670,7 +670,9 @@ block and reads its input itself; its rules are `keyboard_core.c`'s.
   draws; left and right (or the pointer) choose, letting go types.
 - X deletes (held, again and again), Y is a space, LB and RB move the cursor,
   Start (Menu) is done, B cancels (the accents first), the left stick's click
-  is shift; the prompts show the controller's own buttons. The computer's
+  is shift; the prompts show the controller's own buttons (CANCEL and DONE,
+  B's and Start's, are the footer's buttons, a click's too: no key repeats
+  them), the help beside them its first form that fits. The computer's
   keys type into it, Enter done and Esc cancel.
 - It is in the middle of the menus' 640 by 480 (past 4:3 the room either side
   is margins), with bigger keys where the Steam Deck's controls play; phones

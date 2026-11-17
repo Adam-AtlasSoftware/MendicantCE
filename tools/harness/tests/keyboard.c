@@ -219,7 +219,8 @@ int main(int argc, char **argv)
 				}
 				CHECK(width <= KEYBOARD_ROW_WIDTH, "page %d row %d is %d wide", page, row, width);
 			}
-			CHECK(done == 1 && pages == 1 && backspaces == 1 && spaces == 1, "page %d's own keys", page);
+			/* (DONE is the prompts' alone, with Start: no key of it as well) */
+			CHECK(done == 0 && pages == 1 && backspaces == 1 && spaces == 1, "page %d's own keys", page);
 		}
 		for (character = '!'; character <= '~'; character++)
 		{
@@ -249,7 +250,7 @@ int main(int argc, char **argv)
 		keyboard_move(&keyboard.state, 0, 1);
 		CHECK(keyboard.state.row == 4 && keyboard.state.column == 2, "down to SPACE: %d", keyboard.state.column);
 		keyboard_move(&keyboard.state, 0, 1);
-		CHECK(keyboard.state.row == 0 && keyboard.state.column == 4, "round the rows, under SPACE: %d",
+		CHECK(keyboard.state.row == 0 && keyboard.state.column == 5, "round the rows, under SPACE: %d",
 			keyboard.state.column);
 		keyboard.state.column = 0;
 		keyboard_move(&keyboard.state, -1, 0);

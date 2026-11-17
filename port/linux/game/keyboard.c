@@ -965,10 +965,23 @@ static void keyboard_draw_prompts(real x, real y)
 	boolean keys = halo_keyboard_prompts() != 0 || keyboard.system;
 	short top = geometry->prompts_y, bottom = (short)(geometry->prompts_y + 22);
 	short right = (short)(geometry->left + geometry->width - (geometry->keys_x - geometry->left));
-	wchar_t const *help = keyboard.system ? L"Type with your keyboard" :
-		keys ? L"Hold or right-click a letter for accents" :
-		L"%x-button DELETE  %y-button SPACE  %white-button %black-button CURSOR  HOLD %a-button ACCENTS";
+	/* (the help, its shorter forms after it: the first that fits its room is
+	shown, measured with its buttons' codes as words, wider than their
+	pictures, so it fits whatever their family) */
+	static wchar_t const *const system_help[] = { L"Type with your keyboard", L"" };
+	static wchar_t const *const keys_help[] =
+		{ L"Hold or right-click a letter for accents", L"Right-click a letter for accents", L"" };
+	static wchar_t const *const pad_help[] =
+	{
+		L"%x-button DELETE  %y-button SPACE  %white-button %black-button CURSOR  HOLD %a-button ACCENTS",
+		L"%x-button DELETE  %y-button SPACE  %white-button %black-button CURSOR",
+		L"%x-button DELETE  %y-button SPACE",
+		L"",
+	};
+	wchar_t const *const *helps = keyboard.system ? system_help : keys ? keys_help : pad_help;
+	wchar_t const *help;
 	short width = (short)(keyboard.large ? 112 : 100);
+	short room;
 
 	keyboard.done_box.x1 = right;
 	keyboard.done_box.x0 = (short)(right - width);
@@ -976,6 +989,9 @@ static void keyboard_draw_prompts(real x, real y)
 	keyboard.cancel_box.x0 = (short)(keyboard.cancel_box.x1 - width);
 	keyboard.done_box.y0 = keyboard.cancel_box.y0 = top;
 	keyboard.done_box.y1 = keyboard.cancel_box.y1 = bottom;
+	room = (short)(keyboard.cancel_box.x0 - 8 - geometry->keys_x);
+	for (help = *helps; help[0] && keyboard_width(keyboard.small_font, help) > room; help = *++helps)
+		;
 	keyboard_words(keyboard.small_font, 0xFFCFE3FFUL, 0, x + geometry->keys_x, y + top,
 		x + keyboard.cancel_box.x0 - 8, y + bottom, help, !keys);
 	menu_shape_rounded_box(x + keyboard.cancel_box.x0, y + top, x + keyboard.cancel_box.x1, y + bottom, 6.0f, 1.5f,
