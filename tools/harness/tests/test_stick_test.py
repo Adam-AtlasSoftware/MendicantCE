@@ -183,6 +183,11 @@ def _layout_problems(screen_text):
     # (the longest reading in its value's box, at the small font's size: the screen draws it unscaled)
     if port_settings.small_ui_width(LONGEST) > sizes["screens/stick_value"][0]:
         problems.append(f"{LONGEST!r} does not fit")
+    # (and each hint on its one line: its box is not wrapped)
+    for stick in ElementTree.fromstring(screen_text).iter("stick"):
+        hint = stick.get("hint", "")
+        if port_settings.small_ui_width(hint) > sizes["screens/stick_hint"][0]:
+            problems.append(f"the hint {hint!r} does not fit its line")
     return problems
 
 
@@ -191,6 +196,6 @@ def test_screen_fits():
 
 
 def test_fit_check_sees_too_big_a_circle():
-    """negative control: a circle wider than its column, and its foot in the bar, fail"""
-    text = SCREEN.read_text().replace('radius="88"', 'radius="120"', 1)
+    """negative control: a circle wider than its column fails"""
+    text = SCREEN.read_text().replace('radius="88"', 'radius="130"', 1)
     assert _layout_problems(text)

@@ -7,8 +7,8 @@ engine draws: its dead zones (round, or square for each direction's own), the st
 takes a blue one. -->
 <screen name="stick_test">
 	<header title="STICK TEST"/>
-	<stick id="left" label="LEFT STICK" value="{stick.left}" detail="DRIFT AT REST {stick.left.drift}" x="176" y="92" radius="88" hint="White: the stick. Blue: what the game takes, after the bar."/>
-	<stick id="right" label="RIGHT STICK" value="{stick.right}" detail="DRIFT AT REST {stick.right.drift}" x="464" y="92" radius="88" hint="Set a stick's dead zone a little past its drift, on Advanced Stick Settings."/>
+	<stick id="left" label="LEFT STICK" value="{stick.left}" detail="DRIFT AT REST {stick.left.drift}" x="176" y="92" radius="88" hint="White: the stick. Blue: the game's."/>
+	<stick id="right" label="RIGHT STICK" value="{stick.right}" detail="DRIFT AT REST {stick.right.drift}" x="464" y="92" radius="88" hint="Set dead zones just past the drift."/>
 	<space/>
 	<buttons>
 		<button key="back" label="BACK"/>

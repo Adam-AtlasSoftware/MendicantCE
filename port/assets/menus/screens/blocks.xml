@@ -386,5 +386,5 @@ picture, the line, the words for no rows) -->
 	<widget name="screens/stick" width="16" height="16"/>
 	<widget name="screens/stick_value" type="text" width="240" height="16" font="ui\small_ui" color="#FFFFFFFF" align="center" text_flags="no_focus_test"/>
 	<widget name="screens/stick_note" type="text" width="240" height="16" font="ui\small_ui" color="#FF2896FF" align="center" text_flags="no_focus_test"/>
-	<widget name="screens/stick_hint" type="text" width="240" height="34" font="ui\small_ui" color="#FF6F9CD0" align="center" text_flags="no_focus_test wrap"/>
+	<widget name="screens/stick_hint" type="text" width="240" height="16" font="ui\small_ui" color="#FF6F9CD0" align="center" text_flags="no_focus_test"/>
 </menus>
