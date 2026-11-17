@@ -90,8 +90,13 @@ void halo_loading_fade_begin(void);
 /* (port/linux/game/menu_pictures_render.c) */
 int menu_pictures_preparing(void);
 
+/* (port/linux/game/speedrun_state.c) */
+void speedrun_state_loading(void);
+
 void halo_loading_begin(void)
 {
+	/* (the speedrun state block's loading flag, whatever is shown) */
+	speedrun_state_loading();
 	/* the menus' pictures' maps: the loading screen of their whole pass
 	stays (halo_loading_screen_begin), the old draws retired all the same */
 	if (menu_pictures_preparing())

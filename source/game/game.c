@@ -196,6 +196,7 @@ struct game_options;
 #include "sim_rate.h" /* port: port/linux/game/sim_rate.c */
 #include "basic_training.h" /* port: port/linux/game/basic_training.c */
 #include "demo.h" /* port: port/linux/game/demo.c */
+#include "speedrun_state.h" /* port: port/linux/game/speedrun_state.c */
 
 /* network_game_globals.c's */
 boolean network_game_distributed_client(void);
@@ -713,6 +714,7 @@ boolean game_load(
 	struct game_options *options)
 {
 	halo_loading_begin(); /* port: keep presentation alive while loading */
+	speedrun_state_map_load(); /* port: port/linux/game/speedrun_state.c */
 #ifdef HALO_PROFILE
 	/* port: the profiling build's recording learns of the map (every map
 	load passes here: main_new_map's and a network game's,

@@ -737,6 +737,7 @@ void vr_death_test_update(void);
 #endif
 #include "server_director.h" /* port: port/linux/game/server_director.c */
 #include "load_zone.h" /* port: port/linux/game/load_zone.c */
+#include "speedrun_state.h" /* port: port/linux/game/speedrun_state.c */
 
 /* ---------- prototypes */
 
@@ -2716,6 +2717,8 @@ static void main_won_map_private(
 	if they did */
 	char next[NUMBEROF(main_script_next_level)];
 
+	/* port: (port/linux/game/speedrun_state.c) */
+	speedrun_state_level_won();
 	csstrncpy(next, main_script_next_level, sizeof(next) - 1);
 	next[sizeof(next) - 1] = 0;
 	main_script_next_level[0] = 0;
@@ -3970,6 +3973,7 @@ void main_loop(
 	boolean loading_game_frame; /* port: only a completed game picture ends loading */
 	boolean frames_unseen; /* port: nobody sees the frames (port/linux/game/unseen_frames.c) */
 	boolean frames_undrawn; /* port: ... and they need not be drawn */
+	long frame_ticks; /* port: the ticks the game ran this frame (speedrun_state.c) */
 
 	if (!game_in_editor())
 	{
@@ -3991,6 +3995,8 @@ void main_loop(
 	while (TRUE)
 	{
 		loading_game_frame = FALSE; /* port: loading presentation is independent of game frames */
+		frame_ticks = 0;
+		frames_undrawn = FALSE;
 		/* port: what follows changes the game as a whole (saves it, loads a
 		saved game, changes the map), between two ticks: with game.sim_rate's
 		sub-steps spread over the frames, not while a tick is open between two
@@ -4328,6 +4334,7 @@ void main_loop(
 
 					profile_scope(main_game_time_update_section,
 						game_time_update((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);)
+					frame_ticks = game_time_get_elapsed();
 
 					render_frame = main_globals.main_menu_scenario_loaded ||
 						(main_globals.halt_time_scale &&
@@ -4409,6 +4416,10 @@ void main_loop(
 		}
 
 		input_frame_end();
+		/* port: the speedrun state block, for timers' autosplitters
+		(port/linux/game/speedrun_state.c) */
+		speedrun_state_frame(frame_ticks, loading_game_frame, frames_undrawn || debug_no_drawing,
+			main_globals.main_menu_scenario_loaded || menu_pictures_preparing());
 		profile_frame_end();
 		main_frame_rate_debug();
 		halo_load_trace_frame(); /* port: debug.load_trace's long frames */
