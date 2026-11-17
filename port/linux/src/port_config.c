@@ -478,6 +478,17 @@ static const struct config_setting config_settings[] =
 		"too: a weapon is back on the map at every multiple of its period on the\n"
 		"clock. In the campaign and co-op it is the mission's timer: the level's\n"
 		"game time, which stops while the game is paused." },
+	{ "display.state_file", _config_boolean, "false", "HALO_STATE_FILE", _environment_value, _platform_all,
+		"Write the game's state to game_state.json in the data root, for stream\n"
+		"overlays and scene switchers: state (loading, menu, cutscene, paused,\n"
+		"playing), map, mode, clock (seconds), and the first player's score,\n"
+		"kills and deaths. Written only when it changes, at most four times a\n"
+		"second, and replaced whole (never half written)." },
+	{ "display.input_display", _config_boolean, "false", "HALO_INPUT_DISPLAY", _environment_value, _platform_all,
+		"Draw each player's input at the bottom right of their view: the move\n"
+		"stick (or W, A, S, D), the look, the fire trigger and the actions held\n"
+		"(grenade, melee, jump, crouch, reload, action, swap, flashlight). In a\n"
+		"demo's playback, the recorded input. Hide HUD hides it." },
 	{ "display.perf_overlay", _config_string, "\"off\"", "HALO_PERF_OVERLAY", _environment_value, _platform_all,
 		"The performance overlay at the bottom right: \"off\"; \"simple\", the\n"
 		"frame rate averaged over half a second, green at 30 and over (the\n"
@@ -1236,6 +1247,11 @@ static const struct config_setting config_settings[] =
 		"what the profile's LOOK SENSITIVITY gives (half its side to side): 1\n"
 		"the original's, 2 twice as fast. The mouse and the gyroscope have\n"
 		"their own.", _scope_player },
+	{ "input.controller_layout_bindings", _config_boolean, "false", "HALO_CONTROLLER_LAYOUT_BINDINGS",
+		_environment_value, _platform_all,
+		"Settings > Controls > Controller > Button Remapping > Controller Layouts'\n"
+		"EXPORT adds the player's Button Remapping buttons to the layout's file\n"
+		"([bindings]). Off by default." },
 	{ "input.invert_look_horizontal", _config_boolean, "false", "HALO_INVERT_LOOK_HORIZONTAL", _environment_value,
 		_platform_all,
 		"A controller's look turns the other way: pushing the stick that looks to\n"
@@ -1450,6 +1466,24 @@ static const struct config_setting config_settings[] =
 		"most 5 GB), which it always keeps free. 730 (Disk Space Saver): the Xbox's\n"
 		"six cache files' room, the least it takes; a map is unpacked as it is\n"
 		"played, and none ahead. A change gives maps up at once." },
+	{ "game.practice_keys", _config_boolean, "false", "HALO_PRACTICE_KEYS", _environment_value, _platform_all,
+		"Practice keys for speedrunners: game.practice_save_key, _load_key and\n"
+		"_restart_key save and load the game's state (core_save, core_load)\n"
+		"and start the level over, in a game of this computer's.\n"
+		"Using one, a cheat, game_speed or a core's load shows a PRACTICE mark\n"
+		"until the level's next fresh start, whatever this is; the speedrun\n"
+		"state block and demos record it too." },
+	{ "game.practice_save_key", _config_string, "\"\"", "HALO_PRACTICE_SAVE_KEY", _environment_value, _platform_all,
+		"Practice: the key (as controls.* name one, \"F5\") that saves the game's\n"
+		"state, as the console's core_save does (game.practice_keys). Unbound\n"
+		"by default." },
+	{ "game.practice_load_key", _config_string, "\"\"", "HALO_PRACTICE_LOAD_KEY", _environment_value, _platform_all,
+		"Practice: the key that loads the state saved, as the console's\n"
+		"core_load does (game.practice_keys). Unbound by default." },
+	{ "game.practice_restart_key", _config_string, "\"\"", "HALO_PRACTICE_RESTART_KEY", _environment_value,
+		_platform_all,
+		"Practice: the key that starts the level over, as the pause menu's\n"
+		"restart does (game.practice_keys). Unbound by default." },
 	{ "game.auto_pickup", _config_boolean, "false", "HALO_AUTO_PICKUP", _environment_value, _platform_all,
 		"Multiplayer: a player with an empty weapon slot picks up a weapon by\n"
 		"walking over it, as Custom Edition does. false (the Xbox's way): they\n"
@@ -2987,6 +3021,11 @@ static const struct config_setting config_settings[] =
 	{ "debug.menu_open", _config_string, "\"\"", "HALO_MENU_OPEN", _environment_value, _platform_all,
 		"Start on this screen of the menus (port/assets/menus) instead of the main\n"
 		"menu, a player profile being edited; empty for the main menu." },
+	{ "debug.controller_layout_guid", _config_string, "\"\"", "HALO_CONTROLLER_LAYOUT_GUID", _environment_value,
+		_platform_all,
+		"Controller Layout describes the controller of this SDL GUID (32 hex\n"
+		"digits) while the player has none connected: for tests and pictures.\n"
+		"Empty for none." },
 	{ "debug.menu_layout", _config_string, "\"\"", "HALO_MENU_LAYOUT", _environment_value, _platform_all,
 		"Write the open menu screen's geometry to this file (in the data root) as\n"
 		"JSON, every 30th frame of the menus: each widget's box, each text's box,\n"
@@ -3117,6 +3156,22 @@ static const struct config_setting config_settings[] =
 		"its thread and the render thread were (sampled every 10 ms while it\n"
 		"lasts) and the work in progress, once the frame comes; and count such\n"
 		"frames. Read by the host (port/android/host/host_stall.c); 0 never." },
+	{ "debug.demo_perf_log", _config_boolean, "false", "HALO_DEMO_PERF_LOG", _environment_value, _platform_all,
+		"Beside each demo recorded, write a performance log, demos/<name>.perf:\n"
+		"a line for each frame with the demo's tick, the frame's, the game\n"
+		"thread's CPU, the GPU's, the render thread's and the wait's\n"
+		"microseconds; stalls, loads and pipelines built as events; and a\n"
+		"summary every 10 seconds (the average, 1% and 0.1% lows). The demo\n"
+		"itself is unchanged (port/linux/src/report.c; tools/demo_info.py\n"
+		"--perf joins them)." },
+	{ "debug.timings", _config_boolean, "false", "HALO_TIMINGS", _environment_value, _platform_all,
+		"Time the game's CPU sections (the original's profile_enter sections\n"
+		"and the port's: input, AI, objects, effects, scripts, present...) from\n"
+		"the next frame on, and show the busiest, the counts of objects,\n"
+		"effects, particles and pipelines and, with Vulkan, each setting's\n"
+		"passes on the GPU in the performance overlay's detailed view. Off,\n"
+		"nothing is timed. With Vulkan it times the passes every 10 frames\n"
+		"from the next start where debug.pass_times is 0." },
 	{ "debug.pass_times", _config_integer, "0", "HALO_PASS_TIMES", _environment_value, _platform_all,
 		"Every this many frames, time each of the frame's passes on the GPU and\n"
 		"log, every 30 timed frames, each kind of pass's milliseconds a frame and\n"

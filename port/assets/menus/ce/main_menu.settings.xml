@@ -153,6 +153,7 @@
 		<string text="ADVANCED GRAPHICS"/>
 		<string text="BRIGHTNESS"/>
 		<string text="FRAME RATE &amp; SYNC"/>
+		<string text="PERFORMANCE TOOLS"/>
 		<string text="FIRST PERSON"/>
 		<string text="WEAPON POSITION"/>
 		<string text="WEAPON &amp; BODY"/>
@@ -163,9 +164,11 @@
 		<string text="ADVANCED STICK SETTINGS"/>
 		<string text="SCREEN LAYOUT"/>
 		<string text="GAMEPLAY"/>
+		<string text="STREAMING &amp; SPEEDRUN"/>
 		<string text="STREAMER MODE"/>
 		<string text="FILTERS"/>
 		<string text="CONTROLLER BUTTONS"/>
+		<string text="CONTROLLER LAYOUTS"/>
 		<string text="MCC PACKAGES"/>
 		<string text="DISCORD ACCOUNT"/>
 	</strings>

@@ -138,6 +138,17 @@ enum
 /* every stage's texture looked at again (stream.textures_dirty) */
 #define TEXTURES_ALL 15u
 
+/* (debug.pass_times, the performance overlay) the graphics settings whose
+passes are labeled by them (xgpu_vulkan_pass_owner): display.anti_aliasing
+(FXAA, SMAA, MSAA's resolve), display.panini, display.ambient_occlusion's
+pre-pass, and the frame's last pass (its composition, encoding, present) */
+#define PASS_OWNER_FXAA "FXAA"
+#define PASS_OWNER_SMAA "SMAA"
+#define PASS_OWNER_MSAA_RESOLVE "MSAA RESOLVE"
+#define PASS_OWNER_PANINI "PANINI"
+#define PASS_OWNER_AO "AO"
+#define PASS_OWNER_FINAL "FINAL PASS"
+
 struct stream_target
 {
 	struct xgpu_vulkan_image *image;
@@ -705,7 +716,11 @@ static void stream_target_multisample(void *context, const struct xgpu_stream_ta
 static void stream_target_resolve(void *context, uint32_t number)
 {
 	(void)context;
+	/* (debug.pass_times: display.anti_aliasing's MSAA, its resolve where
+	it is no part of the pass before it) */
+	xgpu_vulkan_pass_owner(PASS_OWNER_MSAA_RESOLVE);
 	target_resolve(target_get(number));
+	xgpu_vulkan_pass_owner(NULL);
 }
 
 /* the images draws go to: the targets' multisampled attachments where the
@@ -3069,7 +3084,9 @@ static void stream_anti_alias(void *context, const struct xgpu_stream_anti_alias
 	if (target->multisampled)
 		return;
 	target->written++;
+	xgpu_vulkan_pass_owner(record->smaa ? PASS_OWNER_SMAA : PASS_OWNER_FXAA);
 	xgpu_vulkan_post_anti_alias(record->smaa != 0, target->image, 0, record->corners);
+	xgpu_vulkan_pass_owner(NULL);
 	/* (the stream's targets again, for what follows) */
 	targets_bind();
 }
@@ -3096,11 +3113,13 @@ static void stream_panini(void *context, const struct xgpu_stream_panini *record
 		(void)xgpu_vulkan_post_panini_prepare(target->format, xgpu_vulkan_image_description(into)->samples, 1);
 		return;
 	}
+	xgpu_vulkan_pass_owner(PASS_OWNER_PANINI);
 	target_resolve(target);
 	target->written++;
 	if (xgpu_vulkan_post_panini(target->image, into, 0, record->corners, record->projection) &&
 		into == target->multisampled)
 		target->unresolved = 1;
+	xgpu_vulkan_pass_owner(NULL);
 	/* (the stream's targets again, for what follows) */
 	targets_bind();
 }
@@ -3406,6 +3425,8 @@ static void stream_world_ao_prepass(void *context, const struct xgpu_stream_worl
 		xgpu_vulkan_world_ao_set_pixels(NULL);
 		if (!target || !prepass_shaders() || !prepass_tables())
 			return;
+		/* (debug.pass_times: the pre-pass's draws and its pass, to the END) */
+		xgpu_vulkan_pass_owner(PASS_OWNER_AO);
 		prepass.inputs = prepass_image(prepass.inputs, XGPU_VULKAN_FORMAT_RGBA32_UINT, target->width, target->height);
 		prepass.depth = prepass_image(prepass.depth, XGPU_VULKAN_FORMAT_D24S8, target->width, target->height);
 		if (!prepass.inputs || !prepass.depth)
@@ -3482,6 +3503,7 @@ static void stream_world_ao_prepass(void *context, const struct xgpu_stream_worl
 				xgpu_vulkan_world_ao_set_pixels(prepass.pixels);
 			}
 		}
+		xgpu_vulkan_pass_owner(NULL);
 		targets_bind();
 		return;
 	}
@@ -3489,6 +3511,7 @@ static void stream_world_ao_prepass(void *context, const struct xgpu_stream_worl
 	if (prepass.active)
 	{
 		prepass.active = 0;
+		xgpu_vulkan_pass_owner(NULL);
 		targets_bind();
 	}
 	xgpu_vulkan_world_ao_set_pixels(NULL);
@@ -3636,7 +3659,10 @@ static void stream_frame_end(void *context)
 	(void)context;
 	world_make_some();
 	prepass.twins_made = 0;
+	xgpu_vulkan_pass_owner(PASS_OWNER_MSAA_RESOLVE);
 	target_resolve(back_buffer);
+	/* (debug.pass_times: the frame's composition, encoding and present) */
+	xgpu_vulkan_pass_owner(PASS_OWNER_FINAL);
 #ifdef HALO_VR
 	/* (the headset shows the frames: the window, hidden, is not presented
 	to, which could wait for a display that never takes a frame) */
@@ -3647,6 +3673,7 @@ static void stream_frame_end(void *context)
 	}
 #endif
 	xgpu_vulkan_frame_end(back_buffer ? back_buffer->image : NULL, present_window);
+	xgpu_vulkan_pass_owner(NULL);
 	/* (debug.load_trace: each frame's end on the render thread, whose
 	spacing tools/load_benchmark.py reads as the frames' times after a load) */
 	if (stream.trace_frames)

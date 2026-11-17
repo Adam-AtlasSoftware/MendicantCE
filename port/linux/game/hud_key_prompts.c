@@ -87,6 +87,8 @@ void hud_key_prompt_action_name(short action, char *name, long size);
 boolean hud_key_prompt_draw(short local_player_index, short game_control, short gamepad_button,
 	rectangle2d *bounds, rectangle2d *cursor, pixel32 color);
 boolean hud_key_prompt_draw_key(char const *name, rectangle2d *bounds, rectangle2d *cursor, pixel32 color);
+boolean hud_key_prompt_draw_symbol(wchar_t const *legend, rectangle2d *bounds, rectangle2d *cursor, pixel32 color,
+	unsigned long fill, unsigned long legend_color, boolean round);
 short hud_key_prompt_cap_advance(short name_left, short name_right);
 short hud_key_prompt_legend_advance(short name_left, short name_right, wchar_t const *words);
 long hud_key_prompt_draw_equals(rectangle2d *bounds, rectangle2d *cursor, wchar_t const *text);
@@ -239,6 +241,14 @@ curves' edges blended over a pixel. The box is drawn whole pixels wide and
 high, its middle at the nearest half pixel to its own, so that what it is
 centred on (its name's letters, their capitals) is in its middle at any
 resolution */
+/* port: a controller layout's symbol being drawn (hud_key_prompt_draw_symbol):
+a key cap of its fill, its legend in its own colour, round or square; FALSE
+for a key's */
+static boolean key_cap_symbol;
+static boolean key_cap_symbol_round;
+static pixel32 key_cap_symbol_fill;
+static pixel32 key_cap_symbol_legend;
+
 static void key_cap_shape(real box_x0, real box_y0, real box_x1, real box_y1, pixel32 fill, pixel32 color)
 {
 	real text_scale, origin_x, origin_y, pixels, size;
@@ -255,7 +265,8 @@ static void key_cap_shape(real box_x0, real box_y0, real box_x1, real box_y1, pi
 	x0 = floorf(middle_x - width * 0.5f + 0.5f);
 	y0 = floorf(middle_y - height * 0.5f + 0.5f);
 	size = (local_player_count() > 1 ? 0.75f : 1.0f) * text_scale * pixels;
-	menu_shape_rounded_box_pixels(x0, y0, x0 + width, y0 + height, floorf(KEY_CAP_RADIUS * size + 0.5f),
+	menu_shape_rounded_box_pixels(x0, y0, x0 + width, y0 + height,
+		key_cap_symbol && key_cap_symbol_round ? floorf(height * 0.5f) : floorf(KEY_CAP_RADIUS * size + 0.5f),
 		MAX(floorf(KEY_CAP_EDGE * size + 0.5f), 1.0f), fill, color);
 }
 
@@ -421,10 +432,25 @@ static boolean key_cap_draw(wchar_t const *text, rectangle2d *bounds, rectangle2
 	middle = draw_unicode_string_capital_middle(cursor, L"");
 	capitals_middle = (real)middle + (draw_string_capital_height() % 2 ? 0.5f : 0.0f);
 	fill = ((pixel32)((color >> 24) * 3 / 10) << 24) | (color & 0x00FFFFFFUL);
+	if (key_cap_symbol)
+		fill = (color & 0xFF000000UL) | (key_cap_symbol_fill & 0x00FFFFFFUL);
 	key_cap_shape(ink_middle - (real)(box_x1 - box_x0) * 0.5f, capitals_middle - ((real)half - 0.5f),
 		ink_middle + (real)(box_x1 - box_x0) * 0.5f, capitals_middle + ((real)half - 0.5f), fill, color);
 	text_bounds.x0 = bounds->x0;
-	rasterizer_draw_unicode_string(&text_bounds, NULL, NULL, 0, text);
+	if (key_cap_symbol)
+	{
+		/* (a symbol's legend in its own colour, black or white on its fill:
+		controller_layout_legend_color) */
+		real_argb_color saved, legend;
+
+		draw_string_get_color(&saved);
+		pixel32_to_real_argb_color((color & 0xFF000000UL) | (key_cap_symbol_legend & 0x00FFFFFFUL), &legend);
+		draw_string_set_color(&legend);
+		rasterizer_draw_unicode_string(&text_bounds, NULL, NULL, 0, text);
+		draw_string_set_color(&saved);
+	}
+	else
+		rasterizer_draw_unicode_string(&text_bounds, NULL, NULL, 0, text);
 	bounds->y0 = cursor->y0;
 	/* (the text that follows starts past the cap and its gap) */
 	cursor->x0 = (short)(start + after);
@@ -700,6 +726,31 @@ boolean hud_key_prompt_draw_back_cap(
 	latin1_to_wide(hud_key_prompt_back_name(controller_button_style_family(controller_button_style_for_port(0))),
 		text, NUMBEROF(text));
 	return key_cap_draw(text, bounds, cursor, color);
+}
+
+/* port: a controller layout's symbol (#1143: an extra button a player
+described, port/linux/include/controller_layouts.h) at the cursor, as a key's
+cap is drawn: its legend in a cap of its fill (the prompt's opacity), round or
+square, edged in the prompt's colour, its legend black or white on it; the
+cursor moved past it */
+boolean hud_key_prompt_draw_symbol(
+	wchar_t const *legend,
+	rectangle2d *bounds,
+	rectangle2d *cursor,
+	pixel32 color,
+	unsigned long fill,
+	unsigned long legend_color,
+	boolean round)
+{
+	boolean drawn;
+
+	key_cap_symbol = TRUE;
+	key_cap_symbol_round = round;
+	key_cap_symbol_fill = (pixel32)fill;
+	key_cap_symbol_legend = (pixel32)legend_color;
+	drawn = key_cap_draw(legend, bounds, cursor, color);
+	key_cap_symbol = FALSE;
+	return drawn;
 }
 
 /* the menus' key of their own (Settings' tabs' Q and E for LB and RB:

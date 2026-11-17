@@ -197,6 +197,7 @@ struct game_options;
 #include "basic_training.h" /* port: port/linux/game/basic_training.c */
 #include "demo.h" /* port: port/linux/game/demo.c */
 #include "speedrun_state.h" /* port: port/linux/game/speedrun_state.c */
+#include "practice.h" /* port: port/linux/game/practice.c */
 
 /* network_game_globals.c's */
 boolean network_game_distributed_client(void);
@@ -818,6 +819,9 @@ void game_initialize_for_new_map(
 	hs_initialize_for_new_map();
 	recorded_animations_initialize_for_new_map();
 	cheats_initialize_for_new_map();
+	/* port: a fresh start of the level ends the PRACTICE mark
+	(port/linux/game/practice.c) */
+	practice_new_level();
 	/* port: no hijack under way (port/linux/game/vehicle_hijack.c) */
 	vehicle_hijack_reset();
 

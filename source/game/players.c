@@ -241,6 +241,7 @@ symbols in this file:
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
 #include "bots.h" /* port: port/linux/game/bots.c */
 #include "demo.h" /* port: port/linux/game/demo.c */
+#include "input_display.h" /* port: port/linux/game/input_display.c */
 #include "vehicle_hijack.h" /* port: port/linux/game/vehicle_hijack.c */
 #include "server_team_switch.h" /* port: port/linux/game/server_team_switch.c */
 #include "cutscene/cinematics.h" /* port: network co-op's first spawns */
@@ -5101,6 +5102,9 @@ void players_update_before_game(
 	{
 		/* port: debug.play_log (port/linux/game/play_log.c) */
 		play_log_tick(actions);
+		/* port: display.input_display, the tick's input as taken (a demo's
+		playback's recorded one too: port/linux/game/input_display.c) */
+		input_display_tick(actions, NETWORK_GAME_MAXIMUM_PLAYER_COUNT);
 		data_iterator_new(&iterator, player_data);
 		while (player = data_iterator_next(&iterator))
 		{

@@ -5041,10 +5041,17 @@ void draw_string_and_hack_in_icons(
 			}
 			/* port: an action the player's layout leaves without a button
 			(input.controller_p1 to p4) says so, as the HUD's prompts do,
-			and one on a back paddle names it (controller_remap_prompt_text) */
+			and one on a back paddle names it (controller_remap_prompt_text),
+			or draws its symbol where the controller's layout describes it
+			(#1143) */
 			if (remapped_icon_type > _icon_right_stick && remapped_icon_type <= _icon_accept &&
 				controller_remap_prompt_text(local_player_index_for_draw_string_and_hack_in_icons, icon_index))
 			{
+				if (controller_glyph_layout_draw(local_player_index_for_draw_string_and_hack_in_icons, icon_index,
+					bounds, &cursor_bounds, real_argb_color_to_pixel32(&key_color)))
+				{
+					continue;
+				}
 				render_state_text(bounds, &cursor_bounds,
 					controller_remap_prompt_text(local_player_index_for_draw_string_and_hack_in_icons, icon_index));
 				continue;

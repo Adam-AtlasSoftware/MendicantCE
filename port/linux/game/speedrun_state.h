@@ -76,7 +76,11 @@ enum
 	/* the map played is a Custom Edition map */
 	SPEEDRUN_STATE_SETTING_CUSTOM_EDITION_MAP = 1 << 4,
 	/* the map played is an MCC map */
-	SPEEDRUN_STATE_SETTING_MCC_MAP = 1 << 5
+	SPEEDRUN_STATE_SETTING_MCC_MAP = 1 << 5,
+	/* the PRACTICE mark is on (practice.c: a practice key, a cheat,
+	game_speed, a core's load or a skipped cutscene used since the level's
+	fresh start), set and cleared each frame, not only as a map begins */
+	SPEEDRUN_STATE_SETTING_PRACTICE = 1 << 6
 };
 
 /* ---------- structures */
@@ -115,5 +119,8 @@ void speedrun_state_loading(void);
 void speedrun_state_map_load(void);
 /* a level won (main_won_map_private) */
 void speedrun_state_level_won(void);
+/* the block as the last frame left it, for the game's own readers of its
+fields (stream_state.c), which only read it */
+struct speedrun_state const *speedrun_state_get(void);
 
 #endif

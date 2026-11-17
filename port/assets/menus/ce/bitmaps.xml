@@ -368,6 +368,9 @@
 	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_buttons/header_controller_buttons">
 		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_buttons/header_controller_buttons.png" width="512" height="64"/>
 	</bitmap>
+	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/header_controller_layouts">
+		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/header_controller_layouts.png" width="512" height="64"/>
+	</bitmap>
 	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/header_button_remapping">
 		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/header_button_remapping.png" width="512" height="64"/>
 	</bitmap>
@@ -382,6 +385,9 @@
 	</bitmap>
 	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/interface_settings/streamer_mode/header_streamer_mode">
 		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/interface_settings/streamer_mode/header_streamer_mode.png" width="512" height="64"/>
+	</bitmap>
+	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/interface_settings/streaming/header_streaming">
+		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/interface_settings/streaming/header_streaming.png" width="512" height="64"/>
 	</bitmap>
 	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/network_setup/discord_account/header_discord_account">
 		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/network_setup/discord_account/header_discord_account.png" width="512" height="64"/>
@@ -409,6 +415,9 @@
 	</bitmap>
 	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/header_frame_rate">
 		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/header_frame_rate.png" width="512" height="64"/>
+	</bitmap>
+	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/performance_tools/header_performance_tools">
+		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/performance_tools/header_performance_tools.png" width="512" height="64"/>
 	</bitmap>
 	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/screen_layout/header_screen_layout">
 		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/video_settings/screen_layout/header_screen_layout.png" width="512" height="64"/>

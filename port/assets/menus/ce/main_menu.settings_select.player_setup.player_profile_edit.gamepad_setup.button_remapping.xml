@@ -25,6 +25,7 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/op_pad_6" x="28" y="273"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/section_10" x="28" y="300"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/op_controller_buttons" x="28" y="320"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/op_controller_layouts" x="28" y="341"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/button_bar" y="414"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/button_bar" type="column_list" width="640" height="28" flags="pass_unhandled_to_focused_child left_right_tabs_items" source="tools/port_settings.py settings_files/_settings_page">
@@ -202,6 +203,14 @@
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_buttons_label" type="text" controller="1" width="332" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/labels" string_index="11" color="#FF2896FF" text_x="10" text_y="1" wide="0 244" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/op_controller_layouts" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<on event="a" open="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/controller_layouts_screen"/>
+		<on event="start" open="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/controller_layouts_screen"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts_label"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts_label" type="text" controller="1" width="332" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/labels" string_index="12" color="#FF2896FF" text_x="10" text_y="1" wide="0 244" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/labels">
 		<string text="LAYOUT"/>
 		<string text="PLAYER"/>
@@ -215,6 +224,7 @@
 		<string text=""/>
 		<string text="BUTTON PICTURES"/>
 		<string text="CONTROLLER BUTTONS ›"/>
+		<string text="CONTROLLER LAYOUTS ›"/>
 	</strings>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/help_strings">
 		<string text=""/>
@@ -230,5 +240,6 @@
 		<string text=""/>
 		<string text=""/>
 		<string text="The HUD's buttons drawn as your controller has them, Xbox, PlayStation or Switch, and the style of each."/>
+		<string text="Name your controller's paddles and extra buttons and give each a symbol, which the prompts then draw in place of words like P3."/>
 	</strings>
 </menus>

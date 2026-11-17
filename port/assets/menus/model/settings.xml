@@ -355,10 +355,8 @@
 			<choice shown="LARGE" value="large"/>
 			<choice shown="OFF" value="off"/>
 		</row>
-		<row key="match_timer" kind="choice" setting="display.match_timer" label="MATCH TIMER" crumb="INTERFACE › HUD">
-			<help>Draws a clock at the bottom right: in multiplayer the game's, counting up from its start; in the campaign and co-op the mission's, which stops while the game is paused.</help>
-			<choice shown="ON" value="true"/>
-			<choice shown="OFF" value="false"/>
+		<row key="streaming_speedrun" kind="link" label="STREAMING &amp; SPEEDRUN ›" crumb="INTERFACE › HUD" open="main_menu/settings_select/player_setup/player_profile_edit/interface_settings/streaming/streaming_screen">
+			<help>A state file for stream overlays, an on-screen input display, the match timer, and practice keys for speedrunners.</help>
 		</row>
 		<section key="section_5" title="MULTIPLAYER"/>
 		<row key="player_names" kind="choice" setting="display.player_names" label="PLAYER NAMES" crumb="INTERFACE › MULTIPLAYER" search_choices="all allies enemies">
@@ -765,11 +763,8 @@
 			<choice shown="ON" value="on"/>
 			<choice shown="OFF" value="off"/>
 		</row>
-		<row key="perf_overlay" kind="choice" setting="display.perf_overlay" label="PERFORMANCE OVERLAY" crumb="VIDEO › FRAME RATE &amp; SYNC" search="fps framerate frametime gpu stats" search_choices="simple detailed">
-			<help>Shows how the game runs, at the bottom right. Simple is the frame rate: green is 30 or more, red under 30. Detailed adds the frame time, the 1% low, and the milliseconds spent on the GPU, the render thread, the game and waiting for the display.</help>
-			<choice shown="OFF" value="off"/>
-			<choice shown="SIMPLE" value="simple"/>
-			<choice shown="DETAILED" value="detailed"/>
+		<row key="performance_tools" kind="link" label="PERFORMANCE TOOLS ›" crumb="VIDEO › FRAME RATE &amp; SYNC" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/performance_tools/performance_tools_screen">
+			<help>The performance overlay, and timings and logs of where each frame's time goes, for finding what slows the game down.</help>
 		</row>
 		<section key="section_6" title="BENCHMARK"/>
 		<row key="benchmark_pacing" kind="choice" setting="display.benchmark_pacing" label="BENCHMARK PACING" crumb="VIDEO › FRAME RATE &amp; SYNC" search_choices="uncapped your settings" when="!in_game">
@@ -780,6 +775,28 @@
 		<row key="benchmark" kind="link" label="RUN BENCHMARK" crumb="VIDEO › FRAME RATE &amp; SYNC" when="!in_game" run="port settings benchmark">
 			<help>Plays a fixed minute of Blood Gulch with 40 bots, then shows the average frame rate, the 1% low, the frame times, the GPU and CPU time and your settings, and saves them in the benchmarks folder.</help>
 			<note>From the main menu only.</note>
+		</row>
+		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
+		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>
+		<button key="button_cancel" kind="cancel" run="port settings page cancel" help="Goes back without these changes."/>
+	</screen>
+	<screen name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/performance_tools/performance_tools_screen" kind="settings" layout="page" geometry="tall" title="PERFORMANCE TOOLS">
+		<row key="perf_overlay" kind="choice" setting="display.perf_overlay" label="PERFORMANCE OVERLAY" crumb="VIDEO › FRAME RATE &amp; SYNC › PERFORMANCE TOOLS" search="fps framerate frametime gpu stats" search_choices="simple detailed">
+			<help>Shows how the game runs, at the bottom right. Simple is the frame rate: green is 30 or more, red under 30. Detailed adds the frame time, the 1% low, and the milliseconds spent on the GPU, the render thread, the game and waiting for the display.</help>
+			<choice shown="OFF" value="off"/>
+			<choice shown="SIMPLE" value="simple"/>
+			<choice shown="DETAILED" value="detailed"/>
+		</row>
+		<row key="timings" kind="choice" setting="debug.timings" label="DEVELOPER TIMINGS" crumb="VIDEO › FRAME RATE &amp; SYNC › PERFORMANCE TOOLS">
+			<help>Times the game's own work (AI, objects, effects, scripts...) and, with Vulkan, each graphics setting's passes on the GPU, shown in the Detailed overlay with counts of objects and effects. Off times nothing.</help>
+			<note>The GPU's passes from the next start.</note>
+			<choice shown="ON" value="true"/>
+			<choice shown="OFF" value="false"/>
+		</row>
+		<row key="demo_perf_log" kind="choice" setting="debug.demo_perf_log" label="DEMO FRAME TIMES" crumb="VIDEO › FRAME RATE &amp; SYNC › PERFORMANCE TOOLS">
+			<help>Saves a log of each frame's times beside every demo recorded, lined up with the demo's ticks, so a hitch seen in play can be found in the demo. The demo itself is unchanged.</help>
+			<choice shown="ON" value="true"/>
+			<choice shown="OFF" value="false"/>
 		</row>
 		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
 		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>
@@ -1123,6 +1140,9 @@
 		<row key="controller_buttons" kind="link" label="CONTROLLER BUTTONS ›" crumb="CONTROLS › CONTROLLER › BUTTON REMAPPING" open="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_buttons/controller_buttons_screen">
 			<help>The HUD's buttons drawn as your controller has them, Xbox, PlayStation or Switch, and the style of each.</help>
 		</row>
+		<row key="controller_layouts" kind="link" label="CONTROLLER LAYOUTS ›" crumb="CONTROLS › CONTROLLER › BUTTON REMAPPING" open="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/controller_layouts_screen">
+			<help>Name your controller's paddles and extra buttons and give each a symbol, which the prompts then draw in place of words like P3.</help>
+		</row>
 		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
 		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>
 		<button key="button_cancel" kind="cancel" run="port settings page cancel" help="Goes back without these changes."/>
@@ -1463,6 +1483,33 @@
 		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>
 		<button key="button_cancel" kind="cancel" run="port settings page cancel" help="Goes back without these changes."/>
 	</screen>
+	<screen name="main_menu/settings_select/player_setup/player_profile_edit/interface_settings/streaming/streaming_screen" kind="settings" layout="page" geometry="tall" title="STREAMING &amp; SPEEDRUN">
+		<section key="section_0" title="STREAMING"/>
+		<row key="state_file" kind="choice" setting="display.state_file" label="STATE FILE" crumb="INTERFACE › STREAMING &amp; SPEEDRUN">
+			<help>Writes the game's state (map, mode, score, kills, deaths, loading, cutscene, pause) to game_state.json in the game's folder, for stream overlays and scene switchers.</help>
+			<choice shown="ON" value="true"/>
+			<choice shown="OFF" value="false"/>
+		</row>
+		<row key="input_display" kind="choice" setting="display.input_display" label="INPUT DISPLAY" crumb="INTERFACE › STREAMING &amp; SPEEDRUN">
+			<help>Draws each player's sticks, trigger and buttons (or keys and mouse) at the bottom right, in demos too. Hide HUD hides it.</help>
+			<choice shown="ON" value="true"/>
+			<choice shown="OFF" value="false"/>
+		</row>
+		<section key="section_3" title="SPEEDRUN"/>
+		<row key="match_timer" kind="choice" setting="display.match_timer" label="MATCH TIMER" crumb="INTERFACE › STREAMING &amp; SPEEDRUN">
+			<help>Draws a clock at the bottom right: in multiplayer the game's, counting up from its start; in the campaign and co-op the mission's, which stops while the game is paused.</help>
+			<choice shown="ON" value="true"/>
+			<choice shown="OFF" value="false"/>
+		</row>
+		<row key="practice_keys" kind="choice" setting="game.practice_keys" label="PRACTICE KEYS" crumb="INTERFACE › STREAMING &amp; SPEEDRUN">
+			<help>Keys that save and load a state and restart the level (game.practice_save_key, _load_key and _restart_key in config.toml). They, a cheat or game_speed show PRACTICE until a fresh start.</help>
+			<choice shown="ON" value="true"/>
+			<choice shown="OFF" value="false"/>
+		</row>
+		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
+		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>
+		<button key="button_cancel" kind="cancel" run="port settings page cancel" help="Goes back without these changes."/>
+	</screen>
 	<screen name="main_menu/settings_select/player_setup/player_profile_edit/interface_settings/streamer_mode/streamer_mode_screen" kind="settings" layout="page" geometry="tall" title="STREAMER MODE">
 		<section key="section_0" title="STREAMER MODE"/>
 		<row key="enabled" kind="choice" setting="streamer.enabled" label="STREAMER MODE" crumb="ONLINE › STREAMER MODE">
@@ -1586,6 +1633,33 @@
 			<help>The Xbox's bumpers as the original controller's black and white buttons, or as LB and RB.</help>
 			<choice shown="ORIGINAL XBOX" value="original"/>
 			<choice shown="MODERN XBOX" value="modern"/>
+		</row>
+		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
+		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>
+		<button key="button_cancel" kind="cancel" run="port settings page cancel" help="Goes back without these changes."/>
+	</screen>
+	<screen name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/controller_layouts_screen" kind="settings" layout="page" geometry="tall" title="CONTROLLER LAYOUTS">
+		<section key="section_0" title="THIS CONTROLLER"/>
+		<row key="layout_controller" kind="status" label="CONTROLLER" crumb="CONTROLS › … › CONTROLLER LAYOUTS">
+			<help>The controller of the player whose settings these are, and how many of its paddles and extra buttons its layout describes. Each controller keeps its own layout.</help>
+		</row>
+		<row key="edit_buttons" kind="link" label="EDIT BUTTONS ›" crumb="CONTROLS › … › CONTROLLER LAYOUTS" open="screens/controller_layout">
+			<help>Name each paddle and extra button, and pick its symbol: a legend of up to 3 characters, a shape and a color. Button Remapping's prompts draw it.</help>
+		</row>
+		<section key="section_3" title="SHARE"/>
+		<row key="controller_layout_bindings" kind="choice" setting="input.controller_layout_bindings" label="INCLUDE MY BINDINGS" crumb="CONTROLS › … › CONTROLLER LAYOUTS">
+			<help>Export adds your Button Remapping buttons to the file. Whoever imports it still keeps theirs unless they choose yours.</help>
+			<choice shown="YES" value="true"/>
+			<choice shown="NO" value="false"/>
+		</row>
+		<row key="layout_export" kind="status" label="EXPORT" crumb="CONTROLS › … › CONTROLLER LAYOUTS" run="port settings layout export">
+			<help>Saves this controller's layout as a file in the data folder's controller_layouts/shared, to give to another player.</help>
+		</row>
+		<row key="layout_files" kind="status" label="FILES" crumb="CONTROLS › … › CONTROLLER LAYOUTS">
+			<help>To import a layout, copy its file into the data folder's controller_layouts: it is read when Edit Buttons opens. A file with a mistake is refused whole.</help>
+		</row>
+		<row key="layout_bindings" kind="status" label="ITS BINDINGS ›" crumb="CONTROLS › … › CONTROLLER LAYOUTS" when="layout_bindings" open="screens/layout_bindings">
+			<help>This controller's layout came with its owner's Button Remapping buttons. Yours stay unless you choose to use them.</help>
 		</row>
 		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
 		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>

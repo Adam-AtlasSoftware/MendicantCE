@@ -51,6 +51,7 @@ host_sdl_close_gamepad
 host_sdl_gamepad_has_sensor
 host_sdl_set_gamepad_sensor_enabled
 host_sdl_gamepad_steam
+host_sdl_gamepad_guid
 host_sdl_scancode_name
 host_sdl_scancode_from_name
 host_sdl_key_from_scancode

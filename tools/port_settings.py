@@ -756,6 +756,9 @@ FIRST_PERSON = ("video_settings/first_person", "first_person_screen")
 # (display.vsync, display.vrr and its margin, display.max_fps and
 # display.low_latency: how the frames meet the display)
 FRAME_RATE = ("video_settings/frame_rate", "frame_rate_screen")
+# (Frame Rate & Sync's PERFORMANCE TOOLS: the performance overlay and the
+# developers' timings and logs, their own page as Frame Rate's is full)
+PERFORMANCE_TOOLS = ("video_settings/frame_rate/performance_tools", "performance_tools_screen")
 # (display.gamma, and display.hdr's settings and the display's peak on the
 # renderers that draw it)
 BRIGHTNESS_PAGE = ("video_settings/brightness", "brightness_screen")
@@ -797,6 +800,10 @@ CONTROL_COMMAND_ROWS = {f"command_{n}" for n in range(1, CONTROL_ROWS + 1)}
 # (an action's row: its name, then its two bindings' columns, to the row's end)
 CONTROL_BINDINGS_X, CONTROL_BINDING_WIDTH = (136, 240), 104
 STREAMER = ("interface_settings/streamer_mode", "streamer_mode_screen")
+# (Interface's STREAMING & SPEEDRUN: display.state_file (port/linux/game/
+# stream_state.c), display.input_display (input_display.c) and
+# game.practice_keys (practice.c))
+STREAMING = ("interface_settings/streaming", "streaming_screen")
 # (Online's multiplayer rules, the host's choice in a network game, a page of
 # their own once Online had no room for VEHICLE HIJACKING)
 GAMEPLAY = ("network_setup/gameplay", "gameplay_screen")
@@ -816,6 +823,13 @@ MCC_PACKAGES = ("network_setup/mcc_packages", "mcc_packages_screen")
 # hud_hires_tags.c): the HUD's buttons drawn as the controller playing has
 # them, Xbox, PlayStation or Switch, in the style chosen for each
 CONTROLLER_BUTTONS = ("gamepad_setup/button_remapping/controller_buttons", "controller_buttons_screen")
+# Button Remapping's CONTROLLER LAYOUTS (#1143: port/linux/include/controller_layouts.h): a controller's extra
+# buttons named and drawn as symbols in the prompts; its EDIT BUTTONS › opens a hand-written screen,
+# port/assets/menus/screens/controller_layout.xml (menu_functions.c's controller_layout_menu.inc)
+CONTROLLER_LAYOUTS = ("gamepad_setup/button_remapping/controller_layouts", "controller_layouts_screen")
+CONTROLLER_LAYOUT = "screens/controller_layout"
+# (#1144: the question whether to use an imported layout's bindings, a hand-written pop-up)
+LAYOUT_BINDINGS = "screens/layout_bindings"
 MCC_DOWNLOADS = f"{PE}/network_setup/mcc_downloads"
 MCC_DOWNLOAD = f"{PE}/network_setup/mcc_download"
 BROWSER_FILTERS_TITLE = "main_menu/multiplayer_type_select/join_game/filters/header_filters"
@@ -845,6 +859,7 @@ REMAP_HANDLERS = ['<on event="x" run="port controller clear"/>',
 SETTINGS_STATUS_ROWS = {"discord_account", "link_status", "link_unlink",
                         *(f"link_master_{n}" for n in range(1, 5)), "hdr_display",
                         "viewmodel_weapon_reset", "gyro_found", "gyro_calibrate", "clear_caches", "add_maps",
+                        "layout_controller", "layout_export", "layout_files", "layout_bindings",
                         "remap_player", "remap_group", *(f"pad_{n}" for n in range(1, REMAP_ROWS + 1))}
 # the rows whose labels menu_functions.c writes (a master server's host): the
 # label's text its own, not its list's; their values the narrower column at
@@ -1135,10 +1150,12 @@ PAGES = {
              "Your living teammates' views in the HUD's top line, with their names, shields and distances, in "
              "co-op and team games: the SPARTAN LINK key (or D-pad Down) shows and hides them. Off: the key does "
              "nothing.", None),
-            # (source/interface/hud.c: the mission's timer in the campaign and co-op)
-            ("MATCH TIMER", "display.match_timer", ON_OFF,
-             "Draws a clock at the bottom right: in multiplayer the game's, counting up from its start; in the "
-             "campaign and co-op the mission's, which stops while the game is paused.", None),
+            # (the streamers' and runners' tools: a state file, the input
+            # display, the match timer, the practice keys; MATCH TIMER moved
+            # there to make room for the row)
+            ("STREAMING & SPEEDRUN ›", None, _page_screen(*STREAMING),
+             "A state file for stream overlays, an on-screen input display, the match timer, and practice keys "
+             "for speedrunners.", None),
             (SECTION, "MULTIPLAYER"),
             ("PLAYER NAMES", "display.player_names",
              [("ALL", "all"), ("ALLIES", "allies"), ("ENEMIES", "enemies"), ("NONE", "none")],
@@ -1405,15 +1422,11 @@ PAGES = {
             ("LOW LATENCY", "display.low_latency", [("AUTO", "auto"), ("ON", "on"), ("OFF", "off")],
              "With VSync on, starts each frame just in time for the refresh it is shown at, so a press reaches the "
              "screen sooner. Off starts each frame as soon as the one before is waiting. Auto is on.", None),
-            # (main.c's main_framerate_render, as the console's
-            # display_framerate draws it, and port/linux/game/perf_overlay.c:
-            # Video's page has no room, and Interface's none since WHILE DEAD)
-            ("PERFORMANCE OVERLAY", "display.perf_overlay",
-             [("OFF", "off"), ("SIMPLE", "simple"), ("DETAILED", "detailed")],
-             "Shows how the game runs, at the bottom right. Simple is the frame rate: green is 30 or more, red "
-             "under 30. Detailed adds the frame time, the 1% low, and the milliseconds spent on the GPU, the render "
-             "thread, the game and waiting for the display.",
-             None),
+            # (the performance overlay and the developers' timings: their own
+            # page, PERFORMANCE_TOOLS)
+            ("PERFORMANCE TOOLS ›", None, _page_screen(*PERFORMANCE_TOOLS),
+             "The performance overlay, and timings and logs of where each frame's time goes, for finding what "
+             "slows the game down.", None),
             # (port/linux/game/benchmark.c: from the main menu only, its match
             # taking the place of the game: SETTINGS_ROW_WHEN; its results
             # the new menus' screens/benchmark.xml)
@@ -1425,6 +1438,30 @@ PAGES = {
              "Plays a fixed minute of Blood Gulch with 40 bots, then shows the average frame rate, the 1% low, the "
              "frame times, the GPU and CPU time and your settings, and saves them in the benchmarks folder.|From "
              "the main menu only.", None, "benchmark", "port settings benchmark"),
+        ],
+    },
+    PERFORMANCE_TOOLS[0]: {
+        "screen": PERFORMANCE_TOOLS[1], "title": "PERFORMANCE TOOLS",
+        "rows": [
+            # (main.c's main_framerate_render, as the console's
+            # display_framerate draws it, and port/linux/game/perf_overlay.c)
+            ("PERFORMANCE OVERLAY", "display.perf_overlay",
+             [("OFF", "off"), ("SIMPLE", "simple"), ("DETAILED", "detailed")],
+             "Shows how the game runs, at the bottom right. Simple is the frame rate: green is 30 or more, red "
+             "under 30. Detailed adds the frame time, the 1% low, and the milliseconds spent on the GPU, the render "
+             "thread, the game and waiting for the display.",
+             None),
+            # (debug.timings: profile.c's sections, perf_overlay.c's lines,
+            # the Vulkan passes' owners)
+            ("DEVELOPER TIMINGS", "debug.timings", ON_OFF,
+             "Times the game's own work (AI, objects, effects, scripts...) and, with Vulkan, each graphics "
+             "setting's passes on the GPU, shown in the Detailed overlay with counts of objects and effects. Off "
+             "times nothing.|The GPU's passes from the next start.", None),
+            # (debug.demo_perf_log: report.c's log beside each demo, told by
+            # demo.c's listener)
+            ("DEMO FRAME TIMES", "debug.demo_perf_log", ON_OFF,
+             "Saves a log of each frame's times beside every demo recorded, lined up with the demo's ticks, so a "
+             "hitch seen in play can be found in the demo. The demo itself is unchanged.", None),
         ],
     },
     FIRST_PERSON[0]: {
@@ -1618,6 +1655,9 @@ PAGES = {
             ("CONTROLLER BUTTONS ›", None, _page_screen(*CONTROLLER_BUTTONS),
              "The HUD's buttons drawn as your controller has them, Xbox, PlayStation or Switch, and the style "
              "of each.", None),
+            ("CONTROLLER LAYOUTS ›", None, _page_screen(*CONTROLLER_LAYOUTS),
+             "Name your controller's paddles and extra buttons and give each a symbol, which the prompts then "
+             "draw in place of words like P3.", None),
         ],
     },
     KEY_BINDINGS[0]: {
@@ -1802,6 +1842,27 @@ PAGES = {
              "and take it. Online: the host's choice.", None),
         ],
     },
+    STREAMING[0]: {
+        "screen": STREAMING[1], "title": "STREAMING & SPEEDRUN",
+        "rows": [
+            (SECTION, "STREAMING"),
+            ("STATE FILE", "display.state_file", ON_OFF,
+             "Writes the game's state (map, mode, score, kills, deaths, loading, cutscene, pause) to "
+             "game_state.json in the game's folder, for stream overlays and scene switchers.", None),
+            ("INPUT DISPLAY", "display.input_display", ON_OFF,
+             "Draws each player's sticks, trigger and buttons (or keys and mouse) at the bottom right, in demos "
+             "too. Hide HUD hides it.", None),
+            (SECTION, "SPEEDRUN"),
+            # (source/interface/hud.c: the mission's timer in the campaign and co-op)
+            ("MATCH TIMER", "display.match_timer", ON_OFF,
+             "Draws a clock at the bottom right: in multiplayer the game's, counting up from its start; in the "
+             "campaign and co-op the mission's, which stops while the game is paused.", None),
+            ("PRACTICE KEYS", "game.practice_keys", ON_OFF,
+             "Keys that save and load a state and restart the level (game.practice_save_key, _load_key and "
+             "_restart_key in config.toml). They, a cheat or game_speed show PRACTICE until a fresh start.",
+             None),
+        ],
+    },
     STREAMER[0]: {
         "screen": STREAMER[1], "title": "STREAMER MODE",
         "rows": [
@@ -1864,6 +1925,33 @@ PAGES = {
              "A Switch controller's buttons.", None),
             ("BUMPERS", "display.hud_bumper_style", [("ORIGINAL XBOX", "original"), ("MODERN XBOX", "modern")],
              "The Xbox's bumpers as the original controller's black and white buttons, or as LB and RB.", None),
+        ],
+    },
+    CONTROLLER_LAYOUTS[0]: {
+        "screen": CONTROLLER_LAYOUTS[1], "title": "CONTROLLER LAYOUTS",
+        "rows": [
+            # (its value menu_functions.c's layout_rows_show, each frame)
+            (SECTION, "THIS CONTROLLER"),
+            ("CONTROLLER", None, None,
+             "The controller of the player whose settings these are, and how many of its paddles and extra "
+             "buttons its layout describes. Each controller keeps its own layout.", None, "layout_controller"),
+            ("EDIT BUTTONS ›", None, CONTROLLER_LAYOUT,
+             "Name each paddle and extra button, and pick its symbol: a legend of up to 3 characters, a shape "
+             "and a color. Button Remapping's prompts draw it.", None),
+            # (#1144: EXPORT's, FILES' and ITS BINDINGS' values layout_rows_show's)
+            (SECTION, "SHARE"),
+            ("INCLUDE MY BINDINGS", "input.controller_layout_bindings", YES_NO,
+             "Export adds your Button Remapping buttons to the file. Whoever imports it still keeps theirs unless "
+             "they choose yours.", None),
+            ("EXPORT", None, None,
+             "Saves this controller's layout as a file in the data folder's controller_layouts/shared, to give "
+             "to another player.", None, "layout_export", "port settings layout export"),
+            ("FILES", None, None,
+             "To import a layout, copy its file into the data folder's controller_layouts: it is read when Edit "
+             "Buttons opens. A file with a mistake is refused whole.", None, "layout_files"),
+            ("ITS BINDINGS ›", None, LAYOUT_BINDINGS,
+             "This controller's layout came with its owner's Button Remapping buttons. Yours stay unless you "
+             "choose to use them.", None, "layout_bindings"),
         ],
     },
     MCC_PACKAGES[0]: {
@@ -2551,6 +2639,8 @@ SETTINGS_ROW_WHEN = {
     **{f"viewmodel_weapon_{name}": "weapon_held" for name in ("x", "y", "z", "pitch", "yaw", "roll", "reset")},
     # (Discord's UNLINK an account linked, or waiting for its code)
     "link_unlink": "discord_linked",
+    # (Controller Layouts' ITS BINDINGS: the controller's layout came with them, #1144)
+    "layout_bindings": "layout_bindings",
 }
 SETTINGS_ROW_ENABLED = {
     # (the flick's time while the flick stick is on)

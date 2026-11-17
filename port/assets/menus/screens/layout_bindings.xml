@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The question of a controller layout's bindings (#1144; docs/menu_screens.md, "Controller Layout"), as Button
+Remapping's Controller Layouts' ITS BINDINGS opens it, where the controller's layout came with its owner's
+bindings: how many of the player's buttons they would change. KEEP MINE (focused, and B) goes back as it was; USE
+THIS LAYOUT'S puts them on the player's buttons through Button Remapping's assign rule (controller_layout_menu.inc's
+layout_bindings_use) and goes back. -->
+<screen name="layout_bindings">
+	<dialog title="USE ITS BINDINGS?" text="{layout.bindings}">
+		<list focus="keep">
+			<item id="keep" label="KEEP MINE" do="back"/>
+			<item id="use" label="USE THIS LAYOUT'S" do="layout bindings use"/>
+		</list>
+	</dialog>
+</screen>

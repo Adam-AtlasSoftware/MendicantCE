@@ -149,6 +149,7 @@ symbols in this file:
 #include "text/unicode.h"
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
 #include "controller_remap.h" /* port: port/linux/game/controller_remap_game.c */
+#include "controller_glyphs.h" /* port: port/linux/game/controller_glyphs.c */
 #include "network_standard.h" /* port: port/linux/game/network_standard.c */
 
 #include <stddef.h>
@@ -1837,9 +1838,16 @@ void hud_messaging_update(
 								draw_string_set_indents(line_cursor.x0 - line_bounds.x0, 0);
 								/* port: an action the player's layout leaves
 								without a button, or puts on a back paddle
-								(controller_remap_prompt_text) */
+								(controller_remap_prompt_text); one on an
+								extra button their controller's layout
+								describes is its symbol (#1143) */
 								wchar_t const *remapped = controller_remap_prompt_text(local_player_index, icon_index);
 
+								if (controller_glyph_layout_draw(local_player_index, icon_index, &line_bounds,
+									&line_cursor, pixel_color))
+								{
+									break;
+								}
 								draw_unicode_string_compute_bounds(
 									&line_bounds,
 									remapped ? remapped : L"<no button icon>",

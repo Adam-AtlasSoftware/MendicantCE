@@ -54,6 +54,24 @@ static int valid_button(int button)
     return 0;
 }
 
+/* a physical token's button ("south", "left_paddle", "unbound": 255), -1
+for none; length: the token's characters (it need not end there) */
+int controller_remap_token(char const *text, size_t length)
+{
+    int i;
+    if (length == 7 && !strncmp(text, "unbound", 7)) return CONTROLLER_REMAP_UNBOUND;
+    for (i = 0; i < CONTROLLER_REMAP_BUTTONS; i++)
+        if (strlen(remap_names[i]) == length && !strncmp(text, remap_names[i], length)) return remap_buttons[i];
+    return -1;
+}
+
+char const *controller_remap_token_name(int button)
+{
+    int i;
+    for (i = 0; i < CONTROLLER_REMAP_BUTTONS; i++) if (remap_buttons[i] == button) return remap_names[i];
+    return "unbound";
+}
+
 char const *controller_remap_setting(short port)
 {
     static char const *const settings[] = {"input.controller_p1", "input.controller_p2",

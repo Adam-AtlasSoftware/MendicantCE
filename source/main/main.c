@@ -738,6 +738,8 @@ void vr_death_test_update(void);
 #include "server_director.h" /* port: port/linux/game/server_director.c */
 #include "load_zone.h" /* port: port/linux/game/load_zone.c */
 #include "speedrun_state.h" /* port: port/linux/game/speedrun_state.c */
+#include "stream_state.h" /* port: port/linux/game/stream_state.c */
+#include "practice.h" /* port: port/linux/game/practice.c */
 
 /* ---------- prototypes */
 
@@ -3586,8 +3588,12 @@ void main_framerate_render(
 				short line;
 
 				bounds = render.camera.window_bounds;
-				bounds.x0 = (short)(bounds.x1 - 240);
+				/* (room for debug.timings' longest lines, PERF_OVERLAY_LINE_SIZE) */
+				bounds.x0 = (short)(bounds.x1 - 400 < bounds.x0 ? bounds.x0 : bounds.x1 - 400);
 				bounds.x1 = (short)(bounds.x1 - 14);
+				/* (a split screen's short view: the lines that fit, the top's) */
+				if (bounds.y1 - bounds.y0 < 50 + 20 * count)
+					count = (short)MAX(0, (bounds.y1 - bounds.y0 - 50) / 20);
 				bounds.y0 = (short)(bounds.y1 - 50 - 20 * count);
 				draw_string_set_format(NONE, _text_justification_right, 0);
 				draw_string_set_color(global_real_argb_white);
@@ -4416,10 +4422,16 @@ void main_loop(
 		}
 
 		input_frame_end();
+		/* port: the practice keys and the PRACTICE mark
+		(port/linux/game/practice.c), before the block that holds the mark */
+		practice_frame();
 		/* port: the speedrun state block, for timers' autosplitters
 		(port/linux/game/speedrun_state.c) */
 		speedrun_state_frame(frame_ticks, loading_game_frame, frames_undrawn || debug_no_drawing,
 			main_globals.main_menu_scenario_loaded || menu_pictures_preparing());
+		/* port: the game's state for stream overlays (display.state_file,
+		port/linux/game/stream_state.c) */
+		stream_state_frame();
 		profile_frame_end();
 		main_frame_rate_debug();
 		halo_load_trace_frame(); /* port: debug.load_trace's long frames */

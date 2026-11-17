@@ -30,7 +30,7 @@ Little-endian. `u32` is a 32-bit unsigned number. The strings end with a NUL.
 | 0x30 | game_ticks | u32 | The level's own clock. A checkpoint revert takes it back |
 | 0x34 | ticks_per_second | u32 | 30 |
 | 0x38 | sim_rate | u32 | `game.sim_rate` in effect: 30, 60 or 120 |
-| 0x3C | settings | u32 | 1 Enhanced graphics, 2 Custom graphics (neither: Classic), 4 enhanced animations, 8 mods change the map, 16 Custom Edition map, 32 MCC map |
+| 0x3C | settings | u32 | 1 Enhanced graphics, 2 Custom graphics (neither: Classic), 4 enhanced animations, 8 mods change the map, 16 Custom Edition map, 32 MCC map, 64 PRACTICE mark |
 | 0x40 | build_number | u32 | The release's build number, 0 for a local build |
 | 0x44 | build | char[44] | The build's label, such as `GOAT H1 \| build 123 (release)` |
 | 0x70 | map | char[64] | The map played, such as `levels\a10\a10` |
@@ -49,11 +49,15 @@ Little-endian. `u32` is a 32-bit unsigned number. The strings end with a NUL.
   `levels_completed` go back to 0. Winning a level that leads to the next keeps the run going. Back at the main
   menu, the run's numbers stay as they ended.
 - **levels_completed** goes up as each level is won, the last one (The Maw) included.
-- **settings** and the build are read as each map begins, as the game reads its rules then. **sim_rate** is the
+- **settings** and the build are read as each map begins, as the game reads its rules then, but for the PRACTICE
+  mark (64), set each frame: on from the first use of a practice key, a cheat, `game_speed`, a core's load or
+  `debug.skip_cinematics` (`port/linux/game/practice.c`), off only at the level's next fresh start (a map loaded or
+  started over). The HUD shows it as PRACTICE and demos record it. **sim_rate** is the
   rate the game's next tick simulates at, each frame (30 in a game that must stay as it was, such as a Legacy
   network game or a saved film).
 
-The game writes the block from its main loop only, with plain stores. Nothing in the game reads it back, and it is
+The game writes the block from its main loop only, with plain stores. Nothing of the game's simulation reads it
+back (the state file's writer and the practice keys read its flags), and it is
 not part of the game state, so saved games, reverts and demos neither keep nor change it, and games play the same
 with it as without.
 
@@ -86,3 +90,17 @@ process.
 - **reset**: when `run` changes (a new run began).
 
 To time by the game's ticks instead, uncomment its `gameTime`, which turns `run_ticks` into time.
+
+## The state file, for stream overlays
+
+With `display.state_file` on (off by default; Settings > Interface > Streaming & Speedrun), the game also writes
+what this block says, and the first player's score, kills and deaths, to `game_state.json` in the data root
+(`port/linux/game/stream_state.c`), for OBS text sources and scene switchers:
+
+```json
+{"state":"playing","map":"levels\\a10\\a10","mode":"campaign","clock":95,"score":0,"kills":3,"deaths":1,"practice":false}
+```
+
+`state` is `loading`, `menu`, `cutscene`, `paused` or `playing`; `clock` is the level's clock in seconds. The
+file is written only when it changes, at most four times a second, to `game_state.json.tmp` and then renamed
+over the file, so a reader never sees half of it. Nothing is sent over the network.

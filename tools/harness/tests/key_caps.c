@@ -109,6 +109,23 @@ static short draw_unicode_string_capital_middle(rectangle2d const *bounds, wchar
 	return (short)(bounds->y0 + 10);
 }
 
+/* the draw mode's colour (a controller layout's symbol's legend sets its
+own while it is drawn), and what the cap was filled with and the name
+drawn in */
+typedef struct { real alpha, red, green, blue; } real_argb_color;
+static real_argb_color text_color = { 1.0f, 0.157f, 0.588f, 1.0f }, drawn_color;
+static pixel32 drawn_fill;
+static void draw_string_get_color(real_argb_color *color) { *color = text_color; }
+static void draw_string_set_color(real_argb_color const *color) { text_color = *color; }
+static real_argb_color *pixel32_to_real_argb_color(pixel32 pixel, real_argb_color *color)
+{
+	color->alpha = (real)(pixel >> 24 & 0xFF) / 255.0f;
+	color->red = (real)(pixel >> 16 & 0xFF) / 255.0f;
+	color->green = (real)(pixel >> 8 & 0xFF) / 255.0f;
+	color->blue = (real)(pixel & 0xFF) / 255.0f;
+	return color;
+}
+
 /* what was drawn: the name's pen (and an "='s"), and the cap's box */
 typedef struct { real y0, x0, y1, x1; } real_rectangle2d;
 static short drawn_pen, equals_pen = SHORT_MIN;
@@ -122,12 +139,16 @@ static void rasterizer_draw_unicode_string(rectangle2d const *bounds, void const
 	if (text[0] == L'=' && !text[1])
 		equals_pen = (short)(bounds->x0 + indent);
 	else
+	{
 		drawn_pen = (short)(bounds->x0 + indent);
+		drawn_color = text_color;
+	}
 }
 
 static void key_cap_shape(real x0, real y0, real x1, real y1, pixel32 fill, pixel32 color)
 {
-	(void)fill; (void)color;
+	(void)color;
+	drawn_fill = fill;
 	drawn_box.x0 = x0;
 	drawn_box.y0 = y0;
 	drawn_box.x1 = x1;
@@ -430,6 +451,32 @@ int main(int argc, char **argv)
 		CHECK(key_cap_draw(L"Enter", &bounds, &cursor, 0xFF2896FFUL), "drawn");
 		CHECK(hud_key_prompt_draw_equals(&bounds, &cursor, L"=SELECT") == 0, "an = after a wrapped name taken");
 		line_end = SHORT_MAX;
+	}
+	CASE("symbol")
+	{
+		/* a controller layout's symbol (hud_key_prompt_draw_symbol): the
+		cap as a key's is laid out, filled in its fill at the prompt's
+		opacity, its legend in its own colour and the prompt's colour
+		after it; a key's cap after it as before (the prompt's colour faintly) */
+		rectangle2d bounds = { 0, 0, 480, 640 }, cursor = { 0, 100, 20, 0 };
+		struct drawn key;
+
+		players = 1;
+		lead = 3;
+		trail = 0;
+		key = draw(L"RB2", 100);
+		CHECK(drawn_fill == 0x4C2896FFUL, "a key's cap filled %08lx", drawn_fill);
+		CHECK(hud_key_prompt_draw_symbol(L"RB2", &bounds, &cursor, 0x802896FFUL, 0x3070D0UL, 0xFFFFFFUL, TRUE),
+			"drawn");
+		CHECK(drawn_fill == 0x803070D0UL, "the symbol's cap filled %08lx", drawn_fill);
+		CHECK(drawn_box.x0 == key.box_x0 && drawn_box.x1 == key.box_x1 && cursor.x0 == key.after,
+			"the symbol laid out as a key's");
+		CHECK(drawn_color.red == 1.0f && drawn_color.green == 1.0f && drawn_color.blue == 1.0f &&
+			drawn_color.alpha > 0.5f && drawn_color.alpha < 0.51f, "its legend in its own colour");
+		CHECK(text_color.red < 0.2f && text_color.blue == 1.0f, "the prompt's colour after it");
+		draw(L"Esc", 100);
+		CHECK(drawn_fill == 0x4C2896FFUL && drawn_color.blue == 1.0f && drawn_color.red < 0.2f,
+			"a key's cap after a symbol");
 	}
 	CASE("wrapped")
 	{

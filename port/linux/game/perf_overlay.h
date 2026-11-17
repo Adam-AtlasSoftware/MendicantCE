@@ -19,13 +19,19 @@ enum
 
 enum
 {
-	PERF_OVERLAY_LINES = 6,
-	PERF_OVERLAY_LINE_SIZE = 32
+	/* the frame's times (6); with debug.timings the busiest CPU sections,
+	the GPU's passes and the counts too */
+	PERF_OVERLAY_LINES = 16,
+	PERF_OVERLAY_LINE_SIZE = 32,
+	PERF_OVERLAY_CPU_SECTIONS = 4,
+	PERF_OVERLAY_GPU_GROUPS = 4
 };
 
 /* the setting's mode (_perf_overlay_*), read again when it changes */
 short perf_overlay_mode(void);
 /* "detailed"'s lines, top to bottom, above the counter: their count */
 short perf_overlay_lines(char lines[PERF_OVERLAY_LINES][PERF_OVERLAY_LINE_SIZE]);
+/* debug.timings (off by default), read again when it changes */
+int perf_overlay_timings(void);
 
 #endif
