@@ -38,6 +38,9 @@ struct halo_gpu_journal_bitmaps
 	projection (as halo_screen_panini's) given where the record's is none
 	(made with it off) */
 	int (*panini)(float projection[8]);
+	/* a bitmap's tag index as the record keeps it (identify's and the
+	cache's loads'), which load takes back; NULL: as it is */
+	unsigned long (*keep)(unsigned long tag_index);
 };
 /* recorded from now on (the preparation begun) */
 void halo_gpu_journal_record(struct halo_gpu_journal_bitmaps const *bitmaps);

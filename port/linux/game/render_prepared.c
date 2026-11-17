@@ -64,6 +64,7 @@ loaded) and the walk made.
 #include "tag_files/tag_groups.h"
 #include "cseries/cseries_windows.h"
 #include "network_standard.h"
+#include "menu_models.h"
 
 #include "../src/xgpu_manifest.h"
 #include "render_enumerate.h"
@@ -83,6 +84,8 @@ void platform_log(char const *format, ...);
 unsigned long long halo_gpu_journal_derivation(unsigned long long hash);
 /* (panini.c's) */
 boolean panini_replay_projection(float projection[8]);
+/* (cache_files.c's: the tag table as it is now, the menus' tags in it) */
+void *cache_files_tag_instances(long *count);
 
 #define PREPARED_MAGIC 0x50314f48u /* "HO1P" */
 /* what a record holds: a change to what the walk draws (render_enumerate.c,
@@ -189,11 +192,54 @@ static int prepared_panini(float projection[8])
 	return panini_replay_projection(projection);
 }
 
+/* A bitmap is kept by its tag's index: the map's own tags', and the menus'
+(menu_tags.c: the files built into the game, after the map's own), are at
+the same indices in every run of a build. The menus' models' tags
+(menu_models.c: ui.map's, after the menus', read from a file the first
+start's pass makes) are not: they are there only once the file is made, so
+a bitmap of theirs is kept by its place among them (PREPARED_MODELS_TAG
+and the place: prepared_keep), and a record that names them is keyed by
+what they are (prepared_key_models). */
+#define PREPARED_MODELS_TAG 0x00010000UL
+
+static unsigned long prepared_keep(unsigned long tag_index)
+{
+	long place = menu_models_tag_place((long)tag_index);
+
+	return place != NONE ? PREPARED_MODELS_TAG | (unsigned long)place : tag_index;
+}
+
+static void *prepared_load(unsigned long tag_index, unsigned long bitmap_index)
+{
+	if ((tag_index & 0xffff0000UL) == PREPARED_MODELS_TAG)
+	{
+		long found = menu_models_tag_at((long)(tag_index & 0xffffUL));
+
+		if (found == NONE)
+			return NULL;
+		tag_index = (unsigned long)found;
+	}
+	return texture_cache_port_load(tag_index, bitmap_index);
+}
+
+/* the tags a record may name by their indices (prepared_identify): the
+table's, but the menus' models' after them */
+static long prepared_stable_tags(void)
+{
+	long count = 0, models = 0;
+
+	(void)cache_files_tag_instances(&count);
+	while (menu_models_tag_at(models) != NONE)
+		models++;
+	return count - models;
+}
+
 static struct halo_gpu_journal_bitmaps const prepared_bitmaps =
 {
 	texture_cache_port_identify,
-	texture_cache_port_load,
+	prepared_load,
 	prepared_panini,
+	prepared_keep,
 };
 
 static boolean prepared_enabled(void)
@@ -238,6 +284,15 @@ static uint64_t prepared_key(uint64_t hash, boolean mirrors, long structure_bsp_
 	words[0] = mirrors ? 1 : 0;
 	words[1] = (uint32_t)structure_bsp_index;
 	return xgpu_manifest_hash(words, sizeof(words), hash);
+}
+
+/* ...and the menus' models' tags in the table (menu_models_identity: none,
+or what they are), which a record that names them is for */
+static uint64_t prepared_key_models(uint64_t hash)
+{
+	uint32_t identity = (uint32_t)menu_models_identity();
+
+	return identity ? xgpu_manifest_hash(&identity, sizeof(identity), hash) : hash;
 }
 
 /* the settings, backend and GPU a record's draws are derived under now */
@@ -292,7 +347,8 @@ static boolean prepared_choose(boolean mirrors)
 	if (!prepared_enabled())
 		return FALSE;
 	/* (the structure the map starts in: a saved game's may be another) */
-	hash = prepared_key(prepared_key_settings(scenario), mirrors, global_structure_bsp_index_get());
+	hash = prepared_key_models(prepared_key(prepared_key_settings(scenario), mirrors,
+		global_structure_bsp_index_get()));
 	prepared.checksum = cache_files_get_checksum();
 	/* (prepared again in play: from its record, whatever structure it is in) */
 	prepared.again = prepared.played.known && prepared.played.checksum == prepared.checksum &&
@@ -693,10 +749,11 @@ void render_prepared_record_end(void)
 	}
 	if (written)
 		prepared_played(prepared.recording_mirrors);
-	/* (its file, scenario and form, as tools/prepared_records.py reads them) */
-	platform_log("render: the map's preparation %s (%lu draws, %u words; %s, %s, form %d %u)", written ? "recorded" :
-		"could not be recorded", draw_count, count, prepared.path, global_scenario_index != NONE ?
-		tag_get_name(global_scenario_index) : "", PREPARED_VERSION, halo_gpu_journal_form());
+	/* (its file, scenario and form, and the tags it may name by their index
+	(prepared_stable_tags), as tools/prepared_records.py reads them) */
+	platform_log("render: the map's preparation %s (%lu draws, %u words; %s, %s, form %d %u, tags %ld)", written ?
+		"recorded" : "could not be recorded", draw_count, count, prepared.path, global_scenario_index != NONE ?
+		tag_get_name(global_scenario_index) : "", PREPARED_VERSION, halo_gpu_journal_form(), prepared_stable_tags());
 	halo_gpu_journal_free(words);
 	free(draws);
 }

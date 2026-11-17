@@ -7884,6 +7884,8 @@ static void journal_identify(const void *object, struct journal_object *to)
 	}
 	if (journal.bitmaps && journal.bitmaps->identify(object, &tag_index, &bitmap_index))
 	{
+		if (journal.bitmaps->keep)
+			tag_index = journal.bitmaps->keep(tag_index);
 		to->kind = _journal_object_bitmap;
 		to->value = (uint32_t)tag_index;
 		to->check = (uint32_t)bitmap_index;
@@ -8158,7 +8160,8 @@ void halo_gpu_journal_texture(unsigned int tag_index, unsigned int bitmap_index)
 	if (!journal_recording || !journal_reserve(3))
 		return;
 	journal.words[journal.count++] = JOURNAL_TEXTURE;
-	journal.words[journal.count++] = tag_index;
+	journal.words[journal.count++] = journal.bitmaps && journal.bitmaps->keep ?
+		(uint32_t)journal.bitmaps->keep(tag_index) : tag_index;
 	journal.words[journal.count++] = bitmap_index;
 }
 
@@ -8221,8 +8224,9 @@ runs in JOURNAL_PAGE_UNIT's units, not the platform's pages; 6: the world's
 window's span, world_span; 7: without the screen's ambient occlusion, its
 pre-pass, its flags and its operations; 8: world_span's
 WORLD_AO_SPAN_FOUND, the window found once a pixel; 9: the effect's soft
-group, the stages' texture regions and the high-res text's atlas as itself) */
-#define JOURNAL_FORM 9
+group, the stages' texture regions and the high-res text's atlas as itself;
+10: a bitmap's tag as the record keeps it, halo_gpu_journal_bitmaps' keep) */
+#define JOURNAL_FORM 10
 
 unsigned int halo_gpu_journal_form(void)
 {

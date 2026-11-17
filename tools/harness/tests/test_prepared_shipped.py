@@ -9,6 +9,8 @@ import zlib
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import ROOT, build, read, run, structure, constant, mutated
+sys.path.insert(0, str(ROOT / 'tools'))
+import prepared_records
 
 DEVICE = 'port/linux/src/d3d8_device.c'
 PREPARED = 'port/linux/game/render_prepared.c'
@@ -58,7 +60,7 @@ def test_negative():
 def test_records_are_whole():
     """the shipped file (prepared_shipped.h's form) holds the manifest's records, each whole and of its map and key"""
     records = MANIFEST['records']
-    assert len(records) == 24, f"not every stock map's record is shipped: {RERUN}"
+    assert len({record['map'] for record in records}) == 24, f"not every stock map's record is shipped: {RERUN}"
     assert {path.name for path in FOLDER.iterdir()} == {'manifest.json', MANIFEST['file']}, f"files not in the manifest: {RERUN}"
     pack = (FOLDER / MANIFEST['file']).read_bytes()
     assert struct.unpack_from('<3I', pack) == (0x5331484F, 1, len(records)), RERUN
@@ -73,3 +75,50 @@ def test_records_are_whole():
         assert (magic, header_size) == (0x50314F48, 48), record['map']
         assert version == MANIFEST['prepared_version'], f"{record['map']}: {RERUN}"
         assert (header_checksum, header_key) == (checksum, key), record['map']
+
+
+def shipped():
+    """each shipped record's manifest entry and its bytes"""
+    pack = (FOLDER / MANIFEST['file']).read_bytes()
+    for record in MANIFEST['records']:
+        yield record, zlib.decompress(pack[record['offset']:record['offset'] + record['compressed_size']])
+
+
+def test_records_name_only_kept_tags():
+    """every shipped record names the bitmaps it loads by tags a fresh start of the build has at those indices: the
+    map's own and the menus' (the first of the table, as many as the game logged: its manifest's tags), and the menus'
+    models' by their place among them, never by the index they had in the run that made it (ui.map's, which the
+    first start's pass adds after the menus' once it has made their file); and ui.map's is shipped both without the
+    models, as the first start loads it, and with them"""
+    for record, data in shipped():
+        assert prepared_records.record_tags(data), record['map']
+        assert prepared_records.unkept_tags(data, record['tags']) == [], f"{record['map']}: {RERUN}"
+    models = [any(tag >> 16 == 1 for tag in prepared_records.record_tags(data))
+              for record, data in shipped() if record['map'] == 'ui']
+    assert sorted(models) == [False, True], f"ui.map's records: {RERUN}"
+
+
+def test_negative_a_models_tag_by_its_index():
+    """the menus' models' tags named by the index they had as the record was made (the leak of a record made before
+    PREPARED_MODELS_TAG): seen past the tags a fresh start has"""
+    for record, data in shipped():
+        tags = prepared_records.record_tags(data)
+        if not any(tag >> 16 == 1 for tag in tags):
+            continue
+        header_size, = struct.unpack_from('<I', data, 8)
+        draw_count, = struct.unpack_from('<I', data, 28)
+        start = header_size + 8 * draw_count
+        words = list(struct.unpack_from(f'<{(len(data) - start) // 4}I', data, start))
+        at = 0
+        while at < len(words):
+            if words[at] & 0xFF == prepared_records.JOURNAL_TEXTURE:
+                if words[at + 1] >> 16 == 1:
+                    index = record['tags'] + (words[at + 1] & 0xFFFF)
+                    words[at + 1] = (0xE176 + index) << 16 | index
+                at += 3
+            else:
+                at += 1 + 2 * (words[at] >> 8)
+        leaked = data[:start] + struct.pack(f'<{len(words)}I', *words)
+        assert prepared_records.unkept_tags(leaked, record['tags'])
+        return
+    assert False, "no record names the menus' models"

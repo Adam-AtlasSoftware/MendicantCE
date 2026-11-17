@@ -41,7 +41,15 @@ OUT = ROOT / "port/assets/prepared"
 STOCK_MAP_COUNT = 24
 # render_prepared.c's line, as a record is written
 RECORDED = re.compile(r"render: the map's preparation recorded \((\d+) draws, (\d+) words; "
-                      r"z:\\prepared\\([0-9a-f]{8})-([0-9a-f]{16})\.prepared, ([^,]*), form (\d+) (\d+)\)")
+                      r"z:\\prepared\\([0-9a-f]{8})-([0-9a-f]{16})\.prepared, ([^,]*), form (\d+) (\d+), "
+                      r"tags (\d+)\)")
+# a record's words (render_prepared.c, d3d8_device.c's journal): a cached bitmap loaded, JOURNAL_TEXTURE and its tag
+# and bitmap; the mirror's pages, JOURNAL_PAGES and its runs; an entry, its type and its changed words' pairs
+JOURNAL_TEXTURE = 0x40
+JOURNAL_PAGES = 0x41
+# (render_prepared.c's PREPARED_MODELS_TAG: a bitmap of the menus' models' tags, by its place among them)
+MODELS_TAG = 0x00010000
+MODELS_MAXIMUM = 64
 HEADER_SIZE = 48  # struct prepared_header
 MAGIC = 0x50314F48
 # the shipped file (prepared_shipped.h)
@@ -77,8 +85,9 @@ def run_game(halo: Path, maps: Path, work: Path, seconds: int) -> Path:
         try:
             while game.poll() is None and time.monotonic() - started < seconds:
                 time.sleep(1)
-                if len(RECORDED.findall(log.read_text(errors="replace"))) >= STOCK_MAP_COUNT:
-                    # (the main menu drawn a while, for the manifest)
+                if len({line[4] for line in RECORDED.findall(log.read_text(errors="replace"))}) >= STOCK_MAP_COUNT:
+                    # (the main menu drawn a while, for the manifest, and ui.map's record with the menus' models
+                    # made as the pass ends)
                     time.sleep(MENU_SECONDS)
                     break
                 debug = run / "debug.txt"
@@ -95,6 +104,33 @@ def run_game(halo: Path, maps: Path, work: Path, seconds: int) -> Path:
     return run
 
 
+def record_tags(data: bytes) -> list:
+    """the tags of the bitmaps a record's journal loads (its JOURNAL_TEXTURE entries), as it keeps them"""
+    header_size, = struct.unpack_from("<I", data, 8)
+    draw_count, = struct.unpack_from("<I", data, 28)
+    start = header_size + 8 * draw_count
+    words = struct.unpack_from(f"<{(len(data) - start) // 4}I", data, start)
+    tags, at = [], 0
+    while at < len(words):
+        kind = words[at] & 0xFF
+        if kind == JOURNAL_TEXTURE:
+            tags.append(words[at + 1])
+            at += 3
+        else:
+            # (JOURNAL_PAGES' runs, or an entry's changed words: two words each)
+            at += 1 + 2 * (words[at] >> 8)
+    return tags
+
+
+def unkept_tags(data: bytes, stable_tags: int) -> list:
+    """the tags a record names that a fresh start of the same build may not have at those indices: any but the
+    map's own and the menus' (the first stable_tags of the table, as the game logged them) and the menus' models'
+    by their place (MODELS_TAG)"""
+    return [tag for tag in record_tags(data)
+            if not (tag & 0xFFFF0000 == MODELS_TAG and tag & 0xFFFF < MODELS_MAXIMUM)
+            and not (tag >> 16 and (tag & 0xFFFF) < stable_tags)]
+
+
 def collect(run: Path, out: Path) -> dict:
     """the run's records compressed into out, and their manifest"""
     text = (run / "stdout.txt").read_text(errors="replace")
@@ -105,12 +141,12 @@ def collect(run: Path, out: Path) -> dict:
             [line for line in text.splitlines() if "is not recorded" in line or "could not be recorded" in line]
         sys.exit(f"{len(lines)} of {STOCK_MAP_COUNT} maps recorded (see {run / 'stdout.txt'})" +
                  (f": {failed[0]}" if failed else ""))
-    forms = {(int(version), int(form)) for *_, version, form in lines}
+    forms = {(int(version), int(form)) for *_, version, form, _ in lines}
     if len(forms) != 1:
         sys.exit(f"the records are of more than one form: {sorted(forms)}")
     (version, form), = forms
     records = {}
-    for draws, words, checksum, key, scenario, _, _ in lines:
+    for draws, words, checksum, key, scenario, _, _, stable_tags in lines:
         source = run / "save" / "z" / "prepared" / f"{checksum}-{key}.prepared"
         data = source.read_bytes()
         magic, record_version, header_size, record_checksum = (int.from_bytes(data[at:at + 4], "little")
@@ -120,15 +156,22 @@ def collect(run: Path, out: Path) -> dict:
                 (MAGIC, version, HEADER_SIZE, int(checksum, 16), int(key, 16)):
             sys.exit(f"{source.name}: its header is not its name's or the log's")
         name = scenario.replace("\\", "/").rsplit("/", 1)[-1]
-        records[name] = {"map": name, "scenario": scenario, "checksum": checksum, "key": key,
-                         "draws": int(draws), "words": int(words), "size": len(data),
-                         "data": zlib.compress(data, 9)}
-    if len(records) != STOCK_MAP_COUNT:
-        sys.exit(f"{len(records)} maps recorded, not {STOCK_MAP_COUNT}: {sorted(records)}")
+        unkept = unkept_tags(data, int(stable_tags))
+        if unkept:
+            sys.exit(f"{name}'s record names tags past the {stable_tags} a fresh start has: "
+                     f"{', '.join(f'{tag:08x}' for tag in unkept[:8])}")
+        # (a map recorded under two keys, ui.map's before and after the first start's pass makes the menus'
+        # models: each)
+        records[(checksum, key)] = {"map": name, "scenario": scenario, "checksum": checksum, "key": key,
+                                    "draws": int(draws), "words": int(words), "size": len(data),
+                                    "tags": int(stable_tags), "data": zlib.compress(data, 9)}
+    maps = {record["map"] for record in records.values()}
+    if len(maps) != STOCK_MAP_COUNT:
+        sys.exit(f"{len(maps)} maps recorded, not {STOCK_MAP_COUNT}: {sorted(maps)}")
     if out.is_dir():
         shutil.rmtree(out)
     out.mkdir(parents=True)
-    ordered = [records[name] for name in sorted(records)]
+    ordered = sorted(records.values(), key=lambda record: (record["map"], record["key"]))
     offset = 4 * (3 + 6 * len(ordered))
     index, blobs = [struct.pack("<3I", PACK_MAGIC, PACK_FORM, len(ordered))], []
     for record in ordered:
