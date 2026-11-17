@@ -2060,6 +2060,8 @@ static VkFormat hdr_color_format, hdr_depth_format;
 static VkSampleCountFlagBits hdr_samples;
 static int hdr_told[8][2];
 static float hdr_told_headroom[8];
+static float hdr_told_white[8];
+static int hdr_told_reported[8];
 static unsigned int hdr_tells, hdr_encodes;
 static uint8_t hdr_encoded_format;
 static struct xgpu_hdr_frame hdr_encoded_frame;
@@ -2320,9 +2322,9 @@ static VkResult VKAPI_CALL hdr_formats(VkPhysicalDevice physical, VkSurfaceKHR s
 
 static void hdr_display(int hdr, float headroom, float white_nits, int white_reported)
 {
-	(void)white_nits;
-	(void)white_reported;
 	assert(hdr_tells < 8);
+	hdr_told_white[hdr_tells] = white_nits;
+	hdr_told_reported[hdr_tells] = white_reported;
 	hdr_told[hdr_tells][0] = hdr;
 	hdr_told_headroom[hdr_tells] = headroom;
 	hdr_tells++;
@@ -2464,6 +2466,69 @@ static void hdr_window_test(void)
 	xgpu_vulkan_hdr_state(1, XGPU_HDR_MODE_FAITHFUL, 0, 100, 0);
 	assert(window_present_frame() && window_made.imageFormat == VK_FORMAT_B8G8R8A8_UNORM && !hdr_encodes);
 	assert(hdr_tells == 1 && !hdr_told[0][0]);
+	reset();
+}
+
+/* the HDR metadata set (VK_EXT_hdr_metadata's): its peak and average */
+static unsigned int hdr_metadata_sets;
+static float hdr_metadata_peak_set, hdr_metadata_average_set;
+
+static void VKAPI_CALL hdr_metadata_record(VkDevice device, uint32_t count, const VkSwapchainKHR *swapchains,
+	const VkHdrMetadataEXT *metadata)
+{
+	(void)device; (void)swapchains;
+	assert(count == 1);
+	hdr_metadata_sets++;
+	hdr_metadata_peak_set = metadata->maxContentLightLevel;
+	hdr_metadata_average_set = metadata->maxFrameAverageLightLevel;
+}
+
+/* the system's SDR white (#1119): any value it reports is its white, 1.0
+too (Windows' least SDR brightness, 80 nits); only none reported (0) is
+BT.2408's 203 nits. And the HDR metadata set again when paper white or the
+display's values move it, not only when the swapchain is made. */
+static void hdr_white_test(void)
+{
+	struct xgpu_hdr_frame frame;
+	unsigned int made, sets;
+
+	/* 1.0 reported: 80 nits, so paper white of 300 nits is 3.75 of it,
+	the peak (a headroom of 4) about 1.07 paper whites, and the host told
+	the white was reported */
+	hdr_window_reset();
+	vkSetHdrMetadataEXT = hdr_metadata_record;
+	hdr_metadata_sets = 0;
+	xgpu_vulkan_window_hdr(1, 1.0f, 4.0f);
+	xgpu_vulkan_hdr_state(1, XGPU_HDR_MODE_FAITHFUL, 300, 100, 0);
+	assert(window_present_frame() && hdr_told_white[hdr_tells - 1] == 80.0f && hdr_told_reported[hdr_tells - 1]);
+	xgpu_vulkan_hdr_frame(&frame);
+	assert(fabsf(frame.peak - 4.0f / 3.75f) < 1e-5f);
+	/* (the metadata with the swapchain: the peak 4 of PQ's 203 nits) */
+	assert(hdr_metadata_sets >= 1 && fabsf(hdr_metadata_peak_set - 812.0f) < 1e-3f);
+	made = window_swapchains;
+	sets = hdr_metadata_sets;
+	assert(fabsf(hdr_metadata_average_set - 203.0f * 3.75f) < 1e-3f);
+
+	/* (the negative control) none reported: BT.2408's 203 nits, so the
+	same paper white is about 1.48 of it, and the host told none was */
+	xgpu_vulkan_window_hdr(1, 0.0f, 4.0f);
+	assert(window_present_frame() && hdr_told_white[hdr_tells - 1] == 203.0f && !hdr_told_reported[hdr_tells - 1]);
+	xgpu_vulkan_hdr_frame(&frame);
+	assert(fabsf(frame.peak - 4.0f / (300.0f / 203.0f)) < 1e-5f);
+
+	/* the swapchain kept (its output the same), yet the metadata set
+	again for the new white: and again for a new paper white and a new
+	headroom; not again where nothing moved */
+	assert(window_swapchains == made && hdr_metadata_sets == sets + 1);
+	assert(fabsf(hdr_metadata_average_set - 300.0f) < 1e-3f);
+	xgpu_vulkan_hdr_state(1, XGPU_HDR_MODE_FAITHFUL, 400, 100, 0);
+	assert(hdr_metadata_sets == sets + 2 && fabsf(hdr_metadata_average_set - 400.0f) < 1e-3f);
+	xgpu_vulkan_hdr_state(1, XGPU_HDR_MODE_FAITHFUL, 400, 100, 0);
+	assert(hdr_metadata_sets == sets + 2);
+	xgpu_vulkan_window_hdr(1, 0.0f, 5.0f);
+	assert(window_present_frame() && hdr_metadata_sets == sets + 3 && fabsf(hdr_metadata_peak_set - 1015.0f) < 1e-3f);
+	assert(window_present_frame() && hdr_metadata_sets == sets + 3 && window_swapchains == made);
+	vkSetHdrMetadataEXT = NULL;
 	reset();
 }
 
@@ -3772,6 +3837,7 @@ int main(void)
 	local_read_test();
 	hdr_pipeline_test();
 	hdr_window_test();
+	hdr_white_test();
 	hdr_post_test();
 	half_test();
 	discards_test();
