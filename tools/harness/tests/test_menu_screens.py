@@ -258,6 +258,11 @@ def test_actions_registered():
             assert '"coop."' in value, binding
             assert f'"{binding}"' in re.search(r"\nint pc_menu_coop_value\(.*?\n\}\n",
                                                 read("port/linux/game/coop_menu.inc"), re.S).group(0), binding
+        elif binding.startswith("benchmark."):
+            # (the built-in benchmark's results, benchmark.c's benchmark_value)
+            assert '"benchmark."' in value, binding
+            assert f'"{binding}"' in re.search(r"\nint benchmark_value\(.*?\n\}\n",
+                                                read("port/linux/game/benchmark.c"), re.S).group(0), binding
         else:
             assert f'"{binding}"' in value, binding
     sources = re.findall(r'"([^"]+)"', re.search(r"screen_source_names\[\] =\n\{\n(.*?)\n\};", source,

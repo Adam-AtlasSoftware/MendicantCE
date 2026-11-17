@@ -390,6 +390,7 @@ symbols in this file:
 #include "party.h" /* port: port/linux/game/party_menu.inc */
 #include "matchmaking.h" /* port: port/linux/game/matchmaking.c */
 #include "perf_overlay.h" /* port: port/linux/game/perf_overlay.c */
+#include "benchmark.h" /* port: port/linux/game/benchmark.c */
 #include "network_aim_assist.h" /* port: port/linux/game/network_aim_assist.c */
 #include "network_shield_effects.h" /* port: port/linux/game/network_shield_effects.c */
 #include "network_riding_map.h" /* port: port/linux/game/network_riding_map.c */
@@ -4126,6 +4127,9 @@ void main_loop(
 			/* port: a demo asked for played, and the end of one
 			(port/linux/game/demo.c) */
 			demo_frame(main_globals.main_menu_scenario_loaded, main_globals.seconds_elapsed);
+			/* port: the built-in benchmark, begun, measured and its results
+			shown (port/linux/game/benchmark.c) */
+			benchmark_frame(main_globals.main_menu_scenario_loaded);
 			/* port: Basic Training's game started, its skip buttons
 			(port/linux/game/basic_training.c) */
 			basic_training_update(main_globals.main_menu_scenario_loaded, main_globals.seconds_elapsed);

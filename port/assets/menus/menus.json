@@ -312,6 +312,7 @@
   "model/nodes.xml",
   "model/settings.xml",
   "screens/add_player.xml",
+  "screens/benchmark.xml",
   "screens/blocks.xml",
   "screens/browser.xml",
   "screens/campaign.xml",

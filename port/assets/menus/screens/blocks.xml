@@ -23,6 +23,9 @@ screen file's, set on each widget as the screen is made. -->
 	<!-- Add Player's (screens/add_player.xml: menu_functions.c), as the lobby's and a game under way's ADD PLAYER
 	and another controller's START open it -->
 	<widget name="screens/add_player" width="640" height="480" flags="pass_unhandled_to_focused_child" bitmap="main_menu/parts/background_tall"/>
+	<!-- the built-in benchmark's results (screens/benchmark.xml: port/linux/game/benchmark.c), over the main menu
+	as its match ends -->
+	<widget name="screens/benchmark" width="640" height="480" flags="pass_unhandled_to_focused_child" bitmap="main_menu/parts/background_tall"/>
 	<!-- a header's title in the tall layout's band, as Settings' and the browsers' titles (port_settings.py's tall_title) -->
 	<widget name="screens/header_text" type="text" left="24" width="592" height="40" font="heading" color="#FF2995FD" text_y="9" wide="-106 0" text_flags="no_focus_test"/>
 	<!-- an inner screen's header: its lettered picture (the file's picture=), where the campaign menu's is -->

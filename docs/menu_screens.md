@@ -649,6 +649,19 @@ editor opts in with the same handler. The editor's Step 1 (its GAME TYPE)
 shows the gametype's own type while its BACK is focused, not the PC version's
 picture of a SAVE CHANGES question, which looked like one BACK asked (#901).
 
+## The benchmark's results
+
+`screens/benchmark.xml` shows the built-in benchmark's results
+(`port/linux/game/benchmark.c`) over the main menu as its match ends, a
+screen opened only by C (its stand-in `screens/benchmark`,
+`menu_functions.c`'s `pc_menu_benchmark_results_open`). Its table's rows are
+the row source `benchmark.results` (each measure and its value), its panel
+the `benchmark.*` bindings (what held the frames back, the pacing, the
+window, the GPU, the processor and the file written); a run that stopped
+has no rows, and the table's words for none (`benchmark.failure`) say why.
+CLOSE (B) goes back to the main menu. The classic menus have no results
+screen: the results are in `benchmarks/` and the log.
+
 ## The pause menu
 
 `screens/pause.xml` (a multiplayer game's) and `screens/pause_campaign.xml`

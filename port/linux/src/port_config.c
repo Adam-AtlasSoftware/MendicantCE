@@ -484,6 +484,14 @@ static const struct config_setting config_settings[] =
 		"thread, waiting for the display and on the game's thread. An older\n"
 		"version's display.show_fps or display.show_frame_rate = true reads as\n"
 		"\"simple\"." },
+	{ "display.benchmark_pacing", _config_string, "\"uncapped\"", "HALO_BENCHMARK_PACING", _environment_value,
+		_platform_all,
+		"The built-in benchmark's frame pacing (Settings > Video > Frame Rate &\n"
+		"Sync's RUN BENCHMARK, halo --benchmark: port/linux/game/benchmark.c):\n"
+		"\"uncapped\", vsync, variable refresh and the frame cap off for the run,\n"
+		"what the computer can draw; \"settings\", as they are set, what you see\n"
+		"as you play. The results say which, and how much of the time the\n"
+		"frames waited for the display." },
 	{ "display.movies", _config_boolean, "false", "HALO_MOVIES", _environment_value, _platform_all,
 		"Play the Xbox's Bink movies from the game data's bink folder: the intro\n"
 		"as the game starts, the attract movies on an idle main menu and the\n"
@@ -2679,6 +2687,11 @@ static const struct config_setting config_settings[] =
 		"memory never written: two runs, one of each, compared with\n"
 		"tools/determinism_compare.py, part where one reaches the game; empty\n"
 		"as the game always has (the game's malloc fills with 0xCA)." },
+	{ "debug.benchmark", _config_string, "\"\"", "HALO_BENCHMARK", _environment_value, _platform_all,
+		"Runs the built-in benchmark once the main menu is up, as halo\n"
+		"--benchmark does (port/linux/game/benchmark.c): \"uncapped\" or\n"
+		"\"settings\" its pacing (display.benchmark_pacing's), \"on\" that\n"
+		"setting's; empty for none." },
 	{ "debug.frame_log", _config_string, "\"\"", "HALO_FRAME_LOG", _environment_value, _platform_all,
 		"A file to write a line to for each frame presented once the scenario's\n"
 		"simulation has started: its seconds, then microseconds of the frame,\n"
@@ -4742,6 +4755,7 @@ static const struct
 } config_words[] =
 {
 	{ "display.mode", { "", "fullscreen", "borderless", "windowed", NULL }, "display.fullscreen's" },
+	{ "display.benchmark_pacing", { "uncapped", "settings", NULL }, NULL },
 	{ "display.resolution_scaling", { "native", "original", NULL }, NULL },
 	{ "display.anti_aliasing", { "off", "fxaa", "smaa", "ssaa2x", "msaa2x", "msaa4x", "msaa8x", NULL }, NULL },
 	{ "display.ambient_occlusion", { "off", "world", "ray_traced", NULL }, "off" },

@@ -3479,6 +3479,15 @@ void network_test_update(
 	}
 }
 
+/* the built-in benchmark's (benchmark.c): debug.network_test and the
+rest read again at the next frame, the test begun anew (its settings set
+for the run, config_set_for_run) */
+void network_test_restart(
+	void)
+{
+	csmemset(&network_test, 0, sizeof(network_test));
+}
+
 /* the game's time in seconds while a game runs, -1 otherwise: the scripted
 player's clock (xinput_sdl.c, debug.test_input) */
 double network_test_game_seconds(

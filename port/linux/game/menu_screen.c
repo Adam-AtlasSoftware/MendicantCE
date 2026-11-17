@@ -38,6 +38,7 @@ kept on the item of the same id.
 #include "menu_widget.h"
 #include "menu_spartan.h"
 #include "network_host_controls.h"
+#include "benchmark.h" /* port: port/linux/game/benchmark.c */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -501,7 +502,8 @@ static char const *const screen_binding_names[] =
 	"lobby.friend", "lobby.friend.where", "lobby.friends.said", "lobby.map.picture", "lobby.description",
 	"lobby.where", "lobby.lineup", "lobby.lineup.names", "add.count", "add.title", "add.profile", "add.color", "add.help",
 	"add.done", "pause.friendly_fire", "pause.host_controls", "pause.end_game",
-	"pause.chapters",
+	"pause.chapters", "benchmark.failure", "benchmark.verdict", "benchmark.held", "benchmark.pacing",
+	"benchmark.settings", "benchmark.gpu", "benchmark.cpu", "benchmark.file", "benchmark.scenario",
 };
 
 /* the row sources a table may name (menu_table.h), and their names */
@@ -512,6 +514,7 @@ static struct menu_table_source const *const screen_sources[] =
 	&pc_menu_lobby_source,
 	&pc_menu_color_source,
 	&pc_menu_add_player_source,
+	&benchmark_results_source,
 };
 
 static char const *const screen_source_names[] =
@@ -521,6 +524,7 @@ static char const *const screen_source_names[] =
 	"lobby.players",
 	"profile.colors",
 	"add.players",
+	"benchmark.results",
 };
 
 /* the chats a <chat> may name (menu_table.h), and their names */
@@ -558,6 +562,9 @@ static int screen_value(void *context, char const *name, char *value, unsigned l
 	/* (Add Player's: menu_functions.c's) */
 	if (!strncmp(name, "add.", 4))
 		return pc_menu_add_player_value(name, value, size);
+	/* (the built-in benchmark's results: benchmark.c's) */
+	if (!strncmp(name, "benchmark.", 10))
+		return benchmark_value(name, value, size);
 	/* (co-op's, the lobby's WHO CAN JOIN and what keeps people from the
 	game: coop_menu.inc) */
 	if (!strncmp(name, "coop.", 5))
@@ -661,6 +668,9 @@ static struct screen_place const screen_places[] =
 	question as an editor is left with changes, a screen of its own) */
 	{ "quit", "main_menu\\quit_select\\quit_screen", NULL, NULL },
 	{ "save_changes", "screens\\save_changes", NULL, NULL },
+	/* (the built-in benchmark's results, over the main menu as its match
+	ends: benchmark.c, menu_functions.c's pc_menu_benchmark_results_open) */
+	{ "benchmark", "screens\\benchmark", NULL, NULL },
 };
 
 /* ---------- the screens open */
