@@ -1395,8 +1395,8 @@ interlock), where the device's reads are not in rasterization order and
 the draw can take its depth and stencil tests before its shader: it writes
 neither, nor replaces its depth. Not a VR effect's nor a view of several
 eyes' (the VR mode draws SDR); a flat screen's soft effect's
-(display.soft_particles) can be, its fade before the blend. Else its triangles over the same pixel are
-unordered (docs/hdr.md, "ceiling"). */
+(display.soft_particles) can be, its fade before the blend. Else its
+triangles over the same pixel are unordered (docs/hdr.md, "ceiling"). */
 static int interlocked(const struct xgpu_stream_pipeline_define *definition)
 {
 	const struct xgpu_stream_pipeline_key *key = &definition->key;
