@@ -1637,6 +1637,9 @@ PAGES = {
              "The shape of the look stick's dead zone. Axial: each direction its own, a square in the middle, as "
              "Classic aim. Round: the same whichever way you push, as Modern aim. Auto follows your Aim Style.",
              None),
+            ("ZOOM SENSITIVITY", "input.stick_zoom_sensitivity", VERTICAL_SENSITIVITIES,
+             "How fast the right stick turns the view while zoomed in, as with a sniper rifle's scope. 1X is the "
+             "game's own.", None),
         ],
     },
     SCREEN_LAYOUT[0]: {
@@ -1849,7 +1852,8 @@ SEARCH_BUTTON_HELP = ["Saves your changes, on every tab, and applies them.",
 SETTINGS_SEARCH_WORDS = {
     "fov": ["video_settings:fov", "vehicle_fov", "scale_scoped_fov", "viewmodel_fov"],
     "sens": ["mouse_sensitivity", "mouse_vertical_sensitivity", "zoom_sensitivity", "look_sensitivity",
-             "look_vertical_sensitivity", "gyro_sensitivity", "gyro_vertical_sensitivity"],
+             "look_vertical_sensitivity", "stick_zoom_sensitivity", "gyro_sensitivity",
+             "gyro_vertical_sensitivity"],
     "dpi": ["mouse_sensitivity"],
     "fps": ["max_fps", "show_frame_rate", "frame_rate_sync"],
     "framerate": ["frame_rate_sync", "max_fps", "show_frame_rate"],

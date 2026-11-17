@@ -1139,6 +1139,11 @@ static const struct config_setting config_settings[] =
 		"(input.aim_style: Classic's each direction's own, a square in the\n"
 		"middle; Modern's round); \"axial\", each direction's own; \"round\", none\n"
 		"within the dead zone whichever way the stick points.", _scope_player },
+	{ "input.stick_zoom_sensitivity", _config_real, "1.0", "HALO_STICK_ZOOM_SENSITIVITY", _environment_value,
+		_platform_all,
+		"How fast a controller's look stick turns the view zoomed in, times the\n"
+		"original's (which the zoom's magnification divides): 1 the original's,\n"
+		"2 twice as fast. The mouse's is input.zoom_sensitivity.", _scope_player },
 	{ "input.look_vertical_sensitivity", _config_real, "1.0", "HALO_LOOK_VERTICAL_SENSITIVITY", _environment_value,
 		_platform_all,
 		"How fast a controller's look stick turns the view up and down, times\n"

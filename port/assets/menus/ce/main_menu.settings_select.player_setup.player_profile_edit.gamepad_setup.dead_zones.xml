@@ -21,6 +21,7 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/op_right_stick_outer_dead_zone" x="28" y="189"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/section_6" x="28" y="216"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/op_look_dead_zone_shape" x="28" y="236"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/op_stick_zoom_sensitivity" x="28" y="257"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/button_bar" y="414"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/button_bar" type="column_list" width="640" height="28" flags="pass_unhandled_to_focused_child left_right_tabs_items" source="tools/port_settings.py settings_files/_settings_page">
@@ -113,6 +114,15 @@
 		<on event="created" run="port setting load"/>
 		<on event="a" run="port setting segment"/>
 	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/op_stick_zoom_sensitivity" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/stick_zoom_sensitivity_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/stick_zoom_sensitivity_spinner" x="188"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/stick_zoom_sensitivity_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/labels" string_index="8" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/stick_zoom_sensitivity_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="0.25X|0.5X|0.6X|0.7X|0.75X|0.8X|0.9X|1X|1.1X|1.25X|1.5X|2X" setting="input.stick_zoom_sensitivity" values="0.25|0.5|0.6|0.7|0.75|0.8|0.9|1|1.1|1.25|1.5|2" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
+		<on event="created" run="port setting load"/>
+	</widget>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/labels">
 		<string text="DEAD ZONES"/>
 		<string text="LEFT STICK"/>
@@ -122,6 +132,7 @@
 		<string text="RIGHT STICK"/>
 		<string text="LOOK STICK"/>
 		<string text="SHAPE"/>
+		<string text="ZOOM SENSITIVITY"/>
 	</strings>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/help_strings">
 		<string text=""/>
@@ -133,5 +144,6 @@
 		<string text="How much of the right stick's travel at its edge counts as a full push, so a worn stick still turns at full speed and speeds up the turn. None is the game's own."/>
 		<string text=""/>
 		<string text="The shape of the look stick's dead zone. Axial: each direction its own, a square in the middle, as Classic aim. Round: the same whichever way you push, as Modern aim. Auto follows your Aim Style."/>
+		<string text="How fast the right stick turns the view while zoomed in, as with a sniper rifle's scope. 1X is the game's own."/>
 	</strings>
 </menus>

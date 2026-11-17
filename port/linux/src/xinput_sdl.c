@@ -197,7 +197,8 @@ static float mouse_sensitivity(void)
 
 /* the game's own dead zone of each stick, of 32767 (source/input/input_xbox.c) */
 #define STICK_DEAD_RANGE 9000
-/* the most input.look_vertical_sensitivity takes (a multiplier) */
+/* the most input.look_vertical_sensitivity and input.stick_zoom_sensitivity
+take (multipliers) */
 #define LOOK_VERTICAL_SENSITIVITY_MAXIMUM 4.0f
 /* the most a stick's dead zone setting takes, in percent */
 #define STICK_DEAD_ZONE_MAXIMUM 50
@@ -330,6 +331,30 @@ float halo_look_vertical_sensitivity(short gamepad)
 	if (!pads[slot].read || pads[slot].read_at != config_changes())
 	{
 		float scale = (float)config_player_real(slot < PAD_PLAYERS ? slot : -1, "input.look_vertical_sensitivity");
+
+		pads[slot].read = 1;
+		pads[slot].read_at = config_changes();
+		pads[slot].scale = scale > 0.0f && scale <= LOOK_VERTICAL_SENSITIVITY_MAXIMUM ? scale : 1.0f;
+	}
+	return pads[slot].scale;
+}
+
+/* a gamepad's player's input.stick_zoom_sensitivity: the look stick's turn
+zoomed in times it (player_control.c's player_control_stick_zoom_look), 1
+the original's, each zoom level's magnification dividing it */
+float halo_stick_zoom_sensitivity(short gamepad)
+{
+	static struct
+	{
+		unsigned long read_at;
+		int read;
+		float scale;
+	} pads[PAD_PLAYERS + 1];
+	int slot = PAD_PLAYER_SLOT(gamepad);
+
+	if (!pads[slot].read || pads[slot].read_at != config_changes())
+	{
+		float scale = (float)config_player_real(slot < PAD_PLAYERS ? slot : -1, "input.stick_zoom_sensitivity");
 
 		pads[slot].read = 1;
 		pads[slot].read_at = config_changes();

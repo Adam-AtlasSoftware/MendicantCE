@@ -1310,6 +1310,21 @@
 			<choice shown="AXIAL" value="axial"/>
 			<choice shown="ROUND" value="round"/>
 		</row>
+		<row key="stick_zoom_sensitivity" kind="choice" setting="input.stick_zoom_sensitivity" label="ZOOM SENSITIVITY" crumb="CONTROLS › CONTROLLER › STICK DEAD ZONES" search="sens">
+			<help>How fast the right stick turns the view while zoomed in, as with a sniper rifle's scope. 1X is the game's own.</help>
+			<choice shown="0.25X" value="0.25"/>
+			<choice shown="0.5X" value="0.5"/>
+			<choice shown="0.6X" value="0.6"/>
+			<choice shown="0.7X" value="0.7"/>
+			<choice shown="0.75X" value="0.75"/>
+			<choice shown="0.8X" value="0.8"/>
+			<choice shown="0.9X" value="0.9"/>
+			<choice shown="1X" value="1"/>
+			<choice shown="1.1X" value="1.1"/>
+			<choice shown="1.25X" value="1.25"/>
+			<choice shown="1.5X" value="1.5"/>
+			<choice shown="2X" value="2"/>
+		</row>
 		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
 		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>
 		<button key="button_cancel" kind="cancel" run="port settings page cancel" help="Goes back without these changes."/>

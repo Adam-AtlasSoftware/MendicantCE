@@ -453,6 +453,10 @@ int halo_look_horizontal_inverted(short gamepad);
 /* a gamepad's look stick's turn up and down times this: its player's
 input.look_vertical_sensitivity, 1 the original's (port/linux/src/xinput_sdl.c) */
 float halo_look_vertical_sensitivity(short gamepad);
+/* a gamepad's look stick's turn zoomed in times this, on top of the zoom's
+own slowing: its player's input.stick_zoom_sensitivity, 1 the original's
+(port/linux/src/xinput_sdl.c) */
+float halo_stick_zoom_sensitivity(short gamepad);
 /* a gamepad's motors' strength, in percent (0 to 100): its player's
 input.rumble_strength, 100 the game's own (port/linux/src/xinput_sdl.c) */
 unsigned long halo_rumble_strength(short gamepad);
