@@ -79,6 +79,14 @@ static void case_speed(void)
 	CHECK(bots_match_speed_kept(0.0f) == 1.0f && bots_match_speed_kept(-2.0f) == 1.0f, "none: real time");
 }
 
+static void case_initial(void)
+{
+	/* (before any test case clears the globals: as the game starts) */
+	CHECK(bots_match.speed == 1.0f, "a game nobody asked to speed up runs at real time (%g)", bots_match.speed);
+	CHECK(bots_match.stage == _bots_match_none && !bots_match.tick_seen, "no match yet");
+	CHECK(bots_match.asked.bots_per_team == NONE && bots_match.last.minutes == NONE, "the options' NONEs");
+}
+
 static void schedule(long tick, char const *line)
 {
 	struct bots_match_line *kept = &bots_match.schedule[bots_match.schedule_count++];
@@ -127,6 +135,7 @@ int main(int argc, char **argv)
 		{ "parse", case_parse },
 		{ "entry", case_entry },
 		{ "speed", case_speed },
+		{ "initial", case_initial },
 		{ "schedule", case_schedule },
 		{ "lines", case_lines },
 	};

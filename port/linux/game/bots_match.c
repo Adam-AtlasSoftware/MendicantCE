@@ -174,8 +174,14 @@ static struct
 	/* the last kills */
 	struct bots_match_kill kills[BOTS_MATCH_KILLS];
 	long kill_count;
-} bots_match = { 0, 0, { "", "", NONE, 0, NONE, NONE }, { "", "", NONE, 0, NONE, NONE }, FALSE, FALSE, FALSE, FALSE, 0,
-	"", "", 0, 0, 0, 1.0f };
+} bots_match = {
+	/* (by name: a field added above speed once left it 0, and every game a
+	host played alone stood still, game_time_set_speed(0) each frame) */
+	.stage = _bots_match_none,
+	.asked = { "", "", NONE, 0, NONE, NONE },
+	.last = { "", "", NONE, 0, NONE, NONE },
+	.speed = 1.0f,
+};
 
 /* ---------- the pure parts */
 
