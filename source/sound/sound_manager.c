@@ -966,6 +966,10 @@ boolean sound_scripted_dialog_is_playing(
 void sound_initialize_for_new_map(
 	void)
 {
+	/* port: the new map's ranges of more than 32 permutations start with
+	none of those past 32 played (sound_definitions.c) */
+	sound_definitions_played_beyond_clear();
+
 	return;
 }
 
