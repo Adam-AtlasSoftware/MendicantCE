@@ -763,11 +763,8 @@
 			<choice shown="ON" value="on"/>
 			<choice shown="OFF" value="off"/>
 		</row>
-		<row key="perf_overlay" kind="choice" setting="display.perf_overlay" label="PERFORMANCE OVERLAY" crumb="VIDEO › FRAME RATE &amp; SYNC" search="fps framerate frametime gpu stats" search_choices="simple detailed">
-			<help>Shows how the game runs, at the bottom right. Simple is the frame rate: green is 30 or more, red under 30. Detailed adds the frame time, the 1% low, and the milliseconds spent on the GPU, the render thread, the game and waiting for the display.</help>
-			<choice shown="OFF" value="off"/>
-			<choice shown="SIMPLE" value="simple"/>
-			<choice shown="DETAILED" value="detailed"/>
+		<row key="performance_tools" kind="link" label="PERFORMANCE TOOLS ›" crumb="VIDEO › FRAME RATE &amp; SYNC" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/performance_tools/performance_tools_screen">
+			<help>The performance overlay, and timings and logs of where each frame's time goes, for finding what slows the game down.</help>
 		</row>
 		<section key="section_6" title="BENCHMARK"/>
 		<row key="benchmark_pacing" kind="choice" setting="display.benchmark_pacing" label="BENCHMARK PACING" crumb="VIDEO › FRAME RATE &amp; SYNC" search_choices="uncapped your settings" when="!in_game">
@@ -778,6 +775,28 @@
 		<row key="benchmark" kind="link" label="RUN BENCHMARK" crumb="VIDEO › FRAME RATE &amp; SYNC" when="!in_game" run="port settings benchmark">
 			<help>Plays a fixed minute of Blood Gulch with 40 bots, then shows the average frame rate, the 1% low, the frame times, the GPU and CPU time and your settings, and saves them in the benchmarks folder.</help>
 			<note>From the main menu only.</note>
+		</row>
+		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
+		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>
+		<button key="button_cancel" kind="cancel" run="port settings page cancel" help="Goes back without these changes."/>
+	</screen>
+	<screen name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/performance_tools/performance_tools_screen" kind="settings" layout="page" geometry="tall" title="PERFORMANCE TOOLS">
+		<row key="perf_overlay" kind="choice" setting="display.perf_overlay" label="PERFORMANCE OVERLAY" crumb="VIDEO › FRAME RATE &amp; SYNC › PERFORMANCE TOOLS" search="fps framerate frametime gpu stats" search_choices="simple detailed">
+			<help>Shows how the game runs, at the bottom right. Simple is the frame rate: green is 30 or more, red under 30. Detailed adds the frame time, the 1% low, and the milliseconds spent on the GPU, the render thread, the game and waiting for the display.</help>
+			<choice shown="OFF" value="off"/>
+			<choice shown="SIMPLE" value="simple"/>
+			<choice shown="DETAILED" value="detailed"/>
+		</row>
+		<row key="timings" kind="choice" setting="debug.timings" label="DEVELOPER TIMINGS" crumb="VIDEO › FRAME RATE &amp; SYNC › PERFORMANCE TOOLS">
+			<help>Times the game's own work (AI, objects, effects, scripts...) and, with Vulkan, each graphics setting's passes on the GPU, shown in the Detailed overlay with counts of objects and effects. Off times nothing.</help>
+			<note>The GPU's passes from the next start.</note>
+			<choice shown="ON" value="true"/>
+			<choice shown="OFF" value="false"/>
+		</row>
+		<row key="demo_perf_log" kind="choice" setting="debug.demo_perf_log" label="DEMO FRAME TIMES" crumb="VIDEO › FRAME RATE &amp; SYNC › PERFORMANCE TOOLS">
+			<help>Saves a log of each frame's times beside every demo recorded, lined up with the demo's ticks, so a hitch seen in play can be found in the demo. The demo itself is unchanged.</help>
+			<choice shown="ON" value="true"/>
+			<choice shown="OFF" value="false"/>
 		</row>
 		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
 		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>
