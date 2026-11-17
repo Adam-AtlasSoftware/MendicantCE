@@ -346,6 +346,11 @@ debug.gbuffer_view) */
 #define XGPU_GBUFFER_PHASE_ADDITIONS 2u
 #define XGPU_GBUFFER_PHASE_RESOLVE 3u
 #define XGPU_GBUFFER_PHASE_VIEW_SHIFT 8
+/* (PRISM v4 M4) in the base phase, the diffuse texture pass drawn and the
+decals next: the level's pixels of a pack's or a mod's material take its
+maps' base colour now (the albedo target's, GBUFFER_BEGIN below), so that
+the decals lie over it; the draws still go to the base */
+#define XGPU_GBUFFER_PHASE_BASE_TEXTURED 6u
 /* the G-buffer pass (walk 1: the window's opaque surfaces drawn first,
 alone, as display.ambient_occlusion "world"'s pre-pass draws them, before
 CE's passes): GBUFFER_BEGIN (the draws from here on are the G-buffer's:
@@ -388,10 +393,12 @@ pack's or a mod's), the pass has a third target, the albedo target (RGBA8
 unorm): the base colour its family's uber-shader drew of the maps (the
 base map's colour space), its alpha the maps' occlusion, at least 1/255; 0
 where the base colour is not the maps' (every other twin writes nothing
-there: the fourth word's tier says whose a pixel is). Before the resolve,
-the level's pixels of the pack or mod tier take its colour in the base
-target's place (xgpu_vulkan_post_albedo_over), so that the resolve, its
-views and PRISM Raster read the maps' base colour as they read CE's.
+there: the fourth word's tier says whose a pixel is). Once the diffuse
+texture pass is drawn (XGPU_GBUFFER_PHASE_BASE_TEXTURED), before the
+decals, the level's pixels of the pack or mod tier take its colour in the
+base target's place (xgpu_vulkan_post_albedo_over; at the resolve, where
+that phase did not come), so that the decals lie over it and the resolve,
+its views and PRISM Raster read the maps' base colour as they read CE's.
 The resolve's views (bit 8 on, debug.gbuffer_view) 4 to 11 show the G-buffer
 in the frame's place: 4 the base colour (the level's from the base phase's
 target), 5 the normal, 6 the roughness, 7 the metalness, 8 the material

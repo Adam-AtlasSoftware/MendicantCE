@@ -109,9 +109,11 @@ G-buffer twin of the draw with CE's vertex program as it is:
 
 The maps' base colour also goes to the G-buffer's albedo target (`GBUFFER_BEGIN`'s third target, RGBA8: the colour,
 its alpha the occlusion; 0 where the albedo is not the maps'), which the pass has only where a map's material has
-maps. Before the resolve, the level's pixels of a pack's or mod's material take its colour in the base target's place
-(`xgpu_vulkan_post_albedo_over`), so the resolve, its views and PRISM Raster's light read it as they read CE's.
-An object's base colour is in the G-buffer's first word, as before.
+maps. Once CE's diffuse texture pass is drawn into the base target, before the decals (`GBUFFER_PHASE`'s
+`BASE_TEXTURED`, which `render_window` sends after `structure_render_diffuse_texture`), the level's pixels of a pack's
+or mod's material take its colour in the base target's place (`xgpu_vulkan_post_albedo_over`): the decals (dirt,
+scorch marks, bullet holes) lie over it as over CE's, and the resolve, its views and PRISM Raster's light read it as
+they read CE's. An object's base colour is in the G-buffer's first word, as before.
 
 The images are streamed as `display.prism_materials`' are: each is usable once its levels from 256 texels down are
 resident, the uber-shader drawing the automatic tier's values and CE's bump map until then.

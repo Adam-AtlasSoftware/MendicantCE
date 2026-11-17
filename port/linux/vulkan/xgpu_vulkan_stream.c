@@ -451,6 +451,9 @@ static struct
 	/* after a resolve with a view (debug.gbuffer_view): nothing more drawn
 	into the colour target this frame */
 	int hold;
+	/* (PRISM v4 M4) the maps' base colour put over the base this phase
+	(BASE_TEXTURED): not again at the resolve */
+	int albedo_over;
 } deferred;
 
 /* display.lighting "ce_deferred"'s G-buffer pass (xgpu_stream.h's
@@ -5137,7 +5140,23 @@ static void stream_gbuffer_phase(void *context, uint32_t value)
 		deferred.color = stream.color;
 		deferred_start(color->image, deferred.base, 1.0f);
 		deferred.phase = XGPU_GBUFFER_PHASE_BASE;
+		deferred.albedo_over = 0;
 		targets_bind();
+	}
+	/* (the diffuse texture pass drawn, the decals next: the level's base
+	colour where its materials' maps drew it, the maps' in the base target's
+	place, under the decals; nothing at all where none did) */
+	else if (phase == XGPU_GBUFFER_PHASE_BASE_TEXTURED)
+	{
+		struct xgpu_vulkan_image *words = gbuffer.drawn && gbuffer.color == stream.color &&
+			gbuffer.width == color->width && gbuffer.height == color->height ? gbuffer.words : NULL;
+
+		if (deferred.phase == XGPU_GBUFFER_PHASE_BASE && stream.color == deferred.color && words &&
+			gbuffer.albedo_drawn && gbuffer.albedo && !deferred.albedo_over)
+		{
+			deferred.albedo_over = xgpu_vulkan_post_albedo_over(deferred.base, gbuffer.albedo, words);
+			targets_bind();
+		}
 	}
 	else if (phase == XGPU_GBUFFER_PHASE_ADDITIONS && deferred.phase == XGPU_GBUFFER_PHASE_BASE &&
 		stream.color == deferred.color)
@@ -5175,9 +5194,11 @@ static void stream_gbuffer_phase(void *context, uint32_t value)
 				view = 0;
 			/* (the level's base colour, where its materials' maps drew it, the
 			maps' in the base target's place: what the resolve, its views and
-			Raster take) */
-			if (words && gbuffer.albedo_drawn && gbuffer.albedo)
+			Raster take; at the texture pass's end, BASE_TEXTURED, or here where
+			that did not come) */
+			if (words && gbuffer.albedo_drawn && gbuffer.albedo && !deferred.albedo_over)
 				xgpu_vulkan_post_albedo_over(deferred.base, gbuffer.albedo, words);
+			deferred.albedo_over = 0;
 			xgpu_vulkan_post_deferred_resolve(color->image, deferred.base, deferred.additions, words,
 				words ? gbuffer.extras : NULL, depth && depth->depth && !depth->multisampled ? depth->image : NULL, view,
 				raster && words ? raster_relight : NULL, &context);
@@ -5198,6 +5219,7 @@ static void stream_frame_end(void *context)
 	/* (a window's phases never past its frame) */
 	deferred.phase = 0;
 	deferred.hold = 0;
+	deferred.albedo_over = 0;
 	gbuffer.active = gbuffer.ready = 0;
 	gbuffer.drawn = 0;
 	gbuffer.albedo_drawn = 0;

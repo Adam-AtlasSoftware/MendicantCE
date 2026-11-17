@@ -44,7 +44,9 @@ by the host at its automatic tier (or a mod's, where display.prism_materials
 gives the shader one), and after each its maps, where a pack or a mod gives
 the shader PRISM's material (SCENE_MATERIAL_MAPS, prism_materials.c: the
 pack and mod tiers, which the G-buffer pass's uber-shaders draw). The level's
-base colour is the base target's, or the pack's where it has one.
+base colour is the base target's, or the pack's where it has one: put over
+the texture pass's once that is drawn (GBUFFER_PHASE_BASE_TEXTURED), so that
+the decals lie over it.
 
 Only the primary window's view, not a mirror's nor the VR mode's eyes, and
 only where the host draws it (the Vulkan backend; the others ignore the
@@ -91,6 +93,7 @@ void halo_scene_view(short x0, short y0, short x1, short y1, float const camera[
 #define PHASE_RESOLVE 3ul
 #define PHASE_GBUFFER_BEGIN 4ul
 #define PHASE_GBUFFER_END 5ul
+#define PHASE_BASE_TEXTURED 6ul
 #define PHASE_VIEW_SHIFT 8
 #define PHASE_RASTER 0x10000ul
 
@@ -704,6 +707,13 @@ void prism_deferred_phase(
 {
 	unsigned long value;
 
+	/* (a moment of the base phase, not a phase of its own: the maps' base
+	colour under the decals) */
+	if (phase == _prism_deferred_base_textured)
+	{
+		xgpu_backend_gbuffer_phase(PHASE_BASE_TEXTURED);
+		return;
+	}
 	switch (phase)
 	{
 	case _prism_deferred_base:
