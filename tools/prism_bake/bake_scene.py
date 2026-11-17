@@ -4,7 +4,7 @@ importance and its atlas at the `max` tier (port/linux/vulkan/prism_bake_*.c, ru
 with top-down pictures to check them by.
 
     python3 -I tools/prism_bake/bake_scene.py --data <data root> --out <folder> b30 a10 c40 ratrace bloodgulch
-        [--bsp <index>]... [--density 16 --density 32] [--flight auto|on|off]
+        [--bsp <index>]... [--density 16 --density 32] [--flight auto|on|off] [--tile 8|16|32]
 
 Each bsp is also seeded by the floors its map's other bsps walked (a bsp switch carries the player across), in rounds
 until no walk grows. For each map and bsp, <out>/<map>/<bsp index>/ gets the scene the probe reads (scene.bin), what it writes
@@ -176,7 +176,7 @@ def walked_floors(folder):
     return list(floors.values())
 
 
-def run_bsp(probe, out, game_map, index, densities, flight_mode, transfers=()):
+def run_bsp(probe, out, game_map, index, densities, flight_mode, tile=None, transfers=()):
     bsp = game_map.bsp(index)
     folder = out / game_map.name / str(index)
     folder.mkdir(parents=True, exist_ok=True)
@@ -190,6 +190,8 @@ def run_bsp(probe, out, game_map, index, densities, flight_mode, transfers=()):
     command = [str(probe), str(folder / "scene.bin"), str(folder), "--flight", "1" if flight else "0"]
     for density in densities:
         command += ["--density", str(density)]
+    if tile:
+        command += ["--tile", str(tile)]
     subprocess.run(command, check=True)
     summary = json.loads((folder / "summary.json").read_text())
     summary["map"] = game_map.name
@@ -270,6 +272,7 @@ def main():
     parser.add_argument("--bsp", type=int, action="append")
     parser.add_argument("--density", type=float, action="append")
     parser.add_argument("--flight", choices=("auto", "on", "off"), default="auto")
+    parser.add_argument("--tile", type=int, choices=(8, 16, 32))
     args = parser.parse_args()
     out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -291,7 +294,8 @@ def main():
                 before = summaries[index]["reach"]["walk"] if index in summaries else -1
                 if round_index and before >= 0 and summaries[index].get("transfers") == len(transfers):
                     continue
-                summary = run_bsp(probe, out, game_map, index, args.density or [16.0, 32.0], args.flight, transfers)
+                summary = run_bsp(probe, out, game_map, index, args.density or [16.0, 32.0], args.flight, args.tile,
+                                   transfers)
                 summary["transfers"] = len(transfers)
                 summary["round"] = round_index
                 summaries[index] = summary

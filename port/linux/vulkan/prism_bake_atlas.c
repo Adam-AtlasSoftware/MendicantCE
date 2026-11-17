@@ -89,6 +89,9 @@ int prism_bake_atlas_build(struct prism_bake_atlas *atlas, struct prism_bake_atl
 	int32_t t;
 	int result = -1;
 
+	/* (the sparse tiles' side, in texels: only 8, 16 and 32 are supported) */
+	if (parameters->tile != 8 && parameters->tile != 16 && parameters->tile != 32)
+		return -1;
 	memset(atlas, 0, sizeof(*atlas));
 	atlas->parameters = *parameters;
 	atlas->page_count = page_count;

@@ -69,7 +69,7 @@ struct prism_bake_atlas_triangle
 struct prism_bake_atlas_parameters
 {
 	float density[3]; /* texels per world unit at each tier */
-	int32_t tile; /* the sparse tiles' side, in texels (16 by default; 32 is the other choice) */
+	int32_t tile; /* the sparse tiles' side, in texels: 8, 16 or 32 (16 by default) */
 	float gutter; /* CE texels kept around each chart */
 	int32_t maximum_scale; /* a chart's scale before refinement */
 	int32_t maximum_refine; /* refinement levels */

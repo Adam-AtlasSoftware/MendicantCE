@@ -527,13 +527,13 @@ static void texel_triangle(struct prism_bake_atlas_triangle *t, struct prism_bak
 
 static void test_atlas_tiles(void)
 {
-	static int32_t const tiles[2] = { 16, 32 };
+	static int32_t const tiles[3] = { 8, 16, 32 };
 	struct prism_bake_atlas_page pages[1] = { { 100, 70 } };
 	struct prism_bake_atlas_triangle triangles[64];
 	struct prism_bake_atlas_parameters parameters;
 	struct prism_bake_atlas atlas;
-	double allocated[2] = { 0, 0 }, covered[2] = { 0, 0 };
-	size_t tile_count[2] = { 0, 0 };
+	double allocated[3] = { 0, 0, 0 }, covered[3] = { 0, 0, 0 };
+	size_t tile_count[3] = { 0, 0, 0 };
 	char why[256];
 	int n, i, k;
 
@@ -574,7 +574,7 @@ static void test_atlas_tiles(void)
 	}
 
 	/* random triangles on a page that is not a whole number of tiles, at
-	every tier and several scales, tiles of 16 and of 32: no texel a
+	every tier and several scales, tiles of 8, of 16 and of 32: no texel a
 	triangle's gutter reaches lies in an unallocated tile */
 	n = 48;
 	for (i = 0; i < n; i++)
@@ -590,7 +590,7 @@ static void test_atlas_tiles(void)
 		}
 		texel_triangle(&triangles[i], pages, c, 0.25f + (float)(uniform() * 0.5), (uint8_t)(i % 3));
 	}
-	for (k = 0; k < 2; k++)
+	for (k = 0; k < 3; k++)
 	{
 		long missed;
 
@@ -611,10 +611,12 @@ static void test_atlas_tiles(void)
 		check(atlas_missed(&atlas) == 0, "atlas_refined_no_texel_missed", why);
 		prism_bake_atlas_free(&atlas);
 	}
-	sprintf(why, "16: %lu tiles, %g texels; 32: %lu tiles, %g texels; covered %g and %g", (unsigned long)tile_count[0],
-		allocated[0], (unsigned long)tile_count[1], allocated[1], covered[0], covered[1]);
-	check(allocated[0] <= allocated[1] && tile_count[0] >= tile_count[1] && covered[0] == covered[1] &&
-		allocated[0] >= covered[0], "atlas_tile_sizes", why);
+	sprintf(why, "8: %lu tiles, %g texels; 16: %lu tiles, %g texels; 32: %lu tiles, %g texels; covered %g %g %g",
+		(unsigned long)tile_count[0], allocated[0], (unsigned long)tile_count[1], allocated[1], (unsigned long)tile_count[2],
+		allocated[2], covered[0], covered[1], covered[2]);
+	check(allocated[0] <= allocated[1] && allocated[1] <= allocated[2] && tile_count[0] >= tile_count[1] &&
+		tile_count[1] >= tile_count[2] && covered[0] == covered[1] && covered[1] == covered[2] && allocated[0] >= covered[0],
+		"atlas_tile_sizes", why);
 }
 
 /* ---------- the cache file */

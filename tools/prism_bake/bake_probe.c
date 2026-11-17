@@ -6,7 +6,7 @@ map, offline (tools/prism_bake/bake_scene.py writes the scene and draws
 what this writes): the reachable space, each triangle's importance, the
 floors the walk did not reach, and the atlas at the qualities asked for.
 
-	bake_probe <scene.bin> <out folder> [--flight 0|1] [--density <tier 0 texels per wu>]...
+	bake_probe <scene.bin> <out folder> [--flight 0|1] [--density <tier 0 texels per wu>]... [--tile 8|16|32]
 
 The scene (bake_scene.py's, little endian):
 	"PBSC", version 2
@@ -127,18 +127,20 @@ int main(int argc, char **argv)
 	double started, reach_seconds, importance_seconds;
 	double floor_area = 0, floor_reached = 0, unreached_area_near = 0;
 	size_t floor_triangles = 0, floor_triangles_reached = 0, seeds_walked = 0;
-	int flight_override = -1, a;
+	int flight_override = -1, tile_override = -1, a;
 	int32_t water_count;
 	float const *water;
 
 	if (argc < 3)
-		fail("usage: bake_probe <scene.bin> <out folder> [--flight 0|1] [--density <texels per wu>]...");
+		fail("usage: bake_probe <scene.bin> <out folder> [--flight 0|1] [--density <texels per wu>]... [--tile 8|16|32]");
 	for (a = 3; a + 1 < argc; a += 2)
 	{
 		if (!strcmp(argv[a], "--flight"))
 			flight_override = atoi(argv[a + 1]);
 		else if (!strcmp(argv[a], "--density") && density_count < 8)
 			densities[density_count++] = (float)atof(argv[a + 1]);
+		else if (!strcmp(argv[a], "--tile"))
+			tile_override = atoi(argv[a + 1]);
 	}
 	if (!density_count)
 		densities[density_count++] = 16.0f;
@@ -346,6 +348,8 @@ int main(int argc, char **argv)
 		for (t = 0; t < triangle_count; t++)
 			atlas_triangles[t].tier = flat ? 0 : tiers[t];
 		prism_bake_atlas_defaults(&ap, PRISM_BAKE_QUALITY_MAX);
+		if (tile_override > 0)
+			ap.tile = tile_override;
 		ap.density[0] = densities[a / 2];
 		ap.density[1] = densities[a / 2] * 0.5f;
 		if (prism_bake_atlas_build(&atlas, pages, page_count, atlas_triangles, triangle_count, &ap))
