@@ -367,6 +367,9 @@ static struct
 	unsigned long long work_microseconds;
 } demo_recorder;
 
+/* told as a recording starts and stops (demo_set_recording_listener) */
+static demo_recording_listener demo_listener;
+
 static struct
 {
 	boolean requested;
@@ -1415,6 +1418,16 @@ static void demo_engine_state_set(
 	}
 }
 
+/* the listener, if any, told that a recording started or stopped */
+static void demo_recording_tell(
+	int started,
+	char const *name,
+	long tick)
+{
+	if (demo_listener)
+		demo_listener(started, name, tick);
+}
+
 static void demo_record_stop(
 	char const *reason)
 {
@@ -1439,6 +1452,7 @@ static void demo_record_stop(
 	demo_recorder.recording = FALSE;
 	demo_recorder.shadow_valid = FALSE;
 	demo_settings.read = FALSE;
+	demo_recording_tell(0, NULL, demo_recorder.last_tick);
 }
 
 /* whether this tick's game is one to record: a game of a map (not the main
@@ -1539,6 +1553,7 @@ static void demo_record_start(
 		demo_record_end(&demo_recorder.records, start);
 	}
 	platform_log("demos: recording %s", demo_recorder.name);
+	demo_recording_tell(1, demo_recorder.name, tick);
 }
 
 static void demo_record_tick_begin(
@@ -3435,4 +3450,10 @@ void demo_substep_end(
 		demo_playback_substep_end(substep_index, substep_count);
 	else if (demo_recorder.recording)
 		demo_record_substep_end(substep_index, substep_count);
+}
+
+void demo_set_recording_listener(
+	demo_recording_listener listener)
+{
+	demo_listener = listener;
 }
