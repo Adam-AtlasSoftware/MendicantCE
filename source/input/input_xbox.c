@@ -439,6 +439,47 @@ static void fix_round_dead_zone(
 	return;
 }
 
+/* port: one stick's reading after its dead zones (dead_range read as none,
+live_range as full): round (fix_round_dead_zone), or each direction's own
+(fix_dead_zones); input_port_fix_stick_dead_zones' for the game, and Advanced
+Stick Settings' reading of the stick by the page's values (menu_functions.c's
+stick_test_rows_show) */
+void input_port_fix_stick(
+	short x,
+	short y,
+	short dead_range,
+	short live_range,
+	boolean round,
+	point2d *stick)
+{
+	if (round)
+	{
+		fix_round_dead_zone(x, y, dead_range, live_range, stick);
+	}
+	else
+	{
+		stick->x = fix_dead_zones(x, dead_range, live_range);
+		stick->y = fix_dead_zones(y, dead_range, live_range);
+	}
+	return;
+}
+
+/* port: a gamepad's stick (_gamepad_stick_left or _right) as input_update
+read it last, before its dead zones; none for one out of range */
+void input_port_raw_stick(
+	short gamepad_index,
+	short stick,
+	point2d *raw)
+{
+	raw->x = 0;
+	raw->y = 0;
+	if (gamepad_index >= 0 && gamepad_index < MAXIMUM_GAMEPADS && stick >= 0 && stick < NUMBER_OF_GAMEPAD_STICKS)
+	{
+		*raw = input_globals.raw_gamepad_states[gamepad_index].sticks[stick];
+	}
+	return;
+}
+
 /* port: a gamepad's sticks' dead zones from its reading (input_update's, and
 a sub-step's: input_abstraction.c), each its player's own dead range
 (halo_stick_dead_range) and outer dead range (halo_stick_live_range),
@@ -471,24 +512,10 @@ void input_port_fix_stick_dead_zones(
 	{
 		look_stick = input_abstraction_port_look_stick(gamepad_index);
 	}
-	if (look_stick == _gamepad_stick_left)
-	{
-		fix_round_dead_zone(left_x, left_y, left_range, left_live, &sticks[_gamepad_stick_left]);
-	}
-	else
-	{
-		sticks[_gamepad_stick_left].x = fix_dead_zones(left_x, left_range, left_live);
-		sticks[_gamepad_stick_left].y = fix_dead_zones(left_y, left_range, left_live);
-	}
-	if (look_stick == _gamepad_stick_right)
-	{
-		fix_round_dead_zone(right_x, right_y, right_range, right_live, &sticks[_gamepad_stick_right]);
-	}
-	else
-	{
-		sticks[_gamepad_stick_right].x = fix_dead_zones(right_x, right_range, right_live);
-		sticks[_gamepad_stick_right].y = fix_dead_zones(right_y, right_range, right_live);
-	}
+	input_port_fix_stick(left_x, left_y, left_range, left_live, look_stick == _gamepad_stick_left,
+		&sticks[_gamepad_stick_left]);
+	input_port_fix_stick(right_x, right_y, right_range, right_live, look_stick == _gamepad_stick_right,
+		&sticks[_gamepad_stick_right]);
 	return;
 }
 

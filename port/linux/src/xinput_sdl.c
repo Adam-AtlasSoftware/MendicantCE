@@ -212,6 +212,12 @@ gamepad's config.toml's */
 #define PAD_PLAYERS 4
 #define PAD_PLAYER_SLOT(gamepad) ((gamepad) >= 0 && (gamepad) < PAD_PLAYERS ? (gamepad) : PAD_PLAYERS)
 
+void halo_stick_ranges(long percent, long outer, short *dead_range, short *live_range)
+{
+	*dead_range = percent < 0 || percent > STICK_DEAD_ZONE_MAXIMUM ? STICK_DEAD_RANGE : (short)(percent * 32767 / 100);
+	*live_range = outer <= 0 || outer > STICK_OUTER_DEAD_ZONE_MAXIMUM ? 32767 : (short)(32767 - outer * 32767 / 100);
+}
+
 /* a gamepad's sticks' dead zones (stick 0 the left, 1 the right), of 32767:
 the deflection read as none, its player's input.left_stick_dead_zone and
 input.right_stick_dead_zone as a percentage, else the game's own; and the one
@@ -238,13 +244,9 @@ static void stick_dead_zones(short gamepad, short ranges[2], short live_ranges[2
 		pads[slot].read_at = config_changes();
 		for (index = 0; index < 2; index++)
 		{
-			long percent = config_player_integer(slot < PAD_PLAYERS ? slot : -1, settings[index]);
-			long outer = config_player_integer(slot < PAD_PLAYERS ? slot : -1, outer_settings[index]);
-
-			pads[slot].ranges[index] = percent < 0 || percent > STICK_DEAD_ZONE_MAXIMUM
-				? STICK_DEAD_RANGE : (short)(percent * 32767 / 100);
-			pads[slot].live_ranges[index] = outer <= 0 || outer > STICK_OUTER_DEAD_ZONE_MAXIMUM
-				? 32767 : (short)(32767 - outer * 32767 / 100);
+			halo_stick_ranges(config_player_integer(slot < PAD_PLAYERS ? slot : -1, settings[index]),
+				config_player_integer(slot < PAD_PLAYERS ? slot : -1, outer_settings[index]),
+				&pads[slot].ranges[index], &pads[slot].live_ranges[index]);
 		}
 	}
 	ranges[0] = pads[slot].ranges[0];
@@ -3121,24 +3123,33 @@ static void sdl_gamepad_state(SDL_Gamepad *gamepad, const struct gamepad_taps *t
 	if (abs(value) > abs(pad->sThumbRY)) pad->sThumbRY = value;
 }
 
-/* the back paddles held (controller_remap_paddles' bits: the left, the
-right, the second left, the second right; a Steam Deck's L4, R4, L5, R5),
-which only a custom layout's actions take (Button Remapping) */
+/* the extra buttons held (controller_remap_paddles' bits: the back paddles,
+the left, the right, the second left, the second right, a Steam Deck's L4,
+R4, L5, R5; the touchpad's click; misc1 to misc6), which only a custom
+layout's actions take (Button Remapping); a Valve pad's Quick Access button
+and its touches never (controller_extras_reserved) */
 static unsigned int sdl_gamepad_paddles(SDL_Gamepad *gamepad, const struct gamepad_taps *taps)
 {
-	static const SDL_GamepadButton paddles[4] =
+	static const SDL_GamepadButton paddles[CONTROLLER_REMAP_EXTRAS] =
 	{
 		SDL_GAMEPAD_BUTTON_LEFT_PADDLE1, SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1,
 		SDL_GAMEPAD_BUTTON_LEFT_PADDLE2, SDL_GAMEPAD_BUTTON_RIGHT_PADDLE2,
+		SDL_GAMEPAD_BUTTON_TOUCHPAD, SDL_GAMEPAD_BUTTON_MISC1, SDL_GAMEPAD_BUTTON_MISC2,
+		SDL_GAMEPAD_BUTTON_MISC3, SDL_GAMEPAD_BUTTON_MISC4, SDL_GAMEPAD_BUTTON_MISC5,
+		SDL_GAMEPAD_BUTTON_MISC6,
 	};
 	unsigned int held = 0;
 	int index;
 
-	for (index = 0; gamepad && index < 4; index++)
+	for (index = 0; gamepad && index < CONTROLLER_REMAP_EXTRAS; index++)
 	{
 		if (gamepad_button_down(gamepad, taps, paddles[index]))
 			held |= 1u << index;
 	}
+#ifndef HALO_GUEST
+	if (held)
+		held &= ~controller_extras_reserved(SDL_GetGamepadVendor(gamepad), SDL_GetGamepadProduct(gamepad));
+#endif
 	return held;
 }
 

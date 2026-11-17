@@ -828,6 +828,7 @@ REMAP_HANDLERS = ['<on event="x" run="port controller clear"/>',
 SETTINGS_STATUS_ROWS = {"discord_account", "link_status", "link_unlink",
                         *(f"link_master_{n}" for n in range(1, 5)), "hdr_display",
                         "viewmodel_weapon_reset", "gyro_found", "gyro_calibrate", "clear_caches", "add_maps",
+                        "stick_test_left", "stick_test_right",
                         "remap_player", "remap_group", *(f"pad_{n}" for n in range(1, REMAP_ROWS + 1))}
 # the rows whose labels menu_functions.c writes (a master server's host): the
 # label's text its own, not its list's; their values the narrower column at
@@ -1640,6 +1641,16 @@ PAGES = {
             ("RIGHT STICK", "input.right_stick_dead_zone", STICK_DEAD_ZONES,
              "How far the right stick moves before the view turns. Raise it for a stick that drifts; lower it for "
              "finer aim. Default is the game's own, 27%.", None),
+            # (the sticks' readings, live: menu_functions.c's
+            # stick_test_rows_show, by the values on this page)
+            ("LEFT READING", None, None,
+             "The left stick now: side to side, then up and down, in percent of its travel; after the bar, as "
+             "you move with the dead zones on this page. Let go of it: what is left is its drift. Set the dead "
+             "zone above it.", None, "stick_test_left"),
+            ("RIGHT READING", None, None,
+             "The right stick now: side to side, then up and down, in percent of its travel; after the bar, as "
+             "the view turns with the dead zones and shape on this page. Let go of it: what is left is its "
+             "drift. Set the dead zone above it.", None, "stick_test_right"),
             (SECTION, "OUTER DEAD ZONES"),
             ("LEFT STICK", "input.left_stick_outer_dead_zone", STICK_OUTER_DEAD_ZONES,
              "How much of the left stick's travel at its edge counts as a full push. Raise it for a worn stick "

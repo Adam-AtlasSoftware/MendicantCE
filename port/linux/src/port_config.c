@@ -1117,10 +1117,10 @@ static const struct config_setting config_settings[] =
 	{ "input.controller_p1", _config_string, "\"\"", "HALO_CONTROLLER_P1", _environment_value, _platform_all,
 		"P1 custom controller layout; empty uses the profile's preset. Edit in\n"
 		"Settings > Controls > Controller > Button Remapping. v4: 27 physical\n"
-		"button names (the back paddles too), unbound among them; gameplay and\n"
-		"the debug camera have separate bindings. Old ten-action, v2 and v3\n"
-		"layouts are accepted. See docs/controller_remapping.md for the full\n"
-		"order." },
+		"button names (the back paddles, touchpad and misc1-6 too), unbound\n"
+		"among them; gameplay and the debug camera have separate bindings.\n"
+		"Old ten-action, v2 and v3 layouts are accepted. See\n"
+		"docs/controller_remapping.md for the full order." },
 	{ "input.controller_p2", _config_string, "\"\"", "HALO_CONTROLLER_P2", _environment_value, _platform_all,
 		"P2 custom controller buttons, same format as controller_p1. Empty uses the profile." },
 	{ "input.controller_p3", _config_string, "\"\"", "HALO_CONTROLLER_P3", _environment_value, _platform_all,

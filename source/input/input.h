@@ -209,6 +209,11 @@ short fix_dead_zone(short value, short dead_range);
 /* port: a gamepad's sticks' dead zones, from its reading (input_xbox.c) */
 void input_port_fix_stick_dead_zones(short gamepad_index, short left_x, short left_y, short right_x, short right_y,
 	point2d *sticks);
+/* port: one stick's reading after given dead zones, round or each
+direction's own (input_xbox.c) */
+void input_port_fix_stick(short x, short y, short dead_range, short live_range, boolean round, point2d *stick);
+/* port: a gamepad's stick as last read, before its dead zones (input_xbox.c) */
+void input_port_raw_stick(short gamepad_index, short stick, point2d *raw);
 void update_ticks(byte *ticks, boolean down);
 void input_dispose(void);
 void input_activate(void);

@@ -24,6 +24,7 @@ def generated(fault=None):
         function(xbox, "fix_dead_zone"),
         function(xbox, "fix_dead_zones"),
         function(xbox, "fix_round_dead_zone"),
+        function(xbox, "input_port_fix_stick"),
         function(xbox, "input_port_fix_stick_dead_zones"),
     ]) + "\n"
     if fault:

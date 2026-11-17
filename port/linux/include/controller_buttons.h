@@ -17,8 +17,11 @@ struct controller_device
     int type;
     unsigned int instance;
     unsigned short vendor, product;
-    /* its back paddles (controller_remap_paddles' bits) */
+    /* its extra buttons a layout can take: the back paddles, the touchpad,
+     * misc1 to misc6 (controller_remap_paddles' bits) */
     unsigned int paddles;
+    /* a PlayStation pad's generation (3, 4 or 5), else 0 */
+    int playstation;
     char name[128];
 };
 
@@ -27,6 +30,12 @@ struct controller_device
 void controller_device_get(short port, struct controller_device *device);
 void controller_device_read(void *gamepad, struct controller_device *device);
 void controller_device_update(short port, void *gamepad);
+/* the extra buttons (controller_remap_paddles' bits) a controller has that
+ * are not for a layout: on Valve's pads that report their sticks' touch (the
+ * Steam Deck's own controls, 28de:1205, and the second Steam Controller,
+ * 28de:1302 to 1305: gyro_aim.h's gyro_stick_touch_known) misc1 is the Quick
+ * Access button, Steam's own, and misc3 to misc6 are touches, not presses */
+unsigned int controller_extras_reserved(unsigned short vendor, unsigned short product);
 /* the HUD's button styles (display.hud_button_style and its families'
  * display.hud_button_style_xbox, _ps and _switch): a style's index by its
  * name, its controller family, a family's setting, and a port's style, its

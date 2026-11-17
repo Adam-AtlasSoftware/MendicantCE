@@ -32,8 +32,10 @@ static char const *SDL_GetGamepadName(SDL_Gamepad *p){return "Test controller";}
 static unsigned SDL_GetGamepadID(SDL_Gamepad *p){return p->id;}
 static unsigned short SDL_GetGamepadVendor(SDL_Gamepad *p){return 123;}
 static unsigned short SDL_GetGamepadProduct(SDL_Gamepad *p){return 456;}
-typedef enum {SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1=16,SDL_GAMEPAD_BUTTON_LEFT_PADDLE1,
- SDL_GAMEPAD_BUTTON_RIGHT_PADDLE2,SDL_GAMEPAD_BUTTON_LEFT_PADDLE2} SDL_GamepadButton;
+typedef enum {SDL_GAMEPAD_BUTTON_MISC1=15,SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1,SDL_GAMEPAD_BUTTON_LEFT_PADDLE1,
+ SDL_GAMEPAD_BUTTON_RIGHT_PADDLE2,SDL_GAMEPAD_BUTTON_LEFT_PADDLE2,SDL_GAMEPAD_BUTTON_TOUCHPAD,
+ SDL_GAMEPAD_BUTTON_MISC2,SDL_GAMEPAD_BUTTON_MISC3,SDL_GAMEPAD_BUTTON_MISC4,SDL_GAMEPAD_BUTTON_MISC5,
+ SDL_GAMEPAD_BUTTON_MISC6} SDL_GamepadButton;
 static int SDL_GamepadHasButton(SDL_Gamepad *p,SDL_GamepadButton b){(void)p;return b==SDL_GAMEPAD_BUTTON_LEFT_PADDLE1;}
 static int automatic;
 static char const *manual="ps_modern",*xbox="menu_gems",*ps="ps_gems",*sw="switch_modern";
@@ -55,8 +57,11 @@ int main(void){
  controller_device_get(0,&info);assert(info.family==CONTROLLER_PLAYSTATION && info.type==SDL_GAMEPAD_TYPE_PS5);
 #ifndef HALO_GUEST
  assert(info.instance==7 && info.vendor==123 && info.product==456 && !strcmp(info.name,"Test controller"));
- assert(info.paddles==1);
+ assert(info.paddles==1 && info.playstation==5);
 #endif
+ /* a Valve pad's Quick Access (misc1) and touches (misc3 to misc6) are no layout's; other pads keep theirs */
+ assert(controller_extras_reserved(0x28de,0x1205)==0x7a0 && controller_extras_reserved(0x28de,0x1303)==0x7a0);
+ assert(!controller_extras_reserved(0x28de,0x11ff) && !controller_extras_reserved(123,456));
  assert(controller_button_style_for_port(0)==7 && controller_button_style_for_port(1)==7);
  automatic=1;
  assert(controller_button_style_for_port(0)==5 && controller_button_style_for_port(1)==2 && controller_button_style_for_port(2)==10);
