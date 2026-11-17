@@ -1328,11 +1328,14 @@ PAGES = {
              "With VSync on, starts each frame just in time for the refresh it is shown at, so a press reaches the "
              "screen sooner. Off starts each frame as soon as the one before is waiting. Auto is on.", None),
             # (main.c's main_framerate_render, as the console's
-            # display_framerate draws it: Video's page has no room, and
-            # Interface's none since WHILE DEAD)
-            ("SHOW FRAME RATE", "display.show_frame_rate", ON_OFF,
-             "Draws the frame rate at the bottom right of the screen, to see how the game runs: the frames drawn "
-             "each second, averaged over half a second. Green is 30 or more, red under 30.", None),
+            # display_framerate draws it, and port/linux/game/perf_overlay.c:
+            # Video's page has no room, and Interface's none since WHILE DEAD)
+            ("PERFORMANCE OVERLAY", "display.perf_overlay",
+             [("OFF", "off"), ("SIMPLE", "simple"), ("DETAILED", "detailed")],
+             "Shows how the game runs, at the bottom right. Simple is the frame rate: green is 30 or more, red "
+             "under 30. Detailed adds the frame time, the 1% low, and the milliseconds spent on the GPU, the render "
+             "thread, the game and waiting for the display.",
+             None),
         ],
     },
     FIRST_PERSON[0]: {
@@ -1826,8 +1829,9 @@ SETTINGS_SEARCH_WORDS = {
     "sens": ["mouse_sensitivity", "mouse_vertical_sensitivity", "zoom_sensitivity", "look_sensitivity",
              "gyro_sensitivity", "gyro_vertical_sensitivity"],
     "dpi": ["mouse_sensitivity"],
-    "fps": ["max_fps", "show_frame_rate", "frame_rate_sync"],
-    "framerate": ["frame_rate_sync", "max_fps", "show_frame_rate"],
+    "fps": ["max_fps", "perf_overlay", "frame_rate_sync"],
+    "framerate": ["frame_rate_sync", "max_fps", "perf_overlay"],
+    "frametime": ["perf_overlay"], "gpu": ["perf_overlay"], "stats": ["perf_overlay"],
     "gsync": ["vrr", "vrr_cap_margin"], "freesync": ["vrr", "vrr_cap_margin"], "vrr": ["vrr"],
     "aa": ["anti_aliasing", "anti_aliasing_android"],
     "shadows": ["shadow_resolution"],

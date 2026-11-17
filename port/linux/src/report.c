@@ -518,7 +518,7 @@ void report_frames_log(double seconds)
 }
 
 void report_recent_frames(const uint32_t *micros, const uint32_t *at_ms, const struct report_frame_work *work,
-	unsigned long ring, unsigned long count, unsigned long most, uint32_t milliseconds,
+	unsigned long ring, unsigned long count, unsigned long most, uint32_t milliseconds, uint32_t *scratch,
 	struct perf_times *times)
 {
 	unsigned long taken, gpu_frames = 0;
@@ -533,6 +533,8 @@ void report_recent_frames(const uint32_t *micros, const uint32_t *at_ms, const s
 		if (taken && newest_ms - at_ms[index] >= milliseconds)
 			break;
 		frame_total += micros[index];
+		if (scratch)
+			scratch[taken] = micros[index];
 		render_total += work[index].render;
 		waited_total += work[index].waited;
 		if (work[index].gpu != REPORT_GPU_UNKNOWN)
@@ -546,12 +548,21 @@ void report_recent_frames(const uint32_t *micros, const uint32_t *at_ms, const s
 	times->render_ms = taken ? (float)(render_total / 1000.0 / taken) : 0.0f;
 	times->waited_ms = taken ? (float)(waited_total / 1000.0 / taken) : 0.0f;
 	times->gpu_ms = gpu_frames ? (float)(gpu_total / 1000.0 / gpu_frames) : -1.0f;
+	times->low_fps = 0.0f;
+	if (scratch && taken)
+	{
+		qsort(scratch, taken, sizeof(*scratch), report_compare_micros);
+		times->low_fps = (float)report_low_fps(scratch, taken, 10);
+	}
 }
 
 void perf_times_recent(unsigned long most, unsigned long milliseconds, struct perf_times *times)
 {
+	static uint32_t sorted[PERF_TIMES_MOST];
+
 	report_recent_frames(report_frames.micros, report_frames.at_ms, report_frames.work, REPORT_FRAMES,
-		report_frames.count, most, (uint32_t)milliseconds, times);
+		report_frames.count, most < PERF_TIMES_MOST ? most : PERF_TIMES_MOST, (uint32_t)milliseconds, sorted,
+		times);
 }
 
 /* What held the frames back, from their times (micros) and the work in

@@ -746,10 +746,11 @@
 			<choice shown="ON" value="on"/>
 			<choice shown="OFF" value="off"/>
 		</row>
-		<row key="show_frame_rate" kind="choice" setting="display.show_frame_rate" label="SHOW FRAME RATE" crumb="VIDEO › FRAME RATE &amp; SYNC" search="fps framerate">
-			<help>Draws the frame rate at the bottom right of the screen, to see how the game runs: the frames drawn each second, averaged over half a second. Green is 30 or more, red under 30.</help>
-			<choice shown="ON" value="true"/>
-			<choice shown="OFF" value="false"/>
+		<row key="perf_overlay" kind="choice" setting="display.perf_overlay" label="PERFORMANCE OVERLAY" crumb="VIDEO › FRAME RATE &amp; SYNC" search="fps framerate frametime gpu stats" search_choices="simple detailed">
+			<help>Shows how the game runs, at the bottom right. Simple is the frame rate: green is 30 or more, red under 30. Detailed adds the frame time, the 1% low, and the milliseconds spent on the GPU, the render thread, the game and waiting for the display.</help>
+			<choice shown="OFF" value="off"/>
+			<choice shown="SIMPLE" value="simple"/>
+			<choice shown="DETAILED" value="detailed"/>
 		</row>
 		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
 		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>

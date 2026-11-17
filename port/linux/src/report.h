@@ -83,9 +83,9 @@ void report_gpu_summary(const uint32_t *micros, const struct report_frame_work *
 /* the last frames' times (perf_times.h's perf_times_recent) from a ring of
 them (ring frames, a power of 2; count kept so far, the newest at
 count - 1): those that ended within milliseconds of the newest's end, at
-most most of them */
+most most of them; scratch (NULL: no 1% low), room for their times */
 void report_recent_frames(const uint32_t *micros, const uint32_t *at_ms, const struct report_frame_work *work,
-	unsigned long ring, unsigned long count, unsigned long most, uint32_t milliseconds,
+	unsigned long ring, unsigned long count, unsigned long most, uint32_t milliseconds, uint32_t *scratch,
 	struct perf_times *times);
 /* a new GitHub issue's address on OpenH1's repository, its title and body
 filled in (percent-encoded; the body cut at a line to keep the address
