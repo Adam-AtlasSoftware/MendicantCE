@@ -1655,6 +1655,12 @@ PAGES = {
              "Point the right stick and you turn at once to face that way: right, a quarter turn; down, about "
              "face. Turn it round its rim and you turn with it. Aim up and down with the gyro.|With the default "
              "stick layout.", None),
+            # (dimmed while the flick stick is off: SETTINGS_ROW_ENABLED)
+            ("FLICK TIME", "input.flick_stick_time",
+             [("INSTANT", "0"), ("0.05 S", "0.05"), ("0.1 S", "0.1"), ("0.15 S", "0.15"), ("0.2 S", "0.2"),
+              ("0.25 S", "0.25")],
+             "How long a flick takes to turn you: shorter is snappier, longer smoother. You turn as far either "
+             "way.", None),
         ],
     },
     DEAD_ZONES[0]: {
@@ -2499,6 +2505,8 @@ SETTINGS_ROW_WHEN = {
     "link_unlink": "discord_linked",
 }
 SETTINGS_ROW_ENABLED = {
+    # (the flick's time while the flick stick is on)
+    "flick_stick_time": "flick_stick=true",
     # (macOS's Metal and ProMotion set it: SET BY MACOS; its frame cap only
     # while it is on)
     "vrr": "!vrr_system",

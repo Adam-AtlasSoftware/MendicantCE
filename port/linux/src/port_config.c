@@ -1254,6 +1254,9 @@ static const struct config_setting config_settings[] =
 		"to its rim, you turn at once to face where it points (pushed right, a\n"
 		"quarter turn right; down, about face); turned round the rim, you turn\n"
 		"with it. It does not look up or down: the gyroscope does." },
+	{ "input.flick_stick_time", _config_real, "0.1", "HALO_FLICK_STICK_TIME", _environment_value, _platform_all,
+		"How long a flick of input.flick_stick takes to turn you, in seconds,\n"
+		"0 (at once) to 0.25; it turns as far either way." },
 
 	/* the keyboard and mouse's own controls (port/linux/src/xinput_sdl.c) */
 	{ "controls.move_forward", _config_string, "\"W\"", "HALO_KEY_MOVE_FORWARD", _environment_value, _platform_all,

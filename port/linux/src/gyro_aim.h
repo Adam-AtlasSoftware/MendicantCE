@@ -143,10 +143,10 @@ struct flick_stick
 	0 up, clockwise) */
 	int on_rim;
 	float angle;
-	/* the flick under way: its size (radians of yaw) and how far into its
-	time it is (seconds) */
+	/* the flick under way: its size (radians of yaw) and how much of it is
+	done (0 to 1, 1 done) */
 	float flick_size;
-	float flick_seconds;
+	float flick_done;
 	/* the smoothing's share of the rim's turn rate */
 	float smoothed;
 };
@@ -155,9 +155,12 @@ void flick_stick_reset(struct flick_stick *flick);
 
 /* the stick (x right, y up, -1 to 1) over seconds since the last: the yaw it
 turns the player (radians). Pushed to the rim, the player turns to face
-where it points, relative to the view, over FLICK_STICK_SECONDS; turned
-around the rim, the player turns as it does */
+where it points, relative to the view, over flick_seconds (0: at once;
+input.flick_stick_time, FLICK_STICK_SECONDS by default, at most
+FLICK_STICK_SECONDS_MOST), always as far; turned around the rim, the player
+turns as it does */
 #define FLICK_STICK_SECONDS 0.1f
-float flick_stick_update(struct flick_stick *flick, float x, float y, float seconds);
+#define FLICK_STICK_SECONDS_MOST 0.25f
+float flick_stick_update(struct flick_stick *flick, float x, float y, float seconds, float flick_seconds);
 
 #endif

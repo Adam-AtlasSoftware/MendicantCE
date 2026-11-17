@@ -48,6 +48,8 @@ AIM_CONTROLS = [
     # the smoothing's strength not applied: low and high smooth as medium does
     ("SMOOTH_SLOWEST * settings->smoothing, SMOOTH_FASTEST * settings->smoothing,", "SMOOTH_SLOWEST, SMOOTH_FASTEST,",
      "strength"),
+    # the flick's time not the setting's: every flick a tenth of a second
+    ("seconds / flick_seconds, 1.0f)", "seconds / FLICK_STICK_SECONDS, 1.0f)", "flick_time"),
 ]
 
 
@@ -60,7 +62,7 @@ def aim_generated(fault=None):
 
 
 @pytest.mark.parametrize("case", ["bias", "calibrate", "player_space", "tilt_followed", "smoothing", "flick", "modes",
-                                  "touch", "strength"])
+                                  "touch", "strength", "flick_time"])
 def test_gyro_aim(case):
     status, output = run(build("gyro_aim", aim_generated()), case)
     assert status == 0, output

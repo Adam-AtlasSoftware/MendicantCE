@@ -26,6 +26,7 @@
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/gyro/op_invert_look_horizontal" x="28" y="300"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/gyro/op_aim_style" x="28" y="325"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/gyro/op_flick_stick" x="28" y="350"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/gyro/op_flick_stick_time" x="28" y="375"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/gyro/button_bar" x="0" y="448"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/gyro/button_bar" role="buttons" type="column_list" box="0 0 640 28" place="foot">
@@ -249,5 +250,16 @@
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/gyro/flick_stick_spinner" type="spinner" box="0 1 140 23" wide="40 120" past="60 60" header="bitmaps/arrow_sm_left" header_box="-6 6 0 18" footer="bitmaps/arrow_sm_right" footer_box="140 6 146 18">
 		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 0" items="ON|OFF" scale="1 1.2"/>
+	</look>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/gyro/op_flick_stick_time" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
+		<text color="#FF2896FF"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/gyro/flick_stick_time_label" x="0" y="0"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/gyro/flick_stick_time_spinner" x="188" y="0"/>
+	</look>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/gyro/flick_stick_time_label" type="text" box="0 0 184 24" wide="0 40" past="0 60">
+		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/gyro/labels" index="16" scale="1 1.2"/>
+	</look>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/gyro/flick_stick_time_spinner" type="spinner" box="0 1 140 23" wide="40 120" past="60 60" header="bitmaps/arrow_sm_left" header_box="-6 6 0 18" footer="bitmaps/arrow_sm_right" footer_box="140 6 146 18">
+		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 0" items="INSTANT|0.05 S|0.1 S|0.15 S|0.2 S|0.25 S" scale="1 1.2"/>
 	</look>
 </model>

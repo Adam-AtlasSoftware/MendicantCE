@@ -365,16 +365,20 @@ int gyro_steam_deck(unsigned short vendor, unsigned short product)
 void flick_stick_reset(struct flick_stick *flick)
 {
 	memset(flick, 0, sizeof(*flick));
-	flick->flick_seconds = FLICK_STICK_SECONDS;
+	flick->flick_done = 1.0f;
 }
 
-float flick_stick_update(struct flick_stick *flick, float x, float y, float seconds)
+float flick_stick_update(struct flick_stick *flick, float x, float y, float seconds, float flick_seconds)
 {
 	float magnitude = sqrtf(x * x + y * y);
 	float turn = 0.0f;
 
 	if (!(seconds >= 0.0f) || !isfinite(x) || !isfinite(y))
 		return 0.0f;
+	if (!(flick_seconds > 0.0f))
+		flick_seconds = 0.0f;
+	else if (flick_seconds > FLICK_STICK_SECONDS_MOST)
+		flick_seconds = FLICK_STICK_SECONDS_MOST;
 	if (magnitude >= (flick->on_rim ? FLICK_RIM_LEFT : FLICK_RIM))
 	{
 		float angle = atan2f(x, y);
@@ -382,11 +386,11 @@ float flick_stick_update(struct flick_stick *flick, float x, float y, float seco
 		if (!flick->on_rim)
 		{
 			/* (a flick not yet done finishes at once) */
-			turn += flick->flick_size * (1.0f - flick_ease(flick->flick_seconds / FLICK_STICK_SECONDS));
+			turn += flick->flick_size * (1.0f - flick_ease(flick->flick_done));
 			/* a turn to where the stick points: to the right is a yaw to
 			the right, negative */
 			flick->flick_size = -angle;
-			flick->flick_seconds = 0.0f;
+			flick->flick_done = 0.0f;
 			flick->smoothed = 0.0f;
 			flick->on_rim = 1;
 		}
@@ -418,12 +422,13 @@ float flick_stick_update(struct flick_stick *flick, float x, float y, float seco
 		flick->on_rim = 0;
 		flick->smoothed = 0.0f;
 	}
-	if (flick->flick_seconds < FLICK_STICK_SECONDS)
+	if (flick->flick_done < 1.0f)
 	{
-		float before = flick_ease(flick->flick_seconds / FLICK_STICK_SECONDS);
+		float before = flick_ease(flick->flick_done);
 
-		flick->flick_seconds = fminf(flick->flick_seconds + seconds, FLICK_STICK_SECONDS);
-		turn += (flick_ease(flick->flick_seconds / FLICK_STICK_SECONDS) - before) * flick->flick_size;
+		/* (its time's share done; none: all of it at once) */
+		flick->flick_done = flick_seconds > 0.0f ? fminf(flick->flick_done + seconds / flick_seconds, 1.0f) : 1.0f;
+		turn += (flick_ease(flick->flick_done) - before) * flick->flick_size;
 	}
 	return turn;
 }

@@ -257,7 +257,7 @@ static float flick_play(struct flick_stick *flick, float x, float y, float secon
 	int index, count = (int)(seconds * 60.0f + 0.5f);
 
 	for (index = 0; index < count; index++)
-		turned += flick_stick_update(flick, x, y, 1.0f / 60.0f);
+		turned += flick_stick_update(flick, x, y, 1.0f / 60.0f, FLICK_STICK_SECONDS);
 	return turned;
 }
 
@@ -271,7 +271,7 @@ static void case_flick(void)
 
 	flick_stick_reset(&flick);
 	CHECK(flick_play(&flick, 0.5f, 0.0f, 0.5f) == 0.0f, "half way, the stick flicked");
-	first = flick_stick_update(&flick, 1.0f, 0.0f, 1.0f / 60.0f);
+	first = flick_stick_update(&flick, 1.0f, 0.0f, 1.0f / 60.0f, FLICK_STICK_SECONDS);
 	turned = first + flick_play(&flick, 1.0f, 0.0f, FLICK_STICK_SECONDS);
 	CHECK(first < 0.0f && first > -TEST_PI / 2.0f, "the flick's first frame turned %f", first);
 	CHECK(fabsf(turned + TEST_PI / 2.0f) < 1e-4f, "pushed right, the player turned %f degrees, of -90",
@@ -283,7 +283,7 @@ static void case_flick(void)
 	{
 		float angle = (TEST_PI / 2.0f) * (1.0f - index / 30.0f);
 
-		turned += flick_stick_update(&flick, sinf(angle), cosf(angle), 1.0f / 60.0f);
+		turned += flick_stick_update(&flick, sinf(angle), cosf(angle), 1.0f / 60.0f, FLICK_STICK_SECONDS);
 	}
 	turned += flick_play(&flick, 0.0f, 1.0f, 0.2f);
 	CHECK(fabsf(turned - TEST_PI / 2.0f) < 1e-3f, "turning round the rim a quarter, the player turned %f degrees, of 90",
@@ -300,10 +300,49 @@ static void case_flick(void)
 	{
 		float magnitude = index % 2 ? 0.95f : 0.75f;
 
-		turned += flick_stick_update(&flick, -magnitude * 0.70710678f, magnitude * 0.70710678f, 1.0f / 60.0f);
+		turned += flick_stick_update(&flick, -magnitude * 0.70710678f, magnitude * 0.70710678f, 1.0f / 60.0f,
+			FLICK_STICK_SECONDS);
 	}
 	CHECK(fabsf(turned - TEST_PI / 4.0f) < 1e-3f, "wavering at the rim, the player turned %f degrees, of 45",
 		turned / DEGREES);
+}
+
+/* the flick's time (input.flick_stick_time): pushed right at 120 frames a second, the flick turns a quarter turn
+whatever its time, done once its time has passed and not before; at once with none; past the most, the most */
+static void case_flick_time(void)
+{
+	static const float times[] = { 0.0f, 0.05f, 0.1f, 0.25f, 1.0f };
+	const float frame = 1.0f / 120.0f;
+	unsigned int index;
+
+	for (index = 0; index < sizeof(times) / sizeof(times[0]); index++)
+	{
+		struct flick_stick flick;
+		float time = fminf(times[index], FLICK_STICK_SECONDS_MOST);
+		float turned = 0.0f, first;
+		int frames = (int)(time / frame + 0.5f), at;
+
+		flick_stick_reset(&flick);
+		first = flick_stick_update(&flick, 1.0f, 0.0f, frame, times[index]);
+		turned = first;
+		for (at = 1; at < frames - 1; at++)
+			turned += flick_stick_update(&flick, 1.0f, 0.0f, frame, times[index]);
+		if (frames > 1)
+		{
+			/* (a frame before its time: not all of it yet) */
+			CHECK(fabsf(turned) < TEST_PI / 2.0f - 1e-5f, "a %g s flick turned %f degrees a frame before its time",
+				times[index], turned / DEGREES);
+			turned += flick_stick_update(&flick, 1.0f, 0.0f, frame, times[index]);
+		}
+		CHECK(fabsf(turned + TEST_PI / 2.0f) < 1e-4f, "a %g s flick turned %f degrees, of -90", times[index],
+			turned / DEGREES);
+		CHECK(flick_stick_update(&flick, 1.0f, 0.0f, frame, times[index]) == 0.0f, "a %g s flick turned on",
+			times[index]);
+		/* (its first frame's share: the ease's over a frame of its time) */
+		CHECK(time == 0.0f ? first == -TEST_PI / 2.0f :
+			fabsf(first + TEST_PI / 2.0f * (1.0f - (1.0f - frame / time) * (1.0f - frame / time))) < 1e-5f,
+			"a %g s flick's first frame turned %f degrees", times[index], first / DEGREES);
+	}
 }
 
 /* when the turn counts: each mode, its button and the right stick's touch; which controllers say when their right
@@ -416,8 +455,8 @@ static float first_share(float smoothing, float rate)
 }
 
 /* the smoothing's strengths: medium is the smoothing as it was (on), sample for sample; low and high scale its
-thresholds (a motion medium smooths, just slower than its slowest, low turns direct; one medium turns direct, high smooths); off smooths
-nothing; the words name them */
+thresholds (a motion medium smooths, just slower than its slowest, low turns direct; one medium turns direct,
+high smooths); off smooths nothing; the words name them */
 static void case_strength(void)
 {
 	struct gyro_aim_settings medium = settings(0, 1);
@@ -474,6 +513,8 @@ int main(int argc, char **argv)
 		case_touch();
 	else if (!strcmp(name, "strength"))
 		case_strength();
+	else if (!strcmp(name, "flick_time"))
+		case_flick_time();
 	else
 	{
 		fprintf(stderr, "no case %s\n", name);

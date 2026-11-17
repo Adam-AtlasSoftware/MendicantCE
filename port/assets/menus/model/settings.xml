@@ -1202,6 +1202,15 @@
 			<choice shown="ON" value="true"/>
 			<choice shown="OFF" value="false"/>
 		</row>
+		<row key="flick_stick_time" kind="choice" setting="input.flick_stick_time" label="FLICK TIME" crumb="CONTROLS › CONTROLLER › GYRO &amp; FLICK STICK" search_choices="instant" enabled="flick_stick=true">
+			<help>How long a flick takes to turn you: shorter is snappier, longer smoother. You turn as far either way.</help>
+			<choice shown="INSTANT" value="0"/>
+			<choice shown="0.05 S" value="0.05"/>
+			<choice shown="0.1 S" value="0.1"/>
+			<choice shown="0.15 S" value="0.15"/>
+			<choice shown="0.2 S" value="0.2"/>
+			<choice shown="0.25 S" value="0.25"/>
+		</row>
 		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
 		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>
 		<button key="button_cancel" kind="cancel" run="port settings page cancel" help="Goes back without these changes."/>
