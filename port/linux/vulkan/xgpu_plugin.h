@@ -5,9 +5,9 @@ The host's loader of PRISM's renderer plugins (prism_plugin.h,
 docs/prism_plugin.md): a plugin's shared library opened by name from a
 folder, its entry called, its ABI and sizes checked; on any failure the
 library closed, the reason logged once, and nothing returned, so that the
-renderer draws its own path. Nothing is opened unless a name is given. Not
-yet called by the renderer (PRISM v4's M5 wires display.upscaler and
-display.denoiser "plugin:<name>" to it).
+renderer draws its own path. Nothing is opened unless a name is given. The
+renderer opens display.upscaler's and display.denoiser's "plugin:<name>"
+through it as the game starts (xgpu_vulkan_upscale.c).
 */
 
 #ifndef __HALO_LINUX_XGPU_PLUGIN_H

@@ -8,9 +8,9 @@ lights, the decals and the fog. These are new records of the renderer's command 
 
 ## What is there now
 
-`XGPU_STREAM_VERSION` is 34. The records' types are in the stream's own list, after M1's first record,
+`XGPU_STREAM_VERSION` is 35. The records' types are in the stream's own list, after M1's first record,
 `GBUFFER_PHASE` (82): `SCENE_MATERIAL` is 83 and so on to `SCENE_FOG`, 90, then `SCENE_VIEW`, 91, M2's `PRISM_BAKE`,
-92, and `XGPU_STREAM_RECORD_TYPES` is 93. The
+92, M5's `UPSCALE`, 93 (`docs/prism_plugin.md`: display.upscaler's frame), and `XGPU_STREAM_RECORD_TYPES` is 94. The
 host's decoder takes every one, with its fixed part's size as its minimum.
 
 M1 sends six of them, and `SCENE_VIEW`. With `display.lighting` `ce_deferred` (`port/linux/game/prism_deferred.c`), in its G-buffer pass
@@ -106,6 +106,7 @@ entries are sent; the record's size is its fixed part and those entries.
 | `SCENE_FOG` | Each frame | Flags; the camera cluster's atmospheric fog (colour, maximum density, start and opaque distances); up to 8 fog planes seen, each its index, flags (inside), plane, colour and maximum density, opaque distance and depth | 48 + 64 per plane (at most 560) |
 | `SCENE_VIEW` | At each G-buffer pass's begin | Flags (history); the camera this frame and last (eye and near plane, the axis at the screen's middle and the far plane, its change a unit of the screen's x and y); the view's corners in the target's pixels, this frame's and last | 176 |
 | `PRISM_BAKE` | Each frame in Raster (the control); once a BSP (the reach's inputs, sliced) | Phase (control, reach input, reach end), generation, first, count, total, data and size; display.bake, the quality, the rebakes asked for, flags (menus, foreground, reach sent); the map's checksum, the BSP; the bake folder's and the status block's guest addresses; the frame's GPU budget, the threshold; the map's name | 144 |
+| `UPSCALE` | With display.upscaler on (or display.denoiser a plugin): as a player's window's frame begins, as its view's opaque surfaces end, and as its view ends, before the HUD | Phase (begin, opaque, end), the upscaler (none, FSR 3.1, the plugin), the denoiser (PRISM, the plugin, off), flags (history); the view's colour and depth targets and the output's; the view's corners in each's pixels; the camera this frame and last (SCENE_VIEW's layout); the sharpness, the frame's time | 212 |
 
 ### The capacities
 

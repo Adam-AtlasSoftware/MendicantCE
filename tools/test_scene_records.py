@@ -135,23 +135,25 @@ def test_sizes_multiples_of_four(driver64):
         "xgpu_stream_scene_fog": 48 + 8 * 64,
         "xgpu_stream_scene_view": 16 + 128 + 32,
         "xgpu_stream_prism_bake": 80 + 64,
+        "xgpu_stream_upscale": 36 + 32 + 128 + 16,
     }
 
 
 def test_stream_types(constants):
-    # (34: M2's PRISM_BAKE, GBUFFER_DRAW's lightmap page; 33: the ring's streams_pending; 32: SCENE_STATIC's pages, levels and attributes as sent, SCENE_LIGHTS' emitters, SCENE_VIEW; 31: M1 sends SCENE_MATERIAL
+    # (35: M5's UPSCALE; 34: M2's PRISM_BAKE, GBUFFER_DRAW's lightmap page; 33: the ring's streams_pending; 32: SCENE_STATIC's pages, levels and attributes as sent, SCENE_LIGHTS' emitters, SCENE_VIEW; 31: M1 sends SCENE_MATERIAL
     # and GBUFFER_DRAW, display.lighting "ce_deferred"'s G-buffer pass; 30 was GBUFFER_PHASE, its first record)
-    assert constants["version"] == 34
+    assert constants["version"] == 35
     text = (SOURCE / "xgpu_stream.h").read_text()
-    assert re.search(r"#define XGPU_STREAM_VERSION 34\b", text)
+    assert re.search(r"#define XGPU_STREAM_VERSION 35\b", text)
     # (the scene's types joined the stream's own list after GBUFFER_PHASE, the numbers they were specified with:
-    # the decoder takes every one of them)
-    assert constants["rt_frame"] == constants["record_types"] - 12
+    # the decoder takes every one of them; M5's UPSCALE after them)
+    assert constants["rt_frame"] == constants["record_types"] - 13
+    assert constants["upscale"] == constants["record_types"] - 1
     scene = [constants[name] for name in ("scene_material", "scene_material_animate", "scene_instance",
                                           "gbuffer_draw", "scene_static", "scene_lights", "scene_decal",
                                           "scene_fog", "scene_view", "prism_bake")]
     assert scene == list(range(constants["rt_frame"] + 2, constants["rt_frame"] + 12))
-    assert scene[-1] == constants["record_types"] - 1
+    assert scene[-1] == constants["record_types"] - 2
     assert constants["scene_record_types"] == constants["record_types"] <= 256
     # (the guest's stream writes SCENE_MATERIAL, GBUFFER_DRAW, SCENE_STATIC, SCENE_LIGHTS, SCENE_INSTANCE and
     # SCENE_VIEW)
@@ -161,8 +163,9 @@ def test_stream_types(constants):
         assert f"XGPU_STREAM_{name}" in body, name
     decoder = (ROOT / "port/android/host/host_render_stream.c").read_text()
     for name in ("SCENE_MATERIAL", "SCENE_MATERIAL_ANIMATE", "SCENE_INSTANCE", "GBUFFER_DRAW", "SCENE_STATIC",
-                 "SCENE_LIGHTS", "SCENE_DECAL", "SCENE_FOG", "SCENE_VIEW", "PRISM_BAKE"):
+                 "SCENE_LIGHTS", "SCENE_DECAL", "SCENE_FOG", "SCENE_VIEW", "PRISM_BAKE", "UPSCALE"):
         assert f"[XGPU_STREAM_{name}] =" in decoder, name
+    assert "XGPU_STREAM_UPSCALE" in body
 
 
 def test_path_hash(encoded):

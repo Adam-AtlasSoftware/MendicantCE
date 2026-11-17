@@ -46,6 +46,7 @@ more), each reused once its submission is done. GPU time: HALO_VULKAN_STATS
 #include "xgpu_vulkan_rt.h"
 #include "xgpu_vulkan_rt_shaders.h"
 #include "xgpu_vulkan_scene.h"
+#include "xgpu_vulkan_upscale.h"
 #include "host.h"
 #include "xgpu_exr.h"
 
@@ -3346,6 +3347,12 @@ static int pathtraced_record(VkCommandBuffer commands, struct rt_slot *slot, VkA
 			vkCmdDispatch(commands, RT_CACHE_ENTRIES / 64u, 1, 1);
 			compute_barrier(commands);
 		}
+		/* (display.denoiser's plugin, where it denoises: the raw light and
+		the light added, in place, before the passes that carry them on, its
+		own filter off; xgpu_vulkan_upscale.c) */
+		if (xgpu_vulkan_upscale_denoise(commands, rt.pt_raw[0], rt.pt_raw[1], width, height))
+			barrier_global(commands, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_ACCESS_MEMORY_WRITE_BIT,
+				VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
 		vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.accumulate);
 		vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.accumulate_pipeline_layout, 0, 1,
 			&sets[2], 0, NULL);
@@ -3452,7 +3459,9 @@ struct xgpu_vulkan_image *xgpu_vulkan_rt_window_end(struct xgpu_vulkan_image *in
 	block.rays[2] = 60.0f;
 	block.rays[3] = 800.0f;
 	block.info[0] = rt.frame.frame;
-	block.info[1] = rt.frame.denoiser;
+	/* (display.denoiser's plugin, PRISM v4 M5: the light traced raw for it,
+	this pass's own filter off: xgpu_vulkan_upscale.c) */
+	block.info[1] = xgpu_vulkan_upscale_raw_light() ? 2u : rt.frame.denoiser;
 	block.info[2] = rt.history_valid && pass->history[0] != 0.0f ? 1u : 0u;
 	/* (the debug views: the light's factor alone, the occlusion alone, the
 structure's and the objects' visibility of the sun as they are) */

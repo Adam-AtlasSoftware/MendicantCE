@@ -185,6 +185,11 @@ header, data and size written here), and size bytes of data carried with it
 (NULL none) */
 struct xgpu_stream_prism_bake;
 void xgpu_backend_prism_bake(const struct xgpu_stream_prism_bake *bake, const void *data, unsigned long size);
+/* UPSCALE (xgpu_stream.h; port/linux/src/d3d8_device.c's halo_upscale_*):
+display.upscaler's and display.denoiser's frame, the record whole (its
+header written here) */
+struct xgpu_stream_upscale;
+void xgpu_backend_upscale(const struct xgpu_stream_upscale *upscale);
 /* SCENE_INSTANCE: an object drawn (its id, flags XGPU_SCENE_INSTANCE_*, CE's
 level of detail), node_count of its nodes' matrices this frame and last
 (three rows of four each: now, then last; last NULL: none, NO_HISTORY) */

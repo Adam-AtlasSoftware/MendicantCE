@@ -52,6 +52,19 @@ moments and variance-guided weights (Schied et al., 2017), the
 edge-avoiding a-trous wavelet (Dammertz et al., 2010) and Krzysztof
 Narkowicz's fit of the ACES curve (2016).
 
+## PRISM's frame upscaling
+
+`display.upscaler = "fsr3"` (`docs/prism_plugin.md`) is AMD's FidelityFX Super Resolution 3.1 upscaler (FSR 3.1.4),
+from the [FidelityFX SDK](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK) v1.1.4 (commit
+`c6efa6bf7`), by Advanced Micro Devices, MIT licensed. Its GPU code (the passes' GLSL and the shared headers they
+include, RCAS and SPD among them) is copied unchanged into `port/third_party/fidelityfx-fsr3` with its licence and
+README; `port/linux/vulkan/xgpu_vulkan_fsr3.c`, which runs the passes, is written after the SDK's
+`ffx_fsr3upscaler.cpp` (the passes' order and dispatches, their constants, the resources, the jitter's Halton
+sequence) and carries its notice. The input pass's reactive mask follows FSR's own generation's rule.
+
+No code of any other vendor's SDK is in the tree: DLSS and other vendors' upscalers and denoisers are plugins built
+by the player outside it (`prism-plugins`).
+
 ## PRISM's pack tools
 
 `tools/prism_packs` (the pack tools, `docs/prism_packs.md`) is this fork's own code, AGPL-3.0-or-later,

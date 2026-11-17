@@ -6,9 +6,12 @@ PRISM_PLUGIN_PASSTHROUGH.C
 The tree's own plugin (prism_plugin.h, docs/prism_plugin.md): an
 "upscaler" that copies the frame's colour to the output, byte for byte
 where the sizes are the same (vkCmdCopyImage), else stretched to the
-nearest texel (vkCmdBlitImage). It exists to exercise the ABI: with it
-selected the picture must be the one the upscaler off draws. Built as a
-shared library on its own:
+nearest texel (vkCmdBlitImage); and a "denoiser" that leaves the light as
+it is given (a frame with no colour, its radiance denoised in place: none
+of it changed). It exists to exercise the ABI: with it selected the picture
+must be the one the upscaler off draws (at the screen's size, the jitter
+off), and the one the path tracer's own filter off draws. Built as a shared
+library on its own:
 
   cc -shared -fPIC -fvisibility=hidden -I<vulkan headers> -I port/linux/vulkan \
       port/linux/vulkan/plugins/passthrough/prism_plugin_passthrough.c -o passthrough.so
@@ -139,6 +142,9 @@ static int evaluate(void *context, const struct prism_plugin_frame *frame)
 	}
 	in = &frame->color_in;
 	out = &frame->color_out;
+	/* (a denoiser's frame: the light left as it is) */
+	if (!in->image && !out->image && frame->diffuse_radiance.image)
+		return 1;
 	if (!in->image || !out->image || !in->width || !in->height || !out->width || !out->height)
 	{
 		p->error = "passthrough: no colour in or out";
@@ -200,7 +206,7 @@ static const struct prism_plugin plugin =
 	{
 		PRISM_PLUGIN_ABI, sizeof(struct prism_plugin_info),
 		"passthrough", "PRISM", "1", "AGPL-3.0-or-later (the game's own code)", "",
-		PRISM_CAP_UPSCALE,
+		PRISM_CAP_UPSCALE | PRISM_CAP_DENOISE,
 		sizeof(struct prism_plugin_vulkan), sizeof(struct prism_plugin_image), sizeof(struct prism_plugin_frame),
 	},
 	instance_extensions,

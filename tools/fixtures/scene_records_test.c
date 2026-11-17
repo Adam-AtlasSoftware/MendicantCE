@@ -135,6 +135,23 @@ static void layout(void)
 	FIELD(xgpu_stream_prism_bake, threshold);
 	FIELD(xgpu_stream_prism_bake, pad);
 	FIELD(xgpu_stream_prism_bake, map_name);
+	SIZE(xgpu_stream_upscale);
+	FIELD(xgpu_stream_upscale, header);
+	FIELD(xgpu_stream_upscale, phase);
+	FIELD(xgpu_stream_upscale, upscaler);
+	FIELD(xgpu_stream_upscale, denoiser);
+	FIELD(xgpu_stream_upscale, flags);
+	FIELD(xgpu_stream_upscale, view);
+	FIELD(xgpu_stream_upscale, view_depth);
+	FIELD(xgpu_stream_upscale, output);
+	FIELD(xgpu_stream_upscale, output_depth);
+	FIELD(xgpu_stream_upscale, view_corners);
+	FIELD(xgpu_stream_upscale, output_corners);
+	FIELD(xgpu_stream_upscale, now);
+	FIELD(xgpu_stream_upscale, last);
+	FIELD(xgpu_stream_upscale, sharpness);
+	FIELD(xgpu_stream_upscale, frame_milliseconds);
+	FIELD(xgpu_stream_upscale, pad);
 }
 
 /* (the bytes, 4-byte aligned) */
@@ -296,6 +313,7 @@ static void constants(void)
 	printf("scene_fog %u\n", (unsigned)XGPU_STREAM_SCENE_FOG);
 	printf("scene_view %u\n", (unsigned)XGPU_STREAM_SCENE_VIEW);
 	printf("prism_bake %u\n", (unsigned)XGPU_STREAM_PRISM_BAKE);
+	printf("upscale %u\n", (unsigned)XGPU_STREAM_UPSCALE);
 	printf("scene_record_types %u\n", (unsigned)XGPU_STREAM_SCENE_RECORD_TYPES);
 }
 

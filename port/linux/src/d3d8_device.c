@@ -86,6 +86,23 @@ static float screen_scale[2] = { 1.0f, 1.0f };
 /* how many times the display's pixels each way supersampling draws (with
 the scale screen_mode_choose last chose) */
 static float screen_supersampling = 1.0f;
+/* display.upscaler (PRISM v4 M5, halo_upscale_view_begin): while a player's
+window's 3D view is drawn smaller, the screen's scale it is drawn at is
+screen_scale (the view's), and the screen's own is kept here; view_ratio is
+the view's pixels each way over the screen's (1 while none is) */
+static struct
+{
+	BOOL drawing;
+	float screen[2];
+	float ratio;
+	/* the view's targets' scale as last drawn at (0: none), whose entries
+	render_target_stale keeps; the entries of another let go of between
+	frames (halo_screen_commit), and these too once a frame draws none */
+	float scale[2];
+	BOOL evict, used;
+	/* the maps' textures' mip bias while it is drawn (log2 of the ratio) */
+	float lod_bias;
+} view_scale = { FALSE, { 1.0f, 1.0f }, 1.0f, { 0.0f, 0.0f }, FALSE, FALSE, 0.0f };
 static long ui_offset;
 #define UI_OFFSET ((long)ui_offset)
 /* ---------- anti-aliasing
@@ -142,6 +159,9 @@ static int anti_aliasing_value = -1;
 static int anti_aliasing_samples;
 
 static void anti_aliasing_prepare(void);
+/* port/linux/game/prism_upscale.c: display.upscaler is not "off" (where
+the build upscales) */
+int prism_upscale_setting_on(void);
 
 /* display.anti_aliasing's value (none of them: the first, off) */
 static void anti_aliasing_read(void)
@@ -149,15 +169,26 @@ static void anti_aliasing_read(void)
 	const char *setting = config_string("display.anti_aliasing");
 	int value;
 
+	int upscaled;
+
 	for (value = NUMBER_OF_ANTI_ALIASING_VALUES - 1;
 		value > 0 && strcmp(setting, anti_aliasing_values[value].name);
 		value--)
 	{
 	}
+	/* (display.upscaler: no multisampling or supersampling under an
+	upscaler, which is the view's anti-aliasing: port/linux/game/
+	prism_upscale.c) */
+	upscaled = prism_upscale_setting_on() && (anti_aliasing_values[value].mode == _anti_aliasing_msaa ||
+		anti_aliasing_values[value].mode == _anti_aliasing_ssaa);
+	if (upscaled)
+		value = 0;
 	if (value == anti_aliasing_value)
 		return;
 	anti_aliasing_value = value;
-	if (strcmp(setting, anti_aliasing_values[value].name))
+	if (upscaled)
+		platform_log("anti-aliasing: %s, off under display.upscaler", setting);
+	else if (strcmp(setting, anti_aliasing_values[value].name))
 		platform_log("anti-aliasing: \"%s\" is unknown, so off", setting);
 	else
 		platform_log("anti-aliasing: %s", setting);
@@ -750,8 +781,10 @@ float halo_model_detail_scale(int level)
 	if (detail == _model_detail_highest && level)
 		return 1.0e6f;
 	halo_screen_width();
-	/* (the eyes' scale is their images' own, which nothing supersamples) */
-	display_scale = eyes ? screen_scale[1] : screen_scale[1] / screen_supersampling;
+	/* (the eyes' scale is their images' own, which nothing supersamples; a
+view drawn smaller for display.upscaler is measured at the screen's, which
+the upscaler gives it) */
+	display_scale = eyes ? screen_scale[1] : screen_scale[1] / view_scale.ratio / screen_supersampling;
 	return display_scale > 1.0f ? display_scale : 1.0f;
 }
 
@@ -1623,7 +1656,11 @@ struct xgpu_render_target *xgpu_render_target_find(unsigned long data)
 		/* (in a VR pass, the screen's targets of its own pass: the eyes' have
 		a layer for each eye, the HUD's and the scope's one, each at its
 		pass's scale) */
-		if (entry->target.data == data && !entry->target.depth && (!best || entry->last_rendered > best->last_rendered)
+		if (entry->target.data == data && !entry->target.depth && (!best || entry->last_rendered > best->last_rendered ||
+			/* (display.upscaler: a screen target's view and the target itself
+			drawn in the same frame, the one of the scale drawn at now) */
+			(entry->last_rendered == best->last_rendered && best->target.scale[0] != screen_scale[0] &&
+			entry->target.scale[0] == screen_scale[0]))
 #ifdef HALO_VR
 			&& (vr_gl.pass == HALO_VR_PASS_NONE || entry->kind != _render_target_screen ||
 				((entry->target.layers > 1) == (vr_gl.pass == HALO_VR_PASS_EYES) &&
@@ -2413,6 +2450,19 @@ long halo_screen_commit(void)
 			render_targets_evict();
 		}
 	}
+	/* (display.upscaler: the view's targets of an earlier render scale let
+	go of, and the view's own once a frame drew no view smaller) */
+	if (!view_scale.used && view_scale.scale[0] != 0.0f)
+	{
+		view_scale.scale[0] = view_scale.scale[1] = 0.0f;
+		view_scale.evict = TRUE;
+	}
+	view_scale.used = FALSE;
+	if (view_scale.evict)
+	{
+		view_scale.evict = FALSE;
+		render_targets_evict();
+	}
 	if (!screen_width)
 		return halo_screen_width();
 	screen_mode_choose(&width, scale);
@@ -3116,6 +3166,10 @@ static void sampler_describe(int stage, BOOL mipmapped, BOOL hires, BOOL rendere
 	sampler->address[1] = sampler_address(state[D3DTSS_ADDRESSV]);
 	sampler->address[2] = sampler_address(state[D3DTSS_ADDRESSW]);
 	sampler->lod_bias = hires ? 0.0f : dword_to_float(state[D3DTSS_MIPMAPLODBIAS]);
+	/* (display.upscaler: a view drawn smaller samples the maps' textures as
+	sharp as the screen's pixels would, which the upscaler gives back) */
+	if (view_scale.drawing && !hires && mipmapped && !rendered)
+		sampler->lod_bias += view_scale.lod_bias;
 	sampler->first_level = hires ? 0 : state[D3DTSS_MAXMIPLEVEL];
 	sampler->anisotropy = anisotropy;
 	sampler->border_color = state[D3DTSS_BORDERCOLOR];
@@ -3131,7 +3185,8 @@ static BOOL render_target_stale(const struct render_target_entry *entry)
 	switch (entry->kind)
 	{
 	case _render_target_screen:
-		return entry->target.scale[0] != screen_scale[0] || entry->target.scale[1] != screen_scale[1] ||
+		return ((entry->target.scale[0] != screen_scale[0] || entry->target.scale[1] != screen_scale[1]) &&
+			(entry->target.scale[0] != view_scale.scale[0] || entry->target.scale[1] != view_scale.scale[1])) ||
 			(entry->target.height == SCREEN_HEIGHT && entry->target.width != (unsigned long)halo_screen_width()) ||
 			(render_target_screen_colour(entry) && entry->target.format != hdr_back_buffer_format());
 	case _render_target_shadow_map:
@@ -5486,6 +5541,8 @@ void WINAPI D3DDevice_Clear(DWORD count, CONST D3DRECT *rectangles, DWORD flags,
 
 /* ---------- the anti-aliasing passes */
 
+int halo_upscale_view_upscaled(void);
+
 /* display.anti_aliasing's pass over a window's 3D view, before the HUD and
 menus are drawn over it (source/render/render.c); the window's bounds in the
 game's units of the screen */
@@ -5502,6 +5559,10 @@ void halo_screen_anti_alias(short x0, short y0, short x1, short y1)
 		journal_operation(JOURNAL_ANTI_ALIAS, arguments, sizeof(arguments));
 	}
 	if (!device.gl_ready || (mode != _anti_aliasing_fxaa && mode != _anti_aliasing_smaa))
+		return;
+	/* (display.upscaler: the view upscaled this frame, the upscaler its
+	anti-aliasing) */
+	if (halo_upscale_view_upscaled())
 		return;
 	/* (the primary target's view: the back buffer's) */
 	target = render_target_get(&device.back_buffer);
@@ -5570,6 +5631,196 @@ void halo_scene_view(short x0, short y0, short x1, short y1, float const camera[
 	last_frame = device.frame;
 	last_made = 1;
 	xgpu_backend_scene_view(&view);
+}
+
+/* ---------- display.upscaler (PRISM v4 M5; port/linux/game/prism_upscale.c)
+
+A player's window's 3D view drawn smaller (display.render_scale of the
+screen's pixels each way) and upscaled into the window before the HUD is
+drawn over it, at the screen's scale. While the view is drawn the screen's
+scale is the view's (screen_scale times the ratio), so that every target of
+the screen's the view draws (the back buffer, its depth buffer, the
+secondary target of the mirror's and active camouflage's views, the screen
+effects' copies) is an entry of that scale, a target of the backend's of its
+own, and the game's viewports, clears, quads and texture coordinates scale
+with it as they do with supersampling's; the HUD's targets are the screen's
+own. The backend is told the view's targets as the view begins (UPSCALE
+BEGIN: it jitters the view's draws), when its opaque surfaces are drawn
+(OPAQUE) and as it ends (END: it upscales the view into the window's own
+targets, colour and depth). The maps' textures are sampled with a mip bias
+of log2 of the ratio meanwhile, the models' detail measured at the screen's
+scale. A frame without any of this (the setting off, the default) draws as
+before, byte for byte. */
+
+static struct
+{
+	int upscaler, denoiser;
+	/* the last END's frame, view corners and ratio: a view the frame after
+	the last, of the same corners, keeps its history */
+	unsigned long frame;
+	int32_t corners[4];
+	float ratio;
+	BOOL ended;
+} upscale_view;
+
+/* the view's targets (the scale now) */
+static void upscale_targets(struct render_target_entry **color, struct render_target_entry **depth)
+{
+	*color = render_target_get(&device.back_buffer);
+	*depth = render_target_get(&device.depth_buffer);
+	if (*depth && !(*depth)->target.depth)
+		*depth = NULL;
+}
+
+/* the view begins, drawn at ratio of the screen's scale (0.25 to 1) with an
+upscaler (XGPU_UPSCALE_UPSCALER_*: none draws it at the screen's, for the
+denoiser alone) and a denoiser (XGPU_UPSCALE_DENOISER_*); FALSE where it
+cannot be (nothing changed) */
+int halo_upscale_view_begin(int upscaler, int denoiser, float ratio)
+{
+	struct xgpu_stream_upscale record;
+	struct render_target_entry *color, *depth;
+
+	if (!device.gl_ready || view_scale.drawing || device.render_target != &device.back_buffer ||
+		anti_aliasing() == _anti_aliasing_msaa || anti_aliasing() == _anti_aliasing_ssaa)
+		return FALSE;
+#ifdef HALO_VR
+	if (vr_gl.pass != HALO_VR_PASS_NONE)
+		return FALSE;
+#endif
+	if (upscaler == XGPU_UPSCALE_UPSCALER_NONE || !(ratio > 0.0f) || ratio > 1.0f)
+		ratio = 1.0f;
+	if (ratio < 0.25f)
+		ratio = 0.25f;
+	view_scale.screen[0] = screen_scale[0];
+	view_scale.screen[1] = screen_scale[1];
+	view_scale.ratio = ratio;
+	if (ratio < 1.0f)
+	{
+		/* (the view's pixels each way a whole number: its targets' sizes the
+		screen's times the ratio, rounded as render_target_get rounds) */
+		screen_scale[0] = view_scale.screen[0] * ratio;
+		screen_scale[1] = view_scale.screen[1] * ratio;
+		if (view_scale.scale[0] != screen_scale[0] || view_scale.scale[1] != screen_scale[1])
+		{
+			/* (the entries of an earlier ratio let go of between frames, as a
+			mode's change: render_target_stale keeps the new one's) */
+			view_scale.scale[0] = screen_scale[0];
+			view_scale.scale[1] = screen_scale[1];
+			view_scale.evict = TRUE;
+		}
+		view_scale.used = TRUE;
+		view_scale.lod_bias = log2f(ratio);
+	}
+	else
+	{
+		view_scale.lod_bias = 0.0f;
+	}
+	view_scale.drawing = TRUE;
+	upscale_view.upscaler = upscaler;
+	upscale_view.denoiser = denoiser;
+	upscale_targets(&color, &depth);
+	memset(&record, 0, sizeof(record));
+	record.phase = XGPU_UPSCALE_BEGIN;
+	record.upscaler = (uint32_t)upscaler;
+	record.denoiser = (uint32_t)denoiser;
+	record.view = color ? color->target.number : 0;
+	record.view_depth = depth ? depth->target.number : 0;
+	xgpu_backend_upscale(&record);
+	return TRUE;
+}
+
+/* the view's opaque surfaces drawn, its transparent ones to come */
+void halo_upscale_view_opaque(void)
+{
+	struct xgpu_stream_upscale record;
+	struct render_target_entry *color, *depth;
+
+	if (!view_scale.drawing)
+		return;
+	upscale_targets(&color, &depth);
+	memset(&record, 0, sizeof(record));
+	record.phase = XGPU_UPSCALE_OPAQUE;
+	record.upscaler = (uint32_t)upscale_view.upscaler;
+	record.denoiser = (uint32_t)upscale_view.denoiser;
+	record.view = color ? color->target.number : 0;
+	record.view_depth = depth ? depth->target.number : 0;
+	xgpu_backend_upscale(&record);
+}
+
+/* the view whole, its bounds in the game's units of the screen and the
+camera (SCENE_VIEW's layout; NULL: none known): upscaled into the window at
+the screen's scale, which is drawn at from here on */
+void halo_upscale_view_end(short x0, short y0, short x1, short y1, float const camera[4][4], float sharpness,
+	float frame_milliseconds)
+{
+	static float last[4][4];
+	struct xgpu_stream_upscale record;
+	struct render_target_entry *color, *depth, *output, *output_depth;
+	long corners[4];
+	int index;
+
+	if (!view_scale.drawing)
+		return;
+	upscale_targets(&color, &depth);
+	memset(&record, 0, sizeof(record));
+	if (color)
+	{
+		view_corners(color, x0, y0, x1, y1, corners);
+		for (index = 0; index < 4; index++)
+			record.view_corners[index] = (int32_t)corners[index];
+	}
+	/* (the screen's scale again, and its targets) */
+	screen_scale[0] = view_scale.screen[0];
+	screen_scale[1] = view_scale.screen[1];
+	view_scale.drawing = FALSE;
+	view_scale.lod_bias = 0.0f;
+	upscale_targets(&output, &output_depth);
+	if (output)
+	{
+		view_corners(output, x0, y0, x1, y1, corners);
+		for (index = 0; index < 4; index++)
+			record.output_corners[index] = (int32_t)corners[index];
+	}
+	record.phase = XGPU_UPSCALE_END;
+	record.upscaler = (uint32_t)upscale_view.upscaler;
+	record.denoiser = (uint32_t)upscale_view.denoiser;
+	record.view = color ? color->target.number : 0;
+	record.view_depth = depth ? depth->target.number : 0;
+	record.output = output ? output->target.number : 0;
+	record.output_depth = output_depth ? output_depth->target.number : 0;
+	if (camera)
+	{
+		memcpy(record.now, camera, sizeof(record.now));
+		if (upscale_view.ended && upscale_view.frame + 1 == device.frame && upscale_view.ratio == view_scale.ratio &&
+			!memcmp(upscale_view.corners, record.view_corners, sizeof(upscale_view.corners)))
+		{
+			memcpy(record.last, last, sizeof(record.last));
+			record.flags |= XGPU_UPSCALE_FLAG_HISTORY;
+		}
+		else
+		{
+			memcpy(record.last, camera, sizeof(record.last));
+		}
+		memcpy(last, camera, sizeof(last));
+	}
+	record.sharpness = sharpness;
+	record.frame_milliseconds = frame_milliseconds;
+	upscale_view.ended = camera != NULL;
+	upscale_view.frame = device.frame;
+	upscale_view.ratio = view_scale.ratio;
+	memcpy(upscale_view.corners, record.view_corners, sizeof(upscale_view.corners));
+	view_scale.ratio = 1.0f;
+	xgpu_backend_upscale(&record);
+	/* (the HUD's draws bind the screen's targets: bind_targets) */
+}
+
+/* whether a view was upscaled into the window this frame (display.
+anti_aliasing's passes then not drawn: the upscaler is the anti-aliasing) */
+int halo_upscale_view_upscaled(void)
+{
+	return upscale_view.ended && upscale_view.frame == device.frame &&
+		upscale_view.upscaler != XGPU_UPSCALE_UPSCALER_NONE;
 }
 
 int halo_world_ao_prepass_begin(void)

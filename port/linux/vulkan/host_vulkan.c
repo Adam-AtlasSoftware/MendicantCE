@@ -68,6 +68,7 @@ names another file, or none (empty).
 #include "xgpu_vulkan_post.h"
 #include "xgpu_vulkan_stream.h"
 #include "xgpu_vulkan_textures.h"
+#include "xgpu_vulkan_upscale.h"
 #include "frame_pacing.h"
 #ifdef HALO_VR
 #include "host_vr_vulkan.h"
@@ -252,6 +253,8 @@ static void vulkan_shutdown(void)
 	xgpu_vulkan_wait(xgpu_vulkan_fence());
 	host_vr_vulkan_shutdown();
 #endif
+	/* (PRISM's renderer plugins and the upscalers, before the device) */
+	xgpu_vulkan_upscale_shutdown();
 	xgpu_vulkan_shutdown();
 }
 
@@ -296,6 +299,28 @@ int host_vulkan_device_choose(uint32_t device)
 	if (!chosen)
 		chosen = host_pointer(device);
 	snprintf(vulkan_device, sizeof(vulkan_device), "%s", chosen ? chosen : "");
+	return 1;
+}
+
+/* display.upscaler's and display.denoiser's plugins (xgpu_vulkan_upscale.c),
+from the guest before the window opens: their names (empty: none) and the
+folder they are opened from; HALO_PRISM_PLUGINS names another folder */
+static char plugin_upscaler[72], plugin_denoiser[72], plugin_folder[1024];
+
+/* (a host import: the guest's sdl_platform.c, on its main thread; guest
+addresses of strings) */
+int host_vulkan_plugins_choose(uint32_t upscaler, uint32_t denoiser, uint32_t folder)
+{
+	const char *chosen = getenv("HALO_PRISM_PLUGINS");
+	const char *name;
+
+	name = host_pointer(upscaler);
+	snprintf(plugin_upscaler, sizeof(plugin_upscaler), "%s", name ? name : "");
+	name = host_pointer(denoiser);
+	snprintf(plugin_denoiser, sizeof(plugin_denoiser), "%s", name ? name : "");
+	if (!chosen)
+		chosen = host_pointer(folder);
+	snprintf(plugin_folder, sizeof(plugin_folder), "%s", chosen ? chosen : "");
 	return 1;
 }
 
@@ -412,6 +437,16 @@ int host_vulkan_window_open(uint32_t window, uint32_t debug, uint32_t shader_fol
 	options.device = vulkan_device;
 	options.validation = (debug & DEBUG_VALIDATION) != 0;
 	options.statistics = (debug & DEBUG_STATISTICS) != 0;
+	/* (PRISM's renderer plugins, opened before the instance: what they need of
+	it and the device; none named, none opened, nothing asked) */
+	if (plugin_upscaler[0] || plugin_denoiser[0])
+	{
+		xgpu_vulkan_upscale_plugins_open(plugin_folder, plugin_upscaler, plugin_denoiser);
+		options.plugin_instance_extension_count = xgpu_vulkan_upscale_instance_extensions(
+			&options.plugin_instance_extensions);
+		options.plugin_device_extensions = xgpu_vulkan_upscale_device_extensions;
+		options.plugin_missing = xgpu_vulkan_upscale_extension_missing;
+	}
 	if (!xgpu_vulkan_initialize(&options))
 	{
 #ifdef HALO_VR
@@ -449,6 +484,9 @@ int host_vulkan_window_open(uint32_t window, uint32_t debug, uint32_t shader_fol
 	if (vr && (SDL_GetWindowFlags(object) & SDL_WINDOW_HIDDEN))
 		xgpu_vulkan_window_hidden(1);
 #endif
+	/* (the plugins' state, on the device made) */
+	if (plugin_upscaler[0] || plugin_denoiser[0])
+		xgpu_vulkan_upscale_plugins_create();
 	SDL_GetWindowSizeInPixels(object, &width, &height);
 	xgpu_vulkan_window_resized((uint32_t)width, (uint32_t)height);
 	window_hdr_read();

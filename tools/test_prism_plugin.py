@@ -1,6 +1,6 @@
 """PRISM's renderer plugins (docs/prism_plugin.md): the ABI header (port/linux/vulkan/prism_plugin.h), the
 passthrough plugin built as a shared library that exports its entry alone, and the host's loader
-(port/linux/vulkan/plugins/loader/xgpu_plugin.c) driven by port/linux/vulkan/tests/plugin_test.c: the passthrough opened and its
+(port/linux/vulkan/xgpu_plugin.c) driven by port/linux/vulkan/tests/plugin_test.c: the passthrough opened and its
 commands recorded over a fake device, and each kind of bad plugin, a missing one and a wrong ABI refused with a
 logged reason; no name, no file touched. No GPU or game data is needed: a C compiler, nm and Vulkan's headers (the
 build's, build/<name>/third_party/vulkan-headers, or the system's)."""
@@ -45,8 +45,7 @@ def built():
         shutil.rmtree(WORK)
     plugins = WORK / "plugins"
     plugins.mkdir(parents=True)
-    flags = ["-std=gnu11", "-O1", "-g", "-Wall", "-Wextra", "-Werror", f"-I{headers}", f"-I{VULKAN}",
-             f"-I{VULKAN / 'plugins/loader'}"]
+    flags = ["-std=gnu11", "-O1", "-g", "-Wall", "-Wextra", "-Werror", f"-I{headers}", f"-I{VULKAN}"]
     shared = ["-shared", "-fPIC", "-fvisibility=hidden"]
 
     def run(*arguments):
@@ -60,7 +59,7 @@ def built():
     (plugins / "not_a_library.so").write_text("not a library\n")
     driver = WORK / "plugin_test"
     run("-Wl,--wrap=fopen,--wrap=dlopen", str(VULKAN / "tests/plugin_test.c"),
-        str(VULKAN / "plugins/loader/xgpu_plugin.c"), "-o",
+        str(VULKAN / "xgpu_plugin.c"), "-o",
         str(driver), "-ldl")
     return driver, plugins
 
@@ -84,10 +83,12 @@ def test_passthrough_exports_only_its_entry(built):
 def test_passthrough_opens_and_records_a_copy(built):
     result = drive(built, "record", "passthrough")
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "name passthrough vendor PRISM version 1 capabilities 1 abi 1" in result.stdout
+    assert "name passthrough vendor PRISM version 1 capabilities 3 abi 1" in result.stdout
     assert "log: prism plugin passthrough: opened (1)" in result.stdout
     # (the same sizes copied, others blitted; four transitions an evaluate, every image left as it came)
     assert "copies 1 blits 1 barriers 8 balance 0" in result.stdout
+    # (as a denoiser: the light left as it is, nothing recorded)
+    assert "denoised with 0 commands" in result.stdout
     assert "refused small frame: passthrough:" in result.stdout
 
 

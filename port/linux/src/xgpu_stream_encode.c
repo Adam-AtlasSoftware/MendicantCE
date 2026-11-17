@@ -929,6 +929,20 @@ void xgpu_backend_scene_view(const struct xgpu_stream_scene_view *view)
 	stream_finite(&record_body->now[0][0], 32, "the scene's view", 0);
 }
 
+void xgpu_backend_upscale(const struct xgpu_stream_upscale *upscale)
+{
+	struct xgpu_stream_upscale *record_body;
+	uint32_t header;
+
+	if (!stream.open || stream.preparing || !upscale)
+		return;
+	record_body = record(XGPU_STREAM_UPSCALE, sizeof(*record_body));
+	header = record_body->header;
+	*record_body = *upscale;
+	record_body->header = header;
+	stream_finite(&record_body->now[0][0], 32, "the upscaled view", 0);
+}
+
 void xgpu_backend_scene_instance(unsigned long instance, unsigned long flags, unsigned long lod, const float *now,
 	const float *last, unsigned long node_count)
 {
