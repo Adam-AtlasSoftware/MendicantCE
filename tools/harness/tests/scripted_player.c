@@ -120,6 +120,7 @@ int main(int argc, char **argv)
 	char const *case_name = argc > 1 ? argv[1] : "";
 	int touched, pressed_a;
 
+	(void)test_input_menu_waiting; /* (set by the code, read by the menus' script here stubbed out) */
 	CASE("bot_menus")
 	{
 		test_input_setting = "bot:1";
