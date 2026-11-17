@@ -114,6 +114,8 @@ void mod_sounds_tags_unloaded(void);
 /* (sound_cache_start_loading_sound) whether a permutation is a mod's,
 read at once into buffer */
 boolean mod_sounds_read(struct sound_permutation const *permutation, void *buffer);
+/* Whether the map's sound tag `tag_index` plays from a mod's or a loose tag file (an override) */
+boolean mod_sounds_replaced(long tag_index);
 
 /* ---------- prototypes/MOD_BITMAPS.C */
 

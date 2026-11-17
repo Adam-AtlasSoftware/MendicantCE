@@ -145,6 +145,54 @@ int main(int argc,char **argv)
   CHECK(result==_coop_sound_sync_play&&permutation==2,"result %d, landed on permutation %d",result,permutation);
   CHECK(near(bytes,ideal_adpcm(1000,22050,1),36),"1 s into it is byte %ld",bytes);
  }
+ else if(!strcmp(name,"split-chain"))
+ {
+  /* 30 s of mono kept as 16-bit PCM at 44.1 kHz, split at load into linked pieces of 512 KB (mod_sounds.c's
+  range_split, OpenH1 issue 1167): 13 s in is in the third piece, 13 s less the first two's 11.89 s, within the
+  milliseconds each piece's time is counted to */
+  static long const lengths[]={5944,5944,5944,5944,5944,278};
+  int piece;
+  real ideal;
+  sound(LOOP_SOUND,MONO,XBOX_ADPCM,RATE_22,TRUE,6,lengths);
+  for(piece=0;piece<6;piece++)
+  {
+   struct sound_permutation *p=&permutations[LOOP_SOUND-START_SOUND][piece];
+   p->compression=NONE_COMPRESSION;p->sample_buffer_size=44100;
+   p->samples.size=piece<5?0x80000:(30L*44100-5L*0x40000)*2;
+  }
+  coop_sound_sync_begin(LOOPING,13000);
+  result=place(_coop_sound_sync_loop_part,LOOP_SOUND,&permutation,100);
+  bytes=offset(100,LOOP_SOUND,2);
+  ideal=(13000.f*44100.f/1000.f-2.f*0x40000)*2.f;
+  CHECK(result==_coop_sound_sync_play&&permutation==2,"result %d, landed on piece %d",result,permutation);
+  CHECK(bytes%2==0&&fabsf((real)bytes-ideal)<=2.f*44.1f*2.f,"13 s in is byte %ld of the third piece, not about %.0f",
+   bytes,ideal);
+ }
+ else if(!strcmp(name,"split-repeat"))
+ {
+  /* the same 30 s split into pieces, a loop not linked (as its file says): it repeats, all of its pieces, so 43 s
+  is 13 s into it again, in the third piece, not played out */
+  static long const lengths[]={5944,5944,5944,5944,5944,278};
+  int piece;
+  real ideal;
+  sound(LOOP_SOUND,MONO,XBOX_ADPCM,RATE_22,FALSE,6,lengths);
+  for(piece=0;piece<6;piece++)
+  {
+   struct sound_permutation *p=&permutations[LOOP_SOUND-START_SOUND][piece];
+   p->compression=NONE_COMPRESSION;p->sample_buffer_size=44100;
+   p->samples.size=piece<5?0x80000:(30L*44100-5L*0x40000)*2;
+   p->next_permutation_index=piece<5?(short)(piece+1):NONE;
+  }
+  coop_sound_sync_begin(LOOPING,43000);
+  result=place(_coop_sound_sync_loop_part,LOOP_SOUND,&permutation,100);
+  bytes=offset(100,LOOP_SOUND,2);
+  ideal=(13002.f*44100.f/1000.f-2.f*0x40000)*2.f;
+  CHECK(result==_coop_sound_sync_play&&permutation==2,"result %d, landed on piece %d",result,permutation);
+  CHECK(bytes%2==0&&fabsf((real)bytes-ideal)<=2.f*44.1f*2.f,"43 s in is byte %ld of the third piece, not about %.0f",
+   bytes,ideal);
+  CHECK(coop_sound_sync_sound_milliseconds(LOOP_SOUND)>=29990,"the loop is %ld ms long, not its pieces'",
+   coop_sound_sync_sound_milliseconds(LOOP_SOUND));
+ }
  else if(!strcmp(name,"stereo-blocks"))
  {
   /* a stereo ADPCM block is twice a mono one's */
