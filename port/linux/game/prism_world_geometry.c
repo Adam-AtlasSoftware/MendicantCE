@@ -31,7 +31,8 @@ and incident radiosity of the point of its surface it lies over, so the
 baked light lands where the stock light was.
 
 The file: <data root>/prism_world/<the BSP tag's path, / for \>.pwg, little
-endian, written by tools/prism_packs/art/world_geo (wg_common.py's write_pwg):
+endian, written by tools/prism_packs/art/world_geo (version 1 by wg_common.py's
+write_pwg, version 3 by wg3_pwg.py's write_v3):
 
   header, 64 bytes: "PWG1", version (1), material count, flags (0), the
     BSP tag's path (48 bytes, informational)
@@ -74,6 +75,26 @@ further again before it goes far (each surface's level kept from the
 camera before), so that a camera at the distance does not switch it back
 and forth. Neither draws a surface far nearer than the file's distance.
 
+Version 3 (PRISM v4; the pack tools' wg3_build.py, wg3_pwg.py) keeps
+version 2's records, its far levels always present, and adds (flags 2, 4
+and 8, all set): after the header a 64-byte extension (the seal groups'
+count, the lightmap atlas's page count, a page's width and height in
+texels, its density in texels a world unit (a float), its chart count, 40
+bytes zero); after each record's far levels, each of its surfaces' seal
+group (32 bits), its deviation (4 floats: the most its triangles stand
+above its stock triangle's plane, on the side its front faces, and below
+it, the most they reach past its edges in that plane, and the most its near
+level lies from its far level), and each near triangle's atlas record (its
+chart, 32 bits, 0xffffffff none; its three corners' u and v, 16 bits each,
+in eighths of a texel of the chart's page); after the last record, each
+chart's page (32 bits). A seal group is a set of surfaces that switch
+between the remodel and their stock triangles together without a crack:
+every stock edge between a group and the rest is the stock edge on both
+sides, at both levels. The atlas is the remodel's own lightmap layout
+(xatlas's charts of its near triangles), which CE's lightmap coordinates
+cannot be where relief overhangs its stock surface; it is read and checked
+here, for the baker to take up.
+
 A material whose remodel has more than 65535 vertices (the 16-bit indices)
 comes in parts, records one after another, each of a run of its surfaces in
 order; a surface's triangles are all in one part.
@@ -83,8 +104,10 @@ over its surfaces s of (3 a + 5 b + 7 c) (s + 1), modulo 2^32, where a, b,
 c are its vertex indices; the position check is the sum over its vertices
 of x + 2 y + 3 z. A material whose counts or checks differ (another map
 revision, a modded map) stays stock, and the log says so; so does one whose
-shader is transparent. The file is untrusted input: every count, offset
-and index is checked against what was read.
+shader is transparent (with version 3, the seal groups of its surfaces
+fall back with it: "the shape's checks"). The file is untrusted input:
+every count, offset and index is checked against what was read, version
+3's groups, deviations, charts and pages against the file's own figures.
 
 Memory: the remodel's vertices and triangles, compressed by the game's own
 rasterizer_geometry_compress_vertices, sit in the Xbox's contiguous memory
@@ -164,10 +187,24 @@ extern D3DDevice *global_d3d_device;
 /* ---------- constants */
 
 #define PWG_MAGIC "PWG1"
-#define PWG_VERSION 2
+#define PWG_VERSION 3
 #define PWG_FLAG_FAR 1
+#define PWG_FLAG_GROUPS 2
+#define PWG_FLAG_DEVIATION 4
+#define PWG_FLAG_ATLAS 8
 #define PWG_HEADER_SIZE 64
+/* version 3's extension of the header */
+#define PWG_EXTENSION_SIZE 64
 #define PWG_MATERIAL_SIZE 64
+/* version 3: a near triangle's atlas record (its chart, its corners' u and
+v in eighths of a texel), and a triangle of no chart */
+#define PWG_ATLAS_RECORD_SIZE 16
+#define PWG_ATLAS_UV_SCALE 8
+#define PWG_NO_CHART 0xFFFFFFFFUL
+#define PWG_MOST_GROUPS 0x400000UL
+#define PWG_MOST_CHARTS 0x1000000UL
+#define PWG_MOST_PAGES 4096
+#define PWG_MOST_PAGE_SIZE 8192
 #define PWG_FOLDER "prism_world"
 
 #define ENVIRONMENT_VERTEX_UNCOMPRESSED_SIZE 56
@@ -535,6 +572,21 @@ static boolean material_stock_checks(
 	return TRUE;
 }
 
+/* the file's own figures (version 3's extension; zero before) */
+struct pwg_file
+{
+	unsigned long version;
+	unsigned long flags;
+	unsigned long group_count;
+	unsigned long page_count;
+	unsigned long page_width;
+	unsigned long page_height;
+	float density;
+	unsigned long chart_count;
+	/* each chart's page */
+	byte const *charts;
+};
+
 struct pwg_material_view
 {
 	short lightmap_index;
@@ -557,6 +609,12 @@ struct pwg_material_view
 	float far_distance;
 	byte const *far_triangles;
 	byte const *bounds;
+	/* version 3: each surface's seal group, its deviation (above and below
+	its stock plane, past its edges, its far level from its near), each near
+	triangle's atlas record; NULL before */
+	byte const *groups;
+	byte const *deviations;
+	byte const *atlas;
 	struct structure_material *material;
 	boolean usable;
 	/* the part's surfaces drawn as their stock triangles (the shape's
@@ -565,14 +623,91 @@ struct pwg_material_view
 	unsigned long fallback_count;
 };
 
+/* version 3's tables checked against the file's own figures: every
+surface's group a group of the file, its deviation four numbers none of
+them below zero, every near triangle's chart one of the file's (or none)
+and its corners on the chart's page, every chart's page one of its pages.
+NULL when they hold, else the reason */
+static char const *pwg_tables_check(
+	struct pwg_material_view const *views,
+	long view_count,
+	struct pwg_file const *file)
+{
+	unsigned long limit_u = file->page_width * PWG_ATLAS_UV_SCALE;
+	unsigned long limit_v = file->page_height * PWG_ATLAS_UV_SCALE;
+	unsigned long index;
+	long view_index;
+
+	for (index = 0; index < file->chart_count; index++)
+	{
+		if (read_u32(file->charts + 4 * index) >= file->page_count)
+		{
+			return "has a chart of no page";
+		}
+	}
+	for (view_index = 0; view_index < view_count; view_index++)
+	{
+		struct pwg_material_view const *view = &views[view_index];
+
+		for (index = 0; index < view->part_surface_count; index++)
+		{
+			int axis;
+
+			if (read_u32(view->groups + 4 * index) >= file->group_count)
+			{
+				return "has a surface of no seal group";
+			}
+			for (axis = 0; axis < 4; axis++)
+			{
+				float value;
+
+				memcpy(&value, view->deviations + 16 * index + 4 * axis, sizeof(value));
+				if (!isfinite(value) || value < 0.0f)
+				{
+					return "has a surface's deviation that is no distance";
+				}
+			}
+		}
+		for (index = 0; index < view->near_triangle_count; index++)
+		{
+			byte const *record = view->atlas + PWG_ATLAS_RECORD_SIZE * index;
+			unsigned long chart = read_u32(record);
+			int corner;
+
+			if (chart == PWG_NO_CHART)
+			{
+				continue;
+			}
+			if (chart >= file->chart_count)
+			{
+				return "has a triangle of no chart";
+			}
+			for (corner = 0; corner < 3; corner++)
+			{
+				unsigned long u = (unsigned long)record[4 + 2 * corner] | ((unsigned long)record[5 + 2 * corner] << 8);
+				unsigned long v = (unsigned long)record[10 + 2 * corner] | ((unsigned long)record[11 + 2 * corner] << 8);
+
+				if (u > limit_u || v > limit_v)
+				{
+					return "has a triangle's atlas coordinates off its page";
+				}
+			}
+		}
+	}
+
+	return NULL;
+}
+
 /* the file's materials read and checked against its size, the map's BSP
-and themselves; FALSE if the file is not one */
+and themselves (and version 3's tables against the file's figures); FALSE
+if the file is not one */
 static boolean pwg_parse(
 	byte const *bytes,
 	unsigned long size,
 	struct structure_bsp *bsp,
 	struct pwg_material_view **views_out,
 	long *view_count_out,
+	struct pwg_file *file,
 	char const *path)
 {
 	struct pwg_material_view *views;
@@ -581,26 +716,58 @@ static boolean pwg_parse(
 	unsigned long index;
 	unsigned long version;
 	boolean far;
+	char const *reason;
 
+	memset(file, 0, sizeof(*file));
 	if (size < PWG_HEADER_SIZE || memcmp(bytes, PWG_MAGIC, 4) ||
 		(version = read_u32(bytes + 4)) < 1 || version > PWG_VERSION)
 	{
 		platform_log("prism world geometry: %s is not a remodel of version 1 to %d", path, PWG_VERSION);
 		return FALSE;
 	}
-	far = version >= 2 && (read_u32(bytes + 12) & PWG_FLAG_FAR);
+	file->version = version;
+	file->flags = read_u32(bytes + 12);
+	far = version >= 2 && (file->flags & PWG_FLAG_FAR);
 	material_count = read_u32(bytes + 8);
 	if (!material_count || material_count > 4096)
 	{
 		platform_log("prism world geometry: %s has %lu materials", path, material_count);
 		return FALSE;
 	}
+	offset = PWG_HEADER_SIZE;
+	if (version >= 3)
+	{
+		/* (version 3: far levels, seal groups, deviations and the atlas
+		always, and the extension's figures) */
+		unsigned long all = PWG_FLAG_FAR | PWG_FLAG_GROUPS | PWG_FLAG_DEVIATION | PWG_FLAG_ATLAS;
+
+		if ((file->flags & all) != all || size - offset < PWG_EXTENSION_SIZE)
+		{
+			platform_log("prism world geometry: %s is of version 3 without its tables", path);
+			return FALSE;
+		}
+		file->group_count = read_u32(bytes + offset);
+		file->page_count = read_u32(bytes + offset + 4);
+		file->page_width = read_u32(bytes + offset + 8);
+		file->page_height = read_u32(bytes + offset + 12);
+		memcpy(&file->density, bytes + offset + 16, sizeof(file->density));
+		file->chart_count = read_u32(bytes + offset + 20);
+		if (file->group_count > PWG_MOST_GROUPS || file->chart_count > PWG_MOST_CHARTS ||
+			file->page_count > PWG_MOST_PAGES || file->page_width > PWG_MOST_PAGE_SIZE ||
+			file->page_height > PWG_MOST_PAGE_SIZE || !isfinite(file->density) || file->density < 0.0f ||
+			(file->chart_count && (!file->page_count || !file->page_width || !file->page_height ||
+			!(file->density > 0.0f))))
+		{
+			platform_log("prism world geometry: %s has version 3 figures out of their bounds", path);
+			return FALSE;
+		}
+		offset += PWG_EXTENSION_SIZE;
+	}
 	views = calloc(material_count, sizeof(*views));
 	if (!views)
 	{
 		return FALSE;
 	}
-	offset = PWG_HEADER_SIZE;
 	for (index = 0; index < material_count; index++)
 	{
 		struct pwg_material_view *view = &views[index];
@@ -631,7 +798,8 @@ static boolean pwg_parse(
 		offset += PWG_MATERIAL_SIZE;
 		if (view->surface_count > 0x100000 || view->vertex_count > 0xFFFF || view->triangle_count > 0x400000 ||
 			view->part_first_surface > view->surface_count ||
-			view->part_surface_count > view->surface_count - view->part_first_surface)
+			view->part_surface_count > view->surface_count - view->part_first_surface ||
+			view->near_triangle_count > view->triangle_count)
 		{
 			goto truncated;
 		}
@@ -639,8 +807,9 @@ static boolean pwg_parse(
 			pad4(view->vertex_count * ENVIRONMENT_VERTEX_UNCOMPRESSED_SIZE) +
 			pad4(view->vertex_count * ENVIRONMENT_LIGHTMAP_VERTEX_UNCOMPRESSED_SIZE) +
 			pad4(view->triangle_count * 6) +
-			(far ? view->part_surface_count * (8 + 16) : 0);
-		if (view->near_triangle_count > view->triangle_count || size - offset < data_size)
+			(far ? view->part_surface_count * (8 + 16) : 0) +
+			(version >= 3 ? view->part_surface_count * (4 + 16) + view->near_triangle_count * PWG_ATLAS_RECORD_SIZE : 0);
+		if (size - offset < data_size)
 		{
 			goto truncated;
 		}
@@ -660,6 +829,33 @@ static boolean pwg_parse(
 			offset += view->part_surface_count * 8;
 			view->bounds = bytes + offset;
 			offset += view->part_surface_count * 16;
+		}
+		view->groups = NULL;
+		view->deviations = NULL;
+		view->atlas = NULL;
+		if (version >= 3)
+		{
+			view->groups = bytes + offset;
+			offset += view->part_surface_count * 4;
+			view->deviations = bytes + offset;
+			offset += view->part_surface_count * 16;
+			view->atlas = bytes + offset;
+			offset += view->near_triangle_count * PWG_ATLAS_RECORD_SIZE;
+		}
+	}
+	if (version >= 3)
+	{
+		if ((size - offset) / 4 < file->chart_count)
+		{
+			goto truncated;
+		}
+		file->charts = bytes + offset;
+		reason = pwg_tables_check(views, (long)material_count, file);
+		if (reason)
+		{
+			platform_log("prism world geometry: %s %s; it is drawn stock", path, reason);
+			free(views);
+			return FALSE;
 		}
 	}
 	*views_out = views;
@@ -811,35 +1007,55 @@ refused:
 	return FALSE;
 }
 
-/* ---------- the shape's checks (PRISM v4, M1)
+/* ---------- the shape's checks (PRISM v4, M1; version 3's seal groups)
 
-A remodel's triangles stand for its stock triangle's surface: each must lie
-within the surface's offset prism, the stock triangle's plane and a relief
-off it (SHAPE_RELIEF) and its edges and a margin past them in its plane
-(SHAPE_MARGIN), or it is a floating facet (a spike or sheet the pack tools'
-decimation or far level left: a10f's steel and a10g's panel strips have
-them, metres out of slivers of stock triangles). A surface with one, at
-either level, is drawn as its stock triangle instead.
+A remodel's triangles stand for its stock triangle's surface: each corner
+of each of them must lie within the surface's offset prism, the stock
+triangle's plane and a relief off it (SHAPE_RELIEF) and its edges and a
+margin past them in its plane (SHAPE_MARGIN), and not further from the stock
+triangle than a needle's reach (NEEDLE_FLOOR, or NEEDLE_RATIO times the
+triangle's longest edge, whichever is more), or it is a floating facet (a
+spike or sheet the pack tools' bevels or far levels left: a10f's steel and
+a10g's panel strips had needles metres out of slivers of stock triangles,
+some of them along the sliver, inside its prism). Version 3 declares each
+surface's deviation, which its triangles must also keep to (and which must
+itself be within the prism). A surface with one, at either level, is drawn
+as its stock triangle instead.
 
 A surface drawn stock among remodelled neighbours leaves a crack wherever a
-neighbour's edge along it is not the stock edge (a T-junction where the
-neighbour's edge has vertices between the stock corners, a gap where it
-left the edge). So such surfaces fall back in seal groups, never alone: the
-group grows across each stock edge to every remodelled neighbour whose
-edge there is not the stock edge: a vertex between the stock corners (a
-T-junction), a corner it does not reach, or vertices beside the edge (its
-boundary moved off it, as a bevel's: a gap). That is the crack check, on
-the CPU over the loaded file; the group grows until no edge of its border
-would crack. A group past SEAL_GROUP_MOST surfaces is not let fall back (the
-remodel is drawn as the file has it, and the log says so): a crack across a
-level is worse than a facet. Neighbours of other materials are found by the
-stock edges' corners, which the BSP's surfaces share exactly.
+neighbour's edge along it is not the stock edge. So such surfaces fall back
+in seal groups, never alone:
 
-display.prism_world_geometry_check false skips the checks (read as a BSP's
-remodel loads). */
+- Version 3 names them: each surface's group, made by the pack tools
+  (wg3_pwg.py) so that every stock edge between a group and the rest is the
+  stock edge on both sides, at both levels (its two corners joined by one
+  edge of each side's triangles). A group with a facet, or with a surface of
+  a material that is drawn stock (the map's own: not this map's, or past its
+  vertices), falls back whole; before it does, its border is checked here
+  (each neighbour outside it that stays remodelled has the stock edge as
+  one boundary edge of its triangles at each level), and a group whose
+  border is not is kept as the file has it, and logged.
+- Version 2's are grown here: across each stock edge to every remodelled
+  neighbour whose edge there is not the stock edge (a vertex between the
+  stock corners, a corner it does not reach, or vertices beside the edge:
+  its boundary moved off it, as a bevel's), until no edge of the group's
+  border would crack. A group past SEAL_GROUP_MOST surfaces is not let fall
+  back (a crack across a level is worse than a facet).
+
+Neighbours of other materials are found by the stock edges' corners, which
+the BSP's surfaces share exactly. display.prism_world_geometry_check false
+skips the checks (read as a BSP's remodel loads). */
 
 #define SHAPE_RELIEF 1.0
 #define SHAPE_MARGIN 1.0
+/* (the remodels as built reach at most 0.8 of their stock triangle's
+longest edge past it where they reach past 0.1 wu, and their needles 2 to
+50 times it) */
+#define NEEDLE_FLOOR 0.1
+#define NEEDLE_RATIO 1.0
+/* (a declared deviation's slack: the file's floats against the doubles they
+were measured in) */
+#define DEVIATION_SLACK 1.0e-3
 /* a neighbour's vertex this near a stock edge is on it (wg2_cracks.py's
 tolerance), this near a corner at it (world units): the remodel's
 boundaries lie on the stock edges (wg2_seal.py) */
@@ -861,8 +1077,8 @@ struct shape_check
 	struct structure_bsp *bsp;
 	struct pwg_material_view *views;
 	long view_count;
-	/* the remodelled surfaces, all views' in order: the first of each view
-	(view_count + 1 entries) */
+	/* the surfaces of the usable views (all views' with version 3's
+	groups), in order: the first of each view (view_count + 1 entries) */
 	long *view_first;
 	long surface_count;
 	/* each surface's stock corners (9 floats), its state, its group */
@@ -870,6 +1086,7 @@ struct shape_check
 	byte *state;
 	long *queue;
 	struct shape_edge *edges;
+	long edge_count;
 };
 
 enum
@@ -878,7 +1095,11 @@ enum
 	_shape_facets,
 	_shape_grouped,
 	_shape_fallback,
-	_shape_kept_whole
+	_shape_kept_whole,
+	/* (version 3: a surface of a material drawn stock, and one without
+	stock corners) */
+	_shape_stock,
+	_shape_none
 };
 
 static void shape_vertex(
@@ -930,16 +1151,90 @@ static boolean shape_stock_corners(
 	return TRUE;
 }
 
-/* whether a run of a part's triangles has one outside its surface's offset
-prism (their centroids against the stock triangle) */
+/* the point of the triangle a, b, c nearest p (Ericson's regions) and its
+distance */
+static double shape_triangle_distance(
+	double const p[3],
+	double const a[3],
+	double const b[3],
+	double const c[3])
+{
+	double ab[3], ac[3], ap[3], bp[3], cp[3], q[3], d1, d2, d3, d4, d5, d6, va, vb, vc, denominator, v, w;
+	int axis;
+
+	for (axis = 0; axis < 3; axis++)
+	{
+		ab[axis] = b[axis] - a[axis];
+		ac[axis] = c[axis] - a[axis];
+		ap[axis] = p[axis] - a[axis];
+		bp[axis] = p[axis] - b[axis];
+		cp[axis] = p[axis] - c[axis];
+	}
+	d1 = ab[0] * ap[0] + ab[1] * ap[1] + ab[2] * ap[2];
+	d2 = ac[0] * ap[0] + ac[1] * ap[1] + ac[2] * ap[2];
+	d3 = ab[0] * bp[0] + ab[1] * bp[1] + ab[2] * bp[2];
+	d4 = ac[0] * bp[0] + ac[1] * bp[1] + ac[2] * bp[2];
+	d5 = ab[0] * cp[0] + ab[1] * cp[1] + ab[2] * cp[2];
+	d6 = ac[0] * cp[0] + ac[1] * cp[1] + ac[2] * cp[2];
+	va = d3 * d6 - d5 * d4;
+	vb = d5 * d2 - d1 * d6;
+	vc = d1 * d4 - d3 * d2;
+	if (d1 <= 0.0 && d2 <= 0.0)
+	{
+		v = 0.0, w = 0.0;
+	}
+	else if (d3 >= 0.0 && d4 <= d3)
+	{
+		v = 1.0, w = 0.0;
+	}
+	else if (vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0)
+	{
+		v = d1 / (d1 - d3), w = 0.0;
+	}
+	else if (d6 >= 0.0 && d5 <= d6)
+	{
+		v = 0.0, w = 1.0;
+	}
+	else if (vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0)
+	{
+		v = 0.0, w = d2 / (d2 - d6);
+	}
+	else if (va <= 0.0 && d4 - d3 >= 0.0 && d5 - d6 >= 0.0)
+	{
+		w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+		v = 1.0 - w;
+	}
+	else
+	{
+		denominator = va + vb + vc;
+		if (fabs(denominator) < 1.0e-30)
+		{
+			denominator = 1.0e-30;
+		}
+		v = vb / denominator;
+		w = vc / denominator;
+	}
+	for (axis = 0; axis < 3; axis++)
+	{
+		q[axis] = a[axis] + ab[axis] * v + ac[axis] * w - p[axis];
+	}
+
+	return sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2]);
+}
+
+/* whether a run of a part's triangles has one with a corner outside its
+surface's bounds (above: the stock corners, and version 3's declared
+deviation or NULL); each such triangle counted in facets */
 static boolean shape_run_facets(
 	struct pwg_material_view const *view,
 	float const corners[9],
+	float const *declared,
 	unsigned long first,
 	unsigned long count,
 	unsigned long *facets)
 {
-	double a[3], b[3], c[3], n[3], inward[3][3], length;
+	double a[3], b[3], c[3], n[3], inward[3][3], length, needle, longest = 0.0;
+	double above = SHAPE_RELIEF, below = SHAPE_RELIEF, past = SHAPE_MARGIN;
 	unsigned long triangle;
 	boolean found = FALSE;
 	int axis, edge;
@@ -950,9 +1245,10 @@ static boolean shape_run_facets(
 		b[axis] = corners[3 + axis];
 		c[axis] = corners[6 + axis];
 	}
-	n[0] = (b[1] - a[1]) * (c[2] - a[2]) - (b[2] - a[2]) * (c[1] - a[1]);
-	n[1] = (b[2] - a[2]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[2] - a[2]);
-	n[2] = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+	/* (outward, the engine's front: minus the corners' cross product) */
+	n[0] = -((b[1] - a[1]) * (c[2] - a[2]) - (b[2] - a[2]) * (c[1] - a[1]));
+	n[1] = -((b[2] - a[2]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[2] - a[2]));
+	n[2] = -((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]));
 	length = sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
 	if (length < 1.0e-12)
 	{
@@ -963,50 +1259,83 @@ static boolean shape_run_facets(
 	{
 		n[axis] /= length;
 	}
-	/* each edge's inward direction in the plane (n x edge, the corners
-	about n as they come) */
+	/* each edge's inward direction in the plane, and its length */
 	for (edge = 0; edge < 3; edge++)
 	{
 		float const *u = corners + 3 * edge;
 		float const *v = corners + 3 * ((edge + 1) % 3);
 		double e[3] = { v[0] - u[0], v[1] - u[1], v[2] - u[2] };
 
-		inward[edge][0] = n[1] * e[2] - n[2] * e[1];
-		inward[edge][1] = n[2] * e[0] - n[0] * e[2];
-		inward[edge][2] = n[0] * e[1] - n[1] * e[0];
+		inward[edge][0] = e[1] * n[2] - e[2] * n[1];
+		inward[edge][1] = e[2] * n[0] - e[0] * n[2];
+		inward[edge][2] = e[0] * n[1] - e[1] * n[0];
 		length = sqrt(inward[edge][0] * inward[edge][0] + inward[edge][1] * inward[edge][1] +
 			inward[edge][2] * inward[edge][2]);
+		longest = length > longest ? length : longest;
 		for (axis = 0; axis < 3; axis++)
 		{
 			inward[edge][axis] = length > 1.0e-12 ? inward[edge][axis] / length : 0.0;
 		}
 	}
-	for (triangle = first; triangle < first + count; triangle++)
+	/* (the inward directions turned to the triangle's inside: the corners'
+	order is the BSP's, whichever way it turns) */
+	for (edge = 0; edge < 3; edge++)
 	{
-		double centroid[3] = { 0.0, 0.0, 0.0 }, p[3], height, outside = 0.0;
-		int corner;
+		float const *u = corners + 3 * edge;
+		float const *o = corners + 3 * ((edge + 2) % 3);
 
-		for (corner = 0; corner < 3; corner++)
+		if ((o[0] - u[0]) * inward[edge][0] + (o[1] - u[1]) * inward[edge][1] + (o[2] - u[2]) * inward[edge][2] < 0.0)
 		{
-			shape_vertex(view, shape_index(view, triangle * 3 + corner), p);
 			for (axis = 0; axis < 3; axis++)
 			{
-				centroid[axis] += p[axis] / 3.0;
+				inward[edge][axis] = -inward[edge][axis];
 			}
 		}
-		height = (centroid[0] - a[0]) * n[0] + (centroid[1] - a[1]) * n[1] + (centroid[2] - a[2]) * n[2];
-		for (edge = 0; edge < 3; edge++)
+	}
+	needle = NEEDLE_RATIO * longest > NEEDLE_FLOOR ? NEEDLE_RATIO * longest : NEEDLE_FLOOR;
+	if (declared)
+	{
+		if (!(declared[0] <= SHAPE_RELIEF && declared[1] <= SHAPE_RELIEF && declared[2] <= SHAPE_MARGIN))
 		{
-			float const *u = corners + 3 * edge;
-			double in = (centroid[0] - u[0]) * inward[edge][0] + (centroid[1] - u[1]) * inward[edge][1] +
-				(centroid[2] - u[2]) * inward[edge][2];
+			/* (a deviation past the prism: the surface is a facet whole) */
+			(*facets)++;
+			return TRUE;
+		}
+		above = declared[0] + DEVIATION_SLACK;
+		below = declared[1] + DEVIATION_SLACK;
+		past = declared[2] + DEVIATION_SLACK;
+	}
+	for (triangle = first; triangle < first + count; triangle++)
+	{
+		int corner;
+		boolean outside = FALSE;
 
-			if (-in > outside)
+		for (corner = 0; corner < 3 && !outside; corner++)
+		{
+			double p[3], height, beyond = 0.0;
+
+			shape_vertex(view, shape_index(view, triangle * 3 + corner), p);
+			height = (p[0] - a[0]) * n[0] + (p[1] - a[1]) * n[1] + (p[2] - a[2]) * n[2];
+			for (edge = 0; edge < 3; edge++)
 			{
-				outside = -in;
+				float const *u = corners + 3 * edge;
+				double in = (p[0] - u[0]) * inward[edge][0] + (p[1] - u[1]) * inward[edge][1] +
+					(p[2] - u[2]) * inward[edge][2];
+
+				if (-in > beyond)
+				{
+					beyond = -in;
+				}
+			}
+			/* (a corner over the triangle is its height from it; one past an
+			edge, its distance to the triangle) */
+			if (height > above || -height > below || beyond > past ||
+				(beyond > 0.0 ? shape_triangle_distance(p, a, b, c) : fabs(height)) > needle)
+			{
+				outside = TRUE;
 			}
 		}
-		if (fabs(height) > SHAPE_RELIEF || outside > SHAPE_MARGIN)
+		if (outside)
 		{
 			(*facets)++;
 			found = TRUE;
@@ -1065,7 +1394,7 @@ static int shape_edge_compare(
 	return a->surface < b->surface ? -1 : a->surface > b->surface;
 }
 
-/* the view and part's surface of a remodelled surface's number */
+/* the view and part's surface of a surface's number */
 static struct pwg_material_view *shape_surface(
 	struct shape_check const *check,
 	long surface,
@@ -1091,6 +1420,61 @@ static struct pwg_material_view *shape_surface(
 	return &check->views[low];
 }
 
+/* the first of the sorted edges at the stock edge u-v */
+static long shape_edge_find(
+	struct shape_check const *check,
+	float const *u,
+	float const *v)
+{
+	struct shape_edge key;
+	long low = 0, high = check->edge_count;
+
+	shape_edge_key(u, v, &key);
+	key.surface = -1;
+	while (low < high)
+	{
+		long middle = (low + high) / 2;
+
+		if (shape_edge_compare(&check->edges[middle], &key) < 0)
+		{
+			low = middle + 1;
+		}
+		else
+		{
+			high = middle;
+		}
+	}
+
+	return low;
+}
+
+static boolean shape_same_edge(
+	struct shape_check const *check,
+	long at,
+	float const *u,
+	float const *v)
+{
+	struct shape_edge key;
+
+	shape_edge_key(u, v, &key);
+
+	return at < check->edge_count && !memcmp(check->edges[at].q, key.q, sizeof(key.q));
+}
+
+/* a part surface's triangle runs: near, then far (a count of 0 where none) */
+static void shape_runs(
+	struct pwg_material_view const *view,
+	long local,
+	unsigned long ranges[2][2])
+{
+	ranges[0][0] = read_u32(view->surface_first_triangle + 4 * local);
+	ranges[0][1] = read_u32(view->surface_first_triangle + 4 * (local + 1)) - ranges[0][0];
+	ranges[1][0] = view->far_triangles ? read_u32(view->far_triangles + 8 * local) : 0;
+	ranges[1][1] = view->far_triangles ? read_u32(view->far_triangles + 8 * local + 4) : 0;
+
+	return;
+}
+
 /* whether a neighbour's edge along the stock edge u-v is that edge: a
 vertex of its triangles at each corner, and none on the edge between them
 (a T-junction) nor beside it (within SEAL_NEAR_BAND: a boundary moved off
@@ -1113,10 +1497,7 @@ static boolean shape_edge_sealed(
 	{
 		return TRUE;
 	}
-	ranges[0][0] = read_u32(view->surface_first_triangle + 4 * local);
-	ranges[0][1] = read_u32(view->surface_first_triangle + 4 * (local + 1)) - ranges[0][0];
-	ranges[1][0] = view->far_triangles ? read_u32(view->far_triangles + 8 * local) : 0;
-	ranges[1][1] = view->far_triangles ? read_u32(view->far_triangles + 8 * local + 4) : 0;
+	shape_runs(view, local, ranges);
 	for (range = 0; range < 2; range++)
 	{
 		unsigned long element;
@@ -1162,17 +1543,277 @@ static boolean shape_edge_sealed(
 	return at_u && at_v;
 }
 
+static boolean shape_at(
+	struct pwg_material_view const *view,
+	unsigned long element,
+	float const *corner)
+{
+	double p[3];
+
+	shape_vertex(view, shape_index(view, element), p);
+
+	return (p[0] - corner[0]) * (p[0] - corner[0]) + (p[1] - corner[1]) * (p[1] - corner[1]) +
+		(p[2] - corner[2]) * (p[2] - corner[2]) <= SEAL_CORNER * SEAL_CORNER;
+}
+
+/* whether a surface's side along the stock edge u-v is that edge at each of
+its levels (version 3's rule, the pack tools' plain_sides): exactly one of
+its triangles has an edge from a vertex at u to one at v, so its boundary
+runs straight from corner to corner there */
+static boolean shape_edge_plain(
+	struct pwg_material_view const *view,
+	long local,
+	float const *u,
+	float const *v)
+{
+	unsigned long ranges[2][2];
+	int range;
+
+	shape_runs(view, local, ranges);
+	for (range = 0; range < 2; range++)
+	{
+		unsigned long triangle, found = 0;
+
+		if (range == 1 && (!ranges[1][1] || (ranges[1][0] == ranges[0][0] && ranges[1][1] == ranges[0][1])))
+		{
+			/* (no far level apart from the near) */
+			break;
+		}
+		for (triangle = ranges[range][0]; triangle < ranges[range][0] + ranges[range][1]; triangle++)
+		{
+			int corner;
+
+			for (corner = 0; corner < 3; corner++)
+			{
+				unsigned long first = triangle * 3 + (unsigned long)corner;
+				unsigned long second = triangle * 3 + (unsigned long)((corner + 1) % 3);
+
+				if ((shape_at(view, first, u) && shape_at(view, second, v)) ||
+					(shape_at(view, first, v) && shape_at(view, second, u)))
+				{
+					found++;
+				}
+			}
+		}
+		if (found != 1)
+		{
+			return FALSE;
+		}
+	}
+
+	return TRUE;
+}
+
+/* version 2's seal groups, grown from each surface with facets across the
+edges that would crack (above); the members' states set (_shape_fallback,
+or _shape_kept_whole for a group past SEAL_GROUP_MOST) */
+static void shape_groups_grown(
+	struct shape_check *check,
+	unsigned long *groups,
+	unsigned long *kept_groups,
+	unsigned long *fallbacks,
+	unsigned long *largest)
+{
+	long surface;
+
+	for (surface = 0; surface < check->surface_count; surface++)
+	{
+		long head = 0, tail = 0, member;
+		boolean too_large = FALSE;
+
+		if (check->state[surface] != _shape_facets)
+		{
+			continue;
+		}
+		(*groups)++;
+		check->state[surface] = _shape_grouped;
+		check->queue[tail++] = surface;
+		while (head < tail && !too_large)
+		{
+			long g = check->queue[head++];
+			float const *corners = check->corners + 9 * g;
+			int corner;
+
+			for (corner = 0; corner < 3 && !too_large; corner++)
+			{
+				float const *u = corners + 3 * corner;
+				float const *v = corners + 3 * ((corner + 1) % 3);
+				long at;
+
+				for (at = shape_edge_find(check, u, v); shape_same_edge(check, at, u, v); at++)
+				{
+					long n = check->edges[at].surface;
+
+					if (n == g || check->state[n] == _shape_grouped || check->state[n] == _shape_fallback)
+					{
+						continue;
+					}
+					if (check->state[n] == _shape_facets || !shape_edge_sealed(check, n, u, v))
+					{
+						if (tail >= SEAL_GROUP_MOST)
+						{
+							too_large = TRUE;
+							break;
+						}
+						check->state[n] = _shape_grouped;
+						check->queue[tail++] = n;
+					}
+				}
+			}
+		}
+		if ((unsigned long)tail > *largest)
+		{
+			*largest = (unsigned long)tail;
+		}
+		for (member = 0; member < tail; member++)
+		{
+			/* (a group too large keeps its remodel: its members are marked
+			apart from facets so that no other group takes them up) */
+			check->state[check->queue[member]] = too_large ? _shape_kept_whole : _shape_fallback;
+		}
+		if (too_large)
+		{
+			(*kept_groups)++;
+		}
+		else
+		{
+			*fallbacks += (unsigned long)tail;
+		}
+	}
+
+	return;
+}
+
+static unsigned long shape_group_of(
+	struct shape_check const *check,
+	long surface)
+{
+	long local;
+	struct pwg_material_view const *view = shape_surface(check, surface, &local);
+
+	return read_u32(view->groups + 4 * local);
+}
+
+/* version 3's seal groups (above): every group with a facet or a surface of
+a material drawn stock, its border checked, falls back whole (its
+members' states _shape_fallback) or is kept (_shape_kept_whole). The
+groups' members are found by the groups' first member and a list through
+them (queue: each surface's next in its group). TRUE when the members of
+some group changed state */
+static boolean shape_groups_named(
+	struct shape_check *check,
+	unsigned long group_count,
+	long *first_member,
+	byte *group_state,
+	unsigned long *groups,
+	unsigned long *kept_groups,
+	unsigned long *fallbacks,
+	unsigned long *largest)
+{
+	long surface;
+	unsigned long group;
+	boolean changed = FALSE;
+
+	for (surface = 0; surface < check->surface_count; surface++)
+	{
+		group = shape_group_of(check, surface);
+		if (group_state[group] == 0 && (check->state[surface] == _shape_facets || check->state[surface] == _shape_stock))
+		{
+			group_state[group] = 1;
+		}
+	}
+	for (group = 0; group < group_count; group++)
+	{
+		long member, members = 0;
+		boolean sealed = TRUE;
+
+		if (group_state[group] != 1)
+		{
+			continue;
+		}
+		/* its border: each member's stock edges' neighbours outside it that
+		stay remodelled have the stock edge there */
+		for (member = first_member[group]; member != NONE && sealed; member = check->queue[member])
+		{
+			float const *corners = check->corners + 9 * member;
+			int corner;
+
+			members++;
+			if (check->state[member] == _shape_none)
+			{
+				continue;
+			}
+			for (corner = 0; corner < 3 && sealed; corner++)
+			{
+				float const *u = corners + 3 * corner;
+				float const *v = corners + 3 * ((corner + 1) % 3);
+				long at;
+
+				for (at = shape_edge_find(check, u, v); shape_same_edge(check, at, u, v); at++)
+				{
+					long n = check->edges[at].surface, local;
+					struct pwg_material_view const *view;
+
+					if (shape_group_of(check, n) == group || check->state[n] == _shape_stock ||
+						check->state[n] == _shape_fallback)
+					{
+						continue;
+					}
+					view = shape_surface(check, n, &local);
+					if (!shape_edge_plain(view, local, u, v))
+					{
+						sealed = FALSE;
+						break;
+					}
+				}
+			}
+		}
+		for (; member != NONE; member = check->queue[member])
+		{
+			members++;
+		}
+		(*groups)++;
+		group_state[group] = sealed ? 2 : 3;
+		changed = TRUE;
+		if ((unsigned long)members > *largest)
+		{
+			*largest = (unsigned long)members;
+		}
+		for (member = first_member[group]; member != NONE; member = check->queue[member])
+		{
+			if (check->state[member] == _shape_stock || check->state[member] == _shape_none)
+			{
+				continue;
+			}
+			check->state[member] = sealed ? _shape_fallback : _shape_kept_whole;
+			*fallbacks += sealed;
+		}
+		if (!sealed)
+		{
+			(*kept_groups)++;
+		}
+	}
+
+	return changed;
+}
+
 /* the remodel's shape checked (above): each usable view's fallback list
-made; a view whose fallbacks would take it past 16-bit indices stays stock */
+made; a view whose fallbacks would take it past 16-bit indices stays stock
+(and with version 3's groups, the groups of its surfaces then fall back in
+turn) */
 static void shape_check(
 	struct structure_bsp *bsp,
 	struct pwg_material_view *views,
 	long view_count,
+	struct pwg_file const *file,
 	char const *path)
 {
 	struct shape_check check;
 	long index, surface, edge_count = 0;
-	unsigned long facets = 0, facet_surfaces = 0, groups = 0, kept_groups = 0, fallbacks = 0, largest = 0;
+	unsigned long facets = 0, facet_surfaces = 0, groups = 0, kept_groups = 0, fallbacks = 0, largest = 0, stocked = 0;
+	boolean named = file->version >= 3;
+	long *first_member = NULL;
+	byte *group_state = NULL;
 
 	memset(&check, 0, sizeof(check));
 	if (!config_boolean("display.prism_world_geometry_check"))
@@ -1190,7 +1831,7 @@ static void shape_check(
 	for (index = 0; index < view_count; index++)
 	{
 		check.view_first[index] = check.surface_count;
-		if (views[index].usable)
+		if (views[index].usable || named)
 		{
 			check.surface_count += (long)views[index].part_surface_count;
 		}
@@ -1200,7 +1841,12 @@ static void shape_check(
 	check.state = calloc(check.surface_count + 1, 1);
 	check.queue = malloc(check.surface_count * sizeof(long) + 1);
 	check.edges = malloc(check.surface_count * 3 * sizeof(struct shape_edge) + 1);
-	if (!check.corners || !check.state || !check.queue || !check.edges)
+	if (named)
+	{
+		first_member = malloc(file->group_count * sizeof(long) + 1);
+		group_state = calloc(file->group_count + 1, 1);
+	}
+	if (!check.corners || !check.state || !check.queue || !check.edges || (named && (!first_member || !group_state)))
 	{
 		goto done;
 	}
@@ -1211,33 +1857,42 @@ static void shape_check(
 		struct pwg_material_view *view = &views[index];
 		long local;
 
-		if (!view->usable)
+		if (check.view_first[index + 1] == check.view_first[index])
 		{
 			continue;
 		}
 		for (local = 0; local < (long)view->part_surface_count; local++)
 		{
-			float *corners = check.corners + 9 * (check.view_first[index] + local);
+			long number = check.view_first[index] + local;
+			float *corners = check.corners + 9 * number;
+			float declared[4];
 			unsigned long first = read_u32(view->surface_first_triangle + 4 * local);
 			unsigned long count = read_u32(view->surface_first_triangle + 4 * (local + 1)) - first;
 			boolean found;
 			int corner;
 
-			if (!shape_stock_corners(bsp, view, local, corners))
+			if (!view->usable || !shape_stock_corners(bsp, view, local, corners))
 			{
+				/* (version 3: a surface of a material drawn stock, its group
+				to fall back with it; or one with no stock corners) */
 				memset(corners, 0, 9 * sizeof(float));
+				check.state[number] = view->usable ? _shape_none : _shape_stock;
 				continue;
 			}
-			found = shape_run_facets(view, corners, first, count, &facets);
+			if (view->deviations)
+			{
+				memcpy(declared, view->deviations + 16 * local, sizeof(declared));
+			}
+			found = shape_run_facets(view, corners, view->deviations ? declared : NULL, first, count, &facets);
 			if (view->far_triangles &&
-				shape_run_facets(view, corners, read_u32(view->far_triangles + 8 * local),
-					read_u32(view->far_triangles + 8 * local + 4), &facets))
+				shape_run_facets(view, corners, view->deviations ? declared : NULL,
+					read_u32(view->far_triangles + 8 * local), read_u32(view->far_triangles + 8 * local + 4), &facets))
 			{
 				found = TRUE;
 			}
 			if (found)
 			{
-				check.state[check.view_first[index] + local] = _shape_facets;
+				check.state[number] = _shape_facets;
 				facet_surfaces++;
 			}
 			for (corner = 0; corner < 3; corner++)
@@ -1245,106 +1900,96 @@ static void shape_check(
 				struct shape_edge *edge = &check.edges[edge_count++];
 
 				shape_edge_key(corners + 3 * corner, corners + 3 * ((corner + 1) % 3), edge);
-				edge->surface = check.view_first[index] + local;
+				edge->surface = number;
 			}
 		}
 	}
-	if (!facet_surfaces)
+	check.edge_count = edge_count;
+	if (!facet_surfaces && !named)
 	{
 		goto done;
 	}
 	qsort(check.edges, edge_count, sizeof(*check.edges), shape_edge_compare);
 
-	/* the seal groups, one from each surface with facets not yet in one */
-	for (surface = 0; surface < check.surface_count; surface++)
+	if (named)
 	{
-		long head = 0, tail = 0, member;
-		boolean too_large = FALSE;
-
-		if (check.state[surface] != _shape_facets)
+		/* each group's members, listed through queue (in the surfaces' order) */
+		for (index = 0; index < (long)file->group_count; index++)
 		{
-			continue;
+			first_member[index] = NONE;
 		}
-		groups++;
-		check.state[surface] = _shape_grouped;
-		check.queue[tail++] = surface;
-		while (head < tail && !too_large)
+		for (surface = check.surface_count - 1; surface >= 0; surface--)
 		{
-			long g = check.queue[head++];
-			float const *corners = check.corners + 9 * g;
-			int corner;
+			unsigned long group = shape_group_of(&check, surface);
 
-			for (corner = 0; corner < 3 && !too_large; corner++)
-			{
-				float const *u = corners + 3 * corner;
-				float const *v = corners + 3 * ((corner + 1) % 3);
-				struct shape_edge key;
-				long low = 0, high = edge_count;
-
-				shape_edge_key(u, v, &key);
-				key.surface = -1;
-				while (low < high)
-				{
-					long middle = (low + high) / 2;
-
-					if (shape_edge_compare(&check.edges[middle], &key) < 0)
-					{
-						low = middle + 1;
-					}
-					else
-					{
-						high = middle;
-					}
-				}
-				for (; low < edge_count && !memcmp(check.edges[low].q, key.q, sizeof(key.q)); low++)
-				{
-					long n = check.edges[low].surface;
-
-					if (n == g || check.state[n] == _shape_grouped || check.state[n] == _shape_fallback)
-					{
-						continue;
-					}
-					if (check.state[n] == _shape_facets || !shape_edge_sealed(&check, n, u, v))
-					{
-						if (tail >= SEAL_GROUP_MOST)
-						{
-							too_large = TRUE;
-							break;
-						}
-						check.state[n] = _shape_grouped;
-						check.queue[tail++] = n;
-					}
-				}
-			}
+			check.queue[surface] = first_member[group];
+			first_member[group] = surface;
 		}
-		if ((unsigned long)tail > largest)
+		for (surface = 0; surface < check.surface_count; surface++)
 		{
-			largest = (unsigned long)tail;
-		}
-		for (member = 0; member < tail; member++)
-		{
-			/* (a group too large keeps its remodel: its members are marked
-			apart from facets so that no other group takes them up) */
-			check.state[check.queue[member]] = too_large ? _shape_kept_whole : _shape_fallback;
-		}
-		if (too_large)
-		{
-			kept_groups++;
-		}
-		else
-		{
-			fallbacks += (unsigned long)tail;
+			stocked += check.state[surface] == _shape_stock;
 		}
 	}
+	else
+	{
+		shape_groups_grown(&check, &groups, &kept_groups, &fallbacks, &largest);
+	}
 
-	/* each view's fallbacks */
+	/* each view's fallbacks (version 3: again while a view the fallbacks
+	take past its vertices goes stock, and its surfaces' groups with it) */
+	for (;;)
+	{
+		boolean again = FALSE;
+
+		if (named)
+		{
+			shape_groups_named(&check, file->group_count, first_member, group_state, &groups, &kept_groups,
+				&fallbacks, &largest);
+		}
+		for (index = 0; index < view_count; index++)
+		{
+			struct pwg_material_view *view = &views[index];
+			long local;
+			unsigned long count = 0;
+
+			if (!view->usable || check.view_first[index + 1] == check.view_first[index])
+			{
+				continue;
+			}
+			for (local = 0; local < (long)view->part_surface_count; local++)
+			{
+				count += check.state[check.view_first[index] + local] == _shape_fallback;
+			}
+			if (!count)
+			{
+				continue;
+			}
+			if (view->vertex_count + 3 * count > 0xFFFF)
+			{
+				platform_log("prism world geometry: %s lightmap %d material %d: %lu surfaces to draw stock would "
+					"take it past 65535 vertices; it stays stock", path, (int)view->lightmap_index,
+					(int)view->material_index, count);
+				view->usable = FALSE;
+				for (local = 0; local < (long)view->part_surface_count; local++)
+				{
+					check.state[check.view_first[index] + local] = _shape_stock;
+				}
+				again = named;
+				continue;
+			}
+		}
+		if (!again)
+		{
+			break;
+		}
+	}
 	for (index = 0; index < view_count; index++)
 	{
 		struct pwg_material_view *view = &views[index];
 		long local;
 		unsigned long count = 0;
 
-		if (!view->usable)
+		if (!view->usable || check.view_first[index + 1] == check.view_first[index])
 		{
 			continue;
 		}
@@ -1354,14 +1999,6 @@ static void shape_check(
 		}
 		if (!count)
 		{
-			continue;
-		}
-		if (view->vertex_count + 3 * count > 0xFFFF)
-		{
-			platform_log("prism world geometry: %s lightmap %d material %d: %lu surfaces to draw stock would "
-				"take it past 65535 vertices; it stays stock", path, (int)view->lightmap_index,
-				(int)view->material_index, count);
-			view->usable = FALSE;
 			continue;
 		}
 		view->fallback = malloc(count * sizeof(unsigned long));
@@ -1380,7 +2017,16 @@ static void shape_check(
 	}
 
 done:
-	if (facet_surfaces)
+	if (named && check.state)
+	{
+		platform_log("prism world geometry: %s: version 3, %lu seal groups, %lu atlas pages of %lux%lu (%.1f texels a "
+			"world unit), %lu charts; %lu floating facets or needles on %lu surfaces, %lu surfaces of materials "
+			"drawn stock; %lu groups fall back (the largest %lu surfaces), %lu surfaces drawn as their stock "
+			"triangles, %lu groups kept (their border not the stock edges)", path, file->group_count,
+			file->page_count, file->page_width, file->page_height, (double)file->density, file->chart_count, facets,
+			facet_surfaces, stocked, groups - kept_groups, largest, fallbacks, kept_groups);
+	}
+	else if (facet_surfaces)
 	{
 		platform_log("prism world geometry: %s: %lu floating facets on %lu surfaces; %lu seal groups (the largest "
 			"%lu surfaces), %lu surfaces drawn as their stock triangles, %lu groups kept whole (over %d surfaces)",
@@ -1395,6 +2041,8 @@ done:
 	free(check.state);
 	free(check.queue);
 	free(check.edges);
+	free(first_member);
+	free(group_state);
 
 	return;
 }
@@ -2032,6 +2680,7 @@ static void world_geometry_load(
 	char path[512];
 	char const *name = tag_get_name(tag_index);
 	struct pwg_material_view *views = NULL;
+	struct pwg_file file_figures;
 	long view_count = 0, index;
 	byte *bytes = NULL;
 	unsigned long size = 0;
@@ -2078,13 +2727,13 @@ static void world_geometry_load(
 	}
 	fclose(file);
 
-	if (pwg_parse(bytes, size, bsp, &views, &view_count, path))
+	if (pwg_parse(bytes, size, bsp, &views, &view_count, &file_figures, path))
 	{
 		for (index = 0; index < view_count; index++)
 		{
 			pwg_material_check(bsp, &views[index], path);
 		}
-		shape_check(bsp, views, view_count, path);
+		shape_check(bsp, views, view_count, &file_figures, path);
 		if (world_geometry_make(bsp, views, view_count, path))
 		{
 			world_geometry.loaded_tag_index = tag_index;

@@ -620,10 +620,11 @@ static const struct config_setting config_settings[] =
 		_environment_value, _platform_desktop,
 		"PRISM, with display.prism_world_geometry \"remodel\": true checks the\n"
 		"remodel's shape as it loads, and draws a surface with a floating facet\n"
-		"(a remodel triangle off its stock triangle by more than a world unit)\n"
-		"as its stock triangle, with the neighbours a fallback would crack\n"
-		"against (its seal group); false draws the file as it is. Read as a\n"
-		"level's remodel loads." },
+		"(a remodel triangle off its stock triangle by more than a world unit,\n"
+		"a needle, or past the file's own bounds) as its stock triangle, with\n"
+		"its seal group (a file of version 3 names it; else the neighbours a\n"
+		"fallback would crack against); false draws the file as it is. Read as\n"
+		"a level's remodel loads." },
 	{ "display.prism_world_geometry_batch", _config_boolean, "true", "HALO_PRISM_WORLD_GEOMETRY_BATCH",
 		_environment_value, _platform_desktop,
 		"PRISM v2, with display.prism_world_geometry \"remodel\": true draws a\n"
