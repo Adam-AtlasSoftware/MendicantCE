@@ -1,8 +1,9 @@
 """The real mixer of dsound_sdl.c on known signals (mixer.c): its resampler against the same low pass worked out in
 double precision, sines through it as the ear hears them, voices out of earshot, mono voices, the linear
 resampler, the Xbox ADPCM decoder against reference vectors, the Doppler shift, the limiter, audio.channels' choice
-and the 5.1 pan, the LFE's low pass, and 3D audio: audio.spatial's choice, the HRTF's cues against the pan's, its
-distance, occlusion, reverb and Doppler, the crossfade when the choice changes, and 2D voices left as they are; the master
+and 5.1, the LFE's low pass, and 3D audio: audio.spatial's choice, the HRTF's cues against the pan's, its
+distance, occlusion, reverb and Doppler, the crossfade when the choice changes, stereo voices placed in the world heard
+as mono 3D voices, and 2D voices left as they are; the master
 volume on every kind of voice; and the
 hand-off of the game's side of the voices to the mixer, which never waits for a game thread.
 
@@ -26,7 +27,7 @@ from harness import skip_without_32_bit_abi  # noqa: E402
 SOURCE = "port/linux/src/dsound_sdl.c"
 CASES = ["reference", "impulse", "sines", "aliases", "silent-voice", "mono", "linear", "cut", "cuts", "adpcm", "doppler", "doppler-step",
          "parameter-ramp", "block-size",
-         "limiter", "obstruction", "room-send", "room-send-images", "quiet-levels", "quiet-levels-3d", "resampler-xbox", "resampler-xbox-images", "channels", "surround", "lfe", "spatial-choice", "hrtf-cues", "hrtf-paths", "hrtf-switch",
+         "limiter", "obstruction", "room-send", "room-send-images", "quiet-levels", "quiet-levels-3d", "resampler-xbox", "resampler-xbox-images", "channels", "surround", "lfe", "spatial-choice", "hrtf-cues", "hrtf-paths", "hrtf-switch", "stereo-in-world",
          "dry-2d",
          "master-volume", "buffers", "sound-off",
          "hand-off-never-waits", "hand-off-settings"]
@@ -143,11 +144,6 @@ NEGATIVE_CONTROLS = {
     "auto-always-stereo": (('!strcmp(setting, "auto") && device_channels >= 6', '!strcmp(setting, "auto") && 0'),
                            "channels"),
     "auto-on-four": (("device_channels >= 6", "device_channels >= 4"), "channels"),
-    # the 5.1 pan: the backs swapped, a back on the LFE, or the pan linear in the angle (the pairwise pan it was)
-    "surround-backs-swapped": (("surround_ring_channel[SURROUND_RING_SPEAKERS] = { 2, 1, 5, 4, 0 }",
-                                "surround_ring_channel[SURROUND_RING_SPEAKERS] = { 2, 1, 4, 5, 0 }"), "surround"),
-    "surround-back-on-lfe": (("surround_ring_channel[SURROUND_RING_SPEAKERS] = { 2, 1, 5, 4, 0 }",
-                              "surround_ring_channel[SURROUND_RING_SPEAKERS] = { 2, 1, 5, 3, 0 }"), "surround"),
     # 3D voices on 5.1: the split between the pairs another (linear in the angle), the HRTF's or the pan's back pair
     # silent, a sound behind not mirrored ahead (the HRTF's duller behind), a 2D voice to the center alone skipped
     "surround-split-linear": (("share = 0.5f + (1.0f - fabsf(elevation) / 90.0f) * (fabsf(azimuth) / 90.0f - 1.0f);",
@@ -157,13 +153,6 @@ NEGATIVE_CONTROLS = {
     "surround-pan-front-only": (("gains[0][4] = left * pair[1];", "gains[0][4] = 0.0f * pair[1];"), "surround"),
     "surround-not-mirrored": (("output_channels == 6 ? fabsf(ahead) : ahead, distance", "ahead, distance"), "surround"),
     "surround-center-skipped": (("!ramp_room && !surround_heard)", "!ramp_room && (!surround_heard || TRUE))"), "surround"),
-    "surround-linear-in-angle": (("float first = sinf(surround_ring_angle[segment + 1] - angle);\n"
-                                  "\t\tfloat second = sinf(angle - surround_ring_angle[segment]);",
-                                  "float first = cosf(1.57079633f * (angle - surround_ring_angle[segment]) /\n"
-                                  "\t\t\t(surround_ring_angle[segment + 1] - surround_ring_angle[segment]));\n"
-                                  "\t\tfloat second = sinf(1.57079633f * (angle - surround_ring_angle[segment]) /\n"
-                                  "\t\t\t(surround_ring_angle[segment + 1] - surround_ring_angle[segment]));"),
-                                 "surround"),
     # the LFE on 5.1 full range, as it was (an Xbox's AC-3 carried only its bass)
     "lfe-full-range": (("\tlfe_lowpass(output, frames);\n", ""), "lfe"),
     # a change ramped over the whole mix, as it was (8 ms at 512 frames, where an Xbox took 1 to 2 ms)
@@ -203,9 +192,14 @@ NEGATIVE_CONTROLS = {
     "hrtf-switch-at-once": (("hrtf_mix = hrtf_on ? stream->hrtf_mix : 0.0f;",
                              "hrtf_mix = hrtf_on && hrtf_enabled ? 1.0f : 0.0f;"), "hrtf-switch"),
     # a 2D mono voice through the HRTF
-    "hrtf-2d": (("\t*hrtf_on = FALSE;\n\tif (stream->has_3d && stream->mode != DS3DMODE_DISABLE)",
-                 "\t*hrtf_on = FALSE;\n\tif (stream->channels == 1 || (stream->has_3d && stream->mode != DS3DMODE_DISABLE))"),
+    "hrtf-2d": (("\t*hrtf_on = FALSE;\n\tif (voice_in_world(stream))",
+                 "\t*hrtf_on = FALSE;\n\tif (stream->channels == 1 || voice_in_world(stream))"),
                 "dry-2d"),
+    # a stereo voice placed in the world panned alone, never through the HRTF (as it was: no front, back or
+    # height); or its channels' mean not taken (the left alone)
+    "stereo-pan-only": (("\t*hrtf_on = hrtf_enabled || stream->hrtf_mix > 0.0f;",
+                         "\t*hrtf_on = stream->channels == 1 && (hrtf_enabled || stream->hrtf_mix > 0.0f);"),
+                        "stereo-in-world"),
     # the HRTF's gain without the master volume and the voice's own (every 3D sound at full volume on headphones)
     "hrtf-no-volume": (("\t\tif (*hrtf_on)\n\t\t\thrtf_out->gain *= scale;\n", ""), "master-volume"),
     # the hand-off: the device's mix waiting for the game's thread to take its side over, or to say what it

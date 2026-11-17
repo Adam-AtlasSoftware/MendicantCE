@@ -698,6 +698,28 @@ static struct sdl_stream *voice_placed(const short *samples, unsigned long frame
 	return stream;
 }
 
+/* a stereo voice (frames frames of interleaved samples) as the game places
+one in the world: a 2D stream positioned at right, up and ahead
+(dsound_sdl_stream_set_stereo_position), its minimum distance a unit, its
+volume the game's fade with distance (sound_manager.c: the minimum distance
+over the distance) */
+static struct sdl_stream *voice_stereo_placed(const short *samples, unsigned long frames, unsigned long rate,
+	float right, float up, float ahead)
+{
+	struct sdl_stream *stream = voice_new(samples, frames, 2, rate, 0);
+	float distance = sqrtf(right * right + up * up + ahead * ahead);
+
+	stream->stereo_positioned = TRUE;
+	stream->mode = DS3DMODE_NORMAL;
+	stream->position[0] = right;
+	stream->position[1] = up;
+	stream->position[2] = ahead;
+	stream->minimum_distance = 1.0f;
+	stream->maximum_distance = 3.4e38f;
+	stream->volume = distance > 1.0f ? 1.0f / distance : 1.0f;
+	return stream;
+}
+
 /* the listener as voice_placed has it */
 static void listener_reset(void)
 {
@@ -2406,11 +2428,7 @@ int main(int argc, char **argv)
 		}
 		return 0;
 	}
-	/* the 5.1 pan (VBAP) of a stereo voice positioned in the world: a sound
-	at each speaker's angle plays from that speaker alone; one at any angle
-	from the two either side of it, their power summing to 1, their gains'
-	vector sum pointing its way (where the tangent law puts the image); never
-	from the LFE. A 3D voice on 5.1 as the Xbox's AC-3, recorded: from the
+	/* a 3D voice on 5.1 as the Xbox's AC-3, recorded: from the
 	front pair and the back pair, never the center or the LFE, its power
 	split between them by its direction as measured, through the HRTF and
 	panned alike; the same sound on both pairs, the near side the louder to
@@ -2419,50 +2437,6 @@ int main(int argc, char **argv)
 	LFE alone plays from it */
 	CASE("surround")
 	{
-		/* each speaker's angle (degrees, clockwise from ahead) and its channel
-		in SDL's 5.1 order (FL, FR, FC, LFE, BL, BR) */
-		static const struct { double degrees; unsigned long channel; } speakers[] = {
-			{ 0.0, 2 }, { 30.0, 1 }, { 110.0, 5 }, { 250.0, 4 }, { 330.0, 0 },
-		};
-		static const double channel_degrees[MAXIMUM_OUTPUT_CHANNELS] = { 330.0, 30.0, 0.0, -1.0, 250.0, 110.0 };
-		float gains[MAXIMUM_OUTPUT_CHANNELS];
-		unsigned long speaker, degree;
-
-		for (index = 0; index < sizeof(speakers) / sizeof(speakers[0]); index++)
-		{
-			double radians = speakers[index].degrees * PI / 180.0;
-
-			surround_pan((float)sin(radians), (float)cos(radians), 0.0f, gains);
-			for (speaker = 0; speaker < MAXIMUM_OUTPUT_CHANNELS; speaker++)
-			{
-				CHECK(fabsf(gains[speaker] - (speaker == speakers[index].channel ? 1.0f : 0.0f)) < 1.0e-4f,
-					"a sound at %.0f degrees: channel %lu at %f (its speaker is channel %lu)", speakers[index].degrees,
-					speaker, gains[speaker], speakers[index].channel);
-			}
-		}
-		for (degree = 0; degree < 3600; degree++)
-		{
-			double radians = degree * PI / 1800.0, power = 0.0, x = 0.0, y = 0.0, heard;
-			unsigned long sounding = 0;
-
-			surround_pan((float)sin(radians), (float)cos(radians), 0.0f, gains);
-			for (speaker = 0; speaker < MAXIMUM_OUTPUT_CHANNELS; speaker++)
-			{
-				power += (double)gains[speaker] * gains[speaker];
-				if (gains[speaker] > 1.0e-4f)
-				{
-					sounding++;
-					x += gains[speaker] * sin(channel_degrees[speaker] * PI / 180.0);
-					y += gains[speaker] * cos(channel_degrees[speaker] * PI / 180.0);
-				}
-			}
-			heard = atan2(x, y) * 180.0 / PI;
-			heard = fmod(heard - degree / 10.0 + 540.0, 360.0) - 180.0;
-			CHECK(gains[3] == 0.0f, "a sound at %.1f degrees: the LFE at %f", degree / 10.0, gains[3]);
-			CHECK(fabs(power - 1.0) < 1.0e-4 && sounding <= 2 && fabs(heard) < 0.05,
-				"a sound at %.1f degrees: power %f, %lu speakers, heard %.2f degrees off", degree / 10.0, power,
-				sounding, heard);
-		}
 		/* through the mixer: a mono 3D voice of noise 2 units away, as the
 		Xbox recordings' sweeps were, around and above and below; the back
 		pair's share of the power the recordings' (their AC-3 decoded), to
@@ -2906,9 +2880,135 @@ int main(int argc, char **argv)
 		free(samples);
 		return 0;
 	}
-	/* 2D voices (the menus, the music, the HUD), stereo voices placed in
-	the world and 3D voices with 3D off are as they were through the HRTF:
-	the same to the bit; a mono 3D voice is not (the HRTF is on) */
+	/* a stereo voice the game places in the world (a mod's stereo sound in
+	place of a mono one) is heard as a mono 3D voice is: of the same sound on
+	both channels, it is the mono voice at the same place, panned and through
+	the HRTF, Doppler shifted alike; of two different channels, mixed to one,
+	it has the HRTF's cues (the far ear 33 frames late, behind 15 kHz duller
+	than ahead, 40 degrees below 8 kHz brighter than above), which the pan
+	alone never gave it. A stereo voice not placed (the music) keeps its two
+	channels apart, through the HRTF or not */
+	CASE("stereo-in-world")
+	{
+		static const float places[][3] = {
+			{ -3.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 3.0f }, { 0.0f, 0.0f, -3.0f }, { 0.0f, 1.92836f, 2.29813f },
+			{ 0.0f, -1.92836f, 2.29813f }, { 2.0f, -1.0f, -2.0f },
+		};
+		enum { LEFT, AHEAD, BEHIND, UP, DOWN };
+		unsigned long frames = 24000, all = frames + 4096, place, n;
+		short *mono = noise_samples(all + 2000);
+		short *both = malloc(all * 2 * sizeof(short)), *apart = malloc(all * 2 * sizeof(short));
+		float *heard_mono = malloc((frames + CHUNK) * 2 * sizeof(float));
+		float *heard[6];
+		double worst = 0.0, peak = 0.0, correlation[2] = { 0.0, 0.0 }, power[2][2] = { { 0.0, 0.0 }, { 0.0, 0.0 } };
+		long delay;
+		int through, ear;
+
+		/* (two channels apart: the noise, and the noise 2000 frames on) */
+		for (n = 0; n < all; n++)
+		{
+			both[n * 2] = both[n * 2 + 1] = mono[n];
+			apart[n * 2] = mono[n];
+			apart[n * 2 + 1] = mono[n + 2000];
+		}
+		hrtf_initialize();
+		listener_reset();
+		for (through = 0; through < 2; through++)
+		{
+			for (place = 0; place < sizeof(places) / sizeof(places[0]); place++)
+			{
+				struct sdl_stream *one = voice_placed(mono, all, 48000, places[place][0], places[place][1],
+					places[place][2]);
+				struct sdl_stream *two = voice_stereo_placed(both, all, 48000, places[place][0], places[place][1],
+					places[place][2]);
+				float *heard_both = malloc((frames + CHUNK) * 2 * sizeof(float));
+
+				one->velocity[2] = two->velocity[2] = -12.0f;
+				hrtf_enabled = through;
+				render(one, heard_mono, frames + CHUNK, TRUE);
+				render(two, heard_both, frames + CHUNK, TRUE);
+				hrtf_enabled = FALSE;
+				CHECK(two->current_doppler == one->current_doppler && (place == LEFT || one->current_doppler != 1.0f),
+					"%s at place %lu: the stereo voice's Doppler shift %f, the mono one's %f", through ? "through the HRTF" :
+					"panned", place, two->current_doppler, one->current_doppler);
+				for (n = 0; n < (frames + CHUNK) * 2; n++)
+				{
+					double difference = fabs((double)heard_both[n] - heard_mono[n]);
+
+					worst = difference > worst ? difference : worst;
+					peak = fabs(heard_mono[n]) > peak ? fabs(heard_mono[n]) : peak;
+				}
+				voice_delete(one);
+				voice_delete(two);
+				free(heard_both);
+			}
+		}
+		CHECK(peak > 0.01 && worst < 1.0e-5 * peak, "a stereo voice of one sound placed in the world is %g off the "
+			"mono voice's (its peak %g)", worst, peak);
+
+		/* two channels apart, through the HRTF (after the first mix: its
+		ramps) */
+		for (place = 0; place <= DOWN; place++)
+		{
+			struct sdl_stream *stream = voice_stereo_placed(apart, all, 48000, places[place][0], places[place][1],
+				places[place][2]);
+
+			heard[place] = malloc((frames + CHUNK) * 2 * sizeof(float));
+			hrtf_enabled = TRUE;
+			render(stream, heard[place], frames + CHUNK, TRUE);
+			hrtf_enabled = FALSE;
+			memmove(heard[place], heard[place] + CHUNK * 2, frames * 2 * sizeof(float));
+			voice_delete(stream);
+		}
+		delay = ears_delay(heard[LEFT], frames);
+		CHECK(delay >= 31 && delay <= 35, "a stereo voice to the left: the right ear %ld frames later, not 33", delay);
+		for (ear = 0; ear < 2; ear++)
+		{
+			double rear_db = ear_band(heard[BEHIND], frames, ear, 15000.0) - ear_band(heard[AHEAD], frames, ear, 15000.0);
+			double low_db = ear_band(heard[BEHIND], frames, ear, 300.0) - ear_band(heard[AHEAD], frames, ear, 300.0);
+			double bright_db = ear_band(heard[DOWN], frames, ear, 8000.0) - ear_band(heard[UP], frames, ear, 8000.0);
+
+			CHECK(rear_db < -15.0 && fabs(low_db) < 1.0, "a stereo voice behind: 15 kHz %+.1f dB and 300 Hz %+.1f dB "
+				"of ahead's (ear %d)", rear_db, low_db, ear);
+			CHECK(bright_db > 3.0, "a stereo voice 40 degrees below against 40 above: 8 kHz %+.1f dB (ear %d)",
+				bright_db, ear);
+		}
+		for (place = 0; place <= DOWN; place++)
+			free(heard[place]);
+
+		/* the music: its channels apart, as they were, with the HRTF on and
+		off */
+		for (through = 0; through < 2; through++)
+		{
+			struct sdl_stream *stream = voice_new(apart, all, 2, 48000, 0);
+			double cross = 0.0, left = 0.0, right = 0.0;
+
+			hrtf_enabled = through;
+			render(stream, heard_mono, frames + CHUNK, TRUE);
+			hrtf_enabled = FALSE;
+			voice_delete(stream);
+			for (n = CHUNK; n < frames + CHUNK; n++)
+			{
+				cross += (double)heard_mono[n * 2] * heard_mono[n * 2 + 1];
+				left += (double)heard_mono[n * 2] * heard_mono[n * 2];
+				right += (double)heard_mono[n * 2 + 1] * heard_mono[n * 2 + 1];
+			}
+			correlation[through] = cross / sqrt(left * right + 1e-30);
+			power[through][0] = left;
+			power[through][1] = right;
+		}
+		CHECK(fabs(correlation[0]) < 0.1 && correlation[0] == correlation[1] && power[0][0] == power[1][0] &&
+			power[0][1] == power[1][1], "the music's channels %.3f alike (none: apart), %.3f through the HRTF",
+			correlation[0], correlation[1]);
+		free(mono);
+		free(both);
+		free(apart);
+		free(heard_mono);
+		return 0;
+	}
+	/* 2D voices (the menus, the music, the HUD) and 3D voices with 3D off
+	are as they were through the HRTF: the same to the bit; a mono 3D voice
+	and a stereo voice placed in the world are not (the HRTF is on) */
 	CASE("dry-2d")
 	{
 		unsigned long frames = 24000, kind;
@@ -2941,9 +3041,7 @@ int main(int argc, char **argv)
 				else if (kind == 2)
 				{
 					/* a stereo voice placed in the world */
-					stream = voice_new(samples, frames + 2048, 2, 22050, 0);
-					stream->stereo_positioned = TRUE;
-					stream->stereo_pan = -0.6f;
+					stream = voice_stereo_placed(samples, frames + 2048, 22050, -3.0f, 1.0f, 0.0f);
 				}
 				else if (kind == 3)
 				{
@@ -2963,7 +3061,7 @@ int main(int argc, char **argv)
 			}
 			for (index = 0; index < frames * 2; index++)
 				same = same && through[index] == panned[index];
-			CHECK(same == (kind != 4), "voice %lu (0 2D stereo, 1 2D mono, 2 stereo placed, 3 3D off, 4 mono 3D) "
+			CHECK(same == (kind != 2 && kind != 4), "voice %lu (0 2D stereo, 1 2D mono, 2 stereo placed, 3 3D off, 4 mono 3D) "
 				"%s through the HRTF", kind, same ? "the same" : "changed");
 		}
 		free(samples);
@@ -3040,11 +3138,7 @@ int main(int argc, char **argv)
 				else if (kind == 1)
 					stream = voice_new(samples, frames + 2048, 1, 22050, 0);
 				else if (kind == 2)
-				{
-					stream = voice_new(samples, frames + 2048, 2, 22050, 0);
-					stream->stereo_positioned = TRUE;
-					stream->stereo_pan = -0.6f;
-				}
+					stream = voice_stereo_placed(samples, frames + 2048, 22050, -3.0f, 1.0f, 0.0f);
 				else
 					stream = voice_placed(samples, frames + 2048, 22050, -3.0f, 1.0f, 0.0f);
 				hrtf_enabled = kind == 4;

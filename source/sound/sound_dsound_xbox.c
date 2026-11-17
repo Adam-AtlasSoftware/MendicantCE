@@ -267,10 +267,10 @@ static struct
 	{
 		boolean given;
 		boolean positioned;
-		real pan;
-		real distance;
+		/* (DirectSound's axes: DSOUND_POINT3D, DSOUND_VECTOR3D) */
+		float position[3];
+		float velocity[3];
 		real minimum_distance;
-		real distance_fade;
 	} stereo_positions[MAXIMUM_SOUND_CHANNELS];
 	/* the streams made, and released, since the sound started (tests) */
 	long streams_made;
@@ -2021,24 +2021,24 @@ static void dsound_virtual_set_location(
 	return;
 }
 
-/* port: a stereo channel's sound in the world is panned towards it, and
-muffled and reverberated as a 3D channel's is (its I3DL2 source, from the
-same occlusion, obstruction and underwater listener), which the Xbox's
-stereo channels never were (sound_manager.c, update_channels;
-port/linux/src/dsound_sdl.c) */
+/* port: a stereo channel's sound in the world is heard from where it is,
+as a 3D channel's is: its place and velocity relative to the listener (as
+update_channels gives a 3D channel's, location), its minimum distance, and
+its I3DL2 source, from the same occlusion, obstruction and underwater
+listener; the mixer mixes its channels to one and spatializes it as a mono
+3D voice. The Xbox's stereo channels were never placed (sound_manager.c,
+update_channels; port/linux/src/dsound_sdl.c, voice_in_world) */
 void dsound_port_set_channel_stereo_position(
 	short virtual_channel_index,
 	boolean positioned,
-	real pan,
-	real distance,
+	struct sound_location const *location,
 	real minimum_distance,
-	real distance_fade,
 	real obstruction,
 	real occlusion,
 	boolean attenuate_direct_path)
 {
-	extern void dsound_sdl_stream_set_stereo_position(IDirectSoundStream *stream, BOOL positioned, float pan,
-		float distance, float minimum_distance, float distance_fade);
+	extern void dsound_sdl_stream_set_stereo_position(IDirectSoundStream *stream, BOOL positioned,
+		const float *position, const float *velocity, float minimum_distance);
 	short channel_index= dsound_virtual_touch(virtual_channel_index);
 
 	if (channel_index!=NONE)
@@ -2048,12 +2048,14 @@ void dsound_port_set_channel_stereo_position(
 		if (channel->stream && TEST_FLAG(channel->type_flags, _sound_channel_stereo_bit))
 		{
 			/* (given again to a stream switched in: dsound_channel_use_format) */
+			float position[3]= { DSOUND_POINT3D(location->position) };
+			float velocity[3]= { DSOUND_VECTOR3D(location->translational_velocity) };
+
 			dsound_port_formats.stereo_positions[channel_index].given= TRUE;
 			dsound_port_formats.stereo_positions[channel_index].positioned= positioned;
-			dsound_port_formats.stereo_positions[channel_index].pan= pan;
-			dsound_port_formats.stereo_positions[channel_index].distance= distance;
+			csmemcpy(dsound_port_formats.stereo_positions[channel_index].position, position, sizeof(position));
+			csmemcpy(dsound_port_formats.stereo_positions[channel_index].velocity, velocity, sizeof(velocity));
 			dsound_port_formats.stereo_positions[channel_index].minimum_distance= minimum_distance;
-			dsound_port_formats.stereo_positions[channel_index].distance_fade= distance_fade;
 			if (channel->spatialized!=positioned ||
 				!realcmp_epsilon(occlusion, channel->occlusion, 0.001f) ||
 				!realcmp_epsilon(obstruction, channel->obstruction, 0.001f) ||
@@ -2065,8 +2067,8 @@ void dsound_port_set_channel_stereo_position(
 				channel->attenuate_direct_path= attenuate_direct_path;
 				dsound_channel_set_I3DL2_properties(channel_index);
 			}
-			dsound_sdl_stream_set_stereo_position(channel->stream, positioned, pan,
-				distance, minimum_distance, distance_fade);
+			dsound_sdl_stream_set_stereo_position(channel->stream, positioned, position, velocity,
+				minimum_distance);
 		}
 	}
 
@@ -2441,8 +2443,8 @@ it has switched to (dsound_channel_use_format) */
 static void dsound_channel_reapply(
 	short index)
 {
-	extern void dsound_sdl_stream_set_stereo_position(IDirectSoundStream *stream, BOOL positioned, float pan,
-		float distance, float minimum_distance, float distance_fade);
+	extern void dsound_sdl_stream_set_stereo_position(IDirectSoundStream *stream, BOOL positioned,
+		const float *position, const float *velocity, float minimum_distance);
 	struct sound_channel *channel= channel_get(index);
 
 	IDirectSoundStream_SetVolume(channel->stream, dsound_volume_from_gain(PIN(channel->gain, 0.f, 1.f), 0));
@@ -2477,10 +2479,9 @@ static void dsound_channel_reapply(
 			{
 				dsound_sdl_stream_set_stereo_position(channel->stream,
 					dsound_port_formats.stereo_positions[index].positioned,
-					dsound_port_formats.stereo_positions[index].pan,
-					dsound_port_formats.stereo_positions[index].distance,
-					dsound_port_formats.stereo_positions[index].minimum_distance,
-					dsound_port_formats.stereo_positions[index].distance_fade);
+					dsound_port_formats.stereo_positions[index].position,
+					dsound_port_formats.stereo_positions[index].velocity,
+					dsound_port_formats.stereo_positions[index].minimum_distance);
 			}
 		}
 	}
