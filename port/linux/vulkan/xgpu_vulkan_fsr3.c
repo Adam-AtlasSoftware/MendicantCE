@@ -913,8 +913,12 @@ int xgpu_vulkan_fsr3_dispatch(const struct xgpu_vulkan_fsr3_frame *frame)
 		vkUpdateDescriptorSets(fsr3.handles.device, count, writes, 0, NULL);
 	}
 
-	/* the clears (as the SDK schedules them: the history on a reset, the
-	nearest depth of the frame before each frame, SPD's counter and mips) */
+	/* the clears (as the SDK schedules them: the history, the scene's
+	luminance and the frame's information on a reset; the nearest depth of
+	the frame before and SPD's counter each frame), after the images'
+	first clear where they were just made */
+	if (fsr3.first)
+		barrier(commands, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
 	if (reset)
 	{
 		clear_image(commands, odd ? I_ACCUMULATION_2 : I_ACCUMULATION_1, 0.0f);
@@ -936,7 +940,6 @@ int xgpu_vulkan_fsr3_dispatch(const struct xgpu_vulkan_fsr3_frame *frame)
 	/* (reversed depth: the nearest is cleared to 0, as uint bits) */
 	clear_image(commands, I_RECONSTRUCTED_DEPTH, 0.0f);
 	clear_image(commands, I_SPD_ATOMIC, 0.0f);
-	clear_image(commands, I_SPD_MIPS, 0.0f);
 	barrier(commands, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
 
 	/* the passes (ffx_fsr3upscaler.cpp's order and dispatches) */
