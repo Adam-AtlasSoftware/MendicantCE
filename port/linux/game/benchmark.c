@@ -297,7 +297,7 @@ void benchmark_request(
 {
 	if (benchmark.state != _benchmark_idle && benchmark.state != _benchmark_done)
 		return;
-	if (!pacing || !pacing[0])
+	if (!pacing || (strcmp(pacing, "uncapped") && strcmp(pacing, "settings")))
 		pacing = config_string("display.benchmark_pacing");
 	snprintf(benchmark.pacing, sizeof(benchmark.pacing), "%s", strcmp(pacing, "settings") ? "uncapped" : "settings");
 	benchmark.state = _benchmark_asked;
@@ -311,7 +311,8 @@ void benchmark_frame(
 	struct benchmark_live live;
 	char const *problem;
 
-	/* (halo --benchmark [uncapped|settings]: as RUN BENCHMARK, at once) */
+	/* (halo --benchmark [uncapped|settings], or debug.benchmark (a test
+	run's, which takes no arguments): as RUN BENCHMARK, at once) */
 	if (!benchmark.command_line_checked)
 	{
 		char value[32];
@@ -324,6 +325,8 @@ void benchmark_frame(
 		}
 		else if (config_command_line_flag("--benchmark"))
 			benchmark_request(NULL);
+		else if (config_string("debug.benchmark")[0])
+			benchmark_request(config_string("debug.benchmark"));
 	}
 	switch (benchmark.state)
 	{

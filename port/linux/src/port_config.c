@@ -2656,6 +2656,11 @@ static const struct config_setting config_settings[] =
 		"memory never written: two runs, one of each, compared with\n"
 		"tools/determinism_compare.py, part where one reaches the game; empty\n"
 		"as the game always has (the game's malloc fills with 0xCA)." },
+	{ "debug.benchmark", _config_string, "\"\"", "HALO_BENCHMARK", _environment_value, _platform_all,
+		"Runs the built-in benchmark once the main menu is up, as halo\n"
+		"--benchmark does (port/linux/game/benchmark.c): \"uncapped\" or\n"
+		"\"settings\" its pacing (display.benchmark_pacing's), \"on\" that\n"
+		"setting's; empty for none." },
 	{ "debug.frame_log", _config_string, "\"\"", "HALO_FRAME_LOG", _environment_value, _platform_all,
 		"A file to write a line to for each frame presented once the scenario's\n"
 		"simulation has started: its seconds, then microseconds of the frame,\n"
