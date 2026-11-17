@@ -797,10 +797,11 @@ void xgpu_vulkan_upscale_begin(const struct xgpu_stream_upscale *record, struct 
 	up.jittering = 0;
 	up.denoiser = record->denoiser;
 	xgpu_vulkan_set_jitter(0.0f, 0.0f, 0, 0);
-	/* (an upscaler, or the denoiser's plugin, which may upscale: Ray
-	Reconstruction resolves the jitter as an upscaler does) */
+	/* (an upscaler, or the denoiser's plugin where it denoises and upscales:
+	Ray Reconstruction resolves the jitter as an upscaler does) */
 	if (!view || (record->upscaler == XGPU_UPSCALE_UPSCALER_NONE &&
-		record->denoiser != XGPU_UPSCALE_DENOISER_PLUGIN))
+		(record->denoiser != XGPU_UPSCALE_DENOISER_PLUGIN ||
+		!plugin_ready(PLUGIN_DENOISER, PRISM_CAP_DENOISE_UPSCALE))))
 		return;
 	description = xgpu_vulkan_image_description(view);
 	/* (the sequence of the last frame's sizes: the view's target's width
