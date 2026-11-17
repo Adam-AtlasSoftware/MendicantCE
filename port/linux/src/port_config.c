@@ -1184,7 +1184,7 @@ static const struct config_setting config_settings[] =
 	{ "input.keyboard_layout", _config_string, "\"auto\"", "HALO_KEYBOARD_LAYOUT", _environment_value, _platform_all,
 		"The on-screen keyboard's letters: \"qwerty\", \"azerty\", \"qwertz\",\n"
 		"\"swedish\" (Finnish too), \"norwegian\", \"danish\", \"spanish\",\n"
-		"\"portuguese\", \"czech\", \"hungarian\" or \"turkish\"; \"auto\" the\n"
+		"\"portuguese\" or \"auto\", the\n"
 		"system's language's (else game.language's, else QWERTY)." },
 	{ "input.controller_p1", _config_string, "\"\"", "HALO_CONTROLLER_P1", _environment_value, _platform_all,
 		"P1 custom controller layout; empty uses the profile's preset. Edit in\n"
@@ -4839,7 +4839,7 @@ static const struct
 	{ "input.touch_gyro_smoothing", { "off", "low", "medium", "high", NULL }, "off" },
 	{ "input.button_prompts", { "auto", "controller", "keyboard", NULL }, NULL },
 	{ "input.keyboard_layout", { "auto", "qwerty", "azerty", "qwertz", "swedish", "norwegian", "danish", "spanish",
-		"portuguese", "czech", "hungarian", "turkish", NULL }, "qwerty" },
+		"portuguese", NULL }, "qwerty" },
 	{ "input.zoom_sensitivity", { "cs2", "halo", NULL }, "cs2" },
 	{ "game.console_log", { "important", "all", "none", NULL }, NULL },
 	{ "game.spectate_on_death", { "teammates", "off", NULL }, NULL },

@@ -19,7 +19,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, ROOT, build, function, mutated, read, run  # noqa: E402
 
-CASES = ["layout", "layouts", "auto", "filtered", "paging", "accents", "shortcuts", "round-trip", "fit", "modes"]
+CASES = ["layout", "layouts", "auto", "filtered", "drawable", "paging", "accents", "shortcuts", "round-trip", "fit", "modes"]
 
 CORE = "port/linux/game/keyboard_core.c"
 GLUE = "port/linux/game/keyboard.c"
@@ -64,8 +64,13 @@ NEGATIVE_CONTROLS = {
     "layout-no-accents": ("core", ("\tif (!count && keyboard_accent_plain(character))\n", "\tif (0)\n"),
                           "filtered"),
     # the widest layout's keys too wide for the block
-    "layout-too-wide": ("core", ("{ 2, 12, { QWERTZ_TOP(8), O_DOUBLE_ACUTE(8), U_ACUTE(8) } }",
-                                 "{ 2, 12, { QWERTZ_TOP(9), O_DOUBLE_ACUTE(9), U_ACUTE(9) } }"), "fit"),
+    "layout-too-wide": ("core", ("{ 0, 11, { top(9), top_last(9) } }", "{ 0, 11, { top(10), top_last(10) } }"),
+                        "fit"),
+    # Hungarian back, whose ő and ű the menus' font does not draw
+    "layout-undrawable": ("core", ('TEN("portuguese", "pt", C_CEDILLA),',
+                                   'TEN("portuguese", "pt", C_CEDILLA),\n'
+                                   '#define O_DOUBLE_ACUTE(width) KEY_WIDE(width, 0x151, 0x150)\n'
+                                   '\tTEN("hungarian", "hu", O_DOUBLE_ACUTE),'), "drawable"),
     # the classic modes given the new keyboard
     "one-keyboard": ("glue", ("\tif (!keyboard_new())\n\t\treturn virtual_keyboard_launch(text, size, caption_index);\n",
                               ""), "modes"),

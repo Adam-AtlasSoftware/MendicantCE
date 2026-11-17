@@ -661,8 +661,9 @@ block and reads its input itself; its rules are `keyboard_core.c`'s.
 - Its keys are a table (`keyboard_core.c`'s `keyboard_layouts`), each row
   its keys' kinds, widths and characters: the player's letters
   (`input.keyboard_layout`, Settings > Profiles: ON-SCREEN KEYBOARD; #1136):
-  QWERTY, AZERTY, QWERTZ, Swedish/Finnish, Norwegian, Danish, Spanish,
-  Portuguese, Czech, Hungarian and Turkish Q, each with the same number row
+  QWERTY, AZERTY, QWERTZ, Swedish/Finnish, Norwegian, Danish, Spanish and
+  Portuguese (only layouts whose own letters `ui\large_ui` draws: no Czech,
+  Hungarian or Turkish), each with the same number row
   (digits plain) and page of signs (every one of ASCII's but `|`). Auto is the
   system's languages' layout (SDL's preferred locales: a place's, `fr_CA`,
   before its language's, `fr`), else `game.language`'s, else QWERTY. A

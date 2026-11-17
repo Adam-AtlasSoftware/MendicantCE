@@ -459,8 +459,8 @@ int main(int argc, char **argv)
 			keyboard_geometry_get(large, &keyboard.geometry);
 			CHECK(geometry.prompts_y + 22 <= geometry.top + geometry.height && geometry.text_y > geometry.caption_y,
 				"the prompts in the block");
-			/* (every layout's keys, the widest's too: Hungarian's and Turkish's
-			twelve; and the accents of each one's last letter of its first row,
+			/* (every layout's keys, the widest's too: QWERTZ's and the Nordic ones'
+			eleven; and the accents of each one's last letter of its first row,
 			at the block's right) */
 			for (index = 0; index < keyboard_layout_count; index++)
 			{
@@ -538,9 +538,6 @@ int main(int argc, char **argv)
 			{ "danish", { L"qwertyuiopå", L"asdfghjklæø", L"zxcvbnm" } },
 			{ "spanish", { L"qwertyuiop", L"asdfghjklñ", L"zxcvbnm" } },
 			{ "portuguese", { L"qwertyuiop", L"asdfghjklç", L"zxcvbnm" } },
-			{ "czech", { L"qwertzuiopú", L"asdfghjklů", L"yxcvbnm" } },
-			{ "hungarian", { L"qwertzuiopőú", L"asdfghjkléáű", L"íyxcvbnm" } },
-			{ "turkish", { L"qwertyuıopğü", L"asdfghjklşi", L"zxcvbnmöç" } },
 		};
 		struct keyboard_layout const *qwerty = &keyboard_layouts[0];
 		long index;
@@ -650,9 +647,9 @@ int main(int argc, char **argv)
 			{ "da_DK", "", "danish" },
 			{ "es_MX", "", "spanish" },
 			{ "pt_BR", "", "portuguese" },
-			{ "cs_CZ", "", "czech" },
-			{ "hu_HU", "", "hungarian" },
-			{ "tr_TR", "", "turkish" },
+			{ "cs_CZ", "", "qwerty" },
+			{ "hu_HU", "", "qwerty" },
+			{ "tr_TR", "", "qwerty" },
 			{ "en_US", "fr", "qwerty" },
 			{ "zz_ZZ, de_DE en_US", "", "qwertz" },
 			{ "en_GB sv_SE", "", "qwerty" },
@@ -707,22 +704,6 @@ int main(int argc, char **argv)
 		focus_on(0xF1);
 		CHECK(keyboard_press(&keyboard.state, 0) == KEYBOARD_TYPED && text_is("n") &&
 			!keyboard_hold(&keyboard.state, 1000), "a chat line's ñ");
-		/* (Turkish: a field, Latin-1: İ and ğ past a byte, I and g; a name takes them) */
-		layout_name = "turkish";
-		open_kind(KEYBOARD_FIELD, field, 31);
-		focus_on('i');
-		keyboard.state.shift = TRUE;
-		CHECK(keyboard_press(&keyboard.state, 0) == KEYBOARD_TYPED && keyboard.state.text[0] == 'I', "a field's İ: %04X",
-			keyboard.state.text[0]);
-		focus_on(0x11F);
-		CHECK(keyboard_press(&keyboard.state, 0) == KEYBOARD_TYPED && keyboard.state.text[1] == 'g', "a field's ğ: %04X",
-			keyboard.state.text[1]);
-		open_kind(KEYBOARD_NAME, name, 11);
-		focus_on('i');
-		CHECK(keyboard.state.shift && keyboard_press(&keyboard.state, 0) == KEYBOARD_TYPED &&
-			keyboard.state.text[0] == 0x130, "a name's İ: %04X", keyboard.state.text[0]);
-		focus_on(0x131);
-		CHECK(keyboard_press(&keyboard.state, 0) == KEYBOARD_TYPED && keyboard.state.text[1] == 0x131, "a name's ı");
 		/* (a capital held on its own key, Ö: its accents, shift kept on while they are open) */
 		layout_name = "swedish";
 		open_kind(KEYBOARD_NAME, name, 11);
@@ -747,6 +728,40 @@ int main(int argc, char **argv)
 			keyboard_accents_close(&keyboard.state);
 		}
 		layout_name = "qwerty";
+		return 0;
+	}
+	CASE("drawable")
+	{
+		/* (no layout has a letter the menus' font, ui\large_ui, does not
+		draw: it has Windows-1252's, Latin-1's and these few past it) */
+		long index;
+
+		for (index = 0; index < keyboard_layout_count; index++)
+		{
+			short row, column;
+
+			for (row = 0; row < KEYBOARD_ROWS; row++)
+			{
+				struct keyboard_row const *keys = &keyboard_layouts[index].pages[0].rows[row];
+
+				for (column = 0; column < keys->count; column++)
+				{
+					unsigned short both[2];
+					int each;
+
+					both[0] = keys->keys[column].character;
+					both[1] = keys->keys[column].shifted;
+					for (each = 0; each < 2; each++)
+					{
+						unsigned short character = both[each];
+
+						CHECK(character <= 0xFF || character == 0x152 || character == 0x153 || character == 0x160 ||
+							character == 0x161 || character == 0x178 || character == 0x17D || character == 0x17E,
+							"%s: %04X, which the font does not draw", keyboard_layouts[index].name, character);
+					}
+				}
+			}
+		}
 		return 0;
 	}
 	CASE("modes")

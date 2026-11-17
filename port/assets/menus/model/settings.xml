@@ -422,7 +422,7 @@
 		<row key="profiles" kind="link" label="MANAGE PROFILES ›" crumb="PROFILES › PLAYER" when="profile+!in_game" open="main_menu/profile_manager/player_profile_manager" run="port settings profiles">
 			<help>Switch to another player profile, make a new one or delete one. Your changes so far are kept.</help>
 		</row>
-		<row key="keyboard_layout" kind="choice" setting="input.keyboard_layout" label="ON-SCREEN KEYBOARD" crumb="PROFILES › PLAYER" search_choices="qwerty azerty qwertz swedish finnish norwegian danish spanish portuguese czech hungarian turkish">
+		<row key="keyboard_layout" kind="choice" setting="input.keyboard_layout" label="ON-SCREEN KEYBOARD" crumb="PROFILES › PLAYER" search_choices="qwerty azerty qwertz swedish finnish norwegian danish spanish portuguese">
 			<help>The letters of the on-screen keyboard that names and chat are typed with. Auto follows your system's language.</help>
 			<note>Where a text can't take a letter with a mark (the chat), it types the plain letter.</note>
 			<choice shown="AUTO" value="auto"/>
@@ -434,9 +434,6 @@
 			<choice shown="DANISH" value="danish"/>
 			<choice shown="SPANISH" value="spanish"/>
 			<choice shown="PORTUGUESE" value="portuguese"/>
-			<choice shown="CZECH" value="czech"/>
-			<choice shown="HUNGARIAN" value="hungarian"/>
-			<choice shown="TURKISH" value="turkish"/>
 		</row>
 		<section key="section_6" title="STORAGE"/>
 		<row key="map_cache_megabytes" kind="choice" setting="game.map_cache_megabytes" label="MAP STORAGE" crumb="PROFILES › STORAGE" search="cache disk" search_choices="instant loading disk space saver">

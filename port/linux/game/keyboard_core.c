@@ -54,29 +54,17 @@ but "|", the game's text's own mark), every layout's */
 	{ 0, 5, { PAGE(15, 0, "ABC"), SIGN(','), WIDE(KEYBOARD_KEY_SPACE, 55, "SPACE"), SIGN('.'), SIGN('?') } }, \
 } }
 
-/* the letters with a mark a layout has keys of (Latin-1's and Latin
-Extended-A's, each with its capital), of a width; one the text does not
-take or the font does not draw types its plain letter (keyboard_key_character) */
-#define A_ACUTE(width) KEY_WIDE(width, 0xE1, 0xC1)
+/* the letters with a mark a layout has keys of (Latin-1's, each with its
+capital: all the menus' font draws), of a width; one the text does not take
+types its plain letter (keyboard_key_character) */
 #define A_DIAERESIS(width) KEY_WIDE(width, 0xE4, 0xC4)
 #define A_RING(width) KEY_WIDE(width, 0xE5, 0xC5)
 #define AE(width) KEY_WIDE(width, 0xE6, 0xC6)
 #define C_CEDILLA(width) KEY_WIDE(width, 0xE7, 0xC7)
-#define E_ACUTE(width) KEY_WIDE(width, 0xE9, 0xC9)
-#define I_ACUTE(width) KEY_WIDE(width, 0xED, 0xCD)
 #define N_TILDE(width) KEY_WIDE(width, 0xF1, 0xD1)
 #define O_DIAERESIS(width) KEY_WIDE(width, 0xF6, 0xD6)
 #define O_STROKE(width) KEY_WIDE(width, 0xF8, 0xD8)
-#define U_ACUTE(width) KEY_WIDE(width, 0xFA, 0xDA)
 #define U_DIAERESIS(width) KEY_WIDE(width, 0xFC, 0xDC)
-#define G_BREVE(width) KEY_WIDE(width, 0x11F, 0x11E)
-#define O_DOUBLE_ACUTE(width) KEY_WIDE(width, 0x151, 0x150)
-#define S_CEDILLA(width) KEY_WIDE(width, 0x15F, 0x15E)
-#define U_RING(width) KEY_WIDE(width, 0x16F, 0x16E)
-#define U_DOUBLE_ACUTE(width) KEY_WIDE(width, 0x171, 0x170)
-/* (Turkish's two i's: the dotless one's capital is I, the dotted one's İ) */
-#define DOTLESS_I(width) KEY_WIDE(width, 0x131, 'I')
-#define DOTTED_I(width) KEY_WIDE(width, 'i', 0x130)
 
 /* the letters the layouts share: QWERTY's and QWERTZ's first rows' ten,
 the home row's nine, and the third rows' seven */
@@ -146,33 +134,9 @@ struct keyboard_layout const keyboard_layouts[] =
 	/* (Spain and Latin America; Portugal and Brazil) */
 	TEN("spanish", "es", N_TILDE),
 	TEN("portuguese", "pt", C_CEDILLA),
-	/* (Czech QWERTZ: ú and ů; its háčeks are the accents') */
-	{ "czech", "cs", { { {
-		DIGITS,
-		{ 0, 11, { QWERTZ_TOP(9), U_ACUTE(9) } },
-		{ 5, 10, { HOME(9), U_RING(9) } },
-		{ 0, 9, { SHIFT(18), QWERTZ_THIRD(9), DELETE(18) } },
-		LETTERS_FOOT,
-	} }, SIGNS_PAGE } },
-	/* (Hungarian QWERTZ: twelve letters on its first two rows, eight on its
-	third, at 8 tenths) */
-	{ "hungarian", "hu", { { {
-		DIGITS,
-		{ 2, 12, { QWERTZ_TOP(8), O_DOUBLE_ACUTE(8), U_ACUTE(8) } },
-		{ 2, 12, { HOME(8), E_ACUTE(8), A_ACUTE(8), U_DOUBLE_ACUTE(8) } },
-		{ 2, 10, { SHIFT(16), I_ACUTE(8), QWERTZ_THIRD(8), DELETE(16) } },
-		LETTERS_FOOT,
-	} }, SIGNS_PAGE } },
-	/* (Turkish Q: its two i's, and twelve, eleven and nine letters) */
-	{ "turkish", "tr", { { {
-		DIGITS,
-		{ 2, 12, { LETTER_WIDE(8, 'q'), LETTER_WIDE(8, 'w'), LETTER_WIDE(8, 'e'), LETTER_WIDE(8, 'r'),
-			LETTER_WIDE(8, 't'), LETTER_WIDE(8, 'y'), LETTER_WIDE(8, 'u'), DOTLESS_I(8), LETTER_WIDE(8, 'o'),
-			LETTER_WIDE(8, 'p'), G_BREVE(8), U_DIAERESIS(8) } },
-		{ 6, 11, { HOME(8), S_CEDILLA(8), DOTTED_I(8) } },
-		{ 0, 11, { SHIFT(14), QWERTY_THIRD(8), O_DIAERESIS(8), C_CEDILLA(8), DELETE(14) } },
-		LETTERS_FOOT,
-	} }, SIGNS_PAGE } },
+	/* (none whose own letters the menus' font, ui\large_ui, does not draw:
+	it has Windows-1252's, so not Czech's ů, Hungarian's ő ű nor Turkish's
+	ı ğ ş İ; those languages' players get QWERTY and the accents) */
 };
 
 long const keyboard_layout_count = sizeof(keyboard_layouts) / sizeof(keyboard_layouts[0]);

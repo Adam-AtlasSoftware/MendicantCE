@@ -683,8 +683,7 @@ MODERN_AIM_THRESHOLDS = [("DEFAULT", "-1")] + [(f"{percent}%", str(percent)) for
 # input.keyboard_layout's: the on-screen keyboard's layouts (port/linux/game/keyboard_core.c's keyboard_layouts)
 KEYBOARD_LAYOUTS = [("AUTO", "auto"), ("QWERTY", "qwerty"), ("AZERTY", "azerty"), ("QWERTZ", "qwertz"),
                     ("SWEDISH/FINNISH", "swedish"), ("NORWEGIAN", "norwegian"), ("DANISH", "danish"),
-                    ("SPANISH", "spanish"), ("PORTUGUESE", "portuguese"), ("CZECH", "czech"),
-                    ("HUNGARIAN", "hungarian"), ("TURKISH", "turkish")]
+                    ("SPANISH", "spanish"), ("PORTUGUESE", "portuguese")]
 # input.rumble_strength's: the motors' strength, in percent
 RUMBLE_STRENGTHS = [(f"{percent}%", str(percent)) for percent in range(0, 101, 10)]
 STICK_DEAD_ZONES = [("DEFAULT (27%)", "-1")] + [(f"{percent}%", str(percent)) for percent in range(0, 51, 5)]
