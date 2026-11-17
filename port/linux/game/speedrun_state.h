@@ -60,7 +60,8 @@ enum
 	SPEEDRUN_STATE_FLAG_IN_GAME = 1 << 3
 };
 
-/* settings: what the run is played with, read as each map begins */
+/* settings: what the run is played with, read as each map begins (the
+build too; sim_rate each frame) */
 enum
 {
 	/* display.graphics "enhanced"; neither this nor CUSTOM: "classic" */

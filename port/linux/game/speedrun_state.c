@@ -67,8 +67,9 @@ struct speedrun_state_input
 	boolean cutscene;
 	unsigned long game_ticks;
 	char const *map_name;
-	/* the settings (read only when the tracker asks: speedrun_state_wants_settings) */
+	/* the rate the game simulates at */
 	unsigned long sim_rate;
+	/* the settings (read only when the tracker asks: speedrun_state_wants_settings) */
 	unsigned long settings;
 	unsigned long build_number;
 	char const *build;
@@ -143,7 +144,6 @@ static void speedrun_state_update(
 	}
 	if (speedrun_state_wants_settings(tracker))
 	{
-		block->sim_rate = input->sim_rate;
 		block->settings = input->settings;
 		block->build_number = input->build_number;
 		speedrun_state_copy(block->build, input->build, SPEEDRUN_STATE_BUILD_SIZE);
@@ -179,6 +179,7 @@ static void speedrun_state_update(
 		flags |= SPEEDRUN_STATE_FLAG_IN_GAME;
 	block->flags = flags;
 	block->game_ticks = input->game_ticks;
+	block->sim_rate = input->sim_rate;
 	speedrun_state_copy(block->map, input->map_name, SPEEDRUN_STATE_MAP_SIZE);
 	block->frame++;
 	block->sequence++;
@@ -196,7 +197,6 @@ static void speedrun_state_read_settings(
 	long number = 0;
 	char flavor[32], repository[64];
 
-	input->sim_rate = (unsigned long)sim_rate_get();
 	input->settings = 0;
 	if (graphics && !strcmp(graphics, "enhanced"))
 		input->settings |= SPEEDRUN_STATE_SETTING_GRAPHICS_ENHANCED;
@@ -235,6 +235,8 @@ void speedrun_state_frame(
 	input.in_game = playing;
 	input.cutscene = playing && cinematic_in_progress();
 	input.game_ticks = playing ? (unsigned long)game_time_get() : 0;
+	/* (the next tick's: a map's first frame has run none yet) */
+	input.sim_rate = (unsigned long)sim_rate_next();
 	input.map_name = global_scenario_index != NONE ? tag_get_name(global_scenario_index) : "";
 	if (speedrun_state_wants_settings(&speedrun_state_tracker))
 		speedrun_state_read_settings(&input, build, sizeof(build));

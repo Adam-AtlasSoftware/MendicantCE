@@ -49,7 +49,9 @@ Little-endian. `u32` is a 32-bit unsigned number. The strings end with a NUL.
   `levels_completed` go back to 0. Winning a level that leads to the next keeps the run going. Back at the main
   menu, the run's numbers stay as they ended.
 - **levels_completed** goes up as each level is won, the last one (The Maw) included.
-- **settings**, **sim_rate** and the build are read as each map begins, as the game reads its rules then.
+- **settings** and the build are read as each map begins, as the game reads its rules then. **sim_rate** is the
+  rate the game's next tick simulates at, each frame (30 in a game that must stay as it was, such as a Legacy
+  network game or a saved film).
 
 The game writes the block from its main loop only, with plain stores. Nothing in the game reads it back, and it is
 not part of the game state, so saved games, reverts and demos neither keep nor change it, and games play the same

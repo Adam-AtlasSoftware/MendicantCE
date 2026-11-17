@@ -69,8 +69,12 @@ def find_block(pid):
 
 
 def read(memory, address):
+    """the block's fields; OSError once the game has ended"""
     memory.seek(address)
-    values = dict(zip(FIELDS, LAYOUT.unpack(memory.read(LAYOUT.size))))
+    data = memory.read(LAYOUT.size)
+    if len(data) != LAYOUT.size:
+        raise OSError("the game ended")
+    values = dict(zip(FIELDS, LAYOUT.unpack(data)))
     for name in ("build", "map"):
         values[name] = values[name].split(b"\0")[0].decode("latin-1")
     return values

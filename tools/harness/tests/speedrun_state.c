@@ -192,8 +192,8 @@ int main(int argc, char **argv)
 		/* the settings are read again as each map begins, not between */
 		settings(SPEEDRUN_STATE_SETTING_MODS, 120);
 		frame(1, 2);
-		CHECK(BLOCK.settings == SPEEDRUN_STATE_SETTING_GRAPHICS_ENHANCED && BLOCK.sim_rate == 60,
-			"settings read between maps");
+		CHECK(BLOCK.settings == SPEEDRUN_STATE_SETTING_GRAPHICS_ENHANCED, "settings read between maps");
+		CHECK(BLOCK.sim_rate == 120, "the rate not read each frame: %u", (unsigned)BLOCK.sim_rate);
 		/* the same map again: a restart */
 		load("levels\\a30\\a30", FALSE);
 		CHECK(BLOCK.run == 2 && BLOCK.run_ticks == 0 && BLOCK.levels_completed == 0, "a restart: run %u",
