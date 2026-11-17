@@ -1591,7 +1591,7 @@ BOOL xgpu_spirv_vertex_shader(const struct xgpu_vertex_program *program, unsigne
 	unsigned int main_id, input_variables[XGPU_VERTEX_ATTRIBUTE_COUNT];
 	unsigned int position_out, point_size_out, color_outs[6], fog_out;
 	unsigned int world_normal_out = 0, world_position_out = 0, world_binormal_out = 0, world_tangent_out = 0;
-	unsigned int light_ambient_out = 0, light_point_out = 0;
+	unsigned int light_ambient_out = 0, light_point_out = 0, base_uv_out = 0;
 	unsigned int world_normal = 0, world_position = 0;
 	unsigned int clip_position = 0, view = 0, screen_points = 0, centre_clip = 0, eye = 0;
 	BOOL environment = lighting && lighting->lights == XGPU_ENVIRONMENT_LIGHTING;
@@ -1642,6 +1642,10 @@ BOOL xgpu_spirv_vertex_shader(const struct xgpu_vertex_program *program, unsigne
 		world_binormal_out = interface_variable(&m, m.t_v3, STORAGE_OUTPUT, XGPU_SPIRV_LOCATION_WORLD_BINORMAL, "xWorldBinormal");
 		world_tangent_out = interface_variable(&m, m.t_v3, STORAGE_OUTPUT, XGPU_SPIRV_LOCATION_WORLD_TANGENT, "xWorldTangent");
 	}
+	/* (a level's G-buffer twin drawn by its pack's material: the base map's
+	coordinates, the vertices' own, attribute 4) */
+	if (environment && options->gbuffer_base_uv)
+		base_uv_out = interface_variable(&m, m.t_v4, STORAGE_OUTPUT, XGPU_SPIRV_LOCATION_BASE_UV, "xBaseUV");
 	if (lighting && lighting->split && !environment)
 	{
 		light_ambient_out = interface_variable(&m, m.t_v3, STORAGE_OUTPUT, XGPU_SPIRV_LOCATION_LIGHT_AMBIENT, "xLightAmbient");
@@ -1938,6 +1942,9 @@ BOOL xgpu_spirv_vertex_shader(const struct xgpu_vertex_program *program, unsigne
 		store(&m, world_binormal_out, xyz(&m, state.inputs[2]));
 		store(&m, world_tangent_out, xyz(&m, state.inputs[3]));
 	}
+	if (base_uv_out)
+		store(&m, base_uv_out, finite4(&m, vec4_of(&m, construct(&m, 3, (unsigned int[]){ extract(&m, state.inputs[4], 0),
+			extract(&m, state.inputs[4], 1), constant_float(&m, 0.0f) }), constant_float(&m, 1.0f))));
 	precise_dependencies(&m, position_out);
 	if (!module_end(&m, EXECUTION_MODEL_VERTEX, main_id, &locals, module))
 	{
@@ -2011,6 +2018,10 @@ struct pixel_state
 	the emissive light it adds to r0 after the general combiners (0 none) */
 	unsigned int material_images[XGPU_MATERIAL_IMAGE_COUNT];
 	unsigned int pbr_emissive;
+	/* a G-buffer twin of a material of the pack or mod tier (gbuffer_pack):
+	the base map's coordinates handed on by the level's vertices (0 none),
+	and an object's occlusion (its ORM's red) */
+	unsigned int in_base_uv, pack_occlusion;
 };
 
 static unsigned int pixel_input(struct module *m, struct pixel_state *state, unsigned int variable_id, unsigned int type)
@@ -4079,13 +4090,259 @@ static unsigned int gbuffer_octahedral(struct module *m, unsigned int n)
 	return ext1(m, GLSL_PACK_SNORM_2X16, m->t_uint, folded);
 }
 
+/* ---------- the G-buffer's uber-shaders (PRISM v4 M4)
+
+A G-buffer twin whose material is the pack's or a mod's (xgpu_spirv_options
+gbuffer_pack; xgpu_spirv.h's XGPU_SPIRV_PACK_*) draws by its family's
+uber-shader:
+- an environment shader's (the level's twins, its lightmap pass's): the base
+  colour CE's texture pass would draw, with the maps' albedo in the base
+  map's place: the detail maps blended as the shader's type says (normal:
+  the secondary's alpha mixes the secondary and the primary; blended and
+  blended base specular: the base's alpha does), the detail function (double
+  biased multiply 2 a b, multiply a b, double biased add a + 2 b - 1), the
+  micro detail's function likewise, each step clamped as the NV2A's
+  combiners clamp (-1 to 1), CE's default detail (grey, 128) where the maps
+  have no layer; the normal map at the base map's or at CE's bump map's
+  coordinates (its texture 0's), in the vertices' tangent frame (their
+  tangent along u, binormal along v: CE's bump maps' convention), CE's bump
+  map where it is not resident yet;
+- a model shader's (an object's twins): the albedo in texture 0's place (its
+  alpha CE's base map's), CE's combiners making the base colour of it as
+  before (detail map, change colour); the normal map at the base map's
+  coordinates in the cotangent frame of the pixel's world position (from its
+  distance and the view's camera) and coordinates (surface_frame's);
+- both: roughness and metalness the ORM's times their factors (the automatic
+  tier's where it is not resident), the occlusion its red, specular the
+  material's.
+Their base colour also goes to the albedo target (location 2), its alpha the
+occlusion (0 where the albedo is not resident: the level's base colour then
+stays the base target's). */
+
+static unsigned int material_sample(struct module *m, struct pixel_state *state, int image, unsigned int uv);
+
+static unsigned int pack_uniform(struct module *m, int index)
+{
+	return uniform(m, U_MATERIAL, index);
+}
+
+/* every image of the pack's, declared (a stand-in bound where it has none) */
+/* (the pack's images are the material bindings') */
+typedef char pack_images_assert[XGPU_SPIRV_PACK_IMAGES == XGPU_MATERIAL_IMAGE_COUNT ? 1 : -1];
+
+static void pack_declare(struct module *m, struct pixel_state *state)
+{
+	static const char *const names[XGPU_SPIRV_PACK_IMAGES] = { "pack_albedo", "pack_normal", "pack_orm",
+		"pack_primary_detail", "pack_secondary_detail", "pack_micro_detail" };
+	int index;
+
+	for (index = 0; index < XGPU_SPIRV_PACK_IMAGES; index++)
+	{
+		state->material_images[index] = variable(m, type_sampled_image(m, DIM_2D, FALSE, FALSE, TRUE),
+			STORAGE_UNIFORM_CONSTANT, names[index]);
+		decorate1(m, state->material_images[index], DECORATION_DESCRIPTOR_SET, XGPU_SPIRV_SET_TEXTURES);
+		decorate1(m, state->material_images[index], DECORATION_BINDING, XGPU_MATERIAL_BINDING + index);
+	}
+}
+
+/* a bit of a uniform float's integer (the flags and the images resident) */
+static unsigned int pack_bit(struct module *m, unsigned int value, unsigned int bit)
+{
+	unsigned int bits = op1(m, OP_CONVERT_F_TO_U, m->t_uint, fadd(m, 1, value, constant_float(m, 0.5f)));
+
+	return op2(m, OP_I_NOT_EQUAL, m->t_bool, op2(m, OP_BITWISE_AND, m->t_uint, bits, constant_uint(m, bit)),
+		constant_uint(m, 0));
+}
+
+/* two bits of a uniform float's integer, from shift, as an unsigned */
+static unsigned int pack_field(struct module *m, unsigned int value, unsigned int shift)
+{
+	unsigned int bits = op1(m, OP_CONVERT_F_TO_U, m->t_uint, fadd(m, 1, value, constant_float(m, 0.5f)));
+
+	return op2(m, OP_BITWISE_AND, m->t_uint, op2(m, OP_SHIFT_RIGHT_LOGICAL, m->t_uint, bits, constant_uint(m, shift)),
+		constant_uint(m, 3));
+}
+
+/* a detail function (CE's numbering, selected by `function`) of a and b,
+rgb, clamped as a combiner's output is */
+static unsigned int pack_detail_function(struct module *m, unsigned int function, unsigned int a, unsigned int b)
+{
+	unsigned int doubled = fscale(m, 3, fmul(m, 3, a, b), constant_float(m, 2.0f));
+	unsigned int multiplied = fmul(m, 3, a, b);
+	unsigned int added = fsub(m, 3, fadd(m, 3, a, fscale(m, 3, b, constant_float(m, 2.0f))), constant_splat(m, 3, 1.0f));
+	unsigned int result = select_n(m, 3, op2(m, OP_I_EQUAL, m->t_bool, function, constant_uint(m, 1)), multiplied,
+		doubled);
+
+	result = select_n(m, 3, op2(m, OP_I_EQUAL, m->t_bool, function, constant_uint(m, 2)), added, result);
+	return fclamp(m, 3, result, -1.0f, 1.0f);
+}
+
+/* the pack's image sampled, or `otherwise` where it is not resident */
+static unsigned int pack_sample(struct module *m, struct pixel_state *state, int image, unsigned int uv,
+	unsigned int resident, unsigned int otherwise)
+{
+	return select_n(m, 4, pack_bit(m, resident, 1u << image), material_sample(m, state, image, uv), otherwise);
+}
+
+/* the shading normal of a tangent-space texel (the normal map's RG, z
+found; CE's bump map's RGB), in a frame: normalize(t x + b y + n z) */
+static unsigned int pack_frame_normal(struct module *m, unsigned int ts, unsigned int t, unsigned int b, unsigned int n)
+{
+	return ext1(m, GLSL_NORMALIZE, m->t_v3, fadd(m, 3, fadd(m, 3, fscale(m, 3, t, extract(m, ts, 0)),
+		fscale(m, 3, b, extract(m, ts, 1))), fscale(m, 3, n, fmax_scalar(m, 1, extract(m, ts, 2), 0.05f))));
+}
+
+/* a pack's normal map's texel as a tangent-space normal: xy 2 rg - 1 by
+the scale, z of the unit vector */
+static unsigned int pack_tangent_normal(struct module *m, unsigned int texel, unsigned int scale)
+{
+	unsigned int sxy = fsub(m, 2, fscale(m, 2, xy(m, texel), constant_float(m, 2.0f)), constant_splat(m, 2, 1.0f));
+	unsigned int sz = ext1(m, GLSL_SQRT, m->t_float, fmax_scalar(m, 1, fsub(m, 1, constant_float(m, 1.0f),
+		fdot(m, sxy, sxy)), 0.0f));
+
+	sxy = fscale(m, 2, sxy, scale);
+	return construct(m, 3, (unsigned int[]){ extract(m, sxy, 0), extract(m, sxy, 1), sz });
+}
+
+/* a twin of the pack's: its base colour, shading normal and parameters
+(roughness, metalness, specular, the model and flags byte), and the albedo
+target's value; an object's albedo put in texture 0's place (before its
+combiners make its base colour: *albedo then set by the caller) */
+static void gbuffer_pack(struct module *m, struct pixel_state *state, int level, unsigned int *albedo,
+	unsigned int *normal, unsigned int *parameters)
+{
+	unsigned int u0 = pack_uniform(m, 0), u1 = pack_uniform(m, 1), u2 = pack_uniform(m, 2), u3 = pack_uniform(m, 3);
+	unsigned int automatic = uniform(m, U_GBUFFER, 0), resident = extract(m, u3, 3), flags = extract(m, u3, 2);
+	unsigned int one = constant_float(m, 1.0f), grey = constant_v4(m, 128.0f / 255.0f, 128.0f / 255.0f,
+		128.0f / 255.0f, 1.0f);
+	unsigned int uv, base, orm, orm_resident, rough, metal, occlusion, scale = extract(m, u0, 3);
+	unsigned int world_normal = state->in_world_normal ? xyz(m, pixel_input(m, state, state->in_world_normal, m->t_v4))
+		: 0;
+
+	if (level)
+	{
+		unsigned int t1, t2, t3, detail, r0, kind, blended, base_rgb, normal_uv, ts, bump, n, t, b;
+
+		/* (the base map's coordinates: the vertices' own; else texture 0's,
+		the bump map's) */
+		uv = state->in_base_uv ? xy(m, pixel_input(m, state, state->in_base_uv, m->t_v4)) :
+			xy(m, pixel_input(m, state, state->in_t[0], m->t_v4));
+		base = pack_sample(m, state, XGPU_SPIRV_PACK_IMAGE_ALBEDO, uv, resident, constant_v4(m, 1.0f, 1.0f, 1.0f, 1.0f));
+		t1 = pack_sample(m, state, XGPU_SPIRV_PACK_IMAGE_PRIMARY_DETAIL, fmul(m, 2, uv, xy(m, u2)), resident, grey);
+		t2 = pack_sample(m, state, XGPU_SPIRV_PACK_IMAGE_SECONDARY_DETAIL, fmul(m, 2, uv,
+			shuffle(m, 2, u2, u2, (const unsigned int[]){ 2, 3 })), resident, grey);
+		t3 = pack_sample(m, state, XGPU_SPIRV_PACK_IMAGE_MICRO_DETAIL, fmul(m, 2, uv, xy(m, u3)), resident, grey);
+		/* (the type: normal mixes by the secondary's alpha, the blended ones by
+		the base's) */
+		kind = pack_field(m, flags, 4);
+		blended = op2(m, OP_I_NOT_EQUAL, m->t_bool, kind, constant_uint(m, 0));
+		detail = ext3(m, GLSL_F_MIX, m->t_v3, xyz(m, t2), xyz(m, t1), splat(m, 3,
+			fselect(m, blended, extract(m, base, 3), extract(m, t2, 3))));
+		base_rgb = xyz(m, base);
+		r0 = pack_detail_function(m, pack_field(m, flags, 8), base_rgb, detail);
+		r0 = pack_detail_function(m, pack_field(m, flags, 12), r0, xyz(m, t3));
+		base_rgb = fmul(m, 3, saturate(m, 3, r0), xyz(m, u0));
+		/* (the normal: the pack's at the base map's or CE's bump map's
+		coordinates, else CE's bump map, texture 0's texel) */
+		normal_uv = select_n(m, 2, pack_bit(m, flags, 1), xy(m, pixel_input(m, state, state->in_t[0], m->t_v4)), uv);
+		ts = pack_tangent_normal(m, material_sample(m, state, XGPU_SPIRV_PACK_IMAGE_NORMAL, normal_uv), scale);
+		bump = state->program->stages[0].sampler == _xgpu_sampler_2d ? fsub(m, 3, fscale(m, 3, xyz(m, state->t[0]),
+			constant_float(m, 2.0f)), constant_splat(m, 3, 1.0f)) : constant_vector(m, 3, (const float[]){ 0.0f,
+			0.0f, 1.0f });
+		ts = select_n(m, 3, pack_bit(m, resident, 1u << XGPU_SPIRV_PACK_IMAGE_NORMAL), ts, bump);
+		*normal = 0;
+		if (world_normal && state->in_world_tangent)
+		{
+			n = ext1(m, GLSL_NORMALIZE, m->t_v3, world_normal);
+			t = pixel_input(m, state, state->in_world_tangent, m->t_v3);
+			b = pixel_input(m, state, state->in_world_binormal, m->t_v3);
+			*normal = pack_frame_normal(m, ts, t, b, n);
+		}
+		*albedo = vec4_of(m, base_rgb, constant_float(m, 1.0f));
+	}
+	else
+	{
+		unsigned int texel, frag, d, sx, sy, ray, p, n, dp1, dp2, du1, du2, dp2p, dp1p, t, b, frame_scale, ts;
+		unsigned int corners = pack_uniform(m, 7);
+		static const unsigned int rgb[4] = { 4, 5, 6, 3 };
+
+		uv = xy(m, pixel_input(m, state, state->in_t[0], m->t_v4));
+		/* (the albedo in texture 0's place, its alpha CE's) */
+		texel = material_sample(m, state, XGPU_SPIRV_PACK_IMAGE_ALBEDO, uv);
+		state->t[0] = select_n(m, 4, pack_bit(m, resident, 1u << XGPU_SPIRV_PACK_IMAGE_ALBEDO),
+			shuffle(m, 4, state->t[0], vec4_of(m, fmul(m, 3, xyz(m, texel), xyz(m, u0)), one), rgb), state->t[0]);
+		/* the pixel's place, from the eye: its distance along the view's axis
+		times the ray through it (SCENE_VIEW's camera) */
+		frag = load(m, m->t_v4, state->frag_coord);
+		d = fdiv(m, 1, one, fmax_scalar(m, 1, extract(m, frag, 3), 1.0e-20f));
+		sx = fsub(m, 1, fdiv(m, 1, fscale(m, 1, fsub(m, 1, extract(m, frag, 0), extract(m, corners, 0)),
+			constant_float(m, 2.0f)), fmax_scalar(m, 1, fsub(m, 1, extract(m, corners, 2), extract(m, corners, 0)), 1.0f)),
+			one);
+		sy = fsub(m, 1, fdiv(m, 1, fscale(m, 1, fsub(m, 1, extract(m, frag, 1), extract(m, corners, 1)),
+			constant_float(m, 2.0f)), fmax_scalar(m, 1, fsub(m, 1, extract(m, corners, 3), extract(m, corners, 1)), 1.0f)),
+			one);
+		ray = fadd(m, 3, fadd(m, 3, xyz(m, pack_uniform(m, 4)), fscale(m, 3, xyz(m, pack_uniform(m, 5)), sx)),
+			fscale(m, 3, xyz(m, pack_uniform(m, 6)), sy));
+		p = fscale(m, 3, ray, d);
+		/* (the cotangent frame of its derivatives up the screen, as
+		surface_frame's) */
+		dp1 = op1(m, OP_DPDX, m->t_v3, p);
+		dp2 = fneg(m, 3, op1(m, OP_DPDY, m->t_v3, p));
+		du1 = op1(m, OP_DPDX, m->t_v2, uv);
+		du2 = fneg(m, 2, op1(m, OP_DPDY, m->t_v2, uv));
+		/* (the vertices' normal, else the surface's, toward the eye) */
+		if (world_normal)
+			n = ext1(m, GLSL_NORMALIZE, m->t_v3, world_normal);
+		else
+		{
+			n = ext1(m, GLSL_NORMALIZE, m->t_v3, fcross(m, dp1, dp2));
+			n = select_n(m, 3, compare(m, OP_F_ORD_GREATER_THAN, fdot(m, n, p), constant_float(m, 0.0f)),
+				fneg(m, 3, n), n);
+		}
+		dp2p = fcross(m, dp2, n);
+		dp1p = fcross(m, n, dp1);
+		t = fadd(m, 3, fscale(m, 3, dp2p, extract(m, du1, 0)), fscale(m, 3, dp1p, extract(m, du2, 0)));
+		b = fadd(m, 3, fscale(m, 3, dp2p, extract(m, du1, 1)), fscale(m, 3, dp1p, extract(m, du2, 1)));
+		frame_scale = ext1(m, GLSL_INVERSE_SQRT, m->t_float, fmax_scalar(m, 1, ext2(m, GLSL_F_MAX, m->t_float,
+			fdot(m, t, t), fdot(m, b, b)), 1.0e-30f));
+		t = fscale(m, 3, t, frame_scale);
+		b = fscale(m, 3, b, frame_scale);
+		ts = pack_tangent_normal(m, material_sample(m, state, XGPU_SPIRV_PACK_IMAGE_NORMAL, uv), scale);
+		ts = select_n(m, 3, pack_bit(m, resident, 1u << XGPU_SPIRV_PACK_IMAGE_NORMAL), ts,
+			constant_vector(m, 3, (const float[]){ 0.0f, 0.0f, 1.0f }));
+		*normal = pack_frame_normal(m, ts, t, b, n);
+		/* (the base colour: the combiners', made by the caller) */
+		*albedo = 0;
+	}
+	/* roughness and metalness: the ORM's by the factors, else the automatic
+	tier's; the occlusion */
+	orm = material_sample(m, state, XGPU_SPIRV_PACK_IMAGE_ORM, uv);
+	orm_resident = pack_bit(m, resident, 1u << XGPU_SPIRV_PACK_IMAGE_ORM);
+	rough = fselect(m, orm_resident, fmul(m, 1, extract(m, u1, 0), extract(m, orm, 1)), extract(m, automatic, 0));
+	metal = fselect(m, orm_resident, fmul(m, 1, extract(m, u1, 1), extract(m, orm, 2)), extract(m, automatic, 1));
+	occlusion = fselect(m, orm_resident, ext3(m, GLSL_F_MIX, m->t_float, one, extract(m, orm, 0), extract(m, u1, 2)),
+		one);
+	*parameters = construct4(m, saturate(m, 1, rough), saturate(m, 1, metal), saturate(m, 1, extract(m, u1, 3)),
+		extract(m, automatic, 3));
+	/* (the albedo target's alpha the occlusion, at least a step: 0 where the
+	albedo is not the pack's) */
+	if (level)
+		*albedo = vec4_of(m, xyz(m, *albedo), fselect(m, pack_bit(m, resident, 1u << XGPU_SPIRV_PACK_IMAGE_ALBEDO),
+			fmax_scalar(m, 1, occlusion, 1.0f / 255.0f), constant_float(m, 0.0f)));
+	else
+		state->pack_occlusion = occlusion;
+}
+
 /* the G-buffer twin's four words (xgpu_stream.h's GBUFFER_BEGIN): the base
 colour (an object's; the level's lightmap coordinates where its lightmap
-pass has them, 2x16 unorm; else 0), the normal (0 none), the uniforms'
-material parameters and its fourth word */
-static unsigned int gbuffer_words(struct module *m, struct pixel_state *state, unsigned int base, int level)
+pass has them, 2x16 unorm; else 0), the normal (0 none: the vertices';
+pack_normal a pack's, a vec3), the uniforms' material parameters (or a
+pack's, pack_parameters) and its fourth word */
+static unsigned int gbuffer_words(struct module *m, struct pixel_state *state, unsigned int base, int level,
+	unsigned int pack_normal, unsigned int pack_parameters)
 {
-	unsigned int words[4], parameters = uniform(m, U_GBUFFER, 0), ids = uniform(m, U_GBUFFER, 1), has_normal = 0;
+	unsigned int words[4], parameters = pack_parameters ? pack_parameters : uniform(m, U_GBUFFER, 0);
+	unsigned int ids = uniform(m, U_GBUFFER, 1), has_normal = 0;
 
 	if (base)
 		words[0] = ext1(m, GLSL_PACK_UNORM_4X8, m->t_uint, vec4_of(m, base, constant_float(m, 1.0f)));
@@ -4103,7 +4360,13 @@ static unsigned int gbuffer_words(struct module *m, struct pixel_state *state, u
 	}
 	else
 		words[0] = constant_uint(m, 0);
-	if (state->in_world_normal)
+	if (pack_normal)
+	{
+		/* (a pack's: always one) */
+		has_normal = constant_bool(m, TRUE);
+		words[1] = gbuffer_octahedral(m, pack_normal);
+	}
+	else if (state->in_world_normal)
 	{
 		unsigned int normal = xyz(m, pixel_input(m, state, state->in_world_normal, m->t_v4));
 		unsigned int length2 = fdot(m, normal, normal);
@@ -6539,6 +6802,10 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	colour's place, an object's base colour among them) */
 	BOOL gbuffer = options->gbuffer != 0;
 	unsigned int gbuffer_base = 0, gbuffer_emissive = 0, gbuffer_extras_out = 0, gbuffer_light = 0;
+	/* (... drawn by its pack's material, its family's uber-shader: its base
+	colour into the albedo target too; its normal and parameters) */
+	BOOL pack = gbuffer && options->gbuffer_pack;
+	unsigned int pack_albedo = 0, pack_normal = 0, pack_parameters = 0, gbuffer_albedo_out = 0;
 	/* port: a model's twin's light as CE lit it (display.prism_rt's
 	traced light keyed: its fourth word, as a lightmap pass's) */
 	unsigned int model_light_ce = 0;
@@ -6550,8 +6817,8 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	BOOL sun = XGPU_PRISM_SHADOWS_OF(program->prism_lighting) == XGPU_PRISM_SHADOWS_CASCADED;
 	BOOL sun_lightmap = sun && !overlay && !program->per_pixel_lighting;
 	BOOL sun_model = sun && !overlay && program->per_pixel_lighting;
-	/* (display.prism_materials: alike, by its GGX path) */
-	BOOL pbr = (program->material_pbr & XGPU_PBR_ON) && program->per_pixel_lighting && !environment;
+	/* (display.prism_materials: alike, by its GGX path; never a pack's twin) */
+	BOOL pbr = (program->material_pbr & XGPU_PBR_ON) && program->per_pixel_lighting && !environment && !pack;
 	BOOL world_position = (program->per_pixel_lighting && (program->per_pixel_lighting == 2 ||
 		program->dynamic_lights == XGPU_DYNAMIC_LIGHTS_MODEL)) || environment || world || overlay || sun_lightmap || sun_model || pbr;
 	BOOL count_samples = program->count_samples && options->count_samples;
@@ -6614,6 +6881,8 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	}
 	if (pbr)
 		material_declare(&m, &state);
+	else if (pack)
+		pack_declare(&m, &state);
 	if (effect)
 		effect_declare(&m, &state);
 	else if (replaces_depth)
@@ -6683,11 +6952,15 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 		state.in_world_normal = interface_variable(&m, m.t_v4, STORAGE_INPUT, XGPU_SPIRV_LOCATION_WORLD_NORMAL, "xWorldNormal");
 	if (world_position)
 		state.in_world_position = interface_variable(&m, m.t_v3, STORAGE_INPUT, XGPU_SPIRV_LOCATION_WORLD_POSITION, "xWorldPosition");
-	if (environment || (sun_lightmap && program->stages[3].mode == XGPU_TEXTURE_CUBEMAP))
+	if (environment || (sun_lightmap && program->stages[3].mode == XGPU_TEXTURE_CUBEMAP) ||
+		(pack && options->gbuffer == XGPU_SPIRV_GBUFFER_LEVEL && options->gbuffer_normal))
 	{
 		state.in_world_binormal = interface_variable(&m, m.t_v3, STORAGE_INPUT, XGPU_SPIRV_LOCATION_WORLD_BINORMAL, "xWorldBinormal");
 		state.in_world_tangent = interface_variable(&m, m.t_v3, STORAGE_INPUT, XGPU_SPIRV_LOCATION_WORLD_TANGENT, "xWorldTangent");
 	}
+	/* (the level's twin of a pack's material: the base map's coordinates) */
+	if (pack && options->gbuffer == XGPU_SPIRV_GBUFFER_LEVEL && options->gbuffer_base_uv && options->gbuffer_normal)
+		state.in_base_uv = interface_variable(&m, m.t_v4, STORAGE_INPUT, XGPU_SPIRV_LOCATION_BASE_UV, "xBaseUV");
 	color_out = interface_variable(&m, world_inputs || occluder || gbuffer ? m.t_uv4 : m.t_v4, STORAGE_OUTPUT, 0,
 		"fragment_color");
 	/* (a G-buffer twin's second target: its motion, emissive light and
@@ -6695,6 +6968,9 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	if (gbuffer)
 	{
 		gbuffer_extras_out = interface_variable(&m, m.t_uv4, STORAGE_OUTPUT, 1, "gbuffer_extras");
+		/* (and a pack's material's twin, the albedo target) */
+		if (pack)
+			gbuffer_albedo_out = interface_variable(&m, m.t_v4, STORAGE_OUTPUT, 2, "gbuffer_albedo");
 		if (!state.frag_coord)
 		{
 			state.frag_coord = variable(&m, m.t_v4, STORAGE_INPUT, "gl_FragCoord");
@@ -6858,6 +7134,11 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	if (environment)
 		dynamic_light_bump = xyz(&m, state.t[0]);
 
+	/* (a twin of a pack's material: its family's uber-shader; an object's
+	albedo in texture 0's place, before its combiners) */
+	if (pack)
+		gbuffer_pack(&m, &state, options->gbuffer == XGPU_SPIRV_GBUFFER_LEVEL, &pack_albedo, &pack_normal,
+			&pack_parameters);
 	state.r0 = vec4_of(&m, constant_splat(&m, 3, 0.0f), extract(&m, state.t[0], 3));
 	state.r1 = state.zero4;
 	/* (display.lighting "ce_deferred": an object's G-buffer twin's base
@@ -6888,6 +7169,10 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 		memcpy(state.t, t, sizeof(t));
 		state.r0 = r0;
 		state.r1 = r1;
+		/* (a pack's: the base colour the combiners made of its albedo, in the
+		albedo target too) */
+		if (pack)
+			pack_albedo = vec4_of(&m, gbuffer_base, fmax_scalar(&m, 1, state.pack_occlusion, 1.0f / 255.0f));
 	}
 	/* (... and the level's lightmap pass's: its combiners with no lightmap,
 stage 2, what its self-illumination adds) */
@@ -7132,7 +7417,10 @@ stage 2, what its self-illumination adds) */
 	reference) */
 	if (gbuffer)
 	{
-		store(&m, color_out, gbuffer_words(&m, &state, gbuffer_base, options->gbuffer == XGPU_SPIRV_GBUFFER_LEVEL));
+		store(&m, color_out, gbuffer_words(&m, &state, gbuffer_base, options->gbuffer == XGPU_SPIRV_GBUFFER_LEVEL,
+			pack_normal, pack_parameters));
+		if (gbuffer_albedo_out)
+			store(&m, gbuffer_albedo_out, pack_albedo ? saturate(&m, 4, pack_albedo) : state.zero4);
 		store(&m, gbuffer_extras_out, gbuffer_extras(&m, &state, gbuffer_emissive ? gbuffer_emissive :
 			constant_splat(&m, 3, 0.0f), gbuffer_light));
 	}

@@ -729,6 +729,15 @@ static const struct config_setting config_settings[] =
 		"yet), no ray tracing while playing; the bake (display.bake) needs a\n"
 		"graphics card with ray tracing. Read each frame. Vulkan only; no\n"
 		"anti-aliasing by multisampling." },
+	{ "display.material_packs", _config_boolean, "true", "HALO_MATERIAL_PACKS", _environment_value,
+		_platform_desktop,
+		"PRISM v4's materials from packs and mods (docs/prism_materials.md), with\n"
+		"display.lighting \"ce_deferred\" or \"raster\": where the material pack\n"
+		"(made on this machine by prism_packs.py's materials step) or a mod gives a\n"
+		"shader a material, the G-buffer draws its maps (its colour with CE's\n"
+		"painted light taken out, its bump, roughness and metal) in place of the\n"
+		"one made from CE's shader as the map loads; false: every shader's made\n"
+		"from CE's. Read each frame." },
 	{ "display.bake", _config_string, "\"auto\"", "HALO_BAKE", _environment_value, _platform_desktop,
 		"PRISM's in-game baker (docs/prism_bake.md), with display.lighting\n"
 		"\"raster\": \"auto\" bakes each level's light in the background while\n"

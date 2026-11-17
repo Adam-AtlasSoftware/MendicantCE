@@ -805,6 +805,32 @@ void xgpu_backend_scene_material(unsigned long material, const unsigned long has
 	}
 }
 
+void xgpu_backend_scene_material_maps(unsigned long material, unsigned long tier, unsigned long model,
+	unsigned long flags, const unsigned long *maps, const float *scalars)
+{
+	struct xgpu_stream_scene_material_maps *record_body;
+	int index;
+
+	if (!stream.open || stream.preparing || !material || model > 15ul ||
+		(tier != XGPU_GBUFFER_TIER_AUTO && tier != XGPU_GBUFFER_TIER_PACK && tier != XGPU_GBUFFER_TIER_MOD))
+		return;
+	/* (as xgpu_scene_encode_material_maps fills it: the scalars finite or 0) */
+	record_body = record(XGPU_STREAM_SCENE_MATERIAL_MAPS, sizeof(*record_body));
+	record_body->material = (uint32_t)material;
+	record_body->tier = (uint32_t)tier;
+	record_body->model = (uint32_t)model;
+	record_body->flags = (uint32_t)flags;
+	for (index = 0; maps && index < (int)XGPU_SCENE_MATERIAL_MAPS; index++)
+		record_body->maps[index] = (uint32_t)maps[index];
+	for (index = 0; scalars && index < (int)XGPU_SCENE_MATERIAL_MAP_SCALARS; index++)
+	{
+		uint32_t bits;
+
+		memcpy(&bits, &scalars[index], sizeof(bits));
+		record_body->scalars[index] = (bits & 0x7f800000u) == 0x7f800000u ? 0.0f : scalars[index];
+	}
+}
+
 void xgpu_backend_gbuffer_draw(unsigned long material, unsigned long instance, unsigned long flags,
 	unsigned long lightmap)
 {

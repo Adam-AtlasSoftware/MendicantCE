@@ -2095,6 +2095,12 @@ void mod_materials_prism_set(
 		mod_meshes_debug_pose(text + 11);
 		return;
 	}
+	/* (PRISM v4's materials by tier: prism_materials.c) */
+	if (text && !strcmp(text, "material_tiers list"))
+	{
+		prism_materials_describe();
+		return;
+	}
 
 	if (!space || space == text || (size_t)(space - text) >= sizeof(name) - 16)
 	{

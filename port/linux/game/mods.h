@@ -214,4 +214,23 @@ void mod_pbr_textures_answered(unsigned long const *ids, long count);
 boolean mod_pbr_draw_begin(struct shader const *shader);
 void mod_pbr_draw_end(void);
 
+/* ---------- prototypes/PRISM_MATERIALS.C (PRISM v4's materials of the pack
+and mod tiers: docs/prism_materials.md) */
+
+long prism_materials_update(boolean remove_all, boolean at_load);
+void prism_materials_tags_unloaded(void);
+/* (mod_textures.c, once a frame: TRUE if the materials were read again) */
+boolean prism_materials_frame(void);
+/* (mod_textures.c) the images' files, and the store's ids of them */
+long prism_materials_texture_count(void);
+long prism_materials_texture_file(long index);
+void prism_materials_textures_answered(unsigned long const *ids, long count);
+/* (prism_deferred.c) moves as the materials are read and answered; a
+shader's maps sent after its SCENE_MATERIAL (forget: the automatic tier's
+where it has none) */
+unsigned long prism_materials_generation(void);
+void prism_materials_scene(void const *shader, unsigned long material_id, boolean forget);
+/* (mod_materials.c's prism_set "material_tiers list") */
+void prism_materials_describe(void);
+
 #endif

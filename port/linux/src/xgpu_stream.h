@@ -38,7 +38,7 @@ port/linux/README.md.
 #include <stdint.h>
 
 #define XGPU_STREAM_MAGIC 0x53504758u /* "XGPS" */
-#define XGPU_STREAM_VERSION 34
+#define XGPU_STREAM_VERSION 35
 #define XGPU_STREAM_LOADING_ART_BYTES (640u * 480u * 4u)
 
 /* ---------- the ring
@@ -325,6 +325,10 @@ enum
 	/* (PRISM v4 M2: the in-game baker's control and inputs, PRISM_BAKE,
 	below; docs/prism_bake.md) */
 	XGPU_STREAM_PRISM_BAKE,
+	/* (PRISM v4 M4: a material's maps where a pack or a mod gives its
+	shader PRISM's material, SCENE_MATERIAL_MAPS, below;
+	docs/prism_materials.md) */
+	XGPU_STREAM_SCENE_MATERIAL_MAPS,
 	XGPU_STREAM_RECORD_TYPES,
 };
 /* (the scene records' own count: they run from SCENE_MATERIAL to the end) */
@@ -379,6 +383,15 @@ Beside it, the G-buffer's second target, four 32-bit words a pixel too
       to 31 the level's lightmap page + 1 (0 none: an object's, or a draw
       without a page);
   [3] the distance along the view's axis (a float's bits).
+Where a material of the map has maps (PRISM v4 M4: SCENE_MATERIAL_MAPS, a
+pack's or a mod's), the pass has a third target, the albedo target (RGBA8
+unorm): the base colour its family's uber-shader drew of the maps (the
+base map's colour space), its alpha the maps' occlusion, at least 1/255; 0
+where the base colour is not the maps' (every other twin writes nothing
+there: the fourth word's tier says whose a pixel is). Before the resolve,
+the level's pixels of the pack or mod tier take its colour in the base
+target's place (xgpu_vulkan_post_albedo_over), so that the resolve, its
+views and PRISM Raster read the maps' base colour as they read CE's.
 The resolve's views (bit 8 on, debug.gbuffer_view) 4 to 11 show the G-buffer
 in the frame's place: 4 the base colour (the level's from the base phase's
 target), 5 the normal, 6 the roughness, 7 the metalness, 8 the material
@@ -2129,7 +2142,7 @@ geometry once for every consumer, the lights, the decals and the fog. They
 are sent only in the v4 modes (display.lighting "ce_deferred" now; "raster"
 and "pathtraced" to come); with "ce" (the default, Classic and Enhanced)
 none is ever written, so those frames stay byte for byte as they were. Their
-types are in the list above (XGPU_STREAM_VERSION 34) and the host's decoder
+types are in the list above (XGPU_STREAM_VERSION 35) and the host's decoder
 takes every one; M1 sends SCENE_MATERIAL and GBUFFER_DRAW (the guest's
 xgpu_backend_scene_material and _gbuffer_draw) and SCENE_STATIC (also with
 display.prism_rt on: the traced level is its), the others are specified and
@@ -2237,6 +2250,84 @@ struct xgpu_stream_scene_material
 	uint32_t flags, bitmap_count;
 	uint32_t bitmaps[XGPU_SCENE_MATERIAL_BITMAPS];
 	float scalars[XGPU_SCENE_MATERIAL_SCALARS];
+};
+
+/* SCENE_MATERIAL_MAPS (PRISM v4 M4; docs/prism_materials.md): a material's
+maps, where a pack or a mod gives its shader PRISM's material (a
+materials\<shader tag>.pack.json or .material.json of format 2), after the
+map's SCENE_MATERIALs and again as the texture store's answers change: its
+id (SCENE_MATERIAL's; 0 refused); its tier (XGPU_GBUFFER_TIER_PACK or
+_MOD; XGPU_GBUFFER_TIER_AUTO forgets the maps it had); its model
+(XGPU_GBUFFER_MODEL_*); its flags (XGPU_SCENE_MAPS_FLAG_*, with the
+environment shader's type and detail functions as CE's tag has them, the
+guest's where the file says "ce"); its images by XGPU_SCENE_MAP_*, the
+texture store's ids of KIND_MATERIAL entries (0 none); its numbers by
+XGPU_SCENE_MAPS_SCALAR_* (the detail maps' scales CE's texture pass takes,
+its base map's and its detail maps' sizes in them where the tag says to
+rescale). The G-buffer pass draws the material's opaque draws with its
+family's uber-shader, which samples them (xgpu_spirv.c's gbuffer_pack). */
+#define XGPU_SCENE_MATERIAL_MAPS 8u
+#define XGPU_SCENE_MATERIAL_MAP_SCALARS 24u
+enum
+{
+	/* RGBA: the de-lit base colour (the colour space of CE's base map), and
+	CE's base map's alpha */
+	XGPU_SCENE_MAP_ALBEDO,
+	/* RG: the shading normal in the surface's tangent space, x along u and
+	y along v (CE's bump maps' convention), 0.5 flat */
+	XGPU_SCENE_MAP_NORMAL,
+	/* R occlusion, G roughness, B metalness (glTF's) */
+	XGPU_SCENE_MAP_ORM,
+	/* RGBA: an environment shader's detail maps, as CE's texture pass
+	reads them */
+	XGPU_SCENE_MAP_PRIMARY_DETAIL,
+	XGPU_SCENE_MAP_SECONDARY_DETAIL,
+	XGPU_SCENE_MAP_MICRO_DETAIL,
+	/* RGB */
+	XGPU_SCENE_MAP_EMISSIVE,
+	/* R: the height, 0.5 the surface */
+	XGPU_SCENE_MAP_HEIGHT,
+};
+enum
+{
+	/* the normal map is at CE's bump map's coordinates (the environment
+	shader's bump map scale), not the base map's */
+	XGPU_SCENE_MAPS_FLAG_NORMAL_AT_BUMP = 1,
+	/* the material is two-sided foliage (its translucency scalar its
+	diffuse transmission) */
+	XGPU_SCENE_MAPS_FLAG_FOLIAGE = 2,
+};
+/* the model's value that keeps the automatic tier's (XGPU_GBUFFER_MODEL_*
+the others) */
+#define XGPU_SCENE_MAPS_MODEL_AUTO 15u
+/* the environment shader's type (normal, blended, blended base specular),
+detail function and micro detail function (CE's numbering: double-biased
+multiply, multiply, double-biased add), two bits each */
+#define XGPU_SCENE_MAPS_TYPE_SHIFT 4
+#define XGPU_SCENE_MAPS_DETAIL_SHIFT 8
+#define XGPU_SCENE_MAPS_MICRO_SHIFT 12
+enum
+{
+	XGPU_SCENE_MAPS_SCALAR_ALBEDO = 0,            /* rgb, times the albedo */
+	XGPU_SCENE_MAPS_SCALAR_NORMAL_SCALE = 3,      /* the normal's slope's scale */
+	XGPU_SCENE_MAPS_SCALAR_ROUGHNESS = 4,         /* the ORM's factors (the values alone */
+	XGPU_SCENE_MAPS_SCALAR_METAL = 5,             /* where it has none) */
+	XGPU_SCENE_MAPS_SCALAR_OCCLUSION = 6,         /* the ORM occlusion's strength */
+	XGPU_SCENE_MAPS_SCALAR_SPECULAR = 7,          /* F0's scale, 0.5 the dielectric 4% */
+	XGPU_SCENE_MAPS_SCALAR_EMISSIVE = 8,          /* rgb, times the emissive map */
+	XGPU_SCENE_MAPS_SCALAR_TRANSLUCENCY = 11,
+	XGPU_SCENE_MAPS_SCALAR_PRIMARY_DETAIL = 12,   /* u, v: the detail map's scale over the base map's */
+	XGPU_SCENE_MAPS_SCALAR_SECONDARY_DETAIL = 14, /* u, v */
+	XGPU_SCENE_MAPS_SCALAR_MICRO_DETAIL = 16,     /* u, v */
+	XGPU_SCENE_MAPS_SCALAR_HEIGHT_SCALE = 18,     /* world units the height's 0 to 1 spans */
+	/* 19 to 23 unused, 0 */
+};
+struct xgpu_stream_scene_material_maps
+{
+	uint32_t header;
+	uint32_t material, tier, model, flags;
+	uint32_t maps[XGPU_SCENE_MATERIAL_MAPS];
+	float scalars[XGPU_SCENE_MATERIAL_MAP_SCALARS];
 };
 
 /* SCENE_MATERIAL_ANIMATE: each frame, for each animated material drawn
@@ -2730,6 +2821,8 @@ XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_scene_fog_plane, 64);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_scene_fog, 48 + XGPU_SCENE_FOG_PLANES * 64);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_scene_view, 16 + 128 + 32);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_prism_bake, 80 + XGPU_BAKE_NAME);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_scene_material_maps, 20 + 4 * XGPU_SCENE_MATERIAL_MAPS +
+	4 * XGPU_SCENE_MATERIAL_MAP_SCALARS);
 /* (the scene records' types still fit the header's 8 bits) */
 _Static_assert(XGPU_STREAM_SCENE_RECORD_TYPES <= 256, "the scene records' types fit a header");
 

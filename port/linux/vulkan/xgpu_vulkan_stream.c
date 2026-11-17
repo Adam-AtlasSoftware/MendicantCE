@@ -164,8 +164,9 @@ struct variant
 	/* (display.prism_shadows "cascaded": a caster's shadow twin) */
 	uint8_t foveated, shadow;
 	/* (display.lighting "ce_deferred": a G-buffer twin, an object's or the
-	level's: XGPU_SPIRV_GBUFFER_*, 0 none) */
-	uint8_t gbuffer, unused[3];
+	level's: XGPU_SPIRV_GBUFFER_*, 0 none; and drawn by its material's
+	maps, the pack's or a mod's: its family's uber-shader) */
+	uint8_t gbuffer, gbuffer_pack, unused[2];
 };
 
 /* the most world pipelines waiting for their shaders, and the most made a
@@ -471,6 +472,14 @@ struct gbuffer_material
 {
 	uint8_t known, family, model, flags;
 	float roughness, metal, specular;
+	/* (PRISM v4 M4: its maps, where a pack or a mod gives it them:
+	SCENE_MATERIAL_MAPS' tier, XGPU_GBUFFER_TIER_PACK or _MOD, 0 none; its
+	model (XGPU_SCENE_MAPS_MODEL_AUTO: the automatic tier's), flags, the
+	texture store's ids and the numbers) */
+	uint8_t maps_tier, maps_model;
+	uint32_t maps_flags;
+	uint32_t maps[XGPU_SCENE_MATERIAL_MAPS];
+	float maps_scalars[XGPU_SCENE_MATERIAL_MAP_SCALARS];
 };
 static struct
 {
@@ -504,6 +513,16 @@ static struct
 	uint32_t pass_number;
 	float motion[XGPU_SPIRV_GBUFFER_UNIFORMS - 2][4];
 	int motion_history;
+	/* (PRISM v4 M4) the materials with maps (the pass then has the albedo
+	target, its third: RGBA8, the maps' base colour, its alpha their
+	occlusion, 0 where none), whether a twin of theirs drew into it this
+	pass, the twin drawn now is one (its family's uber-shader), and its
+	images and their residence (XGPU_SPIRV_PACK_IMAGE_* bits) */
+	uint32_t pack_materials;
+	struct xgpu_vulkan_image *albedo;
+	int albedo_bound, albedo_drawn, pack;
+	struct xgpu_vulkan_texture pack_images[XGPU_SPIRV_PACK_IMAGES];
+	uint32_t pack_resident;
 } gbuffer;
 
 static double preparation_start(void)
@@ -784,11 +803,13 @@ static void targets_bind(void)
 		xgpu_vulkan_set_target_views(NULL, shadow.atlases[shadow.structure], 0, 1);
 		return;
 	}
-	/* (display.lighting "ce_deferred"'s G-buffer pass: its words and depth) */
+	/* (display.lighting "ce_deferred"'s G-buffer pass: its words and depth,
+	and its albedo target where it has one) */
 	if (gbuffer.active && gbuffer.ready)
 	{
 		xgpu_vulkan_set_target_views(gbuffer.words, gbuffer.depth, 0, 1);
 		xgpu_vulkan_set_second_target(gbuffer.extras);
+		xgpu_vulkan_set_third_target(gbuffer.albedo_bound ? gbuffer.albedo : NULL);
 		return;
 	}
 	/* (display.lighting "ce_deferred"'s phases: the base or the additions in
@@ -1690,6 +1711,7 @@ static int pipeline_shaders(struct stream_pipeline *entry, const struct xgpu_str
 	memset(&options, 0, sizeof(options));
 	options.gbuffer = variant->gbuffer;
 	options.gbuffer_normal = variant->gbuffer && lighting != NULL;
+	options.gbuffer_pack = variant->gbuffer && variant->gbuffer_pack;
 	memcpy(options.border, variant->border, sizeof(options.border));
 	options.multiview = key->views;
 	options.foveated = variant->foveated;
@@ -1707,11 +1729,15 @@ static int pipeline_shaders(struct stream_pipeline *entry, const struct xgpu_str
 		return 0;
 	vertex_program_convert(program_record->record, program);
 	entry->inputs = (uint16_t)xgpu_spirv_vertex_inputs(program, lighting);
+	/* (a pack's twin of the level: the base map's coordinates handed on,
+	the vertices' own, where its program reads them) */
+	options.gbuffer_base_uv = options.gbuffer_pack && variant->gbuffer == XGPU_SPIRV_GBUFFER_LEVEL &&
+		lighting == &environment && (entry->inputs & (1u << 4));
 	if (xgpu_spirv_vertex_shader(program, packed, integers, lighting, &options, &module))
 	{
-		snprintf(name, sizeof(name), "vs%08x%08x_%lx_%lx_%u_view%u_fovea%u%s%s", (unsigned)(hash >> 32), (unsigned)hash,
-			packed, integers, key->lighting, key->views, variant->foveated, variant->shadow ? "_shadow" : "",
-			variant->gbuffer ? "_gbuffer" : "");
+		snprintf(name, sizeof(name), "vs%08x%08x_%lx_%lx_%u_view%u_fovea%u%s%s%s", (unsigned)(hash >> 32),
+			(unsigned)hash, packed, integers, key->lighting, key->views, variant->foveated, variant->shadow ? "_shadow" : "",
+			variant->gbuffer ? "_gbuffer" : "", variant->gbuffer_pack ? "_pack" : "");
 		shader_dump(name, &module);
 		entry->vertex_shader = xgpu_vulkan_shader(module.words, module.count);
 		free(module.words);
@@ -1732,9 +1758,10 @@ static int pipeline_shaders(struct stream_pipeline *entry, const struct xgpu_str
 
 	if (xgpu_spirv_pixel_shader(&pixel, &options, &module))
 	{
-		snprintf(name, sizeof(name), "ps_%08x_%02x%02x%02x%02x_fovea%u_effect%u%u_g%u", bytes_hash(&definition->pixel_program,
+		snprintf(name, sizeof(name), "ps_%08x_%02x%02x%02x%02x_fovea%u_effect%u%u_g%u%s", bytes_hash(&definition->pixel_program,
 			sizeof(definition->pixel_program)), options.border[0], options.border[1], options.border[2], options.border[3],
-			variant->foveated, (unsigned)options.effect, (unsigned)options.effect_fade, (unsigned)variant->gbuffer);
+			variant->foveated, (unsigned)options.effect, (unsigned)options.effect_fade, (unsigned)variant->gbuffer,
+			variant->gbuffer_pack ? "_pack" : "");
 		shader_dump(name, &module);
 		entry->pixel_shader = xgpu_vulkan_shader(module.words, module.count);
 		free(module.words);
@@ -1963,11 +1990,12 @@ static void stream_scene_material(void *context, const struct xgpu_stream_scene_
 	(void)context;
 	if (!record->material || record->material >= GBUFFER_MATERIALS)
 		return;
-	/* (a map's set starts again at 1) */
+	/* (a map's set starts again at 1, with no maps) */
 	if (record->material == 1)
 	{
 		memset(gbuffer.materials, 0, sizeof(gbuffer.materials));
 		gbuffer.material_count = 0;
+		gbuffer.pack_materials = 0;
 	}
 	material = &gbuffer.materials[record->material];
 	memset(material, 0, sizeof(*material));
@@ -2006,6 +2034,36 @@ static void stream_scene_material(void *context, const struct xgpu_stream_scene_
 	material->known = 1;
 	if (record->material > gbuffer.material_count)
 		gbuffer.material_count = record->material;
+}
+
+/* SCENE_MATERIAL_MAPS: a material's maps where a pack or a mod gives its
+shader PRISM's material (the automatic tier's record forgets them); the
+count of the materials with maps kept, which the G-buffer pass's albedo
+target follows */
+static void stream_scene_material_maps(void *context, const struct xgpu_stream_scene_material_maps *record)
+{
+	struct gbuffer_material *material;
+	uint32_t index, count = 0;
+
+	(void)context;
+	if (!record->material || record->material >= GBUFFER_MATERIALS)
+		return;
+	material = &gbuffer.materials[record->material];
+	material->maps_tier = record->tier == XGPU_GBUFFER_TIER_PACK || record->tier == XGPU_GBUFFER_TIER_MOD ?
+		(uint8_t)record->tier : 0;
+	material->maps_model = (uint8_t)(record->model & 15u);
+	material->maps_flags = record->flags;
+	memcpy(material->maps, record->maps, sizeof(material->maps));
+	memcpy(material->maps_scalars, record->scalars, sizeof(material->maps_scalars));
+	if (!material->maps_tier)
+	{
+		memset(material->maps, 0, sizeof(material->maps));
+		memset(material->maps_scalars, 0, sizeof(material->maps_scalars));
+	}
+	for (index = 1; index < GBUFFER_MATERIALS; index++)
+		count += gbuffer.materials[index].maps_tier != 0;
+	gbuffer.pack_materials = count;
+	stream.uniforms_dirty = 1;
 }
 
 static void stream_gbuffer_draw(void *context, const struct xgpu_stream_gbuffer_draw *record)
@@ -2218,7 +2276,7 @@ static void gbuffer_key(uint32_t key[3], const struct gbuffer_material **materia
 	const struct gbuffer_material *found = gbuffer.material && gbuffer.material < GBUFFER_MATERIALS &&
 		gbuffer.materials[gbuffer.material].known ? &gbuffer.materials[gbuffer.material] : NULL;
 	uint32_t tier = !found ? XGPU_GBUFFER_TIER_NONE : stream.definition && stream.definition->key.pixel.material_pbr ?
-		XGPU_GBUFFER_TIER_MOD : XGPU_GBUFFER_TIER_AUTO;
+		XGPU_GBUFFER_TIER_MOD : gbuffer.pack ? found->maps_tier : XGPU_GBUFFER_TIER_AUTO;
 
 	key[0] = (gbuffer.material & 0xfffu) | (tier << 12) | XGPU_GBUFFER_PRESENT;
 	key[1] = gbuffer.instance & 0xffffu;
@@ -2239,7 +2297,8 @@ static void gbuffer_uniforms(float uniforms[XGPU_SPIRV_GBUFFER_UNIFORMS][4])
 	uniforms[0][0] = material ? material->roughness : 1.0f;
 	uniforms[0][1] = material ? material->metal : 0.0f;
 	uniforms[0][2] = material ? material->specular : 0.5f;
-	uniforms[0][3] = (float)((material ? material->model : 0) | (flags << 4)) / 255.0f;
+	uniforms[0][3] = (float)((material ? (gbuffer.pack && material->maps_model != XGPU_SCENE_MAPS_MODEL_AUTO ?
+		material->maps_model : material->model) : 0) | (flags << 4)) / 255.0f;
 	uniforms[1][0] = (float)key[0];
 	uniforms[1][1] = (float)key[1];
 	uniforms[1][2] = (float)gbuffer_motion(gbuffer.motion);
@@ -2247,6 +2306,99 @@ static void gbuffer_uniforms(float uniforms[XGPU_SPIRV_GBUFFER_UNIFORMS][4])
 	lightmap coordinates: xgpu_spirv.c's gbuffer_extras) */
 	uniforms[1][3] = (float)key[2];
 	memcpy(uniforms + 2, gbuffer.motion, sizeof(gbuffer.motion));
+}
+
+/* the material whose maps the twin drawn now takes (its family's
+uber-shader): the draw's material's, where it has maps, its shader's family
+is the twin's (an environment shader's on the level, a model shader's on an
+object) and display.prism_materials gives it none; else NULL */
+static const struct gbuffer_material *gbuffer_pack_material(void)
+{
+	const struct gbuffer_material *material = gbuffer.material && gbuffer.material < GBUFFER_MATERIALS &&
+		gbuffer.materials[gbuffer.material].known ? &gbuffer.materials[gbuffer.material] : NULL;
+
+	if (!material || !material->maps_tier || !gbuffer.albedo_bound ||
+		(stream.definition && stream.definition->key.pixel.material_pbr))
+		return NULL;
+	if (gbuffer.kind == XGPU_SPIRV_GBUFFER_LEVEL ? material->family != XGPU_SCENE_FAMILY_SENV :
+		material->family != XGPU_SCENE_FAMILY_SOSO)
+		return NULL;
+	return material;
+}
+
+/* ... its images (each drawn, its store entry's every resident level, with
+a sampler that repeats, trilinear and anisotropic, as display.prism_materials'
+are: material_resolve's), the bits of those resident */
+static void gbuffer_pack_resolve(const struct gbuffer_material *material)
+{
+	static const int maps[XGPU_SPIRV_PACK_IMAGES] = { XGPU_SCENE_MAP_ALBEDO, XGPU_SCENE_MAP_NORMAL, XGPU_SCENE_MAP_ORM,
+		XGPU_SCENE_MAP_PRIMARY_DETAIL, XGPU_SCENE_MAP_SECONDARY_DETAIL, XGPU_SCENE_MAP_MICRO_DETAIL };
+	uint32_t resident = 0;
+	int index;
+
+	memset(gbuffer.pack_images, 0, sizeof(gbuffer.pack_images));
+	for (index = 0; index < XGPU_SPIRV_PACK_IMAGES; index++)
+	{
+		struct xgpu_texture_store_view view;
+		uint32_t id = material ? material->maps[maps[index]] : 0;
+
+		gbuffer.pack_images[index].kind = XGPU_VULKAN_IMAGE_2D;
+		if (!id || !xgpu_vulkan_store_use(id, &view) || view.cube || view.top >= view.levels)
+			continue;
+		{
+			struct xgpu_stream_sampler sampler;
+			uint32_t first = view.resident > view.top ? view.resident - view.top : 0;
+			float shown = store_shown(&view, (float)first, view.levels - view.top - 1);
+
+			memset(&sampler, 0, sizeof(sampler));
+			sampler.minify = _filter_anisotropic;
+			sampler.magnify = _filter_linear;
+			sampler.mip = _filter_linear;
+			sampler.address[0] = sampler.address[1] = sampler.address[2] = XGPU_VULKAN_ADDRESS_WRAP;
+			sampler.anisotropy = stream.capabilities.anisotropy > 16 ? 16 : stream.capabilities.anisotropy;
+			gbuffer.pack_images[index].image = view.image;
+			gbuffer.pack_images[index].sampler = sampler_get_levels(&sampler, 0, shown,
+				(float)(view.levels - view.top - 1) + 0.001f);
+			resident |= 1u << index;
+		}
+	}
+	if (resident != gbuffer.pack_resident)
+	{
+		gbuffer.pack_resident = resident;
+		stream.uniforms_dirty = 1;
+	}
+}
+
+/* ... and its numbers, in the uniforms' material member (xgpu_spirv.h's
+XGPU_SPIRV_PACK_*), with SCENE_VIEW's camera for an object's frame */
+static void gbuffer_pack_uniforms(const struct gbuffer_material *material, float uniforms[XGPU_MATERIAL_UNIFORM_COUNT][4])
+{
+	const float *scalars = material->maps_scalars;
+	int axis;
+
+	memset(uniforms, 0, XGPU_MATERIAL_UNIFORM_COUNT * sizeof(uniforms[0]));
+	memcpy(uniforms[0], &scalars[XGPU_SCENE_MAPS_SCALAR_ALBEDO], 3 * sizeof(float));
+	uniforms[0][3] = scalars[XGPU_SCENE_MAPS_SCALAR_NORMAL_SCALE];
+	uniforms[1][0] = scalars[XGPU_SCENE_MAPS_SCALAR_ROUGHNESS];
+	uniforms[1][1] = scalars[XGPU_SCENE_MAPS_SCALAR_METAL];
+	uniforms[1][2] = scalars[XGPU_SCENE_MAPS_SCALAR_OCCLUSION];
+	uniforms[1][3] = scalars[XGPU_SCENE_MAPS_SCALAR_SPECULAR];
+	memcpy(uniforms[2], &scalars[XGPU_SCENE_MAPS_SCALAR_PRIMARY_DETAIL], 2 * sizeof(float));
+	memcpy(&uniforms[2][2], &scalars[XGPU_SCENE_MAPS_SCALAR_SECONDARY_DETAIL], 2 * sizeof(float));
+	memcpy(uniforms[3], &scalars[XGPU_SCENE_MAPS_SCALAR_MICRO_DETAIL], 2 * sizeof(float));
+	uniforms[3][2] = (float)(material->maps_flags & 0xffffu);
+	uniforms[3][3] = (float)gbuffer.pack_resident;
+	if (gbuffer.view_known)
+	{
+		for (axis = 0; axis < 3; axis++)
+		{
+			uniforms[4][axis] = gbuffer.view.now[1][axis];
+			uniforms[5][axis] = gbuffer.view.now[2][axis];
+			uniforms[6][axis] = gbuffer.view.now[3][axis];
+		}
+		for (axis = 0; axis < 4; axis++)
+			uniforms[7][axis] = gbuffer.view.corners[axis];
+	}
 }
 
 /* the uniforms both stages read and the vertex constants, in the ring for
@@ -2305,9 +2457,16 @@ static int uniforms_update(int effect)
 		if (stream.materials)
 			material_uniforms(to->material);
 		/* (display.lighting "ce_deferred"'s G-buffer twins': the draw's
-		material and instance) */
+		material and instance; a pack's twin's maps' numbers, in the
+		material member, which no twin's own use has) */
 		if (gbuffer.drawing)
+		{
+			const struct gbuffer_material *material = gbuffer.pack ? gbuffer_pack_material() : NULL;
+
 			gbuffer_uniforms(to->gbuffer);
+			if (material)
+				gbuffer_pack_uniforms(material, to->material);
+		}
 		memcpy(to->blend_constant, stream.dynamic.blend_color, sizeof(to->blend_constant));
 		for (stage = 0; stage < 4; stage++)
 		{
@@ -2762,6 +2921,7 @@ static int draw_pipeline(const struct draw_input *input, int apart)
 	variant.integer_attributes = stream.definition->key.immediate ? 0 : input->integers;
 	variant.shadow = shadow.drawing != NULL;
 	variant.gbuffer = gbuffer.drawing ? gbuffer.kind : 0;
+	variant.gbuffer_pack = gbuffer.drawing && gbuffer.pack;
 	if (apart && (entry->state != XGPU_STREAM_PIPELINE_MADE || memcmp(&entry->variant, &variant, sizeof(variant))))
 		return 0;
 	if (!pipeline_shaders(entry, stream.definition, &variant))
@@ -2823,6 +2983,9 @@ static int draw_pipeline(const struct draw_input *input, int apart)
 	{
 		pipeline.color_format = XGPU_VULKAN_FORMAT_RGBA32_UINT;
 		pipeline.color2_format = XGPU_VULKAN_FORMAT_RGBA32_UINT;
+		/* (with its albedo target: written by a pack's twin alone) */
+		pipeline.color3_format = gbuffer.albedo_bound ? XGPU_VULKAN_FORMAT_RGBA8 : XGPU_VULKAN_FORMAT_NONE;
+		pipeline.color3_mask = gbuffer.albedo_bound && gbuffer.pack ? 15 : 0;
 		pipeline.color_read = 0;
 		pipeline.blend = 0;
 		pipeline.color_mask = 15;
@@ -3067,6 +3230,14 @@ static int draw_pipeline(const struct draw_input *input, int apart)
 		if (!draw.material_overlay)
 			memset(draw.overlay, 0, sizeof(draw.overlay));
 		memcpy(draw.material_images, stream.material_images, sizeof(draw.material_images));
+	}
+	/* (a pack's twin's maps, in the same bindings) */
+	if (gbuffer.drawing && gbuffer.pack)
+	{
+		draw.material = 1;
+		if (!draw.material_overlay)
+			memset(draw.overlay, 0, sizeof(draw.overlay));
+		memcpy(draw.material_images, gbuffer.pack_images, sizeof(draw.material_images));
 	}
 	draw.constants = stream.constants_range;
 	draw.uniforms = stream.uniforms_range;
@@ -4199,7 +4370,7 @@ static void gbuffer_draw(const struct draw_input *input)
 	if (!gbuffer.definitions)
 	{
 		gbuffer.definitions = calloc(XGPU_STREAM_PIPELINES, sizeof(*gbuffer.definitions));
-		gbuffer.entries = calloc(XGPU_STREAM_PIPELINES * 2, sizeof(*gbuffer.entries));
+		gbuffer.entries = calloc(XGPU_STREAM_PIPELINES * 4, sizeof(*gbuffer.entries));
 		if (!gbuffer.definitions || !gbuffer.entries)
 		{
 			free(gbuffer.definitions);
@@ -4213,16 +4384,28 @@ static void gbuffer_draw(const struct draw_input *input)
 	if (!xgpu_stream_gbuffer_twin(&twin))
 		return;
 	gbuffer.kind = gbuffer.instance ? XGPU_SPIRV_GBUFFER_OBJECT : XGPU_SPIRV_GBUFFER_LEVEL;
-	/* (each pipeline's two twins, an object's and the level's, entries of
-	their own: neither makes the other's shaders again) */
-	entry = &gbuffer.entries[id * 2 + (gbuffer.kind == XGPU_SPIRV_GBUFFER_LEVEL)];
+	/* (drawn by its material's maps where it has them: its family's
+	uber-shader, its images looked up) */
+	{
+		const struct gbuffer_material *pack = gbuffer_pack_material();
+
+		gbuffer.pack = pack != NULL;
+		if (pack)
+			gbuffer_pack_resolve(pack);
+	}
+	/* (each pipeline's four twins, an object's and the level's, CE's and a
+	pack's, entries of their own: none makes another's shaders again) */
+	entry = &gbuffer.entries[id * 4 + (gbuffer.kind == XGPU_SPIRV_GBUFFER_LEVEL) + 2 * gbuffer.pack];
 	if (memcmp(&twin, &gbuffer.definitions[id], sizeof(twin)))
 	{
 		gbuffer.definitions[id] = twin;
-		memset(&gbuffer.entries[id * 2], 0, 2 * sizeof(*gbuffer.entries));
+		memset(&gbuffer.entries[id * 4], 0, 4 * sizeof(*gbuffer.entries));
 	}
 	if (entry->state == XGPU_STREAM_PIPELINE_FAILED)
+	{
+		gbuffer.pack = 0;
 		return;
+	}
 	stream.definition = &gbuffer.definitions[id];
 	/* (the uniforms made again where the material, its tier or the
 	instance changed, or the motion's move or cameras) */
@@ -4248,6 +4431,8 @@ static void gbuffer_draw(const struct draw_input *input)
 	(void)draw_pipeline(input, 0);
 	gbuffer.drawing = NULL;
 	gbuffer.drawn = 1;
+	gbuffer.albedo_drawn |= gbuffer.pack;
+	gbuffer.pack = 0;
 	stream.definition = definition;
 	stream.pipeline = pipeline;
 	stream.pipeline_id = id;
@@ -4888,7 +5073,9 @@ static void stream_gbuffer_phase(void *context, uint32_t value)
 			if (gbuffer.ready)
 				xgpu_vulkan_gpu_time_mark(1);
 			gbuffer.active = gbuffer.ready = 0;
+			gbuffer.albedo_bound = 0;
 			stream.uniforms_dirty = 1;
+			xgpu_vulkan_set_third_target(NULL);
 			xgpu_vulkan_set_second_target(NULL);
 			targets_bind();
 		}
@@ -4912,12 +5099,18 @@ static void stream_gbuffer_phase(void *context, uint32_t value)
 		gbuffer.color = stream.color;
 		gbuffer.ready = 1;
 		gbuffer.drawn = 0;
+		/* (the albedo target, where a material has maps: cleared to 0, no
+		pack's albedo) */
+		gbuffer.albedo_drawn = 0;
+		gbuffer.albedo_bound = gbuffer.pack_materials &&
+			(gbuffer.albedo = prepass_image(gbuffer.albedo, XGPU_VULKAN_FORMAT_RGBA8, color->width, color->height)) != NULL;
 		gbuffer.material = gbuffer.instance = gbuffer.flags = 0;
 		memset(gbuffer.uniform_key, 0, sizeof(gbuffer.uniform_key));
 		stream.uniforms_dirty = 1;
 		xgpu_vulkan_gpu_time_mark(0);
 		xgpu_vulkan_set_target_views(gbuffer.words, gbuffer.depth, 0, 1);
 		xgpu_vulkan_set_second_target(gbuffer.extras);
+		xgpu_vulkan_set_third_target(gbuffer.albedo_bound ? gbuffer.albedo : NULL);
 		whole[0][0] = whole[0][1] = 0;
 		whole[0][2] = (int32_t)color->width;
 		whole[0][3] = (int32_t)color->height;
@@ -4980,6 +5173,11 @@ static void stream_gbuffer_phase(void *context, uint32_t value)
 				view = 2;
 			else if (view >= (int)XGPU_GBUFFER_VIEW_BAKE_LIGHT)
 				view = 0;
+			/* (the level's base colour, where its materials' maps drew it, the
+			maps' in the base target's place: what the resolve, its views and
+			Raster take) */
+			if (words && gbuffer.albedo_drawn && gbuffer.albedo)
+				xgpu_vulkan_post_albedo_over(deferred.base, gbuffer.albedo, words);
 			xgpu_vulkan_post_deferred_resolve(color->image, deferred.base, deferred.additions, words,
 				words ? gbuffer.extras : NULL, depth && depth->depth && !depth->multisampled ? depth->image : NULL, view,
 				raster && words ? raster_relight : NULL, &context);
@@ -5002,6 +5200,7 @@ static void stream_frame_end(void *context)
 	deferred.hold = 0;
 	gbuffer.active = gbuffer.ready = 0;
 	gbuffer.drawn = 0;
+	gbuffer.albedo_drawn = 0;
 	world_make_some();
 	prepass.twins_made = 0;
 	shadow.twins_made = 0;
@@ -5283,6 +5482,7 @@ const struct host_render_backend *xgpu_vulkan_stream_backend(void)
 		backend.gamma = stream_gamma;
 		backend.gbuffer_phase = stream_gbuffer_phase;
 		backend.scene_material = stream_scene_material;
+		backend.scene_material_maps = stream_scene_material_maps;
 		backend.gbuffer_draw = stream_gbuffer_draw;
 		backend.scene_instance = stream_scene_instance;
 		backend.scene_view = stream_scene_view;

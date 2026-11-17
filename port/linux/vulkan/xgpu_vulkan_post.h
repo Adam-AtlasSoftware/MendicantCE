@@ -54,6 +54,13 @@ int xgpu_vulkan_post_deferred_resolve(struct xgpu_vulkan_image *target, struct x
 	struct xgpu_vulkan_image *depth, int view,
 	struct xgpu_vulkan_image *(*relight)(struct xgpu_vulkan_image *light, struct xgpu_vulkan_image *base,
 	struct xgpu_vulkan_image *additions, int *whole, void *context), void *context);
+
+/* PRISM v4 M4: the level's base colour where the G-buffer pass drew a
+pack's or a mod's material's maps (the albedo target; gbuffer the G-buffer's
+words: a level pixel of the pack or mod tier) drawn into the base target in
+its colour's place, its alpha kept; 0 if it cannot be */
+int xgpu_vulkan_post_albedo_over(struct xgpu_vulkan_image *base, struct xgpu_vulkan_image *albedo,
+	struct xgpu_vulkan_image *gbuffer);
 int xgpu_vulkan_post_panini(struct xgpu_vulkan_image *source, struct xgpu_vulkan_image *into, uint32_t layer,
 	const int32_t corners[4], const float projection[8]);
 

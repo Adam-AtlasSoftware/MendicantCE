@@ -49,6 +49,10 @@ enum xgpu_vulkan_post_program_id
 	XGPU_VULKAN_POST_PRISM_TONE,
 	/* display.lighting "ce_deferred"'s resolve */
 	XGPU_VULKAN_POST_DEFERRED_RESOLVE,
+	/* (PRISM v4 M4: the level's base colour of the materials' maps, the
+	albedo target's at unit 0, the G-buffer's words at 3, over the base
+	target: xgpu_vulkan_post_albedo_over) */
+	XGPU_VULKAN_POST_ALBEDO_OVER,
 	XGPU_VULKAN_POST_PROGRAM_COUNT
 };
 

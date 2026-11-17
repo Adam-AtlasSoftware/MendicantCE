@@ -308,8 +308,10 @@ static void textures_send(
 	struct tag_iterator iterator;
 	long tag_index, count = 0, capacity = 0, tag_count = 0, replaceable = 0, index;
 	long refused = 0;
-	/* (display.prism_materials' images: mod_pbr.c's, after the bitmaps') */
-	long material_count = mod_pbr_texture_count(), material_first;
+	/* (display.prism_materials' images: mod_pbr.c's, after the bitmaps'; then
+	PRISM v4's materials', prism_materials.c's) */
+	long pbr_count = mod_pbr_texture_count(), prism_count = prism_materials_texture_count();
+	long material_count = pbr_count + prism_count, material_first;
 
 	ids_clear();
 	mod_textures_globals.sent_tier = mod_textures_globals.tier;
@@ -331,6 +333,7 @@ static void textures_send(
 		}
 		store_close();
 		mod_pbr_textures_answered(NULL, 0);
+		prism_materials_textures_answered(NULL, 0);
 		return;
 	}
 	tag_iterator_new(&iterator, BITMAP_GROUP_TAG);
@@ -427,7 +430,8 @@ static void textures_send(
 			capacity = count + material_count;
 			for (index = 0; index < material_count; index++)
 			{
-				long file = mod_pbr_texture_file(index);
+				long file = index < pbr_count ? mod_pbr_texture_file(index) :
+					prism_materials_texture_file(index - pbr_count);
 				unsigned long size, stamp[2];
 
 				/* (a file not there now: a query of none, refused) */
@@ -455,6 +459,7 @@ static void textures_send(
 	{
 		store_close();
 		mod_pbr_textures_answered(NULL, 0);
+		prism_materials_textures_answered(NULL, 0);
 		error(_error_silent, "texstore: %s: no replacements of the map's %ld bitmaps that can take one",
 			mod_textures_globals.tier == _tier_max ? "max" : "enhanced", replaceable);
 		memory_release(queries);
@@ -476,6 +481,7 @@ static void textures_send(
 		memory_release(mod_textures_globals.tags);
 		mod_textures_globals.tags = NULL;
 		mod_pbr_textures_answered(NULL, 0);
+		prism_materials_textures_answered(NULL, 0);
 		return;
 	}
 	mod_textures_globals.open = TRUE;
@@ -489,12 +495,15 @@ static void textures_send(
 		{
 			ids[index - material_first] = answers[index].id;
 		}
-		mod_pbr_textures_answered(ids, ids ? count - material_first : 0);
+		mod_pbr_textures_answered(ids, ids ? MIN(pbr_count, count - material_first) : 0);
+		prism_materials_textures_answered(ids ? ids + pbr_count : NULL,
+			ids && count - material_first > pbr_count ? count - material_first - pbr_count : 0);
 		memory_release(ids);
 	}
 	else
 	{
 		mod_pbr_textures_answered(NULL, 0);
+		prism_materials_textures_answered(NULL, 0);
 	}
 	for (index = 0; index < material_first; index++)
 	{
@@ -578,8 +587,9 @@ void mod_textures_frame(
 	{
 		return;
 	}
-	/* (display.prism_materials read again: their images with the record) */
-	if (mod_pbr_frame() || mod_textures_globals.tier != mod_textures_globals.sent_tier ||
+	/* (display.prism_materials and PRISM v4's materials read again: their
+	images with the record) */
+	if ((mod_pbr_frame() | prism_materials_frame()) || mod_textures_globals.tier != mod_textures_globals.sent_tier ||
 		mod_textures_globals.budget != mod_textures_globals.sent_budget)
 	{
 		textures_send(FALSE);

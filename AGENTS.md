@@ -236,6 +236,7 @@ python -m pytest -q tools/test_ios_touch_layout.py          # the iOS touch layo
 python tools/touch_assets.py --check                        # the touch controls' pictures as their SVGs draw them
 python tools/test_light_storage.py
 python -m pytest -q tools/test_prism_bake.py                 # PRISM v4's baker groundwork: reachable space, atlas, bake file, convergence (with HALO_DATA_ROOT, Rat Race's reachable space)
+python -m pytest -q tools/test_gbuffer_pack.py               # PRISM v4's G-buffer uber-shaders' SPIR-V (spirv-val): the maps' images, the albedo target, the base map's coordinates
 python tools/test_death_timing.py
 python -m pytest -q tools/test_join_page.py                 # the website's join page: the links it reads (Node), nothing loaded from elsewhere
 python -m pytest -q tools/test_net_compare.py               # net_compare.py's judging of logs, its copies and their processes
@@ -440,3 +441,4 @@ The decompilation's upstream, punpckhdq/halo, is AGPL 3.0 from 17 October
 | [docs/prism_plugin.md](docs/prism_plugin.md) | PRISM's renderer plugin interface (`prism_plugin.h`, MIT or AGPL), the passthrough plugin, the loader |
 | [docs/prism_scene_records.md](docs/prism_scene_records.md) | PRISM v4's scene records in the command stream: what is sent (the materials, the G-buffer's draws, the level's geometry, the lights) and what is specified |
 | [docs/prism_bake.md](docs/prism_bake.md) | PRISM v4's in-game baker (the reach, the light-importance grid, the lightmap, the sun mask, the irradiance volume, the bake file) and PRISM Raster (`display.lighting` `"raster"`) |
+| [docs/prism_materials.md](docs/prism_materials.md) | PRISM v4's materials of the pack and mod tiers: the format (2), how the G-buffer's uber-shaders draw them, the material pack the pack tools build (`v4_materials`) |

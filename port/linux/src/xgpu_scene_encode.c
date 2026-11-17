@@ -78,6 +78,30 @@ uint32_t xgpu_scene_encode_material(void *out, uint32_t room, uint32_t material,
 	return size;
 }
 
+uint32_t xgpu_scene_encode_material_maps(void *out, uint32_t room, uint32_t material, uint32_t tier,
+	uint32_t model, uint32_t flags, const uint32_t *maps, uint32_t map_count, const float *scalars,
+	uint32_t scalar_count)
+{
+	struct xgpu_stream_scene_material_maps *record = out;
+	uint32_t size = sizeof(*record);
+
+	if (!out || room < size || !material || model > 15u ||
+		(tier != XGPU_GBUFFER_TIER_AUTO && tier != XGPU_GBUFFER_TIER_PACK && tier != XGPU_GBUFFER_TIER_MOD))
+		return 0;
+	memset(record, 0, size);
+	record->header = XGPU_STREAM_HEADER(XGPU_STREAM_SCENE_MATERIAL_MAPS, size);
+	record->material = material;
+	record->tier = tier;
+	record->model = model;
+	record->flags = flags;
+	map_count = maps ? least(map_count, XGPU_SCENE_MATERIAL_MAPS) : 0;
+	if (map_count)
+		memcpy(record->maps, maps, map_count * sizeof(uint32_t));
+	if (scalars)
+		copy_floats(record->scalars, scalars, least(scalar_count, XGPU_SCENE_MATERIAL_MAP_SCALARS));
+	return size;
+}
+
 uint32_t xgpu_scene_encode_material_animate(void *out, uint32_t room, uint32_t material,
 	const float self_illumination[3], const float (*transforms)[2][4], uint32_t transform_count,
 	const float (*change_colors)[3], uint32_t change_color_count)

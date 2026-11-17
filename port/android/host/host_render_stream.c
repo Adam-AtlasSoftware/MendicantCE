@@ -241,6 +241,7 @@ static const uint32_t record_minimum[XGPU_STREAM_RECORD_TYPES] =
 	[XGPU_STREAM_SCENE_FOG] = offsetof(struct xgpu_stream_scene_fog, planes),
 	[XGPU_STREAM_SCENE_VIEW] = sizeof(struct xgpu_stream_scene_view),
 	[XGPU_STREAM_PRISM_BAKE] = sizeof(struct xgpu_stream_prism_bake),
+	[XGPU_STREAM_SCENE_MATERIAL_MAPS] = sizeof(struct xgpu_stream_scene_material_maps),
 	[XGPU_STREAM_GAMMA] = sizeof(struct xgpu_stream_value),
 	[XGPU_STREAM_PANINI] = sizeof(struct xgpu_stream_panini),
 	[XGPU_STREAM_WORLD_AO_WINDOW] = sizeof(struct xgpu_stream_world_ao_window),
@@ -555,6 +556,16 @@ static int decode_record(struct host_render_decoder *decoder, const unsigned cha
 	case XGPU_STREAM_GBUFFER_DRAW:
 		CALL(gbuffer_draw, (const struct xgpu_stream_gbuffer_draw *)start);
 		break;
+	case XGPU_STREAM_SCENE_MATERIAL_MAPS:
+	{
+		const struct xgpu_stream_scene_material_maps *maps = (const void *)start;
+
+		if (maps->tier != XGPU_GBUFFER_TIER_AUTO && maps->tier != XGPU_GBUFFER_TIER_PACK &&
+			maps->tier != XGPU_GBUFFER_TIER_MOD)
+			return XGPU_STREAM_ERROR_RECORD;
+		CALL(scene_material_maps, maps);
+		break;
+	}
 	/* (the others: taken, nothing done with them yet) */
 	case XGPU_STREAM_SCENE_LIGHTS:
 	{
