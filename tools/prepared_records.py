@@ -22,6 +22,11 @@ what the settings derive it from (xgpu_manifest.h): the Mac's and iOS's shader l
 every setting (tools/macos_shaders.py), so that they have each shader the records' draws need, whatever the
 settings; tools/test_render_manifest.py checks that it holds every record's draw.
 
+Each run sits on the main menu a while after its maps (MENU_SECONDS), as a player does, so that the menu's 3D scene
+(the sky, the ring) and its screens' text are drawn: their draws of play are in the coverage beside the walks and
+playbacks (xgpu_manifest.c's play sections), and tools/test_preparation_coverage.py checks that the record a player's
+start plays back makes them, the first start's record (before the menus' models) played back too.
+
 A change that makes the records another form (PREPARED_VERSION, JOURNAL_FORM or the journal's state) fails
 tools/harness/tests/test_prepared_shipped.py until this is run again and its records committed. A record holds no
 map data: render states, textures by tag and bitmap index, mirror pages and shader ids.
@@ -63,12 +68,13 @@ PACK_MAGIC = 0x5331484F  # "OH1S"
 PACK_FORM = 1
 # the renderer's manifest, recorded in the same run (port/assets/render/README.md)
 RENDER_MANIFEST = ROOT / "port/assets/render/manifest.txt"
-MENU_SECONDS = 10
+# (the main menu sat on: its scene drawn, as a player sees it, which a jump to a lobby never draws)
+MENU_SECONDS = 20
 UI_SCENARIO = "levels\\ui\\ui"
 # each map's walk and its record's playback, as no setting changes their draws, at two shapes of the screen (4:3, the
 # records' own, and 16:9): tools/test_preparation_coverage.py derives both under every setting it checks
 COVERAGE = ROOT / "tools/prepared_coverage.txt.gz"
-COVERAGE_LABEL = re.compile(r"^# coverage (\S+) (walk|replay|scope) (\d+) ([0-9a-f]+)$", re.M)
+COVERAGE_LABEL = re.compile(r"^# coverage (\S+) (walk|replay|scope|play) (\d+) ([0-9a-f]+)$", re.M)
 # (a window of 16:9 drawn at its own pixels, as tools/rig/goat-rig's)
 WIDE_SETTINGS = {"HALO_DISPLAY_MODE": "windowed", "HALO_WINDOW_SIZE": "1280x720", "HALO_RESOLUTION_SCALING": "native"}
 
@@ -266,12 +272,16 @@ def main() -> None:
                 run_game(arguments.halo, arguments.maps, work, arguments.seconds, "wide", dict(WIDE_SETTINGS,
                          HALO_PREPARED_RECORDS="0"), STOCK_MAP_COUNT, "walk"),
                 run_game(arguments.halo, arguments.maps, work, arguments.seconds, "wide-replay",
-                         WIDE_SETTINGS, STOCK_MAP_COUNT, "replay", pack)]
+                         WIDE_SETTINGS, STOCK_MAP_COUNT, "replay", pack),
+                # (a player's first start: ui.map's record before the menus' models played back, the menu sat on)
+                run_game(arguments.halo, arguments.maps, work, arguments.seconds, "first-replay",
+                         {"HALO_DEBUG_MENU_PICTURES": None}, 1, "replay", pack)]
         text = "".join((other / "coverage.txt").read_text(errors="replace") for other in runs
                        if (other / "coverage.txt").is_file())
         labels = COVERAGE_LABEL.findall(text)
         print(f"coverage: {len(labels)} enumerations, {len({(m, w, k) for m, h, w, k in labels if h == 'walk'})} walks, "
-              f"{len({(m, w, k) for m, h, w, k in labels if h == 'replay'})} playbacks")
+              f"{len({(m, w, k) for m, h, w, k in labels if h == 'replay'})} playbacks, "
+              f"{len({(m, w, k) for m, h, w, k in labels if h == 'play'})} plays")
         with gzip.open(arguments.coverage, "wt", compresslevel=9) as file:
             file.write(text)
     finally:

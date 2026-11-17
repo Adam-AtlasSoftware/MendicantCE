@@ -1,10 +1,13 @@
 """A map's preparation's record makes every pipeline the map's draws need, under every setting that changes them, with
 no game started: for each stock map, at 4:3 (the records' own screen) and 16:9, the draws its walk made and the draws
-its shipped record made played back (tools/prepared_records.py records both, as no setting changes them with their
-contexts: tools/prepared_coverage.txt.gz) are derived under each setting of the matrix (xgpu_manifest_derive, the
-front end's own derivation), and each draw the walk derives must be one the playback derives; a miss names the fields
-it differs in from the playback's nearest draw. The negative controls play back a record that lost an input of the
-draws (the soft group, the high-res text's atlas, the shadows' regions): the test names what is missing."""
+its shipped record made played back, and the draws of play after either (the main menu sat on as a player sees it:
+its 3D scene, the sky and the ring, and its screens' text; tools/prepared_records.py records them all, as no setting
+changes them with their contexts: tools/prepared_coverage.txt.gz) are derived under each setting of the matrix
+(xgpu_manifest_derive, the front end's own derivation), and each draw the walk or play derives must be one the playback
+derives; a miss names the fields it differs in from the playback's nearest draw, and what the game was drawing (its
+category: the sky, models, the interface). The negative controls play back a record that lost an input of the draws
+(the soft group, the high-res text's atlas, the shadows' regions), or the main menu's record without its scene: the
+test names what is missing."""
 import gzip
 import re
 import sys
@@ -17,7 +20,11 @@ sys.path.insert(0, str(ROOT / "tools"))
 from test_render_manifest import compile_reader  # noqa: E402
 
 COVERAGE = ROOT / "tools/prepared_coverage.txt.gz"
-LABEL = re.compile(r"^# coverage (\S+) (walk|replay|scope) (\d+) ([0-9a-f]+)$")
+LABEL = re.compile(r"^# coverage (\S+) (walk|replay|scope|play) (\d+) ([0-9a-f]+)$")
+UI = "levels\\ui\\ui"
+# what the game was drawing (rasterizer.h's _rasterizer_profile_*: the HDR tag's category, xgpu_manifest_context's)
+CATEGORIES = {1: "the sky", 2: "models", 16: "transparents", 22: "queued transparents", 25: "lens flares",
+              26: "the screen effect", 27: "the HUD", 255: "the interface"}
 VERSION = int(re.search(r"#define XGPU_MANIFEST_VERSION (\d+)", (ROOT / "port/linux/src/xgpu_manifest.h").read_text())[1])
 
 CHECKER = r"""
@@ -114,8 +121,9 @@ int main(int argc, char **argv)
 			if (found)
 				continue;
 			misses++;
-			printf("miss %s: vertex %08x%08x, differing:", matrix[combination].name,
-				(unsigned)wanted.key.vertex_program[1], (unsigned)wanted.key.vertex_program[0]);
+			printf("miss %s: vertex %08x%08x, category %u, differing:", matrix[combination].name,
+				(unsigned)wanted.key.vertex_program[1], (unsigned)wanted.key.vertex_program[0],
+				(unsigned)walk.contexts[index].hdr_category);
 			for (field = 0; replay.draw_count && field < sizeof(fields) / sizeof(fields[0]); field++)
 			{
 				if (memcmp((const char *)&wanted + fields[field].offset, (const char *)&made[nearest] + fields[field].offset,
@@ -132,7 +140,7 @@ int main(int argc, char **argv)
 
 
 def sections():
-    """{(map, width, models): {"walk": lines, "replay": lines}}"""
+    """{(map, width, models): {"walk": lines, "replay": lines, "play": lines}}"""
     if not COVERAGE.is_file():
         pytest.skip("no coverage recorded (tools/prepared_records.py)")
     groups, current = {}, None
@@ -148,6 +156,17 @@ def sections():
             if current is not None and line and not line.startswith("#"):
                 current[line] = None
     return groups
+
+
+def reference(group):
+    """the draws the map's playback must make: its walk's and its play's (the main menu's scene drawn as it is sat
+    on, after the walk or the playback)"""
+    return list(dict.fromkeys(list(group.get("walk", {})) + list(group.get("play", {}))))
+
+
+def named(miss):
+    """a miss, its category named"""
+    return re.sub(r"category (\d+)", lambda found: CATEGORIES.get(int(found[1]), f"category {found[1]}"), miss)
 
 
 @pytest.fixture(scope="module")
@@ -170,17 +189,41 @@ def check(checker, folder, walk, replay):
 
 def test_every_record_makes_its_walks_pipelines(checker, tmp_path):
     groups = sections()
-    paired = {key: group for key, group in groups.items() if "walk" in group and "replay" in group}
+    paired = {key: group for key, group in groups.items() if ("walk" in group or "play" in group) and "replay" in group}
     widths = {width for _, width, _ in paired}
     assert len({map_name for map_name, _, _ in paired}) >= 24 and len(widths) >= 2, \
         f"the coverage does not hold every map's walk and playback at two screens' shapes: {sorted(groups)}"
+    # (the main menu as a player's first start draws it, before the menus' models are made, sat on: its scene's
+    # draws, the sky's among them, and the record that start plays back)
+    first = [key for key, group in paired.items() if key[0] == UI and key[2] == "0" and "play" in group]
+    assert first and any(" ch=1," in line for key in first for line in paired[key]["play"]), \
+        f"the coverage does not hold the main menu's scene drawn as a player's first start sees it: {sorted(groups)}"
     failures = {}
     for key, group in sorted(paired.items()):
-        misses = check(checker, tmp_path, list(group["walk"]), list(group["replay"]))
+        misses = check(checker, tmp_path, reference(group), list(group["replay"]))
         if misses:
-            failures[" ".join(key)] = misses[:6]
+            failures[" ".join(key)] = [named(miss) for miss in misses[:6]]
     assert not failures, "pipelines the map's draws need that its record's playback does not make: " + \
         "; ".join(f"{key}: {misses}" for key, misses in failures.items())
+
+
+def test_negative_the_menus_scene_is_named(checker, tmp_path):
+    """the main menu's record without its scene (the sky's and the models' draws, as a record made before the scene
+    drew would be): its play's draws are missed, named the sky and models"""
+    groups = sections()
+    for key, group in sorted(groups.items()):
+        if key[0] != UI or "play" not in group or "replay" not in group:
+            continue
+        replay = list(group["replay"])
+        if check(checker, tmp_path, reference(group), replay):
+            continue
+        sceneless = [line for line in replay if not re.match(r"d .* ch=(1|2),", line)]
+        assert sceneless != replay, "the negative control no longer applies: the menu's record has no scene"
+        misses = [named(miss) for miss in check(checker, tmp_path, list(group["play"]), sceneless)]
+        assert misses and any("the sky" in miss for miss in misses) and \
+            all("the sky" in miss or "models" in miss for miss in misses), (key, misses[:4])
+        return
+    pytest.fail("no playback of the main menu's record beside its play")
 
 
 def mutated_replay(lines, pattern, replacement):

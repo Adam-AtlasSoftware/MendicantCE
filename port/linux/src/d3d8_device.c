@@ -2137,6 +2137,7 @@ static void vr_initialize(void);
 #endif
 
 static void hdr_read(void);
+static void output_depth_read(void);
 
 /* the window's context exists: the backend made ready, and what the
 device's settings ask of it */
@@ -2165,6 +2166,11 @@ static void device_backend_ready(void)
 	a frame drawn before the next, a map loaded as the game starts,
 	prepares its pipelines as they are, its targets none yet) */
 	hdr_read();
+	/* (and display.output_depth, which reads display.hdr's: the first
+	frame, the first map's preparation and the first swapchain are then the
+	16-bit frame's, not 8-bit until the next frame's halo_screen_commit, the
+	swapchain made again at 10 bits as the first deep frame is presented) */
+	output_depth_read();
 	/* (the PC menus' files read meanwhile, on a thread of their own, for
 	the first map's load: menu_files.c. Not before: their rows for the
 	renderer that draws display.hdr, and for the VR mode, are kept or left
