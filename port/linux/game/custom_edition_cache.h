@@ -259,9 +259,11 @@ boolean custom_edition_sounds_decode(
 /* The samples `data` (`data_bytes` of them) of a sound permutation of
 `compression` (16-bit PCM, little-endian or `big_endian`; Xbox ADPCM; Ogg
 Vorbis), `channels` channels at `rate`, as a map's are kept: 16-bit PCM at
-their own rate, *kept_rate (sound_permutation_pcm_rate), or where that is too
-long, Xbox ADPCM at `encoded_rate` (*kept_rate 0). A buffer of the game's
-allocator of *encoded_bytes; NULL when they cannot be (mod_sounds.c) */
+their own rate, *kept_rate (sound_permutation_pcm_rate), of any length up to
+`native_budget` bytes (0: none), or past that, Xbox ADPCM at `encoded_rate`
+(*kept_rate 0). A buffer of the game's allocator of *encoded_bytes; NULL
+when they cannot be (mod_sounds.c, which splits PCM longer than
+custom_edition_sounds_piece_bytes into linked pieces) */
 byte *custom_edition_sounds_encode(
 	byte const *data,
 	long data_bytes,
@@ -270,8 +272,14 @@ byte *custom_edition_sounds_encode(
 	long channels,
 	long rate,
 	long encoded_rate,
+	unsigned long native_budget,
 	unsigned long *encoded_bytes,
 	long *kept_rate);
+/* The most bytes of 16-bit PCM in each piece a longer permutation is split
+into: half of what one permutation is kept in as PCM, whole 4 KB pages
+(OpenH1 issue 1167) */
+unsigned long custom_edition_sounds_piece_bytes(
+	void);
 /* The sound `name` (a tag path, sound\sfx\impulse\ting\ting) as the
 Custom Edition install's sounds.map holds it (custom_edition_resource_map_
 file_path): its first permutation decoded to mono 16-bit frames at its own

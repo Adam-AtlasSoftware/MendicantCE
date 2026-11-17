@@ -2525,6 +2525,58 @@ static short sound_find_like_channel(
 	return NONE;
 }
 
+/* port: an impulse sound plays on through its permutation's linked pieces
+of 16-bit PCM at its own rate, those a mod's or a map's long permutation is
+kept in (mod_sounds.c's range_split, OpenH1 issue 1167): the channel's
+playing permutation with none queued after it is given the next of its
+chain, from the sound cache, as a looping sound's track is
+(update_channel_for_looping_sound), so that its packets follow the last of
+the one before (sound_dsound_xbox.c: of the same format, no switch). Only
+a permutation of PCM at its own rate is followed: the Xbox's own linked
+permutations, all Xbox ADPCM, play as the Xbox played them (an impulse
+sound, its first). */
+static void update_channel_for_impulse_sound_piece(
+	short channel_index)
+{
+	struct sound_channel_datum *channel = channel_get(channel_index);
+	struct sound_datum *sound = sound_get(channel->sound_index);
+	struct sound_definition *definition =
+		sound_definition_get(sound->definition_index);
+	struct sound_pitch_range *pitch_range;
+	struct sound_permutation *next;
+	short next_index;
+
+	if (!channel->playing_permutation ||
+		channel->queued_permutation ||
+		!TEST_FLAG(definition->flags, _sound_definition_linked_permutations_bit) ||
+		!sound_permutation_pcm_rate(channel->playing_permutation) ||
+		!VALID_INDEX(sound->pitch_range_index, definition->pitch_ranges.count))
+	{
+		return;
+	}
+	pitch_range = TAG_BLOCK_GET_ELEMENT(
+		&definition->pitch_ranges,
+		sound->pitch_range_index,
+		struct sound_pitch_range);
+	next_index = channel->playing_permutation->next_permutation_index;
+	if (!VALID_INDEX(next_index, pitch_range->permutations.count))
+	{
+		return;
+	}
+	next = TAG_BLOCK_GET_ELEMENT(
+		&pitch_range->permutations,
+		next_index,
+		struct sound_permutation);
+	if (sound_permutation_pcm_rate(next) == sound_permutation_pcm_rate(channel->playing_permutation) &&
+		_sound_cache_sound_request(next, FALSE, TRUE, TRUE))
+	{
+		sound->permutation_index = next_index;
+		channel_queue_sound(channel_index, next);
+	}
+
+	return;
+}
+
 static void update_channel_for_impulse_sound(
 	short channel_index,
 	real fade)
@@ -2580,6 +2632,7 @@ static void update_channel_for_impulse_sound(
 
 		channel_set_properties_hardware(channel_index, &properties, TRUE);
 	}
+	update_channel_for_impulse_sound_piece(channel_index);
 
 	sound_manager_globals.platform_definition->channel_update(channel_index);
 

@@ -18,9 +18,12 @@ does, and every value the game divides by or steps through against what the
 game takes; a file that is not is said and left out. Its samples (16-bit
 PCM, Xbox ADPCM or Ogg Vorbis, mono or stereo at 22 or 44 kHz) are kept as
 a Custom Edition map's are (custom_edition_sounds_encode: 16-bit PCM at
-their own rate, or where that is too long, Xbox ADPCM, mono at 22 kHz and
-stereo at its own rate; Xbox ADPCM in that format is kept as it is), so they
-play through the map's channels as its sounds do. The values a map's
+their own rate, or past the memory the mods may keep, Xbox ADPCM, mono at
+22 kHz and stereo at its own rate, said once; Xbox ADPCM in that format is
+kept as it is), so they play through the map's channels as its sounds do.
+A permutation of PCM longer than the sound cache takes one in is split
+into a chain of linked pieces (range_split, OpenH1 issue 1167), which plays
+as one. The values a map's
 build (tool.exe, Invader) fills in are filled in as it does: the defaults
 of the sound's class, the pitch ranges' playback rates, the per-tick bend.
 The longest permutation length is Tool's measure of a permutation, a split
@@ -136,6 +139,9 @@ struct mod_sound
 	struct sound_permutation *permutations;
 	long permutation_count;
 	unsigned long kept_bytes;
+	/* its permutations kept as Xbox ADPCM, not 16-bit PCM at their own
+	rates: past the memory the mods may keep (said once, mod_sounds_update) */
+	long adpcm_count;
 };
 
 /* a sound of the map played from a file: the map's own values, given back
@@ -347,6 +353,117 @@ static void definition_defaults(
 	return;
 }
 
+/* The bytes of 16-bit PCM a permutation of `sound` may be kept in: what
+the mods may still keep, less what the sound already keeps and its file.
+Past it, a permutation is Xbox ADPCM (custom_edition_sounds_encode). */
+static unsigned long native_budget(
+	struct mod_sound const *sound,
+	unsigned long file_size)
+{
+	unsigned long left = mods_memory_left();
+	unsigned long held = sound->kept_bytes + file_size;
+
+	return left > held ? left - held : 0;
+}
+
+/* the permutations `bytes` of 16-bit PCM are kept in: one, or where that
+is longer than one permutation is kept in (twice a piece), its pieces */
+static long piece_count(
+	unsigned long bytes)
+{
+	unsigned long piece_bytes = custom_edition_sounds_piece_bytes();
+
+	return bytes <= 2 * piece_bytes ? 1 : (long)((bytes + piece_bytes - 1) / piece_bytes);
+}
+
+/* Splits each permutation of the pitch range `range` (the file's `count`
+of them, from sound->permutations[first], the last made) kept as 16-bit PCM
+longer than one permutation is kept in (piece_count) into a chain of linked
+pieces (OpenH1 issue 1167), so that it stays PCM at its own rate: the
+permutation keeps the first piece and its mouth and subtitle data, and the
+others are new permutations after the range's, each followed by the next
+and the last by what followed the permutation. The pieces are its frames
+in order, none left out or repeated, at its rate, so the chain plays them
+as one: sound_dsound_xbox.c queues a piece's packets after the last of the
+one before, of the same format (no switch of the channel's stream between
+them). The range's count takes them; FALSE when out of memory. */
+static boolean range_split(
+	struct mod_sound *sound,
+	struct sound_pitch_range *range,
+	long first,
+	unsigned long count,
+	long *capacity)
+{
+	unsigned long piece_bytes = custom_edition_sounds_piece_bytes();
+	unsigned long index;
+
+	for (index = 0; index < count; index++)
+	{
+		struct sound_permutation *permutation = &sound->permutations[first + index];
+		unsigned long bytes = (unsigned long)permutation->samples.size;
+		long more = piece_count(bytes) - 1;
+		short previous = (short)index;
+		short next = permutation->next_permutation_index;
+		unsigned long offset;
+		byte *samples;
+		byte *shrunk;
+
+		if (!sound_permutation_pcm_rate(permutation) || more <= 0)
+		{
+			continue;
+		}
+		if (sound->permutation_count + more > *capacity)
+		{
+			struct sound_permutation *grown = realloc(sound->permutations,
+				(size_t)(*capacity + more) * sizeof(*sound->permutations));
+
+			if (!grown)
+			{
+				return FALSE;
+			}
+			memset(grown + *capacity, 0, (size_t)more * sizeof(*grown));
+			sound->permutations = grown;
+			*capacity += more;
+			permutation = &sound->permutations[first + index];
+		}
+		samples = permutation->samples.address;
+		for (offset = piece_bytes; offset < bytes; offset += piece_bytes)
+		{
+			struct sound_permutation *piece = &sound->permutations[sound->permutation_count];
+			unsigned long size = MIN(piece_bytes, bytes - offset);
+			short piece_index = (short)(sound->permutation_count - first);
+
+			/* (its name, gain, format and rate, and the sound cache's values) */
+			*piece = *permutation;
+			piece->skip_fraction = 0.f;
+			piece->mouth_data.size = 0;
+			piece->mouth_data.address = NULL;
+			piece->subtitle_data.size = 0;
+			piece->subtitle_data.address = NULL;
+			piece->samples.size = (long)size;
+			piece->samples.address = malloc(size);
+			if (!piece->samples.address)
+			{
+				return FALSE;
+			}
+			memcpy(piece->samples.address, samples + offset, size);
+			piece->next_permutation_index = next;
+			sound->permutations[first + previous].next_permutation_index = piece_index;
+			previous = piece_index;
+			sound->permutation_count++;
+		}
+		permutation->samples.size = (long)piece_bytes;
+		shrunk = realloc(samples, piece_bytes);
+		if (shrunk)
+		{
+			permutation->samples.address = shrunk;
+		}
+	}
+	range->permutations.count = sound->permutation_count - first;
+
+	return TRUE;
+}
+
 /* Tool's measure of a permutation of `size` bytes in `compression` (and,
 for Ogg Vorbis, of `buffer_size` decoded), in milliseconds (Invader's
 SoundPermutation length, as tool.exe's) */
@@ -399,6 +516,9 @@ static struct mod_sound *mod_sound_new(
 	unsigned long promotion_length;
 	unsigned long range_index;
 	long permutation_total = 0;
+	long permutation_capacity;
+	long range_first[MAXIMUM_PITCH_RANGES_PER_SOUND];
+	boolean split = FALSE;
 	boolean linked;
 	long rate;
 	long encoded_rate;
@@ -540,6 +660,7 @@ static struct mod_sound *mod_sound_new(
 	}
 	memset(sound->ranges, 0, range_count * sizeof(*sound->ranges));
 	memset(sound->permutations, 0, (size_t)MAX(permutation_total, 1) * sizeof(*sound->permutations));
+	permutation_capacity = MAX(permutation_total, 1);
 	{
 		byte const *ranges = file + cursor;
 
@@ -552,6 +673,7 @@ static struct mod_sound *mod_sound_new(
 			struct sound_permutation *permutations = sound->permutations + sound->permutation_count;
 			byte const *permutation_bytes = file + cursor;
 			unsigned long permutation_index;
+			long range_pieces = 0;
 			real *lengths;
 
 			*reason = count < 1 ? "a pitch range has no permutations (an empty sound)" :
@@ -562,6 +684,7 @@ static struct mod_sound *mod_sound_new(
 				goto refused;
 			}
 			cursor += count * PERMUTATION_SIZE;
+			range_first[range_index] = sound->permutation_count;
 			memcpy(range->name, range_bytes, sizeof(range->name));
 			range->name[sizeof(range->name) - 1] = 0;
 			range->natural_pitch = mods_read_real(range_bytes + offsetof(struct sound_pitch_range, natural_pitch));
@@ -656,9 +779,36 @@ static struct mod_sound *mod_sound_new(
 				else
 				{
 					permutation->samples.address = custom_edition_sounds_encode(samples, (long)samples_size,
-						compression, TRUE, channels, rate, encoded_rate, &encoded_bytes, &kept_rate);
+						compression, TRUE, channels, rate, encoded_rate, native_budget(sound, file_size),
+						&encoded_bytes, &kept_rate);
+					/* (PCM longer than one permutation is kept in is split into
+					pieces, range_split: Xbox ADPCM where the range has no room
+					for them) */
+					if (permutation->samples.address && kept_rate)
+					{
+						long more = piece_count(encoded_bytes) - 1;
+
+						if (count + range_pieces + more > MAXIMUM_PERMUTATIONS_PER_PITCH_RANGE)
+						{
+							byte *pcm = permutation->samples.address;
+
+							permutation->samples.address = custom_edition_sounds_encode(pcm, (long)encoded_bytes,
+								SOUND_COMPRESSION_NONE, FALSE, channels, kept_rate, encoded_rate, 0,
+								&encoded_bytes, &kept_rate);
+							free(pcm);
+						}
+						else
+						{
+							range_pieces += more;
+						}
+					}
+					if (permutation->samples.address && !kept_rate)
+					{
+						sound->adpcm_count++;
+					}
 				}
-				if (!permutation->samples.address || encoded_bytes > MAXIMUM_SOUND_DATA_SIZE)
+				/* (PCM of any length: it is split, range_split) */
+				if (!permutation->samples.address || (!kept_rate && encoded_bytes > MAXIMUM_SOUND_DATA_SIZE))
 				{
 					*reason = permutation->samples.address ?
 						"a permutation is longer than a sound cache block takes" :
@@ -721,12 +871,33 @@ static struct mod_sound *mod_sound_new(
 				}
 			}
 			free(lengths);
+
+			/* the permutations too long for one, in pieces after the range's */
+			if (range_pieces)
+			{
+				split = TRUE;
+				if (!range_split(sound, range, range_first[range_index], count, &permutation_capacity))
+				{
+					*reason = "out of memory";
+					goto refused;
+				}
+			}
 		}
 	}
 	*reason = "the file goes on past its last permutation";
 	if (cursor != file_size || !(longest < 2147483647.f))
 	{
 		goto refused;
+	}
+	/* (the pieces may have moved the permutations; a chain of them is a
+	linked sound's, game_sound.c and sound_manager.c following it) */
+	for (range_index = 0; range_index < range_count; range_index++)
+	{
+		sound->ranges[range_index].permutations.address = sound->permutations + range_first[range_index];
+	}
+	if (split)
+	{
+		SET_FLAG(definition->flags, _sound_definition_linked_permutations_bit, TRUE);
 	}
 
 	definition->longest_permutation_length = (long)longest;
@@ -930,6 +1101,11 @@ long mod_sounds_update(
 			}
 			sound->next = made;
 			made = sound;
+			if (sound->adpcm_count)
+			{
+				error(_error_silent, "mods: %s: %ld of its permutations kept as Xbox ADPCM, not 16-bit PCM at their own rates "
+					"(past the memory the mods may keep)", file_path, sound->adpcm_count);
+			}
 		}
 		else if (!override->sound)
 		{

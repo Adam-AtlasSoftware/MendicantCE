@@ -18,10 +18,13 @@ It is kept as 16-bit PCM at its own rate (OpenH1 issues 1110 and 1111), so
 nothing is lost: sound_definitions.h's sound_permutation_pcm_rate marks it,
 and the channel that plays it switches its stream to that format
 (sound_dsound_xbox.c). A rate over the mixer's 48 kHz (which nothing past it
-is heard at) is brought down to it. A permutation longer than a sound cache
-block holds as PCM (NATIVE_MAXIMUM_BYTES), or past the PCM budget of all of
-them (NATIVE_TOTAL_BYTES), is encoded as Xbox ADPCM in a format the
-channels play, as before. Wherever the rate changes, the samples are
+is heard at) is brought down to it. A mod's permutation longer than a sound
+cache block holds as PCM (NATIVE_MAXIMUM_BYTES) stays PCM all the same:
+mod_sounds.c splits it into a chain of linked pieces of NATIVE_PIECE_BYTES
+(OpenH1 issue 1167). A map's cannot be split (its permutations are in the
+map's tag cache, which has no room for more), so it, and any permutation
+past the PCM budget of all of them (NATIVE_TOTAL_BYTES), is encoded as Xbox
+ADPCM in a format the channels play, as before, and said once. Wherever the rate changes, the samples are
 resampled with a windowed sinc low pass (frames_resample), not by the
 nearest frame, which folded what lies above the new rate's band back into it
 as tones that were never there (a 16 kHz tone came out at 6 kHz).
@@ -89,6 +92,12 @@ quarter of the phones' 4 MB, 12 seconds of mono at 44 kHz; the desktop's
 4 MB, 47 seconds of mono at 44 kHz or 23 of stereo). A longer one is Xbox
 ADPCM, 3.6 times smaller. */
 #define NATIVE_MAXIMUM_BYTES MIN((long)MAXIMUM_SOUND_DATA_SIZE, (long)(HALO_PORT_SOUND_CACHE_SIZE / 4))
+/* The bytes of each piece a longer one is split into (mod_sounds.c): half
+of that, in whole 4 KB pages (whole frames, mono or stereo), so that the
+piece playing and the next one queued after it hold no more of the sound
+cache than one permutation of the most did (512 KB on the phones, 6 s of
+mono at 44 kHz; 2 MB on the desktop). */
+#define NATIVE_PIECE_BYTES ((unsigned long)(NATIVE_MAXIMUM_BYTES / 2) & ~0xFFFUL)
 /* the most bytes of PCM a map's permutations are kept in, together (128 MB
 on the desktop, 32 MB on the phones); those past it are Xbox ADPCM */
 #define NATIVE_TOTAL_BYTES ((unsigned long)HALO_PORT_SOUND_CACHE_SIZE * 8)
@@ -158,6 +167,8 @@ static struct
 	unsigned long decoded_limit;
 	/* the bytes of them that are PCM (NATIVE_TOTAL_BYTES) */
 	unsigned long native_bytes;
+	/* those too long to keep as PCM, Xbox ADPCM instead */
+	long adpcm_count;
 } custom_edition_sounds_globals;
 
 /* ---------- private code */
@@ -713,12 +724,15 @@ static boolean permutation_needs_conversion(
 }
 
 /* Whether `frames` (at the sound's channel count) are kept as 16-bit PCM
-at their own rate, up to the mixer's: not when that is longer than a sound
-cache block holds (NATIVE_MAXIMUM_BYTES) or past the budget of all of them
-(NATIVE_TOTAL_BYTES); *rate is that rate and *bytes their bytes. */
+at their own rate, up to the mixer's: not when that is past `budget`, the
+bytes of PCM left of the budget of all of them (at most NATIVE_TOTAL_BYTES),
+nor, `whole` (a permutation that cannot be split: a map's), when it is
+longer than a sound cache block holds (NATIVE_MAXIMUM_BYTES); *rate is that
+rate and *bytes their bytes. */
 static boolean frames_kept_native(
 	struct frames const *frames,
-	unsigned long native_bytes,
+	unsigned long budget,
+	boolean whole,
 	long *rate,
 	unsigned long *bytes)
 {
@@ -731,7 +745,7 @@ static boolean frames_kept_native(
 		return FALSE;
 	}
 	kept_bytes = (double)frames->count * *rate / frames->rate * frames->channels * (double)sizeof(short);
-	if (kept_bytes > (double)NATIVE_MAXIMUM_BYTES || kept_bytes > (double)(NATIVE_TOTAL_BYTES - native_bytes))
+	if ((whole && kept_bytes > (double)NATIVE_MAXIMUM_BYTES) || kept_bytes > (double)MIN(budget, NATIVE_TOTAL_BYTES))
 	{
 		return FALSE;
 	}
@@ -771,7 +785,8 @@ static boolean permutation_convert(
 	free(data);
 
 	decoded = decoded && frames_channels(&frames, channels);
-	if (decoded && frames_kept_native(&frames, custom_edition_sounds_globals.native_bytes, &kept_rate, &native_bytes))
+	if (decoded && frames_kept_native(&frames, NATIVE_TOTAL_BYTES - custom_edition_sounds_globals.native_bytes, TRUE,
+		&kept_rate, &native_bytes))
 	{
 		/* (only a rate over the mixer's is resampled) */
 		if (frames.rate == kept_rate || frames_resample(&frames, kept_rate))
@@ -792,6 +807,11 @@ static boolean permutation_convert(
 			return TRUE;
 		}
 		decoded = frames.samples != NULL;
+	}
+	else if (decoded && frames.count > 0)
+	{
+		/* (too long to keep as PCM: said once, custom_edition_sounds_decode) */
+		custom_edition_sounds_globals.adpcm_count++;
 	}
 
 	if (decoded && frames_conform(&frames, channels, playable_rate(sound)))
@@ -970,6 +990,7 @@ boolean custom_edition_sounds_decode(
 	long failed_count = 0;
 
 	custom_edition_sounds_globals.decoded_limit = decoded_limit;
+	custom_edition_sounds_globals.adpcm_count = 0;
 	while ((sound = custom_edition_cache_tag_next(tag_cache, loaded_bytes, SOUND_DEFINITION_TAG, sizeof(*sound), &tag_index)) != NULL)
 	{
 		boolean converted = TRUE;
@@ -1023,6 +1044,13 @@ boolean custom_edition_sounds_decode(
 			converted_count, custom_edition_sounds_globals.decoded_bytes, custom_edition_sounds_globals.native_bytes,
 			failed_count ? " (some sounds could not be converted)" : "");
 	}
+	if (custom_edition_sounds_globals.adpcm_count)
+	{
+		error(_error_silent, "custom edition: %ld sound permutations kept as Xbox ADPCM, not 16-bit PCM at their own rates: "
+			"each longer than %ld KB of PCM, or past the %lu MB of PCM a map's sounds are kept in",
+			custom_edition_sounds_globals.adpcm_count, (long)NATIVE_MAXIMUM_BYTES / 1024,
+			(unsigned long)NATIVE_TOTAL_BYTES >> 20);
+	}
 
 	return TRUE;
 }
@@ -1035,6 +1063,7 @@ byte *custom_edition_sounds_encode(
 	long channels,
 	long rate,
 	long encoded_rate,
+	unsigned long native_budget,
 	unsigned long *encoded_bytes,
 	long *kept_rate)
 {
@@ -1047,8 +1076,9 @@ byte *custom_edition_sounds_encode(
 		samples_decode(data, data_bytes, compression, big_endian, channels, rate, &frames) &&
 		frames_channels(&frames, channels))
 	{
-		/* (16-bit PCM at its own rate, as a map's: permutation_convert) */
-		if (frames_kept_native(&frames, 0, kept_rate, &native_bytes) &&
+		/* (16-bit PCM at its own rate, as a map's: permutation_convert; of
+		any length within the budget, split into pieces by the caller) */
+		if (frames_kept_native(&frames, native_budget, FALSE, kept_rate, &native_bytes) &&
 			(frames.rate == *kept_rate || frames_resample(&frames, *kept_rate)))
 		{
 			*encoded_bytes = (unsigned long)frames.count * channels * sizeof(short);
@@ -1117,6 +1147,12 @@ short *custom_edition_sounds_resource_sound(
 	fclose(stream);
 
 	return samples;
+}
+
+unsigned long custom_edition_sounds_piece_bytes(
+	void)
+{
+	return NATIVE_PIECE_BYTES;
 }
 
 unsigned long custom_edition_sounds_decoded_bytes(
