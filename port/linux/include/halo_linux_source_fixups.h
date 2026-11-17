@@ -366,6 +366,12 @@ int halo_hdr_display_text(int words, char *text, unsigned int size);
 /* the frame is drawn in HDR now (display.hdr and the display: Settings'
 COLOR DEPTH dimmed; port/linux/src/d3d8_device.c) */
 int halo_hdr_drawn(void);
+/* display.soft_particles (port/linux/src/d3d8_device.c): the effect shader's
+group drawn from now on can be soft against the scene's depth on a flat
+screen (rasterizer_xbox_transparent_geometry.c; 0 after it), and whether the
+renderer draws it so (Settings' SOFT PARTICLES row shown) */
+void halo_effect_soft(int soft);
+int halo_soft_effects_drawn(void);
 #ifndef HALO_HDR_KIND_NONE
 #define HALO_HDR_KIND_NONE 0
 #define HALO_HDR_KIND_FIRST_PERSON 1

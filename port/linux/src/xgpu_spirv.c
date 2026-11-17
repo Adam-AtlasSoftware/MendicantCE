@@ -4692,9 +4692,17 @@ XGPU_VULKAN_THICKNESS_UNIT: texels a stored 1 is) */
 
 BOOL xgpu_spirv_effect_possible(const struct xgpu_pixel_program *program)
 {
-	return program->multiview == XGPU_MULTIVIEW_EYES && program->stages[0].mode == XGPU_TEXTURE_PROJECT2D &&
+	return (program->multiview == XGPU_MULTIVIEW_EYES || program->multiview == XGPU_MULTIVIEW_NONE) &&
+		program->stages[0].mode == XGPU_TEXTURE_PROJECT2D &&
 		program->stages[0].sampler == _xgpu_sampler_2d && !stage_samples(program->stages[2].mode) &&
 		!stage_samples(program->stages[3].mode);
+}
+
+/* the effect's depth is the views' layers (an array), else on a flat
+screen (no views: display.soft_particles) one 2D image */
+static BOOL effect_depth_arrayed(const struct pixel_state *state)
+{
+	return state->options->multiview != XGPU_MULTIVIEW_NONE;
 }
 
 /* the effect's textures: the scene's depth (the views' layers) and the
@@ -4703,8 +4711,8 @@ static void effect_declare(struct module *m, struct pixel_state *state)
 {
 	state->frag_coord = variable(m, m->t_v4, STORAGE_INPUT, "gl_FragCoord");
 	decorate1(m, state->frag_coord, DECORATION_BUILT_IN, BUILT_IN_FRAG_COORD);
-	state->effect_depth = variable(m, type_sampled_image(m, DIM_2D, TRUE, FALSE, TRUE), STORAGE_UNIFORM_CONSTANT,
-		"effect_depth");
+	state->effect_depth = variable(m, type_sampled_image(m, DIM_2D, effect_depth_arrayed(state), FALSE, TRUE),
+		STORAGE_UNIFORM_CONSTANT, "effect_depth");
 	decorate1(m, state->effect_depth, DECORATION_DESCRIPTOR_SET, XGPU_SPIRV_SET_TEXTURES);
 	decorate1(m, state->effect_depth, DECORATION_BINDING, XGPU_SPIRV_EFFECT_DEPTH_BINDING);
 	state->effect_thickness = variable(m, type_sampled_image(m, DIM_2D, FALSE, FALSE, TRUE), STORAGE_UNIFORM_CONSTANT,
@@ -4762,7 +4770,9 @@ static unsigned int effect_prelude(struct module *m, struct pixel_state *state)
 	const struct xgpu_spirv_options *options = state->options;
 	/* (a z-sprite's front is its own depth: effect_zsprite_fade) */
 	BOOL thick = options->effect == XGPU_SPIRV_EFFECT_THICK && !xgpu_pixel_program_depth_stage(state->program);
-	unsigned int view = view_number(m, XGPU_MULTIVIEW_EYES, options->foveated);
+	/* (a flat screen's: the first view, 0) */
+	BOOL arrayed = effect_depth_arrayed(state);
+	unsigned int view = arrayed ? view_number(m, XGPU_MULTIVIEW_EYES, options->foveated) : constant_int(m, 0);
 	unsigned int frag = load(m, m->t_v4, state->frag_coord), columns[4], first_column, base, p, depth, behind;
 	unsigned int eye, to_scene, far, to_pixel, offset_to_pixel, ray, xt, w, uv, scaled, thick_texel, texels;
 	unsigned int dpx, dpy, dux, duy, texel, radius, front, span, operands[4];
@@ -4777,13 +4787,13 @@ static unsigned int effect_prelude(struct module *m, struct pixel_state *state)
 	p = effect_point(m, fadd(m, 4, base, fscale(m, 4, columns[2], effect_game_depth(m, options, extract(m, frag, 2)))));
 	/* the scene's depth behind the pixel, in the view's layer */
 	{
-		unsigned int sampled = load(m, type_sampled_image(m, DIM_2D, TRUE, FALSE, TRUE), state->effect_depth);
+		unsigned int sampled = load(m, type_sampled_image(m, DIM_2D, arrayed, FALSE, TRUE), state->effect_depth);
 		unsigned int parts[2];
 
 		parts[0] = op1(m, OP_CONVERT_F_TO_S, m->t_iv2, xy(m, frag));
 		parts[1] = view;
-		operands[0] = op(m, OP_IMAGE, type_sampled_image(m, DIM_2D, TRUE, FALSE, FALSE), 1, &sampled);
-		operands[1] = op(m, OP_COMPOSITE_CONSTRUCT, m->t_iv3, 2, parts);
+		operands[0] = op(m, OP_IMAGE, type_sampled_image(m, DIM_2D, arrayed, FALSE, FALSE), 1, &sampled);
+		operands[1] = arrayed ? op(m, OP_COMPOSITE_CONSTRUCT, m->t_iv3, 2, parts) : parts[0];
 		operands[2] = IMAGE_OPERANDS_LOD;
 		operands[3] = constant_int(m, 0);
 		depth = effect_game_depth(m, options, extract(m, op(m, OP_IMAGE_FETCH, m->t_v4, 4, operands), 0));

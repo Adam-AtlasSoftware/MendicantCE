@@ -245,13 +245,16 @@ static struct
 	int uniforms_set, uniforms_dirty;
 	/* (the constant depth bias the uniforms were made with) */
 	float depth_bias;
-	/* the uniforms uploaded have the VR effects' views (effect_views), for
+	/* the uniforms uploaded have the VR effects' views (effect_views: 1,
+	the eyes'; 2, a flat screen's one), for
 	the projection as it is; and the views, made for the projection, the
 	screen conversion, the viewport, the depth range and the eyes as they
 	are (effect_valid), and the conversion's uniforms they were made for */
 	int uniforms_effect, effect_valid;
 	float effect_unproject[4][4][4], effect_eye[4][4];
 	float effect_scale[4], effect_offset[4], effect_screen_offset;
+	/* (and made for a flat screen's one view: effect_views) */
+	int effect_flat;
 	float constants[192][4];
 	/* the registers set since the constants were last uploaded, and those
 	that upload has (bit n of word n / 64: c[n], from c[-96]) */
@@ -1391,7 +1394,8 @@ reading and writing its target as a storage image (xgpu_spirv_options
 interlock), where the device's reads are not in rasterization order and
 the draw can take its depth and stencil tests before its shader: it writes
 neither, nor replaces its depth. Not a VR effect's nor a view of several
-eyes' (the VR mode draws SDR). Else its triangles over the same pixel are
+eyes' (the VR mode draws SDR); a flat screen's soft effect's
+(display.soft_particles) can be, its fade before the blend. Else its triangles over the same pixel are
 unordered (docs/hdr.md, "ceiling"). */
 static int interlocked(const struct xgpu_stream_pipeline_define *definition)
 {
@@ -1400,7 +1404,8 @@ static int interlocked(const struct xgpu_stream_pipeline_define *definition)
 
 	if (key->color_format != XGPU_FORMAT_RGBA16F || !stream.capabilities.color_read ||
 		!XGPU_HDR_SHADER_BLENDS(key->pixel.hdr) || stream.capabilities.raster_order ||
-		!stream.capabilities.pixel_interlock || key->views > 1 || key->pixel.vr_effect)
+		!stream.capabilities.pixel_interlock || key->views > 1 ||
+		(key->pixel.vr_effect && key->views != XGPU_MULTIVIEW_NONE))
 		return 0;
 	if (key->depth_test && key->depth_write)
 		return 0;
@@ -1655,19 +1660,36 @@ eyes', or foveated the eyes' peripheries and insets, as the uniforms' eye
 corrections and insets have them (host_vulkan_vr_uniforms, made first), for
 a projection (c[-96] to c[-93], c[-38], c[-37]) and the screen conversion,
 in the viewport and depth range drawn with; their clip transforms into
-clip (NULL: not wanted). The count made. */
+clip (NULL: not wanted). flat: a flat screen's one view instead
+(display.soft_particles), the game's own. The count made. */
 static int effect_views(const struct xgpu_spirv_uniforms *to, const float projection[6][4], const float scale[4],
-	const float offset[4], float screen_offset, float (*unproject)[4][4], float (*eye)[4], float (*clip)[4][4])
+	const float offset[4], float screen_offset, int flat, float (*unproject)[4][4], float (*eye)[4], float (*clip)[4][4])
 {
-#ifdef HALO_VR
 	struct xgpu_vulkan_effects_view made;
-	int foveated = host_vulkan_vr_foveated(), view, count = 0;
 	float depth_range[2];
+#ifdef HALO_VR
+	int foveated = host_vulkan_vr_foveated(), view, count = 0;
+#endif
 
 	depth_range[0] = stream.dynamic.depth_range[0] >= 0.0f && stream.dynamic.depth_range[0] <= 1.0f ?
 		stream.dynamic.depth_range[0] : 0.0f;
 	depth_range[1] = stream.dynamic.depth_range[1] >= 0.0f && stream.dynamic.depth_range[1] <= 1.0f ?
 		stream.dynamic.depth_range[1] : 1.0f;
+	/* (a flat screen's, display.soft_particles: one view, the game's own,
+	no eye's correction nor inset) */
+	if (flat)
+	{
+		(void)to;
+		if (!xgpu_vulkan_effects_view(projection, scale, offset, screen_offset, NULL, NULL, stream.dynamic.viewport,
+			depth_range, &made))
+			return 0;
+		memcpy(unproject[0], made.unproject, sizeof(made.unproject));
+		memcpy(eye[0], made.eye, sizeof(made.eye));
+		if (clip)
+			memcpy(clip[0], made.clip, sizeof(made.clip));
+		return 1;
+	}
+#ifdef HALO_VR
 	for (view = 0; view < (foveated ? 4 : 2); view++)
 	{
 		if (!xgpu_vulkan_effects_view(projection, scale, offset, screen_offset, to->eye_correction[foveated ? view >> 1 :
@@ -1682,13 +1704,6 @@ static int effect_views(const struct xgpu_spirv_uniforms *to, const float projec
 	return count;
 #else
 	(void)to;
-	(void)projection;
-	(void)scale;
-	(void)offset;
-	(void)screen_offset;
-	(void)unproject;
-	(void)eye;
-	(void)clip;
 	return 0;
 #endif
 }
@@ -1730,12 +1745,14 @@ static int uniforms_update(const struct stream_pipeline *entry)
 {
 	uint64_t serial = xgpu_vulkan_serial();
 	int effect = entry->effect;
+	/* (display.soft_particles: a flat screen's effect, of no views) */
+	int effect_flat = effect && stream.definition && stream.definition->key.views == XGPU_MULTIVIEW_NONE;
 	/* (the constant depth bias, reversed depth's: the pipeline's and the
 	dynamic state's) */
 	float depth_bias = XGPU_VULKAN_REVERSED_DEPTH && stream.definition ?
 		xgpu_reversed_depth_bias(stream.definition->key.depth_bias, stream.dynamic.depth_bias[1]) : 0.0f;
 
-	if (effect && !stream.uniforms_effect)
+	if (effect && stream.uniforms_effect != 1 + effect_flat)
 		stream.uniforms_dirty = 1;
 	if (depth_bias != stream.depth_bias)
 	{
@@ -1804,7 +1821,7 @@ static int uniforms_update(const struct stream_pipeline *entry)
 			/* (made again only where what they are made of changed) */
 			if (!stream.effect_valid || memcmp(stream.effect_scale, from->viewport_scale, sizeof(stream.effect_scale)) ||
 				memcmp(stream.effect_offset, from->viewport_offset, sizeof(stream.effect_offset)) ||
-				stream.effect_screen_offset != from->screen_offset)
+				stream.effect_screen_offset != from->screen_offset || stream.effect_flat != effect_flat)
 			{
 				float projection[6][4];
 
@@ -1813,15 +1830,16 @@ static int uniforms_update(const struct stream_pipeline *entry)
 				memset(stream.effect_unproject, 0, sizeof(stream.effect_unproject));
 				memset(stream.effect_eye, 0, sizeof(stream.effect_eye));
 				effect_views(to, (const float (*)[4])projection, from->viewport_scale, from->viewport_offset,
-					from->screen_offset, stream.effect_unproject, stream.effect_eye, NULL);
+					from->screen_offset, effect_flat, stream.effect_unproject, stream.effect_eye, NULL);
 				memcpy(stream.effect_scale, from->viewport_scale, sizeof(stream.effect_scale));
 				memcpy(stream.effect_offset, from->viewport_offset, sizeof(stream.effect_offset));
 				stream.effect_screen_offset = from->screen_offset;
+				stream.effect_flat = effect_flat;
 				stream.effect_valid = 1;
 			}
 			memcpy(to->effect_unproject, stream.effect_unproject, sizeof(to->effect_unproject));
 			memcpy(to->effect_eye, stream.effect_eye, sizeof(to->effect_eye));
-			stream.uniforms_effect = 1;
+			stream.uniforms_effect = 1 + effect_flat;
 		}
 		stream.uniforms_dirty = 0;
 		stream.uniforms_uploaded = serial;
@@ -2114,7 +2132,10 @@ static int effect_textures(struct xgpu_vulkan_texture textures[4])
 	sampler.mip = XGPU_VULKAN_MIP_NONE;
 	sampler.address[0] = sampler.address[1] = sampler.address[2] = XGPU_VULKAN_ADDRESS_CLAMP;
 	sampler.anisotropy = 1;
-	textures[XGPU_SPIRV_EFFECT_DEPTH_BINDING].kind = XGPU_VULKAN_IMAGE_2D_ARRAY;
+	/* (a flat screen's, display.soft_particles: its one layer, as the
+	shader samples it: xgpu_spirv.c's effect_depth_arrayed) */
+	textures[XGPU_SPIRV_EFFECT_DEPTH_BINDING].kind = stream.definition &&
+		stream.definition->key.views == XGPU_MULTIVIEW_NONE ? XGPU_VULKAN_IMAGE_2D : XGPU_VULKAN_IMAGE_2D_ARRAY;
 	textures[XGPU_SPIRV_EFFECT_DEPTH_BINDING].sampler = xgpu_vulkan_sampler(&sampler);
 	textures[XGPU_SPIRV_EFFECT_DEPTH_BINDING].image = NULL;
 	if (depth && depth->depth)
@@ -2833,7 +2854,7 @@ static int glow_constants(const struct xgpu_stream_dynamic_lights_halos *record,
 	float clip[4][4][4], forward[3], length, near_point[4], ahead = 0.0f;
 	const float (*unproject)[4] = (const float (*)[4])uniforms->effect_unproject[0];
 	int views = effect_views(uniforms, (const float (*)[4])record->projection, record->viewport_scale,
-		record->viewport_offset, record->screen_offset, uniforms->effect_unproject, uniforms->effect_eye, clip), view, row,
+		record->viewport_offset, record->screen_offset, 0, uniforms->effect_unproject, uniforms->effect_eye, clip), view, row,
 		axis;
 
 	if (!views)
@@ -3743,6 +3764,13 @@ static void stream_initialize(void *context, struct xgpu_stream_capabilities *ca
 	capabilities->ray_queries = stream.capabilities.ray_queries != 0;
 	/* (display.output_depth: RGBA16's 16-bit channels) */
 	capabilities->deep_sdr = stream.capabilities.deep_sdr != 0;
+	/* (display.soft_particles: the VR effects' soft fade in a draw of no
+	views, the depth target sampled where it is, in a pass that writes none
+	of it: effect_textures. Not Android's: a phone's tile GPU would store
+	and load its tiles at each such pass) */
+#ifndef __ANDROID__
+	capabilities->soft_effects = 1;
+#endif
 	snprintf(capabilities->device, sizeof(capabilities->device), "%s", stream.capabilities.device);
 }
 

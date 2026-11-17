@@ -162,6 +162,9 @@ from 90 to 102 frames a second, its 1% low from 18 to 28 and its frames of
 Graphics > Ambient Occlusion, while its cost on the slower GPUs is measured
 and brought down, #671) */
 #define GRAPHICS_AMBIENT_OCCLUSION "\"off\""
+/* display.soft_particles: the effects soft against the scene's depth, as
+the VR mode's eyes draw them (#1116) */
+#define GRAPHICS_SOFT_PARTICLES "true"
 /* display.astc_textures: "auto" everywhere (iPhones, through Metal; Android
 phones without BC, through Vulkan: seen right on a Pixel 11 Pro's PowerVR) */
 #define ASTC_TEXTURES_DEFAULT "\"auto\""
@@ -1573,6 +1576,13 @@ static const struct config_setting config_settings[] =
 		"through their own shapes, where the GPU and its Vulkan driver have ray\n"
 		"queries; \"world\" elsewhere, the Mac's and iOS's Metal included). The\n"
 		"older \"subtle\" and \"strong\" are read as \"world\"."
+		GRAPHICS_CHOOSES },
+	{ "display.soft_particles", _config_boolean, GRAPHICS_SOFT_PARTICLES, "HALO_SOFT_PARTICLES", _environment_value,
+		_platform_desktop,
+		"Smoke, dust, steam and weather fade softly where they meet walls and\n"
+		"floors, as the VR mode draws them, instead of the hard line the Xbox\n"
+		"drew where they cut into them; false draws them as the Xbox did. Not\n"
+		"your own weapon's effects. Where the renderer draws it (Vulkan's)."
 		GRAPHICS_CHOOSES },
 	{ "display.shield_color", _config_string, "\"default\"", "HALO_SHIELD_COLOR", _environment_value, _platform_all,
 		"Your energy shield's color, as this machine draws it: \"default\" (the\n"
@@ -4447,6 +4457,7 @@ static const struct
 	{ "display.model_detail", "\"auto\"" },
 	{ "display.dynamic_lights", "\"classic\"" },
 	{ "display.ambient_occlusion", "\"off\"" },
+	{ "display.soft_particles", "false" },
 	{ "game.enhanced_animations", "false", 1 },
 	{ "display.menu_fade", "true", 1 },
 };

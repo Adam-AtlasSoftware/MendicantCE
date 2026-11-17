@@ -2078,6 +2078,18 @@ void rasterizer_transparent_geometry_group_draw(
 									combiner_index++;
 								}
 								pixel_shader.combiner_count = combiner_index;
+								/* port: on a flat screen, with display.soft_particles,
+								soft against the scene's depth as the VR mode's eyes
+								draw it (d3d8_device.c, halo_effect_soft): the same
+								groups, not the first-person weapon's nor one drawn
+								without depth; soft alone, never thick */
+								{
+									extern void halo_effect_soft(int soft);
+
+									halo_effect_soft(
+										!TEST_FLAG(group->geometry_flags, _rasterizer_geometry_first_person_bit) &&
+										!TEST_FLAG(group->geometry_flags, _rasterizer_geometry_no_zbuffer_bit));
+								}
 #ifdef HALO_VR
 								{
 									/* port: in the VR mode's eyes, soft against the
@@ -3786,6 +3798,12 @@ void rasterizer_transparent_geometry_group_draw(
 
 					rasterizer_set_pixel_shader(&pixel_shader);
 					rasterizer_transparent_geometry_group_draw__internal(group, FALSE);
+					{
+						/* port: (the effect's alone: halo_effect_soft) */
+						extern void halo_effect_soft(int soft);
+
+						halo_effect_soft(0);
+					}
 #ifdef HALO_VR
 					{
 						/* port: (the effect's alone: halo_vr_effect_depth) */

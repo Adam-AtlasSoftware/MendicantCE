@@ -512,12 +512,17 @@
 			<choice shown="FULL" value="native"/>
 			<choice shown="HIGHEST" value="highest"/>
 		</row>
+		<row key="soft_particles" kind="choice" setting="display.soft_particles" label="SOFT PARTICLES" crumb="VIDEO › ADVANCED GRAPHICS" when="desktop+soft_effects+!vr">
+			<help>Smoke, dust, steam and weather fade softly where they meet walls and floors, at a small cost. Off draws them as the Xbox did: a hard line where they cut in.</help>
+			<choice shown="ON" value="true"/>
+			<choice shown="OFF" value="false"/>
+		</row>
 		<row key="interpolation" kind="choice" setting="display.interpolation" label="SMOOTH MOTION" crumb="VIDEO › ADVANCED GRAPHICS" search="interpolation">
 			<help>Draws movement smoothly between the game's 30 updates a second, so that it looks fluid at any frame rate. Off shows each update as it is.</help>
 			<choice shown="ON" value="true"/>
 			<choice shown="OFF" value="false"/>
 		</row>
-		<section key="section_6" title="LIGHTING"/>
+		<section key="section_7" title="LIGHTING"/>
 		<row key="shadow_resolution" kind="choice" setting="display.shadow_resolution" label="SHADOW QUALITY" crumb="VIDEO › ADVANCED GRAPHICS" search="shadows" search_choices="xbox medium high ultra">
 			<help>How sharp the shadows of characters, vehicles and weapons are. Xbox is the original's soft, blocky shadow; each step up is crisper, and costs a little more of the graphics card.</help>
 			<choice shown="XBOX" value="128"/>
@@ -554,7 +559,7 @@
 			<choice shown="DEFAULT" value="default"/>
 			<choice shown="LIGHT SHOW" value="light_show"/>
 		</row>
-		<section key="section_13" title="GAME"/>
+		<section key="section_14" title="GAME"/>
 		<row key="sim_rate" kind="choice" setting="game.sim_rate" label="TICK RATE" crumb="VIDEO › ADVANCED GRAPHICS" search="hz tickrate" search_choices="original">
 			<help>How often the world updates each second, in games on this device (campaign, split screen, bots). 60 and 120 respond faster and take more of the processor. Online games play at their host's tick rate: a GOAT H1 game's (GOAT H1 60 Tick), a Legacy game's 30.</help>
 			<choice shown="ORIGINAL (30)" value="30"/>

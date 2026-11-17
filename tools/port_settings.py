@@ -1259,6 +1259,12 @@ PAGES = {
              [("AUTO", "auto"), ("XBOX", "stock"), ("FULL", "native"), ("HIGHEST", "highest")],
              "How detailed characters and vehicles stay in the distance. Xbox simplifies them as on a TV; Full keeps "
              "their detail for your screen; Highest always draws the most. Auto is Full in VR.", None),
+            # (display.soft_particles: shown where the renderer draws it,
+            # not in the headset, whose eyes draw them soft already:
+            # SETTINGS_ROW_WHEN)
+            ("SOFT PARTICLES", "display.soft_particles", ON_OFF,
+             "Smoke, dust, steam and weather fade softly where they meet walls and floors, at a small cost. Off "
+             "draws them as the Xbox did: a hard line where they cut in.", "desktop"),
             ("SMOOTH MOTION", "display.interpolation", ON_OFF,
              "Draws movement smoothly between the game's 30 updates a second, so that it looks fluid at any frame "
              "rate. Off shows each update as it is.", None),
@@ -2502,6 +2508,9 @@ SETTINGS_ROW_WHEN = {
     "menu_cursor": "!vr", "gamma": "!vr_build", "panini": "!vr_build", "panini_vertical": "!vr_build",
     # (the VR build draws its eyes in 8 bits)
     "output_depth": "!vr_build",
+    # (display.soft_particles: where the renderer draws it, Vulkan's;
+    # settings_condition_term's soft_effects)
+    "soft_particles": "soft_effects+!vr",
     # (the Mac's display paces its frames already)
     "low_latency": "!vrr_system",
     # (in a game: not those that would drop it or are the main menu's, nor

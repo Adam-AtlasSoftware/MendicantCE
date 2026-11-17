@@ -664,6 +664,7 @@ void xgpu_backend_initialize(void)
 	xgpu_backend_capabilities.hdr = stream.capabilities.hdr;
 	xgpu_backend_capabilities.deep_sdr = stream.capabilities.deep_sdr;
 	xgpu_backend_capabilities.ray_queries = stream.capabilities.ray_queries;
+	xgpu_backend_capabilities.soft_effects = stream.capabilities.soft_effects;
 	stream.capabilities.device[sizeof(stream.capabilities.device) - 1] = 0;
 }
 
