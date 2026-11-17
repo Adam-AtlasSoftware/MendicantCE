@@ -74,6 +74,21 @@ turn is not wanted (the gyroscope paused: the caller drops it) */
 void gyro_aim_sample(struct gyro_aim *aim, const float gyro[3], float seconds,
 	const struct gyro_aim_settings *settings, float turn[2]);
 
+/* a turn rate (yaw and pitch, radians a second, positive to the left and up)
+over seconds: the turn it makes for the settings (their smoothing, its state
+in smoothed, and the sensitivities). Every gyroscope's turn comes through
+it: a controller's samples (gyro_aim_sample) and the touch controls' phone
+or tablet (gyro_aim_turned) */
+void gyro_aim_rate(const float rate[2], float smoothed[2], float seconds, const struct gyro_aim_settings *settings,
+	float turn[2]);
+
+/* a device's turn already made over seconds (yaw and pitch, radians), as the
+touch controls hand the phone's or the tablet's over (touch_input.c): the turn
+it makes for the settings, by gyro_aim_rate at its mean rate. None of it is
+lost, whatever the time (none, or a gap) */
+void gyro_aim_turned(const float turned[2], float smoothed[2], float seconds,
+	const struct gyro_aim_settings *settings, float turn[2]);
+
 /* measures the gyroscope at rest over the next GYRO_AIM_CALIBRATION_SECONDS
 of samples, for its bias (the controller put down still) */
 #define GYRO_AIM_CALIBRATION_SECONDS 1.5f

@@ -559,7 +559,6 @@ static float context_swell(int control, int context, float pulse)
 #define FLOATING_ZONE_WIDTH 0.45f
 /* (and logical units up from the bottom: 65% of a 16:9 display's height, as low on a taller one) */
 #define FLOATING_ZONE_HEIGHT 351.0f
-#define LOOK_RADIANS_PER_UNIT 0.0022f
 #define BUTTON_ALPHA 0.8f
 #define MINOR_BUTTON_ALPHA 0.55f
 #define ICON_ALPHA 0.85f
@@ -667,7 +666,6 @@ static UIColor *hud_color(float alpha)
 	int gyro_previous_orientation;
 	float gyro_previous_x, gyro_previous_y;
 	atomic_bool gyro_aiming;
-	_Atomic(float) gyro_sensitivity;
 	atomic_int gyro_rotation;
 	atomic_bool gyro_restart;
 	/* the layers: the controls' (with the look each picture was drawn
@@ -769,7 +767,6 @@ static NSString *const KEY_HIDDEN = @"touch-layout-v2.hidden";
 	gyro_queue.maxConcurrentOperationCount = 1;
 	gyro_queue.qualityOfService = NSQualityOfServiceUserInteractive;
 	atomic_init(&gyro_aiming, false);
-	atomic_init(&gyro_sensitivity, sensitivity);
 	atomic_init(&gyro_rotation, 0);
 	atomic_init(&gyro_restart, true);
 	container = [CALayer layer];
@@ -1011,10 +1008,7 @@ static BOOL other_input_connected(void)
 	}
 	[self updateRumble];
 	if (motion.gyroActive)
-	{
 		atomic_store(&gyro_rotation, [self screenRotation]);
-		atomic_store(&gyro_sensitivity, sensitivity);
-	}
 }
 
 /* ---------- the controller state the game reads */
@@ -1577,7 +1571,6 @@ static BOOL inside(float x, float y, float cx, float cy, float radius)
 	BOOL needed = showing && !controlsHidden && layout.gyroscope && motion.gyroAvailable && !editing && !dialogOpen;
 
 	atomic_store(&gyro_aiming, needed);
-	atomic_store(&gyro_sensitivity, sensitivity);
 	atomic_store(&gyro_rotation, [self screenRotation]);
 	if (needed && !motion.gyroActive)
 	{
@@ -1608,13 +1601,13 @@ static BOOL inside(float x, float y, float cx, float cy, float radius)
 }
 
 /* the turn since the last sample, in the screen's axes (GyroscopeAim.java):
-the trapezoid rule over two samples, as a swipe of so many logical units
-(on the gyroscope's queue: it reads only the atomics the main thread keeps) */
+the trapezoid rule over two samples, radians, which the game makes the
+player's as a controller's gyroscope's (touch_input.c) (on the gyroscope's
+queue: it reads only the atomics the main thread keeps) */
 - (void)gyroSample:(CMGyroData *)data
 {
 	float x = (float)data.rotationRate.x, y = (float)data.rotationRate.y, screen_x = x, screen_y = y;
 	int rotation = atomic_load(&gyro_rotation);
-	float aim_sensitivity = atomic_load(&gyro_sensitivity);
 	double seconds = data.timestamp - gyro_previous_time;
 	BOOL valid;
 
@@ -1651,8 +1644,7 @@ the trapezoid rule over two samples, as a swipe of so many logical units
 		float pitch = -(screen_x + gyro_previous_x) * 0.5f * (float)seconds;
 
 		if (yaw != 0.0f || pitch != 0.0f)
-			host_touch_add_gyro(-yaw / LOOK_RADIANS_PER_UNIT * aim_sensitivity,
-				-pitch / LOOK_RADIANS_PER_UNIT * aim_sensitivity);
+			host_touch_add_gyro(yaw, pitch);
 	}
 	gyro_previous_time = data.timestamp;
 	gyro_previous_orientation = rotation;

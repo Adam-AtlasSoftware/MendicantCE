@@ -53,6 +53,12 @@ as far, a little later. */
 /* a sample this long after the last is after a gap (samples lost, the
 sensor turned off and on): it turns nothing */
 #define LONGEST_SAMPLE 0.1f
+/* the smoothed part's rate (radians a second) under which a device turned
+by nothing is taken as still (gyro_aim_turned): a ten-thousandth of a degree
+a second */
+#define GYRO_AIM_SMOOTHED_LEAST 2e-6f
+/* the shortest time gyro_aim_turned takes a read's turn over */
+#define GYRO_AIM_SHORTEST_READ 0.001f
 
 /* player space's relaxation: a turn about an axis tilted from the vertical
 counts for more than its vertical part, up to the whole of it (the hand's
@@ -237,10 +243,48 @@ void gyro_aim_sample(struct gyro_aim *aim, const float gyro[3], float seconds,
 	{
 		look[0] = rate[1];
 	}
+	gyro_aim_rate(look, aim->smoothed, seconds, settings, turn);
+}
+
+void gyro_aim_rate(const float rate[2], float smoothed[2], float seconds, const struct gyro_aim_settings *settings,
+	float turn[2])
+{
+	float look[2];
+
+	look[0] = rate[0];
+	look[1] = rate[1];
 	if (settings->smoothing)
-		smooth_tiered(look, aim->smoothed, 2, SMOOTH_SLOWEST, SMOOTH_FASTEST, SMOOTH_SECONDS, seconds);
+		smooth_tiered(look, smoothed, 2, SMOOTH_SLOWEST, SMOOTH_FASTEST, SMOOTH_SECONDS, seconds);
 	turn[0] = look[0] * seconds * settings->sensitivity;
 	turn[1] = look[1] * seconds * settings->sensitivity * settings->vertical_sensitivity;
+}
+
+void gyro_aim_turned(const float turned[2], float smoothed[2], float seconds,
+	const struct gyro_aim_settings *settings, float turn[2])
+{
+	float rate[2];
+
+	/* (no time, or a gap: the smoothing's step a sample's, which turns
+	none of it the less) */
+	if (!(seconds >= GYRO_AIM_SHORTEST_READ))
+		seconds = GYRO_AIM_SHORTEST_READ;
+	else if (seconds > LONGEST_SAMPLE)
+		seconds = LONGEST_SAMPLE;
+	if (!isfinite(turned[0]) || !isfinite(turned[1]))
+	{
+		turn[0] = turn[1] = 0.0f;
+		return;
+	}
+	rate[0] = turned[0] / seconds;
+	rate[1] = turned[1] / seconds;
+	gyro_aim_rate(rate, smoothed, seconds, settings, turn);
+	/* (what is left of the smoothed part once the device is still, too
+	small to turn the view: none, so that a still device turns nothing) */
+	if (fabsf(smoothed[0]) < GYRO_AIM_SMOOTHED_LEAST && fabsf(smoothed[1]) < GYRO_AIM_SMOOTHED_LEAST &&
+		turned[0] == 0.0f && turned[1] == 0.0f)
+	{
+		smoothed[0] = smoothed[1] = 0.0f;
+	}
 }
 
 /* ---------- the flick stick */

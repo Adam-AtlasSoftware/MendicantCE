@@ -1032,6 +1032,16 @@ static const struct config_setting config_settings[] =
 		"The touch controls' swipe aiming gets a controller's aim assist: the\n"
 		"aim slows over a target and follows a moving one. false: none, as a\n"
 		"mouse (the bullets' own autoaim stays)." },
+	{ "input.touch_gyro_sensitivity", _config_real, "1.0", "HALO_TOUCH_GYRO_SENSITIVITY", _environment_value,
+		_platform_android | _platform_ios,
+		"The touch controls' gyroscope aiming (the phone's or the tablet's\n"
+		"own, switched on in the touch controls' settings): how far the view\n"
+		"turns side to side for each degree the device turns, 1 as far. A\n"
+		"controller's gyroscope has input.gyro_sensitivity." },
+	{ "input.touch_gyro_vertical_sensitivity", _config_real, "1.0", "HALO_TOUCH_GYRO_VERTICAL_SENSITIVITY",
+		_environment_value, _platform_android | _platform_ios,
+		"How far the view turns up and down for the device's gyroscope, times\n"
+		"input.touch_gyro_sensitivity: 1 the same as side to side." },
 	{ "input.touch_crouch", _config_string, "\"toggle\"", "HALO_TOUCH_CROUCH", _environment_value,
 		_platform_android | _platform_ios,
 		"The touch controls' Crouch: \"toggle\" crouches at a tap until Crouch\n"

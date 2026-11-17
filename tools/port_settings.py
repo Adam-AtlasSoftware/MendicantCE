@@ -1614,8 +1614,18 @@ PAGES = {
             ("SENSITIVITY", "input.gyro_sensitivity", GYRO_SENSITIVITY,
              "How far the view turns for each degree you turn the controller: 1 as far, 2 twice as far. Press A, "
              "or click the number, to type a value.|Zoomed in: as Zoom Aim Speed sets.", None),
+            # (the touch controls' gyroscope, the device's own, in the
+            # controller's rows' place while no controller with a gyroscope
+            # is connected: SETTINGS_SAME_PLACE, SETTINGS_ROW_WHEN)
+            ("SENSITIVITY", "input.touch_gyro_sensitivity", GYRO_SENSITIVITY,
+             "How far the view turns for each degree you turn this device, with the touch controls' Gyroscope "
+             "aiming on: 1 as far, 2 twice as far. Press A, or tap the number, to type a value.|A controller's "
+             "gyro has its own, shown while one is connected.", "touch"),
             ("VERTICAL SENSITIVITY", "input.gyro_vertical_sensitivity", VERTICAL_SENSITIVITIES,
              "How far the view turns up and down, of how far it turns side to side. 1X turns it as far.", None),
+            ("VERTICAL SENSITIVITY", "input.touch_gyro_vertical_sensitivity", VERTICAL_SENSITIVITIES,
+             "How far the view turns up and down as you tilt this device, of how far it turns side to side. 1X "
+             "turns it as far.", "touch"),
             ("TURN AXIS", "input.gyro_space", [("PLAYER SPACE", "player"), ("LOCAL SPACE", "local")],
              "Player Space turns you as you turn the controller about the up direction, however you hold it: "
              "flat, upright or between. Local Space turns you about the controller's own axis, as if held flat.",
@@ -1927,7 +1937,7 @@ SETTINGS_SEARCH_WORDS = {
     "fov": ["video_settings:fov", "vehicle_fov", "scale_scoped_fov", "viewmodel_fov"],
     "sens": ["mouse_sensitivity", "mouse_vertical_sensitivity", "zoom_sensitivity", "look_sensitivity",
              "look_vertical_sensitivity", "stick_zoom_sensitivity", "gyro_sensitivity",
-             "gyro_vertical_sensitivity"],
+             "gyro_vertical_sensitivity", "touch_gyro_sensitivity", "touch_gyro_vertical_sensitivity"],
     "dpi": ["mouse_sensitivity"],
     "fps": ["max_fps", "perf_overlay", "frame_rate_sync"],
     "framerate": ["frame_rate_sync", "max_fps", "perf_overlay"],
@@ -2439,7 +2449,8 @@ def _settings_platform(rows: list, start: int):
 # the rows in the place of the row before them, each platform having one of
 # them at most, or the model's conditions showing one (SETTINGS_ROW_WHEN):
 # Window Size in Resolution's, Android's anti-aliasing in the desktop's
-SETTINGS_SAME_PLACE = {"window_size", "anti_aliasing_android"}
+SETTINGS_SAME_PLACE = {"window_size", "anti_aliasing_android", "touch_gyro_sensitivity",
+                       "touch_gyro_vertical_sensitivity"}
 # the rows hidden while VR Setup's row is shown (the game in the headset),
 # which takes their room: Mouse's Menu Cursor; and Brightness's Gamma, which
 # the VR build hides always (their conditions: SETTINGS_ROW_WHEN)
@@ -2476,6 +2487,8 @@ SETTINGS_ROW_WHEN = {
     **{key: "gyro" for key in ("gyro_aim", "gyro_sensitivity", "gyro_vertical_sensitivity", "gyro_space",
                                "gyro_smoothing", "gyro_calibrate")},
     "gyro_button": "gyro+gyro_aim=hold gyro+gyro_aim=pause",
+    # (the touch controls' gyroscope's, in the controller's rows' place)
+    **{key: "!gyro" for key in ("touch_gyro_sensitivity", "touch_gyro_vertical_sensitivity")},
     **{f"viewmodel_weapon_{name}": "weapon_held" for name in ("x", "y", "z", "pitch", "yaw", "roll", "reset")},
     # (Discord's UNLINK an account linked, or waiting for its code)
     "link_unlink": "discord_linked",

@@ -337,6 +337,72 @@ static void case_modes(void)
 		"the Steam Deck's controls told from the others wrong");
 }
 
+/* the touch controls' gyroscope (a phone's, its turn already made between reads: gyro_aim_turned, touch_input.c):
+at the phone's defaults (1, 1X, no smoothing) the view turns as far as the phone, read by read, as it did before
+it came through here, whatever the reads' times (none, a frame's, a gap); its sensitivities scale it as a
+controller's do, through the same code: a phone and a controller turned alike turn the view alike */
+static void case_touch(void)
+{
+	static const float reads[][3] = {
+		/* yaw, pitch (radians), seconds since the last read */
+		{ 0.004f, -0.002f, 1.0f / 60.0f }, { 0.0f, 0.0f, 1.0f / 60.0f }, { -0.03f, 0.011f, 1.0f / 30.0f },
+		{ 0.0005f, 0.0f, 0.0f }, { 0.2f, -0.1f, 0.4f }, { 1e-5f, 2e-5f, 1.0f / 144.0f },
+	};
+	struct gyro_aim_settings phone = { 1.0f, 1.0f, 0, 0 }, scaled = { 2.0f, 0.5f, 0, 0 };
+	float smoothed[2] = { 0.0f, 0.0f }, scaled_smoothed[2] = { 0.0f, 0.0f };
+	unsigned int index;
+
+	for (index = 0; index < sizeof(reads) / sizeof(reads[0]); index++)
+	{
+		float turn[2];
+
+		gyro_aim_turned(reads[index], smoothed, reads[index][2], &phone, turn);
+		CHECK(fabsf(turn[0] - reads[index][0]) <= 1e-6f * fabsf(reads[index][0]) &&
+			fabsf(turn[1] - reads[index][1]) <= 1e-6f * fabsf(reads[index][1]),
+			"read %u: the phone's defaults turned %g, %g of %g, %g", index, turn[0], turn[1], reads[index][0],
+			reads[index][1]);
+		gyro_aim_turned(reads[index], scaled_smoothed, reads[index][2], &scaled, turn);
+		CHECK(fabsf(turn[0] - 2.0f * reads[index][0]) <= 1e-6f * fabsf(reads[index][0]) &&
+			fabsf(turn[1] - reads[index][1]) <= 1e-6f * fabsf(reads[index][1]),
+			"read %u: sensitivity 2 and vertical 0.5X turned %g, %g of %g, %g", index, turn[0], turn[1],
+			2.0f * reads[index][0], reads[index][1]);
+	}
+	{
+		/* a controller held flat in local space turned as a phone is, 500 samples a second, and the phone read
+		at 60 a second: the same turn, smoothing and all */
+		struct gyro_aim aim;
+		struct gyro_aim_settings controller = settings(0, 1), touch = settings(0, 1);
+		float controller_turned[2] = { 0.0f, 0.0f }, touch_turned[2] = { 0.0f, 0.0f };
+		float rate[2] = { 30.0f * DEGREES, -10.0f * DEGREES };
+
+		touch.vertical_sensitivity = controller.vertical_sensitivity = 0.5f;
+		gyro_aim_reset(&aim);
+		aim.bias_known = 1;
+		aim.still_seconds = -1e9f;
+		for (index = 0; index < RATE / 2; index++)
+		{
+			float gyro[3] = { rate[1], rate[0], 0.0f }, turn[2];
+
+			gyro_aim_sample(&aim, gyro, STEP, &controller, turn);
+			controller_turned[0] += turn[0];
+			controller_turned[1] += turn[1];
+		}
+		smoothed[0] = smoothed[1] = 0.0f;
+		for (index = 0; index < 30; index++)
+		{
+			float turned[2] = { rate[0] / 60.0f, rate[1] / 60.0f }, turn[2];
+
+			gyro_aim_turned(turned, smoothed, 1.0f / 60.0f, &touch, turn);
+			touch_turned[0] += turn[0];
+			touch_turned[1] += turn[1];
+		}
+		CHECK(fabsf(touch_turned[0] - controller_turned[0]) < 1e-3f * fabsf(controller_turned[0]) &&
+			fabsf(touch_turned[1] - controller_turned[1]) < 1e-3f * fabsf(controller_turned[1]),
+			"the phone turned %g, %g and the controller %g, %g", touch_turned[0], touch_turned[1],
+			controller_turned[0], controller_turned[1]);
+	}
+}
+
 int main(int argc, char **argv)
 {
 	const char *name = argc > 1 ? argv[1] : "";
@@ -355,6 +421,8 @@ int main(int argc, char **argv)
 		case_flick();
 	else if (!strcmp(name, "modes"))
 		case_modes();
+	else if (!strcmp(name, "touch"))
+		case_touch();
 	else
 	{
 		fprintf(stderr, "no case %s\n", name);

@@ -424,7 +424,12 @@ stick does, not as a mouse: the aim slows over a target and follows a moving one
 and it follows the profile's "invert look" (the gyroscope turns the view
 as the phone turns, never inverted). The setting `input.touch_aim_assist`
 turns the aim assist off. "Look sensitivity" sets how far a swipe turns;
-the mouse settings do not apply.
+the mouse settings do not apply. The gyroscope turns the view as a
+controller's gyroscope does, through the same code (`gyro_aim.c`), by its own
+settings: Settings > Controls > Controller > Gyro & Flick Stick's SENSITIVITY
+and VERTICAL SENSITIVITY with no gyro controller connected
+(`input.touch_gyro_sensitivity`, `input.touch_gyro_vertical_sensitivity`; at
+1, the view turns as far as the phone).
 
 On a screen taller than 16:9 (the inner screen of a folding phone, a
 tablet) the controls under the thumbs keep the distance from the bottom
