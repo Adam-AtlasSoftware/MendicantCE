@@ -141,6 +141,7 @@ their handlers open opens.
 #include "../src/player_link.h" /* port: port/linux/src/player_link.c */
 #include "../src/server_master.h"
 #include "../src/report.h"
+#include "benchmark.h" /* port: port/linux/game/benchmark.c */
 #include "../src/game_caches.h" /* port: port/linux/src/game_caches.c */
 #include "../src/map_sources.h" /* port: port/linux/src/map_sources.c */
 #include "text_filter.h"
@@ -3200,6 +3201,14 @@ static boolean settings_function(char const *name, struct widget_instance *widge
 		/* (ADD MAPS: asked, then the maps screen asked for at the next
 		start, port/linux/src/map_sources.c) */
 		add_maps_press();
+	}
+	else if (!strcmp(name, "benchmark"))
+	{
+		/* (RUN BENCHMARK: begun from the main menu, at its pacing as this
+		page shows it, port/linux/game/benchmark.c; Settings closed by the
+		match it starts) */
+		benchmark_request(settings_pending_value("display.benchmark_pacing"));
+		ui_play_audio_feedback_sound(SOUND_FORWARD);
 	}
 	else if (!strcmp(name, "report"))
 	{
@@ -6521,6 +6530,19 @@ REPORT runs "port crash report" and SKIP "port crash dismiss" */
 int pc_menu_crash_question_open(void)
 {
 	return main_menu_question_open("pc\\main_menu\\crash\\crash_screen");
+}
+
+/* benchmark.c's: the benchmark's results, the new menus' screens/benchmark.xml
+(its stand-in, screens/benchmark), over the main menu; the classic menus
+have none: the results are in benchmarks/ and the log */
+int pc_menu_benchmark_results_open(void)
+{
+	if (!menu_screen_open_ready("benchmark"))
+	{
+		platform_log("benchmark: the results screen is the new menus' (display.menu_engine \"new\")");
+		return 1;
+	}
+	return main_menu_question_open("pc\\screens\\benchmark");
 }
 
 /* updater.c's, the macOS app's: 1 while a game is played (its pause menu

@@ -2689,6 +2689,16 @@ void halo_test_input_pump(struct platform_input_state *state, unsigned char *but
 	test_latency.mouse_played = test_latency.pressed;
 }
 
+/* debug.test_input read again at the next reading (halo_test_input_reread) */
+static int test_input_generation;
+
+/* the built-in benchmark's (port/linux/game/benchmark.c): debug.test_input,
+set for the run, read again */
+void halo_test_input_reread(void)
+{
+	test_input_generation++;
+}
+
 static void test_input_gamepad(XINPUT_GAMEPAD *pad)
 {
 	static const WORD digital[] =
@@ -2724,11 +2734,13 @@ static void test_input_gamepad(XINPUT_GAMEPAD *pad)
 	if (network_chat_keyboard_open() && network_chat_controller() == 0)
 		return;
 
-	if (!checked)
+	if (checked != test_input_generation + 1)
 	{
 		const char *setting = config_string("debug.test_input");
 
-		checked = 1;
+		checked = test_input_generation + 1;
+		seed = -1;
+		looking = walking = pad_test = 0;
 		if (!strncmp(setting, "menu:", 5))
 		{
 			snprintf(test_input_menu, sizeof(test_input_menu), "%s", setting + 5);

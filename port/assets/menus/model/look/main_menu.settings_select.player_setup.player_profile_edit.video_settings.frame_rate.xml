@@ -16,6 +16,9 @@
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/op_max_fps" x="28" y="125"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/op_low_latency" x="28" y="150"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/op_perf_overlay" x="28" y="175"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/section_6" x="28" y="206"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/op_benchmark_pacing" x="28" y="228"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/op_benchmark" x="28" y="253"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/button_bar" x="0" y="448"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/button_bar" role="buttons" type="column_list" box="0 0 640 28" place="foot">
@@ -134,5 +137,37 @@
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/perf_overlay_spinner" type="spinner" box="0 1 140 23" wide="40 120" past="60 60" header="bitmaps/arrow_sm_left" header_box="-6 6 0 18" footer="bitmaps/arrow_sm_right" footer_box="140 6 146 18">
 		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 0" items="OFF|SIMPLE|DETAILED" scale="1 1.2"/>
+	</look>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/section_6" box="0 0 344 20" wide="-106 244" past="-143 193" picture="main_menu/settings/section_tall">
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/section_6_title" x="0" y="0"/>
+	</look>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/section_6_title" type="text" box="0 0 344 20" wide="0 244" past="0 193">
+		<text font="ui\small_ui" color="#FF6F9CD0" at="2 2" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/labels" index="6" scale="1 1.2"/>
+	</look>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/op_benchmark_pacing" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
+		<text color="#FF2896FF"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/benchmark_pacing_label" x="0" y="0"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/benchmark_pacing_spinner" x="188" y="0"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/benchmark_pacing_seg0" x="188" y="2"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/benchmark_pacing_seg1" x="294" y="2"/>
+	</look>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/benchmark_pacing_label" type="text" box="0 0 184 24" wide="0 40" past="0 60">
+		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/labels" index="7" scale="1 1.2"/>
+	</look>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/benchmark_pacing_seg0" type="text" box="0 0 102 20" wide="40 0" past="60 0" place="keep_ends" picture="main_menu/settings/segment_tall">
+		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 1" flags="no_focus_test" text="UNCAPPED" scale="1 1.2"/>
+	</look>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/benchmark_pacing_seg1" type="text" box="0 0 146 20" wide="40 0" past="60 0" place="keep_ends" picture="main_menu/settings/segment_tall">
+		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 1" flags="no_focus_test" text="YOUR SETTINGS" scale="1 1.2"/>
+	</look>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/benchmark_pacing_spinner" type="spinner" box="0 1 140 23" wide="40 120" past="60 60" header="bitmaps/arrow_sm_left" header_box="-6 6 0 18" footer="bitmaps/arrow_sm_right" footer_box="140 6 146 18">
+		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 0" items="UNCAPPED|YOUR SETTINGS" scale="1 1.2"/>
+	</look>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/op_benchmark" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
+		<text color="#FF2896FF"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/benchmark_label" x="0" y="0"/>
+	</look>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/benchmark_label" type="text" box="0 0 332 24" wide="0 244" past="0 193">
+		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/labels" index="8" scale="1 1.2"/>
 	</look>
 </model>

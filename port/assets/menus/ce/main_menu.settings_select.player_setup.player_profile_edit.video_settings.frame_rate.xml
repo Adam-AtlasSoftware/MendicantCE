@@ -19,6 +19,9 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/op_max_fps" x="28" y="143" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/op_low_latency" x="28" y="164"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/op_perf_overlay" x="28" y="185"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/section_6" x="28" y="212"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/op_benchmark_pacing" x="28" y="232"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/op_benchmark" x="28" y="253"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/button_bar" y="414"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/button_bar" type="column_list" width="640" height="28" flags="pass_unhandled_to_focused_child left_right_tabs_items" source="tools/port_settings.py settings_files/_settings_page">
@@ -134,6 +137,35 @@
 		<on event="created" run="port setting load"/>
 		<on event="a" run="port setting segment"/>
 	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/section_6" width="344" height="18" bitmap="main_menu/settings/section" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/section_6_title"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/section_6_title" type="text" controller="1" width="344" height="18" wide="0 244" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/labels" string_index="6" color="#FF6F9CD0" text_x="2" text_y="1" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/op_benchmark_pacing" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/benchmark_pacing_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/benchmark_pacing_spinner" x="188"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/benchmark_pacing_seg0" x="188" y="1"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/benchmark_pacing_seg1" x="321" y="1"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/benchmark_pacing_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/labels" string_index="7" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/benchmark_pacing_seg0" type="text" controller="1" width="129" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="UNCAPPED" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/benchmark_pacing_seg1" type="text" controller="1" width="129" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="YOUR SETTINGS" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/benchmark_pacing_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="UNCAPPED|YOUR SETTINGS" setting="display.benchmark_pacing" values="uncapped|settings" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
+		<on event="created" run="port setting load"/>
+		<on event="a" run="port setting segment"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/op_benchmark" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<on event="a" run="port settings benchmark"/>
+		<on event="start" run="port settings benchmark"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/benchmark_label"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/benchmark_label" type="text" controller="1" width="332" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/labels" string_index="8" color="#FF2896FF" text_x="10" text_y="1" wide="0 244" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/labels">
 		<string text="VSYNC"/>
 		<string text="VARIABLE REFRESH"/>
@@ -141,6 +173,9 @@
 		<string text="MAX FPS"/>
 		<string text="LOW LATENCY"/>
 		<string text="PERFORMANCE OVERLAY"/>
+		<string text="BENCHMARK"/>
+		<string text="BENCHMARK PACING"/>
+		<string text="RUN BENCHMARK"/>
 	</strings>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/help_strings">
 		<string text=""/>
@@ -150,5 +185,8 @@
 		<string text="The most frames drawn a second with VSync off. Auto is twice the display's refresh rate. More feels smoother and uses more power; None draws as fast as it can.|Click the number (or press A) to type 10 to 1000."/>
 		<string text="With VSync on, starts each frame just in time for the refresh it is shown at, so a press reaches the screen sooner. Off starts each frame as soon as the one before is waiting. Auto is on."/>
 		<string text="Shows how the game runs, at the bottom right. Simple is the frame rate: green is 30 or more, red under 30. Detailed adds the frame time, the 1% low, and the milliseconds spent on the GPU, the render thread, the game and waiting for the display."/>
+		<string text=""/>
+		<string text="What the benchmark measures. Uncapped turns VSync, Variable Refresh and the frame cap off for the run: what your computer can draw. Your Settings keeps them: what you see as you play."/>
+		<string text="Plays a fixed minute of Blood Gulch with 40 bots, then shows the average frame rate, the 1% low, the frame times, the GPU and CPU time and your settings, and saves them in the benchmarks folder.|From the main menu only."/>
 	</strings>
 </menus>

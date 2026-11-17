@@ -1371,6 +1371,17 @@ PAGES = {
              "under 30. Detailed adds the frame time, the 1% low, and the milliseconds spent on the GPU, the render "
              "thread, the game and waiting for the display.",
              None),
+            # (port/linux/game/benchmark.c: from the main menu only, its match
+            # taking the place of the game: SETTINGS_ROW_WHEN; its results
+            # the new menus' screens/benchmark.xml)
+            (SECTION, "BENCHMARK"),
+            ("BENCHMARK PACING", "display.benchmark_pacing", [("UNCAPPED", "uncapped"), ("YOUR SETTINGS", "settings")],
+             "What the benchmark measures. Uncapped turns VSync, Variable Refresh and the frame cap off for the run: "
+             "what your computer can draw. Your Settings keeps them: what you see as you play.", None),
+            ("RUN BENCHMARK", None, None,
+             "Plays a fixed minute of Blood Gulch with 40 bots, then shows the average frame rate, the 1% low, the "
+             "frame times, the GPU and CPU time and your settings, and saves them in the benchmarks folder.|From "
+             "the main menu only.", None, "benchmark", "port settings benchmark"),
         ],
     },
     FIRST_PERSON[0]: {
@@ -2470,7 +2481,7 @@ SETTINGS_ROW_WHEN = {
     # (in a game: not those that would drop it or are the main menu's, nor
     # those whose screens are ui.map's or make a profile)
     "online": "!in_game", "allow_upnp": "!in_game", "join_from_clipboard": "!in_game", "auto": "!in_game",
-    "mods": "!in_game",
+    "mods": "!in_game", "benchmark": "!in_game", "benchmark_pacing": "!in_game",
     "name": "profile+!in_game", "color": "profile+!in_game", "profiles": "profile+!in_game",
     "create_profile": "!profile+!in_game",
     **{key: "gyro" for key in ("gyro_aim", "gyro_sensitivity", "gyro_vertical_sensitivity", "gyro_space",

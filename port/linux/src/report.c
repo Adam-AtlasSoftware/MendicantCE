@@ -646,6 +646,60 @@ void report_gpu_summary(const uint32_t *micros, const struct report_frame_work *
 	free(sorted);
 }
 
+/* ---------- the benchmark's measure (port/linux/game/benchmark.c)
+
+The frames of a benchmark's measured minute, summed as the report and the
+performance overlay sum theirs: the average, the 1% and 0.1% lows (the
+slowest frames' mean, report_low_fps), the frame time's percentiles
+(nearest rank), and the work in a frame: the GPU's (over the frames it was
+measured on), the game's (a frame's time less its waits), the renderer's
+thread's, and the waits for vsync or the frame cap as a share of the
+time. */
+void report_measure_frames(const uint32_t *micros, const struct report_frame_work *work, unsigned long count,
+	uint32_t *scratch, struct report_measure *measure)
+{
+	unsigned long index, gpu_frames = 0;
+	double total = 0, gpu_total = 0, game_total = 0, render_total = 0, waited_total = 0, paced_total = 0;
+
+	memset(measure, 0, sizeof(*measure));
+	measure->gpu_ms = -1.0;
+	if (!count)
+		return;
+	for (index = 0; index < count; index++)
+	{
+		uint32_t waited = work[index].waited < micros[index] ? work[index].waited : micros[index];
+
+		scratch[index] = micros[index];
+		total += micros[index];
+		game_total += micros[index] - waited;
+		waited_total += waited;
+		paced_total += work[index].paced < waited ? work[index].paced : waited;
+		render_total += work[index].render < micros[index] ? work[index].render : micros[index];
+		if (micros[index] >= REPORT_HITCH_MS * 1000)
+			measure->hitches++;
+		if (work[index].gpu != REPORT_GPU_UNKNOWN)
+		{
+			gpu_total += work[index].gpu;
+			gpu_frames++;
+		}
+	}
+	qsort(scratch, count, sizeof(*scratch), report_compare_micros);
+	measure->frames = count;
+	measure->seconds = total / 1000000.0;
+	measure->average_ms = total / 1000.0 / (double)count;
+	measure->average_fps = total > 0 ? 1000000.0 * (double)count / total : 0;
+	measure->low_1_fps = report_low_fps(scratch, count, 10);
+	measure->low_01_fps = report_low_fps(scratch, count, 1);
+	measure->p50_ms = scratch[(count - 1) * 50 / 100] / 1000.0;
+	measure->p95_ms = scratch[(count - 1) * 95 / 100] / 1000.0;
+	measure->p99_ms = scratch[(count - 1) * 99 / 100] / 1000.0;
+	measure->gpu_ms = gpu_frames ? gpu_total / 1000.0 / (double)gpu_frames : -1.0;
+	measure->game_ms = game_total / 1000.0 / (double)count;
+	measure->render_ms = render_total / 1000.0 / (double)count;
+	measure->waited_ms = waited_total / 1000.0 / (double)count;
+	measure->paced_percent = total > 0 ? 100.0 * paced_total / total : 0;
+}
+
 /* ---------- the zip (stored, not compressed: the PNG is already) */
 
 uint32_t report_crc32(uint32_t crc, const unsigned char *data, size_t size)
@@ -2505,4 +2559,133 @@ void report_note_done(const char *note)
 {
 	if (report_capture.waiting)
 		report_finish(note, 0);
+}
+
+/* ---------- the benchmark's results (port/linux/game/benchmark.c)
+
+benchmarks/<date>_<time>-<map>.txt beside reports/: what was measured
+(benchmark.c's lines), the frames' measure (report_measure_frames), what
+held them back (report_gpu_summary's words), the settings the run drew
+with, and the computer. */
+
+/* sdl_platform.c's: the window's size in pixels */
+void platform_video_drawable_size(int *width, int *height);
+
+void report_processor_text(char *text, size_t size)
+{
+	report_processor(text, size);
+}
+
+unsigned long report_frames_mark(void)
+{
+	return report_frames.count;
+}
+
+int report_benchmark_write(unsigned long first, unsigned long last, const char *map, const char *about,
+	struct report_measure *measure, char *verdict, size_t verdict_size, char *name, size_t name_size)
+{
+	static const char *const settings[] = {
+		"display.graphics", "display.mode", "display.resolution", "display.window_size",
+		"display.resolution_scaling", "display.anti_aliasing", "display.ambient_occlusion",
+		"display.dynamic_lights", "display.vsync", "display.vrr", "display.max_fps", "display.low_latency",
+		"game.sim_rate",
+	};
+	unsigned long count = last - first, index;
+	uint32_t *micros, *scratch;
+	struct report_frame_work *work;
+	char *gpu_text, folder[1024], path[1200], when[64], line[512];
+	const char *found;
+	time_t now = time(NULL);
+	struct tm local;
+	FILE *file;
+	int written = 0;
+
+	memset(measure, 0, sizeof(*measure));
+	measure->gpu_ms = -1.0;
+	verdict[0] = 0;
+	name[0] = 0;
+	/* (the newest frames kept, if more were drawn than the ring holds) */
+	if (count > REPORT_FRAMES)
+	{
+		first = last - REPORT_FRAMES;
+		count = REPORT_FRAMES;
+	}
+	micros = malloc((count ? count : 1) * sizeof(*micros));
+	scratch = malloc((count ? count : 1) * sizeof(*scratch));
+	work = malloc((count ? count : 1) * sizeof(*work));
+	gpu_text = malloc(4096);
+	if (!micros || !scratch || !work || !gpu_text)
+		goto done;
+	for (index = 0; index < count; index++)
+	{
+		micros[index] = report_frames.micros[(first + index) & (REPORT_FRAMES - 1)];
+		work[index] = report_frames.work[(first + index) & (REPORT_FRAMES - 1)];
+	}
+	report_measure_frames(micros, work, count, scratch, measure);
+	report_gpu_summary(micros, work, count, gpu_text, 4096);
+	found = strstr(gpu_text, "Verdict: ");
+	if (found)
+		snprintf(verdict, verdict_size, "%.*s", (int)strcspn(found + 9, "\n"), found + 9);
+	if (!count)
+		goto done;
+
+	snprintf(folder, sizeof(folder), "%s/benchmarks", platform_data_root());
+	mkdir(folder, 0755);
+	localtime_r(&now, &local);
+	strftime(when, sizeof(when), "%Y-%m-%d_%H.%M.%S", &local);
+	snprintf(path, sizeof(path), "%s/%s-%s.txt", folder, when, map);
+	file = fopen(path, "w");
+	if (!file)
+	{
+		platform_log("benchmark: cannot write %s", path);
+		goto done;
+	}
+	strftime(when, sizeof(when), "%Y-%m-%d %H:%M:%S", &local);
+	fprintf(file, "GOAT H1 benchmark, %s\n\n%s\n", when, about);
+	fprintf(file, "## Frames\n\n");
+	fprintf(file, "Frames: %lu in %.1f seconds\n", measure->frames, measure->seconds);
+	fprintf(file, "Average: %.1f fps (%.2f ms a frame)\n", measure->average_fps, measure->average_ms);
+	fprintf(file, "1%% low: %.1f fps\n0.1%% low: %.1f fps\n", measure->low_1_fps, measure->low_01_fps);
+	fprintf(file, "Frame time: p50 %.2f ms, p95 %.2f ms, p99 %.2f ms\n", measure->p50_ms, measure->p95_ms,
+		measure->p99_ms);
+	fprintf(file, "Frames of %d ms or more: %lu\n\n", REPORT_HITCH_MS, measure->hitches);
+	fprintf(file, "## CPU and GPU\n\n");
+	if (measure->gpu_ms >= 0.0)
+		fprintf(file, "GPU: %.2f ms a frame\n", measure->gpu_ms);
+	else
+		fprintf(file, "GPU: not measured\n");
+	fprintf(file, "Game thread (CPU): %.2f ms a frame\nRender thread (CPU): %.2f ms a frame\n", measure->game_ms,
+		measure->render_ms);
+	fprintf(file, "Waiting for the renderer or the display: %.2f ms a frame\n", measure->waited_ms);
+	fprintf(file, "%s\n", gpu_text);
+	fprintf(file, "## Settings\n\n");
+	{
+		int width = 0, height = 0;
+
+		platform_video_drawable_size(&width, &height);
+		fprintf(file, "- window: %dx%d pixels\n", width, height);
+	}
+	for (index = 0; index < sizeof(settings) / sizeof(settings[0]); index++)
+	{
+		if (config_text(settings[index], line, sizeof(line)))
+			fprintf(file, "- %s: %s\n", settings[index], line);
+	}
+	fprintf(file, "\n## Computer\n\n");
+	updater_build_text(line, sizeof(line));
+	fprintf(file, "- Build: %s\n- Platform: %s\n", line, report_platform());
+	fprintf(file, "- GPU: %s\n", xgpu_backend_device()[0] ? xgpu_backend_device() : "unknown");
+	report_processor(line, sizeof(line));
+	fprintf(file, "- Processor: %s\n", line);
+	written = fclose(file) == 0;
+	if (written)
+	{
+		snprintf(name, name_size, "benchmarks/%s", strrchr(path, '/') + 1);
+		platform_log("benchmark: results written to %s", path);
+	}
+done:
+	free(micros);
+	free(scratch);
+	free(work);
+	free(gpu_text);
+	return written;
 }

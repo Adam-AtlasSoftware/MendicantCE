@@ -708,6 +708,16 @@
 			<choice shown="SIMPLE" value="simple"/>
 			<choice shown="DETAILED" value="detailed"/>
 		</row>
+		<section key="section_6" title="BENCHMARK"/>
+		<row key="benchmark_pacing" kind="choice" setting="display.benchmark_pacing" label="BENCHMARK PACING" crumb="VIDEO › FRAME RATE &amp; SYNC" search_choices="uncapped your settings" when="!in_game">
+			<help>What the benchmark measures. Uncapped turns VSync, Variable Refresh and the frame cap off for the run: what your computer can draw. Your Settings keeps them: what you see as you play.</help>
+			<choice shown="UNCAPPED" value="uncapped"/>
+			<choice shown="YOUR SETTINGS" value="settings"/>
+		</row>
+		<row key="benchmark" kind="link" label="RUN BENCHMARK" crumb="VIDEO › FRAME RATE &amp; SYNC" when="!in_game" run="port settings benchmark">
+			<help>Plays a fixed minute of Blood Gulch with 40 bots, then shows the average frame rate, the 1% low, the frame times, the GPU and CPU time and your settings, and saves them in the benchmarks folder.</help>
+			<note>From the main menu only.</note>
+		</row>
 		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
 		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>
 		<button key="button_cancel" kind="cancel" run="port settings page cancel" help="Goes back without these changes."/>
