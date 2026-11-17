@@ -459,8 +459,11 @@
 	</screen>
 	<screen name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/advanced_graphics_screen" kind="settings" layout="page" geometry="tall" title="ADVANCED GRAPHICS">
 		<row key="render_resolution" kind="choice" setting="display.render_resolution" label="RENDER RESOLUTION" crumb="VIDEO › ADVANCED GRAPHICS" search_choices="xbox 640x480 full" when="computer">
-			<help>Full draws the game at your screen's resolution. Above 100% draws it larger and scales it down: finer and smoother, for over twice the graphics card's work at 150%, four times at 200%. Xbox draws 640x480, scaled up: softer, and very light.</help>
+			<help>Full draws at your screen's resolution. Below 100% draws fewer pixels, scaled up sharply: a steadier frame rate. Above 100% draws more, scaled down: smoother, for over twice the work at 150%. Xbox draws 640x480.</help>
 			<choice shown="XBOX 640X480" value="original"/>
+			<choice shown="25%" value="0.25"/>
+			<choice shown="50%" value="0.5"/>
+			<choice shown="75%" value="0.75"/>
 			<choice shown="FULL" value="1"/>
 			<choice shown="125%" value="1.25"/>
 			<choice shown="150%" value="1.5"/>

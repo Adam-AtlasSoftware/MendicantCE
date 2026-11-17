@@ -141,6 +141,11 @@ swapchain takes where the surface has it (0: the swap interval's choice) */
 	NULL: no curve (the VR build's). */
 	int (*gamma_prepare)(void);
 	struct xgpu_vulkan_image *(*gamma)(struct xgpu_vulkan_image *image, float power);
+	/* a frame smaller than the window (display.render_scale on a computer,
+	"original" resolution scaling) scaled up sharply: nearest by whole
+	multiples, then linear for the rest (present_sharp). 0: linear alone
+	(Android's, whose compositor scales its smaller swapchain). */
+	int sharp_upscale;
 };
 
 /* 1 on success: a device that has what the backend needs (logged if not) */
@@ -780,6 +785,10 @@ void xgpu_vulkan_hdr_state(int active, int mode, int paper_white_nits, int paper
 this many pixels from its top (no lower than its bottom) or centered (-1)
 (present), from the next present on */
 void xgpu_vulkan_picture_top(int top);
+/* display.render_scale: a frame smaller than the window scaled up sharply
+(where the options allow it: sharp_upscale), else smoothly, as
+"original" resolution scaling's 640x480 always was (any thread) */
+void xgpu_vulkan_sharp_upscale(int sharp);
 /* display.gamma (the stream's record, render thread): the setting, 1 for
 none, from the next present on; an SDR frame is curved by one over it
 (present), an HDR swapchain's never */

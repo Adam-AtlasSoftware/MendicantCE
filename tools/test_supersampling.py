@@ -1,9 +1,10 @@
-"""display.supersampling's arithmetic (d3d8_device.c's screen_mode_choose).
+"""display.supersampling's and display.render_scale's arithmetic
+(d3d8_device.c's screen_mode_choose).
 
 The screen's targets are drawn at display.supersampling's factor each way,
 or an older "ssaa2x"'s 2, or display.panini's, whichever is most, at most
 the GPU's largest target, and independently of display.anti_aliasing's pass
-or samples. The front end's code is compiled on its own over stubs of the
+or samples; times display.render_scale's fraction (0.25 to 1) on a computer. The front end's code is compiled on its own over stubs of the
 settings, the display and the backend's capabilities, for the desktop, the
 Mac (whose "ssaa2x" drew none), iOS and Android (no supersampling).
 """
@@ -47,7 +48,7 @@ typedef int BOOL;
 static float screen_supersampling = 1.0f, screen_supersampling_asked = 1.0f;
 static struct { long largest_target; } xgpu_backend_capabilities = { 32768 };
 static const char *anti_aliasing_setting = "smaa";
-static double supersampling_setting = 1.0, panini = 1.0;
+static double supersampling_setting = 1.0, render_scale_setting = 1.0, panini = 1.0;
 static unsigned long changes;
 static long display_width = 2560, display_height = 1440;
 static BOOL original;
@@ -60,7 +61,13 @@ static const char *config_string(const char *name)
 	assert(!strcmp(name, "display.picture_shape"));
 	return "4:3";
 }
-static double config_real(const char *name) { assert(!strcmp(name, "display.supersampling")); return supersampling_setting; }
+static double config_real(const char *name)
+{
+	if (!strcmp(name, "display.render_scale"))
+		return render_scale_setting;
+	assert(!strcmp(name, "display.supersampling"));
+	return supersampling_setting;
+}
 static void platform_log(const char *format, ...) { (void)format; logs++; }
 static void anti_aliasing_prepare(void) {}
 static float panini_supersampling(long width, long height) { (void)width; (void)height; return (float)panini; }
@@ -151,7 +158,38 @@ int main(void)
 	/* (said once a change, not each frame) */
 	logs = 0;
 	assert(DRAWN(2400, 1800) && DRAWN(2400, 1800) && !logs);
+	/* display.render_scale: half the pixels each way at 1080p and 1440p,
+	the display blit scaling them up; 0.25 at least, 1 (or 0) at most; it
+	multiplies the supersampling; not with "original" */
+	supersampling_setting = 1.0;
+	render_scale_setting = 0.5;
+	display_width = 1920;
+	display_height = 1080;
+	assert(DRAWN(960, 540) && factor == 0.5f);
+	display_width = 2560;
+	display_height = 1440;
+	assert(DRAWN(1280, 720));
+	render_scale_setting = 0.75;
+	assert(DRAWN(1920, 1080));
+	render_scale_setting = 0.1;
+	assert(DRAWN(640, 360) && factor == 0.25f);
+	render_scale_setting = 1.5;
+	assert(DRAWN(2560, 1440) && factor == 1.0f);
+	render_scale_setting = 0.0;
+	assert(DRAWN(2560, 1440) && factor == 1.0f);
+	render_scale_setting = 0.5;
+	supersampling_setting = 1.5;
+	assert(DRAWN(1920, 1080));
+	supersampling_setting = 1.0;
+	original = TRUE;
+	assert(DRAWN(640, 480) && factor == 1.0f);
+	original = FALSE;
+	render_scale_setting = 1.0;
 #else
+	/* (the negative control) iOS and Android: the render scale is their
+	hosts' (a smaller swapchain or drawable), not the targets' */
+	render_scale_setting = 0.5;
+	assert(DRAWN(2560, 1440) && factor == 1.0f);
 	/* none: the display's pixels */
 	supersampling_setting = 2.0;
 	anti_aliasing_setting = "ssaa2x";

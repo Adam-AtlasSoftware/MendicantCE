@@ -454,11 +454,12 @@ static boolean profile_setting_boolean(short field)
 	return field != 0 && field != 4 && field != 5;
 }
 
-/* ---------- Advanced Graphics' RENDER RESOLUTION row: two settings as one
+/* ---------- Advanced Graphics' RENDER RESOLUTION row: three settings as one
 spinner, a setting named "display.render_resolution" (tools/port_settings.py):
-"original", display.resolution_scaling's Xbox 640x480, or the factor of
-display.supersampling's that "native" draws at (1, the screen's pixels, to
-2); written as both (render_resolution_write) */
+"original", display.resolution_scaling's Xbox 640x480, or the factor that
+"native" draws at: below 1 display.render_scale's (0.25 to 1), else
+display.supersampling's (1, the screen's pixels, to 2); written as all three
+(render_resolution_write), the other factor 1 */
 
 #define RENDER_RESOLUTION_SETTING "display.render_resolution"
 
@@ -475,6 +476,16 @@ static boolean render_resolution_text(char *text, unsigned int size, boolean def
 	{
 		snprintf(text, size, "%s", "original");
 		return TRUE;
+	}
+	if (!default_value)
+	{
+		double below;
+
+		if (config_text("display.render_scale", text, size) && text_is_number(text, &below) && below > 0.0 &&
+			below < 1.0)
+		{
+			return TRUE;
+		}
 	}
 	return default_value ? config_default("display.supersampling", text, size) != 0 :
 		config_text("display.supersampling", text, size) != 0;
@@ -496,12 +507,20 @@ static boolean render_resolution_write(char const *value)
 	}
 	if (original)
 		return TRUE;
-	config_text("display.supersampling", factor, sizeof(factor));
 	if (!text_is_number(value, &number))
 		return FALSE;
-	if (text_is_number(factor, &current) && current == number)
+	/* (below 1 the render scale's, the supersampling 1; else the
+	supersampling's, the render scale 1) */
+	config_text("display.render_scale", factor, sizeof(factor));
+	if (!(text_is_number(factor, &current) && current == (number < 1.0 ? number : 1.0)) &&
+		!config_write("display.render_scale", number < 1.0 ? value : "1.0"))
+	{
+		return FALSE;
+	}
+	config_text("display.supersampling", factor, sizeof(factor));
+	if (text_is_number(factor, &current) && current == (number < 1.0 ? 1.0 : number))
 		return TRUE;
-	return config_write("display.supersampling", value) != 0;
+	return config_write("display.supersampling", number < 1.0 ? "1.0" : value) != 0;
 }
 
 /* ---------- First Person's THIS WEAPON rows (Weapon Position's): the

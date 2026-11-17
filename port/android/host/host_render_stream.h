@@ -89,6 +89,9 @@ struct host_render_backend
 	void (*picture_top)(void *context, uint32_t top);
 	/* display.gamma: the setting (a float's bits), from the next present on */
 	void (*gamma)(void *context, uint32_t gamma);
+	/* display.render_scale: a smaller frame scaled up sharply (1) or
+	smoothly (0), from the next present on */
+	void (*sharp_upscale)(void *context, uint32_t sharp);
 	/* the game's renderer's category of the draws from now on
 	(XGPU_STREAM_CATEGORY's value), for the GPU's timing */
 	void (*category)(void *context, uint32_t category);

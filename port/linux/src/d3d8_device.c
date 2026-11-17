@@ -243,6 +243,48 @@ static float supersampling_wanted(void)
 #endif
 }
 
+/* ---------- display.render_scale on a computer
+
+The screen's targets drawn at this fraction of the display's pixels each
+way, 0.25 to 1, which the display blit scales up (on Vulkan sharply:
+xgpu_vulkan.c's present_sharp): a steadier frame rate on a weak graphics
+card, a handheld or a 4K display. The HUD and menus are drawn into the same
+targets, so at it too. 1 (or 0, unset or not a number) draws the display's
+pixels. It multiplies display.supersampling's factor (Settings' RENDER
+RESOLUTION sets one or the other: menu_functions.c). Android and iOS draw
+it in their hosts instead (a smaller swapchain or drawable). Read between
+frames (halo_screen_commit). */
+
+#define RENDER_SCALE_LEAST 0.25f
+
+static float render_scale_wanted(void)
+{
+#ifdef SUPERSAMPLING
+	static unsigned long read_at = (unsigned long)-1;
+	/* (the setting as last read, and what it gives) */
+	static float setting = 1.0f, factor = 1.0f;
+
+	if (read_at != config_changes())
+	{
+		float value = (float)config_real("display.render_scale");
+
+		read_at = config_changes();
+		if (value != setting)
+		{
+			setting = value;
+			factor = !(value > 0.0f) || value >= 1.0f ? 1.0f : value < RENDER_SCALE_LEAST ? RENDER_SCALE_LEAST : value;
+			if (value > 1.0f || (value > 0.0f && value < RENDER_SCALE_LEAST))
+				platform_log("render scale: %g is outside %g to 1, so %g", value, RENDER_SCALE_LEAST, factor);
+			else
+				platform_log("render scale: %g", factor);
+		}
+	}
+	return factor;
+#else
+	return 1.0f;
+#endif
+}
+
 /* ---------- display.hdr (xgpu_hdr.h)
 
 The frame is drawn in HDR where the backend can (Vulkan and Metal: not the
@@ -759,12 +801,13 @@ static void screen_mode_choose(long *width, float scale[2])
 			scale[0] = scale[1] = scale[0] < scale[1] ? scale[0] : scale[1];
 		/* supersampling: display.supersampling's (or "ssaa2x"'s), or
 		display.panini's, its middle's magnification (above), whichever is
-		more, at most as many pixels as the GPU's largest target has (once
-		it is known), which the display blit scales down; not with
-		"original" resolution scaling, which draws the Xbox's 640x480 (and
-		gives no display_width). Each target's pixels are its units times
-		the scale, rounded (render_target_get): 1.5 at 2560x1440 draws
-		3840x2160 */
+		more, times display.render_scale's fraction, at most as many pixels
+		as the GPU's largest target has (once it is known), which the
+		display blit scales down (or, below 1, up); not with "original"
+		resolution scaling, which draws the Xbox's 640x480 (and gives no
+		display_width). Each target's pixels are its units times the scale,
+		rounded (render_target_get): 1.5 at 2560x1440 draws 3840x2160, a
+		render scale of 0.5 at 1920x1080 draws 960x540 */
 		if (xgpu_backend_capabilities.largest_target > 0)
 		{
 			float factor = supersampling_wanted();
@@ -772,12 +815,13 @@ static void screen_mode_choose(long *width, float scale[2])
 
 			if (factor < panini)
 				factor = panini;
+			factor *= render_scale_wanted();
 			screen_supersampling_asked = factor;
 			if (*width * scale[0] * factor > (float)xgpu_backend_capabilities.largest_target)
 				factor = (float)xgpu_backend_capabilities.largest_target / (*width * scale[0]);
 			if (SCREEN_HEIGHT * scale[1] * factor > (float)xgpu_backend_capabilities.largest_target)
 				factor = (float)xgpu_backend_capabilities.largest_target / (SCREEN_HEIGHT * scale[1]);
-			if (factor > 1.0f)
+			if (factor != 1.0f)
 			{
 				scale[0] *= factor;
 				scale[1] *= factor;
@@ -797,6 +841,9 @@ static void screen_mode_log(long width, const float scale[2])
 			screen_supersampling, screen_supersampling_asked, xgpu_backend_capabilities.largest_target);
 	else if (screen_supersampling > 1.0f)
 		platform_log("screen: %ldx%d drawn at %.0fx%.0f, supersampled %.3gx", width, SCREEN_HEIGHT, width * scale[0],
+			SCREEN_HEIGHT * scale[1], screen_supersampling);
+	else if (screen_supersampling < 1.0f)
+		platform_log("screen: %ldx%d drawn at %.0fx%.0f, render scale %.3g", width, SCREEN_HEIGHT, width * scale[0],
 			SCREEN_HEIGHT * scale[1], screen_supersampling);
 	else
 		platform_log("screen: %ldx%d drawn at %.0fx%.0f", width, SCREEN_HEIGHT, width * scale[0],
@@ -2344,6 +2391,21 @@ static void gamma_send(void)
 #endif
 }
 
+/* display.render_scale: the backend told to scale a smaller frame up
+sharply while the render scale draws below the display's pixels, and
+smoothly otherwise ("original" resolution scaling's 640x480 as it always
+was), as it changes */
+static void sharp_upscale_send(void)
+{
+	static int sent = -1;
+	int sharp = screen_supersampling < 1.0f;
+
+	if (!device.gl_ready || sharp == sent)
+		return;
+	xgpu_backend_sharp_upscale(sharp);
+	sent = sharp;
+}
+
 /* a point in the window, as SDL reports it, in the menus' coordinates: the
 inverse of the letterboxed display blit at presentation, the screen's
 width and the menus' centering (halo_screen_ui_offset); or, not centered,
@@ -2613,7 +2675,11 @@ long halo_screen_commit(void)
 		render_targets_evict();
 	}
 	if (!screen_width)
-		return halo_screen_width();
+	{
+		halo_screen_width();
+		sharp_upscale_send();
+		return screen_width;
+	}
 	screen_mode_choose(&width, scale);
 	if (width != screen_width || scale[0] != screen_scale[0] || scale[1] != screen_scale[1])
 	{
@@ -2630,6 +2696,7 @@ long halo_screen_commit(void)
 		/* (the entries of the old size and scale, which nothing finds now) */
 		render_targets_evict();
 	}
+	sharp_upscale_send();
 	return screen_width;
 }
 
