@@ -98,7 +98,8 @@ target of one sample), the fog and the decals are screen passes over the G-buffe
   as its 16-texel tables are sampled), an object's as its draws' combiners had it (their vertex programs' curves),
   blended as CE's fog pass blends. The level is not drawn again for its fog, and the opaque objects' draws have no fog
   of their own (`rasterizer_xbox_models.c`: no fog constants, the planar fog's vertex program its lights' alike but
-  for the fog, no true atmospheric fog); the sky's models keep theirs, and the transparent geometry its own. With
+  for the fog, no true atmospheric fog); the sky's models keep theirs, an object's blended parts (shader_model's
+  alpha-blended decal, which the G-buffer has not) theirs, and the transparent geometry its own. With
   `XGPU_SCENE_FOG_FLAG_SCREEN`, in the fog screen's place for its second pass (`rasterizer_xbox_environment_fog.c`),
   the fog screen's density (its near and far distances, its near density over its far, whether the level's and the
   objects' pixels take it) written into the colour target's alpha, which the fog screen's layers then blend by as
