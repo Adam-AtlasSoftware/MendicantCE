@@ -7491,6 +7491,17 @@ static float swapchain_levels(void)
 	}
 }
 
+/* the frame is shown smaller than it is (supersampling) by other than 1
+or 2 each way: the last pass scales it down by its area (#1117), where a
+linear blit would skip texels */
+static int present_area_scaled(const struct xgpu_vulkan_image *image, uint32_t width, uint32_t height)
+{
+	uint32_t frame_width = image->description.width, frame_height = image->description.height;
+
+	return (frame_width > width || frame_height > height) &&
+		!((frame_width <= width || frame_width == 2 * width) && (frame_height <= height || frame_height == 2 * height));
+}
+
 /* The frame's last pass for the swapchain (#1108), at the picture's size
 in it (width, height): what it is drawn with (output) and into (format), 0
 where it is not wanted. An HDR swapchain's frame is always encoded (10-bit
@@ -7499,7 +7510,8 @@ display.gamma curves it, or where it has more bits than the swapchain (the
 half floats of display.hdr "on" over an SDR display, display.output_depth's
 RGBA16), and dithered then;
 an 8-bit frame at gamma 1 is the swapchain's codes already, which a dither
-could only add noise to: blitted as before, byte for byte. The pass scales
+could only add noise to: blitted as before, byte for byte, unless it is
+scaled down by other than 1 or 2 (present_area_scaled). The pass scales
 the frame as present_sharp's blits would (its factors), so the dither's
 pattern is drawn at the swapchain's own pixels. */
 static int present_output(const struct xgpu_vulkan_image *image, uint32_t width, uint32_t height,
@@ -7532,7 +7544,8 @@ static int present_output(const struct xgpu_vulkan_image *image, uint32_t width,
 	*format = output->levels == 1023.0f ? XGPU_VULKAN_FORMAT_RGB10A2 : XGPU_VULKAN_FORMAT_BGRA8;
 	if (gamma > 0.0f && gamma != 1.0f)
 		output->power = 1.0f / gamma;
-	return output->power != 1.0f || (output->levels > 0.0f && image->description.format != XGPU_VULKAN_FORMAT_BGRA8);
+	return output->power != 1.0f || (output->levels > 0.0f && image->description.format != XGPU_VULKAN_FORMAT_BGRA8) ||
+		present_area_scaled(image, width, height);
 }
 
 /* the frame's last pass drawn (the options' encode, into an image of its

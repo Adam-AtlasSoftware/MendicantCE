@@ -2565,6 +2565,38 @@ static void deep_window_test(void)
 	reset();
 }
 
+/* #1117: an 8-bit frame at gamma 1 shown smaller than it is by 1.5
+(supersampling: 1920x1080 in a 1280x720 window) is drawn by the last pass,
+which scales it down by its area at the window's pixels, then copied 1:1;
+at 1 and exactly 2 (the negative controls) it is blitted as before, the
+2x blit linear, untouched by any pass */
+static void area_window_test(void)
+{
+	static const uint32_t sizes[3][2] = { { 1920, 1080 }, { 2560, 1440 }, { 1280, 720 } };
+	int which;
+
+	for (which = 0; which < 3; which++)
+	{
+		hdr_window_reset();
+		window_frame.description.width = sizes[which][0];
+		window_frame.description.height = sizes[which][1];
+		assert(window_present_frame() && window_made.imageFormat == VK_FORMAT_B8G8R8A8_UNORM);
+		if (!which)
+		{
+			assert(hdr_encodes == 1 && hdr_encoded_format == XGPU_VULKAN_FORMAT_BGRA8);
+			assert(hdr_encoded_output.width == 1280 && hdr_encoded_output.height == 720);
+			assert(hdr_encoded_output.factors[0] == 1 && hdr_encoded_output.factors[1] == 1);
+			assert(window_blit_source == hdr_encoded.image && window_blit_filter == VK_FILTER_NEAREST);
+		}
+		else
+		{
+			assert(!hdr_encodes && window_blit_source == window_frame.image);
+			assert(window_blit_region.srcOffsets[1].x == (int32_t)sizes[which][0]);
+		}
+	}
+	reset();
+}
+
 /* the HDR metadata set (VK_EXT_hdr_metadata's): its peak and average */
 static unsigned int hdr_metadata_sets;
 static float hdr_metadata_peak_set, hdr_metadata_average_set;
@@ -4002,6 +4034,7 @@ int main(void)
 	hdr_pipeline_test();
 	hdr_window_test();
 	deep_window_test();
+	area_window_test();
 	hdr_white_test();
 	sharp_test();
 	hdr_post_test();

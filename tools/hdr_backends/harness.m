@@ -131,6 +131,9 @@ struct post_uniforms
 	float window[4];
 };
 
+/* the post passes' sampler linear (the backends' own), else nearest */
+static BOOL post_linear;
+
 static void post_draw(id<MTLRenderPipelineState> pipeline, id<MTLTexture> target, id<MTLTexture> source,
 	const struct post_uniforms *uniforms)
 {
@@ -148,7 +151,8 @@ static void post_draw(id<MTLRenderPipelineState> pipeline, id<MTLTexture> target
 	{
 		MTLSamplerDescriptor *sampler = [MTLSamplerDescriptor new];
 
-		sampler.minFilter = sampler.magFilter = MTLSamplerMinMagFilterNearest;
+		sampler.minFilter = sampler.magFilter = post_linear ? MTLSamplerMinMagFilterLinear :
+			MTLSamplerMinMagFilterNearest;
 		[encoder setFragmentTexture:source atIndex:0];
 		[encoder setFragmentSamplerState:[device newSamplerStateWithDescriptor:sampler] atIndex:0];
 	}
@@ -415,6 +419,117 @@ static void depth_test(id<MTLFunction> vertex, id<MTLFunction> encode)
 	free(deep);
 }
 
+/* The last pass's downscale (#1117), drawn by the shipped Vulkan encoding
+into a float target from a checkerboard of single texels (0 and 1), its
+sampler linear as the backends' is. At 1.5 (AREA_SIZE * 3 / 2 texels to
+AREA_SIZE pixels each way) it scales down by area: the mean stays 0.5 and
+no pixel is further from it than the box's own beat over a 1.5 grid (1/18,
+AREA_BEAT); the negative control, the single linear tap the pass had (the
+same arithmetic, in MSL here), leaves a pattern twice as strong. At 1 and
+exactly 2 the pass gives the single tap's values, bit for bit. */
+#define AREA_SIZE 256
+#define AREA_BEAT 0.0600f
+
+static const char tap_source[] =
+	"#include <metal_stdlib>\n"
+	"using namespace metal;\n"
+	"struct post_uniforms { float4 metrics; float4 bounds; float4 hdr; float4 window; };\n"
+	"fragment float4 single_tap(float4 position [[position]], constant post_uniforms &u [[buffer(1)]],\n"
+	"\ttexture2d<float> picture [[texture(0)]], sampler linear [[sampler(0)]])\n"
+	"{\n"
+	"\tfloat2 t = (position.xy - u.metrics.xy) * u.bounds.xy * u.metrics.zw - 0.5;\n"
+	"\tfloat2 j = floor(t);\n"
+	"\treturn float4(picture.sample(linear, (j + 0.5 + (t - j)) / u.bounds.xy, level(0.0)).rgb, 1.0);\n"
+	"}\n";
+
+static void area_test(id<MTLFunction> vertex, id<MTLFunction> encode)
+{
+	static const int sources[3] = { AREA_SIZE * 3 / 2, AREA_SIZE, AREA_SIZE * 2 };
+	NSError *error = nil;
+	id<MTLLibrary> library = [device newLibraryWithSource:[NSString stringWithUTF8String:tap_source]
+		options:[MTLCompileOptions new] error:&error];
+	id<MTLFunction> tap = [library newFunctionWithName:@"single_tap"];
+	id<MTLRenderPipelineState> pipelines[2];
+	float *got[2];
+	int which, kind, x, y;
+
+	pipelines[0] = post_pipeline(vertex, encode, MTLPixelFormatRGBA32Float, MTLColorWriteMaskAll);
+	pipelines[1] = tap ? post_pipeline(vertex, tap, MTLPixelFormatRGBA32Float, MTLColorWriteMaskAll) : nil;
+	got[0] = malloc(AREA_SIZE * AREA_SIZE * 16);
+	got[1] = malloc(AREA_SIZE * AREA_SIZE * 16);
+	if (!pipelines[0] || !pipelines[1] || !got[0] || !got[1])
+	{
+		FAIL("area: the pipelines cannot be made");
+		return;
+	}
+	post_linear = YES;
+	for (which = 0; which < 3; which++)
+	{
+		int size = sources[which];
+		MTLTextureDescriptor *description = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:
+			MTLPixelFormatRGBA16Float width:size height:size mipmapped:NO];
+		id<MTLTexture> source, target;
+		__fp16 *halves = malloc((size_t)size * size * 8);
+		double mean[2] = { 0.0, 0.0 }, beat[2] = { 0.0, 0.0 };
+
+		description.usage = MTLTextureUsageShaderRead;
+		description.storageMode = MTLStorageModeShared;
+		source = [device newTextureWithDescriptor:description];
+		description = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA32Float
+			width:AREA_SIZE height:AREA_SIZE mipmapped:NO];
+		description.usage = MTLTextureUsageRenderTarget;
+		description.storageMode = MTLStorageModeShared;
+		target = [device newTextureWithDescriptor:description];
+		for (y = 0; y < size; y++)
+		{
+			for (x = 0; x < size; x++)
+			{
+				__fp16 value = (__fp16)((x + y) & 1 ? 1.0f : 0.0f);
+
+				halves[(y * size + x) * 4] = halves[(y * size + x) * 4 + 1] = halves[(y * size + x) * 4 + 2] = value;
+				halves[(y * size + x) * 4 + 3] = (__fp16)1.0f;
+			}
+		}
+		[source replaceRegion:MTLRegionMake2D(0, 0, size, size) mipmapLevel:0 withBytes:halves bytesPerRow:size * 8];
+		free(halves);
+		for (kind = 0; kind < 2; kind++)
+		{
+			struct post_uniforms uniforms;
+
+			memset(&uniforms, 0, sizeof(uniforms));
+			uniforms.metrics[2] = uniforms.metrics[3] = 1.0f / AREA_SIZE;
+			uniforms.bounds[0] = uniforms.bounds[1] = (float)size;
+			uniforms.bounds[2] = uniforms.bounds[3] = 1.0f;
+			uniforms.hdr[0] = uniforms.hdr[1] = uniforms.hdr[3] = 1.0f;
+			uniforms.hdr[2] = (float)XGPU_HDR_OUTPUT_SDR;
+			uniforms.window[2] = 1.0f;
+			post_draw(pipelines[kind], target, source, &uniforms);
+			[target getBytes:got[kind] bytesPerRow:AREA_SIZE * 16 fromRegion:MTLRegionMake2D(0, 0, AREA_SIZE, AREA_SIZE)
+				mipmapLevel:0];
+			for (x = 0; x < AREA_SIZE * AREA_SIZE; x++)
+			{
+				mean[kind] += got[kind][x * 4 + 1];
+				if (fabs(got[kind][x * 4 + 1] - 0.5) > beat[kind])
+					beat[kind] = fabs(got[kind][x * 4 + 1] - 0.5);
+			}
+			mean[kind] /= AREA_SIZE * AREA_SIZE;
+		}
+		if (which == 0)
+		{
+			if (fabs(mean[0] - 0.5) > 0.002 || beat[0] > AREA_BEAT)
+				FAIL("area (1.5): the mean %.4f, a pixel %.4f off it: the downscale skips texels", mean[0], beat[0]);
+			if (beat[1] < 2.0 * AREA_BEAT)
+				FAIL("area (1.5, the single tap): a pixel only %.4f off the mean: the control shows no pattern", beat[1]);
+			printf("area: at 1.5 the mean %.4f, the pattern %.4f (the single tap's %.4f)\n", mean[0], beat[0], beat[1]);
+		}
+		else if (memcmp(got[0], got[1], AREA_SIZE * AREA_SIZE * 16))
+			FAIL("area (%s): not the single tap's values", which == 1 ? "1" : "2");
+	}
+	post_linear = NO;
+	free(got[0]);
+	free(got[1]);
+}
+
 static void post_test(NSString *dir)
 {
 	static const float peaks[3] = { 1.0f, 4.0f, 16.0f };
@@ -591,6 +706,7 @@ static void post_test(NSString *dir)
 	printf("post: %d values checked against the reference\n", checked);
 	dither_test(vertex, encode);
 	depth_test(vertex, encode);
+	area_test(vertex, encode);
 }
 
 /* ---------- the draws */
