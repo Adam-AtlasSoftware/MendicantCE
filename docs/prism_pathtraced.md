@@ -120,7 +120,12 @@ The denoise step has one call site in `xgpu_vulkan_pt_frame`: the plugins' denoi
 
 `debug.pt_reference N` in this mode (the request comes as with `display.prism_rt`, RT_FRAME's, `prism_rt.c`) traces at
 every pixel the same scene, materials and lights unbiased with no bake, no reuse and no denoiser (the table's last
-column), `HALO_PT_REFERENCE_PATHS` paths a pixel a frame (1 by default), and sums them as running means (Welford's,
+column). Its lamps are reached by next-event estimation alone: at the pixel and at every hit a lamp's point is
+resampled from 8 (4 at a hit) candidates of the grid's mixture, which can pick every lamp, by their unshadowed light
+there (at the pixel the GGX lobe's with the diffuse), and a ray that meets a lamp's triangle takes only its glow. That
+is unbiased without weighing a lamp met by a sampled direction against its next-event estimate (multiple importance
+sampling): the surfaces a path meets are diffuse (the bake's albedo), where next-event estimation is the better
+sampler, and the pixel's glossy lobe is in the resampling's target. It `HALO_PT_REFERENCE_PATHS` paths a pixel a frame (1 by default), and sums them as running means (Welford's,
 so a long sum keeps its precision). Every 32 frames it measures its own noise: each pixel's variance of its
 luminance's mean over the sum of the means squared, the frame's estimated relative MSE (linear, before the tone curve:
 stricter than the 8-bit frame's). It stops once that is at most 0.001 (the gates' `reference_noise`) with 64 frames
@@ -146,9 +151,13 @@ does their means every 600 frames.
 ## What is not done yet
 
 - **Moving objects in the trace.** The traced scene is the bake's: the level and the static scenery. The moving
-  objects (vehicles, doors, the player's weapons on the ground, bodies) are lit, but cast no traced shadow and are not
-  hit by rays; the reference has the same scene, so the gates compare like with like. The old tracer's object capture
-  (`xgpu_vulkan_rt.c`) builds its structure from world AO's pre-pass, which this mode does not draw.
+  objects (vehicles, doors and other devices, weapons on the ground, bodies) are lit, but cast no traced shadow, are
+  not hit by rays and do not occlude the bake's light; the reference has the same scene, so the gates compare like
+  with like. The design (section 8.1) keeps `prism-pt`'s GPU object capture, skinning and per-draw acceleration
+  structures as the scene's instance manager; they live in `xgpu_vulkan_rt.c` and are fed by world AO's pre-pass,
+  which this mode does not draw. Feeding them from the G-buffer pass's object draws (an RT_FRAME mode that builds the
+  objects' structure and traces nothing) is the short way; a new instance manager the long one. The first touches the
+  frozen RT backend's file (not its modes), so it waits for a decision.
 - **ReSTIR's spatial reuse** (left out on purpose, above) and the unbiased (ray-traced) reuse's correction.
 - **ReSTIR GI** (`quality`'s bounce reuse), the dynamic objects' occlusion of the baked light (`performance`'s short
   AO rays), traced-light upscaling and the async queue (M5, M6).
