@@ -51,18 +51,28 @@ enum
 	INPUT_DISPLAY_RIGHT_MARGIN = 8,
 	INPUT_DISPLAY_BOTTOM_MARGIN = 34,
 	INPUT_DISPLAY_PADDING = 3,
-	/* the stick boxes' size, the trigger bar's width, the gap between
-	them */
-	INPUT_DISPLAY_BOX = 30,
+	/* the move's and the look's boxes' size, the trigger bar's width, the
+	gap between them */
+	INPUT_DISPLAY_BOX_WIDTH = 38,
+	INPUT_DISPLAY_BOX_HEIGHT = 32,
 	INPUT_DISPLAY_BAR = 8,
 	INPUT_DISPLAY_GAP = 2,
-	/* the actions' cells: four a row, two rows */
-	INPUT_DISPLAY_CELL_WIDTH = 30,
-	INPUT_DISPLAY_CELL_HEIGHT = 13,
+	/* the actions' cells: four a row, two rows, wide enough for a label of
+	three letters of the terminal font with room either side
+	(test_input_display.py's fit) */
+	INPUT_DISPLAY_CELL_WIDTH = 36,
+	INPUT_DISPLAY_CELL_HEIGHT = 14,
 	INPUT_DISPLAY_CELLS_A_ROW = 4,
-	/* the dot's size, the keys' */
+	/* the dot's size; the W, A, S, D keys', three across the move's box, a
+	letter each */
 	INPUT_DISPLAY_DOT = 4,
-	INPUT_DISPLAY_KEY = 9,
+	INPUT_DISPLAY_KEY_WIDTH = 12,
+	INPUT_DISPLAY_KEY_HEIGHT = 14,
+	INPUT_DISPLAY_KEY_GAP = 1,
+	/* the panel's size */
+	INPUT_DISPLAY_WIDTH = INPUT_DISPLAY_CELLS_A_ROW * INPUT_DISPLAY_CELL_WIDTH +
+		(INPUT_DISPLAY_CELLS_A_ROW - 1) * INPUT_DISPLAY_GAP,
+	INPUT_DISPLAY_HEIGHT = INPUT_DISPLAY_BOX_HEIGHT + 2 * (INPUT_DISPLAY_GAP + INPUT_DISPLAY_CELL_HEIGHT),
 	/* draw_string.c's centred text (its enum is its own) */
 	_input_display_text_center = 2
 };
@@ -118,6 +128,18 @@ struct input_display_player
 	boolean have_facing;
 	real last_yaw;
 	real last_pitch;
+};
+
+/* where the panel's parts are drawn in a view (input_display_layout) */
+struct input_display_layout
+{
+	rectangle2d panel;
+	rectangle2d move;
+	rectangle2d look;
+	rectangle2d bar;
+	rectangle2d fire;
+	rectangle2d keys[NUMBER_OF_INPUT_DISPLAY_KEYS];
+	rectangle2d cells[NUMBER_OF_INPUT_DISPLAY_ACTIONS];
 };
 
 /* ---------- globals */
@@ -224,99 +246,116 @@ static boolean input_display_enabled(
 	return enabled;
 }
 
-static void input_display_box(
+static void input_display_rectangle(
+	rectangle2d *rectangle,
 	short x0,
 	short y0,
 	short width,
-	short height,
-	pixel32 color)
+	short height)
 {
-	rectangle2d box;
-
-	box.x0 = x0;
-	box.y0 = y0;
-	box.x1 = (short)(x0 + width);
-	box.y1 = (short)(y0 + height);
-	draw_quad(&box, color);
+	rectangle->x0 = x0;
+	rectangle->y0 = y0;
+	rectangle->x1 = (short)(x0 + width);
+	rectangle->y1 = (short)(y0 + height);
 }
 
+/* the panel's parts, its bottom right corner at right, bottom (the view's
+coordinates) */
+static void input_display_layout(
+	short right,
+	short bottom,
+	struct input_display_layout *layout)
+{
+	short left = (short)(right - INPUT_DISPLAY_WIDTH);
+	short top = (short)(bottom - INPUT_DISPLAY_HEIGHT);
+	short keys_left = (short)(left + (INPUT_DISPLAY_BOX_WIDTH - 3 * INPUT_DISPLAY_KEY_WIDTH -
+		2 * INPUT_DISPLAY_KEY_GAP) / 2);
+	short keys_top = (short)(top + (INPUT_DISPLAY_BOX_HEIGHT - 2 * INPUT_DISPLAY_KEY_HEIGHT -
+		INPUT_DISPLAY_KEY_GAP) / 2);
+	short key_step = INPUT_DISPLAY_KEY_WIDTH + INPUT_DISPLAY_KEY_GAP;
+	short row_step = INPUT_DISPLAY_KEY_HEIGHT + INPUT_DISPLAY_KEY_GAP;
+	short x;
+	short index;
+
+	input_display_rectangle(&layout->panel, (short)(left - INPUT_DISPLAY_PADDING), (short)(top - INPUT_DISPLAY_PADDING),
+		(short)(INPUT_DISPLAY_WIDTH + 2 * INPUT_DISPLAY_PADDING), (short)(INPUT_DISPLAY_HEIGHT + 2 * INPUT_DISPLAY_PADDING));
+	input_display_rectangle(&layout->move, left, top, INPUT_DISPLAY_BOX_WIDTH, INPUT_DISPLAY_BOX_HEIGHT);
+	x = (short)(left + INPUT_DISPLAY_BOX_WIDTH + INPUT_DISPLAY_GAP);
+	input_display_rectangle(&layout->look, x, top, INPUT_DISPLAY_BOX_WIDTH, INPUT_DISPLAY_BOX_HEIGHT);
+	x = (short)(x + INPUT_DISPLAY_BOX_WIDTH + INPUT_DISPLAY_GAP);
+	input_display_rectangle(&layout->bar, x, top, INPUT_DISPLAY_BAR, INPUT_DISPLAY_BOX_HEIGHT);
+	x = (short)(x + INPUT_DISPLAY_BAR + INPUT_DISPLAY_GAP);
+	input_display_rectangle(&layout->fire, x, top, (short)(right - x), INPUT_DISPLAY_CELL_HEIGHT);
+	input_display_rectangle(&layout->keys[_input_display_key_forward], (short)(keys_left + key_step), keys_top,
+		INPUT_DISPLAY_KEY_WIDTH, INPUT_DISPLAY_KEY_HEIGHT);
+	input_display_rectangle(&layout->keys[_input_display_key_left], keys_left, (short)(keys_top + row_step),
+		INPUT_DISPLAY_KEY_WIDTH, INPUT_DISPLAY_KEY_HEIGHT);
+	input_display_rectangle(&layout->keys[_input_display_key_backward], (short)(keys_left + key_step),
+		(short)(keys_top + row_step), INPUT_DISPLAY_KEY_WIDTH, INPUT_DISPLAY_KEY_HEIGHT);
+	input_display_rectangle(&layout->keys[_input_display_key_right], (short)(keys_left + 2 * key_step),
+		(short)(keys_top + row_step), INPUT_DISPLAY_KEY_WIDTH, INPUT_DISPLAY_KEY_HEIGHT);
+	for (index = 0; index < NUMBER_OF_INPUT_DISPLAY_ACTIONS; index++)
+	{
+		input_display_rectangle(&layout->cells[index],
+			(short)(left + (index % INPUT_DISPLAY_CELLS_A_ROW) * (INPUT_DISPLAY_CELL_WIDTH + INPUT_DISPLAY_GAP)),
+			(short)(top + INPUT_DISPLAY_BOX_HEIGHT + INPUT_DISPLAY_GAP +
+				(index / INPUT_DISPLAY_CELLS_A_ROW) * (INPUT_DISPLAY_CELL_HEIGHT + INPUT_DISPLAY_GAP)),
+			INPUT_DISPLAY_CELL_WIDTH, INPUT_DISPLAY_CELL_HEIGHT);
+	}
+}
+
+static void input_display_fill(
+	rectangle2d const *rectangle,
+	pixel32 color)
+{
+	rectangle2d copy = *rectangle;
+
+	draw_quad(&copy, color);
+}
+
+/* a label centred in its rectangle (the text's box a unit higher and two
+taller, as the terminal font's capitals sit) */
 static void input_display_label(
 	long font_index,
-	short x0,
-	short y0,
-	short width,
-	short height,
+	rectangle2d const *rectangle,
 	wchar_t const *text,
 	boolean lit)
 {
 	real_argb_color color;
-	rectangle2d bounds;
+	rectangle2d bounds = *rectangle;
 
 	if (font_index == NONE)
 		return;
 	color.alpha = 1.0f;
 	color.red = color.green = color.blue = lit ? 1.0f : 0.6f;
-	bounds.x0 = x0;
-	bounds.x1 = (short)(x0 + width);
-	bounds.y0 = y0;
-	bounds.y1 = (short)(y0 + height);
+	bounds.y0 = (short)(bounds.y0 - 1);
+	bounds.y1 = (short)(bounds.y1 + 1);
 	draw_string_set_draw_mode(font_index, NONE, _input_display_text_center, 0, &color);
 	rasterizer_draw_unicode_string(&bounds, NULL, NULL, 0, text);
 }
 
 /* a box with a dot at x, y (each -1 to 1, y up) from its middle */
 static void input_display_stick(
-	short x0,
-	short y0,
+	rectangle2d const *box,
 	real x,
 	real y)
 {
-	short middle_x = (short)(x0 + INPUT_DISPLAY_BOX / 2);
-	short middle_y = (short)(y0 + INPUT_DISPLAY_BOX / 2);
-	short reach = (short)(INPUT_DISPLAY_BOX / 2 - INPUT_DISPLAY_DOT / 2 - 1);
+	rectangle2d line, dot;
+	short middle_x = (short)((box->x0 + box->x1) / 2);
+	short middle_y = (short)((box->y0 + box->y1) / 2);
+	short reach_x = (short)((box->x1 - box->x0) / 2 - INPUT_DISPLAY_DOT / 2 - 1);
+	short reach_y = (short)((box->y1 - box->y0) / 2 - INPUT_DISPLAY_DOT / 2 - 1);
 
-	input_display_box(x0, y0, INPUT_DISPLAY_BOX, INPUT_DISPLAY_BOX, 0x60303030);
-	input_display_box(x0, middle_y, INPUT_DISPLAY_BOX, 1, 0x40FFFFFF);
-	input_display_box(middle_x, y0, 1, INPUT_DISPLAY_BOX, 0x40FFFFFF);
+	input_display_fill(box, 0x60303030);
+	input_display_rectangle(&line, box->x0, middle_y, (short)(box->x1 - box->x0), 1);
+	input_display_fill(&line, 0x40FFFFFF);
+	input_display_rectangle(&line, middle_x, box->y0, 1, (short)(box->y1 - box->y0));
+	input_display_fill(&line, 0x40FFFFFF);
 	x = PIN(x, -1.0f, 1.0f);
 	y = PIN(y, -1.0f, 1.0f);
-	input_display_box((short)(middle_x + (short)(x * reach) - INPUT_DISPLAY_DOT / 2),
-		(short)(middle_y - (short)(y * reach) - INPUT_DISPLAY_DOT / 2), INPUT_DISPLAY_DOT, INPUT_DISPLAY_DOT,
-		0xFFFFFFFF);
-}
-
-/* the W, A, S, D keys in the move's box */
-static void input_display_keys(
-	long font_index,
-	short x0,
-	short y0,
-	unsigned long lit)
-{
-	static wchar_t const *const names[NUMBER_OF_INPUT_DISPLAY_KEYS] = { L"W", L"A", L"S", L"D" };
-	short places[NUMBER_OF_INPUT_DISPLAY_KEYS][2];
-	short step = INPUT_DISPLAY_KEY + 1;
-	short left = (short)(x0 + (INPUT_DISPLAY_BOX - 3 * step + 1) / 2);
-	short top = (short)(y0 + (INPUT_DISPLAY_BOX - 2 * step + 1) / 2);
-	short key;
-
-	places[_input_display_key_forward][0] = (short)(left + step);
-	places[_input_display_key_forward][1] = top;
-	places[_input_display_key_left][0] = left;
-	places[_input_display_key_left][1] = (short)(top + step);
-	places[_input_display_key_backward][0] = (short)(left + step);
-	places[_input_display_key_backward][1] = (short)(top + step);
-	places[_input_display_key_right][0] = (short)(left + 2 * step);
-	places[_input_display_key_right][1] = (short)(top + step);
-	input_display_box(x0, y0, INPUT_DISPLAY_BOX, INPUT_DISPLAY_BOX, 0x60303030);
-	for (key = 0; key < NUMBER_OF_INPUT_DISPLAY_KEYS; key++)
-	{
-		boolean on = (lit & (1UL << key)) != 0;
-
-		input_display_box(places[key][0], places[key][1], INPUT_DISPLAY_KEY, INPUT_DISPLAY_KEY,
-			on ? 0xE03C8CDC : 0x60505050);
-		input_display_label(font_index, places[key][0], (short)(places[key][1] - 2), INPUT_DISPLAY_KEY,
-			INPUT_DISPLAY_KEY + 2, names[key], on);
-	}
+	input_display_rectangle(&dot, (short)(middle_x + (short)(x * reach_x) - INPUT_DISPLAY_DOT / 2),
+		(short)(middle_y - (short)(y * reach_y) - INPUT_DISPLAY_DOT / 2), INPUT_DISPLAY_DOT, INPUT_DISPLAY_DOT);
+	input_display_fill(&dot, 0xFFFFFFFF);
 }
 
 /* ---------- public code */
@@ -338,12 +377,10 @@ void input_display_draw(
 	long player_index,
 	long font_index)
 {
+	static wchar_t const *const key_names[NUMBER_OF_INPUT_DISPLAY_KEYS] = { L"W", L"A", L"S", L"D" };
 	struct input_display_player const *player;
+	struct input_display_layout layout;
 	short absolute_index;
-	short width = INPUT_DISPLAY_CELLS_A_ROW * INPUT_DISPLAY_CELL_WIDTH +
-		(INPUT_DISPLAY_CELLS_A_ROW - 1) * INPUT_DISPLAY_GAP;
-	short height = INPUT_DISPLAY_BOX + 2 * (INPUT_DISPLAY_GAP + INPUT_DISPLAY_CELL_HEIGHT);
-	short right, bottom, left, top, x, y;
 	unsigned long held;
 	short index;
 
@@ -356,33 +393,47 @@ void input_display_draw(
 	if (!player->valid)
 		return;
 
-	/* (the view's coordinates, as the match timer's) */
-	right = (short)(render.camera.window_bounds.x1 - render.camera.viewport_bounds.x0 - INPUT_DISPLAY_RIGHT_MARGIN);
-	bottom = (short)(render.camera.window_bounds.y1 - render.camera.viewport_bounds.y0 - INPUT_DISPLAY_BOTTOM_MARGIN);
-	left = (short)(right - width);
-	top = (short)(bottom - height);
-	input_display_box((short)(left - INPUT_DISPLAY_PADDING), (short)(top - INPUT_DISPLAY_PADDING),
-		(short)(width + 2 * INPUT_DISPLAY_PADDING), (short)(height + 2 * INPUT_DISPLAY_PADDING), 0x80000000);
+	/* (the view's coordinates, as the match timer's; none in a view too
+	small to hold it) */
+	input_display_layout(
+		(short)(render.camera.window_bounds.x1 - render.camera.viewport_bounds.x0 - INPUT_DISPLAY_RIGHT_MARGIN),
+		(short)(render.camera.window_bounds.y1 - render.camera.viewport_bounds.y0 - INPUT_DISPLAY_BOTTOM_MARGIN),
+		&layout);
+	if (layout.panel.x0 < render.camera.window_bounds.x0 - render.camera.viewport_bounds.x0 ||
+		layout.panel.y0 < render.camera.window_bounds.y0 - render.camera.viewport_bounds.y0)
+	{
+		return;
+	}
+	input_display_fill(&layout.panel, 0x80000000);
 
 	/* the move, the look and the trigger */
 	if (input_display_keyboard_style(local_player_index, halo_keyboard_prompts() != 0, demo_playing()))
-		input_display_keys(font_index, left, top, input_display_keys_lit(&player->action));
-	else
-		input_display_stick(left, top, -player->action.throttle.j, player->action.throttle.i);
-	x = (short)(left + INPUT_DISPLAY_BOX + INPUT_DISPLAY_GAP);
-	input_display_stick(x, top, -player->turn_yaw / INPUT_DISPLAY_FULL_TURN,
-		player->turn_pitch / INPUT_DISPLAY_FULL_TURN);
-	x = (short)(x + INPUT_DISPLAY_BOX + INPUT_DISPLAY_GAP);
-	input_display_box(x, top, INPUT_DISPLAY_BAR, INPUT_DISPLAY_BOX, 0x60303030);
 	{
-		short pull = (short)(PIN(player->action.primary_trigger, 0.0f, 1.0f) * INPUT_DISPLAY_BOX + 0.5f);
+		unsigned long lit = input_display_keys_lit(&player->action);
 
-		if (pull > 0)
-			input_display_box(x, (short)(top + INPUT_DISPLAY_BOX - pull), INPUT_DISPLAY_BAR, pull, 0xE0DC5A3C);
+		input_display_fill(&layout.move, 0x60303030);
+		for (index = 0; index < NUMBER_OF_INPUT_DISPLAY_KEYS; index++)
+		{
+			boolean on = (lit & (1UL << index)) != 0;
+
+			input_display_fill(&layout.keys[index], on ? 0xE03C8CDC : 0x60505050);
+			input_display_label(font_index, &layout.keys[index], key_names[index], on);
+		}
 	}
-	input_display_label(font_index, (short)(x + INPUT_DISPLAY_BAR + INPUT_DISPLAY_GAP), top,
-		(short)(right - x - INPUT_DISPLAY_BAR - INPUT_DISPLAY_GAP), INPUT_DISPLAY_CELL_HEIGHT, L"FIRE",
-		player->action.primary_trigger > 0.0f);
+	else
+		input_display_stick(&layout.move, -player->action.throttle.j, player->action.throttle.i);
+	input_display_stick(&layout.look, -player->turn_yaw / INPUT_DISPLAY_FULL_TURN,
+		player->turn_pitch / INPUT_DISPLAY_FULL_TURN);
+	input_display_fill(&layout.bar, 0x60303030);
+	{
+		short pull = (short)(PIN(player->action.primary_trigger, 0.0f, 1.0f) * INPUT_DISPLAY_BOX_HEIGHT + 0.5f);
+		rectangle2d filled = layout.bar;
+
+		filled.y0 = (short)(filled.y1 - pull);
+		if (pull > 0)
+			input_display_fill(&filled, 0xE0DC5A3C);
+	}
+	input_display_label(font_index, &layout.fire, L"FIRE", player->action.primary_trigger > 0.0f);
 
 	/* the actions held */
 	held = input_display_actions_held(&player->action);
@@ -390,11 +441,7 @@ void input_display_draw(
 	{
 		boolean on = (held & (1UL << index)) != 0;
 
-		x = (short)(left + (index % INPUT_DISPLAY_CELLS_A_ROW) * (INPUT_DISPLAY_CELL_WIDTH + INPUT_DISPLAY_GAP));
-		y = (short)(top + INPUT_DISPLAY_BOX + INPUT_DISPLAY_GAP +
-			(index / INPUT_DISPLAY_CELLS_A_ROW) * (INPUT_DISPLAY_CELL_HEIGHT + INPUT_DISPLAY_GAP));
-		input_display_box(x, y, INPUT_DISPLAY_CELL_WIDTH, INPUT_DISPLAY_CELL_HEIGHT, on ? 0xE03C8CDC : 0x60303030);
-		input_display_label(font_index, x, (short)(y - 1), INPUT_DISPLAY_CELL_WIDTH, INPUT_DISPLAY_CELL_HEIGHT + 2,
-			input_display_action_names[index], on);
+		input_display_fill(&layout.cells[index], on ? 0xE03C8CDC : 0x60303030);
+		input_display_label(font_index, &layout.cells[index], input_display_action_names[index], on);
 	}
 }

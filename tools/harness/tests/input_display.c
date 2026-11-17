@@ -26,6 +26,29 @@ static unsigned long config_changes(void) { return (unsigned long)setting_on; }
 
 static struct player_action actions[HALO_PORT_MAXIMUM_NETWORK_PLAYERS];
 
+/* the terminal font's capitals as the HUD draws them (high-res text's Hack
+Bold), in the HUD's units: measured in the first picture, "GRN" 54 pixels
+wide at 2.2 pixels a unit, its capitals 20 pixels tall */
+#define GLYPH_WIDTH 8.2f
+#define GLYPH_HEIGHT 9.0f
+/* the room a label keeps either side of it, a key's letter */
+#define LABEL_PADDING 3.0f
+#define KEY_PADDING 1.5f
+
+static boolean inside(rectangle2d const *rectangle, short x0, short y0, short x1, short y1)
+{
+	return rectangle->x0 >= x0 && rectangle->y0 >= y0 && rectangle->x1 <= x1 && rectangle->y1 <= y1 &&
+		rectangle->x0 < rectangle->x1 && rectangle->y0 < rectangle->y1;
+}
+
+/* a label of so many capitals fits with padding either side, and its
+capitals' height with a unit above and below */
+static boolean fits(rectangle2d const *rectangle, short letters, real padding)
+{
+	return rectangle->x1 - rectangle->x0 >= letters * GLYPH_WIDTH + 2 * padding &&
+		rectangle->y1 - rectangle->y0 >= GLYPH_HEIGHT + 2;
+}
+
 static void reset(void)
 {
 	memset(actions, 0, sizeof(actions));
@@ -99,6 +122,52 @@ int main(int argc, char **argv)
 		input_display_tick(actions, HALO_PORT_MAXIMUM_NETWORK_PLAYERS);
 		CHECK(input_display_players[5].turn_yaw == 0.0f && input_display_players[5].turn_pitch == 0.0f,
 			"turn %g %g", input_display_players[5].turn_yaw, input_display_players[5].turn_pitch);
+		return 0;
+	}
+	/* the panel at every screen shape and split, its labels inside their
+	cells with room either side, the panel inside the view (views in the
+	HUD's 480 lines: 4:3, 16:9 and 21:9, whole, halved (2 players) and
+	quartered (4 players)) */
+	CASE("fit")
+	{
+		static short const widths[] = { 640, 854, 1120 };
+		static short const heights[] = { 480, 240 };
+		short shape, split, quarter, index;
+
+		for (shape = 0; shape < 3; shape++)
+		for (split = 0; split < 2; split++)
+		for (quarter = 0; quarter < 2; quarter++)
+		{
+			short width = (short)(quarter ? widths[shape] / 2 : widths[shape]);
+			short height = heights[split || quarter];
+			struct input_display_layout layout;
+
+			input_display_layout((short)(width - INPUT_DISPLAY_RIGHT_MARGIN),
+				(short)(height - INPUT_DISPLAY_BOTTOM_MARGIN), &layout);
+			CHECK(inside(&layout.panel, 0, 0, width, height), "the panel outside a %dx%d view", width, height);
+			CHECK(inside(&layout.move, layout.panel.x0, layout.panel.y0, layout.panel.x1, layout.panel.y1) &&
+				inside(&layout.look, layout.panel.x0, layout.panel.y0, layout.panel.x1, layout.panel.y1) &&
+				inside(&layout.fire, layout.panel.x0, layout.panel.y0, layout.panel.x1, layout.panel.y1),
+				"the boxes outside the panel");
+			CHECK(fits(&layout.fire, 4, LABEL_PADDING), "FIRE does not fit its room");
+			for (index = 0; index < NUMBER_OF_INPUT_DISPLAY_ACTIONS; index++)
+			{
+				CHECK(inside(&layout.cells[index], layout.panel.x0, layout.panel.y0, layout.panel.x1,
+					layout.panel.y1), "cell %d outside the panel", index);
+				CHECK(fits(&layout.cells[index], 3, LABEL_PADDING), "cell %d: %d wide, its label %.1f",
+					index, layout.cells[index].x1 - layout.cells[index].x0, 3 * GLYPH_WIDTH);
+				CHECK(index % INPUT_DISPLAY_CELLS_A_ROW == 0 ||
+					layout.cells[index].x0 >= layout.cells[index - 1].x1, "cells %d and %d overlap", index - 1,
+					index);
+			}
+			for (index = 0; index < NUMBER_OF_INPUT_DISPLAY_KEYS; index++)
+			{
+				CHECK(inside(&layout.keys[index], layout.move.x0, layout.move.y0, layout.move.x1, layout.move.y1),
+					"key %d outside the move's box", index);
+				CHECK(fits(&layout.keys[index], 1, KEY_PADDING), "key %d: %d wide", index,
+					layout.keys[index].x1 - layout.keys[index].x0);
+			}
+		}
 		return 0;
 	}
 	/* the keys by the move: forward and to the left, then back and right */
