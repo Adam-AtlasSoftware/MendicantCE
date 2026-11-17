@@ -148,7 +148,10 @@ environment shader of the level and every model shader of its characters (`chara
    roughness and occlusion mixed in.
 5. **The files**: `materials/<tag>.pack.json`, `textures/prism_v4/<tag>/{albedo,normal,orm,height}.ktx2` (BC7, BC5,
    BC7, BC4, every level), the environment shaders' detail maps once each (`textures/prism_v4/details/<bitmap>.ktx2`,
-   BC7), and a report per level (`reports/<level>.json`: each shader's gate, R², strength, roughness spread, what was
+   BC7, with CE's own mip levels: the step extracts the detail maps with every level, `map_extract --only bitmaps
+   --mips`, into `extract_v4_mips`; CE's levels fade toward grey, so that a far surface keeps its base colour, where a
+   chain halved from the first level would keep the map's mean: b30's metal scratches, 0.91 on average, would
+   lighten every far metal wall by up to 1.8), and a report per level (`reports/<level>.json`: each shader's gate, R², strength, roughness spread, what was
    skipped and why). A shader whose texture moves (CE's texture animation) or that has no base map is left to the
    automatic tier.
 

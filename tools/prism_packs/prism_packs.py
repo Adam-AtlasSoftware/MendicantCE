@@ -1264,8 +1264,20 @@ def step_v4_materials(ctx):
             shaders = ctx.w("extract_v4", level)
 
         def build(level=level, shaders=shaders):
+            # (the environment shaders' detail maps with every level: CE's own, which fade toward grey)
+            details = sorted({shader["maps"][slot] for path in shaders.joinpath("shaders").rglob("*.json")
+                              for shader in [json.loads(path.read_text())] if shader.get("group") == "senv"
+                              for slot in ("primary_detail_map", "secondary_detail_map", "micro_detail_map")
+                              if shader.get("maps", {}).get(slot)})
+            mips = []
+            if details:
+                ensure_extractor(ctx)
+                ctx.extract_run("--data", ctx.data, "--out", ctx.w("extract_v4_mips"), "--only", "bitmaps", "--mips",
+                                *[arg for tag in details for arg in ("--tag", tag)], level,
+                                what=f"{level}: its environment shaders' {len(details)} detail maps, every level")
+                mips = ["--detail-mips", ctx.w("extract_v4_mips", level)]
             ctx.python("prism_v4_materials.py", "build", "--extract", ctx.w("extract", level), "--shaders", shaders,
-                       "--out", out, "--packs", ctx.out / "mods", "--workers", min(4, os.cpu_count() or 1),
+                       *mips, "--out", out, "--packs", ctx.out / "mods", "--workers", min(4, os.cpu_count() or 1),
                        what=f"{level}: the materials (de-lit colour, normal, roughness and metal; the gate)")
         ctx.once(level, build)
     write_mod(out, "prism_v4_materials", "PRISM v4 materials (local)", "1",

@@ -15,7 +15,9 @@ upscaled characters, Bold's surface maps, the material overlay's classes). For e
                  the relief's cavities and edges; a model's by the overlay's classes and its surface map
     height.ktx2  the height of CE's bump map (BC4, Frankot-Chellappa), 0.5 the surface
   and an environment shader's detail maps as CE draws them (textures\\prism_v4\\details\\<bitmap tag>.ktx2),
-  blended by CE's own type, functions and scales at run time ("ce").
+  blended by CE's own type, functions and scales at run time ("ce"), with CE's own mip levels where the extract
+  has them (--detail-mips: a detail map's levels fade toward grey, so that a far surface keeps its base colour;
+  a chain filtered from level 0 would keep the map's mean, and a bright one would lighten every far surface).
 
 The de-lighting: an environment base map's painted relief light, regressed on its own bump map's relief (cavity,
 slope, facing) above a sixteenth of the map, divided out where the fit explains a tenth of the fine detail at
@@ -25,7 +27,8 @@ by CE's detail function) against CE's, at most 1.0 on average and 3 at the 95th 
 is left to the automatic tier (no file), and the report says so. Roughness is kept in its material type's band.
 
   prism_v4_materials.py build --extract <work>/extract/<map> --shaders <work>/extract_v4/<map> \\
-      --out <data>/mods/prism_v4_materials [--packs <data>/mods] [--workers 4] [--side 2048] [--again]
+      --out <data>/mods/prism_v4_materials [--detail-mips <work>/extract_v4_mips/<map>] [--packs <data>/mods] \\
+      [--workers 4] [--side 2048] [--again]
   prism_v4_materials.py check   the encoders and the gate's maths on made-up pictures
 
 numpy and Pillow only. Everything it writes is made from the player's maps: it stays on the player's machine.
@@ -278,7 +281,10 @@ def ktx2_write(path, vk, width, height, levels):
     out += body
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(bytes(out))
+    # (whole or not at all: shaders share their detail maps, and the workers may write one at once)
+    partial = path.with_name(f"{path.name}.{os.getpid()}.partial")
+    partial.write_bytes(bytes(out))
+    os.replace(partial, path)
     return len(out)
 
 
@@ -295,6 +301,20 @@ def chain_rgba(rgba):
 def write_bc7(path, rgba):
     levels = chain_rgba(rgba)
     return ktx2_write(path, VK_BC7, rgba.shape[1], rgba.shape[0], [texstore_synth.bc7_encode(level) for level in levels])
+
+
+def write_bc7_chain(path, levels):
+    """a chain of levels made before (RGBA uint8, the largest first: CE's own), as BC7, carried on to 1 x 1 by halving
+    its last; False (nothing written) where they are not a power-of-two chain"""
+    h, w = levels[0].shape[:2]
+    if w & (w - 1) or h & (h - 1):
+        return False
+    for k, level in enumerate(levels):
+        if level.shape[:2] != (max(1, h >> k), max(1, w >> k)):
+            return False
+    levels = list(levels[:-1]) + chain_rgba(levels[-1])
+    ktx2_write(path, VK_BC7, w, h, [texstore_synth.bc7_encode(level) for level in levels])
+    return True
 
 
 def write_normal(path, normals):
@@ -344,6 +364,22 @@ def bitmap_png(extract, tag, index=0):
         return None
     path = extract / bitmaps[index]["png"][0]
     return path if path.is_file() else None
+
+
+def bitmap_levels(extract, tag, index=0):
+    """a bitmap tag's bitmap's levels (2D: level 0, then _mip1, _mip2, ...) in an extract made with --mips, as
+    paths; [] where it has no more than its first there"""
+    meta = extract / "bitmaps" / (tag_path(tag) + ".json")
+    if not meta.is_file():
+        return []
+    bitmaps = json.loads(meta.read_text()).get("bitmaps", [])
+    if index >= len(bitmaps) or len(bitmaps[index].get("png", [])) < 2:
+        return []
+    paths = [extract / p for p in bitmaps[index]["png"]]
+    if not all(p.is_file() for p in paths) or any(not p.name.endswith(f"_mip{k}.png") for k, p in enumerate(paths)
+                                                  if k):
+        return []
+    return paths
 
 
 def dxt_decode(data, width, height, kind):
@@ -431,7 +467,7 @@ class Recipe:
 
 def environment_material(job):
     """an environment shader's material: (tag, json or None, report)"""
-    shader, extract, out, recipe_path, again = job
+    shader, extract, out, recipe_path, again, detail_mips = job
     recipe = Recipe(recipe_path)
     env = recipe.data["environment"]
     gate = recipe.data["gate"]
@@ -597,9 +633,18 @@ def environment_material(job):
         if not png:
             continue
         detail_path = Path(out) / "textures" / "prism_v4" / "details" / (tag_path(maps[slot]) + ".ktx2")
+        # (CE's own levels, which fade toward grey, where the extract has them; else a chain halved from level 0)
         if not detail_path.is_file() or again:
-            picture = load_rgba(png)
-            write_bc7(detail_path, resized(picture, power_of_two(picture.shape[1]), power_of_two(picture.shape[0])))
+            levels = bitmap_levels(Path(detail_mips), maps[slot]) if detail_mips else []
+            chain = "halved"
+            if levels:
+                chain = f"ce's {len(levels)} levels" if write_bc7_chain(detail_path, [load_rgba(p) for p in levels]) \
+                    else "halved (ce's levels are not a power-of-two chain)"
+            if not chain.startswith("ce's"):
+                picture = load_rgba(png)
+                write_bc7(detail_path, resized(picture, power_of_two(picture.shape[1]),
+                                               power_of_two(picture.shape[0])))
+            report.setdefault("detail_chains", {})[name] = chain
         layers.append({"slot": name, "albedo": "textures/prism_v4/details/" + tag_path(maps[slot]) + ".ktx2",
                        "scale": "ce", "function": "ce"})
     relative = "textures/prism_v4/" + tag_path(tag) + "/"
@@ -847,7 +892,8 @@ def build(a):
     jobs_environment, jobs_model = [], []
     for shader in shaders_of(shaders):
         if shader["group"] == "senv":
-            jobs_environment.append((shader, extract, out, recipe, a.again))
+            jobs_environment.append((shader, extract, out, recipe, a.again,
+                                     str(Path(a.detail_mips).resolve()) if a.detail_mips else None))
         elif shader["group"] == "soso" and shader["tag"].startswith("characters\\"):
             jobs_model.append((shader, extract, out, recipe, a.again, a.packs, a.side))
     results = []
@@ -913,6 +959,8 @@ def main():
     p = sub.add_parser("build")
     p.add_argument("--extract", required=True, help="a map's extract (map_extract's bitmaps)")
     p.add_argument("--shaders", help="its shaders (map_extract --only shaders: shaders/), else the extract's")
+    p.add_argument("--detail-mips", help="its environment shaders' detail maps with every level (map_extract "
+                                         "--only bitmaps --mips): CE's own levels kept in the pack's detail maps")
     p.add_argument("--out", required=True, help="the pack's mod folder (mods/prism_v4_materials)")
     p.add_argument("--packs", help="the mods folder with the PRISM texture packs already built (Bold, base_local, "
                                    "the overlay's classes and surface maps)")
