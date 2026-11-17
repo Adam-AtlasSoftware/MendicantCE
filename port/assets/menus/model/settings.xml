@@ -576,7 +576,14 @@
 			<help>How bright the picture is, the HUD and menus too, as Halo PC's gamma. Higher brightens the dark parts; lower darkens them. 1.0 shows the game as it is drawn. With HDR on an HDR display, Paper White sets the brightness instead.</help>
 			<note>Click the number (or press A) to type any from 0.5 to 2.0.</note>
 		</row>
-		<section key="section_2" title="HDR" when="hdr"/>
+		<row key="output_depth" kind="choice" setting="display.output_depth" label="COLOR DEPTH" crumb="VIDEO › BRIGHTNESS" search_choices="bit" when="computer+!vr_build" enabled="!hdr_drawn">
+			<help>10-Bit draws finer shades, so fog and skies show no bands: a 10-bit display shows them all, others a fine grain. 8-Bit draws as before, lighter on the graphics card. Auto picks for you: 10-Bit, or 8-Bit with battery saver.</help>
+			<note>HDR has its own depth: this applies with HDR off.</note>
+			<choice shown="AUTO" value="auto"/>
+			<choice shown="8-BIT" value="8"/>
+			<choice shown="10-BIT" value="10"/>
+		</row>
+		<section key="section_3" title="HDR" when="hdr"/>
 		<row key="hdr" kind="choice" setting="display.hdr" label="HDR" crumb="VIDEO › BRIGHTNESS" when="hdr">
 			<help>Brighter highlights on an HDR display. Auto turns it on while the display shows HDR; a display without HDR shows the game as it was.</help>
 			<choice shown="AUTO" value="auto"/>
@@ -647,7 +654,7 @@
 			<choice shown="SRGB" value="srgb"/>
 			<choice shown="2.2" value="2.2"/>
 		</row>
-		<section key="section_8" title="DISPLAY" when="hdr"/>
+		<section key="section_9" title="DISPLAY" when="hdr"/>
 		<row key="hdr_display" kind="status" label="DISPLAY PEAK" crumb="VIDEO › BRIGHTNESS" when="hdr">
 			<help>The brightest the display shows, and its SDR white, as the system reports them.</help>
 		</row>

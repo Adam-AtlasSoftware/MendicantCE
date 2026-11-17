@@ -2662,6 +2662,11 @@ static void hdr_read(void)
 	}
 }
 
+int halo_hdr_drawn(void)
+{
+	return hdr.active;
+}
+
 int halo_hdr_display_text(int words, char *text, unsigned int size)
 {
 	return hdr_display_text(words ? XGPU_HDR_DISPLAY_WORDS : XGPU_HDR_DISPLAY_VALUE, text, size);
