@@ -327,6 +327,9 @@ def cmd_run(argv):
     parser.add_argument("--pair", nargs=2, metavar=("host:BUILD", "client:BUILD"),
                         help="a host and a client, each its own build (opence for OpenCE 359)")
     parser.add_argument("--seconds", type=float, default=60, help="each game quits after this (default 60)")
+    parser.add_argument("--menu", nargs="?", type=float, const=20, metavar="SECONDS",
+                        help="one game that sits on the main menu, its 3D scene drawn, nothing pressed, for SECONDS "
+                        "(default 20); no network test")
     parser.add_argument("--shots", default="", help="every:<frames> or at:<second>[+<more frames>]")
     parser.add_argument("--video", type=int, default=0, metavar="FPS",
                         help="the first instance's frames as video.mp4, each frame 1/FPS of game time")
@@ -346,6 +349,14 @@ def cmd_run(argv):
     parser.add_argument("--no-netns", action="store_true", help="the machine's own loopback, not a private network")
     args = parser.parse_args(options)
 
+    if args.menu is not None:
+        # (the main menu as a player sees it: no network test jumps past it, no input presses anything)
+        if args.pair or args.players > 1 or len(groups) > 1 or args.fast or args.map or args.mcc:
+            die("--menu: one game on the main menu (no --pair, --players, --fast, --map or --mcc)")
+        settings = args.env + (groups[0] if groups else [])
+        if any(item.split("=", 1)[0] in ("HALO_NETWORK_TEST", "HALO_TEST_INPUT") for item in settings):
+            die("--menu sits on the main menu: no HALO_NETWORK_TEST or HALO_TEST_INPUT")
+        args.seconds = args.menu
     if args.pair:
         sides = {}
         for item in args.pair:
@@ -388,7 +399,7 @@ def cmd_run(argv):
 
     spec = {"folder": str(folder), "seconds": args.seconds, "delay": args.delay, "online": args.online,
             "netns": bool(netns), "instances": [], "video": args.video, "video_of": args.video_of,
-            "size": [width, height]}
+            "size": [width, height], "menu": args.menu is not None}
     for number, (name, ref) in enumerate(instances, start=1):
         binary, tree, is_opence = game_of(ref)
         address = f"127.0.0.{199 + number}"
@@ -670,7 +681,52 @@ def collect(spec, keep):
         lines.append(", ".join(parts))
         for line in fatal[:3]:
             lines.append(f"    fatal assert: {line}")
+        log = (run / "halo.log").read_text(errors="replace") if (run / "halo.log").exists() else ""
+        lines += ["    " + line for line in failure_signs(log, spec.get("menu"))]
         lines.append(f"    {run}")
+    return lines
+
+
+def failure_signs(log, menu=False):
+    """the known failure signs in a game's halo.log, a few lines: the port's menus refused, pipelines the map's
+    preparation missed, each map's preparation (from its shipped or own record, or walked), stalls that are not
+    loads; with --menu, whether it stayed on the main menu's scene (the ui map) and nothing else loaded"""
+    lines = []
+    if "menus: not added" in log:
+        lines.append("FAIL menus: not added (the port's menus refused; the game's own are up)")
+    elif "bitmaps added to the map's" in log:
+        lines.append("menus: added")
+    else:
+        lines.append("menus: no line of them in the log")
+    missed = log.count("pipeline missed map preparation")
+    unmade = log.count("a pipeline the map's preparation did not make")
+    lines.append(f"pipelines: {missed} missed map preparation, {unmade} the map's preparation did not make")
+    # (each preparation under the map last unpacked: "map cache: d:\maps\ui.map unpacked ...")
+    maps, current = [], "?"
+    for line in log.splitlines():
+        found = re.search(r"map cache: \S*?([^\\/\s]+)\.map unpacked", line)
+        if found:
+            current = found.group(1)
+        elif "vulkan: map preparation made" in line or "metal: map preparation made" in line:
+            maps.append([current, "walked"])
+        elif (found := re.search(r"shaders and pipelines made from its (shipped|own) record", line)):
+            if not maps or maps[-1][0] != current:
+                maps.append([current, ""])
+            maps[-1][1] = f"{found.group(1)} record"
+        elif "the map's preparation recorded" in line or "is not recorded" in line or "could not be recorded" in line:
+            if not maps or maps[-1][0] != current:
+                maps.append([current, ""])
+            maps[-1][1] = "walked"
+    lines.append("preparation: " + (", ".join(f"{name} {how}" for name, how in maps) or "none logged"))
+    stalls = [float(ms) for ms in re.findall(r"stall: the game made no frame for (\d+) ms", log) if float(ms) > 100]
+    lines.append(f"stalls over 100 ms, not loads: {len(stalls)}" +
+                 (f" ({', '.join(f'{ms:.0f}' for ms in stalls[:6])} ms)" if stalls else ""))
+    if menu:
+        names = [name for name, _ in maps] or re.findall(r"map cache: \S*?([^\\/\s]+)\.map unpacked", log)
+        if names and set(names) == {"ui"}:
+            lines.append("menu: the main menu's scene (ui map) loaded, prepared and stayed up")
+        else:
+            lines.append(f"FAIL menu: maps loaded {names or 'none'}, not the main menu's ui map alone")
     return lines
 
 
