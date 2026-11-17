@@ -6,7 +6,11 @@ port/linux/game/render_prepared.c, port/linux/src/prepared_shipped.h), made agai
 
 Run on a Linux machine with the stock Xbox maps, on a build of the commit to be released. It starts the game once,
 fresh, offscreen at a fixed step, with every setting at its default (a config.toml of its own): its first start's pass loads the
-23 stock maps, then the main menu loads ui.map, and each map's preparation is recorded (z:\\prepared). The records
+23 stock maps, then the main menu loads ui.map, and each map's preparation is recorded (z:\\prepared). ui.map's
+tags then include the menus' models (menu_models.c), which that pass makes: so it starts the game once more,
+fresh, with display.menu_pictures off, for ui.map's record as a player's first start loads it, before its pass, the
+record keyed apart (render_prepared.c's prepared_key_models). Each record must name only tags a fresh start of the
+build has at those indices (unkept_tags: the map's own and the menus', and the models' by their place). The records
 are compressed (zlib, each) into one file, port/assets/prepared/prepared.records (its form:
 port/linux/src/prepared_shipped.h), which the builds put beside the game as they do brokers.txt, every other file
 there removed; and manifest.json lists each one's map, checksum, key, sizes and offset with the records' form (render_prepared.c's PREPARED_VERSION and the journal's,
@@ -59,11 +63,14 @@ PACK_FORM = 1
 # the renderer's manifest, recorded in the same run (port/assets/render/README.md)
 RENDER_MANIFEST = ROOT / "port/assets/render/manifest.txt"
 MENU_SECONDS = 10
+UI_SCENARIO = "levels\\ui\\ui"
 
 
-def run_game(halo: Path, maps: Path, work: Path, seconds: int) -> Path:
-    """the game started fresh, until every stock map is recorded; the run's z:\\prepared"""
-    run = work / "run"
+def run_game(halo: Path, maps: Path, work: Path, seconds: int, name: str = "run", settings: dict = None,
+             wanted: int = STOCK_MAP_COUNT) -> Path:
+    """the game started fresh (with settings over the defaults: None unsets one), until wanted maps are recorded; the
+    run's folder"""
+    run = work / name
     shutil.rmtree(run, ignore_errors=True)
     (run / "save").mkdir(parents=True)
     (run / "maps").symlink_to(maps.resolve())
@@ -76,7 +83,9 @@ def run_game(halo: Path, maps: Path, work: Path, seconds: int) -> Path:
                        HALO_FIXED_STEP="1", HALO_PREPARED_RECORDS="1", HALO_SHIPPED_RECORDS="0",
                        HALO_MAP_CACHE_MEGABYTES="3500",
                        HALO_RENDER_MANIFEST=str(run / "manifest.txt"),
-                       SDL_VIDEO_DRIVER="offscreen", SDL_AUDIO_DRIVER="dummy")
+                       SDL_VIDEO_DRIVER="offscreen", SDL_AUDIO_DRIVER="dummy", **(settings or {}))
+    # (a setting given as None: unset)
+    environment = {name: value for name, value in environment.items() if value is not None}
     log = run / "stdout.txt"
     with open(log, "w") as output:
         game = subprocess.Popen([str(halo.resolve())], cwd=run, env=environment, stdout=output,
@@ -85,7 +94,7 @@ def run_game(halo: Path, maps: Path, work: Path, seconds: int) -> Path:
         try:
             while game.poll() is None and time.monotonic() - started < seconds:
                 time.sleep(1)
-                if len({line[4] for line in RECORDED.findall(log.read_text(errors="replace"))}) >= STOCK_MAP_COUNT:
+                if len({line[4] for line in RECORDED.findall(log.read_text(errors="replace"))}) >= wanted:
                     # (the main menu drawn a while, for the manifest, and ui.map's record with the menus' models
                     # made as the pass ends)
                     time.sleep(MENU_SECONDS)
@@ -131,22 +140,26 @@ def unkept_tags(data: bytes, stable_tags: int) -> list:
             and not (tag >> 16 and (tag & 0xFFFF) < stable_tags)]
 
 
-def collect(run: Path, out: Path) -> dict:
-    """the run's records compressed into out, and their manifest"""
+def collect(runs: list, out: Path) -> dict:
+    """the runs' records ((run, the scenario whose records are taken from it, None: every one)) compressed into out,
+    and their manifest"""
+    run = runs[0][0]
     text = (run / "stdout.txt").read_text(errors="replace")
-    lines = RECORDED.findall(text)
+    lines = [(other, line) for other, scenario in runs
+             for line in RECORDED.findall((other / "stdout.txt").read_text(errors="replace"))
+             if scenario is None or line[4] == scenario]
     if len(lines) < STOCK_MAP_COUNT:
         debug = (run / "debug.txt").read_text(errors="replace") if (run / "debug.txt").is_file() else ""
         failed = [line for line in debug.splitlines() if "EXCEPTION" in line] + \
             [line for line in text.splitlines() if "is not recorded" in line or "could not be recorded" in line]
         sys.exit(f"{len(lines)} of {STOCK_MAP_COUNT} maps recorded (see {run / 'stdout.txt'})" +
                  (f": {failed[0]}" if failed else ""))
-    forms = {(int(version), int(form)) for *_, version, form, _ in lines}
+    forms = {(int(version), int(form)) for _, (*_, version, form, _) in lines}
     if len(forms) != 1:
         sys.exit(f"the records are of more than one form: {sorted(forms)}")
     (version, form), = forms
     records = {}
-    for draws, words, checksum, key, scenario, _, _, stable_tags in lines:
+    for run, (draws, words, checksum, key, scenario, _, _, stable_tags) in lines:
         source = run / "save" / "z" / "prepared" / f"{checksum}-{key}.prepared"
         data = source.read_bytes()
         magic, record_version, header_size, record_checksum = (int.from_bytes(data[at:at + 4], "little")
@@ -219,7 +232,13 @@ def main() -> None:
     work = Path(tempfile.mkdtemp(prefix="prepared-records-", dir=arguments.work))
     try:
         run = run_game(arguments.halo, arguments.maps, work, arguments.seconds)
-        manifest = collect(run, arguments.out)
+        # (ui.map as a player's first start loads it, before its pass makes the menus' models, which a run with
+        # display.menu_pictures off never has: its record without their tags)
+        first = run_game(arguments.halo, arguments.maps, work, arguments.seconds, "first",
+                         {"HALO_MENU_PICTURES": "false", "HALO_DEBUG_MENU_PICTURES": None}, 1)
+        manifest = collect([(run, None), (first, UI_SCENARIO)], arguments.out)
+        if sum(record["map"] == "ui" for record in manifest["records"]) != 2:
+            sys.exit("ui.map's records are not both made: with the menus' models and without")
         render_manifest(run, arguments.render_manifest)
     finally:
         shutil.rmtree(work, ignore_errors=True)
