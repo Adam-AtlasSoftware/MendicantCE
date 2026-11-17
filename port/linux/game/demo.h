@@ -123,4 +123,11 @@ void demo_bookmark(void);
 recorded where it was, for demo_info.py and the playback's log */
 void demo_record_bot_command(char const *line);
 
+/* a listener told as a recording starts (started 1, the demo's file name,
+its first tick) and stops (started 0, NULL, its last tick), on the game's
+thread; NULL for none, the default. It is only told: nothing of the
+recording or the game changes with it */
+typedef void (*demo_recording_listener)(int started, const char *name, long tick);
+void demo_set_recording_listener(demo_recording_listener listener);
+
 #endif
