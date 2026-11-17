@@ -7551,9 +7551,16 @@ enum
 	_journal_object_memory,
 	/* (value: the device's target, as _device's, whose memory it is: a
 	texture or surface the game made over it, in memory of its own; its
-	words, format and size) */
+	words, format and size; and JOURNAL_VIEW_SCREEN where it was the
+	screen's size) */
 	_journal_object_view,
 };
+
+/* a view the screen's size as it was recorded (its game units: the screen's
+width, halo_screen_width, and SCREEN_HEIGHT), played back at the screen's
+size now: a screen's target (render_target_get), whatever the shape of the
+display either was on, as the game's own over that memory is in play */
+#define JOURNAL_VIEW_SCREEN 0x100u
 
 struct journal_object
 {
@@ -7838,8 +7845,8 @@ static struct
 
 static void *journal_view(const struct journal_object *object)
 {
-	const D3DSurface *target = object->value == 0 ? &device.back_buffer : object->value == 1 ? &device.depth_buffer :
-		NULL;
+	uint32_t which = object->value & ~JOURNAL_VIEW_SCREEN;
+	const D3DSurface *target = which == 0 ? &device.back_buffer : which == 1 ? &device.depth_buffer : NULL;
 	int index;
 
 	if (!target || !target->Data)
@@ -7857,6 +7864,10 @@ static void *journal_view(const struct journal_object *object)
 	journal_views[index].header.Data = target->Data;
 	journal_views[index].header.Format = object->format;
 	journal_views[index].header.Size = object->size;
+	if (object->value & JOURNAL_VIEW_SCREEN)
+		d3d8_surface_resize(&journal_views[index].header,
+			(D3DFORMAT)((object->format & D3DFORMAT_FORMAT_MASK) >> D3DFORMAT_FORMAT_SHIFT),
+			(unsigned long)halo_screen_width(), SCREEN_HEIGHT);
 	return &journal_views[index].header;
 }
 
@@ -7917,10 +7928,16 @@ static void journal_identify(const void *object, struct journal_object *to)
 		if ((type == D3DCOMMON_TYPE_TEXTURE || type == D3DCOMMON_TYPE_SURFACE) && fields[1] &&
 			(fields[1] == device.back_buffer.Data || fields[1] == device.depth_buffer.Data))
 		{
+			unsigned long width, height;
+			BOOL depth;
+
 			to->kind = _journal_object_view;
 			to->value = fields[1] == device.back_buffer.Data ? 0 : 1;
 			to->check = journal_object_check(object);
 			journal_object_shape(object, to);
+			surface_dimensions((const D3DSurface *)object, &width, &height, &depth);
+			if (width == (unsigned long)halo_screen_width() && height == SCREEN_HEIGHT)
+				to->value |= JOURNAL_VIEW_SCREEN;
 			return;
 		}
 	}
@@ -8225,8 +8242,10 @@ window's span, world_span; 7: without the screen's ambient occlusion, its
 pre-pass, its flags and its operations; 8: world_span's
 WORLD_AO_SPAN_FOUND, the window found once a pixel; 9: the effect's soft
 group, the stages' texture regions and the high-res text's atlas as itself;
-10: a bitmap's tag as the record keeps it, halo_gpu_journal_bitmaps' keep) */
-#define JOURNAL_FORM 10
+10: a bitmap's tag as the record keeps it, halo_gpu_journal_bitmaps' keep;
+11: a view the screen's size played back at the screen's size now,
+JOURNAL_VIEW_SCREEN) */
+#define JOURNAL_FORM 11
 
 unsigned int halo_gpu_journal_form(void)
 {

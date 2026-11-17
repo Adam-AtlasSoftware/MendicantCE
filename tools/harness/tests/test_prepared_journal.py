@@ -97,7 +97,8 @@ def test_negative(fault, case):
 # texture states (prepare_draw, bind_textures): each must be journaled as the draw is (journal_capture), set again
 # as it plays (journal_restore) and given back after (halo_gpu_journal_replay), or a played record makes other
 # pipelines than the walk did and play makes the walk's, missed (an effect's soft group, display.soft_particles; the
-# shadows' atlas regions; the high-res text's atlas, whose distance fields a stand-in for it has not).
+# shadows' atlas regions; the high-res text's atlas, whose distance fields a stand-in for it has not; a view of the
+# screen's size, recorded on a display of another shape).
 CARRIED = {
     'soft group': ('journal_capture', 'state->soft_effect = (uint32_t)(soft_effects.group != 0);'),
     'soft group set': ('journal_restore', 'soft_effects.group = state->soft_effect != 0;'),
@@ -110,6 +111,10 @@ CARRIED = {
                            'memcpy(device.texture_regions, saved.texture_regions, sizeof(device.texture_regions));'),
     'text atlas named': ('journal_identify', 'if (object == text_hires_atlas_object())'),
     'text atlas found': ('journal_resolve', 'object->value == 2 ? (void *)text_hires_atlas_object() : NULL;'),
+    # (a view over the device's targets the screen's size, played back at the screen's size now: a screen's target,
+    # in the frame's format, whatever the shape of the display the record was made on)
+    'screen view': ('journal_identify', 'to->value |= JOURNAL_VIEW_SCREEN;'),
+    'screen view sized': ('journal_view', '(unsigned long)halo_screen_width(), SCREEN_HEIGHT);'),
 }
 
 
@@ -122,7 +127,7 @@ def test_draw_inputs_journaled():
     assert uncarried(read(DEVICE)) == []
 
 
-@pytest.mark.parametrize('name', ['soft group', 'regions', 'text atlas named'])
+@pytest.mark.parametrize('name', ['soft group', 'regions', 'text atlas named', 'screen view'])
 def test_draw_inputs_negative(name):
     device = read(DEVICE)
     line = CARRIED[name][1]
