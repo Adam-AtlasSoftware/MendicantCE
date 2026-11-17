@@ -846,9 +846,10 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	if (denoiser_off)
 		flags |= FLAG_DENOISER_OFF;
 	/* (the history: the last frame's, drawn by this, of the same window at
-	the same size, from the same bake's scene) */
+	the same size, from the same bake's scene; a frame is a submission or a
+	few, so a gap of more than 16 is frames this mode did not draw) */
 	if (pt.history_valid && (view->flags & XGPU_SCENE_VIEW_HISTORY) && scene == pt.scene_seen &&
-		pt.last_serial + 4 >= xgpu_vulkan_serial())
+		pt.last_serial + 16 >= xgpu_vulkan_serial())
 		flags |= FLAG_HISTORY;
 	reference = reference_take(view, scene, description->width, description->height);
 	if (reference)
