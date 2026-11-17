@@ -308,7 +308,8 @@ int main(int argc, char **argv)
 		/* a permutation split into three linked pieces of 16-bit PCM at 44.1 kHz (mod_sounds.c's range_split), each
 		queued while the one before plays, as the sound manager queues them: the channel's one PCM stream takes
 		every piece's packets, no switch and no stream more, the stream never without a packet until the last has
-		played, and the bytes it is given are the pieces' joined, none left out or repeated */
+		played, and the bytes it is given are the pieces' joined, none left out or repeated (each piece longer than
+		the packets queued ahead, as a split one's 512 KB is) */
 		static struct sound_permutation pieces[3];
 		static long const sizes[3] = { 100000, 100000, 60002 };
 		struct sound_channel *record = channel_get(0);
@@ -353,6 +354,7 @@ int main(int argc, char **argv)
 		for (byte_index = 0; byte_index < at && captured[byte_index] == sound_cache[byte_index]; byte_index++)
 			;
 		CHECK(byte_index == at, "byte %ld sent is not the pieces' (a gap or a repeat at a join)", byte_index);
+		CHECK(locks == 0, "%d of the pieces' sound cache locks were not let go", locks);
 	}
 	else
 	{
