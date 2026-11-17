@@ -66,6 +66,9 @@ enum halo_keyboard_action
 	/* (the HUD's Spartan link's, which the game itself does not read: the
 	teammates' feeds shown or hidden, port/linux/game/spartan_link.c) */
 	HALO_KEYBOARD_SPARTAN_LINK,
+	/* (Hide HUD's, which the game itself does not read: the HUD, the
+	reticle and the clock hidden or shown, source/interface/hud.c) */
+	HALO_KEYBOARD_HIDE_HUD,
 	NUMBER_OF_HALO_KEYBOARD_ACTIONS
 };
 

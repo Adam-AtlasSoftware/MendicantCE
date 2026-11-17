@@ -1498,8 +1498,22 @@ static boolean virtual_keyboard_select(
 	return TRUE;
 }
 
+/* port: whether a character typed is put in: ASCII's visible ones and its
+space, and the letters with a mark a player's name keeps and the host folds
+to their plain letters (players.c's player_name_character_ascii): Latin-1's
+and Latin Extended-A's, U+00C0 to U+017F, but for the signs x and / (#1134) */
+static boolean virtual_keyboard_port_character_kept(
+	wchar_t character)
+{
+	unsigned long code = (unsigned long)character;
+
+	return (code >= ' ' && code <= '~') || (code >= 0xC0 && code <= 0x17F && code != 0xD7 && code != 0xF7);
+}
+
 /* port: the characters and backspaces typed on the computer's keyboard,
-as its keys would put them (the first replacing the text it began with) */
+as its keys would put them (the first replacing the text it began with):
+its layout's letters with a mark too, and the system's on-screen
+keyboard's (input_key_character) */
 static void virtual_keyboard_port_type(
 	void)
 {
@@ -1508,8 +1522,9 @@ static void virtual_keyboard_port_type(
 	while (input_get_key(&key))
 	{
 		boolean backspace = key.key_code == _key_backspace;
+		wchar_t character = input_key_character();
 
-		if (!backspace && ((unsigned char)key.ascii_code < ' ' || (unsigned char)key.ascii_code > '~'))
+		if (!backspace && !virtual_keyboard_port_character_kept(character))
 			continue;
 		if (virtual_keyboard_globals.first_key_replaces_buffer == TRUE)
 		{
@@ -1531,7 +1546,7 @@ static void virtual_keyboard_port_type(
 				virtual_keyboard_globals.buffer_size -
 					((byte *)virtual_keyboard_globals.cursor - (byte *)virtual_keyboard_globals.text_buffer) -
 					sizeof(wchar_t));
-			*virtual_keyboard_globals.cursor++ = (wchar_t)(unsigned char)key.ascii_code;
+			*virtual_keyboard_globals.cursor++ = character;
 			ui_play_audio_feedback_sound(_ui_audio_feedback_forward);
 		}
 		else

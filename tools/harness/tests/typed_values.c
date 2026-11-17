@@ -52,6 +52,13 @@ static boolean input_get_key(struct key_stroke *key)
 	return TRUE;
 }
 
+/* the character of the key input_get_key gave last (input_xbox.c's: here
+its ASCII) */
+static wchar_t input_key_character(void)
+{
+	return key_read ? (wchar_t)(unsigned char)keys[key_read - 1].ascii_code : 0;
+}
+
 static void type_key(short code, char ascii)
 {
 	keys[key_count].modifier_flags = 0;

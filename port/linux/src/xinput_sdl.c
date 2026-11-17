@@ -1232,7 +1232,7 @@ static const char *const binding_settings[NUMBER_OF_HALO_KEYBOARD_ACTIONS] =
 	"controls.flashlight", "controls.scoreboard", "controls.pause", "controls.screenshot",
 	"controls.report", "controls.push_to_talk", "controls.chat", "controls.team_chat", "controls.party_accept",
 	"controls.vote_yes", "controls.vote_no", "controls.clip", "controls.ping", "controls.walk",
-	"controls.spartan_link",
+	"controls.spartan_link", "controls.hide_hud",
 };
 
 static const struct
@@ -4202,6 +4202,16 @@ DWORD WINAPI XInputDebugInitKeyboardQueue(PXINPUT_DEBUG_KEYQUEUE_PARAMETERS para
 	return ERROR_SUCCESS;
 }
 
+/* the character of the keystroke XInputDebugGetKeystroke gave last (the
+Xbox's has its ASCII alone): source/input/input_xbox.c keeps it with its key
+(#1134) */
+static unsigned short keystroke_character_given;
+
+unsigned short platform_keystroke_character(void)
+{
+	return keystroke_character_given;
+}
+
 DWORD WINAPI XInputDebugGetKeystroke(PXINPUT_DEBUG_KEYSTROKE keystroke)
 {
 	struct platform_keystroke next;
@@ -4229,6 +4239,7 @@ DWORD WINAPI XInputDebugGetKeystroke(PXINPUT_DEBUG_KEYSTROKE keystroke)
 			keystroke->VirtualKey = next.virtual_key;
 			keystroke->Ascii = next.ascii;
 			keystroke->Flags = next.flags;
+			keystroke_character_given = next.character;
 			return ERROR_SUCCESS;
 		}
 	}
