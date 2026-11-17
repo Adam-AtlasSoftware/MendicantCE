@@ -69,7 +69,8 @@ UI_SCENARIO = "levels\\ui\\ui"
 # records' own, and 16:9): tools/test_preparation_coverage.py derives both under every setting it checks
 COVERAGE = ROOT / "tools/prepared_coverage.txt.gz"
 COVERAGE_LABEL = re.compile(r"^# coverage (\S+) (walk|replay|scope) (\d+) ([0-9a-f]+)$", re.M)
-WIDE = "1280x720"
+# (a window of 16:9 drawn at its own pixels, as tools/rig/goat-rig's)
+WIDE_SETTINGS = {"HALO_DISPLAY_MODE": "windowed", "HALO_WINDOW_SIZE": "1280x720", "HALO_RESOLUTION_SCALING": "native"}
 
 
 def run_game(halo: Path, maps: Path, work: Path, seconds: int, name: str = "run", settings: dict = None,
@@ -262,10 +263,10 @@ def main() -> None:
         runs = [run, first,
                 run_game(arguments.halo, arguments.maps, work, arguments.seconds, "replay", None, STOCK_MAP_COUNT,
                          "replay", pack),
-                run_game(arguments.halo, arguments.maps, work, arguments.seconds, "wide", {"HALO_WINDOW_SIZE": WIDE,
-                         "HALO_PREPARED_RECORDS": "0"}, STOCK_MAP_COUNT, "walk"),
+                run_game(arguments.halo, arguments.maps, work, arguments.seconds, "wide", dict(WIDE_SETTINGS,
+                         HALO_PREPARED_RECORDS="0"), STOCK_MAP_COUNT, "walk"),
                 run_game(arguments.halo, arguments.maps, work, arguments.seconds, "wide-replay",
-                         {"HALO_WINDOW_SIZE": WIDE}, STOCK_MAP_COUNT, "replay", pack)]
+                         WIDE_SETTINGS, STOCK_MAP_COUNT, "replay", pack)]
         text = "".join((other / "coverage.txt").read_text(errors="replace") for other in runs
                        if (other / "coverage.txt").is_file())
         labels = COVERAGE_LABEL.findall(text)

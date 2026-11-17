@@ -184,7 +184,7 @@ def test_every_record_makes_its_walks_pipelines(checker, tmp_path):
 
 
 def mutated_replay(lines, pattern, replacement):
-    changed = [re.sub(pattern, replacement, line) for line in lines]
+    changed = [re.sub(pattern, replacement, line) if line.startswith("d ") else line for line in lines]
     assert changed != lines, f"the negative control no longer applies: {pattern}"
     return changed
 
@@ -194,9 +194,9 @@ NEGATIVES = {
     # the soft group not journaled: the effects never soft as played back
     "soft_group": (r" cs=1\b", " cs=0", "vr_effect"),
     # the high-res text's atlas named as the texture made in its order: its distance fields (MSDF on w) lost
-    "text_atlas": (r"(t=(?:[^ /]*/)*\d+\.\d+\.\d+\.\d+)\.6\.", r"\1.0.", "stage"),
+    "text_atlas": (r"( t=(?:[^ /]*/)*\d+\.\d+\.\d+\.\d+)\.6\.", r"\1.0.", "stage"),
     # the shadows' regions not journaled: the receivers' stages sample the atlas whole (no REGION on u, v)
-    "regions": (r"(t=(?:[^ /]*/)*\d+\.\d+)\.5\.5\.", r"\1.2.2.", "stage"),
+    "regions": (r"( t=(?:[^ /]*/)*\d+\.\d+)\.5\.5\.", r"\1.2.2.", "stage"),
 }
 
 
@@ -208,7 +208,10 @@ def test_negative_a_lost_input_is_named(checker, tmp_path, name):
         if "walk" not in group or "replay" not in group:
             continue
         replay = list(group["replay"])
-        if not any(re.search(pattern, line) for line in replay):
+        if not any(line.startswith("d ") and re.search(pattern, line) for line in replay):
+            continue
+        # (a map whose playback has every draw of its walk: the control's misses its own)
+        if check(checker, tmp_path, list(group["walk"]), replay):
             continue
         misses = check(checker, tmp_path, list(group["walk"]), mutated_replay(replay, pattern, replacement))
         assert misses and all(field in miss for miss in misses), (key, misses[:4])
