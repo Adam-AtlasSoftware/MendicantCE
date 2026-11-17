@@ -16,10 +16,11 @@ followed by its samples, mouth data and subtitle data. Every count, size and
 offset is checked against the file, which must end where the last of them
 does, and every value the game divides by or steps through against what the
 game takes; a file that is not is said and left out. Its samples (16-bit
-PCM, Xbox ADPCM or Ogg Vorbis, mono or stereo at 22 or 44 kHz) are made the
-Xbox ADPCM this build plays as a Custom Edition map's are
-(custom_edition_sounds_encode: mono at 22 kHz, stereo at its own rate), so
-they play through the map's channels as its sounds do. The values a map's
+PCM, Xbox ADPCM or Ogg Vorbis, mono or stereo at 22 or 44 kHz) are kept as
+a Custom Edition map's are (custom_edition_sounds_encode: 16-bit PCM at
+their own rate, or where that is too long, Xbox ADPCM, mono at 22 kHz and
+stereo at its own rate; Xbox ADPCM in that format is kept as it is), so they
+play through the map's channels as its sounds do. The values a map's
 build (tool.exe, Invader) fills in are filled in as it does: the defaults
 of the sound's class, the pitch ranges' playback rates, the per-tick bend.
 The longest permutation length is Tool's measure of a permutation, a split
@@ -611,6 +612,7 @@ static struct mod_sound *mod_sound_new(
 				short next = mods_read_short(bytes + offsetof(struct sound_permutation, next_permutation_index));
 				byte const *samples = file + cursor;
 				unsigned long encoded_bytes = 0;
+				long kept_rate = 0;
 
 				sound->permutation_count++;
 				*reason = "a permutation's data is not in the file";
@@ -654,7 +656,7 @@ static struct mod_sound *mod_sound_new(
 				else
 				{
 					permutation->samples.address = custom_edition_sounds_encode(samples, (long)samples_size,
-						compression, TRUE, channels, rate, encoded_rate, &encoded_bytes);
+						compression, TRUE, channels, rate, encoded_rate, &encoded_bytes, &kept_rate);
 				}
 				if (!permutation->samples.address || encoded_bytes > MAXIMUM_SOUND_DATA_SIZE)
 				{
@@ -666,8 +668,9 @@ static struct mod_sound *mod_sound_new(
 				}
 				permutation->samples.size = (long)encoded_bytes;
 				permutation->samples.file_offset = 0;
-				permutation->compression = SOUND_COMPRESSION_XBOX_ADPCM;
-				permutation->sample_buffer_size = 0;
+				/* (16-bit PCM at its own rate: sound_permutation_pcm_rate) */
+				permutation->compression = kept_rate ? SOUND_COMPRESSION_NONE : SOUND_COMPRESSION_XBOX_ADPCM;
+				permutation->sample_buffer_size = (unsigned long)kept_rate;
 				sound->kept_bytes += encoded_bytes;
 				cursor += samples_size;
 				/* (the mouth and subtitle data stay in the file kept) */

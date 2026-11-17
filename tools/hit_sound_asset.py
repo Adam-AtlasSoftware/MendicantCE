@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Makes the hit sound (audio.hit_sounds: port/linux/game/hit_sounds.c), a
-PLACEHOLDER until a better one is made:
+"""Makes the hit sound (audio.hit_sounds: port/linux/game/hit_sounds.c) for
+a machine without Custom Edition's sounds.map, where the game plays Halo PC's
+own (sound\\sfx\\impulse\\ting\\ting) instead:
 
     python tools/hit_sound_asset.py           # writes the WAV and the C data
     python tools/hit_sound_asset.py --check   # fails if either is missing or not as written

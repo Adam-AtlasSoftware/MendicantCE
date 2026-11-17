@@ -106,3 +106,23 @@ def hand_off_state():
     backend = read("port/linux/src/dsound_sdl.c")
     start = backend.index("/* (voices_lock) the hand-offs the mixer has taken")
     return backend[start:backend.index("/* (the mixer's thread, voices_lock) the settings the game gave the voice */")]
+
+
+def pcm_permutation_rate():
+    """sound_definitions.h's sound_permutation_pcm_rate (a permutation imported and kept as 16-bit PCM at its own
+    rate) and its bounds"""
+    text = read("source/sound/sound_definitions.h")
+    start = text.index("#define SOUND_PERMUTATION_PCM_MINIMUM_RATE")
+    end = text.index(": 0L)", start) + len(": 0L)")
+    return text[start:end] + "\n"
+
+
+def dsound_port_formats_state():
+    """sound_dsound_xbox.c's record of its channels' stream formats (dsound_port_formats), and its kept streams'
+    structure, taken from the source"""
+    game = read("source/sound/sound_dsound_xbox.c")
+    kept_start = game.index("struct dsound_kept_stream\n{")
+    kept_end = game.index("};", kept_start) + 2
+    start = game.index("static struct\n{", kept_end)
+    end = game.index("} dsound_port_formats;", start) + len("} dsound_port_formats;")
+    return game[kept_start:kept_end] + "\n\n" + game[start:end] + "\n"

@@ -13,10 +13,15 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, enum_with, function, mutated, read, run  # noqa: E402
 
-CASES = ["local", "not-ours", "setting", "spacing", "host", "records", "client"]
+CASES = ["local", "not-ours", "setting", "spacing", "host", "records", "client", "custom-edition", "placeholder"]
 
 # a fault in the code and the case that must catch it
 NEGATIVE_CONTROLS = {
+    # (#673: the beep, though Custom Edition's sound is there)
+    "beep-always": (("if (custom_edition && frame_count > 0)", "if (FALSE)"), "custom-edition"),
+    # (Halo PC's sound at its own rate, not its tag's pitch)
+    "no-pitch": (("samples_per_second = (unsigned long)(rate * pitch + 0.5f);", "samples_per_second = rate;"),
+                 "custom-edition"),
     # (a beep for the player's damage of themselves)
     "self": (("attacker_player_index == NONE || victim_player_index == NONE ||\n\t\tattacker_player_index == "
               "victim_player_index)", "attacker_player_index == NONE || victim_player_index == NONE)"), "not-ours"),
@@ -58,7 +63,7 @@ NEGATIVE_CONTROLS = {
 
 def module_state(source):
     """hit_sounds.c's #defines and its state (the static struct), as the module has them"""
-    defines = "\n".join(re.findall(r"^#define HIT_SOUND_(?:VOLUME|SPACING_MILLISECONDS|BUFFERS) .*$", source, re.M))
+    defines = "\n".join(re.findall(r"^#define HIT_SOUND_(?:VOLUME|SPACING_MILLISECONDS|BUFFERS|CUSTOM_EDITION_NAME) .*$", source, re.M))
     start = source.index("static struct\n{")
     end = source.index(";", source.index("} hit_sounds =", start)) + 1
     return defines + "\n" + source[start:end] + "\n"

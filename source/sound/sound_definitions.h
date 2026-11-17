@@ -66,6 +66,22 @@ enum detail_dont_play_flags
 #define sound_definition_get(index) ((struct sound_definition *)tag_get(SOUND_DEFINITION_TAG, (index)))
 #define looping_sound_definition_get(index) ((struct looping_sound_definition *)tag_get(LOOPING_SOUND_DEFINITION_TAG, (index)))
 
+/* port: a permutation imported from a Halo PC map or a mod and kept as 16-bit
+PCM at its own rate (port/linux/game/custom_edition_sounds.c), so nothing is
+lost to a conversion: its compression is none and its sample_buffer_size,
+which nothing else reads, is its rate (at most the mixer's 48 kHz). Its sound
+is still an Xbox ADPCM one of the channels' formats, so the sound manager
+picks a channel for it as before; the channel plays it in its own format
+(sound_dsound_xbox.c, dsound_channel_use_format). The rate, or 0 for any
+other permutation. */
+#define SOUND_PERMUTATION_PCM_MINIMUM_RATE 1000
+#define SOUND_PERMUTATION_PCM_MAXIMUM_RATE 48000
+#define sound_permutation_pcm_rate(permutation) \
+	((permutation)->compression == 0 && \
+		(permutation)->sample_buffer_size >= SOUND_PERMUTATION_PCM_MINIMUM_RATE && \
+		(permutation)->sample_buffer_size <= SOUND_PERMUTATION_PCM_MAXIMUM_RATE ? \
+		(long)(permutation)->sample_buffer_size : 0L)
+
 /* ---------- structures */
 
 struct real_bounds

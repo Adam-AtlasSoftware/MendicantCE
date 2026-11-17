@@ -21,6 +21,16 @@ static void dsound_channel_fill(short index)
  CHECK(fills<4,"filled too often");
  filled_from[fills++]=dsound_globals.channels[index].sample_offset;
 }
+/* the channel's stream made ready for the sound's format (dsound_channel_use_format) */
+static long formats_used[4];
+static int formats;
+static boolean dsound_channel_use_format(short index,long pcm_rate)
+{
+ CHECK(formats<4,"formats set too often");
+ formats_used[formats++]=pcm_rate;
+ dsound_port_formats.pcm_rates[index]=pcm_rate;
+ return TRUE;
+}
 #include "under_test.inc"
 
 static void setup(void)
@@ -31,7 +41,7 @@ static void setup(void)
  /* channel 0 Xbox ADPCM stereo, channel 1 uncompressed */
  dsound_globals.channels[0].type_flags=(short)(FLAG(_sound_channel_compressed_bit)|FLAG(_sound_channel_stereo_bit));
  dsound_globals.channels[1].type_flags=0;
- fills=0;mapped=TRUE;
+ fills=0;mapped=TRUE;formats=0;memset(&dsound_port_formats,0,sizeof(dsound_port_formats));
 }
 
 int main(int argc,char **argv)
@@ -44,6 +54,15 @@ int main(int argc,char **argv)
   dsound_port_queue_sound_from(0,&sounds[0],7310);
   CHECK(fills==1&&filled_from[0]==7272,"an idle channel started from byte %ld",filled_from[0]);
   CHECK(dsound_globals.channels[0].state==_sound_channel_playing,"the channel is not playing");
+ }
+ else if(!strcmp(name,"pcm"))
+ {
+  /* a permutation kept as 16-bit PCM at 44.1 kHz: the stereo channel's stream switched to it, and started on a
+  frame of it (4 bytes), not a block of Xbox ADPCM */
+  sounds[0].compression=0;sounds[0].sample_buffer_size=44100;
+  dsound_port_queue_sound_from(0,&sounds[0],7310);
+  CHECK(formats==1&&formats_used[0]==44100,"the channel's stream was not made 16-bit PCM at 44.1 kHz");
+  CHECK(fills==1&&filled_from[0]==7308,"a PCM sound started from byte %ld",filled_from[0]);
  }
  else if(!strcmp(name,"uncompressed"))
  {
