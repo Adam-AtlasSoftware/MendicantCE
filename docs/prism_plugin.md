@@ -98,7 +98,10 @@ display.upscaler's and display.denoiser's `"plugin:<name>"` names, and the folde
    the device has (`plugin_device_extensions`). An extension the loader or the device lacks turns its plugin off
    (`plugin_missing`), logged: NGX's ask for `VK_NVX_binary_import`, `VK_NVX_image_view_handle`,
    `VK_EXT_buffer_device_address` and `VK_KHR_push_descriptor` on an NVIDIA card's device, and
-   `VK_KHR_get_physical_device_properties2` on the instance.
+   `VK_KHR_get_physical_device_properties2` on the instance. `VK_EXT_buffer_device_address` is met by Vulkan 1.2's
+   `bufferDeviceAddress` where the device has it (the feature enabled in its place, as the ray queries enable it): a
+   device may not have both, and NVIDIA's driver does not make one with both. A device that cannot be made with the
+   plugins' extensions is made again without them, those plugins off: a plugin never costs the game its device.
 3. After the device: `create` with the instance, device, the loader's functions and the queue.
 4. `resize` before the first frame and whenever the render or output size or the quality changes (the quality the
    ratio of the sizes: 0.67 and more Quality, 0.58 Balanced, 0.5 Performance, less Ultra Performance, 1 Native),
