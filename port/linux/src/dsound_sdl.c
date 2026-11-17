@@ -35,9 +35,12 @@ vr.hrtf, a 3D voice goes to each ear through a model of a head instead
 of the pan (hrtf), as the Xbox's DirectSound put its 3D voices through its
 HRTF; 2D voices (the menus, the music, the HUD) are as they were. A stereo
 voice the game places in the world (a mod's stereo gunfire or engine in
-place of a mono one) is a 3D voice whatever its channels: mixed to one
-channel at the voice and heard from where it is as a mono 3D voice is
-(voice_in_world).
+place of a mono one, sound_manager.c's sound_stereo_placed) is a 3D voice
+whatever its channels, heard from where it is (voice_in_world): its two
+channels spread either side of its place, each its own way through the HRTF
+or the pan, narrowing to its place with distance (audio.stereo_spread,
+stereo_spread_angle), or, at a spread of 0, mixed to one channel at the voice
+and heard as a mono 3D voice is.
 
 The output is stereo or 5.1 (audio.channels; "auto": 5.1 on a device of
 six channels or more, as the host's SDL reports it, output_channels_choose).
@@ -70,7 +73,8 @@ audio.listening_mode "night" evens the loudness out (night_compress);
 audio.spatial chooses the HRTF or the pan ("auto", "headphones", "speakers");
 audio.resampler chooses the Xbox's low pass ("xbox"), the mixer's sinc one
 ("sinc") or between neighbouring frames ("linear"); audio.enabled = false skips opening a device;
-audio.channels chooses stereo or 5.1
+audio.channels chooses stereo or 5.1; audio.stereo_spread how far apart a
+placed stereo voice's channels are heard (0 to 1)
 (port_config.c). For automated tests, debug.audio_record records the mix to a
 WAV file (its front pair, on 5.1) and debug.audio_log logs the 3D voices' places
 and gains (record, voices_log).
@@ -161,6 +165,10 @@ to behind, at 40, 20 and 0 degrees below and above. Measured on an Xbox
 /* the crossfade between the pan and the HRTF when the choice changes
 (audio.spatial): 100 ms */
 #define HRTF_FADE_FRAMES 4800
+/* audio.stereo_spread's default, and the most a placed stereo voice's
+channels are heard either side of it, 45 degrees (stereo_spread_angle) */
+#define STEREO_SPREAD_DEFAULT 0.5f
+#define STEREO_SPREAD_MAXIMUM_ANGLE 0.78539816f
 #if defined(__GNUC__) || defined(__clang__)
 #define RESAMPLER_ALIGNED __attribute__((aligned(16)))
 #else
@@ -336,6 +344,14 @@ struct sdl_stream
 	struct hrtf_parameters hrtf_current, hrtf_target;
 	float hrtf_frames[2][HRTF_FRAMES];
 	float hrtf_bands[HRTF_BANDS - 1][2];
+	/* a placed stereo voice spread (stereo_spread_on): whether it was in the
+	last mix, and its right channel's own gains through the pan and its way
+	through the HRTF, as those above are its left channel's (mix_voice) */
+	BOOL spread_on;
+	float current_second_left, current_second_right, target_second_left, target_second_right;
+	struct hrtf_parameters hrtf_second_current, hrtf_second_target;
+	float hrtf_second_frames[2][HRTF_FRAMES];
+	float hrtf_second_bands[HRTF_BANDS - 1][2];
 	/* what the voice was playing when the game cut it off, faded out
 	(voice_cut): frames of output_channels floats and their room send, and
 	how many of them have played */
@@ -380,6 +396,10 @@ static BOOL doppler_enabled = TRUE;
 /* whether mono 3D voices go through the HRTF: on stereo, audio.spatial;
 in the VR mode, vr.hrtf (spatial_hrtf, DirectSoundDoWork) */
 static BOOL hrtf_enabled = FALSE;
+/* audio.stereo_spread, 0 to 1: how far apart a placed stereo voice's two
+channels are heard (stereo_spread_angle); 0 mixes them to one, as a mono 3D
+voice (stereo_spread_read, DirectSoundDoWork) */
+static float stereo_spread = STEREO_SPREAD_DEFAULT;
 /* 2 or 6 (audio.channels), chosen when the device first opens; the game
 sets its mix bins by it, so it holds while the game runs */
 static unsigned long output_channels = 2;
@@ -591,13 +611,15 @@ static float distance_attenuation(const struct sdl_stream *stream, float distanc
 /* whether a voice is of a sound placed in the world: a 3D voice with 3D on,
 or a stereo voice the game positions (dsound_sdl_stream_set_stereo_position:
 a mod's stereo sound in place of a mono one, which the game plays on a
-stereo channel). A sound in the world is heard from where it is whatever its
-channels: a stereo voice's are mixed to one at the voice (their mean, so
-that a stereo file of the same sound on both is the mono one exactly,
-mix_voice) and it takes the same way as a mono 3D voice, through the HRTF or
-the pan, with its distance, Doppler shift, obstruction and reverb. The
-Xbox's own stereo sounds (the music, the menus, the cinematics) are never
-placed and play as they were */
+stereo channel; sound_manager.c's sound_stereo_placed). A sound in the world
+is heard from where it is whatever its channels: a stereo voice's are spread
+either side of it (the stereo spread), or at audio.stereo_spread 0 mixed to
+one at the voice (their mean, so that a stereo file of the same sound on
+both is the mono one exactly, mix_voice), and it takes the same way as a
+mono 3D voice, through the HRTF or the pan, with its distance, Doppler
+shift, obstruction and reverb. The Xbox's own stereo sounds (the music, the
+menus, the cinematics, and its stereo sounds of the world: flybys, wind) are
+never placed and play as they were */
 static BOOL voice_in_world(const struct sdl_stream *stream)
 {
 	return (stream->has_3d && stream->mode != DS3DMODE_DISABLE) ||
@@ -1171,11 +1193,12 @@ voice's parameters (stream->hrtf_current) to target, ramped over the
 ramp_frames left (more than frames: on in the next mix); a pass of its own
 over the mix, each ear's line one run of frames (the voice's last and
 these), so that it keeps to registers */
-static void hrtf_process(struct sdl_stream *stream, const float *direct, float *output, unsigned long frames,
-	unsigned long ramp_frames, const struct hrtf_parameters *target, float mix, float ramp_mix, float mix_end)
+static void hrtf_run(struct hrtf_parameters *current, float kept[2][HRTF_FRAMES], float bands[HRTF_BANDS - 1][2],
+	const float *direct, float *output, unsigned long frames, unsigned long ramp_frames,
+	const struct hrtf_parameters *target, float mix, float ramp_mix, float mix_end)
 {
 	float line[2][HRTF_FRAMES + MIX_CHUNK_FRAMES];
-	struct hrtf_parameters now = stream->hrtf_current, ramp;
+	struct hrtf_parameters now = *current, ramp;
 	float state[HRTF_BANDS - 1][2];
 	float share = ramp_frames ? 1.0f / (float)ramp_frames : 0.0f;
 	unsigned long frame;
@@ -1186,12 +1209,12 @@ static void hrtf_process(struct sdl_stream *stream, const float *direct, float *
 		ramp.delay[ear] = (target->delay[ear] - now.delay[ear]) * share;
 		for (band = 0; band < HRTF_BANDS; band++)
 			ramp.weights[ear][band] = (target->weights[ear][band] - now.weights[ear][band]) * share;
-		memcpy(line[ear], stream->hrtf_frames[ear], sizeof(stream->hrtf_frames[ear]));
+		memcpy(line[ear], kept[ear], sizeof(kept[ear]));
 	}
 	ramp.gain = (target->gain - now.gain) * share;
 	ramp.pair[0] = (target->pair[0] - now.pair[0]) * share;
 	ramp.pair[1] = (target->pair[1] - now.pair[1]) * share;
-	memcpy(state, stream->hrtf_bands, sizeof(state));
+	memcpy(state, bands, sizeof(state));
 	for (frame = 0; frame < frames; frame++)
 	{
 		/* the low passes (transposed direct form II), then each ear its
@@ -1239,10 +1262,19 @@ static void hrtf_process(struct sdl_stream *stream, const float *direct, float *
 		mix = hrtf_mix_step(mix, ramp_mix, mix_end);
 	}
 	for (ear = 0; ear < 2; ear++)
-		memcpy(stream->hrtf_frames[ear], line[ear] + frames, sizeof(stream->hrtf_frames[ear]));
+		memcpy(kept[ear], line[ear] + frames, sizeof(kept[ear]));
 	memcpy(now.decibels, target->decibels, sizeof(now.decibels));
-	stream->hrtf_current = now;
-	memcpy(stream->hrtf_bands, state, sizeof(state));
+	*current = now;
+	memcpy(bands, state, sizeof(state));
+}
+
+/* (the voice's own way, its one channel's or a spread voice's left's:
+hrtf_run; a spread voice's right channel takes its second, mix_voice) */
+static void hrtf_process(struct sdl_stream *stream, const float *direct, float *output, unsigned long frames,
+	unsigned long ramp_frames, const struct hrtf_parameters *target, float mix, float ramp_mix, float mix_end)
+{
+	hrtf_run(&stream->hrtf_current, stream->hrtf_frames, stream->hrtf_bands, direct, output, frames, ramp_frames,
+		target, mix, ramp_mix, mix_end);
 }
 
 /* audio.spatial ("auto", "headphones" or "speakers"; another is "auto"):
@@ -1300,14 +1332,150 @@ static void surround_split(float right, float up, float ahead, float *pair)
 	pair[1] = sqrtf(share);
 }
 
+/* ---------- the stereo spread
+
+A stereo voice the game places in the world (a mod's or a loose tag file's
+in place of a map's sound, a Custom Edition map's own: sound_manager.c's
+sound_stereo_placed; never the Xbox's own stereo sounds) keeps its width:
+each channel is heard from its own place either side of the voice's, the left
+to the listener's left of it, the right to the right, turned round the
+listener's up through the voice (one straight above or below: towards the
+right), each half the angle atan(audio.stereo_spread x its minimum distance /
+(2 x its distance)) away, at most 45 degrees: the width of a source
+audio.stereo_spread times its minimum distance across, seen from where the
+listener is, so that it narrows to its place, to one channel, as it goes
+away. (Behind the listener the channels change sides, as a source turned
+round does, FMOD's 3D spread too.) Each channel has its own way through the
+HRTF, the pan or the 5.1 split, at half its level (two channels at one place
+are their mean, the mono voice they are mixed to at a spread of 0); the
+distance, the Doppler shift, obstruction, occlusion and the reverb send are
+the voice's, both channels'. Within HRTF_NEAR of the head (a sound at the
+listener, as a first-person one) the channels are HRTF_NEAR away, their
+direction leaning ahead as the voice's comes to the head, so that they stay
+either side ahead, at the whole 45 degrees, as a pair of speakers, however
+the voice's place turns there, and are not faded to the middle as a mono
+voice there is: a stereo sound at the head keeps its width. audio.stereo_spread
+0 is the mono mix as it was, to the bit. */
+
+/* whether a voice is spread: a placed stereo voice (voice_in_world) while
+audio.stereo_spread is over 0 */
+static BOOL stereo_spread_on(const struct sdl_stream *stream)
+{
+	return stream->channels == 2 && stream->stereo_positioned && stereo_spread > 0.0f;
+}
+
+/* a spread voice's channels' angle either side of its place (radians) at
+distance: at most STEREO_SPREAD_MAXIMUM_ANGLE, the whole of it at the head
+(no divide by its distance there) */
+static float stereo_spread_angle(const struct sdl_stream *stream, float distance)
+{
+	float angle;
+
+	if (distance < 1.0e-4f)
+		return STEREO_SPREAD_MAXIMUM_ANGLE;
+	angle = atanf(stereo_spread * stream->minimum_distance / (2.0f * distance));
+	return angle < STEREO_SPREAD_MAXIMUM_ANGLE ? angle : STEREO_SPREAD_MAXIMUM_ANGLE;
+}
+
+/* a spread voice's channel's place (side: -1 its left, 1 its right) from
+the voice's, *right, *up and *ahead of the listener at distance, angle from
+it; its distance, at least HRTF_NEAR */
+static float stereo_spread_place(float side, float angle, float distance, float *right, float *up, float *ahead)
+{
+	float x = *right, y = *up, z = *ahead, length, horizontal, turn_x = 1.0f, turn_z = 0.0f;
+	float c = cosf(angle), s = side * sinf(angle), radius = distance > HRTF_NEAR ? distance : HRTF_NEAR;
+
+	if (distance < HRTF_NEAR)
+		z += HRTF_NEAR - distance;
+	length = sqrtf(x * x + y * y + z * z);
+	if (length > 1.0e-6f)
+	{
+		x /= length;
+		y /= length;
+		z /= length;
+	}
+	else
+	{
+		x = y = 0.0f;
+		z = 1.0f;
+	}
+	/* (the way round the listener's up, to the right) */
+	horizontal = sqrtf(x * x + z * z);
+	if (horizontal > 1.0e-6f)
+	{
+		turn_x = z / horizontal;
+		turn_z = -x / horizontal;
+	}
+	*right = radius * (c * x + s * turn_x);
+	*up = radius * c * y;
+	*ahead = radius * (c * z + s * turn_z);
+	return radius;
+}
+
+/* a spread voice's right channel's gains (voice_gains_spread; its left's
+are the voice's own): to the left and right through the pan, of the front
+and back pairs, and its way through the HRTF. on: the voice is spread */
+struct spread_gains
+{
+	BOOL on;
+	float left, right, pair[2];
+	struct hrtf_parameters hrtf;
+};
+
+/* the gains of a 3D voice (or a spread voice's channel) right, up and ahead
+of the listener at distance to the left and right (the pan's), the gains of
+the front and back pairs (surround_split), and through the HRTF (hrtf_on:
+chosen, or crossfading from it), its gain to each ear and its way there
+(hrtf_out), at the distance rolloff's attenuation; a spread voice's channel
+(spread) is not centred near the head (stereo_spread_place keeps it steady) */
+static void spatialize_at(const struct sdl_stream *stream, float side, float up, float ahead, float distance,
+	float attenuation, BOOL spread, float *left, float *right, float *pair, BOOL *hrtf_on,
+	struct hrtf_parameters *hrtf_out)
+{
+	float pan;
+
+	/* equal power pan; close sources and sources straight ahead or behind
+	stay centred, and neither ear drops below a quarter */
+	{
+		float horizontal = sqrtf(side * side + ahead * ahead);
+		float angle;
+
+		pan = horizontal > 1.0e-4f ? side / horizontal : 0.0f;
+		if (!spread && distance < stream->minimum_distance && stream->minimum_distance > 0.0f)
+			pan *= distance / stream->minimum_distance;
+		pan *= 0.75f;
+		angle = (pan + 1.0f) * 0.25f * 3.14159265f;
+		*left = cosf(angle) * 1.41421356f * 0.70710678f;
+		*right = sinf(angle) * 1.41421356f * 0.70710678f;
+	}
+	/* and through the HRTF, each ear at the pan's gain in the middle (-3
+	dB), the head's filters doing the rest (a stereo voice's channels mixed
+	to one first, or spread, each its own way: mix_voice) */
+	surround_split(side, up, ahead, pair);
+	*hrtf_on = hrtf_enabled || stream->hrtf_mix > 0.0f;
+	if (*hrtf_on)
+	{
+		/* (on 5.1 a sound behind as the direction mirrored ahead) */
+		hrtf_place(side, up, output_channels == 6 ? fabsf(ahead) : ahead, distance,
+			output_channels == 6 && ahead < 0.0f, hrtf_out);
+		hrtf_out->gain = 0.70710678f * attenuation * gain_from_millibels(stream->direct);
+		hrtf_out->pair[0] = pair[0];
+		hrtf_out->pair[1] = pair[1];
+	}
+	*left *= attenuation * gain_from_millibels(stream->direct);
+	*right *= attenuation * gain_from_millibels(stream->direct);
+}
+
 /* the gains of a 3D voice to the left and right (the pan's), the gains of
 the front and back pairs of speakers (surround_split) and the distance
 rolloff's attenuation (distance_gain); through the HRTF (hrtf_on: chosen,
-or crossfading from it), its gain to each ear and its way there (hrtf_out) */
+or crossfading from it), its gain to each ear and its way there (hrtf_out);
+a spread voice's (stereo_spread_on, given second) its left channel's, and
+its right channel's in second */
 static void spatialize(const struct sdl_stream *stream, float *left, float *right, float *pair,
-	float *distance_gain, BOOL *hrtf_on, struct hrtf_parameters *hrtf_out)
+	float *distance_gain, BOOL *hrtf_on, struct hrtf_parameters *hrtf_out, struct spread_gains *second)
 {
-	float offset[3], right_axis[3], distance, attenuation, pan, side, ahead, up;
+	float offset[3], right_axis[3], distance, attenuation, side, ahead, up;
 	int axis;
 
 	if (stream->mode == DS3DMODE_HEADRELATIVE)
@@ -1339,37 +1507,19 @@ static void spatialize(const struct sdl_stream *stream, float *left, float *righ
 	distance, sound_manager.c update_channels) */
 	attenuation = stream->has_3d ? distance_attenuation(stream, distance, listener.rolloff_factor) : 1.0f;
 	*distance_gain = attenuation;
-
-	/* equal power pan; close sources and sources straight ahead or behind
-	stay centred, and neither ear drops below a quarter */
+	if (second && second->on)
 	{
-		float horizontal = sqrtf(side * side + ahead * ahead);
-		float angle;
+		/* (the stereo spread: each channel from its own place) */
+		float angle = stereo_spread_angle(stream, distance), second_side = side, second_up = up;
+		float second_ahead = ahead, second_distance;
 
-		pan = horizontal > 1.0e-4f ? side / horizontal : 0.0f;
-		if (distance < stream->minimum_distance && stream->minimum_distance > 0.0f)
-			pan *= distance / stream->minimum_distance;
-		pan *= 0.75f;
-		angle = (pan + 1.0f) * 0.25f * 3.14159265f;
-		*left = cosf(angle) * 1.41421356f * 0.70710678f;
-		*right = sinf(angle) * 1.41421356f * 0.70710678f;
+		second_distance = stereo_spread_place(1.0f, angle, distance, &second_side, &second_up, &second_ahead);
+		spatialize_at(stream, second_side, second_up, second_ahead, second_distance, attenuation, TRUE,
+			&second->left, &second->right, second->pair, hrtf_on, &second->hrtf);
+		distance = stereo_spread_place(-1.0f, angle, distance, &side, &up, &ahead);
 	}
-	/* and through the HRTF, each ear at the pan's gain in the middle (-3
-	dB), the head's filters doing the rest (a stereo voice's channels mixed
-	to one first, mix_voice) */
-	surround_split(side, up, ahead, pair);
-	*hrtf_on = hrtf_enabled || stream->hrtf_mix > 0.0f;
-	if (*hrtf_on)
-	{
-		/* (on 5.1 a sound behind as the direction mirrored ahead) */
-		hrtf_place(side, up, output_channels == 6 ? fabsf(ahead) : ahead, distance,
-			output_channels == 6 && ahead < 0.0f, hrtf_out);
-		hrtf_out->gain = 0.70710678f * attenuation * gain_from_millibels(stream->direct);
-		hrtf_out->pair[0] = pair[0];
-		hrtf_out->pair[1] = pair[1];
-	}
-	*left *= attenuation * gain_from_millibels(stream->direct);
-	*right *= attenuation * gain_from_millibels(stream->direct);
+	spatialize_at(stream, side, up, ahead, distance, attenuation, second && second->on, left, right, pair, hrtf_on,
+		hrtf_out);
 }
 
 /* the voice's gains to the left and right, and to the reverb (only 3D voices
@@ -1378,11 +1528,19 @@ the low passes of its direct path (3D voices: obstruction and occlusion
 muffle it) and of the send; a 3D voice's gains of the front and back pairs
 of speakers (pair: surround_split; others 1 and 0); a 3D voice through the
 HRTF (hrtf_on) has its way to each ear too (hrtf_out) */
-static void voice_gains(const struct sdl_stream *stream, float *left, float *right, float *pair, float *room,
-	float *direct_lowpass, float *room_lowpass, BOOL *hrtf_on, struct hrtf_parameters *hrtf_out)
+static void voice_gains_spread(const struct sdl_stream *stream, float *left, float *right, float *pair, float *room,
+	float *direct_lowpass, float *room_lowpass, BOOL *hrtf_on, struct hrtf_parameters *hrtf_out,
+	struct spread_gains *second)
 {
 	float level_3d = -1.0f, level_direct = -1.0f;
 
+	/* (a spread voice: its right channel's too, second; its left's are the
+	voice's) */
+	if (second)
+	{
+		memset(second, 0, sizeof(*second));
+		second->on = voice_in_world(stream) && stereo_spread_on(stream);
+	}
 	pair[0] = 1.0f;
 	pair[1] = 0.0f;
 	*room = 0.0f;
@@ -1393,7 +1551,7 @@ static void voice_gains(const struct sdl_stream *stream, float *left, float *rig
 	{
 		float distance_gain, cosine = frequency_cosine(environment.flHFReference);
 
-		spatialize(stream, left, right, pair, &distance_gain, hrtf_on, hrtf_out);
+		spatialize(stream, left, right, pair, &distance_gain, hrtf_on, hrtf_out, second);
 		level_3d = VOICE_LEVEL_3D * distance_gain * stream->volume;
 		level_direct = level_3d * gain_from_millibels(stream->direct);
 		if (stream->direct_hf < stream->direct)
@@ -1458,7 +1616,22 @@ static void voice_gains(const struct sdl_stream *stream, float *left, float *rig
 		*room *= room_scale;
 		if (*hrtf_on)
 			hrtf_out->gain *= scale;
+		if (second && second->on)
+		{
+			second->left *= scale;
+			second->right *= scale;
+			if (*hrtf_on)
+				second->hrtf.gain *= scale;
+		}
 	}
+}
+
+/* (a voice's gains, its one channel's or a spread voice's left's:
+voice_gains_spread) */
+static void voice_gains(const struct sdl_stream *stream, float *left, float *right, float *pair, float *room,
+	float *direct_lowpass, float *room_lowpass, BOOL *hrtf_on, struct hrtf_parameters *hrtf_out)
+{
+	voice_gains_spread(stream, left, right, pair, room, direct_lowpass, room_lowpass, hrtf_on, hrtf_out, NULL);
 }
 
 /* on 5.1, a voice's gains from each source channel to each speaker (the
@@ -1466,7 +1639,8 @@ direct path's; its room send and low passes are voice_gains'):
 	- a 3D voice's left and right gains (voice_gains: the pan's, with its
 	  volume) on the front pair and the back pair, at their gains (pair,
 	  surround_split), from its one channel (a stereo voice's mixed to one,
-	  voice_in_world); through the HRTF, its way to each ear (hrtf_process)
+	  voice_in_world; a spread voice's right channel from its own place,
+	  mix_voice); through the HRTF, its way to each ear (hrtf_process)
 	  instead, crossfaded with these as the choice changes;
 	- a 2D voice goes by its mix bins. */
 static void voice_surround_gains(const struct sdl_stream *stream, float left, float right, const float *pair,
@@ -2070,10 +2244,14 @@ static void mix_voice(struct sdl_stream *stream, float *output, float *send, uns
 	float direct_state[2], room_state;
 	long width;
 	unsigned long frame, ramp_frames;
-	/* (a stereo voice of a sound in the world: its channels mixed to one,
-	which it plays as a mono 3D voice does, voice_in_world) */
-	BOOL downmixed = stream->channels == 2 && voice_in_world(stream);
-	BOOL one_channel = stream->channels == 1 || downmixed;
+	/* (a stereo voice of a sound in the world: spread, each channel its own
+	way (the stereo spread; its right channel's gains, second, and the
+	direct path its way through the HRTF takes), or its channels mixed to
+	one, which it plays as a mono 3D voice does, voice_in_world) */
+	BOOL spread, downmixed, one_channel;
+	struct spread_gains second;
+	float second_left, second_right, ramp_second_left, ramp_second_right;
+	float hrtf_second_direct[MIX_CHUNK_FRAMES];
 	/* (through the HRTF: whether it may take the voice, and whether its
 	filters run in this mix; how much of the voice they play, at the start,
 	the end and a frame's step; its parameters, and the direct path the
@@ -2119,8 +2297,11 @@ static void mix_voice(struct sdl_stream *stream, float *output, float *send, uns
 		scale = resampler_scale(step);
 		width = (long)ceilf(RESAMPLER_ZERO_CROSSINGS / scale);
 	}
-	voice_gains(stream, &target_left, &target_right, pair, &target_room, &target_direct_lowpass,
-		&target_room_lowpass, &hrtf_on, &target_hrtf);
+	voice_gains_spread(stream, &target_left, &target_right, pair, &target_room, &target_direct_lowpass,
+		&target_room_lowpass, &hrtf_on, &target_hrtf, &second);
+	spread = second.on;
+	downmixed = stream->channels == 2 && voice_in_world(stream) && !spread;
+	one_channel = stream->channels == 1 || downmixed;
 	if (mix_profile_on)
 	{
 		mix_profile.mixed++;
@@ -2146,9 +2327,32 @@ static void mix_voice(struct sdl_stream *stream, float *output, float *send, uns
 		memset(stream->hrtf_frames, 0, sizeof(stream->hrtf_frames));
 		memset(stream->hrtf_bands, 0, sizeof(stream->hrtf_bands));
 	}
+	/* (a spread voice's right channel's the same, and once it is spread:
+	its gains at once where they are going) */
+	if (spread && hrtf_running && (!stream->gains_valid || !stream->hrtf_on || !stream->spread_on))
+	{
+		stream->hrtf_second_current = second.hrtf;
+		memset(stream->hrtf_second_frames, 0, sizeof(stream->hrtf_second_frames));
+		memset(stream->hrtf_second_bands, 0, sizeof(stream->hrtf_second_bands));
+	}
+	if (spread && (!stream->gains_valid || !stream->spread_on))
+	{
+		stream->current_second_left = stream->target_second_left = second.left;
+		stream->current_second_right = stream->target_second_right = second.right;
+	}
 	stream->hrtf_on = hrtf_running;
 	if (surround)
+	{
 		voice_surround_gains(stream, target_left, target_right, pair, target_surround);
+		/* (a spread voice's right channel from its own place) */
+		if (spread)
+		{
+			target_surround[1][0] = second.left * second.pair[0];
+			target_surround[1][4] = second.left * second.pair[1];
+			target_surround[1][1] = second.right * second.pair[0];
+			target_surround[1][5] = second.right * second.pair[1];
+		}
+	}
 	/* a voice starting is at once at its gains, step and way through the
 	HRTF; a change to any of them, from the last mix's, ramps from where
 	they are to the new ones over PARAMETER_RAMP_FRAMES, then holds them: a
@@ -2174,7 +2378,9 @@ static void mix_voice(struct sdl_stream *stream, float *output, float *send, uns
 		target_room != stream->target_room || target_step != stream->target_step ||
 		target_direct_lowpass != stream->target_direct_lowpass || target_room_lowpass != stream->target_room_lowpass ||
 		(surround && memcmp(target_surround, stream->target_surround, sizeof(target_surround))) ||
-		(hrtf_running && memcmp(&target_hrtf, &stream->hrtf_target, sizeof(target_hrtf))))
+		(hrtf_running && memcmp(&target_hrtf, &stream->hrtf_target, sizeof(target_hrtf))) ||
+		(spread && (second.left != stream->target_second_left || second.right != stream->target_second_right ||
+			(hrtf_running && memcmp(&second.hrtf, &stream->hrtf_second_target, sizeof(second.hrtf))))))
 	{
 		stream->ramp_frames = PARAMETER_RAMP_FRAMES;
 	}
@@ -2188,8 +2394,20 @@ static void mix_voice(struct sdl_stream *stream, float *output, float *send, uns
 		memcpy(stream->target_surround, target_surround, sizeof(target_surround));
 	if (hrtf_running)
 		stream->hrtf_target = target_hrtf;
+	if (spread)
+	{
+		stream->target_second_left = second.left;
+		stream->target_second_right = second.right;
+		if (hrtf_running)
+			stream->hrtf_second_target = second.hrtf;
+	}
+	stream->spread_on = spread;
 	ramp_frames = stream->ramp_frames;
 	share = ramp_frames ? 1.0f / (float)ramp_frames : 0.0f;
+	second_left = spread ? stream->current_second_left : 0.0f;
+	second_right = spread ? stream->current_second_right : 0.0f;
+	ramp_second_left = spread ? (second.left - second_left) * share : 0.0f;
+	ramp_second_right = spread ? (second.right - second_right) * share : 0.0f;
 	step = stream->current_step;
 	ramp_step = ramp_frames ? (target_step - step) / (double)ramp_frames : 0.0;
 	left = stream->current_left;
@@ -2321,6 +2539,13 @@ static void mix_voice(struct sdl_stream *stream, float *output, float *send, uns
 		mono voice's are) */
 		if (downmixed)
 			sample_left = sample_right = 0.5f * (sample_left + sample_right);
+		/* (spread: each channel at half, so that at one place they are
+		their mean) */
+		else if (spread)
+		{
+			sample_left *= 0.5f;
+			sample_right *= 0.5f;
+		}
 		/* the room send, with its own low pass, through the Xbox's resampler
 		(send_phases), not the mixer's: the reverb folds the send's top
 		octave onto its bottom one, and the Xbox's let through images and
@@ -2357,6 +2582,7 @@ static void mix_voice(struct sdl_stream *stream, float *output, float *send, uns
 			if (hrtf_running)
 			{
 				hrtf_direct[frame] = sample_left;
+				hrtf_second_direct[frame] = sample_right;
 				hrtf_mix = hrtf_mix_step(hrtf_mix, ramp_hrtf_mix, hrtf_mix_end);
 			}
 			for (speaker = 0; speaker < MAXIMUM_OUTPUT_CHANNELS; speaker++)
@@ -2373,10 +2599,16 @@ static void mix_voice(struct sdl_stream *stream, float *output, float *send, uns
 			float panned = 1.0f - hrtf_mix;
 
 			hrtf_direct[frame] = sample_left;
+			hrtf_second_direct[frame] = sample_right;
 			if (panned > 0.0f)
 			{
 				output[frame * 2] += sample_left * left * panned;
 				output[frame * 2 + 1] += sample_left * right * panned;
+				if (spread)
+				{
+					output[frame * 2] += sample_right * second_left * panned;
+					output[frame * 2 + 1] += sample_right * second_right * panned;
+				}
 			}
 			hrtf_mix = hrtf_mix_step(hrtf_mix, ramp_hrtf_mix, hrtf_mix_end);
 		}
@@ -2385,6 +2617,11 @@ static void mix_voice(struct sdl_stream *stream, float *output, float *send, uns
 			output[frame * 2] += sample_left * left;
 			output[frame * 2 + 1] += sample_left * right;
 		}
+		else if (spread)
+		{
+			output[frame * 2] += sample_left * left + sample_right * second_left;
+			output[frame * 2 + 1] += sample_left * right + sample_right * second_right;
+		}
 		else
 		{
 			output[frame * 2] += sample_left * left;
@@ -2392,6 +2629,8 @@ static void mix_voice(struct sdl_stream *stream, float *output, float *send, uns
 		}
 		left += ramp_left;
 		right += ramp_right;
+		second_left += ramp_second_left;
+		second_right += ramp_second_right;
 		room += ramp_room;
 		direct_lowpass += ramp_direct_lowpass;
 		room_lowpass += ramp_room_lowpass;
@@ -2411,7 +2650,10 @@ static void mix_voice(struct sdl_stream *stream, float *output, float *send, uns
 			direct_lowpass = target_direct_lowpass;
 			room_lowpass = target_room_lowpass;
 			step = target_step;
+			second_left = spread ? second.left : 0.0f;
+			second_right = spread ? second.right : 0.0f;
 			ramp_left = ramp_right = ramp_room = ramp_direct_lowpass = ramp_room_lowpass = 0.0f;
+			ramp_second_left = ramp_second_right = 0.0f;
 			ramp_step = 0.0;
 			if (surround)
 			{
@@ -2430,10 +2672,17 @@ static void mix_voice(struct sdl_stream *stream, float *output, float *send, uns
 
 		hrtf_process(stream, hrtf_direct, output, frame, ramp_frames, &target_hrtf, hrtf_mix_start, ramp_hrtf_mix,
 			hrtf_mix_end);
+		/* (a spread voice's right channel, its own way) */
+		if (spread)
+		{
+			hrtf_run(&stream->hrtf_second_current, stream->hrtf_second_frames, stream->hrtf_second_bands,
+				hrtf_second_direct, output, frame, ramp_frames, &second.hrtf, hrtf_mix_start, ramp_hrtf_mix,
+				hrtf_mix_end);
+		}
 		if (mix_profile_on)
 		{
 			mix_profile.parts_ns[_mix_part_hrtf] += SDL_GetTicksNS() - hrtf_began;
-			mix_profile.hrtf++;
+			mix_profile.hrtf += spread ? 2 : 1;
 		}
 	}
 	stream->hrtf_mix = hrtf_running ? hrtf_mix : hrtf_mix_end;
@@ -2441,6 +2690,11 @@ static void mix_voice(struct sdl_stream *stream, float *output, float *send, uns
 	stream->current_left = left;
 	stream->current_right = right;
 	stream->current_room = room;
+	if (spread)
+	{
+		stream->current_second_left = second_left;
+		stream->current_second_right = second_right;
+	}
 	stream->current_step = step;
 	stream->current_direct_lowpass = direct_lowpass;
 	stream->current_room_lowpass = room_lowpass;
@@ -3740,6 +3994,8 @@ static void voice_cut(struct sdl_stream *stream)
 	stream->cut_played = 0;
 	memset(stream->hrtf_frames, 0, sizeof(stream->hrtf_frames));
 	memset(stream->hrtf_bands, 0, sizeof(stream->hrtf_bands));
+	memset(stream->hrtf_second_frames, 0, sizeof(stream->hrtf_second_frames));
+	memset(stream->hrtf_second_bands, 0, sizeof(stream->hrtf_second_bands));
 }
 
 /* (the mixer's thread) a cut voice's fade out (voice_cut), into the mix */
@@ -4797,6 +5053,14 @@ static void timing_check(void)
 	logged_at = now;
 }
 
+/* audio.stereo_spread, held to 0 to 1 (not a number: 0) */
+static float stereo_spread_read(void)
+{
+	double value = config_real("audio.stereo_spread");
+
+	return value > 0.0 ? (value < 1.0 ? (float)value : 1.0f) : 0.0f;
+}
+
 static void audio_start(void)
 {
 	if (audio_started)
@@ -4806,6 +5070,7 @@ static void audio_start(void)
 	reverb_enabled = config_boolean("audio.reverb");
 	doppler_enabled = config_boolean("audio.doppler");
 	night_enabled = !strcmp(config_string("audio.listening_mode"), "night");
+	stereo_spread = stereo_spread_read();
 	sound_on = config_boolean("audio.enabled");
 	sound_gain = sound_on ? 1.0f : 0.0f;
 	mix_profile_initialize();
@@ -5271,7 +5536,7 @@ VOID WINAPI DirectSoundDoWork(void)
 		log_flushed_ns = SDL_GetTicksNS();
 		dsound_log_flush();
 	}
-	/* (audio.volume, audio.reverb, audio.doppler, audio.listening_mode, audio.enabled
+	/* (audio.volume, audio.reverb, audio.doppler, audio.listening_mode, audio.stereo_spread, audio.enabled
 	and audio.resampler read again when the settings change: on the game's thread, not the mixer's,
 	whose lock the config's file I/O would hold) */
 	if (volume_read_at != config_changes())
@@ -5281,6 +5546,7 @@ VOID WINAPI DirectSoundDoWork(void)
 		reverb_enabled = config_boolean("audio.reverb");
 		doppler_enabled = config_boolean("audio.doppler");
 		night_enabled = !strcmp(config_string("audio.listening_mode"), "night");
+		stereo_spread = stereo_spread_read();
 		sound_on = config_boolean("audio.enabled");
 		log_voices = config_boolean("debug.audio_log");
 		snprintf(spatial_setting, sizeof(spatial_setting), "%s", config_string("audio.spatial"));

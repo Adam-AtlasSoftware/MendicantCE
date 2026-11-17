@@ -691,6 +691,11 @@ static const struct config_setting config_settings[] =
 		"Shift the pitch of the world's sounds as they move towards or away\n"
 		"from the player, as the Xbox's DirectSound did (a Banshee passing by);\n"
 		"false keeps their pitch." },
+	{ "audio.stereo_spread", _config_real, "0.5", "HALO_AUDIO_STEREO_SPREAD", _environment_value, _platform_all,
+		"How wide a mod's stereo sound in place of a map's sound is heard, 0.0\n"
+		"to 1.0: its left and right channels from either side of where it is,\n"
+		"narrowing to one point as it goes away; 0.0 mixes them to one. The\n"
+		"game's own stereo sounds play as the Xbox played them, at any value." },
 	{ "audio.spatial", _config_string, "\"auto\"", "HALO_AUDIO_SPATIAL", _environment_value, _platform_all,
 		"How the world's sounds are placed around you: \"auto\" and\n"
 		"\"headphones\" through a model of a head (HRTF), each from its\n"

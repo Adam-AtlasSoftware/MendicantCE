@@ -38,16 +38,25 @@ signals:
 	  above, below or behind); distance, occlusion, the room send and the
 	  Doppler shift through the HRTF as panned; the crossfade as the choice
 	  changes (no click); 2D voices as they were;
+	- the stereo spread (audio.stereo_spread): a placed stereo voice's
+	  channels from either side of it, the left's cues to the left and the
+	  right's to the right, through the HRTF, the pan and 5.1, narrowing to
+	  one place with distance, the whole 45 degrees at the head (no divide
+	  by its distance), channels in opposite phase heard where their mean
+	  is silent; at 0 the mono mix to the bit, and a stereo voice not placed
+	  (the game's own) the same at every spread;
 	- a voice the game cuts off (Flush) faded out over 5 ms at the hand-off,
 	  with no step, and voices of every kind cut at random, once and while a
 	  cut plays: nothing but finite samples;
 	- a voice's changes (its volume, pitch, low passes, room send, place
 	  through the pan, the HRTF and 5.1, Doppler shift and the HRTF's
 	  crossfade) the same whatever frames each mix has.
-"render" writes voices at each rate and a scene's whole mix as raw floats
+"render" writes voices at each rate and a scene's whole mix as raw floats,
+"render-stereo <spread>" placed and unplaced stereo voices at that spread
 (test_mixer.py compares the resampler adding four taps at a time with it
 adding tap by tap), "metrics" prints the figures, "bench" times a game's
-worth of voices (through the HRTF too) and "circle" writes a sound going
+worth of voices (through the HRTF too; the 3D voices placed stereo ones,
+spread or mixed to one) and "circle" writes a sound going
 round the listener to a WAV file, to listen to.
 */
 
@@ -437,6 +446,8 @@ static double *noise(unsigned long frames)
 /* voices: mono 22 kHz sounds in the world (indoors sending to the reverb,
 half muffled, silent ones out of earshot), stereo 44 kHz music, a few
 pitched; each plays for seconds */
+static BOOL scene_stereo;
+
 static void scene(unsigned long voices, unsigned long silent, BOOL indoor, double seconds)
 {
 	unsigned long frames = 22050 * 4, v, n;
@@ -465,11 +476,15 @@ static void scene(unsigned long voices, unsigned long silent, BOOL indoor, doubl
 
 		if (v == 0)
 			stream = voice_new(stereo, frames, 2, 44100, 0);
+		else if (scene_stereo)
+			stream = voice_new(stereo, frames, 2, 22050, v % 5 == 0 ? 22050 + 2000 * (v % 3) : 0);
 		else
 			stream = voice_new(mono, frames, 1, 22050, v % 5 == 0 ? 22050 + 2000 * (v % 3) : 0);
 		if (v)
 		{
-			stream->has_3d = TRUE;
+			/* (scene_stereo: placed stereo voices, dsound_sdl_stream_set_stereo_position) */
+			stream->has_3d = !scene_stereo;
+			stream->stereo_positioned = scene_stereo;
 			stream->mode = DS3DMODE_NORMAL;
 			stream->position[0] = (float)(v % 7) - 3.0f;
 			stream->position[2] = v < voices ? 2.0f : 1000.0f;
@@ -485,7 +500,7 @@ static void scene(unsigned long voices, unsigned long silent, BOOL indoor, doubl
 		stream->mixing[0].frames = (unsigned long)(seconds * 50000);
 		stream->mixing[0].samples = malloc(stream->mixing[0].frames * stream->channels * sizeof(short));
 		for (n = 0; n < stream->mixing[0].frames * stream->channels; n++)
-			stream->mixing[0].samples[n] = (v == 0 ? stereo : mono)[n % frames];
+			stream->mixing[0].samples[n] = (v == 0 || scene_stereo ? stereo : mono)[n % frames];
 		voice_packet_taken(stream);
 		stream->next = streams;
 		streams = stream;
@@ -728,6 +743,25 @@ static void listener_reset(void)
 	listener.top[1] = 1.0f;
 	listener.rolloff_factor = 1.0f;
 	listener.distance_factor = 1.0f;
+}
+
+/* frames of a placed stereo voice (voice_stereo_placed) at right, up and
+ahead, through the HRTF or panned, at audio.stereo_spread spread: both ears,
+interleaved, after the first mix (its ramps) */
+static float *stereo_placed_heard(const short *samples, unsigned long all, unsigned long frames, BOOL through,
+	float spread, float right, float up, float ahead)
+{
+	struct sdl_stream *stream = voice_stereo_placed(samples, all, 48000, right, up, ahead);
+	float *output = malloc((frames + CHUNK) * 2 * sizeof(float));
+
+	stereo_spread = spread;
+	hrtf_enabled = through;
+	render(stream, output, frames + CHUNK, TRUE);
+	hrtf_enabled = FALSE;
+	stereo_spread = STEREO_SPREAD_DEFAULT;
+	memmove(output, output + CHUNK * 2, frames * 2 * sizeof(float));
+	voice_delete(stream);
+	return output;
 }
 
 /* a second of noise at 48 kHz, as 16-bit samples */
@@ -3009,6 +3043,8 @@ int main(int argc, char **argv)
 		}
 		hrtf_initialize();
 		listener_reset();
+		/* (mixed to one: the stereo spread's case has it spread) */
+		stereo_spread = 0.0f;
 		for (through = 0; through < 2; through++)
 		{
 			for (place = 0; place < sizeof(places) / sizeof(places[0]); place++)
@@ -3100,6 +3136,245 @@ int main(int argc, char **argv)
 		free(both);
 		free(apart);
 		free(heard_mono);
+		return 0;
+	}
+	/* the stereo spread (audio.stereo_spread, at its default): a placed
+	stereo voice of noise on its left channel alone is heard to the left,
+	the left ear louder and first, of noise on its right alone to the right,
+	through the HRTF, the pan and on 5.1; narrowing with distance (the cues
+	at 1 unit, its minimum distance, at least 3 times those at 16, nearly
+	none) and, far off, its two channels apart heard as their mean is; at the
+	listener (distance 0, its minimum distance 1 or 0) the whole 45 degrees,
+	finite; its channels in opposite phase, silent mixed to one, heard; a
+	stereo voice not placed (the game's own) the same to the bit at every
+	spread, through the HRTF or not, on stereo and 5.1 */
+	CASE("stereo-spread")
+	{
+		unsigned long frames = 24000, all = frames + 4096, n;
+		short *noise_frames = noise_samples(all + 2000);
+		short *left_only = calloc(all * 2, sizeof(short)), *right_only = calloc(all * 2, sizeof(short));
+		short *apart = malloc(all * 2 * sizeof(short)), *opposite = malloc(all * 2 * sizeof(short));
+		float *heard[2], *near_heard[2], *far_heard, *far_mean, *mixed, *spread_heard;
+		double near_level, far_level, error = 0.0, power = 0.0, energy[2][MAXIMUM_OUTPUT_CHANNELS];
+		long near_delay, far_delay;
+		int side, through;
+
+		for (n = 0; n < all; n++)
+		{
+			left_only[n * 2] = right_only[n * 2 + 1] = noise_frames[n];
+			apart[n * 2] = noise_frames[n];
+			apart[n * 2 + 1] = noise_frames[n + 2000];
+			opposite[n * 2] = noise_frames[n];
+			opposite[n * 2 + 1] = (short)(noise_frames[n] == -32768 ? 32767 : -noise_frames[n]);
+		}
+		hrtf_initialize();
+		listener_reset();
+		CHECK(stereo_spread == 0.5f, "audio.stereo_spread's default is %f, not 0.5", stereo_spread);
+
+		/* each channel's side, a unit ahead (its minimum distance: 14
+		degrees either side), through the HRTF and panned */
+		for (through = 0; through < 2; through++)
+		{
+			for (side = 0; side < 2; side++)
+			{
+				float *output = stereo_placed_heard(side ? right_only : left_only, all, frames, through,
+					STEREO_SPREAD_DEFAULT, 0.0f, 0.0f, 1.0f);
+				double level = ears_level(output, frames);
+				long delay = ears_delay(output, frames);
+
+				CHECK(side ? level < -1.0 : level > 1.0, "%s, the %s channel a unit ahead: the left ear %+.2f dB of the "
+					"right", through ? "through the HRTF" : "panned", side ? "right" : "left", level);
+				if (through)
+				{
+					CHECK(side ? delay <= -3 : delay >= 3, "through the HRTF, the %s channel a unit ahead: the right "
+						"ear %ld frames after the left", side ? "right" : "left", delay);
+					heard[side] = output;
+				}
+				else
+					free(output);
+			}
+		}
+		near_level = ears_level(heard[0], frames);
+		near_delay = ears_delay(heard[0], frames);
+		/* (each is the other mirrored) */
+		CHECK(fabs(near_level + ears_level(heard[1], frames)) < 0.5 && near_delay == -ears_delay(heard[1], frames),
+			"the channels are not mirrored: %+.2f dB and %ld frames, %+.2f dB and %ld", near_level, near_delay,
+			ears_level(heard[1], frames), ears_delay(heard[1], frames));
+		free(heard[0]);
+		free(heard[1]);
+
+		/* narrowing: 16 units ahead (under a degree either side) */
+		far_heard = stereo_placed_heard(left_only, all, frames, TRUE, STEREO_SPREAD_DEFAULT, 0.0f, 0.0f, 16.0f);
+		far_level = ears_level(far_heard, frames);
+		far_delay = ears_delay(far_heard, frames);
+		CHECK(fabs(far_level) * 3.0 < fabs(near_level) && labs(far_delay) <= 1, "the left channel 16 units ahead: "
+			"%+.2f dB and %ld frames between the ears, at a unit %+.2f dB and %ld: not narrowed", far_level, far_delay,
+			near_level, near_delay);
+		free(far_heard);
+		/* far off, the channels apart heard as their mean (a spread of 0) */
+		far_heard = stereo_placed_heard(apart, all, frames, TRUE, STEREO_SPREAD_DEFAULT, 0.0f, 0.0f, 64.0f);
+		far_mean = stereo_placed_heard(apart, all, frames, TRUE, 0.0f, 0.0f, 0.0f, 64.0f);
+		for (n = 0; n < frames * 2; n++)
+		{
+			error += ((double)far_heard[n] - far_mean[n]) * ((double)far_heard[n] - far_mean[n]);
+			power += (double)far_mean[n] * far_mean[n];
+		}
+		CHECK(power > 0.0 && 10.0 * log10(error / power + 1e-30) < -30.0, "64 units off, the spread channels are "
+			"%.1f dB from their mean", 10.0 * log10(error / power + 1e-30));
+		free(far_heard);
+		free(far_mean);
+
+		/* at the listener: the whole 45 degrees, finite, its minimum
+		distance 1 or none */
+		CHECK(fabsf(stereo_spread_angle(&(struct sdl_stream){ .minimum_distance = 0.0f }, 0.0f) - 0.78539816f) < 1e-6f &&
+			fabsf(stereo_spread_angle(&(struct sdl_stream){ .minimum_distance = 1.0f }, 1.0f) - atanf(0.25f)) < 1e-6f,
+			"the spread's angle at the listener %f, a unit off %f", stereo_spread_angle(&(struct sdl_stream){
+			.minimum_distance = 0.0f }, 0.0f), stereo_spread_angle(&(struct sdl_stream){ .minimum_distance = 1.0f },
+			1.0f));
+		for (side = 0; side < 2; side++)
+		{
+			near_heard[side] = stereo_placed_heard(side ? right_only : left_only, all, frames, TRUE,
+				STEREO_SPREAD_DEFAULT, 0.0f, 0.0f, 0.0f);
+			for (n = 0; n < frames * 2; n++)
+				CHECK(isfinite(near_heard[side][n]), "at the listener, frame %lu is %f", n / 2, near_heard[side][n]);
+		}
+		CHECK(ears_level(near_heard[0], frames) > near_level + 3.0 && ears_delay(near_heard[0], frames) > near_delay &&
+			ears_level(near_heard[1], frames) < -near_level - 3.0, "at the listener the left channel %+.2f dB and %ld "
+			"frames between the ears, the right %+.2f dB: not wider than a unit off", ears_level(near_heard[0], frames),
+			ears_delay(near_heard[0], frames), ears_level(near_heard[1], frames));
+		free(near_heard[0]);
+		free(near_heard[1]);
+		{
+			struct sdl_stream *stream = voice_stereo_placed(apart, all, 48000, 0.0f, 0.0f, 0.0f);
+			float *output = malloc((frames + CHUNK) * 2 * sizeof(float));
+
+			stream->minimum_distance = 0.0f;
+			hrtf_enabled = TRUE;
+			render(stream, output, frames + CHUNK, TRUE);
+			hrtf_enabled = FALSE;
+			for (n = 0; n < (frames + CHUNK) * 2; n++)
+				CHECK(isfinite(output[n]), "at the listener, of no minimum distance, frame %lu is %f", n / 2, output[n]);
+			voice_delete(stream);
+			free(output);
+		}
+
+		/* on 5.1, panned: the left channel from the front left, the right
+		from the front right */
+		for (side = 0; side < 2; side++)
+		{
+			struct sdl_stream *stream = voice_stereo_placed(side ? right_only : left_only, all, 48000, 0.0f, 0.0f, 1.0f);
+
+			render_surround(stream, frames, energy[side], NULL);
+			voice_delete(stream);
+		}
+		CHECK(energy[0][0] > energy[0][1] + 1.0 && energy[1][1] > energy[1][0] + 1.0, "on 5.1 the left channel %.1f dB "
+			"front left, %.1f front right; the right %.1f and %.1f", energy[0][0], energy[0][1], energy[1][0],
+			energy[1][1]);
+
+		/* channels in opposite phase: their mean silent, spread heard (half
+		a unit ahead, 27 degrees either side), within 10 dB of channels
+		apart */
+		mixed = stereo_placed_heard(opposite, all, frames, TRUE, 0.0f, 0.0f, 0.0f, 0.5f);
+		spread_heard = stereo_placed_heard(opposite, all, frames, TRUE, STEREO_SPREAD_DEFAULT, 0.0f, 0.0f, 0.5f);
+		far_heard = stereo_placed_heard(apart, all, frames, TRUE, STEREO_SPREAD_DEFAULT, 0.0f, 0.0f, 0.5f);
+		CHECK(ears_power(mixed, frames) < -200.0, "channels in opposite phase mixed to one: %.1f dB, not silent",
+			ears_power(mixed, frames));
+		CHECK(ears_power(spread_heard, frames) > ears_power(far_heard, frames) - 10.0, "channels in opposite phase "
+			"spread: %.1f dB, channels apart %.1f", ears_power(spread_heard, frames), ears_power(far_heard, frames));
+		free(mixed);
+		free(spread_heard);
+		free(far_heard);
+
+		/* a stereo voice not placed: the same at every spread */
+		for (through = 0; through < 3; through++)
+		{
+			static const float spreads[3] = { 0.0f, 0.5f, 1.0f };
+			float *outputs[3];
+			int which;
+
+			for (which = 0; which < 3; which++)
+			{
+				struct sdl_stream *stream = voice_new(apart, all, 2, 48000, 0);
+
+				outputs[which] = calloc((frames + CHUNK) * MAXIMUM_OUTPUT_CHANNELS, sizeof(float));
+				stereo_spread = spreads[which];
+				hrtf_enabled = through == 1;
+				if (through == 2)
+					render_surround(stream, frames, energy[0], outputs[which]);
+				else
+					render(stream, outputs[which], frames + CHUNK, TRUE);
+				hrtf_enabled = FALSE;
+				stereo_spread = STEREO_SPREAD_DEFAULT;
+				voice_delete(stream);
+			}
+			CHECK(!memcmp(outputs[0], outputs[1], (frames + CHUNK) * MAXIMUM_OUTPUT_CHANNELS * sizeof(float)) &&
+				!memcmp(outputs[0], outputs[2], (frames + CHUNK) * MAXIMUM_OUTPUT_CHANNELS * sizeof(float)),
+				"a stereo voice not placed (%s) differs with the spread", through == 2 ? "5.1" : through ? "the HRTF" :
+				"panned");
+			for (which = 0; which < 3; which++)
+				free(outputs[which]);
+		}
+		free(noise_frames);
+		free(left_only);
+		free(right_only);
+		free(apart);
+		free(opposite);
+		return 0;
+	}
+	/* "render-stereo <spread>": placed stereo voices of two channels apart
+	(ahead, to the left, behind, above, at the listener, far off, moving),
+	panned, through the HRTF and on 5.1, at audio.stereo_spread spread, as
+	raw floats (test_mixer.py: at 0, the mono mix's to the bit) */
+	CASE("render-stereo")
+	{
+		static const float places[][3] = {
+			{ 0.0f, 0.0f, 1.0f }, { -2.0f, 0.0f, 0.5f }, { 0.5f, 0.0f, -3.0f }, { 0.0f, 2.0f, 0.0f }, { 0.0f, 0.0f, 0.0f },
+			{ 3.0f, -1.0f, 40.0f },
+		};
+		unsigned long frames = 8192, all = frames + 4096, place, n;
+		short *noise_frames = noise_samples(all + 2000), *apart = malloc(all * 2 * sizeof(short));
+		float *output = malloc((frames + CHUNK) * MAXIMUM_OUTPUT_CHANNELS * sizeof(float));
+		double energy[MAXIMUM_OUTPUT_CHANNELS];
+		int kind;
+
+		for (n = 0; n < all; n++)
+		{
+			apart[n * 2] = noise_frames[n];
+			apart[n * 2 + 1] = noise_frames[n + 2000];
+		}
+		hrtf_initialize();
+		listener_reset();
+		for (place = 0; place < sizeof(places) / sizeof(places[0]); place++)
+		{
+			for (kind = 0; kind < 3; kind++)
+			{
+				struct sdl_stream *stream = voice_stereo_placed(apart, all, 44100, places[place][0], places[place][1],
+					places[place][2]);
+
+				stream->velocity[2] = -10.0f;
+				stream->direct_hf = place % 2 ? -600 : 0;
+				stream->room = 0;
+#ifdef STEREO_SPREAD_DEFAULT
+				stereo_spread = (float)atof(argc > 2 ? argv[2] : "0");
+#endif
+				hrtf_enabled = kind == 1;
+				if (kind == 2)
+				{
+					render_surround(stream, frames, energy, output);
+					fwrite(output, sizeof(float), frames * MAXIMUM_OUTPUT_CHANNELS, stdout);
+				}
+				else
+				{
+					/* (moving half way through: its ramps) */
+					render(stream, output, frames / 2, TRUE);
+					stream->position[0] += 0.5f;
+					render(stream, output + frames, frames / 2, TRUE);
+					fwrite(output, sizeof(float), frames * 2, stdout);
+				}
+				hrtf_enabled = FALSE;
+				voice_delete(stream);
+			}
+		}
 		return 0;
 	}
 	/* 2D voices (the menus, the music, the HUD) and 3D voices with 3D off
@@ -3501,12 +3776,16 @@ int main(int argc, char **argv)
 		}
 		return 0;
 	}
-	/* "bench [voices] [out of earshot] [indoor|outdoor] [hrtf]": through the
-	HRTF, the 3D voices' */
+	/* "bench [voices] [out of earshot] [indoor|outdoor] [hrtf] [spread|mixed]":
+	through the HRTF, the 3D voices'; spread or mixed, placed stereo voices */
 	CASE("bench")
 	{
 		hrtf_initialize();
 		hrtf_enabled = argc > 5 && !strcmp(argv[5], "hrtf");
+		/* (a sixth: "spread", the 3D voices placed stereo ones spread;
+		"mixed", mixed to one) */
+		scene_stereo = argc > 6 && (!strcmp(argv[6], "spread") || !strcmp(argv[6], "mixed"));
+		stereo_spread = argc > 6 && !strcmp(argv[6], "mixed") ? 0.0f : STEREO_SPREAD_DEFAULT;
 		bench(argc > 2 ? strtoul(argv[2], NULL, 0) : 24, argc > 3 ? strtoul(argv[3], NULL, 0) : 16,
 			argc > 4 && !strcmp(argv[4], "indoor"), 10.0);
 		return 0;

@@ -109,6 +109,9 @@
 			<choice shown="HEADPHONES" value="headphones"/>
 			<choice shown="SPEAKERS" value="speakers"/>
 		</row>
+		<row key="stereo_spread" kind="slider" setting="audio.stereo_spread" label="STEREO SPREAD" crumb="AUDIO › SOUND" least="0" most="1" step="0.05" typed_least="0" typed_most="1">
+			<help>How wide stereo sounds from mods and custom maps are heard: left and right from either side, narrowing with distance. 0 makes each one point. The game's own sounds play as on the Xbox.</help>
+		</row>
 		<row key="reverb" kind="choice" setting="audio.reverb" label="REVERB" crumb="AUDIO › SOUND">
 			<help>Echoes sounds as the place you are in would, and muffles those behind walls, as the Xbox did. It costs a little of the processor.</help>
 			<choice shown="ON" value="true"/>
@@ -128,7 +131,7 @@
 		<row key="voice_chat_settings" kind="link" label="MULTIPLAYER ›" crumb="AUDIO › SOUND" open="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/voice_chat/voice_chat_screen">
 			<help>Voice chat in network games (your microphone and the other players' voices' volume) and hit sounds.</help>
 		</row>
-		<section key="section_7" title="VOLUME"/>
+		<section key="section_8" title="VOLUME"/>
 		<row key="volume" kind="slider" setting="audio.volume" label="MASTER VOLUME" crumb="AUDIO › VOLUME" least="0" most="110" step="1" typed_least="0" typed_most="110" whole="true" curve="volume">
 			<help>The volume of everything the game plays. 100% is the Xbox's level; up to 200% is louder.</help>
 		</row>

@@ -340,6 +340,8 @@ VOLUMES = Slider(0, 100, 1, 0, 100, whole=True, curve="volume")
 # is as loud a step as below, its percentage shown the amplitude's
 # (menu_functions.c's settings_volume_shown: 105 is 141%, 110 is 200%)
 MASTER_VOLUMES = Slider(0, 110, 1, 0, 110, whole=True, curve="volume")
+# audio.stereo_spread's: 0 (mixed to one) to 1
+STEREO_SPREADS = Slider(0.0, 1.0, 0.05, 0.0, 1.0)
 # the geometry, in the 640x480 menu units (menu_functions.c's SETTINGS_*
 # have the same): the rows' column and the panel beside it
 SETTINGS_ROW_X, SETTINGS_ROW_WIDTH, SETTINGS_ROW_HEIGHT, SETTINGS_ROW_STEP = 28, 344, 20, 21
@@ -972,6 +974,10 @@ PAGES = {
              "Where the sounds around you come from. Auto and Headphones place each ahead, behind, above or below "
              "you, as the Xbox's 3D audio did on speakers and headphones alike; Speakers pans them left and right.",
              None),
+            # (port/linux/src/dsound_sdl.c's stereo spread)
+            ("STEREO SPREAD", "audio.stereo_spread", STEREO_SPREADS,
+             "How wide stereo sounds from mods and custom maps are heard: left and right from either side, "
+             "narrowing with distance. 0 makes each one point. The game's own sounds play as on the Xbox.", None),
             ("REVERB", "audio.reverb", ON_OFF,
              "Echoes sounds as the place you are in would, and muffles those behind walls, as the Xbox did. It "
              "costs a little of the processor.", None),
