@@ -87,6 +87,27 @@ static void case_initial(void)
 	CHECK(bots_match.asked.bots_per_team == NONE && bots_match.last.minutes == NONE, "the options' NONEs");
 }
 
+static void case_step(void)
+{
+	real applied = 0.0f, set = 0.0f;
+
+	/* (no match speed asked for: a script's or the console's game_speed, 0.25,
+	survives the frame) */
+	CHECK(!bots_match_speed_step(1.0f, TRUE, &applied, &set), "nothing asked for: the game's speed left alone");
+	CHECK(!bots_match_speed_step(1.0f, FALSE, &applied, &set), "nor with another machine in the game");
+	CHECK(applied == 0.0f, "nothing given (%g)", applied);
+	/* (asked for: it applies each frame, over a script's) */
+	CHECK(bots_match_speed_step(8.0f, TRUE, &applied, &set) && set == 8.0f, "a match speed applies (%g)", set);
+	CHECK(bots_match_speed_step(8.0f, TRUE, &applied, &set) && set == 8.0f, "and stays applied");
+	/* (a machine joins: real time once, then the game's own again) */
+	CHECK(bots_match_speed_step(8.0f, FALSE, &applied, &set) && set == 1.0f, "taken back to real time (%g)", set);
+	CHECK(!bots_match_speed_step(8.0f, FALSE, &applied, &set), "then left alone");
+	/* (match speed 1 after 8: real time once, then left alone) */
+	CHECK(bots_match_speed_step(8.0f, TRUE, &applied, &set), "asked again");
+	CHECK(bots_match_speed_step(1.0f, TRUE, &applied, &set) && set == 1.0f, "match speed 1: real time once");
+	CHECK(!bots_match_speed_step(1.0f, TRUE, &applied, &set), "then the game's own");
+}
+
 static void schedule(long tick, char const *line)
 {
 	struct bots_match_line *kept = &bots_match.schedule[bots_match.schedule_count++];
@@ -136,6 +157,7 @@ int main(int argc, char **argv)
 		{ "entry", case_entry },
 		{ "speed", case_speed },
 		{ "initial", case_initial },
+		{ "step", case_step },
 		{ "schedule", case_schedule },
 		{ "lines", case_lines },
 	};
