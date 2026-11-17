@@ -110,6 +110,7 @@ symbols in this file:
 #include "rasterizer_xbox.h"
 #include "rasterizer_xbox_pixel_shader.h"
 #include "mcc_campaign.h" /* port: MCC scripted fades survive damage-flash suppression */
+#include "render_enumerate.h" /* port: port/linux/game/render_enumerate.c */
 
 /* cseries_windows.c's */
 unsigned long system_milliseconds(void);
@@ -513,7 +514,10 @@ viewport exposes its black side margins, whose original noise-dependent
 alpha still admits bright parts of the sampled scene. Keep the video and
 its noise unchanged inside that view, and cover only the added margins.
 The existing screen-effect shader and RGB-only write mask stay in force;
-zero blend factors blacken the margins without changing scratch alpha. */
+zero blend factors blacken the margins without changing scratch alpha.
+A map's preparation (render_enumerate.c) draws them at every width, empty
+where there are no margins, so a record made at 4:3 holds their pipeline
+for a wider screen. */
 static boolean rasterizer_screen_effect_video_borders(
 	boolean video_on,
 	short viewport_width,
@@ -525,10 +529,11 @@ static boolean rasterizer_screen_effect_video_borders(
 	real half_pixel_x;
 	real half_pixel_y;
 
-	if (!video_on || viewport_width <= 640 || viewport_height <= 0)
+	if (!video_on || viewport_width <= 0 || viewport_height <= 0 ||
+		(viewport_width <= 640 && !render_enumerating))
 		return TRUE;
 
-	inner = 640.0f / (real)viewport_width;
+	inner = viewport_width > 640 ? 640.0f / (real)viewport_width : 1.0f;
 	/* The shader translator adds half a logical pixel when converting the
 	Xbox's integer pixel centers. Counter it here so every margin pixel is
 	covered and neither inner edge moves into the authored picture. */
