@@ -102,6 +102,13 @@ layout(set = 0, binding = 25, rgba16f) uniform image2D frame_out;
 layout(set = 0, binding = 26) uniform sampler2D light_in;
 layout(set = 0, binding = 27, rgba16f) uniform image2D spec_moments_last;
 layout(set = 0, binding = 28, rgba16f) uniform image2D spec_moments_now;
+/* ReSTIR DI's reservoirs (the last frame's, this frame's): the kept
+sample's point (a lamp's point, a fixture's place) and its weight W; its
+kind and index, its confidence M (frames) */
+layout(set = 0, binding = 29, rgba32f) uniform image2D reservoir_point_last;
+layout(set = 0, binding = 30, rgba32f) uniform image2D reservoir_point_now;
+layout(set = 0, binding = 31, rgba32ui) uniform uimage2D reservoir_info_last;
+layout(set = 0, binding = 32, rgba32ui) uniform uimage2D reservoir_info_now;
 
 ivec2 size_of() { return ivec2(job.counts.y, job.counts.z); }
 bool inside(ivec2 p) { return p.x >= 0 && p.y >= 0 && p.x < int(job.counts.y) && p.y < int(job.counts.z); }
@@ -155,6 +162,14 @@ vec3 ray_of(vec4 camera[4], ivec4 corners, vec2 pixel)
     vec2 sxy = vec2(2.0 * (pixel.x + 0.5 - c.x) / max(c.z - c.x, 1.0) - 1.0,
         2.0 * (pixel.y + 0.5 - c.y) / max(c.w - c.y, 1.0) - 1.0);
     return camera[1].xyz + sxy.x * camera[2].xyz + sxy.y * camera[3].xyz;
+}
+
+/* where a pixel's surface was the frame before: its pixel there (the
+motion) and the point the last frame's camera saw at a pixel of it */
+vec3 last_point(ivec2 at, float distance)
+{
+    vec3 ray = ray_of(job.last_camera, job.last_corners, vec2(at));
+    return job.last_camera[0].xyz + distance * ray;
 }
 
 Surface surface_at(ivec2 pixel)
@@ -652,6 +667,271 @@ void lights_ris(Surface g, vec3 o, int lamp_count, int fixture_count, int dynami
     specular = kept_s / kept_t * sum;
 }
 
+/* ---------- ReSTIR DI (Bitterli et al. 2020): a reservoir a pixel
+
+A light sample: its kind (0 a lamp's point, 1 a fixture, 2 a dynamic light,
+3 none), its index (the lamp's triangle, the fixture's, the light's), its
+point. Its unshadowed light at a surface in its own measure (a lamp's by its
+area: the cosine at the lamp over the distance squared folded in; a
+fixture's and a dynamic light's as they are), the diffuse and specular
+parts, their luminance the target. */
+const int KIND_LAMP = 0, KIND_FIXTURE = 1, KIND_DYNAMIC = 2, KIND_NONE = 3;
+bool sample_light(Surface g, int kind, uint index, vec3 y, out vec3 dif, out vec3 spe, out vec3 l, out float dist)
+{
+    dif = vec3(0.0);
+    spe = vec3(0.0);
+    l = vec3(0.0, 0.0, 1.0);
+    dist = 0.0;
+    vec3 to = y - g.point;
+    float d2 = dot(to, to);
+    if (d2 < 1.0e-8)
+        return false;
+    dist = sqrt(d2);
+    l = to / dist;
+    float c = dot(g.normal, l);
+    if (c <= 0.0)
+        return false;
+    if (kind == KIND_LAMP)
+    {
+        if (index >= s.counts.z)
+            return false;
+        Floats f = Floats(s.lamps);
+        uint at = index * 16u;
+        vec3 a0 = vec3(f.v[at], f.v[at + 1u], f.v[at + 2u]);
+        vec3 a1 = vec3(f.v[at + 3u], f.v[at + 4u], f.v[at + 5u]);
+        vec3 a2 = vec3(f.v[at + 6u], f.v[at + 7u], f.v[at + 8u]);
+        vec3 radiance = vec3(f.v[at + 9u], f.v[at + 10u], f.v[at + 11u]) * s.rig[11].x;
+        vec3 ne = normalize(cross(a1 - a0, a2 - a0));
+        float ce = dot(ne, -l);
+        if (ce <= 0.0)
+            return false;
+        parts(g, l, radiance * c, false, dif, spe);
+        float geometry = ce / d2;
+        dif *= geometry;
+        spe *= geometry;
+        return true;
+    }
+    if (kind == KIND_FIXTURE)
+    {
+        if (index >= uint(s.lamp.z))
+            return false;
+        vec3 lf;
+        float df;
+        vec3 e = fixture_light(index, g.point, vec3(0.0), lf, df);
+        parts(g, l, e * c, false, dif, spe);
+        return dot(e, e) > 0.0;
+    }
+    if (kind == KIND_DYNAMIC)
+    {
+        if (index >= uint(job.volume.z) || job.lights == uvec2(0u))
+            return false;
+        vec3 ld;
+        float dd;
+        vec3 e = dynamic_light(index, g.point, ld, dd);
+        dif = e * c;
+        spe = ggx(g, l) * e * PI;
+        return dot(e, e) > 0.0;
+    }
+    return false;
+}
+
+/* the initial reservoir: resampled importance over the candidates (as
+lights_ris: each kind its own domain, its candidates' weight over its
+count), no shadow ray: the kept sample, its target in its own measure and
+the weights' sum (W = sum / target) */
+void lights_initial(Surface g, int lamp_count, int fixture_count, int dynamic_count, out int kind, out uint index,
+    out vec3 y, out float target_own, out float sum)
+{
+    kind = KIND_NONE;
+    index = 0u;
+    y = vec3(0.0);
+    target_own = 0.0;
+    sum = 0.0;
+    vec3 p = g.point;
+    bool lamps_on = s.counts.z > 0u && s.lamp.x > 0.0 && s.rig[10].w >= 0.5 && !term_off(2u);
+    if (lamps_on)
+    {
+        Floats f = Floats(s.lamps);
+        for (int c = 0; c < lamp_count; c++)
+        {
+            float probability;
+            uint lamp = lamp_pick(p, probability);
+            if (probability <= 0.0)
+                continue;
+            uint at = lamp * 16u;
+            vec3 a0 = vec3(f.v[at], f.v[at + 1u], f.v[at + 2u]);
+            vec3 a1 = vec3(f.v[at + 3u], f.v[at + 4u], f.v[at + 5u]);
+            vec3 a2 = vec3(f.v[at + 6u], f.v[at + 7u], f.v[at + 8u]);
+            vec3 radiance = vec3(f.v[at + 9u], f.v[at + 10u], f.v[at + 11u]) * s.rig[11].x;
+            vec3 ne = normalize(cross(a1 - a0, a2 - a0));
+            vec3 l;
+            float d, inverse_pdf;
+            if (!lamp_direction(p, a0, a1, a2, ne, l, d, inverse_pdf))
+                continue;
+            float c_ = dot(g.normal, l);
+            if (c_ <= 0.0)
+                continue;
+            vec3 dif, spe;
+            parts(g, l, radiance * c_, false, dif, spe);
+            float target = luma(dif) + luma(spe);
+            float w = target * inverse_pdf / probability / float(lamp_count);
+            if (!(w > 0.0) || isinf(w))
+                continue;
+            sum += w;
+            if (rnd() * sum <= w)
+            {
+                kind = KIND_LAMP;
+                index = lamp;
+                y = p + l * d;
+                /* (its target by area: the cosine at the lamp over d^2) */
+                target_own = target * max(dot(ne, -l), 0.0) / max(d * d, 1.0e-8);
+            }
+        }
+    }
+    uint fixtures = uint(s.lamp.z);
+    if (fixtures > 0u && !term_off(16u) && fixture_count > 0)
+    {
+        uint candidates = min(fixtures, uint(fixture_count));
+        Floats ff = Floats(s.unused);
+        for (uint c = 0u; c < candidates; c++)
+        {
+            uint i = fixtures <= uint(fixture_count) ? c : min(uint(rnd() * float(fixtures)), fixtures - 1u);
+            vec3 l;
+            float d;
+            vec3 e = fixture_light(i, p, vec3(0.0), l, d);
+            if (dot(g.normal, l) <= 0.0 || dot(e, e) <= 0.0)
+                continue;
+            vec3 dif, spe;
+            parts(g, l, e * dot(g.normal, l), false, dif, spe);
+            float target = luma(dif) + luma(spe);
+            float w = target * (float(fixtures) / float(candidates));
+            if (!(w > 0.0) || isinf(w))
+                continue;
+            sum += w;
+            if (rnd() * sum <= w)
+            {
+                kind = KIND_FIXTURE;
+                index = i;
+                y = vec3(ff.v[i * 16u], ff.v[i * 16u + 1u], ff.v[i * 16u + 2u]);
+                target_own = target;
+            }
+        }
+    }
+    uint dynamics = uint(job.volume.z);
+    if (dynamics > 0u && dynamic_count > 0 && job.lights != uvec2(0u))
+    {
+        uint candidates = min(dynamics, uint(dynamic_count));
+        Floats fl = Floats(job.lights);
+        for (uint c = 0u; c < candidates; c++)
+        {
+            uint i = dynamics <= uint(dynamic_count) ? c : min(uint(rnd() * float(dynamics)), dynamics - 1u);
+            vec3 l;
+            float d;
+            vec3 e = dynamic_light(i, p, l, d);
+            float nl = dot(g.normal, l);
+            if (nl <= 0.0 || dot(e, e) <= 0.0)
+                continue;
+            float target = luma(e * nl) + luma(ggx(g, l) * e * PI);
+            float w = target * (float(dynamics) / float(candidates));
+            if (!(w > 0.0) || isinf(w))
+                continue;
+            sum += w;
+            if (rnd() * sum <= w)
+            {
+                kind = KIND_DYNAMIC;
+                index = i;
+                y = vec3(fl.v[i * 12u], fl.v[i * 12u + 1u], fl.v[i * 12u + 2u]);
+                target_own = target;
+            }
+        }
+    }
+}
+
+/* the pixel's lights by ReSTIR DI: its initial reservoir, then the last
+frame's at its surface's place there (the motion's pixel, its guide this
+surface's: no reuse across an edge or an opening), its sample's target
+evaluated again here, its confidence capped at denoise_m frames (a dynamic
+light's sample is not reused: their order changes from frame to frame), one
+kept by its weight; its shadow traced; the reservoir kept for the next frame,
+its weight 0 where its sample was hidden but its confidence counted (a
+reused reservoir whose lamp was hidden still counts its candidates, so the
+light does not brighten as it is reused) */
+void lights_restir(ivec2 pixel, Surface g, vec3 o, bool reuse, out vec3 diffuse, out vec3 specular)
+{
+    diffuse = vec3(0.0);
+    specular = vec3(0.0);
+    int kind;
+    uint index;
+    vec3 y;
+    float target_own, sum;
+    lights_initial(g, int(job.extra.x), 8, 4, kind, index, y, target_own, sum);
+    float w_cur = kind != KIND_NONE && target_own > 0.0 ? sum : 0.0;
+    float m_total = 1.0;
+    /* (the kept sample's weight sum, its target here) */
+    float w_total = w_cur;
+    float target_kept = target_own;
+    if (reuse && g.has_history && (job.frame.y & FLAG_HISTORY) != 0u)
+    {
+        ivec2 q = ivec2(floor(vec2(pixel) + 0.5 + g.motion));
+        if (inside(q))
+        {
+            uvec4 gl = imageLoad(guide_last, q);
+            vec3 nl = unfold(unpackSnorm2x16(gl.y));
+            float dl = uintBitsToFloat(gl.z);
+            bool same = gl.x == (g.instance | 0x10000u) && dot(nl, g.normal) >= 0.9;
+            if (same && g.instance == 0u)
+                same = abs(dot(last_point(q, dl) - g.point, g.normal)) <= 0.02 + 0.004 * g.distance;
+            else if (same)
+                same = abs(dl - g.distance) <= 0.05 * g.distance + 0.05;
+            if (same)
+            {
+                vec4 rp = imageLoad(reservoir_point_last, q);
+                uvec4 ri = imageLoad(reservoir_info_last, q);
+                int k_last = int(ri.x & 3u);
+                uint i_last = ri.x >> 2;
+                float m_last = min(uintBitsToFloat(ri.y), job.extra.z);
+                vec3 dif, spe, l;
+                float d;
+                if (k_last != KIND_DYNAMIC && k_last != KIND_NONE && rp.w > 0.0 && m_last > 0.0 &&
+                    sample_light(g, k_last, i_last, rp.xyz, dif, spe, l, d))
+                {
+                    float target = luma(dif) + luma(spe);
+                    float w_last = target * rp.w * m_last;
+                    if (w_last > 0.0 && !isinf(w_last))
+                    {
+                        w_total += w_last;
+                        if (rnd() * w_total <= w_last)
+                        {
+                            kind = k_last;
+                            index = i_last;
+                            y = rp.xyz;
+                            target_kept = target;
+                        }
+                    }
+                }
+                m_total += max(m_last, 0.0);
+            }
+        }
+    }
+    /* (W: the weights' sum over the kept target, by the confidences' sum:
+    the initial reservoir's weights are already its candidates' mean) */
+    float big_w = kind != KIND_NONE && target_kept > 0.0 ? w_total / (target_kept * m_total) : 0.0;
+    vec3 dif = vec3(0.0), spe = vec3(0.0), l = vec3(0.0, 0.0, 1.0);
+    float d = 0.0;
+    bool seen = false;
+    if (big_w > 0.0 && sample_light(g, kind, index, y, dif, spe, l, d))
+    {
+        seen = kind == KIND_LAMP ? lamp_visible(o, l, d) : !blocked(o, l, max(d - 0.05, 0.0));
+        if (seen)
+        {
+            diffuse = dif * big_w;
+            specular = spe * big_w;
+        }
+    }
+    imageStore(reservoir_point_now, pixel, vec4(y, seen ? big_w : 0.0));
+    imageStore(reservoir_info_now, pixel, uvec4(uint(kind) | (index << 2), floatBitsToUint(m_total), 0u, 0u));
+}
+
 /* a point's sun: its visibility from o (a direction of the disc), its
 diffuse light (the rig's sun by the cosine) and specular light */
 void sun_parts(Surface g, out vec3 dif, out vec3 spe)
@@ -761,13 +1041,6 @@ vec3 ggx_sample(Surface g, out vec3 weight)
     return normalize(l.x * t + l.y * bt + l.z * g.normal);
 }
 
-/* where a pixel's surface was the frame before: its pixel there (the
-motion) and the point the last frame's camera saw at a pixel of it */
-vec3 last_point(ivec2 at, float distance)
-{
-    vec3 ray = ray_of(job.last_camera, job.last_corners, vec2(at));
-    return job.last_camera[0].xyz + distance * ray;
-}
 
 /* the sun's ray from o toward a direction of its disc: 1 seen, 0 blocked,
 and where blocked the distance to a blocker (the first the query meets, not
@@ -837,6 +1110,8 @@ void seed_for(ivec2 pixel, uint frame, uint use)
         hash_u(frame * 26699u + use * 0x9e3779b9u);
 }
 
+bool direct_on_of(uint view) { return view != 24u; }
+
 /* the surface's guide for the frames after (its instance and present bit,
 its normal, its distance, its roughness) */
 uvec4 guide_of(Surface g)
@@ -860,6 +1135,11 @@ void main()
     uint view = job.frame.z;
     Surface g = surface_at(pixel);
     imageStore(guide_now, pixel, guide_of(g));
+    if (!g.present || !direct_on_of(job.frame.z))
+    {
+        imageStore(reservoir_point_now, pixel, vec4(0.0));
+        imageStore(reservoir_info_now, pixel, uvec4(uint(KIND_NONE), 0u, 0u, 0u));
+    }
     if (!g.present)
     {
         imageStore(noisy_diffuse, pixel, vec4(0.0));
@@ -906,7 +1186,7 @@ void main()
         noisy_d += domes_at(o, g.normal, m);
         vec3 ld, ls;
         seed_for(pixel, frame, 3u);
-        lights_ris(g, o, int(job.extra.x), 8, 4, false, ld, ls);
+        lights_restir(pixel, g, o, job.extra.z > 0.0, ld, ls);
         noisy_d += ld;
         noisy_s += ls;
         /* the sky's floor (the units' rig: unoccluded, as the bake adds it) */
