@@ -24,7 +24,7 @@ def generated(fault=None):
     device, prepared = read(DEVICE), read(PREPARED)
     xdk = read('port/include/xdk/xdk_d3d8.h') + read('port/include/xdk/xdk_pdb.h')
     lines = ['#define %s %d' % (name, constant(xdk, name)) for name in ('D3DTSS_MAXSTAGES', 'D3DRS_MAX', 'D3DTSS_MAX')]
-    lines += [structure(device, 'journal_object'), structure(device, 'journal_state'),
+    lines += [structure(device, 'journal_object'), structure(device, 'draw_inputs'), structure(device, 'journal_state'),
               '#define JOURNAL_FORM %d' % constant(device, 'JOURNAL_FORM'),
               re.search(r'^#define PREPARED_VERSION .*$', prepared, re.M).group(0)]
     text = '\n'.join(lines) + '\n'

@@ -369,13 +369,13 @@ static struct derived derive(const struct journal_state *state, int settings)
 
 	memset(&derived, 0, sizeof(derived));
 	derived.pipeline = state->render_state[0];
-	derived.tag = (settings & SETTING_HDR) ? state->hdr_kind : 0;
-	derived.lit = (settings & SETTING_LIGHTS) && state->lights_count > 0;
+	derived.tag = (settings & SETTING_HDR) ? (uint32_t)state->inputs.hdr_kind : 0;
+	derived.lit = (settings & SETTING_LIGHTS) && state->inputs.lights_count > 0;
 	/* (the world's light, read from the pre-pass where found; a found
 	window's first-person weapon none, but its twin made) */
-	if ((settings & SETTING_WORLD) && state->world_span < 5)
-		derived.world = (uint32_t[]){ 0, 1, 0, 2, 3 }[state->world_span];
-	derived.soft = (settings & SETTING_SOFT) && state->soft_effect;
+	if ((settings & SETTING_WORLD) && state->inputs.world_span >= 0 && state->inputs.world_span < 5)
+		derived.world = (uint32_t[]){ 0, 1, 0, 2, 3 }[state->inputs.world_span];
+	derived.soft = (settings & SETTING_SOFT) && state->inputs.soft_group;
 	return derived;
 }
 
@@ -415,11 +415,11 @@ static void walk_make(void)
 		struct journal_state *state = &walk[index];
 
 		state->render_state[0] = (uint32_t)(rand() % 24);
-		state->hdr_kind = (uint32_t)(rand() % 3);
-		state->lights_count = (uint32_t)(rand() % 2);
+		state->inputs.hdr_kind = rand() % 3;
+		state->inputs.lights_count = rand() % 2;
 		/* (world_ao.h's WORLD_AO_SPAN_*: none, open, its first person, found, its first person) */
-		state->world_span = (uint32_t)(rand() % 5);
-		state->soft_effect = (uint32_t)(rand() % 2);
+		state->inputs.world_span = rand() % 5;
+		state->inputs.soft_group = (uint32_t)(rand() % 2);
 	}
 }
 
@@ -447,9 +447,7 @@ static int recorded(int settings)
 
 		memset(&key, 0, sizeof(key));
 		key.derived = derive(state, settings);
-		journal_settings_blind_of(key.blind, (int)state->hdr_category, (int)state->hdr_kind, (BOOL)state->hdr_view,
-			(int)state->lights_count, (BOOL)state->lights_environment, (int)state->world_span,
-			(BOOL)state->soft_effect);
+		journal_settings_blind_of(key.blind, &state->inputs);
 		for (other = 0; other < seen_count && memcmp(&seen[other], &key, sizeof(key)); other++)
 			;
 		if (other < seen_count)
