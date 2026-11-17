@@ -112,7 +112,9 @@ static void add_custom_edition(const char *folder)
 	}
 }
 
-static void expect(int xbox, int custom_edition, int next, const char *summary)
+/* the sources read, the screen's next step, the next start's screen
+(unasked, and with Settings' request) and the summary */
+static void expect(int xbox, int custom_edition, int next, int screen, const char *summary)
 {
 	struct map_sources sources;
 	char text[32];
@@ -122,6 +124,9 @@ static void expect(int xbox, int custom_edition, int next, const char *summary)
 	CHECK(sources.present[_map_source_custom_edition] == custom_edition, "Custom Edition's maps read as %d",
 		sources.present[_map_source_custom_edition]);
 	CHECK(map_sources_next(&sources) == next, "the screen's next is %d, not %d", map_sources_next(&sources), next);
+	CHECK(map_sources_screen_at_start(&sources, 0) == screen, "the next start %s the maps screen unasked",
+		screen ? "does not show" : "shows");
+	CHECK(map_sources_screen_at_start(&sources, 1), "the next start ignores Settings' ADD MAPS");
 	map_sources_summary(&sources, text, sizeof(text));
 	CHECK(!strcmp(text, summary), "the summary is %s, not %s", text, summary);
 }
@@ -132,20 +137,22 @@ int main(int argc, char **argv)
 
 	if (!strcmp(name, "iso-then-ce"))
 	{
-		/* (the disc image first: the list comes back, Custom Edition's
-		installer still to be offered) */
-		expect(0, 0, _map_sources_list, "NONE");
+		/* (the disc image first: the game starts, and no start shows the
+		screen again unasked; Custom Edition's installer is ADD MAPS's) */
+		expect(0, 0, _map_sources_list, 1, "NONE");
 		add_xbox();
-		expect(1, 0, _map_sources_list, "XBOX ONLY");
+		expect(1, 0, _map_sources_play, 0, "XBOX ONLY");
 		add_custom_edition("/game/custom_maps");
-		expect(1, 1, _map_sources_play, "XBOX + CE");
+		expect(1, 1, _map_sources_play, 0, "XBOX + CE");
 	}
 	else if (!strcmp(name, "ce-then-iso"))
 	{
+		/* (Custom Edition's alone cannot start the game: the screen
+		stays, at this start and the next) */
 		add_custom_edition("/game/custom_maps");
-		expect(0, 1, _map_sources_list, "CE ONLY");
+		expect(0, 1, _map_sources_list, 1, "CE ONLY");
 		add_xbox();
-		expect(1, 1, _map_sources_play, "XBOX + CE");
+		expect(1, 1, _map_sources_play, 0, "XBOX + CE");
 	}
 	else if (!strcmp(name, "rerun"))
 	{
@@ -163,10 +170,10 @@ int main(int argc, char **argv)
 		CHECK(map_sources_requested(), "Settings' request was not kept");
 		map_sources_request(0);
 		CHECK(!map_sources_requested(), "the screen asked for again at the start after it showed");
-		expect(1, 1, _map_sources_play, "XBOX + CE");
+		expect(1, 1, _map_sources_play, 0, "XBOX + CE");
 		add_custom_edition("/game/custom_maps");
 		add_xbox();
-		expect(1, 1, _map_sources_play, "XBOX + CE");
+		expect(1, 1, _map_sources_play, 0, "XBOX + CE");
 		snprintf(request, sizeof(request), "%s/add_maps", template);
 		unlink(request);
 		rmdir(template);
@@ -179,9 +186,9 @@ int main(int argc, char **argv)
 		file_add("/game/custom_maps/bitmaps.map");
 		file_add("/game/custom_maps/sounds.map");
 		file_add("/game/custom_maps/hugeass_0e2b3ee4.map");
-		expect(1, 0, _map_sources_list, "XBOX ONLY");
+		expect(1, 0, _map_sources_play, 0, "XBOX ONLY");
 		file_add("/game/maps/ICEFIELDS.MAP");
-		expect(1, 0, _map_sources_list, "XBOX ONLY");
+		expect(1, 0, _map_sources_play, 0, "XBOX ONLY");
 	}
 	else if (!strcmp(name, "settings-folders"))
 	{
@@ -190,15 +197,15 @@ int main(int argc, char **argv)
 		add_xbox();
 		custom_maps_setting = "/elsewhere";
 		add_custom_edition("/game/custom_maps");
-		expect(1, 0, _map_sources_list, "XBOX ONLY");
+		expect(1, 0, _map_sources_play, 0, "XBOX ONLY");
 		file_add("/elsewhere/BITMAPS.MAP");
 		add_custom_edition("/elsewhere");
-		expect(1, 1, _map_sources_play, "XBOX + CE");
+		expect(1, 1, _map_sources_play, 0, "XBOX + CE");
 		file_count = 0;
 		add_xbox();
 		custom_edition_setting = "/halo_ce";
 		add_custom_edition("/halo_ce/MAPS");
-		expect(1, 1, _map_sources_play, "XBOX + CE");
+		expect(1, 1, _map_sources_play, 0, "XBOX + CE");
 	}
 	else
 	{

@@ -32,11 +32,12 @@ picked is explained, not copied: OpenH1 does not play Halo PC's own maps,
 and the installer has the same ones.
 
 The two sources go in either order, at any time (map_sources.c, which says
-which the game has: the screen shows it). The screen comes back after each
-until the game has both, with the game's Start once it has the Xbox maps,
-which it cannot start without. Settings' ADD MAPS asks for the screen at
-the next start (xbox_files.c), with the Xbox maps there, to add Custom
-Edition's or to copy the Xbox maps again.
+which the game has: the screen shows it). The game starts the moment it has
+its Xbox maps, which it cannot start without; Custom Edition's alone bring
+the list back, saying the Xbox maps are still needed. Settings' ADD MAPS
+asks for the screen at the next start (xbox_files.c), with the Xbox maps
+there and Start among its items, to add Custom Edition's or to copy the
+Xbox maps again.
 
 (Windows' first start is sdl_platform.c's.)
 */
@@ -967,7 +968,7 @@ static void activate(int index)
 		browse();
 		break;
 	case _action_back:
-		/* (Continue, after the last source was added: the game) */
+		/* (Continue, once the game has its Xbox maps: the game) */
 		if (chooser.notice && map_sources_next(&chooser.sources) == _map_sources_play)
 			chooser.play = TRUE;
 		else
@@ -1240,8 +1241,8 @@ BOOL platform_offer_game_data(const char *destination, const char *missing)
 			}
 			else if (finished && succeeded)
 			{
-				/* (the game, once it has both sources; else the list, its
-				Start first, to add the other) */
+				/* (the game, now that it has its Xbox maps; Custom
+				Edition's are Settings' ADD MAPS's) */
 				platform_log("first start: copied the maps");
 				if (map_sources_next(&chooser.sources) == _map_sources_play)
 					break;

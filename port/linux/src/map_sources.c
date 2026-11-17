@@ -6,8 +6,10 @@ disc's (its disc image or maps folder, copied into <data root>/maps: the
 game needs them) and Custom Edition's installer (its multiplayer maps and
 resource maps, written into the custom_maps folder by map_import.c:
 optional). They can be added in either order and at any time: at the first
-start, before the game has its Xbox maps, and later from Settings' ADD MAPS,
-which asks for the same screen at the next start (first_start.c on Linux
+start, which shows the screen until the game has its Xbox maps and starts
+the game the moment it has them, and later from Settings' ADD MAPS, which
+asks for the same screen at the next start. A game with one source never
+sees the screen again unasked; Custom Edition's maps alone cannot start it (first_start.c on Linux
 and macOS, sdl_platform.c on Windows).
 
 Which sources a game has is told here alone, by what its folders hold, so
@@ -170,14 +172,12 @@ int map_sources_requested(void)
 
 int map_sources_next(const struct map_sources *sources)
 {
-	int source;
+	return sources->present[_map_source_xbox] ? _map_sources_play : _map_sources_list;
+}
 
-	for (source = 0; source < NUMBER_OF_MAP_SOURCES; source++)
-	{
-		if (!sources->present[source])
-			return _map_sources_list;
-	}
-	return _map_sources_play;
+int map_sources_screen_at_start(const struct map_sources *sources, int requested)
+{
+	return !sources->present[_map_source_xbox] || requested;
 }
 
 void map_sources_summary(const struct map_sources *sources, char *text, int size)

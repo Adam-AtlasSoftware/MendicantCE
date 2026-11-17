@@ -209,8 +209,12 @@ const char *platform_data_root(void)
 		screen that fails is not asked for again */
 		if (has_maps(root) && !halo_server_mode() && map_sources_requested())
 		{
+			struct map_sources sources;
+
 			map_sources_request(FALSE);
-			platform_offer_game_data(root, NULL);
+			map_sources_read(root, &sources);
+			if (map_sources_screen_at_start(&sources, TRUE))
+				platform_offer_game_data(root, NULL);
 		}
 #endif
 		trim_separators(root);

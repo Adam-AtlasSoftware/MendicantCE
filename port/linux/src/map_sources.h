@@ -39,9 +39,13 @@ void map_sources_read(const char *destination, struct map_sources *sources);
 void map_sources_read_game(struct map_sources *sources);
 
 /* after the screen added a source (or found it added already): the game
-starts once it has every source, else the list comes back, the game's
-Start among its items when it has the Xbox's maps */
+starts once it has its Xbox maps, which it cannot start without (Custom
+Edition's are optional, added later from Settings' ADD MAPS), else the list
+comes back */
 int map_sources_next(const struct map_sources *sources);
+/* whether a start shows the maps screen: only without the Xbox maps, or
+when Settings' ADD MAPS asked for it (requested) */
+int map_sources_screen_at_start(const struct map_sources *sources, int requested);
 
 /* the sources in a few words, for Settings' value column: "XBOX + CE",
 "XBOX ONLY", "CE ONLY", "NONE" */
