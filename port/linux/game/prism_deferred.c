@@ -89,6 +89,15 @@ void halo_scene_view(short x0, short y0, short x1, short y1, float const camera[
 #define PHASE_GBUFFER_END 5ul
 #define PHASE_VIEW_SHIFT 8
 #define PHASE_RASTER 0x10000ul
+/* display.lighting "pathtraced" (xgpu_stream.h's
+XGPU_GBUFFER_PHASE_PATHTRACED), its profile (display.pt_profile) and its
+denoiser off (display.denoiser "off") */
+#define PHASE_PATHTRACED 0x20000ul
+#define PHASE_PT_PROFILE_SHIFT 18
+#define PHASE_PT_DENOISER_OFF 0x100000ul
+/* the views the bake's relight shows (Raster's), the path tracer's */
+#define VIEW_BAKE_FIRST 12ul
+#define VIEW_PT_FIRST 20ul
 
 /* xgpu_stream.h's SCENE_MATERIAL's families, flags and scalars, and
 GBUFFER_DRAW's flags */
@@ -150,7 +159,9 @@ the nodes an instance sends (xgpu_stream.h's XGPU_SCENE_INSTANCE_NODES) */
 static struct
 {
 	unsigned long settings_read;
-	boolean wanted, raster;
+	boolean wanted, raster, pathtraced;
+	unsigned long pt_profile;
+	boolean pt_denoiser_off;
 	unsigned long view;
 	/* the window's phase sent last (0 none: the light) */
 	unsigned long phase;
@@ -189,8 +200,15 @@ static void settings_read(
 	}
 	prism_deferred.settings_read = config_changes() + 1;
 	value = config_string("display.lighting");
-	prism_deferred.raster = value && !strcmp(value, "raster");
+	/* (port: "pathtraced" (M3) is lit from the bake as Raster is: its scene,
+	rig and bake are Raster's, its resolve the path tracer's) */
+	prism_deferred.pathtraced = value && !strcmp(value, "pathtraced");
+	prism_deferred.raster = value && (!strcmp(value, "raster") || prism_deferred.pathtraced);
 	prism_deferred.wanted = value && (!strcmp(value, "ce_deferred") || prism_deferred.raster);
+	value = config_string("display.pt_profile");
+	prism_deferred.pt_profile = value && !strcmp(value, "performance") ? 0 : 1;
+	value = config_string("display.denoiser");
+	prism_deferred.pt_denoiser_off = value && !strcmp(value, "off");
 	value = config_string("debug.gbuffer_view");
 	prism_deferred.view = !value ? 0 : !strcmp(value, "base") ? 1 : !strcmp(value, "light") ? 2 :
 		!strcmp(value, "additions") ? 3 : !strcmp(value, "albedo") ? 4 : !strcmp(value, "normal") ? 5 :
@@ -199,9 +217,16 @@ static void settings_read(
 		!strcmp(value, "bake_light") ? 12 : !strcmp(value, "bake_sun") ? 13 : !strcmp(value, "bake_texels") ? 14 :
 		!strcmp(value, "bake_volume") ? 15 : !strcmp(value, "bake_total") ? 16 :
 		!strcmp(value, "raster_albedo") ? 17 : !strcmp(value, "raster_specular") ? 18 :
-		!strcmp(value, "raster_diffuse") ? 19 : 0;
-	/* (the bake's views: Raster's alone) */
-	if (prism_deferred.view >= 12 && !prism_deferred.raster)
+		!strcmp(value, "raster_diffuse") ? 19 : !strcmp(value, "pt_diffuse") ? 20 :
+		!strcmp(value, "pt_specular") ? 21 : !strcmp(value, "pt_sun") ? 22 : !strcmp(value, "pt_direct") ? 23 :
+		!strcmp(value, "pt_indirect") ? 24 : !strcmp(value, "pt_history") ? 25 : !strcmp(value, "pt_noisy") ? 26 : 0;
+	/* (the bake's views: Raster's alone; the path tracer's its own) */
+	if (prism_deferred.view >= VIEW_BAKE_FIRST && prism_deferred.view < VIEW_PT_FIRST &&
+		(!prism_deferred.raster || prism_deferred.pathtraced))
+	{
+		prism_deferred.view = 0;
+	}
+	if (prism_deferred.view >= VIEW_PT_FIRST && !prism_deferred.pathtraced)
 	{
 		prism_deferred.view = 0;
 	}
@@ -635,6 +660,14 @@ boolean prism_deferred_raster(
 	return prism_deferred.raster;
 }
 
+boolean prism_deferred_pathtraced(
+	void)
+{
+	settings_read();
+
+	return prism_deferred.pathtraced;
+}
+
 void prism_deferred_lightmap(
 	void const *lightmap_bitmap)
 {
@@ -680,7 +713,16 @@ void prism_deferred_phase(
 		value = PHASE_ADDS;
 		break;
 	default:
-		value = PHASE_RESOLVE | (prism_deferred.view << PHASE_VIEW_SHIFT) | (prism_deferred.raster ? PHASE_RASTER : 0);
+		value = PHASE_RESOLVE | (prism_deferred.view << PHASE_VIEW_SHIFT);
+		if (prism_deferred.pathtraced)
+		{
+			value |= PHASE_PATHTRACED | (prism_deferred.pt_profile << PHASE_PT_PROFILE_SHIFT) |
+				(prism_deferred.pt_denoiser_off ? PHASE_PT_DENOISER_OFF : 0);
+		}
+		else if (prism_deferred.raster)
+		{
+			value |= PHASE_RASTER;
+		}
 		break;
 	}
 	prism_deferred.phase = value;

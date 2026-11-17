@@ -64,6 +64,7 @@ its swapchain.
 #include "xgpu_vulkan_meshes.h"
 #include "xgpu_vulkan_rt.h"
 #include "xgpu_vulkan_bake.h"
+#include "xgpu_vulkan_pt.h"
 #include "xgpu_vulkan_scene.h"
 #ifdef HALO_VR
 #include "host_vulkan_vr.h"
@@ -4856,6 +4857,9 @@ struct raster_context
 	struct xgpu_vulkan_image *words, *extras;
 	const struct xgpu_stream_scene_view *view;
 	uint32_t bake_view;
+	/* (display.lighting "pathtraced": the resolve's value, its profile,
+	denoiser and view) */
+	uint32_t phase;
 };
 
 static struct xgpu_vulkan_image *raster_relight(struct xgpu_vulkan_image *light, struct xgpu_vulkan_image *base,
@@ -4864,6 +4868,17 @@ static struct xgpu_vulkan_image *raster_relight(struct xgpu_vulkan_image *light,
 	struct raster_context *raster = (struct raster_context *)context;
 
 	return xgpu_vulkan_bake_raster(light, base, additions, raster->words, raster->extras, raster->view, raster->bake_view,
+		whole);
+}
+
+/* display.lighting "pathtraced": the frame lit by the path tracer
+(xgpu_vulkan_pt.c), the G-buffer's targets and cameras its */
+static struct xgpu_vulkan_image *pt_relight(struct xgpu_vulkan_image *light, struct xgpu_vulkan_image *base,
+	struct xgpu_vulkan_image *additions, int *whole, void *context)
+{
+	struct raster_context *raster = (struct raster_context *)context;
+
+	return xgpu_vulkan_pt_frame(light, base, additions, raster->words, raster->extras, raster->view, raster->phase,
 		whole);
 }
 
@@ -4963,6 +4978,7 @@ static void stream_gbuffer_phase(void *context, uint32_t value)
 		{
 			int view = (int)((value & XGPU_GBUFFER_PHASE_VIEW_MASK) >> XGPU_GBUFFER_PHASE_VIEW_SHIFT);
 			int raster = (value & XGPU_GBUFFER_PHASE_RASTER) != 0;
+			int pathtraced = (value & XGPU_GBUFFER_PHASE_PATHTRACED) != 0, held;
 			struct stream_target *depth = target_get(stream.depth);
 			/* (the G-buffer's, where it was drawn for this window) */
 			struct xgpu_vulkan_image *words = gbuffer.drawn && gbuffer.color == stream.color &&
@@ -4976,15 +4992,18 @@ static void stream_gbuffer_phase(void *context, uint32_t value)
 			context.view = gbuffer.view_known ? &gbuffer.view : NULL;
 			context.bake_view = raster && view >= (int)XGPU_GBUFFER_VIEW_BAKE_LIGHT &&
 				view <= (int)XGPU_GBUFFER_VIEW_RASTER_DIFFUSE ? (uint32_t)view : 0;
+			context.phase = value;
+			held = view != 0;
 			if (context.bake_view)
 				view = 2;
 			else if (view >= (int)XGPU_GBUFFER_VIEW_BAKE_LIGHT)
+				/* (the path tracer's views: its whole frame is the view) */
 				view = 0;
 			xgpu_vulkan_post_deferred_resolve(color->image, deferred.base, deferred.additions, words,
 				words ? gbuffer.extras : NULL, depth && depth->depth && !depth->multisampled ? depth->image : NULL, view,
-				raster && words ? raster_relight : NULL, &context);
+				pathtraced && words ? pt_relight : raster && words ? raster_relight : NULL, &context);
 			/* (a view: nothing more over it this frame) */
-			deferred.hold = view != 0;
+			deferred.hold = held;
 		}
 		color->written++;
 		targets_bind();

@@ -18,11 +18,16 @@ enum
 	_prism_deferred_resolve
 };
 
-/* display.lighting "ce_deferred" or "raster" (read once a frame at most) */
+/* display.lighting "ce_deferred", "raster" or "pathtraced" (read once a frame at
+most) */
 boolean prism_deferred_wanted(void);
-/* display.lighting "raster" (PRISM Raster: the deferred core lit from the
-bake, port/linux/game/prism_bake.c) */
+/* display.lighting "raster" or "pathtraced" (PRISM Raster or Path Traced:
+the deferred core lit from the bake, port/linux/game/prism_bake.c; Path
+Traced's scene, rig and bake are Raster's) */
 boolean prism_deferred_raster(void);
+/* display.lighting "pathtraced" (PRISM Path Traced, M3: every CE light off,
+the path tracer's light, xgpu_vulkan_pt.c) */
+boolean prism_deferred_pathtraced(void);
 /* the window's draws from now on to a phase's target (render_window) */
 void prism_deferred_phase(short phase);
 /* the G-buffer pass (render_window's walk 1, render_gbuffer_pass): begun

@@ -2,6 +2,7 @@
 """The quality gate (docs/prism_gates.md) over captures made by capture.py, against thresholds.json's thresholds:
 
     python3 tools/prism_gate/gate.py measure <captures> [scene ...]   # results.json and a table
+    python3 tools/prism_gate/gate.py measure <captures> --state v4pt --off v4off  # M3's Path Traced
     python3 tools/prism_gate/gate.py repro <captures a> <captures b>  # every frame of both byte for byte alike?
     python3 tools/prism_gate/gate.py equivalence <captures> [scene ...]  # M1: "ce_deferred" against "ce"
     python3 tools/prism_gate/gate.py material_source <captures> [scene ...]  # M1: every opaque pixel's material
@@ -35,13 +36,13 @@ def thresholds():
     return json.loads((HERE / "thresholds.json").read_text())["gate"]
 
 
-def measure_scene(scene, folder, limits):
+def measure_scene(scene, folder, limits, state="pathtraced", off="off"):
     moves, refs = folder / "moves", folder / "refs"
     errors, blotches, flips, skies = [], [], [], []
     for index, step in enumerate(capture.probe_steps(scene)):
         ref = metrics.load(refs / f"p{index}_ref.png")
-        moving = metrics.load(moves / f"m_pathtraced_{step:03d}.png")
-        keep = metrics.keep_mask(metrics.load(moves / f"m_off_{step:03d}.png"),
+        moving = metrics.load(moves / f"m_{state}_{step:03d}.png")
+        keep = metrics.keep_mask(metrics.load(moves / f"m_{off}_{step:03d}.png"),
                                  metrics.load(refs / f"p{index}_off.png"))
         errors.append(metrics.rel_mse(moving, ref, keep))
         blotches.append(metrics.blotch(moving, ref, keep))
@@ -55,7 +56,7 @@ def measure_scene(scene, folder, limits):
         return [metrics.load(moves / f"m_{kind}_{s:03d}.png") for s in range(1, total + 1)]
 
     result = {"error": max(errors), "blotch": max(blotches), "flip": max(flips),
-              "flicker": metrics.flicker(frames("pathtraced"), frames("off")), "errors": errors,
+              "flicker": metrics.flicker(frames(state), frames(off)), "errors": errors,
               "blotches": blotches, "flips": flips, "sky": skies}
     result["harness_fault"] = max(skies) > limits["sky_most"]
     result["pass"] = (not result["harness_fault"] and result["error"] <= limits["error"] and
@@ -70,7 +71,7 @@ def measure(args):
     limits = thresholds()
     results = {}
     for scene_id in args.scenes or sorted(p.name for p in root.iterdir() if p.name in scenes):
-        r = measure_scene(scenes[scene_id], root / scene_id, limits)
+        r = measure_scene(scenes[scene_id], root / scene_id, limits, args.state, args.off)
         results[scene_id] = r
         print("%-4s %-14s error %.4f  blotch %.4f  flip %.3f  flicker %.2f  %s" % (
             scene_id, scenes[scene_id]["name"], r["error"], r["blotch"], r["flip"], r["flicker"],
@@ -294,6 +295,8 @@ def main():
     m = sub.add_parser("measure")
     m.add_argument("captures")
     m.add_argument("scenes", nargs="*")
+    m.add_argument("--state", default="pathtraced", help="the moving frames measured (M3's: v4pt, v4perf)")
+    m.add_argument("--off", default="off", help="their RT off (M3's: v4off)")
     r = sub.add_parser("repro")
     r.add_argument("a")
     r.add_argument("b")

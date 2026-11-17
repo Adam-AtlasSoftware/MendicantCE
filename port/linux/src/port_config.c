@@ -727,8 +727,24 @@ static const struct config_setting config_settings[] =
 		"normal, the sun's sharp shadows from the baked sun mask, the objects\n"
 		"from the irradiance volume; CE's light where the bake has nothing\n"
 		"yet), no ray tracing while playing; the bake (display.bake) needs a\n"
-		"graphics card with ray tracing. Read each frame. Vulkan only; no\n"
+		"graphics card with ray tracing. \"pathtraced\" PRISM Path Traced\n"
+		"(docs/prism_pathtraced.md): every CE light off, the same deferred\n"
+		"core lit by the path tracer (the sun's shadows, the sky's domes, the\n"
+		"lamps and the dynamic lights traced each frame, the bounced light\n"
+		"from the bake, denoised); needs ray tracing and a bake of the level\n"
+		"(made while you play, display.bake). Read each frame. Vulkan only; no\n"
 		"anti-aliasing by multisampling." },
+	{ "display.pt_profile", _config_string, "\"quality\"", "HALO_PT_PROFILE", _environment_value,
+		_platform_desktop,
+		"With display.lighting \"pathtraced\": \"quality\" traces a bounce at\n"
+		"every pixel (the bake ending it) beside the direct light; \"performance\"\n"
+		"reads the bounced light from the bake where the level has it and\n"
+		"traces a bounce only for the objects. Read each frame." },
+	{ "display.denoiser", _config_string, "\"prism\"", "HALO_DENOISER", _environment_value, _platform_desktop,
+		"With display.lighting \"pathtraced\": \"prism\" the in-tree denoiser\n"
+		"(its diffuse and specular light and the sun's shadows); \"off\" the\n"
+		"traced light as it is, one sample a pixel (for checking). Read each\n"
+		"frame." },
 	{ "display.bake", _config_string, "\"auto\"", "HALO_BAKE", _environment_value, _platform_desktop,
 		"PRISM's in-game baker (docs/prism_bake.md), with display.lighting\n"
 		"\"raster\": \"auto\" bakes each level's light in the background while\n"
@@ -2883,14 +2899,22 @@ static const struct config_setting config_settings[] =
 		"has none), \"bake_volume\" (the irradiance volume's light alone) or\n"
 		"\"bake_total\" (the bake's whole light, the sun's with it), or the\n"
 		"frame's parts: \"raster_albedo\", \"raster_specular\", \"raster_diffuse\";\n"
+		"with \"pathtraced\", the path tracer's: \"pt_diffuse\" (the diffuse\n"
+		"light, denoised), \"pt_specular\", \"pt_sun\" (the sun's visibility),\n"
+		"\"pt_direct\", \"pt_indirect\", \"pt_history\" (each pixel's history,\n"
+		"white full) or \"pt_noisy\" (the diffuse light as traced);\n"
 		"\"off\" the frame. Read each frame." },
 	{ "debug.pt_reference", _config_integer, "0", "HALO_PT_REFERENCE", _environment_value, _platform_desktop,
 		"With display.prism_rt \"pathtraced\", a converged reference for the\n"
-		"quality gates (docs/prism_v4.md): the path tracer unbiased (no reuse,\n"
+		"quality gates (docs/prism_gates.md): the path tracer unbiased (no reuse,\n"
 		"no cache, no denoiser, up to 8 bounces), its samples summed over this\n"
 		"many frames with the camera and the game stopped (game_speed 0; the sum\n"
 		"starts again where either moves), then written once as a linear\n"
-		"OpenEXR file (debug.pt_reference_file) and held on screen; 0 none." },
+		"OpenEXR file (debug.pt_reference_file) and held on screen; 0 none.\n"
+		"With display.lighting \"pathtraced\", the same scene, materials and\n"
+		"lights traced unbiased with no bake, and summed until its estimated\n"
+		"noise is under the gates' bound (docs/prism_gates.md), this many\n"
+		"frames at most." },
 	{ "debug.pt_reference_file", _config_string, "\"\"", "HALO_PT_REFERENCE_FILE", _environment_value,
 		_platform_desktop,
 		"The file debug.pt_reference writes (its folder made if missing);\n"
@@ -4662,10 +4686,13 @@ static const struct
 	{ "display.resolution_scaling", { "native", "original", NULL }, NULL },
 	{ "display.anti_aliasing", { "off", "fxaa", "smaa", "ssaa2x", "msaa2x", "msaa4x", "msaa8x", NULL }, NULL },
 	{ "display.ambient_occlusion", { "off", "world", NULL }, "off" },
-	{ "display.lighting", { "ce", "ce_deferred", "raster", NULL }, "ce" },
+	{ "display.lighting", { "ce", "ce_deferred", "raster", "pathtraced", NULL }, "ce" },
+	{ "display.pt_profile", { "quality", "performance", NULL }, "quality" },
+	{ "display.denoiser", { "prism", "off", NULL }, "prism" },
 	{ "debug.gbuffer_view", { "off", "base", "light", "additions", "albedo", "normal", "roughness", "metal",
 		"material_source", "instance", "motion", "emissive", "bake_light", "bake_sun", "bake_texels",
-		"bake_volume", "bake_total", "raster_albedo", "raster_specular", "raster_diffuse", NULL }, "off" },
+		"bake_volume", "bake_total", "raster_albedo", "raster_specular", "raster_diffuse", "pt_diffuse",
+		"pt_specular", "pt_sun", "pt_direct", "pt_indirect", "pt_history", "pt_noisy", NULL }, "off" },
 	{ "display.bake", { "auto", "ask", "off", NULL }, "auto" },
 	{ "display.bake_quality", { "max", "ultra", "high", "draft", NULL }, "max" },
 	{ "display.prism_rt", { "off", "shadows", "gi", "pathtraced", NULL }, "off" },

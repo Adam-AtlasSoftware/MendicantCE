@@ -369,6 +369,11 @@ struct bake_state
 	struct bake_scene_block block;
 	/* the raster lookup's */
 	struct bake_buffer pages, charts, vpages, table, pool, sun, masks, bricks, probes, raster_job;
+	/* PRISM Path Traced's (xgpu_vulkan_pt.c): the indirect light alone, a
+	word a texel (RGB9E5) in the pool's physical tiles' order; each level
+	triangle's lightmap page and coordinates (4 words, by its kept index:
+	the info's word 7) */
+	struct bake_buffer pool_indirect, lightmaps;
 	uint32_t mask_capacity, mask_count, physical_count, brick_entries, coarse_entries;
 	struct bake_buffer bricks_coarse;
 	uint32_t *table_host, *sun_host;
@@ -1700,7 +1705,7 @@ static void bake_free(struct bake_state *b)
 	{
 		&b->vertices, &b->info, &b->materials, &b->alpha, &b->lamps, &b->grid, &b->scene, &b->blas_storage[0],
 		&b->blas_storage[1], &b->blas_storage[2], &b->blas_storage[3], &b->fixtures_buffer, &b->tlas_storage, &b->instances, &b->pages, &b->charts, &b->vpages, &b->table, &b->pool,
-		&b->sun, &b->masks, &b->bricks, &b->bricks_coarse, &b->reflection_points, &b->reflection_info,
+		&b->pool_indirect, &b->lightmaps, &b->sun, &b->masks, &b->bricks, &b->bricks_coarse, &b->reflection_points, &b->reflection_info,
 		&b->reflection_data, &b->reflection_table, &b->probes, &b->raster_job, &b->ranges, &b->triangles, &b->texels,
 		&b->accumulators, &b->states, &b->running, &b->tile_origins, &b->job, &b->cell_points, &b->cell_candidates,
 		&b->cell_weights, &b->mask_ranges, &b->mask_out, &b->probe_points, &b->probe_accumulators, &b->probe_states,
@@ -2143,7 +2148,7 @@ static int bake_upload(struct bake_state *b)
 	VkDeviceAddress opaque_address = 0, tested_address = 0, addresses[4] = { 0, 0, 0, 0 };
 	void *host_materials = b->materials.mapped, *host_alpha = b->alpha.mapped;
 	VkDeviceSize alpha_bytes = b->alpha.size;
-	int ok = 0;
+	int ok = 0, k_ok;
 
 	b->materials.mapped = b->alpha.mapped = NULL;
 	b->alpha.size = 0;
@@ -2240,6 +2245,38 @@ static int bake_upload(struct bake_state *b)
 		to[0] = (traced < b->material_count ? traced : b->material_count) | (level != XGPU_SCENE_LEVEL_BOTH ? 0x10000u : 0u);
 		memcpy(to + 1, a + XGPU_SCENE_ATTRIBUTE_BASE, 6 * sizeof(float));
 		to[7] = index;
+	}
+	/* (PRISM Path Traced's: each kept triangle's lightmap page + 1 (0 none)
+	and its corners' lightmap coordinates, 2 x 16 unorm each, so that a ray's
+	hit on the level reads the bake there) */
+	{
+		uint32_t *lightmaps = (uint32_t *)calloc((size_t)plan->triangle_count + 1, 16);
+
+		if (!lightmaps)
+			goto done;
+		for (index = 0; index < plan->triangle_count; index++)
+		{
+			const uint32_t *a = plan->attributes + (size_t)index * XGPU_SCENE_STATIC_ATTRIBUTE_WORDS;
+			uint32_t page = a[XGPU_SCENE_ATTRIBUTE_KIND_PAGE] >> XGPU_SCENE_PAGE_SHIFT, k;
+
+			if (page == XGPU_SCENE_PAGE_NONE || page >= plan->page_count)
+				continue;
+			lightmaps[index * 4] = page + 1;
+			for (k = 0; k < 3; k++)
+			{
+				float u, v;
+
+				memcpy(&u, a + XGPU_SCENE_ATTRIBUTE_ATLAS + k * 2, 4);
+				memcpy(&v, a + XGPU_SCENE_ATTRIBUTE_ATLAS + k * 2 + 1, 4);
+				u = u > 0.0f ? (u < 1.0f ? u : 1.0f) : 0.0f;
+				v = v > 0.0f ? (v < 1.0f ? v : 1.0f) : 0.0f;
+				lightmaps[index * 4 + 1 + k] = (uint32_t)(u * 65535.0f + 0.5f) | ((uint32_t)(v * 65535.0f + 0.5f) << 16);
+			}
+		}
+		k_ok = buffer_filled(commands, lightmaps, (VkDeviceSize)plan->triangle_count * 16 + 16, &b->lightmaps, 0);
+		free(lightmaps);
+		if (!k_ok)
+			goto done;
 	}
 	if (!buffer_filled(commands, vertices, (VkDeviceSize)triangles * 36, &b->vertices,
 		VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR) ||
@@ -2338,6 +2375,7 @@ static int bake_upload(struct bake_state *b)
 		!buffer_filled(commands, NULL, (VkDeviceSize)plan->table_words * 4 + 16, &b->table, 0) ||
 		!buffer_filled(commands, NULL, (VkDeviceSize)plan->table_words * 4 + 16, &b->sun, 0) ||
 		!buffer_make((VkDeviceSize)plan->tile_count * RASTER_TILE_WORDS * 4 + 64, 0, 0, &b->pool) ||
+		!buffer_make((VkDeviceSize)plan->tile_count * TILE_TEXELS * 4 + 64, 0, 0, &b->pool_indirect) ||
 		!buffer_filled(commands, NULL, (VkDeviceSize)b->mask_capacity * MASK_TEXELS + 64, &b->masks, 0) ||
 		!buffer_filled(commands, tridata, (VkDeviceSize)plan->atlas.triangle_count * 64 + 64, &b->triangles, 0) ||
 		!buffer_filled(commands, plan->tile_triangles, (VkDeviceSize)plan->tile_triangle_count * 4 + 16, &b->ranges, 0))
@@ -2682,6 +2720,21 @@ static int tile_draw(VkCommandBuffer commands, struct bake_state *b, uint32_t ti
 	return 1;
 }
 
+/* PRISM Path Traced's: a drawn tile's indirect light (its file words' third
+of each texel) into the indirect pool, at its physical tile */
+static int tile_indirect(VkCommandBuffer commands, struct bake_state *b, uint32_t tile_index, const uint32_t *file)
+{
+	struct bake_tile *tile = &b->plan.tiles[tile_index];
+	uint32_t words[TILE_TEXELS], index;
+
+	if (!tile->physical || !b->pool_indirect.buffer)
+		return 0;
+	for (index = 0; index < TILE_TEXELS; index++)
+		words[index] = file[index * 4 + 2];
+	return upload(commands, &b->pool_indirect, (VkDeviceSize)(tile->physical - 1) * TILE_TEXELS * 4, words,
+		TILE_TEXELS * 4);
+}
+
 /* a tile's results from its readback: written to the file, drawn, its
 mask asked for where its sun is mixed */
 static void tile_finish(VkCommandBuffer commands, struct bake_state *b, uint32_t tile_index, const float *accumulators,
@@ -2767,7 +2820,8 @@ static void tile_finish(VkCommandBuffer commands, struct bake_state *b, uint32_t
 		return;
 	}
 	file_append(b, PRISM_BAKE_RECORD_ATLAS_TILE, b->plan.tiles[tile_index].job, file, sizeof(file));
-	if (!tile_draw(commands, b, tile_index, raster, sun_state, sun_texels, NULL))
+	if (!tile_draw(commands, b, tile_index, raster, sun_state, sun_texels, NULL) ||
+		!tile_indirect(commands, b, tile_index, file))
 		return;
 	b->plan.tiles[tile_index].state = TILE_DONE;
 	b->plan.tiles[tile_index].mask_state = sun_state >= 3 ? 1 : 0;
@@ -4104,6 +4158,8 @@ static int file_load(VkCommandBuffer commands, struct bake_state *b)
 		}
 		else if (!tile_draw(commands, b, cursor, raster, sun_state, sun_texels, NULL))
 			return 0;
+		if (!tile_indirect(commands, b, cursor, file))
+			return 0;
 		tile->state = TILE_DONE;
 		b->tiles_done++;
 		loaded++;
@@ -5067,6 +5123,53 @@ struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy
 	if (whole)
 		*whole = !bake_view;
 	return bake.raster_light;
+}
+
+int xgpu_vulkan_bake_lookup(struct xgpu_vulkan_bake_lookup *lookup)
+{
+	struct bake_state *b = bake.bake;
+
+	memset(lookup, 0, sizeof(*lookup));
+	if (!bake.made || !b || b->step == STEP_FAILED || b->step <= STEP_UPLOAD || !b->scene.address ||
+		!b->block.tlas)
+		return 0;
+	lookup->scene = b->scene.address;
+	lookup->pages = b->pages.address;
+	lookup->charts = b->charts.address;
+	lookup->vpages = b->vpages.address;
+	lookup->table = b->table.address;
+	lookup->tiles = b->pool.address;
+	lookup->indirect = b->pool_indirect.address;
+	lookup->sun = b->sun.address;
+	lookup->masks = b->masks.address;
+	lookup->lightmaps = b->lightmaps.address;
+	lookup->page_count = b->plan.page_count;
+	lookup->tiles_done = b->tiles_done;
+	lookup->tiles_planned = b->tiles_planned;
+	if (b->probes.buffer && b->probes_done)
+	{
+		lookup->bricks = b->bricks.address;
+		lookup->coarse = b->bricks_coarse.address;
+		lookup->probes = b->probes.address;
+		lookup->brick_entries = b->brick_entries;
+		lookup->coarse_entries = b->coarse_entries;
+	}
+	lookup->probe_spacing = PROBE_SPACING;
+	lookup->coarse_spacing = COARSE_SPACING;
+	if (b->reflections_made && b->plan.reflection_count && b->reflections_done)
+	{
+		lookup->reflections = b->reflection_info.address;
+		lookup->reflection_table = b->reflection_table.address;
+		lookup->reflection_data = b->reflection_data.address;
+		lookup->reflection_count = b->reflections_done;
+		lookup->reflection_entries = b->reflection_entries;
+		lookup->reflection_levels = REFLECTION_LEVELS;
+		lookup->reflection_side = REFLECTION_SIDE;
+	}
+	lookup->generation = b->generation;
+	lookup->complete = b->step == STEP_DONE;
+	lookup->gamma = b->block.rig[1][3] > 1.001f ? b->block.rig[1][3] : 1.0f;
+	return 1;
 }
 
 void xgpu_vulkan_bake_shutdown(void)

@@ -38,7 +38,7 @@ port/linux/README.md.
 #include <stdint.h>
 
 #define XGPU_STREAM_MAGIC 0x53504758u /* "XGPS" */
-#define XGPU_STREAM_VERSION 34
+#define XGPU_STREAM_VERSION 35
 #define XGPU_STREAM_LOADING_ART_BYTES (640u * 480u * 4u)
 
 /* ---------- the ring
@@ -427,6 +427,32 @@ diffuse light by the albedo) */
 #define XGPU_GBUFFER_VIEW_RASTER_DIFFUSE 19u
 #define XGPU_GBUFFER_PHASE_RASTER 0x10000u
 #define XGPU_GBUFFER_PHASE_VIEW_MASK 0xff00u
+/* XGPU_GBUFFER_PHASE_PATHTRACED, or'd into the resolve's value in its
+place (M3, stream version 35): display.lighting "pathtraced" (PRISM Path
+Traced, design section 1.5; docs/prism_pathtraced.md): every CE light off,
+the opaque pixels lit by the path tracer (xgpu_vulkan_pt.c) from the G-buffer
+and the bake, and the resolve draws that frame as it is; its profile
+(display.pt_profile: XGPU_PT_PROFILE_*) in bits 18 and 19, bit 20 the
+denoiser off (display.denoiser "off"); its views from 20 (debug.gbuffer_view
+"pt_*": XGPU_GBUFFER_VIEW_PT_*) */
+#define XGPU_GBUFFER_PHASE_PATHTRACED 0x20000u
+#define XGPU_GBUFFER_PHASE_PT_PROFILE_SHIFT 18
+#define XGPU_GBUFFER_PHASE_PT_PROFILE_MASK 0xc0000u
+#define XGPU_GBUFFER_PHASE_PT_DENOISER_OFF 0x100000u
+#define XGPU_PT_PROFILE_PERFORMANCE 0u
+#define XGPU_PT_PROFILE_QUALITY 1u
+/* (the path tracer's views: the diffuse light (denoised, the albedo left
+out), the specular light, the sun's visibility (filtered), the direct
+light's and the indirect light's parts of the diffuse, the history's length,
+the noisy diffuse light as traced) */
+#define XGPU_GBUFFER_VIEW_PT_DIFFUSE 20u
+#define XGPU_GBUFFER_VIEW_PT_SPECULAR 21u
+#define XGPU_GBUFFER_VIEW_PT_SUN 22u
+#define XGPU_GBUFFER_VIEW_PT_DIRECT 23u
+#define XGPU_GBUFFER_VIEW_PT_INDIRECT 24u
+#define XGPU_GBUFFER_VIEW_PT_HISTORY 25u
+#define XGPU_GBUFFER_VIEW_PT_NOISY 26u
+#define XGPU_GBUFFER_VIEW_PT_LAST 26u
 /* the second target's word 2: the motion's history bit and the page's
 shift (GBUFFER_BEGIN) */
 #define XGPU_GBUFFER_EXTRA_HISTORY 0x10000u
@@ -2126,10 +2152,10 @@ The scene as the host's deferred renderer, its path tracer and its baker
 read it (overhaul_research/prism_v4_renderer/design.md, section 1.2): the
 materials, the objects drawn, the opaque draws of the G-buffer, the level's
 geometry once for every consumer, the lights, the decals and the fog. They
-are sent only in the v4 modes (display.lighting "ce_deferred" now; "raster"
-and "pathtraced" to come); with "ce" (the default, Classic and Enhanced)
+are sent only in the v4 modes (display.lighting "ce_deferred", "raster" and
+"pathtraced"); with "ce" (the default, Classic and Enhanced)
 none is ever written, so those frames stay byte for byte as they were. Their
-types are in the list above (XGPU_STREAM_VERSION 34) and the host's decoder
+types are in the list above (XGPU_STREAM_VERSION 35) and the host's decoder
 takes every one; M1 sends SCENE_MATERIAL and GBUFFER_DRAW (the guest's
 xgpu_backend_scene_material and _gbuffer_draw) and SCENE_STATIC (also with
 display.prism_rt on: the traced level is its), the others are specified and

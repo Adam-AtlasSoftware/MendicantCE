@@ -74,8 +74,10 @@ void halo_prism_rt_static(int phase, unsigned long generation, unsigned long fir
 void halo_prism_rt_frame(void const *frame);
 /* render_enumerate.c's (the window drawn is a map's first frame's, unseen) */
 extern unsigned char render_enumerating;
-/* prism_deferred.c's: display.lighting "raster" */
+/* prism_deferred.c's: display.lighting "raster" (or "pathtraced"), and
+"pathtraced" alone */
 boolean prism_deferred_raster(void);
+boolean prism_deferred_pathtraced(void);
 /* render_sky.c's (the sky's sun, as PRISM's cascaded shadows find it, and
 each of its lights) */
 boolean render_sky_sun(short sky_index, real_vector3d *direction, real_rgb_color *color, real *power);
@@ -1597,9 +1599,11 @@ int prism_rt_light(void)
 	return light_keyed();
 }
 
-/* debug.pt_reference: the request in the frame (path traced only), its file
-named; started again if the game's time moved (the sum is of one stopped
-moment: the game is stopped with game_speed 0 first) */
+/* debug.pt_reference: the request in the frame (path traced only, or port:
+display.lighting "pathtraced", whose reference the v4 path tracer makes,
+xgpu_vulkan_pt.c), its file named; started again if the game's time moved
+(the sum is of one stopped moment: the game is stopped with game_speed 0
+first) */
 static void reference_frame(struct prism_rt_frame *frame)
 {
 	char *file;
@@ -1607,7 +1611,7 @@ static void reference_frame(struct prism_rt_frame *frame)
 
 	if (prism_rt.reference_frames <= 0)
 		return;
-	if (prism_rt.mode != PRISM_RT_PATHTRACED)
+	if (prism_rt.mode != PRISM_RT_PATHTRACED && !(raster_scene() && prism_deferred_pathtraced()))
 	{
 		if (!prism_rt.reference_logged)
 			platform_log("prism rt: debug.pt_reference needs display.prism_rt \"pathtraced\"");

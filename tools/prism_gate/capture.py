@@ -8,6 +8,8 @@ every run.
     python3 tools/prism_gate/capture.py all ...          # every scene, moves and references
     python3 tools/prism_gate/capture.py equivalence G2 ... # M1's: "ce" and "ce_deferred" at the probe poses, and
                                                            # the G-buffer's views (gate.py material_source)
+    python3 tools/prism_gate/capture.py all_v4 G5 ... --states v4off v4pt v4raw --env HALO_BAKE_FOLDER=<bakes>
+                                                           # M3's: Path Traced's moves, and its references (refs_v4)
 
 moves: the camera moved along the scene's keys a step at a time (`steps` a leg, each step held `step_frames`
 frames, its last saved) in each state: RT off, path traced (faithful, denoised) and raw (the denoiser off).
@@ -43,7 +45,21 @@ STATES = {
     "pathtraced": ('prism_set "rt pathtraced"', 'prism_set "rt_style faithful"',
                    'prism_set "rt_denoiser spatiotemporal"'),
     "raw": ('prism_set "rt pathtraced"', 'prism_set "rt_style faithful"', 'prism_set "rt_denoiser off"'),
+    # PRISM v4's Path Traced (M3, docs/prism_pathtraced.md): display.lighting "pathtraced", every CE light off, lit
+    # from a bake made before (the run's HALO_BAKE_FOLDER; display.bake "off": nothing baked in the run): its quality
+    # and performance profiles, the denoiser off (a diagnostic), PRISM Raster, and Classic's frame as the moves' RT
+    # off (the flicker's base and the keep mask's)
+    "v4off": ('prism_set "rt off"', 'prism_set "display.lighting ce"', 'prism_set "debug.gbuffer_view off"'),
+    "v4pt": ('prism_set "rt off"', 'prism_set "display.lighting pathtraced"', 'prism_set "display.pt_profile quality"',
+             'prism_set "display.denoiser prism"'),
+    "v4perf": ('prism_set "rt off"', 'prism_set "display.lighting pathtraced"',
+               'prism_set "display.pt_profile performance"', 'prism_set "display.denoiser prism"'),
+    "v4raw": ('prism_set "rt off"', 'prism_set "display.lighting pathtraced"', 'prism_set "display.pt_profile quality"',
+              'prism_set "display.denoiser off"'),
+    "v4raster": ('prism_set "rt off"', 'prism_set "display.lighting raster"'),
 }
+# (the states that read the bake: entered from another, the bake is loaded again, BAKE_LOAD_FRAMES held)
+BAKE_STATES = ("v4pt", "v4perf", "v4raw", "v4raster")
 
 
 def load_scenes(path=HERE / "scenes.json"):
@@ -94,8 +110,13 @@ def begin(scene, by_tick=True):
 def moves_timeline(scene, states):
     t = begin(scene)
     poses = paths.move_poses(scene["keys"], scene["steps"])
+    baked = False
     for state in states:
         t.at(*STATES[state])
+        # (a bake's mode entered: the bake read again before the state's settle)
+        if state in BAKE_STATES and not baked:
+            t.hold(scene["keys"][0], BAKE_LOAD_FRAMES)
+        baked = state in BAKE_STATES
         t.hold(scene["keys"][0], scene["state_settle"])
         for step, pose in enumerate(poses, start=1):
             t.hold(pose, scene["step_frames"], save=f"moves/m_{state}_{step:03d}.png")
@@ -121,6 +142,30 @@ def refs_timeline(scene, frames):
         t.at('prism_set "pt_reference 0"')
         if scene.get("live"):
             t.at("game_speed 1")
+    # (the last file written once the GPU is done with its sums: a few frames on)
+    t.hold(t.keys[max(t.keys)], 60)
+    return t
+
+
+def refs_v4_timeline(scene, frames, state="v4pt"):
+    """M3's references (docs/prism_pathtraced.md): RT off's stills (Classic's frame) at the probe poses first, then
+    display.lighting "pathtraced" once (its bake read), and at each probe pose its live frame held, then
+    debug.pt_reference in that mode (the same scene, materials and lights unbiased, no bake: summed until its noise is
+    under the bound, `frames` at most), its linear file and the frame it holds"""
+    t = begin(scene)
+    poses = paths.move_poses(scene["keys"], scene["steps"])
+    probes = probe_steps(scene)
+    t.at(*STATES["v4off"])
+    for index, step in enumerate(probes):
+        t.hold(poses[step - 1], scene["state_settle"], save=f"refs/p{index}_off.png")
+    t.at(*STATES[state])
+    t.hold(poses[probes[0] - 1], BAKE_LOAD_FRAMES)
+    for index, step in enumerate(probes):
+        pose = poses[step - 1]
+        t.hold(pose, scene["pt_settle"], save=f"refs/p{index}_live.png")
+        t.at(f'prism_set "pt_reference_file p{index}.exr"', f'prism_set "pt_reference {frames}"')
+        t.hold(pose, frames + scene["reference_margin"], save=f"refs/p{index}_ref.png")
+        t.at('prism_set "pt_reference 0"')
     # (the last file written once the GPU is done with its sums: a few frames on)
     t.hold(t.keys[max(t.keys)], 60)
     return t
@@ -218,6 +263,8 @@ def capture(scene, what, args):
     if what == "bake":
         run(scene, bake_timeline(scene), out, "bake", args)
         return
+    if what == "all_v4":
+        what = "moves"
     if what in ("moves", "all"):
         if scene.get("live"):
             for state in args.states:
@@ -226,11 +273,14 @@ def capture(scene, what, args):
             run(scene, moves_timeline(scene, args.states), out, "moves", args)
     if what in ("refs", "all"):
         run(scene, refs_timeline(scene, args.reference_frames or scene["reference_frames"]), out, "refs", args)
+    if what in ("refs_v4", "all_v4"):
+        run(scene, refs_v4_timeline(scene, args.reference_frames or scene.get("reference_frames_v4") or
+                                    scene["reference_frames"], args.v4_state), out, "refs", args)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("what", choices=("moves", "refs", "all", "equivalence", "bake"))
+    parser.add_argument("what", choices=("moves", "refs", "all", "equivalence", "bake", "refs_v4", "all_v4"))
     parser.add_argument("scenes", nargs="*", help="scene ids (default: every scene)")
     parser.add_argument("--stage", required=True, help="a Linux release tree (tools/linux_package.py tree)")
     parser.add_argument("--data", required=True, help="a data folder: maps, mods, prism_world, prism_lightmaps, "
@@ -242,7 +292,10 @@ def main():
                         "scene's)")
     parser.add_argument("--timeout", type=float, default=7200)
     parser.add_argument("--keep", action="store_true", help="keep each run's folder")
-    parser.add_argument("--states", nargs="+", default=list(STATES), choices=list(STATES), help="moves' states")
+    parser.add_argument("--states", nargs="+", default=["off", "pathtraced", "raw"], choices=list(STATES),
+                        help="moves' states (M3's: v4off v4pt v4raw ...)")
+    parser.add_argument("--v4-state", default="v4pt", choices=BAKE_STATES, help="refs_v4: the live state at each "
+                        "probe before its reference")
     parser.add_argument("--env", action="append", default=[], help="K=V given to the game (diagnostics)")
     args = parser.parse_args()
     scenes = load_scenes()

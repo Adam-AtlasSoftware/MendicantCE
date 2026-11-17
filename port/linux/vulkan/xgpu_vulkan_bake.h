@@ -36,6 +36,31 @@ struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy
 	struct xgpu_vulkan_image *additions, struct xgpu_vulkan_image *words, struct xgpu_vulkan_image *extras,
 	const struct xgpu_stream_scene_view *view, uint32_t bake_view, int *whole);
 
+/* PRISM Path Traced's view of the bake on the GPU (xgpu_vulkan_pt.c; docs/
+prism_pathtraced.md), every buffer by its device address: the scene's block
+(xgpu_vulkan_bake_glsl.inc's Scene: the bake's acceleration structure, its
+materials, lamps, light-importance grid, fixtures and rig), Raster's
+lookups (the lightmap's pages and their chart maps, the virtual pages, the
+tile table and the tiles, the sun's table and masks, the volume's two
+cascades, the reflection probes), the indirect light alone (a word a texel,
+RGB9E5, in the tiles' order) and each level triangle's lightmap page and
+coordinates (4 words, by the scene's info's word 7). Counts 0 where a part
+is not made yet; 0 where the bake has no scene to trace */
+struct xgpu_vulkan_bake_lookup
+{
+	uint64_t scene;
+	uint64_t pages, charts, vpages, table, tiles, indirect, sun, masks, lightmaps;
+	uint64_t bricks, coarse, probes;
+	uint64_t reflections, reflection_table, reflection_data;
+	uint32_t page_count, tiles_done, tiles_planned;
+	uint32_t brick_entries, coarse_entries;
+	uint32_t reflection_count, reflection_entries, reflection_levels, reflection_side;
+	uint32_t generation;
+	int complete;
+	float probe_spacing, coarse_spacing, gamma;
+};
+int xgpu_vulkan_bake_lookup(struct xgpu_vulkan_bake_lookup *lookup);
+
 /* the device going away: everything let go of */
 void xgpu_vulkan_bake_shutdown(void);
 
