@@ -29,7 +29,8 @@ uint32_t xgpu_vulkan_upscale_instance_extensions(const char *const **names);
 plugin then asked whether it works on it (supported); a plugin that does
 not is turned off and asks for none */
 uint32_t xgpu_vulkan_upscale_device_extensions(VkPhysicalDevice physical, const char **names, uint32_t most);
-/* an extension the loader or the device lacks: its plugin turned off */
+/* an extension the loader (device 0) or the device (1) lacks, or one the
+driver made no device with (2): its plugin turned off */
 void xgpu_vulkan_upscale_extension_missing(const char *extension, int device);
 void xgpu_vulkan_upscale_plugins_create(void);
 void xgpu_vulkan_upscale_shutdown(void);

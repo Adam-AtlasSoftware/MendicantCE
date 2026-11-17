@@ -145,8 +145,9 @@ struct xgpu_vulkan_options
 	the instance extensions they ask for, added where the loader has them;
 	the device extensions they ask for of the device chosen (at most most of
 	them: the count), added where the device has them; one the loader or the
-	device lacks told (plugin_missing: device 0 the instance's), which turns
-	its plugin off. NULL, 0: none. */
+	device lacks told (plugin_missing: device 0 the instance's, 1 the
+	device's, 2 one the driver made no device with: the device is then made
+	without them), which turns its plugin off. NULL, 0: none. */
 	const char *const *plugin_instance_extensions;
 	uint32_t plugin_instance_extension_count;
 	uint32_t (*plugin_device_extensions)(VkPhysicalDevice physical, const char **names, uint32_t most);

@@ -7906,10 +7906,10 @@ static int device_make(const struct xgpu_vulkan_options *options)
 		for (index = plugin_first; index < extension_count; index++)
 		{
 			if (options->plugin_missing)
-				options->plugin_missing(extensions[index], 1);
+				options->plugin_missing(extensions[index], 2);
 		}
 		if (plugin_addresses && options->plugin_missing)
-			options->plugin_missing(VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME, 1);
+			options->plugin_missing(VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME, 2);
 		*plugin_chain = NULL;
 		info.enabledExtensionCount = extension_count = plugin_first;
 		result = options->create_device ?

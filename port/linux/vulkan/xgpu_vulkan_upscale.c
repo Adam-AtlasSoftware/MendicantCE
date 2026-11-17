@@ -171,6 +171,10 @@ static struct
 	/* the jitter off (HALO_UPSCALE_JITTER=0: the passthrough plugin's
 	identity with the upscaler off, a test's) */
 	int no_jitter;
+	/* END's work between the GPU time's marks (HALO_UPSCALE_GPU_MARKS=1:
+	HALO_VULKAN_GPU_TIMES_FILE's third column, where no G-buffer pass has
+	taken them: display.lighting "ce"'s) */
+	int gpu_marks;
 	/* the output (an image of the core's: stretched into the target) and
 	the colour kept at OPAQUE (the view's format and size), and a stand-in
 	for the G-buffer's second target */
@@ -326,7 +330,11 @@ void xgpu_vulkan_upscale_extension_missing(const char *extension, int device)
 	uint32_t index;
 	int which;
 
-	snprintf(why, sizeof(why), "the %s has no %s", device ? "graphics card" : "Vulkan loader", extension);
+	if (device == 2)
+		snprintf(why, sizeof(why), "the graphics card's driver made no device with %s and the others it asks for",
+			extension);
+	else
+		snprintf(why, sizeof(why), "the %s has no %s", device ? "graphics card" : "Vulkan loader", extension);
 	for (which = 0; which < 2; which++)
 	{
 		if (!device)
@@ -537,6 +545,7 @@ static int make(void)
 		const char *jitter = getenv("HALO_UPSCALE_JITTER");
 
 		up.no_jitter = jitter && !strcmp(jitter, "0");
+		up.gpu_marks = getenv("HALO_UPSCALE_GPU_MARKS") && !strcmp(getenv("HALO_UPSCALE_GPU_MARKS"), "1");
 	}
 	up.made = 1;
 	return 1;
@@ -1176,6 +1185,8 @@ void xgpu_vulkan_upscale_end(const struct xgpu_stream_upscale *record, struct xg
 		xgpu_vulkan_image_compute_use(gbuffer_base, 0);
 	}
 	commands = xgpu_vulkan_compute_commands();
+	if (up.gpu_marks)
+		xgpu_vulkan_gpu_time_mark(0);
 	if (!images_fit(commands, width, height, output_width, output_height) ||
 		!guides_fit(commands, width, height, denoise_upscale))
 	{
@@ -1251,6 +1262,8 @@ void xgpu_vulkan_upscale_end(const struct xgpu_stream_upscale *record, struct xg
 		output_depth, record->output_corners, 0) && !up.logged_upscaled)
 		host_logf(HOST_LOG_WARN, "upscaler: the view's depth cannot be stretched into the window's: what is drawn "
 			"after the HUD is not tested against it");
+	if (up.gpu_marks)
+		xgpu_vulkan_gpu_time_mark(1);
 	if (!up.logged_upscaled)
 	{
 		host_logf(HOST_LOG_INFO, "upscaler: %s%s: %ux%u upscaled to %ux%u", denoise_upscale ?
