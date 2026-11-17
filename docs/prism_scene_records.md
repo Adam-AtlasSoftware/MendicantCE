@@ -8,7 +8,9 @@ lights, the decals and the fog. These are new records of the renderer's command 
 
 ## What is there now
 
-`XGPU_STREAM_VERSION` is 34. The records' types are in the stream's own list, after M1's first record,
+`XGPU_STREAM_VERSION` is 35 (M3: the resolve's `GBUFFER_PHASE` value carries `XGPU_GBUFFER_PHASE_PATHTRACED`, the
+profile and the denoiser, `docs/prism_pathtraced.md`; no record was added). The records' types are in the stream's
+own list, after M1's first record,
 `GBUFFER_PHASE` (82): `SCENE_MATERIAL` is 83 and so on to `SCENE_FOG`, 90, then `SCENE_VIEW`, 91, M2's `PRISM_BAKE`,
 92, and `XGPU_STREAM_RECORD_TYPES` is 93. The
 host's decoder takes every one, with its fixed part's size as its minimum.
@@ -84,7 +86,7 @@ from `xgpu_stream_encode.c`.
 
 ## The byte-identity rule
 
-The records are sent only in the v4 modes (`display.lighting` `ce_deferred` now, `raster` and `pathtraced` to come).
+The records are sent only in the v4 modes (`display.lighting` `ce_deferred`, `raster` and `pathtraced`).
 With `ce`, the default of Classic and Enhanced, none is ever written, and those frames stay byte for byte as the build before them drew them. Every
 milestone checks this.
 
