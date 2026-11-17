@@ -188,6 +188,30 @@ static int reference_glyph(struct face *faces, int count, float oversample, unsi
 	glyph->advance = advance * face->scale * face->narrowing;
 	glyph->ink_left = ink_right > ink_left ? ink_left / pixel_scale : glyph->left;
 	glyph->ink_right = ink_right > ink_left ? ink_right / pixel_scale : glyph->right;
+	/* (a question mark the font draws in the middle of a whole em, more
+	than an eighth of one left of its ink: an exclamation mark's room either
+	side, its own cut, as text_hires.c lays it out since 5997deee4, #901) */
+	if (code == '?' && index)
+	{
+		int mark = stbtt_FindGlyphIndex(&face->info, '!'), mark_x0 = 0, mark_x1 = 0, mark_advance = 0;
+		int mark_bearing = 0, em = (int)(1.0f / stbtt_ScaleForMappingEmToPixels(&face->info, 1.0f) + 0.5f);
+
+		if (mark && em > 0 && bearing > em / 8 && stbtt_GetGlyphBox(&face->info, mark, &mark_x0, NULL, &mark_x1, NULL))
+		{
+			int left, right;
+			float shift;
+
+			stbtt_GetGlyphHMetrics(&face->info, mark, &mark_advance, &mark_bearing);
+			left = bearing > mark_bearing ? bearing - mark_bearing : 0;
+			right = (advance - ink_x1) - (mark_advance - mark_x1);
+			shift = left * face->scale * face->narrowing;
+			glyph->left -= shift;
+			glyph->right -= shift;
+			glyph->ink_left -= shift;
+			glyph->ink_right -= shift;
+			glyph->advance -= (left + (right > 0 ? right : 0)) * face->scale * face->narrowing;
+		}
+	}
 	return 1;
 }
 
