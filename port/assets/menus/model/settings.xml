@@ -1270,7 +1270,7 @@
 			<choice shown="45%" value="45"/>
 			<choice shown="50%" value="50"/>
 		</row>
-		<row key="stick_test" kind="link" label="STICK TEST ›" crumb="CONTROLS › CONTROLLER › STICK SETTINGS" search="deadzone drift" open="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/stick_test/stick_test_screen">
+		<row key="stick_test" kind="link" label="STICK TEST ›" crumb="CONTROLS › CONTROLLER › STICK SETTINGS" search="deadzone drift" open="screens/stick_test">
 			<help>See what each stick reads, and what the game takes from it with the dead zones and shape set here: find a stick's drift, then set its dead zone just past it.</help>
 		</row>
 		<section key="section_4" title="OUTER DEAD ZONES"/>
@@ -1344,21 +1344,6 @@
 			<choice shown="90%" value="90"/>
 			<choice shown="95%" value="95"/>
 			<choice shown="100%" value="100"/>
-		</row>
-		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
-		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>
-		<button key="button_cancel" kind="cancel" run="port settings page cancel" help="Goes back without these changes."/>
-	</screen>
-	<screen name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/stick_test/stick_test_screen" kind="settings" layout="page" geometry="tall" title="STICK TEST">
-		<section key="section_0" title="READINGS"/>
-		<row key="stick_test_left" kind="status" label="LEFT STICK" crumb="CONTROLS › … › STICK TEST">
-			<help>The left stick now: side to side, then up and down, in percent of its travel; after the bar, as you move with the dead zones set. Below, the left circle: its dead zones, the stick white, what the game takes blue.</help>
-		</row>
-		<row key="stick_test_right" kind="status" label="RIGHT STICK" crumb="CONTROLS › … › STICK TEST">
-			<help>The right stick now: side to side, then up and down, in percent of its travel; after the bar, as the view turns with the dead zones and shape set. Below, the right circle.</help>
-		</row>
-		<row key="stick_drift" kind="status" label="DRIFT AT REST" crumb="CONTROLS › … › STICK TEST">
-			<help>The most each stick has read while let go of, since this page opened. Set its dead zone a little past this, on Advanced Stick Settings.</help>
 		</row>
 		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
 		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>
