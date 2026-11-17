@@ -167,8 +167,18 @@ symbols in this file:
 #include "rasterizer/xbox/rasterizer_xbox_pixel_shader.h"
 #include "rasterizer_xbox_draw_primitives.h"
 #include "rasterizer_xbox_internal.h"
+#include "draw_bounds.h" /* port: port/linux/game/draw_bounds.c */
 
 /* ---------- constants */
+
+/* port: how far past a dynamic light's radius its distance attenuation is
+still sampled inside its border, as a multiple of the radius: the diffuse
+pass magnifies the texture's first level alone (half a texel of it, of 8
+or more across; here a quarter of the radius), the specular pass filters
+between its mipmaps, the last of which is one texel (half of it: as far
+again as the radius) */
+#define DIFFUSE_LIGHT_BORDER_REACH 1.25f
+#define SPECULAR_LIGHT_BORDER_REACH 2.0f
 
 enum
 {
@@ -1152,6 +1162,8 @@ void _rasterizer_environment_lightmap_begin(
 void _rasterizer_environment_diffuse_light_end(
 	void)
 {
+	draw_bounds_none(); /* port: (the light's surfaces are drawn) */
+
 	return;
 }
 
@@ -1251,6 +1263,14 @@ void _rasterizer_environment_diffuse_light_begin(
 		D3DDevice_SetRenderState(
 			D3DRS_PSCONSTANT0_0,
 			real_rgb_color_to_pixel32(&light->color));
+
+		/* port: the light's surfaces are drawn whole, and lit only where the
+		distance attenuation is sampled inside its border: the cube of the
+		light's radius about it, and the border's blend with the edge's
+		texels beyond (DIFFUSE_LIGHT_BORDER_REACH). The draws are kept to its
+		place in the view (port/linux/game/draw_bounds.c): the same pixels
+		are lit */
+		draw_bounds_cube(&light->position, light->radius * DIFFUSE_LIGHT_BORDER_REACH);
 	}
 	return;
 }
@@ -1767,6 +1787,8 @@ void _rasterizer_environment_diffuse_texture_draw(
 void _rasterizer_environment_specular_light_end(
 	void)
 {
+	draw_bounds_none(); /* port: (the light's surfaces are drawn) */
+
 	return;
 }
 
@@ -1860,6 +1882,11 @@ void _rasterizer_environment_specular_light_begin(
 				real_rgb_color_brightness(&light->color);
 			inverse_radius = 1.0f /
 				(light->definition->geometry.specular_radius_multiplier * light->radius);
+			/* port: as the diffuse light's surfaces (_rasterizer_environment_
+			diffuse_light_begin), about the specular radius */
+			draw_bounds_cube(
+				&light->position,
+				light->definition->geometry.specular_radius_multiplier * light->radius * SPECULAR_LIGHT_BORDER_REACH);
 			vertex_constants[0].i = light->position.x;
 			vertex_constants[0].j = light->position.y;
 			vertex_constants[0].k = light->position.z;

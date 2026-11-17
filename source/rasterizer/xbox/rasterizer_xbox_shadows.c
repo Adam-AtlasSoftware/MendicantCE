@@ -89,8 +89,16 @@ symbols in this file:
 #include "rasterizer/xbox/rasterizer_xbox.h"
 #include "rasterizer/xbox/rasterizer_xbox_pixel_shader.h"
 #include "rasterizer/xbox/rasterizer_xbox_draw_primitives.h"
+#include "draw_bounds.h" /* port: port/linux/game/draw_bounds.c */
 
 /* ---------- constants */
+
+/* port: how far past a shadow's volume its map is still sampled inside its
+border, as a multiple of the volume's reach: the border's blend with the
+map's edge texels, of a map of 128 or more across, filtered over as many as
+16 of them where the view of the surface is steep (anisotropic filtering);
+here a quarter */
+#define SHADOW_BORDER_REACH 1.25f
 
 enum
 {
@@ -639,6 +647,8 @@ void _rasterizer_environment_shadow_end(
 		563,
 		global_d3d_device);
 
+	draw_bounds_none(); /* port: (the shadow's receivers are drawn) */
+
 	if (global_window_parameters.rasterizer_target ==
 			_rasterizer_target_render_primary &&
 		rasterizer_debug_options.draw_environment_shadows)
@@ -944,6 +954,31 @@ void _rasterizer_environment_shadow_draw(
 					FALSE,
 					TRUE);
 				shadow_restored = TRUE;
+			}
+
+			/* port: the shadow's receivers are the level's surfaces, whole, and
+			shadowed only inside the shadow's volume (render_object_shadow_end's
+			planes: the radius to each side, half of it toward the light and
+			four away), beside which the map is sampled by its border, and a
+			little beyond, where the border blends with the map's edge
+			(SHADOW_BORDER_REACH). The draws are kept to its place in the view
+			(port/linux/game/draw_bounds.c): the same pixels are shadowed */
+			{
+				real const radius = local_object_bounding_radius;
+				real low[3];
+				real high[3];
+
+				low[0] = low[1] = -radius * SHADOW_BORDER_REACH;
+				high[0] = high[1] = radius * SHADOW_BORDER_REACH;
+				low[2] = -radius * 0.5f * SHADOW_BORDER_REACH;
+				high[2] = radius * 4.0f * SHADOW_BORDER_REACH;
+				draw_bounds_box(
+					&local_shadow_matrix.position,
+					&local_shadow_matrix.forward,
+					&local_shadow_matrix.left,
+					&local_shadow_matrix.up,
+					low,
+					high);
 			}
 
 			shadow_setup = TRUE;
@@ -1294,8 +1329,30 @@ static boolean shadow_atlas_make(
 	return TRUE;
 }
 
+/* a region's cell of an atlas: the region and its half of the guard bands
+about it, the cells side by side with nothing between */
+static void shadow_atlas_cell(
+	short region,
+	D3DVIEWPORT8 *viewport)
+{
+	viewport->X = shadow_atlas_x(region) - SHADOW_ATLAS_MARGIN;
+	viewport->Y = shadow_atlas_y(region) - SHADOW_ATLAS_MARGIN;
+	viewport->Width = SHADOW_ATLAS_SPACING;
+	viewport->Height = SHADOW_ATLAS_SPACING;
+
+	return;
+}
+
 /* an atlas of the frame's class drawn into, all of it emptied first if
-clear, the viewport a region's (NONE: all of it) */
+clear, the viewport a region's (NONE: all of it).
+
+Where a pass costs by the area it covers (d3d8_clears_alone: a tile-based
+GPU, for which a class's 1024 by 256 atlas is most of the screen's tiles,
+twice a frame, for one caster), each region's cell is emptied instead as
+its turn comes, and the rest of the atlas left as it was: nothing samples
+it. A pass's taps reach no further than the guard band (SHADOW_ATLAS_GUARD),
+which is the cells', and a receiver samples its region alone
+(d3d8_texture_region). The pixels drawn are the same. */
 static void shadow_atlas_set_target(
 	short atlas,
 	short region,
@@ -1310,7 +1367,22 @@ static void shadow_atlas_set_target(
 	viewport.Height = shadow_atlas_heights[shadow_atlas_class];
 	viewport.MinZ = 0.0f;
 	viewport.MaxZ = 1.0f;
-	if (clear)
+	if (region != NONE && d3d8_clears_alone())
+	{
+		D3DVIEWPORT8 cell = viewport;
+
+		shadow_atlas_cell(region, &cell);
+		IDirect3DDevice8_SetViewport(global_d3d_device, &cell);
+		if (clear)
+		{
+			d3d8_clear_viewport_alone(0);
+		}
+		else
+		{
+			IDirect3DDevice8_Clear(global_d3d_device, 0, NULL, D3DCLEAR_TARGET, 0, 1.0f, 0);
+		}
+	}
+	else if (clear)
 	{
 		IDirect3DDevice8_SetViewport(global_d3d_device, &viewport);
 		IDirect3DDevice8_Clear(global_d3d_device, 0, NULL, D3DCLEAR_TARGET, 0, 1.0f, 0);

@@ -28,6 +28,8 @@ Conventions carried over from the Xbox:
 #include "xgpu_shader.h"
 #include "xgpu_backend.h"
 #include "xgpu_hdr.h"
+#include "draw_bounds_state.h"
+#include "xgpu_images.h"
 #include "xgpu_manifest.h"
 #include "xgpu_stream.h"
 #include "frame_pacing.h"
@@ -3633,12 +3635,333 @@ the game renders each level as a surface of its own (the water's ripple
 map: the backend copies the levels' targets into a mipmapped texture,
 again only once a level's target has been drawn into since). */
 
+/* ---------- an alpha test that cannot fail
+
+The game draws nearly every model with the alpha test on (alpha greater
+than 0x7f: rasterizer_xbox_models.c), its alpha the base map's, and most
+base maps have no texel that fails it. A pixel shader that may discard
+keeps a tile-based GPU from rejecting hidden pixels by their depth before
+it shades them, and from recording the depth of the ones it draws until
+after: Broadcom's V3D shaded a campaign view a third longer for it. So
+where the draw's alpha is a texture's alone and the least alpha of that
+texture's texels passes the test, the draw's key has no alpha test
+(prepare_draw): what is drawn is the same. Where the backend asks
+(xgpu_backend_capabilities.alpha_test_drop: Vulkan's, on any GPU);
+elsewhere the keys are the game's, as the renderers' manifests have them. A texture's least alpha is
+kept while its texels are unchanged (memory_watch.c). */
+
+#define ALPHA_TEXTURES 1024
+/* how far above the reference a texture's least alpha must be, when it is
+not 255 (a filter's weights of 255s make 255 exactly; of less, a GPU's
+fixed point and its DXT5 alphas may make a little less than the least) */
+#define ALPHA_MARGIN 4
+
+static struct
+{
+	DWORD data, format, size;
+	unsigned long generation;
+	BOOL known;
+	int minimum;
+} alpha_textures[ALPHA_TEXTURES];
+
+/* the least alpha of each stage's texture, -1 not known, of the draw being
+prepared (bind_textures) */
+static int stage_alpha_minimum[D3DTSS_MAXSTAGES];
+
+static int texture_alpha_minimum(const D3DBaseTexture *texture, int stage)
+{
+	struct xgpu_texture_description description;
+	unsigned long address, bytes, generation, slot;
+
+	xgpu_texture_describe(texture->Format, texture->Size, &description);
+	if (description.cube_map || description.depth > 1)
+		return -1;
+	address = (unsigned long)PLATFORM_PHYSICAL_TO_VIRTUAL(texture->Data);
+	/* (a Custom Edition map's texels sampled in another order of channels:
+	the alpha sampled is not the one stored, xbox_textures.c) */
+	if (xgpu_texture_channels(address, stage))
+		return -1;
+	bytes = xgpu_texture_face_size(&description);
+	if (!bytes || !platform_is_contiguous((void *)address) ||
+		bytes > PLATFORM_CONTIGUOUS_SIZE - (address - PLATFORM_CONTIGUOUS_BASE))
+		return -1;
+	/* (the product's high bits: the texels' addresses are multiples of a page) */
+	slot = ((DWORD)((texture->Data ^ texture->Format * 0x85ebca6bu ^ texture->Size * 0xc2b2ae35u) * 0x9e3779b1u) >> 16) %
+		ALPHA_TEXTURES;
+	generation = memory_watch_generation(address, bytes);
+	if (alpha_textures[slot].known && alpha_textures[slot].data == texture->Data &&
+		alpha_textures[slot].format == texture->Format && alpha_textures[slot].size == texture->Size &&
+		alpha_textures[slot].generation == generation)
+		return alpha_textures[slot].minimum;
+	/* (its texels watched from here: a write makes it be read again) */
+	memory_watch_protect(address, bytes);
+	alpha_textures[slot].known = TRUE;
+	alpha_textures[slot].data = texture->Data;
+	alpha_textures[slot].format = texture->Format;
+	alpha_textures[slot].size = texture->Size;
+	alpha_textures[slot].generation = memory_watch_generation(address, bytes);
+	alpha_textures[slot].minimum = xgpu_texture_minimum_alpha(&description, (const unsigned char *)address);
+	return alpha_textures[slot].minimum;
+}
+
+/* whether the draw's alpha test passes every pixel: its alpha (the final
+combiner's G) is a texture stage's alpha as sampled, which no combiner
+stage writes, and the least alpha of the texture's texels
+(stage_alpha_minimum) passes the test */
+static int alpha_test_stage(void)
+{
+	const DWORD *state = D3D__RenderState;
+	DWORD final_abcd = state[D3DRS_PSFINALCOMBINERINPUTSABCD], final_efg = state[D3DRS_PSFINALCOMBINERINPUTSEFG];
+	unsigned long source = (final_efg >> 8) & 0xff, reg = source & 0x0f;
+	int count = (int)(state[D3DRS_PSCOMBINERCOUNT] & 0xff), stage;
+
+	/* (no final combiner: r0's alpha, which the stages make) */
+	if (!final_abcd && !final_efg)
+		return -1;
+	/* (the register's alpha, not its blue, as it is: not inverted) */
+	if ((source & 0xf0) != 0x10 || reg < XGPU_REGISTER_T0 || reg > XGPU_REGISTER_T3)
+		return -1;
+	if (count > 8)
+		count = 8;
+	for (stage = 0; stage < count; stage++)
+	{
+		DWORD alpha = state[D3DRS_PSALPHAOUTPUTS0 + stage], rgb = state[D3DRS_PSRGBOUTPUTS0 + stage];
+
+		if (((alpha >> 4) & 0x0f) == reg || (alpha & 0x0f) == reg || ((alpha >> 8) & 0x0f) == reg)
+			return -1;
+		/* (a colour portion's blue copied to its destination's alpha) */
+		if ((((rgb >> 12) & 0x80) && ((rgb >> 4) & 0x0f) == reg) || (((rgb >> 12) & 0x40) && (rgb & 0x0f) == reg))
+			return -1;
+	}
+	return (int)(reg - XGPU_REGISTER_T0);
+}
+
+/* whether an alpha that is never less than this passes the draw's test */
+static BOOL alpha_minimum_passes(int minimum)
+{
+	const DWORD *state = D3D__RenderState;
+	int reference = (int)(state[D3DRS_ALPHAREF] & 0xff);
+
+	if (minimum < 0)
+		return FALSE;
+	/* (every texel 255: the alpha is 255 exactly) */
+	if (minimum == 255)
+	{
+		switch (state[D3DRS_ALPHAFUNC])
+		{
+		case D3DCMP_GREATER: return reference < 255;
+		case D3DCMP_GREATEREQUAL: return TRUE;
+		case D3DCMP_NOTEQUAL: return reference != 255;
+		case D3DCMP_EQUAL: case D3DCMP_LESSEQUAL: return reference == 255;
+		default: return FALSE;
+		}
+	}
+	switch (state[D3DRS_ALPHAFUNC])
+	{
+	case D3DCMP_GREATER: case D3DCMP_GREATEREQUAL: return minimum - ALPHA_MARGIN > reference;
+	default: return FALSE;
+	}
+}
+
+static BOOL alpha_test_always_passes(void)
+{
+	int stage = alpha_test_stage();
+
+	return stage >= 0 && alpha_minimum_passes(stage_alpha_minimum[stage]);
+}
+
+/* ---------- the model being drawn
+
+The game says what model its draws are of while it draws one
+(halo_model_bounds, from rasterizer_xbox_models.c): its bounding sphere,
+how far its middle is from the camera, whether it is a first-person model
+(drawn about the camera whatever its sphere says). The sphere is the
+object's as the last tick left it; a frame draws the object between two
+ticks, or gliding to where the host has it, so its middle as drawn comes
+too, and what is asked of the bounds is asked about both. The draws between are
+decided by it: whether a cut-out's depth is drawn first (below), whether
+any dynamic light reaches it (dynamic_lights_model_unreached). */
+
+static struct
+{
+	BOOL known, first_person;
+	/* (the middle: the tick's, the frame's) */
+	float centre[2][3], radius, distance;
+} model_bounds;
+
+/* how far from the camera a first-person model reaches at most (world units) */
+#define MODEL_BOUNDS_FIRST_PERSON_REACH 1.5f
+/* how far from its middle a model reaches at most: its sphere's radius (the
+object's tag's, which the game itself takes the object's extent from) and a
+margin, the frame's pose not the tick's the sphere was made about */
+#define MODEL_BOUNDS_REACH(radius) ((radius) * 1.25f + 0.25f)
+
+/* ---------- the draws' bounds
+
+A pass that lights or shadows a part of the level draws whole surfaces of
+it, and leaves most of their pixels as they were: beyond a dynamic light's
+reach, beside a shadow's map (port/linux/game/draw_bounds.c). The game says
+which rectangle of the viewport the pass can change (halo_draw_bounds), and
+the draws until it says otherwise are scissored to it
+(xgpu_backend_capabilities.draw_bounds): the same pixels come out, and
+those left as they were are not shaded and blended to be. Not in VR's eye
+pass, where each eye sees the level from a place of its own, not the
+game's camera's. */
+
+static struct draw_bounds_state draw_bounds;
+
+void halo_draw_bounds(const float *rectangle)
+{
+	draw_bounds_state_set(&draw_bounds, rectangle);
+}
+
+/* a draw's scissor rectangle (the viewport's: left, top, width, height in
+the targets' pixels) brought in to the draws' bounds. The vertex shaders
+draw half a unit of the game's right of and below the game's projection
+(pixel centres at half-integers: xgpu_spirv.c's clip position), which is
+more than a pixel of a target of more than two pixels a unit: the right and
+bottom edges are taken that half unit farther, the left and top not, and
+each edge a pixel farther out than its place rounds to */
+static void draw_bounds_scissor(long scissor[4])
+{
+	long left, top, right, bottom;
+
+	if (!draw_bounds.known || !xgpu_backend_capabilities.draw_bounds || scissor[2] <= 0 || scissor[3] <= 0)
+		return;
+#ifdef HALO_VR
+	if (vr_gl.pass == HALO_VR_PASS_EYES)
+		return;
+#endif
+	left = target_pixel((float)(device.viewport.X + UI_OFFSET) + draw_bounds.rectangle[0], 0) - 1;
+	top = target_pixel((float)device.viewport.Y + draw_bounds.rectangle[1], 1) - 1;
+	right = target_pixel((float)(device.viewport.X + UI_OFFSET) + draw_bounds.rectangle[2] + 0.5f, 0) + 1;
+	bottom = target_pixel((float)device.viewport.Y + draw_bounds.rectangle[3] + 0.5f, 1) + 1;
+	if (left < scissor[0])
+		left = scissor[0];
+	if (top < scissor[1])
+		top = scissor[1];
+	if (right > scissor[0] + scissor[2])
+		right = scissor[0] + scissor[2];
+	if (bottom > scissor[1] + scissor[3])
+		bottom = scissor[1] + scissor[3];
+	/* (none of the bounds in the viewport: one pixel of it, which the draws
+	leave as it was like the rest; an API may refuse an empty rectangle) */
+	if (draw_bounds.rectangle[2] <= draw_bounds.rectangle[0] || draw_bounds.rectangle[3] <= draw_bounds.rectangle[1] ||
+		right <= left || bottom <= top)
+	{
+		left = scissor[0];
+		top = scissor[1];
+		right = left + 1;
+		bottom = top + 1;
+	}
+	scissor[0] = left;
+	scissor[1] = top;
+	scissor[2] = right - left;
+	scissor[3] = bottom - top;
+}
+
+/* ---------- a cut-out's depth first
+
+Where a pixel shader that may discard is not tested by its depth before it
+runs (Broadcom's V3D), every
+pixel of an alpha-tested model is shaded whole, the hidden ones too, and
+the ones it draws hide nothing after them until they are shaded. An opaque
+alpha-tested draw that writes its depth, whose alpha is a texture's alone
+(alpha_test_stage), is drawn twice instead: its depth alone, by a pixel
+shader that samples that texture and tests its alpha and no more; then
+itself with no alpha test, where the depth is equal to what was written:
+the pixels the test passed that nothing nearer hides, each shaded once.
+
+The two are the one draw where its depth test passes an equal depth
+(D3DCMP_LESSEQUAL, the game's: the last of two of its pixels at one depth
+is seen either way) and its stencil is the same for the second as for the
+first (kept, or replaced where the test is passed by a test the replaced
+value passes too): any other draw is drawn as it is. One case is left: a
+pixel the test cuts away that lies at exactly the depth of the pixel seen
+there (two of the draw's triangles crossing, or lying in one plane with
+other texels) is drawn by the second draw. A fight among pines on a
+Raspberry Pi 5 had up to five such pixels in half of its frames: so no
+backend asks for the two draws by itself, only who sets
+HALO_VULKAN_CUTOUT_PREPASS=1 (xgpu_backend_capabilities.cutout_prepass). */
+
+/* The depth's draw costs the model's vertices again and a pass over its
+pixels, so it is made only where it saves more: for a model lit for each
+pixel (the costly shader) that is large in the view, its radius at least
+this much of its distance (model_bounds). Measured on a Raspberry Pi 5:
+from 0.15 to 0.3 a fight among pines keeps all of the gain (its worst
+second 53 frames a second to 65) and the levels' calm views lose under 2%;
+with no least size they lose up to 6%, and past 0.6 the gain is gone. */
+#define CUTOUT_LEAST_SIZE 0.25f
+
+/* the first of the two is being prepared (prepare_draw: lit by nothing) */
+static BOOL cutout_depth_drawing;
+
+/* whether the stencil's test and writes are the same made twice */
+static BOOL cutout_stencil_repeatable(void)
+{
+	const DWORD *state = D3D__RenderState;
+
+	if (!state[D3DRS_STENCILENABLE])
+		return TRUE;
+	if (state[D3DRS_STENCILFAIL] != D3DSTENCILOP_KEEP || state[D3DRS_STENCILZFAIL] != D3DSTENCILOP_KEEP)
+		return FALSE;
+	return state[D3DRS_STENCILPASS] == D3DSTENCILOP_KEEP || (state[D3DRS_STENCILPASS] == D3DSTENCILOP_REPLACE &&
+		(state[D3DRS_STENCILFUNC] == D3DCMP_ALWAYS || state[D3DRS_STENCILFUNC] == D3DCMP_EQUAL));
+}
+
+static BOOL per_pixel_lighting(void);
+
+/* the texture stage of the draw's alpha, where it is drawn so; -1 */
+static int cutout_stage(void)
+{
+	const DWORD *state = D3D__RenderState;
+	D3DBaseTexture *texture;
+	int stage, other;
+
+	if (!xgpu_backend_capabilities.cutout_prepass || !state[D3DRS_ALPHATESTENABLE] || state[D3DRS_ALPHABLENDENABLE] ||
+		!state[D3DRS_ZENABLE] || !state[D3DRS_ZWRITEENABLE] || device.visibility_test_active || sampled_view ||
+		state[D3DRS_ZFUNC] != D3DCMP_LESSEQUAL ||
+		(state[D3DRS_ALPHAFUNC] != D3DCMP_GREATER && state[D3DRS_ALPHAFUNC] != D3DCMP_GREATEREQUAL) ||
+		!(state[D3DRS_COLORWRITEENABLE] & D3DCOLORWRITEENABLE_ALL) || !cutout_stencil_repeatable())
+		return -1;
+	for (other = 0; other < D3DTSS_MAXSTAGES; other++)
+	{
+		if (D3D__TextureState[other][D3DTSS_ALPHAKILL] == D3DTALPHAKILL_ENABLE)
+			return -1;
+	}
+	stage = alpha_test_stage();
+	if (stage < 0 || stage_texture_mode(stage) != 0x01)
+		return -1;
+	texture = device.textures[stage];
+	if (!texture || !texture->Data || xgpu_render_target_find(texture->Data))
+		return -1;
+	/* (a test that cannot fail is not made at all: prepare_draw) */
+	if (alpha_minimum_passes(texture_alpha_minimum(texture, stage)))
+		return -1;
+	{
+		struct vertex_shader_object *program = current_program();
+
+		if (!program || !program->lighting.lights || program->lighting_failed || !per_pixel_lighting())
+			return -1;
+		/* (a map's preparation draws it both ways whatever its size:
+		draw_indexed_cutout) */
+		if (!preparation.active && (!model_bounds.known || (!model_bounds.first_person &&
+			model_bounds.radius < model_bounds.distance * CUTOUT_LEAST_SIZE)))
+		{
+			return -1;
+		}
+	}
+	return stage;
+}
+
 static void bind_textures(struct nv2a_pixel_shader_key *key, float texture_scale[4][4])
 {
 	struct xgpu_texture_source sources[D3DTSS_MAXSTAGES];
 	int stage;
 
 	memset(sources, 0, sizeof(sources));
+	for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
+		stage_alpha_minimum[stage] = -1;
 	if (preparation.active)
 	{
 		memset(&preparation.key, 0, sizeof(preparation.key));
@@ -3748,6 +4071,12 @@ static void bind_textures(struct nv2a_pixel_shader_key *key, float texture_scale
 			}
 		}
 		sampler_describe(stage, description.levels > 1, description.hires, target != NULL, &source->sampler);
+		/* (alpha_test_always_passes: the game's own texture, sampled as a 2D
+		texture, never past its edge into a border colour) */
+		if (!target && D3D__RenderState[D3DRS_ALPHATESTENABLE] && mode == 0x01 && kind == XGPU_TEXTURE_KIND_2D &&
+			!description.hires && source->sampler.address[0] < XGPU_ADDRESS_BORDER &&
+			source->sampler.address[1] < XGPU_ADDRESS_BORDER)
+			stage_alpha_minimum[stage] = texture_alpha_minimum(texture, stage);
 		if (device.texture_regions[stage][0] > 0.0f)
 			memcpy(texture_scale[stage], device.texture_regions[stage], sizeof(texture_scale[stage]));
 		/* (the high-res text's distance fields: text_hires.c) */
@@ -3893,6 +4222,8 @@ static void pipeline_state_describe(BOOL has_depth, struct xgpu_pipeline_key *ke
 	defaults to the viewport, so fragment clipping follows the viewport: this is
 	what keeps a split-screen window's geometry from bleeding across the divider */
 	memcpy(dynamic->scissor, dynamic->viewport, sizeof(dynamic->scissor));
+	/* (but a pass the game bounds, to its bounds in the viewport) */
+	draw_bounds_scissor(dynamic->scissor);
 	dynamic->depth_range[0] = device.viewport.MinZ;
 	dynamic->depth_range[1] = device.viewport.MaxZ;
 
@@ -4106,6 +4437,17 @@ static struct
 	BOOL environment;
 	BOOL failed;
 	struct xgpu_dynamic_lights_block data;
+	/* the lights that light the structure: each one's middle and its reach
+	(its radius and a margin), the box about them all; -1: not known (all
+	the lightmap pass is lit) */
+	float reach[XGPU_DYNAMIC_LIGHTS_MAXIMUM][4];
+	float reach_box[2][3];
+	int reach_count;
+	/* every light's (the models' only too), as those; and whether the model
+	being drawn is one none of them reaches (halo_model_bounds) */
+	float model_reach[XGPU_DYNAMIC_LIGHTS_MAXIMUM][4];
+	int model_reach_count;
+	BOOL model_unreached;
 	/* the cells' masks, and past them a slice of the clusters' (xgpu.h) */
 	unsigned int mask[XGPU_DYNAMIC_LIGHTS_GRID_Z + 1][XGPU_DYNAMIC_LIGHTS_GRID_Y][XGPU_DYNAMIC_LIGHTS_GRID_X][4];
 	/* the world (halo_dynamic_lights_world, malloc's), and whether the
@@ -4121,6 +4463,11 @@ static struct
 dynamic lights be enhanced (a Pro 2v2 game's: classic for every player,
 whatever their display.dynamic_lights) */
 int network_standard_enhanced_lights_allowed(void);
+
+/* how far a light is taken to reach: its radius, past which the shaders add
+nothing of it (xgpu_spirv.c's dynamic_light_sum), and a margin for the
+arithmetic's rounding */
+#define LIGHT_REACH(radius) ((radius) * 1.01f + 0.01f)
 
 static void dynamic_lights_read_settings(void)
 {
@@ -4225,6 +4572,9 @@ void halo_dynamic_lights_set(const struct halo_dynamic_light *lights, int count,
 	int index, axis;
 
 	dynamic_lights.count = 0;
+	dynamic_lights.reach_count = 0;
+	dynamic_lights.model_reach_count = 0;
+	dynamic_lights.model_unreached = FALSE;
 	halos->count = 0;
 	if (!halo_dynamic_lights_walked())
 		return;
@@ -4263,6 +4613,25 @@ void halo_dynamic_lights_set(const struct halo_dynamic_light *lights, int count,
 
 		if (!(light->radius > 0.0f))
 			continue;
+		memcpy(dynamic_lights.model_reach[dynamic_lights.model_reach_count], light->position, 3 * sizeof(float));
+		dynamic_lights.model_reach[dynamic_lights.model_reach_count++][3] = LIGHT_REACH(light->radius);
+		if (!(light->flags & HALO_DYNAMIC_LIGHT_MODELS_ONLY))
+		{
+			float *reach = dynamic_lights.reach[dynamic_lights.reach_count];
+
+			reach[3] = LIGHT_REACH(light->radius);
+			for (axis = 0; axis < 3; axis++)
+			{
+				float low = light->position[axis] - reach[3], high = light->position[axis] + reach[3];
+
+				reach[axis] = light->position[axis];
+				if (!dynamic_lights.reach_count || low < dynamic_lights.reach_box[0][axis])
+					dynamic_lights.reach_box[0][axis] = low;
+				if (!dynamic_lights.reach_count || high > dynamic_lights.reach_box[1][axis])
+					dynamic_lights.reach_box[1][axis] = high;
+			}
+			dynamic_lights.reach_count++;
+		}
 		dynamic_lights.data.position[index][0] = light->position[0];
 		dynamic_lights.data.position[index][1] = light->position[1];
 		dynamic_lights.data.position[index][2] = light->position[2];
@@ -4338,6 +4707,70 @@ void halo_dynamic_lights_environment(int drawing)
 backends read them from) */
 typedef char dynamic_lights_own_lights_register[XGPU_MODEL_LIGHT_REGISTER(XGPU_MODEL_LIGHT_OWN_LIGHTS) ==
 	XGPU_VERTEX_CONSTANT_BIAS + HALO_DYNAMIC_LIGHTS_OWN_LIGHTS_REGISTER ? 1 : -1];
+
+/* whether the draws are parted by the lights' reach at all: where the
+backend has the lights' draws kept to what they can change
+(xgpu_backend_capabilities.draw_bounds); not a map's preparation's
+(render_enumerate.c), whose draws make the pipelines of the lit shaders
+whatever its one light reaches, nor a recorded one's */
+static BOOL dynamic_lights_active(void);
+
+static BOOL lights_reach_parted(void)
+{
+	return xgpu_backend_capabilities.draw_bounds && !preparation.active && !journal_recording && dynamic_lights_active();
+}
+
+/* the lightmap pass's triangles being drawn are ones no light reaches
+(lights_reach_split): drawn as with no light, the same pixels (the lights'
+sum is nothing there), by the shader without their loop */
+static BOOL lights_unreached_drawing;
+
+/* whether no light of the frame's reaches the model being drawn
+(halo_model_bounds: its sphere, grown by MODEL_BOUNDS_REACH, about its
+middle as the tick left it and as the frame draws it, both; a first-person
+model's, the weapon and the arms, about the camera). Such a model is drawn
+as with no light, the same pixels, by the shader without the lights' loop;
+the game gives it no point lights then (rasterizer_xbox_models.c) */
+static BOOL dynamic_lights_model_unreached(void)
+{
+	float radius = model_bounds.first_person ? MODEL_BOUNDS_FIRST_PERSON_REACH : MODEL_BOUNDS_REACH(model_bounds.radius);
+	int light, centre;
+
+	if (!model_bounds.known || dynamic_lights.model_reach_count < 0 || !lights_reach_parted())
+		return FALSE;
+	for (light = 0; light < dynamic_lights.model_reach_count; light++)
+	{
+		const float *reach = dynamic_lights.model_reach[light];
+		float both = reach[3] + radius;
+
+		for (centre = 0; centre < 2; centre++)
+		{
+			const float *middle = model_bounds.first_person ? dynamic_lights.data.grid[0] : model_bounds.centre[centre];
+			float x = reach[0] - middle[0], y = reach[1] - middle[1], z = reach[2] - middle[2];
+
+			if (!(x * x + y * y + z * z > both * both))
+				return FALSE;
+		}
+	}
+	return TRUE;
+}
+
+int halo_model_bounds(const float centre[3], const float drawn[3], float radius, float distance, int first_person)
+{
+	/* (a caller with no sphere of its model gives no radius: a flag's cloth,
+	the sky; a first-person model's is not needed) */
+	model_bounds.known = centre && drawn && (first_person || radius > 0.0f) && distance >= 0.0f;
+	dynamic_lights.model_unreached = FALSE;
+	if (!model_bounds.known)
+		return 0;
+	memcpy(model_bounds.centre[0], centre, sizeof(model_bounds.centre[0]));
+	memcpy(model_bounds.centre[1], drawn, sizeof(model_bounds.centre[1]));
+	model_bounds.radius = radius;
+	model_bounds.distance = distance;
+	model_bounds.first_person = first_person != 0;
+	dynamic_lights.model_unreached = dynamic_lights_model_unreached();
+	return dynamic_lights.model_unreached;
+}
 
 /* the frame's draws are lit by the enhanced dynamic lights */
 static BOOL dynamic_lights_active(void)
@@ -4630,7 +5063,7 @@ static void manifest_note_basis(const struct vertex_shader_object *program, cons
 	context.screen_colour = target_screen_colour ? 1 : 0;
 	/* (the lights given to the front end whatever the setting where the
 	map's preparation is recorded: halo_dynamic_lights_walked) */
-	context.lights_present = dynamic_lights.count > 0;
+	context.lights_present = dynamic_lights.count > 0 && !lights_unreached_drawing && !dynamic_lights.model_unreached;
 	context.environment = dynamic_lights.environment ? 1 : 0;
 	context.hdr_category = (uint8_t)hdr.category;
 	context.hdr_view = hdr.view ? 1 : 0;
@@ -4797,6 +5230,13 @@ static BOOL prepare_draw(BOOL immediate, unsigned long primitive)
 		D3D__RenderState[D3DRS_DESTBLEND] == D3DBLEND_SRCALPHA;
 	key.point_threshold = key.point_threshold && key.coverage_alpha;
 	key.alpha_test_function = D3D__RenderState[D3DRS_ALPHATESTENABLE] ? D3D__RenderState[D3DRS_ALPHAFUNC] : 0;
+	/* (a test no pixel of the draw fails is not made: above, "an alpha test
+	that cannot fail") */
+	if (key.alpha_test_function && !key.coverage_alpha && xgpu_backend_capabilities.alpha_test_drop &&
+		alpha_test_always_passes())
+	{
+		key.alpha_test_function = 0;
+	}
 	key.fog_enable = D3D__RenderState[D3DRS_FOGENABLE] != 0;
 	key.source_blend = source_blend_in_shader();
 	key.fog_table_mode = (unsigned char)D3D__RenderState[D3DRS_FOGTABLEMODE];
@@ -4851,8 +5291,10 @@ static BOOL prepare_draw(BOOL immediate, unsigned long primitive)
 	facts.hdr_target = hdr.target;
 	facts.deep_target = target_deep;
 	facts.hdr = hdr_tag(&pipeline_key);
-	facts.per_pixel = per_pixel_lighting();
-	facts.lights_active = dynamic_lights_active();
+	/* (a cut-out's depth: no light) */
+	facts.per_pixel = !cutout_depth_drawing && per_pixel_lighting();
+	facts.lights_active = !cutout_depth_drawing && !lights_unreached_drawing && !dynamic_lights.model_unreached &&
+		dynamic_lights_active();
 	facts.environment = dynamic_lights.environment;
 	facts.sample_mask = xgpu_backend_capabilities.sample_mask;
 	/* (display.ambient_occlusion "world": its light, where its window is
@@ -5571,7 +6013,195 @@ void WINAPI D3DDevice_DrawVertices(D3DPRIMITIVETYPE primitive_type, UINT start_v
 	preparation_draw_complete();
 }
 
+static void draw_indexed_vertices(D3DPRIMITIVETYPE primitive_type, UINT vertex_count, CONST WORD *index_data);
+
+static void draw_indexed_cutout(D3DPRIMITIVETYPE primitive_type, UINT vertex_count, CONST WORD *index_data);
+
+/* ---------- the lightmap pass's triangles the dynamic lights reach
+
+The shader that adds the enhanced dynamic lights costs each pixel its loop's
+set-up whether a light is near or not (on a tile-based GPU of few registers
+it also runs fewer pixels at once). The lightmap pass's draws are whole
+materials, a valley's ground in one: its triangles are drawn in two parts,
+those in some light's reach with that shader, the rest as with no light.
+The pixels are the same: past a light's radius the shader adds nothing.
+(The unreached part is drawn first: where two triangles of one material
+lie in one plane, which of them is seen may change.) */
+
+/* the triangles of a list apart: FALSE if they cannot be told apart (all
+are drawn lit) */
+static BOOL lights_reach_split(const WORD *index_data, unsigned long count, WORD **reached, unsigned long *reached_count,
+	WORD **unreached, unsigned long *unreached_count)
+{
+	static WORD *buffer;
+	static unsigned long capacity;
+	struct vertex_shader_object *declaration = device.vertex_shader;
+	const struct xgpu_vertex_element *position = NULL;
+	const unsigned char *vertices;
+	unsigned long stride, index, lit = 0, unlit = 0;
+
+	if (!declaration)
+		return FALSE;
+	for (index = 0; index < declaration->element_count; index++)
+	{
+		if (declaration->elements[index].reg == 0)
+			position = &declaration->elements[index];
+	}
+	if (!position || position->format != XGPU_VERTEX_FLOAT3 || !device.streams[position->stream].data ||
+		!device.streams[position->stream].stride)
+	{
+		return FALSE;
+	}
+	if (count * 2 > capacity)
+	{
+		WORD *grown = realloc(buffer, count * 2 * sizeof(WORD));
+
+		if (!grown)
+			return FALSE;
+		buffer = grown;
+		capacity = count * 2;
+	}
+	stride = device.streams[position->stream].stride;
+	vertices = (const unsigned char *)PLATFORM_PHYSICAL_TO_VIRTUAL(device.streams[position->stream].data) +
+		device.base_vertex_index * stride + position->offset;
+	*reached = buffer;
+	*unreached = buffer + count;
+	for (index = 0; index + 3 <= count; index += 3)
+	{
+		float low[3], high[3];
+		BOOL touched = TRUE;
+		int corner, axis, light;
+
+		for (corner = 0; corner < 3; corner++)
+		{
+			float point[3];
+
+			memcpy(point, vertices + index_data[index + corner] * stride, sizeof(point));
+			for (axis = 0; axis < 3; axis++)
+			{
+				if (!corner || point[axis] < low[axis])
+					low[axis] = point[axis];
+				if (!corner || point[axis] > high[axis])
+					high[axis] = point[axis];
+			}
+		}
+		for (axis = 0; axis < 3; axis++)
+		{
+			if (high[axis] < dynamic_lights.reach_box[0][axis] || low[axis] > dynamic_lights.reach_box[1][axis])
+				touched = FALSE;
+		}
+		if (touched)
+		{
+			touched = FALSE;
+			for (light = 0; light < dynamic_lights.reach_count && !touched; light++)
+			{
+				const float *reach = dynamic_lights.reach[light];
+				float distance = 0.0f;
+
+				for (axis = 0; axis < 3; axis++)
+				{
+					float away = reach[axis] < low[axis] ? low[axis] - reach[axis] :
+						reach[axis] > high[axis] ? reach[axis] - high[axis] : 0.0f;
+
+					distance += away * away;
+				}
+				touched = !(distance > reach[3] * reach[3]);
+			}
+		}
+		if (touched)
+		{
+			memcpy(*reached + lit, index_data + index, 3 * sizeof(WORD));
+			lit += 3;
+		}
+		else
+		{
+			memcpy(*unreached + unlit, index_data + index, 3 * sizeof(WORD));
+			unlit += 3;
+		}
+	}
+	*reached_count = lit;
+	*unreached_count = unlit;
+	return TRUE;
+}
+
 void WINAPI D3DDevice_DrawIndexedVertices(D3DPRIMITIVETYPE primitive_type, UINT vertex_count, CONST WORD *index_data)
+{
+	WORD *reached, *unreached;
+	unsigned long reached_count, unreached_count;
+
+	if (!dynamic_lights.environment || !vertex_count || !index_data || dynamic_lights.reach_count < 0 ||
+		!lights_reach_parted())
+	{
+		draw_indexed_cutout(primitive_type, vertex_count, index_data);
+		return;
+	}
+	if (!dynamic_lights.reach_count)
+	{
+		lights_unreached_drawing = TRUE;
+		draw_indexed_cutout(primitive_type, vertex_count, index_data);
+		lights_unreached_drawing = FALSE;
+		return;
+	}
+	if (primitive_type != D3DPT_TRIANGLELIST ||
+		!lights_reach_split(index_data, vertex_count, &reached, &reached_count, &unreached, &unreached_count) ||
+		!unreached_count)
+	{
+		draw_indexed_cutout(primitive_type, vertex_count, index_data);
+		return;
+	}
+	lights_unreached_drawing = TRUE;
+	draw_indexed_cutout(primitive_type, reached_count ? (UINT)unreached_count : vertex_count,
+		reached_count ? unreached : index_data);
+	lights_unreached_drawing = FALSE;
+	if (reached_count)
+		draw_indexed_cutout(primitive_type, (UINT)reached_count, reached);
+}
+
+static void draw_indexed_cutout(D3DPRIMITIVETYPE primitive_type, UINT vertex_count, CONST WORD *index_data)
+{
+	/* (the render states the depth's draw and the colour's change) */
+	static const int changed[] = { D3DRS_COLORWRITEENABLE, D3DRS_FOGENABLE, D3DRS_PSTEXTUREMODES, D3DRS_PSCOMBINERCOUNT,
+		D3DRS_PSRGBINPUTS0, D3DRS_PSALPHAINPUTS0, D3DRS_PSRGBOUTPUTS0, D3DRS_PSALPHAOUTPUTS0,
+		D3DRS_PSFINALCOMBINERINPUTSABCD, D3DRS_PSFINALCOMBINERINPUTSEFG, D3DRS_ALPHATESTENABLE, D3DRS_ZFUNC };
+	DWORD *state = D3D__RenderState, kept[sizeof(changed) / sizeof(changed[0])];
+	int stage = vertex_count && index_data ? cutout_stage() : -1, index;
+
+	if (stage < 0)
+	{
+		draw_indexed_vertices(primitive_type, vertex_count, index_data);
+		return;
+	}
+	/* (a map's preparation: as one draw too, a model's small in the view, so
+	that neither way's pipelines are first made in play) */
+	if (preparation.active)
+		draw_indexed_vertices(primitive_type, vertex_count, index_data);
+	for (index = 0; index < (int)(sizeof(changed) / sizeof(changed[0])); index++)
+		kept[index] = state[changed[index]];
+	/* its depth (and stencil): the texture's alpha, tested */
+	state[D3DRS_COLORWRITEENABLE] = 0;
+	state[D3DRS_FOGENABLE] = FALSE;
+	state[D3DRS_PSTEXTUREMODES] &= 0x1fUL << (5 * stage);
+	state[D3DRS_PSCOMBINERCOUNT] = 1;
+	state[D3DRS_PSRGBINPUTS0] = state[D3DRS_PSALPHAINPUTS0] = 0;
+	state[D3DRS_PSRGBOUTPUTS0] = state[D3DRS_PSALPHAOUTPUTS0] = 0;
+	state[D3DRS_PSFINALCOMBINERINPUTSABCD] = 0;
+	state[D3DRS_PSFINALCOMBINERINPUTSEFG] &= 0x0000ff00UL;
+	cutout_depth_drawing = TRUE;
+	draw_indexed_vertices(primitive_type, vertex_count, index_data);
+	cutout_depth_drawing = FALSE;
+	for (index = 0; index < (int)(sizeof(changed) / sizeof(changed[0])); index++)
+		state[changed[index]] = kept[index];
+	/* its colour, where the depth is its own (written again, the same: a
+	tile-based GPU's early test learns a depth from the draws that write
+	it without a discard, and rejects by it what is drawn behind after) */
+	state[D3DRS_ALPHATESTENABLE] = FALSE;
+	state[D3DRS_ZFUNC] = D3DCMP_EQUAL;
+	draw_indexed_vertices(primitive_type, vertex_count, index_data);
+	for (index = 0; index < (int)(sizeof(changed) / sizeof(changed[0])); index++)
+		state[changed[index]] = kept[index];
+}
+
+static void draw_indexed_vertices(D3DPRIMITIVETYPE primitive_type, UINT vertex_count, CONST WORD *index_data)
 {
 	unsigned long minimum, maximum, count, generation = 0, index_offset = 0;
 	WORD *indices = NULL;
@@ -5746,6 +6376,9 @@ void WINAPI D3DDevice_SetVertexDataColor(INT reg, D3DCOLOR color)
 
 /* ---------- clearing */
 
+/* the clear being made is d3d8_clear_viewport_alone's */
+static BOOL clear_alone;
+
 void WINAPI D3DDevice_Clear(DWORD count, CONST D3DRECT *rectangles, DWORD flags, D3DCOLOR color, float z, DWORD stencil)
 {
 	float rgba[4];
@@ -5793,7 +6426,7 @@ void WINAPI D3DDevice_Clear(DWORD count, CONST D3DRECT *rectangles, DWORD flags,
 		rectangle[0][1] = target_pixel((float)device.viewport.Y, 1);
 		rectangle[0][2] = target_pixel((float)(device.viewport.X + device.viewport.Width), 0) - rectangle[0][0];
 		rectangle[0][3] = target_pixel((float)(device.viewport.Y + device.viewport.Height), 1) - rectangle[0][1];
-		xgpu_backend_clear(clear, rgba, z, stencil, (const long (*)[4])rectangle, 1);
+		xgpu_backend_clear(clear | (clear_alone ? XGPU_CLEAR_ALONE : 0), rgba, z, stencil, (const long (*)[4])rectangle, 1);
 		return;
 	}
 	{
@@ -5823,6 +6456,25 @@ void WINAPI D3DDevice_Clear(DWORD count, CONST D3DRECT *rectangles, DWORD flags,
 		xgpu_backend_clear(clear, rgba, z, stencil, (const long (*)[4])cleared, cleared_count);
 		free(cleared);
 	}
+}
+
+/* whether a target drawn in part is better cleared in part
+(d3d8_clear_viewport_alone): where a pass costs by the area it covers, a
+tile-based GPU's */
+int d3d8_clears_alone(void)
+{
+	return device.gl_ready && xgpu_backend_capabilities.clear_alone;
+}
+
+/* the viewport's rectangle of the colour target cleared, as
+IDirect3DDevice8_Clear clears it with no rectangles; and what the target
+holds outside it is of no use from now on (XGPU_CLEAR_ALONE): the caller
+draws, and clears, each part of the target before it is sampled */
+void d3d8_clear_viewport_alone(D3DCOLOR color)
+{
+	clear_alone = TRUE;
+	D3DDevice_Clear(0, NULL, D3DCLEAR_TARGET, color, 1.0f, 0);
+	clear_alone = FALSE;
 }
 
 /* ---------- the anti-aliasing passes */
@@ -6742,6 +7394,9 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 	}
 	device.frame++;
 	stats.presents++;
+	/* (a light's or a shadow's pass that never said its draws are done
+	clips nothing of the next frame: draw_bounds_state.h) */
+	draw_bounds_state_frame_end(&draw_bounds);
 	report_frame_presented();
 	/* (display.hdr: a frame begins with no 3D view drawn) */
 	hdr.view = FALSE;
@@ -7556,6 +8211,9 @@ static void journal_restore(const struct journal_state *state)
 	hdr.view = state->hdr_view != 0;
 	dynamic_lights.environment = state->lights_environment != 0;
 	dynamic_lights.count = (int)state->lights_count;
+	dynamic_lights.reach_count = -1;
+	dynamic_lights.model_reach_count = -1;
+	dynamic_lights.model_unreached = FALSE;
 	dynamic_lights.halos.count = (int)state->halos_count;
 	preparation.sky = state->sky;
 	device.visibility_test_active = state->visibility != 0;
@@ -7792,6 +8450,9 @@ int halo_gpu_journal_replay(const unsigned int *words, unsigned int count, const
 	hdr.view = saved.hdr_view;
 	dynamic_lights.environment = saved.lights_environment;
 	dynamic_lights.count = saved.lights_count;
+	dynamic_lights.reach_count = -1;
+	dynamic_lights.model_reach_count = -1;
+	dynamic_lights.model_unreached = FALSE;
 	dynamic_lights.halos.count = saved.halos_count;
 	preparation.sky = saved.sky;
 	device.visibility_test_active = saved.visibility;

@@ -79,6 +79,10 @@ void render_interpolation_frame_end(void);
 float render_interpolation_fraction(void);
 struct real_matrix4x3 *render_interpolation_object_node_matrices(long object_index);
 void render_interpolation_object_point(long object_index, union real_point3d *point);
+/* a model's bounding sphere's centre where the frame draws the model, if it
+is an object's own (render_interpolation.c) */
+void render_interpolation_model_centre(long unique_identifier, union real_point3d const *centre,
+	union real_point3d *drawn);
 /* an object's origin and a unit's camera where a frame draws them, not
 mixed of the tick's state and the frame's (render_interpolation.c) */
 void render_interpolation_object_origin(long object_index, union real_point3d *origin);
@@ -279,12 +283,24 @@ it kept, and the range it had in previous (NULL: not wanted): a range in
 the last step before 1 draws behind everything drawn, still clipped at the
 far plane (port/linux/src/d3d8_device.c) */
 void d3d8_viewport_depth_range(float minimum, float maximum, float previous[2]);
+/* the rectangle of the viewport that the draws from now on can change
+pixels in (left, top, right, bottom, in the viewport's pixels from its left
+and top; none of it, if the right is not past the left or the bottom past
+the top), to which they are scissored where the backend gains by it; NULL:
+the whole viewport, as before (port/linux/src/d3d8_device.c, "the draws'
+bounds"; from port/linux/game/draw_bounds.c) */
+void halo_draw_bounds(const float *rectangle);
 /* the stage samples a region of its texture as a texture of the region's
 alone, addressed by its border beyond it (D3DTADDRESS_BORDER, whatever the
 stage's address modes): region its width and height, then its left and top,
 in the texture's coordinates (0 to 1); NULL: the whole texture, as the
 stage's address modes have it (port/linux/src/d3d8_device.c) */
 void d3d8_texture_region(unsigned long stage, const float *region);
+/* the viewport's rectangle of the colour target cleared, the rest of the
+target of no use from now on; and whether the renderer gains by it: a pass
+then costs by the part of the target it covers (port/linux/src/d3d8_device.c) */
+int d3d8_clears_alone(void);
+void d3d8_clear_viewport_alone(unsigned long color);
 /* takes up a new width between frames (F11); returns the width */
 long halo_screen_commit(void);
 /* the shadow maps' pixels for each of their 128 texels each way, a power of
@@ -321,6 +337,14 @@ preparation's record) */
 void halo_screen_panini(short x0, short y0, short x1, short y1, const float projection[8]);
 /* the enhanced dynamic lights (display.dynamic_lights) */
 #include "halo_dynamic_lights.h"
+
+/* the model the game's draws are of from now on (port/linux/src/d3d8_device.c):
+its bounding sphere (the tick's), its middle as the frame draws it, the
+middle's distance from the camera, whether it is a first-person model; a
+NULL centre or no radius: not known (no model, or one without a sphere).
+Nonzero if no enhanced dynamic light reaches it: it is drawn as with no
+light, and the game gives it no point lights */
+int halo_model_bounds(const float centre[3], const float drawn[3], float radius, float distance, int first_person);
 /* display.hdr's tone map of a window's 3D view, before its anti-aliasing
 (source/render/render.c), and what the game's renderer tells it of its
 draws (port/linux/src/d3d8_device.c, xgpu_hdr.h): the category drawing now

@@ -2584,6 +2584,23 @@ void render_interpolation_object_point(long object_index, real_point3d *point)
 	matrix4x3_transform_point(&drawn[0], &local, point);
 }
 
+/* the middle of a model's bounding sphere where the frame draws the model:
+moved with the object (render_interpolation_object_point) if the model is
+an object's own, drawn about its sphere (render_objects.c gives render_model
+the object's index and its sphere's centre); as given for any other, whose
+identifier need be no object's (a flag's cloth, a first-person weapon) */
+void render_interpolation_model_centre(long unique_identifier, real_point3d const *centre, real_point3d *drawn)
+{
+	struct object_datum *object;
+
+	*drawn = *centre;
+	if (unique_identifier == NONE || !DATUM_INDEX_TO_IDENTIFIER(unique_identifier))
+		return;
+	object = object_try_and_get(unique_identifier);
+	if (object && !csmemcmp(&object->object.bounding_sphere_center, centre, sizeof(*centre)))
+		render_interpolation_object_point(unique_identifier, drawn);
+}
+
 /* A point the game works out from an object's state reads some of it as the
 tick left it (its position, its bounding sphere) and some as a frame draws
 it (its nodes and markers, object_get_node_matrices): a unit's camera on foot

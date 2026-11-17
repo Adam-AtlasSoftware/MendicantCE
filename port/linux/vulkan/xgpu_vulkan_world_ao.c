@@ -81,7 +81,8 @@ static struct xgpu_vulkan_image *world_ao_image(uint32_t part, uint32_t width, u
 	description.height = height;
 	description.depth_or_layers = depth;
 	description.levels = 1;
-	return xgpu_vulkan_image_create(&description);
+	/* (the vertex stages sample the fields: XGPU_VULKAN_SET_OCCLUSION) */
+	return xgpu_vulkan_image_vertex_read(xgpu_vulkan_image_create(&description));
 }
 
 /* the distance-field scene's cascades: two signed bytes a texel */
@@ -97,7 +98,8 @@ static struct xgpu_vulkan_image *world_ao_cascades_image(uint32_t width, uint32_
 	description.height = height;
 	description.depth_or_layers = depth;
 	description.levels = 1;
-	return xgpu_vulkan_image_create(&description);
+	/* (the vertex stages sample the fields: XGPU_VULKAN_SET_OCCLUSION) */
+	return xgpu_vulkan_image_vertex_read(xgpu_vulkan_image_create(&description));
 }
 
 int xgpu_vulkan_world_ao_create(void)

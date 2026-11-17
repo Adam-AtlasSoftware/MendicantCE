@@ -192,6 +192,105 @@ unsigned long xgpu_texture_face_size(const struct xgpu_texture_description *desc
 	return size;
 }
 
+int xgpu_texture_minimum_alpha(const struct xgpu_texture_description *description, const unsigned char *texels)
+{
+	struct format_information information = format_information(description->format);
+	unsigned long level, least = 255;
+
+	switch (information.kind)
+	{
+	case _texel_x8r8g8b8:
+	case _texel_r5g6b5:
+	case _texel_x1r5g5b5:
+		return 255;
+	case _texel_dxt1:
+	case _texel_dxt3:
+	case _texel_dxt5:
+	case _texel_a8r8g8b8:
+		break;
+	default:
+		return -1;
+	}
+	if (!texels || description->cube_map || description->depth > 1)
+		return -1;
+	for (level = 0; level < description->levels && least; level++)
+	{
+		const unsigned char *data = texels + xgpu_texture_level_offset(description, level);
+		unsigned long size = xgpu_texture_level_size(description, level), offset;
+
+		if (information.kind == _texel_a8r8g8b8)
+		{
+			/* (a linear texture's rows' padding is read with them: no more than
+			the least) */
+			for (offset = 3; offset < size; offset += 4)
+			{
+				if (data[offset] < least)
+					least = data[offset];
+			}
+		}
+		else if (information.kind == _texel_dxt1)
+		{
+			for (offset = 0; offset + 8 <= size; offset += 8)
+			{
+				const unsigned char *block = data + offset;
+				unsigned long c0 = block[0] | (unsigned long)block[1] << 8, c1 = block[2] | (unsigned long)block[3] << 8;
+				unsigned long indices = block[4] | (unsigned long)block[5] << 8 | (unsigned long)block[6] << 16 |
+					(unsigned long)block[7] << 24;
+
+				/* (three colours and transparent: a texel whose index is 3) */
+				if (c0 <= c1 && (indices & (indices >> 1) & 0x55555555UL))
+					return 0;
+			}
+		}
+		else if (information.kind == _texel_dxt3)
+		{
+			/* (a block's first eight bytes: its texels' alphas, four bits each) */
+			for (offset = 0; offset + 16 <= size; offset += 16)
+			{
+				int byte;
+
+				for (byte = 0; byte < 8; byte++)
+				{
+					unsigned long low = data[offset + byte] & 0x0f, high = data[offset + byte] >> 4;
+
+					if (low * 17 < least)
+						least = low * 17;
+					if (high * 17 < least)
+						least = high * 17;
+				}
+			}
+		}
+		else
+		{
+			/* (a block's two alphas, then its texels' indices, three bits each:
+			eight alphas from the first down to the second; or, the first not
+			the greater, six from it up to the second, then 0 and 255) */
+			for (offset = 0; offset + 16 <= size; offset += 16)
+			{
+				const unsigned char *block = data + offset;
+				unsigned long a0 = block[0], a1 = block[1], lower = a0 > a1 ? a1 : a0;
+
+				if (a0 <= a1)
+				{
+					unsigned long long indices = 0;
+					int texel;
+
+					for (texel = 0; texel < 6; texel++)
+						indices |= (unsigned long long)block[2 + texel] << (8 * texel);
+					for (texel = 0; texel < 16; texel++)
+					{
+						if (((indices >> (3 * texel)) & 7) == 6)
+							return 0;
+					}
+				}
+				if (lower < least)
+					least = lower;
+			}
+		}
+	}
+	return (int)least;
+}
+
 /* whether the size is one D3DDevice_GetDeviceCaps allows (d3d8_device.c): up
 to 4096 by 4096, and 512 each way for a volume */
 BOOL xgpu_texture_size_supported(const struct xgpu_texture_description *description)

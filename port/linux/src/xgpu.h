@@ -489,6 +489,14 @@ unsigned long xgpu_texture_level_pitch(const struct xgpu_texture_description *de
 or depth from the first level's */
 unsigned long xgpu_texture_level_size(const struct xgpu_texture_description *description, unsigned long level);
 unsigned long xgpu_texture_level_dimension(unsigned long base, unsigned long level);
+/* the least alpha any texel of any level reads, 0 to 255, from its texels
+(a 2D texture's): 255 for a format with no alpha; a DXT1 texture's 255, or
+0 with a block of three colours that uses the fourth index, the
+transparent one; a DXT3 texture's least alpha; a DXT5 texture's blocks'
+lower end points (0 where a block of six alphas uses its 0); an
+A8R8G8B8 texture's. Never more than the least: -1 where it is not known
+(the other formats are not read) */
+int xgpu_texture_minimum_alpha(const struct xgpu_texture_description *description, const unsigned char *texels);
 /* the size is one D3DDevice_GetDeviceCaps allows (d3d8_device.c) */
 BOOL xgpu_texture_size_supported(const struct xgpu_texture_description *description);
 /* a level of a texture that is not compressed (a volume's slices one after
