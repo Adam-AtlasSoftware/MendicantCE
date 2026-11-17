@@ -1034,6 +1034,8 @@ static double sample_gaussian(void) { double x = 1.0 + 0.5 * gaussian(); return 
 static double sample_rare(void) { return uniform() < 0.002 ? 500.0 : 0.0; } /* mean 1, a firefly per 500 */
 static double sample_pareto(void) { return 0.6 * pow(uniform(), -1.0 / 2.5); } /* alpha 2.5: mean 1 */
 static double sample_mixed(void) { return uniform() < 0.05 ? 10.0 * uniform() : 0.5 * uniform(); }
+/* a dark texel's: mean 0.002, as sample_gaussian's spread */
+static double sample_dark(void) { return 0.002 * sample_gaussian(); }
 
 /* runs one texel to its stop: the samples taken, the estimate */
 static enum prism_bake_converge_state run_texel(struct prism_bake_converge_parameters const *p, sampler source,
@@ -1191,6 +1193,29 @@ static void test_converge(void)
 		p.use_batch_means = 0;
 		check(stopped_plain && !stopped_batched, "converge_batch_means",
 			"the batch means do not hold back a correlated texel");
+	}
+	/* D4 amended: the noise floor (error_floor) stops a dark texel once its
+	standard error is under the threshold of the floor, not of its own light;
+	0 the literal rule */
+	{
+		struct prism_bake_texel_stats s;
+		double literal_samples, floor_samples;
+
+		check(p.error_floor == 0.0f, "converge_floor_default", "the literal rule is not the default");
+		coverage(&p, sample_dark, 0.002, 100, &literal_samples);
+		p.error_floor = 0.018f;
+		coverage(&p, sample_dark, 0.002, 100, &floor_samples);
+		sprintf(why, "%.0f samples literal, %.0f with the floor", literal_samples, floor_samples);
+		check(floor_samples < literal_samples / 10.0, "converge_floor_dark", why);
+		printf("info noise floor: a texel at 0.002, %.0f samples literal, %.0f with the floor\n", literal_samples,
+			floor_samples);
+		/* (a bright texel: the floor changes nothing) */
+		prism_bake_texel_reset(&s);
+		for (k = 0; k < 100000; k++)
+			prism_bake_texel_add(&s, 1.0f + 0.01f * (float)(k % 3));
+		check(prism_bake_texel_state(&s, NULL, &p) == PRISM_BAKE_CONVERGE_CONVERGED, "converge_floor_bright",
+			"a bright texel does not stop with the floor");
+		p.error_floor = 0.0f;
 	}
 	/* a budget, when one is set */
 	p.maximum_samples = 256;
