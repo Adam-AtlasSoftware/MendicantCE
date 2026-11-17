@@ -1311,9 +1311,10 @@ static const struct config_setting config_settings[] =
 	{ "controls.spartan_link", _config_string, "\"B\"", "HALO_KEY_SPARTAN_LINK", _environment_value, _platform_all,
 		"The Spartan link: your teammates' feeds in the HUD shown or hidden\n"
 		"(display.spartan_link).", _scope_keyboard },
-	{ "controls.hide_hud", _config_string, "\"\"", "HALO_KEY_HIDE_HUD", _environment_value, _platform_all,
+	{ "controls.hide_hud", _config_string, "\"F3\"", "HALO_KEY_HIDE_HUD", _environment_value, _platform_all,
 		"Hide HUD: the HUD, the reticle and the clock hidden or shown again, for\n"
-		"clean footage and screenshots (display.hide_hud). Unbound by default.", _scope_keyboard },
+		"clean footage and screenshots (display.hide_hud). Not while the menu\n"
+		"studio is on (debug.menu_studio), whose F3 is its own.", _scope_keyboard },
 
 	{ "game.console_log", _config_string, "\"important\"", "HALO_CONSOLE_LOG", _environment_value, _platform_all,
 		"What the game's console shows on screen of what it logs: \"important\"\n"

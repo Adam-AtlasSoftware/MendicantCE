@@ -56,6 +56,9 @@ static int config_boolean(const char *name)
 /* the keyboard's actions held (halo_keyboard_actions) */
 static unsigned long keys_held;
 static unsigned long halo_keyboard_actions(short controller_index) { (void)controller_index; return keys_held; }
+/* (the menu studio, debug.menu_studio: its F3 its own) */
+static boolean studio;
+boolean menu_studio_on(void) { return studio; }
 static unsigned long config_changes(void) { return changes; }
 
 /* the view and the text */
@@ -154,6 +157,19 @@ int main(int argc, char **argv)
 		/* (with it off, the scripts still hide the HUD) */
 		scripted.show_hud = FALSE;
 		CHECK(!hud_shown(), "the scripts' show_hud ignored");
+		return 0;
+	}
+	CASE("studio")
+	{
+		/* (the menu studio on: F3 steps its input, the HUD stays) */
+		studio = TRUE;
+		keys_held = FLAG(HALO_KEYBOARD_HIDE_HUD);
+		CHECK(hud_shown(), "the studio's F3 hid the HUD");
+		keys_held = 0;
+		CHECK(hud_shown(), "let go, hidden");
+		studio = FALSE;
+		keys_held = FLAG(HALO_KEYBOARD_HIDE_HUD);
+		CHECK(!hud_shown(), "the key did not hide the HUD with the studio off");
 		return 0;
 	}
 	CASE("hide_setting")

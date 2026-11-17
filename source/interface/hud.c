@@ -1546,7 +1546,9 @@ static boolean hud_match_timer_setting(
 	return setting;
 }
 
-/* port: the player's Hide HUD (controls.hide_hud, unbound by default;
+boolean menu_studio_on(void); /* port: port/linux/game/menu_studio.c */
+
+/* port: the player's Hide HUD (controls.hide_hud, F3 by default;
 display.hide_hud, off by default, its state as the game starts and whenever
 Settings changes it): the HUD, the reticle, the clock, the teammates' marks
 and the names over the players hidden until
@@ -1555,7 +1557,8 @@ the key shows them again, over map loads, which reset the scripts' show_hud
 show_hud still hides them with it off, and the HUD's sounds are the
 scripts' alone. The key is the keyboard's (the first player's), read as
 pressed here, whichever view draws first; none while a menu, the console or
-a chat line has the keys (halo_keyboard_actions) */
+a chat line has the keys (halo_keyboard_actions), nor while the menu
+studio is on, whose F3 steps its input (menu_studio.c's menu_studio_on) */
 static struct
 {
 	boolean hidden;
@@ -1581,7 +1584,7 @@ static boolean hud_hidden_by_player(
 		hud_hide.setting = setting;
 	}
 	key = (halo_keyboard_actions(0) & FLAG(HALO_KEYBOARD_HIDE_HUD)) != 0;
-	if (key && !hud_hide.key_held)
+	if (key && !hud_hide.key_held && !menu_studio_on())
 		hud_hide.hidden = !hud_hide.hidden;
 	hud_hide.key_held = key;
 

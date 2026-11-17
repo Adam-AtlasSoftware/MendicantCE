@@ -13,7 +13,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, enum_with, function, mutated, read, run  # noqa: E402
 
-CASES = ["campaign", "multiplayer", "off", "hide", "hide_setting"]
+CASES = ["campaign", "multiplayer", "off", "hide", "studio", "hide_setting"]
 FUNCTIONS = ["hud_match_timer_setting", "hud_hidden_by_player", "hud_shown", "hud_match_timer_shown",
              "hud_draw_match_timer"]
 
@@ -24,9 +24,11 @@ NEGATIVE_CONTROLS = {
                                                    "return game_engine_running() && hud_match_timer_setting() &&"),
                          "campaign"),
     # the key held taken as a press each frame (the HUD flickering)
-    "held-toggles": ("hud_hidden_by_player", ("if (key && !hud_hide.key_held)", "if (key)"), "hide"),
+    "held-toggles": ("hud_hidden_by_player", ("if (key && !hud_hide.key_held &&", "if (key &&"), "hide"),
     # any setting's change taking back the key's choice
     "any-change-resets": ("hud_hidden_by_player", ("\t\tif (setting != hud_hide.setting)\n", ""), "hide"),
+    # the menu studio's F3 hiding the HUD as well
+    "studio-unheard": ("hud_hidden_by_player", (" && !menu_studio_on()", ""), "studio"),
 }
 
 
@@ -72,3 +74,45 @@ def test_the_hud_drawn_by_it():
     assert "\t\tif (hud_shown())\n" in screen
     assert "if (hud_scripted_globals->show_hud)" not in screen
     assert "hud_play_unit_sounds(player, hud_scripted_globals->show_hud);" in screen
+
+
+# the keys the port takes for itself, whatever the bindings (sdl_platform.c, xinput_sdl.c): F1 the menus' Back, F9 the
+# menu studio's notes, F11 fullscreen, F12 the mouse; F3 to F7 the menu studio's, which is on only by
+# debug.menu_studio and whose F3 then wins (hud_hidden_by_player)
+PORT_KEYS = {"F1", "F9", "F11", "F12"}
+
+
+def key_defaults(config):
+    """Each controls.<action>'s default keys, from port_config.c."""
+    defaults = {}
+    for action, keys in re.findall(r'\{ "controls\.(\w+)", _config_string, ("[^\n]*?\\""|\w+),', config):
+        if keys.startswith('"'):
+            keys = keys[1:-1].replace('\\"', "")
+        else:
+            keys = re.search(r"^#define " + keys + r' "\\"([^"\\]*)\\""', config, re.M).group(1)
+        defaults[action] = {key.strip() for key in keys.split(",") if key.strip()}
+    return defaults
+
+
+def clashes(config):
+    """Hide HUD's default, and the keys of it another action's default or the port itself takes."""
+    defaults = key_defaults(config)
+    hide = defaults.pop("hide_hud")
+    return hide, {key for key in hide if key in PORT_KEYS or any(key in keys for keys in defaults.values())}
+
+
+def test_hide_hud_default_f3():
+    """Hide HUD is F3 by default, a key no other action's default nor the port itself takes."""
+    defaults = key_defaults(read("port/linux/src/port_config.c"))
+    assert defaults["vote_yes"] == {"F1"} and defaults["move_forward"] == {"W"}, defaults
+    hide, shared = clashes(read("port/linux/src/port_config.c"))
+    assert hide == {"F3"}, hide
+    assert not shared, shared
+
+
+def test_hide_hud_default_clash_caught():
+    """(negative control) F1, the vote's Yes and the menus' Back, is caught."""
+    config = mutated(read("port/linux/src/port_config.c"), '"controls.hide_hud", _config_string, "\\"F3\\""',
+                     '"controls.hide_hud", _config_string, "\\"F1\\""')
+    hide, shared = clashes(config)
+    assert hide == {"F1"} and shared == {"F1"}, (hide, shared)
