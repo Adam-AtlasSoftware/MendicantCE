@@ -62,6 +62,16 @@ int main(int argc, char **argv)
 		CHECK(sent_count == 0, "nothing sent");
 		return 0;
 	}
+	if (!strcmp(which, "unloaded"))
+	{
+		/* (the map let go: no box kept for a decal of the next one with the
+		same handle) */
+		prism_deferred_decal_made(decal, &basis, &extent, &sprite, 1.5f);
+		prism_deferred_map_unloaded();
+		CHECK(!prism_deferred_decal(decal, 0x1000UL, 0, 0xffffffffUL, 255, FALSE), "a box of the map before sent");
+		CHECK(sent_count == 0, "nothing sent");
+		return 0;
+	}
 	if (!strcmp(which, "refused"))
 	{
 		/* (no box made, no texture, a blend past CE's eight) */

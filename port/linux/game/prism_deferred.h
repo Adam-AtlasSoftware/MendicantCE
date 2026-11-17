@@ -67,6 +67,9 @@ its layer is alpha tested): FALSE where it has no projection kept, CE then
 drawing it */
 void prism_deferred_decal_made(long decal_index, void const *basis, void const *extent, void const *sprite_bounds,
 	real radius);
+/* ... every projection kept let go as the map is (world_ao.c's
+world_ao_map_unloaded) */
+void prism_deferred_map_unloaded(void);
 boolean prism_deferred_decal(long decal_index, unsigned long texture, short blend, unsigned long color,
 	unsigned long intensity, boolean alpha_tested);
 /* a shader's material id in the map's table (0 none; the table made

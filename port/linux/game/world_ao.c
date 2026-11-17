@@ -63,6 +63,8 @@ void prism_bake_frame(void);
 void prism_scene_lights_map_unloaded(void);
 void prism_rt_map_unloaded(void);
 void prism_bake_map_unloaded(void);
+/* (prism_deferred.c's: the projected decals' boxes) */
+void prism_deferred_map_unloaded(void);
 unsigned long long SDL_GetTicksNS(void);
 /* (PRISM v2's model light: prism_light.c) */
 void prism_light_window_begin(float const camera[3]);
@@ -152,6 +154,7 @@ void world_ao_map_unloaded(void)
 	prism_bake_map_unloaded();
 	prism_scene_static_map_unloaded();
 	prism_scene_lights_map_unloaded();
+	prism_deferred_map_unloaded();
 	prism_lightmaps_map_unloaded();
 	world_ao_scene_release();
 	world_sdf_map_unloaded();

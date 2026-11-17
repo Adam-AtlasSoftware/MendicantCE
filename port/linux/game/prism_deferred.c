@@ -893,6 +893,21 @@ void prism_deferred_decal_made(
 	decal_boxes[absolute].rectangle[3] = sprite->y1;
 }
 
+void prism_deferred_map_unloaded(
+	void)
+{
+	long absolute;
+
+	/* (a decal of the next map, or of a saved game, may have the handle a
+	decal of this one had in its slot) */
+	for (absolute = 0; absolute < DECALS_MOST; absolute++)
+	{
+		decal_boxes[absolute].handle = NONE;
+	}
+
+	return;
+}
+
 boolean prism_deferred_decal(
 	long decal_index,
 	unsigned long texture,
@@ -905,8 +920,8 @@ boolean prism_deferred_decal(
 	struct decal_record record;
 	int axis;
 
-	if (absolute < 0 || absolute >= DECALS_MOST || decal_boxes[absolute].handle != decal_index || !texture ||
-		blend < 0 || blend > 7)
+	if (decal_index == NONE || absolute < 0 || absolute >= DECALS_MOST || decal_boxes[absolute].handle != decal_index ||
+		!texture || blend < 0 || blend > 7)
 	{
 		return FALSE;
 	}
