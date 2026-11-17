@@ -1132,8 +1132,27 @@
 			<help>How far the view turns for each degree you turn the controller: 1 as far, 2 twice as far. Press A, or click the number, to type a value.</help>
 			<note>Zoomed in: as Zoom Aim Speed sets.</note>
 		</row>
+		<row key="touch_gyro_sensitivity" kind="slider" setting="input.touch_gyro_sensitivity" label="SENSITIVITY" crumb="CONTROLS › CONTROLLER › GYRO &amp; FLICK STICK" search="sens" when="touch+!gyro" same_place="true" least="0.25" most="8" step="0.05" typed_least="0.05" typed_most="20">
+			<help>How far the view turns for each degree you turn this device, with the touch controls' Gyroscope aiming on: 1 as far, 2 twice as far. Press A, or tap the number, to type a value.</help>
+			<note>A controller's gyro has its own, shown while one is connected.</note>
+		</row>
 		<row key="gyro_vertical_sensitivity" kind="choice" setting="input.gyro_vertical_sensitivity" label="VERTICAL SENSITIVITY" crumb="CONTROLS › CONTROLLER › GYRO &amp; FLICK STICK" search="sens" when="gyro">
 			<help>How far the view turns up and down, of how far it turns side to side. 1X turns it as far.</help>
+			<choice shown="0.25X" value="0.25"/>
+			<choice shown="0.5X" value="0.5"/>
+			<choice shown="0.6X" value="0.6"/>
+			<choice shown="0.7X" value="0.7"/>
+			<choice shown="0.75X" value="0.75"/>
+			<choice shown="0.8X" value="0.8"/>
+			<choice shown="0.9X" value="0.9"/>
+			<choice shown="1X" value="1"/>
+			<choice shown="1.1X" value="1.1"/>
+			<choice shown="1.25X" value="1.25"/>
+			<choice shown="1.5X" value="1.5"/>
+			<choice shown="2X" value="2"/>
+		</row>
+		<row key="touch_gyro_vertical_sensitivity" kind="choice" setting="input.touch_gyro_vertical_sensitivity" label="VERTICAL SENSITIVITY" crumb="CONTROLS › CONTROLLER › GYRO &amp; FLICK STICK" search="sens" when="touch+!gyro" same_place="true">
+			<help>How far the view turns up and down as you tilt this device, of how far it turns side to side. 1X turns it as far.</help>
 			<choice shown="0.25X" value="0.25"/>
 			<choice shown="0.5X" value="0.5"/>
 			<choice shown="0.6X" value="0.6"/>
@@ -1152,16 +1171,25 @@
 			<choice shown="PLAYER SPACE" value="player"/>
 			<choice shown="LOCAL SPACE" value="local"/>
 		</row>
-		<row key="gyro_smoothing" kind="choice" setting="input.gyro_smoothing" label="SMOOTHING" crumb="CONTROLS › CONTROLLER › GYRO &amp; FLICK STICK" when="gyro">
-			<help>Steadies the smallest motions, your hand's tremor, but never a real turn. Off: every motion as it comes.</help>
-			<choice shown="ON" value="true"/>
-			<choice shown="OFF" value="false"/>
+		<row key="gyro_smoothing" kind="choice" setting="input.gyro_smoothing" label="SMOOTHING" crumb="CONTROLS › CONTROLLER › GYRO &amp; FLICK STICK" search_choices="low medium high" when="gyro">
+			<help>Steadies the smallest motions, your hand's tremor, but never a real turn. Higher steadies faster motions, over a little longer. Off: every motion as it comes.</help>
+			<choice shown="OFF" value="off"/>
+			<choice shown="LOW" value="low"/>
+			<choice shown="MEDIUM" value="medium"/>
+			<choice shown="HIGH" value="high"/>
+		</row>
+		<row key="touch_gyro_smoothing" kind="choice" setting="input.touch_gyro_smoothing" label="SMOOTHING" crumb="CONTROLS › CONTROLLER › GYRO &amp; FLICK STICK" search_choices="low medium high" when="touch+!gyro" same_place="true">
+			<help>Steadies this device's smallest motions, your hand's tremor, but never a real turn. Higher steadies faster motions, over a little longer. Off: every motion as it comes.</help>
+			<choice shown="OFF" value="off"/>
+			<choice shown="LOW" value="low"/>
+			<choice shown="MEDIUM" value="medium"/>
+			<choice shown="HIGH" value="high"/>
 		</row>
 		<row key="gyro_calibrate" kind="status" label="CALIBRATE" crumb="CONTROLS › CONTROLLER › GYRO &amp; FLICK STICK" when="gyro" run="port settings gyro calibrate">
 			<help>Put the controller down on something still, then select this: it measures the gyroscope at rest for a second and a half.</help>
 			<note>It also does so whenever it is held still.</note>
 		</row>
-		<section key="section_9" title="RIGHT STICK"/>
+		<section key="section_12" title="RIGHT STICK"/>
 		<row key="invert_look_horizontal" kind="choice" setting="input.invert_look_horizontal" label="INVERT TURNING" crumb="CONTROLS › CONTROLLER › GYRO &amp; FLICK STICK">
 			<help>Pushing the right stick right turns the view left. For every controller on this device.</help>
 			<choice shown="YES" value="true"/>
@@ -1178,6 +1206,15 @@
 			<note>With the default stick layout.</note>
 			<choice shown="ON" value="true"/>
 			<choice shown="OFF" value="false"/>
+		</row>
+		<row key="flick_stick_time" kind="choice" setting="input.flick_stick_time" label="FLICK TIME" crumb="CONTROLS › CONTROLLER › GYRO &amp; FLICK STICK" search_choices="instant" enabled="flick_stick=true">
+			<help>How long a flick takes to turn you: shorter is snappier, longer smoother. You turn as far either way.</help>
+			<choice shown="INSTANT" value="0"/>
+			<choice shown="0.05 S" value="0.05"/>
+			<choice shown="0.1 S" value="0.1"/>
+			<choice shown="0.15 S" value="0.15"/>
+			<choice shown="0.2 S" value="0.2"/>
+			<choice shown="0.25 S" value="0.25"/>
 		</row>
 		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
 		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>

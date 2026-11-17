@@ -1037,6 +1037,21 @@ static const struct config_setting config_settings[] =
 		"The touch controls' swipe aiming gets a controller's aim assist: the\n"
 		"aim slows over a target and follows a moving one. false: none, as a\n"
 		"mouse (the bullets' own autoaim stays)." },
+	{ "input.touch_gyro_sensitivity", _config_real, "1.0", "HALO_TOUCH_GYRO_SENSITIVITY", _environment_value,
+		_platform_android | _platform_ios,
+		"The touch controls' gyroscope aiming (the phone's or the tablet's\n"
+		"own, switched on in the touch controls' settings): how far the view\n"
+		"turns side to side for each degree the device turns, 1 as far. A\n"
+		"controller's gyroscope has input.gyro_sensitivity." },
+	{ "input.touch_gyro_vertical_sensitivity", _config_real, "1.0", "HALO_TOUCH_GYRO_VERTICAL_SENSITIVITY",
+		_environment_value, _platform_android | _platform_ios,
+		"How far the view turns up and down for the device's gyroscope, times\n"
+		"input.touch_gyro_sensitivity: 1 the same as side to side." },
+	{ "input.touch_gyro_smoothing", _config_string, "\"off\"", "HALO_TOUCH_GYRO_SMOOTHING", _environment_value,
+		_platform_android | _platform_ios,
+		"Steadies the device's gyroscope's smallest motions, as\n"
+		"input.gyro_smoothing does a controller's: \"off\", \"low\", \"medium\" or\n"
+		"\"high\"." },
 	{ "input.touch_crouch", _config_string, "\"toggle\"", "HALO_TOUCH_CROUCH", _environment_value,
 		_platform_android | _platform_ios,
 		"The touch controls' Crouch: \"toggle\" crouches at a tap until Crouch\n"
@@ -1233,15 +1248,20 @@ static const struct config_setting config_settings[] =
 		"a turn about the up direction, however the controller is held (flat,\n"
 		"upright or between); \"local\", a turn about the controller's own\n"
 		"vertical axis, as if it were held flat." },
-	{ "input.gyro_smoothing", _config_boolean, "true", "HALO_GYRO_SMOOTHING", _environment_value, _platform_all,
+	{ "input.gyro_smoothing", _config_string, "\"medium\"", "HALO_GYRO_SMOOTHING", _environment_value,
+		_platform_all,
 		"Steadies the gyroscope's smallest motions (the hand's tremor), never a\n"
 		"real turn's; nothing is lost, only spread over a few hundredths of a\n"
-		"second." },
+		"second: \"off\", \"low\", \"medium\" or \"high\" (a stronger one steadies\n"
+		"faster motions, over a longer time)." },
 	{ "input.flick_stick", _config_boolean, "false", "HALO_FLICK_STICK", _environment_value, _platform_all,
 		"The right stick as a flick stick, with the default stick layout: pushed\n"
 		"to its rim, you turn at once to face where it points (pushed right, a\n"
 		"quarter turn right; down, about face); turned round the rim, you turn\n"
 		"with it. It does not look up or down: the gyroscope does." },
+	{ "input.flick_stick_time", _config_real, "0.1", "HALO_FLICK_STICK_TIME", _environment_value, _platform_all,
+		"How long a flick of input.flick_stick takes to turn you, in seconds,\n"
+		"0 (at once) to 0.25; it turns as far either way." },
 
 	/* the keyboard and mouse's own controls (port/linux/src/xinput_sdl.c) */
 	{ "controls.move_forward", _config_string, "\"W\"", "HALO_KEY_MOVE_FORWARD", _environment_value, _platform_all,
@@ -3317,6 +3337,10 @@ static const struct
 	place) */
 	{ "display.ambient_occlusion", "subtle", "world" },
 	{ "display.ambient_occlusion", "strong", "world" },
+	/* (the gyroscope's smoothing on or off: a strength now, on's the
+	medium one; a file's true or false read as these words too) */
+	{ "input.gyro_smoothing", "true", "medium" },
+	{ "input.gyro_smoothing", "false", "off" },
 	{ NULL, NULL, NULL },
 };
 
@@ -3786,14 +3810,14 @@ static char *config_migrate_words(const char *text, toml_datum_t table)
 		long setting = config_setting_index(name);
 		toml_datum_t datum = toml_seek(table, name);
 		const char *word;
+		/* (a word, or an older version's true or false) */
+		const char *old = datum.type == TOML_STRING ? datum.u.s :
+			datum.type == TOML_BOOLEAN ? (datum.u.boolean ? "true" : "false") : NULL;
 		char value[80];
 		char *updated;
 
-		if (setting < 0 || datum.type != TOML_STRING ||
-			!config_word_is(datum.u.s, strlen(datum.u.s), config_renamed_words[index].old_word))
-		{
+		if (setting < 0 || !old || !config_word_is(old, strlen(old), config_renamed_words[index].old_word))
 			continue;
-		}
 		word = config_renamed_words[index].word;
 		snprintf(value, sizeof(value), "\"%s\"", word);
 		updated = config_replace_setting(result ? result : text, &config_settings[setting], value);
@@ -3801,7 +3825,7 @@ static char *config_migrate_words(const char *text, toml_datum_t table)
 			continue;
 		free(result);
 		result = updated;
-		platform_log("settings: %s = \"%s\" is an older version's: now \"%s\"", name, datum.u.s, word);
+		platform_log("settings: %s = \"%s\" is an older version's: now \"%s\"", name, old, word);
 	}
 	return result;
 }
@@ -4246,6 +4270,13 @@ static int config_set_from_file(struct config_value *value, const struct config_
 		{
 			free(value->string);
 			value->string = strdup(datum.u.s);
+		}
+		else if (datum.type == TOML_BOOLEAN && config_renamed_word(setting->name, datum.u.boolean ? "true" : "false"))
+		{
+			/* (an older version's true or false, which config_check_words
+			reads as the word in its place) */
+			free(value->string);
+			value->string = strdup(datum.u.boolean ? "true" : "false");
 		}
 		else if ((datum.type == TOML_FP64 || datum.type == TOML_INT64) && config_string_takes_number(setting))
 		{
@@ -4740,6 +4771,8 @@ static const struct
 	{ "input.gyro_button", { "touchpad", "left_paddle", "right_paddle", "misc", "left_bumper", "right_bumper",
 		"left_trigger", "right_trigger", "left_stick", "right_stick", NULL }, NULL },
 	{ "input.gyro_space", { "player", "local", NULL }, NULL },
+	{ "input.gyro_smoothing", { "off", "low", "medium", "high", NULL }, "medium" },
+	{ "input.touch_gyro_smoothing", { "off", "low", "medium", "high", NULL }, "off" },
 	{ "input.button_prompts", { "auto", "controller", "keyboard", NULL }, NULL },
 	{ "input.zoom_sensitivity", { "cs2", "halo", NULL }, "cs2" },
 	{ "game.console_log", { "important", "all", "none", NULL }, NULL },

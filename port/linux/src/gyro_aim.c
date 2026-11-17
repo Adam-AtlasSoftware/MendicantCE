@@ -45,7 +45,8 @@ A turn slower than SMOOTH_SLOWEST (radians a second) is all smoothed, a
 turn faster than SMOOTH_FASTEST not at all, one between in part: the
 hand's tremor steadied, never a real motion's lag. The smoothed part is
 averaged over SMOOTH_SECONDS, and none of it is lost: it turns the view
-as far, a little later. */
+as far, a little later. A strength (gyro_aim_smoothing) scales all three:
+a stronger smoothing steadies faster motions, over a longer time. */
 #define SMOOTH_SLOWEST 0.044f
 #define SMOOTH_FASTEST 0.087f
 #define SMOOTH_SECONDS 0.06f
@@ -53,6 +54,12 @@ as far, a little later. */
 /* a sample this long after the last is after a gap (samples lost, the
 sensor turned off and on): it turns nothing */
 #define LONGEST_SAMPLE 0.1f
+/* the smoothed part's rate (radians a second) under which a device turned
+by nothing is taken as still (gyro_aim_turned): a ten-thousandth of a degree
+a second */
+#define GYRO_AIM_SMOOTHED_LEAST 2e-6f
+/* the shortest time gyro_aim_turned takes a read's turn over */
+#define GYRO_AIM_SHORTEST_READ 0.001f
 
 /* player space's relaxation: a turn about an axis tilted from the vertical
 counts for more than its vertical part, up to the whole of it (the hand's
@@ -88,6 +95,26 @@ static void smooth_tiered(float *rate, float *smoothed, int count, float slowest
 		smoothed[index] += (rate[index] * (1.0f - direct) - smoothed[index]) * k;
 		rate[index] = rate[index] * direct + smoothed[index];
 	}
+}
+
+float gyro_aim_smoothing(const char *word, float otherwise)
+{
+	static const struct
+	{
+		const char *word;
+		float strength;
+	} strengths[] =
+	{
+		{ "off", 0.0f }, { "low", 0.5f }, { "medium", 1.0f }, { "high", 2.0f },
+	};
+	unsigned int index;
+
+	for (index = 0; word && index < sizeof(strengths) / sizeof(strengths[0]); index++)
+	{
+		if (!strcmp(word, strengths[index].word))
+			return strengths[index].strength;
+	}
+	return otherwise;
 }
 
 void gyro_aim_reset(struct gyro_aim *aim)
@@ -237,10 +264,51 @@ void gyro_aim_sample(struct gyro_aim *aim, const float gyro[3], float seconds,
 	{
 		look[0] = rate[1];
 	}
-	if (settings->smoothing)
-		smooth_tiered(look, aim->smoothed, 2, SMOOTH_SLOWEST, SMOOTH_FASTEST, SMOOTH_SECONDS, seconds);
+	gyro_aim_rate(look, aim->smoothed, seconds, settings, turn);
+}
+
+void gyro_aim_rate(const float rate[2], float smoothed[2], float seconds, const struct gyro_aim_settings *settings,
+	float turn[2])
+{
+	float look[2];
+
+	look[0] = rate[0];
+	look[1] = rate[1];
+	if (settings->smoothing > 0.0f)
+	{
+		smooth_tiered(look, smoothed, 2, SMOOTH_SLOWEST * settings->smoothing, SMOOTH_FASTEST * settings->smoothing,
+			SMOOTH_SECONDS * settings->smoothing, seconds);
+	}
 	turn[0] = look[0] * seconds * settings->sensitivity;
 	turn[1] = look[1] * seconds * settings->sensitivity * settings->vertical_sensitivity;
+}
+
+void gyro_aim_turned(const float turned[2], float smoothed[2], float seconds,
+	const struct gyro_aim_settings *settings, float turn[2])
+{
+	float rate[2];
+
+	/* (no time, or a gap: the smoothing's step a sample's, which turns
+	none of it the less) */
+	if (!(seconds >= GYRO_AIM_SHORTEST_READ))
+		seconds = GYRO_AIM_SHORTEST_READ;
+	else if (seconds > LONGEST_SAMPLE)
+		seconds = LONGEST_SAMPLE;
+	if (!isfinite(turned[0]) || !isfinite(turned[1]))
+	{
+		turn[0] = turn[1] = 0.0f;
+		return;
+	}
+	rate[0] = turned[0] / seconds;
+	rate[1] = turned[1] / seconds;
+	gyro_aim_rate(rate, smoothed, seconds, settings, turn);
+	/* (what is left of the smoothed part once the device is still, too
+	small to turn the view: none, so that a still device turns nothing) */
+	if (fabsf(smoothed[0]) < GYRO_AIM_SMOOTHED_LEAST && fabsf(smoothed[1]) < GYRO_AIM_SMOOTHED_LEAST &&
+		turned[0] == 0.0f && turned[1] == 0.0f)
+	{
+		smoothed[0] = smoothed[1] = 0.0f;
+	}
 }
 
 /* ---------- the flick stick */
@@ -297,16 +365,20 @@ int gyro_steam_deck(unsigned short vendor, unsigned short product)
 void flick_stick_reset(struct flick_stick *flick)
 {
 	memset(flick, 0, sizeof(*flick));
-	flick->flick_seconds = FLICK_STICK_SECONDS;
+	flick->flick_done = 1.0f;
 }
 
-float flick_stick_update(struct flick_stick *flick, float x, float y, float seconds)
+float flick_stick_update(struct flick_stick *flick, float x, float y, float seconds, float flick_seconds)
 {
 	float magnitude = sqrtf(x * x + y * y);
 	float turn = 0.0f;
 
 	if (!(seconds >= 0.0f) || !isfinite(x) || !isfinite(y))
 		return 0.0f;
+	if (!(flick_seconds > 0.0f))
+		flick_seconds = 0.0f;
+	else if (flick_seconds > FLICK_STICK_SECONDS_MOST)
+		flick_seconds = FLICK_STICK_SECONDS_MOST;
 	if (magnitude >= (flick->on_rim ? FLICK_RIM_LEFT : FLICK_RIM))
 	{
 		float angle = atan2f(x, y);
@@ -314,11 +386,11 @@ float flick_stick_update(struct flick_stick *flick, float x, float y, float seco
 		if (!flick->on_rim)
 		{
 			/* (a flick not yet done finishes at once) */
-			turn += flick->flick_size * (1.0f - flick_ease(flick->flick_seconds / FLICK_STICK_SECONDS));
+			turn += flick->flick_size * (1.0f - flick_ease(flick->flick_done));
 			/* a turn to where the stick points: to the right is a yaw to
 			the right, negative */
 			flick->flick_size = -angle;
-			flick->flick_seconds = 0.0f;
+			flick->flick_done = 0.0f;
 			flick->smoothed = 0.0f;
 			flick->on_rim = 1;
 		}
@@ -350,12 +422,13 @@ float flick_stick_update(struct flick_stick *flick, float x, float y, float seco
 		flick->on_rim = 0;
 		flick->smoothed = 0.0f;
 	}
-	if (flick->flick_seconds < FLICK_STICK_SECONDS)
+	if (flick->flick_done < 1.0f)
 	{
-		float before = flick_ease(flick->flick_seconds / FLICK_STICK_SECONDS);
+		float before = flick_ease(flick->flick_done);
 
-		flick->flick_seconds = fminf(flick->flick_seconds + seconds, FLICK_STICK_SECONDS);
-		turn += (flick_ease(flick->flick_seconds / FLICK_STICK_SECONDS) - before) * flick->flick_size;
+		/* (its time's share done; none: all of it at once) */
+		flick->flick_done = flick_seconds > 0.0f ? fminf(flick->flick_done + seconds / flick_seconds, 1.0f) : 1.0f;
+		turn += (flick_ease(flick->flick_done) - before) * flick->flick_size;
 	}
 	return turn;
 }

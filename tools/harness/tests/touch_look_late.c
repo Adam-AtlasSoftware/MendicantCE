@@ -19,6 +19,13 @@ static void host_touch_look_read(float *delta)
 	}
 }
 
+/* (the gyroscope's turn as its settings make it, gyro_aim.c's, which test_gyro_aim.py's touch case tests: here, as
+it came, in radians) */
+static void touch_gyro_turn(float turn[2])
+{
+	(void)turn;
+}
+
 #include "under_test.inc"
 
 #define SCALE 0.5f
@@ -54,19 +61,19 @@ static void case_frames(void)
 		swiped_gyro_yaw += 0.25f * before;
 		touch_input_look(SCALE, &player_yaw, &player_pitch, &gyro_yaw, &gyro_pitch);
 		CHECK(close_to(player_yaw, -swiped_yaw * SCALE) && close_to(player_pitch, -swiped_pitch * SCALE) &&
-			close_to(gyro_yaw, -swiped_gyro_yaw * SCALE) && close_to(gyro_pitch, -swiped_gyro_pitch * SCALE),
+			close_to(gyro_yaw, swiped_gyro_yaw) && close_to(gyro_pitch, swiped_gyro_pitch),
 			"frame %d: the player turned %f, %f by the swipe and %f, %f by the gyroscope, of %f, %f and %f, %f", frame,
 			player_yaw, player_pitch, gyro_yaw, gyro_pitch, -swiped_yaw * SCALE, -swiped_pitch * SCALE,
-			-swiped_gyro_yaw * SCALE, -swiped_gyro_pitch * SCALE);
+			swiped_gyro_yaw, swiped_gyro_pitch);
 		swiped(during, 2.0f * during, 0.0f, -during);
 		swiped_yaw += during;
 		swiped_pitch += 2.0f * during;
 		swiped_gyro_pitch -= during;
 		touch_input_look_late(SCALE, &late_yaw, &late_pitch, &late_gyro_yaw, &late_gyro_pitch);
 		CHECK(close_to(late_yaw, -during * SCALE) && close_to(late_pitch, -2.0f * during * SCALE) &&
-			close_to(late_gyro_yaw, 0.0f) && close_to(late_gyro_pitch, during * SCALE),
+			close_to(late_gyro_yaw, 0.0f) && close_to(late_gyro_pitch, -during),
 			"frame %d: the view read %f, %f and %f, %f late, of %f, %f and 0, %f", frame, late_yaw, late_pitch,
-			late_gyro_yaw, late_gyro_pitch, -during * SCALE, -2.0f * during * SCALE, during * SCALE);
+			late_gyro_yaw, late_gyro_pitch, -during * SCALE, -2.0f * during * SCALE, -during);
 	}
 }
 

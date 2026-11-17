@@ -12,6 +12,9 @@ finger down (host_gesture_insets).
 #include "touch_input.h"
 #include "touch_menu.h"
 #include "port_config.h"
+#include "gyro_aim.h"
+
+#include <SDL3/SDL_timer.h>
 
 #include <math.h>
 #include <stdlib.h>
@@ -463,6 +466,47 @@ int touch_input_move(float *forward, float *strafe)
 	return TRUE;
 }
 
+/* the touch controls' gyroscope (the phone's or the tablet's own): its turn
+since the last read (radians of yaw to the left and pitch up, the overlay's
+GyroscopeAim.java or touch_controls.m) made the player's as a controller's
+is (gyro_aim_turned: input.touch_gyro_sensitivity and the rest), in place */
+static void touch_gyro_turn(float turn[2])
+{
+	static struct gyro_aim_settings settings;
+	static unsigned long read_at = (unsigned long)-1;
+	static float smoothed[2];
+	static Uint64 last_ns;
+	Uint64 now = SDL_GetTicksNS();
+	float seconds = last_ns && now > last_ns ? (float)((double)(now - last_ns) * 1e-9) : 0.0f;
+	float turned[2];
+
+	last_ns = now;
+	if (read_at != config_changes())
+	{
+		read_at = config_changes();
+		settings.sensitivity = (float)config_real("input.touch_gyro_sensitivity");
+		if (!(settings.sensitivity > 0.0f))
+			settings.sensitivity = 1.0f;
+		settings.vertical_sensitivity = (float)config_real("input.touch_gyro_vertical_sensitivity");
+		if (!(settings.vertical_sensitivity > 0.0f))
+			settings.vertical_sensitivity = 1.0f;
+		/* (the overlay turns the device's axes to the screen's itself) */
+		settings.player_space = 0;
+		settings.smoothing = gyro_aim_smoothing(config_string("input.touch_gyro_smoothing"), 0.0f);
+	}
+	turned[0] = turn[0];
+	turned[1] = turn[1];
+	gyro_aim_turned(turned, smoothed, seconds, &settings, turn);
+}
+
+/* the swipe since the last read, in the overlay's logical pixels, then the
+gyroscope's turn, the player's (touch_gyro_turn) */
+static void touch_look_read(float delta[4])
+{
+	host_touch_look_read(delta);
+	touch_gyro_turn(delta + 2);
+}
+
 /* the swipe's and the gyroscope's turn read late in a frame, for the drawn
 view (touch_input_look_late), which the next frame's input takes as its own */
 static float look_carried[4];
@@ -472,7 +516,7 @@ void touch_input_look(float scale, float *yaw, float *pitch, float *gyro_yaw, fl
 	float delta[4];
 	int index;
 
-	host_touch_look_read(delta);
+	touch_look_read(delta);
 	for (index = 0; index < 4; index++)
 	{
 		delta[index] += look_carried[index];
@@ -480,8 +524,8 @@ void touch_input_look(float scale, float *yaw, float *pitch, float *gyro_yaw, fl
 	}
 	*yaw -= delta[0] * scale;
 	*pitch -= delta[1] * scale;
-	*gyro_yaw -= delta[2] * scale;
-	*gyro_pitch -= delta[3] * scale;
+	*gyro_yaw += delta[2];
+	*gyro_pitch += delta[3];
 }
 
 void touch_input_look_late(float scale, float *yaw, float *pitch, float *gyro_yaw, float *gyro_pitch)
@@ -489,13 +533,13 @@ void touch_input_look_late(float scale, float *yaw, float *pitch, float *gyro_ya
 	float delta[4];
 	int index;
 
-	host_touch_look_read(delta);
+	touch_look_read(delta);
 	for (index = 0; index < 4; index++)
 		look_carried[index] += delta[index];
 	*yaw = -look_carried[0] * scale;
 	*pitch = -look_carried[1] * scale;
-	*gyro_yaw = -look_carried[2] * scale;
-	*gyro_pitch = -look_carried[3] * scale;
+	*gyro_yaw = look_carried[2];
+	*gyro_pitch = look_carried[3];
 }
 
 int touch_input_aim_assist(void)

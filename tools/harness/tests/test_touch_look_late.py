@@ -24,7 +24,8 @@ CONTROLS = [
 def generated(fault=None):
     code = read("port/linux/src/touch_input.c")
     carried = re.search(r"^static float look_carried\[4\];$", code, re.M).group(0)
-    text = "\n".join([carried, function(code, "touch_input_look"), function(code, "touch_input_look_late")])
+    text = "\n".join([function(code, "touch_look_read"), carried, function(code, "touch_input_look"),
+                      function(code, "touch_input_look_late")])
     if fault:
         text = mutated(text, *fault)
     return (("under_test.inc", text),)
