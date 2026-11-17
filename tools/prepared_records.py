@@ -8,7 +8,7 @@ Run on a Linux machine with the stock Xbox maps, on a build of the commit to be 
 fresh, offscreen at a fixed step, with every setting at its default (a config.toml of its own): its first start's pass loads the
 23 stock maps, then the main menu loads ui.map, and each map's preparation is recorded (z:\\prepared). ui.map's
 tags then include the menus' models (menu_models.c), which that pass makes: so it starts the game once more,
-fresh, with display.menu_pictures off, for ui.map's record as a player's first start loads it, before its pass, the
+fresh, as a player's first start, for ui.map's record as that start loads it, before its pass, the
 record keyed apart (render_prepared.c's prepared_key_models). Each record must name only tags a fresh start of the
 build has at those indices (unkept_tags: the map's own and the menus', and the models' by their place). The records
 are compressed (zlib, each) into one file, port/assets/prepared/prepared.records (its form:
@@ -233,10 +233,10 @@ def main() -> None:
     work = Path(tempfile.mkdtemp(prefix="prepared-records-", dir=arguments.work))
     try:
         run = run_game(arguments.halo, arguments.maps, work, arguments.seconds)
-        # (ui.map as a player's first start loads it, before its pass makes the menus' models, which a run with
-        # display.menu_pictures off never has: its record without their tags)
+        # (ui.map as a player's first start loads it, every setting at its default, before the start's pass makes
+        # the menus' models: its record without their tags, the first of that run's)
         first = run_game(arguments.halo, arguments.maps, work, arguments.seconds, "first",
-                         {"HALO_MENU_PICTURES": "false", "HALO_DEBUG_MENU_PICTURES": None}, 1)
+                         {"HALO_DEBUG_MENU_PICTURES": None}, 1)
         manifest = collect([(run, None), (first, UI_SCENARIO)], arguments.out)
         if sum(record["map"] == "ui" for record in manifest["records"]) != 2:
             sys.exit("ui.map's records are not both made: with the menus' models and without")
