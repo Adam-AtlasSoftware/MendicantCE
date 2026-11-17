@@ -726,6 +726,11 @@ unsigned int text_hires_atlas_texture(unsigned long data)
 {
 	if (!data || data != placeholder_data)
 		return 0;
+	/* (the baked atlas read where no text has been drawn yet: a map's
+	preparation played back at the first start binds the placeholder before
+	any string is drawn, and a draw of it is the atlas's, MSDF, as in play) */
+	if (!msdf.pixels)
+		(void)msdf_read();
 	/* (the fields' atlas, which its image owns once it is made: a new one
 	each time the glyphs made at run time are let go, msdf_made_reset) */
 	if (!msdf.image && msdf.pixels)
