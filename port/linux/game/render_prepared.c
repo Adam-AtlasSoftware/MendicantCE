@@ -300,14 +300,14 @@ static uint64_t prepared_key_models(uint64_t hash)
 }
 
 /* the enumeration's label for HALO_RENDER_COVERAGE (xgpu_manifest.h): the
-map, how it is prepared (walked, played back from its record) and the
-screen's width */
+map, how it is prepared (walked, played back from its record), the
+screen's width and the menus' models' tags in the table (prepared_key_models) */
 void prepared_coverage_label(char const *how)
 {
 	char label[160];
 
-	snprintf(label, sizeof(label), "%s %s %ld", global_scenario_index != NONE ?
-		tag_get_name(global_scenario_index) : "", how, halo_screen_width());
+	snprintf(label, sizeof(label), "%s %s %ld %lx", global_scenario_index != NONE ?
+		tag_get_name(global_scenario_index) : "", how, halo_screen_width(), menu_models_identity());
 	xgpu_manifest_coverage_label(label);
 }
 

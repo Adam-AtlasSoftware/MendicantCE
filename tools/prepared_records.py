@@ -27,6 +27,7 @@ tools/harness/tests/test_prepared_shipped.py until this is run again and its rec
 map data: render states, textures by tag and bitmap index, mirror pages and shader ids.
 """
 import argparse
+import gzip
 import json
 import os
 import re
@@ -64,16 +65,24 @@ PACK_FORM = 1
 RENDER_MANIFEST = ROOT / "port/assets/render/manifest.txt"
 MENU_SECONDS = 10
 UI_SCENARIO = "levels\\ui\\ui"
+# each map's walk and its record's playback, as no setting changes their draws, at two shapes of the screen (4:3, the
+# records' own, and 16:9): tools/test_preparation_coverage.py derives both under every setting it checks
+COVERAGE = ROOT / "tools/prepared_coverage.txt.gz"
+COVERAGE_LABEL = re.compile(r"^# coverage (\S+) (walk|replay|scope) (\d+) ([0-9a-f]+)$", re.M)
+WIDE = "1280x720"
 
 
 def run_game(halo: Path, maps: Path, work: Path, seconds: int, name: str = "run", settings: dict = None,
-             wanted: int = STOCK_MAP_COUNT) -> Path:
-    """the game started fresh (with settings over the defaults: None unsets one), until wanted maps are recorded; the
-    run's folder"""
+             wanted: int = STOCK_MAP_COUNT, covered: str = None, pack: Path = None) -> Path:
+    """the game started fresh (with settings over the defaults: None unsets one), until wanted maps are recorded (or,
+    covered, have that coverage: walk or replay); the run's folder, its coverage in coverage.txt. pack: the records it
+    plays (else none)"""
     run = work / name
     shutil.rmtree(run, ignore_errors=True)
     (run / "save").mkdir(parents=True)
     (run / "maps").symlink_to(maps.resolve())
+    if pack:
+        shutil.copy(pack, run / PACK_NAME)
     environment = dict(os.environ, HALO_DATA_ROOT=str(run), HALO_SAVE_ROOT=str(run / "save"),
                        HALO_CONFIG_FILE=str(run / "config.toml"), XDG_CACHE_HOME=str(run / "xdg-cache"),
                        XDG_CONFIG_HOME=str(run / "xdg-config"), XDG_DATA_HOME=str(run / "xdg-data"),
@@ -82,8 +91,10 @@ def run_game(halo: Path, maps: Path, work: Path, seconds: int, name: str = "run"
                        HALO_UPDATE_ANSWER="no", HALO_NO_CLIPBOARD="1", HALO_DEBUG_MENU_PICTURES="1",
                        HALO_FIXED_STEP="1", HALO_PREPARED_RECORDS="1", HALO_SHIPPED_RECORDS="0",
                        HALO_MAP_CACHE_MEGABYTES="3500",
-                       HALO_RENDER_MANIFEST=str(run / "manifest.txt"),
+                       HALO_RENDER_MANIFEST=str(run / "manifest.txt"), HALO_RENDER_COVERAGE=str(run / "coverage.txt"),
                        SDL_VIDEO_DRIVER="offscreen", SDL_AUDIO_DRIVER="dummy")
+    if pack:
+        environment["HALO_SHIPPED_RECORDS"] = None
     environment.update(settings or {})
     # (a setting given as None: unset)
     environment = {name: value for name, value in environment.items() if value is not None}
@@ -95,7 +106,11 @@ def run_game(halo: Path, maps: Path, work: Path, seconds: int, name: str = "run"
         try:
             while game.poll() is None and time.monotonic() - started < seconds:
                 time.sleep(1)
-                if len({line[4] for line in RECORDED.findall(log.read_text(errors="replace"))}) >= wanted:
+                coverage = (run / "coverage.txt").read_text(errors="replace") if covered and \
+                    (run / "coverage.txt").is_file() else ""
+                if (len({line[4] for line in RECORDED.findall(log.read_text(errors="replace"))}) if not covered else
+                        len({map_name for map_name, how, _, _ in COVERAGE_LABEL.findall(coverage) if how == covered})) >= \
+                        wanted:
                     # (the main menu drawn a while, for the manifest, and ui.map's record with the menus' models
                     # made as the pass ends)
                     time.sleep(MENU_SECONDS)
@@ -227,6 +242,7 @@ def main() -> None:
     parser.add_argument("--out", type=Path, default=OUT)
     parser.add_argument("--render-manifest", type=Path, default=RENDER_MANIFEST)
     parser.add_argument("--seconds", type=int, default=600)
+    parser.add_argument("--coverage", type=Path, default=COVERAGE)
     arguments = parser.parse_args()
     if not (arguments.maps / "ui.map").is_file():
         sys.exit(f"{arguments.maps}: no ui.map")
@@ -241,6 +257,22 @@ def main() -> None:
         if sum(record["map"] == "ui" for record in manifest["records"]) != 2:
             sys.exit("ui.map's records are not both made: with the menus' models and without")
         render_manifest(run, arguments.render_manifest)
+        # (the records played back, at 4:3 and 16:9, and the maps walked at 16:9: their coverage beside the walk's)
+        pack = arguments.out / PACK_NAME
+        runs = [run, first,
+                run_game(arguments.halo, arguments.maps, work, arguments.seconds, "replay", None, STOCK_MAP_COUNT,
+                         "replay", pack),
+                run_game(arguments.halo, arguments.maps, work, arguments.seconds, "wide", {"HALO_WINDOW_SIZE": WIDE,
+                         "HALO_PREPARED_RECORDS": "0"}, STOCK_MAP_COUNT, "walk"),
+                run_game(arguments.halo, arguments.maps, work, arguments.seconds, "wide-replay",
+                         {"HALO_WINDOW_SIZE": WIDE}, STOCK_MAP_COUNT, "replay", pack)]
+        text = "".join((other / "coverage.txt").read_text(errors="replace") for other in runs
+                       if (other / "coverage.txt").is_file())
+        labels = COVERAGE_LABEL.findall(text)
+        print(f"coverage: {len(labels)} enumerations, {len({(m, w, k) for m, h, w, k in labels if h == 'walk'})} walks, "
+              f"{len({(m, w, k) for m, h, w, k in labels if h == 'replay'})} playbacks")
+        with gzip.open(arguments.coverage, "wt", compresslevel=9) as file:
+            file.write(text)
     finally:
         shutil.rmtree(work, ignore_errors=True)
     size = sum(record["size"] for record in manifest["records"])
