@@ -620,6 +620,7 @@ void _rasterizer_model_end(
 			viewmodel_projection_end();	/* port: (view_fov.c) */
 			rasterizer_set_frustum_z(0.0f, 0.0f);
 		}
+		halo_model_bounds(NULL, NULL, 0.0f, 0.0f, FALSE); /* port: (the model is drawn) */
 		local_parameters = NULL;
 	}
 #ifdef HALO_VR
@@ -689,7 +690,36 @@ void _rasterizer_model_begin(
 			skinning_work =
 				rasterizer_frame_statistics.vertex_shader_skinning_constant_bytes - skinning_work;
 			lighting_work = rasterizer_frame_statistics.vertex_shader_lighting_constant_bytes;
-			rasterizer_set_model_lighting(&parameters->lighting);
+			/* port: the model's bounds, for its draws (port/linux/src/d3d8_device.c):
+			its sphere, and its middle where the frame draws its object
+			(port/linux/game/render_interpolation.c). With the enhanced dynamic
+			lights, a model none of them reaches is drawn as with no light */
+			{
+				real_point3d drawn = parameters->centroid;
+
+				/* (a caller that gives no sphere gives no object either:
+				rasterizer_xbox_active_camouflage.c) */
+				if (parameters->radius > 0.0f)
+				{
+					render_interpolation_model_centre(parameters->unique_identifier, &parameters->centroid, &drawn);
+				}
+				if (halo_model_bounds(
+						(const float *)&parameters->centroid,
+						(const float *)&drawn,
+						parameters->radius,
+						distance3d(&global_window_parameters.camera.position, &parameters->centroid),
+						TEST_FLAG(parameters->geometry_flags, _rasterizer_geometry_first_person_bit)))
+				{
+					struct render_lighting unreached = parameters->lighting;
+
+					unreached.point_light_count = 0;
+					rasterizer_set_model_lighting(&unreached);
+				}
+				else
+				{
+					rasterizer_set_model_lighting(&parameters->lighting);
+				}
+			}
 			rasterizer_frame_statistics.model_skinning_constant_bytes +=
 				skinning_work;
 			rasterizer_frame_statistics.model_lighting_constant_bytes +=

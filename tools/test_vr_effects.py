@@ -44,12 +44,14 @@ def test_effect_shaders(tmp_path):
     corpus = tmp_path / "corpus"
     subprocess.run([str(build / "spirv_corpus"), str(captures), str(corpus)], check=True, capture_output=True)
     rows = [line.split("\t") for line in (corpus / "index.txt").read_text().splitlines()
-            if line.startswith(("effect-", "glow-", "zsprite-"))]
+            if line.startswith(("effect-", "glow-", "zsprite-", "screen-effect-"))]
     # soft and thick, one map and two, each fade, flat and foveated; the
     # glows' two shaders flat and foveated; a z-sprite's depth flat and in
     # both eyes, and as an effect soft and thick, each fade, flat and foveated
     assert len([row for row in rows if row[0].startswith("effect-")]) == 2 * 2 * 6 * 2
     assert len([row for row in rows if row[0].startswith("glow-")]) == 4
+    # a flat screen's (display.soft_particles): soft, one map and two, each fade
+    assert len([row for row in rows if row[0].startswith("screen-effect-")]) == 2 * 6
     assert len([row for row in rows if row[0].startswith("zsprite-")]) == 2 + 2 * 6 * 2
     files = sorted({row[1] for row in rows})
     assert all((corpus / f"{name}.spv").stat().st_size > 0 for name in files)
@@ -102,10 +104,12 @@ struct host_render_texture_stage
     struct xgpu_stream_texture_level levels[XGPU_STREAM_MIP_LEVELS];
 };
 struct stream_target { int depth; struct xgpu_vulkan_image *image, *multisampled; };
+#define XGPU_MULTIVIEW_NONE 0
 static struct
 {
     uint32_t depth;
     int samples;
+    const struct xgpu_stream_pipeline_define *definition;
     struct host_render_texture_stage stages[4];
     struct xgpu_vulkan_texture textures[4];
     uint32_t textures_serial;
@@ -156,6 +160,21 @@ int main(void)
     assert(!textures[XGPU_SPIRV_EFFECT_THICKNESS_BINDING].image->destroyed);
     effect_textures(textures);
     assert(lookups == 2);
+    /* the eyes' depth is their layers; a flat screen's (display.soft_particles,
+    a pipeline of no views) its one 2D image, as its shader samples it */
+    assert(textures[XGPU_SPIRV_EFFECT_DEPTH_BINDING].kind == XGPU_VULKAN_IMAGE_2D_ARRAY);
+    {
+        static struct xgpu_stream_pipeline_define flat;
+
+        flat.key.views = XGPU_MULTIVIEW_NONE;
+        stream.definition = &flat;
+        assert(effect_textures(textures) == 1);
+        assert(textures[XGPU_SPIRV_EFFECT_DEPTH_BINDING].kind == XGPU_VULKAN_IMAGE_2D);
+        assert(textures[XGPU_SPIRV_EFFECT_DEPTH_BINDING].image == &depth_image);
+        flat.key.views = 1;
+        effect_textures(textures);
+        assert(textures[XGPU_SPIRV_EFFECT_DEPTH_BINDING].kind == XGPU_VULKAN_IMAGE_2D_ARRAY);
+    }
     return 0;
 }
 """)

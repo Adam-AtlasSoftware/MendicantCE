@@ -927,8 +927,8 @@ PAGES = {
             # (display.gamma's page, and display.hdr's rows on the renderers
             # that draw it: menu_files.c's "hdr")
             ("BRIGHTNESS ›", None, _page_screen(*BRIGHTNESS_PAGE),
-             "How bright the picture is: its gamma, and on an HDR display, HDR's look, how bright white and the "
-             "HUD are, and the display's peak.", None, "brightness_settings"),
+             "How bright the picture is: its gamma, soft particles, and on an HDR display, HDR's look, how bright "
+             "white and the HUD are, and the display's peak.", None, "brightness_settings"),
             ("ADVANCED GRAPHICS ›", None, _page_screen(*ADVANCED),
              "Render resolution, anti-aliasing, texture filtering, model detail, shadows, the lighting and the "
              "shields' glow, smooth motion and the tick rate.", None),
@@ -1320,6 +1320,13 @@ PAGES = {
              "a fine grain. 8-Bit draws as before, lighter on the graphics card. Auto picks for you: 10-Bit, or "
              "8-Bit with battery saver.|HDR has its own depth: this applies with HDR off.",
              "computer"),
+            # (display.soft_particles: shown where the renderer draws it,
+            # not in the headset, whose eyes draw them soft already:
+            # SETTINGS_ROW_WHEN; Advanced
+            # Graphics and Video have no room)
+            ("SOFT PARTICLES", "display.soft_particles", ON_OFF,
+             "Smoke, dust, steam and weather fade softly where they meet walls and floors, at a small cost. Off "
+             "draws them as the Xbox did: a hard line where they cut in.", "desktop"),
             (SECTION, "HDR"),
             ("HDR", "display.hdr", [("AUTO", "auto"), ("ON", "on"), ("OFF", "off")],
              "Brighter highlights on an HDR display. Auto turns it on while the display shows HDR; a display "
@@ -2502,6 +2509,9 @@ SETTINGS_ROW_WHEN = {
     "menu_cursor": "!vr", "gamma": "!vr_build", "panini": "!vr_build", "panini_vertical": "!vr_build",
     # (the VR build draws its eyes in 8 bits)
     "output_depth": "!vr_build",
+    # (display.soft_particles: where the renderer draws it, Vulkan's;
+    # settings_condition_term's soft_effects)
+    "soft_particles": "soft_effects+!vr",
     # (the Mac's display paces its frames already)
     "low_latency": "!vrr_system",
     # (in a game: not those that would drop it or are the main menu's, nor

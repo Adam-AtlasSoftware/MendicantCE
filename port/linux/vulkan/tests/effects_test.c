@@ -263,6 +263,59 @@ static void views(void)
 	}
 }
 
+/* a flat screen's view (display.soft_particles: no eye's correction) is
+the VR mode's with an identity correction, so its fade is the eyes' math:
+the game's camera, in a render-scaled viewport off the target's corner
+(supersampled or scaled, the depth's pixels are the frame's); and an eye's
+correction moves it (the negative control) */
+static void flat_view(void)
+{
+	const float camera[3] = { 10.0f, -4.0f, 1.5f }, forward[3] = { 0.6f, 0.8f, 0.0f }, up[3] = { 0.0f, 0.0f, 1.0f };
+	const float scale[4] = { 1.0f, 1.0f, 1.0f, 0.0f }, offset[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+	const int32_t viewport[4] = { 64, 32, 3840, 2160 };
+	const float depth_range[2] = { 0.0f, 1.0f };
+	const float points[3][3] = { { 14.0f, 2.0f, 1.0f }, { 11.0f, -3.0f, 1.6f }, { 40.0f, 30.0f, -2.0f } };
+	float rows[4][4], projection[6][4], identity[16], moved[16];
+	struct xgpu_vulkan_effects_view flat, eye, other;
+	int row, column, point;
+
+	camera_rows(rows, camera, forward, up, 1.2f, 0.01f, 100.0f, 0.0f);
+	memcpy(projection, rows, sizeof(rows));
+	for (column = 0; column < 4; column++)
+	{
+		projection[4][column] = 1.0f;
+		projection[5][column] = column == 0 || column == 1 ? -0.5f : 0.0f;
+	}
+	memset(identity, 0, sizeof(identity));
+	identity[0] = identity[5] = identity[10] = identity[15] = 1.0f;
+	memcpy(moved, identity, sizeof(moved));
+	moved[12] = 0.05f;
+	assert(xgpu_vulkan_effects_view(projection, scale, offset, 0.0f, NULL, NULL, viewport, depth_range, &flat));
+	assert(xgpu_vulkan_effects_view(projection, scale, offset, 0.0f, identity, NULL, viewport, depth_range, &eye));
+	assert(xgpu_vulkan_effects_view(projection, scale, offset, 0.0f, moved, NULL, viewport, depth_range, &other));
+	for (row = 0; row < 4; row++)
+		for (column = 0; column < 4; column++)
+			assert(flat.unproject[row][column] == eye.unproject[row][column]);
+	for (row = 0; row < 3; row++)
+		assert(CLOSE(flat.eye[row], camera[row], 1.0e-3));
+	assert(memcmp(other.unproject, flat.unproject, sizeof(flat.unproject)) != 0);
+	for (point = 0; point < 3; point++)
+	{
+		float world[4] = { points[point][0], points[point][1], points[point][2], 1.0f }, clip[4], window[4], back[4];
+
+		transform(flat.clip, world, clip);
+		window[0] = viewport[0] + (clip[0] / clip[3] + 1.0f) * 0.5f * viewport[2];
+		window[1] = viewport[1] + (clip[1] / clip[3] + 1.0f) * 0.5f * viewport[3];
+		window[2] = depth_range[0] + clip[2] / clip[3] * (depth_range[1] - depth_range[0]);
+		window[3] = 1.0f;
+		for (row = 0; row < 4; row++)
+			back[row] = flat.unproject[0][row] * window[0] + flat.unproject[1][row] * window[1] +
+				flat.unproject[2][row] * window[2] + flat.unproject[3][row];
+		for (row = 0; row < 3; row++)
+			assert(CLOSE(back[row] / back[3], world[row], 2.0e-3 * (fabs(world[row]) + 1.0)));
+	}
+}
+
 int main(void)
 {
 	distances();
@@ -270,6 +323,7 @@ int main(void)
 	two_sprites();
 	masks();
 	views();
+	flat_view();
 	printf("ok\n");
 	return 0;
 }

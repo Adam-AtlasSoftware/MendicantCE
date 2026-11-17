@@ -552,9 +552,9 @@ def test_config_mouse_sensitivity_in_cs2_units(config_check_mac):
 # the settings display.graphics chooses, and their values in Classic and in
 # Enhanced (the same on every build)
 GRAPHICS_SETTINGS = ["anti_aliasing", "anisotropic_filtering", "shadow_resolution", "per_pixel_lighting",
-                     "model_detail", "dynamic_lights"]
-GRAPHICS_CLASSIC = ["off", "0", "128", "false", "auto", "classic"]
-GRAPHICS_ENHANCED = ["smaa", "16", "512", "true", "native", "enhanced"]
+                     "model_detail", "dynamic_lights", "soft_particles"]
+GRAPHICS_CLASSIC = ["off", "0", "128", "false", "auto", "classic", "false"]
+GRAPHICS_ENHANCED = ["smaa", "16", "512", "true", "native", "enhanced", "true"]
 
 
 def graphics_values(run):
@@ -587,7 +587,7 @@ def test_graphics_preset_keeps_a_setting_set(config_check_mac, monkeypatch):
     run("write", "display.anisotropic_filtering", "8")
     assert "\nanisotropic_filtering = 8\n" in run.config.read_text()
     run("write", "display.graphics", "classic")
-    assert graphics_values(run) == ["off", "8", "128", "false", "auto", "classic"]
+    assert graphics_values(run) == ["off", "8", "128", "false", "auto", "classic", "false"]
     # (at the preset's value: commented out, the preset's again)
     run("write", "display.anisotropic_filtering", "0")
     assert "\n# anisotropic_filtering = 0\n" in run.config.read_text()
@@ -603,7 +603,17 @@ def test_graphics_preset_keeps_a_setting_set(config_check_mac, monkeypatch):
     # (and by their variables, for one run)
     monkeypatch.setenv("HALO_GRAPHICS", "classic")
     monkeypatch.setenv("HALO_MODEL_DETAIL", "highest")
-    assert graphics_values(run) == ["off", "0", "128", "false", "highest", "classic"]
+    assert graphics_values(run) == ["off", "0", "128", "false", "highest", "classic", "false"]
+    # (display.soft_particles set wins over the preset, either way)
+    monkeypatch.delenv("HALO_MODEL_DETAIL")
+    run("write", "display.soft_particles", "true")
+    assert "\nsoft_particles = true\n" in run.config.read_text()
+    assert run("get", "display.soft_particles") == "true"
+    monkeypatch.delenv("HALO_GRAPHICS")
+    run("write", "display.graphics", "enhanced")
+    run("write", "display.soft_particles", "false")
+    assert "\nsoft_particles = false\n" in run.config.read_text()
+    assert run("get", "display.soft_particles") == "false"
 
 
 def test_battery_saver_reads_the_classic_values(config_check_mac):

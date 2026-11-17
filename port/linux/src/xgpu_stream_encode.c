@@ -652,6 +652,10 @@ void xgpu_backend_initialize(void)
 	xgpu_backend_capabilities.most_samples = stream.capabilities.most_samples;
 	xgpu_backend_capabilities.most_anisotropy = stream.capabilities.most_anisotropy;
 	xgpu_backend_capabilities.sample_counting = stream.capabilities.sample_counting;
+	xgpu_backend_capabilities.alpha_test_drop = (stream.capabilities.cutout_prepass & 1) != 0;
+	xgpu_backend_capabilities.cutout_prepass = (stream.capabilities.cutout_prepass & 2) != 0;
+	xgpu_backend_capabilities.clear_alone = stream.capabilities.clear_alone;
+	xgpu_backend_capabilities.draw_bounds = stream.capabilities.draw_bounds;
 	xgpu_backend_capabilities.bgra_vertex_colors = stream.capabilities.bgra_vertex_colors;
 	xgpu_backend_capabilities.base_vertex = stream.capabilities.base_vertex;
 	xgpu_backend_capabilities.sample_mask = stream.capabilities.sample_mask;
@@ -660,6 +664,7 @@ void xgpu_backend_initialize(void)
 	xgpu_backend_capabilities.hdr = stream.capabilities.hdr;
 	xgpu_backend_capabilities.deep_sdr = stream.capabilities.deep_sdr;
 	xgpu_backend_capabilities.ray_queries = stream.capabilities.ray_queries;
+	xgpu_backend_capabilities.soft_effects = stream.capabilities.soft_effects;
 	stream.capabilities.device[sizeof(stream.capabilities.device) - 1] = 0;
 }
 

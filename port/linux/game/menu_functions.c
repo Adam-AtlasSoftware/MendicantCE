@@ -3086,6 +3086,9 @@ static boolean settings_condition_term(struct widget_instance *list, char const 
 	/* (the frame drawn in HDR now: display.output_depth's row dimmed) */
 	if (!strcmp(name, "hdr_drawn"))
 		return halo_hdr_drawn() != 0;
+	/* (the renderer draws display.soft_particles: Vulkan's) */
+	if (!strcmp(name, "soft_effects"))
+		return halo_soft_effects_drawn() != 0;
 	if (!strcmp(name, "gyro"))
 		return halo_gyro_found() == 2;
 	/* (the player's Aim Style Modern, on another page than the rows it

@@ -236,6 +236,7 @@ python -m pytest -q tools/test_hdr_backends.py              # display.hdr across
 python -m pytest -q tools/test_macos_app.py                 # the macOS app's Info.plist, entitlements, signature
 python -m pytest -q tools/test_hud_assets.py                # the high-res HUD's assets: their sources, credit, the classic buttons' cut-out letters
 python -m pytest -q tools/test_astc.py                      # the DXT textures as ASTC: the transcoding, the encoder's bounds, the disk cache
+python -m pytest -q tools/test_texture_alpha.py             # a texture's least alpha, which an alpha test is dropped by, against the decoder's alphas
 python -m pytest -q tools/test_ios_app.py                   # the iOS app's Info.plist, entitlements, the guest's code section
 build/macos/halo_replay <recording> --shots <dir>           # a recorded render stream replayed (ninja macos_replay;
                                                             # HALO_RENDER_RECORD: port/macos/README.md)

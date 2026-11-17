@@ -21,7 +21,11 @@ front end turns into pipelines and targets as the settings and the screen
 are now (prepared_settings says of each setting why), and the walk draws,
 as it records, what every setting's would (the enhanced lights' passes,
 the ambient occlusion's pre-pass and Panini's pass, whatever the settings:
-the front end plays back what the settings now want of them). Played back
+the front end plays back what the settings now want of them). (One choice
+of the backend's is in what the walk draws: a cut-out's depth first, beside
+the cut-out as one draw, where xgpu_backend_capabilities.cutout_prepass
+(HALO_VULKAN_CUTOUT_PREPASS=1). A record made without it leaves those two
+draws' pipelines to be made in play.) Played back
 under the settings, backend and GPU it was made with (its derivation), the
 map's enumeration (the set of distinct draws as the front end describes
 them: xgpu_manifest_enumeration) must be the record's; under others, which

@@ -436,10 +436,15 @@ struct xgpu_stream_capabilities
 	/* display.ambient_occlusion "ray_traced": the backend traces the
 	occlusion's rays by the GPU's ray queries (xgpu_backend_world_ao_mesh,
 	_instances: Vulkan's VK_KHR_ray_query) */
-	uint8_t ray_queries;
+	/* (and xgpu_backend_capabilities' clear_alone and draw_bounds, and in
+	cutout_prepass its alpha_test_drop, 1, and cutout_prepass, 2) */
+	uint8_t ray_queries, cutout_prepass, clear_alone, draw_bounds;
 	/* display.output_depth: the SDR back buffer can be RGBA16
 	(xgpu_backend.h's XGPU_FORMAT_RGBA16) */
-	uint8_t deep_sdr, pad[2];
+	uint8_t deep_sdr;
+	/* display.soft_particles: an effect drawn with no views can be soft
+	(the pixel key's vr_effect: xgpu_backend_capabilities' soft_effects) */
+	uint8_t soft_effects, pad[2];
 	/* the GPU, its API and driver, in a few words (a report's:
 	port/linux/src/report.c), NUL terminated */
 	char device[96];
@@ -1498,7 +1503,7 @@ struct xgpu_stream_world_ao_instances
 
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_ring, 120);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_frame_end, 12);
-XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_capabilities, 120);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_capabilities, 124);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_hdr, 24);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_tone_map, 24);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_panini, 56);
