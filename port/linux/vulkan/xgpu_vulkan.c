@@ -7622,6 +7622,12 @@ static int device_make(const struct xgpu_vulkan_options *options)
 	VkPhysicalDevicePresentIdFeaturesKHR available_id, present_id;
 	VkPhysicalDevicePresentWaitFeaturesKHR available_wait, present_wait;
 	void **chain;
+	/* (the renderer plugins': their first extension, where the chain was
+	before them, and whether the buffers' addresses were enabled for them) */
+	uint32_t plugin_first;
+	void **plugin_chain;
+	int plugin_addresses = 0;
+	VkResult result;
 
 	memset(&available, 0, sizeof(available));
 	memset(&available11, 0, sizeof(available11));
@@ -7831,7 +7837,12 @@ static int device_make(const struct xgpu_vulkan_options *options)
 	}
 
 	/* (PRISM's renderer plugins': those the device has; told where it lacks
-	one, which turns the plugin off) */
+	one, which turns the plugin off. VK_EXT_buffer_device_address, NGX's,
+	is met by Vulkan 1.2's bufferDeviceAddress where the device has it, the
+	feature enabled in its place: a device may not have both, and NVIDIA's
+	is not made with both) */
+	plugin_first = extension_count;
+	plugin_chain = chain;
 	if (options->plugin_device_extensions)
 	{
 		const char *wanted[16];
@@ -7839,6 +7850,20 @@ static int device_make(const struct xgpu_vulkan_options *options)
 
 		for (index = 0; index < count && index < 16; index++)
 		{
+			if (!strcmp(wanted[index], VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME) &&
+				available12.bufferDeviceAddress)
+			{
+				if (!vk.ray_tracing && !plugin_addresses)
+				{
+					memset(&addresses, 0, sizeof(addresses));
+					addresses.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
+					addresses.bufferDeviceAddress = VK_TRUE;
+					*chain = &addresses;
+					chain = &addresses.pNext;
+					plugin_addresses = 1;
+				}
+				continue;
+			}
 			for (have = 0; have < extension_count && strcmp(extensions[have], wanted[index]); have++)
 				;
 			if (have < extension_count)
@@ -7867,9 +7892,31 @@ static int device_make(const struct xgpu_vulkan_options *options)
 	info.pQueueCreateInfos = &queue;
 	info.enabledExtensionCount = extension_count;
 	info.ppEnabledExtensionNames = extensions;
-	if (!check(options->create_device ?
+	result = options->create_device ?
 		options->create_device(vkGetInstanceProcAddr, vk.physical, &info, NULL, &vk.device) :
-		vkCreateDevice(vk.physical, &info, NULL, &vk.device), "vkCreateDevice"))
+		vkCreateDevice(vk.physical, &info, NULL, &vk.device);
+	/* (a device the renderer plugins' extensions or features cannot be made
+	with: made without them, the plugins that asked for them off) */
+	if (result < 0 && (extension_count > plugin_first || plugin_addresses))
+	{
+		uint32_t index;
+
+		host_logf(HOST_LOG_WARN, "vulkan: vkCreateDevice with the renderer plugins' extensions: %s (%d): made "
+			"without them", result_name(result), (int)result);
+		for (index = plugin_first; index < extension_count; index++)
+		{
+			if (options->plugin_missing)
+				options->plugin_missing(extensions[index], 1);
+		}
+		if (plugin_addresses && options->plugin_missing)
+			options->plugin_missing(VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME, 1);
+		*plugin_chain = NULL;
+		info.enabledExtensionCount = extension_count = plugin_first;
+		result = options->create_device ?
+			options->create_device(vkGetInstanceProcAddr, vk.physical, &info, NULL, &vk.device) :
+			vkCreateDevice(vk.physical, &info, NULL, &vk.device);
+	}
+	if (!check(result, "vkCreateDevice"))
 		return 0;
 #define LOAD(name) name = (PFN_##name)vkGetDeviceProcAddr(vk.device, #name);
 	DEVICE_FUNCTIONS(LOAD)
