@@ -11,7 +11,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, function, mutated, read, run, structure  # noqa: E402
 
-CASES = ["tap", "trigger", "paddles", "ports", "dropped"]
+CASES = ["tap", "trigger", "paddles", "extras", "ports", "dropped"]
 
 PLATFORM_FUNCTIONS = ["gamepad_presses_find", "gamepad_button_pressed", "gamepad_trigger_moved",
                       "gamepad_presses_forget", "gamepad_presses_clear", "gamepad_presses_take"]
@@ -31,6 +31,9 @@ NEGATIVE_CONTROLS = {
     # the paddles' taps not read
     "paddles-held-only": ("sdl_gamepad_paddles", ("gamepad_button_down(gamepad, taps, paddles[index])",
                                                   "SDL_GetGamepadButton(gamepad, paddles[index])"), "paddles"),
+    # a Valve pad's Quick Access button and touches offered as buttons (#1145)
+    "valve-extras-kept": ("sdl_gamepad_paddles", ("\tif (held)\n\t\theld &= ~", "\tif (0)\n\t\theld &= ~"),
+                          "extras"),
     # one place for every gamepad's taps
     "shared-taps": ("gamepad_presses_find", ("if (gamepad_presses[index].id == id)", "if (gamepad_presses[index].id)"),
                     "ports"),
@@ -47,6 +50,8 @@ def generated(fault=None):
     config += "\n" + re.search(r"^#define PLATFORM_GAMEPAD_TRIGGER_PRESSED [^\n]+", platform_header, re.M).group(0)
     config += "\n" + re.search(r"^#define INPUT_TRIGGER_PRESSED [^\n]+", platform, re.M).group(0)
     config += "\n" + re.search(r"^#define GAMEPAD_PRESSES_COUNT [^\n]+", platform, re.M).group(0) + "\n"
+    config += re.search(r"^#define CONTROLLER_REMAP_EXTRAS [^\n]+", read("port/linux/include/controller_remap.h"),
+                        re.M).group(0) + "\n"
     # (SDL3's gamepad buttons and axes, in its order)
     config += "typedef enum {SDL_GAMEPAD_BUTTON_SOUTH, SDL_GAMEPAD_BUTTON_EAST, SDL_GAMEPAD_BUTTON_WEST, " \
               "SDL_GAMEPAD_BUTTON_NORTH, SDL_GAMEPAD_BUTTON_BACK, SDL_GAMEPAD_BUTTON_GUIDE, SDL_GAMEPAD_BUTTON_START, " \
@@ -64,6 +69,7 @@ def generated(fault=None):
                         platform, re.M | re.S)
     assert presses, "sdl_platform.c's gamepad_presses"
     code = presses.group(0) + "\n" + structure(inputs, "gamepad_taps") + "\n"
+    code += function(read("port/linux/src/controller_buttons.c"), "controller_extras_reserved") + "\n"
     for source, names in ((platform, PLATFORM_FUNCTIONS), (inputs, INPUT_FUNCTIONS)):
         for name in names:
             text = function(source, name)

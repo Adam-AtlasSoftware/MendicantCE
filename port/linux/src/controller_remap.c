@@ -8,10 +8,13 @@
 
 unsigned char const controller_remap_controls[CONTROLLER_REMAP_GAME_ACTIONS] = {0,1,2,3,4,5,6,7,10,11};
 static unsigned char const remap_buttons[CONTROLLER_REMAP_BUTTONS] = {0,1,2,3,4,5,6,7,14,15,8,9,10,11,13,
-    CONTROLLER_REMAP_PADDLE, CONTROLLER_REMAP_PADDLE + 1, CONTROLLER_REMAP_PADDLE + 2, CONTROLLER_REMAP_PADDLE + 3};
-static char const *const remap_names[] = {"south","east","west","north","rb","lb","lt","rt","ls","rs",
-    "dpad_up","dpad_down","dpad_left","dpad_right","back",
-    "left_paddle","right_paddle","left_paddle2","right_paddle2"};
+    CONTROLLER_REMAP_PADDLE, CONTROLLER_REMAP_PADDLE + 1, CONTROLLER_REMAP_PADDLE + 2, CONTROLLER_REMAP_PADDLE + 3,
+    CONTROLLER_REMAP_TOUCHPAD, CONTROLLER_REMAP_MISC, CONTROLLER_REMAP_MISC + 1, CONTROLLER_REMAP_MISC + 2,
+    CONTROLLER_REMAP_MISC + 3, CONTROLLER_REMAP_MISC + 4, CONTROLLER_REMAP_MISC + 5};
+static char const *const remap_names[CONTROLLER_REMAP_BUTTONS] = {"south","east","west","north","rb","lb","lt","rt",
+    "ls","rs","dpad_up","dpad_down","dpad_left","dpad_right","back",
+    "left_paddle","right_paddle","left_paddle2","right_paddle2",
+    "touchpad","misc1","misc2","misc3","misc4","misc5","misc6"};
 
 void controller_remap_defaults(unsigned char *buttons)
 {
@@ -174,23 +177,43 @@ int controller_remap_cycle(int button, int direction)
     return i == CONTROLLER_REMAP_BUTTONS ? CONTROLLER_REMAP_UNBOUND : remap_buttons[i];
 }
 
+/* misc1 is a Series pad's Share, a DualSense's mic, a Switch pad's Capture
+(and the Steam Deck's Quick Access, never offered); the Steam Deck's
+touchpad and misc2 are its left and right trackpads' clicks, its misc3 and
+misc4 its sticks' touches (never offered: controller_extras_reserved) */
 char const *controller_remap_button_name(int button, int family)
 {
     static char const *const labels[5][CONTROLLER_REMAP_BUTTONS] = {
         {"A","B","X","Y","RB / BLACK","LB / WHITE","LT","RT","LEFT STICK","RIGHT STICK","D-PAD UP","D-PAD DOWN","D-PAD LEFT","D-PAD RIGHT","BACK / SELECT",
-         "LEFT PADDLE","RIGHT PADDLE","LEFT PADDLE 2","RIGHT PADDLE 2"},
+         "LEFT PADDLE","RIGHT PADDLE","LEFT PADDLE 2","RIGHT PADDLE 2",
+         "TOUCHPAD","MISC 1","MISC 2","MISC 3","MISC 4","MISC 5","MISC 6"},
         {"A","B","X","Y","RB / BLACK","LB / WHITE","LT","RT","LEFT STICK","RIGHT STICK","D-PAD UP","D-PAD DOWN","D-PAD LEFT","D-PAD RIGHT","BACK / SELECT",
-         "P3","P1","P4","P2"},
-        {"CROSS","CIRCLE","SQUARE","TRIANGLE","R1","L1","L2","R2","L3","R3","D-PAD UP","D-PAD DOWN","D-PAD LEFT","D-PAD RIGHT","TOUCHPAD / SELECT",
-         "LEFT BACK","RIGHT BACK","LEFT BACK 2","RIGHT BACK 2"},
+         "P3","P1","P4","P2",
+         "TOUCHPAD","SHARE","MISC 2","MISC 3","MISC 4","MISC 5","MISC 6"},
+        {"CROSS","CIRCLE","SQUARE","TRIANGLE","R1","L1","L2","R2","L3","R3","D-PAD UP","D-PAD DOWN","D-PAD LEFT","D-PAD RIGHT","SHARE / SELECT",
+         "LEFT BACK","RIGHT BACK","LEFT BACK 2","RIGHT BACK 2",
+         "TOUCHPAD","MIC","MISC 2","MISC 3","MISC 4","MISC 5","MISC 6"},
         {"B","A","Y","X","R","L","ZL","ZR","LEFT STICK","RIGHT STICK","D-PAD UP","D-PAD DOWN","D-PAD LEFT","D-PAD RIGHT","BACK / SELECT",
-         "LEFT PADDLE","RIGHT PADDLE","LEFT PADDLE 2","RIGHT PADDLE 2"},
+         "LEFT PADDLE","RIGHT PADDLE","LEFT PADDLE 2","RIGHT PADDLE 2",
+         "TOUCHPAD","CAPTURE","MISC 2","MISC 3","MISC 4","MISC 5","MISC 6"},
         {"A","B","X","Y","R1","L1","L2","R2","L3","R3","D-PAD UP","D-PAD DOWN","D-PAD LEFT","D-PAD RIGHT","VIEW",
-         "L4","R4","L5","R5"}
+         "L4","R4","L5","R5",
+         "LEFT TRACKPAD","QUICK ACCESS","RIGHT TRACKPAD","LEFT STICK TOUCH","RIGHT STICK TOUCH","MISC 5","MISC 6"}
     };
     int i;
     if (family < 0 || family > 4) family = 0;
     for (i = 0; i < CONTROLLER_REMAP_BUTTONS; i++)
         if (remap_buttons[i] == button) return labels[family][i];
     return "UNBOUND";
+}
+
+char const *controller_remap_device_button_name(int button, struct controller_device const *device)
+{
+    static char const *const playstation_back[3] = {"SELECT", "SHARE", "CREATE"};
+    if (!device) return controller_remap_button_name(button, CONTROLLER_UNKNOWN);
+    /* (13: the pad's Back, SDL's; a PS4 or PS5 pad's touchpad is its own) */
+    if (button == 13 && device->family == CONTROLLER_PLAYSTATION &&
+        device->playstation >= 3 && device->playstation <= 5)
+        return playstation_back[device->playstation - 3];
+    return controller_remap_button_name(button, device->family);
 }

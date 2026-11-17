@@ -27,12 +27,24 @@ typedef struct
 
 #include "config.inc"
 
-/* a gamepad as SDL holds it now: its buttons down, its axes */
+/* a gamepad as SDL holds it now: its buttons down, its axes; its USB
+vendor and product */
 typedef struct
 {
 	unsigned char buttons[SDL_GAMEPAD_BUTTON_COUNT];
 	Sint16 axes[SDL_GAMEPAD_AXIS_COUNT];
+	unsigned short vendor, product;
 } SDL_Gamepad;
+
+static unsigned short SDL_GetGamepadVendor(SDL_Gamepad *gamepad)
+{
+	return gamepad->vendor;
+}
+
+static unsigned short SDL_GetGamepadProduct(SDL_Gamepad *gamepad)
+{
+	return gamepad->product;
+}
 
 static BOOL SDL_GetGamepadButton(SDL_Gamepad *gamepad, SDL_GamepadButton button)
 {
@@ -141,6 +153,30 @@ static void case_paddles(void)
 	CHECK(paddles == 0, "the paddle's tap not held: %x", paddles);
 }
 
+/* the touchpad's click and the misc buttons, for the remapping (#1145): bit
+4 and bits 5 to 10; a Steam Deck's Quick Access (misc1) and its sticks'
+touches (misc3, misc4) never, its right trackpad's click (misc2) still */
+static void case_extras(void)
+{
+	SDL_Gamepad gamepad;
+	unsigned int extras;
+
+	memset(&gamepad, 0, sizeof(gamepad));
+	gamepad_button_pressed(9, SDL_GAMEPAD_BUTTON_TOUCHPAD);
+	reading(&gamepad, 9, &extras);
+	CHECK(extras == 1u << 4, "the touchpad's tap seen: %x", extras);
+	gamepad.buttons[SDL_GAMEPAD_BUTTON_MISC1] = gamepad.buttons[SDL_GAMEPAD_BUTTON_MISC6] = 1;
+	reading(&gamepad, 9, &extras);
+	CHECK(extras == ((1u << 5) | (1u << 10)), "misc1 and misc6 held: %x", extras);
+	memset(&gamepad, 0, sizeof(gamepad));
+	gamepad.vendor = 0x28de;
+	gamepad.product = 0x1205;
+	gamepad.buttons[SDL_GAMEPAD_BUTTON_MISC1] = gamepad.buttons[SDL_GAMEPAD_BUTTON_MISC2] = 1;
+	gamepad.buttons[SDL_GAMEPAD_BUTTON_MISC4] = 1;
+	reading(&gamepad, 9, &extras);
+	CHECK(extras == 1u << 6, "a Steam Deck's trackpad click only, not its Quick Access or stick touch: %x", extras);
+}
+
 /* two gamepads (split screen): each reading takes its own taps */
 static void case_ports(void)
 {
@@ -182,6 +218,7 @@ int main(int argc, char **argv)
 	if (!strcmp(name, "tap")) case_tap();
 	else if (!strcmp(name, "trigger")) case_trigger();
 	else if (!strcmp(name, "paddles")) case_paddles();
+	else if (!strcmp(name, "extras")) case_extras();
 	else if (!strcmp(name, "ports")) case_ports();
 	else if (!strcmp(name, "dropped")) case_dropped();
 	else
