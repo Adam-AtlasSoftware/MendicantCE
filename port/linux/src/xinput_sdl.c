@@ -42,6 +42,8 @@ drive the controller.
 #include "port_config.h"
 #include "touch_input.h"
 #include "mouse_sensitivity.h"
+/* (halo_look_dead_zone_shape's HALO_LOOK_DEAD_ZONE_*, the game's too) */
+#include "halo_linux_source_fixups.h"
 /* port/linux/game/network_aim_assist.c */
 extern unsigned char network_aim_assist_block_mouse(void);
 #include "halo_keyboard.h"
@@ -267,6 +269,29 @@ short halo_stick_live_range(short gamepad, short stick)
 
 	stick_dead_zones(gamepad, ranges, live_ranges);
 	return live_ranges[stick ? 1 : 0];
+}
+
+/* a gamepad's player's input.look_dead_zone_shape (HALO_LOOK_DEAD_ZONE_*):
+"auto", or anything it does not know, the aim style's own */
+int halo_look_dead_zone_shape(short gamepad)
+{
+	static struct
+	{
+		unsigned long read_at;
+		int read, shape;
+	} pads[PAD_PLAYERS + 1];
+	int slot = PAD_PLAYER_SLOT(gamepad);
+
+	if (!pads[slot].read || pads[slot].read_at != config_changes())
+	{
+		const char *shape = config_player_string(slot < PAD_PLAYERS ? slot : -1, "input.look_dead_zone_shape");
+
+		pads[slot].read = 1;
+		pads[slot].read_at = config_changes();
+		pads[slot].shape = !strcmp(shape, "axial") ? HALO_LOOK_DEAD_ZONE_AXIAL
+			: !strcmp(shape, "round") ? HALO_LOOK_DEAD_ZONE_ROUND : HALO_LOOK_DEAD_ZONE_AUTO;
+	}
+	return pads[slot].shape;
 }
 
 /* whether a gamepad's look turns the other way side to side (its player's

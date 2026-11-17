@@ -1133,6 +1133,12 @@ static const struct config_setting config_settings[] =
 	{ "input.right_stick_outer_dead_zone", _config_integer, "0", "HALO_RIGHT_STICK_OUTER_DEAD_ZONE",
 		_environment_value, _platform_all,
 		"The same for the right stick, which turns the view.", _scope_player },
+	{ "input.look_dead_zone_shape", _config_string, "\"auto\"", "HALO_LOOK_DEAD_ZONE_SHAPE", _environment_value,
+		_platform_all,
+		"The shape of the look stick's dead zone: \"auto\", the aim style's\n"
+		"(input.aim_style: Classic's each direction's own, a square in the\n"
+		"middle; Modern's round); \"axial\", each direction's own; \"round\", none\n"
+		"within the dead zone whichever way the stick points.", _scope_player },
 	{ "input.look_vertical_sensitivity", _config_real, "1.0", "HALO_LOOK_VERTICAL_SENSITIVITY", _environment_value,
 		_platform_all,
 		"How fast a controller's look stick turns the view up and down, times\n"

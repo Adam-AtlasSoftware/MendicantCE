@@ -444,7 +444,8 @@ a sub-step's: input_abstraction.c), each its player's own dead range
 (halo_stick_dead_range) and outer dead range (halo_stick_live_range),
 each direction's own, as the original's; the stick
 that alone looks round instead under that player's Modern aim
-(input.aim_style), which takes it as a push and a direction (player_control.c) */
+(input.aim_style), which takes it as a push and a direction (player_control.c),
+or as the player's look dead zone shape sets (input.look_dead_zone_shape) */
 void input_port_fix_stick_dead_zones(
 	short gamepad_index,
 	short left_x,
@@ -460,8 +461,13 @@ void input_port_fix_stick_dead_zones(
 	short right_live = halo_stick_live_range(gamepad_index, _gamepad_stick_right);
 	float acceleration_tangent;
 	float acceleration_threshold;
+	/* (the look stick's shape, input.look_dead_zone_shape: Auto the aim
+	style's, round under Modern, each direction's own under Classic) */
+	int shape = halo_look_dead_zone_shape(gamepad_index);
 
-	if (player_control_aim_modern(gamepad_index, &acceleration_tangent, &acceleration_threshold))
+	if (shape == HALO_LOOK_DEAD_ZONE_ROUND ||
+		(shape == HALO_LOOK_DEAD_ZONE_AUTO &&
+			player_control_aim_modern(gamepad_index, &acceleration_tangent, &acceleration_threshold)))
 	{
 		look_stick = input_abstraction_port_look_stick(gamepad_index);
 	}

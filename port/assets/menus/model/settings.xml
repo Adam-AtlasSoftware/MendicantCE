@@ -1303,6 +1303,13 @@
 			<choice shown="25%" value="25"/>
 			<choice shown="30%" value="30"/>
 		</row>
+		<section key="section_6" title="LOOK STICK"/>
+		<row key="look_dead_zone_shape" kind="choice" setting="input.look_dead_zone_shape" label="SHAPE" crumb="CONTROLS › CONTROLLER › STICK DEAD ZONES" search="deadzone" search_choices="axial round">
+			<help>The shape of the look stick's dead zone. Axial: each direction its own, a square in the middle, as Classic aim. Round: the same whichever way you push, as Modern aim. Auto follows your Aim Style.</help>
+			<choice shown="AUTO" value="auto"/>
+			<choice shown="AXIAL" value="axial"/>
+			<choice shown="ROUND" value="round"/>
+		</row>
 		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
 		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>
 		<button key="button_cancel" kind="cancel" run="port settings page cancel" help="Goes back without these changes."/>

@@ -1632,6 +1632,11 @@ PAGES = {
             ("RIGHT STICK", "input.right_stick_outer_dead_zone", STICK_OUTER_DEAD_ZONES,
              "How much of the right stick's travel at its edge counts as a full push, so a worn stick still turns "
              "at full speed and speeds up the turn. None is the game's own.", None),
+            (SECTION, "LOOK STICK"),
+            ("SHAPE", "input.look_dead_zone_shape", [("AUTO", "auto"), ("AXIAL", "axial"), ("ROUND", "round")],
+             "The shape of the look stick's dead zone. Axial: each direction its own, a square in the middle, as "
+             "Classic aim. Round: the same whichever way you push, as Modern aim. Auto follows your Aim Style.",
+             None),
         ],
     },
     SCREEN_LAYOUT[0]: {
@@ -1862,7 +1867,7 @@ SETTINGS_SEARCH_WORDS = {
     "aim": ["aim_style", "modern_aim_acceleration_angle", "modern_aim_acceleration_threshold"],
     "acceleration": ["aim_style", "modern_aim_acceleration_angle", "modern_aim_acceleration_threshold"],
     "deadzone": ["stick_dead_zones", "left_stick_dead_zone", "right_stick_dead_zone", "left_stick_outer_dead_zone",
-                 "right_stick_outer_dead_zone"],
+                 "right_stick_outer_dead_zone", "look_dead_zone_shape"],
     "rumble": ["vibration", "rumble_strength"], "haptics": ["rumble_strength"],
     "keybinds": ["key_bindings"], "keys": ["key_bindings"],
     "mic": ["input_device", "voice_chat"], "microphone": ["input_device", "voice_chat"],
