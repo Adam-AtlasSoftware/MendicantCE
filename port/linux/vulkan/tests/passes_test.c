@@ -691,6 +691,18 @@ static void uploads_test(void)
 	xgpu_vulkan_buffer_write(&buffer, 0, data, sizeof(data), 0);
 	assert(copies == 3 && barriers == 3 && last_destination == AFTER_STAGES);
 	assert(last_memory.dstAccessMask == AFTER_ACCESS);
+	/* (narrow barriers: a write no vertex stage reads, an image's, is not
+	put before the vertex stages, for a tile-based GPU to bin the next pass
+	during it; a buffer's, or a marked image's, still is) */
+	vk.narrow_barriers = 1;
+	transfer_done(vk.slot->main, 0);
+	assert(last_destination == AFTER_IMAGE_STAGES && last_memory.dstAccessMask == AFTER_IMAGE_ACCESS);
+	assert(!(last_destination & (VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT)));
+	transfer_done(vk.slot->main, 1);
+	assert(last_destination == AFTER_STAGES && last_memory.dstAccessMask == AFTER_ACCESS);
+	vk.narrow_barriers = 0;
+	transfer_done(vk.slot->main, 0);
+	assert(last_destination == AFTER_STAGES);
 }
 
 static VkResult VKAPI_CALL fake_reset_pool(VkDevice device, VkCommandPool pool, VkCommandPoolResetFlags flags)
@@ -716,6 +728,16 @@ static void submissions_test(void)
 	assert(last_memory.dstAccessMask == (VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT));
 	recording_begin();
 	assert(barriers == 1);
+	/* (narrow barriers: the frame's vertex stages wait for nothing of the
+	frame before, its target's writes still for the presentation blit) */
+	vk.recording = 0;
+	vk.slots[vk.serial % SLOTS].serial = 0;
+	vk.narrow_barriers = 1;
+	barriers = 0;
+	recording_begin();
+	assert(barriers == 1 && last_source == VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+	assert(last_destination == AFTER_IMAGE_STAGES && (last_destination & VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT));
+	vk.narrow_barriers = 0;
 }
 
 static VkResult VKAPI_CALL fake_reset_descriptors(VkDevice device, VkDescriptorPool pool, VkDescriptorPoolResetFlags flags)
@@ -1366,6 +1388,9 @@ static void masked_clear_test(void)
 	static const int32_t full[1][4] = { { 0, 0, 64, 48 } };
 	static const int32_t two[2][4] = { { 4, 5, 10, 12 }, { -20, -20, 100, 100 } };
 	static const int32_t outside[1][4] = { { 70, 0, 8, 8 } };
+	static const int32_t apart[1][4] = { { 32, 24, 8, 8 } };
+	static const int32_t below[1][4] = { { 8, 34, 8, 6 } }, between[1][4] = { { 8, 24, 8, 8 } };
+	static const float other[4] = { 1.0f, 0.0f, 0.0f, 1.0f };
 	static const float color[4] = { 0.25f, 0.5f, 0.75f, 0.125f };
 	struct query_frame queries;
 	const float *uniforms;
@@ -1431,6 +1456,27 @@ static void masked_clear_test(void)
 	xgpu_vulkan_clear(full, 1, XGPU_VULKAN_CLEAR_COLOR, color, 1.0f, 0);
 	xgpu_vulkan_clear(outside, 1, XGPU_VULKAN_CLEAR_COLOR | XGPU_VULKAN_CLEAR_ALPHA, color, 1.0f, 0);
 	assert(!strcmp(masked_events, "BA") && !masked_draws);
+
+	/* a rectangle alone (XGPU_VULKAN_CLEAR_ALONE, a colour target with no
+	depth): all the target cleared as the pass begins; a rectangle cleared to
+	that colour after it, undrawn since, is not cleared again; to another
+	colour it is, and to the first over that */
+	masked_reset();
+	vk.depth = NULL;
+	xgpu_vulkan_clear(two, 1, XGPU_VULKAN_CLEAR_COLOR | XGPU_VULKAN_CLEAR_CHANNELS | XGPU_VULKAN_CLEAR_ALONE, color, 1.0f, 0);
+	assert(!strcmp(masked_events, "B") && began_color.loadOp == VK_ATTACHMENT_LOAD_OP_CLEAR);
+	xgpu_vulkan_clear(apart, 1, XGPU_VULKAN_CLEAR_COLOR | XGPU_VULKAN_CLEAR_CHANNELS, color, 1.0f, 0);
+	assert(!strcmp(masked_events, "B"));
+	xgpu_vulkan_clear(apart, 1, XGPU_VULKAN_CLEAR_COLOR | XGPU_VULKAN_CLEAR_CHANNELS, other, 1.0f, 0);
+	xgpu_vulkan_clear(apart, 1, XGPU_VULKAN_CLEAR_COLOR | XGPU_VULKAN_CLEAR_CHANNELS, color, 1.0f, 0);
+	assert(!strcmp(masked_events, "BAA") && !masked_draws);
+	/* (the rectangles drawn are known each apart: one between two of them,
+	inside the box about both, is as the pass's clear left it) */
+	xgpu_vulkan_clear(below, 1, XGPU_VULKAN_CLEAR_COLOR | XGPU_VULKAN_CLEAR_CHANNELS, other, 1.0f, 0);
+	xgpu_vulkan_clear(between, 1, XGPU_VULKAN_CLEAR_COLOR | XGPU_VULKAN_CLEAR_CHANNELS, color, 1.0f, 0);
+	assert(!strcmp(masked_events, "BAAA") && !masked_draws);
+	xgpu_vulkan_clear(below, 1, XGPU_VULKAN_CLEAR_COLOR | XGPU_VULKAN_CLEAR_CHANNELS, color, 1.0f, 0);
+	assert(!strcmp(masked_events, "BAAAA") && !masked_draws);
 
 	/* a layered target's two views (multiview), and a multisampled one */
 	masked_reset();
@@ -4024,6 +4070,117 @@ static void aside_test(void)
 	memset(&aside_other_depth, 0, sizeof(aside_other_depth));
 }
 
+/* ---------- the transfers a pass waits for */
+
+/* the main command buffer's barriers that a frame or a pass begins with, in
+the aside test's log: O a frame's first that names no transfer, W the one
+of before (after everything, for everything), T a pass after the transfers
+it uses */
+static void VKAPI_CALL transfers_barrier(VkCommandBuffer command, VkPipelineStageFlags source, VkPipelineStageFlags destination,
+	VkDependencyFlags dependency, uint32_t memory_count, const VkMemoryBarrier *memory, uint32_t buffer_count,
+	const VkBufferMemoryBarrier *buffers, uint32_t image_count, const VkImageMemoryBarrier *images)
+{
+	char seen = 0;
+
+	fake_barrier(command, source, destination, dependency, memory_count, memory, buffer_count, buffers, image_count, images);
+	if (command != DISCARDS_MAIN)
+		return;
+	if (source == VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT && destination == AFTER_IMAGE_STAGES)
+		seen = 'O';
+	else if (source == VK_PIPELINE_STAGE_ALL_COMMANDS_BIT && destination == VK_PIPELINE_STAGE_ALL_COMMANDS_BIT)
+		seen = 'W';
+	else if (source == VK_PIPELINE_STAGE_TRANSFER_BIT && destination == PASS_STAGES)
+		seen = 'T';
+	if (seen)
+	{
+		assert(aside_log_count < sizeof(aside_log) - 1);
+		aside_log[aside_log_count++] = seen;
+	}
+}
+
+static void transfers_log_reset(void)
+{
+	memset(aside_log, 0, sizeof(aside_log));
+	aside_log_count = aside_executed_count = 0;
+}
+
+/* the view, a pass of the aside target, that target copied into the other
+image, the view, a pass of the other image, the view */
+static void transfers_frame(void)
+{
+	transfers_log_reset();
+	discards_clear(DISCARDS_ALL);
+	aside_draw(&aside_target, NULL);
+	xgpu_vulkan_image_copy(&aside_target, 0, 0, &aside_other, 0, 0);
+	aside_draw(&color_target, &depth_target);
+	aside_draw(&aside_other, NULL);
+	aside_draw(&color_target, &depth_target);
+	xgpu_vulkan_fence();
+}
+
+static void transfers_test(void)
+{
+	/* the copy's barrier is put before the first pass that uses one of its
+	images (the other image's, not the view's before it), once; the frame's
+	first barrier names no transfer */
+	aside_reset(0);
+	vk.narrow_barriers = vk.pass_transfers = 1;
+	vkCmdPipelineBarrier = transfers_barrier;
+	transfers_frame();
+	assert(!strcmp(aside_log, "OBXEBXEXBXETBXEBXE"));
+	assert(aside_other.transfer && aside_other.transfer == aside_target.transfer);
+	assert(vk.transfers_ordered == vk.transfers && !vk.barrier_carried);
+
+	/* a pass that samples a copied image waits as one that draws into it */
+	transfers_log_reset();
+	discards_clear(DISCARDS_ALL);
+	aside_draw(&aside_target, NULL);
+	xgpu_vulkan_image_copy(&aside_target, 0, 0, &aside_other, 0, 0);
+	aside_draw(&color_target, &depth_target);
+	image_use(&aside_other);
+	xgpu_vulkan_fence();
+	assert(!strcmp(aside_log, "OBXEBXEXTBXE"));
+
+	/* a later frame's pass does not wait again for a transfer already put
+	before the passes */
+	transfers_log_reset();
+	discards_clear(DISCARDS_ALL);
+	aside_draw(&aside_other, NULL);
+	xgpu_vulkan_fence();
+	assert(!strcmp(aside_log, "OBXEBXE"));
+
+	/* a transfer with no number: the next frame's first barrier is the one
+	of before, and the frame's after it names no transfer again */
+	transfers_log_reset();
+	discards_clear(DISCARDS_ALL);
+	vk.transfer_unnumbered = 1;
+	xgpu_vulkan_fence();
+	assert(vk.barrier_carried);
+	transfers_log_reset();
+	discards_clear(DISCARDS_ALL);
+	xgpu_vulkan_fence();
+	assert(!strcmp(aside_log, "WBXE") && !vk.barrier_carried && vk.transfers_ordered == vk.transfers);
+	transfers_log_reset();
+	discards_clear(DISCARDS_ALL);
+	xgpu_vulkan_fence();
+	assert(!strcmp(aside_log, "OBXE"));
+
+	/* the negative control: without the numbers no pass is given a barrier
+	of its own (the copy's is for every pass after it) */
+	aside_reset(0);
+	vk.narrow_barriers = 1;
+	vkCmdPipelineBarrier = transfers_barrier;
+	transfers_frame();
+	assert(!strcmp(aside_log, "BXEBXEXBXEBXEBXE"));
+	assert(!aside_other.transfer && !vk.transfers);
+	free(aside_target.attachments);
+	free(aside_other.attachments);
+	free(aside_other_depth.attachments);
+	memset(&aside_target, 0, sizeof(aside_target));
+	memset(&aside_other, 0, sizeof(aside_other));
+	memset(&aside_other_depth, 0, sizeof(aside_other_depth));
+}
+
 int main(void)
 {
 	static const int32_t full[1][4] = { { 0, 0, 64, 48 } };
@@ -4057,6 +4214,7 @@ int main(void)
 	half_test();
 	discards_test();
 	aside_test();
+	transfers_test();
 	reset();
 	xgpu_vulkan_clear(full, 0, all, color, 0.75f, 0x123);
 	assert(!begins && !clears);

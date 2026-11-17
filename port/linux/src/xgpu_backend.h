@@ -52,6 +52,26 @@ struct xgpu_backend_capabilities
 	/* visibility tests counted by the pixel shaders (atomic counters)
 	rather than by queries */
 	BOOL sample_counting;
+	/* a pixel shader that may discard is not tested by its depth before it
+	runs (a tile-based GPU's early test): a draw is better made without its
+	alpha test where no texel fails it (d3d8_device.c, "an alpha test that
+	cannot fail") */
+	BOOL alpha_test_drop;
+	/* ... and an alpha-tested opaque draw as its depth, then its colour
+	where the depth is its own ("a cut-out's depth first": asked for by a
+	switch alone, as a few of its pixels can differ) */
+	BOOL cutout_prepass;
+	/* a pass costs by the part of its target it clears and draws, not by the
+	target (XGPU_CLEAR_ALONE is of use: d3d8_clear_viewport_alone) */
+	BOOL clear_alone;
+	/* the lights' and shadows' draws are kept to what they can change, where
+	the pixels shaded are the cost: draws the game bounds (halo_draw_bounds:
+	a dynamic light's, a shadow's over the level) are scissored to their
+	bounds (d3d8_device.c, "the draws' bounds"), and with the enhanced
+	dynamic lights the triangles and models no light reaches are drawn by
+	the shader without the lights' loop ("the lightmap pass's triangles the
+	dynamic lights reach", halo_model_bounds) */
+	BOOL draw_bounds;
 	/* vertex streams' D3DCOLOR elements read as the Xbox has them (BGRA);
 	else streamed with their bytes swapped, never from the
 	mirror */
@@ -232,11 +252,14 @@ their multisampled attachments (0: their textures) */
 void xgpu_backend_set_targets(xgpu_target color, int hud_group, xgpu_target depth, int views, int base, int samples);
 
 /* clears the bound targets' rectangles (left, top from the first row,
-width, height, in their pixels; count of them): XGPU_CLEAR_* */
+width, height, in their pixels; count of them): XGPU_CLEAR_*.
+XGPU_CLEAR_ALONE: what the colour target holds outside the rectangles is of
+no use from now on, and the backend may leave anything there (or clear it
+too: a backend that knows nothing of the flag clears the rectangles) */
 enum
 {
 	XGPU_CLEAR_RED = 1, XGPU_CLEAR_GREEN = 2, XGPU_CLEAR_BLUE = 4, XGPU_CLEAR_ALPHA = 8,
-	XGPU_CLEAR_COLOR = 16, XGPU_CLEAR_DEPTH = 32, XGPU_CLEAR_STENCIL = 64,
+	XGPU_CLEAR_COLOR = 16, XGPU_CLEAR_DEPTH = 32, XGPU_CLEAR_STENCIL = 64, XGPU_CLEAR_ALONE = 128,
 };
 void xgpu_backend_clear(unsigned long flags, const float color[4], float depth, unsigned long stencil,
 	const long (*rectangles)[4], unsigned long count);

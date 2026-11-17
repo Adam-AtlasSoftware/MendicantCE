@@ -671,6 +671,9 @@ void rasterizer_active_camouflage_draw(
 			parameters.skinning.node_matrices = group->node_matrices;
 			parameters.skinning.node_matrix_count = group->node_matrix_count;
 			parameters.centroid = group->centroid;
+			/* port: (no sphere of the model: the original left the radius as
+			the stack had it, and did not read it; halo_model_bounds does) */
+			parameters.radius = 0.0f;
 			csmemset(&parameters.effect, 0, sizeof(parameters.effect));
 			parameters.base_map_scale = group->model_base_map_scale;
 			if (group->lighting)

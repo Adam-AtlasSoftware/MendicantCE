@@ -782,7 +782,7 @@ static void stream_set_targets(void *context, const struct xgpu_stream_set_targe
 
 static void stream_clear(void *context, const struct xgpu_stream_clear *record)
 {
-	uint32_t parts = record->flags & 0x7f;
+	uint32_t parts = record->flags & 0xff;
 	uint64_t before;
 
 	(void)context;
@@ -961,7 +961,7 @@ static struct xgpu_vulkan_image *feedback_copy(uint32_t number, struct stream_ta
 		memset(&made, 0, sizeof(made));
 		made.type = target->layers > 1 ? XGPU_VULKAN_IMAGE_2D_ARRAY : XGPU_VULKAN_IMAGE_2D;
 		made.format = source->format;
-		made.usage = XGPU_VULKAN_USAGE_SAMPLED;
+		made.usage = XGPU_VULKAN_USAGE_SAMPLED | XGPU_VULKAN_USAGE_COPIED;
 		made.width = target->width;
 		made.height = target->height;
 		made.depth_or_layers = target->layers;
@@ -1020,7 +1020,7 @@ static struct xgpu_vulkan_image *composite_get(const struct host_render_texture_
 		memset(&made, 0, sizeof(made));
 		made.type = layers > 1 ? XGPU_VULKAN_IMAGE_2D_ARRAY : XGPU_VULKAN_IMAGE_2D;
 		made.format = format;
-		made.usage = XGPU_VULKAN_USAGE_SAMPLED;
+		made.usage = XGPU_VULKAN_USAGE_SAMPLED | XGPU_VULKAN_USAGE_COPIED;
 		made.width = stage->width;
 		made.height = stage->height;
 		made.depth_or_layers = layers;
@@ -3705,6 +3705,12 @@ static void stream_wait(void *context, uint64_t fence)
 	xgpu_vulkan_wait(fence);
 }
 
+static int stream_fence_ready(void *context, uint64_t fence)
+{
+	(void)context;
+	return xgpu_vulkan_fence_ready(fence);
+}
+
 static void stream_initialize(void *context, struct xgpu_stream_capabilities *capabilities)
 {
 	(void)context;
@@ -3713,8 +3719,15 @@ static void stream_initialize(void *context, struct xgpu_stream_capabilities *ca
 	capabilities->largest_target = (int32_t)stream.capabilities.largest_target;
 	capabilities->most_samples = (int32_t)stream.capabilities.samples;
 	capabilities->most_anisotropy = (int32_t)stream.capabilities.anisotropy;
-	/* (visibility counts from occlusion queries, not the pixel shaders) */
-	capabilities->sample_counting = 0;
+	/* (visibility counts from occlusion queries, not the pixel shaders, but
+	where the device's queries are the costlier) */
+	capabilities->sample_counting = stream.capabilities.shader_visibility != 0;
+	if (capabilities->sample_counting)
+		xgpu_vulkan_visibility_count_samples(1);
+	capabilities->cutout_prepass = (uint8_t)((stream.capabilities.alpha_test_drop ? 1 : 0) |
+		(stream.capabilities.cutout_prepass ? 2 : 0));
+	capabilities->clear_alone = stream.capabilities.clear_alone != 0;
+	capabilities->draw_bounds = stream.capabilities.draw_bounds != 0;
 	capabilities->bgra_vertex_colors = 1;
 	capabilities->base_vertex = 1;
 	capabilities->sample_mask = 1;
@@ -3815,6 +3828,10 @@ const struct host_render_backend *xgpu_vulkan_stream_backend(void)
 		backend.open = stream_open;
 		backend.fence = stream_fence;
 		backend.wait = stream_wait;
+		/* (else the render thread waits for each frame's fence:
+		HALO_VULKAN_FENCE_WAIT) */
+		if (stream.capabilities.completion_told && xgpu_vulkan_completion_notify(host_render_stream_gpu_completed))
+			backend.fence_ready = stream_fence_ready;
 		backend.initialize = stream_initialize;
 		backend.target_create = stream_target_create;
 		backend.target_delete = stream_target_delete;

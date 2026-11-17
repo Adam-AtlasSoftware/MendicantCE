@@ -64,7 +64,10 @@ secondary command buffer begun, ended and executed for each pass and each
 piece of work between passes, and the draws' state bound again in each (on
 an RTX 3090, 22 secondary command buffers and 92 pipeline binds a frame of
 250 draws), so the passes are recorded into the main command buffer as they
-are drawn, the state bound in it kept from pass to pass. Each pass's draws go into a secondary command buffer, and the
+are drawn, the state bound in it kept from pass to pass. Each pass's draws go into a secondary command buffer (on
+Broadcom's V3D into a list of the draws, recorded into the main command
+buffer when the pass is played: its driver tests no draw of a secondary
+command buffer by its depth before shading it, `HALO_VULKAN_SOFT_PASSES`), and the
 pass's `vkCmdBeginRendering` is made at the submission, when what the
 later work does with its attachments is known (`xgpu_vulkan.c`, "the main
 command buffer in segments"):
@@ -168,6 +171,17 @@ four multiview views and fragment storage-buffer atomics.
 | `HALO_VULKAN_DISCARDS=0`, `=1` | Every attachment stored, passes recorded in the main command buffer as drawn: discards off (they are on by default on a tiler, off on an immediate GPU: attachments stored only where something later reads them, multisampled targets resolved in their pass and, with lazily allocated memory, transient, passes put aside; above); `=1`: on, whatever the GPU |
 | `HALO_VULKAN_ASIDE=0` | With `HALO_VULKAN_DISCARDS`: no passes put aside, no buffers renamed (above) |
 | `HALO_VULKAN_TRANSIENT=0`, `=force` | With `HALO_VULKAN_DISCARDS`: no transient multisampled targets, or transient ones in ordinary memory where the device has no lazily allocated memory |
+| `HALO_VULKAN_NARROW_BARRIERS=0` | Off, every barrier names the vertex stages, as before; on (the default), one names them only after a write a vertex stage reads (a buffer's, a world ambient occlusion field's), so that a tile-based GPU bins a pass, and the next frame, while it renders the one before (`xgpu_vulkan.c`'s `AFTER_IMAGE_STAGES`). The same pixels |
+| `HALO_VULKAN_PASS_TRANSFERS=0` | With discards and `HALO_VULKAN_NARROW_BARRIERS`. Off, every pass after a copy between images waits for it, and a frame's first pass for the frame before to be presented, as before. On (the default) a pass waits only for the copies whose images it uses, so that a tile-based GPU draws a frame's shadows and other small passes while the frame before is presented (`xgpu_vulkan.c`, "the transfers a pass waits for"). The same pixels |
+| `HALO_VULKAN_OWN_MEMORY=0`, `=1` | Off, the targets and the textures copied into while the frames are drawn share the other images' blocks of memory, as before. On (the default on Broadcom's V3D) each has memory of its own: the kernel's V3D driver has a job wait for every earlier job that uses a block it uses, whichever images they are (`xgpu_vulkan.c`, "memory of its own"). The same pixels |
+| `HALO_VULKAN_DRAW_BOUNDS=0` | On (the default), a dynamic light's and a shadow's draws over the level are scissored to the part of the view they can change (`d3d8_device.c`'s "the draws' bounds", `port/linux/game/draw_bounds.c`), and with the enhanced dynamic lights the level's triangles and the models no light reaches are drawn by the shader without the lights' loop ("the lightmap pass's triangles the dynamic lights reach"); off, the whole surfaces are shaded, each by the lit shader, as before. The same pixels |
+| `HALO_VULKAN_CLEAR_ALONE=0`, `=1` | On (the default on Broadcom's V3D), a pass is kept to the part of its target it clears and draws (`pass_clear_end`; the shadow atlas's regions each cleared as its turn comes); off, a pass's clear is the whole target's, as before. The same pixels |
+| `HALO_VULKAN_ALPHA_TEST_DROP=0` | On (the default), a draw whose alpha is a texture's, no texel of which fails its alpha test, is drawn without the test (`d3d8_device.c`, "an alpha test that cannot fail"), by a shader that cannot discard; off, with the game's test. The same pixels |
+| `HALO_VULKAN_CUTOUT_PREPASS=1` | An alpha-tested model's depth drawn first, its colour then only where it shows (`d3d8_device.c`, "a cut-out's depth first"). Off unless asked for: a pixel the test cuts away at exactly the depth of the one seen there is drawn too (a fight among pines on a Raspberry Pi 5: up to five pixels in half of its frames) |
+| `HALO_VULKAN_SOFT_PASSES=0`, `=1` | With `HALO_VULKAN_DISCARDS`: a pass's draws kept as a list and recorded into the main command buffer, not into a secondary one (on by default on Broadcom's V3D, whose driver tests no draw of a secondary command buffer early) |
+| `HALO_VULKAN_VISIBILITY=queries`, `=shader` | The lens flares' visibility counted by occlusion queries, or by the pixel shader into a buffer (the default on Broadcom's V3D, whose driver ends each query with a compute job and a cache clean) |
+| `HALO_VULKAN_FENCE_WAIT=1`, `=0` | `1`, the render thread waits for each frame's fence, as before; `0` (the default on Broadcom's V3D), a thread of the backend's tells it of the frame's completion, and it plays the next frame's commands meanwhile |
+| `HALO_VULKAN_FRAMES_AHEAD=1` | Under FIFO, a frame started while the one before is still on the GPU (and no more than that one) |
 | `HALO_NO_VSYNC=1` | `display.vsync = false`: presented without waiting for the display (mailbox where the surface has it, else immediate) instead of FIFO |
 | `HALO_VULKAN_FRAME_LOG=<file>` | A line for each frame, paced or not (`xgpu_vulkan_pacing.c`): `frame <input> <queued> <finished> <shown> <refreshes> <paced> <earliest> <present_margin> <returned>`, nanoseconds of `CLOCK_MONOTONIC`: the frame's input read, its present's return, its work done on the GPU, its time on screen (display timing's, else present wait's return), the refreshes since the frame before reached the screen (more than one: a refresh showed a frame again), whether the game was paced, display timing's earliest time and margin, and present wait's return (0: not known). `tools/latency_summary.py --frames` joins it to `debug.latency_log` |
 | `HALO_VULKAN_NO_PRESENT_WAIT=1`, `HALO_VULKAN_NO_DISPLAY_TIMING=1`, `HALO_VULKAN_DISPLAY_TIMING=1` | `display.low_latency` without `VK_KHR_present_wait` (as on Android: display timing asked each millisecond), or without `VK_GOOGLE_display_timing` (the frames' times present wait's returns). Where the device has present wait, display timing is not used unless `HALO_VULKAN_DISPLAY_TIMING=1` asks for both: gamescope's layer on the Steam Deck answered its past times `VK_INCOMPLETE` without end (the game showed no frame) and crashed as a swapchain was made from one whose times had been asked for |
@@ -392,6 +406,41 @@ them; its Vulkan compiler fuses none. Fusing them in the SPIR-V as OpenGL's
 compiler does (explicit `Fma`) changed no pixel of Blood Gulch, so it is not
 done: the remaining differences (a few thousand pixels a frame, most by one
 level) are rounding in the shaders.
+
+## Broadcom's V3D (a Raspberry Pi 5)
+
+A Raspberry Pi 5 was brought to a frame each refresh of a 60 Hz display by
+two kinds of change. What draws the same pixels with less work on any GPU
+is on everywhere, with a switch above to turn it off:
+
+- A dynamic light's and a shadow's draws are kept to what they can change
+  (`HALO_VULKAN_DRAW_BOUNDS`).
+- An alpha test that no texel of the draw's texture fails is not made
+  (`HALO_VULKAN_ALPHA_TEST_DROP`).
+- A barrier names the vertex stages only after a write they read
+  (`HALO_VULKAN_NARROW_BARRIERS`), and a pass waits only for the copies
+  whose images it uses (`HALO_VULKAN_PASS_TRANSFERS`).
+
+What answers the V3D drivers, or a tile-based GPU's costs, is on by default
+on that GPU alone (vendor 0x14e4), and the switches above turn each on or
+off on any GPU:
+
+- The lens flares' visibility is counted by the pixel shader
+  (`HALO_VULKAN_VISIBILITY`): v3dv ends each occlusion query with a compute
+  job and a cache clean, and the game crashed there with discards on.
+- A pass's draws are recorded into the main command buffer
+  (`HALO_VULKAN_SOFT_PASSES`): v3dv tests no draw of a secondary command
+  buffer early.
+- The targets and the textures copied into have memory of their own
+  (`HALO_VULKAN_OWN_MEMORY`): the kernel's driver makes a job wait for
+  every earlier job that uses a block of memory it uses, whichever images
+  they are.
+- A pass is kept to the part of its target it clears and draws
+  (`HALO_VULKAN_CLEAR_ALONE`): the GPU clears, draws and stores a pass tile
+  by tile over its whole area. Elsewhere it would put rectangles' clears in
+  place of the pass's one.
+- The render thread is told when the GPU has done a frame
+  (`HALO_VULKAN_FENCE_WAIT`) and plays the next frame's commands meanwhile.
 
 ## The enhanced dynamic lights
 
