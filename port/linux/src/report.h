@@ -11,6 +11,8 @@ machine for the player to send.
 #include <stddef.h>
 #include <stdint.h>
 
+#include "perf_times.h"
+
 /* a frame presented (d3d8_device.c's present): its time kept, the last
 REPORT_FRAMES of them */
 void report_frame_presented(void);
@@ -78,6 +80,13 @@ renderer's thread's shares of the time, the pacing's, and the verdict
 frame's time, work, the work in it */
 void report_gpu_summary(const uint32_t *micros, const struct report_frame_work *work, unsigned long count,
 	char *text, size_t size);
+/* the last frames' times (perf_times.h's perf_times_recent) from a ring of
+them (ring frames, a power of 2; count kept so far, the newest at
+count - 1): those that ended within milliseconds of the newest's end, at
+most most of them; scratch (NULL: no 1% low), room for their times */
+void report_recent_frames(const uint32_t *micros, const uint32_t *at_ms, const struct report_frame_work *work,
+	unsigned long ring, unsigned long count, unsigned long most, uint32_t milliseconds, uint32_t *scratch,
+	struct perf_times *times);
 /* a new GitHub issue's address on OpenH1's repository, its title and body
 filled in (percent-encoded; the body cut at a line to keep the address
 within most bytes); 1 if it fits */

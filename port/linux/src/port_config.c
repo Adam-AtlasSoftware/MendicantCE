@@ -260,9 +260,6 @@ static const struct config_setting config_settings[] =
 		"refresh rate, -1 for no limit (which can hang some Intel graphics). On\n"
 		"Linux, the display's refresh rate or a whole fraction of it (60 at\n"
 		"60 Hz, 30) shows the frames in step with the display, as vsync does." },
-	{ "display.show_fps", _config_boolean, "false", "HALO_SHOW_FPS", _environment_set_is_true, _platform_all,
-		"Draw the frame rate at the bottom right of a game, counted over half a\n"
-		"second: green from 30 frames a second, red below." },
 	{ "display.stats_log", _config_boolean, "false", "HALO_STATS_LOG", _environment_value, _platform_all,
 		"A line a second in the log with the frame rate, the mode, the map, the\n"
 		"renderer and the size of the 3D view, so a graphics bug's report or two\n"
@@ -460,11 +457,15 @@ static const struct config_setting config_settings[] =
 		"from the game's first tick, which the items' respawn periods count from\n"
 		"too: a weapon is back on the map at every multiple of its period on the\n"
 		"clock." },
-	{ "display.show_frame_rate", _config_boolean, "false", "HALO_SHOW_FRAME_RATE", _environment_value,
-		_platform_all,
-		"Draw the frame rate at the bottom right: the frames drawn a second,\n"
-		"averaged over half a second, green at 30 and over (the console's\n"
-		"display_framerate draws it too)." },
+	{ "display.perf_overlay", _config_string, "\"off\"", "HALO_PERF_OVERLAY", _environment_value, _platform_all,
+		"The performance overlay at the bottom right: \"off\"; \"simple\", the\n"
+		"frame rate averaged over half a second, green at 30 and over (the\n"
+		"console's display_framerate draws it too); or \"detailed\", with the\n"
+		"frame's time, the 1% low over the last 10 seconds, and a frame's\n"
+		"milliseconds on the GPU (as the backend measures it), the renderer's\n"
+		"thread, waiting for the display and on the game's thread. An older\n"
+		"version's display.show_fps or display.show_frame_rate = true reads as\n"
+		"\"simple\"." },
 	{ "display.movies", _config_boolean, "false", "HALO_MOVIES", _environment_value, _platform_all,
 		"Play the Xbox's Bink movies from the game data's bink folder: the intro\n"
 		"as the game starts, the attract movies on an idle main menu and the\n"
@@ -3304,6 +3305,10 @@ static const char *const config_retired_settings[] =
 	/* (online co-op's PUBLIC or PRIVATE, which most never saw change from
 	PRIVATE: who can join it, network.coop_join) */
 	"network.coop_public",
+	/* (the frame rate counter's two settings: display.perf_overlay's
+	"simple", config_migrate_frame_rate) */
+	"display.show_fps",
+	"display.show_frame_rate",
 	NULL,
 };
 
@@ -3882,6 +3887,38 @@ static char *config_migrate_supersampling(const char *text, toml_datum_t table)
 		platform_log("settings: display.anti_aliasing = \"%s\" is an older version's, which drew none here: now "
 			"\"off\"", datum.u.s);
 #endif
+	return result;
+}
+
+/* a file of an older version with display.show_fps or
+display.show_frame_rate true (the frame rate counter's two settings, which
+config_retired_settings then takes out): display.perf_overlay "simple", if
+the file has not a word for it of its own. Returns the new text, or NULL */
+static char *config_migrate_frame_rate(const char *text, toml_datum_t table)
+{
+	static const char *const old_names[] = { "display.show_fps", "display.show_frame_rate" };
+	long overlay = config_setting_index("display.perf_overlay");
+	toml_datum_t set = toml_seek(table, "display.perf_overlay");
+	char *completed = NULL, *result;
+	size_t index;
+	int on = 0;
+
+	for (index = 0; index < sizeof(old_names) / sizeof(old_names[0]); index++)
+	{
+		toml_datum_t datum = toml_seek(table, old_names[index]);
+
+		on |= datum.type == TOML_BOOLEAN && datum.u.boolean;
+	}
+	if (overlay < 0 || !on || set.type != TOML_UNKNOWN)
+		return NULL;
+	/* (its block, in a file older than it, as config_add_missing would add
+	it after) */
+	completed = config_add_missing(text, table);
+	result = config_replace_setting(completed ? completed : text, &config_settings[overlay], "\"simple\"");
+	free(completed);
+	if (result)
+		platform_log("settings: the frame rate counter's setting is an older version's: now display.perf_overlay = "
+			"\"simple\"");
 	return result;
 }
 
@@ -5054,6 +5091,21 @@ static void config_load(void)
 				toml_free(result);
 				free(text);
 				text = supersampling;
+				result = toml_parse(text, (int)strlen(text));
+				migrated = text;
+			}
+		}
+		/* (the frame rate counter's older settings, display.perf_overlay's
+		now) */
+		if (result.ok && !skipped)
+		{
+			char *frame_rate = config_migrate_frame_rate(text, result.toptab);
+
+			if (frame_rate)
+			{
+				toml_free(result);
+				free(text);
+				text = frame_rate;
 				result = toml_parse(text, (int)strlen(text));
 				migrated = text;
 			}
