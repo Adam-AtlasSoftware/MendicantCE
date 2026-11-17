@@ -28,6 +28,7 @@ Conventions carried over from the Xbox:
 #include "xgpu_shader.h"
 #include "xgpu_backend.h"
 #include "xgpu_hdr.h"
+#include "draw_bounds_state.h"
 #include "xgpu_images.h"
 #include "xgpu_manifest.h"
 #include "xgpu_stream.h"
@@ -3807,18 +3808,11 @@ those left as they were are not shaded and blended to be. Not in VR's eye
 pass, where each eye sees the level from a place of its own, not the
 game's camera's. */
 
-static struct
-{
-	BOOL known;
-	/* (left, top, right, bottom: the viewport's pixels, in the game's units) */
-	float rectangle[4];
-} draw_bounds;
+static struct draw_bounds_state draw_bounds;
 
 void halo_draw_bounds(const float *rectangle)
 {
-	draw_bounds.known = rectangle != NULL;
-	if (rectangle)
-		memcpy(draw_bounds.rectangle, rectangle, sizeof(draw_bounds.rectangle));
+	draw_bounds_state_set(&draw_bounds, rectangle);
 }
 
 /* a draw's scissor rectangle (the viewport's: left, top, width, height in
@@ -7400,6 +7394,9 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 	}
 	device.frame++;
 	stats.presents++;
+	/* (a light's or a shadow's pass that never said its draws are done
+	clips nothing of the next frame: draw_bounds_state.h) */
+	draw_bounds_state_frame_end(&draw_bounds);
 	report_frame_presented();
 	/* (display.hdr: a frame begins with no 3D view drawn) */
 	hdr.view = FALSE;
