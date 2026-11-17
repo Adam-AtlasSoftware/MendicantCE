@@ -12,9 +12,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, enum_with, function, mutated, read, run, structure  # noqa: E402
 
 SOURCE = "port/linux/game/input_display.c"
-CASES = ["tick", "off", "wrap", "garbage", "keys", "style"]
+CASES = ["tick", "off", "wrap", "garbage", "keys", "style", "fit"]
 FUNCTIONS = ("input_display_wrap", "input_display_note", "input_display_actions_held", "input_display_keys_lit",
-             "input_display_keyboard_style", "input_display_enabled", "input_display_tick")
+             "input_display_keyboard_style", "input_display_enabled", "input_display_tick", "input_display_rectangle",
+             "input_display_layout")
 
 # a fault in input_display.c, the function it is in, and the case that must catch it
 NEGATIVE_CONTROLS = {
@@ -29,18 +30,28 @@ NEGATIVE_CONTROLS = {
                                 "input_display_wrap", "garbage"),
     "grenade-not-held": (("_unit_control_throw_grenade_bit, ", "_unit_control_force_alert_bit, "),
                          "input_display_actions_held", "tick"),
+    # (the first picture's cells and keys, whose labels touched their edges)
+    "cells-as-narrow-as-before": (("INPUT_DISPLAY_CELL_WIDTH = 36,", "INPUT_DISPLAY_CELL_WIDTH = 30,"), "constants",
+                                  "fit"),
+    "keys-as-small-as-before": (("INPUT_DISPLAY_KEY_WIDTH = 12,", "INPUT_DISPLAY_KEY_WIDTH = 9,"), "constants", "fit"),
+    "panel-past-a-split-views-top": (("short top = (short)(bottom - INPUT_DISPLAY_HEIGHT);",
+                                      "short top = (short)(bottom - 4 * INPUT_DISPLAY_HEIGHT);"),
+                                     "input_display_layout", "fit"),
 }
 
 
 def generated(fault=None, faulty_function=None):
     source = read(SOURCE)
     units = read("source/units/units.h")
-    text = enum_with(units, "_unit_control_jump_bit") + "\n"
+    text = re.search(r"^union rectangle2d\n\{.*?^\};\ntypedef union rectangle2d rectangle2d;\n",
+                     read("source/math/integer_math.h"), re.M | re.S).group(0)
+    text += enum_with(units, "_unit_control_jump_bit") + "\n"
     text += structure(read("source/game/players.h"), "player_action") + "\n"
-    for match in re.finditer(r"^enum\n\{\n.*?^\};\n", source, re.M | re.S):
-        text += match.group(0)
+    enums = "".join(match.group(0) for match in re.finditer(r"^enum\n\{\n.*?^\};\n", source, re.M | re.S))
+    text += mutated(enums, *fault) if fault and faulty_function == "constants" else enums
     text += "".join(re.findall(r"^#define INPUT_DISPLAY_\w+ [^\n]+\n", source, re.M))
     text += structure(source, "input_display_player") + "\n"
+    text += structure(source, "input_display_layout") + "\n"
     text += re.search(r"^static struct input_display_player input_display_players\[[^\n]+;\n", source, re.M).group(0)
     for name in FUNCTIONS:
         code = function(source, name)
