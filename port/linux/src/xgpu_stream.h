@@ -304,6 +304,10 @@ enum
 	sharply (value 1: the render scale's) or smoothly (0: "original"
 	resolution scaling's 640x480, as it always was) */
 	XGPU_STREAM_SHARP_UPSCALE,
+	/* display.hdr_sdr_curve: the curve the HDR encoding takes the frame's
+	values to light by (value: xgpu_hdr.h's XGPU_HDR_SDR_CURVE_*, AUTO the
+	backend's platform's) */
+	XGPU_STREAM_HDR_SDR_CURVE,
 	XGPU_STREAM_RECORD_TYPES,
 };
 
@@ -325,7 +329,7 @@ struct xgpu_stream_frame_end
 };
 
 /* a record of one value: ANTI_ALIASING_PREPARE (smaa), TARGET_DELETE,
-TARGET_RESOLVE, PRESENT (the back buffer's target), PICTURE_POSITION, GAMMA, SHARP_UPSCALE, VR_PASS, VR_TIMING
+TARGET_RESOLVE, PRESENT (the back buffer's target), PICTURE_POSITION, GAMMA, SHARP_UPSCALE, HDR_SDR_CURVE, VR_PASS, VR_TIMING
 (mark), PIPELINE (the id, XGPU_STREAM_PIPELINE_DEFINE's), VR_SKY (sky) */
 struct xgpu_stream_value
 {

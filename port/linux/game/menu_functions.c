@@ -89,6 +89,7 @@ their handlers open opens.
 #include "cache/cache_files.h"
 #include "game/game.h"
 #include "input/input.h"
+#include "input/input_abstraction.h"
 #include "interface/event_manager.h"
 #include "interface/player_ui.h"
 #include "interface/ui_widget.h"
@@ -141,6 +142,7 @@ their handlers open opens.
 #include "../src/server_master.h"
 #include "../src/report.h"
 #include "../src/game_caches.h" /* port: port/linux/src/game_caches.c */
+#include "../src/map_sources.h" /* port: port/linux/src/map_sources.c */
 #include "text_filter.h"
 /* (the party: party_menu.inc) */
 #include "party.h"
@@ -2560,6 +2562,224 @@ static void gyro_rows_show(struct widget_instance *list)
 		"");
 }
 
+/* Stick Test's readings and view (#1140; a page of its own, opened from
+Advanced Stick Settings): each stick of the player whose profile Settings
+edits, as their controller read it last, the controller's alone, never the
+keyboard's (halo_controller_stick: left to right, then down to up, in
+percent of its travel), then after the dead zones and the look stick's
+shape Settings shows, its changes kept before OK among them
+(settings_value), as input_xbox.c's input_port_fix_stick_dead_zones would
+take it with them. Under the rows a circle for each stick (the left under
+the labels, the right under the values) draws its travel, its dead zones
+(round, or a square for each direction's own) and both readings as dots;
+DRIFT AT REST is the largest push each stick held still near its middle
+since the page opened. Only on the page: nothing drawn or kept elsewhere. */
+
+void menu_shape_rounded_box(real x0, real y0, real x1, real y1, real radius, real edge, pixel32 fill,
+	pixel32 color);
+
+/* the circles: their radius and their gap below the last row, in the
+screen's units (tools/port_settings.py's STICK_TEST_RADIUS and _GAP) */
+#define STICK_TEST_RADIUS 44
+#define STICK_TEST_GAP 14
+/* still: moved less than this since it last moved (1% of the travel) */
+#define STICK_TEST_STILL 328
+/* at rest: still this long, within this much of its middle (30%) */
+#define STICK_TEST_REST_MILLISECONDS 500
+#define STICK_TEST_REST_MOST 9830
+/* the page gone this long: its drift seen begun again */
+#define STICK_TEST_REOPEN_MILLISECONDS 1000
+
+struct stick_test_reading
+{
+	point2d raw, adjusted;
+	short dead_range, live_range;
+	boolean round;
+};
+
+/* the circle's rings, as halves of their width, and its dots, from its
+middle (down positive), each in units for a circle of a radius */
+struct stick_test_view
+{
+	real inner, outer;
+	boolean round;
+	real raw_x, raw_y, adjusted_x, adjusted_y;
+};
+
+static struct
+{
+	boolean connected;
+	struct stick_test_reading readings[2];
+	/* each stick's rest: where it was when it last moved, since when, the
+	largest push seen at rest, when the page last read it */
+	point2d anchors[2];
+	unsigned long still_since[2];
+	short drift[2];
+	unsigned long seen[2];
+} stick_test;
+
+static int stick_test_percent(short value)
+{
+	return (int)PIN((long)value * 100 / 32767, -100, 100);
+}
+
+static void stick_test_read(short gamepad, short stick, struct stick_test_reading *reading)
+{
+	static char const *const inner[2] = { "input.left_stick_dead_zone", "input.right_stick_dead_zone" };
+	static char const *const outer[2] = { "input.left_stick_outer_dead_zone", "input.right_stick_outer_dead_zone" };
+	char value[32];
+	long inner_percent = -1;
+	long outer_percent = 0;
+
+	reading->round = FALSE;
+	if (settings_value(inner[stick], value, sizeof(value)))
+		inner_percent = atol(value);
+	if (settings_value(outer[stick], value, sizeof(value)))
+		outer_percent = atol(value);
+	halo_stick_ranges(inner_percent, outer_percent, &reading->dead_range, &reading->live_range);
+	/* (the look stick's shape: Auto, or none set, Modern aim's round) */
+	if (stick == input_abstraction_port_look_stick(gamepad))
+	{
+		if (!settings_value("input.look_dead_zone_shape", value, sizeof(value)))
+			value[0] = 0;
+		if (!strcmp(value, "round"))
+			reading->round = TRUE;
+		else if (strcmp(value, "axial") && settings_value("input.aim_style", value, sizeof(value)))
+			reading->round = !strcmp(value, "modern");
+	}
+	halo_controller_stick(gamepad, stick, &reading->raw.x, &reading->raw.y);
+	input_port_fix_stick(reading->raw.x, reading->raw.y, reading->dead_range, reading->live_range, reading->round,
+		&reading->adjusted);
+}
+
+static void stick_test_text(struct stick_test_reading const *reading, char *text, unsigned int size)
+{
+	snprintf(text, size, "%d,%d | %d,%d", stick_test_percent(reading->raw.x), stick_test_percent(reading->raw.y),
+		stick_test_percent(reading->adjusted.x), stick_test_percent(reading->adjusted.y));
+}
+
+/* a stick's rest, at a reading now: still (moved less than STICK_TEST_STILL
+since it last moved) for STICK_TEST_REST_MILLISECONDS, within
+STICK_TEST_REST_MOST of its middle, its push the drift if the largest yet;
+the page opened again (not read for a second): all begun again */
+static void stick_test_rest(short stick, point2d raw, unsigned long now)
+{
+	if (now - stick_test.seen[stick] > STICK_TEST_REOPEN_MILLISECONDS || !stick_test.seen[stick])
+	{
+		stick_test.drift[stick] = 0;
+		stick_test.anchors[stick] = raw;
+		stick_test.still_since[stick] = now;
+	}
+	stick_test.seen[stick] = now;
+	if (abs(raw.x - stick_test.anchors[stick].x) > STICK_TEST_STILL ||
+		abs(raw.y - stick_test.anchors[stick].y) > STICK_TEST_STILL)
+	{
+		stick_test.anchors[stick] = raw;
+		stick_test.still_since[stick] = now;
+	}
+	else if (now - stick_test.still_since[stick] >= STICK_TEST_REST_MILLISECONDS)
+	{
+		real length = (real)sqrt((real)raw.x * (real)raw.x + (real)raw.y * (real)raw.y);
+
+		if (length <= (real)STICK_TEST_REST_MOST && length > (real)stick_test.drift[stick])
+			stick_test.drift[stick] = (short)length;
+	}
+}
+
+static void stick_test_view_of(struct stick_test_reading const *reading, real radius, struct stick_test_view *view)
+{
+	real scale = radius / 32767.0f;
+
+	view->inner = reading->dead_range * scale;
+	view->outer = reading->live_range * scale;
+	view->round = reading->round;
+	view->raw_x = PIN(reading->raw.x * scale, -radius, radius);
+	view->raw_y = PIN(-reading->raw.y * scale, -radius, radius);
+	view->adjusted_x = PIN(reading->adjusted.x * scale, -radius, radius);
+	view->adjusted_y = PIN(-reading->adjusted.y * scale, -radius, radius);
+}
+
+/* a stick's circle, its middle at x, y: its travel, its outer dead zone
+(where a push reads as full) and inner one (where none), the raw reading
+white, the reading after them blue */
+static void stick_test_draw(short stick, real x, real y)
+{
+	struct stick_test_view view;
+	real radius = (real)STICK_TEST_RADIUS;
+
+	stick_test_view_of(&stick_test.readings[stick], radius, &view);
+	menu_shape_rounded_box(x - radius, y - radius, x + radius, y + radius, radius, 1.0f, 0x80000000UL,
+		0xFF2896FFUL);
+	if (view.outer < radius)
+	{
+		menu_shape_rounded_box(x - view.outer, y - view.outer, x + view.outer, y + view.outer,
+			view.round ? view.outer : 0.0f, 1.0f, 0, 0xFF6F9CD0UL);
+	}
+	if (view.inner > 0.0f)
+	{
+		menu_shape_rounded_box(x - view.inner, y - view.inner, x + view.inner, y + view.inner,
+			view.round ? view.inner : 0.0f, 1.0f, 0x40FFB000UL, 0xFFFFB000UL);
+	}
+	menu_shape_rounded_box(x + view.raw_x - 3.0f, y + view.raw_y - 3.0f, x + view.raw_x + 3.0f,
+		y + view.raw_y + 3.0f, 3.0f, 0.0f, 0xFFFFFFFFUL, 0);
+	menu_shape_rounded_box(x + view.adjusted_x - 4.0f, y + view.adjusted_y - 4.0f, x + view.adjusted_x + 4.0f,
+		y + view.adjusted_y + 4.0f, 4.0f, 1.0f, 0xFF2896FFUL, 0xFFFFFFFFUL);
+}
+
+/* (menu_functions_text_box_drawn's) the last row's label drawn: the left
+stick's circle under it; its value: the right's; TRUE for either */
+static boolean stick_test_drawn(struct widget_instance *widget, rectangle2d const *bounds)
+{
+	short stick;
+
+	if (!widget->name || !stick_test.connected)
+		return FALSE;
+	if (!strcmp(widget->name, "stick_drift_label"))
+		stick = 0;
+	else if (!strcmp(widget->name, "stick_drift_value"))
+		stick = 1;
+	else
+		return FALSE;
+	if (system_milliseconds() - stick_test.seen[stick] > STICK_TEST_REOPEN_MILLISECONDS)
+		return TRUE;
+	stick_test_draw(stick, (real)(bounds->x0 + bounds->x1) / 2.0f,
+		(real)(bounds->y1 + STICK_TEST_GAP + STICK_TEST_RADIUS));
+	return TRUE;
+}
+
+static void stick_test_rows_show(struct widget_instance *list)
+{
+	static char const *const rows[2] = { "stick_test_left", "stick_test_right" };
+	struct controller_device device;
+	short gamepad = settings_local_player;
+	unsigned long now = system_milliseconds();
+	char text[40];
+	short stick;
+
+	if (!settings_model_row(list, rows[0]))
+		return;
+	controller_device_get(gamepad, &device);
+	stick_test.connected = device.name[0] != 0;
+	for (stick = 0; stick < 2; stick++)
+	{
+		if (stick_test.connected)
+		{
+			stick_test_read(gamepad, stick, &stick_test.readings[stick]);
+			stick_test_rest(stick, stick_test.readings[stick].raw, now);
+			stick_test_text(&stick_test.readings[stick], text, sizeof(text));
+		}
+		else
+			snprintf(text, sizeof(text), "%s", "NO CONTROLLER");
+		settings_status_set(list, rows[stick], text);
+	}
+	if (stick_test.connected)
+	{
+		snprintf(text, sizeof(text), "L %d%%  R %d%%", stick_test_percent(stick_test.drift[0]),
+			stick_test_percent(stick_test.drift[1]));
+	}
+	settings_status_set(list, "stick_drift", stick_test.connected ? text : "");
+}
+
 static void sim_rate_row_show(struct widget_instance *list)
 {
 	struct widget_instance *row = named(list, "op_sim_rate", 0);
@@ -2856,6 +3076,7 @@ static boolean settings_profile_new(struct widget_instance *widget, struct event
 
 static void settings_weapon_reset(struct widget_instance *screen);
 static void clear_caches_press(void);
+static void add_maps_press(void);
 /* Settings' search, the menu engine's (settings_search_menu.inc) */
 static boolean settings_search_open(struct widget_instance *widget, boolean *widget_deleted);
 static void settings_search_edit(struct widget_instance *widget);
@@ -2973,6 +3194,12 @@ static boolean settings_function(char const *name, struct widget_instance *widge
 		/* (CLEAR CACHES: asked, then asked for at the next start,
 		port/linux/src/game_caches.c) */
 		clear_caches_press();
+	}
+	else if (!strcmp(name, "add maps"))
+	{
+		/* (ADD MAPS: asked, then the maps screen asked for at the next
+		start, port/linux/src/map_sources.c) */
+		add_maps_press();
 	}
 	else if (!strcmp(name, "report"))
 	{
@@ -3966,6 +4193,99 @@ static void clear_caches_press(void)
 	ui_play_audio_feedback_sound(SOUND_FORWARD);
 }
 
+/* ---------- Mods' ADD MAPS: its value the sources of maps the game has
+(port/linux/src/map_sources.c, which first_start.c's screen asks too); the
+first press asks, the second asks for that screen at the next start, as
+CLEAR CACHES does */
+
+static struct
+{
+	/* the first press, 0: none */
+	unsigned long asked;
+	/* whether the sources were read since the page showed, and which the
+	game has; whether the screen is asked for */
+	boolean measured;
+	struct map_sources sources;
+	boolean requested;
+} add_maps;
+
+static boolean add_maps_asked(void)
+{
+	return add_maps.asked && system_milliseconds() - add_maps.asked < CLEAR_CACHES_ASK_MILLISECONDS;
+}
+
+static void add_maps_measure(void)
+{
+	map_sources_read_game(&add_maps.sources);
+	add_maps.requested = map_sources_requested() != 0;
+	add_maps.measured = TRUE;
+}
+
+static void add_maps_show(struct widget_instance *list)
+{
+	char text[ROW_TEXT_LENGTH];
+
+	if (!settings_model_row(list, "add_maps"))
+	{
+		add_maps.measured = FALSE;
+		add_maps.asked = 0;
+		return;
+	}
+	if (!add_maps.measured)
+		add_maps_measure();
+	if (add_maps.requested)
+		snprintf(text, sizeof(text), "AT NEXT START");
+	else if (add_maps_asked())
+		snprintf(text, sizeof(text), "SELECT AGAIN");
+	else
+		map_sources_summary(&add_maps.sources, text, sizeof(text));
+	settings_status_set(list, "add_maps", text);
+}
+
+/* the panel's value (the sources) and words for ADD MAPS (the others':
+FALSE) */
+static boolean add_maps_panel(struct widget_instance *row, wchar_t *value, wchar_t const **help)
+{
+	static wchar_t words[SETTINGS_PANEL_TEXT_LENGTH];
+	char summary[32], text[SETTINGS_PANEL_TEXT_LENGTH];
+	boolean custom_edition;
+
+	if (!settings_row_is(row, "add_maps"))
+		return FALSE;
+	map_sources_summary(&add_maps.sources, summary, sizeof(summary));
+	discord_widen(summary, value, ROW_TEXT_LENGTH);
+	custom_edition = add_maps.sources.present[_map_source_custom_edition] != 0;
+	if (add_maps.requested)
+		snprintf(text, sizeof(text), "The maps screen opens the next time the game starts: quit, then start it "
+			"again.|Select ADD MAPS again to keep it closed.");
+	else if (add_maps_asked())
+		snprintf(text, sizeof(text), "Select ADD MAPS again to open the maps screen the next time the game "
+			"starts.");
+	else
+		snprintf(text, sizeof(text), "Xbox maps: installed. Custom Edition's maps: %s.|Select it twice: the "
+			"maps screen opens at the next start, to %s.", custom_edition ? "added" : "not added",
+			custom_edition ? "copy either again" : "add Custom Edition's from its installer");
+	discord_widen(text, words, SETTINGS_PANEL_TEXT_LENGTH);
+	*help = words;
+	return TRUE;
+}
+
+/* "port settings add maps": the first press asks, the second asks for the
+maps screen at the next start; once asked for, a press takes it back */
+static void add_maps_press(void)
+{
+	if (!add_maps.requested && !add_maps_asked())
+	{
+		add_maps.asked = system_milliseconds() | 1;
+		ui_play_audio_feedback_sound(SOUND_CURSOR);
+		return;
+	}
+	map_sources_request(!add_maps.requested);
+	add_maps.asked = 0;
+	add_maps_measure();
+	ui_play_audio_feedback_sound(SOUND_FORWARD);
+}
+
 /* the panel's name, value and words for a row of the page (the others':
 FALSE) */
 static boolean discord_account_panel(struct widget_instance *row, wchar_t *name, wchar_t *value,
@@ -4483,6 +4803,8 @@ static void settings_panel_show(struct widget_instance *list, short tab)
 		about_panel(row, value, &help);
 		/* (Profile's CLEAR CACHES: their size, and what a press does) */
 		clear_caches_panel(row, value, &help);
+		/* (Mods' ADD MAPS: the maps' sources, and what a press does) */
+		add_maps_panel(row, value, &help);
 		/* (Button Remapping's: a button being taken, a replacement asked) */
 		if (pad_editor_page(screen_of(list)))
 			pad_editor_panel(row, name, value, &help);
@@ -4807,6 +5129,7 @@ static void settings_page_update(struct widget_instance *list)
 	settings_rows_conditions(list);
 	discord_account_show(list);
 	clear_caches_show(list);
+	add_maps_show(list);
 	hdr_display_show(list);
 	pad_editor_update(list);
 	controls_page_update(list);
@@ -4815,6 +5138,7 @@ static void settings_page_update(struct widget_instance *list)
 	settings_held_rows_show(list);
 	viewmodel_weapon_rows_show(list);
 	gyro_rows_show(list);
+	stick_test_rows_show(list);
 	settings_each(screen, setting_stash);
 	settings_segments_show(list);
 	settings_sliders_show(list);
@@ -5284,6 +5608,9 @@ static struct
 	/* (COMMUNICATION's last row, after PING: the HUD's Spartan link,
 	spartan_link.c) */
 	{ "controls.spartan_link", L"SPARTAN LINK", 3, FALSE },
+	/* (ACTIONS' last row, after CLIP: the HUD hidden, source/interface/
+	hud.c) */
+	{ "controls.hide_hud", L"HIDE HUD", 2, FALSE },
 };
 
 static struct
@@ -6345,6 +6672,7 @@ boolean playlist_profile_get(long index, struct game_variant *variant);
 boolean playlist_profile_get_display_name(long index, wchar_t *name);
 boolean playlist_profile_get_options(long index, struct game_variant_options *options);
 boolean input_get_key(struct key_stroke *key);
+wchar_t input_key_character(void);
 boolean game_engine_running(void);
 void game_engine_end_game(void);
 /* the platform layer's */
@@ -6498,7 +6826,23 @@ static void text_field_end(boolean keep)
 		done(text_field.text);
 }
 
-static void text_field_insert(char const *text)
+/* whether a character typed is put in the field, whose text is Latin-1
+(shown widened, game_name_done's too): ASCII's visible ones, and Latin-1's
+letters with a mark, U+00C0 to U+00FF but for the signs x and / (#1134: a
+layout's é, ñ, ü; a password's too). Latin Extended-A's (ł), beyond a
+byte, are the on-screen keyboard's alone (virtual_keyboard.c) */
+static boolean text_field_character_kept(wchar_t character)
+{
+	unsigned long code = (unsigned long)character;
+
+	return (code >= ' ' && code <= '~') || (code >= 0xC0 && code <= 0xFF && code != 0xD7 && code != 0xF7);
+}
+
+/* text put in, after what is there: ASCII's visible characters; and, for
+a character typed (letters: text_field_insert_character), Latin-1's letters
+with a mark, where text pasted (the clipboard's, UTF-8) keeps its ASCII
+alone */
+static void text_field_insert(char const *text, boolean letters)
 {
 	size_t length;
 
@@ -6510,10 +6854,18 @@ static void text_field_insert(char const *text)
 
 	for (; *text && length < (size_t)text_field.maximum; text++)
 	{
-		if (*text >= ' ' && *text <= '~')
+		if ((*text >= ' ' && *text <= '~') || (letters && text_field_character_kept((unsigned char)*text)))
 			text_field.text[length++] = *text;
 	}
 	text_field.text[length] = 0;
+}
+
+/* a character typed put in (text_field_character_kept's) */
+static void text_field_insert_character(char character)
+{
+	char text[2] = { character, 0 };
+
+	text_field_insert(text, TRUE);
 }
 
 /* (ui_widget.c) a text box's caret, lit this frame or not: a bar after its
@@ -6563,14 +6915,10 @@ static void text_field_show(struct widget_instance *value, char const *text, boo
 				char clipboard[TEXT_FIELD_LENGTH];
 
 				if (platform_clipboard_get(clipboard, sizeof(clipboard)))
-					text_field_insert(clipboard);
+					text_field_insert(clipboard, FALSE);
 			}
-			else if ((unsigned char)key.ascii_code >= ' ' && (unsigned char)key.ascii_code <= '~')
-			{
-				char character[2] = { key.ascii_code, 0 };
-
-				text_field_insert(character);
-			}
+			else if (text_field_character_kept(input_key_character()))
+				text_field_insert_character((char)input_key_character());
 		}
 		text = text_field.text;
 	}
@@ -8061,7 +8409,7 @@ static void wide_to_text(wchar_t const *wide, char *text, short size)
 	short index;
 
 	for (index = 0; wide[index] && index < size - 1; index++)
-		text[index] = wide[index] < 0x80 ? (char)wide[index] : '?';
+		text[index] = wide[index] < 0x80 || text_field_character_kept(wide[index]) ? (char)wide[index] : '?';
 	text[index] = 0;
 }
 
@@ -14317,6 +14665,9 @@ void menu_functions_text_box_drawn(struct widget_instance *widget, rectangle2d c
 {
 	short row;
 
+	/* (Stick Test's circles, under its last row) */
+	if (stick_test_drawn(widget, bounds))
+		return;
 	/* (as the lobby last updated them: the rows' widgets go with it) */
 	if (!lobby_icons.count || system_milliseconds() - lobby_icons.updated_at > 250)
 		return;

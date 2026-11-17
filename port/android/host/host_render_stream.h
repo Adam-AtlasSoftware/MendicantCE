@@ -92,6 +92,9 @@ struct host_render_backend
 	/* display.render_scale: a smaller frame scaled up sharply (1) or
 	smoothly (0), from the next present on */
 	void (*sharp_upscale)(void *context, uint32_t sharp);
+	/* display.hdr_sdr_curve: the HDR encoding's SDR curve
+	(XGPU_HDR_SDR_CURVE_*), from the next present on */
+	void (*hdr_sdr_curve)(void *context, uint32_t curve);
 	/* the game's renderer's category of the draws from now on
 	(XGPU_STREAM_CATEGORY's value), for the GPU's timing */
 	void (*category)(void *context, uint32_t category);

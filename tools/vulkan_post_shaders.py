@@ -30,8 +30,8 @@ stay: the passes' textures and targets have their first row at the top, as
 Vulkan's images do, and gl_FragCoord counts rows from it. glslang 16.6.0 and
 SPIRV-Tools 2026.4 (Homebrew's) produce the checked-in words.
 
-display.gamma's curve (GAMMA) is the last pass of an SDR frame, in both
-backends.
+The encoding is the frame's last pass in both backends (#1108): HDR's
+encoding, display.gamma's curve over an SDR frame, and the dither.
 display.panini's projection (PANINI) is a pass over a window's 3D view as
 FXAA's is, in both backends; its uniforms add window, panini and tangents.
 
@@ -67,7 +67,7 @@ SAMPLER = re.compile(r"^uniform sampler2D (\w+);\n", re.M)
 UNIFORMS = ("metrics", "bounds", "hdr", "window", "panini", "tangents")
 # the fragment programs, in xgpu_vulkan_post_shaders.h's order
 PROGRAMS = ("fxaa", "smaa_edges", "smaa_weights", "smaa_blend", "rotate", "hdr_tone_map", "hdr_tone_map_ms",
-            "hdr_encode", "gamma", "panini")
+            "hdr_encode", "panini")
 # one triangle over the whole viewport
 VERTEX_SOURCE = (
     "void main()\n"
@@ -239,25 +239,6 @@ ROTATE_SOURCE = (
     "\tresult = vec4(texture(color_texture, coordinates).rgb, 1.0);\n"
     "}\n"
 )
-# display.gamma's curve (both backends' own: xgpu_vulkan_post_gamma, and
-# Metal's presentation, host_metal.m): the frame sampled over the viewport,
-# as the encoding samples it, each channel raised to bounds.x (one over the
-# setting: past 1 brighter, as Halo PC's gamma), alpha opaque
-GAMMA_SOURCE = (
-    "uniform sampler2D color_texture;\n"
-    "/* the viewport: x, y, 1 / width, 1 / height */\n"
-    "uniform vec4 metrics;\n"
-    "/* the power each channel is raised to */\n"
-    "uniform vec4 bounds;\n"
-    "out vec4 result;\n"
-    "\n"
-    "void main()\n"
-    "{\n"
-    "\tvec2 position = (gl_FragCoord.xy - metrics.xy) * metrics.zw;\n"
-    "\tvec3 color = max(textureLod(color_texture, position, 0.0).rgb, vec3(0.0));\n"
-    "\tresult = vec4(pow(color, vec3(bounds.x)), 1.0);\n"
-    "}\n"
-)
 # display.panini's projection (both backends': xgpu_vulkan_post_panini,
 # xgpu_metal_post_panini; port/linux/include/panini_projection.h has the
 # arithmetic, which this is the same as). Its uniforms: metrics, the
@@ -410,7 +391,6 @@ def generate(args):
     programs["hdr_tone_map"] = ("frag", hdr["tone_map"])
     programs["hdr_tone_map_ms"] = ("frag", multisampled(hdr["tone_map"]))
     programs["hdr_encode"] = ("frag", hdr["encode"])
-    programs["gamma"] = ("frag", GAMMA_SOURCE)
     programs["panini"] = ("frag", PANINI_SOURCE)
     programs["clear"] = ("frag", CLEAR)
     text = [

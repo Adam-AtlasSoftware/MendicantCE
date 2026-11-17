@@ -463,11 +463,18 @@ static const struct config_setting config_settings[] =
 	{ "display.player_name_scale", _config_real, "0.75", "HALO_PLAYER_NAME_SCALE", _environment_value, _platform_all,
 		"How large the players' names are drawn: 1.0 three quarters of the size of\n"
 		"the HUD's text, 0.25 to 4." },
+	{ "display.hide_hud", _config_boolean, "false", "HALO_HIDE_HUD", _environment_value, _platform_all,
+		"Hide the HUD, the reticle, the clock, the teammates' marks and the names\n"
+		"over the players, for clean footage and screenshots. The Hide HUD key\n"
+		"(controls.hide_hud) shows and hides them in a game, over map loads; this\n"
+		"is their state as the game starts. Scripts still hide the HUD in\n"
+		"cutscenes." },
 	{ "display.match_timer", _config_boolean, "false", "HALO_MATCH_TIMER", _environment_value, _platform_all,
 		"Draw the match clock at the bottom right in multiplayer. It counts up\n"
 		"from the game's first tick, which the items' respawn periods count from\n"
 		"too: a weapon is back on the map at every multiple of its period on the\n"
-		"clock." },
+		"clock. In the campaign and co-op it is the mission's timer: the level's\n"
+		"game time, which stops while the game is paused." },
 	{ "display.perf_overlay", _config_string, "\"off\"", "HALO_PERF_OVERLAY", _environment_value, _platform_all,
 		"The performance overlay at the bottom right: \"off\"; \"simple\", the\n"
 		"frame rate averaged over half a second, green at 30 and over (the\n"
@@ -554,6 +561,12 @@ static const struct config_setting config_settings[] =
 		"white. The HUD's glows stay as far above it as they are above paper\n"
 		"white; the weapon's displays stay with the scene. No brighter than the\n"
 		"display's peak." },
+	{ "display.hdr_sdr_curve", _config_string, "\"auto\"", "HALO_HDR_SDR_CURVE", _environment_value, _platform_all,
+		"With HDR, the curve the picture's SDR colors are shown by, as an SDR\n"
+		"display would: \"2.2\" (most PC monitors and TVs: the darkest shadows\n"
+		"darker), \"srgb\" (a Mac's), or \"auto\": sRGB on macOS and iOS, 2.2\n"
+		"elsewhere. Only the shadows differ: colors from code 51 up are the\n"
+		"same in both." },
 	{ "display.gamma", _config_real, "1.0", "HALO_GAMMA", _environment_value, _platform_all,
 		"The picture's gamma, 0.5 to 2.0, as Halo PC's: above 1 brighter (the\n"
 		"dark parts lifted most), below 1 darker; white and black stay. The\n"
@@ -1117,10 +1130,10 @@ static const struct config_setting config_settings[] =
 	{ "input.controller_p1", _config_string, "\"\"", "HALO_CONTROLLER_P1", _environment_value, _platform_all,
 		"P1 custom controller layout; empty uses the profile's preset. Edit in\n"
 		"Settings > Controls > Controller > Button Remapping. v4: 27 physical\n"
-		"button names (the back paddles too), unbound among them; gameplay and\n"
-		"the debug camera have separate bindings. Old ten-action, v2 and v3\n"
-		"layouts are accepted. See docs/controller_remapping.md for the full\n"
-		"order." },
+		"button names (the back paddles, touchpad and misc1-6 too), unbound\n"
+		"among them; gameplay and the debug camera have separate bindings.\n"
+		"Old ten-action, v2 and v3 layouts are accepted. See\n"
+		"docs/controller_remapping.md for the full order." },
 	{ "input.controller_p2", _config_string, "\"\"", "HALO_CONTROLLER_P2", _environment_value, _platform_all,
 		"P2 custom controller buttons, same format as controller_p1. Empty uses the profile." },
 	{ "input.controller_p3", _config_string, "\"\"", "HALO_CONTROLLER_P3", _environment_value, _platform_all,
@@ -1304,6 +1317,10 @@ static const struct config_setting config_settings[] =
 	{ "controls.spartan_link", _config_string, "\"B\"", "HALO_KEY_SPARTAN_LINK", _environment_value, _platform_all,
 		"The Spartan link: your teammates' feeds in the HUD shown or hidden\n"
 		"(display.spartan_link).", _scope_keyboard },
+	{ "controls.hide_hud", _config_string, "\"F3\"", "HALO_KEY_HIDE_HUD", _environment_value, _platform_all,
+		"Hide HUD: the HUD, the reticle and the clock hidden or shown again, for\n"
+		"clean footage and screenshots (display.hide_hud). Not while the menu\n"
+		"studio is on (debug.menu_studio), whose F3 is its own.", _scope_keyboard },
 
 	{ "game.console_log", _config_string, "\"important\"", "HALO_CONSOLE_LOG", _environment_value, _platform_all,
 		"What the game's console shows on screen of what it logs: \"important\"\n"

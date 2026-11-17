@@ -228,7 +228,74 @@ struct sound_platform_definition
 typedef char sound_platform_definition_direct_path_gain_offset_assert[
 	offsetof(struct sound_platform_definition, direct_path_gain) == 0x38 ? 1 : -1];
 
+/* port: the formats of the channels' streams (dsound_channel_use_format).
+A permutation imported from a Halo PC map or a mod is kept as 16-bit PCM at
+its own rate (sound_definitions.h, sound_permutation_pcm_rate); its sound is
+one of the Xbox's formats, so the sound manager gives it a channel of that
+type, whose stream is Xbox ADPCM. The channel then plays it in its own
+format: its one stream is switched for one of 16-bit PCM (of the channel's
+channel count) when it starts the sound, on the thread that starts it, and
+the channel's settings are given to it. The stream switched out is kept for
+the channel's next switch back (its callback's context is the channel), as
+many as MAXIMUM_SOUND_CHANNELS leaves past the channels, the one kept
+longest let go first, so the streams never come to more than the 256
+channels the game has. A permutation queued after one of another format
+plays once the last packets of that one have (dsound_channel_fill), a
+moment's gap only where a sound's parts are of both formats. */
+struct dsound_kept_stream
+{
+	LPDIRECTSOUNDSTREAM stream;
+	unsigned long kept_at;
+};
+
+static struct
+{
+	/* each channel's stream's: 0 its type's Xbox ADPCM, else the rate of
+	its 16-bit PCM */
+	long pcm_rates[MAXIMUM_SOUND_CHANNELS];
+	/* the channel's playing permutation waits for its last one's packets
+	to switch the format */
+	boolean switch_pending[MAXIMUM_SOUND_CHANNELS];
+	/* the stream each channel switched out, and how many are kept */
+	struct dsound_kept_stream kept[MAXIMUM_SOUND_CHANNELS];
+	short kept_count;
+	unsigned long kept_clock;
+	/* a stereo channel's position as last given
+	(dsound_port_set_channel_stereo_position), given again to a stream
+	switched in */
+	struct
+	{
+		boolean given;
+		boolean positioned;
+		real pan;
+		real distance;
+		real minimum_distance;
+		real distance_fade;
+	} stereo_positions[MAXIMUM_SOUND_CHANNELS];
+	/* the streams made, and released, since the sound started (tests) */
+	long streams_made;
+	long streams_released;
+} dsound_port_formats;
+
 /* ---------- prototypes */
+
+static unsigned long dsound_channel_samples_per_second(
+	short index);
+static long dsound_channel_block_bytes(
+	short index);
+static long dsound_channel_packet_bytes(
+	short index);
+static HRESULT dsound_channel_create_stream(
+	short channel_index,
+	long pcm_rate,
+	LPDIRECTSOUNDSTREAM *stream);
+static void dsound_channel_set_mix_bins(
+	short channel_index);
+static boolean dsound_channel_use_format(
+	short index,
+	long pcm_rate);
+static void dsound_channel_stream_release(
+	LPDIRECTSOUNDSTREAM stream);
 
 void __stdcall DirectSoundStopStream(
 	LPDIRECTSOUNDSTREAM stream);
@@ -1339,7 +1406,10 @@ long dsound_frequency_from_pitch(
 	match_assert(
 		"c:\\halo\\source\\sound\\sound_dsound.h",
 		54,
-		samples_per_second==22050 || samples_per_second==44100);
+		/* port: or a permutation's own (sound_permutation_pcm_rate) */
+		samples_per_second==22050 || samples_per_second==44100 ||
+			(samples_per_second>=SOUND_PERMUTATION_PCM_MINIMUM_RATE &&
+				samples_per_second<=SOUND_PERMUTATION_PCM_MAXIMUM_RATE));
 
 	frequency= samples_per_second*pitch;
 
@@ -1457,9 +1527,20 @@ static void dsound_dispose(
 
 		if (channel->stream)
 		{
-			IDirectSoundStream_Release(channel->stream);
+			dsound_channel_stream_release(channel->stream);
+			channel->stream= NULL;
+		}
+		/* port: and the one it switched out (dsound_channel_use_format) */
+		if (dsound_port_formats.kept[index].stream)
+		{
+			dsound_channel_stream_release(dsound_port_formats.kept[index].stream);
 		}
 	}
+	csmemset(&dsound_port_formats.pcm_rates, 0, sizeof(dsound_port_formats.pcm_rates));
+	csmemset(&dsound_port_formats.switch_pending, 0, sizeof(dsound_port_formats.switch_pending));
+	csmemset(&dsound_port_formats.kept, 0, sizeof(dsound_port_formats.kept));
+	csmemset(&dsound_port_formats.stereo_positions, 0, sizeof(dsound_port_formats.stereo_positions));
+	dsound_port_formats.kept_count= 0;
 
 	if (dsound_globals.inanity_buffer)
 	{
@@ -1608,11 +1689,9 @@ static void dsound_set_paused(
 			{
 				IDirectSoundStream_Flush(channel->stream);
 
+				/* port: a packet of the channel's format (dsound_channel_packet_bytes) */
 				channel->sample_offset= (long)(channel->sample_offset-
-					(TEST_FLAG(channel->type_flags, _sound_channel_44k_bit) ? 2.f : 1.f)*
-					(TEST_FLAG(channel->type_flags, _sound_channel_stereo_bit) ? 2.f : 1.f)*
-					(TEST_FLAG(channel->type_flags, _sound_channel_compressed_bit) ?
-						MAXIMUM_COMPRESSED_SOUND_PACKET_SIZE : MAXIMUM_SOUND_PACKET_SIZE)*
+					(real)dsound_channel_packet_bytes(index)*
 					(real)MAXIMUM_SOUND_PACKETS);
 
 				channel->gain= 0.f;
@@ -1968,6 +2047,13 @@ void dsound_port_set_channel_stereo_position(
 
 		if (channel->stream && TEST_FLAG(channel->type_flags, _sound_channel_stereo_bit))
 		{
+			/* (given again to a stream switched in: dsound_channel_use_format) */
+			dsound_port_formats.stereo_positions[channel_index].given= TRUE;
+			dsound_port_formats.stereo_positions[channel_index].positioned= positioned;
+			dsound_port_formats.stereo_positions[channel_index].pan= pan;
+			dsound_port_formats.stereo_positions[channel_index].distance= distance;
+			dsound_port_formats.stereo_positions[channel_index].minimum_distance= minimum_distance;
+			dsound_port_formats.stereo_positions[channel_index].distance_fade= distance_fade;
 			if (channel->spatialized!=positioned ||
 				!realcmp_epsilon(occlusion, channel->occlusion, 0.001f) ||
 				!realcmp_epsilon(obstruction, channel->obstruction, 0.001f) ||
@@ -2164,9 +2250,6 @@ static boolean dsound_initialize_channel(
 {
 	struct sound_channel *channel= channel_get(channel_index);
 	boolean success= FALSE;
-	unsigned long speaker_config;
-	XBOXADPCMWAVEFORMAT wave_format;
-	DSSTREAMDESC stream_desc;
 	struct platform_sound_channel_properties properties;
 	HRESULT result;
 
@@ -2175,8 +2258,71 @@ static boolean dsound_initialize_channel(
 	channel->stopping= FALSE;
 	channel->playing_permutation= NULL;
 	channel->queued_permutation= NULL;
+	/* port: its type's format (dsound_channel_use_format) */
+	dsound_port_formats.pcm_rates[channel_index]= 0;
+	dsound_port_formats.switch_pending[channel_index]= FALSE;
 
-	if (!TEST_FLAG(type_flags, _sound_channel_compressed_bit))
+	result= dsound_channel_create_stream(channel_index, 0, &channel->stream);
+
+	if (result>=0)
+	{
+		if (TEST_FLAG(type_flags, _sound_channel_3d_bit))
+		{
+			struct sound_location location;
+
+			csmemset(&location, 0, sizeof(location));
+			location.forward= *global_forward3d;
+
+			dsound_channel_set_location(channel_index, FALSE, &location, 0.f, 0.f, FALSE);
+		}
+		else
+		{
+			dsound_channel_set_mix_bins(channel_index);
+		}
+
+		success= TRUE;
+
+		csmemset(&properties, 0, sizeof(properties));
+
+		properties.minimum_distance= 1.f;
+		properties.maximum_distance= 1.f;
+
+		dsound_channel_set_properties(channel_index, &properties, FALSE);
+	}
+	else
+	{
+		dsound_error(result, "couldn't create sound stream.");
+	}
+
+	return success;
+}
+
+/* port: a stream for the channel channel_index (its type's channel count,
+3D or not, its callback's context the channel): of its type's format, or
+for pcm_rate, 16-bit PCM at that rate (dsound_channel_use_format) */
+static HRESULT dsound_channel_create_stream(
+	short channel_index,
+	long pcm_rate,
+	LPDIRECTSOUNDSTREAM *stream)
+{
+	struct sound_channel *channel= channel_get(channel_index);
+	short type_flags= channel->type_flags;
+	XBOXADPCMWAVEFORMAT wave_format;
+	DSSTREAMDESC stream_desc;
+	HRESULT result;
+
+	csmemset(&wave_format, 0, sizeof(wave_format));
+
+	if (pcm_rate)
+	{
+		wave_format.wfx.wFormatTag= WAVE_FORMAT_PCM;
+		wave_format.wfx.wBitsPerSample= 16;
+		wave_format.wfx.nChannels= (WORD)(TEST_FLAG(type_flags, _sound_channel_stereo_bit) ? 2 : 1);
+		wave_format.wfx.nBlockAlign= (WORD)(2*wave_format.wfx.nChannels);
+		wave_format.wfx.nSamplesPerSec= pcm_rate;
+		wave_format.wfx.nAvgBytesPerSec= wave_format.wfx.nSamplesPerSec*wave_format.wfx.nBlockAlign;
+	}
+	else if (!TEST_FLAG(type_flags, _sound_channel_compressed_bit))
 	{
 		wave_format.wfx.wFormatTag= WAVE_FORMAT_PCM;
 		wave_format.wfx.wBitsPerSample= 16;
@@ -2214,83 +2360,281 @@ static boolean dsound_initialize_channel(
 		stream_desc.dwFlags= DSSTREAMCAPS_CTRL3D;
 	}
 
+	*stream= NULL;
 	result= IDirectSound_CreateSoundStream(
 		dsound_globals.direct_sound,
 		&stream_desc,
-		&channel->stream,
+		stream,
 		NULL);
-
 	if (result>=0)
 	{
-		if (TEST_FLAG(type_flags, _sound_channel_3d_bit))
+		dsound_port_formats.streams_made++;
+	}
+
+	return result;
+}
+
+/* port: a 2D channel's mix bins, as its type has them (the speaker config) */
+static void dsound_channel_set_mix_bins(
+	short channel_index)
+{
+	struct sound_channel *channel= channel_get(channel_index);
+	short type_flags= channel->type_flags;
+	unsigned long speaker_config;
+	unsigned long mixbins= 0;
+	long mixbin_volumes[MAXIMUM_DSOUND_MIXBINS];
+
+	IDirectSound_GetSpeakerConfig(dsound_globals.direct_sound, &speaker_config);
+
+	if (speaker_config & DSSPEAKER_ENABLE_AC3)
+	{
+		if (!TEST_FLAG(type_flags, _sound_channel_stereo_bit))
 		{
-			struct sound_location location;
+			mixbins= DSMIXBIN_FRONT_LEFT|DSMIXBIN_FRONT_RIGHT|DSMIXBIN_FRONT_CENTER;
 
-			csmemset(&location, 0, sizeof(location));
-			location.forward= *global_forward3d;
-
-			dsound_channel_set_location(channel_index, FALSE, &location, 0.f, 0.f, FALSE);
+			mixbin_volumes[0]= dsound_volume_from_gain(0.5f, 0);
+			mixbin_volumes[1]= dsound_volume_from_gain(0.5f, 0);
+			mixbin_volumes[2]= dsound_volume_from_gain(0.5f, 0);
 		}
 		else
 		{
-			unsigned long mixbins= 0;
-			long mixbin_volumes[MAXIMUM_DSOUND_MIXBINS];
+			mixbins= DSMIXBIN_FRONT_LEFT|DSMIXBIN_FRONT_RIGHT|DSMIXBIN_BACK_LEFT|
+				DSMIXBIN_BACK_RIGHT|DSMIXBIN_FXSEND_0|DSMIXBIN_FXSEND_1;
 
-			IDirectSound_GetSpeakerConfig(dsound_globals.direct_sound, &speaker_config);
-
-			if (speaker_config & DSSPEAKER_ENABLE_AC3)
-			{
-				if (!TEST_FLAG(type_flags, _sound_channel_stereo_bit))
-				{
-					mixbins= DSMIXBIN_FRONT_LEFT|DSMIXBIN_FRONT_RIGHT|DSMIXBIN_FRONT_CENTER;
-
-					mixbin_volumes[0]= dsound_volume_from_gain(0.5f, 0);
-					mixbin_volumes[1]= dsound_volume_from_gain(0.5f, 0);
-					mixbin_volumes[2]= dsound_volume_from_gain(0.5f, 0);
-				}
-				else
-				{
-					mixbins= DSMIXBIN_FRONT_LEFT|DSMIXBIN_FRONT_RIGHT|DSMIXBIN_BACK_LEFT|
-						DSMIXBIN_BACK_RIGHT|DSMIXBIN_FXSEND_0|DSMIXBIN_FXSEND_1;
-
-					mixbin_volumes[0]= dsound_volume_from_gain(1.f, 0);
-					mixbin_volumes[1]= dsound_volume_from_gain(1.f, 0);
-					mixbin_volumes[2]= dsound_volume_from_gain(0.5f, 0);
-					mixbin_volumes[3]= dsound_volume_from_gain(0.5f, 0);
-					mixbin_volumes[4]= dsound_volume_from_gain(0.5f, 0);
-					mixbin_volumes[5]= dsound_volume_from_gain(0.5f, 0);
-				}
-			}
-			else if (!TEST_FLAG(type_flags, _sound_channel_stereo_bit))
-			{
-				mixbins= DSMIXBIN_FRONT_LEFT|DSMIXBIN_FRONT_RIGHT;
-
-				mixbin_volumes[0]= dsound_volume_from_gain(0.5f, 0);
-				mixbin_volumes[1]= dsound_volume_from_gain(0.5f, 0);
-			}
-
-			if (mixbins)
-			{
-				IDirectSoundStream_SetMixBins(channel->stream, mixbins);
-				IDirectSoundStream_SetMixBinVolumes(channel->stream, mixbins, mixbin_volumes);
-			}
+			mixbin_volumes[0]= dsound_volume_from_gain(1.f, 0);
+			mixbin_volumes[1]= dsound_volume_from_gain(1.f, 0);
+			mixbin_volumes[2]= dsound_volume_from_gain(0.5f, 0);
+			mixbin_volumes[3]= dsound_volume_from_gain(0.5f, 0);
+			mixbin_volumes[4]= dsound_volume_from_gain(0.5f, 0);
+			mixbin_volumes[5]= dsound_volume_from_gain(0.5f, 0);
 		}
+	}
+	else if (!TEST_FLAG(type_flags, _sound_channel_stereo_bit))
+	{
+		mixbins= DSMIXBIN_FRONT_LEFT|DSMIXBIN_FRONT_RIGHT;
 
-		success= TRUE;
+		mixbin_volumes[0]= dsound_volume_from_gain(0.5f, 0);
+		mixbin_volumes[1]= dsound_volume_from_gain(0.5f, 0);
+	}
 
-		csmemset(&properties, 0, sizeof(properties));
+	if (mixbins)
+	{
+		IDirectSoundStream_SetMixBins(channel->stream, mixbins);
+		IDirectSoundStream_SetMixBinVolumes(channel->stream, mixbins, mixbin_volumes);
+	}
 
-		properties.minimum_distance= 1.f;
-		properties.maximum_distance= 1.f;
+	return;
+}
 
-		dsound_channel_set_properties(channel_index, &properties, FALSE);
+/* port: a stream let go of */
+static void dsound_channel_stream_release(
+	LPDIRECTSOUNDSTREAM stream)
+{
+	IDirectSoundStream_Release(stream);
+	dsound_port_formats.streams_released++;
+
+	return;
+}
+
+/* port: the channel's settings, as it last gave them, given to the stream
+it has switched to (dsound_channel_use_format) */
+static void dsound_channel_reapply(
+	short index)
+{
+	extern void dsound_sdl_stream_set_stereo_position(IDirectSoundStream *stream, BOOL positioned, float pan,
+		float distance, float minimum_distance, float distance_fade);
+	struct sound_channel *channel= channel_get(index);
+
+	IDirectSoundStream_SetVolume(channel->stream, dsound_volume_from_gain(PIN(channel->gain, 0.f, 1.f), 0));
+	IDirectSoundStream_SetFrequency(channel->stream,
+		dsound_frequency_from_pitch(dsound_channel_samples_per_second(index), channel->pitch));
+
+	if (TEST_FLAG(channel->type_flags, _sound_channel_3d_bit))
+	{
+		IDirectSoundStream_SetMode(channel->stream,
+			channel->spatialized ? DS3DMODE_NORMAL : DS3DMODE_DISABLE, DS3D_DEFERRED);
+		IDirectSoundStream_SetPosition(channel->stream, DSOUND_POINT3D(channel->position), DS3D_DEFERRED);
+		IDirectSoundStream_SetConeOrientation(channel->stream, DSOUND_VECTOR3D(channel->forward), DS3D_DEFERRED);
+		IDirectSoundStream_SetVelocity(channel->stream, DSOUND_VECTOR3D(channel->translational_velocity),
+			DS3D_DEFERRED);
+		IDirectSoundStream_SetMaxDistance(channel->stream, channel->maximum_distance, DS3D_DEFERRED);
+		IDirectSoundStream_SetMinDistance(channel->stream, channel->minimum_distance, DS3D_DEFERRED);
+		IDirectSoundStream_SetConeAngles(channel->stream,
+			dsound_angle_from_angle(channel->cone_inside_angle),
+			dsound_angle_from_angle(channel->cone_outside_angle),
+			DS3D_IMMEDIATE);
+		IDirectSoundStream_SetConeOutsideVolume(channel->stream,
+			dsound_volume_from_gain(PIN(channel->cone_outside_gain, 0.f, 1.f), 0), DS3D_DEFERRED);
+		dsound_channel_set_I3DL2_properties(index);
 	}
 	else
 	{
-		dsound_error(result, "couldn't create sound stream.");
+		dsound_channel_set_mix_bins(index);
+		if (TEST_FLAG(channel->type_flags, _sound_channel_stereo_bit))
+		{
+			dsound_channel_set_I3DL2_properties(index);
+			if (dsound_port_formats.stereo_positions[index].given)
+			{
+				dsound_sdl_stream_set_stereo_position(channel->stream,
+					dsound_port_formats.stereo_positions[index].positioned,
+					dsound_port_formats.stereo_positions[index].pan,
+					dsound_port_formats.stereo_positions[index].distance,
+					dsound_port_formats.stereo_positions[index].minimum_distance,
+					dsound_port_formats.stereo_positions[index].distance_fade);
+			}
+		}
 	}
 
-	return success;
+	return;
+}
+
+/* port: the channel index's stream made ready for a permutation of
+pcm_rate (sound_permutation_pcm_rate; 0: its type's Xbox ADPCM), on the
+thread that starts the sound, never the mixer's. A stream of the same kind
+(16-bit PCM at another rate) only has its frequency set. Another is the one
+the channel switched out last, or one made, and the one switched out is
+kept, the one kept longest let go first when the channels and the kept
+streams would come to more than MAXIMUM_SOUND_CHANNELS. The channel's
+settings are given to the stream switched in (dsound_channel_reapply).
+FALSE when no stream could be made: the channel keeps a stream of its
+format as it was. */
+static boolean dsound_channel_use_format(
+	short index,
+	long pcm_rate)
+{
+	struct sound_channel *channel= channel_get(index);
+	struct dsound_kept_stream *kept= &dsound_port_formats.kept[index];
+	long most_kept= MAXIMUM_SOUND_CHANNELS-dsound_globals.actual_channel_count;
+	LPDIRECTSOUNDSTREAM switched_out= channel->stream;
+	LPDIRECTSOUNDSTREAM switched_in= NULL;
+
+	if (dsound_port_formats.pcm_rates[index]==pcm_rate)
+	{
+		return TRUE;
+	}
+	if (dsound_port_formats.pcm_rates[index] && pcm_rate)
+	{
+		dsound_port_formats.pcm_rates[index]= pcm_rate;
+		IDirectSoundStream_SetFrequency(channel->stream,
+			dsound_frequency_from_pitch(dsound_channel_samples_per_second(index), channel->pitch));
+		return TRUE;
+	}
+
+	if (kept->stream)
+	{
+		/* (the channel's other format: kept[index] is always that) */
+		switched_in= kept->stream;
+		kept->stream= NULL;
+		dsound_port_formats.kept_count--;
+	}
+	else
+	{
+		/* room for one more stream: the one kept longest let go */
+		if (dsound_port_formats.kept_count>=most_kept && dsound_port_formats.kept_count>0)
+		{
+			short oldest= NONE;
+			short channel_index;
+
+			for (channel_index= 0; channel_index<dsound_globals.actual_channel_count; channel_index++)
+			{
+				struct dsound_kept_stream *other= &dsound_port_formats.kept[channel_index];
+
+				if (other->stream && (oldest==NONE || other->kept_at<dsound_port_formats.kept[oldest].kept_at))
+				{
+					oldest= channel_index;
+				}
+			}
+			if (oldest!=NONE)
+			{
+				dsound_channel_stream_release(dsound_port_formats.kept[oldest].stream);
+				dsound_port_formats.kept[oldest].stream= NULL;
+				dsound_port_formats.kept_count--;
+			}
+		}
+		/* (none may be kept at all: the channel's own let go first) */
+		if (most_kept<=0)
+		{
+			dsound_channel_stream_release(switched_out);
+			channel->stream= NULL;
+			switched_out= NULL;
+		}
+		if (dsound_channel_create_stream(index, pcm_rate, &switched_in)<0 || !switched_in)
+		{
+			dsound_error(DSERR_OUTOFMEMORY, "couldn't switch a channel's sound stream.");
+			if (!switched_out &&
+				dsound_channel_create_stream(index, dsound_port_formats.pcm_rates[index], &channel->stream)>=0)
+			{
+				dsound_channel_reapply(index);
+			}
+			return FALSE;
+		}
+	}
+
+	if (switched_out)
+	{
+		if (dsound_port_formats.kept_count<most_kept)
+		{
+			kept->stream= switched_out;
+			kept->kept_at= ++dsound_port_formats.kept_clock;
+			dsound_port_formats.kept_count++;
+		}
+		else
+		{
+			dsound_channel_stream_release(switched_out);
+		}
+	}
+	channel->stream= switched_in;
+	dsound_port_formats.pcm_rates[index]= pcm_rate;
+	dsound_channel_reapply(index);
+
+	return TRUE;
+}
+
+/* port: the rate the channel index plays at pitch 1: its permutation's own
+(dsound_channel_use_format), or its type's */
+static unsigned long dsound_channel_samples_per_second(
+	short index)
+{
+	struct sound_channel *channel= channel_get(index);
+
+	return dsound_port_formats.pcm_rates[index] ?
+		(unsigned long)dsound_port_formats.pcm_rates[index] :
+		sound_samples_per_second(TEST_FLAG(channel->type_flags, _sound_channel_44k_bit));
+}
+
+/* port: the bytes a packet of the channel starts at a multiple of: a block
+of Xbox ADPCM, or a 16-bit sample of each channel */
+static long dsound_channel_block_bytes(
+	short index)
+{
+	struct sound_channel *channel= channel_get(index);
+	long channels= TEST_FLAG(channel->type_flags, _sound_channel_stereo_bit) ? 2 : 1;
+
+	return dsound_port_formats.pcm_rates[index] ? 2*channels : SOUND_COMPRESSED_BLOCK_SIZE*channels;
+}
+
+/* port: the most bytes a packet of the channel holds: of Xbox ADPCM, 4096
+frames at 22 kHz (8192 at 44); of 16-bit PCM, as long or a little longer */
+static long dsound_channel_packet_bytes(
+	short index)
+{
+	struct sound_channel *channel= channel_get(index);
+	long pcm_rate= dsound_port_formats.pcm_rates[index];
+
+	if (pcm_rate)
+	{
+		long channels= TEST_FLAG(channel->type_flags, _sound_channel_stereo_bit) ? 2 : 1;
+		long frames= (pcm_rate+22049)/22050*
+			(MAXIMUM_COMPRESSED_SOUND_PACKET_SIZE/SOUND_COMPRESSED_BLOCK_SIZE)*SOUND_COMPRESSED_SAMPLES_PER_BLOCK;
+
+		return frames*2*channels;
+	}
+
+	return (long)(
+		(TEST_FLAG(channel->type_flags, _sound_channel_44k_bit) ? 2.f : 1.f)*
+		(TEST_FLAG(channel->type_flags, _sound_channel_stereo_bit) ? 2.f : 1.f)*
+		(real)(TEST_FLAG(channel->type_flags, _sound_channel_compressed_bit) ?
+			MAXIMUM_COMPRESSED_SOUND_PACKET_SIZE : MAXIMUM_SOUND_PACKET_SIZE));
 }
 
 static void CALLBACK dsound_channel_callback(
@@ -2314,7 +2658,16 @@ static void CALLBACK dsound_channel_callback(
 			{
 				if (channel->packet_count==0)
 				{
-					channel->state= _sound_channel_idle;
+					/* port: its next permutation, of another format, starts now
+					(dsound_channel_fill) */
+					if (dsound_port_formats.switch_pending[channel_index])
+					{
+						dsound_channel_fill(channel_index);
+					}
+					if (channel->packet_count==0)
+					{
+						channel->state= _sound_channel_idle;
+					}
 				}
 				else if (status!=XMEDIAPACKET_STATUS_FLUSHED)
 				{
@@ -2508,8 +2861,8 @@ static void dsound_channel_set_properties(
 	{
 		if (!realcmp_epsilon(properties->pitch, channel->pitch, 0.001f) || !dsound_globals.initialized)
 		{
-			unsigned long samples_per_second= sound_samples_per_second(
-				TEST_FLAG(channel->type_flags, _sound_channel_44k_bit));
+			/* port: or its permutation's own rate (dsound_channel_use_format) */
+			unsigned long samples_per_second= dsound_channel_samples_per_second(channel_index);
 			HRESULT result= IDirectSoundStream_SetFrequency(
 				channel->stream,
 				dsound_frequency_from_pitch(samples_per_second, properties->pitch));
@@ -2621,6 +2974,13 @@ static boolean dsound_channel_queue_packet(
 	struct sound_channel *channel= channel_get(index);
 	boolean queued= FALSE;
 
+	/* port: its playing permutation waits for the last one's packets, of
+	another format (dsound_channel_fill) */
+	if (dsound_port_formats.switch_pending[index])
+	{
+		return FALSE;
+	}
+
 	if (channel->playing_permutation)
 	{
 		if (channel->playing_permutation->cache_base_address)
@@ -2652,11 +3012,8 @@ static boolean dsound_channel_queue_packet(
 				packet.prtTimestamp= 0;
 				packet.pContext= sound;
 
-				if (remaining_size<=
-					(TEST_FLAG(channel->type_flags, _sound_channel_44k_bit) ? 2.f : 1.f)*
-					(TEST_FLAG(channel->type_flags, _sound_channel_stereo_bit) ? 2.f : 1.f)*
-					(real)(TEST_FLAG(channel->type_flags, _sound_channel_compressed_bit) ?
-						MAXIMUM_COMPRESSED_SOUND_PACKET_SIZE : MAXIMUM_SOUND_PACKET_SIZE))
+				/* port: a packet of the channel's format (dsound_channel_packet_bytes) */
+				if (remaining_size<=dsound_channel_packet_bytes(index))
 				{
 					if (channel->sample_offset)
 					{
@@ -2669,11 +3026,17 @@ static boolean dsound_channel_queue_packet(
 						{
 							channel->state= _sound_channel_playing;
 						}
+						/* port: the next, of another format, once this one has played
+						(dsound_channel_fill) */
+						if (channel->playing_permutation &&
+							sound_permutation_pcm_rate(channel->playing_permutation)!=dsound_port_formats.pcm_rates[index])
+						{
+							dsound_port_formats.switch_pending[index]= TRUE;
+						}
 					}
 					else
 					{
-						long block_size= SOUND_COMPRESSED_BLOCK_SIZE*
-							(TEST_FLAG(channel->type_flags, _sound_channel_stereo_bit) ? 2 : 1);
+						long block_size= dsound_channel_block_bytes(index);
 
 						channel->sample_offset= MAX(remaining_size/block_size/2, 1)*block_size;
 						/* port: and no more than the sound has (one smaller than
@@ -2686,11 +3049,7 @@ static boolean dsound_channel_queue_packet(
 				}
 				else
 				{
-					packet.dwMaxSize= (long)(
-						(TEST_FLAG(channel->type_flags, _sound_channel_44k_bit) ? 2.f : 1.f)*
-						(TEST_FLAG(channel->type_flags, _sound_channel_stereo_bit) ? 2.f : 1.f)*
-						(real)(TEST_FLAG(channel->type_flags, _sound_channel_compressed_bit) ?
-							MAXIMUM_COMPRESSED_SOUND_PACKET_SIZE : MAXIMUM_SOUND_PACKET_SIZE));
+					packet.dwMaxSize= dsound_channel_packet_bytes(index);
 
 					channel->sample_offset += packet.dwMaxSize;
 				}
@@ -2741,6 +3100,19 @@ static void dsound_channel_fill(
 {
 	struct sound_channel *channel= channel_get(index);
 
+	/* port: a permutation of another format than the one before it starts
+	once that one's packets have all played (dsound_channel_use_format) */
+	if (dsound_port_formats.switch_pending[index] && channel->packet_count==0)
+	{
+		dsound_port_formats.switch_pending[index]= FALSE;
+		if (channel->playing_permutation &&
+			!dsound_channel_use_format(index, sound_permutation_pcm_rate(channel->playing_permutation)))
+		{
+			channel->playing_permutation= NULL;
+			channel->queued_permutation= NULL;
+		}
+	}
+
 	while (channel->packet_count<MAXIMUM_SOUND_PACKETS && channel->playing_permutation)
 	{
 		unsigned long status;
@@ -2787,17 +3159,25 @@ static void dsound_channel_queue_sound(
 		{
 			HRESULT result;
 
+			/* port: its stream in the sound's format (a permutation kept as
+			16-bit PCM at its own rate, or the channel's Xbox ADPCM) */
+			dsound_port_formats.switch_pending[index]= FALSE;
+			if (!dsound_channel_use_format(index, sound_permutation_pcm_rate(sound)))
+			{
+				break;
+			}
+
 			channel->state= _sound_channel_playing;
 			channel->playing_permutation= sound;
 			channel->sample_offset= 0;
 			/* port: or from dsound_port_queue_sound_from's byte, at its block's
-			start (an uncompressed channel's is a 16-bit stereo sample) and
-			within the sound */
+			start (a 16-bit sample of each channel, for 16-bit PCM:
+			dsound_channel_block_bytes) and within the sound */
 			if (dsound_queue_sample_offset>0 &&
 				dsound_queue_sample_offset<sound->samples.size)
 			{
 				long block_size= TEST_FLAG(channel->type_flags, _sound_channel_compressed_bit) ?
-					SOUND_COMPRESSED_BLOCK_SIZE*(TEST_FLAG(channel->type_flags, _sound_channel_stereo_bit) ? 2 : 1) :
+					dsound_channel_block_bytes(index) :
 					4;
 
 				channel->sample_offset= dsound_queue_sample_offset-dsound_queue_sample_offset%block_size;
@@ -3002,6 +3382,9 @@ static void channel_stop(
 	short index)
 {
 	struct sound_channel *channel= channel_get(index);
+
+	/* port: (nothing waits to switch the format: dsound_channel_fill) */
+	dsound_port_formats.switch_pending[index]= FALSE;
 
 	if (channel->state!=_sound_channel_idle)
 	{

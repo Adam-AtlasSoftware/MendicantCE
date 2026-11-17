@@ -143,12 +143,12 @@ wchar_t const *controller_remap_prompt_text(short port, int button)
     long player;
     int i;
     if (button == CONTROLLER_REMAP_UNBOUND) return L"UNBOUND";
-    if (button < CONTROLLER_REMAP_PROMPT_PADDLE || button > CONTROLLER_REMAP_PROMPT_PADDLE + 3) return NULL;
+    if (!CONTROLLER_REMAP_PROMPT_EXTRA(button)) return NULL;
     if (port >= 0 && port < 4 && (player = local_player_get_player_index(port)) != NONE)
         port = player_get(player)->local_player_index;
     controller_device_get(port, &device);
-    name = controller_remap_button_name(CONTROLLER_REMAP_PADDLE + button - CONTROLLER_REMAP_PROMPT_PADDLE,
-        device.family);
+    name = controller_remap_device_button_name(CONTROLLER_REMAP_PADDLE + button - CONTROLLER_REMAP_PROMPT_PADDLE,
+        &device);
     for (i = 0; name[i] && i < (int)(sizeof(text) / sizeof(text[0])) - 1; i++) text[i] = (wchar_t)(unsigned char)name[i];
     text[i] = 0;
     return text;

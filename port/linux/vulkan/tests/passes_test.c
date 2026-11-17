@@ -2067,6 +2067,7 @@ static int hdr_told_reported[8];
 static unsigned int hdr_tells, hdr_encodes;
 static uint8_t hdr_encoded_format;
 static struct xgpu_hdr_frame hdr_encoded_frame;
+static struct xgpu_vulkan_output hdr_encoded_output;
 static struct xgpu_vulkan_image hdr_encoded;
 static int hdr_encode_fails;
 
@@ -2333,15 +2334,18 @@ static void hdr_display(int hdr, float headroom, float white_nits, int white_rep
 }
 
 static struct xgpu_vulkan_image *hdr_encode(struct xgpu_vulkan_image *image, const struct xgpu_hdr_frame *frame,
-	uint8_t format)
+	uint8_t format, const struct xgpu_vulkan_output *output)
 {
 	assert(image == &window_frame);
 	hdr_encodes++;
 	hdr_encoded_format = format;
 	hdr_encoded_frame = *frame;
+	hdr_encoded_output = *output;
 	if (hdr_encode_fails)
 		return NULL;
 	hdr_encoded.description.format = format;
+	hdr_encoded.description.width = output->width;
+	hdr_encoded.description.height = output->height;
 	return &hdr_encoded;
 }
 
@@ -2361,6 +2365,10 @@ static void hdr_window_reset(void)
 	hdr_encoded.image = (VkImage)(uintptr_t)800;
 	hdr_encoded.description.width = 640;
 	hdr_encoded.description.height = 480;
+	/* (the game's 8-bit frame) */
+	window_frame.description.format = XGPU_VULKAN_FORMAT_BGRA8;
+	xgpu_vulkan_gamma(1.0f);
+	xgpu_vulkan_hdr_sdr_curve(XGPU_HDR_SDR_CURVE_AUTO);
 }
 
 static void hdr_window_test(void)
@@ -2396,6 +2404,16 @@ static void hdr_window_test(void)
 	assert(window_made.imageColorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT);
 	assert(hdr_encodes == 1 && hdr_encoded_format == XGPU_VULKAN_FORMAT_RGB10A2 && window_blit_source == hdr_encoded.image);
 	assert(hdr_encoded_frame.output == XGPU_HDR_OUTPUT_PQ && hdr_encoded_frame.mode == XGPU_HDR_MODE_PUNCHY);
+	/* (dithered to PQ's 10 bits, drawn at the picture's size and copied
+	1:1; the SDR curve gamma 2.2's, "auto" off Apple's platforms) */
+	assert(hdr_encoded_output.levels == 1023.0f && hdr_encoded_output.power == 1.0f);
+	assert(window_blit_region.dstOffsets[1].x - window_blit_region.dstOffsets[0].x == (int32_t)hdr_encoded_output.width);
+	assert(window_blit_region.srcOffsets[1].x == (int32_t)hdr_encoded_output.width && window_blit_filter == VK_FILTER_NEAREST);
+	assert(hdr_encoded_frame.sdr_curve == XGPU_HDR_SDR_CURVE_GAMMA_2_2);
+	xgpu_vulkan_hdr_sdr_curve(XGPU_HDR_SDR_CURVE_SRGB);
+	xgpu_vulkan_hdr_frame(&frame);
+	assert(frame.sdr_curve == XGPU_HDR_SDR_CURVE_SRGB);
+	xgpu_vulkan_hdr_sdr_curve(XGPU_HDR_SDR_CURVE_AUTO);
 	assert(fabsf(hdr_encoded_frame.paper_white - 0.0203f) < 1e-6f && hdr_encoded_frame.peak == 4.0f);
 	assert(hdr_tells == 2);
 
@@ -2442,16 +2460,36 @@ static void hdr_window_test(void)
 	assert(window_made.imageFormat == VK_FORMAT_R16G16B16A16_SFLOAT);
 	assert(window_made.imageColorSpace == VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT);
 	assert(hdr_encoded_format == XGPU_VULKAN_FORMAT_RGBA16F && hdr_encoded_frame.output == XGPU_HDR_OUTPUT_SCRGB);
+	/* (half floats: no dither) */
+	assert(hdr_encoded_output.levels == 0.0f);
 	assert(fabsf(hdr_encoded_frame.paper_white - 1.0f) < 1e-6f && hdr_encoded_frame.peak == 4.0f);
 	unsetenv("HALO_VULKAN_HDR_OUTPUT");
 
-	/* the display's HDR off: told, and the swapchain SDR again, the frame
-	(still the half floats) blitted as it is, clamped */
+	/* the display's HDR off: told, and the swapchain SDR again; the frame,
+	still the half floats, has more bits than the swapchain: drawn by the
+	last pass, clamped and dithered to 8 bits (#1108) */
 	xgpu_vulkan_window_hdr(0, 1.0f, 1.0f);
+	window_frame.description.format = XGPU_VULKAN_FORMAT_RGBA16F;
 	hdr_encodes = 0;
 	assert(window_present_frame() && hdr_tells == 3 && !hdr_told[2][0] && window_swapchains == 4);
-	assert(window_made.imageFormat == VK_FORMAT_B8G8R8A8_UNORM && !hdr_encodes);
-	assert(window_blit_source == window_frame.image);
+	assert(window_made.imageFormat == VK_FORMAT_B8G8R8A8_UNORM && hdr_encodes == 1);
+	assert(hdr_encoded_format == XGPU_VULKAN_FORMAT_BGRA8 && hdr_encoded_frame.output == XGPU_HDR_OUTPUT_SDR);
+	assert(hdr_encoded_output.levels == 255.0f && hdr_encoded_output.power == 1.0f);
+	assert(window_blit_source == hdr_encoded.image);
+	/* (the negative control) the 8-bit frame at gamma 1: the swapchain's
+	codes already, blitted as it is, byte for byte, no dither */
+	window_frame.description.format = XGPU_VULKAN_FORMAT_BGRA8;
+	hdr_encodes = 0;
+	assert(window_present_frame() && !hdr_encodes && window_blit_source == window_frame.image);
+	/* display.gamma over the 8-bit frame: drawn, curved by one over it, and
+	dithered after the curve */
+	xgpu_vulkan_gamma(2.0f);
+	assert(window_present_frame() && hdr_encodes == 1 && window_blit_source == hdr_encoded.image);
+	assert(hdr_encoded_format == XGPU_VULKAN_FORMAT_BGRA8 && hdr_encoded_output.power == 0.5f &&
+		hdr_encoded_output.levels == 255.0f);
+	xgpu_vulkan_gamma(1.0f);
+	window_frame.description.format = XGPU_VULKAN_FORMAT_RGBA16F;
+	hdr_encodes = 0;
 
 	/* an encoding that fails: nothing presented that frame, the window
 	SDR from then on, and the display told it shows no HDR */
@@ -2601,6 +2639,7 @@ static void hdr_post_test(void)
 	static const float tone[4] = { 1.0f, 4.0f, 0.0f, 0.0f };
 	const struct xgpu_vulkan_post_uniforms *uniforms;
 	struct xgpu_hdr_frame encoding;
+	struct xgpu_vulkan_output output;
 
 	hdr_reset();
 	vk.depth_format = VK_FORMAT_D24_UNORM_S8_UINT;
@@ -2635,20 +2674,33 @@ static void hdr_post_test(void)
 	/* the encoding into an image of its own, of the swapchain's format
 	(the pipelines made at the start) */
 	post.encode[1] = (VkPipeline)(uintptr_t)93;
-	post_image(&encoded, 7, XGPU_VULKAN_FORMAT_RGB10A2, 64, 48);
 	post.encoded = &encoded;
 	memset(&encoding, 0, sizeof(encoding));
 	encoding.output = XGPU_HDR_OUTPUT_PQ;
 	encoding.paper_white = 0.02f;
 	encoding.peak = 4.0f;
-	assert(!xgpu_vulkan_post_encode(&frame, &encoding, XGPU_VULKAN_FORMAT_RGBA16F));
+	encoding.sdr_curve = XGPU_HDR_SDR_CURVE_GAMMA_2_2;
+	/* (the 64x48 frame shown at 128x96, twice each way sharply, dithered
+	to 10 bits) */
+	memset(&output, 0, sizeof(output));
+	output.width = 128;
+	output.height = 96;
+	output.factors[0] = output.factors[1] = 2;
+	output.power = 1.0f;
+	output.levels = 1023.0f;
+	post_image(&encoded, 7, XGPU_VULKAN_FORMAT_RGB10A2, 128, 96);
+	assert(!xgpu_vulkan_post_encode(&frame, &encoding, XGPU_VULKAN_FORMAT_RGBA16F, &output));
 	memset(hdr_events, 0, sizeof(hdr_events));
-	assert(xgpu_vulkan_post_encode(&frame, &encoding, XGPU_VULKAN_FORMAT_RGB10A2) == &encoded);
+	assert(xgpu_vulkan_post_encode(&frame, &encoding, XGPU_VULKAN_FORMAT_RGB10A2, &output) == &encoded);
 	assert(vk.color == &encoded && !vk.depth && strchr(hdr_events, 'D') && !strchr(hdr_events, 'I'));
 	uniforms = (const struct xgpu_vulkan_post_uniforms *)(post_ring + vk.bound.offsets[1]);
 	assert(uniforms->hdr[0] == 0.02f && uniforms->hdr[1] == 4.0f && uniforms->hdr[2] == (float)XGPU_HDR_OUTPUT_PQ);
-	assert(uniforms->metrics[0] == 0.0f && uniforms->metrics[2] == 1.0f / 64.0f && uniforms->metrics[3] == 1.0f / 48.0f);
-	assert(vk.bound.viewport.width == 64.0f && vk.bound.viewport.height == 48.0f);
+	assert(uniforms->metrics[0] == 0.0f && uniforms->metrics[2] == 1.0f / 128.0f && uniforms->metrics[3] == 1.0f / 96.0f);
+	assert(uniforms->bounds[0] == 64.0f && uniforms->bounds[1] == 48.0f && uniforms->bounds[2] == 2.0f &&
+		uniforms->bounds[3] == 2.0f);
+	assert(uniforms->window[0] == (float)XGPU_HDR_SDR_CURVE_GAMMA_2_2 && uniforms->window[1] == 1023.0f &&
+		uniforms->window[2] == 1.0f);
+	assert(vk.bound.viewport.width == 128.0f && vk.bound.viewport.height == 96.0f);
 
 	free(target.attachments);
 	free(depth.attachments);

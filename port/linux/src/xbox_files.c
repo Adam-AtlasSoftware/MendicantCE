@@ -15,7 +15,8 @@ its own folder, never in the current one or by where the app is. Without
 maps, the first start copies them into the game's folder
 (platform_offer_game_data); a paths.data whose folder has no maps (moved, or
 on a drive not connected) is passed over for the game's folder, and the
-first start says so.
+first start says so. Settings' ADD MAPS asks for the same screen at the next
+start, with the maps there (map_sources.c).
 h:\ is the Halo Custom Edition install paths.custom_edition names, if any
 (its maps folder holds the resource maps Custom Edition maps need, and more
 maps).
@@ -33,6 +34,7 @@ matched case-insensitively, like the Xbox's FATX volumes.
 #include "server_mode.h"
 #include "steam_workshop.h"
 #include "mcc_local_package.h"
+#include "map_sources.h"
 
 #ifdef HALO_MACOS
 #include <SDL3/SDL.h>
@@ -201,6 +203,20 @@ const char *platform_data_root(void)
 			if (!has_maps(root))
 				platform_log("no maps/ folder found; set paths.data in config.toml to the folder that holds maps/");
 		}
+#if !defined(HALO_ANDROID) && !defined(HALO_IOS)
+		/* Settings' ADD MAPS asked for the maps screen at this start, to add
+		the source the game lacks (map_sources.c): taken first, so that a
+		screen that fails is not asked for again */
+		if (has_maps(root) && !halo_server_mode() && map_sources_requested())
+		{
+			struct map_sources sources;
+
+			map_sources_request(FALSE);
+			map_sources_read(root, &sources);
+			if (map_sources_screen_at_start(&sources, TRUE))
+				platform_offer_game_data(root, NULL);
+		}
+#endif
 		trim_separators(root);
 		platform_log("data root: %s (the game's log: debug.txt there)", root);
 	}

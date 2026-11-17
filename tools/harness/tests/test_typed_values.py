@@ -95,7 +95,8 @@ def generated(fault=None):
         function(menus, name) for name in (
             "text_is_number", "settings_slider_made",
             "text_field_editing", "text_field_open", "text_field_begin", "text_field_begin_value",
-            "text_field_end", "text_field_insert", "text_field_show", "settings_slider_word", "settings_slider_number",
+            "text_field_end", "text_field_character_kept", "text_field_insert", "text_field_insert_character",
+            "text_field_show", "settings_slider_word", "settings_slider_number",
             "settings_slider_text", "settings_slider_field_text")])
     keyboard = function(inputs, "analog") + "\n\n" + function(inputs, "typing_gamepad")
     if where == "menus":

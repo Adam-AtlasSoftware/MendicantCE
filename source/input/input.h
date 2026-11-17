@@ -209,6 +209,9 @@ short fix_dead_zone(short value, short dead_range);
 /* port: a gamepad's sticks' dead zones, from its reading (input_xbox.c) */
 void input_port_fix_stick_dead_zones(short gamepad_index, short left_x, short left_y, short right_x, short right_y,
 	point2d *sticks);
+/* port: one stick's reading after given dead zones, round or each
+direction's own (input_xbox.c) */
+void input_port_fix_stick(short x, short y, short dead_range, short live_range, boolean round, point2d *stick);
 void update_ticks(byte *ticks, boolean down);
 void input_dispose(void);
 void input_activate(void);
@@ -216,6 +219,9 @@ void input_deactivate(void);
 void input_flush(void);
 boolean input_key_is_down(short key_code);
 boolean input_get_key(struct key_stroke *key);
+/* port: the character the key input_get_key gave last types (Unicode to
+U+017F: a letter with a mark too), 0 for none (#1134) */
+wchar_t input_key_character(void);
 const struct mouse_state *input_get_mouse_state(void);
 void input_suppress(void);
 boolean input_mouse_button_is_down(short button_index);

@@ -23,7 +23,10 @@ Each machine picks its pitches and permutations itself, as it always has,
 and the time is walked through the client's own, so the sound ends when it
 would have, had it started with the host's. A permutation whose samples'
 time is not known here (a compression other than none or Xbox ADPCM, which
-the channels play) starts at its beginning.
+the channels play) starts at its beginning; one imported from a Halo PC map
+or a mod and kept as 16-bit PCM at its own rate (sound_permutation_pcm_rate)
+is timed at that rate. Only this machine's own reckoning changes: what the
+host sends is a time, as it was.
 
 Only the scripts' own instance of the sound is placed (the looping sound
 definition's runtime_scripting_sound_index), and only in the refresh that
@@ -149,7 +152,8 @@ static long coop_sound_sync_elapsed(
 }
 
 /* a permutation's sample frames (one sample of each of its channels), or 0
-for a compression whose time is not known here */
+for a compression whose time is not known here; one kept as 16-bit PCM at
+its own rate is (sound_permutation_pcm_rate) */
 static long coop_sound_permutation_frames(
 	struct sound_definition const *definition,
 	struct sound_permutation const *permutation)
@@ -159,20 +163,31 @@ static long coop_sound_permutation_frames(
 
 	if (size <= 0)
 		return 0;
-	if (definition->compression == COOP_SOUND_COMPRESSION_NONE)
+	if (sound_permutation_pcm_rate(permutation) || definition->compression == COOP_SOUND_COMPRESSION_NONE)
 		return size / (2 * channels);
 	if (definition->compression == COOP_SOUND_COMPRESSION_XBOX_ADPCM)
 		return size / (COOP_SOUND_ADPCM_BLOCK_BYTES * channels) * COOP_SOUND_ADPCM_BLOCK_SAMPLES;
 	return 0;
 }
 
-/* the frames a permutation plays each second at played_pitch, or 0 */
+/* the frames a permutation plays each second at played_pitch, or 0 (one
+kept as 16-bit PCM plays at its own rate: sound_permutation_pcm_rate) */
 static real coop_sound_frames_per_second(
 	struct sound_definition const *definition,
+	struct sound_permutation const *permutation,
 	real played_pitch)
 {
-	if (!VALID_INDEX(definition->sample_rate, COOP_SOUND_SAMPLE_RATES) ||
-		!(played_pitch >= COOP_SOUND_MINIMUM_PITCH))
+	long pcm_rate = sound_permutation_pcm_rate(permutation);
+
+	if (!(played_pitch >= COOP_SOUND_MINIMUM_PITCH))
+	{
+		return 0.f;
+	}
+	if (pcm_rate)
+	{
+		return (real)pcm_rate * played_pitch;
+	}
+	if (!VALID_INDEX(definition->sample_rate, COOP_SOUND_SAMPLE_RATES))
 	{
 		return 0.f;
 	}
@@ -186,7 +201,7 @@ static long coop_sound_permutation_milliseconds(
 	struct sound_permutation const *permutation,
 	real played_pitch)
 {
-	real rate = coop_sound_frames_per_second(definition, played_pitch);
+	real rate = coop_sound_frames_per_second(definition, permutation, played_pitch);
 	long frames = coop_sound_permutation_frames(definition, permutation);
 	real milliseconds;
 
@@ -208,7 +223,7 @@ static long coop_sound_permutation_byte_offset(
 {
 	long channels = definition->encoding == COOP_SOUND_ENCODING_STEREO ? 2 : 1;
 	long frames = coop_sound_permutation_frames(definition, permutation);
-	real rate = coop_sound_frames_per_second(definition, played_pitch);
+	real rate = coop_sound_frames_per_second(definition, permutation, played_pitch);
 	real into = (real)milliseconds * rate / 1000.f;
 	long offset;
 
@@ -216,7 +231,13 @@ static long coop_sound_permutation_byte_offset(
 		return 0;
 	if (into >= (real)frames)
 		into = (real)(frames - 1);
-	if (definition->compression == COOP_SOUND_COMPRESSION_XBOX_ADPCM)
+	if (sound_permutation_pcm_rate(permutation))
+	{
+		/* (a 16-bit sample of each of its channels: sound_dsound_xbox.c's
+		dsound_channel_block_bytes) */
+		offset = (long)into * 2 * channels;
+	}
+	else if (definition->compression == COOP_SOUND_COMPRESSION_XBOX_ADPCM)
 	{
 		offset = (long)into / COOP_SOUND_ADPCM_BLOCK_SAMPLES * COOP_SOUND_ADPCM_BLOCK_BYTES * channels;
 	}

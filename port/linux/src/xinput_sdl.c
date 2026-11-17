@@ -212,6 +212,12 @@ gamepad's config.toml's */
 #define PAD_PLAYERS 4
 #define PAD_PLAYER_SLOT(gamepad) ((gamepad) >= 0 && (gamepad) < PAD_PLAYERS ? (gamepad) : PAD_PLAYERS)
 
+void halo_stick_ranges(long percent, long outer, short *dead_range, short *live_range)
+{
+	*dead_range = percent < 0 || percent > STICK_DEAD_ZONE_MAXIMUM ? STICK_DEAD_RANGE : (short)(percent * 32767 / 100);
+	*live_range = outer <= 0 || outer > STICK_OUTER_DEAD_ZONE_MAXIMUM ? 32767 : (short)(32767 - outer * 32767 / 100);
+}
+
 /* a gamepad's sticks' dead zones (stick 0 the left, 1 the right), of 32767:
 the deflection read as none, its player's input.left_stick_dead_zone and
 input.right_stick_dead_zone as a percentage, else the game's own; and the one
@@ -238,13 +244,9 @@ static void stick_dead_zones(short gamepad, short ranges[2], short live_ranges[2
 		pads[slot].read_at = config_changes();
 		for (index = 0; index < 2; index++)
 		{
-			long percent = config_player_integer(slot < PAD_PLAYERS ? slot : -1, settings[index]);
-			long outer = config_player_integer(slot < PAD_PLAYERS ? slot : -1, outer_settings[index]);
-
-			pads[slot].ranges[index] = percent < 0 || percent > STICK_DEAD_ZONE_MAXIMUM
-				? STICK_DEAD_RANGE : (short)(percent * 32767 / 100);
-			pads[slot].live_ranges[index] = outer <= 0 || outer > STICK_OUTER_DEAD_ZONE_MAXIMUM
-				? 32767 : (short)(32767 - outer * 32767 / 100);
+			halo_stick_ranges(config_player_integer(slot < PAD_PLAYERS ? slot : -1, settings[index]),
+				config_player_integer(slot < PAD_PLAYERS ? slot : -1, outer_settings[index]),
+				&pads[slot].ranges[index], &pads[slot].live_ranges[index]);
 		}
 	}
 	ranges[0] = pads[slot].ranges[0];
@@ -1230,7 +1232,7 @@ static const char *const binding_settings[NUMBER_OF_HALO_KEYBOARD_ACTIONS] =
 	"controls.flashlight", "controls.scoreboard", "controls.pause", "controls.screenshot",
 	"controls.report", "controls.push_to_talk", "controls.chat", "controls.team_chat", "controls.party_accept",
 	"controls.vote_yes", "controls.vote_no", "controls.clip", "controls.ping", "controls.walk",
-	"controls.spartan_link",
+	"controls.spartan_link", "controls.hide_hud",
 };
 
 static const struct
@@ -3121,25 +3123,63 @@ static void sdl_gamepad_state(SDL_Gamepad *gamepad, const struct gamepad_taps *t
 	if (abs(value) > abs(pad->sThumbRY)) pad->sThumbRY = value;
 }
 
-/* the back paddles held (controller_remap_paddles' bits: the left, the
-right, the second left, the second right; a Steam Deck's L4, R4, L5, R5),
-which only a custom layout's actions take (Button Remapping) */
+/* the extra buttons held (controller_remap_paddles' bits: the back paddles,
+the left, the right, the second left, the second right, a Steam Deck's L4,
+R4, L5, R5; the touchpad's click; misc1 to misc6), which only a custom
+layout's actions take (Button Remapping); a Valve pad's Quick Access button
+and its touches never (controller_extras_reserved) */
 static unsigned int sdl_gamepad_paddles(SDL_Gamepad *gamepad, const struct gamepad_taps *taps)
 {
-	static const SDL_GamepadButton paddles[4] =
+	static const SDL_GamepadButton paddles[CONTROLLER_REMAP_EXTRAS] =
 	{
 		SDL_GAMEPAD_BUTTON_LEFT_PADDLE1, SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1,
 		SDL_GAMEPAD_BUTTON_LEFT_PADDLE2, SDL_GAMEPAD_BUTTON_RIGHT_PADDLE2,
+		SDL_GAMEPAD_BUTTON_TOUCHPAD, SDL_GAMEPAD_BUTTON_MISC1, SDL_GAMEPAD_BUTTON_MISC2,
+		SDL_GAMEPAD_BUTTON_MISC3, SDL_GAMEPAD_BUTTON_MISC4, SDL_GAMEPAD_BUTTON_MISC5,
+		SDL_GAMEPAD_BUTTON_MISC6,
 	};
 	unsigned int held = 0;
 	int index;
 
-	for (index = 0; gamepad && index < 4; index++)
+	for (index = 0; gamepad && index < CONTROLLER_REMAP_EXTRAS; index++)
 	{
 		if (gamepad_button_down(gamepad, taps, paddles[index]))
 			held |= 1u << index;
 	}
+#ifndef HALO_GUEST
+	if (held)
+		held &= ~controller_extras_reserved(SDL_GetGamepadVendor(gamepad), SDL_GetGamepadProduct(gamepad));
+#endif
 	return held;
+}
+
+/* each port's controller's own sticks as last read (halo_controller_stick):
+the left's x and y, the right's, as XInput has them (up positive), before
+the keyboard, the mouse, the touch controls, the scripted player and VR are
+merged into the port's reading; none without a controller */
+static SHORT controller_sticks[PORT_COUNT][4];
+
+static void controller_sticks_read(int port, SDL_Gamepad *gamepad)
+{
+	static const SDL_GamepadAxis axes[4] =
+	{
+		SDL_GAMEPAD_AXIS_LEFTX, SDL_GAMEPAD_AXIS_LEFTY, SDL_GAMEPAD_AXIS_RIGHTX, SDL_GAMEPAD_AXIS_RIGHTY,
+	};
+	int index;
+
+	if (port < 0 || port >= PORT_COUNT)
+		return;
+	for (index = 0; index < 4; index++)
+		controller_sticks[port][index] = gamepad ? stick(SDL_GetGamepadAxis(gamepad, axes[index]), index & 1) : 0;
+}
+
+void halo_controller_stick(short port, short which, short *x, short *y)
+{
+	*x = *y = 0;
+	if (port < 0 || port >= PORT_COUNT || which < 0 || which > 1)
+		return;
+	*x = controller_sticks[port][which * 2];
+	*y = controller_sticks[port][which * 2 + 1];
 }
 
 /* ---------- gyro aiming and the flick stick (gyro_aim.h)
@@ -3952,6 +3992,7 @@ DWORD WINAPI XInputGetState(HANDLE device, PXINPUT_STATE state)
 	split_players = pc_menu_split_players() != 0;
 	count = sdl_gamepads(gamepads);
 	controller_device_update((short)port, port_gamepad(gamepads, count, port));
+	controller_sticks_read(port, port_gamepad(gamepads, count, port));
 	/* Keep physical remapping separate from the keyboard and touch controls. */
 	memset(&physical, 0, sizeof(physical));
 	/* (what was pressed and let go of since the last reading counts once,
@@ -4191,6 +4232,16 @@ DWORD WINAPI XInputDebugInitKeyboardQueue(PXINPUT_DEBUG_KEYQUEUE_PARAMETERS para
 	return ERROR_SUCCESS;
 }
 
+/* the character of the keystroke XInputDebugGetKeystroke gave last (the
+Xbox's has its ASCII alone): source/input/input_xbox.c keeps it with its key
+(#1134) */
+static unsigned short keystroke_character_given;
+
+unsigned short platform_keystroke_character(void)
+{
+	return keystroke_character_given;
+}
+
 DWORD WINAPI XInputDebugGetKeystroke(PXINPUT_DEBUG_KEYSTROKE keystroke)
 {
 	struct platform_keystroke next;
@@ -4218,6 +4269,7 @@ DWORD WINAPI XInputDebugGetKeystroke(PXINPUT_DEBUG_KEYSTROKE keystroke)
 			keystroke->VirtualKey = next.virtual_key;
 			keystroke->Ascii = next.ascii;
 			keystroke->Flags = next.flags;
+			keystroke_character_given = next.character;
 			return ERROR_SUCCESS;
 		}
 	}

@@ -32,6 +32,7 @@ and the debug keyboard that the game's console reads.
 #include "xiso.h"
 #include "map_unpack.h"
 #include "map_import.h"
+#include "map_sources.h"
 #ifdef HALO_VR
 #include "vr.h"
 #include "vr_host.h"
@@ -906,6 +907,7 @@ static void data_import_custom_edition(const char *destination)
 	char message[1600];
 	unsigned long long written = 0;
 	BOOL failed = FALSE;
+	struct map_sources sources;
 	int kind;
 
 	if (!data_choose_image(installer, sizeof(installer), TRUE, &failed, error, sizeof(error)))
@@ -932,9 +934,11 @@ static void data_import_custom_edition(const char *destination)
 		SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Halo", error, NULL);
 		return;
 	}
-	snprintf(message, sizeof(message), "%s %s. They show in the map lists' CUSTOM MULTIPLAYER.\n\n"
-		"Halo still needs the maps of your Xbox disc to start: choose Xbox disc image next.",
-		written ? "Custom Edition's maps are in" : "Custom Edition's maps were already in", folder);
+	map_sources_read(destination, &sources);
+	snprintf(message, sizeof(message), "%s %s. They show in the map lists' CUSTOM MULTIPLAYER.%s",
+		written ? "Custom Edition's maps are in" : "Custom Edition's maps were already in", folder,
+		sources.present[_map_source_xbox] ? "" :
+		"\n\nHalo still needs the maps of your Xbox disc to start: choose Xbox disc image next.");
 	SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, "Halo", message, NULL);
 }
 
@@ -952,9 +956,18 @@ BOOL platform_offer_game_data(const char *destination, const char *missing)
 		{ 0, _choice_custom_edition, "Custom Edition maps" },
 		{ SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, _choice_quit, "Quit" },
 	};
+	/* (Settings' ADD MAPS, with the Xbox maps there: Start in Quit's place,
+	map_sources.c) */
+	static const SDL_MessageBoxButtonData start_buttons[] =
+	{
+		{ 0, _choice_xbox, "Xbox disc image" },
+		{ 0, _choice_custom_edition, "Custom Edition maps" },
+		{ SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT | SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, _choice_quit, "Start" },
+	};
 	char message[2600];
 	char found[1024];
 	BOOL image_found;
+	struct map_sources sources;
 
 	/* not for runs nobody is watching */
 	if (config_boolean("debug.hidden_window") || config_real("debug.exit_after") > 0.0 ||
@@ -995,8 +1008,21 @@ BOOL platform_offer_game_data(const char *destination, const char *missing)
 		int answer = _choice_quit;
 		BOOL failed = FALSE;
 
+		map_sources_read(destination, &sources);
+		if (sources.present[_map_source_xbox])
+		{
+			snprintf(message, sizeof(message),
+				"Halo's maps: the Xbox maps are installed; Custom Edition's maps are %s.\n\n"
+				"Xbox disc image: copy the Xbox maps from a disc image to %s/maps again.\n\n"
+				"Custom Edition maps: add the multiplayer maps of Custom Edition's installer "
+				"(halocesetup_en_1.00.exe) to custom_maps; only those missing are written.",
+				sources.present[_map_source_custom_edition] ? "added" : "not added", destination);
+			question.buttons = start_buttons;
+		}
 		if (!SDL_ShowMessageBox(&question, &answer) || answer == _choice_quit)
 		{
+			if (sources.present[_map_source_xbox])
+				return TRUE;
 			platform_log("no game data: quitting");
 			exit(EXIT_SUCCESS);
 		}
@@ -2624,8 +2650,63 @@ static CHAR ascii_from_key(SDL_Keycode key, SDL_Keycode typed, SDL_Keymod modifi
 	return 0;
 }
 
+/* a letter with a mark a player's name keeps and the host folds to its plain
+letter (players.c's player_name_character_ascii): Latin-1's and Latin
+Extended-A's, U+00C0 to U+017F, but for the signs x and / */
+static BOOL typed_letter_kept(unsigned long character)
+{
+	return character >= 0xC0 && character <= 0x17F && character != 0xD7 && character != 0xF7;
+}
+
+/* the character a key types for a text field (#1134): its ASCII
+(ascii_from_key's), or a letter with a mark its layout types itself (typed:
+SDL_GetKeyFromScancode's, whose keycode is the character): é on a French
+keyboard's 2, ñ on a Spanish one's, ł with AltGr on a Polish one. 0 for
+none */
+static unsigned short keystroke_character(SDL_Keycode typed, CHAR ascii)
+{
+	if ((unsigned char)ascii >= ' ' && (unsigned char)ascii <= '~')
+		return (unsigned char)ascii;
+	if (typed_letter_kept((unsigned long)typed))
+		return (unsigned short)typed;
+	return 0;
+}
+
+/* the next character of UTF-8 text, the text moved past it; 0 at its end,
+0xFFFD for a broken sequence */
+static unsigned long utf8_next(const char **text)
+{
+	const unsigned char *at = (const unsigned char *)*text;
+	unsigned long character;
+	int more, index;
+
+	if (!*at)
+		return 0;
+	if (*at < 0x80)
+	{
+		*text += 1;
+		return *at;
+	}
+	more = *at >= 0xF0 ? 3 : *at >= 0xE0 ? 2 : *at >= 0xC0 ? 1 : 0;
+	character = *at & (0x3F >> more);
+	for (index = 1; index <= more; index++)
+	{
+		if ((at[index] & 0xC0) != 0x80)
+		{
+			*text += index;
+			return 0xFFFD;
+		}
+		character = character << 6 | (at[index] & 0x3F);
+	}
+	*text += more + 1;
+	return more ? character : 0xFFFD;
+}
+
+static BOOL screen_keyboard_active(void);
+
 static void queue_keystroke(const SDL_KeyboardEvent *event)
 {
+	SDL_Keycode typed = SDL_GetKeyFromScancode(event->scancode, event->mod, false);
 	struct platform_keystroke *keystroke;
 	BYTE flags = 0;
 
@@ -2643,10 +2724,36 @@ static void queue_keystroke(const SDL_KeyboardEvent *event)
 	if (!event->down) flags |= 0x40;
 	if (event->repeat) flags |= 0x80;
 	keystroke->virtual_key = virtual_key_from_scancode(event->scancode);
-	keystroke->ascii = event->down ? ascii_from_key(event->key,
-		SDL_GetKeyFromScancode(event->scancode, event->mod, false), event->mod) : 0;
+	keystroke->ascii = event->down ? ascii_from_key(event->key, typed, event->mod) : 0;
+	keystroke->character = event->down ? keystroke_character(typed, keystroke->ascii) : 0;
+	/* (while the system's keyboard is up, its text events give the letters
+	beyond ASCII: queue_text, not twice) */
+	if (keystroke->character > '~' && screen_keyboard_active())
+		keystroke->character = 0;
 	keystroke->flags = flags;
 	keystroke_count++;
+}
+
+/* (input_lock) the letters with a mark of a text event (the system's
+on-screen keyboard's: Steam's, a phone's), each a keystroke of its own with
+no key: SDL makes a key of each of ASCII's, which queue_keystroke has */
+static void queue_text(const char *text)
+{
+	unsigned long character;
+
+	while ((character = utf8_next(&text)) != 0)
+	{
+		struct platform_keystroke *keystroke;
+
+		if (!typed_letter_kept(character))
+			continue;
+		if (keystroke_count == KEYSTROKE_QUEUE_SIZE)
+			return;
+		keystroke = &keystroke_queue[(keystroke_head + keystroke_count) % KEYSTROKE_QUEUE_SIZE];
+		memset(keystroke, 0, sizeof(*keystroke));
+		keystroke->character = (unsigned short)character;
+		keystroke_count++;
+	}
 }
 
 /* (input_lock) a key pressed and let go of, as its events queue it */
@@ -2663,6 +2770,7 @@ static void queue_test_keystroke(BYTE virtual_key, CHAR ascii)
 		keystroke = &keystroke_queue[(keystroke_head + keystroke_count) % KEYSTROKE_QUEUE_SIZE];
 		keystroke->virtual_key = virtual_key;
 		keystroke->ascii = up ? 0 : ascii;
+		keystroke->character = up ? 0 : keystroke_character(0, ascii);
 		keystroke->flags = up ? 0x40 : 0;
 		keystroke_count++;
 	}
@@ -3686,6 +3794,11 @@ void platform_pump_events(void)
 				if (event.button.down)
 					mouse_buttons_pressed[event.button.button] = 1;
 			}
+			break;
+		/* (the system's on-screen keyboard's text, while a text field has it
+		up: its letters with a mark, which no key types) */
+		case SDL_EVENT_TEXT_INPUT:
+			queue_text(event.text.text);
 			break;
 		case SDL_EVENT_MOUSE_WHEEL:
 #ifndef HALO_ANDROID

@@ -6,7 +6,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, function, mutated, read, run
-from harness.audio import hand_off_state, stream_types
+from harness.audio import dsound_port_formats_state, hand_off_state, stream_types
 
 CASES = ["mixed-head", "unfinished", "all-finished", "paused", "repeat", "ordinary",
          "wrapped", "no-callback", "empty", "taken-during-flush"]
@@ -34,7 +34,8 @@ def generated(fault=None):
         "streams_complete_finished", "stream_from_interface", "stream_flush"])
     if fault:
         code = mutated(code, *fault)
-    return (("types.inc", stream_types()), ("state.inc", hand_off_state()), ("under_test.inc", code))
+    return (("types.inc", stream_types()), ("state.inc", hand_off_state() + dsound_port_formats_state()),
+            ("under_test.inc", code))
 
 
 @pytest.mark.parametrize("case", CASES)

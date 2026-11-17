@@ -39,7 +39,9 @@ highlights it cannot show.
   (`faithful`, `punchy`), `display.hdr_paper_white_nits` (80 to 500 nits,
   or 0, the default: the system's SDR white; the older
   `display.hdr_paper_white`, in percent of the system's SDR white, is still
-  read while it is 0), `display.hdr_ui_nits` (the UI's brightness, below).
+  read while it is 0), `display.hdr_ui_nits` (the UI's brightness, below),
+  `display.hdr_sdr_curve` (`auto`, `srgb`, `2.2`: the shadows' curve, under
+  "Choices").
   On a renderer that draws HDR (the menus' `platform="hdr"`), Video
   Setup's Brightness page has a row for each under its HDR section, and a
   DISPLAY PEAK row that shows the display's peak and SDR white as the
@@ -372,9 +374,34 @@ the stream's ring carries it, written by the host). A backend declares
   alone would make plasma cores deep blue where the game shows them
   white-hot; the SDR colour alone would wash out a glow that is barely past
   white (the counter). The mix keeps both looks.
-- **sRGB's curve, not a 2.2 power.** Untagged 8-bit content on a Mac reaches
-  the panel through its sRGB-curve transfer, so sRGB's curve keeps the
-  shadows where the SDR picture has them.
+- **The SDR curve of the platform** (`display.hdr_sdr_curve`, #1120). The
+  encoding takes the frame's values to light by the curve an SDR display of
+  the platform shows them with, so that HDR's shadows are where the SDR
+  picture has them. Untagged 8-bit content on a Mac reaches the panel
+  through its sRGB-curve transfer, so `auto` is sRGB's curve on macOS and
+  iOS. Most PC monitors and TVs show SDR at gamma 2.2, far darker near
+  black (code 1 sixty times, code 10 four times), so `auto` is 2.2 elsewhere:
+  a 2.2 power to code 25, sRGB's curve from code 51 up, joined by a
+  smoothstep (never falling), so only the shadows move. `srgb` and `2.2`
+  choose either everywhere. No black floor is added: with 2.2, code 1 is
+  0.001 nit, as on the SDR display.
+- **One last pass, dithered** (#1108). The frame's last pass (the encoding
+  program) draws the picture at its size in the swapchain: it scales the
+  frame (Vulkan's sharp upscale in one tap), encodes it (HDR's encoding, or
+  `display.gamma`'s curve over SDR), then dithers by a static triangular
+  noise of up to one output level (1/255 for 8 bits, 1/1023 for HDR10's PQ),
+  narrowed near black and white so it never rounds past them, and none at
+  them. On Vulkan its image is copied 1:1 into the swapchain (a blit has no
+  arithmetic and would scale the pattern); on Metal it draws into the drawable. scRGB's and
+  EDR's half floats are not dithered. The dither only helps where the
+  frame has more bits than the output: the HDR frame's half floats (about
+  11 bits, enough for 8-bit SDR and 10-bit PQ), or a curve between them.
+  The SDR frame is BGRA8 (every blend rounded to 1/255 before the last
+  pass), so at gamma 1 it is the swapchain's codes already and is copied
+  byte for byte, undithered; at other gammas the dither keeps the curve's
+  mean (gamma 0.5 no longer crushes codes 1 to 11 all to black), but cannot
+  smooth the steps an 8-bit frame already has. Smoothing SDR's fog needs a
+  half-float SDR frame (#1152's 10-bit SDR output).
 - **sRGB's gamut.** The EDR layer is tagged extended linear sRGB, as the
   owner asked: no colour is pushed into P3. The SDR layer stays untagged (it
   is unchanged), which on a P3 panel shows the game's colours slightly more

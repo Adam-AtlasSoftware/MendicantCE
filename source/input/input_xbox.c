@@ -439,6 +439,31 @@ static void fix_round_dead_zone(
 	return;
 }
 
+/* port: one stick's reading after its dead zones (dead_range read as none,
+live_range as full): round (fix_round_dead_zone), or each direction's own
+(fix_dead_zones); input_port_fix_stick_dead_zones' for the game, and Advanced
+Stick Settings' reading of the stick by the page's values (menu_functions.c's
+stick_test_rows_show) */
+void input_port_fix_stick(
+	short x,
+	short y,
+	short dead_range,
+	short live_range,
+	boolean round,
+	point2d *stick)
+{
+	if (round)
+	{
+		fix_round_dead_zone(x, y, dead_range, live_range, stick);
+	}
+	else
+	{
+		stick->x = fix_dead_zones(x, dead_range, live_range);
+		stick->y = fix_dead_zones(y, dead_range, live_range);
+	}
+	return;
+}
+
 /* port: a gamepad's sticks' dead zones from its reading (input_update's, and
 a sub-step's: input_abstraction.c), each its player's own dead range
 (halo_stick_dead_range) and outer dead range (halo_stick_live_range),
@@ -471,24 +496,10 @@ void input_port_fix_stick_dead_zones(
 	{
 		look_stick = input_abstraction_port_look_stick(gamepad_index);
 	}
-	if (look_stick == _gamepad_stick_left)
-	{
-		fix_round_dead_zone(left_x, left_y, left_range, left_live, &sticks[_gamepad_stick_left]);
-	}
-	else
-	{
-		sticks[_gamepad_stick_left].x = fix_dead_zones(left_x, left_range, left_live);
-		sticks[_gamepad_stick_left].y = fix_dead_zones(left_y, left_range, left_live);
-	}
-	if (look_stick == _gamepad_stick_right)
-	{
-		fix_round_dead_zone(right_x, right_y, right_range, right_live, &sticks[_gamepad_stick_right]);
-	}
-	else
-	{
-		sticks[_gamepad_stick_right].x = fix_dead_zones(right_x, right_range, right_live);
-		sticks[_gamepad_stick_right].y = fix_dead_zones(right_y, right_range, right_live);
-	}
+	input_port_fix_stick(left_x, left_y, left_range, left_live, look_stick == _gamepad_stick_left,
+		&sticks[_gamepad_stick_left]);
+	input_port_fix_stick(right_x, right_y, right_range, right_live, look_stick == _gamepad_stick_right,
+		&sticks[_gamepad_stick_right]);
 	return;
 }
 
@@ -732,6 +743,23 @@ boolean input_key_is_down(
 	}
 
 	return result;
+}
+
+/* port: the character each buffered key types (Unicode to U+017F, 0 for
+none: port/linux/src/xinput_sdl.c's platform_keystroke_character), beside
+the key, whose ascii_code is ASCII's alone: a letter with a mark for a text
+field (#1134). A letter of the system's on-screen keyboard's, which no key
+types, is buffered with no key (key_code NONE) */
+unsigned short platform_keystroke_character(void);
+static wchar_t input_buffered_key_characters[MAXIMUM_BUFFERED_KEYSTROKES];
+
+wchar_t input_key_character(
+	void)
+{
+	short index = input_globals.buffered_key_read_index - 1;
+
+	return index >= 0 && index < input_globals.buffered_key_write_index ?
+		input_buffered_key_characters[index] : 0;
 }
 
 boolean input_get_key(
@@ -1212,6 +1240,16 @@ static void input_update_keyboard_devices(
 				0x308,
 				keystroke.VirtualKey>=0 && keystroke.VirtualKey<NUMBER_OF_VIRTUAL_CODES);
 			key.key_code = virtual_key_to_key_code[keystroke.VirtualKey];
+			/* port: a letter with no key (the system's keyboard's), buffered
+			for the text fields (input_key_character) */
+			if (key.key_code == NONE && platform_keystroke_character() &&
+				!(keystroke.Flags & XINPUT_DEBUG_KEYSTROKE_FLAG_KEYUP) &&
+				input_globals.buffered_key_write_index < MAXIMUM_BUFFERED_KEYSTROKES)
+			{
+				input_buffered_key_characters[input_globals.buffered_key_write_index] =
+					(wchar_t)platform_keystroke_character();
+				input_globals.buffered_keys[input_globals.buffered_key_write_index++] = key;
+			}
 			if (key.key_code != NONE)
 			{
 				match_assert(
@@ -1231,6 +1269,9 @@ static void input_update_keyboard_devices(
 				{
 					if (input_globals.buffered_key_write_index < MAXIMUM_BUFFERED_KEYSTROKES)
 					{
+						/* port: and the character it types */
+						input_buffered_key_characters[input_globals.buffered_key_write_index] =
+							(wchar_t)platform_keystroke_character();
 						input_globals.buffered_keys[
 							input_globals.buffered_key_write_index++] = key;
 					}
