@@ -771,6 +771,9 @@ CONTROL_COMMAND_ROWS = {f"command_{n}" for n in range(1, CONTROL_ROWS + 1)}
 # (an action's row: its name, then its two bindings' columns, to the row's end)
 CONTROL_BINDINGS_X, CONTROL_BINDING_WIDTH = (136, 240), 104
 STREAMER = ("interface_settings/streamer_mode", "streamer_mode_screen")
+# (Online's multiplayer rules, the host's choice in a network game, a page of
+# their own once Online had no room for VEHICLE HIJACKING)
+GAMEPLAY = ("network_setup/gameplay", "gameplay_screen")
 # (Audio's voice chat, a page of its own)
 VOICE_CHAT = ("audio_settings/voice_chat", "voice_chat_screen")
 # (Online's Discord account: port/linux/src/player_link.c)
@@ -1062,16 +1065,9 @@ PAGES = {
             # other players send, so Online's; its files keep their names)
             ("STREAMER MODE ›", None, _page_screen(*STREAMER),
              "Hides offensive words in names and text from other players, maps and mods, as stars.", None),
-            # (players.c's unit_should_autopick_weapon: a network game's
-            # host's, network_standard.c's network_standard_walk_over_pickup)
-            ("WEAPON PICKUP", "game.auto_pickup", [("HOLD (XBOX)", "false"), ("WALK OVER (CE)", "true")],
-             "Multiplayer, with a weapon slot empty: Hold picks up a weapon as you hold the action button, as on "
-             "the Xbox; Walk Over as you walk over it, as in Custom Edition. Online: the host's choice.", None),
-            # (port/linux/game/vehicle_hijack.c: a network game's host's,
-            # network_standard.c's network_standard_vehicle_hijack)
-            ("VEHICLE HIJACKING", "game.vehicle_hijack", ON_OFF,
-             "Hold the action button beside an enemy's Ghost, Warthog or landed Banshee to throw the rider out "
-             "and take it. Online: the host's choice.", None),
+            ("GAMEPLAY ›", None, _page_screen(*GAMEPLAY),
+             "Multiplayer's rules: how weapons are picked up, and vehicle hijacking. Online: the host's choice.",
+             None),
             # (port/linux/game/map_share.c: this machine's part in another's
             # game)
             (SECTION, "MAP SHARING"),
@@ -1644,6 +1640,22 @@ PAGES = {
             ("PORTRAIT FRAME", "display.frame_style", [("PLAIN", "plain"), ("HALO", "halo"), ("XBOX", "xbox")],
              "The look of the screen around the picture when you play in portrait: plain black, Halo's blue lines "
              "and rings, or Xbox green. It is never drawn over the picture.", "android"),
+        ],
+    },
+    GAMEPLAY[0]: {
+        "screen": GAMEPLAY[1], "title": "GAMEPLAY",
+        "rows": [
+            (SECTION, "MULTIPLAYER"),
+            # (players.c's unit_should_autopick_weapon: a network game's
+            # host's, network_standard.c's network_standard_walk_over_pickup)
+            ("WEAPON PICKUP", "game.auto_pickup", [("HOLD (XBOX)", "false"), ("WALK OVER (CE)", "true")],
+             "Multiplayer, with a weapon slot empty: Hold picks up a weapon as you hold the action button, as on "
+             "the Xbox; Walk Over as you walk over it, as in Custom Edition. Online: the host's choice.", None),
+            # (port/linux/game/vehicle_hijack.c: a network game's host's,
+            # network_standard.c's network_standard_vehicle_hijack)
+            ("VEHICLE HIJACKING", "game.vehicle_hijack", ON_OFF,
+             "Hold the action button beside an enemy's Ghost, Warthog or landed Banshee to throw the rider out "
+             "and take it. Online: the host's choice.", None),
         ],
     },
     STREAMER[0]: {
