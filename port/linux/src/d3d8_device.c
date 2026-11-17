@@ -306,6 +306,9 @@ static struct
 	/* the game's renderer's category, and what its code says of the draws
 	(halo_hdr_category, halo_hdr_draw_kind) */
 	int category, kind;
+	/* display.hdr_highlight_boost's level (0 none: XGPU_HDR_BOOST_MOST at
+	most; #1123) */
+	int boost;
 	/* a window's 3D view is drawn (its categories), until it is tone
 	mapped: the draws after are the HUD's and the menus' */
 	BOOL view;
@@ -317,7 +320,7 @@ static struct
 	int display_logged;
 	char display_text[160];
 	int display_text_frames;
-} hdr = { FALSE, FALSE, 0, 0, -1, 0, 0, FALSE, FALSE, -1 };
+} hdr = { FALSE, FALSE, 0, 0, -1, 0, 0, 0, FALSE, FALSE, -1 };
 
 static int hdr_back_buffer_format(void)
 {
@@ -669,6 +672,7 @@ static unsigned short hdr_tag(const struct xgpu_pipeline_key *key)
 	draw.interface = !hdr.view;
 	draw.kind = hdr.kind;
 	draw.mode = hdr.mode;
+	draw.boost = hdr.boost;
 	return xgpu_hdr_classify(&draw);
 }
 
@@ -2590,6 +2594,10 @@ static void hdr_read(void)
 		ui_nits_read = (int)config_integer("display.hdr_ui_nits");
 		mode_read = config_string("display.hdr_mode") && !strcmp(config_string("display.hdr_mode"), "punchy") ?
 			XGPU_HDR_MODE_PUNCHY : XGPU_HDR_MODE_FAITHFUL;
+		/* (display.hdr_highlight_boost: the draws' tags take it as they are
+		made, #1123) */
+		hdr.boost = (int)config_integer("display.hdr_highlight_boost");
+		hdr.boost = hdr.boost < 0 ? 0 : hdr.boost > XGPU_HDR_BOOST_MOST ? XGPU_HDR_BOOST_MOST : hdr.boost;
 	}
 	setting = setting_read;
 	paper_white = paper_white_read;

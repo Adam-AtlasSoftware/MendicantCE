@@ -1536,6 +1536,17 @@ static void hdr_output(struct xgpu_text *text, unsigned short hdr)
 
 	if (!XGPU_HDR_SHADER_BLENDS(hdr))
 	{
+		/* (an emitter's light gained by display.hdr_highlight_boost's
+		level, before the fixed function adds it: xgpu_hdr_boost_emitter) */
+		if (XGPU_HDR_IS_EMITTER(hdr))
+			xgpu_text_append(text,
+				"\t{\n"
+				"\t\tfloat3 boost_extra = source.rgb * %.6f;\n"
+				"\t\tsource.rgb += boost_extra * clamp((%.6f - max(source.r, max(source.g, source.b))) / "
+				"max(max(boost_extra.r, max(boost_extra.g, boost_extra.b)), 1.0e-6), 0.0, 1.0);\n"
+				"\t}\n", XGPU_HDR_BOOST_STEP * (float)XGPU_HDR_BOOST_OF(hdr),
+				XGPU_HDR_EMITTER_BOUND(hdr) == XGPU_HDR_CEILING_WEAPON ? XGPU_HDR_CEILING_WEAPON_VALUE :
+				XGPU_HDR_CEILING_LIGHT_VALUE);
 		xgpu_text_append(text, "\toutput.color = source;\n");
 		return;
 	}
@@ -2629,6 +2640,17 @@ char *xgpu_msl_pixel_shader(const struct xgpu_pixel_program *program, const stru
 			"\t\tif (added_most > 0.0)\n"
 			"\t\t\tself_illumination = added * min(%.6f * smoothstep(%.6f, 1.0, most) * most / added_most, %.6f);\n"
 			"\t}\n", XGPU_HDR_SELF_ILLUMINATION_VALUE - 1.0f, XGPU_HDR_SELF_ILLUMINATION_KNEE, XGPU_HDR_EXPAND_MOST);
+	/* (... gained by display.hdr_highlight_boost's level, toward the same
+	ceiling: xgpu_hdr_self_illuminate_boost) */
+	if (self_illuminated && XGPU_HDR_BOOST_OF(program->hdr))
+		xgpu_text_append(&text,
+			"\t{\n"
+			"\t\tfloat3 boost_rgb = saturate(result.rgb) + self_illumination;\n"
+			"\t\tfloat3 boost_extra = (max(saturate(result.rgb) - self_illumination_base, float3(0.0)) + "
+			"self_illumination) * %.6f;\n"
+			"\t\tself_illumination += boost_extra * clamp((%.6f - max(boost_rgb.r, max(boost_rgb.g, boost_rgb.b))) / "
+			"max(max(boost_extra.r, max(boost_extra.g, boost_extra.b)), 1.0e-6), 0.0, 1.0);\n"
+			"\t}\n", XGPU_HDR_BOOST_STEP * (float)XGPU_HDR_BOOST_OF(program->hdr), XGPU_HDR_SELF_ILLUMINATION_VALUE);
 	/* (display.ambient_occlusion: a lightmap pass's light, by the
 	occlusion, before the enhanced dynamic lights add theirs) */
 	if (occlusion_light == XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP)

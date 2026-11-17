@@ -190,10 +190,13 @@ XGPU_HDR_ALPHA_LIMIT */
 #define XGPU_HDR_CEILING_OF(hdr) (((hdr) >> 11) & 7)
 #define XGPU_HDR_ALPHA_LIMIT 0x4000
 #define XGPU_HDR_LIGHTS 0x8000
-/* the shader blends the draw itself (its fixed-function blend is off) */
-#define XGPU_HDR_SHADER_BLENDS(hdr) (XGPU_HDR_CEILING_OF(hdr) != 0 || ((hdr) & XGPU_HDR_ALPHA_LIMIT) != 0)
+/* the shader blends the draw itself (its fixed-function blend is off; a
+blend operation a draw has: the operations past them, 6 and 7, are the
+tags below, whose ceiling's bits are a highlight boost's level) */
+#define XGPU_HDR_SHADER_BLENDS(hdr) (XGPU_HDR_BLEND_OPERATION(hdr) < 6 && \
+	(XGPU_HDR_CEILING_OF(hdr) != 0 || ((hdr) & XGPU_HDR_ALPHA_LIMIT) != 0))
 /* the draw is a glow, brightened toward its ceiling (xgpu_hdr_expand) */
-#define XGPU_HDR_GLOW(hdr) (XGPU_HDR_CEILING_OF(hdr) >= XGPU_HDR_CEILING_WEAPON)
+#define XGPU_HDR_GLOW(hdr) (XGPU_HDR_BLEND_OPERATION(hdr) < 6 && XGPU_HDR_CEILING_OF(hdr) >= XGPU_HDR_CEILING_WEAPON)
 /* the pixel stage unclamped above (a blend operation no draw has, without
 a ceiling or the alpha limit: no draw the shader blends) */
 #define XGPU_HDR_UNCLAMPED XGPU_HDR_BLEND(0, 0, 7)
@@ -203,8 +206,27 @@ without a ceiling or the alpha limit; XGPU_HDR_LIGHTS may be set too): the
 combiner stages whose constants are the self-illumination's colours, a bit
 each (stage n's 1 << n) */
 #define XGPU_HDR_SELF_ILLUMINATION(stages) ((unsigned short)(XGPU_HDR_BLEND(0, 0, 6) | ((stages) & 0xff)))
-#define XGPU_HDR_IS_SELF_ILLUMINATED(hdr) (!XGPU_HDR_SHADER_BLENDS(hdr) && XGPU_HDR_BLEND_OPERATION(hdr) == 6)
+#define XGPU_HDR_IS_SELF_ILLUMINATED(hdr) (XGPU_HDR_BLEND_OPERATION(hdr) == 6 && !((hdr) & XGPU_HDR_ALPHA_LIMIT))
 #define XGPU_HDR_SELF_ILLUMINATION_STAGES(hdr) ((hdr) & 0xff)
+/* display.hdr_highlight_boost (#1123): its level (0 none, the picture as
+it was; at most XGPU_HDR_BOOST_MOST), in the ceiling's bits of a
+self-illuminated surface's tag (XGPU_HDR_SELF_ILLUMINATION's) and of an
+emitter's. An emitter's draw (an additive self-illuminated particle, a
+glow, a sun's lens flare and glow, blended by the fixed function) has its
+pixel's colour gained before the blend, its bound (XGPU_HDR_CEILING_LIGHT,
+or XGPU_HDR_CEILING_WEAPON for the first-person weapon's effects) in the
+blend's source bits: xgpu_hdr_boost_emitter */
+#define XGPU_HDR_BOOST(level) XGPU_HDR_CEILING(level)
+#define XGPU_HDR_BOOST_OF(hdr) (XGPU_HDR_BLEND_OPERATION(hdr) >= 6 ? XGPU_HDR_CEILING_OF(hdr) : 0)
+#define XGPU_HDR_EMITTER(level, bound) ((unsigned short)(XGPU_HDR_BLEND((bound), 0, 7) | XGPU_HDR_BOOST(level)))
+#define XGPU_HDR_IS_EMITTER(hdr) (XGPU_HDR_BLEND_OPERATION(hdr) == 7 && !((hdr) & XGPU_HDR_ALPHA_LIMIT) && \
+	XGPU_HDR_BLEND_SOURCE(hdr) != 0 && XGPU_HDR_CEILING_OF(hdr) != 0)
+#define XGPU_HDR_EMITTER_BOUND(hdr) XGPU_HDR_BLEND_SOURCE(hdr)
+#define XGPU_HDR_BOOST_MOST 4
+/* a level's gain on the emitter's light, in the frame's values: 1 and a
+quarter more a level (twice at the most: about 5 times its light where
+nothing bounds it) */
+#define XGPU_HDR_BOOST_STEP 0.25f
 
 /* the ceilings, in the frame's values (sRGB's curve, extended): paper
 white; then the glows': the first-person weapon's, 1.75 times paper
@@ -417,6 +439,48 @@ self-illumination: what it has past the same pixel without it (base) */
 static inline void xgpu_hdr_self_illuminate(float rgb[3], const float base[3])
 {
 	xgpu_hdr_expand_toward(rgb, base, XGPU_HDR_SELF_ILLUMINATION_VALUE, XGPU_HDR_SELF_ILLUMINATION_KNEE);
+}
+
+/* display.hdr_highlight_boost (#1123): a gain (1 + XGPU_HDR_BOOST_STEP a
+level) on the light an emitter adds to what was under it (rgb, after
+today's: what it had, base), bounded: its brightest channel taken no
+further than max(ceiling, its brightest as it was), so the boost never
+passes the ceiling, nor takes away what the pixel had past it (the
+emitter's light scaled, its hue kept). Level 0: as it was, exactly */
+static inline void xgpu_hdr_boost_toward(float rgb[3], const float base[3], int level, float ceiling)
+{
+	float extra[3], extra_most, most = fmaxf(rgb[0], fmaxf(rgb[1], rgb[2])), share;
+	int channel;
+
+	if (level <= 0)
+		return;
+	for (channel = 0; channel < 3; channel++)
+		extra[channel] = fmaxf(rgb[channel] - base[channel], 0.0f) * (XGPU_HDR_BOOST_STEP * (float)level);
+	extra_most = fmaxf(extra[0], fmaxf(extra[1], extra[2]));
+	if (!(extra_most > 0.0f))
+		return;
+	share = (ceiling - most) / extra_most;
+	share = share < 0.0f ? 0.0f : share > 1.0f ? 1.0f : share;
+	for (channel = 0; channel < 3; channel++)
+		rgb[channel] += extra[channel] * share;
+}
+
+/* a self-illuminated surface's pixel as xgpu_hdr_self_illuminate leaves
+it, with a boost's level (XGPU_HDR_BOOST_OF), toward its own ceiling */
+static inline void xgpu_hdr_self_illuminate_boost(float rgb[3], const float base[3], int level)
+{
+	xgpu_hdr_self_illuminate(rgb, base);
+	xgpu_hdr_boost_toward(rgb, base, level, XGPU_HDR_SELF_ILLUMINATION_VALUE);
+}
+
+/* an emitter's pixel (rgb, the shader's colour in [0, 1], before the
+fixed-function blend adds it) gained by a boost's level, its brightest
+no further than its bound's ceiling (XGPU_HDR_CEILING_LIGHT, _WEAPON) */
+static inline void xgpu_hdr_boost_emitter(float rgb[3], int level, int bound)
+{
+	static const float none[3] = { 0.0f, 0.0f, 0.0f };
+
+	xgpu_hdr_boost_toward(rgb, none, level, xgpu_hdr_ceiling_value(bound));
 }
 
 /* the soft shoulder: identity to the knee, then toward the peak, never
@@ -674,6 +738,9 @@ struct xgpu_hdr_draw
 	/* a structure's lightmap pass lit by the enhanced dynamic lights */
 	int dynamic_lights;
 	int mode;
+	/* display.hdr_highlight_boost's level (0 none: XGPU_HDR_BOOST_MOST at
+	most) */
+	int boost;
 };
 
 /* halo_hdr_draw_kind's (port/linux/include/halo_linux_source_fixups.h has
@@ -701,6 +768,11 @@ whose constants are its colours, a bit each, in the bits above 8
 (HALO_HDR_KIND_SELF_ILLUMINATION_STAGES) */
 #define HALO_HDR_KIND_SELF_ILLUMINATION 64
 #define HALO_HDR_KIND_SELF_ILLUMINATION_STAGES(stages) ((stages) << 8)
+/* an emitter of light the boost gains (#1123): a self-illuminated
+particle, a glow, a sun's lens flare and its glow; ... the first-person
+weapon's (its effects: a muzzle flash), toward the weapon's ceiling */
+#define HALO_HDR_KIND_EMITTER 128
+#define HALO_HDR_KIND_EMITTER_FIRST_PERSON (1 << 16)
 #endif
 
 /* ---------- the display, as the menus and the log show it (xgpu_hdr.c) */

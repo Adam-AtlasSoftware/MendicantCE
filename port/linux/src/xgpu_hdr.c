@@ -192,6 +192,19 @@ unsigned short xgpu_hdr_classify(const struct xgpu_hdr_draw *draw)
 	white is its own, a ceiling or the alpha limit first) */
 	else if ((draw->kind & HALO_HDR_KIND_SELF_ILLUMINATION) && colour && !draw->interface)
 		hdr = XGPU_HDR_SELF_ILLUMINATION(draw->kind >> 8);
+	/* (display.hdr_highlight_boost, #1123: a self-illuminated surface's
+	pass, and an emitter's additive draw the fixed function blends, gained
+	by its level; none of the HUD's or the menus') */
+	if (draw->boost > 0 && colour && !draw->interface)
+	{
+		int level = draw->boost < XGPU_HDR_BOOST_MOST ? draw->boost : XGPU_HDR_BOOST_MOST;
+
+		if (XGPU_HDR_IS_SELF_ILLUMINATED(hdr))
+			hdr |= XGPU_HDR_BOOST(level);
+		else if (!hdr && additive && (draw->kind & (HALO_HDR_KIND_EMITTER | HALO_HDR_KIND_EMITTER_FIRST_PERSON)))
+			hdr = XGPU_HDR_EMITTER(level, draw->kind & HALO_HDR_KIND_EMITTER_FIRST_PERSON ? XGPU_HDR_CEILING_WEAPON :
+				XGPU_HDR_CEILING_LIGHT);
+	}
 	if (draw->dynamic_lights)
 		hdr |= XGPU_HDR_LIGHTS;
 	return hdr;

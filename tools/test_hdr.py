@@ -186,6 +186,168 @@ int main(void)
 		!(XGPU_HDR_SELF_ILLUMINATION(0xff) & (XGPU_HDR_CEILING(7) | XGPU_HDR_ALPHA_LIMIT | XGPU_HDR_LIGHTS)),
 		"self-illumination is no blend a draw has, its stages their own bits");
 
+	{
+		/* display.hdr_highlight_boost (#1123): at 0 (the default) every tag
+		as it was, an emitter's draw untagged and a self-illuminated pass's
+		tag its own; above 0 the level in the self-illumination's tag, and an
+		emitter's additive draw tagged with it and its bound (the lights',
+		the first-person weapon's), blended by the fixed function; never the
+		HUD's or the menus', nor an emitter's alpha blend */
+		struct xgpu_hdr_draw draw;
+		int level, si_kind = HALO_HDR_KIND_SELF_ILLUMINATION | HALO_HDR_KIND_SELF_ILLUMINATION_STAGES(1 << 1);
+
+		memset(&draw, 0, sizeof(draw));
+		draw.color_mask = RGB;
+		draw.category = 2;
+		draw.kind = si_kind;
+		draw.boost = 0;
+		CHECK(xgpu_hdr_classify(&draw) == XGPU_HDR_SELF_ILLUMINATION(1 << 1), "boost 0: self-illumination's tag as it was");
+		draw.blend = 1;
+		draw.blend_source = XGPU_BLEND_SOURCE_ALPHA;
+		draw.blend_destination = XGPU_BLEND_ONE;
+		draw.blend_operation = ADD;
+		draw.category = 22;
+		draw.kind = HALO_HDR_KIND_EMITTER;
+		CHECK(xgpu_hdr_classify(&draw) == 0, "boost 0: an emitter untagged");
+		draw.kind = HALO_HDR_KIND_EMITTER_FIRST_PERSON;
+		CHECK(xgpu_hdr_classify(&draw) == 0, "boost 0: a muzzle flash untagged");
+		for (level = 1; level <= XGPU_HDR_BOOST_MOST; level++)
+		{
+			unsigned short tag;
+
+			draw.boost = level;
+			draw.kind = HALO_HDR_KIND_EMITTER;
+			tag = xgpu_hdr_classify(&draw);
+			CHECK(tag == XGPU_HDR_EMITTER(level, XGPU_HDR_CEILING_LIGHT) && XGPU_HDR_IS_EMITTER(tag) &&
+				XGPU_HDR_BOOST_OF(tag) == level && XGPU_HDR_EMITTER_BOUND(tag) == XGPU_HDR_CEILING_LIGHT &&
+				!XGPU_HDR_SHADER_BLENDS(tag) && !XGPU_HDR_GLOW(tag) && !XGPU_HDR_IS_UNCLAMPED(tag) &&
+				!XGPU_HDR_IS_SELF_ILLUMINATED(tag), "level %d: an emitter's tag %04x", level, tag);
+			draw.kind = HALO_HDR_KIND_EMITTER_FIRST_PERSON;
+			tag = xgpu_hdr_classify(&draw);
+			CHECK(XGPU_HDR_IS_EMITTER(tag) && XGPU_HDR_EMITTER_BOUND(tag) == XGPU_HDR_CEILING_WEAPON,
+				"level %d: a muzzle flash bound by the weapon's ceiling: %04x", level, tag);
+			draw.interface = 1;
+			draw.category = 27;
+			CHECK(!XGPU_HDR_IS_EMITTER(xgpu_hdr_classify(&draw)) && !XGPU_HDR_BOOST_OF(xgpu_hdr_classify(&draw)),
+				"level %d: not over the tone mapped view", level);
+			draw.interface = 0;
+			draw.category = 22;
+			draw.blend_destination = XGPU_BLEND_ONE_MINUS_SOURCE_ALPHA;
+			CHECK(xgpu_hdr_classify(&draw) == 0, "level %d: an emitter's alpha blend untagged", level);
+			draw.blend_destination = XGPU_BLEND_ONE;
+		}
+		draw.blend = 0;
+		draw.category = 2;
+		draw.kind = si_kind;
+		draw.boost = 3;
+		CHECK(xgpu_hdr_classify(&draw) == (XGPU_HDR_SELF_ILLUMINATION(1 << 1) | XGPU_HDR_BOOST(3)) &&
+			XGPU_HDR_IS_SELF_ILLUMINATED(xgpu_hdr_classify(&draw)) && !XGPU_HDR_SHADER_BLENDS(xgpu_hdr_classify(&draw)) &&
+			XGPU_HDR_SELF_ILLUMINATION_STAGES(xgpu_hdr_classify(&draw)) == (1 << 1) &&
+			XGPU_HDR_BOOST_OF(xgpu_hdr_classify(&draw)) == 3, "level 3: self-illumination's tag carries it");
+		draw.boost = 9;
+		CHECK(XGPU_HDR_BOOST_OF(xgpu_hdr_classify(&draw)) == XGPU_HDR_BOOST_MOST, "a level past the most, the most");
+		CHECK(!XGPU_HDR_SHADER_BLENDS(XGPU_HDR_EMITTER(7, 7)) && XGPU_HDR_EMITTER(7, 7) != XGPU_HDR_UNCLAMPED &&
+			!(XGPU_HDR_EMITTER(7, 7) & (XGPU_HDR_ALPHA_LIMIT | XGPU_HDR_LIGHTS)) && XGPU_HDR_BOOST_OF(XGPU_HDR_UNCLAMPED) == 0,
+			"the emitter's tag no blend a draw has, apart from unclamped's");
+	}
+	{
+		/* (#1123's macros: XGPU_HDR_SHADER_BLENDS, _GLOW and
+		_IS_SELF_ILLUMINATED, which now leave out the blend operations 6 and
+		7, give what they gave before, as before's macros below, for every
+		tag the classification makes at level 0: each blend (on, off; every
+		factor and operation), colour mask, category, kind, mode, the 3D
+		view and the HUD's, the dynamic lights; and with HDR off (SDR) no
+		draw is tagged at all: d3d8_device.c's hdr_tag) */
+		static const int categories[] = { -1, 1, 2, 5, 9, 12, 13, 14, 15, 16, 17, 18, 19, 22, 24, 26, 27, 28 };
+		static const int kinds[] = { 0, HALO_HDR_KIND_FIRST_PERSON, HALO_HDR_KIND_FIRST_PERSON | HALO_HDR_KIND_NUMERIC,
+			HALO_HDR_KIND_FIRST_PERSON | HALO_HDR_KIND_METER, HALO_HDR_KIND_SPECULAR, HALO_HDR_KIND_HUD_GLOW,
+			HALO_HDR_KIND_LIGHT, HALO_HDR_KIND_SELF_ILLUMINATION | HALO_HDR_KIND_SELF_ILLUMINATION_STAGES(0xff),
+			HALO_HDR_KIND_EMITTER, HALO_HDR_KIND_EMITTER_FIRST_PERSON };
+		static const int masks[] = { 0, RGB, XGPU_WRITE_ALPHA, ALL };
+		struct xgpu_hdr_draw draw;
+		long tags = 0, differ = 0;
+		int on, source, destination, operation, mask, category, kind, interface, mode, lights;
+
+#define OLD_SHADER_BLENDS(hdr) (XGPU_HDR_CEILING_OF(hdr) != 0 || ((hdr) & XGPU_HDR_ALPHA_LIMIT) != 0)
+#define OLD_GLOW(hdr) (XGPU_HDR_CEILING_OF(hdr) >= XGPU_HDR_CEILING_WEAPON)
+#define OLD_IS_SELF_ILLUMINATED(hdr) (!OLD_SHADER_BLENDS(hdr) && XGPU_HDR_BLEND_OPERATION(hdr) == 6)
+		memset(&draw, 0, sizeof(draw));
+		for (on = 0; on < 2; on++)
+		for (source = 0; source <= XGPU_BLEND_ONE_MINUS_CONSTANT_ALPHA; source++)
+		for (destination = 0; destination <= XGPU_BLEND_ONE_MINUS_CONSTANT_ALPHA; destination++)
+		for (operation = XGPU_BLEND_ADD; operation <= XGPU_BLEND_MAX; operation++)
+		for (mask = 0; mask < 4; mask++)
+		for (category = 0; category < (int)(sizeof(categories) / sizeof(categories[0])); category++)
+		for (kind = 0; kind < (int)(sizeof(kinds) / sizeof(kinds[0])); kind++)
+		for (interface = 0; interface < 2; interface++)
+		for (mode = F; mode <= P; mode++)
+		for (lights = 0; lights < 2; lights++)
+		{
+			unsigned short tag;
+
+			draw.blend = on;
+			draw.blend_source = source;
+			draw.blend_destination = destination;
+			draw.blend_operation = operation;
+			draw.color_mask = masks[mask];
+			draw.category = categories[category];
+			draw.kind = kinds[kind];
+			draw.interface = interface;
+			draw.mode = mode;
+			draw.dynamic_lights = lights;
+			draw.boost = 0;
+			tag = xgpu_hdr_classify(&draw);
+			tags++;
+			if (XGPU_HDR_SHADER_BLENDS(tag) != OLD_SHADER_BLENDS(tag) || XGPU_HDR_GLOW(tag) != OLD_GLOW(tag) ||
+				XGPU_HDR_IS_SELF_ILLUMINATED(tag) != OLD_IS_SELF_ILLUMINATED(tag) || XGPU_HDR_BOOST_OF(tag) ||
+				XGPU_HDR_IS_EMITTER(tag))
+				differ++;
+		}
+		CHECK(!differ && tags > 1000000, "level 0: %ld of %ld tags read otherwise by the new macros", differ, tags);
+	}
+	{
+		/* the gain: level 0 nothing, bit for bit; each level a quarter more
+		of the emitter's light, its hue kept, its brightest no further than
+		its ceiling (the lights' 3 times paper white's light, the weapon's
+		1.75), nor below what it was where it is past it already; and a
+		self-illuminated panel's light past paper white, toward its own
+		ceiling, its lit surface as it was */
+		float dim[3] = { 0.4f, 0.2f, 0.1f }, same[3] = { 0.4f, 0.2f, 0.1f }, bright[3] = { 1.0f, 0.5f, 0.2f },
+			flash[3] = { 1.0f, 0.5f, 0.2f }, past[3] = { 2.0f, 1.0f, 0.5f };
+		float base[3] = { 0.25f, 0.25f, 0.28f }, screen[3] = { 0.45f, 0.95f, 1.0f }, plain[3] = { 0.45f, 0.95f, 1.0f },
+			glyph[3] = { 0.30f, 0.42f, 0.35f }, glyph_plain[3] = { 0.30f, 0.42f, 0.35f },
+			wall[3] = { 0.25f, 0.25f, 0.28f };
+		int level;
+
+		xgpu_hdr_boost_emitter(same, 0, XGPU_HDR_CEILING_LIGHT);
+		CHECK(same[0] == 0.4f && same[1] == 0.2f && same[2] == 0.1f, "level 0: nothing");
+		xgpu_hdr_boost_emitter(dim, 2, XGPU_HDR_CEILING_LIGHT);
+		CHECK(fabsf(dim[0] - 0.6f) < 1e-6f && fabsf(dim[1] - 0.3f) < 1e-6f && fabsf(dim[2] - 0.15f) < 1e-6f,
+			"level 2: half again: %.4f %.4f %.4f", dim[0], dim[1], dim[2]);
+		xgpu_hdr_boost_emitter(bright, 4, XGPU_HDR_CEILING_LIGHT);
+		CHECK(fabsf(bright[0] - XGPU_HDR_CEILING_LIGHT_VALUE) < 1e-5f && fabsf(bright[1] / bright[0] - 0.5f) < 1e-5f,
+			"level 4: to the lights' ceiling, its hue kept: %.4f %.4f", bright[0], bright[1]);
+		xgpu_hdr_boost_emitter(flash, 4, XGPU_HDR_CEILING_WEAPON);
+		CHECK(fabsf(flash[0] - XGPU_HDR_CEILING_WEAPON_VALUE) < 1e-5f, "a muzzle flash to the weapon's: %.4f", flash[0]);
+		xgpu_hdr_boost_toward(past, (const float[3]){ 0.0f, 0.0f, 0.0f }, 4, XGPU_HDR_CEILING_LIGHT_VALUE);
+		CHECK(past[0] == 2.0f && past[1] == 1.0f, "past the ceiling already: as it was");
+		xgpu_hdr_self_illuminate(plain, base);
+		xgpu_hdr_self_illuminate_boost(screen, base, 0);
+		CHECK(!memcmp(screen, plain, sizeof(screen)), "self-illumination at level 0 as it was");
+		xgpu_hdr_self_illuminate_boost(glyph, base, 4);
+		xgpu_hdr_self_illuminate(glyph_plain, base);
+		CHECK(glyph[1] > glyph_plain[1], "a dim glyph brighter: %.4f, %.4f", glyph[1], glyph_plain[1]);
+		for (level = 1; level <= XGPU_HDR_BOOST_MOST; level++)
+		{
+			float rgb[3] = { 0.45f, 0.95f, 1.0f }, lit[3] = { 0.25f, 0.25f, 0.28f };
+
+			xgpu_hdr_self_illuminate_boost(rgb, base, level);
+			xgpu_hdr_self_illuminate_boost(lit, base, level);
+			CHECK(fmaxf(rgb[0], fmaxf(rgb[1], rgb[2])) <= XGPU_HDR_SELF_ILLUMINATION_VALUE + 1e-5f &&
+				rgb[2] >= plain[2], "level %d: a screen within its ceiling: %.4f", level, rgb[2]);
+			CHECK(lit[0] == wall[0] && lit[1] == wall[1] && lit[2] == wall[2], "level %d: the lit wall as it was", level);
+		}
+	}
 	/* the reference: Faithful leaves under white as it is, and stays
 	under the peak, rising with the light, past it */
 	for (mode = F; mode <= P; mode++)

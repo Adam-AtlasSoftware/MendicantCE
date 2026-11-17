@@ -19,6 +19,9 @@ enum build_sprites_flags
 {
 	_build_sprites_screen_space_bit = 0,
 	_build_sprites_first_person_bit,
+	/* port: the sprites are light (a self-illuminated particle, a glow):
+	display.hdr_highlight_boost gains them (xgpu_hdr.h, #1123) */
+	_build_sprites_emitter_bit,
 	NUMBER_OF_BUILD_SPRITES_FLAGS,
 };
 

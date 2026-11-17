@@ -41,7 +41,8 @@ highlights it cannot show.
   `display.hdr_paper_white`, in percent of the system's SDR white, is still
   read while it is 0), `display.hdr_ui_nits` (the UI's brightness, below),
   `display.hdr_sdr_curve` (`auto`, `srgb`, `2.2`: the shadows' curve, under
-  "Choices"), `display.hdr_peak_nits` (the display's peak, below).
+  "Choices"), `display.hdr_peak_nits` (the display's peak, below),
+  `display.hdr_highlight_boost` (the lights' gain, below).
   On a renderer that draws HDR (the menus' `platform="hdr"`), Video
   Setup's Brightness page has a row for each under its HDR section, and a
   DISPLAY PEAK row that shows the display's peak and SDR white as the
@@ -66,6 +67,21 @@ highlights it cannot show.
   `xgpu_hdr_highlight`), and its black, under 4 times which the encoding
   lifts the light into the display's range (`xgpu_hdr_black`). Without
   them (0: other systems, or System's peak) both are the curve as before.
+- **Highlight boost** (`display.hdr_highlight_boost`, #1123): 0 (the
+  default: the picture as before, exactly) to 4. Each level gains the
+  light an emitter adds by a quarter more, its brightest channel no
+  further than its ceiling (nor than itself where it is already past):
+  the self-illumination of models and level geometry toward
+  self-illumination's 2 times paper white (`xgpu_hdr_self_illuminate_boost`),
+  and, before the fixed-function blend adds it, the colour of a draw the
+  game marks as light (`HALO_HDR_KIND_EMITTER`: the lens flares and the
+  sun's glow, glows, self-illuminated particles; the first-person
+  weapon's toward the weapon's ceiling) toward the lights' 3 times
+  (`xgpu_hdr_boost_emitter`). The level is in the tag's ceiling bits of
+  the self-illumination's and the emitter's tags (`XGPU_HDR_BOOST`,
+  `XGPU_HDR_EMITTER`), so a change makes those draws' pipelines again.
+  Not boosted: contrails and particle systems' particles (unmarked), and
+  an additive emitter that also writes alpha (blended in its shader).
 - **Fallback**: `auto` turns HDR on only on an HDR display; off, and on an
   SDR display, the frame is the 8-bit one, byte for byte. Highlights roll
   off under a soft shoulder to the display's peak (its EDR headroom, which

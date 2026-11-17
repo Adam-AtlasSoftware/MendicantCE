@@ -205,6 +205,13 @@ enum
 };
 #endif
 
+/* port: sprites that are light, which display.hdr_highlight_boost gains
+(render_sprite.c: a self-illuminated particle, a glow; #1123) */
+enum
+{
+	_rasterizer_geometry_emitter_bit = NUMBER_OF_RASTERIZER_GEOMETRY_FLAGS + 1,
+};
+
 enum
 {
 	_shader_type_screen = 0,
@@ -1155,6 +1162,11 @@ static int transparent_hdr_kind(
 	{
 		kind |= HALO_HDR_KIND_LIGHT;
 	}
+	/* (sprites that are light: display.hdr_highlight_boost's emitters, the
+	first-person weapon's toward its own ceiling) */
+	if (TEST_FLAG(group->geometry_flags, _rasterizer_geometry_emitter_bit))
+		kind |= TEST_FLAG(group->geometry_flags, _rasterizer_geometry_first_person_bit) ?
+			HALO_HDR_KIND_EMITTER_FIRST_PERSON : HALO_HDR_KIND_EMITTER;
 	return kind;
 }
 

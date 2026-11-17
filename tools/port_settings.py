@@ -1329,6 +1329,10 @@ PAGES = {
             ("PEAK BRIGHTNESS", "display.hdr_peak_nits", PEAKS,
              "With HDR, the brightest your display shows, in nits, for a display that reports a wrong peak. "
              "System uses the one it reports. Only the highlights change.", "hdr"),
+            ("HIGHLIGHT BOOST", "display.hdr_highlight_boost",
+             [("OFF", "0"), ("LOW", "1"), ("MEDIUM", "2"), ("HIGH", "3"), ("MAX", "4")],
+             "With HDR, brighter lights of the game's own: the sun's flares, glows, glowing particles, vehicle "
+             "lights and panels. Off keeps the picture as it is. The HUD and menus stay as they are.", "hdr"),
             (SECTION, "DISPLAY"),
             # (the display's peak and SDR white as the system reports them:
             # menu_functions.c's hdr_display_show)

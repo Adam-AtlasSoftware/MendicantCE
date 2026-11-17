@@ -572,6 +572,13 @@ static const struct config_setting config_settings[] =
 		"reports a wrong one; 0 is the system's. Only the highlights change.\n"
 		"With a peak of your own, the display's full-frame peak and black,\n"
 		"where Windows reports them, shape the highlights and the shadows too." },
+	{ "display.hdr_highlight_boost", _config_integer, "0", "HALO_HDR_HIGHLIGHT_BOOST", _environment_value,
+		_platform_all,
+		"With HDR, how much brighter the game's own lights are, 0 to 4: the\n"
+		"sun's lens flares and glow, glows, self-illuminated particles and\n"
+		"surfaces (vehicle lights, panels). 0 keeps the picture as it is. Never\n"
+		"past the ceilings the lights already have; the HUD, the menus, fog and\n"
+		"screen flashes stay at paper white." },
 	{ "display.gamma", _config_real, "1.0", "HALO_GAMMA", _environment_value, _platform_all,
 		"The picture's gamma, 0.5 to 2.0, as Halo PC's: above 1 brighter (the\n"
 		"dark parts lifted most), below 1 darker; white and black stay. The\n"

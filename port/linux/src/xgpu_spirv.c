@@ -4405,6 +4405,19 @@ static unsigned int brightest_of(struct module *m, unsigned int rgb)
 		extract(m, rgb, 2)));
 }
 
+/* display.hdr_highlight_boost (#1123): what a boost's level adds to rgb,
+the light it has past what was under it (added, at least 0) gained, its
+brightest no further than the ceiling, nor than itself where it is
+already past: xgpu_hdr_boost_toward */
+static unsigned int boost_extra(struct module *m, unsigned int rgb, unsigned int added, int level, float ceiling)
+{
+	unsigned int extra = fscale(m, 3, added, constant_float(m, XGPU_HDR_BOOST_STEP * (float)level));
+	unsigned int share = fclamp(m, 1, fdiv(m, 1, fsub(m, 1, constant_float(m, ceiling), brightest_of(m, rgb)),
+		fmax_scalar(m, 1, brightest_of(m, extra), 1.0e-6f)), 0.0f, 1.0f);
+
+	return fscale(m, 3, extra, share);
+}
+
 /* where an interlocked draw writes its colour (hdr_destination): its
 target as a storage image, the pixel's place and the sample's (0: none) */
 struct hdr_store
@@ -5140,6 +5153,12 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 		more = op3(&m, OP_SELECT, m.t_float, compare(&m, OP_F_ORD_GREATER_THAN, added_most, constant_float(&m, 0.0f)),
 			more, constant_float(&m, 0.0f));
 		self_illumination = fscale(&m, 3, added, more);
+		/* (... gained by display.hdr_highlight_boost's level, toward the
+		same ceiling: xgpu_hdr_self_illuminate_boost) */
+		if (XGPU_HDR_BOOST_OF(program->hdr))
+			self_illumination = fadd(&m, 3, self_illumination, boost_extra(&m, fadd(&m, 3, lit, self_illumination),
+				fadd(&m, 3, added, self_illumination), XGPU_HDR_BOOST_OF(program->hdr),
+				XGPU_HDR_SELF_ILLUMINATION_VALUE));
 	}
 	/* (display.ambient_occlusion: a lightmap pass's light, by the
 	occlusion, before the enhanced dynamic lights add theirs) */
@@ -5266,6 +5285,17 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 		result = vec4_of(&m, fadd(&m, 3, xyz(&m, result), self_illumination), extract(&m, result, 3));
 	if (effect)
 		result = effect_fade(&m, options->effect_fade, result, effect_fade_value);
+	/* (an emitter's light gained by display.hdr_highlight_boost's level,
+	before the fixed function adds it: xgpu_hdr_boost_emitter) */
+	if (!program->source_blend && XGPU_HDR_IS_EMITTER(program->hdr))
+	{
+		unsigned int rgb = xyz(&m, result);
+		int bound = XGPU_HDR_EMITTER_BOUND(program->hdr);
+
+		result = vec4_of(&m, fadd(&m, 3, rgb, boost_extra(&m, rgb, rgb, XGPU_HDR_BOOST_OF(program->hdr),
+			bound == XGPU_HDR_CEILING_WEAPON ? XGPU_HDR_CEILING_WEAPON_VALUE : XGPU_HDR_CEILING_LIGHT_VALUE)),
+			extract(&m, result, 3));
+	}
 	if (program->source_blend)
 	{
 		unsigned int blend = uniform(&m, U_BLEND_CONSTANT, -1), factor;

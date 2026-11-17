@@ -349,6 +349,8 @@ int halo_hdr_display_text(int words, char *text, unsigned int size);
 #define HALO_HDR_KIND_LIGHT 32
 #define HALO_HDR_KIND_SELF_ILLUMINATION 64
 #define HALO_HDR_KIND_SELF_ILLUMINATION_STAGES(stages) ((stages) << 8)
+#define HALO_HDR_KIND_EMITTER 128
+#define HALO_HDR_KIND_EMITTER_FIRST_PERSON (1 << 16)
 #endif
 /* a run whose frames nobody sees (debug.null_renderer, a dedicated server,
 no display: port/linux/src/d3d8_device.c): main.c draws none, and paces its

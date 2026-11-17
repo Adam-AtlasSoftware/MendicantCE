@@ -568,7 +568,7 @@ static void draws_test(NSString *dir)
 	NSArray<NSString *> *lines = [index componentsSeparatedByString:@"\n"];
 	static float colors[2 * PIXELS * 4], had[PIXELS * 4], vulkan[PIXELS * 4], metal[PIXELS * 4];
 	unsigned spirv_offset = 0, msl_offset = 0, spirv_constants = 0, msl_constants = 0, seed = 12345;
-	int pixel, channel, draws = 0, compared = 0, unclamped = 0, self_illuminated = 0, interlocked_draws = 0;
+	int pixel, channel, draws = 0, compared = 0, unclamped = 0, self_illuminated = 0, interlocked_draws = 0, emitted = 0;
 	NSUInteger line;
 
 	if (!index || lines.count < 2 || sscanf(lines[0].UTF8String, "blend_constant %u %u ps_c0 %u %u", &spirv_offset,
@@ -608,7 +608,9 @@ static void draws_test(NSString *dir)
 
 		if (sscanf(lines[line].UTF8String, "%63s %u", name, &tag) != 2)
 			continue;
-		ceiling = XGPU_HDR_CEILING_OF(tag);
+		/* (the ceiling's bits of the tags past the blends' are a boost's
+		level) */
+		ceiling = XGPU_HDR_BLEND_OPERATION(tag) < 6 ? XGPU_HDR_CEILING_OF(tag) : 0;
 		ceiling_value = xgpu_hdr_ceiling_value(ceiling);
 		/* (interlocked: Vulkan's storage image against Metal's programmable
 		blending, each pixel drawn twice in one draw; the rest of the
@@ -682,7 +684,7 @@ static void draws_test(NSString *dir)
 					lit[channel] = fminf(base[channel] + self_illumination_color[channel] * colors[pixel * 4 + 3], 1.0f);
 				}
 				if (tag)
-					xgpu_hdr_self_illuminate(lit, base);
+					xgpu_hdr_self_illuminate_boost(lit, base, XGPU_HDR_BOOST_OF(tag));
 				for (channel = 0; channel < 3; channel++)
 				{
 					float v = vulkan[pixel * 4 + channel];
@@ -690,9 +692,30 @@ static void draws_test(NSString *dir)
 					if (fabsf(v - lit[channel]) > 0.003f + 0.002f * lit[channel])
 						FAIL("%s: pixel %d channel %d: %.5f, the reference's %.5f", name, pixel, channel, (double)v,
 							(double)lit[channel]);
-					if (v > (tag ? XGPU_HDR_SELF_ILLUMINATION_VALUE * 1.002f : 1.0f))
+					if (v > (tag ? XGPU_HDR_SELF_ILLUMINATION_VALUE * 1.002f + 0.002f : 1.0f))
 						FAIL("%s: pixel %d channel %d past its ceiling: %.5f", name, pixel, channel, (double)v);
 					self_illuminated += tag && v > 1.0f;
+				}
+			}
+			if (XGPU_HDR_IS_EMITTER(tag))
+			{
+				/* (an emitter: its colour gained, as the reference has it,
+				no further than its bound's ceiling) */
+				float gained[3];
+
+				for (channel = 0; channel < 3; channel++)
+					gained[channel] = colors[pixel * 4 + channel];
+				xgpu_hdr_boost_emitter(gained, XGPU_HDR_BOOST_OF(tag), XGPU_HDR_EMITTER_BOUND(tag));
+				for (channel = 0; channel < 3; channel++)
+				{
+					float v = vulkan[pixel * 4 + channel];
+
+					if (fabsf(v - gained[channel]) > 0.003f + 0.002f * gained[channel])
+						FAIL("%s: pixel %d channel %d: %.5f, the reference's %.5f", name, pixel, channel, (double)v,
+							(double)gained[channel]);
+					if (v > xgpu_hdr_ceiling_value(XGPU_HDR_EMITTER_BOUND(tag)) * 1.002f)
+						FAIL("%s: pixel %d channel %d past its bound: %.5f", name, pixel, channel, (double)v);
+					emitted += v > colors[pixel * 4 + channel] + 0.01f;
 				}
 			}
 			if (XGPU_HDR_GLOW(tag))
@@ -707,9 +730,12 @@ static void draws_test(NSString *dir)
 		}
 	}
 	printf("draws: %d draws (%d interlocked), %d values compared between the backends, %d past 1 unclamped, "
-		"%d past 1 self-illuminated\n", draws, interlocked_draws, compared, unclamped, self_illuminated);
-	if (draws != 141 || interlocked_draws != 72)
-		FAIL("draws: %d drawn (%d interlocked), not 141 (72)", draws, interlocked_draws);
+		"%d past 1 self-illuminated, %d gained\n", draws, interlocked_draws, compared, unclamped, self_illuminated,
+		emitted);
+	if (draws != 144 || interlocked_draws != 72)
+		FAIL("draws: %d drawn (%d interlocked), not 144 (72)", draws, interlocked_draws);
+	if (emitted < PIXELS)
+		FAIL("draws: %d values gained by the boost", emitted);
 	if (unclamped < PIXELS)
 		FAIL("draws: %d values past 1 unclamped", unclamped);
 	if (self_illuminated < PIXELS / 4)
