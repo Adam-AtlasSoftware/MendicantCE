@@ -1247,6 +1247,11 @@ static const struct config_setting config_settings[] =
 		"what the profile's LOOK SENSITIVITY gives (half its side to side): 1\n"
 		"the original's, 2 twice as fast. The mouse and the gyroscope have\n"
 		"their own.", _scope_player },
+	{ "input.controller_layout_bindings", _config_boolean, "false", "HALO_CONTROLLER_LAYOUT_BINDINGS",
+		_environment_value, _platform_all,
+		"Settings > Controls > Controller > Button Remapping > Controller Layouts'\n"
+		"EXPORT adds the player's Button Remapping buttons to the layout's file\n"
+		"([bindings]). Off by default." },
 	{ "input.invert_look_horizontal", _config_boolean, "false", "HALO_INVERT_LOOK_HORIZONTAL", _environment_value,
 		_platform_all,
 		"A controller's look turns the other way: pushing the stick that looks to\n"
@@ -3016,6 +3021,11 @@ static const struct config_setting config_settings[] =
 	{ "debug.menu_open", _config_string, "\"\"", "HALO_MENU_OPEN", _environment_value, _platform_all,
 		"Start on this screen of the menus (port/assets/menus) instead of the main\n"
 		"menu, a player profile being edited; empty for the main menu." },
+	{ "debug.controller_layout_guid", _config_string, "\"\"", "HALO_CONTROLLER_LAYOUT_GUID", _environment_value,
+		_platform_all,
+		"Controller Layout describes the controller of this SDL GUID (32 hex\n"
+		"digits) while the player has none connected: for tests and pictures.\n"
+		"Empty for none." },
 	{ "debug.menu_layout", _config_string, "\"\"", "HALO_MENU_LAYOUT", _environment_value, _platform_all,
 		"Write the open menu screen's geometry to this file (in the data root) as\n"
 		"JSON, every 30th frame of the menus: each widget's box, each text's box,\n"

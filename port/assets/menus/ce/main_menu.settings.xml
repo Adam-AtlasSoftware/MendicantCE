@@ -168,6 +168,7 @@
 		<string text="STREAMER MODE"/>
 		<string text="FILTERS"/>
 		<string text="CONTROLLER BUTTONS"/>
+		<string text="CONTROLLER LAYOUTS"/>
 		<string text="MCC PACKAGES"/>
 		<string text="DISCORD ACCOUNT"/>
 	</strings>

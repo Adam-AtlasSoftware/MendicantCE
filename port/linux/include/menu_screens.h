@@ -134,7 +134,11 @@ enum menu_screen_cell_kind
 	MENU_SCREEN_CELL_DOT,
 	/* (a swatch of a profile color, by its frame: the colors', then
 	random's) */
-	MENU_SCREEN_CELL_SWATCH
+	MENU_SCREEN_CELL_SWATCH,
+	/* (a controller layout's symbol: its legend, the cell's words, in a
+	cap of the cell's fill, round or square by its frame; Controller
+	Layout's) */
+	MENU_SCREEN_CELL_SYMBOL
 };
 
 /* a building block: its kind, the block it is in (-1: the screen), and what

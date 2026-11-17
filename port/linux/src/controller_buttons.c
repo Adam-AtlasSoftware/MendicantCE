@@ -6,6 +6,11 @@
 #include <stdio.h>
 #include <string.h>
 
+#ifdef HALO_GUEST
+/* port/android/guest/runtime/guest_host.h: the pad's SDL GUID, the host's */
+void host_sdl_gamepad_guid(unsigned int gamepad, char *buffer, unsigned int size);
+#endif
+
 /* Updated by the game's input polling, read by menus/HUD on the same thread. */
 static struct controller_device controller_devices[4];
 
@@ -74,7 +79,9 @@ void controller_device_read(void *handle, struct controller_device *device)
             device->paddles &= ~controller_extras_reserved(device->vendor, device->product);
         }
     }
+    SDL_GUIDToString(SDL_GetJoystickGUID(SDL_GetGamepadJoystick(gamepad)), device->guid, (int)sizeof(device->guid));
 #else
+    host_sdl_gamepad_guid((unsigned int)(unsigned long)gamepad, device->guid, (unsigned int)sizeof(device->guid));
     /* The guest's SDL bridge exposes the family but not a device name
      * (port/android/guest/runtime/guest_sdl.c): the host's handle, which
      * stays the same while the pad is open, tells one pad from another. */

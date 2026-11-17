@@ -58,7 +58,13 @@ static char const *config_player_string(int local,char const *name) {(void)name;
 static int config_pinned_by_environment(char const *name) {(void)name;return 0;}
 '''
 POLICY = (source('port/linux/include/controller_buttons.h') +
-          source('port/linux/include/controller_remap.h') + source('port/linux/src/controller_remap.c'))
+          source('port/linux/include/controller_remap.h') + source('port/linux/src/controller_remap.c') +
+          source('port/linux/include/controller_layouts.h') + r'''
+/* (no controller has a layout here: tools/test_controller_layouts.py tests them) */
+struct controller_layout const *controller_layout_for(char const *guid) {(void)guid;return 0;}
+char const *controller_layout_button_name(int button, struct controller_device const *device)
+{return controller_remap_device_button_name(button, device);}
+''')
 
 
 def test_profile_layout_in_place_of_the_port(tmp_path):

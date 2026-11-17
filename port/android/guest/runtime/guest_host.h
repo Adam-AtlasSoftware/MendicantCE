@@ -116,6 +116,9 @@ whether the gamepad is Steam Input's virtual one (gyro aiming) */
 int host_sdl_gamepad_has_sensor(unsigned int gamepad, int type);
 int host_sdl_set_gamepad_sensor_enabled(unsigned int gamepad, int type, int enabled);
 int host_sdl_gamepad_steam(unsigned int gamepad);
+/* the gamepad's SDL GUID as its 32 hex digits (a controller layout's key,
+port/linux/src/controller_layouts.c); empty for none */
+void host_sdl_gamepad_guid(unsigned int gamepad, char *buffer, unsigned int size);
 /* callback: void (*)(void *userdata, unsigned int stream, int additional, int total),
 called on the audio thread */
 unsigned int host_sdl_open_audio_stream(unsigned int device, const void *spec, unsigned int callback, unsigned int userdata);

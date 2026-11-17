@@ -37,6 +37,13 @@ typedef enum {SDL_GAMEPAD_BUTTON_MISC1=15,SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1,SDL_G
  SDL_GAMEPAD_BUTTON_MISC2,SDL_GAMEPAD_BUTTON_MISC3,SDL_GAMEPAD_BUTTON_MISC4,SDL_GAMEPAD_BUTTON_MISC5,
  SDL_GAMEPAD_BUTTON_MISC6} SDL_GamepadButton;
 static int SDL_GamepadHasButton(SDL_Gamepad *p,SDL_GamepadButton b){(void)p;return b==SDL_GAMEPAD_BUTTON_LEFT_PADDLE1;}
+/* (the pad's GUID, a layout's key: SDL's on a desktop, the host's in a guest) */
+typedef struct {unsigned char data[16];} SDL_GUID;
+typedef SDL_Gamepad SDL_Joystick;
+static SDL_Joystick *SDL_GetGamepadJoystick(SDL_Gamepad *p){return p;}
+static SDL_GUID SDL_GetJoystickGUID(SDL_Joystick *j){SDL_GUID g;memset(&g,0,sizeof(g));g.data[0]=(unsigned char)j->id;return g;}
+static void SDL_GUIDToString(SDL_GUID g,char *s,int n){snprintf(s,(size_t)n,"%02x%030d",g.data[0],0);}
+void host_sdl_gamepad_guid(unsigned int pad,char *s,unsigned int n){snprintf(s,n,"%032x",pad);}
 static int automatic;
 static char const *manual="ps_modern",*xbox="menu_gems",*ps="ps_gems",*sw="switch_modern";
 static int config_boolean(char const *s){assert(!strcmp(s,"input.auto_button_detection"));return automatic;}
@@ -55,6 +62,10 @@ int main(void){
  struct controller_device info;int type;
  controller_device_update(0,&a);controller_device_update(1,&b);controller_device_update(2,&c);
  controller_device_get(0,&info);assert(info.family==CONTROLLER_PLAYSTATION && info.type==SDL_GAMEPAD_TYPE_PS5);
+ assert(strlen(info.guid)==32);
+#ifndef HALO_GUEST
+ assert(!strncmp(info.guid,"07",2));
+#endif
 #ifndef HALO_GUEST
  assert(info.instance==7 && info.vendor==123 && info.product==456 && !strcmp(info.name,"Test controller"));
  assert(info.paddles==1 && info.playstation==5);

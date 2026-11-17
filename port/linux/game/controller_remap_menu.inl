@@ -249,7 +249,7 @@ static void pad_editor_update(struct widget_instance *list)
         pad_editor_text_set(named(row, value_name, 0),
             pad_editor.capturing == action && pad_editor.port == port ? "PRESS A BUTTON" :
             pad_editor.buttons[port][action] == CONTROLLER_REMAP_UNBOUND ? "UNBOUND" :
-            controller_remap_device_button_name(pad_editor.buttons[port][action], &device));
+            controller_layout_button_name(pad_editor.buttons[port][action], &device));
     }
 }
 
@@ -287,7 +287,7 @@ static boolean pad_editor_panel(struct widget_instance *row, wchar_t *name, wcha
         conflict[i] = 0;
         snprintf(text, sizeof(text), "%s already uses %s. Press A or Enter to put it here, leaving %s unbound; "
             "B or Escape keeps both as they were.", conflict,
-            controller_remap_device_button_name(pad_editor.button, &device), conflict);
+            controller_layout_button_name(pad_editor.button, &device), conflict);
     }
     else if (pad_editor.capturing != NONE)
         snprintf(text, sizeof(text), "Let go, then press the button for it on player %d's controller.|Start or "

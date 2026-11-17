@@ -368,6 +368,9 @@
 	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_buttons/header_controller_buttons">
 		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_buttons/header_controller_buttons.png" width="512" height="64"/>
 	</bitmap>
+	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/header_controller_layouts">
+		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/header_controller_layouts.png" width="512" height="64"/>
+	</bitmap>
 	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/header_button_remapping">
 		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/header_button_remapping.png" width="512" height="64"/>
 	</bitmap>

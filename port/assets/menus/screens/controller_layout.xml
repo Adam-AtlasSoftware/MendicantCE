@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Controller Layout (docs/menu_screens.md, "Controller Layout"; #1143), as Settings > Controls > Controller >
+Button Remapping > Controller Layouts' EDIT BUTTONS › opens it (its stand-in screens/controller_layout); B goes
+back to it. The tall layout: the controller of the player whose profile Settings edits at the band's right; its
+extra buttons in the table at the left (the back paddles, the touchpad, misc1 to misc6: the row source
+layout.controls), each its words on the controller, its symbol (its legend in a cap of its color, round or
+square: kind="symbol") and its name; in the panel the chosen button's shape and color and what they do.
+A (NAME) names the button on the on-screen keyboard, describing it first; Y (LEGEND) types its legend, 1 to 3
+characters; left and right step its color; X (CLEAR) lets it go back to its words. Each change is kept at once
+(the data folder's controller_layouts/<guid>.toml: controller_layout_menu.inc). -->
+<screen name="controller_layout" background="tall">
+	<header title="CONTROLLER LAYOUT" detail="{layout.controller}"/>
+	<table source="layout.controls" do="layout name" left="layout color left" right="layout color right">
+		<column id="button" label="BUTTON" kind="strong" width="146" grow="40" touch="12 7 140 0 40"/>
+		<column id="symbol" label="SYMBOL" kind="symbol" width="76" touch="156 7 72 40 0"/>
+		<column id="name" label="NAME" width="162" grow="104" touch="232 7 124 40 104"/>
+	</table>
+	<panel>
+		<heading text="{layout.title}"/>
+		<text text="{layout.state}" lines="2"/>
+		<choice label="SHAPE" value="{layout.shape}" left="layout shape left" right="layout shape right" dim="layout.unset"/>
+		<choice label="COLOR" value="{layout.color}" left="layout color left" right="layout color right" dim="layout.unset"/>
+		<text text="{layout.about}" lines="5" touch-lines="3"/>
+	</panel>
+	<buttons>
+		<button key="back" label="BACK"/>
+		<button key="x" label="CLEAR" side="right" if="layout.set" do="layout clear"/>
+		<button key="y" label="LEGEND" side="right" if="layout.set" do="layout legend"/>
+		<button key="accept" label="NAME" side="right" do="layout name"/>
+	</buttons>
+</screen>

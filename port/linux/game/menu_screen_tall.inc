@@ -49,6 +49,11 @@ rows' top, height and step, the bottom they end over (the panel's) */
 #define TALL_LINE_Y 88
 #define TALL_ROWS_Y 92
 #define TALL_ROW_HEIGHT 24
+/* (a symbol cell's: its legend this far into its column and its cap,
+which is from this far below the row's top to this far) */
+#define TALL_SYMBOL_INSET 6
+#define TALL_SYMBOL_TOP 3
+#define TALL_SYMBOL_BOTTOM 21
 #define TALL_ROWS_BOTTOM 436
 /* a group's heading among the rows (the server browser's, the co-op list's):
 the blocks' dim blue (blocks.xml's card subtitle's), 0xRRGGBBAA */
@@ -320,6 +325,11 @@ struct screen_row_widgets
 	struct widget_instance *row, *heading;
 	struct widget_instance *text[TALL_MAXIMUM_COLUMNS], *badge[TALL_MAXIMUM_COLUMNS], *lock[TALL_MAXIMUM_COLUMNS],
 		*picture[TALL_MAXIMUM_COLUMNS];
+	/* (a symbol cell's cap, drawn under its words: its fill, 0xRRGGBBAA,
+	0 for none; its shape; its words' width, this frame's) */
+	unsigned long symbol_fill[TALL_MAXIMUM_COLUMNS];
+	short symbol_shape[TALL_MAXIMUM_COLUMNS];
+	short symbol_width[TALL_MAXIMUM_COLUMNS];
 };
 
 struct screen_search
@@ -1212,6 +1222,11 @@ static void tall_build_table(struct screen_tall *tall, struct menu_screen const 
 			case MENU_SCREEN_CELL_SWATCH:
 				row->picture[column_index] = tall_add(tall, row->row, tall_tag("cell_swatch"), cx,
 					(short)(cy + icon_y), cmove, 0, 0, 0);
+				break;
+			case MENU_SCREEN_CELL_SYMBOL:
+				/* (its words, the legend, inside its cap: tall_symbol_draw) */
+				row->text[column_index] = tall_add(tall, row->row, tall_tag("cell"), (short)(cx + TALL_SYMBOL_INSET),
+					cy, cmove, 0, (short)MAX(cw - 2 * TALL_SYMBOL_INSET, 8), 0);
 				break;
 			case MENU_SCREEN_CELL_PING:
 				row->picture[column_index] = tall_add(tall, row->row, tall_tag("cell_bars"), cx,
@@ -2414,6 +2429,7 @@ static void tall_rows_frame(struct screen_tall *tall, struct widget_instance *sc
 			short width, drawn, room = 0, x;
 			struct screen_box *box;
 
+			row->symbol_fill[column_index] = 0;
 			if (heading)
 			{
 				visible_set_safe(row->text[column_index], FALSE);
@@ -2445,6 +2461,12 @@ static void tall_rows_frame(struct screen_tall *tall, struct widget_instance *sc
 			if (cell.fallback[0] && pc_menu_text_width(row->text[column_index], cell.text) > width - room)
 				csmemcpy(cell.text, cell.fallback, sizeof(cell.text));
 			drawn = pc_menu_text_fit(row->text[column_index], cell.text, (short)(width - room));
+			if (column->block->cell == MENU_SCREEN_CELL_SYMBOL)
+			{
+				row->symbol_fill[column_index] = cell.fill;
+				row->symbol_shape[column_index] = cell.frame;
+				row->symbol_width[column_index] = drawn;
+			}
 			if (cell.speaker != NONE)
 				pc_menu_speaker_note(row->text[column_index], cell.speaker);
 			tall_color(tall, row->text[column_index], cell.color ? cell.color :
@@ -3305,6 +3327,42 @@ static void tall_frame(struct screen_open *open)
 part (on a touchscreen, across the screen's foot over the bar), its keys'
 place noted for taps (the screen's units: menu_spartan.c's) */
 long halo_screen_width(void);
+
+/* (port/linux/game/menu_shapes.c) */
+void menu_shape_rounded_box(real x0, real y0, real x1, real y1, real radius, real edge, pixel32 fill,
+	pixel32 color);
+
+/* a symbol cell's cap (Controller Layout's), drawn as its words' widget is,
+under them: about its legend, as wide as it is tall or wider, round or
+square, filled and edged in its fill */
+static void tall_symbol_draw(struct screen_tall *tall, struct widget_instance const *widget, point2d offset)
+{
+	short row_index, column_index;
+
+	for (row_index = 0; row_index < tall->row_count; row_index++)
+	{
+		struct screen_row_widgets const *row = &tall->rows[row_index];
+
+		if (!row->row || !row->row->visible)
+			continue;
+		for (column_index = 0; column_index < tall->column_count; column_index++)
+		{
+			unsigned long fill = row->symbol_fill[column_index];
+			real x, y, width, height;
+			pixel32 argb;
+
+			if (row->text[column_index] != widget || !fill || !widget->visible)
+				continue;
+			x = (real)(offset.x + widget->horizontal_offset);
+			y = (real)(offset.y + widget->vertical_offset);
+			height = (real)(TALL_SYMBOL_BOTTOM - TALL_SYMBOL_TOP);
+			width = MAX((real)row->symbol_width[column_index] + 2.0f * TALL_SYMBOL_INSET, height);
+			argb = (pixel32)((fill & 0xFFUL) << 24 | fill >> 8);
+			menu_shape_rounded_box(x - TALL_SYMBOL_INSET, y + TALL_SYMBOL_TOP, x - TALL_SYMBOL_INSET + width,
+				y + TALL_SYMBOL_BOTTOM, row->symbol_shape[column_index] ? 3.0f : height * 0.5f, 1.0f, argb, argb);
+		}
+	}
+}
 
 static void tall_chat_keyboard_draw(struct screen_tall *tall, point2d offset)
 {

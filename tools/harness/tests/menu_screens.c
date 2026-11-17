@@ -497,7 +497,7 @@ int main(int argc, char **argv)
 		menu_screen_free(&screen);
 		/* (a column of a kind there is none of refused, naming the kinds) */
 		refused("<screen name=\"main\"><table source=\"test.rows\"><column id=\"a\" kind=\"chip\" width=\"9\"/>"
-			"</table></screen>", "text, strong, ping, star, dot or swatch");
+			"</table></screen>", "text, strong, ping, star, dot, swatch or symbol");
 		/* (a background neither own nor tall refused) */
 		refused("<screen name=\"main\" background=\"blue\"><list><item label=\"A\" do=\"quit\"/></list></screen>",
 			"background is own or tall");
@@ -580,7 +580,7 @@ int main(int argc, char **argv)
 		refused(TABLE("<column label=\"A\" width=\"10\"/>"), "<column> has no id");
 		refused(TABLE("<column id=\"a\"/>"), "<column> has no width");
 		refused(TABLE("<column id=\"a\" width=\"wide\"/>"), "width is a number");
-		refused(TABLE("<column id=\"a\" width=\"10\" kind=\"bars\"/>"), "kind is text, strong, ping, star, dot or swatch");
+		refused(TABLE("<column id=\"a\" width=\"10\" kind=\"bars\"/>"), "kind is text, strong, ping, star, dot, swatch or symbol");
 		refused(TABLE("<column id=\"a\" width=\"10\" align=\"center\"/>"), "align is left or right");
 		refused(TABLE("<column id=\"a\" width=\"10\" touch=\"1 2\"/>"), "touch is");
 		refused(TABLE("<column id=\"a\" width=\"10\" sort=\"sort nowhere\"/>"), "no action \"sort nowhere\"");
@@ -1047,6 +1047,23 @@ int main(int argc, char **argv)
 			"radius");
 		refused("<screen name=\"s\"><stick id=\"left\" label=\"L\" x=\"1\" y=\"1\" value=\"{nothing}\"/></screen>",
 			"nothing");
+	}
+	else if (!strcmp(name, "controller_layout"))
+	{
+		struct menu_screen_block const *table, *symbol;
+
+		/* (Controller Layout: its table of the layout's buttons, its symbol
+		column a symbol's; a symbol column read, a kind past it refused) */
+		CHECK(read_text(controller_layout_xml, &screen, problem), "Controller Layout's file is refused: %s", problem);
+		table = &screen.blocks[kind_first(&screen, MENU_SCREEN_TABLE)];
+		CHECK(!strcmp(table->source, "layout.controls") && !strcmp(table->action, "layout name"), "its table");
+		symbol = block_of(&screen, "symbol");
+		CHECK(symbol && symbol->kind == MENU_SCREEN_COLUMN && symbol->cell == MENU_SCREEN_CELL_SYMBOL,
+			"its symbol column");
+		CHECK(kind_total(&screen, MENU_SCREEN_COLUMN, -2) == 3 && kind_total(&screen, MENU_SCREEN_CHOICE, -2) == 2,
+			"its columns and choices");
+		menu_screen_free(&screen);
+		refused(TABLE("<column id=\"a\" width=\"10\" kind=\"symbols\"/>"), "swatch or symbol");
 	}
 	else if (!strcmp(name, "keyboard"))
 	{

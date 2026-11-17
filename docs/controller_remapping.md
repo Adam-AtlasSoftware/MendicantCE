@@ -100,6 +100,56 @@ continue") stay the stock buttons, as the menus do.
   dots; DRIFT AT REST is the largest push held still near the middle since the
   screen opened (`stick_test_menu.inc`).
 
+## Controller layouts
+
+Button Remapping's CONTROLLER LAYOUTS › (#1143) describes the extra buttons of the controller of the player
+whose settings they are: its EDIT BUTTONS › opens Controller Layout ([menu_screens.md](menu_screens.md)), where
+each back paddle, the touchpad and misc1 to misc6 can be given a name and a symbol, a legend of 1 to 3
+characters in a round or square cap of one of 8 colors (the legend black or white, whichever reads better on it:
+WCAG's contrast ratio). A prompt for an action on a described button then draws its symbol in place of the
+family's words ("P3", "L4"), in the HUD's messages and the help screens (as a key's cap is drawn,
+`hud_key_prompt_draw_symbol`), and Button Remapping and the VR Tutorial name it by its name. A button not
+described, a controller without a layout and every face button, trigger and stick are as before.
+
+A layout is kept by the controller's SDL GUID (the host's `host_sdl_gamepad_guid` in a guest build) as
+`<guid>.toml` in the data folder's `controller_layouts`, a small TOML file:
+
+```toml
+format = 1
+guid = "030000005e040000e002000000007801"
+name = "Fight stick"
+
+[[control]]
+input = "left_paddle"      # an extra button's token, as Button Remapping's
+name = "Left back"         # up to 20 characters
+legend = "LB"              # 1 to 3, no space
+shape = "round"            # or "square"
+fill = "#D03030"
+```
+
+The folder is read when the game first needs a layout and each time Controller Layout opens. A file of another
+name copied into it is taken as its controller's layout (written as `<guid>.toml` in place of its own, the copy
+removed). A file is read whole and strictly: any line it should not have (a key or table it may not have, a
+value out of range, a quote, a backslash or a control character, more than 16 KB) refuses all of it, logged
+with its line (`controller layouts: name.toml refused (line 7: a legend of 1 to 3 letters, digits or signs)`),
+and nothing of it is used. Only pictures and names come of a layout; input never does.
+
+**Sharing (#1144).** The page's SHARE: EXPORT writes the layout into `controller_layouts/shared/<its name>.toml`
+(a folder the game does not read as layouts), to give to another player. INCLUDE MY BINDINGS
+(`input.controller_layout_bindings`, off) adds the player's Button Remapping buttons as a `[bindings]` table of
+action = token (`jump = "left_paddle"`). To import, the other player copies the file into their
+`controller_layouts`; FILES says ALL READ or ONE REFUSED, its panel the refused file's line and why. Bindings in a
+file are checked as Button Remapping's (known actions and tokens, each action once, no two of a group on one
+button) or the whole file is refused; they are never put on anyone's buttons as the file is read or the controller
+connects. Where the controller's layout came with them, ITS BINDINGS › says how many of the player's buttons they
+would change and asks: KEEP MINE (focused) or USE THIS LAYOUT'S, which puts each through Button Remapping's assign
+rule on that player's port alone and writes it as Button Remapping's OK does. The system's save and open dialogs
+are not used: the game's file dialog bridge (`host_sdl_open_file_dialog`) is the first start's (on macOS the game
+data's panel) and the guest has no save dialog, so the folder is the way in and out for now.
+[controller_layouts.c](../port/linux/src/controller_layouts.c) reads and writes the files,
+`controller_remap_prompt_symbol` (controller_remap_game.c) gives a prompt its symbol and
+`controller_layout_menu.inc` (menu_functions.c's) is the page and the screen.
+
 ## Reading route and integration
 
 1. [controller_remap.c](../port/linux/src/controller_remap.c) owns tokens,
@@ -191,6 +241,10 @@ parsing, migration, replacement, cleared saves, all stock presets, per-player in
 pressure, capture, disconnects, focus and context changes, semantic commands,
 prompt identity and pending menu state. Chat ownership and hold-over checks use
 the real production functions.
+[Controller layout tests](../tools/test_controller_layouts.py) run controller_layouts.c on files in a folder: a
+layout's round trip, a file copied in taken, each kind of bad file refused whole, the legend's color, and the
+prompts' symbol with the defaults unchanged; [the screen's](../tools/harness/tests/test_controller_layout_screen.py)
+fit at 4:3, 16:9 and 21:9.
 [Context integration tests](../tools/test_controller_remap_context.py)
 combine the real widget-ownership check, remapper and director input for main-menu
 navigation, pause, camera cycling, alternate bindings, timing and lifecycle guards.

@@ -560,6 +560,20 @@ int host_sdl_gamepad_steam(uint32_t gamepad)
 	return object && SDL_GetGamepadSteamHandle(object) != 0;
 }
 
+/* the gamepad's SDL GUID, its 32 hex digits (what SDL keys its mappings
+by: the bus, vendor, product, version and driver), which a controller layout
+is kept by (port/linux/src/controller_layouts.c); empty for none */
+void host_sdl_gamepad_guid(uint32_t gamepad, char *buffer, uint32_t size)
+{
+	SDL_Gamepad *object = host_sdl_handle_get(gamepad, _handle_gamepad);
+
+	if (!size)
+		return;
+	buffer[0] = 0;
+	if (object && size >= 33)
+		SDL_GUIDToString(SDL_GetJoystickGUID(SDL_GetGamepadJoystick(object)), buffer, (int)size);
+}
+
 /* ---------- audio */
 
 /* SDL calls audio_callback on its own audio thread, which cannot run guest

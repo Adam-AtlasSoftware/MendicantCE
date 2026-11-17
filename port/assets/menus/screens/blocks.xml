@@ -383,6 +383,12 @@ picture, the line, the words for no rows) -->
 		<on event="b" back="true"/>
 		<on event="back" back="true"/>
 	</widget>
+	<!-- Controller Layout's (screens/controller_layout.xml, as Button Remapping's Controller Layouts' EDIT BUTTONS ›
+	opens it: menu_functions.c's controller_layout_menu.inc), pausing the game as Settings' pages do -->
+	<widget name="screens/controller_layout" width="640" height="480" flags="pass_unhandled_to_focused_child pause_game" bitmap="main_menu/parts/background_tall"/>
+	<!-- the question of a controller layout's bindings (screens/layout_bindings.xml, as Controller Layouts' ITS
+	BINDINGS opens it), a pop-up -->
+	<widget name="screens/layout_bindings" width="640" height="480" flags="pass_unhandled_to_focused_child"/>
 	<!-- a <stick>'s (Stick Test's): its label, its circle's anchor (the engine draws the circle there, as large as
 	its radius: menu_screen.c), its reading, its detail and its hint, each about its middle -->
 	<widget name="screens/stick_label" type="text" width="240" height="24" font="ui\large_ui" color="#FF8DB6E6" align="center" text_flags="no_focus_test"/>

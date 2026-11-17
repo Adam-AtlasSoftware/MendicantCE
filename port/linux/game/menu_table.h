@@ -64,6 +64,9 @@ struct menu_table_cell
 	/* a network machine whose speaker (network_voice.c's: talking, or
 	muted) is drawn just left of its words: NONE, none */
 	long speaker;
+	/* a symbol cell's (kind="symbol") cap's fill, 0xRRGGBBAA (0: none, its
+	words alone); its frame its shape, 0 round, 1 square */
+	unsigned long fill;
 };
 
 /* a row's state (a table's source's state): not shown (a lane's place

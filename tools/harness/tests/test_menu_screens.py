@@ -55,10 +55,10 @@ NEGATIVE_CONTROLS = {
     # a table's left not checked: an action the game has not got taken
     "table-left-unchecked": ("\t\t\t\taction_check(reader, table->left_action);\n", "\n", "lanes"),
     # a dot's column refused (the kinds counted short)
-    "dot-unknown": ("for (kind = 0; kind < 6 && values[2]; kind++)", "for (kind = 0; kind < 4 && values[2]; kind++)",
+    "dot-unknown": ("for (kind = 0; kind < 7 && values[2]; kind++)", "for (kind = 0; kind < 4 && values[2]; kind++)",
                     "lanes"),
     # a swatch's column refused (the kinds counted short): Profile Color's file refused
-    "swatch-unknown": ("for (kind = 0; kind < 6 && values[2]; kind++)",
+    "swatch-unknown": ("for (kind = 0; kind < 7 && values[2]; kind++)",
                        "for (kind = 0; kind < 5 && values[2]; kind++)", "profile_color"),
     # a choice with no right taken
     "choice-no-right": ("else if (!choice->left_action || !choice->right_action)", "else if (!choice->left_action)",
@@ -190,7 +190,8 @@ def built(fault=None):
                                        c_string((ROOT / "port/assets/menus/screens/quit.xml").read_bytes()) + ";\n" + "".join(
                                            f"static char const {name}_xml[] =\n" +
                                            c_string((ROOT / f"port/assets/menus/screens/{name}.xml").read_bytes()) +
-                                           ";\n" for name in ("coop", "coop_who", "coop_join", "add_player", "stick_test", "keyboard")))
+                                           ";\n" for name in ("coop", "coop_who", "coop_join", "add_player", "stick_test", "keyboard",
+                                                        "controller_layout")))
     (work / "menu_screens.h").write_text(read("port/linux/include/menu_screens.h"))
     executable = work / "menu_screens"
     command = ["clang", *ABI_FLAGS, "-std=gnu99", "-O1", "-Wall", "-Werror", "-Wno-unused-function",
@@ -204,7 +205,8 @@ def built(fault=None):
 
 CASES = ["main", "hints", "good", "syntax", "elements", "spartan", "items", "actions", "bindings", "when",
          "kept", "browser", "profile_select", "profile_color", "tabs", "table", "panel", "buttons", "lanes", "choice", "lobby", "chat",
-         "box", "picture", "panels", "dialog", "coop", "add_player", "stick", "keyboard"]
+         "box", "picture", "panels", "dialog", "coop", "add_player", "stick", "keyboard",
+         "controller_layout"]
 
 
 @pytest.mark.parametrize("case", CASES)
@@ -273,6 +275,12 @@ def test_actions_registered():
             assert '"stick."' in value, binding
             assert f'"{binding}"' in re.search(r"\nint pc_menu_stick_value\(.*?\n\}\n",
                                                 read("port/linux/game/stick_test_menu.inc"), re.S).group(0), binding
+        elif binding.startswith("layout."):
+            # (Controller Layout's, controller_layout_menu.inc's pc_menu_layout_value)
+            assert '"layout."' in value, binding
+            assert f'"{binding}"' in re.search(r"\nint pc_menu_layout_value\(.*?\n\}\n",
+                                                read("port/linux/game/controller_layout_menu.inc"), re.S).group(0), \
+                binding
         else:
             assert f'"{binding}"' in value, binding
     sources = re.findall(r'"([^"]+)"', re.search(r"screen_source_names\[\] =\n\{\n(.*?)\n\};", source,
