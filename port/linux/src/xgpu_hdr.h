@@ -503,6 +503,37 @@ static inline void xgpu_hdr_encode(float rgb[3], const struct xgpu_hdr_frame *fr
 	}
 }
 
+/* the final write's dither (#1108; the encoding's pass, xgpu_hdr.c): a
+pixel's static noise, triangular in [-1, 1] (interleaved gradient noise,
+a high-frequency uniform pattern, through the triangle's inverse
+distribution), and an output code (0 to 1) dithered to levels (255 for 8
+bits, 1023 for 10; 0 none) by up to one level either way. Within half a
+level of black and of white the noise narrows to what never rounds past
+them (no clipping: a curve's code a fraction of a level up is shown on
+average, about half of it, not black), and at black and white themselves
+it is none, so that they stay exact */
+static inline float xgpu_hdr_noise(float x, float y)
+{
+	float d = floorf(x) * 0.06711056f + floorf(y) * 0.00583715f, u;
+
+	u = 52.9829189f * (d - floorf(d));
+	u -= floorf(u);
+	return u < 0.5f ? sqrtf(2.0f * u) - 1.0f : 1.0f - sqrtf(2.0f - 2.0f * u);
+}
+
+static inline float xgpu_hdr_dither(float code, float x, float y, float levels)
+{
+	float room;
+
+	if (!(levels > 0.0f))
+		return code;
+	if (!(code > 0.0f && code < 1.0f))
+		return code;
+	room = fminf(code, 1.0f - code) * levels + 0.49f;
+	room = room > 1.0f ? 1.0f : room;
+	return code + xgpu_hdr_noise(x, y) * room / levels;
+}
+
 /* the enhanced dynamic lights' shoulder (xgpu_spirv.c, xgpu_msl.c):
 the light a pixel had (base, the lights' gamma 2.2) with the dynamic light
 added (linear); with lights (XGPU_HDR_LIGHTS) on past white */

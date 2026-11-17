@@ -16,6 +16,7 @@ display.hdr's tone map and encoding (port/linux/src/xgpu_hdr.c's shaders).
 struct xgpu_vulkan_image;
 
 struct xgpu_hdr_frame;
+struct xgpu_vulkan_output;
 
 /* the pipelines of FXAA, or of SMAA's passes, for a target of a format
 (XGPU_VULKAN_FORMAT_BGRA8, or display.hdr's RGBA16F), and SMAA's lookup
@@ -55,27 +56,21 @@ reads), its colour alone written; hdr the mode and the peak. */
 int xgpu_vulkan_post_prepare_hdr(uint8_t depth_format, uint32_t samples, int preparing);
 void xgpu_vulkan_post_tone_map(struct xgpu_vulkan_image *target, struct xgpu_vulkan_image *depth,
 	const int32_t corners[4], const float hdr[4]);
-/* The encoding of a frame for an HDR swapchain (the core's options'
-encode): encode_prepare makes its pipelines at the start, for the
+/* The frame's last pass before the swapchain (the core's options'
+encode, #1108): encode_prepare makes its pipelines at the start, for the
 swapchains' formats (XGPU_VULKAN_FORMAT_RGBA16F, scRGB's;
-XGPU_VULKAN_FORMAT_RGB10A2, HDR10's), as the loading screen's presentation
-may encode while a map is prepared: 0 if they cannot be made (logged).
-encode draws the frame (BGRA8 or RGBA16F, the frame's values) encoded
-(xgpu_hdr.c's hdr_encode: the frame's paper white, peak and output) into an
-image of its own of the format and its size, in the stream's order, and
-returns it; the targets bound before are not bound after. NULL if it
-cannot. */
+XGPU_VULKAN_FORMAT_RGB10A2, HDR10's and a 10-bit SDR swapchain's;
+XGPU_VULKAN_FORMAT_BGRA8, SDR's), as the loading screen's presentation may
+draw it while a map is prepared: 0 if they cannot be made (logged). encode
+draws the frame (BGRA8 or RGBA16F, the frame's values) scaled to the
+output's size (sharply by its factors), encoded (xgpu_hdr.c's hdr_encode:
+the frame's paper white, peak, output and SDR curve; an SDR output curved
+by the output's power) and dithered to its levels, into an image of its own
+of the format, in the stream's order, and returns it; the targets bound
+before are not bound after. NULL if it cannot. */
 int xgpu_vulkan_post_encode_prepare(void);
 struct xgpu_vulkan_image *xgpu_vulkan_post_encode(struct xgpu_vulkan_image *image, const struct xgpu_hdr_frame *frame,
-	uint8_t format);
-/* display.gamma's curve over an SDR frame (the core's options' gamma), its
-last pass before the swapchain: gamma_prepare makes its pipeline at the
-start (as the encoding's are), 0 if it cannot be (logged). gamma draws the
-frame with each channel raised to power (one over the setting) into a BGRA8
-image of its own of the frame's size, in the stream's order, and returns
-it; the targets bound before are not bound after. NULL if it cannot. */
-int xgpu_vulkan_post_gamma_prepare(void);
-struct xgpu_vulkan_image *xgpu_vulkan_post_gamma(struct xgpu_vulkan_image *image, float power);
+	uint8_t format, const struct xgpu_vulkan_output *output);
 
 /* The present step's turn, for a swapchain made for the display's own
 orientation while the phone is held another way (Android's pre-rotation:

@@ -877,11 +877,12 @@ static struct
 	int hdr_sdr_curve;
 	struct xgpu_vulkan_image *sharp_image;
 	void (*display_hdr)(int hdr, float headroom, float white_nits, int white_reported);
+	/* the frame's last pass (the options' encode: HDR's encoding,
+	display.gamma's curve, the dither; NULL: none, or it could not be
+	made) */
 	struct xgpu_vulkan_image *(*encode)(struct xgpu_vulkan_image *image, const struct xgpu_hdr_frame *frame,
-		uint8_t format);
-	/* display.gamma: the options' curve (NULL: none, or it could not be
-	made), and the setting (a float's bits; 0 or 1: none) */
-	struct xgpu_vulkan_image *(*gamma)(struct xgpu_vulkan_image *image, float power);
+		uint8_t format, const struct xgpu_vulkan_output *output);
+	/* display.gamma's setting (a float's bits; 0 or 1: none) */
 	uint32_t gamma_setting;
 
 	/* HALO_VULKAN_DISCARDS: the passes recorded into secondary command
@@ -7064,7 +7065,7 @@ static int swapchain_make(void)
 	/* display.hdr: the HDR outputs the surface has (with the instance's
 	colour spaces), told the host; the output the frames want */
 	vk.surface_hdr = 0;
-	for (index = 0; index < format_count && vk.colorspaces && vk.encode; index++)
+	for (index = 0; index < format_count && vk.colorspaces && vk.encode && vk.display_hdr; index++)
 	{
 		if (formats[index].format == VK_FORMAT_R16G16B16A16_SFLOAT &&
 			formats[index].colorSpace == VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT)
@@ -7335,58 +7336,6 @@ static struct xgpu_vulkan_image *present_turned(struct xgpu_vulkan_image *image)
 	return image;
 }
 
-/* display.hdr: the frame encoded for an HDR swapchain (the options'
-encode, into an image of its own of the swapchain's format); the targets
-and visibility test as they were. NULL if it cannot be (logged; the
-swapchain is SDR from then on, and the display told it shows no HDR). */
-static struct xgpu_vulkan_image *present_encoded(struct xgpu_vulkan_image *image)
-{
-	struct xgpu_vulkan_image *color = vk.color, *depth = vk.depth, *encoded;
-	uint32_t layer = vk.layer, views = vk.views;
-	int test_active = vk.test_active;
-	struct xgpu_hdr_frame frame;
-
-	xgpu_vulkan_hdr_frame(&frame);
-	pass_end();
-	vk.test_active = 0;
-	encoded = vk.encode(image, &frame, vk.hdr_output == XGPU_HDR_OUTPUT_SCRGB ? XGPU_VULKAN_FORMAT_RGBA16F :
-		XGPU_VULKAN_FORMAT_RGB10A2);
-	pass_end();
-	vk.test_active = test_active;
-	xgpu_vulkan_set_target_views(color, depth, layer, views);
-	if (encoded)
-		return encoded;
-	host_logf(HOST_LOG_WARN, "vulkan: the frame cannot be encoded for the HDR swapchain: the window is SDR");
-	vk.encode = NULL;
-	vk.swapchain_stale = 1;
-	return NULL;
-}
-
-/* display.gamma: an SDR frame curved by one over the setting (the
-options' gamma, into an image of its own); the frame itself where the
-setting is 1 (none: nothing drawn, so the frame is the swapchain's exactly)
-or the curve cannot be drawn; the targets and visibility test as they
-were */
-static struct xgpu_vulkan_image *present_curved(struct xgpu_vulkan_image *image)
-{
-	struct xgpu_vulkan_image *color = vk.color, *depth = vk.depth, *curved;
-	uint32_t layer = vk.layer, views = vk.views;
-	int test_active = vk.test_active;
-	uint32_t bits = __atomic_load_n(&vk.gamma_setting, __ATOMIC_ACQUIRE);
-	float gamma;
-
-	memcpy(&gamma, &bits, sizeof(gamma));
-	if (!(gamma > 0.0f) || gamma == 1.0f)
-		return image;
-	pass_end();
-	vk.test_active = 0;
-	curved = vk.gamma(image, 1.0f / gamma);
-	pass_end();
-	vk.test_active = test_active;
-	xgpu_vulkan_set_target_views(color, depth, layer, views);
-	return curved ? curved : image;
-}
-
 /* the sharp upscale (display.render_scale's, "sharp bilinear"), on one
 axis: the whole factor nearest scales the frame's pixels up by first, the
 least that reaches the pixels it is shown at; 1 where it is shown at no
@@ -7484,6 +7433,126 @@ static VkFilter present_sharp(VkCommandBuffer commands, struct xgpu_vulkan_image
 	return VK_FILTER_LINEAR;
 }
 
+/* the levels a channel of the SDR swapchain's format is dithered to: 255
+for 8 bits, 1023 for 10; 0 for any other (an sRGB format, which the blit
+encodes, or fewer bits: not dithered) */
+static float swapchain_levels(void)
+{
+	switch (vk.swapchain_format)
+	{
+	case VK_FORMAT_B8G8R8A8_UNORM:
+	case VK_FORMAT_R8G8B8A8_UNORM:
+	case VK_FORMAT_A8B8G8R8_UNORM_PACK32:
+		return 255.0f;
+	case VK_FORMAT_A2B10G10R10_UNORM_PACK32:
+	case VK_FORMAT_A2R10G10B10_UNORM_PACK32:
+		return 1023.0f;
+	default:
+		return 0.0f;
+	}
+}
+
+/* The frame's last pass for the swapchain (#1108), at the picture's size
+in it (width, height): what it is drawn with (output) and into (format), 0
+where it is not wanted. An HDR swapchain's frame is always encoded (10-bit
+PQ dithered, scRGB's half floats not). An SDR frame is drawn where
+display.gamma curves it, or where it has more bits than the swapchain (the
+half floats of display.hdr "on" over an SDR display), and dithered then;
+an 8-bit frame at gamma 1 is the swapchain's codes already, which a dither
+could only add noise to: blitted as before, byte for byte. The pass scales
+the frame as present_sharp's blits would (its factors), so the dither's
+pattern is drawn at the swapchain's own pixels. */
+static int present_output(const struct xgpu_vulkan_image *image, uint32_t width, uint32_t height,
+	struct xgpu_vulkan_output *output, uint8_t *format)
+{
+	uint32_t bits = __atomic_load_n(&vk.gamma_setting, __ATOMIC_ACQUIRE);
+	float gamma;
+
+	memcpy(&gamma, &bits, sizeof(gamma));
+	memset(output, 0, sizeof(*output));
+	output->width = width;
+	output->height = height;
+	output->factors[0] = output->factors[1] = 1;
+	output->power = 1.0f;
+	if (vk.sharp_upscale && __atomic_load_n(&vk.sharp_wanted, __ATOMIC_ACQUIRE))
+		(void)sharp_plan(image->description.width, image->description.height, width, height, output->factors);
+	switch (vk.hdr_output)
+	{
+	case XGPU_HDR_OUTPUT_PQ:
+		*format = XGPU_VULKAN_FORMAT_RGB10A2;
+		output->levels = 1023.0f;
+		return 1;
+	case XGPU_HDR_OUTPUT_SCRGB:
+		*format = XGPU_VULKAN_FORMAT_RGBA16F;
+		return 1;
+	default:
+		break;
+	}
+	output->levels = swapchain_levels();
+	*format = output->levels == 1023.0f ? XGPU_VULKAN_FORMAT_RGB10A2 : XGPU_VULKAN_FORMAT_BGRA8;
+	if (gamma > 0.0f && gamma != 1.0f)
+		output->power = 1.0f / gamma;
+	return output->power != 1.0f || (output->levels > 0.0f && image->description.format != XGPU_VULKAN_FORMAT_BGRA8);
+}
+
+/* the frame's last pass drawn (the options' encode, into an image of its
+own of the output's size and format); the targets and visibility test as
+they were. Where it cannot be: an HDR swapchain's frame NULL (logged; the
+swapchain is SDR from then on, and the display told it shows no HDR), an
+SDR one's the frame itself, as drawn. */
+static struct xgpu_vulkan_image *present_last(struct xgpu_vulkan_image *image, const struct xgpu_vulkan_output *output,
+	uint8_t format)
+{
+	struct xgpu_vulkan_image *color = vk.color, *depth = vk.depth, *drawn;
+	uint32_t layer = vk.layer, views = vk.views;
+	int test_active = vk.test_active;
+	struct xgpu_hdr_frame frame;
+
+	xgpu_vulkan_hdr_frame(&frame);
+	pass_end();
+	vk.test_active = 0;
+	drawn = vk.encode(image, &frame, format, output);
+	pass_end();
+	vk.test_active = test_active;
+	xgpu_vulkan_set_target_views(color, depth, layer, views);
+	if (drawn)
+		return drawn;
+	if (vk.hdr_output == XGPU_HDR_OUTPUT_SDR)
+		return image;
+	host_logf(HOST_LOG_WARN, "vulkan: the frame cannot be encoded for the HDR swapchain: the window is SDR");
+	vk.encode = NULL;
+	vk.swapchain_stale = 1;
+	return NULL;
+}
+
+/* the picture's rectangle in the swapchain: letterboxed to the image's
+shape, in the window as it is seen (the swapchain and the image turned
+back): centered, or at the top of a taller window, as the game says
+(d3d8_device.c's picture_top_in: display.picture_position, a portrait
+window); then turned with the frame */
+static void present_rectangle(const struct xgpu_vulkan_image *image, int turns, uint32_t *x, uint32_t *y,
+	uint32_t *width, uint32_t *height)
+{
+	uint32_t window_width = turns & 1 ? vk.swapchain_extent.height : vk.swapchain_extent.width;
+	uint32_t window_height = turns & 1 ? vk.swapchain_extent.width : vk.swapchain_extent.height;
+	uint32_t image_width = turns & 1 ? image->description.height : image->description.width;
+	uint32_t image_height = turns & 1 ? image->description.width : image->description.height;
+	int top;
+
+	*width = window_width;
+	*height = (uint32_t)((uint64_t)*width * image_height / image_width);
+	if (*height > window_height)
+	{
+		*height = window_height;
+		*width = (uint32_t)((uint64_t)*height * image_width / image_height);
+	}
+	*x = (window_width - *width) / 2;
+	top = __atomic_load_n(&vk.picture_top, __ATOMIC_ACQUIRE);
+	*y = !top ? (window_height - *height) / 2 : (uint32_t)(top - 1) < window_height - *height ?
+		(uint32_t)(top - 1) : window_height - *height;
+	rectangle_turned(turns, window_width, window_height, x, y, width, height);
+}
+
 /* the image shown in the window: letterboxed into a swapchain image
 (cleared black), then presented. 0 if nothing is presented: no surface (the
 app in the background, the window not back yet), a swapchain that cannot
@@ -7500,8 +7569,10 @@ static uint64_t present(struct xgpu_vulkan_image *image, int frame)
 	VkFilter filter;
 	VkPresentInfoKHR info;
 	VkResult result;
-	uint32_t index, width, height, x, y, window_width, window_height, image_width, image_height;
-	int turns = 0, top;
+	struct xgpu_vulkan_output output;
+	uint32_t index, width = 0, height = 0, x = 0, y = 0;
+	uint8_t format;
+	int turns = 0, copied = 0;
 
 	uint64_t serial;
 
@@ -7527,14 +7598,19 @@ static uint64_t present(struct xgpu_vulkan_image *image, int frame)
 		/* (none if it could not be turned: vk.rotate is let go of) */
 		turns = vk.rotate ? vk.swapchain_turns : 0;
 	}
-	if (image && vk.hdr_output != XGPU_HDR_OUTPUT_SDR && vk.encode)
+	/* (the picture's rectangle; the frame's last pass drawn at its size,
+	which the blit below then copies 1:1) */
+	if (image)
+		present_rectangle(image, turns, &x, &y, &width, &height);
+	if (image && vk.encode && width && height && present_output(image, width, height, &output, &format))
 	{
-		image = present_encoded(image);
+		struct xgpu_vulkan_image *frame_image = image;
+
+		image = present_last(image, &output, format);
 		if (!image)
 			return 0;
+		copied = image != frame_image;
 	}
-	else if (image && vk.hdr_output == XGPU_HDR_OUTPUT_SDR && vk.gamma)
-		image = present_curved(image);
 	/* (the slot's semaphore free: the recording begun, which waits for the
 	slot's last submission) */
 	if (trace)
@@ -7602,27 +7678,7 @@ static uint64_t present(struct xgpu_vulkan_image *image, int frame)
 		VK_ACCESS_TRANSFER_WRITE_BIT);
 	if (image)
 	{
-		/* letterboxed to the image's shape, in the window as it is seen
-		(the swapchain and the image turned back): centered, or at the top
-		of a taller window, as the game says (d3d8_device.c's
-		picture_top_in: display.picture_position, a portrait window); then
-		turned with the frame */
-		window_width = turns & 1 ? vk.swapchain_extent.height : vk.swapchain_extent.width;
-		window_height = turns & 1 ? vk.swapchain_extent.width : vk.swapchain_extent.height;
-		image_width = turns & 1 ? image->description.height : image->description.width;
-		image_height = turns & 1 ? image->description.width : image->description.height;
-		width = window_width;
-		height = (uint32_t)((uint64_t)width * image_height / image_width);
-		if (height > window_height)
-		{
-			height = window_height;
-			width = (uint32_t)((uint64_t)height * image_width / image_height);
-		}
-		x = (window_width - width) / 2;
-		top = __atomic_load_n(&vk.picture_top, __ATOMIC_ACQUIRE);
-		y = !top ? (window_height - height) / 2 : (uint32_t)(top - 1) < window_height - height ?
-			(uint32_t)(top - 1) : window_height - height;
-		rectangle_turned(turns, window_width, window_height, &x, &y, &width, &height);
+		/* (into the picture's rectangle: the last pass's image copied 1:1) */
 		memset(&blit, 0, sizeof(blit));
 		blit.srcSubresource.aspectMask = blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 		blit.srcSubresource.layerCount = blit.dstSubresource.layerCount = 1;
@@ -7636,9 +7692,10 @@ static uint64_t present(struct xgpu_vulkan_image *image, int frame)
 		blit.dstOffsets[1].z = 1;
 		image->used = vk.serial;
 		image_use(image);
-		/* (smaller than it is shown: scaled up sharply, from an image of
-		its own where it is not by whole multiples) */
-		filter = present_sharp(commands, &image, &blit);
+		/* (the last pass's image: copied pixel for pixel; else, smaller
+		than it is shown: scaled up sharply, from an image of its own where
+		it is not by whole multiples) */
+		filter = copied ? VK_FILTER_NEAREST : present_sharp(commands, &image, &blit);
 		vkCmdBlitImage(commands, image->image, VK_IMAGE_LAYOUT_GENERAL, vk.swapchain_images[index],
 			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, filter);
 	}
@@ -9338,7 +9395,6 @@ int xgpu_vulkan_initialize(const struct xgpu_vulkan_options *options)
 	vk.sharp_upscale = options->sharp_upscale;
 	vk.hdr_sdr_curve = XGPU_HDR_SDR_CURVE_AUTO;
 	vk.encode = options->encode;
-	vk.gamma = options->gamma;
 	vk.display_hdr_told = -1;
 	vk.hdr_paper_white = 100;
 	if (!vk.window_headroom)
@@ -9449,13 +9505,10 @@ int xgpu_vulkan_initialize(const struct xgpu_vulkan_options *options)
 	if (!layouts_make() || !stand_ins_make() || !draw_set_make())
 		return 0;
 	pipeline_cache_make(options->cache_path);
-	/* (display.hdr: the encoding's pipelines made now, as the loading
-	screen's presentation may encode while a map is prepared) */
-	if (vk.encode && (!vk.colorspaces || !options->encode_prepare || !options->encode_prepare()))
+	/* (the frame's last pass's pipelines made now, as the loading screen's
+	presentation may draw it while a map is prepared) */
+	if (vk.encode && (!options->encode_prepare || !options->encode_prepare()))
 		vk.encode = NULL;
-	/* (display.gamma's too) */
-	if (vk.gamma && (!options->gamma_prepare || !options->gamma_prepare()))
-		vk.gamma = NULL;
 	if (vk.surface && options->rotation_prepare && options->rotate)
 	{
 		VkSurfaceCapabilitiesKHR capabilities;

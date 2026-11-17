@@ -343,6 +343,60 @@ int main(void)
 			"auto: sRGB on Apple's platforms, 2.2 elsewhere; a choice kept");
 	}
 	{
+		/* the final write's dither (#1108): its noise within [-1, 1],
+		about 0 on average and triangular (variance 1/6) over a screen's
+		pixels; a code moved by at most a level, black and white exact; no
+		levels (the negative control) nothing */
+		double sum = 0.0, squares = 0.0;
+		float most = 0.0f;
+		int x, y;
+
+		for (y = 0; y < 512; y++)
+		{
+			for (x = 0; x < 512; x++)
+			{
+				float n = xgpu_hdr_noise((float)x + 0.5f, (float)y + 0.5f);
+
+				sum += n;
+				squares += (double)n * n;
+				most = fmaxf(most, fabsf(n));
+			}
+		}
+		sum /= 512.0 * 512.0;
+		squares /= 512.0 * 512.0;
+		CHECK(most <= 1.0f && fabs(sum) < 0.005 && fabs(squares - 1.0 / 6.0) < 0.01,
+			"the noise: most %.4f, mean %.5f, variance %.4f", most, sum, squares);
+		CHECK(xgpu_hdr_dither(0.0f, 3.5f, 7.5f, 255.0f) == 0.0f && xgpu_hdr_dither(1.0f, 3.5f, 7.5f, 255.0f) == 1.0f,
+			"black and white exact");
+		for (x = 0; x < 64; x++)
+		{
+			float code = 100.3f / 255.0f, dithered = xgpu_hdr_dither(code, (float)x, 5.0f, 255.0f);
+
+			CHECK(fabsf(dithered - code) * 255.0f <= 1.0001f, "a code moved by more than a level: %.4f",
+				(dithered - code) * 255.0f);
+			CHECK(xgpu_hdr_dither(code, (float)x, 5.0f, 0.0f) == code, "no levels: dithered");
+		}
+		/* (a fraction of a level above black, as display.gamma 0.5 makes
+		codes 1 to 11: shown on average within 0.06 of a level, not crushed
+		to black, and never below it) */
+		for (x = 1; x < 10; x++)
+		{
+			float code = (float)x * 0.1f / 255.0f;
+			double shown = 0.0;
+
+			for (y = 0; y < 4096; y++)
+			{
+				float level = roundf(xgpu_hdr_dither(code, (float)(y % 64), (float)(y / 64), 255.0f) * 255.0f);
+
+				CHECK(level >= 0.0f, "below black");
+				shown += level;
+			}
+			shown /= 4096.0;
+			CHECK(shown > 0.0 && fabs(shown - x * 0.1) < 0.06, "%.1f of a level above black shown as %.3f", x * 0.1,
+				shown);
+		}
+	}
+	{
 		/* the display as Video Setup and the log show it */
 		struct xgpu_hdr_display reported = { 1, 800.0f / 203.0f, 203.0f, 1 };
 		struct xgpu_hdr_display edr = { 1, 16.0f, XGPU_HDR_EDR_WHITE_NITS, 0 };
@@ -495,3 +549,6 @@ def test_glsl_constants():
     assert f"min(1.0, {macro('XGPU_HDR_PUNCHY_KNEE'):g} * peak)" in glsl
     assert f"smoothstep(1.0, {macro('XGPU_HDR_FAITHFUL_CLIPPED'):.1f}, max(v.r, max(v.g, v.b)))" in glsl
     assert f"smoothstep(vec3({macro('XGPU_HDR_SDR_TOE_START'):g}), vec3({macro('XGPU_HDR_SDR_TOE_END'):g}), v)" in glsl
+    # (the dither's noise: the same interleaved gradient noise)
+    for constant in ("52.9829189", "0.06711056", "0.00583715"):
+        assert constant in glsl and constant in header, constant

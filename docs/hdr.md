@@ -385,6 +385,23 @@ the stream's ring carries it, written by the host). A backend declares
   smoothstep (never falling), so only the shadows move. `srgb` and `2.2`
   choose either everywhere. No black floor is added: with 2.2, code 1 is
   0.001 nit, as on the SDR display.
+- **One last pass, dithered** (#1108). The frame's last pass (the encoding
+  program) draws the picture at its size in the swapchain: it scales the
+  frame (Vulkan's sharp upscale in one tap), encodes it (HDR's encoding, or
+  `display.gamma`'s curve over SDR), then dithers by a static triangular
+  noise of up to one output level (1/255 for 8 bits, 1/1023 for HDR10's PQ),
+  narrowed near black and white so it never rounds past them, and none at
+  them. On Vulkan its image is copied 1:1 into the swapchain (a blit has no
+  arithmetic and would scale the pattern); on Metal it draws into the drawable. scRGB's and
+  EDR's half floats are not dithered. The dither only helps where the
+  frame has more bits than the output: the HDR frame's half floats (about
+  11 bits, enough for 8-bit SDR and 10-bit PQ), or a curve between them.
+  The SDR frame is BGRA8 (every blend rounded to 1/255 before the last
+  pass), so at gamma 1 it is the swapchain's codes already and is copied
+  byte for byte, undithered; at other gammas the dither keeps the curve's
+  mean (gamma 0.5 no longer crushes codes 1 to 11 all to black), but cannot
+  smooth the steps an 8-bit frame already has. Smoothing SDR's fog needs a
+  half-float SDR frame (#1152's 10-bit SDR output).
 - **sRGB's gamut.** The EDR layer is tagged extended linear sRGB, as the
   owner asked: no colour is pushed into P3. The SDR layer stays untagged (it
   is unchanged), which on a P3 panel shows the game's colours slightly more

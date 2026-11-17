@@ -6,7 +6,9 @@ made Metal's by SPIRV-Cross and run on its GPU (tools/hdr_backends/harness.m):
 - the tone map and the encoding as the Vulkan backend ships them (the
   modules of port/linux/vulkan/xgpu_vulkan_post_shaders.c) over the golden
   colours the Metal backend's own are held to, against the reference
-  (port/linux/src/xgpu_hdr.h);
+  (port/linux/src/xgpu_hdr.h); and its dither (#1108) into a real 8-bit
+  target: bounded, black and white exact, each column's mean kept, and
+  without it (the negative control) each value merely rounded;
 - each tagged draw (every ceiling, a glow's expansion, the alpha limit, over
   each blend) as the Vulkan backend's SPIR-V emitter writes it (reading the
   pixel drawn over as an input attachment) and as the Metal backend's MSL
@@ -124,6 +126,7 @@ def test_post_shaders_on_the_gpu(harness):
     output = _run(binary, "post", str(post))
     assert "post: 1248 values checked" in output, output
     assert "post: 9 values not a number or infinite tone mapped finite" in output, output
+    assert "dither: means within" in output, output
 
 
 def test_draws_agree_on_the_gpu(harness):

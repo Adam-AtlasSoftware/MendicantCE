@@ -698,13 +698,12 @@ int host_vulkan_window_open(uint32_t window, uint32_t debug, uint32_t shader_fol
 			options.display_hdr = host_render_stream_display_hdr;
 			/* (display.render_scale's frame scaled up sharply) */
 			options.sharp_upscale = 1;
-			options.encode_prepare = xgpu_vulkan_post_encode_prepare;
-			options.encode = xgpu_vulkan_post_encode;
 #endif
 #ifndef HALO_VR
-			/* (display.gamma's curve over an SDR frame: not the VR build's) */
-			options.gamma_prepare = xgpu_vulkan_post_gamma_prepare;
-			options.gamma = xgpu_vulkan_post_gamma;
+			/* (the frame's last pass: HDR's encoding, display.gamma's curve
+			over an SDR frame, the dither; not the VR build's) */
+			options.encode_prepare = xgpu_vulkan_post_encode_prepare;
+			options.encode = xgpu_vulkan_post_encode;
 #endif
 		}
 	}
