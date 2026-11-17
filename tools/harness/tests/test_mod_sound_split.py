@@ -11,14 +11,21 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import (CHECK_FAILED, build, constant, enum_with, function, mutated, needs_32_bit_abi, read,  # noqa: E402
                      run, structure)
-from harness.audio import pcm_permutation_rate  # noqa: E402
+from harness.audio import pcm_permutation_rate, permutation_picker  # noqa: E402
 
 # the tag file's sound, pitch ranges and permutations are read at the game's 32-bit offsets (offsetof)
 pytestmark = needs_32_bit_abi("a sound tag file is read at the offsets of the game's 32-bit structures")
 
 CASES = ["mono-30s", "stereo-15s-48k", "linked-chain", "under-cap", "loop-wrap", "fake-impulse-repeats",
-         "too-many-pieces", "over-budget"]
+         "too-many-pieces", "over-budget", "forty-variations"]
 NEGATIVE_CONTROLS = {
+    # the old refusal (#1170): a mod's sound picking from more than 32 permutations left out
+    "refuse-past-32": (("\t\t\t\trange->actual_permutation_count < 1 ||\n",
+                        "\t\t\t\trange->actual_permutation_count < 1 || range->actual_permutation_count > 32 ||\n"),
+                       "forty-variations"),
+    # a range of more than 32 loaded as all played: those past 32 play first, then the first 32 start over
+    "all-played-past-32": (("range->actual_permutation_count > 32 ? 0 : 0xFFFFFFFF;", "0xFFFFFFFF;"),
+                           "forty-variations"),
     # the old fallback (#1111): a permutation longer than the cap is Xbox ADPCM at 22.05 kHz
     "old-fallback": (("native_budget, FALSE, kept_rate", "native_budget, TRUE, kept_rate"), "mono-30s"),
     # a one-sample gap at each join: the next piece starts a sample on
@@ -64,9 +71,7 @@ def generated(fault=None):
                                                          "mods_tag_file_header_valid"]) + "\n"
     loader = read("port/linux/game/mod_sounds.c")
     code += loader[loader.index("/* ---------- constants */"):loader.index("/* Gives `definition` the values")]
-    picker = read("source/sound/sound_definitions.c")
-    code += "\n".join(function(picker, name) for name in ["try_to_reset_permutations",
-                                                           "sound_definition_next_permutation_from_seed"]) + "\n"
+    code += permutation_picker()
     if fault:
         code = mutated(code, *fault)
     return (("types.inc", types), ("under_test.inc", code))

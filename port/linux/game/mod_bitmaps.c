@@ -18,7 +18,13 @@ bitmap among its bitmaps. A non-power-of-two 2D bitmap is drawn linear, as
 a Custom Edition map's is. A file is also left out if what the map's other
 tags ask of the bitmap it replaces is not there: as many bitmaps of the same
 types, as many sequences, and each with as many sprites (a mod's bitmap is
-the map's redrawn, larger or not).
+the map's redrawn, larger or not). A lightmap (its usage the light map's,
+which the lightmaps tool gives the BSP's bitmap and no other) is tied page
+for page to the BSP's lightmaps, each of which names its page by index and
+lays its vertices' coordinates out in it: a file of one is left out unless
+it has the map's pages, each the map's at one scale (another build of the
+level, Halo PC's, lays them out at other sizes, and lights the level
+wrongly).
 
 The HUD draws a bitmap at its own size (hud_draw.c), so a bitmap a redraw
 made larger, every one of its sprites (or, with none, its bitmaps) by the
@@ -68,6 +74,7 @@ a bitmap made is kept until the map goes, as anything may still hold it.
 #include "mods.h"
 
 #include <stddef.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -137,6 +144,13 @@ enum
 
 	/* (hud_draw.c's) */
 	_bitmap_group_half_hud_scale_bit = 4,
+};
+
+/* bitmap_group.c's usages: a lightmap's (the lightmaps tool's bitmap of the
+BSP, and none other's) */
+enum
+{
+	_bitmap_usage_light_map = 4,
 };
 
 /* the HUD's digits' tag (hud_draw.c): their bitmap first */
@@ -358,6 +372,39 @@ static real difference(
 	return first > second ? first - second : second - first;
 }
 
+/* the ratio of the size of the map's bitmaps, `map_group`'s, to the bitmap
+read's, `bitmap`'s, the same for each of the map's (1 with none); or 0 if it
+is not the same, with *differing_page (if not NULL) the first that is not at
+the first's */
+static real bitmaps_scale_find(
+	struct bitmap_group const *map_group,
+	struct mod_bitmap const *bitmap,
+	long *differing_page)
+{
+	real scale = 0.f;
+	long index;
+
+	for (index = 0; index < map_group->bitmaps.count; index++)
+	{
+		struct bitmap_data const *map_bitmap = TAG_BLOCK_GET_ELEMENT(&map_group->bitmaps, index, struct bitmap_data);
+		struct bitmap_data const *mod_bitmap = &bitmap->bitmaps[index];
+
+		if (!scale)
+		{
+			scale = (real)map_bitmap->width / (real)mod_bitmap->width;
+		}
+		if ((real)map_bitmap->width != (real)mod_bitmap->width * scale ||
+			(real)map_bitmap->height != (real)mod_bitmap->height * scale)
+		{
+			if (differing_page)
+				*differing_page = index;
+			return 0.f;
+		}
+	}
+
+	return scale ? scale : 1.f;
+}
+
 /* the ratio of the size the map's bitmap `map_group` draws a sprite at to
 the size the bitmap read, `bitmap`, draws it (both of the same sequences and
 sprites: a sheet the tool made again lays them out anew), or of their
@@ -412,23 +459,85 @@ static real hud_scale_find(
 	{
 		return scale;
 	}
-	for (index = 0; index < map_group->bitmaps.count; index++)
+
+	return bitmaps_scale_find(map_group, bitmap, NULL);
+}
+
+/* NULL if the bitmap read, `bitmap` (`bitmap_count` bitmaps), is laid out as
+the map's lightmap `map_group` is: its pages, each the map's at one scale;
+or why not, naming the page */
+static char const *lightmap_layout_differs(
+	struct bitmap_group const *map_group,
+	struct mod_bitmap const *bitmap,
+	unsigned long bitmap_count)
+{
+	static char reason[160];
+	long page = NONE;
+
+	if (map_group->usage != _bitmap_usage_light_map)
+	{
+		return NULL;
+	}
+	if ((long)bitmap_count != map_group->bitmaps.count)
+	{
+		snprintf(reason, sizeof(reason), "its lightmap has %lu pages, not the map's %ld (another build of the level's)",
+			bitmap_count, map_group->bitmaps.count);
+		return reason;
+	}
+	if (!bitmaps_scale_find(map_group, bitmap, &page))
+	{
+		struct bitmap_data const *map_bitmap = TAG_BLOCK_GET_ELEMENT(&map_group->bitmaps, page, struct bitmap_data);
+
+		snprintf(reason, sizeof(reason),
+			"its lightmap page %ld is %dx%d, not the map's %dx%d at the scale of its others (another build of the level's)",
+			page, bitmap->bitmaps[page].width, bitmap->bitmaps[page].height, map_bitmap->width, map_bitmap->height);
+		return reason;
+	}
+
+	return NULL;
+}
+
+/* NULL if the bitmap read, `bitmap` (`bitmap_count` bitmaps and
+`sequence_count` sequences), has what the map's other tags ask of the map's
+bitmap `map_group`, or why not (as many sequences: what draws it keeps a
+sequence's index, which must still be one when the map's bitmap comes back,
+weather_particle_systems.c) */
+static char const *map_requirements_differ(
+	struct bitmap_group const *map_group,
+	struct mod_bitmap const *bitmap,
+	unsigned long bitmap_count,
+	unsigned long sequence_count)
+{
+	char const *fewer = "it has fewer bitmaps or sprites than the map's, other sequences, or bitmaps of other types";
+	unsigned long index;
+
+	if ((long)bitmap_count < map_group->bitmaps.count || (long)sequence_count != map_group->sequences.count)
+	{
+		return fewer;
+	}
+	for (index = 0; index < (unsigned long)map_group->bitmaps.count; index++)
 	{
 		struct bitmap_data const *map_bitmap = TAG_BLOCK_GET_ELEMENT(&map_group->bitmaps, index, struct bitmap_data);
-		struct bitmap_data const *mod_bitmap = &bitmap->bitmaps[index];
 
-		if (!scale)
+		if (map_bitmap->type != bitmap->bitmaps[index].type)
 		{
-			scale = (real)map_bitmap->width / (real)mod_bitmap->width;
+			return fewer;
 		}
-		if ((real)map_bitmap->width != (real)mod_bitmap->width * scale ||
-			(real)map_bitmap->height != (real)mod_bitmap->height * scale)
+	}
+	for (index = 0; index < (unsigned long)map_group->sequences.count; index++)
+	{
+		struct bitmap_group_sequence const *map_sequence =
+			TAG_BLOCK_GET_ELEMENT(&map_group->sequences, index, struct bitmap_group_sequence);
+		struct bitmap_group_sequence const *sequence = &bitmap->sequences[index];
+
+		if (sequence->sprites.count < map_sequence->sprites.count ||
+			(map_sequence->bitmap_count > 0 && sequence->bitmap_count <= 0))
 		{
-			return 0.f;
+			return fewer;
 		}
 	}
 
-	return scale ? scale : 1.f;
+	return lightmap_layout_differs(map_group, bitmap, bitmap_count);
 }
 
 /* The bitmap the tag file `file` makes for the map's bitmap tag
@@ -647,34 +756,11 @@ static struct mod_bitmap *mod_bitmap_new(
 	free(tail);
 	tail = NULL;
 
-	/* what the map's other tags ask of the bitmap (as many sequences: what
-	draws it keeps a sequence's index, which must still be one when the map's
-	bitmap comes back, weather_particle_systems.c) */
-	*reason = "it has fewer bitmaps or sprites than the map's, other sequences, or bitmaps of other types";
-	if ((long)bitmap_count < map_group->bitmaps.count || (long)sequence_count != map_group->sequences.count)
+	/* what the map's other tags ask of the bitmap, and a lightmap's layout */
+	*reason = map_requirements_differ(map_group, bitmap, bitmap_count, sequence_count);
+	if (*reason)
 	{
 		goto refused;
-	}
-	for (index = 0; index < (unsigned long)map_group->bitmaps.count; index++)
-	{
-		struct bitmap_data const *map_bitmap = TAG_BLOCK_GET_ELEMENT(&map_group->bitmaps, index, struct bitmap_data);
-
-		if (map_bitmap->type != bitmap->bitmaps[index].type)
-		{
-			goto refused;
-		}
-	}
-	for (index = 0; index < (unsigned long)map_group->sequences.count; index++)
-	{
-		struct bitmap_group_sequence const *map_sequence =
-			TAG_BLOCK_GET_ELEMENT(&map_group->sequences, index, struct bitmap_group_sequence);
-		struct bitmap_group_sequence const *sequence = &bitmap->sequences[index];
-
-		if (sequence->sprites.count < map_sequence->sprites.count ||
-			(map_sequence->bitmap_count > 0 && sequence->bitmap_count <= 0))
-		{
-			goto refused;
-		}
 	}
 
 	/* (the HUD draws it at the map's size if what it draws, its sprites or

@@ -132,7 +132,10 @@ struct sound_pitch_range
 	real natural_pitch;
 	struct real_bounds bend_bounds;
 	short actual_permutation_count;
-	short unused;
+	/* port: its played bits past played_permutation_mask's 32 (OpenH1
+	issue 1170), the entry (one on) of sound_definitions.c's
+	sound_pitch_range_played_beyond; 0, as the validator resets it, for none */
+	short played_beyond_index;
 	real playback_rate;
 	unsigned long played_permutation_mask;
 	short previous_permutation_index;
@@ -261,5 +264,9 @@ short sound_definition_port_speech_permutation(
 	struct sound_definition *definition,
 	short pitch_range_index,
 	unsigned long *seed);
+/* port: the played bits past 32 of the last map's pitch ranges let go
+(OpenH1 issue 1170: sound_initialize_for_new_map) */
+void sound_definitions_played_beyond_clear(
+	void);
 
 #endif // __SOUND_DEFINITIONS_H
