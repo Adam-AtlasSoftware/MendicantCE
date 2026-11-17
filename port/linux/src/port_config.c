@@ -1125,11 +1125,39 @@ static const struct config_setting config_settings[] =
 	{ "input.right_stick_dead_zone", _config_integer, "-1", "HALO_RIGHT_STICK_DEAD_ZONE", _environment_value, _platform_all,
 		"How far the controller's right stick moves before it turns the view, in\n"
 		"percent of its travel (0 to 50); -1 for the game's own (27%).", _scope_player },
+	{ "input.left_stick_outer_dead_zone", _config_integer, "0", "HALO_LEFT_STICK_OUTER_DEAD_ZONE", _environment_value,
+		_platform_all,
+		"How much of the controller's left stick's travel at its rim reads as a\n"
+		"full push, in percent (0 to 30): raise it for a worn stick that never\n"
+		"reaches its rim; 0, the game's own, full only at the rim.", _scope_player },
+	{ "input.right_stick_outer_dead_zone", _config_integer, "0", "HALO_RIGHT_STICK_OUTER_DEAD_ZONE",
+		_environment_value, _platform_all,
+		"The same for the right stick, which turns the view.", _scope_player },
+	{ "input.look_dead_zone_shape", _config_string, "\"auto\"", "HALO_LOOK_DEAD_ZONE_SHAPE", _environment_value,
+		_platform_all,
+		"The shape of the look stick's dead zone: \"auto\", the aim style's\n"
+		"(input.aim_style: Classic's each direction's own, a square in the\n"
+		"middle; Modern's round); \"axial\", each direction's own; \"round\", none\n"
+		"within the dead zone whichever way the stick points.", _scope_player },
+	{ "input.stick_zoom_sensitivity", _config_real, "1.0", "HALO_STICK_ZOOM_SENSITIVITY", _environment_value,
+		_platform_all,
+		"How fast a controller's look stick turns the view zoomed in, times the\n"
+		"original's (which the zoom's magnification divides): 1 the original's,\n"
+		"2 twice as fast. The mouse's is input.zoom_sensitivity.", _scope_player },
+	{ "input.look_vertical_sensitivity", _config_real, "1.0", "HALO_LOOK_VERTICAL_SENSITIVITY", _environment_value,
+		_platform_all,
+		"How fast a controller's look stick turns the view up and down, times\n"
+		"what the profile's LOOK SENSITIVITY gives (half its side to side): 1\n"
+		"the original's, 2 twice as fast. The mouse and the gyroscope have\n"
+		"their own.", _scope_player },
 	{ "input.invert_look_horizontal", _config_boolean, "false", "HALO_INVERT_LOOK_HORIZONTAL", _environment_value,
 		_platform_all,
 		"A controller's look turns the other way: pushing the stick that looks to\n"
 		"the right turns the view left. The profile's INVERT LOOK is the up and\n"
 		"down; this is the side to side, for every controller.", _scope_player },
+	{ "input.rumble_strength", _config_integer, "100", "HALO_RUMBLE_STRENGTH", _environment_value, _platform_all,
+		"How strongly the controller rumbles, in percent (0 to 100): 100 the\n"
+		"game's own. The profile's VIBRATION still turns it off.", _scope_player },
 	{ "input.aim_style", _config_string, "\"classic\"", "HALO_AIM_STYLE", _environment_value, _platform_all,
 		"How a controller's look stick aims: \"classic\", the original's (each\n"
 		"direction curved on its own, so a diagonal turns faster, and pushed far\n"

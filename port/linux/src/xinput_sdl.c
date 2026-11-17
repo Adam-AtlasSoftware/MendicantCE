@@ -42,6 +42,8 @@ drive the controller.
 #include "port_config.h"
 #include "touch_input.h"
 #include "mouse_sensitivity.h"
+/* (halo_look_dead_zone_shape's HALO_LOOK_DEAD_ZONE_*, the game's too) */
+#include "halo_linux_source_fixups.h"
 /* port/linux/game/network_aim_assist.c */
 extern unsigned char network_aim_assist_block_mouse(void);
 #include "halo_keyboard.h"
@@ -195,8 +197,14 @@ static float mouse_sensitivity(void)
 
 /* the game's own dead zone of each stick, of 32767 (source/input/input_xbox.c) */
 #define STICK_DEAD_RANGE 9000
+/* the most input.look_vertical_sensitivity and input.stick_zoom_sensitivity
+take (multipliers) */
+#define LOOK_VERTICAL_SENSITIVITY_MAXIMUM 4.0f
 /* the most a stick's dead zone setting takes, in percent */
 #define STICK_DEAD_ZONE_MAXIMUM 50
+/* the most a stick's outer dead zone setting takes, in percent: with the
+inner's most (STICK_DEAD_ZONE_MAXIMUM), a fifth of the travel still between */
+#define STICK_OUTER_DEAD_ZONE_MAXIMUM 30
 
 /* each gamepad's player's settings: the local player of the gamepad's
 index (as controller_remap.c's ports are), their profile's; another
@@ -204,16 +212,20 @@ gamepad's config.toml's */
 #define PAD_PLAYERS 4
 #define PAD_PLAYER_SLOT(gamepad) ((gamepad) >= 0 && (gamepad) < PAD_PLAYERS ? (gamepad) : PAD_PLAYERS)
 
-/* the deflection a stick reads as none, of 32767, for the game's sticks
-(stick 0 the left, 1 the right) of a gamepad: its player's
-input.left_stick_dead_zone and input.right_stick_dead_zone as a
-percentage, else the game's own */
-short halo_stick_dead_range(short gamepad, short stick)
+/* a gamepad's sticks' dead zones (stick 0 the left, 1 the right), of 32767:
+the deflection read as none, its player's input.left_stick_dead_zone and
+input.right_stick_dead_zone as a percentage, else the game's own; and the one
+read as full, 32767 less input.left_stick_outer_dead_zone and
+input.right_stick_outer_dead_zone (none: the original's, full only at the rim) */
+static void stick_dead_zones(short gamepad, short ranges[2], short live_ranges[2])
 {
 	static const char *const settings[2] = { "input.left_stick_dead_zone", "input.right_stick_dead_zone" };
+	static const char *const outer_settings[2] =
+		{ "input.left_stick_outer_dead_zone", "input.right_stick_outer_dead_zone" };
 	static struct
 	{
 		short ranges[2];
+		short live_ranges[2];
 		unsigned long read_at;
 		int read;
 	} pads[PAD_PLAYERS + 1];
@@ -227,12 +239,60 @@ short halo_stick_dead_range(short gamepad, short stick)
 		for (index = 0; index < 2; index++)
 		{
 			long percent = config_player_integer(slot < PAD_PLAYERS ? slot : -1, settings[index]);
+			long outer = config_player_integer(slot < PAD_PLAYERS ? slot : -1, outer_settings[index]);
 
 			pads[slot].ranges[index] = percent < 0 || percent > STICK_DEAD_ZONE_MAXIMUM
 				? STICK_DEAD_RANGE : (short)(percent * 32767 / 100);
+			pads[slot].live_ranges[index] = outer <= 0 || outer > STICK_OUTER_DEAD_ZONE_MAXIMUM
+				? 32767 : (short)(32767 - outer * 32767 / 100);
 		}
 	}
-	return pads[slot].ranges[stick ? 1 : 0];
+	ranges[0] = pads[slot].ranges[0];
+	ranges[1] = pads[slot].ranges[1];
+	live_ranges[0] = pads[slot].live_ranges[0];
+	live_ranges[1] = pads[slot].live_ranges[1];
+}
+
+/* the deflection a gamepad's stick reads as none, of 32767 (stick_dead_zones) */
+short halo_stick_dead_range(short gamepad, short stick)
+{
+	short ranges[2], live_ranges[2];
+
+	stick_dead_zones(gamepad, ranges, live_ranges);
+	return ranges[stick ? 1 : 0];
+}
+
+/* the deflection from which a gamepad's stick reads as full, of 32767:
+32767, the rim, with no outer dead zone (stick_dead_zones) */
+short halo_stick_live_range(short gamepad, short stick)
+{
+	short ranges[2], live_ranges[2];
+
+	stick_dead_zones(gamepad, ranges, live_ranges);
+	return live_ranges[stick ? 1 : 0];
+}
+
+/* a gamepad's player's input.look_dead_zone_shape (HALO_LOOK_DEAD_ZONE_*):
+"auto", or anything it does not know, the aim style's own */
+int halo_look_dead_zone_shape(short gamepad)
+{
+	static struct
+	{
+		unsigned long read_at;
+		int read, shape;
+	} pads[PAD_PLAYERS + 1];
+	int slot = PAD_PLAYER_SLOT(gamepad);
+
+	if (!pads[slot].read || pads[slot].read_at != config_changes())
+	{
+		const char *shape = config_player_string(slot < PAD_PLAYERS ? slot : -1, "input.look_dead_zone_shape");
+
+		pads[slot].read = 1;
+		pads[slot].read_at = config_changes();
+		pads[slot].shape = !strcmp(shape, "axial") ? HALO_LOOK_DEAD_ZONE_AXIAL
+			: !strcmp(shape, "round") ? HALO_LOOK_DEAD_ZONE_ROUND : HALO_LOOK_DEAD_ZONE_AUTO;
+	}
+	return pads[slot].shape;
 }
 
 /* whether a gamepad's look turns the other way side to side (its player's
@@ -253,6 +313,79 @@ int halo_look_horizontal_inverted(short gamepad)
 		pads[slot].inverted = config_player_boolean(slot < PAD_PLAYERS ? slot : -1, "input.invert_look_horizontal");
 	}
 	return pads[slot].inverted;
+}
+
+/* a gamepad's player's input.look_vertical_sensitivity: the look stick's
+turn up and down times it (player_control.c's player_control_stick_look), 1
+the original's, half the side to side of each LOOK SENSITIVITY step */
+float halo_look_vertical_sensitivity(short gamepad)
+{
+	static struct
+	{
+		unsigned long read_at;
+		int read;
+		float scale;
+	} pads[PAD_PLAYERS + 1];
+	int slot = PAD_PLAYER_SLOT(gamepad);
+
+	if (!pads[slot].read || pads[slot].read_at != config_changes())
+	{
+		float scale = (float)config_player_real(slot < PAD_PLAYERS ? slot : -1, "input.look_vertical_sensitivity");
+
+		pads[slot].read = 1;
+		pads[slot].read_at = config_changes();
+		pads[slot].scale = scale > 0.0f && scale <= LOOK_VERTICAL_SENSITIVITY_MAXIMUM ? scale : 1.0f;
+	}
+	return pads[slot].scale;
+}
+
+/* a gamepad's player's input.stick_zoom_sensitivity: the look stick's turn
+zoomed in times it (player_control.c's player_control_stick_zoom_look), 1
+the original's, each zoom level's magnification dividing it */
+float halo_stick_zoom_sensitivity(short gamepad)
+{
+	static struct
+	{
+		unsigned long read_at;
+		int read;
+		float scale;
+	} pads[PAD_PLAYERS + 1];
+	int slot = PAD_PLAYER_SLOT(gamepad);
+
+	if (!pads[slot].read || pads[slot].read_at != config_changes())
+	{
+		float scale = (float)config_player_real(slot < PAD_PLAYERS ? slot : -1, "input.stick_zoom_sensitivity");
+
+		pads[slot].read = 1;
+		pads[slot].read_at = config_changes();
+		pads[slot].scale = scale > 0.0f && scale <= LOOK_VERTICAL_SENSITIVITY_MAXIMUM ? scale : 1.0f;
+	}
+	return pads[slot].scale;
+}
+
+/* a gamepad's player's input.rumble_strength, in percent: its motors'
+speeds times it at their write (input_xbox.c's input_port_write_rumble);
+100, the default, the game's own. The profile's VIBRATION still turns them
+off */
+unsigned long halo_rumble_strength(short gamepad)
+{
+	static struct
+	{
+		unsigned long read_at;
+		int read;
+		unsigned long percent;
+	} pads[PAD_PLAYERS + 1];
+	int slot = PAD_PLAYER_SLOT(gamepad);
+
+	if (!pads[slot].read || pads[slot].read_at != config_changes())
+	{
+		long percent = config_player_integer(slot < PAD_PLAYERS ? slot : -1, "input.rumble_strength");
+
+		pads[slot].read = 1;
+		pads[slot].read_at = config_changes();
+		pads[slot].percent = percent < 0 || percent > 100 ? 100 : (unsigned long)percent;
+	}
+	return pads[slot].percent;
 }
 
 /* radians of yaw and pitch for the mouse motion since the last call: each

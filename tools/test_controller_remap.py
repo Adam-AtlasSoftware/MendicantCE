@@ -397,7 +397,8 @@ def test_generated_remapping_and_dead_zone_pages():
     assert 'setting="input.left_stick_dead_zone"' in dead_zones and 'setting="input.right_stick_dead_zone"' in dead_zones
     controller = '\n'.join(files[prefix + '.gamepad_setup.xml'])
     assert 'button_remapping_screen' in controller and 'dead_zones_screen' in controller
-    assert 'setting="input.invert_look_horizontal"' in controller
+    assert 'setting="input.look_vertical_sensitivity"' in controller
+    assert 'setting="input.invert_look_horizontal"' in '\n'.join(files[prefix + '.gamepad_setup.gyro.xml'])
     for name in ('gamepad_setup.xml', 'gamepad_setup.button_remapping.xml', 'gamepad_setup.dead_zones.xml'):
         filename = prefix + '.' + name
         assert 'ce/' + filename in manifest
