@@ -67,7 +67,7 @@ What the tools use and do not carry. Each is installed or fetched by the player,
 | --- | --- | --- |
 | [Blender](https://www.blender.org) 4.5 LTS | GPL-2.0-or-later (GPL-3.0 as built) | runs the remodel and bake scripts headless; the player installs it |
 | [Invader](https://github.com/SnowyMouse/invader) (Snowy Mouse) | GPL-3.0 | its programs compile and extract tags; the player installs it |
-| Python packages: NumPy, SciPy, scikit-image (BSD-3-Clause), Pillow (MIT-CMU), opencv-python-headless (Apache-2.0, MIT), PyTorch and torchvision (BSD-3-Clause), [spandrel](https://github.com/chaiNNer-org/spandrel) (MIT) | as named | imported; the player installs them (`requirements.txt`) |
+| Python packages: NumPy, SciPy, scikit-image (BSD-3-Clause), Pillow (MIT-CMU), opencv-python-headless (Apache-2.0, MIT), PyTorch and torchvision (BSD-3-Clause), [spandrel](https://github.com/chaiNNer-org/spandrel) (MIT), [xatlas](https://github.com/mworchel/xatlas-python) (MIT; Jonathan Young's [xatlas](https://github.com/jpcy/xatlas), MIT: the level remodels' lightmap atlas) | as named | imported; the player installs them (`requirements.txt`) |
 | [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) (Xintao Wang, Liangbin Xie, Chao Dong, Ying Shan; Tencent ARC Lab): realesrgan-ncnn-vulkan 20220424 and the models x4plus, x4plus-anime, animevideov3, realesr-general-x4v3, realesr-general-wdn-x4v3 | program MIT, code and models BSD-3-Clause | fetched from the project's release v0.2.5.0 when the player says yes, its licence shown first (`prism_packs.py models`) |
 | 4xNomos8kSC, by Philip Hofmann ([Phhofm/models](https://github.com/Phhofm/models)) | CC-BY-4.0 (credit required) | fetched from its author's page when the player says yes, its licence and credit shown first |
 
