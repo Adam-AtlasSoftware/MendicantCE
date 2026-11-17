@@ -147,7 +147,7 @@ def refs_timeline(scene, frames):
     return t
 
 
-def refs_v4_timeline(scene, frames, state="v4pt"):
+def refs_v4_timeline(scene, frames, state="v4pt", only=None):
     """M3's references (docs/prism_pathtraced.md): RT off's stills (Classic's frame) at the probe poses first, then
     display.lighting "pathtraced" once (its bake read), and at each probe pose its live frame held, then
     debug.pt_reference in that mode (the same scene, materials and lights unbiased, no bake: summed until its noise is
@@ -161,6 +161,9 @@ def refs_v4_timeline(scene, frames, state="v4pt"):
     t.at(*STATES[state])
     t.hold(poses[probes[0] - 1], BAKE_LOAD_FRAMES)
     for index, step in enumerate(probes):
+        # (--probe: one probe's reference alone, for a long one in a run of its own)
+        if only is not None and index != only:
+            continue
         pose = poses[step - 1]
         t.hold(pose, scene["pt_settle"], save=f"refs/p{index}_live.png")
         t.at(f'prism_set "pt_reference_file p{index}.exr"', f'prism_set "pt_reference {frames}"')
@@ -275,7 +278,8 @@ def capture(scene, what, args):
         run(scene, refs_timeline(scene, args.reference_frames or scene["reference_frames"]), out, "refs", args)
     if what in ("refs_v4", "all_v4"):
         run(scene, refs_v4_timeline(scene, args.reference_frames or scene.get("reference_frames_v4") or
-                                    scene["reference_frames"], args.v4_state), out, "refs", args)
+                                    scene["reference_frames"], args.v4_state, args.probe),
+            out, "refs" if args.probe is None else f"refs_p{args.probe}", args)
 
 
 def main():
@@ -296,6 +300,7 @@ def main():
                         help="moves' states (M3's: v4off v4pt v4raw ...)")
     parser.add_argument("--v4-state", default="v4pt", choices=BAKE_STATES, help="refs_v4: the live state at each "
                         "probe before its reference")
+    parser.add_argument("--probe", type=int, default=None, help="refs_v4: this probe's reference alone (0, 1, 2)")
     parser.add_argument("--env", action="append", default=[], help="K=V given to the game (diagnostics)")
     args = parser.parse_args()
     scenes = load_scenes()
