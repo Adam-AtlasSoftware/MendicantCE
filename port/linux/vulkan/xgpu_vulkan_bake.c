@@ -78,7 +78,7 @@ inputs); the rig is in the light's units (prism_rt.c's PRISM_RT_UNITS_*).
 /* ---------- constants */
 
 /* the bake file's maker (a change makes every bake stale) */
-#define BAKE_VERSION 9u
+#define BAKE_VERSION 11u
 /* a tile's texels, a mask's */
 #define TILE 16u
 #define TILE_TEXELS (TILE * TILE)
@@ -3056,6 +3056,15 @@ static void importance_finish(VkCommandBuffer commands, struct bake_state *b, co
 			}
 		if (count > GRID_LIST)
 			count = GRID_LIST;
+		/* (the kept by their lamps' ids, for the GPU's binary searches) */
+		for (k = 1; k < count; k++)
+			for (j = k; j > 0 && c[order[j]] < c[order[j - 1]]; j--)
+			{
+				uint32_t swap = order[j];
+
+				order[j] = order[j - 1];
+				order[j - 1] = swap;
+			}
 		/* (the near: the candidates by their unshadowed light at the cell's
 		middle, the most first: the lamps the cell's few points did not see
 		that its other points may, the defensive part of the picks, so that
@@ -3089,6 +3098,14 @@ static void importance_finish(VkCommandBuffer commands, struct bake_state *b, co
 			}
 		if (near_count > GRID_NEAR)
 			near_count = GRID_NEAR;
+		for (k = 1; k < near_count; k++)
+			for (j = k; j > 0 && c[near_order[j]] < c[near_order[j - 1]]; j--)
+			{
+				uint32_t swap = near_order[j];
+
+				near_order[j] = near_order[j - 1];
+				near_order[j - 1] = swap;
+			}
 		cx = (uint32_t)(plan->cell_keys[index * 3] + (1 << 20));
 		cy = (uint32_t)(plan->cell_keys[index * 3 + 1] + (1 << 20));
 		cz = (uint32_t)(plan->cell_keys[index * 3 + 2] + (1 << 20));

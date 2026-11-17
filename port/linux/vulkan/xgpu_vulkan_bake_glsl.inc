@@ -166,7 +166,8 @@ over 2 pi, a0 = 1 - k . n0. */
 	"}\n" \
 	"/* (the terms a diagnostic leaves out: s.settings.y's bits, 1 the domes, 2\n" \
 	"the lamps, 4 the glows, 8 the paths past the first hit, 16 the fixtures;\n" \
-	"32 the grid (every lamp picked by power); 0 none) */\n" \
+	"32 the grid (every lamp picked by power), 64 the lamps' spherical\n" \
+	"sampling (by area alone); 0 none) */\n" \
 	"bool term_off(uint bit) { return (s.settings.y & bit) != 0u; }\n" \
 	"vec3 glow_of(uint t)\n" \
 	"{\n" \
@@ -318,29 +319,41 @@ over 2 pi, a0 = 1 - k . n0. */
 	"    return luma(vec3(f.v[l * 16u + 9u], f.v[l * 16u + 10u], f.v[l * 16u + 11u])) * f.v[l * 16u + 12u];\n" \
 	"}\n" \
 	"/* a lamp from a cell's list (its first word the count, then lamp and\n" \
-	"cumulative weight pairs) by its weights; its probability there */\n" \
+	"cumulative weight pairs, by the lamps' ids) by its weights (a binary\n" \
+	"search of the cumulative weights); its probability there (a binary search\n" \
+	"of the ids) */\n" \
 	"uint list_pick(uint at, uint count)\n" \
 	"{\n" \
 	"    Uints g = Uints(s.grid);\n" \
-	"    float total = uintBitsToFloat(g.v[at + 2u * (count - 1u) + 2u]);\n" \
-	"    float u = rnd() * total;\n" \
-	"    uint k = 0u;\n" \
-	"    while (k + 1u < count && uintBitsToFloat(g.v[at + 2u * k + 2u]) < u)\n" \
-	"        k++;\n" \
-	"    return g.v[at + 2u * k + 1u];\n" \
+	"    float u = rnd() * uintBitsToFloat(g.v[at + 2u * (count - 1u) + 2u]);\n" \
+	"    uint lo = 0u, hi = count - 1u;\n" \
+	"    while (lo < hi)\n" \
+	"    {\n" \
+	"        uint mid = (lo + hi) / 2u;\n" \
+	"        if (uintBitsToFloat(g.v[at + 2u * mid + 2u]) < u)\n" \
+	"            lo = mid + 1u;\n" \
+	"        else\n" \
+	"            hi = mid;\n" \
+	"    }\n" \
+	"    return g.v[at + 2u * lo + 1u];\n" \
 	"}\n" \
 	"float list_probability(uint at, uint count, uint l)\n" \
 	"{\n" \
 	"    Uints g = Uints(s.grid);\n" \
-	"    float total = uintBitsToFloat(g.v[at + 2u * (count - 1u) + 2u]), below = 0.0, p = 0.0;\n" \
-	"    for (uint k = 0u; k < count; k++)\n" \
+	"    uint lo = 0u, hi = count;\n" \
+	"    while (lo < hi)\n" \
 	"    {\n" \
-	"        float c = uintBitsToFloat(g.v[at + 2u * k + 2u]);\n" \
-	"        if (g.v[at + 2u * k + 1u] == l)\n" \
-	"            p += (c - below) / max(total, 1.0e-20);\n" \
-	"        below = c;\n" \
+	"        uint mid = (lo + hi) / 2u;\n" \
+	"        if (g.v[at + 2u * mid + 1u] < l)\n" \
+	"            lo = mid + 1u;\n" \
+	"        else\n" \
+	"            hi = mid;\n" \
 	"    }\n" \
-	"    return p;\n" \
+	"    if (lo >= count || g.v[at + 2u * lo + 1u] != l)\n" \
+	"        return 0.0;\n" \
+	"    float below = lo > 0u ? uintBitsToFloat(g.v[at + 2u * lo]) : 0.0;\n" \
+	"    return (uintBitsToFloat(g.v[at + 2u * lo + 2u]) - below) /\n" \
+	"        max(uintBitsToFloat(g.v[at + 2u * (count - 1u) + 2u]), 1.0e-20);\n" \
 	"}\n" \
 	"/* a lamp picked at p (the cell's seen, its near, else by power) and the\n" \
 	"probability of its pick, the three densities' mixture */\n" \
@@ -370,19 +383,12 @@ over 2 pi, a0 = 1 - k . n0. */
 	"}\n" \
 	"\n" \
 	"/* whether a lamp's point at distance d along l is seen from o: nothing\n" \
-	"before it, or first another lamp's surface */\n" \
+	"before it, another lamp's surface included (whose own light its pick\n" \
+	"counts; let through, it was counted twice: the bake's lamp-lit rooms then\n" \
+	"brighter than R's, whose bounces never let it through) */\n" \
 	"bool lamp_visible(vec3 o, vec3 l, float d)\n" \
 	"{\n" \
-	"    float most = max(d * 0.995 - 0.03, 0.0);\n" \
-	"    if (!blocked(o, l, most))\n" \
-	"        return true;\n" \
-	"    vec3 nh;\n" \
-	"    uint t;\n" \
-	"    vec2 b;\n" \
-	"    if (hit(o, l, most, nh, t, b) < 0.0)\n" \
-	"        return true;\n" \
-	"    uint m = material_of(t);\n" \
-	"    return m < s.counts.w && (uint(material_value(m, 3u)) & 1u) != 0u;\n" \
+	"    return !blocked(o, l, max(d * 0.995 - 0.03, 0.0));\n" \
 	"}\n" \
 	"\n" \
 	"/* a direction from p toward a point of a lamp's triangle (its corners a0\n" \
@@ -399,7 +405,8 @@ over 2 pi, a0 = 1 - k . n0. */
 	"        return false;\n" \
 	"    vec3 a = a0 - p, b = a1 - p, c = a2 - p;\n" \
 	"    float la = length(a), lb = length(b), lc = length(c);\n" \
-	"    bool spherical = la > 1.0e-5 && lb > 1.0e-5 && lc > 1.0e-5;\n" \
+	"    /* (HALO_BAKE_TERMS' 64: by area alone, a diagnostic) */\n" \
+	"    bool spherical = la > 1.0e-5 && lb > 1.0e-5 && lc > 1.0e-5 && !term_off(64u);\n" \
 	"    float solid = 0.0, alpha = 0.0;\n" \
 	"    vec3 n_ab, n_bc, n_ca;\n" \
 	"    if (spherical)\n" \
