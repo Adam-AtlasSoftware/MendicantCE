@@ -390,4 +390,10 @@ picture, the line, the words for no rows) -->
 	<widget name="screens/stick_value" type="text" width="240" height="16" font="ui\small_ui" color="#FFFFFFFF" align="center" text_flags="no_focus_test"/>
 	<widget name="screens/stick_note" type="text" width="240" height="16" font="ui\small_ui" color="#FF2896FF" align="center" text_flags="no_focus_test"/>
 	<widget name="screens/stick_hint" type="text" width="240" height="16" font="ui\small_ui" color="#FF6F9CD0" align="center" text_flags="no_focus_test"/>
+	<!-- the on-screen keyboard's (screens/keyboard.xml: port/linux/game/keyboard.c), a pop-up over the screen it is
+	typed for (or a game's view: the chat), which waits under it; every event its own (keyboard.c reads the
+	controller each frame); its anchor, where keyboard.c draws it (its dim, its block, its text, its keys and its
+	prompts) -->
+	<widget name="screens/keyboard" width="640" height="480" flags="pass_unhandled_to_focused_child"/>
+	<widget name="screens/keyboard_area" width="640" height="480"/>
 </menus>

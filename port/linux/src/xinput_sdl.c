@@ -507,6 +507,8 @@ static unsigned long chat_pad_bits(const XINPUT_GAMEPAD *pad)
 	if (pad->sThumbLY < -PUSHED) buttons |= 1UL << HALO_CHAT_PAD_STICK_DOWN;
 	if (pad->sThumbLX < -PUSHED) buttons |= 1UL << HALO_CHAT_PAD_STICK_LEFT;
 	if (pad->sThumbLX > PUSHED) buttons |= 1UL << HALO_CHAT_PAD_STICK_RIGHT;
+	if (pad->bAnalogButtons[XINPUT_GAMEPAD_WHITE] >= PRESSED) buttons |= 1UL << HALO_CHAT_PAD_LB;
+	if (pad->bAnalogButtons[XINPUT_GAMEPAD_BLACK] >= PRESSED) buttons |= 1UL << HALO_CHAT_PAD_RB;
 	return buttons;
 }
 

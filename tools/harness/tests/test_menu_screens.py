@@ -99,6 +99,8 @@ NEGATIVE_CONTROLS = {
     # a <stick> of an id no stick has taken
     "stick-id-unchecked": ("(!values[0] || (strcmp(values[0], \"left\") && strcmp(values[0], \"right\")))",
                            "(!values[0])", "stick"),
+    # two keyboards on a screen taken
+    "keyboard-twice": ("\t\t\tif (screen->blocks[index].kind == MENU_SCREEN_KEYBOARD)\n", "\t\t\tif (0)\n", "keyboard"),
     # a dialog taken with no list of its choices
     "dialog-no-list": ("\t\tif (list < 0)\n\t\t\treader_problem(reader, \"a <dialog> has a <list> of its choices\", NULL);\n"
                        "\t\telse if", "\t\tif", "dialog"),
@@ -188,7 +190,7 @@ def built(fault=None):
                                        c_string((ROOT / "port/assets/menus/screens/quit.xml").read_bytes()) + ";\n" + "".join(
                                            f"static char const {name}_xml[] =\n" +
                                            c_string((ROOT / f"port/assets/menus/screens/{name}.xml").read_bytes()) +
-                                           ";\n" for name in ("coop", "coop_who", "coop_join", "add_player", "stick_test")))
+                                           ";\n" for name in ("coop", "coop_who", "coop_join", "add_player", "stick_test", "keyboard")))
     (work / "menu_screens.h").write_text(read("port/linux/include/menu_screens.h"))
     executable = work / "menu_screens"
     command = ["clang", *ABI_FLAGS, "-std=gnu99", "-O1", "-Wall", "-Werror", "-Wno-unused-function",
@@ -202,7 +204,7 @@ def built(fault=None):
 
 CASES = ["main", "hints", "good", "syntax", "elements", "spartan", "items", "actions", "bindings", "when",
          "kept", "browser", "profile_select", "profile_color", "tabs", "table", "panel", "buttons", "lanes", "choice", "lobby", "chat",
-         "box", "picture", "panels", "dialog", "coop", "add_player", "stick"]
+         "box", "picture", "panels", "dialog", "coop", "add_player", "stick", "keyboard"]
 
 
 @pytest.mark.parametrize("case", CASES)

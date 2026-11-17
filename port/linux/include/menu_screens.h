@@ -15,7 +15,7 @@ sorted, do, empty, lanes, left, right) holding <lane>s, <column>s (each a <searc
 <button>, <search>, <panel>s (each its if) holding <heading>, <text>, <pills> of <pill>s,
 <pair>, <choice>, <picture>, <spartan> and <button>s, <chat> (source, lines, do, if), <space/>, <box> (x, y, width, align) holding a
 <list> and a <legend> (x), <objectives> (title), <dialog> (title, text) holding a <list> of its
-choices, <stick> (id, label, value, detail, hint, x, y, radius), and <buttons> holding
+choices, <stick> (id, label, value, detail, hint, x, y, radius), <keyboard/>, and <buttons> holding
 <button>s (key, label, do, width, if). Texts may hold bindings, {name}, filled from C; a do and the
 screen's back are actions, a table's source a row source, an if, a current,
 a sorted and a search's value bindings: names the game knows. All are
@@ -102,7 +102,11 @@ enum menu_screen_block_kind
 	(menu_screen.c); its id the stick, left or right, its box_x the middle of
 	it, box_y its top, box_width the circle's radius, in the menus' 640 by
 	480; it takes no room in the layout) */
-	MENU_SCREEN_STICK
+	MENU_SCREEN_STICK,
+	/* (the on-screen keyboard: its block, which the game draws and whose
+	input it reads (port/linux/game/keyboard.c); a screen with one is a pop-up,
+	opened over the screen it is typed for; it takes no room in the layout) */
+	MENU_SCREEN_KEYBOARD
 };
 
 /* a <dialog>'s choices, at most */

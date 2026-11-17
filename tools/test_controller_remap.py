@@ -796,6 +796,9 @@ static int input_get_key(struct key_stroke *key){return 0;}
 static short chat_scroll;
 static WORD chat_held_buttons[4];
 static unsigned char chat_held_analog[4];
+/* (the new menus' keyboard, port/linux/game/keyboard.c: not up here) */
+static int keyboard_chat_up(void){return 0;}
+static void keyboard_close(void){}
 '''
     code+='\n'.join(function(chat,n) for n in ['chat_speaker','chat_input_begin','network_chat_controller','chat_input_end','chat_keyboard_buttons'])
     code+=function(xinput,'chat_pad_hold_over')+r'''
