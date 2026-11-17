@@ -78,7 +78,9 @@ modes with `display.material_packs`: its tier (the pack's or a mod's; the automa
 its model, its flags (the normal map's coordinates, the environment shader's type and detail functions), the texture
 store's ids of its images (albedo, normal, ORM, the three detail maps, emissive, height) and its numbers (the factors,
 specular, translucency, the detail maps' scales). The G-buffer pass draws the material's opaque draws by its family's
-uber-shader, which samples them.
+uber-shader, which samples them. `GBUFFER_PHASE` gains a value, `BASE_TEXTURED` (6), sent in the deferred modes once
+the diffuse texture pass is drawn, before the decals: where a material's maps drew the level's base colour, the host
+puts it over the base target there, so that the decals lie over it.
 
 M2 adds `PRISM_BAKE` (92), sent with `display.lighting` `"raster"` (`port/linux/game/prism_bake.c`): each frame the
 in-game baker's control (the map and BSP, `display.bake`, `display.bake_quality`, the rebakes asked for, the bake
