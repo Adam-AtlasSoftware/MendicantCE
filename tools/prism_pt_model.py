@@ -176,3 +176,19 @@ def list_search(cumulative, u):
             hi = mid
     below = cumulative[lo - 1] if lo > 0 else 0.0
     return lo, (cumulative[lo] - below) / max(cumulative[-1], 1e-20)
+
+
+def guided_bounce(rng, sample_direction, light, guide, candidates=8, floor=0.002):
+    """the reference's guided bounce (guided_bounce): candidates directions from the source density
+    (sample_direction(rng)), each weighed by guide(direction) + floor, one kept by its weight, its light
+    (light(rng, direction): an unbiased estimate) over its weight by the candidates' mean weight"""
+    kept, kept_w, total = None, 0.0, 0.0
+    for _ in range(candidates):
+        d = sample_direction(rng)
+        w = guide(d) + floor
+        total += w
+        if rng.random() * total <= w:
+            kept, kept_w = d, w
+    if kept is None:
+        return 0.0
+    return light(rng, kept) / kept_w * (total / candidates)

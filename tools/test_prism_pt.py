@@ -231,3 +231,23 @@ def test_the_fast_lamp_pick_is_the_bakes():
             k, share = model.list_search(cumulative, u)
             assert k == model.list_pick_linear(cumulative, u)
             assert share == pytest.approx(weights[k] / weights.sum())
+
+
+@pytest.mark.parametrize("guide_kind", ["right", "wrong", "blind"])
+def test_the_guided_bounce_is_unbiased_whatever_the_guide(guide_kind):
+    """the reference's bounce resampled by the bake's say: its mean is the light's whether the guide is right, wrong
+    (a lit place it calls a tenth as bright, a dark one it calls as bright) or blind (0 everywhere), and with a right
+    guide its noise is far less than the plain bounce's (8 candidates: a fifth of it)"""
+    rng = np.random.default_rng(31)
+    # (directions 0..1; the light: a small bright window (0.9 to 0.95) on a dark wall)
+    def light(r, d):
+        return (40.0 if 0.9 <= d < 0.95 else 0.01) * (0.5 + r.random())
+    exact = 0.05 * 40.0 + 0.95 * 0.01
+    guides = {"right": lambda d: 40.0 if 0.9 <= d < 0.95 else 0.01,
+              "wrong": lambda d: 4.0 if 0.2 <= d < 0.25 or 0.9 <= d < 0.95 else 0.01,
+              "blind": lambda d: 0.0}
+    samples = [model.guided_bounce(rng, lambda r: r.random(), light, guides[guide_kind]) for _ in range(40000)]
+    assert np.mean(samples) == pytest.approx(exact, rel=0.05)
+    if guide_kind == "right":
+        plain = [light(rng, rng.random()) for _ in range(40000)]
+        assert np.var(samples) < 0.2 * np.var(plain)

@@ -132,7 +132,13 @@ sampler, and the pixel's glossy lobe is in the resampling's target. It `HALO_PT_
 by their shares, at least a tenth each, its light over its chance), and sums them as running means (Welford's,
 so a long sum keeps its precision). Every 32 frames it measures its own noise: each pixel's variance of its
 luminance's mean over the sum of the means squared, the frame's estimated relative MSE (linear, before the tone curve:
-stricter than the 8-bit frame's). It stops once that is at most 0.001 (the gates' `reference_noise`) with 64 frames
+stricter than the 8-bit frame's). Its diffuse bounce from the pixel is guided: 8 cosine-distributed directions, each traced to its hit and weighed by
+the light the bake says that hit gives back (plus a floor), one kept by its weight (resampled importance) and its path
+traced; its light over its weight by the candidates' mean weight. The bake steers only which direction is traced: the
+estimate's expectation is the path's, whatever the bake holds, so R stays the unbiased estimate of the same scene with
+no bake in its result; its noise is far less where a dark pixel's light comes from a lit place few directions reach
+(a10's corridors: R's first round, unguided, was at an estimated relative MSE of 0.04 to 0.29 after 1536 frames). It
+stops once that is at most 0.001 (the gates' `reference_noise`) with 64 frames
 at least, or at N frames, and writes a linear OpenEXR file: `light.R/G/B` (the diffuse light's mean), `spec.R/G/B`
 (the specular light's), `Z` (the distance; 0 the sky), `samples` and `noise` (each pixel's relative standard error),
 with `prismReferenceFrames` and `prismReferenceNoisePpm` (the estimate, in millionths). The frame it holds is the

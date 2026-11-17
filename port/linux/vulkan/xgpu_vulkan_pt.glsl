@@ -1221,6 +1221,38 @@ vec3 reference_path(vec3 o, vec3 d, int bounces, bool domes_first)
     return light;
 }
 
+/* the reference's diffuse bounce, its direction resampled (Talbot et al.'s
+RIS) from GUIDE cosine-distributed candidates, each traced to its hit and
+weighed by the light the bake says that hit gives back (hit_light's) plus a
+floor: the kept direction's path traced unbiased (reference_path) and its
+light over its weight by the candidates' mean weight. The bake only steers
+which direction is traced: the estimate's expectation is the path's,
+whatever the bake holds (the floor keeps every direction's chance above 0),
+so the reference stays the unbiased, bake-free estimate, its noise far
+less where a dark pixel's light comes from a lit place few directions see */
+const int GUIDE = 8;
+const float GUIDE_FLOOR = 0.002;
+vec3 guided_bounce(Surface g, vec3 o)
+{
+    vec3 kept = g.normal;
+    float kept_w = 0.0, sum = 0.0;
+    for (int k = 0; k < GUIDE; k++)
+    {
+        vec3 d = cosine_dir(g.normal);
+        float hd;
+        float w = luma(max(hit_light(o, d, 300.0, false, hd), vec3(0.0))) + GUIDE_FLOOR;
+        sum += w;
+        if (rnd() * sum <= w)
+        {
+            kept = d;
+            kept_w = w;
+        }
+    }
+    if (kept_w <= 0.0)
+        return vec3(0.0);
+    return reference_path(o, kept, 8, false) / kept_w * (sum / float(GUIDE));
+}
+
 /* a pixel's seed for one use (decorrelated uses: the sun, the lights, the
 bounce, the reflection each their own) */
 void seed_for(ivec2 pixel, uint frame, uint use)
@@ -1990,7 +2022,7 @@ void main()
         if (rnd() >= chance)
         {
             seed_for(pixel, frame, 4u);
-            ld += reference_path(o, cosine_dir(g.normal), 8, false) / (1.0 - chance);
+            ld += guided_bounce(g, o) / (1.0 - chance);
         }
         else
         {
