@@ -2416,6 +2416,21 @@ static void hdr_window_test(void)
 	xgpu_vulkan_hdr_sdr_curve(XGPU_HDR_SDR_CURVE_AUTO);
 	assert(fabsf(hdr_encoded_frame.paper_white - 0.0203f) < 1e-6f && hdr_encoded_frame.peak == 4.0f);
 	assert(hdr_tells == 2);
+	/* #1122: a peak of the player's (1000 nits over the 200-nit SDR white:
+	5 paper whites), and the display's full-frame peak and black (400 and
+	0.1 nits) taken with it alone: with the System peak, none */
+	xgpu_vulkan_window_luminance(0.1f, 400.0f);
+	xgpu_vulkan_hdr_frame(&frame);
+	assert(frame.peak == 4.0f && frame.full_frame == 0.0f && frame.black == 0.0f);
+	xgpu_vulkan_hdr_peak_nits(1000);
+	xgpu_vulkan_hdr_frame(&frame);
+	assert(fabsf(frame.peak - 5.0f) < 1e-5f && fabsf(frame.full_frame - 2.0f) < 1e-5f);
+	assert(fabsf(frame.black - 0.1f * 203.0f / 200.0f / 10000.0f) < 1e-9f);
+	xgpu_vulkan_hdr_peak_nits(0);
+	xgpu_vulkan_window_luminance(0.0f, 0.0f);
+	__atomic_store_n(&vk.window_hdr_changed, 0u, __ATOMIC_RELEASE);
+	xgpu_vulkan_hdr_frame(&frame);
+	assert(frame.peak == 4.0f && frame.full_frame == 0.0f && frame.black == 0.0f);
 
 	/* paper white twice the system's: the peak in paper whites halved;
 	past the headroom, no brighter than it */
@@ -2506,6 +2521,94 @@ static void hdr_window_test(void)
 	xgpu_vulkan_hdr_state(1, XGPU_HDR_MODE_FAITHFUL, 0, 100, 0);
 	assert(window_present_frame() && window_made.imageFormat == VK_FORMAT_B8G8R8A8_UNORM && !hdr_encodes);
 	assert(hdr_tells == 1 && !hdr_told[0][0]);
+	reset();
+}
+
+/* a surface with a 10-bit SDR format besides the formats above (an X
+screen of depth 30, a Wayland compositor's, Windows' drivers') */
+static VkResult VKAPI_CALL deep_formats(VkPhysicalDevice physical, VkSurfaceKHR surface, uint32_t *count,
+	VkSurfaceFormatKHR *formats)
+{
+	uint32_t four = 4;
+
+	assert(*count >= 5);
+	hdr_formats(physical, surface, &four, formats);
+	*count = 5;
+	formats[4].format = VK_FORMAT_A2R10G10B10_UNORM_PACK32;
+	formats[4].colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+	return VK_SUCCESS;
+}
+
+/* display.output_depth (#1152): the front end's RGBA16 SDR frame is
+always drawn by the last pass and dithered to the swapchain's levels: 8
+bits where the surface has no 10-bit SDR format, 10 where it has (the
+swapchain made again for it, at the next frame), and an 8-bit frame (the
+negative control) on an 8-bit swapchain again, blitted as it is */
+static void deep_window_test(void)
+{
+	/* a surface without 10-bit SDR: 8 bits, dithered to 255 */
+	hdr_window_reset();
+	window_frame.description.format = XGPU_VULKAN_FORMAT_RGBA16;
+	assert(window_present_frame() && window_swapchains == 1);
+	assert(window_made.imageFormat == VK_FORMAT_B8G8R8A8_UNORM);
+	assert(window_made.imageColorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR);
+	assert(hdr_encodes == 1 && hdr_encoded_format == XGPU_VULKAN_FORMAT_BGRA8);
+	assert(hdr_encoded_frame.output == XGPU_HDR_OUTPUT_SDR && hdr_encoded_output.levels == 255.0f &&
+		hdr_encoded_output.power == 1.0f && window_blit_source == hdr_encoded.image);
+
+	/* with one: 10 bits in sRGB's colour space (not HDR10's), dithered to
+	1023, the last pass's image copied 1:1 */
+	hdr_window_reset();
+	vkGetPhysicalDeviceSurfaceFormatsKHR = deep_formats;
+	window_frame.description.format = XGPU_VULKAN_FORMAT_RGBA16;
+	assert(window_present_frame() && window_swapchains == 1);
+	assert(window_made.imageFormat == VK_FORMAT_A2R10G10B10_UNORM_PACK32);
+	assert(window_made.imageColorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR);
+	assert(hdr_encodes == 1 && hdr_encoded_format == XGPU_VULKAN_FORMAT_RGB10A2);
+	assert(hdr_encoded_output.levels == 1023.0f && window_blit_source == hdr_encoded.image);
+	assert(window_blit_filter == VK_FILTER_NEAREST);
+	assert(window_present_frame() && window_swapchains == 1);
+
+	/* (the negative control) display.output_depth "8": the 8-bit frame;
+	the swapchain made 8-bit again, the frame blitted byte for byte, no
+	pass */
+	window_frame.description.format = XGPU_VULKAN_FORMAT_BGRA8;
+	hdr_encodes = 0;
+	assert(window_present_frame() && window_swapchains == 2);
+	assert(window_made.imageFormat == VK_FORMAT_B8G8R8A8_UNORM && !hdr_encodes);
+	assert(window_blit_source == window_frame.image);
+	reset();
+}
+
+/* #1117: an 8-bit frame at gamma 1 shown smaller than it is by 1.5
+(supersampling: 1920x1080 in a 1280x720 window) is drawn by the last pass,
+which scales it down by its area at the window's pixels, then copied 1:1;
+at 1 and exactly 2 (the negative controls) it is blitted as before, the
+2x blit linear, untouched by any pass */
+static void area_window_test(void)
+{
+	static const uint32_t sizes[3][2] = { { 1920, 1080 }, { 2560, 1440 }, { 1280, 720 } };
+	int which;
+
+	for (which = 0; which < 3; which++)
+	{
+		hdr_window_reset();
+		window_frame.description.width = sizes[which][0];
+		window_frame.description.height = sizes[which][1];
+		assert(window_present_frame() && window_made.imageFormat == VK_FORMAT_B8G8R8A8_UNORM);
+		if (!which)
+		{
+			assert(hdr_encodes == 1 && hdr_encoded_format == XGPU_VULKAN_FORMAT_BGRA8);
+			assert(hdr_encoded_output.width == 1280 && hdr_encoded_output.height == 720);
+			assert(hdr_encoded_output.factors[0] == 1 && hdr_encoded_output.factors[1] == 1);
+			assert(window_blit_source == hdr_encoded.image && window_blit_filter == VK_FILTER_NEAREST);
+		}
+		else
+		{
+			assert(!hdr_encodes && window_blit_source == window_frame.image);
+			assert(window_blit_region.srcOffsets[1].x == (int32_t)sizes[which][0]);
+		}
+	}
 	reset();
 }
 
@@ -2680,6 +2783,7 @@ static void hdr_post_test(void)
 	encoding.paper_white = 0.02f;
 	encoding.peak = 4.0f;
 	encoding.sdr_curve = XGPU_HDR_SDR_CURVE_GAMMA_2_2;
+	encoding.black = 0.0001f;
 	/* (the 64x48 frame shown at 128x96, twice each way sharply, dithered
 	to 10 bits) */
 	memset(&output, 0, sizeof(output));
@@ -2699,7 +2803,7 @@ static void hdr_post_test(void)
 	assert(uniforms->bounds[0] == 64.0f && uniforms->bounds[1] == 48.0f && uniforms->bounds[2] == 2.0f &&
 		uniforms->bounds[3] == 2.0f);
 	assert(uniforms->window[0] == (float)XGPU_HDR_SDR_CURVE_GAMMA_2_2 && uniforms->window[1] == 1023.0f &&
-		uniforms->window[2] == 1.0f);
+		uniforms->window[2] == 1.0f && uniforms->window[3] == 0.0001f);
 	assert(vk.bound.viewport.width == 128.0f && vk.bound.viewport.height == 96.0f);
 
 	free(target.attachments);
@@ -3945,6 +4049,8 @@ int main(void)
 	local_read_test();
 	hdr_pipeline_test();
 	hdr_window_test();
+	deep_window_test();
+	area_window_test();
 	hdr_white_test();
 	sharp_test();
 	hdr_post_test();

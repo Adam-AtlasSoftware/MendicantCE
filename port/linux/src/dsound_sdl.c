@@ -31,9 +31,13 @@ limiter keeps it under full scale (limit). A voice the game cuts off while
 it plays fades out over 5 ms rather than stopping dead, which clicked
 (voice_cut). On stereo and 5.1 (audio.spatial:
 "auto", as the Xbox; spatial_hrtf), and in the VR mode with
-vr.hrtf, a mono 3D voice goes to each ear through a model of a head instead
+vr.hrtf, a 3D voice goes to each ear through a model of a head instead
 of the pan (hrtf), as the Xbox's DirectSound put its 3D voices through its
-HRTF; 2D voices (the menus, the music, the HUD) are as they were.
+HRTF; 2D voices (the menus, the music, the HUD) are as they were. A stereo
+voice the game places in the world (a mod's stereo gunfire or engine in
+place of a mono one) is a 3D voice whatever its channels: mixed to one
+channel at the voice and heard from where it is as a mono 3D voice is
+(voice_in_world).
 
 The output is stereo or 5.1 (audio.channels; "auto": 5.1 on a device of
 six channels or more, as the host's SDL reports it, output_channels_choose).
@@ -41,10 +45,8 @@ For 5.1 the speaker config reports AC-3, as an Xbox set to Dolby Digital
 does: the game then sends its 2D voices to the center and back mix bins too
 (dsound_initialize_channel: a mono one at half to the front three, a stereo
 one whole to the front pair and at half to the back pair), 3D voices play
-from the front and back pairs as the Xbox's did (surround_split), stereo
-voices positioned in the world are panned around the five full range
-speakers by VBAP (surround_pan), and the reverb plays from the front and
-back pairs. The mix bins 0-5 are in SDL's 5.1 order (FL, FR, FC, LFE, BL,
+from the front and back pairs as the Xbox's did (surround_split), and the
+reverb plays from the front and back pairs. The mix bins 0-5 are in SDL's 5.1 order (FL, FR, FC, LFE, BL,
 BR), so bin n is output channel n. The game sends nothing to the LFE bin;
 what is sent to it plays below 120 Hz, as the Xbox's AC-3 carried it (lfe).
 Stereo output mixes exactly as before.
@@ -64,6 +66,7 @@ buffer, so streams still drain at their real rate.
 
 audio.volume sets the master volume (default 1.0); audio.reverb = false
 turns the reverb off, and audio.doppler = false the Doppler shift;
+audio.listening_mode "night" evens the loudness out (night_compress);
 audio.spatial chooses the HRTF or the pan ("auto", "headphones", "speakers");
 audio.resampler chooses the Xbox's low pass ("xbox"), the mixer's sinc one
 ("sinc") or between neighbouring frames ("linear"); audio.enabled = false skips opening a device;
@@ -204,7 +207,6 @@ struct voice_settings
 	float volume;
 	float mix_left, mix_right;
 	BOOL stereo_positioned;
-	float stereo_pan, stereo_distance, stereo_distance_fade;
 	float surround_bins[2][MAXIMUM_OUTPUT_CHANNELS];
 	DWORD mode;
 	float position[3], velocity[3];
@@ -257,13 +259,10 @@ struct sdl_stream
 	/* 2D gains */
 	float volume;             /* SetVolume */
 	float mix_left, mix_right;
-	/* a stereo voice of a sound in the world: panned towards it, -1 left
-	to 1 right, its distance, and the fade of its volume with distance that
-	the game made (dsound_sdl_stream_set_stereo_position) */
+	/* a stereo voice of a sound in the world, a 3D voice at the position,
+	velocity and minimum distance below, its volume holding the game's fade
+	with distance (dsound_sdl_stream_set_stereo_position, voice_in_world) */
 	BOOL stereo_positioned;
-	float stereo_pan;
-	float stereo_distance;
-	float stereo_distance_fade;
 	float headroom;
 	/* on 5.1 (output_channels 6): the gains from each source channel to
 	each speaker mix bin (SetMixBins, SetMixBinVolumes) */
@@ -589,6 +588,22 @@ static float distance_attenuation(const struct sdl_stream *stream, float distanc
 	return minimum / (minimum + rolloff_factor * (distance - minimum));
 }
 
+/* whether a voice is of a sound placed in the world: a 3D voice with 3D on,
+or a stereo voice the game positions (dsound_sdl_stream_set_stereo_position:
+a mod's stereo sound in place of a mono one, which the game plays on a
+stereo channel). A sound in the world is heard from where it is whatever its
+channels: a stereo voice's are mixed to one at the voice (their mean, so
+that a stereo file of the same sound on both is the mono one exactly,
+mix_voice) and it takes the same way as a mono 3D voice, through the HRTF or
+the pan, with its distance, Doppler shift, obstruction and reverb. The
+Xbox's own stereo sounds (the music, the menus, the cinematics) are never
+placed and play as they were */
+static BOOL voice_in_world(const struct sdl_stream *stream)
+{
+	return (stream->has_3d && stream->mode != DS3DMODE_DISABLE) ||
+		(stream->channels == 2 && stream->stereo_positioned);
+}
+
 /* ---------- Doppler
 
 The game gives each 3D voice its velocity (units a second, relative to the
@@ -618,7 +633,7 @@ static float doppler_ratio(const struct sdl_stream *stream)
 	float offset[3], distance, source_speed, listener_speed = 0.0f, ratio, limit = DOPPLER_SPEED_OF_SOUND;
 	int axis;
 
-	if (!doppler_enabled || !stream->has_3d || stream->mode == DS3DMODE_DISABLE)
+	if (!doppler_enabled || !voice_in_world(stream))
 		return 1.0f;
 	for (axis = 0; axis < 3; axis++)
 	{
@@ -1287,9 +1302,8 @@ static void surround_split(float right, float up, float ahead, float *pair)
 
 /* the gains of a 3D voice to the left and right (the pan's), the gains of
 the front and back pairs of speakers (surround_split) and the distance
-rolloff's attenuation (distance_gain); for a mono voice through the HRTF
-(hrtf_on: chosen, or crossfading from it), its gain to each ear and its way
-there (hrtf_out) */
+rolloff's attenuation (distance_gain); through the HRTF (hrtf_on: chosen,
+or crossfading from it), its gain to each ear and its way there (hrtf_out) */
 static void spatialize(const struct sdl_stream *stream, float *left, float *right, float *pair,
 	float *distance_gain, BOOL *hrtf_on, struct hrtf_parameters *hrtf_out)
 {
@@ -1320,7 +1334,10 @@ static void spatialize(const struct sdl_stream *stream, float *left, float *righ
 	distance factor turns units into meters for Doppler, and scaling by it
 	here put every 3D sound 3 times as far away, up to 10 dB quieter */
 	distance = sqrtf(dot3(offset, offset));
-	attenuation = distance_attenuation(stream, distance, listener.rolloff_factor);
+	/* (a stereo voice in the world, a 2D stream, has the same rolloff in its
+	volume already: the game fades it by its minimum distance over its
+	distance, sound_manager.c update_channels) */
+	attenuation = stream->has_3d ? distance_attenuation(stream, distance, listener.rolloff_factor) : 1.0f;
 	*distance_gain = attenuation;
 
 	/* equal power pan; close sources and sources straight ahead or behind
@@ -1338,9 +1355,10 @@ static void spatialize(const struct sdl_stream *stream, float *left, float *righ
 		*right = sinf(angle) * 1.41421356f * 0.70710678f;
 	}
 	/* and through the HRTF, each ear at the pan's gain in the middle (-3
-	dB), the head's filters doing the rest */
+	dB), the head's filters doing the rest (a stereo voice's channels mixed
+	to one first, mix_voice) */
 	surround_split(side, up, ahead, pair);
-	*hrtf_on = stream->channels == 1 && (hrtf_enabled || stream->hrtf_mix > 0.0f);
+	*hrtf_on = hrtf_enabled || stream->hrtf_mix > 0.0f;
 	if (*hrtf_on)
 	{
 		/* (on 5.1 a sound behind as the direction mirrored ahead) */
@@ -1371,7 +1389,7 @@ static void voice_gains(const struct sdl_stream *stream, float *left, float *rig
 	*direct_lowpass = 0.0f;
 	*room_lowpass = 0.0f;
 	*hrtf_on = FALSE;
-	if (stream->has_3d && stream->mode != DS3DMODE_DISABLE)
+	if (voice_in_world(stream))
 	{
 		float distance_gain, cosine = frequency_cosine(environment.flHFReference);
 
@@ -1395,36 +1413,6 @@ static void voice_gains(const struct sdl_stream *stream, float *left, float *rig
 			rolloff, fitted at 2 and 10 m, was 4 dB loud from 3 m and 6
 			dB quiet within 1 m) */
 			*room = VOICE_LEVEL_3D * gain_from_millibels(level) * distance_gain;
-			if (*room > 0.0f && high_level < level)
-				*room_lowpass = lowpass_coefficient(gain_from_millibels(high_level - level), cosine);
-		}
-	}
-	else if (stream->channels == 2 && stream->stereo_positioned)
-	{
-		/* the equal power pan of a 3D voice, at the gains of a 2D one when
-		centred (the game fades it with distance), its direct path muffled
-		and its room send made as a 3D voice's are (SetI3DL2Source) */
-		float angle = (stream->stereo_pan + 1.0f) * 0.25f * 3.14159265f;
-		float direct = gain_from_millibels(stream->direct);
-		float cosine = frequency_cosine(environment.flHFReference);
-
-		*left = cosf(angle) * 1.41421356f * stream->mix_left * direct;
-		*right = sinf(angle) * 1.41421356f * stream->mix_right * direct;
-		if (stream->direct_hf < stream->direct)
-			*direct_lowpass = lowpass_coefficient(gain_from_millibels(stream->direct_hf - stream->direct), cosine);
-		if (reverb_enabled)
-		{
-			LONG level = environment.lRoom + stream->room;
-			LONG high_level = environment.lRoom + environment.lRoomHF + stream->room_hf;
-
-			/* the room's rolloff with distance, a 3D voice's; the volume
-			holds the game's fade with it, which a 3D voice's room send does
-			not take, so it is taken back out (no further than a twentieth:
-			past that the send fades out with the sound) */
-			*room = gain_from_millibels(level) *
-				distance_attenuation(stream, stream->stereo_distance,
-					environment.flRoomRolloffFactor + stream->room_rolloff_factor) /
-				(stream->stereo_distance_fade > 0.05f ? stream->stereo_distance_fade : 0.05f);
 			if (*room > 0.0f && high_level < level)
 				*room_lowpass = lowpass_coefficient(gain_from_millibels(high_level - level), cosine);
 		}
@@ -1473,78 +1461,13 @@ static void voice_gains(const struct sdl_stream *stream, float *left, float *rig
 	}
 }
 
-/* the 5.1 speakers around the listener, clockwise from the center, and
-their directions in radians (ITU-R BS.775: fronts at 30 degrees, backs at
-110) */
-#define SURROUND_RING_SPEAKERS 5
-static const unsigned long surround_ring_channel[SURROUND_RING_SPEAKERS] = { 2, 1, 5, 4, 0 };
-static const float surround_ring_angle[SURROUND_RING_SPEAKERS + 1] =
-{
-	0.0f, 0.52359878f, 1.91986218f, 4.36332313f, 5.75958653f, 6.28318531f,
-};
-
-/* the speaker gains of a sound from a direction, side (right) and ahead:
-vector base amplitude panning (Pulkki's VBAP, in the plane) between the two
-speakers either side of it, blended (in power) towards all five equally by
-spread, 0 to 1. Their power sums to 1, as the stereo pan's does.
-
-VBAP takes the gains g1 and g2 whose sum g1 l1 + g2 l2 of the speakers'
-directions l1 and l2 points the sound's way p, then scales them to a power
-of 1: g1 = sin(a2 - a) / sin(a2 - a1) and g2 = sin(a - a1) / sin(a2 - a1),
-a the sound's angle, a1 and a2 the speakers', the common divisor gone with
-the scaling. So a sound at a speaker plays from it alone, one between two
-from both, as the tangent law of stereo panning puts a phantom image (the
-listener between them hears it where it is), and no pair is wider than 180
-degrees (the backs' 140 is the widest). */
-static void surround_pan(float side, float ahead, float spread, float *gains)
-{
-	float angle = atan2f(side, ahead);
-	unsigned long segment, speaker;
-
-	for (speaker = 0; speaker < MAXIMUM_OUTPUT_CHANNELS; speaker++)
-		gains[speaker] = 0.0f;
-	if (angle < 0.0f)
-		angle += 6.28318531f;
-	for (segment = 0; segment < SURROUND_RING_SPEAKERS - 1; segment++)
-	{
-		if (angle < surround_ring_angle[segment + 1])
-			break;
-	}
-	{
-		float first = sinf(surround_ring_angle[segment + 1] - angle);
-		float second = sinf(angle - surround_ring_angle[segment]);
-		float length;
-
-		first = first > 0.0f ? first : 0.0f;
-		second = second > 0.0f ? second : 0.0f;
-		length = sqrtf(first * first + second * second);
-		if (length < 1.0e-6f)
-		{
-			first = 1.0f;
-			length = 1.0f;
-		}
-		gains[surround_ring_channel[segment]] = first / length;
-		gains[surround_ring_channel[(segment + 1) % SURROUND_RING_SPEAKERS]] = second / length;
-	}
-	for (speaker = 0; speaker < SURROUND_RING_SPEAKERS; speaker++)
-	{
-		float *gain = &gains[surround_ring_channel[speaker]];
-
-		*gain = sqrtf((1.0f - spread) * *gain * *gain + spread / SURROUND_RING_SPEAKERS);
-	}
-}
-
 /* on 5.1, a voice's gains from each source channel to each speaker (the
 direct path's; its room send and low passes are voice_gains'):
 	- a 3D voice's left and right gains (voice_gains: the pan's, with its
 	  volume) on the front pair and the back pair, at their gains (pair,
-	  surround_split), a mono voice's both from its one channel, a stereo
-	  voice's from its left and right; through the HRTF, its way to each
-	  ear (hrtf_process) instead, crossfaded with these as the choice
-	  changes;
-	- a stereo voice positioned in the world has its channels' middle (the
-	  first row) panned towards it in the front half, and their difference
-	  (the second) kept on the front pair as wide as the stereo mix keeps it;
+	  surround_split), from its one channel (a stereo voice's mixed to one,
+	  voice_in_world); through the HRTF, its way to each ear (hrtf_process)
+	  instead, crossfaded with these as the choice changes;
 	- a 2D voice goes by its mix bins. */
 static void voice_surround_gains(const struct sdl_stream *stream, float left, float right, const float *pair,
 	float gains[2][MAXIMUM_OUTPUT_CHANNELS])
@@ -1552,37 +1475,17 @@ static void voice_surround_gains(const struct sdl_stream *stream, float left, fl
 	unsigned long speaker;
 
 	memset(gains, 0, 2 * sizeof(gains[0]));
-	if (stream->has_3d && stream->mode != DS3DMODE_DISABLE)
+	if (voice_in_world(stream))
 	{
-		unsigned long second = stream->channels == 2 ? 1 : 0;
-
 		gains[0][0] = left * pair[0];
 		gains[0][4] = left * pair[1];
-		gains[second][1] = right * pair[0];
-		gains[second][5] = right * pair[1];
+		gains[0][1] = right * pair[0];
+		gains[0][5] = right * pair[1];
 		return;
 	}
-	if (stream->channels == 2 && stream->stereo_positioned)
-	{
-		float pan = stream->stereo_pan < -1.0f ? -1.0f : stream->stereo_pan > 1.0f ? 1.0f : stream->stereo_pan;
-		float angle = (pan + 1.0f) * 0.25f * 3.14159265f;
-		float direct = gain_from_millibels(stream->direct);
-		float far_gain = (cosf(angle) < sinf(angle) ? cosf(angle) : sinf(angle)) * 1.41421356f;
-
-		/* the middle at the stereo pan's level (1 on each side when centred,
-		a power of 2) */
-		surround_pan(sinf(pan * 1.57079633f), cosf(pan * 1.57079633f), 0.1f, gains[0]);
-		for (speaker = 0; speaker < MAXIMUM_OUTPUT_CHANNELS; speaker++)
-			gains[0][speaker] *= 1.41421356f * stream->mix_left * direct;
-		gains[1][0] = far_gain * stream->mix_left * direct;
-		gains[1][1] = -far_gain * stream->mix_right * direct;
-	}
-	else
-	{
-		memcpy(gains, stream->surround_bins, 2 * sizeof(gains[0]));
-		if (stream->channels == 1)
-			memset(gains[1], 0, sizeof(gains[1]));
-	}
+	memcpy(gains, stream->surround_bins, 2 * sizeof(gains[0]));
+	if (stream->channels == 1)
+		memset(gains[1], 0, sizeof(gains[1]));
 	/* (voice_level, as voice_gains) */
 	for (speaker = 0; speaker < MAXIMUM_OUTPUT_CHANNELS; speaker++)
 	{
@@ -2167,8 +2070,10 @@ static void mix_voice(struct sdl_stream *stream, float *output, float *send, uns
 	float direct_state[2], room_state;
 	long width;
 	unsigned long frame, ramp_frames;
-	/* (a stereo voice panned towards its sound: voice_gains) */
-	BOOL positioned = stream->channels == 2 && stream->stereo_positioned;
+	/* (a stereo voice of a sound in the world: its channels mixed to one,
+	which it plays as a mono 3D voice does, voice_in_world) */
+	BOOL downmixed = stream->channels == 2 && voice_in_world(stream);
+	BOOL one_channel = stream->channels == 1 || downmixed;
 	/* (through the HRTF: whether it may take the voice, and whether its
 	filters run in this mix; how much of the voice they play, at the start,
 	the end and a frame's step; its parameters, and the direct path the
@@ -2412,6 +2317,10 @@ static void mix_voice(struct sdl_stream *stream, float *output, float *send, uns
 			if (stream->channels == 1)
 				sample_right = sample_left;
 		}
+		/* (a stereo voice in the world: its channels' mean, both alike as a
+		mono voice's are) */
+		if (downmixed)
+			sample_left = sample_right = 0.5f * (sample_left + sample_right);
 		/* the room send, with its own low pass, through the Xbox's resampler
 		(send_phases), not the mixer's: the reverb folds the send's top
 		octave onto its bottom one, and the Xbox's let through images and
@@ -2436,15 +2345,14 @@ static void mix_voice(struct sdl_stream *stream, float *output, float *send, uns
 		direct_state[1] = sample_right;
 		if (surround)
 		{
-			/* the first row's gains take the left (a mono voice's only)
-			channel, or a positioned voice's middle; the second the right, or
-			its difference; through the HRTF (hrtf_process, after), the pan's
-			share while the choice changes */
+			/* the first row's gains take the left (a mono voice's only, or a
+			stereo voice's in the world mixed to one) channel; the second the
+			right; through the HRTF (hrtf_process, after), the pan's share
+			while the choice changes */
 			float *speakers = output + frame * MAXIMUM_OUTPUT_CHANNELS;
 			float panned = hrtf_running ? 1.0f - hrtf_mix : 1.0f;
-			float first = (positioned ? 0.5f * (sample_left + sample_right) : sample_left) * panned;
-			float second = (positioned ? 0.5f * (sample_left - sample_right) :
-				stream->channels == 2 ? sample_right : 0.0f) * panned;
+			float first = sample_left * panned;
+			float second = (one_channel ? 0.0f : sample_right) * panned;
 
 			if (hrtf_running)
 			{
@@ -2472,22 +2380,10 @@ static void mix_voice(struct sdl_stream *stream, float *output, float *send, uns
 			}
 			hrtf_mix = hrtf_mix_step(hrtf_mix, ramp_hrtf_mix, hrtf_mix_end);
 		}
-		else if (stream->channels == 1)
+		else if (one_channel)
 		{
 			output[frame * 2] += sample_left * left;
 			output[frame * 2 + 1] += sample_left * right;
-		}
-		else if (positioned)
-		{
-			/* the channels' middle panned, and their difference kept as
-			wide as the far ear's gain: the sound comes from where it is,
-			still stereo */
-			float middle = 0.5f * (sample_left + sample_right);
-			float side = 0.5f * (sample_left - sample_right);
-			float far_gain = left < right ? left : right;
-
-			output[frame * 2] += middle * left + side * far_gain;
-			output[frame * 2 + 1] += middle * right - side * far_gain;
 		}
 		else
 		{
@@ -3332,6 +3228,100 @@ static float sound_fade(float *output, unsigned long frames, unsigned long chann
 	return gain;
 }
 
+/* ---------- night (audio.listening_mode)
+
+"night" evens the loudness out for quiet play: one compressor before the
+limiter, on the whole mix (the players' voices too), both channels (all six
+on 5.1) alike. Its level is the loudest channel's, its power smoothed over
+NIGHT_DETECT_SECONDS, so that it follows syllables and shots but not each
+wave of them. Around NIGHT_PIVOT_DB (about where speech and the game's
+middle sit after OUTPUT_GAIN), the level moves NIGHT_RATIO times less: 3 to
+1, a quiet sound 12 dB under the pivot brought up 8 dB, a loud one 12 dB
+over it brought down 8, at most NIGHT_MOST_DB either way. Under
+NIGHT_FLOOR_DB the lift fades out to none NIGHT_FLOOR_RANGE_DB further down,
+so that silence and hiss are not brought up. The gain comes down within
+NIGHT_ATTACK_SECONDS (an explosion is caught; the limiter after it takes
+what gets past) and goes back up over NIGHT_RELEASE_SECONDS, slow enough
+that a steady sound's gain does not pump. "default" never runs it: the mix is
+as it was, to the bit; turned off as it plays, its gain goes back to 1 over
+its release first, then it stops. */
+
+#define NIGHT_PIVOT_DB (-24.0f)
+#define NIGHT_RATIO 3.0f
+#define NIGHT_MOST_DB 12.0f
+#define NIGHT_FLOOR_DB (-60.0f)
+#define NIGHT_FLOOR_RANGE_DB 12.0f
+#define NIGHT_DETECT_SECONDS 0.01f
+#define NIGHT_ATTACK_SECONDS 0.01f
+#define NIGHT_RELEASE_SECONDS 0.3f
+
+/* audio.listening_mode "night" */
+static BOOL night_enabled = FALSE;
+
+static struct
+{
+	/* the level's power, and the gain (dB) */
+	float power;
+	float gain_db;
+	BOOL running;
+} night;
+
+/* the gain (dB) the compressor wants for a level (dB) */
+static float night_curve(float level_db)
+{
+	float gain_db = (NIGHT_PIVOT_DB - level_db) * (1.0f - 1.0f / NIGHT_RATIO);
+
+	if (gain_db > NIGHT_MOST_DB)
+		gain_db = NIGHT_MOST_DB;
+	if (gain_db < -NIGHT_MOST_DB)
+		gain_db = -NIGHT_MOST_DB;
+	if (gain_db > 0.0f && level_db < NIGHT_FLOOR_DB)
+	{
+		float share = 1.0f - (NIGHT_FLOOR_DB - level_db) / NIGHT_FLOOR_RANGE_DB;
+
+		gain_db *= share > 0.0f ? share : 0.0f;
+	}
+	return gain_db;
+}
+
+static void night_compress(float *output, unsigned long frames)
+{
+	float detect = 1.0f - expf(-1.0f / (NIGHT_DETECT_SECONDS * OUTPUT_RATE));
+	float attack = 1.0f - expf(-1.0f / (NIGHT_ATTACK_SECONDS * OUTPUT_RATE));
+	float release = 1.0f - expf(-1.0f / (NIGHT_RELEASE_SECONDS * OUTPUT_RATE));
+	unsigned long frame, channel;
+
+	if (!night_enabled && !night.running)
+		return;
+	if (!night.running)
+	{
+		night.power = 0.0f;
+		night.gain_db = 0.0f;
+		night.running = TRUE;
+	}
+	for (frame = 0; frame < frames; frame++)
+	{
+		float *sample = output + frame * output_channels;
+		float peak = 0.0f, wanted, gain;
+
+		for (channel = 0; channel < output_channels; channel++)
+		{
+			float power = sample[channel] * sample[channel];
+
+			peak = power > peak ? power : peak;
+		}
+		night.power = flush_denormal(night.power + (peak - night.power) * detect);
+		wanted = night_enabled ? night_curve(10.0f * log10f(night.power + 1.0e-12f)) : 0.0f;
+		night.gain_db += (wanted - night.gain_db) * (wanted < night.gain_db ? attack : release);
+		gain = powf(10.0f, night.gain_db / 20.0f);
+		for (channel = 0; channel < output_channels; channel++)
+			sample[channel] *= gain;
+	}
+	/* (off, and back at 1: stopped, the mix as it was) */
+	if (!night_enabled && fabsf(night.gain_db) < 0.001f)
+		night.running = FALSE;
+}
+
 static void limit(float *output, unsigned long frames)
 {
 	float release = 1.0f - expf(-1.0f / (LIMITER_RELEASE_SECONDS * OUTPUT_RATE));
@@ -3678,9 +3668,6 @@ static void voice_settings_take(struct sdl_stream *stream)
 	stream->mix_left = settings->mix_left;
 	stream->mix_right = settings->mix_right;
 	stream->stereo_positioned = settings->stereo_positioned;
-	stream->stereo_pan = settings->stereo_pan;
-	stream->stereo_distance = settings->stereo_distance;
-	stream->stereo_distance_fade = settings->stereo_distance_fade;
 	memcpy(stream->surround_bins, settings->surround_bins, sizeof(stream->surround_bins));
 	stream->mode = settings->mode;
 	memcpy(stream->position, settings->position, sizeof(stream->position));
@@ -3836,7 +3823,7 @@ static void voices_report_make(void)
 		float offset[3], right_axis[3], room, direct_lowpass, room_lowpass, pair[2];
 		int axis;
 
-		if (!stream->has_3d || stream->mode == DS3DMODE_DISABLE || stream->paused || !stream->mixing_count)
+		if (!voice_in_world(stream) || stream->paused || !stream->mixing_count)
 			continue;
 		for (axis = 0; axis < 3; axis++)
 		{
@@ -4153,6 +4140,8 @@ static void mix(float *output, unsigned long frames, BOOL wait)
 	if (mix_profile_on)
 		mix_part_end(_mix_part_chat, &part_at);
 	subsonic(output, frames);
+	/* (audio.listening_mode "night") */
+	night_compress(output, frames);
 	limit(output, frames);
 	sound_gain = sound_fade(output, frames, output_channels, sound_gain, sound_on);
 	record(output, frames);
@@ -4816,6 +4805,7 @@ static void audio_start(void)
 	master_volume = (float)config_real("audio.volume");
 	reverb_enabled = config_boolean("audio.reverb");
 	doppler_enabled = config_boolean("audio.doppler");
+	night_enabled = !strcmp(config_string("audio.listening_mode"), "night");
 	sound_on = config_boolean("audio.enabled");
 	sound_gain = sound_on ? 1.0f : 0.0f;
 	mix_profile_initialize();
@@ -5121,23 +5111,24 @@ static HRESULT STDMETHODCALLTYPE stream_flush(IDirectSoundStream *object)
 	return S_OK;
 }
 
-/* A stereo voice of a sound in the world (`positioned`) is panned towards
-it, `pan` from -1 (left) to 1 (right), and muffled and reverberated as a 3D
-voice is (its I3DL2 source, which the game sets as a 3D channel's), its room
-send rolling off from `minimum_distance` with `distance`. The game fades its
-volume with distance itself, by `distance_fade`. Not positioned, it plays as
-the Xbox played every stereo sound, unpanned and dry. (sound_manager.c,
+/* A stereo voice of a sound in the world (`positioned`) is a 3D voice at
+`position`, moving at `velocity` (DirectSound's axes, as the game gives a 3D
+channel's: relative to the listener, units a second), heard as a mono 3D
+voice is, its channels mixed to one (voice_in_world): through the HRTF or
+the pan, Doppler shifted, and muffled and reverberated by its I3DL2 source,
+which the game sets as a 3D channel's. The game fades its volume with
+distance itself, from `minimum_distance`. Not positioned, it plays as the
+Xbox played every stereo sound, unpanned and dry. (sound_manager.c,
 update_channels: sound_dsound_xbox.c calls this.) */
-void dsound_sdl_stream_set_stereo_position(IDirectSoundStream *object, BOOL positioned, float pan,
-	float distance, float minimum_distance, float distance_fade)
+void dsound_sdl_stream_set_stereo_position(IDirectSoundStream *object, BOOL positioned, const float *position,
+	const float *velocity, float minimum_distance)
 {
 	struct sdl_stream *stream = stream_from_interface(object);
 
 	pthread_mutex_lock(&voices_lock);
 	stream->pending.stereo_positioned = positioned && stream->channels == 2;
-	stream->pending.stereo_pan = pan < -1.0f ? -1.0f : (pan > 1.0f ? 1.0f : pan);
-	stream->pending.stereo_distance = distance > 0.0f ? distance : 0.0f;
-	stream->pending.stereo_distance_fade = distance_fade < 0.0f ? 0.0f : (distance_fade > 1.0f ? 1.0f : distance_fade);
+	memcpy(stream->pending.position, position, sizeof(stream->pending.position));
+	memcpy(stream->pending.velocity, velocity, sizeof(stream->pending.velocity));
 	/* (as the game gives a 3D channel: no maximum) */
 	stream->pending.minimum_distance = minimum_distance > 0.0f ? minimum_distance : 0.0f;
 	stream->pending.maximum_distance = 3.4e38f;
@@ -5280,8 +5271,8 @@ VOID WINAPI DirectSoundDoWork(void)
 		log_flushed_ns = SDL_GetTicksNS();
 		dsound_log_flush();
 	}
-	/* (audio.volume, audio.reverb, audio.doppler, audio.enabled and
-	audio.resampler read again when the settings change: on the game's thread, not the mixer's,
+	/* (audio.volume, audio.reverb, audio.doppler, audio.listening_mode, audio.enabled
+	and audio.resampler read again when the settings change: on the game's thread, not the mixer's,
 	whose lock the config's file I/O would hold) */
 	if (volume_read_at != config_changes())
 	{
@@ -5289,6 +5280,7 @@ VOID WINAPI DirectSoundDoWork(void)
 		master_volume = (float)config_real("audio.volume");
 		reverb_enabled = config_boolean("audio.reverb");
 		doppler_enabled = config_boolean("audio.doppler");
+		night_enabled = !strcmp(config_string("audio.listening_mode"), "night");
 		sound_on = config_boolean("audio.enabled");
 		log_voices = config_boolean("debug.audio_log");
 		snprintf(spatial_setting, sizeof(spatial_setting), "%s", config_string("audio.spatial"));

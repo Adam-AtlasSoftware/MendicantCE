@@ -497,7 +497,8 @@ static struct xgpu_vulkan_image *target_image_make(const struct stream_target *t
 	memset(&description, 0, sizeof(description));
 	description.type = target->layers > 1 ? XGPU_VULKAN_IMAGE_2D_ARRAY : XGPU_VULKAN_IMAGE_2D;
 	description.format = target->depth ? XGPU_VULKAN_FORMAT_D24S8 :
-		target->format == XGPU_VULKAN_FORMAT_RGBA16F ? XGPU_VULKAN_FORMAT_RGBA16F : XGPU_VULKAN_FORMAT_BGRA8;
+		target->format == XGPU_VULKAN_FORMAT_RGBA16F || target->format == XGPU_VULKAN_FORMAT_RGBA16 ? target->format :
+		XGPU_VULKAN_FORMAT_BGRA8;
 	description.usage = XGPU_VULKAN_USAGE_SAMPLED | XGPU_VULKAN_USAGE_TARGET;
 	if (description.format == XGPU_VULKAN_FORMAT_RGBA16F)
 		description.usage |= XGPU_VULKAN_USAGE_INPUT;
@@ -539,7 +540,8 @@ static void stream_target_create(void *context, const struct xgpu_stream_target_
 	target->layers = record->layers ? record->layers : 1;
 	target->depth = record->depth != 0;
 	target->format = record->format == XGPU_FORMAT_RGBA16F && stream.capabilities.color_read && !target->depth ?
-		XGPU_VULKAN_FORMAT_RGBA16F : XGPU_VULKAN_FORMAT_BGRA8;
+		XGPU_VULKAN_FORMAT_RGBA16F : record->format == XGPU_FORMAT_RGBA16 && stream.capabilities.deep_sdr &&
+		!target->depth ? XGPU_VULKAN_FORMAT_RGBA16 : XGPU_VULKAN_FORMAT_BGRA8;
 	target->image = target_image_make(target, 0);
 	if (!target->image)
 	{
@@ -1588,9 +1590,11 @@ static int stream_pipeline(void *context, uint32_t id, const struct xgpu_stream_
 	pipeline->cull_front = key->cull_front;
 	pipeline->fill = key->fill;
 	pipeline->depth_bias = key->depth_bias;
-	/* (the targets' formats: XGPU_FORMAT_NONE, _BGRA8, _D24S8, _RGBA16F) */
+	/* (the targets' formats: XGPU_FORMAT_NONE, _BGRA8, _D24S8, _RGBA16F,
+	_RGBA16) */
 	pipeline->color_format = key->color_format == XGPU_FORMAT_BGRA8 ? XGPU_VULKAN_FORMAT_BGRA8 :
 		key->color_format == XGPU_FORMAT_RGBA16F && stream.capabilities.color_read ? XGPU_VULKAN_FORMAT_RGBA16F :
+		key->color_format == XGPU_FORMAT_RGBA16 && stream.capabilities.deep_sdr ? XGPU_VULKAN_FORMAT_RGBA16 :
 		XGPU_VULKAN_FORMAT_NONE;
 	/* (display.hdr: a tag that blends in the shader, which reads the pixel
 	it draws over: the pipeline's blending off) */
@@ -3018,6 +3022,8 @@ static void stream_anti_aliasing_prepare(void *context, uint32_t smaa)
 	frames; queued as a map is prepared; logged if they cannot be; for
 	display.hdr's half floats too, while the frames are HDR) */
 	(void)xgpu_vulkan_post_prepare(smaa != 0, XGPU_VULKAN_FORMAT_BGRA8, stream.preparing);
+	if (stream.capabilities.deep_sdr)
+		(void)xgpu_vulkan_post_prepare(smaa != 0, XGPU_VULKAN_FORMAT_RGBA16, stream.preparing);
 	if (stream.hdr_active)
 		(void)xgpu_vulkan_post_prepare(smaa != 0, XGPU_VULKAN_FORMAT_RGBA16F, stream.preparing);
 }
@@ -3498,6 +3504,20 @@ static void stream_sharp_upscale(void *context, uint32_t sharp)
 	xgpu_vulkan_sharp_upscale(sharp != 0);
 }
 
+/* display.hdr_gamut: the encoding's gamut */
+static void stream_hdr_gamut(void *context, uint32_t value)
+{
+	(void)context;
+	xgpu_vulkan_hdr_gamut((int)value);
+}
+
+/* display.hdr_peak_nits: the encoding's peak */
+static void stream_hdr_peak_nits(void *context, uint32_t value)
+{
+	(void)context;
+	xgpu_vulkan_hdr_peak_nits((int)value);
+}
+
 /* display.hdr_sdr_curve: the encoding's SDR curve */
 static void stream_hdr_sdr_curve(void *context, uint32_t curve)
 {
@@ -3544,9 +3564,10 @@ static void stream_tone_map(void *context, const struct xgpu_stream_tone_map *re
 	xgpu_vulkan_hdr_frame(&frame);
 	hdr[0] = (float)frame.mode;
 	hdr[1] = frame.peak;
-	/* (the view's light over the UI's white) */
+	/* (the view's light over the UI's white; the display's full-frame
+	peak, 0 none) */
 	hdr[2] = frame.ui;
-	hdr[3] = 0.0f;
+	hdr[3] = frame.full_frame;
 	target->written++;
 	if (color_image == target->multisampled)
 		target->unresolved = 1;
@@ -3707,6 +3728,8 @@ static void stream_initialize(void *context, struct xgpu_stream_capabilities *ca
 	capabilities->hdr = stream.capabilities.color_read != 0;
 	/* (display.ambient_occlusion "ray_traced": xgpu_vulkan_rt.c) */
 	capabilities->ray_queries = stream.capabilities.ray_queries != 0;
+	/* (display.output_depth: RGBA16's 16-bit channels) */
+	capabilities->deep_sdr = stream.capabilities.deep_sdr != 0;
 	snprintf(capabilities->device, sizeof(capabilities->device), "%s", stream.capabilities.device);
 }
 
@@ -3841,6 +3864,8 @@ const struct host_render_backend *xgpu_vulkan_stream_backend(void)
 		backend.gamma = stream_gamma;
 		backend.sharp_upscale = stream_sharp_upscale;
 		backend.hdr_sdr_curve = stream_hdr_sdr_curve;
+		backend.hdr_peak_nits = stream_hdr_peak_nits;
+		backend.hdr_gamut = stream_hdr_gamut;
 		backend.panini = stream_panini;
 		/* display.ambient_occlusion "world" (#578, docs/world-ao.md): the
 		field's 3D image (XGPU_SPIRV_BINDING_WORLD_SDF) and the window's block

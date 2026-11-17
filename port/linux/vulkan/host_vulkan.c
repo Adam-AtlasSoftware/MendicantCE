@@ -78,6 +78,7 @@ names another file, or none (empty).
 #include "host_render_record.h"
 #include "host_render_stream.h"
 #include "xgpu_vulkan.h"
+#include "../src/xgpu_hdr.h"
 #include "xgpu_vulkan_loading.h"
 #include "xgpu_vulkan_post.h"
 #include "xgpu_vulkan_stream.h"
@@ -144,8 +145,17 @@ static void suspend_call(void *argument)
 the SDL the Linux builds bring */
 #define WAYLAND_REFERENCE_LUMINANCE "openh1.wayland.reference_luminance"
 
-/* display.hdr: what the window's display says (SDL's), told the backend
-(any thread) */
+#ifdef _WIN32
+/* the window's display's black, peak and full-frame peak in nits, and its
+primaries (red, green, blue, white: x, y each; may be NULL), as DXGI
+reports them (port/windows/host/host_display_win.c); 0 where it says
+nothing */
+int host_display_luminance(const unsigned char luid[8], void *window, float *black_nits, float *peak_nits,
+	float *full_frame_nits, float primaries[8]);
+#endif
+
+/* display.hdr: what the window's display says (SDL's; and, on Windows,
+DXGI's black and full-frame peak), told the backend (any thread) */
 static void window_hdr_read(void)
 {
 	SDL_PropertiesID properties = vulkan_window ? SDL_GetWindowProperties(vulkan_window) : 0;
@@ -177,6 +187,28 @@ static void window_hdr_read(void)
 	if (properties && SDL_GetFloatProperty(properties, WAYLAND_REFERENCE_LUMINANCE, 0.0f) > 0.0f)
 		sdr_white = SDL_GetFloatProperty(properties, WAYLAND_REFERENCE_LUMINANCE, 0.0f) / 80.0f;
 	headroom = properties ? SDL_GetFloatProperty(properties, SDL_PROP_WINDOW_HDR_HEADROOM_FLOAT, 1.0f) : 1.0f;
+#ifdef _WIN32
+	{
+		/* (logged as they change) */
+		static float logged[3];
+		unsigned char luid[8];
+		float black = 0.0f, peak = 0.0f, full_frame = 0.0f, primaries[8] = { 0.0f };
+		void *window = properties ? SDL_GetPointerProperty(properties, SDL_PROP_WINDOW_WIN32_HWND_POINTER, NULL) : NULL;
+
+		if (enabled && host_display_luminance(xgpu_vulkan_device_luid(luid) ? luid : NULL, window, &black, &peak,
+			&full_frame, primaries) && (black != logged[0] || peak != logged[1] || full_frame != logged[2]))
+		{
+			host_logf(HOST_LOG_INFO, "hdr: DXGI: black %.4f nits, peak %.0f nits, full-frame %.0f nits", (double)black,
+				(double)peak, (double)full_frame);
+			logged[0] = black;
+			logged[1] = peak;
+			logged[2] = full_frame;
+		}
+		xgpu_vulkan_window_luminance(black, full_frame);
+		/* (display.hdr_gamut's target: the display's primaries, #1124) */
+		xgpu_vulkan_window_gamut(xgpu_hdr_gamut_target(primaries));
+	}
+#endif
 	xgpu_vulkan_window_hdr(enabled, sdr_white, headroom);
 }
 

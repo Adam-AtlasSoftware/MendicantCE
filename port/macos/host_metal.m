@@ -192,6 +192,10 @@ static struct
 	_Atomic int hdr_active, hdr_mode, hdr_paper_white_nits, hdr_paper_white, hdr_ui_nits;
 	/* display.hdr_sdr_curve's setting (XGPU_HDR_SDR_CURVE_*) */
 	_Atomic int hdr_sdr_curve;
+	/* display.hdr_peak_nits's (#1122; 0 the system's) */
+	_Atomic int hdr_peak_nits;
+	/* display.hdr_gamut's (#1124: 1 expanded) */
+	_Atomic int hdr_gamut;
 	_Atomic uint32_t edr_potential, edr_current;
 	BOOL layer_edr;
 	uint32_t edr_ticks;
@@ -406,6 +410,16 @@ void host_metal_hdr_sdr_curve(int curve)
 	atomic_store(&presentation.hdr_sdr_curve, curve);
 }
 
+void host_metal_hdr_gamut(int expanded)
+{
+	atomic_store(&presentation.hdr_gamut, expanded != 0);
+}
+
+void host_metal_hdr_peak_nits(int nits)
+{
+	atomic_store(&presentation.hdr_peak_nits, nits > 0 ? nits : 0);
+}
+
 /* the layer is EDR's while the frame is drawn in HDR and the display has
 headroom at all (an SDR panel's dimmed white has some: display.hdr "on") */
 static BOOL edr_wanted(void)
@@ -422,6 +436,15 @@ void host_metal_hdr_frame(struct xgpu_hdr_frame *frame)
 
 	if (presentation.edr_override > 0.0f && !presentation.window)
 		current = presentation.edr_override;
+	/* (a peak of the player's, over EDR's white: no more than the layer
+	shows, which clips past its headroom) */
+	if (atomic_load(&presentation.hdr_peak_nits) > 0)
+	{
+		float peak = xgpu_hdr_peak_headroom(atomic_load(&presentation.hdr_peak_nits), current, XGPU_HDR_EDR_WHITE_NITS);
+
+		if (peak < current)
+			current = peak;
+	}
 	memset(frame, 0, sizeof(*frame));
 	frame->mode = atomic_load(&presentation.hdr_mode);
 	frame->output = XGPU_HDR_OUTPUT_SDR;
@@ -438,6 +461,9 @@ void host_metal_hdr_frame(struct xgpu_hdr_frame *frame)
 			paper_white = current;
 		frame->output = XGPU_HDR_OUTPUT_EXTENDED_LINEAR;
 		frame->sdr_curve = xgpu_hdr_sdr_curve_of(atomic_load(&presentation.hdr_sdr_curve), 1);
+		/* (display.hdr_gamut: EDR's colour space is Display P3's, #1124) */
+		frame->gamut = atomic_load(&presentation.hdr_gamut);
+		frame->gamut_target = 0.0f;
 		frame->paper_white = paper_white;
 		frame->peak = current / paper_white;
 		/* (the UI's white, no brighter than the display either) */
@@ -846,6 +872,17 @@ uint64_t host_metal_loading(void *context, const struct loading_presentation_fra
 	return presentation.refresh_rate > 0.0f ? (uint64_t)(1e9 / presentation.refresh_rate) : 16666667ull;
 }
 
+/* the picture is shown smaller than it is (supersampling) by other than 1
+or 2 each way: the last pass scales it down by its area (#1117) */
+static BOOL area_scaled(id<MTLTexture> picture, MTLViewport viewport)
+{
+	double width = (double)picture.width, height = (double)picture.height;
+	BOOL across = width <= viewport.width + 0.5 || fabs(width - 2.0 * viewport.width) <= 0.5;
+	BOOL down = height <= viewport.height + 0.5 || fabs(height - 2.0 * viewport.height) <= 0.5;
+
+	return (width > viewport.width + 0.5 || height > viewport.height + 0.5) && !(across && down);
+}
+
 /* A picture drawn into the viewport, as the drawable's layer wants it. */
 static void present_draw(id<MTLRenderCommandEncoder> encoder, id<CAMetalDrawable> drawable, id<MTLTexture> picture,
 	MTLViewport viewport)
@@ -874,16 +911,22 @@ static void present_draw(id<MTLRenderCommandEncoder> encoder, id<CAMetalDrawable
 		uniforms.hdr[2] = (float)XGPU_HDR_OUTPUT_EXTENDED_LINEAR;
 		uniforms.hdr[3] = frame.output == XGPU_HDR_OUTPUT_SDR ? 1.0f : frame.ui;
 		uniforms.window[0] = (float)frame.sdr_curve;
+		uniforms.window[3] = frame.output == XGPU_HDR_OUTPUT_SDR ? 0.0f : frame.black;
+		uniforms.gamut[0] = frame.output != XGPU_HDR_OUTPUT_SDR && frame.gamut ? 1.0f : 0.0f;
+		uniforms.gamut[1] = frame.gamut_target;
 		[encoder setRenderPipelineState:presentation.edr_pipeline];
 		[encoder setFragmentBytes:&uniforms length:sizeof(uniforms) atIndex:XGPU_METAL_BUFFER_DRAW_UNIFORMS];
 		[encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
 	}
 	else if (drawable.texture.pixelFormat == MTLPixelFormatBGRA8Unorm && presentation.sdr_pipeline &&
-		(gamma_power() > 0.0f || picture.pixelFormat == MTLPixelFormatRGBA16Float))
+		(gamma_power() > 0.0f || picture.pixelFormat == MTLPixelFormatRGBA16Float ||
+		picture.pixelFormat == MTLPixelFormatRGBA16Unorm || area_scaled(picture, viewport)))
 	{
-		/* display.gamma, or a half-float frame: the frame curved and
-		dithered to 8 bits as it is drawn into the SDR layer (no pass of its
-		own: this is the frame's last, #1108) */
+		/* display.gamma, or a half-float or 16-bit frame (display.hdr "on"
+		over SDR, display.output_depth): the frame curved and dithered to 8
+		bits as it is drawn into the SDR layer (no pass of its own: this is
+		the frame's last, #1108); a frame larger than the viewport, scaled
+		down by its area there (#1117) */
 		struct xgpu_metal_post_uniforms uniforms;
 		float power = gamma_power();
 

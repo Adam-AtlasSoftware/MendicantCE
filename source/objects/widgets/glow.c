@@ -555,7 +555,8 @@ void glow_render(
 		glow->number_of_particles,
 		definition->texture.index,
 		&global_shader_effect_additive,
-		0);
+		/* port: a glow is light: display.hdr_highlight_boost's */
+		FLAG(_build_sprites_emitter_bit));
 
 	for (particle = glow->head_particle; particle; particle = particle->next)
 	{

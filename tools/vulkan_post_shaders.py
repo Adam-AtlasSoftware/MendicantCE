@@ -63,8 +63,9 @@ UNIFORM = re.compile(r"^uniform vec4 (\w+);\n", re.M)
 SAMPLER = re.compile(r"^uniform sampler2D (\w+);\n", re.M)
 # the uniforms' block: each pass's vec4s, in this order (std140), as far as
 # the last its program uses (hdr in display.hdr's passes, window, panini
-# and tangents in display.panini's)
-UNIFORMS = ("metrics", "bounds", "hdr", "window", "panini", "tangents")
+# and tangents in display.panini's; gamut, display.hdr_gamut's, in the
+# encoding's)
+UNIFORMS = ("metrics", "bounds", "hdr", "window", "panini", "tangents", "gamut")
 # the fragment programs, in xgpu_vulkan_post_shaders.h's order
 PROGRAMS = ("fxaa", "smaa_edges", "smaa_weights", "smaa_blend", "rotate", "hdr_tone_map", "hdr_tone_map_ms",
             "hdr_encode", "panini")

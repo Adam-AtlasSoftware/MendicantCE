@@ -380,9 +380,6 @@
 	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/header_gamepad_setup">
 		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/header_gamepad_setup.png" width="512" height="64"/>
 	</bitmap>
-	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/stick_test/header_stick_test">
-		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/stick_test/header_stick_test.png" width="512" height="64"/>
-	</bitmap>
 	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/interface_settings/streamer_mode/header_streamer_mode">
 		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/interface_settings/streamer_mode/header_streamer_mode.png" width="512" height="64"/>
 	</bitmap>

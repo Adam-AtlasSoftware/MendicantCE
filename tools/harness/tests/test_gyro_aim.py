@@ -42,6 +42,14 @@ AIM_CONTROLS = [
     # the Steam Controller's touch not known, or Steam Input's virtual controller's taken for one
     ("(product >= 0x1302 && product <= 0x1305)", "(product == 0x1302)", "modes"),
     ("return vendor == VALVE && (product", "return vendor == VALVE && (product == 0x11ff || product", "modes"),
+    # the touch controls' gyroscope as the phone turned, its settings not applied (the old path)
+    ("\tgyro_aim_rate(rate, smoothed, seconds, settings, turn);", "\tturn[0] = turned[0];\n\tturn[1] = turned[1];",
+     "touch"),
+    # the smoothing's strength not applied: low and high smooth as medium does
+    ("SMOOTH_SLOWEST * settings->smoothing, SMOOTH_FASTEST * settings->smoothing,", "SMOOTH_SLOWEST, SMOOTH_FASTEST,",
+     "strength"),
+    # the flick's time not the setting's: every flick a tenth of a second
+    ("seconds / flick_seconds, 1.0f)", "seconds / FLICK_STICK_SECONDS, 1.0f)", "flick_time"),
 ]
 
 
@@ -53,7 +61,8 @@ def aim_generated(fault=None):
     return (("gyro_aim.h", read("port/linux/src/gyro_aim.h")), ("under_test.inc", code))
 
 
-@pytest.mark.parametrize("case", ["bias", "calibrate", "player_space", "tilt_followed", "smoothing", "flick", "modes"])
+@pytest.mark.parametrize("case", ["bias", "calibrate", "player_space", "tilt_followed", "smoothing", "flick", "modes",
+                                  "touch", "strength", "flick_time"])
 def test_gyro_aim(case):
     status, output = run(build("gyro_aim", aim_generated()), case)
     assert status == 0, output

@@ -92,8 +92,6 @@ public final class TouchControls extends View implements SensorEventListener, In
      */
     private static final float FLOATING_ZONE_WIDTH = 0.45f;
     private static final float FLOATING_ZONE_HEIGHT = 351;
-    /** radians per logical unit of swipe (the mouse's rate: xinput_sdl.c) */
-    private static final float LOOK_RADIANS_PER_UNIT = 0.0022f;
     /**
      * how solid each part is drawn, times the layout's opacity: the game
      * shows through everything, the seldom used controls more
@@ -1659,9 +1657,9 @@ public final class TouchControls extends View implements SensorEventListener, In
         int rotation = ((WindowManager) getContext().getSystemService(Context.WINDOW_SERVICE))
             .getDefaultDisplay().getRotation();
         if (gyroAim.sample(event.timestamp, event.values[0], event.values[1], rotation, gyroDelta)) {
-            // as a swipe of this many logical units (which the profile's invert leaves alone)
-            nativeGyro(-gyroDelta[0] / LOOK_RADIANS_PER_UNIT * sensitivity,
-                -gyroDelta[1] / LOOK_RADIANS_PER_UNIT * sensitivity);
+            // the device's turn, radians: the game makes it the player's as a controller's gyroscope's
+            // (touch_input.c: input.touch_gyro_sensitivity and the rest; the profile's invert leaves it alone)
+            nativeGyro(gyroDelta[0], gyroDelta[1]);
         }
     }
 

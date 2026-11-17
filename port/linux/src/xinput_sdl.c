@@ -2689,6 +2689,16 @@ void halo_test_input_pump(struct platform_input_state *state, unsigned char *but
 	test_latency.mouse_played = test_latency.pressed;
 }
 
+/* debug.test_input read again at the next reading (halo_test_input_reread) */
+static int test_input_generation;
+
+/* the built-in benchmark's (port/linux/game/benchmark.c): debug.test_input,
+set for the run, read again */
+void halo_test_input_reread(void)
+{
+	test_input_generation++;
+}
+
 static void test_input_gamepad(XINPUT_GAMEPAD *pad)
 {
 	static const WORD digital[] =
@@ -2724,11 +2734,13 @@ static void test_input_gamepad(XINPUT_GAMEPAD *pad)
 	if (network_chat_keyboard_open() && network_chat_controller() == 0)
 		return;
 
-	if (!checked)
+	if (checked != test_input_generation + 1)
 	{
 		const char *setting = config_string("debug.test_input");
 
-		checked = 1;
+		checked = test_input_generation + 1;
+		seed = -1;
+		looking = walking = pad_test = 0;
 		if (!strncmp(setting, "menu:", 5))
 		{
 			snprintf(test_input_menu, sizeof(test_input_menu), "%s", setting + 5);
@@ -3237,6 +3249,8 @@ static struct
 	int button;
 	struct gyro_aim_settings aim;
 	int flick_stick;
+	/* the flick's time, seconds (input.flick_stick_time) */
+	float flick_seconds;
 } gyro_settings;
 
 static void gyro_settings_read(void)
@@ -3265,8 +3279,13 @@ static void gyro_settings_read(void)
 	if (!(gyro_settings.aim.vertical_sensitivity > 0.0f))
 		gyro_settings.aim.vertical_sensitivity = 1.0f;
 	gyro_settings.aim.player_space = strcmp(config_string("input.gyro_space"), "local") != 0;
-	gyro_settings.aim.smoothing = config_boolean("input.gyro_smoothing");
+	gyro_settings.aim.smoothing = gyro_aim_smoothing(config_string("input.gyro_smoothing"), 1.0f);
 	gyro_settings.flick_stick = config_boolean("input.flick_stick");
+	gyro_settings.flick_seconds = (float)config_real("input.flick_stick_time");
+	if (!(gyro_settings.flick_seconds >= 0.0f))
+		gyro_settings.flick_seconds = FLICK_STICK_SECONDS;
+	else if (gyro_settings.flick_seconds > FLICK_STICK_SECONDS_MOST)
+		gyro_settings.flick_seconds = FLICK_STICK_SECONDS_MOST;
 }
 
 #define GYRO_DEVICES 8
@@ -3754,7 +3773,7 @@ static void flick_port_update(int port, const XINPUT_GAMEPAD *pad)
 	if (seconds < 0.0 || seconds > 0.1)
 		seconds = 0.0;
 	flick_ports[port].pending += flick_stick_update(&flick_ports[port].stick, pad->sThumbRX / 32767.0f,
-		pad->sThumbRY / 32767.0f, (float)seconds);
+		pad->sThumbRY / 32767.0f, (float)seconds, gyro_settings.flick_seconds);
 }
 
 /* input.flick_stick (input_abstraction.c: with the default stick layout,

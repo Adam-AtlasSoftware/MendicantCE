@@ -69,6 +69,7 @@ centred, and the bar's wide layout reaches the screen's edges up to 16:9.
 | `<button>` | `key` (`accept`, `back`, `x`, `y`, `lb`, `rb`, `lt`, `rt`, `r3`, `view`, `dpad`), `label`, `side`, `do`, `width`, `touch-width`, `if`, `when` | One hint in the bar: the key's picture (on the keyboard, the key the menus use for it) and its word. `do` is the action the key (anywhere on the screen) and a click run; without it, the key is pressed. In a tall screen's bar (below), `width` is its least width, `if` a binding that must have a value for it to be shown, two buttons of one key share one place, shown as their `if`s say, and the buttons run from the left one after another, but those of `side="right"` (written after the rest) end at the right margin, as Select Profile's BACK at the left and OK, CREATE NEW and DELETE at the right (on a touchscreen, `side` changes nothing; on a wide screen those of `side="right"` keep to its right edge, wherever their place); `touch-width` is its width on a touchscreen (the bar's own by default). `dpad`'s picture is the D-pad's left and right (on the keyboard, the left and right arrow keys' caps, `<` and `>`, which are the menus' left and right) and no key presses it: it is a click's, a tap's or A's on it. A prompt hidden by its `if` leaves no gap: the shown ones are laid out again as their `if`s change |
 | `<colors>` | `id` | The player profile's colors, one item each, under one another in its name and its color (white while focused). It is the screen's list (a screen has one `<list>`, `<cards>` or `<colors>`). The profile's own color is focused first. A chooses the color for the profile being edited, as the PC version's color picker did, and goes back. No shipped screen uses it now (Profile Color is a tall screen, its colors the `profile.colors` table's); it is kept for a simple screen of the colors, with `<spartan color="focus">` beside them |
 | `<spartan>` | `x`, `y`, `width`, `height`, `touch-height`, `color` (`focus`, `profile`, or a binding), `players` (1 to 4) | The Spartan, which the game draws (port/linux/game/menu_spartan.c) standing in this box of the 640 by 480 canvas, its feet at the box's foot, as tall as the box. Each Spartan is drawn in a view of its own where its block is in the screen's order: over the screen's background and the blocks before it, under those after, with its own fixed camera looking at it from about its knees, a little up, as the original pictures were taken (one at a screen's edge is drawn as one in its middle, not seen from the side), depth and light, so nothing of the menus' scene (the ring, the sky) cuts it and the scene's camera never moves or tilts it. It takes no room in the layout. `color="focus"` follows the focused `<colors>` item; `profile` (the default) is the color of the profile being edited, else the player's own, live as it changes; any other word is a binding, read each frame, whose value is the color's word: a profile color's number, `random`, or a team game's `red` or `blue` (as the game gives its teams their colors); while it has no value there is neither Spartan nor picture. A binding of a screen's own `<spartan>` may give several words, up to 8, each a place side by side (`-` an empty place): a lineup. `players` puts that many side by side, each its local player's profile's color. A screen has one `<spartan>` of its own and one in each `<panel>`; `touch-height` is its height on a touchscreen, `when` the platforms it is on. A random color's Spartan cycles through the profile colors in their list's order, one a second (each held three quarters of a second, then blended into the next), on the menus' frame clock, so it cycles while the game is paused too; side by side, each random one is an eighth of the round on from the one before. Where there is no Spartan (no multiplayer map exported one, a refused file, `display.menu_pictures` off, no profile), the box shows the original picture of the color (ui.map's `player_color_marine_large`, frame 18, the "?", for random or no profile). It stands in the rifle's idle, aimed nearly at the camera (the rifle at its shoulder, its muzzle at the viewer, as the original pictures hold it), both hands on the rifle as a unit's are (the rifle class's weapon IK puts the left hand on the rifle's forend; off while it reloads or readies, whose own hands are blended to), and every 10 to 20 seconds, each at its own times (never two starting together), fidgets: reloads, checks its weapon (puts it away and readies it again), looks around (its aim and head turned slowly to one side and the other, through the cyborg's aiming and looking screens) or dips into a crouch and stands again, each blended in from the idle and back out to it; all on the menus' frame clock, drawn only. It is gone as soon as its screen closes |
+| `<stick>` | `id` (required: `left`, `right`), `label` (required), `x`, `y` (required), `value`, `detail`, `hint`, `radius`, `when` | A stick's reading (Stick Test's): its label, large, at the top of a column 240 wide about `x`, from `y`; under it the stick's circle, `radius` (16 to 120, 88 by default) round, which the engine draws (menu_screen.c's `menu_screen_widget_drawing`, `stick_test_menu.inc`'s `pc_menu_stick_test_draw`): its travel, its outer and inner dead zones (round, or square for each direction's own), the raw reading a white dot and the reading after the dead zones a blue one (without a controller, the rings alone); under the circle its `value` and `detail`, filled again every frame (a line whose binding has no value empty), and its `hint`, a line. It takes no room in the layout. A screen has one of each id |
 
 ### A box of rows: the pause menu's
 
@@ -258,6 +259,7 @@ item uses the next of its `<hint>`s. The bindings are listed in
 | `{coop.listing}`, `{coop.link}`, `{coop.problem}`, `{coop.fix}` | A network co-op game's host's lobby: who can join and see it (`FRIENDS CAN JOIN: 3 friends online see it.`), the invite link (its start), what keeps people from finding it in plain words (`Internet play is off, so only players on your network can join.`) and its fix's words; none for anyone else |
 | `{pause.friendly_fire}` | Network co-op's FRIENDLY FIRE row's words, `FRIENDLY FIRE ON` or `OFF` (this machine's choice); none elsewhere |
 | `{pause.host_controls}`, `{pause.end_game}`, `{pause.chapters}` | (for `if`s) the pause menu's HOST CONTROLS (a network game's host's), END GAME (the host of a game of this machine alone) and CHAPTERS (Basic Training's), as `menu_tags.c` adds them to the map's; the host machine's first local player's alone (split screen's player 1: the screen's own player), an admin's too |
+| `{stick.left}`, `{stick.right}`, `{stick.left.drift}`, `{stick.right.drift}` | Stick Test's: a stick's reading, raw \| after the dead zones (`12,-3 \| 0,0`; `NO CONTROLLER` without one), and its drift at rest (`4%`; none without a controller) |
 | `{profile.title}` | Select Profile's chosen row: its profile's name, or `Create New Player Profile` on the row that makes one |
 | `{profile.name}`, `{profile.controls}`, `{profile.difficulty}`, `{profile.level}` | The chosen profile's name, controls (`Default`, `Inverted`), best difficulty finished (none before a level is) and current level (`The Pillar of Autumn`); none on the row that makes one |
 | `{profile.color}`, `{profile.chosen}` | (for a `<spartan>`'s color and `if`s) the chosen profile's color's number, or `random`; whether a profile (not the row that makes one) is chosen |
@@ -634,6 +636,24 @@ deletes the chosen one, B goes back. The list's model is the generated screen's 
 actions run the generated screen's functions and open its screens. The
 classic engine keeps its own screen and the original pictures.
 
+## Stick Test
+
+`screens/stick_test.xml` is Advanced Stick Settings' STICK TEST ›, on the new
+engine (`screens/stick_test`, a stand-in of `blocks.xml`, which pauses the
+game as Settings' pages do): STICK TEST in the band, and a `<stick>` for each
+stick side by side, each its label, its circle, its reading
+(`{stick.left}`: side to side, then up and down, in percent of its travel,
+raw | after the dead zones; `NO CONTROLLER` without one), DRIFT AT REST
+(`{stick.left.drift}`: the largest push it held still near its middle since
+the screen opened) and a line of what it shows. B (BACK) goes back to the
+page. The sticks are the controller's alone (never the keyboard's) of the
+player whose profile Settings edits, read each frame the screen is drawn
+(its place's frame, `stick_test_menu.inc`'s `pc_menu_stick_test_frame`), by
+the dead zones and shape Advanced Stick Settings shows, its changes not yet
+saved among them (`settings_value`), through the game's own
+`input_port_fix_stick`. The classic engine has no screen of it: its row
+opens the blank stand-in, which B leaves.
+
 ## Leaving an editor with changes not saved
 
 The gametype editor (Edit Gametypes' EDIT, a generated screen) takes B, Back
@@ -648,6 +668,19 @@ to the editor, the changes kept (`pc_menu_edit_leave`). Another generated
 editor opts in with the same handler. The editor's Step 1 (its GAME TYPE)
 shows the gametype's own type while its BACK is focused, not the PC version's
 picture of a SAVE CHANGES question, which looked like one BACK asked (#901).
+
+## The benchmark's results
+
+`screens/benchmark.xml` shows the built-in benchmark's results
+(`port/linux/game/benchmark.c`) over the main menu as its match ends, a
+screen opened only by C (its stand-in `screens/benchmark`,
+`menu_functions.c`'s `pc_menu_benchmark_results_open`). Its table's rows are
+the row source `benchmark.results` (each measure and its value), its panel
+the `benchmark.*` bindings (what held the frames back, the pacing, the
+window, the GPU, the processor and the file written); a run that stopped
+has no rows, and the table's words for none (`benchmark.failure`) say why.
+CLOSE (B) goes back to the main menu. The classic menus have no results
+screen: the results are in `benchmarks/` and the log.
 
 ## The pause menu
 

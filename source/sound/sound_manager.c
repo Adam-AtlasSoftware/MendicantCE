@@ -248,10 +248,10 @@ symbols in this file:
 #include <math.h>
 #include <stdio.h>
 
-/* port: a stereo channel's sound in the world panned towards it, muffled
-and reverberated as a 3D channel's is (sound_dsound_xbox.c; update_channels) */
-void dsound_port_set_channel_stereo_position(short virtual_channel_index, boolean positioned, real pan,
-	real distance, real minimum_distance, real distance_fade, real obstruction, real occlusion,
+/* port: a stereo channel's sound in the world heard from where it is, as a
+3D channel's is (sound_dsound_xbox.c; update_channels) */
+void dsound_port_set_channel_stereo_position(short virtual_channel_index, boolean positioned,
+	struct sound_location const *location, real minimum_distance, real obstruction, real occlusion,
 	boolean attenuate_direct_path);
 
 #ifdef HALO_VR
@@ -4005,8 +4005,10 @@ static void update_channels(
 			else
 			{
 				real_point3d relative_position = sound->source.location.position;
-				/* port: what a 3D channel is given of its sound's surroundings,
-				for a stereo one's (dsound_port_set_channel_stereo_position) */
+				/* port: what a 3D channel is given of its sound's place and
+				surroundings, for a stereo one's (its velocity as the 3D
+				channels' above: dsound_port_set_channel_stereo_position) */
+				real_vector3d relative_velocity = sound->source.location.translational_velocity;
 				real stereo_obstruction = 0.f;
 				real stereo_occlusion = 0.f;
 				boolean stereo_underwater = FALSE;
@@ -4017,7 +4019,10 @@ static void update_channels(
 					/* port: (unpanned and dry: dsound_port_set_channel_stereo_position) */
 					if (TEST_FLAG(channel->type_flags, _sound_channel_stereo_bit))
 					{
-						dsound_port_set_channel_stereo_position(channel_index, FALSE, 0.f, 0.f, 0.f, 1.f,
+						struct sound_location nowhere;
+
+						csmemset(&nowhere, 0, sizeof(nowhere));
+						dsound_port_set_channel_stereo_position(channel_index, FALSE, &nowhere, 0.f,
 							0.f, 0.f, FALSE);
 					}
 					break;
@@ -4035,6 +4040,13 @@ static void update_channels(
 							&listener->matrix,
 							&sound->source.location.position,
 							&relative_position);
+						matrix4x3_inverse_transform_vector(
+							&listener->matrix,
+							&sound->source.location.translational_velocity,
+							&relative_velocity);
+						relative_velocity.i = TICKS_PER_SECOND * relative_velocity.i - listener->velocity.i;
+						relative_velocity.j = TICKS_PER_SECOND * relative_velocity.j - listener->velocity.j;
+						relative_velocity.k = TICKS_PER_SECOND * relative_velocity.k - listener->velocity.k;
 						stereo_obstruction = sound->source.obstruction;
 						stereo_occlusion = sound->source.occlusion;
 						stereo_underwater = listener->underwater;
@@ -4050,6 +4062,7 @@ static void update_channels(
 
 						sound_vr_relative(&location);
 						relative_position = location.position;
+						relative_velocity = location.translational_velocity;
 					}
 #endif
 					{
@@ -4080,27 +4093,23 @@ static void update_channels(
 								minimum_distance / distance : 1.f;
 						}
 						fade *= distance_fade;
-						/* port: and a stereo sound is panned towards where it
-						is, as the mixer pans a 3D one (port/linux/src/dsound_sdl.c,
-						spatialize: ahead is x, right -y; centred when close),
-						and muffled and reverberated as one is, which the Xbox's
-						stereo channels never were: a Custom Edition map's stereo
+						/* port: and a stereo sound is heard from where it is, as
+						a 3D one is: the mixer mixes its channels to one and
+						spatializes it as a mono 3D voice, from its place and
+						velocity relative to the listener (port/linux/src/dsound_sdl.c,
+						voice_in_world), with the HRTF's direction, the Doppler
+						shift, obstruction and reverb, which the Xbox's stereo
+						channels never had: a Custom Edition map's stereo
 						gunfire came from nowhere. (Obstruction and occlusion go
 						where the 3D channels' call above puts them.) */
 						if (TEST_FLAG(channel->type_flags, _sound_channel_stereo_bit))
 						{
-							real horizontal = square_root(
-								relative_position.x * relative_position.x +
-								relative_position.y * relative_position.y);
-							real pan = horizontal > 1.0e-4f ? -relative_position.y / horizontal : 0.f;
+							struct sound_location stereo_location = sound->source.location;
 
-							if (distance < minimum_distance && minimum_distance > 0.f)
-							{
-								pan *= distance / minimum_distance;
-							}
-							dsound_port_set_channel_stereo_position(channel_index, TRUE, 0.75f * pan,
-								distance, minimum_distance, distance_fade,
-								stereo_obstruction, stereo_occlusion, stereo_underwater);
+							stereo_location.position = relative_position;
+							stereo_location.translational_velocity = relative_velocity;
+							dsound_port_set_channel_stereo_position(channel_index, TRUE, &stereo_location,
+								minimum_distance, stereo_obstruction, stereo_occlusion, stereo_underwater);
 						}
 					}
 					break;

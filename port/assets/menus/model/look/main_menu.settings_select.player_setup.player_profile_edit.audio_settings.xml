@@ -21,6 +21,7 @@
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/op_music_volume" x="28" y="303"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/op_dialogue_volume" x="28" y="328"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/op_effects_volume" x="28" y="353"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/op_listening_mode" x="28" y="378"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/button_bar" x="0" y="448"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/tabs" x="0" y="46"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/tabs_search" x="0" y="46"/>
@@ -277,5 +278,24 @@
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/effects_volume_thumb" box="0 0 8 14" picture="main_menu/settings/slider_thumb"/>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/effects_volume_value" type="text" box="0 0 76 20" wide="244 0" past="193 0" picture="main_menu/settings/slider_field">
 		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 1" flags="no_focus_test"/>
+	</look>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/op_listening_mode" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
+		<text color="#FF2896FF"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/listening_mode_label" x="0" y="0"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/listening_mode_spinner" x="188" y="0"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/listening_mode_seg0" x="188" y="2"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/listening_mode_seg1" x="278" y="2"/>
+	</look>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/listening_mode_label" type="text" box="0 0 184 24" wide="0 40" past="0 60">
+		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/labels" index="12" scale="1 1.2"/>
+	</look>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/listening_mode_seg0" type="text" box="0 0 86 20" wide="40 0" past="60 0" place="keep_ends" picture="main_menu/settings/segment_tall">
+		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 1" flags="no_focus_test" text="DEFAULT" scale="1 1.2"/>
+	</look>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/listening_mode_seg1" type="text" box="0 0 62 20" wide="40 0" past="60 0" place="keep_ends" picture="main_menu/settings/segment_tall">
+		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 1" flags="no_focus_test" text="NIGHT" scale="1 1.2"/>
+	</look>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/listening_mode_spinner" type="spinner" box="0 1 140 23" wide="40 120" past="60 60" header="bitmaps/arrow_sm_left" header_box="-6 6 0 18" footer="bitmaps/arrow_sm_right" footer_box="140 6 146 18">
+		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 0" items="DEFAULT|NIGHT" scale="1 1.2"/>
 	</look>
 </model>

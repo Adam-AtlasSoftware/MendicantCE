@@ -484,6 +484,14 @@ static const struct config_setting config_settings[] =
 		"thread, waiting for the display and on the game's thread. An older\n"
 		"version's display.show_fps or display.show_frame_rate = true reads as\n"
 		"\"simple\"." },
+	{ "display.benchmark_pacing", _config_string, "\"uncapped\"", "HALO_BENCHMARK_PACING", _environment_value,
+		_platform_all,
+		"The built-in benchmark's frame pacing (Settings > Video > Frame Rate &\n"
+		"Sync's RUN BENCHMARK, halo --benchmark: port/linux/game/benchmark.c):\n"
+		"\"uncapped\", vsync, variable refresh and the frame cap off for the run,\n"
+		"what the computer can draw; \"settings\", as they are set, what you see\n"
+		"as you play. The results say which, and how much of the time the\n"
+		"frames waited for the display." },
 	{ "display.movies", _config_boolean, "false", "HALO_MOVIES", _environment_value, _platform_all,
 		"Play the Xbox's Bink movies from the game data's bink folder: the intro\n"
 		"as the game starts, the attract movies on an idle main menu and the\n"
@@ -567,6 +575,29 @@ static const struct config_setting config_settings[] =
 		"darker), \"srgb\" (a Mac's), or \"auto\": sRGB on macOS and iOS, 2.2\n"
 		"elsewhere. Only the shadows differ: colors from code 51 up are the\n"
 		"same in both." },
+	{ "display.output_depth", _config_string, "\"auto\"", "HALO_OUTPUT_DEPTH", _environment_value, _platform_all,
+		"The SDR picture's depth: \"10\" draws it in 16 bits a channel and shows it\n"
+		"on a 10-bit display at 10 bits, else at 8 with a fine dither, so fog\n"
+		"and dusk skies show no steps; \"8\" draws it in 8 bits, as before (half\n"
+		"the memory and bandwidth); \"auto\" is 10 on a computer and 8 on a phone\n"
+		"or tablet, or with battery saver on." },
+	{ "display.hdr_peak_nits", _config_integer, "0", "HALO_HDR_PEAK_NITS", _environment_value, _platform_all,
+		"With HDR, the display's peak in nits, 200 to 10000, for a display that\n"
+		"reports a wrong one; 0 is the system's. Only the highlights change.\n"
+		"With a peak of your own, the display's full-frame peak and black,\n"
+		"where Windows reports them, shape the highlights and the shadows too." },
+	{ "display.hdr_gamut", _config_string, "\"srgb\"", "HALO_HDR_GAMUT", _environment_value, _platform_all,
+		"With HDR, \"expanded\" lets the brightest colors (plasma, needler\n"
+		"shards) grow more vivid than sRGB, toward the display's own gamut (P3\n"
+		"where it says none, never past BT.2020), keeping their hue; \"srgb\"\n"
+		"keeps the picture as it is. Colors at or under paper white never change." },
+	{ "display.hdr_highlight_boost", _config_integer, "0", "HALO_HDR_HIGHLIGHT_BOOST", _environment_value,
+		_platform_all,
+		"With HDR, how much brighter the game's own lights are, 0 to 4: the\n"
+		"sun's lens flares and glow, glows, self-illuminated particles and\n"
+		"surfaces (vehicle lights, panels). 0 keeps the picture as it is. Never\n"
+		"past the ceilings the lights already have; the HUD, the menus, fog and\n"
+		"screen flashes stay at paper white." },
 	{ "display.gamma", _config_real, "1.0", "HALO_GAMMA", _environment_value, _platform_all,
 		"The picture's gamma, 0.5 to 2.0, as Halo PC's: above 1 brighter (the\n"
 		"dark parts lifted most), below 1 darker; white and black stay. The\n"
@@ -660,6 +691,11 @@ static const struct config_setting config_settings[] =
 		"images above a sound's own rate through; \"sinc\" with a band-limited low\n"
 		"pass, which keeps them out; \"linear\" between neighbouring samples,\n"
 		"brighter for the aliasing it lets through." },
+	{ "audio.listening_mode", _config_string, "\"default\"", "HALO_AUDIO_LISTENING_MODE", _environment_value,
+		_platform_all,
+		"How wide the sound's range of loudness is: \"default\" plays the mix as\n"
+		"it is; \"night\" evens it out for quiet play, bringing quiet sounds and\n"
+		"speech up and loud ones (explosions, gunfire) down." },
 	{ "audio.voice_chat", _config_string, "\"push_to_talk\"", "HALO_VOICE_CHAT", _environment_value, _platform_all,
 		"Talking in network games' voice chat: \"push_to_talk\" (while\n"
 		"controls.push_to_talk is held; the microphone opens the first time),\n"
@@ -1032,6 +1068,21 @@ static const struct config_setting config_settings[] =
 		"The touch controls' swipe aiming gets a controller's aim assist: the\n"
 		"aim slows over a target and follows a moving one. false: none, as a\n"
 		"mouse (the bullets' own autoaim stays)." },
+	{ "input.touch_gyro_sensitivity", _config_real, "1.0", "HALO_TOUCH_GYRO_SENSITIVITY", _environment_value,
+		_platform_android | _platform_ios,
+		"The touch controls' gyroscope aiming (the phone's or the tablet's\n"
+		"own, switched on in the touch controls' settings): how far the view\n"
+		"turns side to side for each degree the device turns, 1 as far. A\n"
+		"controller's gyroscope has input.gyro_sensitivity." },
+	{ "input.touch_gyro_vertical_sensitivity", _config_real, "1.0", "HALO_TOUCH_GYRO_VERTICAL_SENSITIVITY",
+		_environment_value, _platform_android | _platform_ios,
+		"How far the view turns up and down for the device's gyroscope, times\n"
+		"input.touch_gyro_sensitivity: 1 the same as side to side." },
+	{ "input.touch_gyro_smoothing", _config_string, "\"off\"", "HALO_TOUCH_GYRO_SMOOTHING", _environment_value,
+		_platform_android | _platform_ios,
+		"Steadies the device's gyroscope's smallest motions, as\n"
+		"input.gyro_smoothing does a controller's: \"off\", \"low\", \"medium\" or\n"
+		"\"high\"." },
 	{ "input.touch_crouch", _config_string, "\"toggle\"", "HALO_TOUCH_CROUCH", _environment_value,
 		_platform_android | _platform_ios,
 		"The touch controls' Crouch: \"toggle\" crouches at a tap until Crouch\n"
@@ -1228,15 +1279,20 @@ static const struct config_setting config_settings[] =
 		"a turn about the up direction, however the controller is held (flat,\n"
 		"upright or between); \"local\", a turn about the controller's own\n"
 		"vertical axis, as if it were held flat." },
-	{ "input.gyro_smoothing", _config_boolean, "true", "HALO_GYRO_SMOOTHING", _environment_value, _platform_all,
+	{ "input.gyro_smoothing", _config_string, "\"medium\"", "HALO_GYRO_SMOOTHING", _environment_value,
+		_platform_all,
 		"Steadies the gyroscope's smallest motions (the hand's tremor), never a\n"
 		"real turn's; nothing is lost, only spread over a few hundredths of a\n"
-		"second." },
+		"second: \"off\", \"low\", \"medium\" or \"high\" (a stronger one steadies\n"
+		"faster motions, over a longer time)." },
 	{ "input.flick_stick", _config_boolean, "false", "HALO_FLICK_STICK", _environment_value, _platform_all,
 		"The right stick as a flick stick, with the default stick layout: pushed\n"
 		"to its rim, you turn at once to face where it points (pushed right, a\n"
 		"quarter turn right; down, about face); turned round the rim, you turn\n"
 		"with it. It does not look up or down: the gyroscope does." },
+	{ "input.flick_stick_time", _config_real, "0.1", "HALO_FLICK_STICK_TIME", _environment_value, _platform_all,
+		"How long a flick of input.flick_stick takes to turn you, in seconds,\n"
+		"0 (at once) to 0.25; it turns as far either way." },
 
 	/* the keyboard and mouse's own controls (port/linux/src/xinput_sdl.c) */
 	{ "controls.move_forward", _config_string, "\"W\"", "HALO_KEY_MOVE_FORWARD", _environment_value, _platform_all,
@@ -2648,6 +2704,11 @@ static const struct config_setting config_settings[] =
 		"memory never written: two runs, one of each, compared with\n"
 		"tools/determinism_compare.py, part where one reaches the game; empty\n"
 		"as the game always has (the game's malloc fills with 0xCA)." },
+	{ "debug.benchmark", _config_string, "\"\"", "HALO_BENCHMARK", _environment_value, _platform_all,
+		"Runs the built-in benchmark once the main menu is up, as halo\n"
+		"--benchmark does (port/linux/game/benchmark.c): \"uncapped\" or\n"
+		"\"settings\" its pacing (display.benchmark_pacing's), \"on\" that\n"
+		"setting's; empty for none." },
 	{ "debug.frame_log", _config_string, "\"\"", "HALO_FRAME_LOG", _environment_value, _platform_all,
 		"A file to write a line to for each frame presented once the scenario's\n"
 		"simulation has started: its seconds, then microseconds of the frame,\n"
@@ -3312,6 +3373,10 @@ static const struct
 	place) */
 	{ "display.ambient_occlusion", "subtle", "world" },
 	{ "display.ambient_occlusion", "strong", "world" },
+	/* (the gyroscope's smoothing on or off: a strength now, on's the
+	medium one; a file's true or false read as these words too) */
+	{ "input.gyro_smoothing", "true", "medium" },
+	{ "input.gyro_smoothing", "false", "off" },
 	{ NULL, NULL, NULL },
 };
 
@@ -3781,14 +3846,14 @@ static char *config_migrate_words(const char *text, toml_datum_t table)
 		long setting = config_setting_index(name);
 		toml_datum_t datum = toml_seek(table, name);
 		const char *word;
+		/* (a word, or an older version's true or false) */
+		const char *old = datum.type == TOML_STRING ? datum.u.s :
+			datum.type == TOML_BOOLEAN ? (datum.u.boolean ? "true" : "false") : NULL;
 		char value[80];
 		char *updated;
 
-		if (setting < 0 || datum.type != TOML_STRING ||
-			!config_word_is(datum.u.s, strlen(datum.u.s), config_renamed_words[index].old_word))
-		{
+		if (setting < 0 || !old || !config_word_is(old, strlen(old), config_renamed_words[index].old_word))
 			continue;
-		}
 		word = config_renamed_words[index].word;
 		snprintf(value, sizeof(value), "\"%s\"", word);
 		updated = config_replace_setting(result ? result : text, &config_settings[setting], value);
@@ -3796,7 +3861,7 @@ static char *config_migrate_words(const char *text, toml_datum_t table)
 			continue;
 		free(result);
 		result = updated;
-		platform_log("settings: %s = \"%s\" is an older version's: now \"%s\"", name, datum.u.s, word);
+		platform_log("settings: %s = \"%s\" is an older version's: now \"%s\"", name, old, word);
 	}
 	return result;
 }
@@ -4241,6 +4306,13 @@ static int config_set_from_file(struct config_value *value, const struct config_
 		{
 			free(value->string);
 			value->string = strdup(datum.u.s);
+		}
+		else if (datum.type == TOML_BOOLEAN && config_renamed_word(setting->name, datum.u.boolean ? "true" : "false"))
+		{
+			/* (an older version's true or false, which config_check_words
+			reads as the word in its place) */
+			free(value->string);
+			value->string = strdup(datum.u.boolean ? "true" : "false");
 		}
 		else if ((datum.type == TOML_FP64 || datum.type == TOML_INT64) && config_string_takes_number(setting))
 		{
@@ -4700,6 +4772,7 @@ static const struct
 } config_words[] =
 {
 	{ "display.mode", { "", "fullscreen", "borderless", "windowed", NULL }, "display.fullscreen's" },
+	{ "display.benchmark_pacing", { "uncapped", "settings", NULL }, NULL },
 	{ "display.resolution_scaling", { "native", "original", NULL }, NULL },
 	{ "display.anti_aliasing", { "off", "fxaa", "smaa", "ssaa2x", "msaa2x", "msaa4x", "msaa8x", NULL }, NULL },
 	{ "display.ambient_occlusion", { "off", "world", "ray_traced", NULL }, "off" },
@@ -4725,6 +4798,7 @@ static const struct
 		"purple", "cyan", "cobalt", "orange", "teal", "sage", "brown", "tan", "maroon", "salmon", NULL }, NULL },
 	{ "audio.resampler", { "xbox", "sinc", "linear", NULL }, NULL },
 	{ "audio.spatial", { "auto", "headphones", "speakers", NULL }, "auto" },
+	{ "audio.listening_mode", { "default", "night", NULL }, "default" },
 	{ "audio.voice_chat", { "push_to_talk", "open_mic", "off", NULL }, NULL },
 	{ "input.touch_controls", { "auto", "on", "off", NULL }, NULL },
 	{ "input.touch_crouch", { "toggle", "hold", NULL }, NULL },
@@ -4734,6 +4808,8 @@ static const struct
 	{ "input.gyro_button", { "touchpad", "left_paddle", "right_paddle", "misc", "left_bumper", "right_bumper",
 		"left_trigger", "right_trigger", "left_stick", "right_stick", NULL }, NULL },
 	{ "input.gyro_space", { "player", "local", NULL }, NULL },
+	{ "input.gyro_smoothing", { "off", "low", "medium", "high", NULL }, "medium" },
+	{ "input.touch_gyro_smoothing", { "off", "low", "medium", "high", NULL }, "off" },
 	{ "input.button_prompts", { "auto", "controller", "keyboard", NULL }, NULL },
 	{ "input.zoom_sensitivity", { "cs2", "halo", NULL }, "cs2" },
 	{ "game.console_log", { "important", "all", "none", NULL }, NULL },

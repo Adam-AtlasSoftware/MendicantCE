@@ -158,6 +158,12 @@ enum
 };
 #endif
 
+/* port: (rasterizer_xbox_transparent_geometry.c's) */
+enum
+{
+	_rasterizer_geometry_emitter_bit = NUMBER_OF_RASTERIZER_GEOMETRY_FLAGS + 1,
+};
+
 /* ---------- macros */
 
 /* ---------- structures */
@@ -311,6 +317,11 @@ void build_sprites_end(
 					geometry_flags,
 					_rasterizer_geometry_first_person_bit,
 					TEST_FLAG(data->flags, _build_sprites_first_person_bit));
+				/* port: (display.hdr_highlight_boost's emitters) */
+				SET_FLAG(
+					geometry_flags,
+					_rasterizer_geometry_emitter_bit,
+					TEST_FLAG(data->flags, _build_sprites_emitter_bit));
 #ifdef HALO_VR
 				/* port: (thick: VR_THICK_ANGLE) */
 				SET_FLAG(

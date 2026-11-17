@@ -190,6 +190,9 @@ int xgpu_metal_post_prepare(int smaa)
 		{
 			pipeline_describe(function, XGPU_METAL_FORMAT_RGBA16F, 1, &pipeline);
 			xgpu_metal_prepare(&pipeline);
+			/* (display.output_depth's 16 bits) */
+			pipeline_describe(function, XGPU_METAL_FORMAT_RGBA16, 1, &pipeline);
+			xgpu_metal_prepare(&pipeline);
 		}
 	}
 	if (smaa && !post.area)
@@ -349,6 +352,8 @@ int xgpu_metal_post_panini_prepare(uint32_t samples)
 	pipeline_describe(XGPU_METAL_POST_PANINI, XGPU_METAL_FORMAT_BGRA8, samples, &pipeline);
 	xgpu_metal_prepare(&pipeline);
 	pipeline_describe(XGPU_METAL_POST_PANINI, XGPU_METAL_FORMAT_RGBA16F, samples, &pipeline);
+	xgpu_metal_prepare(&pipeline);
+	pipeline_describe(XGPU_METAL_POST_PANINI, XGPU_METAL_FORMAT_RGBA16, samples, &pipeline);
 	xgpu_metal_prepare(&pipeline);
 	return 1;
 }

@@ -32,6 +32,8 @@ static const struct config_setting config_settings[] =
 	{ "display.vsync", _config_boolean, "true", "HALO_VSYNC", _environment_value, _platform_all, "Vsync." },
 	{ "display.ambient_occlusion", _config_string, "\"off\"", "HALO_AMBIENT_OCCLUSION", _environment_value,
 		_platform_all, "Ambient occlusion:\n\"off\" or \"world\"." },
+	{ "input.gyro_smoothing", _config_string, "\"medium\"", "HALO_GYRO_SMOOTHING", _environment_value,
+		_platform_all, "Smoothing." },
 };
 #define NUMBER_OF_CONFIG_SETTINGS (sizeof(config_settings) / sizeof(config_settings[0]))
 #define CONFIG_PLATFORM _platform_all
@@ -101,6 +103,10 @@ int main(int argc, char **argv)
 	char text[512];
 	size_t index;
 
+	/* (each string setting's value, as the settings always have one) */
+	config_values[1].string = strdup("off");
+	config_values[2].string = strdup("medium");
+
 	/* config.toml with an older word: written with "world", the comment
 	this version's, the other settings as they were */
 	CASE("file")
@@ -155,6 +161,37 @@ int main(int argc, char **argv)
 		logged[0] = 0;
 		CHECK(!strcmp(read_as("bright"), "bright") && strstr(logged, "is not \"off\", \"world\" or \"ray_traced\""),
 			"an unknown word: \"%s\", logged %s", config_values[1].string, logged);
+		return 0;
+	}
+	/* an older version's true or false for a setting that is a word now
+	(input.gyro_smoothing): the file written with its word, and read so */
+	CASE("boolean")
+	{
+		static const char *const booleans[][2] = { { "true", "medium" }, { "false", "off" } };
+
+		for (index = 0; index < 2; index++)
+		{
+			char *out;
+			toml_result_t result;
+			toml_datum_t datum;
+
+			snprintf(text, sizeof(text), "[input]\ngyro_smoothing = %s\n", booleans[index][0]);
+			out = migrated(text);
+			CHECK(out, "%s: the file was left as it was", booleans[index][0]);
+			result = toml_parse(out, (int)strlen(out));
+			CHECK(result.ok, "the migrated file does not parse:\n%s", out);
+			datum = toml_seek(result.toptab, "input.gyro_smoothing");
+			CHECK(datum.type == TOML_STRING && !strcmp(datum.u.s, booleans[index][1]), "%s was written as:\n%s",
+				booleans[index][0], out);
+			toml_free(result);
+			free(out);
+			free(config_values[2].string);
+			config_values[2].string = strdup(booleans[index][0]);
+			config_check_words();
+			CHECK(!strcmp(config_values[2].string, booleans[index][1]), "%s was read as \"%s\"",
+				booleans[index][0], config_values[2].string);
+		}
+		CHECK(!migrated("[input]\ngyro_smoothing = \"high\"\n"), "a strength was written again");
 		return 0;
 	}
 	fprintf(stderr, "unknown case %s\n", case_name);

@@ -12,7 +12,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, enum_with, function, mutated, read, run, structure  # noqa: E402
 
-CASES = ["file", "kept", "read"]
+CASES = ["file", "kept", "read", "boolean"]
 NAMES = ["config_name_hash", "config_setting_walk", "config_index_make", "config_setting_index", "config_append",
          "config_copy", "config_append_setting", "config_line_key",
          "config_line_section", "config_find_line", "config_line_commented_default", "config_comment_start",
@@ -22,13 +22,15 @@ NAMES = ["config_name_hash", "config_setting_walk", "config_index_make", "config
 # a fault in the code, the function it is in, and the case that must catch it
 NEGATIVE_CONTROLS = {
     # (the older words kept: neither the file nor the environment's)
-    "file-kept": (("if (setting < 0 || datum.type != TOML_STRING ||", "if (1 || setting < 0 || datum.type != TOML_STRING ||"),
-                  "config_migrate_words", "file"),
+    "file-kept": (("if (setting < 0 || !old ||", "if (1 || setting < 0 || !old ||"), "config_migrate_words", "file"),
+    # (an older version's true or false kept: input.gyro_smoothing's)
+    "boolean-kept": (('datum.type == TOML_BOOLEAN ? (datum.u.boolean ? "true" : "false") : NULL', "NULL"),
+                     "config_migrate_words", "boolean"),
     "read-kept": (("if (renamed)", "if (0)"), "config_check_words", "read"),
     # (every value taken for an older word: "off" turned on)
     "every-word": (("config_word_is(value, strlen(value), config_renamed_words[index].old_word)", "1"),
                    "config_renamed_word", "read"),
-    "every-file": (("!config_word_is(datum.u.s, strlen(datum.u.s), config_renamed_words[index].old_word)", "0"),
+    "every-file": (("!config_word_is(old, strlen(old), config_renamed_words[index].old_word)", "0"),
                    "config_migrate_words", "kept"),
     # (the old word written back)
     "old-written": (("word = config_renamed_words[index].word;", "word = config_renamed_words[index].old_word;"),

@@ -41,7 +41,9 @@ highlights it cannot show.
   `display.hdr_paper_white`, in percent of the system's SDR white, is still
   read while it is 0), `display.hdr_ui_nits` (the UI's brightness, below),
   `display.hdr_sdr_curve` (`auto`, `srgb`, `2.2`: the shadows' curve, under
-  "Choices").
+  "Choices"), `display.hdr_peak_nits` (the display's peak, below),
+  `display.hdr_highlight_boost` (the lights' gain, below), `display.hdr_gamut`
+  (the highlights' colors, below).
   On a renderer that draws HDR (the menus' `platform="hdr"`), Video
   Setup's Brightness page has a row for each under its HDR section, and a
   DISPLAY PEAK row that shows the display's peak and SDR white as the
@@ -54,6 +56,47 @@ highlights it cannot show.
   ratio above it; the first-person weapon's displays and the
   self-illumination are the 3D view's and stay with paper white. It is
   never brighter than the display's peak.
+- **Peak brightness** (`display.hdr_peak_nits`, #1122): the display's peak
+  in nits, 200 to 10000, for a display that reports a wrong one, or 0, the
+  default: the system's (the picture as before). Only what is past paper
+  white changes. With a peak of the player's, the curve also takes what
+  Windows' DXGI reports of the display (`IDXGIOutput6::GetDesc1`, the HDR
+  Calibration app's values where it has run; logged as `hdr: DXGI: ...`):
+  its full-frame peak, toward which the shoulder holds the bright parts (a
+  shoulder toward it summed with one that rises flat from paper white
+  toward the rest of the peak, so a small core still reaches the peak:
+  `xgpu_hdr_highlight`), and its black, under 4 times which the encoding
+  lifts the light into the display's range (`xgpu_hdr_black`). Without
+  them (0: other systems, or System's peak) both are the curve as before.
+- **Highlight boost** (`display.hdr_highlight_boost`, #1123): 0 (the
+  default: the picture as before, exactly) to 4. Each level gains the
+  light an emitter adds by a quarter more, its brightest channel no
+  further than its ceiling (nor than itself where it is already past):
+  the self-illumination of models and level geometry toward
+  self-illumination's 2 times paper white (`xgpu_hdr_self_illuminate_boost`),
+  and, before the fixed-function blend adds it, the colour of a draw the
+  game marks as light (`HALO_HDR_KIND_EMITTER`: the lens flares and the
+  sun's glow, glows, self-illuminated particles; the first-person
+  weapon's toward the weapon's ceiling) toward the lights' 3 times
+  (`xgpu_hdr_boost_emitter`). The level is in the tag's ceiling bits of
+  the self-illumination's and the emitter's tags (`XGPU_HDR_BOOST`,
+  `XGPU_HDR_EMITTER`), so a change makes those draws' pipelines again.
+  Not boosted: contrails and particle systems' particles (unmarked), and
+  an additive emitter that also writes alpha (blended in its shader).
+- **Highlight colors** (`display.hdr_gamut`, #1124): `srgb` (the default,
+  the picture as before) or `expanded`. The frame is sRGB's, so no color
+  past it exists; `expanded` makes the highlights more vivid on purpose.
+  In the encoding, a pixel whose brightest channel is past paper white
+  (or the UI's white, the brighter) has its chroma in Oklab scaled by up
+  to 1.5, from none at white to all of it at 4 times, its hue and
+  lightness kept. The room along its hue in the target gamut (and under
+  the peak) is found by 12 halvings, and the chroma is compressed softly
+  into it (a shoulder from three quarters of the room on): no flat patches,
+  no hue shift. The target: the display's primaries where DXGI reports
+  them (by their triangle's area, between sRGB's, P3's and BT.2020's,
+  never past BT.2020), Display P3 on macOS and iOS, DCI-P3 (D65)
+  elsewhere (`xgpu_hdr_gamut`). The swapchain's HDR metadata still names
+  sRGB's primaries.
 - **Fallback**: `auto` turns HDR on only on an HDR display; off, and on an
   SDR display, the frame is the 8-bit one, byte for byte. Highlights roll
   off under a soft shoulder to the display's peak (its EDR headroom, which
@@ -396,12 +439,18 @@ the stream's ring carries it, written by the host). A backend declares
   EDR's half floats are not dithered. The dither only helps where the
   frame has more bits than the output: the HDR frame's half floats (about
   11 bits, enough for 8-bit SDR and 10-bit PQ), or a curve between them.
-  The SDR frame is BGRA8 (every blend rounded to 1/255 before the last
-  pass), so at gamma 1 it is the swapchain's codes already and is copied
-  byte for byte, undithered; at other gammas the dither keeps the curve's
-  mean (gamma 0.5 no longer crushes codes 1 to 11 all to black), but cannot
-  smooth the steps an 8-bit frame already has. Smoothing SDR's fog needs a
-  half-float SDR frame (#1152's 10-bit SDR output).
+  With `display.output_depth` "8" the SDR frame is BGRA8 (every blend
+  rounded to 1/255 before the last pass), so at gamma 1 it is the
+  swapchain's codes already and is copied byte for byte, undithered; at
+  other gammas the dither keeps the curve's mean but cannot smooth the
+  steps an 8-bit frame already has. With "10" ("auto" on a computer,
+  #1152) the SDR frame is RGBA16, 16-bit unsigned normalized: it clamps
+  and blends as BGRA8 does (the same picture; half floats would keep what
+  a blend takes past 1, and destination alpha past 1, which only HDR's tags
+  keep in range), at 65535 levels, and the last pass dithers it to a 10-bit
+  SDR swapchain where the surface lists one, else to 8 bits. It costs
+  twice the frame's memory and bandwidth (3840x2160: 66 MB, against 33),
+  so "auto" keeps 8 bits on phones and tablets and with battery saver.
 - **sRGB's gamut.** The EDR layer is tagged extended linear sRGB, as the
   owner asked: no colour is pushed into P3. The SDR layer stays untagged (it
   is unchanged), which on a P3 panel shows the game's colours slightly more

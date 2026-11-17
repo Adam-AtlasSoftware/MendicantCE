@@ -27,6 +27,7 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/op_music_volume" x="28" y="297"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/op_dialogue_volume" x="28" y="318"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/op_effects_volume" x="28" y="339"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/op_listening_mode" x="28" y="360"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/button_bar" y="414"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/tabs" y="76"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/tabs_search" y="76"/>
@@ -321,6 +322,22 @@
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/effects_volume_value" type="text" controller="1" width="76" height="20" bitmap="main_menu/settings/slider_field" color="#FF2896FF" align="center" text_y="1" text_flags="no_focus_test" wide="244 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/op_listening_mode" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/listening_mode_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/listening_mode_spinner" x="188"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/listening_mode_seg0" x="188" y="1"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/listening_mode_seg1" x="271" y="1"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/listening_mode_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/labels" string_index="12" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/listening_mode_seg0" type="text" controller="1" width="79" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="DEFAULT" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/listening_mode_seg1" type="text" controller="1" width="79" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="NIGHT" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/listening_mode_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="DEFAULT|NIGHT" setting="audio.listening_mode" values="default|night" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
+		<on event="created" run="port setting load"/>
+		<on event="a" run="port setting segment"/>
+	</widget>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/labels">
 		<string text="SOUND"/>
 		<string text="OUTPUT DEVICE"/>
@@ -334,6 +351,7 @@
 		<string text="MUSIC VOLUME"/>
 		<string text="DIALOGUE VOLUME"/>
 		<string text="EFFECTS VOLUME"/>
+		<string text="LISTENING MODE"/>
 	</strings>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/audio_settings/help_strings">
 		<string text="The sound and its devices, 3D audio, the volumes and voice chat."/>
@@ -349,5 +367,6 @@
 		<string text="The music's volume."/>
 		<string text="The characters' speech: Cortana, the Marines and the cutscenes' lines."/>
 		<string text="Every other sound: weapons, vehicles and the world."/>
+		<string text="Default plays the sound as it is. Night evens it out for playing quietly: speech and quiet sounds come up, explosions and gunfire come down."/>
 	</strings>
 </menus>

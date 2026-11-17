@@ -47,6 +47,11 @@ static boolean player_control_stick_look(struct game_globals_player_control cons
 	return *clamped_yaw >= constants->look_pegging_threshold;
 }
 static void player_control_scale_look(long unit_index, short zoom_level, real_euler_angles2d *look) {}
+/* (the stick's zoomed speed, input.stick_zoom_sensitivity: its default, 1, changes nothing) */
+static void player_control_stick_zoom_look(short gamepad_index, long unit_index, short zoom_level,
+	real_euler_angles2d *look_delta)
+{
+}
 static long local_player_aim_assist(short local_player_index, real *autoaim, real *magnetism,
 	real_euler_angles2d *position, real_euler_angles2d *velocity)
 {

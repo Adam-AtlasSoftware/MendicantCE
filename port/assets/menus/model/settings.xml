@@ -141,6 +141,11 @@
 		<row key="effects_volume" kind="slider" setting="audio.effects_volume" label="EFFECTS VOLUME" crumb="AUDIO › VOLUME" least="0" most="100" step="1" typed_least="0" typed_most="100" whole="true" curve="volume">
 			<help>Every other sound: weapons, vehicles and the world.</help>
 		</row>
+		<row key="listening_mode" kind="choice" setting="audio.listening_mode" label="LISTENING MODE" crumb="AUDIO › VOLUME" search_choices="night">
+			<help>Default plays the sound as it is. Night evens it out for playing quietly: speech and quiet sounds come up, explosions and gunfire come down.</help>
+			<choice shown="DEFAULT" value="default"/>
+			<choice shown="NIGHT" value="night"/>
+		</row>
 		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this tab's settings back to their defaults. Nothing changes until OK."/>
 		<button key="button_ok" kind="ok" run="port settings ok" help="Keeps your changes, on every tab, and applies them."/>
 		<button key="button_cancel" kind="cancel" run="port settings cancel" help="Leaves Settings without keeping any change."/>
@@ -571,7 +576,14 @@
 			<help>How bright the picture is, the HUD and menus too, as Halo PC's gamma. Higher brightens the dark parts; lower darkens them. 1.0 shows the game as it is drawn. With HDR on an HDR display, Paper White sets the brightness instead.</help>
 			<note>Click the number (or press A) to type any from 0.5 to 2.0.</note>
 		</row>
-		<section key="section_2" title="HDR" when="hdr"/>
+		<row key="output_depth" kind="choice" setting="display.output_depth" label="COLOR DEPTH" crumb="VIDEO › BRIGHTNESS" search_choices="bit" when="computer+!vr_build" enabled="!hdr_drawn">
+			<help>10-Bit draws finer shades, so fog and skies show no bands: a 10-bit display shows them all, others a fine grain. 8-Bit draws as before, lighter on the graphics card. Auto picks for you: 10-Bit, or 8-Bit with battery saver.</help>
+			<note>HDR has its own depth: this applies with HDR off.</note>
+			<choice shown="AUTO" value="auto"/>
+			<choice shown="8-BIT" value="8"/>
+			<choice shown="10-BIT" value="10"/>
+		</row>
+		<section key="section_3" title="HDR" when="hdr"/>
 		<row key="hdr" kind="choice" setting="display.hdr" label="HDR" crumb="VIDEO › BRIGHTNESS" when="hdr">
 			<help>Brighter highlights on an HDR display. Auto turns it on while the display shows HDR; a display without HDR shows the game as it was.</help>
 			<choice shown="AUTO" value="auto"/>
@@ -642,7 +654,40 @@
 			<choice shown="SRGB" value="srgb"/>
 			<choice shown="2.2" value="2.2"/>
 		</row>
-		<section key="section_8" title="DISPLAY" when="hdr"/>
+		<row key="hdr_peak_nits" kind="choice" setting="display.hdr_peak_nits" label="PEAK BRIGHTNESS" crumb="VIDEO › BRIGHTNESS" when="hdr">
+			<help>With HDR, the brightest your display shows, in nits, for a display that reports a wrong peak. System uses the one it reports. Only the highlights change.</help>
+			<choice shown="SYSTEM" value="0"/>
+			<choice shown="200 NITS" value="200"/>
+			<choice shown="300 NITS" value="300"/>
+			<choice shown="400 NITS" value="400"/>
+			<choice shown="500 NITS" value="500"/>
+			<choice shown="600 NITS" value="600"/>
+			<choice shown="700 NITS" value="700"/>
+			<choice shown="800 NITS" value="800"/>
+			<choice shown="900 NITS" value="900"/>
+			<choice shown="1000 NITS" value="1000"/>
+			<choice shown="1250 NITS" value="1250"/>
+			<choice shown="1500 NITS" value="1500"/>
+			<choice shown="1750 NITS" value="1750"/>
+			<choice shown="2000 NITS" value="2000"/>
+			<choice shown="2500 NITS" value="2500"/>
+			<choice shown="3000 NITS" value="3000"/>
+			<choice shown="4000 NITS" value="4000"/>
+		</row>
+		<row key="hdr_gamut" kind="choice" setting="display.hdr_gamut" label="HIGHLIGHT COLORS" crumb="VIDEO › BRIGHTNESS" search_choices="srgb expanded" when="hdr">
+			<help>With HDR, Expanded lets the brightest colors, like plasma and needler shards, grow more vivid than sRGB, keeping their hue. sRGB keeps the picture as it is.</help>
+			<choice shown="SRGB" value="srgb"/>
+			<choice shown="EXPANDED" value="expanded"/>
+		</row>
+		<row key="hdr_highlight_boost" kind="choice" setting="display.hdr_highlight_boost" label="HIGHLIGHT BOOST" crumb="VIDEO › BRIGHTNESS" search_choices="low medium high max" when="hdr">
+			<help>With HDR, brighter lights of the game's own: the sun's flares, glows, glowing particles, vehicle lights and panels. Off keeps the picture as it is. The HUD and menus stay as they are.</help>
+			<choice shown="OFF" value="0"/>
+			<choice shown="LOW" value="1"/>
+			<choice shown="MEDIUM" value="2"/>
+			<choice shown="HIGH" value="3"/>
+			<choice shown="MAX" value="4"/>
+		</row>
+		<section key="section_12" title="DISPLAY" when="hdr"/>
 		<row key="hdr_display" kind="status" label="DISPLAY PEAK" crumb="VIDEO › BRIGHTNESS" when="hdr">
 			<help>The brightest the display shows, and its SDR white, as the system reports them.</help>
 		</row>
@@ -707,6 +752,16 @@
 			<choice shown="OFF" value="off"/>
 			<choice shown="SIMPLE" value="simple"/>
 			<choice shown="DETAILED" value="detailed"/>
+		</row>
+		<section key="section_6" title="BENCHMARK"/>
+		<row key="benchmark_pacing" kind="choice" setting="display.benchmark_pacing" label="BENCHMARK PACING" crumb="VIDEO › FRAME RATE &amp; SYNC" search_choices="uncapped your settings" when="!in_game">
+			<help>What the benchmark measures. Uncapped turns VSync, Variable Refresh and the frame cap off for the run: what your computer can draw. Your Settings keeps them: what you see as you play.</help>
+			<choice shown="UNCAPPED" value="uncapped"/>
+			<choice shown="YOUR SETTINGS" value="settings"/>
+		</row>
+		<row key="benchmark" kind="link" label="RUN BENCHMARK" crumb="VIDEO › FRAME RATE &amp; SYNC" when="!in_game" run="port settings benchmark">
+			<help>Plays a fixed minute of Blood Gulch with 40 bots, then shows the average frame rate, the 1% low, the frame times, the GPU and CPU time and your settings, and saves them in the benchmarks folder.</help>
+			<note>From the main menu only.</note>
 		</row>
 		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
 		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>
@@ -1127,8 +1182,27 @@
 			<help>How far the view turns for each degree you turn the controller: 1 as far, 2 twice as far. Press A, or click the number, to type a value.</help>
 			<note>Zoomed in: as Zoom Aim Speed sets.</note>
 		</row>
+		<row key="touch_gyro_sensitivity" kind="slider" setting="input.touch_gyro_sensitivity" label="SENSITIVITY" crumb="CONTROLS › CONTROLLER › GYRO &amp; FLICK STICK" search="sens" when="touch+!gyro" same_place="true" least="0.25" most="8" step="0.05" typed_least="0.05" typed_most="20">
+			<help>How far the view turns for each degree you turn this device, with the touch controls' Gyroscope aiming on: 1 as far, 2 twice as far. Press A, or tap the number, to type a value.</help>
+			<note>A controller's gyro has its own, shown while one is connected.</note>
+		</row>
 		<row key="gyro_vertical_sensitivity" kind="choice" setting="input.gyro_vertical_sensitivity" label="VERTICAL SENSITIVITY" crumb="CONTROLS › CONTROLLER › GYRO &amp; FLICK STICK" search="sens" when="gyro">
 			<help>How far the view turns up and down, of how far it turns side to side. 1X turns it as far.</help>
+			<choice shown="0.25X" value="0.25"/>
+			<choice shown="0.5X" value="0.5"/>
+			<choice shown="0.6X" value="0.6"/>
+			<choice shown="0.7X" value="0.7"/>
+			<choice shown="0.75X" value="0.75"/>
+			<choice shown="0.8X" value="0.8"/>
+			<choice shown="0.9X" value="0.9"/>
+			<choice shown="1X" value="1"/>
+			<choice shown="1.1X" value="1.1"/>
+			<choice shown="1.25X" value="1.25"/>
+			<choice shown="1.5X" value="1.5"/>
+			<choice shown="2X" value="2"/>
+		</row>
+		<row key="touch_gyro_vertical_sensitivity" kind="choice" setting="input.touch_gyro_vertical_sensitivity" label="VERTICAL SENSITIVITY" crumb="CONTROLS › CONTROLLER › GYRO &amp; FLICK STICK" search="sens" when="touch+!gyro" same_place="true">
+			<help>How far the view turns up and down as you tilt this device, of how far it turns side to side. 1X turns it as far.</help>
 			<choice shown="0.25X" value="0.25"/>
 			<choice shown="0.5X" value="0.5"/>
 			<choice shown="0.6X" value="0.6"/>
@@ -1147,16 +1221,25 @@
 			<choice shown="PLAYER SPACE" value="player"/>
 			<choice shown="LOCAL SPACE" value="local"/>
 		</row>
-		<row key="gyro_smoothing" kind="choice" setting="input.gyro_smoothing" label="SMOOTHING" crumb="CONTROLS › CONTROLLER › GYRO &amp; FLICK STICK" when="gyro">
-			<help>Steadies the smallest motions, your hand's tremor, but never a real turn. Off: every motion as it comes.</help>
-			<choice shown="ON" value="true"/>
-			<choice shown="OFF" value="false"/>
+		<row key="gyro_smoothing" kind="choice" setting="input.gyro_smoothing" label="SMOOTHING" crumb="CONTROLS › CONTROLLER › GYRO &amp; FLICK STICK" search_choices="low medium high" when="gyro">
+			<help>Steadies the smallest motions, your hand's tremor, but never a real turn. Higher steadies faster motions, over a little longer. Off: every motion as it comes.</help>
+			<choice shown="OFF" value="off"/>
+			<choice shown="LOW" value="low"/>
+			<choice shown="MEDIUM" value="medium"/>
+			<choice shown="HIGH" value="high"/>
+		</row>
+		<row key="touch_gyro_smoothing" kind="choice" setting="input.touch_gyro_smoothing" label="SMOOTHING" crumb="CONTROLS › CONTROLLER › GYRO &amp; FLICK STICK" search_choices="low medium high" when="touch+!gyro" same_place="true">
+			<help>Steadies this device's smallest motions, your hand's tremor, but never a real turn. Higher steadies faster motions, over a little longer. Off: every motion as it comes.</help>
+			<choice shown="OFF" value="off"/>
+			<choice shown="LOW" value="low"/>
+			<choice shown="MEDIUM" value="medium"/>
+			<choice shown="HIGH" value="high"/>
 		</row>
 		<row key="gyro_calibrate" kind="status" label="CALIBRATE" crumb="CONTROLS › CONTROLLER › GYRO &amp; FLICK STICK" when="gyro" run="port settings gyro calibrate">
 			<help>Put the controller down on something still, then select this: it measures the gyroscope at rest for a second and a half.</help>
 			<note>It also does so whenever it is held still.</note>
 		</row>
-		<section key="section_9" title="RIGHT STICK"/>
+		<section key="section_12" title="RIGHT STICK"/>
 		<row key="invert_look_horizontal" kind="choice" setting="input.invert_look_horizontal" label="INVERT TURNING" crumb="CONTROLS › CONTROLLER › GYRO &amp; FLICK STICK">
 			<help>Pushing the right stick right turns the view left. For every controller on this device.</help>
 			<choice shown="YES" value="true"/>
@@ -1173,6 +1256,15 @@
 			<note>With the default stick layout.</note>
 			<choice shown="ON" value="true"/>
 			<choice shown="OFF" value="false"/>
+		</row>
+		<row key="flick_stick_time" kind="choice" setting="input.flick_stick_time" label="FLICK TIME" crumb="CONTROLS › CONTROLLER › GYRO &amp; FLICK STICK" search_choices="instant" enabled="flick_stick=true">
+			<help>How long a flick takes to turn you: shorter is snappier, longer smoother. You turn as far either way.</help>
+			<choice shown="INSTANT" value="0"/>
+			<choice shown="0.05 S" value="0.05"/>
+			<choice shown="0.1 S" value="0.1"/>
+			<choice shown="0.15 S" value="0.15"/>
+			<choice shown="0.2 S" value="0.2"/>
+			<choice shown="0.25 S" value="0.25"/>
 		</row>
 		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
 		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>
@@ -1211,7 +1303,7 @@
 			<choice shown="45%" value="45"/>
 			<choice shown="50%" value="50"/>
 		</row>
-		<row key="stick_test" kind="link" label="STICK TEST ›" crumb="CONTROLS › CONTROLLER › STICK SETTINGS" search="deadzone drift" open="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/stick_test/stick_test_screen">
+		<row key="stick_test" kind="link" label="STICK TEST ›" crumb="CONTROLS › CONTROLLER › STICK SETTINGS" search="deadzone drift" open="screens/stick_test">
 			<help>See what each stick reads, and what the game takes from it with the dead zones and shape set here: find a stick's drift, then set its dead zone just past it.</help>
 		</row>
 		<section key="section_4" title="OUTER DEAD ZONES"/>
@@ -1285,21 +1377,6 @@
 			<choice shown="90%" value="90"/>
 			<choice shown="95%" value="95"/>
 			<choice shown="100%" value="100"/>
-		</row>
-		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
-		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>
-		<button key="button_cancel" kind="cancel" run="port settings page cancel" help="Goes back without these changes."/>
-	</screen>
-	<screen name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/stick_test/stick_test_screen" kind="settings" layout="page" geometry="tall" title="STICK TEST">
-		<section key="section_0" title="READINGS"/>
-		<row key="stick_test_left" kind="status" label="LEFT STICK" crumb="CONTROLS › … › STICK TEST">
-			<help>The left stick now: side to side, then up and down, in percent of its travel; after the bar, as you move with the dead zones set. Below, the left circle: its dead zones, the stick white, what the game takes blue.</help>
-		</row>
-		<row key="stick_test_right" kind="status" label="RIGHT STICK" crumb="CONTROLS › … › STICK TEST">
-			<help>The right stick now: side to side, then up and down, in percent of its travel; after the bar, as the view turns with the dead zones and shape set. Below, the right circle.</help>
-		</row>
-		<row key="stick_drift" kind="status" label="DRIFT AT REST" crumb="CONTROLS › … › STICK TEST">
-			<help>The most each stick has read while let go of, since this page opened. Set its dead zone a little past this, on Advanced Stick Settings.</help>
 		</row>
 		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
 		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>

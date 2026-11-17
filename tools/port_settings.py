@@ -77,6 +77,9 @@ PAPER_WHITES = [("SYSTEM", "0")] + [(f"{nits} NITS", str(nits)) for nits in rang
 # display.hdr_ui_nits's: paper white's, or nits
 # (0's name the shortest that fits the spinner: "same as paper white" is too wide)
 UI_WHITES = [("PAPER WHITE", "0")] + [(f"{nits} NITS", str(nits)) for nits in range(80, 501, 20)]
+# display.hdr_peak_nits's: the system's, or nits (#1122)
+PEAKS = [("SYSTEM", "0")] + [(f"{nits} NITS", str(nits)) for nits in
+                             [*range(200, 1001, 100), 1250, 1500, 1750, 2000, 2500, 3000, 4000]]
 
 # the old settings screens' layout (rows of a label and a spinner over their
 # row backgrounds, a line of help for the row chosen, Defaults, OK and Cancel),
@@ -764,14 +767,13 @@ DEAD_ZONES = ("gamepad_setup/dead_zones", "dead_zones_screen")
 # (aiming with a controller's gyroscope, and the flick stick: port/linux/src/xinput_sdl.c;
 # menu_functions.c's gyro_rows_show)
 GYRO = ("gamepad_setup/gyro", "gyro_screen")
-# (opened from Advanced Stick Settings: each stick's reading, and its circle
-# under the rows, STICK_TEST_RADIUS units round, STICK_TEST_GAP below the
-# last row's value: menu_functions.c's stick_test_draw)
-STICK_TEST = ("gamepad_setup/stick_test", "stick_test_screen")
-STICK_TEST_RADIUS = 44
-STICK_TEST_GAP = 14
+# (opened from Advanced Stick Settings: each stick's reading and its circle,
+# a hand-written screen's, port/assets/menus/screens/stick_test.xml)
+STICK_TEST = "screens/stick_test"
 # input.gyro_sensitivity's: the view's degrees for each degree the controller turns
 GYRO_SENSITIVITY = Slider(0.25, 8.0, 0.05, 0.05, 20.0)
+# input.gyro_smoothing's strengths (gyro_aim.c's gyro_aim_smoothing)
+GYRO_SMOOTHING = [("OFF", "off"), ("LOW", "low"), ("MEDIUM", "medium"), ("HIGH", "high")]
 GYRO_BUTTONS = [("TOUCHPAD", "touchpad"), ("LEFT PADDLE", "left_paddle"), ("RIGHT PADDLE", "right_paddle"),
                 ("CAPTURE / SHARE", "misc"), ("LEFT BUMPER", "left_bumper"), ("RIGHT BUMPER", "right_bumper"),
                 ("LEFT TRIGGER", "left_trigger"), ("RIGHT TRIGGER", "right_trigger"), ("LEFT STICK", "left_stick"),
@@ -834,7 +836,6 @@ REMAP_HANDLERS = ['<on event="x" run="port controller clear"/>',
 SETTINGS_STATUS_ROWS = {"discord_account", "link_status", "link_unlink",
                         *(f"link_master_{n}" for n in range(1, 5)), "hdr_display",
                         "viewmodel_weapon_reset", "gyro_found", "gyro_calibrate", "clear_caches", "add_maps",
-                        "stick_test_left", "stick_test_right", "stick_drift",
                         "remap_player", "remap_group", *(f"pad_{n}" for n in range(1, REMAP_ROWS + 1))}
 # the rows whose labels menu_functions.c writes (a master server's host): the
 # label's text its own, not its list's; their values the narrower column at
@@ -968,6 +969,10 @@ PAGES = {
              "The characters' speech: Cortana, the Marines and the cutscenes' lines.", None),
             ("EFFECTS VOLUME", "audio.effects_volume", VOLUMES,
              "Every other sound: weapons, vehicles and the world.", None),
+            # (port/linux/src/dsound_sdl.c's night_compress)
+            ("LISTENING MODE", "audio.listening_mode", [("DEFAULT", "default"), ("NIGHT", "night")],
+             "Default plays the sound as it is. Night evens it out for playing quietly: speech and quiet sounds "
+             "come up, explosions and gunfire come down.", None),
         ],
     },
     VOICE_CHAT[0]: {
@@ -1307,6 +1312,14 @@ PAGES = {
              "parts; lower darkens them. 1.0 shows the game as it is drawn. With HDR on an HDR display, Paper "
              "White sets the brightness instead.|Click the number (or press A) to type any from 0.5 to 2.0.",
              None),
+            # (display.output_depth, #1152: a computer's, not the VR build's,
+            # dimmed while the frame is drawn in HDR: SETTINGS_ROW_WHEN,
+            # SETTINGS_ROW_ENABLED)
+            ("COLOR DEPTH", "display.output_depth", [("AUTO", "auto"), ("8-BIT", "8"), ("10-BIT", "10")],
+             "10-Bit draws finer shades, so fog and skies show no bands: a 10-bit display shows them all, others "
+             "a fine grain. 8-Bit draws as before, lighter on the graphics card. Auto picks for you: 10-Bit, or "
+             "8-Bit with battery saver.|HDR has its own depth: this applies with HDR off.",
+             "computer"),
             (SECTION, "HDR"),
             ("HDR", "display.hdr", [("AUTO", "auto"), ("ON", "on"), ("OFF", "off")],
              "Brighter highlights on an HDR display. Auto turns it on while the display shows HDR; a display "
@@ -1323,6 +1336,16 @@ PAGES = {
             ("SDR CURVE", "display.hdr_sdr_curve", [("AUTO", "auto"), ("SRGB", "srgb"), ("2.2", "2.2")],
              "With HDR, how dark the darkest shadows are: the curve an SDR display shows them by. 2.2 is most PC "
              "monitors' and TVs', darker; sRGB is a Mac's. Auto picks sRGB on a Mac, 2.2 elsewhere.", "hdr"),
+            ("PEAK BRIGHTNESS", "display.hdr_peak_nits", PEAKS,
+             "With HDR, the brightest your display shows, in nits, for a display that reports a wrong peak. "
+             "System uses the one it reports. Only the highlights change.", "hdr"),
+            ("HIGHLIGHT COLORS", "display.hdr_gamut", [("SRGB", "srgb"), ("EXPANDED", "expanded")],
+             "With HDR, Expanded lets the brightest colors, like plasma and needler shards, grow more vivid than "
+             "sRGB, keeping their hue. sRGB keeps the picture as it is.", "hdr"),
+            ("HIGHLIGHT BOOST", "display.hdr_highlight_boost",
+             [("OFF", "0"), ("LOW", "1"), ("MEDIUM", "2"), ("HIGH", "3"), ("MAX", "4")],
+             "With HDR, brighter lights of the game's own: the sun's flares, glows, glowing particles, vehicle "
+             "lights and panels. Off keeps the picture as it is. The HUD and menus stay as they are.", "hdr"),
             (SECTION, "DISPLAY"),
             # (the display's peak and SDR white as the system reports them:
             # menu_functions.c's hdr_display_show)
@@ -1371,6 +1394,17 @@ PAGES = {
              "under 30. Detailed adds the frame time, the 1% low, and the milliseconds spent on the GPU, the render "
              "thread, the game and waiting for the display.",
              None),
+            # (port/linux/game/benchmark.c: from the main menu only, its match
+            # taking the place of the game: SETTINGS_ROW_WHEN; its results
+            # the new menus' screens/benchmark.xml)
+            (SECTION, "BENCHMARK"),
+            ("BENCHMARK PACING", "display.benchmark_pacing", [("UNCAPPED", "uncapped"), ("YOUR SETTINGS", "settings")],
+             "What the benchmark measures. Uncapped turns VSync, Variable Refresh and the frame cap off for the run: "
+             "what your computer can draw. Your Settings keeps them: what you see as you play.", None),
+            ("RUN BENCHMARK", None, None,
+             "Plays a fixed minute of Blood Gulch with 40 bots, then shows the average frame rate, the 1% low, the "
+             "frame times, the GPU and CPU time and your settings, and saves them in the benchmarks folder.|From "
+             "the main menu only.", None, "benchmark", "port settings benchmark"),
         ],
     },
     FIRST_PERSON[0]: {
@@ -1614,15 +1648,28 @@ PAGES = {
             ("SENSITIVITY", "input.gyro_sensitivity", GYRO_SENSITIVITY,
              "How far the view turns for each degree you turn the controller: 1 as far, 2 twice as far. Press A, "
              "or click the number, to type a value.|Zoomed in: as Zoom Aim Speed sets.", None),
+            # (the touch controls' gyroscope, the device's own, in the
+            # controller's rows' place while no controller with a gyroscope
+            # is connected: SETTINGS_SAME_PLACE, SETTINGS_ROW_WHEN)
+            ("SENSITIVITY", "input.touch_gyro_sensitivity", GYRO_SENSITIVITY,
+             "How far the view turns for each degree you turn this device, with the touch controls' Gyroscope "
+             "aiming on: 1 as far, 2 twice as far. Press A, or tap the number, to type a value.|A controller's "
+             "gyro has its own, shown while one is connected.", "touch"),
             ("VERTICAL SENSITIVITY", "input.gyro_vertical_sensitivity", VERTICAL_SENSITIVITIES,
              "How far the view turns up and down, of how far it turns side to side. 1X turns it as far.", None),
+            ("VERTICAL SENSITIVITY", "input.touch_gyro_vertical_sensitivity", VERTICAL_SENSITIVITIES,
+             "How far the view turns up and down as you tilt this device, of how far it turns side to side. 1X "
+             "turns it as far.", "touch"),
             ("TURN AXIS", "input.gyro_space", [("PLAYER SPACE", "player"), ("LOCAL SPACE", "local")],
              "Player Space turns you as you turn the controller about the up direction, however you hold it: "
              "flat, upright or between. Local Space turns you about the controller's own axis, as if held flat.",
              None),
-            ("SMOOTHING", "input.gyro_smoothing", ON_OFF,
-             "Steadies the smallest motions, your hand's tremor, but never a real turn. Off: every motion as it "
-             "comes.", None),
+            ("SMOOTHING", "input.gyro_smoothing", GYRO_SMOOTHING,
+             "Steadies the smallest motions, your hand's tremor, but never a real turn. Higher steadies faster "
+             "motions, over a little longer. Off: every motion as it comes.", None),
+            ("SMOOTHING", "input.touch_gyro_smoothing", GYRO_SMOOTHING,
+             "Steadies this device's smallest motions, your hand's tremor, but never a real turn. Higher steadies "
+             "faster motions, over a little longer. Off: every motion as it comes.", "touch"),
             ("CALIBRATE", None, None,
              "Put the controller down on something still, then select this: it measures the gyroscope at rest "
              "for a second and a half.|It also does so whenever it is held still.", None,
@@ -1640,6 +1687,12 @@ PAGES = {
              "Point the right stick and you turn at once to face that way: right, a quarter turn; down, about "
              "face. Turn it round its rim and you turn with it. Aim up and down with the gyro.|With the default "
              "stick layout.", None),
+            # (dimmed while the flick stick is off: SETTINGS_ROW_ENABLED)
+            ("FLICK TIME", "input.flick_stick_time",
+             [("INSTANT", "0"), ("0.05 S", "0.05"), ("0.1 S", "0.1"), ("0.15 S", "0.15"), ("0.2 S", "0.2"),
+              ("0.25 S", "0.25")],
+             "How long a flick takes to turn you: shorter is snappier, longer smoother. You turn as far either "
+             "way.", None),
         ],
     },
     DEAD_ZONES[0]: {
@@ -1652,7 +1705,7 @@ PAGES = {
             ("RIGHT STICK", "input.right_stick_dead_zone", STICK_DEAD_ZONES,
              "How far the right stick moves before the view turns. Raise it for a stick that drifts; lower it for "
              "finer aim. Default is the game's own, 27%.", None),
-            ("STICK TEST ›", None, _page_screen(*STICK_TEST),
+            ("STICK TEST ›", None, STICK_TEST,
              "See what each stick reads, and what the game takes from it with the dead zones and shape set here: "
              "find a stick's drift, then set its dead zone just past it.", None),
             (SECTION, "OUTER DEAD ZONES"),
@@ -1679,25 +1732,6 @@ PAGES = {
             ("ACCELERATION START", "input.modern_aim_acceleration_threshold", MODERN_AIM_THRESHOLDS,
              "Modern aim: how far you push the stick before the turn speeds up. Default is the game's own, as "
              "Classic's.", None),
-        ],
-    },
-    STICK_TEST[0]: {
-        "screen": STICK_TEST[1], "title": "STICK TEST",
-        "rows": [
-            # (menu_functions.c's stick_test_rows_show: the readings, live,
-            # by the dead zones and shape Advanced Stick Settings shows)
-            (SECTION, "READINGS"),
-            ("LEFT STICK", None, None,
-             "The left stick now: side to side, then up and down, in percent of its travel; after the bar, as "
-             "you move with the dead zones set. Below, the left circle: its dead zones, the stick white, what "
-             "the game takes blue.", None, "stick_test_left"),
-            ("RIGHT STICK", None, None,
-             "The right stick now: side to side, then up and down, in percent of its travel; after the bar, as "
-             "the view turns with the dead zones and shape set. Below, the right circle.", None,
-             "stick_test_right"),
-            ("DRIFT AT REST", None, None,
-             "The most each stick has read while let go of, since this page opened. Set its dead zone a little "
-             "past this, on Advanced Stick Settings.", None, "stick_drift"),
         ],
     },
     SCREEN_LAYOUT[0]: {
@@ -1927,7 +1961,7 @@ SETTINGS_SEARCH_WORDS = {
     "fov": ["video_settings:fov", "vehicle_fov", "scale_scoped_fov", "viewmodel_fov"],
     "sens": ["mouse_sensitivity", "mouse_vertical_sensitivity", "zoom_sensitivity", "look_sensitivity",
              "look_vertical_sensitivity", "stick_zoom_sensitivity", "gyro_sensitivity",
-             "gyro_vertical_sensitivity"],
+             "gyro_vertical_sensitivity", "touch_gyro_sensitivity", "touch_gyro_vertical_sensitivity"],
     "dpi": ["mouse_sensitivity"],
     "fps": ["max_fps", "perf_overlay", "frame_rate_sync"],
     "framerate": ["frame_rate_sync", "max_fps", "perf_overlay"],
@@ -2439,7 +2473,8 @@ def _settings_platform(rows: list, start: int):
 # the rows in the place of the row before them, each platform having one of
 # them at most, or the model's conditions showing one (SETTINGS_ROW_WHEN):
 # Window Size in Resolution's, Android's anti-aliasing in the desktop's
-SETTINGS_SAME_PLACE = {"window_size", "anti_aliasing_android"}
+SETTINGS_SAME_PLACE = {"window_size", "anti_aliasing_android", "touch_gyro_sensitivity",
+                       "touch_gyro_vertical_sensitivity", "touch_gyro_smoothing"}
 # the rows hidden while VR Setup's row is shown (the game in the headset),
 # which takes their room: Mouse's Menu Cursor; and Brightness's Gamma, which
 # the VR build hides always (their conditions: SETTINGS_ROW_WHEN)
@@ -2465,22 +2500,28 @@ SETTINGS_ROW_WHEN = {
     # (the headset's menus have no desktop pointer; the VR build never curves
     # its frames, nor draws through the Panini projection)
     "menu_cursor": "!vr", "gamma": "!vr_build", "panini": "!vr_build", "panini_vertical": "!vr_build",
+    # (the VR build draws its eyes in 8 bits)
+    "output_depth": "!vr_build",
     # (the Mac's display paces its frames already)
     "low_latency": "!vrr_system",
     # (in a game: not those that would drop it or are the main menu's, nor
     # those whose screens are ui.map's or make a profile)
     "online": "!in_game", "allow_upnp": "!in_game", "join_from_clipboard": "!in_game", "auto": "!in_game",
-    "mods": "!in_game",
+    "mods": "!in_game", "benchmark": "!in_game", "benchmark_pacing": "!in_game",
     "name": "profile+!in_game", "color": "profile+!in_game", "profiles": "profile+!in_game",
     "create_profile": "!profile+!in_game",
     **{key: "gyro" for key in ("gyro_aim", "gyro_sensitivity", "gyro_vertical_sensitivity", "gyro_space",
                                "gyro_smoothing", "gyro_calibrate")},
     "gyro_button": "gyro+gyro_aim=hold gyro+gyro_aim=pause",
+    # (the touch controls' gyroscope's, in the controller's rows' place)
+    **{key: "!gyro" for key in ("touch_gyro_sensitivity", "touch_gyro_vertical_sensitivity", "touch_gyro_smoothing")},
     **{f"viewmodel_weapon_{name}": "weapon_held" for name in ("x", "y", "z", "pitch", "yaw", "roll", "reset")},
     # (Discord's UNLINK an account linked, or waiting for its code)
     "link_unlink": "discord_linked",
 }
 SETTINGS_ROW_ENABLED = {
+    # (the flick's time while the flick stick is on)
+    "flick_stick_time": "flick_stick=true",
     # (macOS's Metal and ProMotion set it: SET BY MACOS; its frame cap only
     # while it is on)
     "vrr": "!vrr_system",
@@ -2489,6 +2530,10 @@ SETTINGS_ROW_ENABLED = {
     # Gyro & Flick Stick page: menu_functions.c's aim_modern)
     "modern_aim_acceleration_angle": "aim_modern",
     "modern_aim_acceleration_threshold": "aim_modern",
+    # (display.output_depth: the SDR frame's; dimmed while the frame is drawn
+    # in HDR, whose half floats are its own: settings_condition_term's
+    # hdr_drawn)
+    "output_depth": "!hdr_drawn",
 }
 
 

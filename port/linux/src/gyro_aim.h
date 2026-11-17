@@ -25,14 +25,21 @@ A turn is radians of the game's yaw (positive to the left) and pitch
 /* the settings (input.gyro_*): the game's degrees for each degree the
 controller turns, side to side, and up and down of that; the turn's axis
 from the gravity's direction (player space, held any way) or the
-controller's own (local space); the smoothing of the smallest motions */
+controller's own (local space); the smoothing of the smallest motions, its
+strength (0 none; 1 the soft tiered smoothing's own thresholds and time,
+which a strength scales: gyro_aim_smoothing) */
 struct gyro_aim_settings
 {
 	float sensitivity;
 	float vertical_sensitivity;
 	int player_space;
-	int smoothing;
+	float smoothing;
 };
+
+/* the smoothing's strength of a setting's word (input.gyro_smoothing,
+input.touch_gyro_smoothing): "off" none, "low" half, "medium" the
+thresholds and time as they are, "high" twice; `otherwise` for another */
+float gyro_aim_smoothing(const char *word, float otherwise);
 
 struct gyro_aim
 {
@@ -72,6 +79,21 @@ void gyro_aim_accelerometer(struct gyro_aim *aim, const float accelerometer[3]);
 for runs. The controller's state follows it (its up, its bias) even when the
 turn is not wanted (the gyroscope paused: the caller drops it) */
 void gyro_aim_sample(struct gyro_aim *aim, const float gyro[3], float seconds,
+	const struct gyro_aim_settings *settings, float turn[2]);
+
+/* a turn rate (yaw and pitch, radians a second, positive to the left and up)
+over seconds: the turn it makes for the settings (their smoothing, its state
+in smoothed, and the sensitivities). Every gyroscope's turn comes through
+it: a controller's samples (gyro_aim_sample) and the touch controls' phone
+or tablet (gyro_aim_turned) */
+void gyro_aim_rate(const float rate[2], float smoothed[2], float seconds, const struct gyro_aim_settings *settings,
+	float turn[2]);
+
+/* a device's turn already made over seconds (yaw and pitch, radians), as the
+touch controls hand the phone's or the tablet's over (touch_input.c): the turn
+it makes for the settings, by gyro_aim_rate at its mean rate. None of it is
+lost, whatever the time (none, or a gap) */
+void gyro_aim_turned(const float turned[2], float smoothed[2], float seconds,
 	const struct gyro_aim_settings *settings, float turn[2]);
 
 /* measures the gyroscope at rest over the next GYRO_AIM_CALIBRATION_SECONDS
@@ -121,10 +143,10 @@ struct flick_stick
 	0 up, clockwise) */
 	int on_rim;
 	float angle;
-	/* the flick under way: its size (radians of yaw) and how far into its
-	time it is (seconds) */
+	/* the flick under way: its size (radians of yaw) and how much of it is
+	done (0 to 1, 1 done) */
 	float flick_size;
-	float flick_seconds;
+	float flick_done;
 	/* the smoothing's share of the rim's turn rate */
 	float smoothed;
 };
@@ -133,9 +155,12 @@ void flick_stick_reset(struct flick_stick *flick);
 
 /* the stick (x right, y up, -1 to 1) over seconds since the last: the yaw it
 turns the player (radians). Pushed to the rim, the player turns to face
-where it points, relative to the view, over FLICK_STICK_SECONDS; turned
-around the rim, the player turns as it does */
+where it points, relative to the view, over flick_seconds (0: at once;
+input.flick_stick_time, FLICK_STICK_SECONDS by default, at most
+FLICK_STICK_SECONDS_MOST), always as far; turned around the rim, the player
+turns as it does */
 #define FLICK_STICK_SECONDS 0.1f
-float flick_stick_update(struct flick_stick *flick, float x, float y, float seconds);
+#define FLICK_STICK_SECONDS_MOST 0.25f
+float flick_stick_update(struct flick_stick *flick, float x, float y, float seconds, float flick_seconds);
 
 #endif

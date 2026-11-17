@@ -52,7 +52,8 @@ static int32_t touch_state[7];
 static int64_t touch_pressed_ns[TOUCH_INPUTS];
 static float look_delta[2];
 static int64_t look_ns;
-/* the gyroscope's turn, apart: the profile's invert is the swipe's only */
+/* the gyroscope's turn, apart, in radians (the game's settings turn it:
+touch_input.c): the profile's invert is the swipe's only */
 static float gyro_delta[2];
 static int64_t gyro_ns;
 static int rumble_amplitude;
@@ -154,8 +155,9 @@ void host_touch_look_reset(void)
 }
 
 /* the guest's: the view swipe, then the gyroscope's turn, since the last
-read, into delta[4], in the overlay's logical pixels with its sensitivity
-applied */
+read, into delta[4]: the swipe in the overlay's logical pixels with its
+sensitivity applied, the gyroscope's in radians of yaw (to the left) and
+pitch (up) */
 void host_touch_look_read(float *delta)
 {
 	int64_t now = now_ns();

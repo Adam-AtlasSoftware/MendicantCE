@@ -18,8 +18,9 @@ host_touch_scene, host_touch_bindings and host_touch_picture_top
 left trigger, right trigger: -32768..32767, 0..32767), then the SDL button
 bits; a press is held for the game at least a tap's time */
 void host_touch_set_state(const int32_t *state);
-/* the view swipe and the gyroscope's turn, in the overlay's logical units
-with its sensitivity applied, added to what the game reads next */
+/* the view swipe, in the overlay's logical units with its sensitivity
+applied, and the gyroscope's turn, radians of yaw (to the left) and pitch
+(up), added to what the game reads next */
 void host_touch_add_look(float dx, float dy);
 void host_touch_add_gyro(float dx, float dy);
 void host_touch_look_reset(void);

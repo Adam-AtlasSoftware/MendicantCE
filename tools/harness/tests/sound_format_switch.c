@@ -61,7 +61,7 @@ struct fake_stream
 	long volume, mix_bin_volume, cone_outside_volume;
 	float position[3], velocity[3], minimum_distance, maximum_distance;
 	int i3dl2_given, stereo_positioned;
-	float stereo_pan;
+	float stereo_position[3];
 	int packets;
 	unsigned long packet_bytes[64];
 	void *packet_contexts[64];
@@ -134,12 +134,12 @@ static HRESULT IDirectSoundStream_Process(IDirectSoundStream *s, XMEDIAPACKET co
 	return 0;
 }
 static void dsound_channel_set_I3DL2_properties(short index) { fake(channel_get(index)->stream)->i3dl2_given++; }
-void dsound_sdl_stream_set_stereo_position(IDirectSoundStream *stream, BOOL positioned, float pan, float distance,
-	float minimum_distance, float distance_fade)
+void dsound_sdl_stream_set_stereo_position(IDirectSoundStream *stream, BOOL positioned, const float *position,
+	const float *velocity, float minimum_distance)
 {
-	(void)distance; (void)minimum_distance; (void)distance_fade;
+	(void)velocity; (void)minimum_distance;
 	fake(stream)->stereo_positioned = positioned;
-	fake(stream)->stereo_pan = pan;
+	memcpy(fake(stream)->stereo_position, position, sizeof(fake(stream)->stereo_position));
 }
 
 #include "under_test.inc"
@@ -255,11 +255,11 @@ int main(int argc, char **argv)
 		record->pitch = 1.f;
 		dsound_port_formats.stereo_positions[channel_stereo].given = TRUE;
 		dsound_port_formats.stereo_positions[channel_stereo].positioned = TRUE;
-		dsound_port_formats.stereo_positions[channel_stereo].pan = -0.5f;
+		dsound_port_formats.stereo_positions[channel_stereo].position[0] = -0.5f;
 		CHECK(dsound_channel_use_format(channel_stereo, 48000), "no switch");
 		stream = fake(record->stream);
 		CHECK(stream->pcm && stream->channels == 2 && stream->frequency == 48000, "the stereo channel's stream");
-		CHECK(stream->stereo_positioned && stream->stereo_pan == -0.5f, "its stereo position was not given");
+		CHECK(stream->stereo_positioned && stream->stereo_position[0] == -0.5f, "its stereo position was not given");
 
 		/* back to Xbox ADPCM: the stream kept, given the frequency of the channel's type again */
 		CHECK(dsound_channel_use_format(channel_stereo, 0), "no switch back");

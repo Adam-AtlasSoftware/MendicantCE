@@ -38,6 +38,7 @@ kept on the item of the same id.
 #include "menu_widget.h"
 #include "menu_spartan.h"
 #include "network_host_controls.h"
+#include "benchmark.h" /* port: port/linux/game/benchmark.c */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -93,6 +94,11 @@ int pc_menu_coop_action(struct widget_instance *widget, struct event_record *eve
 char const *pc_menu_coop_who_word(void);
 int pc_menu_coop_fix_hosts(void);
 void pc_menu_coop_opened(void);
+/* (menu_functions.c's stick_test_menu.inc: Stick Test's sticks read each
+frame, their words, and a stick's circle drawn) */
+void pc_menu_stick_test_frame(struct widget_instance *screen);
+int pc_menu_stick_value(char const *name, char *value, unsigned long size);
+boolean pc_menu_stick_test_draw(short stick, real x, real y, real radius);
 
 /* ---------- constants */
 
@@ -232,6 +238,18 @@ this far above the box's foot */
 #define DIALOG_CHOICE_WIDTH 128
 #define DIALOG_CHOICES_UP 27
 #define DIALOG_CHOICES_ROOM 5
+
+/* a <stick>'s layout (Stick Test's), from its top, about its middle: its
+label (blocks.xml's screens/stick_label, this tall), its circle this far
+below its top, its reading this far below the circle, its detail this far
+below the reading and its hint this far below the detail; its column this
+wide (the blocks' width) */
+#define STICK_COLUMN_WIDTH 240
+#define STICK_CIRCLE_TOP 32
+#define STICK_VALUE_GAP 10
+#define STICK_DETAIL_STEP 18
+#define STICK_HINT_STEP 22
+#define SCREEN_MAXIMUM_STICKS 2
 
 #define SCREEN_BUTTON_B 1
 #define SCREEN_BUTTON_X 2
@@ -501,7 +519,9 @@ static char const *const screen_binding_names[] =
 	"lobby.friend", "lobby.friend.where", "lobby.friends.said", "lobby.map.picture", "lobby.description",
 	"lobby.where", "lobby.lineup", "lobby.lineup.names", "add.count", "add.title", "add.profile", "add.color", "add.help",
 	"add.done", "pause.friendly_fire", "pause.host_controls", "pause.end_game",
-	"pause.chapters",
+	"pause.chapters", "stick.left", "stick.right", "stick.left.drift", "stick.right.drift",
+	"benchmark.failure", "benchmark.verdict", "benchmark.held", "benchmark.pacing",
+	"benchmark.settings", "benchmark.gpu", "benchmark.cpu", "benchmark.file", "benchmark.scenario",
 };
 
 /* the row sources a table may name (menu_table.h), and their names */
@@ -512,6 +532,7 @@ static struct menu_table_source const *const screen_sources[] =
 	&pc_menu_lobby_source,
 	&pc_menu_color_source,
 	&pc_menu_add_player_source,
+	&benchmark_results_source,
 };
 
 static char const *const screen_source_names[] =
@@ -521,6 +542,7 @@ static char const *const screen_source_names[] =
 	"lobby.players",
 	"profile.colors",
 	"add.players",
+	"benchmark.results",
 };
 
 /* the chats a <chat> may name (menu_table.h), and their names */
@@ -558,10 +580,16 @@ static int screen_value(void *context, char const *name, char *value, unsigned l
 	/* (Add Player's: menu_functions.c's) */
 	if (!strncmp(name, "add.", 4))
 		return pc_menu_add_player_value(name, value, size);
+	/* (the built-in benchmark's results: benchmark.c's) */
+	if (!strncmp(name, "benchmark.", 10))
+		return benchmark_value(name, value, size);
 	/* (co-op's, the lobby's WHO CAN JOIN and what keeps people from the
 	game: coop_menu.inc) */
 	if (!strncmp(name, "coop.", 5))
 		return pc_menu_coop_value(name, value, size);
+	/* (Stick Test's: the sticks' readings and drift, stick_test_menu.inc) */
+	if (!strncmp(name, "stick.", 6))
+		return pc_menu_stick_value(name, value, size);
 	/* (the pause menu's: the rows this machine's has for the screen's local
 	player, as menu_tags.c adds them to the map's, the host's for its first
 	local player alone; FRIENDLY FIRE's words, this machine's choice) */
@@ -661,6 +689,12 @@ static struct screen_place const screen_places[] =
 	question as an editor is left with changes, a screen of its own) */
 	{ "quit", "main_menu\\quit_select\\quit_screen", NULL, NULL },
 	{ "save_changes", "screens\\save_changes", NULL, NULL },
+	/* (the built-in benchmark's results, over the main menu as its match
+	ends: benchmark.c, menu_functions.c's pc_menu_benchmark_results_open) */
+	{ "benchmark", "screens\\benchmark", NULL, NULL },
+	/* (Stick Test, as Advanced Stick Settings' STICK TEST › opens it: its
+	sticks read each frame it is drawn, stick_test_menu.inc) */
+	{ "stick_test", "screens\\stick_test", pc_menu_stick_test_frame, NULL },
 };
 
 /* ---------- the screens open */
@@ -676,6 +710,18 @@ struct screen_spartan
 	short first;
 	short places;
 	boolean shown;
+};
+
+/* a <stick> of an open screen: its block, its circle's anchor (the circle
+drawn where it is in the widgets' order: menu_screen_widget_drawing), and
+its reading's and detail's words, filled each frame */
+struct screen_stick
+{
+	struct menu_screen_block block;
+	short stick;
+	struct widget_instance *circle;
+	struct widget_instance *value;
+	struct widget_instance *detail;
 };
 
 struct screen_open
@@ -742,6 +788,9 @@ struct screen_open
 	the screen behind) */
 	struct widget_instance *dialog_under[4];
 	short dialog_width, dialog_height;
+	/* (its <stick>s) */
+	struct screen_stick sticks[SCREEN_MAXIMUM_STICKS];
+	long stick_count;
 };
 
 static struct
@@ -762,6 +811,8 @@ static struct
 	/* (a <dialog>'s) */
 	long dialog_tag, dialog_title_tag, dialog_text_tag, dialog_list_tag, dialog_choice_tag, dialog_foot_tag,
 		dialog_dim_tag;
+	/* (a <stick>'s) */
+	long stick_tag, stick_label_tag, stick_value_tag, stick_note_tag, stick_hint_tag;
 } screens = { FALSE };
 
 static void screens_names_give(void)
@@ -846,6 +897,11 @@ static boolean screen_blocks_found(void)
 	screens.dialog_choice_tag = screen_block_tag("pc\\screens\\dialog_choice");
 	screens.dialog_foot_tag = screen_block_tag("pc\\screens\\dialog_foot");
 	screens.dialog_dim_tag = screen_block_tag("pc\\screens\\dialog_dim");
+	screens.stick_tag = screen_block_tag("pc\\screens\\stick");
+	screens.stick_label_tag = screen_block_tag("pc\\screens\\stick_label");
+	screens.stick_value_tag = screen_block_tag("pc\\screens\\stick_value");
+	screens.stick_note_tag = screen_block_tag("pc\\screens\\stick_note");
+	screens.stick_hint_tag = screen_block_tag("pc\\screens\\stick_hint");
 	if (screens.title_art_tag == NONE || screens.list_tag == NONE || screens.item_tag == NONE ||
 		screens.hint_tag == NONE || screens.prompt_left_tag == NONE || screens.button_tag == NONE ||
 		screens.cards_tag == NONE || screens.card_tag == NONE || screens.card_title_tag == NONE ||
@@ -858,7 +914,9 @@ static boolean screen_blocks_found(void)
 		screens.objectives_right_tag == NONE || screens.objectives_title_tag == NONE ||
 		screens.objectives_text_tag == NONE || screens.dialog_tag == NONE || screens.dialog_title_tag == NONE ||
 		screens.dialog_text_tag == NONE || screens.dialog_list_tag == NONE || screens.dialog_choice_tag == NONE ||
-		screens.dialog_foot_tag == NONE || screens.dialog_dim_tag == NONE)
+		screens.dialog_foot_tag == NONE || screens.dialog_dim_tag == NONE || screens.stick_tag == NONE ||
+		screens.stick_label_tag == NONE || screens.stick_value_tag == NONE || screens.stick_note_tag == NONE ||
+		screens.stick_hint_tag == NONE)
 	{
 		platform_log("menus: the screens' blocks (screens/blocks.xml) are not all there");
 		screens.blocks_found = FALSE;
@@ -1106,6 +1164,7 @@ static boolean screen_build(struct screen_open *open, struct menu_screen const *
 	open->item_count = 0;
 	open->colors = FALSE;
 	open->spartan_count = 0;
+	open->stick_count = 0;
 	focus_id = screens.focused[place_index][0] ? screens.focused[place_index] : NULL;
 	top = 0;
 	spaces_left = spaces;
@@ -1323,6 +1382,39 @@ static boolean screen_build(struct screen_open *open, struct menu_screen const *
 			screen_spartan_add(open, block, screen_widget_add(widget, screens.spartan_tag,
 				(short)(block->box_x + (block->box_width - SCREEN_SPARTAN_PICTURE_WIDTH) / 2),
 				(short)(block->box_y + block->box_height - SCREEN_SPARTAN_PICTURE_HEIGHT)));
+			break;
+		case MENU_SCREEN_STICK:
+			/* (where its box is, over the screen's other blocks: its label,
+			its circle's anchor, its reading, detail and hint under it) */
+			if (menu_screen_when(block->when) && open->stick_count < SCREEN_MAXIMUM_STICKS)
+			{
+				struct screen_stick *stick = &open->sticks[open->stick_count++];
+				short left = (short)(block->box_x - STICK_COLUMN_WIDTH / 2);
+				short radius = (short)block->box_width;
+				short y = (short)(block->box_y + STICK_CIRCLE_TOP + 2 * radius + STICK_VALUE_GAP);
+				struct widget_instance *made;
+
+				memset(stick, 0, sizeof(*stick));
+				stick->block = *block;
+				stick->stick = (short)(strcmp(block->id, "left") != 0);
+				made = screen_widget_add(widget, screens.stick_label_tag, left, (short)block->box_y);
+				if (made)
+				{
+					menu_screen_text(block->label, screen_value, &values, label, sizeof(label));
+					screen_text_set(made, label);
+				}
+				stick->circle = screen_widget_add(widget, screens.stick_tag, (short)(block->box_x - radius),
+					(short)(block->box_y + STICK_CIRCLE_TOP));
+				stick->value = screen_widget_add(widget, screens.stick_value_tag, left, y);
+				stick->detail = screen_widget_add(widget, screens.stick_note_tag, left, (short)(y + STICK_DETAIL_STEP));
+				made = block->hint_count ? screen_widget_add(widget, screens.stick_hint_tag, left,
+					(short)(y + STICK_DETAIL_STEP + STICK_HINT_STEP)) : NULL;
+				if (made)
+				{
+					menu_screen_text(block->hints[0], screen_value, &values, text, sizeof(text));
+					screen_text_set(made, text);
+				}
+			}
 			break;
 		case MENU_SCREEN_BUTTONS:
 		{
@@ -2152,6 +2244,28 @@ static void screen_spartan_frame(struct screen_open *open, long focused)
 	}
 }
 
+/* a screen's <stick>s' words, filled again each frame (after its place's
+frame has read the sticks): a line whose binding has no value empty */
+static void screen_sticks_frame(struct screen_open *open)
+{
+	struct screen_values values;
+	char text[MENU_SCREEN_MAXIMUM_TEXT];
+	long index;
+
+	screen_values_clear(&values, open);
+	for (index = 0; index < open->stick_count; index++)
+	{
+		struct screen_stick const *stick = &open->sticks[index];
+
+		if (stick->value)
+			screen_text_set(stick->value, stick->block.text &&
+				menu_screen_text(stick->block.text, screen_value, &values, text, sizeof(text)) ? text : "");
+		if (stick->detail)
+			screen_text_set(stick->detail, stick->block.detail &&
+				menu_screen_text(stick->block.detail, screen_value, &values, text, sizeof(text)) ? text : "");
+	}
+}
+
 void menu_screen_widget_drawing(struct widget_instance const *widget, point2d offset)
 {
 	long index;
@@ -2169,6 +2283,16 @@ void menu_screen_widget_drawing(struct widget_instance const *widget, point2d of
 
 			if (each->picture == widget && each->shown)
 				menu_spartan_draw(offset.x, offset.y, each->first, each->places);
+		}
+		/* (its <stick>s' circles, each where its anchor is: Stick Test's) */
+		for (spartan = 0; open->widget && spartan < open->stick_count; spartan++)
+		{
+			struct screen_stick const *stick = &open->sticks[spartan];
+			real radius = (real)stick->block.box_width;
+
+			if (stick->circle == widget)
+				pc_menu_stick_test_draw(stick->stick, (real)(offset.x + widget->horizontal_offset) + radius,
+					(real)(offset.y + widget->vertical_offset) + radius, radius);
 		}
 		/* (its chat's on-screen keyboard, over everything) */
 		if (open->widget && tall_screens[index] && tall_screens[index]->chat_keyboard == widget)
@@ -2253,6 +2377,8 @@ void menu_screen_frame(struct widget_instance *widget)
 		screen_spartan_frame(open, focused);
 	if (open->place->shown)
 		open->place->shown(widget);
+	if (open->stick_count)
+		screen_sticks_frame(open);
 }
 
 /* an action run from the widget (an item, or the screen) */

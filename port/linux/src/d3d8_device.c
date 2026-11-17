@@ -306,6 +306,9 @@ static struct
 	/* the game's renderer's category, and what its code says of the draws
 	(halo_hdr_category, halo_hdr_draw_kind) */
 	int category, kind;
+	/* display.hdr_highlight_boost's level (0 none: XGPU_HDR_BOOST_MOST at
+	most; #1123) */
+	int boost;
 	/* a window's 3D view is drawn (its categories), until it is tone
 	mapped: the draws after are the HUD's and the menus' */
 	BOOL view;
@@ -317,11 +320,29 @@ static struct
 	int display_logged;
 	char display_text[160];
 	int display_text_frames;
-} hdr = { FALSE, FALSE, 0, 0, -1, 0, 0, FALSE, FALSE, -1 };
+} hdr = { FALSE, FALSE, 0, 0, -1, 0, 0, 0, FALSE, FALSE, -1 };
+
+/* ---------- display.output_depth (#1152)
+
+The SDR frame's depth: "8" draws the back buffer in BGRA8, every blend
+rounded to 1/255, which the last pass can only copy (the fog's and the
+dusk's steps stay); "10" draws it in RGBA16, 16-bit unsigned normalized,
+which clamps and blends as BGRA8 does (each value in [0, 1], the same
+pixels) at 65535 levels, then the last pass dithers it to the swapchain's:
+10 bits where the display lists a 10-bit SDR format, else 8. Not half
+floats: those keep what a blend takes past 1 or below 0, and the game reads
+destination alpha back as a blend factor, which only HDR's tags (xgpu_hdr.h)
+keep in range. "auto" is "10" on a computer and "8" on a phone or tablet
+(Android, iOS) or with display.battery_saver on: the frame then costs twice
+the memory and bandwidth (3840x2160: 66 MB a buffer, against 33). Where the
+backend has no RGBA16 target, or in HDR or VR, it is 8. Read between
+frames (halo_screen_commit): the back buffer is made again as it changes. */
+
+static BOOL frame_deep;
 
 static int hdr_back_buffer_format(void)
 {
-	return hdr.active ? XGPU_FORMAT_RGBA16F : XGPU_FORMAT_BGRA8;
+	return hdr.active ? XGPU_FORMAT_RGBA16F : frame_deep ? XGPU_FORMAT_RGBA16 : XGPU_FORMAT_BGRA8;
 }
 
 /* display.hdr's value (XGPU_HDR_*): "auto", "on" ("true"), "off" ("false") */
@@ -669,6 +690,7 @@ static unsigned short hdr_tag(const struct xgpu_pipeline_key *key)
 	draw.interface = !hdr.view;
 	draw.kind = hdr.kind;
 	draw.mode = hdr.mode;
+	draw.boost = hdr.boost;
 	return xgpu_hdr_classify(&draw);
 }
 
@@ -1114,8 +1136,9 @@ struct xgpu_render_target
 	in pixels */
 	float scale[2];
 	unsigned long pixel_width, pixel_height;
-	/* a colour target's format: XGPU_FORMAT_BGRA8, or XGPU_FORMAT_RGBA16F
-	the back buffer drawn in HDR (display.hdr) */
+	/* a colour target's format: XGPU_FORMAT_BGRA8, XGPU_FORMAT_RGBA16F
+	the back buffer drawn in HDR (display.hdr), or XGPU_FORMAT_RGBA16 the
+	SDR one with display.output_depth */
 	int format;
 	/* 2: a texture array, a layer for each eye, drawn into with multiview
 	(the VR mode's eye pass); 4 foveated (xgpu_foveated); else 1 */
@@ -1937,6 +1960,8 @@ static BOOL target_has_color;
 multisampling, and the colour target is a screen buffer's (in half floats
 with display.hdr): a draw's context (xgpu_manifest_context) */
 static BOOL target_multisampled, target_screen_colour;
+/* ...and the colour target is display.output_depth's RGBA16 */
+static BOOL target_deep;
 
 /* the multisampled pixels of a target drawn into since into its texture */
 static void render_target_resolve(struct xgpu_render_target *target)
@@ -2071,6 +2096,7 @@ static BOOL bind_targets(BOOL *has_depth)
 	*has_depth = depth != NULL;
 	target_has_color = color != NULL;
 	hdr.target = color && color->target.format == XGPU_FORMAT_RGBA16F;
+	target_deep = color && color->target.format == XGPU_FORMAT_RGBA16;
 	target_screen_colour = color && render_target_screen_colour(color);
 	return TRUE;
 }
@@ -2431,6 +2457,53 @@ static void hdr_sdr_curve_send(void)
 	sent = curve;
 }
 
+/* display.hdr_peak_nits (#1122): the display's peak the backend's HDR
+encoding takes (0 the system's; else at least
+XGPU_HDR_PEAK_NITS_LEAST, at most _MOST), as it changes */
+static void hdr_peak_nits_send(void)
+{
+	static int sent = -1;
+	/* (read again as the settings change: config_changes) */
+	static unsigned long read_at = (unsigned long)-1;
+	int nits;
+
+	if (!device.gl_ready || read_at == config_changes())
+		return;
+	read_at = config_changes();
+	nits = (int)config_integer("display.hdr_peak_nits");
+	nits = nits <= 0 ? 0 : nits < XGPU_HDR_PEAK_NITS_LEAST ? XGPU_HDR_PEAK_NITS_LEAST :
+		nits > XGPU_HDR_PEAK_NITS_MOST ? XGPU_HDR_PEAK_NITS_MOST : nits;
+	if (nits == sent)
+		return;
+	if (sent >= 0 || nits)
+		platform_log(nits ? "hdr: display peak set to %d nits" : "hdr: display peak the system's", nits);
+	xgpu_backend_hdr_peak_nits(nits);
+	sent = nits;
+}
+
+/* display.hdr_gamut (#1124): the backend's HDR encoding expands the
+highlights' colours ("expanded") or not ("srgb"), as it changes */
+static void hdr_gamut_send(void)
+{
+	static int sent = -1;
+	/* (read again as the settings change: config_changes) */
+	static unsigned long read_at = (unsigned long)-1;
+	const char *setting;
+	int expanded;
+
+	if (!device.gl_ready || read_at == config_changes())
+		return;
+	read_at = config_changes();
+	setting = config_string("display.hdr_gamut");
+	expanded = setting && !strcmp(setting, "expanded");
+	if (expanded == sent)
+		return;
+	if (sent >= 0 || expanded)
+		platform_log("hdr: gamut %s", expanded ? "expanded" : "srgb");
+	xgpu_backend_hdr_gamut(expanded);
+	sent = expanded;
+}
+
 /* a point in the window, as SDL reports it, in the menus' coordinates: the
 inverse of the letterboxed display blit at presentation, the screen's
 width and the menus' centering (halo_screen_ui_offset); or, not centered,
@@ -2566,6 +2639,10 @@ static void hdr_read(void)
 		ui_nits_read = (int)config_integer("display.hdr_ui_nits");
 		mode_read = config_string("display.hdr_mode") && !strcmp(config_string("display.hdr_mode"), "punchy") ?
 			XGPU_HDR_MODE_PUNCHY : XGPU_HDR_MODE_FAITHFUL;
+		/* (display.hdr_highlight_boost: the draws' tags take it as they are
+		made, #1123) */
+		hdr.boost = (int)config_integer("display.hdr_highlight_boost");
+		hdr.boost = hdr.boost < 0 ? 0 : hdr.boost > XGPU_HDR_BOOST_MOST ? XGPU_HDR_BOOST_MOST : hdr.boost;
 	}
 	setting = setting_read;
 	paper_white = paper_white_read;
@@ -2640,9 +2717,48 @@ static void hdr_read(void)
 	}
 }
 
+int halo_hdr_drawn(void)
+{
+	return hdr.active;
+}
+
 int halo_hdr_display_text(int words, char *text, unsigned int size)
 {
 	return hdr_display_text(words ? XGPU_HDR_DISPLAY_WORDS : XGPU_HDR_DISPLAY_VALUE, text, size);
+}
+
+/* display.output_depth (above, "display.output_depth") */
+static BOOL output_depth_wanted(void)
+{
+	const char *setting = config_string("display.output_depth");
+
+	if (!device.gl_ready || !xgpu_backend_capabilities.deep_sdr || hdr.active)
+		return FALSE;
+#ifdef HALO_VR
+	if (halo_vr_running())
+		return FALSE;
+#endif
+	if (setting && !strcmp(setting, "8"))
+		return FALSE;
+	if (setting && !strcmp(setting, "10"))
+		return TRUE;
+#if defined(HALO_ANDROID) || defined(HALO_IOS)
+	return FALSE;
+#else
+	return !battery_saver_active();
+#endif
+}
+
+static void output_depth_read(void)
+{
+	BOOL deep = output_depth_wanted();
+
+	if (deep == frame_deep)
+		return;
+	platform_log("output depth: %s (display.output_depth \"%s\")", deep ? "16-bit frame, dithered" : "8-bit frame",
+		config_string("display.output_depth") ? config_string("display.output_depth") : "auto");
+	frame_deep = deep;
+	render_targets_evict();
 }
 
 /* config_changes() as halo_screen_commit last took the settings up */
@@ -2672,6 +2788,8 @@ long halo_screen_commit(void)
 	anti_aliasing_read();
 	/* (display.hdr, and the display: the back buffer's format) */
 	hdr_read();
+	/* (display.output_depth: the SDR back buffer's format) */
+	output_depth_read();
 	/* (the settings taken up: a map's preparation made again under them,
 	render_enumerate.c) */
 	screen_settings_taken = config_changes();
@@ -2681,6 +2799,10 @@ long halo_screen_commit(void)
 	gamma_send();
 	/* (display.hdr_sdr_curve) */
 	hdr_sdr_curve_send();
+	/* (display.hdr_peak_nits) */
+	hdr_peak_nits_send();
+	/* (display.hdr_gamut) */
+	hdr_gamut_send();
 	/* display.shadow_resolution, if it has changed: the maps' entries at
 	the old scale are freed (render_targets_evict), new ones made at the new */
 	if (shadow_scale && shadow_scale_read_at != config_changes())
@@ -4727,6 +4849,7 @@ static BOOL prepare_draw(BOOL immediate, unsigned long primitive)
 	facts.split_failed = program->split_failed;
 	facts.samples = target_samples;
 	facts.hdr_target = hdr.target;
+	facts.deep_target = target_deep;
 	facts.hdr = hdr_tag(&pipeline_key);
 	facts.per_pixel = per_pixel_lighting();
 	facts.lights_active = dynamic_lights_active();

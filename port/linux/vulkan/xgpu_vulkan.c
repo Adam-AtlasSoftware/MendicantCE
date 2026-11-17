@@ -875,6 +875,20 @@ static struct
 	int sharp_upscale, sharp_wanted;
 	/* display.hdr_sdr_curve's setting (XGPU_HDR_SDR_CURVE_*; any thread) */
 	int hdr_sdr_curve;
+	/* display.output_depth (#1152): the last frame presented was RGBA16,
+	so an SDR swapchain is 10-bit where the surface lists one (render
+	thread: present) */
+	int deep_wanted;
+	/* display.hdr_peak_nits (#1122; 0 the system's; any thread), and the
+	display's black and full-frame peak in nits where the system reports
+	them (Windows' DXGI: xgpu_vulkan_window_luminance; float bits, 0 none) */
+	int hdr_peak_nits;
+	uint32_t window_black, window_full_frame;
+	/* display.hdr_gamut (#1124; any thread), and the gamut the display's
+	primaries make (xgpu_hdr_gamut_target's, float bits; 0, P3's, where
+	the system says none) */
+	int hdr_gamut;
+	uint32_t window_gamut;
 	struct xgpu_vulkan_image *sharp_image;
 	void (*display_hdr)(int hdr, float headroom, float white_nits, int white_reported);
 	/* the frame's last pass (the options' encode: HDR's encoding,
@@ -3017,6 +3031,7 @@ static VkFormat vulkan_format(uint8_t format)
 	case XGPU_VULKAN_FORMAT_RG32_UINT: return VK_FORMAT_R32G32_UINT;
 	case XGPU_VULKAN_FORMAT_RGBA32F: return VK_FORMAT_R32G32B32A32_SFLOAT;
 	case XGPU_VULKAN_FORMAT_RG8_SNORM: return VK_FORMAT_R8G8_SNORM;
+	case XGPU_VULKAN_FORMAT_RGBA16: return VK_FORMAT_R16G16B16A16_UNORM;
 	default: return VK_FORMAT_UNDEFINED;
 	}
 }
@@ -3394,7 +3409,8 @@ void xgpu_vulkan_image_upload(struct xgpu_vulkan_image *image, uint32_t level, u
 		description->format == XGPU_VULKAN_FORMAT_R8_SNORM ? 1 :
 		description->format == XGPU_VULKAN_FORMAT_RG8_SNORM ? 2 :
 		description->format == XGPU_VULKAN_FORMAT_RGBA32_UINT || description->format == XGPU_VULKAN_FORMAT_RGBA32F ? 16 :
-		description->format == XGPU_VULKAN_FORMAT_RGBA16F || description->format == XGPU_VULKAN_FORMAT_RG32_UINT ? 8 : 4;
+		description->format == XGPU_VULKAN_FORMAT_RGBA16F || description->format == XGPU_VULKAN_FORMAT_RG32_UINT ||
+		description->format == XGPU_VULKAN_FORMAT_RGBA16 ? 8 : 4;
 	uint32_t rows = blocks ? (height + 3) / 4 : height;
 	uint32_t row_bytes = blocks ? (description->format == XGPU_VULKAN_FORMAT_DXT1 ? 8 : 16) * ((width + 3) / 4) :
 		width * texel;
@@ -3827,9 +3843,11 @@ int xgpu_vulkan_read_pixels(struct xgpu_vulkan_image *image, uint32_t layer, voi
 	int tone_map)
 {
 	uint32_t width = image->description.width, height = image->description.height, row;
-	/* (display.hdr's half floats: 8 bytes a pixel, made BGRA8's) */
+	/* (display.hdr's half floats, and display.output_depth's 16-bit
+	channels: 8 bytes a pixel, made BGRA8's) */
 	int halves = image->description.format == XGPU_VULKAN_FORMAT_RGBA16F;
-	VkDeviceSize size = (VkDeviceSize)width * height * (halves ? 8 : 4);
+	int deep = image->description.format == XGPU_VULKAN_FORMAT_RGBA16;
+	VkDeviceSize size = (VkDeviceSize)width * height * (halves || deep ? 8 : 4);
 	VkCommandBuffer commands;
 	VkBufferImageCopy copy;
 
@@ -3888,6 +3906,20 @@ int xgpu_vulkan_read_pixels(struct xgpu_vulkan_image *image, uint32_t layer, voi
 				to[pixel * 4 + 1] = half_byte(from[pixel * 4 + 1]);
 				to[pixel * 4 + 2] = half_byte(from[pixel * 4]);
 				to[pixel * 4 + 3] = half_byte(from[pixel * 4 + 3]);
+			}
+		}
+		else if (deep)
+		{
+			const uint16_t *from = (const uint16_t *)(vk.readback_mapped + (size_t)row * width * 8);
+			uint32_t pixel;
+
+			/* (RGBA as BGRA, each 16 bits rounded to 8) */
+			for (pixel = 0; pixel < width; pixel++)
+			{
+				to[pixel * 4] = (unsigned char)((from[pixel * 4 + 2] * 255u + 32767u) / 65535u);
+				to[pixel * 4 + 1] = (unsigned char)((from[pixel * 4 + 1] * 255u + 32767u) / 65535u);
+				to[pixel * 4 + 2] = (unsigned char)((from[pixel * 4] * 255u + 32767u) / 65535u);
+				to[pixel * 4 + 3] = (unsigned char)((from[pixel * 4 + 3] * 255u + 32767u) / 65535u);
 			}
 		}
 		else
@@ -6828,6 +6860,59 @@ void xgpu_vulkan_hdr_sdr_curve(int curve)
 	__atomic_store_n(&vk.hdr_sdr_curve, curve, __ATOMIC_RELEASE);
 }
 
+void xgpu_vulkan_hdr_peak_nits(int nits)
+{
+	__atomic_store_n(&vk.hdr_peak_nits, nits > 0 ? nits : 0, __ATOMIC_RELEASE);
+	/* (the swapchain's metadata again: its peak moved) */
+	__atomic_store_n(&vk.window_hdr_changed, 1u, __ATOMIC_RELEASE);
+}
+
+void xgpu_vulkan_window_luminance(float black_nits, float full_frame_nits)
+{
+	uint32_t black_bits, full_bits;
+
+	if (!(black_nits > 0.0f))
+		black_nits = 0.0f;
+	if (!(full_frame_nits > 0.0f))
+		full_frame_nits = 0.0f;
+	memcpy(&black_bits, &black_nits, sizeof(black_bits));
+	memcpy(&full_bits, &full_frame_nits, sizeof(full_bits));
+	__atomic_store_n(&vk.window_black, black_bits, __ATOMIC_RELEASE);
+	__atomic_store_n(&vk.window_full_frame, full_bits, __ATOMIC_RELEASE);
+}
+
+void xgpu_vulkan_hdr_gamut(int expanded)
+{
+	__atomic_store_n(&vk.hdr_gamut, expanded != 0, __ATOMIC_RELEASE);
+}
+
+void xgpu_vulkan_window_gamut(float target)
+{
+	uint32_t bits;
+
+	memcpy(&bits, &target, sizeof(bits));
+	__atomic_store_n(&vk.window_gamut, bits, __ATOMIC_RELEASE);
+}
+
+int xgpu_vulkan_device_luid(unsigned char luid[8])
+{
+	VkPhysicalDeviceIDProperties id;
+	VkPhysicalDeviceProperties2 properties;
+
+	if (!vk.physical)
+		return 0;
+	memset(&id, 0, sizeof(id));
+	memset(&properties, 0, sizeof(properties));
+	id.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES;
+	properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+	properties.pNext = &id;
+	vkGetPhysicalDeviceProperties2(vk.physical, &properties);
+	if (!id.deviceLUIDValid)
+		return 0;
+	memcpy(luid, id.deviceLUID, 8);
+	return 1;
+}
+
 void xgpu_vulkan_picture_top(int top)
 {
 	__atomic_store_n(&vk.picture_top, top < 0 ? 0 : top + 1, __ATOMIC_RELEASE);
@@ -6928,9 +7013,17 @@ static float window_headroom(void)
 	return headroom >= 1.0f ? headroom : 1.0f;
 }
 
+/* the headroom the encoding takes: the window's, or the player's peak
+(display.hdr_peak_nits) over the system's SDR white */
+static float peak_headroom(void)
+{
+	return xgpu_hdr_peak_headroom(__atomic_load_n(&vk.hdr_peak_nits, __ATOMIC_ACQUIRE), window_headroom(),
+		sdr_white_nits());
+}
+
 void xgpu_vulkan_hdr_frame(struct xgpu_hdr_frame *frame)
 {
-	float headroom = window_headroom(), setting, nits;
+	float headroom = peak_headroom(), setting, nits;
 
 	memset(frame, 0, sizeof(*frame));
 	frame->mode = vk.hdr_mode;
@@ -6954,6 +7047,22 @@ void xgpu_vulkan_hdr_frame(struct xgpu_hdr_frame *frame)
 	/* (the UI's white over the system's SDR white as paper white's is: on
 	Linux relative to the compositor's, no brighter than the display) */
 	frame->ui = xgpu_hdr_ui_white((float)vk.hdr_ui_nits / sdr_white_nits(), setting, headroom);
+	/* (display.hdr_gamut "expanded", toward the display's primaries, #1124) */
+	frame->gamut = __atomic_load_n(&vk.hdr_gamut, __ATOMIC_ACQUIRE);
+	frame->gamut_target = float_of(__atomic_load_n(&vk.window_gamut, __ATOMIC_ACQUIRE));
+	/* (#1122: with a peak of the player's, the display's full-frame peak
+	in paper whites and its black in the output's units, where the system
+	reports them; the System peak's picture as it was) */
+	if (__atomic_load_n(&vk.hdr_peak_nits, __ATOMIC_ACQUIRE) > 0)
+	{
+		float full = float_of(__atomic_load_n(&vk.window_full_frame, __ATOMIC_ACQUIRE));
+		float black = float_of(__atomic_load_n(&vk.window_black, __ATOMIC_ACQUIRE));
+		float scale = encoding_white_nits() / sdr_white_nits();
+
+		frame->full_frame = full > 0.0f ? full / (sdr_white_nits() * setting) : 0.0f;
+		frame->black = black > 0.0f ? black * scale / (vk.hdr_output == XGPU_HDR_OUTPUT_SCRGB ? 80.0f : 10000.0f) :
+			0.0f;
+	}
 }
 
 /* the swapchain's HDR metadata (VK_EXT_hdr_metadata, where the device has
@@ -6965,7 +7074,7 @@ takes static metadata keeps the last it was given. */
 static void hdr_metadata_set(int made)
 {
 	VkHdrMetadataEXT metadata;
-	float headroom = window_headroom();
+	float headroom = peak_headroom();
 	float peak = encoding_white_nits() * headroom;
 	float average = encoding_white_nits() * paper_white_setting(headroom);
 
@@ -7034,6 +7143,8 @@ static int resize_told(VkExtent2D extent)
 	return extent.width == 0xffffffffu || (extent.width == width && extent.height == height) ||
 		(extent.width == height && extent.height == width);
 }
+
+static float swapchain_levels(void);
 
 static int swapchain_make(void)
 {
@@ -7106,6 +7217,20 @@ static int swapchain_make(void)
 		for (index = 0; index < format_count; index++)
 		{
 			if ((formats[index].format == VK_FORMAT_B8G8R8A8_UNORM || formats[index].format == VK_FORMAT_R8G8B8A8_UNORM) &&
+				formats[index].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+			{
+				vk.swapchain_format = formats[index].format;
+				color_space = formats[index].colorSpace;
+				break;
+			}
+		}
+		/* (display.output_depth's 16-bit frame: 10 bits where the surface
+		lists them in sRGB's colour space, the last pass dithering to 1023
+		levels; else the 8 bits above, dithered to 255) */
+		for (index = 0; index < format_count && vk.deep_wanted; index++)
+		{
+			if ((formats[index].format == VK_FORMAT_A2B10G10R10_UNORM_PACK32 ||
+				formats[index].format == VK_FORMAT_A2R10G10B10_UNORM_PACK32) &&
 				formats[index].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
 			{
 				vk.swapchain_format = formats[index].format;
@@ -7235,7 +7360,8 @@ static int swapchain_make(void)
 	hdr_metadata_set(1);
 	host_logf(HOST_LOG_INFO, "vulkan: swapchain %ux%u, %u images, present mode %s, turned %d%s", vk.swapchain_extent.width,
 		vk.swapchain_extent.height, vk.swapchain_image_count, present_mode_name(vk.present_mode), turns * 90,
-		vk.hdr_output == XGPU_HDR_OUTPUT_SCRGB ? ", HDR (scRGB)" : vk.hdr_output == XGPU_HDR_OUTPUT_PQ ? ", HDR (HDR10)" : "");
+		vk.hdr_output == XGPU_HDR_OUTPUT_SCRGB ? ", HDR (scRGB)" : vk.hdr_output == XGPU_HDR_OUTPUT_PQ ? ", HDR (HDR10)" :
+		swapchain_levels() == 1023.0f ? ", SDR 10-bit" : vk.deep_wanted ? ", SDR 8-bit (no 10-bit format), dithered" : "");
 	return 1;
 }
 
@@ -7452,14 +7578,27 @@ static float swapchain_levels(void)
 	}
 }
 
+/* the frame is shown smaller than it is (supersampling) by other than 1
+or 2 each way: the last pass scales it down by its area (#1117), where a
+linear blit would skip texels */
+static int present_area_scaled(const struct xgpu_vulkan_image *image, uint32_t width, uint32_t height)
+{
+	uint32_t frame_width = image->description.width, frame_height = image->description.height;
+
+	return (frame_width > width || frame_height > height) &&
+		!((frame_width <= width || frame_width == 2 * width) && (frame_height <= height || frame_height == 2 * height));
+}
+
 /* The frame's last pass for the swapchain (#1108), at the picture's size
 in it (width, height): what it is drawn with (output) and into (format), 0
 where it is not wanted. An HDR swapchain's frame is always encoded (10-bit
 PQ dithered, scRGB's half floats not). An SDR frame is drawn where
 display.gamma curves it, or where it has more bits than the swapchain (the
-half floats of display.hdr "on" over an SDR display), and dithered then;
+half floats of display.hdr "on" over an SDR display, display.output_depth's
+RGBA16), and dithered then;
 an 8-bit frame at gamma 1 is the swapchain's codes already, which a dither
-could only add noise to: blitted as before, byte for byte. The pass scales
+could only add noise to: blitted as before, byte for byte, unless it is
+scaled down by other than 1 or 2 (present_area_scaled). The pass scales
 the frame as present_sharp's blits would (its factors), so the dither's
 pattern is drawn at the swapchain's own pixels. */
 static int present_output(const struct xgpu_vulkan_image *image, uint32_t width, uint32_t height,
@@ -7492,7 +7631,8 @@ static int present_output(const struct xgpu_vulkan_image *image, uint32_t width,
 	*format = output->levels == 1023.0f ? XGPU_VULKAN_FORMAT_RGB10A2 : XGPU_VULKAN_FORMAT_BGRA8;
 	if (gamma > 0.0f && gamma != 1.0f)
 		output->power = 1.0f / gamma;
-	return output->power != 1.0f || (output->levels > 0.0f && image->description.format != XGPU_VULKAN_FORMAT_BGRA8);
+	return output->power != 1.0f || (output->levels > 0.0f && image->description.format != XGPU_VULKAN_FORMAT_BGRA8) ||
+		present_area_scaled(image, width, height);
 }
 
 /* the frame's last pass drawn (the options' encode, into an image of its
@@ -7579,6 +7719,14 @@ static uint64_t present(struct xgpu_vulkan_image *image, int frame)
 	if (__atomic_load_n(&vk.window_hidden, __ATOMIC_ACQUIRE) || (!vk.surface && !surface_remake()))
 		return 0;
 	window_changes();
+	/* (display.output_depth: a 16-bit frame wants a 10-bit swapchain, an
+	8-bit one the 8 bits it had; made again as that changes) */
+	if (image && (image->description.format == XGPU_VULKAN_FORMAT_RGBA16) != vk.deep_wanted)
+	{
+		vk.deep_wanted = image->description.format == XGPU_VULKAN_FORMAT_RGBA16;
+		if (vk.swapchain)
+			vk.swapchain_stale = 1;
+	}
 	/* (a resize's new size, told late: RESIZE_CHECKS) */
 	if (vk.resize_checks && vk.swapchain && !vk.swapchain_stale && !(--vk.resize_checks % RESIZE_CHECK_EVERY))
 	{
@@ -8862,6 +9010,10 @@ static int device_make(const struct xgpu_vulkan_options *options)
 		VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT |
 		VK_FORMAT_FEATURE_TRANSFER_DST_BIT);
 	vk.capabilities.fragment_stores = available.features.fragmentStoresAndAtomics;
+	vk.capabilities.deep_sdr = format_has(VK_FORMAT_R16G16B16A16_UNORM, 0, VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT |
+		VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT |
+		VK_FORMAT_FEATURE_TRANSFER_SRC_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT | VK_FORMAT_FEATURE_BLIT_SRC_BIT |
+		VK_FORMAT_FEATURE_BLIT_DST_BIT);
 	vk.capabilities.scaled_shorts = format_has(VK_FORMAT_R16G16_SSCALED, 1, VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT) &&
 		format_has(VK_FORMAT_R16G16B16_SSCALED, 1, VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT) &&
 		format_has(VK_FORMAT_R16G16B16A16_SSCALED, 1, VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT) &&

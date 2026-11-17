@@ -60,8 +60,9 @@ strafe to the left); nonzero while it is pushed */
 int touch_input_move(float *forward, float *strafe);
 
 /* adds the touch controls' view swipe and gyroscope turn since the last
-call to yaw and pitch and to gyro_yaw and gyro_pitch, in radians at `scale`
-radians per pixel */
+call to yaw and pitch and to gyro_yaw and gyro_pitch, in radians: the
+swipe's at `scale` radians per pixel, the gyroscope's as its settings turn it
+(input.touch_gyro_*, gyro_aim.c's) */
 void touch_input_look(float scale, float *yaw, float *pitch, float *gyro_yaw, float *gyro_pitch);
 
 /* the same turn come since that call, for the drawn view to take late in the
