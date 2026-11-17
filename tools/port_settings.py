@@ -1497,9 +1497,9 @@ PAGES = {
             ("BUTTON REMAPPING ›", None, _page_screen(*BUTTON_REMAPPING),
              "Put any action on any button, each player their own layout, the D-pad and Back too: chat, push to "
              "talk, the scoreboard, a screenshot.", None),
-            ("STICK DEAD ZONES ›", None, _page_screen(*DEAD_ZONES),
-             "How far each stick moves before it does anything, and how far it must go to count as fully "
-             "pushed: more for a worn stick, less for finer aim.", None),
+            ("STICK SETTINGS ›", None, _page_screen(*DEAD_ZONES),
+             "Each stick's dead zones, the look stick's shape and zoomed speed, and Modern aim's acceleration: "
+             "for a worn stick, or finer aim.", None),
             # (one section with the layout's: the page has no room for
             # another section's title)
             ("VIBRATION", "profile.vibration", ON_OFF, "Rumbles the controller.", None),
@@ -1603,12 +1603,6 @@ PAGES = {
              "Classic aims as the original: a diagonal turns faster, and can speed up the turn as a full push "
              "does. Modern aims as MCC's: the same speed whichever way you push, and only a push straight to the "
              "side speeds up the turn.|The mouse and touch controls are not changed.", None),
-            ("ACCELERATION ANGLE", "input.modern_aim_acceleration_angle", MODERN_AIM_ANGLES,
-             "Modern aim: how far from straight to the side, in degrees, a full push still speeds up the turn. "
-             "Lower keeps more diagonals from speeding it up.", None),
-            ("ACCELERATION START", "input.modern_aim_acceleration_threshold", MODERN_AIM_THRESHOLDS,
-             "Modern aim: how far you push the stick before the turn speeds up. Default is the game's own, as "
-             "Classic's.", None),
             ("FLICK STICK", "input.flick_stick", ON_OFF,
              "Point the right stick and you turn at once to face that way: right, a quarter turn; down, about "
              "face. Turn it round its rim and you turn with it. Aim up and down with the gyro.|With the default "
@@ -1616,7 +1610,7 @@ PAGES = {
         ],
     },
     DEAD_ZONES[0]: {
-        "screen": DEAD_ZONES[1], "title": "STICK DEAD ZONES",
+        "screen": DEAD_ZONES[1], "title": "ADVANCED STICK SETTINGS",
         "rows": [
             (SECTION, "DEAD ZONES"),
             ("LEFT STICK", "input.left_stick_dead_zone", STICK_DEAD_ZONES,
@@ -1640,6 +1634,15 @@ PAGES = {
             ("ZOOM SENSITIVITY", "input.stick_zoom_sensitivity", VERTICAL_SENSITIVITIES,
              "How fast the right stick turns the view while zoomed in, as with a sniper rifle's scope. 1X is the "
              "game's own.", None),
+            # (Modern aim's tuning, with the sticks' other tuning: the aim
+            # style itself is on Gyro & Flick Stick)
+            (SECTION, "MODERN AIM"),
+            ("ACCELERATION ANGLE", "input.modern_aim_acceleration_angle", MODERN_AIM_ANGLES,
+             "Modern aim: how far from straight to the side, in degrees, a full push still speeds up the turn. "
+             "Lower keeps more diagonals from speeding it up.", None),
+            ("ACCELERATION START", "input.modern_aim_acceleration_threshold", MODERN_AIM_THRESHOLDS,
+             "Modern aim: how far you push the stick before the turn speeds up. Default is the game's own, as "
+             "Classic's.", None),
         ],
     },
     SCREEN_LAYOUT[0]: {
@@ -1868,9 +1871,10 @@ SETTINGS_SEARCH_WORDS = {
     "crosshair": ["lowered_reticle", "lowered_reticle_amount"],
     "viewmodel": ["viewmodel_visible", "viewmodel_fov", "weapon_position"],
     "gun": ["viewmodel_visible", "viewmodel_fov", "weapon_position"],
-    "aim": ["aim_style", "modern_aim_acceleration_angle", "modern_aim_acceleration_threshold"],
+    "aim": ["aim_style", "modern_aim_acceleration_angle", "modern_aim_acceleration_threshold",
+            "look_dead_zone_shape"],
     "acceleration": ["aim_style", "modern_aim_acceleration_angle", "modern_aim_acceleration_threshold"],
-    "deadzone": ["stick_dead_zones", "left_stick_dead_zone", "right_stick_dead_zone", "left_stick_outer_dead_zone",
+    "deadzone": ["stick_settings", "left_stick_dead_zone", "right_stick_dead_zone", "left_stick_outer_dead_zone",
                  "right_stick_outer_dead_zone", "look_dead_zone_shape"],
     "rumble": ["vibration", "rumble_strength"], "haptics": ["rumble_strength"],
     "keybinds": ["key_bindings"], "keys": ["key_bindings"],
@@ -2407,9 +2411,10 @@ SETTINGS_ROW_ENABLED = {
     # while it is on)
     "vrr": "!vrr_system",
     "vrr_cap_margin": "vrr=on+!vrr_system vrr=auto+vrr_found+!vrr_system",
-    # (Modern aim's tunables only while it aims: input.aim_style)
-    "modern_aim_acceleration_angle": "aim_style=modern",
-    "modern_aim_acceleration_threshold": "aim_style=modern",
+    # (Modern aim's tunables only while it aims: input.aim_style, on the
+    # Gyro & Flick Stick page: menu_functions.c's aim_modern)
+    "modern_aim_acceleration_angle": "aim_modern",
+    "modern_aim_acceleration_threshold": "aim_modern",
 }
 
 

@@ -64,7 +64,7 @@
 		<on event="start" open="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/button_remapping_screen"/>
 		<on event="left_mouse" run="mouse emit accept event"/>
 	</behaviour>
-	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/op_stick_dead_zones" flags="pass_unhandled_to_focused_child">
+	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/op_stick_settings" flags="pass_unhandled_to_focused_child">
 		<on event="a" open="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/dead_zones_screen"/>
 		<on event="start" open="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/dead_zones_screen"/>
 		<on event="left_mouse" run="mouse emit accept event"/>

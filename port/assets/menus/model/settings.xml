@@ -1039,8 +1039,8 @@
 		<row key="button_remapping" kind="link" label="BUTTON REMAPPING ›" crumb="CONTROLS › CONTROLLER" open="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/button_remapping_screen">
 			<help>Put any action on any button, each player their own layout, the D-pad and Back too: chat, push to talk, the scoreboard, a screenshot.</help>
 		</row>
-		<row key="stick_dead_zones" kind="link" label="STICK DEAD ZONES ›" crumb="CONTROLS › CONTROLLER" search="deadzone" open="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/dead_zones_screen">
-			<help>How far each stick moves before it does anything, and how far it must go to count as fully pushed: more for a worn stick, less for finer aim.</help>
+		<row key="stick_settings" kind="link" label="STICK SETTINGS ›" crumb="CONTROLS › CONTROLLER" search="deadzone" open="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/dead_zones_screen">
+			<help>Each stick's dead zones, the look stick's shape and zoomed speed, and Modern aim's acceleration: for a worn stick, or finer aim.</help>
 		</row>
 		<row key="vibration" kind="choice" setting="profile.vibration" label="VIBRATION" crumb="CONTROLS › CONTROLLER" search="rumble" when="profile">
 			<help>Rumbles the controller.</help>
@@ -1211,34 +1211,6 @@
 			<choice shown="CLASSIC" value="classic"/>
 			<choice shown="MODERN" value="modern"/>
 		</row>
-		<row key="modern_aim_acceleration_angle" kind="choice" setting="input.modern_aim_acceleration_angle" label="ACCELERATION ANGLE" crumb="CONTROLS › CONTROLLER › GYRO &amp; FLICK STICK" search="aim acceleration" enabled="aim_style=modern">
-			<help>Modern aim: how far from straight to the side, in degrees, a full push still speeds up the turn. Lower keeps more diagonals from speeding it up.</help>
-			<choice shown="0" value="0"/>
-			<choice shown="5" value="5"/>
-			<choice shown="10" value="10"/>
-			<choice shown="15" value="15"/>
-			<choice shown="20" value="20"/>
-			<choice shown="25" value="25"/>
-			<choice shown="30" value="30"/>
-			<choice shown="35" value="35"/>
-			<choice shown="40" value="40"/>
-			<choice shown="45" value="45"/>
-		</row>
-		<row key="modern_aim_acceleration_threshold" kind="choice" setting="input.modern_aim_acceleration_threshold" label="ACCELERATION START" crumb="CONTROLS › CONTROLLER › GYRO &amp; FLICK STICK" search="aim acceleration" enabled="aim_style=modern">
-			<help>Modern aim: how far you push the stick before the turn speeds up. Default is the game's own, as Classic's.</help>
-			<choice shown="DEFAULT" value="-1"/>
-			<choice shown="50%" value="50"/>
-			<choice shown="55%" value="55"/>
-			<choice shown="60%" value="60"/>
-			<choice shown="65%" value="65"/>
-			<choice shown="70%" value="70"/>
-			<choice shown="75%" value="75"/>
-			<choice shown="80%" value="80"/>
-			<choice shown="85%" value="85"/>
-			<choice shown="90%" value="90"/>
-			<choice shown="95%" value="95"/>
-			<choice shown="100%" value="100"/>
-		</row>
 		<row key="flick_stick" kind="choice" setting="input.flick_stick" label="FLICK STICK" crumb="CONTROLS › CONTROLLER › GYRO &amp; FLICK STICK">
 			<help>Point the right stick and you turn at once to face that way: right, a quarter turn; down, about face. Turn it round its rim and you turn with it. Aim up and down with the gyro.</help>
 			<note>With the default stick layout.</note>
@@ -1249,9 +1221,9 @@
 		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>
 		<button key="button_cancel" kind="cancel" run="port settings page cancel" help="Goes back without these changes."/>
 	</screen>
-	<screen name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/dead_zones_screen" kind="settings" layout="page" geometry="tall" title="STICK DEAD ZONES">
+	<screen name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/dead_zones_screen" kind="settings" layout="page" geometry="tall" title="ADVANCED STICK SETTINGS">
 		<section key="section_0" title="DEAD ZONES"/>
-		<row key="left_stick_dead_zone" kind="choice" setting="input.left_stick_dead_zone" label="LEFT STICK" crumb="CONTROLS › CONTROLLER › STICK DEAD ZONES" search="deadzone">
+		<row key="left_stick_dead_zone" kind="choice" setting="input.left_stick_dead_zone" label="LEFT STICK" crumb="CONTROLS › CONTROLLER › STICK SETTINGS" search="deadzone">
 			<help>How far the left stick moves before you move. Raise it for a stick that drifts; lower it to start walking sooner. Default is the game's own, 27%.</help>
 			<note>The touch controls' stick too.</note>
 			<choice shown="DEFAULT (27%)" value="-1"/>
@@ -1267,7 +1239,7 @@
 			<choice shown="45%" value="45"/>
 			<choice shown="50%" value="50"/>
 		</row>
-		<row key="right_stick_dead_zone" kind="choice" setting="input.right_stick_dead_zone" label="RIGHT STICK" crumb="CONTROLS › CONTROLLER › STICK DEAD ZONES" search="deadzone">
+		<row key="right_stick_dead_zone" kind="choice" setting="input.right_stick_dead_zone" label="RIGHT STICK" crumb="CONTROLS › CONTROLLER › STICK SETTINGS" search="deadzone">
 			<help>How far the right stick moves before the view turns. Raise it for a stick that drifts; lower it for finer aim. Default is the game's own, 27%.</help>
 			<choice shown="DEFAULT (27%)" value="-1"/>
 			<choice shown="0%" value="0"/>
@@ -1283,7 +1255,7 @@
 			<choice shown="50%" value="50"/>
 		</row>
 		<section key="section_3" title="OUTER DEAD ZONES"/>
-		<row key="left_stick_outer_dead_zone" kind="choice" setting="input.left_stick_outer_dead_zone" label="LEFT STICK" crumb="CONTROLS › CONTROLLER › STICK DEAD ZONES" search="deadzone">
+		<row key="left_stick_outer_dead_zone" kind="choice" setting="input.left_stick_outer_dead_zone" label="LEFT STICK" crumb="CONTROLS › CONTROLLER › STICK SETTINGS" search="deadzone">
 			<help>How much of the left stick's travel at its edge counts as a full push. Raise it for a worn stick that stops short of its edge and never reaches full speed. None is the game's own.</help>
 			<choice shown="NONE" value="0"/>
 			<choice shown="5%" value="5"/>
@@ -1293,7 +1265,7 @@
 			<choice shown="25%" value="25"/>
 			<choice shown="30%" value="30"/>
 		</row>
-		<row key="right_stick_outer_dead_zone" kind="choice" setting="input.right_stick_outer_dead_zone" label="RIGHT STICK" crumb="CONTROLS › CONTROLLER › STICK DEAD ZONES" search="deadzone">
+		<row key="right_stick_outer_dead_zone" kind="choice" setting="input.right_stick_outer_dead_zone" label="RIGHT STICK" crumb="CONTROLS › CONTROLLER › STICK SETTINGS" search="deadzone">
 			<help>How much of the right stick's travel at its edge counts as a full push, so a worn stick still turns at full speed and speeds up the turn. None is the game's own.</help>
 			<choice shown="NONE" value="0"/>
 			<choice shown="5%" value="5"/>
@@ -1304,13 +1276,13 @@
 			<choice shown="30%" value="30"/>
 		</row>
 		<section key="section_6" title="LOOK STICK"/>
-		<row key="look_dead_zone_shape" kind="choice" setting="input.look_dead_zone_shape" label="SHAPE" crumb="CONTROLS › CONTROLLER › STICK DEAD ZONES" search="deadzone" search_choices="axial round">
+		<row key="look_dead_zone_shape" kind="choice" setting="input.look_dead_zone_shape" label="SHAPE" crumb="CONTROLS › CONTROLLER › STICK SETTINGS" search="aim deadzone" search_choices="axial round">
 			<help>The shape of the look stick's dead zone. Axial: each direction its own, a square in the middle, as Classic aim. Round: the same whichever way you push, as Modern aim. Auto follows your Aim Style.</help>
 			<choice shown="AUTO" value="auto"/>
 			<choice shown="AXIAL" value="axial"/>
 			<choice shown="ROUND" value="round"/>
 		</row>
-		<row key="stick_zoom_sensitivity" kind="choice" setting="input.stick_zoom_sensitivity" label="ZOOM SENSITIVITY" crumb="CONTROLS › CONTROLLER › STICK DEAD ZONES" search="sens">
+		<row key="stick_zoom_sensitivity" kind="choice" setting="input.stick_zoom_sensitivity" label="ZOOM SENSITIVITY" crumb="CONTROLS › CONTROLLER › STICK SETTINGS" search="sens">
 			<help>How fast the right stick turns the view while zoomed in, as with a sniper rifle's scope. 1X is the game's own.</help>
 			<choice shown="0.25X" value="0.25"/>
 			<choice shown="0.5X" value="0.5"/>
@@ -1324,6 +1296,35 @@
 			<choice shown="1.25X" value="1.25"/>
 			<choice shown="1.5X" value="1.5"/>
 			<choice shown="2X" value="2"/>
+		</row>
+		<section key="section_9" title="MODERN AIM"/>
+		<row key="modern_aim_acceleration_angle" kind="choice" setting="input.modern_aim_acceleration_angle" label="ACCELERATION ANGLE" crumb="CONTROLS › CONTROLLER › STICK SETTINGS" search="aim acceleration" enabled="aim_modern">
+			<help>Modern aim: how far from straight to the side, in degrees, a full push still speeds up the turn. Lower keeps more diagonals from speeding it up.</help>
+			<choice shown="0" value="0"/>
+			<choice shown="5" value="5"/>
+			<choice shown="10" value="10"/>
+			<choice shown="15" value="15"/>
+			<choice shown="20" value="20"/>
+			<choice shown="25" value="25"/>
+			<choice shown="30" value="30"/>
+			<choice shown="35" value="35"/>
+			<choice shown="40" value="40"/>
+			<choice shown="45" value="45"/>
+		</row>
+		<row key="modern_aim_acceleration_threshold" kind="choice" setting="input.modern_aim_acceleration_threshold" label="ACCELERATION START" crumb="CONTROLS › CONTROLLER › STICK SETTINGS" search="aim acceleration" enabled="aim_modern">
+			<help>Modern aim: how far you push the stick before the turn speeds up. Default is the game's own, as Classic's.</help>
+			<choice shown="DEFAULT" value="-1"/>
+			<choice shown="50%" value="50"/>
+			<choice shown="55%" value="55"/>
+			<choice shown="60%" value="60"/>
+			<choice shown="65%" value="65"/>
+			<choice shown="70%" value="70"/>
+			<choice shown="75%" value="75"/>
+			<choice shown="80%" value="80"/>
+			<choice shown="85%" value="85"/>
+			<choice shown="90%" value="90"/>
+			<choice shown="95%" value="95"/>
+			<choice shown="100%" value="100"/>
 		</row>
 		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
 		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>

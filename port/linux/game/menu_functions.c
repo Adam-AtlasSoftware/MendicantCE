@@ -3043,6 +3043,14 @@ static boolean settings_condition_term(struct widget_instance *list, char const 
 		return platform_vrr_detected() == 3 /* PLATFORM_VRR_SYSTEM */;
 	if (!strcmp(name, "gyro"))
 		return halo_gyro_found() == 2;
+	/* (the player's Aim Style Modern, on another page than the rows it
+	enables: Advanced Stick Settings' Modern aim rows) */
+	if (!strcmp(name, "aim_modern"))
+	{
+		char style[16];
+
+		return settings_value("input.aim_style", style, sizeof(style)) && !strcmp(style, "modern");
+	}
 	if (!strcmp(name, "weapon_held"))
 	{
 		char path[sizeof(settings_weapon)];

@@ -21,7 +21,7 @@
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/op_button_preset" x="28" y="250"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/op_joystick_preset" x="28" y="275"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/op_button_remapping" x="28" y="300"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/op_stick_dead_zones" x="28" y="325"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/op_stick_settings" x="28" y="325"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/op_vibration" x="28" y="350"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/op_rumble_strength" x="28" y="375"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/op_ingame_help" x="28" y="400"/>
@@ -170,11 +170,11 @@
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping_label" type="text" box="0 0 332 24" wide="0 244" past="0 193">
 		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/labels" index="10" scale="1 1.2"/>
 	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/op_stick_dead_zones" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/op_stick_settings" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
 		<text color="#FF2896FF"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/stick_dead_zones_label" x="0" y="0"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/stick_settings_label" x="0" y="0"/>
 	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/stick_dead_zones_label" type="text" box="0 0 332 24" wide="0 244" past="0 193">
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/stick_settings_label" type="text" box="0 0 332 24" wide="0 244" past="0 193">
 		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/labels" index="11" scale="1 1.2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/op_vibration" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
