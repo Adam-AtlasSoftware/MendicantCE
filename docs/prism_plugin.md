@@ -164,7 +164,8 @@ gives an upscaler its inputs at the render size from 0, 0:
 
 Then the upscaler writes the output (four half floats, the output's size): **FSR 3.1** (`xgpu_vulkan_fsr3.c`, its
 passes AMD's, `port/third_party/fidelityfx-fsr3`), or the upscaler's **plugin** (`evaluate`, given those images,
-the jitter, exposure 1, the camera's matrices, the reset and the sizes; one that fails is FSR 3.1 from then on).
+the jitter, exposure 1, the camera's matrices, the reset and the sizes; one that fails is FSR 3.1 from then on;
+where FSR 3.1 cannot run either, its passes or images not made, the view is stretched into the window as it is).
 The output is stretched into the window's rectangle of the screen's target, and the view's depth and stencil into
 its depth target's (nearest: what is drawn after the HUD, Forge's parts and the debug geometry, is tested against
 it). The history is dropped where the guest says the camera has none (the view not drawn the frame before, or of
@@ -183,6 +184,9 @@ own filter then off (the light traced raw, `xgpu_vulkan_rt.c`):
   colour, the level's the base target's, less where metal; the specular albedo: F0, the specular scale's dielectric
   or the base colour where metal; the shading normal and roughness), the depth, motion and jitter. The view must have
   its G-buffer (display.lighting `"ce_deferred"` or `"raster"`): where it has none, FSR 3.1 resolves the view.
+
+display.denoiser `"off"` traces the light raw, the tracer's own filter off whatever display.prism_rt_denoiser
+says (`port/linux/game/prism_rt.c`): a diagnostic, and the light a plugin is given.
 
 The path tracer of display.prism_rt is the mode PRISM v4's M3 replaces; the hooks are its light's and the view's, not
 its own, so that M3's path tracer takes them as they are.
