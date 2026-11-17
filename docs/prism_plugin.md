@@ -195,6 +195,15 @@ python -m pytest -q tools/test_prism_plugin.py
 
 It builds the passthrough plugin and several broken ones, checks that the passthrough exports its entry alone,
 records its commands over a fake device (one copy for equal sizes, one blit otherwise, every image left in its
-layout), checks that each broken plugin, a missing one and a wrong ABI are refused with a logged reason, and that no
-name touches no file. It needs a C compiler, `nm` and Vulkan's headers (the build's or the system's), and no GPU or
-game data.
+layout; as a denoiser, nothing), checks that each broken plugin, a missing one and a wrong ABI are refused with a
+logged reason, and that no name touches no file. It needs a C compiler, `nm` and Vulkan's headers (the build's or
+the system's), and no GPU or game data.
+
+```sh
+python -m pytest -q tools/test_upscale.py
+```
+
+It checks FSR 3.1's vendored files against their README's SHA-256, that the generated SPIR-V is still its GLSL's
+(`tools/vulkan_upscale_shaders.py --check`, where glslang and SPIRV-Tools are installed), FSR's host half over a fake
+core (its jitter the SDK's Halton sequence, of 8 times the area's ratio; no dispatch without a device), and the
+settings' entries, README rows and menu values.

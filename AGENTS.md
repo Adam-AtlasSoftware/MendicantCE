@@ -219,6 +219,7 @@ python -m pytest -q tools/test_prism_gate.py tools/test_prism_plugin.py tools/te
                                                             # PRISM's gates' metrics and captures' paths, the plugin ABI, the scene records, the RT GLSL generated
 python3 tools/vulkan_bake_shaders.py --check               # PRISM v4's baker's and Raster's SPIR-V still its GLSL's (glslangValidator)
 python3 tools/vulkan_upscale_shaders.py --check            # PRISM v4's FSR 3.1 passes and upscaler's input pass, their SPIR-V still their GLSL's
+python -m pytest -q tools/test_upscale.py                  # display.upscaler: FSR 3.1's vendored files, its SPIR-V, its jitter (a fake core), the settings
 python3 tools/prism_gate/capture.py all --stage <tree> --data <game data> --config <toml> --out <dir>
                                                             # PRISM's frozen capture set and its references (docs/prism_gates.md; local only)
 python3 tools/prism_gate/capture.py bake G2 --stage <tree> --data <game data> --config <toml> --out <dir> --env HALO_BAKE_FOLDER=<bakes>
