@@ -1903,6 +1903,102 @@ int main(int argc, char **argv)
 		free(samples);
 		return 0;
 	}
+	/* audio.listening_mode "night": noise two seconds quiet (-36 dBFS
+	out), two loud (-12) and two quiet again, through the whole mix, each
+	measured over its last half second (the release of 300 ms has settled). As it
+	is (default) 24 dB apart; at night 3 to 1 around -24 dBFS, 8 dB apart: the
+	quiet brought up 8 dB, the loud down 8, each within a dB; the loud
+	part's gain steady (no pumping: its 20 ms windows' gains within a dB of
+	each other); nothing over full scale; and once night is turned off, the
+	gain back at 1 and the compressor stopped */
+	CASE("night")
+	{
+		enum { SECOND = 48000, SEGMENT = 2 * SECOND, WINDOW = 960 };
+		unsigned long frames = 3 * SEGMENT, n, chunk;
+		short *samples = malloc((frames + SECOND) * 2 * sizeof(short));
+		float *heard[2], peak = 0.0f;
+		double level[2][3], window_low = 1e9, window_high = -1e9;
+		int night_on;
+
+		random_state = 1;
+		for (n = 0; n < frames + SECOND; n++)
+		{
+			/* (uniform noise: its RMS a root 3rd of its peak) */
+			double size = (n >= SEGMENT && n < 2 * SEGMENT ? pow(10.0, -6.0 / 20.0) : pow(10.0, -30.0 / 20.0)) *
+				sqrt(3.0);
+
+			samples[n * 2] = samples[n * 2 + 1] = (short)lround(random_uniform() * size * 32767.0);
+		}
+		reverb_initialize();
+		for (night_on = 0; night_on < 2; night_on++)
+		{
+			struct sdl_stream *stream = voice_new(samples, frames + SECOND, 2, 48000, 0);
+			int part;
+
+			heard[night_on] = malloc(frames * 2 * sizeof(float));
+			night_enabled = night_on;
+			memset(&night, 0, sizeof(night));
+			memset(&limiter, 0, sizeof(limiter));
+			streams = stream;
+			for (n = 0; n < frames; n += CHUNK)
+				mix(heard[night_on] + n * 2, frames - n < CHUNK ? frames - n : CHUNK, TRUE);
+			streams = NULL;
+			voice_delete(stream);
+			/* (each part's last half second) */
+			for (part = 0; part < 3; part++)
+			{
+				double power = 0.0;
+
+				for (n = (part + 1) * SEGMENT - SECOND / 2; n < (unsigned long)(part + 1) * SEGMENT; n++)
+					power += (double)heard[night_on][n * 2] * heard[night_on][n * 2];
+				level[night_on][part] = 10.0 * log10(power / (SECOND / 2) + 1e-30);
+			}
+		}
+		for (n = 0; n < frames * 2; n++)
+			peak = fabsf(heard[1][n]) > peak ? fabsf(heard[1][n]) : peak;
+		/* (the loud part's last half second, 20 ms at a time: night's gain) */
+		for (n = 2 * SEGMENT - SECOND / 2; n + WINDOW <= 2 * SEGMENT; n += WINDOW)
+		{
+			double night_power = 0.0, default_power = 0.0, gain_db;
+			unsigned long frame;
+
+			for (frame = n; frame < n + WINDOW; frame++)
+			{
+				night_power += (double)heard[1][frame * 2] * heard[1][frame * 2];
+				default_power += (double)heard[0][frame * 2] * heard[0][frame * 2];
+			}
+			gain_db = 10.0 * log10(night_power / default_power);
+			window_low = gain_db < window_low ? gain_db : window_low;
+			window_high = gain_db > window_high ? gain_db : window_high;
+		}
+		CHECK(fabs(level[0][0] + 36.0) < 0.5 && fabs(level[0][1] + 12.0) < 0.5,
+			"as it is, the quiet second at %.2f dBFS and the loud at %.2f (-36 and -12)", level[0][0], level[0][1]);
+		CHECK(fabs(level[1][0] - level[0][0] - 8.0) < 1.0 && fabs(level[1][1] - level[0][1] + 8.0) < 1.0 &&
+			fabs(level[1][2] - level[0][2] - 8.0) < 1.0,
+			"at night the quiet seconds %+.2f and %+.2f dB, the loud %+.2f dB (+8, -8)", level[1][0] - level[0][0],
+			level[1][2] - level[0][2], level[1][1] - level[0][1]);
+		CHECK(fabs((level[1][1] - level[1][0]) - (level[0][1] - level[0][0]) / NIGHT_RATIO) < 1.0,
+			"at night the loud part %.2f dB over the quiet, as it is %.2f (a third)", level[1][1] - level[1][0],
+			level[0][1] - level[0][0]);
+		CHECK(window_high - window_low < 1.0, "at night the loud part's gain moves %.2f dB (%.2f to %.2f): pumping",
+			window_high - window_low, window_low, window_high);
+		CHECK(peak <= 1.0f, "at night a peak at %f, over full scale", peak);
+		/* (turned off: back at 1 within four seconds, its release, and stopped) */
+		{
+			static float mixed[CHUNK * 2];
+
+			night_enabled = FALSE;
+			for (chunk = 0; chunk < 4 * SECOND / CHUNK; chunk++)
+				mix(mixed, CHUNK, TRUE);
+			CHECK(!night.running, "night turned off: still running at %+.4f dB",
+				night.gain_db);
+		}
+		memset(&night, 0, sizeof(night));
+		free(heard[0]);
+		free(heard[1]);
+		free(samples);
+		return 0;
+	}
 	/* obstruction and occlusion, as the Xbox recorded them: a voice of noise
 	2 units ahead in a hall (the reverb on), its direct path's octave levels
 	(the recording's impulse response, the direct sound's 9 ms) against the

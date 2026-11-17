@@ -141,6 +141,11 @@
 		<row key="effects_volume" kind="slider" setting="audio.effects_volume" label="EFFECTS VOLUME" crumb="AUDIO › VOLUME" least="0" most="100" step="1" typed_least="0" typed_most="100" whole="true" curve="volume">
 			<help>Every other sound: weapons, vehicles and the world.</help>
 		</row>
+		<row key="listening_mode" kind="choice" setting="audio.listening_mode" label="LISTENING MODE" crumb="AUDIO › VOLUME" search_choices="night">
+			<help>Default plays the sound as it is. Night evens it out for playing quietly: speech and quiet sounds come up, explosions and gunfire come down.</help>
+			<choice shown="DEFAULT" value="default"/>
+			<choice shown="NIGHT" value="night"/>
+		</row>
 		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this tab's settings back to their defaults. Nothing changes until OK."/>
 		<button key="button_ok" kind="ok" run="port settings ok" help="Keeps your changes, on every tab, and applies them."/>
 		<button key="button_cancel" kind="cancel" run="port settings cancel" help="Leaves Settings without keeping any change."/>

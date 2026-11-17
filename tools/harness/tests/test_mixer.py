@@ -27,7 +27,7 @@ from harness import skip_without_32_bit_abi  # noqa: E402
 SOURCE = "port/linux/src/dsound_sdl.c"
 CASES = ["reference", "impulse", "sines", "aliases", "silent-voice", "mono", "linear", "cut", "cuts", "adpcm", "doppler", "doppler-step",
          "parameter-ramp", "block-size",
-         "limiter", "obstruction", "room-send", "room-send-images", "quiet-levels", "quiet-levels-3d", "resampler-xbox", "resampler-xbox-images", "channels", "surround", "lfe", "spatial-choice", "hrtf-cues", "hrtf-paths", "hrtf-switch", "stereo-in-world",
+         "limiter", "night", "obstruction", "room-send", "room-send-images", "quiet-levels", "quiet-levels-3d", "resampler-xbox", "resampler-xbox-images", "channels", "surround", "lfe", "spatial-choice", "hrtf-cues", "hrtf-paths", "hrtf-switch", "stereo-in-world",
          "dry-2d",
          "master-volume", "buffers", "sound-off",
          "hand-off-never-waits", "hand-off-settings"]
@@ -71,6 +71,8 @@ NEGATIVE_CONTROLS = {
     "doppler-physical": (("ratio = 1.0f + (listener_speed - source_speed) / DOPPLER_SPEED_OF_SOUND;",
                           "ratio = (DOPPLER_SPEED_OF_SOUND + listener_speed) / (DOPPLER_SPEED_OF_SOUND + "
                           "source_speed);"), "doppler"),
+    # night: no compression (its ratio 1: the mix as it is)
+    "night-not-compressing": (("* (1.0f - 1.0f / NIGHT_RATIO)", "* 0.0f"), "night"),
     # the limiter's ceiling under full scale, as it was
     "limiter-ceiling": (("#define LIMITER_CEILING 1.0f", "#define LIMITER_CEILING 0.891f"), "limiter"),
     # the mix at full level (twice the Xbox's), as it was; or held to full scale before it is halved
@@ -267,6 +269,29 @@ def test_vectors_add_as_taps_do():
     assert len(vector) == len(scalar) > 0
     worst = max(abs(a - b) for a, b in zip(vector, scalar))
     assert 0 < worst < 1e-5, f"the vector resampler differs by {worst} (none: no vectors)"
+
+
+def _render(fault):
+    import array
+    import subprocess
+
+    result = subprocess.run([str(build("mixer", generated(fault=fault))), "render"], capture_output=True, timeout=120,
+                            check=True)
+    return array.array("f", result.stdout)
+
+
+# the compressor of audio.listening_mode left out, and night forced on (the control: the comparison sees it)
+NIGHT_LEFT_OUT = ("\tnight_compress(output, frames);\n", "")
+NIGHT_FORCED_ON = ("static BOOL night_enabled = FALSE;", "static BOOL night_enabled = TRUE;")
+
+
+def test_listening_mode_default_is_the_mix_as_it_was():
+    """audio.listening_mode "default": the voices and a scene's whole mix (reverb and limiter) the same to the bit as
+    the mixer without the night compressor; forced to night, they are not"""
+    without = _render(NIGHT_LEFT_OUT)
+    assert len(without) > 0
+    assert _render(None).tobytes() == without.tobytes(), "the default mix is not the mix without the compressor"
+    assert _render(NIGHT_FORCED_ON).tobytes() != without.tobytes(), "night forced on changes nothing: the test is blind"
 
 
 @pytest.mark.parametrize("control", NEGATIVE_CONTROLS)

@@ -968,6 +968,10 @@ PAGES = {
              "The characters' speech: Cortana, the Marines and the cutscenes' lines.", None),
             ("EFFECTS VOLUME", "audio.effects_volume", VOLUMES,
              "Every other sound: weapons, vehicles and the world.", None),
+            # (port/linux/src/dsound_sdl.c's night_compress)
+            ("LISTENING MODE", "audio.listening_mode", [("DEFAULT", "default"), ("NIGHT", "night")],
+             "Default plays the sound as it is. Night evens it out for playing quietly: speech and quiet sounds "
+             "come up, explosions and gunfire come down.", None),
         ],
     },
     VOICE_CHAT[0]: {

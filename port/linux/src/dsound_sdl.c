@@ -66,6 +66,7 @@ buffer, so streams still drain at their real rate.
 
 audio.volume sets the master volume (default 1.0); audio.reverb = false
 turns the reverb off, and audio.doppler = false the Doppler shift;
+audio.listening_mode "night" evens the loudness out (night_compress);
 audio.spatial chooses the HRTF or the pan ("auto", "headphones", "speakers");
 audio.resampler chooses the Xbox's low pass ("xbox"), the mixer's sinc one
 ("sinc") or between neighbouring frames ("linear"); audio.enabled = false skips opening a device;
@@ -3227,6 +3228,100 @@ static float sound_fade(float *output, unsigned long frames, unsigned long chann
 	return gain;
 }
 
+/* ---------- night (audio.listening_mode)
+
+"night" evens the loudness out for quiet play: one compressor before the
+limiter, on the whole mix (the players' voices too), both channels (all six
+on 5.1) alike. Its level is the loudest channel's, its power smoothed over
+NIGHT_DETECT_SECONDS, so that it follows syllables and shots but not each
+wave of them. Around NIGHT_PIVOT_DB (about where speech and the game's
+middle sit after OUTPUT_GAIN), the level moves NIGHT_RATIO times less: 3 to
+1, a quiet sound 12 dB under the pivot brought up 8 dB, a loud one 12 dB
+over it brought down 8, at most NIGHT_MOST_DB either way. Under
+NIGHT_FLOOR_DB the lift fades out to none NIGHT_FLOOR_RANGE_DB further down,
+so that silence and hiss are not brought up. The gain comes down within
+NIGHT_ATTACK_SECONDS (an explosion is caught; the limiter after it takes
+what gets past) and goes back up over NIGHT_RELEASE_SECONDS, slow enough
+that a steady sound's gain does not pump. "default" never runs it: the mix is
+as it was, to the bit; turned off as it plays, its gain goes back to 1 over
+its release first, then it stops. */
+
+#define NIGHT_PIVOT_DB (-24.0f)
+#define NIGHT_RATIO 3.0f
+#define NIGHT_MOST_DB 12.0f
+#define NIGHT_FLOOR_DB (-60.0f)
+#define NIGHT_FLOOR_RANGE_DB 12.0f
+#define NIGHT_DETECT_SECONDS 0.01f
+#define NIGHT_ATTACK_SECONDS 0.01f
+#define NIGHT_RELEASE_SECONDS 0.3f
+
+/* audio.listening_mode "night" */
+static BOOL night_enabled = FALSE;
+
+static struct
+{
+	/* the level's power, and the gain (dB) */
+	float power;
+	float gain_db;
+	BOOL running;
+} night;
+
+/* the gain (dB) the compressor wants for a level (dB) */
+static float night_curve(float level_db)
+{
+	float gain_db = (NIGHT_PIVOT_DB - level_db) * (1.0f - 1.0f / NIGHT_RATIO);
+
+	if (gain_db > NIGHT_MOST_DB)
+		gain_db = NIGHT_MOST_DB;
+	if (gain_db < -NIGHT_MOST_DB)
+		gain_db = -NIGHT_MOST_DB;
+	if (gain_db > 0.0f && level_db < NIGHT_FLOOR_DB)
+	{
+		float share = 1.0f - (NIGHT_FLOOR_DB - level_db) / NIGHT_FLOOR_RANGE_DB;
+
+		gain_db *= share > 0.0f ? share : 0.0f;
+	}
+	return gain_db;
+}
+
+static void night_compress(float *output, unsigned long frames)
+{
+	float detect = 1.0f - expf(-1.0f / (NIGHT_DETECT_SECONDS * OUTPUT_RATE));
+	float attack = 1.0f - expf(-1.0f / (NIGHT_ATTACK_SECONDS * OUTPUT_RATE));
+	float release = 1.0f - expf(-1.0f / (NIGHT_RELEASE_SECONDS * OUTPUT_RATE));
+	unsigned long frame, channel;
+
+	if (!night_enabled && !night.running)
+		return;
+	if (!night.running)
+	{
+		night.power = 0.0f;
+		night.gain_db = 0.0f;
+		night.running = TRUE;
+	}
+	for (frame = 0; frame < frames; frame++)
+	{
+		float *sample = output + frame * output_channels;
+		float peak = 0.0f, wanted, gain;
+
+		for (channel = 0; channel < output_channels; channel++)
+		{
+			float power = sample[channel] * sample[channel];
+
+			peak = power > peak ? power : peak;
+		}
+		night.power = flush_denormal(night.power + (peak - night.power) * detect);
+		wanted = night_enabled ? night_curve(10.0f * log10f(night.power + 1.0e-12f)) : 0.0f;
+		night.gain_db += (wanted - night.gain_db) * (wanted < night.gain_db ? attack : release);
+		gain = powf(10.0f, night.gain_db / 20.0f);
+		for (channel = 0; channel < output_channels; channel++)
+			sample[channel] *= gain;
+	}
+	/* (off, and back at 1: stopped, the mix as it was) */
+	if (!night_enabled && fabsf(night.gain_db) < 0.001f)
+		night.running = FALSE;
+}
+
 static void limit(float *output, unsigned long frames)
 {
 	float release = 1.0f - expf(-1.0f / (LIMITER_RELEASE_SECONDS * OUTPUT_RATE));
@@ -4045,6 +4140,8 @@ static void mix(float *output, unsigned long frames, BOOL wait)
 	if (mix_profile_on)
 		mix_part_end(_mix_part_chat, &part_at);
 	subsonic(output, frames);
+	/* (audio.listening_mode "night") */
+	night_compress(output, frames);
 	limit(output, frames);
 	sound_gain = sound_fade(output, frames, output_channels, sound_gain, sound_on);
 	record(output, frames);
@@ -4708,6 +4805,7 @@ static void audio_start(void)
 	master_volume = (float)config_real("audio.volume");
 	reverb_enabled = config_boolean("audio.reverb");
 	doppler_enabled = config_boolean("audio.doppler");
+	night_enabled = !strcmp(config_string("audio.listening_mode"), "night");
 	sound_on = config_boolean("audio.enabled");
 	sound_gain = sound_on ? 1.0f : 0.0f;
 	mix_profile_initialize();
@@ -5173,8 +5271,8 @@ VOID WINAPI DirectSoundDoWork(void)
 		log_flushed_ns = SDL_GetTicksNS();
 		dsound_log_flush();
 	}
-	/* (audio.volume, audio.reverb, audio.doppler, audio.enabled and
-	audio.resampler read again when the settings change: on the game's thread, not the mixer's,
+	/* (audio.volume, audio.reverb, audio.doppler, audio.listening_mode, audio.enabled
+	and audio.resampler read again when the settings change: on the game's thread, not the mixer's,
 	whose lock the config's file I/O would hold) */
 	if (volume_read_at != config_changes())
 	{
@@ -5182,6 +5280,7 @@ VOID WINAPI DirectSoundDoWork(void)
 		master_volume = (float)config_real("audio.volume");
 		reverb_enabled = config_boolean("audio.reverb");
 		doppler_enabled = config_boolean("audio.doppler");
+		night_enabled = !strcmp(config_string("audio.listening_mode"), "night");
 		sound_on = config_boolean("audio.enabled");
 		log_voices = config_boolean("debug.audio_log");
 		snprintf(spatial_setting, sizeof(spatial_setting), "%s", config_string("audio.spatial"));

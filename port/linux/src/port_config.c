@@ -660,6 +660,11 @@ static const struct config_setting config_settings[] =
 		"images above a sound's own rate through; \"sinc\" with a band-limited low\n"
 		"pass, which keeps them out; \"linear\" between neighbouring samples,\n"
 		"brighter for the aliasing it lets through." },
+	{ "audio.listening_mode", _config_string, "\"default\"", "HALO_AUDIO_LISTENING_MODE", _environment_value,
+		_platform_all,
+		"How wide the sound's range of loudness is: \"default\" plays the mix as\n"
+		"it is; \"night\" evens it out for quiet play, bringing quiet sounds and\n"
+		"speech up and loud ones (explosions, gunfire) down." },
 	{ "audio.voice_chat", _config_string, "\"push_to_talk\"", "HALO_VOICE_CHAT", _environment_value, _platform_all,
 		"Talking in network games' voice chat: \"push_to_talk\" (while\n"
 		"controls.push_to_talk is held; the microphone opens the first time),\n"
@@ -4725,6 +4730,7 @@ static const struct
 		"purple", "cyan", "cobalt", "orange", "teal", "sage", "brown", "tan", "maroon", "salmon", NULL }, NULL },
 	{ "audio.resampler", { "xbox", "sinc", "linear", NULL }, NULL },
 	{ "audio.spatial", { "auto", "headphones", "speakers", NULL }, "auto" },
+	{ "audio.listening_mode", { "default", "night", NULL }, "default" },
 	{ "audio.voice_chat", { "push_to_talk", "open_mic", "off", NULL }, NULL },
 	{ "input.touch_controls", { "auto", "on", "off", NULL }, NULL },
 	{ "input.touch_crouch", { "toggle", "hold", NULL }, NULL },
