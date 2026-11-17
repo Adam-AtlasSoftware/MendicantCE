@@ -5103,9 +5103,10 @@ static void stream_gbuffer_phase(void *context, uint32_t value)
 		gbuffer.ready = 1;
 		gbuffer.drawn = 0;
 		/* (the albedo target, where a material has maps: cleared to 0, no
-		pack's albedo) */
+		pack's albedo; only a pack's twins write it, so its write mask is
+		not the words': where the device lets each target have its own) */
 		gbuffer.albedo_drawn = 0;
-		gbuffer.albedo_bound = gbuffer.pack_materials &&
+		gbuffer.albedo_bound = gbuffer.pack_materials && stream.capabilities.independent_blend &&
 			(gbuffer.albedo = prepass_image(gbuffer.albedo, XGPU_VULKAN_FORMAT_RGBA8, color->width, color->height)) != NULL;
 		gbuffer.material = gbuffer.instance = gbuffer.flags = 0;
 		memset(gbuffer.uniform_key, 0, sizeof(gbuffer.uniform_key));

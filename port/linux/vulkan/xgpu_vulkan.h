@@ -196,6 +196,10 @@ struct xgpu_vulkan_capabilities
 	images too (XGPU_VULKAN_BINDING_MATERIAL on): where a pixel shader may
 	sample that many images */
 	int materials;
+	/* a pipeline's colour targets may each be written its own way
+	(independentBlend): the G-buffer's albedo target, which only a pack's
+	twins write (PRISM v4 M4's materials; none where it cannot be) */
+	int independent_blend;
 };
 void xgpu_vulkan_capabilities(struct xgpu_vulkan_capabilities *capabilities);
 

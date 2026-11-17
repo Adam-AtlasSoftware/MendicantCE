@@ -7742,6 +7742,9 @@ static int device_make(const struct xgpu_vulkan_options *options)
 	features.features.textureCompressionBC = available.features.textureCompressionBC;
 	features.features.textureCompressionASTC_LDR = available.features.textureCompressionASTC_LDR;
 	features.features.fragmentStoresAndAtomics = available.features.fragmentStoresAndAtomics;
+	/* (the G-buffer's albedo target, written by some of the pass's draws
+	alone: a colour target's write mask its own) */
+	features.features.independentBlend = available.features.independentBlend;
 	features.features.shaderImageGatherExtended = VK_FALSE;
 	timeline.timelineSemaphore = VK_TRUE;
 	query_reset.hostQueryReset = VK_TRUE;
@@ -7906,6 +7909,7 @@ static int device_make(const struct xgpu_vulkan_options *options)
 		VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT |
 		VK_FORMAT_FEATURE_TRANSFER_DST_BIT);
 	vk.capabilities.fragment_stores = available.features.fragmentStoresAndAtomics;
+	vk.capabilities.independent_blend = available.features.independentBlend;
 	vk.capabilities.scaled_shorts = format_has(VK_FORMAT_R16G16_SSCALED, 1, VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT) &&
 		format_has(VK_FORMAT_R16G16B16_SSCALED, 1, VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT) &&
 		format_has(VK_FORMAT_R16G16B16A16_SSCALED, 1, VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT) &&

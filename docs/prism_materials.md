@@ -113,7 +113,9 @@ maps. Once CE's diffuse texture pass is drawn into the base target, before the d
 `BASE_TEXTURED`, which `render_window` sends after `structure_render_diffuse_texture`), the level's pixels of a pack's
 or mod's material take its colour in the base target's place (`xgpu_vulkan_post_albedo_over`): the decals (dirt,
 scorch marks, bullet holes) lie over it as over CE's, and the resolve, its views and PRISM Raster's light read it as
-they read CE's. An object's base colour is in the G-buffer's first word, as before.
+they read CE's. An object's base colour is in the G-buffer's first word, as before. The albedo target is written by a
+pack's twins alone, its write mask not the other targets', so it needs the device's `independentBlend`; where that is
+missing, the materials are drawn at the automatic tier.
 
 The images are streamed as `display.prism_materials`' are: each is usable once its levels from 256 texels down are
 resident, the uber-shader drawing the automatic tier's values and CE's bump map until then.
