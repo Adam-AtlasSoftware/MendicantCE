@@ -674,6 +674,7 @@ boolean menu_studio_note_field(wchar_t *line, long size);
 #include "interface/ui_widget_event_handler_functions.h"
 #include "interface/ui_widget_text_search_and_replace_functions.h"
 #include "interface/virtual_keyboard.h"
+#include "keyboard.h" /* port: port/linux/game/keyboard.c */
 #include "main/main.h"
 #include "memory/stack_memory_pool.h"
 #include "networking/network_client_manager.h"
@@ -9014,6 +9015,9 @@ static void ui_widgets_process_mouse(
 	pointer_active = halo_ui_pointer_update(ui_mouse_menus_active(), &pointer) != 0;
 	if (pointer_active)
 		ui_mouse_pointer_is_touch = pointer.touch != 0;
+	/* port: the on-screen keyboard's pointer, which it reads itself
+	(port/linux/game/keyboard.c) */
+	keyboard_pointer(&pointer, pointer_active);
 	/* port: (ui_widget_port_pointer) */
 	ui_widget_port_pointer_active = pointer_active;
 	if (pointer_active)
@@ -11251,8 +11255,11 @@ static boolean ui_check_for_pause_game(
 			gamepad_index < MAXIMUM_NUMBER_OF_LOCAL_PLAYERS;
 			gamepad_index++)
 		{
+			/* port: not a player's whose pop-up is up (the keyboard's Start:
+			done) */
 			if (input_has_gamepad(gamepad_index) &&
 				local_player_exists(gamepad_index) &&
+				!ui_widget_port_popups[gamepad_index] &&
 				input_get_gamepad_state(gamepad_index)->
 					buttons[_gamepad_binary_button_start] == 1)
 			{

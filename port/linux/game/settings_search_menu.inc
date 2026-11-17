@@ -38,11 +38,6 @@ its page) and lays them out under the way to them; this takes what is typed.
 #define SETTINGS_SEARCH_NAME \
 	"pc\\main_menu\\settings_select\\player_setup\\player_profile_edit\\settings_search\\settings_search_screen"
 
-boolean virtual_keyboard_port_launch(wchar_t *text_buffer, word buffer_size, wchar_t const *title,
-	wchar_t const *caption);
-boolean virtual_keyboard_active(void);
-boolean virtual_keyboard_last_exit_saved_text(void);
-
 static struct
 {
 	/* what is typed: the rows found are its */
@@ -129,7 +124,7 @@ static void settings_search_keys(struct widget_instance *list)
 {
 	struct widget_instance *screen = screen_of(list);
 
-	if (!settings_search_on() || text_field_editing(NULL) || virtual_keyboard_active() || controls_page(screen) ||
+	if (!settings_search_on() || text_field_editing(NULL) || keyboard_active() || controls_page(screen) ||
 		pad_editor_page(screen))
 	{
 		return;
@@ -210,7 +205,7 @@ static void settings_search_keyboard(void)
 	for (index = 0; settings_search.typed[index] && index < SETTINGS_SEARCH_LENGTH; index++)
 		settings_search.keyboard_text[index] = (wchar_t)(unsigned char)settings_search.typed[index];
 	settings_search.keyboard_text[index] = 0;
-	settings_search.keyboard_up = virtual_keyboard_port_launch(settings_search.keyboard_text,
+	settings_search.keyboard_up = keyboard_field_launch(settings_search.keyboard_text,
 		(word)sizeof(settings_search.keyboard_text), L"SEARCH",
 		L"FIND A SETTING");
 }
@@ -428,10 +423,10 @@ static void settings_search_update(struct widget_instance *list)
 	halo_keyboard_settings_keys(TRUE);
 	/* (the on-screen keyboard closed: its DONE's text searched for; B, or
 	nothing to search for, back to where the search was opened) */
-	if (settings_search.keyboard_up && !virtual_keyboard_active())
+	if (settings_search.keyboard_up && !keyboard_active())
 	{
 		settings_search.keyboard_up = FALSE;
-		if (virtual_keyboard_last_exit_saved_text())
+		if (keyboard_last_kept())
 		{
 			for (index = 0; settings_search.keyboard_text[index] && index < SETTINGS_SEARCH_LENGTH; index++)
 			{
@@ -456,7 +451,7 @@ static void settings_search_update(struct widget_instance *list)
 		settings_search_type(list);
 	}
 	/* (letters typed with the focus on a row: typed on in the field) */
-	if (!text_field_editing(NULL) && !virtual_keyboard_active() &&
+	if (!text_field_editing(NULL) && !keyboard_active() &&
 		settings_search_keys_read(settings_search.typed, sizeof(settings_search.typed), FALSE))
 	{
 		settings_search_type(list);

@@ -69,6 +69,7 @@ centred, and the bar's wide layout reaches the screen's edges up to 16:9.
 | `<button>` | `key` (`accept`, `back`, `x`, `y`, `lb`, `rb`, `lt`, `rt`, `r3`, `view`, `dpad`), `label`, `side`, `do`, `width`, `touch-width`, `if`, `when` | One hint in the bar: the key's picture (on the keyboard, the key the menus use for it) and its word. `do` is the action the key (anywhere on the screen) and a click run; without it, the key is pressed. In a tall screen's bar (below), `width` is its least width, `if` a binding that must have a value for it to be shown, two buttons of one key share one place, shown as their `if`s say, and the buttons run from the left one after another, but those of `side="right"` (written after the rest) end at the right margin, as Select Profile's BACK at the left and OK, CREATE NEW and DELETE at the right (on a touchscreen, `side` changes nothing; on a wide screen those of `side="right"` keep to its right edge, wherever their place); `touch-width` is its width on a touchscreen (the bar's own by default). `dpad`'s picture is the D-pad's left and right (on the keyboard, the left and right arrow keys' caps, `<` and `>`, which are the menus' left and right) and no key presses it: it is a click's, a tap's or A's on it. A prompt hidden by its `if` leaves no gap: the shown ones are laid out again as their `if`s change |
 | `<colors>` | `id` | The player profile's colors, one item each, under one another in its name and its color (white while focused). It is the screen's list (a screen has one `<list>`, `<cards>` or `<colors>`). The profile's own color is focused first. A chooses the color for the profile being edited, as the PC version's color picker did, and goes back. No shipped screen uses it now (Profile Color is a tall screen, its colors the `profile.colors` table's); it is kept for a simple screen of the colors, with `<spartan color="focus">` beside them |
 | `<spartan>` | `x`, `y`, `width`, `height`, `touch-height`, `color` (`focus`, `profile`, or a binding), `players` (1 to 4) | The Spartan, which the game draws (port/linux/game/menu_spartan.c) standing in this box of the 640 by 480 canvas, its feet at the box's foot, as tall as the box. Each Spartan is drawn in a view of its own where its block is in the screen's order: over the screen's background and the blocks before it, under those after, with its own fixed camera looking at it from about its knees, a little up, as the original pictures were taken (one at a screen's edge is drawn as one in its middle, not seen from the side), depth and light, so nothing of the menus' scene (the ring, the sky) cuts it and the scene's camera never moves or tilts it. It takes no room in the layout. `color="focus"` follows the focused `<colors>` item; `profile` (the default) is the color of the profile being edited, else the player's own, live as it changes; any other word is a binding, read each frame, whose value is the color's word: a profile color's number, `random`, or a team game's `red` or `blue` (as the game gives its teams their colors); while it has no value there is neither Spartan nor picture. A binding of a screen's own `<spartan>` may give several words, up to 8, each a place side by side (`-` an empty place): a lineup. `players` puts that many side by side, each its local player's profile's color. A screen has one `<spartan>` of its own and one in each `<panel>`; `touch-height` is its height on a touchscreen, `when` the platforms it is on. A random color's Spartan cycles through the profile colors in their list's order, one a second (each held three quarters of a second, then blended into the next), on the menus' frame clock, so it cycles while the game is paused too; side by side, each random one is an eighth of the round on from the one before. Where there is no Spartan (no multiplayer map exported one, a refused file, `display.menu_pictures` off, no profile), the box shows the original picture of the color (ui.map's `player_color_marine_large`, frame 18, the "?", for random or no profile). It stands in the rifle's idle, aimed nearly at the camera (the rifle at its shoulder, its muzzle at the viewer, as the original pictures hold it), both hands on the rifle as a unit's are (the rifle class's weapon IK puts the left hand on the rifle's forend; off while it reloads or readies, whose own hands are blended to), and every 10 to 20 seconds, each at its own times (never two starting together), fidgets: reloads, checks its weapon (puts it away and readies it again), looks around (its aim and head turned slowly to one side and the other, through the cyborg's aiming and looking screens) or dips into a crouch and stands again, each blended in from the idle and back out to it; all on the menus' frame clock, drawn only. It is gone as soon as its screen closes |
+| `<keyboard/>` | | The on-screen keyboard's block ("The on-screen keyboard", below): the game draws it and reads its input; a screen with one is a pop-up. A screen has one |
 | `<stick>` | `id` (required: `left`, `right`), `label` (required), `x`, `y` (required), `value`, `detail`, `hint`, `radius`, `when` | A stick's reading (Stick Test's): its label, large, at the top of a column 240 wide about `x`, from `y`; under it the stick's circle, `radius` (16 to 120, 88 by default) round, which the engine draws (menu_screen.c's `menu_screen_widget_drawing`, `stick_test_menu.inc`'s `pc_menu_stick_test_draw`): its travel, its outer and inner dead zones (round, or square for each direction's own), the raw reading a white dot and the reading after the dead zones a blue one (without a controller, the rings alone); under the circle its `value` and `detail`, filled again every frame (a line whose binding has no value empty), and its `hint`, a line. It takes no room in the layout. A screen has one of each id |
 
 ### A box of rows: the pause menu's
@@ -519,9 +520,9 @@ newest lines, each name in its team's colour (no team's blue, the host's
 notices pale gold), and the line being typed. T (or Y: the lobby has one
 channel, everyone, as its voice has: its teams are not yet the game's, and
 anyone may change theirs) begins a line on the keyboard; on a controller LB
-(CHAT) or A on the chat's line opens the on-screen keyboard (the game's own,
-network_chat.c's: D-pad Up moves the lobby's focus here), and on a touchscreen
-a tap on it. The sending, the host's relay, its rate, its refusals (links),
+(CHAT) or A on the chat's line opens the on-screen keyboard over the lobby
+("The on-screen keyboard", below; D-pad Up moves the lobby's focus here), and
+on a touchscreen a tap on it. The sending, the host's relay, its rate, its refusals (links),
 its word filter and its mutes are the game's chat's (port/linux/NETCODE.md,
 "Text chat"); the lobby's lines are kept apart from a game's, and neither
 shows the other's. The host's Host Controls has LOBBY TEXT CHAT and LOBBY
@@ -646,6 +647,47 @@ deletes the chosen one, B goes back. The list's model is the generated screen's 
 `profile_list`: the profiles read, the row chosen, its scroll), and the
 actions run the generated screen's functions and open its screens. The
 classic engine keeps its own screen and the original pictures.
+
+## The on-screen keyboard
+
+`screens/keyboard.xml` is the new menus' one keyboard (#1135), for a name (a
+profile's, a gametype's), the menus' fields (GAME NAME, PASSWORD, Settings'
+search) and the chat (a game's, the lobby's), with a controller or a pointer:
+`port/linux/game/keyboard.c` opens it (`keyboard_open`) as a pop-up over the
+screen it is typed for, which waits under it as it was, or over a game's view
+(the chat's, the player's view in split screen), and draws its `<keyboard/>`
+block and reads its input itself; its rules are `keyboard_core.c`'s.
+
+- Its keys are a table (`keyboard_core.c`'s `keyboard_layouts`): QWERTY with
+  its number row, and a page of signs (every one of ASCII's but `|`), each row
+  its keys' kinds, widths and characters, so that another layout (AZERTY,
+  QWERTZ: #1136) is data alone. A name's first letter is a capital; shift,
+  twice quickly caps lock.
+- Holding A on a letter (or the pointer's button, or a finger), or a right
+  click, offers its accents (Latin-1's and Latin Extended-A's,
+  `keyboard_accent_table`), only those the text takes (a name: both; a
+  menu's field, a byte a letter: Latin-1's; a chat line: none) and the font
+  draws; left and right (or the pointer) choose, letting go types.
+- X deletes (held, again and again), Y is a space, LB and RB move the cursor,
+  Start (Menu) is done, B cancels (the accents first), the left stick's click
+  is shift; the prompts show the controller's own buttons. The computer's
+  keys type into it, Enter done and Esc cancel.
+- It is in the middle of the menus' 640 by 480 (past 4:3 the room either side
+  is margins), with bigger keys where the Steam Deck's controls play; phones
+  keep their system's keyboard, the pop-up showing the text alone.
+- A name is kept as the game's keyboard kept one (`player_name_clean`, and no
+  other saved file's name); a field's and the chat's text as they took it.
+
+Which keyboard a mode has is decided in `keyboard.c` alone (`keyboard_new`):
+the new menus (the menu engine, the PC version's menus) have this one; the
+original-faithful modes (`display.menu_engine = "classic"`, `display.menus =
+"xbox"`) keep the game's own (`source/interface/virtual_keyboard.c`) and the
+chat's (`network_chat.c`). Every caller asks it (`keyboard_name_launch`,
+`keyboard_field_launch`, `keyboard_active`, `keyboard_last_kept`).
+`tools/harness/tests/test_keyboard.py` tests the table, the accents, the
+shortcuts, a name, a field and a chat line typed, the fit and each mode's
+keyboard; `debug.menu_open`'s `open keyboard` opens it on a name, over the
+screen (its picture).
 
 ## Stick Test
 

@@ -131,6 +131,7 @@ their handlers open opens.
 #include "network_map_vote.h"
 #include "text/draw_string.h"
 #include "halo_keyboard.h"
+#include "keyboard.h" /* port: port/linux/game/keyboard.c */
 #include "menu_search.h"
 #include "menu_table.h"
 /* (internet play's server browser: the platform layer's) */
@@ -6639,7 +6640,7 @@ static void text_field_end(boolean keep)
 (shown widened, game_name_done's too): ASCII's visible ones, and Latin-1's
 letters with a mark, U+00C0 to U+00FF but for the signs x and / (#1134: a
 layout's é, ñ, ü; a password's too). Latin Extended-A's (ł), beyond a
-byte, are the on-screen keyboard's alone (virtual_keyboard.c) */
+byte, are a name's alone (the on-screen keyboard's: keyboard.c) */
 static boolean text_field_character_kept(wchar_t character)
 {
 	unsigned long code = (unsigned long)character;
@@ -8299,7 +8300,23 @@ static void server_password_done(char const *text)
 	snprintf(multiplayer.game_password, sizeof(multiplayer.game_password), "%s", text);
 }
 
-/* "ss edit server password" (its row's A: begins, or ends) */
+/* PASSWORD's on-screen keyboard (a controller's, the new menus'): its text,
+and the password typed on it the game's, unless it was cancelled */
+static wchar_t server_password_keyboard_text[PASSWORD_LENGTH + 1];
+
+static void server_password_keyboard_closed(boolean kept, wchar_t const *text, void *context)
+{
+	char typed[PASSWORD_LENGTH + 1];
+
+	if (!kept)
+		return;
+	wide_to_text(text, typed, sizeof(typed));
+	server_password_done(typed);
+}
+
+/* "ss edit server password" (its row's A: begins, or ends): with a
+controller's prompts, the new menus' on-screen keyboard, its stars for the
+letters (as GAME NAME's); else the field typed into */
 static boolean server_password_edit(struct widget_instance *row)
 {
 	if (text_field_editing(row))
@@ -8307,16 +8324,31 @@ static boolean server_password_edit(struct widget_instance *row)
 		text_field_end(TRUE);
 		return TRUE;
 	}
+	if (keyboard_new() && !halo_keyboard_prompts() && !ui_widget_port_touch_menus() && !keyboard_active())
+	{
+		struct keyboard_request request;
+		short index;
+
+		for (index = 0; multiplayer.game_password[index] && index < PASSWORD_LENGTH; index++)
+			server_password_keyboard_text[index] = (wchar_t)(unsigned char)multiplayer.game_password[index];
+		server_password_keyboard_text[index] = 0;
+		memset(&request, 0, sizeof(request));
+		request.kind = KEYBOARD_FIELD;
+		request.local_player = NONE;
+		request.controller = NONE;
+		request.text = server_password_keyboard_text;
+		request.maximum = PASSWORD_LENGTH;
+		request.title = L"PASSWORD";
+		request.caption = L"The password players type to join";
+		request.masked = TRUE;
+		request.closed = server_password_keyboard_closed;
+		if (keyboard_open(&request))
+			return TRUE;
+	}
 	text_field_begin_masked(row, multiplayer.game_password, PASSWORD_LENGTH, server_password_done);
 	return TRUE;
 }
 
-/* (virtual_keyboard.c's: the on-screen keyboard, with a title and caption
-of the caller's) */
-boolean virtual_keyboard_port_launch(wchar_t *text_buffer, word buffer_size, wchar_t const *title,
-	wchar_t const *caption);
-boolean virtual_keyboard_active(void);
-boolean virtual_keyboard_last_exit_saved_text(void);
 
 /* GAME NAME's on-screen keyboard (a controller's): up, and the name typed
 on it, taken as it closes with its text kept (server_name_keyboard_closed) */
@@ -8339,11 +8371,11 @@ static boolean server_name_edit(struct widget_instance *row)
 		text_field_end(TRUE);
 		return TRUE;
 	}
-	if (!halo_keyboard_prompts() && !ui_widget_port_touch_menus() && !virtual_keyboard_active())
+	if (!halo_keyboard_prompts() && !ui_widget_port_touch_menus() && !keyboard_active())
 	{
 		csmemcpy(server_name_keyboard.text, multiplayer.game_name, sizeof(server_name_keyboard.text));
 		server_name_keyboard.text[NUMBEROF(server_name_keyboard.text) - 1] = 0;
-		server_name_keyboard.up = virtual_keyboard_port_launch(server_name_keyboard.text,
+		server_name_keyboard.up = keyboard_field_launch(server_name_keyboard.text,
 			(word)sizeof(server_name_keyboard.text), L"GAME NAME", L"The name the game shows in the lists of games");
 		if (server_name_keyboard.up)
 			return TRUE;
@@ -8359,10 +8391,10 @@ static void server_name_keyboard_closed(void)
 {
 	char text[TEXT_FIELD_LENGTH];
 
-	if (!server_name_keyboard.up || virtual_keyboard_active())
+	if (!server_name_keyboard.up || keyboard_active())
 		return;
 	server_name_keyboard.up = FALSE;
-	if (!virtual_keyboard_last_exit_saved_text() || !server_name_keyboard.text[0])
+	if (!keyboard_last_kept() || !server_name_keyboard.text[0])
 		return;
 	wide_to_text(server_name_keyboard.text, text, sizeof(text));
 	game_name_done(text);

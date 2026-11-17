@@ -39,6 +39,7 @@ kept on the item of the same id.
 #include "menu_spartan.h"
 #include "network_host_controls.h"
 #include "benchmark.h" /* port: port/linux/game/benchmark.c */
+#include "keyboard.h" /* port: port/linux/game/keyboard.c */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -647,6 +648,10 @@ struct screen_place
 	/* (a controller's key (MENU_SCREEN_KEY_*), before the screen's own and its
 	focus take it: MENU_SCREEN_KEY_FREE, theirs; NULL, all theirs) */
 	int (*key)(short controller, int key);
+	/* (an event of the screen's, before everything: TRUE, its own) */
+	int (*event)(struct event_record const *event);
+	/* (the screen closed) */
+	void (*closed)(void);
 };
 
 static struct screen_place const screen_places[] =
@@ -694,6 +699,9 @@ static struct screen_place const screen_places[] =
 	/* (Stick Test, as Advanced Stick Settings' STICK TEST › opens it: its
 	sticks read each frame it is drawn, stick_test_menu.inc) */
 	{ "stick_test", "screens\\stick_test", pc_menu_stick_test_frame, NULL },
+	/* (the on-screen keyboard, a pop-up: keyboard.c opens it, reads its
+	input each frame it is drawn and takes every event of its own) */
+	{ "keyboard", "screens\\keyboard", keyboard_frame, NULL, NULL, keyboard_event, keyboard_screen_closed },
 };
 
 /* ---------- the screens open */
@@ -790,6 +798,8 @@ struct screen_open
 	/* (its <stick>s) */
 	struct screen_stick sticks[SCREEN_MAXIMUM_STICKS];
 	long stick_count;
+	/* (its <keyboard>'s anchor, where keyboard.c draws it) */
+	struct widget_instance *keyboard_area;
 };
 
 static struct
@@ -812,6 +822,8 @@ static struct
 		dialog_dim_tag;
 	/* (a <stick>'s) */
 	long stick_tag, stick_label_tag, stick_value_tag, stick_note_tag, stick_hint_tag;
+	/* (a <keyboard>'s) */
+	long keyboard_area_tag;
 } screens = { FALSE };
 
 static void screens_names_give(void)
@@ -901,6 +913,7 @@ static boolean screen_blocks_found(void)
 	screens.stick_value_tag = screen_block_tag("pc\\screens\\stick_value");
 	screens.stick_note_tag = screen_block_tag("pc\\screens\\stick_note");
 	screens.stick_hint_tag = screen_block_tag("pc\\screens\\stick_hint");
+	screens.keyboard_area_tag = screen_block_tag("pc\\screens\\keyboard_area");
 	if (screens.title_art_tag == NONE || screens.list_tag == NONE || screens.item_tag == NONE ||
 		screens.hint_tag == NONE || screens.prompt_left_tag == NONE || screens.button_tag == NONE ||
 		screens.cards_tag == NONE || screens.card_tag == NONE || screens.card_title_tag == NONE ||
@@ -915,7 +928,7 @@ static boolean screen_blocks_found(void)
 		screens.dialog_text_tag == NONE || screens.dialog_list_tag == NONE || screens.dialog_choice_tag == NONE ||
 		screens.dialog_foot_tag == NONE || screens.dialog_dim_tag == NONE || screens.stick_tag == NONE ||
 		screens.stick_label_tag == NONE || screens.stick_value_tag == NONE || screens.stick_note_tag == NONE ||
-		screens.stick_hint_tag == NONE)
+		screens.stick_hint_tag == NONE || screens.keyboard_area_tag == NONE)
 	{
 		platform_log("menus: the screens' blocks (screens/blocks.xml) are not all there");
 		screens.blocks_found = FALSE;
@@ -1164,6 +1177,7 @@ static boolean screen_build(struct screen_open *open, struct menu_screen const *
 	open->colors = FALSE;
 	open->spartan_count = 0;
 	open->stick_count = 0;
+	open->keyboard_area = NULL;
 	focus_id = screens.focused[place_index][0] ? screens.focused[place_index] : NULL;
 	top = 0;
 	spaces_left = spaces;
@@ -1381,6 +1395,10 @@ static boolean screen_build(struct screen_open *open, struct menu_screen const *
 			screen_spartan_add(open, block, screen_widget_add(widget, screens.spartan_tag,
 				(short)(block->box_x + (block->box_width - SCREEN_SPARTAN_PICTURE_WIDTH) / 2),
 				(short)(block->box_y + block->box_height - SCREEN_SPARTAN_PICTURE_HEIGHT)));
+			break;
+		case MENU_SCREEN_KEYBOARD:
+			/* (its anchor over the screen's other blocks: keyboard.c draws it) */
+			open->keyboard_area = screen_widget_add(widget, screens.keyboard_area_tag, 0, 0);
 			break;
 		case MENU_SCREEN_STICK:
 			/* (where its box is, over the screen's other blocks: its label,
@@ -2050,7 +2068,14 @@ void menu_screen_closed(struct widget_instance *widget)
 			tall_search_screen = NULL;
 		tall_screens[open - screens.open] = NULL;
 	}
-	memset(open, 0, sizeof(*open));
+	{
+		void (*closed)(void) = open->place ? open->place->closed : NULL;
+
+		memset(open, 0, sizeof(*open));
+		/* (its place told: the on-screen keyboard's, closed by another than it, a Cancel) */
+		if (closed)
+			closed();
+	}
 }
 
 /* the item focused now (its index, NONE for none) */
@@ -2271,6 +2296,9 @@ void menu_screen_widget_drawing(struct widget_instance const *widget, point2d of
 				pc_menu_stick_test_draw(stick->stick, (real)(offset.x + widget->horizontal_offset) + radius,
 					(real)(offset.y + widget->vertical_offset) + radius, radius);
 		}
+		/* (its <keyboard>, where its anchor is) */
+		if (open->widget && open->keyboard_area == widget)
+			keyboard_draw((real)(offset.x + widget->horizontal_offset), (real)(offset.y + widget->vertical_offset));
 		/* (its chat's on-screen keyboard, over everything) */
 		if (open->widget && tall_screens[index] && tall_screens[index]->chat_keyboard == widget)
 			tall_chat_keyboard_draw(tall_screens[index], offset);
@@ -2544,7 +2572,8 @@ static struct screen_place const *screen_place_named(char const *name)
 }
 
 /* (ui_widget.c) whether a screen opens as a pop-up: a hand-written screen
-of the menu engine's with a <dialog> (the Quit question, Save Changes),
+of the menu engine's with a <dialog> (the Quit question, Save Changes) or a
+<keyboard> (the on-screen keyboard),
 opened over the screen up without deleting it or adding to its history,
 which stays as it was under it, taking nothing, until the pop-up closes */
 int menu_screen_popup(long tag_index)
@@ -2562,7 +2591,7 @@ int menu_screen_popup(long tag_index)
 	screen = menu_screens_find(place->screen);
 	for (index = 0; screen && index < screen->block_count; index++)
 	{
-		if (screen->blocks[index].kind == MENU_SCREEN_DIALOG)
+		if (screen->blocks[index].kind == MENU_SCREEN_DIALOG || screen->blocks[index].kind == MENU_SCREEN_KEYBOARD)
 			return TRUE;
 	}
 	return FALSE;
@@ -2690,6 +2719,9 @@ boolean menu_screen_back(struct widget_instance *widget, struct event_record *ev
 	struct screen_open *open = screen_open_of(widget);
 
 	*deleted = FALSE;
+	/* (a screen that takes its events itself: the on-screen keyboard's) */
+	if (open && open->place->event && open->place->event(event))
+		return TRUE;
 	/* (a screen that takes keys by controller (Add Player's: a controller
 	not in the game joining with its own), before its focus and its own
 	keys: those it takes, and its done, back to the screen before) */

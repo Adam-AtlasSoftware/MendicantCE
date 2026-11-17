@@ -63,7 +63,7 @@ symbols in this file:
 #include "input/input_abstraction.h"
 #include "interface/player_ui.h"
 #include "interface/ui_widget.h"
-#include "interface/virtual_keyboard.h"
+#include "keyboard.h" /* port: port/linux/game/keyboard.c */
 #include "math/real_math.h"
 #include "networking/network_game_globals.h"
 #include "scenario/scenario.h"
@@ -1162,9 +1162,9 @@ void input_abstraction_update(
 				}
 				if (show_error == TRUE)
 				{
-					if (virtual_keyboard_active())
+					if (keyboard_active())
 					{
-						virtual_keyboard_close();
+						keyboard_close();
 					}
 					display_error_deferred(error_code, error_controller, pause_game, pause_game);
 				}

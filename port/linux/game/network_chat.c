@@ -116,6 +116,7 @@ to no one, and the host's notices say what came of it.
 #include "network_chat.h"
 #include "text_filter.h"
 #include "halo_keyboard.h"
+#include "keyboard.h"
 #include "server_director.h"
 #include "network_host_game.h"
 #include "network_standard.h"
@@ -419,6 +420,12 @@ static struct
 	short right;
 	short bottom;
 } chat_keyboard;
+
+/* the new menus' on-screen keyboard (keyboard.c, a pop-up over the lobby or
+the player's view) in place of this one: the line typed on it (sent as it is
+done: chat_keyboard_closed) */
+static wchar_t chat_keyboard_text[CHAT_TEXT_SIZE];
+static boolean chat_keyboard_new_open(short controller);
 
 /* its keys' characters but the last row's, the letters' and the symbols' */
 static char const *const chat_keyboard_letters[CHAT_KEYBOARD_ROWS - 1] =
@@ -2277,6 +2284,12 @@ static void chat_lobby_input_begin(
 	chat_input.physical = keyboard && controller >= 0 && controller_remap_connected(controller);
 	while (input_get_key(&key))
 		;
+	/* (the new menus': their own keyboard, over the lobby) */
+	if (keyboard && keyboard_new())
+	{
+		chat_keyboard_new_open(controller);
+		return;
+	}
 	if (keyboard)
 	{
 		chat_keyboard.opening_buttons = controller >= 0 ? halo_chat_pad_buttons_for_port(controller) :
@@ -2624,6 +2637,59 @@ static void chat_input_end(
 	chat_keyboard.opening_buttons = 0;
 	chat_keyboard.drawn = FALSE;
 	chat_scroll = 0;
+	/* (the new menus' keyboard, cancelled: chat_keyboard_closed ends nothing
+	more) */
+	if (keyboard_chat_up())
+		keyboard_close();
+}
+
+/* the new menus' keyboard closed: its line sent (done), and the line ended */
+static void chat_keyboard_closed(
+	boolean kept,
+	wchar_t const *text,
+	void *context)
+{
+	short index;
+
+	if (!chat_input.active)
+		return;
+	if (kept)
+	{
+		for (index = 0; text[index] && index < CHAT_TEXT_SIZE - 1; index++)
+			chat_input.text[index] = text[index] < 0x80 ? (char)text[index] : '?';
+		chat_input.text[index] = 0;
+		chat_send(chat_input.channel, chat_input.text, TRUE, TRUE);
+	}
+	chat_input_end();
+}
+
+/* the new menus' keyboard opened for the line begun (a controller's, NONE:
+the first's, or a tap's): over the lobby, or over the typing player's view;
+the line ended where it cannot be */
+static boolean chat_keyboard_new_open(
+	short controller)
+{
+	struct keyboard_request request;
+
+	memset(&request, 0, sizeof(request));
+	request.kind = KEYBOARD_CHAT;
+	request.local_player = chat_input.lobby ? NONE : chat_input.controller;
+	request.controller = controller;
+	chat_keyboard_text[0] = 0;
+	request.text = chat_keyboard_text;
+	request.maximum = CHAT_TEXT_SIZE - 1;
+	request.title = L"CHAT";
+	request.caption = chat_input.lobby ? L"To everyone in the lobby" :
+		chat_input.channel == _chat_channel_team ? L"To your team" :
+		chat_input.channel == _chat_channel_vehicle ? L"To your vehicle" : L"To everyone";
+	request.closed = chat_keyboard_closed;
+	if (keyboard_open(&request))
+	{
+		error(_error_log, "chat: the on-screen keyboard opened");
+		return TRUE;
+	}
+	chat_input_end();
+	return FALSE;
 }
 
 /* the line's last character gone */
@@ -2833,7 +2899,7 @@ static void chat_report_update(
 unsigned char network_chat_keyboard_open(
 	void)
 {
-	return chat_input.active && chat_keyboard.open;
+	return chat_input.active && (chat_keyboard.open || keyboard_chat_up());
 }
 
 /* whether the chat is out of sight: a menu up (the pause menu, however it
@@ -2841,7 +2907,10 @@ was opened), a cinematic, or the HUD hidden; no line is typed nor shown */
 static boolean chat_hidden(
 	void)
 {
-	return ui_widgets_active() || cinematic_in_progress() || (hud_scripted_globals && !hud_scripted_globals->show_hud);
+	/* (the new menus' keyboard over a game's view, the line's own, is not a
+	menu: the lines stay shown under it) */
+	return (ui_widgets_active() && !(keyboard_chat_up() && keyboard_over_game())) || cinematic_in_progress() ||
+		(hud_scripted_globals && !hud_scripted_globals->show_hud);
 }
 
 /* (the host) the machines in the game: one gone has its lines' count let go,
@@ -3021,6 +3090,12 @@ void network_chat_update(
 			{
 				chat_input_begin(requested_channel, requested_port, requested_port != NONE);
 				if (!chat_input.active) return;
+				/* (the new menus': their own keyboard, over the player's view) */
+				if (keyboard_new())
+				{
+					chat_keyboard_new_open(requested_port != NONE ? requested_port : 0);
+					return;
+				}
 				chat_keyboard.opening_buttons = requested_port != NONE ?
 					halo_chat_pad_buttons_for_port(chat_input.controller) : halo_chat_pad_buttons();
 				chat_keyboard.held = 0;
@@ -3036,8 +3111,9 @@ void network_chat_update(
 		return;
 	}
 	chat_actions_held = 0;
-	/* (the console, opened over it, takes the keys) */
-	if (console_is_active())
+	/* (the console, opened over it, takes the keys; the new menus' keyboard
+	reads its own) */
+	if (console_is_active() || keyboard_chat_up())
 		return;
 	if (chat_keyboard.open)
 		chat_keyboard_update(pad_pressed, pad);
@@ -3101,7 +3177,7 @@ void network_chat_update(
 
 short network_chat_controller(void)
 {
-	return chat_input.active && chat_keyboard.open ? chat_input.controller : NONE;
+	return chat_input.active && (chat_keyboard.open || keyboard_chat_up()) ? chat_input.controller : NONE;
 }
 
 boolean network_chat_typing(
