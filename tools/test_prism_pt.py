@@ -29,10 +29,12 @@ def test_the_glsl_has_every_pass_and_shares_the_bakes_scene():
     for name in ("light", "temporal", "fix", "atrous", "composite", "reference", "reference_stats"):
         assert f"//@pass {name}\n" in text
     # (the bake's own functions, not copies: the scene traced and the bake made by one estimator)
-    for used in ("lamp_pick(", "lamp_direction(", "lamp_visible(", "domes_at(", "fixture_light(", "sky_along(",
-                 "ambient()", "glow_of(", "albedo_of("):
+    for used in ("grid_cell(", "lamp_by_power(", "lamp_power(", "GRID_SEEN", "GRID_NEAR", "lamp_direction(",
+                 "lamp_visible(", "domes_at(", "fixture_light(", "fixtures_ris(", "sky_along(", "ambient()", "glow_of(",
+                 "albedo_of(", "sun_at("):
         assert used in text
-    for copied in ("uint lamp_pick(", "bool lamp_direction(", "vec3 domes_at(", "vec3 sky_along("):
+    for copied in ("uint grid_cell(", "uint lamp_by_power(", "bool lamp_direction(", "vec3 domes_at(",
+                   "vec3 sky_along(", "const float GRID_SEEN"):
         assert copied not in text
 
 

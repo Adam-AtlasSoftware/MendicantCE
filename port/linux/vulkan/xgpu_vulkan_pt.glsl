@@ -543,6 +543,70 @@ void parts(Surface g, vec3 l, vec3 radiance_cos, bool diffuse_only, out vec3 dif
     spe = diffuse_only || c <= 0.0 ? vec3(0.0) : ggx(g, l) / max(c, 1.0e-4) * radiance_cos;
 }
 
+/* a lamp picked at p as the bake's lamp_pick picks it (the cell's seen list,
+its near list, else by power: the same mixture, the same probability), but
+each list searched by halves for the pick and the pick's own list's share
+read at its place: a list is scanned only for the lamp's share in the other
+(each lamp is in a list once) */
+uint list_search(uint at, uint count, float u, out float share)
+{
+    Uints gr = Uints(s.grid);
+    float total = uintBitsToFloat(gr.v[at + 2u * (count - 1u) + 2u]);
+    float x = u * total;
+    uint lo = 0u, hi = count - 1u;
+    while (lo < hi)
+    {
+        uint mid = (lo + hi) / 2u;
+        if (uintBitsToFloat(gr.v[at + 2u * mid + 2u]) < x)
+            lo = mid + 1u;
+        else
+            hi = mid;
+    }
+    float below = lo > 0u ? uintBitsToFloat(gr.v[at + 2u * (lo - 1u) + 2u]) : 0.0;
+    share = (uintBitsToFloat(gr.v[at + 2u * lo + 2u]) - below) / max(total, 1.0e-20);
+    return gr.v[at + 2u * lo + 1u];
+}
+float list_share(uint at, uint count, uint l)
+{
+    Uints gr = Uints(s.grid);
+    for (uint k = 0u; k < count; k++)
+        if (gr.v[at + 2u * k + 1u] == l)
+        {
+            float total = uintBitsToFloat(gr.v[at + 2u * (count - 1u) + 2u]);
+            float below = k > 0u ? uintBitsToFloat(gr.v[at + 2u * (k - 1u) + 2u]) : 0.0;
+            return (uintBitsToFloat(gr.v[at + 2u * k + 2u]) - below) / max(total, 1.0e-20);
+        }
+    return 0.0;
+}
+uint lamp_pick_fast(vec3 p, out float probability)
+{
+    int cell = grid_cell(p);
+    Uints gr = Uints(s.grid);
+    uint seen_at = uint(max(cell, 0)), seen = cell >= 0 ? min(gr.v[seen_at], 64u) : 0u;
+    uint near_at = seen_at + 1u + 2u * seen, near = cell >= 0 ? min(gr.v[near_at], 64u) : 0u;
+    float share_seen = seen > 0u && !term_off(32u) ? GRID_SEEN : 0.0;
+    float share_near = near > 0u && !term_off(32u) ? (seen > 0u ? GRID_NEAR : GRID_SEEN + GRID_NEAR) : 0.0;
+    float u = rnd();
+    uint l;
+    float p_seen = -1.0, p_near = -1.0;
+    if (u < share_seen)
+        l = list_search(seen_at, seen, rnd(), p_seen);
+    else if (u < share_seen + share_near)
+        l = list_search(near_at, near, rnd(), p_near);
+    else
+        l = lamp_by_power();
+    if (seen > 0u && p_seen < 0.0)
+        p_seen = list_share(seen_at, seen, l);
+    if (near > 0u && p_near < 0.0)
+        p_near = list_share(near_at, near, l);
+    probability = (1.0 - share_seen - share_near) * lamp_power(l) / max(s.lamp.x, 1.0e-20);
+    if (seen > 0u)
+        probability += share_seen * max(p_seen, 0.0);
+    if (near > 0u)
+        probability += share_near * max(p_near, 0.0);
+    return l;
+}
+
 /* the lamps, the fixtures and the dynamic lights at the surface: resampled
 importance over candidates (lamp_count from the grid's lamp_pick, the
 fixtures' and the dynamic lights' by count), each its unshadowed diffuse and
@@ -565,7 +629,7 @@ void lights_ris(Surface g, vec3 o, int lamp_count, int fixture_count, int dynami
         for (int c = 0; c < lamp_count; c++)
         {
             float probability;
-            uint lamp = lamp_pick(p, probability);
+            uint lamp = lamp_pick_fast(p, probability);
             if (probability <= 0.0)
                 continue;
             uint at = lamp * 16u;
@@ -740,70 +804,6 @@ bool sample_light(Surface g, int kind, uint index, vec3 y, out vec3 dif, out vec
         return dot(e, e) > 0.0;
     }
     return false;
-}
-
-/* a lamp picked at p as the bake's lamp_pick picks it (the cell's seen list,
-its near list, else by power: the same mixture, the same probability), but
-each list searched by halves for the pick and the pick's own list's share
-read at its place: a list is scanned only for the lamp's share in the other
-(each lamp is in a list once) */
-uint list_search(uint at, uint count, float u, out float share)
-{
-    Uints gr = Uints(s.grid);
-    float total = uintBitsToFloat(gr.v[at + 2u * (count - 1u) + 2u]);
-    float x = u * total;
-    uint lo = 0u, hi = count - 1u;
-    while (lo < hi)
-    {
-        uint mid = (lo + hi) / 2u;
-        if (uintBitsToFloat(gr.v[at + 2u * mid + 2u]) < x)
-            lo = mid + 1u;
-        else
-            hi = mid;
-    }
-    float below = lo > 0u ? uintBitsToFloat(gr.v[at + 2u * (lo - 1u) + 2u]) : 0.0;
-    share = (uintBitsToFloat(gr.v[at + 2u * lo + 2u]) - below) / max(total, 1.0e-20);
-    return gr.v[at + 2u * lo + 1u];
-}
-float list_share(uint at, uint count, uint l)
-{
-    Uints gr = Uints(s.grid);
-    for (uint k = 0u; k < count; k++)
-        if (gr.v[at + 2u * k + 1u] == l)
-        {
-            float total = uintBitsToFloat(gr.v[at + 2u * (count - 1u) + 2u]);
-            float below = k > 0u ? uintBitsToFloat(gr.v[at + 2u * (k - 1u) + 2u]) : 0.0;
-            return (uintBitsToFloat(gr.v[at + 2u * k + 2u]) - below) / max(total, 1.0e-20);
-        }
-    return 0.0;
-}
-uint lamp_pick_fast(vec3 p, out float probability)
-{
-    int cell = grid_cell(p);
-    Uints gr = Uints(s.grid);
-    uint seen_at = uint(max(cell, 0)), seen = cell >= 0 ? min(gr.v[seen_at], 64u) : 0u;
-    uint near_at = seen_at + 1u + 2u * seen, near = cell >= 0 ? min(gr.v[near_at], 64u) : 0u;
-    float share_seen = seen > 0u && !term_off(32u) ? GRID_SEEN : 0.0;
-    float share_near = near > 0u && !term_off(32u) ? (seen > 0u ? GRID_NEAR : GRID_SEEN + GRID_NEAR) : 0.0;
-    float u = rnd();
-    uint l;
-    float p_seen = -1.0, p_near = -1.0;
-    if (u < share_seen)
-        l = list_search(seen_at, seen, rnd(), p_seen);
-    else if (u < share_seen + share_near)
-        l = list_search(near_at, near, rnd(), p_near);
-    else
-        l = lamp_by_power();
-    if (seen > 0u && p_seen < 0.0)
-        p_seen = list_share(seen_at, seen, l);
-    if (near > 0u && p_near < 0.0)
-        p_near = list_share(near_at, near, l);
-    probability = (1.0 - share_seen - share_near) * lamp_power(l) / max(s.lamp.x, 1.0e-20);
-    if (seen > 0u)
-        probability += share_seen * max(p_seen, 0.0);
-    if (near > 0u)
-        probability += share_near * max(p_near, 0.0);
-    return l;
 }
 
 /* the initial reservoir: resampled importance over the candidates (as
@@ -1130,6 +1130,54 @@ float sun_ray(vec3 o, out float blocker)
     return 0.0;
 }
 
+/* the lamps' light at a path's hit (the bake's lamps_ris for a texel's
+normal, its lamps picked by lamp_pick_fast: the same distribution, the
+same estimate) */
+vec3 hit_lamps(vec3 p, vec3 n, vec3 o, int candidates)
+{
+    if (s.counts.z == 0u || s.lamp.x <= 0.0 || s.rig[10].w < 0.5 || term_off(2u))
+        return vec3(0.0);
+    Floats f = Floats(s.lamps);
+    vec3 kept = vec3(0.0), kept_l = vec3(0.0, 0.0, 1.0);
+    float kept_target = 0.0, kept_d = 0.0, sum = 0.0;
+    for (int c = 0; c < candidates; c++)
+    {
+        float probability;
+        uint lamp = lamp_pick_fast(p, probability);
+        if (probability <= 0.0)
+            continue;
+        uint at = lamp * 16u;
+        vec3 a0 = vec3(f.v[at], f.v[at + 1u], f.v[at + 2u]);
+        vec3 a1 = vec3(f.v[at + 3u], f.v[at + 4u], f.v[at + 5u]);
+        vec3 a2 = vec3(f.v[at + 6u], f.v[at + 7u], f.v[at + 8u]);
+        vec3 radiance = vec3(f.v[at + 9u], f.v[at + 10u], f.v[at + 11u]) * s.rig[11].x;
+        vec3 ne = normalize(cross(a1 - a0, a2 - a0));
+        vec3 l;
+        float d, inverse_pdf;
+        if (!lamp_direction(p, a0, a1, a2, ne, l, d, inverse_pdf))
+            continue;
+        float cr = dot(n, l);
+        if (cr <= 0.0)
+            continue;
+        vec3 integrand = radiance * cr / 3.14159265;
+        float target = luma(integrand);
+        float w = target * inverse_pdf / probability;
+        if (!(w > 0.0) || isinf(w))
+            continue;
+        sum += w;
+        if (rnd() * sum <= w)
+        {
+            kept = integrand;
+            kept_target = target;
+            kept_l = l;
+            kept_d = d;
+        }
+    }
+    if (kept_target <= 0.0 || sum <= 0.0 || !lamp_visible(o, kept_l, kept_d))
+        return vec3(0.0);
+    return kept / kept_target * (sum / float(candidates));
+}
+
 /* the reference's path (the bake's path(), but the domes taken at the first
 ray's miss where the point did not take them as lights: a reflection's) */
 vec3 reference_path(vec3 o, vec3 d, int bounces, bool domes_first)
@@ -1149,7 +1197,7 @@ vec3 reference_path(vec3 o, vec3 d, int bounces, bool domes_first)
         light += throughput * glow_of(t);
         vec3 oh = h + nh * 0.03;
         vec3 lh;
-        vec3 ls = sun_at(oh, nh) + lamps_ris(h, nh, oh, 4, lh) + fixtures_ris(h, nh, oh, lh);
+        vec3 ls = sun_at(oh, nh) + hit_lamps(h, nh, oh, 4) + fixtures_ris(h, nh, oh, lh);
         throughput *= albedo_of(t);
         light += throughput * ls;
         if (bounce == bounces - 1)
