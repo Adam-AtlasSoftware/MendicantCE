@@ -11,7 +11,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import (CHECK_FAILED, build, constant, enum_with, function, mutated, needs_32_bit_abi, read,  # noqa: E402
                      run, structure)
-from harness.audio import pcm_permutation_rate  # noqa: E402
+from harness.audio import pcm_permutation_rate, permutation_picker  # noqa: E402
 
 # the tag file's sound, pitch ranges and permutations are read at the game's 32-bit offsets (offsetof)
 pytestmark = needs_32_bit_abi("a sound tag file is read at the offsets of the game's 32-bit structures")
@@ -64,9 +64,7 @@ def generated(fault=None):
                                                          "mods_tag_file_header_valid"]) + "\n"
     loader = read("port/linux/game/mod_sounds.c")
     code += loader[loader.index("/* ---------- constants */"):loader.index("/* Gives `definition` the values")]
-    picker = read("source/sound/sound_definitions.c")
-    code += "\n".join(function(picker, name) for name in ["try_to_reset_permutations",
-                                                           "sound_definition_next_permutation_from_seed"]) + "\n"
+    code += permutation_picker()
     if fault:
         code = mutated(code, *fault)
     return (("types.inc", types), ("under_test.inc", code))
