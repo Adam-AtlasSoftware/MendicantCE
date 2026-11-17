@@ -6619,30 +6619,33 @@ struct settings_slider
 	short stop_count;
 };
 
-/* A volume slider's percentage as the amplitude its setting keeps (#1106):
-the ear hears loudness as the logarithm of the amplitude, so the slider
-spans 60 dB evenly, 1/1000 at 0% to 1 at 100% (an exponential; above 100%,
-on as far: 110%, 2.0, is 6 dB louder), and falls straight to 0, an exact
-mute, below 10%. A linear slider gave 20 dB at its first step above mute
-and 6 dB over its whole top half.
-(dr-lex.be/info-stuff/implement-a-volume-control.html) */
+/* A volume slider's place (0 to 100, the master's to 110) as the amplitude
+its setting keeps (#1106): the ear hears loudness as the logarithm of the
+amplitude, so the track spans 60 dB evenly, 1/1000 at 0 to 1 at 100 (an
+exponential), and falls straight to 0, an exact mute, below 10. Past 100
+(the master's), each 10 doubles it, 6 dB as before: 110 is 2.0. A linear
+slider gave 20 dB at its first step above mute and 6 dB over its whole top
+half. (dr-lex.be/info-stuff/implement-a-volume-control.html) */
 #define SETTINGS_VOLUME_RANGE 1000.0
 #define SETTINGS_VOLUME_KNEE 10.0
+#define SETTINGS_VOLUME_DOUBLING 10.0
 
-static double settings_volume_amplitude(double percent)
+static double settings_volume_amplitude(double place)
 {
 	double knee = exp(log(SETTINGS_VOLUME_RANGE) * (SETTINGS_VOLUME_KNEE / 100.0 - 1.0));
 
-	if (percent <= 0.0)
+	if (place <= 0.0)
 		return 0.0;
-	if (percent < SETTINGS_VOLUME_KNEE)
-		return knee * percent / SETTINGS_VOLUME_KNEE;
-	return exp(log(SETTINGS_VOLUME_RANGE) * (percent / 100.0 - 1.0));
+	if (place < SETTINGS_VOLUME_KNEE)
+		return knee * place / SETTINGS_VOLUME_KNEE;
+	if (place > 100.0)
+		return pow(2.0, (place - 100.0) / SETTINGS_VOLUME_DOUBLING);
+	return exp(log(SETTINGS_VOLUME_RANGE) * (place / 100.0 - 1.0));
 }
 
-/* (and the percentage of an amplitude a setting keeps: a value saved from
-the old 0 to 10 spinners shows where it plays) */
-static double settings_volume_percent(double amplitude)
+/* (and the place of an amplitude a setting keeps: a value saved from the
+old 0 to 10 and 0 to 20 spinners sits where it plays) */
+static double settings_volume_place(double amplitude)
 {
 	double knee = settings_volume_amplitude(SETTINGS_VOLUME_KNEE);
 
@@ -6650,7 +6653,21 @@ static double settings_volume_percent(double amplitude)
 		return 0.0;
 	if (amplitude < knee)
 		return SETTINGS_VOLUME_KNEE * amplitude / knee;
+	if (amplitude > 1.0)
+		return 100.0 + SETTINGS_VOLUME_DOUBLING * log(amplitude) / log(2.0);
 	return 100.0 * (1.0 + log(amplitude) / log(SETTINGS_VOLUME_RANGE));
+}
+
+/* the percentage a place is shown as (and typed): the place itself to 100,
+past it the amplitude's (the master's 2.0 is 200%, as its old 20 was) */
+static double settings_volume_shown(double place)
+{
+	return place > 100.0 ? 100.0 * settings_volume_amplitude(place) : place;
+}
+
+static double settings_volume_typed(double shown)
+{
+	return shown > 100.0 ? settings_volume_place(shown / 100.0) : shown;
 }
 
 static struct
@@ -6782,10 +6799,10 @@ static boolean settings_slider_text_value(struct settings_slider const *slider, 
 	}
 	if (!text_is_number(text, value))
 		return FALSE;
-	/* (a volume's amplitude as its percentage, in the slider's range: a
-	master volume saved past it plays at the slider's most) */
+	/* (a volume's amplitude as its place, in the slider's range: a volume
+	saved past it sits at the slider's most) */
 	if (slider->volume)
-		*value = PIN(settings_volume_percent(*value), slider->typed_least, slider->typed_most);
+		*value = PIN(settings_volume_place(*value), slider->typed_least, slider->typed_most);
 	return TRUE;
 }
 
@@ -6840,7 +6857,7 @@ static void settings_slider_text(struct settings_slider const *slider, double va
 	if (word != NONE)
 		snprintf(text, size, "%s", slider->stops[word].word);
 	else
-		settings_slider_number(slider, value, text, size);
+		settings_slider_number(slider, slider->volume ? settings_volume_shown(value) : value, text, size);
 	/* (a volume's, a percentage) */
 	if (slider->volume && strlen(text) + 1 < size)
 		strcat(text, "%");
@@ -6853,7 +6870,7 @@ static void settings_slider_field_text(struct settings_slider const *slider, dou
 	if (settings_slider_word(slider, value) != NONE)
 		text[0] = 0;
 	else
-		settings_slider_number(slider, value, text, size);
+		settings_slider_number(slider, slider->volume ? settings_volume_shown(value) : value, text, size);
 }
 
 /* the value kept as a change, or none if it is the setting's */
@@ -6978,7 +6995,8 @@ static void settings_slider_typed(char const *text)
 	if (text_is_number(text, &value) && (value > 0.0 || slider->typed_least <= 0.0 ||
 		settings_slider_word(slider, value) != NONE))
 	{
-		settings_slider_set(slider, value);
+		/* (a volume's percentage typed, as its place) */
+		settings_slider_set(slider, slider->volume ? settings_volume_typed(value) : value);
 		return;
 	}
 	for (stop = 0; stop < slider->stop_count; stop++)

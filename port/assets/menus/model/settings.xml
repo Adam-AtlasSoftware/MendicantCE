@@ -130,7 +130,7 @@
 		</row>
 		<section key="section_7" title="VOLUME"/>
 		<row key="volume" kind="slider" setting="audio.volume" label="MASTER VOLUME" crumb="AUDIO › VOLUME" least="0" most="110" step="1" typed_least="0" typed_most="110" whole="true" curve="volume">
-			<help>The volume of everything the game plays. 100% is the Xbox's level; up to 110% is louder.</help>
+			<help>The volume of everything the game plays. 100% is the Xbox's level; up to 200% is louder.</help>
 		</row>
 		<row key="music_volume" kind="slider" setting="audio.music_volume" label="MUSIC VOLUME" crumb="AUDIO › VOLUME" least="0" most="100" step="1" typed_least="0" typed_most="100" whole="true" curve="volume">
 			<help>The music's volume.</help>

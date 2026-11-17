@@ -345,7 +345,7 @@
 		<string text="Turns all sound off or on, at once."/>
 		<string text="Voice chat in network games (your microphone and the other players' voices' volume) and hit sounds."/>
 		<string text=""/>
-		<string text="The volume of everything the game plays. 100% is the Xbox's level; up to 110% is louder."/>
+		<string text="The volume of everything the game plays. 100% is the Xbox's level; up to 200% is louder."/>
 		<string text="The music's volume."/>
 		<string text="The characters' speech: Cortana, the Marines and the cutscenes' lines."/>
 		<string text="Every other sound: weapons, vehicles and the world."/>

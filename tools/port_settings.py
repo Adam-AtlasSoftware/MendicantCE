@@ -331,9 +331,11 @@ MOUSE_SENSITIVITY = Slider(0.1, 10.0, 0.05, 0.01, 100.0)
 # the volumes' (audio.*volume): 0 to 100%, evenly loud along the track, each
 # setting keeping the amplitude (an old 0 to 1 value shows where it plays)
 VOLUMES = Slider(0, 100, 1, 0, 100, whole=True, curve="volume")
-# audio.volume's: past 100% (the Xbox's level) to 110%, an amplitude of about
-# 2.0, as loud as before the Xbox's level was matched (dsound_sdl.c's limiter
-# keeps it under full scale)
+# audio.volume's: past 100% (the Xbox's level) to 200%, an amplitude of 2.0, as
+# loud as before the Xbox's level was matched (dsound_sdl.c's limiter keeps it
+# under full scale). Its places, 0 to 110, are the track's: past 100 each step
+# is as loud a step as below, its percentage shown the amplitude's
+# (menu_functions.c's settings_volume_shown: 105 is 141%, 110 is 200%)
 MASTER_VOLUMES = Slider(0, 110, 1, 0, 110, whole=True, curve="volume")
 # the geometry, in the 640x480 menu units (menu_functions.c's SETTINGS_*
 # have the same): the rows' column and the panel beside it
@@ -946,7 +948,7 @@ PAGES = {
              "sounds.", None, "voice_chat_settings"),
             (SECTION, "VOLUME"),
             ("MASTER VOLUME", "audio.volume", MASTER_VOLUMES,
-             "The volume of everything the game plays. 100% is the Xbox's level; up to 110% is louder.", None),
+             "The volume of everything the game plays. 100% is the Xbox's level; up to 200% is louder.", None),
             ("MUSIC VOLUME", "audio.music_volume", VOLUMES, "The music's volume.", None),
             ("DIALOGUE VOLUME", "audio.dialogue_volume", VOLUMES,
              "The characters' speech: Cortana, the Marines and the cutscenes' lines.", None),
