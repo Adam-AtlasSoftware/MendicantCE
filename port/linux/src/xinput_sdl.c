@@ -313,6 +313,31 @@ float halo_look_vertical_sensitivity(short gamepad)
 	return pads[slot].scale;
 }
 
+/* a gamepad's player's input.rumble_strength, in percent: its motors'
+speeds times it at their write (input_xbox.c's input_port_write_rumble);
+100, the default, the game's own. The profile's VIBRATION still turns them
+off */
+unsigned long halo_rumble_strength(short gamepad)
+{
+	static struct
+	{
+		unsigned long read_at;
+		int read;
+		unsigned long percent;
+	} pads[PAD_PLAYERS + 1];
+	int slot = PAD_PLAYER_SLOT(gamepad);
+
+	if (!pads[slot].read || pads[slot].read_at != config_changes())
+	{
+		long percent = config_player_integer(slot < PAD_PLAYERS ? slot : -1, "input.rumble_strength");
+
+		pads[slot].read = 1;
+		pads[slot].read_at = config_changes();
+		pads[slot].percent = percent < 0 || percent > 100 ? 100 : (unsigned long)percent;
+	}
+	return pads[slot].percent;
+}
+
 /* radians of yaw and pitch for the mouse motion since the last call: each
 count turns the view 0.022 degrees times the sensitivity, as CS2's does
 (mouse_sensitivity.h); the game adds these to the facing change of the

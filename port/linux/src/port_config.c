@@ -1144,6 +1144,9 @@ static const struct config_setting config_settings[] =
 		"A controller's look turns the other way: pushing the stick that looks to\n"
 		"the right turns the view left. The profile's INVERT LOOK is the up and\n"
 		"down; this is the side to side, for every controller.", _scope_player },
+	{ "input.rumble_strength", _config_integer, "100", "HALO_RUMBLE_STRENGTH", _environment_value, _platform_all,
+		"How strongly the controller rumbles, in percent (0 to 100): 100 the\n"
+		"game's own. The profile's VIBRATION still turns it off.", _scope_player },
 	{ "input.aim_style", _config_string, "\"classic\"", "HALO_AIM_STYLE", _environment_value, _platform_all,
 		"How a controller's look stick aims: \"classic\", the original's (each\n"
 		"direction curved on its own, so a diagonal turns faster, and pushed far\n"

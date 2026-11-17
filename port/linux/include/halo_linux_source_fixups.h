@@ -448,6 +448,9 @@ int halo_look_horizontal_inverted(short gamepad);
 /* a gamepad's look stick's turn up and down times this: its player's
 input.look_vertical_sensitivity, 1 the original's (port/linux/src/xinput_sdl.c) */
 float halo_look_vertical_sensitivity(short gamepad);
+/* a gamepad's motors' strength, in percent (0 to 100): its player's
+input.rumble_strength, 100 the game's own (port/linux/src/xinput_sdl.c) */
+unsigned long halo_rumble_strength(short gamepad);
 /* whether a local player's controller aims as Modern does (input.aim_style,
 the player's own), and Modern's acceleration angle, as its tangent, and the
 push that accelerates, or -1 for the game's own (source/game/player_control.c) */

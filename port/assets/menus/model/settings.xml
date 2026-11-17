@@ -1017,7 +1017,7 @@
 			<choice shown="YES" value="true"/>
 			<choice shown="NO" value="false"/>
 		</row>
-		<section key="section_7" title="LAYOUT"/>
+		<section key="section_7" title="LAYOUT &amp; FEEDBACK"/>
 		<row key="button_preset" kind="choice" setting="profile.button_preset" label="BUTTON LAYOUT" crumb="CONTROLS › CONTROLLER" search_choices="swap triggers a l trigger b r stick bumper jumper fishsticks recon" when="profile">
 			<help>Which of the controller's buttons does what. Button Remapping sets them one by one; the keyboard's keys are Key Bindings'.</help>
 			<choice shown="DEFAULT" value="0"/>
@@ -1042,11 +1042,24 @@
 		<row key="stick_dead_zones" kind="link" label="STICK DEAD ZONES ›" crumb="CONTROLS › CONTROLLER" search="deadzone" open="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/dead_zones_screen">
 			<help>How far each stick moves before it does anything, and how far it must go to count as fully pushed: more for a worn stick, less for finer aim.</help>
 		</row>
-		<section key="section_12" title="FEEDBACK"/>
 		<row key="vibration" kind="choice" setting="profile.vibration" label="VIBRATION" crumb="CONTROLS › CONTROLLER" search="rumble" when="profile">
 			<help>Rumbles the controller.</help>
 			<choice shown="ON" value="true"/>
 			<choice shown="OFF" value="false"/>
+		</row>
+		<row key="rumble_strength" kind="choice" setting="input.rumble_strength" label="RUMBLE STRENGTH" crumb="CONTROLS › CONTROLLER" search="rumble haptics">
+			<help>How strongly the controller rumbles. 100% is the game's own; Vibration Off turns it off.</help>
+			<choice shown="0%" value="0"/>
+			<choice shown="10%" value="10"/>
+			<choice shown="20%" value="20"/>
+			<choice shown="30%" value="30"/>
+			<choice shown="40%" value="40"/>
+			<choice shown="50%" value="50"/>
+			<choice shown="60%" value="60"/>
+			<choice shown="70%" value="70"/>
+			<choice shown="80%" value="80"/>
+			<choice shown="90%" value="90"/>
+			<choice shown="100%" value="100"/>
 		</row>
 		<row key="ingame_help" kind="choice" setting="profile.ingame_help" label="IN-GAME HELP" crumb="CONTROLS › CONTROLLER" when="profile">
 			<help>Shows the game's hints about its controls.</help>

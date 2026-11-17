@@ -1256,7 +1256,8 @@ static void input_flush_rumble(
 
 /* port: a gamepad's motors written (XInputSetState) when they change, and,
 to refresh them, once INPUT_PORT_RUMBLE_REFRESH_MILLISECONDS have passed
-while they run; nothing while paused, in the console or out of a game */
+while they run, at its player's rumble strength; nothing while paused, in
+the console or out of a game */
 static void input_port_write_rumble(
 	short gamepad_index,
 	boolean refresh)
@@ -1267,8 +1268,13 @@ static void input_port_write_rumble(
 		game_time_get_paused() ||
 		!game_in_progress();
 	XINPUT_FEEDBACK *feedback = &input_globals.gamepad_feedbacks[gamepad_index];
-	word left = suppress_rumble ? 0 : input_globals.gamepad_rumbler_states[gamepad_index].left_frequency;
-	word right = suppress_rumble ? 0 : input_globals.gamepad_rumbler_states[gamepad_index].right_frequency;
+	/* (each motor times its player's rumble strength, input.rumble_strength:
+	100%, the default, the game's own) */
+	unsigned long strength = halo_rumble_strength(gamepad_index);
+	word left = suppress_rumble ? 0 :
+		(word)(input_globals.gamepad_rumbler_states[gamepad_index].left_frequency * strength / 100);
+	word right = suppress_rumble ? 0 :
+		(word)(input_globals.gamepad_rumbler_states[gamepad_index].right_frequency * strength / 100);
 	unsigned long now;
 
 	if (input_globals.gamepad_handles[gamepad_index] == NULL)

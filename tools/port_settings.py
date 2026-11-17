@@ -664,6 +664,8 @@ DISPLAY_MODES = [("FULLSCREEN", "fullscreen"), ("BORDERLESS", "borderless"), ("W
 # stick's travel (-1 the game's own)
 MODERN_AIM_ANGLES = [(str(degrees), str(degrees)) for degrees in range(0, 46, 5)]
 MODERN_AIM_THRESHOLDS = [("DEFAULT", "-1")] + [(f"{percent}%", str(percent)) for percent in range(50, 101, 5)]
+# input.rumble_strength's: the motors' strength, in percent
+RUMBLE_STRENGTHS = [(f"{percent}%", str(percent)) for percent in range(0, 101, 10)]
 STICK_DEAD_ZONES = [("DEFAULT (27%)", "-1")] + [(f"{percent}%", str(percent)) for percent in range(0, 51, 5)]
 # input.left_stick_outer_dead_zone's and right's: the part of the travel at
 # the rim read as full (none, the game's own: full only at the rim)
@@ -1482,7 +1484,7 @@ PAGES = {
             ("INVERT FLIGHT", "profile.flight_inversion", YES_NO,
              "Flying vehicles pitch as aircraft do: pushing up flies down.", None),
             ("AUTO-CENTER LOOK", "profile.autocenter", YES_NO, "Levels the view while you walk.", None),
-            (SECTION, "LAYOUT"),
+            (SECTION, "LAYOUT & FEEDBACK"),
             ("BUTTON LAYOUT", "profile.button_preset",
              [("DEFAULT", "0"), ("SWAP TRIGGERS", "1"), ("SWAP A, L TRIGGER", "2"), ("SWAP B, L TRIGGER", "3"),
               ("SWAP B, R STICK", "4"), ("BUMPER JUMPER", "5"),
@@ -1498,8 +1500,11 @@ PAGES = {
             ("STICK DEAD ZONES ›", None, _page_screen(*DEAD_ZONES),
              "How far each stick moves before it does anything, and how far it must go to count as fully "
              "pushed: more for a worn stick, less for finer aim.", None),
-            (SECTION, "FEEDBACK"),
+            # (one section with the layout's: the page has no room for
+            # another section's title)
             ("VIBRATION", "profile.vibration", ON_OFF, "Rumbles the controller.", None),
+            ("RUMBLE STRENGTH", "input.rumble_strength", RUMBLE_STRENGTHS,
+             "How strongly the controller rumbles. 100% is the game's own; Vibration Off turns it off.", None),
             ("IN-GAME HELP", "profile.ingame_help", ON_OFF, "Shows the game's hints about its controls.", None),
             (SECTION, "PROFILE"),
             CREATE_PROFILE,
@@ -1858,7 +1863,7 @@ SETTINGS_SEARCH_WORDS = {
     "acceleration": ["aim_style", "modern_aim_acceleration_angle", "modern_aim_acceleration_threshold"],
     "deadzone": ["stick_dead_zones", "left_stick_dead_zone", "right_stick_dead_zone", "left_stick_outer_dead_zone",
                  "right_stick_outer_dead_zone"],
-    "rumble": ["vibration"],
+    "rumble": ["vibration", "rumble_strength"], "haptics": ["rumble_strength"],
     "keybinds": ["key_bindings"], "keys": ["key_bindings"],
     "mic": ["input_device", "voice_chat"], "microphone": ["input_device", "voice_chat"],
     "upnp": ["allow_upnp"],
