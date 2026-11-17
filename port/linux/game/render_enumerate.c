@@ -62,6 +62,7 @@ each structure's first sight, every model and effect).
 #include "objects/light_definitions.h"
 #include "objects/object_definitions.h"
 #include "objects/object_types.h"
+#include "objects/widgets/glow.h"
 #include "objects/widgets/light_volumes.h"
 #include "rasterizer/rasterizer.h"
 #include "rasterizer/rasterizer_cinematics.h"
@@ -1647,11 +1648,17 @@ void render_enumerate_decals(void)
 system state's sprite, a sprite before the camera, which the transparent geometry's pass
 then draws as it would theirs */
 
+/* the sprites drawn as light (display.hdr_highlight_boost's emitters, whose
+HDR tag makes a pipeline of their own): a self-illuminated particle's, a
+glow's (render_particles.c, glow.c) */
+static boolean effect_sprite_emitter = FALSE;
+
 static void effect_sprite(long bitmap_group_index, struct shader_effect_definition const *shader)
 {
 	/* (not on the screen: its sprites' vertices are the dynamic screen
 	type's, which has no buffer in a map: render_sprite.c) */
-	unsigned long flags = pass_part() == _part_first_person ? FLAG(_build_sprites_first_person_bit) : 0;
+	unsigned long flags = (pass_part() == _part_first_person ? FLAG(_build_sprites_first_person_bit) : 0) |
+		(effect_sprite_emitter ? FLAG(_build_sprites_emitter_bit) : 0);
 	real_argb_color color = { 1.0f, 1.0f, 1.0f, 1.0f };
 	struct build_sprite_data data;
 	real_point3d origin;
@@ -1769,8 +1776,13 @@ void render_enumerate_effects(void)
 	{
 		struct particle_definition *definition = particle_definition_get(tag_index);
 
+		/* (particles.c's _particle_definition_self_illuminated_bit, 9) */
+		effect_sprite_emitter = TEST_FLAG(definition->flags, 9);
 		effect_sprite(definition->bitmap.index, &definition->shader);
 	}
+	effect_sprite_emitter = TRUE;
+	glow_port_enumerate(effect_sprite);
+	effect_sprite_emitter = FALSE;
 	weather_particle_systems_port_enumerate(effect_sprite);
 	/* (a contrail's shader is drawn as an effect's: rasterizer_xbox_transparent_geometry.c) */
 	tag_iterator_new(&iterator, CONTRAIL_DEFINITION_TAG);
