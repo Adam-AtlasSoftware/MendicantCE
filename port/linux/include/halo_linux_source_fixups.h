@@ -441,6 +441,9 @@ short halo_stick_dead_range(short gamepad, short stick);
 /* whether a gamepad's look turns the other way side to side: its player's
 input.invert_look_horizontal (port/linux/src/xinput_sdl.c) */
 int halo_look_horizontal_inverted(short gamepad);
+/* a gamepad's look stick's turn up and down times this: its player's
+input.look_vertical_sensitivity, 1 the original's (port/linux/src/xinput_sdl.c) */
+float halo_look_vertical_sensitivity(short gamepad);
 /* whether a local player's controller aims as Modern does (input.aim_style,
 the player's own), and Modern's acceleration angle, as its tangent, and the
 push that accelerates, or -1 for the game's own (source/game/player_control.c) */

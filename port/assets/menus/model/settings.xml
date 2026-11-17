@@ -984,18 +984,28 @@
 			<choice shown="9" value="9"/>
 			<choice shown="10" value="10"/>
 		</row>
+		<row key="look_vertical_sensitivity" kind="choice" setting="input.look_vertical_sensitivity" label="VERTICAL SENSITIVITY" crumb="CONTROLS › CONTROLLER" search="sens">
+			<help>How fast the right stick looks up and down, times LOOK SENSITIVITY's. 1X is the game's own, half as fast as it turns side to side.</help>
+			<choice shown="0.25X" value="0.25"/>
+			<choice shown="0.5X" value="0.5"/>
+			<choice shown="0.6X" value="0.6"/>
+			<choice shown="0.7X" value="0.7"/>
+			<choice shown="0.75X" value="0.75"/>
+			<choice shown="0.8X" value="0.8"/>
+			<choice shown="0.9X" value="0.9"/>
+			<choice shown="1X" value="1"/>
+			<choice shown="1.1X" value="1.1"/>
+			<choice shown="1.25X" value="1.25"/>
+			<choice shown="1.5X" value="1.5"/>
+			<choice shown="2X" value="2"/>
+		</row>
 		<row key="invert_look" kind="choice" setting="profile.invert_look" label="INVERT LOOK" crumb="CONTROLS › CONTROLLER" when="profile">
 			<help>Pushing the right stick up looks down.</help>
 			<choice shown="YES" value="true"/>
 			<choice shown="NO" value="false"/>
 		</row>
-		<row key="invert_look_horizontal" kind="choice" setting="input.invert_look_horizontal" label="INVERT TURNING" crumb="CONTROLS › CONTROLLER">
-			<help>Pushing the right stick right turns the view left. For every controller on this device.</help>
-			<choice shown="YES" value="true"/>
-			<choice shown="NO" value="false"/>
-		</row>
 		<row key="gyro_flick_stick" kind="link" label="GYRO &amp; FLICK STICK ›" crumb="CONTROLS › CONTROLLER" open="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/gyro/gyro_screen">
-			<help>Aim by turning a controller that has a gyroscope; the right stick's aim style (Classic or Modern), and the right stick as a flick stick.</help>
+			<help>Aim by turning a controller that has a gyroscope; the right stick's aim style (Classic or Modern) and turning direction, and the right stick as a flick stick.</help>
 		</row>
 		<row key="flight_inversion" kind="choice" setting="profile.flight_inversion" label="INVERT FLIGHT" crumb="CONTROLS › CONTROLLER" when="profile">
 			<help>Flying vehicles pitch as aircraft do: pushing up flies down.</help>
@@ -1177,6 +1187,11 @@
 			<note>It also does so whenever it is held still.</note>
 		</row>
 		<section key="section_9" title="RIGHT STICK"/>
+		<row key="invert_look_horizontal" kind="choice" setting="input.invert_look_horizontal" label="INVERT TURNING" crumb="CONTROLS › CONTROLLER › GYRO &amp; FLICK STICK">
+			<help>Pushing the right stick right turns the view left. For every controller on this device.</help>
+			<choice shown="YES" value="true"/>
+			<choice shown="NO" value="false"/>
+		</row>
 		<row key="aim_style" kind="choice" setting="input.aim_style" label="AIM STYLE" crumb="CONTROLS › CONTROLLER › GYRO &amp; FLICK STICK" search="aim acceleration" search_choices="modern">
 			<help>Classic aims as the original: a diagonal turns faster, and can speed up the turn as a full push does. Modern aims as MCC's: the same speed whichever way you push, and only a push straight to the side speeds up the turn.</help>
 			<note>The mouse and touch controls are not changed.</note>

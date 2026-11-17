@@ -1469,12 +1469,13 @@ PAGES = {
             (SECTION, "LOOK"),
             ("LOOK SENSITIVITY", "profile.look_sensitivity", [(str(step), str(step)) for step in range(1, 11)],
              "How fast the right stick turns the view.", None),
+            ("VERTICAL SENSITIVITY", "input.look_vertical_sensitivity", VERTICAL_SENSITIVITIES,
+             "How fast the right stick looks up and down, times LOOK SENSITIVITY's. 1X is the game's own, half as "
+             "fast as it turns side to side.", None),
             ("INVERT LOOK", "profile.invert_look", YES_NO, "Pushing the right stick up looks down.", None),
-            ("INVERT TURNING", "input.invert_look_horizontal", YES_NO,
-             "Pushing the right stick right turns the view left. For every controller on this device.", None),
             ("GYRO & FLICK STICK ›", None, _page_screen(*GYRO),
              "Aim by turning a controller that has a gyroscope; the right stick's aim style (Classic or "
-             "Modern), and the right stick as a flick stick.", None),
+             "Modern) and turning direction, and the right stick as a flick stick.", None),
             ("INVERT FLIGHT", "profile.flight_inversion", YES_NO,
              "Flying vehicles pitch as aircraft do: pushing up flies down.", None),
             ("AUTO-CENTER LOOK", "profile.autocenter", YES_NO, "Levels the view while you walk.", None),
@@ -1586,6 +1587,10 @@ PAGES = {
              "for a second and a half.|It also does so whenever it is held still.", None,
              "gyro_calibrate", "port settings gyro calibrate"),
             (SECTION, "RIGHT STICK"),
+            # (the Controller page has no room for it: its VERTICAL
+            # SENSITIVITY took its place)
+            ("INVERT TURNING", "input.invert_look_horizontal", YES_NO,
+             "Pushing the right stick right turns the view left. For every controller on this device.", None),
             ("AIM STYLE", "input.aim_style", [("CLASSIC", "classic"), ("MODERN", "modern")],
              "Classic aims as the original: a diagonal turns faster, and can speed up the turn as a full push "
              "does. Modern aims as MCC's: the same speed whichever way you push, and only a push straight to the "
@@ -1824,7 +1829,7 @@ SEARCH_BUTTON_HELP = ["Saves your changes, on every tab, and applies them.",
 SETTINGS_SEARCH_WORDS = {
     "fov": ["video_settings:fov", "vehicle_fov", "scale_scoped_fov", "viewmodel_fov"],
     "sens": ["mouse_sensitivity", "mouse_vertical_sensitivity", "zoom_sensitivity", "look_sensitivity",
-             "gyro_sensitivity", "gyro_vertical_sensitivity"],
+             "look_vertical_sensitivity", "gyro_sensitivity", "gyro_vertical_sensitivity"],
     "dpi": ["mouse_sensitivity"],
     "fps": ["max_fps", "show_frame_rate", "frame_rate_sync"],
     "framerate": ["frame_rate_sync", "max_fps", "show_frame_rate"],

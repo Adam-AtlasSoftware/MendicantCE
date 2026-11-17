@@ -195,6 +195,8 @@ static float mouse_sensitivity(void)
 
 /* the game's own dead zone of each stick, of 32767 (source/input/input_xbox.c) */
 #define STICK_DEAD_RANGE 9000
+/* the most input.look_vertical_sensitivity takes (a multiplier) */
+#define LOOK_VERTICAL_SENSITIVITY_MAXIMUM 4.0f
 /* the most a stick's dead zone setting takes, in percent */
 #define STICK_DEAD_ZONE_MAXIMUM 50
 
@@ -253,6 +255,30 @@ int halo_look_horizontal_inverted(short gamepad)
 		pads[slot].inverted = config_player_boolean(slot < PAD_PLAYERS ? slot : -1, "input.invert_look_horizontal");
 	}
 	return pads[slot].inverted;
+}
+
+/* a gamepad's player's input.look_vertical_sensitivity: the look stick's
+turn up and down times it (player_control.c's player_control_stick_look), 1
+the original's, half the side to side of each LOOK SENSITIVITY step */
+float halo_look_vertical_sensitivity(short gamepad)
+{
+	static struct
+	{
+		unsigned long read_at;
+		int read;
+		float scale;
+	} pads[PAD_PLAYERS + 1];
+	int slot = PAD_PLAYER_SLOT(gamepad);
+
+	if (!pads[slot].read || pads[slot].read_at != config_changes())
+	{
+		float scale = (float)config_player_real(slot < PAD_PLAYERS ? slot : -1, "input.look_vertical_sensitivity");
+
+		pads[slot].read = 1;
+		pads[slot].read_at = config_changes();
+		pads[slot].scale = scale > 0.0f && scale <= LOOK_VERTICAL_SENSITIVITY_MAXIMUM ? scale : 1.0f;
+	}
+	return pads[slot].scale;
 }
 
 /* radians of yaw and pitch for the mouse motion since the last call: each

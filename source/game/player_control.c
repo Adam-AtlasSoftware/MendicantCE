@@ -1509,7 +1509,10 @@ static boolean player_control_stick_look(
 		constants->look_function.address, constants->look_pegging_threshold, input_state->yaw,
 		input_state->pitch, &curved_yaw, &curved_pitch, clamped_yaw, clamped_pitch);
 	look_delta->yaw = curved_yaw * yaw_spin_scale * look_yaw_rate;
-	look_delta->pitch = curved_pitch * pitch_spin_scale * look_pitch_rate;
+	/* port: up and down times the player's own vertical sensitivity
+	(input.look_vertical_sensitivity), 1 the original's */
+	look_delta->pitch = curved_pitch * pitch_spin_scale * look_pitch_rate *
+		halo_look_vertical_sensitivity(gamepad_index);
 
 	return accelerating;
 }

@@ -12,8 +12,8 @@
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/options_menu" type="column_list">
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/section_0" x="28" y="50"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/op_look_sensitivity" x="28" y="72"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/op_invert_look" x="28" y="97"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/op_invert_look_horizontal" x="28" y="122"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/op_look_vertical_sensitivity" x="28" y="97"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/op_invert_look" x="28" y="122"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/op_gyro_flick_stick" x="28" y="147"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/op_flight_inversion" x="28" y="172"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/op_autocenter" x="28" y="197"/>
@@ -60,6 +60,17 @@
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/look_sensitivity_spinner" type="spinner" box="0 1 140 23" wide="40 120" past="60 60" header="bitmaps/arrow_sm_left" header_box="-6 6 0 18" footer="bitmaps/arrow_sm_right" footer_box="140 6 146 18">
 		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 0" items="1|2|3|4|5|6|7|8|9|10" scale="1 1.2"/>
 	</look>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/op_look_vertical_sensitivity" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
+		<text color="#FF2896FF"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/look_vertical_sensitivity_label" x="0" y="0"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/look_vertical_sensitivity_spinner" x="188" y="0"/>
+	</look>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/look_vertical_sensitivity_label" type="text" box="0 0 184 24" wide="0 40" past="0 60">
+		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/labels" index="2" scale="1 1.2"/>
+	</look>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/look_vertical_sensitivity_spinner" type="spinner" box="0 1 140 23" wide="40 120" past="60 60" header="bitmaps/arrow_sm_left" header_box="-6 6 0 18" footer="bitmaps/arrow_sm_right" footer_box="140 6 146 18">
+		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 0" items="0.25X|0.5X|0.6X|0.7X|0.75X|0.8X|0.9X|1X|1.1X|1.25X|1.5X|2X" scale="1 1.2"/>
+	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/op_invert_look" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
 		<text color="#FF2896FF"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/invert_look_label" x="0" y="0"/>
@@ -68,7 +79,7 @@
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/invert_look_seg1" x="240" y="2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/invert_look_label" type="text" box="0 0 184 24" wide="0 40" past="0 60">
-		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/labels" index="2" scale="1 1.2"/>
+		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/labels" index="3" scale="1 1.2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/invert_look_seg0" type="text" box="0 0 48 20" wide="40 0" past="60 0" place="keep_ends" picture="main_menu/settings/segment_tall">
 		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 1" flags="no_focus_test" text="YES" scale="1 1.2"/>
@@ -77,25 +88,6 @@
 		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 1" flags="no_focus_test" text="NO" scale="1 1.2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/invert_look_spinner" type="spinner" box="0 1 140 23" wide="40 120" past="60 60" header="bitmaps/arrow_sm_left" header_box="-6 6 0 18" footer="bitmaps/arrow_sm_right" footer_box="140 6 146 18">
-		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 0" items="YES|NO" scale="1 1.2"/>
-	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/op_invert_look_horizontal" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
-		<text color="#FF2896FF"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/invert_look_horizontal_label" x="0" y="0"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/invert_look_horizontal_spinner" x="188" y="0"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/invert_look_horizontal_seg0" x="188" y="2"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/invert_look_horizontal_seg1" x="240" y="2"/>
-	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/invert_look_horizontal_label" type="text" box="0 0 184 24" wide="0 40" past="0 60">
-		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/labels" index="3" scale="1 1.2"/>
-	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/invert_look_horizontal_seg0" type="text" box="0 0 48 20" wide="40 0" past="60 0" place="keep_ends" picture="main_menu/settings/segment_tall">
-		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 1" flags="no_focus_test" text="YES" scale="1 1.2"/>
-	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/invert_look_horizontal_seg1" type="text" box="0 0 48 20" wide="40 0" past="60 0" place="keep_ends" picture="main_menu/settings/segment_tall">
-		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 1" flags="no_focus_test" text="NO" scale="1 1.2"/>
-	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/invert_look_horizontal_spinner" type="spinner" box="0 1 140 23" wide="40 120" past="60 60" header="bitmaps/arrow_sm_left" header_box="-6 6 0 18" footer="bitmaps/arrow_sm_right" footer_box="140 6 146 18">
 		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 0" items="YES|NO" scale="1 1.2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/op_gyro_flick_stick" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
