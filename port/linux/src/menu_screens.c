@@ -77,7 +77,8 @@ enum reader_element
 	_element_objectives,
 	_element_picture,
 	_element_dialog,
-	_element_stick
+	_element_stick,
+	_element_keyboard
 };
 
 struct reader
@@ -1116,6 +1117,21 @@ static void XMLCALL element_start(void *data, XML_Char const *name, XML_Char con
 	{
 		element = _element_spartan;
 		block = spartan_read(reader, attributes, -1);
+	}
+	else if (parent_element == _element_screen && !strcmp(name, "keyboard"))
+	{
+		static char const *const names[] = { NULL };
+		int index;
+
+		/* (the on-screen keyboard's: a screen's one, which makes it a pop-up) */
+		element = _element_keyboard;
+		attributes_read(reader, name, attributes, names, values);
+		for (index = 0; index < screen->block_count && !reader->failed; index++)
+		{
+			if (screen->blocks[index].kind == MENU_SCREEN_KEYBOARD)
+				reader_problem(reader, "a screen has one <keyboard>", NULL);
+		}
+		block = block_add(reader, MENU_SCREEN_KEYBOARD, -1);
 	}
 	else if (parent_element == _element_screen && !strcmp(name, "stick"))
 	{

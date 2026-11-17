@@ -1254,6 +1254,17 @@ static const struct config_setting config_settings[] =
 		_environment_value, _platform_all,
 		"Modern aim: how far the look stick is pushed, in percent of its travel\n"
 		"(0 to 100), before the turn accelerates; -1 for the game's own.", _scope_player },
+	{ "input.look_acceleration_strength", _config_real, "1.0", "HALO_LOOK_ACCELERATION_STRENGTH",
+		_environment_value, _platform_all,
+		"How much a controller's look stick speeds up the turn when held at its\n"
+		"edge, times the map's own extra speed (every stock map's: up to 3X over\n"
+		"1 s): 1 the map's own, 0 no speeding up, 2 twice the extra speed. For\n"
+		"both aim styles; the mouse and the gyroscope are not changed.", _scope_player },
+	{ "input.look_acceleration_time", _config_real, "1.0", "HALO_LOOK_ACCELERATION_TIME",
+		_environment_value, _platform_all,
+		"How long a controller's look stick takes to reach its full sped-up\n"
+		"turn, times the map's own time (0.25 to 2): 1 the map's own, 0.5 twice\n"
+		"as quickly.", _scope_player },
 	{ "input.gyro_aim", _config_string, "\"off\"", "HALO_GYRO_AIM", _environment_value, _platform_all,
 		"Aiming by turning a controller that has a gyroscope (a DualSense, a\n"
 		"DualShock 4, a Switch Pro Controller or Joy-Cons, a Steam Deck with\n"

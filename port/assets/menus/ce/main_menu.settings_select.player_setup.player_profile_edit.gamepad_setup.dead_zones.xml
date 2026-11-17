@@ -23,9 +23,10 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/section_7" x="28" y="237"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/op_look_dead_zone_shape" x="28" y="257"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/op_stick_zoom_sensitivity" x="28" y="278"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/section_10" x="28" y="305"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/op_modern_aim_acceleration_angle" x="28" y="325"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/op_modern_aim_acceleration_threshold" x="28" y="346"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/op_look_acceleration_strength" x="28" y="299"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/op_look_acceleration_time" x="28" y="320"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/op_modern_aim_acceleration_angle" x="28" y="341"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/op_modern_aim_acceleration_threshold" x="28" y="362"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/button_bar" y="414"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/button_bar" type="column_list" width="640" height="28" flags="pass_unhandled_to_focused_child left_right_tabs_items" source="tools/port_settings.py settings_files/_settings_page">
@@ -135,16 +136,29 @@
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/stick_zoom_sensitivity_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="0.25X|0.5X|0.6X|0.7X|0.75X|0.8X|0.9X|1X|1.1X|1.25X|1.5X|2X" setting="input.stick_zoom_sensitivity" values="0.25|0.5|0.6|0.7|0.75|0.8|0.9|1|1.1|1.25|1.5|2" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
 		<on event="created" run="port setting load"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/section_10" width="344" height="18" bitmap="main_menu/settings/section" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/section_10_title"/>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/op_look_acceleration_strength" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/look_acceleration_strength_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/look_acceleration_strength_spinner" x="188"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/section_10_title" type="text" controller="1" width="344" height="18" wide="0 244" string_list="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/labels" string_index="10" color="#FF6F9CD0" text_x="2" text_y="1" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/look_acceleration_strength_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/labels" string_index="10" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/look_acceleration_strength_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="OFF|0.25X|0.5X|0.75X|1X|1.25X|1.5X|1.75X|2X" setting="input.look_acceleration_strength" values="0|0.25|0.5|0.75|1|1.25|1.5|1.75|2" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
+		<on event="created" run="port setting load"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/op_look_acceleration_time" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/look_acceleration_time_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/look_acceleration_time_spinner" x="188"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/look_acceleration_time_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/labels" string_index="11" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/look_acceleration_time_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="0.25X|0.5X|0.75X|1X|1.25X|1.5X|1.75X|2X" setting="input.look_acceleration_time" values="0.25|0.5|0.75|1|1.25|1.5|1.75|2" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
+		<on event="created" run="port setting load"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/op_modern_aim_acceleration_angle" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/modern_aim_acceleration_angle_label"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/modern_aim_acceleration_angle_spinner" x="188"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/modern_aim_acceleration_angle_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/labels" string_index="11" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/modern_aim_acceleration_angle_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/labels" string_index="12" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/modern_aim_acceleration_angle_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="0|5|10|15|20|25|30|35|40|45" setting="input.modern_aim_acceleration_angle" values="0|5|10|15|20|25|30|35|40|45" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
 		<on event="created" run="port setting load"/>
@@ -153,7 +167,7 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/modern_aim_acceleration_threshold_label"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/modern_aim_acceleration_threshold_spinner" x="188"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/modern_aim_acceleration_threshold_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/labels" string_index="12" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/modern_aim_acceleration_threshold_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/labels" string_index="13" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/dead_zones/modern_aim_acceleration_threshold_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="DEFAULT|50%|55%|60%|65%|70%|75%|80%|85%|90%|95%|100%" setting="input.modern_aim_acceleration_threshold" values="-1|50|55|60|65|70|75|80|85|90|95|100" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
 		<on event="created" run="port setting load"/>
@@ -169,7 +183,8 @@
 		<string text="LOOK STICK"/>
 		<string text="SHAPE"/>
 		<string text="ZOOM SENSITIVITY"/>
-		<string text="MODERN AIM"/>
+		<string text="ACCELERATION"/>
+		<string text="ACCELERATION TIME"/>
 		<string text="ACCELERATION ANGLE"/>
 		<string text="ACCELERATION START"/>
 	</strings>
@@ -185,7 +200,8 @@
 		<string text=""/>
 		<string text="The shape of the look stick's dead zone. Axial: each direction its own, a square in the middle, as Classic aim. Round: the same whichever way you push, as Modern aim. Auto follows your Aim Style."/>
 		<string text="How fast the right stick turns the view while zoomed in, as with a sniper rifle's scope. 1X is the game's own."/>
-		<string text=""/>
+		<string text="How much the turn speeds up while you hold the right stick at its edge, times the map's own: 1X is the game's own, Off never speeds it up, 2X twice the extra speed.|Both aim styles. The mouse and gyro are not changed."/>
+		<string text="How long the turn takes to reach its full speed while you hold the right stick at its edge, times the map's own (1 second on every stock map): 0.5X is twice as quick."/>
 		<string text="Modern aim: how far from straight to the side, in degrees, a full push still speeds up the turn. Lower keeps more diagonals from speeding it up."/>
 		<string text="Modern aim: how far you push the stick before the turn speeds up. Default is the game's own, as Classic's."/>
 	</strings>

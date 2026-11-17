@@ -38,6 +38,8 @@ static struct
 	struct widget_instance *active_widgets[MAXIMUM_NUMBER_OF_LOCAL_PLAYERS];
 	long pause_disabled_ticks;
 } widget_globals;
+/* (ui_widget.c's pop-ups: none here) */
+static struct widget_instance *ui_widget_port_popups[MAXIMUM_NUMBER_OF_LOCAL_PLAYERS];
 
 static boolean we_are_at_the_main_menu;
 static short connection = _game_connection_local;

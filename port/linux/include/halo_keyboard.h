@@ -124,6 +124,9 @@ enum halo_chat_pad_button
 	HALO_CHAT_PAD_STICK_DOWN,
 	HALO_CHAT_PAD_STICK_LEFT,
 	HALO_CHAT_PAD_STICK_RIGHT,
+	/* the bumpers (the on-screen keyboard's cursor: port/linux/game/keyboard.c) */
+	HALO_CHAT_PAD_LB,
+	HALO_CHAT_PAD_RB,
 	NUMBER_OF_HALO_CHAT_PAD_BUTTONS
 };
 
