@@ -696,6 +696,8 @@ int host_vulkan_window_open(uint32_t window, uint32_t debug, uint32_t shader_fol
 			/* (display.hdr: an HDR swapchain, and the display told the front
 			end) */
 			options.display_hdr = host_render_stream_display_hdr;
+			/* (display.render_scale's frame scaled up sharply) */
+			options.sharp_upscale = 1;
 			options.encode_prepare = xgpu_vulkan_post_encode_prepare;
 			options.encode = xgpu_vulkan_post_encode;
 #endif

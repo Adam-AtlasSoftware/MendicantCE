@@ -1488,6 +1488,7 @@ static unsigned int window_presents, window_capability_queries, window_turns, wi
 static int window_gone;
 static VkImage window_blit_source;
 static VkImageBlit window_blit_region;
+static VkFilter window_blit_filter;
 static struct xgpu_vulkan_image window_frame, window_turned;
 
 static VkResult VKAPI_CALL window_get_capabilities(VkPhysicalDevice physical, VkSurfaceKHR surface,
@@ -1632,9 +1633,10 @@ static void VKAPI_CALL window_blit(VkCommandBuffer commands, VkImage source, VkI
 	VkImage destination, VkImageLayout destination_layout, uint32_t count, const VkImageBlit *regions,
 	VkFilter filter)
 {
-	(void)commands; (void)source_layout; (void)destination; (void)destination_layout; (void)count; (void)filter;
+	(void)commands; (void)source_layout; (void)destination; (void)destination_layout; (void)count;
 	window_blit_source = source;
 	window_blit_region = regions[0];
+	window_blit_filter = filter;
 }
 
 static struct xgpu_vulkan_image *window_rotate(struct xgpu_vulkan_image *image, int quarter_turns)
@@ -2529,6 +2531,44 @@ static void hdr_white_test(void)
 	assert(window_present_frame() && hdr_metadata_sets == sets + 3 && fabsf(hdr_metadata_peak_set - 1015.0f) < 1e-3f);
 	assert(window_present_frame() && hdr_metadata_sets == sets + 3 && window_swapchains == made);
 	vkSetHdrMetadataEXT = NULL;
+	reset();
+}
+
+/* the sharp upscale of a frame smaller than the window (display.render_scale,
+#1118): nearest where it is shown at whole multiples of its pixels; else
+nearest by the least whole factors that reach them, then linear; linear
+alone where it is shown at no more than its pixels */
+static void sharp_test(void)
+{
+	uint32_t factors[2];
+
+	/* half of 1080p: twice each way, nearest */
+	assert(sharp_plan(960, 540, 1920, 1080, factors) == SHARP_NEAREST && factors[0] == 2 && factors[1] == 2);
+	/* a quarter of 4K: four times */
+	assert(sharp_plan(960, 540, 3840, 2160, factors) == SHARP_NEAREST && factors[0] == 4 && factors[1] == 4);
+	/* its own size: a copy */
+	assert(sharp_plan(1920, 1080, 1920, 1080, factors) == SHARP_NEAREST && factors[0] == 1 && factors[1] == 1);
+	/* 480 rows at 2160 (4.5 times): nearest 5 times (2400), then linear */
+	assert(sharp_plan(640, 480, 2880, 2160, factors) == SHARP_PRESCALED && factors[0] == 5 && factors[1] == 5);
+	/* 0.75 of 1440p: 1.33 times, nearest twice, then linear */
+	assert(sharp_plan(1920, 1080, 2560, 1440, factors) == SHARP_PRESCALED && factors[0] == 2 && factors[1] == 2);
+	/* each axis its own: twice across exactly, 1.5 down */
+	assert(sharp_plan(1280, 720, 2560, 1080, factors) == SHARP_PRESCALED && factors[0] == 2 && factors[1] == 2);
+	/* (the negative control) larger than shown (supersampling): linear,
+	as before */
+	assert(sharp_plan(3840, 2160, 1920, 1080, factors) == SHARP_LINEAR && factors[0] == 1 && factors[1] == 1);
+	assert(sharp_plan(2000, 1000, 1920, 1080, factors) == SHARP_PRESCALED && factors[0] == 1 && factors[1] == 2);
+
+	/* presented: half the window's pixels each way blitted by nearest
+	where the options ask for it, by linear where not (Android's) */
+	window_reset();
+	window_frame.description.width = 640;
+	window_frame.description.height = 360;
+	assert(window_present_frame() && window_blit_source == window_frame.image && window_blit_filter == VK_FILTER_LINEAR);
+	vk.sharp_upscale = 1;
+	assert(window_present_frame() && window_blit_source == window_frame.image && window_blit_filter == VK_FILTER_NEAREST);
+	assert(window_blit_region.dstOffsets[1].x - window_blit_region.dstOffsets[0].x == 1280);
+	assert(window_blit_region.srcOffsets[1].x == 640 && window_blit_region.srcOffsets[1].y == 360);
 	reset();
 }
 
@@ -3838,6 +3878,7 @@ int main(void)
 	hdr_pipeline_test();
 	hdr_window_test();
 	hdr_white_test();
+	sharp_test();
 	hdr_post_test();
 	half_test();
 	discards_test();

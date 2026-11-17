@@ -707,9 +707,11 @@ DRAW_DISTANCES = Slider(1024, 10000, 1, 1024, 10000, whole=True,
                         stops=(("DEFAULT", "1024"),) + tuple((str(n), str(n)) for n in (
                             1536, 2048, 3072, 4096, 6144, 8192, 10000)))
 # Render Resolution's: display.resolution_scaling's Xbox 640x480, or Full at
-# display.supersampling's factors each way (d3d8_device.c: 1 to 2), as a
-# percentage (menu_functions.c's render_resolution_text)
-RENDER_RESOLUTIONS = [("XBOX 640X480", "original"), ("FULL", "1")] + \
+# display.render_scale's fractions (below 1) or display.supersampling's
+# factors (above) each way (d3d8_device.c: 0.25 to 2), as a percentage
+# (menu_functions.c's render_resolution_text)
+RENDER_RESOLUTIONS = [("XBOX 640X480", "original")] + \
+    [(f"{round(factor * 100)}%", f"{factor:g}") for factor in (0.25, 0.5, 0.75)] + [("FULL", "1")] + \
     [(f"{round(factor * 100)}%", f"{factor:g}") for factor in (1.25, 1.5, 1.75, 2)]
 ANTI_ALIASING_HELP = "Smooths jagged edges. FXAA and SMAA cost little; {} sharper and {} more of the graphics card."
 # (STRONG & WORSE: its row's spinner's 140 units, STRONG AND WORSE did not fit)
@@ -1202,9 +1204,9 @@ PAGES = {
             # with any anti-aliasing, drawn at their resolution:
             # d3d8_device.c's screen_mode_choose; not iOS's)
             ("RENDER RESOLUTION", "display.render_resolution", RENDER_RESOLUTIONS,
-             "Full draws the game at your screen's resolution. Above 100% draws it larger and scales it down: "
-             "finer and smoother, for over twice the graphics card's work at 150%, four times at 200%. Xbox draws "
-             "640x480, scaled up: softer, and very light.",
+             "Full draws at your screen's resolution. Below 100% draws fewer pixels, scaled up sharply: a "
+             "steadier frame rate. Above 100% draws more, scaled down: smoother, for over twice the work at 150%. "
+             "Xbox draws 640x480.",
              "computer"),
             ("ANTI-ALIASING", "display.anti_aliasing",
              [("OFF", "off"), ("FXAA", "fxaa"), ("SMAA", "smaa"), ("MSAA 2X", "msaa2x"), ("MSAA 4X", "msaa4x"),

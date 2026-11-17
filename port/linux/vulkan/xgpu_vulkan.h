@@ -141,6 +141,11 @@ swapchain takes where the surface has it (0: the swap interval's choice) */
 	NULL: no curve (the VR build's). */
 	int (*gamma_prepare)(void);
 	struct xgpu_vulkan_image *(*gamma)(struct xgpu_vulkan_image *image, float power);
+	/* a frame smaller than the window (display.render_scale on a computer,
+	"original" resolution scaling) scaled up sharply: nearest by whole
+	multiples, then linear for the rest (present_sharp). 0: linear alone
+	(Android's, whose compositor scales its smaller swapchain). */
+	int sharp_upscale;
 };
 
 /* 1 on success: a device that has what the backend needs (logged if not) */

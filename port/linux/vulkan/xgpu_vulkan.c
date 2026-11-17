@@ -868,6 +868,10 @@ static struct
 	int colorspaces, hdr_metadata;
 	/* (the HDR metadata's peak and average last set: hdr_metadata_set) */
 	float hdr_metadata_peak, hdr_metadata_average;
+	/* a smaller frame scaled up sharply (the options'), and the image
+	nearest scales it into (present_sharp) */
+	int sharp_upscale;
+	struct xgpu_vulkan_image *sharp_image;
 	void (*display_hdr)(int hdr, float headroom, float white_nits, int white_reported);
 	struct xgpu_vulkan_image *(*encode)(struct xgpu_vulkan_image *image, const struct xgpu_hdr_frame *frame,
 		uint8_t format);
@@ -7364,6 +7368,101 @@ static struct xgpu_vulkan_image *present_curved(struct xgpu_vulkan_image *image)
 	return curved ? curved : image;
 }
 
+/* the sharp upscale (display.render_scale's, "sharp bilinear"), on one
+axis: the whole factor nearest scales the frame's pixels up by first, the
+least that reaches the pixels it is shown at; 1 where it is shown at no
+more than its own (linear alone, as a larger frame is scaled down) */
+static uint32_t sharp_factor(uint32_t frame, uint32_t shown)
+{
+	return frame && shown > frame ? (shown + frame - 1) / frame : 1;
+}
+
+enum
+{
+	/* one linear blit (the frame shown at no more than its pixels) */
+	SHARP_LINEAR,
+	/* one nearest blit: each way a whole multiple of the frame (or its
+	size) */
+	SHARP_NEAREST,
+	/* nearest by the factors into an image of their size, then linear
+	from it: 480 rows shown at 2160 are 5 times 480, 2400, then 2160 */
+	SHARP_PRESCALED,
+};
+
+/* how a frame of a size is shown at another (its factors each way) */
+static int sharp_plan(uint32_t frame_width, uint32_t frame_height, uint32_t shown_width, uint32_t shown_height,
+	uint32_t factors[2])
+{
+	factors[0] = sharp_factor(frame_width, shown_width);
+	factors[1] = sharp_factor(frame_height, shown_height);
+	if (frame_width * factors[0] == shown_width && frame_height * factors[1] == shown_height)
+		return SHARP_NEAREST;
+	return factors[0] == 1 && factors[1] == 1 ? SHARP_LINEAR : SHARP_PRESCALED;
+}
+
+/* the blit's source made ready for a sharp upscale to the blit's
+destination: the filter it is blitted with, and for SHARP_PRESCALED the
+frame scaled up by nearest into vk.sharp_image (kept, made larger only as
+it must be), which is then the source; linear as before where that image
+cannot be made */
+static VkFilter present_sharp(VkCommandBuffer commands, struct xgpu_vulkan_image **image, VkImageBlit *blit)
+{
+	struct xgpu_vulkan_image_description description;
+	const struct xgpu_vulkan_image *frame = *image;
+	uint32_t factors[2], width, height;
+	VkImageBlit nearest;
+	int plan;
+
+	if (!vk.sharp_upscale)
+		return VK_FILTER_LINEAR;
+	plan = sharp_plan(frame->description.width, frame->description.height,
+		(uint32_t)(blit->dstOffsets[1].x - blit->dstOffsets[0].x), (uint32_t)(blit->dstOffsets[1].y - blit->dstOffsets[0].y),
+		factors);
+	if (plan != SHARP_PRESCALED)
+		return plan == SHARP_NEAREST ? VK_FILTER_NEAREST : VK_FILTER_LINEAR;
+	width = frame->description.width * factors[0];
+	height = frame->description.height * factors[1];
+	if (vk.sharp_image && (vk.sharp_image->description.format != frame->description.format ||
+		vk.sharp_image->description.width < width || vk.sharp_image->description.height < height))
+	{
+		xgpu_vulkan_image_destroy(vk.sharp_image);
+		vk.sharp_image = NULL;
+	}
+	if (!vk.sharp_image)
+	{
+		memset(&description, 0, sizeof(description));
+		description.type = XGPU_VULKAN_IMAGE_2D;
+		description.format = frame->description.format;
+		description.width = width;
+		description.height = height;
+		description.depth_or_layers = 1;
+		description.levels = 1;
+		vk.sharp_image = xgpu_vulkan_image_create(&description);
+		if (!vk.sharp_image)
+		{
+			vk.sharp_upscale = 0;
+			host_logf(HOST_LOG_WARN, "vulkan: no %ux%u image to scale the frame up sharply in: scaled up smoothly",
+				width, height);
+			return VK_FILTER_LINEAR;
+		}
+	}
+	nearest = *blit;
+	nearest.dstOffsets[0].x = nearest.dstOffsets[0].y = 0;
+	nearest.dstOffsets[1].x = (int32_t)width;
+	nearest.dstOffsets[1].y = (int32_t)height;
+	vk.sharp_image->used = vk.serial;
+	image_use(vk.sharp_image);
+	image_written(vk.sharp_image);
+	vkCmdBlitImage(commands, frame->image, VK_IMAGE_LAYOUT_GENERAL, vk.sharp_image->image, VK_IMAGE_LAYOUT_GENERAL, 1,
+		&nearest, VK_FILTER_NEAREST);
+	barrier(commands, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+		VK_ACCESS_TRANSFER_READ_BIT);
+	blit->srcOffsets[1].x = (int32_t)width;
+	blit->srcOffsets[1].y = (int32_t)height;
+	*image = vk.sharp_image;
+	return VK_FILTER_LINEAR;
+}
+
 /* the image shown in the window: letterboxed into a swapchain image
 (cleared black), then presented. 0 if nothing is presented: no surface (the
 app in the background, the window not back yet), a swapchain that cannot
@@ -7377,6 +7476,7 @@ static uint64_t present(struct xgpu_vulkan_image *image, int frame)
 	VkClearColorValue black;
 	VkImageSubresourceRange whole;
 	VkImageBlit blit;
+	VkFilter filter;
 	VkPresentInfoKHR info;
 	VkResult result;
 	uint32_t index, width, height, x, y, window_width, window_height, image_width, image_height;
@@ -7515,8 +7615,11 @@ static uint64_t present(struct xgpu_vulkan_image *image, int frame)
 		blit.dstOffsets[1].z = 1;
 		image->used = vk.serial;
 		image_use(image);
+		/* (smaller than it is shown: scaled up sharply, from an image of
+		its own where it is not by whole multiples) */
+		filter = present_sharp(commands, &image, &blit);
 		vkCmdBlitImage(commands, image->image, VK_IMAGE_LAYOUT_GENERAL, vk.swapchain_images[index],
-			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
+			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, filter);
 	}
 	transition.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
 	transition.dstAccessMask = 0;
@@ -9211,6 +9314,7 @@ int xgpu_vulkan_initialize(const struct xgpu_vulkan_options *options)
 	vk.surface_create = options->surface_create;
 	vk.surface_context = options->surface_context;
 	vk.display_hdr = options->display_hdr;
+	vk.sharp_upscale = options->sharp_upscale;
 	vk.encode = options->encode;
 	vk.gamma = options->gamma;
 	vk.display_hdr_told = -1;
@@ -9355,6 +9459,8 @@ void xgpu_vulkan_shutdown(void)
 		return;
 	xgpu_vulkan_image_destroy(vk.loading_image);
 	vk.loading_image = NULL;
+	xgpu_vulkan_image_destroy(vk.sharp_image);
+	vk.sharp_image = NULL;
 	xgpu_vulkan_image_destroy(vk.loading_art_image);
 	vk.loading_art_image = NULL;
 	xgpu_vulkan_image_destroy(vk.loading_caption_image);

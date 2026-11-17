@@ -57,7 +57,7 @@
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/render_resolution_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/labels" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/render_resolution_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="XBOX 640X480|FULL|125%|150%|175%|200%" setting="display.render_resolution" values="original|1|1.25|1.5|1.75|2" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/render_resolution_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="XBOX 640X480|25%|50%|75%|FULL|125%|150%|175%|200%" setting="display.render_resolution" values="original|0.25|0.5|0.75|1|1.25|1.5|1.75|2" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
 		<on event="created" run="port setting load"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/op_anti_aliasing" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
@@ -269,7 +269,7 @@
 	</strings>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/help_strings">
 		<string text=""/>
-		<string text="Full draws the game at your screen's resolution. Above 100% draws it larger and scales it down: finer and smoother, for over twice the graphics card's work at 150%, four times at 200%. Xbox draws 640x480, scaled up: softer, and very light."/>
+		<string text="Full draws at your screen's resolution. Below 100% draws fewer pixels, scaled up sharply: a steadier frame rate. Above 100% draws more, scaled down: smoother, for over twice the work at 150%. Xbox draws 640x480."/>
 		<string text="Smooths jagged edges. FXAA and SMAA cost little; MSAA is sharper and costs more of the graphics card."/>
 		<string text="Smooths jagged edges. FXAA and SMAA cost little; MSAA is sharper and costs more of the graphics card."/>
 		<string text="Keeps floors and walls sharp into the distance, at a small cost. Off looks as the Xbox did: surfaces blur a few steps away."/>

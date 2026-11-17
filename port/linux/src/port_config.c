@@ -181,6 +181,14 @@ Steam Deck's Game Mode) on, with display.low_latency's pacing
 #else
 #define VSYNC_DEFAULT "true"
 #endif
+/* display.render_scale's: the device's on the phones and tablets
+(port/android/host/host_main.c, port/ios/host_app.m), all the display's
+pixels on a computer */
+#if defined(HALO_ANDROID) || defined(HALO_IOS)
+#define RENDER_SCALE_DEFAULT "0.0"
+#else
+#define RENDER_SCALE_DEFAULT "1.0"
+#endif
 /* (in the comment of each setting it chooses) */
 #define GRAPHICS_CHOOSES "\nCommented out, display.graphics chooses it."
 /* in input.mouse_sensitivity's comment: a file with it has the mouse's
@@ -213,14 +221,17 @@ static const struct config_setting config_settings[] =
 		"\"native\" draws at the window's resolution (fullscreen, the display's or\n"
 		"display.resolution); \"original\" draws the Xbox's 640x480 and scales it\n"
 		"up." },
-	{ "display.render_scale", _config_real, "0.0", "HALO_RENDER_SCALE", _environment_value,
-		_platform_ios | _platform_android,
+	{ "display.render_scale", _config_real, RENDER_SCALE_DEFAULT, "HALO_RENDER_SCALE", _environment_value,
+		_platform_all,
 		"The fraction of the screen's pixels the game draws, each way (0.25 to\n"
 		"1.0), which the display scales up: 0.67 draws less than half the\n"
 		"pixels, for a cooler phone and a steadier frame rate. 0: the device's:\n"
 		"0.67 on an iPhone of 3x pixels, 0.8 on another iPhone, 1.0 on an iPad;\n"
 		"on Android 0.8, or about 1080 rows where 0.8 would draw more. Read at\n"
-		"start." },
+		"start on a phone or tablet. On a computer 1.0 (or 0) draws all the\n"
+		"display's pixels, and the HUD is drawn at the scale too; Vulkan scales\n"
+		"up sharply (whole multiples of the pixels, then smoothed), and it\n"
+		"multiplies display.supersampling." },
 	{ "display.window_size", _config_string, "\"\"", "HALO_WINDOW_SIZE", _environment_value, _platform_desktop,
 		"The window's size, \"<width>x<height>\" (\"1920x1080\"), 640x480 or more (it\n"
 		"can be resized). Empty: display.window_scale's." },
