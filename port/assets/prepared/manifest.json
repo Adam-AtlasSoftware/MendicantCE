@@ -10,11 +10,11 @@
    "checksum": "e6ac8e18",
    "key": "c1e6a85b6195ea0b",
    "draws": 546,
-   "words": 159265,
-   "size": 641476,
+   "words": 157412,
+   "size": 634064,
    "tags": 8066,
    "offset": 612,
-   "compressed_size": 94067
+   "compressed_size": 92317
   },
   {
    "map": "a30",
@@ -22,11 +22,11 @@
    "checksum": "5b4c2953",
    "key": "28083a1a4f043c9f",
    "draws": 508,
-   "words": 187621,
-   "size": 754596,
+   "words": 189108,
+   "size": 760544,
    "tags": 7924,
-   "offset": 94679,
-   "compressed_size": 109836
+   "offset": 92929,
+   "compressed_size": 110239
   },
   {
    "map": "a50",
@@ -34,11 +34,11 @@
    "checksum": "2ae9c2ed",
    "key": "4f2ab688ffc961cb",
    "draws": 495,
-   "words": 201764,
-   "size": 811064,
+   "words": 190031,
+   "size": 764132,
    "tags": 8020,
-   "offset": 204515,
-   "compressed_size": 108398
+   "offset": 203168,
+   "compressed_size": 106699
   },
   {
    "map": "b30",
@@ -46,11 +46,11 @@
    "checksum": "cb35bb26",
    "key": "b131fd68e1f33762",
    "draws": 962,
-   "words": 271397,
-   "size": 1093332,
+   "words": 269187,
+   "size": 1084492,
    "tags": 8034,
-   "offset": 312913,
-   "compressed_size": 166992
+   "offset": 309867,
+   "compressed_size": 168062
   },
   {
    "map": "b40",
@@ -58,11 +58,11 @@
    "checksum": "580cd8d3",
    "key": "a09bfde9a3906dee",
    "draws": 978,
-   "words": 296707,
-   "size": 1194700,
+   "words": 291888,
+   "size": 1175424,
    "tags": 8356,
-   "offset": 479905,
-   "compressed_size": 173793
+   "offset": 477929,
+   "compressed_size": 173201
   },
   {
    "map": "beavercreek",
@@ -70,11 +70,11 @@
    "checksum": "a831a7bf",
    "key": "757ade30bf391f31",
    "draws": 477,
-   "words": 157804,
-   "size": 635080,
+   "words": 157045,
+   "size": 632044,
    "tags": 6464,
-   "offset": 653698,
-   "compressed_size": 86389
+   "offset": 651130,
+   "compressed_size": 87175
   },
   {
    "map": "bloodgulch",
@@ -82,11 +82,11 @@
    "checksum": "035e2da3",
    "key": "d1d37a4cafb65b3b",
    "draws": 484,
-   "words": 160036,
-   "size": 644064,
+   "words": 157006,
+   "size": 631944,
    "tags": 6515,
-   "offset": 740087,
-   "compressed_size": 86840
+   "offset": 738305,
+   "compressed_size": 85772
   },
   {
    "map": "boardingaction",
@@ -94,11 +94,11 @@
    "checksum": "a0d614f5",
    "key": "8593bc1e24eb5e7d",
    "draws": 465,
-   "words": 132715,
-   "size": 534628,
+   "words": 129732,
+   "size": 522696,
    "tags": 6444,
-   "offset": 826927,
-   "compressed_size": 78665
+   "offset": 824077,
+   "compressed_size": 77818
   },
   {
    "map": "c10",
@@ -106,11 +106,11 @@
    "checksum": "4a170f76",
    "key": "655ca9f57a45fdbf",
    "draws": 524,
-   "words": 214292,
-   "size": 861408,
+   "words": 223300,
+   "size": 897440,
    "tags": 8078,
-   "offset": 905592,
-   "compressed_size": 121495
+   "offset": 901895,
+   "compressed_size": 125484
   },
   {
    "map": "c20",
@@ -118,11 +118,11 @@
    "checksum": "d22193c1",
    "key": "bb4e3126dc639fab",
    "draws": 420,
-   "words": 125891,
-   "size": 506972,
+   "words": 127183,
+   "size": 512140,
    "tags": 6569,
-   "offset": 1027087,
-   "compressed_size": 71415
+   "offset": 1027379,
+   "compressed_size": 71042
   },
   {
    "map": "c40",
@@ -130,11 +130,11 @@
    "checksum": "61a4799d",
    "key": "52d85151646b79ae",
    "draws": 970,
-   "words": 309491,
-   "size": 1245772,
+   "words": 307449,
+   "size": 1237604,
    "tags": 7917,
-   "offset": 1098502,
-   "compressed_size": 183320
+   "offset": 1098421,
+   "compressed_size": 181718
   },
   {
    "map": "carousel",
@@ -142,11 +142,11 @@
    "checksum": "b38b62c7",
    "key": "d4397d8d4d04c8cd",
    "draws": 480,
-   "words": 126841,
-   "size": 511252,
+   "words": 125342,
+   "size": 505256,
    "tags": 6425,
-   "offset": 1281822,
-   "compressed_size": 77111
+   "offset": 1280139,
+   "compressed_size": 75874
   },
   {
    "map": "chillout",
@@ -154,11 +154,11 @@
    "checksum": "086c74ad",
    "key": "29ff8d3898e3159d",
    "draws": 479,
-   "words": 126118,
-   "size": 508352,
+   "words": 125694,
+   "size": 506656,
    "tags": 6411,
-   "offset": 1358933,
-   "compressed_size": 73847
+   "offset": 1356013,
+   "compressed_size": 74226
   },
   {
    "map": "d20",
@@ -166,11 +166,11 @@
    "checksum": "3c590eec",
    "key": "4cbede2d7961279f",
    "draws": 516,
-   "words": 180112,
-   "size": 724624,
+   "words": 179692,
+   "size": 722944,
    "tags": 7452,
-   "offset": 1432780,
-   "compressed_size": 105703
+   "offset": 1430239,
+   "compressed_size": 104938
   },
   {
    "map": "d40",
@@ -178,11 +178,11 @@
    "checksum": "eb84833e",
    "key": "7fabb71611c1a28f",
    "draws": 578,
-   "words": 205590,
-   "size": 827032,
+   "words": 208212,
+   "size": 837520,
    "tags": 7687,
-   "offset": 1538483,
-   "compressed_size": 122826
+   "offset": 1535177,
+   "compressed_size": 121557
   },
   {
    "map": "damnation",
@@ -190,11 +190,11 @@
    "checksum": "911cd6ee",
    "key": "e4b44faf49c0cbad",
    "draws": 514,
-   "words": 129847,
-   "size": 523548,
+   "words": 128420,
+   "size": 517840,
    "tags": 6467,
-   "offset": 1661309,
-   "compressed_size": 78348
+   "offset": 1656734,
+   "compressed_size": 77836
   },
   {
    "map": "hangemhigh",
@@ -202,11 +202,11 @@
    "checksum": "8313bd85",
    "key": "6ae377bb563a771d",
    "draws": 461,
-   "words": 120716,
-   "size": 486600,
+   "words": 122491,
+   "size": 493700,
    "tags": 6390,
-   "offset": 1739657,
-   "compressed_size": 69675
+   "offset": 1734570,
+   "compressed_size": 71042
   },
   {
    "map": "longest",
@@ -214,11 +214,11 @@
    "checksum": "df1deaa6",
    "key": "5b12d38cf8898a41",
    "draws": 461,
-   "words": 118576,
-   "size": 478040,
+   "words": 119682,
+   "size": 482464,
    "tags": 6405,
-   "offset": 1809332,
-   "compressed_size": 69277
+   "offset": 1805612,
+   "compressed_size": 70386
   },
   {
    "map": "prisoner",
@@ -226,11 +226,11 @@
    "checksum": "b68da242",
    "key": "deae943553d244a1",
    "draws": 473,
-   "words": 124161,
-   "size": 500476,
+   "words": 128218,
+   "size": 516704,
    "tags": 6394,
-   "offset": 1878609,
-   "compressed_size": 72343
+   "offset": 1875998,
+   "compressed_size": 74125
   },
   {
    "map": "putput",
@@ -238,11 +238,11 @@
    "checksum": "b3f87f50",
    "key": "0034f18bf300c27d",
    "draws": 450,
-   "words": 98957,
-   "size": 399476,
+   "words": 100878,
+   "size": 407160,
    "tags": 6384,
-   "offset": 1950952,
-   "compressed_size": 57606
+   "offset": 1950123,
+   "compressed_size": 58626
   },
   {
    "map": "ratrace",
@@ -250,11 +250,11 @@
    "checksum": "af5f3831",
    "key": "424df29607b69ffd",
    "draws": 456,
-   "words": 101700,
-   "size": 410496,
+   "words": 101094,
+   "size": 408072,
    "tags": 6419,
-   "offset": 2008558,
-   "compressed_size": 59982
+   "offset": 2008749,
+   "compressed_size": 58997
   },
   {
    "map": "sidewinder",
@@ -262,11 +262,11 @@
    "checksum": "4f8e749d",
    "key": "f4921b1d1c49fcbd",
    "draws": 482,
-   "words": 135397,
-   "size": 545492,
+   "words": 135307,
+   "size": 545132,
    "tags": 6466,
-   "offset": 2068540,
-   "compressed_size": 82884
+   "offset": 2067746,
+   "compressed_size": 82725
   },
   {
    "map": "ui",
@@ -274,11 +274,11 @@
    "checksum": "cdc1a39a",
    "key": "095d63b5298a30ef",
    "draws": 182,
-   "words": 27109,
-   "size": 109940,
+   "words": 27480,
+   "size": 111424,
    "tags": 5690,
-   "offset": 2151424,
-   "compressed_size": 12085
+   "offset": 2150471,
+   "compressed_size": 12108
   },
   {
    "map": "ui",
@@ -286,11 +286,11 @@
    "checksum": "cdc1a39a",
    "key": "feb22aa3b25a5547",
    "draws": 196,
-   "words": 29428,
-   "size": 119328,
+   "words": 30268,
+   "size": 122688,
    "tags": 5690,
-   "offset": 2163509,
-   "compressed_size": 13883
+   "offset": 2162579,
+   "compressed_size": 14037
   },
   {
    "map": "wizard",
@@ -298,11 +298,11 @@
    "checksum": "2d5a08fc",
    "key": "eca5ce010faceb83",
    "draws": 463,
-   "words": 152781,
-   "size": 614876,
+   "words": 153437,
+   "size": 617500,
    "tags": 6413,
-   "offset": 2177392,
-   "compressed_size": 81924
+   "offset": 2176616,
+   "compressed_size": 82846
   }
  ]
 }
