@@ -84,7 +84,7 @@ def test_brief_puts_the_source_first_and_questions_apart():
 
 def test_batches_part_the_notes_by_file_and_area():
     notes = [note("a1"), note("a2", widget="pc\\main_menu\\settings_select\\player_setup\\player_profile_edit\\"
-                                           "audio_settings\\voice_chat_label"),
+                                           "audio_settings\\voice_chat_settings_label"),
              note("b1", widget="pc\\main_menu\\multiplayer_type_select\\join_game\\prompt_refresh", screen=BROWSER),
              note("q1", kind="question"), note("x1", status="fixed")]
     grouped = menu_notes.batches(notes)
