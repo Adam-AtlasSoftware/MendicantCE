@@ -253,6 +253,12 @@ symbols in this file:
 void dsound_port_set_channel_stereo_position(short virtual_channel_index, boolean positioned,
 	struct sound_location const *location, real minimum_distance, real obstruction, real occlusion,
 	boolean attenuate_direct_path);
+/* port: whether a map's sound tag plays from a mod's or a loose tag file
+(port/linux/game/mod_sounds.c), and whether a Custom Edition map is loaded
+and a tag of it is one of Halo PC's own (custom_edition_cache.c) */
+boolean mod_sounds_replaced(long tag_index);
+boolean custom_edition_cache_tags_loaded(void);
+boolean custom_edition_cache_stock_tag(long tag_index);
 
 #ifdef HALO_VR
 /* port: the VR mode's listener, the head (port/linux/game/vr_render.c) */
@@ -3889,6 +3895,44 @@ boolean sound_vr_listener_head(
 }
 #endif
 
+/* port: whether a stereo sound of the world is heard from where it is
+(dsound_port_set_channel_stereo_position: placed, its two channels spread
+either side of it, port/linux/src/dsound_sdl.c), the one place this is
+decided. The Xbox never placed a stereo channel: its own stereo world sounds
+(the bullet, plasma, needle and tank-shell flybys, the Pelican's wind, the
+vent and wind sound scenery) play full stereo, dry, faded linearly with
+distance, and so do a Halo PC tag's on a Custom Edition map. Placed are the
+stereo sounds that are not the game's: a mod's or a loose tag file's in
+place of a map's sound (mod_sounds_replaced), and a Custom Edition map's own
+(not in Halo PC's resource maps: custom_edition_cache_stock_tag), whose
+stereo gunfire would otherwise come from nowhere. */
+static boolean sound_stereo_placed(
+	long definition_index)
+{
+	return mod_sounds_replaced(definition_index) ||
+		(custom_edition_cache_tags_loaded() && !custom_edition_cache_stock_tag(definition_index));
+}
+
+/* port: a stereo channel's fade with distance: placed (sound_stereo_placed),
+the inverse distance gain a 3D channel's stream gives it, from the minimum
+distance (the listener's rolloff factor is 1), which the 2D stream it plays
+on lacks; otherwise the Xbox's, the linear fade from the minimum to the
+maximum distance (linear_fade). A 3D sound is not cut off at the tag's
+maximum distance either: none starts past it. */
+static real sound_stereo_fade(
+	boolean placed,
+	real linear_fade,
+	real distance,
+	real minimum_distance)
+{
+	if (!placed)
+	{
+		return linear_fade;
+	}
+
+	return minimum_distance > 0.f && distance > minimum_distance ? minimum_distance / distance : 1.f;
+}
+
 static void update_channels(
 	void)
 {
@@ -4081,36 +4125,38 @@ static void update_channels(
 							(maximum_distance - minimum_distance);
 						real distance_fade = PIN(attenuation, 0.f, 1.f);
 
-						/* port: positioned stereo uses a 2D stream, so it misses
-						the 3D stream's inverse-distance gain: it takes that
-						instead of the linear fade (the listener's rolloff
-						factor is 1), so that it fades as a mono sound does. A
-						3D sound is not cut off at the tag's maximum distance
-						either: none starts past it. */
-						if (TEST_FLAG(channel->type_flags, _sound_channel_stereo_bit))
-						{
-							distance_fade = minimum_distance > 0.f && distance > minimum_distance ?
-								minimum_distance / distance : 1.f;
-						}
-						fade *= distance_fade;
-						/* port: and a stereo sound is heard from where it is, as
-						a 3D one is: the mixer mixes its channels to one and
-						spatializes it as a mono 3D voice, from its place and
+						/* port: a stereo sound placed in the world
+						(sound_stereo_placed) is heard from where it is, as a
+						3D one is: the mixer spreads its two channels either
+						side of its place and spatializes each, with its
 						velocity relative to the listener (port/linux/src/dsound_sdl.c,
-						voice_in_world), with the HRTF's direction, the Doppler
-						shift, obstruction and reverb, which the Xbox's stereo
-						channels never had: a Custom Edition map's stereo
-						gunfire came from nowhere. (Obstruction and occlusion go
-						where the 3D channels' call above puts them.) */
+						voice_in_world), the HRTF's direction, the Doppler
+						shift, obstruction and reverb, and the fade of a 3D
+						stream (sound_stereo_fade). (Obstruction and occlusion
+						go where the 3D channels' call above puts them.)
+						Any other plays as the Xbox played it: unplaced, dry,
+						faded linearly. */
 						if (TEST_FLAG(channel->type_flags, _sound_channel_stereo_bit))
 						{
+							boolean placed = sound_stereo_placed(sound->definition_index);
 							struct sound_location stereo_location = sound->source.location;
 
-							stereo_location.position = relative_position;
-							stereo_location.translational_velocity = relative_velocity;
-							dsound_port_set_channel_stereo_position(channel_index, TRUE, &stereo_location,
-								minimum_distance, stereo_obstruction, stereo_occlusion, stereo_underwater);
+							distance_fade = sound_stereo_fade(placed, distance_fade, distance, minimum_distance);
+							if (placed)
+							{
+								stereo_location.position = relative_position;
+								stereo_location.translational_velocity = relative_velocity;
+								dsound_port_set_channel_stereo_position(channel_index, TRUE, &stereo_location,
+									minimum_distance, stereo_obstruction, stereo_occlusion, stereo_underwater);
+							}
+							else
+							{
+								csmemset(&stereo_location, 0, sizeof(stereo_location));
+								dsound_port_set_channel_stereo_position(channel_index, FALSE, &stereo_location, 0.f,
+									0.f, 0.f, FALSE);
+							}
 						}
+						fade *= distance_fade;
 					}
 					break;
 
