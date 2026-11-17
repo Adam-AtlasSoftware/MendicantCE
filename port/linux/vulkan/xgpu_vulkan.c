@@ -535,7 +535,7 @@ static struct
 		uint32_t stencil_reference;
 		VkPrimitiveTopology topology;
 		VkDescriptorSet sets[2];
-		uint32_t offsets[2];
+		uint32_t offsets[3];
 		/* (display.hdr's input set; display.ambient_occlusion "world"'s set;
 		display.prism_shadows "cascaded"'s) */
 		VkDescriptorSet input, occlusion, shadows;
@@ -5193,7 +5193,7 @@ void xgpu_vulkan_draw(const struct xgpu_vulkan_draw *draw)
 	VkViewport viewport;
 	VkRect2D scissor;
 	VkDescriptorSet sets[2];
-	uint32_t offsets[2], index;
+	uint32_t offsets[3], index;
 	int32_t left, top, right, bottom;
 
 	if (!draw->pipeline || !draw->count || dynamic->viewport[2] <= 0 || dynamic->viewport[3] <= 0)
@@ -5394,9 +5394,12 @@ void xgpu_vulkan_draw(const struct xgpu_vulkan_draw *draw)
 	sets[0] = vk.draw_set;
 	offsets[0] = (uint32_t)draw->constants.offset;
 	offsets[1] = (uint32_t)draw->uniforms.offset;
+	/* (the last frame's constants a G-buffer twin's vertex program runs on
+	again; the constants' range where the draw has none) */
+	offsets[2] = (uint32_t)(draw->last_constants.buffer ? draw->last_constants.offset : draw->constants.offset);
 	if (memcmp(vk.bound.sets, sets, sizeof(sets)) || memcmp(vk.bound.offsets, offsets, sizeof(offsets)))
 	{
-		vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout, 0, 2, sets, 2, offsets);
+		vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout, 0, 2, sets, 3, offsets);
 		memcpy(vk.bound.sets, sets, sizeof(sets));
 		memcpy(vk.bound.offsets, offsets, sizeof(offsets));
 	}
@@ -7891,7 +7894,7 @@ static int device_make(const struct xgpu_vulkan_options *options)
 
 static int layouts_make(void)
 {
-	VkDescriptorSetLayoutBinding draw[5], textures[TEXTURE_SET_BINDINGS];
+	VkDescriptorSetLayoutBinding draw[6], textures[TEXTURE_SET_BINDINGS];
 	VkDescriptorSetLayoutCreateInfo info;
 	VkPipelineLayoutCreateInfo layout;
 	VkDescriptorSetLayout sets[5];
@@ -7918,9 +7921,15 @@ static int layouts_make(void)
 	draw[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 	draw[4].descriptorCount = 1;
 	draw[4].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+	/* (the G-buffer twins' last frame's vertex constants:
+	XGPU_SPIRV_BINDING_LAST_CONSTANTS) */
+	draw[5].binding = 5;
+	draw[5].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+	draw[5].descriptorCount = 1;
+	draw[5].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 	memset(&info, 0, sizeof(info));
 	info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-	info.bindingCount = 5;
+	info.bindingCount = 6;
 	info.pBindings = draw;
 	if (!check(vkCreateDescriptorSetLayout(vk.device, &info, NULL, &vk.draw_layout), "vkCreateDescriptorSetLayout"))
 		return 0;
@@ -8056,14 +8065,14 @@ static int draw_set_make(void)
 	VkDescriptorPoolSize sizes[4];
 	VkDescriptorPoolCreateInfo pool;
 	VkDescriptorSetAllocateInfo allocate;
-	VkDescriptorBufferInfo buffers[4];
+	VkDescriptorBufferInfo buffers[5];
 	VkDescriptorImageInfo cells;
-	VkWriteDescriptorSet writes[5];
+	VkWriteDescriptorSet writes[6];
 	struct xgpu_vulkan_image_description description;
 	int index;
 
 	sizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-	sizes[0].descriptorCount = 2;
+	sizes[0].descriptorCount = 3;
 	sizes[1].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 	sizes[1].descriptorCount = 1;
 	sizes[2].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -8118,11 +8127,13 @@ static int draw_set_make(void)
 	buffers[2].range = 6192;
 	buffers[3].buffer = vk.samples->buffer;
 	buffers[3].range = 4 * (XGPU_VULKAN_VISIBILITY_SLOTS + 1) * QUERY_FRAMES;
+	buffers[4].buffer = vk.ring;
+	buffers[4].range = 192 * 16;
 	cells.sampler = vk.stand_in_sampler;
 	cells.imageView = vk.lights_cells->sampled;
 	cells.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 	memset(writes, 0, sizeof(writes));
-	for (index = 0; index < 5; index++)
+	for (index = 0; index < 6; index++)
 	{
 		writes[index].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 		writes[index].dstSet = vk.draw_set;
@@ -8138,7 +8149,9 @@ static int draw_set_make(void)
 	writes[3].pImageInfo = &cells;
 	writes[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 	writes[4].pBufferInfo = &buffers[3];
-	vkUpdateDescriptorSets(vk.device, 5, writes, 0, NULL);
+	writes[5].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+	writes[5].pBufferInfo = &buffers[4];
+	vkUpdateDescriptorSets(vk.device, 6, writes, 0, NULL);
 	return 1;
 }
 

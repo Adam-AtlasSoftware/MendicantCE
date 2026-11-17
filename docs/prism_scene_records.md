@@ -65,12 +65,19 @@ And in the G-buffer pass, for its motion:
   was the pass before and the same object (else `NO_HISTORY`).
 
 The Vulkan backend draws each G-buffer twin into a second target too (`xgpu_stream.h`'s `GBUFFER_BEGIN`: four words a
-pixel): the screen motion (in pixels, from where the surface was last frame: the cameras and, for an object, the
-move of the `SCENE_INSTANCE` node its draw's part hangs from, the one whose matrix is the draw's first node's in the
-vertex constants; the first-person weapon none on the screen), the emissive light (an object's combiners with no
-light, the level's lightmap pass's with no lightmap) and the distance along the view's axis. The motion is the
-part's rigid motion: a skinned part's vertices take its first node's. `debug.gbuffer_view` `motion` and `emissive`
-show them.
+pixel): the screen motion (in pixels, from where the surface was last frame), the emissive light (an object's
+combiners with no light, the level's lightmap pass's with no lightmap) and the distance along the view's axis.
+`debug.gbuffer_view` `motion` and `emissive` show them.
+
+The motion is each vertex's own. The level's is the cameras' (`SCENE_VIEW`'s last and this frame's). An object's twin
+runs its vertex program a second time on the last frame's constants (`xgpu_spirv.h`'s
+`XGPU_SPIRV_BINDING_LAST_CONSTANTS`, `xgpu_spirv_options`' `gbuffer_previous`), which the host makes from the draw's own:
+the camera's projection (`c[-96]` to `c[-93]`) the pass before's, and each node's matrix (`c[-36]` on: a model's nodes
+in its own order, each its world matrix by its default pose's inverse, `models.c`'s relative node matrices) moved back
+as its `SCENE_INSTANCE` node moved (last frame's world matrix by this frame's inverse). The two clip positions go to
+the pixel shader, whose motion is their difference: a skinned limb moves as its own nodes and weights move it, not as
+the part's first node. A model of more nodes than the constants hold (44: a Custom Edition map's, skinned a part's own
+nodes at a time) moves as its root. The first-person weapon has none on the screen.
 
 M2 adds `PRISM_BAKE` (92), sent with `display.lighting` `"raster"` (`port/linux/game/prism_bake.c`): each frame the
 in-game baker's control (the map and BSP, `display.bake`, `display.bake_quality`, the rebakes asked for, the bake

@@ -504,6 +504,19 @@ static struct
 	uint32_t pass_number;
 	float motion[XGPU_SPIRV_GBUFFER_UNIFORMS - 2][4];
 	int motion_history;
+	/* an object's twin's last frame's constants (xgpu_spirv.h's
+	XGPU_SPIRV_BINDING_LAST_CONSTANTS: gbuffer_previous), where they are
+	(previous); the camera's projection (the constants' c[-96] to c[-93],
+	the first of a pass's draws but the first-person weapon's) the pass
+	before and this pass, each with its pass; each node's move from last
+	frame's matrix to this (last by this one's inverse), of one instance in
+	one pass */
+	float (*last_constants)[4];
+	int previous;
+	float projection[4][4], last_projection[4][4];
+	uint32_t projection_pass, last_projection_pass;
+	float (*moves)[3][4];
+	uint32_t moves_instance, moves_pass, move_count;
 } gbuffer;
 
 static double preparation_start(void)
@@ -1690,6 +1703,7 @@ static int pipeline_shaders(struct stream_pipeline *entry, const struct xgpu_str
 	memset(&options, 0, sizeof(options));
 	options.gbuffer = variant->gbuffer;
 	options.gbuffer_normal = variant->gbuffer && lighting != NULL;
+	options.gbuffer_previous = variant->gbuffer == XGPU_SPIRV_GBUFFER_OBJECT;
 	memcpy(options.border, variant->border, sizeof(options.border));
 	options.multiview = key->views;
 	options.foveated = variant->foveated;
@@ -2211,6 +2225,104 @@ static int gbuffer_motion(float motion[XGPU_SPIRV_GBUFFER_UNIFORMS - 2][4])
 	return history;
 }
 
+/* an affine map's product, a . b (3x4 each, as the vertex constants'
+rows) */
+static void affine_product(const float a[3][4], const float b[3][4], float product[3][4])
+{
+	int row, column;
+
+	for (row = 0; row < 3; row++)
+		for (column = 0; column < 4; column++)
+			product[row][column] = (float)((double)a[row][0] * b[0][column] + (double)a[row][1] * b[1][column] +
+				(double)a[row][2] * b[2][column] + (column == 3 ? (double)a[row][3] : 0.0));
+}
+
+/* an object's twin's motion (xgpu_spirv_options' gbuffer_previous): its
+program runs again on the last frame's constants, made here: the draw's
+own, the camera's projection the pass before in c[-96] to c[-93] (the
+rows of 0 to 3), and each node's matrix (the rows from 60, c[-36]: a model's
+nodes in its own order, each its world matrix by its default pose's
+inverse, models.c's relative node matrices) moved back as its
+SCENE_INSTANCE node moved, last frame's world matrix by this frame's
+inverse times it. A model of more nodes than the constants hold has a
+part's own nodes there, which are not known here: they move as its root.
+The first-person weapon moves none on the screen: its constants as they
+are. The uniforms' [2].xy: half the draw's viewport's width and height, by
+which the clip positions' difference is in pixels. Whether it has history
+(the view's, the projection's and the instance's) */
+static int gbuffer_previous_motion(float motion[XGPU_SPIRV_GBUFFER_UNIFORMS - 2][4])
+{
+	const struct gbuffer_instance *instance;
+	uint32_t node, slot, slots;
+	int history = gbuffer.view_known && (gbuffer.view.flags & XGPU_SCENE_VIEW_HISTORY) &&
+		gbuffer.last_projection_pass && gbuffer.last_projection_pass + 1 == gbuffer.pass_number;
+
+	memset(motion, 0, (XGPU_SPIRV_GBUFFER_UNIFORMS - 2) * sizeof(motion[0]));
+	motion[0][0] = stream.dynamic.viewport[2] * 0.5f;
+	motion[0][1] = stream.dynamic.viewport[3] * 0.5f;
+	gbuffer.previous = 0;
+	if (!history)
+		return 0;
+	if (!gbuffer.last_constants)
+	{
+		gbuffer.last_constants = malloc(CONSTANTS_RANGE);
+		gbuffer.moves = malloc(XGPU_SCENE_INSTANCE_NODES * sizeof(*gbuffer.moves));
+		if (!gbuffer.last_constants || !gbuffer.moves)
+		{
+			free(gbuffer.last_constants);
+			free(gbuffer.moves);
+			gbuffer.last_constants = NULL;
+			gbuffer.moves = NULL;
+			return 0;
+		}
+	}
+	memcpy(gbuffer.last_constants, stream.constants, CONSTANTS_RANGE);
+	if (gbuffer.instance == XGPU_GBUFFER_INSTANCE_FIRST_PERSON)
+	{
+		gbuffer.previous = 1;
+		return 1;
+	}
+	instance = gbuffer.instances && gbuffer.instance <= GBUFFER_INSTANCES ? &gbuffer.instances[gbuffer.instance] : NULL;
+	if (!instance || instance->pass != gbuffer.pass_number || !instance->node_count ||
+		(instance->flags & XGPU_SCENE_INSTANCE_NO_HISTORY))
+		return 0;
+	/* (each node's move, once an instance and pass) */
+	if (gbuffer.moves_instance != gbuffer.instance || gbuffer.moves_pass != gbuffer.pass_number)
+	{
+		gbuffer.moves_instance = gbuffer.instance;
+		gbuffer.moves_pass = gbuffer.pass_number;
+		gbuffer.move_count = instance->node_count;
+		for (node = 0; node < instance->node_count; node++)
+		{
+			float inverse[3][4];
+
+			if (affine_inverse(instance->nodes[node].now, inverse))
+				affine_product(instance->nodes[node].last, inverse, gbuffer.moves[node]);
+			else
+			{
+				memset(gbuffer.moves[node], 0, sizeof(gbuffer.moves[node]));
+				gbuffer.moves[node][0][0] = gbuffer.moves[node][1][1] = gbuffer.moves[node][2][2] = 1.0f;
+			}
+		}
+	}
+	memcpy(gbuffer.last_constants[0], gbuffer.last_projection, sizeof(gbuffer.last_projection));
+	slots = (CONSTANTS_RANGE / 16 - 60) / 3;
+	if (slots > gbuffer.move_count)
+		slots = gbuffer.move_count;
+	for (slot = 0; slot < slots; slot++)
+	{
+		/* (a model of more nodes than the constants hold (CE's
+		RASTERIZER_MAXIMUM_NODES_PER_MODEL, 44): a part's own, by its root's
+		move) */
+		const float (*move)[4] = gbuffer.moves[gbuffer.move_count >= 44 ? 0 : slot];
+
+		affine_product(move, (const float (*)[4])stream.constants[60 + slot * 3],
+			(float (*)[4])gbuffer.last_constants[60 + slot * 3]);
+	}
+	gbuffer.previous = 1;
+	return 1;
+}
+
 /* the G-buffer twin's uniforms' fourth word, low and high halves: the
 material, its tier and present, and the instance */
 static void gbuffer_key(uint32_t key[3], const struct gbuffer_material **material)
@@ -2242,7 +2354,7 @@ static void gbuffer_uniforms(float uniforms[XGPU_SPIRV_GBUFFER_UNIFORMS][4])
 	uniforms[0][3] = (float)((material ? material->model : 0) | (flags << 4)) / 255.0f;
 	uniforms[1][0] = (float)key[0];
 	uniforms[1][1] = (float)key[1];
-	uniforms[1][2] = (float)gbuffer_motion(gbuffer.motion);
+	uniforms[1][2] = (float)gbuffer.motion_history;
 	/* (the level's draw's lightmap page + 1, which its twin writes beside its
 	lightmap coordinates: xgpu_spirv.c's gbuffer_extras) */
 	uniforms[1][3] = (float)key[2];
@@ -2991,6 +3103,21 @@ static int draw_pipeline(const struct draw_input *input, int apart)
 		{
 			preparation_end(1, traced);
 			continue;
+		}
+		/* (an object's G-buffer twin's last frame's constants: its program's
+		second run's, gbuffer_previous_motion; the constants' where it has
+		none) */
+		memset(&draw.last_constants, 0, sizeof(draw.last_constants));
+		if (gbuffer.drawing && gbuffer.kind == XGPU_SPIRV_GBUFFER_OBJECT && gbuffer.previous && gbuffer.last_constants)
+		{
+			void *to = xgpu_vulkan_upload(CONSTANTS_RANGE, 256, &draw.last_constants);
+
+			if (!to)
+			{
+				preparation_end(1, traced);
+				return 1;
+			}
+			memcpy(to, gbuffer.last_constants, CONSTANTS_RANGE);
 		}
 		preparation_end(1, traced);
 		traced = preparation_start();
@@ -4232,9 +4359,17 @@ static void gbuffer_draw(const struct draw_input *input)
 		memcpy(gbuffer.uniform_key, key, sizeof(key));
 		stream.uniforms_dirty = 1;
 	}
+	/* (the camera's projection, the pass's first draw's but the first-person
+	weapon's, which an object's twin in the next pass moves back by) */
+	if (gbuffer.projection_pass != gbuffer.pass_number && gbuffer.instance != XGPU_GBUFFER_INSTANCE_FIRST_PERSON)
+	{
+		memcpy(gbuffer.projection, stream.constants, sizeof(gbuffer.projection));
+		gbuffer.projection_pass = gbuffer.pass_number;
+	}
 	{
 		float motion[XGPU_SPIRV_GBUFFER_UNIFORMS - 2][4];
-		int history = gbuffer_motion(motion);
+		int history = gbuffer.kind == XGPU_SPIRV_GBUFFER_OBJECT ? gbuffer_previous_motion(motion) :
+			gbuffer_motion(motion);
 
 		if (memcmp(motion, gbuffer.motion, sizeof(motion)) || history != gbuffer.motion_history)
 		{
@@ -4899,6 +5034,15 @@ static void stream_gbuffer_phase(void *context, uint32_t value)
 	{
 		gbuffer.active = 1;
 		gbuffer.pass_number++;
+		/* (the camera's projection of the pass before, which this pass's
+		objects move back by) */
+		if (gbuffer.projection_pass && gbuffer.projection_pass + 1 == gbuffer.pass_number)
+		{
+			memcpy(gbuffer.last_projection, gbuffer.projection, sizeof(gbuffer.last_projection));
+			gbuffer.last_projection_pass = gbuffer.projection_pass;
+		}
+		else
+			gbuffer.last_projection_pass = 0;
 	}
 	if (prepass.active || shadow.active || stream.preparing || !color || color->depth || color->layers > 1)
 		return;

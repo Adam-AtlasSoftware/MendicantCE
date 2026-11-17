@@ -650,6 +650,10 @@ struct xgpu_vulkan_draw
 	struct xgpu_vulkan_range vertices[XGPU_VULKAN_BINDINGS];
 	struct xgpu_vulkan_range indices;
 	struct xgpu_vulkan_range constants, uniforms;
+	/* an object's G-buffer twin: the vertex constants its program runs on a
+	second time, its last frame's place (xgpu_spirv.h's
+	XGPU_SPIRV_BINDING_LAST_CONSTANTS; no buffer: the constants') */
+	struct xgpu_vulkan_range last_constants;
 	struct xgpu_vulkan_texture textures[4];
 	/* display.prism_material_overlay: its pixel shader reads the overlay's
 	images (tiles A to D, the class mask; none: a stand-in) at bindings

@@ -931,7 +931,9 @@ static void VKAPI_CALL post_bind_sets(VkCommandBuffer c, VkPipelineBindPoint poi
 	uint32_t first, uint32_t count, const VkDescriptorSet *sets, uint32_t dynamic_count, const uint32_t *offsets)
 {
 	(void)c; (void)point; (void)layout; (void)sets;
-	assert(first == 0 && count == 2 && dynamic_count == 2);
+	/* (the constants', the uniforms' and the G-buffer twins' last frame's
+	constants' ranges) */
+	assert(first == 0 && count == 2 && dynamic_count == 3);
 	post_offset_state[0] = offsets[0];
 	post_offset_state[1] = offsets[1];
 }
@@ -1258,7 +1260,7 @@ static void VKAPI_CALL masked_bind_sets(VkCommandBuffer c, VkPipelineBindPoint p
 	uint32_t first, uint32_t count, const VkDescriptorSet *sets, uint32_t dynamic_count, const uint32_t *offsets)
 {
 	(void)c; (void)point; (void)layout; (void)sets;
-	assert(first == 0 && count == 2 && dynamic_count == 2 && offsets[0] == offsets[1]);
+	assert(first == 0 && count == 2 && dynamic_count == 3 && offsets[0] == offsets[1] && offsets[2] == offsets[0]);
 	masked_offset_state = offsets[1];
 }
 

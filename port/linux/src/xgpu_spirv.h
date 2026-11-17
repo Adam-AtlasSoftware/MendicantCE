@@ -53,6 +53,10 @@ The conventions (SPIR-V 1.3, Vulkan 1.1):
 #define XGPU_SPIRV_BINDING_DYNAMIC_LIGHTS 2
 #define XGPU_SPIRV_BINDING_DYNAMIC_LIGHT_CELLS 3
 #define XGPU_SPIRV_BINDING_SAMPLES 4
+/* an object's G-buffer twin's last frame's vertex constants (192 vec4: the
+draw's own with its nodes' matrices and the camera's projection last frame's
+in their place: xgpu_spirv_options' gbuffer_previous) */
+#define XGPU_SPIRV_BINDING_LAST_CONSTANTS 5
 #define XGPU_SPIRV_SET_TEXTURES 1
 /* display.hdr: the pixel a draw blends over in its shader (its tag's
 XGPU_HDR_SHADER_BLENDS, xgpu_hdr.h), the colour attachment read as input
@@ -117,6 +121,9 @@ enum
 	/* (a model lit for each vertex, its ambient light apart: xgpu.h's
 	XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX) */
 	XGPU_SPIRV_LOCATION_LIGHT_AMBIENT, XGPU_SPIRV_LOCATION_LIGHT_POINT,
+	/* (an object's G-buffer twin: its clip position last frame and this,
+	as the GPU takes them: xgpu_spirv_options' gbuffer_previous) */
+	XGPU_SPIRV_LOCATION_PREVIOUS, XGPU_SPIRV_LOCATION_CURRENT,
 };
 
 /* the G-buffer twins' uniforms (xgpu_spirv_uniforms' gbuffer), vec4s */
@@ -246,6 +253,14 @@ struct xgpu_spirv_options
 	shader hands on the world normal (lit), which word 1 is of (else 0) */
 	int gbuffer;
 	BOOL gbuffer_normal;
+	/* ... an object's (XGPU_SPIRV_GBUFFER_OBJECT): its vertex shader runs
+	its program a second time on the last frame's constants
+	(XGPU_SPIRV_BINDING_LAST_CONSTANTS) and hands on that clip position and
+	this frame's, of which its pixel shader finds the motion, each vertex
+	moved as its own nodes moved (a skinned part's limbs as theirs); the
+	gbuffer uniforms' [2].xy then half the view's width and height in
+	pixels, and [1].z 1 where the last frame's constants are */
+	BOOL gbuffer_previous;
 };
 #define XGPU_SPIRV_GBUFFER_OBJECT 1
 #define XGPU_SPIRV_GBUFFER_LEVEL 2
