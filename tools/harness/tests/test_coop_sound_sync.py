@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, constant, enum_with, mutated, read, run, structure
 from harness.audio import pcm_permutation_rate
 
-CASES = ['pcm', 'chain', 'stereo-blocks', 'pitch', 'start-skipped', 'start-playing', 'fade-in-at-start', 'finished',
+CASES = ['pcm', 'chain', 'split-chain', 'stereo-blocks', 'pitch', 'start-skipped', 'start-playing', 'fade-in-at-start', 'finished',
          'repeat', 'late', 'just-started', 'ended', 'placed', 'other-instance', 'unknown-compression', 'taken-once',
          'hostile', 'length', 'length-hostile']
 NEGATIVE_CONTROLS = {
@@ -28,6 +28,8 @@ NEGATIVE_CONTROLS = {
     'no-wait': ('return elapsed + (long)since;', 'return elapsed;', 'late'),
     'one-permutation': ('\t\t\t\tindex = permutation->next_permutation_index;\n', '\t\t\t\tbreak;\n', 'length'),
     'nominal-pitch': ('coop_sound_pitch_or_one(definition->random_pitch_bounds.lower) *', '', 'length'),
+    # a split piece timed at its tag's rate, not its own (#1167): 13 s lands in another piece
+    'piece-at-tag-rate': ('return (real)pcm_rate * played_pitch;', 'return (real)22050 * played_pitch;', 'split-chain'),
     'offset-kept': ('\t\t\tcoop_sound_offsets[index].sound_index = NONE;\n', '', 'taken-once'),
 }
 

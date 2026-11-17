@@ -12,7 +12,7 @@ from harness import CHECK_FAILED, build, constant, mutated, read, run, structure
 from harness.audio import pcm_permutation_rate  # noqa: E402
 
 MODULE = "port/linux/game/custom_edition_sounds.c"
-CASES = ["high-tone", "48k-pcm", "too-long", "resource-entry"]
+CASES = ["high-tone", "48k-pcm", "too-long", "over-total", "resource-entry"]
 NEGATIVE_CONTROLS = {
     # the old conversion path (#1111): every permutation re-encoded as Xbox ADPCM at a rate the channels play
     "always-adpcm": (("if (decoded && frames_kept_native(", "if (decoded && FALSE && frames_kept_native("),

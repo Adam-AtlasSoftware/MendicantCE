@@ -2,7 +2,8 @@
 stream (sound_dsound_xbox.c, dsound_channel_use_format): the stream switched in has the channel's settings, the one
 switched out is kept for the switch back, and the channels and the kept streams never come to more than the 256 the
 game has, every channel of the desktop's pools switching; a permutation of another format queued after one waits for
-its packets to play."""
+its packets to play, and the linked pieces a long permutation is split into (OpenH1 issue 1167) play on one stream,
+joined byte for byte, with no switch and no gap."""
 import re
 import sys
 from pathlib import Path
@@ -14,7 +15,7 @@ from harness import CHECK_FAILED, build, constant, enum_with, function, mutated,
 from harness.audio import dsound_port_formats_state, pcm_permutation_rate, stream_types  # noqa: E402
 
 GAME = "source/sound/sound_dsound_xbox.c"
-CASES = ["every-channel", "settings", "queued"]
+CASES = ["every-channel", "settings", "queued", "chained"]
 NEGATIVE_CONTROLS = {
     # no stream let go to make room: the kept streams and the channels come to more than 256
     "nothing-let-go": (("if (dsound_port_formats.kept_count>=most_kept && dsound_port_formats.kept_count>0)",
@@ -24,6 +25,9 @@ NEGATIVE_CONTROLS = {
                             "\tdsound_port_formats.pcm_rates[index]= pcm_rate;"), "settings"),
     # the next permutation's format not looked at: PCM sent to the Xbox ADPCM stream
     "no-wait": (("\t\t\t\t\t\t\tdsound_port_formats.switch_pending[index]= TRUE;", ""), "queued"),
+    # a one-sample gap at a join of a split permutation's pieces (#1167): the next piece starts a sample in
+    "gap-at-join": (("\t\t\t\t\t\tchannel->queued_permutation= NULL;\n\t\t\t\t\t\tchannel->sample_offset= 0;",
+                     "\t\t\t\t\t\tchannel->queued_permutation= NULL;\n\t\t\t\t\t\tchannel->sample_offset= 2;"), "chained"),
 }
 
 FUNCTIONS = ["dsound_volume_from_gain", "dsound_frequency_from_pitch", "dsound_angle_from_angle",

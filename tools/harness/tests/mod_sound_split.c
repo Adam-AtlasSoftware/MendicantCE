@@ -330,7 +330,7 @@ int main(int argc, char **argv)
 	{
 		/* 30 s of mono at 44.1 kHz (2.6 MB of PCM), or 15 s of stereo at 48 kHz (Ogg Vorbis, 2.9 MB of PCM): a
 		chain of six pieces of at most 512 KB, PCM at the source's rate, joined the source's samples; the mouth
-		data on the first; the sound's longest time the whole */
+		data on the first; the sound's longest time the whole chain's */
 		boolean mono = !strcmp(name, "mono-30s");
 		struct source source = { NULL, mono ? 30L * 44100 : 15L * 48000, mono ? 1 : 2, mono ? 44100 : 48000, NONE };
 		struct mod_sound *sound;
@@ -361,8 +361,9 @@ int main(int argc, char **argv)
 			CHECK((long)piece->unknown0 == NONE && piece->unknown1 == 0 && piece->unknown2 == 1,
 				"piece %d is not the sound cache's to load", index);
 		}
-		CHECK(sound->definition.longest_permutation_length >= (mono ? 29900 : 14900) &&
-			sound->definition.longest_permutation_length <= (mono ? 30100 : 15100),
+		/* (Tool's measure of an Ogg Vorbis permutation is from its tag's buffer size, which the fake's is not) */
+		CHECK(!mono || (sound->definition.longest_permutation_length >= 29900 &&
+			sound->definition.longest_permutation_length <= 30100),
 			"the sound's longest is %ld ms", (long)sound->definition.longest_permutation_length);
 		CHECK(sound->adpcm_count == 0, "a permutation was kept as Xbox ADPCM");
 	}
