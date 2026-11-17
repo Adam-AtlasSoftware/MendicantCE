@@ -1926,8 +1926,9 @@ denoiser: the sun (a ray to its disc), the domes, the lamps, the fixtures
 and the dynamic lights (resampled importance, unbiased for its one ray), the
 floor, the indirect light by the bake's own estimator (a cosine path of up
 to 8 bounces, Russian roulette past the second, every hit's sun and lamps
-by next-event estimation), the reflection by a GGX ray and the same path;
-extra.y of these a pixel each frame, summed (Welford's running mean, so
+by next-event estimation), the reflection by a GGX ray and the same path
+(one of the two lobes a sample, by their shares); extra.y of these a pixel
+each frame, summed (Welford's running mean, so
 that a long sum keeps its precision) into job.sums: per pixel the diffuse
 light's mean (3), the specular light's (3), and the mean and the sum of
 squared deviations of the frame's luminance there (its noise:
@@ -1981,13 +1982,23 @@ void main()
         lights_ris(g, o, 8, 16, 16, false, dl, sl);
         ld += dl;
         ls += sl;
-        seed_for(pixel, frame, 4u);
-        ld += reference_path(o, cosine_dir(g.normal), 8, false);
-        vec3 weight;
-        seed_for(pixel, frame, 5u);
-        vec3 r = ggx_sample(g, weight);
-        if (dot(weight, weight) > 0.0)
-            ls += weight * reference_path(o, r, 8, true);
+        /* (one path a sample: the diffuse lobe's or the specular's, chosen by
+        their shares (at least a tenth each), its light over its chance) */
+        float chance = clamp(luma(share) / max(luma(share) + luma(kd), 1.0e-4), 0.1, 0.9);
+        seed_for(pixel, frame, 6u);
+        if (rnd() >= chance)
+        {
+            seed_for(pixel, frame, 4u);
+            ld += reference_path(o, cosine_dir(g.normal), 8, false) / (1.0 - chance);
+        }
+        else
+        {
+            vec3 weight;
+            seed_for(pixel, frame, 5u);
+            vec3 r = ggx_sample(g, weight);
+            if (dot(weight, weight) > 0.0)
+                ls += weight * reference_path(o, r, 8, true) / chance;
+        }
         if (any(isnan(ld)) || any(isinf(ld)))
             ld = vec3(0.0);
         if (any(isnan(ls)) || any(isinf(ls)))

@@ -125,7 +125,8 @@ resampled from 8 (4 at a hit) candidates of the grid's mixture, which can pick e
 there (at the pixel the GGX lobe's with the diffuse), and a ray that meets a lamp's triangle takes only its glow. That
 is unbiased without weighing a lamp met by a sampled direction against its next-event estimate (multiple importance
 sampling): the surfaces a path meets are diffuse (the bake's albedo), where next-event estimation is the better
-sampler, and the pixel's glossy lobe is in the resampling's target. It `HALO_PT_REFERENCE_PATHS` paths a pixel a frame (1 by default), and sums them as running means (Welford's,
+sampler, and the pixel's glossy lobe is in the resampling's target. It `HALO_PT_REFERENCE_PATHS` paths a pixel a frame (1 by default; each path the diffuse lobe's or the specular's, picked
+by their shares, at least a tenth each, its light over its chance), and sums them as running means (Welford's,
 so a long sum keeps its precision). Every 32 frames it measures its own noise: each pixel's variance of its
 luminance's mean over the sum of the means squared, the frame's estimated relative MSE (linear, before the tone curve:
 stricter than the 8-bit frame's). It stops once that is at most 0.001 (the gates' `reference_noise`) with 64 frames
