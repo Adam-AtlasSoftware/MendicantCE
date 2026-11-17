@@ -214,3 +214,11 @@ It checks FSR 3.1's vendored files against their README's SHA-256, that the gene
 (`tools/vulkan_upscale_shaders.py --check`, where glslang and SPIRV-Tools are installed), FSR's host half over a fake
 core (its jitter the SDK's Halton sequence, of 8 times the area's ratio; no dispatch without a device), and the
 settings' entries, README rows and menu values.
+
+## Measurements
+
+`docs/prism_gates.md`'s "M5, part 1" has them (the RTX 2060): FSR 3.1 against native at the frozen scenes' poses,
+in Classic and `"ce_deferred"` (at 67% every scene measured under the exit's mean FLIP of 0.06; at 50% G2 over it
+in Classic), in motion and on the path tracer; the GPU's time and the upscaler's own share; the passthrough plugin
+byte-identical to the upscaler off; nothing opened without a plugin; Vulkan validation clean with FSR 3.1; and why
+DLSS could not be measured on that machine (its driver makes no device with NGX's `VK_NVX_binary_import`).
