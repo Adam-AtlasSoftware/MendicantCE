@@ -439,6 +439,37 @@ byte-identical (and each tree's two runs alike); `determinism`: the simulation a
 **The Cycles cross-check** was not run: the scene's export to Blender (the materials, the rig) is not written yet, and
 R is the gate's truth.
 
+## M3: Path Traced
+
+M3 (`docs/prism_pathtraced.md`) is judged on the frozen G scenes with `display.lighting` `"pathtraced"` reading a bake
+made before by the game itself (`ultra`, `debug.bake_exit`; the run's `HALO_BAKE_FOLDER`, `display.bake` `"off"`),
+against its own reference: `debug.pt_reference` in that mode traces the same scene, materials and lights unbiased at
+every pixel with no bake, summed until its estimated relative MSE is under `reference_noise` (0.001) or its frames
+are done, its file `p<n>.exr` (`light.R/G/B`, `spec.R/G/B`, `Z`, `samples`, `noise`) and its frame `p<n>_ref.png`.
+The moves' RT off is Classic's frame (`v4off`); the moving frames measured are the `quality` profile's (`v4pt`), the
+`performance` profile's (`v4perf`) beside them; `v4raw` is the light as traced (the denoiser off, a diagnostic).
+
+```sh
+python3 tools/prism_gate/capture.py moves G5 --stage <tree> --data <data> --config <classic toml> --out <dir> \
+    --states v4off v4pt v4perf v4raw --env HALO_BAKE_FOLDER=<bakes> --env HALO_BAKE=off --env HALO_BAKE_QUALITY=ultra
+python3 tools/prism_gate/capture.py refs_v4 G5 --stage <tree> --data <data> --config <classic toml> --out <dir> \
+    --reference-frames 4096 --env HALO_BAKE_FOLDER=<bakes> --env HALO_BAKE=off --env HALO_BAKE_QUALITY=ultra \
+    --env HALO_PT_REFERENCE_PATHS=4
+python3 tools/prism_gate/gate.py measure <dir> G5 --state v4pt --off v4off
+python3 tools/prism_gate/evidence.py sheet <dir> G5      # the still sheet
+python3 tools/prism_gate/evidence.py clip <dir> G5       # the moving camera's clip (H.264)
+```
+
+The bake's quality is part of its key (`docs/prism_bake.md`): a run reads a bake only with the quality it was made
+at (`HALO_BAKE_QUALITY`), else the bake is stale and, with `display.bake` `"off"`, there is none. The thresholds are
+M0's (error 0.01, blotch 0.015, flicker 1.30, still FLIP 0.10). The frame time is the GPU's
+(`HALO_VULKAN_GPU_TIMES_FILE`) and each pass's (`HALO_PT_TIMES_FILE`: the light, the temporal, fix and a-trous passes,
+the composite). V1 and V2 are being frozen on another branch: their gates are not taken here.
+
+### M3 as measured
+
+(round 1: in progress)
+
 ## Every milestone also passes
 
 `tools/prism_gate/identity.py` checks the milestone's tree against the tree it started from:

@@ -129,6 +129,13 @@ vec2 fold(vec3 n)
         f = (1.0 - abs(n.yx)) * vec2(n.x >= 0.0 ? 1.0 : -1.0, n.y >= 0.0 ? 1.0 : -1.0);
     return f;
 }
+float power16(float x)
+{
+    x *= x;
+    x *= x;
+    x *= x;
+    return x * x;
+}
 vec3 rgb9e5(uint v)
 {
     float e = exp2(float(int(v >> 27u) - 15 - 9));
@@ -1476,8 +1483,10 @@ void main()
     int stride = n_d < 1.5 ? 4 : n_d < 2.5 ? 3 : 2;
     vec3 sum_d = vec3(0.0), sum_s = vec3(0.0);
     float w_d = 0.0, w_s = 0.0, m1 = 0.0, m2 = 0.0, wm = 0.0;
-    for (int y = -3; y <= 3; y++)
-        for (int x = -3; x <= 3; x++)
+    /* (nothing to fix and the variance known: the gather not made) */
+    int reach = fix_d || fix_s || fix_v || dc.a < 0.0 ? 3 : -1;
+    for (int y = -reach; y <= reach; y++)
+        for (int x = -reach; x <= reach; x++)
         {
             ivec2 q = pixel + ivec2(x, y) * ((fix_d || fix_s || fix_v) ? stride : 1);
             if (!inside(q))
@@ -1486,7 +1495,7 @@ void main()
             if (gq.x != gc.x)
                 continue;
             vec3 nq = unfold(unpackSnorm2x16(gq.y));
-            float wn = pow(max(dot(nq, nc), 0.0), 16.0);
+            float wn = power16(max(dot(nq, nc), 0.0));
             vec3 pq = job.camera[0].xyz + uintBitsToFloat(gq.z) * ray_of(job.camera, job.corners, vec2(q));
             float plane = abs(dot(pq - pc, nc)) / (0.02 + 0.01 * dist);
             float wz = exp(-plane);
@@ -1620,8 +1629,11 @@ void main()
     float lc = luma(dc.rgb), lsc = luma(sc.rgb);
     float sigma_d = job.settings.w * sqrt(max(dc.a, 0.0)) + 1.0e-4;
     float sigma_s = job.settings.w * sqrt(max(sc.a, 0.0)) + 1.0e-4;
-    /* (the specular's reach: none on a mirror, the diffuse's when rough) */
-    bool spec_on = (signals & 2u) != 0u && float(stride) <= 1.0 + 16.0 * roughness;
+    /* (the specular's reach: none on a mirror, the diffuse's when rough;
+    a signal with no variance left is passed on) */
+    bool spec_on = (signals & 2u) != 0u && float(stride) <= 1.0 + 16.0 * roughness && sc.a > 1.0e-8;
+    if (dc.a <= 1.0e-8)
+        signals &= ~1u;
     /* (the sun: in a penumbra only; its kernel's reach in pixels, the
     penumbra's width: the blocker's distance by the disc's angle, over the
     pixel's footprint at this distance) */
@@ -1647,8 +1659,9 @@ void main()
             vec3 pq = job.camera[0].xyz + uintBitsToFloat(gq.z) * ray_of(job.camera, job.corners, vec2(q));
             float plane = abs(dot(pq - pc, nc)) / (0.01 + 0.004 * dist * float(stride));
             float wz = exp(-plane);
-            float ndot = max(dot(nq, nc), 0.0);
-            float wn = pow(ndot, 64.0);
+            float wn = power16(max(dot(nq, nc), 0.0));
+            wn *= wn;
+            wn *= wn;
             float wgeo = k * wz * wn;
             if (wgeo <= 1.0e-6)
                 continue;
@@ -1667,7 +1680,7 @@ void main()
                 float rq = unpackUnorm2x16(gq.w).x;
                 float wr = exp(-abs(rq - roughness) * 8.0);
                 float wl = exp(-abs(luma(sq.rgb) - lsc) / sigma_s);
-                float w = wgeo * wl * wr * pow(ndot, 64.0);
+                float w = wgeo * wl * wr * wn;
                 sum_s += w * sq.rgb;
                 var_s += w * w * max(sq.a, 0.0);
                 wsum_s += w;
