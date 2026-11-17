@@ -63,30 +63,10 @@ def pad4(n):
 
 
 def read_pwg(path):
-    b = open(path, "rb").read()
-    ver, count, flags = struct.unpack_from("<III", b, 4)
-    far = ver >= 2 and bool(flags & 1)
-    off, parts = 64, []
-    for _ in range(count):
-        rec = b[off:off + 64]
-        vc, tc = struct.unpack_from("<II", rec, 12)
-        pfs, psc = struct.unpack_from("<II", rec, 32)
-        ntc, dist = struct.unpack_from("<If", rec, 40) if far else (tc, 0.0)
-        off += 64
-        p = dict(rec=rec, lm=struct.unpack_from("<h", rec, 0)[0], mi=struct.unpack_from("<h", rec, 2)[0],
-                 pfs=pfs, psc=psc, ntc=ntc, dist=dist)
-        p["sft"] = np.frombuffer(b, "<u4", psc + 1, off).astype(np.int64); off += pad4((psc + 1) * 4)
-        p["verts"] = np.frombuffer(b, "<f4", vc * 14, off).reshape(vc, 14).copy(); off += pad4(vc * 56)
-        p["lmv"] = np.frombuffer(b, "<f4", vc * 5, off).reshape(vc, 5).copy(); off += pad4(vc * 20)
-        p["tri"] = np.frombuffer(b, "<u2", tc * 3, off).reshape(tc, 3).astype(np.int64); off += pad4(tc * 6)
-        if far:
-            p["pairs"] = np.frombuffer(b, "<u4", psc * 2, off).reshape(psc, 2).astype(np.int64); off += psc * 8
-            p["bounds"] = np.frombuffer(b, "<f4", psc * 4, off).reshape(psc, 4).copy(); off += psc * 16
-        else:
-            p["pairs"] = np.stack([p["sft"][:-1], p["sft"][1:] - p["sft"][:-1]], 1)
-            p["bounds"] = None
-        parts.append(p)
-    return b[:64], far, parts
+    """a .pwg of version 1, 2 or 3 (wg3_pwg.read): its header (64 bytes), whether it has far levels, its parts"""
+    import wg3_pwg
+    f = wg3_pwg.read(path)
+    return f["header"], f["far"], f["parts"]
 
 
 def surface_bounds(P, tris_by_surface):

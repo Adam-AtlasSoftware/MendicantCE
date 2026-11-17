@@ -16,7 +16,7 @@ so.
 | | |
 | --- | --- |
 | The game | MendicantCE, started once so that it has extracted the maps from your disc image. Its data folder holds `maps/` with `a10.map` and the rest. |
-| Python | 3.10 or newer, with `numpy`, `pillow`, `scipy`, `scikit-image`, `opencv-python-headless`, `torch` and `spandrel` (`prism_packs/requirements.txt`). |
+| Python | 3.10 or newer, with `numpy`, `pillow`, `scipy`, `scikit-image`, `opencv-python-headless`, `torch`, `spandrel` and `xatlas` (`prism_packs/requirements.txt`). |
 | Blender | 4.5 LTS, from [blender.org](https://www.blender.org/download/lts/4-5/). It runs headless; you never see it. Other versions may build different shapes or fail. |
 | Invader | 0.55 or newer, from [github.com/SnowyMouse/invader](https://github.com/SnowyMouse/invader). Its programs turn the remodels and maps into the tags the game loads (`invader-model`, `invader-bitmap`, `invader-extract`, `invader-edit`, `invader-convert`). |
 | The extractor | `bin/openh1-map-extract` in the Linux download. It reads the maps as the game reads them. On Windows it runs through WSL (below). |
@@ -83,7 +83,8 @@ command again: finished steps are remembered in the work folder. `--again <pack>
 Options: `--out <folder>` writes the packs somewhere other than the data folder, in the same layout.
 `--work <folder>` puts the work folder elsewhere (default `<data>/prism_packs_work`). `--gpu <part of its name>`
 chooses the card Cycles uses, `--vulkan-gpu <number>` the upscaler's card and `--torch cpu|cuda` PyTorch's.
-`--game` and `--extractor` name the game and the extractor if the tools do not find them beside themselves.
+`--threads <n>` keeps Blender and the level remodels' steps to that many of the processor's threads (all by
+default). `--game` and `--extractor` name the game and the extractor if the tools do not find them beside themselves.
 
 When everything is built, the work folder can be deleted. The packs do not need it. Keep it if you want to build
 more levels later without extracting again.
@@ -100,7 +101,8 @@ These are long builds, all on your computer. Nothing runs on a server.
 - A **level's lightmaps** are the heaviest pack: every lightmap page of every part of the level is baked again
   at four times its size, at 1024 samples a texel. On a graphics card that takes a sitting; on a processor alone
   it can run through a night per level. `--lightmap-samples 256` makes a noisier bake in a fraction of the time.
-- A **level's remodel** is moderate on a graphics card. It needs a lot of memory on the big outdoor levels.
+- A **level's remodel** is moderate on a graphics card. It needs a lot of memory on the big outdoor levels. Its
+  later steps (thinning, the checks, the lightmap atlas) run on the processor, a few minutes a part of a level.
 - The game is started hidden, silent and offline a few times (for the models it draws, and for probes). Nothing
   appears on the screen.
 
@@ -124,7 +126,7 @@ write `mods/load_order.toml` with the packs in the order they were made for (Bol
 | `chief_r3` | `mods/prism_r3_chief_meshes`, `mods/prism_r3_chief_materials` | the round 3 Chief (gloves, pouches, lamps, helper bones) and his PBR materials | REMODELS MAX (`display.prism_models = "max"`), PBR MATERIALS (`display.prism_materials = "pbr"`) |
 | `cast` | `mods/prism_v3_cast`, `mods/prism_v3_elite_meshes` | the armoured Marine, Grunt and Jackal remodelled; the Elites stitched (left off: turn it on in MANAGE MODS to compare) | REMODELS MAX |
 | `rocks` | `mods/prism_v3_rocks` | the campaign's rocks and boulders remodelled | REMODELS MAX |
-| `world` | `prism_world/levels/<level>/<bsp>.pwg` | each level's remodelled geometry (a10, a30, a50, b30, c10) | WORLD GEOMETRY Remodel (`display.prism_world_geometry = "remodel"`) |
+| `world` | `prism_world/levels/<level>/<bsp>.pwg` | each level's remodelled geometry (a10, a30, a50, b30, c10), checked (below) | WORLD GEOMETRY Remodel (`display.prism_world_geometry = "remodel"`) |
 | `lightmaps` | `prism_lightmaps/rebaked/*.prl` | each level's lightmaps baked again from its own lamps and sky | LIGHTMAPS Rebaked (`display.prism_lightmaps = "rebaked"`) |
 | `probes` | `prism/probes/<level>.probes` | local reflections (not in `all`: name it) | REFLECTIONS Local (`display.prism_reflections = "local"`) |
 | `sun` | `prism_lightmaps/sun/*.psm` | sharp baked sun shadows (not in `all`) | not read by this build: its setting comes in a later one |
@@ -134,6 +136,32 @@ shadows, but not the packs' own rows above.
 
 **On Windows**, REMODELS, PBR MATERIALS and TEXTURE DETAIL are not in the game's build yet, so `chief_r3`,
 `cast` and `rocks` draw nothing there. Everything else applies.
+
+## The level remodels
+
+Each part of a level (each structure BSP the recipes cover) is built in these steps, each remembered as done:
+
+1. **The remodel** (`world_geo/wg2_remodel.py`, Blender): the level's surfaces bevelled, grooved, subdivided and
+   shaped (rock strata, sand ripples, rounded hulls and pipes), and their light baked by Cycles. A bevel's vertex
+   that ends further than twice the bevel from the stock surfaces about it (a sliver narrower than the bevel sends
+   its miter out as a needle) is put back on the nearest of them, and a rounded class's points move at most half a
+   world unit along their stock triangle (`cap_side` in the recipes).
+2. **The seal** (`wg2_seal.py`): every edge two surfaces share made the same vertices on both sides.
+3. **The far levels** (`wg2_far2.py`, Blender).
+4. **The thinning** (`wg3_thin.py`, Blender): triangles that buy no visible shape taken out, checked by
+   `wg3_fix.py` in every mode the game draws (near, far, and neighbours at different levels): where the thinning
+   opened an edge, the surfaces there are kept whole and it is thinned again; if an edge is still open after three
+   times, the part is kept unthinned.
+5. **The checks and version 3** (`wg3_build.py`, `wg3_pwg.py`): no remodel vertex may lie further from its stock
+   triangle than its longest edge (or 0.1 world units) as a needle does, nor further than 0.9 world units off its
+   plane or past its edges (the game's own check allows a world unit). What does is moved back, and the step checks
+   that the moves opened no edge in any mode. Then each surface's seal group (the surfaces that must fall back to
+   their stock triangles together for no crack to open), its deviation from its stock triangle and the remodel's own
+   lightmap atlas (xatlas) are written as the file's version 3. A part that still fails a check stops the build
+   with its report (`<work>/world/<level>/<part>.build.json`) rather than write a file the game would have to fix.
+
+The game reads versions 1 to 3 (`port/linux/game/prism_world_geometry.c`); a version 3 file lets it fall back a
+group whole where a surface fails its own check or a material is drawn stock, without a crack.
 
 ## The upscalers and their licences
 

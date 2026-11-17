@@ -35,7 +35,7 @@ import time
 import bmesh
 import bpy
 import numpy as np
-from mathutils import Vector
+from mathutils import Vector, geometry
 from mathutils.kdtree import KDTree
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -50,6 +50,9 @@ T0 = time.time()
 # the classes whose surfaces are subdivided and moved (metal's are cut and bevelled in place); "smooth": rounded by
 # Phong over CE's own normals alone (pipes, conduits)
 DISPLACED = ("rock", "ground", "smooth")
+# the most a displaced class's point moves along its stock triangle's plane, by kind, where the recipe has no cap_side
+# (wu): the smooth classes' Phong rounding alone moves them sideways; rock's strata and ground's ripples keep theirs
+SIDE_CAP = {"smooth": 0.5}
 
 
 def log(*a):
@@ -79,6 +82,27 @@ def barycentric(p, a, b, c):
     bc = np.stack([1.0 - v - w, v, w], 1)
     bc = np.clip(bc, 0.0, 1.0)
     return bc / np.maximum(bc.sum(1, keepdims=True), 1e-12)
+
+
+def pull_needles(verts, most, corners_of):
+    """the bevel's vertices further than `most` from the stock triangles of every face about them (a sliver narrower
+    than the bevel sends its miter out as a needle, metres long: a10f's steel, a10g's strips) put back on the nearest
+    of those triangles; how many"""
+    pulled = 0
+    for v in verts:
+        if not v.is_valid or not v.link_faces:
+            continue
+        best = None
+        for f in v.link_faces:
+            a, b, c = corners_of(f)
+            q = geometry.closest_point_on_tri(v.co, a, b, c)
+            d = (q - v.co).length
+            if best is None or d < best[0]:
+                best = (d, q)
+        if best is not None and best[0] > most:
+            v.co = best[1]
+            pulled += 1
+    return pulled
 
 
 # ---------- textures
@@ -514,6 +538,9 @@ def main():
             return True
         return any(face_cls(f) is None for f in v.link_faces)
 
+    def stock_corners(m, s_):
+        return [Vector(W[wid[mats[m].triangles[s_][k] + offsets[m]]]) for k in range(3)]
+
     # metal: deep bevels on the mesh's own sharp edges; with "bevel_across" (the level's recipe), also the edges
     # where two metal classes meet (a corridor's frame against its panels), at the narrower class's bevel, in the
     # pass of the class with the narrower bevel
@@ -546,10 +573,16 @@ def main():
                 continue
             edges.append(e)
         log("bevel", name, why)
+        pulled = 0
         if edges:
-            bmesh.ops.bevel(bm, geom=edges, offset=r["bevel"], offset_type="OFFSET", segments=r["bevel_segments"],
-                            profile=r.get("bevel_profile", 0.5), affect="EDGES", clamp_overlap=True)
+            made = bmesh.ops.bevel(bm, geom=edges, offset=r["bevel"], offset_type="OFFSET",
+                                   segments=r["bevel_segments"], profile=r.get("bevel_profile", 0.5), affect="EDGES",
+                                   clamp_overlap=True)
+            pulled = pull_needles(made["verts"], 2.0 * r["bevel"], lambda f: stock_corners(f[lay_mat], f[lay_src]))
         report["classes"].setdefault(name, {})["bevelled_edges"] = len(edges)
+        report["classes"][name]["needles_pulled"] = pulled
+        if pulled:
+            log("bevel", name, "needles pulled back", pulled)
 
     for name, n_ in groove_rep.items():
         report["classes"].setdefault(name, {})["groove_cut_surfaces"] = n_
@@ -645,6 +678,7 @@ def main():
     alpha = np.full(nV, np.inf)
     cap_in = np.full(nV, np.inf)
     cap_out = np.full(nV, np.inf)
+    cap_side = np.full(nV, np.inf)
     vclass = np.full(nV, "", dtype=object)
     for name, r in recipes.items():
         sel = np.array([c_ == name for c_ in tcls])
@@ -654,6 +688,7 @@ def main():
         alpha[vs_] = np.minimum(alpha[vs_], r.get("phong", 0.0))
         cap_in[vs_] = np.minimum(cap_in[vs_], r.get("cap_in", 0.0))
         cap_out[vs_] = np.minimum(cap_out[vs_], r.get("cap_out", 0.0))
+        cap_side[vs_] = np.minimum(cap_side[vs_], r.get("cap_side", SIDE_CAP.get(r["kind"], np.inf)))
     for arr in (alpha, cap_in, cap_out):
         arr[~np.isfinite(arr)] = 0.0
     unshaped_v = np.unique(T[~shaped]) if (~shaped).any() else np.array([], np.int64)
@@ -723,7 +758,14 @@ def main():
         # one sees stays within cap_out in front of and cap_in behind where one collides
         off = ((X_ - V) * plane).sum(1)
         off_c = shp.soft_clamp(off, -cap_in, cap_out)
-        return X_ + plane * np.where(vshaped, off_c - off, 0.0)[:, None]
+        X_ = X_ + plane * np.where(vshaped, off_c - off, 0.0)[:, None]
+        # and its move along that plane within cap_side (Phong over a large stock triangle whose corners' normals part
+        # carries its points sideways, past the triangle's edges: a world unit and more on a50's hull)
+        side = (X_ - V) - plane * ((X_ - V) * plane).sum(1, keepdims=True)
+        sl = np.linalg.norm(side, axis=1)
+        capped = np.isfinite(cap_side) & vshaped & (sl > 1e-12)
+        sl_c = shp.soft_clamp(sl, 0.0, np.where(capped, cap_side, 1.0))
+        return X_ + side * np.where(capped, sl_c / np.maximum(sl, 1e-12) - 1.0, 0.0)[:, None]
 
     # no folds: where moving along the normal turns a triangle over (an inward move at a convex crease, or outward in
     # a concave one, deeper than the crease's radius), its corners and their neighbours move less, until none does;

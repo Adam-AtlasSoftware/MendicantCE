@@ -31,6 +31,7 @@ Options:
   --vulkan-gpu <n>      the graphics card the Vulkan upscaler runs on, by number (default: its own choice)
   --torch <device>      the PyTorch device of the upscalers (default: cuda, else cpu)
   --lightmap-samples N  the rebaked lightmaps' final samples a texel (default: 1024)
+  --threads N           the processor threads Blender and the level remodels' steps use (default: all)
 
 Everything these tools make is made from your copy of the game: it stays on your computer. Do not share,
 upload or publish the packs, the work folder or anything in them. docs/prism_packs.md (GUIDE.md beside this
@@ -74,7 +75,7 @@ class Pack:
 
 
 # uses: blender (Blender), cycles (a Blender render: a graphics card makes it bearable), invader, game,
-# upscalers:<pack> (packs_fetch.NEEDED_BY), torch (PyTorch, scipy, scikit-image, opencv)
+# upscalers:<pack> (packs_fetch.NEEDED_BY), torch (PyTorch, scipy, scikit-image, opencv), atlas (scipy, xatlas)
 PACKS = [
     Pack("extract", "the maps' bitmaps, models and level geometry, and their light sources (work folder only)",
          internal=True),
@@ -119,7 +120,7 @@ PACKS = [
     Pack("rocks", "the scenery rocks and boulders remodelled for the mesh store", needs=["dumps", "extract"],
          maps=["b30", "a30", "a50", "c10"], mods=["prism_v3_rocks"]),
     Pack("world", "each level's remodelled geometry (prism_world/levels/<level>/<bsp>.pwg)", needs=["extract"],
-         uses={"blender", "cycles"}, level=True),
+         uses={"blender", "cycles", "atlas"}, level=True),
     Pack("lightmaps", "each level's lightmaps baked again from its own lamps and sky "
                       "(prism_lightmaps/rebaked/*.prl)", needs=["extract"], uses={"blender", "cycles"}, level=True),
     Pack("sun", "sharp baked sun shadows (prism_lightmaps/sun/*.psm; " + NOT_YET_READ + ")",
@@ -207,14 +208,19 @@ class Context:
             raise Failure(f"{Path(command[0]).name} failed: {result.stderr.strip()[-300:]}")
         return result.stdout.strip()
 
-    def python(self, script, *args, what="", check=True):
-        return self.run([PYTHON, "-B", "-I", ART / script, *args], what=what, check=check)
+    def python(self, script, *args, what="", check=True, extra=None):
+        return self.run([PYTHON, "-B", "-I", ART / script, *args], what=what, check=check, extra=extra)
 
-    def blender_run(self, script, *args, what=""):
+    def threads(self):
+        """the processor threads a step may use (--threads; 0: all)"""
+        return self.a.threads or os.cpu_count() or 1
+
+    def blender_run(self, script, *args, what="", extra=None):
         # (no bytecode beside the art scripts: Blender's Python reads no PYTHON* variable)
-        return self.run([self.blender, "-b", "--factory-startup", "--python-exit-code", "1", "--python-expr",
-                         "import sys; sys.dont_write_bytecode = True", "--python", ART / script, "--", *args],
-                        what=what)
+        threads = ["-t", str(self.a.threads)] if self.a.threads else []
+        return self.run([self.blender, "-b", "--factory-startup", *threads, "--python-exit-code", "1",
+                         "--python-expr", "import sys; sys.dont_write_bytecode = True", "--python", ART / script,
+                         "--", *args], what=what, extra=extra)
 
     def inv(self, program):
         return str(Path(self.invader) / (program + EXE))
@@ -340,6 +346,10 @@ def check(ctx, packs, quiet=False):
             problems.append(f"python: no {module} (pip install {pip})")
     if uses & {"science", "torch"}:
         for module, pip in (("scipy", "scipy"), ("cv2", "opencv-python-headless"), ("skimage", "scikit-image")):
+            if not importable(module):
+                problems.append(f"python: no {module} (pip install {pip})")
+    if "atlas" in uses:
+        for module, pip in (("scipy", "scipy"), ("xatlas", "xatlas")):
             if not importable(module):
                 problems.append(f"python: no {module} (pip install {pip})")
     if "torch" in uses:
@@ -1169,20 +1179,54 @@ def step_world(ctx):
                 continue
             w = ctx.w("world", level)
             pwg = w / f"{name}.pwg"
+            gltf = bsp_gltf(ctx, level, name)
 
-            def build(level=level, name=name, w=w, pwg=pwg):
+            def build(level=level, name=name, w=w, gltf=gltf):
                 w.mkdir(parents=True, exist_ok=True)
-                gltf = bsp_gltf(ctx, level, name)
                 ctx.blender_run("world_geo/wg2_remodel.py", gltf, ctx.w("extract", level),
                                 ART / "world_geo" / "wg2_recipes.json", w / f"{name}.remodel.pwg",
                                 w / f"{name}.report.json", what=f"{level} {name}: remodel and its light (Cycles)")
                 ctx.python("world_geo/wg2_seal.py", gltf, w / f"{name}.remodel.pwg", w / f"{name}.sealed.pwg",
                            w / f"{name}.seal.json", what=f"{level} {name}: sealed")
-                ctx.blender_run("world_geo/wg2_far2.py", w / f"{name}.sealed.pwg", pwg, w / f"{name}.far2.json",
-                                what=f"{level} {name}: far levels")
+                ctx.blender_run("world_geo/wg2_far2.py", w / f"{name}.sealed.pwg", w / f"{name}.far.pwg",
+                                w / f"{name}.far2.json", what=f"{level} {name}: far levels")
                 (w / f"{name}.remodel.pwg").unlink()
                 (w / f"{name}.sealed.pwg").unlink()
             ctx.once(f"{level}_{name}", build)
+
+            def thin(level=level, name=name, w=w, gltf=gltf, pwg=pwg):
+                # thinned where its triangles buy no visible shape (wg3_thin.py), checked in every mode the engine
+                # draws (wg3_fix.py): surfaces where the thinning opened an edge are kept whole and it is thinned
+                # again, at most three times; if an edge is still open, the far level's file is kept as it is
+                if not (w / f"{name}.far.pwg").is_file() and pwg.is_file():
+                    # (a work folder of the tools before these steps: its file is the far levels')
+                    shutil.move(pwg, w / f"{name}.far.pwg")
+                keep = w / f"{name}.keep.npz"
+                keep.unlink(missing_ok=True)
+                fixed = False
+                for attempt in range(3):
+                    ctx.blender_run("world_geo/wg3_thin.py", gltf, w / f"{name}.far.pwg", w / f"{name}.thin.pwg",
+                                    w / f"{name}.thin.json", what=f"{level} {name}: thinned",
+                                    extra={"WG3_KEEP_POINTS": str(keep), "WG3_JOBS": str(ctx.threads())})
+                    if not ctx.python("world_geo/wg3_fix.py", gltf, w / f"{name}.far.pwg", w / f"{name}.thin.pwg",
+                                      keep, w / f"{name}.fix.txt", what=f"{level} {name}: no edge opened",
+                                      check=False):
+                        fixed = True
+                        break
+                if not fixed:
+                    print(f"    {level} {name}: the thinning still opens edges; kept unthinned", flush=True)
+                    shutil.copyfile(w / f"{name}.far.pwg", w / f"{name}.thin.pwg")
+                keep.unlink(missing_ok=True)
+            ctx.once(f"{level}_{name}_thin", thin)
+
+            def finish(level=level, name=name, w=w, gltf=gltf, pwg=pwg):
+                # no floating facet or needle left, no edge opened, written as version 3: seal groups, deviations
+                # and the remodel's own lightmap atlas (wg3_build.py; it refuses a file that fails a check)
+                ctx.python("world_geo/wg3_build.py", gltf, w / f"{name}.thin.pwg", pwg, w / f"{name}.build.json",
+                           what=f"{level} {name}: checked; seal groups and lightmap atlas (version 3)")
+                (w / f"{name}.far.pwg").unlink(missing_ok=True)
+                (w / f"{name}.thin.pwg").unlink(missing_ok=True)
+            ctx.once(f"{level}_{name}_v3", finish)
             dst = ctx.out / "prism_world" / "levels" / level / f"{name}.pwg"
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(pwg, dst)
@@ -1386,6 +1430,7 @@ def main(argv=None):
     parser.add_argument("--vulkan-gpu", default="")
     parser.add_argument("--torch", default="")
     parser.add_argument("--lightmap-samples", type=int, default=1024)
+    parser.add_argument("--threads", type=int, default=0)
     parser.add_argument("--again", action="append", default=[], help="build this pack anew (repeat)")
     parser.add_argument("--yes", action="store_true", help="models: accept every licence shown")
     a = parser.parse_args(argv)
