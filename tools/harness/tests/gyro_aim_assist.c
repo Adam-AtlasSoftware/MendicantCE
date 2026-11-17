@@ -79,6 +79,12 @@ static int player_control_aim_modern(short local_player_index, float *accelerati
 {
 	return 0;
 }
+/* (the look acceleration at its defaults: test_look_acceleration.py's) */
+static void player_control_look_acceleration_tuning(short gamepad_index, real *strength, real *time)
+{
+	*strength = 1.0f;
+	*time = 1.0f;
+}
 static void input_trace_aim(int controller, int modern, int accelerating, float acceleration_seconds) {}
 static int halo_linux_touch_aiming(short gamepad_index) { return 0; }
 static int halo_linux_mouse_look(short gamepad_index, real *yaw, real *pitch) { return 0; }
