@@ -39,7 +39,8 @@ enum
 typedef struct { unsigned short wFormatTag, nChannels; unsigned long nSamplesPerSec, nAvgBytesPerSec;
 	unsigned short nBlockAlign, wBitsPerSample, cbSize; } WAVEFORMATEX;
 typedef struct { unsigned long dwSize, dwFlags, dwBufferBytes; WAVEFORMATEX *lpwfxFormat; } DSBUFFERDESC;
-typedef struct IDirectSoundBuffer { int number; long volume; long plays; unsigned long size; } IDirectSoundBuffer;
+typedef struct IDirectSoundBuffer { int number; long volume; long plays; unsigned long size, rate; short first; }
+	IDirectSoundBuffer;
 static IDirectSoundBuffer the_buffers[8];
 static int buffers_made;
 static long plays;
@@ -50,12 +51,14 @@ static long DirectSoundCreateBuffer(DSBUFFERDESC const *description, IDirectSoun
 		"the beep's buffer is not 16-bit PCM");
 	CHECK(buffers_made < 8, "too many buffers made");
 	the_buffers[buffers_made].number = buffers_made;
+	the_buffers[buffers_made].rate = description->lpwfxFormat->nSamplesPerSec;
 	*buffer = &the_buffers[buffers_made++];
 	return 0;
 }
 static long IDirectSoundBuffer_SetBufferData(IDirectSoundBuffer *buffer, void *data, unsigned long size)
 {
 	buffer->size = size;
+	buffer->first = size >= 2 ? *(short const *)data : 0;
 	return 0;
 }
 static long IDirectSoundBuffer_SetVolume(IDirectSoundBuffer *buffer, long volume) { buffer->volume = volume; return 0; }
@@ -72,6 +75,27 @@ static long IDirectSoundBuffer_Play(IDirectSoundBuffer *buffer, unsigned long a,
 #define HIT_SOUND_RATE 48000
 #define HIT_SOUND_SAMPLES 4
 static short const hit_sound_pcm[HIT_SOUND_SAMPLES] = { 0, 100, -100, 0 };
+
+/* Custom Edition's sounds.map (custom_edition_sounds.c): Halo PC's hit sound, mono 16-bit at 22.05 kHz, played at
+its tag's pitch of 0.6, when the machine has it */
+static boolean custom_edition_present;
+static int custom_edition_reads;
+static char custom_edition_name[64];
+static short *custom_edition_sounds_resource_sound(char const *name, long *frame_count, long *rate, real *pitch)
+{
+	short *samples;
+
+	custom_edition_reads++;
+	snprintf(custom_edition_name, sizeof(custom_edition_name), "%s", name);
+	if (!custom_edition_present)
+		return NULL;
+	samples = calloc(300, sizeof(short));
+	samples[0] = 1234;
+	*frame_count = 300;
+	*rate = 22050;
+	*pitch = 0.6f;
+	return samples;
+}
 
 /* the players: who is this machine's, who is a bot */
 struct player_datum { short local_player_index; };
@@ -176,6 +200,30 @@ int main(int argc, char **argv)
 			"no beep for a kill outright");
 		CHECK(notes == 4, "the test log has %ld beeps of 4", notes);
 		CHECK(the_buffers[last_played].volume == HIT_SOUND_VOLUME, "the beep's volume is not HIT_SOUND_VOLUME");
+		return 0;
+	}
+	/* with Custom Edition's sounds.map, Halo PC's own sound (sound\sfx\impulse\ting\ting), read once, at its
+	tag's pitch: 22.05 kHz played at 13.23 kHz */
+	CASE("custom-edition")
+	{
+		custom_edition_present = TRUE;
+		CHECK(hit(LOCAL, REMOTE, 0.2f, 0.f, 0) == 1 && hit(LOCAL, REMOTE, 0.2f, 0.f, 0) == 1, "no sound");
+		CHECK(custom_edition_reads == 1, "sounds.map read %d times", custom_edition_reads);
+		CHECK(!strcmp(custom_edition_name, "sound\\sfx\\impulse\\ting\\ting"), "the sound read is %s",
+			custom_edition_name);
+		CHECK(the_buffers[last_played].size == 300 * sizeof(short) && the_buffers[last_played].first == 1234,
+			"the buffer does not hold Halo PC's sound");
+		CHECK(the_buffers[last_played].rate == 13230, "it plays at %lu Hz, not 22050 * 0.6",
+			the_buffers[last_played].rate);
+		return 0;
+	}
+	/* without it, the beep made for this build */
+	CASE("placeholder")
+	{
+		CHECK(hit(LOCAL, REMOTE, 0.2f, 0.f, 0) == 1, "no sound");
+		CHECK(custom_edition_reads == 1, "sounds.map looked for %d times", custom_edition_reads);
+		CHECK(the_buffers[last_played].size == sizeof(hit_sound_pcm) && the_buffers[last_played].first == 0 &&
+			the_buffers[last_played].rate == HIT_SOUND_RATE, "the buffer does not hold the beep");
 		return 0;
 	}
 	/* none for a player's own damage, no damage, another machine's or a bot's player, no victim */

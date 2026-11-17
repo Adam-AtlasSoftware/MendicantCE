@@ -12,11 +12,13 @@ from harness import CHECK_FAILED, build, constant, mutated, read, run, structure
 from harness.audio import pcm_permutation_rate  # noqa: E402
 
 MODULE = "port/linux/game/custom_edition_sounds.c"
-CASES = ["high-tone", "48k-pcm", "too-long"]
+CASES = ["high-tone", "48k-pcm", "too-long", "resource-entry"]
 NEGATIVE_CONTROLS = {
     # the old conversion path (#1111): every permutation re-encoded as Xbox ADPCM at a rate the channels play
     "always-adpcm": (("if (decoded && frames_kept_native(", "if (decoded && FALSE && frames_kept_native("),
                      "high-tone"),
+    # Halo PC's hit sound (#673) at its own rate, not its tag's pitch
+    "no-pitch": (("\tpitch = base * one;", "\tpitch = base;"), "resource-entry"),
     # the old resampler (#1110): the nearest source frame, no low pass
     "nearest-frame": (("double weight = resample_weight((at - source) * cutoff);",
                        "double weight = source == (long)at ? 1.0 / cutoff : 0.0;"), "too-long"),

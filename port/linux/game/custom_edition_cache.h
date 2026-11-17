@@ -272,6 +272,17 @@ byte *custom_edition_sounds_encode(
 	long encoded_rate,
 	unsigned long *encoded_bytes,
 	long *kept_rate);
+/* The sound `name` (a tag path, sound\sfx\impulse\ting\ting) as the
+Custom Edition install's sounds.map holds it (custom_edition_resource_map_
+file_path): its first permutation decoded to mono 16-bit frames at its own
+rate, a buffer of the game's allocator of *frame_count frames at *rate, and
+the pitch the sound manager plays it at with a scale of 1 (*pitch); NULL
+when there is no sounds.map or no such sound in it (hit_sounds.c) */
+short *custom_edition_sounds_resource_sound(
+	char const *name,
+	long *frame_count,
+	long *rate,
+	real *pitch);
 /* the bytes of the samples custom_edition_sounds_decode made */
 unsigned long custom_edition_sounds_decoded_bytes(
 	void);

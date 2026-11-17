@@ -14,8 +14,14 @@ The host may forbid them for its players (network.allow_hit_sounds false):
 network_standard_hit_sounds_allowed, which an OpenH1 game's record carries
 to its clients.
 
-The beep (hit_sound_pcm.inc, made by tools/hit_sound_asset.py: a
-PLACEHOLDER) plays through the game's DirectSound buffers
+The sound is Halo PC's own (OpenH1 issue 673) where this machine has
+Custom Edition's sounds.map (its maps extracted to custom_maps, or its
+install): sound\sfx\impulse\ting\ting, the last of a Custom Edition map's
+multiplayer sounds (globals\globals), at the pitch the tag gives it, 0.6
+(custom_edition_sounds_resource_sound), read the first time one plays.
+Elsewhere it is a beep made for this build (hit_sound_pcm.inc, made by
+tools/hit_sound_asset.py), which the Xbox's maps have nothing like. Either
+plays through the game's DirectSound buffers
 (port/linux/src/dsound_sdl.c), dry, in the front pair, under
 audio.effects_volume and audio.volume, at HIT_SOUND_VOLUME. Hits closer
 together than HIT_SOUND_SPACING_MILLISECONDS (a shotgun's pellets, an
@@ -36,6 +42,8 @@ that one does not cut the last short. */
 
 /* the platform layer's (port/linux/src/port_config.c) */
 unsigned long system_milliseconds(void);
+/* (custom_edition_sounds.c) */
+short *custom_edition_sounds_resource_sound(char const *name, long *frame_count, long *rate, real *pitch);
 /* (network_test.c: a line of debug.network_test's log) */
 void network_test_note_hit_sound(long attacker_player_index, long victim_player_index);
 
@@ -44,6 +52,8 @@ void network_test_note_hit_sound(long attacker_player_index, long victim_player_
 #define HIT_SOUND_SPACING_MILLISECONDS 50
 /* (a beep is 65 ms: two at most play at once) */
 #define HIT_SOUND_BUFFERS 3
+/* Halo PC's hit sound, in Custom Edition's sounds.map */
+#define HIT_SOUND_CUSTOM_EDITION_NAME "sound\\sfx\\impulse\\ting\\ting"
 
 static struct
 {
@@ -60,23 +70,38 @@ static struct
 	boolean on[PLAYER_SETTINGS_SLOTS];
 } hit_sounds = { FALSE, FALSE, { NULL }, 0, 0, FALSE, { FALSE }, { 0 }, { FALSE } };
 
-/* the buffers, made once, with the beep in them */
+/* the buffers, made once, with the sound in them: Halo PC's, played at
+its tag's pitch by its rate (as the channels pitch a sound), or the beep */
 static boolean hit_sounds_make(
 	void)
 {
 	WAVEFORMATEX format;
 	DSBUFFERDESC description;
 	short index;
+	long frame_count = 0;
+	long rate = 0;
+	real pitch = 1.f;
+	short *custom_edition = NULL;
+	void const *samples = hit_sound_pcm;
+	unsigned long bytes = sizeof(hit_sound_pcm);
+	unsigned long samples_per_second = HIT_SOUND_RATE;
 
 	if (hit_sounds.made || hit_sounds.failed)
 		return hit_sounds.made;
+	custom_edition = custom_edition_sounds_resource_sound(HIT_SOUND_CUSTOM_EDITION_NAME, &frame_count, &rate, &pitch);
+	if (custom_edition && frame_count > 0)
+	{
+		samples = custom_edition;
+		bytes = (unsigned long)frame_count * sizeof(short);
+		samples_per_second = (unsigned long)(rate * pitch + 0.5f);
+	}
 	csmemset(&format, 0, sizeof(format));
 	format.wFormatTag = WAVE_FORMAT_PCM;
 	format.nChannels = 1;
-	format.nSamplesPerSec = HIT_SOUND_RATE;
+	format.nSamplesPerSec = samples_per_second;
 	format.wBitsPerSample = 16;
 	format.nBlockAlign = 2;
-	format.nAvgBytesPerSec = HIT_SOUND_RATE * 2;
+	format.nAvgBytesPerSec = samples_per_second * 2;
 	csmemset(&description, 0, sizeof(description));
 	description.dwSize = sizeof(description);
 	description.dwFlags = DSBCAPS_LOCDEFER;
@@ -86,12 +111,15 @@ static boolean hit_sounds_make(
 		if (DirectSoundCreateBuffer(&description, &hit_sounds.buffers[index]) < 0)
 		{
 			hit_sounds.failed = TRUE;
-			return FALSE;
+			break;
 		}
-		IDirectSoundBuffer_SetBufferData(hit_sounds.buffers[index], (void *)hit_sound_pcm, sizeof(hit_sound_pcm));
+		/* (the buffer takes a copy) */
+		IDirectSoundBuffer_SetBufferData(hit_sounds.buffers[index], (void *)samples, bytes);
 	}
-	hit_sounds.made = TRUE;
-	return TRUE;
+	if (custom_edition)
+		free(custom_edition);
+	hit_sounds.made = !hit_sounds.failed;
+	return hit_sounds.made;
 }
 
 static void hit_sounds_play(

@@ -47,6 +47,7 @@ the channels (port/linux/src/dsound_sdl.c decodes it).
 #include "../../third_party/stb_vorbis/stb_vorbis.c"
 
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -102,6 +103,33 @@ down: what lies above the lower rate's band is gone, not folded back. */
 #define RESAMPLE_CUTOFF 0.9
 #define RESAMPLE_KAISER_BETA 9.0
 #define RESAMPLE_PI 3.14159265358979323846
+
+/* A sound as sounds.map holds it (custom_edition_sounds_resource_sound;
+cache_file_formats.c, resource_sound_load): the entry named by the tag's
+path is the sound's header (the Xbox's 32-bit layout), then its pitch
+ranges and their permutations, whose addresses count from the first pitch
+range; a permutation's samples lie in sounds.map, at their file offset,
+when the first bit of their flags is set. */
+#define ENTRY_SOUND_BYTES 0xA4
+#define ENTRY_SAMPLE_RATE_OFFSET 0x06
+#define ENTRY_RANDOM_PITCH_BOUNDS_OFFSET 0x14
+#define ENTRY_ZERO_PITCH_MODIFIER_OFFSET 0x44
+#define ENTRY_ONE_PITCH_MODIFIER_OFFSET 0x5C
+#define ENTRY_ENCODING_OFFSET 0x6C
+#define ENTRY_PITCH_RANGES_OFFSET 0x98
+#define ENTRY_PITCH_RANGE_BYTES 0x48
+#define ENTRY_PITCH_RANGE_PERMUTATIONS_OFFSET 0x3C
+#define ENTRY_PERMUTATION_BYTES 0x7C
+#define ENTRY_PERMUTATION_COMPRESSION_OFFSET 0x28
+#define ENTRY_PERMUTATION_SAMPLES_OFFSET 0x40
+#define ENTRY_DATA_SIZE_OFFSET 0x00
+#define ENTRY_DATA_FLAGS_OFFSET 0x04
+#define ENTRY_DATA_FILE_OFFSET_OFFSET 0x08
+#define ENTRY_SAMPLES_IN_RESOURCE_MAP_BIT 0
+/* the most bytes of an entry read (a short sound's: its pitch ranges and
+permutations) and of its first permutation's samples */
+#define ENTRY_MAXIMUM_BYTES 0x10000
+#define ENTRY_MAXIMUM_SAMPLES_BYTES 0x100000
 
 /* ---------- globals */
 
@@ -785,6 +813,149 @@ static boolean permutation_convert(
 	return offset != NONE;
 }
 
+static int resource_sound_file_read(
+	void *context,
+	uint32_t offset,
+	uint32_t size,
+	void *buffer)
+{
+	FILE *stream = context;
+
+	return fseek(stream, (long)offset, SEEK_SET) == 0 && fread(buffer, 1, size, stream) == size;
+}
+
+static long entry_long(
+	byte const *bytes)
+{
+	int32_t value;
+
+	memcpy(&value, bytes, sizeof(value));
+	return (long)value;
+}
+
+static short entry_short(
+	byte const *bytes)
+{
+	int16_t value;
+
+	memcpy(&value, bytes, sizeof(value));
+	return (short)value;
+}
+
+static real entry_real(
+	byte const *bytes)
+{
+	float value;
+
+	memcpy(&value, bytes, sizeof(value));
+	return (real)value;
+}
+
+/* the pitch a sound's header gives it played at a scale of 1, as the
+sound manager works it out (sound_scale_random_value: the middle of its
+random pitch bounds, times its pitch modifier at 1), or 1 where the tag
+gives none (as a map's build fills it in: mod_sounds.c) */
+static real entry_pitch(
+	byte const *header)
+{
+	real lower = entry_real(header + ENTRY_RANDOM_PITCH_BOUNDS_OFFSET);
+	real upper = entry_real(header + ENTRY_RANDOM_PITCH_BOUNDS_OFFSET + 4);
+	real zero = entry_real(header + ENTRY_ZERO_PITCH_MODIFIER_OFFSET);
+	real one = entry_real(header + ENTRY_ONE_PITCH_MODIFIER_OFFSET);
+	real base = lower > 0.f && upper > 0.f ? (lower + upper) / 2.f : 1.f;
+	real pitch;
+
+	if (zero == 0.f && one == 0.f)
+	{
+		one = 1.f;
+	}
+	pitch = base * one;
+
+	return pitch >= 0.25f && pitch <= 4.f ? pitch : 1.f;
+}
+
+/* The first permutation of the sound sounds.map (`source`) holds in the
+entry of `entry_size` bytes at `entry_offset`, decoded to mono 16-bit
+frames at its own rate: a buffer of the game's allocator of *frame_count
+frames at *rate, played at *pitch; NULL when the entry is not such a
+sound. */
+static short *resource_sound_entry_decode(
+	struct cache_file_source *source,
+	uint32_t entry_offset,
+	uint32_t entry_size,
+	long *frame_count,
+	long *rate,
+	real *pitch)
+{
+	byte *entry;
+	byte const *range;
+	byte const *permutation;
+	byte const *data_field;
+	byte *data = NULL;
+	struct frames frames = { 0 };
+	short *samples = NULL;
+	long range_count, permutation_count, permutations_address, data_size, data_offset;
+	long channels;
+
+	if (entry_size < ENTRY_SOUND_BYTES + ENTRY_PITCH_RANGE_BYTES || entry_size > ENTRY_MAXIMUM_BYTES ||
+		!(entry = malloc(entry_size)))
+	{
+		return NULL;
+	}
+	if (!source->read(source->context, entry_offset, entry_size, entry))
+	{
+		goto done;
+	}
+	range_count = entry_long(entry + ENTRY_PITCH_RANGES_OFFSET);
+	channels = entry_short(entry + ENTRY_ENCODING_OFFSET) ? 2 : 1;
+	*rate = entry_short(entry + ENTRY_SAMPLE_RATE_OFFSET) ? 44100 : 22050;
+	*pitch = entry_pitch(entry);
+	/* (the entry's copy of the header may leave its pitch range count zero:
+	the first pitch range is there all the same) */
+	if (range_count < 0 || range_count > (long)((entry_size - ENTRY_SOUND_BYTES) / ENTRY_PITCH_RANGE_BYTES))
+	{
+		goto done;
+	}
+	range = entry + ENTRY_SOUND_BYTES;
+	permutation_count = entry_long(range + ENTRY_PITCH_RANGE_PERMUTATIONS_OFFSET);
+	permutations_address = entry_long(range + ENTRY_PITCH_RANGE_PERMUTATIONS_OFFSET + 4);
+	if (permutation_count < 1 || permutations_address < 0 ||
+		(unsigned long)permutations_address + ENTRY_PERMUTATION_BYTES > entry_size - ENTRY_SOUND_BYTES)
+	{
+		goto done;
+	}
+	permutation = range + permutations_address;
+	data_field = permutation + ENTRY_PERMUTATION_SAMPLES_OFFSET;
+	data_size = entry_long(data_field + ENTRY_DATA_SIZE_OFFSET);
+	data_offset = entry_long(data_field + ENTRY_DATA_FILE_OFFSET_OFFSET);
+	if (!TEST_FLAG(entry_long(data_field + ENTRY_DATA_FLAGS_OFFSET), ENTRY_SAMPLES_IN_RESOURCE_MAP_BIT) ||
+		data_size <= 0 || data_size > ENTRY_MAXIMUM_SAMPLES_BYTES || data_offset < 0 ||
+		(unsigned long)data_offset + (unsigned long)data_size > source->size ||
+		!(data = malloc(data_size)) ||
+		!source->read(source->context, (uint32_t)data_offset, (uint32_t)data_size, data))
+	{
+		goto done;
+	}
+	if (samples_decode(data, data_size, entry_short(permutation + ENTRY_PERMUTATION_COMPRESSION_OFFSET),
+			FALSE, channels, *rate, &frames) &&
+		frames_channels(&frames, 1) &&
+		frames.rate >= SOUND_PERMUTATION_PCM_MINIMUM_RATE && frames.rate <= MAXIMUM_SAMPLE_RATE)
+	{
+		samples = frames.samples;
+		frames.samples = NULL;
+		*frame_count = frames.count;
+		*rate = frames.rate;
+	}
+
+done:
+	frames_free(&frames);
+	if (data)
+		free(data);
+	free(entry);
+
+	return samples;
+}
+
 /* ---------- public code */
 
 boolean custom_edition_sounds_decode(
@@ -905,6 +1076,47 @@ byte *custom_edition_sounds_encode(
 	}
 
 	return encoded;
+}
+
+short *custom_edition_sounds_resource_sound(
+	char const *name,
+	long *frame_count,
+	long *rate,
+	real *pitch)
+{
+	char path[256];
+	FILE *stream;
+	long size;
+	struct cache_file_source source;
+	struct resource_map map;
+	short *samples = NULL;
+	int32_t item_index;
+
+	if (!custom_edition_resource_map_file_path(_resource_map_sounds, path) || !(stream = fopen(path, "rb")))
+	{
+		return NULL;
+	}
+	if (fseek(stream, 0, SEEK_END) == 0 && (size = ftell(stream)) > 0)
+	{
+		source.context = stream;
+		source.read = resource_sound_file_read;
+		source.size = (uint32_t)size;
+		if (resource_map_open(&source, _resource_map_sounds, &map) == _cache_file_status_ok)
+		{
+			for (item_index = 0; item_index < map.item_count && !samples; item_index++)
+			{
+				if (!csstrcasecmp(map.items[item_index].name, name))
+				{
+					samples = resource_sound_entry_decode(&source, map.items[item_index].data_offset,
+						map.items[item_index].size, frame_count, rate, pitch);
+				}
+			}
+			resource_map_close(&map);
+		}
+	}
+	fclose(stream);
+
+	return samples;
 }
 
 unsigned long custom_edition_sounds_decoded_bytes(

@@ -112,7 +112,36 @@ static void stb_vorbis_close(stb_vorbis *vorbis)
 	(void)vorbis;
 }
 
+/* sounds.map (cache_file_formats.h): a source of bytes, and the index resource_map_open reads (not used: the
+cases read an entry directly) */
+typedef int (*cache_file_read_proc)(void *context, uint32_t offset, uint32_t size, void *buffer);
+struct cache_file_source { void *context; cache_file_read_proc read; uint32_t size; };
+struct resource_map_item { uint32_t data_offset; uint32_t size; char const *name; };
+struct resource_map { struct cache_file_source *source; int type; int32_t item_count; struct resource_map_item *items;
+	char *names; };
+enum { _resource_map_sounds = 2, _cache_file_status_ok = 0 };
+static int resource_map_open(struct cache_file_source *source, int type, struct resource_map *map)
+{ (void)source; (void)type; (void)map; return 1; }
+static void resource_map_close(struct resource_map *map) { (void)map; }
+static boolean custom_edition_resource_map_file_path(short type, char *path) { (void)type; (void)path; return FALSE; }
+#define csstrcasecmp strcasecmp
+#include <strings.h>
+
 #include "under_test.inc"
+
+/* a fake sounds.map: bytes read from memory */
+static byte resource_bytes[0x4000];
+static int resource_read(void *context, uint32_t offset, uint32_t size, void *buffer)
+{
+	(void)context;
+	if (offset + size > sizeof(resource_bytes))
+		return 0;
+	memcpy(buffer, resource_bytes + offset, size);
+	return 1;
+}
+static void put_long(long at, int32_t value) { memcpy(resource_bytes + at, &value, sizeof(value)); }
+static void put_short(long at, int16_t value) { memcpy(resource_bytes + at, &value, sizeof(value)); }
+static void put_real(long at, float value) { memcpy(resource_bytes + at, &value, sizeof(value)); }
 
 #define PI 3.14159265358979323846
 #define FRAMES 8192
@@ -253,6 +282,47 @@ int main(int argc, char **argv)
 		count = kept_adpcm_decoded(decoded, FRAMES);
 		CHECK(fabs(level_db(decoded + 1024, FRAMES - 2048, 3000.0, 22050.0)) < 0.5,
 			"the 3 kHz tone is at %.2f dB", level_db(decoded + 1024, FRAMES - 2048, 3000.0, 22050.0));
+	}
+	else if (!strcmp(name, "resource-entry"))
+	{
+		/* Halo PC's hit sound as sounds.map holds it (sound\sfx\impulse\ting\ting): a mono 22 kHz sound whose
+		pitch modifier at 1 is 0.6 (its zero 0), one pitch range of one permutation of 16-bit samples in
+		sounds.map: its frames as they are, at 22.05 kHz, played at 0.6 */
+		struct cache_file_source source = { NULL, resource_read, sizeof(resource_bytes) };
+		long const range = ENTRY_SOUND_BYTES;
+		long const permutation = range + ENTRY_PITCH_RANGE_BYTES;
+		long const entry_bytes = permutation + ENTRY_PERMUTATION_BYTES;
+		long frame_count = 0, rate = 0, frame;
+		real pitch = 0.f;
+		short *samples;
+
+		memset(resource_bytes, 0, sizeof(resource_bytes));
+		put_short(ENTRY_SAMPLE_RATE_OFFSET, 0);
+		put_real(ENTRY_RANDOM_PITCH_BOUNDS_OFFSET, 1.f);
+		put_real(ENTRY_RANDOM_PITCH_BOUNDS_OFFSET + 4, 1.f);
+		put_real(ENTRY_ZERO_PITCH_MODIFIER_OFFSET, 0.f);
+		put_real(ENTRY_ONE_PITCH_MODIFIER_OFFSET, 0.6f);
+		put_short(ENTRY_ENCODING_OFFSET, 0);
+		put_long(ENTRY_PITCH_RANGES_OFFSET, 1);
+		put_long(range + ENTRY_PITCH_RANGE_PERMUTATIONS_OFFSET, 1);
+		put_long(range + ENTRY_PITCH_RANGE_PERMUTATIONS_OFFSET + 4, ENTRY_PITCH_RANGE_BYTES);
+		put_short(permutation + ENTRY_PERMUTATION_COMPRESSION_OFFSET, 0);
+		put_long(permutation + ENTRY_PERMUTATION_SAMPLES_OFFSET + ENTRY_DATA_SIZE_OFFSET, 400 * 2);
+		put_long(permutation + ENTRY_PERMUTATION_SAMPLES_OFFSET + ENTRY_DATA_FLAGS_OFFSET, 1);
+		put_long(permutation + ENTRY_PERMUTATION_SAMPLES_OFFSET + ENTRY_DATA_FILE_OFFSET_OFFSET, 0x1000);
+		for (frame = 0; frame < 400; frame++)
+			put_short(0x1000 + frame * 2, (int16_t)(frame * 50 - 10000));
+		samples = resource_sound_entry_decode(&source, 0, (uint32_t)entry_bytes, &frame_count, &rate, &pitch);
+		CHECK(samples, "the entry was not read");
+		CHECK(frame_count == 400 && rate == 22050, "%ld frames at %ld Hz", frame_count, rate);
+		CHECK(pitch == 0.6f, "it plays at a pitch of %.3f, not 0.6", pitch);
+		CHECK(!memcmp(samples, resource_bytes + 0x1000, 400 * 2), "its frames are not sounds.map's");
+		free(samples);
+
+		/* (samples in the map file, not sounds.map: not read) */
+		put_long(permutation + ENTRY_PERMUTATION_SAMPLES_OFFSET + ENTRY_DATA_FLAGS_OFFSET, 0);
+		CHECK(!resource_sound_entry_decode(&source, 0, (uint32_t)entry_bytes, &frame_count, &rate, &pitch),
+			"samples outside sounds.map were read from it");
 	}
 	else
 	{
