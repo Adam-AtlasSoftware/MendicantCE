@@ -658,6 +658,7 @@ void xgpu_backend_initialize(void)
 	xgpu_backend_capabilities.mixed_constant_blend = stream.capabilities.mixed_constant_blend;
 	xgpu_backend_capabilities.dynamic_lights = stream.capabilities.dynamic_lights;
 	xgpu_backend_capabilities.hdr = stream.capabilities.hdr;
+	xgpu_backend_capabilities.deep_sdr = stream.capabilities.deep_sdr;
 	xgpu_backend_capabilities.ray_queries = stream.capabilities.ray_queries;
 	stream.capabilities.device[sizeof(stream.capabilities.device) - 1] = 0;
 }

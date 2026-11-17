@@ -131,6 +131,9 @@ struct post_uniforms
 	float window[4];
 };
 
+/* the post passes' sampler linear (the backends' own), else nearest */
+static BOOL post_linear;
+
 static void post_draw(id<MTLRenderPipelineState> pipeline, id<MTLTexture> target, id<MTLTexture> source,
 	const struct post_uniforms *uniforms)
 {
@@ -148,7 +151,8 @@ static void post_draw(id<MTLRenderPipelineState> pipeline, id<MTLTexture> target
 	{
 		MTLSamplerDescriptor *sampler = [MTLSamplerDescriptor new];
 
-		sampler.minFilter = sampler.magFilter = MTLSamplerMinMagFilterNearest;
+		sampler.minFilter = sampler.magFilter = post_linear ? MTLSamplerMinMagFilterLinear :
+			MTLSamplerMinMagFilterNearest;
 		[encoder setFragmentTexture:source atIndex:0];
 		[encoder setFragmentSamplerState:[device newSamplerStateWithDescriptor:sampler] atIndex:0];
 	}
@@ -267,6 +271,263 @@ static void dither_test(id<MTLFunction> vertex, id<MTLFunction> encode)
 	printf("dither: means within %.3f codes dithered, %.3f not\n", (double)worst[1], (double)worst[0]);
 	free(halves);
 	free(bgra);
+}
+
+/* display.output_depth's frame (#1152), on the GPU's own blending: a dark
+fog drawn FOG_LAYERS times over black (source alpha FOG_ALPHA, as the
+game's fog screens blend), its colour a ramp across DITHER_SIZE columns
+from 0 to FOG_MOST codes, into an RGBA16Unorm frame and, the negative
+control, a BGRA8 one; then each drawn by the last pass (the Vulkan encoding,
+dithered to 255 levels) into a real 8-bit target. The 16-bit frame keeps a
+level for each column (the 8-bit one's every blend rounds to 1/255: a few
+dozen steps) and its columns' means stay within DITHER_MEAN codes of the
+exact fog; the 8-bit frame's are off by its rounding. */
+#define FOG_LAYERS 8
+#define FOG_ALPHA 0.3f
+#define FOG_MOST 24.0f
+
+static const char fog_source[] =
+	"#include <metal_stdlib>\n"
+	"using namespace metal;\n"
+	"fragment float4 fog_layer(float4 position [[position]], constant float &width [[buffer(0)]])\n"
+	"{\n"
+	"\tfloat value = (floor(position.x) + 0.5) / width * (24.0 / 255.0);\n"
+	"\treturn float4(value, value, value, 0.3);\n"
+	"}\n";
+
+static void depth_test(id<MTLFunction> vertex, id<MTLFunction> encode)
+{
+	static const MTLPixelFormat frames[2] = { MTLPixelFormatRGBA16Unorm, MTLPixelFormatBGRA8Unorm };
+	id<MTLRenderPipelineState> encode_pipeline = post_pipeline(vertex, encode, MTLPixelFormatBGRA8Unorm,
+		MTLColorWriteMaskAll);
+	NSError *error = nil;
+	id<MTLLibrary> library = [device newLibraryWithSource:[NSString stringWithUTF8String:fog_source]
+		options:[MTLCompileOptions new] error:&error];
+	id<MTLFunction> fog = [library newFunctionWithName:@"fog_layer"];
+	unsigned char *bgra = malloc(DITHER_SIZE * DITHER_SIZE * 4);
+	uint16_t *deep = malloc(DITHER_SIZE * 8);
+	float exact[DITHER_SIZE], worst[2] = { 0.0f, 0.0f }, cover = 1.0f - powf(1.0f - FOG_ALPHA, FOG_LAYERS);
+	int levels[2] = { 0, 0 }, which, x, y, layer;
+
+	if (!fog || !encode_pipeline || !bgra || !deep)
+	{
+		FAIL("depth: the fog's function or the encoding's pipeline cannot be made");
+		return;
+	}
+	for (x = 0; x < DITHER_SIZE; x++)
+		exact[x] = ((float)x + 0.5f) / DITHER_SIZE * FOG_MOST * cover;
+	for (which = 0; which < 2; which++)
+	{
+		MTLRenderPipelineDescriptor *description = [MTLRenderPipelineDescriptor new];
+		MTLTextureDescriptor *texture;
+		id<MTLRenderPipelineState> layer_pipeline;
+		id<MTLTexture> frame, target;
+		struct post_uniforms uniforms;
+		float width = DITHER_SIZE, last = -1.0f;
+
+		description.vertexFunction = vertex;
+		description.fragmentFunction = fog;
+		description.colorAttachments[0].pixelFormat = frames[which];
+		description.colorAttachments[0].blendingEnabled = YES;
+		description.colorAttachments[0].sourceRGBBlendFactor = MTLBlendFactorSourceAlpha;
+		description.colorAttachments[0].destinationRGBBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
+		description.colorAttachments[0].sourceAlphaBlendFactor = MTLBlendFactorZero;
+		description.colorAttachments[0].destinationAlphaBlendFactor = MTLBlendFactorOne;
+		layer_pipeline = [device newRenderPipelineStateWithDescriptor:description error:&error];
+		texture = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:frames[which] width:DITHER_SIZE
+			height:DITHER_SIZE mipmapped:NO];
+		texture.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
+		texture.storageMode = MTLStorageModeShared;
+		frame = [device newTextureWithDescriptor:texture];
+		texture = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm width:DITHER_SIZE
+			height:DITHER_SIZE mipmapped:NO];
+		texture.usage = MTLTextureUsageRenderTarget;
+		texture.storageMode = MTLStorageModeShared;
+		target = [device newTextureWithDescriptor:texture];
+		if (!layer_pipeline || !frame || !target)
+		{
+			FAIL("depth: the fog's pipeline or targets cannot be made");
+			return;
+		}
+		for (layer = -1; layer < FOG_LAYERS; layer++)
+		{
+			MTLRenderPassDescriptor *pass = [MTLRenderPassDescriptor renderPassDescriptor];
+			id<MTLCommandBuffer> commands = [queue commandBuffer];
+			id<MTLRenderCommandEncoder> encoder;
+
+			/* (black, opaque, first; then each layer in a pass of its own,
+			stored between them) */
+			pass.colorAttachments[0].texture = frame;
+			pass.colorAttachments[0].loadAction = layer < 0 ? MTLLoadActionClear : MTLLoadActionLoad;
+			pass.colorAttachments[0].clearColor = MTLClearColorMake(0.0, 0.0, 0.0, 1.0);
+			pass.colorAttachments[0].storeAction = MTLStoreActionStore;
+			encoder = [commands renderCommandEncoderWithDescriptor:pass];
+			if (layer >= 0)
+			{
+				[encoder setRenderPipelineState:layer_pipeline];
+				[encoder setFragmentBytes:&width length:sizeof(width) atIndex:0];
+				[encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+			}
+			[encoder endEncoding];
+			[commands commit];
+			[commands waitUntilCompleted];
+		}
+		/* (the frame's distinct levels along a row, green) */
+		if (which == 0)
+			[frame getBytes:deep bytesPerRow:DITHER_SIZE * 8 fromRegion:MTLRegionMake2D(0, 0, DITHER_SIZE, 1)
+				mipmapLevel:0];
+		else
+			[frame getBytes:bgra bytesPerRow:DITHER_SIZE * 4 fromRegion:MTLRegionMake2D(0, 0, DITHER_SIZE, 1)
+				mipmapLevel:0];
+		for (x = 0; x < DITHER_SIZE; x++)
+		{
+			float value = which == 0 ? (float)deep[x * 4 + 1] : (float)bgra[x * 4 + 1];
+
+			if (value != last)
+				levels[which]++;
+			last = value;
+		}
+		memset(&uniforms, 0, sizeof(uniforms));
+		uniforms.metrics[2] = uniforms.metrics[3] = 1.0f / DITHER_SIZE;
+		uniforms.bounds[0] = uniforms.bounds[1] = DITHER_SIZE;
+		uniforms.bounds[2] = uniforms.bounds[3] = 1.0f;
+		uniforms.hdr[0] = uniforms.hdr[1] = uniforms.hdr[3] = 1.0f;
+		uniforms.hdr[2] = (float)XGPU_HDR_OUTPUT_SDR;
+		uniforms.window[1] = 255.0f;
+		uniforms.window[2] = 1.0f;
+		post_draw(encode_pipeline, target, frame, &uniforms);
+		[target getBytes:bgra bytesPerRow:DITHER_SIZE * 4 fromRegion:MTLRegionMake2D(0, 0, DITHER_SIZE, DITHER_SIZE)
+			mipmapLevel:0];
+		for (x = 0; x < DITHER_SIZE; x++)
+		{
+			float sum = 0.0f;
+
+			for (y = 0; y < DITHER_SIZE; y++)
+				sum += (float)bgra[(y * DITHER_SIZE + x) * 4 + 1];
+			if (fabsf(sum / DITHER_SIZE - exact[x]) > worst[which])
+				worst[which] = fabsf(sum / DITHER_SIZE - exact[x]);
+		}
+	}
+	if (levels[0] < DITHER_SIZE / 2 || worst[0] > DITHER_MEAN)
+		FAIL("depth (16-bit frame): %d levels, a column's mean %.3f codes off the fog", levels[0], (double)worst[0]);
+	if (levels[1] > (int)FOG_MOST + 1 || worst[1] < 0.25f)
+		FAIL("depth (8-bit frame): %d levels, means only %.3f codes off: the control shows no rounding", levels[1],
+			(double)worst[1]);
+	printf("depth: 16-bit frame %d levels, means within %.3f codes; 8-bit frame %d levels, %.3f off\n", levels[0],
+		(double)worst[0], levels[1], (double)worst[1]);
+	free(bgra);
+	free(deep);
+}
+
+/* The last pass's downscale (#1117), drawn by the shipped Vulkan encoding
+into a float target from a checkerboard of single texels (0 and 1), its
+sampler linear as the backends' is. At 1.5 (AREA_SIZE * 3 / 2 texels to
+AREA_SIZE pixels each way) it scales down by area: the mean stays 0.5 and
+no pixel is further from it than the box's own beat over a 1.5 grid (1/18,
+AREA_BEAT); the negative control, the single linear tap the pass had (the
+same arithmetic, in MSL here), leaves a pattern twice as strong. At 1 and
+exactly 2 the pass gives the single tap's values, bit for bit. */
+#define AREA_SIZE 256
+#define AREA_BEAT 0.0600f
+
+static const char tap_source[] =
+	"#include <metal_stdlib>\n"
+	"using namespace metal;\n"
+	"struct post_uniforms { float4 metrics; float4 bounds; float4 hdr; float4 window; };\n"
+	"fragment float4 single_tap(float4 position [[position]], constant post_uniforms &u [[buffer(1)]],\n"
+	"\ttexture2d<float> picture [[texture(0)]], sampler linear [[sampler(0)]])\n"
+	"{\n"
+	"\tfloat2 t = (position.xy - u.metrics.xy) * u.bounds.xy * u.metrics.zw - 0.5;\n"
+	"\tfloat2 j = floor(t);\n"
+	"\treturn float4(picture.sample(linear, (j + 0.5 + (t - j)) / u.bounds.xy, level(0.0)).rgb, 1.0);\n"
+	"}\n";
+
+static void area_test(id<MTLFunction> vertex, id<MTLFunction> encode)
+{
+	static const int sources[3] = { AREA_SIZE * 3 / 2, AREA_SIZE, AREA_SIZE * 2 };
+	NSError *error = nil;
+	id<MTLLibrary> library = [device newLibraryWithSource:[NSString stringWithUTF8String:tap_source]
+		options:[MTLCompileOptions new] error:&error];
+	id<MTLFunction> tap = [library newFunctionWithName:@"single_tap"];
+	id<MTLRenderPipelineState> pipelines[2];
+	float *got[2];
+	int which, kind, x, y;
+
+	pipelines[0] = post_pipeline(vertex, encode, MTLPixelFormatRGBA32Float, MTLColorWriteMaskAll);
+	pipelines[1] = tap ? post_pipeline(vertex, tap, MTLPixelFormatRGBA32Float, MTLColorWriteMaskAll) : nil;
+	got[0] = malloc(AREA_SIZE * AREA_SIZE * 16);
+	got[1] = malloc(AREA_SIZE * AREA_SIZE * 16);
+	if (!pipelines[0] || !pipelines[1] || !got[0] || !got[1])
+	{
+		FAIL("area: the pipelines cannot be made");
+		return;
+	}
+	post_linear = YES;
+	for (which = 0; which < 3; which++)
+	{
+		int size = sources[which];
+		MTLTextureDescriptor *description = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:
+			MTLPixelFormatRGBA16Float width:size height:size mipmapped:NO];
+		id<MTLTexture> source, target;
+		__fp16 *halves = malloc((size_t)size * size * 8);
+		double mean[2] = { 0.0, 0.0 }, beat[2] = { 0.0, 0.0 };
+
+		description.usage = MTLTextureUsageShaderRead;
+		description.storageMode = MTLStorageModeShared;
+		source = [device newTextureWithDescriptor:description];
+		description = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA32Float
+			width:AREA_SIZE height:AREA_SIZE mipmapped:NO];
+		description.usage = MTLTextureUsageRenderTarget;
+		description.storageMode = MTLStorageModeShared;
+		target = [device newTextureWithDescriptor:description];
+		for (y = 0; y < size; y++)
+		{
+			for (x = 0; x < size; x++)
+			{
+				__fp16 value = (__fp16)((x + y) & 1 ? 1.0f : 0.0f);
+
+				halves[(y * size + x) * 4] = halves[(y * size + x) * 4 + 1] = halves[(y * size + x) * 4 + 2] = value;
+				halves[(y * size + x) * 4 + 3] = (__fp16)1.0f;
+			}
+		}
+		[source replaceRegion:MTLRegionMake2D(0, 0, size, size) mipmapLevel:0 withBytes:halves bytesPerRow:size * 8];
+		free(halves);
+		for (kind = 0; kind < 2; kind++)
+		{
+			struct post_uniforms uniforms;
+
+			memset(&uniforms, 0, sizeof(uniforms));
+			uniforms.metrics[2] = uniforms.metrics[3] = 1.0f / AREA_SIZE;
+			uniforms.bounds[0] = uniforms.bounds[1] = (float)size;
+			uniforms.bounds[2] = uniforms.bounds[3] = 1.0f;
+			uniforms.hdr[0] = uniforms.hdr[1] = uniforms.hdr[3] = 1.0f;
+			uniforms.hdr[2] = (float)XGPU_HDR_OUTPUT_SDR;
+			uniforms.window[2] = 1.0f;
+			post_draw(pipelines[kind], target, source, &uniforms);
+			[target getBytes:got[kind] bytesPerRow:AREA_SIZE * 16 fromRegion:MTLRegionMake2D(0, 0, AREA_SIZE, AREA_SIZE)
+				mipmapLevel:0];
+			for (x = 0; x < AREA_SIZE * AREA_SIZE; x++)
+			{
+				mean[kind] += got[kind][x * 4 + 1];
+				if (fabs(got[kind][x * 4 + 1] - 0.5) > beat[kind])
+					beat[kind] = fabs(got[kind][x * 4 + 1] - 0.5);
+			}
+			mean[kind] /= AREA_SIZE * AREA_SIZE;
+		}
+		if (which == 0)
+		{
+			if (fabs(mean[0] - 0.5) > 0.002 || beat[0] > AREA_BEAT)
+				FAIL("area (1.5): the mean %.4f, a pixel %.4f off it: the downscale skips texels", mean[0], beat[0]);
+			if (beat[1] < 2.0 * AREA_BEAT)
+				FAIL("area (1.5, the single tap): a pixel only %.4f off the mean: the control shows no pattern", beat[1]);
+			printf("area: at 1.5 the mean %.4f, the pattern %.4f (the single tap's %.4f)\n", mean[0], beat[0], beat[1]);
+		}
+		else if (memcmp(got[0], got[1], AREA_SIZE * AREA_SIZE * 16))
+			FAIL("area (%s): not the single tap's values", which == 1 ? "1" : "2");
+	}
+	post_linear = NO;
+	free(got[0]);
+	free(got[1]);
 }
 
 static void post_test(NSString *dir)
@@ -444,6 +705,8 @@ static void post_test(NSString *dir)
 	}
 	printf("post: %d values checked against the reference\n", checked);
 	dither_test(vertex, encode);
+	depth_test(vertex, encode);
+	area_test(vertex, encode);
 }
 
 /* ---------- the draws */

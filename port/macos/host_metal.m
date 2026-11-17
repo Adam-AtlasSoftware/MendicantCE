@@ -846,6 +846,17 @@ uint64_t host_metal_loading(void *context, const struct loading_presentation_fra
 	return presentation.refresh_rate > 0.0f ? (uint64_t)(1e9 / presentation.refresh_rate) : 16666667ull;
 }
 
+/* the picture is shown smaller than it is (supersampling) by other than 1
+or 2 each way: the last pass scales it down by its area (#1117) */
+static BOOL area_scaled(id<MTLTexture> picture, MTLViewport viewport)
+{
+	double width = (double)picture.width, height = (double)picture.height;
+	BOOL across = width <= viewport.width + 0.5 || fabs(width - 2.0 * viewport.width) <= 0.5;
+	BOOL down = height <= viewport.height + 0.5 || fabs(height - 2.0 * viewport.height) <= 0.5;
+
+	return (width > viewport.width + 0.5 || height > viewport.height + 0.5) && !(across && down);
+}
+
 /* A picture drawn into the viewport, as the drawable's layer wants it. */
 static void present_draw(id<MTLRenderCommandEncoder> encoder, id<CAMetalDrawable> drawable, id<MTLTexture> picture,
 	MTLViewport viewport)
@@ -879,11 +890,14 @@ static void present_draw(id<MTLRenderCommandEncoder> encoder, id<CAMetalDrawable
 		[encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
 	}
 	else if (drawable.texture.pixelFormat == MTLPixelFormatBGRA8Unorm && presentation.sdr_pipeline &&
-		(gamma_power() > 0.0f || picture.pixelFormat == MTLPixelFormatRGBA16Float))
+		(gamma_power() > 0.0f || picture.pixelFormat == MTLPixelFormatRGBA16Float ||
+		picture.pixelFormat == MTLPixelFormatRGBA16Unorm || area_scaled(picture, viewport)))
 	{
-		/* display.gamma, or a half-float frame: the frame curved and
-		dithered to 8 bits as it is drawn into the SDR layer (no pass of its
-		own: this is the frame's last, #1108) */
+		/* display.gamma, or a half-float or 16-bit frame (display.hdr "on"
+		over SDR, display.output_depth): the frame curved and dithered to 8
+		bits as it is drawn into the SDR layer (no pass of its own: this is
+		the frame's last, #1108); a frame larger than the viewport, scaled
+		down by its area there (#1117) */
 		struct xgpu_metal_post_uniforms uniforms;
 		float power = gamma_power();
 

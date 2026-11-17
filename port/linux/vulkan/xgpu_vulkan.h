@@ -218,6 +218,9 @@ struct xgpu_vulkan_capabilities
 	acceleration structures (VK_KHR_ray_query, VK_KHR_acceleration_structure:
 	xgpu_vulkan_rt.c), unless HALO_VULKAN_NO_RAY_QUERIES */
 	int ray_queries;
+	/* display.output_depth: RGBA16 (unsigned normalized) targets drawn
+	into, blended, multisampled, sampled linearly and copied */
+	int deep_sdr;
 	/* the device, its Vulkan version and driver, in a few words (a
 	report's: port/linux/src/report.c) */
 	char device[96];
@@ -270,6 +273,9 @@ enum
 	XGPU_VULKAN_FORMAT_RGBA32F,
 	/* two signed bytes (its distance-field scene's cascades) */
 	XGPU_VULKAN_FORMAT_RG8_SNORM,
+	/* four 16-bit unsigned normalized channels (display.output_depth's SDR
+	back buffer: clamped and blended as BGRA8, 65535 levels) */
+	XGPU_VULKAN_FORMAT_RGBA16,
 	XGPU_VULKAN_FORMAT_COUNT
 };
 

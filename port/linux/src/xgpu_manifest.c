@@ -748,7 +748,7 @@ int xgpu_draw_derive(const struct xgpu_draw_facts *facts, int unlit, struct xgpu
 	memset(derived, 0, sizeof(*derived));
 	derived->samples = (uint8_t)(facts->samples > 1 ? facts->samples : 1);
 	derived->color_format = (uint8_t)(!facts->color ? XGPU_FORMAT_NONE : facts->hdr_target ? XGPU_FORMAT_RGBA16F :
-		XGPU_FORMAT_BGRA8);
+		facts->deep_target ? XGPU_FORMAT_RGBA16 : XGPU_FORMAT_BGRA8);
 	/* (an alpha test by sample, where the backend has a sample mask, of an
 	opaque draw into multisampled targets) */
 	if (facts->sample_mask && facts->samples > 1 && facts->alpha_test && !facts->blend)

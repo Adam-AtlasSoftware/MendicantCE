@@ -430,7 +430,10 @@ struct xgpu_stream_capabilities
 	/* display.ambient_occlusion "ray_traced": the backend traces the
 	occlusion's rays by the GPU's ray queries (xgpu_backend_world_ao_mesh,
 	_instances: Vulkan's VK_KHR_ray_query) */
-	uint8_t ray_queries, pad[3];
+	uint8_t ray_queries;
+	/* display.output_depth: the SDR back buffer can be RGBA16
+	(xgpu_backend.h's XGPU_FORMAT_RGBA16) */
+	uint8_t deep_sdr, pad[2];
 	/* the GPU, its API and driver, in a few words (a report's:
 	port/linux/src/report.c), NUL terminated */
 	char device[96];
@@ -680,8 +683,8 @@ struct xgpu_stream_target_create
 	uint32_t header;
 	uint32_t target;
 	uint32_t width, height;
-	/* (format: XGPU_FORMAT_* of a colour target: BGRA8, or RGBA16F the
-	back buffer with display.hdr) */
+	/* (format: XGPU_FORMAT_* of a colour target: BGRA8, RGBA16F the back
+	buffer with display.hdr, or RGBA16 with display.output_depth) */
 	uint8_t depth, layers, format, pad;
 };
 

@@ -396,12 +396,18 @@ the stream's ring carries it, written by the host). A backend declares
   EDR's half floats are not dithered. The dither only helps where the
   frame has more bits than the output: the HDR frame's half floats (about
   11 bits, enough for 8-bit SDR and 10-bit PQ), or a curve between them.
-  The SDR frame is BGRA8 (every blend rounded to 1/255 before the last
-  pass), so at gamma 1 it is the swapchain's codes already and is copied
-  byte for byte, undithered; at other gammas the dither keeps the curve's
-  mean (gamma 0.5 no longer crushes codes 1 to 11 all to black), but cannot
-  smooth the steps an 8-bit frame already has. Smoothing SDR's fog needs a
-  half-float SDR frame (#1152's 10-bit SDR output).
+  With `display.output_depth` "8" the SDR frame is BGRA8 (every blend
+  rounded to 1/255 before the last pass), so at gamma 1 it is the
+  swapchain's codes already and is copied byte for byte, undithered; at
+  other gammas the dither keeps the curve's mean but cannot smooth the
+  steps an 8-bit frame already has. With "10" ("auto" on a computer,
+  #1152) the SDR frame is RGBA16, 16-bit unsigned normalized: it clamps
+  and blends as BGRA8 does (the same picture; half floats would keep what
+  a blend takes past 1, and destination alpha past 1, which only HDR's tags
+  keep in range), at 65535 levels, and the last pass dithers it to a 10-bit
+  SDR swapchain where the surface lists one, else to 8 bits. It costs
+  twice the frame's memory and bandwidth (3840x2160: 66 MB, against 33),
+  so "auto" keeps 8 bits on phones and tablets and with battery saver.
 - **sRGB's gamut.** The EDR layer is tagged extended linear sRGB, as the
   owner asked: no colour is pushed into P3. The SDR layer stays untagged (it
   is unchanged), which on a P3 panel shows the game's colours slightly more

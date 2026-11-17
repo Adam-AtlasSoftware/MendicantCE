@@ -175,9 +175,12 @@ struct xgpu_draw_facts
 	failed (the backend could not make it: d3d8_device.c) */
 	int lights, world_found, lighting_failed, split_failed;
 	/* the targets' samples a pixel; the colour target in half floats
-	(display.hdr), and the draw's tag there (xgpu_hdr_classify) */
+	(display.hdr), and the draw's tag there (xgpu_hdr_classify); the colour
+	target in 16-bit unsigned normalized (display.output_depth's SDR back
+	buffer: XGPU_FORMAT_RGBA16) */
 	int samples, hdr_target;
 	uint16_t hdr;
+	int deep_target;
 	/* display.ambient_occlusion "world"'s light for the draw (xgpu.h's
 	XGPU_AMBIENT_OCCLUSION_WORLD, and _WORLD_VIEW with debug.world_ao_view;
 	0 none) */
