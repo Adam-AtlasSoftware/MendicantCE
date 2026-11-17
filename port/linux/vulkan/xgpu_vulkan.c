@@ -1142,8 +1142,10 @@ struct segment
 {
 	VkCommandBuffer commands;
 	int pass;
-	/* (debug.pass_times) the function that ended the pass */
+	/* (debug.pass_times) the function that ended the pass, and the setting
+	that owns it (xgpu_vulkan_pass_owner, as it began; NULL none) */
 	const char *ended_by;
+	const char *owner;
 	/* with aside passes: a pass that continues the chain's pass before it
 	(piece), and a chain's first pass, the last of its pieces (its index
 	plus one; segments_play) */
@@ -1568,6 +1570,10 @@ static struct
 	outside passes was recorded since the last timestamp */
 	struct segment direct_pass;
 	int direct_outside;
+	/* (debug.pass_times) the setting owning the passes begun from now on
+	(xgpu_vulkan_pass_owner), and the one the direct work outside passes
+	since the last timestamp began under */
+	const char *pass_owner, *direct_outside_owner;
 	/* HALO_VULKAN_ASIDE (on with discards): passes put aside, before the
 	pass they interrupt, which goes on in one rendering ("aside passes",
 	below): the chain's first and last pieces (segment indices plus one;
@@ -2801,7 +2807,7 @@ static void segments_play(void)
 			vkCmdExecuteCommands(main, 1, &segment->commands);
 			if (segment->transfer > vk.transfers_played)
 				vk.transfers_played = segment->transfer;
-			pass_times_mark(main, "outside passes");
+			pass_times_mark(main, segment->owner ? segment->owner : "outside passes");
 			timing_mark(main, NULL, 0, 1);
 			continue;
 		}
@@ -2827,7 +2833,7 @@ static void segments_play(void)
 					vkCmdExecuteCommands(main, 1, &aside->commands);
 					if (aside->transfer > vk.transfers_played)
 						vk.transfers_played = aside->transfer;
-					pass_times_mark(main, "outside passes");
+					pass_times_mark(main, aside->owner ? aside->owner : "outside passes");
 					timing_mark(main, NULL, 0, 1);
 				}
 			}
@@ -2854,12 +2860,15 @@ static VkCommandBuffer outside_commands(void)
 
 	if (!vk.deferred)
 	{
+		if (!vk.direct_outside)
+			vk.direct_outside_owner = vk.pass_owner;
 		vk.direct_outside = 1;
 		return vk.slot->main;
 	}
 	if (vk.segment_open)
 		return vk.segments[vk.segment_count - 1].commands;
 	segment = segment_add();
+	segment->owner = vk.pass_owner;
 	segment->commands = secondary_begin(NULL);
 	vk.segment_open = 1;
 	return segment->commands;
@@ -2872,7 +2881,7 @@ static void direct_outside_mark(void)
 	if (vk.deferred || !vk.direct_outside)
 		return;
 	vk.direct_outside = 0;
-	pass_times_mark(vk.slot->main, "outside passes");
+	pass_times_mark(vk.slot->main, vk.direct_outside_owner ? vk.direct_outside_owner : "outside passes");
 	timing_mark(vk.slot->main, NULL, 0, 1);
 }
 
@@ -3162,7 +3171,15 @@ summed by what the pass draws into (its size, samples and attachments).
 On a tiler a pass's time is the time it took from its first draw to its
 stores, the cost to find. Every 30 timed frames the sums are logged as
 milliseconds a frame and shares of the timed frames' GPU time: the shares
-hold whatever clock the GPU ran at, which a phone's governor changes. */
+hold whatever clock the GPU ran at, which a phone's governor changes.
+
+A pass begun (and work outside passes recorded) while a setting's work is
+being recorded is labeled by that setting instead (xgpu_vulkan_pass_owner:
+"SMAA", "PANINI", ...), its passes summed as one. Each summary is also
+logged by owner, the rest as OTHER, the most first, with the draws a frame,
+on a line of its own ("vulkan: pass groups: ..."), which the performance
+overlay reads from the host's recent lines (port/linux/game/perf_overlay.c,
+debug.timings). Labels only: what is drawn is the same. */
 
 #define PASS_TIMES_MAXIMUM 512
 #define PASS_TIMES_LABELS 48
@@ -3183,7 +3200,77 @@ static struct
 	} sums[PASS_TIMES_LABELS];
 	uint32_t sum_count;
 	double frames;
+	/* the statistics' counts at the summary before (the draws a frame) */
+	uint32_t draws_before, frames_before;
 } pass_times;
+
+/* an owner's label (xgpu_vulkan_pass_owner's names are capitals), not one
+that says what a pass draws into ("1920x1080 colour...", "aside ...",
+"outside passes") */
+static int pass_times_owned(const char *label)
+{
+	return label[0] >= 'A' && label[0] <= 'Z';
+}
+
+void xgpu_vulkan_pass_owner(const char *owner)
+{
+	/* (kept only while the passes are timed) */
+	if (host_pass_times)
+		vk.pass_owner = owner;
+}
+
+/* the summary's sums by owner, the rest as OTHER, the most first, and the
+draws a frame since the summary before: logged on a line of their own */
+static void pass_times_groups_log(void)
+{
+	struct
+	{
+		char label[PASS_TIMES_LABEL];
+		double milliseconds;
+	} groups[PASS_TIMES_LABELS + 1], swap;
+	uint32_t count = 0, sum, group, other;
+	uint32_t draws = vk.statistics.draws, frames = vk.statistics.frames;
+	char line[1024];
+	int length;
+
+	for (sum = 0; sum < pass_times.sum_count; sum++)
+	{
+		const char *label = pass_times_owned(pass_times.sums[sum].label) ? pass_times.sums[sum].label : "OTHER";
+
+		for (group = 0; group < count && strcmp(groups[group].label, label); group++)
+			;
+		if (group == count)
+		{
+			snprintf(groups[count].label, sizeof(groups[count].label), "%s", label);
+			groups[count++].milliseconds = 0.0;
+		}
+		groups[group].milliseconds += pass_times.sums[sum].milliseconds / pass_times.frames;
+	}
+	/* (the statistics' counts begin again when stream.statistics logs them) */
+	if (draws < pass_times.draws_before || frames < pass_times.frames_before)
+		pass_times.draws_before = pass_times.frames_before = 0;
+	length = snprintf(line, sizeof(line), "vulkan: pass groups: draws %.0f",
+		frames > pass_times.frames_before ?
+		(double)(draws - pass_times.draws_before) / (double)(frames - pass_times.frames_before) : 0.0);
+	pass_times.draws_before = draws;
+	pass_times.frames_before = frames;
+	for (group = 0; group < count && length < (int)sizeof(line) - PASS_TIMES_LABEL - 16; group++)
+	{
+		uint32_t most = group;
+
+		for (other = group + 1; other < count; other++)
+		{
+			if (groups[other].milliseconds > groups[most].milliseconds)
+				most = other;
+		}
+		swap = groups[group];
+		groups[group] = groups[most];
+		groups[most] = swap;
+		length += snprintf(line + length, sizeof(line) - (size_t)length, "; %s %.3f", groups[group].label,
+			groups[group].milliseconds);
+	}
+	host_logf(HOST_LOG_INFO, "%s", line);
+}
 
 static void pass_times_create(void)
 {
@@ -3226,12 +3313,14 @@ static void pass_times_mark(VkCommandBuffer main, const char *label)
 	pass_times.used++;
 }
 
-/* a pass's label: what it draws into */
+/* a pass's label: the setting that owns it, else what it draws into */
 static const char *pass_times_label(const struct segment *segment, int aside)
 {
 	static char label[PASS_TIMES_LABEL];
 	const struct xgpu_vulkan_image *image = segment->color.image ? segment->color.image : segment->depth.image;
 
+	if (segment->owner)
+		return segment->owner;
 	snprintf(label, sizeof(label), "%s%ux%u%s%s%s, ended by %s", aside ? "aside " : "", segment->area.extent.width,
 		segment->area.extent.height, segment->color.image ? " colour" : "", segment->depth.image ? " depth" : "",
 		image && image->description.samples > 1 ? " msaa" : "", segment->ended_by ? segment->ended_by : "?");
@@ -3318,6 +3407,7 @@ static void pass_times_collect(void)
 		}
 		host_logf(HOST_LOG_INFO, "vulkan: pass times, %.3f ms a frame of %.0f frames%s", total / pass_times.frames,
 			pass_times.frames, line);
+		pass_times_groups_log();
 		pass_times.sum_count = 0;
 		pass_times.frames = 0.0;
 	}
@@ -5906,6 +5996,7 @@ static void pass_segment_begin(const VkRenderingInfo *rendering)
 	struct xgpu_vulkan_image *sized = vk.color ? vk.color : vk.depth;
 
 	segment->pass = 1;
+	segment->owner = vk.pass_owner;
 	segment->area = rendering->renderArea;
 	segment->view_mask = rendering->viewMask;
 	segment->layer = vk.layer;
@@ -6158,6 +6249,7 @@ static int pass_begin(uint32_t clear_parts, const float clear_color[4], float cl
 		direct_outside_mark();
 		memset(&vk.direct_pass, 0, sizeof(vk.direct_pass));
 		vk.direct_pass.pass = 1;
+		vk.direct_pass.owner = vk.pass_owner;
 		vk.direct_pass.area = rendering.renderArea;
 		vk.direct_pass.color.image = rendering.colorAttachmentCount ? vk.color : NULL;
 		vk.direct_pass.depth.image = rendering.pDepthAttachment ? vk.depth : NULL;

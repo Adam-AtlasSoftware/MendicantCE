@@ -1587,6 +1587,16 @@ unsigned long xgpu_backend_pipeline_number(void)
 	return (unsigned long)stream.pipeline | (unsigned long)stream.pipeline_keys.rounds << 16;
 }
 
+unsigned long xgpu_backend_pipelines_defined(void)
+{
+	/* (numbers 1 to limit - 1 each round) */
+	const struct numbering *keys = &stream.pipeline_keys;
+
+	if (!keys->next)
+		return 0;
+	return (unsigned long)keys->rounds * (unsigned long)(keys->limit - 1u) + (unsigned long)(keys->next - 1u);
+}
+
 static void dynamic_state_describe(const struct xgpu_dynamic_state *dynamic, struct xgpu_stream_dynamic_state *wire)
 {
 	int index;
@@ -2299,6 +2309,11 @@ void xgpu_backend_prepare(void)
 		return;
 	record(XGPU_STREAM_PREPARE, sizeof(struct xgpu_stream_record));
 	stream.preparing = TRUE;
+}
+
+unsigned long xgpu_backend_frame_extra_pending(void)
+{
+	return frame_extra_frames;
 }
 
 void xgpu_backend_frame_extra(unsigned long microseconds)

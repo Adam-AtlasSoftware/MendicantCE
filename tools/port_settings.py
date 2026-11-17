@@ -756,6 +756,9 @@ FIRST_PERSON = ("video_settings/first_person", "first_person_screen")
 # (display.vsync, display.vrr and its margin, display.max_fps and
 # display.low_latency: how the frames meet the display)
 FRAME_RATE = ("video_settings/frame_rate", "frame_rate_screen")
+# (Frame Rate & Sync's PERFORMANCE TOOLS: the performance overlay and the
+# developers' timings and logs, their own page as Frame Rate's is full)
+PERFORMANCE_TOOLS = ("video_settings/frame_rate/performance_tools", "performance_tools_screen")
 # (display.gamma, and display.hdr's settings and the display's peak on the
 # renderers that draw it)
 BRIGHTNESS_PAGE = ("video_settings/brightness", "brightness_screen")
@@ -1411,15 +1414,11 @@ PAGES = {
             ("LOW LATENCY", "display.low_latency", [("AUTO", "auto"), ("ON", "on"), ("OFF", "off")],
              "With VSync on, starts each frame just in time for the refresh it is shown at, so a press reaches the "
              "screen sooner. Off starts each frame as soon as the one before is waiting. Auto is on.", None),
-            # (main.c's main_framerate_render, as the console's
-            # display_framerate draws it, and port/linux/game/perf_overlay.c:
-            # Video's page has no room, and Interface's none since WHILE DEAD)
-            ("PERFORMANCE OVERLAY", "display.perf_overlay",
-             [("OFF", "off"), ("SIMPLE", "simple"), ("DETAILED", "detailed")],
-             "Shows how the game runs, at the bottom right. Simple is the frame rate: green is 30 or more, red "
-             "under 30. Detailed adds the frame time, the 1% low, and the milliseconds spent on the GPU, the render "
-             "thread, the game and waiting for the display.",
-             None),
+            # (the performance overlay and the developers' timings: their own
+            # page, PERFORMANCE_TOOLS)
+            ("PERFORMANCE TOOLS ›", None, _page_screen(*PERFORMANCE_TOOLS),
+             "The performance overlay, and timings and logs of where each frame's time goes, for finding what "
+             "slows the game down.", None),
             # (port/linux/game/benchmark.c: from the main menu only, its match
             # taking the place of the game: SETTINGS_ROW_WHEN; its results
             # the new menus' screens/benchmark.xml)
@@ -1431,6 +1430,30 @@ PAGES = {
              "Plays a fixed minute of Blood Gulch with 40 bots, then shows the average frame rate, the 1% low, the "
              "frame times, the GPU and CPU time and your settings, and saves them in the benchmarks folder.|From "
              "the main menu only.", None, "benchmark", "port settings benchmark"),
+        ],
+    },
+    PERFORMANCE_TOOLS[0]: {
+        "screen": PERFORMANCE_TOOLS[1], "title": "PERFORMANCE TOOLS",
+        "rows": [
+            # (main.c's main_framerate_render, as the console's
+            # display_framerate draws it, and port/linux/game/perf_overlay.c)
+            ("PERFORMANCE OVERLAY", "display.perf_overlay",
+             [("OFF", "off"), ("SIMPLE", "simple"), ("DETAILED", "detailed")],
+             "Shows how the game runs, at the bottom right. Simple is the frame rate: green is 30 or more, red "
+             "under 30. Detailed adds the frame time, the 1% low, and the milliseconds spent on the GPU, the render "
+             "thread, the game and waiting for the display.",
+             None),
+            # (debug.timings: profile.c's sections, perf_overlay.c's lines,
+            # the Vulkan passes' owners)
+            ("DEVELOPER TIMINGS", "debug.timings", ON_OFF,
+             "Times the game's own work (AI, objects, effects, scripts...) and, with Vulkan, each graphics "
+             "setting's passes on the GPU, shown in the Detailed overlay with counts of objects and effects. Off "
+             "times nothing.|The GPU's passes from the next start.", None),
+            # (debug.demo_perf_log: report.c's log beside each demo, told by
+            # demo.c's listener)
+            ("DEMO FRAME TIMES", "debug.demo_perf_log", ON_OFF,
+             "Saves a log of each frame's times beside every demo recorded, lined up with the demo's ticks, so a "
+             "hitch seen in play can be found in the demo. The demo itself is unchanged.", None),
         ],
     },
     FIRST_PERSON[0]: {

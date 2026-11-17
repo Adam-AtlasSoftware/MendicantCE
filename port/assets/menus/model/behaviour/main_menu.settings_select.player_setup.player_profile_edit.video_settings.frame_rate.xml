@@ -50,10 +50,10 @@
 		<on event="created" run="port setting load"/>
 		<on event="a" run="port setting segment"/>
 	</behaviour>
-	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/op_perf_overlay" flags="pass_unhandled_to_focused_child"/>
-	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/perf_overlay_spinner" flags="pass_unhandled_to_focused_child left_right_tabs_items">
-		<on event="created" run="port setting load"/>
-		<on event="a" run="port setting segment"/>
+	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/op_performance_tools" flags="pass_unhandled_to_focused_child">
+		<on event="a" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/performance_tools/performance_tools_screen"/>
+		<on event="start" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/performance_tools/performance_tools_screen"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
 	</behaviour>
 	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/op_benchmark_pacing" flags="pass_unhandled_to_focused_child"/>
 	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/benchmark_pacing_spinner" flags="pass_unhandled_to_focused_child left_right_tabs_items">

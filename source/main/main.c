@@ -3588,8 +3588,12 @@ void main_framerate_render(
 				short line;
 
 				bounds = render.camera.window_bounds;
-				bounds.x0 = (short)(bounds.x1 - 240);
+				/* (room for debug.timings' longest lines, PERF_OVERLAY_LINE_SIZE) */
+				bounds.x0 = (short)(bounds.x1 - 400 < bounds.x0 ? bounds.x0 : bounds.x1 - 400);
 				bounds.x1 = (short)(bounds.x1 - 14);
+				/* (a split screen's short view: the lines that fit, the top's) */
+				if (bounds.y1 - bounds.y0 < 50 + 20 * count)
+					count = (short)MAX(0, (bounds.y1 - bounds.y0 - 50) / 20);
 				bounds.y0 = (short)(bounds.y1 - 50 - 20 * count);
 				draw_string_set_format(NONE, _text_justification_right, 0);
 				draw_string_set_color(global_real_argb_white);
