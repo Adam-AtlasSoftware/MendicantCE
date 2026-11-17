@@ -179,13 +179,16 @@ own) */
 #define TALL_LANE_BLUE 0x5AA9FFFFUL
 #define TALL_MAXIMUM_LANES 4
 /* a panel's choice: its height, its label's width, its value's place
-between the arrows from its left, the arrows' size; a touchscreen's
-height; the panel's buttons' gap one over another */
+between the arrows from its left (past the label and a gap, so that its
+words never run into the left arrow), the
+arrows' size; a touchscreen's height; the panel's buttons' gap one over
+another */
 #define PANEL_CHOICE_HEIGHT 22
 #define TOUCH_PANEL_CHOICE_HEIGHT 32
 #define PANEL_CHOICE_LABEL_X 8
-#define PANEL_CHOICE_LABEL_WIDTH 58
-#define PANEL_CHOICE_VALUE_X 58
+#define PANEL_CHOICE_LABEL_WIDTH 52
+#define PANEL_CHOICE_LABEL_GAP 6
+#define PANEL_CHOICE_VALUE_X (PANEL_CHOICE_LABEL_X + PANEL_CHOICE_LABEL_WIDTH + PANEL_CHOICE_LABEL_GAP)
 #define PANEL_CHOICE_ARROW 6
 #define PANEL_CHOICE_GAP 0
 #define PANEL_BUTTON_GAP 4
