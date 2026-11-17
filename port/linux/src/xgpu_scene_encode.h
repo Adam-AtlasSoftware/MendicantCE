@@ -66,8 +66,10 @@ uint32_t xgpu_scene_encode_decal(void *out, uint32_t room, uint32_t decal, uint3
 	uint32_t blend, uint32_t flags, const float centre[3], const float axes[3][3], const float color[4],
 	const float rectangle[4]);
 
-/* atmosphere_range: start and opaque distances */
+/* atmosphere_range: start and opaque distances, the eye's share; screen:
+the fog screen's near and far distances, its near density over its far */
 uint32_t xgpu_scene_encode_fog(void *out, uint32_t room, uint32_t flags, const float atmosphere_color[4],
-	const float atmosphere_range[2], const struct xgpu_stream_scene_fog_plane *planes, uint32_t plane_count);
+	const float atmosphere_range[3], const float screen[3], const struct xgpu_stream_scene_fog_plane *planes,
+	uint32_t plane_count);
 
 #endif

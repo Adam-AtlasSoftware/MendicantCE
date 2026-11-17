@@ -238,6 +238,7 @@ symbols in this file:
 #include "saved games/game_state.h"
 #include "shaders/shader_definitions.h"
 #include "tag_files/tag_files.h"
+#include "prism_deferred.h" /* port: port/linux/game/prism_deferred.c */
 
 /* ---------- constants */
 
@@ -2184,6 +2185,10 @@ void decal_new_from_collision(
 								decal->color = real_a_rgb_color_to_pixel32(intensity, &decal_color);
 								decal->intensity = 255;
 							}
+							/* port: its projection kept, for display.lighting's v4
+							modes, which project it into the G-buffer rather than
+							draw its geometry (port/linux/game/prism_deferred.c) */
+							prism_deferred_decal_made(decal_index, &basis, &extent, &sprite_bounds, radius);
 
 							{
 								struct decal_quad *quad = quads;

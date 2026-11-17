@@ -132,18 +132,18 @@ def test_sizes_multiples_of_four(driver64):
         "xgpu_stream_scene_lights": 16 + 256 * 80,
         "xgpu_stream_scene_decal": 120,
         "xgpu_stream_scene_fog_plane": 64,
-        "xgpu_stream_scene_fog": 48 + 8 * 64,
+        "xgpu_stream_scene_fog": 64 + 8 * 64,
         "xgpu_stream_scene_view": 16 + 128 + 32,
         "xgpu_stream_prism_bake": 80 + 64,
     }
 
 
 def test_stream_types(constants):
-    # (34: M2's PRISM_BAKE, GBUFFER_DRAW's lightmap page; 33: the ring's streams_pending; 32: SCENE_STATIC's pages, levels and attributes as sent, SCENE_LIGHTS' emitters, SCENE_VIEW; 31: M1 sends SCENE_MATERIAL
+    # (35: SCENE_FOG's fog screen and eye densities; 34: M2's PRISM_BAKE, GBUFFER_DRAW's lightmap page; 33: the ring's streams_pending; 32: SCENE_STATIC's pages, levels and attributes as sent, SCENE_LIGHTS' emitters, SCENE_VIEW; 31: M1 sends SCENE_MATERIAL
     # and GBUFFER_DRAW, display.lighting "ce_deferred"'s G-buffer pass; 30 was GBUFFER_PHASE, its first record)
-    assert constants["version"] == 34
+    assert constants["version"] == 35
     text = (SOURCE / "xgpu_stream.h").read_text()
-    assert re.search(r"#define XGPU_STREAM_VERSION 34\b", text)
+    assert re.search(r"#define XGPU_STREAM_VERSION 35\b", text)
     # (the scene's types joined the stream's own list after GBUFFER_PHASE, the numbers they were specified with:
     # the decoder takes every one of them)
     assert constants["rt_frame"] == constants["record_types"] - 12
@@ -153,11 +153,11 @@ def test_stream_types(constants):
     assert scene == list(range(constants["rt_frame"] + 2, constants["rt_frame"] + 12))
     assert scene[-1] == constants["record_types"] - 1
     assert constants["scene_record_types"] == constants["record_types"] <= 256
-    # (the guest's stream writes SCENE_MATERIAL, GBUFFER_DRAW, SCENE_STATIC, SCENE_LIGHTS, SCENE_INSTANCE and
-    # SCENE_VIEW)
+    # (the guest's stream writes SCENE_MATERIAL, GBUFFER_DRAW, SCENE_STATIC, SCENE_LIGHTS, SCENE_INSTANCE,
+    # SCENE_VIEW, SCENE_FOG and SCENE_DECAL)
     body = (SOURCE / "xgpu_stream_encode.c").read_text()
     for name in ("SCENE_MATERIAL", "GBUFFER_DRAW", "SCENE_STATIC", "SCENE_LIGHTS", "SCENE_INSTANCE", "SCENE_VIEW",
-                 "PRISM_BAKE"):
+                 "SCENE_FOG", "SCENE_DECAL", "PRISM_BAKE"):
         assert f"XGPU_STREAM_{name}" in body, name
     decoder = (ROOT / "port/android/host/host_render_stream.c").read_text()
     for name in ("SCENE_MATERIAL", "SCENE_MATERIAL_ANIMATE", "SCENE_INSTANCE", "GBUFFER_DRAW", "SCENE_STATIC",
@@ -284,8 +284,8 @@ def plane(index):
 
 def test_fog(encoded, constants):
     # (plane 1, with no normal, left out; the pad written 0 whatever was given)
-    expected = header(constants["scene_fog"], 48 + 2 * 64) + struct.pack("<3I", 1, 2, 0) + \
-        pack_floats([0.1, 0.2, 0.3, 0.9, 10, 200, 0, 0]) + plane(0) + plane(2)
+    expected = header(constants["scene_fog"], 64 + 2 * 64) + struct.pack("<3I", 1, 2, 0) + \
+        pack_floats([0.1, 0.2, 0.3, 0.9, 10, 200, 0.25, 0, 2, 40, 0.5, 0]) + plane(0) + plane(2)
     assert record(encoded, "fog") == expected
     # (ten planes: cut to eight, the one with no normal left out)
-    assert encoded["fog_many"] == f"{48 + 7 * 64} 7"
+    assert encoded["fog_many"] == f"{64 + 7 * 64} 7"

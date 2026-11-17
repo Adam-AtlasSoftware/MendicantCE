@@ -49,6 +49,13 @@ enum xgpu_vulkan_post_program_id
 	XGPU_VULKAN_POST_PRISM_TONE,
 	/* display.lighting "ce_deferred"'s resolve */
 	XGPU_VULKAN_POST_DEFERRED_RESOLVE,
+	/* display.lighting's v4 fog over the G-buffer (xgpu_vulkan_post_fog): its
+	second target's words at texture unit 2, its words at 3 */
+	XGPU_VULKAN_POST_DEFERRED_FOG,
+	/* display.lighting's v4 projected decals (xgpu_vulkan_post_decal): the
+	decal's bitmap at texture unit 0, the G-buffer's second target's words
+	at 2, its words at 3 */
+	XGPU_VULKAN_POST_DEFERRED_DECAL,
 	XGPU_VULKAN_POST_PROGRAM_COUNT
 };
 
@@ -74,6 +81,40 @@ struct xgpu_vulkan_post_uniforms
 	float window[4];
 	float panini[4];
 	float tangents[4];
+	/* display.lighting's v4 fog's: the window's camera (SCENE_VIEW's: the
+	eye, the axis one unit along the view at the screen's middle, its
+	change a unit of the screen's x and y), the view's corners in the
+	target's pixels (left, top, right, bottom); the atmosphere's colour and
+	maximum density, its start and opaque distances, the eye's share and the
+	mode (0 the fog, 1 the fog screen's density into the alpha); the plane
+	(its normal and distance), its colour and maximum density, its opaque
+	distance and depth, the eye's depth in it and the screen's passes (1 the
+	level's, 2 the objects'); the fog screen's near and far distances and
+	its near density over its far (xgpu_stream.h's SCENE_FOG) */
+	float camera_eye[4];
+	float camera_axis[4];
+	float camera_x[4];
+	float camera_y[4];
+	float view_corners[4];
+	float fog_atmosphere[4];
+	float fog_range[4];
+	float fog_plane[4];
+	float fog_planar[4];
+	float fog_shape[4];
+	float fog_screen[4];
+	/* display.lighting's v4 decals': the box's centre and CE's framebuffer
+	blend function; its axes (across, up, out of the surface) over their
+	lengths squared, the first's w 1 where the layer is alpha tested; the
+	decal's colour and intensity; its sprite's rectangle in its bitmap (u0,
+	v0, u1, v1); the world's size of a texel across the box, 0, of a pixel at
+	a unit's distance, 0 (xgpu_stream.h's SCENE_DECAL) */
+	float decal_centre[4];
+	float decal_x[4];
+	float decal_y[4];
+	float decal_z[4];
+	float decal_color[4];
+	float decal_rectangle[4];
+	float decal_lod[4];
 };
 
 struct xgpu_vulkan_post_module

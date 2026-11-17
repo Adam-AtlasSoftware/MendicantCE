@@ -56,6 +56,25 @@ int xgpu_vulkan_post_deferred_resolve(struct xgpu_vulkan_image *target, struct x
 	struct xgpu_vulkan_image *additions, int *whole, void *context), void *context);
 int xgpu_vulkan_post_panini(struct xgpu_vulkan_image *source, struct xgpu_vulkan_image *into, uint32_t layer,
 	const int32_t corners[4], const float projection[8]);
+/* display.lighting's v4 modes: the window's fog (xgpu_stream.h's SCENE_FOG)
+over its colour target (one sample), from its G-buffer's words and second
+target's (the distance) and its camera (SCENE_VIEW), as CE's fog pass blends
+it; or, with XGPU_SCENE_FOG_FLAG_SCREEN, its fog screen's density into the
+target's alpha alone. In the stream's order; the targets bound before are
+not bound after. 1 if it was drawn */
+struct xgpu_stream_scene_view;
+struct xgpu_stream_scene_fog;
+int xgpu_vulkan_post_fog(struct xgpu_vulkan_image *target, struct xgpu_vulkan_image *words,
+	struct xgpu_vulkan_image *extras, const struct xgpu_stream_scene_view *view,
+	const struct xgpu_stream_scene_fog *fog);
+/* ... a decal (xgpu_stream.h's SCENE_DECAL) projected by its box onto the
+level's pixels of the G-buffer, its bitmap's image the stage's (bitmap),
+blended into the target (the base colour's, or the light's) as CE's decal
+draws blend; 1 if it was drawn or covers nothing */
+struct xgpu_stream_scene_decal;
+int xgpu_vulkan_post_decal(struct xgpu_vulkan_image *target, struct xgpu_vulkan_image *bitmap,
+	struct xgpu_vulkan_image *words, struct xgpu_vulkan_image *extras, const struct xgpu_stream_scene_view *view,
+	const struct xgpu_stream_scene_decal *decal);
 
 /* display.hdr (docs/hdr.md). The tone map's pipeline for an RGBA16F target
 of a number of samples drawn with a depth attachment (XGPU_VULKAN_FORMAT_

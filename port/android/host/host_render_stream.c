@@ -595,9 +595,26 @@ static int decode_record(struct host_render_decoder *decoder, const unsigned cha
 		CALL(prism_bake, bake, data);
 		break;
 	}
-	case XGPU_STREAM_SCENE_MATERIAL_ANIMATE:
-	case XGPU_STREAM_SCENE_DECAL:
 	case XGPU_STREAM_SCENE_FOG:
+	{
+		const struct xgpu_stream_scene_fog *fog = (const void *)start;
+
+		if (fog->plane_count > XGPU_SCENE_FOG_PLANES ||
+			size < offsetof(struct xgpu_stream_scene_fog, planes) + fog->plane_count * sizeof(fog->planes[0]))
+			return XGPU_STREAM_ERROR_RECORD;
+		CALL(scene_fog, fog);
+		break;
+	}
+	case XGPU_STREAM_SCENE_DECAL:
+	{
+		const struct xgpu_stream_scene_decal *decal = (const void *)start;
+
+		if (decal->blend >= XGPU_SCENE_DECAL_BLENDS)
+			return XGPU_STREAM_ERROR_RECORD;
+		CALL(scene_decal, decal);
+		break;
+	}
+	case XGPU_STREAM_SCENE_MATERIAL_ANIMATE:
 		break;
 	case XGPU_STREAM_CATEGORY:
 		CALL(category, value->value);

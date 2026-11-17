@@ -66,11 +66,16 @@ UNIFORM = re.compile(r"^uniform vec4 (\w+);\n", re.M)
 SAMPLER = re.compile(r"^uniform (u?sampler2D) (\w+);\n", re.M)
 # the uniforms' block: each pass's vec4s, in this order (std140), as far as
 # the last its program uses (hdr in display.hdr's passes, window, panini
-# and tangents in display.panini's)
-UNIFORMS = ("metrics", "bounds", "hdr", "window", "panini", "tangents")
+# and tangents in display.panini's; the camera's and the fog's in
+# display.lighting's v4 fog's, and the decal's in its decals')
+UNIFORMS = ("metrics", "bounds", "hdr", "window", "panini", "tangents", "camera_eye", "camera_axis", "camera_x",
+            "camera_y", "view_corners", "fog_atmosphere", "fog_range", "fog_plane", "fog_planar", "fog_shape",
+            "fog_screen", "decal_centre", "decal_x", "decal_y", "decal_z", "decal_color", "decal_rectangle",
+            "decal_lod")
 # the fragment programs, in xgpu_vulkan_post_shaders.h's order
 PROGRAMS = ("fxaa", "smaa_edges", "smaa_weights", "smaa_blend", "rotate", "hdr_tone_map", "hdr_tone_map_ms",
-            "hdr_encode", "gamma", "panini", "bloom_down", "bloom_up", "prism_tone", "deferred_resolve")
+            "hdr_encode", "gamma", "panini", "bloom_down", "bloom_up", "prism_tone", "deferred_resolve",
+            "deferred_fog", "deferred_decal")
 # one triangle over the whole viewport
 VERTEX_SOURCE = (
     "void main()\n"
@@ -223,7 +228,7 @@ SMAA_PREFIX = (
 )
 # each sampler's texture unit, which becomes its binding
 UNITS = {"color_texture": 0, "edges_texture": 0, "area_texture": 1, "search_texture": 2, "weights_texture": 1,
-         "local_texture": 1, "base_texture": 1, "additions_texture": 2, "gbuffer_texture": 3}
+         "local_texture": 1, "base_texture": 1, "additions_texture": 2, "gbuffer_texture": 3, "extras_texture": 2}
 # display.lighting "ce_deferred"'s resolve (Vulkan's: xgpu_vulkan_post_
 # deferred_resolve): each pixel the copy of the light (the colour target's
 # pixels) times the base plus the additions, the additions' alpha (CE's
@@ -316,6 +321,179 @@ DEFERRED_RESOLVE_SOURCE = (
     "\t\t}\n"
     "\t}\n"
     "\tresult = vec4(color, alpha);\n"
+    "}\n"
+)
+# display.lighting's v4 fog (Vulkan's: xgpu_vulkan_post_fog; xgpu_stream.h's
+# SCENE_FOG): a screen pass over the window's G-buffer, its words at
+# gbuffer_texture (present, the instance) and its second target's at
+# extras_texture (the distance along the view's axis), both fetched. Each
+# opaque pixel's point is found from its distance and the camera (camera_*:
+# the eye, the axis one unit along the view at the screen's middle, its
+# change a unit of the screen's x and y; view_corners, the view's corners in
+# the target's pixels), and the fog CE gives its surface computed there: the
+# level's as CE's fog pass's density tables have it (the atmosphere's a ramp
+# of 16 texels, the plane's (1 - cos(pi i / 15)) / 2 in 255ths, along the
+# view (x) and the depth under the plane (y), sampled bilinearly, clamped),
+# an object's as its vertex programs compute it (the atmosphere linear, the
+# plane's (1 - min((1 - x)^2 + (1 - y)^2, 1))^2 and (1 - (1 - x)^2)^2). The
+# atmosphere's density A (fog_atmosphere: its colour and maximum density;
+# fog_range: its start and opaque distances, the eye's share ae, the mode),
+# the plane's P (fog_plane: its normal and distance; fog_planar: its colour
+# and maximum density; fog_shape: its opaque distance and depth, the eye's
+# depth in it pe, the screen's passes), blended as CE's fog pass blends them
+# (the pipeline's: one and one less alpha): colour A atmosphere (1 - (1 - ae)
+# P) + P plane (1 - ae A), alpha 1 - (1 - A)(1 - P). In mode 1 the fog
+# screen's density (fog_screen: its near and far distances, its near density
+# over its far) into the alpha alone, where its passes take the pixel (the
+# level's, the objects'), 0 elsewhere: what CE's fog screen draws its level
+# and models into the alpha for its layers to read
+DEFERRED_FOG_SOURCE = (
+    "uniform usampler2D extras_texture;\n"
+    "uniform usampler2D gbuffer_texture;\n"
+    "uniform vec4 camera_eye;\n"
+    "uniform vec4 camera_axis;\n"
+    "uniform vec4 camera_x;\n"
+    "uniform vec4 camera_y;\n"
+    "uniform vec4 view_corners;\n"
+    "uniform vec4 fog_atmosphere;\n"
+    "uniform vec4 fog_range;\n"
+    "uniform vec4 fog_plane;\n"
+    "uniform vec4 fog_planar;\n"
+    "uniform vec4 fog_shape;\n"
+    "uniform vec4 fog_screen;\n"
+    "out vec4 result;\n"
+    "\n"
+    "const float plane_table[16] = float[16](0.0, 3.0, 11.0, 24.0, 42.0, 64.0, 88.0, 114.0, 141.0, 167.0, 191.0,\n"
+    "\t213.0, 231.0, 244.0, 252.0, 255.0);\n"
+    "\n"
+    "/* the plane's table at u, as its sampler reads it */\n"
+    "float plane_curve(float u)\n"
+    "{\n"
+    "\tfloat s = clamp(u * 16.0 - 0.5, 0.0, 15.0);\n"
+    "\tint i = min(int(s), 14);\n"
+    "\treturn mix(plane_table[i], plane_table[i + 1], s - float(i)) / 255.0;\n"
+    "}\n"
+    "\n"
+    "void main()\n"
+    "{\n"
+    "\tivec2 texel = ivec2(gl_FragCoord.xy);\n"
+    "\tuvec4 words = texelFetch(gbuffer_texture, texel, 0);\n"
+    "\tuvec4 extras = texelFetch(extras_texture, texel, 0);\n"
+    "\tbool present = (words.w & 0x8000u) != 0u;\n"
+    "\tuint instance = words.w >> 16;\n"
+    "\tfloat d = uintBitsToFloat(extras.w);\n"
+    "\tif (fog_range.w > 0.5)\n"
+    "\t{\n"
+    "\t\tuint passes = uint(fog_shape.w + 0.5);\n"
+    "\t\tfloat alpha = 0.0;\n"
+    "\t\tif (present && (passes & (instance == 0u ? 1u : 2u)) != 0u)\n"
+    "\t\t\talpha = (1.0 - plane_curve((d - fog_screen.x) / (fog_screen.y - fog_screen.x))) * (1.0 - fog_screen.z);\n"
+    "\t\tresult = vec4(0.0, 0.0, 0.0, alpha);\n"
+    "\t\treturn;\n"
+    "\t}\n"
+    "\tif (!present || !(d > 0.0))\n"
+    "\t\tdiscard;\n"
+    "\tvec2 s = (gl_FragCoord.xy - view_corners.xy) / (view_corners.zw - view_corners.xy) * 2.0 - 1.0;\n"
+    "\tvec3 p = camera_eye.xyz + d * (camera_axis.xyz + s.x * camera_x.xyz + s.y * camera_y.xyz);\n"
+    "\tfloat t = (d - fog_range.x) / (fog_range.y - fog_range.x);\n"
+    "\tfloat x = d / fog_shape.x;\n"
+    "\tfloat y = (fog_plane.w - dot(fog_plane.xyz, p)) / fog_shape.y;\n"
+    "\tfloat A, P;\n"
+    "\tif (instance == 0u)\n"
+    "\t{\n"
+    "\t\tA = fog_atmosphere.w * clamp((16.0 * t - 0.5) / 15.0, 0.0, 1.0);\n"
+    "\t\tfloat along = plane_curve(x);\n"
+    "\t\tP = fog_planar.w * mix(along * plane_curve(y), along, fog_shape.z);\n"
+    "\t}\n"
+    "\telse\n"
+    "\t{\n"
+    "\t\tA = fog_atmosphere.w * clamp(t, 0.0, 1.0);\n"
+    "\t\tvec2 r = min(max(1.0 - vec2(y, x), 0.0) * max(1.0 - vec2(y, x), 0.0), 1.0);\n"
+    "\t\tfloat under = 1.0 - min(r.x + r.y, 1.0), along = 1.0 - r.y;\n"
+    "\t\tP = fog_planar.w * clamp(mix(under * under, along * along, fog_shape.z), 0.0, 1.0);\n"
+    "\t}\n"
+    "\tfloat ae = fog_range.z;\n"
+    "\tvec3 color = fog_atmosphere.rgb * (A * (1.0 - (1.0 - ae) * P)) + fog_planar.rgb * (P * (1.0 - ae * A));\n"
+    "\tresult = vec4(color, 1.0 - (1.0 - A) * (1.0 - P));\n"
+    "}\n"
+)
+# display.lighting's v4 decals (Vulkan's: xgpu_vulkan_post_decal;
+# xgpu_stream.h's SCENE_DECAL): a decal projected by its box onto the level's
+# pixels of the window's G-buffer (its words at gbuffer_texture: present, the
+# instance, the normal; its second target's at extras_texture: the
+# distance), drawn over the rectangle of the screen its box covers into the
+# target its layer goes to (the base colour, or the light). Each pixel's
+# point is found as the fog's are (camera_*, view_corners), and its place in
+# the box (decal_centre: the box's centre and CE's framebuffer blend
+# function; decal_x, decal_y, decal_z: its axes over their lengths squared,
+# across, up and out of the surface, decal_x.w 1 where the layer is alpha
+# tested): a pixel of the level inside it whose surface faces the decal's
+# way (the G-buffer's normal within 75 degrees of the box's out) takes the
+# bitmap (color_texture, at the sprite's place: decal_rectangle, u0 v0 u1 v1;
+# its level by the texels the pixel covers: decal_lod, the world's size of a
+# texel across the box and of a pixel at a unit's distance) and blends it as
+# CE's decal draws do: their combiners' colour of the texel, the decal's
+# colour and intensity (decal_color), by the pipeline's blend of the function
+DEFERRED_DECAL_SOURCE = (
+    "uniform sampler2D color_texture;\n"
+    "uniform usampler2D extras_texture;\n"
+    "uniform usampler2D gbuffer_texture;\n"
+    "uniform vec4 camera_eye;\n"
+    "uniform vec4 camera_axis;\n"
+    "uniform vec4 camera_x;\n"
+    "uniform vec4 camera_y;\n"
+    "uniform vec4 view_corners;\n"
+    "uniform vec4 decal_centre;\n"
+    "uniform vec4 decal_x;\n"
+    "uniform vec4 decal_y;\n"
+    "uniform vec4 decal_z;\n"
+    "uniform vec4 decal_color;\n"
+    "uniform vec4 decal_rectangle;\n"
+    "uniform vec4 decal_lod;\n"
+    "out vec4 result;\n"
+    "\n"
+    "vec3 unfold(vec2 e)\n"
+    "{\n"
+    "\tvec3 n = vec3(e, 1.0 - abs(e.x) - abs(e.y));\n"
+    "\tfloat t = max(-n.z, 0.0);\n"
+    "\tn.xy += vec2(n.x >= 0.0 ? -t : t, n.y >= 0.0 ? -t : t);\n"
+    "\treturn normalize(n);\n"
+    "}\n"
+    "\n"
+    "void main()\n"
+    "{\n"
+    "\tivec2 texel = ivec2(gl_FragCoord.xy);\n"
+    "\tuvec4 words = texelFetch(gbuffer_texture, texel, 0);\n"
+    "\tuvec4 extras = texelFetch(extras_texture, texel, 0);\n"
+    "\tfloat d = uintBitsToFloat(extras.w);\n"
+    "\tvec2 s = (gl_FragCoord.xy - view_corners.xy) / (view_corners.zw - view_corners.xy) * 2.0 - 1.0;\n"
+    "\tvec3 p = camera_eye.xyz + d * (camera_axis.xyz + s.x * camera_x.xyz + s.y * camera_y.xyz);\n"
+    "\tvec3 r = p - decal_centre.xyz;\n"
+    "\tvec3 local = vec3(dot(r, decal_x.xyz), dot(r, decal_y.xyz), dot(r, decal_z.xyz));\n"
+    "\tvec2 uv = mix(decal_rectangle.xy, decal_rectangle.zw, local.xy * 0.5 + 0.5);\n"
+    "\tvec4 t = textureLod(color_texture, uv, log2(max(d * decal_lod.z / decal_lod.x, 1.0e-6)));\n"
+    "\tbool level = (words.w & 0x8000u) != 0u && (words.w >> 16) == 0u && d > 0.0;\n"
+    "\tbool inside = all(lessThanEqual(abs(local), vec3(1.0)));\n"
+    "\tbool facing = true;\n"
+    "\tif (((words.z >> 28) & 8u) != 0u)\n"
+    "\t\tfacing = dot(unfold(unpackSnorm2x16(words.y)), normalize(decal_z.xyz)) > 0.25;\n"
+    "\tif (!level || !inside || !facing)\n"
+    "\t\tdiscard;\n"
+    "\tint blend = int(decal_centre.w + 0.5);\n"
+    "\tfloat intensity = decal_color.w;\n"
+    "\tvec3 c = decal_color.rgb;\n"
+    "\tvec4 source;\n"
+    "\tif (blend == 1 || blend == 5)\n"
+    "\t\tsource = vec4(1.0 - intensity * c * (1.0 - t.rgb), intensity * t.a + 1.0 - intensity);\n"
+    "\telse if (blend == 2)\n"
+    "\t\tsource = vec4(intensity * ((0.5 - t.rgb) * (1.0 - c) + t.rgb) + (1.0 - intensity) * 0.5,\n"
+    "\t\t\tintensity * t.a + (1.0 - intensity) * 0.5);\n"
+    "\telse\n"
+    "\t\tsource = vec4(t.rgb * c * (blend == 0 ? 1.0 : intensity), intensity * t.a);\n"
+    "\tsource = clamp(source, 0.0, 1.0);\n"
+    "\tif (decal_x.w > 0.5 && !(source.a > 127.0 / 255.0))\n"
+    "\t\tdiscard;\n"
+    "\tresult = source;\n"
     "}\n"
 )
 # Vulkan's own program: the frame turned for a swapchain the display turns
@@ -648,6 +826,8 @@ def generate(args):
     programs["bloom_up"] = ("frag", BLOOM_UP_SOURCE)
     programs["prism_tone"] = ("frag", PRISM_TONE_SOURCE)
     programs["deferred_resolve"] = ("frag", DEFERRED_RESOLVE_SOURCE)
+    programs["deferred_fog"] = ("frag", DEFERRED_FOG_SOURCE)
+    programs["deferred_decal"] = ("frag", DEFERRED_DECAL_SOURCE)
     programs["clear"] = ("frag", CLEAR)
     text = [
         "/* Generated by tools/vulkan_post_shaders.py from its GLSL, xgpu_hdr.c and port/third_party/smaa. "

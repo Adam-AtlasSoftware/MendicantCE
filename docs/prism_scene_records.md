@@ -8,7 +8,7 @@ lights, the decals and the fog. These are new records of the renderer's command 
 
 ## What is there now
 
-`XGPU_STREAM_VERSION` is 34. The records' types are in the stream's own list, after M1's first record,
+`XGPU_STREAM_VERSION` is 35. The records' types are in the stream's own list, after M1's first record,
 `GBUFFER_PHASE` (82): `SCENE_MATERIAL` is 83 and so on to `SCENE_FOG`, 90, then `SCENE_VIEW`, 91, M2's `PRISM_BAKE`,
 92, and `XGPU_STREAM_RECORD_TYPES` is 93. The
 host's decoder takes every one, with its fixed part's size as its minimum.
@@ -79,8 +79,39 @@ inputs a slice a frame (`_REACH_INPUT`, words of the serialised collision BSP, c
 and fighters, the static scenery's triangles and the light fixtures' placements; `_REACH_END`). The host writes the bake's state, progress, time and size into the status block
 (`XGPU_BAKE_STATUS_*`). `docs/prism_bake.md` describes the bake.
 
-The other three are specified and taken, not sent: `SCENE_MATERIAL_ANIMATE`, `SCENE_DECAL`, `SCENE_FOG`. `xgpu_scene_encode.c` still fills all eight from typed values for the tests; the stream writes its own
-from `xgpu_stream_encode.c`.
+And in the v4 modes where the host draws the window deferred (`prism_deferred_screen_passes`: the Vulkan backend, a
+target of one sample), the fog and the decals are screen passes over the G-buffer, not CE's draws:
+
+- `SCENE_FOG` (`port/linux/game/prism_deferred.c`): in CE's fog pass's place (after the resolve, before the
+  transparent geometry), the window's fog: the atmosphere (its colour, maximum density, start and opaque distances,
+  the eye's share of it) and the camera's cluster's fog plane (its plane, colour, maximum density, opaque distance and
+  depth, the eye's depth in it). The host (`xgpu_vulkan_post_fog`) finds each opaque pixel's point from its distance
+  and the camera and gives it the fog CE gives its surface there: the level's as CE's fog pass drew it (the density
+  tables' curves: the atmosphere's a ramp, the plane's `(1 - cos(pi x)) / 2` along the view and under the plane,
+  as its 16-texel tables are sampled), an object's as its draws' combiners had it (their vertex programs' curves),
+  blended as CE's fog pass blends. The level is not drawn again for its fog, and the opaque objects' draws have no fog
+  of their own (`rasterizer_xbox_models.c`: no fog constants, the planar fog's vertex program its lights' alike but
+  for the fog, no true atmospheric fog); the sky's models keep theirs, and the transparent geometry its own. With
+  `XGPU_SCENE_FOG_FLAG_SCREEN`, in the fog screen's place for its second pass (`rasterizer_xbox_environment_fog.c`),
+  the fog screen's density (its near and far distances, its near density over its far, whether the level's and the
+  objects' pixels take it) written into the colour target's alpha, which the fog screen's layers then blend by as
+  CE's do: the fog screen draws neither the level nor its queued models (the a30 rocks' "shell" of M0: nothing draws
+  the stock rock for the fog any more).
+- `SCENE_DECAL` (`port/linux/game/prism_deferred.c`, `rasterizer_xbox_decals.c`): in each decal's draw's place (the
+  primary, secondary and light layers), the decal projected by its box: its
+  projection's basis and extent as `decals.c` made it (kept in a table of the port's by the decal's datum, never in
+  the game's state), its radius out of the surface, its bitmap's texture and sprite, CE's framebuffer blend function,
+  its colour and intensity. The host (`xgpu_vulkan_post_decal`) draws it over the rectangle of the screen its box
+  covers, into the target the window's draws go to then (the base colour's in the base phase, else the light), on the
+  level's pixels inside the box whose surface faces the decal's way (the G-buffer's normal within 75 degrees), as CE's
+  decal draws blend: their combiners' colour of the texel and the decal's colour and intensity, the pipeline's blend
+  of the function. CE's decals have no normal map, so none is projected. A decal made without its projection kept (a
+  saved game's) is drawn as CE draws it, and so are the water's layer and the alpha-tested layer: CE's texture pass
+  leaves out the pixels under an alpha-tested decal by the stencil its draw writes, which a projection does not
+  (`XGPU_SCENE_DECAL_FLAG_ALPHA_TESTED`, the host's alpha test, is there for when it does).
+
+`SCENE_MATERIAL_ANIMATE` is specified and taken, not sent. `xgpu_scene_encode.c` still fills every record from typed
+values for the tests; the stream writes its own from `xgpu_stream_encode.c`.
 
 ## The byte-identity rule
 
@@ -102,8 +133,8 @@ entries are sent; the record's size is its fixed part and those entries.
 | `GBUFFER_DRAW` | Before each opaque draw of walk 1 | Material id (0 refused), instance id (0 the level), the level's surface index or an object's geometry and part, the CE vertex program's id, flags (alpha tested, two-sided, first person, remodel), LOD, the level's lightmap page + 1 (M2). The draw's vertices and indices are bound as today | 32 |
 | `SCENE_STATIC` | Per BSP, a slice at a time, as `RT_STATIC`; its levels as they change | Phase (begin, triangles, attributes, end, release, pages, levels), generation, first, count (at most 65536 a slice), total, the data's address and size. A triangle is 9 floats; its attributes are 16 words: material, surface, kind, level and lightmap page, three corners' lightmap coordinates, three corners' base map coordinates, the ray tracer's material. A page is its width and height; the levels a bit set over the surfaces (set: drawn far) | 32 |
 | `SCENE_LIGHTS` | Each frame | First, count and total of the frame's lights; up to 256 lights, each its stable id, type (sun, dome, sky, point, spot, emitter), class (static, animated, switchable, dynamic), flags (on, casts shadows, first person), position and radius (or direction toward it), spot axis and cone, radiance and power, shape (sun disc, dome half angle, inner cone). Emitters are SCENE_STATIC triangles by their materials | 16 + 80 per light (at most 20496) |
-| `SCENE_DECAL` | Per live decal | Decal id, bitmap and sequence frame, CE's framebuffer blend function (alpha, multiply, double multiply, add, subtract, min, max, alpha multiply add), flags (emissive, normal), the box (centre and three half-extent axes), colour, texture rectangle | 120 |
-| `SCENE_FOG` | Each frame | Flags; the camera cluster's atmospheric fog (colour, maximum density, start and opaque distances); up to 8 fog planes seen, each its index, flags (inside), plane, colour and maximum density, opaque distance and depth | 48 + 64 per plane (at most 560) |
+| `SCENE_DECAL` | Per decal of the level drawn, in its draw's place | Decal id, its bitmap's texture (its Direct3D header's guest address) and sequence frame, CE's framebuffer blend function (alpha, multiply, double multiply, add, subtract, min, max, alpha multiply add), flags (emissive, normal, alpha tested), the box (centre and three half-extent axes: across, up, out of the surface), colour (CE's vertex colour: red, green, blue and intensity), texture rectangle (the sprite's) | 120 |
+| `SCENE_FOG` | Each window, after the resolve; and in the fog screen's second pass (`SCREEN`) | Flags (atmosphere; screen, the screen's level and objects); the camera cluster's atmospheric fog (colour, maximum density; start and opaque distances, the eye's share); the fog screen (near and far distances, near density over far); up to 8 fog planes (CE draws one), each its id, flags (inside), plane, colour and maximum density, opaque distance and depth, the eye's depth in it | 64 + 64 per plane (at most 576) |
 | `SCENE_VIEW` | At each G-buffer pass's begin | Flags (history); the camera this frame and last (eye and near plane, the axis at the screen's middle and the far plane, its change a unit of the screen's x and y); the view's corners in the target's pixels, this frame's and last | 176 |
 | `PRISM_BAKE` | Each frame in Raster (the control); once a BSP (the reach's inputs, sliced) | Phase (control, reach input, reach end), generation, first, count, total, data and size; display.bake, the quality, the rebakes asked for, flags (menus, foreground, reach sent); the map's checksum, the BSP; the bake folder's and the status block's guest addresses; the frame's GPU budget, the threshold; the map's name | 144 |
 

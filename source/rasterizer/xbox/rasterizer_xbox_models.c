@@ -533,6 +533,17 @@ static struct rasterizer_model_begin_parameters const *local_parameters = NULL;
 static boolean local_parameters_queued_flag = FALSE;
 static short local_model_effect_type = 0;
 static boolean local_sky_flag = FALSE;
+
+/* port: display.lighting's v4 modes: the window's opaque objects drawn with
+no fog of their own (the planar fog's vertex program its lights' alike but
+for the fog, no fog constants, no true atmospheric fog), as the host's
+screen pass fogs every opaque pixel of the G-buffer by its own distance
+(port/linux/game/prism_deferred.c); the sky's models keep theirs */
+static boolean rasterizer_models_port_fog_by_host(
+	void)
+{
+	return render_prism_deferred_window && !local_sky_flag;
+}
 static boolean local_planar_fog_flag = FALSE;
 static boolean local_environment_fog_screen_flag = FALSE;
 static boolean local_do_not_change_z_stencil_states = FALSE;
@@ -1278,6 +1289,8 @@ void rasterizer_model_draw_environment_shader(
 			if (local_planar_fog_flag)
 			{
 				vertex_shader_permutation =
+					rasterizer_models_port_fog_by_host() ? /* port: (above) */
+					_model_vertex_shader_permutation_lights :
 					_model_vertex_shader_permutation_planar_fog;
 			}
 			else if (local_parameters->lighting.point_light_count > 0)
@@ -1399,6 +1412,7 @@ void rasterizer_model_draw_environment_shader(
 			global_window_parameters.fog.planar_maximum_depth>0.0f);
 
 		if (rasterizer_debug_options.draw_environment_fog &&
+			!rasterizer_models_port_fog_by_host() && /* port: (above) */
 			!TEST_FLAG(
 				local_parameters->geometry_flags,
 				_rasterizer_geometry_no_fog_bit))
@@ -1535,7 +1549,8 @@ void rasterizer_model_draw_environment_shader(
 			FALSE,
 			(boolean)TEST_FLAG(
 				shader_environment->environment.flags,
-				_shader_environment_true_atmospheric_fog_bit));
+				_shader_environment_true_atmospheric_fog_bit) &&
+				!rasterizer_models_port_fog_by_host()); /* port: (above) */
 
 		IDirect3DDevice8_SetRenderState(
 			global_d3d_device,
@@ -2049,6 +2064,8 @@ void _rasterizer_model_draw(
 					if (local_planar_fog_flag)
 					{
 						vertex_shader_permutation =
+							rasterizer_models_port_fog_by_host() ? /* port: (above) */
+							_model_vertex_shader_permutation_lights :
 							_model_vertex_shader_permutation_planar_fog;
 					}
 					else if (local_parameters->lighting.point_light_count>0)
@@ -2219,6 +2236,7 @@ void _rasterizer_model_draw(
 					global_window_parameters.fog.planar_maximum_depth>0.0f);
 
 				if (rasterizer_debug_options.draw_environment_fog &&
+					!rasterizer_models_port_fog_by_host() && /* port: (above) */
 					!TEST_FLAG(
 						local_parameters->geometry_flags,
 						_rasterizer_geometry_no_fog_bit))
@@ -2362,7 +2380,8 @@ void _rasterizer_model_draw(
 						_shader_model_detail_after_reflection_bit),
 					(boolean)TEST_FLAG(
 						shader_model->model.flags,
-						_shader_model_true_atmospheric_fog_bit));
+						_shader_model_true_atmospheric_fog_bit) &&
+						!rasterizer_models_port_fog_by_host()); /* port: (above) */
 				/* port: display.hdr: the self-illumination, which combiner
 				stage 1 adds to the light (its constant), glows past paper
 				white (port/linux/src/xgpu_hdr.h) */

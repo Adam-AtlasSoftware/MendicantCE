@@ -38,7 +38,7 @@ port/linux/README.md.
 #include <stdint.h>
 
 #define XGPU_STREAM_MAGIC 0x53504758u /* "XGPS" */
-#define XGPU_STREAM_VERSION 34
+#define XGPU_STREAM_VERSION 35
 #define XGPU_STREAM_LOADING_ART_BYTES (640u * 480u * 4u)
 
 /* ---------- the ring
@@ -310,8 +310,9 @@ enum
 	/* PRISM v4's scene records (below; docs/prism_scene_records.md): sent
 	only in the v4 modes. M1 sends SCENE_MATERIAL (each shader of the map,
 	once, before its first G-buffer pass) and GBUFFER_DRAW (the material and
-	instance of the G-buffer pass's draws that follow); the host takes the
-	others' sizes and nothing more yet */
+	instance of the G-buffer pass's draws that follow), and the scene's
+	geometry, lights, instances, view, fog and decals; the host takes
+	SCENE_MATERIAL_ANIMATE's size and nothing more yet */
 	XGPU_STREAM_SCENE_MATERIAL,
 	XGPU_STREAM_SCENE_MATERIAL_ANIMATE,
 	XGPU_STREAM_SCENE_INSTANCE,
@@ -2129,11 +2130,12 @@ geometry once for every consumer, the lights, the decals and the fog. They
 are sent only in the v4 modes (display.lighting "ce_deferred" now; "raster"
 and "pathtraced" to come); with "ce" (the default, Classic and Enhanced)
 none is ever written, so those frames stay byte for byte as they were. Their
-types are in the list above (XGPU_STREAM_VERSION 34) and the host's decoder
+types are in the list above (XGPU_STREAM_VERSION 35) and the host's decoder
 takes every one; M1 sends SCENE_MATERIAL and GBUFFER_DRAW (the guest's
 xgpu_backend_scene_material and _gbuffer_draw) and SCENE_STATIC (also with
-display.prism_rt on: the traced level is its), the others are specified and
-taken, not sent yet. port/linux/src/xgpu_scene_encode.c fills each from
+display.prism_rt on: the traced level is its), SCENE_LIGHTS, SCENE_INSTANCE,
+SCENE_VIEW, SCENE_FOG and SCENE_DECAL; SCENE_MATERIAL_ANIMATE is specified
+and taken, not sent yet. port/linux/src/xgpu_scene_encode.c fills each from
 typed values (tools/test_scene_records.py checks the layouts and the
 encoders).
 
@@ -2451,14 +2453,19 @@ struct xgpu_stream_scene_lights
 	struct xgpu_stream_scene_light lights[XGPU_SCENE_LIGHTS];
 };
 
-/* SCENE_DECAL: each live decal, projected into the G-buffer (design
-section 1.7): its id (stable while it lives), its bitmap's texture id and
-the bitmap's sequence frame, its blend (XGPU_SCENE_DECAL_BLEND_*, CE's
-framebuffer blend functions in their order), its flags
-(XGPU_SCENE_DECAL_FLAG_*), its box (the centre and three axes, each
-scaled by its half extent: across, up, and out of the surface), its colour
-(linear rgb and alpha) and its texture coordinates' rectangle in the bitmap
-(u0 v0 u1 v1) */
+/* SCENE_DECAL: each live decal of the level, projected into the G-buffer
+(design section 1.7) in its draw's place in display.lighting's v4 modes
+(port/linux/game/prism_deferred.c; not the water's layer), into the target
+the window's draws go to then (its layer's: the base colour, or the light):
+its id (stable while it lives), its bitmap's texture (the guest address of
+its Direct3D header, as SET_TEXTURES' resource) and the bitmap's sequence
+frame (0), its blend (XGPU_SCENE_DECAL_BLEND_*, CE's framebuffer blend
+functions in their order), its flags (XGPU_SCENE_DECAL_FLAG_*), its box (the
+centre and three axes, each scaled by its half extent: across, up, and out
+of the surface), its colour (CE's vertex colour: red, green, blue, and its
+intensity, the decal's fade by its colour's alpha) and its texture
+coordinates' rectangle in the bitmap (u0 v0 u1 v1: its sprite's, across and
+up the box) */
 enum
 {
 	XGPU_SCENE_DECAL_BLEND_ALPHA,
@@ -2475,6 +2482,11 @@ enum
 {
 	XGPU_SCENE_DECAL_FLAG_EMISSIVE = 1,
 	XGPU_SCENE_DECAL_FLAG_NORMAL = 2,
+	/* its layer is alpha tested (CE's: drawn where its alpha is more than
+	127 of 255; not sent yet: CE's texture pass leaves out the pixels under
+	those decals by the stencil their draws write, which the host's
+	projection does not, so the game draws that layer itself) */
+	XGPU_SCENE_DECAL_FLAG_ALPHA_TESTED = 4,
 };
 struct xgpu_stream_scene_decal
 {
@@ -2486,20 +2498,43 @@ struct xgpu_stream_scene_decal
 	float rectangle[4];
 };
 
-/* SCENE_FOG: each frame, the fog as a screen pass over the G-buffer's
-depth (design section 1.7): the camera's cluster's atmospheric fog (its
-colour, linear, and maximum density; its start and opaque distances, then
-0s), and the fog planes seen (count of XGPU_SCENE_FOG_PLANES): each its id
-(the BSP's fog plane index), flags (XGPU_SCENE_FOG_FLAG_*), the plane (a
-unit normal out of the fog and its distance: n . p = d), its colour and
-maximum density, and its shape (opaque distance, opaque depth, then 0s).
-Eight is more than any CE cluster sees at once. */
+/* SCENE_FOG (display.lighting's v4 modes: port/linux/game/prism_deferred.c):
+the window's fog as screen passes over its G-buffer's depth (design section
+1.7), in place of the level drawn again for its fog, the objects' fog in
+their own draws and the fog screen's draws of the level and the objects
+over again. Each opaque pixel takes the fog CE gives its surface: the
+level's as CE's fog pass drew it over the level (its density tables'
+curves), an object's as its draws' combiners had it (the vertex programs'
+curves), at the pixel's own distance and depth. Sent at most twice a
+window. Without XGPU_SCENE_FOG_FLAG_SCREEN: the fog itself, after the
+resolve and before the transparent geometry (CE's fog pass's place), into
+the window's colour target. With it: the fog screen's density, written into
+the colour target's alpha for its layers' pass after it to read (where CE's
+fog screen drew the level and its models into the alpha), and nothing else.
+The atmosphere: its colour (CE's, as the sky or fog tag has it: the frame's
+own encoding, as CE's combiners blend it) and maximum density; its range:
+the distance along the view's axis where it begins and where it is whole,
+then the eye's share of it (CE's atmospheric eye density: 1 where the
+camera is high over the planes' fog or the atmosphere dominates, 0 down in
+it), 0. The fog screen: its near and far distances and its near density
+over its far, 0. The planes (plane_count of XGPU_SCENE_FOG_PLANES; CE draws
+one, the camera's cluster's): each its id (the fog palette entry's, + 1),
+flags (XGPU_SCENE_FOG_FLAG_INSIDE), the plane (a unit normal out of the fog
+and its distance: n . p = d), its colour and maximum density, and its shape
+(its opaque distance along the view's axis, its opaque depth, the eye's
+depth in it over the opaque depth (0 to 1: CE's planar eye density), 0). */
 #define XGPU_SCENE_FOG_PLANES 8u
 enum
 {
 	XGPU_SCENE_FOG_FLAG_ATMOSPHERE = 1,
 	/* the camera is under the plane */
 	XGPU_SCENE_FOG_FLAG_INSIDE = 2,
+	/* the fog screen's density (the record's own flags), into the level's
+	pixels and into the objects' (CE's fog screen's environment and model
+	passes); the rest none: its layers whole there */
+	XGPU_SCENE_FOG_FLAG_SCREEN = 4,
+	XGPU_SCENE_FOG_FLAG_SCREEN_LEVEL = 8,
+	XGPU_SCENE_FOG_FLAG_SCREEN_OBJECTS = 16,
 };
 struct xgpu_stream_scene_fog_plane
 {
@@ -2514,6 +2549,7 @@ struct xgpu_stream_scene_fog
 	uint32_t flags, plane_count, pad;
 	float atmosphere_color[4];
 	float atmosphere_range[4];
+	float screen[4];
 	struct xgpu_stream_scene_fog_plane planes[XGPU_SCENE_FOG_PLANES];
 };
 
@@ -2727,7 +2763,7 @@ XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_scene_light, 80);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_scene_lights, 16 + XGPU_SCENE_LIGHTS * 80);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_scene_decal, 120);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_scene_fog_plane, 64);
-XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_scene_fog, 48 + XGPU_SCENE_FOG_PLANES * 64);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_scene_fog, 64 + XGPU_SCENE_FOG_PLANES * 64);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_scene_view, 16 + 128 + 32);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_prism_bake, 80 + XGPU_BAKE_NAME);
 /* (the scene records' types still fit the header's 8 bits) */

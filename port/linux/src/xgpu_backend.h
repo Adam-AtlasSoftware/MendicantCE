@@ -179,6 +179,17 @@ void xgpu_backend_scene_lights(unsigned long first, unsigned long total, const v
 this frame's and last (the record whole, its header written here) */
 struct xgpu_stream_scene_view;
 void xgpu_backend_scene_view(const struct xgpu_stream_scene_view *view);
+/* SCENE_FOG (xgpu_stream.h): the window's fog as screen passes over its
+G-buffer, or with XGPU_SCENE_FOG_FLAG_SCREEN its fog screen's density into
+the colour target's alpha: the bytes of a struct xgpu_stream_scene_fog but
+its header, as many planes as its plane_count says (at most
+XGPU_SCENE_FOG_PLANES taken; port/linux/game/prism_deferred.c) */
+void xgpu_backend_scene_fog(const void *fog);
+/* SCENE_DECAL (xgpu_stream.h): a decal projected into the G-buffer's base
+colour, or the light, by the target the window's draws go to now: the bytes
+of a struct xgpu_stream_scene_decal but its header
+(port/linux/game/prism_decals.c) */
+void xgpu_backend_scene_decal(const void *decal);
 /* PRISM_BAKE (xgpu_stream.h; port/linux/game/prism_bake.c): the record
 whole but its data (its phase, counts and fields as the guest filled them;
 header, data and size written here), and size bytes of data carried with it

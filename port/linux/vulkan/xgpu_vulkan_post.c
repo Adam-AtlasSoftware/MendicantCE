@@ -58,6 +58,7 @@ is drawn into an image of its own first, and only where the setting is not
 #include "../src/xgpu_hdr.h"
 #include "../src/xgpu_stream.h"
 
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -82,8 +83,9 @@ static struct
 	/* SMAA's lookup textures */
 	struct xgpu_vulkan_image *area, *search;
 	/* linear and clamped, as FXAA and SMAA sample; nearest, for the G-buffer's
-	words (integers: fetched, never filtered) */
-	VkSampler sampler, nearest;
+	words (integers: fetched, never filtered); and linear between the levels
+	too, the projected decals' bitmaps' */
+	VkSampler sampler, nearest, levels;
 	/* the present step's turn: its pipeline (made at the start, never
 	while a map is prepared), whether it cannot be, and the turned frame */
 	VkPipeline rotate;
@@ -195,7 +197,10 @@ static int sampler_make(void)
 	post.sampler = xgpu_vulkan_sampler(&sampler);
 	sampler.minify = sampler.magnify = XGPU_VULKAN_FILTER_POINT;
 	post.nearest = xgpu_vulkan_sampler(&sampler);
-	return post.sampler != VK_NULL_HANDLE && post.nearest != VK_NULL_HANDLE;
+	sampler.minify = sampler.magnify = XGPU_VULKAN_FILTER_LINEAR;
+	sampler.mip = XGPU_VULKAN_MIP_LINEAR;
+	post.levels = xgpu_vulkan_sampler(&sampler);
+	return post.sampler != VK_NULL_HANDLE && post.nearest != VK_NULL_HANDLE && post.levels != VK_NULL_HANDLE;
 }
 
 static int prepare_failed(int smaa, const char *what)
@@ -527,6 +532,332 @@ int xgpu_vulkan_post_deferred_resolve(struct xgpu_vulkan_image *target, struct x
 	pass_draw(XGPU_VULKAN_POST_DEFERRED_RESOLVE, target, 0, rectangle, light ? light : post.color, base,
 		view == 8 && depth ? depth : additions, bounds);
 	post.gbuffer = NULL;
+	return 1;
+}
+
+/* ---------- display.lighting's v4 fog (xgpu_vulkan_stream.c's SCENE_FOG)
+
+The window's fog as a pass over its G-buffer (DEFERRED_FOG; xgpu_stream.h's
+SCENE_FOG), in place of CE's fog drawn over the level again and in the
+objects' own draws: each opaque pixel's fog found from its distance and
+blended into the target as CE's fog pass blends it (one, and one less the
+source's alpha; the colour alone), or the fog screen's density written into
+the target's alpha alone. Its words and its second target's fetched, never
+filtered. */
+
+int xgpu_vulkan_post_fog(struct xgpu_vulkan_image *target, struct xgpu_vulkan_image *words,
+	struct xgpu_vulkan_image *extras, const struct xgpu_stream_scene_view *view,
+	const struct xgpu_stream_scene_fog *fog)
+{
+	const struct xgpu_vulkan_image_description *description;
+	struct xgpu_vulkan_pipeline_description pipeline;
+	struct xgpu_vulkan_post_uniforms *uniforms;
+	struct xgpu_vulkan_dynamic_state dynamic;
+	struct xgpu_vulkan_draw draw;
+	int screen, stage, axis;
+
+	if (!target || !words || !extras || !view || !fog)
+		return 0;
+	screen = (fog->flags & XGPU_SCENE_FOG_FLAG_SCREEN) != 0;
+	description = xgpu_vulkan_image_description(target);
+	if ((description->format != XGPU_VULKAN_FORMAT_BGRA8 && description->format != XGPU_VULKAN_FORMAT_RGBA16F) ||
+		description->samples > 1)
+		return 0;
+	if (!post.vertex)
+		post.vertex = xgpu_vulkan_shader(xgpu_vulkan_post_vertex.words, xgpu_vulkan_post_vertex.count);
+	if (!post.pixel[XGPU_VULKAN_POST_DEFERRED_FOG])
+		post.pixel[XGPU_VULKAN_POST_DEFERRED_FOG] = xgpu_vulkan_shader(
+			xgpu_vulkan_post_programs[XGPU_VULKAN_POST_DEFERRED_FOG].words,
+			xgpu_vulkan_post_programs[XGPU_VULKAN_POST_DEFERRED_FOG].count);
+	if (!post.vertex || !post.pixel[XGPU_VULKAN_POST_DEFERRED_FOG] || !sampler_make())
+		return 0;
+	memset(&pipeline, 0, sizeof(pipeline));
+	pipeline.vertex_shader = post.vertex;
+	pipeline.pixel_shader = post.pixel[XGPU_VULKAN_POST_DEFERRED_FOG];
+	pipeline.primitive_class = XGPU_VULKAN_CLASS_TRIANGLES;
+	pipeline.color_format = description->format;
+	pipeline.samples = 1;
+	if (screen)
+		pipeline.color_mask = 8;
+	else
+	{
+		/* (one, and one less the source's alpha: xgpu_vulkan.c's factors 1
+		and 5) */
+		pipeline.color_mask = 7;
+		pipeline.blend = 1;
+		pipeline.blend_source = 1;
+		pipeline.blend_destination = 5;
+	}
+	memset(&draw, 0, sizeof(draw));
+	draw.pipeline = xgpu_vulkan_pipeline(&pipeline);
+	if (!draw.pipeline)
+		return 0;
+	for (stage = 0; stage < 4; stage++)
+	{
+		draw.textures[stage].image = stage == 2 ? extras : stage == 3 ? words : NULL;
+		draw.textures[stage].kind = XGPU_VULKAN_IMAGE_2D;
+		draw.textures[stage].sampler = post.nearest;
+	}
+	uniforms = xgpu_vulkan_upload(UNIFORMS_RANGE, 256, &draw.uniforms);
+	if (!uniforms)
+		return 0;
+	memset(uniforms, 0, sizeof(*uniforms));
+	uniforms->metrics[0] = 1.0f / (float)description->width;
+	uniforms->metrics[1] = 1.0f / (float)description->height;
+	uniforms->metrics[2] = (float)description->width;
+	uniforms->metrics[3] = (float)description->height;
+	for (axis = 0; axis < 3; axis++)
+	{
+		uniforms->camera_eye[axis] = view->now[0][axis];
+		uniforms->camera_axis[axis] = view->now[1][axis];
+		uniforms->camera_x[axis] = view->now[2][axis];
+		uniforms->camera_y[axis] = view->now[3][axis];
+	}
+	for (axis = 0; axis < 4; axis++)
+		uniforms->view_corners[axis] = (float)view->corners[axis];
+	memcpy(uniforms->fog_atmosphere, fog->atmosphere_color, sizeof(uniforms->fog_atmosphere));
+	uniforms->fog_range[0] = fog->atmosphere_range[0];
+	/* (a range of none: one so small that the atmosphere is whole past its
+	start, as CE's tables saturate) */
+	uniforms->fog_range[1] = fog->atmosphere_range[1] > fog->atmosphere_range[0] ? fog->atmosphere_range[1] :
+		fog->atmosphere_range[0] + 1.0e-6f;
+	uniforms->fog_range[2] = fog->atmosphere_range[2];
+	uniforms->fog_range[3] = screen ? 1.0f : 0.0f;
+	if (fog->plane_count)
+	{
+		memcpy(uniforms->fog_plane, fog->planes[0].plane, sizeof(uniforms->fog_plane));
+		memcpy(uniforms->fog_planar, fog->planes[0].color, sizeof(uniforms->fog_planar));
+		memcpy(uniforms->fog_shape, fog->planes[0].shape, sizeof(uniforms->fog_shape));
+	}
+	/* (no plane: its density none, its shape any that divides) */
+	if (!fog->plane_count || !(uniforms->fog_shape[0] > 0.0f) || !(uniforms->fog_shape[1] > 0.0f))
+	{
+		uniforms->fog_planar[3] = 0.0f;
+		uniforms->fog_shape[0] = uniforms->fog_shape[1] = 1.0f;
+		uniforms->fog_plane[2] = 1.0f;
+	}
+	uniforms->fog_shape[3] = (float)(((fog->flags & XGPU_SCENE_FOG_FLAG_SCREEN_LEVEL) ? 1 : 0) |
+		((fog->flags & XGPU_SCENE_FOG_FLAG_SCREEN_OBJECTS) ? 2 : 0));
+	uniforms->fog_screen[0] = fog->screen[0];
+	uniforms->fog_screen[1] = fog->screen[1] > fog->screen[0] ? fog->screen[1] : fog->screen[0] + 1.0e-6f;
+	uniforms->fog_screen[2] = fog->screen[2];
+	draw.constants = draw.uniforms;
+	memset(&dynamic, 0, sizeof(dynamic));
+	dynamic.viewport[2] = dynamic.scissor[2] = (int32_t)description->width;
+	dynamic.viewport[3] = dynamic.scissor[3] = (int32_t)description->height;
+	dynamic.depth_range[1] = 1.0f;
+	draw.dynamic = &dynamic;
+	draw.topology = XGPU_VULKAN_TOPOLOGY_TRIANGLES;
+	draw.count = 3;
+	xgpu_vulkan_set_target_views(target, NULL, 0, 1);
+	xgpu_vulkan_draw(&draw);
+	return 1;
+}
+
+/* ---------- display.lighting's v4 projected decals (xgpu_vulkan_stream.c's
+SCENE_DECAL)
+
+A decal projected by its box onto the level's pixels of the window's
+G-buffer (DEFERRED_DECAL), over the rectangle of the screen the box covers,
+into the target the window's draws go to (the base colour, or the light),
+blended by CE's framebuffer blend function as its decal draws are: the
+pipeline's factors and operation (xgpu_vulkan.c's numbers), and the
+channels its draws write (every one where they multiply, else the colour). */
+
+static const uint8_t decal_blends[XGPU_SCENE_DECAL_BLENDS][4] =
+{
+	/* source, destination, operation, channels */
+	{ 4, 5, 0, 7 },     /* alpha: source alpha, one less it */
+	{ 8, 0, 0, 15 },    /* multiply: destination colour, zero */
+	{ 8, 2, 0, 15 },    /* double multiply: destination colour, source colour */
+	{ 1, 1, 0, 7 },     /* add */
+	{ 1, 1, 2, 7 },     /* subtract: the destination less the source */
+	{ 1, 1, 3, 7 },     /* min */
+	{ 1, 1, 4, 7 },     /* max */
+	{ 1, 5, 0, 7 },     /* alpha multiply add: one, one less source alpha */
+};
+
+int xgpu_vulkan_post_decal(struct xgpu_vulkan_image *target, struct xgpu_vulkan_image *bitmap,
+	struct xgpu_vulkan_image *words, struct xgpu_vulkan_image *extras, const struct xgpu_stream_scene_view *view,
+	const struct xgpu_stream_scene_decal *decal)
+{
+	const struct xgpu_vulkan_image_description *description;
+	struct xgpu_vulkan_pipeline_description pipeline;
+	struct xgpu_vulkan_post_uniforms *uniforms;
+	struct xgpu_vulkan_dynamic_state dynamic;
+	struct xgpu_vulkan_draw draw;
+	double axis2 = 0.0, x2 = 0.0, y2 = 0.0, left, top, width, height, box[4];
+	int stage, axis, corner, whole = 0;
+
+	if (!target || !bitmap || !words || !extras || !view || !decal || decal->blend >= XGPU_SCENE_DECAL_BLENDS)
+		return 0;
+	description = xgpu_vulkan_image_description(target);
+	if ((description->format != XGPU_VULKAN_FORMAT_BGRA8 && description->format != XGPU_VULKAN_FORMAT_RGBA16F) ||
+		description->samples > 1)
+		return 0;
+	/* the rectangle of the screen the box covers: its corners as the camera
+	sees them (the whole view where one is not in front of it), a pixel
+	wider, inside the view */
+	left = view->corners[0];
+	top = view->corners[1];
+	width = view->corners[2] - left;
+	height = view->corners[3] - top;
+	if (!(width > 0.0) || !(height > 0.0))
+		return 0;
+	for (axis = 0; axis < 3; axis++)
+	{
+		axis2 += (double)view->now[1][axis] * view->now[1][axis];
+		x2 += (double)view->now[2][axis] * view->now[2][axis];
+		y2 += (double)view->now[3][axis] * view->now[3][axis];
+	}
+	if (!(axis2 > 1.0e-12) || !(x2 > 1.0e-12) || !(y2 > 1.0e-12))
+		return 0;
+	box[0] = box[1] = 1.0e30;
+	box[2] = box[3] = -1.0e30;
+	for (corner = 0; corner < 8 && !whole; corner++)
+	{
+		double point[3], along = 0.0, across = 0.0, down = 0.0;
+
+		for (axis = 0; axis < 3; axis++)
+		{
+			point[axis] = (double)decal->centre[axis] - view->now[0][axis] +
+				(corner & 1 ? 1.0 : -1.0) * decal->axes[0][axis] + (corner & 2 ? 1.0 : -1.0) * decal->axes[1][axis] +
+				(corner & 4 ? 1.0 : -1.0) * decal->axes[2][axis];
+			along += point[axis] * view->now[1][axis];
+			across += point[axis] * view->now[2][axis];
+			down += point[axis] * view->now[3][axis];
+		}
+		along /= axis2;
+		if (!(along > 1.0e-3))
+		{
+			whole = 1;
+			break;
+		}
+		across = across / x2 / along;
+		down = down / y2 / along;
+		box[0] = across < box[0] ? across : box[0];
+		box[1] = down < box[1] ? down : box[1];
+		box[2] = across > box[2] ? across : box[2];
+		box[3] = down > box[3] ? down : box[3];
+	}
+	{
+		int32_t rectangle[4];
+
+		if (whole)
+		{
+			rectangle[0] = view->corners[0];
+			rectangle[1] = view->corners[1];
+			rectangle[2] = view->corners[2];
+			rectangle[3] = view->corners[3];
+		}
+		else
+		{
+			double x0 = left + (box[0] + 1.0) * 0.5 * width - 1.0, y0 = top + (box[1] + 1.0) * 0.5 * height - 1.0;
+			double x1 = left + (box[2] + 1.0) * 0.5 * width + 1.0, y1 = top + (box[3] + 1.0) * 0.5 * height + 1.0;
+
+			rectangle[0] = (int32_t)(x0 < left ? left : x0 > view->corners[2] ? view->corners[2] : x0);
+			rectangle[1] = (int32_t)(y0 < top ? top : y0 > view->corners[3] ? view->corners[3] : y0);
+			rectangle[2] = (int32_t)(x1 < left ? left : x1 > view->corners[2] ? view->corners[2] : x1 + 1.0);
+			rectangle[3] = (int32_t)(y1 < top ? top : y1 > view->corners[3] ? view->corners[3] : y1 + 1.0);
+		}
+		if (rectangle[0] < 0)
+			rectangle[0] = 0;
+		if (rectangle[1] < 0)
+			rectangle[1] = 0;
+		if (rectangle[2] > (int32_t)description->width)
+			rectangle[2] = (int32_t)description->width;
+		if (rectangle[3] > (int32_t)description->height)
+			rectangle[3] = (int32_t)description->height;
+		if (rectangle[2] <= rectangle[0] || rectangle[3] <= rectangle[1])
+			return 1;
+		if (!post.vertex)
+			post.vertex = xgpu_vulkan_shader(xgpu_vulkan_post_vertex.words, xgpu_vulkan_post_vertex.count);
+		if (!post.pixel[XGPU_VULKAN_POST_DEFERRED_DECAL])
+			post.pixel[XGPU_VULKAN_POST_DEFERRED_DECAL] = xgpu_vulkan_shader(
+				xgpu_vulkan_post_programs[XGPU_VULKAN_POST_DEFERRED_DECAL].words,
+				xgpu_vulkan_post_programs[XGPU_VULKAN_POST_DEFERRED_DECAL].count);
+		if (!post.vertex || !post.pixel[XGPU_VULKAN_POST_DEFERRED_DECAL] || !sampler_make())
+			return 0;
+		memset(&pipeline, 0, sizeof(pipeline));
+		pipeline.vertex_shader = post.vertex;
+		pipeline.pixel_shader = post.pixel[XGPU_VULKAN_POST_DEFERRED_DECAL];
+		pipeline.primitive_class = XGPU_VULKAN_CLASS_TRIANGLES;
+		pipeline.color_format = description->format;
+		pipeline.samples = 1;
+		pipeline.blend = 1;
+		pipeline.blend_source = decal_blends[decal->blend][0];
+		pipeline.blend_destination = decal_blends[decal->blend][1];
+		pipeline.blend_operation = decal_blends[decal->blend][2];
+		pipeline.color_mask = decal_blends[decal->blend][3];
+		memset(&draw, 0, sizeof(draw));
+		draw.pipeline = xgpu_vulkan_pipeline(&pipeline);
+		if (!draw.pipeline)
+			return 0;
+		for (stage = 0; stage < 4; stage++)
+		{
+			draw.textures[stage].image = stage == 0 ? bitmap : stage == 2 ? extras : stage == 3 ? words : NULL;
+			draw.textures[stage].kind = XGPU_VULKAN_IMAGE_2D;
+			draw.textures[stage].sampler = stage == 0 ? post.levels : post.nearest;
+		}
+		uniforms = xgpu_vulkan_upload(UNIFORMS_RANGE, 256, &draw.uniforms);
+		if (!uniforms)
+			return 0;
+		memset(uniforms, 0, sizeof(*uniforms));
+		uniforms->metrics[0] = 1.0f / (float)description->width;
+		uniforms->metrics[1] = 1.0f / (float)description->height;
+		uniforms->metrics[2] = (float)description->width;
+		uniforms->metrics[3] = (float)description->height;
+		for (axis = 0; axis < 3; axis++)
+		{
+			uniforms->camera_eye[axis] = view->now[0][axis];
+			uniforms->camera_axis[axis] = view->now[1][axis];
+			uniforms->camera_x[axis] = view->now[2][axis];
+			uniforms->camera_y[axis] = view->now[3][axis];
+		}
+		for (axis = 0; axis < 4; axis++)
+			uniforms->view_corners[axis] = (float)view->corners[axis];
+		{
+			double lengths[3];
+			int which;
+
+			for (which = 0; which < 3; which++)
+			{
+				lengths[which] = 0.0;
+				for (axis = 0; axis < 3; axis++)
+					lengths[which] += (double)decal->axes[which][axis] * decal->axes[which][axis];
+				if (!(lengths[which] > 1.0e-12))
+					return 1;
+			}
+			for (axis = 0; axis < 3; axis++)
+			{
+				uniforms->decal_centre[axis] = decal->centre[axis];
+				uniforms->decal_x[axis] = (float)(decal->axes[0][axis] / lengths[0]);
+				uniforms->decal_y[axis] = (float)(decal->axes[1][axis] / lengths[1]);
+				uniforms->decal_z[axis] = (float)(decal->axes[2][axis] / lengths[2]);
+			}
+			uniforms->decal_centre[3] = (float)decal->blend;
+			uniforms->decal_x[3] = (decal->flags & XGPU_SCENE_DECAL_FLAG_ALPHA_TESTED) ? 1.0f : 0.0f;
+			memcpy(uniforms->decal_color, decal->color, sizeof(uniforms->decal_color));
+			memcpy(uniforms->decal_rectangle, decal->rectangle, sizeof(uniforms->decal_rectangle));
+			/* (a texel across the box: its width over the sprite's texels; a
+			pixel at a unit's distance: the view's width there over its pixels) */
+			uniforms->decal_lod[0] = (float)(2.0 * sqrt(lengths[0]) / ((double)xgpu_vulkan_image_description(bitmap)->width *
+				fabs((double)decal->rectangle[2] - decal->rectangle[0]) + 1.0e-6));
+			uniforms->decal_lod[2] = (float)(2.0 * sqrt(x2) / width);
+		}
+		draw.constants = draw.uniforms;
+		memset(&dynamic, 0, sizeof(dynamic));
+		dynamic.viewport[0] = dynamic.scissor[0] = rectangle[0];
+		dynamic.viewport[1] = dynamic.scissor[1] = rectangle[1];
+		dynamic.viewport[2] = dynamic.scissor[2] = rectangle[2] - rectangle[0];
+		dynamic.viewport[3] = dynamic.scissor[3] = rectangle[3] - rectangle[1];
+		dynamic.depth_range[1] = 1.0f;
+		draw.dynamic = &dynamic;
+		draw.topology = XGPU_VULKAN_TOPOLOGY_TRIANGLES;
+		draw.count = 3;
+		xgpu_vulkan_set_target_views(target, NULL, 0, 1);
+		xgpu_vulkan_draw(&draw);
+	}
 	return 1;
 }
 

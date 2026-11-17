@@ -105,6 +105,7 @@ static void layout(void)
 	FIELD(xgpu_stream_scene_fog, pad);
 	FIELD(xgpu_stream_scene_fog, atmosphere_color);
 	FIELD(xgpu_stream_scene_fog, atmosphere_range);
+	FIELD(xgpu_stream_scene_fog, screen);
 	FIELD(xgpu_stream_scene_fog, planes);
 	SIZE(xgpu_stream_scene_view);
 	FIELD(xgpu_stream_scene_view, header);
@@ -162,7 +163,7 @@ static void encode(void)
 	struct xgpu_stream_scene_fog_plane planes[10];
 	float centre[3] = { 1.0f, 2.0f, 3.0f }, axes[3][3] = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 0.5f } };
 	float color[4] = { 1.0f, 0.5f, 0.25f, 0.75f }, rectangle[4] = { 0.0f, 0.0f, 0.5f, 0.5f };
-	float fog_color[4] = { 0.1f, 0.2f, 0.3f, 0.9f }, fog_range[2] = { 10.0f, 200.0f };
+	float fog_color[4] = { 0.1f, 0.2f, 0.3f, 0.9f }, fog_range[3] = { 10.0f, 200.0f, 0.25f }, fog_screen[3] = { 2.0f, 40.0f, 0.5f };
 	float atlas[6] = { 0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f }, base[6] = { 1, 2, 3, 4, 5, 6 };
 	uint32_t words[XGPU_SCENE_STATIC_ATTRIBUTE_WORDS];
 
@@ -276,8 +277,8 @@ static void encode(void)
 	}
 	planes[1].plane[2] = 0.0f;
 	show("fog", xgpu_scene_encode_fog(buffer, sizeof(buffer), XGPU_SCENE_FOG_FLAG_ATMOSPHERE, fog_color, fog_range,
-		planes, 3));
-	size = xgpu_scene_encode_fog(buffer, sizeof(buffer), 0, NULL, NULL, planes, 10);
+		fog_screen, planes, 3));
+	size = xgpu_scene_encode_fog(buffer, sizeof(buffer), 0, NULL, NULL, NULL, planes, 10);
 	printf("fog_many %u %u\n", (unsigned)size, (unsigned)((struct xgpu_stream_scene_fog *)buffer)->plane_count);
 }
 

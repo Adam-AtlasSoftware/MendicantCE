@@ -140,6 +140,7 @@ symbols in this file:
 #include "render/render.h"
 #include "view_fov.h" /* port: port/linux/game/view_fov.c */
 #include "mods.h" /* port: port/linux/game/mod_meshes.c */
+#include "prism_deferred.h" /* port: port/linux/game/prism_deferred.c */
 #include "shaders/shader_definitions.h"
 #include "shaders/shaders.h"
 #include <stddef.h>
@@ -1325,6 +1326,20 @@ void _rasterizer_environment_fog_screen_begin(
 				_fog_screen_no_model_multipass_bit) &&
 				opaque_model_count > 0;
 		}
+		/* port: display.lighting's v4 modes (render_prism_deferred_window):
+		the density the layers are drawn by is the host's, from the G-buffer's
+		depth (port/linux/game/prism_deferred.c), written into the alpha in
+		the second pass's place; no level nor model drawn for it, nothing
+		cleared */
+		if ((local_environment_fog_screen_flag || local_environment_fog_screen_model_flag) &&
+			render_prism_deferred_window)
+		{
+			if (pass != 0)
+				prism_deferred_fog_screen(screen->near_distance, screen->far_distance,
+					screen->near_density / screen->far_density, local_environment_fog_screen_flag,
+					local_environment_fog_screen_model_flag);
+		}
+		else
 		if (local_environment_fog_screen_flag || local_environment_fog_screen_model_flag)
 		{
 			boolean success;
@@ -1588,7 +1603,8 @@ void _rasterizer_environment_fog_screen_draw(
 			"c:\\halo\\SOURCE\\rasterizer\\xbox\\rasterizer_xbox_environment_fog.c",
 			992,
 			local_fog_pass==0 || local_fog_pass==1);
-		if (local_environment_fog_screen_flag)
+		/* port: (not in display.lighting's v4 modes: _rasterizer_environment_fog_screen_begin) */
+		if (local_environment_fog_screen_flag && !render_prism_deferred_window)
 		{
 			match_assert(
 				"c:\\halo\\SOURCE\\rasterizer\\xbox\\rasterizer_xbox_environment_fog.c",

@@ -109,6 +109,10 @@ struct host_render_backend
 	/* SCENE_INSTANCE (its nodes checked to lie in the record) and SCENE_VIEW */
 	void (*scene_instance)(void *context, const struct xgpu_stream_scene_instance *record);
 	void (*scene_view)(void *context, const struct xgpu_stream_scene_view *record);
+	/* SCENE_FOG (its planes checked to lie in the record) and SCENE_DECAL
+	(its blend one of XGPU_SCENE_DECAL_BLEND_*) */
+	void (*scene_fog)(void *context, const struct xgpu_stream_scene_fog *record);
+	void (*scene_decal)(void *context, const struct xgpu_stream_scene_decal *record);
 	/* PRISM_BAKE: data its phase's (NULL none), checked to lie in the stream */
 	void (*prism_bake)(void *context, const struct xgpu_stream_prism_bake *record, const void *data);
 	/* display.panini: a 3D view drawn again through the Panini projection

@@ -140,6 +140,11 @@ symbols in this file:
 #include "rasterizer/xbox/rasterizer_xbox_pixel_shader.h"
 #include "saved games/game_state.h"
 #include "cache/cache_files.h" /* port: (rasterizer_decals_port_enumerate) */
+#include "cache/texture_cache.h" /* port: (rasterizer_decal_port_projected) */
+#include "bitmaps/bitmap_group.h" /* port: (rasterizer_decal_port_projected) */
+#include "bitmaps/bitmap_group_lookup.h" /* port: (rasterizer_decal_port_projected) */
+#include "render/render.h" /* port: (rasterizer_decal_port_projected) */
+#include "prism_deferred.h" /* port: port/linux/game/prism_deferred.c */
 
 /* ---------- constants */
 
@@ -401,6 +406,38 @@ static long rasterizer_decals_draw_order(
 	}
 
 	return count;
+}
+
+/* port: display.lighting's v4 modes (render_prism_deferred_window): a decal
+of a layer on the level's opaque surfaces projected into the G-buffer's base
+colour or the light by its box (port/linux/game/prism_deferred.c), as its
+draw would blend it there, with its bitmap's texture (its own, read as the
+draw's stage reads it); FALSE where it is drawn as CE draws it: the water's
+layer, the alpha-tested layer (CE's texture pass leaves out the pixels under
+those decals by the stencil their draws write, which a projection does not),
+a decal with no projection kept for it or no texture */
+static boolean rasterizer_decal_port_projected(
+	long decal_index,
+	struct decal_datum const *decal,
+	struct decal_shader_definition const *shader,
+	unsigned long intensity)
+{
+	struct bitmap_group *bitmap_group;
+	struct bitmap_data *bitmap;
+	void *texture;
+
+	if (!render_prism_deferred_window || local_layer == _decal_layer_water ||
+		local_layer == _decal_layer_alpha_tested || shader->map.index == NONE)
+	{
+		return FALSE;
+	}
+	bitmap_group = bitmap_group_get(shader->map.index);
+	if (!bitmap_group || bitmap_group->bitmaps.count <= 0)
+		return FALSE;
+	bitmap = bitmap_group_try_and_get_bitmap(shader->map.index, (char)decal->bitmap_index % bitmap_group->bitmaps.count);
+	texture = bitmap ? _texture_cache_bitmap_get_hardware_format(bitmap, TRUE, TRUE) : NULL;
+	return texture && prism_deferred_decal(decal_index, (unsigned long)texture, shader->framebuffer_blend_function,
+		decal->color, intensity, FALSE);
 }
 
 /* ---------- public code */
@@ -847,6 +884,13 @@ void _rasterizer_decals_draw(
 		pixel32 color;
 		unsigned long intensity;
 
+		/* port: display.lighting's v4 modes: projected, not drawn
+		(rasterizer_decal_port_projected) */
+		if (rasterizer_decal_port_projected(decal_index, decal, shader,
+			(decal->intensity * (decal->color >> 24) + 127) >> 8))
+		{
+			continue;
+		}
 		if (local_framebuffer_blend_function != framebuffer_blend_function)
 		{
 			rasterizer_decals_blend_function_set(framebuffer_blend_function); /* port: (the run's state) */

@@ -271,7 +271,8 @@ uint32_t xgpu_scene_encode_decal(void *out, uint32_t room, uint32_t decal, uint3
 }
 
 uint32_t xgpu_scene_encode_fog(void *out, uint32_t room, uint32_t flags, const float atmosphere_color[4],
-	const float atmosphere_range[2], const struct xgpu_stream_scene_fog_plane *planes, uint32_t plane_count)
+	const float atmosphere_range[3], const float screen[3], const struct xgpu_stream_scene_fog_plane *planes,
+	uint32_t plane_count)
 {
 	struct xgpu_stream_scene_fog *record = out;
 	uint32_t kept = 0, index, size;
@@ -306,6 +307,8 @@ uint32_t xgpu_scene_encode_fog(void *out, uint32_t room, uint32_t flags, const f
 	if (atmosphere_color)
 		copy_floats(record->atmosphere_color, atmosphere_color, 4);
 	if (atmosphere_range)
-		copy_floats(record->atmosphere_range, atmosphere_range, 2);
+		copy_floats(record->atmosphere_range, atmosphere_range, 3);
+	if (screen)
+		copy_floats(record->screen, screen, 3);
 	return size;
 }

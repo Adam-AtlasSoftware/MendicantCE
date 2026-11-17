@@ -167,6 +167,8 @@ boolean render_world_ao_prepass = FALSE;
 boolean render_prism_shadow_pass = FALSE;
 /* port: display.lighting "ce_deferred"'s G-buffer pass (render.h) */
 boolean render_gbuffer_pass = FALSE;
+/* port: (render.h) */
+boolean render_prism_deferred_window = FALSE;
 /* port: port/linux/game/prism_shadows.c */
 boolean prism_shadows_wanted(void);
 #include "prism_deferred.h" /* port: port/linux/game/prism_deferred.c */
@@ -423,6 +425,7 @@ static void render_window(
 
 	profile_render_window_start(TRUE);
 	prism_deferred = FALSE; /* port: (below) */
+	render_prism_deferred_window = FALSE; /* port: (below) */
 	render.scene_index++;
 	memset(&parameters, 0, sizeof(parameters));
 
@@ -520,6 +523,11 @@ static void render_window(
 			!render_vr_eye_pass && !render_vr_scope_pass &&
 #endif
 			prism_deferred_wanted();
+		/* port: ... and its fog and decals the host's screen passes over the
+		G-buffer, where the host draws them: the objects' own fog left out from
+		here on, the G-buffer pass's draws' too (port/linux/game/
+		prism_deferred.c) */
+		render_prism_deferred_window = prism_deferred && prism_deferred_screen_passes();
 		if (prism_deferred)
 		{
 			prism_deferred_gbuffer_begin();
@@ -685,6 +693,12 @@ static void render_window(
 			prism_deferred_phase(_prism_deferred_resolve);
 		}
 		structure_render_transparent_geometry();
+		/* port: display.lighting's v4 modes: the fog a screen pass over the
+		G-buffer's depth, the level's and the objects' (port/linux/game/
+		prism_deferred.c), not the level drawn again for it */
+		if (render_prism_deferred_window)
+			prism_deferred_fog();
+		else
 		structure_render_fog();
 		game_engine_post_rasterize_objects();
 #ifdef HALO_VR
@@ -718,6 +732,7 @@ static void render_window(
 		/* port: the window's surfaces drawn: none read its sun's shadows
 		from here on (port/linux/game/prism_shadows.c) */
 		prism_shadows_window_end();
+		render_prism_deferred_window = FALSE; /* port: (above) */
 #ifdef HALO_VR
 		if (render_vr_scope_pass)
 		{

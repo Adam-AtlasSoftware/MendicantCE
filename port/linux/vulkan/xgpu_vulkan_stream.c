@@ -4991,6 +4991,49 @@ static void stream_gbuffer_phase(void *context, uint32_t value)
 	}
 }
 
+/* SCENE_FOG (display.lighting's v4 modes): the window's fog, or its fog
+screen's density, a pass over its G-buffer (xgpu_vulkan_post_fog) where it
+was drawn for this colour target; none after a view (debug.gbuffer_view) */
+static void stream_scene_fog(void *context, const struct xgpu_stream_scene_fog *record)
+{
+	struct stream_target *color = target_get(stream.color);
+
+	(void)context;
+	if (!color || stream.preparing || deferred.hold || !gbuffer.view_known || !gbuffer.drawn ||
+		gbuffer.color != stream.color || gbuffer.width != color->width || gbuffer.height != color->height ||
+		color->depth || color->layers > 1 || (stream.samples && color->multisampled))
+		return;
+	if (xgpu_vulkan_post_fog(color->image, gbuffer.words, gbuffer.extras, &gbuffer.view, record))
+		color->written++;
+	targets_bind();
+}
+
+/* SCENE_DECAL (display.lighting's v4 modes): a decal projected into the
+target the window's draws go to now (the base colour's image in the base
+phase, else the colour target: the light), over its G-buffer
+(xgpu_vulkan_post_decal), its bitmap the texture its header names */
+static void stream_scene_decal(void *context, const struct xgpu_stream_scene_decal *record)
+{
+	struct stream_target *color = target_get(stream.color);
+	struct xgpu_vulkan_image *into, *bitmap;
+
+	(void)context;
+	if (!color || stream.preparing || deferred.hold || !gbuffer.view_known || !gbuffer.drawn ||
+		gbuffer.color != stream.color || gbuffer.width != color->width || gbuffer.height != color->height ||
+		color->depth || color->layers > 1 || (stream.samples && color->multisampled))
+		return;
+	bitmap = xgpu_vulkan_textures_header(record->bitmap);
+	if (!bitmap)
+		return;
+	into = deferred.phase == XGPU_GBUFFER_PHASE_BASE && stream.color == deferred.color ? deferred.base :
+		deferred.phase == XGPU_GBUFFER_PHASE_ADDITIONS && stream.color == deferred.color ? deferred.additions :
+		color->image;
+	if (xgpu_vulkan_post_decal(into, bitmap, gbuffer.words, gbuffer.extras, &gbuffer.view, record) &&
+		into == color->image)
+		color->written++;
+	targets_bind();
+}
+
 static void stream_frame_end(void *context)
 {
 	struct stream_target *back_buffer = target_get(stream.back_buffer);
@@ -5286,6 +5329,8 @@ const struct host_render_backend *xgpu_vulkan_stream_backend(void)
 		backend.gbuffer_draw = stream_gbuffer_draw;
 		backend.scene_instance = stream_scene_instance;
 		backend.scene_view = stream_scene_view;
+		backend.scene_fog = stream_scene_fog;
+		backend.scene_decal = stream_scene_decal;
 		backend.prism_bake = stream_prism_bake;
 		backend.panini = stream_panini;
 		/* display.ambient_occlusion "world" (#578, docs/world-ao.md): the

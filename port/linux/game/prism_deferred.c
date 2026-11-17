@@ -62,6 +62,8 @@ nothing changes.
 #include "structures/structure_bsp_definitions.h"
 #include "render/render_cameras.h"
 #include "render_cameras_internal.h"
+#include "rasterizer/rasterizer.h"
+#include "rasterizer/rasterizer_console_vars.h"
 
 #include <stdlib.h>
 
@@ -78,6 +80,8 @@ void xgpu_backend_gbuffer_draw(unsigned long material, unsigned long instance, u
 	unsigned long lightmap);
 void xgpu_backend_scene_instance(unsigned long instance, unsigned long flags, unsigned long lod, const float *now,
 	const float *last, unsigned long node_count);
+void xgpu_backend_scene_fog(const void *fog);
+void xgpu_backend_scene_decal(const void *decal);
 /* d3d8_device.c's (the window's view's pixels are the device's) */
 void halo_scene_view(short x0, short y0, short x1, short y1, float const camera[4][4]);
 
@@ -151,6 +155,9 @@ static struct
 {
 	unsigned long settings_read;
 	boolean wanted, raster;
+	/* the window drawn with multisampling (display.anti_aliasing "msaa*"),
+	which the host draws as "ce" */
+	boolean multisampled;
 	unsigned long view;
 	/* the window's phase sent last (0 none: the light) */
 	unsigned long phase;
@@ -191,6 +198,8 @@ static void settings_read(
 	value = config_string("display.lighting");
 	prism_deferred.raster = value && !strcmp(value, "raster");
 	prism_deferred.wanted = value && (!strcmp(value, "ce_deferred") || prism_deferred.raster);
+	value = config_string("display.anti_aliasing");
+	prism_deferred.multisampled = value && !strncmp(value, "msaa", 4);
 	value = config_string("debug.gbuffer_view");
 	prism_deferred.view = !value ? 0 : !strcmp(value, "base") ? 1 : !strcmp(value, "light") ? 2 :
 		!strcmp(value, "additions") ? 3 : !strcmp(value, "albedo") ? 4 : !strcmp(value, "normal") ? 5 :
@@ -687,4 +696,240 @@ void prism_deferred_phase(
 	xgpu_backend_gbuffer_phase(value);
 
 	return;
+}
+
+boolean prism_deferred_screen_passes(
+	void)
+{
+	settings_read();
+
+#ifdef HALO_VULKAN
+	return prism_deferred.wanted && !prism_deferred.multisampled;
+#else
+	return FALSE;
+#endif
+}
+
+/* (CE's: rasterizer_xbox_environment_fog.c's) */
+#define FOG_ATMOSPHERE_DOMINANT 1
+
+/* xgpu_stream.h's SCENE_FOG: its flags and layout (the game's sources do not
+see the renderer's headers), with room for the one plane CE draws */
+#define FOG_ATMOSPHERE 1ul
+#define FOG_INSIDE 2ul
+#define FOG_SCREEN 4ul
+#define FOG_SCREEN_LEVEL 8ul
+#define FOG_SCREEN_OBJECTS 16ul
+struct fog_record
+{
+	unsigned long header, flags, plane_count, pad;
+	float atmosphere_color[4];
+	float atmosphere_range[4];
+	float screen[4];
+	struct
+	{
+		unsigned long id, flags, pad[2];
+		float plane[4];
+		float color[4];
+		float shape[4];
+	} planes[1];
+};
+
+/* the window's fog (global_window_parameters', as its begin made it) as
+SCENE_FOG: the atmosphere and the camera's cluster's fog plane, with the
+eye's densities CE's fog pass and the objects' draws take (their fog
+constants: _rasterizer_environment_fog_begin, _rasterizer_model_draw) */
+static void fog_record(
+	struct fog_record *record)
+{
+	struct render_fog const *fog = &global_window_parameters.fog;
+	real_point3d const *eye = &global_window_parameters.camera.position;
+	real distance = eye->x * fog->plane.n.i + eye->y * fog->plane.n.j + eye->z * fog->plane.n.k - fog->plane.d;
+
+	memset(record, 0, sizeof(*record));
+	if (fog->atmospheric_maximum_density > 0.0f)
+	{
+		record->flags |= FOG_ATMOSPHERE;
+	}
+	record->atmosphere_color[0] = fog->atmospheric_color.red;
+	record->atmosphere_color[1] = fog->atmospheric_color.green;
+	record->atmosphere_color[2] = fog->atmospheric_color.blue;
+	record->atmosphere_color[3] = PIN(fog->atmospheric_maximum_density, 0.0f, 1.0f);
+	record->atmosphere_range[0] = fog->atmospheric_minimum_distance;
+	record->atmosphere_range[1] = fog->atmospheric_maximum_distance;
+	record->atmosphere_range[2] = TEST_FLAG(fog->fog_definition_flags, FOG_ATMOSPHERE_DOMINANT) ? 1.0f :
+		fog->atmospheric_maximum_distance > 0.0f ? PIN(distance / fog->atmospheric_maximum_distance, 0.0f, 1.0f) : 0.0f;
+	if (fog->planar_mode && fog->planar_maximum_density > 0.0f && fog->planar_maximum_distance > 0.0f &&
+		fog->planar_maximum_depth > 0.0f)
+	{
+		record->plane_count = 1;
+		record->planes[0].id = (unsigned long)(render.cluster_index + 1);
+		record->planes[0].flags = distance < 0.0f ? FOG_INSIDE : 0;
+		record->planes[0].plane[0] = fog->plane.n.i;
+		record->planes[0].plane[1] = fog->plane.n.j;
+		record->planes[0].plane[2] = fog->plane.n.k;
+		record->planes[0].plane[3] = fog->plane.d;
+		record->planes[0].color[0] = fog->planar_color.red;
+		record->planes[0].color[1] = fog->planar_color.green;
+		record->planes[0].color[2] = fog->planar_color.blue;
+		record->planes[0].color[3] = PIN(fog->planar_maximum_density, 0.0f, 1.0f);
+		record->planes[0].shape[0] = fog->planar_maximum_distance;
+		record->planes[0].shape[1] = fog->planar_maximum_depth;
+		record->planes[0].shape[2] = PIN(-(distance / fog->planar_maximum_depth), 0.0f, 1.0f);
+	}
+}
+
+void prism_deferred_fog(
+	void)
+{
+	struct fog_record record;
+
+	/* (as CE's fog pass and the objects' draws: none with the fog drawn off) */
+	if (rasterizer_debug_options.drawing_mode != 0 || !rasterizer_debug_options.draw_environment_fog)
+	{
+		return;
+	}
+	fog_record(&record);
+	xgpu_backend_scene_fog(&record);
+
+	return;
+}
+
+void prism_deferred_fog_screen(
+	real near_distance,
+	real far_distance,
+	real near_over_far,
+	boolean level,
+	boolean objects)
+{
+	struct fog_record record;
+
+	fog_record(&record);
+	record.flags |= FOG_SCREEN | (level ? FOG_SCREEN_LEVEL : 0) | (objects ? FOG_SCREEN_OBJECTS : 0);
+	record.screen[0] = near_distance;
+	record.screen[1] = far_distance;
+	record.screen[2] = near_over_far;
+	xgpu_backend_scene_fog(&record);
+
+	return;
+}
+
+/* ---------- the projected decals
+
+display.lighting's v4 modes project each decal of the level into the
+G-buffer (design section 1.7: SCENE_DECAL) rather than draw the geometry CE
+clipped to the stock surfaces, which floats over the remodel or sinks into
+it: its box (its projection's basis and extent, kept as it is made, and its
+radius out of the surface), its bitmap and sprite, CE's blend and its colour
+and intensity, drawn by the host into the target the decal's layer goes to
+(the base colour, or the light) where the G-buffer's level lies in the box.
+A decal made without its projection kept (one of a saved game) is drawn as
+CE draws it. */
+
+/* MAXIMUM_DECALS_PER_MAP (decals.c's) */
+#define DECALS_MOST 2048
+
+/* xgpu_stream.h's SCENE_DECAL: its layout and flag (the game's sources do
+not see the renderer's headers) */
+#define DECAL_ALPHA_TESTED 4ul
+struct decal_record
+{
+	unsigned long header, decal, bitmap, frame, blend, flags;
+	float centre[4];
+	float axes[3][4];
+	float color[4];
+	float rectangle[4];
+};
+
+/* a decal's box, with the datum handle it was made for (another decal in
+its slot has none) */
+struct decal_box
+{
+	long handle;
+	float centre[3];
+	float axes[3][3];
+	float rectangle[4];
+};
+
+/* each decal's, by its absolute index */
+static struct decal_box decal_boxes[DECALS_MOST];
+
+void prism_deferred_decal_made(
+	long decal_index,
+	void const *basis_pointer,
+	void const *extent_pointer,
+	void const *sprite_bounds_pointer,
+	real radius)
+{
+	real_matrix4x3 const *basis = basis_pointer;
+	real_rectangle2d const *extent = extent_pointer, *sprite = sprite_bounds_pointer;
+	long absolute = DATUM_INDEX_TO_ABSOLUTE_INDEX(decal_index);
+	real across = (extent->x0 + extent->x1) * 0.5f, up = (extent->y0 + extent->y1) * 0.5f;
+	real half_across = (extent->x1 - extent->x0) * 0.5f, half_up = (extent->y1 - extent->y0) * 0.5f;
+	/* (out of the surface as far as the decal reaches along it, which CE's
+	wrapping over a bend of its surfaces reaches) */
+	real depth = MAX(MAX(half_across, half_up), radius);
+
+	if (absolute < 0 || absolute >= DECALS_MOST)
+	{
+		return;
+	}
+	decal_boxes[absolute].handle = decal_index;
+	decal_boxes[absolute].centre[0] = basis->position.x + basis->forward.i * across + basis->left.i * up;
+	decal_boxes[absolute].centre[1] = basis->position.y + basis->forward.j * across + basis->left.j * up;
+	decal_boxes[absolute].centre[2] = basis->position.z + basis->forward.k * across + basis->left.k * up;
+	decal_boxes[absolute].axes[0][0] = basis->forward.i * half_across;
+	decal_boxes[absolute].axes[0][1] = basis->forward.j * half_across;
+	decal_boxes[absolute].axes[0][2] = basis->forward.k * half_across;
+	decal_boxes[absolute].axes[1][0] = basis->left.i * half_up;
+	decal_boxes[absolute].axes[1][1] = basis->left.j * half_up;
+	decal_boxes[absolute].axes[1][2] = basis->left.k * half_up;
+	decal_boxes[absolute].axes[2][0] = basis->up.i * depth;
+	decal_boxes[absolute].axes[2][1] = basis->up.j * depth;
+	decal_boxes[absolute].axes[2][2] = basis->up.k * depth;
+	decal_boxes[absolute].rectangle[0] = sprite->x0;
+	decal_boxes[absolute].rectangle[1] = sprite->y0;
+	decal_boxes[absolute].rectangle[2] = sprite->x1;
+	decal_boxes[absolute].rectangle[3] = sprite->y1;
+}
+
+boolean prism_deferred_decal(
+	long decal_index,
+	unsigned long texture,
+	short blend,
+	unsigned long color,
+	unsigned long intensity,
+	boolean alpha_tested)
+{
+	long absolute = DATUM_INDEX_TO_ABSOLUTE_INDEX(decal_index);
+	struct decal_record record;
+	int axis;
+
+	if (absolute < 0 || absolute >= DECALS_MOST || decal_boxes[absolute].handle != decal_index || !texture ||
+		blend < 0 || blend > 7)
+	{
+		return FALSE;
+	}
+	memset(&record, 0, sizeof(record));
+	record.decal = (unsigned long)absolute + 1;
+	record.bitmap = texture;
+	record.blend = (unsigned long)blend;
+	record.flags = alpha_tested ? DECAL_ALPHA_TESTED : 0;
+	for (axis = 0; axis < 3; axis++)
+	{
+		record.centre[axis] = decal_boxes[absolute].centre[axis];
+		record.axes[0][axis] = decal_boxes[absolute].axes[0][axis];
+		record.axes[1][axis] = decal_boxes[absolute].axes[1][axis];
+		record.axes[2][axis] = decal_boxes[absolute].axes[2][axis];
+	}
+	/* (CE's vertex colour: its red, green and blue, and its intensity, the
+	decal's fade by its colour's alpha) */
+	record.color[0] = (float)((color >> 16) & 0xff) / 255.0f;
+	record.color[1] = (float)((color >> 8) & 0xff) / 255.0f;
+	record.color[2] = (float)(color & 0xff) / 255.0f;
+	record.color[3] = (float)intensity / 255.0f;
+	memcpy(record.rectangle, decal_boxes[absolute].rectangle, sizeof(record.rectangle));
+	xgpu_backend_scene_decal(&record);
+
+	return TRUE;
 }

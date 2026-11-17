@@ -929,6 +929,41 @@ void xgpu_backend_scene_view(const struct xgpu_stream_scene_view *view)
 	stream_finite(&record_body->now[0][0], 32, "the scene's view", 0);
 }
 
+void xgpu_backend_scene_fog(const void *bytes)
+{
+	const struct xgpu_stream_scene_fog *fog = bytes;
+	struct xgpu_stream_scene_fog *record_body;
+	uint32_t header, size, count, index;
+
+	if (!stream.open || stream.preparing || !fog)
+		return;
+	count = fog->plane_count < XGPU_SCENE_FOG_PLANES ? fog->plane_count : XGPU_SCENE_FOG_PLANES;
+	size = (uint32_t)(offsetof(struct xgpu_stream_scene_fog, planes) + count * sizeof(fog->planes[0]));
+	record_body = record(XGPU_STREAM_SCENE_FOG, size);
+	header = record_body->header;
+	memcpy(record_body, fog, size);
+	record_body->header = header;
+	record_body->plane_count = count;
+	stream_finite(&record_body->atmosphere_color[0], 12, "the fog", 0);
+	for (index = 0; index < count; index++)
+		stream_finite(&record_body->planes[index].plane[0], 12, "a fog plane", 0);
+}
+
+void xgpu_backend_scene_decal(const void *bytes)
+{
+	const struct xgpu_stream_scene_decal *decal = bytes;
+	struct xgpu_stream_scene_decal *record_body;
+	uint32_t header;
+
+	if (!stream.open || stream.preparing || !decal || decal->blend >= XGPU_SCENE_DECAL_BLENDS)
+		return;
+	record_body = record(XGPU_STREAM_SCENE_DECAL, sizeof(*record_body));
+	header = record_body->header;
+	*record_body = *decal;
+	record_body->header = header;
+	stream_finite(&record_body->centre[0], 24, "a decal", 0);
+}
+
 void xgpu_backend_scene_instance(unsigned long instance, unsigned long flags, unsigned long lod, const float *now,
 	const float *last, unsigned long node_count)
 {
