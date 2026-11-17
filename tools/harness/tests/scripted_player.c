@@ -61,6 +61,8 @@ static unsigned long long test_input_menu_since;
 /* ("menu:ready ...": its clock waiting for the menus; the computer's clock,
 debug.frame_time not set) */
 static int test_input_menu_waiting;
+/* (the built-in benchmark's count of debug.test_input reread, never bumped here) */
+static int test_input_generation;
 static unsigned long long test_input_menu_now(void) { return SDL_GetTicks(); }
 
 static void test_script_parse(char const *script) { (void)script; test_script_on = 1; }
