@@ -33,6 +33,13 @@ static int player_control_aim_modern(short gamepad, float *tangent, float *thres
 	*threshold = -1.0f;
 	return FALSE;
 }
+/* (the look acceleration at its defaults: test_look_acceleration.py's) */
+static void player_control_look_acceleration_tuning(short gamepad, real *strength, real *time)
+{
+	(void)gamepad;
+	*strength = 1.0f;
+	*time = 1.0f;
+}
 struct player_control_aim;
 static boolean player_control_stick_aim(struct player_control_aim const *aim, long count, real const *function,
 	real pegging, real yaw, real pitch, real *curved_yaw, real *curved_pitch, real *clamped_yaw, real *clamped_pitch);

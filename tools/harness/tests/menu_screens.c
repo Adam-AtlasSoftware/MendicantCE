@@ -1048,6 +1048,16 @@ int main(int argc, char **argv)
 		refused("<screen name=\"s\"><stick id=\"left\" label=\"L\" x=\"1\" y=\"1\" value=\"{nothing}\"/></screen>",
 			"nothing");
 	}
+	else if (!strcmp(name, "keyboard"))
+	{
+		/* (the on-screen keyboard's screen: its one <keyboard>, no attribute;
+		a second refused, an attribute refused) */
+		CHECK(read_text(keyboard_xml, &screen, problem), "the keyboard's file is refused: %s", problem);
+		CHECK(kind_total(&screen, MENU_SCREEN_KEYBOARD, -1) == 1, "the keyboard's block");
+		menu_screen_free(&screen);
+		refused("<screen name=\"s\"><keyboard/><keyboard/></screen>", "one <keyboard>");
+		refused("<screen name=\"s\"><keyboard layout=\"qwerty\"/></screen>", "no attribute layout");
+	}
 	else
 	{
 		fprintf(stderr, "no case %s\n", name);

@@ -29,7 +29,8 @@ compared; past its last, the game quits.
 #include "interface/ui_widget.h"
 #include "interface/ui_widget_event_handler_functions.h"
 #include "interface/terminal.h"
-#include "interface/virtual_keyboard.h"
+#include "text/unicode.h"
+#include "keyboard.h" /* port: port/linux/game/keyboard.c */
 #include "menu_layout.h"
 #include "menu_widget.h"
 
@@ -109,7 +110,8 @@ gametype made and edited ("create&edit playlist profile"), the keyboard
 launched on a name ("player profile change name"), the screens that the
 game shows only then, and that close at once without it ("close if not
 editing profile"). "close keyboard" closes the keyboard one of them left
-up, the name as it was, as a player's Cancel does */
+up, the name as it was, as a player's Cancel does; "open keyboard"
+opens the on-screen keyboard on a name, over the screen (its picture) */
 void menu_tour_setup(
 	char const *functions)
 {
@@ -127,8 +129,18 @@ void menu_tour_setup(
 		functions += length;
 		if (!strcmp(function, "close keyboard"))
 		{
-			if (virtual_keyboard_active())
-				virtual_keyboard_close();
+			if (keyboard_active())
+				keyboard_close();
+			continue;
+		}
+		/* (the on-screen keyboard over the screen, for a name: its picture) */
+		if (!strcmp(function, "open keyboard"))
+		{
+			static wchar_t name[12];
+
+			ustrncpy_terminated(name, L"Spartan", NUMBEROF(name));
+			if (!keyboard_name_launch(name, sizeof(name), 8))
+				platform_log("menus: menu tour: the keyboard did not open");
 			continue;
 		}
 		index = pc_menu_event_function_index(function);
@@ -165,8 +177,8 @@ static boolean menu_tour_open(
 		if (tag_name[index] == '/')
 			tag_name[index] = '\\';
 	}
-	if (virtual_keyboard_active())
-		virtual_keyboard_close();
+	if (keyboard_active())
+		keyboard_close();
 	/* (what the screen before printed on the screen, its warnings, not on
 	this one's picture) */
 	terminal_clear();
@@ -209,7 +221,7 @@ static void menu_script_update(
 	{
 		/* (a name typed in: the game's keyboard, over no screen) */
 		if (game_time_get() < MENU_TOUR_START_TICKS ||
-			(!ui_widget_port_screen_name()[0] && !virtual_keyboard_active()))
+			(!ui_widget_port_screen_name()[0] && !keyboard_active()))
 			return;
 		if (++frames < MENU_SCRIPT_SETTLE_FRAMES)
 			return;
@@ -235,7 +247,7 @@ static void menu_script_update(
 			used = sizeof(path) - 1;
 	}
 	platform_log("menus: focus %d: %s: %s%s", step, menu_script_leaf(ui_widget_port_screen_name()), path,
-		virtual_keyboard_active() ? " (the keyboard)" : "");
+		keyboard_active() ? " (the keyboard)" : "");
 	if (platform_test_menu_done())
 	{
 		platform_log("menus: debug.test_input: done");

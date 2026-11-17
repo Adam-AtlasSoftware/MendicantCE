@@ -674,6 +674,11 @@ DISPLAY_MODES = [("FULLSCREEN", "fullscreen"), ("BORDERLESS", "borderless"), ("W
 # side to side, in degrees, and the push that starts it, in percent of the
 # stick's travel (-1 the game's own)
 MODERN_AIM_ANGLES = [(str(degrees), str(degrees)) for degrees in range(0, 46, 5)]
+# input.look_acceleration_strength's and _time's: times the map's own ramp
+# (player_control.c's LOOK_ACCELERATION_STRENGTH_MAXIMUM and _TIME_'s)
+LOOK_ACCELERATION_STRENGTHS = [("OFF", "0")] + [(f"{value:g}X", f"{value:g}") for value in
+                                                (0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2)]
+LOOK_ACCELERATION_TIMES = [(f"{value:g}X", f"{value:g}") for value in (0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2)]
 MODERN_AIM_THRESHOLDS = [("DEFAULT", "-1")] + [(f"{percent}%", str(percent)) for percent in range(50, 101, 5)]
 # input.rumble_strength's: the motors' strength, in percent
 RUMBLE_STRENGTHS = [(f"{percent}%", str(percent)) for percent in range(0, 101, 10)]
@@ -1730,9 +1735,18 @@ PAGES = {
             ("ZOOM SENSITIVITY", "input.stick_zoom_sensitivity", VERTICAL_SENSITIVITIES,
              "How fast the right stick turns the view while zoomed in, as with a sniper rifle's scope. 1X is the "
              "game's own.", None),
-            # (Modern aim's tuning, with the sticks' other tuning: the aim
-            # style itself is on Gyro & Flick Stick)
-            (SECTION, "MODERN AIM"),
+            # (the look acceleration, either aim style's: how much and how
+            # fast (player_control.c's player_control_look_acceleration);
+            # then Modern aim's tuning of when, with the sticks' other tuning:
+            # the aim style itself is on Gyro & Flick Stick. One section with
+            # the look stick's, for the rows to fit above the footer)
+            ("ACCELERATION", "input.look_acceleration_strength", LOOK_ACCELERATION_STRENGTHS,
+             "How much the turn speeds up while you hold the right stick at its edge, times the map's own: 1X "
+             "is the game's own, Off never speeds it up, 2X twice the extra speed.|Both aim styles. The mouse "
+             "and gyro are not changed.", None),
+            ("ACCELERATION TIME", "input.look_acceleration_time", LOOK_ACCELERATION_TIMES,
+             "How long the turn takes to reach its full speed while you hold the right stick at its edge, times "
+             "the map's own (1 second on every stock map): 0.5X is twice as quick.", None),
             ("ACCELERATION ANGLE", "input.modern_aim_acceleration_angle", MODERN_AIM_ANGLES,
              "Modern aim: how far from straight to the side, in degrees, a full push still speeds up the turn. "
              "Lower keeps more diagonals from speeding it up.", None),
@@ -1986,7 +2000,8 @@ SETTINGS_SEARCH_WORDS = {
     "gun": ["viewmodel_visible", "viewmodel_fov", "weapon_position"],
     "aim": ["aim_style", "modern_aim_acceleration_angle", "modern_aim_acceleration_threshold",
             "look_dead_zone_shape"],
-    "acceleration": ["aim_style", "modern_aim_acceleration_angle", "modern_aim_acceleration_threshold"],
+    "acceleration": ["look_acceleration_strength", "look_acceleration_time", "aim_style",
+                     "modern_aim_acceleration_angle", "modern_aim_acceleration_threshold"],
     "deadzone": ["stick_settings", "left_stick_dead_zone", "right_stick_dead_zone", "left_stick_outer_dead_zone",
                  "right_stick_outer_dead_zone", "look_dead_zone_shape", "stick_test"],
     "drift": ["stick_test", "left_stick_dead_zone", "right_stick_dead_zone"],

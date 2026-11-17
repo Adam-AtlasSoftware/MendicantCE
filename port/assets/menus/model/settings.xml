@@ -1354,7 +1354,30 @@
 			<choice shown="1.5X" value="1.5"/>
 			<choice shown="2X" value="2"/>
 		</row>
-		<section key="section_10" title="MODERN AIM"/>
+		<row key="look_acceleration_strength" kind="choice" setting="input.look_acceleration_strength" label="ACCELERATION" crumb="CONTROLS › CONTROLLER › STICK SETTINGS" search="acceleration">
+			<help>How much the turn speeds up while you hold the right stick at its edge, times the map's own: 1X is the game's own, Off never speeds it up, 2X twice the extra speed.</help>
+			<note>Both aim styles. The mouse and gyro are not changed.</note>
+			<choice shown="OFF" value="0"/>
+			<choice shown="0.25X" value="0.25"/>
+			<choice shown="0.5X" value="0.5"/>
+			<choice shown="0.75X" value="0.75"/>
+			<choice shown="1X" value="1"/>
+			<choice shown="1.25X" value="1.25"/>
+			<choice shown="1.5X" value="1.5"/>
+			<choice shown="1.75X" value="1.75"/>
+			<choice shown="2X" value="2"/>
+		</row>
+		<row key="look_acceleration_time" kind="choice" setting="input.look_acceleration_time" label="ACCELERATION TIME" crumb="CONTROLS › CONTROLLER › STICK SETTINGS" search="acceleration">
+			<help>How long the turn takes to reach its full speed while you hold the right stick at its edge, times the map's own (1 second on every stock map): 0.5X is twice as quick.</help>
+			<choice shown="0.25X" value="0.25"/>
+			<choice shown="0.5X" value="0.5"/>
+			<choice shown="0.75X" value="0.75"/>
+			<choice shown="1X" value="1"/>
+			<choice shown="1.25X" value="1.25"/>
+			<choice shown="1.5X" value="1.5"/>
+			<choice shown="1.75X" value="1.75"/>
+			<choice shown="2X" value="2"/>
+		</row>
 		<row key="modern_aim_acceleration_angle" kind="choice" setting="input.modern_aim_acceleration_angle" label="ACCELERATION ANGLE" crumb="CONTROLS › CONTROLLER › STICK SETTINGS" search="aim acceleration" enabled="aim_modern">
 			<help>Modern aim: how far from straight to the side, in degrees, a full push still speeds up the turn. Lower keeps more diagonals from speeding it up.</help>
 			<choice shown="0" value="0"/>

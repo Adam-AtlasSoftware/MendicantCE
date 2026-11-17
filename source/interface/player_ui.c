@@ -158,7 +158,7 @@ symbols in this file:
 #include "saved games/playlist_profile.h"
 #include "saved games/saved_game_files.h"
 #include "interface/ui_widget.h"
-#include "interface/virtual_keyboard.h"
+#include "keyboard.h" /* port: port/linux/game/keyboard.c */
 #include "main/main.h"
 #include "tag_files/tag_groups.h"
 #include "player_ui.h"
@@ -1057,14 +1057,14 @@ boolean player_ui_prompt_user_to_rename_edit_profile(
 		switch (type)
 		{
 			case _saved_game_file_type_player_profile:
-				result = virtual_keyboard_launch(
+				result = keyboard_name_launch(
 					player_ui_globals.edit_profile.current.player.player_name,
 					sizeof(player_ui_globals.edit_profile.current.player.player_name),
 					10);
 				break;
 
 			case _saved_game_file_type_game_variant:
-				result = virtual_keyboard_launch(
+				result = keyboard_name_launch(
 					player_ui_globals.edit_profile.current.variant.human_readable_game_description,
 					sizeof(player_ui_globals.edit_profile.current.variant.human_readable_game_description),
 					10);

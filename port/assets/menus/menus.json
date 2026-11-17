@@ -316,6 +316,7 @@
   "screens/coop.xml",
   "screens/coop_join.xml",
   "screens/coop_who.xml",
+  "screens/keyboard.xml",
   "screens/lobby.xml",
   "screens/main.xml",
   "screens/pause.xml",
