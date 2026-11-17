@@ -7595,7 +7595,10 @@ struct journal_state
 	struct journal_object textures[D3DTSS_MAXSTAGES], palettes[D3DTSS_MAXSTAGES], render_target, depth_stencil;
 	uint32_t viewport[6];
 	uint32_t vertex_shader, program, program_address, shader_constant_mode;
-	uint32_t streams[16][2];
+	/* each vertex stream: its memory by name and offset, or its address
+	where no geometry by name holds it (journal_stream_keep), and its
+	stride */
+	uint32_t streams[16][3];
 	/* the front end's own inputs to the draw's pipeline, whole (draw_inputs:
 	a field added there is journaled with it), and the glows' count */
 	struct draw_inputs inputs;
@@ -7625,6 +7628,147 @@ static struct
 	const struct halo_gpu_journal_bitmaps *bitmaps;
 	unsigned char pages[MIRROR_PAGE_SLOTS / 8];
 } journal;
+
+/* ---------- geometry by name (#1169)
+
+A vertex buffer's memory is kept by a record as the geometry that holds it,
+named (d3d8_geometry_named: a Custom Edition map's models' and structure's,
+a mod's model's, all made with XPhysicalAlloc top-down, where what else is
+loaded decides the address), and its offset in it, found again by that
+name as the record plays (journal_stream_place), wherever the geometry is
+now; else (the stock maps' own, at the places their caches load to) by its
+address. Either way a draw played back reads only memory that is there and
+readable now (journal_streams_usable: platform_contiguous_readable): one
+that is not is skipped and counted unknown, the record then passed over and
+the map walked, never a read of a page let go. */
+
+#define GEOMETRY_NAMES 256
+
+static struct
+{
+	uint32_t name;
+	unsigned long base, size;
+} geometry_names[GEOMETRY_NAMES];
+
+/* the streams of the entry played whose geometry was not found by its name
+(journal_restore), a bit each */
+static uint32_t journal_lost_streams;
+
+static uint32_t geometry_name_hash(const char *name)
+{
+	uint32_t hash = 2166136261u;
+
+	while (*name)
+		hash = (hash ^ (unsigned char)*name++) * 16777619u;
+	return hash ? hash : 1;
+}
+
+void d3d8_geometry_named(const void *base, unsigned long size, const char *name)
+{
+	uint32_t hash;
+	int index, free_slot = -1;
+
+	if (!base || !size || !name)
+		return;
+	hash = geometry_name_hash(name);
+	for (index = 0; index < GEOMETRY_NAMES; index++)
+	{
+		if (geometry_names[index].base == (unsigned long)base || geometry_names[index].name == hash)
+		{
+			free_slot = index;
+			break;
+		}
+		if (free_slot < 0 && !geometry_names[index].name)
+			free_slot = index;
+	}
+	if (free_slot < 0)
+		return;
+	geometry_names[free_slot].name = hash;
+	geometry_names[free_slot].base = (unsigned long)base;
+	geometry_names[free_slot].size = size;
+}
+
+void d3d8_geometry_unnamed(const void *base)
+{
+	int index;
+
+	for (index = 0; index < GEOMETRY_NAMES; index++)
+	{
+		if (geometry_names[index].base == (unsigned long)base)
+			memset(&geometry_names[index], 0, sizeof(geometry_names[index]));
+	}
+}
+
+/* a stream's memory (its Data, physical) as a record keeps it: the name of
+the geometry that holds it and its offset there, or 0 and its address */
+static void journal_stream_keep(uint32_t data, uint32_t kept[2])
+{
+	unsigned long address = (unsigned long)PLATFORM_PHYSICAL_TO_VIRTUAL(data);
+	int index;
+
+	kept[0] = 0;
+	kept[1] = data;
+	if (!data)
+		return;
+	for (index = 0; index < GEOMETRY_NAMES; index++)
+	{
+		if (geometry_names[index].name && address >= geometry_names[index].base &&
+			address - geometry_names[index].base < geometry_names[index].size)
+		{
+			kept[0] = geometry_names[index].name;
+			kept[1] = (uint32_t)(address - geometry_names[index].base);
+			return;
+		}
+	}
+}
+
+/* ...and its Data now: the geometry of that name, where it is now, at the
+offset; 0 and *lost where none has that name (or is smaller) */
+static uint32_t journal_stream_place(const uint32_t kept[2], BOOL *lost)
+{
+	int index;
+
+	*lost = FALSE;
+	if (!kept[0])
+		return kept[1];
+	for (index = 0; index < GEOMETRY_NAMES; index++)
+	{
+		if (geometry_names[index].name == kept[0] && kept[1] < geometry_names[index].size)
+			return (uint32_t)PLATFORM_VIRTUAL_TO_PHYSICAL(geometry_names[index].base + kept[1]);
+	}
+	*lost = TRUE;
+	return 0;
+}
+
+/* whether the vertices a played back draw reads, first and count of them
+(as setup_streams reads them: each stream the declaration takes), are in
+memory that is there and readable now, and their geometry found by name */
+static BOOL journal_streams_usable(unsigned long first, unsigned long count)
+{
+	const struct vertex_shader_object *declaration = device.vertex_shader;
+	unsigned long index;
+
+	if (!declaration)
+		return TRUE;
+	for (index = 0; index < declaration->element_count; index++)
+	{
+		const struct xgpu_vertex_element *element = &declaration->elements[index];
+		unsigned long stream = element->stream, stride, bytes;
+
+		if (stream >= 16 || element->format == XGPU_VERTEX_NONE_FORMAT)
+			continue;
+		if (journal_lost_streams & (1u << stream))
+			return FALSE;
+		if (!device.streams[stream].data)
+			continue;
+		stride = device.streams[stream].stride;
+		bytes = stride ? stride * count : 64;
+		if (!platform_contiguous_readable((const char *)PLATFORM_PHYSICAL_TO_VIRTUAL(device.streams[stream].data) +
+			first * stride, bytes))
+			return FALSE;
+	}
+	return TRUE;
+}
 
 /* the textures, surfaces and palettes made, in order, and the vertex shaders
 by id */
@@ -7990,7 +8134,8 @@ static void *journal_resolve(const struct journal_object *object)
 		found = journal_view(object);
 		break;
 	case _journal_object_memory:
-		if (platform_is_contiguous((const void *)(unsigned long)object->value) &&
+		/* (its header there and readable now before it is read: #1169) */
+		if (platform_contiguous_readable((const void *)(unsigned long)object->value, sizeof(D3DSurface)) &&
 			journal_object_check((const void *)(unsigned long)object->value) == object->check)
 			found = (void *)(unsigned long)object->value;
 		if (!found)
@@ -8039,8 +8184,8 @@ static void journal_capture(struct journal_state *state)
 	state->shader_constant_mode = (uint32_t)device.shader_constant_mode;
 	for (index = 0; index < 16; index++)
 	{
-		state->streams[index][0] = (uint32_t)device.streams[index].data;
-		state->streams[index][1] = (uint32_t)device.streams[index].stride;
+		journal_stream_keep((uint32_t)device.streams[index].data, state->streams[index]);
+		state->streams[index][2] = (uint32_t)device.streams[index].stride;
 	}
 	/* (the front end's own inputs, whole, whatever the settings: draw_inputs) */
 	state->inputs = inputs;
@@ -8242,8 +8387,9 @@ WORLD_AO_SPAN_FOUND, the window found once a pixel; 9: the effect's soft
 group, the stages' texture regions and the high-res text's atlas as itself;
 10: a bitmap's tag as the record keeps it, halo_gpu_journal_bitmaps' keep;
 11: a view the screen's size played back at the screen's size now,
-JOURNAL_VIEW_SCREEN; 12: the front end's inputs whole, struct draw_inputs) */
-#define JOURNAL_FORM 12
+JOURNAL_VIEW_SCREEN; 12: the front end's inputs whole, struct draw_inputs;
+13: a stream's memory by its geometry's name and offset, #1169) */
+#define JOURNAL_FORM 13
 
 unsigned int halo_gpu_journal_form(void)
 {
@@ -8295,10 +8441,15 @@ static void journal_restore(const struct journal_state *state)
 	device.program_address = state->program_address < VERTEX_PROGRAM_SLOTS ? state->program_address : 0;
 	device.program_slots[device.program_address] = program;
 	device.shader_constant_mode = (D3DSHADERCONSTANTMODE)state->shader_constant_mode;
+	journal_lost_streams = 0;
 	for (index = 0; index < 16; index++)
 	{
-		device.streams[index].data = state->streams[index][0];
-		device.streams[index].stride = state->streams[index][1];
+		BOOL lost;
+
+		device.streams[index].data = journal_stream_place(state->streams[index], &lost);
+		device.streams[index].stride = state->streams[index][2];
+		if (lost)
+			journal_lost_streams |= 1u << index;
 	}
 	inputs = state->inputs;
 	dynamic_lights.reach_count = -1;
@@ -8316,12 +8467,24 @@ static void journal_play(unsigned long op, const struct journal_state *state)
 	journal_restore(state);
 	switch (op)
 	{
+	/* (a draw whose vertices are not there now: skipped, unknown, #1169) */
 	case JOURNAL_DRAW:
+		if (!journal_streams_usable(state->start, journal_vertices(state->primitive, state->count)))
+		{
+			journal.unknown++;
+			break;
+		}
 		D3DDevice_DrawVertices((D3DPRIMITIVETYPE)state->primitive, state->start,
 			journal_vertices(state->primitive, state->count));
 		break;
 	case JOURNAL_DRAW_INDEXED:
 		device.base_vertex_index = state->base_vertex + state->minimum;
+		/* (its indices all 0: the one vertex at its base) */
+		if (!journal_streams_usable(device.base_vertex_index, 1))
+		{
+			journal.unknown++;
+			break;
+		}
 		D3DDevice_DrawIndexedVertices((D3DPRIMITIVETYPE)state->primitive,
 			journal_vertices(state->primitive, state->count), indices);
 		break;
@@ -8454,6 +8617,25 @@ static void journal_replay_texture(uint32_t tag_index, uint32_t bitmap_index)
 /* a run a segment at a time, as mirror_range uploads them */
 static void journal_replay_pages(unsigned long first, unsigned long end)
 {
+	/* (only the pages there and readable now: one let go since the record
+	was made is passed over, its draws, if any, skipped as they play) */
+	while (first < end && !platform_contiguous_readable((const void *)(PLATFORM_CONTIGUOUS_BASE +
+		first * MIRROR_PAGE_SIZE), MIRROR_PAGE_SIZE))
+		first++;
+	if (first < end)
+	{
+		unsigned long readable = first + 1;
+
+		while (readable < end && platform_contiguous_readable((const void *)(PLATFORM_CONTIGUOUS_BASE +
+			readable * MIRROR_PAGE_SIZE), MIRROR_PAGE_SIZE))
+			readable++;
+		if (readable < end)
+		{
+			journal_replay_pages(first, readable);
+			journal_replay_pages(readable, end);
+			return;
+		}
+	}
 	while (first < end)
 	{
 		unsigned long segment_end = (first * MIRROR_PAGE_SIZE / MIRROR_SEGMENT_SIZE + 1) *

@@ -168,6 +168,10 @@ system: they stay the block's, with their protection, and read as zeros
 (also declared for the game in halo_linux_source_fixups.h) */
 void platform_contiguous_discard(void *address, unsigned long size);
 BOOL platform_is_contiguous(const void *address);
+/* whether size bytes at address are in the contiguous window, allocated
+(XPhysicalAlloc, a placed block) and readable now: a played back record's
+reads checked before they are made (d3d8_device.c, #1169) */
+BOOL platform_contiguous_readable(const void *address, unsigned long size);
 #define PLATFORM_PHYSICAL_TO_VIRTUAL(physical) ((void *)((unsigned long)(physical) | PLATFORM_CONTIGUOUS_BASE))
 #define PLATFORM_VIRTUAL_TO_PHYSICAL(address) ((unsigned long)(address) & ~PLATFORM_CONTIGUOUS_BASE)
 

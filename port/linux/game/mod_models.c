@@ -65,6 +65,7 @@ a frame may still draw from it.
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 #include <xtl.h>
 
 /* the game's (port) */
@@ -1188,6 +1189,10 @@ static boolean part_palette_make(
 	return TRUE;
 }
 
+/* (d3d8_device.c's: geometry a map's preparation's record names, #1169) */
+void d3d8_geometry_named(const void *base, unsigned long size, const char *name);
+void d3d8_geometry_unnamed(const void *base);
+
 /* geometry the renderer draws from: in the Xbox's contiguous memory, as a
 map's is (custom_edition_geometry.c's geometry_allocate), while the mods'
 models take no more of it than MAXIMUM_CONTIGUOUS_GEOMETRY_BYTES; else the
@@ -1237,7 +1242,10 @@ static void mod_model_free(
 	}
 	/* (the game's free, debug_free, does not take NULL) */
 	if (made->geometry)
+	{
+		d3d8_geometry_unnamed(made->geometry);
 		geometry_free(made->geometry, made->geometry_size, made->geometry_contiguous);
+	}
 	if (made->path)
 		free(made->path);
 	if (made->regions)
@@ -1482,6 +1490,14 @@ static boolean geometries_make(
 	made->palettes = palettes ? malloc((size_t)file->part_count * sizeof(*made->palettes) + 1) : NULL;
 	made->geometry_size = geometry_bytes + 1;
 	made->geometry = geometry_allocate(made->geometry_size, &made->geometry_contiguous);
+	/* (a record names its streams by it, wherever it is: the mod's file's, #1169) */
+	if (made->geometry && made->path)
+	{
+		char name[300];
+
+		snprintf(name, sizeof(name), "mod model %s", made->path);
+		d3d8_geometry_named(made->geometry, made->geometry_size, name);
+	}
 	if (!made->geometries || !made->parts || (palettes && !made->palettes) || !made->geometry)
 	{
 		free(uncompressed);
