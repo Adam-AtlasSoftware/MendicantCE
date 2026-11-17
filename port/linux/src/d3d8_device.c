@@ -8306,7 +8306,9 @@ span, with display.ambient_occlusion "world": world_ao_key; the effect's
 group, soft with display.soft_particles: soft_effect_key), as three words: recording a map's preparation, a draw is
 journaled where it is new in these or in its pipeline (preparation_seen),
 so that its record holds every draw a load under other settings tells
-apart; 0 otherwise */
+apart; and so recording the renderer's manifest (and the coverage beside
+it), so that a record's playback notes each draw it makes under some
+setting, not only those the settings now tell apart; 0 otherwise */
 static void journal_settings_blind_of(unsigned long words[3], const struct draw_inputs *of)
 {
 	words[0] = (unsigned long)of->hdr_category;
@@ -8319,7 +8321,7 @@ static void journal_settings_blind_of(unsigned long words[3], const struct draw_
 static void journal_settings_blind(unsigned long words[3])
 {
 	words[0] = words[1] = words[2] = 0;
-	if (journal_recording)
+	if (journal_recording || xgpu_manifest_recording())
 		journal_settings_blind_of(words, &inputs);
 }
 

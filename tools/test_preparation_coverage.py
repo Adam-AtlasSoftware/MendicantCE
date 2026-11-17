@@ -200,11 +200,37 @@ def test_every_record_makes_its_walks_pipelines(checker, tmp_path):
         f"the coverage does not hold the main menu's scene drawn as a player's first start sees it: {sorted(groups)}"
     failures = {}
     for key, group in sorted(paired.items()):
-        misses = check(checker, tmp_path, reference(group), list(group["replay"]))
+        misses = [miss for miss in check(checker, tmp_path, reference(group), list(group["replay"]))
+                  if not later_structure(key[0], miss)]
         if misses:
             failures[" ".join(key)] = [named(miss) for miss in misses[:6]]
     assert not failures, "pipelines the map's draws need that its record's playback does not make: " + \
         "; ".join(f"{key}: {misses}" for key, misses in failures.items())
+
+
+# the draws of a map's later structure that no material of its first stands in for (render_enumerate.c's
+# stand_ins_next: no material of the same class), made as the game switches to it, not by the record: the map and
+# the category of its draws (#1181 makes every structure's pipelines from recorded draws)
+LATER_STRUCTURES = {
+    ("levels\\d20\\d20", 19): "d20's coolant water, in its second structure alone",
+}
+
+
+def later_structure(map_name, miss):
+    category = re.search(r"category (\d+)", miss)
+    return bool(category) and (map_name, int(category[1])) in LATER_STRUCTURES
+
+
+@pytest.mark.parametrize("case", sorted(LATER_STRUCTURES), ids=lambda case: f"{case[0].split(chr(92))[-1]}-{case[1]}")
+@pytest.mark.xfail(strict=True, reason="#1181: a later structure's draws no material of the first stands in for")
+def test_a_later_structures_draws_are_made(checker, tmp_path, case):
+    map_name, category = case
+    misses = []
+    for key, group in sorted(sections().items()):
+        if key[0] == map_name and "replay" in group and ("walk" in group or "play" in group):
+            misses += [miss for miss in check(checker, tmp_path, reference(group), list(group["replay"]))
+                       if later_structure(map_name, miss) and int(re.search(r"category (\d+)", miss)[1]) == category]
+    assert not misses, (LATER_STRUCTURES[case], [named(miss) for miss in misses[:4]])
 
 
 def test_negative_the_menus_scene_is_named(checker, tmp_path):

@@ -37,6 +37,10 @@ void glow_submit(
 	long glow_index,
 	struct render_lighting const *lighting,
 	struct render_animation const *animation);
+/* port: (render_enumerate.c) */
+struct shader_effect_definition;
+void glow_port_enumerate(
+	void (*draw)(long bitmap_group_index, struct shader_effect_definition const *shader));
 
 /* ---------- globals */
 

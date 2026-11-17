@@ -93,6 +93,9 @@ symbols in this file:
 #include "render/render.h"
 #include "render/render_sprite.h"
 #include "saved games/game_state.h"
+#include "shaders/shader_definitions.h" /* port: (glow_port_enumerate) */
+#include "tag_files/tag_groups.h" /* port: (glow_port_enumerate) */
+#include "cache/cache_files.h" /* port: (glow_port_enumerate) */
 
 /* ---------- constants */
 
@@ -1511,4 +1514,18 @@ void glow_submit(
 	}
 
 	return;
+}
+
+/* port: each glow's sprite, as glow_render draws it (the effects' additive
+shader, a light: display.hdr_highlight_boost's emitter), for a map's
+preparation (port/linux/game/render_enumerate.c) */
+void glow_port_enumerate(
+	void (*draw)(long bitmap_group_index, struct shader_effect_definition const *shader))
+{
+	struct tag_iterator iterator;
+	long tag_index;
+
+	tag_iterator_new(&iterator, GLOW_TAG);
+	while ((tag_index = tag_iterator_next(&iterator)) != NONE)
+		draw(glow_definition_get(tag_index)->texture.index, &global_shader_effect_additive);
 }
