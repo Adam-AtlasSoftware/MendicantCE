@@ -108,6 +108,7 @@ the code, and another's may part from it at the first tick.
 #include "network_coop.h"
 #include "halo_keyboard.h"
 #include "sim_rate.h"
+#include "practice.h"
 #include "../src/demo_files.h"
 
 #include <stdio.h>
@@ -346,6 +347,8 @@ static struct
 	long patches;
 	unsigned long patch_bytes;
 	long last_tick;
+	/* the PRACTICE mark as the demo's Q records last had it */
+	boolean practice;
 	boolean in_tick;
 	boolean foreign;
 	boolean paused;
@@ -1542,6 +1545,7 @@ static void demo_record_start(
 	demo_recorder.loaded = FALSE;
 	demo_recorder.input_valid = FALSE;
 	demo_recorder.cameras_valid = FALSE;
+	demo_recorder.practice = FALSE;
 	/* (a multiplayer game's variant, for its playback's game) */
 	{
 		unsigned long start = demo_record_begin(&demo_recorder.records, 'V');
@@ -1554,6 +1558,28 @@ static void demo_record_start(
 	}
 	platform_log("demos: recording %s", demo_recorder.name);
 	demo_recording_tell(1, demo_recorder.name, tick);
+}
+
+/* the PRACTICE mark as it changed since the demo's last Q (practice.c), a
+Q record after the tick's T: its tick, whether it is on, and why */
+static void demo_record_practice(
+	long tick)
+{
+	boolean marked = practice_marked();
+	unsigned char on = marked ? 1 : 0;
+	char const *reason = marked ? practice_reason() : "";
+	unsigned long start;
+
+	if (marked == demo_recorder.practice)
+		return;
+	demo_recorder.practice = marked;
+	start = demo_record_begin(&demo_recorder.records, 'Q');
+	demo_buffer_u32(&demo_recorder.records, (unsigned long)tick);
+	demo_buffer_bytes(&demo_recorder.records, &on, 1);
+	demo_buffer_bytes(&demo_recorder.records, reason, (unsigned long)strlen(reason));
+	demo_record_end(&demo_recorder.records, start);
+	platform_log("demos: the PRACTICE mark %s at tick %ld%s%s", marked ? "on" : "off", tick, marked ? ": " : "",
+		reason);
 }
 
 static void demo_record_tick_begin(
@@ -1574,6 +1600,7 @@ static void demo_record_tick_begin(
 		demo_buffer_u32(&demo_recorder.records, (unsigned long)tick);
 		demo_buffer_u32(&demo_recorder.records, (unsigned long)sim_rate_next());
 		demo_record_end(&demo_recorder.records, start);
+		demo_record_practice(tick);
 		demo_snapshot_block(tick, FLAG(_demo_snapshot_start_bit));
 	}
 	else
@@ -1582,6 +1609,7 @@ static void demo_record_tick_begin(
 		demo_buffer_u32(&demo_recorder.records, (unsigned long)tick);
 		demo_buffer_u32(&demo_recorder.records, (unsigned long)sim_rate_next());
 		demo_record_end(&demo_recorder.records, start);
+		demo_record_practice(tick);
 		structural = FALSE;
 		if (!demo_recorder.loaded)
 		{
@@ -2717,6 +2745,16 @@ static void demo_playback_tick_begin(
 		{
 			demo_playback_record(&bytes, &length, TRUE);
 			demo_engine_state_set(bytes, length);
+		}
+		/* (the recording's PRACTICE mark as it changed: practice.c) */
+		else if (type == 'Q' && length >= 5)
+		{
+			char reason[32];
+
+			demo_playback_record(&bytes, &length, TRUE);
+			snprintf(reason, sizeof(reason), "%.*s", (int)MIN(length - 5, (unsigned long)sizeof(reason) - 1),
+				(char const *)bytes + 5);
+			practice_playback_mark(bytes[4] != 0, reason);
 		}
 		else if (type == 'B' || type == 'V' || type == 'W')
 		{

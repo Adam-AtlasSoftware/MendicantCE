@@ -739,6 +739,7 @@ void vr_death_test_update(void);
 #include "load_zone.h" /* port: port/linux/game/load_zone.c */
 #include "speedrun_state.h" /* port: port/linux/game/speedrun_state.c */
 #include "stream_state.h" /* port: port/linux/game/stream_state.c */
+#include "practice.h" /* port: port/linux/game/practice.c */
 
 /* ---------- prototypes */
 
@@ -4417,6 +4418,9 @@ void main_loop(
 		}
 
 		input_frame_end();
+		/* port: the practice keys and the PRACTICE mark
+		(port/linux/game/practice.c), before the block that holds the mark */
+		practice_frame();
 		/* port: the speedrun state block, for timers' autosplitters
 		(port/linux/game/speedrun_state.c) */
 		speedrun_state_frame(frame_ticks, loading_game_frame, frames_undrawn || debug_no_drawing,

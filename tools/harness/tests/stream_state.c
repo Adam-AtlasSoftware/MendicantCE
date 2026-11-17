@@ -91,7 +91,10 @@ int main(int argc, char **argv)
 	{
 		stream_state_text(&input, text, sizeof(text));
 		CHECK(!strcmp(text, "{\"state\":\"playing\",\"map\":\"levels\\\\a10\\\\a10\",\"mode\":\"campaign\","
-			"\"clock\":95,\"score\":0,\"kills\":3,\"deaths\":1}\n"), "%s", text);
+			"\"clock\":95,\"score\":0,\"kills\":3,\"deaths\":1,\"practice\":false}\n"), "%s", text);
+		input.practice = TRUE;
+		stream_state_text(&input, text, sizeof(text));
+		CHECK(strstr(text, "\"practice\":true}"), "%s", text);
 		input.map = "a \"quoted\"\n map";
 		stream_state_text(&input, text, sizeof(text));
 		CHECK(strstr(text, "\"map\":\"a \\\"quoted\\\"\\u000a map\""), "%s", text);

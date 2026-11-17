@@ -159,6 +159,7 @@ def main() -> int:
     tick = None
     bookmarks = []
     bot_commands = []
+    practice = []
     for kind, record_type, data in demo.records("R"):
         types[record_type] += 1
         sizes[record_type] += len(data) + 5
@@ -174,6 +175,9 @@ def main() -> int:
         elif record_type == "W" and len(data) >= 4:
             # (the host's line to its bots, as its tick applied it: port/linux/game/bots_command.c)
             bot_commands.append((struct.unpack_from("<I", data)[0], data[4:].decode("ascii", "replace")))
+        elif record_type == "Q" and len(data) >= 5:
+            # (the PRACTICE mark as it changed: port/linux/game/practice.c)
+            practice.append((struct.unpack_from("<I", data)[0], data[4] != 0, data[5:].decode("ascii", "replace")))
     seconds = ticks / 30.0
     print(f"  {ticks} ticks ({seconds / 60:.1f} min of game), ticks {first} to {last}; "
           f"{total / 1e6:.2f} MB, {total / 1e6 / max(seconds / 60, 1e-9):.2f} MB a minute"
@@ -184,6 +188,8 @@ def main() -> int:
         print(f"  bookmark at tick {tick_value}: the last {milliseconds / 1000:.0f} s")
     for tick_value, line in bot_commands:
         print(f"  bots at tick {tick_value}: {line}")
+    for tick_value, marked, reason in practice:
+        print(f"  PRACTICE {'on' if marked else 'off'} at tick {tick_value}" + (f": {reason}" if marked else ""))
     if args.patches:
         for tick_value, size in patches:
             print(f"  P at tick {tick_value}: {size} bytes")

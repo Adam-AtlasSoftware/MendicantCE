@@ -7,13 +7,14 @@ source) and scene switchers (a cutscene, a load or the pause menu its own
 scene), as Counter-Strike's game state integration gives:
 
     {"state":"playing","map":"levels\\a10\\a10","mode":"campaign","clock":95,
-     "score":0,"kills":3,"deaths":1}
+     "score":0,"kills":3,"deaths":1,"practice":false}
 
 - state: "loading", "menu" (the main menu), "cutscene", "paused" or
   "playing", in that order of precedence; map and clock are the speedrun
   state block's (speedrun_state.c: the map, the level's clock in whole
   seconds); mode "menu", "campaign" (and co-op) or the multiplayer game type;
-  score, kills and deaths the first local player's (0 with none).
+  score, kills and deaths the first local player's (0 with none); practice
+  the PRACTICE mark (practice.c, the block's SPEEDRUN_STATE_SETTING_PRACTICE).
 - The map passes through streamer mode's filter (text_filter.c), as what
   the game draws of it does.
 - Written only when it changed, at most four times a second, from the main
@@ -68,6 +69,8 @@ struct stream_state_input
 	long score;
 	long kills;
 	long deaths;
+	/* the PRACTICE mark (practice.c) */
+	boolean practice;
 };
 
 /* what the writer remembers between frames */
@@ -141,8 +144,9 @@ static void stream_state_text(
 	snprintf(text + length, size - length, "\",\"mode\":\"");
 	stream_state_append_string(text, size, input->mode);
 	length = strlen(text);
-	snprintf(text + length, size - length, "\",\"clock\":%lu,\"score\":%ld,\"kills\":%ld,\"deaths\":%ld}\n",
-		input->seconds, input->score, input->kills, input->deaths);
+	snprintf(text + length, size - length,
+		"\",\"clock\":%lu,\"score\":%ld,\"kills\":%ld,\"deaths\":%ld,\"practice\":%s}\n", input->seconds, input->score,
+		input->kills, input->deaths, input->practice ? "true" : "false");
 }
 
 /* text written to path at once: to path.tmp, then renamed over it. FALSE if
@@ -264,6 +268,7 @@ void stream_state_frame(
 	input.map = text_filter_string(block->map);
 	input.mode = stream_state_mode(input.flags);
 	input.seconds = block->game_ticks / SPEEDRUN_STATE_TICKS_PER_SECOND;
+	input.practice = (block->settings & SPEEDRUN_STATE_SETTING_PRACTICE) != 0;
 	if ((input.flags & SPEEDRUN_STATE_FLAG_IN_GAME) && game_time_initialized() && game_in_progress())
 	{
 		input.paused = game_time_get_paused();

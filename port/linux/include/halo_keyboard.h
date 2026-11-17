@@ -81,6 +81,10 @@ int halo_keyboard_binding_label(int action, int slot, char *shown, unsigned int 
 /* whether voice chat's push to talk is held (controls.push_to_talk), in the
 game and in the menus alike */
 int halo_push_to_talk_held(void);
+/* whether a binding setting's keys ("F5, Mouse 4", named as the controls.*
+settings name them) are held now: the practice keys' (game.practice_*_key),
+which are not keyboard actions */
+int halo_named_binding_held(const char *setting);
 /* whether the HUD's button prompts name the keyboard and mouse's bindings
 in place of the controller's buttons (input.button_prompts: "auto" follows
 the device the first player played with last); the first binding of an

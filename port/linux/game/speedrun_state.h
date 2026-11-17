@@ -76,7 +76,11 @@ enum
 	/* the map played is a Custom Edition map */
 	SPEEDRUN_STATE_SETTING_CUSTOM_EDITION_MAP = 1 << 4,
 	/* the map played is an MCC map */
-	SPEEDRUN_STATE_SETTING_MCC_MAP = 1 << 5
+	SPEEDRUN_STATE_SETTING_MCC_MAP = 1 << 5,
+	/* the PRACTICE mark is on (practice.c: a practice key, a cheat,
+	game_speed, a core's load or a skipped cutscene used since the level's
+	fresh start), set and cleared each frame, not only as a map begins */
+	SPEEDRUN_STATE_SETTING_PRACTICE = 1 << 6
 };
 
 /* ---------- structures */

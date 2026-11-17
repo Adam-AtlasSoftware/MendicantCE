@@ -212,6 +212,24 @@ int main(int argc, char **argv)
 		return 0;
 	}
 
+	/* the PRACTICE mark in the settings as it comes on mid-level (not only
+	as a map begins), off as it goes off, the map's settings kept */
+	CASE("practice")
+	{
+		load("levels\\a10\\a10", FALSE);
+		frame(1, 1);
+		CHECK(!(BLOCK.settings & SPEEDRUN_STATE_SETTING_PRACTICE), "the mark at the start");
+		input.practice = TRUE;
+		frame(1, 2);
+		CHECK(BLOCK.settings == (SPEEDRUN_STATE_SETTING_GRAPHICS_ENHANCED | SPEEDRUN_STATE_SETTING_PRACTICE),
+			"the mark mid-level: settings 0x%x", (unsigned)BLOCK.settings);
+		input.practice = FALSE;
+		load("levels\\a10\\a10", FALSE);
+		CHECK(BLOCK.settings == SPEEDRUN_STATE_SETTING_GRAPHICS_ENHANCED, "the mark after a fresh start: 0x%x",
+			(unsigned)BLOCK.settings);
+		return 0;
+	}
+
 	fprintf(stderr, "unknown case '%s'\n", case_name);
 	return 2;
 }

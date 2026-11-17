@@ -215,6 +215,7 @@ its bytes:
 | `V` | the game's variant and its options |
 | `B` | a bookmark: its tick and how far back it reaches |
 | `W` | a line of the host's to its bots (`docs/bot_control.md`) as the tick applied it, before the tick's `A`: its tick, then the line; the playback logs it, and the bots' recorded input (`A`) plays it |
+| `Q` | the PRACTICE mark as it changed (`port/linux/game/practice.c`), after the tick's `T`: its tick, 1 for on or 0 for off, and why ("cheat", "game_speed", "core_load", "practice key", "skip_cinematics"); the playback shows the recording's mark |
 | `E` | the end |
 
 Each tick has one shape, whatever came when: its `T`; what came from

@@ -1537,6 +1537,39 @@ int halo_push_to_talk_held(void)
 	return controller_remap_talk();
 }
 
+/* whether a binding setting's keys ("F5, Mouse 4", as the controls.*
+settings name them; unbound: "") are held now, read at each call: the
+practice keys' (port/linux/game/practice.c), which are not among the
+keyboard's actions (their bits are full) */
+int halo_named_binding_held(const char *setting)
+{
+	struct platform_input_state input;
+	const char *text = config_player_string(0, setting);
+	int slot;
+
+	if (!text || !*text)
+		return 0;
+	platform_input_read(&input, FALSE);
+	for (slot = 0; slot < MAXIMUM_BINDINGS && *text; slot++)
+	{
+		char name[64];
+		size_t length;
+
+		while (*text == ' ' || *text == ',')
+			text++;
+		length = strcspn(text, ",");
+		if (!length)
+			break;
+		snprintf(name, sizeof(name), "%.*s", (int)length, text);
+		while (*name && name[strlen(name) - 1] == ' ')
+			name[strlen(name) - 1] = 0;
+		if (input_held(&input, halo_input_from_name(name)))
+			return 1;
+		text += length;
+	}
+	return 0;
+}
+
 /* ---------- a Discord friend's ask to join (p2p_discord.c) */
 
 /* answered before the game and the menus see the keys, wherever the player

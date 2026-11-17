@@ -1461,6 +1461,24 @@ static const struct config_setting config_settings[] =
 		"most 5 GB), which it always keeps free. 730 (Disk Space Saver): the Xbox's\n"
 		"six cache files' room, the least it takes; a map is unpacked as it is\n"
 		"played, and none ahead. A change gives maps up at once." },
+	{ "game.practice_keys", _config_boolean, "false", "HALO_PRACTICE_KEYS", _environment_value, _platform_all,
+		"Practice keys for speedrunners: game.practice_save_key, _load_key and\n"
+		"_restart_key save and load the game's state (core_save, core_load)\n"
+		"and start the level over, in a game of this computer's.\n"
+		"Using one, a cheat, game_speed or a core's load shows a PRACTICE mark\n"
+		"until the level's next fresh start, whatever this is; the speedrun\n"
+		"state block and demos record it too." },
+	{ "game.practice_save_key", _config_string, "\"\"", "HALO_PRACTICE_SAVE_KEY", _environment_value, _platform_all,
+		"Practice: the key (as controls.* name one, \"F5\") that saves the game's\n"
+		"state, as the console's core_save does (game.practice_keys). Unbound\n"
+		"by default." },
+	{ "game.practice_load_key", _config_string, "\"\"", "HALO_PRACTICE_LOAD_KEY", _environment_value, _platform_all,
+		"Practice: the key that loads the state saved, as the console's\n"
+		"core_load does (game.practice_keys). Unbound by default." },
+	{ "game.practice_restart_key", _config_string, "\"\"", "HALO_PRACTICE_RESTART_KEY", _environment_value,
+		_platform_all,
+		"Practice: the key that starts the level over, as the pause menu's\n"
+		"restart does (game.practice_keys). Unbound by default." },
 	{ "game.auto_pickup", _config_boolean, "false", "HALO_AUTO_PICKUP", _environment_value, _platform_all,
 		"Multiplayer: a player with an empty weapon slot picks up a weapon by\n"
 		"walking over it, as Custom Edition does. false (the Xbox's way): they\n"

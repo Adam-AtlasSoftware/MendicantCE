@@ -1143,7 +1143,8 @@ PAGES = {
             # display, the match timer, the practice keys; MATCH TIMER moved
             # there to make room for the row)
             ("STREAMING & SPEEDRUN ›", None, _page_screen(*STREAMING),
-             "A state file for stream overlays, an on-screen input display, and the match timer.", None),
+             "A state file for stream overlays, an on-screen input display, the match timer, and practice keys "
+             "for speedrunners.", None),
             (SECTION, "MULTIPLAYER"),
             ("PLAYER NAMES", "display.player_names",
              [("ALL", "all"), ("ALLIES", "allies"), ("ENEMIES", "enemies"), ("NONE", "none")],
@@ -1822,6 +1823,10 @@ PAGES = {
             ("MATCH TIMER", "display.match_timer", ON_OFF,
              "Draws a clock at the bottom right: in multiplayer the game's, counting up from its start; in the "
              "campaign and co-op the mission's, which stops while the game is paused.", None),
+            ("PRACTICE KEYS", "game.practice_keys", ON_OFF,
+             "Keys that save and load a state and restart the level (game.practice_save_key, _load_key and "
+             "_restart_key in config.toml). They, a cheat or game_speed show PRACTICE until a fresh start.",
+             None),
         ],
     },
     STREAMER[0]: {

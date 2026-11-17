@@ -41,6 +41,7 @@ timer's autosplitter needs, in one static block it finds by its magic.
 #include "network_standard.h"
 #include "sim_rate.h"
 #include "speedrun_state.h"
+#include "practice.h"
 
 #include <string.h>
 
@@ -74,6 +75,8 @@ struct speedrun_state_input
 	unsigned long settings;
 	unsigned long build_number;
 	char const *build;
+	/* the PRACTICE mark (each frame's) */
+	boolean practice;
 };
 
 /* what the block's writer remembers between frames */
@@ -149,6 +152,12 @@ static void speedrun_state_update(
 		block->build_number = input->build_number;
 		speedrun_state_copy(block->build, input->build, SPEEDRUN_STATE_BUILD_SIZE);
 	}
+	/* (the PRACTICE mark, each frame: it comes on as a tool is used and goes
+	off only at a fresh start, which a run's timer must see as it happens) */
+	if (input->practice)
+		block->settings |= SPEEDRUN_STATE_SETTING_PRACTICE;
+	else
+		block->settings &= ~(unsigned long)SPEEDRUN_STATE_SETTING_PRACTICE;
 	/* a map loaded since the last frame: a new run, from the main menu or
 	the same map again */
 	if (tracker->map_loading && !input->main_menu &&
@@ -241,6 +250,7 @@ void speedrun_state_frame(
 	input.map_name = global_scenario_index != NONE ? tag_get_name(global_scenario_index) : "";
 	if (speedrun_state_wants_settings(&speedrun_state_tracker))
 		speedrun_state_read_settings(&input, build, sizeof(build));
+	input.practice = practice_marked();
 	speedrun_state_update(&speedrun_state_block, &speedrun_state_tracker, &input);
 }
 

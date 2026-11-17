@@ -2809,6 +2809,7 @@ symbols in this file:
 #include "network_votekick.h" /* port: port/linux/game/network_votekick.c */
 #include "network_host_controls.h" /* port: port/linux/game/network_host_controls.c */
 #include "network_host_game.h" /* port: port/linux/game/network_host_game.c */
+#include "practice.h" /* port: port/linux/game/practice.c */
 #include "server_director.h" /* port: port/linux/game/server_director.c */
 #include "bots_command.h" /* port: port/linux/game/bots_command.c */
 #include "objects/damage.h"
@@ -15795,6 +15796,9 @@ boolean hs_compile_and_evaluate(
 	boolean was_running = terminal_command_running;
 	boolean result;
 
+	/* port: a cheat, game_speed or a core's load sets the PRACTICE mark
+	(port/linux/game/practice.c) */
+	practice_console_line(expression);
 	terminal_command_running = TRUE;
 	/* port: a stopped world's time does not pass, so the update never frees
 	the console's finished commands' nodes; freed here first (hs_runtime.c) */

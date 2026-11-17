@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, function, mutated, read, run, structure  # noqa: E402
 
 SOURCE = "port/linux/game/speedrun_state.c"
-CASES = ["magic", "revert", "loading", "cutscene", "runs"]
+CASES = ["magic", "revert", "loading", "cutscene", "runs", "practice"]
 FUNCTIONS = ("speedrun_state_copy", "speedrun_state_wants_settings", "speedrun_state_update", "speedrun_state_loading",
              "speedrun_state_map_load", "speedrun_state_level_won")
 GLOBALS = ("speedrun_state_block", "speedrun_state_tracker", "speedrun_state_magic_reversed",
@@ -28,6 +28,8 @@ NEGATIVE_CONTROLS = {
     "every-map-a-new-run": (("(tracker->last_main_menu ||", "(TRUE ||"), "speedrun_state_update", "runs"),
     "magic-not-reversed": (("[SPEEDRUN_STATE_MAGIC_SIZE - 1 - index]", "[index]"), "speedrun_state_update",
                            "magic"),
+    "practice-only-as-a-map-begins": (("\tif (input->practice)\n", "\tif (input->practice && tracker->map_loading)\n"),
+                                      "speedrun_state_update", "practice"),
 }
 
 
