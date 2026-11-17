@@ -142,13 +142,25 @@ EQUIVALENCE = (("ce", ('prism_set "display.lighting ce"',)),
                ("instance", ('prism_set "debug.gbuffer_view instance"',)))
 
 
-def equivalence_timeline(scene):
+def equivalence_timeline(scene, which=None):
+    """which: None, every state in one run; "ce" or "deferred", the run of a scene whose states each take a run of
+    their own (a live scene's world, or the fog screen's layers, move by the frames drawn): Classic's frame alone, or
+    the deferred frame and its views, the same frames held in both so that Classic's and the deferred frame at each
+    pose fall on the same frame of the path"""
     t = begin(scene)
     poses = paths.move_poses(scene["keys"], scene["steps"])
     for index, step in enumerate(probe_steps(scene)):
-        for name, commands in EQUIVALENCE:
+        for state, (name, commands) in enumerate(EQUIVALENCE):
+            if which == "ce" and state > 0:
+                t.hold(poses[step - 1], scene["state_settle"] // 2)
+                continue
+            if which == "deferred" and state == 0:
+                name, commands = EQUIVALENCE[1]
+            elif which == "deferred" and state == 1:
+                name, commands = "deferred_again", ()
             t.at(*commands)
-            t.hold(poses[step - 1], scene["state_settle"] // 2, save=f"equivalence/p{index}_{name}.png")
+            t.hold(poses[step - 1], scene["state_settle"] // 2,
+                   save=None if name == "deferred_again" else f"equivalence/p{index}_{name}.png")
         t.at('prism_set "display.lighting ce"', 'prism_set "debug.gbuffer_view off"')
     return t
 
@@ -213,7 +225,13 @@ def run(scene, timeline, out, kind, args):
 def capture(scene, what, args):
     out = Path(args.out) / scene["id"]
     if what == "equivalence":
-        run(scene, equivalence_timeline(scene), out, "equivalence", args)
+        # (a live scene, or one whose frames move by the frames drawn (the fog screen's layers: "separate"), each
+        # state its own run)
+        if scene.get("live") or scene.get("separate"):
+            run(scene, equivalence_timeline(scene, "ce"), out, "equivalence_ce", args)
+            run(scene, equivalence_timeline(scene, "deferred"), out, "equivalence_deferred", args)
+        else:
+            run(scene, equivalence_timeline(scene), out, "equivalence", args)
         return
     if what == "bake":
         run(scene, bake_timeline(scene), out, "bake", args)

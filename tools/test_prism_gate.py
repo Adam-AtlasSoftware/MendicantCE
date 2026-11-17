@@ -265,10 +265,28 @@ def test_the_capture_set_is_frozen_as_the_design_names_it():
         assert scene["reference_frames"] == 4096
 
 
+def test_equivalence_runs_of_their_own():
+    """a scene whose states each take a run (a live scene, or "separate": the fog screen's layers move by the frames
+    drawn) has Classic's frame and the deferred frame at each probe on the same frame of the path, the deferred
+    run's views after it, and the one-run timeline's frames where they were"""
+    scene = dict(capture.load_scenes()["G2"])
+    whole = capture.equivalence_timeline(scene)
+    ce = capture.equivalence_timeline(scene, "ce")
+    deferred = capture.equivalence_timeline(scene, "deferred")
+    assert whole.length == ce.length == deferred.length
+    by_name = {name: frame for frame, name in deferred.saves.items()}
+    for frame, name in ce.saves.items():
+        assert name.endswith("_ce.png")
+        assert by_name[name.replace("_ce.png", "_deferred.png")] == frame
+    assert set(deferred.saves.values()) == set(whole.saves.values()) - set(ce.saves.values())
+    assert {frame for frame, name in whole.saves.items() if name.endswith("_ce.png")} == set(ce.saves)
+
+
 def test_the_thresholds():
     limits = json.loads((ROOT / "tools/prism_gate/thresholds.json").read_text())
     assert set(limits["gate"]) == {"error", "blotch", "flicker", "flip_still", "flip_moving", "ghost_frames",
-                                   "sky_most", "reference_noise", "equivalence_flip", "material_source_coverage"}
+                                   "sky_most", "reference_noise", "equivalence_flip", "material_source_coverage",
+                                   "bake_flip", "raster_flip"}
     assert 0 < limits["bake"]["noise"] < 0.1
     # (M1: the design's "CE light, deferred" against Classic, and every opaque pixel's material)
     assert limits["gate"]["equivalence_flip"] == 0.05
