@@ -212,6 +212,12 @@ gamepad's config.toml's */
 #define PAD_PLAYERS 4
 #define PAD_PLAYER_SLOT(gamepad) ((gamepad) >= 0 && (gamepad) < PAD_PLAYERS ? (gamepad) : PAD_PLAYERS)
 
+void halo_stick_ranges(long percent, long outer, short *dead_range, short *live_range)
+{
+	*dead_range = percent < 0 || percent > STICK_DEAD_ZONE_MAXIMUM ? STICK_DEAD_RANGE : (short)(percent * 32767 / 100);
+	*live_range = outer <= 0 || outer > STICK_OUTER_DEAD_ZONE_MAXIMUM ? 32767 : (short)(32767 - outer * 32767 / 100);
+}
+
 /* a gamepad's sticks' dead zones (stick 0 the left, 1 the right), of 32767:
 the deflection read as none, its player's input.left_stick_dead_zone and
 input.right_stick_dead_zone as a percentage, else the game's own; and the one
@@ -238,13 +244,9 @@ static void stick_dead_zones(short gamepad, short ranges[2], short live_ranges[2
 		pads[slot].read_at = config_changes();
 		for (index = 0; index < 2; index++)
 		{
-			long percent = config_player_integer(slot < PAD_PLAYERS ? slot : -1, settings[index]);
-			long outer = config_player_integer(slot < PAD_PLAYERS ? slot : -1, outer_settings[index]);
-
-			pads[slot].ranges[index] = percent < 0 || percent > STICK_DEAD_ZONE_MAXIMUM
-				? STICK_DEAD_RANGE : (short)(percent * 32767 / 100);
-			pads[slot].live_ranges[index] = outer <= 0 || outer > STICK_OUTER_DEAD_ZONE_MAXIMUM
-				? 32767 : (short)(32767 - outer * 32767 / 100);
+			halo_stick_ranges(config_player_integer(slot < PAD_PLAYERS ? slot : -1, settings[index]),
+				config_player_integer(slot < PAD_PLAYERS ? slot : -1, outer_settings[index]),
+				&pads[slot].ranges[index], &pads[slot].live_ranges[index]);
 		}
 	}
 	ranges[0] = pads[slot].ranges[0];

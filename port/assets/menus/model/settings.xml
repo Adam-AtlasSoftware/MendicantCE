@@ -1200,7 +1200,13 @@
 			<choice shown="45%" value="45"/>
 			<choice shown="50%" value="50"/>
 		</row>
-		<section key="section_3" title="OUTER DEAD ZONES"/>
+		<row key="stick_test_left" kind="status" label="LEFT READING" crumb="CONTROLS › CONTROLLER › STICK SETTINGS">
+			<help>The left stick now: side to side, then up and down, in percent of its travel; after the bar, as you move with the dead zones on this page. Let go of it: what is left is its drift. Set the dead zone above it.</help>
+		</row>
+		<row key="stick_test_right" kind="status" label="RIGHT READING" crumb="CONTROLS › CONTROLLER › STICK SETTINGS">
+			<help>The right stick now: side to side, then up and down, in percent of its travel; after the bar, as the view turns with the dead zones and shape on this page. Let go of it: what is left is its drift. Set the dead zone above it.</help>
+		</row>
+		<section key="section_5" title="OUTER DEAD ZONES"/>
 		<row key="left_stick_outer_dead_zone" kind="choice" setting="input.left_stick_outer_dead_zone" label="LEFT STICK" crumb="CONTROLS › CONTROLLER › STICK SETTINGS" search="deadzone">
 			<help>How much of the left stick's travel at its edge counts as a full push. Raise it for a worn stick that stops short of its edge and never reaches full speed. None is the game's own.</help>
 			<choice shown="NONE" value="0"/>
@@ -1221,7 +1227,7 @@
 			<choice shown="25%" value="25"/>
 			<choice shown="30%" value="30"/>
 		</row>
-		<section key="section_6" title="LOOK STICK"/>
+		<section key="section_8" title="LOOK STICK"/>
 		<row key="look_dead_zone_shape" kind="choice" setting="input.look_dead_zone_shape" label="SHAPE" crumb="CONTROLS › CONTROLLER › STICK SETTINGS" search="aim deadzone" search_choices="axial round">
 			<help>The shape of the look stick's dead zone. Axial: each direction its own, a square in the middle, as Classic aim. Round: the same whichever way you push, as Modern aim. Auto follows your Aim Style.</help>
 			<choice shown="AUTO" value="auto"/>
@@ -1243,7 +1249,7 @@
 			<choice shown="1.5X" value="1.5"/>
 			<choice shown="2X" value="2"/>
 		</row>
-		<section key="section_9" title="MODERN AIM"/>
+		<section key="section_11" title="MODERN AIM"/>
 		<row key="modern_aim_acceleration_angle" kind="choice" setting="input.modern_aim_acceleration_angle" label="ACCELERATION ANGLE" crumb="CONTROLS › CONTROLLER › STICK SETTINGS" search="aim acceleration" enabled="aim_modern">
 			<help>Modern aim: how far from straight to the side, in degrees, a full push still speeds up the turn. Lower keeps more diagonals from speeding it up.</help>
 			<choice shown="0" value="0"/>

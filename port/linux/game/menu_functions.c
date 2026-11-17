@@ -89,6 +89,7 @@ their handlers open opens.
 #include "cache/cache_files.h"
 #include "game/game.h"
 #include "input/input.h"
+#include "input/input_abstraction.h"
 #include "interface/event_manager.h"
 #include "interface/player_ui.h"
 #include "interface/ui_widget.h"
@@ -2560,6 +2561,72 @@ static void gyro_rows_show(struct widget_instance *list)
 		"");
 }
 
+/* Advanced Stick Settings' readings (#1140): each stick of the player whose
+profile Settings edits, as the game read it last (input_port_raw_stick:
+left to right, then down to up, in percent of its travel), then after the
+dead zones and the look stick's shape the page shows, its changes kept
+before OK among them (settings_value), as input_xbox.c's
+input_port_fix_stick_dead_zones would take it with them; only on the page,
+nothing drawn or kept anywhere else */
+static int stick_test_percent(short value)
+{
+	return (int)PIN((long)value * 100 / 32767, -100, 100);
+}
+
+static void stick_test_text(short gamepad, short stick, char *text, unsigned int size)
+{
+	static char const *const inner[2] = { "input.left_stick_dead_zone", "input.right_stick_dead_zone" };
+	static char const *const outer[2] = { "input.left_stick_outer_dead_zone", "input.right_stick_outer_dead_zone" };
+	char value[32];
+	long inner_percent = -1;
+	long outer_percent = 0;
+	short dead_range, live_range;
+	boolean round = FALSE;
+	point2d raw, adjusted;
+
+	if (settings_value(inner[stick], value, sizeof(value)))
+		inner_percent = atol(value);
+	if (settings_value(outer[stick], value, sizeof(value)))
+		outer_percent = atol(value);
+	halo_stick_ranges(inner_percent, outer_percent, &dead_range, &live_range);
+	/* (the look stick's shape: Auto, or none set, Modern aim's round) */
+	if (stick == input_abstraction_port_look_stick(gamepad))
+	{
+		if (!settings_value("input.look_dead_zone_shape", value, sizeof(value)))
+			value[0] = 0;
+		if (!strcmp(value, "round"))
+			round = TRUE;
+		else if (strcmp(value, "axial") && settings_value("input.aim_style", value, sizeof(value)))
+			round = !strcmp(value, "modern");
+	}
+	input_port_raw_stick(gamepad, stick, &raw);
+	input_port_fix_stick(raw.x, raw.y, dead_range, live_range, round, &adjusted);
+	snprintf(text, size, "%d,%d | %d,%d", stick_test_percent(raw.x), stick_test_percent(raw.y),
+		stick_test_percent(adjusted.x), stick_test_percent(adjusted.y));
+}
+
+static void stick_test_rows_show(struct widget_instance *list)
+{
+	static char const *const rows[2] = { "stick_test_left", "stick_test_right" };
+	struct controller_device device;
+	short gamepad = settings_local_player;
+	short stick;
+
+	if (!settings_model_row(list, rows[0]))
+		return;
+	controller_device_get(gamepad, &device);
+	for (stick = 0; stick < 2; stick++)
+	{
+		char text[40];
+
+		if (device.name[0])
+			stick_test_text(gamepad, stick, text, sizeof(text));
+		else
+			snprintf(text, sizeof(text), "%s", "NO CONTROLLER");
+		settings_status_set(list, rows[stick], text);
+	}
+}
+
 static void sim_rate_row_show(struct widget_instance *list)
 {
 	struct widget_instance *row = named(list, "op_sim_rate", 0);
@@ -4815,6 +4882,7 @@ static void settings_page_update(struct widget_instance *list)
 	settings_held_rows_show(list);
 	viewmodel_weapon_rows_show(list);
 	gyro_rows_show(list);
+	stick_test_rows_show(list);
 	settings_each(screen, setting_stash);
 	settings_segments_show(list);
 	settings_sliders_show(list);

@@ -442,6 +442,11 @@ short halo_stick_dead_range(short gamepad, short stick);
 rim, the original's) less its player's input.left_stick_outer_dead_zone or
 input.right_stick_outer_dead_zone (port/linux/src/xinput_sdl.c) */
 short halo_stick_live_range(short gamepad, short stick);
+/* a stick's dead range and live range, of 32767, from its settings'
+percentages (input.left_stick_dead_zone and input.left_stick_outer_dead_zone,
+or the right's): halo_stick_dead_range's and halo_stick_live_range's
+(port/linux/src/xinput_sdl.c) */
+void halo_stick_ranges(long percent, long outer, short *dead_range, short *live_range);
 /* the shape of a gamepad's look stick's dead zone: its player's
 input.look_dead_zone_shape, Auto (the aim style's: round under Modern, each
 direction's own under Classic), Axial or Round (port/linux/src/xinput_sdl.c) */
