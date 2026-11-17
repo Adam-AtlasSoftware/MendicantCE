@@ -16,11 +16,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, function, mutated, read, run  # noqa: E402
 
 CASES = ["centred", "drawn", "fraction", "capitals", "gap", "advance", "wrapped", "equals", "equals-advance",
-         "equals-none"]
+         "equals-none", "symbol"]
 
 SOURCE = "port/linux/game/hud_key_prompts.c"
 FUNCTIONS = ("key_cap_metrics", "key_cap_layout", "key_cap_equals_layout", "key_text_measure", "key_text_span", "key_equals_length", "hud_key_prompt_cap_advance",
-             "hud_key_prompt_legend_advance", "key_cap_draw", "hud_key_prompt_draw_equals")
+             "hud_key_prompt_legend_advance", "key_cap_draw", "hud_key_prompt_draw_equals",
+             "hud_key_prompt_draw_symbol")
 
 # a fault in the code, and the case that must catch it
 NEGATIVE_CONTROLS = {
@@ -54,6 +55,9 @@ NEGATIVE_CONTROLS = {
     "cap-on-whole-unit": (("capitals_middle = (real)middle + (draw_string_capital_height() % 2 ? 0.5f : 0.0f);",
                            "capitals_middle = (real)middle;"), "capitals"),
     # the cap half a unit below the capitals, as before (its top a unit nearer them than its bottom)
+    # a symbol's cap filled as a key's (the prompt's colour faintly), not its own fill
+    "symbol-unfilled": (("\tif (key_cap_symbol)\n\t\tfill = (color & 0xFF000000UL) | (key_cap_symbol_fill & 0x00FFFFFFUL);",
+                         ""), "symbol"),
     "cap-half-low": (("capitals_middle = (real)middle + (draw_string_capital_height() % 2 ? 0.5f : 0.0f);",
                       "capitals_middle = (real)middle + 0.5f;"), "capitals"),
 }
@@ -64,6 +68,10 @@ def generated(fault=None):
     # (the last cap's place, which the "=" is spaced from)
     state = "\n".join(re.findall(r"^static short key_cap_(?:after_line|letters_x)\b[^\n]*;$", source, re.M))
     assert state.count("static short") == 2
+    # (a controller layout's symbol being drawn: hud_key_prompt_draw_symbol's)
+    symbol = re.findall(r"^static (?:boolean|pixel32) key_cap_symbol\w*;$", source, re.M)
+    assert len(symbol) == 4
+    state += "\n" + "\n".join(symbol)
     state += "\n" + re.search(r"^#define KEY_CAP_EQUALS_ROOM [^\n]+$", source, re.M).group(0)
     code = state + "\n\n" + "\n\n".join(function(source, name) for name in FUNCTIONS)
     if fault:

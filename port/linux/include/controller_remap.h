@@ -59,6 +59,10 @@ char const *controller_remap_button_name(int button, int family);
 struct controller_device;
 char const *controller_remap_device_button_name(int button, struct controller_device const *device);
 int controller_remap_cycle(int button, int direction);
+/* a physical token's button ("south", "left_paddle"; "unbound" 255), -1 for
+ * none (length: its characters); a button's token ("unbound" for none) */
+int controller_remap_token(char const *text, size_t length);
+char const *controller_remap_token_name(int button);
 
 /* Game-side access to the existing profile and menu context. No profile writes. */
 void controller_remap_profile(short port, unsigned char *buttons);
@@ -89,6 +93,11 @@ void controller_remap_prompt(short port, struct game_input_preferences *preferen
  * for none, an extra button's name on the port's controller ("L4", "P1",
  * "TOUCHPAD"); NULL for a button that has its icon. */
 wchar_t const *controller_remap_prompt_text(short port, int button);
+/* The symbol a prompt draws for an extra button controller_remap_prompt gave,
+ * where the port's controller has a layout that describes it (#1143,
+ * controller_layouts.h): TRUE and the symbol; FALSE for none, its words then */
+struct controller_layout_control;
+int controller_remap_prompt_symbol(short port, int button, struct controller_layout_control *symbol);
 
 /* Raw physical input only, before keyboard/touch merging. Returns true while
  * capture consumes this port. The caller also suppresses its merged menu input. */

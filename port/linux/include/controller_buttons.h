@@ -23,6 +23,9 @@ struct controller_device
     /* a PlayStation pad's generation (3, 4 or 5), else 0 */
     int playstation;
     char name[128];
+    /* SDL's GUID of the pad, its 32 hex digits (empty for none): what a
+     * controller layout is kept by (controller_layouts.h) */
+    char guid[33];
 };
 
 /* Uses the same port assignment as XInput, including keyboard/pad split screen.

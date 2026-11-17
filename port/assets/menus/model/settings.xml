@@ -1123,6 +1123,9 @@
 		<row key="controller_buttons" kind="link" label="CONTROLLER BUTTONS ›" crumb="CONTROLS › CONTROLLER › BUTTON REMAPPING" open="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_buttons/controller_buttons_screen">
 			<help>The HUD's buttons drawn as your controller has them, Xbox, PlayStation or Switch, and the style of each.</help>
 		</row>
+		<row key="controller_layouts" kind="link" label="CONTROLLER LAYOUTS ›" crumb="CONTROLS › CONTROLLER › BUTTON REMAPPING" open="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/controller_layouts_screen">
+			<help>Name your controller's paddles and extra buttons and give each a symbol, which the prompts then draw in place of words like P3.</help>
+		</row>
 		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
 		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>
 		<button key="button_cancel" kind="cancel" run="port settings page cancel" help="Goes back without these changes."/>
@@ -1586,6 +1589,18 @@
 			<help>The Xbox's bumpers as the original controller's black and white buttons, or as LB and RB.</help>
 			<choice shown="ORIGINAL XBOX" value="original"/>
 			<choice shown="MODERN XBOX" value="modern"/>
+		</row>
+		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
+		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>
+		<button key="button_cancel" kind="cancel" run="port settings page cancel" help="Goes back without these changes."/>
+	</screen>
+	<screen name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/controller_layouts_screen" kind="settings" layout="page" geometry="tall" title="CONTROLLER LAYOUTS">
+		<section key="section_0" title="THIS CONTROLLER"/>
+		<row key="layout_controller" kind="status" label="CONTROLLER" crumb="CONTROLS › … › CONTROLLER LAYOUTS">
+			<help>The controller of the player whose settings these are, and how many of its paddles and extra buttons its layout describes. Each controller keeps its own layout.</help>
+		</row>
+		<row key="edit_buttons" kind="link" label="EDIT BUTTONS ›" crumb="CONTROLS › … › CONTROLLER LAYOUTS" open="screens/controller_layout">
+			<help>Name each paddle and extra button, and pick its symbol: a legend of up to 3 characters, a shape and a color. Button Remapping's prompts draw it.</help>
 		</row>
 		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
 		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>

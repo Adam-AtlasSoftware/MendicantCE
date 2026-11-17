@@ -107,6 +107,7 @@ their handlers open opens.
 #include "halo_menus.h"
 #include "controller_buttons.h"
 #include "controller_remap.h"
+#include "controller_layouts.h"
 #include "custom_edition_cache.h"
 #include "mcc_ui.h"
 #include "mcc_pause.h"
@@ -2567,6 +2568,9 @@ static void gyro_rows_show(struct widget_instance *list)
 /* Stick Test's readings and circles, its screen's (screens/stick_test.xml) */
 #include "stick_test_menu.inc"
 
+/* (Button Remapping's Controller Layouts page's rows: controller_layout_menu.inc) */
+static void layout_rows_show(struct widget_instance *list);
+
 static void sim_rate_row_show(struct widget_instance *list)
 {
 	struct widget_instance *row = named(list, "op_sim_rate", 0);
@@ -4939,6 +4943,7 @@ static void settings_page_update(struct widget_instance *list)
 	settings_held_rows_show(list);
 	viewmodel_weapon_rows_show(list);
 	gyro_rows_show(list);
+	layout_rows_show(list);
 	settings_each(screen, setting_stash);
 	settings_segments_show(list);
 	settings_sliders_show(list);
@@ -16211,6 +16216,9 @@ boolean pc_menu_edit_leave(short local_player_index, boolean save)
 #include "campaign_menu.inc"
 /* (co-op's screens, the new engine's: HOST, JOIN, the lobby's WHO CAN JOIN) */
 #include "coop_menu.inc"
+
+/* Controller Layouts' page and Controller Layout's screen (screens/controller_layout.xml) */
+#include "controller_layout_menu.inc"
 
 /* ---------- the hand-written screens' (menu_screen.c) */
 

@@ -2987,6 +2987,11 @@ static const struct config_setting config_settings[] =
 	{ "debug.menu_open", _config_string, "\"\"", "HALO_MENU_OPEN", _environment_value, _platform_all,
 		"Start on this screen of the menus (port/assets/menus) instead of the main\n"
 		"menu, a player profile being edited; empty for the main menu." },
+	{ "debug.controller_layout_guid", _config_string, "\"\"", "HALO_CONTROLLER_LAYOUT_GUID", _environment_value,
+		_platform_all,
+		"Controller Layout describes the controller of this SDL GUID (32 hex\n"
+		"digits) while the player has none connected: for tests and pictures.\n"
+		"Empty for none." },
 	{ "debug.menu_layout", _config_string, "\"\"", "HALO_MENU_LAYOUT", _environment_value, _platform_all,
 		"Write the open menu screen's geometry to this file (in the data root) as\n"
 		"JSON, every 30th frame of the menus: each widget's box, each text's box,\n"

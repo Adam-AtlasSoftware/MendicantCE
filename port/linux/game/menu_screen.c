@@ -99,6 +99,11 @@ frame, their words, and a stick's circle drawn) */
 void pc_menu_stick_test_frame(struct widget_instance *screen);
 int pc_menu_stick_value(char const *name, char *value, unsigned long size);
 boolean pc_menu_stick_test_draw(short stick, real x, real y, real radius);
+/* (menu_functions.c's controller_layout_menu.inc: Controller Layout's
+buttons, their words, and its actions, the row given) */
+extern struct menu_table_source const pc_menu_layout_source;
+int pc_menu_layout_value(char const *name, char *value, unsigned long size);
+int pc_menu_layout_action(char const *name, short row);
 
 /* ---------- constants */
 
@@ -302,6 +307,8 @@ static boolean screen_call_coop(struct widget_instance *widget, struct event_rec
 	boolean *deleted);
 static boolean screen_call_add_player(struct widget_instance *widget, struct event_record *event, char const *name,
 	boolean *deleted);
+static boolean screen_call_layout(struct widget_instance *widget, struct event_record *event, char const *name,
+	boolean *deleted);
 /* the row of the table an action is run for (0 up, on the table), NONE for
 none (a key's, a button's) */
 static short screen_action_row = NONE;
@@ -465,6 +472,16 @@ static struct screen_action const screen_actions[] =
 	{ "pause revert", NULL, NULL, NULL, NULL, "ui\\shell\\error\\confirm_restartatsave_modal_fullscreen", NULL },
 	{ "pause restart", NULL, NULL, NULL, NULL, "ui\\shell\\error\\confirm_restartlevel_modal_fullscreen", NULL },
 	{ "pause quit", NULL, NULL, "pause game return to main menu", NULL, NULL, NULL },
+	/* (Controller Layout's, screens/controller_layout.xml (menu_functions.c's
+	controller_layout_menu.inc): the chosen button named or its legend typed
+	on the keyboard, its description cleared, its shape and color stepped) */
+	{ "layout name", NULL, NULL, NULL, NULL, NULL, NULL, screen_call_layout },
+	{ "layout legend", NULL, NULL, NULL, NULL, NULL, NULL, screen_call_layout },
+	{ "layout clear", NULL, NULL, NULL, NULL, NULL, NULL, screen_call_layout },
+	{ "layout shape left", NULL, NULL, NULL, NULL, NULL, NULL, screen_call_layout },
+	{ "layout shape right", NULL, NULL, NULL, NULL, NULL, NULL, screen_call_layout },
+	{ "layout color left", NULL, NULL, NULL, NULL, NULL, NULL, screen_call_layout },
+	{ "layout color right", NULL, NULL, NULL, NULL, NULL, NULL, screen_call_layout },
 };
 
 static char const *const screen_action_names[] =
@@ -484,6 +501,8 @@ static char const *const screen_action_names[] =
 	"add player done", "add player back",
 	"close", "close all", "pause leave", "open host controls", "pause end game", "pause chapters",
 	"pause friendly fire", "pause revert", "pause restart", "pause quit",
+	"layout name", "layout legend", "layout clear", "layout shape left", "layout shape right", "layout color left",
+	"layout color right",
 };
 
 /* a binding's value: the saved game's mission and difficulty (player 1's
@@ -522,6 +541,8 @@ static char const *const screen_binding_names[] =
 	"pause.chapters", "stick.left", "stick.right", "stick.left.drift", "stick.right.drift",
 	"benchmark.failure", "benchmark.verdict", "benchmark.held", "benchmark.pacing",
 	"benchmark.settings", "benchmark.gpu", "benchmark.cpu", "benchmark.file", "benchmark.scenario",
+	"layout.controller", "layout.title", "layout.state", "layout.shape", "layout.color", "layout.about",
+	"layout.set", "layout.unset",
 };
 
 /* the row sources a table may name (menu_table.h), and their names */
@@ -533,6 +554,7 @@ static struct menu_table_source const *const screen_sources[] =
 	&pc_menu_color_source,
 	&pc_menu_add_player_source,
 	&benchmark_results_source,
+	&pc_menu_layout_source,
 };
 
 static char const *const screen_source_names[] =
@@ -543,6 +565,7 @@ static char const *const screen_source_names[] =
 	"profile.colors",
 	"add.players",
 	"benchmark.results",
+	"layout.controls",
 };
 
 /* the chats a <chat> may name (menu_table.h), and their names */
@@ -587,6 +610,9 @@ static int screen_value(void *context, char const *name, char *value, unsigned l
 	game: coop_menu.inc) */
 	if (!strncmp(name, "coop.", 5))
 		return pc_menu_coop_value(name, value, size);
+	/* (Controller Layout's: controller_layout_menu.inc) */
+	if (!strncmp(name, "layout.", 7))
+		return pc_menu_layout_value(name, value, size);
 	/* (Stick Test's: the sticks' readings and drift, stick_test_menu.inc) */
 	if (!strncmp(name, "stick.", 6))
 		return pc_menu_stick_value(name, value, size);
@@ -699,6 +725,9 @@ static struct screen_place const screen_places[] =
 	/* (Stick Test, as Advanced Stick Settings' STICK TEST › opens it: its
 	sticks read each frame it is drawn, stick_test_menu.inc) */
 	{ "stick_test", "screens\\stick_test", pc_menu_stick_test_frame, NULL },
+	/* (Controller Layout, as Button Remapping's Controller Layouts' EDIT
+	BUTTONS › opens it: controller_layout_menu.inc) */
+	{ "controller_layout", "screens\\controller_layout", NULL, NULL },
 	/* (the on-screen keyboard, a pop-up: keyboard.c opens it, reads its
 	input each frame it is drawn and takes every event of its own) */
 	{ "keyboard", "screens\\keyboard", keyboard_frame, NULL, NULL, keyboard_event, keyboard_screen_closed },
@@ -2299,6 +2328,10 @@ void menu_screen_widget_drawing(struct widget_instance const *widget, point2d of
 		/* (its <keyboard>, where its anchor is) */
 		if (open->widget && open->keyboard_area == widget)
 			keyboard_draw((real)(offset.x + widget->horizontal_offset), (real)(offset.y + widget->vertical_offset));
+		/* (its table's symbols' caps, under their legends: Controller
+		Layout's) */
+		if (open->widget && tall_screens[index])
+			tall_symbol_draw(tall_screens[index], widget, offset);
 		/* (its chat's on-screen keyboard, over everything) */
 		if (open->widget && tall_screens[index] && tall_screens[index]->chat_keyboard == widget)
 			tall_chat_keyboard_draw(tall_screens[index], offset);
@@ -2514,6 +2547,17 @@ static boolean screen_call_color(struct widget_instance *widget, struct event_re
 	}
 	menu_tags_back(widget, event, deleted);
 	return TRUE;
+}
+
+/* Controller Layout's actions (menu_functions.c's controller_layout_menu.inc),
+the row given */
+static boolean screen_call_layout(struct widget_instance *widget, struct event_record *event, char const *name,
+	boolean *deleted)
+{
+	(void)widget;
+	(void)event;
+	*deleted = FALSE;
+	return pc_menu_layout_action(name, screen_action_row) != 0;
 }
 
 /* the lobby's actions of C's own (menu_functions.c's lobby_menu.inc), the
