@@ -197,3 +197,19 @@ def test_the_atrous_step_keeps_an_instance_edge_and_smooths_noise():
     assert abs(out[:, 8:].mean() - 1.0) < 0.02
     # (the noise down)
     assert (out - clean)[:, 2:6].std() < 0.5 * (values - clean)[:, 2:6].std()
+
+
+def test_the_fast_lamp_pick_is_the_bakes():
+    """lamp_pick_fast's search by halves picks the entry the bake's linear pick picks, and its share is the
+    entry's weight over the list's"""
+    rng = np.random.default_rng(23)
+    for _ in range(200):
+        n = int(rng.integers(1, 65))
+        weights = rng.uniform(0.0, 1.0, n) * (rng.random(n) > 0.2)
+        if weights.sum() <= 0.0:
+            weights[0] = 1.0
+        cumulative = np.cumsum(weights)
+        for u in rng.random(8):
+            k, share = model.list_search(cumulative, u)
+            assert k == model.list_pick_linear(cumulative, u)
+            assert share == pytest.approx(weights[k] / weights.sum())

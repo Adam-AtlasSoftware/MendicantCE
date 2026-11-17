@@ -153,3 +153,26 @@ def atrous_step(values, instances, variance, stride, sigma_scale=4.0):
             out[y, x] = total / wsum if wsum > 0 else values[y, x]
             out_var[y, x] = var / (wsum * wsum) if wsum > 0 else variance[y, x]
     return out, out_var
+
+
+def list_pick_linear(cumulative, u):
+    """the bake's list_pick (xgpu_vulkan_bake_glsl.inc): the first entry whose cumulative weight reaches u x total"""
+    x = u * cumulative[-1]
+    k = 0
+    while k + 1 < len(cumulative) and cumulative[k] < x:
+        k += 1
+    return k
+
+
+def list_search(cumulative, u):
+    """the path tracer's list_search: the same entry found by halves, and its share"""
+    x = u * cumulative[-1]
+    lo, hi = 0, len(cumulative) - 1
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if cumulative[mid] < x:
+            lo = mid + 1
+        else:
+            hi = mid
+    below = cumulative[lo - 1] if lo > 0 else 0.0
+    return lo, (cumulative[lo] - below) / max(cumulative[-1], 1e-20)
