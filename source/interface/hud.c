@@ -1525,7 +1525,10 @@ static void temporary_hud_draw(
 Edition's HUD has none), counting up from the game's
 first tick, which the items' respawn periods count from as well
 (game_engine_update_item_spawn's game_time_get() % respawn_period): an item
-is back on the map at every multiple of its period on the clock. */
+is back on the map at every multiple of its period on the clock. In the
+campaign and co-op it is the mission's timer: the level's game time, which
+stops while the game is paused and loads, and which a checkpoint's revert
+takes back with the rest of the game's state. */
 static boolean hud_match_timer_setting(
 	void)
 {
@@ -1542,6 +1545,15 @@ static boolean hud_match_timer_setting(
 	return setting;
 }
 
+/* whether this view draws the clock: the match's in multiplayer, the
+mission's in the campaign and co-op; none in a cinematic or with the HUD
+hidden */
+static boolean hud_match_timer_shown(
+	void)
+{
+	return hud_match_timer_setting() && !cinematic_in_progress() && hud_scripted_globals->show_hud;
+}
+
 static void hud_draw_match_timer(
 	void)
 {
@@ -1551,7 +1563,7 @@ static void hud_draw_match_timer(
 	rectangle2d bounds;
 	struct font_header *font;
 
-	if (!hud_match_timer_setting() || font_index == NONE)
+	if (!hud_match_timer_shown() || font_index == NONE)
 		return;
 	ticks_to_unicode_time_string(game_time_get(), NUMBEROF(time_string), time_string);
 	/* (a time under a minute is drawn with no minutes digit, which a clock
@@ -1631,12 +1643,9 @@ void hud_draw_screen(
 		if (cinematic_in_progress())
 			coop_skip_vote_draw(render.local_player_index);
 
-		/* port: the match clock, in multiplayer */
-		if (game_engine_running() && !cinematic_in_progress() &&
-			hud_scripted_globals->show_hud)
-		{
-			hud_draw_match_timer();
-		}
+		/* port: the match clock, in multiplayer; the mission's timer in the
+		campaign and co-op */
+		hud_draw_match_timer();
 
 		if (!game_time_get_paused() &&
 			render.local_player_index == local_player_get_next(NONE))

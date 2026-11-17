@@ -467,7 +467,8 @@ static const struct config_setting config_settings[] =
 		"Draw the match clock at the bottom right in multiplayer. It counts up\n"
 		"from the game's first tick, which the items' respawn periods count from\n"
 		"too: a weapon is back on the map at every multiple of its period on the\n"
-		"clock." },
+		"clock. In the campaign and co-op it is the mission's timer: the level's\n"
+		"game time, which stops while the game is paused." },
 	{ "display.perf_overlay", _config_string, "\"off\"", "HALO_PERF_OVERLAY", _environment_value, _platform_all,
 		"The performance overlay at the bottom right: \"off\"; \"simple\", the\n"
 		"frame rate averaged over half a second, green at 30 and over (the\n"

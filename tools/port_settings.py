@@ -1114,6 +1114,10 @@ PAGES = {
              "Your living teammates' views in the HUD's top line, with their names, shields and distances, in "
              "co-op and team games: the SPARTAN LINK key (or D-pad Down) shows and hides them. Off: the key does "
              "nothing.", None),
+            # (source/interface/hud.c: the mission's timer in the campaign and co-op)
+            ("MATCH TIMER", "display.match_timer", ON_OFF,
+             "Draws a clock at the bottom right: in multiplayer the game's, counting up from its start; in the "
+             "campaign and co-op the mission's, which stops while the game is paused.", None),
             (SECTION, "MULTIPLAYER"),
             ("PLAYER NAMES", "display.player_names",
              [("ALL", "all"), ("ALLIES", "allies"), ("ENEMIES", "enemies"), ("NONE", "none")],
@@ -1129,8 +1133,6 @@ PAGES = {
             ("WHILE DEAD", "game.spectate_on_death", [("TEAMMATE'S VIEW", "teammates"), ("DEATH CAMERA", "off")],
              "While you wait to respawn in co-op or a team game: watch a living teammate through their eyes "
              "(A or Jump for the next), or the game's death camera.", None),
-            ("MATCH TIMER", "display.match_timer", ON_OFF,
-             "Draws a clock at the bottom right in multiplayer, counting up from the start of the game.", None),
             # (the text chat's: port/linux/game/network_chat.c)
             (SECTION, "CHAT"),
             ("TEXT CHAT", "display.text_chat", [("SHOW", "true"), ("HIDE", "false")],
