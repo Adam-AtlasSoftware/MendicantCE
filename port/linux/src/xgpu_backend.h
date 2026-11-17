@@ -818,6 +818,9 @@ that frame so much earlier, so that it is on screen at its refresh all the
 same. */
 #define XGPU_FRAME_EXTRA_FRAMES 4
 void xgpu_backend_frame_extra(unsigned long microseconds);
+/* the frames still to be told of xgpu_backend_frame_extra's (0: no load
+zone's switch coming): read, for debug.demo_perf_log's loads */
+unsigned long xgpu_backend_frame_extra_pending(void);
 /* Acknowledged loading ownership change, before map storage is reused. */
 void xgpu_backend_loading(int active);
 int xgpu_backend_loading_owned(void);

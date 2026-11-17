@@ -88,6 +88,7 @@ on the render thread, as report_write is); a log line a copy into the ring.
 #include "report.h"
 #include "input_trace.h"
 #include "xgpu_backend.h"
+#include "demo_files.h"
 
 #include <pthread.h>
 #include <stdio.h>
@@ -290,6 +291,228 @@ static void report_frame_log(long long micros, const struct report_frame_work *w
 	}
 }
 
+/* ---------- debug.demo_perf_log (#1148)
+
+With the setting on (off by default), each demo recorded (port/linux/game/
+demo.c, docs/demos.md) has a performance log beside it in the demos folder:
+<name>.perf for <name>.demo, its frames lined up with the demo's ticks. The
+demo's recording is told nothing and changes in nothing: the log is begun
+and ended by the demos' listener (demo_set_recording_listener: told on the
+game's thread as a recording starts, with its file and first tick, and as
+it stops), and its rows are written as each frame is presented, from the
+frames' times this file keeps already. A shared demo carries no machine's
+data, and the demo's format and determinism are the same.
+
+Text, a line each:
+  # demo perf log 1 <name> <first tick>      (and the columns' names)
+  f <tick> <frame> <frame> <cpu> <gpu> <render> <waited>
+      a frame presented: the game's tick then (the demo's tick numbers:
+      demo_tick_begin's), the frame's number in the log (from 1), then
+      microseconds of the frame, the game thread's CPU (-1 not known), the
+      GPU's (-1 not measured), the render thread's and the game's waits
+      for the renderer and the display (Save Report's, report_frame_work)
+  e <tick> stall <ms> | load <ms> | pipelines <count>
+      a frame of DEMO_PERF_STALL_MS or more (a load: while the game said a
+      load zone's switch was coming, xgpu_backend_frame_extra), and new
+      pipeline keys defined (the backend builds a pipeline for each)
+  s <tick> <frames> <average ms> <1% low fps> <0.1% low fps>
+      every DEMO_PERF_SUMMARY_SECONDS, of the frames since the last
+  # end <last tick>
+At 240 frames a second about 0.5 MB a minute, written through the C
+library's buffer (DEMO_PERF_BUFFER), flushed at each summary. The logs of
+demos that are gone (deleted, or past demos.keep_count) are deleted as the
+next recording starts; a pinned demo's (demos/kept) stays in demos.
+tools/demo_info.py --perf joins a demo and its log. */
+
+#define DEMO_PERF_STALL_MS 50
+#define DEMO_PERF_SUMMARY_SECONDS 10
+#define DEMO_PERF_SUMMARY_FRAMES 16384
+#define DEMO_PERF_BUFFER (64 * 1024)
+
+/* demo.h's (port/linux/game/demo.c): the listener told as a recording
+starts and stops */
+typedef void (*demo_recording_listener)(int started, const char *name, long tick);
+void demo_set_recording_listener(demo_recording_listener listener);
+/* game_time.c's (boolean: the engine's byte) */
+unsigned char game_time_initialized(void);
+long game_time_get(void);
+
+static struct
+{
+	pthread_mutex_t lock;
+	/* the setting as last read, and whether the listener is set */
+	unsigned long read_at;
+	int on, listening;
+	FILE *file;
+	unsigned long frames;
+	long long cpu_ns, summary_ns;
+	unsigned long pipelines;
+	/* the frames since the last summary, microseconds */
+	uint32_t summary[DEMO_PERF_SUMMARY_FRAMES];
+	unsigned long summary_count;
+} demo_perf = { PTHREAD_MUTEX_INITIALIZER, (unsigned long)-1, 0, 0, NULL, 0, -1, 0, 0, { 0 }, 0 };
+
+static int demo_perf_compare(const void *first, const void *second)
+{
+	uint32_t a = *(const uint32_t *)first, b = *(const uint32_t *)second;
+
+	return a < b ? 1 : a > b ? -1 : 0;
+}
+
+/* the frames since the last summary summed: their count, average, and the
+1% and 0.1% lows (the frame rate of the average of the slowest 1% and
+0.1% of them, Save Report's way) */
+static void demo_perf_summary(long tick)
+{
+	unsigned long count = demo_perf.summary_count, index, slowest;
+	double total = 0.0, lows[2];
+	int low;
+
+	if (!count)
+		return;
+	for (index = 0; index < count; index++)
+		total += demo_perf.summary[index];
+	qsort(demo_perf.summary, count, sizeof(demo_perf.summary[0]), demo_perf_compare);
+	for (low = 0; low < 2; low++)
+	{
+		double slow_total = 0.0;
+
+		slowest = count / (low ? 1000 : 100);
+		if (!slowest)
+			slowest = 1;
+		for (index = 0; index < slowest; index++)
+			slow_total += demo_perf.summary[index];
+		lows[low] = slow_total > 0.0 ? 1e6 * (double)slowest / slow_total : 0.0;
+	}
+	fprintf(demo_perf.file, "s %ld %lu %.3f %.1f %.1f\n", tick, count, total / (double)count / 1000.0, lows[0],
+		lows[1]);
+	fflush(demo_perf.file);
+	demo_perf.summary_count = 0;
+}
+
+/* the logs in the demos folder whose demos are gone, deleted */
+static void demo_perf_retain(const char *folder)
+{
+	void *directory = posix_directory_open(folder);
+	char name[256];
+
+	if (!directory)
+		return;
+	while (posix_directory_next(directory, name, sizeof(name)))
+	{
+		size_t length = strlen(name);
+		char demo[256], path[1024];
+
+		if (length < 6 || length >= sizeof(demo) || strcmp(name + length - 5, ".perf"))
+			continue;
+		snprintf(demo, sizeof(demo), "%.*s.demo", (int)(length - 5), name);
+		if (demo_files_path(demo, path, sizeof(path)))
+			continue;
+		snprintf(path, sizeof(path), "%s/%s", folder, name);
+		remove(path);
+	}
+	posix_directory_close(directory);
+}
+
+static void demo_perf_close(long tick)
+{
+	if (!demo_perf.file)
+		return;
+	demo_perf_summary(tick);
+	fprintf(demo_perf.file, "# end %ld\n", tick);
+	fclose(demo_perf.file);
+	demo_perf.file = NULL;
+}
+
+/* the demos' listener: a recording started (its file's name, its first
+tick) or stopped (its last tick) */
+static void demo_perf_listener(int started, const char *name, long tick)
+{
+	char folder[512], path[1024];
+	size_t length;
+
+	pthread_mutex_lock(&demo_perf.lock);
+	demo_perf_close(tick);
+	length = started && name ? strlen(name) : 0;
+	if (demo_perf.on && length > 5 && !strcmp(name + length - 5, ".demo") &&
+		demo_files_folder(folder, sizeof(folder), 0))
+	{
+		demo_perf_retain(folder);
+		snprintf(path, sizeof(path), "%s/%.*s.perf", folder, (int)(length - 5), name);
+		demo_perf.file = fopen(path, "w");
+		if (demo_perf.file)
+		{
+			setvbuf(demo_perf.file, NULL, _IOFBF, DEMO_PERF_BUFFER);
+			fprintf(demo_perf.file, "# demo perf log 1 %s %ld\n# f tick frame frame_us cpu_us gpu_us render_us "
+				"waited_us\n# e tick stall|load ms, e tick pipelines count\n# s tick frames average_ms low1_fps "
+				"low01_fps\n", name, tick);
+			demo_perf.frames = 0;
+			demo_perf.cpu_ns = report_thread_cpu_ns();
+			demo_perf.summary_ns = report_now_ns();
+			demo_perf.summary_count = 0;
+			demo_perf.pipelines = xgpu_backend_pipelines_defined();
+		}
+		else
+			platform_log("debug.demo_perf_log: cannot write %s", path);
+	}
+	pthread_mutex_unlock(&demo_perf.lock);
+}
+
+/* the setting followed: the listener set once it is first on (and left
+set: off, it writes nothing) */
+static void demo_perf_follow(void)
+{
+	if (demo_perf.read_at == config_changes())
+		return;
+	demo_perf.read_at = config_changes();
+	demo_perf.on = config_boolean("debug.demo_perf_log");
+	if (demo_perf.on && !demo_perf.listening)
+	{
+		demo_perf.listening = 1;
+		demo_set_recording_listener(demo_perf_listener);
+	}
+}
+
+/* a frame presented: its row, and the events and summary it brings */
+static void demo_perf_frame(long long micros, const struct report_frame_work *work, long long now)
+{
+	long long cpu_ns, cpu;
+	long tick;
+	unsigned long pipelines;
+
+	demo_perf_follow();
+	if (!demo_perf.file)
+		return;
+	pthread_mutex_lock(&demo_perf.lock);
+	if (!demo_perf.file || !game_time_initialized())
+	{
+		pthread_mutex_unlock(&demo_perf.lock);
+		return;
+	}
+	tick = game_time_get();
+	cpu_ns = report_thread_cpu_ns();
+	cpu = cpu_ns >= 0 && demo_perf.cpu_ns >= 0 ? (cpu_ns - demo_perf.cpu_ns) / 1000 : -1;
+	demo_perf.cpu_ns = cpu_ns;
+	fprintf(demo_perf.file, "f %ld %lu %lld %lld %ld %lu %lu\n", tick, ++demo_perf.frames, micros, cpu,
+		work->gpu == REPORT_GPU_UNKNOWN ? -1L : (long)work->gpu, (unsigned long)work->render,
+		(unsigned long)work->waited);
+	if (micros >= DEMO_PERF_STALL_MS * 1000LL)
+		fprintf(demo_perf.file, "e %ld %s %.1f\n", tick, xgpu_backend_frame_extra_pending() ? "load" : "stall",
+			(double)micros / 1000.0);
+	pipelines = xgpu_backend_pipelines_defined();
+	if (pipelines > demo_perf.pipelines)
+		fprintf(demo_perf.file, "e %ld pipelines %lu\n", tick, pipelines - demo_perf.pipelines);
+	demo_perf.pipelines = pipelines;
+	if (demo_perf.summary_count < DEMO_PERF_SUMMARY_FRAMES)
+		demo_perf.summary[demo_perf.summary_count++] = (uint32_t)(micros > 0xFFFFFFFFLL ? 0xFFFFFFFFLL : micros);
+	if (now - demo_perf.summary_ns >= DEMO_PERF_SUMMARY_SECONDS * 1000000000LL)
+	{
+		demo_perf.summary_ns = now;
+		demo_perf_summary(tick);
+	}
+	pthread_mutex_unlock(&demo_perf.lock);
+}
+
 /* ---------- what is kept */
 
 void report_frame_presented(void)
@@ -324,6 +547,7 @@ void report_frame_presented(void)
 		work->paced = (uint32_t)times.paced - (uint32_t)report_frames.last.paced;
 		report_frames.count++;
 		report_frame_log(micros, work);
+		demo_perf_frame(micros, work, now);
 	}
 	else
 		report_frames.start_ns = now;

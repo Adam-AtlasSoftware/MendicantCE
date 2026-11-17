@@ -3117,6 +3117,14 @@ static const struct config_setting config_settings[] =
 		"its thread and the render thread were (sampled every 10 ms while it\n"
 		"lasts) and the work in progress, once the frame comes; and count such\n"
 		"frames. Read by the host (port/android/host/host_stall.c); 0 never." },
+	{ "debug.demo_perf_log", _config_boolean, "false", "HALO_DEMO_PERF_LOG", _environment_value, _platform_all,
+		"Beside each demo recorded, write a performance log, demos/<name>.perf:\n"
+		"a line for each frame with the demo's tick, the frame's, the game\n"
+		"thread's CPU, the GPU's, the render thread's and the wait's\n"
+		"microseconds; stalls, loads and pipelines built as events; and a\n"
+		"summary every 10 seconds (the average, 1% and 0.1% lows). The demo\n"
+		"itself is unchanged (port/linux/src/report.c; tools/demo_info.py\n"
+		"--perf joins them)." },
 	{ "debug.timings", _config_boolean, "false", "HALO_TIMINGS", _environment_value, _platform_all,
 		"Time the game's CPU sections (the original's profile_enter sections\n"
 		"and the port's: input, AI, objects, effects, scripts, present...) from\n"

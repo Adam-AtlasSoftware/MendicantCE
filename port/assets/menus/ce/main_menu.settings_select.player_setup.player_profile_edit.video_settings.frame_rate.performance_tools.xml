@@ -15,6 +15,7 @@
 		<data input="port settings page"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/performance_tools/op_perf_overlay" x="28" y="80"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/performance_tools/op_timings" x="28" y="101"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/performance_tools/op_demo_perf_log" x="28" y="122"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/performance_tools/button_bar" y="414"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/performance_tools/button_bar" type="column_list" width="640" height="28" flags="pass_unhandled_to_focused_child left_right_tabs_items" source="tools/port_settings.py settings_files/_settings_page">
@@ -72,13 +73,31 @@
 		<on event="created" run="port setting load"/>
 		<on event="a" run="port setting segment"/>
 	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/performance_tools/op_demo_perf_log" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/performance_tools/demo_perf_log_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/performance_tools/demo_perf_log_spinner" x="188"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/performance_tools/demo_perf_log_seg0" x="188" y="1"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/performance_tools/demo_perf_log_seg1" x="240" y="1"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/performance_tools/demo_perf_log_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/performance_tools/labels" string_index="2" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/performance_tools/demo_perf_log_seg0" type="text" controller="1" width="48" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="ON" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/performance_tools/demo_perf_log_seg1" type="text" controller="1" width="48" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="OFF" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/performance_tools/demo_perf_log_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="ON|OFF" setting="debug.demo_perf_log" values="true|false" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
+		<on event="created" run="port setting load"/>
+		<on event="a" run="port setting segment"/>
+	</widget>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/performance_tools/labels">
 		<string text="PERFORMANCE OVERLAY"/>
 		<string text="DEVELOPER TIMINGS"/>
+		<string text="DEMO FRAME TIMES"/>
 	</strings>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/performance_tools/help_strings">
 		<string text=""/>
 		<string text="Shows how the game runs, at the bottom right. Simple is the frame rate: green is 30 or more, red under 30. Detailed adds the frame time, the 1% low, and the milliseconds spent on the GPU, the render thread, the game and waiting for the display."/>
 		<string text="Times the game's own work (AI, objects, effects, scripts...) and, with Vulkan, each graphics setting's passes on the GPU, shown in the Detailed overlay with counts of objects and effects. Off times nothing.|The GPU's passes from the next start."/>
+		<string text="Saves a log of each frame's times beside every demo recorded, lined up with the demo's ticks, so a hitch seen in play can be found in the demo. The demo itself is unchanged."/>
 	</strings>
 </menus>

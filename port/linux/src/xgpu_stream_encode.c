@@ -2311,6 +2311,11 @@ void xgpu_backend_prepare(void)
 	stream.preparing = TRUE;
 }
 
+unsigned long xgpu_backend_frame_extra_pending(void)
+{
+	return frame_extra_frames;
+}
+
 void xgpu_backend_frame_extra(unsigned long microseconds)
 {
 	frame_extra_microseconds = (uint32_t)microseconds;

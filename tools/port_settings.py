@@ -1443,6 +1443,11 @@ PAGES = {
              "Times the game's own work (AI, objects, effects, scripts...) and, with Vulkan, each graphics "
              "setting's passes on the GPU, shown in the Detailed overlay with counts of objects and effects. Off "
              "times nothing.|The GPU's passes from the next start.", None),
+            # (debug.demo_perf_log: report.c's log beside each demo, told by
+            # demo.c's listener)
+            ("DEMO FRAME TIMES", "debug.demo_perf_log", ON_OFF,
+             "Saves a log of each frame's times beside every demo recorded, lined up with the demo's ticks, so a "
+             "hitch seen in play can be found in the demo. The demo itself is unchanged.", None),
         ],
     },
     FIRST_PERSON[0]: {

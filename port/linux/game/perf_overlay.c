@@ -48,8 +48,10 @@ extern struct data_array *object_header_data;
 extern struct data_array *effect_data;
 extern struct data_array *particle_data;
 unsigned long xgpu_backend_pipelines_defined(void);
+#ifdef HALO_GUEST
 /* the host's last lines (port/android/guest/runtime/guest_host.h) */
 unsigned int host_log_recent(char *buffer, unsigned int size);
+#endif
 
 /* the averages' frames, the 1% low's, and how often they are read again */
 #define PERF_OVERLAY_AVERAGE_MILLISECONDS 500
@@ -184,7 +186,9 @@ static short perf_overlay_timing_lines(
 		long draws = -1;
 		short groups;
 
+#ifdef HALO_GUEST
 		host_log_recent(log, sizeof(log));
+#endif
 		groups = perf_overlay_pass_groups(log, labels, pass_milliseconds, PERF_OVERLAY_GPU_GROUPS, &draws);
 		for (index = 0; index < groups && line < PERF_OVERLAY_LINES; index++)
 			snprintf(lines[line++], PERF_OVERLAY_LINE_SIZE, "GPU %.18s %.2f ms", labels[index], pass_milliseconds[index]);
