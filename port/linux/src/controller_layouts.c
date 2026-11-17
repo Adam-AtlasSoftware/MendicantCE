@@ -20,6 +20,19 @@ struct controller_layout_color const controller_layout_colors[CONTROLLER_LAYOUT_
 
 static char const *const shape_names[CONTROLLER_LAYOUT_SHAPES] = {"round", "square"};
 
+/* (Button Remapping's actions, in its order: controller_remap.h's) */
+static char const *const action_names[CONTROLLER_REMAP_ACTIONS] = {
+    "jump", "grenade_type", "use", "weapon", "melee", "flashlight", "grenade", "fire", "crouch", "zoom",
+    "scoreboard", "screenshot", "forward", "backward", "left", "right", "chat", "team_chat", "vehicle_chat",
+    "push_to_talk", "camera_faster", "camera_slower", "camera_switch", "camera_up", "camera_down", "camera_cycle",
+    "ping"
+};
+
+char const *controller_layout_action_name(int action)
+{
+    return action >= 0 && action < CONTROLLER_REMAP_ACTIONS ? action_names[action] : NULL;
+}
+
 char const *controller_layout_shape_name(int shape)
 {
     return shape >= 0 && shape < CONTROLLER_LAYOUT_SHAPES ? shape_names[shape] : shape_names[0];
@@ -125,9 +138,10 @@ int controller_layout_parse(char const *text, size_t length, struct controller_l
     size_t size)
 {
     struct controller_layout parsed;
-    /* (where the lines are: the top level, or a [[control]], whose input
-     * is current) */
-    enum { TOP, CONTROL } table = TOP;
+    /* (where the lines are: the top level, a [[control]], whose input is
+     * current, or the [bindings]) */
+    enum { TOP, CONTROL, BINDINGS } table = TOP;
+    int bindings_given = 0;
     int control = -1, current = -1, format = 0, guid = 0;
     unsigned int seen = 0, controls_given = 0;
     long line = 0;
@@ -157,6 +171,12 @@ int controller_layout_parse(char const *text, size_t length, struct controller_l
             table = CONTROL;
             seen = 0;
             current = -1;
+            continue;
+        }
+        if (line_length == 10 && !strncmp(start, "[bindings]", 10))
+        {
+            if (bindings_given++) return problem_set(problem, size, line, "a second [bindings]");
+            table = BINDINGS;
             continue;
         }
         if (*start == '[') return problem_set(problem, size, line, "a table this file may not have: %.40s", start);
@@ -226,6 +246,22 @@ int controller_layout_parse(char const *text, size_t length, struct controller_l
             if (format > 1 || guid > 1) return problem_set(problem, size, line, "a key given twice");
             continue;
         }
+        if (table == BINDINGS)
+        {
+            int action, button;
+            for (action = 0; action < CONTROLLER_REMAP_ACTIONS && !(strlen(action_names[action]) == key_length &&
+                !strncmp(key, action_names[action], key_length)); action++);
+            if (action == CONTROLLER_REMAP_ACTIONS)
+                return problem_set(problem, size, line, "an action this game has not: %.*s", (int)key_length, key);
+            if (parsed.bound & (1ul << action)) return problem_set(problem, size, line, "an action given twice");
+            button = quoted ? controller_remap_token(value, value_length) : -1;
+            if (button < 0)
+                return problem_set(problem, size, line, "a button this game has not: %.*s",
+                    (int)(value_length < 24 ? value_length : 24), value);
+            parsed.bound |= 1ul << action;
+            parsed.bindings[action] = (unsigned char)button;
+            continue;
+        }
         /* (a control's: its input first, each key once) */
         {
             static char const *const keys[] = {"input", "name", "legend", "shape", "fill"};
@@ -292,6 +328,19 @@ int controller_layout_parse(char const *text, size_t length, struct controller_l
 #undef KEY
     }
     if (!format) return problem_set(problem, size, 0, "no format = 1");
+    /* (two actions of a group on one button, as Button Remapping refuses) */
+    if (parsed.bound)
+    {
+        unsigned char buttons[CONTROLLER_REMAP_ACTIONS];
+        int action;
+        memset(buttons, CONTROLLER_REMAP_UNBOUND, sizeof(buttons));
+        for (action = 0; action < CONTROLLER_REMAP_ACTIONS; action++)
+            if (parsed.bound & (1ul << action)) buttons[action] = parsed.bindings[action];
+        for (action = 0; action < CONTROLLER_REMAP_ACTIONS; action++)
+            if (controller_remap_conflict(buttons, action, buttons[action]) >= 0)
+                return problem_set(problem, size, 0, "two actions on %s in [bindings]",
+                    controller_remap_token_name(buttons[action]));
+    }
     if (!guid) return problem_set(problem, size, 0, "no guid");
     /* (every control given a legend; a name defaults to it, a fill to grey) */
     {
@@ -342,8 +391,29 @@ size_t controller_layout_format(struct controller_layout const *layout, char *te
             "shape = \"%s\"\nfill = \"#%06lX\"\n", controller_remap_token_name(CONTROLLER_REMAP_PADDLE + extra),
             each->name, each->legend, controller_layout_shape_name(each->shape), each->fill & 0xFFFFFFUL);
     }
+    if (layout->bound)
+    {
+        int action;
+        used = appended(text, size, used, "\n# Button Remapping's actions on this controller's buttons, as its owner\n"
+            "# had them: used only when the player who imports it chooses to.\n[bindings]\n");
+        for (action = 0; action < CONTROLLER_REMAP_ACTIONS; action++)
+            if (layout->bound & (1ul << action))
+                used = appended(text, size, used, "%s = \"%s\"\n", action_names[action],
+                    controller_remap_token_name(layout->bindings[action]));
+    }
     if (used >= size) { text[0] = 0; return 0; }
     return used;
+}
+
+int controller_layout_bindings_apply(struct controller_layout const *layout, unsigned char *buttons)
+{
+    unsigned char before[CONTROLLER_REMAP_ACTIONS];
+    int action, differ = 0;
+    memcpy(before, buttons, sizeof(before));
+    for (action = 0; action < CONTROLLER_REMAP_ACTIONS; action++)
+        if (layout->bound & (1ul << action)) controller_remap_assign(buttons, action, layout->bindings[action]);
+    for (action = 0; action < CONTROLLER_REMAP_ACTIONS; action++) differ += before[action] != buttons[action];
+    return differ;
 }
 
 /* ---------- the folder */
@@ -504,6 +574,49 @@ int controller_layout_store(struct controller_layout const *layout)
     }
     layout_keep(layout);
     layouts.changes++;
+    return 1;
+}
+
+int controller_layout_export(struct controller_layout const *layout, unsigned char const *buttons, char *written,
+    size_t size)
+{
+    static char text[CONTROLLER_LAYOUT_FILE_MAXIMUM];
+    struct controller_layout shared = *layout;
+    char name[CONTROLLER_LAYOUT_TITLE + 8], path[900];
+    size_t i, used = 0, length;
+    if (written && size) written[0] = 0;
+    if (!guid_valid(layout->guid)) return 0;
+    shared.bound = 0;
+    if (buttons)
+    {
+        shared.bound = (1ul << CONTROLLER_REMAP_ACTIONS) - 1;
+        memcpy(shared.bindings, buttons, sizeof(shared.bindings));
+    }
+    /* (named for the layout: its letters, digits, spaces, - and _) */
+    for (i = 0; layout->name[i] && used < CONTROLLER_LAYOUT_TITLE - 1; i++)
+    {
+        char c = layout->name[i];
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == ' ' || c == '-' ||
+            c == '_')
+            name[used++] = c;
+    }
+    while (used && name[used - 1] == ' ') used--;
+    name[used] = 0;
+    if (!used) snprintf(name, sizeof(name), "%s", layout->guid);
+    length = controller_layout_format(&shared, text, sizeof(text));
+    if (!length || !folder_path(path, sizeof(path), NULL)) return 0;
+    posix_make_directory(path);
+    if (!folder_path(path, sizeof(path), "shared")) return 0;
+    posix_make_directory(path);
+    if (snprintf(path + strlen(path), sizeof(path) - strlen(path), "/%s.toml", name) >= (int)(sizeof(path) - 1) ||
+        !file_write(path, text, length))
+    {
+        platform_log("controller layouts: %s could not be written", path);
+        return 0;
+    }
+    platform_log("controller layouts: %s's layout exported to %s%s", layout->guid, path,
+        buttons ? " with its bindings" : "");
+    if (written) snprintf(written, size, "controller_layouts/shared/%s.toml", name);
     return 1;
 }
 

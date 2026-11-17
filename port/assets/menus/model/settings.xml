@@ -1602,6 +1602,21 @@
 		<row key="edit_buttons" kind="link" label="EDIT BUTTONS ›" crumb="CONTROLS › … › CONTROLLER LAYOUTS" open="screens/controller_layout">
 			<help>Name each paddle and extra button, and pick its symbol: a legend of up to 3 characters, a shape and a color. Button Remapping's prompts draw it.</help>
 		</row>
+		<section key="section_3" title="SHARE"/>
+		<row key="controller_layout_bindings" kind="choice" setting="input.controller_layout_bindings" label="INCLUDE MY BINDINGS" crumb="CONTROLS › … › CONTROLLER LAYOUTS">
+			<help>Export adds your Button Remapping buttons to the file. Whoever imports it still keeps theirs unless they choose yours.</help>
+			<choice shown="YES" value="true"/>
+			<choice shown="NO" value="false"/>
+		</row>
+		<row key="layout_export" kind="status" label="EXPORT" crumb="CONTROLS › … › CONTROLLER LAYOUTS" run="port settings layout export">
+			<help>Saves this controller's layout as a file in the data folder's controller_layouts/shared, to give to another player.</help>
+		</row>
+		<row key="layout_files" kind="status" label="FILES" crumb="CONTROLS › … › CONTROLLER LAYOUTS">
+			<help>To import a layout, copy its file into the data folder's controller_layouts: it is read when Edit Buttons opens. A file with a mistake is refused whole.</help>
+		</row>
+		<row key="layout_bindings" kind="status" label="ITS BINDINGS ›" crumb="CONTROLS › … › CONTROLLER LAYOUTS" when="layout_bindings" open="screens/layout_bindings">
+			<help>This controller's layout came with its owner's Button Remapping buttons. Yours stay unless you choose to use them.</help>
+		</row>
 		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
 		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>
 		<button key="button_cancel" kind="cancel" run="port settings page cancel" help="Goes back without these changes."/>

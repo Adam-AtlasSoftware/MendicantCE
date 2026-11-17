@@ -352,3 +352,108 @@ def test_prompt_sites_draw_the_symbol():
     assert 'key_cap_symbol && key_cap_symbol_round ? floorf(height * 0.5f)' in prompts
     glyphs = (ROOT / "port/linux/game/controller_layout_prompts.c").read_text()
     assert 'controller_layout_legend_color(symbol.fill), symbol.shape == CONTROLLER_LAYOUT_ROUND' in glyphs
+
+
+# ---------- sharing (#1144): export with or without the bindings, their import refused or taken, applied by choice
+
+SHARE = r'''
+ struct controller_layout a=sample("''' + GUID + r'''"),b;struct controller_layout const *c;
+ unsigned char mine[CONTROLLER_REMAP_ACTIONS],theirs[CONTROLLER_REMAP_ACTIONS];char written[80];
+ static char text[20000];
+ FILE *f;size_t n;int differ;
+ controller_remap_defaults(mine);memcpy(theirs,mine,sizeof(mine));
+ controller_remap_assign(theirs,PAD_JUMP,CONTROLLER_REMAP_PADDLE);      /* jump on the left paddle */
+ controller_remap_assign(theirs,PAD_MELEE,CONTROLLER_REMAP_PADDLE+3);  /* melee on the second right */
+ /* without the bindings (INCLUDE MY BINDINGS off, the default): none in the file */
+ assert(controller_layout_export(&a,NULL,written,sizeof(written)));
+ assert(!strcmp(written,"controller_layouts/shared/Fight stick.toml"));
+ f=fopen(at("shared/Fight stick.toml"),"rb");assert(f);n=fread(text,1,sizeof(text)-1,f);fclose(f);text[n]=0;
+ assert(!strstr(text,"[bindings]") && strstr(text,"legend = \"RB2\""));
+ /* with them: every action, each its button's token, read back the same */
+ assert(controller_layout_export(&a,theirs,written,sizeof(written)));
+ f=fopen(at("shared/Fight stick.toml"),"rb");assert(f);n=fread(text,1,sizeof(text)-1,f);fclose(f);text[n]=0;
+ assert(strstr(text,"[bindings]\njump = \"left_paddle\"\n") && strstr(text,"melee = \"right_paddle2\"") &&
+  strstr(text,"ping = \"dpad_right\""));
+ assert(controller_layout_parse(text,n,&b,written,sizeof(written)));
+ assert(b.bound==(1ul<<CONTROLLER_REMAP_ACTIONS)-1 && !memcmp(b.bindings,theirs,sizeof(theirs)));
+ /* (the shared folder is not read as layouts) */
+ controller_layouts_scan();assert(!controller_layout_for("''' + GUID + r'''"));
+ /* copied in: taken, its bindings kept with it, never put on anyone's buttons by that */
+ put("from a friend.toml",text);controller_layouts_scan();
+ c=controller_layout_for("''' + GUID + r'''");assert(c && c->bound==b.bound);
+ assert(!controller_remap_read(0,mine) && !controller_remap_read(1,mine));
+ /* chosen: through the assign rule, the actions a button is taken from left unbound */
+ controller_remap_defaults(mine);
+ differ=controller_layout_bindings_apply(c,mine);
+ assert(differ>=2 && mine[PAD_JUMP]==CONTROLLER_REMAP_PADDLE && mine[PAD_MELEE]==CONTROLLER_REMAP_PADDLE+3);
+ assert(!memcmp(mine,theirs,sizeof(mine)) && controller_layout_bindings_apply(c,mine)==0);
+ /* a partial [bindings]: only its actions; one whose button another has takes it */
+ {static char const part[]="format = 1\nguid = \"''' + GUID + r'''\"\n[bindings]\nfire = \"south\"\n";
+  assert(controller_layout_parse(part,sizeof(part)-1,&b,written,sizeof(written)) && b.bound==1ul<<PAD_FIRE);
+  controller_remap_defaults(mine);assert(controller_layout_bindings_apply(&b,mine)==2);
+  assert(mine[PAD_FIRE]==0 && mine[PAD_JUMP]==CONTROLLER_REMAP_UNBOUND);}
+'''
+
+
+def test_export_bindings_only_when_chosen_and_applied_by_choice(tmp_path):
+    run_c(tmp_path, program(SHARE))
+
+
+BAD_BINDINGS = {
+    'unknown action': ('jump = "south"', 'teleport = "south"', 'an action this game has not'),
+    'unknown button': ('jump = "south"', 'jump = "start"', 'a button this game has not'),
+    'not a string': ('jump = "south"', 'jump = 3', 'a button this game has not'),
+    'action twice': ('jump = "south"\n', 'jump = "south"\njump = "east"\n', 'an action given twice'),
+    'two on one button': ('melee = "east"', 'melee = "south"', 'two actions on south'),
+    'second table': ('melee = "east"\n', 'melee = "east"\n[bindings]\n', 'a second [bindings]'),
+}
+BINDINGS_FILE = GOOD + '\n[bindings]\njump = "south"\nmelee = "east"\ncamera_up = "south"\n'
+
+
+@pytest.mark.parametrize('case', BAD_BINDINGS)
+def test_import_refuses_bad_bindings(tmp_path, case):
+    """bindings that are not Button Remapping's refuse the whole file (its symbols too); a debug camera action may
+    share a gameplay one's button, as Button Remapping allows"""
+    before, after, words = BAD_BINDINGS[case]
+    body = r'''
+ struct controller_layout parsed;char problem[256];
+ static char const good[]=''' + c_string(BINDINGS_FILE) + r''',bad[]=''' + c_string(
+        BINDINGS_FILE.replace(before, after, 1)) + r''';
+ assert(controller_layout_parse(good,sizeof(good)-1,&parsed,problem,sizeof(problem)));
+ assert(parsed.bound==((1ul<<PAD_JUMP)|(1ul<<PAD_MELEE)|(1ul<<PAD_CAMERA_UP)));
+ assert(!controller_layout_parse(bad,sizeof(bad)-1,&parsed,problem,sizeof(problem)));
+ printf("%s\n",problem);assert(strstr(problem,''' + c_string(words) + r'''));
+ put("shared.toml",bad);controller_layouts_scan();
+ assert(!controller_layout_for("''' + GUID + r'''") && exists("shared.toml"));
+'''
+    run_c(tmp_path, program(body))
+
+
+def test_bindings_negative_control(tmp_path):
+    """the group check dropped: two actions on one button taken, which the refusal test sees"""
+    layouts = (ROOT / 'port/linux/src/controller_layouts.c').read_text()
+    faulty = layouts.replace('if (controller_remap_conflict(buttons, action, buttons[action]) >= 0)', 'if (0)')
+    assert faulty != layouts
+    before, after, words = BAD_BINDINGS['two on one button']
+    body = r'''
+ struct controller_layout parsed;char problem[256];
+ static char const bad[]=''' + c_string(BINDINGS_FILE.replace(before, after, 1)) + r''';
+ assert(!controller_layout_parse(bad,sizeof(bad)-1,&parsed,problem,sizeof(problem)));
+'''
+    assert run_c(tmp_path, program(body, layouts=faulty), expect_ok=False).returncode != 0
+
+
+def test_bindings_used_only_when_chosen():
+    """a layout's bindings reach a player's buttons only through the question's USE THIS LAYOUT'S (never as a
+    controller connects or the folder is read), and INCLUDE MY BINDINGS is off by default"""
+    menu = (ROOT / 'port/linux/game/controller_layout_menu.inc').read_text()
+    assert menu.count('layout_bindings_use()') == 1  # the action's call alone
+    assert 'if (!strcmp(name, "layout bindings use"))\n\t\treturn layout_bindings_use();' in menu
+    for path in ('port/linux/src/controller_layouts.c', 'port/linux/game/controller_remap_game.c',
+                 'port/linux/src/xinput_sdl.c', 'port/linux/src/controller_buttons.c'):
+        assert 'layout_bindings_use' not in (ROOT / path).read_text()
+    assert 'config_write' not in (ROOT / 'port/linux/src/controller_layouts.c').read_text()
+    assert '{ "input.controller_layout_bindings", _config_boolean, "false",' in \
+        (ROOT / 'port/linux/src/port_config.c').read_text()
+    question = (ROOT / 'port/assets/menus/screens/layout_bindings.xml').read_text()
+    assert '<list focus="keep">' in question and 'id="keep" label="KEEP MINE" do="back"' in question

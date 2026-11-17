@@ -133,6 +133,19 @@ removed). A file is read whole and strictly: any line it should not have (a key 
 value out of range, a quote, a backslash or a control character, more than 16 KB) refuses all of it, logged
 with its line (`controller layouts: name.toml refused (line 7: a legend of 1 to 3 letters, digits or signs)`),
 and nothing of it is used. Only pictures and names come of a layout; input never does.
+
+**Sharing (#1144).** The page's SHARE: EXPORT writes the layout into `controller_layouts/shared/<its name>.toml`
+(a folder the game does not read as layouts), to give to another player. INCLUDE MY BINDINGS
+(`input.controller_layout_bindings`, off) adds the player's Button Remapping buttons as a `[bindings]` table of
+action = token (`jump = "left_paddle"`). To import, the other player copies the file into their
+`controller_layouts`; FILES says ALL READ or ONE REFUSED, its panel the refused file's line and why. Bindings in a
+file are checked as Button Remapping's (known actions and tokens, each action once, no two of a group on one
+button) or the whole file is refused; they are never put on anyone's buttons as the file is read or the controller
+connects. Where the controller's layout came with them, ITS BINDINGS › says how many of the player's buttons they
+would change and asks: KEEP MINE (focused) or USE THIS LAYOUT'S, which puts each through Button Remapping's assign
+rule on that player's port alone and writes it as Button Remapping's OK does. The system's save and open dialogs
+are not used: the game's file dialog bridge (`host_sdl_open_file_dialog`) is the first start's (on macOS the game
+data's panel) and the guest has no save dialog, so the folder is the way in and out for now.
 [controller_layouts.c](../port/linux/src/controller_layouts.c) reads and writes the files,
 `controller_remap_prompt_symbol` (controller_remap_game.c) gives a prompt its symbol and
 `controller_layout_menu.inc` (menu_functions.c's) is the page and the screen.

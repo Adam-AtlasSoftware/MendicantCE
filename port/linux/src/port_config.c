@@ -1236,6 +1236,11 @@ static const struct config_setting config_settings[] =
 		"what the profile's LOOK SENSITIVITY gives (half its side to side): 1\n"
 		"the original's, 2 twice as fast. The mouse and the gyroscope have\n"
 		"their own.", _scope_player },
+	{ "input.controller_layout_bindings", _config_boolean, "false", "HALO_CONTROLLER_LAYOUT_BINDINGS",
+		_environment_value, _platform_all,
+		"Settings > Controls > Controller > Button Remapping > Controller Layouts'\n"
+		"EXPORT adds the player's Button Remapping buttons to the layout's file\n"
+		"([bindings]). Off by default." },
 	{ "input.invert_look_horizontal", _config_boolean, "false", "HALO_INVERT_LOOK_HORIZONTAL", _environment_value,
 		_platform_all,
 		"A controller's look turns the other way: pushing the stick that looks to\n"

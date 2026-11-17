@@ -11,7 +11,17 @@ name. A names the chosen button on the on-screen keyboard (describing it
 first, with its words' name and legend, round and grey), Y types its legend,
 left and right step its color and the panel's SHAPE its shape, X lets it go
 back to its words. Each change is kept at once (controller_layout_store):
-the page's OK and Cancel are its settings'. Nothing of it is sent. */
+the page's OK and Cancel are its settings'. Nothing of it is sent.
+
+(#1144) The page's SHARE: EXPORT writes the layout into the folder's
+shared folder (controller_layout_export), with Button Remapping's buttons of
+the player as its [bindings] where INCLUDE MY BINDINGS (unsaved, as the page
+shows it) says; FILES says whether a file copied into the folder was
+refused, its panel why; ITS BINDINGS (only where the controller's layout
+came with them) how many differ from the player's, and A opens the
+question (screens/layout_bindings.xml): KEEP MINE, focused, or USE THIS
+LAYOUT'S, put on the player's port through Button Remapping's assign rule
+(layout_bindings_use). Never on a controller's connecting. */
 
 static struct
 {
@@ -68,6 +78,13 @@ static void layout_editor_read(void)
 	layout_editor.read_at = controller_layouts_changes();
 	layout_editor.read = TRUE;
 }
+
+/* (#1144) the last export's words for EXPORT's row ("" for none yet); the
+sharing's, below */
+static char layout_exported[96];
+static int layout_bindings_differ(void);
+static boolean layout_bindings_use(void);
+static void layout_bindings_words(char *value, unsigned long size);
 
 static boolean layout_editor_set(short extra)
 {
@@ -260,6 +277,8 @@ int pc_menu_layout_value(char const *name, char *value, unsigned long size)
 	else if (!strcmp(name, "layout.about"))
 		snprintf(value, size, "%s", "Prompts draw its symbol in place of its words. Each controller keeps its "
 			"own.");
+	else if (!strcmp(name, "layout.bindings"))
+		layout_bindings_words(value, size);
 	else if (!strcmp(name, "layout.set"))
 	{
 		if (control->name[0])
@@ -349,6 +368,8 @@ int pc_menu_layout_action(char const *name, short row)
 		layout_editor.chosen = (short)PIN(layout_editor.first + row, 0, CONTROLLER_REMAP_EXTRAS - 1);
 	extra = (short)PIN(layout_editor.chosen, 0, CONTROLLER_REMAP_EXTRAS - 1);
 	control = &layout_editor.layout.controls[extra];
+	if (!strcmp(name, "layout bindings use"))
+		return layout_bindings_use();
 	if (!layout_editor.guid[0])
 	{
 		platform_log("controller layouts: no controller to describe");
@@ -425,4 +446,129 @@ static void layout_rows_show(struct widget_instance *list)
 	else
 		snprintf(text, sizeof(text), "%d BUTTON%s DESCRIBED", described, described == 1 ? "" : "S");
 	settings_status_set(list, "layout_controller", text);
+	/* (#1144: EXPORT's last result, FILES', ITS BINDINGS') */
+	settings_status_set(list, "layout_export", layout_exported);
+	settings_status_set(list, "layout_files", controller_layouts_problem()[0] ? "ONE REFUSED" : "ALL READ");
+	if (layout_editor.layout.bound)
+	{
+		short differ = (short)layout_bindings_differ();
+
+		if (differ)
+			snprintf(text, sizeof(text), "%d DIFFER", differ);
+		else
+			snprintf(text, sizeof(text), "SAME AS YOURS");
+		settings_status_set(list, "layout_bindings", text);
+	}
+}
+
+/* ---- sharing (#1144) */
+
+/* the Settings player's buttons now: their layout, else their profile's */
+static void layout_player_buttons(unsigned char *buttons)
+{
+	controller_remap_profile(settings_local_player, buttons);
+	controller_remap_read(settings_local_player, buttons);
+}
+
+/* how many of the player's buttons the layout's bindings would change */
+static int layout_bindings_differ(void)
+{
+	unsigned char buttons[CONTROLLER_REMAP_ACTIONS];
+
+	layout_editor_read();
+	if (!layout_editor.layout.bound)
+		return 0;
+	layout_player_buttons(buttons);
+	return controller_layout_bindings_apply(&layout_editor.layout, buttons);
+}
+
+/* (settings_condition_term's "layout_bindings": ITS BINDINGS shown) */
+static boolean layout_has_bindings(void)
+{
+	layout_editor_read();
+	return layout_editor.layout.bound != 0;
+}
+
+/* "port settings layout export" (EXPORT): the layout written for sharing,
+with the player's buttons as its bindings where INCLUDE MY BINDINGS says */
+static void layout_export_press(void)
+{
+	unsigned char buttons[CONTROLLER_REMAP_ACTIONS];
+	char include[16], written[80];
+	boolean bindings = settings_value("input.controller_layout_bindings", include, sizeof(include)) &&
+		!strcmp(include, "true");
+
+	layout_editor_read();
+	if (!layout_editor.guid[0])
+	{
+		snprintf(layout_exported, sizeof(layout_exported), "NO CONTROLLER");
+		return;
+	}
+	if (bindings)
+		layout_player_buttons(buttons);
+	if (controller_layout_export(&layout_editor.layout, bindings ? buttons : NULL, written, sizeof(written)))
+		snprintf(layout_exported, sizeof(layout_exported), "%s", bindings ? "SAVED WITH BINDINGS" : "SAVED");
+	else
+		snprintf(layout_exported, sizeof(layout_exported), "NOT SAVED");
+	ui_play_audio_feedback_sound(SOUND_CURSOR);
+}
+
+/* USE THIS LAYOUT'S: the layout's bindings put on the player's port through
+Button Remapping's assign rule, written as its OK writes a player's (their
+profile's, else the port's), and Button Remapping's pending buttons of that
+port with them */
+static boolean layout_bindings_use(void)
+{
+	unsigned char buttons[CONTROLLER_REMAP_ACTIONS];
+	char text[CONTROLLER_REMAP_TEXT] = {0};
+	char folder[1024];
+	short port = settings_local_player;
+	int differ;
+
+	layout_editor_read();
+	if (!layout_editor.layout.bound || port < 0 || port >= 4)
+		return FALSE;
+	layout_player_buttons(buttons);
+	differ = controller_layout_bindings_apply(&layout_editor.layout, buttons);
+	controller_remap_format(buttons, text, sizeof(text));
+	if (!text[0])
+		return FALSE;
+	if (player_settings_profile_folder(player_ui_get_active_player_profile_index(port), folder, sizeof(folder)))
+	{
+		if (!config_profile_write(folder, "input.controller", text))
+			return FALSE;
+	}
+	else if (!config_write(controller_remap_setting(port), text))
+		return FALSE;
+	memcpy(pad_editor.buttons[port], buttons, sizeof(buttons));
+	pad_editor.custom[port] = TRUE;
+	platform_log("controller layouts: player %d took the layout's bindings (%d changed)", port + 1, differ);
+	return TRUE;
+}
+
+/* (screens/layout_bindings.xml's question) layout.bindings's words */
+static void layout_bindings_words(char *value, unsigned long size)
+{
+	int differ = layout_bindings_differ();
+
+	if (!differ)
+		snprintf(value, size, "This layout's bindings are the same as yours.");
+	else
+		snprintf(value, size, "This layout came with its owner's bindings: %d of your buttons would change. "
+			"Yours stay unless you choose its.", differ);
+}
+
+/* FILES' panel: why a file copied in was refused */
+static boolean layout_files_panel(struct widget_instance *row, wchar_t const **help)
+{
+	static wchar_t words[SETTINGS_PANEL_TEXT_LENGTH];
+	char text[CONTROLLER_LAYOUT_PROBLEM + 96];
+
+	if (!settings_row_is(row, "layout_files") || !controller_layouts_problem()[0])
+		return FALSE;
+	snprintf(text, sizeof(text), "A file was refused, and nothing of it used: %s.|Fix it or copy it again.",
+		controller_layouts_problem());
+	discord_widen(text, words, SETTINGS_PANEL_TEXT_LENGTH);
+	*help = words;
+	return TRUE;
 }

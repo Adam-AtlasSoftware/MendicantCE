@@ -321,6 +321,7 @@
   "screens/coop_join.xml",
   "screens/coop_who.xml",
   "screens/keyboard.xml",
+  "screens/layout_bindings.xml",
   "screens/lobby.xml",
   "screens/main.xml",
   "screens/pause.xml",

@@ -44,12 +44,15 @@ struct controller_layout_control
 
 /* a controller's layout: its GUID, its name, each extra button's (by
  * CONTROLLER_REMAP_PADDLE's order: the paddles, the touchpad, misc1 to
- * misc6) */
+ * misc6), and (#1144: an exported file's, where its player chose to include
+ * them) Button Remapping's bindings, bound's bit i for action i given */
 struct controller_layout
 {
     char guid[CONTROLLER_LAYOUT_GUID];
     char name[CONTROLLER_LAYOUT_TITLE];
     struct controller_layout_control controls[CONTROLLER_REMAP_EXTRAS];
+    unsigned long bound;
+    unsigned char bindings[CONTROLLER_REMAP_ACTIONS];
 };
 
 struct controller_layout_color
@@ -66,12 +69,19 @@ extern struct controller_layout_color const controller_layout_colors[CONTROLLER_
  * problem, the layout then unchanged. The whole file is refused on any error */
 int controller_layout_parse(char const *text, size_t length, struct controller_layout *layout, char *problem,
     size_t size);
-/* a layout written as its file: its length, 0 where size is too small */
+/* a layout written as its file (its [bindings] where it has them): its
+ * length, 0 where size is too small */
 size_t controller_layout_format(struct controller_layout const *layout, char *text, size_t size);
 /* the legend's color on a fill: black or white, whichever reads better
  * (WCAG's contrast ratio), 0xRRGGBB */
 unsigned long controller_layout_legend_color(unsigned long fill);
 char const *controller_layout_shape_name(int shape);
+/* an action's key in a file's [bindings] ("jump", "push_to_talk"), NULL */
+char const *controller_layout_action_name(int action);
+/* (#1144) how many of a layout's bindings differ from a player's buttons
+ * once applied through Button Remapping's assign rule (controller_remap_assign:
+ * a button another action has is taken from it), which buttons gets */
+int controller_layout_bindings_apply(struct controller_layout const *layout, unsigned char *buttons);
 /* an extra button (0 to CONTROLLER_REMAP_EXTRAS - 1) described: a new
  * control's words from its name on the controller ("P3", "LEFT BACK 2"):
  * the name, a legend of it (its words' initials and digits), round, grey */
@@ -91,6 +101,11 @@ void controller_layouts_scan(void);
 struct controller_layout const *controller_layout_for(char const *guid);
 /* a layout kept (written as <guid>.toml): FALSE where it cannot be */
 int controller_layout_store(struct controller_layout const *layout);
+/* (#1144) a layout written for sharing, with the player's buttons as its
+ * [bindings] (NULL: none), into the folder's shared folder, named for it
+ * (the file's path in written): FALSE where it cannot be */
+int controller_layout_export(struct controller_layout const *layout, unsigned char const *buttons, char *written,
+    size_t size);
 /* the last refused file's problem ("name.toml: line 4: ..."), "" for none */
 char const *controller_layouts_problem(void);
 /* moves each time the folder is read or a layout kept */

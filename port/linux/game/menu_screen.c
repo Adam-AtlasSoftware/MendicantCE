@@ -482,6 +482,9 @@ static struct screen_action const screen_actions[] =
 	{ "layout shape right", NULL, NULL, NULL, NULL, NULL, NULL, screen_call_layout },
 	{ "layout color left", NULL, NULL, NULL, NULL, NULL, NULL, screen_call_layout },
 	{ "layout color right", NULL, NULL, NULL, NULL, NULL, NULL, screen_call_layout },
+	/* (the question of a layout's bindings, screens/layout_bindings.xml:
+	USE THIS LAYOUT'S, and back) */
+	{ "layout bindings use", NULL, NULL, NULL, NULL, NULL, NULL, screen_call_layout },
 };
 
 static char const *const screen_action_names[] =
@@ -502,7 +505,7 @@ static char const *const screen_action_names[] =
 	"close", "close all", "pause leave", "open host controls", "pause end game", "pause chapters",
 	"pause friendly fire", "pause revert", "pause restart", "pause quit",
 	"layout name", "layout legend", "layout clear", "layout shape left", "layout shape right", "layout color left",
-	"layout color right",
+	"layout color right", "layout bindings use",
 };
 
 /* a binding's value: the saved game's mission and difficulty (player 1's
@@ -542,7 +545,7 @@ static char const *const screen_binding_names[] =
 	"benchmark.failure", "benchmark.verdict", "benchmark.held", "benchmark.pacing",
 	"benchmark.settings", "benchmark.gpu", "benchmark.cpu", "benchmark.file", "benchmark.scenario",
 	"layout.controller", "layout.title", "layout.state", "layout.shape", "layout.color", "layout.about",
-	"layout.set", "layout.unset",
+	"layout.set", "layout.unset", "layout.bindings",
 };
 
 /* the row sources a table may name (menu_table.h), and their names */
@@ -728,6 +731,9 @@ static struct screen_place const screen_places[] =
 	/* (Controller Layout, as Button Remapping's Controller Layouts' EDIT
 	BUTTONS › opens it: controller_layout_menu.inc) */
 	{ "controller_layout", "screens\\controller_layout", NULL, NULL },
+	/* (the question of a controller layout's bindings, a pop-up: ITS
+	BINDINGS opens it, #1144) */
+	{ "layout_bindings", "screens\\layout_bindings", NULL, NULL },
 	/* (the on-screen keyboard, a pop-up: keyboard.c opens it, reads its
 	input each frame it is drawn and takes every event of its own) */
 	{ "keyboard", "screens\\keyboard", keyboard_frame, NULL, NULL, keyboard_event, keyboard_screen_closed },
@@ -2554,10 +2560,13 @@ the row given */
 static boolean screen_call_layout(struct widget_instance *widget, struct event_record *event, char const *name,
 	boolean *deleted)
 {
-	(void)widget;
-	(void)event;
 	*deleted = FALSE;
-	return pc_menu_layout_action(name, screen_action_row) != 0;
+	if (!pc_menu_layout_action(name, screen_action_row))
+		return FALSE;
+	/* (the question's USE THIS LAYOUT'S: back to the page) */
+	if (!strcmp(name, "layout bindings use"))
+		menu_tags_back(widget, event, deleted);
+	return TRUE;
 }
 
 /* the lobby's actions of C's own (menu_functions.c's lobby_menu.inc), the

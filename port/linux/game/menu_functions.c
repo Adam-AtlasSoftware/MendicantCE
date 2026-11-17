@@ -2570,6 +2570,9 @@ static void gyro_rows_show(struct widget_instance *list)
 
 /* (Button Remapping's Controller Layouts page's rows: controller_layout_menu.inc) */
 static void layout_rows_show(struct widget_instance *list);
+static boolean layout_has_bindings(void);
+static void layout_export_press(void);
+static boolean layout_files_panel(struct widget_instance *row, wchar_t const **help);
 
 static void sim_rate_row_show(struct widget_instance *list)
 {
@@ -2973,6 +2976,11 @@ static boolean settings_function(char const *name, struct widget_instance *widge
 		settings_weapon_reset(screen);
 		ui_play_audio_feedback_sound(SOUND_CURSOR);
 	}
+	else if (!strcmp(name, "layout export"))
+	{
+		/* (Controller Layouts' EXPORT: at once, not kept for OK) */
+		layout_export_press();
+	}
 	else if (!strcmp(name, "gyro calibrate"))
 	{
 		/* (Gyro & Flick Stick's CALIBRATE: at once, not kept for OK) */
@@ -3111,6 +3119,10 @@ static boolean settings_condition_term(struct widget_instance *list, char const 
 	}
 	if (!strcmp(name, "discord_linked"))
 		return discord_linked();
+	/* (Controller Layouts' ITS BINDINGS: the controller's layout came with
+	them, #1144) */
+	if (!strcmp(name, "layout_bindings"))
+		return layout_has_bindings();
 	if (!strcmp(name, "cooperative"))
 		return hosting_cooperative();
 	if (!strcmp(name, "local"))
@@ -4602,6 +4614,8 @@ static void settings_panel_show(struct widget_instance *list, short tab)
 		hdr_display_panel(row, value, &help);
 		/* (Gyro's STEAM INPUT HAS IT: how to turn it off) */
 		gyro_found_panel(row, &help);
+		/* (Controller Layouts' FILES: why a file was refused) */
+		layout_files_panel(row, &help);
 		/* (Variable Refresh: what the system says of it) */
 		vrr_panel(row, &help);
 		/* (Profile's ABOUT: this build) */

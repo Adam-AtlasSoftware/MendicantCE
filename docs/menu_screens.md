@@ -731,6 +731,10 @@ is kept at once (`controller_layout_menu.inc`, [controller_remapping.md](control
 layouts"). With no controller connected the rows show their words and nothing can be described
 (`debug.controller_layout_guid` names one, for tests and pictures). The classic engine has no screen of it.
 
+`screens/layout_bindings.xml` (#1144) is the CONTROLLER LAYOUTS page's ITS BINDINGS ›, a pop-up (its stand-in
+`screens/layout_bindings`): how many of the player's buttons the layout's bindings would change
+(`{layout.bindings}`), KEEP MINE (focused; B too) and USE THIS LAYOUT'S (`layout bindings use`, then back).
+
 ## Leaving an editor with changes not saved
 
 The gametype editor (Edit Gametypes' EDIT, a generated screen) takes B, Back

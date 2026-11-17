@@ -821,6 +821,8 @@ CONTROLLER_BUTTONS = ("gamepad_setup/button_remapping/controller_buttons", "cont
 # port/assets/menus/screens/controller_layout.xml (menu_functions.c's controller_layout_menu.inc)
 CONTROLLER_LAYOUTS = ("gamepad_setup/button_remapping/controller_layouts", "controller_layouts_screen")
 CONTROLLER_LAYOUT = "screens/controller_layout"
+# (#1144: the question whether to use an imported layout's bindings, a hand-written pop-up)
+LAYOUT_BINDINGS = "screens/layout_bindings"
 MCC_DOWNLOADS = f"{PE}/network_setup/mcc_downloads"
 MCC_DOWNLOAD = f"{PE}/network_setup/mcc_download"
 BROWSER_FILTERS_TITLE = "main_menu/multiplayer_type_select/join_game/filters/header_filters"
@@ -850,7 +852,7 @@ REMAP_HANDLERS = ['<on event="x" run="port controller clear"/>',
 SETTINGS_STATUS_ROWS = {"discord_account", "link_status", "link_unlink",
                         *(f"link_master_{n}" for n in range(1, 5)), "hdr_display",
                         "viewmodel_weapon_reset", "gyro_found", "gyro_calibrate", "clear_caches", "add_maps",
-                        "layout_controller",
+                        "layout_controller", "layout_export", "layout_files", "layout_bindings",
                         "remap_player", "remap_group", *(f"pad_{n}" for n in range(1, REMAP_ROWS + 1))}
 # the rows whose labels menu_functions.c writes (a master server's host): the
 # label's text its own, not its list's; their values the narrower column at
@@ -1886,6 +1888,20 @@ PAGES = {
             ("EDIT BUTTONS ›", None, CONTROLLER_LAYOUT,
              "Name each paddle and extra button, and pick its symbol: a legend of up to 3 characters, a shape "
              "and a color. Button Remapping's prompts draw it.", None),
+            # (#1144: EXPORT's, FILES' and ITS BINDINGS' values layout_rows_show's)
+            (SECTION, "SHARE"),
+            ("INCLUDE MY BINDINGS", "input.controller_layout_bindings", YES_NO,
+             "Export adds your Button Remapping buttons to the file. Whoever imports it still keeps theirs unless "
+             "they choose yours.", None),
+            ("EXPORT", None, None,
+             "Saves this controller's layout as a file in the data folder's controller_layouts/shared, to give "
+             "to another player.", None, "layout_export", "port settings layout export"),
+            ("FILES", None, None,
+             "To import a layout, copy its file into the data folder's controller_layouts: it is read when Edit "
+             "Buttons opens. A file with a mistake is refused whole.", None, "layout_files"),
+            ("ITS BINDINGS ›", None, LAYOUT_BINDINGS,
+             "This controller's layout came with its owner's Button Remapping buttons. Yours stay unless you "
+             "choose to use them.", None, "layout_bindings"),
         ],
     },
     MCC_PACKAGES[0]: {
@@ -2573,6 +2589,8 @@ SETTINGS_ROW_WHEN = {
     **{f"viewmodel_weapon_{name}": "weapon_held" for name in ("x", "y", "z", "pitch", "yaw", "roll", "reset")},
     # (Discord's UNLINK an account linked, or waiting for its code)
     "link_unlink": "discord_linked",
+    # (Controller Layouts' ITS BINDINGS: the controller's layout came with them, #1144)
+    "layout_bindings": "layout_bindings",
 }
 SETTINGS_ROW_ENABLED = {
     # (the flick's time while the flick stick is on)
