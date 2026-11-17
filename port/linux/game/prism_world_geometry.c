@@ -1694,13 +1694,68 @@ static unsigned long shape_group_of(
 	return read_u32(view->groups + 4 * local);
 }
 
+/* whether a group's border is sealed: each of its members' stock edges'
+neighbours outside it that stay remodelled (not drawn stock, not falling
+back, not of a group still to fall back: group_state 1 or 2) have the stock
+edge there (shape_edge_plain); its members counted */
+static boolean shape_group_sealed(
+	struct shape_check const *check,
+	unsigned long group,
+	long const *first_member,
+	byte const *group_state,
+	long *members)
+{
+	long member;
+
+	*members = 0;
+	for (member = first_member[group]; member != NONE; member = check->queue[member])
+	{
+		float const *corners = check->corners + 9 * member;
+		int corner;
+
+		(*members)++;
+		if (check->state[member] == _shape_none || check->state[member] == _shape_stock)
+		{
+			continue;
+		}
+		for (corner = 0; corner < 3; corner++)
+		{
+			float const *u = corners + 3 * corner;
+			float const *v = corners + 3 * ((corner + 1) % 3);
+			long at;
+
+			for (at = shape_edge_find(check, u, v); shape_same_edge(check, at, u, v); at++)
+			{
+				long n = check->edges[at].surface, local;
+				unsigned long other = shape_group_of(check, n);
+				struct pwg_material_view const *view;
+
+				if (other == group || group_state[other] == 1 || group_state[other] == 2 ||
+					check->state[n] == _shape_stock || check->state[n] == _shape_fallback)
+				{
+					continue;
+				}
+				view = shape_surface(check, n, &local);
+				if (!shape_edge_plain(view, local, u, v))
+				{
+					return FALSE;
+				}
+			}
+		}
+	}
+
+	return TRUE;
+}
+
 /* version 3's seal groups (above): every group with a facet or a surface of
-a material drawn stock, its border checked, falls back whole (its
-members' states _shape_fallback) or is kept (_shape_kept_whole). The
-groups' members are found by the groups' first member and a list through
-them (queue: each surface's next in its group). TRUE when the members of
-some group changed state */
-static boolean shape_groups_named(
+a material drawn stock is to fall back whole (group_state 1); a group whose
+border is not sealed against the rest (shape_group_sealed, the groups still
+to fall back taken as falling back) is kept (3), and the others checked
+again, until none changes; those left fall back (2: their members' states
+_shape_fallback; a kept group's _shape_kept_whole). The groups' members are
+found by the groups' first member and a list through them (queue: each
+surface's next in its group) */
+static void shape_groups_named(
 	struct shape_check *check,
 	unsigned long group_count,
 	long *first_member,
@@ -1710,9 +1765,9 @@ static boolean shape_groups_named(
 	unsigned long *fallbacks,
 	unsigned long *largest)
 {
-	long surface;
+	long surface, member, members;
 	unsigned long group;
-	boolean changed = FALSE;
+	boolean changed = TRUE;
 
 	for (surface = 0; surface < check->surface_count; surface++)
 	{
@@ -1722,65 +1777,34 @@ static boolean shape_groups_named(
 			group_state[group] = 1;
 		}
 	}
+	while (changed)
+	{
+		changed = FALSE;
+		for (group = 0; group < group_count; group++)
+		{
+			if (group_state[group] == 1 && !shape_group_sealed(check, group, first_member, group_state, &members))
+			{
+				group_state[group] = 3;
+				changed = TRUE;
+			}
+		}
+	}
 	for (group = 0; group < group_count; group++)
 	{
-		long member, members = 0;
-		boolean sealed = TRUE;
+		boolean sealed;
 
-		if (group_state[group] != 1)
+		if (group_state[group] != 1 && group_state[group] != 3)
 		{
 			continue;
 		}
-		/* its border: each member's stock edges' neighbours outside it that
-		stay remodelled have the stock edge there */
-		for (member = first_member[group]; member != NONE && sealed; member = check->queue[member])
-		{
-			float const *corners = check->corners + 9 * member;
-			int corner;
-
-			members++;
-			if (check->state[member] == _shape_none)
-			{
-				continue;
-			}
-			for (corner = 0; corner < 3 && sealed; corner++)
-			{
-				float const *u = corners + 3 * corner;
-				float const *v = corners + 3 * ((corner + 1) % 3);
-				long at;
-
-				for (at = shape_edge_find(check, u, v); shape_same_edge(check, at, u, v); at++)
-				{
-					long n = check->edges[at].surface, local;
-					struct pwg_material_view const *view;
-
-					if (shape_group_of(check, n) == group || check->state[n] == _shape_stock ||
-						check->state[n] == _shape_fallback)
-					{
-						continue;
-					}
-					view = shape_surface(check, n, &local);
-					if (!shape_edge_plain(view, local, u, v))
-					{
-						sealed = FALSE;
-						break;
-					}
-				}
-			}
-		}
-		for (; member != NONE; member = check->queue[member])
-		{
-			members++;
-		}
+		/* (a kept group is marked 4: counted once, and not checked again) */
+		sealed = group_state[group] == 1;
+		group_state[group] = sealed ? 2 : 4;
+		members = 0;
 		(*groups)++;
-		group_state[group] = sealed ? 2 : 3;
-		changed = TRUE;
-		if ((unsigned long)members > *largest)
-		{
-			*largest = (unsigned long)members;
-		}
 		for (member = first_member[group]; member != NONE; member = check->queue[member])
 		{
+			members++;
 			if (check->state[member] == _shape_stock || check->state[member] == _shape_none)
 			{
 				continue;
@@ -1788,13 +1812,17 @@ static boolean shape_groups_named(
 			check->state[member] = sealed ? _shape_fallback : _shape_kept_whole;
 			*fallbacks += sealed;
 		}
+		if ((unsigned long)members > *largest)
+		{
+			*largest = (unsigned long)members;
+		}
 		if (!sealed)
 		{
 			(*kept_groups)++;
 		}
 	}
 
-	return changed;
+	return;
 }
 
 /* the remodel's shape checked (above): each usable view's fallback list

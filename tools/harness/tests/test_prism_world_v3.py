@@ -12,11 +12,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, enum_with, function, mutated, read, run, structure  # noqa: E402
 
 GAME = "port/linux/game/prism_world_geometry.c"
-CASES = ["parse", "refused", "facets", "plain", "groups", "groups_kept", "groups_stock"]
+CASES = ["parse", "refused", "facets", "plain", "groups", "groups_kept", "groups_stock", "groups_together"]
 FUNCTIONS = ["read_u32", "read_s16", "read_f64", "pad4", "pwg_tables_check", "pwg_parse", "shape_vertex", "shape_index",
              "shape_triangle_distance", "shape_run_facets", "shape_edge_key", "shape_edge_compare", "shape_surface",
              "shape_edge_find", "shape_same_edge", "shape_runs", "shape_at", "shape_edge_plain", "shape_group_of",
-             "shape_groups_named"]
+             "shape_group_sealed", "shape_groups_named"]
 CONTROLS = [
     # the needle test left out: only the prism's relief and margin (the old test's blind spot along a sliver)
     ("(beyond > 0.0 ? shape_triangle_distance(p, a, b, c) : fabs(height)) > needle",
@@ -35,6 +35,10 @@ CONTROLS = [
      "for (range = 0; range < 1; range++)\n\t{\n\t\tunsigned long triangle, found = 0;", "plain"),
     # the border not checked: a group falls back whatever its neighbours' edges
     ("if (!shape_edge_plain(view, local, u, v))", "if (!shape_edge_plain(view, local, u, v) && 0)", "groups_kept"),
+    # the groups still to fall back taken as staying remodelled (a group keeps its neighbour whose own facet takes it
+    # down too)
+    ("if (other == group || group_state[other] == 1 || group_state[other] == 2 ||",
+     "if (other == group || group_state[other] == 2 ||", "groups_together"),
     # a surface of a material drawn stock not bringing its group down
     ("(check->state[surface] == _shape_facets || check->state[surface] == _shape_stock)",
      "(check->state[surface] == _shape_facets)", "groups_stock"),

@@ -342,10 +342,10 @@ static void case_groups(int mode)
 	long view_first[4] = { 0, 1, 2, 3 };
 	float corners[3][9];
 	struct shape_edge edges[9];
-	/* (mode 2: A is of a material drawn stock, with no facet) */
-	byte state[3] = { mode == 2 ? _shape_stock : _shape_facets, _shape_kept, _shape_kept };
-	long queue[3], first_member[2];
-	byte group_state[2] = { 0, 0 };
+	/* (mode 2: A is of a material drawn stock, with no facet; mode 3: B has a facet too, in a group of its own) */
+	byte state[3] = { mode == 2 ? _shape_stock : _shape_facets, mode == 3 ? _shape_facets : _shape_kept, _shape_kept };
+	long queue[3], first_member[3];
+	byte group_state[3] = { 0, 0, 0 };
 	unsigned long groups = 0, kept = 0, fallbacks = 0, largest = 0;
 	int s, k;
 
@@ -366,6 +366,16 @@ static void case_groups(int mode)
 			memcpy(vertices[s] + k * ENVIRONMENT_VERTEX_UNCOMPRESSED_SIZE, c[k], 12);
 		memset(triangles[s], 0, sizeof(triangles[s]));
 		triangles[s][0] = 0, triangles[s][2] = 1, triangles[s][4] = 2;
+		if (s == 1 && mode == 3)
+		{
+			/* B's edge from (0, 1) to (1, 0) split at (0.5, 0.5): its side along A is not the stock edge */
+			float m[3] = { 0.5f, 0.5f, 0 };
+
+			memcpy(vertices[s] + 3 * ENVIRONMENT_VERTEX_UNCOMPRESSED_SIZE, m, 12);
+			triangles[s][0] = 0, triangles[s][2] = 1, triangles[s][4] = 3;
+			triangles[s][6] = 3, triangles[s][8] = 1, triangles[s][10] = 2;
+			count = 2;
+		}
 		if (s == 2 && mode == 1)
 		{
 			/* C's edge from (1, 1) to (1, 0) split at (1, 0.5): its side along B is not the stock edge */
@@ -384,7 +394,8 @@ static void case_groups(int mode)
 		views[s].part_surface_count = 1;
 		views[s].usable = TRUE;
 		memset(group_bytes[s], 0, 4);
-		group_bytes[s][0] = (byte)(s == 2);
+		/* (mode 3: each its own group) */
+		group_bytes[s][0] = (byte)(mode == 3 ? s : s == 2);
 		views[s].groups = group_bytes[s];
 		memcpy(corners[s], c, sizeof(c));
 	}
@@ -405,15 +416,31 @@ static void case_groups(int mode)
 		}
 	check.edge_count = 9;
 	qsort(edges, 9, sizeof(edges[0]), shape_edge_compare);
-	first_member[0] = 0, queue[0] = 1, queue[1] = NONE;
-	first_member[1] = 2, queue[2] = NONE;
-	shape_groups_named(&check, 2, first_member, group_state, &groups, &kept, &fallbacks, &largest);
+	if (mode == 3)
+	{
+		first_member[0] = 0, first_member[1] = 1, first_member[2] = 2;
+		queue[0] = queue[1] = queue[2] = NONE;
+	}
+	else
+	{
+		first_member[0] = 0, queue[0] = 1, queue[1] = NONE;
+		first_member[1] = 2, queue[2] = NONE;
+	}
+	shape_groups_named(&check, mode == 3 ? 3 : 2, first_member, group_state, &groups, &kept, &fallbacks, &largest);
 	if (mode == 0)
 	{
 		CHECK(state[0] == _shape_fallback && state[1] == _shape_fallback && state[2] == _shape_kept,
 			"the group with the facet falls back whole (%d %d %d)", state[0], state[1], state[2]);
 		CHECK(groups == 1 && kept == 0 && fallbacks == 2 && largest == 2, "counted (%lu %lu %lu %lu)", groups, kept,
 			fallbacks, largest);
+	}
+	else if (mode == 3)
+	{
+		/* (B's split side is no crack once both fall back: neither keeps the other) */
+		CHECK(state[0] == _shape_fallback && state[1] == _shape_fallback && state[2] == _shape_kept,
+			"two groups with facets, the edge between them not the stock edge, both fall back (%d %d %d)", state[0],
+			state[1], state[2]);
+		CHECK(groups == 2 && kept == 0, "counted (%lu groups, %lu kept)", groups, kept);
 	}
 	else if (mode == 2)
 	{
@@ -447,6 +474,8 @@ int main(int argc, char **argv)
 		case_groups(1);
 	else if (!strcmp(name, "groups_stock"))
 		case_groups(2);
+	else if (!strcmp(name, "groups_together"))
+		case_groups(3);
 	else
 	{
 		fprintf(stderr, "no case %s\n", name);
