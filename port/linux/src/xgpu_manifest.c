@@ -1041,6 +1041,15 @@ static struct
 	char label[160];
 	struct text text;
 	struct hash_set draws, pixels;
+	/* the draws of play after a map's preparation (its walk's or its
+	record's), as no setting changes them: "<map> play <width> <models>",
+	each written once as it is first drawn (the main menu's scene and its
+	screens' text, a map's play), which tools/test_preparation_coverage.py
+	checks the map's record's playback makes too */
+	char play_label[160];
+	int play_written;
+	struct text play;
+	struct hash_set play_draws, play_pixels;
 } coverage = { -1 };
 
 static int coverage_on(void)
@@ -1068,6 +1077,46 @@ static void coverage_reset(void)
 void xgpu_manifest_coverage_label(const char *label)
 {
 	snprintf(coverage.label, sizeof(coverage.label), "%s", label ? label : "");
+}
+
+/* the play after the enumeration that ends now, labelled as it was ("<map>
+<walk|replay|scope> <width> <models>", its second word "play") */
+static void coverage_play_begin(void)
+{
+	char map[160];
+	const char *rest = strchr(coverage.label, ' ');
+
+	if (!rest || !(rest = strchr(rest + 1, ' ')))
+	{
+		coverage.play_label[0] = 0;
+		return;
+	}
+	snprintf(map, sizeof(map), "%.*s", (int)(strchr(coverage.label, ' ') - coverage.label), coverage.label);
+	snprintf(coverage.play_label, sizeof(coverage.play_label), "%s play%s", map, rest);
+	coverage.play_written = 0;
+	free(coverage.play_draws.slots);
+	memset(&coverage.play_draws, 0, sizeof(coverage.play_draws));
+	free(coverage.play_pixels.slots);
+	memset(&coverage.play_pixels, 0, sizeof(coverage.play_pixels));
+}
+
+/* a draw of play (its basis, with its context), written once */
+static void coverage_play_draw(const struct xgpu_manifest_draw *draw, const struct xgpu_manifest_context *context,
+	uint64_t recorded)
+{
+	if (!coverage.play_label[0] || !hash_set_add(&coverage.play_draws, recorded))
+		return;
+	coverage.play.length = 0;
+	if (!coverage.play_written)
+	{
+		text_add(&coverage.play, "# coverage %s\n", coverage.play_label);
+		coverage.play_written = 1;
+	}
+	if (hash_set_add(&coverage.play_pixels, pixel_hash(&draw->key.pixel)))
+		pixel_write(&coverage.play, &draw->key.pixel);
+	draw_write(&coverage.play, draw, context);
+	fwrite(coverage.play.buffer, 1, coverage.play.length, coverage.file);
+	fflush(coverage.file);
 }
 
 /* the next draw is noted: recorded, or a map's enumeration's */
@@ -1291,6 +1340,9 @@ void xgpu_manifest_enumerating(int enumerating, int new_map)
 			fwrite(coverage.text.buffer, 1, coverage.text.length, coverage.file);
 			fflush(coverage.file);
 		}
+		/* (and the play after it: a scope's enumeration is of the same map) */
+		if (!enumerating && recorder.enumerating)
+			coverage_play_begin();
 		coverage_reset();
 	}
 	recorder.enumerating = enumerating;
@@ -1356,6 +1408,8 @@ void xgpu_manifest_record_draw(int immediate, unsigned long written)
 			pixel_write(&coverage.text, &draw.key.pixel);
 		draw_write(&coverage.text, &draw, &recorder.context);
 	}
+	if (recorder.have_basis && !recorder.enumerating && coverage_on())
+		coverage_play_draw(&draw, &recorder.context, recorded);
 	if (!hash_set_add(&recorder.draws, recorded) && !missed)
 		return;
 	if (missed)

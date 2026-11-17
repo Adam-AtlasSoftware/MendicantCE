@@ -2,7 +2,7 @@
 
 import re
 
-from harness import constant, enum_with, read, structure
+from harness import constant, enum_with, function, read, structure
 
 
 def class_table():
@@ -116,6 +116,21 @@ def pcm_permutation_rate():
     start = text.index("#define SOUND_PERMUTATION_PCM_MINIMUM_RATE")
     end = text.index("/* ---------- structures */", start)
     return text[start:end] + "\n"
+
+
+def permutation_picker():
+    """sound_definitions.c's pick of a pitch range's next permutation (sound_definition_next_permutation_from_seed)
+    with what it calls: the played bits of a range's permutations past 32 kept apart (OpenH1 issue 1170)"""
+    picker = read("source/sound/sound_definitions.c")
+    picker = picker[picker.index("/* ---------- constants */"):]
+    names = ["try_to_reset_permutations", "sound_definitions_played_beyond_clear", "sound_pitch_range_played_beyond",
+             "sound_pitch_range_permutation_played", "sound_pitch_range_permutation_set_played",
+             "try_to_reset_permutations_beyond", "sound_definition_next_permutation_from_seed"]
+    table = "static struct sound_played_beyond_table sound_played_beyond_table;"
+    assert table in picker, "sound_definitions.c's table of played bits past 32 is not where it was"
+    return "\n".join([enum_with(picker, "SOUND_PLAYED_BEYOND_LONGS"), structure(picker, "sound_played_beyond"),
+                      structure(picker, "sound_played_beyond_table"), table,
+                      *(function(picker, name) for name in names)]) + "\n"
 
 
 def dsound_port_formats_state():
