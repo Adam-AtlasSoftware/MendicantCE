@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The on-screen keyboard (docs/menu_screens.md, "The on-screen keyboard"): a pop-up over the screen it is typed
+for, which port/linux/game/keyboard.c opens for a name, a menu's field or a chat line, draws and reads; its keys are
+keyboard_core.c's layout table. -->
+<screen name="keyboard">
+	<keyboard/>
+</screen>

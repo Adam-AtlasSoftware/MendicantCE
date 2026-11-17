@@ -1028,10 +1028,11 @@ void game_engine_playlist_next(
 	long);
 void playlist_profile_delete(
 	long profile_index);
-boolean virtual_keyboard_launch(
-	void *text,
-	long maximum_length,
-	long keyboard_type);
+/* port: the on-screen keyboard of the mode's (port/linux/game/keyboard.c) */
+boolean keyboard_name_launch(
+	wchar_t *text,
+	word size,
+	short caption_index);
 void *network_game_client_get_game(
 	void *client);
 short network_game_client_get_machine_index(
@@ -1460,7 +1461,7 @@ static boolean new_campaign_chosen(
 	struct widget_instance *widget,
 	struct event_record *event,
 	boolean *widget_deleted);
-boolean virtual_keyboard_last_exit_saved_text(
+boolean keyboard_last_kept(
 	void);
 static boolean new_campaign_decision(
 	struct widget_instance *widget,
@@ -1793,7 +1794,7 @@ static boolean new_campaign_decision(
 	result = FALSE;
 	if (event_handler_functions.unknown74 != NONE)
 	{
-		if (virtual_keyboard_last_exit_saved_text())
+		if (keyboard_last_kept())
 		{
 			if (new_campaign_profile_name[0])
 			{
@@ -1876,7 +1877,7 @@ static boolean create_and_begin_editing_new_gametype_profile(
 				*(short *)(profile + 0x64) = 0;
 				ustrncpy((wchar_t *)profile, name, 11);
 				*(short *)(profile + 0x16) = 0;
-				result = virtual_keyboard_launch(profile, 24, 9);
+				result = keyboard_name_launch((wchar_t *)profile, 24, 9);
 			}
 			else
 			{
@@ -2397,7 +2398,7 @@ static boolean playlist_profile_change_name(
 
 	if (profile)
 	{
-		if (!virtual_keyboard_launch(profile, 24, 9))
+		if (!keyboard_name_launch((wchar_t *)profile, 24, 9))
 			error(2, "failed to invoke virtual keyboard on profile name");
 	}
 	else
@@ -2418,7 +2419,7 @@ static boolean player_profile_change_name(
 
 	if (profile)
 	{
-		if (!virtual_keyboard_launch(profile->player_name, sizeof(profile->player_name), 8))
+		if (!keyboard_name_launch(profile->player_name, sizeof(profile->player_name), 8))
 		{
 			error(2, "failed to invoke virtual keyboard on player profile name");
 			result = FALSE;
@@ -2976,7 +2977,7 @@ static boolean create_and_begin_editing_new_player_profile(
 			{
 				ustrncpy(profile->player_name, name, MAXIMUM_PLAYER_PROFILE_NAME_LENGTH-1);
 				profile->player_name[MAXIMUM_PLAYER_PROFILE_NAME_LENGTH-1] = 0;
-				result = virtual_keyboard_launch(profile->player_name, sizeof(profile->player_name), 8);
+				result = keyboard_name_launch(profile->player_name, sizeof(profile->player_name), 8);
 			}
 			else
 			{
@@ -3549,7 +3550,7 @@ static boolean new_campaign_chosen(
 	ustrncpy(new_campaign_profile_name, name, 11);
 	new_campaign_profile_name[11] = L'\0';
 	event_handler_functions.unknown74 = event->controller_index;
-	if (!virtual_keyboard_launch(new_campaign_profile_name, 24, 8))
+	if (!keyboard_name_launch(new_campaign_profile_name, 24, 8))
 		error(2, "failed to invoke the virtual keyboard for a new campaign profile name");
 	return TRUE;
 }
