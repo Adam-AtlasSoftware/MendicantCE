@@ -293,6 +293,56 @@ int main(void)
 		CHECK(pq_glow[0] > pq_hud[0], "PQ: its glow past it, under the peak: %.5f", pq_glow[0]);
 	}
 	{
+		/* display.hdr_sdr_curve (#1120): at 203-nit paper white, gamma 2.2's
+		dark codes are as dark as a gamma-2.2 SDR display shows them (code 1
+		0.001 nit, 10 0.16, 20 0.75; sRGB's 0.062, 0.62, 1.42), joined to
+		sRGB's by code 51, from which up nothing changes; never falling. The
+		negative control: sRGB's (the frame's 0 value), exactly the
+		piecewise curve the encoding had. */
+		struct xgpu_hdr_frame srgb = { F, XGPU_HDR_OUTPUT_EXTENDED_LINEAR, 203.0f, 8.0f, 1.0f };
+		struct xgpu_hdr_frame power = srgb;
+		static const int codes[3] = { 1, 10, 20 };
+		static const float power_nits[3] = { 0.001f, 0.163f, 0.746f }, srgb_nits[3] = { 0.0615f, 0.615f, 1.415f };
+		float previous = -1.0f;
+		int index, code;
+
+		power.sdr_curve = XGPU_HDR_SDR_CURVE_GAMMA_2_2;
+		for (index = 0; index < 3; index++)
+		{
+			float value = (float)codes[index] / 255.0f;
+			float a[3] = { value, value, value }, b[3] = { value, value, value };
+
+			xgpu_hdr_encode(a, &power);
+			xgpu_hdr_encode(b, &srgb);
+			CHECK(fabsf(a[0] - power_nits[index]) <= 0.02f * power_nits[index] + 1e-4f,
+				"2.2: code %d at %.4f nits, not %.4f", codes[index], a[0], power_nits[index]);
+			CHECK(fabsf(b[0] - srgb_nits[index]) <= 0.01f * srgb_nits[index],
+				"sRGB: code %d at %.4f nits, not %.4f", codes[index], b[0], srgb_nits[index]);
+			CHECK(b[0] == xgpu_hdr_linear(value) * 203.0f, "sRGB: code %d not the piecewise curve's", codes[index]);
+		}
+		for (code = 0; code <= 255 * 4; code++)
+		{
+			float value = (float)code / 255.0f;
+			float a[3] = { value, value, value }, b[3] = { value, value, value };
+
+			xgpu_hdr_encode(a, &power);
+			xgpu_hdr_encode(b, &srgb);
+			CHECK(a[0] >= previous, "2.2: code %d darker than the one before it: %.6f", code, a[0]);
+			previous = a[0];
+			if (code >= 51)
+				CHECK(a[0] == b[0], "2.2: code %d (past 51) changed: %.6f, sRGB's %.6f", code, a[0], b[0]);
+			else if (code)
+				CHECK(a[0] < b[0], "2.2: code %d no darker than sRGB's: %.6f, %.6f", code, a[0], b[0]);
+			else
+				CHECK(a[0] == 0.0f && b[0] == 0.0f, "black not black");
+		}
+		CHECK(xgpu_hdr_sdr_curve_of(XGPU_HDR_SDR_CURVE_AUTO, 1) == XGPU_HDR_SDR_CURVE_SRGB &&
+			xgpu_hdr_sdr_curve_of(XGPU_HDR_SDR_CURVE_AUTO, 0) == XGPU_HDR_SDR_CURVE_GAMMA_2_2 &&
+			xgpu_hdr_sdr_curve_of(XGPU_HDR_SDR_CURVE_SRGB, 0) == XGPU_HDR_SDR_CURVE_SRGB &&
+			xgpu_hdr_sdr_curve_of(XGPU_HDR_SDR_CURVE_GAMMA_2_2, 1) == XGPU_HDR_SDR_CURVE_GAMMA_2_2,
+			"auto: sRGB on Apple's platforms, 2.2 elsewhere; a choice kept");
+	}
+	{
 		/* the display as Video Setup and the log show it */
 		struct xgpu_hdr_display reported = { 1, 800.0f / 203.0f, 203.0f, 1 };
 		struct xgpu_hdr_display edr = { 1, 16.0f, XGPU_HDR_EDR_WHITE_NITS, 0 };
@@ -444,3 +494,4 @@ def test_glsl_constants():
            f"{macro('XGPU_HDR_PUNCHY_BRIGHT_KNEE'):g}, 1.0, sdr_luminance))" in glsl
     assert f"min(1.0, {macro('XGPU_HDR_PUNCHY_KNEE'):g} * peak)" in glsl
     assert f"smoothstep(1.0, {macro('XGPU_HDR_FAITHFUL_CLIPPED'):.1f}, max(v.r, max(v.g, v.b)))" in glsl
+    assert f"smoothstep(vec3({macro('XGPU_HDR_SDR_TOE_START'):g}), vec3({macro('XGPU_HDR_SDR_TOE_END'):g}), v)" in glsl

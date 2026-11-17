@@ -202,7 +202,8 @@ unsigned short xgpu_hdr_classify(const struct xgpu_hdr_draw *draw)
 The functions both shaders share: the frame's values made linear and
 encoded again (sRGB's curve, extended past 1), the shoulder, the tone map
 (hdr: the mode, the peak) and the encoding (hdr: paper white, the peak, the
-output: xgpu_hdr.h's XGPU_HDR_OUTPUT_*), as xgpu_hdr.h's reference has them. */
+output: xgpu_hdr.h's XGPU_HDR_OUTPUT_*; curve: the SDR curve, its toe
+XGPU_HDR_SDR_TOE_START to _END), as xgpu_hdr.h's reference has them. */
 const char xgpu_hdr_functions_source[] =
 	"const vec3 HDR_LUMA = vec3(0.2126, 0.7152, 0.0722);\n"
 	"\n"
@@ -251,11 +252,20 @@ const char xgpu_hdr_functions_source[] =
 	"\treturn hdr_encoded(mix(light * hue, sdr * brightened, clipped));\n"
 	"}\n"
 	"\n"
-	"vec3 hdr_encode(vec3 value, vec4 hdr)\n"
+	"vec3 hdr_sdr_light(vec3 value, float curve)\n"
+	"{\n"
+	"\tvec3 srgb = hdr_linear(value);\n"
+	"\tif (curve < 0.5)\n"
+	"\t\treturn srgb;\n"
+	"\tvec3 v = max(value, vec3(0.0));\n"
+	"\treturn mix(pow(v, vec3(2.2)), srgb, smoothstep(vec3(0.1), vec3(0.2), v));\n"
+	"}\n"
+	"\n"
+	"vec3 hdr_encode(vec3 value, vec4 hdr, float curve)\n"
 	"{\n"
 	"\tif (hdr.z < 0.5)\n"
 	"\t\treturn clamp(value, 0.0, 1.0);\n"
-	"\tvec3 light = min(hdr_linear(value) * (hdr.w > 0.0 ? hdr.w : 1.0), vec3(hdr.y)) * hdr.x;\n"
+	"\tvec3 light = min(hdr_sdr_light(value, curve) * (hdr.w > 0.0 ? hdr.w : 1.0), vec3(hdr.y)) * hdr.x;\n"
 	"\tif (hdr.z < 2.5)\n"
 	"\t\treturn light;\n"
 	"\tvec3 wide = mat3(0.627404, 0.069097, 0.016391, 0.329283, 0.919540, 0.088013, 0.043313, 0.011362, 0.895595) * light;\n"
@@ -291,19 +301,22 @@ static const char tone_map_source[] =
 
 /* the encoding of the frame for the display, as it is drawn into the
 display's image: metrics the viewport's rectangle (x, y, 1 / width, 1 /
-height), the frame scaled over it */
+height), the frame scaled over it; window's x the SDR curve
+(XGPU_HDR_SDR_CURVE_*) */
 static const char encode_source[] =
 	"uniform sampler2D color_texture;\n"
 	"/* the viewport: x, y, 1 / width, 1 / height */\n"
 	"uniform vec4 metrics;\n"
 	"/* paper white, the peak, the output, the UI's white */\n"
 	"uniform vec4 hdr;\n"
+	"/* the SDR curve */\n"
+	"uniform vec4 window;\n"
 	"out vec4 result;\n"
 	"\n"
 	"void main()\n"
 	"{\n"
 	"\tvec2 position = (gl_FragCoord.xy - metrics.xy) * metrics.zw;\n"
-	"\tresult = vec4(hdr_encode(textureLod(color_texture, position, 0.0).rgb, hdr), 1.0);\n"
+	"\tresult = vec4(hdr_encode(textureLod(color_texture, position, 0.0).rgb, hdr, window.x), 1.0);\n"
 	"}\n";
 
 /* ---------- the display */

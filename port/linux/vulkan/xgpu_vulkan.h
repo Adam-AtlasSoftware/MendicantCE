@@ -789,6 +789,9 @@ void xgpu_vulkan_picture_top(int top);
 (where the options allow it: sharp_upscale), else smoothly, as
 "original" resolution scaling's 640x480 always was (any thread) */
 void xgpu_vulkan_sharp_upscale(int sharp);
+/* display.hdr_sdr_curve (XGPU_HDR_SDR_CURVE_*; AUTO: sRGB's on Apple's
+platforms, gamma 2.2 elsewhere), for the encoding (any thread) */
+void xgpu_vulkan_hdr_sdr_curve(int curve);
 /* display.gamma (the stream's record, render thread): the setting, 1 for
 none, from the next present on; an SDR frame is curved by one over it
 (present), an HDR swapchain's never */

@@ -3498,6 +3498,13 @@ static void stream_sharp_upscale(void *context, uint32_t sharp)
 	xgpu_vulkan_sharp_upscale(sharp != 0);
 }
 
+/* display.hdr_sdr_curve: the encoding's SDR curve */
+static void stream_hdr_sdr_curve(void *context, uint32_t curve)
+{
+	(void)context;
+	xgpu_vulkan_hdr_sdr_curve((int)curve);
+}
+
 static void stream_hdr(void *context, const struct xgpu_stream_hdr *record)
 {
 	(void)context;
@@ -3833,6 +3840,7 @@ const struct host_render_backend *xgpu_vulkan_stream_backend(void)
 		backend.picture_top = stream_picture_top;
 		backend.gamma = stream_gamma;
 		backend.sharp_upscale = stream_sharp_upscale;
+		backend.hdr_sdr_curve = stream_hdr_sdr_curve;
 		backend.panini = stream_panini;
 		/* display.ambient_occlusion "world" (#578, docs/world-ao.md): the
 		field's 3D image (XGPU_SPIRV_BINDING_WORLD_SDF) and the window's block

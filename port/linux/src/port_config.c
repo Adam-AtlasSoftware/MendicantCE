@@ -554,6 +554,12 @@ static const struct config_setting config_settings[] =
 		"white. The HUD's glows stay as far above it as they are above paper\n"
 		"white; the weapon's displays stay with the scene. No brighter than the\n"
 		"display's peak." },
+	{ "display.hdr_sdr_curve", _config_string, "\"auto\"", "HALO_HDR_SDR_CURVE", _environment_value, _platform_all,
+		"With HDR, the curve the picture's SDR colors are shown by, as an SDR\n"
+		"display would: \"2.2\" (most PC monitors and TVs: the darkest shadows\n"
+		"darker), \"srgb\" (a Mac's), or \"auto\": sRGB on macOS and iOS, 2.2\n"
+		"elsewhere. Only the shadows differ: colors from code 51 up are the\n"
+		"same in both." },
 	{ "display.gamma", _config_real, "1.0", "HALO_GAMMA", _environment_value, _platform_all,
 		"The picture's gamma, 0.5 to 2.0, as Halo PC's: above 1 brighter (the\n"
 		"dark parts lifted most), below 1 darker; white and black stay. The\n"

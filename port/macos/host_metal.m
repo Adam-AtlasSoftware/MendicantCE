@@ -186,6 +186,8 @@ static struct
 	id<MTLRenderPipelineState> gamma_pipeline;
 	_Atomic uint32_t gamma;
 	_Atomic int hdr_active, hdr_mode, hdr_paper_white_nits, hdr_paper_white, hdr_ui_nits;
+	/* display.hdr_sdr_curve's setting (XGPU_HDR_SDR_CURVE_*) */
+	_Atomic int hdr_sdr_curve;
 	_Atomic uint32_t edr_potential, edr_current;
 	BOOL layer_edr;
 	uint32_t edr_ticks;
@@ -395,6 +397,11 @@ void host_metal_hdr_state(int active, int mode, int paper_white_nits, int paper_
 	atomic_store(&presentation.hdr_ui_nits, ui_nits > 0 ? ui_nits : 0);
 }
 
+void host_metal_hdr_sdr_curve(int curve)
+{
+	atomic_store(&presentation.hdr_sdr_curve, curve);
+}
+
 /* the layer is EDR's while the frame is drawn in HDR and the display has
 headroom at all (an SDR panel's dimmed white has some: display.hdr "on") */
 static BOOL edr_wanted(void)
@@ -426,6 +433,7 @@ void host_metal_hdr_frame(struct xgpu_hdr_frame *frame)
 		if (paper_white > current)
 			paper_white = current;
 		frame->output = XGPU_HDR_OUTPUT_EXTENDED_LINEAR;
+		frame->sdr_curve = xgpu_hdr_sdr_curve_of(atomic_load(&presentation.hdr_sdr_curve), 1);
 		frame->paper_white = paper_white;
 		frame->peak = current / paper_white;
 		/* (the UI's white, no brighter than the display either) */
@@ -857,6 +865,7 @@ static void present_draw(id<MTLRenderCommandEncoder> encoder, id<CAMetalDrawable
 		uniforms.hdr[1] = frame.output == XGPU_HDR_OUTPUT_SDR ? 1.0f : frame.peak;
 		uniforms.hdr[2] = (float)XGPU_HDR_OUTPUT_EXTENDED_LINEAR;
 		uniforms.hdr[3] = frame.output == XGPU_HDR_OUTPUT_SDR ? 1.0f : frame.ui;
+		uniforms.window[0] = (float)frame.sdr_curve;
 		[encoder setRenderPipelineState:presentation.edr_pipeline];
 		[encoder setFragmentBytes:&uniforms length:sizeof(uniforms) atIndex:XGPU_METAL_BUFFER_DRAW_UNIFORMS];
 		[encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];

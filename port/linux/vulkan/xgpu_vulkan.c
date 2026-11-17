@@ -873,6 +873,8 @@ static struct
 	display.render_scale below 1); and the image nearest scales it into
 	(present_sharp) */
 	int sharp_upscale, sharp_wanted;
+	/* display.hdr_sdr_curve's setting (XGPU_HDR_SDR_CURVE_*; any thread) */
+	int hdr_sdr_curve;
 	struct xgpu_vulkan_image *sharp_image;
 	void (*display_hdr)(int hdr, float headroom, float white_nits, int white_reported);
 	struct xgpu_vulkan_image *(*encode)(struct xgpu_vulkan_image *image, const struct xgpu_hdr_frame *frame,
@@ -6820,6 +6822,11 @@ void xgpu_vulkan_sharp_upscale(int sharp)
 	__atomic_store_n(&vk.sharp_wanted, sharp != 0, __ATOMIC_RELEASE);
 }
 
+void xgpu_vulkan_hdr_sdr_curve(int curve)
+{
+	__atomic_store_n(&vk.hdr_sdr_curve, curve, __ATOMIC_RELEASE);
+}
+
 void xgpu_vulkan_picture_top(int top)
 {
 	__atomic_store_n(&vk.picture_top, top < 0 ? 0 : top + 1, __ATOMIC_RELEASE);
@@ -6932,6 +6939,11 @@ void xgpu_vulkan_hdr_frame(struct xgpu_hdr_frame *frame)
 	frame->ui = 1.0f;
 	if (vk.hdr_output == XGPU_HDR_OUTPUT_SDR)
 		return;
+#ifdef __APPLE__
+	frame->sdr_curve = xgpu_hdr_sdr_curve_of(__atomic_load_n(&vk.hdr_sdr_curve, __ATOMIC_ACQUIRE), 1);
+#else
+	frame->sdr_curve = xgpu_hdr_sdr_curve_of(__atomic_load_n(&vk.hdr_sdr_curve, __ATOMIC_ACQUIRE), 0);
+#endif
 	setting = paper_white_setting(headroom);
 	/* (in the encoding's nits) */
 	nits = encoding_white_nits() * setting;
@@ -9324,6 +9336,7 @@ int xgpu_vulkan_initialize(const struct xgpu_vulkan_options *options)
 	vk.surface_context = options->surface_context;
 	vk.display_hdr = options->display_hdr;
 	vk.sharp_upscale = options->sharp_upscale;
+	vk.hdr_sdr_curve = XGPU_HDR_SDR_CURVE_AUTO;
 	vk.encode = options->encode;
 	vk.gamma = options->gamma;
 	vk.display_hdr_told = -1;

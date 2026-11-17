@@ -12,8 +12,8 @@ Metal backend's own and the reference (port/linux/src/xgpu_hdr.h).
     Metal's test holds its own to (port/macos/tests/xgpu_metal_test.m,
     test_stream_hdr): the tone map in place, reading each pixel where it is
     drawn, at peaks 1, 4 and 16 in both modes; the encoding for scRGB, for
-    HDR10's PQ and for SDR; each against the reference to half floats'
-    precision.
+    HDR10's PQ and for SDR, by sRGB's SDR curve and by gamma 2.2's; each
+    against the reference to half floats' precision.
   harness draws <dir>
     Each draw of tools/hdr_backends/shaders.c's index, both backends'
     fragment functions (<name>.vk.metal from the SPIR-V, <name>.metal the
@@ -128,6 +128,7 @@ struct post_uniforms
 	float metrics[4];
 	float bounds[4];
 	float hdr[4];
+	float window[4];
 };
 
 static void post_draw(id<MTLRenderPipelineState> pipeline, id<MTLTexture> target, id<MTLTexture> source,
@@ -177,8 +178,9 @@ static id<MTLRenderPipelineState> post_pipeline(id<MTLFunction> vertex, id<MTLFu
 static void post_test(NSString *dir)
 {
 	static const float peaks[3] = { 1.0f, 4.0f, 16.0f };
-	/* (the last two with the UI's white past and under paper white's) */
-	static const struct xgpu_hdr_frame encodings[6] =
+	/* (the fifth and sixth with the UI's white past and under paper
+	white's; the last two by gamma 2.2's SDR curve, display.hdr_sdr_curve's) */
+	static const struct xgpu_hdr_frame encodings[8] =
 	{
 		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_SCRGB, 2.5f, 4.0f },
 		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_PQ, 0.02f, 4.0f },
@@ -186,6 +188,8 @@ static void post_test(NSString *dir)
 		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_SDR, 1.0f, 1.0f },
 		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_SCRGB, 2.5f, 4.0f, 1.8f },
 		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_PQ, 0.0203f, 10.0f, 0.6f },
+		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_SCRGB, 2.5f, 4.0f, 1.0f, XGPU_HDR_SDR_CURVE_GAMMA_2_2 },
+		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_PQ, 0.0203f, 10.0f, 1.0f, XGPU_HDR_SDR_CURVE_GAMMA_2_2 },
 	};
 	/* the tone map's UI white: none given (paper white's), and the UI's
 	white under and past paper white's */
@@ -303,7 +307,7 @@ static void post_test(NSString *dir)
 		}
 		printf("post: %d values not a number or infinite tone mapped finite\n", finite);
 	}
-	for (which = 0; which < 6; which++)
+	for (which = 0; which < 8; which++)
 	{
 		id<MTLTexture> source = texture_make(MTLPixelFormatRGBA16Float, VECTORS, MTLTextureUsageShaderRead);
 		id<MTLTexture> target = texture_make(MTLPixelFormatRGBA32Float, VECTORS, MTLTextureUsageRenderTarget);
@@ -317,6 +321,7 @@ static void post_test(NSString *dir)
 		uniforms.hdr[1] = encodings[which].peak;
 		uniforms.hdr[2] = (float)encodings[which].output;
 		uniforms.hdr[3] = encodings[which].ui;
+		uniforms.window[0] = (float)encodings[which].sdr_curve;
 		post_draw(encode_pipeline, target, source, &uniforms);
 		[target getBytes:got bytesPerRow:VECTORS * 16 fromRegion:MTLRegionMake2D(0, 0, VECTORS, 1) mipmapLevel:0];
 		for (vector = 0; vector < VECTORS; vector++)

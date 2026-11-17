@@ -113,6 +113,34 @@ view (the HUD, the menus, the screen flashes) in nits, these at most and
 least (0: paper white's) */
 #define XGPU_HDR_UI_NITS_LEAST 80
 #define XGPU_HDR_UI_NITS_MOST 500
+
+/* display.hdr_sdr_curve: the curve the encoding takes the frame's values
+(SDR codes) to light by, the one an SDR display of the platform shows them
+with, so that HDR's shadows are as dark as SDR's (xgpu_hdr_frame.sdr_curve:
+SRGB or GAMMA_2_2; the setting's AUTO, the platform's:
+xgpu_hdr_sdr_curve_of). sRGB's piecewise curve is the Mac's (its colour
+management shows SDR so); most PC monitors and TVs show SDR at gamma 2.2,
+which is darker near black (code 1 sixty times, code 10 four times). The
+2.2 curve is gamma 2.2 to XGPU_HDR_SDR_TOE_START and sRGB's from
+XGPU_HDR_SDR_TOE_END (code 51) up, joined smoothly between them, so that
+only the shadows move. */
+enum
+{
+	XGPU_HDR_SDR_CURVE_SRGB,
+	XGPU_HDR_SDR_CURVE_GAMMA_2_2,
+	XGPU_HDR_SDR_CURVE_AUTO,
+};
+#define XGPU_HDR_SDR_TOE_START 0.1f
+#define XGPU_HDR_SDR_TOE_END 0.2f
+
+/* the curve of a setting (XGPU_HDR_SDR_CURVE_*) on a platform (apple: macOS
+or iOS, which show SDR with sRGB's curve) */
+static inline int xgpu_hdr_sdr_curve_of(int setting, int apple)
+{
+	if (setting == XGPU_HDR_SDR_CURVE_SRGB || setting == XGPU_HDR_SDR_CURVE_GAMMA_2_2)
+		return setting;
+	return apple ? XGPU_HDR_SDR_CURVE_SRGB : XGPU_HDR_SDR_CURVE_GAMMA_2_2;
+}
 /* the system's SDR white in nits where it gives none: BT.2408's reference
 white (Vulkan's, without SDL's), and EDR's 1.0 as macOS's reference modes
 show it (Metal's: macOS and iOS give no nits, their SDR white following the
@@ -255,7 +283,9 @@ for scRGB; nits over 10 000 for PQ), the peak in paper whites (the display's hea
 white: 1 for SDR). ui is the UI's white over paper white
 (display.hdr_ui_nits: 1, or 0, for paper white's; 1 for SDR): the frame's
 1.0 is the UI's white, the tone map leaves the 3D view in it (its light
-over ui), and the encoding takes the frame's light times it. */
+over ui), and the encoding takes the frame's light times it. sdr_curve is
+the curve the encoding takes the frame's values to light by
+(XGPU_HDR_SDR_CURVE_SRGB or _GAMMA_2_2: display.hdr_sdr_curve's). */
 struct xgpu_hdr_frame
 {
 	int mode;
@@ -263,6 +293,7 @@ struct xgpu_hdr_frame
 	float paper_white;
 	float peak;
 	float ui;
+	int sdr_curve;
 };
 
 
@@ -283,6 +314,24 @@ static inline float xgpu_hdr_encoded(float linear)
 	if (linear <= 0.0f)
 		return 0.0f;
 	return linear <= 0.0031308f ? linear * 12.92f : 1.055f * powf(linear, 1.0f / 2.4f) - 0.055f;
+}
+
+/* a value of the frame (an SDR code, extended past 1) as light by an SDR
+curve (XGPU_HDR_SDR_CURVE_*): sRGB's, or gamma 2.2 joined to sRGB's by a
+smoothstep from XGPU_HDR_SDR_TOE_START to XGPU_HDR_SDR_TOE_END (where sRGB's
+is the brighter, so the join never falls) */
+static inline float xgpu_hdr_sdr_light(float value, int curve)
+{
+	float srgb = xgpu_hdr_linear(value), t;
+
+	if (curve != XGPU_HDR_SDR_CURVE_GAMMA_2_2 || value >= XGPU_HDR_SDR_TOE_END)
+		return srgb;
+	if (value <= 0.0f)
+		return 0.0f;
+	t = (value - XGPU_HDR_SDR_TOE_START) / (XGPU_HDR_SDR_TOE_END - XGPU_HDR_SDR_TOE_START);
+	t = t < 0.0f ? 0.0f : t > 1.0f ? 1.0f : t;
+	t = t * t * (3.0f - 2.0f * t);
+	return powf(value, 2.2f) * (1.0f - t) + srgb * t;
 }
 
 static inline float xgpu_hdr_ceiling_value(int ceiling)
@@ -409,8 +458,8 @@ static inline void xgpu_hdr_to_ui(float rgb[3], float ui)
 }
 
 /* the encoding of one pixel's colour (the frame's values after the tone
-map and the HUD) for the display, in place: linear, times the UI's white,
-at most the peak, times paper white (and PQ's primaries and curve) */
+map and the HUD) for the display, in place: linear (by the SDR curve),
+times the UI's white, at most the peak, times paper white (and PQ's primaries and curve) */
 static inline void xgpu_hdr_encode(float rgb[3], const struct xgpu_hdr_frame *frame)
 {
 	float light[3], ui = frame->ui > 0.0f ? frame->ui : 1.0f;
@@ -423,7 +472,8 @@ static inline void xgpu_hdr_encode(float rgb[3], const struct xgpu_hdr_frame *fr
 			rgb[channel] = rgb[channel] < 0.0f ? 0.0f : rgb[channel] > 1.0f ? 1.0f : rgb[channel];
 			continue;
 		}
-		light[channel] = fminf(xgpu_hdr_linear(rgb[channel]) * ui, frame->peak) * frame->paper_white;
+		light[channel] = fminf(xgpu_hdr_sdr_light(rgb[channel], frame->sdr_curve) * ui, frame->peak) *
+			frame->paper_white;
 	}
 	if (frame->output == XGPU_HDR_OUTPUT_SDR)
 		return;

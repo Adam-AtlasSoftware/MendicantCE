@@ -940,6 +940,12 @@ void xgpu_backend_sharp_upscale(int sharp)
 		record_value(XGPU_STREAM_SHARP_UPSCALE, sharp ? 1u : 0u);
 }
 
+void xgpu_backend_hdr_sdr_curve(int curve)
+{
+	if (stream.open)
+		record_value(XGPU_STREAM_HDR_SDR_CURVE, (uint32_t)curve);
+}
+
 void xgpu_backend_picture_top(int top)
 {
 	/* (0 centered, n + 1 at n pixels from the top) */

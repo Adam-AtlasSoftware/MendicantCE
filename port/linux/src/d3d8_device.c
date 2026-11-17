@@ -2406,6 +2406,31 @@ static void sharp_upscale_send(void)
 	sent = sharp;
 }
 
+/* display.hdr_sdr_curve: the curve the backend's HDR encoding takes the
+frame's values to light by ("auto": the backend's platform's), as it
+changes */
+static void hdr_sdr_curve_send(void)
+{
+	static int sent = -1;
+	/* (read again as the settings change: config_changes) */
+	static unsigned long read_at = (unsigned long)-1;
+	const char *setting;
+	int curve;
+
+	if (!device.gl_ready || read_at == config_changes())
+		return;
+	read_at = config_changes();
+	setting = config_string("display.hdr_sdr_curve");
+	curve = setting && !strcmp(setting, "srgb") ? XGPU_HDR_SDR_CURVE_SRGB :
+		setting && !strcmp(setting, "2.2") ? XGPU_HDR_SDR_CURVE_GAMMA_2_2 : XGPU_HDR_SDR_CURVE_AUTO;
+	if (curve == sent)
+		return;
+	if (sent >= 0 || curve != XGPU_HDR_SDR_CURVE_AUTO)
+		platform_log("hdr: SDR curve %s", setting ? setting : "auto");
+	xgpu_backend_hdr_sdr_curve(curve);
+	sent = curve;
+}
+
 /* a point in the window, as SDL reports it, in the menus' coordinates: the
 inverse of the letterboxed display blit at presentation, the screen's
 width and the menus' centering (halo_screen_ui_offset); or, not centered,
@@ -2654,6 +2679,8 @@ long halo_screen_commit(void)
 	picture_position_send();
 	/* (display.gamma) */
 	gamma_send();
+	/* (display.hdr_sdr_curve) */
+	hdr_sdr_curve_send();
 	/* display.shadow_resolution, if it has changed: the maps' entries at
 	the old scale are freed (render_targets_evict), new ones made at the new */
 	if (shadow_scale && shadow_scale_read_at != config_changes())

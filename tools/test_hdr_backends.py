@@ -122,7 +122,7 @@ def test_post_shaders_on_the_gpu(harness):
         spv.write_bytes(struct.pack(f"<{len(arrays[name])}I", *arrays[name]))
         _cross(spv, post / (name.replace("_frag", "") + ".metal"), stage, entry, fetch)
     output = _run(binary, "post", str(post))
-    assert "post: 1152 values checked" in output, output
+    assert "post: 1248 values checked" in output, output
     assert "post: 9 values not a number or infinite tone mapped finite" in output, output
 
 
