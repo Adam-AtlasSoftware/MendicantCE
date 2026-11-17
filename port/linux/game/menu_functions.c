@@ -16129,8 +16129,8 @@ struct widget_instance *ui_widget_port_active_screen(short local_player_index);
 /* "port edit leave" (B on a screen that edits a gametype or a profile, as
 its CANCEL presses B; its handler opens the question where this succeeds):
 with nothing changed, back to the screen before, as B went, the question not
-asked; with changes, TRUE, the screen kept in the history for the question's
-CANCEL */
+asked; with changes, TRUE: the question opens over the editor, a pop-up, the
+editor kept as it is under it for its CANCEL (ui_widget.c) */
 static boolean edit_leave_ask(struct widget_instance *widget, boolean *widget_deleted)
 {
 	if (player_ui_edit_profile_is_dirty())
@@ -16145,7 +16145,7 @@ static boolean edit_leave_ask(struct widget_instance *widget, boolean *widget_de
 }
 
 /* the question's SAVE and DON'T SAVE (menu_screen.c's "edit save" and "edit
-discard"), on the editor it went back to: the changes saved as the editor's
+discard"), on the editor under it, the question closed: the changes saved as the editor's
 OK saves them (a built-in gametype's new name asked first, the editor kept
 open for its OK), or let go of, and the editor closed as its OK closes it */
 boolean pc_menu_edit_leave(short local_player_index, boolean save)

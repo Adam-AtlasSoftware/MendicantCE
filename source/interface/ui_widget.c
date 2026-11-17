@@ -1628,6 +1628,21 @@ static struct ui_widget_bss_prefix ui_widget_globals_storage;
 #define widget_globals ui_widget_globals_storage.widget_globals
 #define we_are_at_the_main_menu ui_widget_globals_storage.we_are_at_the_main_menu
 #define dpad_event_times ui_widget_globals_storage.dpad_event_times
+
+/* port: each local player's pop-up (a hand-written screen of the menu
+engine's with a <dialog>: menu_screen.c's menu_screen_popup), opened over
+the screen up without deleting it or adding to its history, or over none (a
+game's): the screen under it is drawn (its pointer's targets not noted) but
+takes no events, not even the empty one that runs its timers, so it is as it
+was when the pop-up closes. Its back closes it alone; a screen opened from
+it, or the screen under it deleted, closes it (ui_widget_delete) */
+static struct widget_instance *ui_widget_port_popups[MAXIMUM_NUMBER_OF_LOCAL_PLAYERS];
+/* (port/linux/game/menu_screen.c) */
+int menu_screen_popup(long tag_index);
+static void ui_widget_port_screen_gone(struct widget_instance *widget);
+static boolean ui_widget_port_popup_in_view(struct widget_instance const *popup, long widget_index,
+	short local_player_index);
+
 real_argb_color ui_plasma_effect_color;
 short local_player_index_for_draw_string_and_hack_in_icons;
 
@@ -2439,7 +2454,7 @@ boolean ui_widgets_active(
 			local_player_index < MAXIMUM_NUMBER_OF_LOCAL_PLAYERS;
 			local_player_index++)
 		{
-			if (widget_globals.active_widgets[local_player_index])
+			if (widget_globals.active_widgets[local_player_index] || ui_widget_port_popups[local_player_index])
 			{
 				result = TRUE;
 				break;
@@ -2562,7 +2577,6 @@ void ui_widget_delete(
 {
 	struct ui_widget_definition *definition;
 	long handler_index;
-	long widget_index;
 
 	match_assert(
 		"c:\\halo\\SOURCE\\interface\\ui_widget.c",
@@ -2685,6 +2699,19 @@ void ui_widget_delete(
 	dispose_pointer(widget_memory_pool, widget);
 	/* port: the mouse's targets name widgets, and this one is gone */
 	ui_mouse_forget_widget(widget);
+	ui_widget_port_screen_gone(widget);
+
+	return;
+}
+
+/* port: (ui_widget_delete) a screen deleted is no player's screen, nor
+pop-up, any longer: a pop-up goes with the screen under it, and a pop-up
+closed leaves the screen under it up again, as it was */
+static void ui_widget_port_screen_gone(
+	struct widget_instance *widget)
+{
+	long widget_index;
+
 	for (widget_index = 0;
 		widget_index < MAXIMUM_NUMBER_OF_LOCAL_PLAYERS;
 		widget_index++)
@@ -2692,11 +2719,16 @@ void ui_widget_delete(
 		if (widget_globals.active_widgets[widget_index] == widget)
 		{
 			widget_globals.active_widgets[widget_index] = NULL;
+			if (ui_widget_port_popups[widget_index])
+				ui_widget_delete(ui_widget_port_popups[widget_index]);
+			break;
+		}
+		if (ui_widget_port_popups[widget_index] == widget)
+		{
+			ui_widget_port_popups[widget_index] = NULL;
 			break;
 		}
 	}
-
-	return;
 }
 
 static void ui_widget_delete_children_recursive(
@@ -3307,6 +3339,9 @@ void ui_widgets_close_all(
 		local_player_index < MAXIMUM_NUMBER_OF_LOCAL_PLAYERS;
 		local_player_index++)
 	{
+		/* port: (a pop-up, over a screen or a game) */
+		if (ui_widget_port_popups[local_player_index])
+			ui_widget_delete(ui_widget_port_popups[local_player_index]);
 		if (widget_globals.active_widgets[local_player_index])
 			ui_widget_delete(widget_globals.active_widgets[local_player_index]);
 		if (widget_globals.widget_stack[local_player_index])
@@ -3337,6 +3372,12 @@ void ui_widgets_close_all_for_local_player(
 	{
 		struct widget_instance *widget = widget_globals.active_widgets[widget_index];
 
+		/* port: (a pop-up of the player's, over a screen or a game) */
+		if (ui_widget_port_popups[widget_index] &&
+			ui_widget_port_popups[widget_index]->local_player_index == local_player_index)
+		{
+			ui_widget_delete(ui_widget_port_popups[widget_index]);
+		}
 		if (widget && widget->local_player_index == local_player_index)
 		{
 			ui_widget_delete(widget);
@@ -3685,7 +3726,19 @@ static void widget_instance_go_back_to_previous(
 	short widget_stack = (widget->local_player_index == NONE) ? 0 : widget->local_player_index;
 	short previous_local_player_index = NONE;
 	long previous_widget_tag;
+	long popup_index;
 
+	/* port: a pop-up's back closes it alone: the screen under it (never
+	deleted for it) is up again as it was, its history as it was */
+	for (popup_index = 0; popup_index < MAXIMUM_NUMBER_OF_LOCAL_PLAYERS; popup_index++)
+	{
+		if (ui_widget_port_popups[popup_index] &&
+			ui_widget_port_popups[popup_index] == widget_instance_get_topmost_parent(widget))
+		{
+			ui_widget_delete(ui_widget_port_popups[popup_index]);
+			return;
+		}
+	}
 	if (widget_globals.widget_stack[widget_stack])
 	{
 		pop_widget(&widget_globals.widget_stack[widget_stack], &data);
@@ -3978,6 +4031,9 @@ static void event_handler_dispatch(
 				widget_index < MAXIMUM_NUMBER_OF_LOCAL_PLAYERS;
 				widget_index++)
 			{
+				/* port: (a pop-up, over a screen or a game) */
+				if (ui_widget_port_popups[widget_index])
+					ui_widget_delete(ui_widget_port_popups[widget_index]);
 				if (widget_globals.active_widgets[widget_index])
 					ui_widget_delete(widget_globals.active_widgets[widget_index]);
 				while (widget_globals.widget_stack[widget_index])
@@ -4405,22 +4461,6 @@ struct widget_instance *ui_widget_port_active_screen(
 	return widget_globals.active_widgets[widget_stack];
 }
 
-/* port: the screen a local player's back goes to (the top of its history),
-NONE for none: a pop-up's screen behind it (port/linux/game/menu_screen.c's
-dialog_build) */
-long ui_widget_port_previous_screen(
-	short local_player_index)
-{
-	short widget_stack = (local_player_index == NONE) ? 0 : local_player_index;
-
-	if (widget_stack < 0 || widget_stack >= MAXIMUM_NUMBER_OF_LOCAL_PLAYERS ||
-		!widget_globals.widget_stack[widget_stack])
-	{
-		return NONE;
-	}
-	return widget_globals.widget_stack[widget_stack]->data.previous_widget_tag;
-}
-
 /* port: a widget of a tag made a child of the parent, before the child
 before (NULL: last), its offsets the parent's (the menu engine's rows of
 Settings' search, from their own pages' widgets: port/linux/game/menu_engine.c);
@@ -4494,10 +4534,36 @@ struct widget_instance *ui_widget_load_by_name_or_tag(
 			395);
 		if (widget)
 		{
-			if (!parent)
+			/* port: a pop-up opened over the screen up (or over none), which
+			stays as it is, out of its history (ui_widget_port_popups) */
+			if (!parent && menu_screen_popup(tag_index))
+			{
+				if (ui_widget_port_popups[widget_stack])
+					ui_widget_delete(ui_widget_port_popups[widget_stack]);
+				ui_widget_port_popups[widget_stack] = widget;
+			}
+			else if (!parent)
 			{
 				short previous_local_player_index;
+				/* port: a pop-up kept over the screen that takes the place of
+				the one under it (opened by that screen or the game, not by the
+				pop-up: the keyboard's name typed before the new campaign's
+				screen that makes the profile closes itself) */
+				struct widget_instance *kept_popup = NULL;
 
+				/* port: a screen opened from a pop-up closes it, and the history
+				remembers the screen under it */
+				if (ui_widget_port_popups[widget_stack] &&
+					invoking_widget_tag == ui_widget_port_popups[widget_stack]->definition_tag_index)
+				{
+					invoking_widget_tag = widget_globals.active_widgets[widget_stack] ?
+						widget_globals.active_widgets[widget_stack]->definition_tag_index : NONE;
+					focused_child_parent_widget_tag = NONE;
+					focused_child_index = NONE;
+					ui_widget_delete(ui_widget_port_popups[widget_stack]);
+				}
+				kept_popup = ui_widget_port_popups[widget_stack];
+				ui_widget_port_popups[widget_stack] = NULL;
 				if (widget_globals.active_widgets[widget_stack])
 				{
 					previous_local_player_index =
@@ -4509,6 +4575,7 @@ struct widget_instance *ui_widget_load_by_name_or_tag(
 					previous_local_player_index = NONE;
 				}
 				widget_globals.active_widgets[widget_stack] = widget;
+				ui_widget_port_popups[widget_stack] = kept_popup;
 				if (invoking_widget_tag != NONE &&
 					!TEST_FLAG(
 						ui_widget_definition_get(invoking_widget_tag)->flags,
@@ -8728,7 +8795,8 @@ static struct widget_instance *ui_mouse_menu(
 
 	for (widget_index = 0; widget_index < MAXIMUM_NUMBER_OF_LOCAL_PLAYERS; widget_index++)
 	{
-		struct widget_instance *widget = widget_globals.active_widgets[widget_index];
+		/* port: (or its pop-up, over a game's view) */
+		struct widget_instance *widget = ui_widget_port_top_screen((short)widget_index);
 
 		if (widget && (widget->local_player_index == NONE || widget->local_player_index == 0))
 			return widget;
@@ -9845,7 +9913,7 @@ studio's notes: port/linux/game/menu_studio.c); NULL for none */
 void const *ui_widget_port_focused_widget(
 	void)
 {
-	struct widget_instance *widget = widget_globals.active_widgets[0];
+	struct widget_instance *widget = ui_widget_port_top_screen(0);
 
 	while (widget && widget->focused_child)
 		widget = widget->focused_child;
@@ -9858,7 +9926,7 @@ port/linux/game/menu_studio.c), its tag's; "" for none */
 char const *ui_widget_port_screen_name(
 	void)
 {
-	struct widget_instance *screen = widget_globals.active_widgets[0];
+	struct widget_instance *screen = ui_widget_port_top_screen(0);
 
 	return screen ? tag_get_name(screen->definition_tag_index) : "";
 }
@@ -9869,7 +9937,7 @@ long ui_widget_port_focus_path(
 	short *path,
 	long maximum)
 {
-	struct widget_instance *widget = widget_globals.active_widgets[0];
+	struct widget_instance *widget = ui_widget_port_top_screen(0);
 	long count = 0;
 
 	while (widget && widget->focused_child && count < maximum)
@@ -9894,7 +9962,7 @@ void ui_widget_port_focus_restore(
 	short const *path,
 	long count)
 {
-	struct widget_instance *widget = widget_globals.active_widgets[0];
+	struct widget_instance *widget = ui_widget_port_top_screen(0);
 	long step;
 
 	for (step = 0; widget && step < count; step++)
@@ -10027,7 +10095,8 @@ void render_ui_widgets(
 				every viewport (a dialog for everyone) is noted in the first
 				player's render only, and once a frame */
 				ui_mouse_noting_targets = first_players_render && !ui_mouse_targets_settled &&
-					(widget->local_player_index == NONE || widget->local_player_index == 0);
+					(widget->local_player_index == NONE || widget->local_player_index == 0) &&
+					!ui_widget_port_popups[widget_index];
 				widget_instance_render_recursive(
 					widget_globals.active_widgets[widget_index],
 					&bounds,
@@ -10061,6 +10130,25 @@ void render_ui_widgets(
 						tag_get_name(
 							widget_globals.active_widgets[widget_index]->definition_tag_index));
 				}
+			}
+			/* port: the player's pop-up, over the screen in this view (only
+			where that is drawn), or over none (a game's) in the player's
+			view; the pointer's targets its own (ui_widget_port_popups) */
+			if (ui_widget_port_popups[widget_index] &&
+				(widget ? should_render : ui_widget_port_popup_in_view(ui_widget_port_popups[widget_index],
+					widget_index, local_player_index)))
+			{
+				struct widget_instance *popup = ui_widget_port_popups[widget_index];
+				point2d offset;
+
+				menu_view_begin(popup, &ui_widget_definition_get(popup->definition_tag_index)->bounds,
+					window_bounds, &bounds, &offset);
+				ui_mouse_noting_targets = first_players_render && !ui_mouse_targets_settled &&
+					(popup->local_player_index == NONE || popup->local_player_index == 0);
+				widget_instance_render_recursive(popup, &bounds, offset, TRUE, FALSE);
+				ui_mouse_noting_targets = FALSE;
+				menu_view_end();
+				menu_layout_widget_none();
 			}
 		}
 		if (first_players_render && !ui_mouse_targets_settled)
@@ -10161,7 +10249,67 @@ void render_ui_widgets_over_views(
 			&bounds, &offset);
 		widget_instance_render_recursive(widget, &bounds, offset, TRUE, FALSE);
 		menu_view_end();
+		/* port: (its pop-up, over it) */
+		if (ui_widget_port_popups[widget_index])
+		{
+			struct widget_instance *popup = ui_widget_port_popups[widget_index];
+
+			menu_view_begin(popup, &ui_widget_definition_get(popup->definition_tag_index)->bounds, window_bounds,
+				&bounds, &offset);
+			widget_instance_render_recursive(popup, &bounds, offset, TRUE, FALSE);
+			menu_view_end();
+		}
 	}
+}
+
+/* port: whether a pop-up over no screen (a game's) is drawn in a view: its
+player's, or the first player's for one of no player's (as a screen of no
+player's is) */
+static boolean ui_widget_port_popup_in_view(
+	struct widget_instance const *popup,
+	long widget_index,
+	short local_player_index)
+{
+	return (popup->local_player_index == NONE && widget_index == 0) ||
+		popup->local_player_index == local_player_index;
+}
+
+/* port: the screen a local player sees on top (NONE: the menus' own): its
+pop-up, else its screen; NULL for none */
+struct widget_instance *ui_widget_port_top_screen(
+	short local_player_index)
+{
+	short widget_stack = (local_player_index == NONE) ? 0 : local_player_index;
+
+	if (widget_stack < 0 || widget_stack >= MAXIMUM_NUMBER_OF_LOCAL_PLAYERS)
+		return NULL;
+	return ui_widget_port_popups[widget_stack] ? ui_widget_port_popups[widget_stack] :
+		widget_globals.active_widgets[widget_stack];
+}
+
+/* port: every pop-up closed (the map they were made from let go of:
+interface.c's interface_dispose_from_old_map) */
+void ui_widget_port_popups_close(
+	void)
+{
+	long index;
+
+	for (index = 0; index < MAXIMUM_NUMBER_OF_LOCAL_PLAYERS; index++)
+	{
+		if (ui_widget_port_popups[index])
+			ui_widget_delete(ui_widget_port_popups[index]);
+	}
+}
+
+/* port: a local player's pop-up (NONE: the menus' own), NULL for none */
+struct widget_instance *ui_widget_port_popup(
+	short local_player_index)
+{
+	short widget_stack = (local_player_index == NONE) ? 0 : local_player_index;
+
+	if (widget_stack < 0 || widget_stack >= MAXIMUM_NUMBER_OF_LOCAL_PLAYERS)
+		return NULL;
+	return ui_widget_port_popups[widget_stack];
 }
 
 /* ---------- private code */
@@ -11487,7 +11635,9 @@ void process_ui_widgets(
 		widget_index < MAXIMUM_NUMBER_OF_LOCAL_PLAYERS;
 		widget_index++)
 	{
-		struct widget_instance *widget = widget_globals.active_widgets[widget_index];
+		/* port: a pop-up takes the player's events in place of the screen
+		under it, which takes none (ui_widget_port_popups) */
+		struct widget_instance *widget = ui_widget_port_top_screen((short)widget_index);
 		boolean process_widget;
 
 		if (modal_widget_active[widget_index] == TRUE)
@@ -11541,13 +11691,13 @@ void process_ui_widgets(
 						if (widget_deleted == TRUE)
 							break;
 					}
-					if (widget != widget_globals.active_widgets[widget_index])
+					if (widget != ui_widget_port_top_screen((short)widget_index))
 						break;
 				}
 				while (get_next_event(&event, widget_event_controller(widget)));
 			}
 			widgets_processed = TRUE;
-			if (!widget_globals.active_widgets[widget_index] &&
+			if (!widget_globals.active_widgets[widget_index] && !ui_widget_port_popups[widget_index] &&
 				widget_globals.widget_stack[widget_index])
 			{
 				struct widget_stack_data data;

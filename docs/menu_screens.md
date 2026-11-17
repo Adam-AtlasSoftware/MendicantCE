@@ -97,10 +97,21 @@ in the box's bottom band, each a button of Quit's OK and BACK. The box is
 Quit's width, or wider for three or four choices (its picture's ends kept),
 and as tall as its words' lines need (up to 4): the box's picture cut above
 its bottom band, and that band drawn under the cut (`dialog/dialog_foot`,
-`tools/port_settings.py`'s `dialog_foot_svg`). Behind it is the screen it was
-opened from, as it was, dimmed and taking no input (where that is a generated
-screen: the gametype editor; Quit's is over the menus' scene, its main menu
-being a hand-written screen). Left and right (the d-pad, the stick, the arrow keys)
+`tools/port_settings.py`'s `dialog_foot_svg`). It is a pop-up
+(`menu_screen_popup`): `ui_widget.c` opens it over the screen up without
+deleting that screen or adding to its history (`ui_widget_port_popups`, one
+for each local player). The screen under it is drawn as it is, dimmed,
+but takes no events (not even the empty one that runs its timers, so a
+screen that closes itself after a moment waits) and none of the pointer's
+targets. Its back closes it alone, and the screen under it is up again as it
+was; a screen opened from it closes it, the history remembering the screen
+under it; a screen opened otherwise (by the screen under it, or the game)
+takes that screen's place under the pop-up, and waits there; the screen
+under it deleted, or every screen closed (`close all`,
+a map let go of, `debug.menu_open`), closes it too. A pop-up over no screen
+(in a game) is drawn in its player's view; in split screen, over a screen
+drawn in the player's view, in that view, and over a screen drawn over
+every view (`menu_view_over_views`), over them too. Left and right (the d-pad, the stick, the arrow keys)
 step the choices, the pointer over one focuses it, and A, Start, a click or a
 tap does its `do`; B does the screen's `back`, else goes back. It is the same
 at every aspect ratio (in the menus' middle 640) and on a phone.

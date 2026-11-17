@@ -286,6 +286,9 @@ void interface_initialize_for_new_map(
 	return;
 }
 
+/* port: (ui_widget.c) */
+void ui_widget_port_popups_close(void);
+
 void interface_dispose_from_old_map(
 	void)
 {
@@ -296,6 +299,9 @@ void interface_dispose_from_old_map(
 	(ui.map's: main_screen_shell_load sets it up again); a game map has none,
 	so it cannot open there (the PC menus' Settings, from the pause menu) */
 	virtual_keyboard_dispose();
+	/* port: and the menus' pop-ups (ui_widget.c), whose screens were the old
+	map's */
+	ui_widget_port_popups_close();
 
 	return;
 }

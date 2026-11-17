@@ -65,7 +65,6 @@ void pc_menu_browser_visit(char const *tab);
 int pc_menu_browser_visit_kind(void);
 void pc_menu_main_menu_shown(struct widget_instance *screen);
 boolean pc_menu_edit_leave(short local_player_index, boolean save);
-long ui_widget_port_previous_screen(short local_player_index);
 int halo_keyboard_prompts(void);
 long ui_widget_port_text_box_font(struct widget_instance *widget, short *width);
 short ui_widget_port_past_move(void);
@@ -1729,21 +1728,9 @@ static boolean box_picture_of(struct widget_instance const *widget, long *bitmap
 quit_screen draws it): its box in the middle of the screen, its title, its
 words and its choices side by side in its foot */
 
-/* a screen's widgets and all in them taken out of the events and the
-pointer's targets: drawn alone (a pop-up's screen behind it) */
-static void dialog_still(struct widget_instance *widget)
-{
-	struct widget_instance *child;
-
-	widget->disabled = TRUE;
-	for (child = widget->child; child; child = child->next)
-		dialog_still(child);
-}
-
-/* the dialog's widgets made: the screen it was opened from behind it, as it
-was and dimmed, taking nothing (where that is a generated screen: an editor's
-question over the editor; Quit's main menu is a hand-written one, so Quit's
-is over the menus' scene, as before); its box as wide as Quit's, or as its
+/* the dialog's widgets made: a dim over the screen it was opened over, which
+is a pop-up's (menu_screen_popup: ui_widget.c draws that screen under it,
+as it is, taking nothing); its box as wide as Quit's, or as its
 choices need (its picture's ends kept), as tall as its words need, in the
 middle of the screen: its title in the box's top band, its words under it
 (wrapped to the box), and its choices, each a button of Quit's, side by side
@@ -1755,7 +1742,7 @@ static boolean dialog_build(struct screen_open *open, struct menu_screen const *
 	struct screen_values values;
 	char label[MENU_SCREEN_MAXIMUM_TEXT];
 	struct menu_screen_block const *dialog = NULL, *list = NULL;
-	long index, choices = 0, list_index = NONE, focus_index = 0, behind_tag;
+	long index, choices = 0, list_index = NONE, focus_index = 0;
 	short width, height, shown, left, top, x, lines = 1;
 	struct widget_instance *focus = NULL;
 	char const *focus_id;
@@ -1800,18 +1787,8 @@ static boolean dialog_build(struct screen_open *open, struct menu_screen const *
 	open->header = NULL;
 	open->prompt_count = 0;
 	open->box = FALSE;
-	/* (the screen it was opened from, behind it and dimmed) */
-	behind_tag = ui_widget_port_previous_screen(widget->local_player_index);
-	if (behind_tag != NONE && !screen_place_of(behind_tag))
-	{
-		struct widget_instance *behind = screen_widget_add(widget, behind_tag, 0, 0);
-
-		if (behind)
-		{
-			dialog_still(behind);
-			screen_widget_add(widget, screens.dialog_dim_tag, 0, 0);
-		}
-	}
+	/* (the screen under it dimmed) */
+	screen_widget_add(widget, screens.dialog_dim_tag, 0, 0);
 	for (index = 0; index < NUMBEROF(open->dialog_under); index++)
 	{
 		open->dialog_under[index] = screen_widget_add(widget, index % 2 ? screens.dialog_foot_tag : screens.dialog_tag,
@@ -1932,8 +1909,8 @@ static boolean dialog_picture_of(struct widget_instance const *widget, long *bit
 }
 
 /* "edit save" and "edit discard" (screens/save_changes.xml's SAVE and DON'T
-SAVE): back to the editor the question was opened from (the screen before),
-then its changes saved as its OK saves them, or let go of, and the editor
+SAVE): the question closed, the editor under it up again as it was (a
+pop-up's: ui_widget.c), then its changes saved as its OK saves them, or let go of, and the editor
 closed, as its OK closes it (menu_functions.c) */
 static boolean screen_call_edit(struct widget_instance *widget, struct event_record *event, char const *name,
 	boolean *deleted)
@@ -2564,6 +2541,31 @@ static struct screen_place const *screen_place_named(char const *name)
 			return &screen_places[index];
 	}
 	return NULL;
+}
+
+/* (ui_widget.c) whether a screen opens as a pop-up: a hand-written screen
+of the menu engine's with a <dialog> (the Quit question, Save Changes),
+opened over the screen up without deleting it or adding to its history,
+which stays as it was under it, taking nothing, until the pop-up closes */
+int menu_screen_popup(long tag_index)
+{
+	struct screen_place const *place;
+	struct menu_screen const *screen;
+	long index;
+
+	if (tag_index == NONE || !menu_engine_looks())
+		return FALSE;
+	place = screen_place_of(tag_index);
+	if (!place)
+		return FALSE;
+	screens_names_give();
+	screen = menu_screens_find(place->screen);
+	for (index = 0; screen && index < screen->block_count; index++)
+	{
+		if (screen->blocks[index].kind == MENU_SCREEN_DIALOG)
+			return TRUE;
+	}
+	return FALSE;
 }
 
 int menu_screen_open_ready(char const *name)
