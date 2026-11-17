@@ -290,7 +290,8 @@ DERIVER = r"""
 with derive it (tools/prepared_records.py: every setting's default, the
 game's own first start: no multisampling, no HDR, the enhanced dynamic
 lights, which light each pixel, no ambient occlusion, display.output_depth
-"auto"'s 16-bit frame on a computer), its hash as a record's
+"auto"'s 16-bit frame on a computer, soft effects, Vulkan's alpha tests that
+cannot fail dropped), its hash as a record's
 (render_prepared.c's prepared_draws) */
 int main(int argc, char **argv)
 {
@@ -310,6 +311,10 @@ int main(int argc, char **argv)
 	settings.per_pixel_lighting = 1;
 	settings.enhanced_lights = 1;
 	settings.deep = 1;
+	/* (display.soft_particles on, and Vulkan's dropped alpha tests that
+	cannot fail) */
+	settings.soft = 1;
+	settings.alpha_drop = 1;
 	for (index = 0; index < manifest.draw_count; index++)
 	{
 		struct xgpu_manifest_draw draw;

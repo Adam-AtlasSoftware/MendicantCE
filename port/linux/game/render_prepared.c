@@ -299,6 +299,18 @@ static uint64_t prepared_key_models(uint64_t hash)
 	return identity ? xgpu_manifest_hash(&identity, sizeof(identity), hash) : hash;
 }
 
+/* the enumeration's label for HALO_RENDER_COVERAGE (xgpu_manifest.h): the
+map, how it is prepared (walked, played back from its record) and the
+screen's width */
+void prepared_coverage_label(char const *how)
+{
+	char label[160];
+
+	snprintf(label, sizeof(label), "%s %s %ld", global_scenario_index != NONE ?
+		tag_get_name(global_scenario_index) : "", how, halo_screen_width());
+	xgpu_manifest_coverage_label(label);
+}
+
 /* the settings, backend and GPU a record's draws are derived under now */
 static uint64_t prepared_derivation(void);
 
@@ -656,6 +668,7 @@ boolean render_prepared_replay(boolean mirrors)
 	if (!prepared_choose(mirrors) || (record = prepared_read(&header)) == NULL)
 		return FALSE;
 	halo_load_trace("enumerate.replay.begin", NULL);
+	prepared_coverage_label("replay");
 	halo_gpu_prepare(TRUE);
 	texture_cache_preparation_begin();
 	formed = halo_gpu_journal_replay((unsigned int const *)(record + header.draw_count), header.word_count,

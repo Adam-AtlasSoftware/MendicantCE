@@ -90,7 +90,8 @@ lighting (lights, world's transform found), ct the targets (multisampled,
 screen colour), cd the dynamic lights
 (present, the lightmap pass), ch the HDR tag's (category, 3D view, kind),
 cw the world's occlusion's light (a recording without it: none), cf its
-window found once a pixel by the pre-pass (none) */
+window found once a pixel by the pre-pass (none), cs the effect's group soft
+with display.soft_particles, cp its alpha test one no pixel fails */
 static const struct field context_fields[] = {
 	CONTEXT_FIELD("cl", lights, 1, 2),
 	CONTEXT_FIELD("ct", multisampled, 1, 2),
@@ -99,6 +100,8 @@ static const struct field context_fields[] = {
 	CONTEXT_FIELD("ck", hdr_kind, 2, 1),
 	CONTEXT_FIELD("cw", world, 1, 1),
 	CONTEXT_FIELD("cf", found, 1, 1),
+	CONTEXT_FIELD("cs", soft, 1, 1),
+	CONTEXT_FIELD("cp", alpha_passes, 1, 1),
 };
 
 #define FIELD_COUNT(fields) (sizeof(fields) / sizeof((fields)[0]))
@@ -817,7 +820,7 @@ static const int settings_samples[] = { 1, 2, 4, 8 };
 
 int xgpu_manifest_settings(int index, struct xgpu_manifest_settings *settings)
 {
-	if (index < 0 || index >= SETTINGS_SAMPLES * 16 * XGPU_MANIFEST_OCCLUSIONS)
+	if (index < 0 || index >= SETTINGS_SAMPLES * 64 * (XGPU_HDR_BOOST_MOST + 1) * XGPU_MANIFEST_OCCLUSIONS)
 		return 0;
 	memset(settings, 0, sizeof(*settings));
 	settings->samples = settings_samples[index % SETTINGS_SAMPLES];
@@ -826,7 +829,11 @@ int xgpu_manifest_settings(int index, struct xgpu_manifest_settings *settings)
 	settings->per_pixel_lighting = (index >> 1) & 1;
 	settings->enhanced_lights = (index >> 2) & 1;
 	settings->deep = (index >> 3) & 1;
-	settings->ambient_occlusion = index >> 4;
+	settings->soft = (index >> 4) & 1;
+	settings->alpha_drop = (index >> 5) & 1;
+	index >>= 6;
+	settings->boost = index % (XGPU_HDR_BOOST_MOST + 1);
+	settings->ambient_occlusion = index / (XGPU_HDR_BOOST_MOST + 1);
 	return 1;
 }
 
@@ -838,12 +845,18 @@ int xgpu_manifest_derive(const struct xgpu_manifest_draw *draw, const struct xgp
 	struct xgpu_draw_derived parts;
 	int lit;
 
+	uint32_t alpha_test = key->pixel.alpha_test_function;
+
+	/* (d3d8_device.c's prepare_draw: a test no pixel fails dropped where the
+	backend drops it) */
+	if (settings->alpha_drop && context->alpha_passes && !key->pixel.coverage_alpha)
+		alpha_test = 0;
 	memset(&facts, 0, sizeof(facts));
 	facts.blend = key->blend;
 	facts.color = key->color_format != XGPU_FORMAT_NONE;
 	facts.immediate = key->immediate;
 	facts.packed_attributes = key->packed_attributes;
-	facts.alpha_test = key->pixel.alpha_test_function;
+	facts.alpha_test = alpha_test;
 	facts.lights = context->lights;
 	facts.world_found = context->world_found;
 	/* (d3d8_device.c's bind_targets: multisampled where a screen buffer
@@ -867,6 +880,7 @@ int xgpu_manifest_derive(const struct xgpu_manifest_draw *draw, const struct xgp
 		tagged.category = (signed char)context->hdr_category;
 		tagged.interface = !context->hdr_view;
 		tagged.kind = context->hdr_kind;
+		tagged.boost = settings->boost;
 		facts.hdr = xgpu_hdr_classify(&tagged);
 	}
 	/* ("world"'s light where its window is given: d3d8_device.c's
@@ -891,6 +905,11 @@ int xgpu_manifest_derive(const struct xgpu_manifest_draw *draw, const struct xgp
 	derived->key.pixel.per_pixel_lighting = parts.per_pixel_lighting;
 	derived->key.pixel.dynamic_lights = parts.dynamic_lights;
 	derived->key.pixel.ambient_occlusion = parts.ambient_occlusion;
+	derived->key.pixel.alpha_test_function = alpha_test;
+	/* (display.soft_particles: the effect soft, on a flat screen: d3d8_device.c's
+	soft_effect_key) */
+	if (settings->soft && context->soft && !derived->key.pixel.vr_effect)
+		derived->key.pixel.vr_effect = 1;
 	return lit;
 }
 
@@ -1012,6 +1031,44 @@ static struct
 	struct hash_set enumerated, missed;
 	int enumerated_once;
 } recorder = { -1 };
+
+/* HALO_RENDER_COVERAGE's (xgpu_manifest_coverage_label) */
+static struct
+{
+	/* -1 not read yet */
+	int state;
+	FILE *file;
+	char label[160];
+	struct text text;
+	struct hash_set draws, pixels;
+} coverage = { -1 };
+
+static int coverage_on(void)
+{
+	if (coverage.state < 0)
+	{
+		const char *path = getenv("HALO_RENDER_COVERAGE");
+
+		coverage.state = 0;
+		if (path && *path && (coverage.file = fopen(path, "a")) != NULL)
+			coverage.state = 1;
+	}
+	return coverage.state > 0;
+}
+
+static void coverage_reset(void)
+{
+	free(coverage.draws.slots);
+	memset(&coverage.draws, 0, sizeof(coverage.draws));
+	free(coverage.pixels.slots);
+	memset(&coverage.pixels, 0, sizeof(coverage.pixels));
+	coverage.text.length = 0;
+}
+
+void xgpu_manifest_coverage_label(const char *label)
+{
+	snprintf(coverage.label, sizeof(coverage.label), "%s", label ? label : "");
+}
 
 /* the next draw is noted: recorded, or a map's enumeration's */
 static int noting(void)
@@ -1224,6 +1281,18 @@ void xgpu_manifest_enumerating(int enumerating, int new_map)
 		free(recorder.missed.slots);
 		memset(&recorder.missed, 0, sizeof(recorder.missed));
 	}
+	/* (an enumeration's draws written as it ends, each enumeration's whole:
+	HALO_RENDER_COVERAGE) */
+	if (coverage_on())
+	{
+		if (!enumerating && recorder.enumerating && coverage.text.length)
+		{
+			fprintf(coverage.file, "# coverage %s\n", coverage.label);
+			fwrite(coverage.text.buffer, 1, coverage.text.length, coverage.file);
+			fflush(coverage.file);
+		}
+		coverage_reset();
+	}
 	recorder.enumerating = enumerating;
 	recorder.enumerated_once = 1;
 	xgpu_manifest_note(enumerating ? "enumerating: the draws until \"prepared\" are a map's enumeration's" :
@@ -1279,6 +1348,13 @@ void xgpu_manifest_record_draw(int immediate, unsigned long written)
 	else
 	{
 		recorded = hash;
+	}
+	/* (a map's enumeration's, each once: HALO_RENDER_COVERAGE) */
+	if (recorder.have_basis && recorder.enumerating && coverage_on() && hash_set_add(&coverage.draws, recorded))
+	{
+		if (hash_set_add(&coverage.pixels, pixel_hash(&draw.key.pixel)))
+			pixel_write(&coverage.text, &draw.key.pixel);
+		draw_write(&coverage.text, &draw, &recorder.context);
 	}
 	if (!hash_set_add(&recorder.draws, recorded) && !missed)
 		return;

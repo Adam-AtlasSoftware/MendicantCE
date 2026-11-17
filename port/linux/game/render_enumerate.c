@@ -892,6 +892,7 @@ boolean render_enumerate_begin(boolean mirrors, boolean scope)
 		enumerate.pass++;
 	fog_set(pass_fog());
 	render_enumerating = TRUE;
+	prepared_coverage_label(scope ? "scope" : "walk");
 	halo_gpu_prepare(enumerate.everything);
 	texture_cache_preparation_begin();
 	if (enumerate.everything && !scope)

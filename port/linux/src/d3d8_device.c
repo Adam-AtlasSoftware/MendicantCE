@@ -5116,11 +5116,21 @@ static void pipeline_derived(const struct xgpu_draw_derived *derived, struct xgp
 /* a draw as no setting changes it (key: before xgpu_draw_derive) to the
 manifest's recording, with what the settings derive it from, whatever they
 are now (xgpu_manifest_context) */
-static void manifest_note_basis(const struct vertex_shader_object *program, const struct xgpu_pipeline_key *key)
+static void manifest_note_basis(const struct vertex_shader_object *program, const struct xgpu_pipeline_key *drawn,
+	unsigned long alpha_test, BOOL alpha_passes, BOOL soft)
 {
 	struct xgpu_manifest_context context;
+	struct xgpu_pipeline_key basis = *drawn;
+	const struct xgpu_pipeline_key *key = &basis;
 
 	memset(&context, 0, sizeof(context));
+	/* (as no setting changes it: its alpha test kept, the effect not soft,
+	with what decides them: xgpu_manifest_derive) */
+	basis.pixel.alpha_test_function = alpha_test;
+	context.alpha_passes = alpha_passes ? 1 : 0;
+	if (soft)
+		basis.pixel.vr_effect = 0;
+	context.soft = soft ? 1 : 0;
 	context.lights = (uint8_t)program->lighting.lights;
 	context.world_found = program->lighting.world_found ? 1 : 0;
 	context.multisampled = target_multisampled ? 1 : 0;
@@ -5239,6 +5249,9 @@ static BOOL prepare_draw(BOOL immediate, unsigned long primitive)
 	struct xgpu_draw_facts facts;
 	float texture_scale[4][4];
 	BOOL has_depth = FALSE, ready;
+	/* (the draw as no setting changes it: manifest_note_basis) */
+	unsigned long alpha_test_kept;
+	BOOL alpha_passes, soft_basis;
 	int stage;
 	double traced;
 
@@ -5295,9 +5308,11 @@ static BOOL prepare_draw(BOOL immediate, unsigned long primitive)
 	key.point_threshold = key.point_threshold && key.coverage_alpha;
 	key.alpha_test_function = D3D__RenderState[D3DRS_ALPHATESTENABLE] ? D3D__RenderState[D3DRS_ALPHAFUNC] : 0;
 	/* (a test no pixel of the draw fails is not made: above, "an alpha test
-	that cannot fail") */
-	if (key.alpha_test_function && !key.coverage_alpha && xgpu_backend_capabilities.alpha_test_drop &&
-		alpha_test_always_passes())
+	that cannot fail"; the manifest's recording notes it whatever the backend
+	does: manifest_note_basis) */
+	alpha_test_kept = key.alpha_test_function;
+	alpha_passes = key.alpha_test_function && !key.coverage_alpha && alpha_test_always_passes();
+	if (alpha_passes && xgpu_backend_capabilities.alpha_test_drop)
 	{
 		key.alpha_test_function = 0;
 	}
@@ -5312,6 +5327,7 @@ static BOOL prepare_draw(BOOL immediate, unsigned long primitive)
 	key.vr_effect = key.multiview == XGPU_MULTIVIEW_EYES ? (unsigned char)vr_gl.effect_depth : 0;
 #endif
 	/* (display.soft_particles: an effect on a flat screen, soft) */
+	soft_basis = !key.vr_effect && inputs.soft_group && key.multiview == XGPU_MULTIVIEW_NONE;
 	if (!key.vr_effect)
 		key.vr_effect = soft_effect_key(key.multiview);
 	/* the pipeline: the shaders, the fixed-function state, the targets */
@@ -5329,7 +5345,7 @@ static BOOL prepare_draw(BOOL immediate, unsigned long primitive)
 	/* the draw as no setting changes it, recorded with what the settings
 	make of it from (debug.render_manifest) */
 	if (xgpu_manifest_recording())
-		manifest_note_basis(program, &pipeline_key);
+		manifest_note_basis(program, &pipeline_key, alpha_test_kept, alpha_passes, soft_basis);
 	/* ...and what the settings make of it as they are now: its targets'
 	samples and format, its alpha test (a sample mask, where the backend
 	has one), its tag (display.hdr: from its blend), and its lighting

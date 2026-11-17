@@ -39,4 +39,9 @@ the settings that change them, render_prepared.c's prepared_settings): a
 map prepared under another is prepared again (render_enumerate.c) */
 unsigned long long render_prepared_derivation(void);
 
+/* the enumeration's label for HALO_RENDER_COVERAGE (xgpu_manifest.h's
+xgpu_manifest_coverage_label): the map, how (walk, replay, scope), its
+screen's width */
+void prepared_coverage_label(char const *how);
+
 #endif
