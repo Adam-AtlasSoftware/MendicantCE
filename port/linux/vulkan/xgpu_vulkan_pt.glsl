@@ -1455,26 +1455,22 @@ void main()
     reflection moves over it as the eye does) */
     float most_s = mix(4.0, most_d, clamp(g.roughness * 2.0, 0.0, 1.0));
 
-    /* fireflies: the new sample's luminance held to its 3 x 3 neighbours'
-    brightest (the centre left out) times firefly, and, once the history is
-    long, to the history's mean and spread */
-    float brightest_d = 0.0, brightest_s = 0.0;
-    for (int y = -1; y <= 1; y++)
-        for (int x = -1; x <= 1; x++)
-        {
-            ivec2 q = pixel + ivec2(x, y);
-            if ((x == 0 && y == 0) || !inside(q))
-                continue;
-            brightest_d = max(brightest_d, imageLoad(noisy_diffuse, q).a);
-            brightest_s = max(brightest_s, imageLoad(noisy_specular, q).a);
-        }
-    float firefly = job.settings.z;
+    /* fireflies: a new sample's luminance held, once the history has 16
+    frames, to the history's mean and 8 times its samples' spread (the slow
+    moments'). Not to its neighbours': where few pixels see a light (a lamp
+    through a gap) a sample far above its neighbours is the light itself,
+    and holding it to them takes that light away */
     float ld = nd.a, ls = ns.a;
-    float cap_d = brightest_d * firefly + 1.0e-4, cap_s = brightest_s * firefly + 1.0e-4;
-    if (history && length_d >= 8.0)
+    float cap_d = 1.0e30, cap_s = 1.0e30;
+    if (history && length_d >= 16.0)
     {
         float sigma = sqrt(max(hm.y - hm.x * hm.x, 0.0));
-        cap_d = min(cap_d, max(hm.x + 4.0 * sigma, 1.0e-4) * 2.0);
+        cap_d = max(hm.x + 8.0 * sigma, 1.0e-4);
+    }
+    if (history && hs.a >= 16.0)
+    {
+        float sigma = sqrt(max(hms.w - hms.z * hms.z, 0.0));
+        cap_s = max(hms.z + 8.0 * sigma, 1.0e-4);
     }
     vec3 cd = ld > cap_d ? nd.rgb * (cap_d / ld) : nd.rgb;
     vec3 cs = ls > cap_s ? ns.rgb * (cap_s / ls) : ns.rgb;
@@ -1503,7 +1499,10 @@ void main()
     was held) */
     float variance = max(m2 - m1 * m1, 0.0);
     float gamma_ = job.denoise.w;
-    float sigma_f = sqrt(max(fast_m2 - fast_d * fast_d, 0.0) / n_f);
+    /* (the fast mean's uncertainty: the samples' spread the slow moments
+    know, over the fast count; a light seen in a few frames of many keeps
+    its spread, so its frames without it do not hold the slow history to 0) */
+    float sigma_f = sqrt(max(variance, fast_m2 - fast_d * fast_d) / n_f);
     float lo = fast_d - gamma_ * sigma_f - 0.02 * fast_d, hi = fast_d + gamma_ * sigma_f + 0.02 * fast_d;
     float sl = luma(slow_d);
     if (history && n_d > most_fast && (sl < lo || sl > hi))
@@ -1514,7 +1513,9 @@ void main()
             slow_d = vec3(c);
         n_d = min(n_d, most_fast);
     }
-    float sigma_fs = sqrt(max(fast_m2s - fast_s * fast_s, 0.0) / n_fs);
+    float m1s = history ? mix(hms.z, ls, 1.0 / n_s) : ls;
+    float m2s = history ? mix(hms.w, ls * ls, 1.0 / n_s) : ls * ls;
+    float sigma_fs = sqrt(max(max(m2s - m1s * m1s, 0.0), fast_m2s - fast_s * fast_s) / n_fs);
     float los = fast_s - gamma_ * sigma_fs - 0.02 * fast_s, his = fast_s + gamma_ * sigma_fs + 0.02 * fast_s;
     float sls = luma(slow_s);
     if (history && n_s > most_fast && (sls < los || sls > his))
@@ -1528,7 +1529,7 @@ void main()
     imageStore(diff_now, pixel, vec4(slow_d, n_d));
     imageStore(spec_now, pixel, vec4(slow_s, n_s));
     imageStore(moments_now, pixel, vec4(m1, m2, fast_d, fast_m2));
-    imageStore(spec_moments_now, pixel, vec4(fast_s, fast_m2s, 0.0, 0.0));
+    imageStore(spec_moments_now, pixel, vec4(fast_s, fast_m2s, m1s, m2s));
     /* (the variance for the spatial filter: the moments' once the history
     has a few frames; else unknown (the fix pass and the filter take it from
     the neighbours)) */

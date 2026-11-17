@@ -96,9 +96,12 @@ published methods (ReLAX's and SVGF's; no NVIDIA SDK code):
   within 5%). So no history is taken across an edge, nor through an opening onto the surface behind it (a10's door
   windows). A slow history (up to 32 frames; the specular's shorter on glossy surfaces) and a fast one (4) of the
   diffuse and specular light; the fast one holds the slow one (its luminance within the fast mean ± 2 standard
-  deviations of that mean, the slow history's length cut to 4 where it is held); the luminance's moments give the
-  variance; a new sample's luminance is held to 4 times its 3 × 3 neighbours' brightest (the centre left out) and,
-  with a long history, near the history's mean and spread (the firefly clamp).
+  deviations of that mean, the deviation the samples' spread the slow moments know over the fast count, the slow
+  history's length cut to 4 where it is held); the luminance's moments give the variance; once the history has 16
+  frames, a new sample's luminance is held to the history's mean and 8 times its spread (the firefly clamp). Neither
+  holds a light to what the pixel's neighbours or its last few frames saw: where a lamp is seen by few samples (through
+  a gap) a sample far above them is the light itself, and the first round's clamps (4 times the brightest neighbour,
+  the fast spread alone) took a10's such light away (G5's first pose, round 1: the pillar lit in R, dark here).
 - **fix**: where the history is shorter than 4 frames (a disocclusion, the first frames), the light gathered wide from
   the neighbours on the same surface (instance, normal, plane), weighed by their history's length, and written into
   the history; the variance from the neighbourhood where the moments do not have it yet.

@@ -148,6 +148,18 @@ def test_the_reference_stops_on_its_noise_or_its_frames():
     assert 0.8 * v / model.REFERENCE_NOISE <= n <= 1.3 * v / model.REFERENCE_NOISE + 32
 
 
+def test_the_temporal_history_keeps_a_sparse_light():
+    """a light a pixel sees in one frame of twenty (a lamp through a gap): the slow history's mean is its mean, not
+    held to the frames that miss it"""
+    rng = np.random.default_rng(29)
+    h = None
+    values = []
+    for _ in range(3000):
+        h = model.temporal_step(h, 20.0 if rng.random() < 0.05 else 0.0)
+        values.append(h["slow"])
+    assert np.mean(values[500:]) == pytest.approx(1.0, rel=0.15)
+
+
 def test_the_temporal_history_converges_and_follows_a_change():
     rng = np.random.default_rng(13)
     h = None
@@ -160,16 +172,20 @@ def test_the_temporal_history_converges_and_follows_a_change():
     # hold cuts the history now and then)
     assert tail.var() < 3.0 * 0.25 / 32.0
     assert abs(tail.mean() - 1.0) < 0.05
-    # (the light doubles, a noiseless step: the fast history's hold brings the slow one there within a few of the
-    # fast history's frames (4), where the slow history alone (32) would still be at 1.4 after 16)
+    # (the light doubles, a noiseless step: the fast history's hold, by the samples' spread the slow moments know,
+    # brings the slow one most of the way in 16 frames and there in 24, where the slow history alone (32 frames)
+    # would still be at 1.4 after 16)
     for k in range(16):
         h = model.temporal_step(h, 2.0)
-    assert h["slow"] > 1.85
-    # (and a noisy step: most of the way within 24 frames)
+    assert h["slow"] > 1.7
+    for k in range(8):
+        h = model.temporal_step(h, 2.0)
+    assert h["slow"] > 1.8
+    # (and a noisy step: most of the way within 32 frames)
     h = None
     for _ in range(200):
         h = model.temporal_step(h, 1.0 + 0.5 * rng.standard_normal())
-    for _ in range(24):
+    for _ in range(32):
         h = model.temporal_step(h, 2.0 + 0.5 * rng.standard_normal())
     assert h["slow"] > 1.7
 

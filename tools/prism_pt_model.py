@@ -109,7 +109,7 @@ def temporal_step(history, sample, most=32.0, most_fast=4.0, gamma=2.0):
     m2 = history["m2"] + (sample * sample - history["m2"]) / n
     fast = history["fast"] + (sample - history["fast"]) / nf
     fast_m2 = history["fast_m2"] + (sample * sample - history["fast_m2"]) / nf
-    sigma = np.sqrt(max(fast_m2 - fast * fast, 0.0) / nf)
+    sigma = np.sqrt(max(m2 - m1 * m1, fast_m2 - fast * fast, 0.0) / nf)
     lo = fast - gamma * sigma - 0.02 * fast
     hi = fast + gamma * sigma + 0.02 * fast
     if n > most_fast and (slow < lo or slow > hi):
